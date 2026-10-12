@@ -2,6 +2,8 @@
 // sized by how much it holds. Reads room.state.piles (view-filtered by distance).
 
 import * as THREE from "three/webgpu";
+import { releaseObjects } from "../render/dispose.ts";
+import { warmupSamples } from "../render/warmup.ts";
 
 const cubeGeo = new THREE.BoxGeometry(0.28, 0.28, 0.28);
 const beamGeo = new THREE.CylinderGeometry(0.12, 0.35, 6, 8, 1, true);
@@ -10,33 +12,52 @@ const cubeMat = new THREE.MeshBasicNodeMaterial({ color: new THREE.Color(0xffd16
 const cubeMat2 = new THREE.MeshBasicNodeMaterial({ color: new THREE.Color(0x36f9f6).multiplyScalar(3) });
 const beamMat = new THREE.MeshBasicNodeMaterial({ color: new THREE.Color(0xffd8a8).multiplyScalar(1.4), transparent: true, opacity: 0.22, depthWrite: false });
 
+/**
+ * Hidden samples of the pile look, compiled by every warm-up and kept for the session (moved into
+ * each body's scene, never disposed) so the first pile you see doesn't hitch (S8).
+ */
+let samples: THREE.Group | null = null;
+export function pileSamples(): THREE.Group {
+  return (samples ??= warmupSamples("pilesWarmup", [[cubeGeo, cubeMat], [cubeGeo, cubeMat2], [beamGeo, beamMat]]));
+}
+
 interface PileView {
   group: THREE.Group;
   spin: THREE.Group;
   items: number;
 }
 
+/** A pile's meshes share the module geometry/materials: dropping one frees only its render state. */
+function drop(v: PileView) {
+  v.group.removeFromParent();
+  releaseObjects(v.group);
+}
+
 export class PilesView {
   private readonly views = new Map<string, PileView>();
+  private readonly seen = new Set<string>();
   private t = 0;
 
-  constructor(private readonly scene: THREE.Scene) {}
+  constructor(private readonly scene: THREE.Scene) {
+    scene.add(pileSamples());
+  }
 
   update(state: any, dt: number) {
     this.t += dt;
-    const seen = new Set<string>();
+    const seen = this.seen;
+    seen.clear();
     state?.piles?.forEach((p: any, id: string) => {
       seen.add(id);
       let v = this.views.get(id);
       if (!v || v.items !== p.items) {
-        if (v) v.group.removeFromParent();
+        if (v) drop(v);
         v = this.build(p);
         this.views.set(id, v);
       }
     });
     for (const [id, v] of this.views) {
       if (!seen.has(id)) {
-        v.group.removeFromParent();
+        drop(v);
         this.views.delete(id);
       } else {
         v.spin.rotation.y = this.t * 0.8;
@@ -70,7 +91,8 @@ export class PilesView {
   }
 
   dispose() {
-    for (const v of this.views.values()) v.group.removeFromParent();
+    for (const v of this.views.values()) drop(v);
     this.views.clear();
+    if (samples?.parent === this.scene) samples.removeFromParent(); // kept alive: not released
   }
 }

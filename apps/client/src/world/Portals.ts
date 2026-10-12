@@ -5,6 +5,7 @@ import * as THREE from "three/webgpu";
 import { materialColor } from "three/tsl";
 import { BODIES, padDirs, PAD_SAFE_RADIUS, portalSpots, type BodyId, type Terrain } from "@firstlight/shared";
 import { atmo } from "../render/atmosphere.ts";
+import { disposeTree } from "../render/dispose.ts";
 
 export const PORTAL_COLORS: Record<BodyId, number> = {
   portus: 0xffd8a8,
@@ -12,6 +13,8 @@ export const PORTAL_COLORS: Record<BodyId, number> = {
   hollowmere: 0xb48cff,
   meridian: 0xff7a4a,
 };
+
+const _d = new THREE.Vector3();
 
 export interface Portal {
   to: BodyId;
@@ -116,10 +119,10 @@ export class Portals {
     }
   }
 
-  /** The portal the player is standing in, if any. */
+  /** The portal the player is standing in, if any (every frame: no allocation). */
   check(pos: THREE.Vector3): BodyId | null {
     for (const p of this.portals) {
-      const d = pos.clone().sub(p.center);
+      const d = _d.copy(pos).sub(p.center);
       const along = d.dot(p.normal);
       const lateral = d.addScaledVector(p.normal, -along).length();
       if (Math.abs(along) < 0.9 && lateral < 2.2) return p.to;
@@ -133,8 +136,10 @@ export class Portals {
     if (playerPos) for (const c of this.cullables) c.obj.visible = c.at.distanceTo(playerPos) < maxDistance;
   }
 
+  /** Leaving the body: every pad, ring, beam, portal and label here is this instance's own. */
   dispose() {
     this.group.removeFromParent();
+    disposeTree(this.group);
   }
 }
 
