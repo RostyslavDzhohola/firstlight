@@ -1,6 +1,5 @@
 // Onboarding HUD (verdict: Entry A's layout, kit markup in src/ui/README.md "Onboarding"): the
-// checklist with keycaps and Skip, the step rail, the big current-step card right of centre (never
-// over the crosshair) and a world callout (the training dummies, then the Arcadia portal). Plain DOM
+// compact current-step card, slim rail and expandable checklist, plus a world callout. Plain DOM
 // (D25); per-frame calls touch the DOM only when a value changes.
 
 import "./styles/kit.css";
@@ -40,16 +39,26 @@ export class OnboardingHud {
   private readonly calloutSub: HTMLElement;
   private readonly skipNote: HTMLElement;
   private readonly repoUrl: string | null;
+  private readonly checklist: HTMLDetailsElement;
+  private readonly onExpanded?: (expanded: boolean) => void;
   private last = { state: "", step: "", bar: "", callout: "", calloutText: "", paid: false };
 
   /** `repoUrl`: Star/Fork links on the last card (only once the repo is public). */
-  constructor(parent: HTMLElement, onSkip: () => void, repoUrl: string | null = null) {
+  constructor(parent: HTMLElement, onSkip: () => void, repoUrl: string | null = null, preference?: { expanded: boolean; onExpanded: (expanded: boolean) => void }) {
     this.repoUrl = repoUrl;
-    this.root = el("div", "fl-onb fl-ui", parent);
+    this.onExpanded = preference?.onExpanded;
+    this.root = el("div", "fl-onb fl-onb--compact fl-ui", parent);
     this.root.dataset.hud = "";
-    this.list = el("section", "fl-onb__list fl-holo", this.root);
+    const widget = el("div", "fl-onb__widget", this.root);
+    this.checklist = el("details", "fl-onb__list fl-holo", widget);
+    this.list = this.checklist;
     this.list.setAttribute("aria-label", "Tutorial");
-    this.title = el("h3", "", this.list, "First minute");
+    const summary = el("summary", "fl-onb__toggle", this.list);
+    summary.title = "Show or hide the tutorial checklist (T)";
+    this.title = el("span", "", summary, "Tutorial checklist");
+    keys(summary, ["T"]);
+    this.checklist.open = preference?.expanded ?? false;
+    this.checklist.addEventListener("toggle", () => this.onExpanded?.(this.checklist.open));
     for (const s of STEPS) {
       const row = el("div", "fl-onb__st", this.list);
       el("i", "", row);
@@ -62,12 +71,16 @@ export class OnboardingHud {
     b.title = "No more XP and no Spark medal";
     this.skipNote = el("small", "", skip, "Esc → Skip tutorial. Skipping pays nothing more.");
 
-    const rail = el("div", "fl-onb__rail", this.root);
+    const rail = el("div", "fl-onb__rail", widget);
+    rail.setAttribute("role", "progressbar");
+    rail.setAttribute("aria-label", "Tutorial progress");
+    rail.setAttribute("aria-valuemin", "0");
+    rail.setAttribute("aria-valuemax", String(STEPS.length));
     this.railText = el("span", "fl-onb__rail-t", rail);
     const segs = el("div", "fl-onb__segs", rail);
     for (let i = 0; i < STEPS.length; i++) this.segs.push(el("i", "", segs));
 
-    this.card = el("section", "fl-onb__step fl-holo fl-corners", this.root);
+    this.card = el("section", "fl-onb__step fl-holo fl-corners", widget);
     this.card.setAttribute("aria-live", "polite");
 
     this.callout = el("div", "fl-callout", this.root);
@@ -90,7 +103,8 @@ export class OnboardingHud {
     if (state !== this.last.state) {
       this.last.state = state;
       const n = steps.doneCount;
-      this.title.textContent = `First minute · ${n} / ${STEPS.length}`;
+      this.title.textContent = `Tutorial checklist · ${n} / ${STEPS.length}`;
+      this.root.querySelector(".fl-onb__rail")?.setAttribute("aria-valuenow", String(n));
       STEPS.forEach((s, i) => {
         const done = steps.isDone(s.id);
         this.rows[i]!.className = `fl-onb__st${done ? " is-done" : s === cur ? " is-now" : ""}${s.optional ? " is-opt" : ""}`;
@@ -104,7 +118,7 @@ export class OnboardingHud {
     if (stepKey !== this.last.step) {
       this.last.step = stepKey;
       this.last.bar = "";
-      if (cur) this.buildCard(cur, steps.next);
+      if (cur) this.buildCard(cur);
     }
     if (cur?.bar && this.barFill && this.barText) {
       const text = steps.progressText(cur.id);
@@ -116,13 +130,19 @@ export class OnboardingHud {
     }
   }
 
-  private buildCard(s: StepDef, next: StepDef | null) {
+  /** T while playing, or the native details summary when the mouse is free. */
+  toggleChecklist() {
+    this.checklist.open = !this.checklist.open;
+    this.onExpanded?.(this.checklist.open);
+  }
+
+  private buildCard(s: StepDef) {
     // A fresh element per step, so the card's rise-in plays again.
     const c = el("section", "fl-onb__step fl-holo fl-corners");
     c.setAttribute("aria-live", "polite");
     this.card.replaceWith(c);
     this.card = c;
-    el("span", "fl-onb__step-k", c, `Step ${STEPS.indexOf(s) + 1} · ${s.label}`);
+    el("span", "fl-onb__step-k", c, `First minute · ${STEPS.indexOf(s) + 1} / ${STEPS.length}`);
     el("h2", "", c, s.heading);
     keys(c, s.cardKeys, "fl-onb__keys");
     rich(el("p", "", c), s.text);
@@ -135,10 +155,6 @@ export class OnboardingHud {
       this.barText = el("span", "num", hold);
     }
     if (s.id === "portal" && this.repoUrl) this.repoLinks(c, this.repoUrl);
-    const nx = el("div", "fl-onb__next", c);
-    el("span", "", nx, next ? "Next" : "Last step");
-    const b = el("b", "", nx, next ? next.label : "Then it's all yours");
-    if (next) keys(b, next.keys.slice(0, 1));
   }
 
   private repoLinks(parent: HTMLElement, repoUrl: string) {

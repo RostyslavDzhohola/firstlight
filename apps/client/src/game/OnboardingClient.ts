@@ -9,6 +9,7 @@
 import * as THREE from "three/webgpu";
 import { BODIES, portalSpots, type PortalSpot } from "@firstlight/shared";
 import { ONBOARDING } from "@firstlight/shared/content/onboarding";
+import type { YouState } from "@firstlight/shared/net/protocol";
 import { WEAPONS, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
 import { config, flags } from "../config.ts";
 import { weaponColor } from "../render/effects.ts";
@@ -19,7 +20,7 @@ import { voice } from "../voice/index.ts";
 import { portalAt } from "../world/portalEntry.ts";
 import { TrainingDummies } from "../world/TrainingDummies.ts";
 import type { Game } from "./Game.ts";
-import { OnboardingSteps } from "./onboardingSteps.ts";
+import { OnboardingProgress } from "./onboardingProgress.ts";
 import type { ClientSystem } from "./systems.ts";
 
 const DONE_CARD_MS = 8000;
@@ -34,7 +35,10 @@ export class OnboardingClient implements ClientSystem {
   private readonly game: Game;
   readonly dummies: TrainingDummies;
   private hud: OnboardingHud | null = null;
-  private readonly steps = new OnboardingSteps();
+  private readonly progress: OnboardingProgress;
+  /** Undefined until this room's own state arrives, so old body HUD state cannot erase saved tips. */
+  private onboarding: YouState["onboarding"];
+  private receivedYou = false;
   private active = false;
   /** Skipped or finished in this session: never restart from a stale `you`. */
   private ended = false;
@@ -60,6 +64,14 @@ export class OnboardingClient implements ClientSystem {
     this.dummies = new TrainingDummies(game.ctx.scene, game.planet.terrain);
     this.portals = portalSpots(BODIES[ONBOARDING.BODY], game.planet.terrain);
     const room = game.net.room!;
+    // Game.enterBody waits for our schema player before creating the body systems.
+    const userId = (room.state as any).players?.get(room.sessionId)?.userId ?? "";
+    this.progress = new OnboardingProgress(userId);
+    room.onMessage("you", (m: YouState) => {
+      this.receivedYou = true;
+      this.onboarding = m.onboarding;
+      if (!m.onboarding) this.progress.end();
+    });
     room.onMessage("train", (m: { dummy: number; hits: number; down: boolean }) => this.onTrain(m));
     room.onMessage("onboarding", (m: { state: "done" | "skipped"; xp: number }) => this.onEnd(m));
     room.onMessage("phrase", (m: { by: string }) => {
@@ -75,7 +87,9 @@ export class OnboardingClient implements ClientSystem {
     this.active = true;
     const g = this.game;
     const layer = g.hud.root.querySelector<HTMLElement>(".fl-hud__layer") ?? g.hud.root;
-    this.hud = new OnboardingHud(layer, () => this.skip(), config.publicRepo ? config.repoUrl : null);
+    this.hud = new OnboardingHud(layer, () => this.skip(), config.publicRepo ? config.repoUrl : null, {
+      expanded: this.progress.expanded, onExpanded: (expanded) => this.progress.setExpanded(expanded),
+    });
   }
 
   private skip() {
@@ -112,6 +126,7 @@ export class OnboardingClient implements ClientSystem {
 
   /** Server: rewards paid (the tutorial goes on with tips) or skipped (it ends here). */
   private onEnd(m: { state: "done" | "skipped"; xp: number }) {
+    this.progress.end();
     if (m.state === "done") {
       this.paid = true;
       this.xpPaid = m.xp;
@@ -170,7 +185,9 @@ export class OnboardingClient implements ClientSystem {
     this.dummies.update(dt);
     const g = this.game;
     if (this.hud && this.doneUntil && now > this.doneUntil) this.closeHud();
-    const ob = g.hud.you?.onboarding;
+    if (!this.receivedYou) return;
+    const steps = this.progress.steps;
+    const ob = this.onboarding;
     if (ob && !this.active && !this.ended && !flags.has("autoplay")) this.start();
     else if (!ob && this.active && !this.paid) this.finish(); // ended on the server without a payout
     if (!this.active || !this.hud) return;
@@ -183,8 +200,9 @@ export class OnboardingClient implements ClientSystem {
     this.lastPos.copy(p);
     this.hasLast = true;
     const playing = g.input.locked && !g.photo?.active && !Panel.current;
+    if (playing && g.input.pressed.has("KeyT")) this.hud.toggleChecklist();
     const look = playing ? (Math.abs(g.input.mouseDX) + Math.abs(g.input.mouseDY)) * g.input.sensitivity : 0;
-    const completed = this.steps.observe({
+    const completed = steps.observe({
       dt,
       moved: playing ? moved : 0,
       lookRad: look,
@@ -196,18 +214,19 @@ export class OnboardingClient implements ClientSystem {
       voiceOn: !!voice()?.optedIn,
       inPortal: !!portalAt(this.portals, p.x, p.y, p.z),
     });
+    if (completed.length) this.progress.save();
     this.phrased = false;
     if (completed.length && completed[0] !== "attack") g.audio.play("ui");
-    if (this.steps.allDone) {
+    if (steps.allDone) {
       this.hud.showDone(this.xpPaid || ONBOARDING.DONE_XP + down * ONBOARDING.DUMMY_XP);
       this.doneUntil = now + DONE_CARD_MS;
       this.finish();
       return;
     }
-    this.hud.render(this.steps, this.paid);
+    this.hud.render(steps, this.paid);
 
     // Point at the dummies, then at the Arcadia portal, while that's the step on the card.
-    const step = this.steps.current?.id;
+    const step = steps.current?.id;
     let at: THREE.Vector3 | null = null;
     let title = "";
     let sub = "";
@@ -232,6 +251,7 @@ export class OnboardingClient implements ClientSystem {
   }
 
   dispose() {
+    this.progress.save();
     pauseExtras.delete(this.pauseRow);
     if (this.game.combat.training) this.game.combat.training = null;
     this.dummies.dispose();
