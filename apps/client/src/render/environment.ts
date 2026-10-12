@@ -64,6 +64,8 @@ const smooth = (e0: number, e1: number, x: number) => {
   return t * t * (3 - 2 * t);
 };
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+/** A server clock jump bigger than this is taken at once instead of smoothed. */
+const CLOCK_SNAP_MS = 5000;
 /** Exponential approach factor for a time constant (s). */
 const approach = (dt: number, tau: number) => 1 - Math.exp(-dt / Math.max(1e-3, tau));
 
@@ -154,6 +156,8 @@ export class Environment {
   };
   private drops = { amount: 0, kind: 0, fall: 9, wind: 0, len: 0.5, width: 0.012, alpha: 0 };
   private readonly angles = { elev: 0, az: 0 };
+  /** The body's sun elevation range (scattering LUT slices). */
+  private readonly lutRange: [number, number] = [0, 1];
   private readonly factors: LightFactors = { night: 0, dusk: 0, sunUp: 0 };
 
   constructor(private readonly ctx: RenderCtx, private readonly audio: EnvAudio | null = null, private readonly particles: EnvParticles | null = null) {
@@ -186,8 +190,13 @@ export class Environment {
     this.local = null;
     this.strike = null;
     this.pendingStrike = null;
+    this.flashAt = -1e9;
     this.kind = "clear";
     this.amount = 0;
+    this.wetness = 0;
+    const p = SKY_PROFILES[body];
+    this.lutRange[0] = p.minElev;
+    this.lutRange[1] = p.maxElev;
     this.loadPalette();
     // Moonlight comes from the highest sky planet, so the light matches what you see.
     let best = look.skyPlanets[0];
@@ -212,8 +221,12 @@ export class Environment {
   setServerSky(s: SkyState) {
     if (s.body !== this.body) return;
     const delta = s.serverTime - Date.now();
-    this.serverDelta = this.haveDelta ? this.serverDelta + (delta - this.serverDelta) * 0.3 : delta;
+    // Smooth small drift; snap a big jump (a laptop waking up, a changed system clock).
+    const snap = !this.haveDelta || Math.abs(delta - this.serverDelta) > CLOCK_SNAP_MS;
+    this.serverDelta = snap ? delta : this.serverDelta + (delta - this.serverDelta) * 0.3;
     this.haveDelta = true;
+    // A new storm (slot or admin override) has its own strikes: drop one scheduled from the old.
+    if (s.slotStart !== this.server?.slotStart || s.weather !== this.server?.weather) this.strike = null;
     this.copy = s.copy;
     this.server = s;
     this.local = null; // the fallback schedule takes this state's day offset/hold
@@ -225,7 +238,10 @@ export class Environment {
 
   setOverrides(time: number | null, weather: { weather: Weather; intensity: number } | null) {
     this.photoTime = time;
-    if (weather?.weather !== this.photoWeather?.weather) this.overrideSince = this.serverNow();
+    if (weather?.weather !== this.photoWeather?.weather) {
+      this.overrideSince = this.serverNow();
+      this.strike = null;
+    }
     this.photoWeather = weather;
   }
 
@@ -328,7 +344,7 @@ export class Environment {
     atmo.mie.value = look.mie * (1 - cloud * 0.8) * (1 - night);
     atmo.sunColor.value.copy(C.sun).lerp(DUSK_SUN, dusk * 0.7);
     atmo.sunDisc.value = look.sunDisc * sunUp * (1 - cloud) * (1 - cloud);
-    atmo.lutSlice.value = sliceFor(elev, [SKY_PROFILES[this.body].minElev, SKY_PROFILES[this.body].maxElev]);
+    atmo.lutSlice.value = sliceFor(elev, this.lutRange);
     const baseMix = this.settings.sky.scatterSteps[0] > 0 ? look.scatter.mix : 0;
     atmo.scatterMix.value = baseMix * (1 - night * 0.85) * (1 - cloud * 0.6);
     atmo.stars.value = on.sky ? night * (1 - Math.min(1, cloud * 1.4)) : 0;
@@ -397,11 +413,11 @@ export class Environment {
 
   private stormState: SkyState | null = null;
 
-  /** A storm on the override's own clock (photo/URL storms get lightning too). */
+  /** A storm on the override's own clock (photo/URL storms get lightning too, for as long as they last). */
   private overrideStorm(st: SkyState): SkyState {
     const s = this.stormState;
     if (s && s.slotStart === this.overrideSince && s.body === st.body && s.copy === st.copy) return s;
-    this.stormState = { ...st, weather: "storm", slotStart: this.overrideSince, nextChangeAt: this.overrideSince + 3_600_000, override: true };
+    this.stormState = { ...st, weather: "storm", slotStart: this.overrideSince, nextChangeAt: Number.MAX_SAFE_INTEGER, override: true };
     return this.stormState;
   }
 
@@ -439,16 +455,19 @@ export class Environment {
     this.fx.updateBolt(camera, atmo.flash.value * 1.6);
   }
 
-  private describeKey = "";
+  private readonly describedFor = { body: "", mins: -1, kind: "", pct: -1 };
   private described = "";
 
-  /** "arcadia · 14:05 rain 70%" for the F3 overlay / photo panel (cached: no per-frame string). */
+  /** "arcadia · 14:05 rain 70%" for the F3 overlay / photo panel (rebuilt only when it changes). */
   describe(): string {
     const mins = Math.floor(this.dayT * 24 * 60);
     const pct = this.amount > 0.01 ? Math.round(this.amount * 20) * 5 : 0;
-    const key = `${this.body}${mins}${this.kind}${pct}`;
-    if (key !== this.describeKey) {
-      this.describeKey = key;
+    const k = this.describedFor;
+    if (k.body !== this.body || k.mins !== mins || k.kind !== this.kind || k.pct !== pct) {
+      k.body = this.body;
+      k.mins = mins;
+      k.kind = this.kind;
+      k.pct = pct;
       const h = Math.floor(mins / 60), m = mins % 60;
       this.described = `${this.body} · ${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")} ${this.kind}${pct ? ` ${pct}%` : ""}`;
     }

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
-import { SKY_PROFILES, skyState, sunAngles } from "@firstlight/shared";
+import { dayT, nextStrike, SKY_PROFILES, skyState, sunAngles } from "@firstlight/shared";
 import { atmo, SunRig } from "./atmosphere.ts";
 import { Environment, lightFactors, referenceDayT } from "./environment.ts";
 import { LOOKS } from "./looks.ts";
@@ -151,6 +151,21 @@ describe("day/night", () => {
     expect(env.dayT).toBe(0.81);
   });
 
+  it("snaps the server clock offset on a big jump and smooths small ones", () => {
+    vi.useFakeTimers({ now: Date.UTC(2026, 9, 12, 12), toFake: ["Date"] });
+    const { env } = setup("arcadia");
+    const offsetSeen = () => {
+      env.update(1 / 60);
+      return Math.round(((env.dayT - dayT("arcadia", Date.now())) * 40 * 60_000) / 10) * 10; // ms, 10 ms grid
+    };
+    env.setServerSky(skyState("arcadia", 0, Date.now() + 60_000));
+    expect(offsetSeen()).toBe(60_000);
+    env.setServerSky(skyState("arcadia", 0, Date.now())); // the server clock jumped back 60 s
+    expect(offsetSeen()).toBe(0);
+    env.setServerSky(skyState("arcadia", 0, Date.now() + 1000)); // 1 s of drift: smoothed (0.3)
+    expect(offsetSeen()).toBe(300);
+  });
+
   it("Portus never gets a night", () => {
     for (let i = 0; i < 48; i++) expect(lightFactors(sunAngles("portus", i / 48).elev).night).toBe(0);
   });
@@ -183,6 +198,19 @@ describe("weather", () => {
     run(env, 10);
     expect((env.fx.drops.geometry as THREE.InstancedBufferGeometry).instanceCount).toBeLessThan(200);
     expect(atmo.wet.value).toBeGreaterThan(0.3);
+  });
+
+  it("a new body starts dry", () => {
+    const { env, ctx } = setup("arcadia");
+    env.timeOverride = 0.5;
+    env.weatherOverride = { weather: "rain", intensity: 1 };
+    run(env, 30);
+    expect(atmo.wet.value).toBeGreaterThan(0.6);
+    const look = LOOKS.meridian;
+    env.setBody("meridian", 0, look, new SunRig(ctx.scene, look));
+    env.weatherOverride = { weather: "clear", intensity: 0 };
+    run(env, 0.1);
+    expect(atmo.wet.value).toBe(0);
   });
 
   it("Meridian dust: motes, dust-tinted haze, more fog, no wetness", () => {
@@ -221,5 +249,43 @@ describe("weather", () => {
     expect(flashes).toBeGreaterThan(0);
     // Thunder delay = distance / 343 m/s.
     for (const d of thunder) expect(d).toBeGreaterThanOrEqual(250 / 343 - 1e-9);
+  });
+
+  it("photo-mode storms keep flashing after an hour", () => {
+    vi.useFakeTimers({ now: Date.UTC(2026, 9, 12, 12), toFake: ["Date"] });
+    const { env, thunder } = setup("arcadia");
+    env.timeOverride = 0.5;
+    env.setOverrides(null, { weather: "storm", intensity: 1 });
+    vi.setSystemTime(Date.now() + 61 * 60_000);
+    const cam = new THREE.PerspectiveCamera();
+    cam.position.set(0, 502, 0);
+    for (let s = 0; s < 90; s++) {
+      vi.setSystemTime(Date.now() + 1000);
+      env.update(1);
+      env.afterCamera(cam, 1);
+    }
+    expect(thunder.length).toBeGreaterThan(1);
+  });
+
+  it("a new server storm drops the strike scheduled from the old one", () => {
+    const t0 = Date.UTC(2026, 9, 12, 12);
+    vi.useFakeTimers({ now: t0, toFake: ["Date"] });
+    const { env, thunder } = setup("arcadia");
+    env.timeOverride = 0.5;
+    const storm = (since: number) => skyState("arcadia", 0, Date.now(), 0, { weather: "storm", intensity: 1, since, until: t0 + 3_600_000 });
+    env.setServerSky(storm(t0 - 4000)); // its first strike is 2–21 s away
+    for (let i = 0; i < 300; i++) env.update(1 / 60); // storm fades in; the strike is cached
+    expect(thunder).toHaveLength(0);
+    vi.setSystemTime(t0 + 1000);
+    const b = storm(t0 + 1000);
+    env.setServerSky(b);
+    const expected = new Set<number>();
+    for (let st = nextStrike(b, t0); st && st.at < t0 + 60_000; st = nextStrike(b, st.at + 1)) expected.add(Math.round((st.distance / 343) * 1e6));
+    for (let i = 0; i < 590; i++) {
+      vi.setSystemTime(Date.now() + 100);
+      env.update(0.1);
+    }
+    expect(thunder.length).toBeGreaterThan(0);
+    for (const d of thunder) expect(expected.has(Math.round(d * 1e6))).toBe(true);
   });
 });
