@@ -378,11 +378,15 @@ export class CombatClient {
       chest.set(p.x, p.y, p.z);
       if (chest.distanceTo(mine) > range + 0.5) return;
       chest.addScaledVector(_v.copy(chest).normalize(), 1.0);
-      // Not through the ground (the server also checks cover).
+      // Not through the ground or a prop (the server checks the same line).
       const myChest = mine.clone().addScaledVector(mine.clone().normalize(), 1.0);
       const to = chest.clone().sub(myChest);
       const len = to.length();
-      if (len > 0.01 && this.rayTerrain(myChest, to.divideScalar(len), len) < len) return;
+      if (len > 0.01) {
+        to.divideScalar(len);
+        if (this.rayTerrain(myChest, to, len) < len) return;
+        if ((this.game.player.getColliders()?.raycast?.(myChest, to, len) ?? Infinity) < len) return;
+      }
       chest.sub(o);
       const t = chest.dot(d);
       if (t <= 0) return;
