@@ -116,8 +116,10 @@ export function rewardKill(sys: NpcSystem, n: Npc, killerId: string | null, now:
   // XP, coins, drops, chest and saves land together; pile events and level-ups go out after the
   // commit (D26, F12 final B1). A failed save pays nobody anything (the kill still happened).
   const events: (() => void)[] = [];
+  const chestOwner = n.point?.chest && n.point.chestKey === n.member ? (top ?? killer) : null;
+  const touched = [...new Set([...xpTo, ...(top ? [top] : []), ...(chestOwner ? [chestOwner] : [])])];
   try {
-    world.withTx(() => {
+    world.withTx(touched, () => {
       for (const p of xpTo) {
         const xp = killXp(def.tier, n.level, p.char.level, repeatDecay(sys, p.identity.userId, key, now));
         if (xp > 0) events.push(world.addXp(p, xp));
@@ -135,10 +137,7 @@ export function rewardKill(sys: NpcSystem, n: Npc, killerId: string | null, now:
         const items = rollDrops(sys, n, top);
         if (items.length) world.createPile(top, items, 0, n.pos, events);
       }
-      if (n.point?.chest && n.point.chestKey === n.member) {
-        const owner = top ?? killer;
-        if (owner) openChest(sys, n.point.chest, owner, n.level, n.point.pos, Math.random, events);
-      }
+      if (chestOwner) openChest(sys, n.point!.chest!, chestOwner, n.level, n.point!.pos, Math.random, events);
       for (const g of gains.values()) world.save(g.p);
     });
   } catch (err) {
@@ -191,7 +190,7 @@ export function bossLoot(sys: NpcSystem, def: BossDef, p: PlayerActor, rng: Rng 
   // Coins, XP, items and the overflow pile commit together; pile events and the level-up go out
   // after (D26, F12 final B1).
   const events: (() => void)[] = [];
-  sys.world.withTx(() => {
+  sys.world.withTx([p], () => {
     p.char.coins += def.loot.coins;
     p.youDirty = true;
     events.push(sys.world.addXp(p, def.loot.xp));

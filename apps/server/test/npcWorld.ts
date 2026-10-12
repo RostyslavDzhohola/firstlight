@@ -71,7 +71,7 @@ export function fakeWorld(body: BodyId, opts: { immortal?: boolean; start?: numb
     },
     giveItem: () => true,
     createPile: () => {},
-    withTx: (fn) => fn(),
+    withTx: (_players, fn) => fn(),
     snapToGround: (p) => {
       const l = Math.hypot(p[0]!, p[1]!, p[2]!);
       const r = BODIES[body].radius + Math.max(terrain.groundHeight(p[0]! / l, p[1]! / l, p[2]! / l), BODIES[body].waterLevel - 1.05);
