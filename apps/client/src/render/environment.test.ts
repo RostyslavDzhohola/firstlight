@@ -18,13 +18,14 @@ function fakeCtx(kill: Feature[] = []) {
 function setup(body: "arcadia" | "portus" | "meridian" | "hollowmere" = "arcadia", kill: Feature[] = []) {
   const ctx = fakeCtx(kill);
   const thunder: number[] = [];
-  const audio = { setWeather: () => {}, thunder: (d: number) => thunder.push(d) };
+  const bed: [number, number][] = [];
+  const audio = { setWeather: (rain: number, wind: number) => bed.push([rain, wind]), thunder: (d: number) => thunder.push(d) };
   const particles = { moteBoost: 1 };
   const env = new Environment(ctx, audio, particles);
   const look = LOOKS[body];
   const rig = new SunRig(ctx.scene, look);
   env.setBody(body, 0, look, rig);
-  return { ctx, env, rig, look, particles, thunder };
+  return { ctx, env, rig, look, particles, thunder, bed };
 }
 
 /** Run `seconds` of frames at 60 fps. */
@@ -230,6 +231,16 @@ describe("weather", () => {
     env.weatherOverride = { weather: "clear", intensity: 0 };
     run(env, 0.1);
     expect(atmo.wet.value).toBe(0);
+  });
+
+  it("silence() stops the rain and wind bed while no frames run", () => {
+    const { env, bed } = setup("arcadia");
+    env.timeOverride = 0.5;
+    env.weatherOverride = { weather: "storm", intensity: 1 };
+    run(env, 4);
+    expect(bed.at(-1)![0]).toBeGreaterThan(0.5);
+    env.silence();
+    expect(bed.at(-1)).toEqual([0, 0]);
   });
 
   it("Meridian dust: motes, dust-tinted haze, more fog, no wetness", () => {

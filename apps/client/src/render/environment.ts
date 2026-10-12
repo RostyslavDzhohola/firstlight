@@ -415,6 +415,11 @@ export class Environment {
     this.audio?.setWeather(wl.rainSound * a, wl.windSound * a);
   }
 
+  /** No frames are running (loading, travel, menus that stop the loop): the weather bed goes quiet. */
+  silence() {
+    this.audio?.setWeather(0, 0);
+  }
+
   /** Day ↔ night colour, greyed and dimmed under cloud cover. */
   private sky(day: THREE.Color, nightC: THREE.Color, night: number, cloud: number, out: THREE.Color) {
     out.copy(day).lerp(nightC, night);
