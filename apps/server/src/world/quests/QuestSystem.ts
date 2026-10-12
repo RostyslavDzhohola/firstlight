@@ -26,6 +26,7 @@ import type { BodyRoom } from "../BodyRoom.ts";
 import { emitGameEvent, onGameEvent, type DamageEvent, type DeathEvent, type GameEvent, type KillEvent, type SpawnRequestEvent } from "../events.ts";
 import { npcSystemOf, onNpcEvent, type NpcEvent } from "../npc/index.ts";
 import { dist3, type V3 } from "../geometry.ts";
+import { groundMotion } from "../movement.ts";
 import type { RoomSystem } from "../systems.ts";
 import { EGG_LIMITS, EggLogic } from "./eggs.ts";
 import { engrave, hallLines, onHallChanged } from "./hall.ts";
@@ -285,6 +286,11 @@ export class QuestSystem implements RoomSystem {
     a.state.z = a.lastZ = p[2];
     a.lastMoveAt = Date.now();
     a.history.length = 0;
+    // Placed on the ground: no fall in progress, a fresh jump envelope (like the admin teleport).
+    const len = Math.hypot(p[0], p[1], p[2]);
+    a.airborne = false;
+    a.peakRadius = len;
+    groundMotion(a, len, a.lastMoveAt);
     a.client.send("correct", { x: p[0], y: p[1], z: p[2], seq: a.state.seq });
   }
 

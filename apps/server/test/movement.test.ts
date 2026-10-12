@@ -197,6 +197,27 @@ describe("no shortcuts through the planet (F12 final Opus N-B1)", () => {
   });
 });
 
+describe("quest teleports (F12 final Opus nit)", () => {
+  it("a teleport mid-fall lands nobody with the fall's damage", async () => {
+    const k = await joinOutside("ported");
+    k.r.send("admin", { cmd: "unprotect" });
+    await waitFor(() => !(me(k.r).flags & 3));
+    const room = matchMaker.getLocalRoomById(k.r.roomId) as unknown as BodyRoom;
+    const a = room.actors.get(k.r.sessionId)!;
+    const hp0 = a.state.hp;
+    // Falling from 30 m up, then a quest teleport (egg lift, fast travel) puts it on the ground.
+    a.airborne = true;
+    a.peakRadius = groundR(k.dir) + 30;
+    const quests = room.systems.find((x) => "eggs" in x) as unknown as { teleport(a: unknown, at: readonly number[]): void };
+    const to = walk(k.dir, k.t, 6);
+    quests.teleport(a, [to[0] * R, to[1] * R, to[2] * R]);
+    expect(a.airborne).toBe(false);
+    send(k.r, k.seq, to, groundR(to), 0);
+    await sleep(300);
+    expect(a.state.hp).toBe(hp0);
+  });
+});
+
 describe("movement budget", () => {
   it("the per-packet tolerance is charged: 12 m/s sustained at 50 Hz is corrected, a 9 m/s sprint is not", async () => {
     const fast = await joinOutside("speeder");
