@@ -67,7 +67,8 @@ class Bucket {
   }
 }
 
-const LIMITS = {
+/** Voice rate limits and timings (exported so tests can shorten them; restore after). */
+export const VOICE_LIMITS = {
   /** Signals per second (the client batches candidates and stays under ~15/s). */
   SIGNAL_BURST: 40,
   SIGNAL_PER_S: 20,
@@ -83,6 +84,7 @@ const LIMITS = {
    */
   LINKED_WITHIN_MS: VOICE.TURN_TTL_S * 1000,
 };
+const LIMITS = VOICE_LIMITS;
 
 interface VoiceSession {
   sid: string;
@@ -243,10 +245,10 @@ export class VoiceSystem implements RoomSystem {
           s.ice = null;
           a.client.send("voice:ice", { iceServers: [], relay: true, ttl: VOICE.TURN_TTL_S, available: false });
         }
-        if (turnConfigured() && !s.minting) {
-          const stale = s.ice && now - s.mintedAt >= VOICE.REMINT_MS;
-          const retry = (!s.ice || s.rotatePending) && now >= s.turnRetryAt;
-          if (stale || retry) void this.sendIce(a, s, true);
+        // Due (no credential, a 6-hour refresh, or a block's rotation) and past any retry deadline.
+        if (turnConfigured() && !s.minting && now >= s.turnRetryAt) {
+          const due = !s.ice || s.rotatePending || now - s.mintedAt >= VOICE.REMINT_MS;
+          if (due) void this.sendIce(a, s, true);
         }
       }
     }
@@ -315,11 +317,16 @@ export class VoiceSystem implements RoomSystem {
       return;
     }
     if (s.minting) return;
-    // After a failure, and beyond the per-account budget, wait instead of calling the TURN API again.
-    // A rotation forced by someone else's block is never charged to this player's budget (F12 B1);
-    // takeRotation() bounds those to one per account per 10 minutes instead.
-    if (now < s.turnRetryAt || (!s.rotatePending && !turnCredentials.allowMint(s.userId, now))) {
-      s.turnRetryAt = Math.max(s.turnRetryAt, now + LIMITS.TURN_RETRY_MS);
+    // After a failure, wait out the deadline it set (asking again doesn't move it, F12 review).
+    if (now < s.turnRetryAt) {
+      if (!s.ice) a.client.send("voice:ice", { iceServers: [], relay: true, ttl, available: false });
+      return;
+    }
+    // Beyond the per-account budget: wait before calling the TURN API again. A rotation forced by
+    // someone else's block is never charged to this player's budget (F12 B1); takeRotation() bounds
+    // those to one per account per 10 minutes instead.
+    if (!s.rotatePending && !turnCredentials.allowMint(s.userId, now)) {
+      s.turnRetryAt = now + LIMITS.TURN_RETRY_MS;
       if (!s.ice) a.client.send("voice:ice", { iceServers: [], relay: true, ttl, available: false });
       return;
     }
@@ -478,6 +485,10 @@ export class VoiceSystem implements RoomSystem {
     // them fresh credentials for everyone else. Only when the pair could hold a relay path at all
     // (they relayed signalling recently), at most once per account per 10 minutes, outside the
     // player's own mint budget, and the old credential stays until a new one is minted (F12 B1).
+    // So the server cutoff is conditional: a second blocker inside that cooldown gets the hang-up
+    // above and the relay's refusal of further signalling, but no revocation; an honest blocker's
+    // client closes its own connection. An unconditional cutoff would need revocation scoped to one
+    // pair's allocation, which per-player TURN credentials don't offer.
     const ts = this.sessions.get(t.id);
     const now = Date.now();
     const linkedAt = this.sessions.get(a.id)?.signalledAt.get(t.id);

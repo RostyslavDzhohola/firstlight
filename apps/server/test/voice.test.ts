@@ -11,7 +11,7 @@ import { accountLinks } from "../src/auth/links.ts";
 import { banUser, isBlockedEitherWay, listReports, openGameDb, setGameDb, type Db } from "../src/db/index.ts";
 import { env } from "../src/env.ts";
 import { liveRooms, SOCIAL_RULES } from "../src/social/index.ts";
-import { revokeVoiceForUser, VoiceSystem } from "../src/world/voice/index.ts";
+import { revokeVoiceForUser, VOICE_LIMITS, VoiceSystem } from "../src/world/voice/index.ts";
 import { TURN_API, turnCredentials } from "../src/world/voice/turn.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 
@@ -21,13 +21,40 @@ const rooms: Room[] = [];
 let run = 0;
 const uid = (name: string) => `${name}${run}`;
 
+// No test may reach Cloudflare (or anything off this machine): TURN is unconfigured unless a test
+// installs a stub, TURN calls go only to that stub, and any other non-local fetch is refused. Real
+// TURN keys from the environment are never restored in this file (late revoke retries must not
+// find them).
+const realFetch = globalThis.fetch;
+let turnStub: ((url: string, init: RequestInit) => Promise<Response>) | null = null;
+function guardFetch() {
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (url.startsWith(TURN_API)) {
+      if (!turnStub) throw new Error("test made an unmocked TURN call");
+      return turnStub(url, init ?? {});
+    }
+    const host = new URL(url).hostname;
+    if (host !== "127.0.0.1" && host !== "localhost") throw new Error(`test refused a non-local fetch to ${host}`);
+    return realFetch(input as never, init);
+  });
+}
+
 beforeEach(async () => {
   run++;
+  env.turnKeyId = "";
+  env.turnKeyToken = "";
+  turnStub = null;
+  guardFetch();
   game = await startServer();
 });
 afterEach(async () => {
   for (const r of rooms.splice(0)) await safeLeave(r);
   await game.close();
+  env.turnKeyId = "";
+  env.turnKeyToken = "";
+  turnStub = null;
+  vi.restoreAllMocks();
 });
 
 type Msg = { type: string; data: any };
@@ -409,19 +436,15 @@ describe("voice safety persistence", () => {
 });
 
 describe("TURN credentials", () => {
-  const saved = { id: env.turnKeyId, token: env.turnKeyToken };
   let calls: { url: string; init: RequestInit }[];
   /** Mock Cloudflare: mint returns user-<n>; `revokeStatus` decides each revoke's HTTP status. */
   function mockTurn(opts: { mintStatus?: number | (() => number); revokeStatus?: () => number } = {}) {
     env.turnKeyId = "key-123";
     env.turnKeyToken = "tok-secret";
-    const realFetch = globalThis.fetch;
     calls = [];
     let n = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      const url = String(input instanceof Request ? input.url : input);
-      if (!url.startsWith(TURN_API)) return realFetch(input as never, init);
-      calls.push({ url, init: init ?? {} });
+    turnStub = async (url, init) => {
+      calls.push({ url, init });
       if (url.endsWith("/revoke")) return new Response(null, { status: opts.revokeStatus?.() ?? 204 });
       const mintStatus = typeof opts.mintStatus === "function" ? opts.mintStatus() : opts.mintStatus;
       if (mintStatus && mintStatus !== 201) return new Response("nope", { status: mintStatus });
@@ -439,16 +462,11 @@ describe("TURN credentials", () => {
         }),
         { status: 201, headers: { "Content-Type": "application/json" } },
       );
-    });
+    };
   }
   const mintCalls = () => calls.filter((c) => c.url.endsWith("generate-ice-servers"));
   const revokes = (user: string) => calls.filter((c) => c.url.endsWith(`/credentials/${user}/revoke`));
 
-  afterEach(() => {
-    env.turnKeyId = saved.id;
-    env.turnKeyToken = saved.token;
-    vi.restoreAllMocks();
-  });
 
   it("mints per-player relay credentials with the right request, filters STUN and :53, revokes on block and leave", async () => {
     mockTurn();
@@ -640,6 +658,52 @@ describe("TURN credentials", () => {
     expect(revokes(cred)).toHaveLength(0);
     expect(unavailable(vic)).toHaveLength(0);
     expect(got(vic, "voice:ice")).toHaveLength(1);
+  });
+
+  it("a second blocker inside the 10-minute rotation cooldown gets the hang-up and the relay cutoff, but no second revocation", async () => {
+    // Documented limit (F12 review nit): the server cutoff for the second pair is signalling refusal
+    // plus voice:drop to both clients; an honest blocker closes its own connection. Revoking again
+    // would need revocation scoped to one pair's allocation, which TURN credentials don't offer.
+    mockTurn();
+    const vic = await bot("vic"), eve = await bot("eve"), ann = await bot("ann");
+    await enable(vic, eve, ann);
+    expect(await relays(eve, vic)).toBe(true);
+    eve.send("voice:block", { target: vic.sessionId });
+    await waitFor(() => got(vic, "voice:ice").length === 2);
+    const rotated = userOf(vic, 1);
+    expect(await relays(ann, vic)).toBe(true); // ann links up with vic on the new credential
+    ann.send("voice:block", { target: vic.sessionId });
+    await barrier(ann, vic);
+    await barrier(vic);
+    expect(got(ann, "voice:drop")).toContainEqual({ peer: vic.sessionId });
+    expect(got(vic, "voice:drop")).toContainEqual({ peer: ann.sessionId });
+    expect(await relays(ann, vic)).toBe(false);
+    expect(await relays(vic, ann)).toBe(false);
+    expect(revokes(rotated)).toHaveLength(0);
+    expect(got(vic, "voice:ice")).toHaveLength(2);
+  });
+
+  it("a failed 6-hour refresh is retried after TURN_RETRY_MS instead of being postponed by every tick", async () => {
+    const savedRetry = VOICE_LIMITS.TURN_RETRY_MS;
+    VOICE_LIMITS.TURN_RETRY_MS = 2_500; // longer than the 1 s slow tick, like the real 30 s
+    try {
+      let mintStatus = 201;
+      mockTurn({ mintStatus: () => mintStatus });
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const vic = await bot("vic");
+      await enable(vic);
+      const voice = [...liveRooms].flatMap((r) => r.systems).find((s): s is VoiceSystem => s instanceof VoiceSystem && s.sessions.has(vic.sessionId))!;
+      mintStatus = 500;
+      voice.sessions.get(vic.sessionId)!.mintedAt -= VOICE.REMINT_MS;
+      await waitFor(() => mintCalls().length === 2, 4000); // the refresh failed
+      mintStatus = 201;
+      await waitFor(() => got(vic, "voice:ice").length === 2, 8000); // retried and recovered
+      expect(got(vic, "voice:ice")[1]).toMatchObject({ available: true });
+      expect(mintCalls()).toHaveLength(3);
+      expect(unavailable(vic)).toHaveLength(0);
+    } finally {
+      VOICE_LIMITS.TURN_RETRY_MS = savedRetry;
+    }
   });
 
   it("a failed 6-hour re-mint keeps credentials that are still valid, and drops them once expired", async () => {
