@@ -8,6 +8,7 @@ import { BODIES, padDirs } from "@firstlight/shared";
 import { NET } from "@firstlight/shared/net/protocol";
 import type { Game } from "../src/app.ts";
 import { REWIND_MS } from "../src/world/combat.ts";
+import { characterRepo } from "../src/world/characters.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 
 let game: Game;
@@ -64,6 +65,48 @@ describe("per-type message caps (F12 nit)", () => {
     const before = pongs.n;
     r.send("ping", { t: 99 });
     await waitFor(() => pongs.n > before);
+  });
+});
+
+describe("respawn and skySync caps (F12 re-review nit)", () => {
+  it("a dead player's burst of respawns is answered (and saved) once per second; skySync bursts are capped too", async () => {
+    const r = await join("revenant", "arcadia", "admin");
+    // Die outside the safe ring.
+    const R = BODIES.arcadia.radius;
+    const d = padDirs(BODIES.arcadia)[0]!;
+    const ref = Math.abs(d[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
+    const k = ref[0]! * d[0] + ref[1]! * d[1] + ref[2]! * d[2];
+    const t = [ref[0]! - k * d[0], ref[1]! - k * d[1], ref[2]! - k * d[2]];
+    const tl = Math.hypot(t[0]!, t[1]!, t[2]!);
+    const v = [d[0] + (t[0]! / tl) * (40 / R), d[1] + (t[1]! / tl) * (40 / R), d[2] + (t[2]! / tl) * (40 / R)];
+    const vl = Math.hypot(v[0]!, v[1]!, v[2]!);
+    r.send("admin", { cmd: "teleport", args: { x: (v[0]! / vl) * R, y: (v[1]! / vl) * R, z: (v[2]! / vl) * R } });
+    r.send("admin", { cmd: "unprotect" });
+    await waitFor(() => !(me(r).flags & 3));
+    const deaths = count(r, "death");
+    r.send("admin", { cmd: "damage", args: { amount: 10_000 } });
+    await waitFor(() => deaths.n > 0);
+    const repo = characterRepo.current;
+    let saves = 0;
+    const save = repo.save.bind(repo);
+    repo.save = (u, c) => {
+      if (u === "revenant") saves++;
+      save(u, c);
+    };
+    try {
+      const reborn = count(r, "reborn");
+      const skies = count(r, "sky");
+      for (let i = 0; i < 6; i++) {
+        r.send("respawn", { starter: 0, palette: 0 });
+        r.send("skySync", {});
+      }
+      await sleep(500);
+      expect(reborn.n).toBe(1);
+      expect(saves).toBe(1);
+      expect(skies.n).toBeLessThanOrEqual(2);
+    } finally {
+      repo.save = save;
+    }
   });
 });
 

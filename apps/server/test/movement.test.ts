@@ -9,6 +9,10 @@ import { matchMaker } from "@colyseus/core";
 import type { BodyRoom } from "../src/world/BodyRoom.ts";
 import { dealDamage } from "../src/world/combat.ts";
 import { DestructionSystem } from "../src/world/destruction.ts";
+import { MOVE, motionFields, moveLimits, validateMove, type MoveWorld } from "../src/world/movement.ts";
+import type { PlayerActor } from "../src/world/actors.ts";
+import { HORSE } from "@firstlight/shared/content/horse";
+import { ANIM } from "@firstlight/shared/net/schema";
 import { isSafe, type Breakable } from "@firstlight/shared";
 import type { BodyId } from "@firstlight/shared";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
@@ -512,5 +516,59 @@ describe("sprinting over real terrain like the client (F12 Codex re-review S1)",
       expect(r.corrections).toBe(0);
     });
   }
+});
+
+describe("mounted limits go through the limits argument (F12 re-review nit)", () => {
+  // A flat test world: radius 1000, ground at 0, no water, no props.
+  const flat: MoveWorld = { radius: 1000, waterLevel: -100, groundAt: () => 0 };
+  function rider(now: number, mounted: boolean, graceUntil = 0): PlayerActor {
+    const pos = { x: 0, y: 0, z: 1000 };
+    return { ...motionFields(1000, now), lastX: 0, lastY: 0, lastZ: 1000, state: pos, mounted, mountGraceUntil: graceUntil } as unknown as PlayerActor;
+  }
+  /** A step of `metres` along +x on the flat world, from the actor's last position. */
+  function step(a: PlayerActor, metres: number, anim = 3) {
+    const x = a.lastX + metres;
+    const l = Math.hypot(x, 0, 1000);
+    return { x: (x / l) * 1000, y: 0, z: (1000 / l) * 1000, anim };
+  }
+
+  it("riding banks HORSE.budgetCap (5 m), walking 3.5 m", () => {
+    const now = 1_000_000;
+    const banked = (mounted: boolean) => {
+      const a = rider(now, mounted);
+      a.moveBudget = 100; // more than any bank: the refill clamps it to the cap
+      a.lastBudgetAt = now;
+      return a;
+    };
+    let a = banked(true);
+    expect(validateMove(a, step(a, HORSE.budgetCap + 0.2), flat, moveLimits(a, now), now).ok).toBe(false);
+    a = banked(true);
+    expect(validateMove(a, step(a, HORSE.budgetCap - 0.1), flat, moveLimits(a, now), now).ok).toBe(true);
+    a = banked(false);
+    expect(validateMove(a, step(a, MOVE.budgetCap + 0.2), flat, moveLimits(a, now), now).ok).toBe(false);
+    a = banked(false);
+    expect(validateMove(a, step(a, MOVE.budgetCap - 0.1), flat, moveLimits(a, now), now).ok).toBe(true);
+  });
+
+  it("the mounted budget lasts HORSE.dismountGraceMs (600 ms) after getting off, then walking limits apply", () => {
+    const now = 1_000_000;
+    const off = rider(now, false, now + HORSE.dismountGraceMs);
+    expect(HORSE.dismountGraceMs).toBe(600);
+    expect(moveLimits(off, now + 599).ride).toBeGreaterThan(0);
+    expect(moveLimits(off, now + 601).ride).toBeUndefined();
+    expect(moveLimits(rider(now, true), now).ride).toBe(HORSE.sprint);
+  });
+
+  it("no dodge burst from the saddle", () => {
+    const now = 1_000_000;
+    const horse = rider(now - 5000, true);
+    horse.moveBudget = 0;
+    horse.lastBudgetAt = now - 10; // almost nothing refilled
+    expect(validateMove(horse, step(horse, 3, ANIM.DODGE), flat, moveLimits(horse, now), now).ok).toBe(false);
+    const foot = rider(now - 5000, false);
+    foot.moveBudget = 0;
+    foot.lastBudgetAt = now - 10;
+    expect(validateMove(foot, step(foot, 3, ANIM.DODGE), flat, moveLimits(foot, now), now).ok).toBe(true);
+  });
 });
 
