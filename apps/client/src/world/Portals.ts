@@ -32,6 +32,8 @@ export class Portals {
   readonly group = new THREE.Group();
   readonly portals: Portal[] = [];
   private readonly spinners: THREE.Object3D[] = [];
+  /** Objects culled by distance from the player (far side of the planet isn't streamed). */
+  private readonly cullables: { obj: THREE.Object3D; at: THREE.Vector3 }[] = [];
   private t = 0;
 
   constructor(scene: THREE.Scene, body: BodyId, terrain: Terrain) {
@@ -64,12 +66,14 @@ export class Portals {
       const right = new THREE.Vector3().crossVectors(f, up).normalize();
       g.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, f));
       this.group.add(g);
+      this.cullables.push({ obj: g, at: dir.clone().multiplyScalar(R + h) });
       this.spinners.push(disc);
       const center = dir.clone().multiplyScalar(R + h).addScaledVector(up, 2.6);
       this.portals.push({ to, center, normal: f });
       const label = makeLabel(BODIES[to].name.toUpperCase(), color);
       label.position.copy(center).addScaledVector(up, 3.2);
       this.group.add(label);
+      this.cullables.push({ obj: label, at: center.clone() });
     };
 
     if (def.terrain.kind === "hub") {
@@ -104,6 +108,8 @@ export class Portals {
         bh.add(beam);
         place(bh, dir, h);
         this.group.add(pad, holder, bh);
+        const at = dir.clone().multiplyScalar(R + h);
+        for (const o of [pad, holder, bh]) this.cullables.push({ obj: o, at });
         if (i === 0) {
           const { fwd } = frame(dir);
           const pdir = dir.clone().addScaledVector(fwd, 8.5 / R).normalize();
@@ -124,9 +130,10 @@ export class Portals {
     return null;
   }
 
-  update(dt: number) {
+  update(dt: number, playerPos?: THREE.Vector3, maxDistance = 450) {
     this.t += dt;
     for (const s of this.spinners) s.rotation.z = this.t * 0.6;
+    if (playerPos) for (const c of this.cullables) c.obj.visible = c.at.distanceTo(playerPos) < maxDistance;
   }
 
   dispose() {

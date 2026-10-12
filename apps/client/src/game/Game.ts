@@ -16,6 +16,7 @@ import { PilesView } from "../world/PilesView.ts";
 import { Planet } from "../world/Planet.ts";
 import { Portals } from "../world/Portals.ts";
 import { CombatClient } from "./CombatClient.ts";
+import { GameAudio } from "../audio/Audio.ts";
 import { Input } from "./input.ts";
 import { PlayerController } from "./PlayerController.ts";
 import { CLIENT_SYSTEMS, type ClientSystem } from "./systems.ts";
@@ -41,6 +42,7 @@ export class Game {
   self!: AvatarView;
   perf!: PerfOverlay;
   combat!: CombatClient;
+  audio!: GameAudio;
   hud!: Hud;
   menu!: Menu;
   portals: Portals | null = null;
@@ -57,6 +59,10 @@ export class Game {
     const container = document.getElementById("game")!;
     this.ctx = await createRenderer(container);
     this.input = new Input(this.ctx.renderer.domElement);
+    this.audio = new GameAudio();
+    this.audio.resume();
+    this.ctx.renderer.domElement.addEventListener("mousedown", () => this.audio.resume());
+    window.addEventListener("keydown", () => this.audio.resume(), { once: true });
     this.perf = new PerfOverlay(this.ctx);
     this.combat = new CombatClient(this);
     this.hud = this.combat.hud;
@@ -82,6 +88,7 @@ export class Game {
   async travel(body: BodyId) {
     if (this.travelling) return;
     this.travelling = true;
+    this.audio.play("portal");
     try {
       await this.enterBody(body);
     } finally {
@@ -120,6 +127,7 @@ export class Game {
     this.player ??= new PlayerController(this.planet.terrain, this.planet.body.waterLevel);
     this.player.setTerrain(this.planet.terrain, this.planet.body.waterLevel);
     this.portals = new Portals(this.ctx.scene, body, this.planet.terrain);
+    this.audio.setMusic(body);
     this.piles = new PilesView(this.ctx.scene);
 
     setLoading("Connecting…", 0.3);
@@ -199,7 +207,7 @@ export class Game {
     }
 
     this.planet.update(p.x, p.y, p.z, this.ctx.camera, now);
-    this.portals?.update(dt);
+    this.portals?.update(dt, p, this.planet.loadRadius * 0.9);
     this.piles?.update(state, dt);
     this.combat.update(dt, now);
     for (const s of this.systems) s.update(dt, now);
@@ -208,6 +216,7 @@ export class Game {
       if (to && to !== this.bodyId) void this.travel(to);
     }
     this.player.placeCamera(this.ctx.camera);
+    this.audio.updateListener(this.ctx.camera);
     if (this.input.pressed.has("F3")) this.perf.toggle();
     this.ctx.render();
     this.perf.frame(now, dt);

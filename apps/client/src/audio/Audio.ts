@@ -1,0 +1,298 @@
+// Game audio: one AudioContext, master/music/SFX/voice buses, positional SFX generated with ZzFX
+// (MIT; no sample files), and a generative ambient soundtrack per body. All original.
+
+import * as THREE from "three/webgpu";
+import { ZZFX } from "zzfx";
+import { WEAPONS } from "@firstlight/shared/content/weapons";
+import type { BodyId } from "@firstlight/shared";
+
+type Preset = (number | undefined)[];
+
+// ZzFX parameter order: volume, randomness, frequency, attack, sustain, release, shape, shapeCurve,
+// slide, deltaSlide, pitchJump, pitchJumpTime, repeatTime, noise, modulation, bitCrush, delay,
+// sustainVolume, decay, tremolo, filter.
+const P: Record<string, Preset> = {
+  carbine: [1.1, 0.05, 420, 0.005, 0.02, 0.08, 4, 1.6, -6, , , , , 0.8, , , , 0.6, 0.03],
+  scatterpipe: [1.7, 0.05, 120, 0.005, 0.05, 0.25, 4, 1.9, , , , , , 1.5, , 0.4, , 0.5, 0.08],
+  stillshot: [1.9, 0.02, 300, 0.005, 0.06, 0.45, 4, 2.4, -4, , , , , 1, , 0.2, 0.05, 0.6, 0.1],
+  hexquill: [0.9, 0.05, 820, 0.02, 0.04, 0.15, 1, 1.5, 12, , 200, 0.05, , , , , , 0.7, 0.05],
+  emberglass: [1.2, 0.05, 200, 0.05, 0.1, 0.3, 3, 2, -2, , , , , 0.6, , 0.2, , 0.7, 0.1],
+  stormcoil: [1.3, 0.05, 1200, 0.01, 0.08, 0.2, 3, 2.5, , , , , 0.02, 2, 30, 0.1, , 0.5, 0.05],
+  longbow: [0.9, 0.05, 520, 0.01, 0.01, 0.12, 2, 1.2, -20, , , , , , , , , 0.8],
+  comet: [1.5, 0.05, 90, 0.04, 0.2, 0.4, 3, 1.5, 2, , , , , 0.8, , 0.2, , 0.7, 0.2],
+  grenade: [0.8, 0.05, 300, 0.01, 0.02, 0.1, 3, 1.5, -10],
+  explosion: [2.6, 0.1, 60, 0.02, 0.2, 0.9, 4, 2.5, -1, , , , , 1.5, , 0.6, 0.2, 0.4, 0.4],
+  swing: [0.7, 0.1, 300, 0.01, 0.02, 0.1, 3, 1.5, -30, , , , , , , , , 0.5],
+  meleeHit: [1.3, 0.05, 150, 0.005, 0.03, 0.15, 4, 2.5, -10, , , , , 1, , 0.3, , 0.6],
+  impact: [0.6, 0.1, 200, 0.005, 0.01, 0.08, 4, 2, -5, , , , , 1.2],
+  hitmark: [0.5, 0, 1600, , 0.01, 0.04, 1, 2, , , , , , , , , , 0.5],
+  hurt: [1, 0.05, 220, 0.01, 0.05, 0.2, 2, 2, -6, , , , , 0.5, , , , 0.7],
+  coins: [0.8, 0, 1200, 0.01, 0.05, 0.2, 1, 1.5, , , 400, 0.05],
+  levelUp: [1.1, 0, 500, 0.05, 0.2, 0.4, 1, 1, , , 300, 0.1, 0.1],
+  death: [1.4, 0, 300, 0.05, 0.3, 0.8, 2, 1, -2, , , , , , , , , 0.5, 0.2],
+  portal: [0.9, 0, 200, 0.4, 0.3, 0.6, 1, 0, 8, , , , , , , , , 0.6],
+  ui: [0.4, 0, 900, , 0.01, 0.03, 1, 1.5],
+  denied: [0.5, 0, 160, , 0.04, 0.08, 2, 1],
+};
+
+export interface Volumes {
+  master: number;
+  music: number;
+  sfx: number;
+  voice: number;
+}
+
+const DEFAULT_VOLUMES: Volumes = { master: 0.8, music: 0.35, sfx: 0.8, voice: 1 };
+
+export class GameAudio {
+  readonly ctx: AudioContext;
+  readonly master: GainNode;
+  readonly music: GainNode;
+  readonly sfx: GainNode;
+  readonly voice: GainNode;
+  private readonly buffers = new Map<string, AudioBuffer>();
+  private musicGen: MusicGen | null = null;
+  volumes: Volumes;
+
+  constructor() {
+    this.ctx = new AudioContext();
+    this.master = this.ctx.createGain();
+    this.music = this.ctx.createGain();
+    this.sfx = this.ctx.createGain();
+    this.voice = this.ctx.createGain();
+    this.music.connect(this.master);
+    this.sfx.connect(this.master);
+    this.voice.connect(this.master);
+    this.master.connect(this.ctx.destination);
+    const saved = localStorage.getItem("fl.volumes");
+    this.volumes = { ...DEFAULT_VOLUMES, ...(saved ? (JSON.parse(saved) as Partial<Volumes>) : {}) };
+    this.applyVolumes();
+  }
+
+  applyVolumes() {
+    this.master.gain.value = this.volumes.master;
+    this.music.gain.value = this.volumes.music;
+    this.sfx.gain.value = this.volumes.sfx;
+    this.voice.gain.value = this.volumes.voice;
+    localStorage.setItem("fl.volumes", JSON.stringify(this.volumes));
+  }
+
+  /** Must be called inside a user gesture at least once. */
+  resume() {
+    if (this.ctx.state !== "running") void this.ctx.resume();
+  }
+
+  private buffer(name: string): AudioBuffer | null {
+    let b = this.buffers.get(name);
+    if (b) return b;
+    const preset = P[name];
+    if (!preset) return null;
+    const samples = (ZZFX.buildSamples as (...p: (number | undefined)[]) => number[])(...preset);
+    b = this.ctx.createBuffer(1, samples.length, ZZFX.sampleRate);
+    b.getChannelData(0).set(samples);
+    this.buffers.set(name, b);
+    return b;
+  }
+
+  /** Play a sound, positional if `at` is given. */
+  play(name: string, at?: THREE.Vector3 | null, gain = 1, rate = 1) {
+    if (this.ctx.state !== "running") return;
+    const b = this.buffer(name);
+    if (!b) return;
+    const src = this.ctx.createBufferSource();
+    src.buffer = b;
+    src.playbackRate.value = rate * (0.94 + Math.random() * 0.12);
+    const g = this.ctx.createGain();
+    g.gain.value = gain;
+    if (at) {
+      const p = this.ctx.createPanner();
+      p.panningModel = "equalpower";
+      p.distanceModel = "inverse";
+      p.refDistance = 4;
+      p.maxDistance = 160;
+      p.rolloffFactor = 1.2;
+      p.positionX.value = at.x;
+      p.positionY.value = at.y;
+      p.positionZ.value = at.z;
+      src.connect(g).connect(p).connect(this.sfx);
+    } else {
+      src.connect(g).connect(this.sfx);
+    }
+    src.start();
+  }
+
+  weaponSound(weaponIndex: number): string {
+    const id = WEAPONS[weaponIndex]?.id ?? "fists";
+    return P[id] ? id : "swing";
+  }
+
+  /** Listener follows the camera. */
+  updateListener(camera: THREE.Camera) {
+    const l = this.ctx.listener;
+    const pos = camera.getWorldPosition(new THREE.Vector3());
+    const fwd = camera.getWorldDirection(new THREE.Vector3());
+    const up = camera.up;
+    if (l.positionX) {
+      const t = this.ctx.currentTime;
+      l.positionX.setTargetAtTime(pos.x, t, 0.02);
+      l.positionY.setTargetAtTime(pos.y, t, 0.02);
+      l.positionZ.setTargetAtTime(pos.z, t, 0.02);
+      l.forwardX.setTargetAtTime(fwd.x, t, 0.02);
+      l.forwardY.setTargetAtTime(fwd.y, t, 0.02);
+      l.forwardZ.setTargetAtTime(fwd.z, t, 0.02);
+      l.upX.setTargetAtTime(up.x, t, 0.02);
+      l.upY.setTargetAtTime(up.y, t, 0.02);
+      l.upZ.setTargetAtTime(up.z, t, 0.02);
+    }
+  }
+
+  setMusic(body: BodyId | null) {
+    this.musicGen?.stop();
+    this.musicGen = body ? new MusicGen(this.ctx, this.music, body) : null;
+    this.musicGen?.start();
+  }
+}
+
+// ---------------------------------------------------------------- generative ambient soundtrack
+
+interface Mood {
+  bpm: number;
+  root: number; // MIDI note
+  scale: number[]; // semitone offsets
+  chords: number[][]; // degrees (indexes into scale) per chord
+  padCutoff: number;
+  arpWave: OscillatorType;
+  arpDensity: number; // 0..1 chance per 8th note
+  kick: boolean;
+}
+
+const MOODS: Record<BodyId, Mood> = {
+  portus: { bpm: 84, root: 57, scale: [0, 2, 4, 7, 9, 12, 14, 16], chords: [[0, 2, 4], [3, 5, 7], [1, 3, 5], [0, 3, 4]], padCutoff: 1400, arpWave: "triangle", arpDensity: 0.55, kick: false },
+  arcadia: { bpm: 96, root: 62, scale: [0, 2, 4, 7, 9, 12, 14, 16, 19], chords: [[0, 2, 4], [4, 6, 8], [3, 5, 7], [1, 3, 5]], padCutoff: 1800, arpWave: "square", arpDensity: 0.7, kick: false },
+  hollowmere: { bpm: 64, root: 50, scale: [0, 2, 3, 7, 8, 12, 14, 15], chords: [[0, 2, 3], [4, 5, 7], [2, 4, 5], [0, 3, 4]], padCutoff: 700, arpWave: "sine", arpDensity: 0.3, kick: false },
+  meridian: { bpm: 108, root: 52, scale: [0, 3, 5, 7, 10, 12, 15, 17], chords: [[0, 2, 3], [1, 3, 4], [2, 4, 5], [0, 3, 5]], padCutoff: 1100, arpWave: "sawtooth", arpDensity: 0.6, kick: true },
+};
+
+const midiHz = (m: number) => 440 * Math.pow(2, (m - 69) / 12);
+
+class MusicGen {
+  private timer = 0;
+  private nextTime = 0;
+  private step = 0;
+  private readonly mood: Mood;
+  private readonly out: GainNode;
+
+  constructor(private readonly ctx: AudioContext, dest: AudioNode, body: BodyId) {
+    this.mood = MOODS[body];
+    this.out = ctx.createGain();
+    this.out.gain.value = 0;
+    this.out.connect(dest);
+  }
+
+  start() {
+    this.nextTime = this.ctx.currentTime + 0.1;
+    this.out.gain.setTargetAtTime(0.9, this.ctx.currentTime, 2);
+    this.timer = window.setInterval(() => this.schedule(), 50);
+  }
+
+  stop() {
+    clearInterval(this.timer);
+    const t = this.ctx.currentTime;
+    this.out.gain.setTargetAtTime(0, t, 0.6);
+    setTimeout(() => this.out.disconnect(), 3000);
+  }
+
+  private schedule() {
+    const eighth = 60 / this.mood.bpm / 2;
+    while (this.nextTime < this.ctx.currentTime + 0.25) {
+      this.playStep(this.step, this.nextTime, eighth);
+      this.step++;
+      this.nextTime += eighth;
+    }
+  }
+
+  private note(deg: number, octave = 0): number {
+    const s = this.mood.scale;
+    const n = s[((deg % s.length) + s.length) % s.length]! + 12 * (Math.floor(deg / s.length) + octave);
+    return this.mood.root + n;
+  }
+
+  private playStep(step: number, t: number, eighth: number) {
+    const m = this.mood;
+    const bar = Math.floor(step / 8);
+    const chord = m.chords[Math.floor(bar / 2) % m.chords.length]!;
+    if (step % 16 === 0) for (const d of chord) this.pad(midiHz(this.note(d, -1)), t, eighth * 16);
+    if (step % 8 === 0) this.bass(midiHz(this.note(chord[0]!, -2)), t, eighth * 6);
+    if (m.kick && step % 4 === 0) this.kick(t);
+    if (Math.random() < m.arpDensity) {
+      const d = chord[step % chord.length]! + (step % 6 === 5 ? 2 : 0);
+      this.pluck(midiHz(this.note(d, step % 16 < 8 ? 1 : 0)), t, eighth * 0.9);
+    }
+  }
+
+  private pad(freq: number, t: number, dur: number) {
+    const c = this.ctx;
+    const g = c.createGain();
+    const f = c.createBiquadFilter();
+    f.type = "lowpass";
+    f.frequency.value = this.mood.padCutoff;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.045, t + dur * 0.3);
+    g.gain.linearRampToValueAtTime(0, t + dur);
+    for (const det of [-7, 7]) {
+      const o = c.createOscillator();
+      o.type = "sawtooth";
+      o.frequency.value = freq;
+      o.detune.value = det;
+      o.connect(f);
+      o.start(t);
+      o.stop(t + dur + 0.05);
+    }
+    f.connect(g).connect(this.out);
+  }
+
+  private bass(freq: number, t: number, dur: number) {
+    const c = this.ctx;
+    const o = c.createOscillator();
+    const g = c.createGain();
+    o.type = "sine";
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.09, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(this.out);
+    o.start(t);
+    o.stop(t + dur + 0.05);
+  }
+
+  private pluck(freq: number, t: number, dur: number) {
+    const c = this.ctx;
+    const o = c.createOscillator();
+    const g = c.createGain();
+    const f = c.createBiquadFilter();
+    o.type = this.mood.arpWave;
+    o.frequency.value = freq;
+    f.type = "lowpass";
+    f.frequency.setValueAtTime(3000, t);
+    f.frequency.exponentialRampToValueAtTime(400, t + dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.03, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(f).connect(g).connect(this.out);
+    o.start(t);
+    o.stop(t + dur + 0.05);
+  }
+
+  private kick(t: number) {
+    const c = this.ctx;
+    const o = c.createOscillator();
+    const g = c.createGain();
+    o.frequency.setValueAtTime(120, t);
+    o.frequency.exponentialRampToValueAtTime(40, t + 0.15);
+    g.gain.setValueAtTime(0.12, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
+    o.connect(g).connect(this.out);
+    o.start(t);
+    o.stop(t + 0.3);
+  }
+}
