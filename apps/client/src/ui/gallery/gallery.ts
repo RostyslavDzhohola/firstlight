@@ -295,7 +295,7 @@ async function run() {
         hotbar: [{ id: "carbine", tier: 2, qty: 1, mag: 21 }, { id: "stormcoil", tier: 3, qty: 1 }, null, { id: "tonic_small", tier: 1, qty: 4 }],
         backpack: [
           { id: "patchkit", tier: 1, qty: 2 }, { id: "wool_tuft", tier: 1, qty: 7 }, { id: "fox_mask", tier: 1, qty: 1 }, { id: "sunbrand", tier: 2, qty: 1 },
-          { id: "radio", tier: 1, qty: 1 }, { id: "riverstaff", tier: 2, qty: 1, skin: "ferrymans_oar" }, { id: "travellers_cloak", tier: 1, qty: 1 }, null,
+          { id: "radio", tier: 1, qty: 1 }, { id: "riverstaff", tier: 2, qty: 1, skin: "ferrymans_oar" }, { id: "travellers_cloak", tier: 1, qty: 1 }, { id: "bubble", tier: 1, qty: 1 },
           ...Array(8).fill(null),
         ],
         worn: { cape: "travellers_cloak" },

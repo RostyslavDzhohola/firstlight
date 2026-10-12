@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { InvItem } from "@firstlight/shared/net/protocol";
-import { InvCursor, invSlots, itemDetails, quickAction, type InvState } from "./inventoryModel.ts";
+import { InvCursor, invSlots, itemActions, itemDetails, quickAction, type InvState } from "./inventoryModel.ts";
 
 const it1 = (id: string, qty = 1, tier: 1 | 2 | 3 = 1, extra: Partial<InvItem> = {}): InvItem => ({ id, tier, qty, ...extra });
 
@@ -80,6 +80,21 @@ describe("quick action (right-click / E)", () => {
 
   it("puts a hotbar weapon away in the backpack", () => {
     expect(quickAction(state(), 1)).toMatchObject({ kind: "unequip", actions: [{ type: "move", from: 1, to: 9 }] });
+  });
+
+  it("support items and tonics can also be equipped or put away (Use doesn't hide Equip)", () => {
+    const s = state({ backpack: [it1("bubble"), it1("patchkit", 2), ...Array(14).fill(null)] });
+    expect(itemActions(s, 4).map((a) => a.kind)).toEqual(["use", "equip"]);
+    expect(itemActions(s, 4)[1]).toMatchObject({ label: "Equip", actions: [{ type: "move", from: 4, to: 2 }, { type: "equip", slot: 2 }] });
+    expect(itemActions(s, 5).map((a) => a.kind)).toEqual(["use", "equip"]);
+    expect(itemActions(state(), 3).map((a) => a.kind)).toEqual(["use", "unequip"]); // tonic in the hotbar
+    expect(itemActions(state(), 7).map((a) => a.kind)).toEqual(["equip"]);
+    expect(itemActions(state(), 5)).toEqual([]);
+  });
+
+  it("use from the backpack sends the inventory slot index (4–19) and no target (self)", () => {
+    const s = state({ backpack: [null, null, null, null, null, it1("bubble"), ...Array(10).fill(null)] });
+    expect(quickAction(s, 9)!.actions).toEqual([{ type: "use", slot: 9 }]);
   });
 
   it("wears and takes off cosmetics; loot and the radio have none", () => {

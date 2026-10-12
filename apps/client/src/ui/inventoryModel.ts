@@ -237,18 +237,8 @@ function firstEmpty(s: InvState, from: number, to: number): number {
   return -1;
 }
 
-/** The one-press action for a slot: use a consumable, equip/put away a weapon, wear a cosmetic. */
-export function quickAction(s: InvState, slot: number): QuickAction | null {
-  const item = itemAt(s, slot);
-  if (!item) return null;
-  const def = WEAPON_BY_ID.get(item.id);
-  if (def && (def.delivery === "heal" || def.delivery === "bubble")) return { kind: "use", label: def.cls === "item" ? "Drink" : "Use", actions: [{ type: "use", slot }] };
-  const cos = COSMETIC_BY_ID.get(item.id);
-  if (cos) {
-    if (s.worn?.[cos.slot] === cos.id) return { kind: "takeoff", label: "Take off", actions: [{ type: "takeoff", cosmeticSlot: cos.slot }] };
-    return { kind: "wear", label: "Wear", actions: [{ type: "wear", slot }] };
-  }
-  if (!prefersHotbar(item)) return null;
+/** Move between hotbar and backpack: equip a backpack item (and take it in hand) or put a hotbar item away. */
+function placeAction(s: InvState, slot: number): QuickAction | null {
   if (isHotbarSlot(slot)) {
     const to = firstEmpty(s, HOTBAR_SLOTS, HOTBAR_SLOTS + BACKPACK_SLOTS);
     return to < 0 ? null : { kind: "unequip", label: "Put away", actions: [{ type: "move", from: slot, to }] };
@@ -256,6 +246,34 @@ export function quickAction(s: InvState, slot: number): QuickAction | null {
   const empty = firstEmpty(s, 0, HOTBAR_SLOTS);
   const to = empty >= 0 ? empty : s.selected;
   return { kind: "equip", label: "Equip", actions: [{ type: "move", from: slot, to }, { type: "equip", slot: to }] };
+}
+
+/**
+ * Everything you can do with a slot, the one-press action (right-click / E) first: use a tonic,
+ * Patchkit or Prism Bubble (`use` with the slot index, 4–19 in the backpack, no target = yourself),
+ * then equip it or put it away; equip/put away a weapon; wear or take off a cosmetic. Loot and the
+ * radio have none.
+ */
+export function itemActions(s: InvState, slot: number): QuickAction[] {
+  const item = itemAt(s, slot);
+  if (!item) return [];
+  const cos = COSMETIC_BY_ID.get(item.id);
+  if (cos) {
+    if (s.worn?.[cos.slot] === cos.id) return [{ kind: "takeoff", label: "Take off", actions: [{ type: "takeoff", cosmeticSlot: cos.slot }] }];
+    return [{ kind: "wear", label: "Wear", actions: [{ type: "wear", slot }] }];
+  }
+  if (!prefersHotbar(item)) return [];
+  const out: QuickAction[] = [];
+  const def = WEAPON_BY_ID.get(item.id);
+  if (def && (def.delivery === "heal" || def.delivery === "bubble")) out.push({ kind: "use", label: def.cls === "item" ? "Drink" : "Use", actions: [{ type: "use", slot }] });
+  const place = placeAction(s, slot);
+  if (place) out.push(place);
+  return out;
+}
+
+/** The one-press action for a slot (right-click / E). */
+export function quickAction(s: InvState, slot: number): QuickAction | null {
+  return itemActions(s, slot)[0] ?? null;
 }
 
 // ------------------------------------------------------------------------------------------------ cursor

@@ -11,7 +11,7 @@ import { slotItem } from "@firstlight/shared/content/inventory";
 import { RARITY_STYLE } from "@firstlight/shared/content/items";
 import type { Game } from "../game/Game.ts";
 import { button, el, icon, sprite } from "./dom.ts";
-import { InvCursor, invSlots, itemDetails, quickAction, type InvAction, type InvSlot, type InvState } from "./inventoryModel.ts";
+import { InvCursor, invSlots, itemActions, itemDetails, quickAction, type InvAction, type InvSlot, type InvState } from "./inventoryModel.ts";
 import { Panel } from "./panels.ts";
 
 const DRAG_START_PX = 5;
@@ -355,8 +355,9 @@ export class InventoryPanel extends Panel {
     const held = this.cursor.held;
     const slot = held ?? this.cursor.focus;
     const item = slotItem(s, slot);
-    const qa = item ? quickAction(s, slot) : null;
-    const key = `${slot}|${held}|${JSON.stringify(item)}|${qa?.label ?? ""}|${this.dragFrom}`;
+    const acts = itemActions(s, slot);
+    const qa = acts[0] ?? null;
+    const key = `${slot}|${held}|${JSON.stringify(item)}|${acts.map((x) => x.label).join(",")}|${this.dragFrom}`;
     if (key === this.actsKey) return;
     this.actsKey = key;
     const a = this.actsEl;
@@ -376,13 +377,14 @@ export class InventoryPanel extends Panel {
     el("p", "", a, "Click a slot to put it there, or the drop zone to leave it on the ground.");
     const btn = (label: string, k: string, cls: string, fn: () => void) => {
       const b = button(label, `fl-btn fl-btn--sm fl-btn--block${cls}`, a, fn);
-      el("span", "fl-key", b, k);
+      if (k) el("span", "fl-key", b, k);
     };
-    if (qa)
-      btn(qa.label, "E", "", () => {
+    acts.forEach((x, n) =>
+      btn(x.label, n === 0 ? "E" : x.kind === "equip" ? "1–4" : "", n === 0 ? "" : " fl-btn--ghost", () => {
         this.cursor.cancel();
-        this.send(qa.actions);
-      });
+        this.send(x.actions);
+      }),
+    );
     btn("Drop", "X", " fl-btn--danger", () => this.send(this.cursor.dropHeld()));
     btn("Cancel", "Esc", " fl-btn--ghost", () => {
       this.cursor.cancel();
