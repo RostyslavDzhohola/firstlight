@@ -41,9 +41,12 @@ function collidersFor(list: Breakable[], solid: (i: number) => boolean = () => t
   return { resolve: (p, out) => c.resolve(p, solid, out) };
 }
 
-/** Run the controller at 60 Hz. */
-function run(pc: PlayerController, input: Input, seconds: number) {
-  for (let t = 0; t < seconds; t += 1 / 60) pc.update(1 / 60, input, false);
+/** Run the controller at `fps` (60 by default), calling `each` after every frame. */
+function run(pc: PlayerController, input: Input, seconds: number, fps = 60, each?: () => void) {
+  for (let t = 0; t < seconds - 1e-9; t += 1 / fps) {
+    pc.update(1 / fps, input, false);
+    each?.();
+  }
 }
 
 function spawn(): PlayerController {
@@ -114,5 +117,50 @@ describe("PlayerController", () => {
     pc.setColliders(collidersFor([crate(0, 0.1, 0)]));
     run(pc, fakeInput(), 0.1);
     expect(Math.abs(pc.pos.z - 0.1)).toBeGreaterThan(0.5 + PLAYER_BODY.radius - 0.01);
+  });
+
+  describe("at low frame rates (no tunnelling)", () => {
+    const fence = () => crate(0, 0, 0, 1.0, 0.09, 1.1); // the shared 2 × 0.18 × 1.1 m fence collider
+
+    for (const fps of [20, 30]) {
+      it(`a dodge at ${fps} fps doesn't cross a fence it starts against`, () => {
+        const pc = spawn();
+        pc.setColliders(collidersFor([fence()]));
+        pc.teleport(0, R, -0.09 - PLAYER_BODY.radius - 0.001);
+        run(pc, fakeInput(), 0.1, fps);
+        const input = fakeInput(["KeyW"]);
+        input.pressed.add("KeyC");
+        let maxZ = -Infinity;
+        run(pc, input, 0.5, fps, () => {
+          input.pressed.clear();
+          maxZ = Math.max(maxZ, pc.pos.z);
+        });
+        expect(maxZ).toBeLessThan(-0.09 - PLAYER_BODY.radius + 0.01);
+      });
+    }
+
+    it("a 20 m/s fall onto a crate top at 20 fps lands on it instead of being shoved off", () => {
+      const pc = spawn();
+      pc.setColliders(collidersFor([crate(0, 0, 0)]));
+      pc.teleport(0.1, R + 1.1, 0.05);
+      pc.vel.set(0, -20, 0);
+      pc.onGround = false;
+      run(pc, fakeInput(), 0.05, 20);
+      expect(pc.pos.length()).toBeCloseTo(R + 1, 3);
+      expect(pc.onGround).toBe(true);
+      expect(pc.pos.x).toBeCloseTo(0.1, 3); // not shoved (that would be ≥ 0.1 m); sub-mm from the radial snap
+      expect(pc.pos.z).toBeCloseTo(0.05, 3);
+    });
+
+    it("a galloping horse (16 m/s) at 20 fps stops at a fence", () => {
+      const pc = spawn();
+      pc.setColliders(collidersFor([fence()]));
+      pc.teleport(0, R, -14);
+      pc.mounted = true;
+      let maxZ = -Infinity;
+      run(pc, fakeInput(["KeyW", "ShiftLeft"]), 3, 20, () => (maxZ = Math.max(maxZ, pc.pos.z)));
+      expect(maxZ).toBeLessThan(-0.09 - PLAYER_BODY.radius + 0.01);
+      expect(pc.pos.z).toBeCloseTo(-0.09 - PLAYER_BODY.radius, 2);
+    });
   });
 });

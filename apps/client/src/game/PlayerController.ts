@@ -38,6 +38,11 @@ export const MOVE = {
   noSprint: false,
 };
 
+/** Collision substep limits (m): sideways under half a fence's blocking depth, vertically under a top's landing band. */
+const SUBSTEP_H = 0.25;
+const SUBSTEP_V = 0.25;
+const MAX_SUBSTEPS = 16;
+
 const _up = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _wish = new THREE.Vector3();
@@ -179,24 +184,39 @@ export class PlayerController {
       }
     }
     this.vel.copy(vH).addScaledVector(up, vUpNew);
-    this.pos.addScaledVector(this.vel, dt);
 
     // Props: shoved out sideways (and the motion into them dropped, so we slide along), or a floor.
+    // The move is split into substeps short enough that a dodge, a gallop or a low frame rate can't
+    // carry the body across a thin prop (a fence blocks 0.47 m either side of its middle), and a
+    // fast fall can't skip a top's 0.4 m landing band.
     let floorR = 0;
-    if (this.colliders) {
+    if (!this.colliders) this.pos.addScaledVector(this.vel, dt);
+    else {
       const c = this.contact;
-      this.colliders.resolve(this.pos, c);
-      if (c.pushed) {
-        const n = _dir.set(c.nx, c.ny, c.nz);
-        const into = this.vel.dot(n);
-        if (into < 0) this.vel.addScaledVector(n, -into);
-        const intoH = vH.dot(n);
-        if (intoH < 0) vH.addScaledVector(n, -intoH);
-        const intoDodge = this.dodgeDir.dot(n);
-        if (this.dodgeT > 0 && intoDodge < 0) this.dodgeDir.addScaledVector(n, -intoDodge);
+      const steps = Math.min(MAX_SUBSTEPS, Math.max(1, Math.ceil(Math.max((vH.length() * dt) / SUBSTEP_H, (Math.abs(vUpNew) * dt) / SUBSTEP_V))));
+      const h = dt / steps;
+      for (let k = 0; k < steps; k++) {
+        this.pos.addScaledVector(this.vel, h);
+        this.colliders.resolve(this.pos, c);
+        if (c.pushed) {
+          const n = _dir.set(c.nx, c.ny, c.nz);
+          const into = this.vel.dot(n);
+          if (into < 0) this.vel.addScaledVector(n, -into);
+          const intoH = vH.dot(n);
+          if (intoH < 0) vH.addScaledVector(n, -intoH);
+          const intoDodge = this.dodgeDir.dot(n);
+          if (this.dodgeT > 0 && intoDodge < 0) this.dodgeDir.addScaledVector(n, -intoDodge);
+        }
+        // A prop top only catches a player who isn't rising (a jump past an edge keeps going up).
+        const su = _newUp.copy(this.pos).normalize();
+        floorR = c.floor > 0 && this.vel.dot(su) <= 0.5 ? c.floor : 0;
+        if (floorR > 0 && this.pos.length() < floorR) {
+          // Landed mid-frame: stand on the top for the rest of it.
+          this.pos.copy(su).multiplyScalar(floorR);
+          const vu = this.vel.dot(su);
+          if (vu < 0) this.vel.addScaledVector(su, -vu);
+        }
       }
-      // A prop top only catches a player who isn't rising (a jump past an edge keeps going up).
-      if (c.floor > 0 && this.vel.dot(up) <= 0.5) floorR = c.floor;
     }
 
     // Ground (terrain or a prop top) and water.
