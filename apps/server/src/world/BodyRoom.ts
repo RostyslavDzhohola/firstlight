@@ -6,6 +6,7 @@ import { CloseCode, Room, ServerError, type Client } from "@colyseus/core";
 import { StateView } from "@colyseus/schema";
 import { BODIES, createTerrain, isSafe, padDirs, portalNear, portalSpots, type BodyDef, type BodyId, type PortalSpot, type Terrain } from "@firstlight/shared";
 import { BACKPACK_SLOTS, HOTBAR_SLOTS, newCharacter, type CharacterData } from "@firstlight/shared/content/character";
+import { INV_SLOTS, moveSlot, storeItem } from "@firstlight/shared/content/inventory";
 import { fallDamageFraction, levelForXp, maxHp, pvpKillXp, xpAtLevel, xpToNext } from "@firstlight/shared/content/progression";
 import { WEAPON_BY_ID, WEAPON_INDEX } from "@firstlight/shared/content/weapons";
 import { NET, PHRASES, type InvItem, type YouState } from "@firstlight/shared/net/protocol";
@@ -21,8 +22,9 @@ export const bannedCheck: { current: (userId: string) => boolean } = { current: 
 import { dealDamage, fire, melee, selectedWeapon, stepEffects, stepProjectiles, type CombatHost } from "./combat.ts";
 import { dist3, type V3 } from "./geometry.ts";
 import { emitGameEvent, npcKindOf } from "./events.ts";
-import { emitPileEvent, onPileEvent, pileStore, type PileData } from "./piles.ts";
+import { emitPileEvent, onPileEvent, pileStore, type PileData, type PileKind } from "./piles.ts";
 import { SYSTEM_FACTORIES, type RoomSystem } from "./systems.ts";
+import { supportOf } from "./support.ts";
 import { identityCheck, storageRecovery, ticketFor, travelRedirect } from "./admission.ts";
 import { pendingSeats } from "./reservations.ts";
 import { seatRefusal } from "../social/moderation.ts";
@@ -281,9 +283,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       const a = this.actor(c);
       if (a && !a.dead) this.equip(a, m.slot);
     });
-    this.onMessage("use", slotSchema, (c, m) => {
+    this.onMessage("use", slotSchema.extend({ targetId: z.string().max(64).optional() }), (c, m) => {
       const a = this.actor(c);
-      if (this.invAllowed(a)) this.use(a, m.slot);
+      if (this.invAllowed(a)) this.use(a, m.slot, m.targetId);
     });
     this.onMessage("pickup", pickupSchema, (c, m) => {
       const a = this.actor(c);
@@ -293,7 +295,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       const a = this.actor(c);
       if (this.invAllowed(a)) this.drop(a, m.slot);
     });
-    this.onMessage("move", z.object({ from: z.number().int().min(0).max(19), to: z.number().int().min(0).max(19) }), (c, m) => {
+    this.onMessage("move", z.object({ from: z.number().int().min(0).max(INV_SLOTS - 1), to: z.number().int().min(0).max(INV_SLOTS - 1) }), (c, m) => {
       const a = this.actor(c);
       if (this.invAllowed(a)) this.moveItem(a, m.from, m.to);
     });
@@ -689,7 +691,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     a.youDirty = true;
   }
 
-  use(a: PlayerActor | undefined, slot: number) {
+  use(a: PlayerActor | undefined, slot: number, targetId?: string) {
     if (!a || a.dead) return;
     const item = slot < HOTBAR_SLOTS ? a.char.hotbar[slot] : a.char.backpack[slot - HOTBAR_SLOTS];
     if (!item) return;
@@ -705,13 +707,10 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       if (now < a.tonicCooldownUntil) return;
       a.tonicCooldownUntil = now + 8000;
       const dur = item.id === "tonic_small" ? 3 : 4;
-      a.heals.push({ perSec: (tier.heal ?? 40) / dur, until: now + dur * 1000 });
+      a.heals.push({ perSec: (tier.heal ?? 40) / dur, until: now + dur * 1000, left: tier.heal ?? 40 });
       this.consume(a, slot);
-    } else if (item.id === "patchkit") {
-      if (now < a.healCooldownUntil) return;
-      a.healCooldownUntil = now + (tier.cooldown ?? 6) * 1000;
-      a.heals.push({ perSec: ((tier.heal ?? 0.3) * maxHp(a.char.level)) / 2, until: now + 2000 + (tier.rate ?? 1) * 1000 });
-      this.consume(a, slot);
+    } else if (item.id === "patchkit" || item.id === "bubble") {
+      supportOf(this)?.use(a, slot, item, targetId); // channelled heal / shield bubble (support.ts)
     }
   }
 
@@ -726,41 +725,18 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     a.youDirty = true;
   }
 
-  /** Add an item to the first free (or stackable) slot: hotbar first, then backpack. */
+  /** Add an item (shared/content/inventory.ts storeItem): weapons and consumables to the hotbar first, loot to the backpack first. */
   giveItem(a: PlayerActor, item: InvItem): boolean {
-    const def = WEAPON_BY_ID.get(item.id);
-    const stack = def?.stack ?? 1;
-    for (const list of [a.char.hotbar, a.char.backpack]) {
-      for (const s of list) {
-        if (s && s.id === item.id && s.tier === item.tier && stack > 1 && s.qty + item.qty <= stack) {
-          s.qty += item.qty;
-          a.youDirty = true;
-          return true;
-        }
-      }
-    }
-    for (const list of [a.char.hotbar, a.char.backpack]) {
-      const i = list.findIndex((s) => !s);
-      if (i >= 0) {
-        list[i] = { ...item };
-        if (list === a.char.hotbar && i === a.char.selected) this.equip(a, i);
-        a.youDirty = true;
-        return true;
-      }
-    }
-    return false;
+    const slot = storeItem(a.char, item);
+    if (slot < 0) return false;
+    if (slot === a.char.selected) this.equip(a, slot);
+    a.youDirty = true;
+    return true;
   }
 
+  /** Move, merge or swap two inventory slots (0–3 hotbar, 4–19 backpack). */
   moveItem(a: PlayerActor | undefined, from: number, to: number) {
-    if (!a || a.dead || from === to) return;
-    const get = (s: number) => (s < HOTBAR_SLOTS ? a.char.hotbar[s] : a.char.backpack[s - HOTBAR_SLOTS]) ?? null;
-    const set = (s: number, v: InvItem | null) => {
-      if (s < HOTBAR_SLOTS) a.char.hotbar[s] = v;
-      else a.char.backpack[s - HOTBAR_SLOTS] = v;
-    };
-    const x = get(from);
-    set(from, get(to));
-    set(to, x);
+    if (!a || a.dead || !moveSlot(a.char, from, to)) return;
     this.equip(a, a.char.selected);
   }
 
@@ -846,7 +822,12 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     }
   }
 
-  createPile(owner: PlayerActor, items: InvItem[], coins: number, at: V3, deferred?: (() => void)[]): PileData {
+  /**
+   * Leave a pile on the ground. `kind`: "death" for what a player carried when they died (the cap
+   * protects these), "loot" by default (drops, chests, boss overflow), "staged" for admin scenes;
+   * `ttlMs` makes it expire (swept by the quest system).
+   */
+  createPile(owner: PlayerActor, items: InvItem[], coins: number, at: V3, deferred?: (() => void)[], opts: { kind?: PileKind; ttlMs?: number } = {}): PileData {
     const g = this.snapToGround(at);
     const { pile, evicted } = pileStore.current.add({
       body: this.bodyDef.id,
@@ -858,6 +839,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       createdAt: Date.now(),
       items,
       coins,
+      kind: opts.kind ?? "loot",
+      ...(opts.ttlMs ? { expiresAt: Date.now() + opts.ttlMs } : {}),
     });
     const publish = () => {
       emitPileEvent({ kind: "add", pile });
@@ -924,7 +907,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     let pile: PileData | null = null;
     try {
       this.persist([victim], () => {
-        pile = (items.length || victim.char.coins) && !victim.identity.loadtest ? this.createPile(victim, items, victim.char.coins, actorPos(victim), events) : null;
+        pile = (items.length || victim.char.coins) && !victim.identity.loadtest ? this.createPile(victim, items, victim.char.coins, actorPos(victim), events, { kind: "death" }) : null;
         victim.char.hotbar = [null, null, null, null];
         victim.char.backpack = Array.from({ length: BACKPACK_SLOTS }, () => null);
         victim.char.coins = 0;
@@ -1023,6 +1006,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   admin(client: Client, cmd: string, args: Record<string, unknown>) {
     const a = this.actors.get(client.sessionId);
     if (!a || !a.identity.admin) return;
+    emitGameEvent(this, { type: "admin", playerId: a.id, cmd, ...(typeof args.target === "string" ? { targetId: args.target } : {}) });
     // Numbers must be finite, integers where counts are meant, and in range (F12 S14). A bad
     // argument refuses the whole command; a missing one takes the default.
     let bad: string | null = null;

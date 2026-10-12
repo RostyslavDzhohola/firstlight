@@ -9,7 +9,9 @@ import { npcSystemFactory } from "./npc/index.ts";
 import { createQuestSystem } from "./quests/QuestSystem.ts";
 import { createVoiceSystem } from "./voice/index.ts";
 import { createSkySystem } from "./SkySystem.ts";
+import { createSupportSystem } from "./support.ts";
 import { createHorseSystem } from "./horses/HorseSystem.ts";
+import { createOnboardingSystem } from "./onboarding.ts";
 
 export interface RoomSystem {
   /** Called every simulation tick (50 ms). */
@@ -35,5 +37,9 @@ export const SYSTEM_FACTORIES: SystemFactory[] = [npcSystemFactory, createVoiceS
 SYSTEM_FACTORIES.push(createDestructionSystem);
 // Weather + day/night lane: per-copy sky clock and weather schedule.
 SYSTEM_FACTORIES.push(createSkySystem);
+// Support items: Patchkit channels and Prism Bubbles (hooks combat via host.bubbles).
+SYSTEM_FACTORIES.push(createSupportSystem);
 // Horses lane (M11 #2, flag FEATURE_HORSES): whistle, riding, the mounted movement budget.
 SYSTEM_FACTORIES.push(createHorseSystem);
+// Onboarding (Portus): training dummies, 50 XP and the Spark medal once per account.
+SYSTEM_FACTORIES.push(createOnboardingSystem);

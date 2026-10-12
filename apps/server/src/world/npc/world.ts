@@ -7,6 +7,7 @@ import type { NpcState } from "@firstlight/shared/net/schema";
 import type { BodyRoom } from "../BodyRoom.ts";
 import type { NpcActor, PlayerActor } from "../actors.ts";
 import type { CombatHost } from "../combat.ts";
+import { emitGameEvent } from "../events.ts";
 import { roomCopyKey } from "../copyState.ts";
 import type { V3 } from "../geometry.ts";
 
@@ -64,10 +65,23 @@ export function roomWorld(room: BodyRoom): NpcWorld {
     },
     broadcast: (type, msg) => room.broadcast(type as never, msg as never),
     onMessage: (type, handler) => {
-      room.onMessage(type, (client, msg) => handler(client.sessionId, msg));
+      room.onMessage(type, (client, msg) => {
+        if (type === "npc") noteAdmin(room, client.sessionId, msg);
+        handler(client.sessionId, msg);
+      });
     },
     // Lingering bodies too: NPC zaps, bursts and tags must be able to hit them (F12).
     playerById: (id) => room.playerById(id) ?? room.lingering.get(id)?.actor,
     save: (p) => room.saveActor(p),
   };
+}
+
+/** Admin NPC tools (spawn, hurt, boss spawn/reset…) go on the room's event bus as `admin` actions. */
+function noteAdmin(room: BodyRoom, sessionId: string, msg: unknown) {
+  if (!room.actors.get(sessionId)?.identity.admin) return;
+  const m = (msg ?? {}) as Record<string, unknown>;
+  emitGameEvent(room, {
+    type: "admin", playerId: sessionId, cmd: `npc:${typeof m.cmd === "string" ? m.cmd : ""}`,
+    ...(typeof m.id === "string" ? { targetId: m.id } : {}), ...(typeof m.action === "string" ? { action: m.action } : {}),
+  });
 }

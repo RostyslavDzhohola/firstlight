@@ -88,12 +88,14 @@ function effectLooks(): [THREE.BufferGeometry, THREE.Material][] {
     [ringGeo, glow(c, 0.8)], // explosion rings, melee arcs (same layout)
     [boltGeo, glow(c)], // bolts, orbs, grenades (opaque)
     [arrowGeo, glow(c)], // arrows
+    [ballGeo, glow(c, 0.12)], // Prism Bubble shells
   ];
 }
 
 export class Effects {
   private readonly list: Fx[] = [];
   readonly projectiles = new Map<number, ProjectileSim>();
+  private readonly bubbles = new Map<number, THREE.Object3D>();
   readonly group = new THREE.Group();
   /** Hidden samples the warm-up compiles; kept for the session so the first shot doesn't hitch. */
   readonly samples = warmupSamples("effectsWarmup", effectLooks());
@@ -153,6 +155,30 @@ export class Effects {
     this.add(m, 160, true, undefined, true);
   }
 
+  /** Prism Bubble: a faint shimmering shell at the owner's feet until it pops or times out. */
+  bubble(id: number, at: THREE.Vector3, radius: number, ms: number, color = 0x9fd8ff) {
+    if (this.bubbles.has(id)) return; // already shown (a snapshot after the live message)
+    const m = new THREE.Mesh(ballGeo, glow(color, 0.12));
+    m.position.copy(at);
+    m.scale.setScalar(radius);
+    const born = performance.now();
+    this.bubbles.set(id, m);
+    this.add(m, ms, true, (t) => {
+      if (!this.bubbles.has(id) || t >= born + ms - 20) {
+        this.bubbles.delete(id);
+        return true;
+      }
+      m.scale.setScalar(radius * (1 + 0.015 * Math.sin((t - born) / 120)));
+    });
+  }
+
+  popBubble(id: number) {
+    const m = this.bubbles.get(id);
+    if (!m) return;
+    this.bubbles.delete(id);
+    this.flash(m.position, 0x9fd8ff, m.scale.x, 160);
+  }
+
   spawnProjectile(id: number, weaponIndex: number, pos: THREE.Vector3, vel: THREE.Vector3, g: number) {
     const color = weaponColor(weaponIndex);
     const id_ = WEAPONS[weaponIndex]?.id;
@@ -204,6 +230,7 @@ export class Effects {
     for (const p of this.projectiles.values()) retire(p.mesh);
     this.list.length = 0;
     this.projectiles.clear();
+    this.bubbles.clear();
     this.group.removeFromParent();
     releaseObjects(this.group);
   }

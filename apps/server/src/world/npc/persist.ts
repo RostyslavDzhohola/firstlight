@@ -1,7 +1,7 @@
 // What an NPC system remembers across room instances of one copy (F12 B2, copyState.ts): the boss's
-// respawn time after a kill or its engaged fight (until the 30 s vacancy reset would have run), and
+// respawn time after a kill or its engaged fight (until the 30 s vacancy reset would have run),
 // spawn groups that are cleared (counting down to their respawn) or part-killed (dead members stay
-// dead until the group is cleared, as in a live room). Survivors' HP is not kept: a despawned
+// dead until the group is cleared, as in a live room), and when each popped Golden Hopbit returns. Survivors' HP is not kept: a despawned
 // group respawns fresh in a live room too.
 
 import type { BossFight } from "./boss.ts";
@@ -20,6 +20,8 @@ export interface NpcCopyState {
   fight?: BossFight;
   /** p = spawn point id, sig = its make-up (content changes don't map state onto other groups). */
   groups: { p: number; sig: string; dead?: number[]; left?: number }[];
+  /** Golden Hopbits that were popped or ran into their burrow: [spawn point id, return time (ms)]. */
+  golden?: [number, number][];
 }
 
 function sig(p: SpawnPoint): string {
@@ -36,8 +38,10 @@ export function snapshotNpcCopy(sys: NpcSystem, now: number): NpcCopyState | nul
   const b = sys.boss;
   const boss = b && b.status === "dead" && b.respawnAt > now ? { id: b.def.id, respawnAt: b.respawnAt } : undefined;
   const fight = b?.fightState(now) ?? undefined;
-  if (!groups.length && !boss && !fight) return null;
-  return { v: 1, at: now, groups, ...(boss ? { boss } : {}), ...(fight ? { fight } : {}) };
+  // Absolute times; an expired one is kept too, so a restored dead slot still comes back (NpcSystem scan).
+  const golden: [number, number][] = [...sys.goldenBack];
+  if (!groups.length && !boss && !fight && !golden.length) return null;
+  return { v: 1, at: now, groups, ...(boss ? { boss } : {}), ...(fight ? { fight } : {}), ...(golden.length ? { golden } : {}) };
 }
 
 /** Apply a snapshot to a freshly built system (no NPCs spawned yet). */
@@ -56,6 +60,10 @@ export function restoreNpcCopy(sys: NpcSystem, s: NpcCopyState | null, now: numb
         g.dead.fill(true);
       }
     } else for (const i of e.dead ?? []) if (i >= 0 && i < g.dead.length) g.dead[i] = true;
+  }
+  for (const [p, back] of s.golden ?? []) {
+    const pt = sys.groups[p]?.point;
+    if (pt && typeof back === "number" && pt.members.some((m) => m.golden)) sys.goldenBack.set(p, back);
   }
   const b = sys.boss;
   if (b && s.boss && s.boss.id === b.def.id && s.boss.respawnAt > now) {

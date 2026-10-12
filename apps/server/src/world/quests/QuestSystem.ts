@@ -7,10 +7,10 @@ import type { Client } from "@colyseus/core";
 import { chordMetres, padDirs, PLANET_IDS, safePadAt, type BodyId } from "@firstlight/shared";
 import { BACKPACK_SLOTS, HOTBAR_SLOTS, emptyLife, type LifeProgress } from "@firstlight/shared/content/character";
 import { HORSE_WHISTLE } from "@firstlight/shared/content/horse";
-import { COSMETIC_BY_ID, COSMETIC_SLOTS, itemName, itemStack, sellValue, shopEntry, type CosmeticSlot } from "@firstlight/shared/content/items";
+import { COSMETIC_BY_ID, COSMETIC_SLOTS, isEggItem, itemName, itemStack, sellValue, shopEntry, type CosmeticSlot } from "@firstlight/shared/content/items";
 import { MEDAL_BY_ID, MEDAL_RULES } from "@firstlight/shared/content/medals";
 import { MISSION_BY_ID, MISSIONS, missionGoal, type MissionDef } from "@firstlight/shared/content/missions";
-import { offsetDir, padName, place, placeDir } from "@firstlight/shared/content/places";
+import { offsetDir, padName, placeDir } from "@firstlight/shared/content/places";
 import { BOSS_FIRSTS, EGG_BY_ID, type EggId } from "@firstlight/shared/content/secrets";
 import { inReach, objectPos, objectsOn, surfaceDistance, WORLD_OBJECT_BY_ID, type WorldObjectDef } from "@firstlight/shared/content/world";
 import { WEAPON_BY_ID, WEAPONS } from "@firstlight/shared/content/weapons";
@@ -27,18 +27,19 @@ import { emitGameEvent, onGameEvent, type DamageEvent, type DeathEvent, type Gam
 import { npcSystemOf, onNpcEvent, type NpcEvent } from "../npc/index.ts";
 import { dist3, type V3 } from "../geometry.ts";
 import type { RoomSystem } from "../systems.ts";
-import { EggLogic } from "./eggs.ts";
+import { EGG_LIMITS, EggLogic } from "./eggs.ts";
 import { engrave, hallLines, onHallChanged } from "./hall.ts";
-import { runStage } from "./stage.ts";
+import { copyRestrictions, type CopyRestrictions } from "./restrictions.ts";
+import { roomCopyKey } from "../copyState.ts";
+import { runStage, STAGE_LIMITS } from "./stage.ts";
 import { progressStore } from "./store.ts";
+import { emitPileEvent, pileStore } from "../piles.ts";
 
 export const QUEST_RULES = {
   /** Touching a pad = feet within this many metres of its centre (D2). */
   PAD_TOUCH_M: 6,
   /** Extra metres allowed between client and server positions when using objects. */
   INTERACT_SLACK: 1.5,
-  /** Hunt kills count up to this far outside the named area's radius. */
-  AREA_SLACK: 20,
   FAST_TRAVEL_COOLDOWN_MS: 2000,
   /** Reach triggers ignore height differences up to this (uneven lookouts). */
   REACH_VERTICAL: 6,
@@ -46,6 +47,12 @@ export const QUEST_RULES = {
   REACH_ARM_M: 60,
   /** Long Shot: the Stillshot must have fired within this window before the kill. */
   LONG_SHOT_WINDOW_MS: 150,
+  /** A boss fight an admin touched (heal, damage, boss spawn…) stays "assisted" this long. */
+  ADMIN_ASSIST_MS: 15 * 60_000,
+  /** E9: how close to Ticket #000 a player must be when it reaches the freight lift. */
+  LIFT_REACH_M: 15,
+  /** Expired piles (staged scenes) are swept this often. */
+  PILE_SWEEP_MS: 5000,
   SLOW_TICK_MS: 200,
 };
 
@@ -116,10 +123,16 @@ export class QuestSystem implements RoomSystem {
   /** Boss encounters (NPC id → account id → hurt by the boss since their first hit), for Untouchable. */
   private readonly bossHits = new Map<string, Map<string, { hurt: boolean }>>();
   private restoreBroadcast: (() => void) | null = null;
+  /** This copy's key for record restrictions (staged scenes, assisted boss fights; restrictions.ts). */
+  private readonly copyKey: string;
+  /** `${userId}|${egg}`: steps an admin opened for that player (the claim that follows is assisted). */
+  private readonly assistedEggs = new Set<string>();
+  private lastSweep = 0;
 
   constructor(room: BodyRoom) {
     this.room = room;
     this.body = room.bodyDef.id;
+    this.copyKey = roomCopyKey(room);
     this.objects = objectsOn(this.body);
     const t = room.terrain;
     for (const o of this.objects) this.objPos.set(o.id, objectPos(o, (x, y, z) => t.groundHeight(x, y, z)));
@@ -202,6 +215,38 @@ export class QuestSystem implements RoomSystem {
 
   actor(id: string): PlayerActor | undefined {
     return this.room.actors.get(id);
+  }
+
+  private restrictions(): CopyRestrictions {
+    return copyRestrictions.current.get(this.copyKey) ?? { stagedUntil: 0, assistedUntil: 0 };
+  }
+
+  /** An admin staged scene ran in this copy (stage.ts); the cast's lives stay unofficial. */
+  markStaged(cast: PlayerActor[] = []) {
+    copyRestrictions.current.set(this.copyKey, { ...this.restrictions(), stagedUntil: Date.now() + STAGE_LIMITS.stagedMs });
+    for (const a of cast) this.life(a).unofficial = true;
+  }
+
+  /**
+   * Whether permanent records may be written in this copy: not while it is staging a scene (no
+   * medals or plaques at all), and for boss records not while its boss fight counts as assisted.
+   */
+  official(opts: { boss?: boolean } = {}): boolean {
+    const now = Date.now();
+    const r = this.restrictions();
+    if (now < r.stagedUntil) return false;
+    return !(opts.boss && now < r.assistedUntil);
+  }
+
+  /** Admin tools touching a boss (or used while its fight is on) make that fight assisted. */
+  private onAdminAction(e: Extract<GameEvent, { type: "admin" }>) {
+    const boss = npcSystemOf(this.room)?.boss;
+    if (!boss) return;
+    const readOnly = e.cmd === "npc:list" || (e.cmd === "npc:boss" && (e.action ?? "info") === "info");
+    const onBoss = (e.cmd === "npc:hurt" && !!e.targetId && !!this.room.npcActors.get(e.targetId)?.boss) || (e.cmd === "npc:boss" && !readOnly);
+    if (onBoss || (!readOnly && (boss.engaged || this.bossHits.size > 0))) {
+      copyRestrictions.current.set(this.copyKey, { ...this.restrictions(), assistedUntil: Date.now() + QUEST_RULES.ADMIN_ASSIST_MS });
+    }
   }
 
   qp(a: PlayerActor): QuestPlayer {
@@ -392,6 +437,12 @@ export class QuestSystem implements RoomSystem {
       }
     }
     this.eggs.tickRoom(now);
+    if (now - this.lastSweep >= QUEST_RULES.PILE_SWEEP_MS) {
+      this.lastSweep = now;
+      for (const [id, list] of this.ops) if (!list.length || now - list[list.length - 1]! >= 1000) this.ops.delete(id);
+      // Expired piles (staged scenes): gone for every copy of the body.
+      for (const id of pileStore.current.sweep(this.body, now)) emitPileEvent({ kind: "remove", id, body: this.body });
+    }
   }
 
   // ---------------------------------------------------------------- pads and fast travel
@@ -483,7 +534,7 @@ export class QuestSystem implements RoomSystem {
     if (!item) return fail("empty", "Nothing in that slot");
     const n = Math.max(1, Math.min(item.qty, qty ?? item.qty));
     const value = sellValue(item, n);
-    if (value <= 0) return fail("worthless", "Juno shakes her head: “I can't sell that on.”");
+    if (value <= 0) return fail("worthless", isEggItem(item) ? "Juno turns it over: “One of a kind. Keep it — nobody would believe where you found it.”" : "Juno shakes her head: “I can't sell that on.”");
     const name = itemName(item);
     try {
       // The sale and the save together; a failed save puts the item and coins back (F12 B6).
@@ -614,15 +665,8 @@ export class QuestSystem implements RoomSystem {
       if (!a || a.dead) continue;
       for (const { m, def } of this.activeMissions(a)) {
         if (!def.hunt) continue;
-        if (def.hunt.place && e.area !== def.hunt.place) {
-          // No matching spawn-area id: fall back to the kill position, if there is one.
-          if (!e.pos) continue;
-          const p = place(def.hunt.place);
-          const d = placeDir(p);
-          const R = this.room.bodyDef.radius;
-          const l = Math.hypot(e.pos[0], e.pos[1], e.pos[2]) || 1;
-          if (chordMetres(d, e.pos[0] / l, e.pos[1] / l, e.pos[2] / l, R) > p.radius + QUEST_RULES.AREA_SLACK) continue;
-        }
+        // Kills count by the spawn area the NPC lane reports (NPCs without one never count for a place).
+        if (def.hunt.place && e.area !== def.hunt.place) continue;
         const ti = def.hunt.targets.findIndex((t) => t.npcKind === e.npcKind);
         if (ti < 0) continue;
         const counts = (m.counts ??= def.hunt.targets.map(() => 0));
@@ -654,20 +698,32 @@ export class QuestSystem implements RoomSystem {
 
   // ---------------------------------------------------------------- medals and titles
 
-  /** Award a medal once per account. Returns true if newly earned. */
-  award(a: PlayerActor, medalId: string): boolean {
+  /**
+   * Award a medal once per account; true if newly earned. The permanent medal write: nothing is
+   * written while the copy is staging a scene, and a life that was part of a scene or credited with
+   * an assisted/staged boss kill never earns life-scoped medals (its level, bosses and progress came
+   * partly from admin tools; F12 review S4). With `deferred`, the caller runs the write inside its own
+   * transaction: the cache update and the player's messages wait in `deferred` until it commits.
+   */
+  award(a: PlayerActor, medalId: string, deferred?: (() => void)[]): boolean {
     const def = MEDAL_BY_ID.get(medalId);
     if (!def || a.identity.loadtest) return false;
+    if (!this.official()) return false;
+    if (def.scope === "life" && this.life(a).unofficial) return false;
     const q = this.qp(a);
     if (q.medals.has(medalId)) return false;
-    q.medals.add(medalId);
     const fresh = progressStore.current.awardMedal(a.identity.userId, medalId);
-    a.youDirty = true;
-    if (!fresh) return false;
-    this.toast(a, `Medal earned: ${def.name} — wear the title “${def.title}” from the journal (J)`, "medal");
-    a.client.send("medal", { id: medalId });
-    emitGameEvent(this.room, { type: "medal", playerId: a.id, medalId });
-    return true;
+    const apply = () => {
+      q.medals.add(medalId);
+      a.youDirty = true;
+      if (!fresh) return;
+      this.toast(a, `Medal earned: ${def.name} — wear the title “${def.title}” from the journal (J)`, "medal");
+      a.client.send("medal", { id: medalId });
+      emitGameEvent(this.room, { type: "medal", playerId: a.id, medalId });
+    };
+    if (deferred) deferred.push(apply);
+    else apply();
+    return fresh;
   }
 
   setTitle(c: Client, medalId: string | null) {
@@ -705,8 +761,12 @@ export class QuestSystem implements RoomSystem {
     if (o.egg) this.eggs.interact(a, this.qp(a), o, code);
   }
 
-  /** Grant an egg's rare item (once per life), its hidden medal (once per account) and try the Hall of Firsts. */
-  claimEgg(a: PlayerActor, eggId: EggId) {
+  /**
+   * Grant an egg's rare item (once per life), its hidden medal (once per account) and try the Hall of
+   * Firsts. Admin-assisted claims (the admin `egg` command, or a step an admin opened) and claims in a
+   * staged copy give the item only: no medal, no plaque.
+   */
+  claimEgg(a: PlayerActor, eggId: EggId, opts: { assisted?: boolean } = {}) {
     const egg = EGG_BY_ID.get(eggId);
     if (!egg || a.dead) return;
     const life = this.life(a);
@@ -714,8 +774,15 @@ export class QuestSystem implements RoomSystem {
       this.toast(a, `You already took the ${egg.itemName} in this life`, "info");
       return;
     }
-    if (!this.grant(a, [{ ...egg.item }], () => life.eggs.push(eggId))) return;
+    const assistKey = `${a.identity.userId}|${eggId}`;
+    const helped = this.assistedEggs.has(assistKey);
+    if (!this.grant(a, [{ ...egg.item }], () => life.eggs.push(eggId))) return; // save failed: nothing changed, try again
+    this.assistedEggs.delete(assistKey);
     this.toast(a, `Secret found: ${egg.name} — ${egg.itemName}`, "medal");
+    if (opts.assisted || helped || !this.official()) {
+      this.toast(a, "Admin-assisted or staged: no medal or Hall of Firsts entry", "info");
+      return;
+    }
     this.award(a, egg.medal);
     if (!a.identity.loadtest && engrave(eggId, a.identity.userId, a.identity.name)) {
       this.toast(a, "You found it first — your name is engraved on the Hall of Firsts in Portus", "medal");
@@ -758,7 +825,7 @@ export class QuestSystem implements RoomSystem {
       }
       case "propBroken": {
         const a = e.playerId ? this.actor(e.playerId) : undefined;
-        if (!a || a.identity.loadtest) break;
+        if (!a || a.identity.loadtest || !this.official()) break; // staged scenes don't count later either
         const n = progressStore.current.addStat(a.identity.userId, "props_broken", 1);
         if (n >= MEDAL_RULES.DEMOLITION_PROPS) this.award(a, "demolition_crew");
         break;
@@ -781,6 +848,9 @@ export class QuestSystem implements RoomSystem {
       case "spawnRequest":
         this.spawn(e);
         break;
+      case "admin":
+        this.onAdminAction(e);
+        break;
       default:
         break;
     }
@@ -789,10 +859,19 @@ export class QuestSystem implements RoomSystem {
   private onKillForMedals(e: KillEvent) {
     // Long Shot: the killing blow from a Stillshot at ≥ 120 m.
     const killer = e.killerId ? this.actor(e.killerId) : undefined;
-    if (killer && e.pos && this.firedStillshot(killer) && dist3(actorPos(killer), e.pos) >= MEDAL_RULES.LONG_SHOT_METRES) this.award(killer, "long_shot");
+    if (killer && e.pos && this.official() && this.firedStillshot(killer) && dist3(actorPos(killer), e.pos) >= MEDAL_RULES.LONG_SHOT_METRES) this.award(killer, "long_shot");
     if (!e.bossId) return;
     const medal = e.bossId === "tidewrath" ? "tide_turner" : e.bossId === "hollow_king" ? "regicide" : "decommissioned";
     const eligible = (e.creditIds ?? (e.killerId ? [e.killerId] : [])).map((id) => this.actor(id)).filter((a): a is PlayerActor => !!a);
+    if (!this.official({ boss: true })) {
+      // Staged scene or admin-assisted fight: loot as usual, but nothing permanent.
+      this.bossHits.delete(e.npcKind);
+      for (const a of eligible) {
+        this.life(a).unofficial = true; // the boss's XP and loot came with admin help
+        this.toast(a, "Admin-assisted or staged fight: no medals or Hall of Firsts", "info");
+      }
+      return;
+    }
     for (const a of eligible) {
       this.award(a, medal);
       const life = this.life(a);
@@ -834,7 +913,7 @@ export class QuestSystem implements RoomSystem {
       }
       // Long Shot on an NPC: this hit killed it, from a Stillshot that just fired, 120 m or more away.
       const npc = this.room.npcActors.get(e.targetId);
-      if (e.hpAfter <= 0 && npc && this.firedStillshot(a) && dist3(actorPos(a), actorPos(npc)) >= MEDAL_RULES.LONG_SHOT_METRES) this.award(a, "long_shot");
+      if (e.hpAfter <= 0 && npc && this.official() && this.firedStillshot(a) && dist3(actorPos(a), actorPos(npc)) >= MEDAL_RULES.LONG_SHOT_METRES) this.award(a, "long_shot");
     }
   }
 
@@ -852,8 +931,24 @@ export class QuestSystem implements RoomSystem {
       const bossId = BOSS_OF_NPC[e.boss];
       if (credit.length && bossId) emitGameEvent(this.room, { type: "kill", npcKind: e.boss, bossId, killerId: null, creditIds: credit });
     } else if (e.kind === "egg") {
-      if (this.room.actors.has(e.sessionId)) emitGameEvent(this.room, { type: "secretStep", playerId: e.sessionId, secretId: e.egg, step: e.egg === "E3" ? "burrow" : "lift" });
+      const a = this.actor(e.sessionId);
+      if (!a) return;
+      // E9 ends in a teleport to the Vat Room: only on foot at the lift with Ticket #000, out of combat
+      // (it was a remote escape teleport).
+      if (e.egg === "E9" && !this.atLift(a)) {
+        this.toast(a, "The freight lift's doors close without you. Stay with Ticket #000 — and out of a fight.", "warn");
+        return;
+      }
+      emitGameEvent(this.room, { type: "secretStep", playerId: e.sessionId, secretId: e.egg, step: e.egg === "E3" ? "burrow" : "lift" });
     }
+  }
+
+  /** Alive, out of combat and within reach of Ticket #000 as it reaches the lift (E9). */
+  private atLift(a: PlayerActor): boolean {
+    if (a.dead || Date.now() < a.combatUntil) return false;
+    const npcs = npcSystemOf(this.room);
+    const ticket = npcs ? [...npcs.npcs.values()].find((n) => n.def.id === "ticket_000" && n.egg?.walker === a.id) : undefined;
+    return !!ticket && dist3(ticket.pos, actorPos(a)) <= QUEST_RULES.LIFT_REACH_M;
   }
 
   /** Honour a spawn request (egg penalties, staged scenes) through the room's NPC system. */
@@ -870,10 +965,26 @@ export class QuestSystem implements RoomSystem {
     const def = NPC_DEFS[idx]!;
     const [lo, hi] = defLevels(def, this.body as PlanetId);
     const level = Math.round((lo + hi) / 2);
-    for (let i = 0; i < Math.min(8, e.count); i++) {
-      const ang = (i / Math.max(1, e.count)) * Math.PI * 2;
+    // Egg penalties and staged scenes are capped (per account and per room) and dissolve after a
+    // while; they never become permanent NPCs (review F12 B1, Opus nit).
+    let count = Math.min(8, e.count);
+    let spawned: { reason: "egg" | "stage"; key: string; userId: string };
+    let ttlMs: number;
+    if (e.reason === "egg") {
+      const a = e.playerId ? this.actor(e.playerId) : undefined;
+      if (!a || !e.egg) return;
+      spawned = { reason: "egg", key: e.egg, userId: a.identity.userId };
+      ttlMs = EGG_LIMITS.ttlMs;
+      count = Math.min(count, EGG_LIMITS.perPlayer - npcs.spawnedCount("egg", spawned.userId), EGG_LIMITS.perBody - npcs.spawnedCount("egg"));
+    } else {
+      spawned = { reason: "stage", key: "stage", userId: e.playerId ? (this.actor(e.playerId)?.identity.userId ?? "") : "" };
+      ttlMs = STAGE_LIMITS.ttlMs;
+      count = Math.min(count, STAGE_LIMITS.perBody - npcs.spawnedCount("stage"));
+    }
+    for (let i = 0; i < count; i++) {
+      const ang = (i / Math.max(1, count)) * Math.PI * 2;
       const at = this.room.snapToGround(this.around(e.pos, Math.cos(ang) * 4, Math.sin(ang) * 4));
-      npcs.createNpc(idx, level, at, now, { roam: 8 });
+      npcs.createNpc(idx, level, at, now, { roam: 8, spawned, ttlMs });
     }
   }
 
@@ -894,7 +1005,7 @@ export class QuestSystem implements RoomSystem {
       const killer = this.actor(e.killerId);
       if (!killer) return;
       if (victim && killer.state.party && killer.state.party === victim.state.party) this.award(victim, "with_friends_like_these");
-      if (this.firedStillshot(killer) && dist3(actorPos(killer), e.pos) >= MEDAL_RULES.LONG_SHOT_METRES) this.award(killer, "long_shot");
+      if (this.official() && this.firedStillshot(killer) && dist3(actorPos(killer), e.pos) >= MEDAL_RULES.LONG_SHOT_METRES) this.award(killer, "long_shot");
     }
   }
 
@@ -914,8 +1025,10 @@ export class QuestSystem implements RoomSystem {
       case "egg": {
         const id = String(args.id ?? "") as EggId;
         const t = typeof args.target === "string" ? (this.actor(args.target) ?? a) : a;
-        if (typeof args.step === "string") this.eggs.onStep(t, this.qp(t), id, args.step);
-        else this.claimEgg(t, id);
+        if (typeof args.step === "string") {
+          this.assistedEggs.add(`${t.identity.userId}|${id}`);
+          this.eggs.onStep(t, this.qp(t), id, args.step);
+        } else this.claimEgg(t, id, { assisted: true });
         return true;
       }
       default:

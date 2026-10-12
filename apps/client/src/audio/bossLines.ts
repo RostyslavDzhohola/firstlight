@@ -9,13 +9,12 @@ export type BossId = "tidewrath" | "hollowking" | "receiver";
 export type BossTrigger = "engage" | "phase2" | "defeat";
 
 /**
- * A clip's URL: `<asset base>/voice/<boss>-<trigger>.mp3`, the same base as every other asset
- * (config.assetBase = VITE_ASSET_BASE, which already ends in /v/<buildId>, SPEC §10.1). The clips
- * are deployed with each asset build; they are never in the repo, so without them (local dev) the
- * fetch fails and the subtitle alone plays.
+ * A clip's URL: `<voice base>/<boss>-<trigger>.mp3`. The clips are never in the repo; they are
+ * uploaded to the asset Worker as a versioned set (`/v/voice-1`, config.voiceBase). Without them
+ * (offline dev) the fetch fails and the subtitle alone plays.
  */
-export function bossLineUrl(boss: BossId, trigger: BossTrigger, base: string = config.assetBase): string {
-  return `${base.replace(/\/+$/, "")}/voice/${boss}-${trigger}.mp3`;
+export function bossLineUrl(boss: BossId, trigger: BossTrigger, base: string = config.voiceBase): string {
+  return `${base.replace(/\/+$/, "")}/${boss}-${trigger}.mp3`;
 }
 
 export const BOSS_LINES: Record<BossId, Record<BossTrigger, string>> = {

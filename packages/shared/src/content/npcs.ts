@@ -5,8 +5,8 @@
 // - Hopbit hop, Woolback buck and Collector taser list 0.4 s telegraphs; the light floor is 0.5 s.
 // - Dunebreaker tail swipe lists 0.8 s for a 23% hit; hits ≥ 20% of on-level HP use the heavy floor (0.9 s).
 // - Leash is 40 m (SPEC §6.4 and the lane brief); content §3.1 says 45 m. One constant: NPC_RULES.leash.
-// - Meridian Oversight colours follow the lane brief (ivory-and-chrome, red visors); content §3.4 says
-//   slate-grey with amber visors. It's a client palette constant only.
+// - Meridian Oversight follows content §3.4 (slate-grey matte hardsuits, amber slit visors, hexagonal
+//   glyph), kept clearly apart from Unit 7's ivory plates (F12 review). It's a client look only.
 
 import type { BodyId, FeatureAnchor } from "../planet/bodies.ts";
 import { enemyDamageMult, enemyHpMult, killCoins, maxHp, type EnemyTier } from "./progression.ts";
@@ -591,38 +591,8 @@ export const PLANET_TONIC: Record<PlanetId, { id: string; chance: number }> = {
 export const PLANET_COSMETIC: Record<PlanetId, { id: string; chance: number }> = {
   arcadia: { id: "winged_cap", chance: 1 / 150 },
   hollowmere: { id: "crowbeak_mask", chance: 1 / 100 },
-  meridian: { id: "hard_hat_oversight", chance: 1 / 75 },
+  meridian: { id: "hard_hat", chance: 1 / 75 },
 };
-
-/**
- * Items that NPCs drop but the weapon catalogue doesn't define yet (materials and cosmetics).
- * The economy/cosmetics lanes should merge these into the item catalogue; sell values from content §1.5.
- */
-export const NPC_LOOT_ITEMS: readonly { id: string; name: string; kind: "material" | "cosmetic"; slot?: "hat" | "cape" | "mask" | "backpack"; rarity?: "common" | "uncommon" | "rare" | "legendary"; sell: number }[] = [
-  { id: "wool_tuft", name: "Wool Tuft", kind: "material", sell: 2 },
-  { id: "wolf_pelt", name: "Wolf Pelt", kind: "material", sell: 8 },
-  { id: "bramblehorn_antler", name: "Bramblehorn Antler", kind: "material", sell: 120 },
-  { id: "fenstalker_plume", name: "Fenstalker Plume", kind: "material", sell: 200 },
-  { id: "dunebreaker_scale", name: "Dunebreaker Scale", kind: "material", sell: 300 },
-  { id: "woolback_plushie", name: "Woolback Plushie", kind: "cosmetic", slot: "backpack", rarity: "uncommon", sell: 90 },
-  { id: "wolfpelt_cape", name: "Wolfpelt Cape", kind: "cosmetic", slot: "cape", rarity: "uncommon", sell: 90 },
-  { id: "antler_crown", name: "Antler Crown", kind: "cosmetic", slot: "hat", rarity: "rare", sell: 250 },
-  { id: "heron_plume_hat", name: "Heron Plume Hat", kind: "cosmetic", slot: "hat", rarity: "rare", sell: 250 },
-  { id: "saltplate_mantle", name: "Saltplate Mantle", kind: "cosmetic", slot: "cape", rarity: "rare", sell: 250 },
-  { id: "winged_cap", name: "Messenger's Winged Cap", kind: "cosmetic", slot: "hat", rarity: "uncommon", sell: 90 },
-  { id: "crowbeak_mask", name: "Crowbeak Mask", kind: "cosmetic", slot: "mask", rarity: "uncommon", sell: 90 },
-  { id: "hard_hat_oversight", name: "Hard Hat (Oversight Issue)", kind: "cosmetic", slot: "hat", rarity: "uncommon", sell: 90 },
-  { id: "voxel_visor", name: "Voxel Visor", kind: "cosmetic", slot: "mask", rarity: "uncommon", sell: 90 },
-  { id: "coral_crown", name: "Coral Crown", kind: "cosmetic", slot: "hat", rarity: "rare", sell: 250 },
-  { id: "tide_cape", name: "Tide Cape", kind: "cosmetic", slot: "cape", rarity: "rare", sell: 250 },
-  { id: "tidewrath_tooth", name: "Tidewrath Tooth", kind: "cosmetic", slot: "backpack", rarity: "legendary", sell: 500 },
-  { id: "court_mantle", name: "Court Mantle", kind: "cosmetic", slot: "cape", rarity: "rare", sell: 250 },
-  { id: "funeral_veil", name: "Funeral Veil", kind: "cosmetic", slot: "mask", rarity: "rare", sell: 250 },
-  { id: "hollow_crown", name: "Hollow Crown", kind: "cosmetic", slot: "hat", rarity: "legendary", sell: 500 },
-  { id: "windup_key", name: "Wind-Up Key", kind: "cosmetic", slot: "backpack", rarity: "rare", sell: 250 },
-  { id: "signal_dish", name: "Signal Dish", kind: "cosmetic", slot: "backpack", rarity: "rare", sell: 250 },
-  { id: "receiver_floodlamp", name: "Receiver Floodlamp", kind: "cosmetic", slot: "backpack", rarity: "legendary", sell: 500 },
-];
 
 // ------------------------------------------------------------------------------------------ camps and chests
 
@@ -687,7 +657,7 @@ export const BOSS_DEFS: readonly BossDef[] = [
     loot: {
       coins: 600, xp: 4400,
       always: [{ id: "weapon", tier: "random3", qty: 1 }],
-      rolls: [{ chance: 1 / 3, oneOf: ["weapon"], weaponTier: 3 }, { chance: 1 / 6, oneOf: ["windup_key", "signal_dish"] }, { chance: 1 / 25, oneOf: ["receiver_floodlamp"] }],
+      rolls: [{ chance: 1 / 3, oneOf: ["weapon"], weaponTier: 3 }, { chance: 1 / 6, oneOf: ["wind_up_key", "signal_dish"] }, { chance: 1 / 25, oneOf: ["receiver_floodlamp"] }],
     },
     voice: { engage: "This planet is now under new management.", phase2: "Resistance has been noted on your file.", defeat: "Shutting down... pending review." },
   },
@@ -704,6 +674,21 @@ export function bossMaxHp(hp2: number, engaged: number, perExtra = 0.35, cap = 8
 /** Damage each player inside a split circle takes; `inside` = 0 means everyone in the arena takes the full amount. */
 export function splitDamage(total: number, inside: number): number {
   return inside <= 0 ? total : total / inside;
+}
+
+/** A split circle's total is at least this share of the sturdiest victim's max HP (content §4: 120%). */
+export const SPLIT_LETHAL_SHARE = 1.2;
+
+/**
+ * Total true damage of a split circle: the listed damage (120% of an on-level player) or 120% of the
+ * highest max HP among the players taking it, whichever is more. One player alone always dies, at
+ * any level, and two always take 60% of the sturdier one's HP each (F12 review: the Hollow King's
+ * flat 276 was survivable solo at levels 19–20).
+ */
+export function splitTotal(listed: number, victimMaxHp: readonly number[]): number {
+  let top = 0;
+  for (const hp of victimMaxHp) if (hp > top) top = hp;
+  return Math.max(listed, SPLIT_LETHAL_SHARE * top);
 }
 
 // ------------------------------------------------------------------------------------------ spawn areas

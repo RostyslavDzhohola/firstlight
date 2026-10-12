@@ -36,7 +36,8 @@ export interface PlayerActor {
   blocking: boolean;
   combatUntil: number;
   protectedUntil: number;
-  heals: { perSec: number; until: number }[];
+  /** Heals over time; `left` (HP still to come) makes the total exact regardless of tick timing. */
+  heals: { perSec: number; until: number; left?: number }[];
   burn: { perSec: number; until: number; by: string } | null;
   healCooldownUntil: number;
   tonicCooldownUntil: number;

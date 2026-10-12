@@ -200,7 +200,7 @@ describe("a failed save undoes quest and shop rewards too (F12 B6, Codex re-revi
     const room = questRoom(b);
     const fields = ground("arcadia", placeDir("clover_fields"));
     failing = true;
-    for (let i = 0; i < 8; i++) emitGameEvent(room, { type: "kill", npcKind: "hopbit", killerId: b.id, pos: fields });
+    for (let i = 0; i < 8; i++) emitGameEvent(room, { type: "kill", npcKind: "hopbit", killerId: b.id, pos: fields, area: "clover_fields" });
     await qsleep(200);
     const m = () => actor(b).char.missions.find((x) => x.id === "A1")!;
     expect(m().done).toBe(false);
@@ -208,9 +208,9 @@ describe("a failed save undoes quest and shop rewards too (F12 B6, Codex re-revi
     expect(actor(b).char.coins).toBe(0);
     expect(memCount(b, "tonic_small")).toBe(0);
     failing = false;
-    emitGameEvent(room, { type: "kill", npcKind: "hopbit", killerId: b.id, pos: fields });
+    emitGameEvent(room, { type: "kill", npcKind: "hopbit", killerId: b.id, pos: fields, area: "clover_fields" });
     await waitFor(() => m().done);
-    emitGameEvent(room, { type: "kill", npcKind: "hopbit", killerId: b.id, pos: fields });
+    emitGameEvent(room, { type: "kill", npcKind: "hopbit", killerId: b.id, pos: fields, area: "clover_fields" });
     await qsleep(200);
     expect(actor(b).char.coins).toBe(30);
     expect(actor(b).char.xp).toBe(xp0 + 80);
@@ -232,12 +232,12 @@ describe("a failed save undoes quest and shop rewards too (F12 B6, Codex re-revi
     const fields = ground("arcadia", placeDir("clover_fields"));
     const piles0 = pileStore.current.list("arcadia").length;
     failing = true;
-    for (let i = 0; i < 8; i++) emitGameEvent(room, { type: "kill", npcKind: "hopbit", killerId: b.id, pos: fields });
+    for (let i = 0; i < 8; i++) emitGameEvent(room, { type: "kill", npcKind: "hopbit", killerId: b.id, pos: fields, area: "clover_fields" });
     await qsleep(200);
     expect(pileStore.current.list("arcadia").length).toBe(piles0);
     expect(actor(b).char.coins).toBe(0);
     failing = false;
-    emitGameEvent(room, { type: "kill", npcKind: "hopbit", killerId: b.id, pos: fields });
+    emitGameEvent(room, { type: "kill", npcKind: "hopbit", killerId: b.id, pos: fields, area: "clover_fields" });
     await waitFor(() => actor(b).char.missions.find((x) => x.id === "A1")!.done);
     await qsleep(100);
     const piles = pileStore.current.list("arcadia");

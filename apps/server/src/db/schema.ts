@@ -158,8 +158,12 @@ export const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (copy_key, system)
   );
   `,
-  // 4 (lane f12-core: voice_mute): admin voice mutes survive restarts and deploys (F12 S12).
-  // Idempotent, so it stays correct if lanes are renumbered before a deploy.
+  // 4: pile kinds (eviction past the cap prefers staged, then loot piles, over death piles) and expiry
+  `
+  ALTER TABLE pile ADD COLUMN kind TEXT NOT NULL DEFAULT 'death';
+  ALTER TABLE pile ADD COLUMN expires_at INTEGER;
+  `,
+  // 5 (lane f12-core): admin voice mutes survive restarts and deploys (F12 S12). Idempotent.
   `
   CREATE TABLE IF NOT EXISTS voice_mute (
     user_id   TEXT PRIMARY KEY,

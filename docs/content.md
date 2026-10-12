@@ -142,7 +142,9 @@ Equipping still needs the level gate (T2 = L6, T3 = L12) (D). Anyone can buy, pi
 
 **Sell-back:** 25% of the shop price, rounded down, minimum 1 [r2-05]. Items the shop doesn't sell use
 fixed values (new): Wool Tuft 2 · Wolf Pelt 8 · Bramblehorn Antler 120 · Fenstalker Plume 200 ·
-Dunebreaker Scale 300 · cosmetics Common 30 / Uncommon 90 / Rare 250 / Legendary 500 · Ferryman's Oar 500.
+Dunebreaker Scale 300 · cosmetics Common 30 / Uncommon 90 / Rare 250 / Legendary 500. Easter-egg items
+(§6, the Ferryman's Oar included) can't be sold: they can be claimed once per life, so a price would
+make them a coin faucet (F12 review).
 
 ### 1.6 Horses (M11 extra #2; code: `packages/shared/src/content/horse.ts`) (new)
 
@@ -536,7 +538,7 @@ Tidewrath stays in the shallows 10–25 m out.
 | Item | Value |
 |---|---|
 | HP₂ | **28,000** (n = 3: 37,800 · n = 4: 47,600). Modelled 2-player kill ≈ 5.2 min with two L13 players on T3 weapons |
-| **Co-op: Royal Judgement** | Every 20 s (P2 18 s, P3 15 s): a **4 m cursed circle** marks one player's position (2.0 s telegraph: a crown sigil falls, a bell tolls three times, a countdown ring). Detonation deals **276 true damage (120% of a L14 player's HP), split equally among players inside**. An **empty circle deals 276 to every player in the arena**. One player inside dies; two take 138 each (60%); three take 92. The damage ignores block, Prism Bubble and i-frames, so solo is impossible |
+| **Co-op: Royal Judgement** | Every 20 s (P2 18 s, P3 15 s): a **4 m cursed circle** marks one player's position (2.0 s telegraph: a crown sigil falls, a bell tolls three times, a countdown ring). Detonation deals **276 true damage (120% of a L14 player's HP), split equally among players inside**. An **empty circle deals 276 to every player in the arena**. One player inside dies; two take 138 each (60%); three take 92. Against higher-level players the total is 120% of the highest max HP among those taking it (348 at L20), so it stays lethal solo at any level (F12 review). The damage ignores block, Prism Bubble and i-frames, so solo is impossible |
 | Breakable cover | 8 stone **Pillars** (HP 600, heavy only). A broken pillar topples along a line (1.0 s creak + dust line): 80 to anyone under it. If it hits the King: 1,000 damage + 3 s stagger, and his rib cage opens (×1.5 for 3 s). Pews (HP 60, light) block Bone Volley |
 
 | Phase | Trigger | Attacks: damage at L14 (telegraph) |
@@ -574,7 +576,7 @@ Tidewrath stays in the shallows 10–25 m out.
 | HP₂ | **30,000** (n = 3: 40,500 · n = 4: 51,000). Modelled 2-player kill ≈ 5.8 min with two L19 players on T3 weapons |
 | Armour | takes **25%** damage except during Asset Freeze |
 | **Co-op 1: Asset Freeze** (plates) | Two **Override Consoles** **32 m apart** (≥ 25 m) at opposite yard edges. Both held for **3 s** together → the Receiver kneels for **8 s**, the rear reactor hatch opens (**×1.5**, 100% elsewhere). Consoles then lock for 15 s. +0.25% max HP/s regeneration if no Freeze in the last 45 s |
-| **Co-op 2: Foreclosure** (split circle) | From P2: every 20 s (P3 18 s) a **4.5 m circle** stamps one player's position (2.0 s: amber hologram stamp + klaxon). **348 true damage (120% of a L20 player's HP), split among players inside**; an empty circle deals 348 to every player in the arena |
+| **Co-op 2: Foreclosure** (split circle) | From P2: every 20 s (P3 18 s) a **4.5 m circle** stamps one player's position (2.0 s: amber hologram stamp + klaxon). **348 true damage (120% of a L20 player's HP), split among players inside**; an empty circle deals 348 to every player in the arena (same 120%-of-the-sturdiest-victim floor as Royal Judgement) |
 | Combined (P3) | Both run at once on independent timers. A 2-player team must sequence them (soak the circle together, then run to the consoles); 3–4 players can split roles |
 | Breakable cover | 8 **Freight Containers** (HP 900, heavy only; Sweep Laser hits deal 300 to them). 4 **Crane Legs** (HP 1,500): breaking one drops the crane arm along a line (1.2 s groan + shadow line), 120 to players; if it hits the Receiver: 2,000 damage + a 3 s kneel (hatch open) |
 
@@ -633,6 +635,9 @@ Rules:
 - The hidden medal is earned once per account and stays hidden in the medal list until earned.
 - The first account to claim each egg is engraved on that egg's plaque in Portus's **Hall of Firsts**
   (D): 9 plaques.
+- Anti-abuse (F12 review): a wrong E2/E5 answer locks that puzzle for the account for 15 s. Penalty
+  spawns dissolve after 90 s, are capped at 6 per account and 12 per world copy, and pay nothing when
+  killed (no XP, coins or drops). The E7 keypad locks an account out for 60 s after 5 wrong codes in a row.
 
 | # | Planet | Name | Location concept | How to find it | Rare item | Hidden medal |
 |---|---|---|---|---|---|---|

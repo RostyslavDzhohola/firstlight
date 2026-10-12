@@ -19,7 +19,7 @@ import type { Terrain } from "./terrain.ts";
 
 // ------------------------------------------------------------------------------------ archetypes
 
-export const BREAKABLE_ARCHETYPES = ["crate", "barrel", "fence", "statue", "pillar", "campwall", "cover"] as const;
+export const BREAKABLE_ARCHETYPES = ["crate", "barrel", "fence", "statue", "pillar", "campwall", "cover", "fueldrum"] as const;
 export type BreakableArchetype = (typeof BREAKABLE_ARCHETYPES)[number];
 
 /** "light" props break to light or heavy weapons; "heavy" props only to heavy ones (content.md §2.2). */
@@ -84,7 +84,15 @@ const ARCHETYPES: Record<BreakableArchetype, ArchetypeDef> = {
   campwall: { hp: 600, size: "heavy", rebuildS: 300, collider: { kind: "box", hx: 2.0, hz: 0.3, h: 2.6 }, maxStep: 1.1 },
   // Boss-arena cover differs per planet (content.md §4): see COVER below.
   cover: { hp: 400, size: "heavy", rebuildS: 180, collider: { kind: "cyl", r: 0.8, h: 3.0 }, maxStep: 0.9 },
+  // Meridian camps only (content.md §2.2): any hit (fists too) damages it; it explodes when it breaks.
+  fueldrum: { hp: 30, size: "light", rebuildS: 240, collider: { kind: "cyl", r: 0.36, h: 0.95 }, maxStep: 0.35 },
 };
+
+/**
+ * Fuel drum blast (content.md §2.2): share of each victim's max HP, 25% at the centre → 8% at 3.5 m.
+ * Props in the blast (and a Prism Bubble shell that stops it) take `props` with the usual falloff.
+ */
+export const FUEL_DRUM_BLAST = { radius: 3.5, centre: 0.25, edge: 0.08, props: 60 } as const;
 
 /** Boss-arena cover per planet: Coral Pillars (Gull Point), Nave pillars, Freight Containers. */
 const COVER: Partial<Record<BodyId, ArchetypeDef>> = {
@@ -267,6 +275,13 @@ function crates(rng: Rng, o: ItemSink) {
   o.add("crate", 0.55 * s1 + 0.55 * s2 + 0.08, jit(rng, 0.15), jit(rng, 0.25), s2);
   if (rng() < 0.6) o.add("crate", 0.2, 0.55 * s1 + 0.55 + 0.1, jit(rng, 0.4), 0.85 + rng() * 0.2);
   if (rng() < 0.7) o.add("barrel", -0.55 * s1 - 0.65, 0.3, rng() * TAU, 0.92 + rng() * 0.15);
+}
+
+/** Two or three fuel drums (Meridian camps). */
+function fuelDrums(rng: Rng, o: ItemSink) {
+  o.add("fueldrum", 0, 0, rng() * TAU, 1);
+  o.add("fueldrum", 0.85, 0.1, rng() * TAU, 1);
+  if (rng() < 0.7) o.add("fueldrum", 0.4, 0.8, rng() * TAU, 1);
 }
 
 function barrels(rng: Rng, o: ItemSink) {
@@ -506,6 +521,11 @@ const SITES: Partial<Record<BodyId, SiteDef[]>> = {
         o.add("cover", 0, 0, 0);
         o.begin(5, 16, rot);
         o.add("cover", 0, 0, 0);
+        // Fuel drums (appended so the ids above don't shift): by the gate and behind the crates.
+        o.begin(2, 5, rng() * TAU);
+        fuelDrums(rng, o);
+        o.begin(-7, -4, rng() * TAU);
+        fuelDrums(rng, o);
       },
     },
     {

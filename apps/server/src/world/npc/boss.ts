@@ -14,14 +14,14 @@
 
 import type { ArenaCover, ArenaLayout } from "@firstlight/shared/content/arenas";
 import {
-  NF, NPC_ANIM, NPC_INDEX, SHAPE_CODE, attackDamage, bossMaxHp, npcDef,
+  NF, NPC_ANIM, NPC_INDEX, SHAPE_CODE, attackDamage, bossMaxHp, npcDef, splitTotal,
   type AttackDef, type BossDef, type BossEventMsg, type NpcAttackMsg, type NpcDef,
 } from "@firstlight/shared/content/npcs";
 import { partyOf } from "../../social/parties.ts";
 import { actorPos, type NpcActor, type PlayerActor } from "../actors.ts";
 import { dealDamage, type BreakableHost } from "../combat.ts";
 import type { V3 } from "../geometry.ts";
-import { cancelAttack, playersInCircle, playersInLine, startAttack, updateAttack } from "./attacks.ts";
+import { cancelAttack, chest, playersInCircle, playersInLine, startAttack, updateAttack } from "./attacks.ts";
 import { aggro } from "./brain.ts";
 import type { LivePlayer, NpcSystem } from "./NpcSystem.ts";
 import { MODE, type ActiveAttack, type Npc } from "./npc.ts";
@@ -742,7 +742,8 @@ export class BossController {
         if (dot(tangentDir(n.pos, lp.pos), beam) < cosTol) continue;
         if (this.blocked(n.pos, lp.pos, a)) continue;
         at.hitIds.add(lp.a.id);
-        this.sys.hitPlayer(n, lp.a, attackDamage(a, n.level), { fromDir: sub(n.pos, lp.pos) });
+        // The beam comes from the Receiver's body: a Prism Bubble shell in between takes it.
+        this.sys.hitPlayer(n, lp.a, attackDamage(a, n.level), { fromDir: sub(n.pos, lp.pos), src: chest(n.pos, 2) });
       }
     }
   }
@@ -840,7 +841,6 @@ export class BossController {
     const a = m.atk;
     switch (m.kind) {
       case "split": {
-        const total = a ? attackDamage(a, n.level) : 0;
         const inside = playersInCircle(this.sys, m.centre, m.radius, 0, 4);
         let victims: PlayerActor[];
         if (inside.length) victims = inside.map((lp) => lp.a);
@@ -850,6 +850,8 @@ export class BossController {
           const ids = new Set([...(m.participants ?? []), ...this.inArena.filter((lp) => !lp.untouchable).map((lp) => lp.a.identity.userId)]);
           victims = [...this.sys.world.players()].filter((p) => ids.has(p.identity.userId) && !p.dead);
         }
+        // 120% of the sturdiest victim's max HP (never less than listed): lethal solo at any level.
+        const total = a ? splitTotal(attackDamage(a, n.level), victims.map((p) => p.state.maxHp)) : 0;
         const each = inside.length ? total / inside.length : total;
         for (const lp of inside) this.soakers.add(lp.a.identity.userId);
         for (const p of victims) this.sys.hitPlayer(n, p, each, { trueDamage: true });
@@ -978,7 +980,7 @@ export class BossController {
       arc: (...args) => inner?.arc(...args),
       // Shots still reach a player standing inside a prop or a cover cylinder (F12), and movement
       // footing stays the destruction system's.
-      contains: (index, p) => (index < COVER_INDEX ? !!inner?.contains(index, p) : this.coverContains(index - COVER_INDEX, p)),
+      contains: (index, p) => (index < COVER_INDEX ? !!inner?.contains?.(index, p) : this.coverContains(index - COVER_INDEX, p)),
       footing: (x, y, z, step) => inner?.footing?.(x, y, z, step) ?? NO_FOOTING,
     };
     host.props = this.coverHost;

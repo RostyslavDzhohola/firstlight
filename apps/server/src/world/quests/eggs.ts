@@ -5,7 +5,8 @@
 //
 // E8 (shoot the billboard lamps) tests hitscan "shot" broadcasts (observed by QuestSystem) against
 // the five lamp spheres. Projectiles don't count (by design the lamps are a Stillshot job: 62 m up,
-// out of every other hitscan's range).
+// out of every other hitscan's range). Each player has their own sequence and sees their own lamps
+// go dark, so nobody can block someone else's run by shooting a lamp first.
 
 import type { Client } from "@colyseus/core";
 import { EGG_RULES, type EggId } from "@firstlight/shared/content/secrets";
@@ -17,6 +18,35 @@ import { emitGameEvent } from "../events.ts";
 import { dist3, type V3 } from "../geometry.ts";
 import type { QuestPlayer, QuestSystem, ShotMsg } from "./QuestSystem.ts";
 
+/**
+ * Anti-abuse limits on the puzzles (server tuning, not content; tests change and restore them).
+ * A wrong E2/E5 answer raises penalty NPCs: the puzzle then locks for that account for `lockMs`,
+ * penalty NPCs dissolve after `ttlMs`, and at most `perPlayer` (per account) and `perBody` (per room)
+ * are alive at once. The E7 keypad locks an account out for `keypadLockMs` after `keypadTries`
+ * wrong codes in a row.
+ */
+export const EGG_LIMITS = {
+  lockMs: 15_000,
+  ttlMs: 90_000,
+  perPlayer: 6,
+  perBody: 12,
+  keypadTries: 5,
+  keypadLockMs: 60_000,
+  /** Wrong keypad codes are forgotten after this long without another try. */
+  keypadIdleMs: 10 * 60_000,
+};
+
+/**
+ * Account timers at process level, not per room, so switching copies or bodies and recreating a room
+ * don't reset them (F12 review S2). A server restart does reset them: they are short anti-abuse timers.
+ */
+export const EGG_TIMERS = {
+  /** `${userId}|${egg}` → when that puzzle unlocks again after a wrong answer. */
+  puzzles: new Map<string, number>(),
+  /** userId → wrong E7 codes in a row, the lockout end (0 = none) and the last try. */
+  keypads: new Map<string, { fails: number; until: number; last: number }>(),
+};
+
 const RIDDLES: Partial<Record<EggId, string>> = {
   E2: "The plaque reads: “Rain feeds the leaf, the leaf drinks the sun, the sun lights the ember.” Four buttons: raindrop, leaf, sun, flame.",
   E5: "The plaque reads: “Ring for the dead, then the lost, then the living.” Three ropes: skull, broken lantern, candle.",
@@ -25,8 +55,8 @@ const RIDDLES: Partial<Record<EggId, string>> = {
 export class EggLogic {
   private readonly sys: QuestSystem;
   private readonly lamps: WorldObjectDef[];
-  /** Lamp id → when it relights (ms); absent = lit. */
-  private readonly lampsOff = new Map<string, number>();
+  /** Session id → lamp id → when that player's lamp relights (ms); absent = lit. */
+  private readonly dark = new Map<string, Map<string, number>>();
 
   constructor(sys: QuestSystem) {
     this.sys = sys;
@@ -34,7 +64,7 @@ export class EggLogic {
   }
 
   syncTo(c: Client) {
-    for (const id of this.lampsOff.keys()) c.send("lamp", { id, on: false });
+    for (const id of this.dark.get(c.sessionId)?.keys() ?? []) c.send("lamp", { id, on: false });
   }
 
   // ---------------------------------------------------------------- per tick
@@ -58,10 +88,19 @@ export class EggLogic {
   }
 
   tickRoom(now: number) {
-    for (const [id, until] of this.lampsOff) {
-      if (until > now) continue;
-      this.lampsOff.delete(id);
-      this.sys.room.broadcast("lamp" as never, { id, on: true } as never);
+    for (const [k, until] of EGG_TIMERS.puzzles) if (until <= now) EGG_TIMERS.puzzles.delete(k);
+    for (const [k, v] of EGG_TIMERS.keypads) {
+      if (v.until > now) continue; // locked out: keep
+      if (v.until || now - v.last >= EGG_LIMITS.keypadIdleMs) EGG_TIMERS.keypads.delete(k); // lockout over, or idle
+    }
+    for (const [sid, lamps] of this.dark) {
+      const a = this.sys.actor(sid);
+      for (const [id, until] of lamps) {
+        if (until > now && a) continue;
+        lamps.delete(id);
+        a?.client.send("lamp", { id, on: true });
+      }
+      if (!lamps.size) this.dark.delete(sid);
     }
   }
 
@@ -78,8 +117,19 @@ export class EggLogic {
     this.sys.teleport(a, this.sys.around(d, 1.5, -1.5));
   }
 
-  private penalty(a: PlayerActor, npcKind: string, count: number) {
-    emitGameEvent(this.sys.room, { type: "spawnRequest", reason: "egg", npcKind, count, pos: actorPos(a), playerId: a.id });
+  private penalty(a: PlayerActor, egg: EggId, npcKind: string, count: number) {
+    EGG_TIMERS.puzzles.set(`${a.identity.userId}|${egg}`, Date.now() + EGG_LIMITS.lockMs);
+    emitGameEvent(this.sys.room, { type: "spawnRequest", reason: "egg", npcKind, count, pos: actorPos(a), playerId: a.id, egg });
+  }
+
+  /** The account is locked out of the E7 keypad right now. */
+  keypadLocked(userId: string, now = Date.now()): boolean {
+    return (EGG_TIMERS.keypads.get(userId)?.until ?? 0) > now;
+  }
+
+  /** Milliseconds until the account may try this puzzle again (0 = open). */
+  lockedFor(userId: string, egg: EggId, now = Date.now()): number {
+    return Math.max(0, (EGG_TIMERS.puzzles.get(`${userId}|${egg}`) ?? 0) - now);
   }
 
   // ---------------------------------------------------------------- triggers
@@ -114,6 +164,11 @@ export class EggLogic {
       case "E2":
       case "E5": {
         if (o.part === "plaque") return toast(RIDDLES[egg]!);
+        const wait = this.lockedFor(a.identity.userId, egg, now);
+        if (wait > 0) {
+          const s = Math.ceil(wait / 1000);
+          return toast(egg === "E2" ? `The cabinet is rebooting… (${s} s)` : `The ropes hang still. The bells are not ready (${s} s).`, "warn");
+        }
         const order: readonly string[] = egg === "E2" ? EGG_RULES.E2_ORDER : EGG_RULES.E5_ORDER;
         const seq = q.seq[egg];
         if (o.part === order[seq.length]) {
@@ -128,10 +183,10 @@ export class EggLogic {
         q.seq[egg] = [];
         if (egg === "E2") {
           toast("The cabinet buzzes: GAME OVER. Something hops out of the ruins!", "warn");
-          this.penalty(a, "hopbit", EGG_RULES.E2_PENALTY_HOPBITS);
+          this.penalty(a, egg, "hopbit", EGG_RULES.E2_PENALTY_HOPBITS);
         } else {
           toast("A wrong note. The water stirs and bones rise!", "warn");
-          this.penalty(a, "bonewalker", EGG_RULES.E5_PENALTY_BONEWALKERS);
+          this.penalty(a, egg, "bonewalker", EGG_RULES.E5_PENALTY_BONEWALKERS);
         }
         return;
       }
@@ -156,16 +211,26 @@ export class EggLogic {
       case "E6":
         if (this.isOpen(q, "E6")) return this.sys.claimEgg(a, "E6");
         return toast("The bell hangs from the “floor” above, out of reach from this side.");
-      case "E7":
+      case "E7": {
+        const k = EGG_TIMERS.keypads.get(a.identity.userId);
+        if (k && k.until > now) return toast(`KEYPAD LOCKED. Try again in ${Math.ceil((k.until - now) / 1000)} s`, "warn");
         if (code === undefined) {
           a.client.send("prompt", { kind: "keypad", target: o.id });
           return;
         }
         if (code === EGG_RULES.E7_CODE) {
+          EGG_TIMERS.keypads.delete(a.identity.userId);
           toast("The safe clicks open.");
           return this.sys.claimEgg(a, "E7");
         }
+        const fails = (k?.fails ?? 0) + 1;
+        if (fails >= EGG_LIMITS.keypadTries) {
+          EGG_TIMERS.keypads.set(a.identity.userId, { fails: 0, until: now + EGG_LIMITS.keypadLockMs, last: now });
+          return toast(`ACCESS DENIED. KEYPAD LOCKED for ${Math.round(EGG_LIMITS.keypadLockMs / 1000)} s`, "warn");
+        }
+        EGG_TIMERS.keypads.set(a.identity.userId, { fails, until: 0, last: now });
         return toast("ACCESS DENIED", "warn");
+      }
       case "E8":
         if (this.isOpen(q, "E8")) {
           toast("The hatch opens into the Signal Room. A wall of CRTs flickers; a cloak of static hangs on a hook.");
@@ -207,14 +272,16 @@ export class EggLogic {
     const d: V3 = [m.dx, m.dy, m.dz];
     const maxT = m.hit ? dist3(o, m.hit) : (w?.falloffTo ?? w?.range ?? 0);
     const now = Date.now();
+    const q = this.sys.qp(a);
+    let dark = this.dark.get(a.id);
     for (const lamp of this.lamps) {
-      if (this.lampsOff.has(lamp.id)) continue;
+      if ((dark?.get(lamp.id) ?? 0) > now) continue; // already out for this player
       const c = this.sys.pos(lamp);
       const t = raySphere(o, d, c, EGG_RULES.E8_LAMP_RADIUS);
       if (t === null || t > maxT + EGG_RULES.E8_LAMP_RADIUS) continue;
-      this.lampsOff.set(lamp.id, now + EGG_RULES.E8_WINDOW_MS);
-      this.sys.room.broadcast("lamp" as never, { id: lamp.id, on: false } as never);
-      const q = this.sys.qp(a);
+      if (!dark) this.dark.set(a.id, (dark = new Map()));
+      dark.set(lamp.id, now + EGG_RULES.E8_WINDOW_MS);
+      a.client.send("lamp", { id: lamp.id, on: false });
       if (!q.e8.hit.size || now - q.e8.startedAt > EGG_RULES.E8_WINDOW_MS) q.e8 = { hit: new Set(), startedAt: now };
       q.e8.hit.add(lamp.id);
       if (q.e8.hit.size >= EGG_RULES.E8_LAMPS) {

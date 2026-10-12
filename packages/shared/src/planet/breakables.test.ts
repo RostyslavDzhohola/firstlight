@@ -120,7 +120,11 @@ describe("breakable placement", () => {
   it("every planet has every archetype; nothing sits in a boss arena (the NPC lane owns arena cover)", () => {
     for (const id of PLANET_IDS) {
       const kinds = new Set(bodyBreakables(terrains[id]).map((b) => b.kind));
-      for (const a of BREAKABLE_ARCHETYPES) expect(kinds, `${id} ${a}`).toContain(a);
+      // Fuel drums are Meridian camp props (content.md §2.2); everything else is on every planet.
+      for (const a of BREAKABLE_ARCHETYPES) {
+        if (a === "fueldrum" && id !== "meridian") expect(kinds, `${id} ${a}`).not.toContain(a);
+        else expect(kinds, `${id} ${a}`).toContain(a);
+      }
       const arena = bossArena(terrains[id])!;
       expect(arena).toBeTruthy();
       for (const b of bodyBreakables(terrains[id])) {
@@ -149,7 +153,7 @@ describe("breakable placement", () => {
       const size = archetypeDef("arcadia", a).size;
       expect(canBreak(size, "heavy")).toBe(true);
       expect(canBreak(size, "none")).toBe(false);
-      expect(canBreak(size, "light")).toBe(a === "crate" || a === "barrel" || a === "fence");
+      expect(canBreak(size, "light")).toBe(a === "crate" || a === "barrel" || a === "fence" || a === "fueldrum");
     }
   });
 });

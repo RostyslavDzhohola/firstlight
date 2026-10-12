@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Room } from "@colyseus/sdk";
 import { BODIES, padDirs } from "@firstlight/shared";
+import { PF } from "@firstlight/shared/net/schema";
 import type { Game } from "../src/app.ts";
 import { RULES } from "../src/world/BodyRoom.ts";
+import { pileStore } from "../src/world/piles.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 
 let game: Game;
@@ -43,6 +45,12 @@ async function setup(body = "arcadia") {
   return { a, b };
 }
 
+/** Out of the safe ring and spawn protection, as the server sees it. */
+function readyToFight(r: Room): boolean {
+  const s = st(r).players.get(r.sessionId);
+  return !!s && !(s.flags & PF.SAFE) && !(s.flags & PF.PROTECTED);
+}
+
 function place(r: Room, p: [number, number, number]) {
   r.send("admin", { cmd: "teleport", args: { x: p[0], y: p[1], z: p[2] } });
   r.send("admin", { cmd: "unprotect" });
@@ -67,7 +75,7 @@ describe("combat (seam 1)", () => {
     place(a, awayFromPad(40));
     place(b, awayFromPad(52));
     await waitFor(() => Math.abs(Math.hypot(me(a).x - me(b).x, me(a).y - me(b).y, me(a).z - me(b).z) - 12) < 1.5 && !(me(b).flags & 2));
-    await new Promise((r) => setTimeout(r, 300));
+    await waitFor(() => readyToFight(a) && readyToFight(b));
     const before = st(a).players.get(b.sessionId).hp;
     a.send("fire", { slot: 0, ...aimAt(a, b), t: Date.now() });
     await waitFor(() => st(a).players.get(b.sessionId).hp < before);
@@ -77,7 +85,7 @@ describe("combat (seam 1)", () => {
     const { a, b } = await setup("portus");
     a.send("admin", { cmd: "unprotect" });
     b.send("admin", { cmd: "unprotect" });
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => !(me(a).flags & PF.PROTECTED) && !(st(a).players.get(b.sessionId).flags & PF.PROTECTED));
     let denied = "";
     a.onMessage("denied", (m: { reason: string }) => (denied = m.reason));
     a.send("fire", { slot: 0, ...aimAt(a, b), t: Date.now() });
@@ -90,7 +98,7 @@ describe("combat (seam 1)", () => {
     const { a, b } = await setup();
     place(a, awayFromPad(40));
     place(b, awayFromPad(46));
-    await new Promise((r) => setTimeout(r, 300));
+    await waitFor(() => readyToFight(b));
     let death: any = null;
     b.onMessage("death", (m) => (death = m));
     let reborn = false;
@@ -98,6 +106,7 @@ describe("combat (seam 1)", () => {
     a.send("admin", { cmd: "damage", args: { target: b.sessionId, amount: 500 } });
     await waitFor(() => death !== null);
     expect(death.pileId).toBeTruthy();
+    expect(pileStore.current.get(death.pileId)?.kind).toBe("death"); // protected from eviction past the cap
     await waitFor(() => st(a).piles?.has(death.pileId));
     // Rebirth (a new life in Portus), then come back for the pile.
     b.send("respawn", { starter: 0, palette: 2 });
@@ -112,7 +121,7 @@ describe("combat (seam 1)", () => {
     let you: any = null;
     back.onMessage("you", (m) => (you = m));
     back.send("admin", { cmd: "teleport", args: { x: pile.x, y: pile.y, z: pile.z } });
-    await new Promise((r) => setTimeout(r, 150));
+    await waitFor(() => Math.hypot(me(back).x - pile.x, me(back).y - pile.y, me(back).z - pile.z) < 1.5);
     back.send("pickup", { pileId: death.pileId });
     // The old life's Sunbrand (Brother Ash's starter) is back, next to the new Hexquill.
     await waitFor(() => !!you && JSON.stringify(you.hotbar).includes("sunbrand"));
@@ -120,38 +129,48 @@ describe("combat (seam 1)", () => {
   });
 
   it("logging out outside a safe zone takes a countdown; inside it is instant", async () => {
-    RULES.LOGOUT_MS = 300;
-    const first = await setup();
-    let out = false;
-    first.a.onMessage("loggedOut", () => (out = true));
-    first.a.send("logout", { start: true }); // still on the pad: instant
-    await waitFor(() => out);
-    // Logging out disconnects; come back and try again outside the safe zone.
-    const a = await joinAs(game, "shooter", "arcadia", {}, "admin");
-    rooms.push(a);
-    a.onMessage("loggedOut", () => (out = true));
-    out = false;
-    await waitFor(() => (a.state as any).players?.has(a.sessionId));
-    place(a, awayFromPad(40));
-    await new Promise((r) => setTimeout(r, 200));
-    a.send("logout", { start: true });
-    await new Promise((r) => setTimeout(r, 100));
-    expect(out).toBe(false);
-    await waitFor(() => out, 2000);
-    RULES.LOGOUT_MS = 30_000;
+    const saved = RULES.LOGOUT_MS;
+    RULES.LOGOUT_MS = 1500;
+    try {
+      const first = await setup();
+      let out = false;
+      first.a.onMessage("loggedOut", () => (out = true));
+      first.a.send("logout", { start: true }); // still on the pad: instant
+      await waitFor(() => out);
+      // Logging out disconnects; come back and try again outside the safe zone.
+      const a = await joinAs(game, "shooter", "arcadia", {}, "admin");
+      rooms.push(a);
+      a.onMessage("loggedOut", () => (out = true));
+      out = false;
+      await waitFor(() => (a.state as any).players?.has(a.sessionId));
+      place(a, awayFromPad(40));
+      await waitFor(() => readyToFight(a));
+      const started = Date.now();
+      a.send("logout", { start: true });
+      await waitFor(() => out, 4000);
+      // The countdown ran (not instant): it took most of LOGOUT_MS.
+      expect(Date.now() - started).toBeGreaterThanOrEqual(1000);
+    } finally {
+      RULES.LOGOUT_MS = saved;
+    }
   });
 
   it("closing the game outside a safe zone leaves the body in the world for a while", async () => {
-    RULES.LINGER_MS = 400;
-    const { a, b } = await setup();
-    place(b, awayFromPad(40));
-    await new Promise((r) => setTimeout(r, 200));
-    const id = b.sessionId;
-    await b.leave(true);
-    rooms.splice(rooms.indexOf(b), 1);
-    await new Promise((r) => setTimeout(r, 100));
-    expect(st(a).players.has(id)).toBe(true);
-    await waitFor(() => !st(a).players.has(id), 2000);
-    RULES.LINGER_MS = 30_000;
+    const saved = RULES.LINGER_MS;
+    RULES.LINGER_MS = 1500;
+    try {
+      const { a, b } = await setup();
+      place(b, awayFromPad(40));
+      await waitFor(() => readyToFight(b));
+      const id = b.sessionId;
+      const left = Date.now();
+      await b.leave(true);
+      rooms.splice(rooms.indexOf(b), 1);
+      expect(st(a).players.has(id)).toBe(true);
+      await waitFor(() => !st(a).players.has(id), 4000);
+      expect(Date.now() - left).toBeGreaterThanOrEqual(1000); // it lingered, not removed at once
+    } finally {
+      RULES.LINGER_MS = saved;
+    }
   });
 });

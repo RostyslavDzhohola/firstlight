@@ -5,11 +5,11 @@ import type { BodyId } from "@firstlight/shared";
 import { BACKPACK_SLOTS, type CharacterData, type LifeProgress } from "@firstlight/shared/content/character";
 import { STARTERS } from "@firstlight/shared/content/weapons";
 import type { InvItem } from "@firstlight/shared/net/protocol";
-import { dropPile, ensureAccount, getPile, listPiles, loadCharacter, saveCharacter, takeAll, takeItem, type Db } from "../db/index.ts";
+import { dropPile, ensureAccount, getPile, listPiles, loadCharacter, PILE_CAP_PER_BODY, saveCharacter, sweepPiles, takeAll, takeItem, type Db } from "../db/index.ts";
 import { tx } from "../db/game-db.ts";
 import type { Pile } from "../db/piles.ts";
 import type { CharacterRepo } from "./characters.ts";
-import type { PileData, PileStore } from "./piles.ts";
+import type { PileData, PileKind, PileStore } from "./piles.ts";
 
 interface StoredInventory {
   hotbar: (InvItem | null)[];
@@ -109,13 +109,21 @@ function toPileData(p: Pile<InvItem>): PileData {
     createdAt: p.createdAt,
     items: p.items.map((e) => e.item),
     coins: p.coins,
+    kind: (p.kind as PileKind) || "death",
+    ...(p.expiresAt !== null ? { expiresAt: p.expiresAt } : {}),
   };
 }
 
 export class SqlitePileStore implements PileStore {
   private readonly db: Db;
-  constructor(db: Db) {
+  private readonly cap: number;
+  constructor(db: Db, cap = PILE_CAP_PER_BODY) {
     this.db = db;
+    this.cap = cap;
+  }
+
+  sweep(body: BodyId, now: number): string[] {
+    return sweepPiles(this.db, body, now).map(String);
   }
 
   list(body: BodyId): PileData[] {
@@ -138,7 +146,9 @@ export class SqlitePileStore implements PileStore {
       ownerId: input.ownerUserId || null,
       ownerName: input.owner,
       now: input.createdAt,
-    });
+      kind: input.kind ?? "death",
+      expiresAt: input.expiresAt ?? null,
+    }, this.cap);
     return { pile: toPileData(pile), evicted: evicted.map(String) };
   }
 
