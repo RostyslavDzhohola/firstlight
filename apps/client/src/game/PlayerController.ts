@@ -7,6 +7,7 @@ import * as THREE from "three/webgpu";
 import type { Terrain } from "@firstlight/shared";
 import { emptyContact, type PropContact } from "@firstlight/shared/planet/collide";
 import { ANIM } from "@firstlight/shared/net/schema";
+import { deepWater, SWIM_FLOAT } from "@firstlight/shared/planet/water";
 import type { Input } from "./input.ts";
 import { mountedSpeed, rideCamera } from "./mount.ts";
 
@@ -225,12 +226,12 @@ export class PlayerController {
     const r = this.pos.length();
     const waterR = R + this.waterLevel;
     const groundR = Math.max(R + ground, floorR);
-    const deep = ground < this.waterLevel - 1.2 && floorR === 0;
+    const deep = deepWater(ground, this.waterLevel) && floorR === 0; // the server's rule too
     const wasOnGround = this.onGround;
     if (deep && r <= waterR - 1.0) {
       this.swimming = true;
       this.onGround = false;
-      this.pos.copy(newUp).multiplyScalar(waterR - 1.05);
+      this.pos.copy(newUp).multiplyScalar(waterR - SWIM_FLOAT);
       this.fallStartRadius = this.pos.length();
     } else if (r <= groundR) {
       this.pos.copy(newUp).multiplyScalar(groundR);

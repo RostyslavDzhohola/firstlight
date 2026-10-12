@@ -15,6 +15,7 @@ import { z } from "zod";
 import type { Identity } from "../auth/identity.ts";
 import { actorPos, inSaddle, pushHistory, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
 import { characterRepo, withTx } from "./characters.ts";
+import { SWIM_FLOAT } from "@firstlight/shared/planet/water";
 import { CLOSE, hub, type HubRoom } from "./hub.ts";
 
 /** Ban lookup for reconnects; set at boot when the database is available. */
@@ -1264,7 +1265,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     const d = l > 1e-6 && Number.isFinite(l) ? norm(p) : (padDirs(this.bodyDef)[0]! as V3);
     const g = this.terrain.groundHeight(d[0], d[1], d[2]);
     const R = this.bodyDef.radius;
-    const r = R + Math.max(g, this.bodyDef.waterLevel - 1.05) + 0.02;
+    const r = R + Math.max(g, this.bodyDef.waterLevel - SWIM_FLOAT) + 0.02;
     return [d[0] * r, d[1] * r, d[2] * r];
   }
 

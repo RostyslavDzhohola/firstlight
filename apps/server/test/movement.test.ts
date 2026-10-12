@@ -15,6 +15,7 @@ import { HORSE } from "@firstlight/shared/content/horse";
 import { ANIM } from "@firstlight/shared/net/schema";
 import { isSafe, type Breakable } from "@firstlight/shared";
 import { emptyContact, PLAYER_BODY } from "@firstlight/shared/planet/collide";
+import { SWIM_DEPTH } from "@firstlight/shared/planet/water";
 import type { BodyId } from "@firstlight/shared";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 import { characterRepo } from "../src/world/characters.ts";
@@ -310,6 +311,71 @@ function deepWater(): V3 {
   }
   throw new Error("no deep water found");
 }
+
+describe("wading at lake edges (F12 final Opus SF2)", () => {
+  for (const body of ["arcadia", "hollowmere", "meridian"] as const) {
+    it(`${body}: running through shallows the client wades (ground 1.0–1.2 m under the surface) is never corrected`, async () => {
+      const def = BODIES[body];
+      const Rb = def.radius;
+      const tr = createTerrain(def);
+      const wl = def.waterLevel;
+      const band = (d: V3) => {
+        const g = tr.groundHeight(d[0], d[1], d[2]);
+        return g >= wl - SWIM_DEPTH && g < wl - 1.0;
+      };
+      // The longest straight run inside the band (deterministic scan).
+      const rnd = (x: number) => {
+        const v = Math.sin(x * 12.9898) * 43758.5453;
+        return v - Math.floor(v);
+      };
+      let best: { d: V3; t: V3; run: number } | null = null;
+      for (let i = 0; i < 6000 && !(best && best.run >= 8); i++) {
+        const d = norm([rnd(i) * 2 - 1, rnd(i + 0.3) * 2 - 1, rnd(i + 0.7) * 2 - 1]);
+        if (!band(d) || isSafe(def, d[0] * Rb, d[1] * Rb, d[2] * Rb)) continue;
+        const e1 = tangent(d);
+        const e2 = norm([d[1] * e1[2] - d[2] * e1[1], d[2] * e1[0] - d[0] * e1[2], d[0] * e1[1] - d[1] * e1[0]]);
+        for (let j = 0; j < 16; j++) {
+          const a = (j / 16) * Math.PI * 2;
+          const t = norm([e1[0] * Math.cos(a) + e2[0] * Math.sin(a), e1[1] * Math.cos(a) + e2[1] * Math.sin(a), e1[2] * Math.cos(a) + e2[2] * Math.sin(a)]);
+          let run = 0;
+          for (let m = 0.3; m < 30; m += 0.3) {
+            if (band(norm([d[0] * Rb + t[0] * m, d[1] * Rb + t[1] * m, d[2] * Rb + t[2] * m]))) run = m;
+            else break;
+          }
+          if (!best || run > best.run) best = { d, t, run };
+        }
+      }
+      expect(best!.run).toBeGreaterThan(3);
+      const at = (m: number): V3 => {
+        const q = norm([best!.d[0] * Rb + best!.t[0] * m, best!.d[1] * Rb + best!.t[1] * m, best!.d[2] * Rb + best!.t[2] * m]);
+        const r = Rb + tr.groundHeight(q[0], q[1], q[2]);
+        return [q[0] * r, q[1] * r, q[2] * r];
+      };
+      const r = await joinAs(game, `wader_${body}`, body, {}, "admin");
+      rooms.push(r);
+      await waitFor(() => !!me(r));
+      const p0 = at(0);
+      r.send("admin", { cmd: "teleport", args: { x: p0[0], y: p0[1], z: p0[2] } });
+      await waitFor(() => Math.hypot(me(r).x - p0[0], me(r).y - p0[1], me(r).z - p0[2]) < 0.5);
+      let corrections = 0;
+      r.onMessage("correct", () => corrections++);
+      await sleep(300);
+      corrections = 0;
+      const seq = { n: 10 };
+      // There and back at a 6 m/s run, on the bottom like the client (it only swims deeper than SWIM_DEPTH).
+      for (const [from, to] of [[0, best!.run], [best!.run, 0]] as const) {
+        const n = Math.max(2, Math.round(Math.abs(to - from) / (6 * 0.05)));
+        for (let i = 1; i <= n; i++) {
+          const p = at(from + ((to - from) * i) / n);
+          send(r, seq, norm(p), Math.hypot(...p), 1);
+          await sleep(50);
+        }
+      }
+      await sleep(150);
+      expect(corrections).toBe(0);
+    }, 30_000);
+  }
+});
 
 describe("swimming (F12 S3)", () => {
   it("swims at swim speed; sprint-speed swimming and dodge bursts in the water are corrected", async () => {

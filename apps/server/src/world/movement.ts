@@ -12,6 +12,7 @@
 
 import { HORSE, rideSpeed } from "@firstlight/shared/content/horse";
 import { ANIM } from "@firstlight/shared/net/schema";
+import { deepWater, SWIM_FLOAT } from "@firstlight/shared/planet/water";
 import { inSaddle, type PlayerActor } from "./actors.ts";
 import type { V3 } from "./geometry.ts";
 import { activeMoveFx, movementLimits } from "./npc/effects.ts";
@@ -85,7 +86,7 @@ export type MoveResult =
 /** Is a body at radius `len` over `ground` floating in deep water (swim depth)? */
 function swimmingAt(w: MoveWorld, len: number, ground: number): boolean {
   const depth = len - w.radius;
-  return ground < w.waterLevel - 1 && depth >= w.waterLevel - MOVE.swimDepthSlack && depth <= w.waterLevel + 0.5;
+  return deepWater(ground, w.waterLevel) && depth >= w.waterLevel - MOVE.swimDepthSlack && depth <= w.waterLevel + 0.5;
 }
 
 /** Highest radius the body may have right now while airborne (the ballistic envelope). */
@@ -136,7 +137,7 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
   }
 
   // Below the ground, deeper in a lake than swimmers float, or inside a solid prop.
-  if (!swimming && (!(above >= -MOVE.groundTolerance) || (terrain < w.waterLevel - 1 && len - w.radius < w.waterLevel - MOVE.swimDepthSlack))) return { ok: false, reason: "ground" };
+  if (!swimming && (!(above >= -MOVE.groundTolerance) || (deepWater(terrain, w.waterLevel) && len - w.radius < w.waterLevel - MOVE.swimDepthSlack))) return { ok: false, reason: "ground" };
   // Walking into a prop is refused; a body that was put inside one (teleport, a rebuild) may walk out.
   if (foot?.inside && !w.footing!(a.lastX, a.lastY, a.lastZ, MOVE.groundedAbove).inside) return { ok: false, reason: "prop" };
   // ...and so is a step whose path goes through one with both ends outside (a thin fence; F12 final S2).
@@ -197,7 +198,7 @@ export function settle(a: PlayerActor, w: MoveWorld, now: number): V3 | null {
   if (len - w.radius - ground <= MOVE.groundedAbove) return null;
   const ceiling = airCeiling(a, now);
   if (len <= ceiling) return null;
-  const floor = w.radius + (ground < w.waterLevel - 1 ? Math.max(ground, w.waterLevel - 1.05) : ground) + 0.02;
+  const floor = w.radius + (deepWater(ground, w.waterLevel) ? Math.max(ground, w.waterLevel - SWIM_FLOAT) : ground) + 0.02;
   const target = Math.max(floor, ceiling - MOVE.airSlack);
   if (target >= len) return null;
   const k = target / len;
