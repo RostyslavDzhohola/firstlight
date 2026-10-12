@@ -22,7 +22,6 @@ import { z } from "zod";
 import { accountLinks } from "../../auth/links.ts";
 import { env } from "../../env.ts";
 import { actorPos, type PlayerActor } from "../actors.ts";
-import { withTx } from "../characters.ts";
 import type { BodyRoom } from "../BodyRoom.ts";
 import { emitGameEvent, onGameEvent, type DamageEvent, type DeathEvent, type GameEvent, type KillEvent, type SpawnRequestEvent } from "../events.ts";
 import { npcSystemOf, onNpcEvent, type NpcEvent } from "../npc/index.ts";
@@ -337,23 +336,29 @@ export class QuestSystem implements RoomSystem {
 
   /**
    * Give items (or drop the overflow at the player's feet), apply `also` (coins, flags) and save,
-   * all in one transaction with the pile write (no dupes or losses on a crash).
+   * all in one transaction with the pile write (no dupes or losses on a crash). If the save fails the
+   * character is put back as it was before `also` (room.persist, F12 B6) and false is returned.
    */
-  grant(a: PlayerActor, items: InvItem[], also?: () => void) {
+  grant(a: PlayerActor, items: InvItem[], also?: () => void): boolean {
     const events: (() => void)[] = [];
     let dropped = false;
-    withTx(() => {
-      also?.();
-      const left = items.filter((it) => !this.give(a, it));
-      if (left.length) {
-        this.room.createPile(a, left, 0, actorPos(a), events);
-        dropped = true;
-      }
-      this.room.saveActor(a);
-    });
+    try {
+      this.room.persist([a], () => {
+        also?.();
+        const left = items.filter((it) => !this.give(a, it));
+        if (left.length) {
+          this.room.createPile(a, left, 0, actorPos(a), events);
+          dropped = true;
+        }
+        this.room.saveActor(a);
+      });
+    } catch {
+      return false;
+    }
     for (const e of events) e();
     if (dropped) this.toast(a, "Your bags are full — the rest is on the ground at your feet", "warn");
     a.youDirty = true;
+    return true;
   }
 
   // ---------------------------------------------------------------- lifecycle
@@ -469,6 +474,7 @@ export class QuestSystem implements RoomSystem {
     const a = this.actor(c.sessionId);
     if (!this.allowOp(a)) return;
     const deny = (reason: string) => c.send("denied", { action: "fastTravel", reason });
+    if (Date.now() < a.combatUntil) return deny("in combat"); // no pad escapes from a fight
     const def = this.room.bodyDef;
     const pads = padDirs(def);
     if (def.padLayout === "none" || pad >= pads.length) return deny("no such pad");
@@ -508,9 +514,7 @@ export class QuestSystem implements RoomSystem {
     if (a.char.coins < cost) return fail("coins", `Not enough coins (${cost} ◎ needed)`);
     const item: InvItem = { id: itemId, tier, qty: n };
     if (!this.canStore(a, item)) return fail("full", "Your bags are full — sell or drop something first");
-    this.grant(a, [item], () => {
-      a.char.coins -= cost;
-    });
+    if (!this.grant(a, [item], () => (a.char.coins -= cost))) return fail("try again", "Couldn't complete that just now. Try again");
     c.send("shop", { ok: true, action: "buy" });
     const gate = entry.level > a.char.level ? ` (equip at level ${entry.level})` : "";
     this.toast(a, `Bought ${n > 1 ? `${n} × ` : ""}${entry.name}${tier > 1 ? ` ${"I".repeat(tier)}` : ""} for ${cost} ◎${gate}`, "coins");
@@ -531,15 +535,23 @@ export class QuestSystem implements RoomSystem {
     const n = Math.max(1, Math.min(item.qty, qty ?? item.qty));
     const value = sellValue(item, n);
     if (value <= 0) return fail("worthless", isEggItem(item) ? "Juno turns it over: “One of a kind. Keep it — nobody would believe where you found it.”" : "Juno shakes her head: “I can't sell that on.”");
-    item.qty -= n;
-    if (item.qty <= 0) list[i] = null;
-    a.char.coins += value;
-    if (slot === a.char.selected) this.room.equip(a, a.char.selected);
+    const name = itemName(item);
+    try {
+      // The sale and the save together; a failed save puts the item and coins back (F12 B6).
+      this.room.persist([a], () => {
+        item.qty -= n;
+        if (item.qty <= 0) list[i] = null;
+        a.char.coins += value;
+        if (slot === a.char.selected) this.room.equip(a, a.char.selected);
+        this.room.saveActor(a);
+      });
+    } catch {
+      return fail("try again", "Couldn't complete that just now. Try again");
+    }
     this.refreshCosmetics(a);
     a.youDirty = true;
     c.send("shop", { ok: true, action: "sell" });
-    this.toast(a, `Sold ${n > 1 ? `${n} × ` : ""}${itemName(item)} for ${value} ◎`, "coins");
-    this.room.saveActor(a);
+    this.toast(a, `Sold ${n > 1 ? `${n} × ` : ""}${name} for ${value} ◎`, "coins");
   }
 
   // ---------------------------------------------------------------- cosmetics
@@ -625,16 +637,20 @@ export class QuestSystem implements RoomSystem {
 
   completeMission(a: PlayerActor, m: CharacterMission, def: MissionDef) {
     if (m.done) return;
-    m.done = true;
-    m.progress = missionGoal(def);
-    this.room.grantXp(a, def.reward.xp);
-    this.grant(
+    const goal = missionGoal(def);
+    // The done flag, coins, items and any overflow pile commit together; a failed save leaves the
+    // mission open (it completes on the next trigger). XP and the news follow the commit (F12 B6).
+    const paid = this.grant(
       a,
       def.reward.items.map((i) => ({ ...i })),
       () => {
+        m.done = true;
+        m.progress = goal;
         a.char.coins += def.reward.coins;
       },
     );
+    if (!paid) return;
+    this.room.grantXp(a, def.reward.xp);
     const extra = def.reward.items.map((i) => `${i.qty} × ${itemName(i)}`).join(", ");
     this.toast(a, `Mission complete: ${def.name} · +${def.reward.xp} XP · +${def.reward.coins} ◎${extra ? ` · ${extra}` : ""}`, "xp");
     a.client.send("missionDone", { id: def.id, xp: def.reward.xp, coins: def.reward.coins });
@@ -654,10 +670,12 @@ export class QuestSystem implements RoomSystem {
         const ti = def.hunt.targets.findIndex((t) => t.npcKind === e.npcKind);
         if (ti < 0) continue;
         const counts = (m.counts ??= def.hunt.targets.map(() => 0));
-        if ((counts[ti] ?? 0) >= def.hunt.targets[ti]!.count) continue;
-        counts[ti] = (counts[ti] ?? 0) + 1;
-        m.progress = def.hunt.targets.reduce((s, t, k) => s + Math.min(t.count, counts[k] ?? 0), 0);
-        a.youDirty = true;
+        if ((counts[ti] ?? 0) < def.hunt.targets[ti]!.count) {
+          counts[ti] = (counts[ti] ?? 0) + 1;
+          m.progress = def.hunt.targets.reduce((s, t, k) => s + Math.min(t.count, counts[k] ?? 0), 0);
+          a.youDirty = true;
+        }
+        // Also when the count was already full: a completion whose save failed pays on the next kill.
         if (m.progress >= missionGoal(def)) this.completeMission(a, m, def);
       }
     }
@@ -756,10 +774,10 @@ export class QuestSystem implements RoomSystem {
       this.toast(a, `You already took the ${egg.itemName} in this life`, "info");
       return;
     }
-    const helped = this.assistedEggs.delete(`${a.identity.userId}|${eggId}`);
-    this.grant(a, [{ ...egg.item }], () => {
-      life.eggs.push(eggId);
-    });
+    const assistKey = `${a.identity.userId}|${eggId}`;
+    const helped = this.assistedEggs.has(assistKey);
+    if (!this.grant(a, [{ ...egg.item }], () => life.eggs.push(eggId))) return; // save failed: nothing changed, try again
+    this.assistedEggs.delete(assistKey);
     this.toast(a, `Secret found: ${egg.name} — ${egg.itemName}`, "medal");
     if (opts.assisted || helped || !this.official()) {
       this.toast(a, "Admin-assisted or staged: no medal or Hall of Firsts entry", "info");

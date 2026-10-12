@@ -25,6 +25,8 @@ export interface PlayerActor {
   lastY: number;
   lastZ: number;
   lastMoveAt: number;
+  /** Last input message received, accepted or refused (idle bodies get server gravity). */
+  lastInputAt?: number;
   joinedAt: number;
   violations: number;
   lastAttackAt: number;
@@ -44,18 +46,33 @@ export interface PlayerActor {
   diedAt: number;
   lastDamagedBy: string | null;
   youDirty: boolean;
+  /** Minor private-state change (magazine count): send `you` soon, at most every YOU_LAZY_MS. */
+  youLazy?: boolean;
+  lastYouAt?: number;
   /** Retired by a newer session or an account merge: never save, never act. */
   superseded?: boolean;
+  /** Leave hooks have run (BodyRoom.detach): no longer a connected player. */
+  detached?: boolean;
+  /** Body-removed hooks have run (BodyRoom.removeBody): gone from the room's world. */
+  removed?: boolean;
   /** Logout countdown start position (cancel if moved > 0.5 m from it). */
   logoutFrom?: [number, number, number];
   loggedOut?: boolean;
-  /** Movement budget (metres) refilled over time; dodge allowance once per cooldown. */
+  /** Movement budget (metres) refilled over time; dodge allowance once per cooldown (movement.ts). */
   moveBudget: number;
   lastBudgetAt: number;
   lastDodgeAt: number;
+  /** One-off distance (dodge, knockback) usable until `moveBonusUntil`. */
+  moveBonus: number;
+  moveBonusUntil: number;
   /** Highest radius since last grounded (server-side fall damage). */
   peakRadius: number;
   airborne: boolean;
+  swimming: boolean;
+  /** Ballistic envelope while airborne: last grounded time and radius, and the launch speed allowed. */
+  airStartAt: number;
+  airStartLen: number;
+  airLiftV: number;
   /** Server-side charge tracking (bow draw, heavy melee). */
   chargeStartedAt: number;
   specialReadyAt: number;

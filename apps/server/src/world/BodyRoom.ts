@@ -7,7 +7,6 @@ import { StateView } from "@colyseus/schema";
 import { BODIES, createTerrain, isSafe, padDirs, portalNear, portalSpots, type BodyDef, type BodyId, type PortalSpot, type Terrain } from "@firstlight/shared";
 import { BACKPACK_SLOTS, HOTBAR_SLOTS, newCharacter, type CharacterData } from "@firstlight/shared/content/character";
 import { INV_SLOTS, moveSlot, storeItem } from "@firstlight/shared/content/inventory";
-import { HORSE, rideSpeed } from "@firstlight/shared/content/horse";
 import { fallDamageFraction, levelForXp, maxHp, pvpKillXp, xpAtLevel, xpToNext } from "@firstlight/shared/content/progression";
 import { WEAPON_BY_ID, WEAPON_INDEX } from "@firstlight/shared/content/weapons";
 import { NET, PHRASES, type InvItem, type YouState } from "@firstlight/shared/net/protocol";
@@ -26,7 +25,10 @@ import { emitGameEvent, npcKindOf } from "./events.ts";
 import { emitPileEvent, onPileEvent, pileStore, type PileData, type PileKind } from "./piles.ts";
 import { SYSTEM_FACTORIES, type RoomSystem } from "./systems.ts";
 import { supportOf } from "./support.ts";
-import { activeMoveFx, movementLimits } from "./npc/effects.ts";
+import { identityCheck, storageRecovery, ticketFor, travelRedirect } from "./admission.ts";
+import { pendingSeats } from "./reservations.ts";
+import { seatRefusal } from "../social/moderation.ts";
+import { groundMotion, heightAboveSupport, motionFields, moveLimits, settle, startFall, validateMove, MOVE, type MoveWorld } from "./movement.ts";
 import { matchMaker } from "@colyseus/core";
 import { liveSessions } from "../auth/sessions.ts";
 import { accountLinks } from "../auth/links.ts";
@@ -50,16 +52,7 @@ export interface JoinOptions {
   palette?: number;
 }
 
-export const MOVE = {
-  maxSpeed: 9,
-  speedSlack: 1.2, // network jitter allowance on top of sprint speed
-  budgetCap: 3.5, // metres that can be banked (≈ 0.3 s of sprint + slack)
-  dodgeBurst: 4.5,
-  dodgeCooldownMs: 1100,
-  groundTolerance: 0.5,
-  maxJumpAbove: 2.6, // highest a jump can lift the feet above ground (with slopes)
-  swimDepthSlack: 2.5,
-};
+export { MOVE } from "./movement.ts";
 
 export const RULES = {
   LOGOUT_MS: 30_000,
@@ -70,7 +63,15 @@ export const RULES = {
   AOI_ADD: 80,
   AOI_REMOVE: 100,
   SAVE_EVERY_MS: 30_000,
+  /** A portal travel ticket must be used within this time (F12 B3). */
+  TRAVEL_TICKET_MS: 60_000,
 };
+
+/**
+ * Runtime state a takeover hands from the old actor to the new session's (F12 B2): protection keeps
+ * its expiry, and cooldowns, damage/heal-over-time and NPC effects survive a reload.
+ */
+const CARRIED_ON_TAKEOVER = ["protectedUntil", "heals", "healAcc", "burn", "healCooldownUntil", "tonicCooldownUntil", "lastAttackAt", "reloadEndsAt", "heat", "overheatUntil", "specialReadyAt", "lastDodgeAt", "lastPhraseAt", "lastDamagedBy", "npcFx", "violations"] as const satisfies readonly (keyof PlayerActor)[];
 
 const vec = z.number().finite();
 const inputSchema = z.object({ seq: z.number().int().nonnegative(), x: vec, y: vec, z: vec, fx: z.number().min(-1).max(1), fy: z.number().min(-1).max(1), fz: z.number().min(-1).max(1), anim: z.number().int().min(0).max(31), t: vec });
@@ -86,12 +87,44 @@ const adminSchema = z.object({ cmd: z.string().max(32), args: z.record(z.string(
 // saving (the database now holds the winner). The guest rejoins under the new id.
 accountLinks.onBeforeLink((from, to) => hub.flush(from, to));
 accountLinks.on((ev) => {
+  pendingSeats.invalidate(ev.fromUserId); // seats reserved as the guest are void
   hub.retireAll(CLOSE.MERGED, "account merged, rejoin", ev.fromUserId);
   hub.retireAll(CLOSE.ELSEWHERE, "signed in elsewhere", ev.toUserId);
 });
 
-/** Last PvP kill time per killer>victim pair (repeat kills within 10 min give 10% XP). */
+/** Last PvP kill time per killer>victim account pair (repeat kills within 10 min give 10% XP). */
 const pvpKills = new Map<string, number>();
+const PVP_REPEAT_MS = 10 * 60_000;
+
+/** Record a PvP kill; true if the same pair already had one within 10 min. Old pairs are forgotten (F12 S10). */
+export function repeatPvpKill(killerUserId: string, victimUserId: string, now: number): boolean {
+  for (const [k, t] of pvpKills) if (now - t >= PVP_REPEAT_MS) pvpKills.delete(k);
+  const key = `${killerUserId}>${victimUserId}`;
+  const repeat = pvpKills.has(key);
+  pvpKills.set(key, now);
+  return repeat;
+}
+
+/** Remembered killer>victim pairs (tests). */
+export function pvpPairCount(): number {
+  return pvpKills.size;
+}
+
+const NO_FOOTING = { top: 0, inside: false };
+
+/** Lazy `you` updates (magazine counts) go out at most this often. */
+const YOU_LAZY_MS = 400;
+
+/**
+ * Per-client caps (messages per second) for types without a limiter of their own (F12 nits: travel
+ * and respawn write SQLite; ping, questSync and client:info answer with messages). Colyseus's 60/s
+ * per client still bounds everything else.
+ */
+export const MESSAGE_RATES: Record<string, number> = { ping: 20, travel: 2, respawn: 1, logout: 4, questSync: 2, "client:info": 2, skySync: 2, npcSync: 2 };
+/** Malformed messages are dropped (no kick for a harmless drift); this many within 10 s disconnects. */
+const BAD_MESSAGE_LIMIT = 20;
+
+type MessageSchema = { safeParse(v: unknown): { success: boolean; data?: unknown } };
 
 const CLIENT_ANIMS: ReadonlySet<number> = new Set([ANIM.IDLE, ANIM.WALK, ANIM.RUN, ANIM.SPRINT, ANIM.JUMP, ANIM.FALL, ANIM.SWIM, ANIM.DODGE, ANIM.ATTACK, ANIM.HEAVY, ANIM.BLOCK, ANIM.AIM, ANIM.CAST, ANIM.EMOTE]);
 
@@ -113,6 +146,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   private lastAoi = 0;
   private lastSave = 0;
   host!: CombatHost;
+  moveWorld!: MoveWorld;
   systems: RoomSystem[] = [];
   portals: PortalSpot[] = [];
 
@@ -120,11 +154,68 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     throw new ServerError(403, "join through /api/play");
   }
 
+  private readonly msgWindows = new Map<string, Map<string, { at: number; n: number }>>();
+  private readonly badMessages = new Map<string, number[]>();
+
+  /**
+   * Every handler registered on this room (the room's and the systems') goes through here: per-type
+   * rate caps, and zod validation that drops a malformed message instead of letting Colyseus close
+   * the connection for it (F12 protocol-drift nit).
+   */
+  private guardMessages() {
+    const register = this.onMessage.bind(this) as unknown as (type: string, ...rest: unknown[]) => () => void;
+    const guarded = (type: string, a: unknown, b?: unknown): (() => void) => {
+      if (type === "*") return b === undefined ? register(type, a) : register(type, a, b);
+      const schema = typeof b === "function" ? (a as MessageSchema) : undefined;
+      const handler = (typeof b === "function" ? b : a) as (c: Client, m: unknown, ...rest: unknown[]) => unknown;
+      return register(type, (c: Client, raw: unknown, ...rest: unknown[]) => {
+        if (!this.withinRate(c.sessionId, type)) return;
+        if (!schema) return handler(c, raw, ...rest);
+        const r = schema.safeParse(raw);
+        if (!r.success) return this.badMessage(c);
+        return handler(c, r.data, ...rest);
+      });
+    };
+    (this as unknown as { onMessage: typeof guarded }).onMessage = guarded;
+  }
+
+  private withinRate(sessionId: string, type: string): boolean {
+    const limit = MESSAGE_RATES[type];
+    if (!limit) return true;
+    let windows = this.msgWindows.get(sessionId);
+    if (!windows) this.msgWindows.set(sessionId, (windows = new Map()));
+    const now = Date.now();
+    const w = windows.get(type);
+    if (!w || now - w.at >= 1000) {
+      windows.set(type, { at: now, n: 1 });
+      return true;
+    }
+    if (w.n >= limit) return false;
+    w.n++;
+    return true;
+  }
+
+  private badMessage(c: Client) {
+    const now = Date.now();
+    const list = (this.badMessages.get(c.sessionId) ?? []).filter((t) => now - t < 10_000);
+    list.push(now);
+    this.badMessages.set(c.sessionId, list);
+    if (list.length >= BAD_MESSAGE_LIMIT) c.leave(CloseCode.WITH_ERROR, "too many malformed messages");
+  }
+
   onCreate(options: BodyRoomOptions) {
+    this.guardMessages();
     // The client consumes its seat right after /api/play; short reservations stop seat hoarding.
     this.seatReservationTimeout = 8;
     this.bodyDef = BODIES[options.body];
     this.terrain = createTerrain(this.bodyDef);
+    const terrain = this.terrain;
+    this.moveWorld = {
+      radius: this.bodyDef.radius,
+      waterLevel: this.bodyDef.waterLevel,
+      groundAt: (x, y, z) => terrain.groundHeightAt(x, y, z),
+      footing: (x, y, z, step) => this.host.props?.footing?.(x, y, z, step) ?? NO_FOOTING,
+    };
     this.state.body = options.body;
     this.state.copy = options.copy;
     void this.setMetadata({ body: options.body, copy: options.copy, loadtest: !!options.loadtest });
@@ -230,9 +321,16 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     for (const l of this.lingering.values()) this.finalLeave(l.actor);
   }
 
-  /** Errors in handlers or the tick must never take the whole process down (review blocker). */
+  /**
+   * Errors in handlers or the tick must never take the whole process down (review blocker). Log only
+   * what failed and where: Colyseus attaches the client (reconnection token), auth, join options and
+   * message payloads to these errors, and none of that may reach the logs (F12 S9).
+   */
   onUncaughtException(error: Error, method: string) {
-    console.error(`[room ${this.roomId}] ${method} failed:`, error);
+    const cause = (error as { cause?: unknown }).cause;
+    const e = cause instanceof Error ? cause : error;
+    const where = (e.stack ?? "").split("\n").slice(1, 7).join("\n");
+    console.error(`[room ${this.roomId}] ${method} failed: ${e.name}: ${e.message}${where ? `\n${where}` : ""}`);
   }
 
   // ---------------------------------------------------------------- joining and leaving
@@ -240,11 +338,15 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   onJoin(client: Client, options: JoinOptions | undefined, auth?: Identity) {
     if (!auth) throw new ServerError(403, "no identity");
     const now = Date.now();
+    // A reservation is checked again when it is used (F12 B5): before any takeover happens.
+    const refusal = this.seatRefusal(client.sessionId, auth, now);
+    if (refusal) throw new ServerError(403, refusal);
     // One authoritative character per user: take over a live, dropped or lingering actor anywhere.
     let char: CharacterData | null = null;
     let inheritedCombat = false;
     let inheritedPos: V3 | null = null;
     const prev = hub.get(auth.userId);
+    const old = prev?.actor ?? null;
     if (prev) {
       char = prev.actor.char;
       inheritedCombat = prev.actor.combatUntil > now && !prev.actor.dead;
@@ -265,6 +367,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     else pos = this.spawnPoint(client.sessionId);
     char.body = this.bodyDef.id;
     char.travelTo = undefined;
+    char.travelUntil = undefined;
     p.x = pos[0];
     p.y = pos[1];
     p.z = pos[2];
@@ -312,18 +415,19 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       diedAt: 0,
       lastDamagedBy: null,
       youDirty: true,
-      moveBudget: MOVE.budgetCap,
-      lastBudgetAt: now,
-      lastDodgeAt: 0,
-      peakRadius: Math.hypot(p.x, p.y, p.z),
-      airborne: false,
+      ...motionFields(Math.hypot(p.x, p.y, p.z), now),
       chargeStartedAt: 0,
       specialReadyAt: 0,
       lastPhraseAt: 0,
       healAcc: 0,
     };
+    if (old) {
+      const carried = a as unknown as Record<string, unknown>, from = old as unknown as Record<string, unknown>;
+      for (const k of CARRIED_ON_TAKEOVER) carried[k] = from[k];
+      if (inheritedCombat) a.protectedUntil = 0;
+    }
     this.equip(a, char.selected);
-    if (!inheritedCombat) p.flags |= PF.PROTECTED;
+    if (a.protectedUntil > now) p.flags |= PF.PROTECTED;
     this.state.players.set(client.sessionId, p);
     this.actors.set(client.sessionId, a);
     hub.set(auth.userId, this, a);
@@ -335,9 +439,23 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (a.dead) client.send("death", { victim: client.sessionId, killer: null, killerName: "", aliveMs: 0, level: char.level, pileId: "" });
   }
 
+  /**
+   * Why this seat may not be used now, or null: it must be a live /api/play reservation for this
+   * account (not voided by a merge), the account must still be valid and not banned or kicked, and
+   * the character must still be allowed on this body (its travel ticket may have been used or expired).
+   */
+  private seatRefusal(sessionId: string, auth: Identity, now: number): string | null {
+    if (!pendingSeats.consume(sessionId, auth.userId, now)) return "seat expired";
+    if (!auth.loadtest && seatRefusal(auth.userId, now)) return "not allowed";
+    if (auth.account && identityCheck.current(auth.userId)) return "sign in again";
+    if (!storageRecovery.ok(auth.userId)) return "storage";
+    if (travelRedirect(auth, this.bodyDef.id, now)) return "travel";
+    return null;
+  }
+
   onDrop(client: Client) {
     const a = this.actors.get(client.sessionId);
-    if (!a || a.superseded || this.shuttingDown) return;
+    if (!a || a.superseded || a.loggedOut || this.shuttingDown) return;
     a.state.flags |= PF.LINGER;
     // Kicked or banned: no reconnection seat (onLeave runs next and removes the body).
     if (this.systems.some((s) => s.canReconnect?.(client.sessionId) === false)) return;
@@ -363,41 +481,78 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     client.view?.dispose();
     const a = this.actors.get(client.sessionId);
     if (!a) return;
-    this.actors.delete(client.sessionId);
-    liveSessions.unregister(a.identity.userId, client.sessionId);
-    for (const s of this.systems) s.onPlayerLeave?.(client.sessionId);
+    this.detach(a);
     if (a.superseded) {
       this.state.players.delete(client.sessionId);
       return;
     }
+    const now = Date.now();
+    // Safe zones and portal handoffs only skip the linger out of combat (F12 B3, SPEC §5.6).
+    const calm = now >= a.combatUntil;
     const safe = isSafe(this.bodyDef, a.state.x, a.state.y, a.state.z);
+    const handoff = !!a.char.travelTo && ticketFor(a.char, a.char.travelTo, now) && portalNear(this.portals, a.state.x, a.state.y, a.state.z)?.to === a.char.travelTo;
     const dropped = code !== CloseCode.CONSENTED; // the 30 s reconnection window already elapsed
-    if (a.dead || safe || a.loggedOut || dropped || this.shuttingDown || a.char.travelTo) {
+    if (a.dead || a.loggedOut || dropped || this.shuttingDown || (calm && (safe || handoff))) {
       this.finalLeave(a);
       this.state.players.delete(client.sessionId);
       return;
     }
-    // Left outside a safe zone without logging out: the body stays for 30 s and can die.
+    // Left without logging out (outside a safe zone, or in a fight): the body stays for 30 s and can die.
     a.state.flags |= PF.LINGER;
     this.saveActor(a);
-    this.lingering.set(client.sessionId, { actor: a, until: Date.now() + RULES.LINGER_MS });
+    this.lingering.set(client.sessionId, { actor: a, until: now + RULES.LINGER_MS });
     this.autoDispose = false; // keep simulating the body even if nobody else is here
+  }
+
+  /**
+   * The one way an actor stops being a connected player here (leave, takeover, merge, kick): drop
+   * it from the live map and run every system's leave hook, exactly once (F12 B4).
+   */
+  private detach(a: PlayerActor) {
+    if (a.detached) return;
+    a.detached = true;
+    if (this.actors.get(a.id) === a) this.actors.delete(a.id);
+    this.invOps.delete(a.id);
+    this.msgWindows.delete(a.id);
+    this.badMessages.delete(a.id);
+    liveSessions.unregister(a.identity.userId, a.id);
+    for (const s of this.systems) {
+      try {
+        s.onPlayerLeave?.(a.id);
+      } catch (err) {
+        console.error(`[room ${this.roomId}] leave hook failed: ${(err as Error)?.message ?? err}`);
+      }
+    }
   }
 
   /** Save and forget an actor that is leaving the world. */
   private finalLeave(a: PlayerActor) {
     if (a.superseded) return;
+    this.removeBody(a);
     this.saveActor(a);
     hub.release(a.identity.userId, a);
+  }
+
+  /** The body is gone from this world (no more targets, attack slots or hits on it): system hooks, once. */
+  private removeBody(a: PlayerActor) {
+    if (a.removed) return;
+    a.removed = true;
+    for (const s of this.systems) {
+      try {
+        s.onBodyRemoved?.(a);
+      } catch (err) {
+        console.error(`[room ${this.roomId}] body hook failed: ${(err as Error)?.message ?? err}`);
+      }
+    }
   }
 
   /** Remove an actor without saving (superseded by a newer session or an account merge). */
   retire(a: PlayerActor, code: number, reason: string) {
     a.superseded = true;
-    this.actors.delete(a.id);
+    this.detach(a);
+    this.removeBody(a);
     this.lingering.delete(a.id);
     this.state.players.delete(a.id);
-    liveSessions.unregister(a.identity.userId, a.id);
     const c = this.clients.getById(a.id);
     if (c) c.leave(code, reason);
   }
@@ -432,7 +587,13 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       client.send("denied", { action: "travel", reason: "not at a portal" });
       return;
     }
+    // No portal escapes from a fight (F12 B3): the ticket waits for the combat tag to run out.
+    if (Date.now() < a.combatUntil) {
+      client.send("denied", { action: "travel", reason: "in combat" });
+      return;
+    }
     a.char.travelTo = to;
+    a.char.travelUntil = Date.now() + RULES.TRAVEL_TICKET_MS;
     this.saveActor(a);
     client.send("travelOk", { to });
   }
@@ -444,42 +605,20 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (!a || a.dead || a.superseded || msg.seq <= a.state.seq) return;
     const p = a.state;
     const now = Date.now();
-    // Distance budget: refills at sprint speed (+slack), banks at most budgetCap; a dodge adds a
-    // one-off allowance no more often than its cooldown (review blocker: speed hack).
-    // Riding (set only by the server's HorseSystem): gallop speed and a bigger bank, never a dodge;
-    // the mounted budget outlives a dismount by HORSE.dismountGraceMs (the client is a round trip behind).
-    const riding = inSaddle(a, now);
-    const elapsed = Math.min(0.25, (now - a.lastBudgetAt) / 1000);
-    a.lastBudgetAt = now;
-    // NPC slows / Cease-and-Desist (npc/effects.ts) scale the refill and can refuse the dodge burst.
-    const limits = movementLimits(a, now);
-    const fx = activeMoveFx(a, now);
-    const refill = riding ? rideSpeed(true, fx.slow, fx.noSprint) : MOVE.maxSpeed * limits.speed;
-    a.moveBudget = Math.min(riding ? HORSE.budgetCap : MOVE.budgetCap, a.moveBudget + refill * MOVE.speedSlack * elapsed);
-    let dodge = 0;
-    if (msg.anim === ANIM.DODGE && !riding && limits.dodge > 0 && now - a.lastDodgeAt >= MOVE.dodgeCooldownMs) {
-      a.lastDodgeAt = now;
-      dodge = MOVE.dodgeBurst * limits.dodge;
-    }
-    const dist = Math.hypot(msg.x - a.lastX, msg.y - a.lastY, msg.z - a.lastZ);
-    const R = this.bodyDef.radius;
-    const len = Math.hypot(msg.x, msg.y, msg.z);
-    const ground = this.terrain.groundHeightAt(msg.x, msg.y, msg.z);
-    const above = len - R - ground;
-    const prevLen = Math.hypot(a.lastX, a.lastY, a.lastZ);
-    const swimmingOk = ground < this.bodyDef.waterLevel - 1 && len - R >= this.bodyDef.waterLevel - MOVE.swimDepthSlack && len - R <= this.bodyDef.waterLevel + 0.5;
-    // Height: no gaining height above ground beyond a jump; falling off cliffs is fine.
-    const heightOk = above >= -MOVE.groundTolerance && (above <= MOVE.maxJumpAbove || len <= prevLen + 0.05);
-    const ok = dist <= a.moveBudget + dodge + 0.05 && (heightOk || swimmingOk);
-    if (!ok) {
+    a.lastInputAt = now;
+    // NPC slows / Cease-and-Desist (npc/effects.ts) and riding (horses) set the refill; see movement.ts.
+    const r = validateMove(a, msg, this.moveWorld, moveLimits(a, now), now);
+    if (!r.ok) {
       a.violations++;
-      client.send("correct", { x: a.lastX, y: a.lastY, z: a.lastZ, seq: msg.seq });
+      // Refused while airborne: the server applies gravity instead of holding the body up there.
+      const at = settle(a, this.moveWorld, now) ?? [a.lastX, a.lastY, a.lastZ];
+      client.send("correct", { x: at[0], y: at[1], z: at[2], seq: msg.seq });
       p.seq = msg.seq;
       return;
     }
-    a.moveBudget = Math.max(0, a.moveBudget + dodge - dist);
+    const R = this.bodyDef.radius;
+    const { len, ground, grounded, swimming: swimmingOk } = r;
     // Server-side fall damage from the validated trajectory.
-    const grounded = above <= 0.35 || swimmingOk;
     if (!grounded) {
       a.airborne = true;
       a.peakRadius = Math.max(a.peakRadius, len);
@@ -608,19 +747,25 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (dist3([pile.x, pile.y, pile.z], actorPos(a)) > RULES.PICKUP_RANGE) return;
     // Take from the pile and save the character in one transaction (no dupes, no losses on crash).
     const events: (() => void)[] = [];
-    const result = withTx(() => {
-      const taken = pileStore.current.take(pileId, itemIndex);
-      if (!taken) return null;
-      const leftovers: InvItem[] = [];
-      for (const it of taken.items) if (!this.giveItem(a, it)) leftovers.push(it);
-      a.char.coins += taken.coins;
-      if (taken.pile) events.push(() => emitPileEvent({ kind: "update", pile: taken.pile! }));
-      else events.push(() => emitPileEvent({ kind: "remove", id: pileId, body: this.bodyDef.id }));
-      // Items that didn't fit go back on the ground as a new pile.
-      if (leftovers.length) this.createPile(a, leftovers, 0, actorPos(a), events);
-      this.saveActor(a);
-      return { taken, leftovers };
-    });
+    let result: { taken: { items: InvItem[]; coins: number; pile: PileData | null }; leftovers: InvItem[] } | null;
+    try {
+      result = this.persist([a], () => {
+        const taken = pileStore.current.take(pileId, itemIndex);
+        if (!taken) return null;
+        const leftovers: InvItem[] = [];
+        for (const it of taken.items) if (!this.giveItem(a, it)) leftovers.push(it);
+        a.char.coins += taken.coins;
+        if (taken.pile) events.push(() => emitPileEvent({ kind: "update", pile: taken.pile! }));
+        else events.push(() => emitPileEvent({ kind: "remove", id: pileId, body: this.bodyDef.id }));
+        // Items that didn't fit go back on the ground as a new pile.
+        if (leftovers.length) this.createPile(a, leftovers, 0, actorPos(a), events);
+        this.saveActor(a);
+        return { taken, leftovers };
+      });
+    } catch {
+      a.client.send("denied", { action: "pickup", reason: "try again" });
+      return;
+    }
     for (const e of events) e();
     if (!result) return;
     emitGameEvent(this, { type: "pickup", playerId: a.id, pileId, pileOwnerUserId: pile.ownerUserId, pileCreatedAt: pile.createdAt, items: result.taken.items.length - result.leftovers.length, coins: result.taken.coins });
@@ -635,17 +780,46 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     const i = slot < HOTBAR_SLOTS ? slot : slot - HOTBAR_SLOTS;
     const item = list[i];
     if (!item) return;
-    list[i] = null;
-    if (slot === a.char.selected) this.equip(a, a.char.selected);
     const pos = actorPos(a);
     const f: V3 = [a.state.fx, a.state.fy, a.state.fz];
     const events: (() => void)[] = [];
-    withTx(() => {
-      this.createPile(a, [item], 0, [pos[0] + f[0] * 1.2, pos[1] + f[1] * 1.2, pos[2] + f[2] * 1.2], events);
-      this.saveActor(a);
-    });
+    try {
+      this.persist([a], () => {
+        list[i] = null;
+        if (slot === a.char.selected) this.equip(a, a.char.selected);
+        this.createPile(a, [item], 0, [pos[0] + f[0] * 1.2, pos[1] + f[1] * 1.2, pos[2] + f[2] * 1.2], events);
+        this.saveActor(a);
+      });
+    } catch {
+      a.client.send("denied", { action: "drop", reason: "try again" });
+      return;
+    }
     for (const e of events) e();
     a.youDirty = true;
+  }
+
+  /**
+   * Character + pile writes in one SQLite transaction. If it throws, the listed characters are put
+   * back exactly as they were before `fn` and the error is rethrown: memory never runs ahead of
+   * the database (F12 B6). Publish pile events queued by `fn` only after this returns.
+   */
+  persist<T>(actors: readonly PlayerActor[], fn: () => T): T {
+    const before = actors.map((a) => ({ a, char: structuredClone(a.char) }));
+    try {
+      return withTx(fn);
+    } catch (err) {
+      for (const { a, char } of before) {
+        const live = a.char as unknown as Record<string, unknown>;
+        for (const k of Object.keys(live)) if (!(k in char)) delete live[k];
+        Object.assign(a.char, char);
+        a.state.level = a.char.level;
+        a.state.maxHp = maxHp(a.char.level);
+        a.state.hp = Math.min(a.state.hp, a.state.maxHp);
+        this.equip(a, a.char.selected);
+      }
+      console.error(`[room ${this.roomId}] save failed, changes undone: ${(err as Error)?.message ?? err}`);
+      throw err;
+    }
   }
 
   /**
@@ -731,15 +905,25 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     const items = [...victim.char.hotbar, ...victim.char.backpack].filter((x): x is InvItem => !!x);
     const events: (() => void)[] = [];
     let pile: PileData | null = null;
-    withTx(() => {
-      pile = (items.length || victim.char.coins) && !victim.identity.loadtest ? this.createPile(victim, items, victim.char.coins, actorPos(victim), events, { kind: "death" }) : null;
-      victim.char.hotbar = [null, null, null, null];
-      victim.char.backpack = Array.from({ length: BACKPACK_SLOTS }, () => null);
-      victim.char.coins = 0;
-      victim.char.dead = true;
-      victim.char.deaths += 1;
-      this.saveActor(victim);
-    });
+    try {
+      this.persist([victim], () => {
+        pile = (items.length || victim.char.coins) && !victim.identity.loadtest ? this.createPile(victim, items, victim.char.coins, actorPos(victim), events, { kind: "death" }) : null;
+        victim.char.hotbar = [null, null, null, null];
+        victim.char.backpack = Array.from({ length: BACKPACK_SLOTS }, () => null);
+        victim.char.coins = 0;
+        victim.char.dead = true;
+        victim.char.deaths += 1;
+        this.saveActor(victim);
+      });
+    } catch {
+      // The death couldn't be recorded (no pile, inventory still saved): drop this actor without
+      // saving and let the client rejoin from the last good save rather than lose or copy items.
+      // Until saving works again the account stays out (no die-rejoin loop; F12 re-review S5).
+      storageRecovery.mark(victim.identity.userId);
+      hub.release(victim.identity.userId, victim);
+      this.retire(victim, CLOSE.STORAGE, "saving failed, rejoin later");
+      return;
+    }
     for (const e of events) e();
     this.equip(victim, 0);
     const killerName = killer ? (killer.kind === "player" ? killer.identity.name : `npc:${npcKindOf(killer) ?? killer.state.kind}`) : "the fall";
@@ -747,10 +931,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     this.broadcast("death", { victim: victim.id, killer: killer?.id ?? null, killerName, aliveMs: now - victim.char.lifeStartedAt, level: victim.char.level, pileId });
     emitGameEvent(this, { type: "death", victimId: victim.id, killerId: killer?.id ?? null, killerKind: killer?.kind ?? "world", npcKind: killer?.kind === "npc" ? npcKindOf(killer) : undefined, pos: actorPos(victim) });
     if (killer && killer.kind === "player" && killer.id !== victim.id) {
-      const key = `${killer.identity.userId}>${victim.identity.userId}`;
-      const recent = pvpKills.get(key) ?? 0;
-      pvpKills.set(key, now);
-      this.grantXp(killer, Math.round(pvpKillXp(victim.char.level, killer.char.level) * (now - recent < 10 * 60_000 ? 0.1 : 1)));
+      const repeat = repeatPvpKill(killer.identity.userId, victim.identity.userId, now);
+      this.grantXp(killer, Math.round(pvpKillXp(victim.char.level, killer.char.level) * (repeat ? 0.1 : 1)));
     }
   }
 
@@ -825,27 +1007,50 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     const a = this.actors.get(client.sessionId);
     if (!a || !a.identity.admin) return;
     emitGameEvent(this, { type: "admin", playerId: a.id, cmd, ...(typeof args.target === "string" ? { targetId: args.target } : {}) });
-    const num = (k: string, d = 0) => (typeof args[k] === "number" ? (args[k] as number) : d);
+    // Numbers must be finite, integers where counts are meant, and in range (F12 S14). A bad
+    // argument refuses the whole command; a missing one takes the default.
+    let bad: string | null = null;
+    const num = (k: string, d: number, min: number, max: number, integer = false): number => {
+      const v = args[k];
+      if (v === undefined) return d;
+      if (typeof v !== "number" || !Number.isFinite(v) || v < min || v > max || (integer && !Number.isInteger(v))) {
+        bad ??= k;
+        return d;
+      }
+      return v;
+    };
+    const refuse = () => (bad ? (client.send("denied", { action: "admin", reason: `bad ${bad}` }), true) : false);
     const target = typeof args.target === "string" ? this.actors.get(args.target) : a;
+    const R = this.bodyDef.radius;
     switch (cmd) {
       case "teleport": {
         const t = target ?? a;
-        const p = this.snapToGround([num("x"), num("y"), num("z")]);
+        const want: V3 = [num("x", NaN, -4 * R, 4 * R), num("y", NaN, -4 * R, 4 * R), num("z", NaN, -4 * R, 4 * R)];
+        if (!bad && !(Math.hypot(...want) > R * 0.5)) bad = "position";
+        if (refuse()) return;
+        const p = this.snapToGround(want);
         t.state.x = t.lastX = p[0];
         t.state.y = t.lastY = p[1];
         t.state.z = t.lastZ = p[2];
         t.history.length = 0;
+        groundMotion(t, Math.hypot(p[0], p[1], p[2]), Date.now());
+        t.airborne = false;
+        t.peakRadius = Math.hypot(p[0], p[1], p[2]);
         t.client.send("correct", { x: p[0], y: p[1], z: p[2], seq: t.state.seq });
         break;
       }
       case "give": {
         const id = typeof args.id === "string" ? args.id : "carbine";
-        if (WEAPON_BY_ID.has(id)) this.giveItem(target ?? a, { id, tier: (Math.max(1, Math.min(3, num("tier", 1))) as 1 | 2 | 3), qty: Math.max(1, num("qty", 1)) });
+        const tier = num("tier", 1, 1, 3, true);
+        const qty = num("qty", 1, 1, Math.max(1, WEAPON_BY_ID.get(id)?.stack ?? 1), true);
+        if (refuse()) return;
+        if (WEAPON_BY_ID.has(id)) this.giveItem(target ?? a, { id, tier: tier as 1 | 2 | 3, qty });
         break;
       }
       case "level": {
         const t = target ?? a;
-        const lv = Math.max(1, Math.min(20, num("level", 1)));
+        const lv = num("level", 1, 1, 20, true);
+        if (refuse()) return;
         t.char.xp = xpAtLevel(lv);
         t.char.level = lv;
         t.state.level = lv;
@@ -854,10 +1059,14 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
         t.youDirty = true;
         break;
       }
-      case "coins":
-        (target ?? a).char.coins += num("amount", 100);
-        (target ?? a).youDirty = true;
+      case "coins": {
+        const amount = num("amount", 100, -1_000_000, 1_000_000, true);
+        if (refuse()) return;
+        const t = target ?? a;
+        t.char.coins = Math.max(0, t.char.coins + amount);
+        t.youDirty = true;
         break;
+      }
       case "heal":
         (target ?? a).state.hp = (target ?? a).state.maxHp;
         break;
@@ -865,9 +1074,12 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
         (target ?? a).protectedUntil = 0;
         (target ?? a).state.flags &= ~PF.PROTECTED;
         break;
-      case "damage":
-        if (target) dealDamage(this.host, null, target, num("amount", 10), false);
+      case "damage": {
+        const amount = num("amount", 10, 0, 100_000);
+        if (refuse()) return;
+        if (target) dealDamage(this.host, null, target, amount, false);
         break;
+      }
       case "announce":
         this.presence.publish("announce", String(args.text ?? "").slice(0, 200));
         this.broadcast("announce", { text: String(args.text ?? "").slice(0, 200) });
@@ -905,9 +1117,11 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       if (a.logoutEndsAt === null) p.flags &= ~PF.LOGGING_OUT;
       else if (now >= a.logoutEndsAt) this.completeLogout(a);
       if (!a.dead) a.char.hp = p.hp;
+      if (now - Math.max(a.lastMoveAt, a.lastInputAt ?? 0) > MOVE.silentFallMs) this.idleGravity(a, now, true);
     }
     for (const n of this.npcActors.values()) pushHistory(n, now);
     for (const [sid, l] of this.lingering) {
+      this.idleGravity(l.actor, now, false);
       pushHistory(l.actor, now);
       if (l.actor.dead || now >= l.until) {
         this.finalLeave(l.actor);
@@ -927,13 +1141,36 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       this.lastAoi = now;
       this.updateViews(false);
     }
-    for (const a of this.actors.values()) if (a.youDirty) this.sendYou(a);
+    for (const a of this.actors.values()) if (a.youDirty || (a.youLazy && now - (a.lastYouAt ?? 0) >= YOU_LAZY_MS)) this.sendYou(a);
     if (now - this.lastSave > RULES.SAVE_EVERY_MS) {
       this.lastSave = now;
       withTx(() => {
         for (const a of this.actors.values()) this.saveActor(a);
       });
     }
+  }
+
+  /**
+   * Gravity for a body the client isn't moving (idle, lingering): if what held it up is gone (a prop
+   * broke) it starts to fall; a falling body follows the air envelope down; on landing the fall is
+   * resolved here, fall damage included (F12 re-review S3). The client hears where it ended up.
+   */
+  private idleGravity(a: PlayerActor, now: number, connected: boolean) {
+    if (a.dead) return;
+    if (!a.airborne) {
+      if (heightAboveSupport(a, this.moveWorld) <= MOVE.groundedAbove) return;
+      startFall(a, now);
+    }
+    const at = settle(a, this.moveWorld, now);
+    if (at && connected) a.client.send("correct", { x: at[0], y: at[1], z: at[2], seq: a.state.seq });
+    if (heightAboveSupport(a, this.moveWorld) > MOVE.groundedAbove) return;
+    // Landed.
+    const len = Math.hypot(a.state.x, a.state.y, a.state.z);
+    const frac = fallDamageFraction(a.peakRadius - len);
+    a.airborne = false;
+    a.peakRadius = len;
+    groundMotion(a, len, now);
+    if (frac > 0) dealDamage(this.host, null, a, frac * maxHp(a.char.level), false);
   }
 
   /** Distance-based views for NPCs and piles (players are not view-filtered). */
@@ -961,6 +1198,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
   sendYou(a: PlayerActor) {
     a.youDirty = false;
+    a.youLazy = false;
+    a.lastYouAt = Date.now();
     const you: YouState = {
       xp: a.char.xp - xpAtLevel(a.char.level),
       xpToNext: xpToNext(a.char.level),

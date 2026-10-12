@@ -3,7 +3,7 @@
 
 import { Client, type Room } from "@colyseus/sdk";
 import type { BodyId } from "@firstlight/shared";
-import { NET, type InputMsg, type PlayResponse } from "@firstlight/shared/net/protocol";
+import { NET, PROTOCOL_VERSION, type InputMsg, type PlayResponse } from "@firstlight/shared/net/protocol";
 import { config } from "../config.ts";
 import { getPlayToken, invalidatePlayToken } from "./auth.ts";
 
@@ -28,6 +28,17 @@ export class TravelRedirect extends Error {
   constructor(readonly body: BodyId) {
     super(`travel: character is on ${body}`);
   }
+}
+
+/**
+ * The server speaks another protocol version (a deploy happened while this tab was open): reload
+ * once to pick up the new client. Only once per server version, so a stale cached page can't loop.
+ */
+function reloadForVersion(version: number | undefined): void {
+  const key = "fl.reloadedForVersion";
+  if (sessionStorage.getItem(key) === String(version)) return;
+  sessionStorage.setItem(key, String(version));
+  location.reload();
 }
 
 /** App close codes (shared with the server). */
@@ -105,7 +116,7 @@ export class Net {
       const res = await fetch(`${config.apiUrl}/api/play`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ body, ...opts }),
+        body: JSON.stringify({ body, v: PROTOCOL_VERSION, ...opts }),
         signal: AbortSignal.timeout(20_000), // a server that never answers fails the arrival (retry/reconnect), not a spinner
       });
       if (res.status === 401 && !retried401) {
@@ -136,6 +147,7 @@ export class Net {
         continue;
       }
       this.onQueue?.(null);
+      if (r.error === "version") reloadForVersion(r.version);
       if (r.error === "travel" && r.body) throw new TravelRedirect(r.body);
       if (r.error === "banned" || r.error === "kicked") this.onRefused?.(r.error);
       throw new Error(r.error);

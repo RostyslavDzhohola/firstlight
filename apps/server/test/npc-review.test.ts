@@ -306,6 +306,9 @@ function column(at: V3): BreakableHost {
       hit.t = t;
       return hit;
     },
+    contains() {
+      return false;
+    },
     damage() {},
     splash() {},
     arc() {},

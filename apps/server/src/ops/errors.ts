@@ -23,6 +23,7 @@ export function redact(text: string): string {
     if (v && v.length >= 8) t = t.split(v).join(`[${k}]`);
   }
   return t
+    .replace(/(reconnectionToken["']?\s*[:=]\s*["']?)[^"'\s,}]+/gi, "$1[redacted]")
     .replace(/eyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}/g, "[jwt]")
     .replace(/\b(Bearer|bearer)\s+[^\s"']+/g, "$1 [redacted]")
     .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "[email]")

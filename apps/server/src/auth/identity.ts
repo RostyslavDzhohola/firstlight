@@ -7,6 +7,8 @@ export interface Identity {
   guest: boolean;
   admin: boolean;
   loadtest: boolean;
+  /** Verified from a Better Auth account JWT (revalidated when a seat is used; dev tokens aren't). */
+  account?: boolean;
 }
 
 /** Request facts a verifier may use (IP bans). */

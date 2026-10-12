@@ -8,6 +8,7 @@
 
 import { BreakableGrid, bodyBreakables, canBreak, distanceToBreakable, FUEL_DRUM_BLAST, hash4, rayBreakable, segmentNearBreakable, type Breakable, type BreakClass } from "@firstlight/shared";
 import { splashFalloff } from "@firstlight/shared/content/progression";
+import { BreakableCollider, emptyContact, PLAYER_BODY, pushOutOfBreakable, resetContact, supportHeightAt, type PropContact, type XYZ } from "@firstlight/shared/planet/collide";
 import { WEAPON_INDEX } from "@firstlight/shared/content/weapons";
 import { actorPos, type Actor } from "./actors.ts";
 import type { BodyRoom } from "./BodyRoom.ts";
@@ -32,6 +33,9 @@ export const DESTRUCTION = {
 /** The room surface this system needs. */
 type Room = BodyRoom;
 
+/** Feet this far inside a solid's footprint (and below its top) are inside the prop, not pressed against it. */
+const INSIDE_MARGIN = 0.1;
+
 /** Broken props kept across room instances of one copy (copyState.ts, F12 B2): [prop id, rebuild time]. */
 interface DestructionCopyState {
   v: 1;
@@ -41,6 +45,8 @@ interface DestructionCopyState {
 export class DestructionSystem implements RoomSystem, BreakableHost {
   readonly list: readonly Breakable[];
   readonly grid: BreakableGrid;
+  /** Player-vs-prop collision shared with the client (support under the feet, push-outs). */
+  readonly collider: BreakableCollider;
   /** Current HP per breakable (index = Breakable.index). */
   readonly hp: Float32Array;
   /** Rebuild time per breakable (ms since epoch); 0 = intact. */
@@ -61,6 +67,7 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
     this.now = now;
     this.list = bodyBreakables(room.terrain);
     this.grid = new BreakableGrid(this.list);
+    this.collider = new BreakableCollider(this.list, this.grid);
     this.hp = new Float32Array(this.list.length);
     this.brokenUntil = new Float64Array(this.list.length);
     for (const b of this.list) this.hp[b.index] = b.hp;
@@ -114,6 +121,8 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
       const b = this.list[i]!;
       if (!segmentNearBreakable(b, o[0], o[1], o[2], d[0], d[1], d[2], lim)) continue;
       const t = rayBreakable(b, o[0], o[1], o[2], d[0], d[1], d[2], Math.min(lim, best));
+      // A ray that starts inside a prop ignores it (standing in a prop is no shield; F12).
+      if (t <= 1e-6) continue;
       if (t < best) {
         best = t;
         bestIdx = i;
@@ -123,6 +132,45 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
     this.rayHit.index = bestIdx;
     this.rayHit.t = best;
     return this.rayHit;
+  }
+
+  private readonly footingOut = { top: 0, inside: false };
+  private readonly scratch: XYZ = { x: 0, y: 0, z: 0 };
+  private readonly contact: PropContact = emptyContact();
+  private readonly solid = (i: number): boolean => !(this.brokenUntil[i]! > 0);
+
+  /**
+   * Movement footing at feet position (x, y, z) (F12: props are standable), with the player-vs-prop
+   * rules the client moves by (shared planet/collide.ts, compound colliders): `top` is the distance
+   * from the planet centre of the highest intact prop top under the feet (supportHeightAt; 0 = none),
+   * and `inside` is true when the feet are deep in an intact prop's solid part (the client would push
+   * the body out by more than its radius + INSIDE_MARGIN). Broken props hold nobody. Reused object.
+   */
+  footing(x: number, y: number, z: number, step: number): { top: number; inside: boolean } {
+    const out = this.footingOut;
+    const body = { radius: PLAYER_BODY.radius, step };
+    out.top = supportHeightAt(this.collider, x, y, z, this.solid, body);
+    out.inside = false;
+    if (this.list.length === 0) return out;
+    const n = this.grid.collect(x, y, z, 0, 0, 0, 0, PLAYER_BODY.radius + PLAYER_BODY.height, this.candidates);
+    for (let k = 0; k < n && !out.inside; k++) {
+      const i = this.candidates[k]!;
+      if (!this.solid(i)) continue;
+      const p = this.scratch;
+      p.x = x;
+      p.y = y;
+      p.z = z;
+      if (!pushOutOfBreakable(this.list[i]!, p, PLAYER_BODY.radius, PLAYER_BODY.height, step, resetContact(this.contact))) continue;
+      if (Math.hypot(p.x - x, p.y - y, p.z - z) >= PLAYER_BODY.radius + INSIDE_MARGIN) out.inside = true;
+    }
+    return out;
+  }
+
+  /** Is point `p` inside intact prop `index`? */
+  contains(index: number, p: V3): boolean {
+    const b = this.list[index];
+    if (!b || this.brokenUntil[index]! > 0) return false;
+    return rayBreakable(b, p[0], p[1], p[2], b.ux, b.uy, b.uz, 1e-3) === 0;
   }
 
   damage(index: number, amount: number, cls: BreakClass, weaponId: string, dir: V3, by: string | null = null, force = 1): boolean {

@@ -69,6 +69,11 @@ export interface Accounts {
   /** Only when the dev outbox is in use (no RESEND_API_KEY, not production). Test-only. */
   devOutbox: DevOutbox | null;
   hashIp(ip: string): string;
+  /**
+   * Is this account still allowed into a seat it reserved earlier? Refusal reason or null: the
+   * user row is gone (merged or deleted guest), it is banned, or it has no session left (signed out).
+   */
+  revalidate(userId: string): string | null;
   /** Resolve the caller from the Better Auth session cookie, else a Bearer JWT. */
   identify(req: Request): Promise<Identity | null>;
   /** Express middleware for /admin and /stats routes: 401 unless signed in, 403 unless admin. Sets res.locals.identity. */
@@ -213,7 +218,15 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
       const r = setDisplayName(db, sub, user.name, now);
       if (r.ok) display = r.name;
     }
-    return { userId: sub, name: display ?? generated, guest: user.anon === 1, admin: acc.isAdmin, loadtest: false };
+    return { userId: sub, name: display ?? generated, guest: user.anon === 1, admin: acc.isAdmin, loadtest: false, account: true };
+  };
+
+  const sessionStmt = authDb.prepare(`SELECT 1 FROM "session" WHERE "userId" = ? LIMIT 1`);
+  const revalidate = (userId: string): string | null => {
+    if (!userStmt.get(userId)) return "account gone";
+    if (isBanned(db, userId, Date.now())) return "banned";
+    if (!sessionStmt.get(userId)) return "signed out";
+    return null;
   };
 
   const fallback = cfg.fallbackVerifier;
@@ -231,6 +244,7 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
     mailer,
     devOutbox,
     hashIp,
+    revalidate,
     identify: async () => null,
     requireAdmin: async () => {},
     mountBeforeJson(app) {

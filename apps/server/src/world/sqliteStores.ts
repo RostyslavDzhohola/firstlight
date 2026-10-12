@@ -19,6 +19,7 @@ interface StoredInventory {
   dead: boolean;
   worn?: CharacterData["worn"];
   travelTo?: string;
+  travelUntil?: number;
 }
 
 /** mission_state_json: the accepted missions plus per-life quest progress (older rows: a bare array). */
@@ -61,6 +62,7 @@ export class SqliteCharacterRepo implements CharacterRepo {
       ...(inv.worn ? { worn: inv.worn } : {}),
       ...(life ? { life } : {}),
       travelTo: (inv.travelTo as BodyId | undefined) ?? undefined,
+      ...(inv.travelUntil ? { travelUntil: inv.travelUntil } : {}),
     };
   }
 
@@ -87,7 +89,7 @@ export class SqliteCharacterRepo implements CharacterRepo {
       y: d.pos?.[1] ?? 0,
       z: d.pos?.[2] ?? 0,
       heading: 0,
-      inventory: { hotbar: d.hotbar, backpack: d.backpack, selected: d.selected, deaths: d.deaths, dead: !!d.dead, worn: d.worn ?? {}, travelTo: d.travelTo } satisfies StoredInventory,
+      inventory: { hotbar: d.hotbar, backpack: d.backpack, selected: d.selected, deaths: d.deaths, dead: !!d.dead, worn: d.worn ?? {}, travelTo: d.travelTo, travelUntil: d.travelUntil } satisfies StoredInventory,
       missionState: { list: d.missions, life: d.life ?? null } satisfies StoredMissions,
       lifeStartedAt: d.lifeStartedAt,
       protectedUntil: 0,

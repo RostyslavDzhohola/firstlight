@@ -26,7 +26,26 @@ function deLeet(s: string): string {
   return s.replace(/[0134578@$]/g, (c) => LEET[c] ?? c);
 }
 
-export type NameProblem = "length" | "chars" | "filtered";
+export type NameProblem = "length" | "chars" | "filtered" | "reserved";
+
+// Names that would pass for staff or the game itself (F12 review). Matched after lower-casing,
+// dropping underscores, undoing digit swaps and l/1 → i, and collapsing repeated letters.
+const RESERVED_ANYWHERE = ["admin", "administrator", "firstlight", "moderator", "system", "oversight", "official", "gamemaster", "developer", "support", "server"];
+// Short words only as whole name parts (they hide inside ordinary names otherwise).
+const RESERVED_TOKENS = ["mod", "mods", "dev", "devs", "staff", "gm", "owner", "root", "sysop", "team"];
+
+function reservedForm(s: string): string {
+  return deLeet(s.toLowerCase().replace(/_/g, "")).replace(/[l|]/g, "i").replace(/(.)\1+/g, "$1");
+}
+const RESERVED_FORMS = RESERVED_ANYWHERE.map(reservedForm);
+const RESERVED_TOKEN_FORMS = new Set(RESERVED_TOKENS.map(reservedForm));
+
+export function isReservedName(name: string): boolean {
+  const flat = reservedForm(name);
+  if (RESERVED_FORMS.some((w) => flat.includes(w))) return true;
+  const tokens = name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").split(/_+/).filter(Boolean);
+  return tokens.some((t) => RESERVED_TOKEN_FORMS.has(reservedForm(t)));
+}
 
 /** Shape check only (length and characters). */
 export function nameShapeProblem(name: string): NameProblem | null {
@@ -53,14 +72,15 @@ export function isOffensiveName(name: string): boolean {
   return tokens.some((t) => EXTRA_BLOCKED_TOKENS.has(t) || EXTRA_BLOCKED_TOKENS.has(deLeet(t)));
 }
 
-/** Full check: shape, then the filter. */
+/** Full check: shape, then the filter, then reserved names. */
 export function displayNameProblem(name: string): NameProblem | null {
-  return nameShapeProblem(name) ?? (isOffensiveName(name) ? "filtered" : null);
+  return nameShapeProblem(name) ?? (isOffensiveName(name) ? "filtered" : isReservedName(name) ? "reserved" : null);
 }
 
 export const NAME_MESSAGES: Record<NameProblem | "taken", string> = {
   length: `Names are ${NAME_MIN}–${NAME_MAX} characters.`,
   chars: "Use letters, numbers and _ only.",
   filtered: "That name isn't allowed. Try another.",
+  reserved: "That name is reserved. Try another.",
   taken: "That name is taken. Try another.",
 };

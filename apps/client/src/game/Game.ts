@@ -26,7 +26,7 @@ import { getAccountInfo, invalidatePlayToken, isDevGuest } from "../net/auth.ts"
 import { PilesView } from "../world/PilesView.ts";
 import { Planet } from "../world/Planet.ts";
 import { Portals } from "../world/Portals.ts";
-import { ArrivalWatch, closeAction, ConnectionLost, waitFor } from "./arrival.ts";
+import { ArrivalWatch, closeAction, ConnectionLost, StorageBackoff, waitFor } from "./arrival.ts";
 import { BootGate, RendererUnavailable, shouldKeepReconnecting } from "./boot.ts";
 import { CombatClient } from "./CombatClient.ts";
 import { GameAudio } from "../audio/Audio.ts";
@@ -70,6 +70,8 @@ export class Game {
   private travelling = false;
   private portalCooldownUntil = 0;
   private reconnecting = false;
+  /** Rejoins after "saving failed" closes: bounded, and not reset by a successful join. */
+  private readonly storageBackoff = new StorageBackoff();
   /** Logged out, removed or "connection lost" screen: room closes are not ours to act on. */
   private stopped = false;
   /** A graphics re-warm is running (the loop is paused); a room close waits for it to finish. */
@@ -312,6 +314,18 @@ export class Game {
     if (action === "removed") {
       removedFromWorld(code);
       this.stop();
+      return;
+    }
+    if (action === "storage") {
+      // The server couldn't save us (and keeps us out until it can): rejoin later, a few times at most.
+      const wait = this.storageBackoff.next(Date.now());
+      if (wait === null) {
+        this.stop();
+        this.menu.showNotice("SAVING TROUBLE", "The server can't save characters right now. Your last save is safe; try again in a few minutes.", "Try again", () => void this.resume());
+        return;
+      }
+      setLoading("The server couldn't save just now. Rejoining shortly…", 0.1);
+      setTimeout(() => void this.reconnect(), wait);
       return;
     }
     if (action === "rejoin-fresh") invalidatePlayToken(); // saved/signed in: rejoin as the account

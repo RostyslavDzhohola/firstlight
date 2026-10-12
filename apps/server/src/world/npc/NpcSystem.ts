@@ -160,10 +160,20 @@ export class NpcSystem implements RoomSystem {
   }
 
   onPlayerLeave(sessionId: string) {
-    this.tokens.delete(sessionId);
-    this.recentHits.delete(sessionId);
-    for (const n of this.npcs.values()) if (n.target?.id === sessionId) n.target = null;
+    // The client is gone; its body may linger (and can still be attacked) until onBodyRemoved.
     this.boss?.forget(sessionId);
+  }
+
+  onBodyRemoved(a: PlayerActor) {
+    this.tokens.delete(a.id);
+    this.recentHits.delete(a.id);
+    for (const n of this.npcs.values()) if (n.target === a || n.target?.id === a.id) n.target = null;
+  }
+
+  /** Is this player alive and in this world (connected or lingering)? Targets that aren't are dropped. */
+  isLive(a: PlayerActor): boolean {
+    for (const l of this.live) if (l.a === a) return true;
+    return false;
   }
 
   dispose() {

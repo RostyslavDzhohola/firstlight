@@ -7,6 +7,7 @@
 //   LOADTEST_SECRET=… node src/load.ts --url https://api.firstlight.one4all.dev --bots 40 --seconds 600
 
 import { BODIES, createTerrain, padDirs, type BodyId } from "@firstlight/shared";
+import { PROTOCOL_VERSION } from "@firstlight/shared/net/protocol";
 
 const args = new Map<string, string>();
 for (let i = 2; i < process.argv.length; i++) {
@@ -79,7 +80,7 @@ let joinFailures = 0;
 async function spawnBot(i: number) {
   try {
     const tok = await token(i);
-    const r = await fetch(`${URL_}/api/play`, { method: "POST", headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json" }, body: JSON.stringify({ body: BODY, loadtest: true }) });
+    const r = await fetch(`${URL_}/api/play`, { method: "POST", headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json" }, body: JSON.stringify({ body: BODY, loadtest: true, v: PROTOCOL_VERSION }) });
     const res = (await r.json()) as { ok: boolean; reservation?: unknown };
     if (!res.ok) throw new Error(JSON.stringify(res));
     const client = new Client(URL_);

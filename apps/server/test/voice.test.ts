@@ -78,9 +78,14 @@ const got = (r: Room, type: string) => inbox.get(r)!.filter((m) => m.type === ty
 const me = (r: Room) => (r.state as any).players.get(r.sessionId);
 
 let pingSeq = 0;
+const lastPing = new WeakMap<Room, number>();
 /** Every message sent by `r` before this call has been handled, and everything the server wrote to `r` before it has arrived. */
 async function barrier(...rs: Room[]) {
   for (const r of rs) {
+    // Pings are capped per client (20/s): keep barriers under that.
+    const wait = 60 - (Date.now() - (lastPing.get(r) ?? 0));
+    if (wait > 0) await new Promise((ok) => setTimeout(ok, wait));
+    lastPing.set(r, Date.now());
     const t = ++pingSeq;
     r.send("ping", { t });
     await waitFor(() => got(r, "pong").some((p) => p.t === t));
@@ -530,12 +535,20 @@ describe("TURN credentials", () => {
 
   it("credentials follow the account when a guest saves", async () => {
     mockTurn();
+    // Registry level: a credential minted for the guest is revoked by the account's id afterwards.
+    turnCredentials.remember(uid("gus"), [`gus-user-${run}`]);
+    turnCredentials.rekey(uid("gus"), uid("gus-acct"));
+    expect(await revokeVoiceForUser(uid("gus"))).toBe(0);
+    expect(await revokeVoiceForUser(uid("gus-acct"))).toBe(1);
+    // In a room the merged guest session is retired (it rejoins as the account): its leave hook
+    // revokes the credential exactly once (F12 B4) and nothing is left under either id.
     const a = await bot("ann");
     await enable(a);
     const user = got(a, "voice:ice")[0].iceServers[0].username;
     accountLinks.emit({ fromUserId: uid("ann"), toUserId: uid("acct"), name: "ann", character: "guest", merged: false, moved: null, displaced: null });
+    await waitFor(() => revokes(user).length === 1);
     expect(await revokeVoiceForUser(uid("ann"))).toBe(0);
-    expect(await revokeVoiceForUser(uid("acct"))).toBe(1);
+    expect(await revokeVoiceForUser(uid("acct"))).toBe(0);
     expect(revokes(user)).toHaveLength(1);
   });
 

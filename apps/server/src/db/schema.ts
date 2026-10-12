@@ -163,6 +163,13 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE pile ADD COLUMN kind TEXT NOT NULL DEFAULT 'death';
   ALTER TABLE pile ADD COLUMN expires_at INTEGER;
   `,
+  // 5 (lane f12-core): admin voice mutes survive restarts and deploys (F12 S12). Idempotent.
+  `
+  CREATE TABLE IF NOT EXISTS voice_mute (
+    user_id   TEXT PRIMARY KEY,
+    muted_at  INTEGER NOT NULL
+  );
+  `,
 ];
 
 /** Apply every migration newer than the database's user_version, each in its own transaction. */

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Client } from "@colyseus/sdk";
 import type { Room } from "@colyseus/sdk";
 import type { Game } from "../src/app.ts";
-import { joinAs, playRequest, safeLeave, startServer, waitFor } from "./helpers.ts";
+import { grantTravel, joinAs, playRequest, safeLeave, startServer, waitFor } from "./helpers.ts";
 
 let game: Game;
 const rooms: Room[] = [];
@@ -70,6 +70,7 @@ describe("entering the world", () => {
     expect(copies.size).toBe(2);
     const first = joined.slice(0, 4).every((r) => r.roomId === joined[0]!.roomId);
     expect(first).toBe(true);
+    grantTravel("late", "meridian"); // new characters start in Portus without a ticket
     const queued = await playRequest(game, "dev:late:late", { body: "meridian" });
     expect(queued.ok).toBe(false);
     expect("queue" in queued && queued.queue.position).toBeGreaterThan(0);

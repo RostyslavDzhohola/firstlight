@@ -17,10 +17,18 @@ export const NET = {
   REWIND_MS: 200,
 } as const;
 
+/**
+ * Wire protocol version. Bump it whenever client and server messages stop being compatible: the
+ * server refuses /api/play from other versions with `{error: "version"}` and the client reloads.
+ */
+export const PROTOCOL_VERSION = 2; // 2: F12 core message changes + the sky lane's lightning schedule
+
 // ---- HTTP: entering the world -------------------------------------------------------------
 
 export interface PlayRequest {
   body: BodyId;
+  /** The client's PROTOCOL_VERSION. */
+  v: number;
   /** Room id of the party leader (or a member) on this body, to land in the same copy. The server only honours it for party members. */
   partyLeaderRoomId?: string;
   /** Load-test rooms only (requires the load-test secret server-side). */
@@ -30,7 +38,7 @@ export interface PlayRequest {
 export type PlayResponse =
   | { ok: true; reservation: SeatReservation }
   | { ok: false; queue: { position: number; etaSeconds: number } }
-  | { ok: false; error: string; body?: BodyId };
+  | { ok: false; error: string; body?: BodyId; version?: number };
 
 /** Mirrors Colyseus' ISeatReservation. */
 export interface SeatReservation {
@@ -77,6 +85,12 @@ export type ClientMessages = {
   fire: FireMsg;
   melee: { slot: number; t: number; heavy?: boolean };
   block: { on: boolean };
+  /** Start/stop drawing a bow or charging a heavy swing (the server times the draw). */
+  charge: { on: boolean };
+  /** Scope/aim down sights on or off (spread and the scoped flag). */
+  scope: { on: boolean };
+  /** Swap two inventory slots (0–3 hotbar, 4–19 backpack). */
+  move: { from: number; to: number };
   reload: { slot: number };
   equip: { slot: number };
   use: { slot: number; targetId?: string };
@@ -112,7 +126,22 @@ export type ClientMessages = {
 // ---- Server → client events (broadcast or direct) -------------------------------------------
 
 export type ServerMessages = {
-  hit: { attacker: string; target: string; amount: number; weak: boolean; kind: "player" | "npc"; x: number; y: number; z: number };
+  /** `kb`: knockback strength (m/s) along the unit shove direction kx/ky/kz (the victim's client applies it). */
+  hit: { attacker: string; target: string; amount: number; weak: boolean; kind: "player" | "npc"; x: number; y: number; z: number; kb: number; kx: number; ky: number; kz: number };
+  /** A melee swing (animation and sound for everyone nearby). */
+  swing: { by: string; weapon: number; heavy: boolean; hits: number };
+  /** The server refused an action (`reason` is short and human-readable). */
+  denied: { action: string; reason: string };
+  /** Movement snap-back: the authoritative position for input `seq`. */
+  correct: { x: number; y: number; z: number; seq: number };
+  /** A portal travel ticket was issued: leave and join `to` through /api/play. */
+  travelOk: { to: BodyId };
+  /** Reborn: leave and join `body` (Portus) as the new character. */
+  reborn: { body: BodyId };
+  /** Logout finished; the server closes the connection with CLOSE.LOGGED_OUT. */
+  loggedOut: Record<string, never>;
+  /** Rewards for an NPC kill (or a boss's personal loot). */
+  npcKill: { id: string; kind: number; xp: number; coins: number };
   shot: { by: string; weapon: number; ox: number; oy: number; oz: number; dx: number; dy: number; dz: number; hit?: [number, number, number] };
   projectile: { id: number; by: string; weapon: number; x: number; y: number; z: number; vx: number; vy: number; vz: number; g: number };
   explode: { id: number; x: number; y: number; z: number; radius: number; weapon: number };

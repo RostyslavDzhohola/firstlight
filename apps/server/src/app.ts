@@ -9,8 +9,9 @@ import type { TokenVerifier } from "./auth/identity.ts";
 import { directRequestIp } from "./auth/ip.ts";
 import { BodyRoom } from "./world/BodyRoom.ts";
 import { isBodyId, onlineCount, play, type MatchmakingLimits } from "./world/matchmaking.ts";
-import { characterRepo } from "./world/characters.ts";
-import { hub } from "./world/hub.ts";
+import { identityCheck, storageRecovery, travelRedirect } from "./world/admission.ts";
+import { pendingSeats } from "./world/reservations.ts";
+import { PROTOCOL_VERSION } from "@firstlight/shared/net/protocol";
 import { timingSafeEqual } from "node:crypto";
 import { partyOf, partyRoomFor, playRefusal } from "./social/index.ts";
 
@@ -26,7 +27,20 @@ export interface GameOptions {
   onShutdown?: () => Promise<void> | void;
   /** When verification fails: is this a validly signed token of a banned account/network? (403 "banned" instead of 401.) */
   explainRefusal?: (token: string, ip: string | null) => Promise<string | null>;
+  /** Accounts: recheck a real account when its seat is used (merged/deleted, banned, signed out). */
+  revalidate?: (userId: string) => string | null;
 }
+
+const LOOPBACK: ReadonlySet<string> = new Set(["127.0.0.1", "::1"]);
+
+/** /api/play limits (F12 S2): calls per 10 s and unused seats, per account and per address. */
+export const PLAY_LIMITS = {
+  windowMs: 10_000,
+  userCalls: 6,
+  ipCalls: 60,
+  userSeats: 2,
+  ipSeats: 10,
+};
 
 export interface Game {
   app: Express;
@@ -43,10 +57,12 @@ function secretMatches(given: unknown, expected: string): boolean {
 }
 
 export async function createGame(opts: GameOptions): Promise<Game> {
+  identityCheck.current = opts.revalidate ?? (() => null);
   const playCalls = new Map<string, number[]>();
+  const ipCalls = new Map<string, number[]>();
   const pruneCalls = setInterval(() => {
     const now = Date.now();
-    for (const [k, v] of playCalls) if (v.every((t) => now - t > 10_000)) playCalls.delete(k);
+    for (const m of [playCalls, ipCalls]) for (const [k, v] of m) if (v.every((t) => now - t > PLAY_LIMITS.windowMs)) m.delete(k);
   }, 60_000);
   pruneCalls.unref();
   const app = express();
@@ -111,33 +127,68 @@ export async function createGame(opts: GameOptions): Promise<Game> {
       res.status(400).json({ ok: false, error: "bad body" });
       return;
     }
-    // Per-user rate limit: 6 requests per 10 s (each request reserves a seat for a while).
+    // Stale tabs after a deploy: refuse other protocol versions so the client reloads.
+    if (req.body?.v !== PROTOCOL_VERSION) {
+      res.status(409).json({ ok: false, error: "version", version: PROTOCOL_VERSION });
+      return;
+    }
+    // Rate limits: each request reserves a seat for a while (F12 S2: per account and per address).
     const now = Date.now();
-    const recent = (playCalls.get(identity.userId) ?? []).filter((t) => now - t < 10_000);
-    if (recent.length >= 6) {
+    const recent = (playCalls.get(identity.userId) ?? []).filter((t) => now - t < PLAY_LIMITS.windowMs);
+    if (recent.length >= PLAY_LIMITS.userCalls) {
       res.status(429).json({ ok: false, error: "slow down" });
       return;
     }
     recent.push(now);
     playCalls.set(identity.userId, recent);
+    const ip = directRequestIp(req);
+    // Per-address limits skip load-test bots and loopback (local development and in-process tests;
+    // production requests always carry the edge's client address).
+    const perAddress = !identity.loadtest && !(ip !== null && LOOPBACK.has(ip));
+    if (!identity.loadtest) {
+      const key = ip ?? "unknown";
+      const fromIp = (ipCalls.get(key) ?? []).filter((t) => now - t < PLAY_LIMITS.windowMs);
+      if (perAddress && fromIp.length >= PLAY_LIMITS.ipCalls) {
+        res.status(429).json({ ok: false, error: "slow down" });
+        return;
+      }
+      fromIp.push(now);
+      ipCalls.set(key, fromIp);
+    }
+    // A change of this account couldn't be saved: not back in until storage works (F12 re-review S5).
+    if (!storageRecovery.ok(identity.userId)) {
+      res.status(503).json({ ok: false, error: "storage" });
+      return;
+    }
     // Banned (also covers dev identities) or recently kicked by an admin.
     const refusal = identity.loadtest ? null : playRefusal(identity.userId);
     if (refusal) {
       res.status(403).json({ ok: false, error: refusal });
       return;
     }
-    // Travel tickets: an existing character may only rejoin its current body or the one it was
-    // authorised to travel to (portal or rebirth). Admins and load-test bots are exempt.
-    if (!identity.admin && !identity.loadtest) {
-      const ch = hub.get(identity.userId)?.actor.char ?? characterRepo.current.load(identity.userId);
-      if (ch && body !== ch.body && body !== ch.travelTo) {
-        res.json({ ok: false, error: "travel", body: ch.body });
-        return;
-      }
+    // Bots only in load-test rooms, players only in public rooms ("no fake players, ever").
+    if ((req.body.loadtest === true) !== !!identity.loadtest) {
+      res.json({ ok: false, error: "forbidden" });
+      return;
+    }
+    // Travel tickets: a character may only rejoin its current body or the one an unexpired ticket
+    // names (portal, out of combat); brand-new characters start home. Admins and bots are exempt.
+    const redirect = travelRedirect(identity, body, Date.now());
+    if (redirect) {
+      res.json({ ok: false, error: "travel", body: redirect });
+      return;
     }
     // Party headroom (D12) only for real party members: the copy another member is in on this body
     // (a client hint is honoured only if it names such a room).
     const partyRoom = partyRoomFor(identity.userId, body, typeof req.body.partyLeaderRoomId === "string" ? req.body.partyLeaderRoomId : undefined);
+    // Unused-seat caps: checked and claimed together, before any await (F12 re-review S4); the claim
+    // becomes the reservation or is released.
+    const seatIp = perAddress ? (ip ?? "unknown") : null;
+    if (!identity.loadtest && (pendingSeats.forUser(identity.userId, now) >= PLAY_LIMITS.userSeats || (seatIp !== null && pendingSeats.forIp(seatIp, now) >= PLAY_LIMITS.ipSeats))) {
+      res.status(429).json({ ok: false, error: "slow down" });
+      return;
+    }
+    const claim = pendingSeats.claim(identity.userId, seatIp, body, now);
     try {
       const result = await play(
         identity,
@@ -151,8 +202,11 @@ export async function createGame(opts: GameOptions): Promise<Game> {
         },
         opts.limits,
       );
+      if (result.ok) pendingSeats.bind(claim, result.reservation.sessionId, result.reservation.roomId);
+      else pendingSeats.release(claim);
       res.json(result);
     } catch (err) {
+      pendingSeats.release(claim);
       console.error("play failed", err);
       res.status(500).json({ ok: false, error: "play failed" });
     }

@@ -36,3 +36,15 @@ export const env = {
    *  (no whistle sales, H refused, clients told through `you.horses`). Mutable for tests. */
   horses: process.env.FEATURE_HORSES !== "0",
 };
+
+/**
+ * Why a production config must not boot (main.ts exits on any): dev guests would allow
+ * impersonation, a missing origin secret makes forwarded IPs spoofable, and database paths must be
+ * explicit (the ./data default is outside the Railway volume, so data would vanish on deploy).
+ */
+export function productionConfigProblems(e: Record<string, string | undefined> = process.env): string[] {
+  const problems: string[] = [];
+  if (e.ALLOW_DEV_GUESTS === "1") problems.push("ALLOW_DEV_GUESTS must not be set in production");
+  for (const k of ["ORIGIN_SECRET", "BETTER_AUTH_URL", "CLIENT_ORIGIN", "BETTER_AUTH_SECRET", "AUTH_DB_PATH", "GAME_DB_PATH"]) if (!e[k]) problems.push(`${k} is required in production`);
+  return problems;
+}

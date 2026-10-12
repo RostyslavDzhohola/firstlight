@@ -66,13 +66,14 @@ interface Mech {
   length: number;
   width: number;
   cover: CoverState | null;
-  /** Split circles: everyone in the arena when the stamp fell (session ids), held through detonation. */
+  /** Split circles: everyone in the arena when the stamp fell (account ids, so a new session can't shed it), held through detonation. */
   participants?: string[];
   /** The telegraph clients were sent (replayed to late arrivals with the remaining time). */
   msg?: NpcAttackMsg;
 }
 
 const BOSS_MSG_RADIUS = 220;
+const NO_FOOTING = { top: 0, inside: false };
 /** Live summons per boss at most (Court Summons / Collector Drones stop when the cap is reached). */
 const MAX_SUMMONS = 4;
 /** Lair-state snapshots go to players who come within this distance of the arena (and on request). */
@@ -795,7 +796,7 @@ export class BossController {
       if (!pool.length) return false;
       const victim = pool[Math.floor(Math.random() * pool.length)]!;
       const c = this.groundAt(victim.pos);
-      this.mechs.push({ ...base, kind: "split", centre: c, participants: this.inArena.map((lp) => lp.a.id) });
+      this.mechs.push({ ...base, kind: "split", centre: c, participants: this.inArena.map((lp) => lp.a.identity.userId) });
       this.sendTelegraph(n, a, c, n.facing, ms, { r: a.radius ?? 4 });
       this.event({ type: "mechanic", mech: a.id, pts: [...c], r: a.radius, ms });
       return true;
@@ -845,9 +846,9 @@ export class BossController {
         if (inside.length) victims = inside.map((lp) => lp.a);
         else {
           // Empty circle: everyone who was in the arena when it was stamped takes it, wherever they
-          // went (running out, or closing the tab, doesn't dodge the curse), plus anyone in the arena now.
-          const ids = new Set([...(m.participants ?? []), ...this.inArena.filter((lp) => !lp.untouchable).map((lp) => lp.a.id)]);
-          victims = [...this.sys.world.players()].filter((p) => ids.has(p.id) && !p.dead);
+          // went (running out, closing the tab or swapping sessions doesn't dodge the curse), plus anyone in the arena now.
+          const ids = new Set([...(m.participants ?? []), ...this.inArena.filter((lp) => !lp.untouchable).map((lp) => lp.a.identity.userId)]);
+          victims = [...this.sys.world.players()].filter((p) => ids.has(p.identity.userId) && !p.dead);
         }
         // 120% of the sturdiest victim's max HP (never less than listed): lethal solo at any level.
         const total = a ? splitTotal(attackDamage(a, n.level), victims.map((p) => p.state.maxHp)) : 0;
@@ -977,8 +978,20 @@ export class BossController {
       },
       splash: (...args) => inner?.splash(...args),
       arc: (...args) => inner?.arc(...args),
+      // Shots still reach a player standing inside a prop or a cover cylinder (F12), and movement
+      // footing stays the destruction system's.
+      contains: (index, p) => (index < COVER_INDEX ? !!inner?.contains?.(index, p) : this.coverContains(index - COVER_INDEX, p)),
+      footing: (x, y, z, step) => inner?.footing?.(x, y, z, step) ?? NO_FOOTING,
     };
     host.props = this.coverHost;
+  }
+
+  /** Is `p` inside intact cover cylinder `i`? */
+  private coverContains(i: number, p: V3): boolean {
+    const c = this.cover[i];
+    if (!c || c.broken) return false;
+    const h = len(p) - len(c.def.pos);
+    return h >= 0 && h <= c.def.height && flatDist(c.def.pos, p) < c.def.radius;
   }
 
   /** First intact cover cylinder along a ray within maxT: its index and distance (i = −1: none; reused object). */

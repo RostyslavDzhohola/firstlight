@@ -11,7 +11,7 @@ import { mountOps } from "../src/ops/admin.ts";
 import { banExplainer } from "../src/social/refusal.ts";
 import { recordError } from "../src/ops/errors.ts";
 import { ANALYTICS, blockedEitherWay, partyOf, partyRoomFor } from "../src/social/index.ts";
-import { api, Browser, decodeJwt, ORIGIN, play, startAuthServer, type AuthServer } from "./auth-helpers.ts";
+import { api, Browser, decodeJwt, ORIGIN, play, startAuthServer, ticketFor, type AuthServer } from "./auth-helpers.ts";
 import { safeLeave, waitFor } from "./helpers.ts";
 
 let server: AuthServer | null = null;
@@ -34,6 +34,7 @@ async function start(over: Parameters<typeof startAuthServer>[0] = {}) {
 
 /** Enter the world with a token from a given client IP (x-real-ip, as Railway's edge sets it). */
 async function enter(s: AuthServer, token: string, body = "arcadia", ip = "198.51.100.50", extra: Record<string, unknown> = {}): Promise<Room> {
+  ticketFor(token, body);
   const r = await play(s, token, { body, ...extra }, { "x-real-ip": ip });
   if (!r.json.ok) throw new Error(`play refused: ${JSON.stringify(r.json)}`);
   const room = await new Client(s.base).consumeSeatReservation(r.json.reservation as never);

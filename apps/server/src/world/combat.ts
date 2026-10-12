@@ -5,13 +5,16 @@
 import { damageMult, falloff, maxHp, splashFalloff } from "@firstlight/shared/content/progression";
 import { WEAPONS, WEAPON_INDEX, type Destroys, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
 import type { Terrain } from "@firstlight/shared";
+import { NET } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
 import { actorPos, mountedAt, positionAgo, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
+import { noteKnockback } from "./movement.ts";
 import { dist3, HEAD_FROM, inMeleeArc, PLAYER_HEIGHT, PLAYER_RADIUS, rayCapsule, rayTerrain, type V3 } from "./geometry.ts";
 import { splashShield, type BubbleHost } from "./support.ts";
 import { HORSE } from "@firstlight/shared/content/horse";
 
-export const REWIND_MS = 150;
+/** Lag compensation window: the one shared constant (SPEC §5.3: history ≤ 200 ms). */
+export const REWIND_MS = NET.REWIND_MS;
 export const COMBAT_TAG_MS = 10_000;
 export const ORIGIN_SLACK = 7; // metres the shot origin may be from the shooter's head (camera offset)
 
@@ -39,8 +42,12 @@ export interface CombatHost {
  * whether that class can break the prop and applies weapon prop multipliers.
  */
 export interface BreakableHost {
-  /** First intact prop along a segment (the returned object is reused), or null. */
+  /** First intact prop along a segment (the returned object is reused), or null. Props containing `o` are ignored. */
   raycast(o: V3, d: V3, maxT: number): { index: number; t: number } | null;
+  /** Is the point inside intact prop `index`? (Stand-ins without it: never.) */
+  contains?(index: number, p: V3): boolean;
+  /** Movement footing at the feet: highest intact prop top under them (radius, 0 = none), and whether they're inside a prop. */
+  footing?(x: number, y: number, z: number, step: number): { top: number; inside: boolean };
   /** `by`: the attacking player's session id (credit for the Demolition Crew medal), or null. */
   damage(index: number, amount: number, cls: Destroys, weaponId: string, dir: V3, by: string | null): void;
   /** `blocked(point)`: a Prism Bubble shell lies between the blast and that prop centre (skip it). */
@@ -205,8 +212,8 @@ export function consumeAttack(p: PlayerActor, def: WeaponDef, tier: TierStats, n
     if (item.mag <= 0) {
       p.reloadEndsAt = now + (tier.reload ?? 1.5) * 1000;
       item.mag = tier.mag;
-    }
-    p.youDirty = true;
+      p.youDirty = true;
+    } else p.youLazy = true; // the ammo readout catches up within ~0.4 s, not one full 'you' per shot
   }
   if (tier.heat !== undefined) {
     // Heat cools at one shot per second of not firing.
@@ -353,6 +360,17 @@ function aimActorT(host: CombatHost, p: PlayerActor, o: V3, d: V3, maxT: number)
   return hit ? hit.t : Infinity;
 }
 
+/**
+ * An actor the ray reaches inside the prop that stopped it (at `propIdx`): standing in a prop is no
+ * shield (F12). Null when nobody is hit there.
+ */
+function actorInsideProp(host: CombatHost, propIdx: number, o: V3, d: V3, maxT: number, ignore: Set<string>, rewindMs: number): RayTargetHit | null {
+  if (propIdx < 0 || !host.props) return null;
+  const hit = raycastActors(host, o, d, maxT, ignore, rewindMs);
+  if (!hit) return null;
+  return host.props.contains?.(propIdx, [o[0] + d[0] * hit.t, o[1] + d[1] * hit.t, o[2] + d[2] * hit.t]) ? hit : null;
+}
+
 function hitscan(host: CombatHost, p: PlayerActor, o: V3, d: V3, maxRange: number, baseDamage: number, def: WeaponDef, tier: TierStats): number | null {
   const terrainT = rayTerrain(host.terrain, o, d, maxRange, 1.5);
   // An intact breakable in the way stops the shot and takes it instead (destruction.ts).
@@ -361,7 +379,9 @@ function hitscan(host: CombatHost, p: PlayerActor, o: V3, d: V3, maxRange: numbe
   // A Prism Bubble shell in the way (either side) takes the shot.
   const shell = host.bubbles?.cross(o, d, Math.min(maxRange, terrainT, propT)) ?? null;
   const shellT = shell ? shell.t : Infinity;
-  const hit = raycastActors(host, o, d, Math.min(maxRange, terrainT, propT, shellT), new Set([p.id]), REWIND_MS);
+  const ignore = new Set([p.id]);
+  // Someone standing inside the prop that stops the shot is still hit (F12: props are no shield).
+  const hit = raycastActors(host, o, d, Math.min(maxRange, terrainT, propT, shellT), ignore, REWIND_MS) ?? (shellT < propT ? null : actorInsideProp(host, propIdx, o, d, Math.min(maxRange, terrainT), ignore, REWIND_MS));
   if (!hit && shell) {
     host.bubbles!.absorb(shell.bubble, baseDamage * falloff(shellT, def.range, def.falloffTo, def.falloffMin));
     return shellT;
@@ -594,7 +614,7 @@ export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | 
     kx = +(-fromDir[0] / l).toFixed(3);
     ky = +(-fromDir[1] / l).toFixed(3);
     kz = +(-fromDir[2] / l).toFixed(3);
-    if (target.kind === "player") target.moveBudget += knockback * 1.5;
+    if (target.kind === "player") noteKnockback(target, knockback, now);
   }
   host.broadcastNear("hit", { attacker: attacker?.id ?? "", target: target.id, amount: dmg, weak, kind: target.kind, x: tp[0], y: tp[1], z: tp[2], kb: knockback ?? 0, kx, ky, kz }, tp, 120, [target.id, attacker?.id ?? ""]);
   host.onDamage(target, dmg, attacker, weak);
@@ -685,7 +705,7 @@ function advance(host: CombatHost, p: Projectile, d: V3, step: number, now: numb
     const shell = host.bubbles?.cross(o, d, Math.min(left, terrainT, propT)) ?? null;
     const shellT = shell ? shell.t : Infinity;
     const sh = shell ? shell.bubble : null;
-    const hit = raycastActors(host, o, d, Math.min(left, terrainT, propT, shellT), p.hit, 0);
+    const hit = raycastActors(host, o, d, Math.min(left, terrainT, propT, shellT), p.hit, 0) ?? (propT < left && propT < shellT ? actorInsideProp(host, propIdx, o, d, Math.min(left, terrainT), p.hit, 0) : null);
     if (hit) {
       p.hit.add(hit.actor.id);
       const at: V3 = [o[0] + d[0] * hit.t, o[1] + d[1] * hit.t, o[2] + d[2] * hit.t];

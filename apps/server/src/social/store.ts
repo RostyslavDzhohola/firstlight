@@ -36,9 +36,11 @@ export function currentDb(): Db | null {
 const memBlocks = new Map<string, Set<string>>(); // userId → blocked userIds
 const memBans = new Set<string>();
 const memReports: { reporter: string; target: string; body: string | null; pos: [number, number, number] | null; reason: string; createdAt: number }[] = [];
+const memMutes = new Set<string>();
 
 /** Test hook: forget the in-memory fallback state. */
 export function resetMemoryStore(): void {
+  memMutes.clear();
   memBlocks.clear();
   memBans.clear();
   memReports.length = 0;
@@ -70,6 +72,30 @@ export function blockedEitherWay(a: string, b: string): boolean {
   const db = currentDb();
   if (db) return isBlockedEitherWay(db, a, b);
   return !!memBlocks.get(a)?.has(b) || !!memBlocks.get(b)?.has(a);
+}
+
+// ---- admin voice mutes (F12 S12: they survive restarts) ---------------------------------------------
+
+export function storeVoiceMute(userId: string, on: boolean, now = Date.now()): void {
+  const db = currentDb();
+  if (db) {
+    if (on) stmt(db, "INSERT OR REPLACE INTO voice_mute (user_id, muted_at) VALUES (?, ?)").run(userId, now);
+    else stmt(db, "DELETE FROM voice_mute WHERE user_id = ?").run(userId);
+    return;
+  }
+  if (on) memMutes.add(userId);
+  else memMutes.delete(userId);
+}
+
+export function storedVoiceMute(userId: string): boolean {
+  const db = currentDb();
+  if (db) return !!stmt(db, "SELECT 1 FROM voice_mute WHERE user_id = ?").get(userId);
+  return memMutes.has(userId);
+}
+
+/** A guest saved: the in-memory fallback follows the account (game.db rows move in linkAccounts). */
+export function rekeyStoredVoiceMute(from: string, to: string): void {
+  if (memMutes.delete(from)) memMutes.add(to);
 }
 
 // ---- reports -------------------------------------------------------------------------------------
