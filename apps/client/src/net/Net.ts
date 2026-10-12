@@ -33,9 +33,54 @@ export class TravelRedirect extends Error {
 /** App close codes (shared with the server). */
 export { CLOSE } from "@firstlight/shared/net/social";
 
+/** The room handshake (WebSocket join of a seat reservation) must finish within this (ms). */
+export const JOIN_TIMEOUT_MS = 15_000;
+
+/** The WebSocket connected (or not) but the room handshake never finished. */
+export class JoinTimeout extends Error {
+  constructor() {
+    super(`room handshake timed out after ${JOIN_TIMEOUT_MS} ms`);
+    this.name = "JoinTimeout";
+  }
+}
+
+/** Starts the WebSocket join of a seat reservation; `abort` closes that socket while it handshakes. */
+export interface SeatJoiner {
+  consume(reservation: unknown): { joined: Promise<Room>; abort(): void };
+}
+
+/** The SDK client, keeping hold of the room it is connecting so a stalled handshake can be closed. */
+class SeatClient extends Client implements SeatJoiner {
+  private connecting: Room | null = null;
+
+  protected override createRoom<T>(roomName: string, rootSchema?: any): Room<any, T> {
+    const room = super.createRoom<T>(roomName, rootSchema);
+    this.connecting = room;
+    return room;
+  }
+
+  consume(reservation: unknown): { joined: Promise<Room>; abort(): void } {
+    // consumeSeatReservation creates the room and starts connecting before its first await.
+    const joined = this.consumeSeatReservation(reservation as never);
+    const room = this.connecting;
+    this.connecting = null;
+    return {
+      joined,
+      abort: () => {
+        try {
+          room?.connection?.close();
+        } catch {
+          /* the socket may never have opened */
+        }
+      },
+    };
+  }
+}
+
 export class Net {
   room: Room | null = null;
-  readonly client = new Client(config.apiUrl);
+  /** Bumped by every join and leave: a join that finishes after a newer one (or a leave) is dropped. */
+  private joinGen = 0;
   readonly remotes = new Map<string, RemotePlayerView>();
   private seq = 0;
   private lastSend = 0;
@@ -49,6 +94,8 @@ export class Net {
   /** /api/play refused this account ("banned", or "kicked" for a short cooldown). */
   onRefused: ((reason: string) => void) | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
+
+  constructor(private readonly joiner: SeatJoiner = new SeatClient(config.apiUrl)) {}
 
   async join(body: BodyId, opts: { partyLeaderRoomId?: string; starter?: number; palette?: number } = {}): Promise<Room> {
     let retried401 = false;
@@ -74,7 +121,12 @@ export class Net {
       const r = (await res.json()) as PlayResponse;
       if (r.ok) {
         this.onQueue?.(null);
-        const room = await this.client.consumeSeatReservation(r.reservation as never);
+        const gen = ++this.joinGen;
+        const room = await this.consumeWithDeadline(r.reservation);
+        if (gen !== this.joinGen) {
+          void room.leave().catch(() => {}); // a leave() or a newer join came first: never attach this one
+          throw new Error("join superseded");
+        }
         this.attach(room);
         return room;
       }
@@ -88,6 +140,37 @@ export class Net {
       if (r.error === "banned" || r.error === "kicked") this.onRefused?.(r.error);
       throw new Error(r.error);
     }
+  }
+
+  /**
+   * The WebSocket half of a join, bounded: a socket that never finishes the room handshake is closed
+   * and the join fails (JoinTimeout); a room that joins after that is left, never attached.
+   */
+  private consumeWithDeadline(reservation: unknown): Promise<Room> {
+    const { joined, abort } = this.joiner.consume(reservation);
+    return new Promise<Room>((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        abort();
+        reject(new JoinTimeout());
+      }, JOIN_TIMEOUT_MS);
+      joined.then(
+        (room) => {
+          if (settled) return void room.leave().catch(() => {});
+          settled = true;
+          clearTimeout(timer);
+          resolve(room);
+        },
+        (e: unknown) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          reject(e);
+        },
+      );
+    });
   }
 
   private attach(room: Room) {
@@ -187,6 +270,7 @@ export class Net {
   }
 
   async leave() {
+    this.joinGen++; // a join still in flight must not attach after this
     const r = this.room;
     this.room = null;
     this.stopPing();
