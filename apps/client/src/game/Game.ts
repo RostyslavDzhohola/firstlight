@@ -5,7 +5,7 @@ import * as THREE from "three/webgpu";
 import { BODIES, padDirs, type BodyId } from "@firstlight/shared";
 import { flags } from "../config.ts";
 import { CLOSE, Net, TravelRedirect } from "../net/Net.ts";
-import { AvatarView, preloadAvatars } from "../render/Avatars.ts";
+import { AvatarView, avatarWarmupHook, preloadAvatars } from "../render/Avatars.ts";
 import "../render/avatars/system.ts";
 import { Bench, benchConfig } from "../render/bench.ts";
 import { BlobShadows } from "../render/blobShadows.ts";
@@ -361,9 +361,12 @@ export class Game {
   }
 
   private warmupHook() {
+    // every palette's skinned toon variant, weapons and LOD proxies compile behind the loading screen
+    const avatars = avatarWarmupHook(this.ctx.scene, () => this.player.pos);
     return {
       forceAll: (on: boolean) => {
         this.planet.props.setForceAll(on);
+        avatars.forceAll(on);
       },
     };
   }
