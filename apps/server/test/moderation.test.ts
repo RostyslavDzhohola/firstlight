@@ -311,6 +311,38 @@ describe("account merges and blocks (F12 social review 1)", () => {
   });
 });
 
+describe("report limits survive saving (F12 social review 4)", () => {
+  it("a guest who used up their reports can't file more after saving", async () => {
+    const s = await start();
+    const off = s.accounts.links.on((e) => accountLinks.emit(e));
+    try {
+      const targets: Room[] = [];
+      for (let i = 0; i < 6; i++) targets.push(await enter(s, `dev:rl_t${i}:Tee${i}`, "portus"));
+      const gb = new Browser(s, "198.51.100.90");
+      const gToken = await gb.playToken();
+      const g = await enter(s, gToken, "portus", "198.51.100.90");
+      await waitFor(() => st(g).players?.size === 7);
+      const toasts = inbox<any>(g, "toast");
+      for (let i = 0; i < 5; i++) g.send("report", { target: targets[i]!.sessionId, reason: "griefing" });
+      await waitFor(() => toasts.filter((t) => /Report sent/.test(t.text)).length === 5);
+      let closed = 0;
+      g.onLeave((c) => (closed = c));
+      await gb.saveWithEmail("rl-saver@example.test");
+      await waitFor(() => closed === CLOSE.MERGED);
+      const savedToken = (await gb.client.token()).data!.token;
+      const a = await enter(s, savedToken, "portus", "198.51.100.90");
+      await waitFor(() => st(a).players?.has(targets[5]!.sessionId));
+      const after = inbox<any>(a, "toast");
+      a.send("report", { target: targets[5]!.sessionId, reason: "griefing" });
+      await waitFor(() => after.length > 0);
+      expect(after[0].text).toBe("Report already sent. Thanks.");
+      expect(listReports(s.accounts.db)).toHaveLength(5);
+    } finally {
+      off();
+    }
+  });
+});
+
 describe("session analytics", () => {
   it("a session row starts on join, spans travel, records backend/tier and ends after leaving; load-test players are skipped", async () => {
     ANALYTICS.END_GRACE_MS = 300;

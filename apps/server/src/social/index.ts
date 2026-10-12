@@ -11,6 +11,7 @@ import { accountLinks } from "../auth/links.ts";
 import { SYSTEM_FACTORIES } from "../world/systems.ts";
 import { rekeyAnalytics } from "./analytics.ts";
 import { rekeyModeration } from "./moderation.ts";
+import { rekeyLimits } from "./limits.ts";
 import { parties } from "./parties.ts";
 import { rekeyPresence, sendTo } from "./presence.ts";
 import { createSocialSystem, enforceBlocksAfterMerge, rekeySessions, syncParty } from "./system.ts";
@@ -24,6 +25,7 @@ accountLinks.on((ev) => {
   rekeySessions(ev.fromUserId, ev.toUserId);
   rekeyAnalytics(ev.fromUserId, ev.toUserId);
   rekeyModeration(ev.fromUserId, ev.toUserId);
+  rekeyLimits(ev.fromUserId, ev.toUserId); // report, block and invite limits carry over
   // The merged blocks (game.db moved them before this event) apply to the merged party and invites.
   enforceBlocksAfterMerge(ev.toUserId);
   syncParty([...affected, ev.toUserId, ...(parties.of(ev.toUserId)?.members ?? [])]);

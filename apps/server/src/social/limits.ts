@@ -43,6 +43,23 @@ export function allowReport(reporter: string, target: string, now = Date.now()):
   );
 }
 
+/**
+ * A guest saved or signed into an account: every key that names the old id (as the actor or as the
+ * target) now names the account, merged with the account's own history, so neither saving nor
+ * signing in on another browser resets a limit (F12 social review). Keys are `kind:id[:id]`; ids
+ * never contain ":".
+ */
+export function rekeyLimits(from: string, to: string): void {
+  if (from === to) return;
+  for (const [key, list] of [...rate]) {
+    const parts = key.split(":");
+    if (!parts.slice(1).includes(from)) continue;
+    rate.delete(key);
+    const next = [parts[0]!, ...parts.slice(1).map((p) => (p === from ? to : p))].join(":");
+    rate.set(next, [...(rate.get(next) ?? []), ...list].sort((a, b) => a - b));
+  }
+}
+
 /** Drop keys idle for 15 minutes (bounded memory). */
 export function sweepLimits(now = Date.now()): void {
   for (const [k, list] of rate) if (!list.length || now - list[list.length - 1]! > 15 * 60_000) rate.delete(k);
