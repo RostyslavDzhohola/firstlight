@@ -158,6 +158,78 @@ describe("parties", () => {
   });
 });
 
+describe("blocks and parties (stalking, risk R1)", () => {
+  const userOf = (r: Room) => me(r).userId as string;
+
+  it("a voice-panel block withdraws a pending invite: the blocked player can't accept it", async () => {
+    const ann = await join(uid("ann"));
+    const ben = await join(uid("ben"));
+    await waitFor(() => st(ann).players.size === 2);
+    const invites = inbox<any>(ben, "party:invite");
+    const closed = inbox<any>(ben, "party:invite-closed");
+    const states = inbox<any>(ben, "party:state");
+    ann.send("party", { action: "invite", target: ben.sessionId });
+    await waitFor(() => invites.length === 1);
+    ann.send("voice:block", { target: ben.sessionId });
+    await waitFor(() => closed.some((c) => c.from === userOf(ann) && c.reason === "cancelled"));
+    const denied = inbox<any>(ben, "denied");
+    ben.send("party", { action: "accept", target: invites[0].from });
+    await waitFor(() => denied.length > 0);
+    expect(me(ben).party).toBe("");
+    expect(partyOf(userOf(ben))).toEqual([userOf(ben)]);
+    expect(states.every((s) => !s.members.some((m: any) => m.userId === userOf(ann)))).toBe(true);
+  });
+
+  it("a block inside a party splits it: the leader's block removes the other, a member's block makes them leave", async () => {
+    const lead = await join(uid("lead"));
+    const ben = await join(uid("ben"));
+    const cat = await join(uid("cat"));
+    const dan = await join(uid("dan"));
+    await waitFor(() => st(lead).players.size === 4);
+    await formParty(lead, ben, cat, dan);
+    const pid = me(lead).party;
+
+    // A member blocks another member (voice panel): the blocker leaves, the blocked one stays.
+    ben.send("voice:block", { target: cat.sessionId });
+    await waitFor(() => me(ben).party === "");
+    expect(me(cat).party).toBe(pid);
+    expect(partyOf(userOf(lead)).sort()).toEqual([userOf(lead), userOf(cat), userOf(dan)].sort());
+
+    // The leader blocks a member (Tab list): that member is removed.
+    lead.send("social:block", { target: dan.sessionId });
+    await waitFor(() => me(dan).party === "");
+    expect(partyOf(userOf(lead)).sort()).toEqual([userOf(lead), userOf(cat)].sort());
+
+    // A member blocks the leader: the member leaves (here that disbands the party of two).
+    cat.send("social:block", { target: lead.sessionId });
+    await waitFor(() => me(cat).party === "" && me(lead).party === "");
+  });
+
+  it("invites and accepts are refused when anyone in the party blocked the player, either way", async () => {
+    const ann = await join(uid("ann"));
+    const ben = await join(uid("ben"));
+    const cat = await join(uid("cat"));
+    await waitFor(() => st(ann).players.size === 3);
+    // Cat invites Ben first; then Ann (who blocked Ben) joins Cat's party.
+    const benInvites = inbox<any>(ben, "party:invite");
+    cat.send("party", { action: "invite", target: ben.sessionId });
+    await waitFor(() => benInvites.length === 1);
+    ann.send("social:block", { target: ben.sessionId });
+    await formParty(cat, ann);
+    // Accepting now would put Ben next to Ann: refused.
+    const benDenied = inbox<any>(ben, "denied");
+    ben.send("party", { action: "accept", target: benInvites[0].from });
+    await waitFor(() => benDenied.length > 0);
+    expect(benDenied[0]).toEqual({ action: "party", reason: "you can't join this party" });
+    expect(me(ben).party).toBe("");
+    // And Cat can't invite Ben while Ann is in the party.
+    const catDenied = inbox<any>(cat, "denied");
+    cat.send("party", { action: "invite", target: ben.sessionId });
+    await waitFor(() => catDenied.length > 0);
+    expect(catDenied[0]).toEqual({ action: "party", reason: "you can't invite this player" });
+  });
+});
+
 describe("admin actions", () => {
   it("admin kick disconnects at once, refuses the old seat and keeps them out for a while", async () => {
     const boss = await join(uid("admin"), "portus", "admin");

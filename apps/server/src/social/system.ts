@@ -120,12 +120,35 @@ export function resetSocialTimers(): void {
   clearLimits();
 }
 
+/** True when `userId` blocked, or was blocked by, any of `members` (stalking, risk R1). */
+function blockedWithAny(userId: string, members: readonly string[]): boolean {
+  return members.some((m) => m !== userId && blockedEitherWay(userId, m));
+}
+
+/**
+ * A block between two members of one party splits it, so neither keeps getting the other's live
+ * position (party:state) or a way into their copy (partyRoomFor). The leader's block removes the
+ * other player; anyone else's block makes the blocker leave, so a block never removes someone the
+ * blocker couldn't kick anyway.
+ */
+function splitParty(blocker: string, target: string): void {
+  const p = parties.of(blocker);
+  if (!p || !p.members.includes(target)) return;
+  const leaving = p.leader === blocker ? target : blocker;
+  const r = parties.leave(leaving);
+  sendTo(leaving, "toast", { text: leaving === blocker ? "You left the party" : "You were removed from the party", kind: "warn" });
+  const name = lastNames.get(leaving) ?? "A player";
+  for (const other of r.affected) if (other !== leaving) sendTo(other, "toast", { text: `${name} left the party`, kind: "info" });
+  syncParty(r.affected);
+}
+
 export type BlockOutcome = { ok: true; changed: boolean } | { ok: false; reason: string };
 
 /**
  * Block or unblock: the one path for the Tab list and the voice panel (same rate limit and list cap).
- * A block withdraws invites between the two; only a new block runs the voice hooks (hang up, and
- * rotate relay credentials when the pair was linked), so repeating it changes nothing (F12 B1).
+ * A block withdraws invites between the two and splits a party they share; only a new block runs the
+ * voice hooks (hang up, and rotate relay credentials when the pair was linked), so repeating it
+ * changes nothing (F12 B1).
  */
 export function applyBlock(blocker: string, target: string, on: boolean, now = Date.now()): BlockOutcome {
   if (blocker === target) return { ok: false, reason: "that's you" };
@@ -136,6 +159,7 @@ export function applyBlock(blocker: string, target: string, on: boolean, now = D
   const changed = had !== on && setBlocked(blocker, target, on, now);
   if (on) {
     for (const inv of parties.cancelBetween(blocker, target)) sendTo(inv.to, "party:invite-closed", { from: inv.from, to: inv.to, reason: "cancelled" });
+    splitParty(blocker, target);
     if (changed) for (const h of onBlockHooks) h(blocker, target);
   }
   return { ok: true, changed };
@@ -174,7 +198,7 @@ export function createSocialSystem(room: BodyRoom): RoomSystem {
         if (!t) return deny(c, "party", "that player isn't in this world copy");
         if (t === me) return deny(c, "party", "you can't invite yourself");
         if (dist(me, t) > SOCIAL.INVITE_RANGE_M) return deny(c, "party", "too far away (30 m)");
-        if (blockedEitherWay(uid, t.identity.userId)) return deny(c, "party", "you can't invite this player");
+        if (blockedWithAny(t.identity.userId, parties.of(uid)?.members ?? [uid])) return deny(c, "party", "you can't invite this player");
         if (!allow(`inv:${uid}`, SOCIAL_RULES.INVITES_PER_MINUTE, 60_000)) return deny(c, "party", "slow down");
         const r = parties.invite(uid, me.identity.name, t.identity.userId);
         if (!r.ok) return deny(c, "party", r.reason);
@@ -184,6 +208,11 @@ export function createSocialSystem(room: BodyRoom): RoomSystem {
       }
       case "accept": {
         if (!m.target) return;
+        // The party may have changed since the invite (a block, or a member who blocked you joined).
+        if (parties.pendingFor(uid).some((i) => i.from === m.target) && blockedWithAny(uid, parties.of(m.target)?.members ?? [m.target])) {
+          parties.decline(uid, m.target);
+          return deny(c, "party", "you can't join this party");
+        }
         const r = parties.accept(uid, m.target);
         if (!r.ok) return deny(c, "party", r.reason);
         sendTo(m.target, "party:invite-closed", { from: m.target, to: uid, reason: "accepted" });
