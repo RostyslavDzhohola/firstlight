@@ -16,6 +16,7 @@ import { pauseExtras, type PauseExtra } from "../ui/menu.ts";
 import { OnboardingHud } from "../ui/onboarding.ts";
 import { Panel } from "../ui/panels.ts";
 import { voice } from "../voice/index.ts";
+import { portalAt } from "../world/portalEntry.ts";
 import { TrainingDummies } from "../world/TrainingDummies.ts";
 import type { Game } from "./Game.ts";
 import { OnboardingSteps } from "./onboardingSteps.ts";
@@ -190,6 +191,7 @@ export class OnboardingClient implements ClientSystem {
       phrased: this.phrased,
       voiceOn: !!voice()?.optedIn,
       atPortal: !!portalNear(this.portals, p.x, p.y, p.z),
+      inPortal: !!portalAt(this.portals, p.x, p.y, p.z),
     });
     this.phrased = false;
     if (completed.length && completed[0] !== "attack") g.audio.play("ui");

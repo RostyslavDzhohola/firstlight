@@ -321,7 +321,7 @@ async function run() {
       hud.setHp(100, 100);
       const onb = new OnboardingHud(hud.root.querySelector<HTMLElement>(".fl-hud__layer")!, () => {}, "https://github.com/example/firstlight");
       const steps = new OnboardingSteps();
-      const sample = { dt: 0, moved: 0, lookRad: 0, anim: ANIM.IDLE as number, dummiesDown: 0, pressed: new Set<string>(), phrased: false, voiceOn: false, atPortal: false };
+      const sample = { dt: 0, moved: 0, lookRad: 0, anim: ANIM.IDLE as number, dummiesDown: 0, pressed: new Set<string>(), phrased: false, voiceOn: false, atPortal: false, inPortal: false };
       for (const id of ["move", "look", "jump"] as const) steps.complete(id);
       steps.observe({ ...sample, dt: 1.1, anim: ANIM.SPRINT });
       if (screen !== "onboarding") for (const id of ["sprint", "dodge"] as const) steps.complete(id);

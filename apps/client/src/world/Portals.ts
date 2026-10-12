@@ -3,9 +3,10 @@
 
 import * as THREE from "three/webgpu";
 import { materialColor } from "three/tsl";
-import { BODIES, padDirs, PAD_SAFE_RADIUS, portalSpots, type BodyId, type Terrain } from "@firstlight/shared";
+import { BODIES, padDirs, PAD_SAFE_RADIUS, portalSpots, type BodyId, type PortalSpot, type Terrain } from "@firstlight/shared";
 import { atmo } from "../render/atmosphere.ts";
 import { disposeTree } from "../render/dispose.ts";
+import { portalAt } from "./portalEntry.ts";
 
 export const PORTAL_COLORS: Record<BodyId, number> = {
   portus: 0xffd8a8,
@@ -13,14 +14,6 @@ export const PORTAL_COLORS: Record<BodyId, number> = {
   hollowmere: 0xb48cff,
   meridian: 0xff7a4a,
 };
-
-const _d = new THREE.Vector3();
-
-export interface Portal {
-  to: BodyId;
-  center: THREE.Vector3;
-  normal: THREE.Vector3;
-}
 
 function glow(color: number, k = 3, opacity = 1) {
   const m = new THREE.MeshBasicNodeMaterial({ color: new THREE.Color(color).multiplyScalar(k), transparent: opacity < 1, opacity, depthWrite: opacity >= 1 });
@@ -39,7 +32,8 @@ function frame(up: THREE.Vector3): { right: THREE.Vector3; fwd: THREE.Vector3 } 
 
 export class Portals {
   readonly group = new THREE.Group();
-  readonly portals: Portal[] = [];
+  /** The shared, server-validated portal spots on this body (entry test: portalEntry.ts). */
+  readonly spots: PortalSpot[];
   private readonly spinners: THREE.Object3D[] = [];
   /** Objects culled by distance from the player (far side of the planet isn't streamed). */
   private readonly cullables: { obj: THREE.Object3D; at: THREE.Vector3 }[] = [];
@@ -78,7 +72,6 @@ export class Portals {
       this.cullables.push({ obj: g, at: dir.clone().multiplyScalar(R + h) });
       this.spinners.push(disc);
       const center = dir.clone().multiplyScalar(R + h).addScaledVector(up, 2.6);
-      this.portals.push({ to, center, normal: f });
       const label = makeLabel(BODIES[to].name.toUpperCase(), color);
       label.position.copy(center).addScaledVector(up, 3.2);
       this.group.add(label);
@@ -114,20 +107,15 @@ export class Portals {
       });
     }
     // Portals at the shared, server-validated positions.
-    for (const spot of portalSpots(def, terrain)) {
+    this.spots = portalSpots(def, terrain);
+    for (const spot of this.spots) {
       addPortal(spot.to, new THREE.Vector3(...spot.dir), spot.h, new THREE.Vector3(...spot.facing));
     }
   }
 
-  /** The portal the player is standing in, if any (every frame: no allocation). */
+  /** The portal the player (feet at `pos`) is standing in, if any (every frame: no allocation). */
   check(pos: THREE.Vector3): BodyId | null {
-    for (const p of this.portals) {
-      const d = _d.copy(pos).sub(p.center);
-      const along = d.dot(p.normal);
-      const lateral = d.addScaledVector(p.normal, -along).length();
-      if (Math.abs(along) < 0.9 && lateral < 2.2) return p.to;
-    }
-    return null;
+    return portalAt(this.spots, pos.x, pos.y, pos.z)?.to ?? null;
   }
 
   update(dt: number, playerPos?: THREE.Vector3, maxDistance = 450) {

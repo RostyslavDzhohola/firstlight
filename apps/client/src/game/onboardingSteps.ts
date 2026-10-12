@@ -62,8 +62,10 @@ export interface Sample {
   phrased: boolean;
   /** Voice chat is switched on. */
   voiceOn: boolean;
-  /** Standing in a portal. */
+  /** Within the server's travel reach of a portal ring (the ring is on screen right ahead). */
   atPortal: boolean;
+  /** Standing in a portal's ring (what starts travel). */
+  inPortal: boolean;
 }
 
 const DIGITS = ["Digit1", "Digit2", "Digit3", "Digit4"];
@@ -93,7 +95,9 @@ export class OnboardingSteps {
     if (x.pressed.has("KeyM")) this.set("map", 1);
     if (x.phrased) this.set("wheel", 1);
     if (x.voiceOn || x.pressed.has("KeyV")) this.set("voice", 1);
-    if (x.atPortal) this.set("portal", 1);
+    // Walking into a ring always counts; only reaching it counts once it is the step on the card, so
+    // passing the Arcadia ring on the way to the dummies doesn't tick it early (T9).
+    if (x.inPortal || (x.atPortal && this.current?.id === "portal")) this.set("portal", 1);
     const cur = this.current;
     if (cur?.id !== this.cardId) {
       this.cardId = cur?.id ?? null;
