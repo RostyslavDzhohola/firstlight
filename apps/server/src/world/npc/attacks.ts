@@ -59,13 +59,15 @@ export function chest(p: V3, h = 0.9): V3 {
   return [p[0] + u[0] * h, p[1] + u[1] * h, p[2] + u[2] * h];
 }
 
-/** Line of sight over the terrain from one point to another. */
+/** Line of sight from one point to another: terrain, intact breakable props and arena cover block it. */
 export function canSee(sys: NpcSystem, from: V3, to: V3): boolean {
   const d = sub(to, from);
   const l = len(d);
   if (l < 1) return true;
   const dir: V3 = [d[0] / l, d[1] / l, d[2] / l];
-  return rayTerrain(sys.world.terrain, from, dir, l, 2.5) >= l - 0.75;
+  if (rayTerrain(sys.world.terrain, from, dir, l, 2.5) < l - 0.75) return false;
+  // Cover works both ways (F12): the walls that stop players' shots hide them from NPCs too.
+  return !sys.world.host.props?.raycast(from, dir, l - 0.75);
 }
 
 function vertOk(a: V3, b: V3, tol = HEIGHT_TOL): boolean {
@@ -283,10 +285,11 @@ function fromDirOf(n: Npc, p: V3): V3 {
   return sub(n.pos, p);
 }
 
-function hitAll(sys: NpcSystem, n: Npc, list: LivePlayer[], a: AttackDef, at: ActiveAttack, from?: V3) {
+/** `src`: where splash comes from (lobbed circles), so a Prism Bubble between it and a player stops it. */
+function hitAll(sys: NpcSystem, n: Npc, list: LivePlayer[], a: AttackDef, at: ActiveAttack, from?: V3, src?: V3) {
   for (const lp of list) {
     if (n.boss && sys.boss && sys.boss.blocked(n.pos, lp.pos, a)) continue;
-    sys.hitPlayer(n, lp.a, dmgOf(n, a), { fromDir: from ? sub(from, lp.pos) : fromDirOf(n, lp.pos), knockback: a.knockback, effect: a.effect });
+    sys.hitPlayer(n, lp.a, dmgOf(n, a), { fromDir: from ? sub(from, lp.pos) : fromDirOf(n, lp.pos), knockback: a.knockback, effect: a.effect, ...(src ? { src } : {}) });
     at.hitIds.add(lp.a.id);
   }
 }
@@ -310,7 +313,7 @@ function resolve(sys: NpcSystem, n: Npc, at: ActiveAttack, now: number) {
       hitAll(sys, n, playersInCircle(sys, at.origin, a.radius ?? 3, a.inner ?? 0, n.boss ? 5 : HEIGHT_TOL), a, at, at.origin);
       break;
     case "circle":
-      for (const c of at.points) hitAll(sys, n, playersInCircle(sys, c, a.radius ?? 3), a, at, n.pos);
+      for (const c of at.points) hitAll(sys, n, playersInCircle(sys, c, a.radius ?? 3), a, at, n.pos, chest(c, 0.3));
       break;
     case "field":
       for (const c of at.points) for (const lp of playersInCircle(sys, c, a.radius ?? 4)) if (a.effect) sys.applyEffect(lp.a, a.effect, n);
@@ -362,7 +365,7 @@ function resolve(sys: NpcSystem, n: Npc, at: ActiveAttack, now: number) {
       const t = at.targetId ? sys.world.playerById(at.targetId) : undefined;
       if (t && !t.dead) {
         const tp = actorPos(t);
-        if (dist(n.pos, tp) <= a.range + 1.5 && canSee(sys, chest(n.pos, 0.3), chest(tp))) sys.hitPlayer(n, t, dmgOf(n, a), { fromDir: fromDirOf(n, tp) });
+        if (dist(n.pos, tp) <= a.range + 1.5 && canSee(sys, chest(n.pos, 0.3), chest(tp))) sys.hitPlayer(n, t, dmgOf(n, a), { fromDir: fromDirOf(n, tp), src: chest(n.pos, 0.3) });
         sys.sendNear(n.pos, TELEGRAPH_RADIUS, "npcShot", { id: n.id, x: n.pos[0], y: n.pos[1], z: n.pos[2], vx: tp[0], vy: tp[1], vz: tp[2], g: -1, ms: 150, k: n.defIndex });
       }
       break;
@@ -424,7 +427,7 @@ function runActive(sys: NpcSystem, n: Npc, at: ActiveAttack, now: number, dt: nu
         const from = chest(n.pos, Math.min(1.5, n.height * 0.75));
         if (at.aim === null || at.ticksLeft === (a.count ?? 1) - 1) at.aim = canSee(sys, from, chest(tp)) ? tp : null;
         sys.sendNear(n.pos, TELEGRAPH_RADIUS, "npcShot", { id: n.id, x: from[0], y: from[1], z: from[2], vx: aim[0], vy: aim[1], vz: aim[2], g: -1, ms: 90, k: n.defIndex });
-        if (at.aim && dist(aim, tp) <= 1.1 && dist(n.pos, tp) <= a.range + 3) sys.hitPlayer(n, t, dmgOf(n, a), { fromDir: fromDirOf(n, tp) });
+        if (at.aim && dist(aim, tp) <= 1.1 && dist(n.pos, tp) <= a.range + 3) sys.hitPlayer(n, t, dmgOf(n, a), { fromDir: fromDirOf(n, tp), src: from });
       }
       break;
     }
@@ -509,15 +512,39 @@ export function stepNpcProjectiles(sys: NpcSystem, now: number, dt: number) {
     }
     const u = up(pr.pos);
     pr.vel = add(pr.vel, u, -pr.g * dt);
-    const next = add(pr.pos, pr.vel, dt);
-    let gone = false;
+    let next = add(pr.pos, pr.vel, dt);
+    // An intact prop (or arena cover) on this step stops the bolt where it touches it, as it stops
+    // players' shots; only players in front of it can still be hit.
+    const step0 = sub(next, pr.pos);
+    const sl = len(step0);
+    const wall = sl > 0 ? sys.world.host.props?.raycast(pr.pos, scale(step0, 1 / sl), sl) : null;
+    if (wall) next = add(pr.pos, step0, Math.max(0, wall.t - pr.radius) / sl);
+    let gone = !!wall;
+    // Nearest first along what's left of this step: the first player the bolt reaches, or a Prism
+    // Bubble shell (which then takes the hit). A player in front of a shell is hit; one behind is not.
+    const seg = sub(next, pr.pos);
+    const segLen = len(seg);
+    let victim: LivePlayer | null = null;
+    let victimT = Infinity;
     for (const lp of sys.live) {
       if (lp.untouchable) continue;
-      if (segPointDist(pr.pos, next, chest(lp.pos)) <= pr.radius + 0.55) {
-        sys.hitPlayer(pr.owner, lp.a, pr.damage, { fromDir: scale(normalize(pr.vel), -1), effect: pr.effect });
-        gone = true;
-        break;
+      const c = chest(lp.pos);
+      if (segPointDist(pr.pos, next, c) > pr.radius + 0.55) continue;
+      const t = segLen > 0 ? Math.max(0, Math.min(segLen, dot(sub(c, pr.pos), seg) / segLen)) : 0;
+      if (t < victimT) {
+        victimT = t;
+        victim = lp;
       }
+    }
+    const shell = segLen > 0 ? (sys.world.host.bubbles?.cross(pr.pos, scale(seg, 1 / segLen), segLen) ?? null) : null;
+    if (shell && shell.t < victimT) {
+      sys.world.host.bubbles!.absorb(shell.bubble, pr.damage);
+      list.splice(i, 1);
+      continue;
+    }
+    if (victim) {
+      sys.hitPlayer(pr.owner, victim.a, pr.damage, { fromDir: scale(normalize(pr.vel), -1), effect: pr.effect });
+      gone = true;
     }
     if (!gone) {
       const l = len(next);

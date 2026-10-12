@@ -19,6 +19,12 @@ export const terrainUniforms = {
   aoStrength: uniform(0.85).setGroup(renderGroup),
   /** 1 on Low: darken by the baked sun visibility (no shadow map there). */
   bakedSun: uniform(0).setGroup(renderGroup),
+  /**
+   * How much the baked sun visibility applies now (0..1, written per frame by the environment):
+   * it was baked for the look's reference sun, so it fades out as the live sun moves away from
+   * that direction, sets or hides behind cloud.
+   */
+  sunMatch: uniform(1).setGroup(renderGroup),
   detailStrength: uniform(1).setGroup(renderGroup),
 };
 
@@ -120,7 +126,7 @@ function build(layers: number, normals: boolean): THREE.MeshStandardNodeMaterial
   col = col.mul(mix(float(1), float(0.72), rainWet));
   // Baked AO (always) and baked sun visibility (Low).
   col = col.mul(mix(float(1), bake.x, terrainUniforms.aoStrength));
-  col = col.mul(mix(float(1), mix(float(0.55), float(1), bake.y), terrainUniforms.bakedSun));
+  col = col.mul(mix(float(1), mix(float(0.55), float(1), bake.y), terrainUniforms.bakedSun.mul(terrainUniforms.sunMatch)));
   m.colorNode = col;
   m.roughnessNode = mix(mix(float(0.93), float(0.5), wet), float(0.32), rainWet.mul(0.85));
 

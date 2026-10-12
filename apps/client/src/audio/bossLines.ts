@@ -2,12 +2,20 @@
 // processing and subtitles. Subtitles always show, so the lines work with sound off (accessibility).
 
 import type { GameAudio } from "./Audio.ts";
+import { config } from "../config.ts";
 import { showSubtitle } from "../ui/subtitle.ts";
 
 export type BossId = "tidewrath" | "hollowking" | "receiver";
 export type BossTrigger = "engage" | "phase2" | "defeat";
 
-const ASSET_BASE = (import.meta.env.VITE_ASSET_BASE as string | undefined) ?? "https://firstlight-assets.rosty-build.workers.dev";
+/**
+ * A clip's URL: `<voice base>/<boss>-<trigger>.mp3`. The clips are never in the repo; they are
+ * uploaded to the asset Worker as a versioned set (`/v/voice-1`, config.voiceBase). Without them
+ * (offline dev) the fetch fails and the subtitle alone plays.
+ */
+export function bossLineUrl(boss: BossId, trigger: BossTrigger, base: string = config.voiceBase): string {
+  return `${base.replace(/\/+$/, "")}/${boss}-${trigger}.mp3`;
+}
 
 export const BOSS_LINES: Record<BossId, Record<BossTrigger, string>> = {
   tidewrath: { engage: "The lake was quiet. You woke it.", phase2: "Every tide comes back. So do I.", defeat: "The water... remembers you." },
@@ -35,7 +43,7 @@ function load(audio: GameAudio, url: string): Promise<AudioBuffer | null> {
 export async function playBossLine(audio: GameAudio, boss: BossId, trigger: BossTrigger) {
   const text = BOSS_LINES[boss][trigger];
   showSubtitle(BOSS_NAMES[boss], text, 4500);
-  const buf = await load(audio, `${ASSET_BASE}/v/voice-1/${boss}-${trigger}.mp3`);
+  const buf = await load(audio, bossLineUrl(boss, trigger));
   if (!buf || audio.ctx.state !== "running") return;
   const c = audio.ctx;
   const src = c.createBufferSource();

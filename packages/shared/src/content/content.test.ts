@@ -71,6 +71,14 @@ describe("PvP time-to-kill (content.md §2.5)", () => {
     }
   });
 
+  it("matches the weapon table's per-tier details (content.md §2.3)", () => {
+    const scatter = weapon("scatterpipe");
+    expect(scatter.tiers.map((t) => t.pellets)).toEqual([7, 7, 7]); // 7 pellets × 6 / 8 / 10
+    expect(scatter.tiers.map((t) => t.damage)).toEqual([6, 8, 10]);
+    expect(weapon("grenade").tiers.map((t) => t.fuse)).toEqual([1.6, 1.5, 1.4]);
+    expect(weapon("riverstaff").tiers.map((t) => t.knockback)).toEqual([3, 3.5, 4]);
+  });
+
   it("every starter weapon exists and is tier-1 equippable at level 1", () => {
     for (const s of STARTERS) expect(weapon(s.weapon).tiers[0].level).toBe(1);
     expect(new Set(WEAPONS.map((w) => w.id)).size).toBe(WEAPONS.length);

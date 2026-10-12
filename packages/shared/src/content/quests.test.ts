@@ -10,6 +10,7 @@ import { MEDAL_BY_ID, MEDALS } from "./medals.ts";
 import { GUIDES, MISSION_BY_ID, MISSIONS, missionGoal } from "./missions.ts";
 import { arcMetres, BOSS_LAIRS, MAIN_PAD, PLACE_BY_ID, PLACES, padName, placeDir } from "./places.ts";
 import { EGGS, PLAQUES } from "./secrets.ts";
+import { NPC_AREAS, PLANET_WILDS } from "./npcs.ts";
 import { WEAPON_BY_ID } from "./weapons.ts";
 import { inReach, objectPos, WORLD_OBJECT_BY_ID, WORLD_OBJECTS } from "./world.ts";
 
@@ -35,6 +36,21 @@ describe("missions (content.md §5)", () => {
     }
     expect(MISSIONS.reduce((s, m) => s + m.reward.xp, 0)).toBe(10280);
     expect(MISSIONS.reduce((s, m) => s + m.reward.coins, 0)).toBe(1630);
+  });
+
+  it("hunt targets spawn where the hunt counts them (the NPC lane reports kills by spawn area)", () => {
+    const kinds = (a: (typeof NPC_AREAS)[number]) => [
+      ...a.groups.flatMap((g) => g.members.map((m) => m.kind)),
+      ...(a.camp?.members.map((m) => m.kind) ?? []),
+      ...(a.singles?.map((m) => m.kind) ?? []),
+    ];
+    for (const m of MISSIONS) {
+      if (!m.hunt) continue;
+      const areas = NPC_AREAS.filter((a) => a.planet === m.body && (!m.hunt!.place || a.id === m.hunt!.place));
+      expect(areas.length, `${m.id}: an NPC spawn area for ${m.hunt.place ?? m.body}`).toBeGreaterThan(0);
+      const spawnable = new Set([...areas.flatMap(kinds), ...(m.hunt.place ? [] : PLANET_WILDS[m.body].groups.flatMap((g) => g.members.map((x) => x.kind)))]);
+      for (const t of m.hunt.targets) expect(spawnable.has(t.npcKind), `${m.id}: ${t.npcKind} spawns in ${m.hunt.place ?? m.body}`).toBe(true);
+    }
   });
 
   it("points at places and objects that exist on the mission's planet", () => {
@@ -155,8 +171,10 @@ describe("Portus Exchange and cosmetics (content.md §1.5, §8.4)", () => {
     expect(sellValue({ id: "tonic_small", tier: 1, qty: 4 })).toBe(8);
     expect(unitSellValue({ id: "wool_tuft", tier: 1 })).toBe(2);
     expect(unitSellValue({ id: "woolly_beanie", tier: 1 })).toBe(30);
-    expect(unitSellValue({ id: "pixel_halo", tier: 1 })).toBe(500);
-    expect(unitSellValue({ id: "riverstaff", tier: 2, skin: "ferrymans_oar" })).toBe(500);
+    expect(unitSellValue({ id: "hollow_crown", tier: 1 })).toBe(500);
+    // Easter-egg items are claimable once per life, so the Exchange won't buy them (catalogue.test.ts).
+    expect(unitSellValue({ id: "pixel_halo", tier: 1 })).toBe(0);
+    expect(unitSellValue({ id: "riverstaff", tier: 2, skin: "ferrymans_oar" })).toBe(0);
     expect(unitSellValue({ id: "fists", tier: 1 })).toBe(0);
   });
 

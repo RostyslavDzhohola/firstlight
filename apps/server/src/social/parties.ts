@@ -50,6 +50,16 @@ export class PartyRegistry {
     return { ok: true, invite };
   }
 
+  /** Pending invites `from` has sent. */
+  sentBy(from: string): Invite[] {
+    const out: Invite[] = [];
+    for (const m of this.invites.values()) {
+      const inv = m.get(from);
+      if (inv) out.push(inv);
+    }
+    return out;
+  }
+
   pendingFor(to: string, now = Date.now()): Invite[] {
     return [...(this.invites.get(to)?.values() ?? [])].filter((i) => i.expiresAt > now);
   }
@@ -118,10 +128,12 @@ export class PartyRegistry {
     return { ok: true, ...this.leave(target) };
   }
 
-  /** Withdraw every invite between the two users (after a block). */
-  cancelBetween(a: string, b: string): void {
+  /** Withdraw every invite between the two users (after a block). Returns the withdrawn invites. */
+  cancelBetween(a: string, b: string): Invite[] {
+    const out = [this.invites.get(a)?.get(b), this.invites.get(b)?.get(a)].filter((i): i is Invite => !!i);
     this.dropInvite(a, b);
     this.dropInvite(b, a);
+    return out;
   }
 
   expire(now = Date.now()): Invite[] {

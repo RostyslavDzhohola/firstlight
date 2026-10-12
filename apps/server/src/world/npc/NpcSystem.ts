@@ -8,15 +8,17 @@ import {
   aiHitCap, npcMaxHp, npcShieldHp, type PlanetId, type StatusEffect,
 } from "@firstlight/shared/content/npcs";
 import { PF } from "@firstlight/shared/net/schema";
-import { actorPos, type PlayerActor } from "../actors.ts";
+import { actorPos, type NpcActor, type PlayerActor } from "../actors.ts";
 import { dealDamage } from "../combat.ts";
+import { loadCopy, saveCopy } from "../copyState.ts";
 import type { V3 } from "../geometry.ts";
 import type { RoomSystem } from "../systems.ts";
-import { stepNpcProjectiles, type NpcProjectile } from "./attacks.ts";
+import { chest, stepNpcProjectiles, type NpcProjectile } from "./attacks.ts";
 import { BossController } from "./boss.ts";
 import { onNpcHurt, think } from "./brain.ts";
+import { NPC_COPY_SYSTEM, restoreNpcCopy, snapshotNpcCopy, type NpcCopyState } from "./persist.ts";
 import { MODE, MODE_NAME, type Mode, type Npc } from "./npc.ts";
-import { rewardKill } from "./rewards.ts";
+import { pruneRewardMaps, rewardKill } from "./rewards.ts";
 import { activePull, applyMoveEffect, applyPull } from "./effects.ts";
 import { buildSpawnPoints, type SpawnPoint } from "./spawns.ts";
 import { makeGround, placeOnGround, type Ground } from "./steer.ts";
@@ -56,6 +58,9 @@ interface Noise {
   explosion: boolean;
 }
 
+/** Egg NPC timers (tests shorten them): a Golden Hopbit that was popped or ran into its burrow stays away this long. */
+export const EGG_NPC = { goldenBackMs: 15 * 60_000 };
+
 export class NpcSystem implements RoomSystem {
   readonly world: NpcWorld;
   readonly ground: Ground;
@@ -76,13 +81,19 @@ export class NpcSystem implements RoomSystem {
   avgTickMs = 0;
   private seq = 0;
   private lastScan = 0;
+  private lastPrune = 0;
   private readonly tokens = new Map<string, TokenBook>();
   private readonly recentHits = new Map<string, { t: number; amt: number }[]>();
   readonly tagged = new Map<string, number>();
   readonly repeatKills = new Map<string, number[]>();
-  readonly cosmeticPity = new Map<string, { life: number; kills: number }>();
+  readonly cosmeticPity = new Map<string, { life: number; kills: number; at: number }>();
+  /** Spawn point id → when its Golden Hopbit may come back (it doesn't return with every pack respawn). */
+  readonly goldenBack = new Map<number, number>();
   private grid = new Map<number, Npc[]>();
   private readonly restore: (() => void)[] = [];
+  /** Copy state (boss timer, cleared groups) changed since the last save (persist.ts). */
+  copyDirty = false;
+  private lastCopySave = 0;
 
   constructor(world: NpcWorld) {
     this.world = world;
@@ -93,6 +104,8 @@ export class NpcSystem implements RoomSystem {
     this.groups = this.points.map((p) => ({ point: p, active: false, members: p.members.map(() => null), dead: p.members.map(() => false), cleared: false, respawnLeft: 0, lastNearAt: 0 }));
     const bd = BOSS_BY_BODY[world.body.id];
     this.boss = bd && this.arena ? new BossController(this, bd, this.arena) : null;
+    // A fresh room on a copy that was emptied or restarted keeps its dead boss and cleared groups (F12 B2).
+    if (world.copyKey) restoreNpcCopy(this, loadCopy<NpcCopyState>(world.copyKey, NPC_COPY_SYSTEM), world.now());
     this.hookNoise();
     world.onMessage("npc", (sid, msg) => this.admin(sid, msg));
     world.onMessage("phrase", (sid, msg) => this.onPhrase(sid, msg));
@@ -116,11 +129,19 @@ export class NpcSystem implements RoomSystem {
       this.scan(now, sdt);
       this.auras();
     }
+    if (now - this.lastPrune >= 60_000) {
+      this.lastPrune = now;
+      pruneRewardMaps(this, now);
+    }
     this.boss?.tick(now, dt);
     this.buildGrid();
     for (const n of this.npcs.values()) {
       if (n.removeAt && now >= n.removeAt) {
         this.despawnNpc(n);
+        continue;
+      }
+      if (n.expiresAt && now >= n.expiresAt && !n.dead) {
+        this.dissolve(n, now);
         continue;
       }
       n.nearD = this.nearestLive(n.pos);
@@ -133,6 +154,7 @@ export class NpcSystem implements RoomSystem {
       this.sync(n);
     }
     stepNpcProjectiles(this, now, dt);
+    if (this.copyDirty && now - this.lastCopySave >= 1000) this.saveCopyState(now);
     this.lastTickMs = performance.now() - t0;
     this.avgTickMs = this.avgTickMs * 0.95 + this.lastTickMs * 0.05;
   }
@@ -147,6 +169,15 @@ export class NpcSystem implements RoomSystem {
   dispose() {
     for (const r of this.restore) r();
     this.restore.length = 0;
+    this.boss?.dispose();
+    this.saveCopyState(this.world.now());
+  }
+
+  /** Remember the boss timer and group state for the next room on this copy (copyState.ts). */
+  saveCopyState(now: number) {
+    this.copyDirty = false;
+    this.lastCopySave = now;
+    if (this.world.copyKey) saveCopy(this.world.copyKey, NPC_COPY_SYSTEM, snapshotNpcCopy(this, now));
   }
 
   private refreshLive(now: number) {
@@ -180,11 +211,17 @@ export class NpcSystem implements RoomSystem {
       if (g.cleared) {
         const slow = near <= NPC_RULES.respawnSlowRadius;
         g.respawnLeft -= sdt * (slow ? 0.5 : 1);
+        // A slowed countdown drifts from wall time: checkpoint it (≤ 1/s) so a crash can't respawn it early.
+        if (slow && sdt > 0) this.copyDirty = true;
         if (g.respawnLeft <= 0) {
           g.cleared = false;
           g.dead.fill(false);
+          this.copyDirty = true;
         }
       }
+      // A Golden Hopbit whose own timer ran out comes back to its pack while the pack is still out.
+      const back = this.goldenBack.get(g.point.id);
+      if (back !== undefined && now >= back && g.active && !g.cleared) this.returnGolden(g, now);
       if (!g.active && !g.cleared && this.ambientOn && near <= act && budget > 0) {
         this.spawnGroup(g, now);
         budget -= g.point.members.length;
@@ -204,6 +241,10 @@ export class NpcSystem implements RoomSystem {
     for (let i = 0; i < pt.members.length; i++) {
       if (g.dead[i] || g.members[i]) continue;
       const m = pt.members[i]!;
+      if (m.golden && now < (this.goldenBack.get(pt.id) ?? 0)) {
+        g.dead[i] = true; // still away: the pack comes back without it
+        continue;
+      }
       const def = NPC_DEFS[m.def]!;
       const d = walk(pt.dir, pt.t1, m.a, pt.t2, m.b, this.ground.R);
       const R = this.ground.R;
@@ -214,6 +255,15 @@ export class NpcSystem implements RoomSystem {
       if (def.id === "ticket_000" || def.id === "crypt_sentinel" && pt.kind === "single") n.facing = stableTangentAt(pos);
       g.members[i] = n;
     }
+  }
+
+  private returnGolden(g: GroupState, now: number) {
+    this.goldenBack.delete(g.point.id);
+    this.copyDirty = true;
+    const i = g.point.members.findIndex((m) => m.golden);
+    if (i < 0 || !g.dead[i] || g.members[i]) return;
+    g.dead[i] = false;
+    this.spawnGroup(g, now);
   }
 
   private despawnGroup(g: GroupState) {
@@ -230,7 +280,13 @@ export class NpcSystem implements RoomSystem {
   }
 
   /** Create and register an NPC (ambient member, summon, admin spawn or boss). */
-  createNpc(defIndex: number, level: number, pos: V3, now: number, opts: { point?: SpawnPoint | null; member?: number; roam?: number; boss?: boolean; summoner?: string; instant?: boolean } = {}): Npc {
+  createNpc(
+    defIndex: number,
+    level: number,
+    pos: V3,
+    now: number,
+    opts: { point?: SpawnPoint | null; member?: number; roam?: number; boss?: boolean; summoner?: string; instant?: boolean; spawned?: Npc["spawned"]; ttlMs?: number } = {},
+  ): Npc {
     const def = NPC_DEFS[defIndex]!;
     const state = this.world.newNpcState();
     const hp = npcMaxHp(def, level);
@@ -297,14 +353,23 @@ export class NpcSystem implements RoomSystem {
       hpAcc: 0,
       gridAxis: -1,
       strafeSign: this.seq & 1 ? 1 : -1,
+      spawned: opts.spawned ?? null,
+      expiresAt: opts.ttlMs ? now + opts.ttlMs : 0,
       dead: false,
     };
     n.onDamaged = (amount, by) => this.onDamaged(n, amount, by);
     n.onKilled = (by) => this.onKilled(n, by);
-    n.mitigate = (amount, weak, fromDir) => this.mitigate(n, amount, weak, fromDir);
+    n.mitigate = (amount, weak, fromDir, attacker) => this.mitigate(n, amount, weak, fromDir, attacker);
     this.npcs.set(id, n);
     this.world.addNpc(n);
     return n;
+  }
+
+  /** Live NPCs raised by egg penalties or staged scenes in this room, or only those one account raised. */
+  spawnedCount(reason: "egg" | "stage", userId?: string): number {
+    let k = 0;
+    for (const n of this.npcs.values()) if (n.spawned?.reason === reason && !n.dead && (userId === undefined || n.spawned.userId === userId)) k++;
+    return k;
   }
 
   /** Remove an NPC without rewards (despawn, egg exit, reset). */
@@ -349,6 +414,10 @@ export class NpcSystem implements RoomSystem {
   retire(n: Npc) {
     if (n.dead) return;
     n.dead = true;
+    if (n.def.id === "golden_hopbit" && n.point) {
+      this.goldenBack.set(n.point.id, this.world.now() + EGG_NPC.goldenBackMs);
+      this.copyDirty = true; // the return time outlives the room (persist.ts)
+    }
     const g = this.groupOf(n);
     if (g) {
       g.dead[n.member] = true;
@@ -357,15 +426,16 @@ export class NpcSystem implements RoomSystem {
         g.active = false;
         g.respawnLeft = g.point.respawnSec * NPC_TUNING.respawnScale;
       }
+      this.copyDirty = true;
     }
     this.despawnNpc(n);
   }
 
   // ------------------------------------------------------------------------------------ damage hooks
 
-  private mitigate(n: Npc, amount: number, weak: boolean, fromDir?: V3): number {
+  private mitigate(n: Npc, amount: number, weak: boolean, fromDir?: V3, attacker?: PlayerActor | NpcActor | null): number {
     if (n.dead || n.state.flags & NF.INVULN) return 0;
-    if (n.boss && this.boss) return this.boss.mitigate(n, amount, weak);
+    if (n.boss && this.boss) return this.boss.mitigate(n, amount, weak, attacker);
     if (n.shieldHp > 0 && fromDir) {
       const f = tangentize(n.pos, fromDir);
       if (dot(f, n.facing) > 0.25) {
@@ -409,6 +479,7 @@ export class NpcSystem implements RoomSystem {
     n.removeAt = now + (n.boss ? 2500 : 1200);
     if (n.boss && this.boss) {
       this.boss.onKilled(n, by, now);
+      this.copyDirty = true;
       return;
     }
     const g = this.groupOf(n);
@@ -419,6 +490,7 @@ export class NpcSystem implements RoomSystem {
         g.active = false;
         g.respawnLeft = g.point.respawnSec * NPC_TUNING.respawnScale;
       }
+      this.copyDirty = true;
     }
     if (n.summoner) this.npcs.get(n.summoner)?.raised.delete(n.id);
     this.dissolveChildren(n);
@@ -434,10 +506,23 @@ export class NpcSystem implements RoomSystem {
     n.modeUntil = until;
   }
 
-  /** Damage a player from an NPC with the AI caps (content §0), buffs and status effects. */
-  hitPlayer(n: Npc | null, p: PlayerActor, amount: number, opts: { fromDir?: V3; knockback?: number; effect?: StatusEffect; trueDamage?: boolean } = {}): number {
+  /**
+   * Damage a player from an NPC with the AI caps (content §0), buffs and status effects. `src` is
+   * where a ranged hit comes from (rounds, lobbed splash): a Prism Bubble shell between it and the
+   * player's chest takes the hit instead. Melee passes no `src`; true damage ignores bubbles.
+   */
+  hitPlayer(n: Npc | null, p: PlayerActor, amount: number, opts: { fromDir?: V3; knockback?: number; effect?: StatusEffect; trueDamage?: boolean; src?: V3 } = {}): number {
     const now = this.world.now();
     if (p.dead) return 0;
+    if (opts.src && !opts.trueDamage && this.world.host.bubbles) {
+      const shell = this.world.host.bubbles.between(opts.src, chest(actorPos(p)));
+      if (shell) {
+        this.world.host.bubbles.absorb(shell, amount);
+        return 0;
+      }
+    }
+    // Contact: an NPC that just struck its target can reach it (brain.ts unreachable timer).
+    if (n && n.target === p) n.unreachSince = undefined;
     let dmg = amount;
     if (n && !opts.trueDamage) {
       if (n.state.flags & NF.BUFFED) dmg *= 1.15;

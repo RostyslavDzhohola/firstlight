@@ -26,11 +26,13 @@ export interface TierStats {
   heavyTime?: number;
   zoom?: number;
   headMult?: number;
-  heal?: number; // fraction of target max HP
+  heal?: number; // fraction of target max HP (Patchkit) or HP (tonics)
+  channel?: number; // Patchkit channel seconds before the heal starts
   shell?: number; // bubble HP per 100 owner max HP
   duration?: number;
   cooldown?: number;
-  knockback?: number;
+  knockback?: number; // metres (Riverstaff: on every 3rd hit in a row)
+  fuse?: number; // seconds (grenades; shortens by tier)
 }
 
 export interface WeaponDef {
@@ -105,7 +107,8 @@ export const WEAPONS: readonly WeaponDef[] = [
   {
     id: "scatterpipe", name: "Scatterpipe", cls: "ranged", delivery: "pellets", range: 10, falloffTo: 22, falloffMin: 0.3, spread: 7, adsSpread: 5,
     destroys: "light", stack: 1,
-    tiers: [T(1, 60, { damage: 7, pellets: 6, rate: 0.9, mag: 6, reload: 2.0 }), T(6, 300, { damage: 7, pellets: 8, rate: 0.9, mag: 7, reload: 1.8 }), T(12, 900, { damage: 7, pellets: 10, rate: 0.9, mag: 8, reload: 1.6 })],
+    // 7 pellets × 6 / 8 / 10 damage (content.md §2.3, §2.5 "all 7 pellets").
+    tiers: [T(1, 60, { damage: 6, pellets: 7, rate: 0.9, mag: 6, reload: 2.0 }), T(6, 300, { damage: 8, pellets: 7, rate: 0.9, mag: 7, reload: 1.8 }), T(12, 900, { damage: 10, pellets: 7, rate: 0.9, mag: 8, reload: 1.6 })],
   },
   {
     id: "longbow", name: "Yew Longbow", cls: "ranged", delivery: "arrow", range: 100, speed: 55, gravity: 9.8,
@@ -125,12 +128,13 @@ export const WEAPONS: readonly WeaponDef[] = [
   {
     id: "grenade", name: "Scrapburst Grenade", cls: "support", delivery: "thrown", range: 20, speed: 18, gravity: 9.8, fuse: 1.6,
     destroys: "heavy", stack: 5,
-    tiers: [T(1, 15, { damage: 70, radius: 4, rate: 0.8 }), T(6, 40, { damage: 95, radius: 4.5, rate: 0.8 }), T(12, 90, { damage: 123, radius: 5, rate: 0.8 })],
+    tiers: [T(1, 15, { damage: 70, radius: 4, rate: 0.8, fuse: 1.6 }), T(6, 40, { damage: 95, radius: 4.5, rate: 0.8, fuse: 1.5 }), T(12, 90, { damage: 123, radius: 5, rate: 0.8, fuse: 1.4 })],
   },
   {
     id: "patchkit", name: "Patchkit", cls: "support", delivery: "heal", range: 4,
     destroys: "none", stack: 5,
-    tiers: [T(1, 25, { damage: 0, heal: 0.3, rate: 1.0, cooldown: 6 }), T(6, 60, { damage: 0, heal: 0.4, rate: 0.9, cooldown: 6 }), T(12, 120, { damage: 0, heal: 0.5, rate: 0.8, cooldown: 6 })],
+    // Channel 1.0 / 0.9 / 0.8 s, then heal × the target's max HP over 2 s (content.md §2.3).
+    tiers: [T(1, 25, { damage: 0, heal: 0.3, rate: 1.0, channel: 1.0, duration: 2, cooldown: 6 }), T(6, 60, { damage: 0, heal: 0.4, rate: 0.9, channel: 0.9, duration: 2, cooldown: 6 }), T(12, 120, { damage: 0, heal: 0.5, rate: 0.8, channel: 0.8, duration: 2, cooldown: 6 })],
   },
   {
     id: "bubble", name: "Prism Bubble", cls: "support", delivery: "bubble", range: 0,
@@ -151,6 +155,13 @@ export const WEAPONS: readonly WeaponDef[] = [
     id: "tonic_large", name: "Large Tonic", cls: "item", delivery: "heal", range: 0,
     destroys: "none", stack: 10,
     tiers: [T(1, 35, { damage: 0, heal: 120, rate: 0.4, cooldown: 8, duration: 4 }), T(1, 35, { damage: 0, heal: 120, rate: 0.4 }), T(1, 35, { damage: 0, heal: 120, rate: 0.4 })],
+  },
+  // Horses (content/horse.ts): carry it, press H outside a safe zone. Appended last: PlayerState.weapon
+  // holds indexes into this list, so existing entries never move.
+  {
+    id: "horse_whistle", name: "Horse Whistle", cls: "item", delivery: "none", range: 0,
+    destroys: "none", stack: 1,
+    tiers: [T(1, 1500, { damage: 0, rate: 0 }), T(1, 1500, { damage: 0, rate: 0 }), T(1, 1500, { damage: 0, rate: 0 })],
   },
 ];
 

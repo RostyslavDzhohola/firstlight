@@ -45,7 +45,7 @@ compaction, and before every milestone:
 
 ## 1. Goal and finish line
 
-**Goal:** a beautiful, playable, multiplayer OASIS-style world at `https://firstlight.one4all.dev`
+**Goal:** a beautiful, playable, persistent multi-planet multiplayer open world at `https://firstlight.one4all.dev`
 that the owner can share as a link and film for a video: one life, wild-west PvP outside safe
 zones, co-op bosses, proximity voice, three planets and a hub.
 
@@ -111,17 +111,18 @@ Railway's default "lts" becomes Node 26 on 28 Oct).
 **Pins** (exact, from `docs/tech-facts.md` §1; lockfile committed): three 0.186.1, @types/three 0.186.0,
 colyseus 0.18.9, @colyseus/core 0.18.18, @colyseus/schema 5.0.36, @colyseus/ws-transport 0.18.4,
 @colyseus/tools 0.18.9, **@colyseus/sdk 0.18.5** (never `colyseus.js`, never `@next` tags), better-auth 1.7.7,
-better-sqlite3 13.0.3, express 5.3.0, jose 6.2.12, resend 6.32.1, vite ^8.3.4, @vitejs/plugin-react 6.1.2,
-react/react-dom 19.3.0, zustand 5.0.15, @dgreenheck/three-pinata 2.0.1, @gltf-transform/* 4.5.1,
+better-sqlite3 13.0.3, express 5.3.0, jose 6.2.12, resend 6.32.1, zod 4.6.6, esbuild 0.28.2, tsx 4.23.15,
+vite ^8.3.4, @dgreenheck/three-pinata 2.0.1, @gltf-transform/* 4.5.1,
 meshoptimizer 1.3.0, zzfx 1.4.0 (+ a `declare module` shim), vitest 5.0.3, playwright 1.64.0,
 wrangler 4.149.0, typescript 7.0.2 (**typecheck only** — no compiler API; Vite/Vitest/tsx transpile).
 TS 7 defaults: `types: []` (list them), no `baseUrl`, `moduleResolution: bundler` (client) / `nodenext`
 (server). Colyseus state uses `schema()`/`t.*` builders, not decorators. No Rapier unless D8 is revisited.
+No React, React DOM, Zustand or `@vitejs/plugin-react`: the UI is plain DOM + CSS (D25).
 
 ```
 firstlight/
   apps/
-    client/            Vite app: landing, game, UI (React 19 DOM overlay), renderer (three WebGPU + TSL)
+    client/            Vite app: landing, game, UI (plain DOM + CSS, D25), renderer (three WebGPU + TSL)
     server/            Express + Better Auth + Colyseus rooms + SQLite + admin/stats pages
     assets-worker/     Cloudflare Worker static-assets project (wrangler.toml, _headers); serves assets/dist
   packages/
@@ -183,10 +184,11 @@ finished during the teleport pull-out. Release a planet's GPU resources on depar
 | `game/` | Player controller on a sphere, camera, input map, combat (aim, fire, melee, block, charge, scope), inventory/hotbar, pickups, interactions, logout flow, death/rebirth, onboarding script, photo mode |
 | `audio/` | WebAudio graph: SFX (ZzFX + CC0 samples), music per planet, positional SFX, boss lines + subtitles |
 | `voice/` | `VoiceTransport` interface; P2P mesh implementation (§5.7); LiveKit stub behind the same interface |
-| `ui/` | React 19 overlay: landing, loading, HUD (HP, XP, level, coins, hotbar, compass, safe-zone sign, mission tracker, boss bar, speaking indicators), menus, settings, map, inventory, player list, phrase wheel, death screen, character creation, share dialog, toasts |
+| `ui/` | Plain DOM + CSS overlay (D25): landing, loading, HUD (HP, XP, level, coins, hotbar, compass, safe-zone sign, mission tracker, boss bar, speaking indicators), menus, settings, map, inventory, player list, phrase wheel, death screen, character creation, share dialog, toasts |
 
 No React Three Fiber: the 3D layer is vanilla three.js driven by our own loop for direct control of
-the WebGPU renderer. UI state bridges through a small Zustand store. No ECS library: plain TS entity
+the WebGPU renderer. UI state bridges through small subscribe-style stores (for example
+`world/npcs/bossStore.ts`, wired in `ui/bind.ts`). No ECS library: plain TS entity
 maps + systems.
 
 ### 4.3 Movement and camera on a sphere
@@ -742,8 +744,8 @@ issues". The builder reviews the diff before merging.
   mission checks, slur filter.
 - **Server integration:** in-process Colyseus + SDK bot clients: join, move, fight, die, loot, travel,
   party travel, caps/queue, graceful restart.
-- **E2E cards** (`docs/tests/T1…T8.md`, exact steps + expected results + screenshot names), run by
-  Codex computer use: T1 landing→play < 30 s, T2 fight PvE/PvP, T3 death + own pile, T4 voice + radio,
+- **E2E cards** (`docs/tests/e2e-cards.md`, exact steps + expected results + screenshot names), run by
+  Codex computer use (D23: now T3 Code's built-in browser): T1 landing→play < 30 s, T2 fight PvE/PvP, T3 death + own pile, T4 voice + radio,
   T5 email sign-in + second browser, T6 2-player boss kill (two windows; an admin `stage` command may
   pre-place the players), T7 screenshot share, T8 photo mode.
 - **When Codex control breaks:** retry up to 3 times ~10 min apart (keep building meanwhile); then run
@@ -767,7 +769,7 @@ deploying. PRs are linked to this thread with `link_pull_request`.
   `/v/<buildId>/…`; **every deploy also ships the previous build's directory** (a deploy replaces the
   whole asset set, so mid-session lazy loads would 404). Watch the 20,000-file and 25 MiB-per-file caps.
   Never enable `run_worker_first` or Workers Caching (they turn free asset requests into metered ones).
-- **Server:** Railway service `game-server` from `main` (`apps/server`), Railpack, Node 24. **Each deploy
+- **Server:** Railway service `game-server` from `main` (`apps/server`), built from `apps/server/Dockerfile` (`RAILWAY_DOCKERFILE_PATH`; Railpack is not used), Node 24. **Each deploy
   disconnects everyone** (one replica because of the volume), so server deploys are batched (D9): during
   the run at most about one every 30 minutes unless a fix is urgent; after launch only when needed.
 - **Smoke test after every production deploy:** `/healthz`, `/api/play` with a bot JWT, one bot

@@ -1,7 +1,8 @@
 // Loading screen (verdict: Entry A layout). Game.ts calls setLoading(text, frac) with its status lines;
 // loadingPhase() maps each line to one of the four named boot steps, so Game.ts keeps plain text.
 // Re-entrant: mid-game status lines ("Applying graphics settings…", "Reconnecting…") use a compact
-// card over the world instead of the full screen.
+// card over the world instead of the full screen. A failed boot swaps the progress for an error with
+// a Retry button (showLoadingError); the next setLoading() goes back to progress.
 
 export type BodyKey = "portus" | "arcadia" | "hollowmere" | "meridian";
 
@@ -63,6 +64,7 @@ let tipTimer = 0;
 const refs: {
   title?: HTMLElement; blurb?: HTMLElement; status?: HTMLElement; pct?: HTMLElement; fill?: HTMLElement;
   steps?: HTMLElement[]; tip?: HTMLElement; dots?: HTMLElement[]; badge?: HTMLElement; bar?: HTMLElement;
+  card?: HTMLElement; error?: HTMLElement | null;
 } = {};
 let last = { text: "", pct: -1, step: -1, body: "" as string, compact: false };
 
@@ -97,6 +99,7 @@ function build(): HTMLElement {
 
   const main = el("main", "fl-loading__main", page);
   const load = el("section", "fl-loading__card", main);
+  refs.card = load;
   el("span", "fl-eyebrow", load, "Loading");
   const h1 = el("h1", "fl-loading__title", load);
   refs.title = el("span", "", h1, "Firstlight");
@@ -139,9 +142,17 @@ function showTip() {
   refs.dots.forEach((d, i) => d.classList.toggle("is-on", i === tipIndex));
 }
 
+function clearError(r: HTMLElement) {
+  if (!refs.error) return;
+  refs.error.remove();
+  refs.error = null;
+  r.classList.remove("fl-loading--error");
+}
+
 /** Show (or update) the loading screen. `frac` is 0–1. */
 export function setLoading(text: string, frac: number): void {
   const r = build();
+  clearError(r);
   phase = loadingPhase(text, phase);
   if (r.hidden) {
     r.hidden = false;
@@ -180,8 +191,46 @@ export function setLoading(text: string, frac: number): void {
   }
 }
 
+export interface LoadingError {
+  title: string;
+  text: string;
+  /** The main button (e.g. "Retry"). */
+  action: string;
+  onAction: () => void;
+  /** An optional second button (e.g. back to the start page). */
+  back?: string;
+  onBack?: () => void;
+}
+
+/** Replace the progress with an error and a Retry button (full screen; never a stuck spinner). */
+export function showLoadingError(e: LoadingError): void {
+  const r = build();
+  clearError(r);
+  if (r.hidden) r.hidden = false;
+  r.classList.remove("fl-loading--compact");
+  last.compact = false;
+  phase = { ...phase, compact: false };
+  r.classList.add("fl-loading--error");
+  const box = el("div", "fl-loading__error", refs.card);
+  box.setAttribute("role", "alert");
+  el("h2", "fl-loading__errtitle", box, e.title);
+  el("p", "fl-loading__errtext", box, e.text);
+  const row = el("div", "fl-loading__erractions", box);
+  const go = el("button", "fl-btn fl-btn--primary fl-btn--lg", row, e.action);
+  go.type = "button";
+  go.onclick = () => e.onAction();
+  if (e.back && e.onBack) {
+    const back = el("button", "fl-btn fl-btn--ghost", row, e.back);
+    back.type = "button";
+    back.onclick = () => e.onBack!();
+  }
+  refs.error = box;
+  go.focus();
+}
+
 export function hideLoading(): void {
   if (!root || root.hidden) return;
+  clearError(root);
   root.hidden = true;
   clearInterval(tipTimer);
   // Next show starts fresh at the right step; a compact card must not stick to a full load.

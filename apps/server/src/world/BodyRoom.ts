@@ -7,13 +7,14 @@ import { StateView } from "@colyseus/schema";
 import { BODIES, createTerrain, isSafe, padDirs, portalNear, portalSpots, type BodyDef, type BodyId, type PortalSpot, type Terrain } from "@firstlight/shared";
 import { BACKPACK_SLOTS, HOTBAR_SLOTS, newCharacter, type CharacterData } from "@firstlight/shared/content/character";
 import { INV_SLOTS, moveSlot, storeItem } from "@firstlight/shared/content/inventory";
+import { HORSE, rideSpeed } from "@firstlight/shared/content/horse";
 import { fallDamageFraction, levelForXp, maxHp, pvpKillXp, xpAtLevel, xpToNext } from "@firstlight/shared/content/progression";
 import { WEAPON_BY_ID, WEAPON_INDEX } from "@firstlight/shared/content/weapons";
 import { NET, PHRASES, type InvItem, type YouState } from "@firstlight/shared/net/protocol";
 import { ANIM, BodyState, NpcState, PF, PileState, PlayerState } from "@firstlight/shared/net/schema";
 import { z } from "zod";
 import type { Identity } from "../auth/identity.ts";
-import { actorPos, pushHistory, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
+import { actorPos, inSaddle, pushHistory, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
 import { characterRepo, withTx } from "./characters.ts";
 import { CLOSE, hub, type HubRoom } from "./hub.ts";
 
@@ -22,9 +23,10 @@ export const bannedCheck: { current: (userId: string) => boolean } = { current: 
 import { dealDamage, fire, melee, selectedWeapon, stepEffects, stepProjectiles, type CombatHost } from "./combat.ts";
 import { dist3, type V3 } from "./geometry.ts";
 import { emitGameEvent, npcKindOf } from "./events.ts";
-import { emitPileEvent, onPileEvent, pileStore, type PileData } from "./piles.ts";
+import { emitPileEvent, onPileEvent, pileStore, type PileData, type PileKind } from "./piles.ts";
 import { SYSTEM_FACTORIES, type RoomSystem } from "./systems.ts";
-import { movementLimits } from "./npc/effects.ts";
+import { supportOf } from "./support.ts";
+import { activeMoveFx, movementLimits } from "./npc/effects.ts";
 import { matchMaker } from "@colyseus/core";
 import { liveSessions } from "../auth/sessions.ts";
 import { accountLinks } from "../auth/links.ts";
@@ -157,6 +159,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     this.onMessage("fire", fireSchema, (c, m) => {
       const a = this.actor(c);
       if (!a || a.dead) return;
+      if (inSaddle(a, Date.now())) return void c.send("denied", { action: "fire", reason: "mounted" }); // no weapons from the saddle
       if (m.slot !== a.char.selected) this.equip(a, m.slot);
       const r = fire(this.host, a, m);
       if (!r.ok && r.reason !== "rate") c.send("denied", { action: "fire", reason: r.reason });
@@ -164,23 +167,24 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     this.onMessage("melee", meleeSchema, (c, m) => {
       const a = this.actor(c);
       if (!a || a.dead) return;
+      if (inSaddle(a, Date.now())) return void c.send("denied", { action: "melee", reason: "mounted" });
       if (m.slot !== a.char.selected) this.equip(a, m.slot);
       melee(this.host, a, !!m.heavy);
     });
     this.onMessage("block", z.object({ on: z.boolean() }), (c, m) => {
       const a = this.actor(c);
-      if (!a) return;
+      if (!a || (m.on && inSaddle(a, Date.now()))) return;
       a.blocking = m.on;
       a.state.flags = m.on ? a.state.flags | PF.BLOCKING : a.state.flags & ~PF.BLOCKING;
     });
     this.onMessage("charge", z.object({ on: z.boolean() }), (c, m) => {
       const a = this.actor(c);
-      if (a && !a.dead) a.chargeStartedAt = m.on ? Date.now() : 0;
+      if (a && !a.dead) a.chargeStartedAt = m.on && !inSaddle(a, Date.now()) ? Date.now() : 0;
     });
     this.onMessage("travel", z.object({ to: z.enum(["portus", "arcadia", "hollowmere", "meridian"]) }), (c, m) => this.travelRequest(c, m.to));
     this.onMessage("scope", z.object({ on: z.boolean() }), (c, m) => {
       const a = this.actor(c);
-      if (!a) return;
+      if (!a || (m.on && inSaddle(a, Date.now()))) return;
       a.state.flags = m.on ? a.state.flags | PF.SCOPED : a.state.flags & ~PF.SCOPED;
     });
     this.onMessage("reload", z.object({ slot: z.number().int().min(0).max(3) }), (c) => this.reload(this.actor(c)));
@@ -188,9 +192,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       const a = this.actor(c);
       if (a && !a.dead) this.equip(a, m.slot);
     });
-    this.onMessage("use", slotSchema, (c, m) => {
+    this.onMessage("use", slotSchema.extend({ targetId: z.string().max(64).optional() }), (c, m) => {
       const a = this.actor(c);
-      if (this.invAllowed(a)) this.use(a, m.slot);
+      if (this.invAllowed(a)) this.use(a, m.slot, m.targetId);
     });
     this.onMessage("pickup", pickupSchema, (c, m) => {
       const a = this.actor(c);
@@ -442,13 +446,18 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     const now = Date.now();
     // Distance budget: refills at sprint speed (+slack), banks at most budgetCap; a dodge adds a
     // one-off allowance no more often than its cooldown (review blocker: speed hack).
+    // Riding (set only by the server's HorseSystem): gallop speed and a bigger bank, never a dodge;
+    // the mounted budget outlives a dismount by HORSE.dismountGraceMs (the client is a round trip behind).
+    const riding = inSaddle(a, now);
     const elapsed = Math.min(0.25, (now - a.lastBudgetAt) / 1000);
     a.lastBudgetAt = now;
     // NPC slows / Cease-and-Desist (npc/effects.ts) scale the refill and can refuse the dodge burst.
     const limits = movementLimits(a, now);
-    a.moveBudget = Math.min(MOVE.budgetCap, a.moveBudget + MOVE.maxSpeed * MOVE.speedSlack * limits.speed * elapsed);
+    const fx = activeMoveFx(a, now);
+    const refill = riding ? rideSpeed(true, fx.slow, fx.noSprint) : MOVE.maxSpeed * limits.speed;
+    a.moveBudget = Math.min(riding ? HORSE.budgetCap : MOVE.budgetCap, a.moveBudget + refill * MOVE.speedSlack * elapsed);
     let dodge = 0;
-    if (msg.anim === ANIM.DODGE && limits.dodge > 0 && now - a.lastDodgeAt >= MOVE.dodgeCooldownMs) {
+    if (msg.anim === ANIM.DODGE && !riding && limits.dodge > 0 && now - a.lastDodgeAt >= MOVE.dodgeCooldownMs) {
       a.lastDodgeAt = now;
       dodge = MOVE.dodgeBurst * limits.dodge;
     }
@@ -543,7 +552,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     a.youDirty = true;
   }
 
-  use(a: PlayerActor | undefined, slot: number) {
+  use(a: PlayerActor | undefined, slot: number, targetId?: string) {
     if (!a || a.dead) return;
     const item = slot < HOTBAR_SLOTS ? a.char.hotbar[slot] : a.char.backpack[slot - HOTBAR_SLOTS];
     if (!item) return;
@@ -559,13 +568,10 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       if (now < a.tonicCooldownUntil) return;
       a.tonicCooldownUntil = now + 8000;
       const dur = item.id === "tonic_small" ? 3 : 4;
-      a.heals.push({ perSec: (tier.heal ?? 40) / dur, until: now + dur * 1000 });
+      a.heals.push({ perSec: (tier.heal ?? 40) / dur, until: now + dur * 1000, left: tier.heal ?? 40 });
       this.consume(a, slot);
-    } else if (item.id === "patchkit") {
-      if (now < a.healCooldownUntil) return;
-      a.healCooldownUntil = now + (tier.cooldown ?? 6) * 1000;
-      a.heals.push({ perSec: ((tier.heal ?? 0.3) * maxHp(a.char.level)) / 2, until: now + 2000 + (tier.rate ?? 1) * 1000 });
-      this.consume(a, slot);
+    } else if (item.id === "patchkit" || item.id === "bubble") {
+      supportOf(this)?.use(a, slot, item, targetId); // channelled heal / shield bubble (support.ts)
     }
   }
 
@@ -642,7 +648,12 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     a.youDirty = true;
   }
 
-  createPile(owner: PlayerActor, items: InvItem[], coins: number, at: V3, deferred?: (() => void)[]): PileData {
+  /**
+   * Leave a pile on the ground. `kind`: "death" for what a player carried when they died (the cap
+   * protects these), "loot" by default (drops, chests, boss overflow), "staged" for admin scenes;
+   * `ttlMs` makes it expire (swept by the quest system).
+   */
+  createPile(owner: PlayerActor, items: InvItem[], coins: number, at: V3, deferred?: (() => void)[], opts: { kind?: PileKind; ttlMs?: number } = {}): PileData {
     const g = this.snapToGround(at);
     const { pile, evicted } = pileStore.current.add({
       body: this.bodyDef.id,
@@ -654,6 +665,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       createdAt: Date.now(),
       items,
       coins,
+      kind: opts.kind ?? "loot",
+      ...(opts.ttlMs ? { expiresAt: Date.now() + opts.ttlMs } : {}),
     });
     const publish = () => {
       emitPileEvent({ kind: "add", pile });
@@ -719,7 +732,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     const events: (() => void)[] = [];
     let pile: PileData | null = null;
     withTx(() => {
-      pile = (items.length || victim.char.coins) && !victim.identity.loadtest ? this.createPile(victim, items, victim.char.coins, actorPos(victim), events) : null;
+      pile = (items.length || victim.char.coins) && !victim.identity.loadtest ? this.createPile(victim, items, victim.char.coins, actorPos(victim), events, { kind: "death" }) : null;
       victim.char.hotbar = [null, null, null, null];
       victim.char.backpack = Array.from({ length: BACKPACK_SLOTS }, () => null);
       victim.char.coins = 0;
@@ -729,7 +742,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     });
     for (const e of events) e();
     this.equip(victim, 0);
-    const killerName = killer ? (killer.kind === "player" ? killer.identity.name : `npc:${killer.state.kind}`) : "the fall";
+    const killerName = killer ? (killer.kind === "player" ? killer.identity.name : `npc:${npcKindOf(killer) ?? killer.state.kind}`) : "the fall";
     const pileId = (pile as PileData | null)?.id ?? "";
     this.broadcast("death", { victim: victim.id, killer: killer?.id ?? null, killerName, aliveMs: now - victim.char.lifeStartedAt, level: victim.char.level, pileId });
     emitGameEvent(this, { type: "death", victimId: victim.id, killerId: killer?.id ?? null, killerKind: killer?.kind ?? "world", npcKind: killer?.kind === "npc" ? npcKindOf(killer) : undefined, pos: actorPos(victim) });
@@ -811,6 +824,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   admin(client: Client, cmd: string, args: Record<string, unknown>) {
     const a = this.actors.get(client.sessionId);
     if (!a || !a.identity.admin) return;
+    emitGameEvent(this, { type: "admin", playerId: a.id, cmd, ...(typeof args.target === "string" ? { targetId: args.target } : {}) });
     const num = (k: string, d = 0) => (typeof args[k] === "number" ? (args[k] as number) : d);
     const target = typeof args.target === "string" ? this.actors.get(args.target) : a;
     switch (cmd) {

@@ -4,6 +4,7 @@
 
 import type { InvItem } from "../net/protocol.ts";
 import { SELL_RATE } from "./progression.ts";
+import { EGGS } from "./secrets.ts";
 import { WEAPONS, WEAPON_BY_ID } from "./weapons.ts";
 
 export type Rarity = "common" | "uncommon" | "rare" | "legendary";
@@ -106,7 +107,7 @@ export interface SkinDef {
   rarity: Rarity;
   value: number;
 }
-export const SKINS: readonly SkinDef[] = [{ id: "ferrymans_oar", name: "Ferryman's Oar", base: { id: "riverstaff", tier: 2 }, rarity: "legendary", value: 500 }];
+export const SKINS: readonly SkinDef[] = [{ id: "ferrymans_oar", name: "Ferryman's Oar", base: { id: "riverstaff", tier: 2 }, rarity: "legendary", value: 0 }];
 export const SKIN_BY_ID: ReadonlyMap<string, SkinDef> = new Map(SKINS.map((s) => [s.id, s]));
 
 // ---------------------------------------------------------------- Portus Exchange
@@ -133,8 +134,9 @@ function buildShop(): ShopEntry[] {
   const out: ShopEntry[] = [];
   for (const w of WEAPONS) {
     if (NOT_SOLD.has(w.id)) continue;
-    const category: ShopCategory = w.id.startsWith("tonic") ? "consumables" : w.id === "radio" ? "gear" : w.cls === "support" ? "support" : "weapons";
-    const tiers: (1 | 2 | 3)[] = w.id.startsWith("tonic") || w.id === "radio" ? [1] : [1, 2, 3];
+    const gear = w.id === "radio" || w.id === "horse_whistle";
+    const category: ShopCategory = w.id.startsWith("tonic") ? "consumables" : gear ? "gear" : w.cls === "support" ? "support" : "weapons";
+    const tiers: (1 | 2 | 3)[] = w.id.startsWith("tonic") || gear ? [1] : [1, 2, 3];
     for (const tier of tiers) {
       const t = w.tiers[tier - 1]!;
       if (t.price <= 0) continue;
@@ -165,8 +167,20 @@ export function itemStack(id: string): number {
   return WEAPON_BY_ID.get(id)?.stack ?? TROPHY_BY_ID.get(id)?.stack ?? 1;
 }
 
-/** Sell value of ONE unit: 25% of the shop price (rounded down, minimum 1), or the fixed value. */
+/** Easter-egg rewards (content.md §6): the item id, or the skin for the Ferryman's Oar. */
+const EGG_ITEM_KEYS: ReadonlySet<string> = new Set(EGGS.map((e) => e.item.skin ?? e.item.id));
+
+/**
+ * An Easter-egg reward. Eggs can be claimed once per life, so the Exchange doesn't buy them: at 500
+ * each they would be a coin faucet (F12 review). The same cosmetic from another source never exists.
+ */
+export function isEggItem(item: Pick<InvItem, "id"> & { skin?: string }): boolean {
+  return EGG_ITEM_KEYS.has(item.skin ?? item.id);
+}
+
+/** Sell value of ONE unit: 25% of the shop price (rounded down, minimum 1), or the fixed value. Egg items: 0. */
 export function unitSellValue(item: Pick<InvItem, "id" | "tier"> & { skin?: string }): number {
+  if (isEggItem(item)) return 0;
   if (item.skin) {
     const s = SKIN_BY_ID.get(item.skin);
     if (s) return s.value;

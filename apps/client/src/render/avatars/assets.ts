@@ -6,6 +6,7 @@ import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import { config } from "../../config.ts";
+import { makeRideClip } from "./ride.ts";
 
 /** Order matches PlayerState.starter and STARTERS in @firstlight/shared/content/weapons. */
 export const STARTER_FILES = ["hexwick", "ash", "kappa", "unit7"] as const;
@@ -74,6 +75,8 @@ async function load(onProgress?: (frac: number) => void): Promise<AvatarAssets> 
     });
     return g.scene;
   });
+  const idle = clips.get("idle");
+  if (idle && starters[0]) clips.set("ride", makeRideClip(idle, starters[0])); // horses: no CC0 riding clip
   loaded = { starters, clips, atlas };
   return loaded;
 }

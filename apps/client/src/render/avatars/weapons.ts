@@ -201,6 +201,8 @@ function design(id: string): Piece[] {
       return [P(box(0.12, 0.08, 0.16), "ivory", [0, 0.02, 0.04]), P(box(0.125, 0.02, 0.165), "accent", [0, 0.02, 0.04])];
     case "bubble":
       return [P(sph(0.05, 12, 10), "glass", [0, 0.03, 0.05]), P(torus(0.05, 0.006, 12), "brass", [0, 0.03, 0.05], [H, 0, 0])];
+    case "horse_whistle":
+      return [P(cylZ(0.012, 0.016, 0.07, 8), "brass", [0, 0.02, 0.03]), P(torus(0.018, 0.003, 8), "cord", [0, 0.02, -0.015], [H, 0, 0])];
     case "radio":
       return [P(box(0.07, 0.13, 0.04), "metal", [0, 0.04, 0.02]), P(cylZ(0.004, 0.003, 0.16, 4), "metalLight", [0.025, 0.17, 0.02], [H, 0, 0])];
     case "tonic_small":

@@ -4,13 +4,14 @@
 import * as THREE from "three/webgpu";
 import { BODIES, padDirs, type BodyId } from "@firstlight/shared";
 import { flags } from "../config.ts";
-import { CLOSE, Net, TravelRedirect } from "../net/Net.ts";
+import { Net, TravelRedirect, type Snapshot } from "../net/Net.ts";
 import { AvatarView, avatarWarmupHook, preloadAvatars } from "../render/Avatars.ts";
+import { HorseView, horseWarmupHook, preloadHorse } from "../render/Horses.ts";
 import "../render/avatars/system.ts";
 import { Bench, benchConfig } from "../render/bench.ts";
 import { BlobShadows } from "../render/blobShadows.ts";
 import { ParticleSystem, type BurstOptions } from "../render/particles.ts";
-import { PerfOverlay } from "../render/PerfOverlay.ts";
+import { PerfOverlay, type PerfExtras } from "../render/PerfOverlay.ts";
 import { Environment } from "../render/environment.ts";
 import { MENU_GRADE } from "../render/post.ts";
 import { runProbe } from "../render/probe.ts";
@@ -25,6 +26,8 @@ import { getAccountInfo, invalidatePlayToken, isDevGuest } from "../net/auth.ts"
 import { PilesView } from "../world/PilesView.ts";
 import { Planet } from "../world/Planet.ts";
 import { Portals } from "../world/Portals.ts";
+import { ArrivalWatch, closeAction, ConnectionLost, waitFor } from "./arrival.ts";
+import { BootGate, RendererUnavailable, shouldKeepReconnecting } from "./boot.ts";
 import { CombatClient } from "./CombatClient.ts";
 import { GameAudio } from "../audio/Audio.ts";
 import { Input } from "./input.ts";
@@ -67,15 +70,33 @@ export class Game {
   private travelling = false;
   private portalCooldownUntil = 0;
   private reconnecting = false;
+  /** Logged out, removed or "connection lost" screen: room closes are not ours to act on. */
+  private stopped = false;
+  /** A graphics re-warm is running (the loop is paused); a room close waits for it to finish. */
+  private rewarming = false;
+  private pendingClose: number | null = null;
+  /** Renderer + UI exist: a retried first boot (S6) only enters the world again. */
+  private uiReady = false;
+  private firstChoice: { starter: number; palette: number } | undefined;
   private probed = false;
   private nextFxDemo = 0;
+  /** Per-frame scratch (the loop allocates nothing in steady state). */
+  private readonly inputMsg = { x: 0, y: 0, z: 0, fx: 0, fy: 0, fz: 0, anim: 0 };
+  private readonly remoteSnap: Snapshot = { t: 0, x: 0, y: 0, z: 0, fx: 0, fy: 0, fz: 0, anim: 0 };
+  private readonly perfExtras: PerfExtras = {};
 
   async start(body: BodyId) {
+    if (this.uiReady) return this.retryArrival(body); // the first attempt failed after the UI was up
     setLoading("Starting the renderer…", 0.05);
     const container = document.getElementById("game")!;
-    this.ctx = await createRenderer(container);
+    try {
+      this.ctx = await createRenderer(container);
+    } catch (e) {
+      throw new RendererUnavailable(e); // nothing was attached yet: a retry starts clean
+    }
     installShaderMonitor(this.ctx);
     void preloadAvatars(); // character GLBs stream in while we connect and build the world
+    void preloadHorse(); // 147 KB: horses are in the warm-up, so they never compile mid-game
     console.info(`[gfx] backend ${this.ctx.webgpu ? "WebGPU" : "WebGL2"}, tier ${this.ctx.tier}${this.ctx.settings.auto ? " (auto)" : ""}, gpu "${this.ctx.gpuName}"`);
     setLoadingBadge(`${this.ctx.webgpu ? "WebGPU" : "WebGL2"} · ${this.ctx.tier}${this.ctx.settings.auto ? " (auto)" : ""}`);
     this.input = new Input(this.ctx.renderer.domElement);
@@ -124,10 +145,10 @@ export class Game {
     installSocial(this);
     bindUi(this);
     document.getElementById("landing")!.style.display = "none";
+    this.uiReady = true;
     const automated = flags.has("autoplay") || OFFLINE;
     // First visit: choose a starter (and the display name, once per account) before entering the world.
     // Dev guests and automated runs skip the name.
-    let firstChoice: { starter: number; palette: number } | undefined;
     const info = !isDevGuest() && !automated ? await getAccountInfo().catch(() => null) : null;
     const needsName = !!info && !info.displayName;
     // A saved account signing in on a new browser already has a character: no starter pick.
@@ -137,9 +158,31 @@ export class Game {
     }
     if (!localStorage.getItem("fl.starter") && !automated) {
       hideLoading();
-      firstChoice = await this.hud.characterPick({ askName: needsName ? { suggested: info!.name } : undefined });
+      this.firstChoice = await this.hud.characterPick({ askName: needsName ? { suggested: info!.name } : undefined });
     } else if (needsName) await pickDisplayName({ suggested: info!.name, dismissible: true });
-    await this.enterBody(body, firstChoice);
+    await this.firstArrival(body);
+  }
+
+  /** Retry after a failed first arrival (S6): the renderer and UI are up, enter the world again. */
+  private async retryArrival(body: BodyId) {
+    document.getElementById("landing")!.style.display = "none"; // Retry may come from the start page
+    await this.firstArrival(body);
+  }
+
+  private async firstArrival(body: BodyId) {
+    try {
+      await this.enterBody(body, this.firstChoice);
+    } catch (e) {
+      // Kicked, banned or playing elsewhere while arriving: stop here; the boot (main.ts runBoot)
+      // puts the removal screen up.
+      if (e instanceof ConnectionLost && e.action === "removed") this.stop();
+      throw e;
+    }
+    this.handOver();
+  }
+
+  /** First arrival done: start the loop and give the player control. */
+  private handOver() {
     this.running = true;
     if (!this.bench) this.input.lock();
     this.ctx.renderer.setAnimationLoop(() => this.frame());
@@ -179,12 +222,44 @@ export class Game {
     if (this.travelling) return;
     this.travelling = true;
     this.audio.play("portal");
+    let failure: unknown = null;
     try {
       await this.enterBody(body);
+    } catch (e) {
+      console.warn("[travel] arrival failed", e);
+      failure = e ?? new Error("travel failed");
     } finally {
       this.travelling = false;
       this.portalCooldownUntil = performance.now() + 3000;
     }
+    if (failure) this.arrivalFailed(failure);
+  }
+
+  /** Stop acting on the world (logged out, removed, connection given up): menus own the screen. */
+  private stop() {
+    this.running = false;
+    this.stopped = true;
+    document.exitPointerLock?.();
+  }
+
+  /**
+   * An arrival (travel, resume, reconnect) didn't make it (S5): removed → say so and stop; refused at
+   * /api/play → its screen is up; otherwise the reconnect path (never a stuck loading screen).
+   */
+  private arrivalFailed(e: unknown) {
+    if (e instanceof ConnectionLost && e.action === "removed") {
+      hideLoading();
+      removedFromWorld(e.code!);
+      this.stop();
+      return;
+    }
+    if (!shouldKeepReconnecting(e)) {
+      hideLoading();
+      this.stop();
+      return;
+    }
+    if (e instanceof ConnectionLost && e.action === "rejoin-fresh") invalidatePlayToken();
+    void this.reconnect();
   }
 
   /** Rejoin after an unexpected disconnect: backoff 1.5 s → 30 s, then a "lost connection" screen. */
@@ -202,12 +277,18 @@ export class Game {
           return;
         } catch (e) {
           console.warn("rejoin failed", e);
+          if ((e instanceof ConnectionLost && e.action === "removed") || !shouldKeepReconnecting(e)) {
+            hideLoading();
+            if (e instanceof ConnectionLost && e.code !== null) removedFromWorld(e.code);
+            this.stop();
+            return;
+          }
+          if (e instanceof ConnectionLost && e.action === "rejoin-fresh") invalidatePlayToken();
           delay = Math.min(30_000, delay * 2);
         }
       }
       hideLoading();
-      this.running = false;
-      document.exitPointerLock?.();
+      this.stop();
       this.menu.showNotice("CONNECTION LOST", "Couldn't reach the server. Your character is safe.", "Try again", () => void this.resume());
     } finally {
       this.reconnecting = false;
@@ -215,29 +296,45 @@ export class Game {
     }
   }
 
-  /** Server closed our room: decide by close code (SPEC §5; server world/hub.ts). */
+  /**
+   * Our room closed while playing (SPEC §5; server world/hub.ts). Net only reports rooms we didn't
+   * leave; during an arrival the ArrivalWatch handles them instead.
+   */
   private onRoomClosed(code: number) {
-    if (this.travelling || !this.running) return;
-    if (code === 1000 || code === 4000 || code === CLOSE.LOGGED_OUT) return; // we left, or logged out
-    // Kicked, banned or playing elsewhere: the social screens say so; never auto-rejoin.
-    if (removedFromWorld(code)) {
-      this.running = false;
-      document.exitPointerLock?.();
+    if (this.travelling || this.stopped) return;
+    if (this.rewarming) {
+      this.pendingClose = code; // acted on when the re-warm finishes (never warm into no connection)
       return;
     }
-    if (code === CLOSE.MERGED) invalidatePlayToken(); // saved/signed in: rejoin as the account
+    const action = closeAction(code);
+    if (action === "ignore") return; // logged out: that screen is up
+    // Kicked, banned or playing elsewhere: the social screens say so; never auto-rejoin.
+    if (action === "removed") {
+      removedFromWorld(code);
+      this.stop();
+      return;
+    }
+    if (action === "rejoin-fresh") invalidatePlayToken(); // saved/signed in: rejoin as the account
     void this.reconnect();
   }
 
+  /** A re-warm paused the loop; act on a room close that arrived meanwhile. */
+  private endRewarm() {
+    this.rewarming = false;
+    const code = this.pendingClose;
+    this.pendingClose = null;
+    if (code !== null) this.onRoomClosed(code);
+  }
+
   async loggedOut() {
-    this.running = false;
+    this.stop();
     await this.net.leave();
-    document.exitPointerLock?.();
     this.menu.showLoggedOut();
   }
 
   async resume() {
     this.menu.hideAll();
+    this.stopped = false;
     this.travelling = true;
     try {
       await this.enterBody(this.bodyId);
@@ -245,7 +342,7 @@ export class Game {
       console.warn("resume failed", e);
       this.travelling = false;
       this.running = true;
-      return void this.reconnect();
+      return void this.arrivalFailed(e);
     }
     this.travelling = false;
     this.running = true;
@@ -274,6 +371,10 @@ export class Game {
     this.piles = new PilesView(this.ctx.scene);
 
     const stored = { starter: Number(localStorage.getItem("fl.starter") ?? 0), palette: Number(localStorage.getItem("fl.palette") ?? 0) };
+    // S5: from the join until control is handed over, a close of the new room aborts the arrival
+    // (ConnectionLost at the next check) instead of hanging or warming into no connection.
+    let watch: ArrivalWatch | null = null;
+    const alive = (stage: string) => watch?.check(stage);
     if (OFFLINE) {
       const p = this.spawnPoint();
       this.player.teleport(p.x, p.y, p.z);
@@ -290,20 +391,13 @@ export class Game {
         if (e instanceof TravelRedirect && e.body !== body) return this.enterBody(e.body, choice);
         throw e;
       }
+      const w = (watch = new ArrivalWatch());
+      this.net.onLeaveRoom = w.onClose; // until the hand-over below
       localStorage.setItem("fl.body", body);
       this.combat.attach();
-      await new Promise<void>((resolve) => {
-        const check = () => {
-          const me = (room.state as any).players?.get(room.sessionId);
-          if (me) {
-            this.player.teleport(me.x, me.y, me.z);
-            resolve();
-          } else setTimeout(check, 30);
-        };
-        check();
-      });
+      const me = await waitFor(() => (room.state as any).players?.get(room.sessionId), { stage: "waiting for our player", timeoutMs: 15_000, watch: w });
+      this.player.teleport(me.x, me.y, me.z);
       this.net.onCorrect = (x, y, z) => this.player.teleport(x, y, z);
-      this.net.onLeaveRoom = (code) => this.onRoomClosed(code);
       this.systems = CLIENT_SYSTEMS.map((f) => f(this)).filter((x): x is ClientSystem => !!x);
     }
 
@@ -315,9 +409,11 @@ export class Game {
       setLoading("Building the world…", 0.4 + 0.4 * Math.max(0, 1 - pending / 40));
       if (pending === 0 || performance.now() - t0 > 15000) break;
       await new Promise((r) => setTimeout(r, 50));
+      alive("building the world");
     }
     setLoading("Loading characters…", 0.8);
-    await preloadAvatars(); // resolves null on failure: avatars fall back to capsules
+    await Promise.all([preloadAvatars(), preloadHorse()]); // resolve null on failure: capsules / box horses
+    alive("loading characters");
     if (!this.self) {
       this.self = new AvatarView(choice?.palette ?? stored.palette, choice?.starter ?? stored.starter);
       this.self.root.name = "selfAvatar";
@@ -345,6 +441,7 @@ export class Game {
         console.warn("[gfx] probe failed, staying on medium", e);
         this.ctx.setProbedTier("medium", { persist: false });
       }
+      alive("tuning graphics");
     }
     // The bench crowd exists before warm-up so its shaders compile behind the loading screen.
     const benchCfg = benchConfig();
@@ -365,16 +462,21 @@ export class Game {
     }
     setLoading("Warming up shaders…", 0.92);
     await warmup(this.ctx, { frames: 4, hooks: [this.warmupHook()], beforeFrame: updateWorld });
+    alive("warming up shaders");
+    // Hand-over: from here a close is a mid-game disconnect (no await until the caller resumes play).
+    if (watch) this.net.onLeaveRoom = (code) => this.onRoomClosed(code);
     hideLoading();
   }
 
   private warmupHook() {
     // every palette's skinned toon variant, weapons and LOD proxies compile behind the loading screen
     const avatars = avatarWarmupHook(this.ctx.scene, () => this.player.pos);
+    const horses = horseWarmupHook(this.ctx.scene, () => this.player.pos); // the six coat materials
     return {
       forceAll: (on: boolean) => {
         this.planet.props.setForceAll(on);
         avatars.forceAll(on);
+        horses.forceAll(on);
       },
     };
   }
@@ -384,6 +486,7 @@ export class Game {
     change();
     if (!this.running || this.travelling) return;
     this.running = false;
+    this.rewarming = true;
     setLoading("Applying graphics settings…", 0.5);
     try {
       await warmup(this.ctx, { frames: 3, hooks: [this.warmupHook()], beforeFrame: () => this.updateWorldForWarmup() });
@@ -391,6 +494,7 @@ export class Game {
       hideLoading();
       this.running = true;
       this.last = performance.now();
+      this.endRewarm();
     }
   }
 
@@ -406,6 +510,7 @@ export class Game {
     // Only from live play (F3 panel): leave menus, logged-out and notice screens alone.
     if (!this.running || this.travelling) return;
     this.running = false;
+    this.rewarming = true;
     setLoading("Tuning graphics for this computer…", 0.5);
     try {
       const r = await runProbe(this.ctx);
@@ -416,6 +521,7 @@ export class Game {
       hideLoading();
       this.running = true;
       this.last = performance.now();
+      this.endRewarm();
     }
   }
 
@@ -431,7 +537,7 @@ export class Game {
     const rawMs = now - this.last;
     const dt = Math.min(0.05, rawMs / 1000);
     this.last = now;
-    if (!this.running || this.travelling) return;
+    if (!this.running || this.travelling) return this.env.silence();
     const cpu0 = performance.now();
 
     let focus: THREE.Vector3;
@@ -444,7 +550,11 @@ export class Game {
       if (!this.photo.active) this.player.update(dt, this.input, this.combat.aiming());
       const p = this.player.pos;
       const f = this.player.facing;
-      this.net.sendInput(now, { x: p.x, y: p.y, z: p.z, fx: f.x, fy: f.y, fz: f.z, anim: this.player.anim });
+      const m = this.inputMsg;
+      m.x = p.x; m.y = p.y; m.z = p.z;
+      m.fx = f.x; m.fy = f.y; m.fz = f.z;
+      m.anim = this.player.anim;
+      this.net.sendInput(now, m);
       this.self.set(p.x, p.y, p.z, f.x, f.y, f.z, this.player.anim, dt);
       focus = this.photo.active ? this.photo.pos : p;
     }
@@ -452,7 +562,7 @@ export class Game {
     // Remote players.
     const state = this.net.room?.state as any;
     for (const [id, view] of this.net.remotes) {
-      const s = this.net.sample(view, now);
+      const s = this.net.sample(view, now, undefined, this.remoteSnap);
       if (!s) continue;
       let a = this.avatars.get(id);
       if (!a) {
@@ -496,19 +606,12 @@ export class Game {
     this.env.afterCamera(this.ctx.camera, dt);
     this.particles.update(dt, this.ctx.camera.position, now);
     if (this.ctx.settings.on.chars) {
-      const blobs: { x: number; y: number; z: number; r: number }[] = [];
-      const addBlob = (pos: THREE.Vector3) => {
-        const l = pos.length();
-        const g = this.planet.terrain.groundHeight(pos.x / l, pos.y / l, pos.z / l) + this.planet.body.radius;
-        const lift = l - g;
-        if (lift > 6) return;
-        const k = g / l;
-        blobs.push({ x: pos.x * k, y: pos.y * k, z: pos.z * k, r: 0.55 * (1 - lift / 8) });
-      };
-      if (!this.bench && this.self) addBlob(this.player.pos);
-      for (const a of this.avatars.values()) addBlob(a.root.position);
-      if (this.bench) blobs.push(...this.bench.crowdBlobs());
-      this.blobs.update(blobs);
+      this.blobs.begin();
+      if (!this.bench && this.self) this.addBlob(this.player.pos);
+      for (const a of this.avatars.values()) this.addBlob(a.root.position);
+      for (const h of HorseView.all) if (h.root.parent && h.root.visible) this.addBlob(h.root.position, 1.0);
+      if (this.bench) for (const b of this.bench.crowdBlobs()) this.blobs.add(b.x, b.y, b.z, b.r);
+      this.blobs.end();
     }
     if (this.input.pressed.has("F3")) this.perf.toggle();
     this.ctx.render();
@@ -523,33 +626,55 @@ export class Game {
     this.ctx.afterFrame(now, rawMs);
     this.bench?.record(rawMs);
     shaderMonitorFrame();
-    const st = this.planet.stats();
-    this.perf.frame(now, rawMs / 1000, {
-      cpuMs,
-      chunks: st.chunks,
-      visibleChunks: st.visibleChunks,
-      water: st.water,
-      grass: st.grassBlades,
-      props: st.props,
-      particles: this.particles.liveCount,
-      entities: this.avatars.size + 1 + (this.bench?.crowdViews().length ?? 0),
-      ping: this.net.rtt,
-      body: this.env.describe(),
-    });
+    const x = this.perfExtras;
+    x.cpuMs = cpuMs;
+    if (this.perf.shown) {
+      const st = this.planet.stats();
+      x.chunks = st.chunks;
+      x.visibleChunks = st.visibleChunks;
+      x.water = st.water;
+      x.grass = st.grassBlades;
+      x.props = st.props;
+      x.particles = this.particles.liveCount;
+      x.entities = this.avatars.size + 1 + (this.bench?.crowdViews().length ?? 0);
+      x.ping = this.net.rtt;
+      x.body = this.env.describe();
+    }
+    this.perf.frame(now, rawMs / 1000, x);
     this.input.endFrame();
+  }
+
+  /** Contact shadow under a character (or horse, r = 1) standing within 6 m of the ground. */
+  private addBlob(pos: THREE.Vector3, r = 0.55) {
+    const l = pos.length();
+    const g = this.planet.terrain.groundHeight(pos.x / l, pos.y / l, pos.z / l) + this.planet.body.radius;
+    const lift = l - g;
+    if (lift > 6) return;
+    const k = g / l;
+    this.blobs.add(pos.x * k, pos.y * k, pos.z * k, r * (1 - lift / 8));
   }
 }
 
 let game: Game | null = null;
+let boot: BootGate | null = null;
 
+/**
+ * Play (and Retry after a failed boot, S6). The Game is created once; its start() is retryable
+ * (a failed renderer start attaches nothing, a failed arrival is entered again), and the gate runs
+ * it until it succeeds once, sharing an attempt between double clicks.
+ */
 export async function startGame() {
-  if (game) return;
-  game = new Game();
-  (window as unknown as { __game: Game }).__game = game;
-  // Start where the character was last seen (the server redirects if that's stale).
-  const wanted = flags.get("body") ?? benchConfig()?.body ?? localStorage.getItem("fl.body") ?? "portus";
-  const start: BodyId = wanted in BODIES ? (wanted as BodyId) : "portus";
-  await game.start(start);
+  if (!game) {
+    game = new Game();
+    (window as unknown as { __game: Game }).__game = game;
+  }
+  const g = game;
+  boot ??= new BootGate(() => {
+    // Start where the character was last seen (the server redirects if that's stale).
+    const wanted = flags.get("body") ?? benchConfig()?.body ?? localStorage.getItem("fl.body") ?? "portus";
+    return g.start(wanted in BODIES ? (wanted as BodyId) : "portus");
+  });
+  await boot.start();
 }
 
 export { THREE };

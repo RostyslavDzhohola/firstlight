@@ -1,10 +1,11 @@
 // Admin `stage <n>`: the five staged scenes for the video (SPEC §6.13, docs/staged-scenes.md).
 // Teleports the admin plus the crew — other admins, load-test bots and members of the admin's
 // party — within 80 m (or anywhere in the room with `all: true`) into a formation at the scene spot, heals them and sets the scene: boss and NPC
-// spawns are requested on the event bus (`spawnRequest`, reason "stage") for the NPC lane to honour.
+// spawns are requested on the event bus (`spawnRequest`, reason "stage") for the NPC lane to honour,
+// and the copy's sky is pinned (time of day held, weather overridden) for STAGE_SKY_MINUTES.
 // If the admin is on another body the client is told to travel there and repeat the command.
 
-import type { BodyId } from "@firstlight/shared";
+import type { BodyId, Weather } from "@firstlight/shared";
 import { bossArena } from "@firstlight/shared/content/arenas";
 import { BOSS_LAIRS, placeDir, type BossId } from "@firstlight/shared/content/places";
 import { maxHp } from "@firstlight/shared/content/progression";
@@ -13,7 +14,23 @@ import { PF } from "@firstlight/shared/net/schema";
 import { actorPos, type PlayerActor } from "../actors.ts";
 import { emitGameEvent } from "../events.ts";
 import { dist3 } from "../geometry.ts";
+import { SkySystem } from "../SkySystem.ts";
 import type { QuestSystem } from "./QuestSystem.ts";
+
+/**
+ * Staged scenes run in public copies, so nothing they leave behind is permanent: spawned NPCs are
+ * capped per room and dissolve, the loot pile expires, and for `stagedMs` after a scene the copy's
+ * boss kills and egg claims write no medals or Hall of Firsts entries (tests change and restore these).
+ */
+export const STAGE_LIMITS = {
+  perBody: 24,
+  ttlMs: 10 * 60_000,
+  pileTtlMs: 15 * 60_000,
+  stagedMs: 30 * 60_000,
+};
+
+/** How long a scene's sky holds (run `stage n` again to refresh, `sky reset` to end it early). */
+export const STAGE_SKY_MINUTES = 30;
 
 export type Formation = "ring" | "line" | "arc" | "pair" | "duel";
 
@@ -32,30 +49,37 @@ export interface StageDef {
   unprotect?: boolean;
   /** Drop a staged loot pile in the middle. */
   pile?: { items: InvItem[]; coins: number };
+  /** The scene's sky: time of day (0..1, held still) and weather, for every client on the copy. */
+  sky: { dayT: number; weather: Weather; intensity?: number };
   tip: string;
 }
 
 export const STAGES: readonly StageDef[] = [
   {
     n: 1, body: "portus", name: "Portus crowd under the sky planets", place: "portus_plaza", formation: "ring",
+    sky: { dayT: 0.391, weather: "clear" }, // Portus's reference sun (0.85 rad)
     tip: "Low camera in the ring's centre, tilt up to the three planets; slow orbit.",
   },
   {
     n: 2, body: "arcadia", name: "Arcadia vista: Tidewrath rising from the lake", place: "gull_point_overlook", formation: "line", boss: "tidewrath",
+    sky: { dayT: 0.776, weather: "clear" }, // golden hour: afternoon sun at 0.35 rad (20°)
     tip: "Over-the-shoulder from the overlook down to Glasswater; hold until the coral spikes break the surface.",
   },
   {
     n: 3, body: "hollowmere", name: "Hollowmere chapel at dusk vs the Hollow Court", place: "drowned_chapel", north: -14, formation: "arc",
     spawns: [{ npcKind: "bonewalker", count: 4 }, { npcKind: "bone_archer", count: 2 }],
+    sky: { dayT: 0.83, weather: "drizzle", intensity: 0.4 }, // dusk: evening sun at 0.063 rad (3.6°)
     tip: "Track along the arc at knee height; the chapel and the rising bones fill the frame.",
   },
   {
     n: 4, body: "meridian", name: "Meridian canyon co-op vs The Receiver", place: "foreclosure_yard", formation: "pair", boss: "receiver",
+    sky: { dayT: 0.332, weather: "clear" }, // Meridian's hard reference sun (0.95 rad)
     tip: "Wide from the gantry, then cut between the two console holders as the hatch opens.",
   },
   {
     n: 5, body: "arcadia", name: "Wild-west PvP with destruction and a loot pile", place: "blockyard_camp", east: 60, formation: "duel", unprotect: true,
     pile: { items: [{ id: "comet", tier: 1, qty: 1 }, { id: "scatterpipe", tier: 1, qty: 1 }, { id: "tonic_small", tier: 1, qty: 3 }], coins: 150 },
+    sky: { dayT: 0.55, weather: "storm", intensity: 0.8 }, // early afternoon thunderstorm
     tip: "Two lines 20 m apart with the camp walls behind; the loot pile glows between them.",
   },
 ];
@@ -127,12 +151,15 @@ export function runStage(sys: QuestSystem, admin: PlayerActor, n: number, all: b
     }
     sys.toast(a, `Stage ${n}: ${def.name}`, "info");
   });
+  const sky = sys.room.systems.find((x): x is SkySystem => x instanceof SkySystem);
+  sky?.onAdmin(admin, "sky", { ...def.sky, hold: true, minutes: STAGE_SKY_MINUTES });
   const at = sys.room.snapToGround(centre);
+  sys.markStaged(cast);
   if (def.boss) {
     const lair = sys.room.snapToGround(placeDir(BOSS_LAIRS[def.boss].place));
-    emitGameEvent(sys.room, { type: "spawnRequest", reason: "stage", bossId: def.boss, count: 1, pos: lair });
+    emitGameEvent(sys.room, { type: "spawnRequest", reason: "stage", bossId: def.boss, count: 1, pos: lair, playerId: admin.id });
   }
-  for (const s of def.spawns ?? []) emitGameEvent(sys.room, { type: "spawnRequest", reason: "stage", npcKind: s.npcKind, count: s.count, pos: at });
-  if (def.pile) sys.room.createPile(admin, def.pile.items.map((i) => ({ ...i })), def.pile.coins, at);
+  for (const s of def.spawns ?? []) emitGameEvent(sys.room, { type: "spawnRequest", reason: "stage", npcKind: s.npcKind, count: s.count, pos: at, playerId: admin.id });
+  if (def.pile) sys.room.createPile(admin, def.pile.items.map((i) => ({ ...i })), def.pile.coins, at, undefined, { kind: "staged", ttlMs: STAGE_LIMITS.pileTtlMs });
   sys.toast(admin, `${cast.length} in scene · ${def.tip}`, "info");
 }

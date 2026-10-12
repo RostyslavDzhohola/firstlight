@@ -3,6 +3,7 @@
 // Meridian Oversight, warm player, warm party member (joke), creature, the world (falls), yourself.
 
 import "./death.css";
+import { NPC_DEFS } from "@firstlight/shared/content/npcs";
 import { STARTERS } from "@firstlight/shared/content/weapons";
 import type { InvItem } from "@firstlight/shared/net/protocol";
 import { config } from "../config.ts";
@@ -99,7 +100,7 @@ export function showDeath(info: DeathInfo, ctx: DeathContext): Promise<{ starter
     const lede = el("p", "fl-death__lede", left, "Everything you carried scattered into light where you fell. ");
     el("em", "", lede, "It's still there.");
 
-    killerCard(left, classifyKiller(info, info.victim ?? null, { isParty: info.isParty }), info);
+    killerCard(left, classifyKiller(info, info.victim ?? null, { isParty: info.isParty, npcName: (kind) => NPC_DEFS.find((d) => d.id === kind)?.name }), info);
 
     const stats = el("div", "fl-death__stats", left);
     const alive = el("div", "", stats);

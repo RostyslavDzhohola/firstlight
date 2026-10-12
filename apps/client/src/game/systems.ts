@@ -9,6 +9,7 @@ import { createBreakables } from "../world/Breakables.ts";
 import { createSkyClient } from "./SkyClient.ts";
 import { createInventoryClient } from "./InventoryClient.ts";
 import { createOnboardingClient } from "./OnboardingClient.ts";
+import { horseClientSystem, horseInputSystem } from "./HorseClient.ts";
 
 export interface ClientSystem {
   update(dt: number, now: number): void;
@@ -27,3 +28,7 @@ CLIENT_SYSTEMS.push(createSkyClient);
 CLIENT_SYSTEMS.push(createInventoryClient);
 // Onboarding (Portus): training dummies and the first-minute tutorial HUD.
 CLIENT_SYSTEMS.push(createOnboardingClient);
+// Horses lane: horses draw first (riders sit in the saddle before nameplates read their position)
+// and take keys after the quests client (piles and world objects keep E when in reach).
+CLIENT_SYSTEMS.unshift(horseClientSystem);
+CLIENT_SYSTEMS.push(horseInputSystem);

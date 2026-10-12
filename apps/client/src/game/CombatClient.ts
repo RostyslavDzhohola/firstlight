@@ -3,6 +3,9 @@
 
 import * as THREE from "three/webgpu";
 import { isBlocked, partyState } from "../social/store.ts";
+import { HORSE_WHISTLE } from "@firstlight/shared/content/horse";
+import { flags } from "../config.ts";
+import { horsesEnabled } from "./mount.ts";
 import { WEAPONS, WEAPON_BY_ID, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
 import { PHRASES } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
@@ -14,6 +17,18 @@ import { showSavePrompt } from "../ui/account.ts";
 import { getPlayToken, isDevGuest, readClaims } from "../net/auth.ts";
 
 const _v = new THREE.Vector3();
+const _head = new THREE.Vector3();
+const _up = new THREE.Vector3();
+const _from = new THREE.Vector3();
+
+/** Why the server refused a `use` (Patchkit, Prism Bubble), as player-facing text. */
+const USE_DENIED: Record<string, string> = {
+  cooldown: "Not ready yet",
+  busy: "Already patching",
+  "out of reach": "Too far — get within 4 m",
+  "no target": "Nobody to patch there",
+  "no line of sight": "Something's in the way",
+};
 
 export class CombatClient {
   readonly effects: Effects;
@@ -53,7 +68,25 @@ export class CombatClient {
     room.onMessage("denied", (m: { action: string; reason: string }) => {
       if (m.reason === "level gate") this.hud.toast("Your level is too low to use that tier", "warn");
       else if (m.action === "logout") this.hud.toast("Can't log out in combat — wait 10 s", "warn");
+      else if (m.action === "use" && USE_DENIED[m.reason]) this.hud.toast(USE_DENIED[m.reason]!, "warn");
     });
+    // Support items: Patchkit channel (server-timed; damage interrupts it) and Prism Bubbles.
+    room.onMessage("channel", (m: { kind: string; ms: number; target: string }) => {
+      const who = m.target === me ? "" : ` ${(room.state as any).players?.get(m.target)?.name ?? "an ally"}`;
+      this.hud.toast(`Patching up${who}…`, "info");
+      this.game.self?.trigger("attack");
+    });
+    room.onMessage("channelEnd", (m: { ok: boolean; reason?: string }) => {
+      if (!m.ok) this.hud.toast(m.reason === "interrupted" ? "Patchkit interrupted — kit kept" : m.reason === "out of sight" ? "Lost sight of them — kit kept" : "Patchkit cancelled — kit kept", "warn");
+    });
+    room.onMessage("bubble", (m: { id: number; x: number; y: number; z: number; r: number; ms: number }) => {
+      const at = new THREE.Vector3(m.x, m.y, m.z);
+      this.effects.bubble(m.id, at, m.r, m.ms);
+      this.game.audio.play("ui", at);
+    });
+    room.onMessage("bubblePop", (m: { id: number }) => this.effects.popBubble(m.id));
+    // Bubbles deployed before we arrived (late join, reconnect): ask now that the handlers exist.
+    room.send("supportSync", {});
     room.onMessage("hit", (m: { attacker: string; target: string; amount: number; weak: boolean; x: number; y: number; z: number; kb?: number; kx?: number; ky?: number; kz?: number }) => {
       if (m.attacker === me && m.target !== me) {
         this.hud.hit(m.weak);
@@ -164,9 +197,14 @@ export class CombatClient {
     return { def, tier: item?.tier ?? 1 };
   }
 
+  /** The whistle in hand works like H (the server explains a refusal, safe zones included). */
+  private whistle() {
+    if (horsesEnabled(this.game.hud.you, flags.has("nohorses"))) this.game.net.room?.send("horse", { action: "whistle" });
+  }
+
   aiming(): boolean {
     const { def } = this.currentWeapon();
-    return this.game.input.rmb && def.delivery !== "melee";
+    return this.game.input.rmb && def.delivery !== "melee" && !this.game.player.saddleLocked;
   }
 
   update(dt: number, now: number) {
@@ -205,6 +243,26 @@ export class CombatClient {
     const { def, tier } = this.currentWeapon();
     const t = def.tiers[tier - 1]!;
     const rmb = input.rmb;
+    const cam = g.ctx.camera;
+
+    if (g.player.saddleLocked) {
+      // No weapons from the saddle, or just off it (horses; the server refuses them too): lower any
+      // guard, scope or draw. Tonics and Patchkits still work, and the whistle in hand gets you off.
+      if (this.blocking) room.send("block", { on: false });
+      if (this.scoped) room.send("scope", { on: false });
+      if (this.wasRmb) room.send("charge", { on: false });
+      this.blocking = this.scoped = this.wasRmb = false;
+      g.self?.setLocalFlags(0);
+      if (Math.abs(cam.fov - this.baseFov) > 0.1) {
+        cam.fov += (this.baseFov - cam.fov) * Math.min(1, dt * 14);
+        cam.updateProjectionMatrix();
+      }
+      if (!input.lmbPressed || g.photo?.active) return;
+      if (def.delivery === "heal") room.send("use", { slot: g.hud.you?.selected ?? 0 });
+      else if (def.id === HORSE_WHISTLE) this.whistle();
+      else if (g.player.mounted) g.hud.toast("No weapons from the saddle: E to get off", "warn");
+      return;
+    }
 
     // Right mouse: block (blades/staff), charge (axe/hammer), draw (bow), aim/scope (guns).
     if (def.delivery === "melee") {
@@ -237,12 +295,13 @@ export class CombatClient {
         this.chargeStart = now;
         room.send("charge", { on: true }); // the server times the draw
       }
+      // Patchkit: right mouse patches yourself (left mouse: the ally in the crosshair).
+      if (def.id === "patchkit" && rmb && !this.wasRmb) room.send("use", { slot: g.hud.you?.selected ?? 0 });
     }
     this.wasRmb = rmb;
     // Own avatar: hold the guard / aim pose from local input instead of waiting for the server flags.
     g.self?.setLocalFlags((this.blocking ? PF.BLOCKING : 0) | (this.scoped || this.aiming() ? PF.SCOPED : 0));
     const zoom = this.scoped ? (t.zoom ?? 1.35) : 1;
-    const cam = g.ctx.camera;
     const targetFov = this.baseFov / zoom;
     if (Math.abs(cam.fov - targetFov) > 0.1) {
       cam.fov += (targetFov - cam.fov) * Math.min(1, dt * 14);
@@ -251,6 +310,10 @@ export class CombatClient {
 
     // Left mouse: attack.
     if (!input.lmb && !input.lmbPressed) return;
+    if (def.id === HORSE_WHISTLE) {
+      if (input.lmbPressed) this.whistle();
+      return;
+    }
     if (meState && meState.flags & PF.SAFE) {
       if (this.training?.(def, t, now)) return; // onboarding: the Portus training dummies take swings
       if (input.lmbPressed) g.hud.toast("Weapons are holstered in safe zones", "warn");
@@ -270,6 +333,12 @@ export class CombatClient {
       this.effects.arc(g.player.pos, g.player.facing, up, def.range, weaponColor(WEAPONS.indexOf(def)));
       return;
     }
+    if (def.id === "patchkit") {
+      const ally = this.allyInCrosshair(def.range);
+      if (ally) room.send("use", { slot, targetId: ally });
+      else g.hud.toast("No ally in reach — right-click to patch yourself", "info");
+      return;
+    }
     if (def.delivery === "heal" || def.delivery === "bubble" || def.delivery === "none") {
       room.send("use", { slot });
       return;
@@ -283,9 +352,10 @@ export class CombatClient {
       this.chargeStart = now;
       room.send("charge", { on: true });
     }
-    // Local predicted tracer for hitscan weapons.
+    // Local predicted tracer for hitscan weapons, stopped by terrain or the first intact prop.
     if (def.delivery === "hitscan" || def.delivery === "pellets" || def.delivery === "chain") {
-      const hitT = this.rayTerrain(origin, dir, def.falloffTo ?? def.range);
+      const range = def.falloffTo ?? def.range;
+      const hitT = Math.min(this.rayTerrain(origin, dir, range), this.rayProps(origin, dir, range));
       const to = origin.clone().addScaledVector(dir, hitT);
       const muzzle = g.player.pos.clone().addScaledVector(g.player.up(), 1.35).addScaledVector(g.player.facing, 0.5);
       const color = weaponColor(WEAPONS.indexOf(def));
@@ -293,6 +363,57 @@ export class CombatClient {
       g.audio.play(def.id in { carbine: 1, scatterpipe: 1, stillshot: 1, stormcoil: 1 } ? def.id : "carbine");
       this.effects.flash(muzzle, color, 0.3);
     }
+  }
+
+  /** The live player nearest the crosshair ray within `range` metres of us (Patchkit target), or null. */
+  private allyInCrosshair(range: number): string | null {
+    const room = this.game.net.room;
+    if (!room) return null;
+    const cam = this.game.ctx.camera;
+    const o = cam.getWorldPosition(new THREE.Vector3());
+    const d = cam.getWorldDirection(new THREE.Vector3());
+    const mine = this.game.player.pos;
+    const chest = new THREE.Vector3();
+    let best: string | null = null;
+    let bestOff = 1.0;
+    (room.state as any).players?.forEach((p: any, id: string) => {
+      if (id === room.sessionId || p.flags & PF.DEAD) return;
+      chest.set(p.x, p.y, p.z);
+      if (chest.distanceTo(mine) > range + 0.5) return;
+      chest.addScaledVector(_v.copy(chest).normalize(), 1.0);
+      // Not through the ground or a prop (the server checks the same line).
+      const myChest = mine.clone().addScaledVector(mine.clone().normalize(), 1.0);
+      const to = chest.clone().sub(myChest);
+      const len = to.length();
+      if (len > 0.01) {
+        to.divideScalar(len);
+        if (this.rayTerrain(myChest, to, len) < len) return;
+        if ((this.game.player.getColliders()?.raycast?.(myChest, to, len) ?? Infinity) < len) return;
+      }
+      chest.sub(o);
+      const t = chest.dot(d);
+      if (t <= 0) return;
+      const off = chest.addScaledVector(d, -t).length();
+      if (off < bestOff) {
+        bestOff = off;
+        best = id;
+      }
+    });
+    return best;
+  }
+
+  /**
+   * Distance to the first intact prop along the camera ray, ignoring the stretch behind the head
+   * (like the server's propOnRay: props between the camera and the shooter don't catch the aim).
+   */
+  private rayProps(o: THREE.Vector3, d: THREE.Vector3, max: number): number {
+    const props = this.game.player.getColliders();
+    if (!props?.raycast) return Infinity;
+    const p = this.game.player.pos;
+    const head = _head.copy(p).addScaledVector(_up.copy(p).normalize(), 1.6);
+    const skip = Math.max(0, head.sub(o).dot(d));
+    if (skip >= max) return Infinity;
+    return skip + props.raycast(_from.copy(o).addScaledVector(d, skip), d, max - skip);
   }
 
   private rayTerrain(o: THREE.Vector3, d: THREE.Vector3, max: number): number {

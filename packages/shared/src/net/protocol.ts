@@ -101,6 +101,8 @@ export type ClientMessages = {
   mission: { action: "accept" | "abandon"; id: string };
   title: { medalId: string | null };
   ping: { t: number };
+  /** Horses (content/horse.ts): H sends "whistle" (dismount / mount if close / call the horse), E near it sends "ride". */
+  horse: { action: "whistle" | "ride" | "dismount" };
   /** Onboarding: an attack aimed at the training dummies in Portus (camera ray; the server tests the hit). */
   train: { ox: number; oy: number; oz: number; dx: number; dy: number; dz: number };
   /** Onboarding: skip it (no more XP, no Spark medal; it never comes back). */
@@ -137,6 +139,8 @@ export type ServerMessages = {
   stage: { n: number; body: BodyId };
   /** Open a client panel (keypad for the E7 safe). */
   prompt: { kind: "keypad"; target: string };
+  /** Horse events for effects and sounds (state carries the horse itself). */
+  horse: { owner: string; event: "summon" | "mount" | "dismount" | "thrown" | "leave"; x: number; y: number; z: number };
   /** Onboarding: a training dummy took a hit (`down` once it has ONBOARDING.HITS_PER_DUMMY). */
   train: { dummy: number; hits: number; down: boolean };
   /** Onboarding finished: `xp` paid in total (50 when done, less when skipped). */
@@ -159,6 +163,8 @@ export interface YouState {
   worn?: Partial<Record<CosmeticSlot, string>>;
   logoutEndsAt: number | null;
   protectedUntil: number;
+  /** Horses are on in this room (server flag FEATURE_HORSES; set by the horse system). */
+  horses?: boolean;
   /** Onboarding in progress (Portus only): hits on each training dummy. Absent once done or skipped. */
   onboarding?: { hits: number[] };
 }

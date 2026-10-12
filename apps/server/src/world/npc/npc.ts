@@ -106,7 +106,16 @@ export interface Npc extends NpcActor {
   /** Brightbits' current 90° movement axis (0–3), −1 = none. */
   gridAxis: number;
   strafeSign: number;
+  /** Since when the chased target has stood where this NPC can't reach it (brain.ts), if it has. */
+  unreachSince?: number;
   /** Golden Hopbit / Ticket #000 bookkeeping. */
   egg?: { follower: string | null; since: number; walker?: string; walkFrom?: V3; walkDir?: V3 };
+  /**
+   * Raised by a wrong egg-puzzle answer (reason "egg", key = egg id) or an admin staged scene (reason
+   * "stage"): capped per player and room, they expire, and share one repeat-kill decay key.
+   */
+  spawned: { reason: "egg" | "stage"; key: string; userId: string } | null;
+  /** Dissolves (no rewards) at this time; 0 = never. Egg penalty and stage spawns expire. */
+  expiresAt: number;
   dead: boolean;
 }

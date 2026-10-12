@@ -68,6 +68,11 @@ export class PerfOverlay {
     this.lastPanelKey = "";
   }
 
+  /** Is the overlay on screen (the extras passed to frame() are only read then)? */
+  get shown(): boolean {
+    return this.visible;
+  }
+
   frame(now: number, dtSeconds: number, extras: PerfExtras = {}) {
     const ms = dtSeconds * 1000;
     this.frames.push(ms);

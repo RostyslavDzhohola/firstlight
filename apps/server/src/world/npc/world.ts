@@ -8,12 +8,16 @@ import type { BodyRoom } from "../BodyRoom.ts";
 import type { NpcActor, PlayerActor } from "../actors.ts";
 import type { CombatHost } from "../combat.ts";
 import { withTx } from "../characters.ts";
+import { emitGameEvent } from "../events.ts";
+import { roomCopyKey } from "../copyState.ts";
 import type { V3 } from "../geometry.ts";
 
 export interface NpcWorld {
   body: BodyDef;
   terrain: Terrain;
   host: CombatHost;
+  /** `body:copy` key for state that outlives the room (copyState.ts); unset = nothing is kept. */
+  copyKey?: string;
   now(): number;
   /** Everyone NPCs can see and hurt: connected players and lingering bodies. */
   players(): Iterable<PlayerActor>;
@@ -42,6 +46,7 @@ export function roomWorld(room: BodyRoom): NpcWorld {
     body: room.bodyDef,
     terrain: room.terrain,
     host: room.host,
+    copyKey: roomCopyKey(room),
     now: () => room.host.now(),
     players: () => room.host.players(),
     connected: () => room.actors.values(),
@@ -60,9 +65,22 @@ export function roomWorld(room: BodyRoom): NpcWorld {
     },
     broadcast: (type, msg) => room.broadcast(type as never, msg as never),
     onMessage: (type, handler) => {
-      room.onMessage(type, (client, msg) => handler(client.sessionId, msg));
+      room.onMessage(type, (client, msg) => {
+        if (type === "npc") noteAdmin(room, client.sessionId, msg);
+        handler(client.sessionId, msg);
+      });
     },
     playerById: (id) => room.playerById(id),
     save: (p) => room.saveActor(p),
   };
+}
+
+/** Admin NPC tools (spawn, hurt, boss spawn/reset…) go on the room's event bus as `admin` actions. */
+function noteAdmin(room: BodyRoom, sessionId: string, msg: unknown) {
+  if (!room.actors.get(sessionId)?.identity.admin) return;
+  const m = (msg ?? {}) as Record<string, unknown>;
+  emitGameEvent(room, {
+    type: "admin", playerId: sessionId, cmd: `npc:${typeof m.cmd === "string" ? m.cmd : ""}`,
+    ...(typeof m.id === "string" ? { targetId: m.id } : {}), ...(typeof m.action === "string" ? { action: m.action } : {}),
+  });
 }

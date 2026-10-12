@@ -325,6 +325,39 @@ describe("bosses (seam 1)", () => {
     await waitFor(() => died, 4000);
   }, 30_000);
 
+  it("Hollow King: Royal Judgement also kills a lone level-20 player (120% of their max HP)", async () => {
+    NPC_TUNING.bosses = true;
+    NPC_TUNING.bossAttacks = false;
+    NPC_TUNING.bossMechanics = ["royal_judgement"];
+    NPC_TUNING.firstMechanicMs = 300;
+    const ar = hollow();
+    const A = await player("lone-20", "hollowmere", ar.centre as V, 20);
+    expect(me(A).maxHp).toBe(290);
+    let died = false;
+    A.onMessage("death", (m: any) => m.victim === A.sessionId && (died = true));
+    await bossUp(A);
+    await waitFor(() => died, 6000);
+  }, 30_000);
+
+  it("Hollow King: two level-20 players sharing the circle take 60% each (174)", async () => {
+    NPC_TUNING.bosses = true;
+    NPC_TUNING.bossAttacks = false;
+    NPC_TUNING.bossMechanics = ["royal_judgement"];
+    NPC_TUNING.firstMechanicMs = 300;
+    const ar = hollow();
+    const R = BODIES.hollowmere.radius;
+    const A = await player("duo20-a", "hollowmere", ar.centre as V, 20);
+    const B = await player("duo20-b", "hollowmere", offset(ar.centre, 1, 0, R), 20);
+    let end: any = null;
+    A.onMessage("boss", (m: any) => m.type === "mechanicEnd" && m.mech === "royal_judgement" && (end = m));
+    await bossUp(A);
+    await waitFor(() => end !== null, 6000);
+    await waitFor(() => me(A).hp < 290 && st(A).players.get(B.sessionId).hp < 290, 2000);
+    expect(end.engaged).toBe(2);
+    expect(me(A).hp).toBe(290 - 174);
+    expect(st(A).players.get(B.sessionId).hp).toBe(290 - 174);
+  }, 30_000);
+
   it("Hollow King: two players sharing the cursed circle both survive (138 each)", async () => {
     NPC_TUNING.bosses = true;
     NPC_TUNING.bossAttacks = false;
@@ -534,13 +567,15 @@ describe("review blockers (seam 1)", () => {
     const ar = hollowArena();
     const A = await player("runner", "hollowmere", ar.centre as V, 14);
     let died = false;
-    A.onMessage("death", (m: any) => m.victim === A.sessionId && (died = true));
+    let killerName = "";
+    A.onMessage("death", (m: any) => m.victim === A.sessionId && ((died = true), (killerName = m.killerName)));
     let circle: any = null;
     A.onMessage("boss", (m: any) => m.type === "mechanic" && m.mech === "royal_judgement" && (circle = m));
     await bossUpIn(A);
     await waitFor(() => circle !== null, 4000);
     place(A, offset(ar.centre, 0, 140, BODIES.hollowmere.radius)); // well outside the 30 m Nave
     await waitFor(() => died, 4000);
+    expect(killerName).toBe("npc:hollow_king"); // content id: the death screen maps it to "The Hollow King"
   }, 30_000);
 });
 

@@ -4,6 +4,7 @@
 
 import "./quests.css";
 import type { BodyId } from "@firstlight/shared";
+import { HORSE_WHISTLE } from "@firstlight/shared/content/horse";
 import { COSMETIC_BY_ID, COSMETIC_SLOTS, RARITY_STYLE, SHOP, SHOP_KEEPER, SHOP_NAME, itemName, sellValue, type ShopCategory } from "@firstlight/shared/content/items";
 import { MEDALS } from "@firstlight/shared/content/medals";
 import { GUIDES, MISSION_BY_ID, MISSIONS, missionsOn, type MissionDef } from "@firstlight/shared/content/missions";
@@ -11,6 +12,7 @@ import type { InvItem } from "@firstlight/shared/net/protocol";
 import type { Game } from "../game/Game.ts";
 import type { Hud, MissionLine, YouPlus } from "./hud.ts";
 import { overlayClosed, overlayOpened } from "./dom.ts";
+import { parseSkyArgs, SKY_HELP } from "./skyCommand.ts";
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", parent?: HTMLElement, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -125,7 +127,8 @@ export class ShopPanel extends Panel {
     const level = you?.level ?? 1;
     let cat: ShopCategory | null = null;
     const order: ShopCategory[] = ["consumables", "weapons", "support", "gear", "cosmetics"];
-    const entries = [...SHOP].sort((a, c) => order.indexOf(a.category) - order.indexOf(c.category) || a.name.localeCompare(c.name) || a.tier - c.tier);
+    // Horses behind their server flag (you.horses): no whistle for sale when they are off.
+    const entries = SHOP.filter((e) => e.itemId !== HORSE_WHISTLE || !!you?.horses).sort((a, c) => order.indexOf(a.category) - order.indexOf(c.category) || a.name.localeCompare(c.name) || a.tier - c.tier);
     for (const e of entries) {
       if (e.category !== cat) {
         cat = e.category;
@@ -439,7 +442,7 @@ export class MissionTracker {
 
 // ---------------------------------------------------------------- admin console (` key)
 
-const CONSOLE_HELP = "stage <1-5> [all] · coins <n> · level <n> · give <id> [tier] [qty] · medal <id> · egg <E1-E9> · heal · unprotect · announce <text>";
+const CONSOLE_HELP = `stage <1-5> [all] · coins <n> · level <n> · give <id> [tier] [qty] · medal <id> · egg <E1-E9> · heal · unprotect · announce <text> · ${SKY_HELP}`;
 
 /** Parse a console line into an admin message. */
 export function parseAdminLine(line: string): { cmd: string; args: Record<string, unknown> } | null {
@@ -461,6 +464,8 @@ export function parseAdminLine(line: string): { cmd: string; args: Record<string
       return { cmd, args: { id: rest[0] ?? "", ...(rest[1] ? { step: rest[1] } : {}) } };
     case "announce":
       return { cmd, args: { text: rest.join(" ") } };
+    case "sky":
+      return { cmd, args: parseSkyArgs(rest) };
     default:
       return { cmd, args: {} };
   }

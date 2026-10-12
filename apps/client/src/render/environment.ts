@@ -17,6 +17,7 @@ import { MENU_GRADE, postUniforms, setGrade, type GradeParams } from "./post.ts"
 import type { ResolvedSettings } from "./quality.ts";
 import type { RenderCtx } from "./renderer.ts";
 import { sliceFor } from "./skyLut.ts";
+import { terrainUniforms } from "./terrainMaterial.ts";
 import { WeatherFx } from "./weather.ts";
 
 export interface WeatherLook {
@@ -64,6 +65,8 @@ const smooth = (e0: number, e1: number, x: number) => {
   return t * t * (3 - 2 * t);
 };
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+/** A server clock jump bigger than this is taken at once instead of smoothed. */
+const CLOCK_SNAP_MS = 5000;
 /** Exponential approach factor for a time constant (s). */
 const approach = (dt: number, tau: number) => 1 - Math.exp(-dt / Math.max(1e-3, tau));
 
@@ -80,13 +83,31 @@ export interface LightFactors {
   sunUp: number;
 }
 
-/** Derived per-frame factors from a sun elevation (exported for tests). */
-export function lightFactors(elev: number, out: LightFactors = { night: 0, dusk: 0, sunUp: 0 }): LightFactors {
+/**
+ * Derived per-frame factors from a sun elevation (exported for tests). Dusk warmth and the sun's
+ * ramp-up are measured against the body's reference sun `refElev` when that is low: Hollowmere's
+ * violet sun sits at 0.12 rad all day long, and at its reference elevation it must light the scene
+ * with the look's own colour and intensity, not a dimmed dusk orange.
+ */
+export function lightFactors(elev: number, refElev = Infinity, out: LightFactors = { night: 0, dusk: 0, sunUp: 0 }): LightFactors {
+  const ref = Math.max(0.08, refElev);
   out.night = smooth(0.06, -0.1, elev);
-  out.dusk = smooth(0.45, 0.02, elev) * (1 - out.night);
-  out.sunUp = smooth(-0.02, 0.22, elev);
+  out.dusk = smooth(Math.min(0.45, ref), 0.02, elev) * (1 - out.night);
+  out.sunUp = smooth(-0.02, Math.min(0.22, ref), elev);
   return out;
 }
+
+/**
+ * How well the live sun matches the direction the Low tier's terrain sun visibility was baked for
+ * (the look's reference sun), 1 within ~20°, 0 beyond ~57°. Baking follows the chunk, not the
+ * clock, so wrong-way shadows fade out instead of showing all day.
+ */
+export function bakedSunMatch(elev: number, az: number, refElev: number, refAz: number): number {
+  const cosD = Math.sin(elev) * Math.sin(refElev) + Math.cos(elev) * Math.cos(refElev) * Math.cos(az - refAz);
+  return smooth(BAKE_MATCH_COS_ZERO, BAKE_MATCH_COS_FULL, cosD);
+}
+const BAKE_MATCH_COS_FULL = Math.cos(0.35);
+const BAKE_MATCH_COS_ZERO = Math.cos(1.0);
 
 export interface EnvAudio {
   setWeather(rain: number, wind: number): void;
@@ -113,6 +134,8 @@ export class Environment {
   private readonly speed = Math.max(0, Number(flags.get("dayspeed")) || 1);
   // Overrides (URL dev flags, photo mode, bench).
   timeOverride: number | null = null;
+  /** Bench: the look's own sun (elevation and azimuth), like ?nodaynight; a ?time flag wins. */
+  private referenceSun = false;
   weatherOverride: { weather: Weather; intensity: number } | null = null;
   private overrideSince = 0;
   /** Menu grade (look rule 1) while a menu is open. */
@@ -146,6 +169,8 @@ export class Environment {
   };
   private drops = { amount: 0, kind: 0, fall: 9, wind: 0, len: 0.5, width: 0.012, alpha: 0 };
   private readonly angles = { elev: 0, az: 0 };
+  /** The body's sun elevation range (scattering LUT slices). */
+  private readonly lutRange: [number, number] = [0, 1];
   private readonly factors: LightFactors = { night: 0, dusk: 0, sunUp: 0 };
 
   constructor(private readonly ctx: RenderCtx, private readonly audio: EnvAudio | null = null, private readonly particles: EnvParticles | null = null) {
@@ -178,8 +203,13 @@ export class Environment {
     this.local = null;
     this.strike = null;
     this.pendingStrike = null;
+    this.flashAt = -1e9;
     this.kind = "clear";
     this.amount = 0;
+    this.wetness = 0;
+    const p = SKY_PROFILES[body];
+    this.lutRange[0] = p.minElev;
+    this.lutRange[1] = p.maxElev;
     this.loadPalette();
     // Moonlight comes from the highest sky planet, so the light matches what you see.
     let best = look.skyPlanets[0];
@@ -190,9 +220,13 @@ export class Environment {
     }
   }
 
-  /** Bench: a fixed, repeatable sky (the body's reference time, clear unless the URL says otherwise). */
-  setBenchMode(body: BodyId, look: BodyLook) {
-    if (this.timeOverride === null) this.timeOverride = referenceDayT(body, look.sunElev);
+  /**
+   * Bench: a fixed, repeatable sky: the look's reference sun (the same light as before day/night,
+   * so runs stay comparable), clear unless the URL says otherwise. The schedule reaches the
+   * reference elevation at another azimuth, so this doesn't go through the time of day.
+   */
+  setBenchMode(_body: BodyId, _look: BodyLook) {
+    this.referenceSun = true;
     if (!this.weatherOverride) this.weatherOverride = { weather: "clear", intensity: 0 };
   }
 
@@ -200,10 +234,21 @@ export class Environment {
   setServerSky(s: SkyState) {
     if (s.body !== this.body) return;
     const delta = s.serverTime - Date.now();
-    this.serverDelta = this.haveDelta ? this.serverDelta + (delta - this.serverDelta) * 0.3 : delta;
+    // Smooth small drift; snap a big jump (a laptop waking up, a changed system clock).
+    const snap = !this.haveDelta || Math.abs(delta - this.serverDelta) > CLOCK_SNAP_MS;
+    this.serverDelta = snap ? delta : this.serverDelta + (delta - this.serverDelta) * 0.3;
     this.haveDelta = true;
+    // A clock snap (either way) or a new storm (slot or admin override) reschedules the lightning:
+    // drop the cached strike, a pending bolt and a flash from the old timeline.
+    if (snap || s.slotStart !== this.server?.slotStart || s.weather !== this.server?.weather) {
+      this.strike = null;
+      this.pendingStrike = null;
+      this.fired = -1;
+      if (snap) this.flashAt = -1e9;
+    }
     this.copy = s.copy;
     this.server = s;
+    this.local = null; // the fallback schedule takes this state's day offset/hold
   }
 
   /** Photo mode overrides (local only; null = back to the URL/bench/live sky). */
@@ -212,7 +257,10 @@ export class Environment {
 
   setOverrides(time: number | null, weather: { weather: Weather; intensity: number } | null) {
     this.photoTime = time;
-    if (weather?.weather !== this.photoWeather?.weather) this.overrideSince = this.serverNow();
+    if (weather?.weather !== this.photoWeather?.weather) {
+      this.overrideSince = this.serverNow();
+      this.strike = null;
+    }
     this.photoWeather = weather;
   }
 
@@ -234,7 +282,7 @@ export class Environment {
     const s = this.server;
     if (s && now < s.nextChangeAt + 2000) return s;
     if (!this.local || now >= this.local.nextChangeAt || this.local.copy !== this.copy) {
-      this.local = skyState(this.body, this.copy, now, s?.dayOffset ?? 0);
+      this.local = skyState(this.body, this.copy, now, s?.dayOffset ?? 0, null, s?.dayHold ?? null);
     }
     return this.local;
   }
@@ -250,18 +298,18 @@ export class Environment {
 
     // ---- time of day
     let elev: number, az: number;
-    if (!on.daynight && this.timeOv === null) {
+    if ((!on.daynight || this.referenceSun) && this.timeOv === null) {
       elev = look.sunElev;
       az = look.sunAz;
       this.dayT = referenceDayT(this.body, elev);
     } else {
-      this.dayT = this.timeOv ?? dayAt(this.body, now, st.dayOffset);
+      this.dayT = this.timeOv ?? st.dayHold ?? dayAt(this.body, now, st.dayOffset);
       const a = sunAngles(this.body, this.dayT, this.angles);
       elev = a.elev;
       az = a.az;
     }
     this.sunElev = elev;
-    const { night, dusk, sunUp } = lightFactors(elev, this.factors);
+    const { night, dusk, sunUp } = lightFactors(elev, look.sunElev, this.factors);
     this.night = night;
 
     // ---- weather (target → smoothed kind/amount)
@@ -315,7 +363,7 @@ export class Environment {
     atmo.mie.value = look.mie * (1 - cloud * 0.8) * (1 - night);
     atmo.sunColor.value.copy(C.sun).lerp(DUSK_SUN, dusk * 0.7);
     atmo.sunDisc.value = look.sunDisc * sunUp * (1 - cloud) * (1 - cloud);
-    atmo.lutSlice.value = sliceFor(elev, [SKY_PROFILES[this.body].minElev, SKY_PROFILES[this.body].maxElev]);
+    atmo.lutSlice.value = sliceFor(elev, this.lutRange);
     const baseMix = this.settings.sky.scatterSteps[0] > 0 ? look.scatter.mix : 0;
     atmo.scatterMix.value = baseMix * (1 - night * 0.85) * (1 - cloud * 0.6);
     atmo.stars.value = on.sky ? night * (1 - Math.min(1, cloud * 1.4)) : 0;
@@ -336,10 +384,13 @@ export class Environment {
     sk.sunAz = az;
     sk.keyIsMoon = night > 0.4;
     this.c1.copy(C.sun).lerp(DUSK_SUN, dusk * 0.8);
-    const sunI = look.sunIntensity * sunUp * (1 - cloud * 0.75);
-    const moonI = look.night.moonIntensity * night * (1 - cloud * 0.5);
+    // The key switches to the moon at night 0.4: the sun has faded to zero by then and the moon
+    // ramps in from there, so the key light never jumps at sunset or sunrise.
+    const sunI = look.sunIntensity * sunUp * (1 - cloud * 0.75) * (1 - smooth(0.2, 0.4, night));
+    const moonI = look.night.moonIntensity * smooth(0.4, 0.9, night) * (1 - cloud * 0.5);
     if (sk.keyIsMoon) rig.setKey(C.moon, moonI);
     else rig.setKey(this.c1, sunI);
+    terrainUniforms.sunMatch.value = bakedSunMatch(elev, az, look.sunElev, look.sunAz) * (sunI / look.sunIntensity);
     this.c1.copy(C.hemiSky).lerp(C.nightHemiSky, night);
     if (cloud > 0) this.c1.lerp(OVERCAST, cloud * 0.4);
     this.c2.copy(C.hemiGround).lerp(C.nightHemiGround, night);
@@ -370,6 +421,11 @@ export class Environment {
     this.audio?.setWeather(wl.rainSound * a, wl.windSound * a);
   }
 
+  /** No frames are running (loading, travel, menus that stop the loop): the weather bed goes quiet. */
+  silence() {
+    this.audio?.setWeather(0, 0);
+  }
+
   /** Day ↔ night colour, greyed and dimmed under cloud cover. */
   private sky(day: THREE.Color, nightC: THREE.Color, night: number, cloud: number, out: THREE.Color) {
     out.copy(day).lerp(nightC, night);
@@ -382,11 +438,11 @@ export class Environment {
 
   private stormState: SkyState | null = null;
 
-  /** A storm on the override's own clock (photo/URL storms get lightning too). */
+  /** A storm on the override's own clock (photo/URL storms get lightning too, for as long as they last). */
   private overrideStorm(st: SkyState): SkyState {
     const s = this.stormState;
     if (s && s.slotStart === this.overrideSince && s.body === st.body && s.copy === st.copy) return s;
-    this.stormState = { ...st, weather: "storm", slotStart: this.overrideSince, nextChangeAt: this.overrideSince + 3_600_000, override: true };
+    this.stormState = { ...st, weather: "storm", slotStart: this.overrideSince, nextChangeAt: Number.MAX_SAFE_INTEGER, override: true };
     return this.stormState;
   }
 
@@ -424,16 +480,19 @@ export class Environment {
     this.fx.updateBolt(camera, atmo.flash.value * 1.6);
   }
 
-  private describeKey = "";
+  private readonly describedFor = { body: "", mins: -1, kind: "", pct: -1 };
   private described = "";
 
-  /** "arcadia · 14:05 rain 70%" for the F3 overlay / photo panel (cached: no per-frame string). */
+  /** "arcadia · 14:05 rain 70%" for the F3 overlay / photo panel (rebuilt only when it changes). */
   describe(): string {
     const mins = Math.floor(this.dayT * 24 * 60);
     const pct = this.amount > 0.01 ? Math.round(this.amount * 20) * 5 : 0;
-    const key = `${this.body}${mins}${this.kind}${pct}`;
-    if (key !== this.describeKey) {
-      this.describeKey = key;
+    const k = this.describedFor;
+    if (k.body !== this.body || k.mins !== mins || k.kind !== this.kind || k.pct !== pct) {
+      k.body = this.body;
+      k.mins = mins;
+      k.kind = this.kind;
+      k.pct = pct;
       const h = Math.floor(mins / 60), m = mins % 60;
       this.described = `${this.body} · ${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")} ${this.kind}${pct ? ` ${pct}%` : ""}`;
     }

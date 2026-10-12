@@ -599,6 +599,8 @@ export class NpcRenderer implements ClientSystem {
     MOVE.run = this.baseMove.run * (1 - slow);
     MOVE.sprint = noSprint ? MOVE.run : this.baseMove.sprint * (1 - slow);
     MOVE.dodgeDistance = noSprint ? 0 : this.baseMove.dodge * (1 - slow);
+    MOVE.slow = slow; // riding (game/mount.ts mountedSpeed)
+    MOVE.noSprint = noSprint;
   }
 
   // ------------------------------------------------------------------------------------ boss HUD
@@ -637,6 +639,8 @@ export class NpcRenderer implements ClientSystem {
     MOVE.run = this.baseMove.run;
     MOVE.sprint = this.baseMove.sprint;
     MOVE.dodgeDistance = this.baseMove.dodge;
+    MOVE.slow = 0;
+    MOVE.noSprint = false;
     this.batch.dispose();
     this.particles.dispose();
     this.telegraphs.dispose();
