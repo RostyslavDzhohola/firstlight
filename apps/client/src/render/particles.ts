@@ -1,7 +1,7 @@
 // "Digital matter is light" (SPEC §7.2 rule 4): additive glowing corpuscles. One instanced quad
 // draw for everything: ambient motes drifting around the camera plus bursts from burst() for
 // spawns, deaths, loot and teleports. CPU-updated instance buffers on both backends (the WebGL2
-// fallback can't run real compute; a WebGPU compute path for High+ is a TODO, see report).
+// fallback can't run real compute; a WebGPU compute path for High+ is not built yet).
 // Max live particles follow the tier table; HDR colours exceed the bloom threshold on purpose.
 
 import * as THREE from "three/webgpu";

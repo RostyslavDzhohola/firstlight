@@ -133,7 +133,7 @@ self.onmessage = (e: MessageEvent<ChunkRequest>) => {
       grass[v] = w;
     }
   }
-  // Skirts copy their edge vertex's bake values (skirt i mirrors grid edge vertex order).
+  // Skirts (crack fillers, mostly hidden) get a mid AO and full sun visibility.
   for (let v = gridCount; v < count; v++) {
     bake[v * 2] = 0.6;
     bake[v * 2 + 1] = 1;
