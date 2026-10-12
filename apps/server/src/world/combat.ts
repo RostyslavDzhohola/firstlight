@@ -301,7 +301,7 @@ export function fire(host: CombatHost, p: PlayerActor, msg: FireInput): FireResu
         maxDist: def.range * 1.2,
         pierceLeft: tier.pierce ?? 0,
         hit: new Set([p.id]),
-        fuseAt: def.delivery === "thrown" ? now + (def.fuse ?? 1.6) * 1000 : null,
+        fuseAt: def.delivery === "thrown" ? now + (tier.fuse ?? def.fuse ?? 1.6) * 1000 : null,
         stuck: false,
       };
       projectiles(host).push(pr);
@@ -472,6 +472,18 @@ function* allActors(host: CombatHost): Iterable<Actor> {
   yield* host.npcs();
 }
 
+/** Riverstaff swings that hit, in a row (a miss or a pause longer than this resets the count). */
+const STAFF_COMBO_MS = 1500;
+const staffHits = new WeakMap<PlayerActor, { n: number; at: number }>();
+
+/** Riverstaff knockback (content §2.3): only every 3rd hit in a row knocks back. */
+function staffCombo(p: PlayerActor, hit: boolean, now: number): number | undefined {
+  const prev = staffHits.get(p);
+  const n = hit ? (prev && now - prev.at <= STAFF_COMBO_MS ? prev.n : 0) + 1 : 0;
+  staffHits.set(p, { n: n % 3, at: now });
+  return n === 3 ? selectedWeapon(p).tier.knockback : undefined;
+}
+
 export function melee(host: CombatHost, p: PlayerActor, heavy: boolean): FireResult {
   const now = host.now();
   const { def, tier } = selectedWeapon(p);
@@ -498,7 +510,8 @@ export function melee(host: CombatHost, p: PlayerActor, heavy: boolean): FireRes
   }
   targets.sort((x, y) => x.d - y.d);
   const slam = useHeavy && !!meleeTier.radius;
-  if (!slam) for (const t of targets.slice(0, meleeDef.maxTargets ?? 1)) dealDamage(host, p, t.a, dmg, false, actorFacingFrom(pos, t.a), meleeTier.knockback);
+  const kb = meleeDef.id === "riverstaff" ? staffCombo(p, targets.length > 0, now) : meleeTier.knockback;
+  if (!slam) for (const t of targets.slice(0, meleeDef.maxTargets ?? 1)) dealDamage(host, p, t.a, dmg, false, actorFacingFrom(pos, t.a), kb);
   // Hammer slam replaces the arc: radius damage around the attacker.
   if (slam && meleeTier.radius) {
     for (const a of allActors(host)) {
@@ -648,7 +661,11 @@ export function stepProjectiles(host: CombatHost, dt: number) {
       const at: V3 = [p.pos[0] + d[0] * hit.t, p.pos[1] + d[1] * hit.t, p.pos[2] + d[2] * hit.t];
       if (p.fuseAt === null) {
         const applied = dealDamage(host, p.owner, hit.actor, p.damage * mult, hit.weak, [p.pos[0] - at[0], p.pos[1] - at[1], p.pos[2] - at[2]]);
-        if (applied && p.tier.burn && hit.actor.kind === "player") hit.actor.burn = { perSec: p.tier.burn, until: now + 3000, by: p.owner.id };
+        // Burn refreshes, never stacks; NPCs burn too (F12 review).
+        if (applied && p.tier.burn) {
+          if (hit.actor.kind === "player") hit.actor.burn = { perSec: p.tier.burn, until: now + 3000, by: p.owner.id };
+          else npcBurns(host).set(hit.actor, { perSec: p.tier.burn, until: now + 3000, by: p.owner.id, acc: 0 });
+        }
         // The direct-hit number already includes the blast for the victim (content.md §2.3).
         if (p.tier.splash && p.tier.radius) explode(host, p.owner, at, p.tier.radius, p.tier.splash, WEAPON_INDEX.get(p.weapon.id) ?? 0, hit.actor.id);
         if (p.pierceLeft > 0) {
@@ -698,9 +715,34 @@ export function stepProjectiles(host: CombatHost, dt: number) {
 
 const burnAcc = new WeakMap<PlayerActor, number>();
 
-/** Per-tick effects on players: burn, heals over time. */
+/** Burning NPCs per room (Emberglass): the attacker's session id gets the credit. */
+const npcBurnLists = new WeakMap<CombatHost, Map<NpcActor, { perSec: number; until: number; by: string; acc: number }>>();
+function npcBurns(host: CombatHost) {
+  let m = npcBurnLists.get(host);
+  if (!m) npcBurnLists.set(host, (m = new Map()));
+  return m;
+}
+
+/** Per-tick effects: burn (players and NPCs), heals over time. */
 export function stepEffects(host: CombatHost, dt: number) {
   const now = host.now();
+  const burning = npcBurnLists.get(host);
+  if (burning?.size) {
+    for (const [n, b] of burning) {
+      if (n.state.hp <= 0 || now > b.until) {
+        burning.delete(n);
+        continue;
+      }
+      b.acc += b.perSec * dt;
+      if (b.acc + 1e-6 >= 1) {
+        const whole = Math.floor(b.acc + 1e-6);
+        b.acc -= whole;
+        let by: PlayerActor | null = null;
+        for (const x of host.players()) if (x.id === b.by) by = x;
+        dealDamage(host, by, n, whole, false);
+      }
+    }
+  }
   for (const p of host.players()) {
     if (p.dead) continue;
     if (p.burn) {
