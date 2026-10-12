@@ -50,7 +50,7 @@
 | F8 2-player boss | 🟡 | seam-1 duo tests for all 3 bosses; browser E2E pending |
 | F9 screenshot share | 🟡 | built; browser check pending |
 | F10 M1 ≥ 60 fps Medium | ✅* | ?bench=g1 59.9 fps p50, p95 17.6 ms (T3 Chromium, not plugged-in Chrome) |
-| F11 Low on weak profile | 🟡 | needs DevTools CPU throttle (not available in T3 automation) |
+| F11 Low on weak profile | ✅* | `?bench=g1&tier=low&cpuslow=4`: 51.3 fps p50, p95 29.8 ms, 0 shader builds (D29 emulation) |
 | F12 three-model review | 🟡 | per-lane reviews done; whole-codebase review after the last merges |
 | F13 photo mode + 5 scenes | 🟡 | photo mode + `stage <n>` + docs/staged-scenes.md merged; browser check pending |
 
@@ -86,6 +86,10 @@
   max 78.8 ms, 0 shader builds during the run**, draws mean 296 / max 445, 1.05 M triangles,
   104,699 grass blades, heap ≤ 132 MB. Not plugged-in Chrome as SPEC asks (D23: no Chrome control),
   but same machine and Chromium engine. It exposed a GPU-timer bug (fixed: probe would have picked Low).
+
+- 03:45Z F11 stand-in: `?bench=g1&tier=low&cpuslow=4` (4× main-thread slowdown emulation, D29),
+  Low, 1125×661 internal (more pixels than the 1280×720 profile), 40-avatar crowd, 60 s warm + 60 s:
+  **51.3 fps p50 (mean 47.5), frame p95 29.8 ms, p99 35.7 ms, 0 shader builds**, draws mean 174.
 
 ## Open issues
 
