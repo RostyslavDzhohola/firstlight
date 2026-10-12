@@ -13,6 +13,8 @@ export const PORTAL_COLORS: Record<BodyId, number> = {
   meridian: 0xff7a4a,
 };
 
+const _d = new THREE.Vector3();
+
 export interface Portal {
   to: BodyId;
   center: THREE.Vector3;
@@ -116,10 +118,10 @@ export class Portals {
     }
   }
 
-  /** The portal the player is standing in, if any. */
+  /** The portal the player is standing in, if any (every frame: no allocation). */
   check(pos: THREE.Vector3): BodyId | null {
     for (const p of this.portals) {
-      const d = pos.clone().sub(p.center);
+      const d = _d.copy(pos).sub(p.center);
       const along = d.dot(p.normal);
       const lateral = d.addScaledVector(p.normal, -along).length();
       if (Math.abs(along) < 0.9 && lateral < 2.2) return p.to;

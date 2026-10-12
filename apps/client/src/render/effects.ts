@@ -52,6 +52,8 @@ const boltGeo = new THREE.SphereGeometry(0.16, 10, 8);
 const arrowGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.9, 5);
 arrowGeo.rotateX(Math.PI / 2);
 const ringGeo = new THREE.TorusGeometry(1, 0.05, 6, 32);
+const _up = new THREE.Vector3();
+const _ahead = new THREE.Vector3();
 
 export interface ProjectileSim {
   id: number;
@@ -154,11 +156,11 @@ export class Effects {
       }
     }
     for (const p of this.projectiles.values()) {
-      const up = p.pos.clone().normalize();
+      const up = _up.copy(p.pos).normalize();
       p.vel.addScaledVector(up, -p.g * dt);
       p.pos.addScaledVector(p.vel, dt);
       p.mesh.position.copy(p.pos);
-      p.mesh.lookAt(p.pos.clone().add(p.vel));
+      p.mesh.lookAt(_ahead.copy(p.pos).add(p.vel));
       if (now > p.until) this.endProjectile(p.id);
     }
   }

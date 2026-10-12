@@ -4,13 +4,13 @@
 import * as THREE from "three/webgpu";
 import { BODIES, padDirs, type BodyId } from "@firstlight/shared";
 import { flags } from "../config.ts";
-import { CLOSE, Net, TravelRedirect } from "../net/Net.ts";
+import { CLOSE, Net, TravelRedirect, type Snapshot } from "../net/Net.ts";
 import { AvatarView, avatarWarmupHook, preloadAvatars } from "../render/Avatars.ts";
 import "../render/avatars/system.ts";
 import { Bench, benchConfig } from "../render/bench.ts";
 import { BlobShadows } from "../render/blobShadows.ts";
 import { ParticleSystem, type BurstOptions } from "../render/particles.ts";
-import { PerfOverlay } from "../render/PerfOverlay.ts";
+import { PerfOverlay, type PerfExtras } from "../render/PerfOverlay.ts";
 import { Environment } from "../render/environment.ts";
 import { MENU_GRADE } from "../render/post.ts";
 import { runProbe } from "../render/probe.ts";
@@ -69,6 +69,10 @@ export class Game {
   private reconnecting = false;
   private probed = false;
   private nextFxDemo = 0;
+  /** Per-frame scratch (the loop allocates nothing in steady state). */
+  private readonly inputMsg = { x: 0, y: 0, z: 0, fx: 0, fy: 0, fz: 0, anim: 0 };
+  private readonly remoteSnap: Snapshot = { t: 0, x: 0, y: 0, z: 0, fx: 0, fy: 0, fz: 0, anim: 0 };
+  private readonly perfExtras: PerfExtras = {};
 
   async start(body: BodyId) {
     setLoading("Starting the renderer…", 0.05);
@@ -444,7 +448,11 @@ export class Game {
       if (!this.photo.active) this.player.update(dt, this.input, this.combat.aiming());
       const p = this.player.pos;
       const f = this.player.facing;
-      this.net.sendInput(now, { x: p.x, y: p.y, z: p.z, fx: f.x, fy: f.y, fz: f.z, anim: this.player.anim });
+      const m = this.inputMsg;
+      m.x = p.x; m.y = p.y; m.z = p.z;
+      m.fx = f.x; m.fy = f.y; m.fz = f.z;
+      m.anim = this.player.anim;
+      this.net.sendInput(now, m);
       this.self.set(p.x, p.y, p.z, f.x, f.y, f.z, this.player.anim, dt);
       focus = this.photo.active ? this.photo.pos : p;
     }
@@ -452,7 +460,7 @@ export class Game {
     // Remote players.
     const state = this.net.room?.state as any;
     for (const [id, view] of this.net.remotes) {
-      const s = this.net.sample(view, now);
+      const s = this.net.sample(view, now, undefined, this.remoteSnap);
       if (!s) continue;
       let a = this.avatars.get(id);
       if (!a) {
@@ -496,19 +504,11 @@ export class Game {
     this.env.afterCamera(this.ctx.camera, dt);
     this.particles.update(dt, this.ctx.camera.position, now);
     if (this.ctx.settings.on.chars) {
-      const blobs: { x: number; y: number; z: number; r: number }[] = [];
-      const addBlob = (pos: THREE.Vector3) => {
-        const l = pos.length();
-        const g = this.planet.terrain.groundHeight(pos.x / l, pos.y / l, pos.z / l) + this.planet.body.radius;
-        const lift = l - g;
-        if (lift > 6) return;
-        const k = g / l;
-        blobs.push({ x: pos.x * k, y: pos.y * k, z: pos.z * k, r: 0.55 * (1 - lift / 8) });
-      };
-      if (!this.bench && this.self) addBlob(this.player.pos);
-      for (const a of this.avatars.values()) addBlob(a.root.position);
-      if (this.bench) blobs.push(...this.bench.crowdBlobs());
-      this.blobs.update(blobs);
+      this.blobs.begin();
+      if (!this.bench && this.self) this.addBlob(this.player.pos);
+      for (const a of this.avatars.values()) this.addBlob(a.root.position);
+      if (this.bench) for (const b of this.bench.crowdBlobs()) this.blobs.add(b.x, b.y, b.z, b.r);
+      this.blobs.end();
     }
     if (this.input.pressed.has("F3")) this.perf.toggle();
     this.ctx.render();
@@ -523,20 +523,32 @@ export class Game {
     this.ctx.afterFrame(now, rawMs);
     this.bench?.record(rawMs);
     shaderMonitorFrame();
-    const st = this.planet.stats();
-    this.perf.frame(now, rawMs / 1000, {
-      cpuMs,
-      chunks: st.chunks,
-      visibleChunks: st.visibleChunks,
-      water: st.water,
-      grass: st.grassBlades,
-      props: st.props,
-      particles: this.particles.liveCount,
-      entities: this.avatars.size + 1 + (this.bench?.crowdViews().length ?? 0),
-      ping: this.net.rtt,
-      body: this.env.describe(),
-    });
+    const x = this.perfExtras;
+    x.cpuMs = cpuMs;
+    if (this.perf.shown) {
+      const st = this.planet.stats();
+      x.chunks = st.chunks;
+      x.visibleChunks = st.visibleChunks;
+      x.water = st.water;
+      x.grass = st.grassBlades;
+      x.props = st.props;
+      x.particles = this.particles.liveCount;
+      x.entities = this.avatars.size + 1 + (this.bench?.crowdViews().length ?? 0);
+      x.ping = this.net.rtt;
+      x.body = this.env.describe();
+    }
+    this.perf.frame(now, rawMs / 1000, x);
     this.input.endFrame();
+  }
+
+  /** Contact shadow under a character standing within 6 m of the ground. */
+  private addBlob(pos: THREE.Vector3) {
+    const l = pos.length();
+    const g = this.planet.terrain.groundHeight(pos.x / l, pos.y / l, pos.z / l) + this.planet.body.radius;
+    const lift = l - g;
+    if (lift > 6) return;
+    const k = g / l;
+    this.blobs.add(pos.x * k, pos.y * k, pos.z * k, 0.55 * (1 - lift / 8));
   }
 }
 

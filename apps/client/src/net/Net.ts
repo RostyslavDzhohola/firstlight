@@ -160,8 +160,8 @@ export class Net {
     this.room.send("input", { ...m, seq: ++this.seq, t: Date.now() });
   }
 
-  /** Interpolated snapshot `delay` ms in the past. */
-  sample(view: RemotePlayerView, now: number, delay = NET.INTERP_DELAY_MS): Snapshot | null {
+  /** Interpolated snapshot `delay` ms in the past (written into `out` when given: no allocation). */
+  sample(view: RemotePlayerView, now: number, delay = NET.INTERP_DELAY_MS, out?: Snapshot): Snapshot | null {
     const b = view.buf;
     if (b.length === 0) return null;
     const t = now - delay;
@@ -170,16 +170,16 @@ export class Net {
       const a = b[i - 1]!, c = b[i]!;
       if (t >= a.t) {
         const k = Math.min(1, (t - a.t) / Math.max(1, c.t - a.t));
-        return {
-          t,
-          x: a.x + (c.x - a.x) * k,
-          y: a.y + (c.y - a.y) * k,
-          z: a.z + (c.z - a.z) * k,
-          fx: a.fx + (c.fx - a.fx) * k,
-          fy: a.fy + (c.fy - a.fy) * k,
-          fz: a.fz + (c.fz - a.fz) * k,
-          anim: k < 0.5 ? a.anim : c.anim,
-        };
+        const s = out ?? { t: 0, x: 0, y: 0, z: 0, fx: 0, fy: 0, fz: 0, anim: 0 };
+        s.t = t;
+        s.x = a.x + (c.x - a.x) * k;
+        s.y = a.y + (c.y - a.y) * k;
+        s.z = a.z + (c.z - a.z) * k;
+        s.fx = a.fx + (c.fx - a.fx) * k;
+        s.fy = a.fy + (c.fy - a.fy) * k;
+        s.fz = a.fz + (c.fz - a.fz) * k;
+        s.anim = k < 0.5 ? a.anim : c.anim;
+        return s;
       }
     }
     return b[b.length - 1]!;
