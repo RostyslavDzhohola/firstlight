@@ -35,7 +35,7 @@ describe("reserved display names", () => {
   it("…while ordinary words and names that only share those letters still pass", () => {
     const ordinary = [
       "Badminton", "Observer", "Staffan", "Ecosystem", "Supporter", "Unofficial", "Systemic", "Preserver", "Modest", "Device", "Developers",
-      "Serverus", "Supportive", "Supported", "Systematic", "Officially", "Officialdom", "Devin", "Deverell", "Moderna", "Modric", "Modular",
+      "Serverus", "Serverless", "Systemization", "Systematize", "Systemize", "Supportive", "Supported", "Systematic", "Officially", "Officialdom", "Devin", "Deverell", "Moderna", "Modric", "Modular",
       "Development", "Admiral", "Systole", "Kadmina", "Overseer", "Sysy",
     ];
     for (const name of ordinary) expect(displayNameProblem(name), name).toBeNull();

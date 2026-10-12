@@ -49,8 +49,8 @@ const RESERVED_ENDS = ["admin", "oversight", "sysop"];
 const RESERVED_STARTS = ["server", "support", "system", "official"];
 /** Ordinary words that begin with a RESERVED_STARTS word; a name starting with one is not caught by that rule. */
 const ORDINARY_STARTS = [
-  "serverus", "supporter", "supportive", "supporting", "supported", "supportable",
-  "systemic", "systematic", "officially", "officialdom", "officialese",
+  "serverus", "serverless", "supporter", "supportive", "supporting", "supported", "supportable",
+  "systemic", "systematic", "systematiz", "systemiz", "officially", "officialdom", "officialese",
 ];
 
 function reservedForm(s: string): string {
