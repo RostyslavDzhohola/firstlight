@@ -429,14 +429,29 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   /** Save and forget an actor that is leaving the world. */
   private finalLeave(a: PlayerActor) {
     if (a.superseded) return;
+    this.removeBody(a);
     this.saveActor(a);
     hub.release(a.identity.userId, a);
+  }
+
+  /** The body is gone from this world (no more targets, attack slots or hits on it): system hooks, once. */
+  private removeBody(a: PlayerActor) {
+    if (a.removed) return;
+    a.removed = true;
+    for (const s of this.systems) {
+      try {
+        s.onBodyRemoved?.(a);
+      } catch (err) {
+        console.error(`[room ${this.roomId}] body hook failed: ${(err as Error)?.message ?? err}`);
+      }
+    }
   }
 
   /** Remove an actor without saving (superseded by a newer session or an account merge). */
   retire(a: PlayerActor, code: number, reason: string) {
     a.superseded = true;
     this.detach(a);
+    this.removeBody(a);
     this.lingering.delete(a.id);
     this.state.players.delete(a.id);
     const c = this.clients.getById(a.id);

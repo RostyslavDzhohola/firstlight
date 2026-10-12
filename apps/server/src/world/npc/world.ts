@@ -62,7 +62,8 @@ export function roomWorld(room: BodyRoom): NpcWorld {
     onMessage: (type, handler) => {
       room.onMessage(type, (client, msg) => handler(client.sessionId, msg));
     },
-    playerById: (id) => room.playerById(id),
+    // Lingering bodies too: NPC zaps, bursts and tags must be able to hit them (F12).
+    playerById: (id) => room.playerById(id) ?? room.lingering.get(id)?.actor,
     save: (p) => room.saveActor(p),
   };
 }

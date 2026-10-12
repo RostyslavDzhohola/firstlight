@@ -47,6 +47,8 @@ export interface PlayerActor {
   superseded?: boolean;
   /** Leave hooks have run (BodyRoom.detach): no longer a connected player. */
   detached?: boolean;
+  /** Body-removed hooks have run (BodyRoom.removeBody): gone from the room's world. */
+  removed?: boolean;
   /** Logout countdown start position (cancel if moved > 0.5 m from it). */
   logoutFrom?: [number, number, number];
   loggedOut?: boolean;

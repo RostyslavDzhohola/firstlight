@@ -13,9 +13,11 @@ import { createSkySystem } from "./SkySystem.ts";
 export interface RoomSystem {
   /** Called every simulation tick (50 ms). */
   tick(dtMs: number, now: number): void;
-  /** Optional: a player joined/left (sessionId). */
+  /** Optional: a player joined/left (sessionId). Leave runs once per session, when the client goes; its body may linger. */
   onPlayerJoin?(sessionId: string): void;
   onPlayerLeave?(sessionId: string): void;
+  /** Optional: a player's body left this room's world for good (final leave, linger over, takeover, merge). Once per actor. */
+  onBodyRemoved?(actor: PlayerActor): void;
   /** Optional: fill system-owned fields of the private `you` message before it is sent. */
   decorateYou?(actor: PlayerActor, you: YouState): void;
   /** Optional: handle an admin command the room doesn't know. Return true if handled. */

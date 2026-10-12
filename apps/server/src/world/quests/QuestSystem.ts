@@ -416,6 +416,7 @@ export class QuestSystem implements RoomSystem {
     const a = this.actor(c.sessionId);
     if (!this.allowOp(a)) return;
     const deny = (reason: string) => c.send("denied", { action: "fastTravel", reason });
+    if (Date.now() < a.combatUntil) return deny("in combat"); // no pad escapes from a fight
     const def = this.room.bodyDef;
     const pads = padDirs(def);
     if (def.padLayout === "none" || pad >= pads.length) return deny("no such pad");

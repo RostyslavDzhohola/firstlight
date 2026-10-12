@@ -5,6 +5,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Room } from "@colyseus/sdk";
 import { BODIES, createTerrain, padDirs } from "@firstlight/shared";
 import type { Game } from "../src/app.ts";
+import { matchMaker } from "@colyseus/core";
+import type { BodyRoom } from "../src/world/BodyRoom.ts";
+import { dealDamage } from "../src/world/combat.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 
 let game: Game;
@@ -163,6 +166,29 @@ describe("movement budget", () => {
     }
     await sleep(100);
     expect(ok.corrections.n).toBe(0);
+  });
+});
+
+describe("knockback (F12 Opus nit)", () => {
+  it("a shove's extra distance is honoured even with the bank spent (not clamped away on the next input)", async () => {
+    const k = await joinOutside("shoved");
+    k.r.send("admin", { cmd: "unprotect" });
+    await waitFor(() => !(me(k.r).flags & 3));
+    const room = matchMaker.getLocalRoomById(k.r.roomId) as unknown as BodyRoom;
+    const actor = room.actors.get(k.r.sessionId)!;
+    await sleep(400); // full bank
+    // Spend the bank (3.4 m at once), then take a strength-4 shove (6 m allowance) and slide 6 m.
+    let d = groundStep(k.dir, k.t, 3.4);
+    send(k.r, k.seq, d, groundR(d), 3);
+    await sleep(20);
+    dealDamage(room.host, null, actor, 1, false, [-k.t[0], -k.t[1], -k.t[2]], 4);
+    for (let i = 0; i < 3; i++) {
+      await sleep(50);
+      d = groundStep(d, k.t, 2);
+      send(k.r, k.seq, d, groundR(d), 2);
+    }
+    await sleep(150);
+    expect(k.corrections.n).toBe(0);
   });
 });
 

@@ -165,7 +165,7 @@ export function aggro(sys: NpcSystem, n: Npc, p: PlayerActor, now: number, share
 function chase(sys: NpcSystem, n: Npc, now: number, dt: number) {
   const def = n.def;
   const t = n.target;
-  if (!t || t.dead || t.state.hp <= 0 || (t.state.flags & PF.SAFE) !== 0) {
+  if (!t || t.dead || t.state.hp <= 0 || (t.state.flags & PF.SAFE) !== 0 || !sys.isLive(t)) {
     drop(sys, n, now);
     return;
   }

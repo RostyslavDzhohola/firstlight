@@ -11,7 +11,7 @@ import { CLOSE } from "@firstlight/shared/net/social";
 import type { Game } from "../src/app.ts";
 import { accountLinks } from "../src/auth/links.ts";
 import { RULES, type BodyRoom } from "../src/world/BodyRoom.ts";
-import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
+import { NPC_TUNING, npcSystemOf, resetTuning } from "../src/world/npc/index.ts";
 import { SYSTEM_FACTORIES, type SystemFactory } from "../src/world/systems.ts";
 import { grantTravel, joinAs, playRequest, safeLeave, startServer, waitFor } from "./helpers.ts";
 
@@ -69,7 +69,12 @@ function offset(p: readonly number[], metres: number, sideways: number, R: numbe
   const vl = Math.hypot(v[0]!, v[1]!, v[2]!);
   return [(v[0]! / vl) * R, (v[1]! / vl) * R, (v[2]! / vl) * R];
 }
-const near = (r: Room, p: readonly number[], m = 2) => Math.hypot(me(r).x - p[0]!, me(r).y - p[1]!, me(r).z - p[2]!) < m;
+/** Within `m` metres of `p` along the ground (heights differ: teleports land on the terrain). */
+const near = (r: Room, p: readonly number[], m = 2) => {
+  const a = me(r), la = Math.hypot(a.x, a.y, a.z), lp = Math.hypot(p[0]!, p[1]!, p[2]!);
+  const cos = (a.x * p[0]! + a.y * p[1]! + a.z * p[2]!) / (la * lp);
+  return Math.acos(Math.min(1, cos)) * lp < m;
+};
 
 async function join(name: string, body: BodyId = "arcadia", role = "admin"): Promise<Room> {
   const r = await joinAs(game, name, body, {}, role);
@@ -298,6 +303,53 @@ describe("combat-tagged leaving and travel tickets (F12 B3)", () => {
     } finally {
       RULES.TRAVEL_TICKET_MS = saved;
     }
+  });
+});
+
+describe("bodies and NPCs (F12 Opus should-fix 9)", () => {
+  it("NPCs can hit a lingering body, and let go of it once it is gone", async () => {
+    const saved = RULES.LINGER_MS;
+    try {
+      RULES.LINGER_MS = 1500;
+      const watcher = await join("npcwatch");
+      const r = await join("bait");
+      const at = nearPad("arcadia", 70);
+      place(r, at);
+      r.send("admin", { cmd: "unprotect" });
+      await waitFor(() => near(r, at, 3) && !(me(r).flags & 3));
+      const sys = npcSystemOf(serverRoom(r))!;
+      const reply = new Promise<{ id: string }>((ok) => r.onMessage("npcInfo", ok));
+      const R = BODIES.arcadia.radius;
+      const spot = offset(at, 2.5, 0, R);
+      r.send("npc", { cmd: "spawn", kind: "hopbit", x: spot[0], y: spot[1], z: spot[2], level: 1, instant: true, req: 1 });
+      const { id } = await reply;
+      const npc = () => sys.npcs.get(id)!;
+      const body = actorOf(r);
+      await waitFor(() => npc().target === body, 6000);
+      const sid = r.sessionId;
+      await leaveRoom(r); // lingers: outside the safe ring
+      const hp0 = body.state.hp;
+      await waitFor(() => body.state.hp < hp0 || body.dead, 6000); // still attacked while it lingers
+      await waitFor(() => !st(watcher).players.has(sid), 4000);
+      await waitFor(() => npc().target !== body, 1000);
+    } finally {
+      RULES.LINGER_MS = saved;
+    }
+  }, 20_000);
+});
+
+describe("fast travel (F12 Opus should-fix 7)", () => {
+  it("pads refuse fast travel while combat-tagged", async () => {
+    const r = await join("padhopper");
+    const pads = padDirs(BODIES.arcadia);
+    const R = BODIES.arcadia.radius;
+    const pad0: V = [pads[0]![0] * R, pads[0]![1] * R, pads[0]![2] * R];
+    place(r, pad0);
+    await waitFor(() => near(r, pad0, 4));
+    actorOf(r).combatUntil = Date.now() + 10_000;
+    const denied = new Promise<string>((ok) => r.onMessage("denied", (m: { action: string; reason: string }) => m.action === "fastTravel" && ok(m.reason)));
+    r.send("fastTravel", { pad: 1 });
+    expect(await denied).toBe("in combat");
   });
 });
 
