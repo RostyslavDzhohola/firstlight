@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
-import { SKY_PROFILES, sunAngles } from "@firstlight/shared";
+import { SKY_PROFILES, skyState, sunAngles } from "@firstlight/shared";
 import { atmo, SunRig } from "./atmosphere.ts";
 import { Environment, lightFactors, referenceDayT } from "./environment.ts";
 import { LOOKS } from "./looks.ts";
@@ -72,6 +72,17 @@ describe("day/night", () => {
     expect(rig.sky.keyIsMoon).toBe(false);
     expect(rig.sun.intensity).toBeGreaterThan(look.sunIntensity * 0.8);
     expect(atmo.stars.value).toBe(0);
+  });
+
+  it("follows a time of day the server holds, also past the state's slot end", () => {
+    vi.useFakeTimers({ now: Date.UTC(2026, 9, 12, 12), toFake: ["Date"] });
+    const { env } = setup("hollowmere");
+    env.setServerSky(skyState("hollowmere", 0, Date.now(), 0, null, 0.81));
+    run(env, 0.1);
+    expect(env.dayT).toBe(0.81);
+    vi.setSystemTime(Date.now() + 10 * 60_000);
+    run(env, 0.1);
+    expect(env.dayT).toBe(0.81);
   });
 
   it("Portus never gets a night", () => {

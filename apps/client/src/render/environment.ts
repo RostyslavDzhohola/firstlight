@@ -204,6 +204,7 @@ export class Environment {
     this.haveDelta = true;
     this.copy = s.copy;
     this.server = s;
+    this.local = null; // the fallback schedule takes this state's day offset/hold
   }
 
   /** Photo mode overrides (local only; null = back to the URL/bench/live sky). */
@@ -234,7 +235,7 @@ export class Environment {
     const s = this.server;
     if (s && now < s.nextChangeAt + 2000) return s;
     if (!this.local || now >= this.local.nextChangeAt || this.local.copy !== this.copy) {
-      this.local = skyState(this.body, this.copy, now, s?.dayOffset ?? 0);
+      this.local = skyState(this.body, this.copy, now, s?.dayOffset ?? 0, null, s?.dayHold ?? null);
     }
     return this.local;
   }
@@ -255,7 +256,7 @@ export class Environment {
       az = look.sunAz;
       this.dayT = referenceDayT(this.body, elev);
     } else {
-      this.dayT = this.timeOv ?? dayAt(this.body, now, st.dayOffset);
+      this.dayT = this.timeOv ?? st.dayHold ?? dayAt(this.body, now, st.dayOffset);
       const a = sunAngles(this.body, this.dayT, this.angles);
       elev = a.elev;
       az = a.az;

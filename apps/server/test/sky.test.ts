@@ -2,7 +2,7 @@
 // slot changes are broadcast; an admin override reaches everyone on the copy.
 
 import type { Room } from "@colyseus/sdk";
-import { nextStrike, skyState, type SkyState } from "@firstlight/shared";
+import { DAY_MS, dayT, nextStrike, skyState, type SkyState } from "@firstlight/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Game } from "../src/app.ts";
 import { SkySystem } from "../src/world/SkySystem.ts";
@@ -177,6 +177,42 @@ describe("SkySystem admin input", () => {
     sys.onAdmin(ADMIN, "sky", { weather: "rain", intensity: 7, minutes: 1e9 });
     expect(sent[2]!.intensity).toBe(1);
     expect(sent[2]!.nextChangeAt - sent[2]!.serverTime).toBe(240 * 60_000);
+  });
+});
+
+describe("SkySystem admin time of day", () => {
+  it("a time shift lets the clock run and expires after its minutes", () => {
+    const { sys, sent, step } = unit();
+    sys.onAdmin(ADMIN, "sky", { dayT: 0.3, minutes: 1 });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.dayT).toBeCloseTo(0.3, 9);
+    expect(sent[0]!.dayHold).toBeUndefined();
+    step(30_000);
+    expect(sys.state().dayT).toBeCloseTo(0.3 + 30_000 / DAY_MS, 9);
+    expect(sent).toHaveLength(1);
+    while (sys.now() < sent[0]!.serverTime + 60_000 + 100) step(50);
+    expect(sent).toHaveLength(2);
+    expect(sent[1]!.dayOffset).toBe(0);
+    expect(sent[1]!.dayT).toBeCloseTo(dayT("arcadia", sent[1]!.serverTime), 9);
+  });
+
+  it("hold freezes the time of day until it expires; reset clears it at once", () => {
+    const { sys, sent, step } = unit();
+    sys.onAdmin(ADMIN, "sky", { dayT: 0.82, hold: true, minutes: 2 });
+    expect(sent[0]!.dayT).toBe(0.82);
+    expect(sent[0]!.dayHold).toBe(0.82);
+    for (let i = 0; i < 1200; i++) step(50); // 60 s
+    expect(sent).toHaveLength(1);
+    expect(sys.state().dayT).toBe(0.82);
+    while (sys.now() < sent[0]!.serverTime + 120_000 + 100) step(50);
+    expect(sent).toHaveLength(2);
+    expect(sent[1]!.dayHold).toBeUndefined();
+    sys.onAdmin(ADMIN, "sky", { dayT: 0.5, hold: true, weather: "storm" });
+    expect(sent[2]!.dayHold).toBe(0.5);
+    sys.onAdmin(ADMIN, "sky", { clear: true });
+    expect(sent[3]!.dayHold).toBeUndefined();
+    expect(sent[3]!.override).toBe(false);
+    expect(sent[3]!.dayOffset).toBe(0);
   });
 });
 

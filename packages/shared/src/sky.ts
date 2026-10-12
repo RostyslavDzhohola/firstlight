@@ -126,6 +126,8 @@ export interface SkyState {
   nextIntensity: number;
   /** An admin override is active (weather fixed until nextChangeAt). */
   override: boolean;
+  /** Admin staging: the time of day is held here (the clock is frozen); absent normally. */
+  dayHold?: number;
 }
 
 export interface SkyOverride {
@@ -136,8 +138,10 @@ export interface SkyOverride {
   until: number;
 }
 
-/** The sky of a body copy at a server time (with an optional admin override). */
-export function skyState(body: BodyId, copy: number, serverMs: number, dayOffset = 0, override: SkyOverride | null = null): SkyState {
+/** The sky of a body copy at a server time (with an optional admin override and held time of day). */
+export function skyState(
+  body: BodyId, copy: number, serverMs: number, dayOffset = 0, override: SkyOverride | null = null, dayHold: number | null = null,
+): SkyState {
   const k = slotIndex(body, serverMs);
   const cur = slotWeather(body, copy, k);
   const prev = slotWeather(body, copy, k - 1);
@@ -149,6 +153,10 @@ export function skyState(body: BodyId, copy: number, serverMs: number, dayOffset
     slotStart: start, nextChangeAt: start + SKY_PROFILES[body].slotMs,
     nextWeather: next.weather, nextIntensity: next.intensity, override: false,
   };
+  if (dayHold !== null) {
+    base.dayT = dayHold;
+    base.dayHold = dayHold;
+  }
   if (override && override.until > serverMs) {
     return {
       ...base, weather: override.weather, intensity: override.weather === "clear" ? 0 : override.intensity,

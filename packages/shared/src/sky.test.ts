@@ -20,6 +20,15 @@ describe("day/night clock", () => {
     expect(new Set(ts.map((t) => t.toFixed(3))).size).toBe(BODY_IDS.length);
   });
 
+  it("holds the time of day for admin staging", () => {
+    const a = skyState("hollowmere", 0, T0, 0, null, 0.81);
+    const b = skyState("hollowmere", 0, T0 + 10 * 60_000, 0.2, null, 0.81);
+    expect(a.dayT).toBe(0.81);
+    expect(b.dayT).toBe(0.81);
+    expect(a.dayHold).toBe(0.81);
+    expect("dayHold" in skyState("hollowmere", 0, T0)).toBe(false);
+  });
+
   it("gives planets a 25% night and keeps Portus in daylight", () => {
     for (const b of ["arcadia", "hollowmere", "meridian"] as const) {
       let night = 0;
