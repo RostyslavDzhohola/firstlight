@@ -157,3 +157,20 @@ admin heals, write that in the results, because then it doesn't show the pair ca
 4. Press **F9**: the panel goes, the HUD and the normal camera return.
 
 Staged scenes for F13: `docs/staged-scenes.md`.
+
+## T9 Onboarding and inventory (F12 follow-up)
+
+Setup: a fresh guest (clean browser profile) on a stack with an empty database, or production.
+
+1. Play → pick a name. The "First minute · 0 / 12" checklist, the step rail and the Walk card appear.
+2. Walk 6 m, move the mouse, Space, hold Shift+W, C: each step ticks.
+3. Walk to the three training dummies south-east of spawn and hit each three times with the
+   starter weapon (melee starters need to stand within reach). Each third hit knocks one down
+   with "+10 XP"; the last pays +20, level 2 and "Medal earned: Spark".
+4. Press 2 then 1 (switch weapons), E (pick up tip), M twice (map), hold G and pick a phrase
+   (phrase wheel), wait 8 s on the voice card. The tutorial ends.
+5. Press I: hotbar + 16-slot backpack, the item card and the drop zone. Click the weapon, click a
+   backpack slot: the HUD hotbar shows Fists. Click it back.
+6. Click the weapon, click "Drop here": a pile appears at your feet. Close with I, stand on the
+   pile, press E: the weapon is back in slot 1.
+7. Reload: the tutorial doesn't come back.
