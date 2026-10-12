@@ -4,7 +4,9 @@
 //
 // Kinds (F12 review): death piles are what the cap protects. Past the cap, staged piles (admin scenes)
 // go first, then loot piles (NPC drops, camp chests, boss overflow, items a player dropped), then the
-// oldest death piles; the pile just added is never the one evicted. Staged piles also expire.
+// oldest death piles; the pile just added is never the one evicted. Death piles younger than 10 min
+// (their owners are on the way back) are kept even past the cap, up to twice the cap, where the
+// oldest of them go too. Staged piles also expire.
 
 import type { BodyId } from "@firstlight/shared";
 import type { InvItem } from "@firstlight/shared/net/protocol";
@@ -30,6 +32,11 @@ export type PileKind = "death" | "loot" | "staged";
 
 /** Eviction order past the cap: lower goes first (then oldest first). */
 export const PILE_EVICT_ORDER: Readonly<Record<PileKind, number>> = { staged: 0, loot: 1, death: 2 };
+
+/** Death piles this young aren't evicted at the cap (the owner is reborn and coming back for it)… */
+export const DEATH_PILE_GRACE_MS = 10 * 60_000;
+/** …unless the body reaches this many times the cap. */
+export const PILE_HARD_CAP_FACTOR = 2;
 
 export type PileEvent = { kind: "add"; pile: PileData } | { kind: "update"; pile: PileData } | { kind: "remove"; id: string; body: BodyId };
 
@@ -76,9 +83,13 @@ export class MemoryPileStore implements PileStore {
     this.index.set(pile.id, pile);
     const evicted: string[] = [];
     if (m.size > this.cap) {
-      const order = (p: PileData) => PILE_EVICT_ORDER[p.kind ?? "death"];
+      const graceFrom = pile.createdAt - DEATH_PILE_GRACE_MS;
+      const young = (p: PileData) => (p.kind ?? "death") === "death" && p.createdAt > graceFrom;
+      const order = (p: PileData) => PILE_EVICT_ORDER[p.kind ?? "death"] + (young(p) ? 1 : 0);
       const sorted = [...m.values()].filter((p) => p !== pile).sort((a, b) => order(a) - order(b) || a.createdAt - b.createdAt);
-      for (const p of sorted.slice(0, m.size - this.cap)) {
+      for (const p of sorted) {
+        if (m.size <= this.cap) break;
+        if (young(p) && m.size <= this.cap * PILE_HARD_CAP_FACTOR) break; // only young death piles left
         m.delete(p.id);
         this.index.delete(p.id);
         evicted.push(p.id);

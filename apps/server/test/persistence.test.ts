@@ -113,9 +113,11 @@ describe("piles", () => {
 
   it("are per body, never expire, and the oldest are evicted beyond the cap", () => {
     const ids: number[] = [];
-    for (let i = 0; i < 4; i++) ids.push(dropPile(db, { body: "meridian", x: i, y: 0, z: 0, items: [i], coins: 0, ownerName: "B", now: 1000 + i }, 3).pile.id);
+    // 11 minutes apart: past the grace period young death piles get at the cap.
+    const at = (k: number) => 1000 + k * 11 * 60_000;
+    for (let i = 0; i < 4; i++) ids.push(dropPile(db, { body: "meridian", x: i, y: 0, z: 0, items: [i], coins: 0, ownerName: "B", now: at(i) }, 3).pile.id);
     dropPile(db, { body: "arcadia", x: 0, y: 0, z: 0, items: [], coins: 1, ownerName: "C" }, 3);
-    const r = dropPile(db, { body: "meridian", x: 9, y: 0, z: 0, items: [9], coins: 0, ownerName: "B", now: 2000 }, 3);
+    const r = dropPile(db, { body: "meridian", x: 9, y: 0, z: 0, items: [9], coins: 0, ownerName: "B", now: at(5) }, 3);
     expect(r.evicted).toEqual([ids[1]]); // ids[0] was evicted by the 4th drop
     expect(listPiles(db, "meridian").map((p) => p.x)).toEqual([2, 3, 9]);
     expect(listPiles(db, "arcadia")).toHaveLength(1);

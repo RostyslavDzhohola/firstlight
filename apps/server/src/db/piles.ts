@@ -7,6 +7,10 @@
 import { parseJson, stmt, tx, type Db } from "./game-db.ts";
 
 export const PILE_CAP_PER_BODY = 1000;
+/** Death piles younger than this aren't evicted at the cap (their owners are coming back)… */
+export const DEATH_PILE_GRACE_MS = 10 * 60_000;
+/** …unless the body reaches this many times the cap. */
+export const PILE_HARD_CAP_FACTOR = 2;
 
 export interface PileEntry<T = unknown> {
   key: number;
@@ -77,7 +81,8 @@ export interface DropPileInput<T> {
 
 /**
  * Insert a pile; beyond the cap evicts other piles on that body: staged, then loot, then death piles,
- * oldest first (never the new one). Returns evicted ids.
+ * oldest first (never the new one). Death piles younger than 10 min are kept past the cap, up to
+ * twice the cap. Returns evicted ids.
  */
 export function dropPile<T>(db: Db, input: DropPileInput<T>, cap = PILE_CAP_PER_BODY): { pile: Pile<T>; evicted: number[] } {
   return tx(db, () => {
@@ -88,16 +93,31 @@ export function dropPile<T>(db: Db, input: DropPileInput<T>, cap = PILE_CAP_PER_
       "INSERT INTO pile (body, pos_x, pos_y, pos_z, items_json, coins, owner_id, owner_name, created_at, kind, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(input.body, input.x, input.y, input.z, JSON.stringify(entries), Math.max(0, Math.floor(input.coins)), input.ownerId ?? null, input.ownerName, now, input.kind ?? "death", input.expiresAt ?? null);
     const id = Number(res.lastInsertRowid);
-    const count = (stmt(db, "SELECT COUNT(*) AS n FROM pile WHERE body = ?").get(input.body) as { n: number }).n;
-    let evicted: number[] = [];
+    const countNow = () => (stmt(db, "SELECT COUNT(*) AS n FROM pile WHERE body = ?").get(input.body) as { n: number }).n;
+    let count = countNow();
+    const evicted: number[] = [];
     if (count > cap) {
-      evicted = (
-        stmt(
-          db,
-          `DELETE FROM pile WHERE id IN (SELECT id FROM pile WHERE body = ? AND id <> ?
-             ORDER BY CASE kind WHEN 'staged' THEN 0 WHEN 'loot' THEN 1 ELSE 2 END, created_at, id LIMIT ?) RETURNING id`,
-        ).all(input.body, id, count - cap) as { id: number }[]
-      ).map((r) => r.id);
+      // Staged, loot, then death piles past their grace period; oldest first; never the new pile.
+      const graceFrom = now - DEATH_PILE_GRACE_MS;
+      evicted.push(
+        ...(
+          stmt(
+            db,
+            `DELETE FROM pile WHERE id IN (SELECT id FROM pile WHERE body = ? AND id <> ? AND NOT (kind = 'death' AND created_at > ?)
+               ORDER BY CASE kind WHEN 'staged' THEN 0 WHEN 'loot' THEN 1 ELSE 2 END, created_at, id LIMIT ?) RETURNING id`,
+          ).all(input.body, id, graceFrom, count - cap) as { id: number }[]
+        ).map((r) => r.id),
+      );
+      count = countNow();
+      // Young death piles only go past the hard ceiling.
+      const hard = cap * PILE_HARD_CAP_FACTOR;
+      if (count > hard) {
+        evicted.push(
+          ...(
+            stmt(db, "DELETE FROM pile WHERE id IN (SELECT id FROM pile WHERE body = ? AND id <> ? ORDER BY created_at, id LIMIT ?) RETURNING id").all(input.body, id, count - hard) as { id: number }[]
+          ).map((r) => r.id),
+        );
+      }
     }
     return { pile: getPile<T>(db, id)!, evicted };
   });
