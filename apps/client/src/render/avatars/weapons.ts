@@ -77,7 +77,7 @@ interface Piece {
 }
 
 function P(geo: THREE.BufferGeometry, m: MatKey, pos: [number, number, number] = [0, 0, 0], rot: [number, number, number] = [0, 0, 0], scale?: [number, number, number]): Piece {
-  const g = geo.index ? geo : geo;
+  const g = geo;
   const mtx = new THREE.Matrix4().compose(new THREE.Vector3(...pos), new THREE.Quaternion().setFromEuler(new THREE.Euler(...rot)),
     new THREE.Vector3(...(scale ?? [1, 1, 1])));
   g.applyMatrix4(mtx);
@@ -236,12 +236,13 @@ function build(id: string, palette: number): THREE.Object3D | null {
   g.name = `weapon:${id}`;
   const byMat = new Map<MatKey, THREE.BufferGeometry[]>();
   for (const p of pieces) {
-    const geo = p.geo.index ? p.geo : p.geo;
+    // merge needs identical attribute sets and indexing (polyhedra come unindexed)
+    const geo = p.geo.index ? p.geo : p.geo.setIndex([...Array(p.geo.attributes.position!.count).keys()]);
     for (const name of Object.keys(geo.attributes)) if (name !== "position" && name !== "normal" && name !== "uv") geo.deleteAttribute(name);
-    (byMat.get(p.mat) ?? byMat.set(p.mat, []).get(p.mat)!).push(geo.index ? geo : geo);
+    (byMat.get(p.mat) ?? byMat.set(p.mat, []).get(p.mat)!).push(geo);
   }
   for (const [k, geos] of byMat) {
-    const merged = mergeGeometries(geos.map((x) => (x.index ? x : x)), false);
+    const merged = mergeGeometries(geos, false);
     if (!merged) continue;
     const mesh = new THREE.Mesh(merged, mat(k, palette));
     mesh.castShadow = k !== "blade";
