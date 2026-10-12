@@ -90,13 +90,13 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 | Weather + day/night (M11 #3–4) | MERGED 743d651 (deployed 06:39Z) | — |
 | F12 server core (Codex B1–B6, S2/S3/S9/S10/S12/S14) | Opus sub-agent | ../fl-wt-core (lane/f12-core) |
 | F12 content (eggs, items, Patchkit, Prism Bubble, Hollow King, Associates look) | Opus sub-agent | ../fl-wt-data (lane/f12-data) |
-| F12 client robustness (S4–S8, N1) | Opus sub-agent | ../fl-wt-client (lane/f12-client) |
+| F12 client robustness (S4–S8, N1, Opus 13–14) | MERGED b020746 (Codex round 1 fixed) | — |
 | F12 docs + repo hygiene | MERGED 8535ae7 | — |
-| F12 inventory panel + onboarding | done 346b99a; Codex review running | ../fl-wt-inv (lane/f12-ui) |
+| F12 inventory panel + onboarding | Codex round 1 fixed; waits for the data lane (bubble test) | ../fl-wt-inv (lane/f12-ui) |
 | F12 social/voice (Opus B1, block/party, reports, OTP, guest pruning) | Opus sub-agent | ../fl-wt-social (lane/f12-social) |
 | F12 NPC/boss (Opus B2 respawn persistence, evade, arena scaling/cover, NPC LOS) | Opus sub-agent | ../fl-wt-npc (lane/f12-npc) |
-| F12 weather/sky (override broadcast, stage sky, Hollowmere look, nits) | Opus sub-agent | ../fl-wt-sky (lane/f12-sky) |
-| Horses (M11 #2) | Opus sub-agent (resumed after the spend-limit stop) | ../fl-wt-horses (lane/horses) |
+| F12 weather/sky (override broadcast, stage sky, Hollowmere look, nits) | MERGED 5e9d5ce (Codex round 1 fixed) | — |
+| Horses (M11 #2) | MERGED acdfcb3 (deployed; Codex-reviewed) | — |
 
 ## Measured numbers
 
