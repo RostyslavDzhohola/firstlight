@@ -61,6 +61,11 @@
   36-bot room tick p50 0.55 ms / p95 1.74 ms / max 3.74 ms; RSS 162 MB; downstream 21.8 KB/s per bot
   (0.08 GB per player-hour → ≈ $0.004 per player-hour of Railway egress at $0.05/GB). Optimise in M9.
 
+- 02:40Z F2 on production (Railway 2 vCPU/2 GB, commit c26efad, no NPCs merged yet): 40 load-test bots
+  on one Arcadia copy for 600 s with `--fire`, 0 failures/disconnects; tick p50 ≤ 0.65 ms, p95 ≤ 1.88 ms,
+  max 10.2 ms (limit p95 ≤ 25 ms); RSS ≤ 192 MB; CPU ≈ 6 % of one core; downstream 11.7 KB/s per bot on
+  average (0.043 GB per player-hour). **Re-run after the NPC lane merges.**
+
 ## Open issues
 
 - NO CODEX COMPUTER USE (D23): visual/E2E checks run in T3 Code's built-in browser (preview tools). Never Chrome.
