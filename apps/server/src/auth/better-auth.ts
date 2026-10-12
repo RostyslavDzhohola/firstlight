@@ -90,6 +90,8 @@ export interface AuthDeps {
   secret: string;
   trustedOrigins: string[];
   rateLimit: boolean;
+  /** Production: pin Origin/CSRF checks on (Better Auth skips them when it detects a test env). */
+  strictOrigin?: boolean;
   /** True if this client IP is banned. */
   ipBanned(ip: string): boolean;
   /** Does this (lower-cased) address belong to a saved account? (A returning player.) */
@@ -143,7 +145,7 @@ export function authOptions(d: AuthDeps) {
         "/email-otp/send-verification-otp": { window: 3600, max: 8 },
       },
     },
-    advanced: { ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] } },
+    advanced: { ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] }, ...(d.strictOrigin ? { disableOriginCheck: false, disableCSRFCheck: false } : {}) },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
         if (!IP_CHECKED_PATHS.has(ctx.path ?? "")) return;

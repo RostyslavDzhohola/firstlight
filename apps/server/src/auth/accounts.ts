@@ -123,6 +123,7 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
     secret: cfg.secret,
     trustedOrigins: cfg.trustedOrigins,
     rateLimit: cfg.rateLimit ?? cfg.production,
+    strictOrigin: cfg.production,
     ipBanned: (ip) => isIpBanned(db, hashIp(ip)),
     savedEmail: (email) => savedEmail(email),
     accountBanned: (userId) => isBanned(db, userId, Date.now()),
