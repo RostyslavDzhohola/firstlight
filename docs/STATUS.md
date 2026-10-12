@@ -21,7 +21,7 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 - [x] M0 Setup and skeleton (live client + server; dev-guest tokens disabled in prod 03:40Z)
   - [x] caffeinate, start time
   - [x] Railway project + service + volume
-  - [x] workspace scaffold, docs, AGENTS.md (no CONTRIBUTING.md yet)
+  - [x] workspace scaffold, docs, AGENTS.md, README.md (no CONTRIBUTING.md yet)
   - [x] Vercel project + domain + DNS
   - [x] Railway domain + DNS + env
   - [ ] Cloudflare: account, workers.dev and Workers token done (D24); **TURN key pending the owner**
@@ -37,23 +37,24 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
   production needs Resend's domain verified (owner).
 - [ ] M5 Voice: merged d40d058, tested with bots. Open: E2E T4 needs the owner's TURN key and two
   real browsers with microphones.
-- [ ] M6 Content: all content lanes merged; E2E T2 and T6 pass. Open: F12 content fixes (egg-spawn
-  cap, Prism Bubble, Patchkit, bad drop ids, Hollow King solo protection) and medal/egg tests that
-  emit synthetic events instead of the real paths (docs/reviews/2026-10-12-f12-*).
-- [ ] M7 Look and assets: render look, characters and the UI port merged. Open: concept art (not
-  generated), the onboarding tutorial + training dummy (SPEC §6.12), a per-body visual check.
+- [x] M6 Content: all content lanes merged; E2E T2 and T6 pass. The F12 content fixes (egg-spawn
+  caps, Prism Bubble, Patchkit, drop ids, Hollow King solo protection, real-path medal/egg tests)
+  merged in c57d406.
+- [ ] M7 Look and assets: render look, characters, the UI port and the onboarding tutorial +
+  training dummies (1c30f4e, seen live on a fresh guest) merged. Open: concept art (not generated),
+  a per-body visual check.
 - [x] M8 Social and operations (merged 1a2ee50; E2E T7 passes). The `/stats` test-session check
   isn't recorded.
 - [ ] M9 Hardening: F2 load test, perf pass (F10/F11) and the E2E run (T4 blocked) done.
   - [ ] F12 three-model review: blockers fixed, reviewers sign off
   - [ ] Security pass (auth flows, rate limits, admin routes, input validation, no secrets in the bundle)
-  - [ ] Voice launch items from docs/risk-assessment.md §5: a public complaints/appeals contact, a
-    terms page (voice rules, 16+), admin voice-mutes persisted in game.db
+  - [ ] Voice launch items from docs/risk-assessment.md §5: a public complaints/appeals contact and
+    a terms page (voice rules, 16+). Admin voice-mutes are persisted in game.db (migration 5, 668ec82).
   - [ ] Before the repo goes public: docs/pre-public.md (owner)
 - [ ] M10 Video-ready: photo mode, `stage <n>` and docs/staged-scenes.md done (F13). Open: the landing
   flythrough video, the final report to the owner (SPEC §12).
-- [ ] M11 Extras: photo mode (#1) done; weather + day/night (#3–4) merged 743d651; horses (#2) in
-  progress; more cosmetics and Easter eggs (#5) not started.
+- [ ] M11 Extras: photo mode (#1) done; weather + day/night (#3–4) merged 743d651; horses (#2)
+  merged acdfcb3; more cosmetics and Easter eggs (#5) not started.
 
 ## Finish line (SPEC §1)
 
