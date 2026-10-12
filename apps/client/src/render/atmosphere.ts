@@ -11,10 +11,11 @@
 
 import * as THREE from "three/webgpu";
 import {
-  abs, cameraPosition, clamp, dot, exp, float, Fn, length, max, mix, normalize, output, positionWorld,
+  abs, acos, cameraPosition, clamp, dot, exp, float, Fn, length, max, mix, normalize, output, positionWorld, sqrt, texture, vec2,
   positionWorldDirection, pow, select, smoothstep, uniform, vec4, renderGroup,
 } from "three/tsl";
 import type { BodyLook } from "./looks.ts";
+import { SKY_MID_E, skyLutTexture } from "./skyLut.ts";
 import type { ResolvedSettings } from "./quality.ts";
 import { skyDir, type V3 } from "./sunFrame.ts";
 
@@ -26,6 +27,7 @@ export const atmo = {
   sunDir: uniform(new THREE.Vector3(0, 1, 0)).setGroup(renderGroup),
   sunColor: col().setGroup(renderGroup),
   zenith: col().setGroup(renderGroup),
+  mid: col().setGroup(renderGroup),
   horizon: col().setGroup(renderGroup),
   ground: col().setGroup(renderGroup),
   glow: col().setGroup(renderGroup),
@@ -43,15 +45,29 @@ export const atmo = {
   fogHeight: uniform(1).setGroup(renderGroup),
   haze: uniform(0.0008).setGroup(renderGroup),
   inscatter: uniform(0.6).setGroup(renderGroup),
+  /** Weight of the single-scattering LUT vs the art gradient (0 on Low). */
+  scatterMix: uniform(0.6).setGroup(renderGroup),
 };
+
+/** Single-scattering radiance from the per-body sky-view LUT (see skyLut.ts). */
+const lutSky = Fn(([dir]: [any]) => {
+  const up = atmo.up;
+  const e = dot(dir, up);
+  const dT = dir.sub(up.mul(e));
+  const sT = atmo.sunDir.sub(up.mul(dot(atmo.sunDir, up)));
+  const cosPhi = dot(dT, sT).div(max(length(dT).mul(length(sT)), 0.00001));
+  const u = acos(clamp(cosPhi, -1.0, 1.0)).div(Math.PI);
+  const v = sqrt(max(e, 0.0));
+  return (texture(skyLutTexture(), vec2(u, v)) as any).level(0).rgb;
+});
 
 /** Sky radiance (linear) towards a unit direction. `disc` adds the HDR sun disc. */
 export const skyColor = Fn(([dir, disc]: [any, any]) => {
   const e = dot(dir, atmo.up);
-  const t = pow(max(e, 0.0), 0.42);
-  const c: any = mix(atmo.horizon, atmo.zenith, t).toVar();
-  // Below the mathematical horizon: the curved planet drops away, so keep a hazy band.
-  c.assign(mix(c, atmo.ground, smoothstep(0.0, -0.35, e)));
+  // 3-stop art gradient: horizon → mid (SKY_MID_E) → zenith.
+  const t1 = smoothstep(0.0, SKY_MID_E, e);
+  const t2 = pow(clamp(e.sub(SKY_MID_E).div(1 - SKY_MID_E), 0.0, 1.0), 0.6);
+  const c: any = mix(mix(atmo.horizon, atmo.mid, t1), atmo.zenith, t2).toVar();
   const cosT = dot(dir, atmo.sunDir);
   const sunSide = cosT.mul(0.5).add(0.5);
   // Anisotropy: the anti-sun half of the sky is a little darker.
@@ -59,6 +75,10 @@ export const skyColor = Fn(([dir, disc]: [any, any]) => {
   // Sun-side horizon glow (single-scatter look).
   const band = exp(abs(e).mul(-6.0));
   c.addAssign(atmo.glow.mul(band.mul(pow(sunSide, 4.0)).mul(atmo.glowStrength)));
+  // Physical single scattering (Medium+), blended with the art gradient.
+  c.assign(mix(c, lutSky(dir), atmo.scatterMix));
+  // Below the mathematical horizon: the curved planet drops away, so keep a hazy band.
+  c.assign(mix(c, atmo.ground, smoothstep(0.0, -0.35, e)));
   // Forward-scatter halo.
   const fwd = max(cosT, 0.0);
   c.addAssign(atmo.sunColor.mul(pow(fwd, 10.0).mul(0.22).add(pow(fwd, 240.0).mul(1.4)).mul(atmo.mie)));
@@ -113,6 +133,7 @@ const tmpColor = new THREE.Color();
 /** Load a body's look into the shared uniforms. */
 export function applyLook(look: BodyLook, radius: number, waterLevel: number, s: ResolvedSettings) {
   atmo.zenith.value.setHex(look.zenith);
+  atmo.mid.value.setHex(look.mid);
   atmo.horizon.value.setHex(look.horizon);
   atmo.ground.value.setHex(look.ground);
   atmo.glow.value.setHex(look.glow);
@@ -131,6 +152,7 @@ export function applyLook(look: BodyLook, radius: number, waterLevel: number, s:
   atmo.haze.value = look.haze;
   atmo.inscatter.value = look.inscatter;
   atmo.fogHeight.value = s.fog.height ? 1 : 0;
+  atmo.scatterMix.value = s.sky.scatterSteps[0] > 0 ? look.scatter.mix : 0;
 }
 
 /**

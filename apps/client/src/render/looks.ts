@@ -17,6 +17,8 @@ export interface SkyPlanetSpec {
 export interface BodyLook {
   // Sky
   zenith: number;
+  /** Mid-sky colour (about 13° up): keeps warm horizons from turning the whole sky lilac. */
+  mid: number;
   horizon: number;
   /** Haze below the mathematical horizon (small planets show a lot of it). */
   ground: number;
@@ -56,6 +58,9 @@ export interface BodyLook {
   bloomStrength: number;
   grade: GradeParams;
   skyPlanets: SkyPlanetSpec[];
+  /** Single-scattering sky (Medium+): Rayleigh colour multiplier, Mie (haze/dust) multiplier and
+   * how much of it replaces the art gradient (0 = art only, 1 = physics only). */
+  scatter: { rayleigh: [number, number, number]; mie: number; mix: number };
 }
 
 export interface SkyPlanetPalette {
@@ -73,7 +78,7 @@ export const SKY_PLANET_PALETTES: Record<BodyId, SkyPlanetPalette> = {
 
 export const LOOKS: Record<BodyId, BodyLook> = {
   portus: {
-    zenith: 0x4a7fe0, horizon: 0xffdcc0, ground: 0xe9c3a6, glow: 0xffc28a, glowStrength: 0.55, mie: 0.5,
+    zenith: 0x4a7fe0, mid: 0x93c0f2, horizon: 0xffdcc0, ground: 0xe9c3a6, glow: 0xffc28a, glowStrength: 0.55, mie: 0.5,
     sun: 0xfff1d6, sunIntensity: 3.2, sunDisc: 22, sunSizeDeg: 1.3, sunElev: 0.85, sunAz: 0.6,
     hemiSky: 0x9fb8ff, hemiGround: 0x6a5644, hemiIntensity: 1.4,
     fogDensity: 0.0025, fogFalloff: 0.04, fogStart: 40, haze: 0.0006, inscatter: 0.6,
@@ -81,6 +86,7 @@ export const LOOKS: Record<BodyId, BodyLook> = {
     grassRoot: 0x3f7a35, grassTip: 0x9ccc6a, grassHeight: 0.38,
     exposure: 1.0, bloomThreshold: 1.25, bloomStrength: 0.35,
     grade: { slope: [1.04, 1.0, 0.95], offset: [0, 0, 0], power: [1, 1, 1], saturation: 1.08, hue: 0 },
+    scatter: { rayleigh: [1, 1, 1], mie: 1.0, mix: 0.7 },
     skyPlanets: [
       { body: "arcadia", elevDeg: 28, azDeg: 35, sizeDeg: 7 },
       { body: "hollowmere", elevDeg: 16, azDeg: 150, sizeDeg: 5.5 },
@@ -88,7 +94,7 @@ export const LOOKS: Record<BodyId, BodyLook> = {
     ],
   },
   arcadia: {
-    zenith: 0x2f7ff0, horizon: 0xc4f4ec, ground: 0xa8d8cc, glow: 0xffd27a, glowStrength: 0.65, mie: 0.6,
+    zenith: 0x2f7ff0, mid: 0x6fb8f2, horizon: 0xc4f4ec, ground: 0xa8d8cc, glow: 0xffd27a, glowStrength: 0.65, mie: 0.6,
     sun: 0xffe2a8, sunIntensity: 3.4, sunDisc: 24, sunSizeDeg: 1.2, sunElev: 0.55, sunAz: 0.9,
     hemiSky: 0x9fe8ff, hemiGround: 0x3f5a2a, hemiIntensity: 1.4,
     fogDensity: 0.003, fogFalloff: 0.05, fogStart: 50, haze: 0.0008, inscatter: 0.7,
@@ -96,6 +102,7 @@ export const LOOKS: Record<BodyId, BodyLook> = {
     grassRoot: 0x2c7a34, grassTip: 0x9fdc58, grassHeight: 0.45,
     exposure: 1.0, bloomThreshold: 1.25, bloomStrength: 0.35,
     grade: { slope: [0.97, 1.03, 1.02], offset: [0, 0.004, 0.006], power: [1, 1, 1], saturation: 1.18, hue: 0 },
+    scatter: { rayleigh: [0.92, 1.0, 1.05], mie: 1.0, mix: 0.7 },
     skyPlanets: [
       { body: "portus", elevDeg: 22, azDeg: 300, sizeDeg: 3 },
       { body: "hollowmere", elevDeg: 35, azDeg: 120, sizeDeg: 6 },
@@ -103,7 +110,7 @@ export const LOOKS: Record<BodyId, BodyLook> = {
     ],
   },
   hollowmere: {
-    zenith: 0x1a1240, horizon: 0xc77dc8, ground: 0x7a5a90, glow: 0xff9ad0, glowStrength: 0.9, mie: 0.8,
+    zenith: 0x1a1240, mid: 0x5b3c8e, horizon: 0xc77dc8, ground: 0x7a5a90, glow: 0xff9ad0, glowStrength: 0.9, mie: 0.8,
     sun: 0xffb0d8, sunIntensity: 1.8, sunDisc: 16, sunSizeDeg: 1.6, sunElev: 0.12, sunAz: 2.2,
     hemiSky: 0x8a6ad0, hemiGround: 0x2a2030, hemiIntensity: 1.3,
     fogDensity: 0.009, fogFalloff: 0.09, fogStart: 25, haze: 0.0016, inscatter: 0.9,
@@ -111,6 +118,7 @@ export const LOOKS: Record<BodyId, BodyLook> = {
     grassRoot: 0x2a3324, grassTip: 0x6e7a4a, grassHeight: 0.5,
     exposure: 1.05, bloomThreshold: 1.1, bloomStrength: 0.4,
     grade: { slope: [1.0, 0.95, 1.08], offset: [0.006, 0, 0.016], power: [1.04, 1.02, 1.0], saturation: 1.06, hue: -0.02 },
+    scatter: { rayleigh: [1.35, 0.85, 1.2], mie: 1.7, mix: 0.75 },
     skyPlanets: [
       { body: "portus", elevDeg: 30, azDeg: 40, sizeDeg: 3 },
       { body: "arcadia", elevDeg: 20, azDeg: 300, sizeDeg: 10 },
@@ -118,7 +126,7 @@ export const LOOKS: Record<BodyId, BodyLook> = {
     ],
   },
   meridian: {
-    zenith: 0x2a62c8, horizon: 0xffd2b0, ground: 0xd8a88a, glow: 0xffe0c0, glowStrength: 0.4, mie: 0.45,
+    zenith: 0x2a62c8, mid: 0x86b2ec, horizon: 0xffd2b0, ground: 0xd8a88a, glow: 0xffe0c0, glowStrength: 0.4, mie: 0.45,
     sun: 0xffffff, sunIntensity: 4.0, sunDisc: 28, sunSizeDeg: 1.0, sunElev: 0.95, sunAz: 1.4,
     hemiSky: 0xa8c8ff, hemiGround: 0x6a2a18, hemiIntensity: 1.2,
     fogDensity: 0.0022, fogFalloff: 0.035, fogStart: 60, haze: 0.001, inscatter: 0.55,
@@ -126,6 +134,7 @@ export const LOOKS: Record<BodyId, BodyLook> = {
     grassRoot: 0x7a5a30, grassTip: 0xc8a060, grassHeight: 0.3,
     exposure: 1.0, bloomThreshold: 1.4, bloomStrength: 0.3,
     grade: { slope: [1.06, 0.99, 0.95], offset: [0, 0.004, 0.012], power: [1, 1, 1], saturation: 1.12, hue: 0 },
+    scatter: { rayleigh: [1.0, 1.0, 1.0], mie: 2.2, mix: 0.7 },
     skyPlanets: [
       { body: "portus", elevDeg: 18, azDeg: 80, sizeDeg: 2.5 },
       { body: "arcadia", elevDeg: 30, azDeg: 200, sizeDeg: 8 },

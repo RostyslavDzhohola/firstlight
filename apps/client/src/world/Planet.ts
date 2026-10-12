@@ -11,6 +11,7 @@ import { LOOKS, type BodyLook } from "../render/looks.ts";
 import { postUniforms, setGrade } from "../render/post.ts";
 import { PropSystem } from "../render/props.ts";
 import type { RenderCtx, ResolvedSettings } from "../render/renderer.ts";
+import { applySkyLut } from "../render/skyLut.ts";
 import { SkyPlanets } from "../render/skyPlanets.ts";
 import { localFrame, type V3 } from "../render/sunFrame.ts";
 import { applyTerrainSettings, terrainMaterialFor } from "../render/terrainMaterial.ts";
@@ -104,6 +105,7 @@ export class Planet {
 
     // Look: shared uniforms, scene nodes, post parameters.
     applyLook(this.look, this.body.radius, this.body.waterLevel, this.settings);
+    applySkyLut(bodyId, this.look);
     applyWaterLook(this.look);
     applyGrassLook(this.look);
     skyNode ??= skyBackgroundNode();
@@ -155,6 +157,7 @@ export class Planet {
     }
     this.scene.fogNode = s.on.fog ? fogNode : null;
     atmo.fogHeight.value = s.fog.height ? 1 : 0;
+    atmo.scatterMix.value = s.sky.scatterSteps[0] > 0 ? this.look.scatter.mix : 0;
     applyTerrainSettings(s);
     const mat = terrainMaterialFor(s);
     if (mat !== this.material) {
