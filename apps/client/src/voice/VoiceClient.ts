@@ -11,6 +11,7 @@ import { PF } from "@firstlight/shared/net/schema";
 import { filterIceServers, type VoiceServerMessages } from "@firstlight/shared/net/voice";
 import type { Game } from "../game/Game.ts";
 import type { ClientSystem } from "../game/systems.ts";
+import { isBlocked, isMuted, isMutedLocally, onSocialChange, setMuted } from "../social/store.ts";
 import { VoiceAudio } from "./audio.ts";
 import { MeshTransport } from "./MeshTransport.ts";
 import { acceptsIncoming, onMyChannel, planLinks, shouldSend, type Me, type PeerView } from "./planner.ts";
@@ -19,22 +20,10 @@ import { VoiceUi } from "./ui.ts";
 
 export type MicState = "off" | "live" | "denied" | "unsupported";
 
-const LS = { optIn: "fl.voice.optin", mutes: "fl.voice.mutes", blocks: "fl.voice.blocks", strangers: "fl.voice.strangers" };
+const LS = { optIn: "fl.voice.optin", strangers: "fl.voice.strangers" };
 const BACKOFF_MS = 10_000;
 
-function loadSet(key: string): Set<string> {
-  try {
-    const v = JSON.parse(localStorage.getItem(key) ?? "[]");
-    return new Set(Array.isArray(v) ? v.filter((x) => typeof x === "string") : []);
-  } catch {
-    return new Set();
-  }
-}
 const micSupported = () => typeof navigator.mediaDevices?.getUserMedia === "function";
-
-function saveSet(key: string, s: Set<string>) {
-  localStorage.setItem(key, JSON.stringify([...s].slice(-500)));
-}
 
 /** A player in the current room as the voice UI sees them. */
 export interface VoicePeerInfo {
@@ -62,8 +51,6 @@ export class VoiceClient {
   audio: VoiceAudio | null = null;
   mic: MediaStream | null = null;
   micState: MicState = "off";
-  readonly mutedUsers = loadSet(LS.mutes);
-  readonly blockedUsers = loadSet(LS.blocks);
   muteStrangers = localStorage.getItem(LS.strangers) === "1";
   panic = false;
   adminMuted = false;
@@ -81,6 +68,8 @@ export class VoiceClient {
   constructor(game: Game) {
     this.game = game;
     this.ui = new VoiceUi(this);
+    // Mutes and blocks are shared with the Tab player list (social store).
+    onSocialChange(() => this.ui.refresh());
     // Shift+Esc: panic mute-all. Browsers may swallow Esc while pointer-locked or fullscreen, so also
     // treat "pointer lock lost while Shift is held" as the same gesture.
     let shift = false;
@@ -192,13 +181,9 @@ export class VoiceClient {
     this.ui.refresh();
   }
 
-  /** Local mute (only you stop hearing them), remembered by account. */
+  /** Local mute (only you stop hearing them), remembered by account (shared with the player list). */
   setMuted(sessionId: string, on: boolean): void {
-    const userId = this.userIdOf(sessionId);
-    if (!userId) return;
-    if (on) this.mutedUsers.add(userId);
-    else this.mutedUsers.delete(userId);
-    saveSet(LS.mutes, this.mutedUsers);
+    setMuted(sessionId, on);
     this.ui.refresh();
   }
 
@@ -206,9 +191,7 @@ export class VoiceClient {
   block(sessionId: string): void {
     const userId = this.userIdOf(sessionId);
     if (!userId || !this.room) return;
-    this.blockedUsers.add(userId);
-    saveSet(LS.blocks, this.blockedUsers);
-    this.room.send("voice:block", { target: sessionId });
+    this.room.send("voice:block", { target: sessionId }); // the server replies with social:blocked
     this.room.transport.close(sessionId);
     this.ui.refresh();
   }
@@ -255,8 +238,8 @@ export class VoiceClient {
         voice: !!(p.flags & PF.VOICE),
         linked: !!this.room?.transport.has(id),
         speaking: this.speaking.get(id) ?? 0,
-        muted: this.mutedUsers.has(p.userId),
-        blocked: this.blockedUsers.has(p.userId),
+        muted: isMutedLocally(id),
+        blocked: isBlocked(p.userId),
         adminMuted: !!(p.flags & PF.VOICE_MUTED),
         radioCh: p.radioCh,
         radioTx: !!(p.flags & PF.RADIO_TX),
@@ -415,7 +398,7 @@ export class VoiceRoom implements ClientSystem {
     const state = this.room.state as any;
     const p = state?.players?.get(peer);
     const me = state?.players?.get(this.room.sessionId);
-    if (!p || !me || !(p.flags & PF.VOICE) || p.flags & PF.VOICE_MUTED || vc.blockedUsers.has(p.userId)) return false;
+    if (!p || !me || !(p.flags & PF.VOICE) || p.flags & PF.VOICE_MUTED || isBlocked(p.userId)) return false;
     // Only links the planner would keep: a radio mate, or one of the nearest MAX_PEERS within DROP.
     const d = (q: any) => Math.hypot(q.x - me.x, q.y - me.y, q.z - me.z);
     const my = this.myInfo(me);
@@ -504,7 +487,7 @@ export class VoiceRoom implements ClientSystem {
         voice: !!(p.flags & PF.VOICE),
         adminMuted: !!(p.flags & PF.VOICE_MUTED),
         radioCh: p.radioCh,
-        blocked: vc.blockedUsers.has(p.userId) || (this.backoff.get(id) ?? 0) > now,
+        blocked: isBlocked(p.userId) || (this.backoff.get(id) ?? 0) > now,
       });
     });
     const plan = planLinks({ me: this.myInfo(me), peers, linked: new Set(this.transport.peers()), farSince: this.farSince, now });
@@ -549,7 +532,7 @@ export class VoiceRoom implements ClientSystem {
       _v.addScaledVector(_up.set(_v.x / l, _v.y / l, _v.z / l), 1.6).sub(_me).applyQuaternion(_q);
       audio.setPosition(id, _v.x, _v.y, _v.z);
       const stranger = !myParty || p.party !== myParty;
-      const silent = vc.mutedUsers.has(p.userId) || vc.blockedUsers.has(p.userId) || (vc.muteStrangers && stranger);
+      const silent = isMuted(id) || (vc.muteStrangers && stranger);
       audio.setPeerGain(id, silent ? 0 : 1);
       // Same-channel transmitter: through the radio chain at fixed gain (squelch on each edge).
       audio.setRadio(id, !!(p.flags & PF.RADIO_TX) && onMyChannel(my, p), !silent && !vc.panic);

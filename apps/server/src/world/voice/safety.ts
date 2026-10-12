@@ -1,19 +1,9 @@
-// Voice safety records: blocks and reports go to game.db (the shared persistence API); admin voice
-// mutes are process-wide by account. Without an open game.db (unit tests, bare dev runs) blocks and
-// reports fall back to memory so the rules still hold.
+// Voice safety records, shared with the social lane so the Tab player list and the voice panel see
+// the same state: blocks, reports and bans live in game.db through the social store (with its
+// in-memory fallback when no database is open); admin voice mutes are the moderation module's.
 
-import { blockUser, fileReport, gameDb, isBanned, isBlockedEitherWay, type Db } from "../../db/index.ts";
-
-function db(): Db | null {
-  try {
-    return gameDb();
-  } catch {
-    return null;
-  }
-}
-
-const memBlocks = new Set<string>();
-let memReportId = 0;
+import { isVoiceMuted, setVoiceMuted } from "../../social/moderation.ts";
+import { blockedBy, blockedEitherWay, setBlocked, storeReport, userBanned } from "../../social/store.ts";
 
 export interface VoiceReport {
   reporter: string;
@@ -26,47 +16,36 @@ export interface VoiceReport {
 export const voiceSafety = {
   /** Persist `userId` blocking `blockedUserId`. True if it is a new block. */
   block(userId: string, blockedUserId: string, now = Date.now()): boolean {
-    if (userId === blockedUserId) return false;
-    const d = db();
-    if (d) return blockUser(d, userId, blockedUserId, now);
-    const key = `${userId}\n${blockedUserId}`;
-    if (memBlocks.has(key)) return false;
-    memBlocks.add(key);
-    return true;
+    if (userId === blockedUserId || blockedBy(userId).includes(blockedUserId)) return false;
+    return setBlocked(userId, blockedUserId, true, now);
+  },
+
+  /** Everyone `userId` has blocked (the client's copy of the list). */
+  blockedBy(userId: string): string[] {
+    return blockedBy(userId);
   },
 
   blockedEitherWay(a: string, b: string): boolean {
-    const d = db();
-    if (d) return isBlockedEitherWay(d, a, b);
-    return memBlocks.has(`${a}\n${b}`) || memBlocks.has(`${b}\n${a}`);
+    return blockedEitherWay(a, b);
   },
 
-  /** Banned accounts lose voice at once (the ban itself kicks them; that's the admin tools' job). */
+  /** Banned accounts lose voice at once (the ban itself also removes them from the world). */
   isBanned(userId: string, now = Date.now()): boolean {
-    const d = db();
-    return d ? isBanned(d, userId, now) : false;
+    return userBanned(userId, now);
   },
 
   /** File a report (who, when, where, why; never audio). Returns the report id. */
   report(r: VoiceReport, now = Date.now()): number {
-    const d = db();
-    if (d) return fileReport(d, { reporter: r.reporter, target: r.target, body: r.body, pos: r.pos, reason: r.reason, now });
-    return ++memReportId;
+    return storeReport({ reporter: r.reporter, target: r.target, body: r.body, pos: r.pos ? [r.pos[0], r.pos[1], r.pos[2]] : null, reason: r.reason, now });
   },
 };
 
-const mutedUsers = new Set<string>();
-
-/** Admin voice mutes by account id; survive rejoining within this server process. */
+/** Admin voice mutes (process-wide by account; the moderation module owns them). */
 export const voiceMutes = {
   set(userId: string, on: boolean): void {
-    if (on) mutedUsers.add(userId);
-    else mutedUsers.delete(userId);
+    setVoiceMuted(userId, on);
   },
   has(userId: string): boolean {
-    return mutedUsers.has(userId);
-  },
-  rekey(fromUserId: string, toUserId: string): void {
-    if (mutedUsers.delete(fromUserId)) mutedUsers.add(toUserId);
+    return isVoiceMuted(userId);
   },
 };

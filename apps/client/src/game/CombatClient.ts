@@ -175,6 +175,7 @@ export class CombatClient {
     if (this.wheel.update(input, now, !this.deadUntilRespawn)) {
       if (this.blocking) room.send("block", { on: false });
       if (this.scoped) room.send("scope", { on: false });
+      if (this.wasRmb) room.send("charge", { on: false }); // a charge or draw in progress is cancelled
       this.blocking = this.scoped = this.wasRmb = false;
       return;
     }

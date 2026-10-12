@@ -41,7 +41,7 @@ async function bot(name: string): Promise<Room> {
   inbox.set(r, box);
   for (const t of VOICE_TYPES) r.onMessage(t, (data: unknown) => box.push({ type: t, data }));
   r.onMessage("pong", (data: unknown) => box.push({ type: "pong", data }));
-  for (const t of ["you", "toast", "denied", "phrase", "correct"]) r.onMessage(t, () => {});
+  for (const t of ["you", "toast", "denied", "phrase", "correct", "social:blocked", "party:state", "kicked"]) r.onMessage(t, () => {});
   await waitFor(() => !!(r.state as any).players?.get(r.sessionId));
   return r;
 }
@@ -184,6 +184,16 @@ describe("voice signalling relay", () => {
     expect(await relays(a, b)).toBe(false); // blocked by the receiver
     expect(await relays(b, a)).toBe(false); // the blocker can't reach them either
     expect(await relays(a, c)).toBe(true); // everyone else is unaffected
+  });
+
+  it("a block from the player list (social:block) also stops voice relay", async () => {
+    const a = await bot("ann"), b = await bot("ben");
+    await enable(a, b);
+    expect(await relays(a, b)).toBe(true);
+    b.send("social:block", { target: a.sessionId });
+    await barrier(b);
+    expect(await relays(a, b)).toBe(false);
+    expect(await relays(b, a)).toBe(false);
   });
 
   it("does not relay to or from an admin-muted player", async () => {
@@ -475,6 +485,16 @@ describe("TURN credentials", () => {
       setGameDb(null);
       db.close();
     }
+  });
+
+  it("an admin ban from the player list revokes the banned player's relay credentials", async () => {
+    mockTurn();
+    const a = await bot("ann"), b = await bot("ben");
+    await enable(b);
+    const user = got(b, "voice:ice")[0].iceServers[0].username;
+    a.send("mod", { action: "ban", target: b.sessionId, reason: "test" }); // ann is an admin
+    await waitFor(() => revokes(user).length > 0);
+    rooms.splice(rooms.indexOf(b), 1);
   });
 
   it("tells the client voice is unavailable when the relay can't be reached, and backs off (never falls back to direct)", async () => {

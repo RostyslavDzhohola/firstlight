@@ -345,6 +345,7 @@ export class VoiceSystem implements RoomSystem {
     const fa = a.state.flags, fb = b.state.flags;
     if (!(fa & PF.VOICE) || !(fb & PF.VOICE)) return false;
     if (fa & PF.VOICE_MUTED || fb & PF.VOICE_MUTED) return false;
+    if (voiceMutes.has(a.identity.userId) || voiceMutes.has(b.identity.userId)) return false;
     const near = dist3(actorPos(a), actorPos(b)) <= VOICE.DROP;
     if (!near && !sameRadioChannel(a, b)) return false;
     return !voiceSafety.blockedEitherWay(a.identity.userId, b.identity.userId);
@@ -410,6 +411,7 @@ export class VoiceSystem implements RoomSystem {
     c.send("voice:drop", { peer: t.id });
     t.client.send("voice:drop", { peer: a.id });
     c.send("voice:blocked", { target: t.id });
+    c.send("social:blocked", { userIds: voiceSafety.blockedBy(a.identity.userId) }); // the Tab list's copy
     // Defence in depth against a modified client: cut the blocked player's relay allocations and give
     // them fresh credentials for everyone else.
     const ts = this.sessions.get(t.id);

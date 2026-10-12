@@ -6,6 +6,7 @@ import { PF } from "@firstlight/shared/net/schema";
 import { CLOSE, SOCIAL } from "@firstlight/shared/net/social";
 import type { BodyRoom } from "../world/BodyRoom.ts";
 import type { PlayerActor } from "../world/actors.ts";
+import { turnCredentials } from "../world/voice/turn.ts";
 import { liveActor, liveRooms } from "./presence.ts";
 import { banIpHash, lastIpHashOf, networkBanned, storeBan, userBanned } from "./store.ts";
 
@@ -59,6 +60,7 @@ export function kickUser(userId: string, reason = "Removed by an admin", now = D
 /** Ban the account and the IP hash it last played from; disconnect it if online. Returns the ban id. */
 export function banAccount(userId: string, reason: string, createdBy: string | null): number {
   const id = storeBan({ userId, reason: reason.slice(0, 200), createdBy });
+  void turnCredentials.revokeUser(userId); // voice relay credentials end with the ban
   const live = liveActor(userId);
   if (live) removePlayer(live.room, live.actor, CLOSE.BANNED, "Banned by an admin");
   // The network ban also removes other accounts playing from that network right now (not admins).

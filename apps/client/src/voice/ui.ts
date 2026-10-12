@@ -7,6 +7,7 @@ import * as THREE from "three/webgpu";
 import { PF } from "@firstlight/shared/net/schema";
 import { VOICE, VOICE_REPORT_REASONS } from "@firstlight/shared/net/voice";
 import type { Game } from "../game/Game.ts";
+import { isBlocked, isMuted } from "../social/store.ts";
 import type { VoiceClient, VoicePeerInfo } from "./VoiceClient.ts";
 
 const SPEAKING = 0.06;
@@ -25,7 +26,7 @@ const _p = new THREE.Vector3();
 
 export class VoiceUi {
   private readonly vc: VoiceClient;
-  private readonly root = el("div", "fl-voice");
+  private readonly root = el("div", "fl-vroot");
   private readonly widget = el("div", "fl-vwidget", this.root);
   private readonly micIcon = el("span", "ic", this.widget);
   private readonly label = el("span", "lbl", this.widget);
@@ -107,7 +108,7 @@ export class VoiceUi {
     const speakers: string[] = [];
     if (ch && state?.players) {
       state.players.forEach((p: any, id: string) => {
-        if (id !== me && p.radioCh === ch && p.flags & PF.RADIO_TX && !vc.blockedUsers.has(p.userId)) speakers.push(p.name);
+        if (id !== me && p.radioCh === ch && p.flags & PF.RADIO_TX && !isBlocked(p.userId)) speakers.push(p.name);
       });
     }
     this.radioLine.className = `fl-vradio${speakers.length ? " rx" : ""}${vc.radioTx ? " tx" : ""}`;
@@ -143,7 +144,7 @@ export class VoiceUi {
           this.ringEls.set(id, r);
         }
         seen.add(id);
-        const muted = vc.mutedUsers.has(p.userId) || (vc.muteStrangers && !(myParty && p.party === myParty));
+        const muted = isMuted(id) || (vc.muteStrangers && !(myParty && p.party === myParty));
         r.classList.toggle("muted", muted);
         r.classList.toggle("radio", !!(p.flags & PF.RADIO_TX));
         const x = (_p.x * 0.5 + 0.5) * innerWidth;

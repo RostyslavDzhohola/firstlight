@@ -53,13 +53,12 @@ anonymous guests, live speech can't be checked in advance, and radio channels ar
 | Voice **off by default**; opt-in panel explains range, push-to-talk, no recording, and how to mute/block/report | all | client `voice/ui.ts` |
 | **16+ self-declaration** before enabling (not age assurance; see §2); the server refuses to enable without it | R3, R4 | server `voice:enable` |
 | **Push-to-talk** (V, B); the mic is not sent otherwise; listen-only if the mic is denied | R1, R2, R4 | client sender gating |
-| **Mute** any player (local, remembered by account) and **"mute strangers"** (hear only your party) | R1, R2, R4 | client |
+| **Mute** any player (local, remembered by account; from the voice panel or the Tab player list) and **"mute strangers"** (hear only your party) | R1, R2, R4 | client `voice/`, `social/store.ts` |
 | **Panic mute-all** (Shift+Esc) silences everyone at once and stops transmitting | all | client |
-| **Block** (persisted on the server, both directions, across sessions): the server stops relaying connection set-up between the pair and tells both clients to hang up; the blocked player's relay credential is revoked | R1–R6 | server `voice:block`, game.db `block` |
+| **Block** (persisted on the server, both directions, across sessions; from the voice panel or the Tab list): the server stops relaying connection set-up between the pair; a voice-panel block also tells both clients to hang up at once and revokes the blocked player's relay credential | R1–R6 | server `voice:block`, `social:block`, game.db `block` |
 | **Report** in game: who, when, which planet and where, and a reason category. **Never audio** (none exists). Stored in game.db `report` | all | server `voice:report` |
-| **Admin voice-mute** (stops all relaying to and from the player; in-game for admins today) | all | server `voice:mute` |
-| **Ban → voice ends:** within a second of a ban being recorded in game.db, the room turns the player's voice off, tells peers to hang up and revokes their relay credentials (failed revocations are retried) | all | server `VoiceSystem` tick, `revokeVoiceForUser` |
-| **Report review on `/admin`** by the admin, with kick and ban (account + IP hash) | all | M8 admin tools (**pending**, see §5) |
+| **Report review on `/admin`** by the admin: dismiss, kick, ban (account + network), and **voice-mute** (stops all relaying to and from the player); also from the Tab list for admins | all | `ops/admin.ts`, `social/moderation.ts`, server `voice:mute` |
+| **Ban → voice ends:** a ban revokes all the account's relay credentials at once (failed revocations are retried), removes the player, and any room still holding them turns their voice off within a second | all | `banAccount` → `revokeVoiceForUser`, `VoiceSystem` tick |
 | **Relay-only connections** in production (`iceTransportPolicy: "relay"`, per-player Cloudflare TURN credentials, 12 h lifetime, re-minted every 6 h): players never see each other's IP address. If the relay is down, voice is unavailable rather than falling back to direct connections | R7 | server `voice/turn.ts` |
 | The server relays set-up messages only for players **within 60 m or on the same radio channel**, never across the world; rate-limited | R1, R6 | server `voice/VoiceSystem.ts` |
 | Radio channels capped at 8 holders; radio drops on death | R3 | server |
@@ -73,11 +72,9 @@ anonymous guests, live speech can't be checked in advance, and radio channels ar
 - **Report handling:** the admin checks `/admin` reports at least daily during launch week, then
   weekly; serious reports (R3, R5, threats) are handled the same day, with ban and preservation of
   the report row. Reports involving a child at risk are referred to the police / CEOP.
-- **Not yet built (planned, M8):** the `/admin` page that lists reports with kick/ban actions (reports
-  are already stored; until the page ships the admin reads the `report` table directly), a public
-  contact address for complaints and appeals (s.20/s.21 reporting and complaints), a published terms
-  page that states the voice rules and the 16+ condition, and admin voice-mutes persisted in game.db
-  (today they last until the server restarts).
+- **Not yet built (planned):** a public contact address for complaints and appeals (s.20/s.21
+  reporting and complaints), a published terms page that states the voice rules and the 16+
+  condition, and admin voice-mutes persisted in game.db (today they last until the server restarts).
 - **If risk rises** (repeated R3/R4 reports, or many under-16 users): switch voice to party-only
   by default, require a saved account for voice, or add real age assurance before voice.
 
