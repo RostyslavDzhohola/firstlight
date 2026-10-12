@@ -105,14 +105,27 @@ const SOCKETS: Record<SocketName, { bone: string; at: (b: (n: string) => THREE.V
 };
 
 // weapon +Z (muzzle) → model -X (right hand's knuckles at rest), weapon +Y (top) → model +Z (thumb)
-const GUN_GRIP = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(
+export const GUN_GRIP = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(
   new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(-1, 0, 0)));
+
+/** Free what one avatar owns: each unique cloned skeleton (bone texture) and every mesh object's
+ *  per-object render state (Object3D.dispose() fires the event the renderer listens for). Shared
+ *  template geometry, materials and the atlas are never disposed here. */
+export function releaseAvatarObjects(root: THREE.Object3D | null) {
+  if (!root) return;
+  const skeletons = new Set<THREE.Skeleton>();
+  root.traverse((o) => {
+    const sm = o as THREE.SkinnedMesh;
+    if (sm.isSkinnedMesh && sm.skeleton) skeletons.add(sm.skeleton);
+    if ((o as THREE.Mesh).isMesh) o.dispose();
+  });
+  for (const sk of skeletons) sk.dispose();
+}
 
 const _up = new THREE.Vector3();
 const _fwd = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _m = new THREE.Matrix4();
-const _prev = new THREE.Vector3();
 const _d = new THREE.Vector3();
 
 type Lod = "full" | "mid" | "far";
@@ -148,6 +161,7 @@ export class AvatarView {
   private lastAnim: number = ANIM.IDLE;
   private speed = 0;
   private havePrev = false;
+  private readonly prevPos = new THREE.Vector3(); // per avatar: speed is this avatar's own displacement
   private clock = 0;
   private pendingDt = 0;
   private lod: Lod = "full";
@@ -155,6 +169,7 @@ export class AvatarView {
   private disposed = false;
   private debugClip: string | null = null;
   private manualDetail = false;
+  private localFlags: number | null = null;
 
   constructor(palette = 0, starter = 0) {
     this.palette = palette;
@@ -176,6 +191,7 @@ export class AvatarView {
     this.palette = palette;
     this.starter = starter;
     this.proxy.removeFromParent();
+    releaseAvatarObjects(this.proxy);
     this.proxy = capsule(palette, starter);
     const a = avatarAssets();
     this.teardownModel();
@@ -188,6 +204,7 @@ export class AvatarView {
     if (index === this.weaponIndex && (this.weaponObj || index === 0)) return;
     this.weaponIndex = index;
     this.weaponObj?.removeFromParent();
+    releaseAvatarObjects(this.weaponObj);
     this.weaponObj = null;
     const def = WEAPONS[index];
     const socket = this.sockets.get("hand_r");
@@ -203,9 +220,20 @@ export class AvatarView {
     }
   }
 
+  /** Smoothed ground speed (m/s) from this avatar's own successive positions. */
+  get groundSpeed(): number {
+    return this.speed;
+  }
+
   /** PlayerState.flags (PF): DEAD, BLOCKING, SWIMMING, SCOPED override the animation state. */
   setFlags(bits: number) {
     this.flagBits = bits;
+  }
+
+  /** Local prediction for the player's own avatar: when set, these BLOCKING/SCOPED bits replace the
+   *  server's (which arrive a round trip late). null hands them back to the server. */
+  setLocalFlags(bits: number | null) {
+    this.localFlags = bits;
   }
 
   /** Fire a one-shot clip (attack, cast, hit…) that plays over the current state. */
@@ -253,12 +281,12 @@ export class AvatarView {
     // ground speed from successive positions (tangential only), smoothed
     if (this.havePrev && dt > 0) {
       _up.set(x, y, z).normalize();
-      _d.set(x, y, z).sub(_prev);
+      _d.set(x, y, z).sub(this.prevPos);
       _d.addScaledVector(_up, -_d.dot(_up));
       const v = Math.min(20, _d.length() / dt);
       this.speed += (v - this.speed) * Math.min(1, dt * 8);
     }
-    _prev.set(x, y, z);
+    this.prevPos.set(x, y, z);
     this.havePrev = true;
 
     this.root.position.set(x, y, z);
@@ -297,6 +325,8 @@ export class AvatarView {
     this.disposed = true;
     AvatarView.all.delete(this);
     this.teardownModel();
+    this.proxy.removeFromParent();
+    releaseAvatarObjects(this.proxy);
     this.root.removeFromParent();
   }
 
@@ -430,8 +460,10 @@ export class AvatarView {
     this.current = null;
     this.currentName = "";
     this.weaponObj?.removeFromParent();
+    releaseAvatarObjects(this.weaponObj);
     this.weaponObj = null;
     this.model?.removeFromParent();
+    releaseAvatarObjects(this.model);
     this.model = null;
     this.mesh = null;
     this.sockets.clear();
@@ -462,7 +494,8 @@ export class AvatarView {
       if (act && !LOOPING.has(this.debugClip) && !act.isRunning()) this.play(this.debugClip, 0.2, true);
       return;
     }
-    const f = this.flagBits;
+    const held = PF.BLOCKING | PF.SCOPED;
+    const f = this.localFlags === null ? this.flagBits : (this.flagBits & ~held) | (this.localFlags & held);
     if (f & PF.DEAD || anim === ANIM.DEAD) {
       if (this.currentName !== "death") this.play("death", 0.15);
       this.oneShot = null;
@@ -537,3 +570,48 @@ function clamp(v: number, a: number, b: number) {
 }
 
 export { PALETTES };
+
+/**
+ * Shader warm-up hook (render/warmup.ts WarmupHooks): while forced on, stands one avatar per palette
+ * (cycling the four starters, each holding a different item plus a palette-accent item in the left
+ * hand) and the six far-LOD capsules at `at()`. Every skinned toon variant, its shadow pass, and every
+ * weapon/proxy material then compiles behind the loading screen instead of on first sight of another
+ * player. Forced off, everything is disposed again.
+ */
+export function avatarWarmupHook(scene: THREE.Object3D, at: () => THREE.Vector3): { forceAll(on: boolean): void } {
+  const items = ["sunbrand", "hexquill", "carbine", "riverstaff", "emberglass", "stillshot"];
+  let group: THREE.Group | null = null;
+  let views: AvatarView[] = [];
+  let capsules: THREE.Group[] = [];
+  return {
+    forceAll(on: boolean) {
+      if (on) {
+        if (group || flags.has("nochars") || !avatarAssets()) return;
+        group = new THREE.Group();
+        group.name = "avatarWarmup";
+        const p = at();
+        for (let i = 0; i < PALETTES.length; i++) {
+          const v = new AvatarView(i, i % 4);
+          v.setDetail(true);
+          v.setWeapon(Math.max(0, WEAPONS.findIndex((w) => w.id === items[i % items.length])));
+          v.attach("hand_l", weaponModel("stormcoil", i));
+          v.set(p.x, p.y, p.z, 1, 0, 0, ANIM.IDLE, 0);
+          group.add(v.root);
+          views.push(v);
+          const cap = capsule(i, 0); // starter 0 → trim colour i: all six proxy + trim materials
+          cap.position.copy(p);
+          group.add(cap);
+          capsules.push(cap);
+        }
+        scene.add(group);
+      } else {
+        for (const v of views) v.dispose();
+        for (const c of capsules) releaseAvatarObjects(c);
+        views = [];
+        capsules = [];
+        group?.removeFromParent();
+        group = null;
+      }
+    },
+  };
+}

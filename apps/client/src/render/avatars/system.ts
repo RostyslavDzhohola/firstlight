@@ -24,9 +24,12 @@ function avatarSystem(game: Game): ClientSystem | null {
     if (w.cls === "magic" || w.delivery === "heal" || w.delivery === "bubble") return "cast";
     return fallback;
   };
-  on("swing", (m: { by: string; weapon: number }) => viewOf(m.by)?.trigger("attack"));
-  on("shot", (m: { by: string; weapon: number }) => viewOf(m.by)?.trigger(kindFor(m.weapon, "shoot")));
-  on("projectile", (m: { by: string; weapon: number }) => viewOf(m.by)?.trigger(kindFor(m.weapon, "shoot")));
+  // Remote players' attacks are server-driven; the local avatar already played its one-shot when
+  // CombatClient sent the input, so its own echo is ignored here.
+  const remote = (id: string) => (id === me ? undefined : game.avatars.get(id));
+  on("swing", (m: { by: string; weapon: number }) => remote(m.by)?.trigger("attack"));
+  on("shot", (m: { by: string; weapon: number }) => remote(m.by)?.trigger(kindFor(m.weapon, "shoot")));
+  on("projectile", (m: { by: string; weapon: number }) => remote(m.by)?.trigger(kindFor(m.weapon, "shoot")));
   on("hit", (m: { target: string; amount: number }) => viewOf(m.target)?.trigger(m.amount >= 30 ? "hit_heavy" : "hit"));
 
   return {
