@@ -128,8 +128,9 @@ export class QuestWorld {
       const up = pos.clone().normalize();
       const ref = Math.abs(up.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
       const north = ref.addScaledVector(up, -ref.dot(up)).normalize();
-      const east = new THREE.Vector3().crossVectors(north, up).normalize();
-      root.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(east, up, north));
+      // Right-handed basis (x = up × north): a proper rotation, not a mirror.
+      const x = new THREE.Vector3().crossVectors(up, north).normalize();
+      root.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, up, north));
       const prop: Prop = { def, root, pos };
       this.build(prop);
       this.group.add(root);
