@@ -6,7 +6,8 @@
 // backpack share the back socket, so each socket gets one group holding everything worn there.
 
 import * as THREE from "three/webgpu";
-import { COSMETIC_BY_ID, COSMETIC_SOCKET, type CosmeticSlot, type Socket } from "@firstlight/shared/content/items";
+import { COSMETIC_BY_ID, COSMETICS, COSMETIC_SOCKET, type CosmeticSlot, type Socket } from "@firstlight/shared/content/items";
+import { keptSamples } from "./warmup.ts";
 import { disposeTree } from "./dispose.ts";
 
 /** Anything with sockets (AvatarView). */
@@ -245,10 +246,79 @@ export function buildCosmetic(id: string, anims: Anim[]): THREE.Object3D | null 
     case "bone_bell":
       add(g, new THREE.ConeGeometry(0.12, 0.2, 10), m(0xeae2d0), 0, 0.05, -0.1);
       break;
+    case "bracken_stitch_cap":
+      add(g, dome(0.27), m(0x5e7a3a), 0, -0.1);
+      for (let i = 0; i < 4; i++) add(g, new THREE.BoxGeometry(0.025, 0.06, 0.02), m(0xc8a97e), -0.09 + i * 0.06, 0.02, 0.23, 0, 0, 0.3);
+      break;
+    case "dockfold_cape":
+      cape(0x3e5568);
+      for (const s of [-1, 1]) add(g, new THREE.PlaneGeometry(0.2, 0.95), m(0x6f7780, 0, 1, 0.1, true), s * 0.25, -0.45, -0.06, 0.16, s * 0.2);
+      add(g, new THREE.BoxGeometry(0.16, 0.05, 0.04), m(0xc9a46a, 0, 1, 0.6), 0, 0.03, 0.04);
+      break;
+    case "petalwake_mask":
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2;
+        add(g, new THREE.ConeGeometry(0.075, 0.16, 4), m(i % 2 ? 0x8a6a43 : 0xf09a7a), Math.sin(a) * 0.12, Math.cos(a) * 0.12, 0.04, 0, 0, -a);
+      }
+      add(g, new THREE.CircleGeometry(0.06, 8), m(0xc9a46a), 0, 0, 0.08);
+      break;
+    case "fenweave_cape":
+      cape(0x4a3260);
+      for (let i = 0; i < 5; i++) add(g, new THREE.BoxGeometry(0.035, 0.9, 0.02), m(0x8a6a43), -0.28 + i * 0.14, -0.48, -0.08, 0.16, 0, 0.15);
+      add(g, new THREE.TorusGeometry(0.12, 0.018, 5, 12), m(0xc9a46a, 0, 1, 0.6), 0, -0.15, -0.11);
+      break;
+    case "copper_orbit_pack":
+      add(g, new THREE.BoxGeometry(0.35, 0.42, 0.18), m(0xa8774f, 0, 1, 0.65), 0, -0.02, -0.1);
+      add(g, new THREE.TorusGeometry(0.15, 0.025, 6, 16), m(0x3e5568, 0, 1, 0.5), 0, 0.04, -0.2);
+      add(g, new THREE.BoxGeometry(0.025, 0.21, 0.02), m(0xf2b544, 0.5), 0, 0.04, -0.23, 0, 0, 0.5);
+      break;
+    case "dewdial_crown": {
+      add(g, new THREE.TorusGeometry(0.23, 0.025, 6, 20), m(0x8a6a43), 0, -0.02, 0, Math.PI / 2);
+      const beads = new THREE.Group();
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2;
+        add(g, new THREE.ConeGeometry(0.035, 0.14, 5), m(0x5e7a3a), Math.cos(a) * 0.23, 0.05, Math.sin(a) * 0.23);
+        add(beads, new THREE.OctahedronGeometry(0.04), m(0x9bdde4, 2.5), Math.cos(a) * 0.25, 0.2, Math.sin(a) * 0.25);
+      }
+      g.add(beads);
+      anims.push({ obj: beads, kind: "spin" });
+      break;
+    }
+    case "wickfloat_mantle":
+      cape(0x3e5568);
+      for (let i = 0; i < 3; i++) {
+        add(g, new THREE.TorusGeometry(0.06, 0.014, 5, 12), m(0x8a6a43), -0.23 + i * 0.23, -0.3 - i * 0.18, -0.11);
+        add(g, new THREE.OctahedronGeometry(0.028), m(0xf5a623, 3), -0.23 + i * 0.23, -0.3 - i * 0.18, -0.13);
+      }
+      break;
+    case "quietshift_lens":
+      add(g, new THREE.TorusGeometry(0.1, 0.025, 5, 8), m(0xa8774f, 0, 1, 0.65), 0.1, 0.02, 0.03);
+      add(g, new THREE.CircleGeometry(0.084, 8), m(0x9bdde4, 0.8, 0.7), 0.1, 0.02, 0.035);
+      add(g, new THREE.BoxGeometry(0.09, 0.025, 0.035), m(0x6f7780), 0.22, 0.02, 0.01);
+      break;
     default:
       add(g, new THREE.BoxGeometry(0.2, 0.2, 0.2), m(0xffffff));
   }
   return g;
+}
+
+/** Retained sample of every catalogue item, including its shadow/material variants. */
+export function cosmeticWarmupHook(scene: THREE.Object3D, at: () => THREE.Vector3): { forceAll(on: boolean): void } {
+  return {
+    forceAll(on) {
+      if (!on) {
+        keptSamples("cosmeticWarmup")?.removeFromParent();
+        return;
+      }
+      const group = keptSamples("cosmeticWarmup", () => COSMETICS.flatMap(({ id }) => {
+        const obj = buildCosmetic(id, []);
+        return obj ? [obj] : [];
+      }));
+      if (!group) return;
+      group.position.copy(at());
+      scene.add(group);
+    },
+  };
 }
 
 /** Keeps the cosmetics on one avatar in sync with a comma-separated id list (PlayerState.cosmetics). */
