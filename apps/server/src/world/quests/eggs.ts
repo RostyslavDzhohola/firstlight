@@ -5,7 +5,8 @@
 //
 // E8 (shoot the billboard lamps) tests hitscan "shot" broadcasts (observed by QuestSystem) against
 // the five lamp spheres. Projectiles don't count (by design the lamps are a Stillshot job: 62 m up,
-// out of every other hitscan's range).
+// out of every other hitscan's range). Each player has their own sequence and sees their own lamps
+// go dark, so nobody can block someone else's run by shooting a lamp first.
 
 import type { Client } from "@colyseus/core";
 import { EGG_RULES, type EggId } from "@firstlight/shared/content/secrets";
@@ -41,8 +42,8 @@ const RIDDLES: Partial<Record<EggId, string>> = {
 export class EggLogic {
   private readonly sys: QuestSystem;
   private readonly lamps: WorldObjectDef[];
-  /** Lamp id → when it relights (ms); absent = lit. */
-  private readonly lampsOff = new Map<string, number>();
+  /** Session id → lamp id → when that player's lamp relights (ms); absent = lit. */
+  private readonly dark = new Map<string, Map<string, number>>();
   /** `${userId}|${egg}` → when the puzzle unlocks again after a wrong answer (survives relog and death). */
   private readonly locked = new Map<string, number>();
   /** userId → wrong keypad codes in a row and the lockout end (E7). */
@@ -54,7 +55,7 @@ export class EggLogic {
   }
 
   syncTo(c: Client) {
-    for (const id of this.lampsOff.keys()) c.send("lamp", { id, on: false });
+    for (const id of this.dark.get(c.sessionId)?.keys() ?? []) c.send("lamp", { id, on: false });
   }
 
   // ---------------------------------------------------------------- per tick
@@ -80,10 +81,14 @@ export class EggLogic {
   tickRoom(now: number) {
     for (const [k, until] of this.locked) if (until <= now) this.locked.delete(k);
     for (const [k, v] of this.keypad) if (v.until && v.until <= now) this.keypad.delete(k);
-    for (const [id, until] of this.lampsOff) {
-      if (until > now) continue;
-      this.lampsOff.delete(id);
-      this.sys.room.broadcast("lamp" as never, { id, on: true } as never);
+    for (const [sid, lamps] of this.dark) {
+      const a = this.sys.actor(sid);
+      for (const [id, until] of lamps) {
+        if (until > now && a) continue;
+        lamps.delete(id);
+        a?.client.send("lamp", { id, on: true });
+      }
+      if (!lamps.size) this.dark.delete(sid);
     }
   }
 
@@ -255,14 +260,16 @@ export class EggLogic {
     const d: V3 = [m.dx, m.dy, m.dz];
     const maxT = m.hit ? dist3(o, m.hit) : (w?.falloffTo ?? w?.range ?? 0);
     const now = Date.now();
+    const q = this.sys.qp(a);
+    let dark = this.dark.get(a.id);
     for (const lamp of this.lamps) {
-      if (this.lampsOff.has(lamp.id)) continue;
+      if ((dark?.get(lamp.id) ?? 0) > now) continue; // already out for this player
       const c = this.sys.pos(lamp);
       const t = raySphere(o, d, c, EGG_RULES.E8_LAMP_RADIUS);
       if (t === null || t > maxT + EGG_RULES.E8_LAMP_RADIUS) continue;
-      this.lampsOff.set(lamp.id, now + EGG_RULES.E8_WINDOW_MS);
-      this.sys.room.broadcast("lamp" as never, { id: lamp.id, on: false } as never);
-      const q = this.sys.qp(a);
+      if (!dark) this.dark.set(a.id, (dark = new Map()));
+      dark.set(lamp.id, now + EGG_RULES.E8_WINDOW_MS);
+      a.client.send("lamp", { id: lamp.id, on: false });
       if (!q.e8.hit.size || now - q.e8.startedAt > EGG_RULES.E8_WINDOW_MS) q.e8 = { hit: new Set(), startedAt: now };
       q.e8.hit.add(lamp.id);
       if (q.e8.hit.size >= EGG_RULES.E8_LAMPS) {

@@ -56,6 +56,9 @@ interface Noise {
   explosion: boolean;
 }
 
+/** Egg NPC timers (tests shorten them): a Golden Hopbit that was popped or ran into its burrow stays away this long. */
+export const EGG_NPC = { goldenBackMs: 15 * 60_000 };
+
 export class NpcSystem implements RoomSystem {
   readonly world: NpcWorld;
   readonly ground: Ground;
@@ -82,6 +85,8 @@ export class NpcSystem implements RoomSystem {
   readonly tagged = new Map<string, number>();
   readonly repeatKills = new Map<string, number[]>();
   readonly cosmeticPity = new Map<string, { life: number; kills: number; at: number }>();
+  /** Spawn point id → when its Golden Hopbit may come back (it doesn't return with every pack respawn). */
+  readonly goldenBack = new Map<number, number>();
   private grid = new Map<number, Npc[]>();
   private readonly restore: (() => void)[] = [];
 
@@ -213,6 +218,10 @@ export class NpcSystem implements RoomSystem {
     for (let i = 0; i < pt.members.length; i++) {
       if (g.dead[i] || g.members[i]) continue;
       const m = pt.members[i]!;
+      if (m.golden && now < (this.goldenBack.get(pt.id) ?? 0)) {
+        g.dead[i] = true; // still away: the pack comes back without it
+        continue;
+      }
       const def = NPC_DEFS[m.def]!;
       const d = walk(pt.dir, pt.t1, m.a, pt.t2, m.b, this.ground.R);
       const R = this.ground.R;
@@ -373,6 +382,7 @@ export class NpcSystem implements RoomSystem {
   retire(n: Npc) {
     if (n.dead) return;
     n.dead = true;
+    if (n.def.id === "golden_hopbit" && n.point) this.goldenBack.set(n.point.id, this.world.now() + EGG_NPC.goldenBackMs);
     const g = this.groupOf(n);
     if (g) {
       g.dead[n.member] = true;

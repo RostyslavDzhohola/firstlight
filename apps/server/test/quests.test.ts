@@ -9,6 +9,7 @@ import { pileStore } from "../src/world/piles.ts";
 import { EGG_LIMITS } from "../src/world/quests/eggs.ts";
 import type { QuestSystem } from "../src/world/quests/QuestSystem.ts";
 import { progressStore } from "../src/world/quests/store.ts";
+import { emitNpcEvent } from "../src/world/npc/tuning.ts";
 import { safeLeave, startServer, waitFor } from "./helpers.ts";
 import { bot, dieAndRejoin, ground, harness, invIds, me, near, objAt, offPad, padAt, serverRoom, sleep, tpAndWait, until, tp } from "./quest-helpers.ts";
 
@@ -122,14 +123,15 @@ describe("missions", () => {
     await sleep(300); // one quest tick at the guide arms the reach mission
     expect(b.you.missions.map((m: any) => m.goal)).toEqual([8, 1, 1]);
 
-    // Hunt: 8 Hopbits inside Clover Fields; kills elsewhere or of other kinds don't count.
-    const room = serverRoom(b);
-    const fields = ground("arcadia", placeDir("clover_fields"));
-    emitGameEvent(room, { type: "kill", npcKind: "hopbit", killerId: b.id, pos: padAt("arcadia", 9) });
-    emitGameEvent(room, { type: "kill", npcKind: "sparkfly", killerId: b.id, pos: fields });
-    for (let i = 0; i < 7; i++) emitGameEvent(room, { type: "kill", npcKind: "hopbit", killerId: b.id, pos: fields });
+    // Hunt: 8 Hopbits inside Clover Fields (by the NPC lane's spawn area); kills elsewhere, without an
+    // area, or of other kinds don't count.
+    const kill = (def: string, area: string | null) => emitNpcEvent({ kind: "kill", body: "arcadia", def, npcLevel: 2, players: [b.id], userIds: ["errand"], area });
+    kill("hopbit", "lacefall");
+    kill("hopbit", null);
+    kill("sparkfly", "clover_fields");
+    for (let i = 0; i < 7; i++) kill("hopbit", "clover_fields");
     await waitFor(() => b.you.missions.find((m: any) => m.id === "A1").progress === 7);
-    emitGameEvent(room, { type: "kill", npcKind: "hopbit", killerId: null, creditIds: [b.id], pos: fields });
+    kill("hopbit", "clover_fields");
     await waitFor(() => b.you.missions.find((m: any) => m.id === "A1").done);
     expect(b.last("missionDone")).toEqual({ id: "A1", xp: 80, coins: 30 });
     expect(b.you.coins).toBe(30);

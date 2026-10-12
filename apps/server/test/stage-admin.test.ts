@@ -118,3 +118,15 @@ describe("admin assistance", () => {
     expect(hall()).not.toContain("E6");
   });
 });
+
+describe("quest bookkeeping", () => {
+  it("the per-player action limiter forgets players once their last second of actions is over", async () => {
+    QUEST_RULES.PILE_SWEEP_MS = 100;
+    const b = await bot("clicker", "arcadia");
+    const quests = serverRoom(b).systems.find((s) => "eggs" in s) as unknown as { ops: Map<string, number[]> };
+    b.send("questSync");
+    b.send("mission", { action: "accept", id: "A1" }); // far from the guide: refused, but counted
+    await until("counted", () => quests.ops.size === 1);
+    await until("pruned", () => quests.ops.size === 0, 4000);
+  });
+});

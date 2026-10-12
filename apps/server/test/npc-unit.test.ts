@@ -7,6 +7,7 @@ import { bossArena } from "@firstlight/shared/content/arenas";
 import { NF, NPC_INDEX, PLANET_COSMETIC } from "@firstlight/shared/content/npcs";
 import { dealDamage } from "../src/world/combat.ts";
 import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
+import { EGG_NPC } from "../src/world/npc/NpcSystem.ts";
 import { PITY_IDLE_MS, pruneRewardMaps, repeatDecay, rollDrops } from "../src/world/npc/rewards.ts";
 import { buildSpawnPoints } from "../src/world/npc/spawns.ts";
 import { fakeWorld } from "./npcWorld.ts";
@@ -126,6 +127,34 @@ describe("rewards", () => {
       }
     }
     expect(got).toBe(3 * expected);
+  });
+});
+
+describe("egg NPCs", () => {
+  it("a Golden Hopbit that was popped stays away on its own timer, not the pack's", () => {
+    const w = fakeWorld("arcadia");
+    NPC_TUNING.respawnScale = 0.01;
+    w.sys.ambientOn = true;
+    const g = w.sys.groups.find((x) => x.point.members.some((m) => m.golden))!;
+    expect(g).toBeTruthy();
+    w.addPlayer("p", g.point.pos, 3);
+    const golden = () => g.members.find((m) => m?.def.id === "golden_hopbit") ?? null;
+    const clearPack = () => {
+      for (const m of [...g.members]) if (m && !m.dead) w.sys.retire(m);
+    };
+    for (let i = 0; i < 4 && !g.active; i++) w.step(600);
+    expect(golden()).not.toBeNull();
+    w.sys.retire(golden()!); // popped (or ran into its burrow)
+    clearPack();
+    expect(g.cleared).toBe(true);
+    for (let i = 0; i < 40 && !g.active; i++) w.step(600); // the pack respawns quickly…
+    expect(g.active).toBe(true);
+    expect(g.members.some((m) => m && m.def.id === "hopbit")).toBe(true);
+    expect(golden()).toBeNull(); // …without the Golden Hopbit
+    w.clock.t += EGG_NPC.goldenBackMs;
+    clearPack();
+    for (let i = 0; i < 40 && !golden(); i++) w.step(600);
+    expect(golden()).not.toBeNull();
   });
 });
 

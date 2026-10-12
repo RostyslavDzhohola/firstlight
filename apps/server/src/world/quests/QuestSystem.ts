@@ -9,7 +9,7 @@ import { BACKPACK_SLOTS, HOTBAR_SLOTS, emptyLife, type LifeProgress } from "@fir
 import { COSMETIC_BY_ID, COSMETIC_SLOTS, isEggItem, itemName, itemStack, sellValue, shopEntry, type CosmeticSlot } from "@firstlight/shared/content/items";
 import { MEDAL_BY_ID, MEDAL_RULES } from "@firstlight/shared/content/medals";
 import { MISSION_BY_ID, MISSIONS, missionGoal, type MissionDef } from "@firstlight/shared/content/missions";
-import { offsetDir, padName, place, placeDir } from "@firstlight/shared/content/places";
+import { offsetDir, padName, placeDir } from "@firstlight/shared/content/places";
 import { BOSS_FIRSTS, EGG_BY_ID, type EggId } from "@firstlight/shared/content/secrets";
 import { inReach, objectPos, objectsOn, surfaceDistance, WORLD_OBJECT_BY_ID, type WorldObjectDef } from "@firstlight/shared/content/world";
 import { WEAPON_BY_ID, WEAPONS } from "@firstlight/shared/content/weapons";
@@ -37,8 +37,6 @@ export const QUEST_RULES = {
   PAD_TOUCH_M: 6,
   /** Extra metres allowed between client and server positions when using objects. */
   INTERACT_SLACK: 1.5,
-  /** Hunt kills count up to this far outside the named area's radius. */
-  AREA_SLACK: 20,
   FAST_TRAVEL_COOLDOWN_MS: 2000,
   /** Reach triggers ignore height differences up to this (uneven lookouts). */
   REACH_VERTICAL: 6,
@@ -48,6 +46,8 @@ export const QUEST_RULES = {
   LONG_SHOT_WINDOW_MS: 150,
   /** A boss fight an admin touched (heal, damage, boss spawn…) stays "assisted" this long. */
   ADMIN_ASSIST_MS: 15 * 60_000,
+  /** E9: how close to Ticket #000 a player must be when it reaches the freight lift. */
+  LIFT_REACH_M: 15,
   /** Expired piles (staged scenes) are swept this often. */
   PILE_SWEEP_MS: 5000,
   SLOW_TICK_MS: 200,
@@ -423,6 +423,7 @@ export class QuestSystem implements RoomSystem {
     this.eggs.tickRoom(now);
     if (now - this.lastSweep >= QUEST_RULES.PILE_SWEEP_MS) {
       this.lastSweep = now;
+      for (const [id, list] of this.ops) if (!list.length || now - list[list.length - 1]! >= 1000) this.ops.delete(id);
       // Expired piles (staged scenes): gone for every copy of the body.
       for (const id of pileStore.current.sweep(this.body, now)) emitPileEvent({ kind: "remove", id, body: this.body });
     }
@@ -637,15 +638,8 @@ export class QuestSystem implements RoomSystem {
       if (!a || a.dead) continue;
       for (const { m, def } of this.activeMissions(a)) {
         if (!def.hunt) continue;
-        if (def.hunt.place && e.area !== def.hunt.place) {
-          // No matching spawn-area id: fall back to the kill position, if there is one.
-          if (!e.pos) continue;
-          const p = place(def.hunt.place);
-          const d = placeDir(p);
-          const R = this.room.bodyDef.radius;
-          const l = Math.hypot(e.pos[0], e.pos[1], e.pos[2]) || 1;
-          if (chordMetres(d, e.pos[0] / l, e.pos[1] / l, e.pos[2] / l, R) > p.radius + QUEST_RULES.AREA_SLACK) continue;
-        }
+        // Kills count by the spawn area the NPC lane reports (NPCs without one never count for a place).
+        if (def.hunt.place && e.area !== def.hunt.place) continue;
         const ti = def.hunt.targets.findIndex((t) => t.npcKind === e.npcKind);
         if (ti < 0) continue;
         const counts = (m.counts ??= def.hunt.targets.map(() => 0));
@@ -893,8 +887,24 @@ export class QuestSystem implements RoomSystem {
       const bossId = BOSS_OF_NPC[e.boss];
       if (credit.length && bossId) emitGameEvent(this.room, { type: "kill", npcKind: e.boss, bossId, killerId: null, creditIds: credit });
     } else if (e.kind === "egg") {
-      if (this.room.actors.has(e.sessionId)) emitGameEvent(this.room, { type: "secretStep", playerId: e.sessionId, secretId: e.egg, step: e.egg === "E3" ? "burrow" : "lift" });
+      const a = this.actor(e.sessionId);
+      if (!a) return;
+      // E9 ends in a teleport to the Vat Room: only on foot at the lift with Ticket #000, out of combat
+      // (it was a remote escape teleport).
+      if (e.egg === "E9" && !this.atLift(a)) {
+        this.toast(a, "The freight lift's doors close without you. Stay with Ticket #000 — and out of a fight.", "warn");
+        return;
+      }
+      emitGameEvent(this.room, { type: "secretStep", playerId: e.sessionId, secretId: e.egg, step: e.egg === "E3" ? "burrow" : "lift" });
     }
+  }
+
+  /** Alive, out of combat and within reach of Ticket #000 as it reaches the lift (E9). */
+  private atLift(a: PlayerActor): boolean {
+    if (a.dead || Date.now() < a.combatUntil) return false;
+    const npcs = npcSystemOf(this.room);
+    const ticket = npcs ? [...npcs.npcs.values()].find((n) => n.def.id === "ticket_000" && n.egg?.walker === a.id) : undefined;
+    return !!ticket && dist3(ticket.pos, actorPos(a)) <= QUEST_RULES.LIFT_REACH_M;
   }
 
   /** Honour a spawn request (egg penalties, staged scenes) through the room's NPC system. */
