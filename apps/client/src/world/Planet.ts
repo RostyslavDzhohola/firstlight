@@ -60,6 +60,7 @@ export class Planet {
   private reqId = 0;
   private material: THREE.MeshStandardNodeMaterial;
   private waterMaterial: THREE.MeshBasicNodeMaterial;
+  private readonly waterDummy: THREE.Mesh;
   private settings: ResolvedSettings;
   private lastStream = 0;
   private readonly unsubscribe: () => void;
@@ -120,6 +121,16 @@ export class Planet {
     this.group.add(this.props.group);
     this.material = terrainMaterialFor(this.settings);
     this.waterMaterial = waterMaterialFor(this.settings.water);
+    // A hidden one-triangle water patch at the planet centre: the warm-up protocol shows hidden
+    // objects, so the water shader compiles even when no lake is in range yet.
+    this.waterDummy = createWaterMesh(
+      { positions: new Float32Array([0, 0, 0, 0.01, 0, 0, 0, 0.01, 0]), depth: new Float32Array([1, 1, 1]), indices: new Uint16Array([0, 1, 2]) },
+      this.waterMaterial,
+    );
+    this.waterDummy.name = "waterWarmupDummy";
+    this.waterDummy.visible = false;
+    this.waterDummy.frustumCulled = false;
+    this.waterGroup.add(this.waterDummy);
 
     this.applySettings(this.settings);
     this.unsubscribe = ctx.onChange((s) => this.applySettings(s));
@@ -154,6 +165,7 @@ export class Planet {
     if (wm !== this.waterMaterial) {
       this.waterMaterial = wm;
       for (const c of this.loaded.values()) if (c.water) c.water.material = wm;
+      this.waterDummy.material = wm;
     }
     this.waterGroup.visible = s.on.water;
     this.rig.applySettings(s);
@@ -329,6 +341,7 @@ export class Planet {
     this.props.dispose();
     this.skyPlanets.dispose();
     this.rig.dispose();
+    this.waterDummy.geometry.dispose();
     this.scene.remove(this.group);
   }
 }

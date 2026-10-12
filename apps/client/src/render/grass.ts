@@ -10,20 +10,20 @@ import * as THREE from "three/webgpu";
 import {
   abs, attribute, cameraPosition, cameraViewMatrix, cos, cross, distance, float, floor, fract, Fn, hash, mix,
   mx_noise_float, normalize, positionGeometry, positionPrevious, pow, select, sin, smoothstep, time,
-  transformDirection, uniform, vec3, varying,
+  transformDirection, uniform, vec3, varying, renderGroup,
 } from "three/tsl";
 import { CHUNK_QUADS, hash4, mulberry32, type Face } from "@firstlight/shared";
 import type { BodyLook } from "./looks.ts";
 import type { ResolvedSettings } from "./quality.ts";
 
 export const grassUniforms = {
-  radius: uniform(40),
-  height: uniform(0.45),
-  width: uniform(0.07),
-  windDir: uniform(new THREE.Vector3(1, 0, 0)),
-  windStrength: uniform(0.55),
-  root: uniform(new THREE.Color(0x2c7a34)),
-  tip: uniform(new THREE.Color(0x9fdc58)),
+  radius: uniform(40).setGroup(renderGroup),
+  height: uniform(0.45).setGroup(renderGroup),
+  width: uniform(0.07).setGroup(renderGroup),
+  windDir: uniform(new THREE.Vector3(1, 0, 0)).setGroup(renderGroup),
+  windStrength: uniform(0.55).setGroup(renderGroup),
+  root: uniform(new THREE.Color(0x2c7a34)).setGroup(renderGroup),
+  tip: uniform(new THREE.Color(0x9fdc58)).setGroup(renderGroup),
 };
 
 export function applyGrassLook(look: BodyLook) {

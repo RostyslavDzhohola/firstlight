@@ -175,12 +175,11 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
     setProbedTier(t) {
       stored = { ...stored, autoTier: t };
       saveStored(stored);
-      if (!forcedTier && !stored.tier) {
-        tier = t;
-        auto = true;
-        ladder.reset();
-        apply();
-      }
+      // The probe switches tiers while measuring; always land on the effective choice.
+      tier = forcedTier ?? stored.tier ?? t;
+      auto = !forcedTier && !stored.tier;
+      ladder.reset();
+      apply();
     },
     setFeature(f, on) {
       const features = { ...stored.features };

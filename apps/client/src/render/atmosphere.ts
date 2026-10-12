@@ -12,7 +12,7 @@
 import * as THREE from "three/webgpu";
 import {
   abs, cameraPosition, clamp, dot, exp, float, Fn, length, max, mix, normalize, output, positionWorld,
-  positionWorldDirection, pow, select, smoothstep, uniform, vec4,
+  positionWorldDirection, pow, select, smoothstep, uniform, vec4, renderGroup,
 } from "three/tsl";
 import type { BodyLook } from "./looks.ts";
 import type { ResolvedSettings } from "./quality.ts";
@@ -22,27 +22,27 @@ const col = (hex = 0xffffff) => uniform(new THREE.Color(hex));
 
 /** Shared atmosphere uniforms (one set per renderer). */
 export const atmo = {
-  up: uniform(new THREE.Vector3(0, 1, 0)),
-  sunDir: uniform(new THREE.Vector3(0, 1, 0)),
-  sunColor: col(),
-  zenith: col(),
-  horizon: col(),
-  ground: col(),
-  glow: col(),
-  glowStrength: uniform(0.6),
-  mie: uniform(0.5),
-  sunDisc: uniform(20),
-  sunCosInner: uniform(0.9998),
-  sunCosOuter: uniform(0.9997),
-  planetR: uniform(500),
-  waterLevel: uniform(0),
-  fogDensity: uniform(0.003),
-  fogFalloff: uniform(0.05),
-  fogStart: uniform(50),
+  up: uniform(new THREE.Vector3(0, 1, 0)).setGroup(renderGroup),
+  sunDir: uniform(new THREE.Vector3(0, 1, 0)).setGroup(renderGroup),
+  sunColor: col().setGroup(renderGroup),
+  zenith: col().setGroup(renderGroup),
+  horizon: col().setGroup(renderGroup),
+  ground: col().setGroup(renderGroup),
+  glow: col().setGroup(renderGroup),
+  glowStrength: uniform(0.6).setGroup(renderGroup),
+  mie: uniform(0.5).setGroup(renderGroup),
+  sunDisc: uniform(20).setGroup(renderGroup),
+  sunCosInner: uniform(0.9998).setGroup(renderGroup),
+  sunCosOuter: uniform(0.9997).setGroup(renderGroup),
+  planetR: uniform(500).setGroup(renderGroup),
+  waterLevel: uniform(0).setGroup(renderGroup),
+  fogDensity: uniform(0.003).setGroup(renderGroup),
+  fogFalloff: uniform(0.05).setGroup(renderGroup),
+  fogStart: uniform(50).setGroup(renderGroup),
   /** 1 = height fog (Medium+), 0 = plain radial fog (Low). */
-  fogHeight: uniform(1),
-  haze: uniform(0.0008),
-  inscatter: uniform(0.6),
+  fogHeight: uniform(1).setGroup(renderGroup),
+  haze: uniform(0.0008).setGroup(renderGroup),
+  inscatter: uniform(0.6).setGroup(renderGroup),
 };
 
 /** Sky radiance (linear) towards a unit direction. `disc` adds the HDR sun disc. */

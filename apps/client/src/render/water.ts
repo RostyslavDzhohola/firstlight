@@ -10,16 +10,16 @@
 import * as THREE from "three/webgpu";
 import {
   attribute, cameraPosition, clamp, dot, exp, float, max, mix, mx_noise_float, mx_noise_vec3, normalize,
-  positionWorld, pow, reflect, sin, smoothstep, time, uniform, vec3,
+  positionWorld, pow, reflect, sin, smoothstep, time, uniform, vec3, renderGroup,
 } from "three/tsl";
 import { atmo, skyColor } from "./atmosphere.ts";
 import type { BodyLook } from "./looks.ts";
 import type { WaterMeshData } from "../world/terrain.worker.ts";
 
 export const waterUniforms = {
-  shallow: uniform(new THREE.Color(0x3fe0c8)),
-  deep: uniform(new THREE.Color(0x0d5a78)),
-  foam: uniform(new THREE.Color(0xeafffa)),
+  shallow: uniform(new THREE.Color(0x3fe0c8)).setGroup(renderGroup),
+  deep: uniform(new THREE.Color(0x0d5a78)).setGroup(renderGroup),
+  foam: uniform(new THREE.Color(0xeafffa)).setGroup(renderGroup),
 };
 
 export function applyWaterLook(look: BodyLook) {

@@ -6,7 +6,7 @@
 import * as THREE from "three/webgpu";
 import {
   cdl, float, fract, hue, interleavedGradientNoise, luminance, mix, mrt, output, pass, renderOutput,
-  screenCoordinate, time, uniform, vec2, vec3, vec4, velocity,
+  screenCoordinate, time, uniform, vec2, vec3, vec4, velocity, renderGroup,
 } from "three/tsl";
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
 import { fxaa } from "three/addons/tsl/display/FXAANode.js";
@@ -30,17 +30,17 @@ export const MENU_GRADE: GradeParams = { slope: [0.96, 0.96, 1.0], offset: [0.01
 
 /** Shared post uniforms (one instance per renderer). */
 export const postUniforms = {
-  bloomStrength: uniform(0.35),
-  bloomRadius: uniform(0.45),
-  bloomThreshold: uniform(1.15),
-  gradeSlope: uniform(new THREE.Vector3(1, 1, 1)),
-  gradeOffset: uniform(new THREE.Vector3(0, 0, 0)),
-  gradePower: uniform(new THREE.Vector3(1, 1, 1)),
-  gradeSat: uniform(1),
-  gradeHue: uniform(0),
-  vignette: uniform(0.28),
-  grain: uniform(0.035),
-  aoStrength: uniform(0.85),
+  bloomStrength: uniform(0.35).setGroup(renderGroup),
+  bloomRadius: uniform(0.45).setGroup(renderGroup),
+  bloomThreshold: uniform(1.15).setGroup(renderGroup),
+  gradeSlope: uniform(new THREE.Vector3(1, 1, 1)).setGroup(renderGroup),
+  gradeOffset: uniform(new THREE.Vector3(0, 0, 0)).setGroup(renderGroup),
+  gradePower: uniform(new THREE.Vector3(1, 1, 1)).setGroup(renderGroup),
+  gradeSat: uniform(1).setGroup(renderGroup),
+  gradeHue: uniform(0).setGroup(renderGroup),
+  vignette: uniform(0.28).setGroup(renderGroup),
+  grain: uniform(0.035).setGroup(renderGroup),
+  aoStrength: uniform(0.85).setGroup(renderGroup),
 };
 
 export function setGrade(g: GradeParams) {

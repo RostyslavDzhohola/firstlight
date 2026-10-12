@@ -140,11 +140,7 @@ export class Game {
     this.ctx.scene.add(this.self.root);
     this.player.placeCamera(this.ctx.camera);
     this.applyCharsVisibility();
-    const updateWorld = () => {
-      const p = this.player.pos;
-      this.planet.update(p.x, p.y, p.z, this.ctx.camera, performance.now());
-      this.particles.update(1 / 60, this.ctx.camera.position, performance.now());
-    };
+    const updateWorld = () => this.updateWorldForWarmup();
 
     // Quality probe on first visit (SPEC §7.3), then the warm-up protocol (SPEC §4.1).
     const st = this.ctx.stored();
@@ -162,8 +158,7 @@ export class Game {
         this.ctx.setProbedTier("medium");
       }
     }
-    setLoading("Warming up shaders…", 0.92);
-    await warmup(this.ctx, { frames: 4, hooks: [this.warmupHook()], beforeFrame: updateWorld });
+    // The bench crowd exists before warm-up so its shaders compile behind the loading screen.
     if (flags.has("bench") && !this.bench) {
       const crowd = Math.max(0, Math.min(200, Number(flags.get("benchcrowd")) || 0));
       const spawn = this.player.pos.clone();
@@ -177,7 +172,10 @@ export class Game {
       }, crowd);
       this.player.frozen = true;
       this.applyCharsVisibility();
+      this.bench.update(0, performance.now(), 16, this.ctx.camera);
     }
+    setLoading("Warming up shaders…", 0.92);
+    await warmup(this.ctx, { frames: 4, hooks: [this.warmupHook()], beforeFrame: updateWorld });
     hideLoading();
   }
 
@@ -193,12 +191,21 @@ export class Game {
   async applyGraphics(change: () => void) {
     change();
     if (!this.running) return;
+    this.running = false;
     setLoading("Applying graphics settings…", 0.5);
     try {
-      await warmup(this.ctx, { frames: 3, hooks: [this.warmupHook()] });
+      await warmup(this.ctx, { frames: 3, hooks: [this.warmupHook()], beforeFrame: () => this.updateWorldForWarmup() });
     } finally {
       hideLoading();
+      this.running = true;
+      this.last = performance.now();
     }
+  }
+
+  private updateWorldForWarmup() {
+    const f = this.bench ? this.bench.focus : this.player.pos;
+    this.planet.update(f.x, f.y, f.z, this.ctx.camera, performance.now());
+    this.particles.update(1 / 60, this.ctx.camera.position, performance.now());
   }
 
   private async reprobe() {

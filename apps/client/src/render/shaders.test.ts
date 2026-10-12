@@ -37,7 +37,14 @@ function build(renderer: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE
   b.material = material;
   b.camera = camera;
   b.context.material = material;
+  // The renderer normally collects lights from the render list; do it here so lighting and
+  // shadow-receiving code is generated too.
+  const lights: THREE.Light[] = [];
+  scene.traverse((o) => {
+    if ((o as THREE.Light).isLight) lights.push(o as THREE.Light);
+  });
   b.lightsNode = (renderer as any).lighting.getNode(scene, camera);
+  b.lightsNode.setLights(lights);
   b.fogNode = scene.fogNode ?? null;
   b.environmentNode = null;
   b.build();
@@ -97,6 +104,7 @@ for (const backendName of ["webgpu", "webgl2"] as const) {
   describe(`shader generation (${backendName})`, () => {
     const renderer = new THREE.WebGPURenderer({ canvas: fakeCanvas(), forceWebGL: backendName === "webgl2" });
     // Minimal stand-ins for what init() would provide (no GPU here): feature queries and limits.
+    renderer.shadowMap.enabled = true;
     const be = renderer.backend as any;
     (renderer as any)._initialized = true;
     if (backendName === "webgpu") {

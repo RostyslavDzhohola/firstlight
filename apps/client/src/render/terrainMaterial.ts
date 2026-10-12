@@ -8,7 +8,7 @@ import * as THREE from "three/webgpu";
 import {
   abs, attribute, cameraPosition, clamp, cross, dFdx, dFdy, distance, dot, float, length, mix, normalize,
   normalViewGeometry, normalWorldGeometry, positionView, positionWorld, sign, sin, smoothstep, step,
-  texture, uniform, vec2, vec3, vertexColor,
+  texture, uniform, vec2, vec3, vertexColor, renderGroup,
 } from "three/tsl";
 import { atmo } from "./atmosphere.ts";
 import { detailNoiseTexture } from "./noiseTexture.ts";
@@ -16,10 +16,10 @@ import type { ResolvedSettings } from "./quality.ts";
 
 export const terrainUniforms = {
   /** How much of the baked concavity AO to apply (less when GTAO runs). */
-  aoStrength: uniform(0.85),
+  aoStrength: uniform(0.85).setGroup(renderGroup),
   /** 1 on Low: darken by the baked sun visibility (no shadow map there). */
-  bakedSun: uniform(0),
-  detailStrength: uniform(1),
+  bakedSun: uniform(0).setGroup(renderGroup),
+  detailStrength: uniform(1).setGroup(renderGroup),
 };
 
 /**
