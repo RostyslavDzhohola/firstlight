@@ -8,6 +8,7 @@ import { characterRepo, MemoryCharacterRepo } from "../src/world/characters.ts";
 import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
 import { MemoryPileStore, pileStore } from "../src/world/piles.ts";
 import { MemoryProgressStore, progressStore } from "../src/world/quests/store.ts";
+import { copyStateStore, MemoryCopyStateStore } from "../src/world/copyState.ts";
 import { hub } from "../src/world/hub.ts";
 import type { BodyId } from "@firstlight/shared";
 import { newCharacter } from "@firstlight/shared/content/character";
@@ -16,6 +17,7 @@ export async function startServer(limits: Partial<{ maxClients: number; soloFill
   characterRepo.current = new MemoryCharacterRepo();
   pileStore.current = new MemoryPileStore();
   progressStore.current = new MemoryProgressStore();
+  copyStateStore.current = new MemoryCopyStateStore();
   // Quiet worlds by default: tests that need ambient enemies or bosses opt in via NPC_TUNING.
   resetTuning();
   NPC_TUNING.ambient = false;

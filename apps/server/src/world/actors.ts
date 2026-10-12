@@ -109,9 +109,10 @@ export interface NpcActor {
   armour?: number;
   /**
    * Optional mitigation (replaces `armour`): shields, boss weak windows, invulnerable states.
-   * Gets the damage after the weak-point multiplier and returns what to apply; ≤ 0 = no damage.
+   * Gets the damage after the weak-point multiplier (and who dealt it) and returns what to apply;
+   * ≤ 0 = no damage.
    */
-  mitigate?: (amount: number, weak: boolean, fromDir?: V3) => number;
+  mitigate?: (amount: number, weak: boolean, fromDir?: V3, attacker?: PlayerActor | NpcActor | null) => number;
   /**
    * Weak-point test for a ray that hit this NPC's capsule at distance `t` (bosses: does the ray pass
    * through an exposed weak-point volume?). Replaces the generic "top of the capsule" test.

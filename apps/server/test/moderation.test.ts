@@ -4,13 +4,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { Client, type Room } from "@colyseus/sdk";
 import { CLOSE } from "@firstlight/shared/net/social";
-import { isBlockedEitherWay, listBans, listReports } from "../src/db/index.ts";
+import { fileReport, isBlockedEitherWay, listBans, listReports } from "../src/db/index.ts";
 import { stmt } from "../src/db/game-db.ts";
 import { accountLinks } from "../src/auth/links.ts";
 import { mountOps } from "../src/ops/admin.ts";
 import { banExplainer } from "../src/social/refusal.ts";
 import { recordError } from "../src/ops/errors.ts";
-import { ANALYTICS, blockedEitherWay, partyOf } from "../src/social/index.ts";
+import { ANALYTICS, blockedEitherWay, partyOf, partyRoomFor } from "../src/social/index.ts";
 import { api, Browser, decodeJwt, ORIGIN, play, startAuthServer, ticketFor, type AuthServer } from "./auth-helpers.ts";
 import { safeLeave, waitFor } from "./helpers.ts";
 
@@ -220,6 +220,130 @@ describe("parties and saving", () => {
   });
 });
 
+describe("account merges and blocks (F12 social review 1)", () => {
+  /** A saved account (email) that is not in the world. */
+  async function savedAccount(s: AuthServer, ip: string, email: string) {
+    const b = new Browser(s, ip);
+    await b.playToken();
+    await b.saveWithEmail(email);
+    const token = (await b.client.token()).data!.token;
+    return { id: String(decodeJwt(token).sub), token };
+  }
+
+  /** A guest on a new browser who enters `body` and joins `leader`'s party. */
+  async function guestInParty(s: AuthServer, ip: string, leader: Room) {
+    const b = new Browser(s, ip);
+    const token = await b.playToken();
+    const id = String(decodeJwt(token).sub);
+    const g = await enter(s, token, "portus", ip);
+    await waitFor(() => st(leader).players?.has(g.sessionId));
+    const invites = inbox<any>(g, "party:invite");
+    leader.send("party", { action: "invite", target: g.sessionId });
+    await waitFor(() => invites.length > 0);
+    g.send("party", { action: "accept", target: invites[0].from });
+    await waitFor(() => !!me(g)?.party && me(g).party === me(leader)?.party);
+    return { b, id, room: g };
+  }
+
+  it("signing a guest into an account that blocked, or was blocked by, a party member splits the party before routing", async () => {
+    const s = await start();
+    const off = s.accounts.links.on((e) => accountLinks.emit(e));
+    try {
+      const bee = await enter(s, "dev:mrg_bee:Bee", "portus");
+      // Outgoing: account A blocked Bee earlier.
+      const a = await savedAccount(s, "198.51.100.80", "mrg-a@example.test");
+      const aRoom = await enter(s, a.token, "portus", "198.51.100.80");
+      await waitFor(() => st(bee).players?.has(aRoom.sessionId));
+      aRoom.send("social:block", { target: bee.sessionId });
+      await waitFor(() => blockedEitherWay(a.id, "mrg_bee"));
+      await safeLeave(aRoom);
+      const ga = await guestInParty(s, "198.51.100.81", bee);
+      await ga.b.saveWithEmail("mrg-a@example.test");
+      expect(partyOf(a.id)).toEqual([a.id]);
+      expect(partyOf("mrg_bee")).toEqual(["mrg_bee"]);
+      expect(partyRoomFor(a.id, "portus")).toBeUndefined();
+
+      // Incoming: Bee blocked account C earlier.
+      const c = await savedAccount(s, "198.51.100.82", "mrg-c@example.test");
+      const cRoom = await enter(s, c.token, "portus", "198.51.100.82");
+      await waitFor(() => st(bee).players?.has(cRoom.sessionId));
+      bee.send("social:block", { target: cRoom.sessionId });
+      await waitFor(() => blockedEitherWay("mrg_bee", c.id));
+      await safeLeave(cRoom);
+      const gc = await guestInParty(s, "198.51.100.83", bee);
+      await gc.b.saveWithEmail("mrg-c@example.test");
+      expect(partyOf(c.id)).toEqual([c.id]);
+      expect(partyOf("mrg_bee")).toEqual(["mrg_bee"]);
+      expect(partyRoomFor(c.id, "portus")).toBeUndefined();
+    } finally {
+      off();
+    }
+  });
+
+  it("an account that keeps its own party loses the members its guest blocked", async () => {
+    const s = await start();
+    const off = s.accounts.links.on((e) => accountLinks.emit(e));
+    try {
+      // Account D leads a party with Cid.
+      const d = await savedAccount(s, "198.51.100.84", "mrg-d@example.test");
+      const dRoom = await enter(s, d.token, "portus", "198.51.100.84");
+      const cid = await enter(s, "dev:mrg_cid:Cid", "portus");
+      await waitFor(() => st(dRoom).players?.has(cid.sessionId));
+      const invites = inbox<any>(cid, "party:invite");
+      dRoom.send("party", { action: "invite", target: cid.sessionId });
+      await waitFor(() => invites.length > 0);
+      cid.send("party", { action: "accept", target: d.id });
+      await waitFor(() => partyOf(d.id).length === 2);
+      // On another browser D plays as a guest, blocks Cid, then signs in: the blocks merge into D.
+      const gb = new Browser(s, "198.51.100.85");
+      const gToken = await gb.playToken();
+      const g = await enter(s, gToken, "portus", "198.51.100.85");
+      await waitFor(() => st(g).players?.has(cid.sessionId));
+      g.send("social:block", { target: cid.sessionId });
+      await waitFor(() => blockedEitherWay(String(decodeJwt(gToken).sub), "mrg_cid"));
+      await gb.saveWithEmail("mrg-d@example.test");
+      expect(blockedEitherWay(d.id, "mrg_cid")).toBe(true);
+      expect(partyOf(d.id)).toEqual([d.id]);
+      expect(partyOf("mrg_cid")).toEqual(["mrg_cid"]);
+      expect(partyRoomFor("mrg_cid", "portus")).toBeUndefined();
+    } finally {
+      off();
+    }
+  });
+});
+
+describe("report limits survive saving (F12 social review 4)", () => {
+  it("a guest who used up their reports can't file more after saving", async () => {
+    const s = await start();
+    const off = s.accounts.links.on((e) => accountLinks.emit(e));
+    try {
+      const targets: Room[] = [];
+      for (let i = 0; i < 6; i++) targets.push(await enter(s, `dev:rl_t${i}:Tee${i}`, "portus"));
+      const gb = new Browser(s, "198.51.100.90");
+      const gToken = await gb.playToken();
+      const g = await enter(s, gToken, "portus", "198.51.100.90");
+      await waitFor(() => st(g).players?.size === 7);
+      const toasts = inbox<any>(g, "toast");
+      for (let i = 0; i < 5; i++) g.send("report", { target: targets[i]!.sessionId, reason: "griefing" });
+      await waitFor(() => toasts.filter((t) => /Report sent/.test(t.text)).length === 5);
+      let closed = 0;
+      g.onLeave((c) => (closed = c));
+      await gb.saveWithEmail("rl-saver@example.test");
+      await waitFor(() => closed === CLOSE.MERGED);
+      const savedToken = (await gb.client.token()).data!.token;
+      const a = await enter(s, savedToken, "portus", "198.51.100.90");
+      await waitFor(() => st(a).players?.has(targets[5]!.sessionId));
+      const after = inbox<any>(a, "toast");
+      a.send("report", { target: targets[5]!.sessionId, reason: "griefing" });
+      await waitFor(() => after.length > 0);
+      expect(after[0].text).toBe("Report already sent. Thanks.");
+      expect(listReports(s.accounts.db)).toHaveLength(5);
+    } finally {
+      off();
+    }
+  });
+});
+
 describe("session analytics", () => {
   it("a session row starts on join, spans travel, records backend/tier and ends after leaving; load-test players are skipped", async () => {
     ANALYTICS.END_GRACE_MS = 300;
@@ -351,5 +475,27 @@ describe("/admin and /stats", () => {
     expect((await post("/admin/announce", "text=Server+restart+in+5+minutes")).status).toBe(303);
     const page = await (await owner.fetch("/admin?done=Announced")).text();
     expect(page).toContain("Announced");
+  });
+
+  it("reports are paged, so a flood can't push older ones out of reach (F12 should-fix 15)", async () => {
+    const s = await start();
+    const owner = new Browser(s, "198.51.100.42");
+    await owner.playToken();
+    await owner.saveWithEmail("owner42@example.test");
+    await owner.fetch("/admin/claim?token=claim-token-for-tests");
+    const db = s.accounts.db;
+    fileReport(db, { reporter: "real_rep", target: "real_bad", reason: "the real one", now: 1_000 });
+    for (let i = 0; i < 120; i++) fileReport(db, { reporter: "flooder", target: `t${i}`, reason: `spam ${i}`, now: 2_000 + i });
+    const first = await (await owner.fetch("/admin")).text();
+    expect(first).toContain("<b>121</b><span>open reports");
+    expect(first).toContain("spam 119");
+    expect(first).not.toContain("the real one");
+    expect(first).toContain('href="/admin?reports=2#reports"');
+    const last = await (await owner.fetch("/admin?reports=3")).text();
+    expect(last).toContain("the real one");
+    expect(last).not.toContain("spam 119");
+    expect(last).toContain('href="/admin?reports=2#reports"');
+    // Out-of-range pages show the last one.
+    expect(await (await owner.fetch("/admin?reports=99")).text()).toContain("the real one");
   });
 });

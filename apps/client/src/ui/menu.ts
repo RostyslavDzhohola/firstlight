@@ -201,8 +201,11 @@ export class Menu {
           const c = readClaims(t);
           if (!c?.guest || this.mode !== "pause") return;
           sub.textContent += " · Guest";
-          const save = item("save", "Save your character", `Keep ${c.name || "this character"} on any browser with an email code`, "", saveSlot);
+          // The server only emails a code to a new address after the first level-up (F12: OTP budget).
+          const ready = (this.game.hud.you?.level ?? 1) >= 2;
+          const save = item("save", "Save your character", ready ? `Keep ${c.name || "this character"} on any browser with an email code` : "Unlocks at level 2: play a little first", "", saveSlot);
           el("span", "fl-menu__badge", save.right, "Guest");
+          save.b.disabled = !ready;
           save.b.onclick = () => void showSavePrompt({ name: c.name });
           saveSlot.hidden = false;
         })

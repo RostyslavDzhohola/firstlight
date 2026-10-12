@@ -378,7 +378,7 @@ export function showSignIn(): Promise<"signed-in" | "dismissed"> {
         m.card,
         {
           title: "Sign in with email",
-          intro: "We'll email you a 6-digit code. Your saved character comes with you.",
+          intro: "If a character was saved with this email, we'll send it a 6-digit code. Your saved character comes with you.",
           submit: "Sign in",
           done: "Signed in.",
         },

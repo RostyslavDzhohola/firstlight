@@ -10,7 +10,8 @@ import type { Game } from "../src/app.ts";
 import { accountLinks } from "../src/auth/links.ts";
 import { banUser, isBlockedEitherWay, listReports, openGameDb, setGameDb, type Db } from "../src/db/index.ts";
 import { env } from "../src/env.ts";
-import { revokeVoiceForUser } from "../src/world/voice/index.ts";
+import { liveRooms, SOCIAL_RULES } from "../src/social/index.ts";
+import { revokeVoiceForUser, VOICE_LIMITS, VoiceSystem } from "../src/world/voice/index.ts";
 import { TURN_API, turnCredentials } from "../src/world/voice/turn.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 
@@ -20,13 +21,40 @@ const rooms: Room[] = [];
 let run = 0;
 const uid = (name: string) => `${name}${run}`;
 
+// No test may reach Cloudflare (or anything off this machine): TURN is unconfigured unless a test
+// installs a stub, TURN calls go only to that stub, and any other non-local fetch is refused. Real
+// TURN keys from the environment are never restored in this file (late revoke retries must not
+// find them).
+const realFetch = globalThis.fetch;
+let turnStub: ((url: string, init: RequestInit) => Promise<Response>) | null = null;
+function guardFetch() {
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (url.startsWith(TURN_API)) {
+      if (!turnStub) throw new Error("test made an unmocked TURN call");
+      return turnStub(url, init ?? {});
+    }
+    const host = new URL(url).hostname;
+    if (host !== "127.0.0.1" && host !== "localhost") throw new Error(`test refused a non-local fetch to ${host}`);
+    return realFetch(input as never, init);
+  });
+}
+
 beforeEach(async () => {
   run++;
+  env.turnKeyId = "";
+  env.turnKeyToken = "";
+  turnStub = null;
+  guardFetch();
   game = await startServer();
 });
 afterEach(async () => {
   for (const r of rooms.splice(0)) await safeLeave(r);
   await game.close();
+  env.turnKeyId = "";
+  env.turnKeyToken = "";
+  turnStub = null;
+  vi.restoreAllMocks();
 });
 
 type Msg = { type: string; data: any };
@@ -246,6 +274,23 @@ describe("blocks from the Tab list", () => {
     await waitFor(() => got(a, "voice:drop").some((m) => m.peer === b.sessionId));
     await waitFor(() => got(b, "voice:drop").some((m) => m.peer === a.sessionId));
   });
+
+  it("the voice panel's block shares the Tab list's block-list cap", async () => {
+    const saved = SOCIAL_RULES.MAX_BLOCKS;
+    SOCIAL_RULES.MAX_BLOCKS = 1;
+    try {
+      const a = await bot("ann"), b = await bot("ben"), c = await bot("cat");
+      a.send("voice:block", { target: b.sessionId });
+      await barrier(a);
+      expect(got(a, "voice:blocked")).toContainEqual({ target: b.sessionId });
+      a.send("voice:block", { target: c.sessionId });
+      await barrier(a);
+      expect(got(a, "voice:denied")).toContainEqual({ action: "voice:block", reason: "your block list is full" });
+      expect(got(a, "voice:blocked")).not.toContainEqual({ target: c.sessionId });
+    } finally {
+      SOCIAL_RULES.MAX_BLOCKS = saved;
+    }
+  });
 });
 
 describe("radio", () => {
@@ -364,24 +409,50 @@ describe("voice safety persistence", () => {
     expect(got(b, "voice:denied")).toContainEqual({ action: "voice:report", reason: "too many reports" });
     expect(listReports(db)).toHaveLength(1);
   });
+
+  it("report limits are per account: a rejoin doesn't reset them, and Tab-list reports share them (F12 should-fix 15)", async () => {
+    const bob = await bot("bob");
+    const [ann, cat, dan, eve, fay, gus] = [await bot("ann"), await bot("cat"), await bot("dan"), await bot("eve"), await bot("fay"), await bot("gus")];
+    bob.send("voice:report", { target: ann!.sessionId, reason: "Other" });
+    await barrier(bob);
+    expect(got(bob, "voice:reported")).toHaveLength(1);
+
+    const rejoin = async (r: Room) => {
+      await safeLeave(r);
+      rooms.splice(rooms.indexOf(r), 1);
+      return bot("bob");
+    };
+    const bob2 = await rejoin(bob);
+    bob2.send("voice:report", { target: ann!.sessionId, reason: "Other" });
+    await barrier(bob2);
+    expect(got(bob2, "voice:denied")).toContainEqual({ action: "voice:report", reason: "too many reports" });
+
+    // One budget of five per 10 minutes across the Tab list and the voice panel.
+    bob2.send("report", { target: cat!.sessionId, reason: "harassment" });
+    for (const t of [dan!, eve!, fay!]) bob2.send("voice:report", { target: t.sessionId, reason: "Other" });
+    await barrier(bob2);
+    expect(listReports(db)).toHaveLength(5);
+    const bob3 = await rejoin(bob2);
+    bob3.send("voice:report", { target: gus!.sessionId, reason: "Other" });
+    await barrier(bob3);
+    expect(got(bob3, "voice:denied")).toContainEqual({ action: "voice:report", reason: "too many reports" });
+    expect(listReports(db)).toHaveLength(5);
+  });
 });
 
 describe("TURN credentials", () => {
-  const saved = { id: env.turnKeyId, token: env.turnKeyToken };
   let calls: { url: string; init: RequestInit }[];
   /** Mock Cloudflare: mint returns user-<n>; `revokeStatus` decides each revoke's HTTP status. */
-  function mockTurn(opts: { mintStatus?: number; revokeStatus?: () => number } = {}) {
+  function mockTurn(opts: { mintStatus?: number | (() => number); revokeStatus?: () => number } = {}) {
     env.turnKeyId = "key-123";
     env.turnKeyToken = "tok-secret";
-    const realFetch = globalThis.fetch;
     calls = [];
     let n = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      const url = String(input instanceof Request ? input.url : input);
-      if (!url.startsWith(TURN_API)) return realFetch(input as never, init);
-      calls.push({ url, init: init ?? {} });
+    turnStub = async (url, init) => {
+      calls.push({ url, init });
       if (url.endsWith("/revoke")) return new Response(null, { status: opts.revokeStatus?.() ?? 204 });
-      if (opts.mintStatus && opts.mintStatus !== 201) return new Response("nope", { status: opts.mintStatus });
+      const mintStatus = typeof opts.mintStatus === "function" ? opts.mintStatus() : opts.mintStatus;
+      if (mintStatus && mintStatus !== 201) return new Response("nope", { status: mintStatus });
       n++;
       return new Response(
         JSON.stringify({
@@ -396,16 +467,11 @@ describe("TURN credentials", () => {
         }),
         { status: 201, headers: { "Content-Type": "application/json" } },
       );
-    });
+    };
   }
   const mintCalls = () => calls.filter((c) => c.url.endsWith("generate-ice-servers"));
   const revokes = (user: string) => calls.filter((c) => c.url.endsWith(`/credentials/${user}/revoke`));
 
-  afterEach(() => {
-    env.turnKeyId = saved.id;
-    env.turnKeyToken = saved.token;
-    vi.restoreAllMocks();
-  });
 
   it("mints per-player relay credentials with the right request, filters STUN and :53, revokes on block and leave", async () => {
     mockTurn();
@@ -433,9 +499,10 @@ describe("TURN credentials", () => {
     await waitFor(() => got(a, "voice:ice").length === 2);
     expect(mintCalls()).toHaveLength(1);
 
-    // Blocking ann revokes her relay credential and hands her a fresh one.
+    // Blocking ann (who was talking to ben) revokes her relay credential and hands her a fresh one.
     b.send("voice:enable", { age16: true });
     await waitFor(() => got(b, "voice:ice").length > 0);
+    expect(await relays(a, b)).toBe(true);
     b.send("voice:block", { target: a.sessionId });
     await waitFor(() => revokes(annUser).length > 0);
     await waitFor(() => got(a, "voice:ice").length === 3);
@@ -534,5 +601,140 @@ describe("TURN credentials", () => {
     await waitFor(() => got(a, "voice:ice").length === 2);
     expect(got(a, "voice:ice")[1]).toMatchObject({ available: false });
     expect(mintCalls()).toHaveLength(1);
+  });
+
+  const userOf = (r: Room, i = 0) => got(r, "voice:ice")[i].iceServers[0].username as string;
+  const unavailable = (r: Room) => got(r, "voice:ice").filter((m) => !m.available);
+
+  it("repeated blocks from someone who never talked to you don't touch your relay credentials (F12 B1)", async () => {
+    mockTurn();
+    const vic = await bot("vic"), eve = await bot("eve"); // eve never enables voice
+    await enable(vic);
+    const cred = userOf(vic);
+    for (let i = 0; i < 11; i++) eve.send("social:block", { target: vic.sessionId, on: true });
+    for (let i = 0; i < 3; i++) {
+      eve.send("social:block", { target: vic.sessionId, on: false });
+      eve.send("social:block", { target: vic.sessionId, on: true });
+    }
+    eve.send("voice:block", { target: vic.sessionId });
+    await barrier(eve, vic);
+    await barrier(vic);
+    expect(revokes(cred)).toHaveLength(0);
+    expect(mintCalls()).toHaveLength(1);
+    expect(got(vic, "voice:ice")).toHaveLength(1);
+    expect(unavailable(vic)).toHaveLength(0);
+  });
+
+  it("a block between players who talked rotates the blocked player's credential once per 10 minutes, outside their mint budget (F12 B1)", async () => {
+    mockTurn();
+    const vic = await bot("vic"), eve = await bot("eve");
+    await enable(vic, eve);
+    expect(await relays(eve, vic)).toBe(true);
+    const cred = userOf(vic);
+    eve.send("social:block", { target: vic.sessionId, on: true });
+    await waitFor(() => got(vic, "voice:ice").length === 2);
+    await waitFor(() => revokes(cred).length === 1);
+    expect(userOf(vic, 1)).not.toBe(cred);
+
+    // Blocking again, unblocking and re-blocking (Tab list or voice panel) rotates nothing more.
+    for (let i = 0; i < 5; i++) eve.send("social:block", { target: vic.sessionId, on: true });
+    for (let i = 0; i < 4; i++) {
+      eve.send("social:block", { target: vic.sessionId, on: false });
+      eve.send("social:block", { target: vic.sessionId, on: true });
+    }
+    eve.send("social:block", { target: vic.sessionId, on: false });
+    eve.send("voice:block", { target: vic.sessionId });
+    await barrier(eve, vic);
+    await barrier(vic);
+    expect(got(vic, "voice:ice")).toHaveLength(2);
+    expect(unavailable(vic)).toHaveLength(0);
+    expect(mintCalls()).toHaveLength(3); // vic, eve, one rotation
+
+    // The rotation was not charged to vic: the enable used 1 of 10, so 9 more mints are allowed.
+    for (let i = 0; i < 9; i++) expect(turnCredentials.allowMint(uid("vic"))).toBe(true);
+    expect(turnCredentials.allowMint(uid("vic"))).toBe(false);
+  });
+
+  it("a rotation that can't mint keeps the blocked player's working credential (F12 B1)", async () => {
+    let mintStatus = 201;
+    mockTurn({ mintStatus: () => mintStatus });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const vic = await bot("vic"), eve = await bot("eve");
+    await enable(vic, eve);
+    expect(await relays(eve, vic)).toBe(true);
+    const cred = userOf(vic);
+    mintStatus = 500;
+    eve.send("voice:block", { target: vic.sessionId });
+    await waitFor(() => mintCalls().length === 3);
+    await waitFor(() => warn.mock.calls.length > 0);
+    await barrier(vic);
+    expect(revokes(cred)).toHaveLength(0);
+    expect(unavailable(vic)).toHaveLength(0);
+    expect(got(vic, "voice:ice")).toHaveLength(1);
+  });
+
+  it("a second blocker inside the 10-minute rotation cooldown gets the hang-up and the relay cutoff, but no second revocation", async () => {
+    // Documented limit (F12 review nit): the server cutoff for the second pair is signalling refusal
+    // plus voice:drop to both clients; an honest blocker closes its own connection. Revoking again
+    // would need revocation scoped to one pair's allocation, which TURN credentials don't offer.
+    mockTurn();
+    const vic = await bot("vic"), eve = await bot("eve"), ann = await bot("ann");
+    await enable(vic, eve, ann);
+    expect(await relays(eve, vic)).toBe(true);
+    eve.send("voice:block", { target: vic.sessionId });
+    await waitFor(() => got(vic, "voice:ice").length === 2);
+    const rotated = userOf(vic, 1);
+    expect(await relays(ann, vic)).toBe(true); // ann links up with vic on the new credential
+    ann.send("voice:block", { target: vic.sessionId });
+    await barrier(ann, vic);
+    await barrier(vic);
+    expect(got(ann, "voice:drop")).toContainEqual({ peer: vic.sessionId });
+    expect(got(vic, "voice:drop")).toContainEqual({ peer: ann.sessionId });
+    expect(await relays(ann, vic)).toBe(false);
+    expect(await relays(vic, ann)).toBe(false);
+    expect(revokes(rotated)).toHaveLength(0);
+    expect(got(vic, "voice:ice")).toHaveLength(2);
+  });
+
+  it("a failed 6-hour refresh is retried after TURN_RETRY_MS instead of being postponed by every tick", async () => {
+    const savedRetry = VOICE_LIMITS.TURN_RETRY_MS;
+    VOICE_LIMITS.TURN_RETRY_MS = 2_500; // longer than the 1 s slow tick, like the real 30 s
+    try {
+      let mintStatus = 201;
+      mockTurn({ mintStatus: () => mintStatus });
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const vic = await bot("vic");
+      await enable(vic);
+      const voice = [...liveRooms].flatMap((r) => r.systems).find((s): s is VoiceSystem => s instanceof VoiceSystem && s.sessions.has(vic.sessionId))!;
+      mintStatus = 500;
+      voice.sessions.get(vic.sessionId)!.mintedAt -= VOICE.REMINT_MS;
+      await waitFor(() => mintCalls().length === 2, 4000); // the refresh failed
+      mintStatus = 201;
+      await waitFor(() => got(vic, "voice:ice").length === 2, 8000); // retried and recovered
+      expect(got(vic, "voice:ice")[1]).toMatchObject({ available: true });
+      expect(mintCalls()).toHaveLength(3);
+      expect(unavailable(vic)).toHaveLength(0);
+    } finally {
+      VOICE_LIMITS.TURN_RETRY_MS = savedRetry;
+    }
+  });
+
+  it("a failed 6-hour re-mint keeps credentials that are still valid, and drops them once expired", async () => {
+    let mintStatus = 201;
+    mockTurn({ mintStatus: () => mintStatus });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const vic = await bot("vic");
+    await enable(vic);
+    const voice = [...liveRooms].flatMap((r) => r.systems).find((s): s is VoiceSystem => s instanceof VoiceSystem && s.sessions.has(vic.sessionId))!;
+    const session = voice.sessions.get(vic.sessionId)!;
+    mintStatus = 500;
+    session.mintedAt -= VOICE.REMINT_MS; // the 6-hour refresh is due
+    await waitFor(() => mintCalls().length === 2, 4000);
+    await barrier(vic);
+    expect(unavailable(vic)).toHaveLength(0);
+    expect(session.ice).not.toBeNull();
+    session.mintedAt -= VOICE.TURN_TTL_S * 1000; // now past its lifetime
+    await waitFor(() => unavailable(vic).length === 1, 4000);
+    expect(session.ice).toBeNull();
   });
 });

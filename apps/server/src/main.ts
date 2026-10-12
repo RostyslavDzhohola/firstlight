@@ -11,6 +11,7 @@ import { characterRepo } from "./world/characters.ts";
 import { pileStore } from "./world/piles.ts";
 import { SqliteCharacterRepo, SqlitePileStore } from "./world/sqliteStores.ts";
 import { progressStore, SqliteProgressStore } from "./world/quests/store.ts";
+import { copyStateStore, SqliteCopyStateStore } from "./world/copyState.ts";
 import { mountOps } from "./ops/admin.ts";
 import { endAllSessions } from "./social/index.ts";
 import { banExplainer } from "./social/refusal.ts";
@@ -34,6 +35,9 @@ const accounts = await createAccounts({
 characterRepo.current = new SqliteCharacterRepo(gameDb());
 pileStore.current = new SqlitePileStore(gameDb());
 progressStore.current = new SqliteProgressStore(gameDb());
+// Boss respawn timers, cleared camps/packs and broken props per copy: rooms save them as they change
+// and on dispose (graceful shutdown included, SPEC §5.1), and restore them when the copy reopens.
+copyStateStore.current = new SqliteCopyStateStore(gameDb());
 bannedCheck.current = (userId) => isBanned(gameDb(), userId);
 
 const game = await createGame({

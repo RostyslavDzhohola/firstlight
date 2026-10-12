@@ -31,6 +31,8 @@ export interface GameOptions {
   revalidate?: (userId: string) => string | null;
 }
 
+const LOOPBACK: ReadonlySet<string> = new Set(["127.0.0.1", "::1"]);
+
 /** /api/play limits (F12 S2): calls per 10 s and unused seats, per account and per address. */
 export const PLAY_LIMITS = {
   windowMs: 10_000,
@@ -140,16 +142,19 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     recent.push(now);
     playCalls.set(identity.userId, recent);
     const ip = directRequestIp(req);
+    // Per-address limits skip load-test bots and loopback (local development and in-process tests;
+    // production requests always carry the edge's client address).
+    const perAddress = !identity.loadtest && !(ip !== null && LOOPBACK.has(ip));
     if (!identity.loadtest) {
       const key = ip ?? "unknown";
       const fromIp = (ipCalls.get(key) ?? []).filter((t) => now - t < PLAY_LIMITS.windowMs);
-      if (fromIp.length >= PLAY_LIMITS.ipCalls) {
+      if (perAddress && fromIp.length >= PLAY_LIMITS.ipCalls) {
         res.status(429).json({ ok: false, error: "slow down" });
         return;
       }
       fromIp.push(now);
       ipCalls.set(key, fromIp);
-      if (pendingSeats.forUser(identity.userId, now) >= PLAY_LIMITS.userSeats || pendingSeats.forIp(key, now) >= PLAY_LIMITS.ipSeats) {
+      if (pendingSeats.forUser(identity.userId, now) >= PLAY_LIMITS.userSeats || (perAddress && pendingSeats.forIp(key, now) >= PLAY_LIMITS.ipSeats)) {
         res.status(429).json({ ok: false, error: "slow down" });
         return;
       }

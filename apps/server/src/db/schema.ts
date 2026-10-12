@@ -147,8 +147,19 @@ export const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (user_id, stat)
   );
   `,
-  // 3 (lane f12-core: voice_mute): admin voice mutes survive restarts and deploys (F12 S12).
-  // Other lanes adding a migration: renumber at merge; never reorder applied ones.
+  // 3: per-copy world state that outlives a room (boss timers and fights, cleared spawn groups,
+  // broken props). Self-contained and idempotent, so it can be renumbered when lanes merge.
+  `
+  CREATE TABLE IF NOT EXISTS copy_state (
+    copy_key    TEXT NOT NULL,
+    system      TEXT NOT NULL,
+    state_json  TEXT NOT NULL,
+    saved_at    INTEGER NOT NULL,
+    PRIMARY KEY (copy_key, system)
+  );
+  `,
+  // 4 (lane f12-core: voice_mute): admin voice mutes survive restarts and deploys (F12 S12).
+  // Idempotent, so it stays correct if lanes are renumbered before a deploy.
   `
   CREATE TABLE IF NOT EXISTS voice_mute (
     user_id   TEXT PRIMARY KEY,
