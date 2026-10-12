@@ -46,7 +46,7 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 - [x] M8 Social and operations (merged 1a2ee50; E2E T7 passes). The `/stats` test-session check
   isn't recorded.
 - [ ] M9 Hardening: F2 load test, perf pass (F10/F11) and the E2E run (T4 blocked) done.
-  - [ ] F12 three-model review: blockers fixed, reviewers sign off
+  - [x] F12 three-model review: blockers fixed, all three reviewers sign off (b274af9)
   - [ ] Security pass (auth flows, rate limits, admin routes, input validation, no secrets in the bundle)
   - [ ] Voice launch items from docs/risk-assessment.md §5: a public complaints/appeals contact and
     a terms page (voice rules, 16+). Admin voice-mutes are persisted in game.db (migration 5, 668ec82).
@@ -71,7 +71,7 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 | F9 screenshot share | ✅ | browser E2E T7 |
 | F10 M1 ≥ 60 fps Medium | ✅* | re-run on 668ec82 (weather, NPCs, horses, collision): ?bench=g1 59.9 fps p50, p95 18.6 ms; night storm 59.9 fps p50, p95 18.5 ms; 0 shader builds (T3 Chromium, not plugged-in Chrome) |
 | F11 Low on weak profile | ✅* | re-run on 668ec82: `?bench=g1&tier=low&cpuslow=4`: 59.2 fps p50 (mean 57.0), p95 21.9 ms, p99 25.6 ms, 0 shader builds (D29 emulation) |
-| F12 three-model review | 🛠 | Round 1: Codex 7, Sonnet 2, Opus 2 blockers, all fixed and verified closed. Final round on 668ec82: **Sonnet yes**; Codex no (2 payout-after-commit blockers); Opus no (two-packet teleport via the planet centre). Fixing in lane/f12-r2 + lane/f12-r2-auth (docs/reviews/2026-10-12-f12-final-*) |
+| F12 three-model review | ✅ | **All three sign off on b274af9** (docs/reviews/2026-10-12-f12-confirm-{codex-sol,opus-5-5,sonnet-5-5}.md). Round 1: Codex 7, Sonnet 2, Opus 2 blockers; final round: Codex 2, Opus 1; all fixed and verified closed by probes. Remaining should-fixes in lane/t9-fixes and lane/f12-polish |
 | F13 photo mode + 5 scenes | ✅ | browser E2E T8; `stage <n>` + docs/staged-scenes.md |
 
 ## Lanes (who owns what right now)
@@ -98,8 +98,10 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 | F12 NPC/boss (Opus B2 respawn persistence, evade, arena scaling/cover, NPC LOS) | MERGED f787f37 (Codex round 1 fixed; migration 3 = copy_state) | — |
 | F12 weather/sky (override broadcast, stage sky, Hollowmere look, nits) | MERGED 5e9d5ce (Codex round 1 fixed) | — |
 | Horses (M11 #2) | MERGED acdfcb3 (deployed; Codex-reviewed) | — |
-| F12 round 2: payouts, teleport, movement sweep, quest/onboarding nits | Opus sub-agent | ../fl-wt-f12r2 (lane/f12-r2) |
-| F12 round 2: auth/social (OTP enumeration and drain, self-delete, prune) | Opus sub-agent | ../fl-wt-f12r2b (lane/f12-r2-auth) |
+| F12 round 2: payouts, teleport, movement sweep, quest/onboarding nits | MERGED b274af9 | — |
+| F12 round 2: auth/social (OTP enumeration and drain, self-delete, prune) | MERGED ae6810b | — |
+| T9 findings + confirmation should-fixes (save prompt, portal step, warm-up, payout retry, names, dodge, camera) | Opus sub-agent | ../fl-wt-t9 (lane/t9-fixes) |
+| F12 polish (prop-top climb, public OTP budget, load-test pickup, origin-check pin) | Opus sub-agent | ../fl-wt-polish (lane/f12-polish) |
 
 ## Measured numbers
 
