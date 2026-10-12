@@ -7,6 +7,7 @@ import { PHRASES } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
 import { Effects, weaponColor } from "../render/effects.ts";
 import { Hud, type YouPlus } from "../ui/hud.ts";
+import { PhraseWheel } from "../ui/phraseWheel.ts";
 import type { Game } from "./Game.ts";
 import { showSavePrompt } from "../ui/account.ts";
 import { getPlayToken, isDevGuest, readClaims } from "../net/auth.ts";
@@ -23,11 +24,12 @@ export class CombatClient {
   private scoped = false;
   private baseFov = 75;
   deadUntilRespawn = false;
-  private phraseMode = false;
+  private readonly wheel: PhraseWheel;
 
   constructor(private readonly game: Game) {
     this.effects = new Effects(game.ctx.scene);
     this.hud = new Hud();
+    this.wheel = new PhraseWheel((id) => this.game.net.room?.send("phrase", { id }));
   }
 
   /** Attach room message handlers (call after each join). */
@@ -152,25 +154,14 @@ export class CombatClient {
       g.hud.setLogout(g.hud.you?.logoutEndsAt ?? null, Date.now() + g.net.serverOffset);
     }
     this.updatePickupPrompt();
+    // The phrase wheel (G) owns the mouse and number keys while it is open.
+    if (this.wheel.update(input, now, !this.deadUntilRespawn)) return;
     if (this.deadUntilRespawn || !input.locked) return;
 
     // Hotbar and utility keys.
     for (let i = 0; i < 4; i++) if (input.pressed.has(`Digit${i + 1}`)) room.send("equip", { slot: i });
     if (input.pressed.has("KeyR")) room.send("reload", { slot: g.hud.you?.selected ?? 0 });
     if (input.pressed.has("KeyE")) this.tryPickup();
-    if (input.pressed.has("KeyG")) {
-      this.phraseMode = !this.phraseMode;
-      if (this.phraseMode) g.hud.toast("Phrase: press 1 Truce? · 2 Help! · 3 Follow me · 4 Boss here · 5 Thanks · 6 GG", "info");
-    }
-    if (this.phraseMode) {
-      for (let i = 0; i < PHRASES.length; i++) {
-        if (input.pressed.has(`Digit${i + 1}`)) {
-          room.send("phrase", { id: i });
-          this.phraseMode = false;
-        }
-      }
-      return;
-    }
 
     const { def, tier } = this.currentWeapon();
     const t = def.tiers[tier - 1]!;
@@ -277,5 +268,6 @@ export class CombatClient {
 
   dispose() {
     this.effects.dispose();
+    this.wheel.dispose();
   }
 }
