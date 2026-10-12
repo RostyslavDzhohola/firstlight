@@ -13,7 +13,7 @@ import { NET, PHRASES, type InvItem, type YouState } from "@firstlight/shared/ne
 import { ANIM, BodyState, NpcState, PF, PileState, PlayerState } from "@firstlight/shared/net/schema";
 import { z } from "zod";
 import type { Identity } from "../auth/identity.ts";
-import { actorPos, pushHistory, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
+import { actorPos, inSaddle, pushHistory, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
 import { characterRepo, withTx } from "./characters.ts";
 import { CLOSE, hub, type HubRoom } from "./hub.ts";
 
@@ -157,7 +157,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     this.onMessage("fire", fireSchema, (c, m) => {
       const a = this.actor(c);
       if (!a || a.dead) return;
-      if (a.mounted) return void c.send("denied", { action: "fire", reason: "mounted" }); // no weapons from the saddle
+      if (inSaddle(a, Date.now())) return void c.send("denied", { action: "fire", reason: "mounted" }); // no weapons from the saddle
       if (m.slot !== a.char.selected) this.equip(a, m.slot);
       const r = fire(this.host, a, m);
       if (!r.ok && r.reason !== "rate") c.send("denied", { action: "fire", reason: r.reason });
@@ -165,24 +165,24 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     this.onMessage("melee", meleeSchema, (c, m) => {
       const a = this.actor(c);
       if (!a || a.dead) return;
-      if (a.mounted) return void c.send("denied", { action: "melee", reason: "mounted" });
+      if (inSaddle(a, Date.now())) return void c.send("denied", { action: "melee", reason: "mounted" });
       if (m.slot !== a.char.selected) this.equip(a, m.slot);
       melee(this.host, a, !!m.heavy);
     });
     this.onMessage("block", z.object({ on: z.boolean() }), (c, m) => {
       const a = this.actor(c);
-      if (!a || (m.on && a.mounted)) return;
+      if (!a || (m.on && inSaddle(a, Date.now()))) return;
       a.blocking = m.on;
       a.state.flags = m.on ? a.state.flags | PF.BLOCKING : a.state.flags & ~PF.BLOCKING;
     });
     this.onMessage("charge", z.object({ on: z.boolean() }), (c, m) => {
       const a = this.actor(c);
-      if (a && !a.dead) a.chargeStartedAt = m.on && !a.mounted ? Date.now() : 0;
+      if (a && !a.dead) a.chargeStartedAt = m.on && !inSaddle(a, Date.now()) ? Date.now() : 0;
     });
     this.onMessage("travel", z.object({ to: z.enum(["portus", "arcadia", "hollowmere", "meridian"]) }), (c, m) => this.travelRequest(c, m.to));
     this.onMessage("scope", z.object({ on: z.boolean() }), (c, m) => {
       const a = this.actor(c);
-      if (!a) return;
+      if (!a || (m.on && inSaddle(a, Date.now()))) return;
       a.state.flags = m.on ? a.state.flags | PF.SCOPED : a.state.flags & ~PF.SCOPED;
     });
     this.onMessage("reload", z.object({ slot: z.number().int().min(0).max(3) }), (c) => this.reload(this.actor(c)));
@@ -446,7 +446,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     // one-off allowance no more often than its cooldown (review blocker: speed hack).
     // Riding (set only by the server's HorseSystem): gallop speed and a bigger bank, never a dodge;
     // the mounted budget outlives a dismount by HORSE.dismountGraceMs (the client is a round trip behind).
-    const riding = !!a.mounted || now < (a.mountGraceUntil ?? 0);
+    const riding = inSaddle(a, now);
     const elapsed = Math.min(0.25, (now - a.lastBudgetAt) / 1000);
     a.lastBudgetAt = now;
     // NPC slows / Cease-and-Desist (npc/effects.ts) scale the refill and can refuse the dodge burst.

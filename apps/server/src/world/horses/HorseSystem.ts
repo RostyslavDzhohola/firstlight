@@ -20,6 +20,11 @@ import type { RoomSystem, SystemFactory } from "../systems.ts";
 
 interface Horse {
   owner: string; // session id
+  /** The owner's actor. Kept here because the room forgets a leaving actor before onPlayerLeave,
+   *  and a lingering body must not stay in the saddle. */
+  actor: PlayerActor;
+  /** The owner's position at the last tick: a bigger jump than HORSE.teleportMetres is a teleport. */
+  ownerAt: V3;
   state: HorseState;
   /** When it was last ridden (or summoned): it leaves HORSE.idleDespawnMs after this. */
   idleSince: number;
@@ -28,7 +33,7 @@ interface Horse {
 }
 
 export type DismountReason = "dismount" | "thrown" | "water";
-export type LeaveReason = "idle" | "death" | "left" | "no whistle" | "replaced";
+export type LeaveReason = "idle" | "death" | "left" | "no whistle" | "replaced" | "travel";
 
 const actionSchema = z.object({ action: z.enum(["whistle", "ride", "dismount"]) });
 
@@ -62,7 +67,8 @@ export class HorseSystem implements RoomSystem {
       this.lastToggle.set(a.id, now);
       fn();
     };
-    if (a.mounted) return toggle(() => this.dismount(a, "dismount"));
+    // Getting off in deep water (the client slides off at once) sends the horse back to dry land.
+    if (a.mounted) return toggle(() => this.dismount(a, this.deep(a.state.x, a.state.y, a.state.z) ? "water" : "dismount"));
     if (action === "dismount") return;
     const h = this.horses.get(a.id);
     if (h && this.inReach(a, h)) return toggle(() => this.mount(a, h));
@@ -97,7 +103,7 @@ export class HorseSystem implements RoomSystem {
     if (!h) {
       const state = new HorseState();
       state.coat = horseCoat(a.identity.userId);
-      h = { owner: a.id, state, idleSince: now, lastDry: at };
+      h = { owner: a.id, actor: a, ownerAt: actorPos(a), state, idleSince: now, lastDry: at };
       this.horses.set(a.id, h);
       this.room.state.horses.set(a.id, state);
     }
@@ -110,6 +116,7 @@ export class HorseSystem implements RoomSystem {
   mount(a: PlayerActor, h: Horse) {
     if (a.mounted || (a.state.flags & PF.SWIMMING) !== 0) return;
     a.mounted = true;
+    a.mountChangedAt = Date.now();
     a.mountGraceUntil = 0;
     a.blocking = false;
     a.chargeStartedAt = 0;
@@ -135,7 +142,7 @@ export class HorseSystem implements RoomSystem {
   /** Remove the horse (and its rider from the saddle). */
   despawn(owner: string, reason: LeaveReason) {
     const h = this.horses.get(owner);
-    const a = this.room.playerById(owner);
+    const a = h?.actor ?? this.room.playerById(owner);
     const ridden = !!a?.mounted;
     if (a && ridden) this.clearMounted(a);
     if (!h) return;
@@ -146,7 +153,10 @@ export class HorseSystem implements RoomSystem {
   }
 
   private clearMounted(a: PlayerActor) {
-    if (a.mounted) a.mountGraceUntil = Date.now() + HORSE.dismountGraceMs;
+    if (a.mounted) {
+      a.mountGraceUntil = Date.now() + HORSE.dismountGraceMs;
+      a.mountChangedAt = Date.now();
+    }
     a.mounted = false;
     a.state.flags &= ~PF.MOUNTED;
   }
@@ -164,6 +174,15 @@ export class HorseSystem implements RoomSystem {
       }
       if (!hasWhistle(a.char.hotbar, a.char.backpack)) {
         this.despawn(owner, "no whistle"); // sold, dropped or lost: no whistle, no horse
+        continue;
+      }
+      // Fast travel, a quest trigger or an admin teleport moved the owner: the horse stays behind
+      // (it leaves, like on portal travel; a rider arrives on foot).
+      const at = actorPos(a);
+      const jumped = Math.hypot(at[0] - h.ownerAt[0], at[1] - h.ownerAt[1], at[2] - h.ownerAt[2]) > HORSE.teleportMetres;
+      h.ownerAt = at;
+      if (jumped) {
+        this.despawn(owner, "travel");
         continue;
       }
       if (a.mounted) {

@@ -30,6 +30,9 @@ export const HORSE = {
   /** Getting on or off within this many ms of the last change is ignored (E spam would flip the
    *  flag and broadcast an event to everyone nearby on every message). */
   toggleCooldownMs: 500,
+  /** The owner moving further than this in one server tick is a teleport (fast travel, quest
+   *  triggers, admin): the horse leaves. A gallop covers about 1 m per tick. */
+  teleportMetres: 25,
   /** "horse" messages a player may send per second; the rest are dropped (AGENTS.md: 5/s). */
   messagesPerSecond: 5,
   /** An unridden horse leaves after this long. */

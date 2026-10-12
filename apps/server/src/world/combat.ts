@@ -6,7 +6,7 @@ import { damageMult, falloff, maxHp, splashFalloff } from "@firstlight/shared/co
 import { WEAPONS, WEAPON_INDEX, type Destroys, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
 import type { Terrain } from "@firstlight/shared";
 import { PF } from "@firstlight/shared/net/schema";
-import { actorPos, positionAgo, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
+import { actorPos, mountedAt, positionAgo, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
 import { dist3, HEAD_FROM, inMeleeArc, PLAYER_HEIGHT, PLAYER_RADIUS, rayCapsule, rayTerrain, type V3 } from "./geometry.ts";
 import { HORSE } from "@firstlight/shared/content/horse";
 
@@ -110,7 +110,7 @@ export function canHurt(a: Actor | null, b: Actor, now: number): boolean {
 /** Feet of an actor's hit capsule `ms` ago: a mounted rider's sit HORSE.riderLift up, in the saddle. */
 function capsuleFeet(a: Actor, now: number, ms: number): V3 {
   const f = positionAgo(a, now, ms);
-  if (a.kind !== "player" || !a.mounted) return f;
+  if (a.kind !== "player" || !mountedAt(a, now - ms)) return f;
   const l = Math.hypot(f[0], f[1], f[2]);
   const k = 1 + HORSE.riderLift / l;
   return [f[0] * k, f[1] * k, f[2] * k];

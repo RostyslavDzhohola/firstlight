@@ -3,7 +3,7 @@
 // horse leaves (death with the whistle in the pile, travel, logout, idle, lost whistle).
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { BODIES, portalSpots, type BodyId } from "@firstlight/shared";
+import { BODIES, isSafe, portalSpots, type BodyId } from "@firstlight/shared";
 import { HORSE, HORSE_WHISTLE, tooDeepToRide } from "@firstlight/shared/content/horse";
 import { PF } from "@firstlight/shared/net/schema";
 import { env } from "../src/env.ts";
@@ -28,9 +28,9 @@ const mounted = (b: Bot) => !!(me(b).flags & PF.MOUNTED);
 const horseSystem = (b: Bot) => serverRoom(b).systems.find((s): s is HorseSystem => s instanceof HorseSystem)!;
 
 /** A level-1 admin bot standing 40 m off Arcadia's main pad (outside the safe ring) with a whistle. */
-async function rider(userId: string, whistle = true): Promise<Bot> {
-  const b = await bot(userId, BODY);
-  await tpAndWait(b, offPad(BODY, 0, 40));
+async function rider(userId: string, whistle = true, at: V3 = offPad(BODY, 0, 40)): Promise<Bot> {
+  const b = await bot(userId, BODY, "admin", { starter: 3 }); // Unit 7: the carbine in slot 0
+  await tpAndWait(b, at);
   b.send("admin", { cmd: "unprotect" });
   if (whistle) {
     b.send("admin", { cmd: "give", args: { id: HORSE_WHISTLE } });
@@ -72,6 +72,49 @@ function dryBearing(p: V3, metres: number): V3 {
 function norm(v: V3): V3 {
   const l = Math.hypot(...v);
   return [v[0] / l, v[1] / l, v[2] / l];
+}
+
+/** The nearest dry ground point outside every safe ring from `p` (2 m past the ring's edge). */
+function outsideSafe(p: V3): V3 {
+  const def = BODIES[BODY];
+  const t = terrain(BODY);
+  const up = norm(p);
+  const a: V3 = Math.abs(up[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
+  const k = a[0] * up[0] + a[1] * up[1] + a[2] * up[2];
+  const e1 = norm([a[0] - k * up[0], a[1] - k * up[1], a[2] - k * up[2]]);
+  const e2 = norm([up[1] * e1[2] - up[2] * e1[1], up[2] * e1[0] - up[0] * e1[2], up[0] * e1[1] - up[1] * e1[0]]);
+  const at = (ang: number, m: number): V3 => {
+    const d = norm([up[0] * def.radius + (e1[0] * Math.cos(ang) + e2[0] * Math.sin(ang)) * m, up[1] * def.radius + (e1[1] * Math.cos(ang) + e2[1] * Math.sin(ang)) * m, up[2] * def.radius + (e1[2] * Math.cos(ang) + e2[2] * Math.sin(ang)) * m]);
+    const r = def.radius + t.groundHeight(d[0], d[1], d[2]);
+    return [d[0] * r, d[1] * r, d[2] * r];
+  };
+  for (let m = 4; m <= 40; m++) {
+    for (let i = 0; i < 16; i++) {
+      const q = at((i / 16) * Math.PI * 2, m);
+      const g = Math.hypot(...q) - def.radius;
+      if (!isSafe(def, ...q) && !tooDeepToRide(g, def.waterLevel + 0.5)) return at((i / 16) * Math.PI * 2, m + 2);
+    }
+  }
+  throw new Error("no unsafe ground near the portal");
+}
+
+/** Ride along the ground toward `target` at `speed` m/s (20 Hz inputs) until within `stop` metres. */
+async function rideToward(b: Bot, target: V3, speed: number, stop: number) {
+  const def = BODIES[BODY];
+  const t = terrain(BODY);
+  let pos: V3 = [me(b).x, me(b).y, me(b).z];
+  let seq = (me(b).seq ?? 0) + 1000;
+  for (let i = 0; i < 400 && Math.hypot(target[0] - pos[0], target[1] - pos[1], target[2] - pos[2]) > stop; i++) {
+    const up = norm(pos);
+    const d0: V3 = [target[0] - pos[0], target[1] - pos[1], target[2] - pos[2]];
+    const k = d0[0] * up[0] + d0[1] * up[1] + d0[2] * up[2];
+    const dir = norm([d0[0] - k * up[0], d0[1] - k * up[1], d0[2] - k * up[2]]);
+    const n = norm([pos[0] + dir[0] * speed * 0.05, pos[1] + dir[1] * speed * 0.05, pos[2] + dir[2] * speed * 0.05]);
+    const r = def.radius + t.groundHeight(n[0], n[1], n[2]);
+    pos = [n[0] * r, n[1] * r, n[2] * r];
+    b.send("input", { seq: ++seq, x: pos[0], y: pos[1], z: pos[2], fx: dir[0], fy: dir[1], fz: dir[2], anim: 3, t: Date.now() });
+    await sleep(50);
+  }
 }
 
 /**
@@ -286,6 +329,29 @@ describe("combat and riders", () => {
     return { slot: 0, ox: o[0], oy: o[1], oz: o[2], dx: d[0], dy: d[1], dz: d[2], t: Date.now() };
   }
 
+  it("no weapons from the saddle or during the horse-speed grace after getting off; no scope while mounted", async () => {
+    const b = await rider("dismounter");
+    await summonAndMount(b);
+    b.send("scope", { on: true });
+    await sleep(HORSE.toggleCooldownMs); // also lets the next E count
+    expect(me(b).flags & PF.SCOPED).toBe(0);
+    b.send("horse", { action: "dismount" });
+    await until("off", () => !mounted(b));
+    const shot = () => {
+      const a = me(b);
+      const l = Math.hypot(a.x, a.y, a.z);
+      const o: V3 = [a.x + (a.x / l) * 1.6, a.y + (a.y / l) * 1.6, a.z + (a.z / l) * 1.6];
+      return { slot: 0, ox: o[0], oy: o[1], oz: o[2], dx: a.fx || 1, dy: a.fy, dz: a.fz, t: Date.now() };
+    };
+    b.send("fire", shot()); // the server still budgets horse speed for in-flight inputs: no shooting yet
+    await until("refused", () => b.last("denied")?.action === "fire");
+    expect(b.last("denied").reason).toBe("mounted");
+    await sleep(HORSE.dismountGraceMs);
+    const shots = b.count("shot");
+    b.send("fire", shot());
+    await until("on foot it fires", () => b.count("shot") > shots);
+  });
+
   it("the hit capsule rides in the saddle: the drawn head is a weak point, the horse's legs are not the rider", async () => {
     const r = await rider("target");
     const s = await bot("gunner", BODY, "admin", { starter: 3 });
@@ -321,16 +387,40 @@ describe("the horse leaves with its owner", () => {
     await until("horse gone", () => !horses(b).has(b.id));
   });
 
+  it("on a teleport (fast travel, quest triggers, admin): the horse doesn't come along", async () => {
+    const b = await rider("blinker");
+    await summonAndMount(b);
+    b.send("admin", { cmd: "teleport", args: (() => { const p = offPad(BODY, 0, 240); return { x: p[0], y: p[1], z: p[2] }; })() });
+    await until("no horse, not mounted", () => !horses(b).has(b.id) && !mounted(b));
+  });
+
+  it("when the rider leaves outside a safe zone: the lingering body stands, unmounted, without a horse", async () => {
+    const watcher = await bot("watcher2", BODY);
+    const r = await rider("leaver");
+    await summonAndMount(r);
+    await until("watcher sees the rider mounted", () => !!((horses(watcher).get(r.id)?.ridden) && (watcher.room.state as any).players.get(r.id).flags & PF.MOUNTED));
+    const rid = r.id;
+    await r.room.leave(true);
+    await until("lingering, not mounted", () => {
+      const p = (watcher.room.state as any).players.get(rid);
+      return !!p && !!(p.flags & PF.LINGER) && !(p.flags & PF.MOUNTED);
+    });
+    expect(horses(watcher).has(rid)).toBe(false);
+    expect(serverRoom(watcher).lingering.get(rid)?.actor.mounted).toBeFalsy();
+  });
+
   it("on travel through a portal and on logout", async () => {
     const watcher = await bot("watcher", BODY);
-    const t = await rider("tourist");
+    // Portals stand in a pad's safe ring: mount just outside it, ride to the portal, travel.
+    const spot = portalSpots(BODIES[BODY], terrain(BODY))[0]!;
+    const R = BODIES[BODY].radius + spot.h;
+    const portal: V3 = [spot.dir[0] * R, spot.dir[1] * R, spot.dir[2] * R];
+    const t = await rider("tourist", true, outsideSafe(portal));
     expect(t.room.roomId).toBe(watcher.room.roomId);
     await summonAndMount(t);
     await until("watcher sees the horse", () => horses(watcher).has(t.id));
-    // Ride (teleported, mounted) into the portal and travel.
-    const spot = portalSpots(BODIES[BODY], terrain(BODY))[0]!;
-    const R = BODIES[BODY].radius + spot.h;
-    await tpAndWait(t, [spot.dir[0] * R, spot.dir[1] * R, spot.dir[2] * R]);
+    await rideToward(t, portal, 8, 1);
+    expect(mounted(t)).toBe(true);
     t.send("travel", { to: spot.to });
     await until("ticket", () => t.count("travelOk") > 0);
     const tid = t.id;
@@ -341,12 +431,13 @@ describe("the horse leaves with its owner", () => {
     await waitFor(() => (there.state as any).players?.get(there.sessionId) !== undefined);
     expect((there.state as any).horses.size).toBe(0);
 
-    // Logout: ride into the pad's safe ring (instant logout there), log out.
-    const l = await rider("homebody");
+    // Logout: mount just outside the pad's safe ring, ride in (instant logout there), log out.
+    const l = await rider("homebody", true, offPad(BODY, 0, 15));
     await summonAndMount(l);
     await until("watcher sees it", () => horses(watcher).has(l.id));
-    await tpAndWait(l, padAt(BODY, 0));
+    await rideToward(l, padAt(BODY, 0) as V3, 8, 6);
     await until("safe", () => !!(me(l).flags & PF.SAFE));
+    expect(mounted(l)).toBe(true);
     const lid = l.id;
     l.send("logout", { start: true });
     await until("logged out", () => l.count("loggedOut") > 0);
