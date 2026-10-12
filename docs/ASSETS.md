@@ -9,6 +9,7 @@ source, licence and where its notice lives. Our code is MIT (`LICENSE`); our own
 | What | Where it ships | Author / owner | Licence | Source | Notice |
 |---|---|---|---|---|---|
 | Starter character bases and animations (UAL 1, UAL 2, UBC) | `apps/client/public/assets-dev/characters/*.glb` (rebuilt, see below) | Quaternius | CC0 1.0 | itch.io pages below | none required; credited here |
+| Horse mesh, rig and 4 clips (LowPoly Animated Animals) | `apps/client/public/assets-dev/animals/horse.glb` (rebuilt with our saddle, see "Horse" below) | Quaternius | CC0 1.0 | https://quaternius.itch.io/lowpoly-animated-animals | none required; credited here |
 | Fonts: Barlow Semi Condensed, Inter, JetBrains Mono | client bundle (`/assets/*.woff2`), from `@fontsource/*` 5.3.0 | The Barlow Project Authors; The Inter Project Authors; The JetBrains Mono Project Authors | SIL OFL 1.1 | npm `@fontsource/*` | `apps/client/public/fonts/LICENSES.md` (served at `/fonts/LICENSES.md`, full OFL text) |
 | three.js r186, incl. the meshoptimizer decoder in its addons | client bundle | three.js authors; Arseny Kapoulkine (meshoptimizer) | MIT | npm `three` 0.186.1 | `apps/client/public/THIRD-PARTY-NOTICES.md` |
 | three-pinata (pre-fractured debris) | client fracture worker | Daniel Greenheck | MIT (npm field + LICENSE; D17: package only, never its `demo/`) | npm `@dgreenheck/three-pinata` 2.0.1 | same |
@@ -23,7 +24,7 @@ Not third-party: the music (generated at runtime per planet by `MusicGen` in
 weapon, prop, NPC, boss and terrain geometry (built in code), `favicon.svg`, and the character
 heads, clothing and atlas listed below as our own work.
 
-Build tools that ship nothing themselves: Blender (headless, `tools/blender/characters/build.sh`),
+Build tools that ship nothing themselves: Blender (headless, `tools/blender/characters/build.sh`, `tools/blender/horse/build.sh`),
 `@gltf-transform/cli` 4.5.1 via `pnpm dlx`, Vite, Vitest, TypeScript, tsx, esbuild, wrangler.
 
 When you add a dependency that ends up in the client bundle, add it to
