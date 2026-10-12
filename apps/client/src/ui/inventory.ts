@@ -11,7 +11,7 @@ import { slotItem } from "@firstlight/shared/content/inventory";
 import { RARITY_STYLE } from "@firstlight/shared/content/items";
 import type { Game } from "../game/Game.ts";
 import { button, el, icon, sprite } from "./dom.ts";
-import { InvCursor, invSlots, itemActions, itemDetails, quickAction, type InvAction, type InvSlot, type InvState } from "./inventoryModel.ts";
+import { DROP_CONFIRM_HINT, DROP_CONFIRM_MS, InvCursor, invSlots, itemActions, itemDetails, quickAction, type InvAction, type InvSlot, type InvState } from "./inventoryModel.ts";
 import { Panel } from "./panels.ts";
 
 const DRAG_START_PX = 5;
@@ -45,6 +45,8 @@ export class InventoryPanel extends Panel {
     if (!r.handled) return;
     this.swallow(e);
     this.send(r.actions);
+    // "Press X again to drop it" shows in the action box; take it away when the chance is over.
+    if (r.hint) setTimeout(() => this.isOpen && this.render(), DROP_CONFIRM_MS + 50);
   };
   private readonly onMove = (e: PointerEvent) => this.pointerMove(e);
   private readonly onUp = (e: PointerEvent) => this.pointerUp(e);
@@ -357,7 +359,8 @@ export class InventoryPanel extends Panel {
     const item = slotItem(s, slot);
     const acts = itemActions(s, slot);
     const qa = acts[0] ?? null;
-    const key = `${slot}|${held}|${JSON.stringify(item)}|${acts.map((x) => x.label).join(",")}|${this.dragFrom}`;
+    const armed = this.cursor.dropArmed(slot);
+    const key = `${slot}|${held}|${JSON.stringify(item)}|${acts.map((x) => x.label).join(",")}|${this.dragFrom}|${armed}`;
     if (key === this.actsKey) return;
     this.actsKey = key;
     const a = this.actsEl;
@@ -371,7 +374,8 @@ export class InventoryPanel extends Panel {
     }
     el("b", "", a, `${v.name}${v.qty > 1 ? ` ×${v.qty}` : ""}`);
     if (held === null) {
-      el("p", "", a, `Click to pick it up, then click where it goes.${qa ? ` Right-click or E: ${qa.label.toLowerCase()}.` : ""} X drops it.`);
+      el("p", "", a, `Click to pick it up, then click where it goes.${qa ? ` Right-click or E: ${qa.label.toLowerCase()}.` : ""} X twice drops it.`);
+      if (armed) el("p", "fl-danger", a, DROP_CONFIRM_HINT);
       return;
     }
     el("p", "", a, "Click a slot to put it there, or the drop zone to leave it on the ground.");

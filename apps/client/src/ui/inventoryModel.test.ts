@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { InvItem } from "@firstlight/shared/net/protocol";
-import { InvCursor, invSlots, itemActions, itemDetails, quickAction, type InvState } from "./inventoryModel.ts";
+import { DROP_CONFIRM_MS, InvCursor, invSlots, itemActions, itemDetails, quickAction, type InvState } from "./inventoryModel.ts";
 
 const it1 = (id: string, qty = 1, tier: 1 | 2 | 3 = 1, extra: Partial<InvItem> = {}): InvItem => ({ id, tier, qty, ...extra });
 
@@ -176,9 +176,37 @@ describe("cursor: keyboard", () => {
     expect(c.key("Digit3").actions).toEqual([{ type: "move", from: 7, to: 2 }]);
     c.focus = 4;
     expect(c.key("KeyE").actions).toEqual([{ type: "use", slot: 4 }]);
-    expect(c.key("KeyX").actions).toEqual([{ type: "drop", slot: 4 }]);
+    expect(c.key("KeyX").actions).toEqual([]); // pointing only: X arms the drop…
+    expect(c.key("KeyX").actions).toEqual([{ type: "drop", slot: 4 }]); // …a second X drops
     c.focus = 12;
     expect(c.key("KeyX")).toMatchObject({ handled: true, actions: [] }); // empty
+  });
+
+  it("X on a slot that is only pointed at needs a second X within 1.5 s; a picked item drops at once (F12 final Sonnet N9)", () => {
+    let now = 10_000;
+    const c = new InvCursor(() => state(), () => now);
+    c.focus = 5;
+    const first = c.key("KeyX");
+    expect(first).toMatchObject({ handled: true, actions: [] });
+    expect(first.hint).toBe("Press X again to drop it");
+    expect(c.dropArmed(5)).toBe(true);
+    expect(c.dropArmed(6)).toBe(false);
+    // Too late: the second press arms again instead of dropping.
+    now += DROP_CONFIRM_MS + 1;
+    expect(c.dropArmed(5)).toBe(false);
+    expect(c.key("Delete").actions).toEqual([]);
+    now += 500;
+    expect(c.key("Delete").actions).toEqual([{ type: "drop", slot: 5 }]);
+    expect(c.dropArmed(5)).toBe(false);
+    // Armed on one slot, then the pointer moves on: X there arms that slot, it doesn't drop the first.
+    c.focus = 4;
+    c.key("KeyX");
+    c.focus = 7;
+    expect(c.key("KeyX").actions).toEqual([]);
+    expect(c.key("KeyX").actions).toEqual([{ type: "drop", slot: 7 }]);
+    // Picked (clicked) first: one X drops it.
+    c.click(5);
+    expect(c.key("KeyX").actions).toEqual([{ type: "drop", slot: 5 }]);
   });
 
   it("number keys and X act on the held item when there is one; Esc cancels the hold first", () => {

@@ -35,6 +35,9 @@ describe("inventory", () => {
     expect(ids(b.you.hotbar)).toEqual(["hexquill", "carbine", null, null]); // the default starter, then the weapon
     expect(ids(b.you.backpack.slice(0, 3))).toEqual(["wool_tuft", "fox_mask", null]);
     expect(b.you.backpack[0].qty).toBe(5);
+    // The toast says where the loot went and which key opens the backpack (F12 final Sonnet N9).
+    await until("toast", () => b.toasts.some((t) => t.startsWith("Picked up")));
+    expect(b.toasts.find((t) => t.startsWith("Picked up"))).toBe("Picked up 4 item(s) · 3 in your backpack (I)");
   });
 
   it("move swaps across hotbar and backpack, merges stacks and re-equips the selected slot", async () => {

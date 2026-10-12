@@ -729,11 +729,16 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
   /** Add an item (shared/content/inventory.ts storeItem): weapons and consumables to the hotbar first, loot to the backpack first. */
   giveItem(a: PlayerActor, item: InvItem): boolean {
+    return this.storeAt(a, item) >= 0;
+  }
+
+  /** giveItem, returning the slot the item went to (0–3 hotbar, 4–19 backpack), or -1 when full. */
+  private storeAt(a: PlayerActor, item: InvItem): number {
     const slot = storeItem(a.char, item);
-    if (slot < 0) return false;
+    if (slot < 0) return -1;
     if (slot === a.char.selected) this.equip(a, slot);
     a.youDirty = true;
-    return true;
+    return slot;
   }
 
   /** Move, merge or swap two inventory slots (0–3 hotbar, 4–19 backpack). */
@@ -749,20 +754,25 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (dist3([pile.x, pile.y, pile.z], actorPos(a)) > RULES.PICKUP_RANGE) return;
     // Take from the pile and save the character in one transaction (no dupes, no losses on crash).
     const events: (() => void)[] = [];
-    let result: { taken: { items: InvItem[]; coins: number; pile: PileData | null }; leftovers: InvItem[] } | null;
+    let result: { taken: { items: InvItem[]; coins: number; pile: PileData | null }; leftovers: InvItem[]; toBackpack: number } | null;
     try {
       result = this.persist([a], () => {
         const taken = pileStore.current.take(pileId, itemIndex);
         if (!taken) return null;
         const leftovers: InvItem[] = [];
-        for (const it of taken.items) if (!this.giveItem(a, it)) leftovers.push(it);
+        let toBackpack = 0;
+        for (const it of taken.items) {
+          const slot = this.storeAt(a, it);
+          if (slot < 0) leftovers.push(it);
+          else if (slot >= HOTBAR_SLOTS) toBackpack++;
+        }
         a.char.coins += taken.coins;
         if (taken.pile) events.push(() => emitPileEvent({ kind: "update", pile: taken.pile! }));
         else events.push(() => emitPileEvent({ kind: "remove", id: pileId, body: this.bodyDef.id }));
         // Items that didn't fit go back on the ground as a new pile.
         if (leftovers.length) this.createPile(a, leftovers, 0, actorPos(a), events);
         this.saveActor(a);
-        return { taken, leftovers };
+        return { taken, leftovers, toBackpack };
       });
     } catch {
       a.client.send("denied", { action: "pickup", reason: "try again" });
@@ -772,8 +782,10 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (!result) return;
     emitGameEvent(this, { type: "pickup", playerId: a.id, pileId, pileOwnerUserId: pile.ownerUserId, pileCreatedAt: pile.createdAt, items: result.taken.items.length - result.leftovers.length, coins: result.taken.coins });
     a.youDirty = true;
-    const { taken, leftovers } = result;
-    if (taken.coins || taken.items.length) a.client.send("toast", { text: `Picked up ${taken.items.length - leftovers.length} item(s)${taken.coins ? ` and ${taken.coins} coins` : ""}`, kind: "coins" });
+    const { taken, leftovers, toBackpack } = result;
+    // Where the loot went, and the key that opens the backpack (the only other pointer is the tutorial).
+    const bag = toBackpack ? ` · ${toBackpack} in your backpack (I)` : "";
+    if (taken.coins || taken.items.length) a.client.send("toast", { text: `Picked up ${taken.items.length - leftovers.length} item(s)${taken.coins ? ` and ${taken.coins} coins` : ""}${bag}`, kind: "coins" });
   }
 
   drop(a: PlayerActor | undefined, slot: number) {
