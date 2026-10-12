@@ -9,6 +9,7 @@ import "../styles/base.css";
 import "../styles/landing.css";
 import "../styles/loading.css";
 import "./gallery.css";
+import "../../social/social.css";
 import indexHtml from "../../../index.html?raw";
 import type { Game } from "../../game/Game.ts";
 import { loadStored, resolveSettings, type Feature, type Tier } from "../../render/quality.ts";
@@ -18,10 +19,19 @@ import { Menu } from "../menu.ts";
 import { showSavePrompt, showSignIn, pickDisplayName } from "../account.ts";
 import { installSprites } from "../sprites.ts";
 import { el } from "../dom.ts";
+import { Compass } from "../../social/compass.ts";
+import { PlayerList } from "../../social/playerList.ts";
+import { InviteCards } from "../../social/invites.ts";
+import { showRemoved } from "../../social/screens.ts";
+import { addInvite, setParty } from "../../social/store.ts";
+import { PhraseWheel } from "../phraseWheel.ts";
+import { JournalPanel, ShopPanel } from "../panels.ts";
+import { INVENTORY_HTML, ONBOARDING_HTML } from "./kitExamples.ts";
 
 const SCREENS = [
   "landing", "loading", "loading-compact", "charpick", "charpick-rebirth", "hud", "hud-oversight", "hud-states",
-  "death", "death-player", "death-party", "death-world", "menu", "menu-logout", "settings", "save", "save-code", "save-saved", "save-busy", "signin", "name", "notice",
+  "death", "death-player", "death-party", "death-world", "menu", "menu-logout", "settings",
+  "players", "compass", "wheel", "shop", "journal", "invite", "removed", "kit-inventory", "kit-onboarding", "save", "save-code", "save-saved", "save-busy", "signin", "name", "notice",
 ] as const;
 type Screen = (typeof SCREENS)[number];
 
@@ -133,6 +143,25 @@ function hudScene(variant: "monster" | "oversight"): Hud {
   return hud;
 }
 
+const PLAYERS = new Map<string, Record<string, unknown>>([
+  ["me", { name: "Wren_07", userId: "u1", level: 7, starter: 3, flags: 0, party: "p1", x: 0, y: 500, z: 0, title: "" }],
+  ["s2", { name: "Mossback", userId: "u2", level: 7, starter: 2, flags: 8, party: "p1", x: 8, y: 500, z: 11, title: "Wrecker" }],
+  ["s3", { name: "glasswing", userId: "u3", level: 4, starter: 0, flags: 0, party: "", x: 40, y: 500, z: 30, title: "" }],
+  ["s4", { name: "Vexa_77", userId: "u4", level: 19, starter: 3, flags: 128 | 8, party: "p9", x: 120, y: 480, z: 60, title: "Farshot" }],
+  ["s5", { name: "Pip_Hexer_with_a_long_name", userId: "u5", level: 5, starter: 0, flags: 0, party: "", x: 15, y: 500, z: -20, title: "" }],
+]);
+
+function party() {
+  setParty({
+    id: "p1", leader: "u1",
+    members: [
+      { userId: "u1", name: "Wren_07", level: 7, online: true, body: "arcadia", roomId: "r", sessionId: "me", x: 0, y: 500, z: 0 },
+      { userId: "u2", name: "Mossback", level: 7, online: true, body: "arcadia", roomId: "r", sessionId: "s2", x: 8, y: 500, z: 11 },
+      { userId: "u6", name: "Ashfall", level: 6, online: true, body: "meridian", roomId: null, sessionId: null, x: 0, y: 0, z: 0 },
+    ],
+  });
+}
+
 async function run() {
   const nav = el("nav", "fl-gallery-nav", document.body);
   if (q.has("nav")) for (const s of SCREENS) el("a", s === screen ? "is-on" : "", nav, s).setAttribute("href", `?screen=${s}&nav`);
@@ -218,6 +247,58 @@ async function run() {
     case "name":
       gameEl.className = "fl-gallery-dark";
       void pickDisplayName({ suggested: "Wanderer_ab12", dismissible: true });
+      break;
+    case "players": {
+      gameEl.className = "fl-gallery-world";
+      party();
+      const list = new PlayerList({ players: () => PLAYERS as Map<string, any>, selfSession: () => "me", myPos: () => [0, 500, 0], bodyName: () => "Arcadia", send() {}, relock() {} });
+      list.open();
+      break;
+    }
+    case "compass": {
+      const hud = hudScene("monster");
+      const c = new Compass(hud.root);
+      c.update([0, 500, 0], [0.6, 0, -0.8], "arcadia", false, [{ key: "u2", label: "Mossback", colour: "#7fe3b0", pos: [60, 490, -90] }]);
+      break;
+    }
+    case "wheel": {
+      hudScene("monster");
+      const w = new PhraseWheel(() => {});
+      const fakeInput = { mouseDX: 0, mouseDY: 0, sensitivity: 1, lmb: false } as unknown;
+      (w as unknown as { show(i: unknown, now: number): void }).show(fakeInput, 0);
+      (w as unknown as { select(i: number): void }).select?.(3);
+      break;
+    }
+    case "shop":
+    case "journal": {
+      const hud = hudScene("monster");
+      hud.you = you({ coins: 214, missions: [{ id: "A1", progress: 8, goal: 8, done: true }, { id: "A2", progress: 0, goal: 1, done: false }] });
+      const g = { hud, input: { enabled: true, keys: new Set(), lock() {} }, net: { room: null }, bodyId: "arcadia" } as unknown as Game;
+      if (screen === "shop") new ShopPanel(g).open();
+      else new JournalPanel(g).show("missions");
+      break;
+    }
+    case "invite":
+      hudScene("monster");
+      addInvite({ from: "u4", fromName: "Vexa_77", partyId: null, expiresAt: Date.now() + 30_000 });
+      new InviteCards(() => {}).render();
+      break;
+    case "kit-inventory":
+      hudScene("monster");
+      document.getElementById("ui")!.insertAdjacentHTML("beforeend", INVENTORY_HTML);
+      break;
+    case "kit-onboarding": {
+      gameEl.className = "fl-gallery-world";
+      const hud = new Hud();
+      hud.setIdentity("Wren_07", 3, 0);
+      hud.setYou(you({ level: 1, coins: 0, hotbar: [{ id: "carbine", tier: 1, qty: 1, mag: 24 }, null, null, null] }));
+      hud.setHp(100, 100);
+      hud.root.querySelector(".fl-hud__layer")!.insertAdjacentHTML("beforeend", ONBOARDING_HTML);
+      break;
+    }
+    case "removed":
+      gameEl.className = "fl-gallery-world";
+      showRemoved(4100);
       break;
     case "notice": {
       gameEl.className = "fl-gallery-world";

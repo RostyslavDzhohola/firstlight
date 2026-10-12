@@ -6,6 +6,7 @@
 
 import "./hud.css";
 import "./styles/compat.css";
+import "./styles/kit.css";
 import { STARTERS, PALETTE_NAMES, WEAPON_BY_ID } from "@firstlight/shared/content/weapons";
 import { PHRASES, type YouState } from "@firstlight/shared/net/protocol";
 import { el, icon, sprite, uiRoot } from "./dom.ts";

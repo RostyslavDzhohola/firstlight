@@ -30,7 +30,7 @@
 .fl-plist h3 { margin: var(--sp-4) 0 var(--sp-2); font: 600 var(--t-xs)/1.2 var(--font-display); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--dawn-3); }
 /* Fixed layout: every column has a width, the name column takes the rest, nothing overflows the panel. */
 .fl-plist table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: var(--t-sm); }
-.fl-plist th { padding: 0 calc(.5 * var(--u)) calc(.45 * var(--u)); text-align: left; font: 600 var(--t-xs)/1.2 var(--font-display); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--fog-2); border-bottom: 1px solid var(--line-2); white-space: nowrap; overflow: hidden; }
+.fl-plist th { padding: 0 calc(.5 * var(--u)) calc(.45 * var(--u)); text-align: left; font: 600 var(--t-xs)/1.2 var(--font-display); letter-spacing: .1em; text-transform: uppercase; color: var(--fog-2); border-bottom: 1px solid var(--line-2); white-space: nowrap; overflow: hidden; }
 .fl-plist td { padding: calc(.5 * var(--u)); border-bottom: 1px solid var(--line-1); vertical-align: middle; color: var(--paper-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fl-plist tr:hover td { background: rgba(255, 255, 255, .03); }
 .fl-plist tr.me td { background: rgba(255, 243, 220, .05); color: var(--hero-cream); }
@@ -38,7 +38,7 @@
 .fl-plist th:nth-child(2), .fl-plist tr:first-child > td:nth-child(2) { width: calc(4 * var(--u)); }
 .fl-plist th:nth-child(3), .fl-plist tr:first-child > td:nth-child(3) { width: calc(7 * var(--u)); }
 .fl-plist th:nth-child(4), .fl-plist tr:first-child > td:nth-child(4) { width: calc(7.5 * var(--u)); }
-.fl-plist th:nth-child(5), .fl-plist tr:first-child > td:nth-child(5) { width: calc(5 * var(--u)); }
+.fl-plist th:nth-child(5), .fl-plist tr:first-child > td:nth-child(5) { width: calc(6.2 * var(--u)); }
 .fl-plist th:nth-child(6), .fl-plist tr:first-child > td:nth-child(6) { width: calc(20 * var(--u)); }
 .fl-plist th:first-child, .fl-plist tr:first-child > td:first-child { width: auto; }
 .fl-plist td:last-child { white-space: normal; overflow: visible; }
