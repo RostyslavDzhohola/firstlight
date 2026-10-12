@@ -170,7 +170,7 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
   const authCtx = await auth.$context;
   await authCtx.checkSchema?.();
   closeDanglingSessions(db);
-  // Daily housekeeping (and once at boot): old analytics rows, abandoned level-1 guests (F12).
+  // Daily housekeeping (and once at boot): old analytics rows, abandoned guests (F12, see prune.ts).
   const housekeeping = () => {
     pruneSessionLog(db);
     try {
