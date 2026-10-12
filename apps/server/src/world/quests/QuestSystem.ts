@@ -111,7 +111,7 @@ export class QuestSystem implements RoomSystem {
     room.onMessage("mission", z.object({ action: z.enum(["accept", "abandon"]), id: z.string().max(8) }), (c, m) => this.mission(c, m.action, m.id));
     room.onMessage("title", z.object({ medalId: z.string().max(40).nullable() }), (c, m) => this.setTitle(c, m.medalId));
     room.onMessage("interact", z.object({ target: z.string().max(40), code: z.string().max(8).optional() }), (c, m) => this.interact(c, m.target, m.code));
-    room.onMessage("questSync", z.object({}).passthrough(), (c) => this.sync(c));
+    room.onMessage("questSync", z.object({}).passthrough().optional(), (c) => this.sync(c));
     // Observe phrases (the room's own handler validates and broadcasts them).
     room.onMessage("phrase", (c: Client, m: { id: number }) => this.eggs.onPhrase(c.sessionId, m.id));
 
@@ -532,10 +532,13 @@ export class QuestSystem implements RoomSystem {
     }
   }
 
+  private readonly reachTargets = new Map<string, V3>();
+
   private checkReach(a: PlayerActor, q: QuestPlayer) {
     for (const { m, def } of this.activeMissions(a)) {
       if (!def.reach) continue;
-      const target = this.room.snapToGround(placeDir(def.reach.place));
+      let target = this.reachTargets.get(def.reach.place);
+      if (!target) this.reachTargets.set(def.reach.place, (target = this.room.snapToGround(placeDir(def.reach.place))));
       const p = actorPos(a);
       const vertical = Math.abs(Math.hypot(p[0], p[1], p[2]) - Math.hypot(target[0], target[1], target[2]));
       if (surfaceDistance(target, p) <= def.reach.radius && vertical <= QUEST_RULES.REACH_VERTICAL) this.completeMission(a, m, def);
@@ -696,8 +699,8 @@ export class QuestSystem implements RoomSystem {
         q.bossHurtMe.delete(e.npcId);
       }
     }
-    const names = eligible.filter((a) => !a.identity.loadtest).map((a) => a.identity.name);
-    if (names.length) engrave(BOSS_FIRSTS[e.bossId], eligible[0]!.identity.userId, names.join(", ").slice(0, 200));
+    const people = eligible.filter((a) => !a.identity.loadtest);
+    if (people.length) engrave(BOSS_FIRSTS[e.bossId], people[0]!.identity.userId, people.map((a) => a.identity.name).join(", ").slice(0, 200));
   }
 
   private isStillshot(a: PlayerActor): boolean {
