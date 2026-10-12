@@ -10,6 +10,7 @@ source, licence and where its notice lives. Our code is MIT (`LICENSE`); our own
 |---|---|---|---|---|---|
 | Starter character bases and animations (UAL 1, UAL 2, UBC) | `apps/client/public/assets-dev/characters/*.glb` (rebuilt, see below) | Quaternius | CC0 1.0 | itch.io pages below | none required; credited here |
 | Horse mesh, rig and 4 clips (LowPoly Animated Animals) | `apps/client/public/assets-dev/animals/horse.glb` (rebuilt with our saddle, see "Horse" below) | Quaternius | CC0 1.0 | https://quaternius.itch.io/lowpoly-animated-animals | none required; credited here |
+| Stylized vegetation meshes and two painted atlases | `apps/client/public/assets-dev/vegetation/vegetation.glb` | Quaternius | CC0 1.0 | https://quaternius.itch.io/stylized-nature-megakit | none required; credited here and in the vegetation section below |
 | Fonts: Barlow Semi Condensed, Inter, JetBrains Mono | client bundle (`/assets/*.woff2`), from `@fontsource/*` 5.3.0 | The Barlow Project Authors; The Inter Project Authors; The JetBrains Mono Project Authors | SIL OFL 1.1 | npm `@fontsource/*` | `apps/client/public/fonts/LICENSES.md` (served at `/fonts/LICENSES.md`, full OFL text) |
 | three.js r186, incl. the meshoptimizer decoder in its addons | client bundle | three.js authors; Arseny Kapoulkine (meshoptimizer) | MIT | npm `three` 0.186.1 | `apps/client/public/THIRD-PARTY-NOTICES.md` |
 | three-pinata (pre-fractured debris) | client fracture worker | Daniel Greenheck | MIT (npm field + LICENSE; D17: package only, never its `demo/`) | npm `@dgreenheck/three-pinata` 2.0.1 | same |
@@ -21,10 +22,10 @@ source, licence and where its notice lives. Our code is MIT (`LICENSE`); our own
 
 Not third-party: the music (generated at runtime per planet by `MusicGen` in
 `apps/client/src/audio/Audio.ts`, none of the candidate tracks in content.md §9 is used), all
-weapon, prop, NPC, boss and terrain geometry (built in code), `favicon.svg`, and the character
+weapon, NPC, boss and terrain geometry, procedural prop fallbacks and Meridian spires (built in code), `favicon.svg`, and the character
 heads, clothing and atlas listed below as our own work.
 
-Build tools that ship nothing themselves: Blender (headless, `tools/blender/characters/build.sh`, `tools/blender/horse/build.sh`),
+Build tools that ship nothing themselves: Blender (headless, `tools/blender/characters/build.sh`, `tools/blender/horse/build.sh`, `tools/blender/vegetation/build.sh`),
 `@gltf-transform/cli` 4.5.1 via `pnpm dlx`, Vite, Vitest, TypeScript, tsx, esbuild, wrangler.
 
 When you add a dependency that ends up in the client bundle, add it to
@@ -122,3 +123,45 @@ Shipped output (2026-10-11 build):
 | `horse.glb` | 147,072 | `615314bc14b2af1a` | 1,118 tris, 39 joints, 1 skinned mesh, `saddle` node, 4 clips |
 
 IP line: a generic farm horse with a plain saddle; no franchise names, brands or look-alike tack.
+
+## Vegetation (lane/vegetation)
+
+Source: Quaternius, [Stylized Nature MegaKit Standard](https://quaternius.itch.io/stylized-nature-megakit),
+CC0 1.0 Universal. Download supplied on 2026-10-12; licence supplied in `License_Standard.txt`.
+Archive SHA-256: `298f6732b872e4cf7b30e6e7abf9641c7f6dc6b326df37ac089533ed7e3d58c9`.
+The archive is not in git. `tools/blender/vegetation/build.sh` verifies it and rebuilds offline from
+`SRC/download.zip` and `SRC/x/glTF/`. The pinned gltf-transform 4.5.1 CLI must already be in the
+pnpm cache, or be provided through `GLTF_CLI`; the script never downloads it.
+
+Only glTF, referenced geometry buffers and PNG textures are imported, in headless Blender 5.2.1
+with `--disable-autoexec --factory-startup`. URI validation rejects remote paths and traversal.
+No pack scripts or Blender files are run. The author-supplied CC0 grant covers these derivative
+meshes and atlases; the build and rendering code is MIT. Existing CC0 packs are credited in this
+registry rather than in the client software's `THIRD-PARTY-NOTICES.md`; this pack follows that pattern.
+
+Used: CommonTree, Pine, TwistedTree and DeadTree variants 1–3; Bush_Common,
+Bush_Common_Flowers, Fern_1, Plant_1, Plant_1_Big, Plant_7, Plant_7_Big,
+Flower_3_Group, Flower_4_Group, Mushroom_Common, Mushroom_Laetiporus and Rock_Medium variants 1–3.
+Grass, normal maps and the other pack models are not shipped.
+
+Changes: roots centred at the origin, heights normalized in metres and exported +Y up; imported
+seams welded before decimation; near trees capped at 900 triangles and near small props at 320;
+small-prop far LODs decimated to at most 32 triangles. Trees' far LODs use four triangles in two
+perpendicular cards, baked from the full source meshes at two orthographic bearings. Textures are
+packed into a 2048² mesh atlas and a 1536×1024 tree-impostor atlas. Foliage paint is neutralized for
+client tinting. A vertex role mask separates leaves, bark and stone; impostors infer leaves from
+neutral paint per pixel, with dead trees using bark throughout. All materials use double-sided
+alpha cutouts at 0.5, with no transparency sorting. Meshopt compression and quantization follow
+the character pipeline. PNG is retained because the existing loader/pipeline already supports it.
+
+Shipped outputs, 2026-10-12:
+
+| File | Bytes | SHA-256 | Contents |
+|---|---:|---|---|
+| `vegetation.glb` | 2,353,020 | `87cc1e48fe162a07443f46c193ee8c322dd379a1eb585acfa26bddaded2e3bb4` | 26 models × 2 LODs, two embedded PNG atlases; 14,489 near and 491 far triangles across all templates |
+| `manifest.json` | 3,821 | generated alongside the GLB | per-model source/LOD triangle counts, heights and far-LOD method |
+
+Total download: 2,356,841 bytes, under the 4 MB target. The client downloads only the GLB; the
+manifest is build/test metadata. See `docs/reviews/2026-10-12-vegetation-gpt-6.1-sol.md` for the
+body mapping, CPU budgets and browser checks still needed. The optional headless
+`tools/blender/vegetation/preview.py` produces a local near/far style check from the raw build.
