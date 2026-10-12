@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
-import { HORSE } from "@firstlight/shared/content/horse";
+import { HORSE, HORSE_COATS } from "@firstlight/shared/content/horse";
+import { watchDisposals } from "./disposeWatch.testutil.ts";
 
 // config.ts reads the URL at import time; ?nochars keeps views on the box horse (no asset fetches).
 vi.stubGlobal("location", { search: "?nochars", hostname: "localhost" });
@@ -79,5 +80,28 @@ describe("ride pose", () => {
       expect(shin.y).toBeLessThan(-0.9); // down into the stirrup
       expect(Math.sign(at(`calf_${s}`).x)).toBe(side); // knees on their own side of the horse
     }
+  });
+});
+
+describe("horse warm-up hook (T9)", () => {
+  it("keeps one horse per coat for the session, out of the LOD and blob passes, never disposed", () => {
+    const R = 1000;
+    const scene = new THREE.Scene();
+    const before = horses.HorseView.all.size;
+    const hook = horses.horseWarmupHook(scene, () => new THREE.Vector3(0, R, 0));
+    hook.forceAll(true);
+    const kept = scene.getObjectByName("horseWarmup")!;
+    expect(kept).toBeTruthy();
+    expect(kept.visible).toBe(false);
+    expect(kept.children).toHaveLength(HORSE_COATS.length);
+    expect(horses.HorseView.all.size).toBe(before);
+    const w = watchDisposals(kept);
+    hook.forceAll(false);
+    expect(kept.parent).toBeNull();
+    expect(w.disposed.size).toBe(0);
+    horses.horseWarmupHook(scene, () => new THREE.Vector3(0, R, 0)).forceAll(true);
+    expect(scene.getObjectByName("horseWarmup")).toBe(kept);
+    expect(kept.children).toHaveLength(HORSE_COATS.length);
+    expect(w.disposed.size).toBe(0);
   });
 });

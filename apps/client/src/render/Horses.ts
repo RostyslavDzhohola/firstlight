@@ -13,6 +13,7 @@ import { HORSE, HORSE_COATS } from "@firstlight/shared/content/horse";
 import { config, flags } from "../config.ts";
 import { releaseAvatarObjects } from "./Avatars.ts";
 import { avatarRim, toonRamp } from "./avatars/material.ts";
+import { keptSamples } from "./warmup.ts";
 
 // ---- assets ----------------------------------------------------------------------------------
 
@@ -347,34 +348,37 @@ function clamp(v: number, a: number, b: number) {
   return Math.min(b, Math.max(a, v));
 }
 
+let warmupViews: HorseView[] = [];
+
 /**
  * Shader warm-up hook (render/warmup.ts): while forced on, stands one horse per coat at `at()` with
- * full detail (shadow pass included), so the six coat materials compile behind the loading screen.
+ * full detail (shadow pass included), so the six coat materials and their shadow variants compile
+ * behind the loading screen. Forced off, the samples leave the scene but are kept for the session
+ * (keptSamples): disposing them freed those builds, and the first horses after arrival compiled in
+ * play (T9). They are not in HorseView.all, so the LOD and blob-shadow passes skip them. Without the
+ * GLB they are box horses, which is what the game shows then.
  */
 export function horseWarmupHook(scene: THREE.Object3D, at: () => THREE.Vector3): { forceAll(on: boolean): void } {
-  let group: THREE.Group | null = null;
-  let views: HorseView[] = [];
   return {
     forceAll(on: boolean) {
-      if (on) {
-        if (group || !horseAssets()) return;
-        group = new THREE.Group();
-        group.name = "horseWarmup";
-        const p = at();
-        for (let i = 0; i < HORSE_COATS.length; i++) {
-          const v = new HorseView(i);
-          v.setDetail(true);
-          v.set(p.x, p.y, p.z, 1, 0, 0, 0, false, 0);
-          group.add(v.root);
-          views.push(v);
-        }
-        scene.add(group);
-      } else {
-        for (const v of views) v.dispose();
-        views = [];
-        group?.removeFromParent();
-        group = null;
+      if (!on) {
+        keptSamples("horseWarmup")?.removeFromParent();
+        return;
       }
+      if (flags.has("nohorses")) return;
+      const group = keptSamples("horseWarmup", () => {
+        warmupViews = HORSE_COATS.map((_, i) => {
+          const v = new HorseView(i);
+          HorseView.all.delete(v);
+          v.setDetail(true);
+          return v;
+        });
+        return warmupViews.map((v) => v.root);
+      });
+      if (!group) return;
+      scene.add(group);
+      const p = at();
+      for (const v of warmupViews) v.set(p.x, p.y, p.z, 1, 0, 0, 0, false, 0);
     },
   };
 }

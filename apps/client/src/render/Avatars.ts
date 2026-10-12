@@ -13,9 +13,10 @@ import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
 import { ANIM, PF } from "@firstlight/shared/net/schema";
 import { STARTERS, WEAPONS } from "@firstlight/shared/content/weapons";
 import { flags } from "../config.ts";
-import { avatarAssets, preloadAvatars, STARTER_SCALE, type AvatarAssets } from "./avatars/assets.ts";
+import { avatarAssets, preloadAvatars, STARTER_FILES, STARTER_SCALE, type AvatarAssets } from "./avatars/assets.ts";
 import { avatarMaterial, PALETTES, proxyMaterial } from "./avatars/material.ts";
 import { weaponModel } from "./avatars/weapons.ts";
+import { keptSamples } from "./warmup.ts";
 
 export { preloadAvatars } from "./avatars/assets.ts";
 
@@ -588,47 +589,52 @@ function clamp(v: number, a: number, b: number) {
 
 export { PALETTES };
 
+const WARMUP_ITEMS = ["sunbrand", "hexquill", "carbine", "riverstaff", "emberglass", "stillshot"] as const;
+
+/** What the avatar warm-up stands: one avatar per palette, cycling the starters and held items. */
+export function avatarWarmupLooks(): { palette: number; starter: number; item: string }[] {
+  return PALETTES.map((_, i) => ({ palette: i, starter: i % STARTER_FILES.length, item: WARMUP_ITEMS[i % WARMUP_ITEMS.length]! }));
+}
+
+let warmupViews: AvatarView[] = [];
+
 /**
  * Shader warm-up hook (render/warmup.ts WarmupHooks): while forced on, stands one avatar per palette
- * (cycling the four starters, each holding a different item plus a palette-accent item in the left
- * hand) and the six far-LOD capsules at `at()`. Every skinned toon variant, its shadow pass, and every
- * weapon/proxy material then compiles behind the loading screen instead of on first sight of another
- * player. Forced off, everything is disposed again.
+ * (avatarWarmupLooks, each holding an item plus a palette-accent item in the left hand) and the six
+ * far-LOD capsules at `at()`. Every skinned toon variant, its shadow pass, and every weapon/proxy
+ * material then compiles behind the loading screen instead of on first sight of another player or an
+ * NPC. Forced off, the samples leave the scene but are kept for the session (keptSamples): disposing
+ * them freed those builds again (T9). They are not in AvatarView.all, so the LOD pass never ranks them.
  */
 export function avatarWarmupHook(scene: THREE.Object3D, at: () => THREE.Vector3): { forceAll(on: boolean): void } {
-  const items = ["sunbrand", "hexquill", "carbine", "riverstaff", "emberglass", "stillshot"];
-  let group: THREE.Group | null = null;
-  let views: AvatarView[] = [];
-  let capsules: THREE.Group[] = [];
+  const samples = () =>
+    keptSamples("avatarWarmup", () => {
+      const parts: THREE.Object3D[] = [];
+      warmupViews = avatarWarmupLooks().map(({ palette, starter, item }) => {
+        const v = new AvatarView(palette, starter);
+        AvatarView.all.delete(v);
+        v.setDetail(true);
+        v.setWeapon(Math.max(0, WEAPONS.findIndex((w) => w.id === item)));
+        v.attach("hand_l", weaponModel("stormcoil", palette));
+        parts.push(v.root);
+        return v;
+      });
+      // Starter 0 → trim colour i: all six proxy + trim materials.
+      for (let i = 0; i < PALETTES.length; i++) parts.push(capsule(i, 0));
+      return parts;
+    });
   return {
     forceAll(on: boolean) {
-      if (on) {
-        if (group || flags.has("nochars") || !avatarAssets()) return;
-        group = new THREE.Group();
-        group.name = "avatarWarmup";
-        const p = at();
-        for (let i = 0; i < PALETTES.length; i++) {
-          const v = new AvatarView(i, i % 4);
-          v.setDetail(true);
-          v.setWeapon(Math.max(0, WEAPONS.findIndex((w) => w.id === items[i % items.length])));
-          v.attach("hand_l", weaponModel("stormcoil", i));
-          v.set(p.x, p.y, p.z, 1, 0, 0, ANIM.IDLE, 0);
-          group.add(v.root);
-          views.push(v);
-          const cap = capsule(i, 0); // starter 0 → trim colour i: all six proxy + trim materials
-          cap.position.copy(p);
-          group.add(cap);
-          capsules.push(cap);
-        }
-        scene.add(group);
-      } else {
-        for (const v of views) v.dispose();
-        for (const c of capsules) releaseAvatarObjects(c);
-        views = [];
-        capsules = [];
-        group?.removeFromParent();
-        group = null;
+      if (!on) {
+        keptSamples("avatarWarmup")?.removeFromParent();
+        return;
       }
+      const group = samples();
+      if (!group) return;
+      scene.add(group);
+      const p = at();
+      for (const v of warmupViews) v.set(p.x, p.y, p.z, 1, 0, 0, ANIM.IDLE, 0);
+      for (const c of group.children) if (!warmupViews.some((v) => v.root === c)) c.position.copy(p);
     },
   };
 }

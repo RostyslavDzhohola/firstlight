@@ -82,6 +82,32 @@ export function warmupSamples(name: string, looks: readonly (readonly [THREE.Buf
   return g;
 }
 
+const kept = new Map<string, THREE.Group>();
+
+/**
+ * Warm-up samples kept for the session (T9): `build` runs once, on the first warm-up that can build
+ * them (null = not yet), and the same hidden group comes back every time after (without `build`:
+ * the group if it exists). A warm-up hook adds
+ * it to the scene while forced on (warmup() shows hidden objects) and takes it out again after, so
+ * it costs nothing per frame. Three frees a node build, its shadow variant and its pipeline with the
+ * last render object that uses them; render objects live until their object, material or geometry is
+ * disposed, not when they leave the scene. So keeping the samples (never disposing them) keeps those
+ * builds, and the first horse, NPC or other player of each coat or palette doesn't compile in play.
+ */
+export function keptSamples(name: string, build?: () => readonly THREE.Object3D[] | null): THREE.Group | null {
+  let g = kept.get(name);
+  if (!g) {
+    const parts = build?.() ?? null;
+    if (!parts) return null;
+    g = new THREE.Group();
+    g.name = name;
+    g.visible = false;
+    for (const p of parts) g.add(p);
+    kept.set(name, g);
+  }
+  return g;
+}
+
 export interface WarmupHooks {
   /** Force every LOD / hidden variant on (true) or back to normal (false). */
   forceAll(on: boolean): void;
