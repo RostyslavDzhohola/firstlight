@@ -6,7 +6,9 @@ import { describe, expect, it } from "vitest";
 import { BODIES, padDirs } from "@firstlight/shared";
 import { NPC_INDEX, npcDef } from "@firstlight/shared/content/npcs";
 import { WEAPON_INDEX, weapon } from "@firstlight/shared/content/weapons";
-import { explode, projectiles, stepProjectiles, type Projectile } from "../src/world/combat.ts";
+import { explode, fire, projectiles, stepProjectiles, type Projectile } from "../src/world/combat.ts";
+import { DestructionSystem } from "../src/world/destruction.ts";
+import type { BodyRoom } from "../src/world/BodyRoom.ts";
 import type { V3 } from "../src/world/geometry.ts";
 import { spawnBolt, stepNpcProjectiles } from "../src/world/npc/attacks.ts";
 import { BubbleField, segmentShellT } from "../src/world/support.ts";
@@ -166,5 +168,82 @@ describe("what the shell stops", () => {
     }
     expect(front.state.hp).toBe(90);
     expect(shell.hp).toBe(150);
+  });
+});
+
+/** A destruction system on a fake world (the room surface it needs, nothing more). */
+function destructionOn(w: FakeWorld): DestructionSystem {
+  const room = { terrain: w.world.terrain, state: { broken: new Map<string, number>() }, broadcastNear: () => {}, host: w.world.host, actors: w.players } as unknown as BodyRoom;
+  const sys = new DestructionSystem(room, () => w.clock.t);
+  w.world.host.props = sys;
+  return sys;
+}
+
+describe("splash and shells (review B2, S3, S7)", () => {
+  it("splash from outside doesn't reach a fuel drum inside a shell, so nobody inside is blown up by it", () => {
+    const w = fakeWorld("meridian");
+    const field = new BubbleField();
+    w.world.host.bubbles = field;
+    const sys = destructionOn(w);
+    const drum = sys.list.find((b) => b.kind === "fueldrum")!;
+    const right = (m: number): V3 => w.world.snapToGround([drum.px + drum.rx * m, drum.py + drum.ry * m, drum.pz + drum.rz * m]);
+    const victim = w.addPlayer("victim", right(1.0), 1);
+    const owner = w.addPlayer("owner", right(30), 1);
+    const shell = field.add("victim", right(1.0), 3, 150, w.clock.t + 6000);
+    // A rocket bursting just outside the shell, with the drum (inside the shell) within its 4.5 m.
+    explode(w.world.host, owner, lift(right(4.3), 0.6), 4.5, 61, WEAPON_INDEX.get("comet")!);
+    expect(sys.hp[drum.index]).toBe(30);
+    expect(sys.isBroken(drum.index)).toBe(false);
+    expect(victim.state.hp).toBe(100);
+    expect(shell.hp).toBeLessThan(150);
+    expect(shell.hp).toBeGreaterThan(80); // charged once, not once per victim or prop
+  });
+
+  it("a nearly spent shell still protects everyone behind it from one blast (decided before it pops)", () => {
+    const { w, field } = setup();
+    const a = w.addPlayer("a", at(w, 90), 1);
+    const b = w.addPlayer("b", at(w, 90.3), 1);
+    const owner = w.addPlayer("owner", at(w, 120), 1);
+    const shell = field.add("a", at(w, 90), 3, 5, w.clock.t + 6000);
+    explode(w.world.host, owner, lift(at(w, 94), 0.5), 4.5, 61, WEAPON_INDEX.get("comet")!);
+    expect([a.state.hp, b.state.hp]).toEqual([100, 100]);
+    expect(field.list).not.toContain(shell); // it popped doing it
+  });
+
+  it("a fuel drum blast charges a shell it can't get through exactly once", () => {
+    const w = fakeWorld("meridian");
+    const field = new BubbleField();
+    w.world.host.bubbles = field;
+    const sys = destructionOn(w);
+    const drum = sys.list.find((b) => b.kind === "fueldrum")!;
+    const right = (m: number): V3 => w.world.snapToGround([drum.px + drum.rx * m, drum.py + drum.ry * m, drum.pz + drum.rz * m]);
+    const a = w.addPlayer("a", right(-3.2), 1);
+    const b = w.addPlayer("b", right(-3.4), 1);
+    const shell = field.add("a", right(-3.3), 1.5, 150, w.clock.t + 6000);
+    const shooter = w.addPlayer("shooter", right(25), 1);
+    sys.damage(drum.index, 100, "light", "carbine", [1, 0, 0], shooter.id);
+    expect(sys.isBroken(drum.index)).toBe(true);
+    expect([a.state.hp, b.state.hp]).toEqual([100, 100]);
+    const charged = 150 - shell.hp;
+    expect(charged).toBeGreaterThan(0);
+    expect(charged).toBeLessThan(60); // one charge, not one per protected player
+  });
+
+  it("a Stormcoil jump that the shell intercepts stops there and charges the shell", () => {
+    const { w, field } = setup();
+    const p = w.addPlayer("caster", at(w, 78), 6);
+    p.char.hotbar[0] = { id: "stormcoil", tier: 2, qty: 1 };
+    p.char.selected = 0;
+    const first = w.addPlayer("first", at(w, 86), 1);
+    const sheltered = w.addPlayer("sheltered", at(w, 90), 1);
+    const shell = field.add("sheltered", at(w, 90), 2, 150, w.clock.t + 6000);
+    const head = lift(at(w, 78), 1.6);
+    const aim = lift(at(w, 86), 1.0);
+    const d = [aim[0] - head[0], aim[1] - head[1], aim[2] - head[2]];
+    const l = Math.hypot(d[0]!, d[1]!, d[2]!);
+    fire(w.world.host, p, { ox: head[0], oy: head[1], oz: head[2], dx: d[0]! / l, dy: d[1]! / l, dz: d[2]! / l });
+    expect(first.state.hp).toBeLessThan(100);
+    expect(sheltered.state.hp).toBe(100);
+    expect(shell.hp).toBeLessThan(150);
   });
 });

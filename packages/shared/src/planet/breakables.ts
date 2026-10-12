@@ -54,8 +54,11 @@ const ARCHETYPES: Record<BreakableArchetype, ArchetypeDef> = {
   fueldrum: { hp: 30, size: "light", rebuildS: 240, collider: { kind: "cyl", r: 0.36, h: 0.95 }, maxStep: 0.35 },
 };
 
-/** Fuel drum blast (content.md §2.2): share of each victim's max HP, 25% at the centre → 8% at 3.5 m. */
-export const FUEL_DRUM_BLAST = { radius: 3.5, centre: 0.25, edge: 0.08 } as const;
+/**
+ * Fuel drum blast (content.md §2.2): share of each victim's max HP, 25% at the centre → 8% at 3.5 m.
+ * Props in the blast (and a Prism Bubble shell that stops it) take `props` with the usual falloff.
+ */
+export const FUEL_DRUM_BLAST = { radius: 3.5, centre: 0.25, edge: 0.08, props: 60 } as const;
 
 /** Boss-arena cover per planet: Coral Pillars (Gull Point), Nave pillars, Freight Containers. */
 const COVER: Partial<Record<BodyId, ArchetypeDef>> = {

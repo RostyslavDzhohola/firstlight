@@ -126,6 +126,26 @@ export class BubbleField implements BubbleHost {
   }
 }
 
+/**
+ * Splash against shells, decided for every target before any shell is charged, so who is checked
+ * first can't matter (F12 review S3). `blocks(point)` says whether a shell lies between the blast and
+ * that point; `charge()` then charges each intercepting shell once. Overflow is defined as none: a
+ * shell that runs out while stopping a blast still stops all of it, then pops.
+ */
+export function splashShield(bubbles: BubbleHost | undefined, at: V3) {
+  const shells = new Set<Bubble>();
+  return {
+    blocks(point: V3): boolean {
+      const s = bubbles?.between(at, point) ?? null;
+      if (s) shells.add(s);
+      return !!s;
+    },
+    charge(amount: (b: Bubble) => number) {
+      for (const s of shells) bubbles!.absorb(s, amount(s));
+    },
+  };
+}
+
 /** Chest height above an actor's feet, where splash and NPC rounds are aimed. */
 export function chestOf(feet: V3, h = 1.0): V3 {
   const l = Math.hypot(feet[0], feet[1], feet[2]) || 1;

@@ -13,6 +13,7 @@ import { actorPos, type Actor } from "./actors.ts";
 import type { BodyRoom } from "./BodyRoom.ts";
 import { emitGameEvent } from "./events.ts";
 import { dealDamage, type BreakableHost } from "./combat.ts";
+import { splashShield } from "./support.ts";
 import type { V3 } from "./geometry.ts";
 import type { RoomSystem } from "./systems.ts";
 
@@ -99,15 +100,22 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
     return true;
   }
 
-  splash(at: V3, radius: number, amount: number, cls: BreakClass, weaponId: string, by: string | null = null, exclude = -1): void {
+  splash(at: V3, radius: number, amount: number, cls: BreakClass, weaponId: string, by: string | null = null, exclude = -1, blocked?: (point: V3) => boolean): void {
     if (!(radius > 0) || cls === "none") return;
     const n = this.grid.collect(at[0], at[1], at[2], 0, 0, 0, 0, radius, this.candidates);
+    // Decide every target first (a drum that goes up mid-loop can't change who else is hit).
+    const hits: { i: number; dist: number }[] = [];
     for (let k = 0; k < n; k++) {
       const i = this.candidates[k]!;
       if (i === exclude || this.brokenUntil[i]! > 0) continue;
       const b = this.list[i]!;
       const dist = distanceToBreakable(b, at[0], at[1], at[2]);
       if (dist >= radius) continue;
+      if (blocked?.([b.cx, b.cy, b.cz])) continue; // a Prism Bubble shell is in the way
+      hits.push({ i, dist });
+    }
+    for (const { i, dist } of hits) {
+      const b = this.list[i]!;
       const dir: V3 = [b.cx - at[0], b.cy - at[1], b.cz - at[2]];
       this.damage(i, amount * splashFalloff(dist, radius), cls, weaponId, dir, by, 2.2);
     }
@@ -168,19 +176,25 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
     const at: V3 = [b.cx, b.cy, b.cz];
     const R = FUEL_DRUM_BLAST.radius;
     const attacker = by ? (this.room.actors.get(by) ?? null) : null;
-    const victims: Actor[] = [...host.players(), ...host.npcs()];
-    for (const a of victims) {
+    // Shells: decided for every victim and prop first, then each intercepting shell is charged once.
+    const shield = splashShield(host.bubbles, at);
+    const hits: { a: Actor; d: number; p: V3 }[] = [];
+    for (const a of [...host.players(), ...host.npcs()] as Actor[]) {
       if (a.kind === "npc" && a.boss) continue;
       const p = actorPos(a);
       const l = Math.hypot(p[0], p[1], p[2]) || 1;
       const chest: V3 = [p[0] + p[0] / l, p[1] + p[1] / l, p[2] + p[2] / l];
       const d = Math.min(Math.hypot(chest[0] - at[0], chest[1] - at[1], chest[2] - at[2]), Math.hypot(p[0] - at[0], p[1] - at[1], p[2] - at[2]));
       if (d > R || a.state.hp <= 0) continue;
-      if (host.bubbles?.between(at, chest)) continue;
+      if (shield.blocks(chest)) continue;
+      hits.push({ a, d, p });
+    }
+    for (const { a, d, p } of hits) {
       const share = FUEL_DRUM_BLAST.centre + (FUEL_DRUM_BLAST.edge - FUEL_DRUM_BLAST.centre) * (d / R);
       dealDamage(host, attacker, a, share * a.state.maxHp, false, [at[0] - p[0], at[1] - p[1], at[2] - p[2]], 2);
     }
-    this.splash(at, R, 60, "heavy", "fueldrum", by, b.index);
+    this.splash(at, R, FUEL_DRUM_BLAST.props, "heavy", "fueldrum", by, b.index, (c) => shield.blocks(c));
+    shield.charge((s) => FUEL_DRUM_BLAST.props * splashFalloff(Math.max(0, Math.hypot(s.c[0] - at[0], s.c[1] - at[1], s.c[2] - at[2]) - s.r), R));
     this.room.broadcastNear("explode", { id: 0, x: at[0], y: at[1], z: at[2], radius: R, weapon: WEAPON_INDEX.get("grenade") ?? 0 }, at, 200);
   }
 

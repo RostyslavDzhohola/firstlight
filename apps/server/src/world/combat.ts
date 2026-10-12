@@ -8,7 +8,7 @@ import type { Terrain } from "@firstlight/shared";
 import { PF } from "@firstlight/shared/net/schema";
 import { actorPos, positionAgo, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
 import { dist3, HEAD_FROM, inMeleeArc, PLAYER_HEIGHT, PLAYER_RADIUS, rayCapsule, rayTerrain, type V3 } from "./geometry.ts";
-import type { Bubble, BubbleHost } from "./support.ts";
+import { splashShield, type BubbleHost } from "./support.ts";
 
 export const REWIND_MS = 150;
 export const COMBAT_TAG_MS = 10_000;
@@ -42,7 +42,8 @@ export interface BreakableHost {
   raycast(o: V3, d: V3, maxT: number): { index: number; t: number } | null;
   /** `by`: the attacking player's session id (credit for the Demolition Crew medal), or null. */
   damage(index: number, amount: number, cls: Destroys, weaponId: string, dir: V3, by: string | null): void;
-  splash(at: V3, radius: number, amount: number, cls: Destroys, weaponId: string, by: string | null, exclude?: number): void;
+  /** `blocked(point)`: a Prism Bubble shell lies between the blast and that prop centre (skip it). */
+  splash(at: V3, radius: number, amount: number, cls: Destroys, weaponId: string, by: string | null, exclude?: number, blocked?: (point: V3) => boolean): void;
   arc(pos: V3, facing: V3, range: number, arcDeg: number, amount: number, cls: Destroys, weaponId: string, by: string | null): void;
 }
 
@@ -373,31 +374,33 @@ function actorFacingFrom(from: V3, target: Actor): V3 {
   return [from[0] - t[0], from[1] - t[1], from[2] - t[2]];
 }
 
-/**
- * What stops a line between two points: terrain, an intact breakable, or a Prism Bubble shell (which
- * then takes `amount`). Returns true when the line is clear.
- */
-function clearLine(host: CombatHost, a: V3, b: V3, amount: number): boolean {
+/** Line of sight between two points: no terrain and no intact breakable in the way (shells aside). */
+export function lineOfSight(host: CombatHost, a: V3, b: V3): boolean {
   const v: V3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
   const l = Math.hypot(v[0], v[1], v[2]);
   if (l < 1e-6) return true;
   const d: V3 = [v[0] / l, v[1] / l, v[2] / l];
-  if (rayTerrain(host.terrain, a, d, l, 1) < l) return false;
-  if (propOnRay(host, a, d, l)) return false;
-  const shell = host.bubbles?.cross(a, d, l) ?? null;
-  if (shell) {
-    host.bubbles!.absorb(shell.bubble, amount);
-    return false;
-  }
-  return true;
+  return rayTerrain(host.terrain, a, d, l, 1) >= l && !propOnRay(host, a, d, l);
+}
+
+/** The first Prism Bubble shell between two points, and where along the line it is. */
+function shellBetween(host: CombatHost, a: V3, b: V3): { bubble: NonNullable<ReturnType<BubbleHost["between"]>>; at: V3 } | null {
+  if (!host.bubbles) return null;
+  const v: V3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const l = Math.hypot(v[0], v[1], v[2]);
+  if (l < 1e-6) return null;
+  const d: V3 = [v[0] / l, v[1] / l, v[2] / l];
+  const hit = host.bubbles.cross(a, d, l);
+  return hit ? { bubble: hit.bubble, at: [a[0] + d[0] * hit.t, a[1] + d[1] * hit.t, a[2] + d[2] * hit.t] } : null;
 }
 
 /**
  * Stormcoil (content §2.3): the camera ray only picks the first target (generous aim, 0.7 m extra);
  * the bolt is traced from the caster's head on the server and needs a clear line to it, and every
- * jump (to the nearest damageable entity within 6 m, allies included, never twice) needs a clear
- * line from the previous target (F12 review: it used to trace from the client's origin, up to 7 m
- * from the head, and jumped through cover).
+ * jump (to the nearest damageable entity within 6 m that it can see, allies included, never twice)
+ * needs a clear line from the previous target (F12 review: it used to trace from the client's origin,
+ * up to 7 m from the head, and jumped through cover). A Prism Bubble shell on the chosen line takes
+ * that bolt or jump and ends the chain.
  */
 function chain(host: CombatHost, p: PlayerActor, o: V3, d: V3, def: WeaponDef, tier: TierStats, lvl: number) {
   const now = host.now();
@@ -422,28 +425,40 @@ function chain(host: CombatHost, p: PlayerActor, o: V3, d: V3, def: WeaponDef, t
   }
   const points: V3[] = [];
   let end: V3;
-  if (first && clearLine(host, head, chestOf(first), 0)) {
-    const hitSet = new Set<string>([p.id]);
-    let cur: Actor | null = first;
-    for (let j = 0; cur && j <= (tier.jumps ?? 2); j++) {
-      hitSet.add(cur.id);
-      points.push(actorPos(cur));
-      dealDamage(host, p, cur, dmg, false, actorFacingFrom(j === 0 ? head : points[j - 1]!, cur));
-      dmg *= 0.7;
-      const from = chestOf(cur);
-      let next: Actor | null = null;
-      let nd = 6;
-      for (const a of allActors(host)) {
-        if (hitSet.has(a.id) || !canHurt(p, a, now)) continue;
-        const dd = dist3(actorPos(a), actorPos(cur));
-        if (dd <= nd && clearLine(host, from, chestOf(a), 0)) {
-          nd = dd;
-          next = a;
+  if (first && lineOfSight(host, head, chestOf(first))) {
+    const shell = shellBetween(host, head, chestOf(first));
+    if (shell) {
+      host.bubbles!.absorb(shell.bubble, dmg);
+      end = shell.at;
+    } else {
+      const hitSet = new Set<string>([p.id]);
+      let cur: Actor | null = first;
+      for (let j = 0; cur && j <= (tier.jumps ?? 2); j++) {
+        hitSet.add(cur.id);
+        points.push(actorPos(cur));
+        dealDamage(host, p, cur, dmg, false, actorFacingFrom(j === 0 ? head : points[j - 1]!, cur));
+        dmg *= 0.7;
+        const from = chestOf(cur);
+        let next: Actor | null = null;
+        let nd = 6;
+        for (const a of allActors(host)) {
+          if (hitSet.has(a.id) || !canHurt(p, a, now)) continue;
+          const dd = dist3(actorPos(a), actorPos(cur));
+          if (dd <= nd && lineOfSight(host, from, chestOf(a))) {
+            nd = dd;
+            next = a;
+          }
         }
+        // The jump goes to the nearest visible target; a shell on that line takes it and ends the chain.
+        const shellJ = next ? shellBetween(host, from, chestOf(next)) : null;
+        if (shellJ) {
+          host.bubbles!.absorb(shellJ.bubble, dmg);
+          next = null;
+        }
+        cur = next;
       }
-      cur = next;
+      end = actorPos(first);
     }
-    end = actorPos(first);
   } else {
     // No target (or the first is behind cover): the bolt flies from the head toward the aim point
     // and stops at the first thing in the way; an intact breakable or a bubble shell there takes it.
@@ -576,28 +591,26 @@ export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | 
 
 /** Splash damage around a point (friendly fire on; the owner takes half). */
 export function explode(host: CombatHost, owner: PlayerActor | NpcActor, at: V3, radius: number, damage: number, weaponIndex: number, exclude?: string, excludeProp?: number) {
-  const shielded = new Set<Bubble>();
+  // Prism Bubble shells: decide who (and which props) they shelter before charging any of them.
+  const shield = splashShield(host.bubbles, at);
+  const hits: { a: Actor; d: number }[] = [];
   for (const a of allActors(host)) {
     if (a.id === exclude) continue;
     const d = dist3(at, actorPos(a));
     if (d > radius + 0.5) continue;
+    if (shield.blocks(chestOf(a))) continue;
+    hits.push({ a, d });
+  }
+  for (const { a, d } of hits) {
     let dmg = damage * splashFalloff(Math.max(0, d - 0.5), radius);
-    // Splash crossing a Prism Bubble shell stops at it (the shell takes the blast once).
-    const shell = host.bubbles?.between(at, chestOf(a)) ?? null;
-    if (shell) {
-      if (!shielded.has(shell)) {
-        shielded.add(shell);
-        host.bubbles!.absorb(shell, damage * splashFalloff(Math.max(0, dist3(at, shell.c) - shell.r), radius));
-      }
-      continue;
-    }
     if (a.id === owner.id) dmg *= 0.5;
     if (dmg > 0) dealDamage(host, owner, a, dmg, false, [at[0] - actorPos(a)[0], at[1] - actorPos(a)[1], at[2] - actorPos(a)[2]], 4);
   }
   host.onPropHit?.(at, "heavy", damage);
-  // Breakable props in the blast (NPC blasts count as heavy too).
+  // Breakable props in the blast (NPC blasts count as heavy too); not through a shell.
   const w = WEAPONS[weaponIndex];
-  host.props?.splash(at, radius, damage, owner.kind === "npc" ? "heavy" : (w?.destroys ?? "heavy"), w?.id ?? "", playerId(owner), excludeProp);
+  host.props?.splash(at, radius, damage, owner.kind === "npc" ? "heavy" : (w?.destroys ?? "heavy"), w?.id ?? "", playerId(owner), excludeProp, (c) => shield.blocks(c));
+  shield.charge((b) => damage * splashFalloff(Math.max(0, dist3(at, b.c) - b.r), radius));
   host.broadcastNear("explode", { id: 0, x: at[0], y: at[1], z: at[2], radius, weapon: weaponIndex }, at, 200);
 }
 
