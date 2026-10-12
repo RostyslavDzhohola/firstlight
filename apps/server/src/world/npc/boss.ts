@@ -272,9 +272,9 @@ export class BossController {
     if (p === 2) this.voice(this.def.voice.phase2);
     for (const a of this.npcDef.attacks) {
       if (!a.timed || !a.every) continue;
-      const every = a.every[p - 1] ?? 0;
+      const every = (a.every[p - 1] ?? 0) * 1000 * NPC_TUNING.bossEveryScale;
       if (every <= 0) this.nextTimed.delete(a.id);
-      else if (!this.nextTimed.has(a.id) || (a.every[p - 2] ?? 0) <= 0) this.nextTimed.set(a.id, now + every * 1000 * NPC_TUNING.bossEveryScale);
+      else if (!this.nextTimed.has(a.id) || (a.every[p - 2] ?? 0) <= 0) this.nextTimed.set(a.id, now + (NPC_TUNING.firstMechanicMs ?? every));
     }
   }
 
@@ -355,8 +355,10 @@ export class BossController {
     return amount * m;
   }
 
-  onDamaged(_n: Npc, _amount: number, _by: unknown) {
-    // Contribution is tracked in n.damage by the system; engagement comes from arena presence.
+  onDamaged(n: Npc, _amount: number, by: unknown) {
+    // Contribution is tracked in n.damage by the system. A hit from outside the arena engages too,
+    // so the empty-arena reset (30 s) heals it: no free chip damage from range.
+    if (!this.engaged && by && this.status === "alive") this.engage(n, this.sys.world.now());
   }
 
   onKilled(n: Npc, _by: string | null, now: number) {

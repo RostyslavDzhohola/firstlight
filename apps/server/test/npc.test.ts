@@ -104,7 +104,9 @@ describe("enemies and wildlife (seam 1)", () => {
     }, 5000);
     for (const n of npcs) {
       expect(isSafe(BODIES.arcadia, n.x, n.y, n.z), `${n.def} at a pad`).toBe(false);
-      expect(d3([n.x, n.y, n.z], at)).toBeLessThan(NPC_TUNING.activateRadius + 30);
+      // Woken by the player: near Clover Fields, or near the main pad where they joined before teleporting.
+      const nearest = Math.min(d3([n.x, n.y, n.z], at), d3([n.x, n.y, n.z], nearPad("arcadia", 0, 0)));
+      expect(nearest).toBeLessThan(NPC_TUNING.activateRadius + 30);
     }
     // The client's view holds the nearby ones only (AOI ≤ 100 m).
     await waitFor(() => st(a).npcs?.size > 0, 4000);
@@ -333,6 +335,45 @@ describe("bosses (seam 1)", () => {
     expect(me(A).hp).toBe(230 - 138);
     expect(st(A).players.get(B.sessionId).hp).toBe(230 - 138);
     expect(me(A).flags & 32).toBe(0);
+  }, 30_000);
+
+  it("The Receiver: a duo soaks Foreclosure together (60% each), then holds both consoles for Asset Freeze", async () => {
+    NPC_TUNING.bosses = true;
+    NPC_TUNING.bossAttacks = false;
+    NPC_TUNING.bossMechanics = ["foreclosure"];
+    NPC_TUNING.firstMechanicMs = 200;
+    const ar = bossArena(createTerrain("meridian"))!;
+    const R = BODIES.meridian.radius;
+    const A = await player("duo-1", "meridian", ar.centre as V, 20);
+    const B = await player("duo-2", "meridian", offset(ar.centre, 6, 0, R), 20);
+    const boss = await bossUp(A);
+    expect(boss.maxHp).toBe(30_000);
+    let stamp: any = null;
+    let end: any = null;
+    A.onMessage("boss", (m: any) => {
+      if (m.type === "mechanic" && m.mech === "foreclosure") stamp = m;
+      if (m.type === "mechanicEnd" && m.mech === "foreclosure") end = m;
+    });
+    // P1 has no Foreclosure; push it into P2 (below 60%): 13,000 after the 25% armour.
+    await sleep(800);
+    expect(stamp).toBeNull();
+    A.send("npc", { cmd: "hurt", id: boss.id, amount: 13_000 / 0.25, as: A.sessionId });
+    await waitFor(() => st(A).npcs.get(boss.id)?.phase === 2, 2000);
+    await waitFor(() => stamp !== null, 3000);
+    expect(stamp.r).toBe(4.5);
+    // Both into the stamp before it lands: 348 split two ways = 174 each (60% of 290).
+    const c = stamp.pts as V;
+    place(A, c);
+    place(B, offset(c, 1, 0, R));
+    await waitFor(() => end !== null, 3000);
+    await sleep(150);
+    expect(end.engaged).toBe(2);
+    expect(me(A).hp).toBe(290 - 174);
+    expect(st(A).players.get(B.sessionId).hp).toBe(290 - 174);
+    // Then both run to the Override Consoles: held 3 s together → the Receiver kneels.
+    place(A, ar.plates[0]! as V);
+    place(B, ar.plates[1]! as V);
+    await waitFor(() => !!((st(A).npcs.get(boss.id)?.flags ?? 0) & NF.WEAK_OPEN), 6000);
   }, 30_000);
 
   it("a defeated boss pays every contributor and respawns after its timer", async () => {

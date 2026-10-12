@@ -170,7 +170,8 @@ export class NpcSystem implements RoomSystem {
     let budget = NPC_TUNING.spawnBudget;
     for (const g of this.groups) {
       const near = this.nearestLiveAny(g.point.pos);
-      if (near <= act) g.lastNearAt = now;
+      // Wake within activateRadius; stay awake while anyone is within the (larger) despawn radius.
+      if (near <= (g.active ? NPC_TUNING.despawnRadius : act)) g.lastNearAt = now;
       if (g.cleared) {
         const slow = near <= NPC_RULES.respawnSlowRadius;
         g.respawnLeft -= sdt * (slow ? 0.5 : 1);

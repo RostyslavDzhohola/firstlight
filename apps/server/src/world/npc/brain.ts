@@ -279,7 +279,7 @@ export function startEvade(sys: NpcSystem, n: Npc, now: number) {
 }
 
 function evade(sys: NpcSystem, n: Npc, now: number, dt: number) {
-  const arrived = moveTo(sys, n, n.home, n.def.runSpeed * NPC_RULES.evadeSpeedMult, dt, 1.5, false);
+  const arrived = moveTo(sys, n, n.home, n.def.runSpeed * NPC_RULES.evadeSpeedMult, dt, 1.5);
   if (arrived || now - n.modeAt > 20_000) {
     if (!arrived) n.pos = [n.home[0], n.home[1], n.home[2]];
     n.state.hp = n.state.maxHp;
