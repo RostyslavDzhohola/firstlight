@@ -80,3 +80,39 @@ export function describeBootFailure(e: unknown): BootFailure | null {
 export function shouldKeepReconnecting(e: unknown): boolean {
   return !refused(e);
 }
+
+/** The screens a failed boot can end on (main.ts wires the real ones; tests record the calls). */
+export interface BootScreens {
+  hideLoading(): void;
+  /** The loading card's error with Retry / Reload. */
+  showError(f: BootFailure): void;
+  /** The removal screen (kicked, banned, playing elsewhere): a close code or an /api/play refusal. */
+  showRemoved(reason: number | string): void;
+}
+
+/** What a removal is called on the removal screen: the close code, or the /api/play refusal. */
+function removalReason(e: unknown): number | string | null {
+  if (e instanceof ConnectionLost && e.action === "removed" && e.code !== null) return e.code;
+  const m = message(e);
+  return m === "banned" || m === "kicked" ? m : null;
+}
+
+/**
+ * Run the first boot; if it fails, end on a screen, never a blank page: removed (a removal close
+ * during the first arrival, or a refusal) → the removal screen; anything else → the error with
+ * Retry. Returns whether the boot succeeded.
+ */
+export async function runBoot(start: () => Promise<void>, ui: BootScreens): Promise<boolean> {
+  try {
+    await start();
+    return true;
+  } catch (e) {
+    console.error("[boot] failed", e);
+    const removed = removalReason(e);
+    if (removed !== null) {
+      ui.hideLoading();
+      ui.showRemoved(removed); // idempotent: a refusal's screen may already be up
+    } else ui.showError(describeBootFailure(e)!);
+    return false;
+  }
+}

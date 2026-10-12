@@ -7,7 +7,7 @@ import "./ui/styles/base.css";
 import "./ui/styles/landing.css";
 import "./ui/styles/loading.css";
 import { config } from "./config.ts";
-import { describeBootFailure } from "./game/boot.ts";
+import { runBoot } from "./game/boot.ts";
 import { hideLoading, setLoading, showLoadingError } from "./ui/loading.ts";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T | null;
@@ -56,30 +56,36 @@ function backToLanding() {
   if (playBtn) playBtn.disabled = false;
 }
 
-/** Load and start the game. A failure shows what went wrong with Retry (F12 S6), never a dead Play. */
+/**
+ * Load and start the game. A failure always ends on a screen (F12 S6 + Codex review): the error with
+ * Retry (or Reload), or the removal screen when the server removed us while we were arriving.
+ */
 async function boot() {
   setLoading("Loading the game…", 0.02);
-  try {
-    const { startGame } = await import("./game/Game.ts");
-    await startGame();
-  } catch (e) {
-    console.error("[boot] failed", e);
-    const f = describeBootFailure(e);
-    if (!f) return void hideLoading(); // banned / kicked: the removal screen explains
-    showLoadingError({
-      title: f.title,
-      text: f.text,
-      action: f.action === "reload" ? "Reload" : "Retry",
-      onAction: () => {
-        if (f.action === "reload") return location.reload();
-        // A click again: fullscreen can be requested here.
-        void document.documentElement.requestFullscreen?.().catch(() => {});
-        void boot();
-      },
-      back: "Back to the start page",
-      onBack: backToLanding,
-    });
-  }
+  await runBoot(
+    async () => {
+      const { startGame } = await import("./game/Game.ts");
+      await startGame();
+    },
+    {
+      hideLoading,
+      showRemoved: (reason) => void import("./social/screens.ts").then((m) => m.showRemoved(reason)),
+      showError: (f) =>
+        showLoadingError({
+          title: f.title,
+          text: f.text,
+          action: f.action === "reload" ? "Reload" : "Retry",
+          onAction: () => {
+            if (f.action === "reload") return location.reload();
+            // A click again: fullscreen can be requested here.
+            void document.documentElement.requestFullscreen?.().catch(() => {});
+            void boot();
+          },
+          back: "Back to the start page",
+          onBack: backToLanding,
+        }),
+    },
+  );
 }
 
 playBtn?.addEventListener("click", async () => {

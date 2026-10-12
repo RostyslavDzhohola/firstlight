@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { CLOSE } from "@firstlight/shared/net/social";
 import { ConnectionLost } from "./arrival.ts";
-import { BootGate, describeBootFailure, RendererUnavailable, shouldKeepReconnecting } from "./boot.ts";
+import { BootGate, describeBootFailure, RendererUnavailable, runBoot, shouldKeepReconnecting, type BootScreens } from "./boot.ts";
 
 /** A deferred promise for driving one boot attempt by hand. */
 function deferred() {
@@ -92,5 +92,50 @@ describe("shouldKeepReconnecting", () => {
     expect(shouldKeepReconnecting(new ConnectionLost(1006, "joining"))).toBe(true);
     expect(shouldKeepReconnecting(new Error("banned"))).toBe(false);
     expect(shouldKeepReconnecting(new ConnectionLost(CLOSE.KICKED, "joining"))).toBe(false);
+  });
+});
+
+describe("runBoot: a failed boot always ends on a screen (Codex finding 1)", () => {
+  function screens() {
+    const calls: string[] = [];
+    const ui: BootScreens = {
+      hideLoading: () => calls.push("hideLoading"),
+      showError: (f) => calls.push(`error:${f.action}`),
+      showRemoved: (r) => calls.push(`removed:${r}`),
+    };
+    return { ui, calls };
+  }
+  const quiet = () => vi.spyOn(console, "error").mockImplementation(() => {});
+
+  for (const code of [CLOSE.ELSEWHERE, CLOSE.BANNED, CLOSE.KICKED]) {
+    it(`a ${code} close during the first arrival shows the removal screen (not a blank page)`, async () => {
+      const err = quiet();
+      const { ui, calls } = screens();
+      const gate = new BootGate(async () => {
+        throw new ConnectionLost(code, "warming up shaders");
+      });
+      expect(await runBoot(() => gate.start(), ui)).toBe(false);
+      expect(calls).toEqual(["hideLoading", `removed:${code}`]);
+      err.mockRestore();
+    });
+  }
+
+  it("a refusal at /api/play also ends on the removal screen (its screen may already be up)", async () => {
+    const err = quiet();
+    const { ui, calls } = screens();
+    expect(await runBoot(async () => Promise.reject(new Error("banned")), ui)).toBe(false);
+    expect(calls).toEqual(["hideLoading", "removed:banned"]);
+    err.mockRestore();
+  });
+
+  it("anything else shows the error with Retry; success shows nothing", async () => {
+    const err = quiet();
+    const { ui, calls } = screens();
+    expect(await runBoot(async () => Promise.reject(new TypeError("Failed to fetch")), ui)).toBe(false);
+    expect(calls).toEqual(["error:retry"]);
+    calls.length = 0;
+    expect(await runBoot(async () => {}, ui)).toBe(true);
+    expect(calls).toEqual([]);
+    err.mockRestore();
   });
 });

@@ -160,14 +160,24 @@ export class Game {
       hideLoading();
       this.firstChoice = await this.hud.characterPick({ askName: needsName ? { suggested: info!.name } : undefined });
     } else if (needsName) await pickDisplayName({ suggested: info!.name, dismissible: true });
-    await this.enterBody(body, this.firstChoice);
-    this.handOver();
+    await this.firstArrival(body);
   }
 
   /** Retry after a failed first arrival (S6): the renderer and UI are up, enter the world again. */
   private async retryArrival(body: BodyId) {
     document.getElementById("landing")!.style.display = "none"; // Retry may come from the start page
-    await this.enterBody(body, this.firstChoice);
+    await this.firstArrival(body);
+  }
+
+  private async firstArrival(body: BodyId) {
+    try {
+      await this.enterBody(body, this.firstChoice);
+    } catch (e) {
+      // Kicked, banned or playing elsewhere while arriving: stop here; the boot (main.ts runBoot)
+      // puts the removal screen up.
+      if (e instanceof ConnectionLost && e.action === "removed") this.stop();
+      throw e;
+    }
     this.handOver();
   }
 
