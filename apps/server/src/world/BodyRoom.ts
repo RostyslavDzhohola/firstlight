@@ -24,6 +24,7 @@ import { emitGameEvent, npcKindOf } from "./events.ts";
 import { emitPileEvent, onPileEvent, pileStore, type PileData } from "./piles.ts";
 import { SYSTEM_FACTORIES, type RoomSystem } from "./systems.ts";
 import { movementLimits } from "./npc/effects.ts";
+import { groundMotion, motionFields, settle, validateMove, MOVE, type MoveWorld } from "./movement.ts";
 import { matchMaker } from "@colyseus/core";
 import { liveSessions } from "../auth/sessions.ts";
 import { accountLinks } from "../auth/links.ts";
@@ -47,16 +48,7 @@ export interface JoinOptions {
   palette?: number;
 }
 
-export const MOVE = {
-  maxSpeed: 9,
-  speedSlack: 1.2, // network jitter allowance on top of sprint speed
-  budgetCap: 3.5, // metres that can be banked (≈ 0.3 s of sprint + slack)
-  dodgeBurst: 4.5,
-  dodgeCooldownMs: 1100,
-  groundTolerance: 0.5,
-  maxJumpAbove: 2.6, // highest a jump can lift the feet above ground (with slopes)
-  swimDepthSlack: 2.5,
-};
+export { MOVE } from "./movement.ts";
 
 export const RULES = {
   LOGOUT_MS: 30_000,
@@ -110,6 +102,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   private lastAoi = 0;
   private lastSave = 0;
   host!: CombatHost;
+  moveWorld!: MoveWorld;
   systems: RoomSystem[] = [];
   portals: PortalSpot[] = [];
 
@@ -122,6 +115,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     this.seatReservationTimeout = 8;
     this.bodyDef = BODIES[options.body];
     this.terrain = createTerrain(this.bodyDef);
+    const terrain = this.terrain;
+    this.moveWorld = { radius: this.bodyDef.radius, waterLevel: this.bodyDef.waterLevel, groundAt: (x, y, z) => terrain.groundHeightAt(x, y, z) };
     this.state.body = options.body;
     this.state.copy = options.copy;
     void this.setMetadata({ body: options.body, copy: options.copy, loadtest: !!options.loadtest });
@@ -307,11 +302,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       diedAt: 0,
       lastDamagedBy: null,
       youDirty: true,
-      moveBudget: MOVE.budgetCap,
-      lastBudgetAt: now,
-      lastDodgeAt: 0,
-      peakRadius: Math.hypot(p.x, p.y, p.z),
-      airborne: false,
+      ...motionFields(Math.hypot(p.x, p.y, p.z), now),
       chargeStartedAt: 0,
       specialReadyAt: 0,
       lastPhraseAt: 0,
@@ -439,37 +430,19 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (!a || a.dead || a.superseded || msg.seq <= a.state.seq) return;
     const p = a.state;
     const now = Date.now();
-    // Distance budget: refills at sprint speed (+slack), banks at most budgetCap; a dodge adds a
-    // one-off allowance no more often than its cooldown (review blocker: speed hack).
-    const elapsed = Math.min(0.25, (now - a.lastBudgetAt) / 1000);
-    a.lastBudgetAt = now;
     // NPC slows / Cease-and-Desist (npc/effects.ts) scale the refill and can refuse the dodge burst.
-    const limits = movementLimits(a, now);
-    a.moveBudget = Math.min(MOVE.budgetCap, a.moveBudget + MOVE.maxSpeed * MOVE.speedSlack * limits.speed * elapsed);
-    let dodge = 0;
-    if (msg.anim === ANIM.DODGE && limits.dodge > 0 && now - a.lastDodgeAt >= MOVE.dodgeCooldownMs) {
-      a.lastDodgeAt = now;
-      dodge = MOVE.dodgeBurst * limits.dodge;
-    }
-    const dist = Math.hypot(msg.x - a.lastX, msg.y - a.lastY, msg.z - a.lastZ);
-    const R = this.bodyDef.radius;
-    const len = Math.hypot(msg.x, msg.y, msg.z);
-    const ground = this.terrain.groundHeightAt(msg.x, msg.y, msg.z);
-    const above = len - R - ground;
-    const prevLen = Math.hypot(a.lastX, a.lastY, a.lastZ);
-    const swimmingOk = ground < this.bodyDef.waterLevel - 1 && len - R >= this.bodyDef.waterLevel - MOVE.swimDepthSlack && len - R <= this.bodyDef.waterLevel + 0.5;
-    // Height: no gaining height above ground beyond a jump; falling off cliffs is fine.
-    const heightOk = above >= -MOVE.groundTolerance && (above <= MOVE.maxJumpAbove || len <= prevLen + 0.05);
-    const ok = dist <= a.moveBudget + dodge + 0.05 && (heightOk || swimmingOk);
-    if (!ok) {
+    const r = validateMove(a, msg, this.moveWorld, movementLimits(a, now), now);
+    if (!r.ok) {
       a.violations++;
-      client.send("correct", { x: a.lastX, y: a.lastY, z: a.lastZ, seq: msg.seq });
+      // Refused while airborne: the server applies gravity instead of holding the body up there.
+      const at = settle(a, this.moveWorld, now) ?? [a.lastX, a.lastY, a.lastZ];
+      client.send("correct", { x: at[0], y: at[1], z: at[2], seq: msg.seq });
       p.seq = msg.seq;
       return;
     }
-    a.moveBudget = Math.max(0, a.moveBudget + dodge - dist);
+    const R = this.bodyDef.radius;
+    const { len, ground, grounded, swimming: swimmingOk } = r;
     // Server-side fall damage from the validated trajectory.
-    const grounded = above <= 0.35 || swimmingOk;
     if (!grounded) {
       a.airborne = true;
       a.peakRadius = Math.max(a.peakRadius, len);
@@ -843,6 +816,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
         t.state.y = t.lastY = p[1];
         t.state.z = t.lastZ = p[2];
         t.history.length = 0;
+        groundMotion(t, Math.hypot(p[0], p[1], p[2]), Date.now());
+        t.airborne = false;
+        t.peakRadius = Math.hypot(p[0], p[1], p[2]);
         t.client.send("correct", { x: p[0], y: p[1], z: p[2], seq: t.state.seq });
         break;
       }
@@ -913,9 +889,15 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       if (a.logoutEndsAt === null) p.flags &= ~PF.LOGGING_OUT;
       else if (now >= a.logoutEndsAt) this.completeLogout(a);
       if (!a.dead) a.char.hp = p.hp;
+      // A body left in mid-air (no input) falls on the server; the client is told where it is.
+      if (a.airborne && now - a.lastMoveAt > MOVE.silentFallMs) {
+        const at = settle(a, this.moveWorld, now);
+        if (at) a.client.send("correct", { x: at[0], y: at[1], z: at[2], seq: p.seq });
+      }
     }
     for (const n of this.npcActors.values()) pushHistory(n, now);
     for (const [sid, l] of this.lingering) {
+      if (l.actor.airborne) settle(l.actor, this.moveWorld, now);
       pushHistory(l.actor, now);
       if (l.actor.dead || now >= l.until) {
         this.finalLeave(l.actor);

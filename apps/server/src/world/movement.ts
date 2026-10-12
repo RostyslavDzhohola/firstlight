@@ -1,0 +1,167 @@
+// Server-side movement validation (SPEC §5.3, D3; F12 review B1 flight, S3 swimming).
+//
+// The client predicts and sends positions; the server checks every step:
+// - Distance: a budget refilled at sprint speed (swim speed in the water) plus slack, banked up to
+//   `budgetCap`. A dodge or a shove adds a one-off bonus that expires. The per-packet tolerance is
+//   charged (the budget may dip below zero), so it can't be repeated into extra speed.
+//   Downward radial motion is gravity's (bounded by the ground), not the run budget's.
+// - Height: off the ground, the body must follow a ballistic envelope from its last grounded
+//   position (jump speed, gravity, generous slack). Hovering or climbing in small steps fails as
+//   soon as the envelope drops below it, and `settle` pulls such bodies (or silent ones) down.
+
+import { ANIM } from "@firstlight/shared/net/schema";
+import type { PlayerActor } from "./actors.ts";
+import type { V3 } from "./geometry.ts";
+
+export const MOVE = {
+  maxSpeed: 9, // sprint (content §0)
+  swimSpeed: 3,
+  speedSlack: 1.2, // network jitter allowance on top of the speed
+  budgetCap: 3.5, // metres that can be banked (≈ 0.3 s of sprint + slack)
+  swimBudgetCap: 1.5,
+  stepTolerance: 0.05, // per packet, charged
+  dodgeBurst: 4.5,
+  dodgeCooldownMs: 1100,
+  dodgeWindowMs: 800, // the dodge bonus must be used within this time
+  knockbackWindowMs: 1500,
+  groundTolerance: 0.5, // feet may be this far below the ground
+  groundedAbove: 0.35, // feet within this of the ground count as grounded (client: the same)
+  gravity: 18, // client PlayerController
+  jumpSpeed: 6.6, // client PlayerController (apex ≈ 1.21 m)
+  airSlack: 0.5, // metres above the envelope
+  airTimeSlackMs: 350, // packet timing slack on the envelope
+  silentFallMs: 400, // airborne with no input for this long: the server applies gravity
+  swimDepthSlack: 2.5,
+};
+
+/** What the validator needs from the body. */
+export interface MoveWorld {
+  radius: number;
+  waterLevel: number;
+  groundAt(x: number, y: number, z: number): number;
+}
+
+export interface MoveLimits {
+  /** Refill factor (NPC slows, no-sprint). */
+  speed: number;
+  /** Dodge bonus factor (0 = refused). */
+  dodge: number;
+}
+
+export type MoveResult =
+  | { ok: true; swimming: boolean; grounded: boolean; len: number; ground: number }
+  | { ok: false; reason: "speed" | "height" | "ground" };
+
+/** Is a body at radius `len` over `ground` floating in deep water (swim depth)? */
+function swimmingAt(w: MoveWorld, len: number, ground: number): boolean {
+  const depth = len - w.radius;
+  return ground < w.waterLevel - 1 && depth >= w.waterLevel - MOVE.swimDepthSlack && depth <= w.waterLevel + 0.5;
+}
+
+/** Highest radius the body may have right now while airborne (the ballistic envelope). */
+export function airCeiling(a: PlayerActor, now: number): number {
+  const g = MOVE.gravity;
+  const v0 = a.airLiftV;
+  const tApex = v0 / g;
+  const apex = (v0 * v0) / (2 * g);
+  const t = Math.max(0, (now - a.airStartAt - MOVE.airTimeSlackMs) / 1000);
+  const h = t <= tApex ? apex : apex - 0.5 * g * (t - tApex) * (t - tApex);
+  return a.airStartLen + h + MOVE.airSlack;
+}
+
+/** Start the envelope over from a grounded (or freshly placed) position. */
+export function groundMotion(a: PlayerActor, len: number, now: number) {
+  a.airStartAt = now;
+  a.airStartLen = len;
+  a.airLiftV = MOVE.jumpSpeed;
+}
+
+/** Validate one client step and, if it is allowed, charge it. Does not move the actor. */
+export function validateMove(a: PlayerActor, m: { x: number; y: number; z: number; anim: number }, w: MoveWorld, limits: MoveLimits, now: number): MoveResult {
+  const elapsed = Math.min(0.25, Math.max(0, (now - a.lastBudgetAt) / 1000));
+  a.lastBudgetAt = now;
+  const len = Math.hypot(m.x, m.y, m.z);
+  const ground = w.groundAt(m.x, m.y, m.z);
+  const above = len - w.radius - ground;
+  const swimming = swimmingAt(w, len, ground);
+  // Swim speed when both ends of the step are in the water (entering and leaving keep land speed).
+  const inWater = swimming && a.swimming;
+  const speed = (inWater ? MOVE.swimSpeed : MOVE.maxSpeed) * MOVE.speedSlack * limits.speed;
+  a.moveBudget = Math.min(inWater ? MOVE.swimBudgetCap : MOVE.budgetCap, a.moveBudget + speed * elapsed);
+  if (now >= a.moveBonusUntil) a.moveBonus = 0;
+  // Dodge rolls only on land (the client can't roll in the water either).
+  if (m.anim === ANIM.DODGE && !swimming && !a.swimming && limits.dodge > 0 && now - a.lastDodgeAt >= MOVE.dodgeCooldownMs) {
+    a.lastDodgeAt = now;
+    a.moveBonus += MOVE.dodgeBurst * limits.dodge;
+    a.moveBonusUntil = Math.max(a.moveBonusUntil, now + MOVE.dodgeWindowMs);
+  }
+
+  // Below the ground, or deeper in a lake than swimmers float.
+  if (!swimming && (above < -MOVE.groundTolerance || (ground < w.waterLevel - 1 && len - w.radius < w.waterLevel - MOVE.swimDepthSlack))) return { ok: false, reason: "ground" };
+  const grounded = swimming || above <= MOVE.groundedAbove;
+  if (!grounded && len > airCeiling(a, now)) return { ok: false, reason: "height" };
+
+  const dx = m.x - a.lastX, dy = m.y - a.lastY, dz = m.z - a.lastZ;
+  const dist = Math.hypot(dx, dy, dz);
+  const radial = len - Math.hypot(a.lastX, a.lastY, a.lastZ);
+  const charged = radial < 0 ? Math.sqrt(Math.max(0, dist * dist - radial * radial)) : dist;
+  if (charged > a.moveBudget + a.moveBonus + MOVE.stepTolerance) return { ok: false, reason: "speed" };
+
+  // Allowed: spend the expiring bonus first, then the budget (which may dip by the tolerance).
+  const fromBonus = Math.min(a.moveBonus, charged);
+  a.moveBonus -= fromBonus;
+  a.moveBudget -= charged - fromBonus;
+  a.swimming = swimming;
+  if (grounded) groundMotion(a, len, now);
+  return { ok: true, swimming, grounded, len, ground };
+}
+
+/**
+ * Server gravity: an airborne body above its envelope (silent client, refused steps) is pulled
+ * down onto the envelope or the ground. Moves the actor and returns the new position, or null.
+ */
+export function settle(a: PlayerActor, w: MoveWorld, now: number): V3 | null {
+  const x = a.state.x, y = a.state.y, z = a.state.z;
+  const len = Math.hypot(x, y, z);
+  const ground = w.groundAt(x, y, z);
+  if (swimmingAt(w, len, ground) || len - w.radius - ground <= MOVE.groundedAbove) return null;
+  const ceiling = airCeiling(a, now);
+  if (len <= ceiling) return null;
+  const floor = w.radius + (ground < w.waterLevel - 1 ? Math.max(ground, w.waterLevel - 1.05) : ground) + 0.02;
+  const target = Math.max(floor, ceiling - MOVE.airSlack);
+  if (target >= len) return null;
+  const k = target / len;
+  const p: V3 = [x * k, y * k, z * k];
+  a.state.x = a.lastX = p[0];
+  a.state.y = a.lastY = p[1];
+  a.state.z = a.lastZ = p[2];
+  // The envelope keeps running: only a grounded step from the client starts a new jump.
+  return p;
+}
+
+/** A shove: extra distance for a moment, and lift (the client adds 0.4 × strength upwards). */
+export function noteKnockback(a: PlayerActor, strength: number, now: number) {
+  if (strength <= 0) return;
+  a.moveBonus += strength * 1.5;
+  a.moveBonusUntil = Math.max(a.moveBonusUntil, now + MOVE.knockbackWindowMs);
+  a.airStartAt = now;
+  a.airStartLen = Math.hypot(a.state.x, a.state.y, a.state.z);
+  a.airLiftV = MOVE.jumpSpeed + strength * 0.4;
+}
+
+/** Fresh motion state for a body placed at radius `len` (join, teleport). */
+export function motionFields(len: number, now: number) {
+  return {
+    moveBudget: MOVE.budgetCap,
+    lastBudgetAt: now,
+    lastDodgeAt: 0,
+    moveBonus: 0,
+    moveBonusUntil: 0,
+    peakRadius: len,
+    airborne: false,
+    swimming: false,
+    airStartAt: now,
+    airStartLen: len,
+    airLiftV: MOVE.jumpSpeed,
+  };
+}

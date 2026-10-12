@@ -7,6 +7,7 @@ import { WEAPONS, WEAPON_INDEX, type Destroys, type TierStats, type WeaponDef } 
 import type { Terrain } from "@firstlight/shared";
 import { PF } from "@firstlight/shared/net/schema";
 import { actorPos, positionAgo, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
+import { noteKnockback } from "./movement.ts";
 import { dist3, HEAD_FROM, inMeleeArc, PLAYER_HEIGHT, PLAYER_RADIUS, rayCapsule, rayTerrain, type V3 } from "./geometry.ts";
 
 export const REWIND_MS = 150;
@@ -490,7 +491,7 @@ export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | 
     kx = +(-fromDir[0] / l).toFixed(3);
     ky = +(-fromDir[1] / l).toFixed(3);
     kz = +(-fromDir[2] / l).toFixed(3);
-    if (target.kind === "player") target.moveBudget += knockback * 1.5;
+    if (target.kind === "player") noteKnockback(target, knockback, now);
   }
   host.broadcastNear("hit", { attacker: attacker?.id ?? "", target: target.id, amount: dmg, weak, kind: target.kind, x: tp[0], y: tp[1], z: tp[2], kb: knockback ?? 0, kx, ky, kz }, tp, 120, [target.id, attacker?.id ?? ""]);
   host.onDamage(target, dmg, attacker, weak);

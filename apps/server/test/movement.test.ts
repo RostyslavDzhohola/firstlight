@@ -1,0 +1,219 @@
+// Seam 1: server movement validation (review F12 B1 flight, S3 swimming, uncharged tolerance).
+// Bots send positions like the real client (PlayerController physics: gravity 18, jump 6.6 m/s).
+
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { Room } from "@colyseus/sdk";
+import { BODIES, createTerrain, padDirs } from "@firstlight/shared";
+import type { Game } from "../src/app.ts";
+import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
+
+let game: Game;
+const rooms: Room[] = [];
+
+beforeEach(async () => {
+  game = await startServer();
+});
+afterEach(async () => {
+  for (const r of rooms.splice(0)) await safeLeave(r);
+  await game.close();
+});
+
+const BODY = BODIES.arcadia;
+const R = BODY.radius;
+const terrain = createTerrain(BODY);
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const st = (r: Room) => r.state as any;
+const me = (r: Room) => st(r).players.get(r.sessionId);
+
+type V3 = [number, number, number];
+const norm = (v: readonly number[]): V3 => {
+  const l = Math.hypot(v[0]!, v[1]!, v[2]!);
+  return [v[0]! / l, v[1]! / l, v[2]! / l];
+};
+const groundR = (d: readonly number[]) => R + terrain.groundHeight(d[0]!, d[1]!, d[2]!);
+const aboveGround = (p: { x: number; y: number; z: number }) => Math.hypot(p.x, p.y, p.z) - groundR(norm([p.x, p.y, p.z]));
+
+/** A tangent at `up` (stable). */
+function tangent(up: V3): V3 {
+  const ref = Math.abs(up[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
+  const k = ref[0]! * up[0] + ref[1]! * up[1] + ref[2]! * up[2];
+  return norm([ref[0]! - k * up[0], ref[1]! - k * up[1], ref[2]! - k * up[2]]);
+}
+
+/** Direction `metres` from `from` along `t` (great-circle step). */
+function walk(from: V3, t: V3, metres: number): V3 {
+  return norm([from[0] + (t[0] * metres) / R, from[1] + (t[1] * metres) / R, from[2] + (t[2] * metres) / R]);
+}
+
+/** Join as an admin, step off the pad's safe ring and settle on the ground. Returns the start direction and tangent. */
+async function joinOutside(name: string, at?: V3): Promise<{ r: Room; dir: V3; t: V3; seq: { n: number }; corrections: { n: number } }> {
+  const r = await joinAs(game, name, "arcadia", {}, "admin");
+  rooms.push(r);
+  await waitFor(() => !!me(r));
+  const pad = padDirs(BODY)[0]!;
+  const t0 = tangent(pad as V3);
+  const dir = at ?? walk(pad as V3, t0, 40);
+  const h = Math.max(groundR(dir), R + BODY.waterLevel - 1.03); // swimmers float
+  const p = [dir[0] * h, dir[1] * h, dir[2] * h];
+  r.send("admin", { cmd: "teleport", args: { x: p[0], y: p[1], z: p[2] } });
+  const corrections = { n: 0 };
+  await waitFor(() => Math.hypot(me(r).x - p[0]!, me(r).y - p[1]!, me(r).z - p[2]!) < 1.5);
+  r.onMessage("correct", () => corrections.n++);
+  await sleep(100);
+  corrections.n = 0;
+  return { r, dir: norm([me(r).x, me(r).y, me(r).z]), t: tangent(norm([me(r).x, me(r).y, me(r).z])), seq: { n: 10 }, corrections };
+}
+
+/** Step along the ground so the 3D distance (what the server charges) is `metres`. */
+function groundStep(from: V3, t: V3, metres: number): V3 {
+  const a = groundR(from);
+  let s = metres;
+  for (let i = 0; i < 4; i++) {
+    const n = walk(from, t, s);
+    const b = groundR(n);
+    const chord = Math.hypot(n[0] * b - from[0] * a, n[1] * b - from[1] * a, n[2] * b - from[2] * a);
+    if (chord < 1e-6) break;
+    s *= metres / chord;
+  }
+  return walk(from, t, s);
+}
+
+function send(r: Room, seq: { n: number }, dir: V3, radius: number, anim = 1, face: V3 = [0, 0, 1]) {
+  r.send("input", { seq: ++seq.n, x: dir[0] * radius, y: dir[1] * radius, z: dir[2] * radius, fx: face[0], fy: face[1], fz: face[2], anim, t: Date.now() });
+}
+
+describe("no flying (F12 B1)", () => {
+  it("climbing a few centimetres per packet is refused: the server keeps the player near the ground", async () => {
+    const { r, dir, seq, corrections } = await joinOutside("climber");
+    const base = groundR(dir);
+    for (let i = 1; i <= 100; i++) {
+      send(r, seq, dir, base + i * 0.04, 4);
+      await sleep(50);
+    }
+    await sleep(200);
+    expect(corrections.n).toBeGreaterThan(0);
+    expect(aboveGround(me(r))).toBeLessThan(2);
+  });
+
+  it("hovering at jump height doesn't last: the body comes down", async () => {
+    const { r, dir, seq, corrections } = await joinOutside("hoverer");
+    const base = groundR(dir);
+    for (let i = 0; i < 50; i++) {
+      send(r, seq, dir, base + 1.0, 4);
+      await sleep(50);
+    }
+    await sleep(200);
+    expect(corrections.n).toBeGreaterThan(0);
+    expect(aboveGround(me(r))).toBeLessThan(0.5);
+  });
+
+  it("going quiet in mid-air doesn't leave the body hanging there", async () => {
+    const { r, dir, seq } = await joinOutside("statue");
+    const base = groundR(dir);
+    send(r, seq, dir, base + 1.1, 4); // the top of a jump, then silence
+    await sleep(1500);
+    expect(aboveGround(me(r))).toBeLessThan(0.5);
+  });
+
+  it("real jumps (also back to back, while running) are never corrected", async () => {
+    const { r, dir, t, seq, corrections } = await joinOutside("jumper");
+    let d = dir;
+    for (let hop = 0; hop < 4; hop++) {
+      let h = 0, v = 6.6, time = 0;
+      do {
+        time += 0.05;
+        v -= 18 * 0.05;
+        h = Math.max(0, h + v * 0.05);
+        d = walk(d, t, 6 * 0.05);
+        send(r, seq, d, groundR(d) + h, h > 0 ? 4 : 1);
+        await sleep(50);
+      } while (h > 0 && time < 2);
+    }
+    await sleep(150);
+    expect(corrections.n).toBe(0);
+  });
+});
+
+describe("movement budget", () => {
+  it("the per-packet tolerance is charged: 12 m/s sustained at 50 Hz is corrected, a 9 m/s sprint is not", async () => {
+    const fast = await joinOutside("speeder");
+    let d = fast.dir;
+    let last = Date.now();
+    const t0 = last;
+    while (Date.now() - t0 < 5000) {
+      await sleep(20);
+      const now = Date.now();
+      d = groundStep(d, fast.t, 12 * ((now - last) / 1000));
+      last = now;
+      send(fast.r, fast.seq, d, groundR(d), 3);
+      if (fast.corrections.n) break;
+    }
+    expect(fast.corrections.n).toBeGreaterThan(0);
+
+    const ok = await joinOutside("sprinter");
+    d = ok.dir;
+    last = Date.now();
+    const t1 = last;
+    while (Date.now() - t1 < 3000) {
+      await sleep(25);
+      const now = Date.now();
+      d = groundStep(d, ok.t, 9 * ((now - last) / 1000));
+      last = now;
+      send(ok.r, ok.seq, d, groundR(d), 3);
+    }
+    await sleep(100);
+    expect(ok.corrections.n).toBe(0);
+  });
+});
+
+/** A deep-water direction on Arcadia (lake), well away from the pads. */
+function deepWater(): V3 {
+  let s = 12345;
+  const rand = () => ((s = (s * 1103515245 + 12345) >>> 0) / 2 ** 32) * 2 - 1;
+  for (let i = 0; i < 200_000; i++) {
+    const d = norm([rand(), rand(), rand()]);
+    // Deep here and 15 m around, so a short swim stays in deep water.
+    if (terrain.groundHeight(d[0], d[1], d[2]) > BODY.waterLevel - 4) continue;
+    const t = tangent(d);
+    if ([-15, 15].every((m) => {
+      const e = walk(d, t, m);
+      return terrain.groundHeight(e[0], e[1], e[2]) < BODY.waterLevel - 4;
+    })) return d;
+  }
+  throw new Error("no deep water found");
+}
+
+describe("swimming (F12 S3)", () => {
+  it("swims at swim speed; sprint-speed swimming and dodge bursts in the water are corrected", async () => {
+    const water = deepWater();
+    const swimR = R + BODY.waterLevel - 1.05;
+    const s = await joinOutside("swimmer", walk(water, tangent(water), -12));
+    let d = s.dir;
+    // 3 m/s for 2 s: fine.
+    for (let i = 0; i < 40; i++) {
+      d = walk(d, s.t, 3 * 0.05);
+      send(s.r, s.seq, d, swimR, 6);
+      await sleep(50);
+    }
+    await sleep(100);
+    expect(s.corrections.n).toBe(0);
+    // 9 m/s (a sprint) in the water: corrected within 2 s.
+    for (let i = 0; i < 40 && !s.corrections.n; i++) {
+      d = walk(d, s.t, 9 * 0.05);
+      send(s.r, s.seq, d, swimR, 6);
+      await sleep(50);
+    }
+    expect(s.corrections.n).toBeGreaterThan(0);
+  });
+
+  it("a dodge burst is not granted in the water", async () => {
+    const water = deepWater();
+    const swimR = R + BODY.waterLevel - 1.05;
+    const s = await joinOutside("diver", walk(water, tangent(water), 12));
+    send(s.r, s.seq, s.dir, swimR, 6); // in the water now
+    await sleep(600); // full (swim) budget
+    const d = walk(s.dir, s.t, -4.5);
+    send(s.r, s.seq, d, swimR, 7);
+    await waitFor(() => s.corrections.n > 0, 2000);
+  });
+});

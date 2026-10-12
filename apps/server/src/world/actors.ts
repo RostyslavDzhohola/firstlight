@@ -48,13 +48,21 @@ export interface PlayerActor {
   /** Logout countdown start position (cancel if moved > 0.5 m from it). */
   logoutFrom?: [number, number, number];
   loggedOut?: boolean;
-  /** Movement budget (metres) refilled over time; dodge allowance once per cooldown. */
+  /** Movement budget (metres) refilled over time; dodge allowance once per cooldown (movement.ts). */
   moveBudget: number;
   lastBudgetAt: number;
   lastDodgeAt: number;
+  /** One-off distance (dodge, knockback) usable until `moveBonusUntil`. */
+  moveBonus: number;
+  moveBonusUntil: number;
   /** Highest radius since last grounded (server-side fall damage). */
   peakRadius: number;
   airborne: boolean;
+  swimming: boolean;
+  /** Ballistic envelope while airborne: last grounded time and radius, and the launch speed allowed. */
+  airStartAt: number;
+  airStartLen: number;
+  airLiftV: number;
   /** Server-side charge tracking (bow draw, heavy melee). */
   chargeStartedAt: number;
   specialReadyAt: number;
