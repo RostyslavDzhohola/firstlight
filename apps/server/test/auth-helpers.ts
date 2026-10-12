@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, type Room } from "@colyseus/sdk";
-import type { PlayResponse } from "@firstlight/shared/net/protocol";
+import { PROTOCOL_VERSION, type PlayResponse } from "@firstlight/shared/net/protocol";
 import { createAuthClient } from "better-auth/client";
 import { anonymousClient, emailOTPClient, jwtClient } from "better-auth/client/plugins";
 import type { Express } from "express";
@@ -60,6 +60,7 @@ export async function startAuthServer(over: Partial<AccountsConfig> & { dir?: st
     verify: accounts.verify,
     limits: { maxClients: 40, soloFillLimit: 36, maxCopiesPerBody: 2, globalCap: 320 },
     allowedOrigins: [ORIGIN],
+    revalidate: accounts.revalidate,
     mountBeforeJson: accounts.mountBeforeJson,
     mountAfterJson: (app) => {
       accounts.mountAfterJson(app);
@@ -166,7 +167,7 @@ export async function play(server: AuthServer, token: string, body: Record<strin
   const res = await fetch(`${server.base}/api/play`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...headers },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ v: PROTOCOL_VERSION, ...body }),
   });
   return { status: res.status, json: (await res.json()) as PlayResponse };
 }

@@ -9,7 +9,9 @@ import type { TokenVerifier } from "./auth/identity.ts";
 import { directRequestIp } from "./auth/ip.ts";
 import { BodyRoom } from "./world/BodyRoom.ts";
 import { isBodyId, onlineCount, play, type MatchmakingLimits } from "./world/matchmaking.ts";
-import { travelRedirect } from "./world/admission.ts";
+import { identityCheck, travelRedirect } from "./world/admission.ts";
+import { pendingSeats } from "./world/reservations.ts";
+import { PROTOCOL_VERSION } from "@firstlight/shared/net/protocol";
 import { timingSafeEqual } from "node:crypto";
 import { partyOf, partyRoomFor, playRefusal } from "./social/index.ts";
 
@@ -25,7 +27,18 @@ export interface GameOptions {
   onShutdown?: () => Promise<void> | void;
   /** When verification fails: is this a validly signed token of a banned account/network? (403 "banned" instead of 401.) */
   explainRefusal?: (token: string, ip: string | null) => Promise<string | null>;
+  /** Accounts: recheck a real account when its seat is used (merged/deleted, banned, signed out). */
+  revalidate?: (userId: string) => string | null;
 }
+
+/** /api/play limits (F12 S2): calls per 10 s and unused seats, per account and per address. */
+export const PLAY_LIMITS = {
+  windowMs: 10_000,
+  userCalls: 6,
+  ipCalls: 60,
+  userSeats: 2,
+  ipSeats: 10,
+};
 
 export interface Game {
   app: Express;
@@ -42,10 +55,12 @@ function secretMatches(given: unknown, expected: string): boolean {
 }
 
 export async function createGame(opts: GameOptions): Promise<Game> {
+  identityCheck.current = opts.revalidate ?? (() => null);
   const playCalls = new Map<string, number[]>();
+  const ipCalls = new Map<string, number[]>();
   const pruneCalls = setInterval(() => {
     const now = Date.now();
-    for (const [k, v] of playCalls) if (v.every((t) => now - t > 10_000)) playCalls.delete(k);
+    for (const m of [playCalls, ipCalls]) for (const [k, v] of m) if (v.every((t) => now - t > PLAY_LIMITS.windowMs)) m.delete(k);
   }, 60_000);
   pruneCalls.unref();
   const app = express();
@@ -110,15 +125,35 @@ export async function createGame(opts: GameOptions): Promise<Game> {
       res.status(400).json({ ok: false, error: "bad body" });
       return;
     }
-    // Per-user rate limit: 6 requests per 10 s (each request reserves a seat for a while).
+    // Stale tabs after a deploy: refuse other protocol versions so the client reloads.
+    if (req.body?.v !== PROTOCOL_VERSION) {
+      res.status(409).json({ ok: false, error: "version", version: PROTOCOL_VERSION });
+      return;
+    }
+    // Rate limits: each request reserves a seat for a while (F12 S2: per account and per address).
     const now = Date.now();
-    const recent = (playCalls.get(identity.userId) ?? []).filter((t) => now - t < 10_000);
-    if (recent.length >= 6) {
+    const recent = (playCalls.get(identity.userId) ?? []).filter((t) => now - t < PLAY_LIMITS.windowMs);
+    if (recent.length >= PLAY_LIMITS.userCalls) {
       res.status(429).json({ ok: false, error: "slow down" });
       return;
     }
     recent.push(now);
     playCalls.set(identity.userId, recent);
+    const ip = directRequestIp(req);
+    if (!identity.loadtest) {
+      const key = ip ?? "unknown";
+      const fromIp = (ipCalls.get(key) ?? []).filter((t) => now - t < PLAY_LIMITS.windowMs);
+      if (fromIp.length >= PLAY_LIMITS.ipCalls) {
+        res.status(429).json({ ok: false, error: "slow down" });
+        return;
+      }
+      fromIp.push(now);
+      ipCalls.set(key, fromIp);
+      if (pendingSeats.forUser(identity.userId, now) >= PLAY_LIMITS.userSeats || pendingSeats.forIp(key, now) >= PLAY_LIMITS.ipSeats) {
+        res.status(429).json({ ok: false, error: "slow down" });
+        return;
+      }
+    }
     // Banned (also covers dev identities) or recently kicked by an admin.
     const refusal = identity.loadtest ? null : playRefusal(identity.userId);
     if (refusal) {
@@ -150,6 +185,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
           starter: Number.isInteger(req.body.starter) ? Math.max(0, Math.min(3, req.body.starter)) : undefined,
           palette: Number.isInteger(req.body.palette) ? Math.max(0, Math.min(5, req.body.palette)) : undefined,
           loadtest: req.body.loadtest === true,
+          ip: identity.loadtest ? null : (ip ?? "unknown"),
         },
         opts.limits,
       );

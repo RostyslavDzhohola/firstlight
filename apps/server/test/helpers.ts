@@ -1,7 +1,7 @@
 // Seam 1 helpers: run the real server in-process and drive it with SDK bot clients.
 
 import { Client, type Room } from "@colyseus/sdk";
-import type { PlayResponse } from "@firstlight/shared/net/protocol";
+import { PROTOCOL_VERSION, type PlayResponse } from "@firstlight/shared/net/protocol";
 import { createGame, type Game } from "../src/app.ts";
 import { chainVerifiers, devVerifier } from "../src/auth/identity.ts";
 import { characterRepo, MemoryCharacterRepo } from "../src/world/characters.ts";
@@ -32,7 +32,7 @@ export async function playRequest(game: Game, token: string, body: Record<string
   const res = await fetch(`http://127.0.0.1:${game.port}/api/play`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ v: PROTOCOL_VERSION, ...body }),
   });
   return (await res.json()) as PlayResponse;
 }

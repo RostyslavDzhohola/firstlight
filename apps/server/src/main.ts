@@ -54,6 +54,7 @@ const game = await createGame({
   gracefulShutdown: true,
   mountBeforeJson: accounts.mountBeforeJson,
   explainRefusal: banExplainer(accounts),
+  revalidate: accounts.revalidate,
   mountAfterJson: (app) => {
     accounts.mountAfterJson(app);
     mountOps(app, { db: accounts.db, requireAdmin: accounts.requireAdmin, allowedOrigins: env.clientOrigins });

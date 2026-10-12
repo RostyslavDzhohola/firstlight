@@ -24,7 +24,9 @@ import { emitGameEvent, npcKindOf } from "./events.ts";
 import { emitPileEvent, onPileEvent, pileStore, type PileData } from "./piles.ts";
 import { SYSTEM_FACTORIES, type RoomSystem } from "./systems.ts";
 import { movementLimits } from "./npc/effects.ts";
-import { ticketFor } from "./admission.ts";
+import { identityCheck, ticketFor, travelRedirect } from "./admission.ts";
+import { pendingSeats } from "./reservations.ts";
+import { seatRefusal } from "../social/moderation.ts";
 import { groundMotion, motionFields, settle, validateMove, MOVE, type MoveWorld } from "./movement.ts";
 import { matchMaker } from "@colyseus/core";
 import { liveSessions } from "../auth/sessions.ts";
@@ -84,6 +86,7 @@ const adminSchema = z.object({ cmd: z.string().max(32), args: z.record(z.string(
 // saving (the database now holds the winner). The guest rejoins under the new id.
 accountLinks.onBeforeLink((from, to) => hub.flush(from, to));
 accountLinks.on((ev) => {
+  pendingSeats.invalidate(ev.fromUserId); // seats reserved as the guest are void
   hub.retireAll(CLOSE.MERGED, "account merged, rejoin", ev.fromUserId);
   hub.retireAll(CLOSE.ELSEWHERE, "signed in elsewhere", ev.toUserId);
 });
@@ -239,6 +242,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   onJoin(client: Client, options: JoinOptions | undefined, auth?: Identity) {
     if (!auth) throw new ServerError(403, "no identity");
     const now = Date.now();
+    // A reservation is checked again when it is used (F12 B5): before any takeover happens.
+    const refusal = this.seatRefusal(client.sessionId, auth, now);
+    if (refusal) throw new ServerError(403, refusal);
     // One authoritative character per user: take over a live, dropped or lingering actor anywhere.
     let char: CharacterData | null = null;
     let inheritedCombat = false;
@@ -335,6 +341,19 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     emitGameEvent(this, { type: "travel", playerId: client.sessionId, body: this.bodyDef.id });
     this.sendYou(a);
     if (a.dead) client.send("death", { victim: client.sessionId, killer: null, killerName: "", aliveMs: 0, level: char.level, pileId: "" });
+  }
+
+  /**
+   * Why this seat may not be used now, or null: it must be a live /api/play reservation for this
+   * account (not voided by a merge), the account must still be valid and not banned or kicked, and
+   * the character must still be allowed on this body (its travel ticket may have been used or expired).
+   */
+  private seatRefusal(sessionId: string, auth: Identity, now: number): string | null {
+    if (!pendingSeats.consume(sessionId, auth.userId, now)) return "seat expired";
+    if (!auth.loadtest && seatRefusal(auth.userId, now)) return "not allowed";
+    if (auth.account && identityCheck.current(auth.userId)) return "sign in again";
+    if (travelRedirect(auth, this.bodyDef.id, now)) return "travel";
+    return null;
   }
 
   onDrop(client: Client) {

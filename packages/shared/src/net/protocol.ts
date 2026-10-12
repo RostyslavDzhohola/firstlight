@@ -17,10 +17,18 @@ export const NET = {
   REWIND_MS: 200,
 } as const;
 
+/**
+ * Wire protocol version. Bump it whenever client and server messages stop being compatible: the
+ * server refuses /api/play from other versions with `{error: "version"}` and the client reloads.
+ */
+export const PROTOCOL_VERSION = 1;
+
 // ---- HTTP: entering the world -------------------------------------------------------------
 
 export interface PlayRequest {
   body: BodyId;
+  /** The client's PROTOCOL_VERSION. */
+  v: number;
   /** Room id of the party leader (or a member) on this body, to land in the same copy. The server only honours it for party members. */
   partyLeaderRoomId?: string;
   /** Load-test rooms only (requires the load-test secret server-side). */
@@ -30,7 +38,7 @@ export interface PlayRequest {
 export type PlayResponse =
   | { ok: true; reservation: SeatReservation }
   | { ok: false; queue: { position: number; etaSeconds: number } }
-  | { ok: false; error: string; body?: BodyId };
+  | { ok: false; error: string; body?: BodyId; version?: number };
 
 /** Mirrors Colyseus' ISeatReservation. */
 export interface SeatReservation {
