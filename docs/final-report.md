@@ -113,7 +113,7 @@ The test suite grew from 490 to 1,014 tests over the run. The rules the reviews 
 | 2 | Horses | ✅ live: buy the whistle from Juno Vale (1,500 coins), H outside safe zones |
 | 3 | Weather | ✅ live: rain and lightning storms per planet |
 | 4 | Day/night | ✅ live |
-| 5 | More cosmetics and Easter eggs | not started |
+| 5 | More cosmetics and Easter eggs | ✅ 8 new cosmetics (shop, planet drops, a mission, egg rewards) and eggs E10–E12, one per planet |
 
 ## Making the repo public
 

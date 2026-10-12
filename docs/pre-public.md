@@ -58,6 +58,10 @@ claim them from the code instead of the game. The solutions live in:
   rotate it together with `E7_CODE`).
 - `apps/server/test/quests.test.ts`: the tests send the real answers.
 - `docs/content.md` §6 (full walkthroughs) and the M2 mission row in §5.
+- The M11 eggs E10–E12: their answers are in server-only code (`apps/server/src/world/quests/eggs.ts`)
+  and their tests (`apps/server/test/m11-eggs.test.ts`); content.md §6 describes them without
+  answers, and the in-world clues are diegetic (the dial carvings, the wick keeper's stone, the
+  work slip in `apps/client/src/world/QuestWorld.ts`).
 
 Options, pick one: (a) move `EGG_RULES` into a server-only file loaded from outside git (e.g. the
 Railway volume) and give the tests their own fixture values; (b) rotate the solutions right before

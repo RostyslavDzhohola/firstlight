@@ -54,7 +54,7 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 - [ ] M10 Video-ready: photo mode, `stage <n>` and docs/staged-scenes.md done (F13). Open: the landing
   flythrough video, the final report to the owner (SPEC §12).
 - [ ] M11 Extras: photo mode (#1) done; weather + day/night (#3–4) merged 743d651; horses (#2)
-  merged acdfcb3; more cosmetics and Easter eggs (#5) in progress (lane/m11-cosmetics). Final report: docs/final-report.md.
+  merged acdfcb3; more cosmetics and Easter eggs (#5) merged (8 cosmetics, eggs E10–E12). Final report: docs/final-report.md.
 
 ## Finish line (SPEC §1)
 
@@ -102,7 +102,7 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 | F12 round 2: auth/social (OTP enumeration and drain, self-delete, prune) | MERGED ae6810b | — |
 | T9 findings + confirmation should-fixes (save prompt, portal step, warm-up, payout retry, names, dodge, camera) | MERGED 1c39649 (Codex-reviewed; T9 re-run passes) | — |
 | F12 polish (prop-top climb, public OTP budget, load-test pickup, origin-check pin) | MERGED a2f407f (deployed 11:47Z; 1014 tests) | — |
-| M11 #5 more cosmetics + 3 Easter eggs | Codex gpt-6.1-sol (Claude sub-agents hit the monthly spend limit at 11:40Z) | ../fl-wt-m11 (lane/m11-cosmetics) |
+| M11 #5 more cosmetics + 3 Easter eggs | MERGED (Codex-built, Codex-reviewed; atomic egg claims for all eggs) | — |
 
 ## Measured numbers
 
