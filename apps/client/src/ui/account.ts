@@ -292,6 +292,22 @@ async function currentName(): Promise<string | undefined> {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Display names
+
+/** The suggestion if it already passes the name rules, else "" (leave the field empty). */
+export function validSuggestion(name: string | undefined | null): string {
+  const v = (name ?? "").trim();
+  return NAME_PATTERN.test(v) ? v : "";
+}
+
+/** Why a name can't be used (shown next to the disabled button). */
+export function nameProblem(v: string): string {
+  if (v.length === 0) return "Type a name to continue: 3–16 letters, numbers or _";
+  if (v.length < 3 || v.length > 16) return "Names are 3–16 characters";
+  return "Use letters, numbers and _ only (no spaces or dashes)";
+}
+
+// ---------------------------------------------------------------------------------------------
 // Public API
 
 let saveOpen: Promise<"saved" | "dismissed"> | null = null;
@@ -395,7 +411,8 @@ export function pickDisplayName(opts: { suggested?: string; dismissible?: boolea
     m.card.setAttribute("aria-label", "Pick a name");
     el("h2", "", m.card, "Pick a name");
     el("p", "", m.card, "Other players see it above your head.");
-    const input = field("text", "Your name", opts.suggested ?? "");
+    // Only pre-fill a suggestion that passes validation (generated guest names like "Wanderer-7904" don't).
+    const input = field("text", "Your name", validSuggestion(opts.suggested));
     input.maxLength = 16;
     input.setAttribute("autocomplete", "nickname");
     input.spellcheck = false;
@@ -408,9 +425,11 @@ export function pickDisplayName(opts: { suggested?: string; dismissible?: boolea
       const v = input.value.trim();
       const valid = NAME_PATTERN.test(v);
       ok.disabled = !valid;
+      ok.title = valid ? "" : nameProblem(v);
       input.classList.toggle("is-error", v.length > 0 && !valid);
-      status.className = "fl-status";
-      status.textContent = v.length > 0 && !valid ? (v.length < 3 || v.length > 16 ? "Names are 3–16 characters." : "Use letters, numbers and _ only.") : "3–16 letters, numbers or _";
+      status.className = `fl-status${v.length > 0 && !valid ? " is-error" : ""}`;
+      // Always say why the button is disabled.
+      status.textContent = valid ? "3–16 letters, numbers or _" : nameProblem(v);
       return valid;
     };
     const go = async () => {

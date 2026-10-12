@@ -1,11 +1,13 @@
-/* Phrase wheel (G). */
-.fl-wheel { position: fixed; left: 50%; top: 50%; width: 0; height: 0; z-index: 25; pointer-events: none; display: none; font: 13px/1.2 ui-sans-serif, system-ui, sans-serif; color: #f4f0ff; }
+/* Phrase wheel (G), restyled with the UI kit (verdict: Entry B, pixel icons on sectors). The phrases
+   are yours, so they're warm arcade; the selected one is lit with first light. */
+.fl-wheel { position: fixed; left: 50%; top: 50%; width: 0; height: 0; z-index: 25; pointer-events: none; display: none; font: 600 var(--t-sm)/1.1 var(--font-display); letter-spacing: .04em; color: var(--paper); text-shadow: none; }
 .fl-wheel.on { display: block; animation: fl-wheel-in .12s ease-out; }
 @keyframes fl-wheel-in { from { opacity: 0; transform: scale(.9); } }
-.fl-wheel::before { content: ""; position: absolute; left: -146px; top: -146px; width: 292px; height: 292px; border-radius: 50%; background: radial-gradient(circle, #0a0816d8 0 38%, #0a081690 39% 100%); border: 1px solid #ffffff22; }
-.fl-wheel-center { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); width: 96px; text-align: center; font-weight: 800; font-size: 14px; color: #ffd8a8; }
-.fl-wheel-item { position: absolute; left: 0; top: 0; padding: 7px 12px; border-radius: 999px; background: #161230e8; border: 1px solid #ffffff2a; white-space: nowrap; font-weight: 700; transition: background .08s, border-color .08s; }
-.fl-wheel-item b { font-size: 10px; color: #8f88a8; margin-right: 6px; }
-.fl-wheel-item.sel { background: linear-gradient(180deg, #ffb86b, #ff7edb); color: #1a0f2a; border-color: #ffd8a8; box-shadow: 0 0 16px #ff7edb77; }
-.fl-wheel-item.sel b { color: #1a0f2a99; }
-.fl-wheel-cursor { position: absolute; left: 0; top: 0; width: 8px; height: 8px; border-radius: 50%; background: #fff; box-shadow: 0 0 6px #000a; }
+.fl-wheel::before { content: ""; position: absolute; left: -150px; top: -150px; width: 300px; height: 300px; border-radius: 50%; background: radial-gradient(circle, rgba(5, 7, 10, .86) 0 34%, rgba(5, 7, 10, .55) 35% 100%); border: 1px solid rgba(255, 243, 220, .22); box-shadow: inset 0 0 0 46px rgba(255, 243, 220, .03); }
+.fl-wheel-center { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); width: 96px; text-align: center; font: 600 var(--t-xs)/1.2 var(--font-display); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--dawn-3); }
+.fl-wheel-item { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 6px; padding: 6px 12px 6px 8px; background: rgba(14, 11, 9, .88); border: 1px solid rgba(255, 243, 220, .3); border-radius: 3px; white-space: nowrap; transition: background .08s, border-color .08s; }
+.fl-wheel-item .px { width: 20px; height: 20px; }
+.fl-wheel-item b { font: 700 var(--t-xs)/1 var(--font-mono); color: var(--fog-3); }
+.fl-wheel-item.sel { background: linear-gradient(180deg, #ffe6b8, #f3ae5b); color: #1f1308; border-color: #ffe6b8; }
+.fl-wheel-item.sel b { color: rgba(31, 19, 8, .6); }
+.fl-wheel-cursor { position: absolute; left: 0; top: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--dawn-4); box-shadow: 0 0 0 1px rgba(0, 0, 0, .6); }

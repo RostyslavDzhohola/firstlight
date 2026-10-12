@@ -1,80 +1,98 @@
 /* Social UI: compass strip, player list, party invites, screenshot share, queue and removal screens.
-   Plain DOM (D25), same palette as hud.css. */
+   Plain DOM (D25), restyled with the UI kit (src/ui/styles, verdict: player list = Entry A structure
+   in Entry B's look, table-layout fixed). */
 
-/* The compass takes the top centre; the safe-zone sign and logout countdown sit below it. */
-.fl-hud .fl-safe { top: 46px; }
-.fl-hud .fl-logout { top: 84px; }
-
-.fl-compass { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); width: min(560px, 62vw); height: 30px; z-index: 21; pointer-events: none;
-  font: 700 11px/1 ui-sans-serif, system-ui, sans-serif; color: #f4f0ff; text-shadow: 0 1px 2px #000a; letter-spacing: .06em;
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); }
-.fl-compass::before { content: ""; position: absolute; inset: 0; border-radius: 6px; background: linear-gradient(180deg, #0a081699, #0a081640); border-top: 1px solid #ffffff1f; border-bottom: 1px solid #ffffff14; }
-.fl-compass::after { content: ""; position: absolute; left: 50%; top: -2px; width: 2px; height: 8px; margin-left: -1px; background: #ffd8a8; border-radius: 1px; }
-.fl-compass .tk { position: absolute; bottom: 3px; width: 1px; height: 5px; background: #ffffff55; }
-.fl-compass .cd { position: absolute; top: 9px; transform: translateX(-50%); color: #ffffffb0; font-size: 10px; }
-.fl-compass .cd.main { color: #fff; font-size: 13px; top: 8px; }
-.fl-compass .cd.n { color: #ff9f9f; }
-.fl-compass .mk { position: absolute; top: 3px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 2px; white-space: nowrap; }
-.fl-compass .mk i { display: block; width: 9px; height: 9px; border-radius: 50%; border: 1px solid #0008; }
-.fl-compass .mk.pad i { border-radius: 2px; transform: rotate(45deg); background: #72f1b8; }
-.fl-compass .mk span { font-size: 9px; font-weight: 600; color: #ece8f6; position: absolute; top: 31px; padding: 1px 5px; border-radius: 6px; background: #0a0816b0; }
+/* ---------------------------------------------------------------- compass (top centre, the world's information: photon) */
+.fl-compass { position: absolute; top: calc(1.2 * var(--u)); left: 50%; transform: translateX(-50%); width: min(calc(42 * var(--u)), 62vw); height: calc(1.85 * var(--u)); z-index: var(--z-hud); pointer-events: none;
+  font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: .08em; color: var(--photon); text-shadow: var(--hud-text-shadow); }
+.fl-compass::before { content: ""; position: absolute; inset: 0; border-top: 1px solid rgba(196, 241, 255, .28); border-bottom: 1px solid rgba(196, 241, 255, .28); background: linear-gradient(180deg, rgba(5, 10, 15, .55), rgba(5, 10, 15, .35));
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 9%, #000 91%, transparent); mask-image: linear-gradient(90deg, transparent, #000 9%, #000 91%, transparent); }
+/* Heading caret */
+.fl-compass::after { content: ""; position: absolute; left: 50%; top: -6px; width: 0; height: 0; margin-left: -5px; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid var(--paper); }
+.fl-compass .tk { position: absolute; bottom: 0; width: 1px; height: calc(.35 * var(--u)); background: rgba(196, 241, 255, .45); }
+.fl-compass .cd { position: absolute; top: calc(.45 * var(--u)); transform: translateX(-50%); color: rgba(196, 241, 255, .75); font-size: var(--t-xs); }
+.fl-compass .cd.main { color: var(--photon); font-weight: 700; }
+.fl-compass .cd.n { color: var(--dawn-3); }
+.fl-compass .mk { position: absolute; top: calc(.35 * var(--u)); transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; white-space: nowrap; }
+.fl-compass .mk i { display: block; width: calc(.8 * var(--u)); height: calc(.8 * var(--u)); border-radius: 3px; box-shadow: 0 0 0 1px rgba(0, 0, 0, .55); }
+/* Nearest safe pad: the cyan ring, as in the world. */
+.fl-compass .mk.pad i { width: calc(1.05 * var(--u)); height: calc(1.05 * var(--u)); border-radius: 50%; background: transparent; border: 2px solid var(--safe); box-shadow: inset 0 0 6px rgba(143, 243, 255, .5); transform: none; }
+.fl-compass .mk span { position: absolute; top: calc(1.85 * var(--u)); padding: 2px 6px; border-radius: 2px; background: rgba(5, 10, 15, .66); font: 600 var(--t-xs)/1 var(--font-mono); letter-spacing: 0; color: var(--paper); }
+.fl-compass .mk.pad span { color: var(--safe); }
 .fl-compass .mk.edge { opacity: .7; }
 
-/* Player list (Tab) */
+/* ---------------------------------------------------------------- player list (Tab) */
 .fl-plist { z-index: 45; }
-.fl-plist.peek { pointer-events: none; background: transparent; backdrop-filter: none; }
-.fl-plist .fl-panel { width: min(920px, 95vw); max-height: 86vh; overflow: auto; text-align: left; padding: 20px 24px; }
-.fl-plist h2 { font-size: 20px; letter-spacing: .12em; margin: 0 0 4px; }
-.fl-plist .sub { color: #8f88a8; font-size: 12px; margin: 0 0 12px; }
-.fl-plist h3 { font-size: 12px; letter-spacing: .14em; color: #b9b2cc; margin: 14px 0 6px; text-transform: uppercase; }
-.fl-plist table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.fl-plist th { text-align: left; font-weight: 600; color: #8f88a8; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; padding: 4px 6px; }
-.fl-plist td { padding: 6px; border-top: 1px solid #ffffff14; vertical-align: middle; }
-.fl-plist tr.me td { background: #ffffff08; }
-.fl-plist .nm { font-weight: 700; }
-.fl-plist .ttl { color: #ffd8a8; font-size: 11px; margin-left: 6px; font-weight: 500; }
-.fl-plist .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.fl-plist .acts { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
-.fl-chip { display: inline-block; padding: 0 7px; border-radius: 999px; font-size: 10px; font-weight: 700; letter-spacing: .06em; border: 1px solid #ffffff2a; color: #c9c2e0; margin-left: 6px; vertical-align: 1px; }
-.fl-chip.admin { border-color: #ffb86b99; color: #ffd8a8; }
-.fl-chip.party { border-color: #36f9f699; color: #9ffcfa; }
-.fl-chip.other { border-color: #b48cff66; color: #d3c0ff; }
-.fl-chip.bad { border-color: #ff6b6b88; color: #ffb3b3; }
-.fl-sbtn { font: inherit; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px; border: 1px solid #ffffff2e; background: #1b1530; color: #ece8f6; cursor: pointer; }
-.fl-sbtn:hover:not(:disabled) { border-color: #ffd8a8aa; }
-.fl-sbtn:disabled { opacity: .4; cursor: default; }
-.fl-sbtn.on { background: #ffd8a8; color: #1a0f2a; border-color: #ffd8a8; }
-.fl-sbtn.warn { border-color: #ff6b6b77; color: #ffc0c0; }
-.fl-sbtn.primary { background: linear-gradient(180deg, #ffb86b, #ff7edb); color: #1a0f2a; border-color: #ffd8a8; }
-.fl-plist .mod { display: inline-flex; gap: 4px; padding-left: 6px; margin-left: 2px; border-left: 1px solid #ffb86b44; }
-.fl-plist .report { display: flex; gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
-.fl-plist select, .fl-plist input[type=text] { font: inherit; font-size: 12px; padding: 4px 8px; border-radius: 8px; border: 1px solid #4a3a72; background: #140d28; color: #ece8f6; }
-.fl-plist .foot { display: flex; gap: 8px; align-items: center; margin-top: 14px; color: #8f88a8; font-size: 12px; flex-wrap: wrap; }
-.fl-plist .foot input[type=text] { flex: 1; min-width: 200px; }
-.fl-voice { font-size: 11px; color: #8f88a8; white-space: nowrap; }
-.fl-voice.live { color: #72f1b8; }
-.fl-voice.muted { color: #ff9f9f; }
+.fl-plist.peek { pointer-events: none; background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.fl-plist .fl-panel { width: min(calc(62 * var(--u)), 95vw); max-height: 86vh; overflow: auto; text-align: left; padding: calc(1.3 * var(--u)) calc(1.5 * var(--u)); }
+.fl-plist h2 { margin: 0; font: 300 var(--t-2xl)/1.1 var(--font-display); letter-spacing: .14em; text-transform: uppercase; color: var(--paper); }
+.fl-plist .sub { margin: calc(.3 * var(--u)) 0 var(--sp-3); color: var(--fog-3); font-size: var(--t-xs); }
+.fl-plist h3 { margin: var(--sp-4) 0 var(--sp-2); font: 600 var(--t-xs)/1.2 var(--font-display); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--dawn-3); }
+/* Fixed layout: every column has a width, the name column takes the rest, nothing overflows the panel. */
+.fl-plist table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: var(--t-sm); }
+.fl-plist th { padding: 0 calc(.5 * var(--u)) calc(.45 * var(--u)); text-align: left; font: 600 var(--t-xs)/1.2 var(--font-display); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--fog-2); border-bottom: 1px solid var(--line-2); white-space: nowrap; overflow: hidden; }
+.fl-plist td { padding: calc(.5 * var(--u)); border-bottom: 1px solid var(--line-1); vertical-align: middle; color: var(--paper-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-plist tr:hover td { background: rgba(255, 255, 255, .03); }
+.fl-plist tr.me td { background: rgba(255, 243, 220, .05); color: var(--hero-cream); }
+/* Columns: Player | Level | Character | Voice | Distance | Actions */
+.fl-plist th:nth-child(2), .fl-plist tr:first-child > td:nth-child(2) { width: calc(4 * var(--u)); }
+.fl-plist th:nth-child(3), .fl-plist tr:first-child > td:nth-child(3) { width: calc(7 * var(--u)); }
+.fl-plist th:nth-child(4), .fl-plist tr:first-child > td:nth-child(4) { width: calc(7.5 * var(--u)); }
+.fl-plist th:nth-child(5), .fl-plist tr:first-child > td:nth-child(5) { width: calc(5 * var(--u)); }
+.fl-plist th:nth-child(6), .fl-plist tr:first-child > td:nth-child(6) { width: calc(20 * var(--u)); }
+.fl-plist th:first-child, .fl-plist tr:first-child > td:first-child { width: auto; }
+.fl-plist td:last-child { white-space: normal; overflow: visible; }
+.fl-plist .nm { font: 600 var(--t-sm)/1.2 var(--font-display); letter-spacing: .03em; color: var(--paper); }
+.fl-plist .ttl { margin-left: var(--sp-2); font-size: var(--t-xs); color: var(--dawn-3); }
+.fl-plist .num { text-align: right; font-family: var(--font-mono); font-size: var(--t-xs); font-variant-numeric: tabular-nums; }
+.fl-plist .acts { display: flex; flex-wrap: wrap; gap: calc(.3 * var(--u)); justify-content: flex-end; }
+.fl-plist .fl-pip { margin-right: var(--sp-2); }
+.fl-plist .mod { display: inline-flex; flex-wrap: wrap; gap: calc(.3 * var(--u)); padding-left: calc(.4 * var(--u)); border-left: 1px solid rgba(255, 217, 155, .3); }
+.fl-plist .report { display: flex; gap: calc(.4 * var(--u)); align-items: center; justify-content: flex-end; flex-wrap: wrap; font-size: var(--t-xs); color: var(--fog-3); }
+.fl-plist select, .fl-plist input[type=text] { height: calc(2 * var(--u)); padding: 0 calc(.5 * var(--u)); font-size: var(--t-xs); color: var(--paper); background: rgba(0, 0, 0, .35); border: 1px solid var(--line-3); border-radius: var(--r-2); }
+.fl-plist .foot { display: flex; gap: var(--sp-2); align-items: center; margin-top: var(--sp-4); padding: calc(.6 * var(--u)); border: 1px solid rgba(255, 217, 155, .25); border-radius: var(--r-2); background: rgba(243, 174, 91, .05); color: var(--dawn-3); font-size: var(--t-xs); flex-wrap: wrap; }
+.fl-plist .foot input[type=text] { flex: 1; min-width: calc(12 * var(--u)); }
 
-/* Party invite card */
-.fl-invites { position: fixed; right: 18px; top: 38%; display: flex; flex-direction: column; gap: 8px; z-index: 46; pointer-events: auto; }
-.fl-invite { width: 280px; padding: 12px 14px; border-radius: 12px; background: #110d22f2; border: 1px solid #36f9f677; box-shadow: 0 8px 30px #0008; color: #ece8f6; font: 13px/1.4 ui-sans-serif, system-ui, sans-serif; animation: flin .2s ease-out; }
-.fl-invite b { color: #9ffcfa; }
-.fl-invite .row { display: flex; gap: 8px; margin-top: 10px; }
-.fl-invite .row .fl-sbtn { flex: 1; padding: 6px 10px; font-size: 12px; }
-.fl-invite .ttl { height: 2px; margin-top: 10px; background: #36f9f6; transform-origin: left; }
+/* Chips inside social screens extend the kit's .fl-chip (never redefine the base) */
+.fl-chip.admin { color: var(--dawn-3); border-color: rgba(255, 217, 155, .35); background: rgba(243, 174, 91, .08); }
+.fl-chip.party { color: var(--party-2); border-color: rgba(127, 227, 176, .35); background: rgba(127, 227, 176, .07); }
+.fl-chip.other { color: var(--party-3); border-color: rgba(185, 166, 255, .35); }
+.fl-chip.bad { color: #ffb4a8; border-color: rgba(255, 111, 94, .4); background: rgba(255, 111, 94, .08); }
+.fl-plist .fl-chip { margin-left: calc(.4 * var(--u)); height: calc(1.3 * var(--u)); padding: 0 calc(.4 * var(--u)); vertical-align: 1px; }
 
-/* Screenshot */
-.fl-shot-btn { position: fixed; right: 18px; bottom: 18px; z-index: 44; width: 38px; height: 38px; border-radius: 50%; border: 1px solid #ffffff2e; background: #0a0816c0; color: #ece8f6; cursor: pointer; display: grid; place-items: center; pointer-events: auto; padding: 0; }
-.fl-shot-btn:hover { border-color: #ffd8a8; }
-.fl-shot-btn svg { width: 18px; height: 18px; }
+/* Small action buttons: the kit's small button */
+.fl-sbtn { display: inline-flex; align-items: center; height: calc(1.9 * var(--u)); padding: 0 calc(.65 * var(--u)); font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: .1em; text-transform: uppercase; color: var(--paper); background: linear-gradient(180deg, rgba(255, 255, 255, .07), rgba(255, 255, 255, .02)); border: 1px solid var(--line-3); border-radius: var(--r-2); cursor: pointer; white-space: nowrap; }
+.fl-sbtn:hover:not(:disabled) { border-color: rgba(255, 217, 155, .65); }
+.fl-sbtn:disabled { opacity: .42; cursor: default; }
+.fl-sbtn.on { color: #1f1308; background: var(--dawn-3); border-color: var(--dawn-3); }
+.fl-sbtn.warn { color: #ffd2c9; border-color: rgba(255, 111, 94, .5); background: rgba(255, 111, 94, .08); }
+.fl-sbtn.primary { color: #1f1308; background: linear-gradient(180deg, #ffe6b8 0%, #f7bb69 50%, #ec9268 100%); border-color: rgba(255, 230, 184, .95); }
+
+/* Voice state in words, with a colour cue on top */
+.fl-voice { font-size: var(--t-xs); color: var(--fog-3); white-space: nowrap; }
+.fl-voice.live { color: var(--ok); }
+.fl-voice.muted { color: #ffb4a8; }
+
+/* ---------------------------------------------------------------- party invite card (warm arcade: it's for you) */
+.fl-invites { position: fixed; right: calc(1.5 * var(--u)); top: 40%; display: flex; flex-direction: column; gap: var(--sp-2); z-index: 46; pointer-events: auto; }
+.fl-invite { width: calc(19.5 * var(--u)); padding: calc(.8 * var(--u)) var(--sp-4); border-radius: var(--r-2); background: linear-gradient(180deg, rgba(40, 28, 16, .94), rgba(18, 14, 10, .94)); border: 1px solid rgba(255, 217, 155, .45); box-shadow: 0 12px 30px -10px rgba(0, 0, 0, .8); color: var(--paper); font: 400 var(--t-sm)/1.4 var(--font-body); animation: fl-rise-in var(--dur-3) var(--ease-snap) both; }
+.fl-invite b { color: var(--hero-cream); font-family: var(--font-display); font-weight: 600; }
+.fl-invite .row { display: flex; gap: var(--sp-2); margin-top: calc(.7 * var(--u)); }
+.fl-invite .row .fl-sbtn { flex: 1; justify-content: center; height: calc(2.2 * var(--u)); }
+.fl-invite .ttl { height: 2px; margin-top: calc(.7 * var(--u)); background: var(--dawn-3); transform-origin: left; }
+
+/* ---------------------------------------------------------------- screenshot */
+.fl-shot-btn { position: absolute; right: calc(1.5 * var(--u)); bottom: calc(6.9 * var(--u)); z-index: var(--z-hud); width: calc(2.4 * var(--u)); height: calc(2.4 * var(--u)); border-radius: var(--r-2); border: 1px solid var(--photon-line); background: var(--hud-scrim); color: var(--photon); cursor: pointer; display: grid; place-items: center; pointer-events: auto; padding: 0; }
+.fl-shot-btn:hover { border-color: var(--photon); }
+.fl-shot-btn svg { width: calc(1.15 * var(--u)); height: calc(1.15 * var(--u)); }
 .fl-shot-flash { position: fixed; inset: 0; background: #fff; opacity: .55; z-index: 70; pointer-events: none; transition: opacity .35s ease-out; }
-.fl-shot .fl-panel { width: min(760px, 94vw); padding: 18px 20px; }
-.fl-shot img { display: block; width: 100%; border-radius: 10px; border: 1px solid #ffffff22; background: #07060d; }
-.fl-shot .row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 14px; }
-.fl-shot .row .fl-sbtn { font-size: 13px; padding: 8px 16px; }
-.fl-shot .note { color: #8f88a8; font-size: 12px; margin-top: 10px; min-height: 16px; }
+.fl-shot .fl-panel { width: min(calc(48 * var(--u)), 94vw); padding: calc(1.1 * var(--u)) calc(1.3 * var(--u)); }
+.fl-shot img { display: block; width: 100%; border-radius: var(--r-2); border: 1px solid var(--line-2); background: var(--ink-1); }
+.fl-shot .row { display: flex; gap: var(--sp-2); justify-content: center; flex-wrap: wrap; margin-top: var(--sp-4); }
+.fl-shot .row .fl-sbtn { height: calc(2.4 * var(--u)); padding: 0 var(--sp-4); }
+.fl-shot .note { margin-top: calc(.6 * var(--u)); min-height: 1.4em; color: var(--fog-3); font-size: var(--t-xs); }
 
-/* Queue and removal screens */
-.fl-queue { z-index: 65; }
-.fl-queue .pos { font-size: 56px; font-weight: 800; margin: 6px 0; background: linear-gradient(180deg, #fff, #ffd8a8 55%, #ff7edb); -webkit-background-clip: text; background-clip: text; color: transparent; }
-.fl-removed { z-index: 66; }
+/* ---------------------------------------------------------------- queue and removal screens */
+.fl-queue { z-index: 65; background: rgba(5, 7, 10, .9); }
+.fl-queue .pos { margin: var(--sp-2) 0; font: 300 var(--t-4xl)/1 var(--font-display); color: var(--dawn-3); }
+.fl-removed { z-index: 66; background: rgba(5, 7, 10, .9); }

@@ -8,6 +8,7 @@ import { REPORT_REASONS, SOCIAL } from "@firstlight/shared/net/social";
 import { el, isolateKeys, sbtn } from "./dom.ts";
 import { PARTY_COLOURS } from "./compass.ts";
 import { isBlocked, isMutedLocally, partyState, setMuted } from "./store.ts";
+import { overlayClosed, overlayOpened } from "../ui/dom.ts";
 
 export interface ListHost {
   /** Room state players map (sessionId → PlayerState), and my session id. */
@@ -59,7 +60,8 @@ export class PlayerList {
     this.mode = "open";
     if (wasClosed) this.build();
     else this.overlay?.classList.remove("peek");
-    // Our overlay (an .fl-overlay with an h2) is in the DOM first, so the pause menu stays away.
+    // Registered before the pointer is freed, so the Esc menu stays away.
+    overlayOpened("players");
     document.exitPointerLock?.();
     this.render(true);
   }
@@ -71,6 +73,7 @@ export class PlayerList {
     this.confirmBan = null;
     this.overlay?.remove();
     this.overlay = this.panel = null;
+    overlayClosed("players");
     if (relock) this.host.relock();
   }
 
@@ -138,8 +141,8 @@ export class PlayerList {
       party.members.forEach((m, i) => {
         const tr = el("tr", m.userId === self?.userId ? "me" : "", t);
         const name = el("td", "", tr);
-        const dot = el("span", "", name);
-        dot.style.cssText = `display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;background:${PARTY_COLOURS[i % PARTY_COLOURS.length]}`;
+        // Slot colour AND number (never colour alone).
+        el("span", "fl-pip", name, String(i + 1)).style.setProperty("--c", PARTY_COLOURS[i % PARTY_COLOURS.length]!);
         el("span", "nm", name, m.name);
         if (m.userId === party.leader) el("span", "fl-chip party", name, "LEADER");
         el("td", "num", tr, m.online && m.level ? `LV ${m.level}` : "");

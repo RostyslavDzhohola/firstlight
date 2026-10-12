@@ -5,6 +5,7 @@
 import "./character.css";
 import { STARTERS, PALETTE_NAMES, WEAPON_BY_ID } from "@firstlight/shared/content/weapons";
 import { NAME_PATTERN, setDisplayName } from "../net/auth.ts";
+import { nameProblem, validSuggestion } from "./account.ts";
 import { button, el, icon, isolateKeys, overlayClosed, overlayOpened, sprite, uiRoot } from "./dom.ts";
 import { FIGURE_DEFS, FIGURE_IDS } from "./figures.ts";
 import { weaponChips } from "./hudFormat.ts";
@@ -146,7 +147,8 @@ export function showCharacterPick(opts: CharacterPickOptions = {}): Promise<{ st
       nameInput.maxLength = 16;
       nameInput.setAttribute("autocomplete", "nickname");
       nameInput.spellcheck = false;
-      nameInput.value = opts.askName.suggested ?? "";
+      // Generated guest names ("Wanderer-7904") fail the rules: only pre-fill a valid suggestion.
+      nameInput.value = validSuggestion(opts.askName.suggested);
       nameInput.placeholder = "Your name";
       icon("check", "fl-charpick__ok", iw);
       const row = el("div", "fl-charpick__row", field);
@@ -180,8 +182,9 @@ export function showCharacterPick(opts: CharacterPickOptions = {}): Promise<{ st
       nameInput.classList.toggle("is-ok", ok);
       nameInput.classList.toggle("is-error", v.length > 0 && !ok);
       nameStatus.className = `fl-status${ok ? " is-ok" : v.length ? " is-error" : ""}`;
-      nameStatus.textContent = ok ? "Looks good" : v.length === 0 ? "Pick a name" : v.length < 3 || v.length > 16 ? "Names are 3–16 characters" : "Letters, numbers and _ only";
+      nameStatus.textContent = ok ? "Looks good" : nameProblem(v);
       play.disabled = !ok;
+      play.title = ok ? "" : nameProblem(v);
       return ok;
     }
 

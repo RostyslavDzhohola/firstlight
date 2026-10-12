@@ -9,7 +9,8 @@ import { MEDALS } from "@firstlight/shared/content/medals";
 import { GUIDES, MISSION_BY_ID, MISSIONS, missionsOn, type MissionDef } from "@firstlight/shared/content/missions";
 import type { InvItem } from "@firstlight/shared/net/protocol";
 import type { Game } from "../game/Game.ts";
-import type { YouPlus } from "./hud.ts";
+import type { Hud, MissionLine, YouPlus } from "./hud.ts";
+import { overlayClosed, overlayOpened } from "./dom.ts";
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", parent?: HTMLElement, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -57,6 +58,7 @@ export class Panel {
     this.game.input.enabled = false;
     this.game.input.keys.clear();
     window.addEventListener("keydown", this.onKey, true);
+    overlayOpened("panel"); // keeps the Esc menu away while the mouse is free
     document.exitPointerLock?.();
   }
 
@@ -65,6 +67,7 @@ export class Panel {
     this.overlay.remove();
     window.removeEventListener("keydown", this.onKey, true);
     if (Panel.current === this) Panel.current = null;
+    overlayClosed("panel");
     this.game.input.enabled = true;
     if (relock) this.game.input.lock();
   }
@@ -394,31 +397,43 @@ export class KeypadPanel extends Panel {
 
 // ---------------------------------------------------------------- HUD mission tracker
 
+/**
+ * Active missions in the HUD's missions panel (top-right, in one column with the toasts: verdict fix 2).
+ * Accepts the HUD (or, for older callers, its root element: then the HUD is looked up lazily).
+ */
 export class MissionTracker {
-  readonly el = el("div", "fl-tracker");
   private last = "";
 
-  constructor(hudRoot: HTMLElement) {
-    hudRoot.appendChild(this.el);
-  }
+  constructor(private readonly hud: Pick<Hud, "setMissions"> | HTMLElement) {}
 
   update(you: YouPlus | null) {
-    const active = (you?.missions ?? []).filter((m) => !m.done).slice(0, 3);
-    const key = JSON.stringify(active);
-    if (key === this.last) return;
+    const all = you?.missions ?? [];
+    const key = JSON.stringify(all);
+    if (key === this.last || this.hud instanceof HTMLElement) return;
     this.last = key;
-    this.el.innerHTML = "";
-    for (const m of active) {
+    // Open missions first, then the ones done this life; at most three lines.
+    const rows = [...all.filter((m) => !m.done), ...all.filter((m) => m.done)].slice(0, 3);
+    const lines: MissionLine[] = [];
+    let body = "";
+    let guide = "";
+    rows.forEach((m, i) => {
       const def = MISSION_BY_ID.get(m.id);
-      if (!def) continue;
-      const t = el("div", "t", this.el);
-      el("b", "", t, def.name);
-      t.append(` — ${def.type === "hunt" ? `${m.progress}/${m.goal} ${def.hunt!.targets.map((x) => x.label).join(" + ")}` : def.objective}`);
-    }
+      if (!def) return;
+      body ||= def.body[0]!.toUpperCase() + def.body.slice(1);
+      guide ||= def.guide;
+      lines.push({
+        id: m.id,
+        title: def.name,
+        detail: def.objective,
+        progress: m.done ? "Done" : `${m.progress}/${m.goal}`,
+        state: m.done ? "done" : i === 0 ? "tracked" : "open",
+      });
+    });
+    this.hud.setMissions(lines, [guide, body].filter(Boolean).join(" · "));
   }
 
   dispose() {
-    this.el.remove();
+    if (!(this.hud instanceof HTMLElement)) this.hud.setMissions([]);
   }
 }
 
@@ -474,6 +489,7 @@ export class AdminConsole {
     el("div", "h", box, CONSOLE_HELP);
     this.wrap = wrap;
     this.game.input.enabled = false;
+    overlayOpened("console");
     document.exitPointerLock?.();
     setTimeout(() => input.focus(), 0);
     input.onkeydown = (e) => {
@@ -492,6 +508,7 @@ export class AdminConsole {
   close(relock = false) {
     this.wrap?.remove();
     this.wrap = null;
+    overlayClosed("console");
     this.game.input.enabled = true;
     if (relock) this.game.input.lock();
   }

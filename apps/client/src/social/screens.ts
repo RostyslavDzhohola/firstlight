@@ -3,6 +3,7 @@
 
 import { CLOSE } from "@firstlight/shared/net/social";
 import { el } from "./dom.ts";
+import { overlayClosed, overlayOpened } from "../ui/dom.ts";
 
 let queueEl: HTMLDivElement | null = null;
 
@@ -11,10 +12,12 @@ export function showQueue(q: { position: number; etaSeconds: number } | null): v
   if (!q) {
     queueEl?.remove();
     queueEl = null;
+    overlayClosed("queue");
     return;
   }
   if (!queueEl) {
     queueEl = el("div", "fl-overlay fl-queue");
+    overlayOpened("queue");
     document.body.appendChild(queueEl);
   }
   queueEl.replaceChildren();
@@ -50,6 +53,7 @@ export function isRemoval(code: number): boolean {
 export function showRemoved(code: number | string): void {
   const t = TEXT[String(code)];
   if (!t || removedEl) return;
+  overlayOpened("removed"); // final: the page reloads from here
   document.exitPointerLock?.();
   removedEl = el("div", "fl-overlay fl-removed");
   const p = el("div", "fl-panel", removedEl);

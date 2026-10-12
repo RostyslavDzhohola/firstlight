@@ -39,7 +39,8 @@
 .fl-hitmark.is-weak i { background: var(--dmg-weak); }
 
 /* ---------------------------------------------------------------- top-centre: zone banner + boss bar */
-.fl-hud__top { position: absolute; top: calc(1.4 * var(--u)); left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: calc(.8 * var(--u)); }
+/* Below the compass strip (social lane, top: 1.2u + its labels). */
+.fl-hud__top { position: absolute; top: calc(4.7 * var(--u)); left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: calc(.8 * var(--u)); }
 .fl-banner { display: flex; align-items: center; gap: calc(.8 * var(--u)); padding: calc(.6 * var(--u)) calc(1.2 * var(--u)); white-space: nowrap; font: 600 var(--t-md)/1 var(--font-display); letter-spacing: .3em; text-transform: uppercase; animation: fl-flicker .9s var(--ease-out) both; }
 .fl-banner small { font: 500 var(--t-xs)/1 var(--font-body); letter-spacing: .02em; text-transform: none; color: var(--fog-4); }
 .fl-banner.is-safe { color: var(--safe); border: 1px solid rgba(143, 243, 255, .5); background: linear-gradient(90deg, rgba(5, 10, 15, .35), rgba(20, 60, 70, .55), rgba(5, 10, 15, .35)); }

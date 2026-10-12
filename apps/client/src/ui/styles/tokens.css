@@ -3,9 +3,10 @@
    light (photon lines over dark scrims); anything the player owns is a warm 80s arcade sprite; only the
    enemy faction (Meridian Oversight) is cold, stencilled and hexagonal.
 
-   Every token lives on `.fl-ui` (each UI root carries that class), not on :root/html, so the fluid
-   size unit `--u` scales the UI without touching the rest of the page. Sizes are `calc(N * var(--u))`
-   where the design used N rem: 14 px at 1280 wide → 19 px at 2560 wide. */
+   The fluid size unit `--u` replaces the design's rem (the html font size is never changed): sizes are
+   `calc(N * var(--u))` where the design used N rem, 14 px at 1280 wide → 19 px at 2560 wide. The
+   variables are declared on :root (so any lane's markup can use them) and again on each `.fl-ui` root;
+   the base text style applies only inside `.fl-ui`. */
 
 /* Self-hosted fonts, SIL OFL 1.1 (see public/fonts/LICENSES.md). Latin subset, used weights only. */
 @import "@fontsource/barlow-semi-condensed/latin-300.css";
@@ -19,9 +20,8 @@
 @import "@fontsource/jetbrains-mono/latin-600.css";
 @import "@fontsource/jetbrains-mono/latin-700.css";
 
+:root,
 .fl-ui {
-  color-scheme: dark;
-
   /* The fluid unit. */
   --u: clamp(14px, calc(.390625vw + 9px), 19px);
 
@@ -189,7 +189,11 @@
 
   --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .6 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 
-  /* Base text for everything inside a UI root */
+}
+
+/* Base text for everything inside a UI root */
+.fl-ui {
+  color-scheme: dark;
   font: 400 var(--t-sm)/var(--lh-body) var(--font-body);
   color: var(--paper);
   -webkit-font-smoothing: antialiased;
@@ -197,15 +201,17 @@
 }
 
 /* Low graphics tier: no backdrop blur anywhere in the UI; scrims get darker instead (verdict fix 6). */
+:root.fl-lowfx,
 .fl-lowfx .fl-ui {
   --hud-scrim: linear-gradient(180deg, rgba(5, 10, 15, .8), rgba(5, 10, 15, .72));
   --hud-blur: none;
   --panel-blur: none;
   --panel-bg: linear-gradient(180deg, rgba(25, 30, 39, .97), rgba(12, 15, 20, .98));
 }
-.fl-lowfx .fl-ui *,
-.fl-lowfx .fl-ui *::before,
-.fl-lowfx .fl-ui *::after {
+/* Every lane's UI, not just ours: on Low nothing on the page uses a backdrop filter. */
+.fl-lowfx *,
+.fl-lowfx *::before,
+.fl-lowfx *::after {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }

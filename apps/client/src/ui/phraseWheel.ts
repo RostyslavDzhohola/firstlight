@@ -5,6 +5,10 @@
 import "./phraseWheel.css";
 import { PHRASES } from "@firstlight/shared/net/protocol";
 import type { Input } from "../game/input.ts";
+import { installSprites } from "./sprites.ts";
+
+/** Truce?, Help!, Follow me, Boss here, Thanks, GG */
+const PHRASE_SPRITES = ["flag", "alert", "arrow", "crown", "heart", "trophy"];
 
 const RING = 104; // px from the centre to each phrase
 const DEAD = 16; // px of virtual cursor travel before a phrase lights up
@@ -37,6 +41,7 @@ export class PhraseWheel {
 
   constructor(say: (id: number) => void) {
     this.say = say;
+    installSprites();
     this.root = document.createElement("div");
     this.root.className = "fl-wheel";
     this.center = document.createElement("div");
@@ -49,7 +54,10 @@ export class PhraseWheel {
       it.style.transform = `translate(calc(-50% + ${(Math.cos(a) * RING).toFixed(1)}px), calc(-50% + ${(Math.sin(a) * RING).toFixed(1)}px))`;
       const n = document.createElement("b");
       n.textContent = String(i + 1);
-      it.append(n, document.createTextNode(text));
+      // Pixel icon per phrase (UI kit sprites; same icons as the speech bubbles).
+      const icon = document.createElement("i");
+      icon.className = `px px-${PHRASE_SPRITES[i] ?? "flag"}`;
+      it.append(n, icon, document.createTextNode(text));
       this.root.appendChild(it);
       this.items.push(it);
     });

@@ -64,7 +64,7 @@ export class QuestClient implements ClientSystem {
     this.journal = new JournalPanel(game);
     this.keypad = new KeypadPanel(game);
     this.map = new MapPanel(game);
-    this.tracker = new MissionTracker(game.hud.root);
+    this.tracker = new MissionTracker(game.hud);
     this.console = new AdminConsole(game);
     window.addEventListener("keydown", this.onKey);
 

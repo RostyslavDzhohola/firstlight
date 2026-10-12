@@ -1,57 +1,68 @@
-/* Quests lane UI: shop, guide, journal, keypad, map, mission tracker, nameplates, admin console. */
-.fl-q { text-align: left; width: min(860px, 94vw); max-height: 86vh; display: flex; flex-direction: column; padding: 22px 26px; }
-.fl-q h2 { font-size: 22px; letter-spacing: .06em; margin: 0 0 2px; }
-.fl-q .sub { color: #b9b2cc; margin: 0 0 12px; font-size: 13px; }
-.fl-q .head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.fl-q .coins { color: #ffd166; font-weight: 800; font-size: 16px; white-space: nowrap; }
-.fl-q .tabs { display: flex; gap: 6px; margin: 4px 0 12px; flex-wrap: wrap; }
-.fl-q .tab { font: inherit; font-size: 13px; padding: 6px 14px; border-radius: 999px; border: 1px solid #ffffff26; background: #0a0816; color: #ece8f6; cursor: pointer; }
-.fl-q .tab.on { border-color: #ffd8a8; color: #ffd8a8; }
-.fl-q .body { overflow: auto; flex: 1; min-height: 120px; padding-right: 4px; }
-.fl-q .cat { margin: 12px 0 6px; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: #8f88a8; }
-.fl-q .row { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; padding: 7px 10px; border-radius: 10px; background: #0a0816b8; border: 1px solid #ffffff14; margin-bottom: 5px; }
-.fl-q .row .nm { font-weight: 700; }
-.fl-q .row .meta { font-size: 12px; color: #b9b2cc; }
-.fl-q .row .gate { color: #ffd166; }
-.fl-q .row .price { color: #ffd166; font-weight: 700; white-space: nowrap; }
-.fl-q .btn { font: inherit; font-size: 12px; font-weight: 700; padding: 6px 12px; border-radius: 999px; border: 1px solid #ffd8a8; background: linear-gradient(180deg, #ffb86b, #ff7edb); color: #1a0f2a; cursor: pointer; white-space: nowrap; }
-.fl-q .btn.ghost { background: transparent; color: #ffd8a8; }
-.fl-q .btn:disabled { opacity: .4; cursor: default; }
-.fl-q .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; color: #8f88a8; font-size: 12px; }
-.fl-q .mission { padding: 12px 14px; border-radius: 12px; background: #0a0816b8; border: 1px solid #ffffff1a; margin-bottom: 8px; }
-.fl-q .mission .top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
-.fl-q .mission .ty { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; border: 1px solid #ffffff30; color: #c9c2e0; }
-.fl-q .mission .obj { margin: 6px 0; }
-.fl-q .mission .rw { color: #b9b2cc; font-size: 12px; }
-.fl-q .mission .bar { height: 5px; border-radius: 4px; background: #0007; overflow: hidden; margin: 8px 0 4px; }
-.fl-q .mission .bar i { display: block; height: 100%; background: linear-gradient(90deg, #36f9f6, #b48cff); }
+/* Quests lane UI: shop, guide, journal, keypad, map, nameplates, admin console. Restyled with the UI
+   kit (src/ui/styles; verdict Entry B: shop table with price buttons, readable map). The mission
+   tracker now lives in the HUD's missions panel (top-right, one column with the toasts). */
+.fl-q { text-align: left; width: min(calc(56 * var(--u)), 94vw); max-height: 86vh; display: flex; flex-direction: column; padding: calc(1.3 * var(--u)) calc(1.5 * var(--u)); }
+.fl-q h2 { margin: 0; font: 300 var(--t-2xl)/1.1 var(--font-display); letter-spacing: .1em; text-transform: uppercase; }
+.fl-q .sub { margin: calc(.3 * var(--u)) 0 var(--sp-3); color: var(--fog-3); font-size: var(--t-sm); }
+.fl-q .head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); }
+.fl-q .coins { font: 700 var(--t-md)/1 var(--font-mono); color: var(--coin); white-space: nowrap; }
+.fl-q .tabs { display: flex; gap: calc(1.2 * var(--u)); margin: calc(.2 * var(--u)) 0 var(--sp-3); border-bottom: 1px solid var(--line-2); flex-wrap: wrap; }
+.fl-q .tab { position: relative; padding: calc(.55 * var(--u)) 0; border: 0; background: none; font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--fog-3); cursor: pointer; }
+.fl-q .tab:hover { color: var(--paper); }
+.fl-q .tab.on { color: var(--paper); }
+.fl-q .tab.on::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--dawn-3); }
+.fl-q select.tab { height: calc(2 * var(--u)); padding: 0 calc(.4 * var(--u)); border: 1px solid var(--line-3); border-radius: var(--r-2); background: rgba(0, 0, 0, .35); color: var(--paper); text-transform: none; letter-spacing: 0; font-family: var(--font-mono); }
+.fl-q .body { overflow: auto; flex: 1; min-height: calc(8 * var(--u)); padding-right: calc(.3 * var(--u)); }
+.fl-q .cat { margin: var(--sp-3) 0 calc(.4 * var(--u)); font: 600 var(--t-xs)/1.2 var(--font-display); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--dawn-3); }
+.fl-q .row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--sp-3); align-items: center; padding: calc(.45 * var(--u)) calc(.6 * var(--u)); border-bottom: 1px solid var(--line-1); }
+.fl-q .row:hover { background: rgba(255, 255, 255, .03); }
+.fl-q .row .nm { font: 600 var(--t-sm)/1.2 var(--font-display); letter-spacing: .03em; color: var(--paper); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-q .row .meta { font-size: var(--t-xs); color: var(--fog-3); }
+.fl-q .row .gate { color: #ffb4a8; }
+.fl-q .row .price { font: 700 var(--t-sm)/1 var(--font-mono); color: var(--coin); white-space: nowrap; }
+.fl-q .btn { display: inline-flex; align-items: center; height: calc(2 * var(--u)); padding: 0 calc(.8 * var(--u)); font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: .12em; text-transform: uppercase; border-radius: var(--r-2); border: 1px solid rgba(255, 230, 184, .95); background: linear-gradient(180deg, #ffe6b8 0%, #f7bb69 50%, #ec9268 100%); color: #1f1308; cursor: pointer; white-space: nowrap; }
+.fl-q .btn.ghost { background: transparent; color: var(--fog-4); border-color: var(--line-3); }
+.fl-q .btn.ghost:hover { color: var(--paper); border-color: rgba(255, 217, 155, .65); }
+.fl-q .btn:disabled { opacity: .42; cursor: default; }
+.fl-q .foot { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-3); margin-top: var(--sp-3); color: var(--fog-3); font-size: var(--t-xs); }
+.fl-q .mission { padding: calc(.75 * var(--u)) var(--sp-4); border-radius: var(--r-2); background: rgba(0, 0, 0, .25); border: 1px solid var(--line-2); margin-bottom: var(--sp-2); }
+.fl-q .mission .top { display: flex; justify-content: space-between; gap: var(--sp-3); align-items: baseline; }
+.fl-q .mission .ty { height: calc(1.4 * var(--u)); display: inline-flex; align-items: center; padding: 0 calc(.45 * var(--u)); font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: .1em; text-transform: uppercase; border-radius: var(--r-1); border: 1px solid var(--photon-line); color: var(--photon); }
+.fl-q .mission .obj { margin: calc(.4 * var(--u)) 0; color: var(--paper-2); }
+.fl-q .mission .rw { color: var(--fog-3); font-size: var(--t-xs); }
+.fl-q .mission .bar { height: 4px; background: rgba(0, 0, 0, .5); overflow: hidden; margin: var(--sp-2) 0 calc(.3 * var(--u)); }
+.fl-q .mission .bar i { display: block; height: 100%; background: linear-gradient(90deg, #ffb547, #ffe6b8); }
 .fl-q .mission.done { opacity: .6; }
-.fl-q .quote { font-style: italic; color: #d8d0ee; margin: 4px 0 12px; }
-.fl-q .medals { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; }
-.fl-q .medal { padding: 10px 12px; border-radius: 12px; background: #0a0816b8; border: 1px solid #ffffff14; }
-.fl-q .medal.got { border-color: #ff7edb66; }
-.fl-q .medal .nm { font-weight: 800; }
-.fl-q .medal .cond { font-size: 12px; color: #b9b2cc; margin: 3px 0 6px; }
-.fl-q .medal .tt { font-size: 12px; color: #ffd8a8; }
-.fl-q .medal.locked .nm { color: #8f88a8; }
-.fl-q .rar { font-size: 12px; font-weight: 700; }
-.fl-keypad { width: 280px; text-align: center; }
-.fl-keypad .disp { font: 700 30px/1 ui-monospace, monospace; letter-spacing: .3em; padding: 12px; margin: 10px 0; border-radius: 10px; background: #050409; color: #f2b544; border: 1px solid #f2b54455; }
-.fl-keypad .keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.fl-keypad .keys button { font: 700 18px ui-sans-serif, system-ui; padding: 12px 0; border-radius: 10px; border: 1px solid #ffffff26; background: #0a0816; color: #ece8f6; cursor: pointer; }
-.fl-map { width: min(820px, 96vw); }
+.fl-q .quote { font-style: italic; color: var(--paper-2); margin: calc(.3 * var(--u)) 0 var(--sp-3); }
+.fl-q .medals { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(15 * var(--u)), 1fr)); gap: var(--sp-2); }
+.fl-q .medal { padding: calc(.6 * var(--u)) calc(.75 * var(--u)); border-radius: var(--r-2); background: rgba(0, 0, 0, .25); border: 1px solid var(--line-2); }
+.fl-q .medal.got { border-color: rgba(255, 201, 74, .5); background: linear-gradient(180deg, rgba(60, 38, 14, .4), rgba(24, 16, 8, .4)); }
+.fl-q .medal .nm { font: 600 var(--t-sm)/1.2 var(--font-display); letter-spacing: .03em; color: var(--paper); }
+.fl-q .medal .cond { font-size: var(--t-xs); color: var(--fog-3); margin: calc(.2 * var(--u)) 0 calc(.4 * var(--u)); }
+.fl-q .medal .tt { font-size: var(--t-xs); color: var(--dawn-3); }
+.fl-q .medal.locked .nm { color: var(--fog-3); }
+.fl-q .rar { font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: .08em; text-transform: uppercase; }
+
+.fl-keypad { width: calc(18 * var(--u)); text-align: center; }
+.fl-keypad .disp { font: 700 var(--t-2xl)/1 var(--font-mono); letter-spacing: .3em; padding: var(--sp-3); margin: var(--sp-3) 0; border-radius: 2px; background: var(--ink-0); color: var(--cold-amber); border: 1px solid rgba(224, 163, 58, .4); }
+.fl-keypad .keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-2); }
+.fl-keypad .keys button { height: calc(3 * var(--u)); font: 600 var(--t-lg)/1 var(--font-mono); border-radius: var(--r-2); border: 1px solid var(--line-3); border-bottom-width: 2px; background: linear-gradient(180deg, rgba(255, 255, 255, .1), rgba(255, 255, 255, .03)); color: var(--paper); cursor: pointer; }
+.fl-keypad .keys button:hover { border-color: rgba(255, 217, 155, .65); }
+
+.fl-map { width: min(calc(54 * var(--u)), 96vw); }
 .fl-map canvas { display: block; margin: 0 auto; cursor: grab; border-radius: 50%; }
 .fl-map canvas.drag { cursor: grabbing; }
-.fl-map .tip { min-height: 18px; text-align: center; color: #ffd8a8; font-size: 13px; margin-top: 6px; }
-.fl-map .legend { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; font-size: 12px; color: #b9b2cc; margin-top: 6px; }
-.fl-tracker { position: absolute; left: 18px; top: 30%; display: flex; flex-direction: column; gap: 4px; max-width: 340px; }
-.fl-tracker .t { padding: 5px 10px; border-radius: 8px; background: #0a0816a8; border-left: 3px solid #36f9f6; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fl-tracker .t b { color: #ffd8a8; }
+.fl-map .tip { min-height: 1.4em; text-align: center; color: var(--dawn-3); font: 600 var(--t-sm)/1.3 var(--font-display); letter-spacing: .04em; margin-top: calc(.4 * var(--u)); }
+.fl-map .legend { display: flex; flex-wrap: wrap; gap: calc(.5 * var(--u)) var(--sp-4); justify-content: center; font-size: var(--t-xs); color: var(--fog-3); margin-top: calc(.4 * var(--u)); }
+
+/* World nameplates (players and NPCs) */
 .fl-plates { position: fixed; inset: 0; pointer-events: none; z-index: 19; }
-.fl-plate { position: absolute; transform: translate(-50%, -100%); text-align: center; white-space: nowrap; font: 700 12px/1.15 ui-sans-serif, system-ui, sans-serif; color: #f4f0ff; text-shadow: 0 1px 2px #000c; }
-.fl-plate i { display: block; font-style: normal; font-weight: 600; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: #ffd166; }
-.fl-console { position: fixed; left: 50%; top: 22%; transform: translateX(-50%); z-index: 45; width: min(520px, 90vw); }
-.fl-console input { width: 100%; font: 14px ui-monospace, monospace; padding: 10px 12px; border-radius: 10px; border: 1px solid #ff7edb; background: #0a0816f0; color: #f4f0ff; outline: none; }
-.fl-console .h { font: 11px ui-monospace, monospace; color: #b9b2cc; margin-top: 4px; text-shadow: 0 1px 2px #000; }
-.fl-console-wrap { background: transparent; backdrop-filter: none; pointer-events: none; }
+.fl-plate { position: absolute; transform: translate(-50%, -100%); text-align: center; white-space: nowrap; font: 600 var(--t-xs)/1.15 var(--font-display); letter-spacing: .06em; color: var(--paper); text-shadow: var(--hud-text-shadow); }
+.fl-plate i { display: block; font: 500 var(--t-xs)/1.2 var(--font-body); font-style: normal; letter-spacing: 0; color: var(--dawn-3); }
+
+/* Admin console (`) */
+.fl-console { position: fixed; left: 50%; top: 22%; transform: translateX(-50%); z-index: 45; width: min(calc(34 * var(--u)), 90vw); }
+.fl-console input { width: 100%; height: calc(2.6 * var(--u)); padding: 0 calc(.8 * var(--u)); font: 500 var(--t-sm)/1 var(--font-mono); border-radius: var(--r-2); border: 1px solid rgba(255, 217, 155, .7); background: rgba(9, 12, 17, .96); color: var(--paper); outline: none; }
+.fl-console .h { margin-top: calc(.3 * var(--u)); font: 500 var(--t-xs)/1.4 var(--font-mono); color: var(--fog-4); text-shadow: var(--hud-text-shadow); }
+.fl-console-wrap { background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; pointer-events: none; }
 .fl-console-wrap .fl-console { pointer-events: auto; }
