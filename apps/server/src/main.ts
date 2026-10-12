@@ -4,11 +4,19 @@ import { createGame } from "./app.ts";
 import { accountsConfigFromEnv, createAccounts } from "./auth/accounts.ts";
 import { devVerifier } from "./auth/identity.ts";
 import { env } from "./env.ts";
+import { gameDb } from "./db/index.ts";
+import { characterRepo } from "./world/characters.ts";
+import { pileStore } from "./world/piles.ts";
+import { SqliteCharacterRepo, SqlitePileStore } from "./world/sqliteStores.ts";
 
 const accounts = await createAccounts({
   ...accountsConfigFromEnv(env),
   fallbackVerifier: devVerifier(env.allowDevGuests),
 });
+
+// Characters and piles live in game.db from here on (survive restarts and deploys).
+characterRepo.current = new SqliteCharacterRepo(gameDb());
+pileStore.current = new SqlitePileStore(gameDb());
 
 const game = await createGame({
   port: env.port,

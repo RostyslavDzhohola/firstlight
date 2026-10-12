@@ -18,6 +18,9 @@ import { dealDamage, fire, melee, selectedWeapon, stepEffects, stepProjectiles, 
 import { dist3, type V3 } from "./geometry.ts";
 import { emitPileEvent, onPileEvent, pileStore, type PileData } from "./piles.ts";
 import { SYSTEM_FACTORIES, type RoomSystem } from "./systems.ts";
+import { matchMaker } from "@colyseus/core";
+import { liveSessions } from "../auth/sessions.ts";
+import { accountLinks } from "../auth/links.ts";
 
 export interface BodyRoomOptions {
   body: BodyId;
@@ -66,7 +69,6 @@ const pickupSchema = z.object({ pileId: z.string().max(64), itemIndex: z.number(
 const respawnSchema = z.object({ starter: z.number().int().min(0).max(3), palette: z.number().int().min(0).max(5) });
 const adminSchema = z.object({ cmd: z.string().max(32), args: z.record(z.string(), z.unknown()).optional() });
 
-let pileSeq = 0;
 
 export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadata }> {
   maxClients = NET.MAX_CLIENTS;
@@ -82,6 +84,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   readonly lingering = new Map<string, { actor: PlayerActor; until: number }>();
   private readonly piles = new Map<string, PileData>();
   private unsubscribePiles: (() => void) | null = null;
+  private unsubscribeLinks: (() => void) | null = null;
   private lastAoi = 0;
   private lastSave = 0;
   host!: CombatHost;
@@ -119,6 +122,22 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
         if (e.kind === "add") this.addPileToState(e.pile);
         else this.updatePileInState(e.pile);
       }
+    });
+
+    // A guest saved their character: re-key live clients to the new account id.
+    this.unsubscribeLinks = accountLinks.on((ev) => {
+      for (const a of this.actors.values()) {
+        if (a.identity.userId !== ev.fromUserId) continue;
+        a.identity = { ...a.identity, userId: ev.toUserId, guest: false, name: ev.name };
+        a.state.userId = ev.toUserId;
+        a.state.name = ev.name;
+        if (ev.character === "account") {
+          const kept = characterRepo.current.load(ev.toUserId);
+          if (kept) a.char = kept;
+          a.client.leave(4002, "account merged, rejoin");
+        }
+      }
+      if (ev.displaced?.roomId === this.roomId) this.clients.getById(ev.displaced.sessionId)?.leave(4001, "signed in elsewhere");
     });
 
     this.onMessage("input", inputSchema, (c, m) => this.handleInput(c, m));
@@ -170,6 +189,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
   onDispose() {
     this.unsubscribePiles?.();
+    this.unsubscribeLinks?.();
     for (const s of this.systems) s.dispose?.();
     for (const a of this.actors.values()) this.saveActor(a);
     for (const l of this.lingering.values()) this.saveActor(l.actor);
@@ -179,6 +199,12 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
   onJoin(client: Client, options: JoinOptions | undefined, auth?: Identity) {
     if (!auth) throw new ServerError(403, "no identity");
+    // One live session per character: kick the previous one (any room in this process).
+    const prev = liveSessions.register(auth.userId, this.roomId, client.sessionId);
+    if (prev) {
+      const other = matchMaker.getLocalRoomById(prev.roomId) as BodyRoom | undefined;
+      other?.clients.getById(prev.sessionId)?.leave(4001, "signed in elsewhere");
+    }
     // A lingering body of the same user in this room is reclaimed.
     for (const [sid, l] of this.lingering) {
       if (l.actor.identity.userId === auth.userId) {
@@ -272,6 +298,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     client.view?.dispose();
     if (!a) return;
     this.actors.delete(client.sessionId);
+    liveSessions.unregister(a.identity.userId, client.sessionId);
     for (const s of this.systems) s.onPlayerLeave?.(client.sessionId);
     const safe = isSafe(this.bodyDef, a.state.x, a.state.y, a.state.z);
     const cleanLogout = (a as PlayerActor & { loggedOut?: boolean }).loggedOut === true;
@@ -469,8 +496,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
   createPile(owner: PlayerActor, items: InvItem[], coins: number, at: V3): PileData {
     const g = this.snapToGround(at);
-    const pile: PileData = {
-      id: `${this.bodyDef.id}-${Date.now().toString(36)}-${(pileSeq++).toString(36)}`,
+    const { pile, evicted } = pileStore.current.add({
       body: this.bodyDef.id,
       x: g[0],
       y: g[1],
@@ -480,10 +506,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       createdAt: Date.now(),
       items,
       coins,
-    };
-    const evicted = pileStore.current.add(pile);
+    });
     emitPileEvent({ kind: "add", pile });
-    for (const e of evicted) emitPileEvent({ kind: "remove", id: e.id, body: e.body });
+    for (const id of evicted) emitPileEvent({ kind: "remove", id, body: this.bodyDef.id });
     return pile;
   }
 

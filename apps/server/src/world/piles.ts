@@ -24,7 +24,8 @@ export const PILE_CAP = 1000;
 
 export interface PileStore {
   list(body: BodyId): PileData[];
-  add(pile: PileData): PileData[]; // returns evicted piles
+  /** Store a new pile; the store assigns the id. Returns the stored pile and evicted pile ids. */
+  add(input: Omit<PileData, "id">): { pile: PileData; evicted: string[] };
   /** Take one item (index) or everything (index undefined). Returns what was taken, or null if gone. */
   take(id: string, index?: number): { items: InvItem[]; coins: number; pile: PileData | null } | null;
   get(id: string): PileData | undefined;
@@ -42,7 +43,10 @@ export class MemoryPileStore implements PileStore {
     return this.index.get(id);
   }
 
-  add(pile: PileData): PileData[] {
+  private seq = 0;
+
+  add(input: Omit<PileData, "id">): { pile: PileData; evicted: string[] } {
+    const pile: PileData = { ...input, id: `${input.body}-${input.createdAt.toString(36)}-${(this.seq++).toString(36)}` };
     let m = this.byBody.get(pile.body);
     if (!m) {
       m = new Map();
@@ -50,16 +54,16 @@ export class MemoryPileStore implements PileStore {
     }
     m.set(pile.id, pile);
     this.index.set(pile.id, pile);
-    const evicted: PileData[] = [];
+    const evicted: string[] = [];
     if (m.size > PILE_CAP) {
       const sorted = [...m.values()].sort((a, b) => a.createdAt - b.createdAt);
       for (const p of sorted.slice(0, m.size - PILE_CAP)) {
         m.delete(p.id);
         this.index.delete(p.id);
-        evicted.push(p);
+        evicted.push(p.id);
       }
     }
-    return evicted;
+    return { pile, evicted };
   }
 
   take(id: string, index?: number) {
