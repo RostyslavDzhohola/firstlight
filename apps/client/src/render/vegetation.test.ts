@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import * as THREE from "three/webgpu";
 import { BODIES, buildChunk, chunkOf, chunkProps, createTerrain, packProps, padDirs, type Face } from "@firstlight/shared";
 import { GrassSystem, type GrassChunk } from "./grass.ts";
+import { testVegetationAssets } from "./vegetationAsset.testutil.ts";
 import { PropSystem } from "./props.ts";
 import { emptyStored, resolveSettings, type StoredGfx, type Tier } from "./quality.ts";
 import { grassWeight, PALETTES } from "../world/palette.ts";
@@ -104,9 +105,10 @@ describe("vegetation (CPU)", () => {
     });
   }
 
-  it("props split into LOD0 near and LOD1 far, within capacity", () => {
+  it("props split into LOD0 near and LOD1 far, within capacity", async () => {
     const s = settingsFor("medium");
-    const sys = new PropSystem("arcadia");
+    const sys = new PropSystem("arcadia", await testVegetationAssets());
+    await sys.ready;
     sys.applySettings(s);
     for (const p of props) sys.addChunk(p.key, p.packed, p.center, p.radius);
     sys.update(cam, 1000);

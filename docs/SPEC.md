@@ -568,7 +568,9 @@ player; distant terrain simpler but lit and hazy.
 | Terrain | vertex colour + baked AO/sun | + 2-layer biplanar | 4 layers + normals | 4 layers 1024² |
 | Shadows | blob + baked vertex AO | one 1024² map over 40 m | 2 cascades 1024² to 80 m | 2 × 2048² to 150 m |
 | Grass | 25k (25 m) | 80k (40 m) | 200k (60 m, compute on WebGPU) | 500k (horizon) |
-| Trees/rocks full mesh to | 15 m | 25 m | 40 m | 60 m |
+| Trees/rocks full mesh to | 0 m (tree impostors) | 20 m | 40 m | 60 m |
+| Trees/rocks draw distance | 110 m | 150 m | 220 m | 260 m |
+| Small undergrowth draw distance | 65 m | 65 m | 65 m | 65 m |
 | Water | colour + fresnel | + baked depth, foam | + ripples, cube map | + SSR on the nearest lake (WebGPU) |
 | Post | bloom (4 mips) + tone map + LUT | + FXAA, vignette, grain | + GTAO half-res, TRAA (WebGPU) | + GTAO full, god rays |
 | Particles (max live) | 2k | 5k | 15k | 30k |
