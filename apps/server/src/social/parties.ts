@@ -118,10 +118,12 @@ export class PartyRegistry {
     return { ok: true, ...this.leave(target) };
   }
 
-  /** Withdraw every invite between the two users (after a block). */
-  cancelBetween(a: string, b: string): void {
+  /** Withdraw every invite between the two users (after a block). Returns the withdrawn invites. */
+  cancelBetween(a: string, b: string): Invite[] {
+    const out = [this.invites.get(a)?.get(b), this.invites.get(b)?.get(a)].filter((i): i is Invite => !!i);
     this.dropInvite(a, b);
     this.dropInvite(b, a);
+    return out;
   }
 
   expire(now = Date.now()): Invite[] {

@@ -13,6 +13,7 @@ import { trackClientInfo, trackJoin, trackLeave, trackTick } from "./analytics.t
 import { announceAll, applyVoiceMute, banAccount, kickUser, refusesReconnect, removePlayer, seatRefusal, setVoiceMuted } from "./moderation.ts";
 import { parties, type Party } from "./parties.ts";
 import { clearPresence, clearRoomPresence, liveActor, liveRooms, presenceOf, sendTo, setPresence } from "./presence.ts";
+import { allow, clearLimits, sweepLimits } from "./limits.ts";
 import { blockedBy, blockedEitherWay, onBlockHooks, setBlocked, storeReport } from "./store.ts";
 
 export const SOCIAL_RULES = {
@@ -40,26 +41,14 @@ const modSchema = z.object({
 // ---- process-wide helpers ------------------------------------------------------------------------
 
 const offlineTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const rate = new Map<string, number[]>(); // key → recent timestamps
 
 let lastSweep = 0;
 /** Drop stale rate-limit keys and names of players who are gone and partyless (bounded memory). */
 function sweep(now: number): void {
   if (now - lastSweep < 60_000) return;
   lastSweep = now;
-  for (const [k, list] of rate) if (!list.length || now - list[list.length - 1]! > 15 * 60_000) rate.delete(k);
+  sweepLimits(now);
   for (const u of lastNames.keys()) if (!presenceOf(u) && !parties.of(u)) lastNames.delete(u);
-}
-
-function allow(key: string, max: number, windowMs: number, now = Date.now()): boolean {
-  const list = (rate.get(key) ?? []).filter((t) => now - t < windowMs);
-  if (list.length >= max) {
-    rate.set(key, list);
-    return false;
-  }
-  list.push(now);
-  rate.set(key, list);
-  return true;
 }
 
 function memberInfo(userId: string): PartyMemberInfo {
@@ -128,7 +117,28 @@ function scheduleOfflineLeave(userId: string): void {
 export function resetSocialTimers(): void {
   for (const t of offlineTimers.values()) clearTimeout(t);
   offlineTimers.clear();
-  rate.clear();
+  clearLimits();
+}
+
+export type BlockOutcome = { ok: true; changed: boolean } | { ok: false; reason: string };
+
+/**
+ * Block or unblock: the one path for the Tab list and the voice panel (same rate limit and list cap).
+ * A block withdraws invites between the two; only a new block runs the voice hooks (hang up, and
+ * rotate relay credentials when the pair was linked), so repeating it changes nothing (F12 B1).
+ */
+export function applyBlock(blocker: string, target: string, on: boolean, now = Date.now()): BlockOutcome {
+  if (blocker === target) return { ok: false, reason: "that's you" };
+  if (!allow(`blk:${blocker}`, SOCIAL_RULES.BLOCKS_PER_MINUTE, 60_000, now)) return { ok: false, reason: "slow down" };
+  const current = blockedBy(blocker);
+  const had = current.includes(target);
+  if (on && !had && current.length >= SOCIAL_RULES.MAX_BLOCKS) return { ok: false, reason: "your block list is full" };
+  const changed = had !== on && setBlocked(blocker, target, on, now);
+  if (on) {
+    for (const inv of parties.cancelBetween(blocker, target)) sendTo(inv.to, "party:invite-closed", { from: inv.from, to: inv.to, reason: "cancelled" });
+    if (changed) for (const h of onBlockHooks) h(blocker, target);
+  }
+  return { ok: true, changed };
 }
 
 // ---- the room system ------------------------------------------------------------------------------
@@ -212,19 +222,13 @@ export function createSocialSystem(room: BodyRoom): RoomSystem {
     if (!me || me.identity.loadtest) return;
     const uid = me.identity.userId;
     const on = m.on ?? true;
-    if (!allow(`blk:${uid}`, SOCIAL_RULES.BLOCKS_PER_MINUTE, 60_000)) return deny(c, "block", "slow down");
-    const current = blockedBy(uid);
     // Block someone who is playing (this copy or anywhere); unblock anyone on your list.
-    const target = inRoom(m.target)?.identity.userId ?? (liveActor(m.target) || (!on && current.includes(m.target)) ? m.target : undefined);
+    const target = inRoom(m.target)?.identity.userId ?? (liveActor(m.target) || (!on && blockedBy(uid).includes(m.target)) ? m.target : undefined);
     if (!target) return deny(c, "block", "player not found");
     if (target === uid) return;
-    if (on && !current.includes(target) && current.length >= SOCIAL_RULES.MAX_BLOCKS) return deny(c, "block", "your block list is full");
-    setBlocked(uid, target, on);
-    if (on) {
-      parties.cancelBetween(me.identity.userId, target);
-      for (const h of onBlockHooks) h(uid, target);
-    }
-    c.send("social:blocked", { userIds: blockedBy(me.identity.userId) });
+    const r = applyBlock(uid, target, on);
+    if (!r.ok) return deny(c, "block", r.reason);
+    c.send("social:blocked", { userIds: blockedBy(uid) });
     toast(c, on ? "Blocked. You won't hear or get invites from them." : "Unblocked.");
   });
 

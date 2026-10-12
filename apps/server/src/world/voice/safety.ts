@@ -3,7 +3,7 @@
 // in-memory fallback when no database is open); admin voice mutes are the moderation module's.
 
 import { isVoiceMuted, setVoiceMuted } from "../../social/moderation.ts";
-import { blockedBy, blockedEitherWay, setBlocked, storeReport, userBanned } from "../../social/store.ts";
+import { blockedBy, blockedEitherWay, storeReport, userBanned } from "../../social/store.ts";
 
 export interface VoiceReport {
   reporter: string;
@@ -13,13 +13,9 @@ export interface VoiceReport {
   reason: string;
 }
 
+// Blocks are made through the social system's applyBlock (one rate limit, list cap and party rule
+// for the Tab list and the voice panel); this module only reads them.
 export const voiceSafety = {
-  /** Persist `userId` blocking `blockedUserId`. True if it is a new block. */
-  block(userId: string, blockedUserId: string, now = Date.now()): boolean {
-    if (userId === blockedUserId || blockedBy(userId).includes(blockedUserId)) return false;
-    return setBlocked(userId, blockedUserId, true, now);
-  },
-
   /** Everyone `userId` has blocked (the client's copy of the list). */
   blockedBy(userId: string): string[] {
     return blockedBy(userId);
