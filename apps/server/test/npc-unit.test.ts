@@ -195,6 +195,35 @@ describe("payout retries (F12 confirm Sonnet SF1)", () => {
     }
   });
 
+  it("a payout still waiting when its room closes gets one last try, so its ground loot isn't lost (T9 review)", () => {
+    const w = fakeWorld("arcadia");
+    let failing = true;
+    let commits = 0;
+    let published = 0;
+    w.sys.payouts.pay("kill:x", "test", () => {
+      if (failing) throw new Error("save failed");
+      commits++;
+      return () => {
+        published++;
+      };
+    }, w.clock.t);
+    expect(w.sys.payouts.size()).toBe(1);
+    failing = false; // storage is back, but the room closes before the 1 s retry
+    w.sys.dispose();
+    expect([commits, published, w.sys.payouts.size()]).toEqual([1, 1, 0]);
+  });
+
+  it("the last try at close gives up if the save still fails, without throwing", () => {
+    const q = new PayoutQueue();
+    let tries = 0;
+    q.pay("k", "test", () => {
+      tries++;
+      throw new Error("save failed");
+    }, 0);
+    expect(() => q.flush(10)).not.toThrow();
+    expect([tries, q.size()]).toEqual([2, 0]);
+  });
+
   it("the queue is keyed: a paid or waiting key never runs again, and a publish error isn't a retry", () => {
     const q = new PayoutQueue();
     let commits = 0;

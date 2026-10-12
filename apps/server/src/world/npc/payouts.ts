@@ -77,6 +77,29 @@ export class PayoutQueue {
     }
   }
 
+  /**
+   * The room is closing: give every waiting payout one last try now, whatever its wait, then give up
+   * on the rest. Recipients who left forfeit their share as usual, but the ground loot (drops, camp
+   * chest) still lands, since piles belong to the body, not the room (T9 review).
+   */
+  flush(now: number): void {
+    for (const [key, p] of [...this.pending]) {
+      this.pending.delete(key);
+      try {
+        const publish = p.commit();
+        this.settled.set(key, now);
+        try {
+          publish();
+        } catch (err) {
+          console.error(`[npc] ${p.what} paid at close; publishing it failed`, err);
+        }
+      } catch (err) {
+        this.settled.set(key, now);
+        console.error(`[npc] ${p.what} not paid before its room closed, given up: ${(err as Error)?.message ?? err}`);
+      }
+    }
+  }
+
   /** Payouts waiting for a retry. */
   size(): number {
     return this.pending.size;

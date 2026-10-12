@@ -181,6 +181,7 @@ export class NpcSystem implements RoomSystem {
   }
 
   dispose() {
+    this.payouts.flush(this.world.now());
     for (const r of this.restore) r();
     this.restore.length = 0;
     this.boss?.dispose();
