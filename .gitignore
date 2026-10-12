@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.vercel/
+.wrangler/
+.env
+.env.*
+*.log
+.DS_Store
+coverage/
+assets-private/
+apps/assets-worker/public/v/
+tools/bench/results/*.json
+data/
+*.db
+*.db-wal
+*.db-shm
+.scratch/
