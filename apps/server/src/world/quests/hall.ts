@@ -16,10 +16,10 @@ export function hallLines(): HallLine[] {
   return progressStore.current.hall().map((e) => ({ id: e.secretId, name: e.displayName, foundAt: e.foundAt }));
 }
 
-/** Try to engrave `name` for `secretId`. Returns true only for the first finder. */
-export function engrave(secretId: string, userId: string, name: string): boolean {
+/** Reserve the first finder. With `deferred`, publish the Hall only after the caller commits. */
+export function engrave(secretId: string, userId: string, name: string, deferred?: (() => void)[]): boolean {
   const { won } = progressStore.current.claimFirst(secretId, userId, name);
-  if (won) {
+  const publish = () => {
     const lines = hallLines();
     for (const fn of [...listeners]) {
       try {
@@ -28,6 +28,10 @@ export function engrave(secretId: string, userId: string, name: string): boolean
         console.error("hall listener failed", err);
       }
     }
+  };
+  if (won) {
+    if (deferred) deferred.push(publish);
+    else publish();
   }
   return won;
 }

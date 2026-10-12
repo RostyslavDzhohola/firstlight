@@ -794,22 +794,29 @@ export class QuestSystem implements RoomSystem {
     }
     const assistKey = `${a.identity.userId}|${eggId}`;
     const helped = this.assistedEggs.has(assistKey);
-    // The offering (E1's coin), the life flag, the item and any overflow commit together; a failed
-    // save changes nothing and the claim can be tried again.
+    const eligible = !opts.assisted && !helped && this.official({ boss: !!egg.extra });
+    const events: (() => void)[] = [];
+    let first = false;
+    // Item, offering, life flag, medal and first-finder reservation share the reward transaction.
+    // Cache changes and announcements wait until it commits; a failed claim can be retried.
     const paid = this.grant(a, [{ ...egg.item }], () => {
       if (opts.cost) a.char.coins -= opts.cost;
       life.eggs.push(eggId);
+      if (eligible) {
+        this.award(a, egg.medal, events);
+        if (!a.identity.loadtest) first = engrave(eggId, a.identity.userId, a.identity.name, events);
+      }
     });
     if (!paid) return;
     this.assistedEggs.delete(assistKey);
     if (opts.note) this.toast(a, opts.note, "info");
     this.toast(a, `Secret found: ${egg.name} — ${egg.itemName}`, "medal");
-    if (opts.assisted || helped || !this.official({ boss: !!egg.extra })) {
+    for (const e of events) e();
+    if (!eligible) {
       this.toast(a, "Admin-assisted or staged: no medal or Hall of Firsts entry", "info");
       return;
     }
-    this.award(a, egg.medal);
-    if (!a.identity.loadtest && engrave(eggId, a.identity.userId, a.identity.name)) {
+    if (first) {
       this.toast(a, "You found it first — your name is engraved on the Hall of Firsts in Portus", "medal");
     }
   }
