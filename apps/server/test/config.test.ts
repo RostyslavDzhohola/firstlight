@@ -23,6 +23,23 @@ describe("reserved display names", () => {
       expect(displayNameProblem(name), name).toBeNull();
     }
   });
+
+  it("…and glued lower-case names that start or end with a staff word are reserved (F12 confirm Sonnet N-1)", () => {
+    const glued = [
+      "adminbob", "gameadmin", "theadmin", "serverbob", "supportteam", "systemmsg", "officialfl",
+      "oversightbob", "theoversight", "sysopbob", "mysysop", "5erverbob", "supportdesk", "officialnews", "systemone", "adm1nbob",
+    ];
+    for (const name of glued) expect(displayNameProblem(name), name).toBe("reserved");
+  });
+
+  it("…while ordinary words and names that only share those letters still pass", () => {
+    const ordinary = [
+      "Badminton", "Observer", "Staffan", "Ecosystem", "Supporter", "Unofficial", "Systemic", "Preserver", "Modest", "Device", "Developers",
+      "Serverus", "Supportive", "Supported", "Systematic", "Officially", "Officialdom", "Devin", "Deverell", "Moderna", "Modric", "Modular",
+      "Development", "Admiral", "Systole", "Kadmina", "Overseer", "Sysy",
+    ];
+    for (const name of ordinary) expect(displayNameProblem(name), name).toBeNull();
+  });
 });
 
 describe("production boot check", () => {
