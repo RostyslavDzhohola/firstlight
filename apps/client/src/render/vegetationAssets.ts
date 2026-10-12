@@ -106,6 +106,10 @@ function tintRatio(target: number, source: number): THREE.Color {
 }
 
 const FOLIAGE_GAIN = 3.6;
+/** Near crowns self-shadow and keep some of their own shading; flat impostor cards get neither.
+ *  Browser check: far cards read brighter than the near meshes, so the switch at ~20 m popped. */
+const NEAR_FOLIAGE_UP = 0.85;
+const IMPOSTOR_FOLIAGE = 0.88;
 
 const materials = new Map<string, THREE.MeshStandardNodeMaterial>();
 /** One opaque alpha-tested atlas material per kind/body. The color attribute is a role mask,
@@ -126,7 +130,7 @@ export function vegetationMaterial(body: BodyId, kind: PropKind, atlas: THREE.Te
   // Neutral foliage texels average ~0.25 linear (median 0.20) in both atlases; scale the tint back
   // up so a typical leaf lands near the body's palette colour instead of a third of it.
   const leaf = new THREE.Color(kind === "blossom" ? p.blossom : kind === "pine" ? p.pine : kind === "scrub" ? p.scrub : p.leaf)
-    .multiplyScalar(FOLIAGE_GAIN);
+    .multiplyScalar(FOLIAGE_GAIN * (impostor ? IMPOSTOR_FOLIAGE : 1));
   const bark = tintRatio(p.bark, 0x6b4a2f);
   const stone = tintRatio(kind === "boulder" ? p.rock2 : p.rock, 0xa3ada6);
   const tint = vec3(leaf.r, leaf.g, leaf.b).mul(role.r).add(vec3(bark.r, bark.g, bark.b).mul(role.g)).add(vec3(stone.r, stone.g, stone.b).mul(role.b))
@@ -139,7 +143,7 @@ export function vegetationMaterial(body: BodyId, kind: PropKind, atlas: THREE.Te
   // some of their own shading so the switch to impostors doesn't pop in brightness.
   const upView = normalize(cameraViewMatrix.mul(vec4(normalize(positionWorld), 0)).xyz);
   if (impostor) m.normalNode = upView;
-  else if (!["rock", "boulder", "mushroom", "deadtree"].includes(kind)) m.normalNode = normalize(mix(normalView, upView, role.r.mul(0.65)));
+  else if (!["rock", "boulder", "mushroom", "deadtree"].includes(kind)) m.normalNode = normalize(mix(normalView, upView, role.r.mul(NEAR_FOLIAGE_UP)));
   if (!["rock", "boulder", "mushroom"].includes(kind)) {
     // No compute/storage buffers: attribute + time works on WebGPU and WebGL2.
     // Roots stay still; each instance carries its packed yaw seed through LOD changes.
