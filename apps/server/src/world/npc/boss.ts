@@ -910,7 +910,11 @@ export class BossController {
     for (let i = 0; i < this.cover.length; i++) {
       const c = this.cover[i]!;
       if (c.broken) continue;
-      const t = rayCylinder(o, d, lim, c.def.pos, c.def.radius, c.def.height);
+      // Cheap reject: the whole cylinder is farther from the origin than the ray reaches.
+      const p = c.def.pos, reach = lim + c.def.radius + c.def.height;
+      const dx = p[0] - o[0], dy = p[1] - o[1], dz = p[2] - o[2];
+      if (dx * dx + dy * dy + dz * dz > reach * reach) continue;
+      const t = rayCylinder(o, d, lim, p, c.def.radius, c.def.height);
       if (t === Infinity) continue;
       out.i = i;
       out.t = lim = t;
