@@ -163,4 +163,31 @@ describe("PlayerController", () => {
       expect(pc.pos.z).toBeCloseTo(-0.09 - PLAYER_BODY.radius, 2);
     });
   });
+
+  describe("server corrections (F12 confirm Sonnet N-6)", () => {
+    it("a small correction keeps the camera heading and the facing; motion stops", () => {
+      const pc = spawn();
+      const heading = Math.SQRT1_2;
+      pc.camForward.set(heading, 0, heading); // turned 45° right of +z
+      pc.facing.set(1, 0, 0);
+      pc.vel.set(3, 0, 0);
+      pc.correct(0.8, R, 0.3);
+      expect(pc.pos.x).toBeCloseTo(0.8, 6);
+      expect(pc.camForward.x).toBeCloseTo(heading, 2);
+      expect(pc.camForward.z).toBeCloseTo(heading, 2);
+      expect(pc.facing.x).toBeCloseTo(1, 2);
+      expect(Math.abs(pc.camForward.dot(pc.up()))).toBeLessThan(1e-9); // still tangent
+      expect(pc.vel.length()).toBe(0);
+    });
+
+    it("a far one (admin or quest teleport) resets the camera like a teleport", () => {
+      const pc = spawn();
+      pc.camForward.set(1, 0, 0);
+      pc.correct(0, 0, R); // a quarter of the way round the planet
+      const ref = new PlayerController(terrain, -100);
+      ref.teleport(0, 0, R);
+      expect(pc.camForward.distanceTo(ref.camForward)).toBeLessThan(1e-9);
+      expect(pc.facing.distanceTo(ref.facing)).toBeLessThan(1e-9);
+    });
+  });
 });

@@ -56,6 +56,8 @@ const _cam = new THREE.Vector3();
 const _camUp = new THREE.Vector3();
 const AXIS_X = new THREE.Vector3(1, 0, 0);
 const AXIS_Z = new THREE.Vector3(0, 0, 1);
+/** Server corrections closer than this (metres) keep the camera heading (F12 confirm Sonnet N-6). */
+export const CORRECT_KEEP_HEADING_M = 25;
 
 export class PlayerController {
   readonly pos = new THREE.Vector3();
@@ -101,6 +103,29 @@ export class PlayerController {
     return this.colliders;
   }
 
+  /**
+   * The server put us somewhere (a refused move, a fall it resolved, an admin or quest teleport).
+   * Within CORRECT_KEEP_HEADING_M the camera keeps its heading and the body its facing (carried onto
+   * the new ground plane); further than that it is a teleport and the camera resets.
+   */
+  correct(x: number, y: number, z: number) {
+    const far = !(Math.hypot(x - this.pos.x, y - this.pos.y, z - this.pos.z) <= CORRECT_KEEP_HEADING_M);
+    if (far) return this.teleport(x, y, z);
+    this.pos.set(x, y, z);
+    this.vel.set(0, 0, 0);
+    const up = _up.copy(this.pos).normalize();
+    for (const v of [this.camForward, this.facing]) {
+      v.addScaledVector(up, -v.dot(up));
+      if (v.lengthSq() < 1e-8) {
+        const ref = Math.abs(up.z) < 0.9 ? AXIS_Z : AXIS_X;
+        v.copy(ref).addScaledVector(up, -ref.dot(up));
+      }
+      v.normalize();
+    }
+    this.fallStartRadius = this.pos.length();
+  }
+
+  /** Place the player (arrival, travel, respawn): the camera faces the body's reference direction. */
   teleport(x: number, y: number, z: number) {
     this.pos.set(x, y, z);
     this.vel.set(0, 0, 0);
