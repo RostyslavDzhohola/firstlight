@@ -199,6 +199,9 @@ export class NpcSystem implements RoomSystem {
           g.dead.fill(false);
         }
       }
+      // A Golden Hopbit whose own timer ran out comes back to its pack while the pack is still out.
+      const back = this.goldenBack.get(g.point.id);
+      if (back !== undefined && now >= back && g.active && !g.cleared) this.returnGolden(g, now);
       if (!g.active && !g.cleared && this.ambientOn && near <= act && budget > 0) {
         this.spawnGroup(g, now);
         budget -= g.point.members.length;
@@ -232,6 +235,14 @@ export class NpcSystem implements RoomSystem {
       if (def.id === "ticket_000" || def.id === "crypt_sentinel" && pt.kind === "single") n.facing = stableTangentAt(pos);
       g.members[i] = n;
     }
+  }
+
+  private returnGolden(g: GroupState, now: number) {
+    this.goldenBack.delete(g.point.id);
+    const i = g.point.members.findIndex((m) => m.golden);
+    if (i < 0 || !g.dead[i] || g.members[i]) return;
+    g.dead[i] = false;
+    this.spawnGroup(g, now);
   }
 
   private despawnGroup(g: GroupState) {

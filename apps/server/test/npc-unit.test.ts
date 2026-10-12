@@ -151,10 +151,13 @@ describe("egg NPCs", () => {
     expect(g.active).toBe(true);
     expect(g.members.some((m) => m && m.def.id === "hopbit")).toBe(true);
     expect(golden()).toBeNull(); // …without the Golden Hopbit
+    // Its own timer runs out while this pack is still alive: it comes back on its own.
+    const pack = g.members.filter((m) => m && !m.dead).map((m) => m!.id);
+    expect(pack.length).toBeGreaterThan(0);
     w.clock.t += EGG_NPC.goldenBackMs;
-    clearPack();
-    for (let i = 0; i < 40 && !golden(); i++) w.step(600);
+    for (let i = 0; i < 4 && !golden(); i++) w.step(600);
     expect(golden()).not.toBeNull();
+    expect(g.members.filter((m) => m && !m.dead && m.def.id !== "golden_hopbit").map((m) => m!.id)).toEqual(pack);
   });
 });
 
