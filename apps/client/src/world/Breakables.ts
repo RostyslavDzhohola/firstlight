@@ -8,17 +8,22 @@
 // brings it back with a re-materialise burst.
 //
 // Intact props are solid: the view is the local player's MoveColliders (shared planet/collide).
+//
+// If the worker can't run (its chunk 404s after a client deploy, or it crashes), every pending and
+// later request settles with null and the view builds the intact props on the main thread
+// (breakableIntact.ts, no three-piñata): props stay visible where the server's colliders are; only
+// the debris is missing.
 
 import * as THREE from "three/webgpu";
 import { attribute, uniform } from "three/tsl";
-import { BREAKABLE_ARCHETYPES, type BodyId, type Breakable } from "@firstlight/shared";
+import { BREAKABLE_ARCHETYPES, hash4, type BodyId, type Breakable, type Terrain } from "@firstlight/shared";
 import { BreakableCollider, resetContact, type PropContact } from "@firstlight/shared/planet/collide";
 import type { Game } from "../game/Game.ts";
 import type { MoveColliders } from "../game/PlayerController.ts";
 import type { ClientSystem } from "../game/systems.ts";
 import { Debris, type DebrisPiece } from "../render/debris.ts";
 import type { ResolvedSettings } from "../render/quality.ts";
-import type { BreakableAssets, MeshArrays } from "./breakableShapes.ts";
+import { buildIntactAssets, type BreakableAssets, type MeshArrays } from "./breakableIntact.ts";
 import type { FractureRequest, FractureResponse } from "./fracture.worker.ts";
 
 // ------------------------------------------------------------------------------------ material
@@ -41,21 +46,43 @@ export function breakableMaterial(): THREE.MeshStandardNodeMaterial {
 // ------------------------------------------------------------------------------------ worker + cache
 
 let worker: Worker | null = null;
+/** The worker failed to load or crashed: requests answer null at once (no retry storm). */
+let workerBroken = false;
 let reqId = 0;
 const pending = new Map<number, (r: FractureResponse) => void>();
 const assetCache = new Map<string, Promise<BreakableAssets | null>>();
+
+/** Settle every waiting request with null and stop using the worker. */
+function workerFailed(why: string) {
+  if (!workerBroken) console.warn(`[breakables] fracture worker failed (${why}): intact props from the main thread, no debris`);
+  workerBroken = true;
+  for (const [id, settle] of pending) settle({ id, assets: null, error: why });
+  pending.clear();
+  worker?.terminate();
+  worker = null;
+}
 
 function requestAssets(body: BodyId, quality: 0 | 1, fracture: boolean): Promise<BreakableAssets | null> {
   const key = `${body}:${quality}:${fracture ? 1 : 0}`;
   let p = assetCache.get(key);
   if (p) return p;
+  if (workerBroken) return Promise.resolve(null);
   if (!worker) {
-    worker = new Worker(new URL("./fracture.worker.ts", import.meta.url), { type: "module" });
+    try {
+      worker = new Worker(new URL("./fracture.worker.ts", import.meta.url), { type: "module" });
+    } catch (e) {
+      workerFailed(String(e));
+      return Promise.resolve(null);
+    }
     worker.onmessage = (e: MessageEvent<FractureResponse>) => {
       pending.get(e.data.id)?.(e.data);
       pending.delete(e.data.id);
     };
-    worker.onerror = (e) => console.error("[breakables] fracture worker error", e.message);
+    worker.onerror = (e) => {
+      e.preventDefault?.();
+      workerFailed(e.message || "failed to load");
+    };
+    worker.onmessageerror = () => workerFailed("unreadable message");
   }
   const w = worker;
   p = new Promise<BreakableAssets | null>((resolve) => {
@@ -103,6 +130,17 @@ function placeholder(): THREE.BufferGeometry {
 
 // ------------------------------------------------------------------------------------ the view
 
+type BrokenMap = { forEach(cb: (until: number, id: string) => void): void; get(id: string): number | undefined };
+
+/**
+ * Debris seed for one shatter, from the `broke` message alone (prop, the server's variant, impulse
+ * and force), so every client that sees the same break throws the same pieces the same way.
+ */
+export function shatterSeed(index: number, variant: number, ix: number, iy: number, iz: number, force: number): number {
+  const q = (v: number) => Math.round(v * 4096);
+  return hash4(hash4(index, variant, q(force)), q(ix), q(iy), q(iz)) >>> 0;
+}
+
 interface BrokeMsg {
   id: string;
   archetype: number;
@@ -119,6 +157,8 @@ const REBUILD_DELAY_S = 0.3;
 const STREAM_MAX = 260;
 /** Instances per archetype mesh (the most of one archetype on a planet is under 100). */
 const CAPACITY = 256;
+/** Shatters remembered while the props are still loading (ids are unique; far more than a body has). */
+const EARLY_MAX = 2048;
 const FX_RANGE = 140;
 const BUDGET: Record<ResolvedSettings["tier"], number> = { low: 60, medium: 120, high: 150, ultra: 150 };
 /** Rotation/scale elements of a column-major 4×4 matrix. */
@@ -150,7 +190,14 @@ export class BreakablesView implements ClientSystem, MoveColliders {
   private lastFill = new THREE.Vector3(1e9, 0, 0);
   private lastPoll = 0;
   private breakSeq = 0;
-  private readonly early: BrokeMsg[] = [];
+  /** Props that shattered before the assets arrived: hidden on install. Capped. */
+  private readonly early = new Set<string>();
+  /**
+   * Props rebuilt (`rebuilt` message) while BodyState.broken still lists them with this rebuild time:
+   * that patch is stale (the message beats it), so it must not hide them again.
+   */
+  private readonly staleBroken = new Map<number, number>();
+  private readonly terrain: Terrain;
   /**
    * Worker results wait here and are installed from update(): the frame loop never runs during a
    * warm-up, whose compileAsync yields mid-traversal (swapping meshes then would break it).
@@ -165,6 +212,7 @@ export class BreakablesView implements ClientSystem, MoveColliders {
   constructor(game: Game) {
     this.game = game;
     this.body = game.bodyId;
+    this.terrain = game.planet.terrain;
     this.group.name = "breakables";
     game.ctx.scene.add(this.group);
     accent.value.setHex(ACCENT[this.body]);
@@ -191,7 +239,17 @@ export class BreakablesView implements ClientSystem, MoveColliders {
     }
     const q = this.wantedQuality();
     if (this.settings.on.destruct) this.requested = q;
-    void requestAssets(this.body, q, this.settings.on.destruct).then((a) => a && this.inbox.push(a));
+    void requestAssets(this.body, q, this.settings.on.destruct).then((a) => {
+      if (this.disposed) return;
+      if (a) return void this.inbox.push(a);
+      // No worker: build the intact props here (placement + meshes, tens of ms) so what blocks
+      // shots is drawn.
+      try {
+        this.inbox.push(buildIntactAssets(this.body, this.terrain, q));
+      } catch (e) {
+        console.error("[breakables] intact props failed on the main thread too", e);
+      }
+    });
     (window as unknown as { __breakables?: BreakablesView }).__breakables = this;
   }
 
@@ -236,7 +294,8 @@ export class BreakablesView implements ClientSystem, MoveColliders {
       this.game.player?.setColliders(this);
       this.pollBroken(performance.now());
       // Shatters that arrived before the assets: just hide them (they're long gone).
-      for (const m of this.early.splice(0)) this.hide(m.id, performance.now());
+      for (const id of this.early) this.hide(id, performance.now());
+      this.early.clear();
     }
     if (Object.keys(a.fragments).length) this.installDebris(a);
     else this.wantDebris();
@@ -297,24 +356,34 @@ export class BreakablesView implements ClientSystem, MoveColliders {
 
   private onBroke(m: BrokeMsg) {
     if (!this.ready) {
-      this.early.push(m);
+      if (this.early.size < EARLY_MAX) this.early.add(m.id);
       return;
     }
     const i = this.ids.get(m.id);
-    if (i === undefined || this.hidden[i]) return;
+    if (i === undefined) return;
+    this.staleBroken.delete(i); // a new break: its state entry is current
+    if (this.hidden[i]) return;
     const now = performance.now();
     this.hide(m.id, now);
     const b = this.list[i]!;
     const cam = this.game.ctx.camera.position;
     const d = Math.hypot(b.cx - cam.x, b.cy - cam.y, b.cz - cam.z);
     if (d > FX_RANGE) return;
-    this.shatter(b, m.variant, m.ix, m.iy, m.iz, m.f ?? 1);
+    this.shatter(b, m.variant, m.ix, m.iy, m.iz, m.f ?? 1, shatterSeed(b.index, m.variant, m.ix, m.iy, m.iz, m.f ?? 1));
   }
 
   private onRebuilt(id: string) {
     const i = this.ids.get(id);
-    if (i === undefined || !this.hidden[i]) return;
-    this.show(i, true);
+    if (i === undefined) return;
+    // The message beats the state patch that drops the id from BodyState.broken: until that patch
+    // lands, the old entry must not hide the prop again (a flicker and a second burst).
+    const until = this.brokenMap()?.get(id);
+    if (until !== undefined) this.staleBroken.set(i, until);
+    if (this.hidden[i]) this.show(i, true);
+  }
+
+  private brokenMap() {
+    return (this.game.net.room?.state as { broken?: BrokenMap } | undefined)?.broken;
   }
 
   private hide(id: string, now: number) {
@@ -346,15 +415,18 @@ export class BreakablesView implements ClientSystem, MoveColliders {
 
   /** Mirror BodyState.broken: hide what broke elsewhere (late join, far away), show what came back. */
   private pollBroken(now: number) {
-    const state = this.game.net.room?.state as { broken?: { forEach(cb: (v: number, k: string) => void): void } } | undefined;
-    const map = state?.broken;
+    const map = this.brokenMap();
     if (!map || !this.ready) return;
     const seen = this.inMap;
     const present = this.present;
     present.fill(0);
-    map.forEach((_until, id) => {
+    for (const [i, until] of this.staleBroken) {
+      const v = map.get(this.list[i]!.id);
+      if (v !== until) this.staleBroken.delete(i); // the patch landed (gone) or it broke again
+    }
+    map.forEach((until, id) => {
       const i = this.ids.get(id);
-      if (i === undefined) return;
+      if (i === undefined || this.staleBroken.get(i) === until) return;
       present[i] = 1;
       seen[i] = 1;
       if (!this.hidden[i]) this.hide(id, now);
@@ -369,8 +441,7 @@ export class BreakablesView implements ClientSystem, MoveColliders {
 
   // ------------------------------------------------------------------ effects
 
-  private shatter(b: Breakable, variant: number, ix: number, iy: number, iz: number, force: number) {
-    const seed = (b.index * 7919 + ++this.breakSeq * 104729) >>> 0;
+  private shatter(b: Breakable, variant: number, ix: number, iy: number, iz: number, force: number, seed: number) {
     if (this.settings.on.destruct) this.debris.spawn(b, b.archetype, variant, ix, iy, iz, force, seed);
     const c = this.scratch.set(b.cx, b.cy, b.cz);
     this.game.burst(c, 0xe8dcc8, 10 + Math.round(4 * b.h), { speed: [1, 3.5], life: [0.25, 0.6], size: [0.03, 0.07], intensity: 1.3, lift: -0.6 });
@@ -394,7 +465,9 @@ export class BreakablesView implements ClientSystem, MoveColliders {
     const b = this.list[best]!;
     const dl = Math.hypot(b.cx - cam.x, b.cy - cam.y, b.cz - cam.z) || 1;
     this.hide(b.id, performance.now());
-    this.shatter(b, this.breakSeq % 3, (b.cx - cam.x) / dl, (b.cy - cam.y) / dl, (b.cz - cam.z) / dl, 1.5);
+    const variant = ++this.breakSeq % 3;
+    const ix = (b.cx - cam.x) / dl, iy = (b.cy - cam.y) / dl, iz = (b.cz - cam.z) / dl;
+    this.shatter(b, variant, ix, iy, iz, 1.5, shatterSeed(b.index, variant, ix, iy, iz, 1.5));
     return b.id;
   }
 
@@ -472,7 +545,7 @@ export class BreakablesView implements ClientSystem, MoveColliders {
     for (let i = 0; i < this.hidden.length; i++) broken += this.hidden[i]!;
     let draws = 1;
     for (const m of this.meshes) if (m.mesh.count > 0) draws++;
-    return { props: this.list.length, instances, broken, debris: this.debris.count, draws };
+    return { props: this.list.length, instances, broken, debris: this.debris.count, draws, early: this.early.size };
   }
 
   dispose() {
