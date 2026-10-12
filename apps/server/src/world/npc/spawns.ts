@@ -5,7 +5,7 @@
 import { CHUNK_QUADS, gridDir, hash01, hash4, padDirs, type Face, type Terrain } from "@firstlight/shared";
 import { resolveAreaDir, stableTangent, walk, type ArenaLayout } from "@firstlight/shared/content/arenas";
 import {
-  NPC_AREAS, NPC_INDEX, NPC_RULES, PLANET_WILDS, defLevels, npcDef,
+  NPC_AREAS, NPC_DEFS, NPC_INDEX, NPC_RULES, PLANET_WILDS, defLevels, npcDef,
   type CampChest, type NpcArea, type PlanetId, type SpawnGroupDef,
 } from "@firstlight/shared/content/npcs";
 import type { V3 } from "../geometry.ts";
@@ -37,6 +37,8 @@ export interface SpawnPoint {
 }
 
 const MIN_PAD_DIST = 40;
+/** Hostile homes include room for member offsets and wandering toward the arrival pad. */
+const MIN_HOSTILE_PAD_DIST = 45;
 const MIN_POINT_DIST = 28;
 /** Named areas get one group per this many square metres × density. */
 const AREA_M2_PER_GROUP = 6000;
@@ -120,7 +122,7 @@ export function buildSpawnPoints(terrain: Terrain, arena: ArenaLayout | null): S
   /** Packs that may carry the Golden Hopbit (egg E3), with their roll. */
   const goldenCandidates: { point: SpawnPoint; roll: number }[] = [];
   const chord = (a: readonly number[], b: readonly number[]) => Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!) * R;
-  const farFromPads = (d: V3) => pads.every((p) => chord(p, d) >= MIN_PAD_DIST);
+  const farFromPads = (d: V3, min = MIN_PAD_DIST) => pads.every((p) => chord(p, d) >= min);
   const farFromArena = (d: V3, extra: number) => !arena || chord(arena.up, d) >= arena.radius + extra;
   const farFromPoints = (d: V3, min = MIN_POINT_DIST) => points.every((p) => chord(p.dir, d) >= min);
   const groundPos = (d: V3): V3 => {
@@ -137,10 +139,15 @@ export function buildSpawnPoints(terrain: Terrain, arena: ArenaLayout | null): S
   const add = (p: Omit<SpawnPoint, "id" | "t1" | "t2" | "pos" | "respawnSec"> & { respawnSec?: number }) => {
     const t1 = stableTangent(p.dir);
     const t2 = cross(p.dir, t1);
+    for (const m of p.members) {
+      if (NPC_DEFS[m.def]!.temper !== "hostile") continue;
+      if (!farFromPads(p.dir, MIN_HOSTILE_PAD_DIST) || !farFromPads(walk(p.dir, t1, m.a, t2, m.b, R), MIN_HOSTILE_PAD_DIST + p.roam)) return false;
+    }
     points.push({ ...p, id: points.length, pos: groundPos(p.dir), t1, t2, respawnSec: p.respawnSec ?? respawnFor(p.kind, p.members.map((m) => m.def)) });
+    return true;
   };
   /** Nearest dry spot within 40 m of `d` (rings of 8 m), or null. */
-  const findLand = (d: V3): V3 | null => {
+  const findLand = (d: V3, padDist = MIN_PAD_DIST): V3 | null => {
     const t1 = stableTangent(d);
     const t2 = cross(d, t1);
     for (let ring = 0; ring <= 40; ring += 8) {
@@ -148,7 +155,7 @@ export function buildSpawnPoints(terrain: Terrain, arena: ArenaLayout | null): S
       for (let k = 0; k < n; k++) {
         const ang = (k / n) * Math.PI * 2;
         const c = walk(d, t1, Math.cos(ang) * ring, t2, Math.sin(ang) * ring, R);
-        if (classify(terrain, c).land && farFromPads(c) && farFromArena(c, 15)) return c;
+        if (classify(terrain, c).land && farFromPads(c, padDist) && farFromArena(c, 15)) return c;
       }
     }
     return null;
@@ -157,7 +164,9 @@ export function buildSpawnPoints(terrain: Terrain, arena: ArenaLayout | null): S
   // 1. Camps at named POIs (one fixed group each).
   for (const { area, dir } of areas) {
     if (!area.camp) continue;
-    const d = findLand(dir);
+    // Camp members spread up to 11 m and wander 8 m from their individual homes.
+    const hostile = area.camp.members.some((m) => npcDef(m.kind).temper === "hostile");
+    const d = findLand(dir, hostile ? MIN_HOSTILE_PAD_DIST + 11 + 8 : MIN_PAD_DIST);
     if (!d) continue;
     const members: SpawnMember[] = [];
     let i = 0;
@@ -183,7 +192,7 @@ export function buildSpawnPoints(terrain: Terrain, arena: ArenaLayout | null): S
       const t2 = cross(dir, t1);
       const def = npcDef(s.kind);
       let d = walk(dir, t1, Math.cos(ang) * off, t2, Math.sin(ang) * off, R);
-      if (def.locomotion !== "wade") d = findLand(d) ?? d;
+      if (def.locomotion !== "wade") d = findLand(d, def.temper === "hostile" ? MIN_HOSTILE_PAD_DIST + (s.roam ?? 0) : MIN_PAD_DIST) ?? d;
       const lv = s.level ?? clampLevel(s.kind, planet, area.levels[1]);
       add({ kind: "single", area: area.id, dir: d, members: [{ def: NPC_INDEX.get(s.kind)!, level: lv, a: 0, b: 0 }], roam: s.roam ?? 0 });
     }
@@ -205,7 +214,12 @@ export function buildSpawnPoints(terrain: Terrain, arena: ArenaLayout | null): S
       lo = Math.max(body.levels[0], L - 1);
       hi = Math.min(body.levels[1], L + 1);
     }
-    const table = (inArea ? inArea.area.groups : wilds.groups).filter((g) => groundOk(g, cls) && levelFits(g, planet, lo, hi));
+    const table = (inArea ? inArea.area.groups : wilds.groups).filter((g) => {
+      if (!groundOk(g, cls) || !levelFits(g, planet, lo, hi)) return false;
+      if (!g.members.some((m) => npcDef(m.kind).temper === "hostile")) return true;
+      const roam = g.members.some((m) => npcDef(m.kind).family === "woolback") ? 14 : 10;
+      return farFromPads(d, MIN_HOSTILE_PAD_DIST + 6 + roam);
+    });
     const g = pickGroup(table, hash01(key, 4));
     if (!g) return false;
     const level = lo + Math.floor(hash01(key, 5) * (hi - lo + 1));
@@ -224,7 +238,7 @@ export function buildSpawnPoints(terrain: Terrain, arena: ArenaLayout | null): S
       members.push({ def: NPC_INDEX.get("golden_hopbit")!, level: 1, a: 3, b: 3, golden: true });
     }
     const roam = members.some((m) => npcDef(npcIdOf(m.def)).family === "woolback") ? 14 : 10;
-    add({ kind: "pack", area: inArea?.area.id ?? null, dir: d, members, roam });
+    if (!add({ kind: "pack", area: inArea?.area.id ?? null, dir: d, members, roam })) return false;
     if (g.goldenOneIn) goldenCandidates.push({ point: points[points.length - 1]!, roll });
     return true;
   };
@@ -271,6 +285,15 @@ export function buildSpawnPoints(terrain: Terrain, arena: ArenaLayout | null): S
   if (goldenCandidates.length && !points.some((p) => p.members.some((m) => m.golden))) {
     const best = goldenCandidates.reduce((x, y) => (y.roll < x.roll ? y : x));
     best.point.members.push({ def: NPC_INDEX.get("golden_hopbit")!, level: 1, a: 3, b: 3, golden: true });
+  }
+  // Dawnpad's first fight is a small pack. Keep any special non-hostile member when reducing it.
+  if (planet === "arcadia") {
+    const packs = points.filter((p) => p.kind === "pack" && p.members.some((m) => NPC_DEFS[m.def]!.temper === "hostile"));
+    const first = packs.reduce<SpawnPoint | null>((best, p) => !best || chord(p.dir, main) < chord(best.dir, main) ? p : best, null);
+    if (first && first.members.length > 3) {
+      const golden = first.members.filter((m) => m.golden);
+      first.members = [...first.members.filter((m) => !m.golden).slice(0, 3 - golden.length), ...golden];
+    }
   }
   return points;
 }
