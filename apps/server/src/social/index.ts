@@ -14,7 +14,7 @@ import { rekeyModeration } from "./moderation.ts";
 import { rekeyLimits } from "./limits.ts";
 import { parties } from "./parties.ts";
 import { rekeyPresence, sendTo } from "./presence.ts";
-import { createSocialSystem, enforceBlocksAfterMerge, rekeySessions, syncParty } from "./system.ts";
+import { createSocialSystem, enforceBlocksAfterMerge, rekeyOfflineTimer, rekeySessions, syncParty } from "./system.ts";
 
 SYSTEM_FACTORIES.push(createSocialSystem);
 
@@ -23,6 +23,7 @@ accountLinks.on((ev) => {
   const { affected, reissued } = parties.rekey(ev.fromUserId, ev.toUserId);
   rekeyPresence(ev.fromUserId, ev.toUserId);
   rekeySessions(ev.fromUserId, ev.toUserId);
+  rekeyOfflineTimer(ev.fromUserId, ev.toUserId);
   rekeyAnalytics(ev.fromUserId, ev.toUserId);
   rekeyModeration(ev.fromUserId, ev.toUserId);
   rekeyLimits(ev.fromUserId, ev.toUserId); // report, block and invite limits carry over

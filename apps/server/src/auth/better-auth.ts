@@ -16,9 +16,51 @@ export const SAVING_BUSY = "Saving is busy, try again later";
 /** A new address only gets a code from a player who reached this level (the save card's first level-up). */
 export const OTP_MIN_LEVEL = 2;
 
+/** Codes one account may ask for per UTC day (saving a guest), so one session can't drain the global budget. */
+export const OTP_PER_ACCOUNT_PER_DAY = 10;
+
+/**
+ * Better Auth endpoints the game never calls (F12 final review S6, S8). It uses only anonymous
+ * sign-in, get-session, token, sign-in codes (send-verification-otp, type "sign-in") and
+ * sign-in/email-otp. The other email-OTP endpoints answered differently for saved and unknown
+ * addresses; email/password flows aren't configured; profile edits go through /api/account; and a
+ * guest that deleted itself kept its game.db rows and display name for good. Server-side
+ * `auth.api.*` calls skip this list, so the anonymous plugin still deletes the guest after a save.
+ */
+export const DISABLED_AUTH_PATHS = [
+  "/update-user",
+  "/change-email",
+  "/delete-user",
+  "/delete-anonymous-user",
+  "/email-otp/check-verification-otp",
+  "/email-otp/verify-email",
+  "/email-otp/request-password-reset",
+  "/forget-password/email-otp",
+  "/email-otp/reset-password",
+  "/email-otp/request-email-change",
+  "/email-otp/change-email",
+  "/sign-in/email",
+  "/sign-up/email",
+  "/request-password-reset",
+  "/reset-password",
+  "/send-verification-email",
+  "/verify-email",
+  "/change-password",
+  "/verify-password",
+];
+
+/**
+ * Every failed code check (wrong, used up, expired, none sent) gets this one answer: otherwise
+ * "too many attempts" or "expired" would show that a code exists, which for a session-less request
+ * means the address is saved (F12 final review S6).
+ */
+export const WRONG_CODE = { code: "INVALID_OTP", message: "Wrong or expired code" } as const;
+const CODE_FAILURES: ReadonlySet<string> = new Set(["INVALID_OTP", "OTP_EXPIRED", "TOO_MANY_ATTEMPTS"]);
+
 /** Per-request state shared by the before hook, the send function and the after hook. */
 interface AuthRequestState {
-  otpReservation?: number;
+  /** The budget reservation of this send, and the account it counts against (null: a public send). */
+  otpReservation?: { id: number; userId: string | null };
   otpSendFailed?: boolean;
   /** A queued background send (the public request was already answered). */
   otpQueued?: boolean;
@@ -41,6 +83,8 @@ export interface AuthDeps {
   ipBanned(ip: string): boolean;
   /** Does this (lower-cased) address belong to a saved account? (A returning player.) */
   savedEmail(email: string): boolean;
+  /** Is this account banned? (Its session gets no codes at all.) */
+  accountBanned(userId: string): boolean;
   /** May this signed-in player get a code for any address? (Saving a guest after OTP_MIN_LEVEL.) */
   maySave(userId: string): boolean;
   /**
@@ -48,9 +92,15 @@ export interface AuthDeps {
    * the public answer never depends on the budget, the delivery result or its timing.
    */
   queueOtp(email: string): void;
-  /** Reserve one OTP send for this (lower-cased) email; false = over budget. Returns a reservation id. */
-  reserveOtp(email: string): { ok: true; id: number } | { ok: false; reason: string };
-  releaseOtp(id: number): void;
+  /**
+   * Reserve one OTP send for this (lower-cased) email; false = over budget. Returns a reservation id.
+   * `userId` is the signed-in player asking (OTP_PER_ACCOUNT_PER_DAY applies), or null for a queued
+   * public send.
+   * The two kinds have separate per-address hourly caps, so public requests (which only reach saved
+   * addresses) never change what a player who may save is told about an address.
+   */
+  reserveOtp(email: string, userId: string | null): { ok: true; id: number } | { ok: false; reason: string };
+  releaseOtp(id: number, userId: string | null): void;
   sendOtp(email: string, otp: string): Promise<boolean>;
   /** Guest → account. Synchronous game.db move + live re-key; returns the name to keep on the account. */
   onLink(guest: LinkedUser, account: LinkedUser): string | null;
@@ -67,8 +117,7 @@ export function authOptions(d: AuthDeps) {
     secret: d.secret,
     baseURL: d.baseURL,
     basePath: "/api/auth",
-    // Players never edit their Better Auth profile directly (names go through /api/account/name).
-    disabledPaths: ["/update-user", "/change-email", "/delete-user"],
+    disabledPaths: DISABLED_AUTH_PATHS,
     trustedOrigins: d.trustedOrigins,
     telemetry: { enabled: false },
     session: { expiresIn: 60 * 60 * 24 * 180, updateAge: 60 * 60 * 24 },
@@ -99,27 +148,37 @@ export function authOptions(d: AuthDeps) {
         // same immediate answer, whatever the address, budget or delivery result (no enumeration);
         // saved addresses are served by a queued background send. A player who may save gets the
         // synchronous path with clear errors: its outcome doesn't depend on whose address it is.
+        let userId: string | null = null;
         if (!authRequestState.getStore()?.otpQueued) {
           const session = await getSessionFromCtx(ctx, { disableRefresh: true }).catch(() => null);
-          const userId = session?.user.id ?? null;
+          userId = session?.user.id ?? null;
+          // A banned account's session gets nothing (F12 final review S7).
+          if (userId && d.accountBanned(userId)) throw APIError.from("FORBIDDEN", { code: "BANNED", message: "This account is banned." });
           if (!userId || !d.maySave(userId)) {
             if (d.savedEmail(email)) d.queueOtp(email);
             return ctx.json({ success: true });
           }
         }
         // Budget key ignores "+tag" aliases so one inbox can't multiply its hourly allowance.
-        const r = d.reserveOtp(email.replace(/\+[^@]*@/, "@"));
+        const r = d.reserveOtp(email.replace(/\+[^@]*@/, "@"), userId);
         if (!r.ok) throw APIError.from("TOO_MANY_REQUESTS", { code: "SAVING_BUSY", message: SAVING_BUSY });
         const st = authRequestState.getStore();
-        if (st) st.otpReservation = r.id;
+        if (st) st.otpReservation = { id: r.id, userId };
       }),
       after: createAuthMiddleware(async (ctx) => {
+        if (ctx.path === "/sign-in/email-otp") {
+          const r = ctx.context.returned;
+          // A Response, not a thrown APIError: an error thrown here would keep the endpoint's status (403).
+          if (isAPIError(r) && CODE_FAILURES.has(String((r.body as { code?: unknown } | undefined)?.code))) return Response.json(WRONG_CODE, { status: 400 });
+          return;
+        }
         if (ctx.path !== "/email-otp/send-verification-otp") return;
         const st = authRequestState.getStore();
-        if (!st?.otpReservation) return;
+        const res = st?.otpReservation;
+        if (!st || !res) return;
         const failed = st.otpSendFailed || isAPIError(ctx.context.returned);
         if (!failed) return;
-        d.releaseOtp(st.otpReservation);
+        d.releaseOtp(res.id, res.userId);
         st.otpReservation = undefined;
         if (st.otpSendFailed) throw APIError.from("SERVICE_UNAVAILABLE", { code: "SAVING_BUSY", message: SAVING_BUSY });
       }),

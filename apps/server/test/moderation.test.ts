@@ -10,7 +10,7 @@ import { accountLinks } from "../src/auth/links.ts";
 import { mountOps } from "../src/ops/admin.ts";
 import { banExplainer } from "../src/social/refusal.ts";
 import { recordError } from "../src/ops/errors.ts";
-import { ANALYTICS, blockedEitherWay, partyOf, partyRoomFor } from "../src/social/index.ts";
+import { ANALYTICS, blockedEitherWay, partyOf, partyRoomFor, SOCIAL_RULES } from "../src/social/index.ts";
 import { api, Browser, decodeJwt, ORIGIN, play, startAuthServer, ticketFor, type AuthServer } from "./auth-helpers.ts";
 import { safeLeave, waitFor } from "./helpers.ts";
 
@@ -217,6 +217,53 @@ describe("parties and saving", () => {
     a2.send("party", { action: "kick", target: "pal_b" });
     await waitFor(() => me(b).party === "");
     off();
+  });
+
+  /** A guest (real account) and a dev player in one party in Portus. */
+  async function guestParty(s: AuthServer, ip: string, pal: string) {
+    const guest = new Browser(s, ip);
+    const guestToken = await guest.playToken();
+    const guestId = String(decodeJwt(guestToken).sub);
+    const a = await enter(s, guestToken, "portus", ip);
+    const b = await enter(s, `dev:${pal}:Pal`, "portus");
+    await waitFor(() => !!st(a).players?.get(b.sessionId) && !!st(b).players?.get(a.sessionId));
+    const invites = inbox<any>(b, "party:invite");
+    a.send("party", { action: "invite", target: b.sessionId });
+    await waitFor(() => invites.length > 0);
+    b.send("party", { action: "accept", target: guestId });
+    await waitFor(() => !!me(b)?.party && me(b).party === me(a)?.party);
+    return { guest, a, b };
+  }
+
+  it("a guest who saves and never rejoins leaves the party after the offline window, like anyone who drops", async () => {
+    const s = await start();
+    const off = s.accounts.links.on((e) => accountLinks.emit(e));
+    const offlineMs = SOCIAL_RULES.PARTY_OFFLINE_MS;
+    SOCIAL_RULES.PARTY_OFFLINE_MS = 1500;
+    try {
+      // Saving in the world: the guest session is retired (4101) and the client never rejoins.
+      const p1 = await guestParty(s, "198.51.100.61", "pal_g");
+      let closed = 0;
+      p1.a.onLeave((code) => (closed = code));
+      await p1.guest.saveWithEmail("ghost@example.test");
+      const saved1 = String(decodeJwt((await p1.guest.client.token()).data!.token).sub);
+      await waitFor(() => closed === CLOSE.MERGED);
+      expect(partyOf("pal_g").sort()).toEqual(["pal_g", saved1].sort()); // kept for a quick rejoin...
+      await waitFor(() => me(p1.b)?.party === ""); // ...but the saved player never came back
+      expect(partyOf(saved1)).toEqual([saved1]);
+
+      // Saving after leaving the world: the guest's offline timer must not be lost on the way.
+      const p2 = await guestParty(s, "198.51.100.62", "pal_h");
+      await p2.a.leave();
+      await p2.guest.saveWithEmail("ghost2@example.test");
+      const saved2 = String(decodeJwt((await p2.guest.client.token()).data!.token).sub);
+      expect(partyOf("pal_h").sort()).toEqual(["pal_h", saved2].sort());
+      await waitFor(() => me(p2.b)?.party === "");
+      expect(partyOf(saved2)).toEqual([saved2]);
+    } finally {
+      SOCIAL_RULES.PARTY_OFFLINE_MS = offlineMs;
+      off();
+    }
   });
 });
 

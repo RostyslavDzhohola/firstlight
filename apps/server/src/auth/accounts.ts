@@ -18,7 +18,7 @@ import { setDisplayName } from "../db/accounts.ts";
 import { reserveOtpSend, releaseOtpSend } from "../db/otp-budget.ts";
 import { closeDanglingSessions, pruneSessionLog } from "../db/sessions.ts";
 import { stmt } from "../db/game-db.ts";
-import { authOptions, authRequestState, buildAuth, OTP_MIN_LEVEL, type FirstlightAuth } from "./better-auth.ts";
+import { authOptions, authRequestState, buildAuth, OTP_MIN_LEVEL, OTP_PER_ACCOUNT_PER_DAY, type FirstlightAuth } from "./better-auth.ts";
 import { hmacHex, safeEqual } from "./crypto.ts";
 import type { Identity, TokenVerifier, VerifyContext } from "./identity.ts";
 import { banKey, CLIENT_IP_HEADER, firstForwardedFor, normalizeIp } from "./ip.ts";
@@ -125,6 +125,7 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
     rateLimit: cfg.rateLimit ?? cfg.production,
     ipBanned: (ip) => isIpBanned(db, hashIp(ip)),
     savedEmail: (email) => savedEmail(email),
+    accountBanned: (userId) => isBanned(db, userId, Date.now()),
     maySave: (userId) => bestLevel(db, userId) >= OTP_MIN_LEVEL,
     queueOtp: (email) => {
       // One at a time, after this response is on its way; failures are logged by sendOtp/reserveOtp.
@@ -140,12 +141,14 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
           () => {},
         );
     },
-    reserveOtp: (email) => {
-      const r = reserveOtpSend(db, hashEmail(email), { perEmailPerHour: cfg.otpPerEmailPerHour, perDay: cfg.otpDailyBudget });
+    reserveOtp: (email, userId) => {
+      // Public (queued) sends count under their own per-address key (F12 final review S6).
+      const key = hashEmail(userId ? email : `public:${email}`);
+      const r = reserveOtpSend(db, key, { perEmailPerHour: cfg.otpPerEmailPerHour, perDay: cfg.otpDailyBudget, perAccountPerDay: OTP_PER_ACCOUNT_PER_DAY }, Date.now(), userId);
       if (!r.ok) console.warn(`otp send refused: ${r.reason} budget`);
       return r;
     },
-    releaseOtp: (id) => releaseOtpSend(db, id),
+    releaseOtp: (id, userId) => releaseOtpSend(db, id, userId),
     sendOtp: async (email, otp) => {
       const r = await mailer.sendOtp(email, otp);
       if (!r.ok) console.warn(`otp send failed: ${r.error}`);
@@ -170,7 +173,7 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
   const authCtx = await auth.$context;
   await authCtx.checkSchema?.();
   closeDanglingSessions(db);
-  // Daily housekeeping (and once at boot): old analytics rows, abandoned level-1 guests (F12).
+  // Daily housekeeping (and once at boot): old analytics rows, abandoned guests (F12, see prune.ts).
   const housekeeping = () => {
     pruneSessionLog(db);
     try {

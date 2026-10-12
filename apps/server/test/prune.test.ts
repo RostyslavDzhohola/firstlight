@@ -1,8 +1,9 @@
-// Guest pruning (F12): abandoned level-1 guests are deleted from auth.db and game.db so the databases
-// don't grow without bound and their display names are released. Runs at boot and daily.
+// Guest pruning (F12): abandoned guests (level 1, or no further than the tutorial) are deleted from
+// auth.db and game.db so the databases don't grow without bound and their display names are released.
+// Runs at boot and daily.
 
 import { afterEach, describe, expect, it } from "vitest";
-import { awardMedal, getAccount, loadCharacter, saveCharacter, type CharacterData } from "../src/db/index.ts";
+import { awardMedal, getAccount, listMedals, loadCharacter, saveCharacter, type CharacterData } from "../src/db/index.ts";
 import { stmt } from "../src/db/game-db.ts";
 import { GUEST_PRUNE, pruneGuests, TOMBSTONE } from "../src/auth/prune.ts";
 import { hub } from "../src/world/hub.ts";
@@ -21,15 +22,15 @@ function charData(level: number, extra: Partial<CharacterData> = {}): CharacterD
   return { starter: "ember", palette: 0, level, xp: 0, coins: 0, hp: 100, body: "portus", copyHint: 0, x: 0, y: 0, z: 0, heading: 0, inventory: [], missionState: {}, lifeStartedAt: 0, protectedUntil: 0, ...extra };
 }
 
-/** A guest who played once (account row via /api/play), optionally with a name, level and medal. */
-async function guest(s: AuthServer, ip: string, opts: { name?: string; level?: number; medal?: boolean; loot?: boolean } = {}) {
+/** A guest who played once (account row via /api/play), optionally with a name, level, XP and medals. */
+async function guest(s: AuthServer, ip: string, opts: { name?: string; level?: number; xp?: number; medals?: string[]; loot?: boolean } = {}) {
   const b = new Browser(s, ip);
   const token = await b.playToken();
   const id = String(decodeJwt(token).sub);
   expect((await play(s, token)).json.ok).toBe(true);
   if (opts.name) expect((await api(s, "/api/account/name", token, { body: { name: opts.name } })).json.ok).toBe(true);
-  saveCharacter(s.accounts.db, id, charData(opts.level ?? 1, opts.loot ? { coins: 480, inventory: [{ id: "hexquill" }, { id: "radio" }] } : {}));
-  if (opts.medal) awardMedal(s.accounts.db, id, "first-blood");
+  saveCharacter(s.accounts.db, id, charData(opts.level ?? 1, { xp: opts.xp ?? 0, ...(opts.loot ? { coins: 480, inventory: [{ id: "hexquill" }, { id: "radio" }] } : {}) }));
+  for (const m of opts.medals ?? []) awardMedal(s.accounts.db, id, m);
   return { b, token, id };
 }
 
@@ -48,32 +49,42 @@ const authUser = (s: AuthServer, id: string) => s.accounts.authDb.prepare(`SELEC
 const authSessions = (s: AuthServer, id: string) => (s.accounts.authDb.prepare(`SELECT COUNT(*) AS n FROM "session" WHERE "userId" = ?`).get(id) as { n: number }).n;
 
 describe("guest pruning", () => {
-  it("deletes guests idle for 30+ days at level 1 with nothing earned, and releases their names; keeps everyone else", async () => {
+  it("deletes guests idle for 30+ days who got no further than the tutorial, and releases their names; keeps everyone else", async () => {
     server = await startAuthServer();
     const s = server;
     // Level-1 coins and items don't keep an abandoned guest (policy, see prune.ts).
     const gone = await guest(s, "198.51.100.70", { name: "Squatter", loot: true });
-    const levelled = await guest(s, "198.51.100.71", { level: 2 });
-    const medalled = await guest(s, "198.51.100.72", { medal: true });
-    const recent = await guest(s, "198.51.100.73");
+    // Finishing the tutorial pays exactly 50 XP (level 2) and the Spark medal: still abandoned (F12 final review S5).
+    const trainee = await guest(s, "198.51.100.69", { name: "Trainee", level: 2, xp: 50, medals: ["spark"] });
+    const levelled = await guest(s, "198.51.100.71", { level: 2, xp: 60 }); // XP past the tutorial
+    const level3 = await guest(s, "198.51.100.80", { level: 3, xp: 190 });
+    const medalled = await guest(s, "198.51.100.72", { medals: ["first-blood"] });
+    const sparkPlus = await guest(s, "198.51.100.81", { level: 2, xp: 50, medals: ["spark", "first-blood"] });
+    const recent = await guest(s, "198.51.100.73", { level: 2, xp: 50, medals: ["spark"] });
     const saved = await guest(s, "198.51.100.74");
     await saved.b.saveWithEmail("kept@example.test");
     const savedId = String(decodeJwt((await saved.b.client.token()).data!.token).sub);
-    stmt(s.accounts.db, "UPDATE character SET level = 1 WHERE user_id = ?").run(savedId);
-    for (const id of [gone.id, levelled.id, medalled.id, savedId]) age(s, id, GUEST_PRUNE.INACTIVE_DAYS + 1);
+    stmt(s.accounts.db, "UPDATE character SET level = 1, xp = 0 WHERE user_id = ?").run(savedId);
+    const kept = [levelled.id, level3.id, medalled.id, sparkPlus.id, savedId];
+    for (const id of [gone.id, trainee.id, ...kept]) age(s, id, GUEST_PRUNE.INACTIVE_DAYS + 1);
     age(s, recent.id, GUEST_PRUNE.INACTIVE_DAYS - 1);
 
-    expect(pruneGuests(s.accounts.authDb, s.accounts.db)).toBe(1);
-    expect(authUser(s, gone.id)).toBeUndefined();
-    expect(authSessions(s, gone.id)).toBe(0);
-    expect(getAccount(s.accounts.db, gone.id)).toBeNull();
-    expect(loadCharacter(s.accounts.db, gone.id)).toBeNull();
-    expect((await play(s, gone.token)).status).toBe(401);
-    // The name is free again.
+    expect(pruneGuests(s.accounts.authDb, s.accounts.db)).toBe(2);
+    for (const g of [gone, trainee]) {
+      expect(authUser(s, g.id)).toBeUndefined();
+      expect(authSessions(s, g.id)).toBe(0);
+      expect(getAccount(s.accounts.db, g.id)).toBeNull();
+      expect(loadCharacter(s.accounts.db, g.id)).toBeNull();
+      expect((await play(s, g.token)).status).toBe(401);
+    }
+    expect(listMedals(s.accounts.db, trainee.id)).toEqual([]);
+    // The names are free again.
     const other = await guest(s, "198.51.100.75");
     expect((await api(s, "/api/account/name", other.token, { body: { name: "Squatter" } })).json).toEqual({ ok: true, name: "Squatter" });
+    const other2 = await guest(s, "198.51.100.82");
+    expect((await api(s, "/api/account/name", other2.token, { body: { name: "Trainee" } })).json).toEqual({ ok: true, name: "Trainee" });
 
-    for (const id of [levelled.id, medalled.id, recent.id, savedId]) {
+    for (const id of [...kept, recent.id]) {
       expect(authUser(s, id)).toBeTruthy();
       expect(getAccount(s.accounts.db, id)).not.toBeNull();
     }

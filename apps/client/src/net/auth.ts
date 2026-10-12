@@ -163,10 +163,9 @@ export async function verifyEmailCode(email: string, otp: string, name?: string)
   const r = await authClient().signIn.emailOtp({ email: email.trim(), otp: otp.trim(), ...(name ? { name } : {}) });
   if (r.error) {
     const e = r.error as { status?: number; code?: string };
-    if (e.code === "OTP_EXPIRED") return { ok: false, message: "That code expired. Send a new one." };
-    if (e.code === "TOO_MANY_ATTEMPTS") return { ok: false, message: "Too many tries. Send a new code." };
     if (e.status === 429) return { ok: false, message: "Too many tries. Wait a minute." };
-    return { ok: false, message: "That code isn't right." };
+    // The server gives wrong, expired and used-up codes one answer (no hint whether an address is saved).
+    return { ok: false, message: "That code isn't right, or it expired. Check it or send a new one." };
   }
   await accountChanged();
   return { ok: true };
