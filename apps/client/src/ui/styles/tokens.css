@@ -1,0 +1,219 @@
+/* FIRSTLIGHT design tokens (UI verdict: Entry B base, docs/design/ui-judging.md).
+   "First light": menus are the hour before dawn (ink, fog, one warm horizon line); the HUD is made of
+   light (photon lines over dark scrims); anything the player owns is a warm 80s arcade sprite; only the
+   enemy faction (Meridian Oversight) is cold, stencilled and hexagonal.
+
+   Every token lives on `.fl-ui` (each UI root carries that class), not on :root/html, so the fluid
+   size unit `--u` scales the UI without touching the rest of the page. Sizes are `calc(N * var(--u))`
+   where the design used N rem: 14 px at 1280 wide → 19 px at 2560 wide. */
+
+/* Self-hosted fonts, SIL OFL 1.1 (see public/fonts/LICENSES.md). Latin subset, used weights only. */
+@import "@fontsource/barlow-semi-condensed/latin-300.css";
+@import "@fontsource/barlow-semi-condensed/latin-500.css";
+@import "@fontsource/barlow-semi-condensed/latin-600.css";
+@import "@fontsource/barlow-semi-condensed/latin-700.css";
+@import "@fontsource/inter/latin-400.css";
+@import "@fontsource/inter/latin-500.css";
+@import "@fontsource/inter/latin-600.css";
+@import "@fontsource/jetbrains-mono/latin-500.css";
+@import "@fontsource/jetbrains-mono/latin-600.css";
+@import "@fontsource/jetbrains-mono/latin-700.css";
+
+.fl-ui {
+  color-scheme: dark;
+
+  /* The fluid unit. */
+  --u: clamp(14px, calc(.390625vw + 9px), 19px);
+
+  /* Type families */
+  --font-display: "Barlow Semi Condensed", "Avenir Next Condensed", "Bahnschrift SemiCondensed", "Bahnschrift", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+
+  /* Type scale. --t-xs is the 13 px floor (13.1 px at 1280 wide). */
+  --t-xs: calc(.9375 * var(--u));
+  --t-sm: var(--u);
+  --t-md: calc(1.125 * var(--u));
+  --t-lg: calc(1.375 * var(--u));
+  --t-xl: calc(1.75 * var(--u));
+  --t-2xl: calc(2.25 * var(--u));
+  --t-3xl: calc(3 * var(--u));
+  --t-4xl: calc(4.25 * var(--u));
+  --t-5xl: calc(6 * var(--u));
+  --track-caps: .16em;
+  --track-wide: .3em;
+  --lh-tight: 1.08;
+  --lh-snug: 1.3;
+  --lh-body: 1.5;
+
+  /* Spacing (4-pt) */
+  --sp-1: calc(.25 * var(--u));
+  --sp-2: calc(.5 * var(--u));
+  --sp-3: calc(.75 * var(--u));
+  --sp-4: var(--u);
+  --sp-5: calc(1.5 * var(--u));
+  --sp-6: calc(2 * var(--u));
+  --sp-7: calc(3 * var(--u));
+  --sp-8: calc(4 * var(--u));
+
+  /* Radii: almost square. Light is sharp. */
+  --r-1: 2px;
+  --r-2: 4px;
+  --r-3: 8px;
+  --r-pill: 999px;
+
+  /* ---- Grade A: menus (muted, pre-dawn) ---- */
+  --ink-0: #05070a;
+  --ink-1: #090c11;
+  --ink-2: #0e1218;
+  --ink-3: #141921;
+  --ink-4: #1b212b;
+  --ink-5: #252d39;
+  --ink-6: #323b49;
+  --fog-1: #4a5363;
+  --fog-2: #6b7484;
+  --fog-3: #949cab;
+  --fog-4: #bcc2cc;
+  --paper: #efe9df;
+  --paper-2: #d8d1c5;
+  --line-1: rgba(222, 228, 238, .08);
+  --line-2: rgba(222, 228, 238, .14);
+  --line-3: rgba(222, 228, 238, .26);
+
+  /* The signature: first light on the horizon */
+  --dawn-1: #e48a72;
+  --dawn-2: #f3ae5b;
+  --dawn-3: #ffd99b;
+  --dawn-4: #fff3df;
+  --horizon: linear-gradient(90deg, transparent, rgba(228, 138, 114, .75) 22%, var(--dawn-3) 50%, rgba(228, 138, 114, .75) 78%, transparent);
+
+  /* ---- Grade B: HUD (luminous) ---- */
+  --photon: #c4f1ff;
+  --photon-2: #7ad8ff;
+  --photon-line: rgba(196, 241, 255, .2);
+  --hud-scrim: linear-gradient(180deg, rgba(5, 10, 15, .64), rgba(5, 10, 15, .44));
+  --hud-blur: blur(10px) saturate(125%);
+  --hud-text-shadow: 0 1px 2px rgba(0, 0, 0, .7), 0 0 14px rgba(0, 0, 0, .35);
+
+  /* ---- Heroes: warm 80s arcade ---- */
+  --hero-amber: #ffb547;
+  --hero-coral: #ff7b5c;
+  --hero-cream: #fff3dc;
+  --hero-gold: #ffc94a;
+
+  /* Party slot colours: always paired with the slot number */
+  --party-1: #fff3dc;
+  --party-2: #7fe3b0;
+  --party-3: #b9a6ff;
+  --party-4: #7cc6ff;
+
+  /* ---- Enemy only: Meridian Oversight (cold) ---- */
+  --cold-1: #e4e9ef;
+  --cold-2: #8e98a6;
+  --cold-3: #3b4350;
+  --cold-4: #1a1f27;
+  --cold-signal: #ff4b3e;
+  --cold-slit: #ffb000;
+  --cold-amber: #e0a33a;
+
+  /* ---- Gameplay semantics ---- */
+  --hp: #ff6f5e;
+  --hp-hi: #ffb09e;
+  --hp-trail: #ffe0c4;
+  --xp: #ffc94a;
+  --coin: #ffc94a;
+  --shield: #5fe3ff;
+  --heat-1: #ffc94a;
+  --heat-2: #ff6f5e;
+  --ok: #7fe3b0;
+  --warn: #ffc94a;
+  --danger: #ff6f5e;
+  --safe: #8ff3ff;
+  --hostile: #ff5d4d;
+
+  /* Damage numbers (colour-blind safe: colour + size + glyph) */
+  --dmg-normal: #ffffff;
+  --dmg-weak: #ffd23f;
+  --dmg-armour: #9aa3ad;
+  --dmg-shield: #5fe3ff;
+
+  /* Rarity (colour + shape ● ▲ ◆ ★) */
+  --rar-common: #a9afb8;
+  --rar-uncommon: #71db8c;
+  --rar-rare: #6aa8ff;
+  --rar-legendary: #ffc94a;
+
+  /* Bodies (planet keys, accents only) */
+  --portus: #f2c38b;
+  --arcadia: #38cfc0;
+  --arcadia-2: #ffcf5a;
+  --hollowmere: #8b6fd6;
+  --hollowmere-2: #6ff0c8;
+  --meridian: #d2553a;
+  --meridian-2: #3fd0c9;
+  --meridian-chrome: #cfd6dd;
+
+  /* Starter palettes (content.md §8.3) */
+  --pal-ivory-p: #e9e4d8;    --pal-ivory-s: #6f7780;    --pal-ivory-a: #f2b544;
+  --pal-sand-p: #c8a97e;     --pal-sand-s: #6b4a32;     --pal-sand-a: #f5a623;
+  --pal-midnight-p: #1e2f5c; --pal-midnight-s: #c9ced6; --pal-midnight-a: #6fd3ff;
+  --pal-moss-p: #5e7a3a;     --pal-moss-s: #8a6a43;     --pal-moss-a: #9be564;
+  --pal-ember-p: #2e2a2b;    --pal-ember-s: #a3402b;    --pal-ember-a: #ff8a3d;
+  --pal-dusk-p: #4a3260;     --pal-dusk-s: #3e5568;     --pal-dusk-a: #f09a7a;
+
+  /* Surfaces */
+  --panel-bg: linear-gradient(180deg, rgba(25, 30, 39, .86), rgba(12, 15, 20, .92));
+  --panel-blur: blur(22px) saturate(115%);
+  --panel-shadow: 0 30px 80px -30px rgba(0, 0, 0, .8), 0 0 0 1px rgba(0, 0, 0, .35);
+  --menu-scrim: rgba(5, 7, 10, .58);
+  --glow-dawn: 0 0 0 1px rgba(255, 217, 155, .55), 0 10px 40px -10px rgba(243, 174, 91, .75);
+
+  /* Motion */
+  --ease-out: cubic-bezier(.16, .84, .3, 1);
+  --ease-in-out: cubic-bezier(.65, 0, .35, 1);
+  --ease-snap: cubic-bezier(.3, 1.45, .5, 1);
+  --dur-1: 120ms;
+  --dur-2: 200ms;
+  --dur-3: 320ms;
+  --dur-4: 600ms;
+  --dur-5: 1200ms;
+
+  /* Z layers above the WebGL canvas. The hurt vignette (5) sits BELOW the HUD (10). */
+  --z-world: 0;
+  --z-vignette: 5;
+  --z-hud: 10;
+  --z-toast: 30;
+  --z-menu: 40;
+  --z-modal: 50;
+  --z-loading: 60;
+
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .6 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+
+  /* Base text for everything inside a UI root */
+  font: 400 var(--t-sm)/var(--lh-body) var(--font-body);
+  color: var(--paper);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Low graphics tier: no backdrop blur anywhere in the UI; scrims get darker instead (verdict fix 6). */
+.fl-lowfx .fl-ui {
+  --hud-scrim: linear-gradient(180deg, rgba(5, 10, 15, .8), rgba(5, 10, 15, .72));
+  --hud-blur: none;
+  --panel-blur: none;
+  --panel-bg: linear-gradient(180deg, rgba(25, 30, 39, .97), rgba(12, 15, 20, .98));
+}
+.fl-lowfx .fl-ui *,
+.fl-lowfx .fl-ui *::before,
+.fl-lowfx .fl-ui *::after {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fl-ui *, .fl-ui *::before, .fl-ui *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
+}
