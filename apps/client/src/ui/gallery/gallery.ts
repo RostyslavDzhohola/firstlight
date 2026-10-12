@@ -26,12 +26,13 @@ import { showRemoved } from "../../social/screens.ts";
 import { addInvite, setParty } from "../../social/store.ts";
 import { PhraseWheel } from "../phraseWheel.ts";
 import { JournalPanel, ShopPanel } from "../panels.ts";
+import { InventoryPanel } from "../inventory.ts";
 import { INVENTORY_HTML, ONBOARDING_HTML } from "./kitExamples.ts";
 
 const SCREENS = [
   "landing", "loading", "loading-compact", "charpick", "charpick-rebirth", "hud", "hud-oversight", "hud-states",
   "death", "death-player", "death-party", "death-world", "menu", "menu-logout", "settings",
-  "players", "compass", "wheel", "shop", "journal", "invite", "removed", "kit-inventory", "kit-onboarding", "save", "save-code", "save-saved", "save-busy", "signin", "name", "notice",
+  "players", "compass", "wheel", "shop", "journal", "invite", "removed", "kit-inventory", "kit-onboarding", "inventory", "inventory-drag", "save", "save-code", "save-saved", "save-busy", "signin", "name", "notice",
 ] as const;
 type Screen = (typeof SCREENS)[number];
 
@@ -283,6 +284,27 @@ async function run() {
       addInvite({ from: "u4", fromName: "Vexa_77", partyId: null, expiresAt: Date.now() + 30_000 });
       new InviteCards(() => {}).render();
       break;
+    case "inventory":
+    case "inventory-drag": {
+      // The live inventory panel (I) with mock bags: hover a slot for its card, drag or click to move.
+      const hud = hudScene("monster");
+      hud.you = you({
+        hotbar: [{ id: "carbine", tier: 2, qty: 1, mag: 21 }, { id: "stormcoil", tier: 3, qty: 1 }, null, { id: "tonic_small", tier: 1, qty: 4 }],
+        backpack: [
+          { id: "patchkit", tier: 1, qty: 2 }, { id: "wool_tuft", tier: 1, qty: 7 }, { id: "fox_mask", tier: 1, qty: 1 }, { id: "sunbrand", tier: 2, qty: 1 },
+          { id: "radio", tier: 1, qty: 1 }, { id: "riverstaff", tier: 2, qty: 1, skin: "ferrymans_oar" }, { id: "travellers_cloak", tier: 1, qty: 1 }, null,
+          ...Array(8).fill(null),
+        ],
+        worn: { cape: "travellers_cloak" },
+      });
+      const g = { hud, input: { enabled: true, keys: new Set(), lock() {} }, net: { room: null }, bodyId: "arcadia" } as unknown as Game;
+      const inv = new InventoryPanel(g);
+      inv.open();
+      inv.cursor.focus = 7; // the Sunbrand II in the backpack: card with a damage comparison
+      if (screen === "inventory-drag") inv.cursor.click(4); // holding the Patchkit: drop zone armed
+      inv.render();
+      break;
+    }
     case "kit-inventory":
       hudScene("monster");
       document.getElementById("ui")!.insertAdjacentHTML("beforeend", INVENTORY_HTML);

@@ -7,6 +7,7 @@ import { createQuestClient } from "./QuestClient.ts";
 import { createVoiceSystem } from "../voice/index.ts";
 import { createBreakables } from "../world/Breakables.ts";
 import { createSkyClient } from "./SkyClient.ts";
+import { createInventoryClient } from "./InventoryClient.ts";
 
 export interface ClientSystem {
   update(dt: number, now: number): void;
@@ -21,3 +22,5 @@ export const CLIENT_SYSTEMS: ClientSystemFactory[] = [npcClientSystem, createVoi
 CLIENT_SYSTEMS.push(createBreakables);
 // Weather + day/night lane: server sky sync (the environment runs offline from the shared schedule).
 CLIENT_SYSTEMS.push(createSkyClient);
+// Inventory panel (I): move, drop, use and wear from the hotbar and backpack.
+CLIENT_SYSTEMS.push(createInventoryClient);
