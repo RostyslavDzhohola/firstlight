@@ -38,9 +38,9 @@ server), extension points and tests.
 - `packages/shared`: deterministic code both sides use (terrain, content catalogues, protocol).
 - `apps/assets-worker`: a Cloudflare Worker for large assets.
 
-The game was built by AI agents (Claude Opus 5.5, reviewed by Codex Sol, Opus 5.5 and Sonnet 5.5) from the spec in
-`docs/SPEC.md`; decisions are in `docs/DECISIONS.md`, progress in `docs/STATUS.md`, and the code
-reviews in `docs/reviews/`.
+The game was built by AI agents (Claude Opus 5.5, reviewed by Codex Sol, Opus 5.5 and Sonnet 5.5)
+from the spec in `docs/SPEC.md`; decisions are in `docs/DECISIONS.md`, progress in
+`docs/STATUS.md`, and the code reviews in `docs/reviews/`.
 
 ## Licences
 
