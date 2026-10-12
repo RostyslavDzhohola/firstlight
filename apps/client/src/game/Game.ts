@@ -24,6 +24,7 @@ import { Portals } from "../world/Portals.ts";
 import { CombatClient } from "./CombatClient.ts";
 import { GameAudio } from "../audio/Audio.ts";
 import { Input } from "./input.ts";
+import { PhotoMode } from "./PhotoMode.ts";
 import { PlayerController } from "./PlayerController.ts";
 import { CLIENT_SYSTEMS, type ClientSystem } from "./systems.ts";
 
@@ -54,6 +55,7 @@ export class Game {
   particles!: ParticleSystem;
   blobs!: BlobShadows;
   bench: Bench | null = null;
+  photo!: PhotoMode;
   combat!: CombatClient;
   audio!: GameAudio;
   hud!: Hud;
@@ -78,6 +80,13 @@ export class Game {
     installShaderMonitor(this.ctx);
     console.info(`[gfx] backend ${this.ctx.webgpu ? "WebGPU" : "WebGL2"}, tier ${this.ctx.tier}${this.ctx.settings.auto ? " (auto)" : ""}, gpu "${this.ctx.gpuName}"`);
     this.input = new Input(this.ctx.renderer.domElement);
+    this.photo = new PhotoMode({
+      ctx: this.ctx,
+      input: this.input,
+      planetGrade: () => this.planet.look.grade,
+      terrain: () => this.planet.terrain,
+      anchor: () => this.player.pos,
+    });
     this.audio = new GameAudio();
     this.audio.resume();
     this.ctx.renderer.domElement.addEventListener("mousedown", () => this.audio.resume());
@@ -417,12 +426,14 @@ export class Game {
       this.bench.update(dt, now, this.ctx.camera);
       focus = this.bench.focus;
     } else {
-      this.player.update(dt, this.input, this.combat.aiming());
+      // Photo mode (F9): the body stays put (and can still be hurt) while the camera flies.
+      if (this.input.pressed.has("F9")) this.photo.toggle(this.ctx.camera);
+      if (!this.photo.active) this.player.update(dt, this.input, this.combat.aiming());
       const p = this.player.pos;
       const f = this.player.facing;
       this.net.sendInput(now, { x: p.x, y: p.y, z: p.z, fx: f.x, fy: f.y, fz: f.z, anim: this.player.anim });
       this.self.set(p.x, p.y, p.z, f.x, f.y, f.z, this.player.anim, dt);
-      focus = p;
+      focus = this.photo.active ? this.photo.pos : p;
     }
 
     // Remote players.
@@ -465,7 +476,8 @@ export class Game {
           });
       }
     }
-    if (!this.bench) this.player.placeCamera(this.ctx.camera);
+    if (this.photo.active) this.photo.update(dt, this.ctx.camera);
+    else if (!this.bench) this.player.placeCamera(this.ctx.camera);
     this.audio.updateListener(this.ctx.camera);
     if (FX_DEMO && now >= this.nextFxDemo) this.fxDemo(now, focus);
     this.particles.update(dt, this.ctx.camera.position, now);

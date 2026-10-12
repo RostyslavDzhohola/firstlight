@@ -1,5 +1,5 @@
 // Post pipeline (SPEC §7.1): scene pass → [GTAO (WebGPU High/Ultra)] → [TRAA (opt-in)] → bloom →
-// renderOutput (tone map + sRGB) → grade (cdl + saturation + hue) → vignette → grain → FXAA.
+// [DoF (photo mode)] → renderOutput (tone map + sRGB) → grade (cdl + saturation + hue) → vignette → grain → FXAA.
 // Everything per-body is a shared uniform, so changing planets never rebuilds shaders; only tier or
 // feature changes rebuild the pipeline.
 
@@ -12,6 +12,7 @@ import { bloom } from "three/addons/tsl/display/BloomNode.js";
 import { fxaa } from "three/addons/tsl/display/FXAANode.js";
 import { ao } from "three/addons/tsl/display/GTAONode.js";
 import { denoise } from "three/addons/tsl/display/DenoiseNode.js";
+import { dof } from "three/addons/tsl/display/DepthOfFieldNode.js";
 import { traa } from "three/addons/tsl/display/TRAANode.js";
 import { vignette } from "three/addons/tsl/display/CRT.js";
 import type { ResolvedSettings } from "./quality.ts";
@@ -42,6 +43,10 @@ export const postUniforms = {
   vignette: uniform(0.28).setGroup(renderGroup),
   grain: uniform(0.035).setGroup(renderGroup),
   aoStrength: uniform(0.75).setGroup(renderGroup),
+  // Photo mode depth of field (only in the pipeline while photo mode is on).
+  dofFocus: uniform(12).setGroup(renderGroup),
+  dofFocal: uniform(6).setGroup(renderGroup),
+  dofBokeh: uniform(2).setGroup(renderGroup),
 };
 
 export function setGrade(g: GradeParams) {
@@ -59,7 +64,7 @@ export interface PostBuild {
 }
 
 /** Build the pipeline's output node for the given settings. */
-export function buildPost(scene: THREE.Scene, camera: THREE.Camera, s: ResolvedSettings): PostBuild {
+export function buildPost(scene: THREE.Scene, camera: THREE.Camera, s: ResolvedSettings, photo = false): PostBuild {
   const disposables: { dispose(): void }[] = [];
   const scenePass = pass(scene, camera);
   disposables.push(scenePass);
@@ -98,6 +103,13 @@ export function buildPost(scene: THREE.Scene, camera: THREE.Camera, s: ResolvedS
     b.setResolutionScale(s.post.bloomScale);
     disposables.push(b);
     color = color.add(b);
+  }
+
+  if (photo) {
+    // Photo mode only: a pipeline rebuild on enter/exit is fine there (no gameplay hitch budget).
+    const d = dof(color, scenePass.getViewZNode(), postUniforms.dofFocus, postUniforms.dofFocal, postUniforms.dofBokeh);
+    disposables.push(d);
+    color = d;
   }
 
   let out: any = renderOutput(color as any);
