@@ -158,9 +158,9 @@ describe("enemies and wildlife (seam 1)", () => {
     const home = offset(at, 5, 0, BODIES.arcadia.radius);
     const id = await spawn(a, "hopbit", home, { level: 3, instant: true });
     a.send("npc", { cmd: "hurt", id, amount: 5, as: a.sessionId });
-    await waitFor(() => (st(a).npcs?.get(id)?.flags ?? 0) & NF.AGGRO, 3000);
+    await waitFor(() => !!((st(a).npcs?.get(id)?.flags ?? 0) & NF.AGGRO), 3000);
     place(a, offset(at, -32, 0, BODIES.arcadia.radius));
-    await waitFor(() => (st(a).npcs?.get(id)?.flags ?? 0) & NF.EVADING, 8000);
+    await waitFor(() => !!((st(a).npcs?.get(id)?.flags ?? 0) & NF.EVADING), 8000);
     await waitFor(() => {
       const n = st(a).npcs?.get(id);
       return !!n && !(n.flags & NF.EVADING);
@@ -272,7 +272,7 @@ describe("bosses (seam 1)", () => {
     expect(st(A).npcs.get(boss.id).hp).toBeGreaterThan(12_000 - 200);
     // A second body on the other stone: both held 3 s → Moored, full damage.
     const B = await player("stone-b", "arcadia", ar.plates[1]! as V, 8);
-    await waitFor(() => (st(A).npcs.get(boss.id)?.flags ?? 0) & NF.WEAK_OPEN, 6000);
+    await waitFor(() => !!((st(A).npcs.get(boss.id)?.flags ?? 0) & NF.WEAK_OPEN), 6000);
     expect(windows).toBe(1);
     const hp = st(A).npcs.get(boss.id).hp;
     B.send("npc", { cmd: "hurt", id: boss.id, amount: 1000, as: B.sessionId });

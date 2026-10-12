@@ -166,6 +166,8 @@ export class NpcSystem implements RoomSystem {
 
   private scan(now: number, sdt: number) {
     const act = NPC_TUNING.activateRadius;
+    // Wake at most this many NPCs per scan so a crowd arriving doesn't spike one tick.
+    let budget = NPC_TUNING.spawnBudget;
     for (const g of this.groups) {
       const near = this.nearestLiveAny(g.point.pos);
       if (near <= act) g.lastNearAt = now;
@@ -177,7 +179,10 @@ export class NpcSystem implements RoomSystem {
           g.dead.fill(false);
         }
       }
-      if (!g.active && !g.cleared && this.ambientOn && near <= act) this.spawnGroup(g, now);
+      if (!g.active && !g.cleared && this.ambientOn && near <= act && budget > 0) {
+        this.spawnGroup(g, now);
+        budget -= g.point.members.length;
+      }
       else if (g.active && now - g.lastNearAt > NPC_TUNING.despawnAfterMs && !g.members.some((m) => m && m.target)) this.despawnGroup(g);
     }
   }

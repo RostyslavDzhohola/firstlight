@@ -13,8 +13,9 @@ export const NPC_TUNING = {
   /** … and despawn after nobody has been within this radius for despawnAfterMs. */
   despawnRadius: 230,
   despawnAfterMs: 30_000,
-  /** Activation pass interval (ms). */
+  /** Activation pass interval (ms) and how many NPCs one pass may wake. */
   scanMs: 500,
+  spawnBudget: 40,
   /** Multiplies every respawn delay (pack/camp/beast). */
   respawnScale: 1,
   leash: NPC_RULES.leash as number,
