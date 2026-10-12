@@ -28,7 +28,7 @@ export interface PlayRequest {
 export type PlayResponse =
   | { ok: true; reservation: SeatReservation }
   | { ok: false; queue: { position: number; etaSeconds: number } }
-  | { ok: false; error: string };
+  | { ok: false; error: string; body?: BodyId };
 
 /** Mirrors Colyseus' ISeatReservation. */
 export interface SeatReservation {

@@ -200,10 +200,16 @@ export class CombatClient {
         room.send("block", { on: rmb });
       }
       if (heavyCapable) {
-        if (rmb && !this.wasRmb) this.chargeStart = now;
-        if (!rmb && this.wasRmb && now - this.chargeStart >= (t.heavyTime ?? 0.8) * 1000) {
-          room.send("melee", { slot: g.hud.you?.selected ?? 0, t: Date.now(), heavy: true });
-          this.lastFire = now;
+        // The server times the charge from this message (heavy without it is refused).
+        if (rmb && !this.wasRmb) {
+          this.chargeStart = now;
+          room.send("charge", { on: true });
+        }
+        if (!rmb && this.wasRmb) {
+          if (now - this.chargeStart >= (t.heavyTime ?? 0.8) * 1000) {
+            room.send("melee", { slot: g.hud.you?.selected ?? 0, t: Date.now(), heavy: true });
+            this.lastFire = now;
+          } else room.send("charge", { on: false });
         }
       }
     } else {
@@ -212,7 +218,10 @@ export class CombatClient {
         this.scoped = wantScope;
         room.send("scope", { on: wantScope });
       }
-      if (def.delivery === "arrow" && rmb && !this.wasRmb) this.chargeStart = now;
+      if (def.delivery === "arrow" && rmb && !this.wasRmb) {
+        this.chargeStart = now;
+        room.send("charge", { on: true }); // the server times the draw
+      }
     }
     this.wasRmb = rmb;
     const zoom = this.scoped ? (t.zoom ?? 1.35) : 1;
@@ -249,6 +258,11 @@ export class CombatClient {
     const dir = cam.getWorldDirection(new THREE.Vector3());
     const charge = def.delivery === "arrow" ? Math.min(1, (now - this.chargeStart) / ((t.draw ?? 1) * 1000)) : 1;
     room.send("fire", { slot, ox: origin.x, oy: origin.y, oz: origin.z, dx: dir.x, dy: dir.y, dz: dir.z, t: Date.now(), charge });
+    if (def.delivery === "arrow" && rmb) {
+      // Still holding the draw: the server's timer restarts after each shot, so restart ours too.
+      this.chargeStart = now;
+      room.send("charge", { on: true });
+    }
     // Local predicted tracer for hitscan weapons.
     if (def.delivery === "hitscan" || def.delivery === "pellets" || def.delivery === "chain") {
       const hitT = this.rayTerrain(origin, dir, def.falloffTo ?? def.range);

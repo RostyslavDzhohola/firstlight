@@ -2,16 +2,16 @@
 // portals, piles, HUD and the main loop.
 
 import * as THREE from "three/webgpu";
-import type { BodyId } from "@firstlight/shared";
+import { BODIES, type BodyId } from "@firstlight/shared";
 import { flags } from "../config.ts";
-import { Net } from "../net/Net.ts";
+import { CLOSE, Net, TravelRedirect } from "../net/Net.ts";
 import { AvatarView } from "../render/Avatars.ts";
 import { createRenderer, type RenderCtx } from "../render/renderer.ts";
 import { PerfOverlay } from "../render/PerfOverlay.ts";
 import type { Hud } from "../ui/hud.ts";
 import { Menu } from "../ui/menu.ts";
 import { pickDisplayName } from "../ui/account.ts";
-import { getAccountInfo, isDevGuest } from "../net/auth.ts";
+import { getAccountInfo, invalidatePlayToken, isDevGuest } from "../net/auth.ts";
 import { PilesView } from "../world/PilesView.ts";
 import { Planet } from "../world/Planet.ts";
 import { Portals } from "../world/Portals.ts";
@@ -53,6 +53,7 @@ export class Game {
   private running = false;
   private travelling = false;
   private portalCooldownUntil = 0;
+  private reconnecting = false;
 
   async start(body: BodyId) {
     setLoading("Starting the renderer…", 0.05);
@@ -97,6 +98,49 @@ export class Game {
     }
   }
 
+  /** Rejoin after an unexpected disconnect: backoff 1.5 s → 30 s, then a "lost connection" screen. */
+  private async reconnect() {
+    if (this.reconnecting) return;
+    this.reconnecting = true;
+    this.travelling = true;
+    let delay = 1500;
+    try {
+      for (let attempt = 0; attempt < 7; attempt++) {
+        setLoading(attempt ? `Reconnecting… (try ${attempt + 1})` : "Reconnecting…", 0.1);
+        await new Promise((r) => setTimeout(r, delay));
+        try {
+          await this.enterBody(this.bodyId);
+          return;
+        } catch (e) {
+          console.warn("rejoin failed", e);
+          delay = Math.min(30_000, delay * 2);
+        }
+      }
+      hideLoading();
+      this.running = false;
+      document.exitPointerLock?.();
+      this.menu.showNotice("CONNECTION LOST", "Couldn't reach the server. Your character is safe.", "Try again", () => void this.resume());
+    } finally {
+      this.reconnecting = false;
+      this.travelling = false;
+    }
+  }
+
+  /** Server closed our room: decide by close code (SPEC §5; server world/hub.ts). */
+  private onRoomClosed(code: number) {
+    if (this.travelling || !this.running) return;
+    if (code === 1000 || code === 4000 || code === CLOSE.LOGGED_OUT) return; // we left, or logged out
+    if (code === CLOSE.ELSEWHERE || code === CLOSE.BANNED) {
+      this.running = false;
+      document.exitPointerLock?.();
+      if (code === CLOSE.BANNED) this.menu.showNotice("BANNED", "This account can't play right now.", null, null);
+      else this.menu.showNotice("PLAYING ELSEWHERE", "This character is playing in another tab or window.", "Play here", () => void this.resume());
+      return;
+    }
+    if (code === CLOSE.MERGED) invalidatePlayToken(); // saved/signed in: rejoin as the account
+    void this.reconnect();
+  }
+
   async loggedOut() {
     this.running = false;
     await this.net.leave();
@@ -106,12 +150,17 @@ export class Game {
 
   async resume() {
     this.menu.hideAll();
-    await this.enterBody(this.bodyId);
     this.running = true;
+    try {
+      await this.enterBody(this.bodyId);
+    } catch (e) {
+      console.warn("resume failed", e);
+      return void this.reconnect();
+    }
     this.input.lock();
   }
 
-  async enterBody(body: BodyId, choice?: { starter: number; palette: number }) {
+  async enterBody(body: BodyId, choice?: { starter: number; palette: number }): Promise<void> {
     const name = `${body[0]!.toUpperCase()}${body.slice(1)}`;
     setLoading(`Travelling to ${name}…`, 0.15);
     await this.net.leave();
@@ -132,7 +181,15 @@ export class Game {
 
     setLoading("Connecting…", 0.3);
     const stored = { starter: Number(localStorage.getItem("fl.starter") ?? 0), palette: Number(localStorage.getItem("fl.palette") ?? 0) };
-    const room = await this.net.join(body, choice ?? stored);
+    let room;
+    try {
+      room = await this.net.join(body, choice ?? stored);
+    } catch (e) {
+      // No travel ticket for this body: the character is elsewhere (e.g. logged out on a planet).
+      if (e instanceof TravelRedirect && e.body !== body) return this.enterBody(e.body, choice);
+      throw e;
+    }
+    localStorage.setItem("fl.body", body);
     this.combat.attach();
     await new Promise<void>((resolve) => {
       const check = () => {
@@ -145,11 +202,7 @@ export class Game {
       check();
     });
     this.net.onCorrect = (x, y, z) => this.player.teleport(x, y, z);
-    this.net.onLeaveRoom = (code) => {
-      if (this.travelling || !this.running) return;
-      // Unexpected disconnect (e.g. a server update): rejoin the same body.
-      if (code !== 1000 && code !== 4000) setTimeout(() => void this.travel(this.bodyId), 1500);
-    };
+    this.net.onLeaveRoom = (code) => this.onRoomClosed(code);
     this.systems = CLIENT_SYSTEMS.map((f) => f(this)).filter((x): x is ClientSystem => !!x);
 
     const t0 = performance.now();
@@ -213,7 +266,13 @@ export class Game {
     for (const s of this.systems) s.update(dt, now);
     if (now > this.portalCooldownUntil) {
       const to = this.portals?.check(p);
-      if (to && to !== this.bodyId) void this.travel(to);
+      if (to && to !== this.bodyId) {
+        // The server must authorise portal travel (it records a travel ticket for /api/play).
+        this.portalCooldownUntil = now + 1500;
+        void this.net.requestTravel(to).then((ok) => {
+          if (ok) void this.travel(to);
+        });
+      }
     }
     this.player.placeCamera(this.ctx.camera);
     this.audio.updateListener(this.ctx.camera);
@@ -230,7 +289,9 @@ export async function startGame() {
   if (game) return;
   game = new Game();
   (window as unknown as { __game: Game }).__game = game;
-  const start = (flags.get("body") as BodyId | null) ?? "portus";
+  // Start where the character was last seen (the server redirects if that's stale).
+  const wanted = flags.get("body") ?? localStorage.getItem("fl.body") ?? "portus";
+  const start: BodyId = wanted in BODIES ? (wanted as BodyId) : "portus";
   await game.start(start);
 }
 

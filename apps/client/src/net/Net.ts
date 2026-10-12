@@ -23,6 +23,16 @@ export interface RemotePlayerView {
   buf: Snapshot[];
 }
 
+/** The server sent us to the body our character is actually on (no travel ticket for the one asked). */
+export class TravelRedirect extends Error {
+  constructor(readonly body: BodyId) {
+    super(`travel: character is on ${body}`);
+  }
+}
+
+/** App close codes (server world/hub.ts). Colyseus reserves 4000–4010. */
+export const CLOSE = { ELSEWHERE: 4100, MERGED: 4101, BANNED: 4102, LOGGED_OUT: 4103 } as const;
+
 export class Net {
   room: Room | null = null;
   readonly client = new Client(config.apiUrl);
@@ -33,8 +43,11 @@ export class Net {
   rtt = 0;
   onCorrect: ((x: number, y: number, z: number) => void) | null = null;
   onLeaveRoom: ((code: number) => void) | null = null;
+  /** Called while waiting in the queue (position, eta seconds). */
+  onQueue: ((position: number, etaSeconds: number) => void) | null = null;
+  private pingTimer: ReturnType<typeof setInterval> | null = null;
 
-  async join(body: BodyId, opts: { partyLeaderRoomId?: string; starter?: number; palette?: number } = {}): Promise<Room> {
+  async join(body: BodyId, opts: { starter?: number; palette?: number } = {}): Promise<Room> {
     let retried401 = false;
     for (;;) {
       // Per attempt: queues can outlast the 15-minute JWT (getPlayToken caches and refreshes it).
@@ -50,6 +63,10 @@ export class Net {
         invalidatePlayToken();
         continue;
       }
+      if (res.status === 429) {
+        await new Promise((ok) => setTimeout(ok, 2500));
+        continue;
+      }
       const r = (await res.json()) as PlayResponse;
       if (r.ok) {
         const room = await this.client.consumeSeatReservation(r.reservation as never);
@@ -57,9 +74,11 @@ export class Net {
         return room;
       }
       if ("queue" in r) {
+        this.onQueue?.(r.queue.position, r.queue.etaSeconds);
         await new Promise((ok) => setTimeout(ok, 5000));
         continue;
       }
+      if (r.error === "travel" && r.body) throw new TravelRedirect(r.body);
       throw new Error(r.error);
     }
   }
@@ -94,10 +113,40 @@ export class Net {
       this.serverOffset = m.serverTime - (Date.now() - this.rtt / 2);
     });
     room.onLeave((code: number) => {
-      if (this.room === room) this.room = null;
+      if (this.room === room) {
+        this.room = null;
+        this.stopPing();
+      }
       this.onLeaveRoom?.(code);
     });
-    setInterval(() => this.room === room && room.send("ping", { t: performance.now() }), 2000);
+    this.stopPing();
+    this.pingTimer = setInterval(() => this.room === room && room.send("ping", { t: performance.now() }), 2000);
+  }
+
+  private stopPing() {
+    if (this.pingTimer) clearInterval(this.pingTimer);
+    this.pingTimer = null;
+  }
+
+  /** Ask the server to authorise travel through the portal we're standing in. */
+  requestTravel(to: BodyId, timeoutMs = 3000): Promise<boolean> {
+    const room = this.room;
+    if (!room) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (ok: boolean) => {
+        if (done) return;
+        done = true;
+        offOk();
+        offDenied();
+        clearTimeout(timer);
+        resolve(ok);
+      };
+      const offOk = room.onMessage("travelOk", (m: { to: BodyId }) => m.to === to && finish(true));
+      const offDenied = room.onMessage("denied", (m: { action: string }) => m.action === "travel" && finish(false));
+      const timer = setTimeout(() => finish(false), timeoutMs);
+      room.send("travel", { to });
+    });
   }
 
   sendInput(now: number, m: Omit<InputMsg, "seq" | "t">) {
@@ -134,6 +183,7 @@ export class Net {
   async leave() {
     const r = this.room;
     this.room = null;
+    this.stopPing();
     await r?.leave().catch(() => {});
   }
 }
