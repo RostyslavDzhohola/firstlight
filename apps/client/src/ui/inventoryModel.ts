@@ -164,6 +164,9 @@ function weaponNote(def: WeaponDef, t: TierStats): string | null {
     case "thrown":
       return `Left mouse throws one. It goes off after ${def.fuse ?? 1.6} s.`;
     case "heal":
+      if (def.id === "patchkit") {
+        return `Channel ${t.channel ?? 1} s, then the patched player heals ${Math.round((t.heal ?? 0) * 100)}% of their max HP over ${t.duration ?? 2} s. Left mouse: the ally in your crosshair (${def.range} m). Right mouse, or E here: yourself. A hit stops the channel and keeps the kit. ${t.cooldown ?? 6} s between kits.`;
+      }
       return def.cls === "item" ? "Left mouse with it in hand, or E here. 8 s between tonics." : "Heals you over 2 s. Left mouse with it in hand, or E here.";
     case "bubble":
       return "A shield of light around you and anyone close.";

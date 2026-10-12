@@ -5,7 +5,7 @@ import * as THREE from "three/webgpu";
 import { isBlocked, partyState } from "../social/store.ts";
 import { HORSE_WHISTLE } from "@firstlight/shared/content/horse";
 import { flags } from "../config.ts";
-import { horsesEnabled } from "./mount.ts";
+import { horsesEnabled, usableAnywhere } from "./mount.ts";
 import { WEAPONS, WEAPON_BY_ID, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
 import { PHRASES } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
@@ -36,6 +36,8 @@ export class CombatClient {
   private lastFire = 0;
   private chargeStart = 0;
   private wasRmb = false;
+  /** Right mouse last frame while saddle-locked (the Patchkit's self-patch there). */
+  private saddleRmb = false;
   private blocking = false;
   private scoped = false;
   /** Unzoomed field of view (Settings → Field of view). */
@@ -197,6 +199,19 @@ export class CombatClient {
     return { def, tier: item?.tier ?? 1 };
   }
 
+  /** Left mouse with a support item: a Patchkit patches the ally in the crosshair; tonics and the Bubble are used. */
+  private useSupport(def: WeaponDef) {
+    const room = this.game.net.room;
+    const slot = this.game.hud.you?.selected ?? 0;
+    if (def.id === "patchkit") {
+      const ally = this.allyInCrosshair(def.range);
+      if (ally) room?.send("use", { slot, targetId: ally });
+      else this.game.hud.toast("No ally in reach — right-click to patch yourself", "info");
+      return;
+    }
+    room?.send("use", { slot });
+  }
+
   /** The whistle in hand works like H (the server explains a refusal, safe zones included). */
   private whistle() {
     if (horsesEnabled(this.game.hud.you, flags.has("nohorses"))) this.game.net.room?.send("horse", { action: "whistle" });
@@ -247,7 +262,8 @@ export class CombatClient {
 
     if (g.player.saddleLocked) {
       // No weapons from the saddle, or just off it (horses; the server refuses them too): lower any
-      // guard, scope or draw. Tonics and Patchkits still work, and the whistle in hand gets you off.
+      // guard, scope or draw. Tonics, Patchkits and Prism Bubbles still work (the server takes them
+      // anywhere), and the whistle in hand gets you off.
       if (this.blocking) room.send("block", { on: false });
       if (this.scoped) room.send("scope", { on: false });
       if (this.wasRmb) room.send("charge", { on: false });
@@ -257,12 +273,21 @@ export class CombatClient {
         cam.fov += (this.baseFov - cam.fov) * Math.min(1, dt * 14);
         cam.updateProjectionMatrix();
       }
-      if (!input.lmbPressed || g.photo?.active) return;
-      if (def.delivery === "heal") room.send("use", { slot: g.hud.you?.selected ?? 0 });
+      // Patchkit: right mouse patches yourself here too (edge-triggered).
+      const rmbEdge = rmb && !this.saddleRmb;
+      this.saddleRmb = rmb;
+      if (g.photo?.active) return;
+      if (def.id === "patchkit" && rmbEdge) {
+        room.send("use", { slot: g.hud.you?.selected ?? 0 });
+        return;
+      }
+      if (!input.lmbPressed) return;
+      if (usableAnywhere(def)) this.useSupport(def);
       else if (def.id === HORSE_WHISTLE) this.whistle();
       else if (g.player.mounted) g.hud.toast("No weapons from the saddle: E to get off", "warn");
       return;
     }
+    this.saddleRmb = false;
 
     // Right mouse: block (blades/staff), charge (axe/hammer), draw (bow), aim/scope (guns).
     if (def.delivery === "melee") {
@@ -314,7 +339,8 @@ export class CombatClient {
       if (input.lmbPressed) this.whistle();
       return;
     }
-    if (meState && meState.flags & PF.SAFE) {
+    // Safe zones holster weapons; support items still work there (the server takes them anywhere).
+    if (meState && meState.flags & PF.SAFE && !usableAnywhere(def)) {
       if (this.training?.(def, t, now)) return; // onboarding: the Portus training dummies take swings
       if (input.lmbPressed) g.hud.toast("Weapons are holstered in safe zones", "warn");
       return;
@@ -333,13 +359,11 @@ export class CombatClient {
       this.effects.arc(g.player.pos, g.player.facing, up, def.range, weaponColor(WEAPONS.indexOf(def)));
       return;
     }
-    if (def.id === "patchkit") {
-      const ally = this.allyInCrosshair(def.range);
-      if (ally) room.send("use", { slot, targetId: ally });
-      else g.hud.toast("No ally in reach — right-click to patch yourself", "info");
+    if (usableAnywhere(def)) {
+      this.useSupport(def);
       return;
     }
-    if (def.delivery === "heal" || def.delivery === "bubble" || def.delivery === "none") {
+    if (def.delivery === "none") {
       room.send("use", { slot });
       return;
     }

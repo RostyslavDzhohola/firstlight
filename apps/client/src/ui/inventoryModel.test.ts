@@ -92,6 +92,16 @@ describe("quick action (right-click / E)", () => {
     expect(itemActions(state(), 5)).toEqual([]);
   });
 
+  it("the Patchkit's card says how it works: channel, heal share, ally vs self, cooldown (F12 final Opus nit)", () => {
+    const s = state({ backpack: [it1("patchkit", 2), ...Array(15).fill(null)] });
+    const note = itemDetails({ id: "patchkit", tier: 2, qty: 2 }, s).note!;
+    expect(note).toContain("Channel 0.9 s");
+    expect(note).toContain("40% of their max HP over 2 s");
+    expect(note).toContain("Left mouse: the ally in your crosshair (4 m)");
+    expect(note).toContain("Right mouse, or E here: yourself");
+    expect(note).toContain("6 s between kits");
+  });
+
   it("use from the backpack sends the inventory slot index (4–19) and no target (self)", () => {
     const s = state({ backpack: [null, null, null, null, null, it1("bubble"), ...Array(10).fill(null)] });
     expect(quickAction(s, 9)!.actions).toEqual([{ type: "use", slot: 9 }]);

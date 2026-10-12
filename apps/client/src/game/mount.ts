@@ -4,6 +4,15 @@
 // on early: horse speed starts only once the server says so.
 
 import { HORSE, rideSpeed, tooDeepToRide } from "@firstlight/shared/content/horse";
+import type { WeaponDef } from "@firstlight/shared/content/weapons";
+
+/**
+ * Tonics, Patchkits and Prism Bubbles: the server takes `use` for them anywhere, from the saddle and
+ * in safe zones too (BodyRoom.use, support.ts), so the client doesn't holster them there.
+ */
+export function usableAnywhere(def: WeaponDef): boolean {
+  return def.delivery === "heal" || def.delivery === "bubble";
+}
 
 export class MountState {
   /** Riding as far as movement prediction and the camera are concerned. */
