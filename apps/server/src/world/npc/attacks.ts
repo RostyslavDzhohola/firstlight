@@ -512,20 +512,31 @@ export function stepNpcProjectiles(sys: NpcSystem, now: number, dt: number) {
     pr.vel = add(pr.vel, u, -pr.g * dt);
     const next = add(pr.pos, pr.vel, dt);
     let gone = false;
-    // A Prism Bubble shell stops the bolt where it crosses, and takes the hit.
-    const shell = sys.world.host.bubbles?.between(pr.pos, next) ?? null;
-    if (shell) {
-      sys.world.host.bubbles!.absorb(shell, pr.damage);
+    // Nearest first along this step: the first player the bolt reaches, or a Prism Bubble shell
+    // (which then takes the hit). A player in front of a shell is hit; one behind it is not.
+    const seg = sub(next, pr.pos);
+    const segLen = len(seg);
+    let victim: LivePlayer | null = null;
+    let victimT = Infinity;
+    for (const lp of sys.live) {
+      if (lp.untouchable) continue;
+      const c = chest(lp.pos);
+      if (segPointDist(pr.pos, next, c) > pr.radius + 0.55) continue;
+      const t = segLen > 0 ? Math.max(0, Math.min(segLen, dot(sub(c, pr.pos), seg) / segLen)) : 0;
+      if (t < victimT) {
+        victimT = t;
+        victim = lp;
+      }
+    }
+    const shell = segLen > 0 ? (sys.world.host.bubbles?.cross(pr.pos, scale(seg, 1 / segLen), segLen) ?? null) : null;
+    if (shell && shell.t < victimT) {
+      sys.world.host.bubbles!.absorb(shell.bubble, pr.damage);
       list.splice(i, 1);
       continue;
     }
-    for (const lp of sys.live) {
-      if (lp.untouchable) continue;
-      if (segPointDist(pr.pos, next, chest(lp.pos)) <= pr.radius + 0.55) {
-        sys.hitPlayer(pr.owner, lp.a, pr.damage, { fromDir: scale(normalize(pr.vel), -1), effect: pr.effect });
-        gone = true;
-        break;
-      }
+    if (victim) {
+      sys.hitPlayer(pr.owner, victim.a, pr.damage, { fromDir: scale(normalize(pr.vel), -1), effect: pr.effect });
+      gone = true;
     }
     if (!gone) {
       const l = len(next);

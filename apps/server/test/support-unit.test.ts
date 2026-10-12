@@ -111,6 +111,7 @@ describe("what the shell stops", () => {
     const shell = field.add("in", at(w, 80), 3, 150, w.clock.t + 6000);
     const archer = w.sys.createNpc(NPC_INDEX.get("sparkfly")!, 2, at(w, 92), w.clock.t, { instant: true });
     const pellet = npcDef("sparkfly").attacks.find((a) => a.shape === "bolt")!;
+    w.step(1); // the NPC system's list of live players (so the bolt could hit p if the shell let it)
     spawnBolt(w.sys, archer, lift(at(w, 92), 1.2), lift(at(w, 80), 0.9), pellet, 10, w.clock.t);
     for (let i = 0; i < 40; i++) {
       w.clock.t += 50;
@@ -124,5 +125,46 @@ describe("what the shell stops", () => {
     expect(shell.hp).toBe(131);
     expect(w.sys.hitPlayer(archer, p, 9, { src: lift(at(w, 81), 1.0) })).toBe(9);
     expect(w.sys.hitPlayer(archer, p, 5)).toBe(5);
+  });
+
+  it("a piercing bolt that hits someone just outside the shell still stops at the shell (nearest hit first)", () => {
+    const { w, field } = setup();
+    // Downhill from 78 m to 90 m: a clear line over open ground.
+    const shooter = w.addPlayer("shooter", at(w, 78), 12);
+    const front = w.addPlayer("front", at(w, 86), 1);
+    const inside = w.addPlayer("inside", at(w, 91.5), 1);
+    const shell = field.add("inside", at(w, 90), 3, 150, w.clock.t + 6000);
+    const from = lift(at(w, 78), 1.0);
+    const to = lift(at(w, 91.5), 1.0);
+    const d: V3 = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+    const l = Math.hypot(...d);
+    const def = weapon("hexquill");
+    projectiles(w.world.host).push({
+      id: 7, owner: shooter, weapon: def, tier: def.tiers[2], damage: 26, pos: from, vel: [(d[0] / l) * 45, (d[1] / l) * 45, (d[2] / l) * 45],
+      gravity: 0, travelled: 0, maxDist: 60, pierceLeft: 2, hit: new Set([shooter.id]), fuseAt: null, stuck: false,
+    });
+    // One long step (10 m) crosses the front player and the shell's surface together.
+    stepProjectiles(w.world.host, 10 / 45);
+    for (let i = 0; i < 10; i++) stepProjectiles(w.world.host, 0.05);
+    expect(front.state.hp).toBe(100 - 26);
+    expect(inside.state.hp).toBe(100);
+    expect(shell.hp).toBe(150 - 26);
+    expect(projectiles(w.world.host)).toHaveLength(0);
+  });
+
+  it("an NPC bolt hits a player standing in front of a shell before the shell", () => {
+    const { w, field } = setup();
+    const front = w.addPlayer("front", at(w, 86.5), 1);
+    const shell = field.add("other", at(w, 90), 3, 150, w.clock.t + 6000);
+    const spark = w.sys.createNpc(NPC_INDEX.get("sparkfly")!, 2, at(w, 78), w.clock.t, { instant: true });
+    const pellet = npcDef("sparkfly").attacks.find((a) => a.shape === "bolt")!;
+    w.step(1); // the NPC system's list of live players
+    spawnBolt(w.sys, spark, lift(at(w, 78), 1.0), lift(at(w, 90), 1.0), pellet, 10, w.clock.t);
+    for (let i = 0; i < 12 && w.sys.projectiles.length; i++) {
+      w.clock.t += 300;
+      stepNpcProjectiles(w.sys, w.clock.t, 0.3);
+    }
+    expect(front.state.hp).toBe(90);
+    expect(shell.hp).toBe(150);
   });
 });

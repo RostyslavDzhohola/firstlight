@@ -629,88 +629,110 @@ export function stepProjectiles(host: CombatHost, dt: number) {
     p.vel[2] -= up[2] * p.gravity * dt;
     const step = Math.hypot(p.vel[0], p.vel[1], p.vel[2]) * dt;
     const d: V3 = [p.vel[0] * dt / step, p.vel[1] * dt / step, p.vel[2] * dt / step];
-    const terrainT = rayTerrain(host.terrain, p.pos, d, step, 0.75);
+    if (!advance(host, p, d, step, now)) list.splice(i, 1);
+    else if (!p.stuck && p.travelled > p.maxDist) list.splice(i, 1);
+  }
+}
+
+/**
+ * Move a projectile `step` metres along `d`, resolving collisions nearest first: an actor, a Prism
+ * Bubble shell, an intact breakable, then terrain. A piercing bolt carries on through the rest of the
+ * segment after each actor it pierces (F12 review: it used to jump the whole step, skipping a shell
+ * just behind the first victim). Returns false when the projectile is gone; grenades stop (stuck)
+ * against shells, props and terrain and wait for their fuse.
+ */
+function advance(host: CombatHost, p: Projectile, d: V3, step: number, now: number): boolean {
+  const wi = WEAPON_INDEX.get(p.weapon.id) ?? 0;
+  const splash = p.tier.splash && p.tier.radius ? p.tier.splash : 0;
+  const burst = (at: V3) => host.broadcastNear("explode", { id: p.id, x: at[0], y: at[1], z: at[2], radius: 0, weapon: wi }, at, 200);
+  const moveTo = (t: number) => {
+    p.pos = [p.pos[0] + d[0] * t, p.pos[1] + d[1] * t, p.pos[2] + d[2] * t];
+    p.travelled += t;
+  };
+  let left = step;
+  for (let guard = 0; guard < 8 && left > 1e-6; guard++) {
+    const o = p.pos;
+    const terrainT = rayTerrain(host.terrain, o, d, left, 0.75);
     // Intact breakables stop projectiles like terrain does (destruction.ts).
-    const prop = propOnRay(host, p.pos, d, Math.min(step, terrainT));
+    const prop = propOnRay(host, o, d, Math.min(left, terrainT));
     const propT = prop ? prop.t : Infinity, propIdx = prop ? prop.index : -1;
     // A Prism Bubble shell stops the projectile where it crosses (rockets burst against it).
-    const shell = host.bubbles?.cross(p.pos, d, Math.min(step, terrainT, propT)) ?? null;
-    if (shell) {
-      const sh = shell.bubble, shT = shell.t;
-      if (!raycastActors(host, p.pos, d, shT, p.hit, 0)) {
-        const at: V3 = [p.pos[0] + d[0] * shT, p.pos[1] + d[1] * shT, p.pos[2] + d[2] * shT];
-        if (p.fuseAt !== null) {
-          // Grenades stop against the shell and wait for the fuse outside it.
-          p.pos = [at[0] - d[0] * 0.2, at[1] - d[1] * 0.2, at[2] - d[2] * 0.2];
-          p.stuck = true;
-          continue;
-        }
-        // The direct number includes the blast (content §2.3): the shell takes the rest from the splash.
-        host.bubbles!.absorb(sh, p.damage - (p.tier.splash && p.tier.radius ? p.tier.splash : 0));
-        const back: V3 = [at[0] - d[0] * 0.05, at[1] - d[1] * 0.05, at[2] - d[2] * 0.05];
-        if (p.tier.splash && p.tier.radius) explode(host, p.owner, back, p.tier.radius, p.tier.splash, WEAPON_INDEX.get(p.weapon.id) ?? 0);
-        else host.broadcastNear("explode", { id: p.id, x: at[0], y: at[1], z: at[2], radius: 0, weapon: WEAPON_INDEX.get(p.weapon.id) }, at, 200);
-        list.splice(i, 1);
-        continue;
-      }
-    }
-    const hit = raycastActors(host, p.pos, d, Math.min(step, terrainT, propT), p.hit, 0);
+    const shell = host.bubbles?.cross(o, d, Math.min(left, terrainT, propT)) ?? null;
+    const shellT = shell ? shell.t : Infinity;
+    const sh = shell ? shell.bubble : null;
+    const hit = raycastActors(host, o, d, Math.min(left, terrainT, propT, shellT), p.hit, 0);
     if (hit) {
       p.hit.add(hit.actor.id);
-      const mult = weakMult(hit, p.tier);
-      const at: V3 = [p.pos[0] + d[0] * hit.t, p.pos[1] + d[1] * hit.t, p.pos[2] + d[2] * hit.t];
+      const at: V3 = [o[0] + d[0] * hit.t, o[1] + d[1] * hit.t, o[2] + d[2] * hit.t];
       if (p.fuseAt === null) {
-        const applied = dealDamage(host, p.owner, hit.actor, p.damage * mult, hit.weak, [p.pos[0] - at[0], p.pos[1] - at[1], p.pos[2] - at[2]]);
+        const mult = weakMult(hit, p.tier);
+        const applied = dealDamage(host, p.owner, hit.actor, p.damage * mult, hit.weak, [o[0] - at[0], o[1] - at[1], o[2] - at[2]]);
         // Burn refreshes, never stacks; NPCs burn too (F12 review).
         if (applied && p.tier.burn) {
           if (hit.actor.kind === "player") hit.actor.burn = { perSec: p.tier.burn, until: now + 3000, by: p.owner.id };
           else npcBurns(host).set(hit.actor, { perSec: p.tier.burn, until: now + 3000, by: p.owner.id, acc: 0 });
         }
         // The direct-hit number already includes the blast for the victim (content.md §2.3).
-        if (p.tier.splash && p.tier.radius) explode(host, p.owner, at, p.tier.radius, p.tier.splash, WEAPON_INDEX.get(p.weapon.id) ?? 0, hit.actor.id);
-        if (p.pierceLeft > 0) {
-          p.pierceLeft--;
-        } else {
-          host.broadcastNear("explode", { id: p.id, x: at[0], y: at[1], z: at[2], radius: 0, weapon: WEAPON_INDEX.get(p.weapon.id) }, at, 200);
-          list.splice(i, 1);
-          continue;
+        if (splash) explode(host, p.owner, at, p.tier.radius!, splash, wi, hit.actor.id);
+        if (p.pierceLeft <= 0) {
+          burst(at);
+          return false;
         }
+        p.pierceLeft--;
       }
+      // Pierced (or a grenade rolling past someone): carry on from just beyond the hit.
+      const t = Math.min(left, hit.t + 0.01);
+      moveTo(t);
+      left -= t;
+      continue;
     }
-    if (propIdx >= 0 && propT < step && propT <= terrainT) {
-      const at: V3 = [p.pos[0] + d[0] * propT, p.pos[1] + d[1] * propT, p.pos[2] + d[2] * propT];
+    if (sh) {
+      const at: V3 = [o[0] + d[0] * shellT, o[1] + d[1] * shellT, o[2] + d[2] * shellT];
+      if (p.fuseAt !== null) {
+        // Grenades stop against the shell and wait for the fuse on the side they came from.
+        moveTo(Math.max(0, shellT - 0.2));
+        p.stuck = true;
+        return true;
+      }
+      // The direct number includes the blast (content §2.3): the shell takes the rest from the splash.
+      host.bubbles!.absorb(sh, p.damage - splash);
+      const back: V3 = [at[0] - d[0] * 0.05, at[1] - d[1] * 0.05, at[2] - d[2] * 0.05];
+      if (splash) explode(host, p.owner, back, p.tier.radius!, splash, wi);
+      else burst(at);
+      return false;
+    }
+    if (propIdx >= 0 && propT < left && propT <= terrainT) {
+      const at: V3 = [o[0] + d[0] * propT, o[1] + d[1] * propT, o[2] + d[2] * propT];
       if (p.fuseAt !== null) {
         // Grenades stop against the prop and wait for the fuse.
-        p.pos = [at[0] - d[0] * 0.2, at[1] - d[1] * 0.2, at[2] - d[2] * 0.2];
+        moveTo(Math.max(0, propT - 0.2));
         p.stuck = true;
-        continue;
+        return true;
       }
       host.props!.damage(propIdx, p.damage, p.weapon.destroys, p.weapon.id, d, playerId(p.owner));
-      if (p.tier.splash && p.tier.radius) explode(host, p.owner, at, p.tier.radius, p.tier.splash, WEAPON_INDEX.get(p.weapon.id) ?? 0, undefined, propIdx);
+      if (splash) explode(host, p.owner, at, p.tier.radius!, splash, wi, undefined, propIdx);
       else host.onPropHit?.(at, p.weapon.destroys === "heavy" ? "heavy" : "light", p.damage);
-      host.broadcastNear("explode", { id: p.id, x: at[0], y: at[1], z: at[2], radius: 0, weapon: WEAPON_INDEX.get(p.weapon.id) }, at, 200);
-      list.splice(i, 1);
-      continue;
+      burst(at);
+      return false;
     }
-    if (terrainT < step) {
-      const at: V3 = [p.pos[0] + d[0] * terrainT, p.pos[1] + d[1] * terrainT, p.pos[2] + d[2] * terrainT];
+    if (terrainT < left) {
+      const at: V3 = [o[0] + d[0] * terrainT, o[1] + d[1] * terrainT, o[2] + d[2] * terrainT];
       if (p.fuseAt !== null) {
-        p.pos = at;
+        moveTo(terrainT);
         p.stuck = true;
-        continue;
+        return true;
       }
-      if (p.tier.splash && p.tier.radius) explode(host, p.owner, at, p.tier.radius, p.tier.splash, WEAPON_INDEX.get(p.weapon.id) ?? 0);
+      if (splash) explode(host, p.owner, at, p.tier.radius!, splash, wi);
       else {
         host.onPropHit?.(at, p.weapon.destroys === "heavy" ? "heavy" : "light", p.damage);
-        host.broadcastNear("explode", { id: p.id, x: at[0], y: at[1], z: at[2], radius: 0, weapon: WEAPON_INDEX.get(p.weapon.id) }, at, 200);
+        burst(at);
       }
-      list.splice(i, 1);
-      continue;
+      return false;
     }
-    p.pos = [p.pos[0] + d[0] * step, p.pos[1] + d[1] * step, p.pos[2] + d[2] * step];
-    p.travelled += step;
-    if (p.travelled > p.maxDist) list.splice(i, 1);
+    moveTo(left);
+    left = 0;
   }
+  return true;
 }
 
 const burnAcc = new WeakMap<PlayerActor, number>();
