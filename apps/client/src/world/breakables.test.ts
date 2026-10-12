@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 import * as THREE from "three/webgpu";
-import { archetypeDef, BREAKABLE_ARCHETYPES, createTerrain, PLANET_IDS, type Breakable } from "@firstlight/shared";
+import { archetypeDef, BREAKABLE_ARCHETYPES, createTerrain, distanceToBreakable, PLANET_IDS, rayBreakable, scaledCollider, type Breakable, type BodyId, type BreakableArchetype } from "@firstlight/shared";
 import { Debris, DEBRIS_MAX } from "../render/debris.ts";
 import { archetypeShape, buildBreakableAssets, FRACTURE_VARIANTS, type BreakableAssets } from "./breakableShapes.ts";
 
@@ -33,6 +33,40 @@ function isClosed(pos: ArrayLike<number>): boolean {
   return edges.size > 0;
 }
 
+type V3 = [number, number, number];
+
+/** The intact mesh's triangles (object space, scale 1). */
+function meshTris(body: BodyId, a: BreakableArchetype): Float32Array[] {
+  return archetypeShape(body, a).map((p) => p.geometry.getAttribute("position").array as Float32Array);
+}
+
+/** The shared collider at scale 1, standing at the origin (x right, y up, z forward). */
+function collider(body: BodyId, a: BreakableArchetype): Breakable {
+  const c = scaledCollider(archetypeDef(body, a).collider, 1);
+  return { px: 0, py: 0, pz: 0, rx: 1, ry: 0, rz: 0, ux: 0, uy: 1, uz: 0, fx: 0, fy: 0, fz: 1, ...c } as unknown as Breakable;
+}
+
+/** Does a ray hit any triangle (Möller–Trumbore, t > 0)? */
+function rayMesh(tris: Float32Array[], o: V3, d: V3): boolean {
+  for (const p of tris) {
+    for (let t = 0; t < p.length; t += 9) {
+      const e1x = p[t + 3]! - p[t]!, e1y = p[t + 4]! - p[t + 1]!, e1z = p[t + 5]! - p[t + 2]!;
+      const e2x = p[t + 6]! - p[t]!, e2y = p[t + 7]! - p[t + 1]!, e2z = p[t + 8]! - p[t + 2]!;
+      const hx = d[1] * e2z - d[2] * e2y, hy = d[2] * e2x - d[0] * e2z, hz = d[0] * e2y - d[1] * e2x;
+      const det = e1x * hx + e1y * hy + e1z * hz;
+      if (Math.abs(det) < 1e-12) continue;
+      const f = 1 / det, sx = o[0] - p[t]!, sy = o[1] - p[t + 1]!, sz = o[2] - p[t + 2]!;
+      const u = f * (sx * hx + sy * hy + sz * hz);
+      if (u < 0 || u > 1) continue;
+      const qx = sy * e1z - sz * e1y, qy = sz * e1x - sx * e1z, qz = sx * e1y - sy * e1x;
+      const v = f * (d[0] * qx + d[1] * qy + d[2] * qz);
+      if (v < 0 || u + v > 1) continue;
+      if (f * (e2x * qx + e2y * qy + e2z * qz) > 0) return true;
+    }
+  }
+  return false;
+}
+
 describe("breakable meshes and pre-fracture", () => {
   it("every archetype part on every planet is a closed (manifold) solid", () => {
     for (const body of PLANET_IDS) {
@@ -47,23 +81,58 @@ describe("breakable meshes and pre-fracture", () => {
   it("meshes fill their shared colliders (what blocks a shot is what you see)", () => {
     for (const body of PLANET_IDS) {
       for (const a of BREAKABLE_ARCHETYPES) {
-        const c = archetypeDef(body, a).collider;
-        let vol = 0, ext = 0, top = 0;
-        for (const part of archetypeShape(body, a)) {
-          const p = part.geometry.getAttribute("position").array as Float32Array;
+        const c = collider(body, a);
+        let vol = 0, reach = 0, top = 0;
+        for (const p of meshTris(body, a)) {
           for (let t = 0; t < p.length; t += 9) {
             const [ax, ay, az, bx, by, bz, cx, cy, cz] = Array.from(p.subarray(t, t + 9)) as [number, number, number, number, number, number, number, number, number];
             vol += (ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx)) / 6;
           }
           for (let i = 0; i < p.length; i += 3) {
-            ext = Math.max(ext, c.kind === "box" ? Math.max(Math.abs(p[i]!) / c.hx, Math.abs(p[i + 2]!) / c.hz) : Math.hypot(p[i]!, p[i + 2]!) / c.r);
+            reach = Math.max(reach, Math.hypot(p[i]!, p[i + 2]!));
             top = Math.max(top, p[i + 1]!);
           }
         }
-        const cvol = c.kind === "box" ? 4 * c.hx * c.hz * c.h : Math.PI * c.r * c.r * c.h;
+        // Collider volume by sampling (compound colliders overlap their parts).
+        const N = 24, F = c.foot;
+        let inside = 0;
+        for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) for (let k = 0; k < N; k++) {
+          const x = -F + (2 * F * (i + 0.5)) / N, y = (c.h * (j + 0.5)) / N, z = -F + (2 * F * (k + 0.5)) / N;
+          if (distanceToBreakable(c, x, y, z) === 0) inside++;
+        }
+        const cvol = (inside / N ** 3) * 4 * F * F * c.h;
         expect(vol / cvol, `${body} ${a} volume`).toBeGreaterThan(0.5); // the rail fence was 12%, statues ~30%
-        expect(ext, `${body} ${a} width`).toBeGreaterThan(0.95);
+        expect(reach / c.foot, `${body} ${a} width`).toBeGreaterThan(0.95);
         expect(top / c.h, `${body} ${a} height`).toBeGreaterThan(0.9);
+      }
+    }
+  });
+
+  it("mesh and collider agree on what a shot hits (down, front and side ray fans)", () => {
+    for (const body of PLANET_IDS) {
+      for (const a of BREAKABLE_ARCHETYPES) {
+        const c = collider(body, a);
+        const tris = meshTris(body, a);
+        const N = 13, F = c.foot * 1.1;
+        let agree = 0, n = 0;
+        for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+          const u = -F + (2 * F * i) / (N - 1), w = -F + (2 * F * j) / (N - 1), y = c.h * (0.05 + (0.9 * j) / (N - 1));
+          const rays: [V3, V3][] = [[[u, c.h + 1, w], [0, -1, 0]], [[u, y, -10], [0, 0, 1]], [[-10, y, u], [1, 0, 0]]];
+          for (const [o, d] of rays) {
+            n++;
+            if (rayMesh(tris, o, d) === rayBreakable(c, o[0], o[1], o[2], d[0], d[1], d[2], 50) < Infinity) agree++;
+          }
+        }
+        expect(agree / n, `${body} ${a}`).toBeGreaterThan(0.9);
+      }
+    }
+    // The review's probes: shots down onto a statue base's corner and a pillar cap's corner.
+    for (const body of PLANET_IDS) {
+      for (const [a, x] of [["statue", 0.36], ["pillar", 0.32]] as const) {
+        if (body === "meridian" && a === "statue") continue; // a narrower plinth: no corner there
+        const o: V3 = [x, 6, x];
+        expect(rayMesh(meshTris(body, a), o, [0, -1, 0]), `${body} ${a} mesh`).toBe(true);
+        expect(rayBreakable(collider(body, a), o[0], o[1], o[2], 0, -1, 0, 50), `${body} ${a} collider`).toBeLessThan(Infinity);
       }
     }
   });

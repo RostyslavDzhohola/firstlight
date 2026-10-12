@@ -48,35 +48,62 @@ export function resetContact(c: PropContact): PropContact {
 }
 
 /**
- * One prop vs the player cylinder (`radius`, `height`) with its feet at `p`.
- * - Feet within `step` below the top (or just above it) with the centre over the footprint: the prop
- *   is a floor; its top (distance from the planet centre) goes into `out.floor` (the max is kept).
- * - Otherwise, overlapping the side: `p` moves out sideways by the shortest way; the push direction
- *   goes into `out`.
+ * One prop vs the player cylinder (`radius`, `height`) with its feet at `p`, solid by solid for a
+ * compound collider (main shape, then its extra parts).
+ * - Feet within `step` below a solid's top (or just above it) with the centre over its footprint:
+ *   that top is a floor; its distance from the planet centre goes into `out.floor` (the max is kept).
+ * - Otherwise, overlapping a solid's side: `p` moves out sideways by the shortest way; the push
+ *   direction goes into `out`.
  * Returns true if `p` moved.
  */
 export function pushOutOfBreakable(b: Breakable, p: XYZ, radius: number, height: number, step: number, out: PropContact): boolean {
+  let moved = pushOutOfSolid(b, b.shape, b.hx, b.hz, 0, b.h, p, radius, height, step, out);
+  if (b.parts) for (const q of b.parts) if (pushOutOfSolid(b, q.shape, q.hx, q.hz, q.y0, q.y1, p, radius, height, step, out)) moved = true;
+  return moved;
+}
+
+/** Local frame coordinates of `p` relative to a prop's base. */
+const _l = { x: 0, y: 0, z: 0 };
+function toLocal(b: Breakable, p: XYZ) {
   const qx = p.x - b.px, qy = p.y - b.py, qz = p.z - b.pz;
-  const ly = qx * b.ux + qy * b.uy + qz * b.uz;
-  if (ly >= b.h + TOP_SLACK || ly + height <= 0) return false;
-  const lx = qx * b.rx + qy * b.ry + qz * b.rz;
-  const lz = qx * b.fx + qy * b.fy + qz * b.fz;
+  _l.x = qx * b.rx + qy * b.ry + qz * b.rz;
+  _l.y = qx * b.ux + qy * b.uy + qz * b.uz;
+  _l.z = qx * b.fx + qy * b.fy + qz * b.fz;
+  return _l;
+}
+
+/** How far the point (lx, lz) lies outside a solid's footprint (0 inside). */
+function outsideFootprint(shape: 0 | 1, hx: number, hz: number, lx: number, lz: number): number {
+  if (shape === 0) {
+    const ex = lx - Math.max(-hx, Math.min(hx, lx)), ez = lz - Math.max(-hz, Math.min(hz, lz));
+    return Math.sqrt(ex * ex + ez * ez);
+  }
+  return Math.max(0, Math.sqrt(lx * lx + lz * lz) - hx);
+}
+
+/** The top of a solid under the feet at `p` (local height ly), as a distance from the planet centre. */
+function topRadius(b: Breakable, p: XYZ, ly: number, y1: number): number {
+  const lift = y1 - ly;
+  const tx = p.x + b.ux * lift, ty = p.y + b.uy * lift, tz = p.z + b.uz * lift;
+  return Math.sqrt(tx * tx + ty * ty + tz * tz);
+}
+
+function pushOutOfSolid(b: Breakable, shape: 0 | 1, hx: number, hz: number, y0: number, y1: number, p: XYZ, radius: number, height: number, step: number, out: PropContact): boolean {
+  const { x: lx, y: ly, z: lz } = toLocal(b, p);
+  if (ly >= y1 + TOP_SLACK || ly + height <= y0) return false;
   // Unit escape direction (local x, z), how far to move along it, and how far the centre is
   // outside the footprint (0 inside).
-  let dx: number, dz: number, depth: number, outside: number;
-  if (b.shape === 0) {
-    const cx = Math.max(-b.hx, Math.min(b.hx, lx));
-    const cz = Math.max(-b.hz, Math.min(b.hz, lz));
-    const ex = lx - cx, ez = lz - cz;
-    outside = Math.sqrt(ex * ex + ez * ez);
-    if (outside >= radius) return false;
+  let dx: number, dz: number, depth: number;
+  const outside = outsideFootprint(shape, hx, hz, lx, lz);
+  if (outside >= radius) return false;
+  if (shape === 0) {
     if (outside > 1e-9) {
-      dx = ex / outside;
-      dz = ez / outside;
+      dx = (lx - Math.max(-hx, Math.min(hx, lx))) / outside;
+      dz = (lz - Math.max(-hz, Math.min(hz, lz))) / outside;
       depth = radius - outside;
     } else {
       // Centre inside the box: leave through the nearest face.
-      const gx = b.hx - Math.abs(lx), gz = b.hz - Math.abs(lz);
+      const gx = hx - Math.abs(lx), gz = hz - Math.abs(lz);
       if (gx <= gz) {
         dx = lx >= 0 ? 1 : -1;
         dz = 0;
@@ -89,8 +116,6 @@ export function pushOutOfBreakable(b: Breakable, p: XYZ, radius: number, height:
     }
   } else {
     const rl = Math.sqrt(lx * lx + lz * lz);
-    if (rl >= b.hx + radius) return false;
-    outside = Math.max(0, rl - b.hx);
     if (rl > 1e-9) {
       dx = lx / rl;
       dz = lz / rl;
@@ -98,13 +123,11 @@ export function pushOutOfBreakable(b: Breakable, p: XYZ, radius: number, height:
       dx = 1;
       dz = 0;
     }
-    depth = b.hx + radius - rl;
+    depth = hx + radius - rl;
   }
-  if (ly >= b.h - step && outside <= radius * 0.5) {
+  if (ly >= y1 - step && outside <= radius * 0.5) {
     // Standing on (or stepping onto) the top.
-    const lift = b.h - ly;
-    const tx = p.x + b.ux * lift, ty = p.y + b.uy * lift, tz = p.z + b.uz * lift;
-    const top = Math.sqrt(tx * tx + ty * ty + tz * tz);
+    const top = topRadius(b, p, ly, y1);
     if (top > out.floor) out.floor = top;
     return false;
   }
@@ -119,6 +142,41 @@ export function pushOutOfBreakable(b: Breakable, p: XYZ, radius: number, height:
   return true;
 }
 
+/**
+ * The highest top of a prop's solids that feet at `p` stand over: centre over the footprint (within
+ * half the body radius, as the client lands) and the feet no deeper than `step` below it. Distance
+ * from the planet centre, or 0.
+ */
+function supportOf(b: Breakable, p: XYZ, radius: number, step: number): number {
+  let best = 0;
+  for (let k = -1; k < (b.parts?.length ?? 0); k++) {
+    const q = k < 0 ? null : b.parts![k]!;
+    const shape = q ? q.shape : b.shape, hx = q ? q.hx : b.hx, hz = q ? q.hz : b.hz, y1 = q ? q.y1 : b.h;
+    const { x: lx, y: ly, z: lz } = toLocal(b, p);
+    if (ly < y1 - step || outsideFootprint(shape, hx, hz, lx, lz) > radius * 0.5) continue;
+    best = Math.max(best, topRadius(b, p, ly, y1));
+  }
+  return best;
+}
+
+/** How far below the feet a supporting top is looked for (a jump apex is ~1.2 m; slack for slopes). */
+const SUPPORT_REACH = 4;
+const _p: XYZ = { x: 0, y: 0, z: 0 };
+
+/**
+ * For the server's movement validator (height and grounded checks): the highest intact prop top
+ * that a player with feet at (x, y, z) stands over — centre over the top's footprint (within half
+ * the body radius, the client's landing rule), feet no deeper than `step` below it, any height
+ * above it — as a distance from the planet centre; 0 if none. Measure jumps from
+ * max(R + terrain height, support): that is where the client stands and lands.
+ *
+ *   const props = new BreakableCollider(destruction.list, destruction.grid); // once per room
+ *   const support = supportHeightAt(props, x, y, z, (i) => !destruction.isBroken(i));
+ */
+export function supportHeightAt(props: BreakableCollider, x: number, y: number, z: number, solid: (index: number) => boolean = () => true, body: { radius: number; step: number } = PLAYER_BODY): number {
+  return props.support(x, y, z, solid, body);
+}
+
 /** Every breakable of a body behind a grid: resolves the player against the solid ones near it. */
 export class BreakableCollider {
   readonly grid: BreakableGrid;
@@ -128,6 +186,26 @@ export class BreakableCollider {
   constructor(list: readonly Breakable[], grid?: BreakableGrid) {
     this.list = list;
     this.grid = grid ?? new BreakableGrid(list);
+  }
+
+  /**
+   * The highest solid prop top that feet at (x, y, z) stand over, however far below the feet (a jump
+   * from a wall top), as a distance from the planet centre; 0 if none. See supportHeightAt.
+   */
+  support(x: number, y: number, z: number, solid: (index: number) => boolean, body: { radius: number; step: number } = PLAYER_BODY): number {
+    if (this.list.length === 0) return 0;
+    _p.x = x;
+    _p.y = y;
+    _p.z = z;
+    const n = this.grid.collect(x, y, z, 0, 0, 0, 0, SUPPORT_REACH, this.candidates);
+    let best = 0;
+    for (let k = 0; k < n; k++) {
+      const i = this.candidates[k]!;
+      if (!solid(i)) continue;
+      const top = supportOf(this.list[i]!, _p, body.radius, body.step);
+      if (top > best) best = top;
+    }
+    return best;
   }
 
   /**

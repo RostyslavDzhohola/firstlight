@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { bodyBreakables, distanceToBreakable, type Breakable } from "./breakables.ts";
-import { BreakableCollider, emptyContact, PLAYER_BODY, pushOutOfBreakable, type XYZ } from "./collide.ts";
+import { BreakableCollider, emptyContact, PLAYER_BODY, pushOutOfBreakable, supportHeightAt, type XYZ } from "./collide.ts";
 import { createTerrain } from "./terrain.ts";
 
 const R = 500;
@@ -17,7 +17,7 @@ function prop(over: Partial<Breakable> & Pick<Breakable, "shape" | "hx" | "hz" |
   b.cx = b.px + b.ux * b.h / 2;
   b.cy = b.py + b.uy * b.h / 2;
   b.cz = b.pz + b.uz * b.h / 2;
-  b.foot = b.shape === 0 ? Math.hypot(b.hx, b.hz) : b.hx;
+  b.foot = Math.max(b.shape === 0 ? Math.hypot(b.hx, b.hz) : b.hx, ...(b.parts ?? []).map((q) => (q.shape === 0 ? Math.hypot(q.hx, q.hz) : q.hx)));
   b.bound = Math.hypot(b.foot, b.h / 2);
   return b;
 }
@@ -149,6 +149,48 @@ describe("BreakableCollider.raycast", () => {
     expect(collider.raycast(o.x, o.y, o.z, 0, 0, 1, 50, (i) => i !== 0)).toBeCloseTo(6.6, 9);
     expect(collider.raycast(o.x, o.y, o.z, 0, 0, 1, 2, () => true)).toBe(Infinity);
     expect(collider.raycast(o.x, R + 3, o.z, 0, 0, 1, 50, () => true)).toBe(Infinity); // over both
+  });
+});
+
+describe("compound colliders (statue base, pillar caps)", () => {
+  // A statue: a 0.4 m figure cylinder on a 0.9 m square base, 0.5 m tall.
+  const statue = prop({ shape: 1, hx: 0.4, hz: 0.4, h: 2.75, parts: [{ shape: 0, hx: 0.45, hz: 0.45, y0: 0, y1: 0.5 }] });
+  const collider = new BreakableCollider([statue]);
+
+  it("stops a downward shot on the base's corner, outside the figure", () => {
+    const o = feet(0.36, 3, 0.36);
+    expect(collider.raycast(o.x, o.y, o.z, 0, -1, 0, 10, () => true)).toBeCloseTo(2.5, 9);
+    const past = feet(0.5, 3, 0.5); // beyond the base
+    expect(collider.raycast(past.x, past.y, past.z, 0, -1, 0, 10, () => true)).toBe(Infinity);
+    expect(distanceToBreakable(statue, 0.36, R + 0.6, 0.36)).toBeCloseTo(0.1, 9); // above the base top
+  });
+
+  it("pushes a player out of the base corner as well as the figure", () => {
+    const p = feet(0.6, 0, 0.6); // 0.15 m from the base corner diagonally
+    pushOutOfBreakable(statue, p, r, H, step, emptyContact());
+    expect(distanceToBreakable(statue, p.x, p.y + 0.2, p.z)).toBeCloseTo(r, 6);
+  });
+});
+
+describe("supportHeightAt (server movement validation)", () => {
+  const crateA = prop({ shape: 0, hx: 0.5, hz: 0.5, h: 1 }, 0);
+  const pillar = prop({ shape: 1, hx: 0.38, hz: 0.38, h: 4.2, px: 5, parts: [{ shape: 0, hx: 0.42, hz: 0.42, y0: 0, y1: 0.3 }, { shape: 0, hx: 0.42, hz: 0.42, y0: 3.9, y1: 4.2 }] }, 1);
+  const props = new BreakableCollider([crateA, pillar]);
+
+  it("is the crate top under feet standing on it or jumping above it", () => {
+    expect(supportHeightAt(props, 0.2, R + 1, 0.1)).toBeCloseTo(Math.hypot(0.2, R + 1, 0.1), 9);
+    expect(supportHeightAt(props, 0.2, R + 2.2, 0.1)).toBeCloseTo(Math.hypot(0.2, R + 1, 0.1), 6); // mid-jump
+    expect(supportHeightAt(props, 0.2, R + 0.8, 0.1)).toBeCloseTo(Math.hypot(0.2, R + 1, 0.1), 6); // landing: within a step
+  });
+
+  it("is 0 beside the prop, deep inside it, or once it is broken", () => {
+    expect(supportHeightAt(props, 1.2, R + 1, 0)).toBe(0);
+    expect(supportHeightAt(props, 0, R + 0.3, 0)).toBe(0);
+    expect(supportHeightAt(props, 0.2, R + 1, 0.1, (i) => i !== 0)).toBe(0);
+  });
+
+  it("uses a compound prop's top (the pillar cap)", () => {
+    expect(supportHeightAt(props, 5.3, R + 4.4, 0.3)).toBeCloseTo(Math.hypot(5.3, R + 4.2, 0.3), 6);
   });
 });
 
