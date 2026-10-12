@@ -49,6 +49,9 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
   private readonly rayHit = { index: -1, t: 0 };
   private readonly tmp: V3 = [0, 0, 0];
   private breaks = 0;
+  /** Broken set changed since the last copy-state save (flushed at most once a second, and on dispose). */
+  private copyDirty = false;
+  private lastCopySave = 0;
 
   constructor(room: Room, now: () => number = Date.now) {
     this.room = room;
@@ -78,6 +81,8 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
   }
 
   private saveCopy() {
+    this.copyDirty = false;
+    this.lastCopySave = this.now();
     const broken: [string, number][] = [];
     for (const i of this.broken) broken.push([this.list[i]!.id, this.brokenUntil[i]!]);
     saveCopy(roomCopyKey(this.room), "destruction", broken.length ? ({ v: 1, broken } satisfies DestructionCopyState) : null);
@@ -176,6 +181,7 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
     this.brokenUntil[b.index] = until;
     this.hp[b.index] = 0;
     this.broken.add(b.index);
+    this.copyDirty = true;
     this.room.state.broken.set(b.id, until);
     // The server picks the shatter variant (deterministic per prop and break count).
     const variant = hash4(b.index, ++this.breaks, 0xb4ea) % DESTRUCTION.variants;
@@ -191,6 +197,7 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
     this.brokenUntil[index] = 0;
     this.hp[index] = b.hp;
     this.broken.delete(index);
+    this.copyDirty = true;
     this.room.state.broken.delete(b.id);
     this.room.broadcastNear("rebuilt", { id: b.id }, [b.cx, b.cy, b.cz], DESTRUCTION.broadcastRadius);
   }
@@ -204,8 +211,9 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
   }
 
   tick(_dtMs: number, now: number) {
-    if (this.broken.size === 0) return;
     for (const i of this.broken) if (now >= this.brokenUntil[i]!) this.rebuild(i);
+    // Checkpoint breaks and rebuilds so a crash doesn't bring broken props back early (SPEC §5.1).
+    if (this.copyDirty && now - this.lastCopySave >= 1000) this.saveCopy();
   }
 
   dispose() {

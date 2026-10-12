@@ -7,13 +7,14 @@ import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Room } from "@colyseus/sdk";
-import { createTerrain } from "@firstlight/shared";
+import { BODIES, createTerrain } from "@firstlight/shared";
 import { bossArena } from "@firstlight/shared/content/arenas";
 import { NF } from "@firstlight/shared/content/npcs";
-import { PF } from "@firstlight/shared/net/schema";
+import { BodyState, PF } from "@firstlight/shared/net/schema";
 import type { Game } from "../src/app.ts";
 import { openGameDb, type Db } from "../src/db/index.ts";
 import { copyStateStore, MemoryCopyStateStore, SqliteCopyStateStore } from "../src/world/copyState.ts";
+import type { BodyRoom } from "../src/world/BodyRoom.ts";
 import { DestructionSystem } from "../src/world/destruction.ts";
 import { dealDamage } from "../src/world/combat.ts";
 import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
@@ -195,6 +196,42 @@ describe("crash recovery (no dispose)", () => {
     const camp2 = w2.sys.groups[camp.point.id]!;
     expect(camp2.cleared).toBe(true);
     expect(Math.abs(camp2.respawnLeft - camp.respawnLeft)).toBeLessThan(1.5);
+  });
+});
+
+/** The slice of a room a DestructionSystem uses (Arcadia copy 0), with its own synced state. */
+function propRoom(): BodyRoom {
+  const state = new BodyState();
+  state.body = "arcadia";
+  state.copy = 0;
+  return { bodyDef: BODIES.arcadia, terrain: createTerrain("arcadia"), state, metadata: { body: "arcadia", copy: 0, loadtest: false }, host: {}, broadcastNear() {} } as unknown as BodyRoom;
+}
+
+describe("crash recovery: broken props (no dispose)", () => {
+  it("a broken prop is checkpointed within a second (Codex S2)", () => {
+    const dir = tempDir();
+    dirs.push(dir);
+    const path = join(dir, "game.db");
+    const db1 = openGameDb(path);
+    dbs.push(db1);
+    copyStateStore.current = new SqliteCopyStateStore(db1);
+    let now = 5_000_000;
+    const clock = () => now;
+    const a = new DestructionSystem(propRoom(), clock);
+    const prop = a.list.find((b) => b.hp < 400)!;
+    a.damage(prop.index, 1e6, "heavy", "", [1, 0, 0]);
+    expect(a.isBroken(prop.index)).toBe(true);
+    now += 1000;
+    a.tick(1000, now);
+    db1.close(); // the process dies: no dispose
+    const db2 = openGameDb(path);
+    dbs.push(db2);
+    copyStateStore.current = new SqliteCopyStateStore(db2);
+    const room = propRoom();
+    const b = new DestructionSystem(room, clock);
+    expect(b.isBroken(prop.index)).toBe(true);
+    expect(room.state.broken.has(prop.id)).toBe(true);
+    expect(b.brokenUntil[prop.index]).toBe(a.brokenUntil[prop.index]);
   });
 });
 
