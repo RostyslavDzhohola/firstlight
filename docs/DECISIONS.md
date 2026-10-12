@@ -8,7 +8,7 @@ Source tags: R1–R4 = grilling round, Q = question number in that round.
 
 ## Product
 
-- **What it is:** an original-IP, OASIS-style open-world multiplayer game in the browser. Free,
+- **What it is:** an original-IP multiplayer game in the browser: a persistent multi-planet open world. Free,
   open source, zero monetization. Desktop browsers only; phones get a "play on your computer"
   page with a copy-link button. (initial brief, R1 Q16)
 - **Name:** FIRSTLIGHT. Hub planet: Portus. Planets: Arcadia, Hollowmere, Meridian. (R1 Q1, R2 Q1)

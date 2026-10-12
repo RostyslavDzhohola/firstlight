@@ -45,7 +45,7 @@ compaction, and before every milestone:
 
 ## 1. Goal and finish line
 
-**Goal:** a beautiful, playable, multiplayer OASIS-style world at `https://firstlight.one4all.dev`
+**Goal:** a beautiful, playable, persistent multi-planet multiplayer open world at `https://firstlight.one4all.dev`
 that the owner can share as a link and film for a video: one life, wild-west PvP outside safe
 zones, co-op bosses, proximity voice, three planets and a hub.
 
