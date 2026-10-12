@@ -178,33 +178,24 @@ export class EggLogic {
     }
   }
 
-  /** Steps reported by other lanes (E3: the Golden Hopbit reached its burrow) or the admin `egg` command. */
+  /**
+   * Steps reported by the NPC lane (E3: the Golden Hopbit ran into its burrow; E9: Ticket #000
+   * reached the freight lift) or the admin `egg <id> <step>` command.
+   */
   onStep(a: PlayerActor, q: QuestPlayer, egg: EggId, step: string) {
     if (egg === "E3") {
       this.open(q, "E3");
-      this.sys.toast(a, "The Golden Hopbit dives into a burrow under the lone oak — and the burrow opens wide.", "info");
+      this.sys.toast(a, "The Golden Hopbit dives into its burrow under the lone oak. Follow it in!", "info");
+    } else if (egg === "E9") {
+      this.open(q, "E9");
+      this.sys.toast(a, "Ticket #000 steps into a freight lift and holds the door. It sinks below Checkpoint Seven…", "info");
+      this.teleportTo(a, "vat_room");
+      this.sys.toast(a, "The Vat Room: rows of empty trooper pods. One stands open.", "info");
     } else if (egg === "E4" && step === "lanterns") {
       q.e4 = { lit: new Set(), startedAt: Date.now(), ferryUntil: Date.now() + EGG_RULES.E4_FERRY_MS };
-    } else if (egg === "E6" || egg === "E8" || egg === "E9") {
+    } else if (egg === "E6" || egg === "E8") {
       this.open(q, egg);
     }
-  }
-
-  onPhrase(sessionId: string, phraseId: number) {
-    if (phraseId !== EGG_RULES.E9_PHRASE) return;
-    const a = this.sys.actor(sessionId);
-    if (!a || a.dead) return;
-    const trooper = this.sys.objects.find((o) => o.id === "e9_trooper");
-    if (!trooper || !inReach(this.sys.pos(trooper), actorPos(a), EGG_RULES.E9_RANGE)) return;
-    const q = this.sys.qp(a);
-    this.sys.toast(a, "Ticket #000 turns, studies you, and nods. It walks you to a freight lift that sinks below Checkpoint Seven…", "info");
-    this.sys.room.clock.setTimeout(() => {
-      const still = this.sys.actor(sessionId);
-      if (!still || still.dead) return;
-      this.open(q, "E9");
-      this.teleportTo(still, "vat_room");
-      this.sys.toast(still, "The Vat Room: rows of empty trooper pods. One stands open.", "info");
-    }, 2500);
   }
 
   // ---------------------------------------------------------------- E8 lamps

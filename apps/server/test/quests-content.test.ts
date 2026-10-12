@@ -9,6 +9,8 @@ import { missionsOn } from "@firstlight/shared/content/missions";
 import { placeDir } from "@firstlight/shared/content/places";
 import { WEAPON_INDEX } from "@firstlight/shared/content/weapons";
 import { emitGameEvent, onGameEvent, type GameEvent } from "../src/world/events.ts";
+import { npcSystemOf } from "../src/world/npc/index.ts";
+import { emitNpcEvent } from "../src/world/npc/tuning.ts";
 import { progressStore } from "../src/world/quests/store.ts";
 import { safeLeave, startServer } from "./helpers.ts";
 import { bot, ground, harness, invIds, me, near, objAt, offPad, padAt, serverRoom, sleep, tpAndWait, until, type Bot } from "./quest-helpers.ts";
@@ -197,14 +199,13 @@ describe("Easter eggs", () => {
     expect(b.you.medals).toContain("lights_out");
   });
 
-  it("E9 Ticket #000: “Truce?” near the trooper leads to the Vat Room", async () => {
+  it("E9 Ticket #000: when the NPC lane's trooper reaches the lift, the Vat Room opens", async () => {
     const b = await bot("diplomat", "meridian");
-    await tpAndWait(b, objAt("e9_trooper"));
-    b.send("phrase", { id: 1 }); // "Help!" does nothing
-    await sleep(300);
-    expect(b.toasts.some((t) => t.includes("Ticket #000"))).toBe(false);
-    b.send("phrase", { id: 0 });
-    await until("vat room", () => near(b, ground("meridian", placeDir("vat_room")), 4), 5000);
+    b.send("interact", { target: "e9_pod" });
+    await sleep(200);
+    expect(invIds(b)).not.toContain("ticket_000_helmet");
+    emitNpcEvent({ kind: "egg", body: "meridian", egg: "E9", sessionId: b.id, userId: "diplomat" });
+    await until("vat room", () => near(b, ground("meridian", placeDir("vat_room")), 4));
     b.send("interact", { target: "e9_pod" });
     await until("helmet", () => invIds(b).includes("ticket_000_helmet"));
     expect(b.you.medals).toContain("not_a_clone");
@@ -212,3 +213,26 @@ describe("Easter eggs", () => {
   });
 });
 
+describe("NPC lane bridge", () => {
+  it("NPC kills by spawn area feed hunts, boss kills feed medals, egg penalties spawn real NPCs", async () => {
+    const b = await bot("bridger", "arcadia");
+    await tpAndWait(b, objAt("guide_arcadia"));
+    b.send("mission", { action: "accept", id: "A1" });
+    await until("accepted", () => !!mission(b, "A1"));
+    // Kills outside Clover Fields (other area, or none) don't count; inside do.
+    emitNpcEvent({ kind: "kill", body: "arcadia", def: "hopbit", npcLevel: 2, players: [b.id], userIds: ["bridger"], area: "lacefall" });
+    emitNpcEvent({ kind: "kill", body: "arcadia", def: "hopbit", npcLevel: 2, players: [b.id], userIds: ["bridger"], area: null });
+    emitNpcEvent({ kind: "kill", body: "hollowmere", def: "hopbit", npcLevel: 2, players: [b.id], userIds: ["bridger"], area: "clover_fields" });
+    for (let i = 0; i < 3; i++) emitNpcEvent({ kind: "kill", body: "arcadia", def: "hopbit", npcLevel: 2, players: [b.id], userIds: ["bridger"], area: "clover_fields" });
+    await until("hunt progress", () => mission(b, "A1")?.progress === 3);
+
+    emitNpcEvent({ kind: "bossKill", body: "arcadia", boss: "tidewrath", sessionIds: [b.id], userIds: ["bridger"], names: ["bridger"] });
+    await until("tide turner", () => b.you.medals.includes("tide_turner"));
+
+    const npcs = npcSystemOf(serverRoom(b))!;
+    const before = npcs.npcs.size;
+    await tpAndWait(b, objAt("e2_btn_flame"));
+    b.send("interact", { target: "e2_btn_flame" }); // wrong first button
+    await until("hopbits spawned", () => [...npcs.npcs.values()].filter((n) => n.def.id === "hopbit").length >= 3 && npcs.npcs.size >= before + 3);
+  });
+});

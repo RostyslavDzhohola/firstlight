@@ -10,14 +10,14 @@ import { offsetDir, place, placeDir } from "./places.ts";
 import type { EggId } from "./secrets.ts";
 import type { MissionId } from "./missions.ts";
 
-/** How a player uses it: press E nearby, walk into it, shoot it, say a phrase nearby, or look only. */
-export type Trigger = "interact" | "enter" | "shoot" | "phrase" | "none";
+/** How a player uses it: press E nearby, walk into it, shoot it, or look only. */
+export type Trigger = "interact" | "enter" | "shoot" | "none";
 
 export type ObjectLook =
   | "keeper" | "guide" | "hall"
   | "bell" | "ledger" | "memo"
   | "bowl" | "cabinet" | "button" | "plaque" | "burrow" | "lantern" | "ferry" | "chest"
-  | "rope" | "well" | "altar" | "safe" | "poster" | "mirror" | "lamp" | "hatch" | "trooper" | "pod";
+  | "rope" | "well" | "altar" | "safe" | "poster" | "mirror" | "lamp" | "hatch" | "pod";
 
 export interface WorldObjectDef {
   id: string;
@@ -108,8 +108,7 @@ export const WORLD_OBJECTS: readonly WorldObjectDef[] = [
   ),
   O({ id: "e8_hatch", body: "meridian", place: "last_billboard", north: -24, look: "hatch", name: "Open the maintenance hatch", trigger: "interact", range: 2.2, egg: "E8", part: "hatch" }),
 
-  // E9 Ticket #000
-  O({ id: "e9_trooper", body: "meridian", place: "checkpoint_seven", north: -40, look: "trooper", name: "a trooper facing the wall", trigger: "phrase", range: 5, egg: "E9", part: "trooper" }),
+  // E9 Ticket #000 (the trooper is an NPC from the NPC lane; its walk to the lift opens the Vat Room)
   O({ id: "e9_pod", body: "meridian", place: "vat_room", look: "pod", name: "Look inside the open pod", trigger: "interact", range: 2.2, egg: "E9", part: "pod" }),
 ];
 

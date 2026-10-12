@@ -9,6 +9,7 @@ import type { HallLine } from "@firstlight/shared/content/secrets";
 import { inReach, objectPos, objectsOn, surfaceDistance, type WorldObjectDef } from "@firstlight/shared/content/world";
 import { PF } from "@firstlight/shared/net/schema";
 import { flags } from "../config.ts";
+import type { AvatarView } from "../render/Avatars.ts";
 import { CosmeticRig, Nameplates } from "../render/Cosmetics.ts";
 import { MapPanel } from "../ui/map.ts";
 import { AdminConsole, GuidePanel, JournalPanel, KeypadPanel, MissionTracker, Panel, ShopPanel } from "../ui/panels.ts";
@@ -43,7 +44,7 @@ export class QuestClient implements ClientSystem {
   private readonly tracker: MissionTracker;
   private readonly plates = new Nameplates();
   private readonly console: AdminConsole;
-  private readonly rigs = new Map<THREE.Object3D, CosmeticRig>();
+  private readonly rigs = new Map<AvatarView, CosmeticRig>();
   private readonly interactables: { def: WorldObjectDef; pos: [number, number, number] }[];
   private lastYou: unknown = null;
   private t = 0;
@@ -183,11 +184,11 @@ export class QuestClient implements ClientSystem {
     this.syncAvatars();
   }
 
-  private rig(root: THREE.Object3D): CosmeticRig {
-    let r = this.rigs.get(root);
+  private rig(avatar: AvatarView): CosmeticRig {
+    let r = this.rigs.get(avatar);
     if (!r) {
-      r = new CosmeticRig(root);
-      this.rigs.set(root, r);
+      r = new CosmeticRig(avatar);
+      this.rigs.set(avatar, r);
     }
     return r;
   }
@@ -198,21 +199,21 @@ export class QuestClient implements ClientSystem {
     const players = (room?.state as any)?.players;
     if (!room || !players) return;
     const mine = players.get(room.sessionId);
-    if (g.self && mine) this.rig(g.self.root).set(mine.cosmetics ?? "");
-    const live = new Set<THREE.Object3D>([g.self?.root].filter(Boolean) as THREE.Object3D[]);
+    if (g.self && mine) this.rig(g.self).set(mine.cosmetics ?? "");
+    const live = new Set<AvatarView>(g.self ? [g.self] : []);
     const plates: { id: string; pos: THREE.Vector3; name: string; title: string }[] = [];
     for (const [id, a] of g.avatars) {
       const st = players.get(id);
       if (!st) continue;
-      live.add(a.root);
-      this.rig(a.root).set(st.cosmetics ?? "");
+      live.add(a);
+      this.rig(a).set(st.cosmetics ?? "");
       if (!(st.flags & PF.DEAD)) plates.push({ id, pos: a.root.position, name: st.name, title: st.title ?? "" });
     }
-    for (const [root, r] of this.rigs) {
-      if (live.has(root)) r.update(this.t);
+    for (const [avatar, r] of this.rigs) {
+      if (live.has(avatar)) r.update(this.t);
       else {
         r.dispose();
-        this.rigs.delete(root);
+        this.rigs.delete(avatar);
       }
     }
     this.plates.update(g.ctx.camera, plates, g.player.pos);

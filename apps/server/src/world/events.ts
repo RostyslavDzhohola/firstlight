@@ -3,7 +3,9 @@
 // onboarding). Missions, medals and Easter eggs (world/quests) listen. Handlers run synchronously
 // and are isolated: a throwing handler is logged and never breaks the emitter.
 //
-// For the NPC / boss lane — call this when an NPC dies (after its HP hits 0):
+// The NPC lane's own process-wide events (npc/tuning.ts onNpcEvent: kill, bossKill, egg) are
+// bridged onto this bus by the quests system (quests/QuestSystem.ts onNpcEvent), and the quests
+// system honours `spawnRequest` through npcSystemOf(room). Any other lane can emit directly:
 //
 //   import { emitGameEvent } from "../events.ts";
 //   emitGameEvent(room, {
@@ -11,23 +13,28 @@
 //     npcKind: "hopbit",              // content id (missions match on it: hopbit, cantor, associate, compliance_officer…)
 //     killerId: lastHitterSessionId,  // player session id, or null
 //     creditIds: [...],               // players credited (XP rule: ≥ 20% damage or the killing blow); defaults to [killerId]
-//     pos: [x, y, z],                 // where it died (hunt missions with an area check use it)
+//     area: "clover_fields",          // NPC spawn-area id, or pos: [x, y, z] (hunt missions with an area check use either)
 //     bossId: "tidewrath",            // bosses only: "tidewrath" | "hollow_king" | "receiver"
 //     // for bosses, creditIds = every LOOT-ELIGIBLE player (medals, Triple Crown, Hall of Firsts)
-//     npcId: npc.id,                  // bosses: the NpcActor id (Untouchable matches it to damage events)
 //   });
+//   emitGameEvent(room, { type: "propBroken", playerId });      // destruction lane (Demolition Crew)
+//   emitGameEvent(room, { type: "onboardingDone", playerId });  // onboarding (Spark)
 //
-// Emit it synchronously from NpcActor.onKilled (inside the damage call): Long Shot checks that the
-// killer's Stillshot fired within the last few ticks.
-//
-// Also set `defId` (e.g. "woolback") on NpcActor so player deaths can name the NPC kind, and listen
-// for `spawnRequest` (egg penalties, admin staged scenes) to spawn NPCs or bosses on demand.
+// NPC kinds in damage/death events come from NpcActor.defId, else the NPC table entry for its
+// NpcState.kind (npcKindOf).
 
 import type { BodyId } from "@firstlight/shared";
+import { NPC_DEFS } from "@firstlight/shared/content/npcs";
 import type { BossId } from "@firstlight/shared/content/places";
 import type { EggId } from "@firstlight/shared/content/secrets";
+import type { NpcActor } from "./actors.ts";
 import type { BodyRoom } from "./BodyRoom.ts";
 import type { V3 } from "./geometry.ts";
+
+/** NPC content id of an actor: its `defId`, else the NPC table entry for NpcState.kind. */
+export function npcKindOf(n: NpcActor): string | undefined {
+  return n.defId ?? NPC_DEFS[n.state.kind]?.id;
+}
 
 export interface KillEvent {
   type: "kill";
@@ -40,7 +47,10 @@ export interface KillEvent {
   creditIds?: string[];
   bossId?: BossId;
   level?: number;
-  pos: V3;
+  /** Where it died (hunt area checks by distance, Long Shot). */
+  pos?: V3;
+  /** NPC spawn-area id (npcs.ts NPC_AREAS), when it belonged to one: hunt areas match on it. */
+  area?: string;
 }
 
 export interface DeathEvent {

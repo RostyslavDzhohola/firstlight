@@ -13,6 +13,8 @@ import { offsetDir, padName, place, placeDir } from "@firstlight/shared/content/
 import { BOSS_FIRSTS, EGG_BY_ID, type EggId } from "@firstlight/shared/content/secrets";
 import { inReach, objectPos, objectsOn, surfaceDistance, WORLD_OBJECT_BY_ID, type WorldObjectDef } from "@firstlight/shared/content/world";
 import { WEAPON_BY_ID, WEAPONS } from "@firstlight/shared/content/weapons";
+import { NPC_DEFS, NPC_INDEX, defLevels, type PlanetId } from "@firstlight/shared/content/npcs";
+import type { BossId } from "@firstlight/shared/content/places";
 import type { InvItem, YouState } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
 import { z } from "zod";
@@ -20,7 +22,8 @@ import { accountLinks } from "../../auth/links.ts";
 import { actorPos, type PlayerActor } from "../actors.ts";
 import { withTx } from "../characters.ts";
 import type { BodyRoom } from "../BodyRoom.ts";
-import { emitGameEvent, onGameEvent, type DamageEvent, type DeathEvent, type GameEvent, type KillEvent } from "../events.ts";
+import { emitGameEvent, onGameEvent, type DamageEvent, type DeathEvent, type GameEvent, type KillEvent, type SpawnRequestEvent } from "../events.ts";
+import { npcSystemOf, onNpcEvent, type NpcEvent } from "../npc/index.ts";
 import { dist3, type V3 } from "../geometry.ts";
 import type { RoomSystem } from "../systems.ts";
 import { EggLogic } from "./eggs.ts";
@@ -132,10 +135,8 @@ export class QuestSystem implements RoomSystem {
     room.onMessage("title", z.object({ medalId: z.string().max(40).nullable() }), (c, m) => this.setTitle(c, m.medalId));
     room.onMessage("interact", z.object({ target: z.string().max(40), code: z.string().max(8).optional() }), (c, m) => this.interact(c, m.target, m.code));
     room.onMessage("questSync", z.object({}).passthrough().optional(), (c) => this.sync(c));
-    // Observe phrases (the room's own handler validates and broadcasts them).
-    room.onMessage("phrase", (c: Client, m: { id: number }) => this.eggs.onPhrase(c.sessionId, m.id));
-
     this.unsubs.push(onGameEvent(room, (e) => this.onEvent(e)));
+    this.unsubs.push(onNpcEvent((e) => this.onNpcEvent(e)));
     this.unsubs.push(onHallChanged((lines) => this.room.broadcast("hall" as never, { lines } as never)));
     this.unsubs.push(
       accountLinks.on((ev) => {
@@ -595,7 +596,9 @@ export class QuestSystem implements RoomSystem {
       if (!a || a.dead) continue;
       for (const { m, def } of this.activeMissions(a)) {
         if (!def.hunt) continue;
-        if (def.hunt.place) {
+        if (def.hunt.place && e.area !== def.hunt.place) {
+          // No matching spawn-area id: fall back to the kill position, if there is one.
+          if (!e.pos) continue;
           const p = place(def.hunt.place);
           const d = placeDir(p);
           const R = this.room.bodyDef.radius;
@@ -757,6 +760,9 @@ export class QuestSystem implements RoomSystem {
         if (a) this.eggs.onStep(a, this.qp(a), e.secretId, e.step);
         break;
       }
+      case "spawnRequest":
+        this.spawn(e);
+        break;
       default:
         break;
     }
@@ -765,7 +771,7 @@ export class QuestSystem implements RoomSystem {
   private onKillForMedals(e: KillEvent) {
     // Long Shot: the killing blow from a Stillshot at ≥ 120 m.
     const killer = e.killerId ? this.actor(e.killerId) : undefined;
-    if (killer && this.firedStillshot(killer) && dist3(actorPos(killer), e.pos) >= MEDAL_RULES.LONG_SHOT_METRES) this.award(killer, "long_shot");
+    if (killer && e.pos && this.firedStillshot(killer) && dist3(actorPos(killer), e.pos) >= MEDAL_RULES.LONG_SHOT_METRES) this.award(killer, "long_shot");
     if (!e.bossId) return;
     const medal = e.bossId === "tidewrath" ? "tide_turner" : e.bossId === "hollow_king" ? "regicide" : "decommissioned";
     const eligible = (e.creditIds ?? (e.killerId ? [e.killerId] : [])).map((id) => this.actor(id)).filter((a): a is PlayerActor => !!a);
@@ -774,10 +780,10 @@ export class QuestSystem implements RoomSystem {
       const life = this.life(a);
       if (!life.bosses.includes(e.bossId)) life.bosses.push(e.bossId);
       if (["tidewrath", "hollow_king", "receiver"].every((b) => life.bosses.includes(b))) this.award(a, "triple_crown");
-      const hits = e.npcId ? this.bossHits.get(e.npcId)?.get(a.identity.userId) : undefined;
+      const hits = this.bossHits.get(e.npcKind)?.get(a.identity.userId);
       if (hits && !hits.hurt) this.award(a, "untouchable");
     }
-    if (e.npcId) this.bossHits.delete(e.npcId);
+    this.bossHits.delete(e.npcKind);
     const people = eligible.filter((a) => !a.identity.loadtest);
     if (people.length) engrave(BOSS_FIRSTS[e.bossId], people[0]!.identity.userId, people.map((a) => a.identity.name).join(", ").slice(0, 200));
   }
@@ -793,18 +799,63 @@ export class QuestSystem implements RoomSystem {
       if (!a) return;
       const q = this.qp(a);
       if (e.attackerKind === "npc" && e.npcKind === "woolback") q.woolbackHitAt = e.at;
-      if (e.attackerKind === "npc" && e.boss && e.attackerId) {
-        const hit = this.bossHits.get(e.attackerId)?.get(a.identity.userId);
+      if (e.attackerKind === "npc" && e.boss) {
+        const hit = this.bossHits.get(e.npcKind ?? e.attackerId ?? "")?.get(a.identity.userId);
         if (hit) hit.hurt = true;
       }
       if (e.hpAfter > 0 && e.hpAfter <= e.maxHp * MEDAL_RULES.BY_A_THREAD_FRACTION && q.lowHpAt === null) q.lowHpAt = e.at;
     }
-    if (e.attackerKind === "player" && e.attackerId && e.targetKind === "npc" && e.boss) {
+    if (e.attackerKind === "player" && e.attackerId && e.targetKind === "npc") {
       const a = this.actor(e.attackerId);
       if (!a) return;
-      let enc = this.bossHits.get(e.targetId);
-      if (!enc) this.bossHits.set(e.targetId, (enc = new Map()));
-      if (!enc.has(a.identity.userId)) enc.set(a.identity.userId, { hurt: false });
+      if (e.boss) {
+        const key = e.npcKind ?? e.targetId;
+        let enc = this.bossHits.get(key);
+        if (!enc) this.bossHits.set(key, (enc = new Map()));
+        if (!enc.has(a.identity.userId)) enc.set(a.identity.userId, { hurt: false });
+      }
+      // Long Shot on an NPC: this hit killed it, from a Stillshot that just fired, 120 m or more away.
+      const npc = this.room.npcActors.get(e.targetId);
+      if (e.hpAfter <= 0 && npc && this.firedStillshot(a) && dist3(actorPos(a), actorPos(npc)) >= MEDAL_RULES.LONG_SHOT_METRES) this.award(a, "long_shot");
+    }
+  }
+
+  // ---------------------------------------------------------------- the NPC lane
+
+  /** Bridge the NPC lane's process-wide events (kills, boss kills, egg steps) onto this room's bus. */
+  private onNpcEvent(e: NpcEvent) {
+    if (e.body !== this.body) return;
+    const here = (ids: string[]) => ids.filter((id) => this.room.actors.has(id));
+    if (e.kind === "kill") {
+      const credit = here(e.players);
+      if (credit.length) emitGameEvent(this.room, { type: "kill", npcKind: e.def, killerId: null, creditIds: credit, level: e.npcLevel, ...(e.area ? { area: e.area } : {}) });
+    } else if (e.kind === "bossKill") {
+      const credit = here(e.sessionIds);
+      const bossId = BOSS_OF_NPC[e.boss];
+      if (credit.length && bossId) emitGameEvent(this.room, { type: "kill", npcKind: e.boss, bossId, killerId: null, creditIds: credit });
+    } else if (e.kind === "egg") {
+      if (this.room.actors.has(e.sessionId)) emitGameEvent(this.room, { type: "secretStep", playerId: e.sessionId, secretId: e.egg, step: e.egg === "E3" ? "burrow" : "lift" });
+    }
+  }
+
+  /** Honour a spawn request (egg penalties, staged scenes) through the room's NPC system. */
+  private spawn(e: SpawnRequestEvent) {
+    const npcs = npcSystemOf(this.room);
+    if (!npcs) return;
+    const now = Date.now();
+    if (e.bossId) {
+      npcs.boss?.forceSpawn(now);
+      return;
+    }
+    const idx = e.npcKind ? NPC_INDEX.get(e.npcKind) : undefined;
+    if (idx === undefined) return;
+    const def = NPC_DEFS[idx]!;
+    const [lo, hi] = defLevels(def, this.body as PlanetId);
+    const level = Math.round((lo + hi) / 2);
+    for (let i = 0; i < Math.min(8, e.count); i++) {
+      const ang = (i / Math.max(1, e.count)) * Math.PI * 2;
+      const at = this.room.snapToGround(this.around(e.pos, Math.cos(ang) * 4, Math.sin(ang) * 4));
+      npcs.createNpc(idx, level, at, now, { roam: 8 });
     }
   }
 
@@ -856,6 +907,9 @@ export class QuestSystem implements RoomSystem {
 }
 
 type CharacterMission = PlayerActor["char"]["missions"][number];
+
+/** NPC lane boss def ids → quests boss ids. */
+const BOSS_OF_NPC: Record<string, BossId> = { tidewrath: "tidewrath", hollow_king: "hollow_king", the_receiver: "receiver" };
 
 export function createQuestSystem(room: BodyRoom): RoomSystem {
   return new QuestSystem(room);

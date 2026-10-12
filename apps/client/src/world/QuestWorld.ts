@@ -7,6 +7,7 @@ import * as THREE from "three/webgpu";
 import type { BodyId, Terrain } from "@firstlight/shared";
 import { PLAQUES, type HallLine } from "@firstlight/shared/content/secrets";
 import { objectPos, objectsOn, type WorldObjectDef } from "@firstlight/shared/content/world";
+import { ANIM } from "@firstlight/shared/net/schema";
 import { AvatarView } from "../render/Avatars.ts";
 
 const mats = new Map<string, THREE.Material>();
@@ -104,6 +105,9 @@ interface Prop {
   spin?: THREE.Object3D;
   bob?: THREE.Object3D;
   lampBulb?: THREE.Mesh;
+  /** A standing NPC figure (animated avatar in world space) and the way it faces. */
+  npc?: AvatarView;
+  facing?: THREE.Vector3;
 }
 
 export class QuestWorld {
@@ -159,6 +163,7 @@ export class QuestWorld {
       toward.normalize();
       const right = new THREE.Vector3().crossVectors(up, toward).normalize();
       p.root.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, toward));
+      p.facing = toward.clone();
     }
   }
 
@@ -167,9 +172,8 @@ export class QuestWorld {
     const d = p.def;
     switch (d.look) {
       case "keeper": {
-        const npc = new AvatarView(1, 2);
-        npc.root.position.set(0, 0, 0);
-        r.add(npc.root);
+        p.npc = new AvatarView(1, 2);
+        this.group.add(p.npc.root);
         const counter = mesh(new THREE.BoxGeometry(2.6, 1.0, 0.8), std(0x7a5a3a, { rough: 0.8 }), 0, 0.5, 1.1);
         const top = mesh(new THREE.BoxGeometry(2.8, 0.08, 1.0), std(0xd8b98a), 0, 1.04, 1.1);
         const awning = mesh(new THREE.BoxGeometry(3.2, 0.06, 1.8), std(0xc0482e), 0, 2.7, 0.6);
@@ -186,8 +190,8 @@ export class QuestWorld {
         break;
       }
       case "guide": {
-        const npc = new AvatarView(d.body === "arcadia" ? 3 : d.body === "hollowmere" ? 5 : 4, d.body === "meridian" ? 3 : 1);
-        r.add(npc.root);
+        p.npc = new AvatarView(d.body === "arcadia" ? 3 : d.body === "hollowmere" ? 5 : 4, d.body === "meridian" ? 3 : 1);
+        this.group.add(p.npc.root);
         const staff = mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.9, 6), std(0x6b4a32), 0.45, 0.95, 0.1);
         const lamp = mesh(new THREE.SphereGeometry(0.1, 10, 8), glow(0xffd8a8, 2.5), 0.45, 1.95, 0.1);
         r.add(staff, lamp);
@@ -362,12 +366,6 @@ export class QuestWorld {
         r.add(mesh(new THREE.BoxGeometry(1.2, 1.6, 0.25), std(0x4a4f58, { metal: 0.7 }), 0, 0.8, 0));
         r.add(mesh(new THREE.BoxGeometry(0.2, 0.1, 0.1), std(0xf2b544, { emissive: 0.8 }), 0.4, 0.9, 0.15));
         break;
-      case "trooper": {
-        const t = new AvatarView(1, 3);
-        t.root.rotation.y = Math.PI; // facing the wall
-        r.add(t.root, mesh(new THREE.BoxGeometry(4, 3, 0.4), std(0x6a6e78, { rough: 0.85 }), 0, 1.5, -1.0));
-        break;
-      }
       case "pod": {
         r.add(mesh(new THREE.CylinderGeometry(0.6, 0.6, 2.4, 16, 1, true), std(0x9fe8ff, { opacity: 0.3, emissive: 0.2 }), 0, 1.2, 0));
         r.add(mesh(new THREE.CylinderGeometry(0.7, 0.7, 0.2, 16), std(0x3a3f48, { metal: 0.6 }), 0, 0.1, 0));
@@ -427,6 +425,7 @@ export class QuestWorld {
     this.t += dt;
     const now = performance.now();
     for (const p of this.props) {
+      if (p.npc && p.facing) p.npc.set(p.pos.x, p.pos.y, p.pos.z, p.facing.x, p.facing.y, p.facing.z, ANIM.IDLE, dt);
       if (p.def.mission) p.root.visible = st.activeMissions.has(p.def.mission);
       if (p.bob) p.bob.position.y = (p.def.look === "ferry" ? 0.3 : p.def.look === "altar" ? 2.4 : p.def.look === "bowl" ? 1.0 : p.def.look === "keeper" ? 1.3 : 0.6) + Math.sin(this.t * 2 + p.pos.x) * 0.06;
       if (p.spin) p.spin.rotation.y = Math.sin(this.t * 0.8) * 0.4;
@@ -440,6 +439,7 @@ export class QuestWorld {
   }
 
   dispose() {
+    for (const p of this.props) p.npc?.dispose();
     this.group.removeFromParent();
   }
 }

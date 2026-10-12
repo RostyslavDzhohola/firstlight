@@ -72,4 +72,4 @@
 - Concept art not generated yet (Codex task cancelled for safety). Retry only without computer use.
 - Character floats slightly above terrain (Codex first look) — investigate.
 - Cloudflare: Workers token OK (D24). TURN key pending the owner (save-turn-key.sh).
-- Resend domain records added; key `firstlight-server` to create after verification.
+- Resend: DNS records are live on Vercel DNS (checked against ns1.vercel-dns.com and 8.8.8.8), but Resend still says the domain is unverified (02:45Z). The send-only key is set on Railway, so mail turns on as soon as the domain verifies. **Owner: press "Verify" on resend.com/domains** (the builder's key is send-only, so it can't trigger verification).

@@ -5,6 +5,7 @@
 // If the admin is on another body the client is told to travel there and repeat the command.
 
 import type { BodyId } from "@firstlight/shared";
+import { bossArena } from "@firstlight/shared/content/arenas";
 import { BOSS_LAIRS, placeDir, type BossId } from "@firstlight/shared/content/places";
 import { maxHp } from "@firstlight/shared/content/progression";
 import type { InvItem } from "@firstlight/shared/net/protocol";
@@ -113,9 +114,12 @@ export function runStage(sys: QuestSystem, admin: PlayerActor, n: number, all: b
   }
   const centre = sys.around(placeDir(def.place), def.east ?? 0, def.north ?? 0);
   const spots = formation(def.formation, cast.length);
+  // Boss pairs stand on the arena's real plates (Override Consoles / Tide Stones) when it has them.
+  const plates = def.formation === "pair" ? (bossArena(sys.room.terrain)?.plates ?? []) : [];
   cast.forEach((a, i) => {
     const [e, nn] = spots[i]!;
-    sys.teleport(a, sys.around(centre, e, nn));
+    const plate = plates.length >= 2 ? plates[i % 2]! : null;
+    sys.teleport(a, plate ? sys.around(plate, 0, Math.floor(i / 2) * 2) : sys.around(centre, e, nn));
     a.state.hp = a.state.maxHp = maxHp(a.char.level);
     if (def.unprotect) {
       a.protectedUntil = 0;

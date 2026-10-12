@@ -20,7 +20,7 @@ import { CLOSE, hub, type HubRoom } from "./hub.ts";
 export const bannedCheck: { current: (userId: string) => boolean } = { current: () => false };
 import { dealDamage, fire, melee, selectedWeapon, stepEffects, stepProjectiles, type CombatHost } from "./combat.ts";
 import { dist3, type V3 } from "./geometry.ts";
-import { emitGameEvent } from "./events.ts";
+import { emitGameEvent, npcKindOf } from "./events.ts";
 import { emitPileEvent, onPileEvent, pileStore, type PileData } from "./piles.ts";
 import { SYSTEM_FACTORIES, type RoomSystem } from "./systems.ts";
 import { matchMaker } from "@colyseus/core";
@@ -717,7 +717,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     const npc = target.kind === "npc" ? target : attacker?.kind === "npc" ? attacker : null;
     emitGameEvent(this, {
       type: "damage", targetId: target.id, targetKind: target.kind, attackerId: attacker?.id ?? null, attackerKind: attacker?.kind ?? "world",
-      npcKind: npc?.defId, boss: !!npc?.boss, amount, hpAfter: target.state.hp, maxHp: target.state.maxHp, at: Date.now(),
+      npcKind: npc ? npcKindOf(npc) : undefined, boss: !!npc?.boss, amount, hpAfter: target.state.hp, maxHp: target.state.maxHp, at: Date.now(),
     });
     if (target.kind === "player") {
       target.youDirty = true;
@@ -751,7 +751,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     const killerName = killer ? (killer.kind === "player" ? killer.identity.name : `npc:${killer.state.kind}`) : "the fall";
     const pileId = (pile as PileData | null)?.id ?? "";
     this.broadcast("death", { victim: victim.id, killer: killer?.id ?? null, killerName, aliveMs: now - victim.char.lifeStartedAt, level: victim.char.level, pileId });
-    emitGameEvent(this, { type: "death", victimId: victim.id, killerId: killer?.id ?? null, killerKind: killer?.kind ?? "world", npcKind: killer?.kind === "npc" ? killer.defId : undefined, pos: actorPos(victim) });
+    emitGameEvent(this, { type: "death", victimId: victim.id, killerId: killer?.id ?? null, killerKind: killer?.kind ?? "world", npcKind: killer?.kind === "npc" ? npcKindOf(killer) : undefined, pos: actorPos(victim) });
     if (killer && killer.kind === "player" && killer.id !== victim.id) {
       const key = `${killer.identity.userId}>${victim.identity.userId}`;
       const recent = pvpKills.get(key) ?? 0;

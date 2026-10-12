@@ -4,6 +4,7 @@
 import type { YouState } from "@firstlight/shared/net/protocol";
 import type { PlayerActor } from "./actors.ts";
 import type { BodyRoom } from "./BodyRoom.ts";
+import { npcSystemFactory } from "./npc/index.ts";
 import { createQuestSystem } from "./quests/QuestSystem.ts";
 
 export interface RoomSystem {
@@ -23,4 +24,4 @@ export interface RoomSystem {
 
 export type SystemFactory = (room: BodyRoom) => RoomSystem | null;
 
-export const SYSTEM_FACTORIES: SystemFactory[] = [createQuestSystem];
+export const SYSTEM_FACTORIES: SystemFactory[] = [npcSystemFactory, createQuestSystem];

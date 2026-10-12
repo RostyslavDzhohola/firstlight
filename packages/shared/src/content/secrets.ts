@@ -50,8 +50,6 @@ export const EGG_RULES = {
   E8_LAMPS: 5,
   E8_WINDOW_MS: 20_000,
   E8_LAMP_RADIUS: 0.6,
-  E9_PHRASE: 0, // "Truce?"
-  E9_RANGE: 5,
   /** How long an opened passage (burrow, ferry ride, hatch, lift, well) stays valid for that player. */
   PASSAGE_MS: 5 * 60_000,
 } as const;

@@ -410,7 +410,8 @@ export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | 
     target.logoutEndsAt = null; // damage cancels logout
     if (attacker) target.lastDamagedBy = attacker.id;
   } else {
-    dmg *= target.armour ?? 1;
+    dmg = target.mitigate ? target.mitigate(dmg, weak, fromDir) : dmg * (target.armour ?? 1);
+    if (dmg <= 0) return false;
   }
   dmg = Math.max(1, Math.round(dmg));
   target.state.hp = Math.max(0, target.state.hp - dmg);

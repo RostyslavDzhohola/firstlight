@@ -1,15 +1,19 @@
 // Named places on every body (docs/content.md §3 area tables, §4 arenas, §5 missions, §6 eggs).
 // Positions are computed from pad anchors plus great-circle offsets, so the client (rendering,
 // map) and the server (triggers, validation) derive exactly the same spots from the same data.
-// Moving a place is a data change here; everything that references it follows.
+// Places that are NPC spawn areas (`{ area }`) or boss lairs (`{ lair }`) follow the NPC lane's
+// data (npcs.ts NPC_AREAS, arenas.ts bossArena), so missions point where enemies really spawn.
 
 import { BODIES, type BodyId, type FeatureAnchor } from "../planet/bodies.ts";
 import { anchorDir, padDirs, type Dir } from "../planet/pads.ts";
+import { createTerrain, type Terrain } from "../planet/terrain.ts";
+import { bossArena, resolveAreaDir } from "./arenas.ts";
+import { NPC_AREAS } from "./npcs.ts";
 
 export type PlaceKind = "pad" | "area" | "lair" | "landmark" | "hidden";
 
-/** Where something sits: a pad anchor or another place, then optional offsets. */
-export type PlaceRef = FeatureAnchor | { place: string };
+/** Where something sits: a pad anchor, another place, an NPC spawn area, or a boss lair (arena centre). */
+export type PlaceRef = FeatureAnchor | { place: string } | { area: string } | { lair: BossId };
 
 export interface PlaceDef {
   id: string;
@@ -35,44 +39,44 @@ export const PLACES: readonly PlaceDef[] = [
 
   // ---------------------------------------------------------------- Arcadia (levels 1–7)
   { id: "dawnpad", body: "arcadia", name: "Dawnpad", kind: "pad", at: { pad: 0 }, radius: 12 },
-  { id: "clover_fields", body: "arcadia", name: "Clover Fields", kind: "area", at: { pad: 0 }, toward: { pad: 3 }, dist: 150, north: 40, radius: 110 },
+  { id: "clover_fields", body: "arcadia", name: "Clover Fields", kind: "area", at: { area: "clover_fields" }, radius: 140 },
   { id: "lone_oak", body: "arcadia", name: "the lone oak", kind: "landmark", at: { place: "clover_fields" }, east: 40, north: -25, radius: 6 },
   { id: "glasswater_lake", body: "arcadia", name: "Glasswater Lake", kind: "landmark", at: { mid: [3, 7] }, radius: 75 },
-  { id: "gull_point", body: "arcadia", name: "Gull Point", kind: "lair", at: { place: "glasswater_lake" }, east: 86, radius: 40 },
-  { id: "gull_point_overlook", body: "arcadia", name: "Gull Point overlook", kind: "landmark", at: { place: "glasswater_lake" }, east: 142, radius: 8 },
-  { id: "lacefall", body: "arcadia", name: "Lacefall", kind: "area", at: { place: "glasswater_lake" }, north: 92, radius: 40 },
-  { id: "lacefall_cave", body: "arcadia", name: "the cave behind Lacefall", kind: "hidden", at: { place: "glasswater_lake" }, north: 106, radius: 5 },
-  { id: "pinewhistle_wood", body: "arcadia", name: "Pinewhistle Wood", kind: "area", at: { mid: [1, 7] }, radius: 120 },
-  { id: "highscore_hill", body: "arcadia", name: "Highscore Hill", kind: "area", at: { mid: [1, 6] }, radius: 80 },
-  { id: "kestrel_peak", body: "arcadia", name: "Kestrel Peak", kind: "landmark", at: { tri: [4, 5, 9] }, radius: 120 },
-  { id: "blockyard_camp", body: "arcadia", name: "Blockyard Camp", kind: "area", at: { mid: [3, 5] }, radius: 45 },
+  { id: "gull_point", body: "arcadia", name: "Gull Point", kind: "lair", at: { lair: "tidewrath" }, radius: 40 },
+  { id: "gull_point_overlook", body: "arcadia", name: "Gull Point overlook", kind: "landmark", at: { place: "gull_point" }, toward: { place: "glasswater_lake" }, dist: -45, radius: 8 },
+  { id: "lacefall", body: "arcadia", name: "Lacefall", kind: "area", at: { area: "lacefall" }, radius: 60 },
+  { id: "lacefall_cave", body: "arcadia", name: "the cave behind Lacefall", kind: "hidden", at: { place: "lacefall" }, north: 14, radius: 5 },
+  { id: "pinewhistle_wood", body: "arcadia", name: "Pinewhistle Wood", kind: "area", at: { area: "pinewhistle_wood" }, radius: 130 },
+  { id: "highscore_hill", body: "arcadia", name: "Highscore Hill", kind: "area", at: { area: "highscore_hill" }, radius: 100 },
+  { id: "kestrel_peak", body: "arcadia", name: "Kestrel Peak", kind: "landmark", at: { area: "kestrel_slopes" }, radius: 120 },
+  { id: "blockyard_camp", body: "arcadia", name: "Blockyard Camp", kind: "area", at: { area: "blockyard_camp" }, radius: 35 },
 
   // ---------------------------------------------------------------- Hollowmere (levels 6–13)
   { id: "lanternfall", body: "hollowmere", name: "Lanternfall", kind: "pad", at: { pad: 0 }, radius: 12 },
-  { id: "whisper_fen", body: "hollowmere", name: "Whisper Fen", kind: "area", at: { tri: [0, 3, 4] }, radius: 70 },
+  { id: "whisper_fen", body: "hollowmere", name: "Whisper Fen", kind: "area", at: { area: "whisper_fen" }, radius: 70 },
   { id: "fen_jetty", body: "hollowmere", name: "the Fen jetty", kind: "landmark", at: { place: "whisper_fen" }, toward: { pad: 0 }, dist: 58, radius: 4 },
-  { id: "saint_orrins", body: "hollowmere", name: "Saint Orrin's ruin", kind: "area", at: { mid: [0, 2] }, radius: 45 },
+  { id: "saint_orrins", body: "hollowmere", name: "Saint Orrin's ruin", kind: "area", at: { area: "saint_orrins" }, radius: 45 },
   { id: "upside_down_chapel", body: "hollowmere", name: "the Upside-Down Chapel", kind: "hidden", at: { place: "saint_orrins" }, east: -30, north: 52, radius: 6 },
-  { id: "thornwood", body: "hollowmere", name: "Thornwood", kind: "area", at: { mid: [1, 2] }, radius: 120 },
+  { id: "thornwood", body: "hollowmere", name: "Thornwood", kind: "area", at: { area: "thornwood" }, radius: 140 },
   { id: "mourning_mere", body: "hollowmere", name: "Mourning Mere", kind: "landmark", at: { mid: [2, 8] }, radius: 95 },
-  { id: "drowned_chapel", body: "hollowmere", name: "the Drowned Chapel", kind: "area", at: { place: "mourning_mere" }, toward: { pad: 2 }, dist: 92, radius: 30 },
+  { id: "drowned_chapel", body: "hollowmere", name: "the Drowned Chapel", kind: "area", at: { area: "drowned_chapel" }, radius: 40 },
   { id: "ferrymans_isle", body: "hollowmere", name: "Ferryman's Isle", kind: "hidden", at: { place: "mourning_mere" }, toward: { pad: 8 }, dist: 104, radius: 8 },
   { id: "tolling_tower", body: "hollowmere", name: "the Tolling Tower", kind: "landmark", at: { pad: 10 }, radius: 8 },
-  { id: "hollow_nave", body: "hollowmere", name: "the Hollow Nave", kind: "lair", at: { pad: 10 }, toward: { pad: 4 }, dist: 125, radius: 30 },
-  { id: "ossuary_camp", body: "hollowmere", name: "Ossuary Camp", kind: "area", at: { place: "hollow_nave" }, toward: { pad: 4 }, dist: 110, radius: 45 },
+  { id: "hollow_nave", body: "hollowmere", name: "the Hollow Nave", kind: "lair", at: { lair: "hollow_king" }, radius: 30 },
+  { id: "ossuary_camp", body: "hollowmere", name: "Ossuary Camp", kind: "area", at: { area: "ossuary_camp" }, radius: 35 },
 
   // ---------------------------------------------------------------- Meridian (levels 12–20)
   { id: "waystation_nine", body: "meridian", name: "Waystation Nine", kind: "pad", at: { pad: 0 }, radius: 12 },
-  { id: "cinder_canyons", body: "meridian", name: "Cinder Canyons", kind: "area", at: { mid: [0, 2] }, radius: 150 },
+  { id: "cinder_canyons", body: "meridian", name: "Cinder Canyons", kind: "area", at: { area: "cinder_canyons" }, radius: 170 },
   { id: "brinewater_lake", body: "meridian", name: "Brinewater Lake", kind: "landmark", at: { mid: [4, 11] }, radius: 120 },
-  { id: "checkpoint_seven", body: "meridian", name: "Checkpoint Seven", kind: "area", at: { mid: [0, 3] }, radius: 60 },
-  { id: "vat_room", body: "meridian", name: "the Vat Room", kind: "hidden", at: { place: "checkpoint_seven" }, toward: { pad: 3 }, dist: 120, radius: 6 },
-  { id: "foreclosure_yard", body: "meridian", name: "Foreclosure Yard", kind: "lair", at: { mid: [3, 9] }, radius: 40 },
-  { id: "yard_gantry", body: "meridian", name: "the Foreclosure Yard gantry", kind: "landmark", at: { place: "foreclosure_yard" }, east: -48, north: -27, radius: 8 },
-  { id: "glasspan_flats", body: "meridian", name: "Glasspan Salt Flats", kind: "area", at: { mid: [2, 8] }, radius: 140 },
-  { id: "last_billboard", body: "meridian", name: "The Last Billboard", kind: "landmark", at: { place: "glasspan_flats" }, north: 120, radius: 10 },
+  { id: "checkpoint_seven", body: "meridian", name: "Checkpoint Seven", kind: "area", at: { area: "checkpoint_seven" }, radius: 40 },
+  { id: "vat_room", body: "meridian", name: "the Vat Room", kind: "hidden", at: { place: "checkpoint_seven" }, toward: { pad: 17 }, dist: 125, radius: 6 },
+  { id: "foreclosure_yard", body: "meridian", name: "Foreclosure Yard", kind: "lair", at: { lair: "receiver" }, radius: 40 },
+  { id: "yard_gantry", body: "meridian", name: "the Foreclosure Yard gantry", kind: "landmark", at: { place: "foreclosure_yard" }, toward: { place: "checkpoint_seven" }, dist: 55, radius: 8 },
+  { id: "glasspan_flats", body: "meridian", name: "Glasspan Salt Flats", kind: "area", at: { area: "glasspan" }, radius: 170 },
+  { id: "last_billboard", body: "meridian", name: "The Last Billboard", kind: "landmark", at: { area: "last_billboard" }, radius: 10 },
   { id: "chrome_spires", body: "meridian", name: "Chrome Spires", kind: "landmark", at: { pad: 15 }, radius: 140 },
-  { id: "oversight_lobby", body: "meridian", name: "the Oversight Lobby", kind: "area", at: { pad: 15 }, toward: { pad: 9 }, dist: 165, radius: 25 },
+  { id: "oversight_lobby", body: "meridian", name: "the Oversight Lobby", kind: "area", at: { area: "oversight_lobby" }, radius: 25 },
 ];
 
 export const PLACE_BY_ID: ReadonlyMap<string, PlaceDef> = new Map(PLACES.map((p) => [p.id, p]));
@@ -148,12 +152,31 @@ export function arcMetres(a: Dir, b: Dir, radius: number): number {
 
 const dirCache = new Map<string, Dir>();
 
+const LAIR_NPC: Record<BossId, string> = { tidewrath: "tidewrath", hollow_king: "hollow_king", receiver: "the_receiver" };
+const terrains = new Map<BodyId, Terrain>();
+
+/** The boss arena centre direction (terrain-derived, deterministic; shared with the NPC lane). */
+function lairDir(body: BodyId, boss: BossId): Dir {
+  let t = terrains.get(body);
+  if (!t) terrains.set(body, (t = createTerrain(body)));
+  const a = bossArena(t);
+  if (!a || a.boss !== LAIR_NPC[boss]) throw new Error(`no ${boss} lair on ${body}`);
+  return [a.up[0], a.up[1], a.up[2]];
+}
+
 function refDir(body: BodyId, ref: PlaceRef): Dir {
   if ("place" in ref) {
     const p = place(ref.place);
     if (p.body !== body) throw new Error(`place ${ref.place} is on ${p.body}, not ${body}`);
     return placeDir(p);
   }
+  if ("area" in ref) {
+    const a = NPC_AREAS.find((x) => x.id === ref.area);
+    if (!a || a.planet !== body) throw new Error(`no NPC area ${ref.area} on ${body}`);
+    const d = resolveAreaDir(BODIES[body], a.at);
+    return [d[0], d[1], d[2]];
+  }
+  if ("lair" in ref) return lairDir(body, ref.lair);
   if (BODIES[body].padLayout === "none") return [0, 1, 0];
   return anchorDir(BODIES[body], ref);
 }

@@ -1,18 +1,24 @@
-// Cosmetics on avatars (procedural placeholders until the characters lane ships real models) and
-// name + title plates over other players' heads.
+// Cosmetics on avatars (procedural placeholder shapes until cosmetic models exist) and name + title
+// plates over other players' heads.
 //
-// Sockets are abstract (head / face / back / belt, items.ts COSMETIC_SOCKET); SOCKET_POS maps them
-// onto the placeholder capsule avatar. The characters lane can swap SOCKET_POS for bone lookups.
+// Cosmetics ride the avatar's bone sockets (AvatarView.attach: head / face / back / belt, mapped from
+// item slots by items.ts COSMETIC_SOCKET). Each shape is built around its socket point; cape and
+// backpack share the back socket, so each socket gets one group holding everything worn there.
 
 import * as THREE from "three/webgpu";
 import { COSMETIC_BY_ID, COSMETIC_SOCKET, type CosmeticSlot, type Socket } from "@firstlight/shared/content/items";
 
-/** Socket positions on the placeholder avatar (local space: y up, +z forward). */
-export const SOCKET_POS: Record<Socket, THREE.Vector3> = {
-  head: new THREE.Vector3(0, 1.8, 0),
-  face: new THREE.Vector3(0, 1.64, 0.24),
-  back: new THREE.Vector3(0, 1.25, -0.34),
-  belt: new THREE.Vector3(0, 0.92, 0),
+/** Anything with sockets (AvatarView). */
+export interface Socketed {
+  attach(slot: Socket, obj: THREE.Object3D | null): void;
+}
+
+/** Per-slot nudges from the socket point (the back socket sits on the spine; capes hang lower, packs sit out). */
+const SLOT_OFFSET: Record<CosmeticSlot, THREE.Vector3> = {
+  hat: new THREE.Vector3(0, -0.04, 0),
+  mask: new THREE.Vector3(0, -0.05, 0.1),
+  cape: new THREE.Vector3(0, 0.15, -0.12),
+  backpack: new THREE.Vector3(0, -0.05, -0.16),
 };
 
 const mats = new Map<string, THREE.Material>();
@@ -240,35 +246,38 @@ export function buildCosmetic(id: string, anims: Anim[]): THREE.Object3D | null 
   return g;
 }
 
-/** Keeps the cosmetics on one avatar root in sync with a comma-separated id list. */
+/** Keeps the cosmetics on one avatar in sync with a comma-separated id list (PlayerState.cosmetics). */
 export class CosmeticRig {
   private current = "";
-  private readonly parts = new Map<CosmeticSlot, THREE.Object3D>();
+  private readonly used = new Set<Socket>();
   private anims: Anim[] = [];
-  private readonly root: THREE.Object3D;
+  private readonly avatar: Socketed;
 
-  /** `root` is an avatar root; cosmetics ride its first child (the model, which bobs and leans) when there is one. */
-  constructor(root: THREE.Object3D) {
-    this.root = root.children[0] instanceof THREE.Group ? root.children[0] : root;
+  constructor(avatar: Socketed) {
+    this.avatar = avatar;
   }
 
   set(list: string) {
     if (list === this.current) return;
     this.current = list;
-    for (const p of this.parts.values()) p.removeFromParent();
-    this.parts.clear();
+    for (const s of this.used) this.avatar.attach(s, null);
+    this.used.clear();
     this.anims = [];
+    const groups = new Map<Socket, THREE.Group>();
     for (const id of list.split(",").filter(Boolean)) {
       const def = COSMETIC_BY_ID.get(id);
       if (!def) continue;
       const obj = buildCosmetic(id, this.anims);
       if (!obj) continue;
+      obj.position.copy(SLOT_OFFSET[def.slot]);
       const socket = COSMETIC_SOCKET[def.slot];
-      obj.position.copy(SOCKET_POS[socket]);
-      if (def.slot === "backpack") obj.position.z -= 0.06;
-      if (def.slot === "cape") obj.position.y += 0.2;
-      this.root.add(obj);
-      this.parts.set(def.slot, obj);
+      let g = groups.get(socket);
+      if (!g) groups.set(socket, (g = new THREE.Group()));
+      g.add(obj);
+    }
+    for (const [socket, g] of groups) {
+      this.avatar.attach(socket, g);
+      this.used.add(socket);
     }
   }
 
