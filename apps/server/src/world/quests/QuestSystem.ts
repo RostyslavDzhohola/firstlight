@@ -28,6 +28,7 @@ import { dist3, type V3 } from "../geometry.ts";
 import type { RoomSystem } from "../systems.ts";
 import { EGG_LIMITS, EggLogic } from "./eggs.ts";
 import { engrave, hallLines, onHallChanged } from "./hall.ts";
+import { copyKey, copyRestrictions, type CopyRestrictions } from "./restrictions.ts";
 import { runStage, STAGE_LIMITS } from "./stage.ts";
 import { progressStore } from "./store.ts";
 import { emitPileEvent, pileStore } from "../piles.ts";
@@ -120,10 +121,8 @@ export class QuestSystem implements RoomSystem {
   /** Boss encounters (NPC id → account id → hurt by the boss since their first hit), for Untouchable. */
   private readonly bossHits = new Map<string, Map<string, { hurt: boolean }>>();
   private restoreBroadcast: (() => void) | null = null;
-  /** Until when this copy counts as staged (an admin scene ran here): see `official`. */
-  private stagedUntil = 0;
-  /** Last admin intervention in this copy's boss fight. */
-  private bossAssistedAt = 0;
+  /** This copy's key for record restrictions (staged scenes, assisted boss fights; restrictions.ts). */
+  private readonly copyKey: string;
   /** `${userId}|${egg}`: steps an admin opened for that player (the claim that follows is assisted). */
   private readonly assistedEggs = new Set<string>();
   private lastSweep = 0;
@@ -131,6 +130,7 @@ export class QuestSystem implements RoomSystem {
   constructor(room: BodyRoom) {
     this.room = room;
     this.body = room.bodyDef.id;
+    this.copyKey = copyKey(this.body, room.state.copy);
     this.objects = objectsOn(this.body);
     const t = room.terrain;
     for (const o of this.objects) this.objPos.set(o.id, objectPos(o, (x, y, z) => t.groundHeight(x, y, z)));
@@ -215,19 +215,25 @@ export class QuestSystem implements RoomSystem {
     return this.room.actors.get(id);
   }
 
-  /** An admin staged scene ran in this copy (stage.ts). */
-  markStaged() {
-    this.stagedUntil = Date.now() + STAGE_LIMITS.stagedMs;
+  private restrictions(): CopyRestrictions {
+    return copyRestrictions.current.get(this.copyKey) ?? { stagedUntil: 0, assistedUntil: 0 };
+  }
+
+  /** An admin staged scene ran in this copy (stage.ts); the cast's lives stay unofficial. */
+  markStaged(cast: PlayerActor[] = []) {
+    copyRestrictions.current.set(this.copyKey, { ...this.restrictions(), stagedUntil: Date.now() + STAGE_LIMITS.stagedMs });
+    for (const a of cast) this.life(a).unofficial = true;
   }
 
   /**
-   * Whether permanent records (medals from boss kills, egg claims and Long Shot; Hall of Firsts) may
-   * be written: not in a copy that is staging a scene, and not for a boss fight an admin assisted.
+   * Whether permanent records may be written in this copy: not while it is staging a scene (no
+   * medals or plaques at all), and for boss records not while its boss fight counts as assisted.
    */
   official(opts: { boss?: boolean } = {}): boolean {
     const now = Date.now();
-    if (now < this.stagedUntil) return false;
-    return !(opts.boss && now - this.bossAssistedAt < QUEST_RULES.ADMIN_ASSIST_MS);
+    const r = this.restrictions();
+    if (now < r.stagedUntil) return false;
+    return !(opts.boss && now < r.assistedUntil);
   }
 
   /** Admin tools touching a boss (or used while its fight is on) make that fight assisted. */
@@ -236,7 +242,9 @@ export class QuestSystem implements RoomSystem {
     if (!boss) return;
     const readOnly = e.cmd === "npc:list" || (e.cmd === "npc:boss" && (e.action ?? "info") === "info");
     const onBoss = (e.cmd === "npc:hurt" && !!e.targetId && !!this.room.npcActors.get(e.targetId)?.boss) || (e.cmd === "npc:boss" && !readOnly);
-    if (onBoss || (!readOnly && (boss.engaged || this.bossHits.size > 0))) this.bossAssistedAt = Date.now();
+    if (onBoss || (!readOnly && (boss.engaged || this.bossHits.size > 0))) {
+      copyRestrictions.current.set(this.copyKey, { ...this.restrictions(), assistedUntil: Date.now() + QUEST_RULES.ADMIN_ASSIST_MS });
+    }
   }
 
   qp(a: PlayerActor): QuestPlayer {
@@ -670,9 +678,16 @@ export class QuestSystem implements RoomSystem {
   // ---------------------------------------------------------------- medals and titles
 
   /** Award a medal once per account. Returns true if newly earned. */
+  /**
+   * The permanent medal write. Nothing is written while the copy is staging a scene, and a life that
+   * was part of a scene or credited with an assisted/staged boss kill never earns life-scoped medals
+   * (its level, bosses and progress came partly from admin tools; F12 review S4).
+   */
   award(a: PlayerActor, medalId: string): boolean {
     const def = MEDAL_BY_ID.get(medalId);
     if (!def || a.identity.loadtest) return false;
+    if (!this.official()) return false;
+    if (def.scope === "life" && this.life(a).unofficial) return false;
     const q = this.qp(a);
     if (q.medals.has(medalId)) return false;
     q.medals.add(medalId);
@@ -784,7 +799,7 @@ export class QuestSystem implements RoomSystem {
       }
       case "propBroken": {
         const a = e.playerId ? this.actor(e.playerId) : undefined;
-        if (!a || a.identity.loadtest) break;
+        if (!a || a.identity.loadtest || !this.official()) break; // staged scenes don't count later either
         const n = progressStore.current.addStat(a.identity.userId, "props_broken", 1);
         if (n >= MEDAL_RULES.DEMOLITION_PROPS) this.award(a, "demolition_crew");
         break;
@@ -825,7 +840,10 @@ export class QuestSystem implements RoomSystem {
     if (!this.official({ boss: true })) {
       // Staged scene or admin-assisted fight: loot as usual, but nothing permanent.
       this.bossHits.delete(e.npcKind);
-      for (const a of eligible) this.toast(a, "Admin-assisted or staged fight: no medals or Hall of Firsts", "info");
+      for (const a of eligible) {
+        this.life(a).unofficial = true; // the boss's XP and loot came with admin help
+        this.toast(a, "Admin-assisted or staged fight: no medals or Hall of Firsts", "info");
+      }
       return;
     }
     for (const a of eligible) {

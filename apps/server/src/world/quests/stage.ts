@@ -140,7 +140,7 @@ export function runStage(sys: QuestSystem, admin: PlayerActor, n: number, all: b
     sys.toast(a, `Stage ${n}: ${def.name}`, "info");
   });
   const at = sys.room.snapToGround(centre);
-  sys.markStaged();
+  sys.markStaged(cast);
   if (def.boss) {
     const lair = sys.room.snapToGround(placeDir(BOSS_LAIRS[def.boss].place));
     emitGameEvent(sys.room, { type: "spawnRequest", reason: "stage", bossId: def.boss, count: 1, pos: lair, playerId: admin.id });

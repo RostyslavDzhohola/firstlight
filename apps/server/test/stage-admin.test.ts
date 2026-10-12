@@ -11,8 +11,20 @@ import { pileStore } from "../src/world/piles.ts";
 import { QUEST_RULES } from "../src/world/quests/QuestSystem.ts";
 import { STAGE_LIMITS } from "../src/world/quests/stage.ts";
 import { progressStore } from "../src/world/quests/store.ts";
+import { matchMaker } from "@colyseus/core";
+import { emitGameEvent } from "../src/world/events.ts";
+import type { QuestSystem } from "../src/world/quests/QuestSystem.ts";
+import type { BodyRoom } from "../src/world/BodyRoom.ts";
 import { safeLeave, startServer } from "./helpers.ts";
-import { bot, ground, harness, invIds, objAt, serverRoom, tpAndWait, until, type Bot } from "./quest-helpers.ts";
+import { bot, ground, harness, invIds, objAt, padAt, serverRoom, tpAndWait, until, type Bot } from "./quest-helpers.ts";
+
+const questsOf = (room: BodyRoom) => room.systems.find((s) => "eggs" in s) as unknown as QuestSystem;
+/** Wait for the quest system's next level check (it runs once a second). */
+async function sleepUntilQuestTick(b: Bot) {
+  const q = questsOf(serverRoom(b)) as unknown as { lastLevelCheck: number };
+  const seen = q.lastLevelCheck;
+  await until("quest tick", () => q.lastLevelCheck !== seen, 3000);
+}
 
 const savedStage = { ...STAGE_LIMITS };
 const savedQuest = { ...QUEST_RULES };
@@ -81,7 +93,7 @@ describe("admin assistance", () => {
     const boss = npcSystemOf(serverRoom(b))!.boss!;
     await until("fight on", () => boss.engaged, 8000);
     b.send("admin", { cmd: "heal" });
-    await until("heal seen", () => serverRoom(b).systems.some((s: any) => s.bossAssistedAt > 0));
+    await until("heal seen", () => !questsOf(serverRoom(b)).official({ boss: true }));
     emitNpcEvent({ kind: "bossKill", body: "arcadia", boss: "tidewrath", sessionIds: [b.id], userIds: ["helped"], names: ["helped"] });
     await until("told", () => b.toasts.some((t) => t.includes("no medals")));
     expect(b.you.medals).not.toContain("tide_turner");
@@ -129,4 +141,51 @@ describe("quest bookkeeping", () => {
     await until("counted", () => quests.ops.size === 1);
     await until("pruned", () => quests.ops.size === 0, 4000);
   });
+});
+
+describe("record restrictions outlive the room (review B3, S4)", () => {
+  it("a staged copy stays staged when its room is emptied and recreated", async () => {
+    const d = await bot("restager", "arcadia");
+    d.send("admin", { cmd: "stage", args: { n: 2 } });
+    await until("staged", () => d.toasts.some((t) => t.startsWith("Stage 2")));
+    const first = serverRoom(d);
+    expect(questsOf(first).official()).toBe(false);
+    await tpAndWait(d, padAt("arcadia", 0)); // log out from the safe ring: the copy empties at once
+    await safeLeave(d.room);
+    harness.rooms.splice(harness.rooms.indexOf(d.room), 1);
+    await until("disposed", () => !matchMaker.getLocalRoomById(first.roomId), 8000);
+    const again = await bot("restager", "arcadia");
+    const second = serverRoom(again);
+    expect(second.roomId).not.toBe(first.roomId);
+    expect(second.state.copy).toBe(first.state.copy);
+    expect(questsOf(second).official()).toBe(false);
+    emitNpcEvent({ kind: "bossKill", body: "arcadia", boss: "tidewrath", sessionIds: [again.id], userIds: ["restager"], names: ["restager"] });
+    await until("told", () => again.toasts.some((t) => t.includes("no medals")));
+    expect(again.you.medals).not.toContain("tide_turner");
+  }, 30_000);
+
+  it("no medal is written in a staged copy, and staged progress never pays out later", async () => {
+    const d = await bot("crewmate", "arcadia");
+    const other = await bot("bystander2", "arcadia", "");
+    d.send("admin", { cmd: "stage", args: { n: 2 } });
+    await until("staged", () => d.toasts.some((t) => t.startsWith("Stage 2")));
+    // XP during the scene (the boss's loot, an admin level): no Ten Down now…
+    d.send("admin", { cmd: "level", args: { level: 10 } });
+    await until("L10", () => d.you.level === 10);
+    // …and props broken while staged don't count toward Demolition Crew.
+    emitGameEvent(serverRoom(d), { type: "propBroken", playerId: other.id });
+    await sleepUntilQuestTick(d);
+    expect(d.you.medals).not.toContain("ten_down");
+    expect(progressStore.current.stat("bystander2", "props_broken")).toBe(0);
+    // After the scene: the cast's life stays unofficial (its level came from the scene), bystanders are fine.
+    STAGE_LIMITS.stagedMs = 0;
+    d.send("admin", { cmd: "stage", args: { n: 2 } });
+    await until("restaged", () => d.toasts.filter((t) => t.startsWith("Stage 2")).length === 2);
+    await sleepUntilQuestTick(d);
+    await sleepUntilQuestTick(d);
+    expect(d.you.medals).not.toContain("ten_down");
+    other.send("admin", { cmd: "level", args: { level: 10 } }); // not an admin: ignored
+    emitGameEvent(serverRoom(d), { type: "propBroken", playerId: other.id });
+    await until("counted", () => progressStore.current.stat("bystander2", "props_broken") === 1);
+  }, 20_000);
 });

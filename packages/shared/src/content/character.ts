@@ -45,6 +45,8 @@ export interface LifeProgress {
   eggs: string[];
   /** Online playtime this life in ms (Old Timer). */
   playMs: number;
+  /** Part of a staged scene or credited with an admin-assisted boss kill: no life-scoped medals. */
+  unofficial?: boolean;
 }
 
 export function emptyLife(): LifeProgress {
