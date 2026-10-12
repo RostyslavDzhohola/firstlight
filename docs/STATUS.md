@@ -69,7 +69,7 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 | F7 email sign-in | 🟡 | browser E2E T5 passes locally (dev outbox); production waits for Resend domain verification (owner) |
 | F8 2-player boss | ✅ | browser E2E T6: Tidewrath killed by two players (admin heals) |
 | F9 screenshot share | ✅ | browser E2E T7 |
-| F10 M1 ≥ 60 fps Medium | ✅* | ?bench=g1 59.9 fps p50, p95 17.6 ms (T3 Chromium, not plugged-in Chrome) |
+| F10 M1 ≥ 60 fps Medium | ✅* | re-run on 668ec82 (weather, NPCs, horses, collision): ?bench=g1 59.9 fps p50, p95 18.6 ms; night storm 59.9 fps p50, p95 18.5 ms; 0 shader builds (T3 Chromium, not plugged-in Chrome) |
 | F11 Low on weak profile | ✅* | `?bench=g1&tier=low&cpuslow=4`: 51.3 fps p50, p95 29.8 ms, 0 shader builds (D29 emulation) |
 | F12 three-model review | 🛠 | Round 1: Codex 7, Sonnet 2, Opus 2 blockers, all fixed and verified closed. Final round on 668ec82: **Sonnet yes**; Codex no (2 payout-after-commit blockers); Opus no (two-packet teleport via the planet centre). Fixing in lane/f12-r2 + lane/f12-r2-auth (docs/reviews/2026-10-12-f12-final-*) |
 | F13 photo mode + 5 scenes | ✅ | browser E2E T8; `stage <n>` + docs/staged-scenes.md |
@@ -102,6 +102,12 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 | F12 round 2: auth/social (OTP enumeration and drain, self-delete, prune) | Opus sub-agent | ../fl-wt-f12r2b (lane/f12-r2-auth) |
 
 ## Measured numbers
+
+- 09:20Z F10 re-run on the live site at 668ec82 (all F12 fixes + weather/day-night, horses, prop collision), T3 Code's
+  built-in browser (Chromium/WebGPU) on the owner's M1, 1785×1048 canvas, Medium, `?bench=g1` (180 s warm + 60 s):
+  **59.9 fps p50 (vsync-capped), frame p95 18.6 ms, p99 18.7 ms, max 20.5 ms, 0 shader builds**, draws mean 288,
+  1.05 M triangles. Night storm pass (`&weather=storm&time=0`, Portus 00:00 storm 90 %): **59.9 fps p50, p95 18.5 ms,
+  max 18.8 ms, 0 shader builds**, draws mean 332. Two agent test suites were running on the same machine.
 
 - 08:45Z F2 re-run on production at 668ec82 (every F12 fix, NPCs, destruction, weather, horses): 40 load-test bots on one
   Arcadia copy for 600 s with `--fire`: 0 failures/disconnects, 40/40 clients in all 22 samples; tick p50 ≤ 1.27 ms,
