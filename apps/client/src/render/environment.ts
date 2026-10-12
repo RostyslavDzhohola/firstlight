@@ -74,12 +74,18 @@ export function referenceDayT(body: BodyId, elev: number): number {
   return 0.25 + Math.asin(2 * s - 1) / (2 * Math.PI);
 }
 
+export interface LightFactors {
+  night: number;
+  dusk: number;
+  sunUp: number;
+}
+
 /** Derived per-frame factors from a sun elevation (exported for tests). */
-export function lightFactors(elev: number): { night: number; dusk: number; sunUp: number } {
-  const night = smooth(0.06, -0.1, elev);
-  const dusk = smooth(0.45, 0.02, elev) * (1 - night);
-  const sunUp = smooth(-0.02, 0.22, elev);
-  return { night, dusk, sunUp };
+export function lightFactors(elev: number, out: LightFactors = { night: 0, dusk: 0, sunUp: 0 }): LightFactors {
+  out.night = smooth(0.06, -0.1, elev);
+  out.dusk = smooth(0.45, 0.02, elev) * (1 - out.night);
+  out.sunUp = smooth(-0.02, 0.22, elev);
+  return out;
 }
 
 export interface EnvAudio {
@@ -139,6 +145,8 @@ export class Environment {
     hemiSky: new THREE.Color(), hemiGround: new THREE.Color(), nightHemiSky: new THREE.Color(), nightHemiGround: new THREE.Color(),
   };
   private drops = { amount: 0, kind: 0, fall: 9, wind: 0, len: 0.5, width: 0.012, alpha: 0 };
+  private readonly angles = { elev: 0, az: 0 };
+  private readonly factors: LightFactors = { night: 0, dusk: 0, sunUp: 0 };
 
   constructor(private readonly ctx: RenderCtx, private readonly audio: EnvAudio | null = null, private readonly particles: EnvParticles | null = null) {
     this.fx = new WeatherFx(ctx.scene);
@@ -248,12 +256,12 @@ export class Environment {
       this.dayT = referenceDayT(this.body, elev);
     } else {
       this.dayT = this.timeOv ?? dayAt(this.body, now, st.dayOffset);
-      const a = sunAngles(this.body, this.dayT);
+      const a = sunAngles(this.body, this.dayT, this.angles);
       elev = a.elev;
       az = a.az;
     }
     this.sunElev = elev;
-    const { night, dusk, sunUp } = lightFactors(elev);
+    const { night, dusk, sunUp } = lightFactors(elev, this.factors);
     this.night = night;
 
     // ---- weather (target → smoothed kind/amount)

@@ -65,10 +65,12 @@ export function dayT(body: BodyId, serverMs: number, dayOffset = 0): number {
 }
 
 /** Sun elevation and azimuth (radians, local sky frame) at time of day t. */
-export function sunAngles(body: BodyId, t: number): { elev: number; az: number } {
+export function sunAngles(body: BodyId, t: number, out: { elev: number; az: number } = { elev: 0, az: 0 }): { elev: number; az: number } {
   const p = SKY_PROFILES[body];
   const s = (Math.sin(2 * Math.PI * (t - 0.25)) + 1) / 2;
-  return { elev: p.minElev + (p.maxElev - p.minElev) * s, az: p.noonAz + 2 * Math.PI * (t - 0.5) };
+  out.elev = p.minElev + (p.maxElev - p.minElev) * s;
+  out.az = p.noonAz + 2 * Math.PI * (t - 0.5);
+  return out;
 }
 
 export interface SlotWeather {
