@@ -24,7 +24,10 @@ export const MOVE = {
   budgetCap: 3.5, // metres that can be banked (≈ 0.3 s of sprint + slack)
   swimBudgetCap: 1.5,
   stepTolerance: 0.05, // per packet, charged
-  dodgeBurst: 4.5,
+  // A dodge covers 4.5 m in 0.3 s (client) instead of sprinting, and the budget keeps refilling at
+  // sprint speed meanwhile: the burst only pays the difference (4.5 − 9 × 0.3) plus slack, so
+  // DODGE-animation spam can't buy ~40 % more speed (F12 final Opus nit).
+  dodgeBurst: 2.0,
   dodgeCooldownMs: 1100,
   dodgeWindowMs: 800, // the dodge bonus must be used within this time
   knockbackWindowMs: 1500,
