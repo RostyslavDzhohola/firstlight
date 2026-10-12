@@ -270,7 +270,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     p.maxHp = maxHp(char.level);
     p.hp = char.dead ? 0 : Math.max(1, Math.min(p.maxHp, char.hp || p.maxHp));
     p.name = auth.name;
-    p.userId = ""; // never broadcast account ids (review); systems map sessionId → user server-side
+    p.userId = auth.userId; // random opaque id (not a credential): clients need it for blocks, mutes, parties (D27)
     p.starter = char.starter;
     p.palette = char.palette;
     p.flags = (auth.admin ? PF.ADMIN : 0) | (auth.loadtest ? PF.LOADTEST : 0) | (char.dead ? PF.DEAD : 0);
@@ -331,11 +331,15 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     const a = this.actors.get(client.sessionId);
     if (!a || a.superseded || this.shuttingDown) return;
     a.state.flags |= PF.LINGER;
+    // Kicked or banned: no reconnection seat (onLeave runs next and removes the body).
+    if (this.systems.some((s) => s.canReconnect?.(client.sessionId) === false)) return;
     // The promise rejects when the window expires or the room disposes; never let that escape.
     this.allowReconnection(client, NET.RECONNECT_WINDOW_S).catch(() => {});
   }
 
   onReconnect(client: Client) {
+    // Reconnects skip /api/play, so bans are checked here too (SPEC §5.2).
+    if (this.systems.some((s) => s.canReconnect?.(client.sessionId) === false)) throw new ServerError(CLOSE.BANNED, "not allowed back");
     const a = this.actors.get(client.sessionId);
     if (!a || a.superseded || hub.get(a.identity.userId)?.actor !== a || this.isBanned(a.identity.userId)) {
       client.leave(CLOSE.ELSEWHERE, "session replaced");

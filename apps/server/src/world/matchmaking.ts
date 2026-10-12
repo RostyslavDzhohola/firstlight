@@ -23,14 +23,6 @@ export interface PlayInput {
   loadtest?: boolean;
 }
 
-/**
- * Server-side party placement: where a user's party leader is and how big the party is. The
- * party system (social lane) installs this; client claims are never trusted (review).
- */
-export const partyPlacement: { current: (userId: string, body: BodyId) => { leaderRoomId?: string; size: number } | undefined } = {
-  current: () => undefined,
-};
-
 const locks = new Map<string, Promise<unknown>>();
 
 /** Serialise work per key (room creation per body) without blocking other bodies. */

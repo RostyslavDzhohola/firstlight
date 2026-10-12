@@ -51,10 +51,5 @@ export const hub = {
   },
 };
 
-/** App close codes (Colyseus reserves 4000–4010). */
-export const CLOSE = {
-  ELSEWHERE: 4100, // playing in another window
-  MERGED: 4101, // account merged: rejoin
-  BANNED: 4102,
-  LOGGED_OUT: 4103,
-} as const;
+/** App close codes: one table shared with the client (packages/shared net/social.ts). */
+export { CLOSE } from "@firstlight/shared/net/social";

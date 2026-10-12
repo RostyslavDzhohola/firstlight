@@ -30,8 +30,8 @@ export class TravelRedirect extends Error {
   }
 }
 
-/** App close codes (server world/hub.ts). Colyseus reserves 4000–4010. */
-export const CLOSE = { ELSEWHERE: 4100, MERGED: 4101, BANNED: 4102, LOGGED_OUT: 4103 } as const;
+/** App close codes (shared with the server). */
+export { CLOSE } from "@firstlight/shared/net/social";
 
 export class Net {
   room: Room | null = null;
@@ -43,11 +43,13 @@ export class Net {
   rtt = 0;
   onCorrect: ((x: number, y: number, z: number) => void) | null = null;
   onLeaveRoom: ((code: number) => void) | null = null;
-  /** Called while waiting in the queue (position, eta seconds). */
-  onQueue: ((position: number, etaSeconds: number) => void) | null = null;
+  /** Queue position while /api/play says the world is full (null once in, or on failure). */
+  onQueue: ((q: { position: number; etaSeconds: number } | null) => void) | null = null;
+  /** /api/play refused this account ("banned", or "kicked" for a short cooldown). */
+  onRefused: ((reason: string) => void) | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
 
-  async join(body: BodyId, opts: { starter?: number; palette?: number } = {}): Promise<Room> {
+  async join(body: BodyId, opts: { partyLeaderRoomId?: string; starter?: number; palette?: number } = {}): Promise<Room> {
     let retried401 = false;
     for (;;) {
       // Per attempt: queues can outlast the 15-minute JWT (getPlayToken caches and refreshes it).
@@ -69,16 +71,19 @@ export class Net {
       }
       const r = (await res.json()) as PlayResponse;
       if (r.ok) {
+        this.onQueue?.(null);
         const room = await this.client.consumeSeatReservation(r.reservation as never);
         this.attach(room);
         return room;
       }
       if ("queue" in r) {
-        this.onQueue?.(r.queue.position, r.queue.etaSeconds);
+        this.onQueue?.(r.queue);
         await new Promise((ok) => setTimeout(ok, 5000));
         continue;
       }
+      this.onQueue?.(null);
       if (r.error === "travel" && r.body) throw new TravelRedirect(r.body);
+      if (r.error === "banned" || r.error === "kicked") this.onRefused?.(r.error);
       throw new Error(r.error);
     }
   }

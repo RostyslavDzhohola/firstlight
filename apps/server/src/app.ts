@@ -8,10 +8,11 @@ import express, { type Express, type NextFunction, type Request, type Response }
 import type { TokenVerifier } from "./auth/identity.ts";
 import { directRequestIp } from "./auth/ip.ts";
 import { BodyRoom } from "./world/BodyRoom.ts";
-import { isBodyId, onlineCount, play, type MatchmakingLimits, partyPlacement } from "./world/matchmaking.ts";
+import { isBodyId, onlineCount, play, type MatchmakingLimits } from "./world/matchmaking.ts";
 import { characterRepo } from "./world/characters.ts";
 import { hub } from "./world/hub.ts";
 import { timingSafeEqual } from "node:crypto";
+import { partyOf, partyRoomFor, playRefusal } from "./social/index.ts";
 
 export interface GameOptions {
   port: number;
@@ -23,6 +24,8 @@ export interface GameOptions {
   mountAfterJson?: (app: Express) => void;
   gracefulShutdown?: boolean;
   onShutdown?: () => Promise<void> | void;
+  /** When verification fails: is this a validly signed token of a banned account/network? (403 "banned" instead of 401.) */
+  explainRefusal?: (token: string, ip: string | null) => Promise<string | null>;
 }
 
 export interface Game {
@@ -98,7 +101,9 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
     const identity = token ? await opts.verify(token, { ip: directRequestIp(req) }) : null;
     if (!identity) {
-      res.status(401).json({ ok: false, error: "unauthorized" });
+      const why = token && opts.explainRefusal ? await opts.explainRefusal(token, directRequestIp(req)).catch(() => null) : null;
+      if (why) res.status(403).json({ ok: false, error: why });
+      else res.status(401).json({ ok: false, error: "unauthorized" });
       return;
     }
     const body = req.body?.body;
@@ -115,6 +120,12 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     }
     recent.push(now);
     playCalls.set(identity.userId, recent);
+    // Banned (also covers dev identities) or recently kicked by an admin.
+    const refusal = identity.loadtest ? null : playRefusal(identity.userId);
+    if (refusal) {
+      res.status(403).json({ ok: false, error: refusal });
+      return;
+    }
     // Travel tickets: an existing character may only rejoin its current body or the one it was
     // authorised to travel to (portal or rebirth). Admins and load-test bots are exempt.
     if (!identity.admin && !identity.loadtest) {
@@ -124,15 +135,16 @@ export async function createGame(opts: GameOptions): Promise<Game> {
         return;
       }
     }
-    const party = partyPlacement.current(identity.userId, body);
+    // Party headroom (D12) only for real party members: the copy another member is in on this body
+    // (a client hint is honoured only if it names such a room).
+    const partyRoom = partyRoomFor(identity.userId, body, typeof req.body.partyLeaderRoomId === "string" ? req.body.partyLeaderRoomId : undefined);
     try {
       const result = await play(
         identity,
         {
           body,
-          // Party placement is decided server-side by the party system (not client claims).
-          partyLeaderRoomId: party?.leaderRoomId,
-          partySize: party?.size,
+          partyLeaderRoomId: partyRoom,
+          partySize: partyRoom ? partyOf(identity.userId).length : undefined,
           starter: Number.isInteger(req.body.starter) ? Math.max(0, Math.min(3, req.body.starter)) : undefined,
           palette: Number.isInteger(req.body.palette) ? Math.max(0, Math.min(5, req.body.palette)) : undefined,
           loadtest: req.body.loadtest === true,

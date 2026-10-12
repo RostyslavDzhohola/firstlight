@@ -10,6 +10,9 @@ import { gameDb } from "./db/index.ts";
 import { characterRepo } from "./world/characters.ts";
 import { pileStore } from "./world/piles.ts";
 import { SqliteCharacterRepo, SqlitePileStore } from "./world/sqliteStores.ts";
+import { mountOps } from "./ops/admin.ts";
+import { endAllSessions } from "./social/index.ts";
+import { banExplainer } from "./social/refusal.ts";
 
 // Refuse to boot an insecure production config (review): dev guests would allow impersonation, and a
 // missing origin secret makes forwarded IPs spoofable.
@@ -48,8 +51,15 @@ const game = await createGame({
   allowedOrigins: env.clientOrigins,
   gracefulShutdown: true,
   mountBeforeJson: accounts.mountBeforeJson,
-  mountAfterJson: accounts.mountAfterJson,
-  onShutdown: () => accounts.close(),
+  explainRefusal: banExplainer(accounts),
+  mountAfterJson: (app) => {
+    accounts.mountAfterJson(app);
+    mountOps(app, { db: accounts.db, requireAdmin: accounts.requireAdmin, allowedOrigins: env.clientOrigins });
+  },
+  onShutdown: () => {
+    endAllSessions();
+    accounts.close();
+  },
 });
 
 console.log(`FIRSTLIGHT server listening on :${game.port} (mail: ${accounts.mailer.kind})`);

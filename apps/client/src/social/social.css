@@ -1,0 +1,80 @@
+/* Social UI: compass strip, player list, party invites, screenshot share, queue and removal screens.
+   Plain DOM (D25), same palette as hud.css. */
+
+/* The compass takes the top centre; the safe-zone sign and logout countdown sit below it. */
+.fl-hud .fl-safe { top: 46px; }
+.fl-hud .fl-logout { top: 84px; }
+
+.fl-compass { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); width: min(560px, 62vw); height: 30px; z-index: 21; pointer-events: none;
+  font: 700 11px/1 ui-sans-serif, system-ui, sans-serif; color: #f4f0ff; text-shadow: 0 1px 2px #000a; letter-spacing: .06em;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); }
+.fl-compass::before { content: ""; position: absolute; inset: 0; border-radius: 6px; background: linear-gradient(180deg, #0a081699, #0a081640); border-top: 1px solid #ffffff1f; border-bottom: 1px solid #ffffff14; }
+.fl-compass::after { content: ""; position: absolute; left: 50%; top: -2px; width: 2px; height: 8px; margin-left: -1px; background: #ffd8a8; border-radius: 1px; }
+.fl-compass .tk { position: absolute; bottom: 3px; width: 1px; height: 5px; background: #ffffff55; }
+.fl-compass .cd { position: absolute; top: 9px; transform: translateX(-50%); color: #ffffffb0; font-size: 10px; }
+.fl-compass .cd.main { color: #fff; font-size: 13px; top: 8px; }
+.fl-compass .cd.n { color: #ff9f9f; }
+.fl-compass .mk { position: absolute; top: 3px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 2px; white-space: nowrap; }
+.fl-compass .mk i { display: block; width: 9px; height: 9px; border-radius: 50%; border: 1px solid #0008; }
+.fl-compass .mk.pad i { border-radius: 2px; transform: rotate(45deg); background: #72f1b8; }
+.fl-compass .mk span { font-size: 9px; font-weight: 600; color: #ece8f6; position: absolute; top: 31px; padding: 1px 5px; border-radius: 6px; background: #0a0816b0; }
+.fl-compass .mk.edge { opacity: .7; }
+
+/* Player list (Tab) */
+.fl-plist { z-index: 45; }
+.fl-plist.peek { pointer-events: none; background: transparent; backdrop-filter: none; }
+.fl-plist .fl-panel { width: min(920px, 95vw); max-height: 86vh; overflow: auto; text-align: left; padding: 20px 24px; }
+.fl-plist h2 { font-size: 20px; letter-spacing: .12em; margin: 0 0 4px; }
+.fl-plist .sub { color: #8f88a8; font-size: 12px; margin: 0 0 12px; }
+.fl-plist h3 { font-size: 12px; letter-spacing: .14em; color: #b9b2cc; margin: 14px 0 6px; text-transform: uppercase; }
+.fl-plist table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.fl-plist th { text-align: left; font-weight: 600; color: #8f88a8; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; padding: 4px 6px; }
+.fl-plist td { padding: 6px; border-top: 1px solid #ffffff14; vertical-align: middle; }
+.fl-plist tr.me td { background: #ffffff08; }
+.fl-plist .nm { font-weight: 700; }
+.fl-plist .ttl { color: #ffd8a8; font-size: 11px; margin-left: 6px; font-weight: 500; }
+.fl-plist .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fl-plist .acts { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.fl-chip { display: inline-block; padding: 0 7px; border-radius: 999px; font-size: 10px; font-weight: 700; letter-spacing: .06em; border: 1px solid #ffffff2a; color: #c9c2e0; margin-left: 6px; vertical-align: 1px; }
+.fl-chip.admin { border-color: #ffb86b99; color: #ffd8a8; }
+.fl-chip.party { border-color: #36f9f699; color: #9ffcfa; }
+.fl-chip.other { border-color: #b48cff66; color: #d3c0ff; }
+.fl-chip.bad { border-color: #ff6b6b88; color: #ffb3b3; }
+.fl-sbtn { font: inherit; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px; border: 1px solid #ffffff2e; background: #1b1530; color: #ece8f6; cursor: pointer; }
+.fl-sbtn:hover:not(:disabled) { border-color: #ffd8a8aa; }
+.fl-sbtn:disabled { opacity: .4; cursor: default; }
+.fl-sbtn.on { background: #ffd8a8; color: #1a0f2a; border-color: #ffd8a8; }
+.fl-sbtn.warn { border-color: #ff6b6b77; color: #ffc0c0; }
+.fl-sbtn.primary { background: linear-gradient(180deg, #ffb86b, #ff7edb); color: #1a0f2a; border-color: #ffd8a8; }
+.fl-plist .mod { display: inline-flex; gap: 4px; padding-left: 6px; margin-left: 2px; border-left: 1px solid #ffb86b44; }
+.fl-plist .report { display: flex; gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+.fl-plist select, .fl-plist input[type=text] { font: inherit; font-size: 12px; padding: 4px 8px; border-radius: 8px; border: 1px solid #4a3a72; background: #140d28; color: #ece8f6; }
+.fl-plist .foot { display: flex; gap: 8px; align-items: center; margin-top: 14px; color: #8f88a8; font-size: 12px; flex-wrap: wrap; }
+.fl-plist .foot input[type=text] { flex: 1; min-width: 200px; }
+.fl-voice { font-size: 11px; color: #8f88a8; white-space: nowrap; }
+.fl-voice.live { color: #72f1b8; }
+.fl-voice.muted { color: #ff9f9f; }
+
+/* Party invite card */
+.fl-invites { position: fixed; right: 18px; top: 38%; display: flex; flex-direction: column; gap: 8px; z-index: 46; pointer-events: auto; }
+.fl-invite { width: 280px; padding: 12px 14px; border-radius: 12px; background: #110d22f2; border: 1px solid #36f9f677; box-shadow: 0 8px 30px #0008; color: #ece8f6; font: 13px/1.4 ui-sans-serif, system-ui, sans-serif; animation: flin .2s ease-out; }
+.fl-invite b { color: #9ffcfa; }
+.fl-invite .row { display: flex; gap: 8px; margin-top: 10px; }
+.fl-invite .row .fl-sbtn { flex: 1; padding: 6px 10px; font-size: 12px; }
+.fl-invite .ttl { height: 2px; margin-top: 10px; background: #36f9f6; transform-origin: left; }
+
+/* Screenshot */
+.fl-shot-btn { position: fixed; right: 18px; bottom: 18px; z-index: 44; width: 38px; height: 38px; border-radius: 50%; border: 1px solid #ffffff2e; background: #0a0816c0; color: #ece8f6; cursor: pointer; display: grid; place-items: center; pointer-events: auto; padding: 0; }
+.fl-shot-btn:hover { border-color: #ffd8a8; }
+.fl-shot-btn svg { width: 18px; height: 18px; }
+.fl-shot-flash { position: fixed; inset: 0; background: #fff; opacity: .55; z-index: 70; pointer-events: none; transition: opacity .35s ease-out; }
+.fl-shot .fl-panel { width: min(760px, 94vw); padding: 18px 20px; }
+.fl-shot img { display: block; width: 100%; border-radius: 10px; border: 1px solid #ffffff22; background: #07060d; }
+.fl-shot .row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 14px; }
+.fl-shot .row .fl-sbtn { font-size: 13px; padding: 8px 16px; }
+.fl-shot .note { color: #8f88a8; font-size: 12px; margin-top: 10px; min-height: 16px; }
+
+/* Queue and removal screens */
+.fl-queue { z-index: 65; }
+.fl-queue .pos { font-size: 56px; font-weight: 800; margin: 6px 0; background: linear-gradient(180deg, #fff, #ffd8a8 55%, #ff7edb); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.fl-removed { z-index: 66; }

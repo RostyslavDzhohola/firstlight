@@ -20,6 +20,7 @@ import { GameAudio } from "../audio/Audio.ts";
 import { Input } from "./input.ts";
 import { PlayerController } from "./PlayerController.ts";
 import { CLIENT_SYSTEMS, type ClientSystem } from "./systems.ts";
+import { installSocial, partyRoomOn, removedFromWorld } from "../social/index.ts";
 
 const loadingEl = () => document.getElementById("loading")!;
 function setLoading(text: string, frac: number) {
@@ -68,6 +69,7 @@ export class Game {
     this.combat = new CombatClient(this);
     this.hud = this.combat.hud;
     this.menu = new Menu(this);
+    installSocial(this);
     document.getElementById("landing")!.style.display = "none";
     // First visit: choose a starter before entering the world.
     let firstChoice: { starter: number; palette: number } | undefined;
@@ -130,11 +132,10 @@ export class Game {
   private onRoomClosed(code: number) {
     if (this.travelling || !this.running) return;
     if (code === 1000 || code === 4000 || code === CLOSE.LOGGED_OUT) return; // we left, or logged out
-    if (code === CLOSE.ELSEWHERE || code === CLOSE.BANNED) {
+    // Kicked, banned or playing elsewhere: the social screens say so; never auto-rejoin.
+    if (removedFromWorld(code)) {
       this.running = false;
       document.exitPointerLock?.();
-      if (code === CLOSE.BANNED) this.menu.showNotice("BANNED", "This account can't play right now.", null, null);
-      else this.menu.showNotice("PLAYING ELSEWHERE", "This character is playing in another tab or window.", "Play here", () => void this.resume());
       return;
     }
     if (code === CLOSE.MERGED) invalidatePlayToken(); // saved/signed in: rejoin as the account
@@ -183,7 +184,8 @@ export class Game {
     const stored = { starter: Number(localStorage.getItem("fl.starter") ?? 0), palette: Number(localStorage.getItem("fl.palette") ?? 0) };
     let room;
     try {
-      room = await this.net.join(body, choice ?? stored);
+      // Party members land in the copy a member is already in (D12 headroom).
+      room = await this.net.join(body, { ...(choice ?? stored), partyLeaderRoomId: partyRoomOn(body) });
     } catch (e) {
       // No travel ticket for this body: the character is elsewhere (e.g. logged out on a planet).
       if (e instanceof TravelRedirect && e.body !== body) return this.enterBody(e.body, choice);
