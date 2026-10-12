@@ -36,6 +36,9 @@ function mat(colorHex: number, emissive = false): THREE.Material {
 export class AvatarView {
   readonly root = new THREE.Group();
   private readonly model = new THREE.Group();
+  private readonly detailMeshes: THREE.Mesh[] = [];
+  private readonly allMeshes: THREE.Mesh[] = [];
+  private full = true;
   private t = Math.random() * 10;
 
   constructor(palette = 0, starter = 0) {
@@ -49,7 +52,20 @@ export class AvatarView {
       m.castShadow = true;
       this.model.add(m);
     }
+    this.allMeshes.push(body, head, visor, ring);
+    this.detailMeshes.push(visor, ring);
     this.root.add(this.model);
+  }
+
+  /**
+   * Full detail (all parts, casts shadows) or reduced (body + head, no shadow) for avatars beyond
+   * the tier's full-detail count (SPEC §7.3 "full-detail avatars").
+   */
+  setDetail(full: boolean) {
+    if (full === this.full) return;
+    this.full = full;
+    for (const m of this.detailMeshes) m.visible = full;
+    for (const m of this.allMeshes) m.castShadow = full;
   }
 
   /** Place at a planet-space position, standing on local up, facing a tangent direction. */

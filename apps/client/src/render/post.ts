@@ -1,0 +1,123 @@
+// Post pipeline (SPEC §7.1): scene pass → [GTAO (WebGPU High/Ultra)] → [TRAA (opt-in)] → bloom →
+// renderOutput (tone map + sRGB) → grade (cdl + saturation + hue) → vignette → grain → FXAA.
+// Everything per-body is a shared uniform, so changing planets never rebuilds shaders; only tier or
+// feature changes rebuild the pipeline.
+
+import * as THREE from "three/webgpu";
+import {
+  cdl, float, fract, hue, interleavedGradientNoise, luminance, mix, mrt, output, pass, renderOutput,
+  screenCoordinate, time, uniform, vec2, vec3, vec4, velocity,
+} from "three/tsl";
+import { bloom } from "three/addons/tsl/display/BloomNode.js";
+import { fxaa } from "three/addons/tsl/display/FXAANode.js";
+import { ao } from "three/addons/tsl/display/GTAONode.js";
+import { traa } from "three/addons/tsl/display/TRAANode.js";
+import { vignette } from "three/addons/tsl/display/CRT.js";
+import type { ResolvedSettings } from "./quality.ts";
+
+export interface GradeParams {
+  slope: [number, number, number];
+  offset: [number, number, number];
+  power: [number, number, number];
+  saturation: number;
+  /** Hue rotation in radians. */
+  hue: number;
+}
+
+export const NEUTRAL_GRADE: GradeParams = { slope: [1, 1, 1], offset: [0, 0, 0], power: [1, 1, 1], saturation: 1, hue: 0 };
+/** Look rule 1: menus, lobby and loading are muted. */
+export const MENU_GRADE: GradeParams = { slope: [0.96, 0.96, 1.0], offset: [0.01, 0.01, 0.015], power: [1.05, 1.05, 1.0], saturation: 0.62, hue: 0 };
+
+/** Shared post uniforms (one instance per renderer). */
+export const postUniforms = {
+  bloomStrength: uniform(0.35),
+  bloomRadius: uniform(0.45),
+  bloomThreshold: uniform(1.15),
+  gradeSlope: uniform(new THREE.Vector3(1, 1, 1)),
+  gradeOffset: uniform(new THREE.Vector3(0, 0, 0)),
+  gradePower: uniform(new THREE.Vector3(1, 1, 1)),
+  gradeSat: uniform(1),
+  gradeHue: uniform(0),
+  vignette: uniform(0.28),
+  grain: uniform(0.035),
+  aoStrength: uniform(0.85),
+};
+
+export function setGrade(g: GradeParams) {
+  postUniforms.gradeSlope.value.set(...g.slope);
+  postUniforms.gradeOffset.value.set(...g.offset);
+  postUniforms.gradePower.value.set(...g.power);
+  postUniforms.gradeSat.value = g.saturation;
+  postUniforms.gradeHue.value = g.hue;
+}
+
+export interface PostBuild {
+  outputNode: THREE.Node;
+  scenePass: ReturnType<typeof pass>;
+  dispose(): void;
+}
+
+/** Build the pipeline's output node for the given settings. */
+export function buildPost(scene: THREE.Scene, camera: THREE.Camera, s: ResolvedSettings): PostBuild {
+  const disposables: { dispose(): void }[] = [];
+  const scenePass = pass(scene, camera);
+  disposables.push(scenePass);
+  if (s.on.traa) scenePass.setMRT(mrt({ output, velocity }));
+
+  let color: any = scenePass.getTextureNode("output");
+
+  if (s.on.ao) {
+    // Depth-only GTAO (normals reconstructed from depth): no normal MRT, so materials keep one
+    // pipeline variant. WebGPU High/Ultra only (gated in resolveSettings).
+    const aoNode = ao(scenePass.getTextureNode("depth"), null as unknown as THREE.Node, camera);
+    aoNode.resolutionScale = s.post.ao === "full" ? 1 : 0.5;
+    disposables.push(aoNode);
+    const occ = aoNode.getTextureNode().r;
+    color = vec4(color.rgb.mul(mix(float(1), occ, postUniforms.aoStrength)), color.a);
+  }
+
+  if (s.on.traa) {
+    const t = traa(color, scenePass.getTextureNode("depth"), scenePass.getTextureNode("velocity"), camera);
+    disposables.push(t);
+    color = t;
+  }
+
+  if (s.on.bloom) {
+    const b = bloom(color, postUniforms.bloomStrength, postUniforms.bloomRadius, postUniforms.bloomThreshold);
+    b.smoothWidth.value = 0.35;
+    b.setResolutionScale(s.post.bloomScale);
+    disposables.push(b);
+    color = color.add(b);
+  }
+
+  let out: any = renderOutput(color as any);
+
+  if (s.on.grade) {
+    out = cdl(out, postUniforms.gradeSlope, postUniforms.gradeOffset, postUniforms.gradePower, postUniforms.gradeSat);
+    out = vec4(hue(out.rgb, postUniforms.gradeHue), out.a);
+  }
+  if (s.on.vignette) out = vec4(vignette(out.rgb, postUniforms.vignette, float(0.55)), out.a);
+  if (s.on.grain) {
+    const jitter = vec2(fract(time.mul(7.13)).mul(64), fract(time.mul(3.71)).mul(64));
+    const n = interleavedGradientNoise(screenCoordinate.xy.add(jitter)).sub(0.5);
+    // Strongest in the mid-tones, like film.
+    const l = luminance(out.rgb);
+    const w = l.mul(float(1).sub(l)).mul(4).clamp(0.25, 1);
+    out = vec4(out.rgb.add(vec3(n.mul(postUniforms.grain).mul(w))), out.a);
+  }
+  if (s.on.fxaa) out = fxaa(out);
+
+  return {
+    outputNode: out,
+    scenePass,
+    dispose() {
+      for (const d of disposables) {
+        try {
+          d.dispose();
+        } catch {
+          /* already gone */
+        }
+      }
+    },
+  };
+}
