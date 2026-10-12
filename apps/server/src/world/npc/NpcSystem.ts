@@ -259,6 +259,7 @@ export class NpcSystem implements RoomSystem {
 
   private returnGolden(g: GroupState, now: number) {
     this.goldenBack.delete(g.point.id);
+    this.copyDirty = true;
     const i = g.point.members.findIndex((m) => m.golden);
     if (i < 0 || !g.dead[i] || g.members[i]) return;
     g.dead[i] = false;
@@ -413,7 +414,10 @@ export class NpcSystem implements RoomSystem {
   retire(n: Npc) {
     if (n.dead) return;
     n.dead = true;
-    if (n.def.id === "golden_hopbit" && n.point) this.goldenBack.set(n.point.id, this.world.now() + EGG_NPC.goldenBackMs);
+    if (n.def.id === "golden_hopbit" && n.point) {
+      this.goldenBack.set(n.point.id, this.world.now() + EGG_NPC.goldenBackMs);
+      this.copyDirty = true; // the return time outlives the room (persist.ts)
+    }
     const g = this.groupOf(n);
     if (g) {
       g.dead[n.member] = true;
