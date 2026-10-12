@@ -12,9 +12,9 @@
   "devDependencies": {
     "@colyseus/sdk": "0.18.5",
     "@types/better-sqlite3": "9.6.0",
-    "@types/express": "^5.0.6",
-    "esbuild": "^0.28.2",
-    "tsx": "^4.23.15"
+    "@types/express": "5.0.6",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.15"
   },
   "dependencies": {
     "@colyseus/core": "0.18.18",
@@ -29,6 +29,6 @@
     "jose": "6.2.12",
     "obscenity": "0.4.6",
     "resend": "6.32.1",
-    "zod": "^4.6.6"
+    "zod": "4.6.6"
   }
 }
