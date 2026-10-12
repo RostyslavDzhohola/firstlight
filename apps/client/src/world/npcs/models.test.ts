@@ -22,4 +22,25 @@ describe("NPC models", () => {
     const wool = (b: "arcadia" | "hollowmere" | "meridian") => buildModels(b)[NPC_DEFS.findIndex((d) => d.id === "woolback")]!.parts[0]!.c;
     expect(new Set([wool("arcadia"), wool("hollowmere"), wool("meridian")]).size).toBe(3);
   });
+
+  it("Meridian Associates are matte slate with one amber slit visor, nothing like Unit 7's ivory plates (content §3.4, §8.2)", () => {
+    const models = buildModels("meridian");
+    const luma = (c: number) => (0.2126 * ((c >> 16) & 255) + 0.7152 * ((c >> 8) & 255) + 0.0722 * (c & 255)) / 255;
+    for (const id of ["associate", "enforcer", "compliance_officer", "ticket_000"]) {
+      const i = NPC_DEFS.findIndex((d) => d.id === id);
+      if (i < 0) continue;
+      const m = models[i]!;
+      const plates = m.parts.filter((p) => p.m !== "glow");
+      // No ivory/white armour (Unit 7 is #E9E4D8): every plate is mid-to-dark grey.
+      for (const p of plates) expect(luma(p.c), `${id} plate ${p.c.toString(16)}`).toBeLessThan(0.55);
+      expect(plates.some((p) => p.m === "metal" && p.g !== "cyl" && p.p[1] > 1.5), `${id}: matte helmet`).toBe(false);
+      // Accents are amber, never the old red visor.
+      for (const p of m.parts.filter((q) => q.m === "glow")) {
+        const r = (p.c >> 16) & 255, g = (p.c >> 8) & 255, b = p.c & 255;
+        expect(r > 200 && g > 120 && b < 120, `${id} glow ${p.c.toString(16)}`).toBe(true);
+      }
+      // One visor: a single thin glowing slit at head height.
+      expect(m.parts.filter((p) => p.m === "glow" && p.p[1] > 1.6 && p.p[1] < 1.85 && p.p[2] < 0.3 && !p.tag)).toHaveLength(1);
+    }
+  });
 });

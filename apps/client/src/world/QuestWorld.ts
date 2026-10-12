@@ -372,9 +372,14 @@ export class QuestWorld {
         r.add(mesh(new THREE.BoxGeometry(0.2, 0.1, 0.1), std(0xf2b544, { emissive: 0.8 }), 0.4, 0.9, 0.15));
         break;
       case "pod": {
-        r.add(mesh(new THREE.CylinderGeometry(0.6, 0.6, 2.4, 16, 1, true), std(0x9fe8ff, { opacity: 0.3, emissive: 0.2 }), 0, 1.2, 0));
-        r.add(mesh(new THREE.CylinderGeometry(0.7, 0.7, 0.2, 16), std(0x3a3f48, { metal: 0.6 }), 0, 0.1, 0));
-        r.add(mesh(new THREE.SphereGeometry(0.3, 12, 10), std(0x5a5e68, { metal: 0.5 }), 0, 1.4, 0));
+        // An Oversight storage locker, not a cloning tube: a hexagonal slate frame with a smoked amber
+        // window, hazard-banded base and the helmet on a hook inside (F12 review, IP).
+        r.add(mesh(new THREE.CylinderGeometry(0.62, 0.62, 2.3, 6, 1, true), std(0xd9a54a, { opacity: 0.22, emissive: 0.1 }), 0, 1.25, 0));
+        for (const y of [0.15, 2.4]) r.add(mesh(new THREE.CylinderGeometry(0.72, 0.72, 0.22, 6), std(0x4a525c), 0, y, 0));
+        r.add(mesh(new THREE.BoxGeometry(0.12, 2.3, 0.12), std(0x3a424b), 0.66, 1.25, 0));
+        r.add(mesh(new THREE.BoxGeometry(0.12, 2.3, 0.12), std(0x3a424b), -0.66, 1.25, 0));
+        r.add(mesh(new THREE.BoxGeometry(1.2, 0.08, 0.05), std(0xf2b544, { emissive: 0.6 }), 0, 0.3, 0.62));
+        r.add(mesh(new THREE.BoxGeometry(0.34, 0.34, 0.36), std(0x56606b), 0, 1.45, 0));
         break;
       }
     }

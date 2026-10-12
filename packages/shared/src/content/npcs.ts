@@ -5,8 +5,8 @@
 // - Hopbit hop, Woolback buck and Collector taser list 0.4 s telegraphs; the light floor is 0.5 s.
 // - Dunebreaker tail swipe lists 0.8 s for a 23% hit; hits ≥ 20% of on-level HP use the heavy floor (0.9 s).
 // - Leash is 40 m (SPEC §6.4 and the lane brief); content §3.1 says 45 m. One constant: NPC_RULES.leash.
-// - Meridian Oversight colours follow the lane brief (ivory-and-chrome, red visors); content §3.4 says
-//   slate-grey with amber visors. It's a client palette constant only.
+// - Meridian Oversight follows content §3.4 (slate-grey matte hardsuits, amber slit visors, hexagonal
+//   glyph), kept clearly apart from Unit 7's ivory plates (F12 review). It's a client look only.
 
 import type { BodyId, FeatureAnchor } from "../planet/bodies.ts";
 import { enemyDamageMult, enemyHpMult, killCoins, maxHp, type EnemyTier } from "./progression.ts";
