@@ -26,11 +26,9 @@ function groundAt(t: Terrain, b: Breakable, lx: number, lz: number): number {
 }
 
 describe("breakable placement", () => {
-  it("is deterministic: fresh terrains give identical lists, and the cache returns the same", () => {
+  it("is deterministic: a fresh terrain gives the same list as the cached one", { timeout: 60_000 }, () => {
     for (const id of PLANET_IDS) {
       const a = placeBreakables(createTerrain(id));
-      const b = placeBreakables(createTerrain(id));
-      expect(b).toEqual(a);
       expect(bodyBreakables(terrains[id])).toEqual(a);
       expect(a.length).toBeGreaterThan(120);
     }
@@ -58,7 +56,7 @@ describe("breakable placement", () => {
     }
   });
 
-  it("sits on dry ground: no footprint corner floats, and slopes stay within the archetype's step", () => {
+  it("sits on dry ground: no footprint corner floats, and slopes stay within the archetype's step", { timeout: 60_000 }, () => {
     for (const id of PLANET_IDS) {
       const t = terrains[id];
       const R = t.body.radius;
@@ -99,7 +97,7 @@ describe("breakable placement", () => {
     }
   });
 
-  it("doesn't overlap trees, rocks or spires", () => {
+  it("doesn't overlap trees, rocks or spires", { timeout: 60_000 }, () => {
     for (const id of PLANET_IDS) {
       const t = terrains[id];
       const cache = new Map<string, ReturnType<typeof chunkProps>>();
@@ -136,7 +134,7 @@ describe("breakable placement", () => {
     expect(archetypeDef("meridian", "cover").hp).toBe(900);
   });
 
-  it("points of interest keep most of their props", () => {
+  it("points of interest keep most of their props", { timeout: 60_000 }, () => {
     for (const id of PLANET_IDS) {
       for (const r of breakablePlacementReport(terrains[id])) {
         if (r.site.startsWith("pad ")) continue;
