@@ -288,6 +288,11 @@ export class BreakablesView implements ClientSystem, MoveColliders {
     return this.collider.resolve(pos, this.solid, out);
   }
 
+  /** MoveColliders: first intact prop along a ray (the local tracer stops where the server's shot does). */
+  raycast(o: THREE.Vector3, d: THREE.Vector3, maxT: number): number {
+    return this.collider ? this.collider.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT, this.solid) : Infinity;
+  }
+
   // ------------------------------------------------------------------ server events
 
   private onBroke(m: BrokeMsg) {

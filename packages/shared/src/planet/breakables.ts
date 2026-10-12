@@ -45,8 +45,10 @@ const ARCHETYPES: Record<BreakableArchetype, ArchetypeDef> = {
   crate: { hp: 40, size: "light", rebuildS: 180, collider: { kind: "box", hx: 0.5, hz: 0.5, h: 1.0 }, maxStep: 0.4 },
   barrel: { hp: 40, size: "light", rebuildS: 180, collider: { kind: "cyl", r: 0.42, h: 1.12 }, maxStep: 0.35 },
   fence: { hp: 60, size: "light", rebuildS: 180, collider: { kind: "box", hx: 1.0, hz: 0.09, h: 1.1 }, maxStep: 0.55 },
-  statue: { hp: 300, size: "heavy", rebuildS: 300, collider: { kind: "cyl", r: 0.6, h: 2.75 }, maxStep: 0.5 },
-  pillar: { hp: 500, size: "heavy", rebuildS: 300, collider: { kind: "cyl", r: 0.5, h: 4.2 }, maxStep: 0.6 },
+  // Colliders fit the client meshes (F12 review: a 0.6 m statue / 0.5 m pillar cylinder blocked shots
+  // well clear of the figure / shaft): the statue base is 0.9 m square, the pillar caps 0.84 m.
+  statue: { hp: 300, size: "heavy", rebuildS: 300, collider: { kind: "cyl", r: 0.45, h: 2.75 }, maxStep: 0.5 },
+  pillar: { hp: 500, size: "heavy", rebuildS: 300, collider: { kind: "cyl", r: 0.42, h: 4.2 }, maxStep: 0.6 },
   campwall: { hp: 600, size: "heavy", rebuildS: 300, collider: { kind: "box", hx: 2.0, hz: 0.3, h: 2.6 }, maxStep: 1.1 },
   // Boss-arena cover differs per planet (content.md §4): see COVER below.
   cover: { hp: 400, size: "heavy", rebuildS: 180, collider: { kind: "cyl", r: 0.8, h: 3.0 }, maxStep: 0.9 },

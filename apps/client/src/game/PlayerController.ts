@@ -13,6 +13,8 @@ import type { Input } from "./input.ts";
 export interface MoveColliders {
   /** Push `pos` (feet, planet space) out of solid props; fills `out` (push direction, floor under the feet). */
   resolve(pos: THREE.Vector3, out: PropContact): boolean;
+  /** Distance along a ray (unit `d`) to the first solid prop within `maxT`, or Infinity (tracers). */
+  raycast?(o: THREE.Vector3, d: THREE.Vector3, maxT: number): number;
 }
 
 export const MOVE = {

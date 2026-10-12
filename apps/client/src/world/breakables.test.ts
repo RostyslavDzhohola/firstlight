@@ -44,6 +44,30 @@ describe("breakable meshes and pre-fracture", () => {
     }
   });
 
+  it("meshes fill their shared colliders (what blocks a shot is what you see)", () => {
+    for (const body of PLANET_IDS) {
+      for (const a of BREAKABLE_ARCHETYPES) {
+        const c = archetypeDef(body, a).collider;
+        let vol = 0, ext = 0, top = 0;
+        for (const part of archetypeShape(body, a)) {
+          const p = part.geometry.getAttribute("position").array as Float32Array;
+          for (let t = 0; t < p.length; t += 9) {
+            const [ax, ay, az, bx, by, bz, cx, cy, cz] = Array.from(p.subarray(t, t + 9)) as [number, number, number, number, number, number, number, number, number];
+            vol += (ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx)) / 6;
+          }
+          for (let i = 0; i < p.length; i += 3) {
+            ext = Math.max(ext, c.kind === "box" ? Math.max(Math.abs(p[i]!) / c.hx, Math.abs(p[i + 2]!) / c.hz) : Math.hypot(p[i]!, p[i + 2]!) / c.r);
+            top = Math.max(top, p[i + 1]!);
+          }
+        }
+        const cvol = c.kind === "box" ? 4 * c.hx * c.hz * c.h : Math.PI * c.r * c.r * c.h;
+        expect(vol / cvol, `${body} ${a} volume`).toBeGreaterThan(0.5); // the rail fence was 12%, statues ~30%
+        expect(ext, `${body} ${a} width`).toBeGreaterThan(0.95);
+        expect(top / c.h, `${body} ${a} height`).toBeGreaterThan(0.9);
+      }
+    }
+  });
+
   it("fractures into 8–12 pieces per prop (fewer on Low), with inner faces flagged, and no fallbacks", () => {
     for (const body of PLANET_IDS) {
       const full = get(body, 0), low = get(body, 1);

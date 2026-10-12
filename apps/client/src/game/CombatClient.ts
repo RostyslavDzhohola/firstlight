@@ -14,6 +14,9 @@ import { showSavePrompt } from "../ui/account.ts";
 import { getPlayToken, isDevGuest, readClaims } from "../net/auth.ts";
 
 const _v = new THREE.Vector3();
+const _head = new THREE.Vector3();
+const _up = new THREE.Vector3();
+const _from = new THREE.Vector3();
 
 export class CombatClient {
   readonly effects: Effects;
@@ -280,9 +283,10 @@ export class CombatClient {
       this.chargeStart = now;
       room.send("charge", { on: true });
     }
-    // Local predicted tracer for hitscan weapons.
+    // Local predicted tracer for hitscan weapons, stopped by terrain or the first intact prop.
     if (def.delivery === "hitscan" || def.delivery === "pellets" || def.delivery === "chain") {
-      const hitT = this.rayTerrain(origin, dir, def.falloffTo ?? def.range);
+      const range = def.falloffTo ?? def.range;
+      const hitT = Math.min(this.rayTerrain(origin, dir, range), this.rayProps(origin, dir, range));
       const to = origin.clone().addScaledVector(dir, hitT);
       const muzzle = g.player.pos.clone().addScaledVector(g.player.up(), 1.35).addScaledVector(g.player.facing, 0.5);
       const color = weaponColor(WEAPONS.indexOf(def));
@@ -290,6 +294,20 @@ export class CombatClient {
       g.audio.play(def.id in { carbine: 1, scatterpipe: 1, stillshot: 1, stormcoil: 1 } ? def.id : "carbine");
       this.effects.flash(muzzle, color, 0.3);
     }
+  }
+
+  /**
+   * Distance to the first intact prop along the camera ray, ignoring the stretch behind the head
+   * (like the server's propOnRay: props between the camera and the shooter don't catch the aim).
+   */
+  private rayProps(o: THREE.Vector3, d: THREE.Vector3, max: number): number {
+    const props = this.game.player.getColliders();
+    if (!props?.raycast) return Infinity;
+    const p = this.game.player.pos;
+    const head = _head.copy(p).addScaledVector(_up.copy(p).normalize(), 1.6);
+    const skip = Math.max(0, head.sub(o).dot(d));
+    if (skip >= max) return Infinity;
+    return skip + props.raycast(_from.copy(o).addScaledVector(d, skip), d, max - skip);
   }
 
   private rayTerrain(o: THREE.Vector3, d: THREE.Vector3, max: number): number {

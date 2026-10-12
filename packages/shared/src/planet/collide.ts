@@ -6,7 +6,7 @@
 // differs from the player's by metres / planet radius, which is negligible). Pushes are sideways in
 // the prop's tangent plane, by the shortest way out, so walking into a prop slides along it.
 
-import { BreakableGrid, type Breakable } from "./breakables.ts";
+import { BreakableGrid, rayBreakable, segmentNearBreakable, type Breakable } from "./breakables.ts";
 
 export interface XYZ {
   x: number;
@@ -128,6 +128,25 @@ export class BreakableCollider {
   constructor(list: readonly Breakable[], grid?: BreakableGrid) {
     this.list = list;
     this.grid = grid ?? new BreakableGrid(list);
+  }
+
+  /**
+   * Distance along a ray (origin o, unit direction d) to the first solid prop within `maxT`, or
+   * Infinity (the same test the server's shot occlusion runs).
+   */
+  raycast(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number, solid: (index: number) => boolean): number {
+    if (!(maxT > 0) || this.list.length === 0) return Infinity;
+    const n = this.grid.collect(ox, oy, oz, dx, dy, dz, maxT, 0, this.candidates);
+    let best = Infinity;
+    for (let k = 0; k < n; k++) {
+      const i = this.candidates[k]!;
+      if (!solid(i)) continue;
+      const b = this.list[i]!;
+      if (!segmentNearBreakable(b, ox, oy, oz, dx, dy, dz, maxT)) continue;
+      const t = rayBreakable(b, ox, oy, oz, dx, dy, dz, Math.min(maxT, best));
+      if (t < best) best = t;
+    }
+    return best;
   }
 
   /**

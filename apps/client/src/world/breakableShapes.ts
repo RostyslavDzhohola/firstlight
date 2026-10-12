@@ -161,19 +161,28 @@ export function archetypeShape(body: BodyId, kind: BreakableArchetype): ShapePar
         },
       }];
     case "fence": {
+      // A solid plank panel between two posts, filling the shared 2 × 0.18 × 1.1 m collider (it used
+      // to be two thin rails, so shots stopped by the collider looked like they hit thin air).
       const post = (x: number): ShapePart => ({
-        geometry: box(0.12, 1.1, 0.12, [1, 2, 1], x, 0, 0),
+        geometry: box(0.12, 1.1, 0.18, [1, 2, 1], x, 0, 0),
         pieces: [1, 1],
         inner: P.woodIn,
         color: (px, py, pz, _a, _b, _c2, out) => shaded(P.frame, px, py, pz, 6, out),
       });
-      const rail = (y: number): ShapePart => ({
-        geometry: box(1.76, 0.1, 0.05, [4, 1, 1], 0, y, 0),
-        pieces: [3, 2],
+      const [plankA, plankB] = body === "meridian" ? [P.stone2, P.stone] : [P.wood, P.wood2];
+      const panel: ShapePart = {
+        geometry: box(1.76, 0.96, 0.14, [6, 2, 1], 0, 0.04, 0),
+        pieces: [6, 4],
         inner: P.woodIn,
-        color: (px, py, pz, _a, _b, _c2, out) => shaded(body === "meridian" ? P.stone2 : P.wood, px, py, pz, 7, out),
-      });
-      return [post(-0.94), post(0.94), rail(0.4), rail(0.8)];
+        color: (px, py, pz, _a, _b, _c2, out) => shaded(Math.floor((px + 0.88) / (1.76 / 6)) % 2 ? plankA : plankB, px, py, pz, 7, out),
+      };
+      const rail: ShapePart = {
+        geometry: box(1.76, 0.08, 0.18, [4, 1, 1], 0, 1.0, 0),
+        pieces: [2, 1],
+        inner: P.woodIn,
+        color: (px, py, pz, _a, _b, _c2, out) => shaded(P.frame, px, py, pz, 26, out),
+      };
+      return [post(-0.94), post(0.94), panel, rail];
     }
     case "statue":
       return statue(body, P);

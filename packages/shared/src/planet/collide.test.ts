@@ -138,6 +138,20 @@ describe("BreakableCollider (many props)", () => {
   });
 });
 
+describe("BreakableCollider.raycast", () => {
+  const a = prop({ shape: 0, hx: 0.5, hz: 0.5, h: 1 }, 0);
+  const b = prop({ shape: 1, hx: 0.4, hz: 0.4, h: 2, pz: 4 }, 1);
+  const collider = new BreakableCollider([a, b]);
+
+  it("finds the first solid prop along a ray, skipping broken ones and stopping at maxT", () => {
+    const o = feet(0, 0.5, -3); // in front of the crate, looking +z through both props
+    expect(collider.raycast(o.x, o.y, o.z, 0, 0, 1, 50, () => true)).toBeCloseTo(2.5, 9);
+    expect(collider.raycast(o.x, o.y, o.z, 0, 0, 1, 50, (i) => i !== 0)).toBeCloseTo(6.6, 9);
+    expect(collider.raycast(o.x, o.y, o.z, 0, 0, 1, 2, () => true)).toBe(Infinity);
+    expect(collider.raycast(o.x, R + 3, o.z, 0, 0, 1, 50, () => true)).toBe(Infinity); // over both
+  });
+});
+
 describe("real placement", () => {
   const list = bodyBreakables(createTerrain("arcadia"));
 
