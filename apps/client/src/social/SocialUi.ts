@@ -20,7 +20,7 @@ import type { V3 } from "./compassMath.ts";
 const PEEK_MS = 250;
 
 export class SocialUi {
-  readonly compass = new Compass();
+  readonly compass: Compass;
   readonly list: PlayerList;
   readonly invites: InviteCards;
   private readonly shotBtn: HTMLButtonElement;
@@ -28,6 +28,7 @@ export class SocialUi {
   private shooting = false;
 
   constructor(private readonly game: Game) {
+    this.compass = new Compass(game.hud.root);
     this.list = new PlayerList({
       players: () => (this.room()?.state as any)?.players ?? null,
       selfSession: () => this.room()?.sessionId ?? "",
@@ -40,7 +41,7 @@ export class SocialUi {
       relock: () => this.game.input.lock(),
     });
     this.invites = new InviteCards((inv, accept) => this.room()?.send("party", { action: accept ? "accept" : "decline", target: inv.from }));
-    this.shotBtn = el("button", "fl-shot-btn", document.body);
+    this.shotBtn = el("button", "fl-shot-btn", game.hud.root);
     this.shotBtn.type = "button";
     this.shotBtn.title = "Screenshot (P)";
     this.shotBtn.setAttribute("aria-label", "Take a screenshot");
@@ -84,6 +85,7 @@ export class SocialUi {
       update: (_dt, now) => this.update(now),
       dispose: () => {
         if (this.list.isOpen) this.list.close(false);
+        this.compass.setVisible(false);
       },
     };
   }

@@ -24,8 +24,10 @@ export class Compass {
   private readonly pad = el("div", "mk pad");
   private readonly padText: HTMLElement;
 
-  constructor() {
-    document.body.appendChild(this.root);
+  /** Mount inside the HUD root so it hides with the HUD (photo mode). */
+  constructor(parent: HTMLElement = document.body) {
+    parent.appendChild(this.root);
+    this.root.style.display = "none"; // until the first update in a room
     for (let d = 0; d < 360; d += 15) {
       if (d % 45 === 0) continue;
       const t = el("div", "tk", this.root);
@@ -52,6 +54,7 @@ export class Compass {
    * @param safe    standing in a safe zone (hides the pad marker)
    */
   update(pos: V3, forward: V3, body: BodyId, safe: boolean, markers: CompassMarker[]) {
+    if (this.root.style.display === "none") this.root.style.display = "";
     const heading = headingOf(pos, forward);
     const place = (e: HTMLElement, rel: number, hideOff = true) => {
       const s = stripX(rel, HALF_SPAN);

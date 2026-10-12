@@ -162,8 +162,23 @@ describe("session analytics", () => {
       // Travel within the grace period: still one session, time on both bodies.
       await new Promise((r) => setTimeout(r, 60));
       await safeLeave(a);
-      const b = await enter(s, "dev:sess_a:Sessy", "arcadia");
-      await new Promise((r) => setTimeout(r, 60));
+      const b = await enter(s, "dev:sess_a:Sessy:admin", "arcadia");
+      await waitFor(() => !!me(b));
+      // Level up, walk off the pad, die: the row records max level and deaths.
+      const deaths = inbox<any>(b, "death");
+      b.send("admin", { cmd: "level", args: { level: 5 } });
+      const p = me(b);
+      const len = Math.hypot(p.x, p.y, p.z);
+      const up = [p.x / len, p.y / len, p.z / len];
+      const side = Math.abs(up[2]!) < 0.9 ? [0, 0, 1] : [1, 0, 0];
+      const k = side[0]! * up[0]! + side[1]! * up[1]! + side[2]! * up[2]!;
+      const t = side.map((v, i) => v - k * up[i]!);
+      const tl = Math.hypot(t[0]!, t[1]!, t[2]!);
+      b.send("admin", { cmd: "teleport", args: { x: p.x + (t[0]! / tl) * 40, y: p.y + (t[1]! / tl) * 40, z: p.z + (t[2]! / tl) * 40 } });
+      b.send("admin", { cmd: "unprotect" });
+      await waitFor(() => (me(b).flags & 1) === 0);
+      b.send("admin", { cmd: "damage", args: { amount: 9999 } });
+      await waitFor(() => deaths.length > 0);
       await safeLeave(b);
       rooms.splice(0);
       await waitFor(() => rows("sess_a")[0].ended_at !== null, 3000);
@@ -171,6 +186,8 @@ describe("session analytics", () => {
       expect(row).toHaveLength(1);
       const bodyTime = JSON.parse(row[0].body_time_json);
       expect(Object.keys(bodyTime).sort()).toEqual(["arcadia", "portus"]);
+      expect(row[0].deaths).toBe(1);
+      expect(row[0].max_level).toBe(5);
       expect(row[0].ended_at).toBeGreaterThan(row[0].started_at);
 
       // Load-test bots never get a row.

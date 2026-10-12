@@ -40,6 +40,15 @@ const modSchema = z.object({
 const offlineTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const rate = new Map<string, number[]>(); // key → recent timestamps
 
+let lastSweep = 0;
+/** Drop stale rate-limit keys and names of players who are gone and partyless (bounded memory). */
+function sweep(now: number): void {
+  if (now - lastSweep < 60_000) return;
+  lastSweep = now;
+  for (const [k, list] of rate) if (!list.length || now - list[list.length - 1]! > 15 * 60_000) rate.delete(k);
+  for (const u of lastNames.keys()) if (!presenceOf(u) && !parties.of(u)) lastNames.delete(u);
+}
+
 function allow(key: string, max: number, windowMs: number, now = Date.now()): boolean {
   const list = (rate.get(key) ?? []).filter((t) => now - t < windowMs);
   if (list.length >= max) {
@@ -320,6 +329,7 @@ export function createSocialSystem(room: BodyRoom): RoomSystem {
     tick(_dt, now) {
       if (now - lastSlow < 1000) return;
       lastSlow = now;
+      sweep(now);
       for (const inv of parties.expire(now)) sendTo(inv.from, "party:invite-closed", { from: inv.from, to: inv.to, reason: "expired" });
       for (const a of room.actors.values()) {
         trackTick(a.identity.userId, now);
