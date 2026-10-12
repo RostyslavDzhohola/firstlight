@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Client } from "@colyseus/sdk";
 import type { Room } from "@colyseus/sdk";
 import type { Game } from "../src/app.ts";
-import { joinAs, playRequest, startServer, waitFor } from "./helpers.ts";
+import { joinAs, playRequest, safeLeave, startServer, waitFor } from "./helpers.ts";
 
 let game: Game;
 const rooms: Room[] = [];
@@ -12,7 +12,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  for (const r of rooms.splice(0)) await r.leave().catch(() => {});
+  for (const r of rooms.splice(0)) await safeLeave(r);
   await game.close();
 });
 

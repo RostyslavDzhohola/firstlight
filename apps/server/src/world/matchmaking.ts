@@ -16,6 +16,8 @@ export interface MatchmakingLimits {
 
 export interface PlayInput {
   body: BodyId;
+  starter?: number;
+  palette?: number;
   partyLeaderRoomId?: string;
   partySize?: number;
   loadtest?: boolean;
@@ -93,7 +95,7 @@ export async function play(identity: Identity, input: PlayInput, limits: Matchma
       target = await matchMaker.createRoom("body", { body: input.body, copy, loadtest });
     }
     queue.delete(identity.userId);
-    const reservation = await matchMaker.reserveSeatFor(target, { body: input.body }, identity);
+    const reservation = await matchMaker.reserveSeatFor(target, { body: input.body, starter: input.starter, palette: input.palette }, identity);
     return { ok: true, reservation: reservation as unknown as import("@firstlight/shared/net/protocol").SeatReservation };
   });
 }

@@ -8,10 +8,10 @@
 | Thing | State |
 |---|---|
 | GitHub repo | `RostyslavDzhohola/firstlight` (private), branch `main` |
-| Railway | project `firstlight` (34985681-…), service `game-server` (3aa5094e-…), volume `/data` (7c8af5f6-…), region us-east requested |
+| Railway | project `firstlight`, service `game-server`, volume `/data` 5 GB, US East, 2 vCPU/2 GB, Hobby; live at https://api.firstlight.one4all.dev (ALLOW_DEV_GUESTS=1 until auth lane merges) |
 | Vercel | not yet |
-| Cloudflare | Codex task `fl-run-codex-dashboards-1` running |
-| Resend | Codex task `fl-run-codex-dashboards-1` running |
+| Cloudflare | account `rosty-build` workers.dev; Workers token saved; TURN key pending owner |
+| Resend | paid plan; domain firstlight.one4all.dev added, DNS added, verification pending; sending key not yet created |
 
 ## Milestones
 
@@ -48,4 +48,8 @@
 
 ## Open issues
 
-(none yet)
+- NO CODEX COMPUTER USE (D23): visual/E2E checks run in T3 Code's built-in browser (preview tools). Never Chrome.
+- Concept art not generated yet (Codex task cancelled for safety). Retry only without computer use.
+- Character floats slightly above terrain (Codex first look) — investigate.
+- Cloudflare: Workers token OK (D24). TURN key pending the owner (save-turn-key.sh).
+- Resend domain records added; key `firstlight-server` to create after verification.

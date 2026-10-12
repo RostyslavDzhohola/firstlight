@@ -11,13 +11,13 @@ export interface Identity {
 
 export type TokenVerifier = (token: string) => Promise<Identity | null>;
 
-/** Dev tokens look like `dev:<userId>:<name>`. Only accepted when explicitly enabled. */
+/** Dev tokens look like `dev:<userId>:<name>[:admin|:loadtest]`. Only accepted when explicitly enabled. */
 export function devVerifier(enabled: boolean): TokenVerifier {
   return async (token) => {
     if (!enabled || !token.startsWith("dev:")) return null;
-    const [, userId, name] = token.split(":");
+    const [, userId, name, role] = token.split(":");
     if (!userId) return null;
-    return { userId, name: name || `Wanderer-${userId.slice(0, 4)}`, guest: true, admin: false, loadtest: false };
+    return { userId, name: name || `Wanderer-${userId.slice(0, 4)}`, guest: true, admin: role === "admin", loadtest: role === "loadtest" };
   };
 }
 

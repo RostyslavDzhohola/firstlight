@@ -97,6 +97,8 @@ export async function createGame(opts: GameOptions): Promise<Game> {
           body,
           partyLeaderRoomId: typeof req.body.partyLeaderRoomId === "string" ? req.body.partyLeaderRoomId : undefined,
           partySize: typeof req.body.partySize === "number" ? req.body.partySize : undefined,
+          starter: Number.isInteger(req.body.starter) ? Math.max(0, Math.min(3, req.body.starter)) : undefined,
+          palette: Number.isInteger(req.body.palette) ? Math.max(0, Math.min(5, req.body.palette)) : undefined,
           loadtest: req.body.loadtest === true,
         },
         opts.limits,
