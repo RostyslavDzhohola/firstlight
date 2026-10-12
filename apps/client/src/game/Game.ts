@@ -9,6 +9,7 @@ import { Bench } from "../render/bench.ts";
 import { BlobShadows } from "../render/blobShadows.ts";
 import { ParticleSystem, type BurstOptions } from "../render/particles.ts";
 import { PerfOverlay } from "../render/PerfOverlay.ts";
+import { MENU_GRADE } from "../render/post.ts";
 import { runProbe } from "../render/probe.ts";
 import { createRenderer, type RenderCtx } from "../render/renderer.ts";
 import { installShaderMonitor, shaderMonitorFrame, warmup } from "../render/warmup.ts";
@@ -94,6 +95,11 @@ export class Game {
     const p = focus.clone().addScaledVector(side, 3).addScaledVector(up, 1);
     const colors = [0x36f9f6, 0xffb86b, 0xff7edb, 0x9cff6b, 0xffd166];
     this.burst(p, colors[Math.floor(now / 800) % colors.length]!, 80);
+  }
+
+  /** Look rule 1: muted grade while a menu/lobby is open, the body's saturated grade otherwise. */
+  setMenuMode(on: boolean) {
+    this.ctx.setGrade(on || !this.planet ? MENU_GRADE : this.planet.look.grade);
   }
 
   /** Reusable "digital matter is light" burst for spawns, deaths, loot and teleports. */

@@ -11,6 +11,7 @@ import {
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
 import { fxaa } from "three/addons/tsl/display/FXAANode.js";
 import { ao } from "three/addons/tsl/display/GTAONode.js";
+import { denoise } from "three/addons/tsl/display/DenoiseNode.js";
 import { traa } from "three/addons/tsl/display/TRAANode.js";
 import { vignette } from "three/addons/tsl/display/CRT.js";
 import type { ResolvedSettings } from "./quality.ts";
@@ -40,7 +41,7 @@ export const postUniforms = {
   gradeHue: uniform(0).setGroup(renderGroup),
   vignette: uniform(0.28).setGroup(renderGroup),
   grain: uniform(0.035).setGroup(renderGroup),
-  aoStrength: uniform(0.85).setGroup(renderGroup),
+  aoStrength: uniform(0.75).setGroup(renderGroup),
 };
 
 export function setGrade(g: GradeParams) {
@@ -68,11 +69,20 @@ export function buildPost(scene: THREE.Scene, camera: THREE.Camera, s: ResolvedS
 
   if (s.on.ao) {
     // Depth-only GTAO (normals reconstructed from depth): no normal MRT, so materials keep one
-    // pipeline variant. WebGPU High/Ultra only (gated in resolveSettings).
-    const aoNode = ao(scenePass.getTextureNode("depth"), null as unknown as THREE.Node, camera);
+    // pipeline variant. WebGPU High/Ultra only (gated in resolveSettings). Raw GTAO is noisy:
+    // with TRAA it filters temporally, otherwise a DenoiseNode pass cleans it (three's guidance).
+    const depth = scenePass.getTextureNode("depth");
+    const aoNode = ao(depth, null as unknown as THREE.Node, camera);
     aoNode.resolutionScale = s.post.ao === "full" ? 1 : 0.5;
+    aoNode.radius.value = 0.6;
+    aoNode.useTemporalFiltering = s.on.traa;
     disposables.push(aoNode);
-    const occ = aoNode.getTextureNode().r;
+    let occ: any = aoNode.getTextureNode().r;
+    if (!s.on.traa) {
+      const dn = denoise(aoNode.getTextureNode(), depth, null as unknown as THREE.Node, camera);
+      disposables.push(dn);
+      occ = (dn as any).r;
+    }
     color = vec4(color.rgb.mul(mix(float(1), occ, postUniforms.aoStrength)), color.a);
   }
 
