@@ -1,0 +1,32 @@
+// Server configuration from the environment. Secrets are read here and never logged.
+
+function num(name: string, fallback: number): number {
+  const v = process.env[name];
+  return v === undefined || v === "" ? fallback : Number(v);
+}
+
+export const env = {
+  port: num("PORT", 2567),
+  production: process.env.NODE_ENV === "production",
+  clientOrigins: (process.env.CLIENT_ORIGIN ?? "http://localhost:5173")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+  authUrl: process.env.BETTER_AUTH_URL ?? "http://localhost:5173",
+  authSecret: process.env.BETTER_AUTH_SECRET ?? "dev-only-secret-change-me-dev-only-secret",
+  authDbPath: process.env.AUTH_DB_PATH ?? "./data/auth.db",
+  gameDbPath: process.env.GAME_DB_PATH ?? "./data/game.db",
+  originSecret: process.env.ORIGIN_SECRET ?? "",
+  resendKey: process.env.RESEND_API_KEY ?? "",
+  emailFrom: process.env.EMAIL_FROM ?? "FIRSTLIGHT <login@firstlight.one4all.dev>",
+  turnKeyId: process.env.TURN_KEY_ID ?? "",
+  turnKeyToken: process.env.TURN_KEY_API_TOKEN ?? "",
+  adminClaimToken: process.env.ADMIN_CLAIM_TOKEN ?? "",
+  loadtestSecret: process.env.LOADTEST_SECRET ?? "",
+  allowDevGuests: process.env.ALLOW_DEV_GUESTS === "1",
+  maxClients: num("MAX_CLIENTS", 40),
+  maxCopiesPerBody: num("MAX_COPIES_PER_BODY", 2),
+  soloFillLimit: num("SOLO_FILL_LIMIT", 36),
+  globalCap: num("GLOBAL_CAP", 320),
+  otpDailyBudget: num("OTP_DAILY_BUDGET", 80),
+};

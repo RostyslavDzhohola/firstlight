@@ -1,0 +1,33 @@
+{
+  "name": "@firstlight/server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "node build.mjs",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@colyseus/sdk": "0.18.5",
+    "@types/better-sqlite3": "9.6.0",
+    "@types/express": "^5.0.6",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15"
+  },
+  "dependencies": {
+    "@colyseus/core": "0.18.18",
+    "@colyseus/schema": "5.0.36",
+    "@colyseus/tools": "0.18.9",
+    "@colyseus/ws-transport": "0.18.4",
+    "@firstlight/shared": "workspace:*",
+    "better-auth": "1.7.7",
+    "better-sqlite3": "13.0.3",
+    "colyseus": "0.18.9",
+    "express": "5.3.0",
+    "jose": "6.2.12",
+    "resend": "6.32.1",
+    "zod": "^4.6.6"
+  }
+}

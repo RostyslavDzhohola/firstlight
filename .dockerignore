@@ -1,0 +1,10 @@
+**/node_modules
+**/dist
+.git
+docs
+assets-src
+assets-private
+apps/client
+apps/assets-worker
+tools/blender
+**/*.test.ts
