@@ -11,17 +11,29 @@ export class MountState {
   /** 0 → 1 blend towards the riding camera (eased, ~0.35 s). */
   blend = 0;
   private slidOff = false;
+  private serverMounted = false;
+  private lastAsk = -Infinity;
 
   /** Feed the server's flag every frame. */
   sync(serverMounted: boolean) {
+    this.serverMounted = serverMounted;
     if (!serverMounted) this.slidOff = false;
     this.riding = serverMounted && !this.slidOff;
   }
 
-  /** Leave the saddle now; stays off until the server's flag clears too (it is told separately). */
+  /** Leave the saddle now; stays off until the server's flag clears too (see dismountDue). */
   slideOff() {
     this.slidOff = true;
     this.riding = false;
+    this.lastAsk = -Infinity;
+  }
+
+  /** After a slide-off, while the server still has us mounted: true when a dismount request is due
+   *  (at once, then again every HORSE.toggleCooldownMs, since the server ignores changes that soon). */
+  dismountDue(nowMs: number): boolean {
+    if (!this.slidOff || !this.serverMounted || nowMs - this.lastAsk < HORSE.toggleCooldownMs) return false;
+    this.lastAsk = nowMs;
+    return true;
   }
 
   /** True when the server still has us mounted but we already got off (send it a dismount). */

@@ -67,11 +67,9 @@ export class HorseClient {
     if (this.mount.riding) {
       const p = g.player.pos;
       const l = p.length();
-      if (rideBlockedByWater(g.planet.terrain.groundHeight(p.x / l, p.y / l, p.z / l), g.planet.body.waterLevel)) {
-        this.mount.slideOff();
-        room.send("horse", { action: "dismount" });
-      }
+      if (rideBlockedByWater(g.planet.terrain.groundHeight(p.x / l, p.y / l, p.z / l), g.planet.body.waterLevel)) this.mount.slideOff();
     }
+    if (this.mount.dismountDue(performance.now())) room.send("horse", { action: "dismount" });
     this.mount.step(dt);
     g.player.mounted = this.mount.riding;
     g.player.rideBlend = this.mount.blend;
@@ -186,7 +184,11 @@ export class HorseClient {
 
 /** Created per body (first in CLIENT_SYSTEMS). */
 export function horseClientSystem(game: Game): ClientSystem | null {
-  if (!game.net.room || flags.has("nohorses")) return null;
+  if (!game.net.room) return null;
+  if (flags.has("nohorses")) {
+    game.net.room.onMessage("horse", () => {}); // kill switch: other players' horse events stay quiet
+    return null;
+  }
   const c = new HorseClient(game);
   current = c;
   return { update: (dt) => c.update(dt), dispose: () => c.dispose() };

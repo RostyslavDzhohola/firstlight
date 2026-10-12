@@ -27,6 +27,19 @@ describe("MountState (local riding state)", () => {
     expect(m.riding).toBe(true);
   });
 
+  it("asks the server to dismount after a slide-off, and asks again (no faster than its cooldown) until it agrees", () => {
+    const m = new MountState();
+    m.sync(true);
+    expect(m.dismountDue(0)).toBe(false); // riding: nothing to ask
+    m.slideOff();
+    expect(m.dismountDue(1000)).toBe(true);
+    expect(m.dismountDue(1000 + HORSE.toggleCooldownMs - 1)).toBe(false);
+    m.sync(true); // the server ignored it (e.g. it had just mounted us)
+    expect(m.dismountDue(1000 + HORSE.toggleCooldownMs)).toBe(true);
+    m.sync(false); // agreed
+    expect(m.dismountDue(1e6)).toBe(false);
+  });
+
   it("eases the camera blend in and out", () => {
     const m = new MountState();
     m.sync(true);
