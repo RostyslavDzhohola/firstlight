@@ -19,7 +19,10 @@ interface StoredInventory {
 }
 
 export class SqliteCharacterRepo implements CharacterRepo {
-  constructor(private readonly db: Db) {}
+  private readonly db: Db;
+  constructor(db: Db) {
+    this.db = db;
+  }
 
   load(userId: string): CharacterData | null {
     const c = loadCharacter<StoredInventory, CharacterData["missions"]>(this.db, userId);
@@ -85,7 +88,10 @@ function toPileData(p: Pile<InvItem>): PileData {
 }
 
 export class SqlitePileStore implements PileStore {
-  constructor(private readonly db: Db) {}
+  private readonly db: Db;
+  constructor(db: Db) {
+    this.db = db;
+  }
 
   list(body: BodyId): PileData[] {
     return listPiles<InvItem>(this.db, body).map(toPileData);
