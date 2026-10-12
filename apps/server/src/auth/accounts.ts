@@ -25,6 +25,7 @@ import { banKey, CLIENT_IP_HEADER, firstForwardedFor, normalizeIp } from "./ip.t
 import { accountLinks, type LinkEvents } from "./links.ts";
 import { DevOutbox, disabledMailer, resendMailer, type Mailer } from "./mailer.ts";
 import { identifyRequest, mountAccountRoutes, requireAdminFor } from "./routes.ts";
+import { pruneGuests } from "./prune.ts";
 import { liveSessions, type SessionRegistry } from "./sessions.ts";
 
 export const DEV_AUTH_SECRET = "dev-only-secret-change-me-dev-only-secret";
@@ -145,8 +146,18 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
   const authCtx = await auth.$context;
   await authCtx.checkSchema?.();
   closeDanglingSessions(db);
-  pruneSessionLog(db);
-  const pruneTimer = setInterval(() => pruneSessionLog(db), 24 * 3_600_000);
+  // Daily housekeeping (and once at boot): old analytics rows, abandoned level-1 guests (F12).
+  const housekeeping = () => {
+    pruneSessionLog(db);
+    try {
+      const n = pruneGuests(authDb, db, { isLive: (userId) => !!sessions.get(userId) });
+      if (n) console.log(`pruned ${n} abandoned guest account(s)`);
+    } catch (e) {
+      console.warn(`guest pruning failed: ${(e as Error).message}`);
+    }
+  };
+  housekeeping();
+  const pruneTimer = setInterval(housekeeping, 24 * 3_600_000);
   pruneTimer.unref();
 
   const userStmt = authDb.prepare(`SELECT id, name, "isAnonymous" AS anon FROM "user" WHERE id = ?`);
