@@ -2,12 +2,14 @@
 body.fl-photo .fl-hud,
 body.fl-photo [data-hud] { display: none !important; }
 
+/* Key reference while flying (UI kit look: a quiet holo, keycaps in mono). */
 .fl-photo-panel {
-  position: fixed; left: 16px; bottom: 16px; z-index: 40; pointer-events: none;
-  display: grid; grid-template-columns: auto auto; gap: 4px 12px; align-items: baseline;
-  padding: 10px 14px; border-radius: 4px; background: rgb(5 7 10 / 0.62);
-  font: 13px/1.35 ui-sans-serif, system-ui, sans-serif; color: #efe9df;
+  position: fixed; left: calc(1.2 * var(--u)); bottom: calc(1.2 * var(--u)); z-index: 40; pointer-events: none;
+  display: grid; grid-template-columns: auto auto; gap: calc(.3 * var(--u)) calc(.8 * var(--u)); align-items: baseline;
+  padding: calc(.7 * var(--u)) calc(.9 * var(--u)); border-radius: var(--r-1);
+  background: var(--hud-scrim); border: 1px solid var(--photon-line);
+  font: 400 var(--t-xs)/1.35 var(--font-body); color: var(--paper);
 }
 .fl-photo-panel kbd {
-  font: 12px/1.2 ui-monospace, "JetBrains Mono", monospace; color: #c4f1ff; justify-self: end;
+  font: 600 var(--t-xs)/1.2 var(--font-mono); color: var(--photon); justify-self: end;
 }

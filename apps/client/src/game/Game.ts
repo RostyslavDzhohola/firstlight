@@ -5,7 +5,7 @@ import * as THREE from "three/webgpu";
 import { BODIES, padDirs, type BodyId } from "@firstlight/shared";
 import { flags } from "../config.ts";
 import { CLOSE, Net, TravelRedirect } from "../net/Net.ts";
-import { AvatarView, preloadAvatars } from "../render/Avatars.ts";
+import { AvatarView, avatarWarmupHook, preloadAvatars } from "../render/Avatars.ts";
 import "../render/avatars/system.ts";
 import { Bench, benchConfig } from "../render/bench.ts";
 import { BlobShadows } from "../render/blobShadows.ts";
@@ -17,7 +17,9 @@ import { createRenderer, type RenderCtx } from "../render/renderer.ts";
 import { installShaderMonitor, shaderMonitorFrame, warmup } from "../render/warmup.ts";
 import type { Hud } from "../ui/hud.ts";
 import { Menu } from "../ui/menu.ts";
+import { bindUi } from "../ui/bind.ts";
 import { pickDisplayName } from "../ui/account.ts";
+import { hideLoading, setLoading, setLoadingBadge } from "../ui/loading.ts";
 import { getAccountInfo, invalidatePlayToken, isDevGuest } from "../net/auth.ts";
 import { PilesView } from "../world/PilesView.ts";
 import { Planet } from "../world/Planet.ts";
@@ -30,20 +32,11 @@ import { PlayerController } from "./PlayerController.ts";
 import { CLIENT_SYSTEMS, type ClientSystem } from "./systems.ts";
 import { installSocial, partyRoomOn, removedFromWorld } from "../social/index.ts";
 
-const loadingEl = () => document.getElementById("loading")!;
-function setLoading(text: string, frac: number) {
-  const el = loadingEl();
-  el.style.display = "grid";
-  document.getElementById("loading-text")!.textContent = text;
-  (document.getElementById("loading-bar") as HTMLElement).style.width = `${Math.round(frac * 100)}%`;
-}
-function hideLoading() {
-  loadingEl().style.display = "none";
-}
 
 /** ?bench runs without a server unless ?online is also given; ?offline forces it anywhere. */
 const OFFLINE = flags.has("offline") || (flags.has("bench") && !flags.has("online"));
 const FX_DEMO = flags.has("fxdemo");
+const CPU_SLOW = Math.max(1, Math.min(8, Number(flags.get("cpuslow")) || 1));
 
 export class Game {
   ctx!: RenderCtx;
@@ -81,6 +74,7 @@ export class Game {
     installShaderMonitor(this.ctx);
     void preloadAvatars(); // character GLBs stream in while we connect and build the world
     console.info(`[gfx] backend ${this.ctx.webgpu ? "WebGPU" : "WebGL2"}, tier ${this.ctx.tier}${this.ctx.settings.auto ? " (auto)" : ""}, gpu "${this.ctx.gpuName}"`);
+    setLoadingBadge(`${this.ctx.webgpu ? "WebGPU" : "WebGL2"} · ${this.ctx.tier}${this.ctx.settings.auto ? " (auto)" : ""}`);
     this.input = new Input(this.ctx.renderer.domElement);
     this.photo = new PhotoMode({
       ctx: this.ctx,
@@ -123,19 +117,18 @@ export class Game {
     this.hud = this.combat.hud;
     this.menu = new Menu(this);
     installSocial(this);
+    bindUi(this);
     document.getElementById("landing")!.style.display = "none";
     const automated = flags.has("autoplay") || OFFLINE;
-    // First visit: choose a starter before entering the world.
+    // First visit: choose a starter (and the display name, once per account) before entering the world.
+    // Dev guests and automated runs skip the name.
     let firstChoice: { starter: number; palette: number } | undefined;
+    const info = !isDevGuest() && !automated ? await getAccountInfo().catch(() => null) : null;
+    const needsName = !!info && !info.displayName;
     if (!localStorage.getItem("fl.starter") && !automated) {
       hideLoading();
-      firstChoice = await this.hud.characterPick();
-    }
-    // Pick a display name once per account (skipped for dev guests and automated runs).
-    if (!isDevGuest() && !automated) {
-      const info = await getAccountInfo().catch(() => null);
-      if (info && !info.displayName) await pickDisplayName({ suggested: info.name, dismissible: true });
-    }
+      firstChoice = await this.hud.characterPick({ askName: needsName ? { suggested: info!.name } : undefined });
+    } else if (needsName) await pickDisplayName({ suggested: info!.name, dismissible: true });
     await this.enterBody(body, firstChoice);
     this.running = true;
     if (!this.bench) this.input.lock();
@@ -363,9 +356,12 @@ export class Game {
   }
 
   private warmupHook() {
+    // every palette's skinned toon variant, weapons and LOD proxies compile behind the loading screen
+    const avatars = avatarWarmupHook(this.ctx.scene, () => this.player.pos);
     return {
       forceAll: (on: boolean) => {
         this.planet.props.setForceAll(on);
+        avatars.forceAll(on);
       },
     };
   }
@@ -499,7 +495,14 @@ export class Game {
     }
     if (this.input.pressed.has("F3")) this.perf.toggle();
     this.ctx.render();
-    const cpuMs = performance.now() - cpu0;
+    let cpuMs = performance.now() - cpu0;
+    if (CPU_SLOW > 1) {
+      // ?cpuslow=N (F11 weak-laptop profile): emulate an N× slower CPU on the main thread by
+      // busy-waiting (N−1)× this frame's CPU time, like DevTools CPU throttling.
+      const until = performance.now() + cpuMs * (CPU_SLOW - 1);
+      while (performance.now() < until) { /* spin */ }
+      cpuMs *= CPU_SLOW;
+    }
     this.ctx.afterFrame(now, rawMs);
     this.bench?.record(rawMs);
     shaderMonitorFrame();

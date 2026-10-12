@@ -9,6 +9,7 @@ import { VOICE, VOICE_REPORT_REASONS } from "@firstlight/shared/net/voice";
 import type { Game } from "../game/Game.ts";
 import { isBlocked, isMuted } from "../social/store.ts";
 import type { VoiceClient, VoicePeerInfo } from "./VoiceClient.ts";
+import { overlayClosed, overlayOpened } from "../ui/dom.ts";
 
 const SPEAKING = 0.06;
 const MIC_SVG = `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/></svg>`;
@@ -186,6 +187,7 @@ export class VoiceUi {
     overlay.addEventListener("keydown", (e) => e.stopPropagation());
     this.panel = { overlay, body, timer: window.setInterval(() => this.renderPeople(), 500) };
     this.vc.micTest = this.vc.enabled;
+    overlayOpened("voice"); // keeps the Esc menu away while the mouse is free
     document.exitPointerLock?.();
     this.renderPanel();
   }
@@ -195,6 +197,7 @@ export class VoiceUi {
     clearInterval(this.panel.timer);
     this.panel.overlay.remove();
     this.panel = null;
+    overlayClosed("voice");
     this.reportFor = null;
     this.vc.micTest = false;
     if (resume) this.vc.game.input.lock();

@@ -1,0 +1,330 @@
+/* FIRSTLIGHT UI primitives. Markup examples: src/ui/README.md.
+   Rules: classes only (no inline style for static looks); text never below --t-xs (13 px);
+   colour is never the only signal; warm = yours, photon = world info, red hatch = hostile,
+   cold mono = Oversight. */
+
+/* Resets use :where() so every component class below wins over them. */
+:where(.fl-ui) *, :where(.fl-ui) *::before, :where(.fl-ui) *::after { box-sizing: border-box; }
+:where(.fl-ui) :where(button, input, select, textarea) { font: inherit; color: inherit; }
+:where(.fl-ui) button { cursor: pointer; }
+:where(.fl-ui) :focus-visible { outline: 2px solid var(--dawn-3); outline-offset: 2px; }
+:where(.fl-ui) ::selection { background: rgba(243, 174, 91, .4); }
+:where(.fl-ui) a { color: inherit; }
+
+/* ---------------------------------------------------------------- helpers */
+.num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+.caps { text-transform: uppercase; letter-spacing: var(--track-caps); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.fl-hidden, .fl-ui[hidden], .fl-ui [hidden] { display: none !important; }
+.fl-muted { color: var(--fog-3); }
+.fl-ok { color: var(--ok); }
+.fl-warn { color: var(--warn); }
+.fl-danger { color: var(--danger); }
+.fl-coin { color: var(--coin); }
+.fl-xp { color: var(--xp); }
+.fl-safe { color: var(--safe); }
+
+/* ---------------------------------------------------------------- film effects */
+.fl-grain { position: absolute; inset: 0; pointer-events: none; background-image: var(--grain); background-size: 180px; opacity: .07; mix-blend-mode: overlay; animation: fl-grain .9s steps(6) infinite; }
+.fl-grain--faint { opacity: .04; }
+@keyframes fl-grain {
+  0% { background-position: 0 0; } 20% { background-position: -37px 21px; } 40% { background-position: 23px -44px; }
+  60% { background-position: -61px -12px; } 80% { background-position: 14px 52px; } 100% { background-position: 0 0; }
+}
+@keyframes fl-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+@keyframes fl-breathe { 0%, 100% { transform: scale(1); opacity: .9; } 50% { transform: scale(1.06); opacity: 1; } }
+@keyframes fl-flicker { 0% { opacity: 0; } 8% { opacity: .8; } 12% { opacity: .2; } 22% { opacity: 1; } 100% { opacity: 1; } }
+@keyframes fl-rise-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes fl-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fl-spin { to { transform: rotate(360deg); } }
+@keyframes fl-ring { 0% { transform: scale(.85); opacity: .9; } 100% { transform: scale(1.5); opacity: 0; } }
+
+/* ---------------------------------------------------------------- 1. menu panel (ink glass + horizon line) */
+.fl-panel {
+  position: relative;
+  background: var(--panel-bg);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-2);
+  box-shadow: var(--panel-shadow), inset 0 1px 0 rgba(255, 255, 255, .04);
+  -webkit-backdrop-filter: var(--panel-blur);
+  backdrop-filter: var(--panel-blur);
+}
+.fl-panel::before {
+  content: ""; position: absolute; left: 10%; right: 10%; top: -1px; height: 1px;
+  background: var(--horizon); box-shadow: 0 0 14px rgba(255, 200, 140, .45); pointer-events: none;
+}
+.fl-panel--quiet::before { opacity: .35; }
+.fl-panel--danger { border-color: rgba(255, 111, 94, .35); }
+.fl-panel--danger::before { background: linear-gradient(90deg, transparent, rgba(255, 111, 94, .8), transparent); box-shadow: none; }
+.fl-panel--pad { padding: calc(1.2 * var(--u)) calc(1.3 * var(--u)); }
+
+/* ---------------------------------------------------------------- 2. HUD holo frame (drawn in light over the world) */
+.fl-holo {
+  position: relative;
+  background: var(--hud-scrim);
+  border: 1px solid var(--photon-line);
+  border-radius: var(--r-1);
+  box-shadow: inset 0 0 24px -12px rgba(122, 216, 255, .45), 0 0 0 1px rgba(0, 0, 0, .18);
+  -webkit-backdrop-filter: var(--hud-blur);
+  backdrop-filter: var(--hud-blur);
+  text-shadow: var(--hud-text-shadow);
+}
+.fl-corners { --corner: var(--photon); --corner-l: 10px; }
+.fl-corners::after {
+  content: ""; position: absolute; inset: -1px; pointer-events: none; opacity: .85;
+  background:
+    linear-gradient(var(--corner) 0 0) top left / var(--corner-l) 1px,
+    linear-gradient(var(--corner) 0 0) top left / 1px var(--corner-l),
+    linear-gradient(var(--corner) 0 0) top right / var(--corner-l) 1px,
+    linear-gradient(var(--corner) 0 0) top right / 1px var(--corner-l),
+    linear-gradient(var(--corner) 0 0) bottom left / var(--corner-l) 1px,
+    linear-gradient(var(--corner) 0 0) bottom left / 1px var(--corner-l),
+    linear-gradient(var(--corner) 0 0) bottom right / var(--corner-l) 1px,
+    linear-gradient(var(--corner) 0 0) bottom right / 1px var(--corner-l);
+  background-repeat: no-repeat;
+}
+
+/* ---------------------------------------------------------------- 3. labels and titles */
+.fl-label { font: 600 var(--t-xs)/1.2 var(--font-display); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--fog-3); }
+.fl-eyebrow { font: 500 var(--t-xs)/1.2 var(--font-display); letter-spacing: var(--track-wide); text-transform: uppercase; color: var(--dawn-3); }
+.fl-title { margin: 0; font: 300 var(--t-2xl)/1.1 var(--font-display); letter-spacing: .04em; color: var(--paper); }
+.fl-title--xl { font-size: var(--t-3xl); line-height: var(--lh-tight); }
+.fl-lede { margin: 0; font-size: var(--t-sm); line-height: 1.5; color: var(--fog-3); }
+.fl-fine { font-size: var(--t-xs); line-height: 1.45; color: var(--fog-3); }
+
+/* ---------------------------------------------------------------- 4. buttons */
+.fl-btn {
+  --h: calc(2.75 * var(--u));
+  display: inline-flex; align-items: center; justify-content: center; gap: .6em;
+  height: var(--h); padding: 0 calc(1.25 * var(--u));
+  font: 600 var(--t-sm)/1 var(--font-display); letter-spacing: .14em; text-transform: uppercase;
+  color: var(--paper);
+  background: linear-gradient(180deg, rgba(255, 255, 255, .07), rgba(255, 255, 255, .02));
+  border: 1px solid var(--line-3); border-radius: var(--r-2);
+  text-decoration: none; white-space: nowrap;
+  transition: border-color var(--dur-2), box-shadow var(--dur-2), background var(--dur-2), transform var(--dur-1);
+}
+.fl-btn:hover { border-color: rgba(255, 217, 155, .65); box-shadow: 0 0 0 1px rgba(255, 217, 155, .2), 0 0 24px -8px rgba(243, 174, 91, .7); }
+.fl-btn:active { transform: translateY(1px); }
+.fl-btn[disabled], .fl-btn.is-disabled { opacity: .42; cursor: not-allowed; box-shadow: none; border-color: var(--line-2); }
+.fl-btn--primary {
+  color: #1f1308;
+  background: linear-gradient(180deg, #ffe6b8 0%, #f7bb69 50%, #ec9268 100%);
+  border-color: rgba(255, 230, 184, .95);
+  box-shadow: var(--glow-dawn), inset 0 1px 0 rgba(255, 255, 255, .7), inset 0 -2px 0 rgba(120, 50, 20, .22);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .35);
+}
+.fl-btn--primary:hover { box-shadow: 0 0 0 1px rgba(255, 230, 184, .9), 0 14px 52px -10px rgba(243, 174, 91, .95), inset 0 1px 0 rgba(255, 255, 255, .7); }
+.fl-btn--primary[disabled] { box-shadow: none; }
+.fl-btn--ghost { background: transparent; border-color: transparent; color: var(--fog-4); }
+.fl-btn--ghost:hover { color: var(--paper); border-color: var(--line-2); box-shadow: none; }
+.fl-btn--danger { color: #ffd2c9; border-color: rgba(255, 111, 94, .5); background: rgba(255, 111, 94, .08); }
+.fl-btn--danger:hover { border-color: var(--danger); box-shadow: 0 0 22px -8px rgba(255, 111, 94, .8); }
+.fl-btn--sm { --h: calc(2.125 * var(--u)); padding: 0 calc(.85 * var(--u)); font-size: var(--t-xs); }
+.fl-btn--lg { --h: calc(3.5 * var(--u)); padding: 0 calc(2 * var(--u)); font-size: var(--t-md); letter-spacing: .2em; }
+.fl-btn--icon { width: var(--h); padding: 0; }
+.fl-btn--block { width: 100%; }
+
+/* Text link with an underline that lights on hover */
+.fl-link { color: var(--paper-2); text-decoration: none; border-bottom: 1px solid rgba(255, 217, 155, .4); padding-bottom: 1px; }
+.fl-link:hover { color: var(--dawn-3); border-color: var(--dawn-3); }
+
+/* ---------------------------------------------------------------- 5. keycap */
+.fl-key {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 1.85em; height: 1.85em; padding: 0 .45em;
+  font: 600 var(--t-xs)/1 var(--font-mono); color: var(--paper);
+  background: linear-gradient(180deg, rgba(255, 255, 255, .14), rgba(255, 255, 255, .04));
+  border: 1px solid rgba(255, 255, 255, .24); border-bottom-width: 2px; border-radius: var(--r-2);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, .5);
+  white-space: nowrap; text-shadow: none;
+}
+.fl-key--lit { color: #1f1308; background: linear-gradient(180deg, #ffe6b8, #f3ae5b); border-color: #ffe6b8; box-shadow: 0 0 16px rgba(243, 174, 91, .6); }
+.fl-key--wide { min-width: 4.2em; }
+.fl-keys { display: inline-flex; gap: calc(.25 * var(--u)); align-items: center; }
+
+/* ---------------------------------------------------------------- 6. chips */
+.fl-chip {
+  display: inline-flex; align-items: center; gap: .4em; height: calc(1.6 * var(--u)); padding: 0 calc(.55 * var(--u));
+  font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: .1em; text-transform: uppercase;
+  color: var(--fog-4); background: rgba(255, 255, 255, .05); border: 1px solid var(--line-2); border-radius: var(--r-1);
+  white-space: nowrap;
+}
+.fl-chip--dawn { color: var(--dawn-3); border-color: rgba(255, 217, 155, .35); background: rgba(243, 174, 91, .08); }
+.fl-chip--ok { color: var(--ok); border-color: rgba(127, 227, 176, .35); background: rgba(127, 227, 176, .07); }
+.fl-chip--danger { color: #ffb4a8; border-color: rgba(255, 111, 94, .4); background: rgba(255, 111, 94, .08); }
+.fl-chip--photon { color: var(--photon); border-color: var(--photon-line); background: rgba(122, 216, 255, .06); }
+.fl-chip--cold { color: var(--cold-amber); border-color: rgba(224, 163, 58, .5); background: transparent; border-radius: 0; font-family: var(--font-mono); }
+
+/* ---------------------------------------------------------------- 7. bars and tier pips */
+/* Bars: set --fill (0–1) and --c. The fill is a scaled layer, so updates never trigger layout. */
+.fl-bar { --fill: .5; --c: var(--hp); position: relative; height: calc(.5 * var(--u)); background: rgba(0, 0, 0, .5); border-radius: 1px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08); overflow: hidden; }
+.fl-bar > i { position: absolute; inset: 0; background: var(--c); transform-origin: left center; transform: scaleX(var(--fill)); }
+.fl-bar--thin { height: 4px; }
+
+/* Tier pips: I / II / III as filled diamonds (readable at HUD size; text "II" sits next to them in names) */
+.fl-tier { display: inline-flex; gap: 3px; align-items: center; }
+.fl-tier > i { width: 7px; height: 7px; transform: rotate(45deg); border: 1.5px solid rgba(255, 201, 74, .75); background: rgba(0, 0, 0, .35); }
+.fl-tier > i.on { background: var(--hero-gold); border-color: var(--hero-gold); }
+
+/* ---------------------------------------------------------------- 8. forms */
+.fl-input {
+  width: 100%; height: calc(2.875 * var(--u)); padding: 0 calc(.9 * var(--u));
+  font: 500 var(--t-md)/1 var(--font-body); color: var(--paper);
+  background: rgba(0, 0, 0, .35); border: 1px solid var(--line-3); border-radius: var(--r-2);
+  outline: none; transition: border-color var(--dur-2), box-shadow var(--dur-2);
+}
+.fl-input::placeholder { color: var(--fog-2); }
+.fl-input:focus { border-color: rgba(255, 217, 155, .75); box-shadow: 0 0 0 3px rgba(243, 174, 91, .14); }
+.fl-input.is-error { border-color: rgba(255, 111, 94, .8); box-shadow: 0 0 0 3px rgba(255, 111, 94, .12); }
+.fl-input.is-ok { border-color: rgba(127, 227, 176, .6); }
+
+.fl-switch { -webkit-appearance: none; appearance: none; flex: none; width: calc(2.5 * var(--u)); height: calc(1.375 * var(--u)); margin: 0; border-radius: var(--r-pill); background: var(--ink-5); border: 1px solid var(--line-2); position: relative; cursor: pointer; transition: background var(--dur-2), border-color var(--dur-2); }
+.fl-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: calc(1.375 * var(--u) - 6px); height: calc(1.375 * var(--u) - 6px); border-radius: 50%; background: var(--fog-3); transition: transform var(--dur-2) var(--ease-out), background var(--dur-2); }
+.fl-switch:checked { background: rgba(243, 174, 91, .22); border-color: rgba(255, 217, 155, .6); }
+.fl-switch:checked::after { transform: translateX(calc(1.125 * var(--u))); background: var(--dawn-3); }
+.fl-switch:disabled { opacity: .4; cursor: not-allowed; }
+
+.fl-check { -webkit-appearance: none; appearance: none; flex: none; width: calc(1.25 * var(--u)); height: calc(1.25 * var(--u)); margin: 0; border: 1px solid var(--line-3); border-radius: 3px; background: rgba(0, 0, 0, .3); display: inline-grid; place-content: center; cursor: pointer; }
+.fl-check::after { content: ""; width: calc(.7 * var(--u)); height: calc(.4 * var(--u)); border: 2px solid #1f1308; border-top: 0; border-right: 0; transform: rotate(-45deg) translate(1px, -1px); opacity: 0; }
+.fl-check:checked { background: var(--dawn-2); border-color: var(--dawn-3); }
+.fl-check:checked::after { opacity: 1; }
+
+/* Range: set --val (0–100%) from code so the filled track follows the thumb in WebKit. */
+.fl-range { --val: 50%; -webkit-appearance: none; appearance: none; width: 100%; height: calc(1.5 * var(--u)); margin: 0; background: transparent; cursor: pointer; }
+.fl-range::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(90deg, var(--dawn-2) 0 var(--val), var(--ink-6) var(--val) 100%); }
+.fl-range::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px; border-radius: 50%; background: var(--dawn-4); border: 2px solid var(--dawn-2); box-shadow: 0 0 10px rgba(243, 174, 91, .65); }
+.fl-range::-moz-range-track { height: 4px; border-radius: 2px; background: var(--ink-6); }
+.fl-range::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--dawn-2); }
+.fl-range::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--dawn-4); border: 2px solid var(--dawn-2); }
+
+/* Segmented control (tiers, push-to-talk mode) */
+.fl-seg { display: inline-flex; padding: 3px; gap: 2px; background: rgba(0, 0, 0, .3); border: 1px solid var(--line-2); border-radius: var(--r-2); }
+.fl-seg > * { flex: 1; padding: calc(.55 * var(--u)) calc(.7 * var(--u)); font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: .12em; text-transform: uppercase; color: var(--fog-3); border-radius: 3px; border: 0; background: none; white-space: nowrap; }
+.fl-seg > :hover { color: var(--paper); }
+.fl-seg > .is-on, .fl-seg > [aria-pressed="true"] { background: linear-gradient(180deg, rgba(255, 226, 174, .2), rgba(243, 174, 91, .08)); color: var(--paper); box-shadow: inset 0 0 0 1px rgba(255, 217, 155, .5); }
+.fl-seg--block { display: flex; width: 100%; }
+
+/* Tabs (inventory pages, shop buy/sell, settings sections) */
+.fl-tabs { display: flex; gap: calc(1.4 * var(--u)); border-bottom: 1px solid var(--line-2); }
+.fl-tab { position: relative; padding: calc(.6 * var(--u)) 0; border: 0; background: none; font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--fog-3); }
+.fl-tab:hover { color: var(--paper); }
+.fl-tab.is-on, .fl-tab[aria-selected="true"] { color: var(--paper); }
+.fl-tab.is-on::after, .fl-tab[aria-selected="true"]::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--dawn-3); }
+
+/* ---------------------------------------------------------------- 9. table / list (fixed layout: columns never overflow) */
+.fl-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: var(--t-sm); }
+.fl-table th { padding: 0 calc(.6 * var(--u)) calc(.5 * var(--u)); text-align: left; font: 600 var(--t-xs)/1.2 var(--font-display); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--fog-2); border-bottom: 1px solid var(--line-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-table td { padding: calc(.55 * var(--u)) calc(.6 * var(--u)); border-bottom: 1px solid var(--line-1); color: var(--paper-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+.fl-table tbody tr:hover td { background: rgba(255, 255, 255, .03); }
+.fl-table tr.is-on td { background: linear-gradient(90deg, rgba(243, 174, 91, .12), rgba(243, 174, 91, .02)); }
+.fl-table tr.is-me td { color: var(--hero-cream); }
+.fl-table .r { text-align: right; }
+.fl-table .c { text-align: center; }
+/* Column width helpers (give every column a width; the name column takes the rest) */
+.fl-col-xs { width: calc(3 * var(--u)); }
+.fl-col-sm { width: calc(5 * var(--u)); }
+.fl-col-md { width: calc(8 * var(--u)); }
+.fl-col-lg { width: calc(11 * var(--u)); }
+
+/* Simple rows list (menus, kept/lost lists) */
+.fl-rows { display: grid; gap: calc(.35 * var(--u)); font-size: var(--t-sm); }
+.fl-rows > div { display: flex; justify-content: space-between; gap: var(--sp-3); color: var(--fog-3); }
+.fl-rows b { font: 600 var(--t-sm)/1.2 var(--font-mono); color: var(--paper); }
+
+/* ---------------------------------------------------------------- 10. tooltip */
+.fl-tooltip {
+  position: absolute; z-index: var(--z-modal); max-width: calc(20 * var(--u)); padding: calc(.75 * var(--u)) calc(.9 * var(--u));
+  background: linear-gradient(180deg, rgba(25, 30, 39, .97), rgba(12, 15, 20, .98)); border: 1px solid var(--line-3); border-radius: var(--r-2);
+  box-shadow: 0 18px 40px -16px rgba(0, 0, 0, .9); font-size: var(--t-xs); line-height: 1.45; color: var(--paper-2); pointer-events: none;
+}
+.fl-tooltip b { display: block; font: 600 var(--t-md)/1.15 var(--font-display); letter-spacing: .04em; color: var(--paper); }
+
+/* ---------------------------------------------------------------- 11. overlay, modal and scrims */
+/* Full-screen overlay that owns the pointer (menus, death, character pick). Put .fl-ui on it. */
+/* No opacity animation on the overlay itself: that would make it a backdrop root and cut the blur off from the world. */
+.fl-overlay { position: fixed; inset: 0; z-index: var(--z-menu); pointer-events: auto; }
+.fl-overlay--modal { z-index: var(--z-modal); display: grid; place-items: center; padding: var(--sp-5); background: var(--menu-scrim); }
+.fl-scrim { position: absolute; inset: 0; animation: fl-fade-in var(--dur-2) var(--ease-out) both; background: linear-gradient(90deg, rgba(5, 7, 10, .9) 0%, rgba(5, 7, 10, .66) 45%, rgba(5, 7, 10, .55) 100%); -webkit-backdrop-filter: blur(14px) saturate(.35) brightness(.7); backdrop-filter: blur(14px) saturate(.35) brightness(.7); }
+.fl-modal { width: min(calc(26 * var(--u)), calc(100vw - 32px)); padding: calc(1.4 * var(--u)); display: grid; gap: calc(.9 * var(--u)); animation: fl-rise-in var(--dur-3) var(--ease-out) both; }
+.fl-modal h2 { margin: 0; font: 500 var(--t-xl)/1.1 var(--font-display); letter-spacing: .03em; }
+.fl-modal p { margin: 0; font-size: var(--t-sm); line-height: 1.5; color: var(--paper-2); }
+.fl-actions { display: flex; gap: var(--sp-2); align-items: center; }
+.fl-actions--end { justify-content: flex-end; }
+.fl-actions--split { justify-content: space-between; }
+.fl-actions > .fl-grow { flex: 1; }
+
+/* Status line under a field */
+.fl-status { min-height: 1.4em; font-size: var(--t-xs); color: var(--fog-3); }
+.fl-status.is-error { color: #ffb4a8; }
+.fl-status.is-ok { color: var(--ok); }
+
+/* ---------------------------------------------------------------- 12. wordmark: thin FIRST, bold LIGHT, on a horizon with the sun cresting */
+.fl-wordmark {
+  --wm-size: calc(4 * var(--u)); --wm-track: .34em;
+  position: relative; display: inline-block; margin: 0;
+  font: 300 var(--wm-size)/1 var(--font-display);
+  letter-spacing: var(--wm-track); padding-left: var(--wm-track);
+  text-transform: uppercase; color: var(--paper); white-space: nowrap;
+  padding-bottom: .26em;
+}
+.fl-wordmark b { font-weight: 500; color: #fff8ec; text-shadow: 0 0 .4em rgba(255, 210, 150, .35); }
+.fl-wordmark::after { content: ""; position: absolute; left: -16%; right: -16%; bottom: 0; height: max(1px, .018em); background: var(--horizon); box-shadow: 0 0 .35em rgba(255, 200, 140, .55); }
+.fl-wordmark::before { content: ""; position: absolute; left: 50%; bottom: 0; width: .42em; height: .21em; transform: translateX(-50%); border-radius: .42em .42em 0 0; background: radial-gradient(circle at 50% 100%, #fffaf0 0 38%, #ffd99b 64%, #f3ae5b 100%); box-shadow: 0 0 .45em .08em rgba(255, 200, 130, .7), 0 0 2.2em .5em rgba(243, 174, 91, .22); }
+.fl-wordmark--sm { --wm-size: calc(1.125 * var(--u)); --wm-track: .38em; padding-bottom: .4em; }
+.fl-wordmark--sm::before { width: .6em; height: .3em; }
+
+/* ---------------------------------------------------------------- 13. Oversight frame (enemy only: cold, stencilled, hexagonal) */
+.fl-cold {
+  position: relative;
+  background: linear-gradient(180deg, rgba(26, 31, 39, .94), rgba(16, 19, 24, .96));
+  border: 1px solid rgba(228, 233, 239, .22);
+  border-left: 3px solid var(--cold-1);
+  color: var(--cold-1);
+  font-family: var(--font-mono);
+}
+.fl-cold::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(135deg, rgba(228, 233, 239, .035) 0 6px, transparent 6px 12px); }
+.fl-hex { display: inline-block; width: 1.4em; height: 1.6em; clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); background: var(--cold-1); }
+
+/* ---------------------------------------------------------------- 14. arcade frame (stepped pixel corners) — ONLY for things the player owns */
+.fl-arcade {
+  --step: 3px; --edge: rgba(255, 243, 220, .34); --fill: rgba(14, 11, 9, .64);
+  --steps: polygon(0 calc(var(--step) * 2), var(--step) calc(var(--step) * 2), var(--step) var(--step), calc(var(--step) * 2) var(--step), calc(var(--step) * 2) 0,
+    calc(100% - var(--step) * 2) 0, calc(100% - var(--step) * 2) var(--step), calc(100% - var(--step)) var(--step), calc(100% - var(--step)) calc(var(--step) * 2), 100% calc(var(--step) * 2),
+    100% calc(100% - var(--step) * 2), calc(100% - var(--step)) calc(100% - var(--step) * 2), calc(100% - var(--step)) calc(100% - var(--step)), calc(100% - var(--step) * 2) calc(100% - var(--step)), calc(100% - var(--step) * 2) 100%,
+    calc(var(--step) * 2) 100%, calc(var(--step) * 2) calc(100% - var(--step)), var(--step) calc(100% - var(--step)), var(--step) calc(100% - var(--step) * 2), 0 calc(100% - var(--step) * 2));
+  position: relative; isolation: isolate;
+  clip-path: var(--steps); background: var(--edge);
+}
+/* No backdrop blur inside clipped arcade frames (it is the most expensive thing on the HUD); the fill is opaque enough. */
+.fl-arcade::before { content: ""; position: absolute; inset: 2px; z-index: -1; clip-path: var(--steps); background: var(--fill); }
+.fl-arcade--lit { --edge: linear-gradient(180deg, #fff3dc, #ffb547); --fill: linear-gradient(180deg, rgba(60, 38, 14, .86), rgba(24, 16, 8, .86)); }
+.fl-arcade--danger { --edge: rgba(255, 111, 94, .7); }
+
+/* ---------------------------------------------------------------- 15. icons (line icons in icons.css, sprites from sprites.ts) */
+.li { display: inline-block; flex: none; width: 1.25em; height: 1.25em; vertical-align: -.22em; background-color: currentColor; -webkit-mask: var(--i) center / contain no-repeat; mask: var(--i) center / contain no-repeat; }
+.px { display: inline-block; flex: none; width: calc(2 * var(--u)); height: calc(2 * var(--u)); vertical-align: middle; background: var(--i) center / contain no-repeat; image-rendering: pixelated; }
+.px--xs { width: var(--u); height: var(--u); }
+.px--sm { width: calc(1.25 * var(--u)); height: calc(1.25 * var(--u)); }
+.px--md { width: calc(1.6 * var(--u)); height: calc(1.6 * var(--u)); }
+.px--lg { width: calc(3 * var(--u)); height: calc(3 * var(--u)); }
+.px--xl { width: calc(4 * var(--u)); height: calc(4 * var(--u)); }
+.px--dim { opacity: .45; }
+.px--gated { filter: grayscale(1); opacity: .45; }
+
+/* Portrait frame (player card, party, death, save card) */
+.fl-face { position: relative; flex: none; width: calc(2.8 * var(--u)); height: calc(2.8 * var(--u)); display: grid; place-items: center; background: rgba(0, 0, 0, .45); border: 1px solid rgba(255, 243, 220, .45); border-radius: 3px; }
+.fl-face > .px { width: 78%; height: 78%; }
+.fl-face--lg { width: calc(3.4 * var(--u)); height: calc(3.4 * var(--u)); }
+.fl-lvl { position: absolute; right: calc(-.55 * var(--u)); bottom: calc(-.55 * var(--u)); display: grid; place-items: center; min-width: calc(1.6 * var(--u)); height: calc(1.6 * var(--u)); padding: 0 calc(.25 * var(--u)); background: linear-gradient(180deg, #ffe6b8, #ffb547); color: #2a1606; border-radius: 3px; font: 700 var(--t-xs)/1 var(--font-mono); text-shadow: none; }
+
+/* Party slot pip: colour AND number. Takes --c from the nearest party-coloured parent. */
+.fl-pip { display: inline-grid; place-items: center; width: calc(1.35 * var(--u)); height: calc(1.35 * var(--u)); border-radius: 3px; background: var(--c, var(--party-2)); color: #0e1116; font: 700 var(--t-xs)/1 var(--font-mono); text-shadow: none; }
+
+/* Rarity mark: colour + shape (● ▲ ◆ ★) */
+.fl-rar { display: inline-flex; align-items: center; gap: .3em; font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: .08em; text-transform: uppercase; }
+.fl-rar::before { font-size: 1em; }
+.fl-rar--common { color: var(--rar-common); } .fl-rar--common::before { content: "●"; }
+.fl-rar--uncommon { color: var(--rar-uncommon); } .fl-rar--uncommon::before { content: "▲"; }
+.fl-rar--rare { color: var(--rar-rare); } .fl-rar--rare::before { content: "◆"; }
+.fl-rar--legendary { color: var(--rar-legendary); } .fl-rar--legendary::before { content: "★"; }

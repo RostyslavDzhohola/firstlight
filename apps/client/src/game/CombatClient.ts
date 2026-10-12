@@ -2,6 +2,7 @@
 // inventory keys, pickups, death and rebirth.
 
 import * as THREE from "three/webgpu";
+import { isBlocked, partyState } from "../social/store.ts";
 import { WEAPONS, WEAPON_BY_ID, type WeaponDef } from "@firstlight/shared/content/weapons";
 import { PHRASES } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
@@ -22,7 +23,8 @@ export class CombatClient {
   private wasRmb = false;
   private blocking = false;
   private scoped = false;
-  private baseFov = 75;
+  /** Unzoomed field of view (Settings → Field of view). */
+  baseFov = 75;
   deadUntilRespawn = false;
   private readonly wheel: PhraseWheel;
 
@@ -98,18 +100,24 @@ export class CombatClient {
       this.game.audio.play("swing", pos);
     });
     room.onMessage("phrase", (m: { by: string; id: number }) => {
+      if (m.by !== me && isBlocked(m.by)) return; // no speech bubbles from blocked players
       const p = m.by === me ? this.game.player.pos : (() => { const s = (room.state as any).players?.get(m.by); return s ? new THREE.Vector3(s.x, s.y, s.z) : null; })();
       if (!p) return;
       const s = this.toScreen(p.clone(), 2.3);
-      if (s) this.hud.bubble(s.x, s.y, PHRASES[m.id] ?? "");
+      if (!s) return;
+      // Others' bubbles carry their name; party members also their slot (colour + number).
+      const speaker = m.by === me ? null : (room.state as any).players?.get(m.by);
+      const slot = partyState().members.findIndex((x) => x.sessionId === m.by) + 1;
+      this.hud.bubble(s.x, s.y, PHRASES[m.id] ?? "", { name: speaker?.name, slot: slot > 0 && slot <= 4 ? (slot as 1 | 2 | 3 | 4) : undefined });
     });
-    room.onMessage("death", async (m: { victim: string; killerName: string; aliveMs: number; level: number }) => {
+    room.onMessage("death", async (m: { victim: string; killer: string | null; killerName: string; aliveMs: number; level: number; pileId: string }) => {
       if (m.victim !== me || this.deadUntilRespawn) return;
       this.deadUntilRespawn = true;
       this.game.photo?.exit(this.game.ctx.camera);
       this.game.player.frozen = true;
       this.game.audio.play("death");
-      const choice = await this.hud.death(m);
+      const k = m.killer ? (room.state as any).players?.get(m.killer) : null;
+      const choice = await this.hud.death({ ...m, body: this.game.bodyId, killerStarter: k?.starter, killerLevel: k?.level });
       room.send("respawn", choice);
     });
     room.onMessage("reborn", () => {
@@ -130,7 +138,7 @@ export class CombatClient {
     const claims = readClaims(await getPlayToken().catch(() => ""));
     if (!claims?.guest) return;
     this.offeredSave = true;
-    void showSavePrompt({ name: claims.name });
+    void showSavePrompt({ name: claims.name, level: this.hud.you?.level });
   }
 
   private muzzleOf(p: { x: number; y: number; z: number; fx: number; fy: number; fz: number }): THREE.Vector3 {
@@ -168,6 +176,7 @@ export class CombatClient {
     const meState = (room.state as any).players?.get(room.sessionId);
     if (meState) {
       g.hud.setHp(meState.hp, meState.maxHp);
+      g.hud.setIdentity(meState.name, meState.starter, meState.palette);
       g.hud.setSafe(!!(meState.flags & PF.SAFE));
       g.hud.setLogout(g.hud.you?.logoutEndsAt ?? null, Date.now() + g.net.serverOffset);
     }
@@ -179,6 +188,7 @@ export class CombatClient {
     if (this.wheel.update(input, now, !this.deadUntilRespawn)) {
       if (this.blocking) room.send("block", { on: false });
       if (this.scoped) room.send("scope", { on: false });
+      g.self?.setLocalFlags(0);
       if (this.wasRmb) room.send("charge", { on: false }); // a charge or draw in progress is cancelled
       this.blocking = this.scoped = this.wasRmb = false;
       return;
@@ -210,6 +220,7 @@ export class CombatClient {
         if (!rmb && this.wasRmb) {
           if (now - this.chargeStart >= (t.heavyTime ?? 0.8) * 1000) {
             room.send("melee", { slot: g.hud.you?.selected ?? 0, t: Date.now(), heavy: true });
+            g.self?.trigger("heavy"); // own avatar animates now; remote views follow the server's swing
             this.lastFire = now;
           } else room.send("charge", { on: false });
         }
@@ -226,6 +237,8 @@ export class CombatClient {
       }
     }
     this.wasRmb = rmb;
+    // Own avatar: hold the guard / aim pose from local input instead of waiting for the server flags.
+    g.self?.setLocalFlags((this.blocking ? PF.BLOCKING : 0) | (this.scoped || this.aiming() ? PF.SCOPED : 0));
     const zoom = this.scoped ? (t.zoom ?? 1.35) : 1;
     const cam = g.ctx.camera;
     const targetFov = this.baseFov / zoom;
@@ -245,6 +258,8 @@ export class CombatClient {
     if (now - this.lastFire < t.rate * 1000) return;
     this.lastFire = now;
     const slot = g.hud.you?.selected ?? 0;
+    // own avatar: swing / shot / cast / throw picked from the held item, without the round trip
+    if (def.delivery !== "none") g.self?.trigger("attack");
     if (def.delivery === "melee") {
       room.send("melee", { slot, t: Date.now(), heavy: false });
       g.audio.play("swing");

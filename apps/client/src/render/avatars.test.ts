@@ -1,0 +1,116 @@
+import { beforeAll, describe, expect, it, vi } from "vitest";
+import * as THREE from "three/webgpu";
+import { WEAPONS } from "@firstlight/shared/content/weapons";
+import { ANIM } from "@firstlight/shared/net/schema";
+
+// config.ts reads the URL at import time; ?nochars keeps AvatarView on capsules (no asset fetches).
+vi.stubGlobal("location", { search: "?nochars", hostname: "localhost" });
+
+let mod: typeof import("./Avatars.ts");
+let weapons: typeof import("./avatars/weapons.ts");
+beforeAll(async () => {
+  mod = await import("./Avatars.ts");
+  weapons = await import("./avatars/weapons.ts");
+});
+
+const R = 1000;
+/** A point on a planet of radius R, `east` metres along the tangent from the north pole. */
+const at = (east: number) => new THREE.Vector3(east, R, 0).normalize().multiplyScalar(R);
+
+describe("AvatarView ground speed", () => {
+  it("is measured per avatar, not from whichever avatar moved last", () => {
+    const runner = new mod.AvatarView(0, 0);
+    const idler = new mod.AvatarView(1, 1);
+    const dt = 1 / 30;
+    for (let i = 0; i < 60; i++) {
+      const p = at(i * 6 * dt); // 6 m/s
+      runner.set(p.x, p.y, p.z, 1, 0, 0, ANIM.RUN, dt);
+      const q = at(-50); // stands still, far away
+      idler.set(q.x, q.y, q.z, 1, 0, 0, ANIM.IDLE, dt);
+    }
+    expect(runner.groundSpeed).toBeGreaterThan(5.5);
+    expect(runner.groundSpeed).toBeLessThan(6.5);
+    expect(idler.groundSpeed).toBeLessThan(0.01);
+    runner.dispose();
+    idler.dispose();
+  });
+});
+
+describe("avatar teardown", () => {
+  it("disposes cloned skeletons and per-object render state, never shared geometry or materials", () => {
+    const geo = new THREE.BoxGeometry();
+    const mat = new THREE.MeshStandardNodeMaterial();
+    const bone = new THREE.Bone();
+    const skel = new THREE.Skeleton([bone]);
+    const skinned = new THREE.SkinnedMesh(geo, mat);
+    skinned.add(bone);
+    skinned.bind(skel);
+    const prop = new THREE.Mesh(geo, mat);
+    const root = new THREE.Group().add(skinned, prop);
+
+    const skelDispose = vi.spyOn(skel, "dispose");
+    const objectEvents: string[] = [];
+    skinned.addEventListener("dispose", () => objectEvents.push("skinned"));
+    prop.addEventListener("dispose", () => objectEvents.push("prop"));
+    let sharedDisposed = 0;
+    geo.addEventListener("dispose", () => sharedDisposed++);
+    mat.addEventListener("dispose", () => sharedDisposed++);
+
+    mod.releaseAvatarObjects(root);
+    expect(skelDispose).toHaveBeenCalledTimes(1);
+    expect(objectEvents.sort()).toEqual(["prop", "skinned"]);
+    expect(sharedDisposed).toBe(0);
+  });
+
+  it("releases its capsule on dispose and leaves the LOD registry", () => {
+    const a = new mod.AvatarView(2, 3);
+    const events: number[] = [];
+    a.root.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.addEventListener("dispose", () => events.push(1)); });
+    expect(mod.AvatarView.all.has(a)).toBe(true);
+    a.dispose();
+    expect(events.length).toBeGreaterThan(0);
+    expect(mod.AvatarView.all.has(a)).toBe(false);
+  });
+});
+
+describe("held items", () => {
+  it("builds a model for every weapon id except fists", () => {
+    for (const w of WEAPONS) {
+      const m = weapons.weaponModel(w.id, 0);
+      if (w.id === "fists") expect(m).toBeNull();
+      else {
+        expect(m, w.id).not.toBeNull();
+        let meshes = 0;
+        m!.traverse((o) => { if ((o as THREE.Mesh).isMesh) meshes++; });
+        expect(meshes, w.id).toBeGreaterThan(0);
+        expect(meshes, `${w.id} draw calls`).toBeLessThanOrEqual(6);
+      }
+    }
+  });
+
+  it("shares geometry between copies of the same item", () => {
+    const a = weapons.weaponModel("carbine", 1)!;
+    const b = weapons.weaponModel("carbine", 1)!;
+    expect((a.children[0] as THREE.Mesh).geometry).toBe((b.children[0] as THREE.Mesh).geometry);
+  });
+
+  it("holds guns muzzle-along-the-knuckles, top towards the thumb", () => {
+    const muzzle = new THREE.Vector3(0, 0, 1).applyQuaternion(mod.GUN_GRIP);
+    const top = new THREE.Vector3(0, 1, 0).applyQuaternion(mod.GUN_GRIP);
+    expect(muzzle.distanceTo(new THREE.Vector3(-1, 0, 0))).toBeLessThan(1e-6);
+    expect(top.distanceTo(new THREE.Vector3(0, 0, 1))).toBeLessThan(1e-6);
+  });
+});
+
+describe("avatar warm-up hook", () => {
+  it("is a no-op without loaded assets and is safe to switch off twice", () => {
+    const scene = new THREE.Scene();
+    const hook = mod.avatarWarmupHook(scene, () => at(0));
+    const before = mod.AvatarView.all.size;
+    hook.forceAll(true);
+    hook.forceAll(false);
+    hook.forceAll(false);
+    expect(scene.children.length).toBe(0);
+    expect(mod.AvatarView.all.size).toBe(before);
+  });
+});

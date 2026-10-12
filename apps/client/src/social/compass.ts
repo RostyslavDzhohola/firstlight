@@ -7,7 +7,8 @@ import { bearingTo, headingOf, nearestDir, stripX, surfaceDistance, type V3 } fr
 
 const HALF_SPAN = 95; // degrees visible either side of centre
 const CARDINALS: [number, string][] = [[0, "N"], [45, "NE"], [90, "E"], [135, "SE"], [180, "S"], [225, "SW"], [270, "W"], [315, "NW"]];
-export const PARTY_COLOURS = ["#36f9f6", "#ff7edb", "#ffd166", "#b48cff"];
+/** Party slot colours (UI kit --party-1…4), always shown with the slot number or name. */
+export { PARTY_SLOT_COLOURS as PARTY_COLOURS } from "../ui/partyFrames.ts";
 
 export interface CompassMarker {
   key: string;

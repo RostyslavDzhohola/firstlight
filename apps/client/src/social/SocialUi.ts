@@ -16,6 +16,8 @@ import { noteRemovalReason } from "./screens.ts";
 import { CAMERA_ICON, captureShot, flash, shareDialog } from "./screenshot.ts";
 import { addInvite, onSocialChange, partyState, removeInvite, setBlockedList, setParty, setSessionResolver } from "./store.ts";
 import type { V3 } from "./compassMath.ts";
+import { partyFrames } from "../ui/partyFrames.ts";
+import { voice } from "../voice/index.ts";
 
 const PEEK_MS = 250;
 
@@ -26,6 +28,7 @@ export class SocialUi {
   private readonly shotBtn: HTMLButtonElement;
   private tabDownAt = 0;
   private shooting = false;
+  private partyAt = 0;
 
   constructor(private readonly game: Game) {
     this.compass = new Compass(game.hud.root);
@@ -106,6 +109,16 @@ export class SocialUi {
       if (at) markers.push({ key: m.userId, label: m.name, colour: PARTY_COLOURS[i % PARTY_COLOURS.length]!, pos: at });
     });
     this.compass.update(pos, [f.x, f.y, f.z], this.game.bodyId, !!me && (me.flags & PF.SAFE) !== 0, markers);
+    // HUD party frames (top-left), 4 Hz.
+    if (now - this.partyAt > 250) {
+      this.partyAt = now;
+      const peers = new Map((voice()?.peers() ?? []).map((v) => [v.id, v]));
+      const frames = partyFrames(party.members, me ?? null, players ?? null, this.game.bodyId, (sid) => {
+        const v = peers.get(sid);
+        return v ? { speaking: v.speaking > 0.06, radio: v.radioTx, muted: v.muted || v.blocked || v.adminMuted } : null;
+      });
+      this.game.hud.setParty(frames);
+    }
     this.list.update(now);
     this.invites.render();
   }

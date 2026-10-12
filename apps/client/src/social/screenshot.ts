@@ -4,6 +4,7 @@
 // Share on X. Nothing is uploaded.
 
 import { el, sbtn } from "./dom.ts";
+import { overlayClosed, overlayOpened } from "../ui/dom.ts";
 
 export const SITE = "firstlight.one4all.dev";
 export const SITE_URL = `https://${SITE}`;
@@ -137,6 +138,7 @@ export function shareDialog(blob: Blob, info: ShotInfo, blank: boolean, onClose:
   const url = URL.createObjectURL(blob);
   const file = new File([blob], `firstlight-${info.planet.toLowerCase()}-${Date.now()}.png`, { type: "image/png" });
   const ov = el("div", "fl-overlay fl-shot");
+  overlayOpened("shot");
   const p = el("div", "fl-panel", ov);
   el("h2", "", p, "SCREENSHOT").style.fontSize = "18px";
   const img = el("img", "", p);
@@ -148,6 +150,7 @@ export function shareDialog(blob: Blob, info: ShotInfo, blank: boolean, onClose:
 
   const close = () => {
     ov.remove();
+    overlayClosed("shot");
     URL.revokeObjectURL(url);
     document.removeEventListener("keydown", onKey, true);
     onClose();

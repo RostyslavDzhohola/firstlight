@@ -1,0 +1,5 @@
+/* Page frame: the WebGL canvas and the UI root above it. */
+#game { position: fixed; inset: 0; }
+#game canvas { display: block; width: 100%; height: 100%; }
+/* The UI root never takes the pointer itself; overlays, cards and real controls opt in. */
+#ui { position: fixed; inset: 0; pointer-events: none; }

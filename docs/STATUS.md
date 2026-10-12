@@ -36,24 +36,38 @@
 - [ ] M10 Video-ready
 - [ ] M11 Extras
 
+## Finish line (SPEC §1)
+
+| # | State | Evidence |
+|---|---|---|
+| F1 live | ✅ | https://firstlight.one4all.dev + api health; T3 browser loads and plays |
+| F2 40 bots | ✅ | 600 s, 0 failures, tick p95 ≤ 2.94 ms with NPCs (Measured numbers) |
+| F3 < 30 s to play | ✅ | 8.0 s landing → playing (probe 3.5 s, warm-up 2.2 s), T3 browser, 03:20Z |
+| F4 fighting | 🟡 | seam-1 tests (PvP + PvE); browser E2E pending |
+| F5 death + own pile | 🟡 | seam-1 tests; browser E2E pending |
+| F6 voice | ⛔ | built + tested with bots; needs owner's TURN key; mic E2E needs two real browsers |
+| F7 email sign-in | ⛔ | built + tested; Resend domain unverified (owner: press Verify) |
+| F8 2-player boss | 🟡 | seam-1 duo tests for all 3 bosses; browser E2E pending |
+| F9 screenshot share | 🟡 | built; browser check pending |
+| F10 M1 ≥ 60 fps Medium | ✅* | ?bench=g1 59.9 fps p50, p95 17.6 ms (T3 Chromium, not plugged-in Chrome) |
+| F11 Low on weak profile | ✅* | `?bench=g1&tier=low&cpuslow=4`: 51.3 fps p50, p95 29.8 ms, 0 shader builds (D29 emulation) |
+| F12 three-model review | 🟡 | per-lane reviews done; whole-codebase review after the last merges |
+| F13 photo mode + 5 scenes | 🟡 | photo mode + `stage <n>` + docs/staged-scenes.md merged; browser check pending |
+
 ## Lanes (who owns what right now)
 
-| Lane | Owner | Worktree / task | Paths |
-|---|---|---|---|
-| Render look + G1 gate | Opus sub-agent | lane/render: fixing Codex+Opus review findings, then merge | apps/client/src/render, world/Planet.ts, shared props.ts |
-| Accounts + persistence | Opus sub-agent | MERGED 61aa332 | apps/server/src/auth, db |
-| Enemies, wildlife, bosses | Opus sub-agent | MERGED 7768535 (Codex review running) | server world/npc, client world/npcs, shared content/npcs.ts |
-| Voice + radio + phrase wheel | Opus sub-agent | ../fl-wt-voice (lane/voice) | server world/voice, client voice |
-| Social, moderation, stats, share | Opus sub-agent | MERGED 1a2ee50 | parties, player list, /admin, /stats, screenshot |
-| Missions, medals, eggs, shop, pads, stage | Opus sub-agent | ../fl-wt-quests (lane/quests) | content missions/medals, server systems, map |
-| Characters (GLB, animations) | Opus sub-agent | MERGED 2447afe (Codex review running) | Avatars.ts, assets-dev/characters, tools/blender |
-| UI design competition | judged: Opus entry B base, Fable entry A for landing/loading/player list/onboarding | ../design/opus (base) | port to apps/client/src/ui |
-| Review combat+auth | done; fixes in D26 | docs/reviews/2026-10-12-* | — |
-| Audio (SFX + generative music) | Builder | main | apps/client/src/audio |
-| UI port (design verdict) | Opus sub-agent | ../fl-wt-ui (lane/ui, based on lane/render + main) | apps/client/src/ui, index.html, main.ts |
-| Review lane/render | Codex Sol high + Opus | delegate fl-review-render-sol-1 + agent | — |
-| Destruction (§6.9) | Opus sub-agent | ../fl-wt-destruct (lane/destruct, main+render) | shared breakables.ts, server destruction.ts, client Breakables/debris |
-| Photo mode + F2 load test | Builder | ../fl-wt-photo / tools/bots | game/PhotoMode.ts |
+| Lane | State | Where |
+|---|---|---|
+| Render look + G1 gate | MERGED a59d992 (Codex + Opus reviewed, fixed) | — |
+| Accounts + persistence | MERGED 61aa332 | — |
+| Social, moderation, stats, share | MERGED 1a2ee50 (Codex ×2) | — |
+| Enemies, wildlife, bosses | MERGED 7768535; fixing Codex review (3 blockers) | ../fl-wt-npc |
+| Characters (GLB, animations) | MERGED 2447afe; fixing Codex review | ../fl-wt-chars |
+| Voice + radio + phrase wheel | MERGED d40d058 (Codex ×2); TURN key pending owner | — |
+| Missions, medals, eggs, shop, pads, stage | MERGED f8514dc (Codex) | — |
+| Photo mode | MERGED 4214419 | — |
+| UI port (design verdict) | Opus sub-agent, merging main then restyling lanes' panels | ../fl-wt-ui |
+| Destruction (§6.9) | Opus sub-agent | ../fl-wt-destruct |
 
 ## Measured numbers
 
@@ -65,6 +79,17 @@
   on one Arcadia copy for 600 s with `--fire`, 0 failures/disconnects; tick p50 ≤ 0.65 ms, p95 ≤ 1.88 ms,
   max 10.2 ms (limit p95 ≤ 25 ms); RSS ≤ 192 MB; CPU ≈ 6 % of one core; downstream 11.7 KB/s per bot on
   average (0.043 GB per player-hour). Re-run with NPCs (03:10Z, commit d40d058): 40 bots × 600 s, 0 failures, tick p50 ≤ 1.36 ms, p95 ≤ 2.94 ms, max 5.7 ms, RSS ≤ 218 MB, CPU ≈ 6 %, 8.3 KB/s per bot. **F2 passes.**
+
+- 03:13Z G1 / F10 stand-in: `?bench=g1` on the live site in T3 Code's built-in browser (Chromium 152 /
+  Electron 44, WebGPU) on the owner's MacBook Air M1, 1785×1048 canvas, Medium, 40-avatar crowd with
+  particle bursts, Portus, 180 s warm-up + 60 s run: **59.9 fps p50, frame p95 17.6 ms, p99 19.4 ms,
+  max 78.8 ms, 0 shader builds during the run**, draws mean 296 / max 445, 1.05 M triangles,
+  104,699 grass blades, heap ≤ 132 MB. Not plugged-in Chrome as SPEC asks (D23: no Chrome control),
+  but same machine and Chromium engine. It exposed a GPU-timer bug (fixed: probe would have picked Low).
+
+- 03:45Z F11 stand-in: `?bench=g1&tier=low&cpuslow=4` (4× main-thread slowdown emulation, D29),
+  Low, 1125×661 internal (more pixels than the 1280×720 profile), 40-avatar crowd, 60 s warm + 60 s:
+  **51.3 fps p50 (mean 47.5), frame p95 29.8 ms, p99 35.7 ms, 0 shader builds**, draws mean 174.
 
 ## Open issues
 

@@ -1,0 +1,30 @@
+/* Legacy overlay markup used by other lanes before the kit landed (`.fl-overlay > .fl-panel`, appended
+   to <body> without `.fl-ui`): a centred card over a drained scrim, in the kit's look. Everything here
+   uses :where() (zero specificity), so each lane's own rules (e.g. .fl-q, .fl-plist.peek,
+   .fl-console-wrap) still win. New code: use the kit classes (see src/ui/README.md). */
+
+:where(.fl-overlay:not(.fl-ui)) {
+  display: grid; place-items: center; padding: var(--sp-5);
+  background: rgba(5, 7, 10, .62);
+  -webkit-backdrop-filter: blur(10px) saturate(.5); backdrop-filter: blur(10px) saturate(.5);
+  font: 400 var(--t-sm)/var(--lh-body) var(--font-body); color: var(--paper);
+  -webkit-font-smoothing: antialiased;
+}
+:where(.fl-lowfx) :where(.fl-overlay:not(.fl-ui)) { background: rgba(5, 7, 10, .88); }
+:where(.fl-overlay:not(.fl-ui)) :where(*, *::before, *::after) { box-sizing: border-box; }
+:where(.fl-overlay:not(.fl-ui)) :where(button, input, select, textarea) { font: inherit; color: inherit; }
+:where(.fl-overlay:not(.fl-ui)) > :where(.fl-panel) {
+  width: min(calc(40 * var(--u)), 94vw); max-height: 88vh; overflow-y: auto;
+  padding: calc(1.6 * var(--u)) calc(1.8 * var(--u)); text-align: center;
+  animation: fl-rise-in var(--dur-3) var(--ease-out) both;
+}
+:where(.fl-overlay:not(.fl-ui)) :where(.fl-panel h2) { margin: 0 0 var(--sp-2); font: 300 var(--t-2xl)/1.1 var(--font-display); letter-spacing: .12em; text-transform: uppercase; color: var(--paper); }
+:where(.fl-overlay:not(.fl-ui)) :where(.fl-panel h3) { margin: var(--sp-4) 0 var(--sp-2); font: 600 var(--t-xs)/1.2 var(--font-display); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--fog-3); }
+:where(.fl-overlay:not(.fl-ui)) :where(.fl-panel p) { margin: var(--sp-2) 0; font-size: var(--t-sm); line-height: 1.5; color: var(--paper-2); }
+:where(.fl-overlay:not(.fl-ui)) :where(.fl-panel select, .fl-panel input[type="text"]) { height: calc(2.2 * var(--u)); padding: 0 calc(.6 * var(--u)); font-size: var(--t-sm); color: var(--paper); background: rgba(0, 0, 0, .35); border: 1px solid var(--line-3); border-radius: var(--r-2); }
+
+/* Old button modifiers on the kit's .fl-btn */
+.fl-btn.ghost { background: transparent; color: var(--fog-4); }
+.fl-btn.ghost:hover { color: var(--paper); }
+.fl-btn.danger { color: #ffd2c9; border-color: rgba(255, 111, 94, .5); background: rgba(255, 111, 94, .08); }
+.fl-btn.primary { color: #1f1308; background: linear-gradient(180deg, #ffe6b8 0%, #f7bb69 50%, #ec9268 100%); border-color: rgba(255, 230, 184, .95); }

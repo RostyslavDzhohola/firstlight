@@ -1,0 +1,85 @@
+/* Landing (verdict: Entry A layout, Entry B wordmark). The planets stay at the edges, clear of the
+   wordmark, and the planet limb sits below the call to action (no beam, no rings through the text). */
+
+.fl-landing { position: fixed; inset: 0; z-index: 20; overflow: hidden; background: var(--ink-0); transition: opacity var(--dur-4) var(--ease-out); }
+
+/* ---- backdrop (placeholder for the M10 flythrough video); muted menu grade ---- */
+.fl-fly { position: absolute; inset: 0; overflow: hidden; filter: saturate(.72) contrast(1.04); }
+.fl-fly__sky {
+  position: absolute; inset: -6%;
+  background:
+    radial-gradient(1.5px 1.5px at 12% 18%, #fff, transparent), radial-gradient(1px 1px at 32% 8%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 48% 12%, #fff, transparent), radial-gradient(1px 1px at 63% 6%, #fff, transparent),
+    radial-gradient(1px 1px at 78% 26%, #fff, transparent), radial-gradient(1.5px 1.5px at 92% 34%, #fff, transparent),
+    radial-gradient(1px 1px at 6% 40%, #fff, transparent), radial-gradient(1px 1px at 24% 52%, #fff, transparent),
+    radial-gradient(1px 1px at 72% 44%, #fff, transparent), radial-gradient(1px 1px at 96% 56%, #fff, transparent),
+    radial-gradient(60% 46% at 50% 100%, rgba(246, 177, 74, .26), transparent 70%),
+    linear-gradient(180deg, #05070c 0%, #0b1220 42%, #1c2a40 70%, #4d3e45 90%, #8a6248 100%);
+  animation: fl-drift 90s linear infinite alternate;
+}
+@keyframes fl-drift { from { transform: translate3d(0, 0, 0) scale(1.02); } to { transform: translate3d(-2%, 1%, 0) scale(1.06); } }
+.fl-fly__planet { position: absolute; border-radius: 50%; }
+.fl-fly__planet--arcadia { width: calc(7.5 * var(--u)); height: calc(7.5 * var(--u)); right: 7%; top: 11%; background: radial-gradient(circle at 35% 35%, #7fe0c0, #2fbf9b 45%, #0e4f43 100%); box-shadow: 0 0 40px rgba(47, 191, 155, .22); }
+.fl-fly__planet--hollowmere { width: calc(3.8 * var(--u)); height: calc(3.8 * var(--u)); left: 8%; top: 20%; background: radial-gradient(circle at 35% 35%, #b394d8, #7a5ba6 45%, #2b1d44 100%); box-shadow: 0 0 30px rgba(122, 91, 166, .28); }
+.fl-fly__planet--meridian { width: calc(2.2 * var(--u)); height: calc(2.2 * var(--u)); left: 19%; top: 9%; background: radial-gradient(circle at 35% 35%, #f0a585, #c2452d 45%, #4a1a12 100%); }
+.fl-fly__limb {
+  position: absolute; left: 50%; top: 84vh; width: 240vw; height: 240vw; margin-left: -120vw; border-radius: 50%;
+  background: radial-gradient(ellipse at 50% 0%, #4a3a33 0%, #1e1b1e 18%, #0a0c12 40%);
+  box-shadow: 0 -2px 0 rgba(255, 226, 168, .9), 0 -10px 40px rgba(246, 177, 74, .5), 0 -40px 140px rgba(246, 177, 74, .24);
+}
+.fl-fly__haze { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(5, 7, 10, .55) 0%, transparent 22%, transparent 60%, rgba(5, 7, 10, .6) 100%); }
+
+/* ---- layout ---- */
+.fl-landing__page { position: relative; z-index: 1; height: 100%; display: grid; grid-template-rows: auto 1fr auto; padding: calc(1.6 * var(--u)) calc(2.4 * var(--u)) calc(1.5 * var(--u)); }
+.fl-landing__top { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-5); }
+.fl-worlds { display: flex; gap: calc(1.25 * var(--u)); font: 500 var(--t-xs)/1 var(--font-display); letter-spacing: var(--track-wide); text-transform: uppercase; color: var(--fog-3); }
+.fl-world { display: inline-flex; align-items: center; gap: .55em; }
+.fl-world::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--c); opacity: .85; }
+.fl-world--portus { --c: var(--portus); }
+.fl-world--arcadia { --c: var(--arcadia); }
+.fl-world--hollowmere { --c: var(--hollowmere); }
+.fl-world--meridian { --c: var(--meridian); }
+.fl-landing__signin { font-size: var(--t-sm); color: var(--fog-3); text-decoration: none; }
+.fl-landing__signin:hover .fl-link { color: var(--dawn-3); border-color: var(--dawn-3); }
+
+.fl-landing__hero { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: calc(1.4 * var(--u)); padding-bottom: 4vh; }
+.fl-landing__hero .fl-eyebrow { color: var(--fog-4); }
+.fl-landing__wordmark { --wm-size: clamp(calc(3.5 * var(--u)), 6.2vw, calc(7 * var(--u))); margin: calc(.4 * var(--u)) 0 calc(.6 * var(--u)); animation: fl-flicker 1.4s var(--ease-out) both; }
+.fl-landing__tag { margin: 0; max-width: calc(34 * var(--u)); font: 400 var(--t-lg)/1.45 var(--font-body); color: var(--paper-2); text-wrap: balance; }
+.fl-landing__tag b { font-weight: 500; color: var(--paper); }
+
+.fl-landing__cta { display: grid; justify-items: center; gap: calc(.9 * var(--u)); margin-top: calc(.8 * var(--u)); }
+.fl-landing__play { position: relative; --h: calc(4.4 * var(--u)); min-width: calc(19 * var(--u)); font-size: var(--t-lg); letter-spacing: .32em; padding-left: calc(2 * var(--u) + .32em); }
+.fl-landing__play .li { width: 1em; height: 1em; }
+.fl-landing__play::before { content: ""; position: absolute; inset: -8px; border-radius: 8px; border: 1px solid rgba(255, 217, 155, .35); pointer-events: none; animation: fl-ring-soft 2.8s var(--ease-in-out) infinite; }
+@keyframes fl-ring-soft { 0% { transform: scale(.98); opacity: .9; } 70%, 100% { transform: scale(1.07); opacity: 0; } }
+.fl-landing__play[disabled] { cursor: wait; }
+.fl-landing__play[disabled]::before { animation: none; opacity: 0; }
+
+.fl-online { display: inline-flex; align-items: center; gap: .6em; height: calc(2.2 * var(--u)); padding: 0 calc(1 * var(--u)); border-radius: var(--r-pill); border: 1px solid var(--line-2); background: rgba(0, 0, 0, .35); font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: .12em; text-transform: uppercase; color: var(--paper-2); }
+.fl-online b { font: 600 var(--t-md)/1 var(--font-display); letter-spacing: .02em; color: var(--paper); }
+.fl-live-dot { position: relative; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+.fl-live-dot::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 1px solid var(--ok); animation: fl-ring 2s var(--ease-out) infinite; }
+.fl-landing__sub { display: inline-flex; align-items: center; gap: calc(.8 * var(--u)); font-size: var(--t-xs); color: var(--fog-3); }
+.fl-landing__sub i { width: 3px; height: 3px; border-radius: 50%; background: var(--fog-2); }
+
+.fl-landing__foot { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-5); }
+.fl-landing__credit { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; font-size: var(--t-sm); color: var(--fog-3); }
+.fl-landing__credit b { font-weight: 500; color: var(--paper-2); }
+.fl-repo { display: inline-flex; gap: var(--sp-2); }
+.fl-landing__meta { font: 500 var(--t-xs)/1 var(--font-mono); color: var(--fog-2); white-space: nowrap; }
+
+/* ---- phone fallback ---- */
+.fl-landing__phone { display: none; }
+.fl-phone-card { width: min(100%, calc(24 * var(--u))); padding: calc(2.2 * var(--u)) calc(1.6 * var(--u)) calc(1.8 * var(--u)); text-align: center; }
+.fl-phone-card__mark { --wm-size: calc(2.1 * var(--u)); margin-bottom: var(--sp-6); }
+.fl-phone-card h2 { margin: 0 0 var(--sp-2); font: 500 var(--t-xl)/1.2 var(--font-display); letter-spacing: .02em; }
+.fl-phone-card p { margin: 0 0 calc(1.4 * var(--u)); color: var(--fog-3); font-size: var(--t-sm); }
+.fl-copybox { display: flex; align-items: center; gap: var(--sp-2); padding: calc(.35 * var(--u)) calc(.35 * var(--u)) calc(.35 * var(--u)) calc(.9 * var(--u)); border: 1px solid var(--line-3); border-radius: var(--r-2); background: rgba(0, 0, 0, .35); font: 500 var(--t-sm)/1 var(--font-mono); text-align: left; }
+.fl-copybox span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-copied { margin-top: calc(.7 * var(--u)); font-size: var(--t-xs); color: var(--ok); display: inline-flex; gap: .4em; align-items: center; }
+
+@media (max-width: 760px), (pointer: coarse) and (hover: none) {
+  .fl-landing__page { display: none; }
+  .fl-landing__phone { display: grid; place-items: center; position: relative; z-index: 1; height: 100%; padding: 1.25rem; }
+}

@@ -1,0 +1,16 @@
+/* Dev-only UI gallery: a stand-in world behind the HUD, and animations frozen at their end state so
+   screenshots are stable. */
+#game.fl-gallery-world {
+  background:
+    radial-gradient(40% 30% at 74% 36%, rgba(255, 245, 220, .9), rgba(255, 220, 150, .25) 40%, transparent 70%),
+    linear-gradient(180deg, #1b7d97 0%, #3aa9b6 30%, #8fd6c6 46%, #f4e2a8 54%, #ffd48c 58%, #4f9ea6 58.5%, #5fd6cd 64%, #22b0b6 75%, #3d9a6c 76%, #2a5e3a 100%);
+}
+#game.fl-gallery-world::after { content: ""; position: absolute; left: 52%; top: 40%; width: 22%; height: 18%; border-radius: 50% 50% 0 0; background: linear-gradient(180deg, #2a2629, #3b3436); }
+#game.fl-gallery-dark { background: radial-gradient(70% 60% at 50% 70%, #3a2e2a, #0f1218 60%, #07090d); }
+.fl-gallery-freeze *, .fl-gallery-freeze *::before, .fl-gallery-freeze *::after { animation-duration: .001ms !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; transition: none !important; }
+.fl-gallery-freeze .fl-dmg { animation: none !important; transform: translate(var(--x), var(--y)) translate(-50%, -50%); }
+.fl-gallery-freeze .fl-bubble { animation: none !important; }
+.fl-gallery-freeze .fl-fly__sky { animation: none !important; }
+.fl-gallery-nav { position: fixed; left: 8px; bottom: 8px; z-index: 999; display: flex; flex-wrap: wrap; gap: 4px; max-width: 70vw; font: 500 13px/1 ui-monospace, monospace; }
+.fl-gallery-nav a { padding: 4px 6px; border-radius: 3px; background: rgba(0, 0, 0, .6); color: #bcc2cc; text-decoration: none; }
+.fl-gallery-nav a.is-on { color: #ffd99b; }
