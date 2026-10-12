@@ -7,7 +7,7 @@
 // tutorial.
 
 import * as THREE from "three/webgpu";
-import { BODIES, portalNear, portalSpots, type PortalSpot } from "@firstlight/shared";
+import { BODIES, portalSpots, type PortalSpot } from "@firstlight/shared";
 import { ONBOARDING } from "@firstlight/shared/content/onboarding";
 import { WEAPONS, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
 import { config, flags } from "../config.ts";
@@ -194,7 +194,6 @@ export class OnboardingClient implements ClientSystem {
       pressed: g.photo?.active ? NO_KEYS : g.input.pressed,
       phrased: this.phrased,
       voiceOn: !!voice()?.optedIn,
-      atPortal: !!portalNear(this.portals, p.x, p.y, p.z),
       inPortal: !!portalAt(this.portals, p.x, p.y, p.z),
     });
     this.phrased = false;
