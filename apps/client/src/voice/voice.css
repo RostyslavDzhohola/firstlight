@@ -1,0 +1,53 @@
+/* Voice HUD: mic widget, radio line, speaking rings, Voice & radio panel. */
+.fl-vroot { position: fixed; inset: 0; pointer-events: none; z-index: 21; font: 13px/1.3 ui-sans-serif, system-ui, sans-serif; color: #f4f0ff; text-shadow: 0 1px 2px #0008; }
+.fl-vwidget { position: absolute; left: 18px; bottom: 18px; display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 999px; background: #0a0816b0; border: 1px solid #ffffff26; pointer-events: auto; cursor: pointer; user-select: none; }
+.fl-vwidget .ic { display: grid; place-items: center; width: 18px; height: 18px; color: #8f88a8; }
+.fl-vwidget.on .ic { color: #72f1b8; }
+.fl-vwidget.talking { border-color: #72f1b8; box-shadow: 0 0 14px #72f1b855; }
+.fl-vwidget.talking .ic { color: #b8ffe0; }
+.fl-vwidget.radio { border-color: #ffd166; box-shadow: 0 0 14px #ffd16655; }
+.fl-vwidget.warn { border-color: #ff6b6baa; }
+.fl-vwidget.warn .ic { color: #ff9f9f; }
+.fl-vwidget.off .lbl { color: #b9b2cc; }
+.fl-vwidget .meter { width: 54px; height: 5px; border-radius: 3px; background: #ffffff1a; overflow: hidden; display: none; }
+.fl-vwidget.talking .meter { display: block; }
+.fl-vwidget .meter i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, #72f1b8, #ffd166); transform-origin: left; transform: scaleX(0); }
+.fl-vradio { position: absolute; left: 18px; bottom: 56px; display: none; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: #0a0816a0; border: 1px solid #ffffff1f; color: #c9c2e0; font-size: 12px; }
+.fl-vradio.rx { border-color: #ffd166; color: #ffe7a8; animation: fl-vpulse 1s ease-in-out infinite alternate; }
+.fl-vradio.tx { border-color: #ffd166; color: #fff; }
+@keyframes fl-vpulse { from { box-shadow: 0 0 0 #ffd16600; } to { box-shadow: 0 0 12px #ffd16677; } }
+.fl-vrings { position: absolute; inset: 0; overflow: hidden; }
+.fl-vring { position: absolute; left: 0; top: 0; width: 26px; height: 26px; border-radius: 50%; border: 3px solid #72f1b8; box-shadow: 0 0 10px #72f1b8aa, inset 0 0 6px #72f1b866; will-change: transform; }
+.fl-vring.radio { border-color: #ffd166; box-shadow: 0 0 10px #ffd166aa; }
+.fl-vring.muted { border-color: #8f88a8; box-shadow: none; opacity: .6; border-style: dashed; }
+
+.fl-vpanel-overlay { z-index: 42; }
+.fl-vpanel { text-align: left; width: min(620px, 94vw); max-height: 90vh; overflow-y: auto; }
+.fl-vpanel h2 { text-align: center; font-size: 24px; }
+.fl-vpanel h3 { margin: 16px 0 6px; font-size: 13px; letter-spacing: .12em; text-transform: uppercase; color: #c9c2e0; }
+.fl-vfacts { margin: 10px 0 14px; padding-left: 18px; color: #d9d3ea; }
+.fl-vfacts li { margin: 6px 0; }
+.fl-vcheck { display: flex; align-items: center; gap: 8px; margin: 8px 0; cursor: pointer; }
+.fl-vcheck input { width: 18px; height: 18px; accent-color: #ff7edb; }
+.fl-vrow { display: flex; justify-content: center; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.fl-vsmall { font-size: 12px; color: #8f88a8 !important; }
+.fl-vstatus { color: #d9d3ea !important; }
+.fl-vmeter { display: flex; align-items: center; gap: 10px; margin: 8px 0; font-size: 12px; color: #b9b2cc; }
+.fl-vmeter .bar { flex: 1; height: 6px; border-radius: 3px; background: #ffffff1a; overflow: hidden; }
+.fl-vmeter .bar i { display: block; height: 100%; background: linear-gradient(90deg, #72f1b8, #ffd166); transform-origin: left; transform: scaleX(0); }
+.fl-vtoggles { margin: 6px 0; }
+.fl-vradio-pick { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin: 10px 0; }
+.fl-vradio-pick b { margin-right: 6px; }
+.fl-vradio-pick .ch { font: inherit; min-width: 34px; padding: 5px 8px; border-radius: 8px; border: 1px solid #ffffff2a; background: #0a0816; color: #ece8f6; cursor: pointer; }
+.fl-vradio-pick .ch.sel { border-color: #ffd166; color: #ffd166; box-shadow: 0 0 10px #ffd16644; }
+.fl-vradio-pick .fl-vsmall { flex-basis: 100%; margin-top: 4px; }
+.fl-vpeople { display: flex; flex-direction: column; gap: 4px; }
+.fl-vperson { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 10px; background: #0a0816; border: 1px solid #ffffff14; }
+.fl-vperson .dot { width: 8px; height: 8px; border-radius: 50%; background: #ffffff22; flex: none; }
+.fl-vperson.speaking .dot { background: #72f1b8; box-shadow: 0 0 8px #72f1b8; }
+.fl-vperson .name { font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-vperson .meta { color: #8f88a8; font-size: 12px; white-space: nowrap; }
+.fl-vperson .acts { margin-left: auto; display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.fl-vperson .acts button, .fl-vperson .acts select { font: inherit; font-size: 12px; padding: 4px 8px; border-radius: 8px; border: 1px solid #ffffff2a; background: #161230; color: #ece8f6; cursor: pointer; }
+.fl-vperson .acts button.danger { border-color: #ff6b6b; color: #ffb3b3; }
+.fl-vperson .acts button.admin { border-color: #ffd16688; color: #ffd166; }
