@@ -97,6 +97,17 @@ describe("sky (seam 1)", () => {
     expect(nextStrike(heard, heard.serverTime)).not.toBeNull();
   });
 
+  it("answers skySync at most once a second per client", async () => {
+    const a = await bot("spam");
+    for (let i = 0; i < 10; i++) a.send("skySync", {});
+    await waitFor(() => skies(a).length > 0);
+    const t0 = skies(a)[0]!.serverTime;
+    await waitFor(() => ((a.state as any).time ?? 0) - t0 >= 1200);
+    expect(skies(a)).toHaveLength(1);
+    a.send("skySync", {});
+    await waitFor(() => skies(a).length === 2);
+  });
+
   it("ignores the sky command from non-admins", async () => {
     const a = await bot("plain");
     a.send("admin", { cmd: "sky", args: { weather: "storm" } });
@@ -151,6 +162,21 @@ describe("SkySystem (unit)", () => {
     while (sys.now() < sent[1]!.nextChangeAt + 100) step(50);
     expect(sent).toHaveLength(3);
     expect(sent[2]!.override).toBe(false);
+  });
+});
+
+describe("SkySystem admin input", () => {
+  it("falls back to defaults for non-finite numbers", () => {
+    const { sys, sent } = unit();
+    sys.onAdmin(ADMIN, "sky", { weather: "rain", intensity: Number.NaN, minutes: Number.NaN });
+    expect(sent[0]!.intensity).toBe(0.9);
+    expect(sent[0]!.nextChangeAt - sent[0]!.serverTime).toBe(15 * 60_000);
+    sys.onAdmin(ADMIN, "sky", { weather: "rain", intensity: Number.POSITIVE_INFINITY, minutes: Number.POSITIVE_INFINITY });
+    expect(sent[1]!.intensity).toBe(0.9);
+    expect(sent[1]!.nextChangeAt - sent[1]!.serverTime).toBe(15 * 60_000);
+    sys.onAdmin(ADMIN, "sky", { weather: "rain", intensity: 7, minutes: 1e9 });
+    expect(sent[2]!.intensity).toBe(1);
+    expect(sent[2]!.nextChangeAt - sent[2]!.serverTime).toBe(240 * 60_000);
   });
 });
 

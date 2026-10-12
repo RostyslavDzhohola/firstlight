@@ -12,19 +12,39 @@ import type { PlayerActor } from "./actors.ts";
 import type { BodyRoom } from "./BodyRoom.ts";
 import type { RoomSystem, SystemFactory } from "./systems.ts";
 
+/** One skySync answer per client per second (clients ask on join and every SKY_SYNC_MS). */
+const SYNC_MIN_MS = 1000;
+
+/** A finite number from an admin argument, else undefined. */
+const finite = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+
 export class SkySystem implements RoomSystem {
   private readonly room: BodyRoom;
   private override: SkyOverride | null = null;
   /** Admin time shift (fraction of a day added to the clock). */
   private dayOffset = 0;
   private lastKey = "";
+  private readonly lastSync = new Map<string, number>();
   /** Injectable clock (tests). */
   now: () => number = () => Date.now();
 
   constructor(room: BodyRoom) {
     this.room = room;
-    room.onMessage("skySync", z.object({}).passthrough().optional(), (c: Client) => c.send("sky", this.state()));
+    room.onMessage("skySync", z.object({}).passthrough().optional(), (c: Client) => this.sync(c));
     this.lastKey = this.key(this.state());
+  }
+
+  /** Answer a client's re-sync. Extra requests inside a second are dropped: the reply is idempotent
+   * and the client keeps extrapolating, so there is nothing to refuse. */
+  private sync(c: Client) {
+    const now = this.now();
+    if (now - (this.lastSync.get(c.sessionId) ?? -Infinity) < SYNC_MIN_MS) return;
+    this.lastSync.set(c.sessionId, now);
+    c.send("sky", this.state(now));
+  }
+
+  onPlayerLeave(sessionId: string) {
+    this.lastSync.delete(sessionId);
   }
 
   get body() {
@@ -62,8 +82,8 @@ export class SkySystem implements RoomSystem {
       this.dayOffset = 0;
     }
     if (isWeather(args.weather)) {
-      const minutes = typeof args.minutes === "number" ? Math.max(0.1, Math.min(240, args.minutes)) : 15;
-      const intensity = typeof args.intensity === "number" ? Math.max(0, Math.min(1, args.intensity)) : 0.9;
+      const minutes = Math.max(0.1, Math.min(240, finite(args.minutes) ?? 15));
+      const intensity = Math.max(0, Math.min(1, finite(args.intensity) ?? 0.9));
       this.override = { weather: args.weather, intensity, since: now, until: now + minutes * 60_000 };
     }
     if (typeof args.dayT === "number" && Number.isFinite(args.dayT)) {
