@@ -104,6 +104,7 @@ export class CombatClient {
     room.onMessage("death", async (m: { victim: string; killerName: string; aliveMs: number; level: number }) => {
       if (m.victim !== me || this.deadUntilRespawn) return;
       this.deadUntilRespawn = true;
+      this.game.photo?.exit(this.game.ctx.camera);
       this.game.player.frozen = true;
       this.game.audio.play("death");
       const choice = await this.hud.death(m);
@@ -169,7 +170,7 @@ export class CombatClient {
       g.hud.setLogout(g.hud.you?.logoutEndsAt ?? null, Date.now() + g.net.serverOffset);
     }
     this.updatePickupPrompt();
-    if (this.deadUntilRespawn || !input.locked) return;
+    if (this.deadUntilRespawn || !input.locked || g.photo?.active) return;
 
     // Hotbar and utility keys.
     for (let i = 0; i < 4; i++) if (input.pressed.has(`Digit${i + 1}`)) room.send("equip", { slot: i });

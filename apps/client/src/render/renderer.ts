@@ -4,7 +4,7 @@
 
 import * as THREE from "three/webgpu";
 import { flags } from "../config.ts";
-import { buildPost, MENU_GRADE, setGrade, type GradeParams, type PostBuild } from "./post.ts";
+import { buildPost, MENU_GRADE, postUniforms, setGrade, type GradeParams, type PostBuild } from "./post.ts";
 import {
   clearStored, emptyStored, FEATURES, killSwitches, loadStored, resolveSettings, saveStored, TIERS, tierIndex,
   urlScale, urlTier, validAutoTier, type Feature, type ResolvedSettings, type StoredGfx, type Tier,
@@ -53,6 +53,9 @@ export interface RenderCtx {
   /** User render scale on top of the tier (null = tier default). */
   setRenderScale(s: number | null): void;
   setGrade(g: GradeParams): void;
+  /** Photo mode: add depth of field to the post pipeline (rebuilds it). */
+  setPhotoPost(on: boolean): void;
+  setPhotoParams(p: { focus: number; aperture: number; bokeh: number }): void;
   onChange(cb: SettingsListener): () => void;
   /** Effective pixel ratio after DPR cap × render scale × ladder, never above devicePixelRatio. */
   pixelRatio(): number;
@@ -128,15 +131,16 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
   let settings = resolveSettings(tier, auto, webgpu, stored, kills);
   let post: PostBuild | null = null;
   let postKey = "";
+  let photo = false;
 
   const postKeyOf = (s: ResolvedSettings) =>
-    [s.on.bloom, s.on.ao, s.on.traa, s.on.fxaa, s.on.grade, s.on.grain, s.on.vignette, s.post.ao, s.post.bloomScale].join(",");
+    [s.on.bloom, s.on.ao, s.on.traa, s.on.fxaa, s.on.grade, s.on.grain, s.on.vignette, s.post.ao, s.post.bloomScale, photo].join(",");
 
   function rebuildPost() {
     const key = postKeyOf(settings);
     if (post && key === postKey) return;
     post?.dispose();
-    post = buildPost(scene, camera, settings);
+    post = buildPost(scene, camera, settings, photo);
     postKey = key;
     pipeline.outputNode = post.outputNode;
     pipeline.needsUpdate = true;
@@ -231,6 +235,15 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
     },
     setGrade(g) {
       setGrade(g);
+    },
+    setPhotoPost(on) {
+      photo = on;
+      rebuildPost();
+    },
+    setPhotoParams(p) {
+      postUniforms.dofFocus.value = p.focus;
+      postUniforms.dofFocal.value = p.aperture;
+      postUniforms.dofBokeh.value = p.bokeh;
     },
     onChange(cb) {
       listeners.add(cb);

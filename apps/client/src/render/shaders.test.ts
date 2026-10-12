@@ -227,6 +227,18 @@ for (const backendName of ["webgpu", "webgl2"] as const) {
         post.dispose();
       }
     });
+
+    it("photo mode post (depth of field) for every tier", () => {
+      for (const t of ["low", "medium", "high", "ultra"] as const) {
+        const s = settingsFor(t, backendName === "webgpu");
+        const post = buildPost(sceneWithLights(), camera, s, true);
+        const mat = new THREE.NodeMaterial();
+        mat.fragmentNode = post.outputNode;
+        const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
+        expectClean(build(renderer, new THREE.Scene(), camera, quad), false);
+        post.dispose();
+      }
+    });
   });
 }
 
