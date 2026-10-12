@@ -36,6 +36,15 @@ export const CONTROLS: { title: string; rows: Ctl[] }[] = [
   },
 ];
 
+/** Extra pause-menu rows other systems offer while they apply (onboarding: "Skip tutorial"). */
+export interface PauseExtra {
+  icon: string;
+  title: string;
+  sub: string;
+  onClick: () => void;
+}
+export const pauseExtras = new Set<() => PauseExtra | null>();
+
 const RULES: [sprite: string, title: string, text: string][] = [
   ["heart", "One life", "Die and everything you carry drops in a pile of light. Anyone can loot it."],
   ["prism", "Pads are safe", "A 12 m ring around every pad: no damage in or out. All of Portus is safe."],
@@ -207,6 +216,16 @@ export class Menu {
           saveSlot.hidden = false;
         })
         .catch(() => {});
+    }
+
+    for (const extra of pauseExtras) {
+      const x = extra();
+      if (!x) continue;
+      const row = item(x.icon, x.title, x.sub);
+      row.b.onclick = () => {
+        x.onClick();
+        this.game.input.lock();
+      };
     }
 
     const howto = item("book", "How to play", "Controls and the three rules", "is-on");

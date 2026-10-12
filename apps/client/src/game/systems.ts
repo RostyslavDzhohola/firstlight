@@ -8,6 +8,7 @@ import { createVoiceSystem } from "../voice/index.ts";
 import { createBreakables } from "../world/Breakables.ts";
 import { createSkyClient } from "./SkyClient.ts";
 import { createInventoryClient } from "./InventoryClient.ts";
+import { createOnboardingClient } from "./OnboardingClient.ts";
 
 export interface ClientSystem {
   update(dt: number, now: number): void;
@@ -24,3 +25,5 @@ CLIENT_SYSTEMS.push(createBreakables);
 CLIENT_SYSTEMS.push(createSkyClient);
 // Inventory panel (I): move, drop, use and wear from the hotbar and backpack.
 CLIENT_SYSTEMS.push(createInventoryClient);
+// Onboarding (Portus): training dummies and the first-minute tutorial HUD.
+CLIENT_SYSTEMS.push(createOnboardingClient);

@@ -1,0 +1,10 @@
+/* Onboarding HUD on top of the kit's onboarding pieces (styles/kit.css). The Skip control sits under
+   the checklist instead of the top-right corner, where the HUD's toasts appear (+10 XP lands there). */
+
+.fl-onb .fl-onb__list .fl-onb__skip { position: static; display: grid; justify-items: start; gap: calc(.35 * var(--u)); margin-top: calc(.6 * var(--u)); padding-top: calc(.6 * var(--u)); border-top: 1px solid var(--line-1); }
+.fl-onb .fl-onb__skip .fl-btn .fl-key { font-size: var(--t-xs); }
+.fl-onb__st .fl-keys { justify-self: end; }
+.fl-onb__step p .fl-key { vertical-align: 1px; }
+.fl-onb__step-k b { color: var(--hero-gold); }
+.fl-onb__done { display: flex; flex-wrap: wrap; gap: calc(.5 * var(--u)); }
+.fl-onb .fl-callout[hidden] { display: none; }
