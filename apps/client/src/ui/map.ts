@@ -51,29 +51,30 @@ export class MapPanel extends Panel {
   private raf = 0;
   private relief: { res: number; at: number } = { res: 0, at: 0 };
 
+  private readonly onUp = (e: MouseEvent) => {
+    if (!this.drag) return;
+    this.canvas.classList.remove("drag");
+    this.drag = null;
+    if (!this.moved) this.click(e);
+    this.relief = { res: 0, at: 0 };
+  };
+  private readonly onMove = (e: MouseEvent) => {
+    if (!this.isOpen) return;
+    if (this.drag) {
+      const dx = e.clientX - this.drag.x, dy = e.clientY - this.drag.y;
+      if (Math.abs(dx) + Math.abs(dy) > 2) this.moved = true;
+      this.drag = { x: e.clientX, y: e.clientY };
+      const k = 1 / (this.size * 0.45);
+      this.turn(-dx * k, dy * k);
+    } else this.hover(e);
+  };
+
   constructor(game: Game) {
     super(game, "fl-q fl-map");
     this.canvas.addEventListener("mousedown", (e) => {
       this.drag = { x: e.clientX, y: e.clientY };
       this.moved = false;
       this.canvas.classList.add("drag");
-    });
-    window.addEventListener("mouseup", (e) => {
-      if (!this.drag) return;
-      this.canvas.classList.remove("drag");
-      this.drag = null;
-      if (!this.moved) this.click(e);
-      this.relief = { res: 0, at: 0 };
-    });
-    window.addEventListener("mousemove", (e) => {
-      if (!this.isOpen) return;
-      if (this.drag) {
-        const dx = e.clientX - this.drag.x, dy = e.clientY - this.drag.y;
-        if (Math.abs(dx) + Math.abs(dy) > 2) this.moved = true;
-        this.drag = { x: e.clientX, y: e.clientY };
-        const k = 1 / (this.size * 0.45);
-        this.turn(-dx * k, dy * k);
-      } else this.hover(e);
     });
   }
 
@@ -86,6 +87,8 @@ export class MapPanel extends Panel {
     this.n = [...f.north] as V;
     this.terrainKey = "";
     super.open();
+    window.addEventListener("mouseup", this.onUp);
+    window.addEventListener("mousemove", this.onMove);
     const loop = () => {
       if (!this.isOpen) return;
       this.draw();
@@ -96,6 +99,9 @@ export class MapPanel extends Panel {
 
   close(relock = true) {
     cancelAnimationFrame(this.raf);
+    window.removeEventListener("mouseup", this.onUp);
+    window.removeEventListener("mousemove", this.onMove);
+    this.drag = null;
     super.close(relock);
   }
 

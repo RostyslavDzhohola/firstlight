@@ -247,8 +247,9 @@ export class CosmeticRig {
   private anims: Anim[] = [];
   private readonly root: THREE.Object3D;
 
+  /** `root` is an avatar root; cosmetics ride its first child (the model, which bobs and leans) when there is one. */
   constructor(root: THREE.Object3D) {
-    this.root = root;
+    this.root = root.children[0] instanceof THREE.Group ? root.children[0] : root;
   }
 
   set(list: string) {

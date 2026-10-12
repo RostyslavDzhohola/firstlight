@@ -346,6 +346,11 @@ export class JournalPanel extends Panel {
 export class KeypadPanel extends Panel {
   private target = "";
   private code = "";
+  private readonly onDigit = (e: KeyboardEvent) => {
+    if (/^(Digit|Numpad)\d$/.test(e.code)) this.press(e.code.slice(-1));
+    else if (e.code === "Enter" || e.code === "NumpadEnter") this.press("OK");
+    else if (e.code === "Backspace") this.press("C");
+  };
 
   constructor(game: Game) {
     super(game, "fl-keypad");
@@ -355,6 +360,12 @@ export class KeypadPanel extends Panel {
     this.target = target;
     this.code = "";
     this.open();
+    window.addEventListener("keydown", this.onDigit);
+  }
+
+  close(relock = true) {
+    window.removeEventListener("keydown", this.onDigit);
+    super.close(relock);
   }
 
   render() {
@@ -366,13 +377,6 @@ export class KeypadPanel extends Panel {
     for (const k of ["1", "2", "3", "4", "5", "6", "7", "8", "9", "C", "0", "OK"]) {
       el("button", "", keys, k).onclick = () => this.press(k);
     }
-    const onKey = (e: KeyboardEvent) => {
-      if (!this.isOpen) return window.removeEventListener("keydown", onKey);
-      if (/^Digit\d$/.test(e.code)) this.press(e.code.slice(5));
-      else if (e.code === "Enter") this.press("OK");
-      else if (e.code === "Backspace") this.press("C");
-    };
-    window.addEventListener("keydown", onKey);
   }
 
   private press(k: string) {
