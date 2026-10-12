@@ -21,6 +21,10 @@ export const MOVE = {
   airAccel: 3,
   fallSafe: 8,
   fallLethal: 20.5,
+  /** NPC movement effects (set by world/npcs/NpcRenderer; on foot it rewrites run/sprint instead):
+   *  riding reads them through mountedSpeed. */
+  slow: 0,
+  noSprint: false,
 };
 
 const _v = new THREE.Vector3();
@@ -108,7 +112,7 @@ export class PlayerController {
     const wish = new THREE.Vector3().addScaledVector(this.camForward, mz).addScaledVector(right, mx);
     if (wish.lengthSq() > 0) wish.normalize();
     const sprint = input.down("ShiftLeft") || input.down("ShiftRight");
-    const speed = this.swimming ? MOVE.swim : this.mounted ? mountedSpeed(sprint) : sprint && mz > 0 && !aiming ? MOVE.sprint : MOVE.run;
+    const speed = this.swimming ? MOVE.swim : this.mounted ? mountedSpeed(sprint, MOVE.slow, MOVE.noSprint) : sprint && mz > 0 && !aiming ? MOVE.sprint : MOVE.run;
 
     this.dodgeCooldown = Math.max(0, this.dodgeCooldown - dt);
     if (!this.frozen && !this.mounted && input.pressed.has("KeyC") && this.dodgeCooldown <= 0 && this.onGround && !this.swimming) {

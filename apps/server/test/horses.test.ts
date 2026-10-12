@@ -8,6 +8,7 @@ import { HORSE, HORSE_WHISTLE, tooDeepToRide } from "@firstlight/shared/content/
 import { PF } from "@firstlight/shared/net/schema";
 import { env } from "../src/env.ts";
 import { HorseSystem } from "../src/world/horses/HorseSystem.ts";
+import { applyMoveEffect } from "../src/world/npc/effects.ts";
 import { pileStore } from "../src/world/piles.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 import { bot, harness, invIds, me, objAt, offPad, padAt, serverRoom, sleep, terrain, tpAndWait, until, type Bot } from "./quest-helpers.ts";
@@ -207,6 +208,17 @@ describe("riding", () => {
     const sprinted = await run(b, 14, 2.5);
     expect(sprinted.corrections).toBeGreaterThan(0);
     expect(sprinted.moved).toBeLessThan(30);
+  });
+
+  it("NPC slows hold the horse back too: chilled to half speed, a full gallop is corrected", async () => {
+    const b = await rider("chilled");
+    await summonAndMount(b);
+    const a = serverRoom(b).playerById(b.id)!;
+    applyMoveEffect(a, { kind: "slow", amount: 0.5, seconds: 8 }, Date.now());
+    const slowed = await run(b, 7.5, 2);
+    expect(slowed.corrections).toBe(0);
+    const galloped = await run(b, HORSE.sprint, 2);
+    expect(galloped.corrections).toBeGreaterThan(0);
   });
 
   it("ignores E spam: getting on and off waits HORSE.toggleCooldownMs between changes", async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HORSE, HORSE_COATS, HORSE_WHISTLE, hasWhistle, horseCoat, tooDeepToRide, whistleRefusal } from "./horse.ts";
+import { HORSE, HORSE_COATS, HORSE_WHISTLE, hasWhistle, horseCoat, rideSpeed, tooDeepToRide, whistleRefusal } from "./horse.ts";
 import { itemName, itemStack, SHOP, shopEntry, unitSellValue } from "./items.ts";
 import { WEAPON_BY_ID, WEAPON_INDEX, WEAPONS } from "./weapons.ts";
 import { PF } from "../net/schema.ts";
@@ -38,6 +38,15 @@ describe("horse rules", () => {
     const all = Object.values(PF);
     expect(new Set(all).size).toBe(all.length);
     for (const f of all) expect(Math.log2(f) % 1).toBe(0);
+  });
+
+  it("slows the horse under NPC chill/slow, and Cease-and-Desist holds it to a canter", () => {
+    expect(rideSpeed(false)).toBe(HORSE.speed);
+    expect(rideSpeed(true)).toBe(HORSE.sprint);
+    expect(rideSpeed(true, 0.5)).toBe(HORSE.sprint * 0.5);
+    expect(rideSpeed(true, 0, true)).toBe(HORSE.speed);
+    expect(rideSpeed(true, 0.2, true)).toBeCloseTo(HORSE.speed * 0.8);
+    expect(rideSpeed(true, 3)).toBe(0); // clamped
   });
 
   it("finds a whistle in either the hotbar or the backpack", () => {

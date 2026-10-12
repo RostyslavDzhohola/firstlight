@@ -3,7 +3,7 @@
 // (deep water ahead, death) so prediction never runs faster than the server allows. It never gets
 // on early: horse speed starts only once the server says so.
 
-import { HORSE, tooDeepToRide } from "@firstlight/shared/content/horse";
+import { HORSE, rideSpeed, tooDeepToRide } from "@firstlight/shared/content/horse";
 
 export class MountState {
   /** Riding as far as movement prediction and the camera are concerned. */
@@ -59,9 +59,10 @@ export function rideCamera(blend: number): { lift: number; back: number } {
   return { lift: 1.0 * blend, back: 1.8 * blend };
 }
 
-/** Move speed for the controller (m/s): horse canter / gallop when mounted. */
-export function mountedSpeed(sprint: boolean): number {
-  return sprint ? HORSE.sprint : HORSE.speed;
+/** Move speed for the controller (m/s): horse canter / gallop when mounted, under NPC slows
+ *  (MOVE.slow / MOVE.noSprint, set by the NPC renderer) exactly as the server budgets it. */
+export function mountedSpeed(sprint: boolean, slow = 0, noSprint = false): number {
+  return rideSpeed(sprint, slow, noSprint);
 }
 
 /** Should the rider slide off here? (the server applies the same rule) */

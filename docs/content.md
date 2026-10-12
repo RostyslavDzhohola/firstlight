@@ -151,7 +151,7 @@ Dunebreaker Scale 300 · cosmetics Common 30 / Uncommon 90 / Rare 250 / Legendar
 | Item | Horse Whistle, 1,500 ◎ at the Portus Exchange (gear, one per slot, sells back for 375). Carried like anything else: it drops in the death pile, whoever picks it up owns a horse |
 | Whistle (H) | Outside safe zones only (all of Portus and the 12 m pad rings refuse), with the whistle in the hotbar or backpack, not in deep water; 2 s between whistles. The horse appears 3 m to your side (a dry spot) with a corpuscle burst. One horse per player: whistling again brings the same horse over |
 | Get on / off | E (or H) within 3.5 m of your own horse. H while riding always gets off. At most one change per 0.5 s |
-| Speed | 14 m/s, Shift gallop 16 m/s (on foot: run 6, sprint 9). Heavier turns and acceleration. Jumping works; fall damage still applies |
+| Speed | 14 m/s, Shift gallop 16 m/s (on foot: run 6, sprint 9). Heavier turns and acceleration. Jumping works; fall damage still applies. NPC chill/slow scale it; Cease-and-Desist holds it to 14 |
 | From the saddle | **No attacks of any kind** (fire, melee, block, bow draw, scope are refused by the server); no dodge-roll. Tonics and Patchkits still work. Kept simple on purpose: no one-handed-sidearm exception to balance |
 | Thrown off | Any single hit of ≥ 20% of your max HP, or water deeper than 1 m (the horse won't swim; it waits on the last dry spot) |
 | Hit box | The rider can be shot in the saddle: the server lifts a mounted player's hit capsule 0.8 m (headshots land on the drawn head; shots at the horse's legs miss) |

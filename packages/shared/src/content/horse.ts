@@ -44,6 +44,15 @@ export const HORSE = {
   riderLift: 0.8,
 } as const;
 
+/**
+ * Riding speed (m/s) under NPC movement effects (server npc/effects.ts): a chill or slow scales it,
+ * Cease-and-Desist holds the horse to a canter. The client predicts with it and the server's mounted
+ * budget refills at rideSpeed(true, …) × slack, so both agree.
+ */
+export function rideSpeed(gallop: boolean, slow = 0, noSprint = false): number {
+  return (gallop && !noSprint ? HORSE.sprint : HORSE.speed) * (1 - Math.max(0, Math.min(1, slow)));
+}
+
 /** Coats: [coat, mane/tail/hooves, blanket]. A horse's coat comes from its owner (stable per account). */
 export const HORSE_COATS: readonly (readonly [number, number, number])[] = [
   [0x8a4b2a, 0x2a1a12, 0xc8473a], // chestnut, red blanket

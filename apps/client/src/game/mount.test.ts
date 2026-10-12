@@ -58,9 +58,11 @@ describe("MountState (local riding state)", () => {
 });
 
 describe("riding rules on the client", () => {
-  it("moves at the server's horse speeds", () => {
+  it("moves at the server's horse speeds, NPC slows included", () => {
     expect(mountedSpeed(false)).toBe(HORSE.speed);
     expect(mountedSpeed(true)).toBe(HORSE.sprint);
+    expect(mountedSpeed(true, 0.5)).toBe(HORSE.sprint * 0.5);
+    expect(mountedSpeed(true, 0, true)).toBe(HORSE.speed);
   });
 
   it("slides off only in water too deep to wade", () => {

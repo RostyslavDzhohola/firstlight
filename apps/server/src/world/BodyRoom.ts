@@ -6,7 +6,7 @@ import { CloseCode, Room, ServerError, type Client } from "@colyseus/core";
 import { StateView } from "@colyseus/schema";
 import { BODIES, createTerrain, isSafe, padDirs, portalNear, portalSpots, type BodyDef, type BodyId, type PortalSpot, type Terrain } from "@firstlight/shared";
 import { BACKPACK_SLOTS, HOTBAR_SLOTS, newCharacter, type CharacterData } from "@firstlight/shared/content/character";
-import { HORSE } from "@firstlight/shared/content/horse";
+import { HORSE, rideSpeed } from "@firstlight/shared/content/horse";
 import { fallDamageFraction, levelForXp, maxHp, pvpKillXp, xpAtLevel, xpToNext } from "@firstlight/shared/content/progression";
 import { WEAPON_BY_ID, WEAPON_INDEX } from "@firstlight/shared/content/weapons";
 import { NET, PHRASES, type InvItem, type YouState } from "@firstlight/shared/net/protocol";
@@ -24,7 +24,7 @@ import { dist3, type V3 } from "./geometry.ts";
 import { emitGameEvent, npcKindOf } from "./events.ts";
 import { emitPileEvent, onPileEvent, pileStore, type PileData } from "./piles.ts";
 import { SYSTEM_FACTORIES, type RoomSystem } from "./systems.ts";
-import { movementLimits } from "./npc/effects.ts";
+import { activeMoveFx, movementLimits } from "./npc/effects.ts";
 import { matchMaker } from "@colyseus/core";
 import { liveSessions } from "../auth/sessions.ts";
 import { accountLinks } from "../auth/links.ts";
@@ -451,7 +451,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     a.lastBudgetAt = now;
     // NPC slows / Cease-and-Desist (npc/effects.ts) scale the refill and can refuse the dodge burst.
     const limits = movementLimits(a, now);
-    const refill = riding ? HORSE.sprint : MOVE.maxSpeed * limits.speed;
+    const fx = activeMoveFx(a, now);
+    const refill = riding ? rideSpeed(true, fx.slow, fx.noSprint) : MOVE.maxSpeed * limits.speed;
     a.moveBudget = Math.min(riding ? HORSE.budgetCap : MOVE.budgetCap, a.moveBudget + refill * MOVE.speedSlack * elapsed);
     let dodge = 0;
     if (msg.anim === ANIM.DODGE && !riding && limits.dodge > 0 && now - a.lastDodgeAt >= MOVE.dodgeCooldownMs) {
