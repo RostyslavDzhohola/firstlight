@@ -1,10 +1,13 @@
 // What an NPC system remembers across room instances of one copy (F12 B2, copyState.ts): the boss's
-// respawn time after a kill, and spawn groups that are cleared (counting down to their respawn) or
-// part-killed (dead members stay dead until the group is cleared, as in a live room). Survivors'
-// HP is not kept: a despawned group respawns fresh in a live room too.
+// respawn time after a kill or its engaged fight (until the 30 s vacancy reset would have run), and
+// spawn groups that are cleared (counting down to their respawn) or part-killed (dead members stay
+// dead until the group is cleared, as in a live room). Survivors' HP is not kept: a despawned
+// group respawns fresh in a live room too.
 
+import type { BossFight } from "./boss.ts";
 import type { NpcSystem } from "./NpcSystem.ts";
 import type { SpawnPoint } from "./spawns.ts";
+import { NPC_TUNING } from "./tuning.ts";
 
 export const NPC_COPY_SYSTEM = "npc";
 
@@ -13,6 +16,8 @@ export interface NpcCopyState {
   /** World time of the snapshot (ms): countdowns resume minus the time the copy was empty. */
   at: number;
   boss?: { id: string; respawnAt: number };
+  /** An engaged boss fight (HP, phase, cover, credit) and when its arena emptied. */
+  fight?: BossFight;
   /** p = spawn point id, sig = its make-up (content changes don't map state onto other groups). */
   groups: { p: number; sig: string; dead?: number[]; left?: number }[];
 }
@@ -30,8 +35,9 @@ export function snapshotNpcCopy(sys: NpcSystem, now: number): NpcCopyState | nul
   }
   const b = sys.boss;
   const boss = b && b.status === "dead" && b.respawnAt > now ? { id: b.def.id, respawnAt: b.respawnAt } : undefined;
-  if (!groups.length && !boss) return null;
-  return { v: 1, at: now, groups, ...(boss ? { boss } : {}) };
+  const fight = b?.fightState(now) ?? undefined;
+  if (!groups.length && !boss && !fight) return null;
+  return { v: 1, at: now, groups, ...(boss ? { boss } : {}), ...(fight ? { fight } : {}) };
 }
 
 /** Apply a snapshot to a freshly built system (no NPCs spawned yet). */
@@ -55,5 +61,8 @@ export function restoreNpcCopy(sys: NpcSystem, s: NpcCopyState | null, now: numb
   if (b && s.boss && s.boss.id === b.def.id && s.boss.respawnAt > now) {
     b.status = "dead";
     b.respawnAt = s.boss.respawnAt;
+  } else if (b && s.fight && s.fight.id === b.def.id && now - s.fight.vacantSince < NPC_TUNING.bossResetMs) {
+    // Empty for less than the 30 s reset: the fight resumes when the boss next spawns (boss.ts).
+    b.pendingFight = s.fight;
   }
 }

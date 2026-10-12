@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Room } from "@colyseus/sdk";
 import { BODIES, createTerrain } from "@firstlight/shared";
-import { bossArena } from "@firstlight/shared/content/arenas";
+import { bossArena, walk } from "@firstlight/shared/content/arenas";
 import { NF } from "@firstlight/shared/content/npcs";
 import { BodyState, PF } from "@firstlight/shared/net/schema";
 import type { Game } from "../src/app.ts";
@@ -21,7 +21,7 @@ import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
 import { tempDir } from "./auth-helpers.ts";
 import { safeLeave, startServer, waitFor } from "./helpers.ts";
 import { adminBot, bossInfo, me, nearPad, noBodyRooms, place, serverRoom, st, type V } from "./npc-bots.ts";
-import { fakeWorld } from "./npcWorld.ts";
+import { fakeWorld, type FakeWorld } from "./npcWorld.ts";
 
 let game: Game | null = null;
 const rooms: Room[] = [];
@@ -251,4 +251,82 @@ describe("broken props outlive the room (F12 B2)", () => {
     expect(sys2.isBroken(prop.index)).toBe(true);
     expect(sys2.raycast([prop.cx + 5, prop.cy, prop.cz], [-1, 0, 0], 10)?.index ?? -1).not.toBe(prop.index);
   }, 30_000);
+});
+
+// ------------------------------------------------------------------------------------ active fights
+
+/** A ground point `a` m along the arena axis and `b` m to its side from the arena centre. */
+function arenaAt(w: FakeWorld, a: number, b = 0): V {
+  const ar = w.sys.arena!;
+  return w.world.snapToGround(walk(ar.up, ar.axis, a, ar.side, b, w.world.body.radius)) as V;
+}
+
+function runFor(w: FakeWorld, ms: number, until?: () => boolean): number {
+  for (let t = 0; t < ms; t += 50) {
+    w.step(50);
+    if (until?.()) return t + 50;
+  }
+  return -1;
+}
+
+/** Tidewrath up (copy arcadia:0) with a player at the arena centre. */
+function tidewrathUp(start?: number) {
+  NPC_TUNING.bosses = true;
+  NPC_TUNING.bossAttacks = false;
+  NPC_TUNING.bossMechanics = [];
+  const w = fakeWorld("arcadia", { copyKey: "arcadia:0", immortal: true, ...(start ? { start } : {}) });
+  const a = w.addPlayer("a", arenaAt(w, 0, 0), 8);
+  const boss = w.sys.boss!;
+  expect(runFor(w, 3000, () => !!boss.npc && !(boss.npc.state.flags & NF.INVULN))).toBeGreaterThan(0);
+  return { w, a, boss, n: boss.npc! };
+}
+
+/** Tidewrath at 11,800 / 12,000 with one Coral Pillar broken. */
+function hurtTidewrath() {
+  const t = tidewrathUp();
+  dealDamage(t.w.world.host, t.a, t.n, 1000, false); // 20% through the shell
+  expect(t.n.state.hp).toBe(11_800);
+  const coral = t.boss.cover[0]!;
+  t.boss.coverHit(coral.def.pos, "heavy", 1000);
+  expect(coral.broken).toBe(true);
+  return t;
+}
+
+describe("active boss fights outlive a quick room recreation (Codex S3)", () => {
+  it("recreated 1 s later, Tidewrath keeps its HP, broken cover and damage credit", () => {
+    const { w } = hurtTidewrath();
+    w.sys.dispose();
+    const t = tidewrathUp(w.clock.t + 1000);
+    expect(t.n.state.hp).toBe(11_800);
+    expect(t.boss.cover[0]!.broken).toBe(true);
+    expect(t.boss.engaged).toBe(true);
+    expect(t.n.damage.get("u-a")?.amount).toBe(200);
+  });
+
+  it("recreated 31 s after the arena emptied, it is reset (full HP, cover rebuilt)", () => {
+    const { w, a } = hurtTidewrath();
+    w.movePlayer(a, arenaAt(w, -150));
+    const emptied = w.clock.t;
+    runFor(w, 5000); // the room lingers a little, then goes away
+    w.sys.dispose();
+    const t = tidewrathUp(emptied + 31_000);
+    expect(t.n.state.hp).toBe(12_000);
+    expect(t.boss.cover[0]!.broken).toBe(false);
+  });
+
+  it("recreated 20 s after the arena emptied (no dispose), it resumes, then resets when 30 s are up", () => {
+    const { w, a } = hurtTidewrath();
+    w.movePlayer(a, arenaAt(w, -150));
+    const emptied = w.clock.t;
+    runFor(w, 2000); // the vacancy is checkpointed; then the process dies
+    const w2 = fakeWorld("arcadia", { copyKey: "arcadia:0", immortal: true, start: emptied + 20_000 });
+    w2.addPlayer("b", arenaAt(w2, -80), 8); // near the lair, not inside the arena
+    const boss = w2.sys.boss!;
+    expect(runFor(w2, 3000, () => !!boss.npc && !(boss.npc.state.flags & NF.INVULN))).toBeGreaterThan(0);
+    const n = boss.npc!;
+    expect(n.state.hp).toBe(11_800);
+    expect(runFor(w2, 12_000, () => n.state.hp === n.state.maxHp)).toBeGreaterThan(0);
+    expect(w2.clock.t - emptied).toBeGreaterThanOrEqual(30_000);
+    expect(w2.clock.t - emptied).toBeLessThan(31_000);
+  });
 });

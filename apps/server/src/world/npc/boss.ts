@@ -36,6 +36,25 @@ interface CoverState {
   broken: boolean;
 }
 
+/**
+ * An engaged fight as kept across room instances of the copy (persist.ts, Codex S3): it resumes
+ * if the boss comes back before the 30 s vacancy reset would have run, else the boss is fresh.
+ */
+export interface BossFight {
+  id: string;
+  /** Since when nobody has been inside the arena (the save time if someone still was). */
+  vacantSince: number;
+  /** HP as a fraction of max (max is recounted from the players present). */
+  frac: number;
+  phase: number;
+  /** Per cover index: HP and broken (1/0). */
+  cover: [number, number][];
+  /** Damage credit by account: [userId, name, amount]. */
+  damage: [string, string, number][];
+  plates: string[];
+  soakers: string[];
+}
+
 interface Mech {
   kind: "split" | "band" | "raise" | "topple";
   atk: AttackDef | null;
@@ -88,6 +107,8 @@ export class BossController {
   fighters: LivePlayer[] = [];
   /** Session id → last time that player damaged the boss. */
   private readonly recentHits = new Map<string, number>();
+  /** A fight restored from the copy state, applied when the boss next spawns (if still in time). */
+  pendingFight: BossFight | null = null;
   phase = 1;
   windowUntil = 0;
   darkUntil = 0;
@@ -186,6 +207,45 @@ export class BossController {
     this.npc = n;
     this.status = "alive";
     this.resetState(n, now);
+    const f = this.pendingFight;
+    this.pendingFight = null;
+    if (f && f.id === this.def.id && now - f.vacantSince < NPC_TUNING.bossResetMs) this.resumeFight(n, f, now);
+  }
+
+  /** The engaged fight worth keeping across room instances, or null (persist.ts). */
+  fightState(now: number): BossFight | null {
+    const n = this.npc;
+    if (this.status !== "alive" || !this.engaged || !n || n.dead) return null;
+    return {
+      id: this.def.id,
+      vacantSince: this.inArena.length > 0 ? now : (this.emptySince ?? now),
+      frac: n.state.hp / n.state.maxHp,
+      phase: this.phase,
+      cover: this.cover.map((c) => [c.hp, c.broken ? 1 : 0]),
+      damage: [...n.damage.values()].map((e) => [e.userId, e.name, e.amount]),
+      plates: [...this.plateHolders],
+      soakers: [...this.soakers],
+    };
+  }
+
+  /** Pick a kept fight back up: HP share, phase, cover, credit; the vacancy clock keeps running. */
+  private resumeFight(n: Npc, f: BossFight, now: number) {
+    n.state.hp = Math.max(1, Math.min(n.state.maxHp, Math.round(n.state.maxHp * f.frac)));
+    this.phase = Math.max(1, Math.min(3, f.phase | 0));
+    n.state.phase = this.phase;
+    f.cover.forEach(([hp, broken], i) => {
+      const c = this.cover[i];
+      if (!c) return;
+      c.hp = Math.max(0, Math.min(c.def.hp, hp));
+      c.broken = broken === 1 || c.hp <= 0;
+    });
+    for (const [userId, name, amount] of f.damage) n.damage.set(userId, { userId, name, amount, sid: "" });
+    for (const u of f.plates) this.plateHolders.add(u);
+    for (const u of f.soakers) this.soakers.add(u);
+    this.engaged = true;
+    this.emptySince = f.vacantSince;
+    this.nextAttackAt = now + 1500;
+    n.state.flags |= NF.ENGAGED;
   }
 
   private despawn() {
@@ -229,6 +289,7 @@ export class BossController {
     cancelAttack(this.sys, n);
     this.clearSummons();
     this.resetState(n, now);
+    this.sys.copyDirty = true;
     n.state.flags &= ~(NF.ENGAGED | NF.WEAK_OPEN | NF.STUNNED);
     n.pos = [this.arena.home[0], this.arena.home[1], this.arena.home[2]];
     n.facing = this.arena.homeFacing;
@@ -343,7 +404,10 @@ export class BossController {
       this.emptySince = null;
       if (!this.engaged) this.engage(n, now);
     } else if (this.engaged) {
-      this.emptySince ??= now;
+      if (this.emptySince === null) {
+        this.emptySince = now;
+        this.sys.copyDirty = true; // keep the vacancy start for a room that comes back (persist.ts)
+      }
       if (now - this.emptySince >= NPC_TUNING.bossResetMs) this.reset(now);
     }
   }
@@ -488,6 +552,7 @@ export class BossController {
     // Contribution is tracked in n.damage by the system. A hit from just outside the arena engages
     // too and counts the hitter as a fighter for RECENT_HIT_MS (HP scaling, targeting).
     if (by && amount > 0) this.recentHits.set(by.id, this.sys.world.now());
+    this.sys.copyDirty = true; // the fight's HP is worth keeping (persist.ts; saved at most once a second)
     if (!this.engaged && by && this.status === "alive") this.engage(n, this.sys.world.now());
   }
 
