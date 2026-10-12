@@ -145,21 +145,24 @@ export class GrassSystem {
     this.group.visible = this.enabled;
     const radius = s.grass.radius;
     grassUniforms.radius.value = radius;
-    this.density = s.grass.count / (Math.PI * radius * radius);
+    const density = s.grass.count / (Math.PI * radius * radius);
     this.receiveShadow = s.on.shadows && s.shadows.mode === "map";
     const cellQuads = radius > 45 ? 8 : 4;
     // Largest cell (at a face centre, quads are 2R/n wide).
     const quad = (2 * this.radiusOfBody) / this.quadsPerFace;
-    const capacity = Math.ceil(this.density * (cellQuads * quad) ** 2 * 1.1);
+    const capacity = Math.ceil(density * (cellQuads * quad) ** 2 * 1.1);
     if (s.grass.segments !== this.segments || cellQuads !== this.cellQuads || capacity > this.capacity) {
+      this.density = density;
       this.rebuildAll(s.grass.segments, cellQuads, capacity);
-    } else {
-      // Same layout: regenerate blades at the new density, keep the cells.
+      this.lastPos.set(1e9, 0, 0);
+    } else if (Math.abs(density - this.density) > 1e-6) {
+      // Same layout, new density: regenerate the blades, keep the pooled cells.
+      this.density = density;
       for (const c of this.cells.values()) this.release(c);
       this.cells.clear();
+      this.lastPos.set(1e9, 0, 0);
     }
     for (const c of [...this.cells.values(), ...this.free]) c.mesh.receiveShadow = this.receiveShadow;
-    this.lastPos.set(1e9, 0, 0);
   }
 
   private rebuildAll(segments: number, cellQuads: number, capacity: number) {

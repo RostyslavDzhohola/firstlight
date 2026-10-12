@@ -138,6 +138,10 @@ export class Game {
       this.self.root.name = "selfAvatar";
     }
     this.ctx.scene.add(this.self.root);
+    {
+      const p = this.player.pos, f = this.player.facing;
+      this.self.set(p.x, p.y, p.z, f.x, f.y, f.z, this.player.anim, 0);
+    }
     this.player.placeCamera(this.ctx.camera);
     this.applyCharsVisibility();
     const updateWorld = () => this.updateWorldForWarmup();
