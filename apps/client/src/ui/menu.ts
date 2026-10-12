@@ -5,11 +5,13 @@ import { PF } from "@firstlight/shared/net/schema";
 import type { Game } from "../game/Game.ts";
 import { showSavePrompt } from "./account.ts";
 import { getPlayToken, isDevGuest, readClaims } from "../net/auth.ts";
+import { openVoicePanel } from "../voice/index.ts";
 
 const CONTROLS = [
   ["WASD", "move"], ["Mouse", "aim"], ["Left click", "attack"], ["Right click", "aim / block / charge"],
   ["Shift", "sprint"], ["Space", "jump"], ["C", "dodge"], ["R", "reload"], ["1–4", "weapons"], ["E", "pick up"],
-  ["G then 1–6", "phrases"], ["F3", "performance"], ["Esc", "this menu"],
+  ["G (hold)", "phrase wheel"], ["V", "push to talk"], ["B", "radio"], ["Shift+Esc", "mute all voices"],
+  ["F3", "performance"], ["Esc", "this menu"],
 ];
 
 export class Menu {
@@ -62,7 +64,8 @@ export class Menu {
       b.textContent = v!;
       ctl.append(a, b);
     }
-    this.panel.append(h, note, ctl, resume, logout);
+    const voice = this.button("Voice & radio", () => openVoicePanel(), true);
+    this.panel.append(h, note, ctl, resume, voice, logout);
     if (!isDevGuest()) {
       void getPlayToken().then((t) => {
         const c = readClaims(t);

@@ -3,6 +3,7 @@
 
 import type { BodyRoom } from "./BodyRoom.ts";
 import { npcSystemFactory } from "./npc/index.ts";
+import { createVoiceSystem } from "./voice/index.ts";
 
 export interface RoomSystem {
   /** Called every simulation tick (50 ms). */
@@ -17,4 +18,4 @@ export interface RoomSystem {
 
 export type SystemFactory = (room: BodyRoom) => RoomSystem | null;
 
-export const SYSTEM_FACTORIES: SystemFactory[] = [npcSystemFactory];
+export const SYSTEM_FACTORIES: SystemFactory[] = [npcSystemFactory, createVoiceSystem];

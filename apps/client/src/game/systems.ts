@@ -3,6 +3,7 @@
 
 import type { Game } from "./Game.ts";
 import { npcClientSystem } from "../world/npcs/index.ts";
+import { createVoiceSystem } from "../voice/index.ts";
 
 export interface ClientSystem {
   update(dt: number, now: number): void;
@@ -11,4 +12,4 @@ export interface ClientSystem {
 
 export type ClientSystemFactory = (game: Game) => ClientSystem | null;
 
-export const CLIENT_SYSTEMS: ClientSystemFactory[] = [npcClientSystem];
+export const CLIENT_SYSTEMS: ClientSystemFactory[] = [npcClientSystem, createVoiceSystem];

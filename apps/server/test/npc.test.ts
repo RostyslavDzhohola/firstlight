@@ -109,8 +109,15 @@ describe("enemies and wildlife (seam 1)", () => {
       expect(nearest).toBeLessThan(NPC_TUNING.activateRadius + 30);
     }
     // The client's view holds the nearby ones only (AOI ≤ 100 m).
-    await waitFor(() => st(a).npcs?.size > 0, 4000);
-    st(a).npcs.forEach((n: any) => expect(d3([n.x, n.y, n.z], [me(a).x, me(a).y, me(a).z])).toBeLessThan(105));
+    // (Wait for the view to settle: right after the teleport it can still hold NPCs near the pad.)
+    const allNear = () => {
+      let ok = st(a).npcs?.size > 0;
+      st(a).npcs?.forEach((n: any) => {
+        if (d3([n.x, n.y, n.z], [me(a).x, me(a).y, me(a).z]) >= 105) ok = false;
+      });
+      return ok;
+    };
+    await waitFor(allNear, 6000);
   });
 
   it("an enemy notices, telegraphs, then damages a player who stays in range", async () => {
