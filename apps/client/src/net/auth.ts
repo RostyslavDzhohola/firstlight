@@ -182,7 +182,7 @@ export interface AccountInfo {
   guest: boolean;
   admin: boolean;
   titleMedal: string | null;
-  character: { level: number; xp: number; coins: number; starter: string; palette: number; body: string } | null;
+  character: { level: number; xp: number; coins: number; starter: number; palette: number; body: string } | null;
   medals: string[];
   pads: { body: string; padId: string }[];
 }

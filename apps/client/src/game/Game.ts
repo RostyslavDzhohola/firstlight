@@ -125,6 +125,11 @@ export class Game {
     let firstChoice: { starter: number; palette: number } | undefined;
     const info = !isDevGuest() && !automated ? await getAccountInfo().catch(() => null) : null;
     const needsName = !!info && !info.displayName;
+    // A saved account signing in on a new browser already has a character: no starter pick.
+    if (info?.character && !localStorage.getItem("fl.starter")) {
+      localStorage.setItem("fl.starter", String(info.character.starter));
+      localStorage.setItem("fl.palette", String(info.character.palette));
+    }
     if (!localStorage.getItem("fl.starter") && !automated) {
       hideLoading();
       firstChoice = await this.hud.characterPick({ askName: needsName ? { suggested: info!.name } : undefined });
