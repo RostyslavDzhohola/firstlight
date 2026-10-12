@@ -67,6 +67,11 @@ export class OnboardingClient implements ClientSystem {
     // Game.enterBody waits for our schema player before creating the body systems.
     const userId = (room.state as any).players?.get(room.sessionId)?.userId ?? "";
     this.progress = new OnboardingProgress(userId);
+    // CombatClient.attach clears the old room state before Game waits for our schema player.
+    // The first message often arrives during that wait, before this system has a listener.
+    this.receivedYou = game.hud.you !== null;
+    this.onboarding = game.hud.you?.onboarding;
+    if (this.receivedYou && !this.onboarding) this.progress.end();
     room.onMessage("you", (m: YouState) => {
       this.receivedYou = true;
       this.onboarding = m.onboarding;
