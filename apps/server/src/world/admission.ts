@@ -4,7 +4,7 @@
 import type { BodyId } from "@firstlight/shared";
 import type { CharacterData } from "@firstlight/shared/content/character";
 import type { Identity } from "../auth/identity.ts";
-import { characterRepo } from "./characters.ts";
+import { characterRepo, withTx } from "./characters.ts";
 import { hub } from "./hub.ts";
 
 /** Where brand-new characters (and rebirths) start. */
@@ -36,3 +36,35 @@ export function travelRedirect(identity: Identity, body: BodyId, now: number): B
   const fighting = !!live && !live.dead && now < live.combatUntil;
   return ticketFor(ch, body, now) && !fighting ? null : ch.body;
 }
+
+/**
+ * Accounts whose last change couldn't be saved (a death, F12 re-review S5). They aren't admitted
+ * again until a storage health check for the account passes: its character row is read and written
+ * back in a transaction. Otherwise a player whose saves keep failing would die, be sent back,
+ * rejoin alive and die again.
+ */
+const recovering = new Set<string>();
+
+export const storageRecovery = {
+  mark(userId: string): void {
+    recovering.add(userId);
+  },
+  /** May the account play? True unless recovering and the health check still fails. */
+  ok(userId: string): boolean {
+    if (!recovering.has(userId)) return true;
+    try {
+      withTx(() => {
+        const c = characterRepo.current.load(userId);
+        if (c) characterRepo.current.save(userId, c);
+      });
+    } catch {
+      return false;
+    }
+    recovering.delete(userId);
+    return true;
+  },
+  clear(): void {
+    recovering.clear();
+  },
+};
+

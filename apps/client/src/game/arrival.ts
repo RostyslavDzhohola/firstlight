@@ -7,10 +7,11 @@
 import { CLOSE } from "@firstlight/shared/net/social";
 
 /** What to do when our room closes without us leaving it. */
-export type CloseAction = "ignore" | "removed" | "rejoin" | "rejoin-fresh";
+export type CloseAction = "ignore" | "removed" | "rejoin" | "rejoin-fresh" | "storage";
 
 export function closeAction(code: number): CloseAction {
   if (code === CLOSE.LOGGED_OUT) return "ignore"; // the logged-out screen is up
+  if (code === CLOSE.STORAGE) return "storage"; // saving failed: rejoin later, spaced out (StorageBackoff)
   if (code === CLOSE.KICKED || code === CLOSE.BANNED || code === CLOSE.ELSEWHERE) return "removed";
   if (code === CLOSE.MERGED) return "rejoin-fresh"; // saved/signed in: rejoin with a fresh token
   return "rejoin"; // network drop, server restart, anything else
@@ -79,3 +80,27 @@ export function waitFor<T>(
     tick();
   });
 }
+
+/**
+ * Rejoining after "saving failed" closes (CLOSE.STORAGE), spaced out and bounded. The count
+ * survives successful joins (a join that fails to save again must not restart the schedule) and
+ * only forgets closes older than the window.
+ */
+export class StorageBackoff {
+  private times: number[] = [];
+
+  constructor(
+    readonly max = 3,
+    readonly windowMs = 10 * 60_000,
+    readonly baseMs = 5_000,
+  ) {}
+
+  /** A storage close happened at `now`: the delay before rejoining, or null to stop and explain. */
+  next(now: number): number | null {
+    this.times = this.times.filter((t) => now - t < this.windowMs);
+    this.times.push(now);
+    if (this.times.length > this.max) return null;
+    return this.baseMs * 2 ** (this.times.length - 1);
+  }
+}
+

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLOSE } from "@firstlight/shared/net/social";
-import { ArrivalWatch, closeAction, ConnectionLost, waitFor } from "./arrival.ts";
+import { ArrivalWatch, closeAction, ConnectionLost, StorageBackoff, waitFor } from "./arrival.ts";
 
 describe("closeAction", () => {
   it("rejoins after unexpected closes, stops for removals, stays out after logout", () => {
@@ -12,6 +12,28 @@ describe("closeAction", () => {
     expect(closeAction(CLOSE.BANNED)).toBe("removed");
     expect(closeAction(CLOSE.ELSEWHERE)).toBe("removed");
     expect(closeAction(CLOSE.LOGGED_OUT)).toBe("ignore");
+    expect(closeAction(CLOSE.STORAGE)).toBe("storage");
+  });
+});
+
+describe("StorageBackoff (saving failed: F12 re-review S5)", () => {
+  it("spaces rejoins out and gives up after a few closes, however many joins succeeded in between", () => {
+    const b = new StorageBackoff();
+    const t0 = 1_000_000;
+    expect(b.next(t0)).toBe(5_000);
+    // (a successful join here doesn't reset anything)
+    expect(b.next(t0 + 30_000)).toBe(10_000);
+    expect(b.next(t0 + 60_000)).toBe(20_000);
+    expect(b.next(t0 + 90_000)).toBeNull(); // stop: show the notice
+  });
+
+  it("forgets closes older than its window", () => {
+    const b = new StorageBackoff();
+    const t0 = 1_000_000;
+    b.next(t0);
+    b.next(t0 + 1000);
+    b.next(t0 + 2000);
+    expect(b.next(t0 + 11 * 60_000)).toBe(5_000);
   });
 });
 

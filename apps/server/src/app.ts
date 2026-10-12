@@ -9,7 +9,7 @@ import type { TokenVerifier } from "./auth/identity.ts";
 import { directRequestIp } from "./auth/ip.ts";
 import { BodyRoom } from "./world/BodyRoom.ts";
 import { isBodyId, onlineCount, play, type MatchmakingLimits } from "./world/matchmaking.ts";
-import { identityCheck, travelRedirect } from "./world/admission.ts";
+import { identityCheck, storageRecovery, travelRedirect } from "./world/admission.ts";
 import { pendingSeats } from "./world/reservations.ts";
 import { PROTOCOL_VERSION } from "@firstlight/shared/net/protocol";
 import { timingSafeEqual } from "node:crypto";
@@ -154,6 +154,11 @@ export async function createGame(opts: GameOptions): Promise<Game> {
       }
       fromIp.push(now);
       ipCalls.set(key, fromIp);
+    }
+    // A change of this account couldn't be saved: not back in until storage works (F12 re-review S5).
+    if (!storageRecovery.ok(identity.userId)) {
+      res.status(503).json({ ok: false, error: "storage" });
+      return;
     }
     // Banned (also covers dev identities) or recently kicked by an admin.
     const refusal = identity.loadtest ? null : playRefusal(identity.userId);

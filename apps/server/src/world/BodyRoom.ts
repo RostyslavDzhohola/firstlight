@@ -23,7 +23,7 @@ import { dist3, type V3 } from "./geometry.ts";
 import { emitGameEvent, npcKindOf } from "./events.ts";
 import { emitPileEvent, onPileEvent, pileStore, type PileData } from "./piles.ts";
 import { SYSTEM_FACTORIES, type RoomSystem } from "./systems.ts";
-import { identityCheck, ticketFor, travelRedirect } from "./admission.ts";
+import { identityCheck, storageRecovery, ticketFor, travelRedirect } from "./admission.ts";
 import { pendingSeats } from "./reservations.ts";
 import { seatRefusal } from "../social/moderation.ts";
 import { groundMotion, heightAboveSupport, motionFields, moveLimits, settle, startFall, validateMove, MOVE, type MoveWorld } from "./movement.ts";
@@ -446,6 +446,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (!pendingSeats.consume(sessionId, auth.userId, now)) return "seat expired";
     if (!auth.loadtest && seatRefusal(auth.userId, now)) return "not allowed";
     if (auth.account && identityCheck.current(auth.userId)) return "sign in again";
+    if (!storageRecovery.ok(auth.userId)) return "storage";
     if (travelRedirect(auth, this.bodyDef.id, now)) return "travel";
     return null;
   }
@@ -934,8 +935,10 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     } catch {
       // The death couldn't be recorded (no pile, inventory still saved): drop this actor without
       // saving and let the client rejoin from the last good save rather than lose or copy items.
+      // Until saving works again the account stays out (no die-rejoin loop; F12 re-review S5).
+      storageRecovery.mark(victim.identity.userId);
       hub.release(victim.identity.userId, victim);
-      this.retire(victim, CloseCode.WITH_ERROR, "server hiccup, rejoining");
+      this.retire(victim, CLOSE.STORAGE, "saving failed, rejoin later");
       return;
     }
     for (const e of events) e();

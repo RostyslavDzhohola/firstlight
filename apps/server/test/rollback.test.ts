@@ -8,7 +8,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { matchMaker } from "@colyseus/core";
 import type { Room } from "@colyseus/sdk";
 import { BODIES, padDirs } from "@firstlight/shared";
-import type { InvItem } from "@firstlight/shared/net/protocol";
+import { PROTOCOL_VERSION, type InvItem } from "@firstlight/shared/net/protocol";
+import { CLOSE } from "@firstlight/shared/net/social";
 import type { Game } from "../src/app.ts";
 import { openGameDb, type Db } from "../src/db/index.ts";
 import type { BodyRoom } from "../src/world/BodyRoom.ts";
@@ -122,10 +123,35 @@ describe("a failed save undoes the room's changes (F12 B6)", () => {
     failing = true;
     r.send("admin", { cmd: "damage", args: { amount: 10_000 } });
     await waitFor(() => code !== 0, 3000);
-    expect(code).toBe(4002); // CloseCode.WITH_ERROR: the client rejoins
+    expect(code).toBe(CLOSE.STORAGE); // the client backs off and rejoins later
     expect(pilesHere()).toHaveLength(0);
     failing = false;
     const back = await joinAs(game, "unlucky", "arcadia", {}, "admin");
+    rooms.push(back);
+    await waitFor(() => !!me(back));
+    expect(me(back).hp).toBeGreaterThan(0);
+    expect(count(back, "axe")).toBe(1);
+  });
+
+  it("while saving keeps failing, the account isn't admitted again (no die-rejoin loop); it is once storage recovers (F12 re-review S5)", async () => {
+    const r = await setup("stuck");
+    let code = 0;
+    r.onLeave((c) => (code = c));
+    failing = true;
+    r.send("admin", { cmd: "damage", args: { amount: 10_000 } });
+    await waitFor(() => code === CLOSE.STORAGE, 3000);
+    // The failure stays on: /api/play refuses with a clear reason, a seat reserved before is refused too.
+    for (let i = 0; i < 3; i++) {
+      const res = await fetch(`http://127.0.0.1:${game.port}/api/play`, {
+        method: "POST",
+        headers: { Authorization: "Bearer dev:stuck:stuck:admin", "Content-Type": "application/json" },
+        body: JSON.stringify({ body: "arcadia", v: PROTOCOL_VERSION }),
+      });
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({ ok: false, error: "storage" });
+    }
+    failing = false;
+    const back = await joinAs(game, "stuck", "arcadia", {}, "admin");
     rooms.push(back);
     await waitFor(() => !!me(back));
     expect(me(back).hp).toBeGreaterThan(0);

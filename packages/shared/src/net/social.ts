@@ -17,6 +17,8 @@ export const CLOSE = {
   LOGGED_OUT: 4103,
   /** Kicked by an admin (may come back after a short cooldown). */
   KICKED: 4104,
+  /** Saving failed (e.g. a death couldn't be recorded): rejoin later, from the last good save. */
+  STORAGE: 4105,
 } as const;
 
 export const SOCIAL = {

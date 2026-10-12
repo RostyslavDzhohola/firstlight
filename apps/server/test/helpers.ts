@@ -4,6 +4,7 @@ import { Client, type Room } from "@colyseus/sdk";
 import { PROTOCOL_VERSION, type PlayResponse } from "@firstlight/shared/net/protocol";
 import { createGame, type Game } from "../src/app.ts";
 import { chainVerifiers, devVerifier } from "../src/auth/identity.ts";
+import { storageRecovery } from "../src/world/admission.ts";
 import { characterRepo, MemoryCharacterRepo } from "../src/world/characters.ts";
 import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
 import { MemoryPileStore, pileStore } from "../src/world/piles.ts";
@@ -15,6 +16,7 @@ import { newCharacter } from "@firstlight/shared/content/character";
 
 export async function startServer(limits: Partial<{ maxClients: number; soloFillLimit: number; maxCopiesPerBody: number; globalCap: number }> = {}): Promise<Game> {
   characterRepo.current = new MemoryCharacterRepo();
+  storageRecovery.clear();
   pileStore.current = new MemoryPileStore();
   progressStore.current = new MemoryProgressStore();
   copyStateStore.current = new MemoryCopyStateStore();
