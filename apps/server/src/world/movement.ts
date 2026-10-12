@@ -4,7 +4,8 @@
 // - Distance: a budget refilled at sprint speed (swim speed in the water) plus slack, banked up to
 //   `budgetCap`. A dodge or a shove adds a one-off bonus that expires. The per-packet tolerance is
 //   charged (the budget may dip below zero), so it can't be repeated into extra speed.
-//   Downward radial motion is gravity's (bounded by the ground), not the run budget's.
+//   Only ground covered is charged: the client walks up any slope at full speed and snaps onto it,
+//   so radial motion is the height rules' business (ground, envelope), not the run budget's.
 // - Height: off the ground, the body must follow a ballistic envelope from its last grounded
 //   position (jump speed, gravity, generous slack). Hovering or climbing in small steps fails as
 //   soon as the envelope drops below it, and `settle` pulls such bodies (or silent ones) down.
@@ -138,8 +139,11 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
 
   const dx = m.x - a.lastX, dy = m.y - a.lastY, dz = m.z - a.lastZ;
   const dist = Math.hypot(dx, dy, dz);
+  // The budget pays for ground covered (the tangential part), like the client, which moves along
+  // its tangent plane and then snaps onto the terrain or a prop top at any slope. Height is the
+  // envelope's business: supported climbing follows the ground, airborne lift is bounded above.
   const radial = len - Math.hypot(a.lastX, a.lastY, a.lastZ);
-  const charged = radial < 0 ? Math.sqrt(Math.max(0, dist * dist - radial * radial)) : dist;
+  const charged = Math.sqrt(Math.max(0, dist * dist - radial * radial));
   if (charged > a.moveBudget + a.moveBonus + MOVE.stepTolerance) return { ok: false, reason: "speed" };
 
   // Allowed: spend the expiring bonus first, then the budget (which may dip by the tolerance).

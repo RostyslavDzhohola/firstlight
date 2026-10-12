@@ -10,6 +10,7 @@ import type { BodyRoom } from "../src/world/BodyRoom.ts";
 import { dealDamage } from "../src/world/combat.ts";
 import { DestructionSystem } from "../src/world/destruction.ts";
 import { isSafe, type Breakable } from "@firstlight/shared";
+import type { BodyId } from "@firstlight/shared";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 
 let game: Game;
@@ -67,20 +68,6 @@ async function joinOutside(name: string, at?: V3): Promise<{ r: Room; dir: V3; t
   await sleep(100);
   corrections.n = 0;
   return { r, dir: norm([me(r).x, me(r).y, me(r).z]), t: tangent(norm([me(r).x, me(r).y, me(r).z])), seq: { n: 10 }, corrections };
-}
-
-/** Step along the ground so the 3D distance (what the server charges) is `metres`. */
-function groundStep(from: V3, t: V3, metres: number): V3 {
-  const a = groundR(from);
-  let s = metres;
-  for (let i = 0; i < 4; i++) {
-    const n = walk(from, t, s);
-    const b = groundR(n);
-    const chord = Math.hypot(n[0] * b - from[0] * a, n[1] * b - from[1] * a, n[2] * b - from[2] * a);
-    if (chord < 1e-6) break;
-    s *= metres / chord;
-  }
-  return walk(from, t, s);
 }
 
 function send(r: Room, seq: { n: number }, dir: V3, radius: number, anim = 1, face: V3 = [0, 0, 1]) {
@@ -148,7 +135,7 @@ describe("movement budget", () => {
     while (Date.now() - t0 < 5000) {
       await sleep(20);
       const now = Date.now();
-      d = groundStep(d, fast.t, 12 * ((now - last) / 1000));
+      d = walk(d, fast.t, 12 * ((now - last) / 1000));
       last = now;
       send(fast.r, fast.seq, d, groundR(d), 3);
       if (fast.corrections.n) break;
@@ -162,7 +149,7 @@ describe("movement budget", () => {
     while (Date.now() - t1 < 3000) {
       await sleep(25);
       const now = Date.now();
-      d = groundStep(d, ok.t, 9 * ((now - last) / 1000));
+      d = walk(d, ok.t, 9 * ((now - last) / 1000));
       last = now;
       send(ok.r, ok.seq, d, groundR(d), 3);
     }
@@ -180,13 +167,13 @@ describe("knockback (F12 Opus nit)", () => {
     const actor = room.actors.get(k.r.sessionId)!;
     await sleep(400); // full bank
     // Spend the bank (3.4 m at once), then take a strength-4 shove (6 m allowance) and slide 6 m.
-    let d = groundStep(k.dir, k.t, 3.4);
+    let d = walk(k.dir, k.t, 3.4);
     send(k.r, k.seq, d, groundR(d), 3);
     await sleep(20);
     dealDamage(room.host, null, actor, 1, false, [-k.t[0], -k.t[1], -k.t[2]], 4);
     for (let i = 0; i < 3; i++) {
       await sleep(50);
-      d = groundStep(d, k.t, 2);
+      d = walk(d, k.t, 2);
       send(k.r, k.seq, d, groundR(d), 2);
     }
     await sleep(150);
@@ -374,5 +361,80 @@ describe("standing on props (F12 client review should-fix 4)", () => {
     await sleep(150);
     expect(k.corrections.n).toBe(0);
   });
+});
+
+describe("sprinting over real terrain like the client (F12 Codex re-review S1)", () => {
+  /**
+   * The client's ground movement (PlayerController): each 60 Hz frame moves `speed`/60 m along the
+   * tangent plane, then snaps onto the terrain (uphill and down); inputs go out every third frame.
+   */
+  async function sprint(body: BodyId, name: string): Promise<{ corrections: number; climbed: number }> {
+    const def = BODIES[body];
+    const tr = createTerrain(def);
+    const gR = (d: readonly number[]) => def.radius + tr.groundHeight(d[0]!, d[1]!, d[2]!);
+    const r = await joinAs(game, name, body, {}, "admin");
+    rooms.push(r);
+    await waitFor(() => !!me(r));
+    const sys = (matchMaker.getLocalRoomById(r.roomId) as unknown as BodyRoom).systems.find((x) => x instanceof DestructionSystem) as DestructionSystem;
+    // A dry, prop-free 80 m line from 20 m off the main pad, picking the bearing with the most climb.
+    const pad = padDirs(def)[0]! as V3;
+    let best: { start: V3; t: V3; climb: number } | null = null;
+    for (let k = 0; k < 24; k++) {
+      const a = (k / 24) * Math.PI * 2;
+      const t0 = tangent(pad);
+      const s0 = norm([pad[1] * t0[2] - pad[2] * t0[1], pad[2] * t0[0] - pad[0] * t0[2], pad[0] * t0[1] - pad[1] * t0[0]]);
+      const t: V3 = norm([t0[0] * Math.cos(a) + s0[0] * Math.sin(a), t0[1] * Math.cos(a) + s0[1] * Math.sin(a), t0[2] * Math.cos(a) + s0[2] * Math.sin(a)]);
+      const start = walk(pad, t, 20);
+      let ok = true, climb = 0, prev = gR(start);
+      for (let m = 0; m <= 80 && ok; m += 1) {
+        const d = walk(start, t, m);
+        const g = tr.groundHeight(d[0], d[1], d[2]);
+        if (g < def.waterLevel + 0.5) ok = false;
+        const p: V3 = [d[0] * gR(d), d[1] * gR(d), d[2] * gR(d)];
+        if (sys.list.some((b) => Math.hypot(b.px - p[0], b.py - p[1], b.pz - p[2]) < b.foot + 1.5)) ok = false;
+        climb += Math.max(0, gR(d) - prev);
+        prev = gR(d);
+      }
+      if (ok && (!best || climb > best.climb)) best = { start, t, climb };
+    }
+    if (!best) throw new Error(`no dry, clear line on ${body}`);
+    const p0 = best.start;
+    r.send("admin", { cmd: "teleport", args: { x: p0[0] * gR(p0), y: p0[1] * gR(p0), z: p0[2] * gR(p0) } });
+    await waitFor(() => Math.hypot(me(r).x - p0[0] * gR(p0), me(r).y - p0[1] * gR(p0), me(r).z - p0[2] * gR(p0)) < 0.5);
+    await sleep(200);
+    let corrections = 0;
+    r.onMessage("correct", () => corrections++);
+    let pos: V3 = [p0[0] * gR(p0), p0[1] * gR(p0), p0[2] * gR(p0)];
+    let dir = best.t;
+    let seq = 1000;
+    let last = Date.now();
+    const t0 = last;
+    while (Date.now() - t0 < 8000) {
+      await sleep(50);
+      const now = Date.now();
+      const frames = Math.max(1, Math.round(((now - last) / 1000) * 60));
+      last = now;
+      for (let f = 0; f < frames; f++) {
+        const up = norm(pos);
+        const k = dir[0] * up[0] + dir[1] * up[1] + dir[2] * up[2];
+        dir = norm([dir[0] - k * up[0], dir[1] - k * up[1], dir[2] - k * up[2]]);
+        const moved: V3 = [pos[0] + dir[0] * (9 / 60), pos[1] + dir[1] * (9 / 60), pos[2] + dir[2] * (9 / 60)];
+        const nu = norm(moved);
+        const g = gR(nu);
+        pos = [nu[0] * g, nu[1] * g, nu[2] * g];
+      }
+      r.send("input", { seq: ++seq, x: pos[0], y: pos[1], z: pos[2], fx: dir[0], fy: dir[1], fz: dir[2], anim: 3, t: now });
+    }
+    await sleep(200);
+    return { corrections, climbed: best.climb };
+  }
+
+  for (const body of ["arcadia", "hollowmere", "meridian"] as const) {
+    it(`${body}: a 9 m/s sprint up and down hills is never corrected`, async () => {
+      const r = await sprint(body, `hill_${body}`);
+      expect(r.climbed).toBeGreaterThan(1);
+      expect(r.corrections).toBe(0);
+    });
+  }
 });
 
