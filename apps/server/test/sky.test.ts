@@ -119,6 +119,8 @@ describe("sky (seam 1)", () => {
     expect(s.weather).toBe(def.sky.weather);
     expect(s.dayHold).toBe(def.sky.dayT);
     expect(s.dayT).toBe(def.sky.dayT);
+    // Previous-build clients ignore dayHold and use dayOffset: they start the scene at its time too.
+    expect(dayT("arcadia", s.serverTime, s.dayOffset)).toBeCloseTo(def.sky.dayT, 9);
     expect(s.nextChangeAt - s.serverTime).toBe(30 * 60_000);
   });
 
@@ -215,6 +217,8 @@ describe("SkySystem admin time of day", () => {
     sys.onAdmin(ADMIN, "sky", { dayT: 0.82, hold: true, minutes: 2 });
     expect(sent[0]!.dayT).toBe(0.82);
     expect(sent[0]!.dayHold).toBe(0.82);
+    // A client from before dayHold reads the clock through dayOffset: it starts at the held time.
+    expect(dayT("arcadia", sent[0]!.serverTime, sent[0]!.dayOffset)).toBeCloseTo(0.82, 9);
     for (let i = 0; i < 1200; i++) step(50); // 60 s
     expect(sent).toHaveLength(1);
     expect(sys.state().dayT).toBe(0.82);

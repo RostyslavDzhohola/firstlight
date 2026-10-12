@@ -95,9 +95,10 @@ export class SkySystem implements RoomSystem {
     const t = finite(args.dayT);
     if (t !== undefined) {
       const want = t - Math.floor(t);
-      // Hold: freeze the time of day. Otherwise shift the clock so the copy is at that time now.
+      // Shift the clock so the copy is at that time now; `hold` also freezes it there. The offset is
+      // set for a hold too, so a client from before dayHold starts at the requested time.
       this.dayHold = args.hold === true ? want : null;
-      this.dayOffset = args.hold === true ? 0 : want - dayAt(this.body, now);
+      this.dayOffset = want - dayAt(this.body, now);
       this.dayUntil = until;
     }
     const s = this.state(now);
