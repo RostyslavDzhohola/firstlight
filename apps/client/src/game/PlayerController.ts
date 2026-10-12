@@ -53,6 +53,8 @@ export class PlayerController {
   mounted = false;
   /** 0 → 1 riding camera blend (HorseClient). */
   rideBlend = 0;
+  /** Riding or just off the horse (HorseClient): weapons stay lowered (CombatClient), as on the server. */
+  saddleLocked = false;
 
   constructor(private terrain: Terrain, private waterLevel: number) {}
 

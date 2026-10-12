@@ -13,6 +13,8 @@ export class MountState {
   private slidOff = false;
   private serverMounted = false;
   private lastAsk = -Infinity;
+  /** Seconds since we last rode (Infinity = never). */
+  private sinceOff = Infinity;
 
   /** Feed the server's flag every frame. */
   sync(serverMounted: boolean) {
@@ -41,7 +43,14 @@ export class MountState {
     return this.slidOff;
   }
 
+  /** No weapons, guard, draw or scope: riding, or off for less than the server's dismount grace
+   *  (it refuses attacks while it still budgets horse speed: HORSE.dismountGraceMs). */
+  get weaponsLocked(): boolean {
+    return this.riding || this.sinceOff * 1000 < HORSE.dismountGraceMs;
+  }
+
   step(dt: number) {
+    this.sinceOff = this.riding ? 0 : this.sinceOff + dt;
     const target = this.riding ? 1 : 0;
     const k = Math.min(1, dt * 3);
     this.blend += (target - this.blend) * k;

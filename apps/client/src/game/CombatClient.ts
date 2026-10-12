@@ -4,6 +4,8 @@
 import * as THREE from "three/webgpu";
 import { isBlocked, partyState } from "../social/store.ts";
 import { HORSE_WHISTLE } from "@firstlight/shared/content/horse";
+import { flags } from "../config.ts";
+import { horsesEnabled } from "./mount.ts";
 import { WEAPONS, WEAPON_BY_ID, type WeaponDef } from "@firstlight/shared/content/weapons";
 import { PHRASES } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
@@ -163,9 +165,14 @@ export class CombatClient {
     return { def, tier: item?.tier ?? 1 };
   }
 
+  /** The whistle in hand works like H (the server explains a refusal, safe zones included). */
+  private whistle() {
+    if (horsesEnabled(this.game.hud.you, flags.has("nohorses"))) this.game.net.room?.send("horse", { action: "whistle" });
+  }
+
   aiming(): boolean {
     const { def } = this.currentWeapon();
-    return this.game.input.rmb && def.delivery !== "melee" && !this.game.player.mounted;
+    return this.game.input.rmb && def.delivery !== "melee" && !this.game.player.saddleLocked;
   }
 
   update(dt: number, now: number) {
@@ -206,9 +213,9 @@ export class CombatClient {
     const rmb = input.rmb;
     const cam = g.ctx.camera;
 
-    if (g.player.mounted) {
-      // No weapons from the saddle (horses; the server refuses fire/melee too): lower any guard,
-      // scope or draw, and say why when the player clicks.
+    if (g.player.saddleLocked) {
+      // No weapons from the saddle, or just off it (horses; the server refuses them too): lower any
+      // guard, scope or draw. Tonics and Patchkits still work, and the whistle in hand gets you off.
       if (this.blocking) room.send("block", { on: false });
       if (this.scoped) room.send("scope", { on: false });
       if (this.wasRmb) room.send("charge", { on: false });
@@ -218,7 +225,10 @@ export class CombatClient {
         cam.fov += (this.baseFov - cam.fov) * Math.min(1, dt * 14);
         cam.updateProjectionMatrix();
       }
-      if (input.lmbPressed) g.hud.toast("No weapons from the saddle: E to get off", "warn");
+      if (!input.lmbPressed || g.photo?.active) return;
+      if (def.delivery === "heal") room.send("use", { slot: g.hud.you?.selected ?? 0 });
+      else if (def.id === HORSE_WHISTLE) this.whistle();
+      else if (g.player.mounted) g.hud.toast("No weapons from the saddle: E to get off", "warn");
       return;
     }
 
@@ -267,8 +277,7 @@ export class CombatClient {
     // Left mouse: attack.
     if (!input.lmb && !input.lmbPressed) return;
     if (def.id === HORSE_WHISTLE) {
-      // The whistle in hand works like H (the server explains a refusal, safe zones included).
-      if (input.lmbPressed && g.hud.you?.horses) room.send("horse", { action: "whistle" });
+      if (input.lmbPressed) this.whistle();
       return;
     }
     if (meState && meState.flags & PF.SAFE) {

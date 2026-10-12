@@ -40,6 +40,19 @@ describe("MountState (local riding state)", () => {
     expect(m.dismountDue(1e6)).toBe(false);
   });
 
+  it("keeps weapons lowered while riding and for the server's dismount grace afterwards", () => {
+    const m = new MountState();
+    expect(m.weaponsLocked).toBe(false); // never rode
+    m.sync(true);
+    m.step(1 / 60);
+    expect(m.weaponsLocked).toBe(true);
+    m.sync(false);
+    m.step(HORSE.dismountGraceMs / 2000);
+    expect(m.weaponsLocked).toBe(true);
+    m.step(HORSE.dismountGraceMs / 1000);
+    expect(m.weaponsLocked).toBe(false);
+  });
+
   it("eases the camera blend in and out", () => {
     const m = new MountState();
     m.sync(true);

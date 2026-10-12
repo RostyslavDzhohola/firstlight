@@ -74,6 +74,7 @@ export class HorseClient {
     if (this.mount.dismountDue(performance.now())) room.send("horse", { action: "dismount" });
     this.mount.step(dt);
     g.player.mounted = this.mount.riding;
+    g.player.saddleLocked = this.mount.weaponsLocked;
     g.player.rideBlend = this.mount.blend;
 
     const visible = g.ctx.settings.on.chars;
@@ -185,6 +186,7 @@ export class HorseClient {
     for (const s of this.shown.values()) s.view.dispose();
     this.shown.clear();
     this.game.player.mounted = false;
+    this.game.player.saddleLocked = false;
     this.game.player.rideBlend = 0;
     if (current === this) current = null;
   }
