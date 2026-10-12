@@ -7,6 +7,7 @@ import type { NpcState } from "@firstlight/shared/net/schema";
 import type { BodyRoom } from "../BodyRoom.ts";
 import type { NpcActor, PlayerActor } from "../actors.ts";
 import type { CombatHost } from "../combat.ts";
+import { withTx } from "../characters.ts";
 import type { V3 } from "../geometry.ts";
 
 export interface NpcWorld {
@@ -23,7 +24,12 @@ export interface NpcWorld {
   newNpcState(): NpcState;
   grantXp(p: PlayerActor, amount: number): void;
   giveItem(p: PlayerActor, item: InvItem): boolean;
-  createPile(owner: PlayerActor, items: InvItem[], coins: number, at: V3): void;
+  /** Create a loot pile; with `deferred`, pile events are queued until after the transaction. */
+  createPile(owner: PlayerActor, items: InvItem[], coins: number, at: V3, deferred?: (() => void)[]): void;
+  /** Character + pile writes atomically (D26). */
+  withTx<T>(fn: () => T): T;
+  /** Ground point under a position (water surface for swimmers). */
+  snapToGround(p: readonly number[]): V3;
   send(p: PlayerActor, type: string, msg: unknown): void;
   broadcast(type: string, msg: unknown): void;
   onMessage(type: string, handler: (sessionId: string, msg: unknown) => void): void;
@@ -44,9 +50,11 @@ export function roomWorld(room: BodyRoom): NpcWorld {
     newNpcState: () => room.newNpcState(),
     grantXp: (p, amount) => room.grantXp(p, amount),
     giveItem: (p, it) => room.giveItem(p, it),
-    createPile: (owner, items, coins, at) => {
-      room.createPile(owner, items, coins, at);
+    createPile: (owner, items, coins, at, deferred) => {
+      room.createPile(owner, items, coins, at, deferred);
     },
+    withTx: (fn) => withTx(fn),
+    snapToGround: (p) => room.snapToGround(p),
     send: (p, type, msg) => {
       if (room.actors.get(p.id) === p) p.client.send(type, msg);
     },

@@ -86,6 +86,13 @@ interface RayTargetHit {
   weak: boolean;
 }
 
+/** Weak-point multiplier: the NPC's own (bosses) or the weapon's headshot multiplier. */
+function weakMult(hit: RayTargetHit, tier: TierStats): number {
+  if (!hit.weak) return 1;
+  if (hit.actor.kind === "npc" && hit.actor.weakMult !== undefined) return hit.actor.weakMult;
+  return tier.headMult ?? 1.5;
+}
+
 /** Nearest actor hit by a ray, using rewound positions, ignoring `ignore`. */
 function raycastActors(host: CombatHost, o: V3, d: V3, maxT: number, ignore: Set<string>, rewindMs: number): RayTargetHit | null {
   let best: RayTargetHit | null = null;
@@ -94,7 +101,11 @@ function raycastActors(host: CombatHost, o: V3, d: V3, maxT: number, ignore: Set
     if (ignore.has(a.id) || !canHurt(null, a, now)) return;
     const feet = positionAgo(a, now, rewindMs);
     const hit = rayCapsule(o, d, maxT, feet, r, h);
-    if (hit && (!best || hit.t < best.t)) best = { actor: a, t: hit.t, weak: a.kind === "player" ? hit.heightAboveFeet >= HEAD_FROM : hit.heightAboveFeet >= h * 0.8 };
+    if (hit && (!best || hit.t < best.t)) {
+      // NPCs with weak-point volumes (bosses) decide for themselves where the weak spot is.
+      const weak = a.kind === "player" ? hit.heightAboveFeet >= HEAD_FROM : a.weakPoint ? a.weakPoint([o[0] + d[0] * hit.t, o[1] + d[1] * hit.t, o[2] + d[2] * hit.t]) : hit.heightAboveFeet >= h * 0.8;
+      best = { actor: a, t: hit.t, weak };
+    }
   };
   for (const p of host.players()) if (!p.dead) test(p, PLAYER_RADIUS, PLAYER_HEIGHT);
   for (const n of host.npcs()) if (n.state.hp > 0) test(n, n.radius, n.height);
@@ -292,7 +303,7 @@ function hitscan(host: CombatHost, p: PlayerActor, o: V3, d: V3, maxRange: numbe
     return terrainT === Infinity ? null : terrainT;
   }
   const f = falloff(hit.t, def.range, def.falloffTo, def.falloffMin);
-  const mult = hit.weak ? (tier.headMult ?? 1.5) : 1;
+  const mult = weakMult(hit, tier);
   dealDamage(host, p, hit.actor, baseDamage * f * mult, hit.weak, actorFacingFrom(o, hit.actor));
   return hit.t;
 }
@@ -414,8 +425,10 @@ export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | 
     if (dmg <= 0) return false;
   }
   dmg = Math.max(1, Math.round(dmg));
-  target.state.hp = Math.max(0, target.state.hp - dmg);
-  if (target.kind === "npc") target.onDamaged?.(dmg, attacker?.id ?? "");
+  const hpBefore = target.state.hp;
+  target.state.hp = Math.max(0, hpBefore - dmg);
+  // NPC credit counts HP actually removed (an overkill hit can't outrank earlier damage).
+  if (target.kind === "npc") target.onDamaged?.(hpBefore - target.state.hp, attacker?.id ?? "");
   const tp = actorPos(target);
   // Knockback: the shove direction (away from the attacker) rides on the hit; the victim's client
   // applies it, and the server widens that player's movement budget so the shove isn't "corrected".
@@ -478,7 +491,7 @@ export function stepProjectiles(host: CombatHost, dt: number) {
     const hit = raycastActors(host, p.pos, d, Math.min(step, terrainT), p.hit, 0);
     if (hit) {
       p.hit.add(hit.actor.id);
-      const mult = hit.weak ? (p.tier.headMult ?? 1.5) : 1;
+      const mult = weakMult(hit, p.tier);
       const at: V3 = [p.pos[0] + d[0] * hit.t, p.pos[1] + d[1] * hit.t, p.pos[2] + d[2] * hit.t];
       if (p.fuseAt === null) {
         const applied = dealDamage(host, p.owner, hit.actor, p.damage * mult, hit.weak, [p.pos[0] - at[0], p.pos[1] - at[1], p.pos[2] - at[2]]);

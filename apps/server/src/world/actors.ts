@@ -60,6 +60,16 @@ export interface PlayerActor {
   specialReadyAt: number;
   lastPhraseAt: number;
   healAcc: number;
+  /** NPC status effects enforced by movement validation (see npc/effects.ts). */
+  npcFx?: NpcMoveFx;
+}
+
+/** Movement effects from NPC attacks: chill/slow, Cease-and-Desist (no sprint, no dodge), Undertow pull. */
+export interface NpcMoveFx {
+  slow: number;
+  slowUntil: number;
+  noSprintUntil: number;
+  pull: { c: V3; speed: number; until: number } | null;
 }
 
 export interface NpcActor {
@@ -81,6 +91,10 @@ export interface NpcActor {
    * Gets the damage after the weak-point multiplier and returns what to apply; ≤ 0 = no damage.
    */
   mitigate?: (amount: number, weak: boolean, fromDir?: V3) => number;
+  /** Weak-point volume test for a ray hit point (bosses); replaces the generic "top of the capsule" test. */
+  weakPoint?: (point: V3) => boolean;
+  /** Multiplier for weak-point hits on this NPC; replaces the weapon's headshot multiplier when set. */
+  weakMult?: number;
   boss?: boolean;
 }
 

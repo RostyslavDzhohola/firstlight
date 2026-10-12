@@ -1,31 +1,23 @@
 // Telegraph decals on the ground (content §3.1 language: colour + shape, never colour alone):
 // red wedge/line = dodge, amber = ranged lock, teal ring = step out, violet sigil = split curse.
-// Each decal is a small terrain-conforming grid (sector, annulus or strip) with its own TSL
-// uniforms; the fill grows to the rim as the wind-up runs out, then the shape flashes once.
+// Each decal is a small terrain-conforming grid (sector, annulus or strip). All decals share ONE
+// material: colour, timing (start/end), style and edge emphasis ride on vertex attributes and a shared
+// clock uniform drives the fill, so no material is created or compiled during combat. A hidden
+// sample decal is kept in the scene so the loading-screen warm-up compiles the pipeline.
 
 import * as THREE from "three/webgpu";
-import { abs, float, fract, max, smoothstep, step, uniform, uv } from "three/tsl";
+import { abs, attribute, clamp, float, fract, max, mix, sin, smoothstep, step, uniform, uv } from "three/tsl";
 import type { Terrain } from "@firstlight/shared";
 import { SHAPE_CODE, type NpcAttackMsg } from "@firstlight/shared/content/npcs";
 
 export const TELEGRAPH_COLORS = [0xff3b3b, 0xffb000, 0x2ee6d6, 0xffffff, 0xb45cff];
 const LIFT = 0.14;
 
-interface DecalMaterial {
-  material: THREE.MeshBasicNodeMaterial;
-  color: { value: THREE.Color };
-  prog: { value: number };
-  edge: { value: number };
-  style: { value: number };
-  alpha: { value: number };
-}
-
-function makeMaterial(): DecalMaterial {
-  const color = uniform(new THREE.Color(1, 0, 0));
-  const prog = uniform(0);
-  const edge = uniform(0);
-  const style = uniform(0);
-  const alpha = uniform(1);
+/** The shared decal material and its clock (seconds since the system started). */
+function makeSharedMaterial() {
+  const clock = uniform(0);
+  const tele = attribute("aTele", "vec4"); // start s, end s, style (0 fill · 1 ring · 2 sigil), edge emphasis
+  const col = attribute("aColor", "vec3");
   const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide });
   m.polygonOffset = true;
   m.polygonOffsetFactor = -2;
@@ -33,23 +25,28 @@ function makeMaterial(): DecalMaterial {
   const u = uv();
   const radial = u.x;
   const lateral = abs(u.y.mul(2).sub(1));
-  const rim = max(smoothstep(0.84, 0.97, radial), smoothstep(0.86, 0.99, lateral).mul(edge));
+  const prog = clamp(clock.sub(tele.x).div(max(tele.y.sub(tele.x), 0.001)), 0, 1);
+  const rim = max(smoothstep(0.84, 0.97, radial), smoothstep(0.86, 0.99, lateral).mul(tele.w));
   const fill = step(radial, prog).mul(0.32);
-  const ringStyle = step(0.5, style).mul(step(style, 1.5));
-  const sigilStyle = step(1.5, style);
+  const ringStyle = step(0.5, tele.z).mul(step(tele.z, 1.5));
+  const sigilStyle = step(1.5, tele.z);
   const ring = smoothstep(0.55, 0.9, radial).mul(ringStyle).mul(0.3);
   const sigil = step(0.86, fract(u.y.mul(10))).mul(step(0.35, radial)).mul(step(radial, 0.8)).mul(sigilStyle).mul(0.55);
-  m.colorNode = color.mul(2.2);
-  m.opacityNode = float(0.16).add(fill).add(rim.mul(0.7)).add(ring).add(sigil).mul(alpha);
-  return { material: m, color, prog, edge, style, alpha } as unknown as DecalMaterial;
+  // Gentle pulse during the wind-up, a bright flash at the moment of impact.
+  const pulse = mix(sin(clock.mul(16.6)).mul(0.15).add(0.85), float(1.6), step(tele.y, clock));
+  m.colorNode = col.mul(2.2);
+  m.opacityNode = float(0.16).add(fill).add(rim.mul(0.7)).add(ring).add(sigil).mul(pulse);
+  return { material: m, clock };
 }
 
 interface Decal {
   npc: string;
   mesh: THREE.Mesh;
-  mat: DecalMaterial;
   start: number;
   end: number;
+  color: number;
+  style: number;
+  edge: number;
   /** Tracked player whose position re-centres the decal until lock. */
   track: string | null;
   lastBuild: number;
@@ -149,11 +146,28 @@ function stripGeometry(g: Ground, origin: THREE.Vector3, dir: THREE.Vector3, len
 export class Telegraphs {
   readonly group = new THREE.Group();
   private readonly decals: Decal[] = [];
-  private readonly free: DecalMaterial[] = [];
   private readonly ground: Ground;
+  private readonly shared = makeSharedMaterial();
+  private readonly t0 = performance.now();
+  private readonly tmpColor = new THREE.Color();
 
   constructor(terrain: Terrain, water: number, private readonly playerPos: (id: string) => THREE.Vector3 | null) {
     this.ground = new Ground(terrain, water);
+    // Hidden sample for the warm-up pass (warmup() forces hidden meshes visible for one compile).
+    const sample = new THREE.BufferGeometry();
+    sample.setAttribute("position", new THREE.BufferAttribute(new Float32Array([0, 0, 0, 0.01, 0, 0, 0, 0.01, 0]), 3));
+    sample.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(6), 2));
+    sample.setAttribute("aTele", new THREE.BufferAttribute(new Float32Array(12), 4));
+    sample.setAttribute("aColor", new THREE.BufferAttribute(new Float32Array(9), 3));
+    const warm = new THREE.Mesh(sample, this.shared.material);
+    warm.visible = false;
+    warm.frustumCulled = false;
+    this.group.add(warm);
+  }
+
+  /** Seconds on the shared decal clock for a performance.now() time. */
+  private secs(t: number): number {
+    return (t - this.t0) / 1000;
   }
 
   get count(): number {
@@ -214,18 +228,34 @@ export class Telegraphs {
   }
 
   private spawn(npc: string, color: number, start: number, end: number, track: string | null, style: number, edge: number, build: (c: THREE.Vector3) => THREE.BufferGeometry, centre: THREE.Vector3) {
-    const mat = this.free.pop() ?? makeMaterial();
-    mat.color.value.setHex(color);
-    mat.prog.value = 0;
-    mat.style.value = style;
-    mat.edge.value = edge;
-    mat.alpha.value = 1;
+    const d: Decal = { npc, mesh: null as unknown as THREE.Mesh, start, end, color, style, edge, track, lastBuild: start, build };
     const c = track ? (this.playerPos(track) ?? centre) : centre;
-    const mesh = new THREE.Mesh(build(c), mat.material);
-    mesh.renderOrder = 2;
-    mesh.frustumCulled = false;
-    this.group.add(mesh);
-    this.decals.push({ npc, mesh, mat, start, end, track, lastBuild: start, build });
+    d.mesh = new THREE.Mesh(this.dress(d, build(c)), this.shared.material);
+    d.mesh.renderOrder = 2;
+    d.mesh.frustumCulled = false;
+    this.group.add(d.mesh);
+    this.decals.push(d);
+  }
+
+  /** Per-vertex colour, timing and style for the shared material. */
+  private dress(d: Decal, geo: THREE.BufferGeometry): THREE.BufferGeometry {
+    const n = geo.getAttribute("position").count;
+    const tele = new Float32Array(n * 4);
+    const col = new Float32Array(n * 3);
+    const c = this.tmpColor.setHex(d.color);
+    const a = this.secs(d.start), b = this.secs(d.end);
+    for (let i = 0; i < n; i++) {
+      tele[i * 4] = a;
+      tele[i * 4 + 1] = b;
+      tele[i * 4 + 2] = d.style;
+      tele[i * 4 + 3] = d.edge;
+      col[i * 3] = c.r;
+      col[i * 3 + 1] = c.g;
+      col[i * 3 + 2] = c.b;
+    }
+    geo.setAttribute("aTele", new THREE.BufferAttribute(tele, 4));
+    geo.setAttribute("aColor", new THREE.BufferAttribute(col, 3));
+    return geo;
   }
 
   cancel(npc: string, filter: (d: Decal) => boolean = () => true) {
@@ -239,28 +269,23 @@ export class Telegraphs {
     const d = this.decals[i]!;
     d.mesh.removeFromParent();
     d.mesh.geometry.dispose();
-    this.free.push(d.mat);
     this.decals.splice(i, 1);
   }
 
   update(now: number) {
+    this.shared.clock.value = this.secs(now);
     for (let i = this.decals.length - 1; i >= 0; i--) {
       const d = this.decals[i]!;
-      const span = Math.max(1, d.end - d.start);
-      const k = (now - d.start) / span;
       if (now > d.end + 160) {
         this.remove(i);
         continue;
       }
-      d.mat.prog.value = Math.min(1, k);
-      // Flash at the moment of impact.
-      d.mat.alpha.value = now > d.end ? 1.6 : 0.85 + 0.15 * Math.sin(now / 60);
       if (d.track && now - d.lastBuild > 90) {
         const p = this.playerPos(d.track);
         if (p) {
           d.lastBuild = now;
           d.mesh.geometry.dispose();
-          d.mesh.geometry = d.build(p);
+          d.mesh.geometry = this.dress(d, d.build(p));
         }
       }
     }
@@ -268,7 +293,8 @@ export class Telegraphs {
 
   dispose() {
     while (this.decals.length) this.remove(this.decals.length - 1);
-    for (const m of this.free) m.material.dispose();
+    this.group.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
+    this.shared.material.dispose();
     this.group.removeFromParent();
   }
 }
