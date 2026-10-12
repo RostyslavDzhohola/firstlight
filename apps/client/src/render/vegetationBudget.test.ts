@@ -46,8 +46,8 @@ describe("vegetation tier budgets", () => {
           results.push({ body, instances: sys.instances, triangles, draws });
           expect(sys.instances).toBeLessThanOrEqual(tier === "low" ? 500 : tier === "medium" ? 1000 : tier === "high" ? 1800 : 2500);
           expect(triangles).toBeLessThanOrEqual(tier === "low" ? 35_000 : tier === "medium" ? 120_000 : tier === "high" ? 250_000 : 400_000);
-          expect(draws).toBeLessThanOrEqual(tier === "low" ? 22 : tier === "medium" ? 40 : tier === "high" ? 55 : 65);
-          expect(draws).toBeLessThan(settings.drawBudget);
+          // This is a props-only cap, not evidence of whole-scene draw/FPS compliance.
+          expect(draws).toBeLessThanOrEqual(tier === "low" ? 20 : tier === "medium" ? 30 : tier === "high" ? 40 : 45);
           sys.dispose();
         }
       }

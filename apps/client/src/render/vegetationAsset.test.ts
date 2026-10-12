@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { BODY_IDS, PROP_KINDS } from "@firstlight/shared";
-import { vegetationModels } from "./vegetationModels.ts";
+import { BODY_IDS, hash01, PROP_KINDS } from "@firstlight/shared";
+import { vegetationModels, vegetationVariant } from "./vegetationModels.ts";
+import { PROP_PALETTES } from "./propGeometry.ts";
 import { vegetationMaterial, type VegetationAssets } from "./vegetationAssets.ts";
 import { testVegetationAssets, vegetationBytes, vegetationDocument } from "./vegetationAsset.testutil.ts";
 import * as THREE from "three/webgpu";
@@ -68,7 +69,7 @@ describe("shipped vegetation", () => {
         else expect(geo.index!.count / 3, model).toBe(4);
         expect(geo.boundingBox!.max.y, model).toBeGreaterThan(0.2);
         const triangles = geo.index!.count / 3;
-        expect(triangles, `${model} L${lod}`).toBeLessThanOrEqual(lod === 0 ? 900 : 96);
+        expect(triangles, `${model} L${lod}`).toBeLessThanOrEqual(tree ? lod === 0 ? 900 : 4 : lod === 0 ? 320 : 32);
         expect(geo.getAttribute("color")).toBeTruthy();
         expect(geo.getAttribute("uv")).toBeTruthy();
       }
@@ -102,6 +103,58 @@ describe("shipped vegetation", () => {
     }
     sys.setForceAll(false);
     expect(samples.parent).toBeNull();
+    sys.dispose();
+  });
+  it("combines matching rock/boulder variants, preserving scale, paint and chunks received before ready", async () => {
+    const sys = new PropSystem("arcadia", await testVegetationAssets());
+    const rockYaw = Math.fround(1.25);
+    const variant = vegetationVariant("arcadia", "rock", rockYaw);
+    let boulderYaw = Math.fround(0.01);
+    while (vegetationVariant("arcadia", "boulder", boulderYaw) !== variant) boulderYaw = Math.fround(boulderYaw + 0.01);
+    sys.addChunk("early", new Float32Array([3, 0, 1000, 0, 1, rockYaw, 4, 1, 1000, 0, 1, boulderYaw]), new THREE.Vector3(0, 1000, 0), 2);
+    await sys.ready;
+    sys.update(new THREE.Vector3(0, 1010, 0), 1000);
+    const populated = (sys.group.children as THREE.InstancedMesh[]).filter((m) => m.count > 0);
+    expect(populated).toHaveLength(1);
+    const mesh = populated[0]!;
+    expect(mesh.name).toBe(`prop:rock:${variant}:L0`);
+    expect(mesh.count).toBe(2);
+    const matrix = new THREE.Matrix4(), scale = new THREE.Vector3();
+    for (let i = 0; i < 2; i++) {
+      mesh.getMatrixAt(i, matrix);
+      scale.setFromMatrixScale(matrix);
+      expect(scale.x).toBeCloseTo(i === 0 ? 1 : 2.3 / 0.9, 5);
+      const yaw = i === 0 ? rockYaw : boulderYaw, key = (i === 0 ? 3 : 4) * 8 + variant;
+      const v = 0.86 + hash01(Math.floor(yaw * 1e4), key, 3) * 0.26;
+      const hue = (hash01(Math.floor(yaw * 1e4), key, 4) - 0.5) * 0.06;
+      const expected = new THREE.Color().setRGB(v * (1 + hue), v, v * (1 - hue));
+      if (i === 1) {
+        const rock = new THREE.Color(PROP_PALETTES.arcadia.rock), boulder = new THREE.Color(PROP_PALETTES.arcadia.rock2);
+        expected.setRGB(expected.r * boulder.r / rock.r, expected.g * boulder.g / rock.g, expected.b * boulder.b / rock.b);
+      }
+      expect(mesh.instanceColor!.getX(i)).toBeCloseTo(expected.r, 5);
+      expect(mesh.instanceColor!.getY(i)).toBeCloseTo(expected.g, 5);
+      expect(mesh.instanceColor!.getZ(i)).toBeCloseTo(expected.b, 5);
+    }
+    sys.dispose();
+  });
+
+  it.each(BODY_IDS)("%s undergrowth never casts, and retained samples follow live shadow settings", async (body) => {
+    const sys = new PropSystem(body, await testVegetationAssets());
+    await sys.ready;
+    for (const tier of ["medium", "low", "high", "medium"] as const) {
+      sys.applySettings(resolveSettings(tier, false, true, emptyStored(), new Set()));
+      sys.setForceAll(true);
+      const samples = sys.group.children.find((o) => o.name === `vegetation:${body}`)!;
+      const live = sys.group.children.filter((o) => o.type === "Mesh") as THREE.InstancedMesh[];
+      live.forEach((mesh, i) => {
+        const small = /prop:(bush|fern|flower|mushroom|scrub|reed):/.test(mesh.name);
+        if (small || mesh.name.endsWith("L1") || tier === "low") expect(mesh.castShadow).toBe(false);
+        else expect(mesh.castShadow).toBe(true);
+        expect((samples.children[i] as THREE.Mesh).castShadow).toBe(mesh.castShadow);
+      });
+      sys.setForceAll(false);
+    }
     sys.dispose();
   });
   it("keeps the yaw wind phase through LOD and tier changes, with shadows only on LOD0", async () => {
