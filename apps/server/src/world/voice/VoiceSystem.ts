@@ -14,6 +14,7 @@ import { actorPos, type PlayerActor } from "../actors.ts";
 import type { BodyRoom } from "../BodyRoom.ts";
 import { dist3 } from "../geometry.ts";
 import type { RoomSystem } from "../systems.ts";
+import { onBlockHooks } from "../../social/store.ts";
 import { voiceMutes, voiceSafety } from "./safety.ts";
 import { mintIceServers, turnConfigured, turnCredentials } from "./turn.ts";
 
@@ -98,6 +99,12 @@ interface VoiceSession {
   reportedAt: Map<string, number>;
 }
 
+/** Live voice systems (one per room), so a Tab-list block anywhere reaches the right sessions. */
+const liveVoice = new Set<VoiceSystem>();
+onBlockHooks.push((blocker, target) => {
+  for (const v of liveVoice) v.blockedPair(blocker, target);
+});
+
 export class VoiceSystem implements RoomSystem {
   readonly sessions = new Map<string, VoiceSession>();
   private readonly room: BodyRoom;
@@ -107,6 +114,7 @@ export class VoiceSystem implements RoomSystem {
 
   constructor(room: BodyRoom) {
     this.room = room;
+    liveVoice.add(this);
     // A guest saved mid-session: the voice session follows the account id.
     this.unsubscribeLinks = accountLinks.on((ev) => {
       for (const s of this.sessions.values()) if (s.userId === ev.fromUserId) s.userId = ev.toUserId;
@@ -167,6 +175,7 @@ export class VoiceSystem implements RoomSystem {
   }
 
   dispose(): void {
+    liveVoice.delete(this);
     this.disposed = true;
     this.unsubscribeLinks();
     for (const s of this.sessions.values()) if (s.iceUsernames.length) void turnCredentials.revoke(s.iceUsernames);
@@ -407,15 +416,31 @@ export class VoiceSystem implements RoomSystem {
     const t = this.room.actors.get(r.data.target);
     if (!t || t === a) return this.deny(c, "voice:block", "no such player");
     const fresh = voiceSafety.block(a.identity.userId, t.identity.userId);
-    // Both clients hang up now; the relay refuses the pair from here on (persisted, survives rejoin).
-    c.send("voice:drop", { peer: t.id });
-    t.client.send("voice:drop", { peer: a.id });
     c.send("voice:blocked", { target: t.id });
     c.send("social:blocked", { userIds: voiceSafety.blockedBy(a.identity.userId) }); // the Tab list's copy
+    this.hangUpPair(a, t, fresh);
+  }
+
+  /** A block made elsewhere (Tab list): apply it to any of the pair's sessions in this room. */
+  blockedPair(blockerUserId: string, targetUserId: string): void {
+    let a: PlayerActor | undefined, t: PlayerActor | undefined;
+    for (const x of this.room.actors.values()) {
+      if (x.identity.userId === blockerUserId) a = x;
+      else if (x.identity.userId === targetUserId) t = x;
+    }
+    if (t) this.hangUpPair(a ?? null, t, true);
+  }
+
+  /** Both clients hang up now; the relay refuses the pair from here on (persisted, survives rejoin). */
+  private hangUpPair(a: PlayerActor | null, t: PlayerActor, rotate: boolean): void {
+    if (a) {
+      a.client.send("voice:drop", { peer: t.id });
+      t.client.send("voice:drop", { peer: a.id });
+    }
     // Defence in depth against a modified client: cut the blocked player's relay allocations and give
     // them fresh credentials for everyone else.
     const ts = this.sessions.get(t.id);
-    if (fresh && ts?.iceUsernames.length) {
+    if (rotate && ts?.iceUsernames.length) {
       const old = ts.iceUsernames;
       ts.iceUsernames = [];
       ts.ice = null;
