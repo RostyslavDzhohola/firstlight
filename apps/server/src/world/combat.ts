@@ -373,52 +373,98 @@ function actorFacingFrom(from: V3, target: Actor): V3 {
   return [from[0] - t[0], from[1] - t[1], from[2] - t[2]];
 }
 
+/**
+ * What stops a line between two points: terrain, an intact breakable, or a Prism Bubble shell (which
+ * then takes `amount`). Returns true when the line is clear.
+ */
+function clearLine(host: CombatHost, a: V3, b: V3, amount: number): boolean {
+  const v: V3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const l = Math.hypot(v[0], v[1], v[2]);
+  if (l < 1e-6) return true;
+  const d: V3 = [v[0] / l, v[1] / l, v[2] / l];
+  if (rayTerrain(host.terrain, a, d, l, 1) < l) return false;
+  if (propOnRay(host, a, d, l)) return false;
+  const shell = host.bubbles?.cross(a, d, l) ?? null;
+  if (shell) {
+    host.bubbles!.absorb(shell.bubble, amount);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Stormcoil (content §2.3): the camera ray only picks the first target (generous aim, 0.7 m extra);
+ * the bolt is traced from the caster's head on the server and needs a clear line to it, and every
+ * jump (to the nearest damageable entity within 6 m, allies included, never twice) needs a clear
+ * line from the previous target (F12 review: it used to trace from the client's origin, up to 7 m
+ * from the head, and jumped through cover).
+ */
 function chain(host: CombatHost, p: PlayerActor, o: V3, d: V3, def: WeaponDef, tier: TierStats, lvl: number) {
   const now = host.now();
-  const terrainT0 = rayTerrain(host.terrain, o, d, def.range, 1.5);
-  // An intact breakable in front of the caster stops the bolt like terrain (destruction.ts).
-  const prop = propOnRay(host, o, d, Math.min(def.range, terrainT0), behind(o, d, headPos(p)));
-  const propIdx = prop ? prop.index : -1;
-  const terrainT = prop ? prop.t : terrainT0;
-  // Generous aim: look for the actor closest to the ray within 1.2 m.
+  const head = headPos(p);
+  const skip = behind(o, d, head);
+  const terrainT = rayTerrain(host.terrain, o, d, skip + def.range, 1.5);
+  const prop = propOnRay(host, o, d, Math.min(skip + def.range, terrainT), skip);
+  const aimEnd = Math.min(skip + def.range, terrainT, prop ? prop.t : Infinity);
+  let dmg = tier.damage * lvl;
+  // First target: closest to the camera ray, in front of the head, within range of the head.
   let first: Actor | null = null;
   let bestT = Infinity;
   for (const a of allActors(host)) {
     if (a.id === p.id || !canHurt(p, a, now)) continue;
     const r = a.kind === "player" ? PLAYER_RADIUS + 0.7 : a.radius + 0.7;
     const h = a.kind === "player" ? PLAYER_HEIGHT : a.height;
-    const hit = rayCapsule(o, d, Math.min(def.range, terrainT), positionAgo(a, now, REWIND_MS), r, h);
-    if (hit && hit.t < bestT) {
-      bestT = hit.t;
-      first = a;
-    }
+    const hit = rayCapsule(o, d, aimEnd, positionAgo(a, now, REWIND_MS), r, h);
+    if (!hit || hit.t < skip || hit.t >= bestT) continue;
+    if (dist3(head, chestOf(a)) > def.range + 1) continue;
+    bestT = hit.t;
+    first = a;
   }
   const points: V3[] = [];
-  if (first) {
+  let end: V3;
+  if (first && clearLine(host, head, chestOf(first), 0)) {
     const hitSet = new Set<string>([p.id]);
     let cur: Actor | null = first;
-    let dmg = tier.damage * lvl;
     for (let j = 0; cur && j <= (tier.jumps ?? 2); j++) {
       hitSet.add(cur.id);
       points.push(actorPos(cur));
-      dealDamage(host, p, cur, dmg, false, actorFacingFrom(o, cur));
+      dealDamage(host, p, cur, dmg, false, actorFacingFrom(j === 0 ? head : points[j - 1]!, cur));
       dmg *= 0.7;
+      const from = chestOf(cur);
       let next: Actor | null = null;
       let nd = 6;
       for (const a of allActors(host)) {
         if (hitSet.has(a.id) || !canHurt(p, a, now)) continue;
         const dd = dist3(actorPos(a), actorPos(cur));
-        if (dd <= nd) {
+        if (dd <= nd && clearLine(host, from, chestOf(a), 0)) {
           nd = dd;
           next = a;
         }
       }
       cur = next;
     }
+    end = actorPos(first);
+  } else {
+    // No target (or the first is behind cover): the bolt flies from the head toward the aim point
+    // and stops at the first thing in the way; an intact breakable or a bubble shell there takes it.
+    const aim: V3 = first ? chestOf(first) : [o[0] + d[0] * aimEnd, o[1] + d[1] * aimEnd, o[2] + d[2] * aimEnd];
+    const v: V3 = [aim[0] - head[0], aim[1] - head[1], aim[2] - head[2]];
+    const l = Math.hypot(v[0], v[1], v[2]) || 1;
+    const hd: V3 = [v[0] / l, v[1] / l, v[2] / l];
+    const tT = rayTerrain(host.terrain, head, hd, l, 1);
+    const pr = propOnRay(host, head, hd, Math.min(l, tT));
+    const shell = host.bubbles?.cross(head, hd, Math.min(l, tT, pr ? pr.t : Infinity)) ?? null;
+    let t = Math.min(l, tT);
+    if (shell) {
+      t = shell.t;
+      host.bubbles!.absorb(shell.bubble, dmg);
+    } else if (pr) {
+      t = pr.t;
+      host.props!.damage(pr.index, dmg, def.destroys, def.id, hd, p.id);
+    }
+    end = [head[0] + hd[0] * t, head[1] + hd[1] * t, head[2] + hd[2] * t];
   }
-  if (!first && propIdx >= 0) host.props!.damage(propIdx, tier.damage * lvl, def.destroys, def.id, d, p.id);
-  const end: V3 = first ? actorPos(first) : [o[0] + d[0] * Math.min(def.range, terrainT), o[1] + d[1] * Math.min(def.range, terrainT), o[2] + d[2] * Math.min(def.range, terrainT)];
-  host.broadcastNear("shot", { by: p.id, weapon: WEAPON_INDEX.get(def.id), ox: o[0], oy: o[1], oz: o[2], dx: d[0], dy: d[1], dz: d[2], hit: end, chain: points }, o, 160);
+  host.broadcastNear("shot", { by: p.id, weapon: WEAPON_INDEX.get(def.id), ox: head[0], oy: head[1], oz: head[2], dx: d[0], dy: d[1], dz: d[2], hit: end, chain: points }, head, 160);
 }
 
 function* allActors(host: CombatHost): Iterable<Actor> {
