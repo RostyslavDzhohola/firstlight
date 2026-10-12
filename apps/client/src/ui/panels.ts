@@ -11,6 +11,7 @@ import type { InvItem } from "@firstlight/shared/net/protocol";
 import type { Game } from "../game/Game.ts";
 import type { Hud, MissionLine, YouPlus } from "./hud.ts";
 import { overlayClosed, overlayOpened } from "./dom.ts";
+import { parseSkyArgs, SKY_HELP } from "./skyCommand.ts";
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", parent?: HTMLElement, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -439,7 +440,7 @@ export class MissionTracker {
 
 // ---------------------------------------------------------------- admin console (` key)
 
-const CONSOLE_HELP = "stage <1-5> [all] · coins <n> · level <n> · give <id> [tier] [qty] · medal <id> · egg <E1-E9> · heal · unprotect · announce <text>";
+const CONSOLE_HELP = `stage <1-5> [all] · coins <n> · level <n> · give <id> [tier] [qty] · medal <id> · egg <E1-E9> · heal · unprotect · announce <text> · ${SKY_HELP}`;
 
 /** Parse a console line into an admin message. */
 export function parseAdminLine(line: string): { cmd: string; args: Record<string, unknown> } | null {
@@ -461,6 +462,8 @@ export function parseAdminLine(line: string): { cmd: string; args: Record<string
       return { cmd, args: { id: rest[0] ?? "", ...(rest[1] ? { step: rest[1] } : {}) } };
     case "announce":
       return { cmd, args: { text: rest.join(" ") } };
+    case "sky":
+      return { cmd, args: parseSkyArgs(rest) };
     default:
       return { cmd, args: {} };
   }

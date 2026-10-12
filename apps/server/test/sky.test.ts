@@ -2,10 +2,11 @@
 // slot changes are broadcast; an admin override reaches everyone on the copy.
 
 import type { Room } from "@colyseus/sdk";
-import { DAY_MS, dayT, nextStrike, skyState, type SkyState } from "@firstlight/shared";
+import { DAY_MS, dayT, isWeather, nextStrike, skyState, sunAngles, type SkyState } from "@firstlight/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Game } from "../src/app.ts";
 import { SkySystem } from "../src/world/SkySystem.ts";
+import { STAGES } from "../src/world/quests/stage.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 
 let game: Game;
@@ -106,6 +107,19 @@ describe("sky (seam 1)", () => {
     expect(skies(a)).toHaveLength(1);
     a.send("skySync", {});
     await waitFor(() => skies(a).length === 2);
+  });
+
+  it("a staged scene sets its time of day (held) and weather for everyone on the copy", async () => {
+    const admin = await bot("director", "admin");
+    const other = await bot("crew");
+    admin.send("admin", { cmd: "stage", args: { n: 5 } });
+    const def = STAGES.find((d) => d.n === 5)!;
+    await waitFor(() => skies(other).some((s) => s.override));
+    const s = skies(other).find((x) => x.override)!;
+    expect(s.weather).toBe(def.sky.weather);
+    expect(s.dayHold).toBe(def.sky.dayT);
+    expect(s.dayT).toBe(def.sky.dayT);
+    expect(s.nextChangeAt - s.serverTime).toBe(30 * 60_000);
   });
 
   it("ignores the sky command from non-admins", async () => {
@@ -213,6 +227,21 @@ describe("SkySystem admin time of day", () => {
     expect(sent[3]!.dayHold).toBeUndefined();
     expect(sent[3]!.override).toBe(false);
     expect(sent[3]!.dayOffset).toBe(0);
+  });
+});
+
+describe("staged scene skies", () => {
+  it("every scene pins a valid time of day and weather; the Hollowmere chapel is at dusk", () => {
+    for (const d of STAGES) {
+      expect(d.sky.dayT).toBeGreaterThanOrEqual(0);
+      expect(d.sky.dayT).toBeLessThan(1);
+      expect(isWeather(d.sky.weather)).toBe(true);
+      // Daylight (or dusk) for every scene: the sun is up.
+      expect(sunAngles(d.body, d.sky.dayT).elev).toBeGreaterThan(0.02);
+    }
+    const chapel = STAGES.find((d) => d.body === "hollowmere")!;
+    expect(chapel.sky.dayT).toBeGreaterThan(0.5); // evening
+    expect(sunAngles("hollowmere", chapel.sky.dayT).elev).toBeLessThan(0.12); // below its reference sun
   });
 });
 
