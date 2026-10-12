@@ -43,16 +43,16 @@
 | F1 live | ✅ | https://firstlight.one4all.dev + api health; T3 browser loads and plays |
 | F2 40 bots | ✅ | 600 s, 0 failures, tick p95 ≤ 2.94 ms with NPCs (Measured numbers) |
 | F3 < 30 s to play | ✅ | 8.0 s landing → playing (probe 3.5 s, warm-up 2.2 s), T3 browser, 03:20Z |
-| F4 fighting | 🟡 | seam-1 tests (PvP + PvE); browser E2E pending |
-| F5 death + own pile | 🟡 | seam-1 tests; browser E2E pending |
+| F4 fighting | ✅ | browser E2E T2 PvE + PvP (docs/e2e-2026-10-12.md) |
+| F5 death + own pile | ✅ | browser E2E T3 |
 | F6 voice | ⛔ | built + tested with bots; needs owner's TURN key; mic E2E needs two real browsers |
-| F7 email sign-in | ⛔ | built + tested; Resend domain unverified (owner: press Verify) |
-| F8 2-player boss | 🟡 | seam-1 duo tests for all 3 bosses; browser E2E pending |
-| F9 screenshot share | 🟡 | built; browser check pending |
+| F7 email sign-in | 🟡 | browser E2E T5 passes locally (dev outbox); production waits for Resend domain verification (owner) |
+| F8 2-player boss | ✅ | browser E2E T6: Tidewrath killed by two players (admin heals) |
+| F9 screenshot share | ✅ | browser E2E T7 |
 | F10 M1 ≥ 60 fps Medium | ✅* | ?bench=g1 59.9 fps p50, p95 17.6 ms (T3 Chromium, not plugged-in Chrome) |
 | F11 Low on weak profile | ✅* | `?bench=g1&tier=low&cpuslow=4`: 51.3 fps p50, p95 29.8 ms, 0 shader builds (D29 emulation) |
 | F12 three-model review | 🟡 | per-lane reviews done; whole-codebase review after the last merges |
-| F13 photo mode + 5 scenes | 🟡 | photo mode + `stage <n>` + docs/staged-scenes.md merged; browser check pending |
+| F13 photo mode + 5 scenes | ✅ | browser E2E T8; `stage <n>` + docs/staged-scenes.md |
 
 ## Lanes (who owns what right now)
 
