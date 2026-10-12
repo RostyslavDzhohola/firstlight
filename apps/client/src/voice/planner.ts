@@ -114,3 +114,16 @@ export function acceptsIncoming(me: Me, peer: { radioCh: number; dist: number },
 export function shouldSend(dist: number, ptt: boolean, radioTx: boolean, sameChannel: boolean): boolean {
   return ((ptt || radioTx) && dist <= VOICE.HEAR + 5) || (radioTx && sameChannel);
 }
+
+const REDIAL_BASE_MS = 10_000;
+const REDIAL_MAX_MS = 5 * 60_000;
+
+/**
+ * How long to wait before ringing a peer again after `strikes` unreachable replies in a row from the
+ * server (the reason is never disclosed: out of range, voice off, or a block). Doubles from 10 s to
+ * 5 minutes, so a client next to someone who blocked it stops dialling them every 10 s; the count
+ * resets as soon as that peer reaches us.
+ */
+export function redialBackoffMs(strikes: number): number {
+  return Math.min(REDIAL_BASE_MS * 2 ** Math.max(0, strikes - 1), REDIAL_MAX_MS);
+}

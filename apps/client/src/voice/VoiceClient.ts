@@ -14,7 +14,7 @@ import type { ClientSystem } from "../game/systems.ts";
 import { isBlocked, isMuted, isMutedLocally, onSocialChange, setMuted } from "../social/store.ts";
 import { VoiceAudio } from "./audio.ts";
 import { MeshTransport } from "./MeshTransport.ts";
-import { acceptsIncoming, onMyChannel, planLinks, shouldSend, type Me, type PeerView } from "./planner.ts";
+import { acceptsIncoming, onMyChannel, planLinks, redialBackoffMs, shouldSend, type Me, type PeerView } from "./planner.ts";
 import type { IceSettings, SignalPayload, VoiceTransport } from "./transport.ts";
 import { VoiceUi } from "./ui.ts";
 
@@ -278,6 +278,8 @@ export class VoiceRoom implements ClientSystem {
   private readonly unsub: (() => void)[] = [];
   private readonly farSince = new Map<string, number>();
   private readonly backoff = new Map<string, number>();
+  /** Peer → unreachable replies in a row (reset when that peer's signalling reaches us). */
+  private readonly strikes = new Map<string, number>();
   private lastPlan = 0;
   private lastAudio = 0;
   private bHeld = false;
@@ -304,6 +306,7 @@ export class VoiceRoom implements ClientSystem {
     on("voice:ice", (m) => this.onIce(m));
     on("voice:signal", (m) => {
       const { from, ...payload } = m;
+      this.strikes.delete(from);
       if (vc.enabled) this.transport.handleSignal(from, payload as SignalPayload);
     });
     on("voice:drop", (m) => {
@@ -311,7 +314,9 @@ export class VoiceRoom implements ClientSystem {
       this.backoff.set(m.peer, performance.now() + BACKOFF_MS);
     });
     on("voice:unreachable", (m) => {
-      this.backoff.set(m.peer, performance.now() + BACKOFF_MS);
+      const n = (this.strikes.get(m.peer) ?? 0) + 1;
+      this.strikes.set(m.peer, n);
+      this.backoff.set(m.peer, performance.now() + redialBackoffMs(n));
     });
     on("voice:denied", (m) => this.onDenied(m));
     on("radio:tuned", (m) => {
