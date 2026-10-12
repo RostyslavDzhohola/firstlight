@@ -14,6 +14,7 @@ import type { V3 } from "../geometry.ts";
 import type { NpcSystem } from "./NpcSystem.ts";
 import type { Npc } from "./npc.ts";
 import { emitNpcEvent } from "./tuning.ts";
+import { actorOf, recipientOf, stillEligible } from "./payouts.ts";
 
 type Rng = () => number;
 
@@ -81,14 +82,15 @@ export function rollDrops(sys: NpcSystem, n: Npc, top: PlayerActor, rng: Rng = M
   return out;
 }
 
-/** The live actor of an account in this room (connected players only), preferring its last session. */
-function actorOf(sys: NpcSystem, userId: string, sid: string): PlayerActor | null {
-  const bySid = sys.world.playerById(sid);
-  if (bySid && bySid.identity.userId === userId) return bySid;
-  for (const p of sys.world.connected()) if (p.identity.userId === userId) return p;
-  return null;
-}
-
+/**
+ * Pay a kill. The payout is decided once, here (each XP share with this kill's repeat decay, the top
+ * dealer's coins, the rolled drops and camp chest), so the decay and pity counters move once and a
+ * retry pays exactly this. XP, coins, drops, chest and saves land together; pile events, level-ups,
+ * the kill news and hunt credit go out after the commit (D26, F12 final B1). A failed save pays
+ * nobody anything and is retried on later ticks (payouts.ts, F12 confirm Sonnet SF1); by then a
+ * recipient who left, died or was reborn forfeits their XP and coins, while the ground piles (drops,
+ * chest) are still placed.
+ */
 export function rewardKill(sys: NpcSystem, n: Npc, killerId: string | null, now: number) {
   // Egg penalties and staged-scene spawns pay nothing (no XP, coins, drops or hunt credit): they are
   // a penalty and a film set, not a farm (F12 review S1).
@@ -102,7 +104,7 @@ export function rewardKill(sys: NpcSystem, n: Npc, killerId: string | null, now:
   let topAmt = -1;
   // Credit is HP actually removed per account (overkill can't outrank earlier damage).
   for (const e of n.damage.values()) {
-    const p = actorOf(sys, e.userId, e.sid);
+    const p = actorOf(world, e.userId, e.sid);
     if (!p || p.dead) continue;
     if (e.amount > topAmt) {
       topAmt = e.amount;
@@ -112,70 +114,81 @@ export function rewardKill(sys: NpcSystem, n: Npc, killerId: string | null, now:
   }
   if (killer && !killer.dead && !xpTo.includes(killer)) xpTo.push(killer);
   const key = n.point ? `p${n.point.id}` : n.summoner ? `s${n.summoner}` : `x${n.id}`;
-  const gains = new Map<string, { p: PlayerActor; xp: number; coins: number }>();
-  // XP, coins, drops, chest and saves land together; pile events and level-ups go out after the
-  // commit (D26, F12 final B1). A failed save pays nobody anything (the kill still happened).
-  const events: (() => void)[] = [];
+  const shares = xpTo.map((p) => ({ who: recipientOf(p), xp: killXp(def.tier, n.level, p.char.level, repeatDecay(sys, p.identity.userId, key, now)) }));
+  const coins = top ? npcCoins(def, n.level) : 0;
+  const drops = top ? rollDrops(sys, n, top) : [];
+  const topWho = top ? recipientOf(top) : null;
   const chestOwner = n.point?.chest && n.point.chestKey === n.member ? (top ?? killer) : null;
-  const touched = [...new Set([...xpTo, ...(top ? [top] : []), ...(chestOwner ? [chestOwner] : [])])];
-  try {
+  const chest = chestOwner ? rollChest(sys, n.point!.chest!, n.level) : null;
+  const at: V3 = [n.pos[0], n.pos[1], n.pos[2]];
+  const chestAt = n.point?.pos;
+  const commit = () => {
+    const gains = new Map<string, { p: PlayerActor; xp: number; coins: number }>();
+    const paid = shares.map((s) => ({ s, p: stillEligible(world, s.who) }));
+    const coinsTo = topWho ? stillEligible(world, topWho) : null;
+    const touched = [...new Set([...paid.flatMap((x) => (x.p ? [x.p] : [])), ...(coinsTo ? [coinsTo] : [])])];
+    const events: (() => void)[] = [];
     world.withTx(touched, () => {
-      for (const p of xpTo) {
-        const xp = killXp(def.tier, n.level, p.char.level, repeatDecay(sys, p.identity.userId, key, now));
-        if (xp > 0) events.push(world.addXp(p, xp));
-        gains.set(p.id, { p, xp, coins: 0 });
+      for (const { s, p } of paid) {
+        if (!p) continue;
+        if (s.xp > 0) events.push(world.addXp(p, s.xp));
+        gains.set(p.id, { p, xp: s.xp, coins: 0 });
       }
-      if (top) {
-        const coins = npcCoins(def, n.level);
+      if (coinsTo) {
         if (coins > 0) {
-          top.char.coins += coins;
-          top.youDirty = true;
+          coinsTo.char.coins += coins;
+          coinsTo.youDirty = true;
         }
-        const g = gains.get(top.id) ?? { p: top, xp: 0, coins: 0 };
+        const g = gains.get(coinsTo.id) ?? { p: coinsTo, xp: 0, coins: 0 };
         g.coins = coins;
-        gains.set(top.id, g);
-        const items = rollDrops(sys, n, top);
-        if (items.length) world.createPile(top, items, 0, n.pos, events);
+        gains.set(coinsTo.id, g);
       }
-      if (chestOwner) openChest(sys, n.point!.chest!, chestOwner, n.level, n.point!.pos, Math.random, events);
+      if (top && drops.length) world.createPile(top, drops.map((it) => ({ ...it })), 0, at, events);
+      if (chestOwner && chest && chestAt) placeChest(sys, chest, chestOwner, chestAt, events);
       for (const g of gains.values()) world.save(g.p);
     });
-  } catch (err) {
-    console.error(`[npc] kill reward for ${def.id} not paid: ${(err as Error)?.message ?? err}`);
-    return;
-  }
-  for (const e of events) e();
-  for (const g of gains.values()) world.send(g.p, "npcKill", { id: n.id, kind: n.defIndex, xp: g.xp, coins: g.coins });
-  emitNpcEvent({
-    kind: "kill",
-    body: world.body.id,
-    def: def.id,
-    npcLevel: n.level,
-    players: [...gains.keys()],
-    userIds: [...gains.values()].map((g) => g.p.identity.userId),
-    area: n.point?.area ?? null,
-  });
+    return () => {
+      for (const e of events) e();
+      for (const g of gains.values()) world.send(g.p, "npcKill", { id: n.id, kind: n.defIndex, xp: g.xp, coins: g.coins });
+      emitNpcEvent({
+        kind: "kill",
+        body: world.body.id,
+        def: def.id,
+        npcLevel: n.level,
+        players: [...gains.keys()],
+        userIds: [...gains.values()].map((g) => g.p.identity.userId),
+        area: n.point?.area ?? null,
+      });
+    };
+  };
+  sys.payouts.pay(`kill:${n.id}`, `kill reward for ${def.id} (${n.id})`, commit, now);
 }
 
-/** Camp chest (content §1.4): opens when the camp elite dies; a pile at the camp centre. */
-export function openChest(sys: NpcSystem, chest: CampChest, owner: PlayerActor, level: number, at: V3, rng: Rng = Math.random, deferred?: (() => void)[]) {
+/** A camp chest's contents (content §1.4), rolled once per opening. */
+export interface ChestRoll {
+  items: InvItem[];
+  coins: number;
+}
+
+export function rollChest(sys: NpcSystem, chest: CampChest, level: number, rng: Rng = Math.random): ChestRoll {
   const planet: PlanetId = sys.planet ?? "arcadia";
   const items: InvItem[] = [];
   for (let i = 0; i < chest.weapons; i++) items.push(randomWeapon(level, rng));
   if (chest.tonics > 0) items.push({ id: PLANET_TONIC[planet].id, tier: 1, qty: chest.tonics });
   if (chest.cosmetic && rng() < chest.cosmetic.chance) items.push({ id: chest.cosmetic.id, tier: 1, qty: 1 });
-  sys.world.createPile(owner, items, chest.coins, at, deferred);
-  const announce = () => sys.sendNear(at, 80, "npcChest", { x: at[0], y: at[1], z: at[2], coins: chest.coins, items: items.length });
+  return { items, coins: chest.coins };
+}
+
+/** Camp chest (content §1.4): opens when the camp elite dies; a pile at the camp centre. */
+export function placeChest(sys: NpcSystem, chest: ChestRoll, owner: PlayerActor, at: V3, deferred?: (() => void)[]) {
+  sys.world.createPile(owner, chest.items.map((it) => ({ ...it })), chest.coins, at, deferred);
+  const announce = () => sys.sendNear(at, 80, "npcChest", { x: at[0], y: at[1], z: at[2], coins: chest.coins, items: chest.items.length });
   if (deferred) deferred.push(announce);
   else announce();
 }
 
-/**
- * Personal boss loot for one eligible player: coins, XP, items into the inventory, overflow at their
- * feet, in one transaction (throws if it fails: nothing was paid). Pile events and level-ups go out
- * after the commit.
- */
-export function bossLoot(sys: NpcSystem, def: BossDef, p: PlayerActor, rng: Rng = Math.random): { xp: number; coins: number; items: InvItem[] } {
+/** Personal boss loot for one eligible player (coins and XP are fixed by the def), rolled once. */
+export function rollBossLoot(def: BossDef, rng: Rng = Math.random): InvItem[] {
   const items: InvItem[] = [];
   for (const a of def.loot.always) {
     if (a.id === "weapon") items.push(randomWeapon(def.level, rng, a.tier === "random3" ? 3 : 2));
@@ -187,18 +200,26 @@ export function bossLoot(sys: NpcSystem, def: BossDef, p: PlayerActor, rng: Rng 
     if (id === "weapon") items.push(randomWeapon(def.level, rng, r.weaponTier ?? 2));
     else items.push({ id, tier: 1, qty: 1 });
   }
-  // Coins, XP, items and the overflow pile commit together; pile events and the level-up go out
-  // after (D26, F12 final B1).
+  return items;
+}
+
+/**
+ * Pay rolled boss loot: coins, XP, items into the inventory, overflow at the player's feet, in one
+ * transaction (throws if it fails: nothing was paid). Returns the pile events and level-up to run
+ * after the commit (D26, F12 final B1).
+ */
+export function payBossLoot(sys: NpcSystem, def: BossDef, p: PlayerActor, items: readonly InvItem[]): () => void {
   const events: (() => void)[] = [];
   sys.world.withTx([p], () => {
     p.char.coins += def.loot.coins;
     p.youDirty = true;
     events.push(sys.world.addXp(p, def.loot.xp));
     const leftovers: InvItem[] = [];
-    for (const it of items) if (!sys.world.giveItem(p, it)) leftovers.push(it);
+    for (const it of items) if (!sys.world.giveItem(p, { ...it })) leftovers.push({ ...it });
     if (leftovers.length) sys.world.createPile(p, leftovers, 0, actorPos(p), events);
     sys.world.save(p);
   });
-  for (const e of events) e();
-  return { xp: def.loot.xp, coins: def.loot.coins, items };
+  return () => {
+    for (const e of events) e();
+  };
 }

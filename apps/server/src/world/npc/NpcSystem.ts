@@ -19,6 +19,7 @@ import { onNpcHurt, think } from "./brain.ts";
 import { NPC_COPY_SYSTEM, restoreNpcCopy, snapshotNpcCopy, type NpcCopyState } from "./persist.ts";
 import { MODE, MODE_NAME, type Mode, type Npc } from "./npc.ts";
 import { pruneRewardMaps, rewardKill } from "./rewards.ts";
+import { PayoutQueue } from "./payouts.ts";
 import { activePull, applyMoveEffect, applyPull } from "./effects.ts";
 import { buildSpawnPoints, type SpawnPoint } from "./spawns.ts";
 import { makeGround, placeOnGround, type Ground } from "./steer.ts";
@@ -87,6 +88,8 @@ export class NpcSystem implements RoomSystem {
   readonly tagged = new Map<string, number>();
   readonly repeatKills = new Map<string, number[]>();
   readonly cosmeticPity = new Map<string, { life: number; kills: number; at: number }>();
+  /** Kill and boss payouts whose save failed, waiting for a retry (payouts.ts). */
+  readonly payouts = new PayoutQueue();
   /** Spawn point id → when its Golden Hopbit may come back (it doesn't return with every pack respawn). */
   readonly goldenBack = new Map<number, number>();
   private grid = new Map<number, Npc[]>();
@@ -133,6 +136,7 @@ export class NpcSystem implements RoomSystem {
       this.lastPrune = now;
       pruneRewardMaps(this, now);
     }
+    this.payouts.tick(now);
     this.boss?.tick(now, dt);
     this.buildGrid();
     for (const n of this.npcs.values()) {

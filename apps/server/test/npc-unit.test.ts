@@ -12,6 +12,7 @@ import { copyStateStore, MemoryCopyStateStore } from "../src/world/copyState.ts"
 import { onNpcEvent, type NpcEvent } from "../src/world/npc/tuning.ts";
 import { PITY_IDLE_MS, pruneRewardMaps, repeatDecay, rollDrops } from "../src/world/npc/rewards.ts";
 import { buildSpawnPoints } from "../src/world/npc/spawns.ts";
+import { PAYOUT_RETRY, PayoutQueue } from "../src/world/npc/payouts.ts";
 import { fakeWorld } from "./npcWorld.ts";
 
 beforeEach(() => {
@@ -129,6 +130,121 @@ describe("rewards", () => {
       }
     }
     expect(got).toBe(3 * expected);
+  });
+});
+
+describe("payout retries (F12 confirm Sonnet SF1)", () => {
+  /** A fake world whose saves throw while `fail.on`, with persist's rollback of the touched characters. */
+  function flakyWorld() {
+    const w = fakeWorld("arcadia");
+    const fail = { on: false, tries: 0 };
+    w.world.save = () => {
+      fail.tries++;
+      if (fail.on) throw new Error("disk I/O error (test)");
+    };
+    w.world.withTx = (players, fn) => {
+      const before = players.map((p) => ({ p, char: structuredClone(p.char) }));
+      try {
+        return fn();
+      } catch (err) {
+        for (const { p, char } of before) Object.assign(p.char, char);
+        throw err;
+      }
+    };
+    return { w, fail };
+  }
+
+  it("a failed kill payout is retried after 1 s, 3 s and 6 s; a recipient who left by then forfeits only their own share", () => {
+    const { w, fail } = flakyWorld();
+    const a = w.addPlayer("a", arcadiaPoint(80), 1);
+    const b = w.addPlayer("b", arcadiaPoint(82), 1);
+    const n = w.sys.createNpc(NPC_INDEX.get("bramblehorn")!, 3, arcadiaPoint(90), w.clock.t, { instant: true });
+    const events: NpcEvent[] = [];
+    const off = onNpcEvent((e) => e.kind === "kill" && events.push(e));
+    try {
+      fail.on = true;
+      dealDamage(w.world.host, a, n, n.state.maxHp * 0.3, false);
+      dealDamage(w.world.host, b, n, n.state.maxHp, false); // the top dealer: the coins are b's
+      expect(n.dead).toBe(true);
+      expect(w.sys.payouts.size()).toBe(1);
+      expect([a.char.xp, b.char.xp, b.char.coins]).toEqual([0, 0, 0]);
+      expect(fail.tries).toBe(1); // both shares in one transaction: its first save threw
+      w.step(900);
+      expect(fail.tries).toBe(1);
+      w.step(200); // first retry at +1 s: fails again
+      expect(fail.tries).toBe(2);
+      expect(w.sys.payouts.size()).toBe(1);
+      // b (the top dealer) leaves; storage recovers before the second retry, 3 s later.
+      w.players.delete("b");
+      fail.on = false;
+      for (let i = 0; i < 70; i++) w.step(50);
+      expect(w.sys.payouts.size()).toBe(0);
+      expect(a.char.xp).toBeGreaterThan(0);
+      expect(a.char.coins).toBe(0);
+      expect([b.char.xp, b.char.coins]).toEqual([0, 0]);
+      const kills = w.sent.filter((m) => m.type === "npcKill");
+      expect(kills.map((m) => m.to)).toEqual(["a"]);
+      expect(events.map((e) => (e as { userIds: string[] }).userIds)).toEqual([["u-a"]]);
+      // Settled: nothing runs again.
+      const xp = a.char.xp;
+      for (let i = 0; i < 300; i++) w.step(50);
+      expect(a.char.xp).toBe(xp);
+      expect(w.sent.filter((m) => m.type === "npcKill")).toHaveLength(1);
+    } finally {
+      off();
+    }
+  });
+
+  it("the queue is keyed: a paid or waiting key never runs again, and a publish error isn't a retry", () => {
+    const q = new PayoutQueue();
+    let commits = 0;
+    let publishes = 0;
+    const ok = () => {
+      commits++;
+      return () => {
+        publishes++;
+      };
+    };
+    q.pay("k", "test", ok, 0);
+    q.pay("k", "test", ok, 1);
+    expect([commits, publishes, q.size()]).toEqual([1, 1, 0]);
+
+    let failing = true;
+    let tries = 0;
+    const flaky = () => {
+      tries++;
+      if (failing) throw new Error("save failed");
+      return () => {};
+    };
+    q.pay("f", "test", flaky, 0);
+    q.pay("f", "test", flaky, 10); // already waiting: not queued twice
+    expect([tries, q.size()]).toEqual([1, 1]);
+    q.tick(999);
+    expect(tries).toBe(1);
+    failing = false;
+    q.tick(1000);
+    expect([tries, q.size()]).toEqual([2, 0]);
+    q.tick(30_000);
+    q.pay("f", "test", flaky, 30_001); // settled: not paid again
+    expect(tries).toBe(2);
+
+    let late = 0;
+    q.pay("p", "test", () => {
+      late++;
+      return () => {
+        throw new Error("publish failed");
+      };
+    }, 0);
+    q.tick(20_000);
+    expect([late, q.size()]).toEqual([1, 0]);
+
+    let doomed = 0;
+    q.pay("d", "test", () => {
+      doomed++;
+      throw new Error("save failed");
+    }, 0);
+    for (let t = 0; t <= 20_000; t += 500) q.tick(t);
+    expect([doomed, q.size()]).toEqual([1 + PAYOUT_RETRY.delaysMs.length, 0]);
   });
 });
 
