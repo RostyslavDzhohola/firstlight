@@ -61,7 +61,7 @@
 | Render look + G1 gate | MERGED a59d992 (Codex + Opus reviewed, fixed) | — |
 | Accounts + persistence | MERGED 61aa332 | — |
 | Social, moderation, stats, share | MERGED 1a2ee50 (Codex ×2) | — |
-| Enemies, wildlife, bosses | MERGED 7768535; fixing Codex review (3 blockers) | ../fl-wt-npc |
+| Enemies, wildlife, bosses | MERGED 7768535 + review fixes ec3f110 (deployed) | — |
 | Characters (GLB, animations) | MERGED 2447afe + review fixes 13cf0f5 | — |
 | Voice + radio + phrase wheel | MERGED d40d058 (Codex ×2); TURN key pending owner | — |
 | Missions, medals, eggs, shop, pads, stage | MERGED f8514dc (Codex) | — |
@@ -94,6 +94,8 @@
   **51.3 fps p50 (mean 47.5), frame p95 29.8 ms, p99 35.7 ms, 0 shader builds**, draws mean 174.
 
 ## Open issues
+
+- Flaky under full-suite load (pass alone 3/3): voice "relays far apart on the same channel…" failed once (81 ms) in a full run at 04:50Z; watching.
 
 - NO CODEX COMPUTER USE (D23): visual/E2E checks run in T3 Code's built-in browser (preview tools). Never Chrome.
 - Concept art not generated yet (Codex task cancelled for safety). Retry only without computer use.
