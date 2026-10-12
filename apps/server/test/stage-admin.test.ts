@@ -7,6 +7,7 @@ import { bossArena } from "@firstlight/shared/content/arenas";
 import { createTerrain } from "@firstlight/shared";
 import { NPC_TUNING, npcSystemOf } from "../src/world/npc/index.ts";
 import { NF } from "@firstlight/shared/content/npcs";
+import { dealDamage } from "../src/world/combat.ts";
 import { xpAtLevel } from "@firstlight/shared/content/progression";
 import { characterRepo } from "../src/world/characters.ts";
 import { emitNpcEvent } from "../src/world/npc/tuning.ts";
@@ -156,6 +157,36 @@ describe("admin assistance", () => {
       expect(row.life?.unofficial).toBe(true);
     }, 30_000);
   }
+
+  it("after a boss fight resets, a later admin command doesn't mark the next fight assisted (F12 final Opus nit)", async () => {
+    NPC_TUNING.bosses = true;
+    NPC_TUNING.bossAttacks = false;
+    NPC_TUNING.bossMechanics = [];
+    const b = await bot("resetter", "arcadia");
+    const arena = bossArena(createTerrain("arcadia"))!;
+    await tpAndWait(b, ground("arcadia", arena.centre.map((v) => v / Math.hypot(...arena.centre))));
+    b.send("admin", { cmd: "unprotect" });
+    const room = serverRoom(b);
+    const npcs = npcSystemOf(room)!;
+    const tide = () => [...npcs.npcs.values()].find((n) => n.boss);
+    await until("boss up", () => !!tide() && !(tide()!.state.flags & NF.SPAWNING), 8000);
+    // A real hit (no admin tool): the fight is on and the quests system tracks its hitters.
+    dealDamage(room.host, room.actors.get(b.id)!, tide()!, 50, false);
+    await until("fight on", () => npcs.boss!.engaged);
+    expect(questsOf(room).official({ boss: true })).toBe(true);
+    // Everyone left for 30 s: the fight resets. Later, an admin command that has nothing to do with it.
+    const a = room.actors.get(b.id)!;
+    const pad = padAt("arcadia", 0); // moved server-side: an admin teleport now would itself count as help
+    a.state.x = a.lastX = pad[0];
+    a.state.y = a.lastY = pad[1];
+    a.state.z = a.lastZ = pad[2];
+    npcs.boss!.reset(Date.now());
+    expect(npcs.boss!.engaged).toBe(false);
+    await sleepUntilQuestTick(b);
+    b.send("admin", { cmd: "heal" });
+    await sleep(300);
+    expect(questsOf(room).official({ boss: true })).toBe(true);
+  }, 20_000);
 
   it("admin egg claims (and steps an admin opened) give the item but no medal or plaque", async () => {
     const b = await bot("tester", "hollowmere");

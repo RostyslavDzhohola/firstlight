@@ -443,6 +443,9 @@ export class QuestSystem implements RoomSystem {
       }
     }
     this.eggs.tickRoom(now);
+    // A boss fight that reset or despawned is over: forget its hitters, or a later unrelated admin
+    // command would mark the next fight assisted (and Untouchable would span encounters).
+    if (this.bossHits.size && !npcSystemOf(this.room)?.boss?.engaged) this.bossHits.clear();
     if (now - this.lastSweep >= QUEST_RULES.PILE_SWEEP_MS) {
       this.lastSweep = now;
       for (const [id, list] of this.ops) if (!list.length || now - list[list.length - 1]! >= 1000) this.ops.delete(id);
