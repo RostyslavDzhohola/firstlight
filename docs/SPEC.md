@@ -769,7 +769,7 @@ deploying. PRs are linked to this thread with `link_pull_request`.
   `/v/<buildId>/…`; **every deploy also ships the previous build's directory** (a deploy replaces the
   whole asset set, so mid-session lazy loads would 404). Watch the 20,000-file and 25 MiB-per-file caps.
   Never enable `run_worker_first` or Workers Caching (they turn free asset requests into metered ones).
-- **Server:** Railway service `game-server` from `main` (`apps/server`), Railpack, Node 24. **Each deploy
+- **Server:** Railway service `game-server` from `main` (`apps/server`), built from `apps/server/Dockerfile` (`RAILWAY_DOCKERFILE_PATH`; Railpack is not used), Node 24. **Each deploy
   disconnects everyone** (one replica because of the volume), so server deploys are batched (D9): during
   the run at most about one every 30 minutes unless a fix is urgent; after launch only when needed.
 - **Smoke test after every production deploy:** `/healthz`, `/api/play` with a bot JWT, one bot

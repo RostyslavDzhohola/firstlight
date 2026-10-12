@@ -11,7 +11,7 @@
 | Railway | project `firstlight`, service `game-server`, volume `/data` 5 GB, US East, 2 vCPU/2 GB, Hobby; live at https://api.firstlight.one4all.dev (dev guest tokens off: `main.ts` refuses to boot production with `ALLOW_DEV_GUESTS` set) |
 | Vercel | project `playfirstlight`, https://firstlight.one4all.dev live (A record added), /api/auth + /admin + /stats proxied with origin secret |
 | Cloudflare | account `rosty-build` workers.dev; Workers token saved; TURN key pending owner |
-| Resend | paid plan; domain firstlight.one4all.dev added, DNS added, verification pending; sending key not yet created |
+| Resend | paid plan; domain firstlight.one4all.dev added, DNS added, send-only key set on Railway; **verification pending the owner** |
 
 ## Milestones
 
