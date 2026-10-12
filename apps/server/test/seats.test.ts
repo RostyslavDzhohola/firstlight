@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Client, type Room } from "@colyseus/sdk";
 import { PROTOCOL_VERSION } from "@firstlight/shared/net/protocol";
 import type { Game } from "../src/app.ts";
+import { BodyRoom } from "../src/world/BodyRoom.ts";
 import { Browser, play, startAuthServer, type AuthServer } from "./auth-helpers.ts";
 import { grantTravel, joinAs, playRequest, safeLeave, startServer, waitFor } from "./helpers.ts";
 
@@ -110,6 +111,56 @@ describe("seat hoarding (F12 S2)", () => {
     expect((await post(game.port, "dev:ipu10:ipu10", { body: "portus", v: PROTOCOL_VERSION }, ip)).status).toBe(429);
     // Another address is unaffected.
     expect((await post(game.port, "dev:ipv0:ipv0", { body: "portus", v: PROTOCOL_VERSION }, { "x-real-ip": "203.0.113.10" })).json.ok).toBe(true);
+  });
+});
+
+describe("seat caps hold under concurrent requests (F12 re-review S4)", () => {
+  /** Slow every seat reservation down by 100 ms, so concurrent requests overlap in the await. */
+  function slowReservations(): () => void {
+    const proto = BodyRoom.prototype as unknown as { _reserveSeat: (...a: unknown[]) => Promise<unknown> };
+    const orig = proto._reserveSeat;
+    proto._reserveSeat = async function (this: unknown, ...a: unknown[]) {
+      await new Promise((ok) => setTimeout(ok, 100));
+      return orig.apply(this, a);
+    };
+    return () => {
+      proto._reserveSeat = orig;
+    };
+  }
+
+  it("one account gets at most 2 unused seats from concurrent requests, within one body and across bodies", async () => {
+    game = await startServer();
+    const restore = slowReservations();
+    try {
+      const token = "dev:racer:racer:admin"; // admins may ask for any body
+      const bodies = ["portus", "arcadia", "portus", "hollowmere", "meridian", "arcadia"];
+      const results = await Promise.all(bodies.map((body) => post(game!.port, token, { body, v: PROTOCOL_VERSION })));
+      expect(results.filter((r) => r.json.ok).length).toBeLessThanOrEqual(2);
+      expect(results.filter((r) => r.json.ok).length).toBeGreaterThan(0);
+    } finally {
+      restore();
+    }
+  });
+
+  it("one address gets at most 10 unused seats from concurrent requests", async () => {
+    game = await startServer();
+    const restore = slowReservations();
+    try {
+      const ip = { "x-real-ip": "203.0.113.77" };
+      const results = await Promise.all(Array.from({ length: 16 }, (_, i) => post(game!.port, `dev:crowd${i}:crowd${i}`, { body: "portus", v: PROTOCOL_VERSION }, ip)));
+      expect(results.filter((r) => r.json.ok).length).toBe(10);
+    } finally {
+      restore();
+    }
+  });
+
+  it("a failed request frees its claim", async () => {
+    game = await startServer({ globalCap: 0 }); // everyone is queued: no seat is ever reserved
+    const ip = { "x-real-ip": "203.0.113.78" };
+    for (let i = 0; i < 12; i++) {
+      const r = await post(game.port, `dev:queued${i}:queued${i}`, { body: "portus", v: PROTOCOL_VERSION }, ip);
+      expect("queue" in r.json).toBe(true);
+    }
   });
 });
 

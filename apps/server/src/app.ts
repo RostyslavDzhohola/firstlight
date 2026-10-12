@@ -154,10 +154,6 @@ export async function createGame(opts: GameOptions): Promise<Game> {
       }
       fromIp.push(now);
       ipCalls.set(key, fromIp);
-      if (pendingSeats.forUser(identity.userId, now) >= PLAY_LIMITS.userSeats || (perAddress && pendingSeats.forIp(key, now) >= PLAY_LIMITS.ipSeats)) {
-        res.status(429).json({ ok: false, error: "slow down" });
-        return;
-      }
     }
     // Banned (also covers dev identities) or recently kicked by an admin.
     const refusal = identity.loadtest ? null : playRefusal(identity.userId);
@@ -180,6 +176,14 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     // Party headroom (D12) only for real party members: the copy another member is in on this body
     // (a client hint is honoured only if it names such a room).
     const partyRoom = partyRoomFor(identity.userId, body, typeof req.body.partyLeaderRoomId === "string" ? req.body.partyLeaderRoomId : undefined);
+    // Unused-seat caps: checked and claimed together, before any await (F12 re-review S4); the claim
+    // becomes the reservation or is released.
+    const seatIp = perAddress ? (ip ?? "unknown") : null;
+    if (!identity.loadtest && (pendingSeats.forUser(identity.userId, now) >= PLAY_LIMITS.userSeats || (seatIp !== null && pendingSeats.forIp(seatIp, now) >= PLAY_LIMITS.ipSeats))) {
+      res.status(429).json({ ok: false, error: "slow down" });
+      return;
+    }
+    const claim = pendingSeats.claim(identity.userId, seatIp, body, now);
     try {
       const result = await play(
         identity,
@@ -190,12 +194,14 @@ export async function createGame(opts: GameOptions): Promise<Game> {
           starter: Number.isInteger(req.body.starter) ? Math.max(0, Math.min(3, req.body.starter)) : undefined,
           palette: Number.isInteger(req.body.palette) ? Math.max(0, Math.min(5, req.body.palette)) : undefined,
           loadtest: req.body.loadtest === true,
-          ip: identity.loadtest ? null : (ip ?? "unknown"),
         },
         opts.limits,
       );
+      if (result.ok) pendingSeats.bind(claim, result.reservation.sessionId, result.reservation.roomId);
+      else pendingSeats.release(claim);
       res.json(result);
     } catch (err) {
+      pendingSeats.release(claim);
       console.error("play failed", err);
       res.status(500).json({ ok: false, error: "play failed" });
     }

@@ -17,6 +17,9 @@ export interface PendingSeat {
 export const SEAT_TTL_MS = 10_000;
 
 const bySession = new Map<string, PendingSeat>();
+let claimSeq = 0;
+/** A claim waits for the matchmaker at most this long before it stops counting. */
+const CLAIM_TTL_MS = 60_000;
 
 function prune(now: number): void {
   for (const [k, r] of bySession) if (r.expiresAt <= now) bySession.delete(k);
@@ -25,6 +28,26 @@ function prune(now: number): void {
 export const pendingSeats = {
   add(seat: PendingSeat): void {
     bySession.set(seat.sessionId, seat);
+  },
+  /**
+   * Hold one unused-seat slot for an account (and address) before any await, so concurrent
+   * requests can't all pass the cap check (F12 re-review S4). Bind it to the reservation, or
+   * release it if none was made. Returns the claim handle.
+   */
+  claim(userId: string, ip: string | null, body: BodyId, now = Date.now()): string {
+    const key = `claim:${++claimSeq}`;
+    bySession.set(key, { userId, ip, sessionId: key, roomId: "", body, expiresAt: now + CLAIM_TTL_MS });
+    return key;
+  },
+  /** The claimed slot became this reservation. */
+  bind(claim: string, sessionId: string, roomId: string, now = Date.now()): void {
+    const c = bySession.get(claim);
+    bySession.delete(claim);
+    if (c) bySession.set(sessionId, { ...c, sessionId, roomId, expiresAt: now + SEAT_TTL_MS });
+  },
+  /** No reservation came of the claim (queue, refusal, error). */
+  release(claim: string): void {
+    bySession.delete(claim);
   },
   /** Unused, unexpired reservations of an account. */
   forUser(userId: string, now = Date.now()): number {

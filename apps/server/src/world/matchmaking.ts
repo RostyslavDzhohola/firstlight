@@ -6,7 +6,6 @@ import { BODY_IDS, type BodyId } from "@firstlight/shared";
 import type { PlayResponse } from "@firstlight/shared/net/protocol";
 import type { Identity } from "../auth/identity.ts";
 import type { BodyRoomMetadata } from "./BodyRoom.ts";
-import { pendingSeats, SEAT_TTL_MS } from "./reservations.ts";
 
 export interface MatchmakingLimits {
   maxClients: number;
@@ -22,8 +21,6 @@ export interface PlayInput {
   partyLeaderRoomId?: string;
   partySize?: number;
   loadtest?: boolean;
-  /** Requesting address (seat caps per address); null for load-test bots. */
-  ip?: string | null;
 }
 
 const locks = new Map<string, Promise<unknown>>();
@@ -100,8 +97,6 @@ export async function play(identity: Identity, input: PlayInput, limits: Matchma
     }
     queue.delete(identity.userId);
     const reservation = await matchMaker.reserveSeatFor(target, { body: input.body, starter: input.starter, palette: input.palette }, identity);
-    // The room only admits seats it can find here (BodyRoom.onJoin revalidates them, F12 B5).
-    pendingSeats.add({ userId: identity.userId, ip: input.ip ?? null, sessionId: reservation.sessionId, roomId: target.roomId, body: input.body, expiresAt: Date.now() + SEAT_TTL_MS });
     return { ok: true, reservation: reservation as unknown as import("@firstlight/shared/net/protocol").SeatReservation };
   });
 }
