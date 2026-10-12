@@ -94,7 +94,7 @@ export function grassWeight(p: TerrainPalette, height: number, water: number, fl
   return Math.max(0, Math.min(1, w * p.grassDensity * (0.75 + 0.25 * n)));
 }
 
-/** Landing pads' stone discs are 8.6 m across the base: no grass on them, back to full just past the rim. */
+/** Landing pads' stone discs have an 8.6 m base radius: no grass on them, back to full just past the rim. */
 export function padGrassMask(pads: readonly Dir[], x: number, y: number, z: number, radius: number): number {
   let m = 1;
   for (const pad of pads) m *= Math.max(0, Math.min(1, (chordMetres(pad, x, y, z, radius) - 9.2) / 2));

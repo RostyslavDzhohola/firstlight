@@ -58,7 +58,10 @@ export class OnboardingHud {
     this.title = el("span", "", summary, "Tutorial checklist");
     keys(summary, ["T"]);
     this.checklist.open = preference?.expanded ?? false;
-    this.checklist.addEventListener("toggle", () => this.onExpanded?.(this.checklist.open));
+    this.checklist.addEventListener("toggle", () => {
+      this.onExpanded?.(this.checklist.open);
+      this.revealCurrent();
+    });
     for (const s of STEPS) {
       const row = el("div", "fl-onb__st", this.list);
       el("i", "", row);
@@ -110,6 +113,7 @@ export class OnboardingHud {
         this.rows[i]!.className = `fl-onb__st${done ? " is-done" : s === cur ? " is-now" : ""}${s.optional ? " is-opt" : ""}`;
         this.segs[i]!.className = done ? "is-done" : s === cur ? "is-now" : "";
       });
+      this.revealCurrent();
       this.railText.replaceChildren("Step ");
       el("b", "", this.railText, String(cur ? STEPS.indexOf(cur) + 1 : STEPS.length));
       this.railText.append(` of ${STEPS.length}`);
@@ -128,6 +132,14 @@ export class OnboardingHud {
         this.barText.textContent = text;
       }
     }
+  }
+
+  /** On a short screen the open checklist scrolls inside the widget, and while playing the mouse
+   *  can't scroll it (the pointer is locked; unlocking opens the pause menu): keep the current step in view. */
+  private revealCurrent() {
+    if (!this.checklist.open) return;
+    const row = this.rows.find((r) => r.classList.contains("is-now"));
+    row?.scrollIntoView({ block: "nearest" });
   }
 
   /** T while playing, or the native details summary when the mouse is free. */

@@ -12,7 +12,8 @@ import {
   mx_noise_float, normalize, positionGeometry, positionPrevious, pow, select, sin, smoothstep, time,
   transformDirection, uniform, vec3, varying, renderGroup,
 } from "three/tsl";
-import { CHUNK_QUADS, hash4, mulberry32, type Face } from "@firstlight/shared";
+import { CHUNK_QUADS, hash4, mulberry32, type Dir, type Face } from "@firstlight/shared";
+import { padGrassMask } from "../world/palette.ts";
 import { atmo } from "./atmosphere.ts";
 import type { BodyLook } from "./looks.ts";
 import type { ResolvedSettings } from "./quality.ts";
@@ -144,7 +145,9 @@ export class GrassSystem {
   private wanted: { key: string; chunk: GrassChunk; ca: number; cb: number; d: number }[] = [];
   blades = 0;
 
-  constructor(private readonly radiusOfBody: number, private readonly quadsPerFace: number) {
+  /** @param pads landing pads: no blade roots on their stone discs (the per-vertex weight alone
+   *  bleeds into the disc through interpolation). */
+  constructor(private readonly radiusOfBody: number, private readonly quadsPerFace: number, private readonly pads: readonly Dir[] = []) {
     this.group.name = "grass";
   }
 
@@ -327,6 +330,10 @@ export class GrassSystem {
       const x = P[A]! * wa + P[B]! * wb + P[C]! * wc;
       const y = P[A + 1]! * wa + P[B + 1]! * wb + P[C + 1]! * wc;
       const z = P[A + 2]! * wa + P[B + 2]! * wb + P[C + 2]! * wc;
+      if (this.pads.length) {
+        const l = Math.hypot(x, y, z);
+        if (padGrassMask(this.pads, x / l, y / l, z / l, this.radiusOfBody) <= 0) continue;
+      }
       const scale = 0.55 + rand() * 0.75 * (0.6 + 0.4 * gw);
       const o = n * 4;
       arr[o] = x;
