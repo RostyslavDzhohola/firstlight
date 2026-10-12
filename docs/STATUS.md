@@ -50,6 +50,8 @@
 | UI design competition | judged: Opus entry B base, Fable entry A for landing/loading/player list/onboarding | ../design/opus (base) | port to apps/client/src/ui |
 | Review combat+auth | done; fixes in D26 | docs/reviews/2026-10-12-* | — |
 | Audio (SFX + generative music) | Builder | main | apps/client/src/audio |
+| UI port (design verdict) | Opus sub-agent | ../fl-wt-ui (lane/ui, based on lane/render + main) | apps/client/src/ui, index.html, main.ts |
+| Review lane/render | Codex Sol high + Opus | delegate fl-review-render-sol-1 + agent | — |
 
 ## Measured numbers
 
