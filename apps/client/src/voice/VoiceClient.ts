@@ -86,7 +86,7 @@ export class VoiceClient {
     let shift = false;
     window.addEventListener("keydown", (e) => {
       if (e.key === "Shift") shift = true;
-      if (e.key === "Escape" && e.shiftKey) this.setPanic(true);
+      if (e.key === "Escape" && e.shiftKey && this.enabled) this.setPanic(true);
       if (this.ctx?.state === "suspended") void this.ctx.resume().catch(() => {});
     }, true);
     window.addEventListener("keyup", (e) => {
@@ -295,7 +295,6 @@ export class VoiceRoom implements ClientSystem {
   private readonly unsub: (() => void)[] = [];
   private readonly farSince = new Map<string, number>();
   private readonly backoff = new Map<string, number>();
-  private readonly radioWasOn = new Map<string, boolean>();
   private lastPlan = 0;
   private lastAudio = 0;
   private bHeld = false;
@@ -313,7 +312,6 @@ export class VoiceRoom implements ClientSystem {
         vc.audio?.detach(peer);
         vc.speaking.delete(peer);
         this.farSince.delete(peer);
-        this.radioWasOn.delete(peer);
       },
       accept: (peer) => this.accepts(peer),
     });
@@ -454,6 +452,7 @@ export class VoiceRoom implements ClientSystem {
     const canTalk = vc.enabled && !vc.panic && !vc.adminMuted && vc.micState === "live";
     if (input.pressed.has("KeyV") && vc.enabled && vc.micState !== "live") this.game.hud.toast("No microphone — listening only (Esc → Voice & radio to retry)", "warn");
     const wasPtt = vc.ptt;
+    const wasRadio = vc.radioTx;
     vc.ptt = canTalk && input.down("KeyV");
 
     const b = input.down("KeyB");
@@ -474,7 +473,7 @@ export class VoiceRoom implements ClientSystem {
     vc.radioTx = canTalk && b && !this.txDenied && me.radioCh > 0 && vc.hasRadio();
     const talking = vc.ptt || vc.radioTx || (vc.micTest && vc.micState === "live");
     for (const t of vc.mic?.getAudioTracks() ?? []) if (t.enabled !== talking) t.enabled = talking;
-    if (vc.ptt !== wasPtt) this.gate(this.room.state as any, me);
+    if (vc.ptt !== wasPtt || vc.radioTx !== wasRadio) this.gate(this.room.state as any, me);
   }
 
   private myInfo(me: any): Me {
@@ -543,11 +542,8 @@ export class VoiceRoom implements ClientSystem {
       const stranger = !myParty || p.party !== myParty;
       const silent = vc.mutedUsers.has(p.userId) || vc.blockedUsers.has(p.userId) || (vc.muteStrangers && stranger);
       audio.setPeerGain(id, silent ? 0 : 1);
-      const radioOn = !!(p.flags & PF.RADIO_TX) && onMyChannel(my, p);
-      if ((this.radioWasOn.get(id) ?? false) !== radioOn) {
-        this.radioWasOn.set(id, radioOn);
-        audio.setRadio(id, radioOn, !silent && !vc.panic);
-      }
+      // Same-channel transmitter: through the radio chain at fixed gain (squelch on each edge).
+      audio.setRadio(id, !!(p.flags & PF.RADIO_TX) && onMyChannel(my, p), !silent && !vc.panic);
     }
     audio.levels(vc.speaking);
   }

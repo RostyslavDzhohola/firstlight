@@ -18,6 +18,8 @@ const SIGNAL_BURST = 12;
 const MAX_CANDIDATES_PER_MSG = 20;
 const RING_EVERY_MS = 3000;
 const FAILED_GIVE_UP_MS = 8000;
+/** A ring for a link younger than this crossed our own offer: ignore it. */
+const RING_GRACE_MS = 4000;
 const MAX_LINKS = VOICE.MAX_PEERS + VOICE.RADIO_CAP;
 
 interface Link {
@@ -29,6 +31,7 @@ interface Link {
   sending: MediaStreamTrack | null;
   bitrateSet: boolean;
   failedAt: number;
+  createdAt: number;
   closed: boolean;
 }
 
@@ -105,8 +108,10 @@ export class MeshTransport implements VoiceTransport {
     if (!this.ice || from === this.me) return;
     let link = this.links.get(from);
     if (isRing(payload)) {
-      // They have no link to us. Drop any stale one and call them.
+      // They have no link to us: call them. A young link means our offer is already on its way;
+      // an older one is stale (they closed their side), so start over.
       if (!this.initiates(from) || !this.hooks.accept(from)) return;
+      if (link && performance.now() - link.createdAt < RING_GRACE_MS) return;
       if (link) this.close(from);
       if (this.links.size < MAX_LINKS) this.open(from, true);
       return;
@@ -133,6 +138,7 @@ export class MeshTransport implements VoiceTransport {
     const pc = link.pc;
     const d = payload.sdp;
     if (d) {
+      if (d.type === "answer" && pc.signalingState !== "have-local-offer") return; // stale answer
       const collision = d.type === "offer" && (link.makingOffer || pc.signalingState !== "stable");
       link.ignoreOffer = !link.polite && collision;
       if (link.ignoreOffer) return;
@@ -211,6 +217,7 @@ export class MeshTransport implements VoiceTransport {
       sending: null,
       bitrateSet: false,
       failedAt: 0,
+      createdAt: performance.now(),
       closed: false,
     };
     this.links.set(peer, link);
