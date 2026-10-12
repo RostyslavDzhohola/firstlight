@@ -9,13 +9,13 @@
 |---|---|
 | GitHub repo | `RostyslavDzhohola/firstlight` (private), branch `main` |
 | Railway | project `firstlight`, service `game-server`, volume `/data` 5 GB, US East, 2 vCPU/2 GB, Hobby; live at https://api.firstlight.one4all.dev (ALLOW_DEV_GUESTS=1 until auth lane merges) |
-| Vercel | not yet |
+| Vercel | project `playfirstlight`, https://firstlight.one4all.dev live (A record added), /api/auth + /admin + /stats proxied with origin secret |
 | Cloudflare | account `rosty-build` workers.dev; Workers token saved; TURN key pending owner |
 | Resend | paid plan; domain firstlight.one4all.dev added, DNS added, verification pending; sending key not yet created |
 
 ## Milestones
 
-- [ ] M0 Setup and skeleton
+- [x] M0 Setup and skeleton (live client + server; dev-guest tokens disabled in prod 03:40Z)
   - [x] caffeinate, start time
   - [x] Railway project + service + volume
   - [ ] workspace scaffold, docs, AGENTS.md
@@ -40,7 +40,16 @@
 
 | Lane | Owner | Worktree / task | Paths |
 |---|---|---|---|
-| Dashboards | Codex | fl-run-codex-dashboards-1 | — |
+| Render look + G1 gate | Opus sub-agent | ../fl-wt-render (lane/render) | apps/client/src/render, world/Planet.ts, shared props.ts |
+| Accounts + persistence | Opus sub-agent | MERGED 61aa332 | apps/server/src/auth, db |
+| Enemies, wildlife, bosses | Opus sub-agent | ../fl-wt-npc (lane/npc) | server world/npc, client world/npcs, shared content/npcs.ts |
+| Voice + radio + phrase wheel | Opus sub-agent | ../fl-wt-voice (lane/voice) | server world/voice, client voice |
+| Social, moderation, stats, share | Opus sub-agent | ../fl-wt-social (lane/social) | parties, player list, /admin, /stats, screenshot |
+| Missions, medals, eggs, shop, pads, stage | Opus sub-agent | ../fl-wt-quests (lane/quests) | content missions/medals, server systems, map |
+| Characters (GLB, animations) | Opus sub-agent | ../fl-wt-chars (lane/chars) | Avatars.ts, assets-dev/characters, tools/blender |
+| UI design competition | Fable 5.1 (delegate) + Opus sub-agent | ../design/fable, ../design/opus | — |
+| Review combat+auth | Codex Sol high + Opus + Sonnet | delegate fl-review-combat-auth-sol-1 + 2 agents | — |
+| Audio (SFX + generative music) | Builder | main | apps/client/src/audio |
 
 ## Measured numbers
 
