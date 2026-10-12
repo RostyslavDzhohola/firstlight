@@ -1,4 +1,5 @@
-// Game orchestration: renderer, current body, local player, network, remote avatars, main loop.
+// Game orchestration: renderer, current body, local player, network, remote avatars, combat,
+// portals, piles, HUD and the main loop.
 
 import * as THREE from "three/webgpu";
 import type { BodyId } from "@firstlight/shared";
@@ -7,7 +8,12 @@ import { Net } from "../net/Net.ts";
 import { AvatarView } from "../render/Avatars.ts";
 import { createRenderer, type RenderCtx } from "../render/renderer.ts";
 import { PerfOverlay } from "../render/PerfOverlay.ts";
+import type { Hud } from "../ui/hud.ts";
+import { Menu } from "../ui/menu.ts";
+import { PilesView } from "../world/PilesView.ts";
 import { Planet } from "../world/Planet.ts";
+import { Portals } from "../world/Portals.ts";
+import { CombatClient } from "./CombatClient.ts";
 import { Input } from "./input.ts";
 import { PlayerController } from "./PlayerController.ts";
 import { CLIENT_SYSTEMS, type ClientSystem } from "./systems.ts";
@@ -32,10 +38,17 @@ export class Game {
   readonly avatars = new Map<string, AvatarView>();
   self!: AvatarView;
   perf!: PerfOverlay;
+  combat!: CombatClient;
+  hud!: Hud;
+  menu!: Menu;
+  portals: Portals | null = null;
+  piles: PilesView | null = null;
   bodyId: BodyId = "portus";
   systems: ClientSystem[] = [];
   private last = performance.now();
   private running = false;
+  private travelling = false;
+  private portalCooldownUntil = 0;
 
   async start(body: BodyId) {
     setLoading("Starting the renderer…", 0.05);
@@ -43,28 +56,69 @@ export class Game {
     this.ctx = await createRenderer(container);
     this.input = new Input(this.ctx.renderer.domElement);
     this.perf = new PerfOverlay(this.ctx);
+    this.combat = new CombatClient(this);
+    this.hud = this.combat.hud;
+    this.menu = new Menu(this);
     document.getElementById("landing")!.style.display = "none";
-    await this.enterBody(body);
+    // First visit: choose a starter before entering the world.
+    let firstChoice: { starter: number; palette: number } | undefined;
+    if (!localStorage.getItem("fl.starter") && !flags.has("autoplay")) {
+      hideLoading();
+      firstChoice = await this.hud.characterPick();
+    }
+    await this.enterBody(body, firstChoice);
     this.running = true;
     this.input.lock();
     this.ctx.renderer.setAnimationLoop(() => this.frame());
   }
 
-  async enterBody(body: BodyId) {
-    setLoading(`Travelling to ${body[0]!.toUpperCase()}${body.slice(1)}…`, 0.15);
+  async travel(body: BodyId) {
+    if (this.travelling) return;
+    this.travelling = true;
+    try {
+      await this.enterBody(body);
+    } finally {
+      this.travelling = false;
+      this.portalCooldownUntil = performance.now() + 3000;
+    }
+  }
+
+  async loggedOut() {
+    this.running = false;
+    await this.net.leave();
+    document.exitPointerLock?.();
+    this.menu.showLoggedOut();
+  }
+
+  async resume() {
+    this.menu.hideAll();
+    await this.enterBody(this.bodyId);
+    this.running = true;
+    this.input.lock();
+  }
+
+  async enterBody(body: BodyId, choice?: { starter: number; palette: number }) {
+    const name = `${body[0]!.toUpperCase()}${body.slice(1)}`;
+    setLoading(`Travelling to ${name}…`, 0.15);
     await this.net.leave();
     for (const s of this.systems) s.dispose();
     this.systems = [];
     for (const a of this.avatars.values()) a.dispose();
     this.avatars.clear();
+    this.portals?.dispose();
+    this.piles?.dispose();
     this.planet?.dispose();
     this.bodyId = body;
     this.planet = new Planet(this.ctx.scene, body);
     this.player ??= new PlayerController(this.planet.terrain, this.planet.body.waterLevel);
     this.player.setTerrain(this.planet.terrain, this.planet.body.waterLevel);
+    this.portals = new Portals(this.ctx.scene, body, this.planet.terrain);
+    this.piles = new PilesView(this.ctx.scene);
 
     setLoading("Connecting…", 0.3);
-    const room = await this.net.join(body);
+    const stored = { starter: Number(localStorage.getItem("fl.starter") ?? 0), palette: Number(localStorage.getItem("fl.palette") ?? 0) };
+    const room = await this.net.join(body, choice ?? stored);
+    this.combat.attach();
     await new Promise<void>((resolve) => {
       const check = () => {
         const me = (room.state as any).players?.get(room.sessionId);
@@ -76,9 +130,13 @@ export class Game {
       check();
     });
     this.net.onCorrect = (x, y, z) => this.player.teleport(x, y, z);
+    this.net.onLeaveRoom = (code) => {
+      if (this.travelling || !this.running) return;
+      // Unexpected disconnect (e.g. a server update): rejoin the same body.
+      if (code !== 1000 && code !== 4000) setTimeout(() => void this.travel(this.bodyId), 1500);
+    };
     this.systems = CLIENT_SYSTEMS.map((f) => f(this)).filter((x): x is ClientSystem => !!x);
 
-    // Stream terrain around the spawn before handing control over.
     const t0 = performance.now();
     for (;;) {
       const p = this.player.pos;
@@ -90,7 +148,6 @@ export class Game {
     this.self ??= new AvatarView(0, 0);
     this.ctx.scene.add(this.self.root);
     this.player.placeCamera(this.ctx.camera);
-    // Warm up shaders with real frames behind the loading screen (SPEC §4.1).
     setLoading("Warming up shaders…", 0.95);
     for (let i = 0; i < 4; i++) {
       this.ctx.render();
@@ -103,22 +160,25 @@ export class Game {
     const now = performance.now();
     const dt = Math.min(0.05, (now - this.last) / 1000);
     this.last = now;
-    if (!this.running) return;
+    if (!this.running || this.travelling) {
+      this.ctx.render();
+      return;
+    }
 
-    this.player.update(dt, this.input, this.input.rmb);
+    this.player.update(dt, this.input, this.combat.aiming());
     const p = this.player.pos;
     const f = this.player.facing;
     this.net.sendInput(now, { x: p.x, y: p.y, z: p.z, fx: f.x, fy: f.y, fz: f.z, anim: this.player.anim });
     this.self.set(p.x, p.y, p.z, f.x, f.y, f.z, this.player.anim, dt);
 
-    // Remote players.
+    const state = this.net.room?.state as any;
     for (const [id, view] of this.net.remotes) {
       const s = this.net.sample(view, now);
       if (!s) continue;
       let a = this.avatars.get(id);
       if (!a) {
-        const st = (this.net.room?.state as any)?.players?.get(id);
-        a = new AvatarView(st?.palette ?? (id.charCodeAt(0) % 6), st?.starter ?? 0);
+        const st = state?.players?.get(id);
+        a = new AvatarView(st?.palette ?? 0, st?.starter ?? 0);
         this.avatars.set(id, a);
         this.ctx.scene.add(a.root);
       }
@@ -132,7 +192,14 @@ export class Game {
     }
 
     this.planet.update(p.x, p.y, p.z, this.ctx.camera, now);
+    this.portals?.update(dt);
+    this.piles?.update(state, dt);
+    this.combat.update(dt, now);
     for (const s of this.systems) s.update(dt, now);
+    if (now > this.portalCooldownUntil) {
+      const to = this.portals?.check(p);
+      if (to && to !== this.bodyId) void this.travel(to);
+    }
     this.player.placeCamera(this.ctx.camera);
     if (this.input.pressed.has("F3")) this.perf.toggle();
     this.ctx.render();

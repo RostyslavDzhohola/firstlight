@@ -34,7 +34,7 @@ export class Net {
   onCorrect: ((x: number, y: number, z: number) => void) | null = null;
   onLeaveRoom: ((code: number) => void) | null = null;
 
-  async join(body: BodyId, opts: { partyLeaderRoomId?: string } = {}): Promise<Room> {
+  async join(body: BodyId, opts: { partyLeaderRoomId?: string; starter?: number; palette?: number } = {}): Promise<Room> {
     const token = await getPlayToken();
     for (;;) {
       const res = await fetch(`${config.apiUrl}/api/play`, {
