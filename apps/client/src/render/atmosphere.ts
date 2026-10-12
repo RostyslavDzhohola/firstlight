@@ -11,11 +11,11 @@
 
 import * as THREE from "three/webgpu";
 import {
-  abs, acos, cameraPosition, clamp, dot, exp, float, Fn, length, max, mix, normalize, output, positionWorld, sqrt, texture, vec2,
-  positionWorldDirection, pow, select, smoothstep, uniform, vec4, renderGroup,
+  abs, acos, cameraPosition, clamp, dot, exp, float, floor, Fn, fract, hash, length, max, min, mix, normalize, output, positionWorld,
+  positionWorldDirection, pow, renderGroup, select, sin, smoothstep, sqrt, texture, time, uniform, vec2, vec3, vec4,
 } from "three/tsl";
 import type { BodyLook } from "./looks.ts";
-import { SKY_MID_E, skyLutTexture } from "./skyLut.ts";
+import { LUT_H, LUT_SLICES, SKY_MID_E, skyLutTexture } from "./skyLut.ts";
 import { SunLight } from "three/addons/lights/SunLight.js";
 import { SunLightNode } from "three/addons/lights/SunLightNode.js";
 import type { ResolvedSettings } from "./quality.ts";
@@ -49,9 +49,27 @@ export const atmo = {
   inscatter: uniform(0.6).setGroup(renderGroup),
   /** Weight of the single-scattering LUT vs the art gradient (0 on Low). */
   scatterMix: uniform(0.6).setGroup(renderGroup),
+  // ---- day/night + weather (environment.ts drives these every frame; uniforms only) ----
+  /** Fractional LUT slice for the current sun elevation (skyLut.ts sliceFor). */
+  lutSlice: uniform(0).setGroup(renderGroup),
+  /** Star field brightness (night × clear sky). */
+  stars: uniform(0).setGroup(renderGroup),
+  /** Lightning flash 0..1 (sky + ambient pulse). */
+  flash: uniform(0).setGroup(renderGroup),
+  flashColor: col(0xd8e4ff).setGroup(renderGroup),
+  /** Fog colour tint (dust storms) and its amount. */
+  fogTint: col(0xc8925a).setGroup(renderGroup),
+  fogTintAmt: uniform(0).setGroup(renderGroup),
+  /** Multiplier for emissive "glow" materials (pads, portals, lamps): brighter at night. */
+  glowBoost: uniform(1).setGroup(renderGroup),
+  /** Surface wetness 0..1 (darker, shinier terrain/props/grass after rain). */
+  wet: uniform(0).setGroup(renderGroup),
+  /** Rain hitting water now 0..1 (ripples). */
+  rain: uniform(0).setGroup(renderGroup),
 };
 
-/** Single-scattering radiance from the per-body sky-view LUT (see skyLut.ts). */
+/** Single-scattering radiance from the per-body sky-view LUT atlas (see skyLut.ts): two slices by
+ * sun elevation, blended. */
 const lutSky = Fn(([dir]: [any]) => {
   const up = atmo.up;
   const e = dot(dir, up);
@@ -59,8 +77,31 @@ const lutSky = Fn(([dir]: [any]) => {
   const sT = atmo.sunDir.sub(up.mul(dot(atmo.sunDir, up)));
   const cosPhi = dot(dT, sT).div(max(length(dT).mul(length(sT)), 0.00001));
   const u = acos(clamp(cosPhi, -1.0, 1.0)).div(Math.PI);
-  const v = sqrt(max(e, 0.0));
-  return (texture(skyLutTexture(), vec2(u, v)) as any).level(0).rgb;
+  // Row within a slice, kept off the slice edges so bilinear filtering can't bleed across slices.
+  const vr = clamp(sqrt(max(e, 0.0)), 0.5 / LUT_H, 1 - 0.5 / LUT_H);
+  const sl = clamp(atmo.lutSlice, 0, LUT_SLICES - 1);
+  const s0 = floor(sl);
+  const s1 = min(s0.add(1), LUT_SLICES - 1);
+  const tex = skyLutTexture();
+  const a = (texture(tex, vec2(u, s0.add(vr).div(LUT_SLICES))) as any).level(0).rgb;
+  const b = (texture(tex, vec2(u, s1.add(vr).div(LUT_SLICES))) as any).level(0).rgb;
+  return mix(a, b, sl.sub(s0));
+});
+
+/** Sparse twinkling stars (background only), above the horizon, scaled by atmo.stars. */
+const starField = Fn(([dir]: [any]) => {
+  const p = dir.mul(150.0);
+  const cell: any = floor(p);
+  const seed = cell.x.mul(7.0).add(cell.y.mul(157.0)).add(cell.z.mul(113.0));
+  const h = hash(seed);
+  const j = vec3(hash(seed.add(1.7)), hash(seed.add(3.1)), hash(seed.add(5.3))).mul(0.6).add(0.2);
+  const d = length(fract(p).sub(j));
+  const on = smoothstep(0.9955, 1.0, h);
+  const core = smoothstep(0.2, 0.0, d);
+  const twinkle = sin(time.mul(2.7).add(h.mul(97.0))).mul(0.3).add(0.7);
+  const above = smoothstep(0.02, 0.2, dot(dir, atmo.up));
+  const tint = mix(vec3(1.0, 0.92, 0.82), vec3(0.75, 0.85, 1.0), hash(seed.add(9.1)));
+  return tint.mul(on.mul(core).mul(twinkle).mul(above).mul(atmo.stars).mul(6.0));
 });
 
 /** Sky radiance (linear) towards a unit direction. `disc` adds the HDR sun disc. */
@@ -87,12 +128,14 @@ export const skyColor = Fn(([dir, disc]: [any, any]) => {
   // Sun disc (HDR → bloom).
   const d: any = smoothstep(atmo.sunCosOuter, atmo.sunCosInner, cosT).mul(atmo.sunDisc).mul(disc);
   c.addAssign(atmo.sunColor.mul(d));
+  // Lightning: the whole sky lights up, most near the horizon cloud deck.
+  c.addAssign(atmo.flashColor.mul(atmo.flash.mul(float(1.2).sub(max(e, 0.0).mul(0.6)))));
   return c;
 });
 
-/** Background node: the sky in the view direction. */
+/** Background node: the sky in the view direction (plus stars at night). */
 export function skyBackgroundNode(): THREE.Node {
-  return skyColor(positionWorldDirection, float(1));
+  return skyColor(positionWorldDirection, float(1)).add(starField(positionWorldDirection));
 }
 
 /** Fog amount (0..1) for the current fragment. Exposed for custom materials (sky planets, particles). */
@@ -118,7 +161,10 @@ export const fogColor = Fn(([dir]: [any]) => {
   const dirH = normalize(dir.sub(atmo.up.mul(e)).add(atmo.up.mul(clamp(e, -0.05, 0.3))));
   const sky = skyColor(dirH, float(0));
   const fwd = max(dot(dir, atmo.sunDir), 0.0);
-  return sky.add(atmo.sunColor.mul(pow(fwd, 8.0).mul(atmo.inscatter)));
+  const c = sky.add(atmo.sunColor.mul(pow(fwd, 8.0).mul(atmo.inscatter)));
+  // Dust storms: the haze takes the dust colour (lit by the sky's brightness).
+  const lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  return mix(c, atmo.fogTint.mul(lum.mul(1.6).add(0.02)), atmo.fogTintAmt);
 });
 
 /** Scene fog node (assigned to scene.fogNode). */
@@ -181,10 +227,19 @@ export class SunRig {
   private readonly bx = new THREE.Vector3();
   private readonly by = new THREE.Vector3();
   private readonly snapped = new THREE.Vector3();
+  private readonly keyDir = new THREE.Vector3(0, 1, 0);
   private look: BodyLook;
+  /**
+   * Where the sun and the key light are (local sky frame, radians). The environment (day/night
+   * clock) writes these every frame; defaults are the body's reference sun. At night the key light
+   * is the moon (a bright sky planet), so the same DirectionalLight keeps the scene readable.
+   */
+  readonly sky = { sunElev: 0.6, sunAz: 0.9, keyIsMoon: false, moonElev: 0.5, moonAz: 2.0 };
 
   constructor(private readonly scene: THREE.Scene, look: BodyLook, private readonly renderer?: THREE.WebGPURenderer) {
     this.look = look;
+    this.sky.sunElev = look.sunElev;
+    this.sky.sunAz = look.sunAz;
     this.sun = new THREE.DirectionalLight(look.sun, look.sunIntensity);
     this.sun.name = "sun";
     this.sun.shadow.bias = -0.0004;
@@ -201,6 +256,9 @@ export class SunRig {
    */
   setLook(look: BodyLook) {
     this.look = look;
+    this.sky.sunElev = look.sunElev;
+    this.sky.sunAz = look.sunAz;
+    this.sky.keyIsMoon = false;
     for (const l of [this.sun, this.cascaded]) {
       if (!l) continue;
       l.color.setHex(look.sun);
@@ -259,22 +317,49 @@ export class SunRig {
     sc.updateProjectionMatrix();
   }
 
+  /** Key light (sun or moon) colour and intensity; the cascaded sun follows when active. */
+  setKey(color: THREE.Color, intensity: number) {
+    this.sun.color.copy(color);
+    this.sun.intensity = intensity;
+    if (this.cascaded) {
+      this.cascaded.color.copy(color);
+      this.cascaded.intensity = intensity;
+    }
+  }
+
+  /** Sky fill (hemisphere light). */
+  setFill(sky: THREE.Color, ground: THREE.Color, intensity: number) {
+    this.hemi.color.copy(sky);
+    this.hemi.groundColor.copy(ground);
+    this.hemi.intensity = intensity;
+  }
+
   /** `focus` = the point the shadows centre on (player); `up` its local up. */
   update(focus: THREE.Vector3, dt: number) {
     const up = this.target.copy(focus).normalize();
     atmo.up.value.copy(up);
     this.hemi.position.copy(up);
-    const t = skyDir(up.x, up.y, up.z, this.look.sunElev, this.look.sunAz, this.tmp);
+    const t = skyDir(up.x, up.y, up.z, this.sky.sunElev, this.sky.sunAz, this.tmp);
     const want = this.want.set(t[0], t[1], t[2]);
     if (!this.initialised) {
       this.sunDir.copy(want);
-      this.shadowDir.copy(want);
-      this.initialised = true;
     } else {
       this.sunDir.lerp(want, 1 - Math.exp(-3 * dt)).normalize();
-      if (this.shadowDir.dot(this.sunDir) < 0.999975) this.shadowDir.copy(this.sunDir);
     }
     atmo.sunDir.value.copy(this.sunDir);
+    // Key light: the sun by day, the moon at night (switched while both are dim, at twilight).
+    if (this.sky.keyIsMoon) {
+      const m = skyDir(up.x, up.y, up.z, this.sky.moonElev, this.sky.moonAz, this.tmp);
+      this.keyDir.set(m[0], m[1], m[2]);
+    } else {
+      this.keyDir.copy(this.sunDir);
+    }
+    if (!this.initialised) {
+      this.shadowDir.copy(this.keyDir);
+      this.initialised = true;
+    } else if (this.shadowDir.dot(this.keyDir) < 0.999975) {
+      this.shadowDir.copy(this.keyDir);
+    }
     // SunLight shines from its position towards the origin: a pure direction.
     if (this.cascaded) this.cascaded.position.copy(this.shadowDir);
 

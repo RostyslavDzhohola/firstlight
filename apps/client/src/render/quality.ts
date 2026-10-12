@@ -38,6 +38,8 @@ export const FEATURES = [
   "detail",
   "chars",
   "destruct",
+  "weather",
+  "daynight",
 ] as const;
 export type Feature = (typeof FEATURES)[number];
 
@@ -64,6 +66,8 @@ export interface TierSpec {
   particles: number;
   motes: number;
   fullAvatars: number;
+  /** Rain streaks / dust motes in the camera-local weather box at full intensity (one draw). */
+  weatherDrops: number;
 }
 
 export const TIER_TABLE: Record<Tier, TierSpec> = {
@@ -77,7 +81,7 @@ export const TIER_TABLE: Record<Tier, TierSpec> = {
     props: { fullTo: 15, lodTo: 140 },
     water: 0,
     post: { bloomScale: 0.33, fxaa: false, vignette: false, grain: false, ao: "off", traa: false },
-    particles: 2_000, motes: 60, fullAvatars: 8,
+    particles: 2_000, motes: 60, fullAvatars: 8, weatherDrops: 1_500,
   },
   medium: {
     dprCap: 1.25, renderScale: 0.85, gpuTargetMs: 12, drawBudget: 250,
@@ -89,7 +93,7 @@ export const TIER_TABLE: Record<Tier, TierSpec> = {
     props: { fullTo: 25, lodTo: 180 },
     water: 1,
     post: { bloomScale: 0.5, fxaa: true, vignette: true, grain: true, ao: "off", traa: false },
-    particles: 5_000, motes: 160, fullAvatars: 16,
+    particles: 5_000, motes: 160, fullAvatars: 16, weatherDrops: 4_000,
   },
   high: {
     dprCap: 1.5, renderScale: 1.0, gpuTargetMs: 10, drawBudget: 400,
@@ -101,7 +105,7 @@ export const TIER_TABLE: Record<Tier, TierSpec> = {
     props: { fullTo: 40, lodTo: 220 },
     water: 2,
     post: { bloomScale: 0.5, fxaa: true, vignette: true, grain: true, ao: "half", traa: true },
-    particles: 15_000, motes: 300, fullAvatars: 24,
+    particles: 15_000, motes: 300, fullAvatars: 24, weatherDrops: 8_000,
   },
   ultra: {
     dprCap: 2.0, renderScale: 1.0, gpuTargetMs: 7, drawBudget: 600,
@@ -113,7 +117,7 @@ export const TIER_TABLE: Record<Tier, TierSpec> = {
     props: { fullTo: 60, lodTo: 260 },
     water: 3,
     post: { bloomScale: 0.5, fxaa: true, vignette: true, grain: true, ao: "full", traa: true },
-    particles: 30_000, motes: 500, fullAvatars: 40,
+    particles: 30_000, motes: 500, fullAvatars: 40, weatherDrops: 14_000,
   },
 };
 

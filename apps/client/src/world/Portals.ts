@@ -2,7 +2,9 @@
 // Portus' three portals. Walking into a portal travels to its body.
 
 import * as THREE from "three/webgpu";
+import { materialColor } from "three/tsl";
 import { BODIES, padDirs, PAD_SAFE_RADIUS, portalSpots, type BodyId, type Terrain } from "@firstlight/shared";
+import { atmo } from "../render/atmosphere.ts";
 
 export const PORTAL_COLORS: Record<BodyId, number> = {
   portus: 0xffd8a8,
@@ -18,7 +20,10 @@ export interface Portal {
 }
 
 function glow(color: number, k = 3, opacity = 1) {
-  return new THREE.MeshBasicNodeMaterial({ color: new THREE.Color(color).multiplyScalar(k), transparent: opacity < 1, opacity, depthWrite: opacity >= 1 });
+  const m = new THREE.MeshBasicNodeMaterial({ color: new THREE.Color(color).multiplyScalar(k), transparent: opacity < 1, opacity, depthWrite: opacity >= 1 });
+  // Glows brighter at night (shared uniform: no recompile as the day turns).
+  m.colorNode = materialColor.mul(atmo.glowBoost);
+  return m;
 }
 
 function frame(up: THREE.Vector3): { right: THREE.Vector3; fwd: THREE.Vector3 } {

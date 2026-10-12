@@ -28,3 +28,16 @@ describe("photo camera clamp", () => {
     expect(p.distanceTo(ok)).toBeLessThan(1e-9);
   });
 });
+
+describe("photo mode time of day", () => {
+  it("steps and wraps the time, and formats a clock", async () => {
+    const { stepTime, clock, PHOTO_WEATHERS } = await import("./PhotoMode.ts");
+    expect(stepTime(0.99, 1 / 48)).toBeCloseTo(0.99 + 1 / 48 - 1, 9);
+    expect(stepTime(0.0, -1 / 96)).toBeCloseTo(1 - 1 / 96, 9);
+    expect(clock(0.5)).toBe("12:00");
+    expect(clock(0.25 + 1 / 96)).toBe("06:15");
+    expect(PHOTO_WEATHERS[0]).toBeNull(); // "planet" = the live sky
+    expect(PHOTO_WEATHERS).toContain("storm");
+    expect(PHOTO_WEATHERS).toContain("dust");
+  });
+});

@@ -3,7 +3,7 @@
 // time of day (R4 Q10 extra #4). Every system re-applies itself when the graphics settings change.
 
 import * as THREE from "three/webgpu";
-import { BODIES, CHUNK_QUADS, createTerrain, gridDir, type BodyDef, type BodyId, type Face, type Terrain } from "@firstlight/shared";
+import { BODIES, CHUNK_QUADS, createTerrain, gridDir, SKY_PROFILES, type BodyDef, type BodyId, type Face, type Terrain } from "@firstlight/shared";
 import type { BakeResult, ChunkRequest, ChunkResult } from "./terrain.worker.ts";
 import { applyLook, atmo, radialFogNode, skyBackgroundNode, sunRigFor, type SunRig } from "../render/atmosphere.ts";
 import { applyGrassLook, GrassSystem, type GrassChunk } from "../render/grass.ts";
@@ -116,7 +116,8 @@ export class Planet {
 
     // Look: shared uniforms, scene nodes, post parameters.
     applyLook(this.look, this.body.radius, this.body.waterLevel, this.settings);
-    applySkyLut(bodyId, this.look);
+    // Scattering LUT slices span the body's sun elevations over the day (day/night cycle).
+    applySkyLut(bodyId, this.look, [SKY_PROFILES[bodyId].minElev, SKY_PROFILES[bodyId].maxElev]);
     applyWaterLook(this.look);
     applyGrassLook(this.look);
     skyNode ??= skyBackgroundNode();
