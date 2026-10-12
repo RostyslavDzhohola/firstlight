@@ -4,6 +4,7 @@
 // spawns/deaths, the boss lair props and the boss HUD store. Costs ≈ 10–20 draw calls in total.
 
 import * as THREE from "three/webgpu";
+import { BOSS_LINES, playBossLine, type BossId, type BossTrigger } from "../../audio/bossLines.ts";
 import { NF, NPC_ANIM, NPC_DEFS, SHAPE_CODE, type BossEventMsg, type NpcAttackMsg, type NpcDef, type NpcShotMsg, type StatusEffect } from "@firstlight/shared/content/npcs";
 import { NET } from "@firstlight/shared/net/protocol";
 import { flags } from "../../config.ts";
@@ -126,6 +127,9 @@ function prepare(model: ModelDef): PreparedModel {
   });
   return { model, parts, height, fx: new THREE.Color(model.fx) };
 }
+
+/** NPC boss def ids → recorded voice-line ids. */
+const BOSS_AUDIO_ID: Record<string, BossId | undefined> = { tidewrath: "tidewrath", hollow_king: "hollowking", the_receiver: "receiver" };
 
 export class NpcRenderer implements ClientSystem {
   private readonly game: Game;
@@ -285,7 +289,13 @@ export class NpcRenderer implements ClientSystem {
     this.arena?.onEvent(m, now);
     bossStore.event(m);
     if (m.engaged !== undefined) this.bossEngaged = m.engaged;
-    if (m.type === "voice" && m.line) this.bossVoice = { name: m.name ?? "", line: m.line, at: Date.now() };
+    if (m.type === "voice" && m.line) {
+      this.bossVoice = { name: m.name ?? "", line: m.line, at: Date.now() };
+      // Recorded line + subtitle (audio/bossLines.ts); the text picks which of the three it is.
+      const boss = BOSS_AUDIO_ID[m.boss];
+      const trigger = boss && (Object.keys(BOSS_LINES[boss]) as BossTrigger[]).find((t) => BOSS_LINES[boss][t] === m.line);
+      if (boss && trigger) void playBossLine(this.game.audio, boss, trigger);
+    }
     if (m.type === "defeat") this.bossDefeatedAt = now;
     if (m.type === "respawn" || m.type === "reset") this.bossDefeatedAt = 0;
   }
