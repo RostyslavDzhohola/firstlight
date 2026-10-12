@@ -3,9 +3,9 @@
 // (Upside-Down Chapel, Ferryman's Isle, Vat Room) are reached by a server teleport after the step
 // that opens them; the passage stays open for that player for a few minutes.
 //
-// E8 (shoot the billboard lamps) watches hitscan "shot" broadcasts: the room's combat host is
-// wrapped on Meridian so every shot ray is tested against the five lamp spheres. Projectiles don't
-// count (by design the lamps are a Stillshot job: 62 m up, out of every other hitscan's range).
+// E8 (shoot the billboard lamps) tests hitscan "shot" broadcasts (observed by QuestSystem) against
+// the five lamp spheres. Projectiles don't count (by design the lamps are a Stillshot job: 62 m up,
+// out of every other hitscan's range).
 
 import type { Client } from "@colyseus/core";
 import { EGG_RULES, type EggId } from "@firstlight/shared/content/secrets";
@@ -15,58 +15,22 @@ import { WEAPONS } from "@firstlight/shared/content/weapons";
 import { actorPos, type PlayerActor } from "../actors.ts";
 import { emitGameEvent } from "../events.ts";
 import { dist3, type V3 } from "../geometry.ts";
-import type { QuestPlayer, QuestSystem } from "./QuestSystem.ts";
+import type { QuestPlayer, QuestSystem, ShotMsg } from "./QuestSystem.ts";
 
 const RIDDLES: Partial<Record<EggId, string>> = {
   E2: "The plaque reads: “Rain feeds the leaf, the leaf drinks the sun, the sun lights the ember.” Four buttons: raindrop, leaf, sun, flame.",
   E5: "The plaque reads: “Ring for the dead, then the lost, then the living.” Three ropes: skull, broken lantern, candle.",
 };
 
-interface ShotMsg {
-  by: string;
-  weapon: number;
-  ox: number;
-  oy: number;
-  oz: number;
-  dx: number;
-  dy: number;
-  dz: number;
-  hit?: [number, number, number];
-}
-
 export class EggLogic {
   private readonly sys: QuestSystem;
   private readonly lamps: WorldObjectDef[];
   /** Lamp id → when it relights (ms); absent = lit. */
   private readonly lampsOff = new Map<string, number>();
-  private restoreBroadcast: (() => void) | null = null;
 
   constructor(sys: QuestSystem) {
     this.sys = sys;
     this.lamps = sys.objects.filter((o) => o.trigger === "shoot");
-    if (this.lamps.length) this.watchShots();
-  }
-
-  dispose() {
-    this.restoreBroadcast?.();
-  }
-
-  private watchShots() {
-    const host = this.sys.room.host;
-    const orig = host.broadcast;
-    host.broadcast = (type, msg, except) => {
-      orig(type, msg, except);
-      if (type === "shot") {
-        try {
-          this.onShot(msg as ShotMsg);
-        } catch (err) {
-          console.error("lamp shot check failed", err);
-        }
-      }
-    };
-    this.restoreBroadcast = () => {
-      host.broadcast = orig;
-    };
   }
 
   syncTo(c: Client) {
@@ -245,9 +209,8 @@ export class EggLogic {
 
   // ---------------------------------------------------------------- E8 lamps
 
-  private onShot(m: ShotMsg) {
-    const a = this.sys.actor(m.by);
-    if (!a || a.dead) return;
+  onShot(a: PlayerActor, m: ShotMsg) {
+    if (!this.lamps.length) return;
     const w = WEAPONS[m.weapon];
     const o: V3 = [m.ox, m.oy, m.oz];
     const d: V3 = [m.dx, m.dy, m.dz];

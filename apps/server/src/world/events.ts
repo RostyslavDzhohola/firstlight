@@ -14,7 +14,11 @@
 //     pos: [x, y, z],                 // where it died (hunt missions with an area check use it)
 //     bossId: "tidewrath",            // bosses only: "tidewrath" | "hollow_king" | "receiver"
 //     // for bosses, creditIds = every LOOT-ELIGIBLE player (medals, Triple Crown, Hall of Firsts)
+//     npcId: npc.id,                  // bosses: the NpcActor id (Untouchable matches it to damage events)
 //   });
+//
+// Emit it synchronously from NpcActor.onKilled (inside the damage call): Long Shot checks that the
+// killer's Stillshot fired within the last few ticks.
 //
 // Also set `defId` (e.g. "woolback") on NpcActor so player deaths can name the NPC kind, and listen
 // for `spawnRequest` (egg penalties, admin staged scenes) to spawn NPCs or bosses on demand.
@@ -73,6 +77,7 @@ export interface PickupEvent {
   pileId: string;
   pileOwnerUserId: string;
   pileCreatedAt: number;
+  /** Items actually kept (full bags put the rest back on the ground). */
   items: number;
   coins: number;
 }

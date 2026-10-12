@@ -131,6 +131,25 @@ describe("missions", () => {
     expect(reborn.you.missions).toEqual([]);
   });
 
+  it("fast travel can't complete a reach mission: the target has to be walked into", async () => {
+    const b = await bot("climber", "hollowmere");
+    await tpAndWait(b, padAt("hollowmere", 10)); // discover the pad on top of the Tolling Tower
+    await waitFor(() => b.you.pads.includes(10));
+    await tpAndWait(b, objAt("guide_hollowmere"));
+    b.send("mission", { action: "accept", id: "H3" });
+    await waitFor(() => b.you.missions.length === 1);
+    await tpAndWait(b, padAt("hollowmere", 0));
+    b.send("fastTravel", { pad: 10 });
+    await waitFor(() => near(b, padAt("hollowmere", 10), 6));
+    await sleep(500);
+    expect(b.you.missions[0].done).toBe(false);
+    // Walk away down the tower and back up (admin moves stand in for walking here).
+    await tpAndWait(b, offPad("hollowmere", 10, 80));
+    await sleep(300);
+    await tpAndWait(b, padAt("hollowmere", 10));
+    await waitFor(() => b.you.missions[0].done);
+  });
+
   it("accepting needs the guide; abandoning drops progress", async () => {
     const b = await bot("wanderer", "arcadia");
     await tpAndWait(b, offPad("arcadia", 0, 40));

@@ -89,33 +89,29 @@ describe("medals", () => {
     await until("demolition crew", () => b.you.medals.includes("demolition_crew"));
     expect(progressStore.current.stat("featster", "props_broken")).toBe(200);
 
-    // Arc Welder needs a T2+ Stormcoil in hand and 4 different targets from one cast.
-    b.send("admin", { cmd: "give", args: { id: "stormcoil", tier: 1 } });
-    await until("stormcoil T1", () => b.you.hotbar[1]?.id === "stormcoil");
-    b.send("equip", { slot: 1 });
-    await until("equip", () => b.you.selected === 1);
-    const cast = (tag: string) => {
-      const t = Date.now();
-      for (let i = 0; i < 4; i++) emitGameEvent(room, { type: "damage", targetId: `${tag}${i}`, targetKind: "npc", attackerId: b.id, attackerKind: "player", amount: 20, hpAfter: 10, maxHp: 100, at: t });
-    };
-    cast("t1-");
+    // Arc Welder: a Stormcoil cast whose chain damaged 4 entities (combat's "shot" broadcast; only T2+ chains reach 4).
+    const chainShot = (weapon: string, n: number) =>
+      room.host.broadcast("shot", { by: b.id, weapon: WEAPON_INDEX.get(weapon), ox: 0, oy: 0, oz: 0, dx: 1, dy: 0, dz: 0, chain: Array.from({ length: n }, () => [0, 0, 0]) });
+    chainShot("stormcoil", 3);
+    chainShot("carbine", 5);
     await sleep(100);
     expect(b.you.medals).not.toContain("arc_welder");
-    b.send("admin", { cmd: "give", args: { id: "stormcoil", tier: 2 } });
-    await until("stormcoil T2", () => b.you.hotbar[2]?.tier === 2);
-    b.send("equip", { slot: 2 });
-    await until("equip 2", () => b.you.selected === 2);
-    cast("t2-");
+    chainShot("stormcoil", 4);
     await until("arc welder", () => b.you.medals.includes("arc_welder"));
 
-    // Long Shot: a Stillshot kill at 120 m or more (NPC kill event).
+    // Long Shot: a kill at 120 m or more by a Stillshot that just fired (not an older projectile).
     b.send("admin", { cmd: "give", args: { id: "stillshot", tier: 1 } });
-    await until("stillshot", () => b.you.hotbar[3]?.id === "stillshot");
-    b.send("equip", { slot: 3 });
-    await until("equip 3", () => b.you.selected === 3);
+    await until("stillshot", () => b.you.hotbar[1]?.id === "stillshot");
+    b.send("equip", { slot: 1 });
+    await until("equip", () => b.you.selected === 1);
+    const shooter = actorOf(b);
+    shooter.lastAttackAt = Date.now();
     emitGameEvent(room, { type: "kill", npcKind: "hopbit", killerId: b.id, pos: offPad("arcadia", 0, 60) });
+    shooter.lastAttackAt = Date.now() - 5000;
+    emitGameEvent(room, { type: "kill", npcKind: "hopbit", killerId: b.id, pos: offPad("arcadia", 0, 135) });
     await sleep(100);
     expect(b.you.medals).not.toContain("long_shot");
+    shooter.lastAttackAt = Date.now();
     emitGameEvent(room, { type: "kill", npcKind: "hopbit", killerId: b.id, pos: offPad("arcadia", 0, 135) });
     await until("long shot", () => b.you.medals.includes("long_shot"));
   }, 15_000);

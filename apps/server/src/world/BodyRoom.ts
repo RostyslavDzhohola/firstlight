@@ -470,9 +470,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (dist3([pile.x, pile.y, pile.z], actorPos(a)) > RULES.PICKUP_RANGE) return;
     const taken = pileStore.current.take(pileId, itemIndex);
     if (!taken) return;
-    emitGameEvent(this, { type: "pickup", playerId: a.id, pileId, pileOwnerUserId: pile.ownerUserId, pileCreatedAt: pile.createdAt, items: taken.items.length, coins: taken.coins });
     const leftovers: InvItem[] = [];
     for (const it of taken.items) if (!this.giveItem(a, it)) leftovers.push(it);
+    emitGameEvent(this, { type: "pickup", playerId: a.id, pileId, pileOwnerUserId: pile.ownerUserId, pileCreatedAt: pile.createdAt, items: taken.items.length - leftovers.length, coins: taken.coins });
     a.char.coins += taken.coins;
     a.youDirty = true;
     if (taken.pile) emitPileEvent({ kind: "update", pile: taken.pile });

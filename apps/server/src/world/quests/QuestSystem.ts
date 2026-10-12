@@ -12,7 +12,7 @@ import { MISSION_BY_ID, MISSIONS, missionGoal, type MissionDef } from "@firstlig
 import { offsetDir, padName, place, placeDir } from "@firstlight/shared/content/places";
 import { BOSS_FIRSTS, EGG_BY_ID, type EggId } from "@firstlight/shared/content/secrets";
 import { inReach, objectPos, objectsOn, surfaceDistance, WORLD_OBJECT_BY_ID, type WorldObjectDef } from "@firstlight/shared/content/world";
-import { WEAPON_BY_ID } from "@firstlight/shared/content/weapons";
+import { WEAPON_BY_ID, WEAPONS } from "@firstlight/shared/content/weapons";
 import type { InvItem, YouState } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
 import { z } from "zod";
@@ -37,6 +37,10 @@ export const QUEST_RULES = {
   FAST_TRAVEL_COOLDOWN_MS: 2000,
   /** Reach triggers ignore height differences up to this (uneven lookouts). */
   REACH_VERTICAL: 6,
+  /** A reach mission arms once you've been this far from its target since your last teleport (no fast-travel shortcuts). */
+  REACH_ARM_M: 60,
+  /** Long Shot: the Stillshot must have fired within this window before the kill. */
+  LONG_SHOT_WINDOW_MS: 150,
   SLOW_TICK_MS: 200,
 };
 
@@ -54,11 +58,10 @@ export interface QuestPlayer {
   e8: { hit: Set<string>; startedAt: number };
   /** Opened passages (egg key → expiry ms). */
   passages: Map<string, number>;
+  /** Reach missions that may complete (armed by being far from the target since the last teleport). */
+  reachArmed: Set<string>;
   lowHpAt: number | null;
   woolbackHitAt: number;
-  bossFirstHit: Map<string, number>;
-  bossHurtMe: Set<string>;
-  arc: { at: number; targets: Set<string> };
 }
 
 function newQuestPlayer(id: string): QuestPlayer {
@@ -73,12 +76,24 @@ function newQuestPlayer(id: string): QuestPlayer {
     e4: { lit: new Set(), startedAt: 0, ferryUntil: 0 },
     e8: { hit: new Set(), startedAt: 0 },
     passages: new Map(),
+    reachArmed: new Set(),
     lowHpAt: null,
     woolbackHitAt: 0,
-    bossFirstHit: new Map(),
-    bossHurtMe: new Set(),
-    arc: { at: 0, targets: new Set() },
   };
+}
+
+/** Combat's "shot" broadcast (hitscan rays carry `hit`; Stormcoil casts carry `chain`, one point per entity hit). */
+export interface ShotMsg {
+  by: string;
+  weapon: number;
+  ox: number;
+  oy: number;
+  oz: number;
+  dx: number;
+  dy: number;
+  dz: number;
+  hit?: [number, number, number];
+  chain?: [number, number, number][];
 }
 
 const slotSchema = z.number().int().min(0).max(HOTBAR_SLOTS + BACKPACK_SLOTS - 1);
@@ -93,6 +108,9 @@ export class QuestSystem implements RoomSystem {
   private readonly unsubs: (() => void)[] = [];
   private lastSlow = 0;
   private lastLevelCheck = 0;
+  /** Boss encounters (NPC id → account id → hurt by the boss since their first hit), for Untouchable. */
+  private readonly bossHits = new Map<string, Map<string, { hurt: boolean }>>();
+  private restoreBroadcast: (() => void) | null = null;
 
   constructor(room: BodyRoom) {
     this.room = room;
@@ -101,6 +119,7 @@ export class QuestSystem implements RoomSystem {
     const t = room.terrain;
     for (const o of this.objects) this.objPos.set(o.id, objectPos(o, (x, y, z) => t.groundHeight(x, y, z)));
     this.eggs = new EggLogic(this);
+    this.watchShots();
 
     room.onMessage("fastTravel", z.object({ pad: z.number().int().min(0).max(63) }), (c, m) => this.fastTravel(c, m.pad));
     room.onMessage("buy", z.object({ itemId: z.string().max(40), tier: z.number().int().min(1).max(3).optional(), qty: z.number().int().min(1).max(20).optional() }), (c, m) =>
@@ -126,7 +145,33 @@ export class QuestSystem implements RoomSystem {
 
   dispose() {
     for (const u of this.unsubs.splice(0)) u();
-    this.eggs.dispose();
+    this.restoreBroadcast?.();
+  }
+
+  /** Observe combat's "shot" broadcasts (hitscan rays and Stormcoil chains) for Arc Welder and egg E8. */
+  private watchShots() {
+    const host = this.room.host;
+    const orig = host.broadcast;
+    host.broadcast = (type, msg, except) => {
+      orig(type, msg, except);
+      if (type !== "shot") return;
+      try {
+        this.onShot(msg as ShotMsg);
+      } catch (err) {
+        console.error("quest shot observer failed", err);
+      }
+    };
+    this.restoreBroadcast = () => {
+      host.broadcast = orig;
+    };
+  }
+
+  private onShot(m: ShotMsg) {
+    const a = this.actor(m.by);
+    if (!a || a.dead) return;
+    // Arc Welder: one Stormcoil cast whose chain damaged 4 entities (only T2+ chains reach 4).
+    if (WEAPONS[m.weapon]?.id === "stormcoil" && (m.chain?.length ?? 0) >= MEDAL_RULES.ARC_WELDER_TARGETS) this.award(a, "arc_welder");
+    this.eggs.onShot(a, m);
   }
 
   // ---------------------------------------------------------------- helpers
@@ -164,6 +209,7 @@ export class QuestSystem implements RoomSystem {
 
   /** Move a player (server-authoritative), like the admin teleport. */
   teleport(a: PlayerActor, at: readonly number[]) {
+    this.qp(a).reachArmed.clear();
     const p = this.room.snapToGround(at);
     a.state.x = a.lastX = p[0];
     a.state.y = a.lastY = p[1];
@@ -540,10 +586,11 @@ export class QuestSystem implements RoomSystem {
       let target = this.reachTargets.get(def.reach.place);
       if (!target) this.reachTargets.set(def.reach.place, (target = this.room.snapToGround(placeDir(def.reach.place))));
       const p = actorPos(a);
+      const across = surfaceDistance(target, p);
+      if (across >= QUEST_RULES.REACH_ARM_M) q.reachArmed.add(def.id);
       const vertical = Math.abs(Math.hypot(p[0], p[1], p[2]) - Math.hypot(target[0], target[1], target[2]));
-      if (surfaceDistance(target, p) <= def.reach.radius && vertical <= QUEST_RULES.REACH_VERTICAL) this.completeMission(a, m, def);
+      if (across <= def.reach.radius && vertical <= QUEST_RULES.REACH_VERTICAL && q.reachArmed.has(def.id)) this.completeMission(a, m, def);
     }
-    void q;
   }
 
   // ---------------------------------------------------------------- medals and titles
@@ -683,7 +730,7 @@ export class QuestSystem implements RoomSystem {
   private onKillForMedals(e: KillEvent) {
     // Long Shot: the killing blow from a Stillshot at ≥ 120 m.
     const killer = e.killerId ? this.actor(e.killerId) : undefined;
-    if (killer && this.isStillshot(killer) && dist3(actorPos(killer), e.pos) >= MEDAL_RULES.LONG_SHOT_METRES) this.award(killer, "long_shot");
+    if (killer && this.firedStillshot(killer) && dist3(actorPos(killer), e.pos) >= MEDAL_RULES.LONG_SHOT_METRES) this.award(killer, "long_shot");
     if (!e.bossId) return;
     const medal = e.bossId === "tidewrath" ? "tide_turner" : e.bossId === "hollow_king" ? "regicide" : "decommissioned";
     const eligible = (e.creditIds ?? (e.killerId ? [e.killerId] : [])).map((id) => this.actor(id)).filter((a): a is PlayerActor => !!a);
@@ -692,19 +739,17 @@ export class QuestSystem implements RoomSystem {
       const life = this.life(a);
       if (!life.bosses.includes(e.bossId)) life.bosses.push(e.bossId);
       if (["tidewrath", "hollow_king", "receiver"].every((b) => life.bosses.includes(b))) this.award(a, "triple_crown");
-      const q = this.qp(a);
-      if (e.npcId && q.bossFirstHit.has(e.npcId) && !q.bossHurtMe.has(e.npcId)) this.award(a, "untouchable");
-      if (e.npcId) {
-        q.bossFirstHit.delete(e.npcId);
-        q.bossHurtMe.delete(e.npcId);
-      }
+      const hits = e.npcId ? this.bossHits.get(e.npcId)?.get(a.identity.userId) : undefined;
+      if (hits && !hits.hurt) this.award(a, "untouchable");
     }
+    if (e.npcId) this.bossHits.delete(e.npcId);
     const people = eligible.filter((a) => !a.identity.loadtest);
     if (people.length) engrave(BOSS_FIRSTS[e.bossId], people[0]!.identity.userId, people.map((a) => a.identity.name).join(", ").slice(0, 200));
   }
 
-  private isStillshot(a: PlayerActor): boolean {
-    return a.char.hotbar[a.char.selected]?.id === "stillshot";
+  /** The Stillshot is in hand and fired just now (the kill came from that shot, not an older projectile). */
+  private firedStillshot(a: PlayerActor): boolean {
+    return a.char.hotbar[a.char.selected]?.id === "stillshot" && Date.now() - a.lastAttackAt <= QUEST_RULES.LONG_SHOT_WINDOW_MS;
   }
 
   private onDamage(e: DamageEvent) {
@@ -713,21 +758,18 @@ export class QuestSystem implements RoomSystem {
       if (!a) return;
       const q = this.qp(a);
       if (e.attackerKind === "npc" && e.npcKind === "woolback") q.woolbackHitAt = e.at;
-      if (e.attackerKind === "npc" && e.boss && e.attackerId && q.bossFirstHit.has(e.attackerId)) q.bossHurtMe.add(e.attackerId);
+      if (e.attackerKind === "npc" && e.boss && e.attackerId) {
+        const hit = this.bossHits.get(e.attackerId)?.get(a.identity.userId);
+        if (hit) hit.hurt = true;
+      }
       if (e.hpAfter > 0 && e.hpAfter <= e.maxHp * MEDAL_RULES.BY_A_THREAD_FRACTION && q.lowHpAt === null) q.lowHpAt = e.at;
     }
-    if (e.attackerKind === "player" && e.attackerId) {
+    if (e.attackerKind === "player" && e.attackerId && e.targetKind === "npc" && e.boss) {
       const a = this.actor(e.attackerId);
       if (!a) return;
-      const q = this.qp(a);
-      if (e.targetKind === "npc" && e.boss && !q.bossFirstHit.has(e.targetId)) q.bossFirstHit.set(e.targetId, e.at);
-      // Arc Welder: one Stormcoil cast (T2+) damaging 4 different entities.
-      const held = a.char.hotbar[a.char.selected];
-      if (held?.id === "stormcoil" && held.tier >= MEDAL_RULES.ARC_WELDER_MIN_TIER) {
-        if (e.at - q.arc.at > 5) q.arc = { at: e.at, targets: new Set() };
-        q.arc.targets.add(e.targetId);
-        if (q.arc.targets.size >= MEDAL_RULES.ARC_WELDER_TARGETS) this.award(a, "arc_welder");
-      }
+      let enc = this.bossHits.get(e.targetId);
+      if (!enc) this.bossHits.set(e.targetId, (enc = new Map()));
+      if (!enc.has(a.identity.userId)) enc.set(a.identity.userId, { hurt: false });
     }
   }
 
@@ -748,7 +790,7 @@ export class QuestSystem implements RoomSystem {
       const killer = this.actor(e.killerId);
       if (!killer) return;
       if (victim && killer.state.party && killer.state.party === victim.state.party) this.award(victim, "with_friends_like_these");
-      if (this.isStillshot(killer) && dist3(actorPos(killer), e.pos) >= MEDAL_RULES.LONG_SHOT_METRES) this.award(killer, "long_shot");
+      if (this.firedStillshot(killer) && dist3(actorPos(killer), e.pos) >= MEDAL_RULES.LONG_SHOT_METRES) this.award(killer, "long_shot");
     }
   }
 
