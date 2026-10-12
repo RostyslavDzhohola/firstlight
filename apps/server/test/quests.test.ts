@@ -8,7 +8,7 @@ import { emitGameEvent, onGameEvent, type GameEvent } from "../src/world/events.
 import { pileStore } from "../src/world/piles.ts";
 import { progressStore } from "../src/world/quests/store.ts";
 import { safeLeave, startServer, waitFor } from "./helpers.ts";
-import { bot, dieAndRejoin, ground, harness, invIds, me, near, objAt, offPad, padAt, serverRoom, sleep, tpAndWait, until } from "./quest-helpers.ts";
+import { bot, dieAndRejoin, ground, harness, invIds, me, near, objAt, offPad, padAt, serverRoom, sleep, tp, tpAndWait, until } from "./quest-helpers.ts";
 
 beforeEach(async () => {
   harness.game = await startServer();
@@ -290,7 +290,8 @@ describe("Easter eggs and the Hall of Firsts", () => {
 
     const h = await bot("diver", "hollowmere");
     h.send("interact", { target: "e6_altar" }); // too far, and not via the well
-    await tpAndWait(h, objAt("e6_well"));
+    // Stepping into the well moves the player down at once, so don't wait to be seen at the top.
+    tp(h, objAt("e6_well"));
     await waitFor(() => near(h, ground("hollowmere", placeDir("upside_down_chapel")), 4));
     h.send("interact", { target: "e6_altar" });
     await waitFor(() => invIds(h).includes("bone_bell"));
