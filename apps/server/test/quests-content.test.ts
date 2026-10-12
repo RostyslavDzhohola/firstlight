@@ -313,12 +313,19 @@ describe("medals", () => {
 });
 
 describe("Easter eggs", () => {
-  it("E3 Follow the Gold: the burrow opens when the NPC lane reports the Golden Hopbit's run", async () => {
+  it("E3 Follow the Gold: when the Golden Hopbit you followed runs into its burrow, the burrow opens", async () => {
     const b = await bot("follower", "arcadia");
     await tpAndWait(b, objAt("e3_burrow"));
     b.send("interact", { target: "e3_burrow" });
     await until("too small", () => b.toasts.some((t) => t.includes("too small")));
-    emitGameEvent(serverRoom(b), { type: "secretStep", playerId: b.id, secretId: "E3", step: "burrow" });
+    // The real brain path: a Golden Hopbit beside you that you have already followed for 60 s
+    // (the follow timing itself is covered in npc-unit.test.ts).
+    const npcs = npcSystemOf(serverRoom(b))!;
+    const p = me(b);
+    const n = npcs.createNpc(NPC_INDEX.get("golden_hopbit")!, 1, serverRoom(b).snapToGround([p.x, p.y, p.z]), Date.now(), { instant: true, roam: 0 });
+    n.egg = { follower: b.id, since: Date.now() - 61_000 };
+    await until("burrow open", () => b.toasts.some((t) => t.includes("dives into its burrow")));
+    expect(n.dead).toBe(true);
     b.send("interact", { target: "e3_burrow" });
     await until("golden hopbit", () => invIds(b).includes("golden_hopbit"));
     expect(b.you.medals).toContain("follow_the_gold");

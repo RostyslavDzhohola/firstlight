@@ -8,6 +8,7 @@ import { NF, NPC_INDEX, PLANET_COSMETIC } from "@firstlight/shared/content/npcs"
 import { dealDamage } from "../src/world/combat.ts";
 import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
 import { EGG_NPC } from "../src/world/npc/NpcSystem.ts";
+import { onNpcEvent, type NpcEvent } from "../src/world/npc/tuning.ts";
 import { PITY_IDLE_MS, pruneRewardMaps, repeatDecay, rollDrops } from "../src/world/npc/rewards.ts";
 import { buildSpawnPoints } from "../src/world/npc/spawns.ts";
 import { fakeWorld } from "./npcWorld.ts";
@@ -131,6 +132,38 @@ describe("rewards", () => {
 });
 
 describe("egg NPCs", () => {
+  it("the Golden Hopbit runs to its burrow for whoever stays within 15 m of it for 60 s; walking off resets it; a hit pops it", () => {
+    const w = fakeWorld("arcadia");
+    const events: NpcEvent[] = [];
+    const off = onNpcEvent((e) => events.push(e));
+    try {
+      const golden = w.sys.createNpc(NPC_INDEX.get("golden_hopbit")!, 1, arcadiaPoint(84), w.clock.t, { instant: true, roam: 0 });
+      const p = w.addPlayer("p", arcadiaPoint(94), 3); // 10 m: close enough to follow, too far to make it flee
+      const run = (ms: number) => {
+        for (let t = 0; t < ms; t += 500) w.step(500);
+      };
+      run(30_000);
+      expect(events.filter((e) => e.kind === "egg")).toHaveLength(0);
+      w.movePlayer(p, arcadiaPoint(140)); // walks off: the follow resets
+      run(2_000);
+      w.movePlayer(p, arcadiaPoint(94));
+      run(58_000);
+      expect(events.filter((e) => e.kind === "egg")).toHaveLength(0);
+      run(4_000);
+      expect(events.filter((e) => e.kind === "egg")).toEqual([{ kind: "egg", body: "arcadia", egg: "E3", sessionId: "p", userId: "u-p" }]);
+      expect(golden.dead).toBe(true);
+      // Another one, popped by a hit: 25 coins, no egg.
+      const second = w.sys.createNpc(NPC_INDEX.get("golden_hopbit")!, 1, arcadiaPoint(84), w.clock.t, { instant: true, roam: 0 });
+      const coins = p.char.coins;
+      dealDamage(w.world.host, p, second, 5, false);
+      expect(second.dead).toBe(true);
+      expect(p.char.coins).toBe(coins + 25);
+      expect(events.filter((e) => e.kind === "egg")).toHaveLength(1);
+    } finally {
+      off();
+    }
+  });
+
   it("a Golden Hopbit that was popped stays away on its own timer, not the pack's", () => {
     const w = fakeWorld("arcadia");
     NPC_TUNING.respawnScale = 0.01;

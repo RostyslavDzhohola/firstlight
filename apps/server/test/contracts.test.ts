@@ -35,7 +35,8 @@ const SIGNALS: Record<string, RegExp> = {
   "game:onboardingDone": /emitGameEvent\([^;]*type: "onboardingDone"/,
   "npc:kill": /emitNpcEvent\(\{\s*kind: "kill"/,
   "npc:bossKill": /emitNpcEvent\(\{\s*kind: "bossKill"/,
-  "npc:egg": /emitNpcEvent\(\{\s*kind: "egg"/,
+  "npc:egg:E3": /emitNpcEvent\(\{\s*kind: "egg"[^}]*egg: "E3"/,
+  "npc:egg:E9": /emitNpcEvent\(\{\s*kind: "egg"[^}]*egg: "E9"/,
   "broadcast:shot": /broadcastNear\("shot"/,
   "message:interact": /onMessage\("interact"/,
 };
@@ -87,8 +88,10 @@ describe("production emitters (contract)", () => {
   it("every hidden egg medal comes from its egg's claim, and every egg has a production path", () => {
     expect(QUESTS).toMatch(/this\.award\(a, egg\.medal\)/);
     for (const e of EGGS) expect(MEDALS.find((m) => m.id === e.medal)?.hidden, e.id).toBe(true);
-    // E3 and E9 finish through the NPC lane (the Golden Hopbit's run, Ticket #000's walk).
-    expect(SIGNALS["npc:egg"]!.test(SRC)).toBe(true);
+    // E3 and E9 finish through the NPC lane, each from its own emitter (the Golden Hopbit's run,
+    // Ticket #000's walk); quests-content.test.ts drives both through the real brain.
+    expect(SIGNALS["npc:egg:E3"]!.test(SRC)).toBe(true);
+    expect(SIGNALS["npc:egg:E9"]!.test(SRC)).toBe(true);
     expect(SIGNALS["message:interact"]!.test(SRC)).toBe(true);
   });
 
