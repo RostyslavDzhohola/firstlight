@@ -80,11 +80,17 @@ export interface LightFactors {
   sunUp: number;
 }
 
-/** Derived per-frame factors from a sun elevation (exported for tests). */
-export function lightFactors(elev: number, out: LightFactors = { night: 0, dusk: 0, sunUp: 0 }): LightFactors {
+/**
+ * Derived per-frame factors from a sun elevation (exported for tests). Dusk warmth and the sun's
+ * ramp-up are measured against the body's reference sun `refElev` when that is low: Hollowmere's
+ * violet sun sits at 0.12 rad all day long, and at its reference elevation it must light the scene
+ * with the look's own colour and intensity, not a dimmed dusk orange.
+ */
+export function lightFactors(elev: number, refElev = Infinity, out: LightFactors = { night: 0, dusk: 0, sunUp: 0 }): LightFactors {
+  const ref = Math.max(0.08, refElev);
   out.night = smooth(0.06, -0.1, elev);
-  out.dusk = smooth(0.45, 0.02, elev) * (1 - out.night);
-  out.sunUp = smooth(-0.02, 0.22, elev);
+  out.dusk = smooth(Math.min(0.45, ref), 0.02, elev) * (1 - out.night);
+  out.sunUp = smooth(-0.02, Math.min(0.22, ref), elev);
   return out;
 }
 
@@ -262,7 +268,7 @@ export class Environment {
       az = a.az;
     }
     this.sunElev = elev;
-    const { night, dusk, sunUp } = lightFactors(elev, this.factors);
+    const { night, dusk, sunUp } = lightFactors(elev, look.sunElev, this.factors);
     this.night = night;
 
     // ---- weather (target → smoothed kind/amount)

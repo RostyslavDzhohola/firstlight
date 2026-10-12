@@ -45,6 +45,40 @@ describe("day/night", () => {
     }
   });
 
+  it("the reference time, ?nodaynight and the bench light each body with its look's own sun", () => {
+    const expectLookSun = (rig: SunRig, look: (typeof LOOKS)[keyof typeof LOOKS], label: string) => {
+      const want = new THREE.Color(look.sun);
+      expect(rig.sky.keyIsMoon, label).toBe(false);
+      expect(rig.sun.intensity, label).toBeCloseTo(look.sunIntensity, 3);
+      for (const c of ["r", "g", "b"] as const) {
+        expect(rig.sun.color[c], `${label} key ${c}`).toBeCloseTo(want[c], 3);
+        expect(atmo.sunColor.value[c], `${label} sky sun ${c}`).toBeCloseTo(want[c], 3);
+      }
+    };
+    for (const b of ["arcadia", "hollowmere", "meridian", "portus"] as const) {
+      const live = setup(b);
+      live.env.timeOverride = referenceDayT(b, live.look.sunElev);
+      live.env.weatherOverride = { weather: "clear", intensity: 0 };
+      run(live.env, 0.1);
+      expectLookSun(live.rig, live.look, `${b} reference time`);
+
+      const fixed = setup(b, ["daynight"]);
+      fixed.env.weatherOverride = { weather: "clear", intensity: 0 };
+      run(fixed.env, 0.1);
+      expectLookSun(fixed.rig, fixed.look, `${b} ?nodaynight`);
+
+      const bench = setup(b);
+      bench.env.setBenchMode(b, bench.look);
+      run(bench.env, 0.1);
+      expectLookSun(bench.rig, bench.look, `${b} bench`);
+    }
+    // Hollowmere's low violet sun is its daylight, not a dusk.
+    const f = lightFactors(LOOKS.hollowmere.sunElev, LOOKS.hollowmere.sunElev);
+    expect(f.dusk).toBe(0);
+    expect(f.sunUp).toBe(1);
+    expect(lightFactors(0.06, LOOKS.hollowmere.sunElev).dusk).toBeGreaterThan(0.3);
+  });
+
   it("night is readable: moon key, bright fill, raised exposure, stars, glowing pads", () => {
     const { env, rig, look, particles, ctx } = setup("arcadia");
     env.timeOverride = 0; // midnight
