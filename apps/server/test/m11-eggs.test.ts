@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { EGGS, type EggDef } from "@firstlight/shared/content/secrets";
 import { dieAndRejoin } from "./quest-helpers.ts";
 import { env } from "../src/env.ts";
-import { EGG_LIMITS } from "../src/world/quests/eggs.ts";
+import { EGG_LIMITS, EGG_TIMERS } from "../src/world/quests/eggs.ts";
 import { npcSystemOf } from "../src/world/npc/index.ts";
 import { serverRoom, padAt } from "./quest-helpers.ts";
 import { safeLeave, startServer } from "./helpers.ts";
@@ -100,14 +100,14 @@ describe("M11 egg abuse limits", () => {
     expect(b.last("lamp")).toEqual({ id: "e11_lantern_1", on: false });
     expect(await press(b, "e11_lantern_2")).toContain("Wait a moment");
     expect(invIds(b)).not.toContain("wickfloat_mantle");
-    await sleep(1100);
+    await until("wick lock expired", () => !EGG_TIMERS.puzzles.has("wick_guesser|E11"));
     EGG_LIMITS.wickWindowMs = 200;
     await press(b, "e11_lantern_1");
     await until("wicks expired", () => b.toasts.some((t) => t.includes("fade into the mist")));
     expect(await press(b, "e11_chest")).toContain("Wait a moment");
     expect(npcSystemOf(serverRoom(b))!.spawnedCount("egg")).toBe(0);
     EGG_LIMITS.wickWindowMs = limits.wickWindowMs;
-    await sleep(1100);
+    await until("expired wick window unlocked", () => !EGG_TIMERS.puzzles.has("wick_guesser|E11"));
     await discover(b, EGGS[10]!);
   });
 
@@ -121,7 +121,7 @@ describe("M11 egg abuse limits", () => {
     const back = await bot("timebox_guesser", "meridian");
     expect(await press(back, "e12_safe", "3158")).toContain("TIMEBOX LOCKED");
     expect(invIds(back)).not.toContain("quietshift_lens");
-    await sleep(2500);
+    await until("timebox unlocked", () => !EGG_TIMERS.keypads.has("timebox_guesser|E12"));
     await discover(back, EGGS[11]!);
   });
 
