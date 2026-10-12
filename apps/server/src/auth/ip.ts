@@ -23,6 +23,21 @@ export function normalizeIp(ip: string | null | undefined): string | null {
   return t.toLowerCase().startsWith("::ffff:") && t.includes(".") ? t.slice(7) : t;
 }
 
+/**
+ * The unit an IP ban applies to: the address itself for IPv4, the /64 prefix for IPv6 (one home or
+ * phone gets a whole /64, so banning a single v6 address is trivially dodged).
+ */
+export function banKey(ip: string): string {
+  const n = normalizeIp(ip) ?? ip;
+  if (!n.includes(":")) return n;
+  const addr = n.split("%")[0]!.toLowerCase();
+  const [head, tail] = addr.includes("::") ? addr.split("::") as [string, string] : [addr, null];
+  const left = head ? head.split(":") : [];
+  const right = tail ? tail.split(":") : [];
+  const groups = tail === null ? left : [...left, ...Array(Math.max(0, 8 - left.length - right.length)).fill("0"), ...right];
+  return `${groups.slice(0, 4).map((g) => (g || "0").replace(/^0+(?=.)/, "")).join(":")}::/64`;
+}
+
 export function firstForwardedFor(req: IncomingMessage): string | null {
   const xff = header(req, "x-forwarded-for");
   return normalizeIp(xff?.split(",")[0]);

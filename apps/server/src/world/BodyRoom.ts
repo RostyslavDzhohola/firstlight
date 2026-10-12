@@ -116,6 +116,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   }
 
   onCreate(options: BodyRoomOptions) {
+    // The client consumes its seat right after /api/play; short reservations stop seat hoarding.
+    this.seatReservationTimeout = 8;
     this.bodyDef = BODIES[options.body];
     this.terrain = createTerrain(this.bodyDef);
     this.state.body = options.body;
