@@ -377,6 +377,35 @@ describe("voice safety persistence", () => {
     expect(got(b, "voice:denied")).toContainEqual({ action: "voice:report", reason: "too many reports" });
     expect(listReports(db)).toHaveLength(1);
   });
+
+  it("report limits are per account: a rejoin doesn't reset them, and Tab-list reports share them (F12 should-fix 15)", async () => {
+    const bob = await bot("bob");
+    const [ann, cat, dan, eve, fay, gus] = [await bot("ann"), await bot("cat"), await bot("dan"), await bot("eve"), await bot("fay"), await bot("gus")];
+    bob.send("voice:report", { target: ann!.sessionId, reason: "Other" });
+    await barrier(bob);
+    expect(got(bob, "voice:reported")).toHaveLength(1);
+
+    const rejoin = async (r: Room) => {
+      await safeLeave(r);
+      rooms.splice(rooms.indexOf(r), 1);
+      return bot("bob");
+    };
+    const bob2 = await rejoin(bob);
+    bob2.send("voice:report", { target: ann!.sessionId, reason: "Other" });
+    await barrier(bob2);
+    expect(got(bob2, "voice:denied")).toContainEqual({ action: "voice:report", reason: "too many reports" });
+
+    // One budget of five per 10 minutes across the Tab list and the voice panel.
+    bob2.send("report", { target: cat!.sessionId, reason: "harassment" });
+    for (const t of [dan!, eve!, fay!]) bob2.send("voice:report", { target: t.sessionId, reason: "Other" });
+    await barrier(bob2);
+    expect(listReports(db)).toHaveLength(5);
+    const bob3 = await rejoin(bob2);
+    bob3.send("voice:report", { target: gus!.sessionId, reason: "Other" });
+    await barrier(bob3);
+    expect(got(bob3, "voice:denied")).toContainEqual({ action: "voice:report", reason: "too many reports" });
+    expect(listReports(db)).toHaveLength(5);
+  });
 });
 
 describe("TURN credentials", () => {

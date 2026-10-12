@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { Client, type Room } from "@colyseus/sdk";
 import { CLOSE } from "@firstlight/shared/net/social";
-import { isBlockedEitherWay, listBans, listReports } from "../src/db/index.ts";
+import { fileReport, isBlockedEitherWay, listBans, listReports } from "../src/db/index.ts";
 import { stmt } from "../src/db/game-db.ts";
 import { accountLinks } from "../src/auth/links.ts";
 import { mountOps } from "../src/ops/admin.ts";
@@ -350,5 +350,27 @@ describe("/admin and /stats", () => {
     expect((await post("/admin/announce", "text=Server+restart+in+5+minutes")).status).toBe(303);
     const page = await (await owner.fetch("/admin?done=Announced")).text();
     expect(page).toContain("Announced");
+  });
+
+  it("reports are paged, so a flood can't push older ones out of reach (F12 should-fix 15)", async () => {
+    const s = await start();
+    const owner = new Browser(s, "198.51.100.42");
+    await owner.playToken();
+    await owner.saveWithEmail("owner42@example.test");
+    await owner.fetch("/admin/claim?token=claim-token-for-tests");
+    const db = s.accounts.db;
+    fileReport(db, { reporter: "real_rep", target: "real_bad", reason: "the real one", now: 1_000 });
+    for (let i = 0; i < 120; i++) fileReport(db, { reporter: "flooder", target: `t${i}`, reason: `spam ${i}`, now: 2_000 + i });
+    const first = await (await owner.fetch("/admin")).text();
+    expect(first).toContain("<b>121</b><span>open reports");
+    expect(first).toContain("spam 119");
+    expect(first).not.toContain("the real one");
+    expect(first).toContain('href="/admin?reports=2#reports"');
+    const last = await (await owner.fetch("/admin?reports=3")).text();
+    expect(last).toContain("the real one");
+    expect(last).not.toContain("spam 119");
+    expect(last).toContain('href="/admin?reports=2#reports"');
+    // Out-of-range pages show the last one.
+    expect(await (await owner.fetch("/admin?reports=99")).text()).toContain("the real one");
   });
 });

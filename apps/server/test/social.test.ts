@@ -6,6 +6,7 @@ import { PF } from "@firstlight/shared/net/schema";
 import { CLOSE } from "@firstlight/shared/net/social";
 import type { Game } from "../src/app.ts";
 import { isVoiceMuted, partyOf } from "../src/social/index.ts";
+import { memoryReports } from "../src/social/store.ts";
 import { joinAs, playRequest, safeLeave, startServer, waitFor } from "./helpers.ts";
 
 let game: Game;
@@ -227,6 +228,29 @@ describe("blocks and parties (stalking, risk R1)", () => {
     cat.send("party", { action: "invite", target: ben.sessionId });
     await waitFor(() => catDenied.length > 0);
     expect(catDenied[0]).toEqual({ action: "party", reason: "you can't invite this player" });
+  });
+});
+
+describe("reports", () => {
+  it("reach players in your copy, or who shared it with you in the last 10 minutes, not anyone online", async () => {
+    const [annId, eveId, farId] = [uid("ann"), uid("eve"), uid("far")];
+    const ann = await join(annId);
+    const eve = await join(eveId);
+    await join(farId, "arcadia"); // never met Ann
+    await waitFor(() => st(ann).players.size === 2);
+    // Eve leaves Ann's copy for another body: Ann can still report her.
+    await safeLeave(eve);
+    rooms.splice(rooms.indexOf(eve), 1);
+    await join(eveId, "arcadia");
+    await waitFor(() => st(ann).players.size === 1);
+    const toasts = inbox<any>(ann, "toast");
+    const denied = inbox<any>(ann, "denied");
+    ann.send("report", { target: eveId, reason: "harassment" });
+    await waitFor(() => toasts.some((t) => /Report sent/.test(t.text)));
+    ann.send("report", { target: farId, reason: "harassment" });
+    await waitFor(() => denied.length > 0);
+    expect(denied[0]).toEqual({ action: "report", reason: "player not found" });
+    expect(memoryReports().filter((r) => r.reporter === annId).map((r) => r.target)).toEqual([eveId]);
   });
 });
 

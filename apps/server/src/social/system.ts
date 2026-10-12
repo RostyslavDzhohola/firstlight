@@ -12,15 +12,14 @@ import type { RoomSystem } from "../world/systems.ts";
 import { trackClientInfo, trackJoin, trackLeave, trackTick } from "./analytics.ts";
 import { announceAll, applyVoiceMute, banAccount, kickUser, refusesReconnect, removePlayer, seatRefusal, setVoiceMuted } from "./moderation.ts";
 import { parties, type Party } from "./parties.ts";
-import { clearPresence, clearRoomPresence, liveActor, liveRooms, presenceOf, sendTo, setPresence } from "./presence.ts";
-import { allow, clearLimits, sweepLimits } from "./limits.ts";
+import { clearPresence, clearRoomPresence, liveActor, liveRooms, presenceOf, sendTo, setPresence, sharedCopyRecently, stintEnd, stintStart, sweepStints } from "./presence.ts";
+import { allow, allowReport, clearLimits, sweepLimits } from "./limits.ts";
 import { blockedBy, blockedEitherWay, onBlockHooks, setBlocked, storeReport } from "./store.ts";
 
 export const SOCIAL_RULES = {
   /** A member who stays offline this long leaves their party. */
   PARTY_OFFLINE_MS: 120_000,
   INVITES_PER_MINUTE: 10,
-  REPORTS_PER_10_MIN: 5,
   BLOCKS_PER_MINUTE: 20,
   MAX_BLOCKS: 200,
 };
@@ -48,6 +47,7 @@ function sweep(now: number): void {
   if (now - lastSweep < 60_000) return;
   lastSweep = now;
   sweepLimits(now);
+  sweepStints(now);
   for (const u of lastNames.keys()) if (!presenceOf(u) && !parties.of(u)) lastNames.delete(u);
 }
 
@@ -265,13 +265,13 @@ export function createSocialSystem(room: BodyRoom): RoomSystem {
     const me = actorOf(c);
     if (!me || me.identity.loadtest) return;
     const found = anywhere(m.target);
-    if (!found) return deny(c, "report", "player not found");
+    // Only players you could have seen or heard: in this copy, or in one you shared in the last 10 minutes.
+    if (!found || (found.room !== room && !sharedCopyRecently(me.identity.userId, found.actor.identity.userId))) return deny(c, "report", "player not found");
     const t = found.actor;
     const target = t.identity.userId;
     if (target === me.identity.userId) return;
-    if (!allow(`rep:${me.identity.userId}:${target}`, 1, 10 * 60_000) || !allow(`rep:${me.identity.userId}`, SOCIAL_RULES.REPORTS_PER_10_MIN, 10 * 60_000)) {
-      return toast(c, "Report already sent. Thanks.");
-    }
+    // Per account (survives rejoin) and shared with voice reports.
+    if (!allowReport(me.identity.userId, target)) return toast(c, "Report already sent. Thanks.");
     const note = m.note?.replace(/\s+/g, " ").trim();
     const name = t.identity.name;
     storeReport({
@@ -345,6 +345,7 @@ export function createSocialSystem(room: BodyRoom): RoomSystem {
         return;
       }
       sessionUser.set(sessionId, uid);
+      stintStart(uid, room.roomId, sessionId);
       setPresence({ userId: uid, name: a.identity.name, room, sessionId, body: room.bodyDef.id });
       lastNames.set(uid, a.identity.name);
       clearTimeout(offlineTimers.get(uid));
@@ -360,6 +361,7 @@ export function createSocialSystem(room: BodyRoom): RoomSystem {
       const u = sessionUser.get(sessionId);
       if (!u) return;
       sessionUser.delete(sessionId);
+      stintEnd(u, sessionId);
       trackLeave(u, sessionId);
       if (clearPresence(u, sessionId)) {
         scheduleOfflineLeave(u);

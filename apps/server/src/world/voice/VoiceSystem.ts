@@ -14,6 +14,7 @@ import { actorPos, type PlayerActor } from "../actors.ts";
 import type { BodyRoom } from "../BodyRoom.ts";
 import { dist3 } from "../geometry.ts";
 import type { RoomSystem } from "../systems.ts";
+import { allowReport } from "../../social/limits.ts";
 import { applyBlock } from "../../social/system.ts";
 import { onBlockHooks } from "../../social/store.ts";
 import { voiceMutes, voiceSafety } from "./safety.ts";
@@ -72,8 +73,6 @@ const LIMITS = {
   SIGNAL_PER_S: 20,
   ACTION_BURST: 12,
   ACTION_PER_S: 2,
-  REPORTS_PER_10_MIN: 5,
-  REPORT_SAME_TARGET_MS: 60_000,
   UNREACHABLE_EVERY_MS: 5_000,
   TURN_RETRY_MS: 30_000,
   /** A block rotates the blocked player's relay credential at most this often (per account, F12 B1). */
@@ -107,8 +106,6 @@ interface VoiceSession {
   txSince: number;
   mutedSeen: boolean;
   unreachableAt: Map<string, number>;
-  reportTimes: number[];
-  reportedAt: Map<string, number>;
 }
 
 /** Live voice systems (one per room), so a Tab-list block anywhere reaches the right sessions. */
@@ -175,8 +172,6 @@ export class VoiceSystem implements RoomSystem {
       txSince: 0,
       mutedSeen: false,
       unreachableAt: new Map(),
-      reportTimes: [],
-      reportedAt: new Map(),
     });
     a.state.flags &= ~(PF.VOICE | PF.RADIO_TX);
     a.state.radioCh = 0;
@@ -500,13 +495,8 @@ export class VoiceSystem implements RoomSystem {
     if (!r.success) return this.deny(c, "voice:report", "invalid");
     const target = this.room.state.players.get(r.data.target);
     if (!target || r.data.target === c.sessionId || !target.userId) return this.deny(c, "voice:report", "no such player");
-    s.reportTimes = s.reportTimes.filter((t) => now - t < 10 * 60_000);
-    const lastSame = s.reportedAt.get(target.userId) ?? 0;
-    if (s.reportTimes.length >= LIMITS.REPORTS_PER_10_MIN || now - lastSame < LIMITS.REPORT_SAME_TARGET_MS) {
-      return this.deny(c, "voice:report", "too many reports");
-    }
-    s.reportTimes.push(now);
-    s.reportedAt.set(target.userId, now);
+    // Per account, so a rejoin doesn't reset it, and shared with the Tab list's reports.
+    if (!allowReport(a.identity.userId, target.userId, now)) return this.deny(c, "voice:report", "too many reports");
     const known = (VOICE_REPORT_REASONS as readonly string[]).includes(r.data.reason);
     voiceSafety.report(
       {
