@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { ANIM } from "@firstlight/shared/net/schema";
-import { OnboardingSteps, STEPS, type Sample } from "./onboardingSteps.ts";
+import { OnboardingSteps, STEPS, type Sample, type StepId } from "./onboardingSteps.ts";
 
-const s = (over: Partial<Sample> = {}): Sample => ({ dt: 1 / 60, moved: 0, lookRad: 0, anim: ANIM.IDLE, dummiesDown: 0, ...over });
+const s = (over: Partial<Sample> = {}): Sample => ({
+  dt: 1 / 60, moved: 0, lookRad: 0, anim: ANIM.IDLE, dummiesDown: 0, pressed: new Set(), phrased: false, voiceOn: false, atPortal: false, ...over,
+});
+const keys = (...codes: string[]) => s({ pressed: new Set(codes) });
+const FIRST: StepId[] = ["move", "look", "jump", "sprint", "dodge"];
 
 describe("onboarding steps", () => {
-  it("are move, look, jump, sprint, dodge, then the dummies", () => {
-    expect(STEPS.map((x) => x.id)).toEqual(["move", "look", "jump", "sprint", "dodge", "attack"]);
+  it("follow SPEC §6.12: movement, the dummies, then weapons, pick-up, map, phrases, voice and a portal", () => {
+    expect(STEPS.map((x) => x.id)).toEqual(["move", "look", "jump", "sprint", "dodge", "attack", "switch", "pickup", "map", "wheel", "voice", "portal"]);
+    expect(STEPS.filter((x) => x.optional).map((x) => x.id)).toEqual(["voice"]);
     expect(new OnboardingSteps().current?.id).toBe("move");
   });
 
@@ -49,16 +54,61 @@ describe("onboarding steps", () => {
     expect(o.next?.id).toBe("look");
   });
 
-  it("the dummies step follows the server's count and finishes the list", () => {
+  it("the dummies step follows the server's count; the tutorial goes on after it", () => {
     const o = new OnboardingSteps();
     o.observe(s({ dummiesDown: 2 }));
     expect(o.progressText("attack")).toBe("2 / 3");
     expect(o.isDone("attack")).toBe(false);
-    for (const id of ["move", "look", "jump", "sprint", "dodge"] as const) o.complete(id);
+    for (const id of FIRST) o.complete(id);
     expect(o.current?.id).toBe("attack");
-    expect(o.next).toBeNull();
+    expect(o.next?.id).toBe("switch");
     o.observe(s({ dummiesDown: 3 }));
+    expect(o.current?.id).toBe("switch");
+    expect(o.allDone).toBe(false);
+  });
+
+  it("switch weapons takes two different slots; pick-up E, map M, phrase wheel a phrase", () => {
+    const o = new OnboardingSteps();
+    o.observe(keys("Digit2"));
+    o.observe(keys("Digit2"));
+    expect(o.isDone("switch")).toBe(false);
+    expect(o.observe(keys("Digit1"))).toEqual(["switch"]);
+    expect(o.observe(keys("KeyE"))).toEqual(["pickup"]);
+    expect(o.observe(keys("KeyM"))).toEqual(["map"]);
+    o.observe(keys("KeyG")); // opening the wheel isn't enough
+    expect(o.isDone("wheel")).toBe(false);
+    expect(o.observe(s({ phrased: true }))).toEqual(["wheel"]);
+  });
+
+  it("voice is optional: V or opting in completes it, else it moves on after 8 s on the card", () => {
+    const a = new OnboardingSteps();
+    expect(a.observe(keys("KeyV"))).toEqual(["voice"]);
+    const b = new OnboardingSteps();
+    expect(b.observe(s({ voiceOn: true }))).toEqual(["voice"]);
+    const c = new OnboardingSteps();
+    for (const id of ["move", "look", "jump", "sprint", "dodge", "attack", "switch", "pickup", "map", "wheel"] as const) c.complete(id);
+    expect(c.current?.id).toBe("voice");
+    for (let i = 0; i < 7; i++) c.observe(s({ dt: 1 }));
+    expect(c.isDone("voice")).toBe(false);
+    c.observe(s({ dt: 1.1 }));
+    expect(c.isDone("voice")).toBe(true);
+    expect(c.current?.id).toBe("portal");
+  });
+
+  it("time on another card doesn't count toward voice's 8 s", () => {
+    const o = new OnboardingSteps();
+    for (let i = 0; i < 20; i++) o.observe(s({ dt: 1 }));
+    expect(o.isDone("voice")).toBe(false);
+  });
+
+  it("the portal is the final pointer: walking into one finishes the tutorial", () => {
+    const o = new OnboardingSteps();
+    for (const x of STEPS) if (x.id !== "portal") o.complete(x.id);
+    expect(o.current?.id).toBe("portal");
+    expect(o.next).toBeNull();
+    expect(o.observe(s({ atPortal: true }))).toEqual(["portal"]);
     expect(o.current).toBeNull();
+    expect(o.allDone).toBe(true);
     expect(o.doneCount).toBe(STEPS.length);
   });
 });

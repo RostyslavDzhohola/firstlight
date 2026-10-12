@@ -1,10 +1,13 @@
 // Onboarding on Portus (SPEC §6.12; server: apps/server/src/world/onboarding.ts). Draws the three
-// training dummies, and while the server lists `you.onboarding` shows the tutorial HUD: move, look,
-// jump, sprint and dodge are checked here from the local player (they pay nothing); attacks near the
-// dummies go to the server as `train` messages, which counts the hits and pays the XP and the Spark
-// medal. Skip: the HUD button (mouse free) or Esc → Skip tutorial.
+// training dummies, and when the server lists `you.onboarding` runs the tutorial HUD. Attacks near
+// the dummies go to the server as `train` messages; it counts the hits and pays the XP and the Spark
+// medal. Every other step (movement, then weapons, pick-up, map, phrase wheel, optional voice and
+// the walk to a portal) is checked here from the local player and pays nothing; the HUD stays up
+// after the payout until those are done or skipped. Skip: the HUD button (mouse free) or Esc → Skip
+// tutorial.
 
 import * as THREE from "three/webgpu";
+import { BODIES, portalNear, portalSpots, type PortalSpot } from "@firstlight/shared";
 import { ONBOARDING } from "@firstlight/shared/content/onboarding";
 import { WEAPONS, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
 import { config, flags } from "../config.ts";
@@ -12,12 +15,14 @@ import { weaponColor } from "../render/effects.ts";
 import { pauseExtras, type PauseExtra } from "../ui/menu.ts";
 import { OnboardingHud } from "../ui/onboarding.ts";
 import { Panel } from "../ui/panels.ts";
+import { voice } from "../voice/index.ts";
 import { TrainingDummies } from "../world/TrainingDummies.ts";
 import type { Game } from "./Game.ts";
 import { OnboardingSteps } from "./onboardingSteps.ts";
 import type { ClientSystem } from "./systems.ts";
 
-const DONE_CARD_MS = 9000;
+const DONE_CARD_MS = 8000;
+const NO_KEYS: ReadonlySet<string> = new Set();
 /** Frames that move further than this are teleports or corrections, not walking. */
 const MAX_STEP_M = 3;
 
@@ -33,18 +38,30 @@ export class OnboardingClient implements ClientSystem {
   /** Skipped or finished in this session: never restart from a stale `you`. */
   private ended = false;
   private doneUntil = 0;
+  /** The server paid the dummies (and the completion): the rest is client-side tips. */
+  private paid = false;
+  private xpPaid = 0;
+  /** We said a phrase since the last frame (the phrase-wheel step). */
+  private phrased = false;
+  private readonly portals: PortalSpot[];
   private readonly lastPos = new THREE.Vector3();
   private hasLast = false;
   private lastTrainAt = 0;
   private readonly pauseRow = (): PauseExtra | null =>
-    this.active ? { icon: "arrow-r", title: "Skip tutorial", sub: "No more XP and no Spark medal. It won't come back.", onClick: () => this.skip() } : null;
+    this.active
+      ? { icon: "arrow-r", title: "Skip tutorial", sub: this.paid ? "Hide the rest of the tips." : "No more XP and no Spark medal. It won't come back.", onClick: () => this.skip() }
+      : null;
 
   constructor(game: Game) {
     this.game = game;
     this.dummies = new TrainingDummies(game.ctx.scene, game.planet.terrain);
+    this.portals = portalSpots(BODIES[ONBOARDING.BODY], game.planet.terrain);
     const room = game.net.room!;
     room.onMessage("train", (m: { dummy: number; hits: number; down: boolean }) => this.onTrain(m));
     room.onMessage("onboarding", (m: { state: "done" | "skipped"; xp: number }) => this.onEnd(m));
+    room.onMessage("phrase", (m: { by: string }) => {
+      if (m.by === room.sessionId) this.phrased = true;
+    });
     game.combat.training = (def, tier, now) => this.attack(def, tier, now);
     pauseExtras.add(this.pauseRow);
   }
@@ -53,12 +70,12 @@ export class OnboardingClient implements ClientSystem {
     this.active = true;
     const g = this.game;
     const layer = g.hud.root.querySelector<HTMLElement>(".fl-hud__layer") ?? g.hud.root;
-    this.hud = new OnboardingHud(layer, () => this.skip());
+    this.hud = new OnboardingHud(layer, () => this.skip(), config.publicRepo ? config.repoUrl : null);
   }
 
   private skip() {
     if (!this.active) return;
-    this.game.net.room?.send("onboarding", { action: "skip" });
+    if (!this.paid) this.game.net.room?.send("onboarding", { action: "skip" });
     this.finish();
   }
 
@@ -88,20 +105,22 @@ export class OnboardingClient implements ClientSystem {
     }
   }
 
+  /** Server: rewards paid (the tutorial goes on with tips) or skipped (it ends here). */
   private onEnd(m: { state: "done" | "skipped"; xp: number }) {
     if (m.state === "done") {
+      this.paid = true;
+      this.xpPaid = m.xp;
       for (let i = 0; i < this.dummies.dummies.length; i++) this.dummies.setDown(i, true);
-      if (this.hud) {
-        this.hud.showDone(m.xp, config.publicRepo ? config.repoUrl : null);
-        this.doneUntil = performance.now() + DONE_CARD_MS;
-      }
-    } else this.game.hud.toast("Tutorial skipped. Controls are under How to play in the Esc menu.", "info");
+      if (!this.active) this.finish();
+      return;
+    }
+    this.game.hud.toast("Tutorial skipped. Controls are under How to play in the Esc menu.", "info");
     this.finish();
   }
 
   /** CombatClient hook: an attack inside the safe zone. True when the dummies took it. */
   attack(def: WeaponDef, tier: TierStats, now: number): boolean {
-    if (!this.active) return false;
+    if (!this.active || this.paid) return false; // after the payout the server takes no more training hits
     if (def.delivery === "heal" || def.delivery === "bubble" || def.delivery === "none") return false;
     const g = this.game;
     const me = g.player.pos;
@@ -148,11 +167,11 @@ export class OnboardingClient implements ClientSystem {
     if (this.hud && this.doneUntil && now > this.doneUntil) this.closeHud();
     const ob = g.hud.you?.onboarding;
     if (ob && !this.active && !this.ended && !flags.has("autoplay")) this.start();
-    else if (!ob && this.active) this.finish();
-    if (!this.active || !ob || !this.hud) return;
+    else if (!ob && this.active && !this.paid) this.finish(); // ended on the server without a payout
+    if (!this.active || !this.hud) return;
 
-    ob.hits.forEach((h, i) => this.dummies.setDown(i, h >= ONBOARDING.HITS_PER_DUMMY));
-    const down = ob.hits.filter((h) => h >= ONBOARDING.HITS_PER_DUMMY).length;
+    if (ob) ob.hits.forEach((h, i) => this.dummies.setDown(i, h >= ONBOARDING.HITS_PER_DUMMY));
+    const down = this.paid ? this.dummies.dummies.length : (ob?.hits.filter((h) => h >= ONBOARDING.HITS_PER_DUMMY).length ?? 0);
     const p = g.player.pos;
     let moved = this.hasLast ? p.distanceTo(this.lastPos) : 0;
     if (moved > MAX_STEP_M) moved = 0;
@@ -160,23 +179,51 @@ export class OnboardingClient implements ClientSystem {
     this.hasLast = true;
     const playing = g.input.locked && !g.photo?.active && !Panel.current;
     const look = playing ? (Math.abs(g.input.mouseDX) + Math.abs(g.input.mouseDY)) * g.input.sensitivity : 0;
-    const completed = this.steps.observe({ dt, moved: playing ? moved : 0, lookRad: look, anim: g.player.anim, dummiesDown: down });
+    const completed = this.steps.observe({
+      dt,
+      moved: playing ? moved : 0,
+      lookRad: look,
+      anim: g.player.anim,
+      dummiesDown: down,
+      // Keys as the game saw them this frame (M and E open panels at once, so no panel check here).
+      pressed: g.photo?.active ? NO_KEYS : g.input.pressed,
+      phrased: this.phrased,
+      voiceOn: !!voice()?.optedIn,
+      atPortal: !!portalNear(this.portals, p.x, p.y, p.z),
+    });
+    this.phrased = false;
     if (completed.length && completed[0] !== "attack") g.audio.play("ui");
-    this.hud.render(this.steps);
+    if (this.steps.allDone) {
+      this.hud.showDone(this.xpPaid || ONBOARDING.DONE_XP + down * ONBOARDING.DUMMY_XP);
+      this.doneUntil = now + DONE_CARD_MS;
+      this.finish();
+      return;
+    }
+    this.hud.render(this.steps, this.paid);
 
-    // Point at the dummies while that's the step on the card.
-    let shown = false;
-    if (this.steps.current?.id === "attack") {
-      const c = this.dummies.chest(1, _a).addScaledVector(_b.copy(_a).normalize(), 0.9);
-      if (c.distanceTo(p) < 70) {
-        const s = c.project(g.ctx.camera);
-        if (s.z < 1 && Math.abs(s.x) < 0.95 && Math.abs(s.y) < 0.95) {
-          this.hud.setCallout((s.x * 0.5 + 0.5) * innerWidth, (-s.y * 0.5 + 0.5) * innerHeight, down);
-          shown = true;
-        }
+    // Point at the dummies, then at the Arcadia portal, while that's the step on the card.
+    const step = this.steps.current?.id;
+    let at: THREE.Vector3 | null = null;
+    let title = "";
+    let sub = "";
+    if (step === "attack") {
+      at = this.dummies.chest(1, _a).addScaledVector(_b.copy(_a).normalize(), 0.9);
+      title = `Training dummies · ${down} / 3 down`;
+      sub = "10 XP each. Three hits knock one down.";
+    } else if (step === "portal") {
+      const spot = this.portals.find((x) => x.to === "arcadia");
+      if (spot) at = _a.set(spot.center[0], spot.center[1], spot.center[2]);
+      title = "Arcadia";
+      sub = "Levels 1–7 · walk in";
+    }
+    if (at && at.distanceTo(p) < 80) {
+      const sp = at.project(g.ctx.camera);
+      if (sp.z < 1 && Math.abs(sp.x) < 0.95 && Math.abs(sp.y) < 0.95) {
+        this.hud.setCallout((sp.x * 0.5 + 0.5) * innerWidth, (-sp.y * 0.5 + 0.5) * innerHeight, title, sub);
+        return;
       }
     }
-    if (!shown) this.hud.setCallout(null, 0, down);
+    this.hud.setCallout(null);
   }
 
   dispose() {

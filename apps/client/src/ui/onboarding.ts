@@ -1,7 +1,7 @@
 // Onboarding HUD (verdict: Entry A's layout, kit markup in src/ui/README.md "Onboarding"): the
 // checklist with keycaps and Skip, the step rail, the big current-step card right of centre (never
-// over the crosshair) and a callout over the training dummies. Plain DOM (D25); per-frame calls
-// touch the DOM only when a value changes.
+// over the crosshair) and a world callout (the training dummies, then the Arcadia portal). Plain DOM
+// (D25); per-frame calls touch the DOM only when a value changes.
 
 import "./styles/kit.css";
 import "./onboarding.css";
@@ -37,9 +37,14 @@ export class OnboardingHud {
   private barText: HTMLElement | null = null;
   private readonly callout: HTMLElement;
   private readonly calloutText: HTMLElement;
-  private last = { state: "", step: "", bar: "", callout: "", calloutText: "" };
+  private readonly calloutSub: HTMLElement;
+  private readonly skipNote: HTMLElement;
+  private readonly repoUrl: string | null;
+  private last = { state: "", step: "", bar: "", callout: "", calloutText: "", paid: false };
 
-  constructor(parent: HTMLElement, onSkip: () => void) {
+  /** `repoUrl`: Star/Fork links on the last card (only once the repo is public). */
+  constructor(parent: HTMLElement, onSkip: () => void, repoUrl: string | null = null) {
+    this.repoUrl = repoUrl;
     this.root = el("div", "fl-onb fl-ui", parent);
     this.root.dataset.hud = "";
     this.list = el("section", "fl-onb__list fl-holo", this.root);
@@ -55,7 +60,7 @@ export class OnboardingHud {
     const skip = el("div", "fl-onb__skip", this.list);
     const b = button("Skip tutorial", "fl-btn fl-btn--sm", skip, onSkip);
     b.title = "No more XP and no Spark medal";
-    el("small", "", skip, "Esc → Skip tutorial. Skipping pays nothing more.");
+    this.skipNote = el("small", "", skip, "Esc → Skip tutorial. Skipping pays nothing more.");
 
     const rail = el("div", "fl-onb__rail", this.root);
     this.railText = el("span", "fl-onb__rail-t", rail);
@@ -70,12 +75,16 @@ export class OnboardingHud {
     el("div", "fl-callout__line", this.callout);
     el("div", "fl-callout__dot", this.callout);
     const box = el("div", "fl-callout__box fl-holo", this.callout);
-    this.calloutText = el("span", "", box, "Training dummies");
-    el("small", "", box, "10 XP each. Three hits knock one down.");
+    this.calloutText = el("span", "", box);
+    this.calloutSub = el("small", "", box);
   }
 
-  /** Checklist, rail and card from the step machine (cheap to call every frame). */
-  render(steps: OnboardingSteps) {
+  /** Checklist, rail and card from the step machine (cheap to call every frame). `paid`: the server has paid the dummies. */
+  render(steps: OnboardingSteps, paid = false) {
+    if (paid !== this.last.paid) {
+      this.last.paid = paid;
+      this.skipNote.textContent = paid ? "XP and the Spark medal are yours; the rest is tips." : "Esc → Skip tutorial. Skipping pays nothing more.";
+    }
     const cur = steps.current;
     const state = STEPS.map((s) => (steps.isDone(s.id) ? "d" : s === cur ? "n" : "-")).join("");
     if (state !== this.last.state) {
@@ -84,7 +93,7 @@ export class OnboardingHud {
       this.title.textContent = `First minute · ${n} / ${STEPS.length}`;
       STEPS.forEach((s, i) => {
         const done = steps.isDone(s.id);
-        this.rows[i]!.className = `fl-onb__st${done ? " is-done" : s === cur ? " is-now" : ""}`;
+        this.rows[i]!.className = `fl-onb__st${done ? " is-done" : s === cur ? " is-now" : ""}${s.optional ? " is-opt" : ""}`;
         this.segs[i]!.className = done ? "is-done" : s === cur ? "is-now" : "";
       });
       this.railText.replaceChildren("Step ");
@@ -125,14 +134,31 @@ export class OnboardingHud {
       this.barFill.style.setProperty("--fill", "0");
       this.barText = el("span", "num", hold);
     }
+    if (s.id === "portal" && this.repoUrl) this.repoLinks(c, this.repoUrl);
     const nx = el("div", "fl-onb__next", c);
     el("span", "", nx, next ? "Next" : "Last step");
-    const b = el("b", "", nx, next ? next.label : "Spark medal · +20 XP");
+    const b = el("b", "", nx, next ? next.label : "Then it's all yours");
     if (next) keys(b, next.keys.slice(0, 1));
   }
 
-  /** The dummies callout at screen (x, y), or hidden (null). */
-  setCallout(x: number | null, y = 0, down = 0) {
+  private repoLinks(parent: HTMLElement, repoUrl: string) {
+    const row = el("div", "fl-onb__done", parent);
+    const star = el("a", "fl-btn fl-btn--sm", row);
+    icon("star", "", star);
+    star.append("Star on GitHub");
+    star.href = repoUrl;
+    const fork = el("a", "fl-btn fl-btn--sm", row);
+    icon("fork", "", fork);
+    fork.append("Fork");
+    fork.href = `${repoUrl}/fork`;
+    for (const a of [star, fork]) {
+      a.target = "_blank";
+      a.rel = "noopener";
+    }
+  }
+
+  /** A world callout at screen (x, y) with a title and a line under it, or hidden (x = null). */
+  setCallout(x: number | null, y = 0, title = "", sub = "") {
     const key = x === null ? "" : `${Math.round(x)},${Math.round(y)}`;
     if (key !== this.last.callout) {
       this.last.callout = key;
@@ -142,12 +168,16 @@ export class OnboardingHud {
         this.callout.style.setProperty("--y", `${Math.round(y)}px`);
       }
     }
-    const text = `Training dummies · ${down} / 3 down`;
-    if (text !== this.last.calloutText) this.calloutText.textContent = this.last.calloutText = text;
+    const text = `${title}\u0001${sub}`;
+    if (text !== this.last.calloutText) {
+      this.last.calloutText = text;
+      this.calloutText.textContent = title;
+      this.calloutSub.textContent = sub;
+    }
   }
 
   /** The end card: XP, the medal, and the Star/Fork links once the repo is public. */
-  showDone(xp: number, repoUrl: string | null) {
+  showDone(xp: number) {
     this.list.hidden = true;
     this.callout.hidden = true;
     this.root.querySelector(".fl-onb__rail")?.remove();
@@ -157,21 +187,7 @@ export class OnboardingHud {
     el("b", "", k, `+${xp} XP`);
     el("h2", "", c, "You're ready");
     rich(el("p", "", c), "The **Spark** medal is yours: wear its title from the journal (**J**). Your inventory is on **I**. The portals around the plaza lead to the three planets.");
-    if (repoUrl) {
-      const row = el("div", "fl-onb__done", c);
-      const star = el("a", "fl-btn fl-btn--sm", row);
-      icon("star", "", star);
-      star.append("Star on GitHub");
-      star.href = repoUrl;
-      const fork = el("a", "fl-btn fl-btn--sm", row);
-      icon("fork", "", fork);
-      fork.append("Fork");
-      fork.href = `${repoUrl}/fork`;
-      for (const a of [star, fork]) {
-        a.target = "_blank";
-        a.rel = "noopener";
-      }
-    }
+    if (this.repoUrl) this.repoLinks(c, this.repoUrl);
   }
 
   dispose() {
