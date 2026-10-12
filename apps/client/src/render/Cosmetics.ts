@@ -7,6 +7,7 @@
 
 import * as THREE from "three/webgpu";
 import { COSMETIC_BY_ID, COSMETIC_SOCKET, type CosmeticSlot, type Socket } from "@firstlight/shared/content/items";
+import { disposeTree } from "./dispose.ts";
 
 /** Anything with sockets (AvatarView). */
 export interface Socketed {
@@ -21,7 +22,10 @@ const SLOT_OFFSET: Record<CosmeticSlot, THREE.Vector3> = {
   backpack: new THREE.Vector3(0, -0.05, -0.16),
 };
 
+/** Materials shared by every rig (never freed); geometry and the static texture are per build. */
 const mats = new Map<string, THREE.Material>();
+const sharedMats = new WeakSet<object>();
+const isShared = (r: object) => sharedMats.has(r);
 function m(color: number, emissive = 0, opacity = 1, metal = 0.1, double = false): THREE.Material {
   const key = `${color}:${emissive}:${opacity}:${metal}:${double}`;
   let x = mats.get(key);
@@ -33,6 +37,7 @@ function m(color: number, emissive = 0, opacity = 1, metal = 0.1, double = false
     }
     x = s;
     mats.set(key, x);
+    sharedMats.add(x);
   }
   return x;
 }
@@ -252,6 +257,8 @@ export class CosmeticRig {
   private readonly used = new Set<Socket>();
   private anims: Anim[] = [];
   private readonly avatar: Socketed;
+  /** What the current list built (freed when the list changes or the rig goes). */
+  private built: THREE.Group[] = [];
 
   constructor(avatar: Socketed) {
     this.avatar = avatar;
@@ -262,6 +269,8 @@ export class CosmeticRig {
     this.current = list;
     for (const s of this.used) this.avatar.attach(s, null);
     this.used.clear();
+    for (const g of this.built) disposeTree(g, isShared);
+    this.built = [];
     this.anims = [];
     const groups = new Map<Socket, THREE.Group>();
     for (const id of list.split(",").filter(Boolean)) {
@@ -278,6 +287,7 @@ export class CosmeticRig {
     for (const [socket, g] of groups) {
       this.avatar.attach(socket, g);
       this.used.add(socket);
+      this.built.push(g);
     }
   }
 

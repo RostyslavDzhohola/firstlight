@@ -3,6 +3,7 @@
 
 import * as THREE from "three/webgpu";
 import { WEAPONS } from "@firstlight/shared/content/weapons";
+import { releaseObjects } from "./dispose.ts";
 
 const WEAPON_COLORS: Record<string, number> = {
   carbine: 0x7af8ff,
@@ -37,11 +38,23 @@ function glow(color: number, opacity = 1): THREE.MeshBasicNodeMaterial {
 }
 
 interface Fx {
-  obj: THREE.Object3D;
+  obj: THREE.Mesh;
   until: number;
   update?: (t: number, dt: number) => boolean | void; // return true to remove early
   fade?: boolean;
   born: number;
+  /** The mesh's geometry is its own (melee arcs): freed with it. */
+  ownGeometry?: boolean;
+}
+
+/**
+ * Effect meshes share the cached glow materials and module geometry, so taking one off the scene
+ * must also free its render state (WebGPU keeps it, listening on the shared material, otherwise).
+ */
+function retire(m: THREE.Mesh, ownGeometry = false) {
+  m.removeFromParent();
+  m.dispose();
+  if (ownGeometry) m.geometry.dispose();
 }
 
 const tracerGeo = new THREE.CylinderGeometry(0.03, 0.03, 1, 6, 1, true);
@@ -57,7 +70,7 @@ const _ahead = new THREE.Vector3();
 
 export interface ProjectileSim {
   id: number;
-  mesh: THREE.Object3D;
+  mesh: THREE.Mesh;
   pos: THREE.Vector3;
   vel: THREE.Vector3;
   g: number;
@@ -120,8 +133,7 @@ export class Effects {
     const basis = new THREE.Matrix4().makeBasis(right, facing, up.clone().negate());
     m.quaternion.setFromRotationMatrix(basis);
     m.rotateZ(-Math.PI * 0.3 + Math.PI / 2);
-    this.add(m, 160, true);
-    setTimeout(() => geo.dispose(), 400);
+    this.add(m, 160, true, undefined, true);
   }
 
   spawnProjectile(id: number, weaponIndex: number, pos: THREE.Vector3, vel: THREE.Vector3, g: number) {
@@ -137,21 +149,26 @@ export class Effects {
   endProjectile(id: number) {
     const p = this.projectiles.get(id);
     if (!p) return;
-    this.group.remove(p.mesh);
+    retire(p.mesh);
     this.projectiles.delete(id);
   }
 
-  private add(obj: THREE.Object3D, ms: number, fade: boolean, update?: Fx["update"]) {
+  private add(obj: THREE.Mesh, ms: number, fade: boolean, update?: Fx["update"], ownGeometry = false) {
     this.group.add(obj);
     const now = performance.now();
-    this.list.push({ obj, until: now + ms, fade, update, born: now });
+    this.list.push({ obj, until: now + ms, fade, update, born: now, ownGeometry });
+  }
+
+  /** Live effect meshes (tests). */
+  get live(): number {
+    return this.list.length + this.projectiles.size;
   }
 
   update(dt: number, now: number) {
     for (let i = this.list.length - 1; i >= 0; i--) {
       const f = this.list[i]!;
       if (now >= f.until || f.update?.(now, dt) === true) {
-        this.group.remove(f.obj);
+        retire(f.obj, f.ownGeometry);
         this.list.splice(i, 1);
       }
     }
@@ -166,8 +183,11 @@ export class Effects {
   }
 
   dispose() {
-    this.group.removeFromParent();
+    for (const f of this.list) retire(f.obj, f.ownGeometry);
+    for (const p of this.projectiles.values()) retire(p.mesh);
     this.list.length = 0;
     this.projectiles.clear();
+    this.group.removeFromParent();
+    releaseObjects(this.group);
   }
 }

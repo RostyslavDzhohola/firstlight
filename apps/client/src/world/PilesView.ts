@@ -2,6 +2,7 @@
 // sized by how much it holds. Reads room.state.piles (view-filtered by distance).
 
 import * as THREE from "three/webgpu";
+import { releaseObjects } from "../render/dispose.ts";
 
 const cubeGeo = new THREE.BoxGeometry(0.28, 0.28, 0.28);
 const beamGeo = new THREE.CylinderGeometry(0.12, 0.35, 6, 8, 1, true);
@@ -16,27 +17,35 @@ interface PileView {
   items: number;
 }
 
+/** A pile's meshes share the module geometry/materials: dropping one frees only its render state. */
+function drop(v: PileView) {
+  v.group.removeFromParent();
+  releaseObjects(v.group);
+}
+
 export class PilesView {
   private readonly views = new Map<string, PileView>();
+  private readonly seen = new Set<string>();
   private t = 0;
 
   constructor(private readonly scene: THREE.Scene) {}
 
   update(state: any, dt: number) {
     this.t += dt;
-    const seen = new Set<string>();
+    const seen = this.seen;
+    seen.clear();
     state?.piles?.forEach((p: any, id: string) => {
       seen.add(id);
       let v = this.views.get(id);
       if (!v || v.items !== p.items) {
-        if (v) v.group.removeFromParent();
+        if (v) drop(v);
         v = this.build(p);
         this.views.set(id, v);
       }
     });
     for (const [id, v] of this.views) {
       if (!seen.has(id)) {
-        v.group.removeFromParent();
+        drop(v);
         this.views.delete(id);
       } else {
         v.spin.rotation.y = this.t * 0.8;
@@ -70,7 +79,7 @@ export class PilesView {
   }
 
   dispose() {
-    for (const v of this.views.values()) v.group.removeFromParent();
+    for (const v of this.views.values()) drop(v);
     this.views.clear();
   }
 }

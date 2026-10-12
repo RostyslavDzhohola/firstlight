@@ -5,6 +5,7 @@ import * as THREE from "three/webgpu";
 import { materialColor } from "three/tsl";
 import { BODIES, padDirs, PAD_SAFE_RADIUS, portalSpots, type BodyId, type Terrain } from "@firstlight/shared";
 import { atmo } from "../render/atmosphere.ts";
+import { disposeTree } from "../render/dispose.ts";
 
 export const PORTAL_COLORS: Record<BodyId, number> = {
   portus: 0xffd8a8,
@@ -135,8 +136,10 @@ export class Portals {
     if (playerPos) for (const c of this.cullables) c.obj.visible = c.at.distanceTo(playerPos) < maxDistance;
   }
 
+  /** Leaving the body: every pad, ring, beam, portal and label here is this instance's own. */
   dispose() {
     this.group.removeFromParent();
+    disposeTree(this.group);
   }
 }
 
