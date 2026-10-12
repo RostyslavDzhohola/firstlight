@@ -62,12 +62,14 @@
 | Accounts + persistence | MERGED 61aa332 | — |
 | Social, moderation, stats, share | MERGED 1a2ee50 (Codex ×2) | — |
 | Enemies, wildlife, bosses | MERGED 7768535; fixing Codex review (3 blockers) | ../fl-wt-npc |
-| Characters (GLB, animations) | MERGED 2447afe; fixing Codex review | ../fl-wt-chars |
+| Characters (GLB, animations) | MERGED 2447afe + review fixes 13cf0f5 | — |
 | Voice + radio + phrase wheel | MERGED d40d058 (Codex ×2); TURN key pending owner | — |
 | Missions, medals, eggs, shop, pads, stage | MERGED f8514dc (Codex) | — |
 | Photo mode | MERGED 4214419 | — |
-| UI port (design verdict) | Opus sub-agent, merging main then restyling lanes' panels | ../fl-wt-ui |
+| UI port (design verdict) | MERGED 9f6dc14 (deployed) | — |
 | Destruction (§6.9) | Opus sub-agent | ../fl-wt-destruct |
+| Horses (M11 #2) | Opus sub-agent | ../fl-wt-horses (lane/horses) |
+| Weather + day/night (M11 #3–4) | Opus (render agent) | ../fl-wt-render (lane/weather) |
 
 ## Measured numbers
 
