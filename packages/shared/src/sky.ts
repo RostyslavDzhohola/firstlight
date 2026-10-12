@@ -187,31 +187,31 @@ export interface Strike {
   seed: number;
 }
 
-/** Long storms (admin overrides, photo mode) schedule their strikes in windows this long. */
-const STRIKE_WINDOW_MS = 10 * 60_000;
+// Any change to the lightning schedule (these constants, nextStrike) must bump the shared protocol version.
+/** Lightning cadence: strike i of a storm sits at slotStart + (i + 1)·EVERY ± JITTER, so consecutive
+ * strikes are 6–25 s apart (mean 15.5 s) for a storm of any length. */
+const STRIKE_EVERY_MS = 15_500;
+const STRIKE_JITTER_MS = 4_750;
+const STRIKE_TIME_SALT = 0x1717;
+const STRIKE_SEED_SALT = 0x5eed;
 
 /**
  * The first lightning strike at or after `ms` in a storm slot (deterministic, so every client on
  * the copy flashes together), or null when the slot isn't a storm or no strike is left in it.
- * Strikes come 6–25 s apart. A slot is split into 10-minute windows (scheduled slots fit in the
- * first one), so a storm of any length keeps striking and a lookup only walks one or two windows.
+ * Found in O(1): only the strikes around `ms` are computed.
  */
 export function nextStrike(s: SkyState, ms: number): Strike | null {
   if (s.weather !== "storm") return null;
   const k = Math.round(s.slotStart / 1000);
-  const first = Math.max(0, Math.floor((ms - s.slotStart) / STRIKE_WINDOW_MS));
-  for (let w = first; w < first + 3; w++) {
-    const start = s.slotStart + w * STRIKE_WINDOW_MS;
-    if (start >= s.nextChangeAt) return null;
-    const end = Math.min(s.nextChangeAt, start + STRIKE_WINDOW_MS);
-    let t = start;
-    for (let i = 0; i < 100; i++) {
-      t += 6000 + 19000 * hash01(BODY_SEED[s.body], s.copy, k, 100 + i + 1000 * w);
-      if (t >= end) break;
-      if (t >= ms) {
-        const seed = hash4(BODY_SEED[s.body], s.copy, k, 300 + i + 1000 * w);
-        return { at: t, az: hash01(seed, 1) * Math.PI * 2, distance: 250 + 450 * hash01(seed, 2), seed };
-      }
+  // Strikes before index i are at least EVERY − JITTER before ms and strike i + 2 is after it.
+  let i = Math.max(0, Math.floor((ms - s.slotStart) / STRIKE_EVERY_MS) - 1);
+  for (let end = i + 2; i <= end; i++) {
+    const jitter = (2 * hash01(BODY_SEED[s.body] ^ STRIKE_TIME_SALT, s.copy, k, i) - 1) * STRIKE_JITTER_MS;
+    const at = s.slotStart + (i + 1) * STRIKE_EVERY_MS + jitter;
+    if (at >= s.nextChangeAt) return null;
+    if (at >= ms) {
+      const seed = hash4(BODY_SEED[s.body] ^ STRIKE_SEED_SALT, s.copy, k, i);
+      return { at, az: hash01(seed, 1) * Math.PI * 2, distance: 250 + 450 * hash01(seed, 2), seed };
     }
   }
   return null;

@@ -128,16 +128,30 @@ describe("weather schedule", () => {
       expect(st, `strike after ${min} min`).not.toBeNull();
       expect(st!.at - at).toBeLessThan(26_000);
     }
-    // Strikes stay at least 6 s apart, also across the schedule's internal windows, and stop at the end.
-    let prev = -Infinity;
+    // Strikes come 6–25 s apart for the whole storm (the first within 25 s of its start) and stop at the end.
+    let prev = o.since;
     let n = 0;
+    let shortest = Infinity;
+    let longest = 0;
+    const all: number[] = [];
     for (let st = nextStrike(s, T0); st; st = nextStrike(s, st.at + 1)) {
-      expect(st.at - prev).toBeGreaterThanOrEqual(6000);
+      shortest = Math.min(shortest, st.at - prev);
+      longest = Math.max(longest, st.at - prev);
       expect(st.at).toBeLessThan(o.until);
+      all.push(st.at);
       prev = st.at;
       n++;
     }
-    expect(n).toBeGreaterThan(500); // ~240 min / 15.5 s
+    expect(shortest).toBeGreaterThanOrEqual(6000);
+    expect(longest).toBeLessThanOrEqual(25_000);
+    expect(n).toBeGreaterThan(900); // ~240 min / 15.5 s
+    expect(n).toBeLessThan(960);
+    // A lookup from any time finds the first strike at or after it.
+    for (let i = 0; i < 400; i++) {
+      const ms = T0 + Math.floor(((i * 7919) % 400) / 400 * 240 * 60_000) + i;
+      const want = all.find((t) => t >= ms);
+      expect(nextStrike(s, ms)?.at).toBe(want);
+    }
   });
 
   it("schedules lightning only in storms, identically for every client", () => {
