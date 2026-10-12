@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HOTBAR_SLOTS } from "@firstlight/shared/content/character";
 import { WEAPON_INDEX } from "@firstlight/shared/content/weapons";
 import { actorPos } from "../src/world/actors.ts";
+import { supportOf } from "../src/world/support.ts";
 import { safeLeave, startServer } from "./helpers.ts";
 import { bot, harness, me, offPad, serverRoom, sleep, tpAndWait, until, type Bot } from "./quest-helpers.ts";
 
@@ -85,5 +86,67 @@ describe("inventory", () => {
     await op(b, "use", { slot: HOTBAR_SLOTS + 9 });
     await until("drank", () => b.you.backpack[9]?.qty === 1);
     await until("healing", () => me(b).hp > hp + 10, 4000);
+  });
+});
+
+/** Put the first `id` into backpack slot `k` the way the inventory panel does (a `move`). */
+async function toBackpack(b: Bot, id: string, k: number): Promise<number> {
+  const from = [...b.you.hotbar, ...b.you.backpack].findIndex((i: any) => i?.id === id);
+  await op(b, "move", { from, to: HOTBAR_SLOTS + k });
+  await until(`${id} in backpack ${k}`, () => b.you.backpack[k]?.id === id);
+  return HOTBAR_SLOTS + k;
+}
+
+/** Ray from b's head to a's chest (a camera-style shot). */
+function aimAt(b: Bot, a: Bot) {
+  const s = me(b);
+  const t = (b.room.state as any).players.get(a.id);
+  const l = Math.hypot(s.x, s.y, s.z);
+  const o = [s.x + (s.x / l) * 1.6, s.y + (s.y / l) * 1.6, s.z + (s.z / l) * 1.6];
+  const tl = Math.hypot(t.x, t.y, t.z);
+  const aim = [t.x + (t.x / tl) * 1.0, t.y + (t.y / tl) * 1.0, t.z + (t.z / tl) * 1.0];
+  const d = [aim[0]! - o[0]!, aim[1]! - o[1]!, aim[2]! - o[2]!];
+  const dl = Math.hypot(d[0]!, d[1]!, d[2]!);
+  return { ox: o[0]!, oy: o[1]!, oz: o[2]!, dx: d[0]! / dl, dy: d[1]! / dl, dz: d[2]! / dl };
+}
+
+async function outside(b: Bot, metres: number) {
+  await tpAndWait(b, offPad("arcadia", 0, metres));
+  b.send("admin", { cmd: "unprotect" });
+  await until("unprotected", () => actorOf(b).protectedUntil === 0);
+}
+
+describe("support items used from the backpack (the inventory's Use)", () => {
+  it("a Prism Bubble used from a backpack slot raises a shell that stops a shot", async () => {
+    const a = await bot("shellback", "arcadia");
+    const b = await bot("sniper", "arcadia");
+    await outside(a, 40);
+    await outside(b, 50);
+    a.send("admin", { cmd: "give", args: { id: "bubble" } });
+    b.send("admin", { cmd: "give", args: { id: "carbine" } });
+    await until("given", () => a.you.hotbar.some((i: any) => i?.id === "bubble") && b.you.hotbar[1]?.id === "carbine");
+    const slot = await toBackpack(a, "bubble", 6);
+    await op(a, "use", { slot }); // what the panel sends: the slot index, no target
+    await until("bubble up", () => b.count("bubble") === 1 && supportOf(serverRoom(a))!.bubbles.list.length === 1);
+    expect(b.last("bubble")).toMatchObject({ by: a.id, hp: 150 });
+    b.send("fire", { slot: 1, ...aimAt(b, a), t: Date.now() });
+    await until("shell took the shot", () => (supportOf(serverRoom(a))!.bubbles.list[0]?.hp ?? 150) < 150);
+    expect(me(a).hp).toBe(me(a).maxHp);
+    expect(a.you.backpack[6]).toMatchObject({ id: "bubble", qty: 1 }); // kept (cooldown item)
+  });
+
+  it("a Patchkit used from a backpack slot heals yourself and uses one kit", async () => {
+    const a = await bot("selfmedic", "arcadia");
+    await outside(a, 40);
+    a.send("admin", { cmd: "give", args: { id: "patchkit", qty: 2 } });
+    await until("given", () => a.you.hotbar.some((i: any) => i?.id === "patchkit"));
+    const slot = await toBackpack(a, "patchkit", 3);
+    a.send("admin", { cmd: "damage", args: { amount: 60 } });
+    await until("hurt", () => me(a).hp === 40);
+    await op(a, "use", { slot });
+    await until("channel done", () => a.last("channelEnd")?.ok === true, 4000);
+    expect(a.last("channel")).toMatchObject({ kind: "patchkit", target: a.id });
+    await until("kit used", () => a.you.backpack[3]?.qty === 1);
+    await until("healed", () => actorOf(a).heals.length === 0 && me(a).hp === 70, 6000); // 30% of 100
   });
 });
