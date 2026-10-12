@@ -27,6 +27,9 @@ export const HORSE = {
   summonDistance: 3,
   /** Whistling again within this many ms is ignored. */
   whistleCooldownMs: 2000,
+  /** Getting on or off within this many ms of the last change is ignored (E spam would flip the
+   *  flag and broadcast an event to everyone nearby on every message). */
+  toggleCooldownMs: 500,
   /** An unridden horse leaves after this long. */
   idleDespawnMs: 30_000,
   /** One hit of at least this fraction of max HP throws the rider. */

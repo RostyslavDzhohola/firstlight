@@ -36,6 +36,8 @@ export class HorseSystem implements RoomSystem {
   readonly room: BodyRoom;
   readonly horses = new Map<string, Horse>();
   private readonly lastWhistle = new Map<string, number>();
+  /** Last time each player got on or off (HORSE.toggleCooldownMs). */
+  private readonly lastToggle = new Map<string, number>();
   private readonly unsubscribe: () => void;
 
   constructor(room: BodyRoom) {
@@ -49,10 +51,16 @@ export class HorseSystem implements RoomSystem {
   onAction(c: Client, action: "whistle" | "ride" | "dismount") {
     const a = this.room.playerById(c.sessionId);
     if (!a || a.dead || a.superseded) return;
-    if (a.mounted) return this.dismount(a, "dismount");
+    const now = Date.now();
+    const toggle = (fn: () => void) => {
+      if (now - (this.lastToggle.get(a.id) ?? 0) < HORSE.toggleCooldownMs) return;
+      this.lastToggle.set(a.id, now);
+      fn();
+    };
+    if (a.mounted) return toggle(() => this.dismount(a, "dismount"));
     if (action === "dismount") return;
     const h = this.horses.get(a.id);
-    if (h && this.inReach(a, h)) return this.mount(a, h);
+    if (h && this.inReach(a, h)) return toggle(() => this.mount(a, h));
     if (action === "whistle") this.summon(a);
   }
 
@@ -173,6 +181,7 @@ export class HorseSystem implements RoomSystem {
   onPlayerLeave(sessionId: string) {
     this.despawn(sessionId, "left"); // logout, travel, closed tab (a lingering body walks, it doesn't ride)
     this.lastWhistle.delete(sessionId);
+    this.lastToggle.delete(sessionId);
   }
 
   private onEvent(e: GameEvent) {

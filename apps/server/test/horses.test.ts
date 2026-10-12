@@ -209,6 +209,23 @@ describe("riding", () => {
     expect(sprinted.moved).toBeLessThan(30);
   });
 
+  it("ignores E spam: getting on and off waits HORSE.toggleCooldownMs between changes", async () => {
+    const b = await rider("spammer");
+    await summonAndMount(b);
+    const events = () => b.count("horse");
+    const before = events();
+    for (let i = 0; i < 10; i++) b.send("horse", { action: "ride" });
+    await sleep(250);
+    expect(mounted(b)).toBe(true); // too soon after getting on
+    await sleep(HORSE.toggleCooldownMs);
+    b.send("horse", { action: "dismount" });
+    await until("off", () => !mounted(b));
+    for (let i = 0; i < 10; i++) b.send("horse", { action: "ride" });
+    await sleep(250);
+    expect(mounted(b)).toBe(false);
+    expect(events() - before).toBeLessThanOrEqual(1); // the one dismount (owners hear their own events)
+  });
+
   it("a big hit throws the rider; losing the whistle sends the horse away; an idle horse leaves after 30 s", async () => {
     const b = await rider("rodeo");
     await summonAndMount(b);
