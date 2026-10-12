@@ -238,8 +238,14 @@ export class Environment {
     const snap = !this.haveDelta || Math.abs(delta - this.serverDelta) > CLOCK_SNAP_MS;
     this.serverDelta = snap ? delta : this.serverDelta + (delta - this.serverDelta) * 0.3;
     this.haveDelta = true;
-    // A new storm (slot or admin override) has its own strikes: drop one scheduled from the old.
-    if (s.slotStart !== this.server?.slotStart || s.weather !== this.server?.weather) this.strike = null;
+    // A clock snap (either way) or a new storm (slot or admin override) reschedules the lightning:
+    // drop the cached strike, a pending bolt and a flash from the old timeline.
+    if (snap || s.slotStart !== this.server?.slotStart || s.weather !== this.server?.weather) {
+      this.strike = null;
+      this.pendingStrike = null;
+      this.fired = -1;
+      if (snap) this.flashAt = -1e9;
+    }
     this.copy = s.copy;
     this.server = s;
     this.local = null; // the fallback schedule takes this state's day offset/hold

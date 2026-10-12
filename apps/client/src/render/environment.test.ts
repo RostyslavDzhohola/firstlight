@@ -281,6 +281,30 @@ describe("weather", () => {
     for (const d of thunder) expect(d).toBeGreaterThanOrEqual(250 / 343 - 1e-9);
   });
 
+  it("a backward clock correction mid-storm reschedules lightning at once", () => {
+    const t0 = Date.UTC(2026, 9, 12, 12);
+    vi.useFakeTimers({ now: t0, toFake: ["Date"] });
+    const { env, thunder } = setup("arcadia");
+    env.timeOverride = 0.5;
+    const storm = { weather: "storm" as const, intensity: 1, since: t0 - 10 * 60_000, until: t0 + 3_600_000 };
+    // The first sync claims the server is 60 s ahead; frames run and a strike ~60 s out is cached.
+    env.setServerSky(skyState("arcadia", 0, t0 + 60_000, 0, storm));
+    for (let i = 0; i < 300; i++) env.update(1 / 60);
+    expect(thunder).toHaveLength(0);
+    // The next sync puts the clock back 60 s (same storm, same slot): the strikes in between count.
+    const fixed = skyState("arcadia", 0, t0, 0, storm);
+    env.setServerSky(fixed);
+    const expected = new Set<number>();
+    for (let st = nextStrike(fixed, t0 + 100); st && st.at <= t0 + 50_000; st = nextStrike(fixed, st.at + 1)) expected.add(Math.round((st.distance / 343) * 1e6));
+    expect(expected.size).toBeGreaterThan(0);
+    for (let i = 0; i < 500; i++) {
+      vi.setSystemTime(Date.now() + 100);
+      env.update(0.1);
+    }
+    expect(thunder.length).toBe(expected.size);
+    for (const d of thunder) expect(expected.has(Math.round(d * 1e6))).toBe(true);
+  });
+
   it("photo-mode storms keep flashing after an hour", () => {
     vi.useFakeTimers({ now: Date.UTC(2026, 9, 12, 12), toFake: ["Date"] });
     const { env, thunder } = setup("arcadia");
