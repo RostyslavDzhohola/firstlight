@@ -10,7 +10,7 @@
 import type { Client } from "@colyseus/core";
 import { EGG_RULES, type EggId } from "@firstlight/shared/content/secrets";
 import { placeDir } from "@firstlight/shared/content/places";
-import type { WorldObjectDef } from "@firstlight/shared/content/world";
+import { inReach, type WorldObjectDef } from "@firstlight/shared/content/world";
 import { WEAPONS } from "@firstlight/shared/content/weapons";
 import { actorPos, type PlayerActor } from "../actors.ts";
 import { emitGameEvent } from "../events.ts";
@@ -79,7 +79,7 @@ export class EggLogic {
     // Enter triggers: the well (E6) and the ghost ferry (E4).
     for (const o of this.sys.objects) {
       if (o.trigger !== "enter") continue;
-      const inside = dist3(actorPos(a), this.sys.pos(o)) <= o.range;
+      const inside = inReach(this.sys.pos(o), actorPos(a), o.range);
       const was = q.inside.has(o.id);
       if (inside && !was) {
         q.inside.add(o.id);
@@ -230,7 +230,7 @@ export class EggLogic {
     const a = this.sys.actor(sessionId);
     if (!a || a.dead) return;
     const trooper = this.sys.objects.find((o) => o.id === "e9_trooper");
-    if (!trooper || dist3(actorPos(a), this.sys.pos(trooper)) > EGG_RULES.E9_RANGE) return;
+    if (!trooper || !inReach(this.sys.pos(trooper), actorPos(a), EGG_RULES.E9_RANGE)) return;
     const q = this.sys.qp(a);
     this.sys.toast(a, "Ticket #000 turns, studies you, and nods. It walks you to a freight lift that sinks below Checkpoint Seven…", "info");
     this.sys.room.clock.setTimeout(() => {

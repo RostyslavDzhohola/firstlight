@@ -11,7 +11,7 @@ import { MEDAL_BY_ID, MEDAL_RULES } from "@firstlight/shared/content/medals";
 import { MISSION_BY_ID, MISSIONS, missionGoal, type MissionDef } from "@firstlight/shared/content/missions";
 import { offsetDir, padName, place, placeDir } from "@firstlight/shared/content/places";
 import { BOSS_FIRSTS, EGG_BY_ID, type EggId } from "@firstlight/shared/content/secrets";
-import { objectPos, objectsOn, WORLD_OBJECT_BY_ID, type WorldObjectDef } from "@firstlight/shared/content/world";
+import { inReach, objectPos, objectsOn, surfaceDistance, WORLD_OBJECT_BY_ID, type WorldObjectDef } from "@firstlight/shared/content/world";
 import { WEAPON_BY_ID } from "@firstlight/shared/content/weapons";
 import type { InvItem, YouState } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
@@ -35,6 +35,8 @@ export const QUEST_RULES = {
   /** Hunt kills count up to this far outside the named area's radius. */
   AREA_SLACK: 20,
   FAST_TRAVEL_COOLDOWN_MS: 2000,
+  /** Reach triggers ignore height differences up to this (uneven lookouts). */
+  REACH_VERTICAL: 6,
   SLOW_TICK_MS: 200,
 };
 
@@ -153,7 +155,7 @@ export class QuestSystem implements RoomSystem {
   }
 
   near(a: PlayerActor, o: WorldObjectDef, slack = QUEST_RULES.INTERACT_SLACK): boolean {
-    return dist3(actorPos(a), this.pos(o)) <= o.range + slack;
+    return inReach(this.pos(o), actorPos(a), o.range, slack);
   }
 
   toast(a: PlayerActor, text: string, kind: "info" | "xp" | "coins" | "medal" | "warn" = "info") {
@@ -533,9 +535,10 @@ export class QuestSystem implements RoomSystem {
   private checkReach(a: PlayerActor, q: QuestPlayer) {
     for (const { m, def } of this.activeMissions(a)) {
       if (!def.reach) continue;
-      const d = placeDir(def.reach.place);
-      const target = this.room.snapToGround(d);
-      if (dist3(actorPos(a), target) <= def.reach.radius) this.completeMission(a, m, def);
+      const target = this.room.snapToGround(placeDir(def.reach.place));
+      const p = actorPos(a);
+      const vertical = Math.abs(Math.hypot(p[0], p[1], p[2]) - Math.hypot(target[0], target[1], target[2]));
+      if (surfaceDistance(target, p) <= def.reach.radius && vertical <= QUEST_RULES.REACH_VERTICAL) this.completeMission(a, m, def);
     }
     void q;
   }
