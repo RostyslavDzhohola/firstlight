@@ -8,7 +8,7 @@ import { getPlayToken, isDevGuest, readClaims } from "../net/auth.ts";
 
 const CONTROLS = [
   ["WASD", "move"], ["Mouse", "aim"], ["Left click", "attack"], ["Right click", "aim / block / charge"],
-  ["Shift", "sprint"], ["Space", "jump"], ["C", "dodge"], ["R", "reload"], ["1–4", "weapons"], ["E", "pick up"],
+  ["Shift", "sprint"], ["Space", "jump"], ["C", "dodge"], ["R", "reload"], ["1–4", "weapons"], ["E", "pick up / talk / use"], ["M", "map and fast travel"], ["J", "journal: missions, medals, wardrobe"],
   ["G then 1–6", "phrases"], ["F3", "performance"], ["Esc", "this menu"],
 ];
 

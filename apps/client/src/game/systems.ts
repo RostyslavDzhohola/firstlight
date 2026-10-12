@@ -2,6 +2,7 @@
 // updated every frame. Lanes add their factory to CLIENT_SYSTEMS.
 
 import type { Game } from "./Game.ts";
+import { createQuestClient } from "./QuestClient.ts";
 
 export interface ClientSystem {
   update(dt: number, now: number): void;
@@ -10,4 +11,4 @@ export interface ClientSystem {
 
 export type ClientSystemFactory = (game: Game) => ClientSystem | null;
 
-export const CLIENT_SYSTEMS: ClientSystemFactory[] = [];
+export const CLIENT_SYSTEMS: ClientSystemFactory[] = [createQuestClient];
