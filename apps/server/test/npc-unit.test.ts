@@ -11,12 +11,13 @@ import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
 import { EGG_NPC } from "../src/world/npc/NpcSystem.ts";
 import { copyStateStore, MemoryCopyStateStore } from "../src/world/copyState.ts";
 import { onNpcEvent, type NpcEvent } from "../src/world/npc/tuning.ts";
-import { PITY_IDLE_MS, pruneRewardMaps, repeatDecay, rollDrops } from "../src/world/npc/rewards.ts";
+import { cosmeticPity, PITY_IDLE_MS, pruneRewardMaps, repeatDecay, rollDrops } from "../src/world/npc/rewards.ts";
 import { buildSpawnPoints } from "../src/world/npc/spawns.ts";
 import { PAYOUT_RETRY, PayoutQueue } from "../src/world/npc/payouts.ts";
 import { fakeWorld } from "./npcWorld.ts";
 
 beforeEach(() => {
+  cosmeticPity.clear();
   resetTuning();
   NPC_TUNING.ambient = false;
   NPC_TUNING.bosses = false;
@@ -70,6 +71,28 @@ describe("AI hit caps (content §0, code clamp)", () => {
 });
 
 describe("rewards", () => {
+  it.each(["arcadia:0", "arcadia:1"])("539 misses survive recreation or travel to %s and roll 540 pays the same account and life", (copyKey) => {
+    const w = fakeWorld("arcadia", { copyKey: "arcadia:0" });
+    const p = w.addPlayer("persistent_pity", arcadiaPoint(80), 3);
+    const n = w.sys.createNpc(NPC_INDEX.get("hopbit")!, 3, arcadiaPoint(84), w.clock.t, { instant: true });
+    for (let k = 0; k < 539; k++) {
+      expect(rollDrops(w.sys, n, p, () => 0.999).some((i) => i.id === "petalwake_mask")).toBe(false);
+    }
+    w.sys.dispose();
+    const back = fakeWorld("arcadia", { copyKey, start: w.clock.t + 1000 });
+    const same = back.addPlayer("persistent_pity", arcadiaPoint(80), 3);
+    same.char.lifeStartedAt = p.char.lifeStartedAt;
+    const next = back.sys.createNpc(NPC_INDEX.get("hopbit")!, 3, arcadiaPoint(84), back.clock.t, { instant: true });
+    const other = back.addPlayer("unrelated_pity", arcadiaPoint(80), 3);
+    other.char.lifeStartedAt = p.char.lifeStartedAt;
+    expect(rollDrops(back.sys, next, other, () => 0.999).some((i) => i.id === "petalwake_mask")).toBe(false);
+    same.char.lifeStartedAt++;
+    expect(rollDrops(back.sys, next, same, () => 0.999).some((i) => i.id === "petalwake_mask")).toBe(false);
+    same.char.lifeStartedAt = p.char.lifeStartedAt;
+    expect(rollDrops(back.sys, next, same, () => 0.999)).toContainEqual({ id: "petalwake_mask", tier: 1, qty: 1 });
+    back.sys.dispose();
+  });
+
   it("repeat kills at one spawn point within 5 min lose 10% each, floor 30%", () => {
     const w = fakeWorld("arcadia");
     const t = w.clock.t;
@@ -136,17 +159,17 @@ describe("rewards", () => {
     const t = w.clock.t;
     repeatDecay(w.sys, "u1", "p7", t);
     repeatDecay(w.sys, "u2", "p7", t + 200_000);
-    w.sys.cosmeticPity.set("u1|arcadia", { life: 1, kills: 4, at: t });
-    w.sys.cosmeticPity.set("u2|arcadia", { life: 1, kills: 4, at: t + PITY_IDLE_MS });
+    cosmeticPity.set("u1|arcadia", { kills: 4, at: t });
+    cosmeticPity.set("u2|arcadia", { kills: 4, at: t + PITY_IDLE_MS });
     w.sys.tagged.set("s1", t + 1000);
     w.sys.tagged.set("s2", t + 400_000);
     pruneRewardMaps(w.sys, t + 301_000);
     expect([...w.sys.repeatKills.keys()]).toEqual(["u2|p7"]);
-    expect([...w.sys.cosmeticPity.keys()]).toEqual(["u1|arcadia", "u2|arcadia"]);
+    expect([...cosmeticPity.keys()]).toEqual(["u1|arcadia", "u2|arcadia"]);
     expect([...w.sys.tagged.keys()]).toEqual(["s2"]);
     pruneRewardMaps(w.sys, t + PITY_IDLE_MS + 1);
     expect([...w.sys.repeatKills.keys()]).toEqual([]);
-    expect([...w.sys.cosmeticPity.keys()]).toEqual(["u2|arcadia"]);
+    expect([...cosmeticPity.keys()]).toEqual(["u2|arcadia"]);
     expect([...w.sys.tagged.keys()]).toEqual([]);
   });
 

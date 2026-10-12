@@ -787,6 +787,9 @@ Cosmetics are items: they drop on death (D). Slots are hat, cape, mask and backp
 | Cape | Wickfloat Mantle | Legendary | egg E11; cannot be sold |
 | Mask | Quietshift Lens | Legendary | egg E12; cannot be sold |
 
+Planet cosmetic pity is tracked by account, life and cosmetic across travel and copy recreation.
+Counters reset on a server restart or after six hours without an eligible roll for that cosmetic.
+
 M11 looks are procedural shapes in `apps/client/src/render/Cosmetics.ts`. Bracken Stitch Cap is
 moss cloth with tan stitches; Dockfold Cape is slate cloth with folded side panels; Petalwake Mask is
 a faceted flower with a brass centre; Fenweave Cape is violet cloth with reed strips; Copper Orbit

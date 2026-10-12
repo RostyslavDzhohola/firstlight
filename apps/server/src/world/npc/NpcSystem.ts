@@ -87,7 +87,6 @@ export class NpcSystem implements RoomSystem {
   private readonly recentHits = new Map<string, { t: number; amt: number }[]>();
   readonly tagged = new Map<string, number>();
   readonly repeatKills = new Map<string, number[]>();
-  readonly cosmeticPity = new Map<string, { life: number; kills: number; at: number }>();
   /** Kill and boss payouts whose save failed, waiting for a retry (payouts.ts). */
   readonly payouts = new PayoutQueue();
   /** Spawn point id → when its Golden Hopbit may come back (it doesn't return with every pack respawn). */

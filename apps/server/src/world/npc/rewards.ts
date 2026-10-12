@@ -36,11 +36,14 @@ export function repeatDecay(sys: NpcSystem, userId: string, key: string, now: nu
 /** How long an idle planet-cosmetic pity counter is kept (ms); the counter is per life anyway. */
 export const PITY_IDLE_MS = 6 * 60 * 60_000;
 
+/** Account, life and cosmetic counters survive room disposal and travel, until idle or restart. */
+export const cosmeticPity = new Map<string, { kills: number; at: number }>();
+
 /** Drop reward bookkeeping nobody can use any more (expired decay windows, idle pity, old tags). */
 export function pruneRewardMaps(sys: NpcSystem, now: number) {
   const window = NPC_RULES.repeatWindowSeconds * 1000;
   for (const [k, list] of sys.repeatKills) if (!list.length || now - list[list.length - 1]! >= window) sys.repeatKills.delete(k);
-  for (const [k, p] of sys.cosmeticPity) if (now - p.at > PITY_IDLE_MS) sys.cosmeticPity.delete(k);
+  for (const [k, p] of cosmeticPity) if (now - p.at > PITY_IDLE_MS) cosmeticPity.delete(k);
   for (const [k, until] of sys.tagged) if (until <= now) sys.tagged.delete(k);
 }
 
@@ -72,14 +75,13 @@ export function rollDrops(sys: NpcSystem, n: Npc, top: PlayerActor, rng: Rng = M
   if (n.def.temper !== "critter" && n.def.temper !== "passive" && n.def.family !== "egg" && !n.summoner && !n.spawned) {
     const original = PLANET_COSMETIC[planet];
     for (const c of [original, ...(env.cosmeticsExtras ? EXTRA_PLANET_COSMETICS[planet] : [])]) {
-      const key = `${top.identity.userId}|${planet}${c === original ? "" : `|${c.id}`}`;
-      const pity = sys.cosmeticPity.get(key);
-      let kills = pity && pity.life === top.char.lifeStartedAt ? pity.kills + 1 : 1;
+      const key = JSON.stringify([top.identity.userId, top.char.lifeStartedAt, c.id]);
+      let kills = (cosmeticPity.get(key)?.kills ?? 0) + 1;
       if (rng() < c.chance || kills >= 3 / c.chance) {
         out.push({ id: c.id, tier: 1, qty: 1 });
         kills = 0;
       }
-      sys.cosmeticPity.set(key, { life: top.char.lifeStartedAt, kills, at: sys.world.now() });
+      cosmeticPity.set(key, { kills, at: sys.world.now() });
     }
   }
   return out;
