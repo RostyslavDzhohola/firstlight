@@ -84,10 +84,27 @@ function boltMaterial(): THREE.MeshBasicNodeMaterial {
 
 const BOLT_SEGMENTS = 40;
 
+/** The instanced drop quad with `n` per-instance seeds (none for n = 0: nothing draws then). */
+function dropGeometry(n: number): THREE.InstancedBufferGeometry {
+  const quad = new THREE.PlaneGeometry(1, 1);
+  quad.translate(0, 0.5, 0); // y in [0, 1]
+  const geo = new THREE.InstancedBufferGeometry();
+  geo.index = quad.index;
+  geo.setAttribute("position", quad.getAttribute("position"));
+  if (n > 0) {
+    const seeds = new Float32Array(n * 4);
+    for (let i = 0; i < n * 4; i++) seeds[i] = hash01(i, 0x7a1d, 0x5eed);
+    geo.setAttribute("seed", new THREE.InstancedBufferAttribute(seeds, 4));
+  }
+  geo.instanceCount = 0;
+  geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
+  return geo;
+}
+
 export class WeatherFx {
   readonly drops: THREE.Mesh;
   readonly bolt: THREE.Mesh;
-  private readonly geo: THREE.InstancedBufferGeometry;
+  private geo: THREE.InstancedBufferGeometry;
   private readonly boltGeo: THREE.BufferGeometry;
   private readonly boltPos: Float32Array;
   private capacity = 0;
@@ -100,13 +117,7 @@ export class WeatherFx {
   private boltVisible = false;
 
   constructor(private readonly scene: THREE.Scene) {
-    const quad = new THREE.PlaneGeometry(1, 1);
-    quad.translate(0, 0.5, 0); // y in [0, 1]
-    this.geo = new THREE.InstancedBufferGeometry();
-    this.geo.index = quad.index;
-    this.geo.setAttribute("position", quad.getAttribute("position"));
-    this.geo.instanceCount = 0;
-    this.geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
+    this.geo = dropGeometry(0);
     this.drops = new THREE.Mesh(this.geo, precipitationMaterial());
     this.drops.frustumCulled = false;
     this.drops.renderOrder = 6;
@@ -133,15 +144,18 @@ export class WeatherFx {
     scene.add(this.bolt);
   }
 
-  /** Size the seed buffer for the tier (rebuilds the instance attribute; rare). */
+  /**
+   * Size the seed buffer for the tier (rare). A whole new geometry: three frees GPU buffers per
+   * geometry, so swapping only the attribute would leave the old buffer behind.
+   */
   setCapacity(n: number) {
     if (n === this.capacity) return;
     this.capacity = n;
-    const seeds = new Float32Array(n * 4);
-    for (let i = 0; i < n * 4; i++) seeds[i] = hash01(i, 0x7a1d, 0x5eed);
-    // A new attribute object: the old GPU buffer is dropped with it (tier changes are rare).
-    this.geo.setAttribute("seed", new THREE.InstancedBufferAttribute(seeds, 4));
-    this.geo.instanceCount = Math.min(this.geo.instanceCount, n);
+    const old = this.geo;
+    this.geo = dropGeometry(n);
+    this.geo.instanceCount = Math.min(old.instanceCount, n);
+    this.drops.geometry = this.geo;
+    old.dispose();
   }
 
   /**

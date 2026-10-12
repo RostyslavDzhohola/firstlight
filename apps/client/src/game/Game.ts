@@ -435,7 +435,7 @@ export class Game {
     const rawMs = now - this.last;
     const dt = Math.min(0.05, rawMs / 1000);
     this.last = now;
-    if (!this.running || this.travelling) return;
+    if (!this.running || this.travelling) return this.env.silence();
     const cpu0 = performance.now();
 
     let focus: THREE.Vector3;

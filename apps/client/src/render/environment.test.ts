@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
-import { SKY_PROFILES, sunAngles } from "@firstlight/shared";
+import { dayT, nextStrike, SKY_PROFILES, skyState, sunAngles } from "@firstlight/shared";
 import { atmo, SunRig } from "./atmosphere.ts";
-import { Environment, lightFactors, referenceDayT } from "./environment.ts";
+import { bakedSunMatch, Environment, lightFactors, referenceDayT } from "./environment.ts";
 import { LOOKS } from "./looks.ts";
 import { emptyStored, resolveSettings, type Feature } from "./quality.ts";
+import { terrainUniforms } from "./terrainMaterial.ts";
 import type { RenderCtx } from "./renderer.ts";
 
 function fakeCtx(kill: Feature[] = []) {
@@ -17,13 +18,14 @@ function fakeCtx(kill: Feature[] = []) {
 function setup(body: "arcadia" | "portus" | "meridian" | "hollowmere" = "arcadia", kill: Feature[] = []) {
   const ctx = fakeCtx(kill);
   const thunder: number[] = [];
-  const audio = { setWeather: () => {}, thunder: (d: number) => thunder.push(d) };
+  const bed: [number, number][] = [];
+  const audio = { setWeather: (rain: number, wind: number) => bed.push([rain, wind]), thunder: (d: number) => thunder.push(d) };
   const particles = { moteBoost: 1 };
   const env = new Environment(ctx, audio, particles);
   const look = LOOKS[body];
   const rig = new SunRig(ctx.scene, look);
   env.setBody(body, 0, look, rig);
-  return { ctx, env, rig, look, particles, thunder };
+  return { ctx, env, rig, look, particles, thunder, bed };
 }
 
 /** Run `seconds` of frames at 60 fps. */
@@ -45,6 +47,51 @@ describe("day/night", () => {
     }
   });
 
+  it("the reference time, ?nodaynight and the bench light each body with its look's own sun", () => {
+    const expectLookSun = (rig: SunRig, look: (typeof LOOKS)[keyof typeof LOOKS], label: string) => {
+      const want = new THREE.Color(look.sun);
+      expect(rig.sky.keyIsMoon, label).toBe(false);
+      expect(rig.sun.intensity, label).toBeCloseTo(look.sunIntensity, 3);
+      for (const c of ["r", "g", "b"] as const) {
+        expect(rig.sun.color[c], `${label} key ${c}`).toBeCloseTo(want[c], 3);
+        expect(atmo.sunColor.value[c], `${label} sky sun ${c}`).toBeCloseTo(want[c], 3);
+      }
+    };
+    for (const b of ["arcadia", "hollowmere", "meridian", "portus"] as const) {
+      const live = setup(b);
+      live.env.timeOverride = referenceDayT(b, live.look.sunElev);
+      live.env.weatherOverride = { weather: "clear", intensity: 0 };
+      run(live.env, 0.1);
+      expectLookSun(live.rig, live.look, `${b} reference time`);
+
+      const fixed = setup(b, ["daynight"]);
+      fixed.env.weatherOverride = { weather: "clear", intensity: 0 };
+      run(fixed.env, 0.1);
+      expectLookSun(fixed.rig, fixed.look, `${b} ?nodaynight`);
+
+      const bench = setup(b);
+      bench.env.setBenchMode(b, bench.look);
+      run(bench.env, 0.1);
+      expectLookSun(bench.rig, bench.look, `${b} bench`);
+    }
+    // Hollowmere's low violet sun is its daylight, not a dusk.
+    const f = lightFactors(LOOKS.hollowmere.sunElev, LOOKS.hollowmere.sunElev);
+    expect(f.dusk).toBe(0);
+    expect(f.sunUp).toBe(1);
+    expect(lightFactors(0.06, LOOKS.hollowmere.sunElev).dusk).toBeGreaterThan(0.3);
+  });
+
+  it("the bench puts the sun where each look puts it (elevation and azimuth), as before day/night", () => {
+    for (const b of ["arcadia", "hollowmere", "meridian", "portus"] as const) {
+      const { env, rig, look } = setup(b);
+      env.setBenchMode(b, look);
+      run(env, 0.1);
+      expect(rig.sky.sunElev).toBe(look.sunElev);
+      expect(rig.sky.sunAz).toBe(look.sunAz);
+      expect(env.dayT).toBeCloseTo(referenceDayT(b, look.sunElev), 9);
+    }
+  });
+
   it("night is readable: moon key, bright fill, raised exposure, stars, glowing pads", () => {
     const { env, rig, look, particles, ctx } = setup("arcadia");
     env.timeOverride = 0; // midnight
@@ -63,6 +110,27 @@ describe("day/night", () => {
     expect(lum(atmo.horizon.value)).toBeGreaterThan(0.005);
   });
 
+  it("the key light hands over between sun and moon without a jump", () => {
+    for (const b of ["arcadia", "hollowmere", "meridian"] as const) {
+      const { env, rig } = setup(b);
+      env.weatherOverride = { weather: "clear", intensity: 0 };
+      let prev: number | null = null;
+      let moon: boolean | null = null;
+      let maxStep = 0;
+      let switches = 0;
+      for (let i = 0; i <= 3000; i++) {
+        env.timeOverride = (0.7 + i * 0.0002) % 1; // sunset … midnight … sunrise
+        env.update(1 / 60);
+        if (prev !== null) maxStep = Math.max(maxStep, Math.abs(rig.sun.intensity - prev));
+        if (moon !== null && moon !== rig.sky.keyIsMoon) switches++;
+        prev = rig.sun.intensity;
+        moon = rig.sky.keyIsMoon;
+      }
+      expect(switches, b).toBe(2);
+      expect(maxStep, b).toBeLessThan(0.03);
+    }
+  });
+
   it("noon is daylight: sun key, no stars", () => {
     const { env, rig, look } = setup("arcadia");
     env.timeOverride = 0.5;
@@ -72,6 +140,50 @@ describe("day/night", () => {
     expect(rig.sky.keyIsMoon).toBe(false);
     expect(rig.sun.intensity).toBeGreaterThan(look.sunIntensity * 0.8);
     expect(atmo.stars.value).toBe(0);
+  });
+
+  it("follows a time of day the server holds, also past the state's slot end", () => {
+    vi.useFakeTimers({ now: Date.UTC(2026, 9, 12, 12), toFake: ["Date"] });
+    const { env } = setup("hollowmere");
+    env.setServerSky(skyState("hollowmere", 0, Date.now(), 0, null, 0.81));
+    run(env, 0.1);
+    expect(env.dayT).toBe(0.81);
+    vi.setSystemTime(Date.now() + 10 * 60_000);
+    run(env, 0.1);
+    expect(env.dayT).toBe(0.81);
+  });
+
+  it("snaps the server clock offset on a big jump and smooths small ones", () => {
+    vi.useFakeTimers({ now: Date.UTC(2026, 9, 12, 12), toFake: ["Date"] });
+    const { env } = setup("arcadia");
+    const offsetSeen = () => {
+      env.update(1 / 60);
+      return Math.round(((env.dayT - dayT("arcadia", Date.now())) * 40 * 60_000) / 10) * 10; // ms, 10 ms grid
+    };
+    env.setServerSky(skyState("arcadia", 0, Date.now() + 60_000));
+    expect(offsetSeen()).toBe(60_000);
+    env.setServerSky(skyState("arcadia", 0, Date.now())); // the server clock jumped back 60 s
+    expect(offsetSeen()).toBe(0);
+    env.setServerSky(skyState("arcadia", 0, Date.now() + 1000)); // 1 s of drift: smoothed (0.3)
+    expect(offsetSeen()).toBe(300);
+  });
+
+  it("Low's baked terrain sun only darkens while the live sun is near the direction it was baked for", () => {
+    expect(bakedSunMatch(0.55, 0.9, 0.55, 0.9)).toBe(1);
+    expect(bakedSunMatch(0.6, 1.0, 0.55, 0.9)).toBe(1); // within ~20°
+    expect(bakedSunMatch(0.55, 0.9 + Math.PI, 0.55, 0.9)).toBe(0);
+    const sunMatchAt = (t: number | "bench") => {
+      const { env, look } = setup("arcadia");
+      env.weatherOverride = { weather: "clear", intensity: 0 };
+      if (t === "bench") env.setBenchMode("arcadia", look);
+      else env.timeOverride = t;
+      run(env, 0.1);
+      return terrainUniforms.sunMatch.value;
+    };
+    expect(sunMatchAt("bench")).toBe(1); // the reference sun the chunks were baked with
+    expect(sunMatchAt(0.5)).toBeGreaterThan(0.6); // noon: same azimuth, higher sun
+    expect(sunMatchAt(0.8)).toBe(0); // evening: the sun is on the other side
+    expect(sunMatchAt(0)).toBe(0); // night
   });
 
   it("Portus never gets a night", () => {
@@ -106,6 +218,29 @@ describe("weather", () => {
     run(env, 10);
     expect((env.fx.drops.geometry as THREE.InstancedBufferGeometry).instanceCount).toBeLessThan(200);
     expect(atmo.wet.value).toBeGreaterThan(0.3);
+  });
+
+  it("a new body starts dry", () => {
+    const { env, ctx } = setup("arcadia");
+    env.timeOverride = 0.5;
+    env.weatherOverride = { weather: "rain", intensity: 1 };
+    run(env, 30);
+    expect(atmo.wet.value).toBeGreaterThan(0.6);
+    const look = LOOKS.meridian;
+    env.setBody("meridian", 0, look, new SunRig(ctx.scene, look));
+    env.weatherOverride = { weather: "clear", intensity: 0 };
+    run(env, 0.1);
+    expect(atmo.wet.value).toBe(0);
+  });
+
+  it("silence() stops the rain and wind bed while no frames run", () => {
+    const { env, bed } = setup("arcadia");
+    env.timeOverride = 0.5;
+    env.weatherOverride = { weather: "storm", intensity: 1 };
+    run(env, 4);
+    expect(bed.at(-1)![0]).toBeGreaterThan(0.5);
+    env.silence();
+    expect(bed.at(-1)).toEqual([0, 0]);
   });
 
   it("Meridian dust: motes, dust-tinted haze, more fog, no wetness", () => {
@@ -144,5 +279,67 @@ describe("weather", () => {
     expect(flashes).toBeGreaterThan(0);
     // Thunder delay = distance / 343 m/s.
     for (const d of thunder) expect(d).toBeGreaterThanOrEqual(250 / 343 - 1e-9);
+  });
+
+  it("a backward clock correction mid-storm reschedules lightning at once", () => {
+    const t0 = Date.UTC(2026, 9, 12, 12);
+    vi.useFakeTimers({ now: t0, toFake: ["Date"] });
+    const { env, thunder } = setup("arcadia");
+    env.timeOverride = 0.5;
+    const storm = { weather: "storm" as const, intensity: 1, since: t0 - 10 * 60_000, until: t0 + 3_600_000 };
+    // The first sync claims the server is 60 s ahead; frames run and a strike ~60 s out is cached.
+    env.setServerSky(skyState("arcadia", 0, t0 + 60_000, 0, storm));
+    for (let i = 0; i < 300; i++) env.update(1 / 60);
+    expect(thunder).toHaveLength(0);
+    // The next sync puts the clock back 60 s (same storm, same slot): the strikes in between count.
+    const fixed = skyState("arcadia", 0, t0, 0, storm);
+    env.setServerSky(fixed);
+    const expected = new Set<number>();
+    for (let st = nextStrike(fixed, t0 + 100); st && st.at <= t0 + 50_000; st = nextStrike(fixed, st.at + 1)) expected.add(Math.round((st.distance / 343) * 1e6));
+    expect(expected.size).toBeGreaterThan(0);
+    for (let i = 0; i < 500; i++) {
+      vi.setSystemTime(Date.now() + 100);
+      env.update(0.1);
+    }
+    expect(thunder.length).toBe(expected.size);
+    for (const d of thunder) expect(expected.has(Math.round(d * 1e6))).toBe(true);
+  });
+
+  it("photo-mode storms keep flashing after an hour", () => {
+    vi.useFakeTimers({ now: Date.UTC(2026, 9, 12, 12), toFake: ["Date"] });
+    const { env, thunder } = setup("arcadia");
+    env.timeOverride = 0.5;
+    env.setOverrides(null, { weather: "storm", intensity: 1 });
+    vi.setSystemTime(Date.now() + 61 * 60_000);
+    const cam = new THREE.PerspectiveCamera();
+    cam.position.set(0, 502, 0);
+    for (let s = 0; s < 90; s++) {
+      vi.setSystemTime(Date.now() + 1000);
+      env.update(1);
+      env.afterCamera(cam, 1);
+    }
+    expect(thunder.length).toBeGreaterThan(1);
+  });
+
+  it("a new server storm drops the strike scheduled from the old one", () => {
+    const t0 = Date.UTC(2026, 9, 12, 12);
+    vi.useFakeTimers({ now: t0, toFake: ["Date"] });
+    const { env, thunder } = setup("arcadia");
+    env.timeOverride = 0.5;
+    const storm = (since: number) => skyState("arcadia", 0, Date.now(), 0, { weather: "storm", intensity: 1, since, until: t0 + 3_600_000 });
+    env.setServerSky(storm(t0 - 4000)); // its first strike is 2–21 s away
+    for (let i = 0; i < 300; i++) env.update(1 / 60); // storm fades in; the strike is cached
+    expect(thunder).toHaveLength(0);
+    vi.setSystemTime(t0 + 1000);
+    const b = storm(t0 + 1000);
+    env.setServerSky(b);
+    const expected = new Set<number>();
+    for (let st = nextStrike(b, t0); st && st.at < t0 + 60_000; st = nextStrike(b, st.at + 1)) expected.add(Math.round((st.distance / 343) * 1e6));
+    for (let i = 0; i < 590; i++) {
+      vi.setSystemTime(Date.now() + 100);
+      env.update(0.1);
+    }
+    expect(thunder.length).toBeGreaterThan(0);
+    for (const d of thunder) expect(expected.has(Math.round(d * 1e6))).toBe(true);
   });
 });

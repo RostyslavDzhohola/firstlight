@@ -126,16 +126,22 @@ export interface SkyState {
   nextIntensity: number;
   /** An admin override is active (weather fixed until nextChangeAt). */
   override: boolean;
+  /** Admin staging: the time of day is held here (the clock is frozen); absent normally. */
+  dayHold?: number;
 }
 
 export interface SkyOverride {
   weather: Weather;
   intensity: number;
+  /** Server time the override was set: its fixed "slot start", so its state (and lightning) doesn't drift. */
+  since: number;
   until: number;
 }
 
-/** The sky of a body copy at a server time (with an optional admin override). */
-export function skyState(body: BodyId, copy: number, serverMs: number, dayOffset = 0, override: SkyOverride | null = null): SkyState {
+/** The sky of a body copy at a server time (with an optional admin override and held time of day). */
+export function skyState(
+  body: BodyId, copy: number, serverMs: number, dayOffset = 0, override: SkyOverride | null = null, dayHold: number | null = null,
+): SkyState {
   const k = slotIndex(body, serverMs);
   const cur = slotWeather(body, copy, k);
   const prev = slotWeather(body, copy, k - 1);
@@ -147,10 +153,14 @@ export function skyState(body: BodyId, copy: number, serverMs: number, dayOffset
     slotStart: start, nextChangeAt: start + SKY_PROFILES[body].slotMs,
     nextWeather: next.weather, nextIntensity: next.intensity, override: false,
   };
+  if (dayHold !== null) {
+    base.dayT = dayHold;
+    base.dayHold = dayHold;
+  }
   if (override && override.until > serverMs) {
     return {
       ...base, weather: override.weather, intensity: override.weather === "clear" ? 0 : override.intensity,
-      prevWeather: override.weather, slotStart: serverMs - WEATHER_RAMP_MS, nextChangeAt: override.until,
+      prevWeather: override.weather, slotStart: override.since, nextChangeAt: override.until,
       nextWeather: override.weather, override: true,
     };
   }
@@ -177,20 +187,31 @@ export interface Strike {
   seed: number;
 }
 
+// Any change to the lightning schedule (these constants, nextStrike) must bump the shared protocol version.
+/** Lightning cadence: strike i of a storm sits at slotStart + (i + 1)·EVERY ± JITTER, so consecutive
+ * strikes are 6–25 s apart (mean 15.5 s) for a storm of any length. */
+const STRIKE_EVERY_MS = 15_500;
+const STRIKE_JITTER_MS = 4_750;
+const STRIKE_TIME_SALT = 0x1717;
+const STRIKE_SEED_SALT = 0x5eed;
+
 /**
  * The first lightning strike at or after `ms` in a storm slot (deterministic, so every client on
  * the copy flashes together), or null when the slot isn't a storm or no strike is left in it.
+ * Found in O(1): only the strikes around `ms` are computed.
  */
 export function nextStrike(s: SkyState, ms: number): Strike | null {
   if (s.weather !== "storm") return null;
   const k = Math.round(s.slotStart / 1000);
-  let t = s.slotStart;
-  for (let i = 0; i < 200; i++) {
-    t += 6000 + 19000 * hash01(BODY_SEED[s.body], s.copy, k, 100 + i);
-    if (t >= s.nextChangeAt) return null;
-    if (t >= ms) {
-      const seed = hash4(BODY_SEED[s.body], s.copy, k, 300 + i);
-      return { at: t, az: hash01(seed, 1) * Math.PI * 2, distance: 250 + 450 * hash01(seed, 2), seed };
+  // Strikes before index i are at least EVERY − JITTER before ms and strike i + 2 is after it.
+  let i = Math.max(0, Math.floor((ms - s.slotStart) / STRIKE_EVERY_MS) - 1);
+  for (let end = i + 2; i <= end; i++) {
+    const jitter = (2 * hash01(BODY_SEED[s.body] ^ STRIKE_TIME_SALT, s.copy, k, i) - 1) * STRIKE_JITTER_MS;
+    const at = s.slotStart + (i + 1) * STRIKE_EVERY_MS + jitter;
+    if (at >= s.nextChangeAt) return null;
+    if (at >= ms) {
+      const seed = hash4(BODY_SEED[s.body] ^ STRIKE_SEED_SALT, s.copy, k, i);
+      return { at, az: hash01(seed, 1) * Math.PI * 2, distance: 250 + 450 * hash01(seed, 2), seed };
     }
   }
   return null;
