@@ -3,6 +3,7 @@
 // and title plates, the Hall of Firsts wall, billboard lamps, and the admin console (`) with
 // staged scenes (`stage <n>`, or `?stage=<n>` in the URL for an admin window).
 
+import { EGG_BY_ID } from "@firstlight/shared/content/secrets";
 import * as THREE from "three/webgpu";
 import { PLANET_IDS, type BodyId } from "@firstlight/shared";
 import type { HallLine } from "@firstlight/shared/content/secrets";
@@ -129,6 +130,7 @@ export class QuestClient implements ClientSystem {
     let best: WorldObjectDef | null = null;
     let bestD = Infinity;
     for (const o of this.interactables) {
+      if (o.def.egg && EGG_BY_ID.get(o.def.egg)?.extra && !this.game.hud.you?.cosmeticsExtras) continue;
       if (o.def.mission && !active.has(o.def.mission)) continue;
       if (!inReach(o.pos, at, o.def.range, 0.3)) continue;
       const d = surfaceDistance(o.pos, at);
@@ -149,7 +151,7 @@ export class QuestClient implements ClientSystem {
   private use(o: WorldObjectDef) {
     if (o.look === "keeper") return this.shop.open();
     if (o.look === "guide") return this.guide?.open();
-    if (o.look === "lantern") this.world.lightLantern(o.id);
+    if (o.look === "lantern" && o.egg === "E4") this.world.lightLantern(o.id);
     this.game.net.room?.send("interact", { target: o.id });
   }
 
@@ -158,7 +160,7 @@ export class QuestClient implements ClientSystem {
     const g = this.game;
     const you = g.hud.you;
     const active = new Set((you?.missions ?? []).filter((m) => !m.done).map((m) => m.id));
-    this.world.update(dt, { activeMissions: active });
+    this.world.update(dt, { activeMissions: active, cosmeticsExtras: !!you?.cosmeticsExtras });
     this.tracker.update(you);
     if (you !== this.lastYou) {
       this.lastYou = you;

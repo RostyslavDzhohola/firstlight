@@ -23,7 +23,8 @@ import type { QuestPlayer, QuestSystem, ShotMsg } from "./QuestSystem.ts";
  * A wrong E2/E5 answer raises penalty NPCs: the puzzle then locks for that account for `lockMs`,
  * penalty NPCs dissolve after `ttlMs`, and at most `perPlayer` (per account) and `perBody` (per room)
  * are alive at once. The E7 keypad locks an account out for `keypadLockMs` after `keypadTries`
- * wrong codes in a row.
+ * wrong codes in a row. E10/E11 failures use the same account puzzle lockout without spawning NPCs.
+ * E12 uses the keypad limits independently of E7.
  */
 export const EGG_LIMITS = {
   lockMs: 15_000,
@@ -34,6 +35,7 @@ export const EGG_LIMITS = {
   keypadLockMs: 60_000,
   /** Wrong keypad codes are forgotten after this long without another try. */
   keypadIdleMs: 10 * 60_000,
+  wickWindowMs: 45_000,
 };
 
 /**
@@ -43,12 +45,15 @@ export const EGG_LIMITS = {
 export const EGG_TIMERS = {
   /** `${userId}|${egg}` → when that puzzle unlocks again after a wrong answer. */
   puzzles: new Map<string, number>(),
-  /** userId → wrong E7 codes in a row, the lockout end (0 = none) and the last try. */
+  /** Account/keypad key → failed attempts, lockout end (0 = none) and last attempt. */
   keypads: new Map<string, { fails: number; until: number; last: number }>(),
 };
 
 const RIDDLES: Partial<Record<EggId, string>> = {
   E2: "The plaque reads: “Rain feeds the leaf, the leaf drinks the sun, the sun lights the ember.” Four buttons: raindrop, leaf, sun, flame.",
+  E10: "The weathered dial reads: 'Under earth, a sleeping root waits for a silver bead. Only then does the flower wake.'",
+  E11: "The stone reads: 'A wick alone drifts away. Keep the little lights together before the mist takes them. The reeds keep what they remember.'",
+  E12: "The slip lists a timebox inspection: 'Rails: a trident. Brake: a lone nail. Teeth: an open hand. Bolts: a pair of squares. Enter the counts in inspection order.'",
   E5: "The plaque reads: “Ring for the dead, then the lost, then the living.” Three ropes: skull, broken lantern, candle.",
 };
 
@@ -65,6 +70,8 @@ export class EggLogic {
 
   syncTo(c: Client) {
     for (const id of this.dark.get(c.sessionId)?.keys() ?? []) c.send("lamp", { id, on: false });
+    const a = this.sys.actor(c.sessionId);
+    if (a) for (const o of this.sys.objects) if (o.egg === "E11" && o.part === "wick") c.send("lamp", { id: o.id, on: this.sys.qp(a).e11.lit.has(o.id) });
   }
 
   // ---------------------------------------------------------------- per tick
@@ -84,6 +91,11 @@ export class EggLogic {
       q.e4 = { lit: new Set(), startedAt: 0, ferryUntil: 0 };
       this.sys.toast(a, "The marsh lanterns gutter out", "info");
     }
+    if (q.e11.lit.size && now - q.e11.startedAt > EGG_LIMITS.wickWindowMs) {
+      this.resetWicks(a, q);
+      EGG_TIMERS.puzzles.set(`${a.identity.userId}|E11`, now + EGG_LIMITS.lockMs);
+      this.sys.toast(a, "The floating wicks fade into the mist", "info");
+    }
     for (const [k, until] of q.passages) if (until < now) q.passages.delete(k);
   }
 
@@ -102,6 +114,11 @@ export class EggLogic {
       }
       if (!lamps.size) this.dark.delete(sid);
     }
+  }
+
+  resetWicks(a: PlayerActor, q: QuestPlayer) {
+    for (const id of q.e11.lit) a.client.send("lamp", { id, on: false });
+    q.e11 = { lit: new Set(), startedAt: 0 };
   }
 
   private open(q: QuestPlayer, key: string) {
@@ -187,6 +204,66 @@ export class EggLogic {
           this.penalty(a, egg, "bonewalker", EGG_RULES.E5_PENALTY_BONEWALKERS);
         }
         return;
+      }
+      case "E10": {
+        if (o.part === "plaque") return toast(RIDDLES.E10!);
+        if (this.lockedFor(a.identity.userId, egg, now)) return toast("The dial rests under a film of dew. Wait a moment.", "warn");
+        const order = ["root", "dew", "bloom"];
+        if (q.seq.E10.length === order.length) {
+          this.sys.claimEgg(a, egg);
+          if (this.sys.life(a).eggs.includes(egg)) q.seq.E10 = [];
+          return;
+        }
+        const seq = q.seq.E10;
+        if (o.part !== order[seq.length]) {
+          q.seq.E10 = [];
+          EGG_TIMERS.puzzles.set(`${a.identity.userId}|${egg}`, now + EGG_LIMITS.lockMs);
+          return toast("The dial folds shut. The carvings fall still.", "warn");
+        }
+        seq.push(o.part);
+        if (seq.length < order.length) return toast("A silver bead settles in the carving.");
+        // Retain the completed sequence until the claim saves, so a storage failure can be retried.
+        this.sys.claimEgg(a, egg);
+        if (this.sys.life(a).eggs.includes(egg)) q.seq.E10 = [];
+        return;
+      }
+      case "E11": {
+        if (o.part === "plaque") return toast(RIDDLES.E11!);
+        if (this.lockedFor(a.identity.userId, egg, now)) return toast("The mist holds the wicks. Wait a moment.", "warn");
+        if (q.e11.lit.size && now - q.e11.startedAt > EGG_LIMITS.wickWindowMs) {
+          this.resetWicks(a, q);
+          EGG_TIMERS.puzzles.set(`${a.identity.userId}|${egg}`, now + EGG_LIMITS.lockMs);
+          return toast("The floating wicks fade into the mist", "warn");
+        }
+        if (o.part === "chest") {
+          if (q.e11.lit.size === 3) {
+            this.sys.claimEgg(a, egg);
+            if (this.sys.life(a).eggs.includes(egg)) this.resetWicks(a, q);
+            return;
+          }
+          this.resetWicks(a, q);
+          EGG_TIMERS.puzzles.set(`${a.identity.userId}|${egg}`, now + EGG_LIMITS.lockMs);
+          return toast("The reeds tighten around the coffer. Its lights are scattered.", "warn");
+        }
+        if (!q.e11.lit.size) q.e11.startedAt = now;
+        q.e11.lit.add(o.id);
+        a.client.send("lamp", { id: o.id, on: true });
+        return toast(`The floating wick catches (${q.e11.lit.size}/3)`);
+      }
+      case "E12": {
+        if (o.part === "plaque") return toast(RIDDLES.E12!);
+        const key = `${a.identity.userId}|${egg}`;
+        const k = EGG_TIMERS.keypads.get(key);
+        if (k && k.until > now) return toast(`TIMEBOX LOCKED. Try again in ${Math.ceil((k.until - now) / 1000)} s`, "warn");
+        if (code === undefined) return a.client.send("prompt", { kind: "keypad", target: o.id });
+        if (code === "3158") {
+          EGG_TIMERS.keypads.delete(key);
+          return this.sys.claimEgg(a, egg);
+        }
+        const fails = (k?.fails ?? 0) + 1;
+        const until = fails >= EGG_LIMITS.keypadTries ? now + EGG_LIMITS.keypadLockMs : 0;
+        EGG_TIMERS.keypads.set(key, { fails: until ? 0 : fails, until, last: now });
+        return toast(until ? "TIMEBOX LOCKED. The inspection counter needs to cool." : "The timebox rejects the inspection.", "warn");
       }
       case "E3":
         if (this.isOpen(q, "E3")) return this.sys.claimEgg(a, "E3");
