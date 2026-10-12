@@ -10,6 +10,7 @@ import { PerfOverlay } from "../render/PerfOverlay.ts";
 import { Planet } from "../world/Planet.ts";
 import { Input } from "./input.ts";
 import { PlayerController } from "./PlayerController.ts";
+import { CLIENT_SYSTEMS, type ClientSystem } from "./systems.ts";
 
 const loadingEl = () => document.getElementById("loading")!;
 function setLoading(text: string, frac: number) {
@@ -32,6 +33,7 @@ export class Game {
   self!: AvatarView;
   perf!: PerfOverlay;
   bodyId: BodyId = "portus";
+  systems: ClientSystem[] = [];
   private last = performance.now();
   private running = false;
 
@@ -51,6 +53,8 @@ export class Game {
   async enterBody(body: BodyId) {
     setLoading(`Travelling to ${body[0]!.toUpperCase()}${body.slice(1)}…`, 0.15);
     await this.net.leave();
+    for (const s of this.systems) s.dispose();
+    this.systems = [];
     for (const a of this.avatars.values()) a.dispose();
     this.avatars.clear();
     this.planet?.dispose();
@@ -72,6 +76,7 @@ export class Game {
       check();
     });
     this.net.onCorrect = (x, y, z) => this.player.teleport(x, y, z);
+    this.systems = CLIENT_SYSTEMS.map((f) => f(this)).filter((x): x is ClientSystem => !!x);
 
     // Stream terrain around the spawn before handing control over.
     const t0 = performance.now();
@@ -127,6 +132,7 @@ export class Game {
     }
 
     this.planet.update(p.x, p.y, p.z, this.ctx.camera, now);
+    for (const s of this.systems) s.update(dt, now);
     this.player.placeCamera(this.ctx.camera);
     if (this.input.pressed.has("F3")) this.perf.toggle();
     this.ctx.render();

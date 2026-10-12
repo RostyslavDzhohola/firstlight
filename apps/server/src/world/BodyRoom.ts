@@ -17,6 +17,7 @@ import { characterRepo } from "./characters.ts";
 import { dealDamage, fire, melee, selectedWeapon, stepEffects, stepProjectiles, type CombatHost } from "./combat.ts";
 import { dist3, type V3 } from "./geometry.ts";
 import { emitPileEvent, onPileEvent, pileStore, type PileData } from "./piles.ts";
+import { SYSTEM_FACTORIES, type RoomSystem } from "./systems.ts";
 
 export interface BodyRoomOptions {
   body: BodyId;
@@ -84,6 +85,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   private lastAoi = 0;
   private lastSave = 0;
   host!: CombatHost;
+  systems: RoomSystem[] = [];
 
   static async onAuth(): Promise<unknown> {
     throw new ServerError(403, "join through /api/play");
@@ -162,11 +164,13 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     });
     this.onMessage("admin", adminSchema, (c, m) => this.admin(c, m.cmd, m.args ?? {}));
 
+    this.systems = SYSTEM_FACTORIES.map((f) => f(this)).filter((x): x is RoomSystem => !!x);
     this.setTimestep((dt) => this.tick(dt), NET.TICK_MS);
   }
 
   onDispose() {
     this.unsubscribePiles?.();
+    for (const s of this.systems) s.dispose?.();
     for (const a of this.actors.values()) this.saveActor(a);
     for (const l of this.lingering.values()) this.saveActor(l.actor);
   }
@@ -243,6 +247,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     this.actors.set(client.sessionId, a);
     client.view = new StateView();
     this.updateViews(true);
+    for (const s of this.systems) s.onPlayerJoin?.(client.sessionId);
     this.sendYou(a);
     if (a.dead) client.send("death", { victim: client.sessionId, killer: null, killerName: "", aliveMs: 0, level: char.level, pileId: "" });
   }
@@ -267,6 +272,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     client.view?.dispose();
     if (!a) return;
     this.actors.delete(client.sessionId);
+    for (const s of this.systems) s.onPlayerLeave?.(client.sessionId);
     const safe = isSafe(this.bodyDef, a.state.x, a.state.y, a.state.z);
     const cleanLogout = (a as PlayerActor & { loggedOut?: boolean }).loggedOut === true;
     const dropped = code !== CloseCode.CONSENTED; // reconnection window already elapsed
@@ -682,6 +688,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
         this.state.players.delete(sid);
       }
     }
+    for (const s of this.systems) s.tick(dtMs, now);
     stepProjectiles(this.host, dt);
     stepEffects(this.host, dt);
     if (now - this.lastAoi > 200) {
