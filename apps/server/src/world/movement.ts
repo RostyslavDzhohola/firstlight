@@ -39,6 +39,14 @@ export interface MoveWorld {
   radius: number;
   waterLevel: number;
   groundAt(x: number, y: number, z: number): number;
+  /** Intact breakable props: the highest top under the feet (radius from the centre, 0 = none) and whether the feet are inside one. */
+  footing?(x: number, y: number, z: number, step: number): { top: number; inside: boolean };
+}
+
+/** Ground height (above the radius) under a position: the terrain or an intact prop top, whichever is higher. */
+function supportAt(w: MoveWorld, x: number, y: number, z: number, terrain: number): number {
+  const top = w.footing?.(x, y, z, MOVE.groundedAbove).top ?? 0;
+  return top > 0 ? Math.max(terrain, top - w.radius) : terrain;
 }
 
 export interface MoveLimits {
@@ -50,7 +58,7 @@ export interface MoveLimits {
 
 export type MoveResult =
   | { ok: true; swimming: boolean; grounded: boolean; len: number; ground: number }
-  | { ok: false; reason: "speed" | "height" | "ground" };
+  | { ok: false; reason: "speed" | "height" | "ground" | "prop" };
 
 /** Is a body at radius `len` over `ground` floating in deep water (swim depth)? */
 function swimmingAt(w: MoveWorld, len: number, ground: number): boolean {
@@ -81,9 +89,12 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
   const elapsed = Math.min(0.25, Math.max(0, (now - a.lastBudgetAt) / 1000));
   a.lastBudgetAt = now;
   const len = Math.hypot(m.x, m.y, m.z);
-  const ground = w.groundAt(m.x, m.y, m.z);
+  const terrain = w.groundAt(m.x, m.y, m.z);
+  const swimming = swimmingAt(w, len, terrain);
+  // Intact props are solid and standable (F12): their tops count as ground; their insides don't.
+  const foot = swimming ? null : (w.footing?.(m.x, m.y, m.z, MOVE.groundedAbove) ?? null);
+  const ground = foot && foot.top > 0 ? Math.max(terrain, foot.top - w.radius) : terrain;
   const above = len - w.radius - ground;
-  const swimming = swimmingAt(w, len, ground);
   // Swim speed when both ends of the step are in the water (entering and leaving keep land speed).
   const inWater = swimming && a.swimming;
   const speed = (inWater ? MOVE.swimSpeed : MOVE.maxSpeed) * MOVE.speedSlack * limits.speed;
@@ -96,8 +107,10 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
     a.moveBonusUntil = Math.max(a.moveBonusUntil, now + MOVE.dodgeWindowMs);
   }
 
-  // Below the ground, or deeper in a lake than swimmers float.
-  if (!swimming && (above < -MOVE.groundTolerance || (ground < w.waterLevel - 1 && len - w.radius < w.waterLevel - MOVE.swimDepthSlack))) return { ok: false, reason: "ground" };
+  // Below the ground, deeper in a lake than swimmers float, or inside a solid prop.
+  if (!swimming && (above < -MOVE.groundTolerance || (terrain < w.waterLevel - 1 && len - w.radius < w.waterLevel - MOVE.swimDepthSlack))) return { ok: false, reason: "ground" };
+  // Walking into a prop is refused; a body that was put inside one (teleport, a rebuild) may walk out.
+  if (foot?.inside && !w.footing!(a.lastX, a.lastY, a.lastZ, MOVE.groundedAbove).inside) return { ok: false, reason: "prop" };
   const grounded = swimming || above <= MOVE.groundedAbove;
   if (!grounded && len > airCeiling(a, now)) return { ok: false, reason: "height" };
 
@@ -123,8 +136,10 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
 export function settle(a: PlayerActor, w: MoveWorld, now: number): V3 | null {
   const x = a.state.x, y = a.state.y, z = a.state.z;
   const len = Math.hypot(x, y, z);
-  const ground = w.groundAt(x, y, z);
-  if (swimmingAt(w, len, ground) || len - w.radius - ground <= MOVE.groundedAbove) return null;
+  const terrain = w.groundAt(x, y, z);
+  if (swimmingAt(w, len, terrain)) return null;
+  const ground = supportAt(w, x, y, z, terrain);
+  if (len - w.radius - ground <= MOVE.groundedAbove) return null;
   const ceiling = airCeiling(a, now);
   if (len <= ceiling) return null;
   const floor = w.radius + (ground < w.waterLevel - 1 ? Math.max(ground, w.waterLevel - 1.05) : ground) + 0.02;

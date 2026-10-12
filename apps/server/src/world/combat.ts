@@ -42,6 +42,8 @@ export interface BreakableHost {
   raycast(o: V3, d: V3, maxT: number): { index: number; t: number } | null;
   /** Is the point inside intact prop `index`? */
   contains(index: number, p: V3): boolean;
+  /** Movement footing at the feet: highest intact prop top under them (radius, 0 = none), and whether they're inside a prop. */
+  footing?(x: number, y: number, z: number, step: number): { top: number; inside: boolean };
   /** `by`: the attacking player's session id (credit for the Demolition Crew medal), or null. */
   damage(index: number, amount: number, cls: Destroys, weaponId: string, dir: V3, by: string | null): void;
   splash(at: V3, radius: number, amount: number, cls: Destroys, weaponId: string, by: string | null, exclude?: number): void;

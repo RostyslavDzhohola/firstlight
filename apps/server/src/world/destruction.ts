@@ -28,6 +28,11 @@ export const DESTRUCTION = {
 /** The room surface this system needs. */
 type Room = BodyRoom;
 
+/** Feet this far outside a prop's footprint still stand on its edge (the client body is 0.38 m wide). */
+const FOOT_EDGE_SLACK = 0.2;
+/** Feet this far inside a footprint (and below the top) are inside the prop, not pressed against it. */
+const INSIDE_MARGIN = 0.1;
+
 export class DestructionSystem implements RoomSystem, BreakableHost {
   readonly list: readonly Breakable[];
   readonly grid: BreakableGrid;
@@ -87,6 +92,51 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
     this.rayHit.index = bestIdx;
     this.rayHit.t = best;
     return this.rayHit;
+  }
+
+  private readonly footingOut = { top: 0, inside: false };
+
+  /**
+   * Movement footing at feet position (x, y, z) (F12: props are standable): `top` is the distance
+   * from the planet centre of the highest intact prop top the feet stand on or above (centre over
+   * the footprint, with a little edge slack; 0 = none), and `inside` is true when the feet are in an
+   * intact prop's solid part (more than `step` below its top, well within its footprint). Broken
+   * props hold nobody. The returned object is reused.
+   */
+  footing(x: number, y: number, z: number, step: number): { top: number; inside: boolean } {
+    const out = this.footingOut;
+    out.top = 0;
+    out.inside = false;
+    if (this.list.length === 0) return out;
+    const n = this.grid.collect(x, y, z, 0, 0, 0, 0, 0, this.candidates);
+    for (let k = 0; k < n; k++) {
+      const i = this.candidates[k]!;
+      if (this.brokenUntil[i]! > 0) continue;
+      const b = this.list[i]!;
+      const qx = x - b.px, qy = y - b.py, qz = z - b.pz;
+      const ly = qx * b.ux + qy * b.uy + qz * b.uz;
+      if (ly < -0.5) continue;
+      const lx = qx * b.rx + qy * b.ry + qz * b.rz;
+      const lz = qx * b.fx + qy * b.fy + qz * b.fz;
+      // How far the feet are outside the footprint (0 inside) and how deep inside it (≤ 0 outside).
+      let outside: number, depth: number;
+      if (b.shape === 0) {
+        const ex = Math.max(0, Math.abs(lx) - b.hx), ez = Math.max(0, Math.abs(lz) - b.hz);
+        outside = Math.sqrt(ex * ex + ez * ez);
+        depth = Math.min(b.hx - Math.abs(lx), b.hz - Math.abs(lz));
+      } else {
+        const rl = Math.sqrt(lx * lx + lz * lz);
+        outside = Math.max(0, rl - b.hx);
+        depth = b.hx - rl;
+      }
+      if (outside > FOOT_EDGE_SLACK) continue;
+      if (ly >= b.h - step) {
+        const lift = b.h - ly;
+        const top = Math.hypot(x + b.ux * lift, y + b.uy * lift, z + b.uz * lift);
+        if (top > out.top) out.top = top;
+      } else if (depth >= INSIDE_MARGIN) out.inside = true;
+    }
+    return out;
   }
 
   /** Is point `p` inside intact prop `index`? */

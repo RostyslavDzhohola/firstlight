@@ -109,6 +109,8 @@ export function pvpPairCount(): number {
   return pvpKills.size;
 }
 
+const NO_FOOTING = { top: 0, inside: false };
+
 /** Lazy `you` updates (magazine counts) go out at most this often. */
 const YOU_LAZY_MS = 400;
 
@@ -207,7 +209,12 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     this.bodyDef = BODIES[options.body];
     this.terrain = createTerrain(this.bodyDef);
     const terrain = this.terrain;
-    this.moveWorld = { radius: this.bodyDef.radius, waterLevel: this.bodyDef.waterLevel, groundAt: (x, y, z) => terrain.groundHeightAt(x, y, z) };
+    this.moveWorld = {
+      radius: this.bodyDef.radius,
+      waterLevel: this.bodyDef.waterLevel,
+      groundAt: (x, y, z) => terrain.groundHeightAt(x, y, z),
+      footing: (x, y, z, step) => this.host.props?.footing?.(x, y, z, step) ?? NO_FOOTING,
+    };
     this.state.body = options.body;
     this.state.copy = options.copy;
     void this.setMetadata({ body: options.body, copy: options.copy, loadtest: !!options.loadtest });

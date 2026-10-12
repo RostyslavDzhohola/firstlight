@@ -8,6 +8,8 @@ import type { Game } from "../src/app.ts";
 import { matchMaker } from "@colyseus/core";
 import type { BodyRoom } from "../src/world/BodyRoom.ts";
 import { dealDamage } from "../src/world/combat.ts";
+import { DestructionSystem } from "../src/world/destruction.ts";
+import { isSafe, type Breakable } from "@firstlight/shared";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 
 let game: Game;
@@ -243,3 +245,134 @@ describe("swimming (F12 S3)", () => {
     await waitFor(() => s.corrections.n > 0, 2000);
   });
 });
+
+describe("standing on props (F12 client review should-fix 4)", () => {
+  const roomOf = (r: Room) => matchMaker.getLocalRoomById(r.roomId) as unknown as BodyRoom;
+  const destructionOf = (r: Room) => roomOf(r).systems.find((x) => x instanceof DestructionSystem) as DestructionSystem;
+  const topR = (b: Breakable) => Math.hypot(b.px + b.ux * b.h, b.py + b.uy * b.h, b.pz + b.uz * b.h);
+  const centre = (b: Breakable): V3 => norm([b.px, b.py, b.pz]);
+  /** Direction `k` of the way from `a` to `b` (great circle, short distances). */
+  const lerpDir = (a: V3, b: V3, k: number): V3 => norm([a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k]);
+
+  /** An intact crate on open, dry, unsafe ground with a run-up spot `run` m from its centre. */
+  function crateWithRunUp(sys: DestructionSystem, run: number): { b: Breakable; start: V3 } {
+    for (const b of sys.list) {
+      if (b.kind !== "crate" || sys.isBroken(b.index)) continue;
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * Math.PI * 2;
+        const c = Math.cos(a), s2 = Math.sin(a);
+        const start = norm([b.px + (b.rx * c + b.fx * s2) * run, b.py + (b.ry * c + b.fy * s2) * run, b.pz + (b.rz * c + b.fz * s2) * run]);
+        const g = terrain.groundHeight(start[0], start[1], start[2]);
+        if (g < BODY.waterLevel + 0.5 || isSafe(BODY, start[0] * R, start[1] * R, start[2] * R)) continue;
+        // Gentle ground between the run-up and the crate, and no other prop on the way.
+        const gc = terrain.groundHeight(...centre(b));
+        if (Math.abs(g - gc) > 0.25) continue;
+        if (sys.list.some((o) => o !== b && Math.hypot(o.px - b.px, o.py - b.py, o.pz - b.pz) < run + 2)) continue;
+        return { b, start };
+      }
+    }
+    throw new Error("no crate with a run-up");
+  }
+
+  async function onTheCrate(name: string) {
+    const k = await joinOutside(name);
+    const sys = destructionOf(k.r);
+    const run = 1.6;
+    const { b, start } = crateWithRunUp(sys, run);
+    k.r.send("admin", { cmd: "teleport", args: { x: start[0] * groundR(start), y: start[1] * groundR(start), z: start[2] * groundR(start) } });
+    await waitFor(() => Math.hypot(me(k.r).x - start[0] * groundR(start), me(k.r).y - start[1] * groundR(start), me(k.r).z - start[2] * groundR(start)) < 0.5);
+    await sleep(150);
+    k.corrections.n = 0;
+    // Jump at 6.6 m/s while moving 3 m/s toward the crate centre; land on its top.
+    const top = topR(b);
+    let h = 0, v = 6.6, t = 0, landed = false;
+    while (!landed && t < 1.5) {
+      t += 0.05;
+      v -= 18 * 0.05;
+      const d = lerpDir(start, centre(b), Math.min(1, (3 * t) / run));
+      const overTop = 3 * t >= run - b.hx + 0.15;
+      const g = groundR(d);
+      h += v * 0.05;
+      let r = g + h;
+      if (overTop && v < 0 && r <= top) {
+        r = top;
+        landed = true;
+      } else if (r <= g) r = g;
+      send(k.r, k.seq, d, r, landed ? 0 : 4);
+      await sleep(50);
+    }
+    expect(landed).toBe(true);
+    const at = lerpDir(start, centre(b), Math.min(1, (3 * t) / run));
+    return { ...k, b, sys, at, top };
+  }
+
+  it("a player can jump onto a crate, stand there, and jump from its top", async () => {
+    const c = await onTheCrate("percher");
+    for (let i = 0; i < 30; i++) {
+      send(c.r, c.seq, c.at, c.top, 0);
+      await sleep(50);
+    }
+    let h = 0, v = 6.6;
+    do {
+      v -= 18 * 0.05;
+      h = Math.max(0, h + v * 0.05);
+      send(c.r, c.seq, c.at, c.top + h, h > 0 ? 4 : 0);
+      await sleep(50);
+    } while (h > 0);
+    await sleep(200);
+    expect(c.corrections.n).toBe(0);
+    expect(Math.hypot(me(c.r).x, me(c.r).y, me(c.r).z)).toBeCloseTo(c.top, 1);
+  });
+
+  it("a broken crate holds nobody up", async () => {
+    const c = await onTheCrate("faller");
+    c.sys.damage(c.b.index, 1e6, "heavy", "comet", [0, 0, 1]);
+    for (let i = 0; i < 30; i++) {
+      send(c.r, c.seq, c.at, c.top, 0);
+      await sleep(50);
+    }
+    await sleep(200);
+    expect(c.corrections.n).toBeGreaterThan(0);
+    expect(aboveGround(me(c.r))).toBeLessThan(0.5);
+  });
+
+  it("a move that ends inside a crate's solid part is refused", async () => {
+    const k = await joinOutside("ghost");
+    const sys = destructionOf(k.r);
+    const { b, start } = crateWithRunUp(sys, 1.6);
+    k.r.send("admin", { cmd: "teleport", args: { x: start[0] * groundR(start), y: start[1] * groundR(start), z: start[2] * groundR(start) } });
+    await waitFor(() => Math.hypot(me(k.r).x - start[0] * groundR(start), me(k.r).y - start[1] * groundR(start), me(k.r).z - start[2] * groundR(start)) < 0.5);
+    await sleep(150);
+    k.corrections.n = 0;
+    for (let i = 1; i <= 8; i++) {
+      const d = lerpDir(start, centre(b), i / 8);
+      send(k.r, k.seq, d, groundR(d), 1);
+      await sleep(80);
+    }
+    await sleep(150);
+    expect(k.corrections.n).toBeGreaterThan(0);
+    const p = me(k.r);
+    const q = [p.x - b.px, p.y - b.py, p.z - b.pz];
+    const lx = q[0]! * b.rx + q[1]! * b.ry + q[2]! * b.rz, lz = q[0]! * b.fx + q[1]! * b.fy + q[2]! * b.fz;
+    expect(Math.abs(lx) <= b.hx - 0.1 && Math.abs(lz) <= b.hz - 0.1).toBe(false);
+  });
+
+  it("a body put inside a prop (teleport, rebuild) can walk out of it", async () => {
+    const k = await joinOutside("stuck");
+    const sys = destructionOf(k.r);
+    const { b, start } = crateWithRunUp(sys, 1.6);
+    const c = centre(b);
+    k.r.send("admin", { cmd: "teleport", args: { x: c[0] * groundR(c), y: c[1] * groundR(c), z: c[2] * groundR(c) } });
+    await waitFor(() => Math.hypot(me(k.r).x - c[0] * groundR(c), me(k.r).y - c[1] * groundR(c), me(k.r).z - c[2] * groundR(c)) < 0.5);
+    await sleep(150);
+    k.corrections.n = 0;
+    for (let i = 1; i <= 8; i++) {
+      const d = lerpDir(c, start, i / 8);
+      send(k.r, k.seq, d, groundR(d), 1);
+      await sleep(80);
+    }
+    await sleep(150);
+    expect(k.corrections.n).toBe(0);
+  });
+});
+
