@@ -19,7 +19,7 @@ export const NET = {
 
 export interface PlayRequest {
   body: BodyId;
-  /** Room id of the party leader, to land in the same copy. */
+  /** Room id of the party leader (or a member) on this body, to land in the same copy. The server only honours it for party members. */
   partyLeaderRoomId?: string;
   /** Load-test rooms only (requires the load-test secret server-side). */
   loadtest?: boolean;
@@ -88,7 +88,7 @@ export type ClientMessages = {
   travel: { to: BodyId; viaPad?: number };
   fastTravel: { pad: number };
   respawn: { starter: number; palette: number };
-  party: { action: "invite" | "accept" | "leave" | "kick"; target?: string };
+  party: { action: "invite" | "accept" | "decline" | "leave" | "kick"; target?: string };
   mission: { action: "accept" | "abandon"; id: string };
   title: { medalId: string | null };
   ping: { t: number };

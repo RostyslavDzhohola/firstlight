@@ -281,10 +281,14 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   onDrop(client: Client) {
     const a = this.actors.get(client.sessionId);
     if (a) a.state.flags |= PF.LINGER;
+    // Kicked or banned: no reconnection seat (onLeave runs next and removes the body).
+    if (this.systems.some((s) => s.canReconnect?.(client.sessionId) === false)) return;
     this.allowReconnection(client, NET.RECONNECT_WINDOW_S);
   }
 
   onReconnect(client: Client) {
+    // Reconnects skip /api/play, so bans are checked here too (SPEC §5.2).
+    if (this.systems.some((s) => s.canReconnect?.(client.sessionId) === false)) throw new ServerError(4004, "not allowed back");
     const a = this.actors.get(client.sessionId);
     if (a) {
       a.client = client;

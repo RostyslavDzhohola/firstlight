@@ -9,6 +9,7 @@ import type { TokenVerifier } from "./auth/identity.ts";
 import { directRequestIp } from "./auth/ip.ts";
 import { BodyRoom } from "./world/BodyRoom.ts";
 import { isBodyId, onlineCount, play, type MatchmakingLimits } from "./world/matchmaking.ts";
+import { partyOf, partyRoomFor, playRefusal } from "./social/index.ts";
 
 export interface GameOptions {
   port: number;
@@ -91,13 +92,20 @@ export async function createGame(opts: GameOptions): Promise<Game> {
       res.status(400).json({ ok: false, error: "bad body" });
       return;
     }
+    // Banned (also covers dev identities) or recently kicked by an admin.
+    const refusal = identity.loadtest ? null : playRefusal(identity.userId);
+    if (refusal) {
+      res.status(403).json({ ok: false, error: refusal });
+      return;
+    }
     try {
       const result = await play(
         identity,
         {
           body,
-          partyLeaderRoomId: typeof req.body.partyLeaderRoomId === "string" ? req.body.partyLeaderRoomId : undefined,
-          partySize: typeof req.body.partySize === "number" ? req.body.partySize : undefined,
+          // Party headroom (D12) only for real party members: the copy a member of the caller's party is in.
+          partyLeaderRoomId: partyRoomFor(identity.userId, body, typeof req.body.partyLeaderRoomId === "string" ? req.body.partyLeaderRoomId : undefined),
+          partySize: typeof req.body.partySize === "number" ? Math.min(req.body.partySize, partyOf(identity.userId).length) : undefined,
           starter: Number.isInteger(req.body.starter) ? Math.max(0, Math.min(3, req.body.starter)) : undefined,
           palette: Number.isInteger(req.body.palette) ? Math.max(0, Math.min(5, req.body.palette)) : undefined,
           loadtest: req.body.loadtest === true,

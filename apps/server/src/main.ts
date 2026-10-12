@@ -8,6 +8,8 @@ import { gameDb } from "./db/index.ts";
 import { characterRepo } from "./world/characters.ts";
 import { pileStore } from "./world/piles.ts";
 import { SqliteCharacterRepo, SqlitePileStore } from "./world/sqliteStores.ts";
+import { mountOps } from "./ops/admin.ts";
+import { endAllSessions } from "./social/index.ts";
 
 const accounts = await createAccounts({
   ...accountsConfigFromEnv(env),
@@ -30,8 +32,14 @@ const game = await createGame({
   allowedOrigins: env.clientOrigins,
   gracefulShutdown: true,
   mountBeforeJson: accounts.mountBeforeJson,
-  mountAfterJson: accounts.mountAfterJson,
-  onShutdown: () => accounts.close(),
+  mountAfterJson: (app) => {
+    accounts.mountAfterJson(app);
+    mountOps(app, { db: accounts.db, requireAdmin: accounts.requireAdmin, allowedOrigins: env.clientOrigins });
+  },
+  onShutdown: () => {
+    endAllSessions();
+    accounts.close();
+  },
 });
 
 console.log(`FIRSTLIGHT server listening on :${game.port} (mail: ${accounts.mailer.kind})`);
