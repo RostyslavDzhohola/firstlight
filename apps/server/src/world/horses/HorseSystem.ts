@@ -38,6 +38,8 @@ export class HorseSystem implements RoomSystem {
   private readonly lastWhistle = new Map<string, number>();
   /** Last time each player got on or off (HORSE.toggleCooldownMs). */
   private readonly lastToggle = new Map<string, number>();
+  /** "horse" messages per player in the current second (at most HORSE.messagesPerSecond count). */
+  private readonly rate = new Map<string, { windowStart: number; n: number }>();
   private readonly unsubscribe: () => void;
 
   constructor(room: BodyRoom) {
@@ -52,6 +54,9 @@ export class HorseSystem implements RoomSystem {
     const a = this.room.playerById(c.sessionId);
     if (!a || a.dead || a.superseded) return;
     const now = Date.now();
+    const r = this.rate.get(a.id);
+    if (!r || now - r.windowStart >= 1000) this.rate.set(a.id, { windowStart: now, n: 1 });
+    else if (++r.n > HORSE.messagesPerSecond) return; // spam: dropped without a reply
     const toggle = (fn: () => void) => {
       if (now - (this.lastToggle.get(a.id) ?? 0) < HORSE.toggleCooldownMs) return;
       this.lastToggle.set(a.id, now);
@@ -184,6 +189,7 @@ export class HorseSystem implements RoomSystem {
     this.despawn(sessionId, "left"); // logout, travel, closed tab (a lingering body walks, it doesn't ride)
     this.lastWhistle.delete(sessionId);
     this.lastToggle.delete(sessionId);
+    this.rate.delete(sessionId);
   }
 
   private onEvent(e: GameEvent) {

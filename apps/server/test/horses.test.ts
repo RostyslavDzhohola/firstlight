@@ -228,19 +228,27 @@ describe("riding", () => {
 
   it("ignores E spam: getting on and off waits HORSE.toggleCooldownMs between changes", async () => {
     const b = await rider("spammer");
-    await summonAndMount(b);
+    await summonAndMount(b); // 2 messages
     const events = () => b.count("horse");
     const before = events();
-    for (let i = 0; i < 10; i++) b.send("horse", { action: "ride" });
+    for (let i = 0; i < 3; i++) b.send("horse", { action: "ride" }); // 5 this second: under the rate limit
     await sleep(250);
     expect(mounted(b)).toBe(true); // too soon after getting on
-    await sleep(HORSE.toggleCooldownMs);
+    await sleep(1000); // next rate window, well past the toggle cooldown
     b.send("horse", { action: "dismount" });
     await until("off", () => !mounted(b));
-    for (let i = 0; i < 10; i++) b.send("horse", { action: "ride" });
+    for (let i = 0; i < 3; i++) b.send("horse", { action: "ride" });
     await sleep(250);
     expect(mounted(b)).toBe(false);
     expect(events() - before).toBeLessThanOrEqual(1); // the one dismount (owners hear their own events)
+  });
+
+  it("drops horse messages past HORSE.messagesPerSecond without a reply", async () => {
+    const b = await rider("flooder", false); // no whistle: every whistle that gets through is refused
+    for (let i = 0; i < 20; i++) b.send("horse", { action: "whistle" });
+    await until("refusals", () => b.count("denied") >= HORSE.messagesPerSecond);
+    await sleep(300);
+    expect(b.count("denied")).toBe(HORSE.messagesPerSecond);
   });
 
   it("a big hit throws the rider; losing the whistle sends the horse away; an idle horse leaves after 30 s", async () => {

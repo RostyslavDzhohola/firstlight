@@ -30,6 +30,8 @@ export const HORSE = {
   /** Getting on or off within this many ms of the last change is ignored (E spam would flip the
    *  flag and broadcast an event to everyone nearby on every message). */
   toggleCooldownMs: 500,
+  /** "horse" messages a player may send per second; the rest are dropped (AGENTS.md: 5/s). */
+  messagesPerSecond: 5,
   /** An unridden horse leaves after this long. */
   idleDespawnMs: 30_000,
   /** One hit of at least this fraction of max HP throws the rider. */
