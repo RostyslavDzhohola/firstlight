@@ -658,19 +658,25 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (dist3([pile.x, pile.y, pile.z], actorPos(a)) > RULES.PICKUP_RANGE) return;
     // Take from the pile and save the character in one transaction (no dupes, no losses on crash).
     const events: (() => void)[] = [];
-    const result = withTx(() => {
-      const taken = pileStore.current.take(pileId, itemIndex);
-      if (!taken) return null;
-      const leftovers: InvItem[] = [];
-      for (const it of taken.items) if (!this.giveItem(a, it)) leftovers.push(it);
-      a.char.coins += taken.coins;
-      if (taken.pile) events.push(() => emitPileEvent({ kind: "update", pile: taken.pile! }));
-      else events.push(() => emitPileEvent({ kind: "remove", id: pileId, body: this.bodyDef.id }));
-      // Items that didn't fit go back on the ground as a new pile.
-      if (leftovers.length) this.createPile(a, leftovers, 0, actorPos(a), events);
-      this.saveActor(a);
-      return { taken, leftovers };
-    });
+    let result: { taken: { items: InvItem[]; coins: number; pile: PileData | null }; leftovers: InvItem[] } | null;
+    try {
+      result = this.persist([a], () => {
+        const taken = pileStore.current.take(pileId, itemIndex);
+        if (!taken) return null;
+        const leftovers: InvItem[] = [];
+        for (const it of taken.items) if (!this.giveItem(a, it)) leftovers.push(it);
+        a.char.coins += taken.coins;
+        if (taken.pile) events.push(() => emitPileEvent({ kind: "update", pile: taken.pile! }));
+        else events.push(() => emitPileEvent({ kind: "remove", id: pileId, body: this.bodyDef.id }));
+        // Items that didn't fit go back on the ground as a new pile.
+        if (leftovers.length) this.createPile(a, leftovers, 0, actorPos(a), events);
+        this.saveActor(a);
+        return { taken, leftovers };
+      });
+    } catch {
+      a.client.send("denied", { action: "pickup", reason: "try again" });
+      return;
+    }
     for (const e of events) e();
     if (!result) return;
     emitGameEvent(this, { type: "pickup", playerId: a.id, pileId, pileOwnerUserId: pile.ownerUserId, pileCreatedAt: pile.createdAt, items: result.taken.items.length - result.leftovers.length, coins: result.taken.coins });
@@ -685,17 +691,46 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     const i = slot < HOTBAR_SLOTS ? slot : slot - HOTBAR_SLOTS;
     const item = list[i];
     if (!item) return;
-    list[i] = null;
-    if (slot === a.char.selected) this.equip(a, a.char.selected);
     const pos = actorPos(a);
     const f: V3 = [a.state.fx, a.state.fy, a.state.fz];
     const events: (() => void)[] = [];
-    withTx(() => {
-      this.createPile(a, [item], 0, [pos[0] + f[0] * 1.2, pos[1] + f[1] * 1.2, pos[2] + f[2] * 1.2], events);
-      this.saveActor(a);
-    });
+    try {
+      this.persist([a], () => {
+        list[i] = null;
+        if (slot === a.char.selected) this.equip(a, a.char.selected);
+        this.createPile(a, [item], 0, [pos[0] + f[0] * 1.2, pos[1] + f[1] * 1.2, pos[2] + f[2] * 1.2], events);
+        this.saveActor(a);
+      });
+    } catch {
+      a.client.send("denied", { action: "drop", reason: "try again" });
+      return;
+    }
     for (const e of events) e();
     a.youDirty = true;
+  }
+
+  /**
+   * Character + pile writes in one SQLite transaction. If it throws, the listed characters are put
+   * back exactly as they were before `fn` and the error is rethrown: memory never runs ahead of
+   * the database (F12 B6). Publish pile events queued by `fn` only after this returns.
+   */
+  persist<T>(actors: readonly PlayerActor[], fn: () => T): T {
+    const before = actors.map((a) => ({ a, char: structuredClone(a.char) }));
+    try {
+      return withTx(fn);
+    } catch (err) {
+      for (const { a, char } of before) {
+        const live = a.char as unknown as Record<string, unknown>;
+        for (const k of Object.keys(live)) if (!(k in char)) delete live[k];
+        Object.assign(a.char, char);
+        a.state.level = a.char.level;
+        a.state.maxHp = maxHp(a.char.level);
+        a.state.hp = Math.min(a.state.hp, a.state.maxHp);
+        this.equip(a, a.char.selected);
+      }
+      console.error(`[room ${this.roomId}] save failed, changes undone: ${(err as Error)?.message ?? err}`);
+      throw err;
+    }
   }
 
   createPile(owner: PlayerActor, items: InvItem[], coins: number, at: V3, deferred?: (() => void)[]): PileData {
@@ -774,15 +809,23 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     const items = [...victim.char.hotbar, ...victim.char.backpack].filter((x): x is InvItem => !!x);
     const events: (() => void)[] = [];
     let pile: PileData | null = null;
-    withTx(() => {
-      pile = (items.length || victim.char.coins) && !victim.identity.loadtest ? this.createPile(victim, items, victim.char.coins, actorPos(victim), events) : null;
-      victim.char.hotbar = [null, null, null, null];
-      victim.char.backpack = Array.from({ length: BACKPACK_SLOTS }, () => null);
-      victim.char.coins = 0;
-      victim.char.dead = true;
-      victim.char.deaths += 1;
-      this.saveActor(victim);
-    });
+    try {
+      this.persist([victim], () => {
+        pile = (items.length || victim.char.coins) && !victim.identity.loadtest ? this.createPile(victim, items, victim.char.coins, actorPos(victim), events) : null;
+        victim.char.hotbar = [null, null, null, null];
+        victim.char.backpack = Array.from({ length: BACKPACK_SLOTS }, () => null);
+        victim.char.coins = 0;
+        victim.char.dead = true;
+        victim.char.deaths += 1;
+        this.saveActor(victim);
+      });
+    } catch {
+      // The death couldn't be recorded (no pile, inventory still saved): drop this actor without
+      // saving and let the client rejoin from the last good save rather than lose or copy items.
+      hub.release(victim.identity.userId, victim);
+      this.retire(victim, CloseCode.WITH_ERROR, "server hiccup, rejoining");
+      return;
+    }
     for (const e of events) e();
     this.equip(victim, 0);
     const killerName = killer ? (killer.kind === "player" ? killer.identity.name : `npc:${killer.state.kind}`) : "the fall";

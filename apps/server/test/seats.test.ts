@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Client, type Room } from "@colyseus/sdk";
 import { PROTOCOL_VERSION } from "@firstlight/shared/net/protocol";
 import type { Game } from "../src/app.ts";
-import { Browser, play, startAuthServer, ticketFor, type AuthServer } from "./auth-helpers.ts";
+import { Browser, play, startAuthServer, type AuthServer } from "./auth-helpers.ts";
 import { grantTravel, joinAs, playRequest, safeLeave, startServer, waitFor } from "./helpers.ts";
 
 let game: Game | null = null;
@@ -124,4 +124,3 @@ describe("protocol version gate", () => {
   });
 });
 
-void ticketFor;

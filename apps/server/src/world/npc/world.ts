@@ -7,7 +7,6 @@ import type { NpcState } from "@firstlight/shared/net/schema";
 import type { BodyRoom } from "../BodyRoom.ts";
 import type { NpcActor, PlayerActor } from "../actors.ts";
 import type { CombatHost } from "../combat.ts";
-import { withTx } from "../characters.ts";
 import type { V3 } from "../geometry.ts";
 
 export interface NpcWorld {
@@ -53,7 +52,8 @@ export function roomWorld(room: BodyRoom): NpcWorld {
     createPile: (owner, items, coins, at, deferred) => {
       room.createPile(owner, items, coins, at, deferred);
     },
-    withTx: (fn) => withTx(fn),
+    // Rewards touch any player here: a failed save puts their characters back (F12 B6).
+    withTx: (fn) => room.persist([...room.host.players()], fn),
     snapToGround: (p) => room.snapToGround(p),
     send: (p, type, msg) => {
       if (room.actors.get(p.id) === p) p.client.send(type, msg);

@@ -1,0 +1,129 @@
+// Seam 1: a failed SQLite save must not leave the room's memory ahead of the database (F12 review
+// B6: a rolled-back pickup kept the item in the inventory while the pile still held it).
+
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { matchMaker } from "@colyseus/core";
+import type { Room } from "@colyseus/sdk";
+import { BODIES, padDirs } from "@firstlight/shared";
+import type { InvItem } from "@firstlight/shared/net/protocol";
+import type { Game } from "../src/app.ts";
+import { openGameDb, type Db } from "../src/db/index.ts";
+import type { BodyRoom } from "../src/world/BodyRoom.ts";
+import { characterRepo } from "../src/world/characters.ts";
+import { pileStore } from "../src/world/piles.ts";
+import { SqliteCharacterRepo, SqlitePileStore } from "../src/world/sqliteStores.ts";
+import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
+
+let game: Game;
+let dir: string;
+let db: Db;
+let failing = false;
+const rooms: Room[] = [];
+
+beforeEach(async () => {
+  game = await startServer();
+  dir = mkdtempSync(join(tmpdir(), "fl-rollback-"));
+  db = openGameDb(join(dir, "game.db"));
+  const repo = new SqliteCharacterRepo(db);
+  const save = repo.save.bind(repo);
+  repo.save = (userId, data) => {
+    if (failing) throw new Error("disk I/O error (test)");
+    save(userId, data);
+  };
+  characterRepo.current = repo;
+  pileStore.current = new SqlitePileStore(db);
+  failing = false;
+});
+afterEach(async () => {
+  failing = false;
+  for (const r of rooms.splice(0)) await safeLeave(r);
+  await game.close();
+  db.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+type V = [number, number, number];
+const st = (r: Room) => r.state as any;
+const me = (r: Room) => st(r).players.get(r.sessionId);
+const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
+const serverRoom = (r: Room) => matchMaker.getLocalRoomById(r.roomId) as unknown as BodyRoom;
+const actorOf = (r: Room) => serverRoom(r).actors.get(r.sessionId)!;
+const slots = (r: Room): (InvItem | null)[] => [...actorOf(r).char.hotbar, ...actorOf(r).char.backpack];
+const count = (r: Room, id: string) => slots(r).filter((s) => s?.id === id).reduce((n, s) => n + s!.qty, 0);
+
+function outside(metres = 40): V {
+  const R = BODIES.arcadia.radius;
+  const d = padDirs(BODIES.arcadia)[0]!;
+  const ref = Math.abs(d[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
+  const k = ref[0]! * d[0] + ref[1]! * d[1] + ref[2]! * d[2];
+  const t = [ref[0]! - k * d[0], ref[1]! - k * d[1], ref[2]! - k * d[2]];
+  const tl = Math.hypot(t[0]!, t[1]!, t[2]!);
+  const v = [d[0] + (t[0]! / tl) * (metres / R), d[1] + (t[1]! / tl) * (metres / R), d[2] + (t[2]! / tl) * (metres / R)];
+  const l = Math.hypot(v[0]!, v[1]!, v[2]!);
+  return [(v[0]! / l) * R, (v[1]! / l) * R, (v[2]! / l) * R];
+}
+
+/** An admin out of the safe ring with an axe in hotbar slot 1, saved to the database. */
+async function setup(name: string): Promise<Room> {
+  const r = await joinAs(game, name, "arcadia", {}, "admin");
+  rooms.push(r);
+  await waitFor(() => !!me(r));
+  const p = outside();
+  r.send("admin", { cmd: "teleport", args: { x: p[0], y: p[1], z: p[2] } });
+  r.send("admin", { cmd: "unprotect" });
+  r.send("admin", { cmd: "give", args: { id: "axe" } });
+  await waitFor(() => count(r, "axe") === 1 && Math.hypot(me(r).x - p[0], me(r).y - p[1], me(r).z - p[2]) < 2 && !(me(r).flags & 3));
+  serverRoom(r).saveActor(actorOf(r));
+  return r;
+}
+const axeSlot = (r: Room) => slots(r).findIndex((s) => s?.id === "axe");
+const pilesHere = () => pileStore.current.list("arcadia");
+
+describe("a failed save undoes the room's changes (F12 B6)", () => {
+  it("a pickup whose save fails leaves the item in the pile only; the retry moves exactly one", async () => {
+    const r = await setup("picker");
+    r.send("drop", { slot: axeSlot(r) });
+    await waitFor(() => pilesHere().length === 1 && count(r, "axe") === 0);
+    const pile = pilesHere()[0]!;
+    failing = true;
+    r.send("pickup", { pileId: pile.id });
+    await sleep(300);
+    expect(count(r, "axe")).toBe(0);
+    expect(pileStore.current.get(pile.id)?.items.map((i) => i.id)).toEqual(["axe"]);
+    failing = false;
+    await sleep(250); // inventory ops: 5/s
+    r.send("pickup", { pileId: pile.id });
+    await waitFor(() => count(r, "axe") === 1);
+    expect(pileStore.current.get(pile.id)).toBeUndefined();
+    expect(characterRepo.current.load("picker")!.hotbar.concat(characterRepo.current.load("picker")!.backpack).filter((s) => s?.id === "axe")).toHaveLength(1);
+  });
+
+  it("a drop whose save fails keeps the item in the inventory and makes no pile", async () => {
+    const r = await setup("dropper");
+    failing = true;
+    r.send("drop", { slot: axeSlot(r) });
+    await sleep(300);
+    expect(count(r, "axe")).toBe(1);
+    expect(pilesHere()).toHaveLength(0);
+  });
+
+  it("a death whose save fails loses nothing: the player is sent to rejoin from the last save", async () => {
+    const r = await setup("unlucky");
+    let code = 0;
+    r.onLeave((c) => (code = c));
+    failing = true;
+    r.send("admin", { cmd: "damage", args: { amount: 10_000 } });
+    await waitFor(() => code !== 0, 3000);
+    expect(code).toBe(4002); // CloseCode.WITH_ERROR: the client rejoins
+    expect(pilesHere()).toHaveLength(0);
+    failing = false;
+    const back = await joinAs(game, "unlucky", "arcadia", {}, "admin");
+    rooms.push(back);
+    await waitFor(() => !!me(back));
+    expect(me(back).hp).toBeGreaterThan(0);
+    expect(count(back, "axe")).toBe(1);
+  });
+});
