@@ -10,6 +10,7 @@ import { createAuthClient } from "better-auth/client";
 import { anonymousClient, emailOTPClient, jwtClient } from "better-auth/client/plugins";
 import type { Express } from "express";
 import { createGame, type Game } from "../src/app.ts";
+import { waitFor } from "./helpers.ts";
 import { createAccounts, type Accounts, type AccountsConfig } from "../src/auth/accounts.ts";
 import { devVerifier } from "../src/auth/identity.ts";
 import { ensureAccount, loadCharacter, saveCharacter } from "../src/db/index.ts";
@@ -166,9 +167,13 @@ export class Browser {
 
   /** Request a code and sign in with it (dev outbox). */
   async saveWithEmail(email: string, name?: string) {
+    const outbox = this.server.accounts.devOutbox!;
+    const before = outbox.sent;
     const sent = await this.sendCode(email);
     if (sent.error) throw new Error(`send failed: ${JSON.stringify(sent.error)}`);
-    const code = this.server.accounts.devOutbox!.lastCode(email);
+    // Without a session that may save, the code is delivered in the background.
+    await waitFor(() => outbox.sent > before).catch(() => {});
+    const code = outbox.lastCode(email);
     if (!code) throw new Error("no code in the dev outbox");
     const r = await this.signInWithCode(email, code, name);
     if (r.error) throw new Error(`sign-in failed: ${JSON.stringify(r.error)}`);

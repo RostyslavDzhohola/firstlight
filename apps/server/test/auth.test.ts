@@ -4,9 +4,24 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { Room } from "@colyseus/sdk";
 import { awardMedal, discoverPad, getAccount, loadCharacter, saveCharacter, type CharacterData } from "../src/db/index.ts";
 import { otpSendsToday } from "../src/db/otp-budget.ts";
+import { DevOutbox, type SendResult } from "../src/auth/mailer.ts";
+
 import type { AccountLinkedEvent } from "../src/auth/links.ts";
 import { api, Browser, decodeJwt, joinWithToken, play, startAuthServer, type AuthServer } from "./auth-helpers.ts";
 import { waitFor } from "./helpers.ts";
+
+/** Dev outbox with a switchable delay and failure (the helper reads codes from any DevOutbox). */
+class ControlledOutbox extends DevOutbox {
+  delayMs = 0;
+  fail = false;
+  attempts = 0;
+  override async sendOtp(email: string, otp: string): Promise<SendResult> {
+    this.attempts++;
+    if (this.delayMs) await new Promise((ok) => setTimeout(ok, this.delayMs));
+    if (this.fail) return { ok: false, error: "test_failure" };
+    return super.sendOtp(email, otp);
+  }
+}
 
 let server: AuthServer | null = null;
 const rooms: Room[] = [];
@@ -452,9 +467,51 @@ describe("who can ask for a code (F12: the global OTP budget can't be drained)",
     const freshGuest = new Browser(server, "198.51.100.64");
     await freshGuest.playToken(); // level 1
     expect((await ask(freshGuest, "back@example.test")).error).toBeNull();
-    expect(out.sent).toBe(3);
+    await waitFor(() => out.sent === 3); // public requests are delivered in the background
     const code = out.lastCode("back@example.test")!;
     expect((await freshGuest.signInWithCode("back@example.test", code)).error).toBeNull();
+  });
+
+  /** The raw HTTP answer to a public (no-session) code request. */
+  async function publicAsk(s: AuthServer, email: string) {
+    const b = new Browser(s, "198.51.100.66");
+    const t0 = performance.now();
+    const res = await b.fetch("/api/auth/email-otp/send-verification-otp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email, type: "sign-in" }) });
+    return { status: res.status, body: await res.text(), type: res.headers.get("content-type"), ms: performance.now() - t0 };
+  }
+
+  it("public answers are the same for unknown, saved, budget-exhausted and undeliverable addresses (no enumeration)", async () => {
+    const mailer = new ControlledOutbox();
+    server = await startAuthServer({ mailer });
+    const a = new Browser(server, "198.51.100.65");
+    await a.playToken();
+    await a.saveWithEmail("taken@example.test"); // 1 of the 3 hourly codes for this address
+    const b = new Browser(server, "198.51.100.67");
+    await b.playToken();
+    await b.saveWithEmail("broken@example.test");
+    const unknown = await publicAsk(server, "nobody@example.test");
+    expect(unknown).toMatchObject({ status: 200 });
+    for (let i = 0; i < 4; i++) expect(await publicAsk(server, "taken@example.test")).toMatchObject({ status: unknown.status, body: unknown.body, type: unknown.type });
+    await waitFor(() => mailer.sent === 4); // 2 more codes went out; the 4th public ask hit the hourly cap silently
+    mailer.fail = true;
+    expect(await publicAsk(server, "broken@example.test")).toMatchObject({ status: unknown.status, body: unknown.body, type: unknown.type });
+    await waitFor(() => mailer.attempts === 5);
+    expect(mailer.lastCode("nobody@example.test")).toBeNull();
+  });
+
+  it("public requests don't wait for the mailer", async () => {
+    const mailer = new ControlledOutbox();
+    server = await startAuthServer({ mailer });
+    const a = new Browser(server, "198.51.100.68");
+    await a.playToken();
+    await a.saveWithEmail("slow@example.test");
+    mailer.delayMs = 3000;
+    const before = mailer.sent;
+    const r = await publicAsk(server, "slow@example.test");
+    expect(r.status).toBe(200);
+    expect(r.ms).toBeLessThan(1500);
+    expect(mailer.sent).toBe(before);
+    await waitFor(() => mailer.sent === before + 1, 8000);
   });
 });
 

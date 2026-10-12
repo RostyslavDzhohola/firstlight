@@ -101,6 +101,9 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
   if (cfg.mailer instanceof DevOutbox) devOutbox = cfg.mailer;
 
   const hashIp = (ip: string) => hmacHex(`${cfg.secret}:ip`, banKey(ip)).slice(0, 32);
+  let authRef: FirstlightAuth | null = null;
+  let closed = false;
+  let otpQueue: Promise<void> = Promise.resolve();
   // Prepared on first use: Better Auth's tables exist only after the migrations below.
   let savedEmailStmt: Database.Statement | null = null;
   const savedEmail = (email: string) => {
@@ -116,7 +119,22 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
     trustedOrigins: cfg.trustedOrigins,
     rateLimit: cfg.rateLimit ?? cfg.production,
     ipBanned: (ip) => isIpBanned(db, hashIp(ip)),
-    mayEmailCode: (email, userId) => savedEmail(email) || (!!userId && bestLevel(db, userId) >= OTP_MIN_LEVEL),
+    savedEmail: (email) => savedEmail(email),
+    maySave: (userId) => bestLevel(db, userId) >= OTP_MIN_LEVEL,
+    queueOtp: (email) => {
+      // One at a time, after this response is on its way; failures are logged by sendOtp/reserveOtp.
+      otpQueue = otpQueue
+        .then(() => new Promise<void>((ok) => setImmediate(ok)))
+        .then(() => {
+          if (!authRef || closed) return;
+          const api = authRef.api;
+          return authRequestState.run({ otpQueued: true }, () => api.sendVerificationOTP({ body: { email, type: "sign-in" } }));
+        })
+        .then(
+          () => {},
+          () => {},
+        );
+    },
     reserveOtp: (email) => {
       const r = reserveOtpSend(db, hashEmail(email), { perEmailPerHour: cfg.otpPerEmailPerHour, perDay: cfg.otpDailyBudget });
       if (!r.ok) console.warn(`otp send refused: ${r.reason} budget`);
@@ -142,6 +160,7 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
   const { runMigrations } = await getMigrations(options);
   await runMigrations();
   const auth = buildAuth(options);
+  authRef = auth;
   // Settle Better Auth's startup schema check now (it would otherwise run in the background).
   const authCtx = await auth.$context;
   await authCtx.checkSchema?.();
@@ -244,6 +263,7 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
       mountAccountRoutes(app, accounts, cfg);
     },
     close() {
+      closed = true;
       clearInterval(pruneTimer);
       setGameDb(null);
       try {
