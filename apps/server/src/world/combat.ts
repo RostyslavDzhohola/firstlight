@@ -409,6 +409,8 @@ function chain(host: CombatHost, p: PlayerActor, o: V3, d: V3, def: WeaponDef, t
   }
   if (!first && propIdx >= 0) host.props!.damage(propIdx, tier.damage * lvl, def.destroys, def.id, d, p.id);
   const end: V3 = first ? actorPos(first) : [o[0] + d[0] * Math.min(def.range, terrainT), o[1] + d[1] * Math.min(def.range, terrainT), o[2] + d[2] * Math.min(def.range, terrainT)];
+  // Where the bolt ends on something, report it like hitscan does (boss-arena cover listens).
+  if (!first && terrainT < def.range) host.onPropHit?.(end, def.destroys === "heavy" ? "heavy" : "light", tier.damage * lvl);
   host.broadcastNear("shot", { by: p.id, weapon: WEAPON_INDEX.get(def.id), ox: o[0], oy: o[1], oz: o[2], dx: d[0], dy: d[1], dz: d[2], hit: end, chain: points }, o, 160);
 }
 
@@ -482,7 +484,7 @@ export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | 
     target.logoutEndsAt = null; // damage cancels logout
     if (attacker) target.lastDamagedBy = attacker.id;
   } else {
-    dmg = target.mitigate ? target.mitigate(dmg, weak, fromDir) : dmg * (target.armour ?? 1);
+    dmg = target.mitigate ? target.mitigate(dmg, weak, fromDir, attacker) : dmg * (target.armour ?? 1);
     if (dmg <= 0) return false;
   }
   dmg = Math.max(1, Math.round(dmg));

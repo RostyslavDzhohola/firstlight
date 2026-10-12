@@ -147,6 +147,17 @@ export const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (user_id, stat)
   );
   `,
+  // 3: per-copy world state that outlives a room (boss timers and fights, cleared spawn groups,
+  // broken props). Self-contained and idempotent, so it can be renumbered when lanes merge.
+  `
+  CREATE TABLE IF NOT EXISTS copy_state (
+    copy_key    TEXT NOT NULL,
+    system      TEXT NOT NULL,
+    state_json  TEXT NOT NULL,
+    saved_at    INTEGER NOT NULL,
+    PRIMARY KEY (copy_key, system)
+  );
+  `,
 ];
 
 /** Apply every migration newer than the database's user_version, each in its own transaction. */

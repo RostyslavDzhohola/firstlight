@@ -25,7 +25,7 @@ export interface FakeWorld {
   step(ms?: number): number;
 }
 
-export function fakeWorld(body: BodyId, opts: { immortal?: boolean; start?: number } = {}): FakeWorld {
+export function fakeWorld(body: BodyId, opts: { immortal?: boolean; start?: number; copyKey?: string } = {}): FakeWorld {
   const terrain = createTerrain(body);
   const clock = { t: opts.start ?? 1_000_000 };
   const players = new Map<string, PlayerActor>();
@@ -58,6 +58,7 @@ export function fakeWorld(body: BodyId, opts: { immortal?: boolean; start?: numb
     body: BODIES[body],
     terrain,
     host,
+    ...(opts.copyKey ? { copyKey: opts.copyKey } : {}),
     now: () => clock.t,
     players: () => players.values(),
     connected: () => players.values(),
