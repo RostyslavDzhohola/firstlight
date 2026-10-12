@@ -110,6 +110,25 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     }
   });
 
+  // Load-test and admin metrics: per-room tick time and process usage. Guarded by the load-test secret.
+  app.get("/api/metrics", async (req, res) => {
+    const secret = process.env.LOADTEST_SECRET;
+    if (!secret || req.headers["x-loadtest-secret"] !== secret) {
+      res.status(403).json({ error: "forbidden" });
+      return;
+    }
+    const rooms = await matchMaker.query({ name: "body" });
+    const stats = rooms.map((r) => {
+      const room = matchMaker.getLocalRoomById(r.roomId) as BodyRoom | undefined;
+      const t = [...(room?.tickTimes ?? [])].sort((a, b) => a - b);
+      const q = (p: number) => (t.length ? +t[Math.min(t.length - 1, Math.floor(t.length * p))]!.toFixed(2) : 0);
+      return { roomId: r.roomId, metadata: r.metadata, clients: r.clients, tickP50: q(0.5), tickP95: q(0.95), tickMax: q(1) };
+    });
+    const mem = process.memoryUsage();
+    const cpu = process.cpuUsage();
+    res.json({ rooms: stats, rssMB: Math.round(mem.rss / 1048576), heapMB: Math.round(mem.heapUsed / 1048576), cpuUserS: cpu.user / 1e6, cpuSystemS: cpu.system / 1e6, uptimeS: process.uptime() });
+  });
+
   opts.mountAfterJson?.(app);
 
   const transport = new WebSocketTransport({ server: httpServer, maxPayload: 16 * 1024 });

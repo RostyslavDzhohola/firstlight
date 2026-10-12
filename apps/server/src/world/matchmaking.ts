@@ -84,7 +84,7 @@ export async function play(identity: Identity, input: PlayInput, limits: Matchma
     }
     if (!target) {
       target = mine.find((r) =>
-        !r.locked && (partySize > 1 ? r.clients + partySize <= limits.maxClients : r.clients < limits.soloFillLimit),
+        !r.locked && (partySize > 1 || loadtest ? r.clients + partySize <= limits.maxClients : r.clients < limits.soloFillLimit),
       );
     }
     if (!target) {

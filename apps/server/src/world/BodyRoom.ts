@@ -658,7 +658,17 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
   // ---------------------------------------------------------------- tick
 
+  /** Recent tick durations (ms) for /api/metrics. */
+  readonly tickTimes: number[] = [];
+
   tick(dtMs: number) {
+    const t0 = performance.now();
+    this.tickBody(dtMs);
+    this.tickTimes.push(performance.now() - t0);
+    if (this.tickTimes.length > 400) this.tickTimes.shift();
+  }
+
+  private tickBody(dtMs: number) {
     const now = Date.now();
     const dt = dtMs / 1000;
     this.state.time = now;
