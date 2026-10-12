@@ -30,6 +30,20 @@ export function isMelee(a: AttackDef): boolean {
   return a.shape === "arc" || a.shape === "ring" || a.shape === "leap" || a.shape === "charge" || a.shape === "line";
 }
 
+/** Vertical tolerance of this NPC's melee shapes (bosses reach higher). */
+export function meleeHeightTol(n: Npc): number {
+  return n.boss ? 5 : HEIGHT_TOL;
+}
+
+/**
+ * Does this attack only hit players near the ground: melee shapes (within the NPC's height
+ * tolerance), and lobbed circles and fields (on the ground under the target, HEIGHT_TOL)? Bolts,
+ * rounds, zaps, tags and boss specials reach a player standing on a pillar or wall top.
+ */
+export function groundOnly(a: AttackDef): boolean {
+  return isMelee(a) || a.shape === "circle" || a.shape === "field";
+}
+
 /** Telegraph language (content §3.1): 0 red = dodge, 1 amber = ranged lock, 2 teal = step out, 3 white = launch, 4 violet = curse. */
 export function colourOf(a: AttackDef): number {
   switch (a.shape) {
@@ -301,7 +315,7 @@ function resolve(sys: NpcSystem, n: Npc, at: ActiveAttack, now: number) {
   sys.setAnim(n, NPC_ANIM.STRIKE);
   switch (a.shape) {
     case "arc": {
-      hitAll(sys, n, playersInArc(sys, n.pos, at.dir, a.radius ?? 2, a.angle ?? 90, n.boss ? 5 : HEIGHT_TOL), a, at);
+      hitAll(sys, n, playersInArc(sys, n.pos, at.dir, a.radius ?? 2, a.angle ?? 90, meleeHeightTol(n)), a, at);
       if (a.ticks && a.ticks > 1) {
         at.ticksLeft = a.ticks - 1;
         at.nextTickAt = now + (a.interval ?? 0.5) * 1000;
@@ -310,7 +324,7 @@ function resolve(sys: NpcSystem, n: Npc, at: ActiveAttack, now: number) {
       break;
     }
     case "ring":
-      hitAll(sys, n, playersInCircle(sys, at.origin, a.radius ?? 3, a.inner ?? 0, n.boss ? 5 : HEIGHT_TOL), a, at, at.origin);
+      hitAll(sys, n, playersInCircle(sys, at.origin, a.radius ?? 3, a.inner ?? 0, meleeHeightTol(n)), a, at, at.origin);
       break;
     case "circle":
       for (const c of at.points) hitAll(sys, n, playersInCircle(sys, c, a.radius ?? 3), a, at, n.pos, chest(c, 0.3));
@@ -319,7 +333,7 @@ function resolve(sys: NpcSystem, n: Npc, at: ActiveAttack, now: number) {
       for (const c of at.points) for (const lp of playersInCircle(sys, c, a.radius ?? 4)) if (a.effect) sys.applyEffect(lp.a, a.effect, n);
       break;
     case "line":
-      hitAll(sys, n, playersInLine(sys, at.origin, at.dir, a.length ?? 6, a.width ?? 2, n.boss ? 5 : HEIGHT_TOL), a, at);
+      hitAll(sys, n, playersInLine(sys, at.origin, at.dir, a.length ?? 6, a.width ?? 2, meleeHeightTol(n)), a, at);
       break;
     case "leap": {
       const land = at.points[0];
@@ -435,7 +449,7 @@ function runActive(sys: NpcSystem, n: Npc, at: ActiveAttack, now: number, dt: nu
       if (at.ticksLeft > 0 && now >= at.nextTickAt) {
         at.ticksLeft--;
         at.nextTickAt += (a.interval ?? 0.5) * 1000;
-        hitAll(sys, n, playersInArc(sys, n.pos, at.dir, a.radius ?? 2, a.angle ?? 90, n.boss ? 5 : HEIGHT_TOL), a, at);
+        hitAll(sys, n, playersInArc(sys, n.pos, at.dir, a.radius ?? 2, a.angle ?? 90, meleeHeightTol(n)), a, at);
       }
       if (at.repeatAt > 0 && now >= at.repeatAt && at.repeatDir) {
         at.repeatAt = 0;

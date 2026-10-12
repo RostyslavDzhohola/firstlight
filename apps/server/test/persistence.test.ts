@@ -320,6 +320,36 @@ describe("OTP send budget", () => {
     // Only today's counter is kept per account.
     expect((db.prepare("SELECT COUNT(*) AS n FROM account_stat WHERE user_id = ?").get("acct") as { n: number }).n).toBe(1);
   });
+
+  it("public sends get a share of the day and a cap per client IP; saving keeps the rest (F12 confirmation Opus SF2)", () => {
+    const lim = { perEmailPerHour: 3, perDay: 10, publicPerDay: 6, publicPerIpPerDay: 2 };
+    const t = 70 * 86_400_000;
+    const pub = (email: string, ip: string, at: number) => reserveOtpSend(db, email, lim, at, null, ip);
+    expect(pub("p1", "ipA", t).ok).toBe(true);
+    const second = pub("p2", "ipA", t + 1);
+    expect(second.ok).toBe(true);
+    expect(pub("p3", "ipA", t + 2)).toEqual({ ok: false, reason: "ip" });
+    expect(pub("p3", "ipB", t + 3).ok).toBe(true); // other IPs are unaffected
+    expect(pub("p4", "ipB", t + 4).ok).toBe(true);
+    expect(pub("p5", "ipC", t + 5).ok).toBe(true);
+    expect(pub("p6", "ipC", t + 6).ok).toBe(true);
+    expect(pub("p7", "ipD", t + 7)).toEqual({ ok: false, reason: "public" }); // 6 public sends today
+    // Saving sends use the rest of the day.
+    for (let i = 0; i < 4; i++) expect(reserveOtpSend(db, `s${i}`, lim, t + 10 + i, "acct").ok).toBe(true);
+    expect(reserveOtpSend(db, "s4", lim, t + 20, "acct")).toEqual({ ok: false, reason: "global" });
+    // A released public send gives back its IP's and the public share's slot.
+    if (second.ok) releaseOtpSend(db, second.id);
+    expect(reserveOtpSend(db, "s4", lim, t + 21, "acct").ok).toBe(true);
+    expect(pub("p8", "ipA", t + 86_400_000).ok).toBe(true); // next UTC day
+  });
+
+  it("a public address's hourly cap counts across IPs and stays apart from the saving cap", () => {
+    const lim = { perEmailPerHour: 3, perDay: 100, publicPerDay: 60, publicPerIpPerDay: 5 };
+    const t = 80 * 86_400_000;
+    for (let i = 0; i < 3; i++) expect(reserveOtpSend(db, "same", lim, t + i, null, `ip${i}`).ok).toBe(true);
+    expect(reserveOtpSend(db, "same", lim, t + 3, null, "ip9")).toEqual({ ok: false, reason: "email" });
+    expect(reserveOtpSend(db, "same", lim, t + 4, "acct").ok).toBe(true); // a saving send keys its own count
+  });
 });
 
 describe("display-name filter", () => {

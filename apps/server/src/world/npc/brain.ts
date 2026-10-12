@@ -8,7 +8,7 @@ import { NF, NPC_ANIM, NPC_INDEX, NPC_RULES } from "@firstlight/shared/content/n
 import { PF } from "@firstlight/shared/net/schema";
 import { actorPos, type PlayerActor } from "../actors.ts";
 import type { V3 } from "../geometry.ts";
-import { cancelAttack, canSee, chest, isMelee, startAttack, updateAttack } from "./attacks.ts";
+import { cancelAttack, canSee, chest, groundOnly, isMelee, meleeHeightTol, startAttack, updateAttack } from "./attacks.ts";
 import type { NpcSystem } from "./NpcSystem.ts";
 import { MODE, type Npc } from "./npc.ts";
 import { feetHeight, nearSafeRing, step } from "./steer.ts";
@@ -264,16 +264,28 @@ function chase(sys: NpcSystem, n: Npc, now: number, dt: number) {
 }
 
 /**
- * The target stands where this NPC can't follow — inside a pad's safe ring (plus the NPC's margin)
- * or outside its medium — and no attack reaches it from here: ranged ones, or melee that strikes
- * from where the NPC stands (arc, ring, line). Charges and leaps would have to move into the
- * no-go zone; when one of them does connect, hitPlayer clears the timer (contact).
+ * The target stands where this NPC can't follow — inside a pad's safe ring (plus the NPC's margin),
+ * outside its medium, or perched higher above anywhere it could stand under the target than its
+ * melee reaches (a pillar or wall top, with no attack that flies; F12 confirmation Opus SF1) — and
+ * no attack reaches it from here: ranged ones, melee that strikes from where the NPC stands (arc,
+ * ring, line) within its height tolerance, ground circles under a target near the ground. Charges and
+ * leaps would have to move into the no-go zone; when one of them does connect, hitPlayer clears the
+ * timer (contact).
  */
 function outOfReach(sys: NpcSystem, n: Npc, tp: V3, d: number): boolean {
-  for (const a of n.def.attacks) if (d <= a.range && a.shape !== "charge" && a.shape !== "leap") return false;
-  if (nearSafeRing(sys.ground, tp[0], tp[1], tp[2], NPC_RULES.safeMargin + n.radius)) return true;
   const l = len(tp);
-  return feetHeight(sys.ground, tp[0] / l, tp[1] / l, tp[2] / l, n.def.locomotion, n.def.hover ?? 0) === null;
+  const tol = meleeHeightTol(n);
+  const under = feetHeight(sys.ground, tp[0] / l, tp[1] / l, tp[2] / l, n.def.locomotion, n.def.hover ?? 0);
+  const perch = under === null ? 0 : l - (sys.ground.R + under);
+  for (const a of n.def.attacks) {
+    if (d > a.range || a.shape === "charge" || a.shape === "leap") continue;
+    if (isMelee(a) && Math.abs(l - len(n.pos)) > tol) continue; // swings under (or over) the target
+    if (groundOnly(a) && !isMelee(a) && perch > tol) continue; // lands on the ground under it
+    return false;
+  }
+  if (nearSafeRing(sys.ground, tp[0], tp[1], tp[2], NPC_RULES.safeMargin + n.radius)) return true;
+  if (under === null) return true;
+  return perch > tol && n.def.attacks.every(groundOnly);
 }
 
 function meleeReach(n: Npc): number {

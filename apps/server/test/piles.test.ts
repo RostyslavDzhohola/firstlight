@@ -106,3 +106,27 @@ describe("load-test bots leave no piles in the public world (F12 final Opus SF4)
     }
   });
 });
+
+describe("load-test bots can't see or take real players' piles (F12 confirmation, Opus nit)", () => {
+  it("a load-test copy lists no piles, and its bots' pickups leave real piles alone", async () => {
+    const game = await startServer();
+    const listed = pileStore.current.add({ ...pile(Date.now()), x: 0, y: 0, z: 0 }).pile;
+    const r = await joinAs(game, "ltbot2", "arcadia", { loadtest: true }, "loadtest");
+    try {
+      await waitFor(() => !!(r.state as any).players?.get(r.sessionId));
+      const room = matchMaker.getLocalRoomById(r.roomId) as unknown as BodyRoom;
+      const a = room.actors.get(r.sessionId)!;
+      expect((room.state as any).piles.size).toBe(0);
+      const [x, y, z] = actorPos(a);
+      const underfoot = pileStore.current.add({ ...pile(Date.now()), x, y, z }).pile;
+      room.pickup(a, underfoot.id);
+      await new Promise((ok) => setTimeout(ok, 100));
+      expect(pileStore.current.get(underfoot.id)?.items).toEqual([item]);
+      expect(pileStore.current.get(listed.id)).toBeDefined();
+      expect(a.char.hotbar.concat(a.char.backpack).filter(Boolean)).not.toContainEqual(item);
+    } finally {
+      await safeLeave(r);
+      await game.close();
+    }
+  });
+});
