@@ -753,19 +753,19 @@ def unit7(ctx):
     for s, side in ((1, "l"), (-1, "r")):
         def keep_ua(c, n, doms, side=side):
             return all(d == f"upperarm_{side}" for d in doms) and 0.26 < abs(c.x) < 0.42 and c.z > B.head(f"upperarm_{side}").z - 0.02
-        objs.append(shell(ctx, f"ua_{side}", keep_ua, 0.02, tile_plate, None, thick=0.01))
+        objs.append(shell(ctx, f"ua_{side}", keep_ua, 0.026, tile_plate, None, thick=0.01, smooth=4))
 
         def keep_fa(c, n, doms, side=side):
             return all(d == f"lowerarm_{side}" for d in doms) and 0.53 < abs(c.x) < 0.7
-        objs.append(shell(ctx, f"fa_{side}", keep_fa, 0.022, tile_plate, None, thick=0.012))
+        objs.append(shell(ctx, f"fa_{side}", keep_fa, 0.028, tile_plate, None, thick=0.012, smooth=4))
 
         def keep_th(c, n, doms, side=side):
-            return all(d == f"thigh_{side}" for d in doms) and 0.6 < c.z < 0.86 and (n.y < 0.2)
-        objs.append(shell(ctx, f"th_{side}", keep_th, 0.022, tile_plate, None, thick=0.012))
+            return all(d == f"thigh_{side}" for d in doms) and 0.6 < c.z < 0.86 and c.y < 0.0 and s * c.x > 0.02
+        objs.append(shell(ctx, f"th_{side}", keep_th, 0.03, tile_plate, None, thick=0.012, smooth=3))
 
         def keep_sh(c, n, doms, side=side):
-            return all(d == f"calf_{side}" for d in doms) and 0.16 < c.z < 0.47 and n.y < 0.25
-        objs.append(shell(ctx, f"sh_{side}", keep_sh, 0.02, tile_plate, None, thick=0.012))
+            return all(d == f"calf_{side}" for d in doms) and 0.2 < c.z < 0.47 and c.y < 0.02
+        objs.append(shell(ctx, f"sh_{side}", keep_sh, 0.026, tile_plate, None, thick=0.012, smooth=3))
 
 
         # knee cap

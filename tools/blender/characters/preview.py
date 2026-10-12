@@ -97,12 +97,15 @@ def main():
     ap.add_argument("--view", default="front")
     ap.add_argument("--only", default="")
     ap.add_argument("--res", type=int, default=1100)
+    ap.add_argument("--sweep", default="", help="one starter in all 6 palettes")
     a = ap.parse_args(argv)
     bpy.ops.wm.read_factory_settings(use_empty=True)
     sc = bpy.context.scene
     atlas = bpy.data.images.load(os.path.join(a.dir, "starters_atlas.png"))
     names = [n for n in ORDER if not a.only or n in a.only.split(",")]
     pals = [int(x) for x in a.palettes.split(",")] if a.palettes else [DEFAULT_PAL[n] for n in names]
+    if a.sweep:
+        names, pals = [a.sweep] * 6, list(range(6))
     clip_action = None
     if a.anims:
         before = set(bpy.data.objects)

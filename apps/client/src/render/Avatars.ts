@@ -117,6 +117,11 @@ const _d = new THREE.Vector3();
 
 type Lod = "full" | "mid" | "far";
 
+/** The avatar stands on the analytic ground height, but the rendered terrain is a triangulated mesh
+ *  and feet are spread on slopes: sink the model a few cm so feet read as planted (Kappa's bare feet
+ *  already sit 2 cm low). */
+const FOOT_SINK = [0.035, 0.035, 0.015, 0.035] as const;
+
 export class AvatarView {
   /** Every live avatar (for the LOD pass). */
   static readonly all = new Set<AvatarView>();
@@ -149,6 +154,7 @@ export class AvatarView {
   private midTimer = 0;
   private disposed = false;
   private debugClip: string | null = null;
+  private manualDetail = false;
 
   constructor(palette = 0, starter = 0) {
     this.palette = palette;
@@ -306,8 +312,20 @@ export class AvatarView {
       const dist = Math.sqrt(d);
       const tier: Lod = a === keep || (rank < maxFull && dist < 90) ? "full" : rank < maxFull * 2 && dist < 70 ? "mid" : "far";
       if (a !== keep) rank++;
-      a.setLod(tier);
+      if (!a.manualDetail) a.setLod(tier);
     }
+  }
+
+  /** Explicit detail control (render tiers): true = full (every-frame animation, shadows), false =
+   *  reduced (12 Hz animation, no shadows). Once called, the automatic LOD pass leaves this avatar
+   *  alone; call clearDetail() to hand it back. */
+  setDetail(full: boolean) {
+    this.manualDetail = true;
+    this.setLod(full ? "full" : "mid");
+  }
+
+  clearDetail() {
+    this.manualDetail = false;
   }
 
   private setLod(tier: Lod) {
@@ -344,6 +362,7 @@ export class AvatarView {
         mesh = m;
       }
     });
+    this.holder.position.y = -(FOOT_SINK[this.starter % FOOT_SINK.length] ?? 0.03);
     this.model = model;
     this.mesh = mesh;
     this.makeSockets(model);
