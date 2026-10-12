@@ -9,6 +9,7 @@ import { npcSystemFactory } from "./npc/index.ts";
 import { createQuestSystem } from "./quests/QuestSystem.ts";
 import { createVoiceSystem } from "./voice/index.ts";
 import { createSkySystem } from "./SkySystem.ts";
+import { createOnboardingSystem } from "./onboarding.ts";
 
 export interface RoomSystem {
   /** Called every simulation tick (50 ms). */
@@ -32,3 +33,5 @@ export const SYSTEM_FACTORIES: SystemFactory[] = [npcSystemFactory, createVoiceS
 SYSTEM_FACTORIES.push(createDestructionSystem);
 // Weather + day/night lane: per-copy sky clock and weather schedule.
 SYSTEM_FACTORIES.push(createSkySystem);
+// Onboarding (Portus): training dummies, 50 XP and the Spark medal once per account.
+SYSTEM_FACTORIES.push(createOnboardingSystem);

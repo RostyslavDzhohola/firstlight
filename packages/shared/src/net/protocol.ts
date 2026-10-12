@@ -101,6 +101,10 @@ export type ClientMessages = {
   mission: { action: "accept" | "abandon"; id: string };
   title: { medalId: string | null };
   ping: { t: number };
+  /** Onboarding: an attack aimed at the training dummies in Portus (camera ray; the server tests the hit). */
+  train: { ox: number; oy: number; oz: number; dx: number; dy: number; dz: number };
+  /** Onboarding: skip it (no more XP, no Spark medal; it never comes back). */
+  onboarding: { action: "skip" };
 };
 
 // ---- Server → client events (broadcast or direct) -------------------------------------------
@@ -133,6 +137,10 @@ export type ServerMessages = {
   stage: { n: number; body: BodyId };
   /** Open a client panel (keypad for the E7 safe). */
   prompt: { kind: "keypad"; target: string };
+  /** Onboarding: a training dummy took a hit (`down` once it has ONBOARDING.HITS_PER_DUMMY). */
+  train: { dummy: number; hits: number; down: boolean };
+  /** Onboarding finished: `xp` paid in total (50 when done, less when skipped). */
+  onboarding: { state: "done" | "skipped"; xp: number };
 };
 
 /** Private per-player state sent only to its owner. */
@@ -151,6 +159,8 @@ export interface YouState {
   worn?: Partial<Record<CosmeticSlot, string>>;
   logoutEndsAt: number | null;
   protectedUntil: number;
+  /** Onboarding in progress (Portus only): hits on each training dummy. Absent once done or skipped. */
+  onboarding?: { hits: number[] };
 }
 
 export interface InvItem {
