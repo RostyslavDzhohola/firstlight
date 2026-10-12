@@ -1,8 +1,11 @@
 // Extension point: per-room systems (enemy AI, bosses, missions, destruction, voice…) that tick
 // with the room. Each lane adds its factory to SYSTEM_FACTORIES; the room creates them on start.
 
+import type { YouState } from "@firstlight/shared/net/protocol";
+import type { PlayerActor } from "./actors.ts";
 import type { BodyRoom } from "./BodyRoom.ts";
 import { npcSystemFactory } from "./npc/index.ts";
+import { createQuestSystem } from "./quests/QuestSystem.ts";
 import { createVoiceSystem } from "./voice/index.ts";
 
 export interface RoomSystem {
@@ -11,6 +14,10 @@ export interface RoomSystem {
   /** Optional: a player joined/left (sessionId). */
   onPlayerJoin?(sessionId: string): void;
   onPlayerLeave?(sessionId: string): void;
+  /** Optional: fill system-owned fields of the private `you` message before it is sent. */
+  decorateYou?(actor: PlayerActor, you: YouState): void;
+  /** Optional: handle an admin command the room doesn't know. Return true if handled. */
+  onAdmin?(actor: PlayerActor, cmd: string, args: Record<string, unknown>): boolean;
   /** Optional: return false to refuse a dropped client's reconnection (kicked or banned players). */
   canReconnect?(sessionId: string): boolean;
   dispose?(): void;
@@ -18,4 +25,4 @@ export interface RoomSystem {
 
 export type SystemFactory = (room: BodyRoom) => RoomSystem | null;
 
-export const SYSTEM_FACTORIES: SystemFactory[] = [npcSystemFactory, createVoiceSystem];
+export const SYSTEM_FACTORIES: SystemFactory[] = [npcSystemFactory, createVoiceSystem, createQuestSystem];

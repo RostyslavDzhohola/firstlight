@@ -1,8 +1,8 @@
 // Guest → saved account (SPEC §5.4.2). Better Auth gives the saved account a new user id, so every
 // game.db row moves from the guest id to the new id in one idempotent transaction. If the target
 // already has data (signing in on a second browser that was playing as a guest), the merge rule is:
-// keep the higher-level live character (ties: more XP, then the account's), union medals, blocks
-// and discovered pads; Hall of Firsts entries, piles, reports, bans and session history follow the player.
+// keep the higher-level live character (ties: more XP, then the account's), union medals, blocks,
+// discovered pads and account stats (summed); Hall of Firsts entries, piles, reports, bans and session history follow the player.
 
 import { getAccount } from "./accounts.ts";
 import { loadCharacter } from "./characters.ts";
@@ -77,6 +77,12 @@ export function linkAccounts(db: Db, fromUserId: string, toUserId: string, now =
     stmt(db, "DELETE FROM discovered_pad WHERE user_id = ?").run(fromUserId);
     stmt(db, "INSERT OR IGNORE INTO medal (user_id, medal_id, earned_at) SELECT ?, medal_id, earned_at FROM medal WHERE user_id = ?").run(toUserId, fromUserId);
     stmt(db, "DELETE FROM medal WHERE user_id = ?").run(fromUserId);
+    stmt(
+      db,
+      `INSERT INTO account_stat (user_id, stat, value) SELECT ?, stat, value FROM account_stat WHERE user_id = ?
+       ON CONFLICT(user_id, stat) DO UPDATE SET value = account_stat.value + excluded.value`,
+    ).run(toUserId, fromUserId);
+    stmt(db, "DELETE FROM account_stat WHERE user_id = ?").run(fromUserId);
     stmt(db, "INSERT OR IGNORE INTO block (user_id, blocked_user_id, created_at) SELECT ?, blocked_user_id, created_at FROM block WHERE user_id = ?").run(toUserId, fromUserId);
     stmt(db, "DELETE FROM block WHERE user_id = ?").run(fromUserId);
     stmt(db, "INSERT OR IGNORE INTO block (user_id, blocked_user_id, created_at) SELECT user_id, ?, created_at FROM block WHERE blocked_user_id = ?").run(toUserId, fromUserId);

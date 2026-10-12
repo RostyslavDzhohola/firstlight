@@ -3,6 +3,7 @@
 
 import "./hud.css";
 import { STARTERS, PALETTE_NAMES, WEAPON_BY_ID } from "@firstlight/shared/content/weapons";
+import { itemName } from "@firstlight/shared/content/items";
 import type { InvItem, YouState } from "@firstlight/shared/net/protocol";
 import { config } from "../config.ts";
 
@@ -72,7 +73,7 @@ export class Hud {
     }
     const def = WEAPON_BY_ID.get(it.id);
     const tier = def?.tiers[it.tier - 1];
-    n.innerHTML = `${def?.name ?? it.id} <span class="t">${TIERS[it.tier]}</span>`;
+    n.innerHTML = `${itemName(it)} <span class="t">${def && !it.skin ? TIERS[it.tier] : ""}</span>`;
     const parts: string[] = [];
     if (tier?.mag !== undefined) parts.push(`${it.mag ?? tier.mag}/${tier.mag}`);
     if ((def?.stack ?? 1) > 1) parts.push(`×${it.qty}`);

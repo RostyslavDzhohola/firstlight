@@ -7,12 +7,14 @@ import { chainVerifiers, devVerifier } from "../src/auth/identity.ts";
 import { characterRepo, MemoryCharacterRepo } from "../src/world/characters.ts";
 import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
 import { MemoryPileStore, pileStore } from "../src/world/piles.ts";
+import { MemoryProgressStore, progressStore } from "../src/world/quests/store.ts";
 import { hub } from "../src/world/hub.ts";
 import type { BodyId } from "@firstlight/shared";
 
 export async function startServer(limits: Partial<{ maxClients: number; soloFillLimit: number; maxCopiesPerBody: number; globalCap: number }> = {}): Promise<Game> {
   characterRepo.current = new MemoryCharacterRepo();
   pileStore.current = new MemoryPileStore();
+  progressStore.current = new MemoryProgressStore();
   // Quiet worlds by default: tests that need ambient enemies or bosses opt in via NPC_TUNING.
   resetTuning();
   NPC_TUNING.ambient = false;

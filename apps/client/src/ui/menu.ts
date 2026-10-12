@@ -9,7 +9,8 @@ import { openVoicePanel } from "../voice/index.ts";
 
 const CONTROLS = [
   ["WASD", "move"], ["Mouse", "aim"], ["Left click", "attack"], ["Right click", "aim / block / charge"],
-  ["Shift", "sprint"], ["Space", "jump"], ["C", "dodge"], ["R", "reload"], ["1–4", "weapons"], ["E", "pick up"],
+  ["Shift", "sprint"], ["Space", "jump"], ["C", "dodge"], ["R", "reload"], ["1–4", "weapons"], ["E", "pick up / talk / use"],
+  ["M", "map and fast travel"], ["J", "journal: missions, medals, wardrobe"],
   ["G (hold)", "phrase wheel"], ["V", "push to talk"], ["B", "radio"], ["Shift+Esc", "mute all voices"],
   ["F3", "performance"], ["Esc", "this menu"],
 ];
