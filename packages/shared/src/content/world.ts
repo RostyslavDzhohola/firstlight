@@ -110,6 +110,13 @@ export const WORLD_OBJECTS: readonly WorldObjectDef[] = [
 
   // E9 Ticket #000 (the trooper is an NPC from the NPC lane; its walk to the lift opens the Vat Room)
   O({ id: "e9_pod", body: "meridian", place: "vat_room", look: "pod", name: "Look inside the open pod", trigger: "interact", range: 2.2, egg: "E9", part: "pod" }),
+  O({ id: "e10_plaque", body: "arcadia", place: "pinewhistle_wood", east: 18, north: 20, look: "plaque", name: "Read the weathered dial", trigger: "interact", range: 2, egg: "E10", part: "plaque" }),
+  ...["dew", "root", "bloom"].map((part, i) => O({ id: `e10_btn_${part}`, body: "arcadia", place: "pinewhistle_wood", east: 16 + i * 2, north: 17, look: "button", name: `Touch the ${part} carving`, trigger: "interact", range: 1, egg: "E10", part })),
+  O({ id: "e11_plaque", body: "hollowmere", place: "thornwood", east: -24, north: 20, look: "plaque", name: "Read the wick keeper's stone", trigger: "interact", range: 2, egg: "E11", part: "plaque" }),
+  ...ring(3, 8).map((v, i) => O({ id: `e11_lantern_${i + 1}`, body: "hollowmere", place: "thornwood", east: -24 + v.east, north: 16 + v.north, look: "lantern", name: "Tend the floating wick", trigger: "interact", range: 2, egg: "E11", part: "wick" })),
+  O({ id: "e11_chest", body: "hollowmere", place: "thornwood", east: -24, north: 16, look: "chest", name: "Open the reed coffer", trigger: "interact", range: 2, egg: "E11", part: "chest" }),
+  O({ id: "e12_plaque", body: "meridian", place: "cinder_canyons", east: 20, north: -18, look: "plaque", name: "Read the discarded work slip", trigger: "interact", range: 2, egg: "E12", part: "plaque" }),
+  O({ id: "e12_safe", body: "meridian", place: "cinder_canyons", east: 20, north: -22, look: "safe", name: "Use the timebox keypad", trigger: "interact", range: 2, egg: "E12", part: "safe" }),
 ];
 
 export const WORLD_OBJECT_BY_ID: ReadonlyMap<string, WorldObjectDef> = new Map(WORLD_OBJECTS.map((o) => [o.id, o]));

@@ -1,3 +1,4 @@
+import { cosmeticWarmupHook } from "../render/Cosmetics.ts";
 // Game orchestration: renderer, current body, local player, network, remote avatars, combat,
 // portals, piles, HUD and the main loop.
 
@@ -484,12 +485,14 @@ export class Game {
 
   private warmupHook() {
     // every palette's skinned toon variant, weapons and LOD proxies compile behind the loading screen
+    const cosmetics = cosmeticWarmupHook(this.ctx.scene, () => this.player.pos);
     const avatars = avatarWarmupHook(this.ctx.scene, () => this.player.pos);
     const horses = horseWarmupHook(this.ctx.scene, () => this.player.pos); // the six coat materials
     return {
       forceAll: (on: boolean) => {
         this.planet.props.setForceAll(on);
         avatars.forceAll(on);
+        cosmetics.forceAll(on);
         horses.forceAll(on);
       },
     };

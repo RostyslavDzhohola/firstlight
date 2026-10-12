@@ -126,7 +126,7 @@ export const MISSIONS: readonly MissionDef[] = [
   {
     id: "M3", body: "meridian", guide: "Rook Calder", type: "reach", name: "Site Visit",
     objective: "Reach the gantry overlook above Foreclosure Yard", recLevel: [15, 18],
-    reward: { xp: 2800, coins: 400, items: [] },
+    reward: { xp: 2800, coins: 400, items: items(["copper_orbit_pack", 1]) },
     reach: { place: "yard_gantry", radius: 8 },
     pitch: "Get eyes on Foreclosure Yard from the gantry. Don't get repossessed.",
     routes: "Both Override Consoles are visible from the gantry.",

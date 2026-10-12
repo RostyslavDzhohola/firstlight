@@ -73,10 +73,10 @@ describe("missions (content.md §5)", () => {
 });
 
 describe("medals (content.md §7)", () => {
-  it("has 20 medals plus 9 hidden egg medals, unique ids and titles", () => {
-    expect(MEDALS).toHaveLength(29);
+  it("has 20 medals plus 12 hidden egg medals, unique ids and titles", () => {
+    expect(MEDALS).toHaveLength(32);
     expect(MEDALS.filter((m) => !m.hidden)).toHaveLength(20);
-    expect(MEDALS.filter((m) => m.hidden)).toHaveLength(9);
+    expect(MEDALS.filter((m) => m.hidden)).toHaveLength(12);
     expect(unique(MEDALS.map((m) => m.id))).toBe(true);
     for (const m of MEDALS) {
       expect(m.title.length, m.id).toBeGreaterThan(0);
@@ -87,9 +87,9 @@ describe("medals (content.md §7)", () => {
 });
 
 describe("Easter eggs (content.md §6)", () => {
-  it("has 3 eggs per planet, each with an existing item, place and hidden medal", () => {
-    expect(EGGS).toHaveLength(9);
-    for (const body of PLANET_IDS) expect(EGGS.filter((e) => e.body === body)).toHaveLength(3);
+  it("has 4 eggs per planet, each with an existing item, place and hidden medal", () => {
+    expect(EGGS).toHaveLength(12);
+    for (const body of PLANET_IDS) expect(EGGS.filter((e) => e.body === body)).toHaveLength(4);
     for (const e of EGGS) {
       const medal = MEDAL_BY_ID.get(e.medal);
       expect(medal?.hidden, e.id).toBe(true);
@@ -103,7 +103,7 @@ describe("Easter eggs (content.md §6)", () => {
   });
 
   it("has one Hall of Firsts plaque per egg and per boss", () => {
-    expect(PLAQUES).toHaveLength(12);
+    expect(PLAQUES).toHaveLength(15);
     expect(unique(PLAQUES.map((p) => p.id))).toBe(true);
   });
 });
@@ -158,7 +158,7 @@ describe("Portus Exchange and cosmetics (content.md §1.5, §8.4)", () => {
     expect(shopEntry("radio", 1)?.price).toBe(100);
     expect(shopEntry("fists", 1)).toBeUndefined();
     const commons = SHOP.filter((e) => e.category === "cosmetics");
-    expect(commons).toHaveLength(5);
+    expect(commons).toHaveLength(7);
     expect(commons.every((e) => e.price === 120)).toBe(true);
     expect(SHOP.every((e) => e.price > 0 && itemExists(e.itemId))).toBe(true);
     expect(unique(SHOP.map((e) => `${e.itemId}:${e.tier}`))).toBe(true);
@@ -178,11 +178,11 @@ describe("Portus Exchange and cosmetics (content.md §1.5, §8.4)", () => {
     expect(unitSellValue({ id: "fists", tier: 1 })).toBe(0);
   });
 
-  it("lists the 31 cosmetics across hat, cape, mask and backpack", () => {
-    expect(COSMETICS).toHaveLength(31);
+  it("lists the 39 cosmetics across hat, cape, mask and backpack", () => {
+    expect(COSMETICS).toHaveLength(39);
     expect(unique(COSMETICS.map((c) => c.id))).toBe(true);
     const bySlot = (s: string) => COSMETICS.filter((c) => c.slot === s).length;
-    expect([bySlot("hat"), bySlot("cape"), bySlot("mask"), bySlot("backpack")]).toEqual([11, 6, 5, 9]);
+    expect([bySlot("hat"), bySlot("cape"), bySlot("mask"), bySlot("backpack")]).toEqual([13, 9, 7, 10]);
     expect(COSMETICS.every((c) => !WEAPON_BY_ID.has(c.id) && isCosmetic(c.id))).toBe(true);
   });
 });

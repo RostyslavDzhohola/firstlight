@@ -7,7 +7,7 @@ import type { Client } from "@colyseus/core";
 import { chordMetres, padDirs, PLANET_IDS, safePadAt, type BodyId } from "@firstlight/shared";
 import { BACKPACK_SLOTS, HOTBAR_SLOTS, emptyLife, type LifeProgress } from "@firstlight/shared/content/character";
 import { HORSE_WHISTLE } from "@firstlight/shared/content/horse";
-import { COSMETIC_BY_ID, COSMETIC_SLOTS, isEggItem, itemName, itemStack, sellValue, shopEntry, type CosmeticSlot } from "@firstlight/shared/content/items";
+import { COSMETIC_BY_ID, COSMETIC_SLOTS, isEggItem, isExtraCosmetic, itemName, itemStack, sellValue, shopEntry, type CosmeticSlot } from "@firstlight/shared/content/items";
 import { MEDAL_BY_ID, MEDAL_RULES } from "@firstlight/shared/content/medals";
 import { MISSION_BY_ID, MISSIONS, missionGoal, type MissionDef } from "@firstlight/shared/content/missions";
 import { offsetDir, padName, placeDir } from "@firstlight/shared/content/places";
@@ -66,7 +66,8 @@ export interface QuestPlayer {
   lastFastTravel: number;
   /** Enter-trigger objects and reach targets the player is currently inside (edge detection). */
   inside: Set<string>;
-  seq: { E2: string[]; E5: string[] };
+  seq: { E2: string[]; E5: string[]; E10: string[] };
+  e11: { lit: Set<string>; startedAt: number };
   e4: { lit: Set<string>; startedAt: number; ferryUntil: number };
   e8: { hit: Set<string>; startedAt: number };
   /** Opened passages (egg key → expiry ms). */
@@ -85,7 +86,8 @@ function newQuestPlayer(id: string): QuestPlayer {
     title: null,
     lastFastTravel: 0,
     inside: new Set(),
-    seq: { E2: [], E5: [] },
+    seq: { E2: [], E5: [], E10: [] },
+    e11: { lit: new Set(), startedAt: 0 },
     e4: { lit: new Set(), startedAt: 0, ferryUntil: 0 },
     e8: { hit: new Set(), startedAt: 0 },
     passages: new Map(),
@@ -405,6 +407,7 @@ export class QuestSystem implements RoomSystem {
     you.medals = [...q.medals];
     you.pads = [...q.pads].sort((x, y) => x - y);
     you.title = q.title;
+    you.cosmeticsExtras = env.cosmeticsExtras;
     you.worn = { ...(a.char.worn ?? {}) };
   }
 
@@ -516,7 +519,8 @@ export class QuestSystem implements RoomSystem {
       this.toast(a, text, "warn");
     };
     if (!this.atShop(a)) return fail("too far", "Talk to Juno Vale at the Portus Exchange to buy");
-    const entry = itemId === HORSE_WHISTLE && !env.horses ? undefined : shopEntry(itemId, tier); // horses flag off
+    const disabled = (itemId === HORSE_WHISTLE && !env.horses) || (isExtraCosmetic(itemId) && !env.cosmeticsExtras);
+    const entry = disabled ? undefined : shopEntry(itemId, tier);
     if (!entry) return fail("not sold", "The Exchange doesn't sell that");
     const n = entry.stack > 1 ? Math.max(1, Math.min(entry.stack, qty)) : 1;
     const cost = entry.price * n;
@@ -650,10 +654,11 @@ export class QuestSystem implements RoomSystem {
     // The done flag, XP and level, coins, items and any overflow pile commit together; a failed save
     // leaves the mission open (it completes on the next trigger). Level-up effects and the news
     // follow the commit, and nothing after it saves again (F12 B6, final B1).
+    const rewardItems = def.reward.items.filter((i) => env.cosmeticsExtras || !isExtraCosmetic(i.id));
     let showXp = (): void => {};
     const paid = this.grant(
       a,
-      def.reward.items.map((i) => ({ ...i })),
+      rewardItems.map((i) => ({ ...i })),
       () => {
         m.done = true;
         m.progress = goal;
@@ -663,7 +668,7 @@ export class QuestSystem implements RoomSystem {
     );
     if (!paid) return;
     showXp();
-    const extra = def.reward.items.map((i) => `${i.qty} × ${itemName(i)}`).join(", ");
+    const extra = rewardItems.map((i) => `${i.qty} × ${itemName(i)}`).join(", ");
     this.toast(a, `Mission complete: ${def.name} · +${def.reward.xp} XP · +${def.reward.coins} ◎${extra ? ` · ${extra}` : ""}`, "xp");
     a.client.send("missionDone", { id: def.id, xp: def.reward.xp, coins: def.reward.coins });
     emitGameEvent(this.room, { type: "missionDone", playerId: a.id, missionId: def.id });
@@ -770,6 +775,7 @@ export class QuestSystem implements RoomSystem {
       if (active && def) this.completeMission(a, active, def);
       return;
     }
+    if (o.egg && EGG_BY_ID.get(o.egg)?.extra && !env.cosmeticsExtras) return c.send("denied", { action: "interact", reason: "unavailable" });
     if (o.egg) this.eggs.interact(a, this.qp(a), o, code);
   }
 
@@ -780,7 +786,7 @@ export class QuestSystem implements RoomSystem {
    */
   claimEgg(a: PlayerActor, eggId: EggId, opts: { assisted?: boolean; cost?: number; note?: string } = {}) {
     const egg = EGG_BY_ID.get(eggId);
-    if (!egg || a.dead) return;
+    if (!egg || a.dead || (egg.extra && !env.cosmeticsExtras)) return;
     const life = this.life(a);
     if (life.eggs.includes(eggId)) {
       this.toast(a, `You already took the ${egg.itemName} in this life`, "info");
@@ -788,22 +794,29 @@ export class QuestSystem implements RoomSystem {
     }
     const assistKey = `${a.identity.userId}|${eggId}`;
     const helped = this.assistedEggs.has(assistKey);
-    // The offering (E1's coin), the life flag, the item and any overflow commit together; a failed
-    // save changes nothing and the claim can be tried again.
+    const eligible = !opts.assisted && !helped && this.official({ boss: !!egg.extra });
+    const events: (() => void)[] = [];
+    let first = false;
+    // Item, offering, life flag, medal and first-finder reservation share the reward transaction.
+    // Cache changes and announcements wait until it commits; a failed claim can be retried.
     const paid = this.grant(a, [{ ...egg.item }], () => {
       if (opts.cost) a.char.coins -= opts.cost;
       life.eggs.push(eggId);
+      if (eligible) {
+        this.award(a, egg.medal, events);
+        if (!a.identity.loadtest) first = engrave(eggId, a.identity.userId, a.identity.name, events);
+      }
     });
     if (!paid) return;
     this.assistedEggs.delete(assistKey);
     if (opts.note) this.toast(a, opts.note, "info");
     this.toast(a, `Secret found: ${egg.name} — ${egg.itemName}`, "medal");
-    if (opts.assisted || helped || !this.official()) {
+    for (const e of events) e();
+    if (!eligible) {
       this.toast(a, "Admin-assisted or staged: no medal or Hall of Firsts entry", "info");
       return;
     }
-    this.award(a, egg.medal);
-    if (!a.identity.loadtest && engrave(eggId, a.identity.userId, a.identity.name)) {
+    if (first) {
       this.toast(a, "You found it first — your name is engraved on the Hall of Firsts in Portus", "medal");
     }
   }
@@ -1015,6 +1028,7 @@ export class QuestSystem implements RoomSystem {
       if (e.killerKind === "npc" && e.npcKind === "woolback") this.award(victim, "killed_by_a_woolback");
       else if (e.killerKind === "world" && now - q.woolbackHitAt <= MEDAL_RULES.WOOLBACK_FALL_WINDOW_MS) this.award(victim, "killed_by_a_woolback");
       if (e.killerKind === "player" && e.killerId === victim.id) this.award(victim, "own_goal");
+      this.eggs.resetWicks(victim, q);
       // Everything carried is in the pile now: nothing is worn; egg sequences reset.
       victim.char.worn = {};
       this.refreshCosmetics(victim);

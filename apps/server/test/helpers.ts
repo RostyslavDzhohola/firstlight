@@ -7,6 +7,7 @@ import { chainVerifiers, devVerifier } from "../src/auth/identity.ts";
 import { storageRecovery } from "../src/world/admission.ts";
 import { characterRepo, MemoryCharacterRepo } from "../src/world/characters.ts";
 import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
+import { cosmeticPity } from "../src/world/npc/rewards.ts";
 import { MemoryPileStore, pileStore } from "../src/world/piles.ts";
 import { MemoryProgressStore, progressStore } from "../src/world/quests/store.ts";
 import { copyRestrictions, CopyStateRestrictions } from "../src/world/quests/restrictions.ts";
@@ -28,6 +29,7 @@ export async function startServer(limits: Partial<{ maxClients: number; soloFill
   EGG_TIMERS.puzzles.clear();
   EGG_TIMERS.keypads.clear();
   SUPPORT_TIMERS.bubbleReady.clear();
+  cosmeticPity.clear();
   // Quiet worlds by default: tests that need ambient enemies or bosses opt in via NPC_TUNING.
   resetTuning();
   NPC_TUNING.ambient = false;

@@ -164,7 +164,10 @@ describe("all nine missions", () => {
       await runPlanetMissions(b, body);
       coins += missionsOn(body).reduce((s, d) => s + d.reward.coins, 0);
       expect(b.you.coins).toBe(coins);
-      if (body === "meridian") await until("errand runner", () => b.you.medals.includes("errand_runner"), 8000);
+      if (body === "meridian") {
+        await until("errand runner", () => b.you.medals.includes("errand_runner"), 8000);
+        expect(invIds(b).filter((id: string) => id === "copper_orbit_pack")).toHaveLength(1);
+      }
       else await safeLeave(b.room);
     }
   }, 60_000);

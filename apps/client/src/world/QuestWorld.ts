@@ -7,7 +7,7 @@ import * as THREE from "three/webgpu";
 import { materialColor, materialEmissive } from "three/tsl";
 import { atmo } from "../render/atmosphere.ts";
 import type { BodyId, Terrain } from "@firstlight/shared";
-import { PLAQUES, type HallLine } from "@firstlight/shared/content/secrets";
+import { EGG_BY_ID, PLAQUES, type HallLine } from "@firstlight/shared/content/secrets";
 import { objectPos, objectsOn, type WorldObjectDef } from "@firstlight/shared/content/world";
 import { ANIM } from "@firstlight/shared/net/schema";
 import { AvatarView } from "../render/Avatars.ts";
@@ -102,10 +102,11 @@ function iconPlate(icon: string, color: string): THREE.Mesh {
   return new THREE.Mesh(new THREE.PlaneGeometry(0.32, 0.32), new THREE.MeshBasicNodeMaterial({ map: tex }));
 }
 
-const ICONS: Record<string, string> = { rain: "💧", leaf: "🍃", sun: "☀", flame: "🔥", skull: "☠", lantern: "🏮", candle: "🕯" };
+const ICONS: Record<string, string> = { dew: "◇", root: "⋎", bloom: "✿", rain: "💧", leaf: "🍃", sun: "☀", flame: "🔥", skull: "☠", lantern: "🏮", candle: "🕯" };
 
 export interface QuestWorldState {
   activeMissions: Set<string>;
+  cosmeticsExtras?: boolean;
 }
 
 interface Prop {
@@ -426,7 +427,10 @@ export class QuestWorld {
 
   setLamp(id: string, on: boolean) {
     const p = this.byId.get(id);
-    if (p?.lampBulb) p.lampBulb.visible = on;
+    if (p?.lampBulb) {
+      if (p.def.egg === "E11") p.lampBulb.material = on ? glow(0x9fffd8, 3) : std(0x5a6a6a, { opacity: 0.85 });
+      else p.lampBulb.visible = on;
+    }
   }
 
   /** Light a marsh lantern locally for the egg's 180 s window (the server keeps the truth). */
@@ -441,6 +445,7 @@ export class QuestWorld {
     const now = performance.now();
     for (const p of this.props) {
       if (p.npc && p.facing) p.npc.set(p.pos.x, p.pos.y, p.pos.z, p.facing.x, p.facing.y, p.facing.z, ANIM.IDLE, dt);
+      if (p.def.egg && EGG_BY_ID.get(p.def.egg)?.extra) p.root.visible = !!st.cosmeticsExtras;
       if (p.def.mission) p.root.visible = st.activeMissions.has(p.def.mission);
       if (p.bob) p.bob.position.y = (p.def.look === "ferry" ? 0.3 : p.def.look === "altar" ? 2.4 : p.def.look === "bowl" ? 1.0 : p.def.look === "keeper" ? 1.3 : 0.6) + Math.sin(this.t * 2 + p.pos.x) * 0.06;
       if (p.spin) p.spin.rotation.y = Math.sin(this.t * 0.8) * 0.4;

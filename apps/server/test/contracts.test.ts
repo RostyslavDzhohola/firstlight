@@ -83,7 +83,7 @@ describe("production emitters (contract)", () => {
   });
 
   it("every hidden egg medal comes from its egg's claim, and every egg has a production path", () => {
-    expect(QUESTS).toMatch(/this\.award\(a, egg\.medal\)/);
+    expect(QUESTS).toMatch(/this\.award\(a, egg\.medal(?:, \w+)?\)/);
     for (const e of EGGS) expect(MEDALS.find((m) => m.id === e.medal)?.hidden, e.id).toBe(true);
     // E3 and E9 finish through the NPC lane, each from its own emitter (the Golden Hopbit's run,
     // Ticket #000's walk); quests-content.test.ts drives both through the real brain.

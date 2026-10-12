@@ -1,4 +1,4 @@
-// Medals (docs/content.md §7): 20 medals plus 9 hidden Easter-egg medals. Medals are account-bound
+// Medals (docs/content.md §7): 20 medals plus 12 hidden Easter-egg medals. Medals are account-bound
 // and survive death; one can be worn as a title. "life" scope = the condition must be met within
 // one life (since the last rebirth); "account" = cumulative. The server checks every condition.
 
@@ -7,7 +7,7 @@ export type MedalScope = "life" | "account";
 
 export interface MedalDef {
   id: string;
-  /** Row in content.md §7 (1–20) or the egg id (E1–E9) for hidden medals. */
+  /** Row in content.md §7 (1–20) or the egg id (E1–E12) for hidden medals. */
   ref: string;
   name: string;
   type: MedalType;
@@ -52,6 +52,9 @@ export const MEDALS: readonly MedalDef[] = [
   M("E7", "employee_of_the_month", "Employee of the Month", "hidden", "Claim the Executive Visor", "account", "Employee of the Month"),
   M("E8", "lights_out", "Lights Out", "hidden", "Claim the Static Cloak", "account", "Lights Out"),
   M("E9", "not_a_clone", "Not a Clone", "hidden", "Claim the Ticket #000 Helmet", "account", "Not a Clone"),
+  M("E10", "tended_the_dawn", "Tended the Dawn", "hidden", "Claim the Dewdial Crown", "account", "Dawn Tender"),
+  M("E11", "kept_the_wicks", "Kept the Wicks", "hidden", "Claim the Wickfloat Mantle", "account", "Wick Keeper"),
+  M("E12", "off_the_clock", "Off the Clock", "hidden", "Claim the Quietshift Lens", "account", "Quietshift"),
 ];
 
 export const MEDAL_BY_ID: ReadonlyMap<string, MedalDef> = new Map(MEDALS.map((m) => [m.id, m]));

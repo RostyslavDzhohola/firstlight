@@ -5,7 +5,7 @@
 import "./quests.css";
 import type { BodyId } from "@firstlight/shared";
 import { HORSE_WHISTLE } from "@firstlight/shared/content/horse";
-import { COSMETIC_BY_ID, COSMETIC_SLOTS, RARITY_STYLE, SHOP, SHOP_KEEPER, SHOP_NAME, itemName, sellValue, type ShopCategory } from "@firstlight/shared/content/items";
+import { COSMETIC_BY_ID, COSMETIC_SLOTS, RARITY_STYLE, SHOP, SHOP_KEEPER, SHOP_NAME, isExtraCosmetic, itemName, sellValue, type ShopCategory } from "@firstlight/shared/content/items";
 import { MEDALS } from "@firstlight/shared/content/medals";
 import { GUIDES, MISSION_BY_ID, MISSIONS, missionsOn, type MissionDef } from "@firstlight/shared/content/missions";
 import type { InvItem } from "@firstlight/shared/net/protocol";
@@ -128,7 +128,7 @@ export class ShopPanel extends Panel {
     let cat: ShopCategory | null = null;
     const order: ShopCategory[] = ["consumables", "weapons", "support", "gear", "cosmetics"];
     // Horses behind their server flag (you.horses): no whistle for sale when they are off.
-    const entries = SHOP.filter((e) => e.itemId !== HORSE_WHISTLE || !!you?.horses).sort((a, c) => order.indexOf(a.category) - order.indexOf(c.category) || a.name.localeCompare(c.name) || a.tier - c.tier);
+    const entries = SHOP.filter((e) => (e.itemId !== HORSE_WHISTLE || !!you?.horses) && (!isExtraCosmetic(e.itemId) || !!you?.cosmeticsExtras)).sort((a, c) => order.indexOf(a.category) - order.indexOf(c.category) || a.name.localeCompare(c.name) || a.tier - c.tier);
     for (const e of entries) {
       if (e.category !== cat) {
         cat = e.category;
@@ -199,7 +199,7 @@ function missionCard(parent: HTMLElement, def: MissionDef, you: YouPlus | null, 
   el("b", "", top, `${def.name}`);
   el("span", "ty", top, def.type);
   el("div", "obj", card, def.objective);
-  const items = def.reward.items.map((i) => `${i.qty} × ${itemName(i)}`);
+  const items = def.reward.items.filter((i) => !isExtraCosmetic(i.id) || !!you?.cosmeticsExtras).map((i) => `${i.qty} × ${itemName(i)}`);
   el("div", "rw", card, `Recommended LV ${def.recLevel[0]}–${def.recLevel[1]} · Reward ${def.reward.xp} XP, ${def.reward.coins} ◎${items.length ? `, ${items.join(", ")}` : ""}`);
   if (state && !state.done) {
     const bar = el("div", "bar", card);
@@ -347,7 +347,7 @@ export class JournalPanel extends Panel {
   }
 }
 
-// ---------------------------------------------------------------- keypad (egg E7)
+// ---------------------------------------------------------------- keypads
 
 export class KeypadPanel extends Panel {
   private target = "";
@@ -377,7 +377,7 @@ export class KeypadPanel extends Panel {
   render() {
     const b = this.box;
     b.innerHTML = "";
-    el("h2", "", b, "WALL SAFE");
+    el("h2", "", b, this.target === "e12_safe" ? "TIMEBOX" : "WALL SAFE");
     el("div", "disp", b, this.code.padEnd(4, "·"));
     const keys = el("div", "keys", b);
     for (const k of ["1", "2", "3", "4", "5", "6", "7", "8", "9", "C", "0", "OK"]) {
@@ -442,7 +442,7 @@ export class MissionTracker {
 
 // ---------------------------------------------------------------- admin console (` key)
 
-const CONSOLE_HELP = `stage <1-5> [all] · coins <n> · level <n> · give <id> [tier] [qty] · medal <id> · egg <E1-E9> · heal · unprotect · announce <text> · ${SKY_HELP}`;
+const CONSOLE_HELP = `stage <1-5> [all] · coins <n> · level <n> · give <id> [tier] [qty] · medal <id> · egg <E1-E12> · heal · unprotect · announce <text> · ${SKY_HELP}`;
 
 /** Parse a console line into an admin message. */
 export function parseAdminLine(line: string): { cmd: string; args: Record<string, unknown> } | null {
