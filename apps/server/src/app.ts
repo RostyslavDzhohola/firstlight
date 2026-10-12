@@ -6,6 +6,7 @@ import { matchMaker, Server } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import type { TokenVerifier } from "./auth/identity.ts";
+import { directRequestIp } from "./auth/ip.ts";
 import { BodyRoom } from "./world/BodyRoom.ts";
 import { isBodyId, onlineCount, play, type MatchmakingLimits } from "./world/matchmaking.ts";
 
@@ -80,7 +81,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
   app.post("/api/play", async (req, res) => {
     const auth = req.headers.authorization ?? "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-    const identity = token ? await opts.verify(token) : null;
+    const identity = token ? await opts.verify(token, { ip: directRequestIp(req) }) : null;
     if (!identity) {
       res.status(401).json({ ok: false, error: "unauthorized" });
       return;

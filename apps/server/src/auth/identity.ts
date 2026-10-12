@@ -9,7 +9,12 @@ export interface Identity {
   loadtest: boolean;
 }
 
-export type TokenVerifier = (token: string) => Promise<Identity | null>;
+/** Request facts a verifier may use (IP bans). */
+export interface VerifyContext {
+  ip?: string | null;
+}
+
+export type TokenVerifier = (token: string, ctx?: VerifyContext) => Promise<Identity | null>;
 
 /** Dev tokens look like `dev:<userId>:<name>`. Only accepted when explicitly enabled. */
 export function devVerifier(enabled: boolean): TokenVerifier {
@@ -23,9 +28,9 @@ export function devVerifier(enabled: boolean): TokenVerifier {
 
 /** Try verifiers in order; first identity wins. */
 export function chainVerifiers(...vs: TokenVerifier[]): TokenVerifier {
-  return async (token) => {
+  return async (token, ctx) => {
     for (const v of vs) {
-      const id = await v(token);
+      const id = await v(token, ctx);
       if (id) return id;
     }
     return null;
