@@ -2,6 +2,7 @@
 // updated every frame. Lanes add their factory to CLIENT_SYSTEMS.
 
 import type { Game } from "./Game.ts";
+import { npcClientSystem } from "../world/npcs/index.ts";
 import { createVoiceSystem } from "../voice/index.ts";
 
 export interface ClientSystem {
@@ -11,5 +12,4 @@ export interface ClientSystem {
 
 export type ClientSystemFactory = (game: Game) => ClientSystem | null;
 
-export const CLIENT_SYSTEMS: ClientSystemFactory[] = [];
-CLIENT_SYSTEMS.push(createVoiceSystem);
+export const CLIENT_SYSTEMS: ClientSystemFactory[] = [npcClientSystem, createVoiceSystem];
