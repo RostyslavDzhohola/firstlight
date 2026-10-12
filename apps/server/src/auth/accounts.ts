@@ -20,7 +20,7 @@ import { closeDanglingSessions, pruneSessionLog } from "../db/sessions.ts";
 import { authOptions, authRequestState, buildAuth, type FirstlightAuth } from "./better-auth.ts";
 import { hmacHex, safeEqual } from "./crypto.ts";
 import type { Identity, TokenVerifier, VerifyContext } from "./identity.ts";
-import { CLIENT_IP_HEADER, firstForwardedFor, normalizeIp } from "./ip.ts";
+import { banKey, CLIENT_IP_HEADER, firstForwardedFor, normalizeIp } from "./ip.ts";
 import { accountLinks, type LinkEvents } from "./links.ts";
 import { DevOutbox, disabledMailer, resendMailer, type Mailer } from "./mailer.ts";
 import { identifyRequest, mountAccountRoutes, requireAdminFor } from "./routes.ts";
@@ -98,7 +98,7 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
   else mailer = devOutbox = new DevOutbox(!!cfg.devMailLog);
   if (cfg.mailer instanceof DevOutbox) devOutbox = cfg.mailer;
 
-  const hashIp = (ip: string) => hmacHex(`${cfg.secret}:ip`, ip).slice(0, 32);
+  const hashIp = (ip: string) => hmacHex(`${cfg.secret}:ip`, banKey(ip)).slice(0, 32);
   const hashEmail = (email: string) => hmacHex(`${cfg.secret}:email`, email.toLowerCase());
 
   const options = authOptions({
