@@ -6,10 +6,12 @@ import { createGame, type Game } from "../src/app.ts";
 import { chainVerifiers, devVerifier } from "../src/auth/identity.ts";
 import { characterRepo, MemoryCharacterRepo } from "../src/world/characters.ts";
 import { MemoryPileStore, pileStore } from "../src/world/piles.ts";
+import { MemoryProgressStore, progressStore } from "../src/world/quests/store.ts";
 
 export async function startServer(limits: Partial<{ maxClients: number; soloFillLimit: number; maxCopiesPerBody: number; globalCap: number }> = {}): Promise<Game> {
   characterRepo.current = new MemoryCharacterRepo();
   pileStore.current = new MemoryPileStore();
+  progressStore.current = new MemoryProgressStore();
   return createGame({
     port: 0,
     verify: chainVerifiers(devVerifier(true)),

@@ -2,6 +2,7 @@
 
 import type { BodyId } from "../planet/bodies.ts";
 import type { InvItem } from "../net/protocol.ts";
+import type { CosmeticSlot } from "./items.ts";
 import { maxHp } from "./progression.ts";
 import { STARTERS } from "./weapons.ts";
 
@@ -20,10 +21,32 @@ export interface CharacterData {
   hotbar: (InvItem | null)[];
   backpack: (InvItem | null)[];
   selected: number; // hotbar index
-  missions: { id: string; progress: number; done: boolean }[];
+  /** Accepted missions this life. `counts` holds per-target kills for multi-target hunts. */
+  missions: { id: string; progress: number; done: boolean; counts?: number[] }[];
   lifeStartedAt: number;
   deaths: number;
   dead?: boolean;
+  /** Worn cosmetics by slot (ids of cosmetic items that are in the inventory). Cleared on death. */
+  worn?: Partial<Record<CosmeticSlot, string>>;
+  /** Per-life progress for life-scoped medals and once-per-life eggs (quests lane). */
+  life?: LifeProgress;
+}
+
+export interface LifeProgress {
+  /** Planets set foot on (Grand Tour). */
+  visited: BodyId[];
+  /** Pads touched this life, per planet (Cartographer). */
+  padsUsed: Partial<Record<BodyId, number[]>>;
+  /** Bosses this life's character was loot-eligible on (Triple Crown). */
+  bosses: string[];
+  /** Eggs claimed this life (items are once per life). */
+  eggs: string[];
+  /** Online playtime this life in ms (Old Timer). */
+  playMs: number;
+}
+
+export function emptyLife(): LifeProgress {
+  return { visited: [], padsUsed: {}, bosses: [], eggs: [], playMs: 0 };
 }
 
 /** A fresh life: level 1, starter weapon, no coins, in Portus. */

@@ -2,6 +2,8 @@
 // these types are the shape both sides agree on.
 
 import type { BodyId } from "../planet/bodies.ts";
+import type { CosmeticSlot } from "../content/items.ts";
+import type { HallLine } from "../content/secrets.ts";
 
 export const NET = {
   TICK_MS: 50, // 20 Hz simulation and patches
@@ -80,9 +82,16 @@ export type ClientMessages = {
   use: { slot: number; targetId?: string };
   pickup: { pileId: string; itemIndex?: number };
   drop: { slot: number };
-  interact: { target: string };
-  buy: { itemId: string };
-  sell: { slot: number };
+  /** Use a world object (quests lane): shop keeper, guide, mission pickup, egg part. `code` for keypads. */
+  interact: { target: string; code?: string };
+  /** Portus Exchange: buy `qty` (stackables only) of an item tier. Level gates are shown, not enforced. */
+  buy: { itemId: string; tier?: 1 | 2 | 3; qty?: number };
+  /** Sell the item in an inventory slot (0–3 hotbar, 4–19 backpack); `qty` defaults to the whole stack. */
+  sell: { slot: number; qty?: number };
+  /** Wear the cosmetic in an inventory slot, or take off a cosmetic slot. */
+  wear: { slot?: number; remove?: CosmeticSlot };
+  /** Ask for the Hall of Firsts and other quest state after joining (replies with `hall`). */
+  questSync: Record<string, never>;
   logout: { start: boolean };
   phrase: { id: number };
   travel: { to: BodyId; viaPad?: number };
@@ -111,6 +120,18 @@ export type ServerMessages = {
   you: YouState;
   kicked: { reason: string };
   updating: { seconds: number };
+  /** Hall of Firsts lines (all engraved plaques), on questSync and whenever a new first is claimed. */
+  hall: { lines: HallLine[] };
+  medal: { id: string };
+  missionDone: { id: string; xp: number; coins: number };
+  /** Result of buy/sell/wear (a toast carries the human text). */
+  shop: { ok: boolean; action: "buy" | "sell" | "wear"; reason?: string };
+  /** A billboard lamp (egg E8) went dark or relit, for everyone nearby. */
+  lamp: { id: string; on: boolean };
+  /** Admin staged scene: travel to `body`, then send `admin {cmd:"stage", args:{n}}` again. */
+  stage: { n: number; body: BodyId };
+  /** Open a client panel (keypad for the E7 safe). */
+  prompt: { kind: "keypad"; target: string };
 };
 
 /** Private per-player state sent only to its owner. */
@@ -123,6 +144,10 @@ export interface YouState {
   missions: { id: string; progress: number; goal: number; done: boolean }[];
   medals: string[];
   pads: number[]; // discovered pad indices on this body
+  /** Medal worn as a title (null = none). */
+  title?: string | null;
+  /** Worn cosmetic ids by slot. */
+  worn?: Partial<Record<CosmeticSlot, string>>;
   logoutEndsAt: number | null;
   protectedUntil: number;
 }
@@ -133,6 +158,8 @@ export interface InvItem {
   qty: number;
   /** Rounds left in the magazine, or heat. */
   mag?: number;
+  /** Unique look for a standard item (items.ts SKINS), e.g. the Ferryman's Oar is a Riverstaff II. */
+  skin?: string;
 }
 
 export const PHRASES = ["Truce?", "Help!", "Follow me", "Boss here", "Thanks", "GG"] as const;

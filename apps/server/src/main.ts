@@ -8,15 +8,17 @@ import { gameDb } from "./db/index.ts";
 import { characterRepo } from "./world/characters.ts";
 import { pileStore } from "./world/piles.ts";
 import { SqliteCharacterRepo, SqlitePileStore } from "./world/sqliteStores.ts";
+import { progressStore, SqliteProgressStore } from "./world/quests/store.ts";
 
 const accounts = await createAccounts({
   ...accountsConfigFromEnv(env),
   fallbackVerifier: devVerifier(env.allowDevGuests),
 });
 
-// Characters and piles live in game.db from here on (survive restarts and deploys).
+// Characters, piles and quest progress (pads, medals, Hall of Firsts) live in game.db from here on (survive restarts and deploys).
 characterRepo.current = new SqliteCharacterRepo(gameDb());
 pileStore.current = new SqlitePileStore(gameDb());
+progressStore.current = new SqliteProgressStore(gameDb());
 
 const game = await createGame({
   port: env.port,

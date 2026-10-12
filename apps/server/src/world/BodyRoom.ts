@@ -16,6 +16,7 @@ import { actorPos, pushHistory, type Actor, type NpcActor, type PlayerActor } fr
 import { characterRepo } from "./characters.ts";
 import { dealDamage, fire, melee, selectedWeapon, stepEffects, stepProjectiles, type CombatHost } from "./combat.ts";
 import { dist3, type V3 } from "./geometry.ts";
+import { emitGameEvent } from "./events.ts";
 import { emitPileEvent, onPileEvent, pileStore, type PileData } from "./piles.ts";
 import { SYSTEM_FACTORIES, type RoomSystem } from "./systems.ts";
 import { matchMaker } from "@colyseus/core";
@@ -111,7 +112,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       },
       npcs: () => this.npcActors.values(),
       broadcast: (type, msg, except) => this.broadcast(type as never, msg as never, except ? { except: except.client } : undefined),
-      onDamage: (target, _amount, attacker) => this.afterDamage(target, attacker),
+      onDamage: (target, amount, attacker) => this.afterDamage(target, attacker, amount),
     };
 
     for (const p of pileStore.current.list(options.body)) this.addPileToState(p);
@@ -274,6 +275,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     client.view = new StateView();
     this.updateViews(true);
     for (const s of this.systems) s.onPlayerJoin?.(client.sessionId);
+    emitGameEvent(this, { type: "travel", playerId: client.sessionId, body: this.bodyDef.id });
     this.sendYou(a);
     if (a.dead) client.send("death", { victim: client.sessionId, killer: null, killerName: "", aliveMs: 0, level: char.level, pileId: "" });
   }
@@ -468,6 +470,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (dist3([pile.x, pile.y, pile.z], actorPos(a)) > RULES.PICKUP_RANGE) return;
     const taken = pileStore.current.take(pileId, itemIndex);
     if (!taken) return;
+    emitGameEvent(this, { type: "pickup", playerId: a.id, pileId, pileOwnerUserId: pile.ownerUserId, pileCreatedAt: pile.createdAt, items: taken.items.length, coins: taken.coins });
     const leftovers: InvItem[] = [];
     for (const it of taken.items) if (!this.giveItem(a, it)) leftovers.push(it);
     a.char.coins += taken.coins;
@@ -542,7 +545,12 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
   // ---------------------------------------------------------------- damage, death, rebirth
 
-  afterDamage(target: Actor, attacker: PlayerActor | NpcActor | null) {
+  afterDamage(target: Actor, attacker: PlayerActor | NpcActor | null, amount = 0) {
+    const npc = target.kind === "npc" ? target : attacker?.kind === "npc" ? attacker : null;
+    emitGameEvent(this, {
+      type: "damage", targetId: target.id, targetKind: target.kind, attackerId: attacker?.id ?? null, attackerKind: attacker?.kind ?? "world",
+      npcKind: npc?.defId, boss: !!npc?.boss, amount, hpAfter: target.state.hp, maxHp: target.state.maxHp, at: Date.now(),
+    });
     if (target.kind === "player") {
       target.youDirty = true;
       if (target.state.hp <= 0 && !target.dead) this.kill(target, attacker);
@@ -568,6 +576,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     this.equip(victim, 0);
     const killerName = killer ? (killer.kind === "player" ? killer.identity.name : `npc:${killer.state.kind}`) : "the fall";
     this.broadcast("death", { victim: victim.id, killer: killer?.id ?? null, killerName, aliveMs: now - victim.char.lifeStartedAt, level: victim.char.level, pileId: pile?.id ?? "" });
+    emitGameEvent(this, { type: "death", victimId: victim.id, killerId: killer?.id ?? null, killerKind: killer?.kind ?? "world", npcKind: killer?.kind === "npc" ? killer.defId : undefined, pos: actorPos(victim) });
     if (killer && killer.kind === "player" && killer.id !== victim.id) this.grantXp(killer, pvpKillXp(victim.char.level, killer.char.level));
     this.saveActor(victim);
   }
@@ -595,6 +604,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       a.state.hp = Math.min(newMax, a.state.hp + (newMax - oldMax));
       a.state.level = a.char.level;
       a.client.send("toast", { text: `Level ${a.char.level}!`, kind: "xp" });
+      emitGameEvent(this, { type: "levelUp", playerId: a.id, level: a.char.level });
       this.saveActor(a);
     }
     a.youDirty = true;
@@ -678,6 +688,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
         this.presence.publish("announce", String(args.text ?? "").slice(0, 200));
         this.broadcast("announce", { text: String(args.text ?? "").slice(0, 200) });
         break;
+      default:
+        for (const s of this.systems) if (s.onAdmin?.(a, cmd, args)) break;
     }
   }
 
@@ -774,6 +786,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       logoutEndsAt: a.logoutEndsAt,
       protectedUntil: a.protectedUntil,
     };
+    for (const s of this.systems) s.decorateYou?.(a, you);
     a.client.send("you", { ...you, selected: a.char.selected, level: a.char.level, dead: a.dead });
   }
 

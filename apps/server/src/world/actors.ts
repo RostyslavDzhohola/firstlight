@@ -48,6 +48,8 @@ export interface PlayerActor {
 export interface NpcActor {
   kind: "npc";
   id: string;
+  /** Content id ("hopbit", "woolback", "tidewrath"…): death and damage events report it. */
+  defId?: string;
   state: NpcState;
   history: PosSample[];
   radius: number;

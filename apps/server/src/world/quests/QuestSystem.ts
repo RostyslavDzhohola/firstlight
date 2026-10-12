@@ -1,0 +1,780 @@
+// Quests and economy for one room (one copy of one body): fast-travel pads (discover by touch,
+// travel pad-to-pad), the Portus Exchange shop, guide missions, medals and titles, Easter eggs and
+// the Hall of Firsts, cosmetics, and the admin `stage <n>` command. Plugs into the room through
+// RoomSystem hooks, room messages and the game event bus (../events.ts).
+
+import type { Client } from "@colyseus/core";
+import { chordMetres, padDirs, PLANET_IDS, safePadAt, type BodyId } from "@firstlight/shared";
+import { BACKPACK_SLOTS, HOTBAR_SLOTS, emptyLife, type LifeProgress } from "@firstlight/shared/content/character";
+import { COSMETIC_BY_ID, COSMETIC_SLOTS, itemName, itemStack, sellValue, shopEntry, type CosmeticSlot } from "@firstlight/shared/content/items";
+import { MEDAL_BY_ID, MEDAL_RULES } from "@firstlight/shared/content/medals";
+import { MISSION_BY_ID, MISSIONS, missionGoal, type MissionDef } from "@firstlight/shared/content/missions";
+import { offsetDir, padName, place, placeDir } from "@firstlight/shared/content/places";
+import { BOSS_FIRSTS, EGG_BY_ID, type EggId } from "@firstlight/shared/content/secrets";
+import { objectPos, objectsOn, WORLD_OBJECT_BY_ID, type WorldObjectDef } from "@firstlight/shared/content/world";
+import { WEAPON_BY_ID } from "@firstlight/shared/content/weapons";
+import type { InvItem, YouState } from "@firstlight/shared/net/protocol";
+import { PF } from "@firstlight/shared/net/schema";
+import { z } from "zod";
+import { accountLinks } from "../../auth/links.ts";
+import { actorPos, type PlayerActor } from "../actors.ts";
+import type { BodyRoom } from "../BodyRoom.ts";
+import { emitGameEvent, onGameEvent, type DamageEvent, type DeathEvent, type GameEvent, type KillEvent } from "../events.ts";
+import { dist3, type V3 } from "../geometry.ts";
+import type { RoomSystem } from "../systems.ts";
+import { EggLogic } from "./eggs.ts";
+import { engrave, hallLines, onHallChanged } from "./hall.ts";
+import { runStage } from "./stage.ts";
+import { progressStore } from "./store.ts";
+
+export const QUEST_RULES = {
+  /** Touching a pad = feet within this many metres of its centre (D2). */
+  PAD_TOUCH_M: 6,
+  /** Extra metres allowed between client and server positions when using objects. */
+  INTERACT_SLACK: 1.5,
+  /** Hunt kills count up to this far outside the named area's radius. */
+  AREA_SLACK: 20,
+  FAST_TRAVEL_COOLDOWN_MS: 2000,
+  SLOW_TICK_MS: 200,
+};
+
+/** Transient per-session quest state (account data is cached here, life data lives in char.life). */
+export interface QuestPlayer {
+  id: string;
+  medals: Set<string>;
+  pads: Set<number>;
+  title: string | null;
+  lastFastTravel: number;
+  /** Enter-trigger objects and reach targets the player is currently inside (edge detection). */
+  inside: Set<string>;
+  seq: { E2: string[]; E5: string[] };
+  e4: { lit: Set<string>; startedAt: number; ferryUntil: number };
+  e8: { hit: Set<string>; startedAt: number };
+  /** Opened passages (egg key → expiry ms). */
+  passages: Map<string, number>;
+  lowHpAt: number | null;
+  woolbackHitAt: number;
+  bossFirstHit: Map<string, number>;
+  bossHurtMe: Set<string>;
+  arc: { at: number; targets: Set<string> };
+}
+
+function newQuestPlayer(id: string): QuestPlayer {
+  return {
+    id,
+    medals: new Set(),
+    pads: new Set(),
+    title: null,
+    lastFastTravel: 0,
+    inside: new Set(),
+    seq: { E2: [], E5: [] },
+    e4: { lit: new Set(), startedAt: 0, ferryUntil: 0 },
+    e8: { hit: new Set(), startedAt: 0 },
+    passages: new Map(),
+    lowHpAt: null,
+    woolbackHitAt: 0,
+    bossFirstHit: new Map(),
+    bossHurtMe: new Set(),
+    arc: { at: 0, targets: new Set() },
+  };
+}
+
+const slotSchema = z.number().int().min(0).max(HOTBAR_SLOTS + BACKPACK_SLOTS - 1);
+
+export class QuestSystem implements RoomSystem {
+  readonly room: BodyRoom;
+  readonly body: BodyId;
+  readonly players = new Map<string, QuestPlayer>();
+  readonly objects: WorldObjectDef[];
+  private readonly objPos = new Map<string, V3>();
+  readonly eggs: EggLogic;
+  private readonly unsubs: (() => void)[] = [];
+  private lastSlow = 0;
+  private lastLevelCheck = 0;
+
+  constructor(room: BodyRoom) {
+    this.room = room;
+    this.body = room.bodyDef.id;
+    this.objects = objectsOn(this.body);
+    const t = room.terrain;
+    for (const o of this.objects) this.objPos.set(o.id, objectPos(o, (x, y, z) => t.groundHeight(x, y, z)));
+    this.eggs = new EggLogic(this);
+
+    room.onMessage("fastTravel", z.object({ pad: z.number().int().min(0).max(63) }), (c, m) => this.fastTravel(c, m.pad));
+    room.onMessage("buy", z.object({ itemId: z.string().max(40), tier: z.number().int().min(1).max(3).optional(), qty: z.number().int().min(1).max(20).optional() }), (c, m) =>
+      this.buy(c, m.itemId, (m.tier ?? 1) as 1 | 2 | 3, m.qty ?? 1),
+    );
+    room.onMessage("sell", z.object({ slot: slotSchema, qty: z.number().int().min(1).max(99).optional() }), (c, m) => this.sell(c, m.slot, m.qty));
+    room.onMessage("wear", z.object({ slot: slotSchema.optional(), remove: z.enum(["hat", "cape", "mask", "backpack"]).optional() }), (c, m) => this.wear(c, m.slot, m.remove));
+    room.onMessage("mission", z.object({ action: z.enum(["accept", "abandon"]), id: z.string().max(8) }), (c, m) => this.mission(c, m.action, m.id));
+    room.onMessage("title", z.object({ medalId: z.string().max(40).nullable() }), (c, m) => this.setTitle(c, m.medalId));
+    room.onMessage("interact", z.object({ target: z.string().max(40), code: z.string().max(8).optional() }), (c, m) => this.interact(c, m.target, m.code));
+    room.onMessage("questSync", z.object({}).passthrough(), (c) => this.sync(c));
+    // Observe phrases (the room's own handler validates and broadcasts them).
+    room.onMessage("phrase", (c: Client, m: { id: number }) => this.eggs.onPhrase(c.sessionId, m.id));
+
+    this.unsubs.push(onGameEvent(room, (e) => this.onEvent(e)));
+    this.unsubs.push(onHallChanged((lines) => this.room.broadcast("hall" as never, { lines } as never)));
+    this.unsubs.push(
+      accountLinks.on((ev) => {
+        for (const a of this.room.actors.values()) if (a.identity.userId === ev.toUserId) this.loadAccount(a);
+      }),
+    );
+  }
+
+  dispose() {
+    for (const u of this.unsubs.splice(0)) u();
+    this.eggs.dispose();
+  }
+
+  // ---------------------------------------------------------------- helpers
+
+  actor(id: string): PlayerActor | undefined {
+    return this.room.actors.get(id);
+  }
+
+  qp(a: PlayerActor): QuestPlayer {
+    let q = this.players.get(a.id);
+    if (!q) {
+      q = newQuestPlayer(a.id);
+      this.players.set(a.id, q);
+    }
+    return q;
+  }
+
+  life(a: PlayerActor): LifeProgress {
+    a.char.life ??= emptyLife();
+    return a.char.life;
+  }
+
+  pos(o: WorldObjectDef | string): V3 {
+    const id = typeof o === "string" ? o : o.id;
+    return this.objPos.get(id)!;
+  }
+
+  near(a: PlayerActor, o: WorldObjectDef, slack = QUEST_RULES.INTERACT_SLACK): boolean {
+    return dist3(actorPos(a), this.pos(o)) <= o.range + slack;
+  }
+
+  toast(a: PlayerActor, text: string, kind: "info" | "xp" | "coins" | "medal" | "warn" = "info") {
+    a.client.send("toast", { text, kind });
+  }
+
+  /** Move a player (server-authoritative), like the admin teleport. */
+  teleport(a: PlayerActor, at: readonly number[]) {
+    const p = this.room.snapToGround(at);
+    a.state.x = a.lastX = p[0];
+    a.state.y = a.lastY = p[1];
+    a.state.z = a.lastZ = p[2];
+    a.lastMoveAt = Date.now();
+    a.history.length = 0;
+    a.client.send("correct", { x: p[0], y: p[1], z: p[2], seq: a.state.seq });
+  }
+
+  /** Surface point `metres` from a direction at a stable bearing (for arrivals and formations). */
+  around(dir: readonly number[], east: number, north: number): V3 {
+    const l = Math.hypot(dir[0]!, dir[1]!, dir[2]!) || 1;
+    const d = offsetDir([dir[0]! / l, dir[1]! / l, dir[2]! / l], east, north, this.room.bodyDef.radius);
+    const R = this.room.bodyDef.radius;
+    return [d[0] * R, d[1] * R, d[2] * R];
+  }
+
+  private canStore(a: PlayerActor, item: InvItem): boolean {
+    const stack = itemStack(item.id);
+    for (const list of [a.char.hotbar, a.char.backpack]) {
+      for (const s of list) {
+        if (!s) return true;
+        if (stack > 1 && s.id === item.id && s.tier === item.tier && !s.skin && !item.skin && s.qty + item.qty <= stack) return true;
+      }
+    }
+    return false;
+  }
+
+  /** Give an item: weapons and consumables like the room does (hotbar first); everything else to the backpack first. */
+  give(a: PlayerActor, item: InvItem): boolean {
+    if (WEAPON_BY_ID.has(item.id) && !item.skin) return this.room.giveItem(a, item);
+    const stack = itemStack(item.id);
+    if (stack > 1) {
+      for (const list of [a.char.backpack, a.char.hotbar]) {
+        for (const s of list) {
+          if (s && s.id === item.id && s.tier === item.tier && s.qty + item.qty <= stack) {
+            s.qty += item.qty;
+            a.youDirty = true;
+            return true;
+          }
+        }
+      }
+    }
+    for (const list of [a.char.backpack, a.char.hotbar]) {
+      const i = list.findIndex((s) => !s);
+      if (i >= 0) {
+        list[i] = { ...item };
+        if (list === a.char.hotbar && i === a.char.selected) this.room.equip(a, i);
+        a.youDirty = true;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Give, or drop at the player's feet when the bags are full. */
+  giveOrDrop(a: PlayerActor, items: InvItem[]) {
+    const left = items.filter((it) => !this.give(a, it));
+    if (left.length) {
+      this.room.createPile(a, left, 0, actorPos(a));
+      this.toast(a, "Your bags are full — the rest is on the ground at your feet", "warn");
+    }
+  }
+
+  // ---------------------------------------------------------------- lifecycle
+
+  onPlayerJoin(sessionId: string) {
+    const a = this.actor(sessionId);
+    if (!a) return;
+    this.players.set(sessionId, newQuestPlayer(sessionId));
+    this.life(a);
+    this.loadAccount(a);
+    this.refreshCosmetics(a);
+  }
+
+  onPlayerLeave(sessionId: string) {
+    this.players.delete(sessionId);
+  }
+
+  /** (Re)load account-level progress for a player: medals, title, discovered pads on this body. */
+  loadAccount(a: PlayerActor) {
+    const q = this.qp(a);
+    const uid = a.identity.userId;
+    if (a.identity.loadtest) return;
+    const store = progressStore.current;
+    q.medals = new Set(store.medals(uid));
+    q.pads = new Set(store.pads(uid, this.body));
+    const t = store.title(uid);
+    q.title = t && q.medals.has(t) ? t : null;
+    a.state.title = q.title ? (MEDAL_BY_ID.get(q.title)?.title ?? "") : "";
+    a.youDirty = true;
+  }
+
+  decorateYou(a: PlayerActor, you: YouState) {
+    const q = this.qp(a);
+    you.missions = a.char.missions.map((m) => {
+      const def = MISSION_BY_ID.get(m.id);
+      return { id: m.id, progress: m.progress, goal: def ? missionGoal(def) : 1, done: m.done };
+    });
+    you.medals = [...q.medals];
+    you.pads = [...q.pads].sort((x, y) => x - y);
+    you.title = q.title;
+    you.worn = { ...(a.char.worn ?? {}) };
+  }
+
+  sync(c: Client) {
+    c.send("hall", { lines: hallLines() });
+    this.eggs.syncTo(c);
+  }
+
+  // ---------------------------------------------------------------- tick
+
+  tick(dtMs: number, now: number) {
+    for (const a of this.room.actors.values()) {
+      if (a.dead) continue;
+      const life = this.life(a);
+      life.playMs += dtMs;
+    }
+    if (now - this.lastSlow < QUEST_RULES.SLOW_TICK_MS) return;
+    this.lastSlow = now;
+    const checkLevels = now - this.lastLevelCheck > 1000;
+    if (checkLevels) this.lastLevelCheck = now;
+    for (const a of this.room.actors.values()) {
+      if (a.dead) continue;
+      const q = this.qp(a);
+      if (this.room.bodyDef.padLayout !== "none") this.touchPads(a, q);
+      this.checkReach(a, q);
+      this.eggs.tickPlayer(a, q, now);
+      this.refreshCosmetics(a);
+      if (q.lowHpAt !== null && now - q.lowHpAt >= MEDAL_RULES.BY_A_THREAD_MS) {
+        q.lowHpAt = null;
+        this.award(a, "by_a_thread");
+      }
+      if (checkLevels) {
+        if (a.char.level >= MEDAL_RULES.TEN_DOWN_LEVEL) this.award(a, "ten_down");
+        if (a.char.level >= MEDAL_RULES.FIRSTLIGHT_LEVEL) this.award(a, "firstlight");
+        if (this.life(a).playMs >= MEDAL_RULES.OLD_TIMER_MS) this.award(a, "old_timer");
+      }
+    }
+    this.eggs.tickRoom(now);
+  }
+
+  // ---------------------------------------------------------------- pads and fast travel
+
+  private touchPads(a: PlayerActor, q: QuestPlayer) {
+    const def = this.room.bodyDef;
+    const p = actorPos(a);
+    const l = Math.hypot(p[0], p[1], p[2]);
+    const pads = padDirs(def);
+    for (let i = 0; i < pads.length; i++) {
+      if (chordMetres(pads[i]!, p[0] / l, p[1] / l, p[2] / l, def.radius) > QUEST_RULES.PAD_TOUCH_M) continue;
+      // Life progress (Cartographer): every pad touched this life.
+      const life = this.life(a);
+      const used = (life.padsUsed[this.body] ??= []);
+      if (!used.includes(i)) {
+        used.push(i);
+        if (used.length >= pads.length) this.award(a, "cartographer");
+      }
+      if (q.pads.has(i) || a.identity.loadtest) continue;
+      q.pads.add(i);
+      progressStore.current.discoverPad(a.identity.userId, this.body, i);
+      a.youDirty = true;
+      this.toast(a, `Pad discovered: ${padName(this.body, i)} — fast travel here from any pad (M)`, "info");
+      emitGameEvent(this.room, { type: "padDiscovered", playerId: a.id, pad: i });
+    }
+  }
+
+  fastTravel(c: Client, pad: number) {
+    const a = this.actor(c.sessionId);
+    if (!a || a.dead) return;
+    const deny = (reason: string) => c.send("denied", { action: "fastTravel", reason });
+    const def = this.room.bodyDef;
+    const pads = padDirs(def);
+    if (def.padLayout === "none" || pad >= pads.length) return deny("no such pad");
+    const here = safePadAt(def, a.state.x, a.state.y, a.state.z);
+    if (here < 0) return deny("stand on a pad");
+    if (here === pad) return deny("already here");
+    const q = this.qp(a);
+    if (!q.pads.has(pad)) return deny("undiscovered");
+    const now = Date.now();
+    if (now - q.lastFastTravel < QUEST_RULES.FAST_TRAVEL_COOLDOWN_MS) return deny("cooldown");
+    q.lastFastTravel = now;
+    const d = pads[pad]!;
+    const ang = ((a.id.charCodeAt(0) + now) % 360) * (Math.PI / 180);
+    this.teleport(a, this.around(d, Math.cos(ang) * 3.5, Math.sin(ang) * 3.5));
+    this.toast(a, `Travelled to ${padName(this.body, pad)}`, "info");
+  }
+
+  // ---------------------------------------------------------------- shop
+
+  private atShop(a: PlayerActor): boolean {
+    const keeper = WORLD_OBJECT_BY_ID.get("juno_vale")!;
+    return this.body === "portus" && this.near(a, keeper, 2.5);
+  }
+
+  buy(c: Client, itemId: string, tier: 1 | 2 | 3, qty: number) {
+    const a = this.actor(c.sessionId);
+    if (!a || a.dead) return;
+    const fail = (reason: string, text: string) => {
+      c.send("shop", { ok: false, action: "buy", reason });
+      this.toast(a, text, "warn");
+    };
+    if (!this.atShop(a)) return fail("too far", "Talk to Juno Vale at the Portus Exchange to buy");
+    const entry = shopEntry(itemId, tier);
+    if (!entry) return fail("not sold", "The Exchange doesn't sell that");
+    const n = entry.stack > 1 ? Math.max(1, Math.min(entry.stack, qty)) : 1;
+    const cost = entry.price * n;
+    if (a.char.coins < cost) return fail("coins", `Not enough coins (${cost} ◎ needed)`);
+    const item: InvItem = { id: itemId, tier, qty: n };
+    if (!this.canStore(a, item)) return fail("full", "Your bags are full — sell or drop something first");
+    a.char.coins -= cost;
+    this.give(a, item);
+    a.youDirty = true;
+    c.send("shop", { ok: true, action: "buy" });
+    const gate = entry.level > a.char.level ? ` (equip at level ${entry.level})` : "";
+    this.toast(a, `Bought ${n > 1 ? `${n} × ` : ""}${entry.name}${tier > 1 ? ` ${"I".repeat(tier)}` : ""} for ${cost} ◎${gate}`, "coins");
+    this.room.saveActor(a);
+  }
+
+  sell(c: Client, slot: number, qty?: number) {
+    const a = this.actor(c.sessionId);
+    if (!a || a.dead) return;
+    const fail = (reason: string, text: string) => {
+      c.send("shop", { ok: false, action: "sell", reason });
+      this.toast(a, text, "warn");
+    };
+    if (!this.atShop(a)) return fail("too far", "Talk to Juno Vale at the Portus Exchange to sell");
+    const list = slot < HOTBAR_SLOTS ? a.char.hotbar : a.char.backpack;
+    const i = slot < HOTBAR_SLOTS ? slot : slot - HOTBAR_SLOTS;
+    const item = list[i];
+    if (!item) return fail("empty", "Nothing in that slot");
+    const n = Math.max(1, Math.min(item.qty, qty ?? item.qty));
+    const value = sellValue(item, n);
+    if (value <= 0) return fail("worthless", "Juno shakes her head: “I can't sell that on.”");
+    item.qty -= n;
+    if (item.qty <= 0) list[i] = null;
+    a.char.coins += value;
+    if (slot === a.char.selected) this.room.equip(a, a.char.selected);
+    this.refreshCosmetics(a);
+    a.youDirty = true;
+    c.send("shop", { ok: true, action: "sell" });
+    this.toast(a, `Sold ${n > 1 ? `${n} × ` : ""}${itemName(item)} for ${value} ◎`, "coins");
+    this.room.saveActor(a);
+  }
+
+  // ---------------------------------------------------------------- cosmetics
+
+  wear(c: Client, slot?: number, remove?: CosmeticSlot) {
+    const a = this.actor(c.sessionId);
+    if (!a || a.dead) return;
+    const worn = (a.char.worn ??= {});
+    if (remove) {
+      delete worn[remove];
+    } else if (slot !== undefined) {
+      const item = slot < HOTBAR_SLOTS ? a.char.hotbar[slot] : a.char.backpack[slot - HOTBAR_SLOTS];
+      const def = item ? COSMETIC_BY_ID.get(item.id) : undefined;
+      if (!def) {
+        c.send("shop", { ok: false, action: "wear", reason: "not a cosmetic" });
+        return;
+      }
+      if (worn[def.slot] === def.id) delete worn[def.slot];
+      else worn[def.slot] = def.id;
+    }
+    this.refreshCosmetics(a);
+    a.youDirty = true;
+    c.send("shop", { ok: true, action: "wear" });
+  }
+
+  /** Drop worn cosmetics that left the inventory and mirror the rest to PlayerState.cosmetics. */
+  refreshCosmetics(a: PlayerActor) {
+    const worn = a.char.worn;
+    let s = "";
+    if (worn) {
+      const have = new Set<string>();
+      for (const it of a.char.hotbar) if (it) have.add(it.id);
+      for (const it of a.char.backpack) if (it) have.add(it.id);
+      const ids: string[] = [];
+      for (const slot of COSMETIC_SLOTS) {
+        const id = worn[slot];
+        if (!id) continue;
+        if (!have.has(id) || COSMETIC_BY_ID.get(id)?.slot !== slot) {
+          delete worn[slot];
+          a.youDirty = true;
+        } else ids.push(id);
+      }
+      s = ids.join(",");
+    }
+    if (a.state.cosmetics !== s) a.state.cosmetics = s;
+  }
+
+  // ---------------------------------------------------------------- missions
+
+  mission(c: Client, action: "accept" | "abandon", id: string) {
+    const a = this.actor(c.sessionId);
+    if (!a || a.dead) return;
+    const def = MISSION_BY_ID.get(id);
+    if (!def) return;
+    const list = a.char.missions;
+    const have = list.find((m) => m.id === id);
+    if (action === "abandon") {
+      if (!have || have.done) return;
+      a.char.missions = list.filter((m) => m !== have);
+      a.youDirty = true;
+      this.toast(a, `Mission abandoned: ${def.name}`, "info");
+      return;
+    }
+    if (def.body !== this.body) return c.send("denied", { action: "mission", reason: "wrong planet" });
+    const guide = WORLD_OBJECT_BY_ID.get(`guide_${def.body}`)!;
+    if (!this.near(a, guide, 3)) return c.send("denied", { action: "mission", reason: "too far" });
+    if (have) return c.send("denied", { action: "mission", reason: have.done ? "done this life" : "active" });
+    list.push({ id, progress: 0, done: false, ...(def.hunt ? { counts: def.hunt.targets.map(() => 0) } : {}) });
+    a.youDirty = true;
+    this.toast(a, `Mission accepted: ${def.name} — ${def.objective}`, "info");
+    this.room.saveActor(a);
+  }
+
+  private activeMissions(a: PlayerActor): { m: CharacterMission; def: MissionDef }[] {
+    const out: { m: CharacterMission; def: MissionDef }[] = [];
+    for (const m of a.char.missions) {
+      if (m.done) continue;
+      const def = MISSION_BY_ID.get(m.id);
+      if (def && def.body === this.body) out.push({ m, def });
+    }
+    return out;
+  }
+
+  completeMission(a: PlayerActor, m: CharacterMission, def: MissionDef) {
+    if (m.done) return;
+    m.done = true;
+    m.progress = missionGoal(def);
+    this.room.grantXp(a, def.reward.xp);
+    a.char.coins += def.reward.coins;
+    if (def.reward.items.length) this.giveOrDrop(a, def.reward.items.map((i) => ({ ...i })));
+    a.youDirty = true;
+    const extra = def.reward.items.map((i) => `${i.qty} × ${itemName(i)}`).join(", ");
+    this.toast(a, `Mission complete: ${def.name} · +${def.reward.xp} XP · +${def.reward.coins} ◎${extra ? ` · ${extra}` : ""}`, "xp");
+    a.client.send("missionDone", { id: def.id, xp: def.reward.xp, coins: def.reward.coins });
+    emitGameEvent(this.room, { type: "missionDone", playerId: a.id, missionId: def.id });
+    if (MISSIONS.every((d) => a.char.missions.some((x) => x.id === d.id && x.done))) this.award(a, "errand_runner");
+    this.room.saveActor(a);
+  }
+
+  private onKillForMissions(e: KillEvent) {
+    const credit = new Set(e.creditIds ?? (e.killerId ? [e.killerId] : []));
+    for (const id of credit) {
+      const a = this.actor(id);
+      if (!a || a.dead) continue;
+      for (const { m, def } of this.activeMissions(a)) {
+        if (!def.hunt) continue;
+        if (def.hunt.place) {
+          const p = place(def.hunt.place);
+          const d = placeDir(p);
+          const R = this.room.bodyDef.radius;
+          const l = Math.hypot(e.pos[0], e.pos[1], e.pos[2]) || 1;
+          if (chordMetres(d, e.pos[0] / l, e.pos[1] / l, e.pos[2] / l, R) > p.radius + QUEST_RULES.AREA_SLACK) continue;
+        }
+        const ti = def.hunt.targets.findIndex((t) => t.npcKind === e.npcKind);
+        if (ti < 0) continue;
+        const counts = (m.counts ??= def.hunt.targets.map(() => 0));
+        if ((counts[ti] ?? 0) >= def.hunt.targets[ti]!.count) continue;
+        counts[ti] = (counts[ti] ?? 0) + 1;
+        m.progress = def.hunt.targets.reduce((s, t, k) => s + Math.min(t.count, counts[k] ?? 0), 0);
+        a.youDirty = true;
+        if (m.progress >= missionGoal(def)) this.completeMission(a, m, def);
+      }
+    }
+  }
+
+  private checkReach(a: PlayerActor, q: QuestPlayer) {
+    for (const { m, def } of this.activeMissions(a)) {
+      if (!def.reach) continue;
+      const d = placeDir(def.reach.place);
+      const target = this.room.snapToGround(d);
+      if (dist3(actorPos(a), target) <= def.reach.radius) this.completeMission(a, m, def);
+    }
+    void q;
+  }
+
+  // ---------------------------------------------------------------- medals and titles
+
+  /** Award a medal once per account. Returns true if newly earned. */
+  award(a: PlayerActor, medalId: string): boolean {
+    const def = MEDAL_BY_ID.get(medalId);
+    if (!def || a.identity.loadtest) return false;
+    const q = this.qp(a);
+    if (q.medals.has(medalId)) return false;
+    q.medals.add(medalId);
+    const fresh = progressStore.current.awardMedal(a.identity.userId, medalId);
+    a.youDirty = true;
+    if (!fresh) return false;
+    this.toast(a, `Medal earned: ${def.name} — wear the title “${def.title}” from the journal (J)`, "medal");
+    a.client.send("medal", { id: medalId });
+    emitGameEvent(this.room, { type: "medal", playerId: a.id, medalId });
+    return true;
+  }
+
+  setTitle(c: Client, medalId: string | null) {
+    const a = this.actor(c.sessionId);
+    if (!a || a.identity.loadtest) return;
+    const q = this.qp(a);
+    if (medalId !== null && (!MEDAL_BY_ID.has(medalId) || !q.medals.has(medalId))) {
+      c.send("denied", { action: "title", reason: "not earned" });
+      return;
+    }
+    if (!progressStore.current.setTitle(a.identity.userId, medalId)) {
+      c.send("denied", { action: "title", reason: "not earned" });
+      return;
+    }
+    q.title = medalId;
+    a.state.title = medalId ? MEDAL_BY_ID.get(medalId)!.title : "";
+    a.youDirty = true;
+    this.toast(a, medalId ? `Title set: ${a.state.title}` : "Title cleared", "medal");
+  }
+
+  // ---------------------------------------------------------------- interaction
+
+  interact(c: Client, target: string, code?: string) {
+    const a = this.actor(c.sessionId);
+    if (!a || a.dead) return;
+    const o = WORLD_OBJECT_BY_ID.get(target);
+    if (!o || o.body !== this.body || o.trigger !== "interact") return;
+    if (!this.near(a, o)) return c.send("denied", { action: "interact", reason: "too far" });
+    if (o.mission) {
+      const active = a.char.missions.find((m) => m.id === o.mission && !m.done);
+      const def = MISSION_BY_ID.get(o.mission);
+      if (active && def) this.completeMission(a, active, def);
+      return;
+    }
+    if (o.egg) this.eggs.interact(a, this.qp(a), o, code);
+  }
+
+  /** Grant an egg's rare item (once per life), its hidden medal (once per account) and try the Hall of Firsts. */
+  claimEgg(a: PlayerActor, eggId: EggId) {
+    const egg = EGG_BY_ID.get(eggId);
+    if (!egg || a.dead) return;
+    const life = this.life(a);
+    if (life.eggs.includes(eggId)) {
+      this.toast(a, `You already took the ${egg.itemName} in this life`, "info");
+      return;
+    }
+    life.eggs.push(eggId);
+    this.giveOrDrop(a, [{ ...egg.item }]);
+    this.toast(a, `Secret found: ${egg.name} — ${egg.itemName}`, "medal");
+    this.award(a, egg.medal);
+    if (!a.identity.loadtest && engrave(eggId, a.identity.userId, a.identity.name)) {
+      this.toast(a, "You found it first — your name is engraved on the Hall of Firsts in Portus", "medal");
+    }
+    a.youDirty = true;
+    this.room.saveActor(a);
+  }
+
+  // ---------------------------------------------------------------- events (medals, missions, eggs)
+
+  private onEvent(e: GameEvent) {
+    switch (e.type) {
+      case "kill":
+        this.onKillForMissions(e);
+        this.onKillForMedals(e);
+        break;
+      case "damage":
+        this.onDamage(e);
+        break;
+      case "death":
+        this.onDeath(e);
+        break;
+      case "pickup": {
+        const a = this.actor(e.playerId);
+        if (a && e.items > 0 && e.pileOwnerUserId === a.identity.userId && e.pileCreatedAt < a.char.lifeStartedAt) this.award(a, "back_for_my_stuff");
+        break;
+      }
+      case "levelUp": {
+        const a = this.actor(e.playerId);
+        if (!a) break;
+        if (e.level >= MEDAL_RULES.TEN_DOWN_LEVEL) this.award(a, "ten_down");
+        if (e.level >= MEDAL_RULES.FIRSTLIGHT_LEVEL) this.award(a, "firstlight");
+        break;
+      }
+      case "travel": {
+        const a = this.actor(e.playerId);
+        if (!a || a.dead || !(PLANET_IDS as readonly string[]).includes(e.body)) break;
+        const life = this.life(a);
+        if (!life.visited.includes(e.body)) life.visited.push(e.body);
+        if (PLANET_IDS.every((b) => life.visited.includes(b))) this.award(a, "grand_tour");
+        break;
+      }
+      case "propBroken": {
+        const a = e.playerId ? this.actor(e.playerId) : undefined;
+        if (!a || a.identity.loadtest) break;
+        const n = progressStore.current.addStat(a.identity.userId, "props_broken", 1);
+        if (n >= MEDAL_RULES.DEMOLITION_PROPS) this.award(a, "demolition_crew");
+        break;
+      }
+      case "onboardingDone": {
+        const a = this.actor(e.playerId);
+        if (a) this.award(a, "spark");
+        break;
+      }
+      case "secretFound": {
+        const a = this.actor(e.playerId);
+        if (a) this.claimEgg(a, e.secretId);
+        break;
+      }
+      case "secretStep": {
+        const a = this.actor(e.playerId);
+        if (a) this.eggs.onStep(a, this.qp(a), e.secretId, e.step);
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  private onKillForMedals(e: KillEvent) {
+    // Long Shot: the killing blow from a Stillshot at ≥ 120 m.
+    const killer = e.killerId ? this.actor(e.killerId) : undefined;
+    if (killer && this.isStillshot(killer) && dist3(actorPos(killer), e.pos) >= MEDAL_RULES.LONG_SHOT_METRES) this.award(killer, "long_shot");
+    if (!e.bossId) return;
+    const medal = e.bossId === "tidewrath" ? "tide_turner" : e.bossId === "hollow_king" ? "regicide" : "decommissioned";
+    const eligible = (e.creditIds ?? (e.killerId ? [e.killerId] : [])).map((id) => this.actor(id)).filter((a): a is PlayerActor => !!a);
+    for (const a of eligible) {
+      this.award(a, medal);
+      const life = this.life(a);
+      if (!life.bosses.includes(e.bossId)) life.bosses.push(e.bossId);
+      if (["tidewrath", "hollow_king", "receiver"].every((b) => life.bosses.includes(b))) this.award(a, "triple_crown");
+      const q = this.qp(a);
+      if (e.npcId && q.bossFirstHit.has(e.npcId) && !q.bossHurtMe.has(e.npcId)) this.award(a, "untouchable");
+      if (e.npcId) {
+        q.bossFirstHit.delete(e.npcId);
+        q.bossHurtMe.delete(e.npcId);
+      }
+    }
+    const names = eligible.filter((a) => !a.identity.loadtest).map((a) => a.identity.name);
+    if (names.length) engrave(BOSS_FIRSTS[e.bossId], eligible[0]!.identity.userId, names.join(", ").slice(0, 200));
+  }
+
+  private isStillshot(a: PlayerActor): boolean {
+    return a.char.hotbar[a.char.selected]?.id === "stillshot";
+  }
+
+  private onDamage(e: DamageEvent) {
+    if (e.targetKind === "player") {
+      const a = this.actor(e.targetId);
+      if (!a) return;
+      const q = this.qp(a);
+      if (e.attackerKind === "npc" && e.npcKind === "woolback") q.woolbackHitAt = e.at;
+      if (e.attackerKind === "npc" && e.boss && e.attackerId && q.bossFirstHit.has(e.attackerId)) q.bossHurtMe.add(e.attackerId);
+      if (e.hpAfter > 0 && e.hpAfter <= e.maxHp * MEDAL_RULES.BY_A_THREAD_FRACTION && q.lowHpAt === null) q.lowHpAt = e.at;
+    }
+    if (e.attackerKind === "player" && e.attackerId) {
+      const a = this.actor(e.attackerId);
+      if (!a) return;
+      const q = this.qp(a);
+      if (e.targetKind === "npc" && e.boss && !q.bossFirstHit.has(e.targetId)) q.bossFirstHit.set(e.targetId, e.at);
+      // Arc Welder: one Stormcoil cast (T2+) damaging 4 different entities.
+      const held = a.char.hotbar[a.char.selected];
+      if (held?.id === "stormcoil" && held.tier >= MEDAL_RULES.ARC_WELDER_MIN_TIER) {
+        if (e.at - q.arc.at > 5) q.arc = { at: e.at, targets: new Set() };
+        q.arc.targets.add(e.targetId);
+        if (q.arc.targets.size >= MEDAL_RULES.ARC_WELDER_TARGETS) this.award(a, "arc_welder");
+      }
+    }
+  }
+
+  private onDeath(e: DeathEvent) {
+    const victim = this.actor(e.victimId);
+    if (victim) {
+      const q = this.qp(victim);
+      const now = Date.now();
+      if (e.killerKind === "npc" && e.npcKind === "woolback") this.award(victim, "killed_by_a_woolback");
+      else if (e.killerKind === "world" && now - q.woolbackHitAt <= MEDAL_RULES.WOOLBACK_FALL_WINDOW_MS) this.award(victim, "killed_by_a_woolback");
+      if (e.killerKind === "player" && e.killerId === victim.id) this.award(victim, "own_goal");
+      // Everything carried is in the pile now: nothing is worn; egg sequences reset.
+      victim.char.worn = {};
+      this.refreshCosmetics(victim);
+      this.players.set(victim.id, { ...newQuestPlayer(victim.id), medals: q.medals, pads: q.pads, title: q.title });
+    }
+    if (e.killerKind === "player" && e.killerId && e.killerId !== e.victimId) {
+      const killer = this.actor(e.killerId);
+      if (!killer) return;
+      if (victim && killer.state.party && killer.state.party === victim.state.party) this.award(victim, "with_friends_like_these");
+      if (this.isStillshot(killer) && dist3(actorPos(killer), e.pos) >= MEDAL_RULES.LONG_SHOT_METRES) this.award(killer, "long_shot");
+    }
+  }
+
+  // ---------------------------------------------------------------- admin
+
+  onAdmin(a: PlayerActor, cmd: string, args: Record<string, unknown>): boolean {
+    switch (cmd) {
+      case "stage":
+        runStage(this, a, Math.trunc(Number(args.n ?? 1)), args.all === true);
+        return true;
+      case "medal": {
+        const id = String(args.id ?? "");
+        const t = typeof args.target === "string" ? (this.actor(args.target) ?? a) : a;
+        this.award(t, id);
+        return true;
+      }
+      case "egg": {
+        const id = String(args.id ?? "") as EggId;
+        const t = typeof args.target === "string" ? (this.actor(args.target) ?? a) : a;
+        if (typeof args.step === "string") this.eggs.onStep(t, this.qp(t), id, args.step);
+        else this.claimEgg(t, id);
+        return true;
+      }
+      default:
+        return false;
+    }
+  }
+}
+
+type CharacterMission = PlayerActor["char"]["missions"][number];
+
+export function createQuestSystem(room: BodyRoom): RoomSystem {
+  return new QuestSystem(room);
+}
+

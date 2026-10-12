@@ -5,6 +5,7 @@ export { gameDb, openGameDb, setGameDb, type Db } from "./game-db.ts";
 export * from "./accounts.ts";
 export * from "./characters.ts";
 export * from "./piles.ts";
+export * from "./stats.ts";
 export * from "./sessions.ts";
 export { linkAccounts, type LinkResult } from "./link.ts";
 export { displayNameProblem, isOffensiveName, NAME_MESSAGES, type NameProblem } from "./names.ts";
