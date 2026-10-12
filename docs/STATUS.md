@@ -21,7 +21,7 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 - [x] M0 Setup and skeleton (live client + server; dev-guest tokens disabled in prod 03:40Z)
   - [x] caffeinate, start time
   - [x] Railway project + service + volume
-  - [x] workspace scaffold, docs, AGENTS.md (no CONTRIBUTING.md yet)
+  - [x] workspace scaffold, docs, AGENTS.md, README.md (no CONTRIBUTING.md yet)
   - [x] Vercel project + domain + DNS
   - [x] Railway domain + DNS + env
   - [ ] Cloudflare: account, workers.dev and Workers token done (D24); **TURN key pending the owner**
@@ -37,23 +37,24 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
   production needs Resend's domain verified (owner).
 - [ ] M5 Voice: merged d40d058, tested with bots. Open: E2E T4 needs the owner's TURN key and two
   real browsers with microphones.
-- [ ] M6 Content: all content lanes merged; E2E T2 and T6 pass. Open: F12 content fixes (egg-spawn
-  cap, Prism Bubble, Patchkit, bad drop ids, Hollow King solo protection) and medal/egg tests that
-  emit synthetic events instead of the real paths (docs/reviews/2026-10-12-f12-*).
-- [ ] M7 Look and assets: render look, characters and the UI port merged. Open: concept art (not
-  generated), the onboarding tutorial + training dummy (SPEC §6.12), a per-body visual check.
+- [x] M6 Content: all content lanes merged; E2E T2 and T6 pass. The F12 content fixes (egg-spawn
+  caps, Prism Bubble, Patchkit, drop ids, Hollow King solo protection, real-path medal/egg tests)
+  merged in c57d406.
+- [ ] M7 Look and assets: render look, characters, the UI port and the onboarding tutorial +
+  training dummies (1c30f4e, seen live on a fresh guest) merged. Open: concept art (not generated),
+  a per-body visual check.
 - [x] M8 Social and operations (merged 1a2ee50; E2E T7 passes). The `/stats` test-session check
   isn't recorded.
 - [ ] M9 Hardening: F2 load test, perf pass (F10/F11) and the E2E run (T4 blocked) done.
   - [ ] F12 three-model review: blockers fixed, reviewers sign off
   - [ ] Security pass (auth flows, rate limits, admin routes, input validation, no secrets in the bundle)
-  - [ ] Voice launch items from docs/risk-assessment.md §5: a public complaints/appeals contact, a
-    terms page (voice rules, 16+), admin voice-mutes persisted in game.db
+  - [ ] Voice launch items from docs/risk-assessment.md §5: a public complaints/appeals contact and
+    a terms page (voice rules, 16+). Admin voice-mutes are persisted in game.db (migration 5, 668ec82).
   - [ ] Before the repo goes public: docs/pre-public.md (owner)
 - [ ] M10 Video-ready: photo mode, `stage <n>` and docs/staged-scenes.md done (F13). Open: the landing
   flythrough video, the final report to the owner (SPEC §12).
-- [ ] M11 Extras: photo mode (#1) done; weather + day/night (#3–4) merged 743d651; horses (#2) in
-  progress; more cosmetics and Easter eggs (#5) not started.
+- [ ] M11 Extras: photo mode (#1) done; weather + day/night (#3–4) merged 743d651; horses (#2)
+  merged acdfcb3; more cosmetics and Easter eggs (#5) not started.
 
 ## Finish line (SPEC §1)
 
@@ -68,9 +69,9 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 | F7 email sign-in | 🟡 | browser E2E T5 passes locally (dev outbox); production waits for Resend domain verification (owner) |
 | F8 2-player boss | ✅ | browser E2E T6: Tidewrath killed by two players (admin heals) |
 | F9 screenshot share | ✅ | browser E2E T7 |
-| F10 M1 ≥ 60 fps Medium | ✅* | ?bench=g1 59.9 fps p50, p95 17.6 ms (T3 Chromium, not plugged-in Chrome) |
-| F11 Low on weak profile | ✅* | `?bench=g1&tier=low&cpuslow=4`: 51.3 fps p50, p95 29.8 ms, 0 shader builds (D29 emulation) |
-| F12 three-model review | 🛠→🔎 | Round 1 (bb54dc3/743d651): Codex 7, Sonnet 2, Opus 2 blockers. All fixed in 9 lanes, each Codex-reviewed (docs/reviews/2026-10-12-f12-*); merged at 668ec82 (deployed 08:42Z; 902 tests). Final three-model review of 668ec82 running |
+| F10 M1 ≥ 60 fps Medium | ✅* | re-run on 668ec82 (weather, NPCs, horses, collision): ?bench=g1 59.9 fps p50, p95 18.6 ms; night storm 59.9 fps p50, p95 18.5 ms; 0 shader builds (T3 Chromium, not plugged-in Chrome) |
+| F11 Low on weak profile | ✅* | re-run on 668ec82: `?bench=g1&tier=low&cpuslow=4`: 59.2 fps p50 (mean 57.0), p95 21.9 ms, p99 25.6 ms, 0 shader builds (D29 emulation) |
+| F12 three-model review | 🛠 | Round 1: Codex 7, Sonnet 2, Opus 2 blockers, all fixed and verified closed. Final round on 668ec82: **Sonnet yes**; Codex no (2 payout-after-commit blockers); Opus no (two-packet teleport via the planet centre). Fixing in lane/f12-r2 + lane/f12-r2-auth (docs/reviews/2026-10-12-f12-final-*) |
 | F13 photo mode + 5 scenes | ✅ | browser E2E T8; `stage <n>` + docs/staged-scenes.md |
 
 ## Lanes (who owns what right now)
@@ -97,8 +98,21 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 | F12 NPC/boss (Opus B2 respawn persistence, evade, arena scaling/cover, NPC LOS) | MERGED f787f37 (Codex round 1 fixed; migration 3 = copy_state) | — |
 | F12 weather/sky (override broadcast, stage sky, Hollowmere look, nits) | MERGED 5e9d5ce (Codex round 1 fixed) | — |
 | Horses (M11 #2) | MERGED acdfcb3 (deployed; Codex-reviewed) | — |
+| F12 round 2: payouts, teleport, movement sweep, quest/onboarding nits | Opus sub-agent | ../fl-wt-f12r2 (lane/f12-r2) |
+| F12 round 2: auth/social (OTP enumeration and drain, self-delete, prune) | Opus sub-agent | ../fl-wt-f12r2b (lane/f12-r2-auth) |
 
 ## Measured numbers
+
+- 09:30Z F11 re-run on the live site at 668ec82: `?bench=g1&tier=low&cpuslow=4` (4× main-thread slowdown, D29),
+  Low, 1125×661 internal, 40-avatar crowd, 180 s warm + 60 s: **59.2 fps p50 (mean 57.0), frame p95 21.9 ms, p99
+  25.6 ms, max 40.5 ms, 0 shader builds**, draws mean 182 (was 51.3 fps p50 / p95 29.8 ms at 03:45Z: the F12 client
+  lane removed per-frame allocations).
+
+- 09:20Z F10 re-run on the live site at 668ec82 (all F12 fixes + weather/day-night, horses, prop collision), T3 Code's
+  built-in browser (Chromium/WebGPU) on the owner's M1, 1785×1048 canvas, Medium, `?bench=g1` (180 s warm + 60 s):
+  **59.9 fps p50 (vsync-capped), frame p95 18.6 ms, p99 18.7 ms, max 20.5 ms, 0 shader builds**, draws mean 288,
+  1.05 M triangles. Night storm pass (`&weather=storm&time=0`, Portus 00:00 storm 90 %): **59.9 fps p50, p95 18.5 ms,
+  max 18.8 ms, 0 shader builds**, draws mean 332. Two agent test suites were running on the same machine.
 
 - 08:45Z F2 re-run on production at 668ec82 (every F12 fix, NPCs, destruction, weather, horses): 40 load-test bots on one
   Arcadia copy for 600 s with `--fire`: 0 failures/disconnects, 40/40 clients in all 22 samples; tick p50 ≤ 1.27 ms,

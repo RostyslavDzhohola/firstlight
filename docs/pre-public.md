@@ -32,7 +32,7 @@ printf '%s\n' \
   'regex:/Users/[^/\n]+/Projects/[^/\n]+/fl-wt-render/==>' \
   'regex:/Users/[^/\n]+/Projects/[^/\n]+/fl-wt-render==>fl-wt-render' > ../fl-replace.txt
 git filter-repo --replace-text ../fl-replace.txt
-git log --all -p | grep -c -E '/Users/[A-Za-z]'            # must print 0
+git log --all -p | grep -c -E '/Users/[A-Za-z]'            # must print 0 (also add docs/reviews/2026-10-12-f12-sonnet-5-5.md's one /Users line from dd4ed12 to the replace list)
 ```
 
 Push the rewritten history (filter-repo removes the `origin` remote on purpose):
@@ -120,4 +120,12 @@ git grep -n -i -E 'oasis|ready player|parzival|halliday|sixers|\bIOI\b|sorrento'
   them as plain descriptions.
 - `docs/reviews/` are kept as records and quote some of this wording.
 - The F12 review asked for the Meridian Associates to move off the clone-trooper look (slate grey,
-  amber visors, content.md §3.4): confirm that fix is merged.
+  amber visors, content.md §3.4): merged in c57d406 (the Sonnet final review confirmed it).
+- The NPC name "Hopbit" is one letter from a franchise word, which content.md §10's own "no
+  one-letter variants" rule bans. Low risk and display-name only (the id `hopbit` can stay): decide
+  whether to rename before going public.
+
+## 7. Front page
+
+- README.md exists (what it is, how to run it, licences). Add a CONTRIBUTING.md (how to run tests,
+  the erasable-TypeScript rule, review process) if you want outside contributions.

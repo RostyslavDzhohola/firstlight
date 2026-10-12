@@ -522,7 +522,7 @@ export class VoiceSystem implements RoomSystem {
     c.send("voice:reported", { target: r.data.target });
   }
 
-  /** Admin: server-side voice mute. Persists for the account while this process runs. */
+  /** Admin: server-side voice mute for the account, stored in game.db (voice_mute): it survives restarts and deploys. */
   private adminMute(c: Client, m: unknown): void {
     const { a } = this.who(c);
     if (!a || !a.identity.admin) return;

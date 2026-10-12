@@ -5,6 +5,7 @@ import type { Room } from "@colyseus/sdk";
 import { awardMedal, discoverPad, getAccount, loadCharacter, saveCharacter, type CharacterData } from "../src/db/index.ts";
 import { otpSendsToday } from "../src/db/otp-budget.ts";
 import { DevOutbox, type SendResult } from "../src/auth/mailer.ts";
+import { OTP_PER_ACCOUNT_PER_DAY } from "../src/auth/better-auth.ts";
 
 import type { AccountLinkedEvent } from "../src/auth/links.ts";
 import { api, Browser, decodeJwt, joinWithToken, play, startAuthServer, type AuthServer } from "./auth-helpers.ts";
@@ -485,17 +486,17 @@ describe("who can ask for a code (F12: the global OTP budget can't be drained)",
     server = await startAuthServer({ mailer });
     const a = new Browser(server, "198.51.100.65");
     await a.playToken();
-    await a.saveWithEmail("taken@example.test"); // 1 of the 3 hourly codes for this address
+    await a.saveWithEmail("taken@example.test"); // a player who may save: not counted against public requests
     const b = new Browser(server, "198.51.100.67");
     await b.playToken();
     await b.saveWithEmail("broken@example.test");
     const unknown = await publicAsk(server, "nobody@example.test");
     expect(unknown).toMatchObject({ status: 200 });
     for (let i = 0; i < 4; i++) expect(await publicAsk(server, "taken@example.test")).toMatchObject({ status: unknown.status, body: unknown.body, type: unknown.type });
-    await waitFor(() => mailer.sent === 4); // 2 more codes went out; the 4th public ask hit the hourly cap silently
+    await waitFor(() => mailer.sent === 5); // 3 more codes went out; the 4th public ask hit the public hourly cap silently
     mailer.fail = true;
     expect(await publicAsk(server, "broken@example.test")).toMatchObject({ status: unknown.status, body: unknown.body, type: unknown.type });
-    await waitFor(() => mailer.attempts === 5);
+    await waitFor(() => mailer.attempts === 6);
     expect(mailer.lastCode("nobody@example.test")).toBeNull();
   });
 
@@ -512,6 +513,166 @@ describe("who can ask for a code (F12: the global OTP budget can't be drained)",
     expect(r.ms).toBeLessThan(1500);
     expect(mailer.sent).toBe(before);
     await waitFor(() => mailer.sent === before + 1, 8000);
+  });
+});
+
+/** A raw POST to /api/auth from a browser with no session (an attacker probing addresses). */
+async function rawAuth(s: AuthServer, path: string, body: unknown, ip = "203.0.113.70") {
+  const res = await new Browser(s, ip).fetch(`/api/auth${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  return { status: res.status, body: await res.text() };
+}
+
+const authUserRow = (s: AuthServer, id: string) => s.accounts.authDb.prepare(`SELECT id FROM "user" WHERE id = ?`).get(id);
+
+describe("Better Auth endpoints the game doesn't use are off (F12 final review S6, S8)", () => {
+  it("a guest can't delete itself (its game.db rows and name would outlive the auth user); saving still removes the guest user", async () => {
+    server = await startAuthServer();
+    const b = new Browser(server, "198.51.100.90");
+    const token = await b.playToken();
+    const id = String(decodeJwt(token).sub);
+    expect((await play(server, token)).json.ok).toBe(true);
+    expect((await api(server, "/api/account/name", token, { body: { name: "Keeper" } })).json.ok).toBe(true);
+    const del = await b.fetch("/api/auth/delete-anonymous-user", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    expect(del.status).toBe(404);
+    expect(authUserRow(server, id)).toBeTruthy();
+    expect((await play(server, token)).json.ok).toBe(true);
+    // Better Auth's post-link cleanup is a server-side call: the guest user still goes on save.
+    await b.saveWithEmail("keeper@example.test");
+    expect(authUserRow(server, id)).toBeUndefined();
+  });
+
+  it("every email-OTP and email/password endpoint the game doesn't call answers 404", async () => {
+    server = await startAuthServer();
+    const victim = new Browser(server, "198.51.100.92");
+    await victim.playToken();
+    await victim.saveWithEmail("victim@example.test");
+    const body = { email: "victim@example.test", type: "forget-password", otp: "000000", newEmail: "other@example.test", password: "correct-horse-battery", newPassword: "correct-horse-battery", currentPassword: "x", token: "t" };
+    const paths = [
+      "/email-otp/check-verification-otp",
+      "/email-otp/verify-email",
+      "/email-otp/request-password-reset",
+      "/forget-password/email-otp",
+      "/email-otp/reset-password",
+      "/email-otp/request-email-change",
+      "/email-otp/change-email",
+      "/sign-in/email",
+      "/sign-up/email",
+      "/request-password-reset",
+      "/reset-password",
+      "/send-verification-email",
+      "/change-password",
+      "/verify-password",
+    ];
+    for (const path of paths) expect((await rawAuth(server, path, body)).status, path).toBe(404);
+    const verify = await victim.fetch("/api/auth/verify-email?token=x");
+    expect(verify.status).toBe(404);
+    // What the game does use still works.
+    expect((await rawAuth(server, "/email-otp/send-verification-otp", { email: "victim@example.test", type: "sign-in" })).status).toBe(200);
+  });
+
+  it("wrong, used-up and expired codes get one answer, whether or not the address is saved", async () => {
+    server = await startAuthServer();
+    const outbox = server.accounts.devOutbox!;
+    const victim = new Browser(server, "198.51.100.93");
+    await victim.playToken();
+    await victim.saveWithEmail("victim@example.test");
+    // A session-less attacker asks for a code (only the saved address gets one), then guesses.
+    const guesses = async (email: string, ip: string) => {
+      const before = outbox.sent;
+      expect((await rawAuth(server!, "/email-otp/send-verification-otp", { email, type: "sign-in" }, ip)).status).toBe(200);
+      if (email === "victim@example.test") await waitFor(() => outbox.sent > before);
+      const wrong = outbox.lastCode(email) === "000000" ? "111111" : "000000";
+      const out: { status: number; body: string }[] = [];
+      for (let i = 0; i < 4; i++) out.push(await rawAuth(server!, "/sign-in/email-otp", { email, otp: wrong }, `${ip}${i}`));
+      return out;
+    };
+    const saved = await guesses("victim@example.test", "203.0.113.71");
+    const unknown = await guesses("nobody@example.test", "203.0.113.72");
+    expect(saved).toEqual(unknown);
+    expect(saved[0]!.status).toBe(400);
+
+    // An expired code for a saved address looks like no code at all.
+    const before = outbox.sent;
+    await rawAuth(server, "/email-otp/send-verification-otp", { email: "victim@example.test", type: "sign-in" }, "203.0.113.73");
+    await waitFor(() => outbox.sent > before);
+    server.accounts.authDb.prepare(`UPDATE "verification" SET "expiresAt" = ? WHERE identifier = ?`).run(new Date(Date.now() - 60_000).toISOString(), "sign-in-otp-victim@example.test");
+    const expired = await rawAuth(server, "/sign-in/email-otp", { email: "victim@example.test", otp: outbox.lastCode("victim@example.test")! }, "203.0.113.74");
+    expect(expired).toEqual(unknown[0]);
+  });
+
+  it("a player who may save gets the same answer for saved and unknown addresses, whatever public requests did first", async () => {
+    server = await startAuthServer();
+    const outbox = server.accounts.devOutbox!;
+    const victim = new Browser(server, "198.51.100.94");
+    await victim.playToken();
+    await victim.saveWithEmail("victim@example.test");
+    // Public requests for a saved address are delivered (up to the hourly cap); for an unknown one nothing happens.
+    const before = outbox.sent;
+    for (const email of ["victim@example.test", "nobody@example.test"]) for (let i = 0; i < 3; i++) await rawAuth(server, "/email-otp/send-verification-otp", { email, type: "sign-in" }, "203.0.113.75");
+    await waitFor(() => outbox.sent === before + 3);
+    const attacker = new Browser(server, "203.0.113.76");
+    await attacker.playToken();
+    await attacker.levelUp(2);
+    const a = await attacker.client.emailOtp.sendVerificationOtp({ email: "victim@example.test", type: "sign-in" });
+    const b = await attacker.client.emailOtp.sendVerificationOtp({ email: "nobody@example.test", type: "sign-in" });
+    expect(a.error).toBeNull();
+    expect(b.error).toBeNull();
+  });
+});
+
+describe("one session can't drain the OTP budget (F12 final review S7)", () => {
+  const ask = (b: Browser, email: string) => b.client.emailOtp.sendVerificationOtp({ email, type: "sign-in" });
+
+  it(`a player who may save gets ${OTP_PER_ACCOUNT_PER_DAY} codes a day, whatever its IP; other players are unaffected`, async () => {
+    server = await startAuthServer({ rateLimit: true });
+    const b = new Browser(server, "198.51.100.95");
+    await b.playToken();
+    await b.levelUp(2);
+    for (let i = 0; i < OTP_PER_ACCOUNT_PER_DAY; i++) {
+      b.ip = `203.0.113.${100 + i}`; // a new address every request (the per-IP cap doesn't help)
+      expect((await ask(b, `drain${i}@example.test`)).error).toBeNull();
+    }
+    b.ip = "203.0.113.150";
+    const over = await ask(b, "drain-over@example.test");
+    expect(over.error).toMatchObject({ status: 429, code: "SAVING_BUSY" });
+    expect(server.accounts.devOutbox!.lastCode("drain-over@example.test")).toBeNull();
+    expect(otpSendsToday(server.accounts.db)).toBe(OTP_PER_ACCOUNT_PER_DAY);
+    const other = new Browser(server, "198.51.100.96");
+    await other.playToken();
+    await other.levelUp(2);
+    expect((await ask(other, "other@example.test")).error).toBeNull();
+  });
+
+  it("a failed send doesn't count against the player's daily cap", async () => {
+    const mailer = new ControlledOutbox();
+    server = await startAuthServer({ mailer });
+    const b = new Browser(server, "198.51.100.97");
+    await b.playToken();
+    await b.levelUp(2);
+    mailer.fail = true;
+    for (let i = 0; i < OTP_PER_ACCOUNT_PER_DAY; i++) expect((await ask(b, `fail${i}@example.test`)).error?.status).toBe(503);
+    mailer.fail = false;
+    expect((await ask(b, "works@example.test")).error).toBeNull();
+  });
+
+  it("a banned account's session gets no code at all", async () => {
+    server = await startAuthServer();
+    const out = server.accounts.devOutbox!;
+    const b = new Browser(server, "198.51.100.98");
+    const id = String(decodeJwt(await b.playToken()).sub);
+    await b.levelUp(2);
+    const { banUser } = await import("../src/db/index.ts");
+    banUser(server.accounts.db, { userId: id, ipHash: null, reason: "test" });
+    const r = await ask(b, "banned-new@example.test");
+    expect(r.error).toMatchObject({ status: 403, code: "BANNED" });
+    // Not even through the public path for a saved address.
+    const saver = new Browser(server, "198.51.100.99");
+    await saver.playToken();
+    await saver.saveWithEmail("saved-elsewhere@example.test");
+    const sent = out.sent;
+    expect((await ask(b, "saved-elsewhere@example.test")).error).toMatchObject({ status: 403, code: "BANNED" });
+    expect(out.sent).toBe(sent);
+    expect(otpSendsToday(server.accounts.db)).toBe(1);
   });
 });
 

@@ -36,7 +36,7 @@ export const voiceSafety = {
   },
 };
 
-/** Admin voice mutes (process-wide by account; the moderation module owns them). */
+/** Admin voice mutes (by account, stored in game.db; the moderation module owns them). */
 export const voiceMutes = {
   set(userId: string, on: boolean): void {
     setVoiceMuted(userId, on);

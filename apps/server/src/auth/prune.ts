@@ -1,15 +1,18 @@
-// Guest pruning (F12): guests who never got past level 1, earned nothing and haven't played for 30
-// days are deleted from auth.db (user, sessions, accounts) and game.db (account, character, pads,
-// stats, blocks), so the databases stay bounded and squatted display names are released. Run at
-// boot and daily by createAccounts().
+// Guest pruning (F12): guests who got no further than the tutorial, earned nothing else and haven't
+// played for 30 days are deleted from auth.db (user, sessions, accounts) and game.db (account,
+// character, pads, stats, medals, blocks), so the databases stay bounded and squatted display names
+// are released. Run at boot and daily by createAccounts().
 //
 // Policy:
 // - "Played" is the latest of the account's last sign-in (account.last_seen_at), its last character
 //   save (character.updated_at: autosave every 30 s, logout, shutdown) and its play sessions
 //   (session_log, an open session counting as now), so a long session that just ended, or was cut
 //   by a restart, is recent. Anyone with a live, dropped or lingering actor is never touched.
-// - A level-1 character's coins and inventory don't keep it: they come from a few minutes of play
-//   and are lost on death anyway. Medals, the Hall of Firsts, a ban or the admin flag do.
+// - Finishing the tutorial pays exactly ONBOARDING_XP (level 2) and the Spark medal, so neither
+//   keeps a guest (F12 final review S5): a character that never went past level 2 or that much XP,
+//   in its row or any recorded session, is abandoned. Its coins and inventory don't keep it either:
+//   they come from a few minutes of play and are lost on death anyway. Any other medal, the Hall of
+//   Firsts, a ban or the admin flag do.
 // - Reports, bans, piles and the analytics log are kept (moderation history; the log has its own
 //   90-day pruning).
 //
@@ -22,13 +25,21 @@
 //      next run deletes.
 
 import type Database from "better-sqlite3";
+import { ONBOARDING, TRAINING_DUMMIES } from "@firstlight/shared/content/onboarding";
 import { stmt, tx, type Db } from "../db/game-db.ts";
 import { hub } from "../world/hub.ts";
 
+/** Everything the tutorial pays (3 dummies + completion): exactly level 2. */
+export const ONBOARDING_XP = ONBOARDING.DUMMY_XP * TRAINING_DUMMIES.length + ONBOARDING.DONE_XP;
+
 export const GUEST_PRUNE = {
   INACTIVE_DAYS: 30,
-  /** Guests whose character never got above this level. */
-  MAX_LEVEL: 1,
+  /** Guests whose character never got above this level (the tutorial's)... */
+  MAX_LEVEL: 2,
+  /** ...or above this much XP (the tutorial's: XP past it is real play). */
+  MAX_XP: ONBOARDING_XP,
+  /** The tutorial's medal doesn't keep a guest; any other medal does. */
+  IGNORED_MEDAL: "spark",
   /** Deletions per run, so a boot after a long gap stays quick (the daily run continues). */
   MAX_PER_RUN: 5000,
 };
@@ -45,6 +56,7 @@ interface GameFacts {
   admin: number | null;
   banned: number | null;
   level: number | null;
+  xp: number | null;
   maxLevel: number | null;
   medals: number;
   hall: number;
@@ -68,7 +80,7 @@ export function pruneGuests(authDb: Database.Database, db: Db, opts: PruneOption
   const deleteGameRows = (ids: readonly string[]) =>
     tx(db, () => {
       for (const id of ids) {
-        for (const table of ["character", "discovered_pad", "account_stat", "account"]) stmt(db, `DELETE FROM ${table} WHERE user_id = ?`).run(id);
+        for (const table of ["character", "discovered_pad", "account_stat", "medal", "account"]) stmt(db, `DELETE FROM ${table} WHERE user_id = ?`).run(id);
         stmt(db, "DELETE FROM block WHERE user_id = ? OR blocked_user_id = ?").run(id, id);
       }
     });
@@ -95,16 +107,17 @@ export function pruneGuests(authDb: Database.Database, db: Db, opts: PruneOption
             (SELECT is_admin FROM account WHERE user_id = @id) AS admin,
             (SELECT banned_until FROM account WHERE user_id = @id) AS banned,
             (SELECT level FROM character WHERE user_id = @id) AS level,
+            (SELECT xp FROM character WHERE user_id = @id) AS xp,
             (SELECT MAX(max_level) FROM session_log WHERE user_id = @id) AS maxLevel,
-            EXISTS (SELECT 1 FROM medal WHERE user_id = @id) AS medals,
+            EXISTS (SELECT 1 FROM medal WHERE user_id = @id AND medal_id <> @ignoredMedal) AS medals,
             EXISTS (SELECT 1 FROM hall_of_firsts WHERE user_id = @id) AS hall`,
   );
   const prunable = (id: string): boolean => {
     if (hub.get(id) || opts.isLive?.(id)) return false;
-    const f = facts.get({ id, now }) as GameFacts;
+    const f = facts.get({ id, now, ignoredMedal: GUEST_PRUNE.IGNORED_MEDAL }) as GameFacts;
     if (Math.max(f.seen ?? 0, f.saved ?? 0, f.played ?? 0) >= cutoff) return false;
     if (f.admin || f.banned !== null || f.medals || f.hall) return false;
-    return (f.level ?? 0) <= GUEST_PRUNE.MAX_LEVEL && (f.maxLevel ?? 0) <= GUEST_PRUNE.MAX_LEVEL;
+    return (f.level ?? 0) <= GUEST_PRUNE.MAX_LEVEL && (f.maxLevel ?? 0) <= GUEST_PRUNE.MAX_LEVEL && (f.xp ?? 0) <= GUEST_PRUNE.MAX_XP;
   };
 
   const tombstone = (ids: readonly string[]) =>

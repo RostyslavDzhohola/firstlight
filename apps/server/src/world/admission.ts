@@ -41,16 +41,26 @@ export function travelRedirect(identity: Identity, body: BodyId, now: number): B
  * Accounts whose last change couldn't be saved (a death, F12 re-review S5). They aren't admitted
  * again until a storage health check for the account passes: its character row is read and written
  * back in a transaction. Otherwise a player whose saves keep failing would die, be sent back,
- * rejoin alive and die again.
+ * rejoin alive and die again. A mark lapses after LAPSE_MS (a new failure marks the account again),
+ * so accounts that never come back aren't kept for good (F12 final review nit).
  */
-const recovering = new Set<string>();
+export const STORAGE_RECOVERY = { LAPSE_MS: 3_600_000 };
+
+const recovering = new Map<string, number>(); // userId → marked at
+
+function sweepLapsed(now: number): void {
+  for (const [u, at] of recovering) if (now - at >= STORAGE_RECOVERY.LAPSE_MS) recovering.delete(u);
+}
 
 export const storageRecovery = {
-  mark(userId: string): void {
-    recovering.add(userId);
+  mark(userId: string, now = Date.now()): void {
+    sweepLapsed(now);
+    recovering.set(userId, now);
   },
   /** May the account play? True unless recovering and the health check still fails. */
-  ok(userId: string): boolean {
+  ok(userId: string, now = Date.now()): boolean {
+    if (!recovering.size) return true;
+    sweepLapsed(now);
     if (!recovering.has(userId)) return true;
     try {
       withTx(() => {
@@ -63,8 +73,11 @@ export const storageRecovery = {
     recovering.delete(userId);
     return true;
   },
+  /** Marked accounts (tests). */
+  size(): number {
+    return recovering.size;
+  },
   clear(): void {
     recovering.clear();
   },
 };
-

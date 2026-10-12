@@ -81,7 +81,8 @@ file alone before calling it a failure.
   each server handler. Change the type and the schema together. Rate-limit new client messages
   (inventory and quest ops allow 5/s) and answer refusals with `denied {action, reason}`.
 - **Close codes:** `CLOSE` in `packages/shared/src/net/social.ts`: 4100 elsewhere, 4101 merged,
-  4102 banned, 4103 logged out, 4104 kicked (Colyseus reserves 4000–4010). Add new codes there and
+  4102 banned, 4103 logged out, 4104 kicked, 4105 storage (saving is failing; the client backs off
+  and shows a notice) (Colyseus reserves 4000–4010). Add new codes there and
   handle them in `Game.onRoomClosed` (`apps/client/src/game/Game.ts`).
 
 ## Tests

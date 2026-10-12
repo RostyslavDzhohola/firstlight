@@ -81,10 +81,9 @@ anonymous guests, live speech can't be checked in advance, and radio channels ar
     only address in the code is the sign-in sender;
   - a published terms page that states the voice rules and the 16+ condition (the landing page links
     only to the source code);
-  - admin voice-mutes persisted in game.db (today they are an in-memory set and end when the server
-    restarts or redeploys);
   - personal mutes are per browser (localStorage), so they don't follow a signed-in player to a
     second browser.
+  Admin voice-mutes are persisted in game.db (`voice_mute`, migration 5) and survive restarts.
 - **If risk rises** (repeated R3/R4 reports, or many under-16 users): switch voice to party-only
   by default, require a saved account for voice, or add real age assurance before voice.
 
