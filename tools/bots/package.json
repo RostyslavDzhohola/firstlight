@@ -1,0 +1,12 @@
+{
+  "name": "@firstlight/bots",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "load": "node src/load.ts"
+  },
+  "dependencies": {
+    "@colyseus/sdk": "0.18.5",
+    "@firstlight/shared": "workspace:*"
+  }
+}

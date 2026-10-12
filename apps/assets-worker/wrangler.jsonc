@@ -1,0 +1,8 @@
+{
+  // Assets-only Worker: serves content-versioned game files (models, textures, audio) from
+  // /v/<buildId>/… with CORS * and immutable caching. No script runs, so requests are free.
+  "name": "firstlight-assets",
+  "compatibility_date": "2026-10-01",
+  "assets": { "directory": "./public", "not_found_handling": "none" },
+  "workers_dev": true
+}

@@ -6,3 +6,4 @@ export * from "./planet/pads.ts";
 export * from "./planet/terrain.ts";
 export * from "./planet/chunk.ts";
 export * from "./planet/props.ts";
+export * from "./planet/portals.ts";

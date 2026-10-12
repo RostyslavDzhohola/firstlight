@@ -16,10 +16,20 @@ export interface MatchmakingLimits {
 
 export interface PlayInput {
   body: BodyId;
+  starter?: number;
+  palette?: number;
   partyLeaderRoomId?: string;
   partySize?: number;
   loadtest?: boolean;
 }
+
+/**
+ * Server-side party placement: where a user's party leader is and how big the party is. The
+ * party system (social lane) installs this; client claims are never trusted (review).
+ */
+export const partyPlacement: { current: (userId: string, body: BodyId) => { leaderRoomId?: string; size: number } | undefined } = {
+  current: () => undefined,
+};
 
 const locks = new Map<string, Promise<unknown>>();
 
@@ -58,7 +68,8 @@ export async function onlineCount(includeLoadtest = false): Promise<number> {
 
 export async function play(identity: Identity, input: PlayInput, limits: MatchmakingLimits): Promise<PlayResponse> {
   const loadtest = !!input.loadtest;
-  if (loadtest && !identity.loadtest) return { ok: false, error: "forbidden" };
+  // Bots only in load-test rooms, players only in public rooms ("no fake players, ever").
+  if (loadtest !== !!identity.loadtest) return { ok: false, error: "forbidden" };
   const partySize = Math.max(1, Math.min(4, input.partySize ?? 1));
 
   return withLock(`${loadtest ? "lt" : "pub"}:${input.body}`, async () => {
@@ -82,7 +93,7 @@ export async function play(identity: Identity, input: PlayInput, limits: Matchma
     }
     if (!target) {
       target = mine.find((r) =>
-        !r.locked && (partySize > 1 ? r.clients + partySize <= limits.maxClients : r.clients < limits.soloFillLimit),
+        !r.locked && (partySize > 1 || loadtest ? r.clients + partySize <= limits.maxClients : r.clients < limits.soloFillLimit),
       );
     }
     if (!target) {
@@ -93,7 +104,7 @@ export async function play(identity: Identity, input: PlayInput, limits: Matchma
       target = await matchMaker.createRoom("body", { body: input.body, copy, loadtest });
     }
     queue.delete(identity.userId);
-    const reservation = await matchMaker.reserveSeatFor(target, { body: input.body }, identity);
+    const reservation = await matchMaker.reserveSeatFor(target, { body: input.body, starter: input.starter, palette: input.palette }, identity);
     return { ok: true, reservation: reservation as unknown as import("@firstlight/shared/net/protocol").SeatReservation };
   });
 }

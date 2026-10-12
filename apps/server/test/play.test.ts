@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Client } from "@colyseus/sdk";
 import type { Room } from "@colyseus/sdk";
 import type { Game } from "../src/app.ts";
-import { joinAs, playRequest, startServer, waitFor } from "./helpers.ts";
+import { partyPlacement } from "../src/world/matchmaking.ts";
+import { joinAs, playRequest, safeLeave, startServer, waitFor } from "./helpers.ts";
 
 let game: Game;
 const rooms: Room[] = [];
@@ -12,7 +13,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  for (const r of rooms.splice(0)) await r.leave().catch(() => {});
+  for (const r of rooms.splice(0)) await safeLeave(r);
   await game.close();
 });
 
@@ -80,9 +81,17 @@ describe("entering the world", () => {
     for (let i = 0; i < 4; i++) joined.push(await joinAs(game, `p${i}`, "hollowmere"));
     rooms.push(...joined);
     const leaderRoom = joined[0]!.roomId;
-    const friend = await joinAs(game, "friend", "hollowmere", { partyLeaderRoomId: leaderRoom });
-    rooms.push(friend);
-    expect(friend.roomId).toBe(leaderRoom);
+    // Client party claims are ignored; only the server's party placement counts.
+    const liar = await playRequest(game, "dev:liar:liar", { body: "hollowmere", partyLeaderRoomId: leaderRoom, partySize: 2 });
+    expect(liar.ok && liar.reservation.roomId).not.toBe(leaderRoom);
+    partyPlacement.current = (userId) => (userId === "friend" ? { leaderRoomId: leaderRoom, size: 2 } : undefined);
+    try {
+      const friend = await joinAs(game, "friend", "hollowmere");
+      rooms.push(friend);
+      expect(friend.roomId).toBe(leaderRoom);
+    } finally {
+      partyPlacement.current = () => undefined;
+    }
   });
 
   it("direct joins that bypass /api/play are refused", async () => {

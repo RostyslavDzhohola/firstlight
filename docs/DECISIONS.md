@@ -273,3 +273,27 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
 - **D21 (run, 01:20Z):** Cloudflare has no signed-in account in Chrome; creating one means accepting
   Cloudflare's terms, which needs the owner. Asked the owner (non-blocking). Voice and asset hosting
   are built and tested locally meanwhile.
+- **D22 (run, 01:40Z):** owner is using the Mac: all Codex computer-use (Chrome/mouse) work is paused
+  until the owner says the screen is free. Code-only work continues; visual checks queue up.
+- **D23 (run, 01:55Z):** owner asked to stop using Chrome/computer use (it took over the mouse even
+  after cancelling: Codex left a cua kernel + osascript running; both killed). All UI/E2E/visual
+  checks move to T3 Code's built-in browser (owner-named tool), which is isolated from the owner's
+  mouse. Codex stays for code review and non-GUI work only; no Codex computer use unless the owner
+  re-enables it. Supersedes the Codex-computer-use parts of R4 Q13/Q14 and SPEC §9.3.
+- **D24 (run, 02:25Z):** Cloudflare: account signed in by the owner; Workers token saved and verified
+  (an invalid duplicate line removed); workers.dev subdomain is `rosty-build`, so assets will be at
+  `firstlight-assets.rosty-build.workers.dev`. The token can't create TURN keys (no Calls permission);
+  the owner creates the TURN key in the dashboard and stores it with `~/.config/firstlight/save-turn-key.sh`
+  (secret never shown to the builder).
+- **D25 (run, 01:30Z):** game UI is plain DOM + CSS (no React/Vue). Why: a handful of screens, the
+  canvas owns the frame loop, and a framework adds bundle and re-render cost for no gain here.
+- **D26 (run, 02:10Z):** server hardening after the three-model combat/auth review (Codex Sol, Opus,
+  Sonnet; docs/reviews/2026-10-12-*): one authoritative actor per user (process hub; a new session
+  takes over the old one, which is retired with app close code 4100; merges use 4101, bans 4102,
+  logout 4103); pile + character writes in one SQLite transaction; server-side movement budget, fall
+  damage, bow/heavy charge timers and cooldowns; travel only through a portal (`travel` → server
+  ticket in the character, checked by /api/play); party placement only from the server's party
+  system; account ids never synced to clients; load-test bots never persist; repeat PvP kills on the
+  same victim within 10 min give 10% XP; inventory ops ≤ 5/s; per-IP OTP cap 8/h and "+tag" aliases
+  share one budget; admin claim needs a saved (email) account. Note: the D20–D24 timestamps above were
+  mislabelled (the run started 00:46Z, commits confirm); order is right, clock times are not.

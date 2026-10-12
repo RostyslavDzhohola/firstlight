@@ -9,23 +9,28 @@ export interface Identity {
   loadtest: boolean;
 }
 
-export type TokenVerifier = (token: string) => Promise<Identity | null>;
+/** Request facts a verifier may use (IP bans). */
+export interface VerifyContext {
+  ip?: string | null;
+}
 
-/** Dev tokens look like `dev:<userId>:<name>`. Only accepted when explicitly enabled. */
+export type TokenVerifier = (token: string, ctx?: VerifyContext) => Promise<Identity | null>;
+
+/** Dev tokens look like `dev:<userId>:<name>[:admin|:loadtest]`. Only accepted when explicitly enabled. */
 export function devVerifier(enabled: boolean): TokenVerifier {
   return async (token) => {
     if (!enabled || !token.startsWith("dev:")) return null;
-    const [, userId, name] = token.split(":");
+    const [, userId, name, role] = token.split(":");
     if (!userId) return null;
-    return { userId, name: name || `Wanderer-${userId.slice(0, 4)}`, guest: true, admin: false, loadtest: false };
+    return { userId, name: name || `Wanderer-${userId.slice(0, 4)}`, guest: true, admin: role === "admin", loadtest: role === "loadtest" };
   };
 }
 
 /** Try verifiers in order; first identity wins. */
 export function chainVerifiers(...vs: TokenVerifier[]): TokenVerifier {
-  return async (token) => {
+  return async (token, ctx) => {
     for (const v of vs) {
-      const id = await v(token);
+      const id = await v(token, ctx);
       if (id) return id;
     }
     return null;

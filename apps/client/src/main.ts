@@ -29,5 +29,12 @@ playBtn?.addEventListener("click", async () => {
   await startGame();
 });
 
+document.getElementById("signin")?.addEventListener("click", async (e) => {
+  e.preventDefault();
+  const { showSignIn } = await import("./ui/account.ts");
+  const r = await showSignIn();
+  if (r === "signed-in") playBtn?.click();
+});
+
 // Bench and dev shortcuts: ?autoplay skips the landing (for Codex and benchmarks).
 if (new URLSearchParams(location.search).has("autoplay")) playBtn?.click();
