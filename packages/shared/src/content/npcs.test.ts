@@ -4,7 +4,7 @@ import { createTerrain } from "../planet/terrain.ts";
 import { bossArena } from "./arenas.ts";
 import {
   AI_CAPS, BOSS_DEFS, HEAVY_RECOVERY_FLOOR, HEAVY_SHARE, LETHAL_SHARE, NPC_AREAS, NPC_DEFS, NPC_INDEX, PLANET_WILDS, TELEGRAPH_FLOORS,
-  aiHitCap, attackDamage, bossMaxHp, hitShare, npcCoins, npcDef, npcMaxHp, splitDamage, weaponTierFor,
+  aiHitCap, attackDamage, bossMaxHp, hitShare, npcCoins, npcDef, npcMaxHp, splitDamage, splitTotal, weaponTierFor,
 } from "./npcs.ts";
 import { maxHp } from "./progression.ts";
 import { WEAPON_BY_ID } from "./weapons.ts";
@@ -51,6 +51,23 @@ describe("npc roster", () => {
         expect(splitDamage(a.damage, 0)).toBe(a.damage);
       }
     }
+  });
+
+  it("split circles stay lethal solo for every player level, and 60% each for a duo", () => {
+    for (const d of NPC_DEFS.filter((x) => x.tier === "boss")) {
+      for (const a of d.attacks.filter((x) => x.shape === "split")) {
+        const listed = attackDamage(a, d.levels[1]);
+        for (let level = 1; level <= 20; level++) {
+          const hp = maxHp(level);
+          expect(splitTotal(listed, [hp]), `${d.id} solo L${level}`).toBeGreaterThanOrEqual(hp * 1.2 - 1e-9);
+          expect(splitDamage(splitTotal(listed, [hp, hp]), 2) / hp, `${d.id} duo L${level}`).toBeGreaterThanOrEqual(0.6 - 1e-9);
+        }
+        // At or below the boss's level the listed number stands (276 / 348).
+        expect(splitTotal(listed, [maxHp(d.levels[1])])).toBeCloseTo(listed, 6);
+      }
+    }
+    expect(splitTotal(276, [maxHp(20)])).toBe(348);
+    expect(splitTotal(276, [maxHp(14), maxHp(20)]) / 2).toBe(174);
   });
 
   it("HP and damage match the content tables at the ends of each level range", () => {

@@ -12,7 +12,7 @@
 
 import type { ArenaCover, ArenaLayout } from "@firstlight/shared/content/arenas";
 import {
-  NF, NPC_ANIM, NPC_INDEX, SHAPE_CODE, attackDamage, bossMaxHp, npcDef,
+  NF, NPC_ANIM, NPC_INDEX, SHAPE_CODE, attackDamage, bossMaxHp, npcDef, splitTotal,
   type AttackDef, type BossDef, type BossEventMsg, type NpcAttackMsg, type NpcDef,
 } from "@firstlight/shared/content/npcs";
 import { partyOf } from "../../social/parties.ts";
@@ -733,7 +733,6 @@ export class BossController {
     const a = m.atk;
     switch (m.kind) {
       case "split": {
-        const total = a ? attackDamage(a, n.level) : 0;
         const inside = playersInCircle(this.sys, m.centre, m.radius, 0, 4);
         let victims: PlayerActor[];
         if (inside.length) victims = inside.map((lp) => lp.a);
@@ -743,6 +742,8 @@ export class BossController {
           const ids = new Set([...(m.participants ?? []), ...this.inArena.filter((lp) => !lp.untouchable).map((lp) => lp.a.id)]);
           victims = [...this.sys.world.players()].filter((p) => ids.has(p.id) && !p.dead);
         }
+        // 120% of the sturdiest victim's max HP (never less than listed): lethal solo at any level.
+        const total = a ? splitTotal(attackDamage(a, n.level), victims.map((p) => p.state.maxHp)) : 0;
         const each = inside.length ? total / inside.length : total;
         for (const lp of inside) this.soakers.add(lp.a.identity.userId);
         for (const p of victims) this.sys.hitPlayer(n, p, each, { trueDamage: true });

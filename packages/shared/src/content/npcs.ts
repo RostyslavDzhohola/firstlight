@@ -676,6 +676,21 @@ export function splitDamage(total: number, inside: number): number {
   return inside <= 0 ? total : total / inside;
 }
 
+/** A split circle's total is at least this share of the sturdiest victim's max HP (content §4: 120%). */
+export const SPLIT_LETHAL_SHARE = 1.2;
+
+/**
+ * Total true damage of a split circle: the listed damage (120% of an on-level player) or 120% of the
+ * highest max HP among the players taking it, whichever is more. One player alone always dies, at
+ * any level, and two always take 60% of the sturdier one's HP each (F12 review: the Hollow King's
+ * flat 276 was survivable solo at levels 19–20).
+ */
+export function splitTotal(listed: number, victimMaxHp: readonly number[]): number {
+  let top = 0;
+  for (const hp of victimMaxHp) if (hp > top) top = hp;
+  return Math.max(listed, SPLIT_LETHAL_SHARE * top);
+}
+
 // ------------------------------------------------------------------------------------------ spawn areas
 
 /** Where an area sits: a feature anchor, or a point part-way from one anchor to another. */
