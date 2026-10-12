@@ -191,7 +191,7 @@ describe("medals and titles", () => {
     await waitFor(() => b.last("denied")?.action === "title");
     b.send("title", { medalId: "ten_down" });
     await waitFor(() => (watcher.room.state as any).players.get(b.id)?.title === "Seasoned");
-    expect(b.you.title).toBe("ten_down");
+    await waitFor(() => b.you.title === "ten_down"); // the `you` message can land after the state patch
     b.send("title", { medalId: null });
     await waitFor(() => (watcher.room.state as any).players.get(b.id)?.title === "");
   });
