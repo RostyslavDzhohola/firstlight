@@ -860,6 +860,8 @@ export const NPC_AREAS: readonly NpcArea[] = [
       members: [{ kind: "compliance_officer", count: 1, level: 17 }, { kind: "associate", count: 6 }, { kind: "enforcer", count: 2 }, { kind: "collector", count: 2 }],
       chest: { coins: 300, weapons: 1, tonics: 2 },
     },
+    // Egg E9: the non-hostile clone facing the back wall.
+    singles: [{ kind: "ticket_000", level: 12, offset: 18 }],
   },
   {
     id: "oversight_lobby", name: "Chrome Spires / Oversight Lobby", planet: "meridian", at: { lerp: [{ pad: 15 }, { pad: 9 }, 0.16] }, radius: 100, levels: [15, 19], density: 0.7,

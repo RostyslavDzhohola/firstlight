@@ -5,11 +5,16 @@ import type { PlayResponse } from "@firstlight/shared/net/protocol";
 import { createGame, type Game } from "../src/app.ts";
 import { chainVerifiers, devVerifier } from "../src/auth/identity.ts";
 import { characterRepo, MemoryCharacterRepo } from "../src/world/characters.ts";
+import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
 import { MemoryPileStore, pileStore } from "../src/world/piles.ts";
 
 export async function startServer(limits: Partial<{ maxClients: number; soloFillLimit: number; maxCopiesPerBody: number; globalCap: number }> = {}): Promise<Game> {
   characterRepo.current = new MemoryCharacterRepo();
   pileStore.current = new MemoryPileStore();
+  // Quiet worlds by default: tests that need ambient enemies or bosses opt in via NPC_TUNING.
+  resetTuning();
+  NPC_TUNING.ambient = false;
+  NPC_TUNING.bosses = false;
   return createGame({
     port: 0,
     verify: chainVerifiers(devVerifier(true)),
