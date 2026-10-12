@@ -334,3 +334,66 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   no local paths or personal emails, licences, a secret scan of the whole history, third-party IP
   wording). Why: making the repo public is an owner-only step (Process, R4 Q2), and some items rewrite
   history or change live puzzles, which needs the owner's go-ahead.
+- **D32 (run, 11:55Z):** server movement and session rules after the F12 rounds. A takeover keeps
+  the old session's protection expiry, cooldowns and effects; fresh spawn protection only without a
+  live, dropped or lingering body. Safe zones and portal handoffs skip the 30 s body linger only out
+  of combat; travel tickets last 60 s and are refused while combat-tagged. New characters start in
+  Portus only. A seat is valid once, for its own account, rechecked when used; ≤ 2 unused seats per
+  account, ≤ 10 per address. Movement (`world/movement.ts`): ground covered is charged, height is
+  bounded by the jump/air envelope from the last support (terrain or an intact prop top), a step
+  onto a prop top from below must fit a jump, a path through a prop is refused, moves near the
+  planet centre or with non-finite numbers are refused, a saved position that is broken or > 3 m
+  underground rejoins at the pad, one shared swim depth (1.2 m). Dodges are paid from a 1.6 m
+  reserve that refills over one cooldown (1.2 s): honest rolling at every cooldown is never
+  corrected, and a modified client gains at most ~12 % over sprinting (T9 review probe). Message
+  caps per player per second: ping 20, travel 2, respawn 1, questSync/client:info/skySync 2;
+  malformed messages are dropped, 20 in 10 s disconnects. `PROTOCOL_VERSION` gates `/api/play`
+  (bump it for any incompatible message or schedule change, e.g. the lightning schedule).
+  Why: the F12 reviews' blockers (flight, takeover resets, combat logout, stale seats, teleport via
+  the centre) and the honest-player corrections the later probes found.
+- **D33 (run, 11:55Z):** persistence rules. Every reward that pays XP saves XP/level with everything
+  else it pays in one transaction; level-up effects and messages follow the commit and never save
+  again. Kill and boss payouts whose save fails are retried after 1, 3 and 6 s (once per key) and
+  get one last try when the room closes; a recipient who left, died or was reborn forfeits their
+  share, ground loot still lands. A death that can't be saved drops the session (4002) and the
+  account is refused (4105, `/api/play` 503 `storage`) until a health write succeeds; an expired
+  mark arms a global health check. Per-copy world state (boss timers and fights within 30 s of
+  vacancy, cleared/part-killed groups, the Golden Hopbit timer, broken props, staged/assisted marks)
+  lives in `copy_state` (migration 3), checkpointed ≤ 1/s with backoff on failure. Piles have
+  kinds (death/loot/staged) and expiry (migration 4); past the cap: staged, then loot, then death
+  piles older than 10 min, soft-capped at twice the cap. Admin voice mutes persist (migration 5).
+  Why: F12 blockers B6 (dupes), Opus B2 (boss reset) and the final-round payout-after-commit findings.
+- **D34 (run, 11:55Z):** auth and abuse rules. A sign-in code is emailed only to a saved address or
+  to a signed-in player at level ≥ 2; every public request gets the same immediate answer and saved
+  addresses get their code from a background queue; unused email-OTP endpoints and
+  `/delete-anonymous-user` are disabled; every failed code gets one 400 answer. Budgets: ≤ 10 codes
+  per account per day, banned accounts none, public sends ≤ 60 % of the daily budget and ≤ 5 per
+  client IP (/64) per day, separate hourly per-address caps for public and level-2 sends.
+  Production pins Better Auth's Origin/CSRF checks on. Guests idle > 30 days at level ≤ 2 with
+  ≤ 50 XP and no medal but Spark are pruned in recoverable steps (≤ 5,000 per run), names freed.
+  Reserved display names: staff/game words at name-part boundaries, admin/oversight/sysop at either
+  end, server/support/system/official as prefixes, with ordinary-word exceptions. Why: the F12
+  reviews' enumeration, budget-drain, squatting and impersonation findings; easy to loosen later.
+- **D35 (run, 11:55Z):** social and voice: a block acts on voice only when new; it rotates the
+  blocked player's relay credential only if the pair relayed signalling within 12 h, at most once
+  per player per 10 min, outside their mint budget (mint before revoke). A block withdraws invites
+  and splits a shared party (leader blocks → the other leaves; otherwise the blocker leaves),
+  including blocks merged in by a guest→account link. Reports: 5 per 10 min per account, one per
+  target, shared by voice and the Tab list, only against players seen in the last 10 min. Why: Opus
+  F12 B1 (voice DoS by repeated blocks) and stalking risk R1.
+- **D36 (run, 11:55Z):** NPC and boss rules: an NPC whose target is out of reach (pad ring, other
+  medium, perched above melee reach) for 5 s with no ranged attack that reaches evades home and
+  heals; boss HP scaling and targeting count players in the arena plus anyone who hit it in the
+  last 10 s, hits from beyond radius + 10 m deal nothing and edge hits count only while someone
+  alive is inside; arena cover and props block shots, NPC sight and NPC bolts. Staged copies (30
+  min) and admin-assisted fights (15 min) write no medals or Hall of Firsts (Spark exempt);
+  egg-penalty and staged spawns are capped, expire and pay nothing. Why: F12 pad-cheese, sniping,
+  staging and XP-faucet findings.
+- **D37 (run, 11:55Z):** onboarding and inventory: the tutorial is offered once per account to a
+  level-1, never-died character in Portus; three training dummies (server-validated `train` hits)
+  pay 10 XP each and +20 with the Spark medal on completion, in one transaction and only on the
+  first durable transition; six free tips follow (switch, pick up, map, phrase wheel, optional
+  voice, walk into a portal); skipping keeps XP already earned. The level-2 save prompt waits until
+  the tutorial is over and never takes focus while the pointer is locked. Loot goes to the backpack
+  except weapon-table items (not the radio), which prefer the hotbar; X on a hovered slot needs a
+  second press. Why: Sonnet F12 B2 and should-fix 6, and the T9 browser run.
