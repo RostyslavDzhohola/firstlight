@@ -64,7 +64,7 @@
 - 02:40Z F2 on production (Railway 2 vCPU/2 GB, commit c26efad, no NPCs merged yet): 40 load-test bots
   on one Arcadia copy for 600 s with `--fire`, 0 failures/disconnects; tick p50 ≤ 0.65 ms, p95 ≤ 1.88 ms,
   max 10.2 ms (limit p95 ≤ 25 ms); RSS ≤ 192 MB; CPU ≈ 6 % of one core; downstream 11.7 KB/s per bot on
-  average (0.043 GB per player-hour). **Re-run after the NPC lane merges.**
+  average (0.043 GB per player-hour). Re-run with NPCs (03:10Z, commit d40d058): 40 bots × 600 s, 0 failures, tick p50 ≤ 1.36 ms, p95 ≤ 2.94 ms, max 5.7 ms, RSS ≤ 218 MB, CPU ≈ 6 %, 8.3 KB/s per bot. **F2 passes.**
 
 ## Open issues
 
