@@ -19,7 +19,6 @@ export class BlobShadows {
     this.geo.index = quad.index;
     this.geo.setAttribute("position", quad.getAttribute("position"));
     this.attr = new THREE.InstancedBufferAttribute(new Float32Array(MAX * 4), 4);
-    this.attr.setUsage(THREE.DynamicDrawUsage);
     this.geo.setAttribute("iBlob", this.attr);
     this.geo.instanceCount = 0;
     this.geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
@@ -43,7 +42,8 @@ export class BlobShadows {
   }
 
   applySettings(s: ResolvedSettings) {
-    this.enabled = s.on.chars && !(s.on.shadows && s.shadows.mode === "map");
+    // Blob shadows are the Low tier's shadows: off with ?noshadows / ?nochars, and on tiers with maps.
+    this.enabled = s.on.shadows && s.on.chars && s.shadows.mode === "blob";
     this.mesh.visible = this.enabled;
   }
 

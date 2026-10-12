@@ -8,6 +8,7 @@ import {
   abs, attribute, cameraPosition, dot, exp, float, int, max, mix, mx_fractal_noise_float, normalGeometry,
   normalize, normalWorld, positionWorld, pow, smoothstep, sqrt, uniformArray, vec3,
 } from "three/tsl";
+import { BODY_IDS } from "@firstlight/shared";
 import { atmo, skyColor } from "./atmosphere.ts";
 import { SKY_PLANET_PALETTES, type SkyPlanetSpec } from "./looks.ts";
 import type { ResolvedSettings } from "./quality.ts";
@@ -20,7 +21,11 @@ const MAX = 4;
 export class SkyPlanets {
   readonly planets: THREE.InstancedMesh;
   readonly halos: THREE.InstancedMesh;
-  private readonly specs: SkyPlanetSpec[];
+  private specs: SkyPlanetSpec[];
+  private readonly land: THREE.Color[];
+  private readonly sea: THREE.Color[];
+  private readonly air: THREE.Color[];
+  private readonly seeds: number[];
   private readonly m = new THREE.Matrix4();
   private readonly q = new THREE.Quaternion();
   private readonly s = new THREE.Vector3();
@@ -28,27 +33,28 @@ export class SkyPlanets {
   private readonly tmp: V3 = [0, 0, 0];
 
   constructor(private readonly scene: THREE.Scene, specs: SkyPlanetSpec[]) {
-    this.specs = specs.slice(0, MAX);
-    const n = this.specs.length;
-    const land = this.specs.map((s) => new THREE.Color(SKY_PLANET_PALETTES[s.body].land));
-    const sea = this.specs.map((s) => new THREE.Color(SKY_PLANET_PALETTES[s.body].sea));
-    const air = this.specs.map((s) => new THREE.Color(SKY_PLANET_PALETTES[s.body].atmosphere));
-    while (land.length < MAX) land.push(new THREE.Color()), sea.push(new THREE.Color()), air.push(new THREE.Color());
+    this.specs = [];
+    const land = (this.land = Array.from({ length: MAX }, () => new THREE.Color()));
+    const sea = (this.sea = Array.from({ length: MAX }, () => new THREE.Color()));
+    const air = (this.air = Array.from({ length: MAX }, () => new THREE.Color()));
+    const seeds = (this.seeds = Array.from({ length: MAX }, () => 0));
     const landU = uniformArray(land, "color") as any;
     const seaU = uniformArray(sea, "color") as any;
     const airU = uniformArray(air, "color") as any;
+    const seedU = uniformArray(seeds, "float") as any;
 
     const geo = new THREE.SphereGeometry(1, 48, 32);
     const idx = new Float32Array(MAX);
     for (let i = 0; i < MAX; i++) idx[i] = i;
     geo.setAttribute("pIdx", new THREE.InstancedBufferAttribute(idx, 1));
-    const pi = int(attribute("pIdx", "float"));
+    // Round: the per-instance index arrives interpolated in the fragment stage.
+    const pi = int(attribute("pIdx", "float").add(0.5));
 
     // Planet surface.
     const mat = new THREE.MeshBasicNodeMaterial({ fog: false });
     {
       const nL = normalGeometry;
-      const seed = attribute("pIdx", "float").mul(7.31);
+      const seed = seedU.element(pi);
       const n1 = mx_fractal_noise_float(nL.mul(2.3).add(seed), 4, 2.0, 0.5);
       const n2 = mx_fractal_noise_float(nL.mul(9.0).sub(seed), 2, 2.0, 0.5);
       const landMask = smoothstep(-0.02, 0.12, n1);
@@ -67,7 +73,6 @@ export class SkyPlanets {
       mat.colorNode = mix(sky, planet, T);
     }
     this.planets = new THREE.InstancedMesh(geo, mat, MAX);
-    this.planets.count = n;
     this.planets.frustumCulled = false;
     this.planets.renderOrder = -10;
     this.planets.name = "skyPlanets";
@@ -86,11 +91,26 @@ export class SkyPlanets {
       haloMat.colorNode = vec3(airU.element(pi)).mul(halo.mul(sunSide.mul(0.9).add(0.1)).mul(T).mul(0.9));
     }
     this.halos = new THREE.InstancedMesh(geo, haloMat, MAX);
-    this.halos.count = n;
     this.halos.frustumCulled = false;
     this.halos.renderOrder = -9;
     this.halos.name = "skyPlanetHalos";
     scene.add(this.planets, this.halos);
+    this.setSpecs(specs);
+  }
+
+  /** Show another body's sky (same meshes and shaders; only uniform values change). */
+  setSpecs(specs: SkyPlanetSpec[]) {
+    this.specs = specs.slice(0, MAX);
+    this.specs.forEach((sp, i) => {
+      const pal = SKY_PLANET_PALETTES[sp.body];
+      this.land[i]!.setHex(pal.land);
+      this.sea[i]!.setHex(pal.sea);
+      this.air[i]!.setHex(pal.atmosphere);
+      // Seed by body, so a planet looks the same from every sky.
+      this.seeds[i] = (BODY_IDS.indexOf(sp.body) + 1) * 7.31;
+    });
+    this.planets.count = this.specs.length;
+    this.halos.count = this.specs.length;
   }
 
   applySettings(s: ResolvedSettings) {
@@ -125,4 +145,18 @@ export class SkyPlanets {
     this.planets.dispose();
     this.halos.dispose();
   }
+}
+
+const skies = new WeakMap<THREE.Scene, SkyPlanets>();
+
+/** The scene's one sky-planet set (created on first use, re-skinned per body). */
+export function skyPlanetsFor(scene: THREE.Scene, specs: SkyPlanetSpec[]): SkyPlanets {
+  let sp = skies.get(scene);
+  if (!sp) {
+    sp = new SkyPlanets(scene, specs);
+    skies.set(scene, sp);
+  } else {
+    sp.setSpecs(specs);
+  }
+  return sp;
 }

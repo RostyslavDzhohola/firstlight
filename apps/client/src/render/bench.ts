@@ -293,13 +293,28 @@ export class Bench {
     }
   }
 
-  /** Ground positions of the crowd for blob shadows. */
+  private readonly blobs: { x: number; y: number; z: number; r: number }[] = [];
+  private readonly views: AvatarView[] = [];
+
+  /** Ground positions of the crowd for blob shadows (the same array every call). */
   crowdBlobs(): { x: number; y: number; z: number; r: number }[] {
-    return this.crowd.map((d) => ({ x: d.pos.x, y: d.pos.y, z: d.pos.z, r: 0.55 }));
+    for (let i = 0; i < this.crowd.length; i++) {
+      const d = this.crowd[i]!;
+      const b = (this.blobs[i] ??= { x: 0, y: 0, z: 0, r: 0.55 });
+      b.x = d.pos.x;
+      b.y = d.pos.y;
+      b.z = d.pos.z;
+    }
+    return this.blobs;
   }
 
+  /** The crowd's avatar views (the same array every call). */
   crowdViews(): AvatarView[] {
-    return this.crowd.map((d) => d.view);
+    if (this.views.length !== this.crowd.length) {
+      this.views.length = 0;
+      for (const d of this.crowd) this.views.push(d.view);
+    }
+    return this.views;
   }
 
   private finish() {

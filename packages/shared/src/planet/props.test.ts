@@ -5,7 +5,7 @@ import { buildChunk } from "./chunk.ts";
 import { chunkOf, type Face } from "./cubesphere.ts";
 import { chordMetres, padDirs } from "./pads.ts";
 import {
-  chunkProps, packProps, PORTUS_PLAZA_CLEAR, PROP_KINDS, PROP_MIN_FLATNESS, PROP_PAD_CLEARANCE, PROP_STRIDE,
+  chunkProps, packProps, PORTUS_PLAZA_CLEAR, PROP_JITTER_MIN, PROP_KINDS, PROP_MIN_FLATNESS, PROP_PAD_CLEARANCE, PROP_STRIDE, PROPS_VERSION,
   PROP_STYLES, surfaceAtGrid, type PropInstance, type SurfacePoint,
 } from "./props.ts";
 import { createTerrain, type Terrain } from "./terrain.ts";
@@ -129,6 +129,32 @@ describe("props", () => {
       }
     }
     expect(seen.size).toBeGreaterThan(0);
+  });
+
+  it("keeps same-rule props apart, also across cube-face seams", () => {
+    // Points on cube edges and a cube corner, where two or three face grids meet.
+    const seams: [number, number, number][] = [[1, 1, 0.2], [1, -0.3, 1], [-1, 1, -1], [0.2, -1, -1]];
+    for (const id of ["arcadia", "hollowmere", "meridian", "portus"] as const) {
+      const terrain = terrains[id];
+      const R = BODIES[id].radius;
+      const minQuad = (0.5 * 2 * R) / terrain.n; // smallest quad side (at face edges/corners)
+      for (const s of seams) {
+        const l = Math.hypot(...s);
+        const d: [number, number, number] = [s[0] / l, s[1] / l, s[2] / l];
+        const props = chunksAround(terrain, d, 40).flatMap(([f, cx, cy]) => chunkProps(terrain, f, cx, cy));
+        for (const rule of PROP_STYLES[id]) {
+          const same = props.filter((p) => p.kind === rule.kind);
+          const minDist = 2 * PROP_JITTER_MIN * rule.every * minQuad * 0.98;
+          for (let a = 0; a < same.length; a++) {
+            for (let b = a + 1; b < same.length; b++) {
+              const pa = same[a]!, pb = same[b]!;
+              expect(Math.hypot(pa.x - pb.x, pa.y - pb.y, pa.z - pb.z)).toBeGreaterThan(minDist);
+            }
+          }
+        }
+      }
+    }
+    expect(PROPS_VERSION).toBe(2);
   });
 
   it("surfaceAtGrid matches groundHeight at random grid points", () => {

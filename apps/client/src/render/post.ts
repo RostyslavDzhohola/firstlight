@@ -5,7 +5,7 @@
 
 import * as THREE from "three/webgpu";
 import {
-  cdl, float, fract, hue, interleavedGradientNoise, luminance, mix, mrt, output, pass, renderOutput,
+  cdl, convertToTexture, float, fract, hue, interleavedGradientNoise, luminance, mix, mrt, output, pass, renderOutput,
   screenCoordinate, time, uniform, vec2, vec3, vec4, velocity, renderGroup,
 } from "three/tsl";
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
@@ -87,7 +87,10 @@ export function buildPost(scene: THREE.Scene, camera: THREE.Camera, s: ResolvedS
   }
 
   if (s.on.traa) {
-    const t = traa(color, scenePass.getTextureNode("depth"), scenePass.getTextureNode("velocity"), camera);
+    // Explicit RTT so its render target is ours to dispose (traa() would create it implicitly).
+    const input = convertToTexture(color);
+    if (input !== color) disposables.push(input);
+    const t = traa(input, scenePass.getTextureNode("depth"), scenePass.getTextureNode("velocity"), camera);
     disposables.push(t);
     color = t;
   }
@@ -115,7 +118,13 @@ export function buildPost(scene: THREE.Scene, camera: THREE.Camera, s: ResolvedS
     const w = l.mul(float(1).sub(l)).mul(4).clamp(0.25, 1);
     out = vec4(out.rgb.add(vec3(n.mul(postUniforms.grain).mul(w))), out.a);
   }
-  if (s.on.fxaa) out = fxaa(out);
+  if (s.on.fxaa) {
+    const input = convertToTexture(out);
+    if (input !== out) disposables.push(input);
+    const f = fxaa(input);
+    disposables.push(f);
+    out = f;
+  }
 
   return {
     outputNode: out,

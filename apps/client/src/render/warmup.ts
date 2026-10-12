@@ -10,6 +10,7 @@
 import * as THREE from "three/webgpu";
 import type { RenderCtx } from "./renderer.ts";
 import { flags } from "../config.ts";
+import { beginManualFrame, type TimestampSource } from "./timing.ts";
 
 export interface ShaderStats {
   total: number;
@@ -68,8 +69,33 @@ export interface WarmupHooks {
 const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
 
 /**
+ * Temporarily force `obj[prop]` to `value` for rendering. Writes made by other systems during the
+ * force window are recorded, and the restore applies the last written value (or the original).
+ * So a grass cell filled during warm-up keeps its new blade count and visibility afterwards.
+ */
+export function forceProperty<T extends object, K extends keyof T>(obj: T, prop: K, value: T[K]): () => void {
+  const original = obj[prop];
+  let written = false;
+  let last = original;
+  Object.defineProperty(obj, prop, {
+    configurable: true,
+    enumerable: true,
+    get: () => value,
+    set: (v: T[K]) => {
+      written = true;
+      last = v;
+    },
+  });
+  return () => {
+    delete (obj as Record<PropertyKey, unknown>)[prop as PropertyKey];
+    (obj as T)[prop] = written ? last : original;
+  };
+}
+
+/**
  * Run the protocol. `beforeFrame` lets the caller update systems between the real frames
- * (e.g. stream grass cells) so instance buffers are filled.
+ * (e.g. stream grass cells) so instance buffers are filled. Always restores the scene, even if a
+ * frame throws.
  */
 export async function warmup(
   ctx: RenderCtx,
@@ -78,48 +104,59 @@ export async function warmup(
   const { scene, camera, renderer } = ctx;
   const restore: (() => void)[] = [];
   const t0 = performance.now();
-  for (const h of opts.hooks ?? []) h.forceAll(true);
-  scene.traverse((o) => {
-    if (o.frustumCulled) {
-      o.frustumCulled = false;
-      restore.push(() => (o.frustumCulled = true));
-    }
-    if (!o.visible && !o.userData.noWarmup) {
-      o.visible = true;
-      restore.push(() => (o.visible = false));
-    }
-    const im = o as THREE.InstancedMesh;
-    if (im.isInstancedMesh && im.count === 0) {
-      im.count = 1;
-      restore.push(() => (im.count = 0));
-    }
-    const mesh = o as THREE.Mesh;
-    const g = mesh.isMesh ? (mesh.geometry as THREE.InstancedBufferGeometry) : null;
-    if (g && (g as { isInstancedBufferGeometry?: boolean }).isInstancedBufferGeometry && g.instanceCount === 0) {
-      g.instanceCount = 1;
-      restore.push(() => (g.instanceCount = 0));
-    }
-  });
-  opts.beforeFrame?.();
+  const src = renderer as unknown as TimestampSource;
   try {
-    await renderer.compileAsync(scene, camera);
-  } catch (e) {
-    console.warn("[warmup] compileAsync failed (continuing with real frames)", e);
-  }
-  opts.onProgress?.(0.5);
-  const frames = opts.frames ?? 4;
-  for (let i = 0; i < frames; i++) {
+    for (const h of opts.hooks ?? []) h.forceAll(true);
+    scene.traverse((o) => {
+      if (o.frustumCulled) restore.push(forceProperty(o, "frustumCulled", false));
+      if (!o.visible && !o.userData.noWarmup) restore.push(forceProperty(o, "visible", true));
+      const im = o as THREE.InstancedMesh;
+      if (im.isInstancedMesh && im.count === 0) restore.push(forceProperty(im, "count", 1));
+      const mesh = o as THREE.Mesh;
+      const g = mesh.isMesh ? (mesh.geometry as THREE.InstancedBufferGeometry) : null;
+      if (g && (g as { isInstancedBufferGeometry?: boolean }).isInstancedBufferGeometry && g.instanceCount === 0) {
+        restore.push(forceProperty(g, "instanceCount", 1));
+      }
+    });
     opts.beforeFrame?.();
-    ctx.render();
-    await nextFrame();
-    opts.onProgress?.(0.5 + (0.5 * (i + 1)) / frames);
+    try {
+      await renderer.compileAsync(scene, camera);
+    } catch (e) {
+      console.warn("[warmup] compileAsync failed (continuing with real frames)", e);
+    }
+    opts.onProgress?.(0.5);
+    const frames = opts.frames ?? 4;
+    for (let i = 0; i < frames; i++) {
+      opts.beforeFrame?.();
+      beginManualFrame(src);
+      ctx.render();
+      ctx.gpu.frame(); // keeps three's timestamp query pool drained
+      await nextFrame();
+      opts.onProgress?.(0.5 + (0.5 * (i + 1)) / frames);
+    }
+  } finally {
+    for (const r of restore.reverse()) {
+      try {
+        r();
+      } catch (e) {
+        console.warn("[warmup] restore failed", e);
+      }
+    }
+    for (const h of opts.hooks ?? []) {
+      try {
+        h.forceAll(false);
+      } catch (e) {
+        console.warn("[warmup] hook restore failed", e);
+      }
+    }
   }
-  for (const r of restore.reverse()) r();
-  for (const h of opts.hooks ?? []) h.forceAll(false);
   // One more real frame in the normal state (restored counts can differ, e.g. LOD splits).
   opts.beforeFrame?.();
+  beginManualFrame(src);
   ctx.render();
+  ctx.gpu.frame();
   await nextFrame();
+  ctx.gpu.drain();
   stats.watching = 120;
   stats.afterWarmup = 0;
   stats.recent = [];

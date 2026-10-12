@@ -119,6 +119,13 @@ function grassMaterial(): THREE.MeshLambertNodeMaterial {
   return m;
 }
 
+let sharedMaterial: THREE.MeshLambertNodeMaterial | null = null;
+/** One grass material for the app's lifetime (all bodies; values come from shared uniforms). */
+function grassMaterialShared(): THREE.MeshLambertNodeMaterial {
+  sharedMaterial ??= grassMaterial();
+  return sharedMaterial;
+}
+
 export class GrassSystem {
   readonly group = new THREE.Group();
   private material: THREE.MeshLambertNodeMaterial | null = null;
@@ -147,9 +154,10 @@ export class GrassSystem {
     grassUniforms.radius.value = radius;
     const density = s.grass.count / (Math.PI * radius * radius);
     this.receiveShadow = s.on.shadows && s.shadows.mode === "map";
-    const cellQuads = radius > 45 ? 8 : 4;
-    // Largest cell (at a face centre, quads are 2R/n wide).
+    // Largest quad (at a face centre, quads are 2R/n wide). Small quads (Portus ~2.3 m) or a large
+    // radius → 8×8-quad cells, else 4×4: keeps grass at a few dozen draws.
     const quad = (2 * this.radiusOfBody) / this.quadsPerFace;
+    const cellQuads = radius > 45 || quad < 3 ? 8 : 4;
     const capacity = Math.ceil(density * (cellQuads * quad) ** 2 * 1.1);
     if (s.grass.segments !== this.segments || cellQuads !== this.cellQuads || capacity > this.capacity) {
       this.density = density;
@@ -177,7 +185,7 @@ export class GrassSystem {
     this.cellQuads = cellQuads;
     this.capacity = capacity;
     this.blade = bladeGeometry(segments);
-    this.material ??= grassMaterial();
+    this.material = grassMaterialShared();
   }
 
   private acquire(): Cell {
@@ -190,7 +198,6 @@ export class GrassSystem {
     geo.index = this.blade!.index;
     geo.setAttribute("position", this.blade!.getAttribute("position"));
     const attr = new THREE.InstancedBufferAttribute(new Float32Array(this.capacity * 4), 4);
-    attr.setUsage(THREE.DynamicDrawUsage);
     geo.setAttribute("iPos", attr);
     geo.instanceCount = 0;
     const mesh = new THREE.Mesh(geo, this.material!);
@@ -358,7 +365,6 @@ export class GrassSystem {
     this.cells.clear();
     this.free.length = 0;
     this.blade?.dispose();
-    this.material?.dispose();
     this.group.removeFromParent();
   }
 }

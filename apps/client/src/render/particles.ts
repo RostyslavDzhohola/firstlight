@@ -30,7 +30,7 @@ const STRIDE = 4;
 
 export class ParticleSystem {
   readonly mesh: THREE.Mesh;
-  private readonly geo: THREE.InstancedBufferGeometry;
+  private geo: THREE.InstancedBufferGeometry;
   private posAttr: THREE.InstancedBufferAttribute;
   private colAttr: THREE.InstancedBufferAttribute;
   private capacity = 0;
@@ -57,16 +57,10 @@ export class ParticleSystem {
   private seed = 1;
 
   constructor(private readonly scene: THREE.Scene) {
-    const quad = new THREE.PlaneGeometry(2, 2);
-    this.geo = new THREE.InstancedBufferGeometry();
-    this.geo.index = quad.index;
-    this.geo.setAttribute("position", quad.getAttribute("position"));
-    this.posAttr = new THREE.InstancedBufferAttribute(new Float32Array(4), 4);
-    this.colAttr = new THREE.InstancedBufferAttribute(new Float32Array(4), 4);
-    this.geo.setAttribute("iPos", this.posAttr);
-    this.geo.setAttribute("iCol", this.colAttr);
-    this.geo.instanceCount = 0;
-    this.geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
+    const g = ParticleSystem.makeGeometry(1);
+    this.geo = g.geo;
+    this.posAttr = g.pos;
+    this.colAttr = g.col;
 
     const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false });
     m.name = "particles";
@@ -105,6 +99,26 @@ export class ParticleSystem {
 
   private motesNeedInit = true;
 
+  /**
+   * A fresh geometry with its own quad attributes, so disposing an old one (which frees every
+   * attribute it references) can't take buffers another geometry still uses.
+   */
+  private static makeGeometry(cap: number) {
+    const quad = new THREE.PlaneGeometry(2, 2);
+    const geo = new THREE.InstancedBufferGeometry();
+    geo.index = quad.index;
+    geo.setAttribute("position", quad.getAttribute("position"));
+    // Static usage + needsUpdate with update ranges: uploaded once per change (DynamicDrawUsage
+    // would re-upload the whole buffer on every render in r186).
+    const pos = new THREE.InstancedBufferAttribute(new Float32Array(cap * STRIDE), 4);
+    const col = new THREE.InstancedBufferAttribute(new Float32Array(cap * STRIDE), 4);
+    geo.setAttribute("iPos", pos);
+    geo.setAttribute("iCol", col);
+    geo.instanceCount = 0;
+    geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
+    return { geo, pos, col };
+  }
+
   private resize(cap: number) {
     this.capacity = cap;
     const mk = () => new Float32Array(cap);
@@ -114,15 +128,14 @@ export class ParticleSystem {
     this.cr = mk(); this.cg = mk(); this.cb = mk();
     this.live = 0;
     this.motesNeedInit = true;
-    // New GPU buffers sized to the tier (old ones are released with the geometry swap below).
-    const pos = new THREE.InstancedBufferAttribute(new Float32Array(cap * STRIDE), 4);
-    const col = new THREE.InstancedBufferAttribute(new Float32Array(cap * STRIDE), 4);
-    pos.setUsage(THREE.DynamicDrawUsage);
-    col.setUsage(THREE.DynamicDrawUsage);
-    this.geo.setAttribute("iPos", pos);
-    this.geo.setAttribute("iCol", col);
-    this.posAttr = pos;
-    this.colAttr = col;
+    // New GPU buffers sized to the tier: swap in a new geometry, then free the old one.
+    const old = this.geo;
+    const g = ParticleSystem.makeGeometry(cap);
+    this.geo = g.geo;
+    this.posAttr = g.pos;
+    this.colAttr = g.col;
+    this.mesh.geometry = this.geo;
+    old.dispose();
   }
 
   private rand() {
