@@ -91,8 +91,23 @@ accountLinks.on((ev) => {
   hub.retireAll(CLOSE.ELSEWHERE, "signed in elsewhere", ev.toUserId);
 });
 
-/** Last PvP kill time per killer>victim pair (repeat kills within 10 min give 10% XP). */
+/** Last PvP kill time per killer>victim account pair (repeat kills within 10 min give 10% XP). */
 const pvpKills = new Map<string, number>();
+const PVP_REPEAT_MS = 10 * 60_000;
+
+/** Record a PvP kill; true if the same pair already had one within 10 min. Old pairs are forgotten (F12 S10). */
+export function repeatPvpKill(killerUserId: string, victimUserId: string, now: number): boolean {
+  for (const [k, t] of pvpKills) if (now - t >= PVP_REPEAT_MS) pvpKills.delete(k);
+  const key = `${killerUserId}>${victimUserId}`;
+  const repeat = pvpKills.has(key);
+  pvpKills.set(key, now);
+  return repeat;
+}
+
+/** Remembered killer>victim pairs (tests). */
+export function pvpPairCount(): number {
+  return pvpKills.size;
+}
 
 const CLIENT_ANIMS: ReadonlySet<number> = new Set([ANIM.IDLE, ANIM.WALK, ANIM.RUN, ANIM.SPRINT, ANIM.JUMP, ANIM.FALL, ANIM.SWIM, ANIM.DODGE, ANIM.ATTACK, ANIM.HEAVY, ANIM.BLOCK, ANIM.AIM, ANIM.CAST, ANIM.EMOTE]);
 
@@ -232,9 +247,16 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     for (const l of this.lingering.values()) this.finalLeave(l.actor);
   }
 
-  /** Errors in handlers or the tick must never take the whole process down (review blocker). */
+  /**
+   * Errors in handlers or the tick must never take the whole process down (review blocker). Log only
+   * what failed and where: Colyseus attaches the client (reconnection token), auth, join options and
+   * message payloads to these errors, and none of that may reach the logs (F12 S9).
+   */
   onUncaughtException(error: Error, method: string) {
-    console.error(`[room ${this.roomId}] ${method} failed:`, error);
+    const cause = (error as { cause?: unknown }).cause;
+    const e = cause instanceof Error ? cause : error;
+    const where = (e.stack ?? "").split("\n").slice(1, 7).join("\n");
+    console.error(`[room ${this.roomId}] ${method} failed: ${e.name}: ${e.message}${where ? `\n${where}` : ""}`);
   }
 
   // ---------------------------------------------------------------- joining and leaving
@@ -848,10 +870,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     this.broadcast("death", { victim: victim.id, killer: killer?.id ?? null, killerName, aliveMs: now - victim.char.lifeStartedAt, level: victim.char.level, pileId });
     emitGameEvent(this, { type: "death", victimId: victim.id, killerId: killer?.id ?? null, killerKind: killer?.kind ?? "world", npcKind: killer?.kind === "npc" ? npcKindOf(killer) : undefined, pos: actorPos(victim) });
     if (killer && killer.kind === "player" && killer.id !== victim.id) {
-      const key = `${killer.identity.userId}>${victim.identity.userId}`;
-      const recent = pvpKills.get(key) ?? 0;
-      pvpKills.set(key, now);
-      this.grantXp(killer, Math.round(pvpKillXp(victim.char.level, killer.char.level) * (now - recent < 10 * 60_000 ? 0.1 : 1)));
+      const repeat = repeatPvpKill(killer.identity.userId, victim.identity.userId, now);
+      this.grantXp(killer, Math.round(pvpKillXp(victim.char.level, killer.char.level) * (repeat ? 0.1 : 1)));
     }
   }
 
@@ -925,12 +945,28 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   admin(client: Client, cmd: string, args: Record<string, unknown>) {
     const a = this.actors.get(client.sessionId);
     if (!a || !a.identity.admin) return;
-    const num = (k: string, d = 0) => (typeof args[k] === "number" ? (args[k] as number) : d);
+    // Numbers must be finite, integers where counts are meant, and in range (F12 S14). A bad
+    // argument refuses the whole command; a missing one takes the default.
+    let bad: string | null = null;
+    const num = (k: string, d: number, min: number, max: number, integer = false): number => {
+      const v = args[k];
+      if (v === undefined) return d;
+      if (typeof v !== "number" || !Number.isFinite(v) || v < min || v > max || (integer && !Number.isInteger(v))) {
+        bad ??= k;
+        return d;
+      }
+      return v;
+    };
+    const refuse = () => (bad ? (client.send("denied", { action: "admin", reason: `bad ${bad}` }), true) : false);
     const target = typeof args.target === "string" ? this.actors.get(args.target) : a;
+    const R = this.bodyDef.radius;
     switch (cmd) {
       case "teleport": {
         const t = target ?? a;
-        const p = this.snapToGround([num("x"), num("y"), num("z")]);
+        const want: V3 = [num("x", NaN, -4 * R, 4 * R), num("y", NaN, -4 * R, 4 * R), num("z", NaN, -4 * R, 4 * R)];
+        if (!bad && !(Math.hypot(...want) > R * 0.5)) bad = "position";
+        if (refuse()) return;
+        const p = this.snapToGround(want);
         t.state.x = t.lastX = p[0];
         t.state.y = t.lastY = p[1];
         t.state.z = t.lastZ = p[2];
@@ -943,12 +979,16 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       }
       case "give": {
         const id = typeof args.id === "string" ? args.id : "carbine";
-        if (WEAPON_BY_ID.has(id)) this.giveItem(target ?? a, { id, tier: (Math.max(1, Math.min(3, num("tier", 1))) as 1 | 2 | 3), qty: Math.max(1, num("qty", 1)) });
+        const tier = num("tier", 1, 1, 3, true);
+        const qty = num("qty", 1, 1, Math.max(1, WEAPON_BY_ID.get(id)?.stack ?? 1), true);
+        if (refuse()) return;
+        if (WEAPON_BY_ID.has(id)) this.giveItem(target ?? a, { id, tier: tier as 1 | 2 | 3, qty });
         break;
       }
       case "level": {
         const t = target ?? a;
-        const lv = Math.max(1, Math.min(20, num("level", 1)));
+        const lv = num("level", 1, 1, 20, true);
+        if (refuse()) return;
         t.char.xp = xpAtLevel(lv);
         t.char.level = lv;
         t.state.level = lv;
@@ -957,10 +997,14 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
         t.youDirty = true;
         break;
       }
-      case "coins":
-        (target ?? a).char.coins += num("amount", 100);
-        (target ?? a).youDirty = true;
+      case "coins": {
+        const amount = num("amount", 100, -1_000_000, 1_000_000, true);
+        if (refuse()) return;
+        const t = target ?? a;
+        t.char.coins = Math.max(0, t.char.coins + amount);
+        t.youDirty = true;
         break;
+      }
       case "heal":
         (target ?? a).state.hp = (target ?? a).state.maxHp;
         break;
@@ -968,9 +1012,12 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
         (target ?? a).protectedUntil = 0;
         (target ?? a).state.flags &= ~PF.PROTECTED;
         break;
-      case "damage":
-        if (target) dealDamage(this.host, null, target, num("amount", 10), false);
+      case "damage": {
+        const amount = num("amount", 10, 0, 100_000);
+        if (refuse()) return;
+        if (target) dealDamage(this.host, null, target, amount, false);
         break;
+      }
       case "announce":
         this.presence.publish("announce", String(args.text ?? "").slice(0, 200));
         this.broadcast("announce", { text: String(args.text ?? "").slice(0, 200) });

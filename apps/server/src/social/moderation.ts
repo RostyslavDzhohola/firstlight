@@ -8,10 +8,11 @@ import type { BodyRoom } from "../world/BodyRoom.ts";
 import type { PlayerActor } from "../world/actors.ts";
 import { turnCredentials } from "../world/voice/turn.ts";
 import { liveActor, liveRooms } from "./presence.ts";
-import { banIpHash, lastIpHashOf, networkBanned, storeBan, userBanned } from "./store.ts";
+import { banIpHash, lastIpHashOf, networkBanned, rekeyStoredVoiceMute, storeBan, storedVoiceMute, storeVoiceMute, userBanned } from "./store.ts";
 
 const kickedUntil = new Map<string, number>();
-const voiceMuted = new Set<string>();
+/** Admin voice mutes as last read from or written to the store (game.db, so they survive restarts). */
+const muteCache = new Map<string, boolean>();
 /** Session ids removed on purpose: their reconnection seat is refused. */
 const noReconnect = new Set<string>();
 
@@ -77,19 +78,25 @@ export function banAccount(userId: string, reason: string, createdBy: string | n
 }
 
 export function setVoiceMuted(userId: string, on: boolean): void {
-  if (on) voiceMuted.add(userId);
-  else voiceMuted.delete(userId);
+  storeVoiceMute(userId, on);
+  muteCache.set(userId, on);
   const live = liveActor(userId);
   if (live) applyVoiceMute(live.actor);
 }
 
 /** Admin voice-mute: the voice relay must not forward this player's signalling. */
 export function isVoiceMuted(userId: string): boolean {
-  return voiceMuted.has(userId);
+  let on = muteCache.get(userId);
+  if (on === undefined) {
+    on = storedVoiceMute(userId);
+    if (muteCache.size > 5000) muteCache.clear();
+    muteCache.set(userId, on);
+  }
+  return on;
 }
 
 export function applyVoiceMute(a: PlayerActor): void {
-  if (voiceMuted.has(a.identity.userId)) a.state.flags |= PF.VOICE_MUTED;
+  if (isVoiceMuted(a.identity.userId)) a.state.flags |= PF.VOICE_MUTED;
   else a.state.flags &= ~PF.VOICE_MUTED;
 }
 
@@ -111,11 +118,13 @@ export function rekeyModeration(from: string, to: string): void {
     kickedUntil.delete(from);
     kickedUntil.set(to, k);
   }
-  if (voiceMuted.delete(from)) voiceMuted.add(to);
+  rekeyStoredVoiceMute(from, to);
+  muteCache.delete(from);
+  muteCache.delete(to);
 }
 
 export function resetModeration(): void {
   kickedUntil.clear();
-  voiceMuted.clear();
+  muteCache.clear();
   noReconnect.clear();
 }

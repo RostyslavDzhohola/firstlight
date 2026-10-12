@@ -97,6 +97,8 @@ export function linkAccounts(db: Db, fromUserId: string, toUserId: string, now =
     stmt(db, "UPDATE ban SET user_id = ? WHERE user_id = ?").run(toUserId, fromUserId);
     stmt(db, "UPDATE session_log SET user_id = ? WHERE user_id = ?").run(toUserId, fromUserId);
     stmt(db, "UPDATE admin_claim SET user_id = ? WHERE user_id = ?").run(toUserId, fromUserId);
+    stmt(db, "INSERT OR IGNORE INTO voice_mute (user_id, muted_at) SELECT ?, muted_at FROM voice_mute WHERE user_id = ?").run(toUserId, fromUserId);
+    stmt(db, "DELETE FROM voice_mute WHERE user_id = ?").run(fromUserId);
 
     return { character, displayName, merged };
   });

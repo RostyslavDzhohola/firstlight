@@ -98,6 +98,11 @@ const MINTS_PER_WINDOW = 10;
 const MINT_WINDOW_MS = 10 * 60_000;
 const mints = new Map<string, number[]>();
 
+/** Accounts with mint history kept (tests). */
+export function mintHistorySize(): number {
+  return mints.size;
+}
+
 export const turnCredentials = {
   remember(userId: string, usernames: readonly string[], ttlS: number = VOICE.TURN_TTL_S, now = Date.now()): void {
     prune(now);
@@ -128,6 +133,8 @@ export const turnCredentials = {
 
   /** May this account mint another credential now? (counts the attempt) */
   allowMint(userId: string, now = Date.now()): boolean {
+    // Forget accounts with no mint in the window (F12 S10: the map must not grow forever).
+    for (const [u, l] of mints) if (u !== userId && l.every((t) => now - t >= MINT_WINDOW_MS)) mints.delete(u);
     const list = (mints.get(userId) ?? []).filter((t) => now - t < MINT_WINDOW_MS);
     if (list.length >= MINTS_PER_WINDOW) {
       mints.set(userId, list);

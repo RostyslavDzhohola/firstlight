@@ -147,6 +147,13 @@ export const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (user_id, stat)
   );
   `,
+  // 3: admin voice mutes survive restarts and deploys (F12 S12)
+  `
+  CREATE TABLE voice_mute (
+    user_id   TEXT PRIMARY KEY,
+    muted_at  INTEGER NOT NULL
+  );
+  `,
 ];
 
 /** Apply every migration newer than the database's user_version, each in its own transaction. */
