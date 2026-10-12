@@ -62,6 +62,8 @@ export interface PlayerActor {
   moveBudget: number;
   lastBudgetAt: number;
   lastDodgeAt: number;
+  /** Metres the next dodge may add, refilled by budget the full bank couldn't hold (movement.ts). */
+  dodgeReserve: number;
   /** One-off distance (dodge, knockback) usable until `moveBonusUntil`. */
   moveBonus: number;
   moveBonusUntil: number;
