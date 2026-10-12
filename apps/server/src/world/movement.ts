@@ -44,6 +44,8 @@ export interface MoveWorld {
   groundAt(x: number, y: number, z: number): number;
   /** Intact breakable props: the highest top under the feet (radius from the centre, 0 = none) and whether the feet are inside one. */
   footing?(x: number, y: number, z: number, step: number): { top: number; inside: boolean };
+  /** Do feet moving straight from a to b pass through an intact prop (shared collider sweep)? */
+  crosses?(ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean;
 }
 
 /** Ground height (above the radius) under a position: the terrain or an intact prop top, whichever is higher. */
@@ -137,6 +139,8 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
   if (!swimming && (!(above >= -MOVE.groundTolerance) || (terrain < w.waterLevel - 1 && len - w.radius < w.waterLevel - MOVE.swimDepthSlack))) return { ok: false, reason: "ground" };
   // Walking into a prop is refused; a body that was put inside one (teleport, a rebuild) may walk out.
   if (foot?.inside && !w.footing!(a.lastX, a.lastY, a.lastZ, MOVE.groundedAbove).inside) return { ok: false, reason: "prop" };
+  // ...and so is a step whose path goes through one with both ends outside (a thin fence; F12 final S2).
+  if (!swimming && w.crosses?.(a.lastX, a.lastY, a.lastZ, m.x, m.y, m.z)) return { ok: false, reason: "prop" };
   const grounded = swimming || above <= MOVE.groundedAbove;
   if (!grounded && !(len <= airCeiling(a, now))) return { ok: false, reason: "height" };
 

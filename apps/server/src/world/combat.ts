@@ -48,6 +48,8 @@ export interface BreakableHost {
   contains?(index: number, p: V3): boolean;
   /** Movement footing at the feet: highest intact prop top under them (radius, 0 = none), and whether they're inside a prop. */
   footing?(x: number, y: number, z: number, step: number): { top: number; inside: boolean };
+  /** Do feet moving straight from a to b pass through an intact prop (props the start is inside don't count)? */
+  crosses?(ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean;
   /** `by`: the attacking player's session id (credit for the Demolition Crew medal), or null. */
   damage(index: number, amount: number, cls: Destroys, weaponId: string, dir: V3, by: string | null): void;
   /** `blocked(point)`: a Prism Bubble shell lies between the blast and that prop centre (skip it). */

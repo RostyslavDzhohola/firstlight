@@ -988,9 +988,10 @@ export class BossController {
       splash: (...args) => inner?.splash(...args),
       arc: (...args) => inner?.arc(...args),
       // Shots still reach a player standing inside a prop or a cover cylinder (F12), and movement
-      // footing stays the destruction system's.
+      // footing and path checks stay the destruction system's.
       contains: (index, p) => (index < COVER_INDEX ? !!inner?.contains?.(index, p) : this.coverContains(index - COVER_INDEX, p)),
       footing: (x, y, z, step) => inner?.footing?.(x, y, z, step) ?? NO_FOOTING,
+      crosses: (ax, ay, az, bx, by, bz) => inner?.crosses?.(ax, ay, az, bx, by, bz) ?? false,
     };
     host.props = this.coverHost;
   }

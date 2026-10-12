@@ -14,6 +14,7 @@ import type { PlayerActor } from "../src/world/actors.ts";
 import { HORSE } from "@firstlight/shared/content/horse";
 import { ANIM } from "@firstlight/shared/net/schema";
 import { isSafe, type Breakable } from "@firstlight/shared";
+import { emptyContact, PLAYER_BODY } from "@firstlight/shared/planet/collide";
 import type { BodyId } from "@firstlight/shared";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 import { characterRepo } from "../src/world/characters.ts";
@@ -502,6 +503,76 @@ describe("standing on props (F12 client review should-fix 4)", () => {
       const d = lerpDir(c, start, i / 8);
       send(k.r, k.seq, d, groundR(d), 1);
       await sleep(80);
+    }
+    await sleep(150);
+    expect(k.corrections.n).toBe(0);
+  });
+});
+
+describe("no walking through props in one packet (F12 final S2)", () => {
+  const roomOf = (r: Room) => matchMaker.getLocalRoomById(r.roomId) as unknown as BodyRoom;
+  const destructionOf = (r: Room) => roomOf(r).systems.find((x) => x instanceof DestructionSystem) as DestructionSystem;
+  /** Ground point at prop-local (lx, lz) of `w`. */
+  const local = (w: Breakable, lx: number, lz: number): V3 => {
+    const d = norm([w.px + w.rx * lx + w.fx * lz, w.py + w.ry * lx + w.fy * lz, w.pz + w.rz * lx + w.fz * lz]);
+    const g = groundR(d) + 0.02;
+    return [d[0] * g, d[1] * g, d[2] * g];
+  };
+  const dry = (p: V3) => terrain.groundHeight(...norm(p)) > BODY.waterLevel + 0.5 && !isSafe(BODY, p[0], p[1], p[2]);
+  /** Would the client be pushed at feet `p` (intact props only)? */
+  const blocked = (sys: DestructionSystem, p: V3) => {
+    const q = { x: p[0], y: p[1], z: p[2] };
+    return sys.collider.resolve(q, (i) => !sys.isBroken(i), emptyContact(), PLAYER_BODY);
+  };
+  /** An intact `kind` whose `path(b)` points are all on dry, level, open ground where nothing pushes the body. */
+  function wallOf(sys: DestructionSystem, kind: string, path: (b: Breakable) => V3[]): Breakable {
+    const w = sys.list.find((b) => {
+      if (b.kind !== kind || sys.isBroken(b.index)) return false;
+      const pts = path(b);
+      const r0 = Math.hypot(...pts[0]!);
+      return pts.every((p) => dry(p) && !blocked(sys, p) && Math.abs(Math.hypot(...p) - r0) < 0.3);
+    });
+    if (!w) throw new Error(`no free ${kind}`);
+    return w;
+  }
+
+  for (const kind of ["fence", "campwall"] as const) {
+    it(`a hop through a ${kind} with both ends outside it is corrected`, async () => {
+      const k = await joinOutside(`ghost_${kind}`);
+      const sys = destructionOf(k.r);
+      const off = (b: Breakable) => b.hz + 0.38 + 0.15;
+      const w = wallOf(sys, kind, (b) => [local(b, 0, -off(b)), local(b, 0, off(b))]);
+      const front = local(w, 0, -off(w)), back = local(w, 0, off(w));
+      k.r.send("admin", { cmd: "teleport", args: { x: front[0], y: front[1], z: front[2] } });
+      await waitFor(() => Math.hypot(me(k.r).x - front[0], me(k.r).y - front[1], me(k.r).z - front[2]) < 0.5);
+      await sleep(400);
+      k.corrections.n = 0;
+      send(k.r, k.seq, norm(back), Math.hypot(...back), 1);
+      await sleep(300);
+      expect(k.corrections.n).toBeGreaterThan(0);
+      const p = me(k.r);
+      const lz = (p.x - w.px) * w.fx + (p.y - w.py) * w.fy + (p.z - w.pz) * w.fz;
+      expect(lz).toBeLessThan(0); // still on the near side
+    });
+  }
+
+  it("walking along a fence, close to it, is never corrected", async () => {
+    const k = await joinOutside("fencewalker");
+    const sys = destructionOf(k.r);
+    const side = (b: Breakable) => b.hz + 0.38 + 0.02;
+    const xs: number[] = [];
+    for (let x = -2.5; x <= 2.5; x += 0.4) xs.push(x);
+    const w = wallOf(sys, "fence", (b) => xs.map((x) => local(b, x, -side(b))));
+    const along = (x: number) => local(w, x, -side(w));
+    const start = along(xs[0]!);
+    k.r.send("admin", { cmd: "teleport", args: { x: start[0], y: start[1], z: start[2] } });
+    await waitFor(() => Math.hypot(me(k.r).x - start[0], me(k.r).y - start[1], me(k.r).z - start[2]) < 0.5);
+    await sleep(400);
+    k.corrections.n = 0;
+    for (const x of xs) {
+      const p = along(x);
+      send(k.r, k.seq, norm(p), Math.hypot(...p), 1);
+      await sleep(50);
     }
     await sleep(150);
     expect(k.corrections.n).toBe(0);

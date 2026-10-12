@@ -166,6 +166,21 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
     return out;
   }
 
+  private readonly sweepA: XYZ = { x: 0, y: 0, z: 0 };
+  private readonly sweepB: XYZ = { x: 0, y: 0, z: 0 };
+
+  /**
+   * Do feet moving straight from a to b pass through an intact prop (shared collider sweep, the
+   * client's player body and step)? A prop the start is already inside doesn't count, so a body a
+   * prop was rebuilt around can still walk out.
+   */
+  crosses(ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean {
+    const a = this.sweepA, b = this.sweepB;
+    a.x = ax; a.y = ay; a.z = az;
+    b.x = bx; b.y = by; b.z = bz;
+    return this.collider.sweep(a, b, this.solid, PLAYER_BODY) >= 0;
+  }
+
   /** Is point `p` inside intact prop `index`? */
   contains(index: number, p: V3): boolean {
     const b = this.list[index];

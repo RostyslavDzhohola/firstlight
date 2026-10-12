@@ -215,6 +215,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       waterLevel: this.bodyDef.waterLevel,
       groundAt: (x, y, z) => terrain.groundHeightAt(x, y, z),
       footing: (x, y, z, step) => this.host.props?.footing?.(x, y, z, step) ?? NO_FOOTING,
+      crosses: (ax, ay, az, bx, by, bz) => this.host.props?.crosses?.(ax, ay, az, bx, by, bz) ?? false,
     };
     this.state.body = options.body;
     this.state.copy = options.copy;
