@@ -9,7 +9,7 @@ import { hash01, PROP_KINDS, PROP_STRIDE, PROP_STYLES, type BodyId, type PropKin
 import { float, materialColor, mix } from "three/tsl";
 import { atmo } from "./atmosphere.ts";
 import { propGeometry } from "./propGeometry.ts";
-import { preloadVegetation, vegetationMaterial, type VegetationAssets } from "./vegetationAssets.ts";
+import { preloadVegetation, validateVegetationAssets, vegetationMaterial, type VegetationAssets } from "./vegetationAssets.ts";
 import { vegetationModels, vegetationVariant } from "./vegetationModels.ts";
 import { keptSamples } from "./warmup.ts";
 import type { ResolvedSettings } from "./quality.ts";
@@ -87,29 +87,45 @@ export class PropSystem {
         this.kinds.set(k * 8 + variant, { kind, variant, lod0: mk(0), lod1: mk(1), capacity });
       }
     }
-    this.ready = (assets ? Promise.resolve(assets) : preloadVegetation()).then((assets) => { if (assets) this.installAssets(assets); });
+    this.ready = (assets ? Promise.resolve(assets) : preloadVegetation())
+      .then((assets) => { if (assets) this.installAssets(assets); })
+      .catch((err: unknown) => { console.warn("[vegetation] assets failed to install; using procedural props", err); });
   }
 
   private disposed = false;
 
   private installAssets(assets: VegetationAssets) {
     if (this.disposed) return;
-    for (const km of this.kinds.values()) {
-      const name = vegetationModels(this.body, km.kind)[km.variant];
-      if (!name) continue;
-      for (const lod of [0, 1] as const) {
-        const mesh = lod === 0 ? km.lod0 : km.lod1;
-        const source = assets.geometry.get(`${name}_L${lod}`);
-        if (!source) throw new Error(`vegetation model missing: ${name}_L${lod}`);
-        mesh.geometry.dispose();
-        mesh.geometry = source.clone();
-        if (km.kind === "boulder") mesh.geometry.scale(2.3 / 0.9, 2.3 / 0.9, 2.3 / 0.9);
-        if (km.kind === "blossom") mesh.geometry.scale(5.2 / 6.2, 5.2 / 6.2, 5.2 / 6.2);
-        mesh.geometry.setAttribute("iWind", new THREE.InstancedBufferAttribute(new Float32Array(km.capacity), 1));
-        const impostor = lod === 1 && ["oak", "pine", "deadtree", "blossom"].includes(km.kind) && !!assets.impostors;
-        mesh.material = vegetationMaterial(this.body, km.kind, impostor ? assets.impostors! : assets.atlas, impostor);
+    validateVegetationAssets(assets);
+    const replacements: { mesh: THREE.InstancedMesh; geometry: THREE.BufferGeometry; material: THREE.Material }[] = [];
+    try {
+      for (const km of this.kinds.values()) {
+        const name = vegetationModels(this.body, km.kind)[km.variant];
+        if (!name) continue;
+        for (const lod of [0, 1] as const) {
+          const mesh = lod === 0 ? km.lod0 : km.lod1;
+          const geometry = assets.geometry.get(`${name}_L${lod}`)!.clone();
+          // Track ownership before preparing so a preparation failure also disposes this clone.
+          const replacement = { mesh, geometry, material: mesh.material as THREE.Material };
+          replacements.push(replacement);
+          if (km.kind === "boulder") geometry.scale(2.3 / 0.9, 2.3 / 0.9, 2.3 / 0.9);
+          if (km.kind === "blossom") geometry.scale(5.2 / 6.2, 5.2 / 6.2, 5.2 / 6.2);
+          geometry.setAttribute("iWind", new THREE.InstancedBufferAttribute(new Float32Array(km.capacity), 1));
+          const impostor = lod === 1 && ["oak", "pine", "deadtree", "blossom"].includes(km.kind);
+          replacement.material = vegetationMaterial(this.body, km.kind, impostor ? assets.impostors! : assets.atlas, impostor);
+        }
       }
+    } catch (err) {
+      for (const r of replacements) r.geometry.dispose();
+      throw err;
     }
+    // All validation and preparation succeeded. Only now replace the complete procedural set.
+    const old = replacements.map((r) => r.mesh.geometry);
+    for (const r of replacements) {
+      r.mesh.geometry = r.geometry;
+      r.mesh.material = r.material;
+    }
+    for (const geometry of old) geometry.dispose();
     this.dirty = true;
   }
 

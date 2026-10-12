@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { BODY_IDS, PROP_KINDS } from "@firstlight/shared";
 import { vegetationModels } from "./vegetationModels.ts";
-import { vegetationMaterial } from "./vegetationAssets.ts";
+import { vegetationMaterial, type VegetationAssets } from "./vegetationAssets.ts";
 import { testVegetationAssets, vegetationBytes, vegetationDocument } from "./vegetationAsset.testutil.ts";
 import * as THREE from "three/webgpu";
 import { emptyStored, resolveSettings } from "./quality.ts";
@@ -9,6 +9,41 @@ import { PropSystem } from "./props.ts";
 import { lookKey } from "./warmupLooks.testutil.ts";
 
 describe("shipped vegetation", () => {
+  it.each(["node", "mesh atlas", "impostor atlas", "attribute"] as const)("keeps every procedural mesh and resolves ready when a required %s is missing", async (missing) => {
+    const pack = await testVegetationAssets();
+    const assets: VegetationAssets = { ...pack, geometry: new Map(pack.geometry) };
+    if (missing === "node") assets.geometry.delete("Mushroom_Laetiporus_L1");
+    if (missing === "mesh atlas") assets.atlas = undefined as unknown as THREE.Texture;
+    if (missing === "impostor atlas") assets.impostors = undefined;
+    if (missing === "attribute") {
+      const broken = assets.geometry.get("Mushroom_Laetiporus_L1")!.clone();
+      broken.deleteAttribute("uv");
+      assets.geometry.set("Mushroom_Laetiporus_L1", broken);
+    }
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const sys = new PropSystem("arcadia", assets);
+    const meshes = sys.group.children as THREE.InstancedMesh[];
+    const before = meshes.map((m) => ({ geometry: m.geometry, material: m.material }));
+    const disposals = [...new Set(before.map((m) => m.geometry))].map((g) => vi.spyOn(g, "dispose"));
+    try {
+      await expect(sys.ready).resolves.toBeUndefined();
+      meshes.forEach((m, i) => {
+        expect(m.geometry).toBe(before[i]!.geometry);
+        expect(m.material).toBe(before[i]!.material);
+      });
+      for (const dispose of disposals) expect(dispose).not.toHaveBeenCalled();
+      expect(warning).toHaveBeenCalledOnce();
+      sys.addChunk("fallback", new Float32Array([0, 0, 1000, 0, 1, 1.25]), new THREE.Vector3(0, 1000, 0), 1);
+      sys.update(new THREE.Vector3(0, 1010, 0), 1000);
+      expect(sys.instances).toBe(1);
+    } finally {
+      for (const dispose of disposals) dispose.mockRestore();
+      warning.mockRestore();
+      sys.dispose();
+      if (missing === "attribute") assets.geometry.get("Mushroom_Laetiporus_L1")!.dispose();
+    }
+  });
+
   it("stays under 4 MB, uses two embedded cutout PNG atlases and meshopt compression", () => {
     expect(vegetationBytes.length).toBeLessThanOrEqual(4_000_000);
     expect(vegetationDocument.extensionsRequired).toContain("EXT_meshopt_compression");

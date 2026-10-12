@@ -3,7 +3,8 @@ import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import { abs, attribute, cameraViewMatrix, cross, float, normalize, materialColor, mix, normalView, positionGeometry, positionLocal, positionWorld, select, sin, texture, time, vec3, vec4 } from "three/tsl";
-import { type BodyId, type PropKind } from "@firstlight/shared";
+import { BODY_IDS, PROP_KINDS, type BodyId, type PropKind } from "@firstlight/shared";
+import { vegetationModels } from "./vegetationModels.ts";
 import { config } from "../config.ts";
 import { atmo } from "./atmosphere.ts";
 import { PROP_PALETTES } from "./propGeometry.ts";
@@ -42,8 +43,42 @@ async function load(): Promise<VegetationAssets> {
   if (!atlas) throw new Error("vegetation atlas missing");
   atlas.anisotropy = 4;
   const impostors = textures.get("vegetation_impostors");
-  if (impostors) impostors.anisotropy = 4;
+  if (!impostors) throw new Error("vegetation impostor atlas missing");
+  impostors.anisotropy = 4;
   return { geometry, atlas, impostors };
+}
+
+/** Validate the whole pack before installing any part of it on a live planet. */
+export function validateVegetationAssets(assets: VegetationAssets): void {
+  if (!assets.atlas?.isTexture) throw new Error("vegetation atlas missing");
+  if (!assets.impostors?.isTexture) throw new Error("vegetation impostor atlas missing");
+  const names = new Set(BODY_IDS.flatMap((body) => PROP_KINDS.flatMap((kind) => vegetationModels(body, kind))));
+  for (const name of names) {
+    if (!name) continue;
+    for (const lod of [0, 1]) {
+      const key = `${name}_L${lod}`;
+      const geometry = assets.geometry.get(key);
+      if (!geometry) throw new Error(`vegetation model missing: ${key}`);
+      const count = geometry.getAttribute("position")?.count;
+      for (const [attrName, size] of [["position", 3], ["normal", 3], ["uv", 2], ["color", 3]] as const) {
+        const attr = geometry.getAttribute(attrName);
+        // glTF may encode COLOR_0 as RGB or RGBA; the shader reads only the RGB role mask.
+        const sizeValid = attr && (attr.itemSize === size || attrName === "color" && attr.itemSize === 4);
+        if (!attr || !count || attr.count !== count || !sizeValid) {
+          throw new Error(`vegetation attribute invalid: ${key}.${attrName}`);
+        }
+        for (let i = 0; i < count; i++) for (let c = 0; c < size; c++) {
+          if (!Number.isFinite(attr.getComponent(i, c))) throw new Error(`vegetation attribute non-finite: ${key}.${attrName}`);
+        }
+      }
+      const index = geometry.index;
+      if ((index?.count ?? count!) % 3 !== 0) throw new Error(`vegetation triangles invalid: ${key}`);
+      if (index) for (let i = 0; i < index.count; i++) {
+        const v = index.getX(i);
+        if (!Number.isInteger(v) || v < 0 || v >= count!) throw new Error(`vegetation index invalid: ${key}`);
+      }
+    }
+  }
 }
 
 /** Quantized glTF positions are normalized integer attributes. Baking node transforms into
