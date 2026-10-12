@@ -481,3 +481,28 @@ describe("rate limits (production rules)", () => {
     expect((await new Browser(server, "192.0.2.51").client.signIn.anonymous()).error).toBeNull();
   });
 });
+
+describe("production safety", () => {
+  it("refuses to boot in production with the dev secret", async () => {
+    const { createAccounts, DEV_AUTH_SECRET } = await import("../src/auth/accounts.ts");
+    const { tempDir } = await import("./auth-helpers.ts");
+    const dir = tempDir();
+    await expect(
+      createAccounts({
+        production: true, baseURL: "https://example.test", secret: DEV_AUTH_SECRET, authDbPath: `${dir}/a.db`, gameDbPath: `${dir}/g.db`,
+        trustedOrigins: [], originSecret: "", emailFrom: "x <x@example.test>", resendKey: "", adminClaimToken: "", loadtestSecret: "",
+        otpPerEmailPerHour: 3, otpDailyBudget: 10,
+      }),
+    ).rejects.toThrow(/BETTER_AUTH_SECRET/);
+  });
+
+  it("without a Resend key in production, saving reports busy instead of pretending to send", async () => {
+    server = await startAuthServer({ production: true, rateLimit: false });
+    expect(server.accounts.mailer.kind).toBe("disabled");
+    expect(server.accounts.devOutbox).toBeNull();
+    const b = new Browser(server);
+    await b.playToken();
+    const r = await b.sendCode("prod@example.test");
+    expect(r.error?.message).toBe("Saving is busy, try again later");
+  });
+});

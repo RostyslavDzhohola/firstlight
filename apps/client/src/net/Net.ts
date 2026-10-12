@@ -5,7 +5,7 @@ import { Client, type Room } from "@colyseus/sdk";
 import type { BodyId } from "@firstlight/shared";
 import { NET, type InputMsg, type PlayResponse } from "@firstlight/shared/net/protocol";
 import { config } from "../config.ts";
-import { getPlayToken } from "./auth.ts";
+import { getPlayToken, invalidatePlayToken } from "./auth.ts";
 
 export interface Snapshot {
   t: number; // local receive time (ms)
@@ -35,13 +35,21 @@ export class Net {
   onLeaveRoom: ((code: number) => void) | null = null;
 
   async join(body: BodyId, opts: { partyLeaderRoomId?: string } = {}): Promise<Room> {
-    const token = await getPlayToken();
+    let retried401 = false;
     for (;;) {
+      // Per attempt: queues can outlast the 15-minute JWT (getPlayToken caches and refreshes it).
+      const token = await getPlayToken();
       const res = await fetch(`${config.apiUrl}/api/play`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ body, ...opts }),
       });
+      if (res.status === 401 && !retried401) {
+        // Stale token (e.g. the guest just saved and got a new id): fetch a fresh one once.
+        retried401 = true;
+        invalidatePlayToken();
+        continue;
+      }
       const r = (await res.json()) as PlayResponse;
       if (r.ok) {
         const room = await this.client.consumeSeatReservation(r.reservation as never);
