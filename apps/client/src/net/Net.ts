@@ -44,21 +44,69 @@ function reloadForVersion(version: number | undefined): void {
 /** App close codes (shared with the server). */
 export { CLOSE } from "@firstlight/shared/net/social";
 
+/** The room handshake (WebSocket join of a seat reservation) must finish within this (ms). */
+export const JOIN_TIMEOUT_MS = 15_000;
+
+/** The WebSocket connected (or not) but the room handshake never finished. */
+export class JoinTimeout extends Error {
+  constructor() {
+    super(`room handshake timed out after ${JOIN_TIMEOUT_MS} ms`);
+    this.name = "JoinTimeout";
+  }
+}
+
+/** Starts the WebSocket join of a seat reservation; `abort` closes that socket while it handshakes. */
+export interface SeatJoiner {
+  consume(reservation: unknown): { joined: Promise<Room>; abort(): void };
+}
+
+/** The SDK client, keeping hold of the room it is connecting so a stalled handshake can be closed. */
+class SeatClient extends Client implements SeatJoiner {
+  private connecting: Room | null = null;
+
+  protected override createRoom<T>(roomName: string, rootSchema?: any): Room<any, T> {
+    const room = super.createRoom<T>(roomName, rootSchema);
+    this.connecting = room;
+    return room;
+  }
+
+  consume(reservation: unknown): { joined: Promise<Room>; abort(): void } {
+    // consumeSeatReservation creates the room and starts connecting before its first await.
+    const joined = this.consumeSeatReservation(reservation as never);
+    const room = this.connecting;
+    this.connecting = null;
+    return {
+      joined,
+      abort: () => {
+        try {
+          room?.connection?.close();
+        } catch {
+          /* the socket may never have opened */
+        }
+      },
+    };
+  }
+}
+
 export class Net {
   room: Room | null = null;
-  readonly client = new Client(config.apiUrl);
+  /** Bumped by every join and leave: a join that finishes after a newer one (or a leave) is dropped. */
+  private joinGen = 0;
   readonly remotes = new Map<string, RemotePlayerView>();
   private seq = 0;
   private lastSend = 0;
   serverOffset = 0; // serverTime - localTime
   rtt = 0;
   onCorrect: ((x: number, y: number, z: number) => void) | null = null;
+  /** The current room closed without us leaving it (rooms we left or replaced don't report). */
   onLeaveRoom: ((code: number) => void) | null = null;
   /** Queue position while /api/play says the world is full (null once in, or on failure). */
   onQueue: ((q: { position: number; etaSeconds: number } | null) => void) | null = null;
   /** /api/play refused this account ("banned", or "kicked" for a short cooldown). */
   onRefused: ((reason: string) => void) | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
+
+  constructor(private readonly joiner: SeatJoiner = new SeatClient(config.apiUrl)) {}
 
   async join(body: BodyId, opts: { partyLeaderRoomId?: string; starter?: number; palette?: number } = {}): Promise<Room> {
     let retried401 = false;
@@ -69,6 +117,7 @@ export class Net {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ body, v: PROTOCOL_VERSION, ...opts }),
+        signal: AbortSignal.timeout(20_000), // a server that never answers fails the arrival (retry/reconnect), not a spinner
       });
       if (res.status === 401 && !retried401) {
         // Stale token (e.g. the guest just saved and got a new id): fetch a fresh one once.
@@ -83,7 +132,12 @@ export class Net {
       const r = (await res.json()) as PlayResponse;
       if (r.ok) {
         this.onQueue?.(null);
-        const room = await this.client.consumeSeatReservation(r.reservation as never);
+        const gen = ++this.joinGen;
+        const room = await this.consumeWithDeadline(r.reservation);
+        if (gen !== this.joinGen) {
+          void room.leave().catch(() => {}); // a leave() or a newer join came first: never attach this one
+          throw new Error("join superseded");
+        }
         this.attach(room);
         return room;
       }
@@ -98,6 +152,37 @@ export class Net {
       if (r.error === "banned" || r.error === "kicked") this.onRefused?.(r.error);
       throw new Error(r.error);
     }
+  }
+
+  /**
+   * The WebSocket half of a join, bounded: a socket that never finishes the room handshake is closed
+   * and the join fails (JoinTimeout); a room that joins after that is left, never attached.
+   */
+  private consumeWithDeadline(reservation: unknown): Promise<Room> {
+    const { joined, abort } = this.joiner.consume(reservation);
+    return new Promise<Room>((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        abort();
+        reject(new JoinTimeout());
+      }, JOIN_TIMEOUT_MS);
+      joined.then(
+        (room) => {
+          if (settled) return void room.leave().catch(() => {});
+          settled = true;
+          clearTimeout(timer);
+          resolve(room);
+        },
+        (e: unknown) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          reject(e);
+        },
+      );
+    });
   }
 
   private attach(room: Room) {
@@ -130,10 +215,9 @@ export class Net {
       this.serverOffset = m.serverTime - (Date.now() - this.rtt / 2);
     });
     room.onLeave((code: number) => {
-      if (this.room === room) {
-        this.room = null;
-        this.stopPing();
-      }
+      if (this.room !== room) return; // we left it (leave() clears this.room first) or joined another
+      this.room = null;
+      this.stopPing();
       this.onLeaveRoom?.(code);
     });
     this.stopPing();
@@ -172,8 +256,8 @@ export class Net {
     this.room.send("input", { ...m, seq: ++this.seq, t: Date.now() });
   }
 
-  /** Interpolated snapshot `delay` ms in the past. */
-  sample(view: RemotePlayerView, now: number, delay = NET.INTERP_DELAY_MS): Snapshot | null {
+  /** Interpolated snapshot `delay` ms in the past (written into `out` when given: no allocation). */
+  sample(view: RemotePlayerView, now: number, delay = NET.INTERP_DELAY_MS, out?: Snapshot): Snapshot | null {
     const b = view.buf;
     if (b.length === 0) return null;
     const t = now - delay;
@@ -182,22 +266,23 @@ export class Net {
       const a = b[i - 1]!, c = b[i]!;
       if (t >= a.t) {
         const k = Math.min(1, (t - a.t) / Math.max(1, c.t - a.t));
-        return {
-          t,
-          x: a.x + (c.x - a.x) * k,
-          y: a.y + (c.y - a.y) * k,
-          z: a.z + (c.z - a.z) * k,
-          fx: a.fx + (c.fx - a.fx) * k,
-          fy: a.fy + (c.fy - a.fy) * k,
-          fz: a.fz + (c.fz - a.fz) * k,
-          anim: k < 0.5 ? a.anim : c.anim,
-        };
+        const s = out ?? { t: 0, x: 0, y: 0, z: 0, fx: 0, fy: 0, fz: 0, anim: 0 };
+        s.t = t;
+        s.x = a.x + (c.x - a.x) * k;
+        s.y = a.y + (c.y - a.y) * k;
+        s.z = a.z + (c.z - a.z) * k;
+        s.fx = a.fx + (c.fx - a.fx) * k;
+        s.fy = a.fy + (c.fy - a.fy) * k;
+        s.fz = a.fz + (c.fz - a.fz) * k;
+        s.anim = k < 0.5 ? a.anim : c.anim;
+        return s;
       }
     }
     return b[b.length - 1]!;
   }
 
   async leave() {
+    this.joinGen++; // a join still in flight must not attach after this
     const r = this.room;
     this.room = null;
     this.stopPing();

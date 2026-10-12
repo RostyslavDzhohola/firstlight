@@ -75,6 +75,12 @@ export interface PlayerActor {
   specialReadyAt: number;
   lastPhraseAt: number;
   healAcc: number;
+  /** Riding a horse (horses/HorseSystem). Movement allows horse speed, no dodge, no attacks. */
+  mounted?: boolean;
+  /** Mounted movement budget lasts until here after a dismount (the client learns a round trip later). */
+  mountGraceUntil?: number;
+  /** When `mounted` last changed (combat rewinds the rider's lifted hit capsule with the position). */
+  mountChangedAt?: number;
   /** NPC status effects enforced by movement validation (see npc/effects.ts). */
   npcFx?: NpcMoveFx;
 }
@@ -141,4 +147,16 @@ export function positionAgo(a: Actor, now: number, ms: number): V3 {
   }
   const f = h[0]!;
   return [f.x, f.y, f.z];
+}
+
+/** Horses: riding, or just off the horse while the server still budgets horse speed for the
+ *  client's in-flight inputs (HORSE.dismountGraceMs). No weapons, guard, draw or scope meanwhile. */
+export function inSaddle(a: PlayerActor, now: number): boolean {
+  return !!a.mounted || now < (a.mountGraceUntil ?? 0);
+}
+
+/** Was the player riding at time `t`? Changes are at least HORSE.toggleCooldownMs apart, longer than
+ *  any rewind, so only the last one matters. */
+export function mountedAt(a: PlayerActor, t: number): boolean {
+  return t >= (a.mountChangedAt ?? 0) ? !!a.mounted : !a.mounted;
 }

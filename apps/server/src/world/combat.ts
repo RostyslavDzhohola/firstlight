@@ -7,9 +7,10 @@ import { WEAPONS, WEAPON_INDEX, type Destroys, type TierStats, type WeaponDef } 
 import type { Terrain } from "@firstlight/shared";
 import { NET } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
-import { actorPos, positionAgo, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
+import { actorPos, mountedAt, positionAgo, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
 import { noteKnockback } from "./movement.ts";
 import { dist3, HEAD_FROM, inMeleeArc, PLAYER_HEIGHT, PLAYER_RADIUS, rayCapsule, rayTerrain, type V3 } from "./geometry.ts";
+import { HORSE } from "@firstlight/shared/content/horse";
 
 /** Lag compensation window: the one shared constant (SPEC §5.3: history ≤ 200 ms). */
 export const REWIND_MS = NET.REWIND_MS;
@@ -113,6 +114,15 @@ export function canHurt(a: Actor | null, b: Actor, now: number): boolean {
   return true;
 }
 
+/** Feet of an actor's hit capsule `ms` ago: a mounted rider's sit HORSE.riderLift up, in the saddle. */
+function capsuleFeet(a: Actor, now: number, ms: number): V3 {
+  const f = positionAgo(a, now, ms);
+  if (a.kind !== "player" || !mountedAt(a, now - ms)) return f;
+  const l = Math.hypot(f[0], f[1], f[2]);
+  const k = 1 + HORSE.riderLift / l;
+  return [f[0] * k, f[1] * k, f[2] * k];
+}
+
 function headPos(p: PlayerActor): V3 {
   const [x, y, z] = actorPos(p);
   const l = Math.hypot(x, y, z);
@@ -143,8 +153,7 @@ function raycastActors(host: CombatHost, o: V3, d: V3, maxT: number, ignore: Set
   const now = host.now();
   const test = (a: Actor, r: number, h: number) => {
     if (ignore.has(a.id) || !canHurt(null, a, now)) return;
-    const feet = positionAgo(a, now, rewindMs);
-    const hit = rayCapsule(o, d, maxT, feet, r, h);
+    const hit = rayCapsule(o, d, maxT, capsuleFeet(a, now, rewindMs), r, h);
     if (hit && (!best || hit.t < best.t)) {
       // NPCs with weak-point volumes (bosses) decide for themselves where the weak spot is.
       const weak = a.kind === "player" ? hit.heightAboveFeet >= HEAD_FROM : a.weakPoint ? a.weakPoint(o, d, hit.t) : hit.heightAboveFeet >= h * 0.8;
@@ -388,7 +397,7 @@ function chain(host: CombatHost, p: PlayerActor, o: V3, d: V3, def: WeaponDef, t
     if (a.id === p.id || !canHurt(p, a, now)) continue;
     const r = a.kind === "player" ? PLAYER_RADIUS + 0.7 : a.radius + 0.7;
     const h = a.kind === "player" ? PLAYER_HEIGHT : a.height;
-    const hit = rayCapsule(o, d, Math.min(def.range, terrainT), positionAgo(a, now, REWIND_MS), r, h);
+    const hit = rayCapsule(o, d, Math.min(def.range, terrainT), capsuleFeet(a, now, REWIND_MS), r, h);
     if (hit && hit.t < bestT) {
       bestT = hit.t;
       first = a;

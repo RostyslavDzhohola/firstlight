@@ -432,6 +432,11 @@ export class Hud {
     this.logoutRing.style.strokeDashoffset = String(RING_C * (1 - Math.min(1, left / LOGOUT_MS)));
   }
 
+  /** True when some system already put up an interaction prompt this frame (prompts are set each frame). */
+  get promptShown(): boolean {
+    return this.c.prompt !== "" && this.c.prompt !== "\u0000";
+  }
+
   /** Interaction prompt. "E — take everything…" shows E as a keycap; or pass the key separately. */
   setPrompt(text: string | null, key?: string | null) {
     const k = text ? `${key ?? ""}\u0001${text}` : "";

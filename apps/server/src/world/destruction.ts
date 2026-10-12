@@ -8,6 +8,7 @@
 
 import { BreakableGrid, bodyBreakables, canBreak, distanceToBreakable, hash4, rayBreakable, segmentNearBreakable, type Breakable, type BreakClass } from "@firstlight/shared";
 import { splashFalloff } from "@firstlight/shared/content/progression";
+import { BreakableCollider, emptyContact, PLAYER_BODY, pushOutOfBreakable, resetContact, supportHeightAt, type PropContact, type XYZ } from "@firstlight/shared/planet/collide";
 import type { BodyRoom } from "./BodyRoom.ts";
 import { emitGameEvent } from "./events.ts";
 import type { BreakableHost } from "./combat.ts";
@@ -28,14 +29,14 @@ export const DESTRUCTION = {
 /** The room surface this system needs. */
 type Room = BodyRoom;
 
-/** Feet this far outside a prop's footprint still stand on its edge (the client body is 0.38 m wide). */
-const FOOT_EDGE_SLACK = 0.2;
-/** Feet this far inside a footprint (and below the top) are inside the prop, not pressed against it. */
+/** Feet this far inside a solid's footprint (and below its top) are inside the prop, not pressed against it. */
 const INSIDE_MARGIN = 0.1;
 
 export class DestructionSystem implements RoomSystem, BreakableHost {
   readonly list: readonly Breakable[];
   readonly grid: BreakableGrid;
+  /** Player-vs-prop collision shared with the client (support under the feet, push-outs). */
+  readonly collider: BreakableCollider;
   /** Current HP per breakable (index = Breakable.index). */
   readonly hp: Float32Array;
   /** Rebuild time per breakable (ms since epoch); 0 = intact. */
@@ -53,6 +54,7 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
     this.now = now;
     this.list = bodyBreakables(room.terrain);
     this.grid = new BreakableGrid(this.list);
+    this.collider = new BreakableCollider(this.list, this.grid);
     this.hp = new Float32Array(this.list.length);
     this.brokenUntil = new Float64Array(this.list.length);
     for (const b of this.list) this.hp[b.index] = b.hp;
@@ -95,46 +97,33 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
   }
 
   private readonly footingOut = { top: 0, inside: false };
+  private readonly scratch: XYZ = { x: 0, y: 0, z: 0 };
+  private readonly contact: PropContact = emptyContact();
+  private readonly solid = (i: number): boolean => !(this.brokenUntil[i]! > 0);
 
   /**
-   * Movement footing at feet position (x, y, z) (F12: props are standable): `top` is the distance
-   * from the planet centre of the highest intact prop top the feet stand on or above (centre over
-   * the footprint, with a little edge slack; 0 = none), and `inside` is true when the feet are in an
-   * intact prop's solid part (more than `step` below its top, well within its footprint). Broken
-   * props hold nobody. The returned object is reused.
+   * Movement footing at feet position (x, y, z) (F12: props are standable), with the player-vs-prop
+   * rules the client moves by (shared planet/collide.ts, compound colliders): `top` is the distance
+   * from the planet centre of the highest intact prop top under the feet (supportHeightAt; 0 = none),
+   * and `inside` is true when the feet are deep in an intact prop's solid part (the client would push
+   * the body out by more than its radius + INSIDE_MARGIN). Broken props hold nobody. Reused object.
    */
   footing(x: number, y: number, z: number, step: number): { top: number; inside: boolean } {
     const out = this.footingOut;
-    out.top = 0;
+    const body = { radius: PLAYER_BODY.radius, step };
+    out.top = supportHeightAt(this.collider, x, y, z, this.solid, body);
     out.inside = false;
     if (this.list.length === 0) return out;
-    const n = this.grid.collect(x, y, z, 0, 0, 0, 0, 0, this.candidates);
-    for (let k = 0; k < n; k++) {
+    const n = this.grid.collect(x, y, z, 0, 0, 0, 0, PLAYER_BODY.radius + PLAYER_BODY.height, this.candidates);
+    for (let k = 0; k < n && !out.inside; k++) {
       const i = this.candidates[k]!;
-      if (this.brokenUntil[i]! > 0) continue;
-      const b = this.list[i]!;
-      const qx = x - b.px, qy = y - b.py, qz = z - b.pz;
-      const ly = qx * b.ux + qy * b.uy + qz * b.uz;
-      if (ly < -0.5) continue;
-      const lx = qx * b.rx + qy * b.ry + qz * b.rz;
-      const lz = qx * b.fx + qy * b.fy + qz * b.fz;
-      // How far the feet are outside the footprint (0 inside) and how deep inside it (≤ 0 outside).
-      let outside: number, depth: number;
-      if (b.shape === 0) {
-        const ex = Math.max(0, Math.abs(lx) - b.hx), ez = Math.max(0, Math.abs(lz) - b.hz);
-        outside = Math.sqrt(ex * ex + ez * ez);
-        depth = Math.min(b.hx - Math.abs(lx), b.hz - Math.abs(lz));
-      } else {
-        const rl = Math.sqrt(lx * lx + lz * lz);
-        outside = Math.max(0, rl - b.hx);
-        depth = b.hx - rl;
-      }
-      if (outside > FOOT_EDGE_SLACK) continue;
-      if (ly >= b.h - step) {
-        const lift = b.h - ly;
-        const top = Math.hypot(x + b.ux * lift, y + b.uy * lift, z + b.uz * lift);
-        if (top > out.top) out.top = top;
-      } else if (depth >= INSIDE_MARGIN) out.inside = true;
+      if (!this.solid(i)) continue;
+      const p = this.scratch;
+      p.x = x;
+      p.y = y;
+      p.z = z;
+      if (!pushOutOfBreakable(this.list[i]!, p, PLAYER_BODY.radius, PLAYER_BODY.height, step, resetContact(this.contact))) continue;
+      if (Math.hypot(p.x - x, p.y - y, p.z - z) >= PLAYER_BODY.radius + INSIDE_MARGIN) out.inside = true;
     }
     return out;
   }

@@ -39,15 +39,19 @@ export function applyPull(a: PlayerActor, c: V3, speed: number, ms: number, now:
   fxOf(a).pull = { c, speed, until: now + ms };
 }
 
+/** The NPC movement effects on a player right now (riding uses them through rideSpeed). */
+export function activeMoveFx(a: PlayerActor, now: number): { slow: number; noSprint: boolean } {
+  const fx = a.npcFx;
+  if (!fx) return { slow: 0, noSprint: false };
+  return { slow: now < fx.slowUntil ? fx.slow : 0, noSprint: now < fx.noSprintUntil };
+}
+
 /**
  * Speed factor for the movement budget's refill (1 = normal) and the dodge allowance factor
  * (0 = dodge refused) for this player right now.
  */
 export function movementLimits(a: PlayerActor, now: number): { speed: number; dodge: number } {
-  const fx = a.npcFx;
-  if (!fx) return { speed: 1, dodge: 1 };
-  const slow = now < fx.slowUntil ? fx.slow : 0;
-  const noSprint = now < fx.noSprintUntil;
+  const { slow, noSprint } = activeMoveFx(a, now);
   return { speed: (noSprint ? RUN / SPRINT : 1) * (1 - slow), dodge: noSprint ? 0 : 1 - slow };
 }
 

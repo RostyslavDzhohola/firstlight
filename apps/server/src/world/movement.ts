@@ -9,9 +9,11 @@
 //   position (jump speed, gravity, generous slack). Hovering or climbing in small steps fails as
 //   soon as the envelope drops below it, and `settle` pulls such bodies (or silent ones) down.
 
+import { HORSE, rideSpeed } from "@firstlight/shared/content/horse";
 import { ANIM } from "@firstlight/shared/net/schema";
-import type { PlayerActor } from "./actors.ts";
+import { inSaddle, type PlayerActor } from "./actors.ts";
 import type { V3 } from "./geometry.ts";
+import { activeMoveFx, movementLimits } from "./npc/effects.ts";
 
 export const MOVE = {
   maxSpeed: 9, // sprint (content §0)
@@ -54,6 +56,23 @@ export interface MoveLimits {
   speed: number;
   /** Dodge bonus factor (0 = refused). */
   dodge: number;
+  /**
+   * Riding (horses): the mounted refill speed in m/s (gallop under NPC effects); the bank is
+   * HORSE.budgetCap and there is no dodge. Set while mounted and during the dismount grace.
+   */
+  ride?: number;
+}
+
+/**
+ * The movement limits for a player now: NPC slows and Cease-and-Desist (npc/effects.ts), and riding
+ * (HorseSystem sets `mounted`; the mounted budget outlives a dismount by HORSE.dismountGraceMs since
+ * the client is a round trip behind).
+ */
+export function moveLimits(a: PlayerActor, now: number): MoveLimits {
+  const limits = movementLimits(a, now);
+  if (!inSaddle(a, now)) return limits;
+  const fx = activeMoveFx(a, now);
+  return { speed: limits.speed, dodge: 0, ride: rideSpeed(true, fx.slow, fx.noSprint) };
 }
 
 export type MoveResult =
@@ -95,13 +114,16 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
   const foot = swimming ? null : (w.footing?.(m.x, m.y, m.z, MOVE.groundedAbove) ?? null);
   const ground = foot && foot.top > 0 ? Math.max(terrain, foot.top - w.radius) : terrain;
   const above = len - w.radius - ground;
-  // Swim speed when both ends of the step are in the water (entering and leaving keep land speed).
+  // Swim speed when both ends of the step are in the water (entering and leaving keep land speed);
+  // horse speed and a bigger bank while riding.
   const inWater = swimming && a.swimming;
-  const speed = (inWater ? MOVE.swimSpeed : MOVE.maxSpeed) * MOVE.speedSlack * limits.speed;
-  a.moveBudget = Math.min(inWater ? MOVE.swimBudgetCap : MOVE.budgetCap, a.moveBudget + speed * elapsed);
+  const riding = limits.ride !== undefined;
+  const speed = (riding ? limits.ride! : (inWater ? MOVE.swimSpeed : MOVE.maxSpeed) * limits.speed) * MOVE.speedSlack;
+  const cap = riding ? HORSE.budgetCap : inWater ? MOVE.swimBudgetCap : MOVE.budgetCap;
+  a.moveBudget = Math.min(cap, a.moveBudget + speed * elapsed);
   if (now >= a.moveBonusUntil) a.moveBonus = 0;
-  // Dodge rolls only on land (the client can't roll in the water either).
-  if (m.anim === ANIM.DODGE && !swimming && !a.swimming && limits.dodge > 0 && now - a.lastDodgeAt >= MOVE.dodgeCooldownMs) {
+  // Dodge rolls only on foot on land (the client can't roll in the water or from the saddle).
+  if (m.anim === ANIM.DODGE && !riding && !swimming && !a.swimming && limits.dodge > 0 && now - a.lastDodgeAt >= MOVE.dodgeCooldownMs) {
     a.lastDodgeAt = now;
     a.moveBonus += MOVE.dodgeBurst * limits.dodge;
     a.moveBonusUntil = Math.max(a.moveBonusUntil, now + MOVE.dodgeWindowMs);

@@ -32,6 +32,9 @@ export const env = {
   otpPerEmailPerHour: num("OTP_PER_EMAIL_PER_HOUR", 3),
   /** Print dev OTP codes to the console (dev outbox only: no RESEND_API_KEY and not production). */
   devMailLog: process.env.DEV_MAIL_LOG === "1",
+  /** M11 extra #2 (SPEC §6.14): horses. On in dev and production; FEATURE_HORSES=0 turns them off
+   *  (no whistle sales, H refused, clients told through `you.horses`). Mutable for tests. */
+  horses: process.env.FEATURE_HORSES !== "0",
 };
 
 /**

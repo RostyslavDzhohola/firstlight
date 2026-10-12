@@ -12,7 +12,7 @@ import { NET, PHRASES, type InvItem, type YouState } from "@firstlight/shared/ne
 import { ANIM, BodyState, NpcState, PF, PileState, PlayerState } from "@firstlight/shared/net/schema";
 import { z } from "zod";
 import type { Identity } from "../auth/identity.ts";
-import { actorPos, pushHistory, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
+import { actorPos, inSaddle, pushHistory, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
 import { characterRepo, withTx } from "./characters.ts";
 import { CLOSE, hub, type HubRoom } from "./hub.ts";
 
@@ -23,11 +23,10 @@ import { dist3, type V3 } from "./geometry.ts";
 import { emitGameEvent, npcKindOf } from "./events.ts";
 import { emitPileEvent, onPileEvent, pileStore, type PileData } from "./piles.ts";
 import { SYSTEM_FACTORIES, type RoomSystem } from "./systems.ts";
-import { movementLimits } from "./npc/effects.ts";
 import { identityCheck, ticketFor, travelRedirect } from "./admission.ts";
 import { pendingSeats } from "./reservations.ts";
 import { seatRefusal } from "../social/moderation.ts";
-import { groundMotion, motionFields, settle, validateMove, MOVE, type MoveWorld } from "./movement.ts";
+import { groundMotion, motionFields, moveLimits, settle, validateMove, MOVE, type MoveWorld } from "./movement.ts";
 import { matchMaker } from "@colyseus/core";
 import { liveSessions } from "../auth/sessions.ts";
 import { accountLinks } from "../auth/links.ts";
@@ -249,6 +248,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     this.onMessage("fire", fireSchema, (c, m) => {
       const a = this.actor(c);
       if (!a || a.dead) return;
+      if (inSaddle(a, Date.now())) return void c.send("denied", { action: "fire", reason: "mounted" }); // no weapons from the saddle
       if (m.slot !== a.char.selected) this.equip(a, m.slot);
       const r = fire(this.host, a, m);
       if (!r.ok && r.reason !== "rate") c.send("denied", { action: "fire", reason: r.reason });
@@ -256,23 +256,24 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     this.onMessage("melee", meleeSchema, (c, m) => {
       const a = this.actor(c);
       if (!a || a.dead) return;
+      if (inSaddle(a, Date.now())) return void c.send("denied", { action: "melee", reason: "mounted" });
       if (m.slot !== a.char.selected) this.equip(a, m.slot);
       melee(this.host, a, !!m.heavy);
     });
     this.onMessage("block", z.object({ on: z.boolean() }), (c, m) => {
       const a = this.actor(c);
-      if (!a) return;
+      if (!a || (m.on && inSaddle(a, Date.now()))) return;
       a.blocking = m.on;
       a.state.flags = m.on ? a.state.flags | PF.BLOCKING : a.state.flags & ~PF.BLOCKING;
     });
     this.onMessage("charge", z.object({ on: z.boolean() }), (c, m) => {
       const a = this.actor(c);
-      if (a && !a.dead) a.chargeStartedAt = m.on ? Date.now() : 0;
+      if (a && !a.dead) a.chargeStartedAt = m.on && !inSaddle(a, Date.now()) ? Date.now() : 0;
     });
     this.onMessage("travel", z.object({ to: z.enum(["portus", "arcadia", "hollowmere", "meridian"]) }), (c, m) => this.travelRequest(c, m.to));
     this.onMessage("scope", z.object({ on: z.boolean() }), (c, m) => {
       const a = this.actor(c);
-      if (!a) return;
+      if (!a || (m.on && inSaddle(a, Date.now()))) return;
       a.state.flags = m.on ? a.state.flags | PF.SCOPED : a.state.flags & ~PF.SCOPED;
     });
     this.onMessage("reload", z.object({ slot: z.number().int().min(0).max(3) }), (c) => this.reload(this.actor(c)));
@@ -601,8 +602,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (!a || a.dead || a.superseded || msg.seq <= a.state.seq) return;
     const p = a.state;
     const now = Date.now();
-    // NPC slows / Cease-and-Desist (npc/effects.ts) scale the refill and can refuse the dodge burst.
-    const r = validateMove(a, msg, this.moveWorld, movementLimits(a, now), now);
+    // NPC slows / Cease-and-Desist (npc/effects.ts) and riding (horses) set the refill; see movement.ts.
+    const r = validateMove(a, msg, this.moveWorld, moveLimits(a, now), now);
     if (!r.ok) {
       a.violations++;
       // Refused while airborne: the server applies gravity instead of holding the body up there.
@@ -938,7 +939,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     }
     for (const e of events) e();
     this.equip(victim, 0);
-    const killerName = killer ? (killer.kind === "player" ? killer.identity.name : `npc:${killer.state.kind}`) : "the fall";
+    const killerName = killer ? (killer.kind === "player" ? killer.identity.name : `npc:${npcKindOf(killer) ?? killer.state.kind}`) : "the fall";
     const pileId = (pile as PileData | null)?.id ?? "";
     this.broadcast("death", { victim: victim.id, killer: killer?.id ?? null, killerName, aliveMs: now - victim.char.lifeStartedAt, level: victim.char.level, pileId });
     emitGameEvent(this, { type: "death", victimId: victim.id, killerId: killer?.id ?? null, killerKind: killer?.kind ?? "world", npcKind: killer?.kind === "npc" ? npcKindOf(killer) : undefined, pos: actorPos(victim) });

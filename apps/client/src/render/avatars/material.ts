@@ -22,7 +22,8 @@ export const avatarRim = {
 };
 
 let ramp: THREE.DataTexture | null = null;
-function toonRamp(): THREE.DataTexture {
+/** The shared two-band toon ramp (also used by horses, render/Horses.ts). */
+export function toonRamp(): THREE.DataTexture {
   if (ramp) return ramp;
   // dot(N,L) * 0.5 + 0.5 → irradiance. A soft terminator between a lifted shadow band and full light.
   const n = 32;

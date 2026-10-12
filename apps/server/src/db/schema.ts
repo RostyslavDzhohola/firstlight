@@ -147,9 +147,10 @@ export const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (user_id, stat)
   );
   `,
-  // 3: admin voice mutes survive restarts and deploys (F12 S12)
+  // 3 (lane f12-core: voice_mute): admin voice mutes survive restarts and deploys (F12 S12).
+  // Other lanes adding a migration: renumber at merge; never reorder applied ones.
   `
-  CREATE TABLE voice_mute (
+  CREATE TABLE IF NOT EXISTS voice_mute (
     user_id   TEXT PRIMARY KEY,
     muted_at  INTEGER NOT NULL
   );
