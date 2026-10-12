@@ -6,17 +6,22 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomInt } from "node:crypto";
 import type Database from "better-sqlite3";
 import { betterAuth, type BetterAuthOptions } from "better-auth";
-import { APIError, createAuthMiddleware, isAPIError } from "better-auth/api";
+import { APIError, createAuthMiddleware, getSessionFromCtx, isAPIError } from "better-auth/api";
 import { anonymous, emailOTP, jwt } from "better-auth/plugins";
 import { z } from "zod";
 import { CLIENT_IP_HEADER } from "./ip.ts";
 
 export const SAVING_BUSY = "Saving is busy, try again later";
 
+/** A new address only gets a code from a player who reached this level (the save card's first level-up). */
+export const OTP_MIN_LEVEL = 2;
+
 /** Per-request state shared by the before hook, the send function and the after hook. */
 interface AuthRequestState {
   otpReservation?: number;
   otpSendFailed?: boolean;
+  /** A queued background send (the public request was already answered). */
+  otpQueued?: boolean;
 }
 
 export const authRequestState = new AsyncLocalStorage<AuthRequestState>();
@@ -34,6 +39,15 @@ export interface AuthDeps {
   rateLimit: boolean;
   /** True if this client IP is banned. */
   ipBanned(ip: string): boolean;
+  /** Does this (lower-cased) address belong to a saved account? (A returning player.) */
+  savedEmail(email: string): boolean;
+  /** May this signed-in player get a code for any address? (Saving a guest after OTP_MIN_LEVEL.) */
+  maySave(userId: string): boolean;
+  /**
+   * Send a code to this saved address in the background: reserve the budget and deliver later, so
+   * the public answer never depends on the budget, the delivery result or its timing.
+   */
+  queueOtp(email: string): void;
   /** Reserve one OTP send for this (lower-cased) email; false = over budget. Returns a reservation id. */
   reserveOtp(email: string): { ok: true; id: number } | { ok: false; reason: string };
   releaseOtp(id: number): void;
@@ -79,6 +93,20 @@ export function authOptions(d: AuthDeps) {
         if (body.type !== "sign-in") throw APIError.from("BAD_REQUEST", { code: "UNSUPPORTED_OTP_TYPE", message: "Only sign-in codes are supported." });
         const email = typeof body.email === "string" ? body.email.toLowerCase() : "";
         if (!emailSchema.safeParse(email).success) return; // Better Auth rejects it
+        // F12: a code goes only to a returning player's saved address, or from a signed-in player
+        // who reached OTP_MIN_LEVEL (saving a guest), so fresh guests and session-less requests can't
+        // drain the global budget. Public requests (no session, or below that level) always get the
+        // same immediate answer, whatever the address, budget or delivery result (no enumeration);
+        // saved addresses are served by a queued background send. A player who may save gets the
+        // synchronous path with clear errors: its outcome doesn't depend on whose address it is.
+        if (!authRequestState.getStore()?.otpQueued) {
+          const session = await getSessionFromCtx(ctx, { disableRefresh: true }).catch(() => null);
+          const userId = session?.user.id ?? null;
+          if (!userId || !d.maySave(userId)) {
+            if (d.savedEmail(email)) d.queueOtp(email);
+            return ctx.json({ success: true });
+          }
+        }
         // Budget key ignores "+tag" aliases so one inbox can't multiply its hourly allowance.
         const r = d.reserveOtp(email.replace(/\+[^@]*@/, "@"));
         if (!r.ok) throw APIError.from("TOO_MANY_REQUESTS", { code: "SAVING_BUSY", message: SAVING_BUSY });

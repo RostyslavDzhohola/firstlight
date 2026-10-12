@@ -19,5 +19,5 @@ export function revokeVoiceForUser(userId: string): Promise<number> {
   return turnCredentials.revokeUser(userId);
 }
 
-export { VoiceSystem } from "./VoiceSystem.ts";
+export { VOICE_LIMITS, VoiceSystem } from "./VoiceSystem.ts";
 export { voiceMutes, voiceSafety } from "./safety.ts";

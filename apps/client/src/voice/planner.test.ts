@@ -1,6 +1,6 @@
 import { VOICE } from "@firstlight/shared/net/voice";
 import { describe, expect, it } from "vitest";
-import { acceptsIncoming, planLinks, shouldSend, type Me, type PeerView } from "./planner.ts";
+import { acceptsIncoming, planLinks, redialBackoffMs, shouldSend, type Me, type PeerView } from "./planner.ts";
 
 const me: Me = { radioCh: 0, hasRadio: false, adminMuted: false };
 const peer = (id: string, dist: number, extra: Partial<PeerView> = {}): PeerView => ({ id, dist, voice: true, adminMuted: false, radioCh: 0, blocked: false, ...extra });
@@ -99,5 +99,17 @@ describe("sender gating", () => {
     expect(shouldSend(500, false, true, true)).toBe(true);
     expect(shouldSend(500, false, true, false)).toBe(false);
     expect(shouldSend(10, false, true, false)).toBe(true);
+  });
+});
+
+describe("re-dial backoff", () => {
+  it("doubles after each unreachable reply from the same peer, from 10 s up to 5 minutes", () => {
+    expect([1, 2, 3, 4, 5, 6].map(redialBackoffMs)).toEqual([10_000, 20_000, 40_000, 80_000, 160_000, 300_000]);
+    expect(redialBackoffMs(50)).toBe(300_000);
+    // An hour next to someone who blocked you: about 16 rings instead of 360.
+    let t = 0;
+    let rings = 0;
+    for (let n = 1; t < 3_600_000; n++, rings++) t += redialBackoffMs(n);
+    expect(rings).toBeLessThan(20);
   });
 });

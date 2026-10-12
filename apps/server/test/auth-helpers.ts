@@ -10,8 +10,10 @@ import { createAuthClient } from "better-auth/client";
 import { anonymousClient, emailOTPClient, jwtClient } from "better-auth/client/plugins";
 import type { Express } from "express";
 import { createGame, type Game } from "../src/app.ts";
+import { waitFor } from "./helpers.ts";
 import { createAccounts, type Accounts, type AccountsConfig } from "../src/auth/accounts.ts";
 import { devVerifier } from "../src/auth/identity.ts";
+import { ensureAccount, loadCharacter, saveCharacter } from "../src/db/index.ts";
 import { LinkEvents } from "../src/auth/links.ts";
 import { SessionRegistry } from "../src/auth/sessions.ts";
 
@@ -136,7 +138,26 @@ export class Browser {
     return t.data.token;
   }
 
+  /**
+   * The signed-in user has played to `level` (a character row in game.db). New addresses only get a
+   * code from a player at level 2 or more, or for an email that already has a saved account.
+   */
+  async levelUp(level = 2): Promise<void> {
+    const id = (await this.client.getSession()).data?.user.id;
+    if (!id) return;
+    const db = this.server.accounts.db;
+    const c = loadCharacter(db, id);
+    if (c && c.level >= level) return;
+    ensureAccount(db, id);
+    saveCharacter(db, id, {
+      ...(c ?? { starter: "ember", palette: 0, xp: 0, coins: 0, hp: 100, body: "portus", copyHint: 0, x: 0, y: 0, z: 0, heading: 0, inventory: [], missionState: {}, lifeStartedAt: Date.now(), protectedUntil: 0 }),
+      level,
+    });
+  }
+
+  /** Ask for a code like the save card does (after the first level-up). */
   async sendCode(email: string) {
+    await this.levelUp();
     return this.client.emailOtp.sendVerificationOtp({ email, type: "sign-in" });
   }
 
@@ -146,9 +167,13 @@ export class Browser {
 
   /** Request a code and sign in with it (dev outbox). */
   async saveWithEmail(email: string, name?: string) {
+    const outbox = this.server.accounts.devOutbox!;
+    const before = outbox.sent;
     const sent = await this.sendCode(email);
     if (sent.error) throw new Error(`send failed: ${JSON.stringify(sent.error)}`);
-    const code = this.server.accounts.devOutbox!.lastCode(email);
+    // Without a session that may save, the code is delivered in the background.
+    await waitFor(() => outbox.sent > before).catch(() => {});
+    const code = outbox.lastCode(email);
     if (!code) throw new Error("no code in the dev outbox");
     const r = await this.signInWithCode(email, code, name);
     if (r.error) throw new Error(`sign-in failed: ${JSON.stringify(r.error)}`);
