@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { NF } from "@firstlight/shared/content/npcs";
 import { npcSystemOf } from "../src/world/npc/index.ts";
 import { EGG_LIMITS } from "../src/world/quests/eggs.ts";
+import { pileStore } from "../src/world/piles.ts";
 import type { QuestSystem } from "../src/world/quests/QuestSystem.ts";
 import { safeLeave, startServer } from "./helpers.ts";
 import { bot, harness, invIds, objAt, serverRoom, sleep, tpAndWait, until, type Bot } from "./quest-helpers.ts";
@@ -21,6 +22,7 @@ afterEach(async () => {
   await harness.game!.close();
 });
 
+const actorOf = (b: Bot) => serverRoom(b).actors.get(b.id)!;
 const quests = (b: Bot) => serverRoom(b).systems.find((s) => "eggs" in s) as QuestSystem;
 const penaltyNpcs = (b: Bot, userId?: string) =>
   [...npcSystemOf(serverRoom(b))!.npcs.values()].filter((n) => n.spawned?.reason === "egg" && !n.dead && (userId === undefined || n.spawned.userId === userId));
@@ -79,28 +81,26 @@ describe("egg penalties", () => {
     expect(b.count("npcKill")).toBe(0);
   });
 
-  it("repeat-kill XP decay is keyed on the egg, across separate wrong answers", async () => {
+  it("penalty kills pay nothing: no XP, no coins, no drops (they're a penalty, not a farm)", async () => {
     EGG_LIMITS.lockMs = 0;
     const b = await bot("farmer", "arcadia");
     await tpAndWait(b, objAt("e2_btn_flame"));
     b.send("admin", { cmd: "unprotect" });
-    const kills: number[] = [];
+    const before = { xp: actorOf(b).char.xp, coins: b.you.coins, piles: pileStore.current.list("arcadia").length };
+    const npcs = npcSystemOf(serverRoom(b))!;
     for (let round = 0; round < 2; round++) {
       await press(b, "e2_btn_flame");
       await until("spawned", () => penaltyNpcs(b).length === 3);
       const wave = penaltyNpcs(b);
       await until("materialised", () => wave.every((n) => (n.state.flags & NF.INVULN) === 0));
-      for (const n of wave) {
-        const before = b.count("npcKill");
-        b.send("npc", { cmd: "hurt", id: n.id, as: b.id, amount: 5000 });
-        await until("kill reward", () => b.count("npcKill") > before);
-        kills.push(b.last("npcKill").xp);
-      }
+      for (const n of wave) b.send("npc", { cmd: "hurt", id: n.id, as: b.id, amount: 5000 });
+      await until("wave dead", () => wave.every((n) => n.dead || !npcs.npcs.has(n.id)));
     }
-    expect(kills).toHaveLength(6);
-    // One key per egg: every kill after the first pays 10% less, whichever wave it came from.
-    for (let i = 1; i < kills.length; i++) expect(kills[i]!, `kill ${i + 1}`).toBeLessThan(kills[i - 1]!);
-    expect(kills[5]! / kills[0]!).toBeCloseTo(0.5, 1);
+    await until("a tick later", () => penaltyNpcs(b).length === 0);
+    expect(actorOf(b).char.xp).toBe(before.xp);
+    expect(actorOf(b).char.coins).toBe(before.coins);
+    expect(pileStore.current.list("arcadia")).toHaveLength(before.piles);
+    expect(b.count("npcKill")).toBe(0);
   });
 });
 

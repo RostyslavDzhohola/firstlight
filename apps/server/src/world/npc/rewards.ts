@@ -19,8 +19,7 @@ type Rng = () => number;
 
 /**
  * XP multiplier for killing at the same spawn point again within 5 minutes (−10% per kill, floor 30%).
- * `key` names the spawn source: a spawn point, a summoner, or an egg (penalty spawns share one key per
- * egg, so farming wrong answers decays like farming one pack).
+ * `key` names the spawn source: a spawn point or a summoner.
  */
 export function repeatDecay(sys: NpcSystem, userId: string, key: string, now: number): number {
   const k = `${userId}|${key}`;
@@ -91,6 +90,9 @@ function actorOf(sys: NpcSystem, userId: string, sid: string): PlayerActor | nul
 }
 
 export function rewardKill(sys: NpcSystem, n: Npc, killerId: string | null, now: number) {
+  // Egg penalties and staged-scene spawns pay nothing (no XP, coins, drops or hunt credit): they are
+  // a penalty and a film set, not a farm (F12 review S1).
+  if (n.spawned) return;
   const def = n.def;
   const world = sys.world;
   const maxHp = n.state.maxHp;
@@ -109,7 +111,7 @@ export function rewardKill(sys: NpcSystem, n: Npc, killerId: string | null, now:
     if (e.amount >= NPC_RULES.xpShare * maxHp || (killer && killer.identity.userId === e.userId)) xpTo.push(p);
   }
   if (killer && !killer.dead && !xpTo.includes(killer)) xpTo.push(killer);
-  const key = n.point ? `p${n.point.id}` : n.summoner ? `s${n.summoner}` : n.spawned ? (n.spawned.reason === "egg" ? `e${n.spawned.key}` : "stage") : `x${n.id}`;
+  const key = n.point ? `p${n.point.id}` : n.summoner ? `s${n.summoner}` : `x${n.id}`;
   const gains = new Map<string, { p: PlayerActor; xp: number; coins: number }>();
   // XP, coins, drops, chest and saves land together; pile events go out after the commit (D26).
   const events: (() => void)[] = [];
