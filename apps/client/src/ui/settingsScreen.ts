@@ -66,6 +66,10 @@ export function openSettings(game: Game, host: HTMLElement, back: () => void): (
   const ctx = game.ctx;
   const root = el("div", "fl-settings", host);
   isolateKeys(root);
+  // Keys don't leave the screen (isolateKeys), so Esc → back is handled here.
+  root.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") back();
+  });
   const cleanups: (() => void)[] = [];
 
   const top = el("header", "fl-settings__top", root);

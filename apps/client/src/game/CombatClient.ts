@@ -2,7 +2,7 @@
 // inventory keys, pickups, death and rebirth.
 
 import * as THREE from "three/webgpu";
-import { isBlocked } from "../social/store.ts";
+import { isBlocked, partyState } from "../social/store.ts";
 import { WEAPONS, WEAPON_BY_ID, type WeaponDef } from "@firstlight/shared/content/weapons";
 import { PHRASES } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
@@ -104,7 +104,11 @@ export class CombatClient {
       const p = m.by === me ? this.game.player.pos : (() => { const s = (room.state as any).players?.get(m.by); return s ? new THREE.Vector3(s.x, s.y, s.z) : null; })();
       if (!p) return;
       const s = this.toScreen(p.clone(), 2.3);
-      if (s) this.hud.bubble(s.x, s.y, PHRASES[m.id] ?? "");
+      if (!s) return;
+      // Others' bubbles carry their name; party members also their slot (colour + number).
+      const speaker = m.by === me ? null : (room.state as any).players?.get(m.by);
+      const slot = partyState().members.findIndex((x) => x.sessionId === m.by) + 1;
+      this.hud.bubble(s.x, s.y, PHRASES[m.id] ?? "", { name: speaker?.name, slot: slot > 0 && slot <= 4 ? (slot as 1 | 2 | 3 | 4) : undefined });
     });
     room.onMessage("death", async (m: { victim: string; killer: string | null; killerName: string; aliveMs: number; level: number; pileId: string }) => {
       if (m.victim !== me || this.deadUntilRespawn) return;
