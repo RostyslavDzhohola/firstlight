@@ -180,7 +180,7 @@ describe("medals", () => {
     await until("firstlight", () => b.you.medals.includes("firstlight"), 3000);
     for (let i = 0; i < padDirs(BODIES.arcadia).length; i++) {
       await tpAndWait(b, padAt("arcadia", i));
-      await sleep(260);
+      await until(`pad ${i}`, () => b.you.pads.includes(i));
     }
     await until("cartographer", () => b.you.medals.includes("cartographer"));
     expect(b.you.pads).toHaveLength(12);
