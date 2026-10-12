@@ -108,7 +108,7 @@ export class QuestClient implements ClientSystem {
       return;
     }
     if (this.console.isOpen || Panel.current) return; // panels close themselves (Esc / their key)
-    if (!this.game.input.locked) return;
+    if (!this.game.input.locked || this.game.photo?.active) return;
     if (e.code === "KeyM") this.map.open();
     else if (e.code === "KeyJ") this.journal.show();
   }
@@ -166,7 +166,7 @@ export class QuestClient implements ClientSystem {
     }
 
     // Prompts and E (piles win: the combat client picks those up).
-    if (!g.combat.deadUntilRespawn && !Panel.current && !this.pileNear()) {
+    if (!g.combat.deadUntilRespawn && !Panel.current && !g.photo?.active && !this.pileNear()) {
       const o = this.nearestObject(active);
       if (o) {
         g.hud.setPrompt(this.promptFor(o));

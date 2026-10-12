@@ -302,6 +302,7 @@ export class Nameplates {
 
   constructor() {
     this.root.className = "fl-plates";
+    this.root.dataset.hud = ""; // photo mode hides HUD roots
     document.body.appendChild(this.root);
   }
 
