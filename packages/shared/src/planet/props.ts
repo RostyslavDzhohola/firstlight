@@ -19,7 +19,8 @@ import type { Terrain } from "./terrain.ts";
 
 /**
  * Bump whenever placement output changes (rules, their order, jitter, filters): clients and the
- * server must agree on it (colliders). v2: jitter kept inside [0.15, 0.85] of each cell and a
+ * This versions visual vegetation only; authoritative breakable placement uses props-v2-frozen.
+ * v2: jitter kept inside [0.15, 0.85] of each cell and a
  * margin at each face's far edge, so same-rule props are ≥ 0.3 cells apart even across seams.
  * v3: forest undergrowth, arena/interaction clearings and fitted-breakable exclusions.
  */
@@ -282,8 +283,8 @@ export function naturalChunkProps(terrain: Terrain, face: Face, cx: number, cy: 
   return out;
 }
 
-/** Second stage: breakables yield to solid natural props, then all vegetation yields to the
- * actual fitted breakable footprints. This avoids a props -> breakables -> props recursion.
+/** Breakables yield to the frozen v2 solid placement, then all visual vegetation yields to the
+ * authoritative fitted breakable footprints. This avoids a props -> breakables -> props recursion.
  * Portus' authored walkways are inside its existing 48 m plaza clearing; elsewhere there are
  * no separate path meshes. Portal approaches and quest interactions have their own clearings. */
 export function chunkProps(terrain: Terrain, face: Face, cx: number, cy: number): PropInstance[] {
