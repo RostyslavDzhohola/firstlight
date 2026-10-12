@@ -17,6 +17,7 @@ import { MENU_GRADE, postUniforms, setGrade, type GradeParams } from "./post.ts"
 import type { ResolvedSettings } from "./quality.ts";
 import type { RenderCtx } from "./renderer.ts";
 import { sliceFor } from "./skyLut.ts";
+import { terrainUniforms } from "./terrainMaterial.ts";
 import { WeatherFx } from "./weather.ts";
 
 export interface WeatherLook {
@@ -95,6 +96,18 @@ export function lightFactors(elev: number, refElev = Infinity, out: LightFactors
   out.sunUp = smooth(-0.02, Math.min(0.22, ref), elev);
   return out;
 }
+
+/**
+ * How well the live sun matches the direction the Low tier's terrain sun visibility was baked for
+ * (the look's reference sun), 1 within ~20°, 0 beyond ~57°. Baking follows the chunk, not the
+ * clock, so wrong-way shadows fade out instead of showing all day.
+ */
+export function bakedSunMatch(elev: number, az: number, refElev: number, refAz: number): number {
+  const cosD = Math.sin(elev) * Math.sin(refElev) + Math.cos(elev) * Math.cos(refElev) * Math.cos(az - refAz);
+  return smooth(BAKE_MATCH_COS_ZERO, BAKE_MATCH_COS_FULL, cosD);
+}
+const BAKE_MATCH_COS_FULL = Math.cos(0.35);
+const BAKE_MATCH_COS_ZERO = Math.cos(1.0);
 
 export interface EnvAudio {
   setWeather(rain: number, wind: number): void;
@@ -371,6 +384,7 @@ export class Environment {
     const moonI = look.night.moonIntensity * smooth(0.4, 0.9, night) * (1 - cloud * 0.5);
     if (sk.keyIsMoon) rig.setKey(C.moon, moonI);
     else rig.setKey(this.c1, sunI);
+    terrainUniforms.sunMatch.value = bakedSunMatch(elev, az, look.sunElev, look.sunAz) * (sunI / look.sunIntensity);
     this.c1.copy(C.hemiSky).lerp(C.nightHemiSky, night);
     if (cloud > 0) this.c1.lerp(OVERCAST, cloud * 0.4);
     this.c2.copy(C.hemiGround).lerp(C.nightHemiGround, night);

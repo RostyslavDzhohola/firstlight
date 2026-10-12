@@ -2,9 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
 import { dayT, nextStrike, SKY_PROFILES, skyState, sunAngles } from "@firstlight/shared";
 import { atmo, SunRig } from "./atmosphere.ts";
-import { Environment, lightFactors, referenceDayT } from "./environment.ts";
+import { bakedSunMatch, Environment, lightFactors, referenceDayT } from "./environment.ts";
 import { LOOKS } from "./looks.ts";
 import { emptyStored, resolveSettings, type Feature } from "./quality.ts";
+import { terrainUniforms } from "./terrainMaterial.ts";
 import type { RenderCtx } from "./renderer.ts";
 
 function fakeCtx(kill: Feature[] = []) {
@@ -164,6 +165,24 @@ describe("day/night", () => {
     expect(offsetSeen()).toBe(0);
     env.setServerSky(skyState("arcadia", 0, Date.now() + 1000)); // 1 s of drift: smoothed (0.3)
     expect(offsetSeen()).toBe(300);
+  });
+
+  it("Low's baked terrain sun only darkens while the live sun is near the direction it was baked for", () => {
+    expect(bakedSunMatch(0.55, 0.9, 0.55, 0.9)).toBe(1);
+    expect(bakedSunMatch(0.6, 1.0, 0.55, 0.9)).toBe(1); // within ~20°
+    expect(bakedSunMatch(0.55, 0.9 + Math.PI, 0.55, 0.9)).toBe(0);
+    const sunMatchAt = (t: number | "bench") => {
+      const { env, look } = setup("arcadia");
+      env.weatherOverride = { weather: "clear", intensity: 0 };
+      if (t === "bench") env.setBenchMode("arcadia", look);
+      else env.timeOverride = t;
+      run(env, 0.1);
+      return terrainUniforms.sunMatch.value;
+    };
+    expect(sunMatchAt("bench")).toBe(1); // the reference sun the chunks were baked with
+    expect(sunMatchAt(0.5)).toBeGreaterThan(0.6); // noon: same azimuth, higher sun
+    expect(sunMatchAt(0.8)).toBe(0); // evening: the sun is on the other side
+    expect(sunMatchAt(0)).toBe(0); // night
   });
 
   it("Portus never gets a night", () => {
