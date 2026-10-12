@@ -6,9 +6,10 @@ import { Client, type Room } from "@colyseus/sdk";
 import { CLOSE } from "@firstlight/shared/net/social";
 import { isBlockedEitherWay, listBans, listReports } from "../src/db/index.ts";
 import { stmt } from "../src/db/game-db.ts";
+import { accountLinks } from "../src/auth/links.ts";
 import { mountOps } from "../src/ops/admin.ts";
 import { recordError } from "../src/ops/errors.ts";
-import { ANALYTICS, blockedEitherWay } from "../src/social/index.ts";
+import { ANALYTICS, blockedEitherWay, partyOf } from "../src/social/index.ts";
 import { api, Browser, decodeJwt, ORIGIN, play, startAuthServer, type AuthServer } from "./auth-helpers.ts";
 import { safeLeave, waitFor } from "./helpers.ts";
 
@@ -142,6 +143,36 @@ describe("blocks and reports", () => {
     expect(r.createdAt).toBeGreaterThanOrEqual(before);
     const pb = st(a).players.get(b.sessionId);
     expect(Math.hypot(r.pos![0] - pb.x, r.pos![1] - pb.y, r.pos![2] - pb.z)).toBeLessThan(1);
+  });
+});
+
+describe("parties and saving", () => {
+  it("a guest who saves keeps their party under the new account id", async () => {
+    const s = await start();
+    // Production wires createAccounts to the process-wide bus; the test helper isolates it.
+    const off = s.accounts.links.on((e) => accountLinks.emit(e));
+    const guest = new Browser(s, "198.51.100.60");
+    const guestToken = await guest.playToken();
+    const guestId = String(decodeJwt(guestToken).sub);
+    const a = await enter(s, guestToken, "portus", "198.51.100.60");
+    const b = await enter(s, "dev:pal_b:Pal", "portus");
+    await waitFor(() => st(a).players?.size === 2 && st(b).players?.size === 2);
+    const invites = inbox<any>(b, "party:invite");
+    a.send("party", { action: "invite", target: b.sessionId });
+    await waitFor(() => invites.length > 0);
+    b.send("party", { action: "accept", target: guestId });
+    await waitFor(() => !!me(b)?.party && me(b).party === me(a)?.party);
+
+    await guest.saveWithEmail("pal@example.test");
+    const savedId = String(decodeJwt((await guest.client.token()).data!.token).sub);
+    expect(savedId).not.toBe(guestId);
+    expect(partyOf("pal_b").sort()).toEqual(["pal_b", savedId].sort());
+    const states = inbox<any>(b, "party:state");
+    await waitFor(() => states.some((x) => x.leader === savedId && x.members.some((m: any) => m.userId === savedId && m.online)));
+    // The saved player can still manage the party.
+    a.send("party", { action: "kick", target: "pal_b" });
+    await waitFor(() => me(b).party === "");
+    off();
   });
 });
 
