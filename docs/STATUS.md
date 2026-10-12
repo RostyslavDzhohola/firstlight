@@ -100,8 +100,8 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 | Horses (M11 #2) | MERGED acdfcb3 (deployed; Codex-reviewed) | — |
 | F12 round 2: payouts, teleport, movement sweep, quest/onboarding nits | MERGED b274af9 | — |
 | F12 round 2: auth/social (OTP enumeration and drain, self-delete, prune) | MERGED ae6810b | — |
-| T9 findings + confirmation should-fixes (save prompt, portal step, warm-up, payout retry, names, dodge, camera) | Opus sub-agent | ../fl-wt-t9 (lane/t9-fixes) |
-| F12 polish (prop-top climb, public OTP budget, load-test pickup, origin-check pin) | Opus sub-agent | ../fl-wt-polish (lane/f12-polish) |
+| T9 findings + confirmation should-fixes (save prompt, portal step, warm-up, payout retry, names, dodge, camera) | MERGED 1c39649 (Codex-reviewed; T9 re-run passes) | — |
+| F12 polish (prop-top climb, public OTP budget, load-test pickup, origin-check pin) | MERGED a2f407f (deployed 11:47Z; 1014 tests) | — |
 
 ## Measured numbers
 
