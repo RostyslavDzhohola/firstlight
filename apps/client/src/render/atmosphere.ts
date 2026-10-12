@@ -283,11 +283,8 @@ export class SunRig {
         this.cascaded.shadow.normalBias = 0.04;
       }
       const sh = this.cascaded.shadow;
-      if (sh.mapSize.x !== s.shadows.cascadeSize) {
-        sh.mapSize.set(s.shadows.cascadeSize, s.shadows.cascadeSize);
-        sh.map?.dispose();
-        (sh as { map: unknown }).map = null;
-      }
+      // three resizes the shadow map from mapSize on its next render; never free it here.
+      if (sh.mapSize.x !== s.shadows.cascadeSize) sh.mapSize.set(s.shadows.cascadeSize, s.shadows.cascadeSize);
       sh.camera.far = s.shadows.far;
       this.cascaded.position.copy(this.shadowDir);
       this.scene.remove(this.sun);
@@ -298,14 +295,18 @@ export class SunRig {
       this.scene.remove(this.cascaded);
       if (!this.sun.parent) this.scene.add(this.sun);
     }
-    this.sun.castShadow = cast;
+    // Never switch casting back off once it was on: three then disposes the light's shadow pass
+    // while materials built earlier still run it every frame, and every frame throws (a black
+    // world; Chrome play-test). With the renderer's shadow map off, materials rebuild without
+    // shadow lookups, and the map simply stops updating.
+    if (cast) this.sun.castShadow = true;
+    this.sun.shadow.autoUpdate = cast;
     if (!cast) return;
     if (this.mapSize !== s.shadows.mapSize || this.extent !== s.shadows.extent) {
       this.mapSize = s.shadows.mapSize;
       this.extent = s.shadows.extent;
+      // three resizes the shadow map from mapSize on its next render; never free it here.
       this.sun.shadow.mapSize.set(this.mapSize, this.mapSize);
-      this.sun.shadow.map?.dispose();
-      (this.sun.shadow as { map: unknown }).map = null;
     }
     const sc = this.sun.shadow.camera as THREE.OrthographicCamera;
     sc.left = -this.extent;

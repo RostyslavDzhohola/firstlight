@@ -45,6 +45,35 @@ function chunksAround(body: "arcadia", d: readonly [number, number, number], rad
   return { terrain, chunks, props };
 }
 
+describe("grass around landing pads (live smoke test: blades grew through Dawnpad)", () => {
+  const R = BODIES.arcadia.radius;
+  const pads = padDirs(BODIES.arcadia);
+  const pad = pads[0]!;
+  const { terrain, chunks } = chunksAround("arcadia", pad, 60);
+  const g = terrain.groundHeight(pad[0], pad[1], pad[2]);
+  const cam = new THREE.Vector3(...pad).multiplyScalar(R + g + 1.7);
+  const bladesOnDisc = (grass: GrassSystem) => {
+    grass.applySettings(settingsFor("medium"));
+    for (let i = 0; i < 200; i++) grass.update(cam, chunks, i * 16, 1000);
+    let n = 0;
+    for (const mesh of grass.group.children as THREE.Mesh[]) {
+      const geo = mesh.geometry as THREE.InstancedBufferGeometry;
+      const a = geo.getAttribute("iPos").array as Float32Array;
+      for (let k = 0; k < geo.instanceCount; k++) {
+        const l = Math.hypot(a[k * 4]!, a[k * 4 + 1]!, a[k * 4 + 2]!);
+        const chord = Math.hypot(a[k * 4]! / l - pad[0], a[k * 4 + 1]! / l - pad[1], a[k * 4 + 2]! / l - pad[2]) * R;
+        if (chord < 8.6) n++;
+      }
+    }
+    return n;
+  };
+
+  it("no blade roots on the pad's stone disc, even where the density weights say grass", () => {
+    expect(bladesOnDisc(new GrassSystem(R, terrain.n))).toBeGreaterThan(0); // the weights alone grow grass there
+    expect(bladesOnDisc(new GrassSystem(R, terrain.n, pads))).toBe(0);
+  });
+});
+
 describe("vegetation (CPU)", () => {
   // A grassy spot near Arcadia's main pad: every sample within 30 m is 3–40 m above water.
   const R = BODIES.arcadia.radius;

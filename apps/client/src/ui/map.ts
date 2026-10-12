@@ -9,6 +9,7 @@ import { BOSS_LAIRS, padName, place, placeDir, placesOn, tangentFrame } from "@f
 import { objectDir, WORLD_OBJECT_BY_ID } from "@firstlight/shared/content/world";
 import type { Game } from "../game/Game.ts";
 import { Panel } from "./panels.ts";
+import { layoutMapLabels, type MapLabel } from "./mapLabels.ts";
 
 type V = [number, number, number];
 
@@ -112,7 +113,7 @@ export class MapPanel extends Panel {
     const h = document.createElement("h2");
     h.textContent = def.name.toUpperCase();
     b.appendChild(h);
-    this.size = Math.min(560, Math.floor(window.innerHeight * 0.66));
+    this.size = Math.min(560, Math.floor(window.innerHeight * 0.66), Math.floor(window.innerWidth * 0.85));
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     this.canvas.width = this.size * dpr;
     this.canvas.height = this.size * dpr;
@@ -229,14 +230,24 @@ export class MapPanel extends Panel {
     const you = this.game.hud.you;
     ctx.font = "600 11px ui-sans-serif, system-ui, sans-serif";
     ctx.textAlign = "center";
+    const labels: (MapLabel & { text: string; color: string })[] = [];
+    const markers: { x: number; y: number; radius: number }[] = [];
+    const label = (id: string, text: string, s: { x: number; y: number }, color: string, priority: number, radius = 6) => {
+      labels.push({ id, text, ...s, color, priority, width: ctx.measureText(text).width + 8 });
+      markers.push({ ...s, radius });
+    };
 
     // Named places (areas and landmarks).
     for (const p of placesOn(body)) {
       if (p.kind === "hidden" || p.kind === "pad") continue;
       const s = this.project(placeDir(p));
       if (s.z < 0.15) continue;
-      ctx.fillStyle = `rgba(255,255,255,${0.35 + 0.45 * s.z})`;
-      ctx.fillText(p.name, s.x, s.y + 3);
+      const col = `rgba(255,255,255,${0.35 + 0.45 * s.z})`;
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, 2, 0, Math.PI * 2);
+      ctx.fill();
+      label(`place:${p.id}`, p.name, s, col, 1);
     }
 
     // Boss lairs.
@@ -252,8 +263,7 @@ export class MapPanel extends Panel {
       ctx.lineTo(s.x - 7, s.y);
       ctx.closePath();
       ctx.fill();
-      ctx.fillStyle = "#ffd0d4";
-      ctx.fillText(lair.name, s.x, s.y + 20);
+      label(`lair:${lair.name}`, lair.name, s, "#ffd0d4", 2, 10);
     }
 
     // Active mission targets on this body.
@@ -266,6 +276,7 @@ export class MapPanel extends Panel {
       const s = this.project(dir);
       if (s.z < 0) continue;
       star(ctx, s.x, s.y - 14, 7, "#ffd166");
+      markers.push({ x: s.x, y: s.y - 14, radius: 8 });
     }
 
     // Pads.
@@ -290,29 +301,30 @@ export class MapPanel extends Panel {
         ctx.arc(s.x, s.y, 12, 0, Math.PI * 2);
         ctx.stroke();
       }
+      label(`pad:${i}`, padName(body, i), s, got ? "#72f1b8" : "#c9c2e0", 3, 13);
     });
 
     // Portus: portals, the shop and the Hall of Firsts.
     if (def.padLayout === "none") {
       const up: Dir = [0, 1, 0];
-      const marks: [Dir, string, string][] = [
-        [objectDir(WORLD_OBJECT_BY_ID.get("juno_vale")!), "Portus Exchange", "#ffd166"],
-        [objectDir(WORLD_OBJECT_BY_ID.get("hall_wall")!), "Hall of Firsts", "#ff7edb"],
+      const marks: [Dir, string, string, number][] = [
+        [objectDir(WORLD_OBJECT_BY_ID.get("juno_vale")!), "Portus Exchange", "#ffd166", 2],
+        [objectDir(WORLD_OBJECT_BY_ID.get("hall_wall")!), "Hall of Firsts", "#ff7edb", 1],
       ];
       const f = tangentFrame(up);
       (["Arcadia", "Hollowmere", "Meridian"] as const).forEach((name, i) => {
         const a = (i / 3) * Math.PI * 2 + Math.PI / 6;
         const t = [f.east[0] * Math.cos(a) + f.north[0] * Math.sin(a), f.east[1] * Math.cos(a) + f.north[1] * Math.sin(a), f.east[2] * Math.cos(a) + f.north[2] * Math.sin(a)];
-        marks.push([norm([up[0] + (t[0]! * 17) / def.radius, up[1] + (t[1]! * 17) / def.radius, up[2] + (t[2]! * 17) / def.radius]), `${name} portal`, "#36f9f6"]);
+        marks.push([norm([up[0] + (t[0]! * 17) / def.radius, up[1] + (t[1]! * 17) / def.radius, up[2] + (t[2]! * 17) / def.radius]), `${name} portal`, "#36f9f6", 3]);
       });
-      for (const [d, label, col] of marks) {
+      for (const [d, text, col, priority] of marks) {
         const s = this.project(d);
         if (s.z < 0) continue;
         ctx.fillStyle = col;
         ctx.beginPath();
         ctx.arc(s.x, s.y, 5, 0, Math.PI * 2);
         ctx.fill();
-        ctx.fillText(label, s.x, s.y - 9);
+        label(`portus:${text}`, text, s, col, priority);
       }
     }
 
@@ -329,13 +341,35 @@ export class MapPanel extends Panel {
         ctx.beginPath();
         ctx.arc(s.x, s.y, 5, 0, Math.PI * 2);
         ctx.fill();
-        ctx.fillText(pl.name, s.x, s.y - 9);
+        label(`party:${id}`, pl.name, s, "#9cff6b", 2);
       });
     }
 
     // You: an arrow along your facing.
     const me = norm([p.x, p.y, p.z]);
     const sMe = this.project(me);
+    if (sMe.z > 0) markers.push({ ...sMe, radius: 12 });
+    const byId = new Map(labels.map((l) => [l.id, l]));
+    const placed = layoutMapLabels(labels, S, S, markers);
+    // Leaders first, text last: displaced labels still point to the original marker.
+    ctx.lineWidth = 1;
+    for (const l of placed) {
+      ctx.strokeStyle = byId.get(l.id)!.color;
+      ctx.globalAlpha = 0.45;
+      ctx.beginPath();
+      ctx.moveTo(l.x, l.y);
+      ctx.lineTo(Math.max(l.left, Math.min(l.left + l.width, l.x)), Math.max(l.top, Math.min(l.top + l.height, l.y)));
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.textBaseline = "middle";
+    for (const l of placed) {
+      const source = byId.get(l.id)!;
+      ctx.fillStyle = "#050a0fbf";
+      ctx.fillRect(l.left, l.top, l.width, l.height);
+      ctx.fillStyle = source.color;
+      ctx.fillText(source.text, l.left + l.width / 2, l.top + l.height / 2);
+    }
     if (sMe.z > 0) {
       const f = this.game.player.facing;
       const ahead = this.project(norm([me[0] + f.x * 0.05, me[1] + f.y * 0.05, me[2] + f.z * 0.05]));

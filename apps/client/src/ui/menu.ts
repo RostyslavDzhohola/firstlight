@@ -48,7 +48,7 @@ export const pauseExtras = new Set<() => PauseExtra | null>();
 const RULES: [sprite: string, title: string, text: string][] = [
   ["heart", "One life", "Die and everything you carry drops in a pile of light. Anyone can loot it."],
   ["prism", "Pads are safe", "A 12 m ring around every pad: no damage in or out. All of Portus is safe."],
-  ["crown", "Bosses need friends", "No boss can be beaten alone. The game won't tell you why."],
+  ["crown", "Bosses need friends", "Bring a friend, watch for the opening, and take them on together."],
 ];
 
 const MOUSE: Record<string, string> = {
@@ -60,6 +60,8 @@ const MOUSE_LABEL: Record<string, string> = { "mouse-l": "Left mouse button", "m
 
 export function buildHowTo(parent: HTMLElement): HTMLElement {
   const panel = el("section", "fl-howto fl-panel", parent);
+  panel.tabIndex = 0;
+  panel.setAttribute("aria-label", "How to play");
   const head = el("header", "", panel);
   el("h2", "", head, "How to play");
   el("span", "", head, "Esc frees the mouse · click the world to go back");
