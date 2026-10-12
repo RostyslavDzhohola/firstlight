@@ -252,10 +252,12 @@ function chase(sys: NpcSystem, n: Npc, now: number, dt: number) {
 
 /**
  * The target stands where this NPC can't follow — inside a pad's safe ring (plus the NPC's margin)
- * or outside its medium — and none of its ranged attacks reaches it from here.
+ * or outside its medium — and no attack reaches it from here: ranged ones, or melee that strikes
+ * from where the NPC stands (arc, ring, line). Charges and leaps would have to move into the
+ * no-go zone; when one of them does connect, hitPlayer clears the timer (contact).
  */
 function outOfReach(sys: NpcSystem, n: Npc, tp: V3, d: number): boolean {
-  for (const a of n.def.attacks) if (!isMelee(a) && d <= a.range) return false;
+  for (const a of n.def.attacks) if (d <= a.range && a.shape !== "charge" && a.shape !== "leap") return false;
   if (nearSafeRing(sys.ground, tp[0], tp[1], tp[2], NPC_RULES.safeMargin + n.radius)) return true;
   const l = len(tp);
   return feetHeight(sys.ground, tp[0] / l, tp[1] / l, tp[2] / l, n.def.locomotion, n.def.hover ?? 0) === null;

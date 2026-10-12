@@ -66,6 +66,24 @@ describe("unreachable targets (F12 should-fix 6)", () => {
     expect(wolf.target).toBeNull();
   });
 
+  it("a target just outside the ring but inside the NPC's steering margin is bitten, not evaded (Codex S4)", () => {
+    const w = fakeWorld("arcadia", { immortal: true });
+    // 14.5 m from the pad centre: outside the 12 m safe ring, inside the wolf's 12 + 3 + 0.5 m no-go zone.
+    const p = w.addPlayer("margin", arcadiaPoint(w, 14.5), 5);
+    const wolf = w.sys.createNpc(NPC_INDEX.get("dusk_wolf")!, 5, arcadiaPoint(w, 32), w.clock.t, { instant: true }) as Npc;
+    dealDamage(w.world.host, p, wolf, 10, false);
+    let bites = 0;
+    let last = p.state.hp;
+    run(w, 15_000, () => {
+      if (p.state.hp < last) bites++;
+      last = p.state.hp;
+      return wolf.mode === MODE.EVADE;
+    });
+    expect(bites).toBeGreaterThan(2);
+    expect(wolf.mode).not.toBe(MODE.EVADE);
+    expect(wolf.state.hp).toBeLessThan(wolf.state.maxHp); // no free heal
+  });
+
   it("a reachable target on open ground is still fought (no early evade)", () => {
     const w = fakeWorld("arcadia", { immortal: true });
     const p = w.addPlayer("open", arcadiaPoint(w, 70), 5);

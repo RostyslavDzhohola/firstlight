@@ -459,6 +459,8 @@ export class NpcSystem implements RoomSystem {
   hitPlayer(n: Npc | null, p: PlayerActor, amount: number, opts: { fromDir?: V3; knockback?: number; effect?: StatusEffect; trueDamage?: boolean } = {}): number {
     const now = this.world.now();
     if (p.dead) return 0;
+    // Contact: an NPC that just struck its target can reach it (brain.ts unreachable timer).
+    if (n && n.target === p) n.unreachSince = undefined;
     let dmg = amount;
     if (n && !opts.trueDamage) {
       if (n.state.flags & NF.BUFFED) dmg *= 1.15;
