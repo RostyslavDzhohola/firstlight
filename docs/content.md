@@ -463,7 +463,7 @@ Sixers' black-and-grey "6" look, IOI branding and Sorrento-like leaders [12].
 | HP formula | `HP(n) = HP₂ × (1 + 0.35 × (max(n, 2) − 2))`. n = players alive inside the arena boundary plus anyone who damaged the boss in the last 10 s (any party), recounted on every change; current HP keeps its percentage; n capped at 8. The boss targets the same players. Hits from outside the boundary count only from within 10 m of it and only while someone is inside | (D), (new) |
 | Solo | impossible by design: each boss has a mechanic that needs two bodies in two places, or two bodies in one circle | (D), [r2-05] |
 | Hints | none: no UI, NPC or voice line explains a mechanic (D). Telegraphs are still fully readable | (D) |
-| Reset | no player in the arena for 30 s → full HP, cover rebuilds | (new) |
+| Reset | no player in the arena for 30 s → full HP, cover rebuilds. An engaged fight survives its room closing or a restart until then | (new) |
 | Damage cap | boss single hit ≤ 60% of the target's max HP after all modifiers; split circles are designed to deal exactly 60% each with 2 players | [12], [r2-05] |
 | Loot eligibility | alive in the arena at the kill **and** either you contributed (≥ 50% of an equal damage share, held a plate during an opened window, or stood in a split circle) **or** a party member did (party shares boss credit) | [r2-05], (D) |
 | Loot delivery | personal: every eligible player rolls their own table; items go into the inventory, and overflow drops at their feet as a normal pile | (D), (new) |
