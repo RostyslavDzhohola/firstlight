@@ -9,6 +9,7 @@
 // - Height: off the ground, the body must follow a ballistic envelope from its last grounded
 //   position (jump speed, gravity, generous slack). Hovering or climbing in small steps fails as
 //   soon as the envelope drops below it, and `settle` pulls such bodies (or silent ones) down.
+//   A prop top counts as ground, so a step that lands on one from below must fit a jump as well.
 
 import { HORSE, rideSpeed } from "@firstlight/shared/content/horse";
 import { ANIM } from "@firstlight/shared/net/schema";
@@ -110,6 +111,26 @@ export function groundMotion(a: PlayerActor, len: number, now: number) {
   a.airLiftV = MOVE.jumpSpeed;
 }
 
+/** Height of a standing jump's apex (the client's jump speed and gravity), about 1.21 m. */
+const JUMP_APEX = (MOVE.jumpSpeed * MOVE.jumpSpeed) / (2 * MOVE.gravity);
+
+/**
+ * May a step end standing on a prop top `ground` m up (F12 confirmation Opus SF1)? A top counts as
+ * ground, so without this one packet straight up onto a 2.6 m camp wall or a 4.2 m pillar was a
+ * grounded step and skipped the envelope. From that top (or one within a step of it) the body walks
+ * on; otherwise it must have jumped there: the landing has to fit the air envelope, or a fresh jump
+ * from where it stands (a body that stood still for a while has an old envelope).
+ */
+function reachesTop(a: PlayerActor, w: MoveWorld, ground: number, len: number, now: number): boolean {
+  const sx = a.lastX, sy = a.lastY, sz = a.lastZ;
+  const from = Math.hypot(sx, sy, sz);
+  const support = supportAt(w, sx, sy, sz, w.groundAt(sx, sy, sz));
+  const standing = from - w.radius - support <= MOVE.groundedAbove;
+  if (standing && support >= ground - MOVE.groundedAbove) return true;
+  const ceiling = standing ? Math.max(airCeiling(a, now), from + JUMP_APEX + MOVE.airSlack) : airCeiling(a, now);
+  return len <= ceiling;
+}
+
 /** Validate one client step and, if it is allowed, charge it. Does not move the actor. */
 export function validateMove(a: PlayerActor, m: { x: number; y: number; z: number; anim: number }, w: MoveWorld, limits: MoveLimits, now: number): MoveResult {
   const elapsed = Math.min(0.25, Math.max(0, (now - a.lastBudgetAt) / 1000));
@@ -124,6 +145,8 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
   const foot = swimming ? null : (w.footing?.(m.x, m.y, m.z, MOVE.groundedAbove) ?? null);
   const ground = foot && foot.top > 0 ? Math.max(terrain, foot.top - w.radius) : terrain;
   const above = len - w.radius - ground;
+  // Held up by a prop top that the terrain alone wouldn't hold (read now: `foot` is a reused object).
+  const onPropTop = ground > terrain && len - w.radius - terrain > MOVE.groundedAbove;
   // Swim speed when both ends of the step are in the water (entering and leaving keep land speed);
   // horse speed and a bigger bank while riding.
   const inWater = swimming && a.swimming;
@@ -147,6 +170,7 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
   if (!swimming && w.crosses?.(a.lastX, a.lastY, a.lastZ, m.x, m.y, m.z)) return { ok: false, reason: "prop" };
   const grounded = swimming || above <= MOVE.groundedAbove;
   if (!grounded && !(len <= airCeiling(a, now))) return { ok: false, reason: "height" };
+  if (grounded && onPropTop && !reachesTop(a, w, ground, len, now)) return { ok: false, reason: "height" };
 
   const dx = m.x - a.lastX, dy = m.y - a.lastY, dz = m.z - a.lastZ;
   const dist = Math.hypot(dx, dy, dz);
