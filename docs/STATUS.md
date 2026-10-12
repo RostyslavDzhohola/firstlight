@@ -71,7 +71,7 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 | F9 screenshot share | ✅ | browser E2E T7 |
 | F10 M1 ≥ 60 fps Medium | ✅* | ?bench=g1 59.9 fps p50, p95 17.6 ms (T3 Chromium, not plugged-in Chrome) |
 | F11 Low on weak profile | ✅* | `?bench=g1&tier=low&cpuslow=4`: 51.3 fps p50, p95 29.8 ms, 0 shader builds (D29 emulation) |
-| F12 three-model review | 🛠→🔎 | Round 1 (bb54dc3/743d651): Codex 7, Sonnet 2, Opus 2 blockers. All fixed in 9 lanes, each Codex-reviewed (docs/reviews/2026-10-12-f12-*); merged at 668ec82 (deployed 08:42Z; 902 tests). Final three-model review of 668ec82 running |
+| F12 three-model review | 🛠 | Round 1: Codex 7, Sonnet 2, Opus 2 blockers, all fixed and verified closed. Final round on 668ec82: **Sonnet yes**; Codex no (2 payout-after-commit blockers); Opus no (two-packet teleport via the planet centre). Fixing in lane/f12-r2 + lane/f12-r2-auth (docs/reviews/2026-10-12-f12-final-*) |
 | F13 photo mode + 5 scenes | ✅ | browser E2E T8; `stage <n>` + docs/staged-scenes.md |
 
 ## Lanes (who owns what right now)
@@ -98,6 +98,8 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 | F12 NPC/boss (Opus B2 respawn persistence, evade, arena scaling/cover, NPC LOS) | MERGED f787f37 (Codex round 1 fixed; migration 3 = copy_state) | — |
 | F12 weather/sky (override broadcast, stage sky, Hollowmere look, nits) | MERGED 5e9d5ce (Codex round 1 fixed) | — |
 | Horses (M11 #2) | MERGED acdfcb3 (deployed; Codex-reviewed) | — |
+| F12 round 2: payouts, teleport, movement sweep, quest/onboarding nits | Opus sub-agent | ../fl-wt-f12r2 (lane/f12-r2) |
+| F12 round 2: auth/social (OTP enumeration and drain, self-delete, prune) | Opus sub-agent | ../fl-wt-f12r2b (lane/f12-r2-auth) |
 
 ## Measured numbers
 
