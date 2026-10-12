@@ -6,6 +6,7 @@ import { BODIES, padDirs, type BodyId } from "@firstlight/shared";
 import { flags } from "../config.ts";
 import { CLOSE, Net, TravelRedirect } from "../net/Net.ts";
 import { AvatarView, avatarWarmupHook, preloadAvatars } from "../render/Avatars.ts";
+import { HorseView, horseWarmupHook, preloadHorse } from "../render/Horses.ts";
 import "../render/avatars/system.ts";
 import { Bench, benchConfig } from "../render/bench.ts";
 import { BlobShadows } from "../render/blobShadows.ts";
@@ -76,6 +77,7 @@ export class Game {
     this.ctx = await createRenderer(container);
     installShaderMonitor(this.ctx);
     void preloadAvatars(); // character GLBs stream in while we connect and build the world
+    void preloadHorse(); // 147 KB: horses are in the warm-up, so they never compile mid-game
     console.info(`[gfx] backend ${this.ctx.webgpu ? "WebGPU" : "WebGL2"}, tier ${this.ctx.tier}${this.ctx.settings.auto ? " (auto)" : ""}, gpu "${this.ctx.gpuName}"`);
     setLoadingBadge(`${this.ctx.webgpu ? "WebGPU" : "WebGL2"} · ${this.ctx.tier}${this.ctx.settings.auto ? " (auto)" : ""}`);
     this.input = new Input(this.ctx.renderer.domElement);
@@ -317,7 +319,7 @@ export class Game {
       await new Promise((r) => setTimeout(r, 50));
     }
     setLoading("Loading characters…", 0.8);
-    await preloadAvatars(); // resolves null on failure: avatars fall back to capsules
+    await Promise.all([preloadAvatars(), preloadHorse()]); // resolve null on failure: capsules / box horses
     if (!this.self) {
       this.self = new AvatarView(choice?.palette ?? stored.palette, choice?.starter ?? stored.starter);
       this.self.root.name = "selfAvatar";
@@ -371,10 +373,12 @@ export class Game {
   private warmupHook() {
     // every palette's skinned toon variant, weapons and LOD proxies compile behind the loading screen
     const avatars = avatarWarmupHook(this.ctx.scene, () => this.player.pos);
+    const horses = horseWarmupHook(this.ctx.scene, () => this.player.pos); // the six coat materials
     return {
       forceAll: (on: boolean) => {
         this.planet.props.setForceAll(on);
         avatars.forceAll(on);
+        horses.forceAll(on);
       },
     };
   }
@@ -497,16 +501,17 @@ export class Game {
     this.particles.update(dt, this.ctx.camera.position, now);
     if (this.ctx.settings.on.chars) {
       const blobs: { x: number; y: number; z: number; r: number }[] = [];
-      const addBlob = (pos: THREE.Vector3) => {
+      const addBlob = (pos: THREE.Vector3, r = 0.55) => {
         const l = pos.length();
         const g = this.planet.terrain.groundHeight(pos.x / l, pos.y / l, pos.z / l) + this.planet.body.radius;
         const lift = l - g;
         if (lift > 6) return;
         const k = g / l;
-        blobs.push({ x: pos.x * k, y: pos.y * k, z: pos.z * k, r: 0.55 * (1 - lift / 8) });
+        blobs.push({ x: pos.x * k, y: pos.y * k, z: pos.z * k, r: r * (1 - lift / 8) });
       };
       if (!this.bench && this.self) addBlob(this.player.pos);
       for (const a of this.avatars.values()) addBlob(a.root.position);
+      for (const h of HorseView.all) if (h.root.parent && h.root.visible) addBlob(h.root.position, 1.0);
       if (this.bench) blobs.push(...this.bench.crowdBlobs());
       this.blobs.update(blobs);
     }

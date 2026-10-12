@@ -5,6 +5,7 @@ import * as THREE from "three/webgpu";
 import type { Terrain } from "@firstlight/shared";
 import { ANIM } from "@firstlight/shared/net/schema";
 import type { Input } from "./input.ts";
+import { mountedSpeed, rideCamera } from "./mount.ts";
 
 export const MOVE = {
   run: 6,
@@ -16,9 +17,14 @@ export const MOVE = {
   dodgeTime: 0.3,
   dodgeCooldown: 1.2,
   accel: 12,
+  mountAccel: 5, // a horse has weight: slower to speed up, stop and turn
   airAccel: 3,
   fallSafe: 8,
   fallLethal: 20.5,
+  /** NPC movement effects (set by world/npcs/NpcRenderer; on foot it rewrites run/sprint instead):
+   *  riding reads them through mountedSpeed. */
+  slow: 0,
+  noSprint: false,
 };
 
 const _v = new THREE.Vector3();
@@ -43,6 +49,12 @@ export class PlayerController {
   /** Fall damage as a fraction of max HP, reported to the game for the server to apply. */
   pendingFallDamage = 0;
   frozen = false;
+  /** Riding a horse (HorseClient sets it from the server's flag): horse speed, heavier turns, no dodge. */
+  mounted = false;
+  /** 0 → 1 riding camera blend (HorseClient). */
+  rideBlend = 0;
+  /** Riding or just off the horse (HorseClient): weapons stay lowered (CombatClient), as on the server. */
+  saddleLocked = false;
 
   constructor(private terrain: Terrain, private waterLevel: number) {}
 
@@ -102,10 +114,10 @@ export class PlayerController {
     const wish = new THREE.Vector3().addScaledVector(this.camForward, mz).addScaledVector(right, mx);
     if (wish.lengthSq() > 0) wish.normalize();
     const sprint = input.down("ShiftLeft") || input.down("ShiftRight");
-    const speed = this.swimming ? MOVE.swim : sprint && mz > 0 && !aiming ? MOVE.sprint : MOVE.run;
+    const speed = this.swimming ? MOVE.swim : this.mounted ? mountedSpeed(sprint, MOVE.slow, MOVE.noSprint) : sprint && mz > 0 && !aiming ? MOVE.sprint : MOVE.run;
 
     this.dodgeCooldown = Math.max(0, this.dodgeCooldown - dt);
-    if (!this.frozen && input.pressed.has("KeyC") && this.dodgeCooldown <= 0 && this.onGround && !this.swimming) {
+    if (!this.frozen && !this.mounted && input.pressed.has("KeyC") && this.dodgeCooldown <= 0 && this.onGround && !this.swimming) {
       this.dodgeT = MOVE.dodgeTime;
       this.dodgeCooldown = MOVE.dodgeCooldown;
       this.dodgeDir.copy(wish.lengthSq() > 0 ? wish : this.facing);
@@ -119,7 +131,7 @@ export class PlayerController {
       vH.copy(this.dodgeDir).multiplyScalar(MOVE.dodgeDistance / MOVE.dodgeTime);
     } else {
       const target = wish.multiplyScalar(speed);
-      const a = this.onGround || this.swimming ? MOVE.accel : MOVE.airAccel;
+      const a = this.onGround || this.swimming ? (this.mounted ? MOVE.mountAccel : MOVE.accel) : MOVE.airAccel;
       vH.lerp(target, Math.min(1, a * dt));
     }
 
@@ -175,7 +187,7 @@ export class PlayerController {
     // Face movement (or the camera when aiming).
     const hSpeed = vH.length();
     if (aiming) this.facing.lerp(this.camForward, Math.min(1, 18 * dt)).normalize();
-    else if (hSpeed > 0.5) this.facing.lerp(vH.clone().normalize(), Math.min(1, 10 * dt)).normalize();
+    else if (hSpeed > 0.5) this.facing.lerp(vH.clone().normalize(), Math.min(1, (this.mounted ? 6 : 10) * dt)).normalize();
 
     this.anim = this.dodgeT > 0 ? ANIM.DODGE
       : this.swimming ? ANIM.SWIM
@@ -191,8 +203,9 @@ export class PlayerController {
     const up = this.up(new THREE.Vector3());
     const right = new THREE.Vector3().crossVectors(this.camForward, up).normalize();
     const look = this.camForward.clone().applyAxisAngle(right, this.camPitch);
-    const head = this.pos.clone().addScaledVector(up, 1.65);
-    const camPos = head.clone().addScaledVector(look, -this.camDistance).addScaledVector(right, 0.55).addScaledVector(up, 0.25);
+    const ride = rideCamera(this.rideBlend); // in the saddle: eyes higher, camera further back
+    const head = this.pos.clone().addScaledVector(up, 1.65 + ride.lift);
+    const camPos = head.clone().addScaledVector(look, -(this.camDistance + ride.back)).addScaledVector(right, 0.55).addScaledVector(up, 0.25);
     // Keep the camera above ground.
     const cu = camPos.clone().normalize();
     const g = this.terrain.groundHeight(cu.x, cu.y, cu.z) + this.terrain.body.radius + 0.4;

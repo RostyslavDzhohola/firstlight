@@ -152,6 +152,13 @@ export const WEAPONS: readonly WeaponDef[] = [
     destroys: "none", stack: 10,
     tiers: [T(1, 35, { damage: 0, heal: 120, rate: 0.4, cooldown: 8, duration: 4 }), T(1, 35, { damage: 0, heal: 120, rate: 0.4 }), T(1, 35, { damage: 0, heal: 120, rate: 0.4 })],
   },
+  // Horses (content/horse.ts): carry it, press H outside a safe zone. Appended last: PlayerState.weapon
+  // holds indexes into this list, so existing entries never move.
+  {
+    id: "horse_whistle", name: "Horse Whistle", cls: "item", delivery: "none", range: 0,
+    destroys: "none", stack: 1,
+    tiers: [T(1, 1500, { damage: 0, rate: 0 }), T(1, 1500, { damage: 0, rate: 0 }), T(1, 1500, { damage: 0, rate: 0 })],
+  },
 ];
 
 export const WEAPON_INDEX: ReadonlyMap<string, number> = new Map(WEAPONS.map((w, i) => [w.id, i]));

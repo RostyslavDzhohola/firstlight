@@ -6,6 +6,7 @@
 import type { Client } from "@colyseus/core";
 import { chordMetres, padDirs, PLANET_IDS, safePadAt, type BodyId } from "@firstlight/shared";
 import { BACKPACK_SLOTS, HOTBAR_SLOTS, emptyLife, type LifeProgress } from "@firstlight/shared/content/character";
+import { HORSE_WHISTLE } from "@firstlight/shared/content/horse";
 import { COSMETIC_BY_ID, COSMETIC_SLOTS, itemName, itemStack, sellValue, shopEntry, type CosmeticSlot } from "@firstlight/shared/content/items";
 import { MEDAL_BY_ID, MEDAL_RULES } from "@firstlight/shared/content/medals";
 import { MISSION_BY_ID, MISSIONS, missionGoal, type MissionDef } from "@firstlight/shared/content/missions";
@@ -19,6 +20,7 @@ import type { InvItem, YouState } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
 import { z } from "zod";
 import { accountLinks } from "../../auth/links.ts";
+import { env } from "../../env.ts";
 import { actorPos, type PlayerActor } from "../actors.ts";
 import { withTx } from "../characters.ts";
 import type { BodyRoom } from "../BodyRoom.ts";
@@ -448,7 +450,7 @@ export class QuestSystem implements RoomSystem {
       this.toast(a, text, "warn");
     };
     if (!this.atShop(a)) return fail("too far", "Talk to Juno Vale at the Portus Exchange to buy");
-    const entry = shopEntry(itemId, tier);
+    const entry = itemId === HORSE_WHISTLE && !env.horses ? undefined : shopEntry(itemId, tier); // horses flag off
     if (!entry) return fail("not sold", "The Exchange doesn't sell that");
     const n = entry.stack > 1 ? Math.max(1, Math.min(entry.stack, qty)) : 1;
     const cost = entry.price * n;

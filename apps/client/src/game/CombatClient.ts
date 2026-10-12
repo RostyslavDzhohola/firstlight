@@ -3,6 +3,9 @@
 
 import * as THREE from "three/webgpu";
 import { isBlocked, partyState } from "../social/store.ts";
+import { HORSE_WHISTLE } from "@firstlight/shared/content/horse";
+import { flags } from "../config.ts";
+import { horsesEnabled } from "./mount.ts";
 import { WEAPONS, WEAPON_BY_ID, type WeaponDef } from "@firstlight/shared/content/weapons";
 import { PHRASES } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
@@ -162,9 +165,14 @@ export class CombatClient {
     return { def, tier: item?.tier ?? 1 };
   }
 
+  /** The whistle in hand works like H (the server explains a refusal, safe zones included). */
+  private whistle() {
+    if (horsesEnabled(this.game.hud.you, flags.has("nohorses"))) this.game.net.room?.send("horse", { action: "whistle" });
+  }
+
   aiming(): boolean {
     const { def } = this.currentWeapon();
-    return this.game.input.rmb && def.delivery !== "melee";
+    return this.game.input.rmb && def.delivery !== "melee" && !this.game.player.saddleLocked;
   }
 
   update(dt: number, now: number) {
@@ -203,6 +211,26 @@ export class CombatClient {
     const { def, tier } = this.currentWeapon();
     const t = def.tiers[tier - 1]!;
     const rmb = input.rmb;
+    const cam = g.ctx.camera;
+
+    if (g.player.saddleLocked) {
+      // No weapons from the saddle, or just off it (horses; the server refuses them too): lower any
+      // guard, scope or draw. Tonics and Patchkits still work, and the whistle in hand gets you off.
+      if (this.blocking) room.send("block", { on: false });
+      if (this.scoped) room.send("scope", { on: false });
+      if (this.wasRmb) room.send("charge", { on: false });
+      this.blocking = this.scoped = this.wasRmb = false;
+      g.self?.setLocalFlags(0);
+      if (Math.abs(cam.fov - this.baseFov) > 0.1) {
+        cam.fov += (this.baseFov - cam.fov) * Math.min(1, dt * 14);
+        cam.updateProjectionMatrix();
+      }
+      if (!input.lmbPressed || g.photo?.active) return;
+      if (def.delivery === "heal") room.send("use", { slot: g.hud.you?.selected ?? 0 });
+      else if (def.id === HORSE_WHISTLE) this.whistle();
+      else if (g.player.mounted) g.hud.toast("No weapons from the saddle: E to get off", "warn");
+      return;
+    }
 
     // Right mouse: block (blades/staff), charge (axe/hammer), draw (bow), aim/scope (guns).
     if (def.delivery === "melee") {
@@ -240,7 +268,6 @@ export class CombatClient {
     // Own avatar: hold the guard / aim pose from local input instead of waiting for the server flags.
     g.self?.setLocalFlags((this.blocking ? PF.BLOCKING : 0) | (this.scoped || this.aiming() ? PF.SCOPED : 0));
     const zoom = this.scoped ? (t.zoom ?? 1.35) : 1;
-    const cam = g.ctx.camera;
     const targetFov = this.baseFov / zoom;
     if (Math.abs(cam.fov - targetFov) > 0.1) {
       cam.fov += (targetFov - cam.fov) * Math.min(1, dt * 14);
@@ -249,6 +276,10 @@ export class CombatClient {
 
     // Left mouse: attack.
     if (!input.lmb && !input.lmbPressed) return;
+    if (def.id === HORSE_WHISTLE) {
+      if (input.lmbPressed) this.whistle();
+      return;
+    }
     if (meState && meState.flags & PF.SAFE) {
       if (input.lmbPressed) g.hud.toast("Weapons are holstered in safe zones", "warn");
       return;

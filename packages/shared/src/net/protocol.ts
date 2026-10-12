@@ -101,6 +101,8 @@ export type ClientMessages = {
   mission: { action: "accept" | "abandon"; id: string };
   title: { medalId: string | null };
   ping: { t: number };
+  /** Horses (content/horse.ts): H sends "whistle" (dismount / mount if close / call the horse), E near it sends "ride". */
+  horse: { action: "whistle" | "ride" | "dismount" };
 };
 
 // ---- Server → client events (broadcast or direct) -------------------------------------------
@@ -133,6 +135,8 @@ export type ServerMessages = {
   stage: { n: number; body: BodyId };
   /** Open a client panel (keypad for the E7 safe). */
   prompt: { kind: "keypad"; target: string };
+  /** Horse events for effects and sounds (state carries the horse itself). */
+  horse: { owner: string; event: "summon" | "mount" | "dismount" | "thrown" | "leave"; x: number; y: number; z: number };
 };
 
 /** Private per-player state sent only to its owner. */
@@ -151,6 +155,8 @@ export interface YouState {
   worn?: Partial<Record<CosmeticSlot, string>>;
   logoutEndsAt: number | null;
   protectedUntil: number;
+  /** Horses are on in this room (server flag FEATURE_HORSES; set by the horse system). */
+  horses?: boolean;
 }
 
 export interface InvItem {

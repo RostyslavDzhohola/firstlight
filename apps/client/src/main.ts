@@ -76,4 +76,6 @@ $("signin")?.addEventListener("click", async (e) => {
 // character lineup (4 starters x 6 palettes cycling every clip) instead of the game.
 if (new URLSearchParams(location.search).has("avatars")) {
   void import("./render/avatars/devpage.ts").then((m) => m.startAvatarDevPage());
+} else if (new URLSearchParams(location.search).has("horses")) {
+  void import("./render/horses/devpage.ts").then((m) => m.startHorseDevPage()); // six coats with riders
 } else if (new URLSearchParams(location.search).has("autoplay")) playBtn?.click();
