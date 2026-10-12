@@ -65,12 +65,13 @@ export function fakeWorld(body: BodyId, opts: { immortal?: boolean; start?: numb
     addNpc: (n) => npcs.set(n.id, n),
     removeNpc: (id) => npcs.delete(id),
     newNpcState: () => new NpcState(),
-    grantXp: (p, amount) => {
+    addXp: (p, amount) => {
       p.char.xp += amount;
+      return () => {};
     },
     giveItem: () => true,
     createPile: () => {},
-    withTx: (fn) => fn(),
+    withTx: (_players, fn) => fn(),
     snapToGround: (p) => {
       const l = Math.hypot(p[0]!, p[1]!, p[2]!);
       const r = BODIES[body].radius + Math.max(terrain.groundHeight(p[0]! / l, p[1]! / l, p[2]! / l), BODIES[body].waterLevel - 1.05);

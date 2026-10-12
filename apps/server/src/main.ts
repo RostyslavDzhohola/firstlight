@@ -59,8 +59,14 @@ const game = await createGame({
     mountOps(app, { db: accounts.db, requireAdmin: accounts.requireAdmin, allowedOrigins: env.clientOrigins });
   },
   onShutdown: () => {
-    endAllSessions();
-    accounts.close();
+    // Each step on its own: a failure in one must not skip closing the databases.
+    for (const [what, fn] of [["end sessions", endAllSessions], ["close accounts", () => accounts.close()]] as const) {
+      try {
+        fn();
+      } catch (err) {
+        console.error(`shutdown: ${what} failed: ${(err as Error)?.message ?? err}`);
+      }
+    }
   },
 });
 

@@ -256,6 +256,7 @@ export class HorseSystem implements RoomSystem {
   private besideOf(a: PlayerActor, metres: number): V3 {
     const p = actorPos(a);
     const l = Math.hypot(p[0], p[1], p[2]);
+    if (!(l > 1e-6) || !Number.isFinite(l)) return this.room.snapToGround(p); // no NaN horses (F12 final Opus N-B1)
     const up: V3 = [p[0] / l, p[1] / l, p[2] / l];
     let f: V3 = [a.state.fx, a.state.fy, a.state.fz];
     const fu = f[0] * up[0] + f[1] * up[1] + f[2] * up[2];

@@ -10,6 +10,12 @@ import type { InvItem } from "@firstlight/shared/net/protocol";
 import { openGameDb } from "../src/db/index.ts";
 import { MemoryPileStore, type PileData, type PileKind, type PileStore } from "../src/world/piles.ts";
 import { SqlitePileStore } from "../src/world/sqliteStores.ts";
+import { matchMaker } from "@colyseus/core";
+import { HOTBAR_SLOTS } from "@firstlight/shared/content/character";
+import type { BodyRoom } from "../src/world/BodyRoom.ts";
+import { actorPos } from "../src/world/actors.ts";
+import { pileStore } from "../src/world/piles.ts";
+import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 
 const stores: [string, (cap: number) => PileStore][] = [
   ["memory", (cap) => new MemoryPileStore(cap)],
@@ -77,3 +83,26 @@ for (const [name, make] of stores) {
     });
   });
 }
+
+describe("load-test bots leave no piles in the public world (F12 final Opus SF4)", () => {
+  it("an item a load-test bot drops, and loot or chests it is paid, make no pile", async () => {
+    const game = await startServer();
+    const r = await joinAs(game, "ltbot", "arcadia", { loadtest: true }, "loadtest");
+    try {
+      await waitFor(() => !!(r.state as any).players?.get(r.sessionId));
+      const room = matchMaker.getLocalRoomById(r.roomId) as unknown as BodyRoom;
+      const a = room.actors.get(r.sessionId)!;
+      expect(a.identity.loadtest).toBe(true);
+      a.char.backpack[0] = { id: "carbine", tier: 1, qty: 1 };
+      r.send("drop", { slot: HOTBAR_SLOTS });
+      await waitFor(() => a.char.backpack[0] === null);
+      // NPC drops, camp chests and boss overflow all go through createPile.
+      expect(room.createPile(a, [{ id: "axe", tier: 1, qty: 1 }], 5, actorPos(a))).toBeNull();
+      await new Promise((ok) => setTimeout(ok, 100));
+      expect(pileStore.current.list("arcadia")).toHaveLength(0);
+    } finally {
+      await safeLeave(r);
+      await game.close();
+    }
+  });
+});

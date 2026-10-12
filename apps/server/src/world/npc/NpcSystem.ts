@@ -183,11 +183,13 @@ export class NpcSystem implements RoomSystem {
     this.saveCopyState(this.world.now());
   }
 
-  /** Remember the boss timer and group state for the next room on this copy (copyState.ts). */
+  /**
+   * Remember the boss timer and group state for the next room on this copy (copyState.ts). Stays
+   * dirty (and is tried again, with copyState's backoff) until a save succeeds (F12 final S3).
+   */
   saveCopyState(now: number) {
-    this.copyDirty = false;
     this.lastCopySave = now;
-    if (this.world.copyKey) saveCopy(this.world.copyKey, NPC_COPY_SYSTEM, snapshotNpcCopy(this, now));
+    this.copyDirty = !!this.world.copyKey && !saveCopy(this.world.copyKey, NPC_COPY_SYSTEM, snapshotNpcCopy(this, now));
   }
 
   private refreshLive(now: number) {
@@ -532,7 +534,10 @@ export class NpcSystem implements RoomSystem {
       }
     }
     // Contact: an NPC that just struck its target can reach it (brain.ts unreachable timer).
-    if (n && n.target === p) n.unreachSince = undefined;
+    if (n && n.target === p) {
+      n.unreachSince = undefined;
+      n.unreachBy = undefined;
+    }
     let dmg = amount;
     if (n && !opts.trueDamage) {
       if (n.state.flags & NF.BUFFED) dmg *= 1.15;

@@ -25,12 +25,19 @@ export interface NpcWorld {
   addNpc(n: NpcActor): void;
   removeNpc(id: string): void;
   newNpcState(): NpcState;
-  grantXp(p: PlayerActor, amount: number): void;
+  /**
+   * XP into the character only (call inside withTx, with the save); returns what to run after the
+   * commit: level-up effects and news (BodyRoom.addXp, F12 final B1).
+   */
+  addXp(p: PlayerActor, amount: number): () => void;
   giveItem(p: PlayerActor, item: InvItem): boolean;
   /** Create a loot pile; with `deferred`, pile events are queued until after the transaction. */
   createPile(owner: PlayerActor, items: InvItem[], coins: number, at: V3, deferred?: (() => void)[]): void;
-  /** Character + pile writes atomically (D26). */
-  withTx<T>(fn: () => T): T;
+  /**
+   * Character + pile writes atomically (D26); a failed save puts the listed players' characters back
+   * (only those `fn` touches: no snapshot of everyone per kill).
+   */
+  withTx<T>(players: readonly PlayerActor[], fn: () => T): T;
   /** Ground point under a position (water surface for swimmers). */
   snapToGround(p: readonly number[]): V3;
   send(p: PlayerActor, type: string, msg: unknown): void;
@@ -52,13 +59,13 @@ export function roomWorld(room: BodyRoom): NpcWorld {
     addNpc: (n) => room.addNpc(n),
     removeNpc: (id) => room.removeNpc(id),
     newNpcState: () => room.newNpcState(),
-    grantXp: (p, amount) => room.grantXp(p, amount),
+    addXp: (p, amount) => room.addXp(p, amount),
     giveItem: (p, it) => room.giveItem(p, it),
     createPile: (owner, items, coins, at, deferred) => {
       room.createPile(owner, items, coins, at, deferred);
     },
-    // Rewards touch any player here: a failed save puts their characters back (F12 B6).
-    withTx: (fn) => room.persist([...room.host.players()], fn),
+    // A failed save puts the rewarded players' characters back (F12 B6).
+    withTx: (players, fn) => room.persist(players, fn),
     snapToGround: (p) => room.snapToGround(p),
     send: (p, type, msg) => {
       if (room.actors.get(p.id) === p) p.client.send(type, msg);

@@ -15,6 +15,7 @@ import { z } from "zod";
 import type { Identity } from "../auth/identity.ts";
 import { actorPos, inSaddle, pushHistory, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
 import { characterRepo, withTx } from "./characters.ts";
+import { SWIM_FLOAT } from "@firstlight/shared/planet/water";
 import { CLOSE, hub, type HubRoom } from "./hub.ts";
 
 /** Ban lookup for reconnects; set at boot when the database is available. */
@@ -215,6 +216,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       waterLevel: this.bodyDef.waterLevel,
       groundAt: (x, y, z) => terrain.groundHeightAt(x, y, z),
       footing: (x, y, z, step) => this.host.props?.footing?.(x, y, z, step) ?? NO_FOOTING,
+      crosses: (ax, ay, az, bx, by, bz) => this.host.props?.crosses?.(ax, ay, az, bx, by, bz) ?? false,
     };
     this.state.body = options.body;
     this.state.copy = options.copy;
@@ -314,11 +316,21 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     this.setTimestep((dt) => this.tick(dt), NET.TICK_MS);
   }
 
+  /** Each system and each player on its own: one failure doesn't stop the rest (F12 final Opus nit). */
   onDispose() {
     this.unsubscribePiles?.();
-    for (const s of this.systems) s.dispose?.();
-    for (const a of this.actors.values()) this.finalLeave(a);
-    for (const l of this.lingering.values()) this.finalLeave(l.actor);
+    for (const s of this.systems) this.guarded("dispose", () => s.dispose?.());
+    for (const a of this.actors.values()) this.guarded("final leave", () => this.finalLeave(a));
+    for (const l of this.lingering.values()) this.guarded("final leave", () => this.finalLeave(l.actor));
+  }
+
+  /** Run `fn`, logging (not throwing) a failure: shutdown and dispose go on for everyone else. */
+  private guarded(what: string, fn: () => void) {
+    try {
+      fn();
+    } catch (err) {
+      console.error(`[room ${this.roomId}] ${what} failed: ${(err as Error)?.message ?? err}`);
+    }
   }
 
   /**
@@ -363,7 +375,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (inheritedPos && char.body === this.bodyDef.id) char.pos = inheritedPos;
     const p = new PlayerState();
     let pos: V3;
-    if (char.pos && char.body === this.bodyDef.id && !char.dead) pos = this.snapToGround(char.pos);
+    if (char.pos && char.body === this.bodyDef.id && !char.dead && this.plausible(char.pos)) pos = this.snapToGround(char.pos);
     else pos = this.spawnPoint(client.sessionId);
     char.body = this.bodyDef.id;
     char.travelTo = undefined;
@@ -499,7 +511,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     }
     // Left without logging out (outside a safe zone, or in a fight): the body stays for 30 s and can die.
     a.state.flags |= PF.LINGER;
-    this.saveActor(a);
+    this.guarded("linger save", () => this.saveActor(a));
     this.lingering.set(client.sessionId, { actor: a, until: now + RULES.LINGER_MS });
     this.autoDispose = false; // keep simulating the body even if nobody else is here
   }
@@ -529,7 +541,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   private finalLeave(a: PlayerActor) {
     if (a.superseded) return;
     this.removeBody(a);
-    this.saveActor(a);
+    // A failed last save leaves the last good one in the database (as after a crash); the actor
+    // still goes, so a leave or a shutdown never stalls on it.
+    this.guarded("final save", () => this.saveActor(a));
     hub.release(a.identity.userId, a);
   }
 
@@ -561,10 +575,13 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   onBeforeShutdown() {
     this.shuttingDown = true;
     this.broadcast("updating", { seconds: 5 });
-    withTx(() => {
-      for (const a of this.actors.values()) this.saveActor(a);
-      for (const l of this.lingering.values()) this.saveActor(l.actor);
-    });
+    // One transaction for speed; a player whose save fails is logged and skipped, not everyone.
+    this.guarded("shutdown save", () =>
+      withTx(() => {
+        for (const a of this.actors.values()) this.guarded("shutdown save", () => this.saveActor(a));
+        for (const l of this.lingering.values()) this.guarded("shutdown save", () => this.saveActor(l.actor));
+      }),
+    );
     super.onBeforeShutdown?.();
   }
 
@@ -727,11 +744,16 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
   /** Add an item (shared/content/inventory.ts storeItem): weapons and consumables to the hotbar first, loot to the backpack first. */
   giveItem(a: PlayerActor, item: InvItem): boolean {
+    return this.storeAt(a, item) >= 0;
+  }
+
+  /** giveItem, returning the slot the item went to (0–3 hotbar, 4–19 backpack), or -1 when full. */
+  private storeAt(a: PlayerActor, item: InvItem): number {
     const slot = storeItem(a.char, item);
-    if (slot < 0) return false;
+    if (slot < 0) return -1;
     if (slot === a.char.selected) this.equip(a, slot);
     a.youDirty = true;
-    return true;
+    return slot;
   }
 
   /** Move, merge or swap two inventory slots (0–3 hotbar, 4–19 backpack). */
@@ -747,20 +769,25 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (dist3([pile.x, pile.y, pile.z], actorPos(a)) > RULES.PICKUP_RANGE) return;
     // Take from the pile and save the character in one transaction (no dupes, no losses on crash).
     const events: (() => void)[] = [];
-    let result: { taken: { items: InvItem[]; coins: number; pile: PileData | null }; leftovers: InvItem[] } | null;
+    let result: { taken: { items: InvItem[]; coins: number; pile: PileData | null }; leftovers: InvItem[]; toBackpack: number } | null;
     try {
       result = this.persist([a], () => {
         const taken = pileStore.current.take(pileId, itemIndex);
         if (!taken) return null;
         const leftovers: InvItem[] = [];
-        for (const it of taken.items) if (!this.giveItem(a, it)) leftovers.push(it);
+        let toBackpack = 0;
+        for (const it of taken.items) {
+          const slot = this.storeAt(a, it);
+          if (slot < 0) leftovers.push(it);
+          else if (slot >= HOTBAR_SLOTS) toBackpack++;
+        }
         a.char.coins += taken.coins;
         if (taken.pile) events.push(() => emitPileEvent({ kind: "update", pile: taken.pile! }));
         else events.push(() => emitPileEvent({ kind: "remove", id: pileId, body: this.bodyDef.id }));
         // Items that didn't fit go back on the ground as a new pile.
         if (leftovers.length) this.createPile(a, leftovers, 0, actorPos(a), events);
         this.saveActor(a);
-        return { taken, leftovers };
+        return { taken, leftovers, toBackpack };
       });
     } catch {
       a.client.send("denied", { action: "pickup", reason: "try again" });
@@ -770,8 +797,10 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (!result) return;
     emitGameEvent(this, { type: "pickup", playerId: a.id, pileId, pileOwnerUserId: pile.ownerUserId, pileCreatedAt: pile.createdAt, items: result.taken.items.length - result.leftovers.length, coins: result.taken.coins });
     a.youDirty = true;
-    const { taken, leftovers } = result;
-    if (taken.coins || taken.items.length) a.client.send("toast", { text: `Picked up ${taken.items.length - leftovers.length} item(s)${taken.coins ? ` and ${taken.coins} coins` : ""}`, kind: "coins" });
+    const { taken, leftovers, toBackpack } = result;
+    // Where the loot went, and the key that opens the backpack (the only other pointer is the tutorial).
+    const bag = toBackpack ? ` · ${toBackpack} in your backpack (I)` : "";
+    if (taken.coins || taken.items.length) a.client.send("toast", { text: `Picked up ${taken.items.length - leftovers.length} item(s)${taken.coins ? ` and ${taken.coins} coins` : ""}${bag}`, kind: "coins" });
   }
 
   drop(a: PlayerActor | undefined, slot: number) {
@@ -825,9 +854,12 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   /**
    * Leave a pile on the ground. `kind`: "death" for what a player carried when they died (the cap
    * protects these), "loot" by default (drops, chests, boss overflow), "staged" for admin scenes;
-   * `ttlMs` makes it expire (swept by the quest system).
+   * `ttlMs` makes it expire (swept by the quest system). Load-test bots and load-test copies leave
+   * nothing (null): piles belong to a body, not a copy, so they would show up in public copies and
+   * count toward the body's cap (F12 final Opus SF4).
    */
-  createPile(owner: PlayerActor, items: InvItem[], coins: number, at: V3, deferred?: (() => void)[], opts: { kind?: PileKind; ttlMs?: number } = {}): PileData {
+  createPile(owner: PlayerActor, items: InvItem[], coins: number, at: V3, deferred?: (() => void)[], opts: { kind?: PileKind; ttlMs?: number } = {}): PileData | null {
+    if (owner.identity.loadtest || this.metadata?.loadtest) return null;
     const g = this.snapToGround(at);
     const { pile, evicted } = pileStore.current.add({
       body: this.bodyDef.id,
@@ -907,7 +939,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     let pile: PileData | null = null;
     try {
       this.persist([victim], () => {
-        pile = (items.length || victim.char.coins) && !victim.identity.loadtest ? this.createPile(victim, items, victim.char.coins, actorPos(victim), events, { kind: "death" }) : null;
+        pile = items.length || victim.char.coins ? this.createPile(victim, items, victim.char.coins, actorPos(victim), events, { kind: "death" }) : null;
         victim.char.hotbar = [null, null, null, null];
         victim.char.backpack = Array.from({ length: BACKPACK_SLOTS }, () => null);
         victim.char.coins = 0;
@@ -948,22 +980,54 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     client.send("reborn", { body: "portus" });
   }
 
-  grantXp(a: PlayerActor, amount: number) {
-    if (amount <= 0 || a.dead) return;
-    const before = a.char.level;
+  /**
+   * The durable half of an XP reward: the character's XP and level, nothing else (no save, no
+   * messages). Call it inside the transaction that saves whatever the XP comes with (a mission's
+   * done flag and coins, loot, onboarding flags), so they commit together or not at all (F12 final
+   * B1). Returns the live half, to run once that transaction has committed: level-up HP and level
+   * on the synced state, the toast and the levelUp event. Neither half saves or adds XP again.
+   */
+  addXp(a: PlayerActor, amount: number): () => void {
+    if (!(amount > 0) || a.dead) return () => {};
     a.char.xp += amount;
     a.char.level = levelForXp(a.char.xp);
-    if (a.char.level > before) {
-      const oldMax = maxHp(before);
-      const newMax = maxHp(a.char.level);
-      a.state.maxHp = newMax;
-      a.state.hp = Math.min(newMax, a.state.hp + (newMax - oldMax));
-      a.state.level = a.char.level;
-      a.client.send("toast", { text: `Level ${a.char.level}!`, kind: "xp" });
-      emitGameEvent(this, { type: "levelUp", playerId: a.id, level: a.char.level });
-      this.saveActor(a);
-    }
     a.youDirty = true;
+    return () => this.showLevel(a);
+  }
+
+  /**
+   * After a committed XP change: the levels the synced state doesn't show yet (more HP, the level,
+   * a toast, the levelUp event). Idempotent: a second call finds nothing new.
+   */
+  private showLevel(a: PlayerActor) {
+    a.youDirty = true;
+    const shown = a.state.level;
+    if (a.char.level <= shown) return;
+    const oldMax = maxHp(shown);
+    const newMax = maxHp(a.char.level);
+    a.state.maxHp = newMax;
+    a.state.hp = Math.min(newMax, a.state.hp + (newMax - oldMax));
+    a.state.level = a.char.level;
+    a.client.send("toast", { text: `Level ${a.char.level}!`, kind: "xp" });
+    emitGameEvent(this, { type: "levelUp", playerId: a.id, level: a.char.level });
+  }
+
+  /**
+   * XP that comes with nothing else durable (a PvP kill): a level-up is saved at once, in a
+   * transaction of its own, before anyone hears of it; a failed save leaves the XP unpaid.
+   */
+  grantXp(a: PlayerActor, amount: number) {
+    let live = (): void => {};
+    try {
+      this.persist([a], () => {
+        const before = a.char.level;
+        live = this.addXp(a, amount);
+        if (a.char.level > before) this.saveActor(a);
+      });
+    } catch {
+      return;
+    }
+    live();
   }
 
   // ---------------------------------------------------------------- logout
@@ -1225,12 +1289,23 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
   // ---------------------------------------------------------------- helpers
 
+  /** The ground (or swim surface) under a position; a degenerate one (zero, NaN) snaps to the main pad. */
   snapToGround(p: readonly number[]): V3 {
-    const d = norm(p);
+    const l = Math.hypot(p[0]!, p[1]!, p[2]!);
+    const d = l > 1e-6 && Number.isFinite(l) ? norm(p) : (padDirs(this.bodyDef)[0]! as V3);
     const g = this.terrain.groundHeight(d[0], d[1], d[2]);
     const R = this.bodyDef.radius;
-    const r = R + Math.max(g, this.bodyDef.waterLevel - 1.05) + 0.02;
+    const r = R + Math.max(g, this.bodyDef.waterLevel - SWIM_FLOAT) + 0.02;
     return [d[0] * r, d[1] * r, d[2] * r];
+  }
+
+  /** A saved position worth restoring: finite, and not metres under the ground (F12 final Opus N-B1). */
+  private plausible(p: readonly number[]): boolean {
+    if (p.length !== 3 || !p.every(Number.isFinite)) return false;
+    const l = Math.hypot(p[0]!, p[1]!, p[2]!);
+    if (!(l >= this.bodyDef.radius * 0.5)) return false;
+    const g = this.terrain.groundHeight(p[0]! / l, p[1]! / l, p[2]! / l);
+    return l - this.bodyDef.radius - g >= -3;
   }
 
   spawnPoint(seed: string): V3 {

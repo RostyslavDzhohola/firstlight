@@ -29,22 +29,45 @@ function deLeet(s: string): string {
 export type NameProblem = "length" | "chars" | "filtered" | "reserved";
 
 // Names that would pass for staff or the game itself (F12 review). Matched after lower-casing,
-// dropping underscores, undoing digit swaps and l/1 → i, and collapsing repeated letters.
-const RESERVED_ANYWHERE = ["admin", "administrator", "firstlight", "moderator", "system", "oversight", "official", "gamemaster", "developer", "support", "server"];
-// Short words only as whole name parts (they hide inside ordinary names otherwise).
-const RESERVED_TOKENS = ["mod", "mods", "dev", "devs", "staff", "gm", "owner", "root", "sysop", "team"];
+// undoing digit swaps and l/1 → i, and collapsing repeated letters. Long, distinctive words count
+// anywhere in a name; the rest only as whole name parts (one or more consecutive parts, split at
+// underscores, camelCase, caps runs and letter/digit changes), so "Bob_Server", "AdminBob" and
+// "ADM1N" are reserved but "Observer", "Badminton" and "Unofficial" are not (F12 final Sonnet S6).
+const RESERVED_ANYWHERE = ["administrator", "firstlight", "moderator", "gamemaster"];
+const RESERVED_PARTS = [
+  "admin", "system", "oversight", "official", "developer", "support", "server",
+  "mod", "mods", "dev", "devs", "staff", "gm", "owner", "root", "sysop", "team",
+];
 
 function reservedForm(s: string): string {
   return deLeet(s.toLowerCase().replace(/_/g, "")).replace(/[l|]/g, "i").replace(/(.)\1+/g, "$1");
 }
 const RESERVED_FORMS = RESERVED_ANYWHERE.map(reservedForm);
-const RESERVED_TOKEN_FORMS = new Set(RESERVED_TOKENS.map(reservedForm));
+const RESERVED_PART_FORMS = new Set(RESERVED_PARTS.map(reservedForm));
+
+/** The parts of a name: split at underscores, camelCase, caps runs ("XAdmin") and letter/digit changes. */
+function nameParts(name: string): string[] {
+  return name
+    .replace(/([a-z])([A-Z])/g, "$1_$2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
+    .replace(/([A-Za-z])([0-9])/g, "$1_$2")
+    .replace(/([0-9])([A-Za-z])/g, "$1_$2")
+    .split(/_+/)
+    .filter(Boolean);
+}
 
 export function isReservedName(name: string): boolean {
   const flat = reservedForm(name);
   if (RESERVED_FORMS.some((w) => flat.includes(w))) return true;
-  const tokens = name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").split(/_+/).filter(Boolean);
-  return tokens.some((t) => RESERVED_TOKEN_FORMS.has(reservedForm(t)));
+  const parts = nameParts(name);
+  for (let i = 0; i < parts.length; i++) {
+    let run = "";
+    for (let j = i; j < parts.length; j++) {
+      run += parts[j];
+      if (RESERVED_PART_FORMS.has(reservedForm(run))) return true;
+    }
+  }
+  return false;
 }
 
 /** Shape check only (length and characters). */

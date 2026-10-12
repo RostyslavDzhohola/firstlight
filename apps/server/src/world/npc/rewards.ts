@@ -113,32 +113,37 @@ export function rewardKill(sys: NpcSystem, n: Npc, killerId: string | null, now:
   if (killer && !killer.dead && !xpTo.includes(killer)) xpTo.push(killer);
   const key = n.point ? `p${n.point.id}` : n.summoner ? `s${n.summoner}` : `x${n.id}`;
   const gains = new Map<string, { p: PlayerActor; xp: number; coins: number }>();
-  // XP, coins, drops, chest and saves land together; pile events go out after the commit (D26).
+  // XP, coins, drops, chest and saves land together; pile events and level-ups go out after the
+  // commit (D26, F12 final B1). A failed save pays nobody anything (the kill still happened).
   const events: (() => void)[] = [];
-  world.withTx(() => {
-    for (const p of xpTo) {
-      const xp = killXp(def.tier, n.level, p.char.level, repeatDecay(sys, p.identity.userId, key, now));
-      if (xp > 0) world.grantXp(p, xp);
-      gains.set(p.id, { p, xp, coins: 0 });
-    }
-    if (top) {
-      const coins = npcCoins(def, n.level);
-      if (coins > 0) {
-        top.char.coins += coins;
-        top.youDirty = true;
+  const chestOwner = n.point?.chest && n.point.chestKey === n.member ? (top ?? killer) : null;
+  const touched = [...new Set([...xpTo, ...(top ? [top] : []), ...(chestOwner ? [chestOwner] : [])])];
+  try {
+    world.withTx(touched, () => {
+      for (const p of xpTo) {
+        const xp = killXp(def.tier, n.level, p.char.level, repeatDecay(sys, p.identity.userId, key, now));
+        if (xp > 0) events.push(world.addXp(p, xp));
+        gains.set(p.id, { p, xp, coins: 0 });
       }
-      const g = gains.get(top.id) ?? { p: top, xp: 0, coins: 0 };
-      g.coins = coins;
-      gains.set(top.id, g);
-      const items = rollDrops(sys, n, top);
-      if (items.length) world.createPile(top, items, 0, n.pos, events);
-    }
-    if (n.point?.chest && n.point.chestKey === n.member) {
-      const owner = top ?? killer;
-      if (owner) openChest(sys, n.point.chest, owner, n.level, n.point.pos, Math.random, events);
-    }
-    for (const g of gains.values()) world.save(g.p);
-  });
+      if (top) {
+        const coins = npcCoins(def, n.level);
+        if (coins > 0) {
+          top.char.coins += coins;
+          top.youDirty = true;
+        }
+        const g = gains.get(top.id) ?? { p: top, xp: 0, coins: 0 };
+        g.coins = coins;
+        gains.set(top.id, g);
+        const items = rollDrops(sys, n, top);
+        if (items.length) world.createPile(top, items, 0, n.pos, events);
+      }
+      if (chestOwner) openChest(sys, n.point!.chest!, chestOwner, n.level, n.point!.pos, Math.random, events);
+      for (const g of gains.values()) world.save(g.p);
+    });
+  } catch (err) {
+    console.error(`[npc] kill reward for ${def.id} not paid: ${(err as Error)?.message ?? err}`);
+    return;
+  }
   for (const e of events) e();
   for (const g of gains.values()) world.send(g.p, "npcKill", { id: n.id, kind: n.defIndex, xp: g.xp, coins: g.coins });
   emitNpcEvent({
@@ -165,7 +170,11 @@ export function openChest(sys: NpcSystem, chest: CampChest, owner: PlayerActor, 
   else announce();
 }
 
-/** Personal boss loot for one eligible player: coins, XP, items into the inventory, overflow at their feet. */
+/**
+ * Personal boss loot for one eligible player: coins, XP, items into the inventory, overflow at their
+ * feet, in one transaction (throws if it fails: nothing was paid). Pile events and level-ups go out
+ * after the commit.
+ */
 export function bossLoot(sys: NpcSystem, def: BossDef, p: PlayerActor, rng: Rng = Math.random): { xp: number; coins: number; items: InvItem[] } {
   const items: InvItem[] = [];
   for (const a of def.loot.always) {
@@ -178,12 +187,13 @@ export function bossLoot(sys: NpcSystem, def: BossDef, p: PlayerActor, rng: Rng 
     if (id === "weapon") items.push(randomWeapon(def.level, rng, r.weaponTier ?? 2));
     else items.push({ id, tier: 1, qty: 1 });
   }
-  // Coins, XP, items and the overflow pile commit together; pile events go out after (D26).
+  // Coins, XP, items and the overflow pile commit together; pile events and the level-up go out
+  // after (D26, F12 final B1).
   const events: (() => void)[] = [];
-  sys.world.withTx(() => {
+  sys.world.withTx([p], () => {
     p.char.coins += def.loot.coins;
     p.youDirty = true;
-    sys.world.grantXp(p, def.loot.xp);
+    events.push(sys.world.addXp(p, def.loot.xp));
     const leftovers: InvItem[] = [];
     for (const it of items) if (!sys.world.giveItem(p, it)) leftovers.push(it);
     if (leftovers.length) sys.world.createPile(p, leftovers, 0, actorPos(p), events);

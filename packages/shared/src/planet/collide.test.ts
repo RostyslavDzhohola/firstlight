@@ -222,3 +222,66 @@ describe("real placement", () => {
     }
   });
 });
+
+describe("swept steps (the server's path check, F12 final S2)", () => {
+  const fence = prop({ shape: 0, hx: 1.0, hz: 0.09, h: 1.1, kind: "fence" }, 0);
+  const all = () => true;
+  const one = (b: Breakable) => new BreakableCollider([b]);
+
+  it("a step through a thin fence with both ends outside it crosses it", () => {
+    const c = one(fence);
+    expect(c.sweep(feet(0, 0, -0.7), feet(0, 0, 0.7), all)).toBe(0);
+    expect(c.sweep(feet(0.5, 0, -0.5), feet(-0.2, 0.1, 0.9), all)).toBe(0);
+    // A barrel too, and a broken prop holds nobody back.
+    expect(one(barrel).sweep(feet(-0.9, 0, 0), feet(0.9, 0, 0), all)).toBe(0);
+    expect(c.sweep(feet(0, 0, -0.7), feet(0, 0, 0.7), () => false)).toBe(-1);
+  });
+
+  it("passing over the top, beside it, or along it is clear", () => {
+    const c = one(fence);
+    expect(c.sweep(feet(0, 1.2, -0.7), feet(0, 1.2, 0.7), all)).toBe(-1); // feet above the top
+    expect(c.sweep(feet(1.6, 0, -0.7), feet(1.6, 0, 0.7), all)).toBe(-1); // past its end
+    expect(c.sweep(feet(-1.5, 0, 0.47), feet(1.5, 0, 0.47), all)).toBe(-1); // sliding along a face
+    expect(c.sweep(feet(0, 0, 0.6), feet(0, 0, 2), all)).toBe(-1); // walking away
+  });
+
+  it("stepping onto a top within the step band and walking across it is clear", () => {
+    const low = prop({ shape: 0, hx: 0.5, hz: 0.5, h: 0.3 });
+    expect(one(low).sweep(feet(-0.9, 0, 0), feet(-0.2, 0.3, 0), all)).toBe(-1);
+    expect(one(crate).sweep(feet(-0.3, 1, 0), feet(0.3, 1, 0), all)).toBe(-1);
+    expect(one(crate).sweep(feet(0.3, 1, 0), feet(1.2, 0.8, 0), all)).toBe(-1); // off the edge, falling
+  });
+
+  it("a body a prop was rebuilt around may walk out through it", () => {
+    expect(one(fence).sweep(feet(0, 0, 0.02), feet(0, 0, -0.8), all)).toBe(-1);
+    expect(one(crate).sweep(feet(0.1, 0, 0), feet(-1.2, 0, 0), all)).toBe(-1);
+  });
+
+  it("never flags the straight steps between positions of a client sliding past and over props", () => {
+    // The client: 9 m/s, 0.25 m substeps resolved against the props, a position sent every 50 ms.
+    const props = [crate, barrel, fence].map((b, i) => prop({ ...b, index: i, px: [0, 3, -3][i]!, pz: [0, 1, -1][i]! }, i));
+    const c = new BreakableCollider(props);
+    const out = emptyContact();
+    let checked = 0;
+    for (let k = 0; k < 72; k++) {
+      const ang = (k / 72) * Math.PI * 2;
+      const dir = [Math.cos(ang), Math.sin(ang)] as const;
+      for (const lane of [-1.2, -0.6, -0.2, 0, 0.3, 0.7]) {
+        const p: XYZ = feet(-dir[0] * 6 - dir[1] * lane, 0, -dir[1] * 6 + dir[0] * lane);
+        let prev: XYZ = { ...p };
+        for (let n = 0; n < 30; n++) {
+          for (let s = 0; s < 2; s++) {
+            p.x += dir[0] * 0.225;
+            p.z += dir[1] * 0.225;
+            c.resolve(p, all, out);
+            p.y = R; // on the ground (the tops here are out of reach)
+          }
+          expect(c.sweep(prev, p, all)).toBe(-1);
+          prev = { ...p };
+          checked++;
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(10_000);
+  });
+});

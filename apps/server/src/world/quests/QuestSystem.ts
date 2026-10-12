@@ -26,6 +26,7 @@ import type { BodyRoom } from "../BodyRoom.ts";
 import { emitGameEvent, onGameEvent, type DamageEvent, type DeathEvent, type GameEvent, type KillEvent, type SpawnRequestEvent } from "../events.ts";
 import { npcSystemOf, onNpcEvent, type NpcEvent } from "../npc/index.ts";
 import { dist3, type V3 } from "../geometry.ts";
+import { groundMotion } from "../movement.ts";
 import type { RoomSystem } from "../systems.ts";
 import { EGG_LIMITS, EggLogic } from "./eggs.ts";
 import { engrave, hallLines, onHallChanged } from "./hall.ts";
@@ -285,6 +286,11 @@ export class QuestSystem implements RoomSystem {
     a.state.z = a.lastZ = p[2];
     a.lastMoveAt = Date.now();
     a.history.length = 0;
+    // Placed on the ground: no fall in progress, a fresh jump envelope (like the admin teleport).
+    const len = Math.hypot(p[0], p[1], p[2]);
+    a.airborne = false;
+    a.peakRadius = len;
+    groundMotion(a, len, a.lastMoveAt);
     a.client.send("correct", { x: p[0], y: p[1], z: p[2], seq: a.state.seq });
   }
 
@@ -437,6 +443,9 @@ export class QuestSystem implements RoomSystem {
       }
     }
     this.eggs.tickRoom(now);
+    // A boss fight that reset or despawned is over: forget its hitters, or a later unrelated admin
+    // command would mark the next fight assisted (and Untouchable would span encounters).
+    if (this.bossHits.size && !npcSystemOf(this.room)?.boss?.engaged) this.bossHits.clear();
     if (now - this.lastSweep >= QUEST_RULES.PILE_SWEEP_MS) {
       this.lastSweep = now;
       for (const [id, list] of this.ops) if (!list.length || now - list[list.length - 1]! >= 1000) this.ops.delete(id);
@@ -638,8 +647,10 @@ export class QuestSystem implements RoomSystem {
   completeMission(a: PlayerActor, m: CharacterMission, def: MissionDef) {
     if (m.done) return;
     const goal = missionGoal(def);
-    // The done flag, coins, items and any overflow pile commit together; a failed save leaves the
-    // mission open (it completes on the next trigger). XP and the news follow the commit (F12 B6).
+    // The done flag, XP and level, coins, items and any overflow pile commit together; a failed save
+    // leaves the mission open (it completes on the next trigger). Level-up effects and the news
+    // follow the commit, and nothing after it saves again (F12 B6, final B1).
+    let showXp = (): void => {};
     const paid = this.grant(
       a,
       def.reward.items.map((i) => ({ ...i })),
@@ -647,10 +658,11 @@ export class QuestSystem implements RoomSystem {
         m.done = true;
         m.progress = goal;
         a.char.coins += def.reward.coins;
+        showXp = this.room.addXp(a, def.reward.xp);
       },
     );
     if (!paid) return;
-    this.room.grantXp(a, def.reward.xp);
+    showXp();
     const extra = def.reward.items.map((i) => `${i.qty} × ${itemName(i)}`).join(", ");
     this.toast(a, `Mission complete: ${def.name} · +${def.reward.xp} XP · +${def.reward.coins} ◎${extra ? ` · ${extra}` : ""}`, "xp");
     a.client.send("missionDone", { id: def.id, xp: def.reward.xp, coins: def.reward.coins });
@@ -700,7 +712,7 @@ export class QuestSystem implements RoomSystem {
 
   /**
    * Award a medal once per account; true if newly earned. The permanent medal write: nothing is
-   * written while the copy is staging a scene, and a life that was part of a scene or credited with
+   * written while the copy is staging a scene (but Spark, STAGE_PROOF), and a life that was part of a scene or credited with
    * an assisted/staged boss kill never earns life-scoped medals (its level, bosses and progress came
    * partly from admin tools; F12 review S4). With `deferred`, the caller runs the write inside its own
    * transaction: the cache update and the player's messages wait in `deferred` until it commits.
@@ -708,10 +720,10 @@ export class QuestSystem implements RoomSystem {
   award(a: PlayerActor, medalId: string, deferred?: (() => void)[]): boolean {
     const def = MEDAL_BY_ID.get(medalId);
     if (!def || a.identity.loadtest) return false;
-    if (!this.official()) return false;
-    if (def.scope === "life" && this.life(a).unofficial) return false;
     const q = this.qp(a);
-    if (q.medals.has(medalId)) return false;
+    if (q.medals.has(medalId)) return false; // before official(), which reads the copy state
+    if (!STAGE_PROOF.has(medalId) && !this.official()) return false;
+    if (def.scope === "life" && this.life(a).unofficial) return false;
     const fresh = progressStore.current.awardMedal(a.identity.userId, medalId);
     const apply = () => {
       q.medals.add(medalId);
@@ -766,7 +778,7 @@ export class QuestSystem implements RoomSystem {
    * Firsts. Admin-assisted claims (the admin `egg` command, or a step an admin opened) and claims in a
    * staged copy give the item only: no medal, no plaque.
    */
-  claimEgg(a: PlayerActor, eggId: EggId, opts: { assisted?: boolean } = {}) {
+  claimEgg(a: PlayerActor, eggId: EggId, opts: { assisted?: boolean; cost?: number; note?: string } = {}) {
     const egg = EGG_BY_ID.get(eggId);
     if (!egg || a.dead) return;
     const life = this.life(a);
@@ -776,8 +788,15 @@ export class QuestSystem implements RoomSystem {
     }
     const assistKey = `${a.identity.userId}|${eggId}`;
     const helped = this.assistedEggs.has(assistKey);
-    if (!this.grant(a, [{ ...egg.item }], () => life.eggs.push(eggId))) return; // save failed: nothing changed, try again
+    // The offering (E1's coin), the life flag, the item and any overflow commit together; a failed
+    // save changes nothing and the claim can be tried again.
+    const paid = this.grant(a, [{ ...egg.item }], () => {
+      if (opts.cost) a.char.coins -= opts.cost;
+      life.eggs.push(eggId);
+    });
+    if (!paid) return;
     this.assistedEggs.delete(assistKey);
+    if (opts.note) this.toast(a, opts.note, "info");
     this.toast(a, `Secret found: ${egg.name} — ${egg.itemName}`, "medal");
     if (opts.assisted || helped || !this.official()) {
       this.toast(a, "Admin-assisted or staged: no medal or Hall of Firsts entry", "info");
@@ -1038,6 +1057,13 @@ export class QuestSystem implements RoomSystem {
 }
 
 type CharacterMission = PlayerActor["char"]["missions"][number];
+
+/**
+ * Medals a staged copy doesn't withhold: Spark is earned on the training dummies only, which no
+ * staged scene or admin tool touches, and onboarding is offered once, so withholding it would lose
+ * it for good (F12 final Opus SF3).
+ */
+const STAGE_PROOF: ReadonlySet<string> = new Set(["spark"]);
 
 /** NPC lane boss def ids → quests boss ids. */
 const BOSS_OF_NPC: Record<string, BossId> = { tidewrath: "tidewrath", hollow_king: "hollow_king", the_receiver: "receiver" };

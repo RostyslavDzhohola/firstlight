@@ -54,8 +54,42 @@ export function roomCopyKey(room: BodyRoom): string {
   return copyKey(room.bodyDef.id, room.state.copy, !!room.metadata?.loadtest);
 }
 
-/** Load without letting a broken row stop a room from opening. */
+/**
+ * Failed writes are retried with a bounded backoff (F12 final S3): the first retry after
+ * `firstMs`, then twice as long each time up to `maxMs`.
+ */
+export const COPY_RETRY = { firstMs: 1000, maxMs: 30_000 };
+
+interface PendingWrite {
+  key: string;
+  system: string;
+  state: unknown;
+  failures: number;
+  /** Date.now() before which storage isn't tried again. */
+  retryAt: number;
+}
+
+/**
+ * Writes that failed, newest state per `key|system`, for the store they failed on: until one
+ * succeeds this is the copy's state (loadCopy reads it), so restrictions keep holding and a new
+ * room on the copy restores what the old one had. Dropped if another store is installed.
+ */
+const pending = new Map<string, PendingWrite>();
+let pendingStore: CopyStateStore | null = null;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+function pendingWrites(): Map<string, PendingWrite> {
+  if (pendingStore !== copyStateStore.current) {
+    pending.clear();
+    pendingStore = copyStateStore.current;
+  }
+  return pending;
+}
+
+/** Load without letting a broken row stop a room from opening. A write still being retried wins. */
 export function loadCopy<T>(key: string, system: string): T | null {
+  const p = pendingWrites().get(`${key}|${system}`);
+  if (p) return p.state === null || p.state === undefined ? null : (JSON.parse(JSON.stringify(p.state)) as T);
   try {
     return copyStateStore.current.load<T>(key, system);
   } catch (err) {
@@ -64,11 +98,47 @@ export function loadCopy<T>(key: string, system: string): T | null {
   }
 }
 
-/** Save without letting a storage error break the tick or the dispose. */
-export function saveCopy(key: string, system: string, state: unknown): void {
+/**
+ * Save without letting a storage error break the tick or the dispose. True when the state is in
+ * storage; false when the write failed or is waiting out its backoff: the newest state is kept in
+ * memory and written by a timer (or the caller's next save after the backoff), so callers keep
+ * their dirty flag until this returns true.
+ */
+export function saveCopy(key: string, system: string, state: unknown): boolean {
+  const writes = pendingWrites();
+  const k = `${key}|${system}`;
+  const p = writes.get(k);
+  const now = Date.now();
+  if (p && now < p.retryAt) {
+    p.state = state;
+    return false;
+  }
   try {
     copyStateStore.current.save(key, system, state);
+    writes.delete(k);
+    return true;
   } catch (err) {
-    console.error(`copy state ${key}/${system}: save failed`, err);
+    const failures = (p?.failures ?? 0) + 1;
+    const wait = Math.min(COPY_RETRY.maxMs, COPY_RETRY.firstMs * 2 ** (failures - 1));
+    writes.set(k, { key, system, state, failures, retryAt: now + wait });
+    console.error(`copy state ${key}/${system}: save failed (${failures}× in a row), retrying in ${wait} ms`, err);
+    scheduleRetry();
+    return false;
   }
+}
+
+/** Retry every failed write whose backoff is over (the timer calls this). */
+export function retryCopySaves(): void {
+  for (const p of [...pendingWrites().values()]) if (Date.now() >= p.retryAt) saveCopy(p.key, p.system, p.state);
+  scheduleRetry();
+}
+
+function scheduleRetry() {
+  if (retryTimer) clearTimeout(retryTimer);
+  retryTimer = null;
+  if (!pending.size) return;
+  let next = Infinity;
+  for (const p of pending.values()) next = Math.min(next, p.retryAt);
+  retryTimer = setTimeout(retryCopySaves, Math.max(0, next - Date.now()));
+  retryTimer.unref?.();
 }

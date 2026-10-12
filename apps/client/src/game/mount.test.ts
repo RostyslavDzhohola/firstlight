@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { HORSE } from "@firstlight/shared/content/horse";
-import { MountState, horseKeys, horsesEnabled, mountedSpeed, rideBlockedByWater, rideCamera } from "./mount.ts";
+import { WEAPON_BY_ID } from "@firstlight/shared/content/weapons";
+import { MountState, horseKeys, horsesEnabled, mountedSpeed, rideBlockedByWater, rideCamera, usableAnywhere } from "./mount.ts";
 
 describe("MountState (local riding state)", () => {
   it("follows the server's flag and never gets on before it", () => {
@@ -98,5 +99,12 @@ describe("the horses flag", () => {
     expect(horsesEnabled({ horses: true }, true)).toBe(false);
     expect(horsesEnabled({}, false)).toBe(false);
     expect(horsesEnabled(null, false)).toBe(false);
+  });
+});
+
+describe("support items work where the server allows them (F12 final Opus nit)", () => {
+  it("tonics, Patchkits and Prism Bubbles are usable from the saddle and in safe zones; weapons and the radio aren't", () => {
+    for (const id of ["tonic_small", "tonic_large", "patchkit", "bubble"]) expect(usableAnywhere(WEAPON_BY_ID.get(id)!), id).toBe(true);
+    for (const id of ["carbine", "sunbrand", "grenade", "radio"]) expect(usableAnywhere(WEAPON_BY_ID.get(id)!), id).toBe(false);
   });
 });

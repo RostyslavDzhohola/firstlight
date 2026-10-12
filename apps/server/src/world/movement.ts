@@ -12,6 +12,7 @@
 
 import { HORSE, rideSpeed } from "@firstlight/shared/content/horse";
 import { ANIM } from "@firstlight/shared/net/schema";
+import { deepWater, SWIM_FLOAT } from "@firstlight/shared/planet/water";
 import { inSaddle, type PlayerActor } from "./actors.ts";
 import type { V3 } from "./geometry.ts";
 import { activeMoveFx, movementLimits } from "./npc/effects.ts";
@@ -23,7 +24,10 @@ export const MOVE = {
   budgetCap: 3.5, // metres that can be banked (≈ 0.3 s of sprint + slack)
   swimBudgetCap: 1.5,
   stepTolerance: 0.05, // per packet, charged
-  dodgeBurst: 4.5,
+  // A dodge covers 4.5 m in 0.3 s (client) instead of sprinting, and the budget keeps refilling at
+  // sprint speed meanwhile: the burst only pays the difference (4.5 − 9 × 0.3) plus slack, so
+  // DODGE-animation spam can't buy ~40 % more speed (F12 final Opus nit).
+  dodgeBurst: 2.0,
   dodgeCooldownMs: 1100,
   dodgeWindowMs: 800, // the dodge bonus must be used within this time
   knockbackWindowMs: 1500,
@@ -44,6 +48,8 @@ export interface MoveWorld {
   groundAt(x: number, y: number, z: number): number;
   /** Intact breakable props: the highest top under the feet (radius from the centre, 0 = none) and whether the feet are inside one. */
   footing?(x: number, y: number, z: number, step: number): { top: number; inside: boolean };
+  /** Do feet moving straight from a to b pass through an intact prop (shared collider sweep)? */
+  crosses?(ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean;
 }
 
 /** Ground height (above the radius) under a position: the terrain or an intact prop top, whichever is higher. */
@@ -83,7 +89,7 @@ export type MoveResult =
 /** Is a body at radius `len` over `ground` floating in deep water (swim depth)? */
 function swimmingAt(w: MoveWorld, len: number, ground: number): boolean {
   const depth = len - w.radius;
-  return ground < w.waterLevel - 1 && depth >= w.waterLevel - MOVE.swimDepthSlack && depth <= w.waterLevel + 0.5;
+  return deepWater(ground, w.waterLevel) && depth >= w.waterLevel - MOVE.swimDepthSlack && depth <= w.waterLevel + 0.5;
 }
 
 /** Highest radius the body may have right now while airborne (the ballistic envelope). */
@@ -110,6 +116,9 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
   a.lastBudgetAt = now;
   const len = Math.hypot(m.x, m.y, m.z);
   const terrain = w.groundAt(m.x, m.y, m.z);
+  // Nowhere near the surface (the centre gives NaN ground, and a radial step there is free; F12
+  // final Opus N-B1). Every check below is written so that NaN fails it.
+  if (!(len >= w.radius * 0.5) || !Number.isFinite(len) || !Number.isFinite(terrain)) return { ok: false, reason: "ground" };
   const swimming = swimmingAt(w, len, terrain);
   // Intact props are solid and standable (F12): their tops count as ground; their insides don't.
   const foot = swimming ? null : (w.footing?.(m.x, m.y, m.z, MOVE.groundedAbove) ?? null);
@@ -131,11 +140,13 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
   }
 
   // Below the ground, deeper in a lake than swimmers float, or inside a solid prop.
-  if (!swimming && (above < -MOVE.groundTolerance || (terrain < w.waterLevel - 1 && len - w.radius < w.waterLevel - MOVE.swimDepthSlack))) return { ok: false, reason: "ground" };
+  if (!swimming && (!(above >= -MOVE.groundTolerance) || (deepWater(terrain, w.waterLevel) && len - w.radius < w.waterLevel - MOVE.swimDepthSlack))) return { ok: false, reason: "ground" };
   // Walking into a prop is refused; a body that was put inside one (teleport, a rebuild) may walk out.
   if (foot?.inside && !w.footing!(a.lastX, a.lastY, a.lastZ, MOVE.groundedAbove).inside) return { ok: false, reason: "prop" };
+  // ...and so is a step whose path goes through one with both ends outside (a thin fence; F12 final S2).
+  if (!swimming && w.crosses?.(a.lastX, a.lastY, a.lastZ, m.x, m.y, m.z)) return { ok: false, reason: "prop" };
   const grounded = swimming || above <= MOVE.groundedAbove;
-  if (!grounded && len > airCeiling(a, now)) return { ok: false, reason: "height" };
+  if (!grounded && !(len <= airCeiling(a, now))) return { ok: false, reason: "height" };
 
   const dx = m.x - a.lastX, dy = m.y - a.lastY, dz = m.z - a.lastZ;
   const dist = Math.hypot(dx, dy, dz);
@@ -144,7 +155,7 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
   // envelope's business: supported climbing follows the ground, airborne lift is bounded above.
   const radial = len - Math.hypot(a.lastX, a.lastY, a.lastZ);
   const charged = Math.sqrt(Math.max(0, dist * dist - radial * radial));
-  if (charged > a.moveBudget + a.moveBonus + MOVE.stepTolerance) return { ok: false, reason: "speed" };
+  if (!(charged <= a.moveBudget + a.moveBonus + MOVE.stepTolerance)) return { ok: false, reason: "speed" };
 
   // Allowed: spend the expiring bonus first, then the budget (which may dip by the tolerance).
   const fromBonus = Math.min(a.moveBonus, charged);
@@ -190,7 +201,7 @@ export function settle(a: PlayerActor, w: MoveWorld, now: number): V3 | null {
   if (len - w.radius - ground <= MOVE.groundedAbove) return null;
   const ceiling = airCeiling(a, now);
   if (len <= ceiling) return null;
-  const floor = w.radius + (ground < w.waterLevel - 1 ? Math.max(ground, w.waterLevel - 1.05) : ground) + 0.02;
+  const floor = w.radius + (deepWater(ground, w.waterLevel) ? Math.max(ground, w.waterLevel - SWIM_FLOAT) : ground) + 0.02;
   const target = Math.max(floor, ceiling - MOVE.airSlack);
   if (target >= len) return null;
   const k = target / len;

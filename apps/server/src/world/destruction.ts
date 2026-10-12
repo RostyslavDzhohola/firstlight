@@ -80,9 +80,11 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
     if (!s || s.v !== 1 || !Array.isArray(s.broken)) return;
     const now = this.now();
     const byId = new Map(this.list.map((b) => [b.id, b]));
-    for (const [id, until] of s.broken) {
-      const b = byId.get(id);
-      if (!b || !(until > now)) continue;
+    for (const e of s.broken) {
+      if (!Array.isArray(e)) continue; // a malformed row never stops a room opening
+      const [id, until] = e as unknown[];
+      const b = typeof id === "string" ? byId.get(id) : undefined;
+      if (!b || typeof until !== "number" || !(until > now)) continue;
       this.brokenUntil[b.index] = until;
       this.hp[b.index] = 0;
       this.broken.add(b.index);
@@ -90,12 +92,12 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
     }
   }
 
+  /** Checkpoint the broken set; it stays dirty (and is tried again) until a save succeeds (F12 final S3). */
   private saveCopy() {
-    this.copyDirty = false;
     this.lastCopySave = this.now();
     const broken: [string, number][] = [];
     for (const i of this.broken) broken.push([this.list[i]!.id, this.brokenUntil[i]!]);
-    saveCopy(roomCopyKey(this.room), "destruction", broken.length ? ({ v: 1, broken } satisfies DestructionCopyState) : null);
+    this.copyDirty = !saveCopy(roomCopyKey(this.room), "destruction", broken.length ? ({ v: 1, broken } satisfies DestructionCopyState) : null);
   }
 
   isBroken(index: number): boolean {
@@ -164,6 +166,21 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
       if (Math.hypot(p.x - x, p.y - y, p.z - z) >= PLAYER_BODY.radius + INSIDE_MARGIN) out.inside = true;
     }
     return out;
+  }
+
+  private readonly sweepA: XYZ = { x: 0, y: 0, z: 0 };
+  private readonly sweepB: XYZ = { x: 0, y: 0, z: 0 };
+
+  /**
+   * Do feet moving straight from a to b pass through an intact prop (shared collider sweep, the
+   * client's player body and step)? A prop the start is already inside doesn't count, so a body a
+   * prop was rebuilt around can still walk out.
+   */
+  crosses(ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean {
+    const a = this.sweepA, b = this.sweepB;
+    a.x = ax; a.y = ay; a.z = az;
+    b.x = bx; b.y = by; b.z = bz;
+    return this.collider.sweep(a, b, this.solid, PLAYER_BODY) >= 0;
   }
 
   /** Is point `p` inside intact prop `index`? */

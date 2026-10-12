@@ -44,14 +44,33 @@ export function snapshotNpcCopy(sys: NpcSystem, now: number): NpcCopyState | nul
   return { v: 1, at: now, groups, ...(boss ? { boss } : {}), ...(fight ? { fight } : {}), ...(golden.length ? { golden } : {}) };
 }
 
-/** Apply a snapshot to a freshly built system (no NPCs spawned yet). */
+const num = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const str = (v: unknown): v is string => typeof v === "string";
+
+/** A kept fight in the shape resumeFight reads (a malformed row must not break the boss later). */
+function validFight(f: unknown): f is BossFight {
+  if (!f || typeof f !== "object") return false;
+  const x = f as Record<string, unknown>;
+  return (
+    str(x.id) && num(x.vacantSince) && num(x.frac) && num(x.phase) &&
+    Array.isArray(x.cover) && x.cover.every((c) => Array.isArray(c) && num(c[0]) && num(c[1])) &&
+    Array.isArray(x.damage) && x.damage.every((d) => Array.isArray(d) && str(d[0]) && str(d[1]) && num(d[2])) &&
+    Array.isArray(x.plates) && x.plates.every(str) && Array.isArray(x.soakers) && x.soakers.every(str)
+  );
+}
+
+/**
+ * Apply a snapshot to a freshly built system (no NPCs spawned yet). Entries that aren't in the
+ * shape snapshotNpcCopy writes are skipped (a malformed row never stops a room opening).
+ */
 export function restoreNpcCopy(sys: NpcSystem, s: NpcCopyState | null, now: number) {
-  if (!s || s.v !== 1) return;
-  const away = Math.max(0, (now - s.at) / 1000);
-  for (const e of s.groups ?? []) {
+  if (!s || typeof s !== "object" || s.v !== 1) return;
+  const away = num(s.at) ? Math.max(0, (now - s.at) / 1000) : 0;
+  for (const e of Array.isArray(s.groups) ? s.groups : []) {
+    if (!e || typeof e !== "object" || !num(e.p)) continue;
     const g = sys.groups[e.p];
     if (!g || sig(g.point) !== e.sig) continue;
-    if (typeof e.left === "number") {
+    if (num(e.left)) {
       // Nobody was near while the copy was empty: the countdown ran at full speed.
       const left = e.left - away;
       if (left > 0) {
@@ -59,17 +78,19 @@ export function restoreNpcCopy(sys: NpcSystem, s: NpcCopyState | null, now: numb
         g.respawnLeft = left;
         g.dead.fill(true);
       }
-    } else for (const i of e.dead ?? []) if (i >= 0 && i < g.dead.length) g.dead[i] = true;
+    } else if (Array.isArray(e.dead)) for (const i of e.dead) if (num(i) && i >= 0 && i < g.dead.length) g.dead[i] = true;
   }
-  for (const [p, back] of s.golden ?? []) {
-    const pt = sys.groups[p]?.point;
-    if (pt && typeof back === "number" && pt.members.some((m) => m.golden)) sys.goldenBack.set(p, back);
+  for (const entry of Array.isArray(s.golden) ? s.golden : []) {
+    if (!Array.isArray(entry)) continue;
+    const [p, back] = entry;
+    const pt = num(p) ? sys.groups[p]?.point : undefined;
+    if (pt && num(back) && pt.members.some((m) => m.golden)) sys.goldenBack.set(p, back);
   }
   const b = sys.boss;
-  if (b && s.boss && s.boss.id === b.def.id && s.boss.respawnAt > now) {
+  if (b && s.boss && str(s.boss.id) && s.boss.id === b.def.id && num(s.boss.respawnAt) && s.boss.respawnAt > now) {
     b.status = "dead";
     b.respawnAt = s.boss.respawnAt;
-  } else if (b && s.fight && s.fight.id === b.def.id && now - s.fight.vacantSince < NPC_TUNING.bossResetMs) {
+  } else if (b && validFight(s.fight) && s.fight.id === b.def.id && now - s.fight.vacantSince < NPC_TUNING.bossResetMs) {
     // Empty for less than the 30 s reset: the fight resumes when the boss next spawns (boss.ts).
     b.pendingFight = s.fight;
   }

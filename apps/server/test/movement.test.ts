@@ -14,8 +14,12 @@ import type { PlayerActor } from "../src/world/actors.ts";
 import { HORSE } from "@firstlight/shared/content/horse";
 import { ANIM } from "@firstlight/shared/net/schema";
 import { isSafe, type Breakable } from "@firstlight/shared";
+import { emptyContact, PLAYER_BODY } from "@firstlight/shared/planet/collide";
+import { SWIM_DEPTH } from "@firstlight/shared/planet/water";
 import type { BodyId } from "@firstlight/shared";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
+import { characterRepo } from "../src/world/characters.ts";
+import { newCharacter } from "@firstlight/shared/content/character";
 
 let game: Game;
 const rooms: Room[] = [];
@@ -127,6 +131,90 @@ describe("no flying (F12 B1)", () => {
     }
     await sleep(150);
     expect(corrections.n).toBe(0);
+  });
+});
+
+describe("no shortcuts through the planet (F12 final Opus N-B1)", () => {
+  it("a step to the centre and back out to a far point is corrected: the body stays where it was", async () => {
+    const r = await joinAs(game, "diver", "arcadia", {});
+    rooms.push(r);
+    await waitFor(() => !!me(r));
+    let corrections = 0;
+    r.onMessage("correct", () => corrections++);
+    await sleep(300);
+    const start = [me(r).x, me(r).y, me(r).z];
+    const sd = norm(start);
+    // A dry target more than 300 m away.
+    let target: V3 | null = null;
+    for (const cand of [[1, 0, 0], [0, 0, 1], [-1, 0, 0], [0, 0, -1], [0, -1, 0], [0.6, 0.2, 0.77]]) {
+      const d = norm(cand);
+      if (terrain.groundHeight(d[0], d[1], d[2]) > BODY.waterLevel + 0.5 && Math.hypot(d[0] - sd[0], d[1] - sd[1], d[2] - sd[2]) * R > 300) {
+        target = d;
+        break;
+      }
+    }
+    const tr = groundR(target!) + 0.02;
+    r.send("input", { seq: 101, x: 0, y: 0, z: 0, fx: 0, fy: 0, fz: 1, anim: 1, t: Date.now() });
+    await sleep(60);
+    r.send("input", { seq: 102, x: target![0] * tr, y: target![1] * tr, z: target![2] * tr, fx: 0, fy: 0, fz: 1, anim: 1, t: Date.now() });
+    await sleep(300);
+    const end = [me(r).x, me(r).y, me(r).z];
+    expect(corrections).toBeGreaterThan(0);
+    expect(end.every(Number.isFinite)).toBe(true);
+    expect(Math.hypot(end[0]! - start[0]!, end[1]! - start[1]!, end[2]! - start[2]!)).toBeLessThan(5);
+  });
+
+  it("a step deep below the surface is refused however short its ground distance", () => {
+    const len = R + terrain.groundHeight(0, 1, 0);
+    const a = { lastX: 0, lastY: len, lastZ: 0, ...motionFields(len, 0) } as unknown as PlayerActor;
+    const w: MoveWorld = { radius: R, waterLevel: BODY.waterLevel, groundAt: (x, y, z) => terrain.groundHeightAt(x, y, z) };
+    for (const m of [{ x: 0, y: 0, z: 0 }, { x: 0, y: R * 0.3, z: 0 }, { x: 0, y: len - 6, z: 0 }]) {
+      const r = validateMove({ ...a }, { ...m, anim: 1 }, w, { speed: 1, dodge: 1 }, 100);
+      expect(r.ok).toBe(false);
+    }
+  });
+
+  it("a character saved at the centre (or at NaN) rejoins at the pad and can walk", async () => {
+    for (const [uid, pos] of [["zeroed", [0, 0, 0]], ["nanned", [NaN, 1, 2]]] as const) {
+      characterRepo.current.save(uid, { ...newCharacter(0, 0), body: "arcadia", pos: [...pos] as V3 });
+      const r = await joinAs(game, uid, "arcadia", {});
+      rooms.push(r);
+      await waitFor(() => !!me(r));
+      const p = [me(r).x, me(r).y, me(r).z];
+      expect(p.every(Number.isFinite)).toBe(true);
+      const pad = padDirs(BODY)[0]!;
+      expect(Math.hypot(p[0]! / R - pad[0]!, p[1]! / R - pad[1]!, p[2]! / R - pad[2]!) * R).toBeLessThan(15);
+      expect(aboveGround({ x: p[0]!, y: p[1]!, z: p[2]! })).toBeLessThan(0.5);
+      let corrections = 0;
+      r.onMessage("correct", () => corrections++);
+      const d = norm(p);
+      const step = walk(d, tangent(d), 0.4);
+      send(r, { n: 10 }, step, groundR(step), 1);
+      await sleep(200);
+      expect(corrections).toBe(0);
+      await safeLeave(r);
+    }
+  });
+});
+
+describe("quest teleports (F12 final Opus nit)", () => {
+  it("a teleport mid-fall lands nobody with the fall's damage", async () => {
+    const k = await joinOutside("ported");
+    k.r.send("admin", { cmd: "unprotect" });
+    await waitFor(() => !(me(k.r).flags & 3));
+    const room = matchMaker.getLocalRoomById(k.r.roomId) as unknown as BodyRoom;
+    const a = room.actors.get(k.r.sessionId)!;
+    const hp0 = a.state.hp;
+    // Falling from 30 m up, then a quest teleport (egg lift, fast travel) puts it on the ground.
+    a.airborne = true;
+    a.peakRadius = groundR(k.dir) + 30;
+    const quests = room.systems.find((x) => "eggs" in x) as unknown as { teleport(a: unknown, at: readonly number[]): void };
+    const to = walk(k.dir, k.t, 6);
+    quests.teleport(a, [to[0] * R, to[1] * R, to[2] * R]);
+    expect(a.airborne).toBe(false);
+    send(k.r, k.seq, to, groundR(to), 0);
+    await sleep(300);
+    expect(a.state.hp).toBe(hp0);
   });
 });
 
@@ -244,6 +332,71 @@ function deepWater(): V3 {
   }
   throw new Error("no deep water found");
 }
+
+describe("wading at lake edges (F12 final Opus SF2)", () => {
+  for (const body of ["arcadia", "hollowmere", "meridian"] as const) {
+    it(`${body}: running through shallows the client wades (ground 1.0–1.2 m under the surface) is never corrected`, async () => {
+      const def = BODIES[body];
+      const Rb = def.radius;
+      const tr = createTerrain(def);
+      const wl = def.waterLevel;
+      const band = (d: V3) => {
+        const g = tr.groundHeight(d[0], d[1], d[2]);
+        return g >= wl - SWIM_DEPTH && g < wl - 1.0;
+      };
+      // The longest straight run inside the band (deterministic scan).
+      const rnd = (x: number) => {
+        const v = Math.sin(x * 12.9898) * 43758.5453;
+        return v - Math.floor(v);
+      };
+      let best: { d: V3; t: V3; run: number } | null = null;
+      for (let i = 0; i < 6000 && !(best && best.run >= 8); i++) {
+        const d = norm([rnd(i) * 2 - 1, rnd(i + 0.3) * 2 - 1, rnd(i + 0.7) * 2 - 1]);
+        if (!band(d) || isSafe(def, d[0] * Rb, d[1] * Rb, d[2] * Rb)) continue;
+        const e1 = tangent(d);
+        const e2 = norm([d[1] * e1[2] - d[2] * e1[1], d[2] * e1[0] - d[0] * e1[2], d[0] * e1[1] - d[1] * e1[0]]);
+        for (let j = 0; j < 16; j++) {
+          const a = (j / 16) * Math.PI * 2;
+          const t = norm([e1[0] * Math.cos(a) + e2[0] * Math.sin(a), e1[1] * Math.cos(a) + e2[1] * Math.sin(a), e1[2] * Math.cos(a) + e2[2] * Math.sin(a)]);
+          let run = 0;
+          for (let m = 0.3; m < 30; m += 0.3) {
+            if (band(norm([d[0] * Rb + t[0] * m, d[1] * Rb + t[1] * m, d[2] * Rb + t[2] * m]))) run = m;
+            else break;
+          }
+          if (!best || run > best.run) best = { d, t, run };
+        }
+      }
+      expect(best!.run).toBeGreaterThan(3);
+      const at = (m: number): V3 => {
+        const q = norm([best!.d[0] * Rb + best!.t[0] * m, best!.d[1] * Rb + best!.t[1] * m, best!.d[2] * Rb + best!.t[2] * m]);
+        const r = Rb + tr.groundHeight(q[0], q[1], q[2]);
+        return [q[0] * r, q[1] * r, q[2] * r];
+      };
+      const r = await joinAs(game, `wader_${body}`, body, {}, "admin");
+      rooms.push(r);
+      await waitFor(() => !!me(r));
+      const p0 = at(0);
+      r.send("admin", { cmd: "teleport", args: { x: p0[0], y: p0[1], z: p0[2] } });
+      await waitFor(() => Math.hypot(me(r).x - p0[0], me(r).y - p0[1], me(r).z - p0[2]) < 0.5);
+      let corrections = 0;
+      r.onMessage("correct", () => corrections++);
+      await sleep(300);
+      corrections = 0;
+      const seq = { n: 10 };
+      // There and back at a 6 m/s run, on the bottom like the client (it only swims deeper than SWIM_DEPTH).
+      for (const [from, to] of [[0, best!.run], [best!.run, 0]] as const) {
+        const n = Math.max(2, Math.round(Math.abs(to - from) / (6 * 0.05)));
+        for (let i = 1; i <= n; i++) {
+          const p = at(from + ((to - from) * i) / n);
+          send(r, seq, norm(p), Math.hypot(...p), 1);
+          await sleep(50);
+        }
+      }
+      await sleep(150);
+      expect(corrections).toBe(0);
+    }, 30_000);
+  }
+});
 
 describe("swimming (F12 S3)", () => {
   it("swims at swim speed; sprint-speed swimming and dodge bursts in the water are corrected", async () => {
@@ -443,6 +596,76 @@ describe("standing on props (F12 client review should-fix 4)", () => {
   });
 });
 
+describe("no walking through props in one packet (F12 final S2)", () => {
+  const roomOf = (r: Room) => matchMaker.getLocalRoomById(r.roomId) as unknown as BodyRoom;
+  const destructionOf = (r: Room) => roomOf(r).systems.find((x) => x instanceof DestructionSystem) as DestructionSystem;
+  /** Ground point at prop-local (lx, lz) of `w`. */
+  const local = (w: Breakable, lx: number, lz: number): V3 => {
+    const d = norm([w.px + w.rx * lx + w.fx * lz, w.py + w.ry * lx + w.fy * lz, w.pz + w.rz * lx + w.fz * lz]);
+    const g = groundR(d) + 0.02;
+    return [d[0] * g, d[1] * g, d[2] * g];
+  };
+  const dry = (p: V3) => terrain.groundHeight(...norm(p)) > BODY.waterLevel + 0.5 && !isSafe(BODY, p[0], p[1], p[2]);
+  /** Would the client be pushed at feet `p` (intact props only)? */
+  const blocked = (sys: DestructionSystem, p: V3) => {
+    const q = { x: p[0], y: p[1], z: p[2] };
+    return sys.collider.resolve(q, (i) => !sys.isBroken(i), emptyContact(), PLAYER_BODY);
+  };
+  /** An intact `kind` whose `path(b)` points are all on dry, level, open ground where nothing pushes the body. */
+  function wallOf(sys: DestructionSystem, kind: string, path: (b: Breakable) => V3[]): Breakable {
+    const w = sys.list.find((b) => {
+      if (b.kind !== kind || sys.isBroken(b.index)) return false;
+      const pts = path(b);
+      const r0 = Math.hypot(...pts[0]!);
+      return pts.every((p) => dry(p) && !blocked(sys, p) && Math.abs(Math.hypot(...p) - r0) < 0.3);
+    });
+    if (!w) throw new Error(`no free ${kind}`);
+    return w;
+  }
+
+  for (const kind of ["fence", "campwall"] as const) {
+    it(`a hop through a ${kind} with both ends outside it is corrected`, async () => {
+      const k = await joinOutside(`ghost_${kind}`);
+      const sys = destructionOf(k.r);
+      const off = (b: Breakable) => b.hz + 0.38 + 0.15;
+      const w = wallOf(sys, kind, (b) => [local(b, 0, -off(b)), local(b, 0, off(b))]);
+      const front = local(w, 0, -off(w)), back = local(w, 0, off(w));
+      k.r.send("admin", { cmd: "teleport", args: { x: front[0], y: front[1], z: front[2] } });
+      await waitFor(() => Math.hypot(me(k.r).x - front[0], me(k.r).y - front[1], me(k.r).z - front[2]) < 0.5);
+      await sleep(400);
+      k.corrections.n = 0;
+      send(k.r, k.seq, norm(back), Math.hypot(...back), 1);
+      await sleep(300);
+      expect(k.corrections.n).toBeGreaterThan(0);
+      const p = me(k.r);
+      const lz = (p.x - w.px) * w.fx + (p.y - w.py) * w.fy + (p.z - w.pz) * w.fz;
+      expect(lz).toBeLessThan(0); // still on the near side
+    });
+  }
+
+  it("walking along a fence, close to it, is never corrected", async () => {
+    const k = await joinOutside("fencewalker");
+    const sys = destructionOf(k.r);
+    const side = (b: Breakable) => b.hz + 0.38 + 0.02;
+    const xs: number[] = [];
+    for (let x = -2.5; x <= 2.5; x += 0.4) xs.push(x);
+    const w = wallOf(sys, "fence", (b) => xs.map((x) => local(b, x, -side(b))));
+    const along = (x: number) => local(w, x, -side(w));
+    const start = along(xs[0]!);
+    k.r.send("admin", { cmd: "teleport", args: { x: start[0], y: start[1], z: start[2] } });
+    await waitFor(() => Math.hypot(me(k.r).x - start[0], me(k.r).y - start[1], me(k.r).z - start[2]) < 0.5);
+    await sleep(400);
+    k.corrections.n = 0;
+    for (const x of xs) {
+      const p = along(x);
+      send(k.r, k.seq, norm(p), Math.hypot(...p), 1);
+      await sleep(50);
+    }
+    await sleep(150);
+    expect(k.corrections.n).toBe(0);
+  });
+});
+
 describe("sprinting over real terrain like the client (F12 Codex re-review S1)", () => {
   /**
    * The client's ground movement (PlayerController): each 60 Hz frame moves `speed`/60 m along the
@@ -564,11 +787,54 @@ describe("mounted limits go through the limits argument (F12 re-review nit)", ()
     const horse = rider(now - 5000, true);
     horse.moveBudget = 0;
     horse.lastBudgetAt = now - 10; // almost nothing refilled
-    expect(validateMove(horse, step(horse, 3, ANIM.DODGE), flat, moveLimits(horse, now), now).ok).toBe(false);
+    expect(validateMove(horse, step(horse, 1.8, ANIM.DODGE), flat, moveLimits(horse, now), now).ok).toBe(false);
     const foot = rider(now - 5000, false);
     foot.moveBudget = 0;
     foot.lastBudgetAt = now - 10;
-    expect(validateMove(foot, step(foot, 3, ANIM.DODGE), flat, moveLimits(foot, now), now).ok).toBe(true);
+    expect(validateMove(foot, step(foot, 1.8, ANIM.DODGE), flat, moveLimits(foot, now), now).ok).toBe(true);
+  });
+
+  /** Run a packet pattern at 20 Hz on foot: `at(i)` gives each packet's step (m) and anim. Returns the refusals. */
+  function pattern(packets: number, at: (i: number) => { metres: number; anim: number }): number {
+    let now = 1_000_000;
+    const a = rider(now - 5000, false);
+    let refused = 0;
+    for (let i = 0; i < packets; i++) {
+      now += 50;
+      const { metres, anim } = at(i);
+      const m = step(a, metres, anim);
+      if (validateMove(a, m, flat, moveLimits(a, now), now).ok) {
+        a.lastX = m.x;
+        a.lastY = m.y;
+        a.lastZ = m.z;
+      } else refused++;
+    }
+    return refused;
+  }
+
+  it("dodge animations don't buy speed: 14 m/s with DODGE every 1.1 s is refused (F12 final Opus nit)", () => {
+    // The sprint budget refills at 9 × 1.2 = 10.8 m/s; a 4.5 m burst per dodge let ~14.9 m/s through.
+    expect(pattern(400, (i) => ({ metres: 14 * 0.05, anim: i % 22 === 0 ? ANIM.DODGE : ANIM.SPRINT }))).toBeGreaterThan(0);
+  });
+
+  it("…and a real dodge from an empty bank still fits", () => {
+    let first = true;
+    expect(
+      pattern(6, () => {
+        const r = { metres: first ? 3.5 + (4.5 / 0.3) * 0.05 : (4.5 / 0.3) * 0.05, anim: ANIM.DODGE }; // spend the bank, then dodge
+        first = false;
+        return r;
+      }),
+    ).toBe(0);
+  });
+
+  it("…while real dodges between sprints (4.5 m in 0.3 s, every 1.2 s) are never refused", () => {
+    expect(
+      pattern(400, (i) => {
+        const k = i % 24; // 1.2 s cycle: a 0.3 s dodge, then sprinting
+        return k < 6 ? { metres: (4.5 / 0.3) * 0.05, anim: ANIM.DODGE } : { metres: 9 * 0.05, anim: ANIM.SPRINT };
+      }),
+    ).toBe(0);
   });
 });
 

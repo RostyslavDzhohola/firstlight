@@ -159,6 +159,78 @@ function supportOf(b: Breakable, p: XYZ, radius: number, step: number): number {
   return best;
 }
 
+/** A swept path must get this far into a footprint (and below a top's band) to count as crossing it. */
+const SWEEP_SLACK = 0.03;
+
+/**
+ * Part [t0, t1] of the feet path a→b (prop-local coordinates, t in 0..1) during which the centre is
+ * inside a solid's footprint shrunk by SWEEP_SLACK, or null. Written to `_span`.
+ */
+const _span = { t0: 0, t1: 1 };
+function footprintSpan(shape: 0 | 1, hx: number, hz: number, ax: number, az: number, dx: number, dz: number): typeof _span | null {
+  const ex = hx - SWEEP_SLACK, ez = hz - SWEEP_SLACK;
+  if (ex <= 0 || ez <= 0) return null;
+  let t0 = 0, t1 = 1;
+  if (shape === 0) {
+    for (let k = 0; k < 2; k++) {
+      const p = k === 0 ? ax : az, d = k === 0 ? dx : dz, e = k === 0 ? ex : ez;
+      if (Math.abs(d) < 1e-12) {
+        if (p < -e || p > e) return null;
+        continue;
+      }
+      let ta = (-e - p) / d, tb = (e - p) / d;
+      if (ta > tb) [ta, tb] = [tb, ta];
+      if (ta > t0) t0 = ta;
+      if (tb < t1) t1 = tb;
+      if (t0 > t1) return null;
+    }
+  } else {
+    const A = dx * dx + dz * dz, B = 2 * (ax * dx + az * dz), C = ax * ax + az * az - ex * ex;
+    if (A < 1e-12) {
+      if (C > 0) return null;
+    } else {
+      const disc = B * B - 4 * A * C;
+      if (disc < 0) return null;
+      const q = Math.sqrt(disc);
+      t0 = Math.max(0, (-B - q) / (2 * A));
+      t1 = Math.min(1, (-B + q) / (2 * A));
+      if (t0 > t1) return null;
+    }
+  }
+  _span.t0 = t0;
+  _span.t1 = t1;
+  return _span;
+}
+
+/**
+ * The feet path a→b against one solid of prop b (local frame): 0 = clear; 1 = it crosses the solid
+ * (the centre inside its footprint while the body overlaps it below its standable band: feet more
+ * than `step` under its top, head above its bottom); 2 = the start is already inside it that way.
+ */
+function sweepSolid(b: Breakable, shape: 0 | 1, hx: number, hz: number, y0: number, y1: number, a: XYZ, bb: XYZ, height: number, step: number): 0 | 1 | 2 {
+  const lo = y0 - height + SWEEP_SLACK, hi = y1 - step - SWEEP_SLACK;
+  if (hi <= lo) return 0;
+  const { x: ax, y: ay, z: az } = toLocal(b, a);
+  const { x: bx, y: by, z: bz } = toLocal(b, bb);
+  const span = footprintSpan(shape, hx, hz, ax, az, bx - ax, bz - az);
+  if (!span) return 0;
+  // Feet height is linear along the path: the times it lies inside (lo, hi).
+  const dy = by - ay;
+  let s0: number, s1: number;
+  if (Math.abs(dy) < 1e-12) {
+    if (!(ay > lo && ay < hi)) return 0;
+    s0 = -Infinity;
+    s1 = Infinity;
+  } else {
+    s0 = (lo - ay) / dy;
+    s1 = (hi - ay) / dy;
+    if (s0 > s1) [s0, s1] = [s1, s0];
+  }
+  const t0 = Math.max(span.t0, s0), t1 = Math.min(span.t1, s1);
+  if (!(t0 < t1)) return 0;
+  return t0 <= 0 ? 2 : 1;
+}
+
 /** How far below the feet a supporting top is looked for (a jump apex is ~1.2 m; slack for slopes). */
 const SUPPORT_REACH = 4;
 const _p: XYZ = { x: 0, y: 0, z: 0 };
@@ -206,6 +278,39 @@ export class BreakableCollider {
       if (top > best) best = top;
     }
     return best;
+  }
+
+  /**
+   * The first solid prop that feet moving straight from a to b pass through, or -1: the body's
+   * centre gets inside one of its solids' footprints (by more than a few centimetres) while the
+   * body overlaps that solid below its standable band (feet more than `step` under the top, head
+   * above the bottom). A prop the start is already inside that way is ignored, so a body a prop
+   * was rebuilt around can walk out. For the server's movement validator: the client moves in
+   * short substeps against the same solids and never has its centre inside a footprint below the
+   * band, so straight steps between its positions don't cross one; a step through a thin fence
+   * with both ends outside it does (F12 final S2).
+   */
+  sweep(a: XYZ, b: XYZ, solid: (index: number) => boolean, body: { radius: number; height: number; step: number } = PLAYER_BODY): number {
+    if (this.list.length === 0) return -1;
+    const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+    const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (!(len > 1e-6)) return -1;
+    const n = this.grid.collect(a.x, a.y, a.z, dx / len, dy / len, dz / len, len, body.radius + body.height, this.candidates);
+    let first = -1;
+    for (let k = 0; k < n; k++) {
+      const i = this.candidates[k]!;
+      if (!solid(i)) continue;
+      const p = this.list[i]!;
+      let hit = false, inside = false;
+      for (let s = -1; s < (p.parts?.length ?? 0) && !inside; s++) {
+        const q = s < 0 ? null : p.parts![s]!;
+        const r = q ? sweepSolid(p, q.shape, q.hx, q.hz, q.y0, q.y1, a, b, body.height, body.step) : sweepSolid(p, p.shape, p.hx, p.hz, 0, p.h, a, b, body.height, body.step);
+        if (r === 2) inside = true;
+        else if (r === 1) hit = true;
+      }
+      if (hit && !inside && first < 0) first = i;
+    }
+    return first;
   }
 
   /**

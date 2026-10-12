@@ -73,6 +73,17 @@ export function describeBootFailure(e: unknown): BootFailure | null {
   if (/dynamically imported module|importing a module script failed/i.test(m)) {
     return { title: "The game didn't finish downloading", text: "Your connection dropped while the game was loading. Reload to try again.", action: "reload" };
   }
+  // /api/play and sign-in refusals that aren't about the connection (F12 final Opus nit).
+  if (m === "version") {
+    return { title: "A new version is out", text: "The game was updated while this page was open. Reload to play the new version.", action: "reload" };
+  }
+  if (m === "storage") {
+    return { title: "Saving is down for a moment", text: "The server couldn't save your character a moment ago, so it is keeping you out until saving works again. Your last save is safe; try again in a few minutes.", action: "retry" };
+  }
+  if ((e as { status?: unknown } | null)?.status === 403 || m === "forbidden") {
+    const why = m && m !== "forbidden" ? `${m.replace(/\.?$/, ".")} ` : "";
+    return { title: "This device can't play", text: `${why}The server refused this device or account. If you think that's a mistake, contact the team.`, action: "retry" };
+  }
   return { title: "Couldn't reach the world", text: "The game server didn't answer. Check your connection and try again; your character is safe.", action: "retry" };
 }
 

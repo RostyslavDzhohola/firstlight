@@ -108,6 +108,11 @@ export interface Npc extends NpcActor {
   strafeSign: number;
   /** Since when the chased target has stood where this NPC can't reach it (brain.ts), if it has. */
   unreachSince?: number;
+  /**
+   * The unreachable target it last gave up on and when that clock started: the same target waking it
+   * again keeps the clock (a pad shooter gets no fresh window after each heal; F12 final Opus SF9).
+   */
+  unreachBy?: { id: string; since: number };
   /** Golden Hopbit / Ticket #000 bookkeeping. */
   egg?: { follower: string | null; since: number; walker?: string; walkFrom?: V3; walkDir?: V3 };
   /**

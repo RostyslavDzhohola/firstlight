@@ -164,6 +164,9 @@ function weaponNote(def: WeaponDef, t: TierStats): string | null {
     case "thrown":
       return `Left mouse throws one. It goes off after ${def.fuse ?? 1.6} s.`;
     case "heal":
+      if (def.id === "patchkit") {
+        return `Channel ${t.channel ?? 1} s, then the patched player heals ${Math.round((t.heal ?? 0) * 100)}% of their max HP over ${t.duration ?? 2} s. Left mouse: the ally in your crosshair (${def.range} m). Right mouse, or E here: yourself. A hit stops the channel and keeps the kit. ${t.cooldown ?? 6} s between kits.`;
+      }
       return def.cls === "item" ? "Left mouse with it in hand, or E here. 8 s between tonics." : "Heals you over 2 s. Left mouse with it in hand, or E here.";
     case "bubble":
       return "A shield of light around you and anyone close.";
@@ -282,10 +285,16 @@ export interface KeyResult {
   /** The panel consumed the key (stop it reaching the game). */
   handled: boolean;
   actions: InvAction[];
+  /** A line to show the player now (X pressed once on a slot that is only pointed at). */
+  hint?: string;
 }
 
 const NOT_MINE: KeyResult = { handled: false, actions: [] };
 const done = (actions: InvAction[] = []): KeyResult => ({ handled: true, actions });
+
+/** X (or Delete) on a slot that is only pointed at must be pressed again within this to drop it (F12 final Sonnet N9). */
+export const DROP_CONFIRM_MS = 1500;
+export const DROP_CONFIRM_HINT = "Press X again to drop it";
 
 /**
  * Focus (hover / keyboard) and the held slot (click-to-pick). Methods return the messages to send;
@@ -295,9 +304,18 @@ export class InvCursor {
   focus = 0;
   held: number | null = null;
   private readonly state: () => InvState;
+  private readonly now: () => number;
+  /** A first X on a pointed-at slot: the slot and when (a second X there within DROP_CONFIRM_MS drops). */
+  private armed: { slot: number; at: number } | null = null;
 
-  constructor(state: () => InvState) {
+  constructor(state: () => InvState, now: () => number = () => Date.now()) {
     this.state = state;
+    this.now = now;
+  }
+
+  /** Is a drop of `slot` waiting for its second X? (The panel shows DROP_CONFIRM_HINT.) */
+  dropArmed(slot: number): boolean {
+    return !!this.armed && this.armed.slot === slot && this.now() - this.armed.at <= DROP_CONFIRM_MS && this.has(slot);
   }
 
   private has(slot: number): boolean {
@@ -379,9 +397,19 @@ export class InvCursor {
         return done(quickAction(this.state(), src)?.actions ?? []);
       case "KeyX":
       case "Delete":
-      case "Backspace":
+      case "Backspace": {
+        // A picked item drops at once; one that is only pointed at (an idle cursor) needs a second
+        // press, so a stray X can't throw an item on the ground.
+        const picked = this.held !== null;
         this.held = null;
-        return done(this.has(src) ? [{ type: "drop", slot: src }] : []);
+        if (!this.has(src)) return done();
+        if (picked || this.dropArmed(src)) {
+          this.armed = null;
+          return done([{ type: "drop", slot: src }]);
+        }
+        this.armed = { slot: src, at: this.now() };
+        return { handled: true, actions: [], hint: DROP_CONFIRM_HINT };
+      }
       case "Escape":
         if (this.held === null) return NOT_MINE;
         this.held = null;

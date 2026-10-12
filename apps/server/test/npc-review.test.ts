@@ -70,6 +70,28 @@ describe("unreachable targets (F12 should-fix 6)", () => {
     expect(wolf.target).toBeNull();
   });
 
+  it("re-aggroed by the same pad shooter after its heal, it gives up again at once: no kill inside a fresh window (F12 final Opus SF9)", () => {
+    const w = fakeWorld("arcadia", { immortal: true });
+    const p = w.addPlayer("camper", arcadiaPoint(w, 6), 6);
+    const wolf = w.sys.createNpc(NPC_INDEX.get("dusk_wolf")!, 4, arcadiaPoint(w, 32), w.clock.t, { instant: true }) as Npc;
+    dealDamage(w.world.host, p, wolf, 10, false);
+    expect(run(w, 8000, () => wolf.mode === MODE.EVADE)).toBeGreaterThan(0);
+    expect(run(w, 20_000, () => wolf.mode === MODE.IDLE)).toBeGreaterThan(0);
+    // Healed and home. The camper keeps shooting from the ring: 20 % of its HP every 450 ms.
+    const shot = wolf.state.maxHp * 0.2;
+    let lowest = wolf.state.hp;
+    for (let t = 0; t < 30_000 && !wolf.dead; t += 450) {
+      dealDamage(w.world.host, p, wolf, shot, false);
+      lowest = Math.min(lowest, wolf.state.hp);
+      run(w, 450);
+      lowest = Math.min(lowest, wolf.state.hp);
+    }
+    expect(wolf.dead).toBe(false);
+    expect(p.state.hp).toBe(p.state.maxHp);
+    // Only the shot that wakes it lands before it gives up and heals: never a window's worth.
+    expect(lowest).toBeGreaterThanOrEqual(wolf.state.maxHp - shot - 1e-6);
+  });
+
   it("a target just outside the ring but inside the NPC's steering margin is bitten, not evaded (Codex S4)", () => {
     const w = fakeWorld("arcadia", { immortal: true });
     // 14.5 m from the pad centre: outside the 12 m safe ring, inside the wolf's 12 + 3 + 0.5 m no-go zone.

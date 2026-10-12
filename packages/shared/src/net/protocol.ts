@@ -74,7 +74,10 @@ export interface FireMsg {
   dx: number;
   dy: number;
   dz: number;
-  /** Client clock (ms) of the shot, for lag compensation. */
+  /**
+   * Client clock (ms) of the shot. Unused by the server (reserved): hits are rewound by the fixed
+   * NET.REWIND_MS window, not by this time, which a client could forge.
+   */
   t: number;
   /** 0..1 draw/charge for bows and charged melee. */
   charge?: number;
@@ -83,6 +86,7 @@ export interface FireMsg {
 export type ClientMessages = {
   input: InputMsg;
   fire: FireMsg;
+  /** `t`: client clock (ms) of the swing; unused by the server (reserved, like FireMsg.t). */
   melee: { slot: number; t: number; heavy?: boolean };
   block: { on: boolean };
   /** Start/stop drawing a bow or charging a heavy swing (the server times the draw). */
@@ -108,6 +112,7 @@ export type ClientMessages = {
   questSync: Record<string, never>;
   logout: { start: boolean };
   phrase: { id: number };
+  /** Ask for a travel ticket while standing in a portal. `viaPad` is unused (reserved): the server finds the portal from the position. */
   travel: { to: BodyId; viaPad?: number };
   fastTravel: { pad: number };
   respawn: { starter: number; palette: number };

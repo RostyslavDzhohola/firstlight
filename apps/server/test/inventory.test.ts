@@ -29,12 +29,15 @@ describe("inventory", () => {
   it("picked-up loot goes to the backpack and weapons to the hotbar; trophies stack", async () => {
     const b = await bot("looter", "arcadia");
     const a = actorOf(b);
-    const pile = serverRoom(b).createPile(a, [{ id: "wool_tuft", tier: 1, qty: 3 }, { id: "carbine", tier: 2, qty: 1 }, { id: "fox_mask", tier: 1, qty: 1 }, { id: "wool_tuft", tier: 1, qty: 2 }], 0, actorPos(a));
+    const pile = serverRoom(b).createPile(a, [{ id: "wool_tuft", tier: 1, qty: 3 }, { id: "carbine", tier: 2, qty: 1 }, { id: "fox_mask", tier: 1, qty: 1 }, { id: "wool_tuft", tier: 1, qty: 2 }], 0, actorPos(a))!;
     b.send("pickup", { pileId: pile.id });
     await until("picked up", () => b.you.backpack[0]?.id === "wool_tuft" && b.you.hotbar[1]?.id === "carbine");
     expect(ids(b.you.hotbar)).toEqual(["hexquill", "carbine", null, null]); // the default starter, then the weapon
     expect(ids(b.you.backpack.slice(0, 3))).toEqual(["wool_tuft", "fox_mask", null]);
     expect(b.you.backpack[0].qty).toBe(5);
+    // The toast says where the loot went and which key opens the backpack (F12 final Sonnet N9).
+    await until("toast", () => b.toasts.some((t) => t.startsWith("Picked up")));
+    expect(b.toasts.find((t) => t.startsWith("Picked up"))).toBe("Picked up 4 item(s) · 3 in your backpack (I)");
   });
 
   it("move swaps across hotbar and backpack, merges stacks and re-equips the selected slot", async () => {
