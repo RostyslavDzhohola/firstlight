@@ -1,9 +1,9 @@
 // Every mission, egg and medal has a server test (SPEC M6). Seam 1: SDK bots against the real
-// in-process server; other lanes' events (NPC kills, props, onboarding) are emitted on the bus the
-// way those lanes will emit them.
+// in-process server. Medals and eggs go through the real paths (weapons fired, props broken, NPCs
+// spawned and killed, the NPC lane's events); only Spark still fakes its event (no onboarding yet).
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { BODIES, padDirs, type BodyId } from "@firstlight/shared";
+import { BODIES, isSafe, padDirs, type BodyId } from "@firstlight/shared";
 import { MEDAL_RULES } from "@firstlight/shared/content/medals";
 import { missionsOn } from "@firstlight/shared/content/missions";
 import { offsetDir, placeDir } from "@firstlight/shared/content/places";
@@ -58,17 +58,78 @@ function vantage(b: Bot, targets: [number, number, number][], awayFrom?: [number
   throw new Error("no vantage point on the E8 lamps");
 }
 
-/** A real Stillshot shot from the bot's head at a point (combat's hitscan → "shot" → quests). */
-function snipe(b: Bot, at: readonly number[]) {
+/** A real shot with `weapon` from the bot's head at a point (combat → "shot"/damage → quests). */
+function fireAt(b: Bot, weapon: string, at: readonly number[], slot = slotOf(b, weapon)) {
   const a = actorOf(b);
-  a.lastAttackAt = 0; // the test doesn't wait out the 1.4 s rate or the reload
+  a.lastAttackAt = 0; // the test doesn't wait out fire rates, reloads or heat
   a.reloadEndsAt = 0;
+  a.overheatUntil = 0;
   const p = me(b);
   const l = Math.hypot(p.x, p.y, p.z);
   const head = [p.x + (p.x / l) * 1.6, p.y + (p.y / l) * 1.6, p.z + (p.z / l) * 1.6];
   const d = [at[0]! - head[0]!, at[1]! - head[1]!, at[2]! - head[2]!];
   const dl = Math.hypot(d[0]!, d[1]!, d[2]!);
-  b.send("fire", { slot: slotOf(b, "stillshot"), ox: head[0], oy: head[1], oz: head[2], dx: d[0]! / dl, dy: d[1]! / dl, dz: d[2]! / dl, t: Date.now() });
+  b.send("fire", { slot, ox: head[0], oy: head[1], oz: head[2], dx: d[0]! / dl, dy: d[1]! / dl, dz: d[2]! / dl, t: Date.now() });
+}
+const snipe = (b: Bot, at: readonly number[]) => fireAt(b, "stillshot", at);
+
+const liftBy = (p: readonly number[], h: number): [number, number, number] => {
+  const l = Math.hypot(p[0]!, p[1]!, p[2]!);
+  return [p[0]! + (p[0]! / l) * h, p[1]! + (p[1]! / l) * h, p[2]! + (p[2]! / l) * h];
+};
+
+/** Clear line from a head at `from` to `to`: no terrain, no intact prop. */
+function clear(b: Bot, from: readonly number[], to: readonly number[]): boolean {
+  const room = serverRoom(b);
+  const v = [to[0]! - from[0]!, to[1]! - from[1]!, to[2]! - from[2]!];
+  const len = Math.hypot(v[0]!, v[1]!, v[2]!);
+  const d: [number, number, number] = [v[0]! / len, v[1]! / len, v[2]! / len];
+  const o: [number, number, number] = [from[0]!, from[1]!, from[2]!];
+  return rayTerrain(room.terrain, o, d, len, 1) >= len && !room.host.props?.raycast(o, d, len);
+}
+
+/** A shooter spot and a target spot `range` m apart along the surface, with a clear line between. */
+function lineOfSight(b: Bot, range: number): { shooter: [number, number, number]; target: [number, number, number] } {
+  const R = BODIES.arcadia.radius;
+  for (const pad of padDirs(BODIES.arcadia)) {
+    for (let k = 0; k < 8; k++) {
+      const c = Math.cos((k * Math.PI) / 4), sn = Math.sin((k * Math.PI) / 4);
+      for (const start of [30, 50, 70, 100]) {
+        const shooter = ground("arcadia", offsetDir(pad, c * start, sn * start, R));
+        const target = ground("arcadia", offsetDir(pad, c * (start + range), sn * (start + range), R));
+        if (BODIES.arcadia.waterLevel + R + 0.5 > Math.min(Math.hypot(...shooter), Math.hypot(...target))) continue;
+        if (isSafe(BODIES.arcadia, ...shooter)) continue;
+        if (clear(b, liftBy(shooter, 1.6), liftBy(target, 0.3))) return { shooter, target };
+      }
+    }
+  }
+  throw new Error(`no ${range} m line of sight`);
+}
+
+/** A breakable of `kind` and a firing spot 7 m from it with a clear line to its centre. */
+function propInSight(b: Bot, kind: string): { shooter: [number, number, number]; prop: [number, number, number] } {
+  const room = serverRoom(b);
+  const sys = room.systems.find((x) => "brokenUntil" in x) as unknown as { list: { kind: string; index: number; px: number; py: number; pz: number; cx: number; cy: number; cz: number; rx: number; ry: number; rz: number; fx: number; fy: number; fz: number; foot: number }[] };
+  for (const p of sys.list) {
+    if (p.kind !== kind) continue;
+    for (let k = 0; k < 12; k++) {
+      const a = (k / 12) * Math.PI * 2;
+      const c = Math.cos(a), s = Math.sin(a), r = p.foot + 7;
+      const at = [p.px + (p.rx * c + p.fx * s) * r, p.py + (p.ry * c + p.fy * s) * r, p.pz + (p.rz * c + p.fz * s) * r];
+      const l = Math.hypot(at[0]!, at[1]!, at[2]!);
+      const shooter = ground("arcadia", [at[0]! / l, at[1]! / l, at[2]! / l]);
+      if (isSafe(BODIES.arcadia, ...shooter) || Math.hypot(...shooter) < BODIES.arcadia.radius + BODIES.arcadia.waterLevel + 0.5) continue;
+      const head = liftBy(shooter, 1.6);
+      const centre: [number, number, number] = [p.cx, p.cy, p.cz];
+      const v = [centre[0] - head[0], centre[1] - head[1], centre[2] - head[2]];
+      const len = Math.hypot(v[0]!, v[1]!, v[2]!);
+      const d: [number, number, number] = [v[0]! / len, v[1]! / len, v[2]! / len];
+      if (rayTerrain(room.terrain, head, d, len, 0.5) < len) continue;
+      if (room.host.props?.raycast(head, d, len + 1)?.index !== p.index) continue;
+      return { shooter, prop: centre };
+    }
+  }
+  throw new Error(`no ${kind} in sight`);
 }
 const quests = (b: Bot) => serverRoom(b).systems.find((s) => "eggs" in s) as QuestSystem;
 
@@ -112,6 +173,7 @@ describe("all nine missions", () => {
 describe("medals", () => {
   it("progress medals: Spark, Firstlight, Cartographer", async () => {
     const b = await bot("progressor", "arcadia");
+    // Spark: no production emitter yet (the onboarding lane adds it; contracts.test.ts tracks the gap).
     emitGameEvent(serverRoom(b), { type: "onboardingDone", playerId: b.id });
     await until("spark", () => b.you.medals.includes("spark"));
     b.send("admin", { cmd: "level", args: { level: 20 } });
@@ -124,46 +186,88 @@ describe("medals", () => {
     expect(b.you.pads).toHaveLength(12);
   }, 15_000);
 
-  it("feat medals: all three bosses and Triple Crown, Demolition Crew, Arc Welder, Long Shot", async () => {
-    const b = await bot("featster", "arcadia");
-    const room = serverRoom(b);
-    const at = ground("arcadia", placeDir("gull_point"));
-    for (const bossId of ["tidewrath", "hollow_king", "receiver"] as const) emitGameEvent(room, { type: "kill", npcKind: bossId, bossId, killerId: b.id, creditIds: [b.id], pos: at });
-    await until("boss medals", () => ["tide_turner", "regicide", "decommissioned", "triple_crown"].every((m) => b.you.medals.includes(m)));
+  it("boss medals and Triple Crown from the NPC lane's boss kills on each planet", async () => {
+    const kills = [["arcadia", "tidewrath", "tide_turner"], ["hollowmere", "hollow_king", "regicide"], ["meridian", "the_receiver", "decommissioned"]] as const;
+    for (const [body, boss, medal] of kills) {
+      const b = await bot("featster", body);
+      emitNpcEvent({ kind: "bossKill", body, boss, sessionIds: [b.id], userIds: ["featster"], names: ["featster"] });
+      await until(medal, () => b.you.medals.includes(medal));
+      if (body === "meridian") await until("triple crown", () => b.you.medals.includes("triple_crown"));
+      else {
+        expect(b.you.medals).not.toContain("triple_crown");
+        await tpAndWait(b, padAt(body, 0)); // leave from a pad so the life progress saves at once
+        await safeLeave(b.room);
+      }
+    }
+  }, 30_000);
 
-    for (let i = 0; i < MEDAL_RULES.DEMOLITION_PROPS - 1; i++) emitGameEvent(room, { type: "propBroken", playerId: b.id });
-    await sleep(100);
-    expect(b.you.medals).not.toContain("demolition_crew");
-    emitGameEvent(room, { type: "propBroken", playerId: b.id });
+  it("Demolition Crew: the 200th prop broken by a real rocket", async () => {
+    const b = await bot("wrecker", "arcadia");
+    progressStore.current.addStat("wrecker", "props_broken", MEDAL_RULES.DEMOLITION_PROPS - 1);
+    const { shooter, prop } = propInSight(b, "crate");
+    await tpAndWait(b, shooter);
+    b.send("admin", { cmd: "unprotect" });
+    b.send("admin", { cmd: "give", args: { id: "comet", tier: 1 } });
+    await until("comet", () => slotOf(b, "comet") >= 0);
+    await until("ready", () => (actorOf(b).state.flags & (PF.SAFE | PF.PROTECTED)) === 0);
+    fireAt(b, "comet", prop);
     await until("demolition crew", () => b.you.medals.includes("demolition_crew"));
-    expect(progressStore.current.stat("featster", "props_broken")).toBe(200);
+    expect(progressStore.current.stat("wrecker", "props_broken")).toBeGreaterThanOrEqual(MEDAL_RULES.DEMOLITION_PROPS); // the blast may take a neighbour too
+  });
 
-    // Arc Welder: a Stormcoil cast whose chain damaged 4 entities (combat's "shot" broadcast; only T2+ chains reach 4).
-    const chainShot = (weapon: string, n: number) =>
-      room.host.broadcast("shot", { by: b.id, weapon: WEAPON_INDEX.get(weapon), ox: 0, oy: 0, oz: 0, dx: 1, dy: 0, dz: 0, chain: Array.from({ length: n }, () => [0, 0, 0]) });
-    chainShot("stormcoil", 3);
-    chainShot("carbine", 5);
-    await sleep(100);
-    expect(b.you.medals).not.toContain("arc_welder");
-    chainShot("stormcoil", 4);
+  it("Arc Welder: a real T2 Stormcoil cast that chains through 4 entities (a T1 cast reaches only 3)", async () => {
+    const b = await bot("welder", "arcadia");
+    b.send("admin", { cmd: "level", args: { level: 6 } });
+    await tpAndWait(b, offPad("arcadia", 0, 55));
+    b.send("admin", { cmd: "unprotect" });
+    await until("ready", () => b.you.level === 6 && (actorOf(b).state.flags & (PF.SAFE | PF.PROTECTED)) === 0);
+    const line = [60, 63, 66, 69, 72].map((m) => offPad("arcadia", 0, m));
+    const spawnLine = async () => {
+      const npcs = npcSystemOf(serverRoom(b))!;
+      for (const n of [...npcs.npcs.values()]) npcs.despawnNpc(n);
+      for (const p of line) b.send("npc", { cmd: "spawn", kind: "woolback", x: p[0], y: p[1], z: p[2], level: 1, roam: 0, instant: true });
+      await until("woolbacks", () => [...npcs.npcs.values()].filter((n) => n.def.id === "woolback").length === line.length);
+    };
+    const shots = () => b.count("shot");
+    for (const tier of [1, 2]) {
+      await spawnLine();
+      b.send("admin", { cmd: "give", args: { id: "stormcoil", tier } });
+      await until(`stormcoil ${tier}`, () => [...b.you.hotbar, ...b.you.backpack].some((i: any) => i?.id === "stormcoil" && i.tier === tier));
+      const slot = [...b.you.hotbar, ...b.you.backpack].findIndex((i: any) => i?.id === "stormcoil" && i.tier === tier);
+      const before = shots();
+      fireAt(b, "stormcoil", liftBy(line[0]!, 1.0), slot);
+      await until(`cast ${tier}`, () => shots() > before);
+      const chain = b.last("shot").chain as unknown[];
+      if (tier === 1) {
+        expect(chain).toHaveLength(3); // 2 jumps
+        expect(b.you.medals).not.toContain("arc_welder");
+      } else expect(chain.length).toBeGreaterThanOrEqual(4);
+    }
     await until("arc welder", () => b.you.medals.includes("arc_welder"));
+  }, 20_000);
 
-    // Long Shot: a kill at 120 m or more by a Stillshot that just fired (not an older projectile).
+  it("Long Shot: a real Stillshot kill at 120 m or more (not at 60 m)", async () => {
+    const b = await bot("farshot", "arcadia");
     b.send("admin", { cmd: "give", args: { id: "stillshot", tier: 1 } });
-    await until("stillshot", () => b.you.hotbar[1]?.id === "stillshot");
-    b.send("equip", { slot: 1 });
-    await until("equip", () => b.you.selected === 1);
-    const shooter = actorOf(b);
-    shooter.lastAttackAt = Date.now();
-    emitGameEvent(room, { type: "kill", npcKind: "hopbit", killerId: b.id, pos: offPad("arcadia", 0, 60) });
-    shooter.lastAttackAt = Date.now() - 5000;
-    emitGameEvent(room, { type: "kill", npcKind: "hopbit", killerId: b.id, pos: offPad("arcadia", 0, 135) });
-    await sleep(100);
-    expect(b.you.medals).not.toContain("long_shot");
-    shooter.lastAttackAt = Date.now();
-    emitGameEvent(room, { type: "kill", npcKind: "hopbit", killerId: b.id, pos: offPad("arcadia", 0, 135) });
-    await until("long shot", () => b.you.medals.includes("long_shot"));
-  }, 15_000);
+    await until("stillshot", () => slotOf(b, "stillshot") >= 0);
+    b.send("equip", { slot: slotOf(b, "stillshot") });
+    b.send("scope", { on: true });
+    for (const [range, counts] of [[60, false], [125, true]] as const) {
+      const { shooter, target } = lineOfSight(b, range);
+      await tpAndWait(b, shooter);
+      b.send("admin", { cmd: "unprotect" });
+      await until("ready", () => (actorOf(b).state.flags & (PF.SAFE | PF.PROTECTED)) === 0);
+      const npcs = npcSystemOf(serverRoom(b))!;
+      b.send("npc", { cmd: "spawn", kind: "hopbit", x: target[0], y: target[1], z: target[2], level: 1, roam: 0, instant: true });
+      await until("hopbit", () => [...npcs.npcs.values()].some((n) => n.def.id === "hopbit" && !n.dead));
+      const hop = [...npcs.npcs.values()].find((n) => n.def.id === "hopbit" && !n.dead)!;
+      const kills = b.count("npcKill");
+      fireAt(b, "stillshot", liftBy(hop.pos, 0.3));
+      await until(`kill at ${range} m`, () => b.count("npcKill") > kills);
+      if (counts) await until("long shot", () => b.you.medals.includes("long_shot"));
+      else expect(b.you.medals).not.toContain("long_shot");
+    }
+  }, 20_000);
 
   it("survival and joke medals: Old Timer, By a Thread, With Friends Like These", async () => {
     const a = await bot("survivor", "arcadia");
@@ -171,16 +275,41 @@ describe("medals", () => {
     actorOf(a).char.life!.playMs = MEDAL_RULES.OLD_TIMER_MS;
     await until("old timer", () => a.you.medals.includes("old_timer"), 3000);
 
-    const room = serverRoom(a);
-    emitGameEvent(room, { type: "damage", targetId: a.id, targetKind: "player", attackerId: null, attackerKind: "world", amount: 95, hpAfter: 4, maxHp: 100, at: Date.now() - MEDAL_RULES.BY_A_THREAD_MS - 1000 });
-    await until("by a thread", () => a.you.medals.includes("by_a_thread"));
+    // By a Thread: real damage down to 5% or less, then still alive when the window ends.
+    const rules = MEDAL_RULES as { BY_A_THREAD_MS: number };
+    const window = rules.BY_A_THREAD_MS;
+    rules.BY_A_THREAD_MS = 600;
+    try {
+      await tpAndWait(a, offPad("arcadia", 0, 40));
+      a.send("admin", { cmd: "unprotect" });
+      await until("ready", () => (actorOf(a).state.flags & (PF.SAFE | PF.PROTECTED)) === 0);
+      a.send("admin", { cmd: "damage", args: { amount: 96 } });
+      await until("4 hp", () => actorOf(a).state.hp === 4);
+      await until("by a thread", () => a.you.medals.includes("by_a_thread"), 4000);
+    } finally {
+      rules.BY_A_THREAD_MS = window;
+    }
 
+    // With Friends Like These: a party member's real carbine shot finishes you.
     actorOf(a).state.party = "party-7";
     actorOf(friend).state.party = "party-7";
-    emitGameEvent(room, { type: "death", victimId: a.id, killerId: friend.id, killerKind: "player", pos: offPad("arcadia", 0, 30) });
+    await tpAndWait(friend, offPad("arcadia", 0, 48));
+    friend.send("admin", { cmd: "unprotect" });
+    friend.send("admin", { cmd: "give", args: { id: "carbine", tier: 3 } });
+    await until("carbine", () => [...friend.you.hotbar, ...friend.you.backpack].some((i: any) => i?.id === "carbine" && i.tier === 3));
+    await until("friend ready", () => (actorOf(friend).state.flags & (PF.SAFE | PF.PROTECTED)) === 0);
+    const slot = [...friend.you.hotbar, ...friend.you.backpack].findIndex((i: any) => i?.id === "carbine" && i.tier === 3);
+    friend.send("admin", { cmd: "level", args: { level: 12 } });
+    await until("friend L12", () => friend.you.level === 12);
+    for (let i = 0; i < 10 && !a.you.dead; i++) {
+      const before = actorOf(a).state.hp;
+      fireAt(friend, "carbine", liftBy([me(a).x, me(a).y, me(a).z], 1.0), slot);
+      await until("hit", () => actorOf(a).state.hp < before || actorOf(a).dead, 2000).catch(() => {});
+      if (actorOf(a).dead) break;
+    }
     await until("with friends", () => a.you.medals.includes("with_friends_like_these"));
     expect(friend.you.medals).not.toContain("with_friends_like_these");
-  });
+  }, 20_000);
 });
 
 describe("Easter eggs", () => {
