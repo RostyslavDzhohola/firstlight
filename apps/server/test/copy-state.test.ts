@@ -176,6 +176,28 @@ describe("spawn groups outlive the room (F12 B2)", () => {
   });
 });
 
+describe("crash recovery (no dispose)", () => {
+  it("a camp cleared while a player stays beside it keeps its slowed countdown (Codex S1)", () => {
+    NPC_TUNING.ambient = true;
+    const w1 = fakeWorld("arcadia", { copyKey: "arcadia:0", immortal: true });
+    const camp = w1.sys.groups.find((g) => g.point.kind === "camp")!;
+    w1.addPlayer("camper", camp.point.pos);
+    for (let i = 0; i < 12 && !camp.active; i++) w1.step(500);
+    for (let i = 0; i < 30; i++) w1.step(100);
+    for (const m of camp.members) if (m) dealDamage(w1.world.host, null, m, 1e7, false);
+    expect(camp.cleared).toBe(true);
+    const left = camp.respawnLeft;
+    // 100 s beside it: the countdown runs at half speed (content §3.1: ×2 while a player is within 60 m).
+    for (let i = 0; i < 200; i++) w1.step(500);
+    expect(camp.respawnLeft).toBeCloseTo(left - 50, 0);
+    // The process dies here: no dispose. A new room on the same copy restores what was last saved.
+    const w2 = fakeWorld("arcadia", { copyKey: "arcadia:0", start: w1.clock.t });
+    const camp2 = w2.sys.groups[camp.point.id]!;
+    expect(camp2.cleared).toBe(true);
+    expect(Math.abs(camp2.respawnLeft - camp.respawnLeft)).toBeLessThan(1.5);
+  });
+});
+
 describe("broken props outlive the room (F12 B2)", () => {
   it("a prop broken before the copy emptied is still broken (and synced) in the new room", async () => {
     game = await startServer();

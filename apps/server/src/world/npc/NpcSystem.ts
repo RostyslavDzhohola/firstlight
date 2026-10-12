@@ -197,6 +197,8 @@ export class NpcSystem implements RoomSystem {
       if (g.cleared) {
         const slow = near <= NPC_RULES.respawnSlowRadius;
         g.respawnLeft -= sdt * (slow ? 0.5 : 1);
+        // A slowed countdown drifts from wall time: checkpoint it (≤ 1/s) so a crash can't respawn it early.
+        if (slow && sdt > 0) this.copyDirty = true;
         if (g.respawnLeft <= 0) {
           g.cleared = false;
           g.dead.fill(false);
