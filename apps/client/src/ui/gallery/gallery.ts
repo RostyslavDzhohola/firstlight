@@ -242,7 +242,7 @@ async function run() {
     case "save-saved":
     case "save-busy":
       hudScene("monster");
-      void showSavePrompt({ name: "Wren_07", level: 2, starter: 3, preview: screen === "save" ? undefined : (screen.slice(5) as "code" | "saved" | "busy") });
+      void showSavePrompt({ name: "Wren_07", level: 2, starter: 3, requested: true, preview: screen === "save" ? undefined : (screen.slice(5) as "code" | "saved" | "busy") });
       break;
     case "signin":
       gameEl.className = "fl-gallery-dark";

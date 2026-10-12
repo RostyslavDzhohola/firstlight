@@ -64,6 +64,8 @@ export class OnboardingClient implements ClientSystem {
       if (m.by === room.sessionId) this.phrased = true;
     });
     game.combat.training = (def, tier, now) => this.attack(def, tier, now);
+    // Level 2 is paid on the dummies: the "Save your character" card waits until the HUD is gone.
+    game.combat.tutorialBusy = () => this.active || !!this.hud;
     pauseExtras.add(this.pauseRow);
   }
 
@@ -231,6 +233,7 @@ export class OnboardingClient implements ClientSystem {
   dispose() {
     pauseExtras.delete(this.pauseRow);
     if (this.game.combat.training) this.game.combat.training = null;
+    this.game.combat.tutorialBusy = null;
     this.hud?.dispose();
     this.hud = null;
     this.dummies.dispose();
