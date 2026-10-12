@@ -337,8 +337,8 @@ build if any weapon's TTK leaves 0.6–1.6× of its class median [04].
 | Spawn | 1 s materialise as light particles; no damage while materialising | [12], (D) look |
 | Attack tokens on one player | 2 melee + 2 ranged (Arcadia, Hollowmere); 2 + 3 (Meridian); each held ≤ 1.5 s, released on a 0.4 s stagger | [12] |
 | Perception | sight cone 90°, 25 m (Associates 35 m); hearing 12 m; gunfire is a 30 m noise event; pack mates within 15 m share the target | [12] |
-| Leash | 45 m from anchor, or 20 s without line of sight; then EVADE: invulnerable, runs home at 1.5× speed, heals fully. Entering a safe zone drops all aggro instantly | [12] |
-| Respawn | pack 120 s after clear (×2 while a player is within 60 m); camp 300 s; neutral beast 15 min; boss 10 min (D) | [12], (new) |
+| Leash | 45 m from anchor, or 20 s without line of sight, or 5 s with the target where the NPC can't reach it (inside a pad's safe ring, or out of its medium) and out of its ranged attacks; then EVADE: invulnerable, runs home at 1.5× speed, heals fully. Entering a safe zone drops all aggro instantly | [12], (new) |
+| Respawn | pack 120 s after clear (×2 while a player is within 60 m); camp 300 s; neutral beast 15 min; boss 10 min (D). Timers are per copy and survive the copy emptying and server restarts | [12], (new) |
 | Telegraph language | colour + shape + sound, never colour alone: red wedge = dodge; amber line = ranged lock; teal ring = step out; white flash = projectile launch | [12] |
 | Death | dissolves into light particles; coins auto-credited; item drops appear as a small glowing pickup | (D) look, (new) |
 
@@ -460,7 +460,7 @@ Sixers' black-and-grey "6" look, IOI branding and Sorrento-like leaders [12].
 | Rule | Value | Src |
 |---|---|---|
 | Availability | always up; respawns **10 min** after a kill, separately in each world copy | (D) |
-| HP formula | `HP(n) = HP₂ × (1 + 0.35 × (max(n, 2) − 2))`. n = players alive inside the arena boundary (any party), recounted on every entry/exit; current HP keeps its percentage; n capped at 8 | (D) |
+| HP formula | `HP(n) = HP₂ × (1 + 0.35 × (max(n, 2) − 2))`. n = players alive inside the arena boundary plus anyone who damaged the boss in the last 10 s (any party), recounted on every change; current HP keeps its percentage; n capped at 8. The boss targets the same players. Hits from players more than 10 m outside the boundary deal nothing | (D), (new) |
 | Solo | impossible by design: each boss has a mechanic that needs two bodies in two places, or two bodies in one circle | (D), [r2-05] |
 | Hints | none: no UI, NPC or voice line explains a mechanic (D). Telegraphs are still fully readable | (D) |
 | Reset | no player in the arena for 30 s → full HP, cover rebuilds | (new) |
