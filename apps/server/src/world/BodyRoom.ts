@@ -6,6 +6,7 @@ import { CloseCode, Room, ServerError, type Client } from "@colyseus/core";
 import { StateView } from "@colyseus/schema";
 import { BODIES, createTerrain, isSafe, padDirs, portalNear, portalSpots, type BodyDef, type BodyId, type PortalSpot, type Terrain } from "@firstlight/shared";
 import { BACKPACK_SLOTS, HOTBAR_SLOTS, newCharacter, type CharacterData } from "@firstlight/shared/content/character";
+import { HORSE } from "@firstlight/shared/content/horse";
 import { fallDamageFraction, levelForXp, maxHp, pvpKillXp, xpAtLevel, xpToNext } from "@firstlight/shared/content/progression";
 import { WEAPON_BY_ID, WEAPON_INDEX } from "@firstlight/shared/content/weapons";
 import { NET, PHRASES, type InvItem, type YouState } from "@firstlight/shared/net/protocol";
@@ -155,6 +156,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     this.onMessage("fire", fireSchema, (c, m) => {
       const a = this.actor(c);
       if (!a || a.dead) return;
+      if (a.mounted) return void c.send("denied", { action: "fire", reason: "mounted" }); // no weapons from the saddle
       if (m.slot !== a.char.selected) this.equip(a, m.slot);
       const r = fire(this.host, a, m);
       if (!r.ok && r.reason !== "rate") c.send("denied", { action: "fire", reason: r.reason });
@@ -162,18 +164,19 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     this.onMessage("melee", meleeSchema, (c, m) => {
       const a = this.actor(c);
       if (!a || a.dead) return;
+      if (a.mounted) return void c.send("denied", { action: "melee", reason: "mounted" });
       if (m.slot !== a.char.selected) this.equip(a, m.slot);
       melee(this.host, a, !!m.heavy);
     });
     this.onMessage("block", z.object({ on: z.boolean() }), (c, m) => {
       const a = this.actor(c);
-      if (!a) return;
+      if (!a || (m.on && a.mounted)) return;
       a.blocking = m.on;
       a.state.flags = m.on ? a.state.flags | PF.BLOCKING : a.state.flags & ~PF.BLOCKING;
     });
     this.onMessage("charge", z.object({ on: z.boolean() }), (c, m) => {
       const a = this.actor(c);
-      if (a && !a.dead) a.chargeStartedAt = m.on ? Date.now() : 0;
+      if (a && !a.dead) a.chargeStartedAt = m.on && !a.mounted ? Date.now() : 0;
     });
     this.onMessage("travel", z.object({ to: z.enum(["portus", "arcadia", "hollowmere", "meridian"]) }), (c, m) => this.travelRequest(c, m.to));
     this.onMessage("scope", z.object({ on: z.boolean() }), (c, m) => {
@@ -440,11 +443,14 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     const now = Date.now();
     // Distance budget: refills at sprint speed (+slack), banks at most budgetCap; a dodge adds a
     // one-off allowance no more often than its cooldown (review blocker: speed hack).
+    // Riding (set only by the server's HorseSystem): gallop speed and a bigger bank, never a dodge;
+    // the mounted budget outlives a dismount by HORSE.dismountGraceMs (the client is a round trip behind).
+    const riding = !!a.mounted || now < (a.mountGraceUntil ?? 0);
     const elapsed = Math.min(0.25, (now - a.lastBudgetAt) / 1000);
     a.lastBudgetAt = now;
-    a.moveBudget = Math.min(MOVE.budgetCap, a.moveBudget + MOVE.maxSpeed * MOVE.speedSlack * elapsed);
+    a.moveBudget = Math.min(riding ? HORSE.budgetCap : MOVE.budgetCap, a.moveBudget + (riding ? HORSE.sprint : MOVE.maxSpeed) * MOVE.speedSlack * elapsed);
     let dodge = 0;
-    if (msg.anim === ANIM.DODGE && now - a.lastDodgeAt >= MOVE.dodgeCooldownMs) {
+    if (msg.anim === ANIM.DODGE && !riding && now - a.lastDodgeAt >= MOVE.dodgeCooldownMs) {
       a.lastDodgeAt = now;
       dodge = MOVE.dodgeBurst;
     }

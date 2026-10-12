@@ -1,0 +1,242 @@
+// Horses (seam 1): SDK bots against the real in-process server. The whistle item and the shop, where
+// the whistle works, mounted movement validation, no weapons from the saddle, and every way the
+// horse leaves (death with the whistle in the pile, travel, logout, idle, lost whistle).
+
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { BODIES, portalSpots, type BodyId } from "@firstlight/shared";
+import { HORSE, HORSE_WHISTLE, tooDeepToRide } from "@firstlight/shared/content/horse";
+import { PF } from "@firstlight/shared/net/schema";
+import { HorseSystem } from "../src/world/horses/HorseSystem.ts";
+import { pileStore } from "../src/world/piles.ts";
+import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
+import { bot, harness, invIds, me, objAt, offPad, padAt, serverRoom, sleep, terrain, tpAndWait, until, type Bot } from "./quest-helpers.ts";
+
+beforeEach(async () => {
+  harness.game = await startServer();
+});
+afterEach(async () => {
+  for (const r of harness.rooms.splice(0)) await safeLeave(r);
+  await harness.game!.close();
+});
+
+type V3 = [number, number, number];
+const BODY: BodyId = "arcadia";
+const horses = (b: Bot) => (b.room.state as any).horses as Map<string, any>;
+const mounted = (b: Bot) => !!(me(b).flags & PF.MOUNTED);
+const horseSystem = (b: Bot) => serverRoom(b).systems.find((s): s is HorseSystem => s instanceof HorseSystem)!;
+
+/** A level-1 admin bot standing 40 m off Arcadia's main pad (outside the safe ring) with a whistle. */
+async function rider(userId: string, whistle = true): Promise<Bot> {
+  const b = await bot(userId, BODY);
+  await tpAndWait(b, offPad(BODY, 0, 40));
+  b.send("admin", { cmd: "unprotect" });
+  if (whistle) {
+    b.send("admin", { cmd: "give", args: { id: HORSE_WHISTLE } });
+    await until("whistle in the bags", () => invIds(b).includes(HORSE_WHISTLE));
+  }
+  return b;
+}
+
+async function summonAndMount(b: Bot) {
+  b.send("horse", { action: "whistle" });
+  await until("horse summoned", () => horses(b).has(b.id));
+  b.send("horse", { action: "ride" });
+  await until("mounted", () => mounted(b));
+}
+
+/** Unit tangent at `p` along which the ground stays dry (no horse-deep water) for `metres`. */
+function dryBearing(p: V3, metres: number): V3 {
+  const def = BODIES[BODY];
+  const t = terrain(BODY);
+  const l = Math.hypot(...p);
+  const up: V3 = [p[0] / l, p[1] / l, p[2] / l];
+  const a: V3 = Math.abs(up[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
+  const k = a[0] * up[0] + a[1] * up[1] + a[2] * up[2];
+  const e1 = norm([a[0] - k * up[0], a[1] - k * up[1], a[2] - k * up[2]]);
+  const e2 = norm([up[1] * e1[2] - up[2] * e1[1], up[2] * e1[0] - up[0] * e1[2], up[0] * e1[1] - up[1] * e1[0]]);
+  for (let i = 0; i < 16; i++) {
+    const ang = (i / 16) * Math.PI * 2;
+    const d = norm([e1[0] * Math.cos(ang) + e2[0] * Math.sin(ang), e1[1] * Math.cos(ang) + e2[1] * Math.sin(ang), e1[2] * Math.cos(ang) + e2[2] * Math.sin(ang)]);
+    let dry = true;
+    for (let s = 2; s <= metres && dry; s += 2) {
+      const q = norm([up[0] * def.radius + d[0] * s, up[1] * def.radius + d[1] * s, up[2] * def.radius + d[2] * s]);
+      dry = !tooDeepToRide(t.groundHeight(q[0], q[1], q[2]), def.waterLevel + 0.5);
+    }
+    if (dry) return d;
+  }
+  throw new Error("no dry bearing");
+}
+
+function norm(v: V3): V3 {
+  const l = Math.hypot(...v);
+  return [v[0] / l, v[1] / l, v[2] / l];
+}
+
+/**
+ * Move along the ground at `speed` m/s for `seconds`, sending 20 Hz inputs like the client.
+ * Returns the server's corrections and how far the server let the player get.
+ */
+async function run(b: Bot, speed: number, seconds: number): Promise<{ corrections: number; moved: number }> {
+  const def = BODIES[BODY];
+  const t = terrain(BODY);
+  const s0 = { x: me(b).x, y: me(b).y, z: me(b).z, seq: me(b).seq }; // copy: the schema object is live
+  let pos: V3 = [s0.x, s0.y, s0.z];
+  let dir = dryBearing(pos, speed * seconds + 10);
+  let seq = (s0.seq ?? 0) + 1000; // 0 is a schema default and never sent
+  const before = b.count("correct");
+  for (let i = 0; i < seconds * 20; i++) {
+    const up = norm(pos);
+    const k = dir[0] * up[0] + dir[1] * up[1] + dir[2] * up[2];
+    dir = norm([dir[0] - k * up[0], dir[1] - k * up[1], dir[2] - k * up[2]]);
+    const n = norm([pos[0] + dir[0] * speed * 0.05, pos[1] + dir[1] * speed * 0.05, pos[2] + dir[2] * speed * 0.05]);
+    const r = def.radius + t.groundHeight(n[0], n[1], n[2]);
+    pos = [n[0] * r, n[1] * r, n[2] * r];
+    b.send("input", { seq: ++seq, x: pos[0], y: pos[1], z: pos[2], fx: dir[0], fy: dir[1], fz: dir[2], anim: 3, t: Date.now() });
+    await sleep(50);
+  }
+  await sleep(200);
+  const s1 = me(b);
+  return { corrections: b.count("correct") - before, moved: Math.hypot(s1.x - s0.x, s1.y - s0.y, s1.z - s0.z) };
+}
+
+describe("the Horse Whistle", () => {
+  it("is sold at the Portus Exchange for 1,500 coins, and Portus (all safe) refuses the whistle", async () => {
+    const b = await bot("buyer", "portus");
+    await tpAndWait(b, objAt("juno_vale"));
+    b.send("admin", { cmd: "coins", args: { amount: 1499 } });
+    await until("coins", () => b.you.coins === 1499);
+    b.send("buy", { itemId: HORSE_WHISTLE });
+    await until("refused", () => b.last("shop")?.ok === false);
+    expect(b.last("shop").reason).toBe("coins");
+    b.send("admin", { cmd: "coins", args: { amount: 1 } });
+    await until("coins", () => b.you.coins === 1500);
+    b.send("buy", { itemId: HORSE_WHISTLE });
+    await until("bought", () => invIds(b).includes(HORSE_WHISTLE));
+    expect(b.you.coins).toBe(0);
+    b.send("horse", { action: "whistle" });
+    await until("denied", () => b.last("denied")?.action === "horse");
+    expect(b.last("denied").reason).toBe("safe zone");
+    expect(horses(b).size).toBe(0);
+  });
+
+  it("can't be used in a pad's safe ring, or outside it without the whistle", async () => {
+    const b = await rider("nowhistle", false);
+    b.send("horse", { action: "whistle" });
+    await until("denied", () => b.last("denied")?.action === "horse");
+    expect(b.last("denied").reason).toBe("no whistle");
+    expect(b.toasts.at(-1)).toContain("Horse Whistle");
+
+    b.send("admin", { cmd: "give", args: { id: HORSE_WHISTLE } });
+    await until("whistle", () => invIds(b).includes(HORSE_WHISTLE));
+    await tpAndWait(b, padAt(BODY, 0));
+    b.send("horse", { action: "whistle" });
+    await until("denied in the ring", () => b.count("denied") >= 2);
+    expect(b.last("denied").reason).toBe("safe zone");
+    await sleep(200);
+    expect(horses(b).size).toBe(0);
+  });
+});
+
+describe("riding", () => {
+  it("summons one horse beside you; mounted you may move at 14 m/s, on foot the same speed is corrected", async () => {
+    const b = await rider("jockey");
+    b.send("horse", { action: "whistle" });
+    await until("horse", () => horses(b).has(b.id));
+    const h = horses(b).get(b.id);
+    const p = me(b);
+    const d = Math.hypot(h.x - p.x, h.y - p.y, h.z - p.z);
+    expect(d).toBeGreaterThan(1);
+    expect(d).toBeLessThan(HORSE.summonDistance + 1);
+    expect(!!h.ridden).toBe(false);
+    b.send("horse", { action: "whistle" }); // close enough: H mounts instead of calling a second horse
+    await until("mounted", () => mounted(b));
+    expect(horses(b).size).toBe(1);
+    expect(horses(b).get(b.id).ridden).toBe(true);
+
+    const galloped = await run(b, 14, 2.5);
+    expect(galloped.corrections).toBe(0);
+    expect(galloped.moved).toBeGreaterThan(30); // 35 m in 2.5 s
+    const hh = horses(b).get(b.id);
+    expect(Math.hypot(hh.x - me(b).x, hh.y - me(b).y, hh.z - me(b).z)).toBeLessThan(1); // the horse is under the rider
+
+    // No weapons from the saddle.
+    b.send("fire", { slot: 0, ox: me(b).x, oy: me(b).y, oz: me(b).z, dx: 1, dy: 0, dz: 0, t: Date.now() });
+    await until("fire refused", () => b.last("denied")?.action === "fire");
+    expect(b.last("denied").reason).toBe("mounted");
+
+    b.send("horse", { action: "dismount" });
+    await until("dismounted", () => !mounted(b));
+    expect(horses(b).get(b.id).ridden).toBe(false);
+    await sleep(HORSE.dismountGraceMs + 100);
+    const sprinted = await run(b, 14, 2.5);
+    expect(sprinted.corrections).toBeGreaterThan(0);
+    expect(sprinted.moved).toBeLessThan(30);
+  });
+
+  it("a big hit throws the rider; losing the whistle sends the horse away; an idle horse leaves after 30 s", async () => {
+    const b = await rider("rodeo");
+    await summonAndMount(b);
+    b.send("admin", { cmd: "damage", args: { amount: 10 } }); // a scratch: still riding
+    await until("hurt", () => me(b).hp <= me(b).maxHp - 10);
+    await sleep(150);
+    expect(mounted(b)).toBe(true);
+    b.send("admin", { cmd: "damage", args: { amount: Math.ceil(me(b).maxHp * HORSE.throwFraction) } });
+    await until("thrown", () => !mounted(b));
+    expect(b.toasts).toContain("Thrown from the saddle!");
+    expect(horses(b).has(b.id)).toBe(true);
+
+    // The idle timer: pretend the dismount was 30 s ago.
+    horseSystem(b).horses.get(b.id)!.idleSince = Date.now() - HORSE.idleDespawnMs;
+    await until("idle horse leaves", () => !horses(b).has(b.id));
+
+    await sleep(HORSE.whistleCooldownMs);
+    await summonAndMount(b);
+    const slot = [...b.you.hotbar, ...b.you.backpack].findIndex((it: any) => it?.id === HORSE_WHISTLE);
+    b.send("drop", { slot });
+    await until("no whistle, no horse", () => !horses(b).has(b.id) && !mounted(b));
+  });
+});
+
+describe("the horse leaves with its owner", () => {
+  it("on death: the whistle drops in the pile like everything else", async () => {
+    const b = await rider("fallen");
+    await summonAndMount(b);
+    b.send("admin", { cmd: "damage", args: { amount: 5000 } });
+    await until("death", () => b.count("death") > 0);
+    const pile = pileStore.current.get(b.last("death").pileId)!;
+    expect(pile.items.map((i) => i.id)).toContain(HORSE_WHISTLE);
+    await until("horse gone", () => !horses(b).has(b.id));
+  });
+
+  it("on travel through a portal and on logout", async () => {
+    const watcher = await bot("watcher", BODY);
+    const t = await rider("tourist");
+    expect(t.room.roomId).toBe(watcher.room.roomId);
+    await summonAndMount(t);
+    await until("watcher sees the horse", () => horses(watcher).has(t.id));
+    // Ride (teleported, mounted) into the portal and travel.
+    const spot = portalSpots(BODIES[BODY], terrain(BODY))[0]!;
+    const R = BODIES[BODY].radius + spot.h;
+    await tpAndWait(t, [spot.dir[0] * R, spot.dir[1] * R, spot.dir[2] * R]);
+    t.send("travel", { to: spot.to });
+    await until("ticket", () => t.count("travelOk") > 0);
+    const tid = t.id;
+    await safeLeave(t.room);
+    await until("horse gone after travel", () => !horses(watcher).has(tid));
+    const there = await joinAs(harness.game!, "tourist", spot.to, {}, "admin", false);
+    harness.rooms.push(there);
+    await waitFor(() => (there.state as any).players?.get(there.sessionId) !== undefined);
+    expect((there.state as any).horses.size).toBe(0);
+
+    // Logout: ride into the pad's safe ring (instant logout there), log out.
+    const l = await rider("homebody");
+    await summonAndMount(l);
+    await until("watcher sees it", () => horses(watcher).has(l.id));
+    await tpAndWait(l, padAt(BODY, 0));
+    await until("safe", () => !!(me(l).flags & PF.SAFE));
+    const lid = l.id;
+    l.send("logout", { start: true });
+    await until("logged out", () => l.count("loggedOut") > 0);
+    await until("horse gone after logout", () => !horses(watcher).has(lid));
+  });
+});

@@ -60,6 +60,10 @@ export interface PlayerActor {
   specialReadyAt: number;
   lastPhraseAt: number;
   healAcc: number;
+  /** Riding a horse (horses/HorseSystem). Movement allows horse speed, no dodge, no attacks. */
+  mounted?: boolean;
+  /** Mounted movement budget lasts until here after a dismount (the client learns a round trip later). */
+  mountGraceUntil?: number;
 }
 
 export interface NpcActor {

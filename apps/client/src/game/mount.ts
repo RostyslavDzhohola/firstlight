@@ -1,0 +1,63 @@
+// The local player's riding state (horses, SPEC §6.14 #2). The server decides who is mounted
+// (PF.MOUNTED on our PlayerState); the client follows it, except that it may leave the saddle early
+// (deep water ahead, death) so prediction never runs faster than the server allows. It never gets
+// on early: horse speed starts only once the server says so.
+
+import { HORSE, tooDeepToRide } from "@firstlight/shared/content/horse";
+
+export class MountState {
+  /** Riding as far as movement prediction and the camera are concerned. */
+  riding = false;
+  /** 0 → 1 blend towards the riding camera (eased, ~0.35 s). */
+  blend = 0;
+  private slidOff = false;
+
+  /** Feed the server's flag every frame. */
+  sync(serverMounted: boolean) {
+    if (!serverMounted) this.slidOff = false;
+    this.riding = serverMounted && !this.slidOff;
+  }
+
+  /** Leave the saddle now; stays off until the server's flag clears too (it is told separately). */
+  slideOff() {
+    this.slidOff = true;
+    this.riding = false;
+  }
+
+  /** True when the server still has us mounted but we already got off (send it a dismount). */
+  get awaitingServer(): boolean {
+    return this.slidOff;
+  }
+
+  step(dt: number) {
+    const target = this.riding ? 1 : 0;
+    const k = Math.min(1, dt * 3);
+    this.blend += (target - this.blend) * k;
+    if (Math.abs(this.blend - target) < 1e-3) this.blend = target;
+  }
+}
+
+/** Camera while riding: eyes higher and further back (blend 0 = on foot, 1 = in the saddle). */
+export function rideCamera(blend: number): { lift: number; back: number } {
+  return { lift: 1.0 * blend, back: 1.8 * blend };
+}
+
+/** Move speed for the controller (m/s): horse canter / gallop when mounted. */
+export function mountedSpeed(sprint: boolean): number {
+  return sprint ? HORSE.sprint : HORSE.speed;
+}
+
+/** Should the rider slide off here? (the server applies the same rule) */
+export function rideBlockedByWater(groundHeight: number, waterLevel: number): boolean {
+  return tooDeepToRide(groundHeight, waterLevel);
+}
+
+/**
+ * What E / H mean right now and which prompt to show (null = none). `near` = own horse within reach.
+ * Riding: E or H gets off. On foot next to your horse: E or H gets on. Otherwise H whistles.
+ */
+export function horseKeys(s: { riding: boolean; haveHorse: boolean; near: boolean; moving: boolean }): { e: "ride" | "dismount" | null; prompt: string | null } {
+  if (s.riding) return { e: "dismount", prompt: s.moving ? null : "E — Get off your horse" };
+  if (s.haveHorse && s.near) return { e: "ride", prompt: "E — Ride your horse" };
+  return { e: null, prompt: null };
+}

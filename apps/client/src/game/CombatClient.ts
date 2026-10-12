@@ -164,7 +164,7 @@ export class CombatClient {
 
   aiming(): boolean {
     const { def } = this.currentWeapon();
-    return this.game.input.rmb && def.delivery !== "melee";
+    return this.game.input.rmb && def.delivery !== "melee" && !this.game.player.mounted;
   }
 
   update(dt: number, now: number) {
@@ -203,6 +203,23 @@ export class CombatClient {
     const { def, tier } = this.currentWeapon();
     const t = def.tiers[tier - 1]!;
     const rmb = input.rmb;
+    const cam = g.ctx.camera;
+
+    if (g.player.mounted) {
+      // No weapons from the saddle (horses; the server refuses fire/melee too): lower any guard,
+      // scope or draw, and say why when the player clicks.
+      if (this.blocking) room.send("block", { on: false });
+      if (this.scoped) room.send("scope", { on: false });
+      if (this.wasRmb) room.send("charge", { on: false });
+      this.blocking = this.scoped = this.wasRmb = false;
+      g.self?.setLocalFlags(0);
+      if (Math.abs(cam.fov - this.baseFov) > 0.1) {
+        cam.fov += (this.baseFov - cam.fov) * Math.min(1, dt * 14);
+        cam.updateProjectionMatrix();
+      }
+      if (input.lmbPressed) g.hud.toast("No weapons from the saddle: E to get off", "warn");
+      return;
+    }
 
     // Right mouse: block (blades/staff), charge (axe/hammer), draw (bow), aim/scope (guns).
     if (def.delivery === "melee") {
@@ -240,7 +257,6 @@ export class CombatClient {
     // Own avatar: hold the guard / aim pose from local input instead of waiting for the server flags.
     g.self?.setLocalFlags((this.blocking ? PF.BLOCKING : 0) | (this.scoped || this.aiming() ? PF.SCOPED : 0));
     const zoom = this.scoped ? (t.zoom ?? 1.35) : 1;
-    const cam = g.ctx.camera;
     const targetFov = this.baseFov / zoom;
     if (Math.abs(cam.fov - targetFov) > 0.1) {
       cam.fov += (targetFov - cam.fov) * Math.min(1, dt * 14);

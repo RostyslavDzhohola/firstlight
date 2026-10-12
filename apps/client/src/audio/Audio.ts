@@ -33,6 +33,7 @@ const P: Record<string, Preset> = {
   portal: [0.9, 0, 200, 0.4, 0.3, 0.6, 1, 0, 8, , , , , , , , , 0.6],
   ui: [0.4, 0, 900, , 0.01, 0.03, 1, 1.5],
   denied: [0.5, 0, 160, , 0.04, 0.08, 2, 1],
+  whistle: [0.6, 0, 1250, 0.02, 0.12, 0.12, 0, 1, 4, , 420, 0.1, , , , , , 0.8, 0.04], // two-note horse whistle
 };
 
 export interface Volumes {

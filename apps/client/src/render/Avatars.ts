@@ -57,7 +57,7 @@ export type OneShot = "attack" | "heavy" | "shoot" | "cast" | "throw" | "hit" | 
 export const EMOTES = ["emote_wave", "emote_point", "emote_cheer", "emote_dance"] as const;
 export type Emote = (typeof EMOTES)[number];
 
-const LOOPING = new Set(["idle", "walk", "run", "sprint", "fall", "swim", "swim_idle", "block_hold", "aim", "emote_dance"]);
+const LOOPING = new Set(["idle", "walk", "run", "sprint", "fall", "swim", "swim_idle", "block_hold", "aim", "emote_dance", "ride"]);
 const FADE = 0.18;
 // natural ground speed of each locomotion clip (measured from the CC0 root-motion variants), m/s
 const CLIP_SPEED: Record<string, number> = { walk: 0.97, run: 5.36, sprint: 8.25, swim: 2.18 };
@@ -134,6 +134,10 @@ type Lod = "full" | "mid" | "far";
  *  and feet are spread on slopes: sink the model a few cm so feet read as planted (Kappa's bare feet
  *  already sit 2 cm low). */
 const FOOT_SINK = [0.035, 0.035, 0.015, 0.035] as const;
+/** Rest pelvis joint height on the shared skeleton (m, unscaled), and how far the seat of the
+ *  trousers sits below it: together they put a rider on a horse's saddle socket. */
+const PELVIS_HEIGHT = 0.917;
+const SEAT_CLEARANCE = 0.1;
 
 export class AvatarView {
   /** Every live avatar (for the LOD pass). */
@@ -220,6 +224,13 @@ export class AvatarView {
     }
   }
 
+  /** Metres from the saddle's seat down to where this avatar's root (feet) must go so it sits on it. */
+  seatDrop(): number {
+    if (!this.model) return 0.55; // capsule
+    const scale = STARTER_SCALE[this.starter % STARTER_SCALE.length] ?? 1;
+    return PELVIS_HEIGHT * scale - (FOOT_SINK[this.starter % FOOT_SINK.length] ?? 0.03) - SEAT_CLEARANCE;
+  }
+
   /** Smoothed ground speed (m/s) from this avatar's own successive positions. */
   get groundSpeed(): number {
     return this.speed;
@@ -238,7 +249,7 @@ export class AvatarView {
 
   /** Fire a one-shot clip (attack, cast, hit…) that plays over the current state. */
   trigger(kind: OneShot) {
-    if (!this.mixer) return;
+    if (!this.mixer || this.flagBits & PF.MOUNTED) return; // full-body clips would stand the rider up in the saddle
     const name = oneShotClip(kind, weaponKind(this.weaponIndex));
     const act = this.actions.get(name);
     if (!act) return;
@@ -499,6 +510,12 @@ export class AvatarView {
     if (f & PF.DEAD || anim === ANIM.DEAD) {
       if (this.currentName !== "death") this.play("death", 0.15);
       this.oneShot = null;
+      return;
+    }
+    if (f & PF.MOUNTED) {
+      // Riding (horses): one seated pose whatever the gait; the horse does the moving.
+      this.oneShot = null;
+      this.play("ride", 0.25);
       return;
     }
     // landing: a short settle when touching down to stand still
