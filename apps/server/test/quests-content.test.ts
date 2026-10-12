@@ -31,6 +31,7 @@ async function runPlanetMissions(b: Bot, body: Exclude<BodyId, "portus">) {
   const defs = missionsOn(body);
   for (const d of defs) b.send("mission", { action: "accept", id: d.id });
   await until(`${body} accepted`, () => defs.every((d) => mission(b, d.id)), 8000);
+  await sleep(300); // one quest tick at the guide arms the reach mission (players walk from here)
   for (const d of defs) {
     if (d.hunt) {
       const pos = d.hunt.place ? ground(body, placeDir(d.hunt.place)) : offPad(body, 0, 60);

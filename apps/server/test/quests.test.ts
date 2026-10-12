@@ -105,6 +105,7 @@ describe("missions", () => {
     await tpAndWait(b, objAt("guide_arcadia"));
     for (const id of ["A1", "A2", "A3"]) b.send("mission", { action: "accept", id });
     await waitFor(() => b.you.missions.length === 3);
+    await sleep(300); // one quest tick at the guide arms the reach mission
     expect(b.you.missions.map((m: any) => m.goal)).toEqual([8, 1, 1]);
 
     // Hunt: 8 Hopbits inside Clover Fields; kills elsewhere or of other kinds don't count.
