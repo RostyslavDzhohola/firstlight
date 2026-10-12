@@ -20,9 +20,11 @@ NPC spawns, a loot pile, PvP protection off). Code: `apps/server/src/world/quest
   `coins <n>`, `heal` (admin window only; for other windows use the moderation tools).
 - **Camera:** photo mode (<kbd>F9</kbd>, photo-mode lane) in the admin window: free camera, FOV, DoF,
   exposure, planet grade. Hide the HUD there. Record with the screen recorder of your choice.
-- **Spawns:** bosses and NPC groups are requested on the game event bus
-  (`spawnRequest`, reason `"stage"`). They appear once the NPC/boss lane handles that event; until
-  then the scene is set without them (the toast still says the scene is set).
+- **Spawns:** bosses and NPC groups are requested on the game event bus (`spawnRequest`, reason
+  `"stage"`), and the quest system hands them to the NPC system (`QuestSystem.spawn`): a scene boss
+  is force-spawned at its own lair, and each NPC group (up to 8 per kind, at the scene's mid level
+  for that planet) appears in a 4 m ring at the scene spot. If a room runs without the NPC system
+  (some tests), the scene is set without them.
 
 ## 1 · Portus crowd under the sky planets
 
