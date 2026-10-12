@@ -1,8 +1,6 @@
-// Player settings that are not graphics (graphics live in render/quality.ts, volumes in audio/Audio.ts):
-// mouse, field of view, comfort, damage numbers and the voice opt-in (wired by the voice lane).
+// Player settings that are not graphics (graphics live in render/quality.ts, volumes in audio/Audio.ts,
+// the voice opt-in in voice/VoiceClient.ts): mouse, field of view, comfort and damage numbers.
 // Stored in localStorage as `fl.ui.v1`; every value is validated on load.
-
-export type VoiceMode = "ptt" | "vad";
 
 export interface UiSettings {
   v: 1;
@@ -15,13 +13,6 @@ export interface UiSettings {
   damageNumbers: boolean;
   /** Colour-blind damage colours: yellow weak points, cyan shields (size and "!" always mark weak points). */
   cbDamage: boolean;
-  voice: {
-    /** "I'm 16 or older": required before any voice is sent or heard. */
-    adult: boolean;
-    enabled: boolean;
-    mode: VoiceMode;
-    muteStrangers: boolean;
-  };
 }
 
 export const UI_DEFAULTS: Readonly<UiSettings> = Object.freeze({
@@ -32,7 +23,6 @@ export const UI_DEFAULTS: Readonly<UiSettings> = Object.freeze({
   shake: true,
   damageNumbers: true,
   cbDamage: true,
-  voice: Object.freeze({ adult: false, enabled: false, mode: "ptt", muteStrangers: false }),
 }) as UiSettings;
 
 export const SENSITIVITY_RANGE = [0.2, 3] as const;
@@ -47,10 +37,8 @@ const bool = (v: unknown, d: boolean) => (typeof v === "boolean" ? v : d);
 
 /** Validate anything (parsed JSON, a partial patch) into a complete settings object. */
 export function normalizeUiSettings(raw: unknown): UiSettings {
-  const r = (raw && typeof raw === "object" ? raw : {}) as Partial<UiSettings> & { voice?: Partial<UiSettings["voice"]> };
+  const r = (raw && typeof raw === "object" ? raw : {}) as Partial<UiSettings>;
   const d = UI_DEFAULTS;
-  const vr: Partial<UiSettings["voice"]> = r.voice && typeof r.voice === "object" ? r.voice : {};
-  const adult = bool(vr.adult, d.voice.adult);
   return {
     v: 1,
     sensitivity: Math.round(clamp(r.sensitivity, SENSITIVITY_RANGE, d.sensitivity) * 100) / 100,
@@ -59,13 +47,6 @@ export function normalizeUiSettings(raw: unknown): UiSettings {
     shake: bool(r.shake, d.shake),
     damageNumbers: bool(r.damageNumbers, d.damageNumbers),
     cbDamage: bool(r.cbDamage, d.cbDamage),
-    voice: {
-      adult,
-      // Voice can't be on without the 16+ opt-in.
-      enabled: adult && bool(vr.enabled, d.voice.enabled),
-      mode: vr.mode === "vad" || vr.mode === "ptt" ? vr.mode : d.voice.mode,
-      muteStrangers: bool(vr.muteStrangers, d.voice.muteStrangers),
-    },
   };
 }
 
@@ -96,11 +77,10 @@ export function saveUiSettings(s: UiSettings, store: Store | null = defaultStore
   }
 }
 
-export type UiSettingsPatch = Partial<Omit<UiSettings, "voice" | "v">> & { voice?: Partial<UiSettings["voice"]> };
+export type UiSettingsPatch = Partial<Omit<UiSettings, "v">>;
 
-/** Merge a patch (voice is merged one level deep). */
 export function patchUiSettings(s: UiSettings, patch: UiSettingsPatch): UiSettings {
-  return normalizeUiSettings({ ...s, ...patch, voice: { ...s.voice, ...(patch.voice ?? {}) } });
+  return normalizeUiSettings({ ...s, ...patch });
 }
 
 // ------------------------------------------------------------------------------------------------ live store

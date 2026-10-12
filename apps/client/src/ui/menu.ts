@@ -12,6 +12,7 @@ import { getPlayToken, isDevGuest, readClaims } from "../net/auth.ts";
 import { button, el, icon, isOverlayOpen, keycaps, sprite, uiRoot } from "./dom.ts";
 import { installSprites, portraitSprite } from "./sprites.ts";
 import { openSettings } from "./settingsScreen.ts";
+import { openVoicePanel, voice } from "../voice/index.ts";
 
 type Ctl = [keys: string[] | "mouse-l" | "mouse-r" | "mouse-move", label: string];
 
@@ -23,11 +24,15 @@ export const CONTROLS: { title: string; rows: Ctl[] }[] = [
   },
   {
     title: "Fight",
-    rows: [["mouse-l", "Attack"], ["mouse-r", "Aim · block · charge"], [["1", "2", "3", "4"], "Switch weapon"], [["R"], "Reload"], [["G"], "Phrase wheel"]],
+    rows: [["mouse-l", "Attack"], ["mouse-r", "Aim · block"], [["1", "2", "3", "4"], "Weapons"], [["R"], "Reload"], [["G"], "Phrase wheel (hold)"]],
   },
   {
-    title: "World & voice",
-    rows: [[["E"], "Interact · pick up"], [["I", "M", "Tab"], "Bag · map · players"], [["V"], "Push to talk"], [["B"], "Talk on radio"], [["P"], "Screenshot"], [["F9"], "Photo mode"]],
+    title: "World",
+    rows: [[["E"], "Interact · pick up"], [["M"], "Map · fast travel"], [["J"], "Journal"], [["Tab"], "Players"], [["P"], "Screenshot"], [["F9"], "Photo mode"]],
+  },
+  {
+    title: "Voice",
+    rows: [[["V"], "Push to talk"], [["B"], "Talk on radio"], [["Shift", "Esc"], "Mute everyone"]],
   },
 ];
 
@@ -169,9 +174,15 @@ export class Menu {
     const resume = item("resume", "Resume", "or click anywhere in the world", "is-resume");
     resume.b.onclick = () => this.game.input.lock();
 
-    const settings = item("sliders", "Settings", "Graphics, controls, audio, voice");
+    const settings = item("sliders", "Settings", "Graphics, controls, audio, comfort");
     icon("chev-r", "", settings.right);
     settings.b.onclick = () => this.showSettings();
+
+    const vc = voice();
+    const voiceRow = item("mic", "Voice & radio", vc?.optedIn ? "Mutes, block, report, radio channel" : "Off until you opt in (16+). Never recorded.");
+    icon("chev-r", "", voiceRow.right);
+    voiceRow.b.onclick = () => openVoicePanel();
+    voiceRow.b.disabled = !vc;
 
     const lo = item("logout", "Log out", "");
     this.logoutItem = lo.b;
@@ -211,6 +222,9 @@ export class Menu {
     const perf = el("span", "", foot);
     keycaps(["F3"], perf);
     perf.append("Performance");
+    const photo = el("span", "", foot);
+    keycaps(["F9"], photo);
+    photo.append("Photo mode");
 
     buildHowTo(screen);
     this.tick();

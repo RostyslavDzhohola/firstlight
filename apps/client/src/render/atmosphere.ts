@@ -176,8 +176,15 @@ export class SunRig {
   private extent = 20;
   private mapSize = 1024;
   private readonly tmp: V3 = [0, 0, 0];
+  // Scratch vectors (no per-frame allocation).
+  private readonly want = new THREE.Vector3();
+  private readonly bx = new THREE.Vector3();
+  private readonly by = new THREE.Vector3();
+  private readonly snapped = new THREE.Vector3();
+  private look: BodyLook;
 
-  constructor(private readonly scene: THREE.Scene, private readonly look: BodyLook, private readonly renderer?: THREE.WebGPURenderer) {
+  constructor(private readonly scene: THREE.Scene, look: BodyLook, private readonly renderer?: THREE.WebGPURenderer) {
+    this.look = look;
     this.sun = new THREE.DirectionalLight(look.sun, look.sunIntensity);
     this.sun.name = "sun";
     this.sun.shadow.bias = -0.0004;
@@ -185,6 +192,24 @@ export class SunRig {
     this.hemi = new THREE.HemisphereLight(look.hemiSky, look.hemiGround, look.hemiIntensity);
     this.hemi.name = "skyFill";
     scene.add(this.sun, this.sun.target, this.hemi);
+  }
+
+  /**
+   * Re-skin the same lights for another body. The rig lives as long as the renderer: light ids
+   * are part of three's lighting cache key, so new lights per planet would rebuild every lit
+   * material on each travel.
+   */
+  setLook(look: BodyLook) {
+    this.look = look;
+    for (const l of [this.sun, this.cascaded]) {
+      if (!l) continue;
+      l.color.setHex(look.sun);
+      l.intensity = look.sunIntensity;
+    }
+    this.hemi.color.setHex(look.hemiSky);
+    this.hemi.groundColor.setHex(look.hemiGround);
+    this.hemi.intensity = look.hemiIntensity;
+    this.initialised = false;
   }
 
   applySettings(s: ResolvedSettings) {
@@ -240,7 +265,7 @@ export class SunRig {
     atmo.up.value.copy(up);
     this.hemi.position.copy(up);
     const t = skyDir(up.x, up.y, up.z, this.look.sunElev, this.look.sunAz, this.tmp);
-    const want = new THREE.Vector3(t[0], t[1], t[2]);
+    const want = this.want.set(t[0], t[1], t[2]);
     if (!this.initialised) {
       this.sunDir.copy(want);
       this.shadowDir.copy(want);
@@ -255,12 +280,11 @@ export class SunRig {
 
     // Shadow camera basis: z = shadowDir, y = a stable perpendicular; snap the focus to texels.
     const z = this.shadowDir;
-    const ref = Math.abs(z.x) < 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1);
-    const y = new THREE.Vector3().crossVectors(z, ref).normalize();
-    const x = new THREE.Vector3().crossVectors(y, z).normalize();
+    const y = this.by.set(Math.abs(z.x) < 0.9 ? 1 : 0, 0, Math.abs(z.x) < 0.9 ? 0 : 1).cross(z).negate().normalize();
+    const x = this.bx.crossVectors(y, z).normalize();
     const texel = (2 * this.extent) / Math.max(1, this.mapSize);
     const fx = focus.dot(x), fy = focus.dot(y);
-    const snapped = focus.clone()
+    const snapped = this.snapped.copy(focus)
       .addScaledVector(x, Math.round(fx / texel) * texel - fx)
       .addScaledVector(y, Math.round(fy / texel) * texel - fy);
     this.sun.shadow.camera.up.copy(y);
@@ -287,4 +311,18 @@ function registerSunLight(renderer: THREE.WebGPURenderer) {
   if (registered.has(renderer)) return;
   registered.add(renderer);
   (renderer as unknown as { library: { addLight(node: unknown, light: unknown): void } }).library.addLight(SunLightNode, SunLight);
+}
+
+const rigs = new WeakMap<THREE.Scene, SunRig>();
+
+/** The scene's one sun rig (created on first use, re-skinned per body). */
+export function sunRigFor(scene: THREE.Scene, look: BodyLook, renderer?: THREE.WebGPURenderer): SunRig {
+  let rig = rigs.get(scene);
+  if (!rig) {
+    rig = new SunRig(scene, look, renderer);
+    rigs.set(scene, rig);
+  } else {
+    rig.setLook(look);
+  }
+  return rig;
 }

@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
 import { mrt, output, velocity } from "three/tsl";
-import { TIER_TABLE, resolveSettings, type StoredGfx, type Tier } from "./quality.ts";
+import { emptyStored, TIER_TABLE, resolveSettings, type StoredGfx, type Tier } from "./quality.ts";
 import { radialFogNode, skyBackgroundNode } from "./atmosphere.ts";
 import { terrainMaterialFor } from "./terrainMaterial.ts";
 import { waterMaterialFor } from "./water.ts";
@@ -23,7 +23,7 @@ import { SunLightNode } from "three/addons/lights/SunLightNode.js";
 const fakeCanvas = () =>
   ({ style: {}, width: 800, height: 600, addEventListener() {}, removeEventListener() {}, getContext() { return null; } }) as unknown as HTMLCanvasElement;
 
-const stored: StoredGfx = { v: 1, tier: null, autoTier: null, renderScale: null, features: {} };
+const stored: StoredGfx = emptyStored();
 const settingsFor = (t: Tier, webgpu = true) => resolveSettings(t, false, webgpu, stored, new Set());
 
 interface Built {
@@ -223,6 +223,18 @@ for (const backendName of ["webgpu", "webgl2"] as const) {
         mat.fragmentNode = post.outputNode;
         const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
         // three's own FXAA samples with a bias inside branches by design: skip the uniformity check.
+        expectClean(build(renderer, new THREE.Scene(), camera, quad), false);
+        post.dispose();
+      }
+    });
+
+    it("photo mode post (depth of field) for every tier", () => {
+      for (const t of ["low", "medium", "high", "ultra"] as const) {
+        const s = settingsFor(t, backendName === "webgpu");
+        const post = buildPost(sceneWithLights(), camera, s, true);
+        const mat = new THREE.NodeMaterial();
+        mat.fragmentNode = post.outputNode;
+        const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
         expectClean(build(renderer, new THREE.Scene(), camera, quad), false);
         post.dispose();
       }

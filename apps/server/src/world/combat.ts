@@ -410,13 +410,24 @@ export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | 
     target.logoutEndsAt = null; // damage cancels logout
     if (attacker) target.lastDamagedBy = attacker.id;
   } else {
-    dmg *= target.armour ?? 1;
+    dmg = target.mitigate ? target.mitigate(dmg, weak, fromDir) : dmg * (target.armour ?? 1);
+    if (dmg <= 0) return false;
   }
   dmg = Math.max(1, Math.round(dmg));
   target.state.hp = Math.max(0, target.state.hp - dmg);
   if (target.kind === "npc") target.onDamaged?.(dmg, attacker?.id ?? "");
   const tp = actorPos(target);
-  host.broadcastNear("hit", { attacker: attacker?.id ?? "", target: target.id, amount: dmg, weak, kind: target.kind, x: tp[0], y: tp[1], z: tp[2], kb: knockback ?? 0 }, tp, 120, [target.id, attacker?.id ?? ""]);
+  // Knockback: the shove direction (away from the attacker) rides on the hit; the victim's client
+  // applies it, and the server widens that player's movement budget so the shove isn't "corrected".
+  let kx = 0, ky = 0, kz = 0;
+  if (knockback && fromDir) {
+    const l = Math.hypot(fromDir[0], fromDir[1], fromDir[2]) || 1;
+    kx = +(-fromDir[0] / l).toFixed(3);
+    ky = +(-fromDir[1] / l).toFixed(3);
+    kz = +(-fromDir[2] / l).toFixed(3);
+    if (target.kind === "player") target.moveBudget += knockback * 1.5;
+  }
+  host.broadcastNear("hit", { attacker: attacker?.id ?? "", target: target.id, amount: dmg, weak, kind: target.kind, x: tp[0], y: tp[1], z: tp[2], kb: knockback ?? 0, kx, ky, kz }, tp, 120, [target.id, attacker?.id ?? ""]);
   host.onDamage(target, dmg, attacker, weak);
   return true;
 }

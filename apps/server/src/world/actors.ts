@@ -65,6 +65,8 @@ export interface PlayerActor {
 export interface NpcActor {
   kind: "npc";
   id: string;
+  /** Content id ("hopbit", "woolback", "tidewrath"…): death and damage events report it. */
+  defId?: string;
   state: NpcState;
   history: PosSample[];
   radius: number;
@@ -74,6 +76,11 @@ export interface NpcActor {
   onKilled?: (by: string | null) => void;
   /** Extra damage multiplier (armour), 1 = none. */
   armour?: number;
+  /**
+   * Optional mitigation (replaces `armour`): shields, boss weak windows, invulnerable states.
+   * Gets the damage after the weak-point multiplier and returns what to apply; ≤ 0 = no damage.
+   */
+  mitigate?: (amount: number, weak: boolean, fromDir?: V3) => number;
   boss?: boolean;
 }
 

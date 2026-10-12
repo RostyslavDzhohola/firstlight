@@ -1,0 +1,13 @@
+/* Photo mode: hide every HUD root (UI code marks them .fl-hud or [data-hud]). */
+body.fl-photo .fl-hud,
+body.fl-photo [data-hud] { display: none !important; }
+
+.fl-photo-panel {
+  position: fixed; left: 16px; bottom: 16px; z-index: 40; pointer-events: none;
+  display: grid; grid-template-columns: auto auto; gap: 4px 12px; align-items: baseline;
+  padding: 10px 14px; border-radius: 4px; background: rgb(5 7 10 / 0.62);
+  font: 13px/1.35 ui-sans-serif, system-ui, sans-serif; color: #efe9df;
+}
+.fl-photo-panel kbd {
+  font: 12px/1.2 ui-monospace, "JetBrains Mono", monospace; color: #c4f1ff; justify-self: end;
+}

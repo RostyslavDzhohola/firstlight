@@ -754,6 +754,22 @@ export const ITEM_SPRITE: Readonly<Record<string, string>> = {
   radio: "radio",
   tonic_small: "tonic-s",
   tonic_large: "tonic-l",
+  // Cosmetics and trophies with their own art; others fall back to the chest.
+  woolly_beanie: "beanie",
+  wide_straw_hat: "strawhat",
+  fox_mask: "foxmask",
+  travellers_cloak: "cloak",
+  wolfpelt_cape: "cloak",
+  tide_cape: "cloak",
+  court_mantle: "cloak",
+  saltplate_mantle: "cloak",
+  static_cloak: "cloak",
+  antler_crown: "crown",
+  coral_crown: "crown",
+  hollow_crown: "crown",
+  candle_crown: "crown",
+  woolback_plushie: "wool",
+  wool_tuft: "wool",
 };
 
 /** Starter index (STARTERS order) → portrait sprite. */

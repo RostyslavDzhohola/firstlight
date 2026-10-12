@@ -5,12 +5,12 @@ describe("loadingPhase", () => {
   it("maps Game.ts status lines to the four boot steps in order", () => {
     let p: LoadingPhase | undefined;
     const seen: number[] = [];
-    for (const line of ["Loading the game…", "Starting the renderer…", "Travelling to Arcadia…", "Connecting…", "Building the world…", "Tuning graphics for this computer…", "Warming up shaders…"]) {
+    for (const line of ["Loading the game…", "Starting the renderer…", "Travelling to Arcadia…", "Connecting…", "Building the world…", "Loading characters…", "Tuning graphics for this computer…", "Warming up shaders…"]) {
       p = loadingPhase(line, p);
       seen.push(p.step);
       expect(p.compact).toBe(false);
     }
-    expect(seen).toEqual([0, 0, 1, 1, 2, 3, 3]);
+    expect(seen).toEqual([0, 0, 1, 1, 2, 2, 3, 3]);
     expect(p!.body).toBe("arcadia");
   });
 

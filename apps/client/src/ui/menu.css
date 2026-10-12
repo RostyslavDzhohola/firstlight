@@ -22,7 +22,8 @@
 .fl-menu__item > .li { width: calc(1.25 * var(--u)); height: calc(1.25 * var(--u)); color: var(--fog-3); }
 .fl-menu__item b { display: block; font: 500 var(--t-lg)/1.1 var(--font-display); letter-spacing: .06em; color: var(--paper); }
 .fl-menu__item small { display: block; margin-top: calc(.2 * var(--u)); font-size: var(--t-xs); color: var(--fog-3); }
-.fl-menu__item:hover { background: rgba(255, 255, 255, .04); border-color: var(--line-2); }
+.fl-menu__item:hover:not(:disabled) { background: rgba(255, 255, 255, .04); border-color: var(--line-2); }
+.fl-menu__item:disabled { opacity: .5; cursor: default; }
 .fl-menu__item.is-on { background: linear-gradient(90deg, rgba(243, 174, 91, .14), rgba(243, 174, 91, .02)); border-color: rgba(255, 217, 155, .4); }
 .fl-menu__item.is-on::before { content: ""; position: absolute; left: -1px; top: 20%; bottom: 20%; width: 2px; background: var(--dawn-3); }
 .fl-menu__item.is-on > .li, .fl-menu__item.is-resume > .li { color: var(--dawn-3); }
@@ -43,11 +44,11 @@
 .fl-howto header { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-4); margin-bottom: calc(1.2 * var(--u)); }
 .fl-howto h2 { margin: 0; font: 300 var(--t-2xl)/1 var(--font-display); letter-spacing: .08em; }
 .fl-howto header span { font-size: var(--t-xs); color: var(--fog-3); }
-.fl-howto__cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: calc(1.4 * var(--u)) var(--sp-6); }
+.fl-howto__cols { display: grid; grid-template-columns: repeat(4, auto); justify-content: space-between; gap: calc(1.4 * var(--u)) var(--sp-5); }
 .fl-howto h3 { margin: 0 0 calc(.6 * var(--u)); font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--dawn-3); }
 .fl-howto dl { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: calc(.5 * var(--u)) calc(.6 * var(--u)); align-items: center; }
 .fl-howto dt { display: flex; gap: calc(.25 * var(--u)); justify-content: flex-end; }
-.fl-howto dd { margin: 0; font-size: var(--t-sm); color: var(--paper-2); }
+.fl-howto dd { margin: 0; font-size: var(--t-sm); color: var(--paper-2); white-space: nowrap; }
 .fl-mouse { display: inline-grid; place-items: center; width: calc(1.6 * var(--u)); height: calc(1.85 * var(--u)); }
 .fl-mouse svg { width: 100%; height: 100%; }
 .fl-howto__rules { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: calc(.8 * var(--u)); margin-top: calc(1.6 * var(--u)); padding-top: calc(1.3 * var(--u)); border-top: 1px solid var(--line-2); }

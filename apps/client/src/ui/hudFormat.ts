@@ -1,6 +1,7 @@
 // Pure formatting for the HUD and screens (unit-tested; no DOM).
 
 import { WEAPON_BY_ID, type WeaponDef } from "@firstlight/shared/content/weapons";
+import { itemName, itemStack } from "@firstlight/shared/content/items";
 import type { InvItem } from "@firstlight/shared/net/protocol";
 import { itemSprite } from "./sprites.ts";
 
@@ -64,12 +65,13 @@ export function slotView(item: InvItem | null | undefined, level: number): SlotV
   const tier = def?.tiers[item.tier - 1];
   const gated = !!tier && tier.level > level;
   const ammo = tier?.mag !== undefined ? { cur: item.mag ?? tier.mag, max: tier.mag } : null;
-  const stack = (def?.stack ?? 1) > 1;
-  const showTier = !!def && def.cls !== "item";
+  const stack = itemStack(item.id) > 1;
+  // Skins (e.g. the Ferryman's Oar) carry their own name instead of "Riverstaff II".
+  const showTier = !!def && def.cls !== "item" && !item.skin;
   return {
     sprite: itemSprite(item.id),
-    name: `${def?.name ?? item.id}${showTier ? ` ${TIER_NUMERALS[item.tier] ?? ""}` : ""}`.trim(),
-    tier: showTier ? item.tier : 0,
+    name: `${itemName(item)}${showTier ? ` ${TIER_NUMERALS[item.tier] ?? ""}` : ""}`.trim(),
+    tier: def && def.cls !== "item" ? item.tier : 0,
     corner: gated ? `Lv ${tier!.level}` : stack ? `×${item.qty}` : ammo ? String(ammo.cur) : "",
     gated,
     empty: false,

@@ -41,6 +41,8 @@ describe("hotbar slots", () => {
     expect(gated).toMatchObject({ gated: true, corner: "Lv 12", ammo: null });
     expect(slotView({ id: "grenade", tier: 1, qty: 3 }, 1).corner).toBe("×3");
     expect(slotView({ id: "radio", tier: 1, qty: 1 }, 1)).toMatchObject({ name: "Radio", tier: 0 });
+    expect(slotView({ id: "riverstaff", tier: 2, qty: 1, skin: "ferrymans_oar" }, 9)).toMatchObject({ name: "Ferryman's Oar", sprite: "riverstaff", tier: 2 });
+    expect(slotView({ id: "fox_mask", tier: 1, qty: 1 }, 1)).toMatchObject({ name: "Fox Mask", sprite: "foxmask", tier: 0 });
   });
 });
 

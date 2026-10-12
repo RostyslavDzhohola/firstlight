@@ -48,7 +48,7 @@ export function loadingPhase(text: string, prev: LoadingPhase = { step: 0, body:
   if (/^(Loading the game|Starting the renderer)/i.test(t)) return { ...prev, step: 0, compact: false };
   if (/^Reconnecting/i.test(t)) return { ...prev, step: 1, compact: true };
   if (/^Connecting/i.test(t)) return { ...prev, step: 1 };
-  if (/^Building the world/i.test(t)) return { ...prev, step: 2 };
+  if (/^(Building the world|Loading characters)/i.test(t)) return { ...prev, step: 2 };
   if (/^Applying graphics/i.test(t)) return { ...prev, step: 3, compact: true };
   if (/^(Tuning graphics|Warming up shaders)/i.test(t)) return { ...prev, step: 3 };
   return prev;

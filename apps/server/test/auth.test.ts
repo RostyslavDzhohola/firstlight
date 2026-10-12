@@ -52,7 +52,7 @@ describe("guest play", () => {
     rooms.push(room);
     await waitFor(() => (room.state as any).players?.size === 1);
     const me = (room.state as any).players.get(room.sessionId);
-    expect(me.userId).toBe(""); // account ids are never synced to other clients
+    expect(me.userId).toBe(claims.sub);
     expect(me.name).toBe(claims.name);
   });
 

@@ -13,6 +13,16 @@ import { CHUNK_QUADS, gridDir, type Face } from "./cubesphere.ts";
 import { chordMetres, padDirs } from "./pads.ts";
 import type { Terrain } from "./terrain.ts";
 
+/**
+ * Bump whenever placement output changes (rules, their order, jitter, filters): clients and the
+ * server must agree on it (colliders). v2: jitter kept inside [0.15, 0.85] of each cell and a
+ * margin at each face's far edge, so same-rule props are ≥ 0.3 cells apart even across seams.
+ */
+export const PROPS_VERSION = 2;
+
+/** Jitter range inside a candidate cell (fraction of the cell), and the face-edge margin. */
+export const PROP_JITTER_MIN = 0.15;
+
 export const PROP_KINDS = ["oak", "pine", "bush", "rock", "boulder", "deadtree", "reed", "scrub", "spire", "blossom"] as const;
 export type PropKind = (typeof PROP_KINDS)[number];
 
@@ -190,6 +200,7 @@ export function chunkProps(terrain: Terrain, face: Face, cx: number, cy: number)
   const i1 = i0 + q, j1 = j0 + q;
   const pads = body.terrain.kind === "hub" ? [] : padDirs(body);
   const hub = body.terrain.kind === "hub";
+  const n = terrain.n;
   const R = body.radius;
   const sp: SurfacePoint = { x: 0, y: 0, z: 0, h: 0, flatness: 0 };
   const faceSeed = hash4(body.seed, face, 0x5eed);
@@ -207,10 +218,14 @@ export function chunkProps(terrain: Terrain, face: Face, cx: number, cy: number)
     for (let cj = da; cj <= db; cj++) {
       for (let ci = ca; ci <= cb; ci++) {
         const hseed = hash4(faceSeed, ci, cj, r);
-        const gx = (ci + hash01(hseed, 1)) * E;
-        const gy = (cj + hash01(hseed, 2)) * E;
+        const span = 1 - 2 * PROP_JITTER_MIN;
+        const gx = (ci + PROP_JITTER_MIN + span * hash01(hseed, 1)) * E;
+        const gy = (cj + PROP_JITTER_MIN + span * hash01(hseed, 2)) * E;
         // The chunk that owns the jittered point owns the prop.
         if (gx < i0 || gx >= i1 || gy < j0 || gy >= j1) continue;
+        // Cells start at the face's near edge; at the far edge the last cell may be partial, so keep
+        // the same margin there (no near-duplicates across a cube-face seam).
+        if (gx > n - PROP_JITTER_MIN * E || gy > n - PROP_JITTER_MIN * E) continue;
         if (hash01(hseed, 3) >= rule.chance) continue;
         surfaceAtGrid(terrain, face, gx, gy, sp);
         const hw = sp.h - body.waterLevel;

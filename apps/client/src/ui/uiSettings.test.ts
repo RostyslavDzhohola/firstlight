@@ -15,29 +15,22 @@ describe("ui settings persistence", () => {
 
   it("round-trips through storage", () => {
     const store = memStore();
-    const s = patchUiSettings(UI_DEFAULTS, { sensitivity: 1.35, invertY: true, fov: 90, voice: { adult: true, enabled: true, mode: "vad" } });
+    const s = patchUiSettings(UI_DEFAULTS, { sensitivity: 1.35, invertY: true, fov: 90, cbDamage: false });
     saveUiSettings(s, store);
     expect(loadUiSettings(store)).toEqual(s);
   });
 
   it("clamps numbers and rejects wrong types", () => {
-    const s = normalizeUiSettings({ sensitivity: 99, fov: 10, invertY: "yes", shake: 0, voice: { mode: "shout" } });
+    const s = normalizeUiSettings({ sensitivity: 99, fov: 10, invertY: "yes", shake: 0 });
     expect(s.sensitivity).toBe(3);
     expect(s.fov).toBe(60);
     expect(s.invertY).toBe(false);
     expect(s.shake).toBe(true);
-    expect(s.voice.mode).toBe("ptt");
   });
 
-  it("never enables voice without the 16+ opt-in", () => {
-    expect(normalizeUiSettings({ voice: { enabled: true } }).voice.enabled).toBe(false);
-    const on = patchUiSettings(UI_DEFAULTS, { voice: { adult: true, enabled: true } });
-    expect(on.voice.enabled).toBe(true);
-    expect(patchUiSettings(on, { voice: { adult: false } }).voice.enabled).toBe(false);
+  it("keeps unrelated values when patching", () => {
+    const s = patchUiSettings(patchUiSettings(UI_DEFAULTS, { fov: 88 }), { shake: false });
+    expect(s).toMatchObject({ fov: 88, shake: false, sensitivity: 1 });
   });
 
-  it("merges voice patches one level deep", () => {
-    const s = patchUiSettings(patchUiSettings(UI_DEFAULTS, { voice: { adult: true, muteStrangers: true } }), { voice: { mode: "vad" } });
-    expect(s.voice).toEqual({ adult: true, enabled: false, mode: "vad", muteStrangers: true });
-  });
 });

@@ -2,7 +2,7 @@
 // CharacterRepo and PileStore interfaces.
 
 import type { BodyId } from "@firstlight/shared";
-import { BACKPACK_SLOTS, type CharacterData } from "@firstlight/shared/content/character";
+import { BACKPACK_SLOTS, type CharacterData, type LifeProgress } from "@firstlight/shared/content/character";
 import { STARTERS } from "@firstlight/shared/content/weapons";
 import type { InvItem } from "@firstlight/shared/net/protocol";
 import { dropPile, ensureAccount, getPile, listPiles, loadCharacter, saveCharacter, takeAll, takeItem, type Db } from "../db/index.ts";
@@ -17,7 +17,14 @@ interface StoredInventory {
   selected: number;
   deaths: number;
   dead: boolean;
+  worn?: CharacterData["worn"];
   travelTo?: string;
+}
+
+/** mission_state_json: the accepted missions plus per-life quest progress (older rows: a bare array). */
+interface StoredMissions {
+  list: CharacterData["missions"];
+  life: LifeProgress | null;
 }
 
 export class SqliteCharacterRepo implements CharacterRepo {
@@ -27,11 +34,14 @@ export class SqliteCharacterRepo implements CharacterRepo {
   }
 
   load(userId: string): CharacterData | null {
-    const c = loadCharacter<StoredInventory, CharacterData["missions"]>(this.db, userId);
+    const c = loadCharacter<StoredInventory, CharacterData["missions"] | StoredMissions>(this.db, userId);
     if (!c) return null;
     const starterIndex = Math.max(0, STARTERS.findIndex((s) => s.id === c.starter));
     const inv = c.inventory ?? ({} as StoredInventory);
     const hasPos = c.x !== 0 || c.y !== 0 || c.z !== 0;
+    const ms = c.missionState;
+    const missions = Array.isArray(ms) ? ms : Array.isArray(ms?.list) ? ms.list : [];
+    const life = !Array.isArray(ms) && ms?.life ? ms.life : undefined;
     return {
       starter: starterIndex,
       palette: c.palette,
@@ -44,10 +54,12 @@ export class SqliteCharacterRepo implements CharacterRepo {
       hotbar: inv.hotbar ?? [null, null, null, null],
       backpack: inv.backpack ?? Array.from({ length: BACKPACK_SLOTS }, () => null),
       selected: inv.selected ?? 0,
-      missions: Array.isArray(c.missionState) ? c.missionState : [],
+      missions,
       lifeStartedAt: c.lifeStartedAt,
       deaths: inv.deaths ?? 0,
       dead: !!inv.dead,
+      ...(inv.worn ? { worn: inv.worn } : {}),
+      ...(life ? { life } : {}),
       travelTo: (inv.travelTo as BodyId | undefined) ?? undefined,
     };
   }
@@ -75,8 +87,8 @@ export class SqliteCharacterRepo implements CharacterRepo {
       y: d.pos?.[1] ?? 0,
       z: d.pos?.[2] ?? 0,
       heading: 0,
-      inventory: { hotbar: d.hotbar, backpack: d.backpack, selected: d.selected, deaths: d.deaths, dead: !!d.dead, travelTo: d.travelTo } satisfies StoredInventory,
-      missionState: d.missions,
+      inventory: { hotbar: d.hotbar, backpack: d.backpack, selected: d.selected, deaths: d.deaths, dead: !!d.dead, worn: d.worn ?? {}, travelTo: d.travelTo } satisfies StoredInventory,
+      missionState: { list: d.missions, life: d.life ?? null } satisfies StoredMissions,
       lifeStartedAt: d.lifeStartedAt,
       protectedUntil: 0,
     });

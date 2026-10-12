@@ -1,12 +1,13 @@
 // Settings (verdict: Entry B): every control visible at once. Graphics go through the real render API
 // (game.ctx + game.applyGraphics, so the shader warm-up re-runs), volumes through GameAudio, controls
-// and comfort through uiSettings, and the voice opt-in is stored for the voice lane to read.
+// and comfort through uiSettings; voice through the voice lane's client and its Voice & radio panel.
 
 import type { Game } from "../game/Game.ts";
 import { FEATURES, killSwitches, resolveSettings, TIERS, type Feature, type Tier } from "../render/quality.ts";
 import { button, el, icon, isolateKeys } from "./dom.ts";
 import { formatDamage } from "./hudFormat.ts";
 import { FOV_RANGE, SENSITIVITY_RANGE, uiSettings, type UiSettings, type UiSettingsPatch } from "./uiSettings.ts";
+import { openVoicePanel, voice } from "../voice/index.ts";
 
 /** Player-facing toggles (F3 keeps the rest: sky planets, vignette, post, chars, motes, detail). */
 const TOGGLES: [Feature, string][] = [
@@ -229,39 +230,31 @@ export function openSettings(game: Game, host: HTMLElement, back: () => void): (
   dmg.onchange = () => setUi({ damageNumbers: dmg.checked });
 
   // ------------------------------------------------------------------------------------------ voice + colour
+  // The voice lane owns the opt-in (16+), devices and radio (its "Voice & radio" panel); this column
+  // shows the state, the strangers switch and opens that panel.
   const right = el("section", "fl-settings__col fl-panel", cols);
+  const vc = voice();
   const vh = el("h2", "", right);
   icon("mic", "", vh);
   vh.append("Voice");
-  el("small", "", vh, "Off until you opt in");
+  el("small", "", vh, vc?.optedIn ? (vc.enabled ? "On" : "Opted in, off") : "Off until you opt in");
   const card = el("div", "fl-voicecard", right);
-  const age = el("label", "fl-age", card);
-  const ageIn = el("input", "fl-check", age);
-  ageIn.type = "checkbox";
-  const ageT = el("span", "", age, "I'm 16 or older");
-  el("small", "", ageT, "Needed to talk to or hear other players.");
-  const voiceRow = el("div", "", card);
-  const modeWrap = el("div", "fl-setting", card);
-  el("div", "fl-setting__row", modeWrap, "Talk with");
-  const modeSeg = el("div", "fl-seg fl-seg--block", modeWrap);
-  const strangersRow = el("div", "", card);
-
-  const renderVoice = (s: UiSettings) => {
-    ageIn.checked = s.voice.adult;
-    voiceRow.replaceChildren();
-    const on = toggle(voiceRow, "fl-line", "Voice chat", "Hear and talk to players within 35 m", s.voice.enabled, !s.voice.adult);
-    on.onchange = () => setUi({ voice: { enabled: on.checked } });
-    modeSeg.replaceChildren();
-    for (const [m, label] of [["ptt", "Push to talk · V"], ["vad", "Voice activation"]] as const) {
-      const b = button(label, s.voice.mode === m ? "is-on" : "", modeSeg, () => setUi({ voice: { mode: m } }));
-      b.setAttribute("aria-pressed", String(s.voice.mode === m));
-      b.disabled = !s.voice.enabled;
-    }
-    strangersRow.replaceChildren();
-    const ms = toggle(strangersRow, "fl-line", "Mute strangers", "Only hear your party", s.voice.muteStrangers, !s.voice.enabled);
-    ms.onchange = () => setUi({ voice: { muteStrangers: ms.checked } });
-  };
-  ageIn.onchange = () => setUi({ voice: { adult: ageIn.checked } });
+  const age = el("div", "fl-age", card);
+  icon(vc?.optedIn ? "check" : "lock", "", age);
+  const ageT = el("span", "", age, vc?.optedIn ? "You confirmed you're 16 or older" : "Voice needs you to be 16 or older");
+  el("small", "", ageT, vc?.optedIn ? "Push to talk with V, the radio with B." : "Opt in once from the Voice & radio panel.");
+  if (vc) {
+    const ms = toggle(card, "fl-line", "Mute strangers", "Only hear your party", vc.muteStrangers);
+    ms.onchange = () => {
+      vc.setMuteStrangers(ms.checked);
+      flashSaved();
+    };
+  }
+  const open = button("", "fl-btn fl-btn--block", card, () => openVoicePanel());
+  icon("radio", "", open);
+  open.append("Voice & radio");
+  open.disabled = !vc;
+  if (!vc) el("div", "fl-setting__hint", card, "Voice starts when you join a world (needs WebRTC).");
 
   const priv = el("div", "fl-private", right);
   icon("shield", "", priv);
@@ -280,10 +273,7 @@ export function openSettings(game: Game, host: HTMLElement, back: () => void): (
   }
   el("small", "", prev, "normal · weak · armour · shield");
 
-  const sync = (s: UiSettings) => {
-    renderVoice(s);
-    prev.classList.toggle("is-classic", !s.cbDamage);
-  };
+  const sync = (s: UiSettings) => prev.classList.toggle("is-classic", !s.cbDamage);
   sync(uiSettings.get());
   cleanups.push(uiSettings.onChange((s) => sync(s)));
 
