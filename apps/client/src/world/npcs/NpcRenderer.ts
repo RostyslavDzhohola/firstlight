@@ -155,7 +155,7 @@ export class NpcRenderer implements ClientSystem {
   constructor(game: Game) {
     this.game = game;
     const ctx = game.ctx;
-    const shadows = !flags.has("noshadows") && ctx.settings.shadows !== "blob";
+    const shadows = !flags.has("noshadows") && ctx.settings.on.shadows && ctx.settings.shadows.mode === "map";
     this.batch = new PartBatcher(shadows);
     this.models = buildModels(game.bodyId).map(prepare);
     const planet = game.planet;
