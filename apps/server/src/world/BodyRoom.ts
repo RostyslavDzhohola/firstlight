@@ -236,9 +236,12 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       onDamage: (target, amount, attacker) => this.afterDamage(target, attacker, amount),
     };
 
-    for (const p of pileStore.current.list(options.body)) this.addPileToState(p);
+    // Load-test copies neither show nor touch the public world's piles (piles belong to a body, not a copy).
+    const listPiles = !options.loadtest;
+    if (listPiles) for (const p of pileStore.current.list(options.body)) this.addPileToState(p);
     this.portals = portalSpots(this.bodyDef, this.terrain);
     this.unsubscribePiles = onPileEvent((e) => {
+      if (!listPiles) return;
       if (e.kind === "remove") {
         if (e.body === this.bodyDef.id) this.removePileFromState(e.id);
       } else if (e.pile.body === this.bodyDef.id) {
@@ -763,7 +766,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   }
 
   pickup(a: PlayerActor | undefined, pileId: string, itemIndex?: number) {
-    if (!a || a.dead) return;
+    if (!a || a.dead || a.identity.loadtest || this.metadata?.loadtest) return;
     const pile = pileStore.current.get(pileId);
     if (!pile || pile.body !== this.bodyDef.id) return;
     if (dist3([pile.x, pile.y, pile.z], actorPos(a)) > RULES.PICKUP_RANGE) return;
