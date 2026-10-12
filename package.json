@@ -6,7 +6,7 @@
   "engines": { "node": "24.x" },
   "scripts": {
     "dev": "pnpm --parallel --filter @firstlight/server --filter @firstlight/client dev",
-    "build": "pnpm --filter @firstlight/shared --filter @firstlight/server --filter @firstlight/client build",
+    "build": "pnpm --filter @firstlight/client build",
     "test": "vitest run",
     "typecheck": "pnpm -r --parallel typecheck"
   },

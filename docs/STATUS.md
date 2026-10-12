@@ -8,33 +8,52 @@
 | Thing | State |
 |---|---|
 | GitHub repo | `RostyslavDzhohola/firstlight` (private), branch `main` |
-| Railway | project `firstlight`, service `game-server`, volume `/data` 5 GB, US East, 2 vCPU/2 GB, Hobby; live at https://api.firstlight.one4all.dev (ALLOW_DEV_GUESTS=1 until auth lane merges) |
+| Railway | project `firstlight`, service `game-server`, volume `/data` 5 GB, US East, 2 vCPU/2 GB, Hobby; live at https://api.firstlight.one4all.dev (dev guest tokens off: `main.ts` refuses to boot production with `ALLOW_DEV_GUESTS` set) |
 | Vercel | project `playfirstlight`, https://firstlight.one4all.dev live (A record added), /api/auth + /admin + /stats proxied with origin secret |
 | Cloudflare | account `rosty-build` workers.dev; Workers token saved; TURN key pending owner |
 | Resend | paid plan; domain firstlight.one4all.dev added, DNS added, verification pending; sending key not yet created |
 
 ## Milestones
 
+Checked = the milestone's "done when" (SPEC §8) is met; the notes say what is still open. Checked
+against the repo, the finish-line table and the lane table on 2026-10-12 (F12 docs lane).
+
 - [x] M0 Setup and skeleton (live client + server; dev-guest tokens disabled in prod 03:40Z)
   - [x] caffeinate, start time
   - [x] Railway project + service + volume
-  - [ ] workspace scaffold, docs, AGENTS.md
-  - [ ] Vercel project + domain + DNS
-  - [ ] Railway domain + DNS + env
-  - [ ] Cloudflare (account, workers.dev, token, TURN) — Codex
-  - [ ] Resend domain + DNS + key — Codex + builder
-  - [ ] hello-world deploys (client, server /healthz, worker asset, WS round trip)
-- [ ] M1 Renderer gate G1
-- [ ] M2 Walking multiplayer world
-- [ ] M3 Combat core
-- [ ] M4 Accounts and persistence
-- [ ] M5 Voice
-- [ ] M6 Content
-- [ ] M7 Look and assets
-- [ ] M8 Social and operations
-- [ ] M9 Hardening
-- [ ] M10 Video-ready
-- [ ] M11 Extras
+  - [x] workspace scaffold, docs, AGENTS.md (no CONTRIBUTING.md yet)
+  - [x] Vercel project + domain + DNS
+  - [x] Railway domain + DNS + env
+  - [ ] Cloudflare: account, workers.dev and Workers token done (D24); **TURN key pending the owner**
+  - [ ] Resend: domain, DNS and send-only key done; **domain verification pending the owner**
+  - [x] hello-world deploys: client, server `/healthz`, WebSocket round trip (F1); the asset Worker
+    (`apps/assets-worker`) deploy isn't recorded here
+- [x] M1 Renderer gate G1: WebGPU kept; `?bench=g1` 59.9 fps p50, p95 17.6 ms on the M1 (Measured
+  numbers, D29). The WebGL2 fallback run isn't recorded.
+- [x] M2 Walking multiplayer world (two-browser E2E on a local stack; T1 on production). Player state
+  is not view-filtered (D30).
+- [x] M3 Combat core (E2E T2 PvE + PvP, T3 death + own pile)
+- [ ] M4 Accounts and persistence: merged 61aa332; E2E T5 passes locally. Open: a real OTP email on
+  production needs Resend's domain verified (owner).
+- [ ] M5 Voice: merged d40d058, tested with bots. Open: E2E T4 needs the owner's TURN key and two
+  real browsers with microphones.
+- [ ] M6 Content: all content lanes merged; E2E T2 and T6 pass. Open: F12 content fixes (egg-spawn
+  cap, Prism Bubble, Patchkit, bad drop ids, Hollow King solo protection) and medal/egg tests that
+  emit synthetic events instead of the real paths (docs/reviews/2026-10-12-f12-*).
+- [ ] M7 Look and assets: render look, characters and the UI port merged. Open: concept art (not
+  generated), the onboarding tutorial + training dummy (SPEC §6.12), a per-body visual check.
+- [x] M8 Social and operations (merged 1a2ee50; E2E T7 passes). The `/stats` test-session check
+  isn't recorded.
+- [ ] M9 Hardening: F2 load test, perf pass (F10/F11) and the E2E run (T4 blocked) done.
+  - [ ] F12 three-model review: blockers fixed, reviewers sign off
+  - [ ] Security pass (auth flows, rate limits, admin routes, input validation, no secrets in the bundle)
+  - [ ] Voice launch items from docs/risk-assessment.md §5: a public complaints/appeals contact, a
+    terms page (voice rules, 16+), admin voice-mutes persisted in game.db
+  - [ ] Before the repo goes public: docs/pre-public.md (owner)
+- [ ] M10 Video-ready: photo mode, `stage <n>` and docs/staged-scenes.md done (F13). Open: the landing
+  flythrough video, the final report to the owner (SPEC §12).
+- [ ] M11 Extras: photo mode (#1) done; weather + day/night (#3–4) merged 743d651; horses (#2) in
+  progress; more cosmetics and Easter eggs (#5) not started.
 
 ## Finish line (SPEC §1)
 
