@@ -10,6 +10,8 @@ import type { PlayerActor } from "../src/world/actors.ts";
 import { dealDamage, fire, stepProjectiles } from "../src/world/combat.ts";
 import type { V3 } from "../src/world/geometry.ts";
 import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
+import type { BreakableHost } from "../src/world/combat.ts";
+import { chest, spawnBolt } from "../src/world/npc/attacks.ts";
 import { rayCylinder } from "../src/world/npc/boss.ts";
 import { MODE, type Npc } from "../src/world/npc/npc.ts";
 import { fakeWorld, type FakeWorld } from "./npcWorld.ts";
@@ -227,5 +229,62 @@ describe("rayCylinder", () => {
   it("hits the top cap from above; a ray from inside doesn't trap the shooter", () => {
     expect(rayCylinder([0.2, 770, 0], [0, -1, 0], 50, base, 1, 9)).toBeCloseTo(11, 6);
     expect(rayCylinder([0, 752, 0], [1, 0, 0], 50, base, 1, 9)).toBe(Infinity);
+  });
+});
+
+/** A stand-in for the destruction system: one intact prop, a column of radius 1.5 m rising 6 m above `at`. */
+function column(at: V3): BreakableHost {
+  const hit = { index: 0, t: 0 };
+  const base = above(at, -3); // sunk into uneven ground: nothing passes under it
+  return {
+    raycast(o, d, maxT) {
+      const t = rayCylinder(o, d, maxT, base, 1.5, 9);
+      if (t === Infinity) return null;
+      hit.t = t;
+      return hit;
+    },
+    damage() {},
+    splash() {},
+    arc() {},
+  };
+}
+
+describe("breakable props block NPC sight and bolts (F12 should-fix 12)", () => {
+  it("an enemy doesn't notice a player behind a prop, and does once it's gone", () => {
+    const w = fakeWorld("arcadia", { immortal: true });
+    const p = w.addPlayer("hidden", arcadiaPoint(w, 70), 5);
+    // 18 m away: beyond hearing (12 m), inside sight (25 m), facing the player.
+    const n = w.sys.createNpc(NPC_INDEX.get("hopbit")!, 3, arcadiaPoint(w, 88), w.clock.t, { instant: true }) as Npc;
+    const toP: V3 = [p.state.x - n.pos[0], p.state.y - n.pos[1], p.state.z - n.pos[2]];
+    const u = upAt(n.pos);
+    const k = toP[0] * u[0] + toP[1] * u[1] + toP[2] * u[2];
+    const f: V3 = [toP[0] - u[0] * k, toP[1] - u[1] * k, toP[2] - u[2] * k];
+    const fl = Math.hypot(...f);
+    n.facing = [f[0] / fl, f[1] / fl, f[2] / fl];
+    n.home = [...n.pos] as V3;
+    n.roam = 0;
+    w.world.host.props = column(arcadiaPoint(w, 79));
+    run(w, 2000);
+    expect(n.target).toBeNull();
+    w.world.host.props = undefined; // broken
+    expect(run(w, 2000, () => n.target === p)).toBeGreaterThan(0);
+  });
+
+  it("an NPC bolt stops at a prop instead of passing through to the player", () => {
+    const w = fakeWorld("arcadia", { immortal: true });
+    const p = w.addPlayer("behind", arcadiaPoint(w, 70), 5);
+    const shooter = w.sys.createNpc(NPC_INDEX.get("sparkfly")!, 3, arcadiaPoint(w, 80), w.clock.t, { instant: true }) as Npc;
+    w.sys.despawnNpc(shooter); // only its bolts act
+    const pellet = shooter.def.attacks[0]!;
+    const fireBolt = () => spawnBolt(w.sys, shooter, chest(shooter.pos, 0.6), chest([p.state.x, p.state.y, p.state.z], 0.9), pellet, 8, w.clock.t);
+    w.world.host.props = column(arcadiaPoint(w, 75));
+    fireBolt();
+    run(w, 2000, () => w.sys.projectiles.length === 0);
+    expect(w.sys.projectiles.length).toBe(0);
+    expect(p.state.hp).toBe(p.state.maxHp);
+    w.world.host.props = undefined;
+    fireBolt();
+    run(w, 2000, () => w.sys.projectiles.length === 0);
+    expect(p.state.hp).toBeLessThan(p.state.maxHp);
   });
 });
