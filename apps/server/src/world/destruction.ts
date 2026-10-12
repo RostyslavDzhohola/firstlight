@@ -9,6 +9,7 @@
 import { BreakableGrid, bodyBreakables, canBreak, distanceToBreakable, hash4, rayBreakable, segmentNearBreakable, type Breakable, type BreakClass } from "@firstlight/shared";
 import { splashFalloff } from "@firstlight/shared/content/progression";
 import type { BodyRoom } from "./BodyRoom.ts";
+import { loadCopy, roomCopyKey, saveCopy } from "./copyState.ts";
 import { emitGameEvent } from "./events.ts";
 import type { BreakableHost } from "./combat.ts";
 import type { V3 } from "./geometry.ts";
@@ -27,6 +28,12 @@ export const DESTRUCTION = {
 
 /** The room surface this system needs. */
 type Room = BodyRoom;
+
+/** Broken props kept across room instances of one copy (copyState.ts, F12 B2): [prop id, rebuild time]. */
+interface DestructionCopyState {
+  v: 1;
+  broken: [string, number][];
+}
 
 export class DestructionSystem implements RoomSystem, BreakableHost {
   readonly list: readonly Breakable[];
@@ -51,6 +58,29 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
     this.hp = new Float32Array(this.list.length);
     this.brokenUntil = new Float64Array(this.list.length);
     for (const b of this.list) this.hp[b.index] = b.hp;
+    this.restoreCopy();
+  }
+
+  /** A fresh room on an emptied or restarted copy keeps the props that were broken (SPEC §5.1). */
+  private restoreCopy() {
+    const s = loadCopy<DestructionCopyState>(roomCopyKey(this.room), "destruction");
+    if (!s || s.v !== 1 || !Array.isArray(s.broken)) return;
+    const now = this.now();
+    const byId = new Map(this.list.map((b) => [b.id, b]));
+    for (const [id, until] of s.broken) {
+      const b = byId.get(id);
+      if (!b || !(until > now)) continue;
+      this.brokenUntil[b.index] = until;
+      this.hp[b.index] = 0;
+      this.broken.add(b.index);
+      this.room.state.broken.set(b.id, until);
+    }
+  }
+
+  private saveCopy() {
+    const broken: [string, number][] = [];
+    for (const i of this.broken) broken.push([this.list[i]!.id, this.brokenUntil[i]!]);
+    saveCopy(roomCopyKey(this.room), "destruction", broken.length ? ({ v: 1, broken } satisfies DestructionCopyState) : null);
   }
 
   isBroken(index: number): boolean {
@@ -179,6 +209,7 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
   }
 
   dispose() {
+    this.saveCopy();
     if (this.room.host?.props === this) this.room.host.props = undefined;
   }
 }
