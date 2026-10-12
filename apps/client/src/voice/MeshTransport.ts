@@ -152,6 +152,7 @@ export class MeshTransport implements VoiceTransport {
       try {
         await pc.setRemoteDescription({ type: d.type, sdp: withOpusParams(d.sdp) });
       } catch (e) {
+        if (!this.current(link)) return; // closed or replaced while we waited: not ours to fix
         // A fresh offer from a peer that rebuilt its side (new DTLS identity): start over from it.
         if (d.type === "offer" && !retried) {
           this.close(link.peer);
@@ -162,9 +163,11 @@ export class MeshTransport implements VoiceTransport {
         }
         throw e;
       }
+      if (!this.current(link)) return;
       if (d.type === "offer") {
         for (const t of pc.getTransceivers()) if (t.receiver.track.kind === "audio" && t.direction !== "sendrecv") t.direction = "sendrecv";
         await pc.setLocalDescription();
+        if (!this.current(link)) return;
         this.sendLocalDescription(link);
         const s = this.sender(link);
         if (s && s.track !== link.sending) await s.replaceTrack(link.sending).catch(() => {});
@@ -172,12 +175,18 @@ export class MeshTransport implements VoiceTransport {
     }
     const cands = [...(payload.candidate ? [payload.candidate] : []), ...(payload.candidates ?? [])];
     for (const c of cands) {
+      if (!this.current(link)) return;
       try {
         await pc.addIceCandidate(c);
       } catch {
         // Candidates for an offer we ignored, or from a previous ICE generation.
       }
     }
+  }
+
+  /** Is this still the live link for its peer? (async work re-checks after every await) */
+  private current(link: Link): boolean {
+    return !link.closed && this.links.get(link.peer) === link;
   }
 
   setSending(peer: string, track: MediaStreamTrack | null): void {

@@ -464,6 +464,13 @@ describe("TURN credentials", () => {
       await waitFor(() => got(b, "voice:drop").some((d) => d.peer === a.sessionId));
       await waitFor(() => !(me(a).flags & PF.VOICE));
       expect(await relays(b, a)).toBe(false);
+      // Re-enabling is refused and mints nothing.
+      const mintsBefore = mintCalls().length;
+      a.send("voice:enable", { age16: true });
+      await barrier(a);
+      expect(got(a, "voice:denied")).toContainEqual({ action: "voice:enable", reason: "banned" });
+      expect(me(a).flags & PF.VOICE).toBe(0);
+      expect(mintCalls()).toHaveLength(mintsBefore);
     } finally {
       setGameDb(null);
       db.close();

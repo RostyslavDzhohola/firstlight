@@ -65,6 +65,14 @@ describe("voice link planner", () => {
     expect(out.close).not.toContain("m1");
   });
 
+  it("radio mates nearby don't take proximity slots", () => {
+    const tuned: Me = { radioCh: 5, hasRadio: true, adminMuted: false };
+    const mates = Array.from({ length: 7 }, (_, i) => peer(`m${i}`, 2 + i, { radioCh: 5 }));
+    const others = Array.from({ length: 14 }, (_, i) => peer(`p${i}`, 10 + i));
+    const { open } = plan([...mates, ...others], [], { me: tuned });
+    expect(open).toHaveLength(7 + VOICE.MAX_PEERS);
+  });
+
   it("accepts incoming links only when the planner would keep them", () => {
     const tuned: Me = { radioCh: 5, hasRadio: true, adminMuted: false };
     const twelve = Array.from({ length: 12 }, (_, i) => ({ radioCh: 0, dist: 5 + i * 3 })); // farthest at 38 m

@@ -47,8 +47,10 @@ function eligible(me: Me, p: PeerView): boolean {
 }
 
 export function planLinks({ me, peers, linked, farSince, now }: PlanInput): Plan {
+  // Radio mates have their own slots (a channel holds at most RADIO_CAP), so they don't take
+  // proximity ones.
   const near = peers
-    .filter((p) => eligible(me, p) && p.dist <= VOICE.CONNECT)
+    .filter((p) => eligible(me, p) && p.dist <= VOICE.CONNECT && !onMyChannel(me, p))
     .sort((a, b) => a.dist - b.dist)
     .slice(0, VOICE.MAX_PEERS);
   const wanted = new Set(near.map((p) => p.id));

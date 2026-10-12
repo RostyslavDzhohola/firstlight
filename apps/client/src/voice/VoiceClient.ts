@@ -395,6 +395,7 @@ export class VoiceRoom implements ClientSystem {
       "radio:tx/muted": "A moderator muted your voice",
       "radio:tx/timeout": "Radio released after 60 s — press B again",
       "voice:enable/age": "Voice needs the 16+ confirmation",
+      "voice:enable/banned": "Voice isn't available on this account",
       "voice:report/too many reports": "You reported this player recently",
       "voice:block/no such player": "That player has left",
       "voice:report/no such player": "That player has left",
@@ -418,7 +419,7 @@ export class VoiceRoom implements ClientSystem {
     // Only links the planner would keep: a radio mate, or one of the nearest MAX_PEERS within DROP.
     const d = (q: any) => Math.hypot(q.x - me.x, q.y - me.y, q.z - me.z);
     const my = this.myInfo(me);
-    const linked = this.transport.peers().map((id) => state.players.get(id)).filter(Boolean);
+    const linked = this.transport.peers().filter((id) => id !== peer).map((id) => state.players.get(id)).filter(Boolean);
     return acceptsIncoming(my, { radioCh: p.radioCh, dist: d(p) }, linked.map((q: any) => ({ radioCh: q.radioCh, dist: d(q) })));
   }
 

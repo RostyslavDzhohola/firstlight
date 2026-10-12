@@ -89,6 +89,8 @@ interface VoiceSession {
   mintedAt: number;
   minting: boolean;
   turnRetryAt: number;
+  /** Seen banned in game.db: voice stays off for this session. */
+  banned: boolean;
   txSince: number;
   mutedSeen: boolean;
   unreachableAt: Map<string, number>;
@@ -137,6 +139,7 @@ export class VoiceSystem implements RoomSystem {
       mintedAt: 0,
       minting: false,
       turnRetryAt: 0,
+      banned: false,
       txSince: 0,
       mutedSeen: false,
       unreachableAt: new Map(),
@@ -199,7 +202,7 @@ export class VoiceSystem implements RoomSystem {
       }
       // Banned (by the admin tools, any room): voice ends now and relay credentials are revoked.
       if ((s.enabled || s.iceUsernames.length) && voiceSafety.isBanned(a.identity.userId, now)) {
-        this.turnOff(a, s);
+        this.ban(a, s);
         continue;
       }
       if (s.enabled) {
@@ -221,6 +224,10 @@ export class VoiceSystem implements RoomSystem {
     if (!a || !s || !s.actions.take(Date.now())) return;
     if (!r.success) return this.deny(c, "voice:enable", "invalid");
     if (!r.data.age16) return this.deny(c, "voice:enable", "age");
+    if (s.banned || voiceSafety.isBanned(a.identity.userId)) {
+      this.ban(a, s);
+      return this.deny(c, "voice:enable", "banned");
+    }
     s.enabled = true;
     a.state.flags |= PF.VOICE;
     if (a.state.flags & PF.VOICE_MUTED) {
@@ -234,6 +241,13 @@ export class VoiceSystem implements RoomSystem {
     const { a, s } = this.who(c);
     if (!a || !s || !s.actions.take(Date.now())) return;
     this.turnOff(a, s);
+  }
+
+  /** Banned: voice off for good in this session, and every live credential of the account revoked. */
+  private ban(a: PlayerActor, s: VoiceSession): void {
+    s.banned = true;
+    this.turnOff(a, s);
+    void turnCredentials.revokeUser(a.identity.userId);
   }
 
   /** Voice off: hang up everywhere and revoke relay credentials. */
@@ -274,7 +288,7 @@ export class VoiceSystem implements RoomSystem {
     try {
       const minted = await mintIceServers(ttl);
       turnCredentials.remember(s.userId, minted.usernames, ttl);
-      const live = this.sessions.get(s.sid) === s && s.enabled && !this.disposed;
+      const live = this.sessions.get(s.sid) === s && s.enabled && !s.banned && !this.disposed && !voiceSafety.isBanned(a.identity.userId);
       if (!live) {
         void turnCredentials.revoke(minted.usernames);
         return;
@@ -326,7 +340,8 @@ export class VoiceSystem implements RoomSystem {
     const a = this.room.actors.get(aId);
     const b = this.room.actors.get(bId);
     if (!a || !b || aId === bId) return false;
-    if (!this.sessions.get(aId)?.enabled || !this.sessions.get(bId)?.enabled) return false;
+    const sa = this.sessions.get(aId), sb = this.sessions.get(bId);
+    if (!sa?.enabled || !sb?.enabled || sa.banned || sb.banned) return false;
     const fa = a.state.flags, fb = b.state.flags;
     if (!(fa & PF.VOICE) || !(fb & PF.VOICE)) return false;
     if (fa & PF.VOICE_MUTED || fb & PF.VOICE_MUTED) return false;
