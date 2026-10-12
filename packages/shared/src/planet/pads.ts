@@ -52,6 +52,12 @@ export function padDirs(body: BodyDef): readonly Dir[] {
 /** Resolve a feature anchor to a unit direction. */
 export function anchorDir(body: BodyDef, at: FeatureAnchor): Dir {
   const pads = padDirs(body);
+  if ("between" in at) {
+    const [ia, ib, t] = at.between;
+    const a = pads[ia], b = pads[ib];
+    if (!a || !b) throw new Error(`${body.id}: anchor pad ${a ? ib : ia} does not exist`);
+    return normalize([a[0] * (1 - t) + b[0] * t, a[1] * (1 - t) + b[1] * t, a[2] * (1 - t) + b[2] * t]);
+  }
   const sum: [number, number, number] = [0, 0, 0];
   const idx = "pad" in at ? [at.pad] : "mid" in at ? at.mid : at.tri;
   for (const i of idx) {

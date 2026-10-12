@@ -61,7 +61,7 @@ export const PLACES: readonly PlaceDef[] = [
   { id: "mourning_mere", body: "hollowmere", name: "Mourning Mere", kind: "landmark", at: { mid: [2, 8] }, radius: 95 },
   { id: "drowned_chapel", body: "hollowmere", name: "the Drowned Chapel", kind: "area", at: { area: "drowned_chapel" }, radius: 40 },
   { id: "ferrymans_isle", body: "hollowmere", name: "Ferryman's Isle", kind: "hidden", at: { place: "mourning_mere" }, toward: { pad: 8 }, dist: 104, radius: 8 },
-  { id: "tolling_tower", body: "hollowmere", name: "the Tolling Tower", kind: "landmark", at: { pad: 10 }, radius: 8 },
+  { id: "tolling_tower", body: "hollowmere", name: "the Tolling Tower", kind: "landmark", at: { between: [10, 8, 0.15] }, radius: 8 },
   { id: "hollow_nave", body: "hollowmere", name: "the Hollow Nave", kind: "lair", at: { lair: "hollow_king" }, radius: 30 },
   { id: "ossuary_camp", body: "hollowmere", name: "Ossuary Camp", kind: "area", at: { area: "ossuary_camp" }, radius: 35 },
 
@@ -75,7 +75,7 @@ export const PLACES: readonly PlaceDef[] = [
   { id: "yard_gantry", body: "meridian", name: "the Foreclosure Yard gantry", kind: "landmark", at: { place: "foreclosure_yard" }, toward: { place: "checkpoint_seven" }, dist: 55, radius: 8 },
   { id: "glasspan_flats", body: "meridian", name: "Glasspan Salt Flats", kind: "area", at: { area: "glasspan" }, radius: 170 },
   { id: "last_billboard", body: "meridian", name: "The Last Billboard", kind: "landmark", at: { area: "last_billboard" }, radius: 10 },
-  { id: "chrome_spires", body: "meridian", name: "Chrome Spires", kind: "landmark", at: { pad: 15 }, radius: 140 },
+  { id: "chrome_spires", body: "meridian", name: "Chrome Spires", kind: "landmark", at: { between: [15, 9, 0.45] }, radius: 140 },
   { id: "oversight_lobby", body: "meridian", name: "the Oversight Lobby", kind: "area", at: { area: "oversight_lobby" }, radius: 25 },
 ];
 

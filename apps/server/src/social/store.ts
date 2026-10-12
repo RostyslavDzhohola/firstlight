@@ -160,3 +160,6 @@ export function sessionClient(id: number | null, backend: string, tier: string):
     stmt(db, "UPDATE session_log SET backend = COALESCE(backend, ?), tier = COALESCE(tier, ?) WHERE id = ?").run(backend, tier, id);
   }
 }
+
+/** Called after a Tab-list block (blocker, blocked user ids): voice hangs up and rotates relay credentials. */
+export const onBlockHooks: ((blocker: string, target: string) => void)[] = [];

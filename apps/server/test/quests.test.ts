@@ -144,7 +144,7 @@ describe("missions", () => {
 
   it("fast travel can't complete a reach mission: the target has to be walked into", async () => {
     const b = await bot("climber", "hollowmere");
-    await tpAndWait(b, padAt("hollowmere", 10)); // discover the pad on top of the Tolling Tower
+    await tpAndWait(b, padAt("hollowmere", 10)); // discover the pad at the Tolling Tower's foot
     await waitFor(() => b.you.pads.includes(10));
     await tpAndWait(b, objAt("guide_hollowmere"));
     b.send("mission", { action: "accept", id: "H3" });
@@ -153,11 +153,9 @@ describe("missions", () => {
     b.send("fastTravel", { pad: 10 });
     await waitFor(() => near(b, padAt("hollowmere", 10), 6));
     await sleep(500);
-    expect(b.you.missions[0].done).toBe(false);
-    // Walk away down the tower and back up (admin moves stand in for walking here).
-    await tpAndWait(b, offPad("hollowmere", 10, 80));
-    await sleep(300);
-    await tpAndWait(b, padAt("hollowmere", 10));
+    expect(b.you.missions[0].done).toBe(false); // the pad is 125 m from the top (D28)
+    // Climb to the top platform (admin moves stand in for walking here).
+    await tpAndWait(b, ground("hollowmere", placeDir("tolling_tower")));
     await waitFor(() => b.you.missions[0].done);
   });
 
@@ -191,7 +189,7 @@ describe("medals and titles", () => {
     await waitFor(() => b.last("denied")?.action === "title");
     b.send("title", { medalId: "ten_down" });
     await waitFor(() => (watcher.room.state as any).players.get(b.id)?.title === "Seasoned");
-    expect(b.you.title).toBe("ten_down");
+    await waitFor(() => b.you.title === "ten_down"); // the `you` message can land after the state patch
     b.send("title", { medalId: null });
     await waitFor(() => (watcher.room.state as any).players.get(b.id)?.title === "");
   });

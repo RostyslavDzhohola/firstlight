@@ -13,7 +13,7 @@ import { trackClientInfo, trackJoin, trackLeave, trackTick } from "./analytics.t
 import { announceAll, applyVoiceMute, banAccount, kickUser, refusesReconnect, removePlayer, seatRefusal, setVoiceMuted } from "./moderation.ts";
 import { parties, type Party } from "./parties.ts";
 import { clearPresence, clearRoomPresence, liveActor, liveRooms, presenceOf, sendTo, setPresence } from "./presence.ts";
-import { blockedBy, blockedEitherWay, setBlocked, storeReport } from "./store.ts";
+import { blockedBy, blockedEitherWay, onBlockHooks, setBlocked, storeReport } from "./store.ts";
 
 export const SOCIAL_RULES = {
   /** A member who stays offline this long leaves their party. */
@@ -220,7 +220,10 @@ export function createSocialSystem(room: BodyRoom): RoomSystem {
     if (target === uid) return;
     if (on && !current.includes(target) && current.length >= SOCIAL_RULES.MAX_BLOCKS) return deny(c, "block", "your block list is full");
     setBlocked(uid, target, on);
-    if (on) parties.cancelBetween(me.identity.userId, target);
+    if (on) {
+      parties.cancelBetween(me.identity.userId, target);
+      for (const h of onBlockHooks) h(uid, target);
+    }
     c.send("social:blocked", { userIds: blockedBy(me.identity.userId) });
     toast(c, on ? "Blocked. You won't hear or get invites from them." : "Unblocked.");
   });

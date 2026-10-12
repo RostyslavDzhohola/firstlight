@@ -2,6 +2,7 @@
 // inventory keys, pickups, death and rebirth.
 
 import * as THREE from "three/webgpu";
+import { isBlocked } from "../social/store.ts";
 import { WEAPONS, WEAPON_BY_ID, type WeaponDef } from "@firstlight/shared/content/weapons";
 import { PHRASES } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
@@ -99,6 +100,7 @@ export class CombatClient {
       this.game.audio.play("swing", pos);
     });
     room.onMessage("phrase", (m: { by: string; id: number }) => {
+      if (m.by !== me && isBlocked(m.by)) return; // no speech bubbles from blocked players
       const p = m.by === me ? this.game.player.pos : (() => { const s = (room.state as any).players?.get(m.by); return s ? new THREE.Vector3(s.x, s.y, s.z) : null; })();
       if (!p) return;
       const s = this.toScreen(p.clone(), 2.3);

@@ -24,7 +24,8 @@ function glow(color: number, k = 3, opacity = 1) {
 function frame(up: THREE.Vector3): { right: THREE.Vector3; fwd: THREE.Vector3 } {
   const ref = Math.abs(up.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
   const fwd = ref.addScaledVector(up, -ref.dot(up)).normalize();
-  const right = new THREE.Vector3().crossVectors(fwd, up).normalize();
+  // Right-handed basis for makeBasis(right, up, fwd): right = up × fwd (fwd × up mirrors it).
+  const right = new THREE.Vector3().crossVectors(up, fwd).normalize();
   return { right, fwd };
 }
 
@@ -63,7 +64,7 @@ export class Portals {
       // Turn the ring to face `faceDir` (tangent).
       const up = dir.clone();
       const f = faceDir.clone().addScaledVector(up, -faceDir.dot(up)).normalize();
-      const right = new THREE.Vector3().crossVectors(f, up).normalize();
+      const right = new THREE.Vector3().crossVectors(up, f).normalize();
       g.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, f));
       this.group.add(g);
       this.cullables.push({ obj: g, at: dir.clone().multiplyScalar(R + h) });

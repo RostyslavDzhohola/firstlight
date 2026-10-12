@@ -232,6 +232,17 @@ describe("voice signalling relay", () => {
   });
 });
 
+describe("blocks from the Tab list", () => {
+  it("hang up both voice clients, like a block from the voice panel", async () => {
+    const a = await bot("tabblocker");
+    const b = await bot("tabblocked");
+    await waitFor(() => (a.state as any).players.size >= 2);
+    a.send("social:block", { target: b.sessionId, on: true });
+    await waitFor(() => got(a, "voice:drop").some((m) => m.peer === b.sessionId));
+    await waitFor(() => got(b, "voice:drop").some((m) => m.peer === a.sessionId));
+  });
+});
+
 describe("radio", () => {
   it("relays far apart on the same channel only when both own a radio and are tuned", async () => {
     const a = await bot("ann"), b = await bot("ben");

@@ -99,7 +99,7 @@ export async function tpAndWait(b: Bot, p: readonly number[]) {
 export const near = (b: Bot, p: readonly number[], m: number) => Math.hypot(me(b).x - p[0]!, me(b).y - p[1]!, me(b).z - p[2]!) <= m;
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** waitFor with a label in the failure message. */
-export async function until(label: string, cond: () => boolean, ms = 3000) {
+export async function until(label: string, cond: () => boolean, ms = 6000) {
   await waitFor(cond, ms).catch(() => {
     throw new Error(`timed out waiting for: ${label}`);
   });

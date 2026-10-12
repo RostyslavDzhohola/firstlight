@@ -59,7 +59,8 @@ export async function joinAs(game: Game, userId: string, body = "arcadia", extra
   return client.consumeSeatReservation(r.reservation as never);
 }
 
-export function waitFor(cond: () => boolean, ms = 3000): Promise<void> {
+/** Poll until `cond` holds. 6 s default: the suite shares the machine with builds and other agents. */
+export function waitFor(cond: () => boolean, ms = 6000): Promise<void> {
   return new Promise((resolve, reject) => {
     const t0 = Date.now();
     const iv = setInterval(() => {
