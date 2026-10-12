@@ -180,14 +180,25 @@ export function settle(a: PlayerActor, w: MoveWorld, now: number): V3 | null {
   return p;
 }
 
-/** A shove: extra distance for a moment, and lift (the client adds 0.4 × strength upwards). */
+/** Upward speed the envelope still allows the body at `now` (its launch speed less gravity, with the timing slack). */
+function upwardSpeedLeft(a: PlayerActor, now: number): number {
+  const t = Math.max(0, (now - a.airStartAt - MOVE.airTimeSlackMs) / 1000);
+  return Math.max(0, a.airLiftV - MOVE.gravity * t);
+}
+
+/**
+ * A shove: extra distance for a moment, and lift. The client adds 0.4 × strength to the vertical
+ * velocity it already has, so shoves stack (F12 re-review S2): the envelope restarts here with the
+ * upward speed the body may still have plus this impulse.
+ */
 export function noteKnockback(a: PlayerActor, strength: number, now: number) {
   if (strength <= 0) return;
   a.moveBonus += strength * 1.5;
   a.moveBonusUntil = Math.max(a.moveBonusUntil, now + MOVE.knockbackWindowMs);
+  const v = upwardSpeedLeft(a, now) + strength * 0.4;
   a.airStartAt = now;
   a.airStartLen = Math.hypot(a.state.x, a.state.y, a.state.z);
-  a.airLiftV = MOVE.jumpSpeed + strength * 0.4;
+  a.airLiftV = v;
 }
 
 /** Fresh motion state for a body placed at radius `len` (join, teleport). */

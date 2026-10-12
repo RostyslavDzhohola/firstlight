@@ -159,6 +159,49 @@ describe("movement budget", () => {
 });
 
 describe("knockback (F12 Opus nit)", () => {
+  /**
+   * Fly like the client: vertical speed `v` (m/s) at height `h` over the start, gravity 18; shoves
+   * of strength 4 add 1.6 m/s up each (PlayerController.knockback) when `shoveAt(t)` says how many.
+   */
+  async function flight(name: string, v0: number, shoveAt: (t: number) => number) {
+    const k = await joinOutside(name);
+    k.r.send("admin", { cmd: "unprotect" });
+    await waitFor(() => !(me(k.r).flags & 3));
+    const room = matchMaker.getLocalRoomById(k.r.roomId) as unknown as BodyRoom;
+    const actor = room.actors.get(k.r.sessionId)!;
+    const base = groundR(k.dir);
+    let h = 0, v = v0, t = 0, peak = 0;
+    do {
+      const n = shoveAt(t);
+      for (let i = 0; i < n; i++) {
+        dealDamage(room.host, null, actor, 1, false, [-k.t[0], -k.t[1], -k.t[2]], 4);
+        v += 4 * 0.4;
+      }
+      t += 0.05;
+      v -= 18 * 0.05;
+      h = Math.max(0, h + v * 0.05);
+      peak = Math.max(peak, h);
+      send(k.r, k.seq, k.dir, base + h, h > 0 ? 4 : 0);
+      await sleep(50);
+    } while (h > 0 && t < 4);
+    await sleep(200);
+    return { corrections: k.corrections.n, peak };
+  }
+
+  it("eight shoves at once while standing add up like the client's velocity: no height refusals", async () => {
+    const r = await flight("stacked", 0, (t) => (t === 0 ? 8 : 0));
+    expect(r.peak).toBeGreaterThan(3);
+    expect(r.corrections).toBe(0);
+  });
+
+  it("shoves during a jump and during its fall add to the speed the body still has", async () => {
+    const up = await flight("jumpshoved", 6.6, (t) => (Math.abs(t - 0.15) < 0.01 ? 4 : 0));
+    expect(up.corrections).toBe(0);
+    const down = await flight("fallshoved", 6.6, (t) => (Math.abs(t - 0.6) < 0.01 ? 10 : 0));
+    expect(down.peak).toBeGreaterThan(2);
+    expect(down.corrections).toBe(0);
+  });
+
   it("a shove's extra distance is honoured even with the bank spent (not clamped away on the next input)", async () => {
     const k = await joinOutside("shoved");
     k.r.send("admin", { cmd: "unprotect" });
