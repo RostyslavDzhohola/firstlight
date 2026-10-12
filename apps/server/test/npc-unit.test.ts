@@ -7,7 +7,7 @@ import { bossArena } from "@firstlight/shared/content/arenas";
 import { NF, NPC_INDEX, PLANET_COSMETIC } from "@firstlight/shared/content/npcs";
 import { dealDamage } from "../src/world/combat.ts";
 import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
-import { repeatDecay, rollDrops } from "../src/world/npc/rewards.ts";
+import { PITY_IDLE_MS, pruneRewardMaps, repeatDecay, rollDrops } from "../src/world/npc/rewards.ts";
 import { buildSpawnPoints } from "../src/world/npc/spawns.ts";
 import { fakeWorld } from "./npcWorld.ts";
 
@@ -72,6 +72,44 @@ describe("rewards", () => {
     expect(seq.map((x) => Math.round(x * 100))).toEqual([100, 90, 80, 70, 60, 50, 40, 30, 30]);
     expect(repeatDecay(w.sys, "u1", "p8", t)).toBe(1);
     expect(repeatDecay(w.sys, "u1", "p7", t + 9000 + 301_000)).toBe(1);
+  });
+
+  it("egg penalty NPCs dissolve at their TTL without rewards, and never feed the cosmetic pity", () => {
+    const w = fakeWorld("arcadia");
+    const p = w.addPlayer("p", arcadiaPoint(80), 3);
+    const n = w.sys.createNpc(NPC_INDEX.get("hopbit")!, 3, arcadiaPoint(84), w.clock.t, { instant: true, penalty: { egg: "E2", userId: "u-p" }, ttlMs: 1000 });
+    expect(w.sys.penaltyCount()).toBe(1);
+    expect(w.sys.penaltyCount("u-p")).toBe(1);
+    expect(w.sys.penaltyCount("someone-else")).toBe(0);
+    expect(rollDrops(w.sys, n, p, () => 0)).not.toContainEqual(expect.objectContaining({ id: PLANET_COSMETIC.arcadia.id }));
+    w.step(900);
+    expect(n.dead).toBe(false);
+    w.step(200);
+    expect(n.dead).toBe(true);
+    expect(w.sys.penaltyCount()).toBe(0);
+    w.step(1300);
+    expect(w.sys.npcs.has(n.id)).toBe(false);
+    expect(p.char.xp).toBe(0);
+    expect(w.sent.some((m) => m.type === "npcKill")).toBe(false);
+  });
+
+  it("reward bookkeeping is pruned: expired decay windows, idle pity counters, old Collector tags", () => {
+    const w = fakeWorld("arcadia");
+    const t = w.clock.t;
+    repeatDecay(w.sys, "u1", "p7", t);
+    repeatDecay(w.sys, "u2", "p7", t + 200_000);
+    w.sys.cosmeticPity.set("u1|arcadia", { life: 1, kills: 4, at: t });
+    w.sys.cosmeticPity.set("u2|arcadia", { life: 1, kills: 4, at: t + PITY_IDLE_MS });
+    w.sys.tagged.set("s1", t + 1000);
+    w.sys.tagged.set("s2", t + 400_000);
+    pruneRewardMaps(w.sys, t + 301_000);
+    expect([...w.sys.repeatKills.keys()]).toEqual(["u2|p7"]);
+    expect([...w.sys.cosmeticPity.keys()]).toEqual(["u1|arcadia", "u2|arcadia"]);
+    expect([...w.sys.tagged.keys()]).toEqual(["s2"]);
+    pruneRewardMaps(w.sys, t + PITY_IDLE_MS + 1);
+    expect([...w.sys.repeatKills.keys()]).toEqual([]);
+    expect([...w.sys.cosmeticPity.keys()]).toEqual(["u2|arcadia"]);
+    expect([...w.sys.tagged.keys()]).toEqual([]);
   });
 
   it("the planet cosmetic is guaranteed after 3× its expected kills in one life (pity)", () => {

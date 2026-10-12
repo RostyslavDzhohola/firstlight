@@ -108,5 +108,9 @@ export interface Npc extends NpcActor {
   strafeSign: number;
   /** Golden Hopbit / Ticket #000 bookkeeping. */
   egg?: { follower: string | null; since: number; walker?: string; walkFrom?: V3; walkDir?: V3 };
+  /** Raised by a wrong egg-puzzle answer (E2/E5): capped per player and body, repeat-kill decay per egg. */
+  penalty: { egg: string; userId: string } | null;
+  /** Dissolves (no rewards) at this time; 0 = never. Egg penalty spawns expire. */
+  expiresAt: number;
   dead: boolean;
 }

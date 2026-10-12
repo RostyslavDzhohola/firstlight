@@ -6,9 +6,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { placeDir } from "@firstlight/shared/content/places";
 import { emitGameEvent, onGameEvent, type GameEvent } from "../src/world/events.ts";
 import { pileStore } from "../src/world/piles.ts";
+import { EGG_LIMITS } from "../src/world/quests/eggs.ts";
+import type { QuestSystem } from "../src/world/quests/QuestSystem.ts";
 import { progressStore } from "../src/world/quests/store.ts";
 import { safeLeave, startServer, waitFor } from "./helpers.ts";
 import { bot, dieAndRejoin, ground, harness, invIds, me, near, objAt, offPad, padAt, serverRoom, sleep, tpAndWait, until, tp } from "./quest-helpers.ts";
+
+const quests = (room: ReturnType<typeof serverRoom>) => room.systems.find((s) => "eggs" in s) as QuestSystem;
 
 beforeEach(async () => {
   harness.game = await startServer();
@@ -272,9 +276,16 @@ describe("Easter eggs and the Hall of Firsts", () => {
     onGameEvent(room, (e) => e.type === "spawnRequest" && spawns.push(e));
     await tpAndWait(b, objAt("e2_btn_leaf"));
     // Wrong first press: reset + 3 Hopbits requested from the NPC lane.
-    b.send("interact", { target: "e2_btn_leaf" });
-    await waitFor(() => spawns.length === 1);
-    expect(spawns[0]).toMatchObject({ type: "spawnRequest", reason: "egg", npcKind: "hopbit", count: 3 });
+    const lockMs = EGG_LIMITS.lockMs;
+    EGG_LIMITS.lockMs = 600; // the puzzle locks after a wrong answer (15 s in play)
+    try {
+      b.send("interact", { target: "e2_btn_leaf" });
+      await waitFor(() => spawns.length === 1);
+      expect(spawns[0]).toMatchObject({ type: "spawnRequest", reason: "egg", npcKind: "hopbit", count: 3, egg: "E2" });
+      await until("puzzle unlocked", () => quests(room).eggs.lockedFor("puzzler", "E2") === 0);
+    } finally {
+      EGG_LIMITS.lockMs = lockMs;
+    }
     for (const btn of ["rain", "leaf", "sun", "flame"]) b.send("interact", { target: `e2_btn_${btn}` });
     await until("pixel halo", () => invIds(b).includes("pixel_halo"));
     expect(b.you.medals).toContain("new_high_score");

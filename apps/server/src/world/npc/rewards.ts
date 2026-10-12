@@ -17,7 +17,11 @@ import { emitNpcEvent } from "./tuning.ts";
 
 type Rng = () => number;
 
-/** XP multiplier for killing at the same spawn point again within 5 minutes (−10% per kill, floor 30%). */
+/**
+ * XP multiplier for killing at the same spawn point again within 5 minutes (−10% per kill, floor 30%).
+ * `key` names the spawn source: a spawn point, a summoner, or an egg (penalty spawns share one key per
+ * egg, so farming wrong answers decays like farming one pack).
+ */
 export function repeatDecay(sys: NpcSystem, userId: string, key: string, now: number): number {
   const k = `${userId}|${key}`;
   const window = NPC_RULES.repeatWindowSeconds * 1000;
@@ -26,6 +30,17 @@ export function repeatDecay(sys: NpcSystem, userId: string, key: string, now: nu
   list.push(now);
   sys.repeatKills.set(k, list);
   return decay;
+}
+
+/** How long an idle planet-cosmetic pity counter is kept (ms); the counter is per life anyway. */
+export const PITY_IDLE_MS = 6 * 60 * 60_000;
+
+/** Drop reward bookkeeping nobody can use any more (expired decay windows, idle pity, old tags). */
+export function pruneRewardMaps(sys: NpcSystem, now: number) {
+  const window = NPC_RULES.repeatWindowSeconds * 1000;
+  for (const [k, list] of sys.repeatKills) if (!list.length || now - list[list.length - 1]! >= window) sys.repeatKills.delete(k);
+  for (const [k, p] of sys.cosmeticPity) if (now - p.at > PITY_IDLE_MS) sys.cosmeticPity.delete(k);
+  for (const [k, until] of sys.tagged) if (until <= now) sys.tagged.delete(k);
 }
 
 export function randomWeapon(level: number, rng: Rng, tier?: 1 | 2 | 3): InvItem {
@@ -53,7 +68,7 @@ export function rollDrops(sys: NpcSystem, n: Npc, top: PlayerActor, rng: Rng = M
         break;
     }
   }
-  if (n.def.temper !== "critter" && n.def.temper !== "passive" && n.def.family !== "egg" && !n.summoner) {
+  if (n.def.temper !== "critter" && n.def.temper !== "passive" && n.def.family !== "egg" && !n.summoner && !n.penalty) {
     const c = PLANET_COSMETIC[planet];
     const key = `${top.identity.userId}|${planet}`;
     const pity = sys.cosmeticPity.get(key);
@@ -62,7 +77,7 @@ export function rollDrops(sys: NpcSystem, n: Npc, top: PlayerActor, rng: Rng = M
       out.push({ id: c.id, tier: 1, qty: 1 });
       kills = 0;
     }
-    sys.cosmeticPity.set(key, { life: top.char.lifeStartedAt, kills });
+    sys.cosmeticPity.set(key, { life: top.char.lifeStartedAt, kills, at: sys.world.now() });
   }
   return out;
 }
@@ -94,7 +109,7 @@ export function rewardKill(sys: NpcSystem, n: Npc, killerId: string | null, now:
     if (e.amount >= NPC_RULES.xpShare * maxHp || (killer && killer.identity.userId === e.userId)) xpTo.push(p);
   }
   if (killer && !killer.dead && !xpTo.includes(killer)) xpTo.push(killer);
-  const key = n.point ? `p${n.point.id}` : n.summoner ? `s${n.summoner}` : `x${n.id}`;
+  const key = n.point ? `p${n.point.id}` : n.summoner ? `s${n.summoner}` : n.penalty ? `e${n.penalty.egg}` : `x${n.id}`;
   const gains = new Map<string, { p: PlayerActor; xp: number; coins: number }>();
   // XP, coins, drops, chest and saves land together; pile events go out after the commit (D26).
   const events: (() => void)[] = [];

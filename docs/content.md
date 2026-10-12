@@ -619,6 +619,9 @@ Rules:
 - The hidden medal is earned once per account and stays hidden in the medal list until earned.
 - The first account to claim each egg is engraved on that egg's plaque in Portus's **Hall of Firsts**
   (D): 9 plaques.
+- Anti-abuse (F12 review): a wrong E2/E5 answer locks that puzzle for the account for 15 s. Penalty
+  spawns dissolve after 90 s, are capped at 6 per account and 12 per world copy, and their repeat-kill
+  decay is shared per egg. The E7 keypad locks an account out for 60 s after 5 wrong codes in a row.
 
 | # | Planet | Name | Location concept | How to find it | Rare item | Hidden medal |
 |---|---|---|---|---|---|---|

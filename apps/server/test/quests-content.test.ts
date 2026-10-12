@@ -11,6 +11,8 @@ import { WEAPON_INDEX } from "@firstlight/shared/content/weapons";
 import { emitGameEvent, onGameEvent, type GameEvent } from "../src/world/events.ts";
 import { npcSystemOf } from "../src/world/npc/index.ts";
 import { emitNpcEvent } from "../src/world/npc/tuning.ts";
+import { EGG_LIMITS } from "../src/world/quests/eggs.ts";
+import type { QuestSystem } from "../src/world/quests/QuestSystem.ts";
 import { progressStore } from "../src/world/quests/store.ts";
 import { safeLeave, startServer } from "./helpers.ts";
 import { bot, ground, harness, invIds, me, near, objAt, offPad, padAt, serverRoom, sleep, tpAndWait, until, type Bot, tp } from "./quest-helpers.ts";
@@ -25,6 +27,7 @@ afterEach(async () => {
 
 const mission = (b: Bot, id: string) => b.you.missions.find((m: any) => m.id === id);
 const actorOf = (b: Bot) => serverRoom(b).actors.get(b.id)!;
+const quests = (b: Bot) => serverRoom(b).systems.find((s) => "eggs" in s) as QuestSystem;
 
 async function runPlanetMissions(b: Bot, body: Exclude<BodyId, "portus">) {
   await tpAndWait(b, objAt(`guide_${body}`));
@@ -170,9 +173,17 @@ describe("Easter eggs", () => {
     const spawns: GameEvent[] = [];
     onGameEvent(serverRoom(b), (e) => e.type === "spawnRequest" && spawns.push(e));
     await tpAndWait(b, objAt("e5_rope_lantern"));
-    b.send("interact", { target: "e5_rope_candle" });
-    await until("penalty", () => spawns.length === 1);
-    expect(spawns[0]).toMatchObject({ npcKind: "bonewalker", count: 2 });
+    const lockMs = EGG_LIMITS.lockMs;
+    EGG_LIMITS.lockMs = 600; // the ropes lock after a wrong order (15 s in play)
+    try {
+      b.send("interact", { target: "e5_rope_candle" });
+      await until("penalty", () => spawns.length === 1);
+      expect(spawns[0]).toMatchObject({ npcKind: "bonewalker", count: 2, egg: "E5" });
+      await until("bonewalkers raised", () => [...npcSystemOf(serverRoom(b))!.npcs.values()].filter((n) => n.penalty?.egg === "E5").length === 2);
+      await until("ropes unlocked", () => quests(b).eggs.lockedFor("ringer", "E5") === 0);
+    } finally {
+      EGG_LIMITS.lockMs = lockMs;
+    }
     for (const r of ["skull", "lantern", "candle"]) b.send("interact", { target: `e5_rope_${r}` });
     await until("candle crown", () => invIds(b).includes("candle_crown"));
     expect(b.you.medals).toContain("bellringer");

@@ -17,6 +17,22 @@ import { emitGameEvent } from "../events.ts";
 import { dist3, type V3 } from "../geometry.ts";
 import type { QuestPlayer, QuestSystem, ShotMsg } from "./QuestSystem.ts";
 
+/**
+ * Anti-abuse limits on the puzzles (server tuning, not content; tests change and restore them).
+ * A wrong E2/E5 answer raises penalty NPCs: the puzzle then locks for that account for `lockMs`,
+ * penalty NPCs dissolve after `ttlMs`, and at most `perPlayer` (per account) and `perBody` (per room)
+ * are alive at once. The E7 keypad locks an account out for `keypadLockMs` after `keypadTries`
+ * wrong codes in a row.
+ */
+export const EGG_LIMITS = {
+  lockMs: 15_000,
+  ttlMs: 90_000,
+  perPlayer: 6,
+  perBody: 12,
+  keypadTries: 5,
+  keypadLockMs: 60_000,
+};
+
 const RIDDLES: Partial<Record<EggId, string>> = {
   E2: "The plaque reads: “Rain feeds the leaf, the leaf drinks the sun, the sun lights the ember.” Four buttons: raindrop, leaf, sun, flame.",
   E5: "The plaque reads: “Ring for the dead, then the lost, then the living.” Three ropes: skull, broken lantern, candle.",
@@ -27,6 +43,10 @@ export class EggLogic {
   private readonly lamps: WorldObjectDef[];
   /** Lamp id → when it relights (ms); absent = lit. */
   private readonly lampsOff = new Map<string, number>();
+  /** `${userId}|${egg}` → when the puzzle unlocks again after a wrong answer (survives relog and death). */
+  private readonly locked = new Map<string, number>();
+  /** userId → wrong keypad codes in a row and the lockout end (E7). */
+  private readonly keypad = new Map<string, { fails: number; until: number }>();
 
   constructor(sys: QuestSystem) {
     this.sys = sys;
@@ -58,6 +78,8 @@ export class EggLogic {
   }
 
   tickRoom(now: number) {
+    for (const [k, until] of this.locked) if (until <= now) this.locked.delete(k);
+    for (const [k, v] of this.keypad) if (v.until && v.until <= now) this.keypad.delete(k);
     for (const [id, until] of this.lampsOff) {
       if (until > now) continue;
       this.lampsOff.delete(id);
@@ -78,8 +100,19 @@ export class EggLogic {
     this.sys.teleport(a, this.sys.around(d, 1.5, -1.5));
   }
 
-  private penalty(a: PlayerActor, npcKind: string, count: number) {
-    emitGameEvent(this.sys.room, { type: "spawnRequest", reason: "egg", npcKind, count, pos: actorPos(a), playerId: a.id });
+  private penalty(a: PlayerActor, egg: EggId, npcKind: string, count: number) {
+    this.locked.set(`${a.identity.userId}|${egg}`, Date.now() + EGG_LIMITS.lockMs);
+    emitGameEvent(this.sys.room, { type: "spawnRequest", reason: "egg", npcKind, count, pos: actorPos(a), playerId: a.id, egg });
+  }
+
+  /** The account is locked out of the E7 keypad right now. */
+  keypadLocked(userId: string, now = Date.now()): boolean {
+    return (this.keypad.get(userId)?.until ?? 0) > now;
+  }
+
+  /** Milliseconds until the account may try this puzzle again (0 = open). */
+  lockedFor(userId: string, egg: EggId, now = Date.now()): number {
+    return Math.max(0, (this.locked.get(`${userId}|${egg}`) ?? 0) - now);
   }
 
   // ---------------------------------------------------------------- triggers
@@ -114,6 +147,11 @@ export class EggLogic {
       case "E2":
       case "E5": {
         if (o.part === "plaque") return toast(RIDDLES[egg]!);
+        const wait = this.lockedFor(a.identity.userId, egg, now);
+        if (wait > 0) {
+          const s = Math.ceil(wait / 1000);
+          return toast(egg === "E2" ? `The cabinet is rebooting… (${s} s)` : `The ropes hang still. The bells are not ready (${s} s).`, "warn");
+        }
         const order: readonly string[] = egg === "E2" ? EGG_RULES.E2_ORDER : EGG_RULES.E5_ORDER;
         const seq = q.seq[egg];
         if (o.part === order[seq.length]) {
@@ -128,10 +166,10 @@ export class EggLogic {
         q.seq[egg] = [];
         if (egg === "E2") {
           toast("The cabinet buzzes: GAME OVER. Something hops out of the ruins!", "warn");
-          this.penalty(a, "hopbit", EGG_RULES.E2_PENALTY_HOPBITS);
+          this.penalty(a, egg, "hopbit", EGG_RULES.E2_PENALTY_HOPBITS);
         } else {
           toast("A wrong note. The water stirs and bones rise!", "warn");
-          this.penalty(a, "bonewalker", EGG_RULES.E5_PENALTY_BONEWALKERS);
+          this.penalty(a, egg, "bonewalker", EGG_RULES.E5_PENALTY_BONEWALKERS);
         }
         return;
       }
@@ -156,16 +194,26 @@ export class EggLogic {
       case "E6":
         if (this.isOpen(q, "E6")) return this.sys.claimEgg(a, "E6");
         return toast("The bell hangs from the “floor” above, out of reach from this side.");
-      case "E7":
+      case "E7": {
+        const k = this.keypad.get(a.identity.userId);
+        if (k && k.until > now) return toast(`KEYPAD LOCKED. Try again in ${Math.ceil((k.until - now) / 1000)} s`, "warn");
         if (code === undefined) {
           a.client.send("prompt", { kind: "keypad", target: o.id });
           return;
         }
         if (code === EGG_RULES.E7_CODE) {
+          this.keypad.delete(a.identity.userId);
           toast("The safe clicks open.");
           return this.sys.claimEgg(a, "E7");
         }
+        const fails = (k?.fails ?? 0) + 1;
+        if (fails >= EGG_LIMITS.keypadTries) {
+          this.keypad.set(a.identity.userId, { fails: 0, until: now + EGG_LIMITS.keypadLockMs });
+          return toast(`ACCESS DENIED. KEYPAD LOCKED for ${Math.round(EGG_LIMITS.keypadLockMs / 1000)} s`, "warn");
+        }
+        this.keypad.set(a.identity.userId, { fails, until: 0 });
         return toast("ACCESS DENIED", "warn");
+      }
       case "E8":
         if (this.isOpen(q, "E8")) {
           toast("The hatch opens into the Signal Room. A wall of CRTs flickers; a cloak of static hangs on a hook.");

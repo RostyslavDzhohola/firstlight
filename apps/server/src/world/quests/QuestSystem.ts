@@ -26,7 +26,7 @@ import { emitGameEvent, onGameEvent, type DamageEvent, type DeathEvent, type Gam
 import { npcSystemOf, onNpcEvent, type NpcEvent } from "../npc/index.ts";
 import { dist3, type V3 } from "../geometry.ts";
 import type { RoomSystem } from "../systems.ts";
-import { EggLogic } from "./eggs.ts";
+import { EGG_LIMITS, EggLogic } from "./eggs.ts";
 import { engrave, hallLines, onHallChanged } from "./hall.ts";
 import { runStage } from "./stage.ts";
 import { progressStore } from "./store.ts";
@@ -852,10 +852,19 @@ export class QuestSystem implements RoomSystem {
     const def = NPC_DEFS[idx]!;
     const [lo, hi] = defLevels(def, this.body as PlanetId);
     const level = Math.round((lo + hi) / 2);
-    for (let i = 0; i < Math.min(8, e.count); i++) {
-      const ang = (i / Math.max(1, e.count)) * Math.PI * 2;
+    let count = Math.min(8, e.count);
+    // Egg penalties are capped per account and per room, and dissolve after a while (review F12 B1).
+    let penalty: { egg: string; userId: string } | undefined;
+    if (e.reason === "egg") {
+      const a = e.playerId ? this.actor(e.playerId) : undefined;
+      if (!a || !e.egg) return;
+      penalty = { egg: e.egg, userId: a.identity.userId };
+      count = Math.max(0, Math.min(count, EGG_LIMITS.perPlayer - npcs.penaltyCount(penalty.userId), EGG_LIMITS.perBody - npcs.penaltyCount()));
+    }
+    for (let i = 0; i < count; i++) {
+      const ang = (i / Math.max(1, count)) * Math.PI * 2;
       const at = this.room.snapToGround(this.around(e.pos, Math.cos(ang) * 4, Math.sin(ang) * 4));
-      npcs.createNpc(idx, level, at, now, { roam: 8 });
+      npcs.createNpc(idx, level, at, now, penalty ? { roam: 8, penalty, ttlMs: EGG_LIMITS.ttlMs } : { roam: 8 });
     }
   }
 

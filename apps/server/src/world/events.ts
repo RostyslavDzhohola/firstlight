@@ -159,6 +159,8 @@ export interface SpawnRequestEvent {
   pos: V3;
   /** The player who triggered it (eggs). */
   playerId?: string;
+  /** The egg whose wrong answer raised it (penalty spawns are capped and expire). */
+  egg?: EggId;
 }
 
 export type GameEvent =

@@ -16,7 +16,7 @@ import { stepNpcProjectiles, type NpcProjectile } from "./attacks.ts";
 import { BossController } from "./boss.ts";
 import { onNpcHurt, think } from "./brain.ts";
 import { MODE, MODE_NAME, type Mode, type Npc } from "./npc.ts";
-import { rewardKill } from "./rewards.ts";
+import { pruneRewardMaps, rewardKill } from "./rewards.ts";
 import { activePull, applyMoveEffect, applyPull } from "./effects.ts";
 import { buildSpawnPoints, type SpawnPoint } from "./spawns.ts";
 import { makeGround, placeOnGround, type Ground } from "./steer.ts";
@@ -76,11 +76,12 @@ export class NpcSystem implements RoomSystem {
   avgTickMs = 0;
   private seq = 0;
   private lastScan = 0;
+  private lastPrune = 0;
   private readonly tokens = new Map<string, TokenBook>();
   private readonly recentHits = new Map<string, { t: number; amt: number }[]>();
   readonly tagged = new Map<string, number>();
   readonly repeatKills = new Map<string, number[]>();
-  readonly cosmeticPity = new Map<string, { life: number; kills: number }>();
+  readonly cosmeticPity = new Map<string, { life: number; kills: number; at: number }>();
   private grid = new Map<number, Npc[]>();
   private readonly restore: (() => void)[] = [];
 
@@ -116,11 +117,19 @@ export class NpcSystem implements RoomSystem {
       this.scan(now, sdt);
       this.auras();
     }
+    if (now - this.lastPrune >= 60_000) {
+      this.lastPrune = now;
+      pruneRewardMaps(this, now);
+    }
     this.boss?.tick(now, dt);
     this.buildGrid();
     for (const n of this.npcs.values()) {
       if (n.removeAt && now >= n.removeAt) {
         this.despawnNpc(n);
+        continue;
+      }
+      if (n.expiresAt && now >= n.expiresAt && !n.dead) {
+        this.dissolve(n, now);
         continue;
       }
       n.nearD = this.nearestLive(n.pos);
@@ -230,7 +239,13 @@ export class NpcSystem implements RoomSystem {
   }
 
   /** Create and register an NPC (ambient member, summon, admin spawn or boss). */
-  createNpc(defIndex: number, level: number, pos: V3, now: number, opts: { point?: SpawnPoint | null; member?: number; roam?: number; boss?: boolean; summoner?: string; instant?: boolean } = {}): Npc {
+  createNpc(
+    defIndex: number,
+    level: number,
+    pos: V3,
+    now: number,
+    opts: { point?: SpawnPoint | null; member?: number; roam?: number; boss?: boolean; summoner?: string; instant?: boolean; penalty?: { egg: string; userId: string }; ttlMs?: number } = {},
+  ): Npc {
     const def = NPC_DEFS[defIndex]!;
     const state = this.world.newNpcState();
     const hp = npcMaxHp(def, level);
@@ -297,6 +312,8 @@ export class NpcSystem implements RoomSystem {
       hpAcc: 0,
       gridAxis: -1,
       strafeSign: this.seq & 1 ? 1 : -1,
+      penalty: opts.penalty ?? null,
+      expiresAt: opts.ttlMs ? now + opts.ttlMs : 0,
       dead: false,
     };
     n.onDamaged = (amount, by) => this.onDamaged(n, amount, by);
@@ -305,6 +322,13 @@ export class NpcSystem implements RoomSystem {
     this.npcs.set(id, n);
     this.world.addNpc(n);
     return n;
+  }
+
+  /** Live egg-penalty NPCs in this room, or only those one account raised. */
+  penaltyCount(userId?: string): number {
+    let k = 0;
+    for (const n of this.npcs.values()) if (n.penalty && !n.dead && (userId === undefined || n.penalty.userId === userId)) k++;
+    return k;
   }
 
   /** Remove an NPC without rewards (despawn, egg exit, reset). */
