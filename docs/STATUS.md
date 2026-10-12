@@ -60,7 +60,7 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 | # | State | Evidence |
 |---|---|---|
 | F1 live | ✅ | https://firstlight.one4all.dev + api health; T3 browser loads and plays |
-| F2 40 bots | ✅ | 600 s, 0 failures, tick p95 ≤ 2.94 ms with NPCs (Measured numbers) |
+| F2 40 bots | ✅ | re-run on 668ec82 (all F12 fixes, 08:45Z): 40 bots × 600 s with --fire, 0 failures, tick p95 ≤ 2.86 ms, max 6.67 ms (Measured numbers) |
 | F3 < 30 s to play | ✅ | 8.0 s landing → playing (probe 3.5 s, warm-up 2.2 s), T3 browser, 03:20Z |
 | F4 fighting | ✅ | browser E2E T2 PvE + PvP (docs/e2e-2026-10-12.md) |
 | F5 death + own pile | ✅ | browser E2E T3 |
@@ -99,6 +99,11 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 | Horses (M11 #2) | MERGED acdfcb3 (deployed; Codex-reviewed) | — |
 
 ## Measured numbers
+
+- 08:45Z F2 re-run on production at 668ec82 (every F12 fix, NPCs, destruction, weather, horses): 40 load-test bots on one
+  Arcadia copy for 600 s with `--fire`: 0 failures/disconnects, 40/40 clients in all 22 samples; tick p50 ≤ 1.27 ms,
+  p95 ≤ 2.86 ms, max 6.67 ms (limit p95 ≤ 25 ms); RSS ≤ 218 MB; CPU ≈ 5.9 % of one core; 7.8 KB/s per bot
+  (0.029 GB per player-hour). **F2 still passes.**
 
 - 02:55Z local load test (M1, dev server, no NPCs yet): 40 bots joined Arcadia in 4.1 s, 0 failures;
   36-bot room tick p50 0.55 ms / p95 1.74 ms / max 3.74 ms; RSS 162 MB; downstream 21.8 KB/s per bot
