@@ -16,6 +16,8 @@ import {
 } from "three/tsl";
 import type { BodyLook } from "./looks.ts";
 import { SKY_MID_E, skyLutTexture } from "./skyLut.ts";
+import { SunLight } from "three/addons/lights/SunLight.js";
+import { SunLightNode } from "three/addons/lights/SunLightNode.js";
 import type { ResolvedSettings } from "./quality.ts";
 import { skyDir, type V3 } from "./sunFrame.ts";
 
@@ -159,11 +161,15 @@ export function applyLook(look: BodyLook, radius: number, waterLevel: number, s:
  * The sun and fill light in the player's local frame. The sky sun direction is smoothed over time;
  * the shadow-casting direction is quantised (updates only after ~0.4° of drift) and the shadow
  * camera snaps to texels, so shadows don't shimmer while the local frame rotates as you walk.
+ * Shadows: one DirectionalLight map around the player (Medium; High/Ultra by default), or with the
+ * opt-in `cascades` feature on High/Ultra, r186's SunLight (2 cascades fitted to the view frustum).
  */
 export class SunRig {
   readonly sun: THREE.DirectionalLight;
   readonly hemi: THREE.HemisphereLight;
   readonly sunDir = new THREE.Vector3(0, 1, 0);
+  /** Cascaded sun (High/Ultra, opt-in), replaces `sun` in the scene while active. */
+  cascaded: SunLight | null = null;
   private readonly shadowDir = new THREE.Vector3(0, 1, 0);
   private readonly target = new THREE.Vector3();
   private initialised = false;
@@ -171,16 +177,44 @@ export class SunRig {
   private mapSize = 1024;
   private readonly tmp: V3 = [0, 0, 0];
 
-  constructor(private readonly scene: THREE.Scene, private readonly look: BodyLook) {
+  constructor(private readonly scene: THREE.Scene, private readonly look: BodyLook, private readonly renderer?: THREE.WebGPURenderer) {
     this.sun = new THREE.DirectionalLight(look.sun, look.sunIntensity);
+    this.sun.name = "sun";
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.04;
     this.hemi = new THREE.HemisphereLight(look.hemiSky, look.hemiGround, look.hemiIntensity);
+    this.hemi.name = "skyFill";
     scene.add(this.sun, this.sun.target, this.hemi);
   }
 
   applySettings(s: ResolvedSettings) {
     const cast = s.on.shadows && s.shadows.mode === "map";
+    const useCascades = cast && s.on.cascades && s.shadows.cascadeSize > 0 && !!this.renderer;
+    if (useCascades) {
+      if (!this.cascaded) {
+        registerSunLight(this.renderer!);
+        this.cascaded = new SunLight(this.look.sun, this.look.sunIntensity);
+        this.cascaded.name = "sunCascaded";
+        this.cascaded.castShadow = true;
+        this.cascaded.shadow.bias = -0.0004;
+        this.cascaded.shadow.normalBias = 0.04;
+      }
+      const sh = this.cascaded.shadow;
+      if (sh.mapSize.x !== s.shadows.cascadeSize) {
+        sh.mapSize.set(s.shadows.cascadeSize, s.shadows.cascadeSize);
+        sh.map?.dispose();
+        (sh as { map: unknown }).map = null;
+      }
+      sh.camera.far = s.shadows.far;
+      this.cascaded.position.copy(this.shadowDir);
+      this.scene.remove(this.sun);
+      this.scene.add(this.cascaded);
+      return;
+    }
+    if (this.cascaded) {
+      this.scene.remove(this.cascaded);
+      if (!this.sun.parent) this.scene.add(this.sun);
+    }
     this.sun.castShadow = cast;
     if (!cast) return;
     if (this.mapSize !== s.shadows.mapSize || this.extent !== s.shadows.extent) {
@@ -216,6 +250,8 @@ export class SunRig {
       if (this.shadowDir.dot(this.sunDir) < 0.999975) this.shadowDir.copy(this.sunDir);
     }
     atmo.sunDir.value.copy(this.sunDir);
+    // SunLight shines from its position towards the origin: a pure direction.
+    if (this.cascaded) this.cascaded.position.copy(this.shadowDir);
 
     // Shadow camera basis: z = shadowDir, y = a stable perpendicular; snap the focus to texels.
     const z = this.shadowDir;
@@ -238,6 +274,17 @@ export class SunRig {
     this.sun.shadow.map?.dispose();
     this.sun.dispose();
     this.hemi.dispose();
+    if (this.cascaded) {
+      this.scene.remove(this.cascaded);
+      this.cascaded.dispose();
+    }
   }
 }
 
+const registered = new WeakSet<object>();
+/** r186: SunLight must be registered with the renderer's node library once. */
+function registerSunLight(renderer: THREE.WebGPURenderer) {
+  if (registered.has(renderer)) return;
+  registered.add(renderer);
+  (renderer as unknown as { library: { addLight(node: unknown, light: unknown): void } }).library.addLight(SunLightNode, SunLight);
+}

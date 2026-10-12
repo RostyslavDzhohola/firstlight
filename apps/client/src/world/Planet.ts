@@ -115,7 +115,7 @@ export class Planet {
     postUniforms.bloomStrength.value = this.look.bloomStrength;
     setGrade(this.look.grade);
 
-    this.rig = new SunRig(this.scene, this.look);
+    this.rig = new SunRig(this.scene, this.look, ctx.renderer);
     this.skyPlanets = new SkyPlanets(this.scene, this.look.skyPlanets);
     this.grass = new GrassSystem(this.body.radius, n);
     this.group.add(this.grass.group);

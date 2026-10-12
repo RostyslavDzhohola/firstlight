@@ -58,6 +58,8 @@ export interface BodyLook {
   bloomStrength: number;
   grade: GradeParams;
   skyPlanets: SkyPlanetSpec[];
+  /** Ambient light-mote tint (HDR-scaled in the particle system). */
+  mote: number;
   /** Single-scattering sky (Medium+): Rayleigh colour multiplier, Mie (haze/dust) multiplier and
    * how much of it replaces the art gradient (0 = art only, 1 = physics only). */
   scatter: { rayleigh: [number, number, number]; mie: number; mix: number };
@@ -86,6 +88,7 @@ export const LOOKS: Record<BodyId, BodyLook> = {
     grassRoot: 0x3f7a35, grassTip: 0x9ccc6a, grassHeight: 0.38,
     exposure: 1.0, bloomThreshold: 1.25, bloomStrength: 0.35,
     grade: { slope: [1.04, 1.0, 0.95], offset: [0, 0, 0], power: [1, 1, 1], saturation: 1.08, hue: 0 },
+    mote: 0xffe2b0,
     scatter: { rayleigh: [1, 1, 1], mie: 1.0, mix: 0.7 },
     skyPlanets: [
       { body: "arcadia", elevDeg: 28, azDeg: 35, sizeDeg: 7 },
@@ -102,6 +105,7 @@ export const LOOKS: Record<BodyId, BodyLook> = {
     grassRoot: 0x2c7a34, grassTip: 0x9fdc58, grassHeight: 0.45,
     exposure: 1.0, bloomThreshold: 1.25, bloomStrength: 0.35,
     grade: { slope: [0.97, 1.03, 1.02], offset: [0, 0.004, 0.006], power: [1, 1, 1], saturation: 1.18, hue: 0 },
+    mote: 0xffe08a,
     scatter: { rayleigh: [0.92, 1.0, 1.05], mie: 1.0, mix: 0.7 },
     skyPlanets: [
       { body: "portus", elevDeg: 22, azDeg: 300, sizeDeg: 3 },
@@ -118,6 +122,7 @@ export const LOOKS: Record<BodyId, BodyLook> = {
     grassRoot: 0x2a3324, grassTip: 0x6e7a4a, grassHeight: 0.5,
     exposure: 1.05, bloomThreshold: 1.1, bloomStrength: 0.4,
     grade: { slope: [1.0, 0.95, 1.08], offset: [0.006, 0, 0.016], power: [1.04, 1.02, 1.0], saturation: 1.06, hue: -0.02 },
+    mote: 0x9effd8,
     scatter: { rayleigh: [1.35, 0.85, 1.2], mie: 1.7, mix: 0.75 },
     skyPlanets: [
       { body: "portus", elevDeg: 30, azDeg: 40, sizeDeg: 3 },
@@ -134,6 +139,7 @@ export const LOOKS: Record<BodyId, BodyLook> = {
     grassRoot: 0x7a5a30, grassTip: 0xc8a060, grassHeight: 0.3,
     exposure: 1.0, bloomThreshold: 1.4, bloomStrength: 0.3,
     grade: { slope: [1.06, 0.99, 0.95], offset: [0, 0.004, 0.012], power: [1, 1, 1], saturation: 1.12, hue: 0 },
+    mote: 0x8ff0ea,
     scatter: { rayleigh: [1.0, 1.0, 1.0], mie: 2.2, mix: 0.7 },
     skyPlanets: [
       { body: "portus", elevDeg: 18, azDeg: 80, sizeDeg: 2.5 },

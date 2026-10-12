@@ -17,6 +17,8 @@ import { BlobShadows } from "./blobShadows.ts";
 import { SkyPlanets } from "./skyPlanets.ts";
 import { LOOKS } from "./looks.ts";
 import { buildPost } from "./post.ts";
+import { SunLight } from "three/addons/lights/SunLight.js";
+import { SunLightNode } from "three/addons/lights/SunLightNode.js";
 
 const fakeCanvas = () =>
   ({ style: {}, width: 800, height: 600, addEventListener() {}, removeEventListener() {}, getContext() { return null; } }) as unknown as HTMLCanvasElement;
@@ -130,6 +132,20 @@ for (const backendName of ["webgpu", "webgl2"] as const) {
         scene.add(mesh);
         expectClean(build(renderer, scene, camera, mesh));
       }
+    });
+
+    it("terrain lit by the cascaded SunLight (High/Ultra opt-in)", () => {
+      const scene = new THREE.Scene();
+      (renderer as any).library.addLight(SunLightNode, SunLight);
+      const sun = new SunLight(0xffffff, 3);
+      sun.castShadow = true;
+      sun.position.set(0.3, 0.8, 0.2);
+      scene.add(sun, new THREE.HemisphereLight(0x8899ff, 0x443322, 1));
+      scene.fogNode = radialFogNode();
+      const mesh = new THREE.Mesh(terrainGeometry(), terrainMaterialFor(settingsFor("high")));
+      mesh.receiveShadow = true;
+      scene.add(mesh);
+      expectClean(build(renderer, scene, camera, mesh));
     });
 
     it("water: levels 0–3", () => {

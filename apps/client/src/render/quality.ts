@@ -25,6 +25,7 @@ export const FEATURES = [
   "trees",
   "water",
   "shadows",
+  "cascades",
   "ao",
   "traa",
   "fxaa",
@@ -41,7 +42,7 @@ export const FEATURES = [
 export type Feature = (typeof FEATURES)[number];
 
 /** Features that are off unless the user opts in (not yet verified visually). */
-const DEFAULT_OFF: ReadonlySet<Feature> = new Set<Feature>(["traa"]);
+const DEFAULT_OFF: ReadonlySet<Feature> = new Set<Feature>(["traa", "cascades"]);
 
 export interface TierSpec {
   dprCap: number;
@@ -52,7 +53,9 @@ export interface TierSpec {
   sky: { scatterSteps: [number, number]; planetAtmospheres: boolean };
   fog: { height: boolean; aerial: boolean };
   terrain: { detailLayers: 0 | 2 | 4; normals: boolean; bakedSun: boolean };
-  shadows: { mode: "blob" | "map"; mapSize: number; extent: number };
+  /** Single-map mode: `extent` = half-size of the box around the player. Cascades (High+,
+   * opt-in): SunLight with 2 cascades of `mapSize`² out to `far` metres. */
+  shadows: { mode: "blob" | "map"; mapSize: number; extent: number; far: number; cascadeSize: number };
   grass: { count: number; radius: number; segments: 1 | 2 | 3 };
   props: { fullTo: number; lodTo: number };
   /** 0 colour + fresnel, 1 + baked depth + foam, 2 + ripples, 3 + (reserved: SSR on the nearest lake). */
@@ -69,7 +72,7 @@ export const TIER_TABLE: Record<Tier, TierSpec> = {
     sky: { scatterSteps: [0, 0], planetAtmospheres: false },
     fog: { height: false, aerial: true },
     terrain: { detailLayers: 0, normals: false, bakedSun: true },
-    shadows: { mode: "blob", mapSize: 0, extent: 0 },
+    shadows: { mode: "blob", mapSize: 0, extent: 0, far: 0, cascadeSize: 0 },
     grass: { count: 25_000, radius: 25, segments: 1 },
     props: { fullTo: 15, lodTo: 140 },
     water: 0,
@@ -81,7 +84,7 @@ export const TIER_TABLE: Record<Tier, TierSpec> = {
     sky: { scatterSteps: [8, 4], planetAtmospheres: false },
     fog: { height: true, aerial: true },
     terrain: { detailLayers: 2, normals: false, bakedSun: false },
-    shadows: { mode: "map", mapSize: 1024, extent: 20 },
+    shadows: { mode: "map", mapSize: 1024, extent: 20, far: 40, cascadeSize: 0 },
     grass: { count: 80_000, radius: 40, segments: 2 },
     props: { fullTo: 25, lodTo: 180 },
     water: 1,
@@ -93,7 +96,7 @@ export const TIER_TABLE: Record<Tier, TierSpec> = {
     sky: { scatterSteps: [16, 8], planetAtmospheres: true },
     fog: { height: true, aerial: true },
     terrain: { detailLayers: 4, normals: true, bakedSun: false },
-    shadows: { mode: "map", mapSize: 2048, extent: 40 },
+    shadows: { mode: "map", mapSize: 2048, extent: 40, far: 80, cascadeSize: 1024 },
     grass: { count: 200_000, radius: 60, segments: 2 },
     props: { fullTo: 40, lodTo: 220 },
     water: 2,
@@ -105,7 +108,7 @@ export const TIER_TABLE: Record<Tier, TierSpec> = {
     sky: { scatterSteps: [16, 8], planetAtmospheres: true },
     fog: { height: true, aerial: true },
     terrain: { detailLayers: 4, normals: true, bakedSun: false },
-    shadows: { mode: "map", mapSize: 2048, extent: 60 },
+    shadows: { mode: "map", mapSize: 2048, extent: 60, far: 150, cascadeSize: 2048 },
     grass: { count: 500_000, radius: 85, segments: 3 },
     props: { fullTo: 60, lodTo: 260 },
     water: 3,
@@ -214,6 +217,8 @@ export function resolveSettings(tier: Tier, auto: boolean, webgpu: boolean, stor
   if (on.traa) on.fxaa = false;
   if (!on.sky) on.skyplanets = false;
   if (!on.particles) on.motes = false;
+  // Cascaded sun shadows only on High/Ultra with shadow maps.
+  on.cascades &&= on.shadows && spec.shadows.mode === "map" && t >= 2;
   return { ...spec, tier, auto, webgpu, on, userScale: stored.renderScale };
 }
 

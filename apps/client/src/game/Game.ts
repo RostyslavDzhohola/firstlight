@@ -29,6 +29,7 @@ function hideLoading() {
 
 /** ?bench runs without a server unless ?online is also given; ?offline forces it anywhere. */
 const OFFLINE = flags.has("offline") || (flags.has("bench") && !flags.has("online"));
+const FX_DEMO = flags.has("fxdemo");
 
 export class Game {
   ctx!: RenderCtx;
@@ -47,6 +48,7 @@ export class Game {
   private running = false;
   private probed = false;
   private detailTick = 0;
+  private nextFxDemo = 0;
 
   async start(body: BodyId) {
     setLoading("Starting the renderer…", 0.05);
@@ -82,6 +84,18 @@ export class Game {
     this.ctx.renderer.setAnimationLoop(() => this.frame());
   }
 
+  /** ?fxdemo: a burst every 0.8 s around the focus, cycling colours (particle look check). */
+  private fxDemo(now: number, focus: THREE.Vector3) {
+    this.nextFxDemo = now + 800;
+    const up = focus.clone().normalize();
+    const side = new THREE.Vector3(1, 0, 0).cross(up);
+    if (side.lengthSq() < 1e-6) side.set(0, 0, 1).cross(up);
+    side.normalize().applyAxisAngle(up, (now / 1000) % (Math.PI * 2));
+    const p = focus.clone().addScaledVector(side, 3).addScaledVector(up, 1);
+    const colors = [0x36f9f6, 0xffb86b, 0xff7edb, 0x9cff6b, 0xffd166];
+    this.burst(p, colors[Math.floor(now / 800) % colors.length]!, 80);
+  }
+
   /** Reusable "digital matter is light" burst for spawns, deaths, loot and teleports. */
   burst(position: THREE.Vector3, color: THREE.ColorRepresentation, count: number, opts?: BurstOptions): number {
     return this.particles.burst(position, color, count, opts);
@@ -102,6 +116,7 @@ export class Game {
     this.planet?.dispose();
     this.bodyId = body;
     this.planet = new Planet(this.ctx, body);
+    this.particles.setMoteColor(this.planet.look.mote);
     this.player ??= new PlayerController(this.planet.terrain, this.planet.body.waterLevel);
     this.player.setTerrain(this.planet.terrain, this.planet.body.waterLevel);
 
@@ -291,6 +306,7 @@ export class Game {
 
     this.planet.update(focus.x, focus.y, focus.z, this.ctx.camera, now, dt);
     if (!this.bench) this.player.placeCamera(this.ctx.camera);
+    if (FX_DEMO && now >= this.nextFxDemo) this.fxDemo(now, focus);
     this.particles.update(dt, this.ctx.camera.position, now);
     if (this.ctx.settings.on.chars) {
       const blobs: { x: number; y: number; z: number; r: number }[] = [];
