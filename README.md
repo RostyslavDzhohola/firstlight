@@ -12,7 +12,8 @@ Play: https://firstlight.one4all.dev (desktop browser, keyboard and mouse, WebGP
   creatures, camps and three bosses that need a group.
 - Death drops your inventory in a pile; you start over at level 1 with your account's medals.
 - Missions, medals, hidden Easter eggs and a Hall of Firsts.
-- Proximity voice (WebRTC over a TURN relay), a phrase wheel, parties, blocking and reporting.
+- Proximity voice (WebRTC over a TURN relay, on once the relay key is configured), a phrase wheel,
+  parties, blocking and reporting.
 - Breakable props, weather and a day/night cycle, horses, photo mode.
 - Guests play instantly; an email code saves the account.
 
@@ -37,7 +38,7 @@ server), extension points and tests.
 - `packages/shared`: deterministic code both sides use (terrain, content catalogues, protocol).
 - `apps/assets-worker`: a Cloudflare Worker for large assets.
 
-The game was built by AI agents (Claude Opus 5.5 with Codex reviewers) from the spec in
+The game was built by AI agents (Claude Opus 5.5, reviewed by Codex Sol, Opus 5.5 and Sonnet 5.5) from the spec in
 `docs/SPEC.md`; decisions are in `docs/DECISIONS.md`, progress in `docs/STATUS.md`, and the code
 reviews in `docs/reviews/`.
 

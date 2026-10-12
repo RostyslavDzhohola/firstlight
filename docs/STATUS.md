@@ -105,8 +105,8 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 
 - 09:30Z F11 re-run on the live site at 668ec82: `?bench=g1&tier=low&cpuslow=4` (4× main-thread slowdown, D29),
   Low, 1125×661 internal, 40-avatar crowd, 180 s warm + 60 s: **59.2 fps p50 (mean 57.0), frame p95 21.9 ms, p99
-  25.6 ms, max 40.5 ms, 0 shader builds**, draws mean 182 (was 51.3 fps p50 / p95 29.8 ms at 03:45Z: the F12 client
-  lane removed per-frame allocations).
+  25.6 ms, max 40.5 ms, 0 shader builds**, draws mean 182 (was 51.3 fps p50 / p95 29.8 ms at 03:45Z; the cause of the
+  improvement wasn't isolated, the F12 client lane's per-frame-allocation removal is one candidate).
 
 - 09:20Z F10 re-run on the live site at 668ec82 (all F12 fixes + weather/day-night, horses, prop collision), T3 Code's
   built-in browser (Chromium/WebGPU) on the owner's M1, 1785×1048 canvas, Medium, `?bench=g1` (180 s warm + 60 s):
