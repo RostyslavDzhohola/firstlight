@@ -94,7 +94,7 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 | F12 docs + repo hygiene | MERGED 8535ae7 | — |
 | F12 inventory panel + onboarding | Codex round 1 fixed; waits for the data lane (bubble test) | ../fl-wt-inv (lane/f12-ui) |
 | F12 social/voice (Opus B1, block/party, reports, OTP, guest pruning) | MERGED c45f556 (Codex round 1 fixed) | — |
-| F12 NPC/boss (Opus B2 respawn persistence, evade, arena scaling/cover, NPC LOS) | Opus sub-agent | ../fl-wt-npc (lane/f12-npc) |
+| F12 NPC/boss (Opus B2 respawn persistence, evade, arena scaling/cover, NPC LOS) | MERGED f787f37 (Codex round 1 fixed; migration 3 = copy_state) | — |
 | F12 weather/sky (override broadcast, stage sky, Hollowmere look, nits) | MERGED 5e9d5ce (Codex round 1 fixed) | — |
 | Horses (M11 #2) | MERGED acdfcb3 (deployed; Codex-reviewed) | — |
 
