@@ -79,6 +79,17 @@ describe("day/night", () => {
     expect(lightFactors(0.06, LOOKS.hollowmere.sunElev).dusk).toBeGreaterThan(0.3);
   });
 
+  it("the bench puts the sun where each look puts it (elevation and azimuth), as before day/night", () => {
+    for (const b of ["arcadia", "hollowmere", "meridian", "portus"] as const) {
+      const { env, rig, look } = setup(b);
+      env.setBenchMode(b, look);
+      run(env, 0.1);
+      expect(rig.sky.sunElev).toBe(look.sunElev);
+      expect(rig.sky.sunAz).toBe(look.sunAz);
+      expect(env.dayT).toBeCloseTo(referenceDayT(b, look.sunElev), 9);
+    }
+  });
+
   it("night is readable: moon key, bright fill, raised exposure, stars, glowing pads", () => {
     const { env, rig, look, particles, ctx } = setup("arcadia");
     env.timeOverride = 0; // midnight

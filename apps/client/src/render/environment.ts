@@ -119,6 +119,8 @@ export class Environment {
   private readonly speed = Math.max(0, Number(flags.get("dayspeed")) || 1);
   // Overrides (URL dev flags, photo mode, bench).
   timeOverride: number | null = null;
+  /** Bench: the look's own sun (elevation and azimuth), like ?nodaynight; a ?time flag wins. */
+  private referenceSun = false;
   weatherOverride: { weather: Weather; intensity: number } | null = null;
   private overrideSince = 0;
   /** Menu grade (look rule 1) while a menu is open. */
@@ -196,9 +198,13 @@ export class Environment {
     }
   }
 
-  /** Bench: a fixed, repeatable sky (the body's reference time, clear unless the URL says otherwise). */
-  setBenchMode(body: BodyId, look: BodyLook) {
-    if (this.timeOverride === null) this.timeOverride = referenceDayT(body, look.sunElev);
+  /**
+   * Bench: a fixed, repeatable sky: the look's reference sun (the same light as before day/night,
+   * so runs stay comparable), clear unless the URL says otherwise. The schedule reaches the
+   * reference elevation at another azimuth, so this doesn't go through the time of day.
+   */
+  setBenchMode(_body: BodyId, _look: BodyLook) {
+    this.referenceSun = true;
     if (!this.weatherOverride) this.weatherOverride = { weather: "clear", intensity: 0 };
   }
 
@@ -257,7 +263,7 @@ export class Environment {
 
     // ---- time of day
     let elev: number, az: number;
-    if (!on.daynight && this.timeOv === null) {
+    if ((!on.daynight || this.referenceSun) && this.timeOv === null) {
       elev = look.sunElev;
       az = look.sunAz;
       this.dayT = referenceDayT(this.body, elev);
