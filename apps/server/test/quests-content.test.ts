@@ -179,7 +179,7 @@ describe("Easter eggs", () => {
       b.send("interact", { target: "e5_rope_candle" });
       await until("penalty", () => spawns.length === 1);
       expect(spawns[0]).toMatchObject({ npcKind: "bonewalker", count: 2, egg: "E5" });
-      await until("bonewalkers raised", () => [...npcSystemOf(serverRoom(b))!.npcs.values()].filter((n) => n.penalty?.egg === "E5").length === 2);
+      await until("bonewalkers raised", () => [...npcSystemOf(serverRoom(b))!.npcs.values()].filter((n) => n.spawned?.key === "E5").length === 2);
       await until("ropes unlocked", () => quests(b).eggs.lockedFor("ringer", "E5") === 0);
     } finally {
       EGG_LIMITS.lockMs = lockMs;

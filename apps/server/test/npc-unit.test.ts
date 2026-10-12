@@ -77,16 +77,16 @@ describe("rewards", () => {
   it("egg penalty NPCs dissolve at their TTL without rewards, and never feed the cosmetic pity", () => {
     const w = fakeWorld("arcadia");
     const p = w.addPlayer("p", arcadiaPoint(80), 3);
-    const n = w.sys.createNpc(NPC_INDEX.get("hopbit")!, 3, arcadiaPoint(84), w.clock.t, { instant: true, penalty: { egg: "E2", userId: "u-p" }, ttlMs: 1000 });
-    expect(w.sys.penaltyCount()).toBe(1);
-    expect(w.sys.penaltyCount("u-p")).toBe(1);
-    expect(w.sys.penaltyCount("someone-else")).toBe(0);
+    const n = w.sys.createNpc(NPC_INDEX.get("hopbit")!, 3, arcadiaPoint(84), w.clock.t, { instant: true, spawned: { reason: "egg", key: "E2", userId: "u-p" }, ttlMs: 1000 });
+    expect(w.sys.spawnedCount("egg")).toBe(1);
+    expect(w.sys.spawnedCount("egg", "u-p")).toBe(1);
+    expect(w.sys.spawnedCount("egg", "someone-else")).toBe(0);
     expect(rollDrops(w.sys, n, p, () => 0)).not.toContainEqual(expect.objectContaining({ id: PLANET_COSMETIC.arcadia.id }));
     w.step(900);
     expect(n.dead).toBe(false);
     w.step(200);
     expect(n.dead).toBe(true);
-    expect(w.sys.penaltyCount()).toBe(0);
+    expect(w.sys.spawnedCount("egg")).toBe(0);
     w.step(1300);
     expect(w.sys.npcs.has(n.id)).toBe(false);
     expect(p.char.xp).toBe(0);

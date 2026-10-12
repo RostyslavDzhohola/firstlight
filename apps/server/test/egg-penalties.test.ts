@@ -23,7 +23,7 @@ afterEach(async () => {
 
 const quests = (b: Bot) => serverRoom(b).systems.find((s) => "eggs" in s) as QuestSystem;
 const penaltyNpcs = (b: Bot, userId?: string) =>
-  [...npcSystemOf(serverRoom(b))!.npcs.values()].filter((n) => n.penalty && !n.dead && (userId === undefined || n.penalty.userId === userId));
+  [...npcSystemOf(serverRoom(b))!.npcs.values()].filter((n) => n.spawned?.reason === "egg" && !n.dead && (userId === undefined || n.spawned.userId === userId));
 
 const lastSend = new WeakMap<Bot, number>();
 /** Send one interaction and wait for its toast. Quest actions are rate-limited to 5/s, so sends are paced. */
@@ -75,7 +75,7 @@ describe("egg penalties", () => {
     expect(await press(b, "e5_rope_candle")).toContain("bones rise");
     await until("2 bonewalkers", () => penaltyNpcs(b).length === 2);
     const npcs = npcSystemOf(serverRoom(b))!;
-    await until("dissolved and removed", () => [...npcs.npcs.values()].every((n) => !n.penalty), 6000);
+    await until("dissolved and removed", () => [...npcs.npcs.values()].every((n) => !n.spawned), 6000);
     expect(b.count("npcKill")).toBe(0);
   });
 

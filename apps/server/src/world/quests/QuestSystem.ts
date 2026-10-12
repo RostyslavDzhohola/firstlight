@@ -28,8 +28,9 @@ import { dist3, type V3 } from "../geometry.ts";
 import type { RoomSystem } from "../systems.ts";
 import { EGG_LIMITS, EggLogic } from "./eggs.ts";
 import { engrave, hallLines, onHallChanged } from "./hall.ts";
-import { runStage } from "./stage.ts";
+import { runStage, STAGE_LIMITS } from "./stage.ts";
 import { progressStore } from "./store.ts";
+import { emitPileEvent, pileStore } from "../piles.ts";
 
 export const QUEST_RULES = {
   /** Touching a pad = feet within this many metres of its centre (D2). */
@@ -45,6 +46,10 @@ export const QUEST_RULES = {
   REACH_ARM_M: 60,
   /** Long Shot: the Stillshot must have fired within this window before the kill. */
   LONG_SHOT_WINDOW_MS: 150,
+  /** A boss fight an admin touched (heal, damage, boss spawn…) stays "assisted" this long. */
+  ADMIN_ASSIST_MS: 15 * 60_000,
+  /** Expired piles (staged scenes) are swept this often. */
+  PILE_SWEEP_MS: 5000,
   SLOW_TICK_MS: 200,
 };
 
@@ -115,6 +120,13 @@ export class QuestSystem implements RoomSystem {
   /** Boss encounters (NPC id → account id → hurt by the boss since their first hit), for Untouchable. */
   private readonly bossHits = new Map<string, Map<string, { hurt: boolean }>>();
   private restoreBroadcast: (() => void) | null = null;
+  /** Until when this copy counts as staged (an admin scene ran here): see `official`. */
+  private stagedUntil = 0;
+  /** Last admin intervention in this copy's boss fight. */
+  private bossAssistedAt = 0;
+  /** `${userId}|${egg}`: steps an admin opened for that player (the claim that follows is assisted). */
+  private readonly assistedEggs = new Set<string>();
+  private lastSweep = 0;
 
   constructor(room: BodyRoom) {
     this.room = room;
@@ -201,6 +213,30 @@ export class QuestSystem implements RoomSystem {
 
   actor(id: string): PlayerActor | undefined {
     return this.room.actors.get(id);
+  }
+
+  /** An admin staged scene ran in this copy (stage.ts). */
+  markStaged() {
+    this.stagedUntil = Date.now() + STAGE_LIMITS.stagedMs;
+  }
+
+  /**
+   * Whether permanent records (medals from boss kills, egg claims and Long Shot; Hall of Firsts) may
+   * be written: not in a copy that is staging a scene, and not for a boss fight an admin assisted.
+   */
+  official(opts: { boss?: boolean } = {}): boolean {
+    const now = Date.now();
+    if (now < this.stagedUntil) return false;
+    return !(opts.boss && now - this.bossAssistedAt < QUEST_RULES.ADMIN_ASSIST_MS);
+  }
+
+  /** Admin tools touching a boss (or used while its fight is on) make that fight assisted. */
+  private onAdminAction(e: Extract<GameEvent, { type: "admin" }>) {
+    const boss = npcSystemOf(this.room)?.boss;
+    if (!boss) return;
+    const readOnly = e.cmd === "npc:list" || (e.cmd === "npc:boss" && (e.action ?? "info") === "info");
+    const onBoss = (e.cmd === "npc:hurt" && !!e.targetId && !!this.room.npcActors.get(e.targetId)?.boss) || (e.cmd === "npc:boss" && !readOnly);
+    if (onBoss || (!readOnly && (boss.engaged || this.bossHits.size > 0))) this.bossAssistedAt = Date.now();
   }
 
   qp(a: PlayerActor): QuestPlayer {
@@ -385,6 +421,11 @@ export class QuestSystem implements RoomSystem {
       }
     }
     this.eggs.tickRoom(now);
+    if (now - this.lastSweep >= QUEST_RULES.PILE_SWEEP_MS) {
+      this.lastSweep = now;
+      // Expired piles (staged scenes): gone for every copy of the body.
+      for (const id of pileStore.current.sweep(this.body, now)) emitPileEvent({ kind: "remove", id, body: this.body });
+    }
   }
 
   // ---------------------------------------------------------------- pads and fast travel
@@ -685,8 +726,12 @@ export class QuestSystem implements RoomSystem {
     if (o.egg) this.eggs.interact(a, this.qp(a), o, code);
   }
 
-  /** Grant an egg's rare item (once per life), its hidden medal (once per account) and try the Hall of Firsts. */
-  claimEgg(a: PlayerActor, eggId: EggId) {
+  /**
+   * Grant an egg's rare item (once per life), its hidden medal (once per account) and try the Hall of
+   * Firsts. Admin-assisted claims (the admin `egg` command, or a step an admin opened) and claims in a
+   * staged copy give the item only: no medal, no plaque.
+   */
+  claimEgg(a: PlayerActor, eggId: EggId, opts: { assisted?: boolean } = {}) {
     const egg = EGG_BY_ID.get(eggId);
     if (!egg || a.dead) return;
     const life = this.life(a);
@@ -694,10 +739,15 @@ export class QuestSystem implements RoomSystem {
       this.toast(a, `You already took the ${egg.itemName} in this life`, "info");
       return;
     }
+    const helped = this.assistedEggs.delete(`${a.identity.userId}|${eggId}`);
     this.grant(a, [{ ...egg.item }], () => {
       life.eggs.push(eggId);
     });
     this.toast(a, `Secret found: ${egg.name} — ${egg.itemName}`, "medal");
+    if (opts.assisted || helped || !this.official()) {
+      this.toast(a, "Admin-assisted or staged: no medal or Hall of Firsts entry", "info");
+      return;
+    }
     this.award(a, egg.medal);
     if (!a.identity.loadtest && engrave(eggId, a.identity.userId, a.identity.name)) {
       this.toast(a, "You found it first — your name is engraved on the Hall of Firsts in Portus", "medal");
@@ -763,6 +813,9 @@ export class QuestSystem implements RoomSystem {
       case "spawnRequest":
         this.spawn(e);
         break;
+      case "admin":
+        this.onAdminAction(e);
+        break;
       default:
         break;
     }
@@ -771,10 +824,16 @@ export class QuestSystem implements RoomSystem {
   private onKillForMedals(e: KillEvent) {
     // Long Shot: the killing blow from a Stillshot at ≥ 120 m.
     const killer = e.killerId ? this.actor(e.killerId) : undefined;
-    if (killer && e.pos && this.firedStillshot(killer) && dist3(actorPos(killer), e.pos) >= MEDAL_RULES.LONG_SHOT_METRES) this.award(killer, "long_shot");
+    if (killer && e.pos && this.official() && this.firedStillshot(killer) && dist3(actorPos(killer), e.pos) >= MEDAL_RULES.LONG_SHOT_METRES) this.award(killer, "long_shot");
     if (!e.bossId) return;
     const medal = e.bossId === "tidewrath" ? "tide_turner" : e.bossId === "hollow_king" ? "regicide" : "decommissioned";
     const eligible = (e.creditIds ?? (e.killerId ? [e.killerId] : [])).map((id) => this.actor(id)).filter((a): a is PlayerActor => !!a);
+    if (!this.official({ boss: true })) {
+      // Staged scene or admin-assisted fight: loot as usual, but nothing permanent.
+      this.bossHits.delete(e.npcKind);
+      for (const a of eligible) this.toast(a, "Admin-assisted or staged fight: no medals or Hall of Firsts", "info");
+      return;
+    }
     for (const a of eligible) {
       this.award(a, medal);
       const life = this.life(a);
@@ -816,7 +875,7 @@ export class QuestSystem implements RoomSystem {
       }
       // Long Shot on an NPC: this hit killed it, from a Stillshot that just fired, 120 m or more away.
       const npc = this.room.npcActors.get(e.targetId);
-      if (e.hpAfter <= 0 && npc && this.firedStillshot(a) && dist3(actorPos(a), actorPos(npc)) >= MEDAL_RULES.LONG_SHOT_METRES) this.award(a, "long_shot");
+      if (e.hpAfter <= 0 && npc && this.official() && this.firedStillshot(a) && dist3(actorPos(a), actorPos(npc)) >= MEDAL_RULES.LONG_SHOT_METRES) this.award(a, "long_shot");
     }
   }
 
@@ -852,19 +911,26 @@ export class QuestSystem implements RoomSystem {
     const def = NPC_DEFS[idx]!;
     const [lo, hi] = defLevels(def, this.body as PlanetId);
     const level = Math.round((lo + hi) / 2);
+    // Egg penalties and staged scenes are capped (per account and per room) and dissolve after a
+    // while; they never become permanent NPCs (review F12 B1, Opus nit).
     let count = Math.min(8, e.count);
-    // Egg penalties are capped per account and per room, and dissolve after a while (review F12 B1).
-    let penalty: { egg: string; userId: string } | undefined;
+    let spawned: { reason: "egg" | "stage"; key: string; userId: string };
+    let ttlMs: number;
     if (e.reason === "egg") {
       const a = e.playerId ? this.actor(e.playerId) : undefined;
       if (!a || !e.egg) return;
-      penalty = { egg: e.egg, userId: a.identity.userId };
-      count = Math.max(0, Math.min(count, EGG_LIMITS.perPlayer - npcs.penaltyCount(penalty.userId), EGG_LIMITS.perBody - npcs.penaltyCount()));
+      spawned = { reason: "egg", key: e.egg, userId: a.identity.userId };
+      ttlMs = EGG_LIMITS.ttlMs;
+      count = Math.min(count, EGG_LIMITS.perPlayer - npcs.spawnedCount("egg", spawned.userId), EGG_LIMITS.perBody - npcs.spawnedCount("egg"));
+    } else {
+      spawned = { reason: "stage", key: "stage", userId: e.playerId ? (this.actor(e.playerId)?.identity.userId ?? "") : "" };
+      ttlMs = STAGE_LIMITS.ttlMs;
+      count = Math.min(count, STAGE_LIMITS.perBody - npcs.spawnedCount("stage"));
     }
     for (let i = 0; i < count; i++) {
       const ang = (i / Math.max(1, count)) * Math.PI * 2;
       const at = this.room.snapToGround(this.around(e.pos, Math.cos(ang) * 4, Math.sin(ang) * 4));
-      npcs.createNpc(idx, level, at, now, penalty ? { roam: 8, penalty, ttlMs: EGG_LIMITS.ttlMs } : { roam: 8 });
+      npcs.createNpc(idx, level, at, now, { roam: 8, spawned, ttlMs });
     }
   }
 
@@ -885,7 +951,7 @@ export class QuestSystem implements RoomSystem {
       const killer = this.actor(e.killerId);
       if (!killer) return;
       if (victim && killer.state.party && killer.state.party === victim.state.party) this.award(victim, "with_friends_like_these");
-      if (this.firedStillshot(killer) && dist3(actorPos(killer), e.pos) >= MEDAL_RULES.LONG_SHOT_METRES) this.award(killer, "long_shot");
+      if (this.official() && this.firedStillshot(killer) && dist3(actorPos(killer), e.pos) >= MEDAL_RULES.LONG_SHOT_METRES) this.award(killer, "long_shot");
     }
   }
 
@@ -905,8 +971,10 @@ export class QuestSystem implements RoomSystem {
       case "egg": {
         const id = String(args.id ?? "") as EggId;
         const t = typeof args.target === "string" ? (this.actor(args.target) ?? a) : a;
-        if (typeof args.step === "string") this.eggs.onStep(t, this.qp(t), id, args.step);
-        else this.claimEgg(t, id);
+        if (typeof args.step === "string") {
+          this.assistedEggs.add(`${t.identity.userId}|${id}`);
+          this.eggs.onStep(t, this.qp(t), id, args.step);
+        } else this.claimEgg(t, id, { assisted: true });
         return true;
       }
       default:

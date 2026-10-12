@@ -838,6 +838,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   admin(client: Client, cmd: string, args: Record<string, unknown>) {
     const a = this.actors.get(client.sessionId);
     if (!a || !a.identity.admin) return;
+    emitGameEvent(this, { type: "admin", playerId: a.id, cmd, ...(typeof args.target === "string" ? { targetId: args.target } : {}) });
     const num = (k: string, d = 0) => (typeof args[k] === "number" ? (args[k] as number) : d);
     const target = typeof args.target === "string" ? this.actors.get(args.target) : a;
     switch (cmd) {

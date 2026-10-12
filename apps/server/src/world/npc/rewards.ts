@@ -68,7 +68,7 @@ export function rollDrops(sys: NpcSystem, n: Npc, top: PlayerActor, rng: Rng = M
         break;
     }
   }
-  if (n.def.temper !== "critter" && n.def.temper !== "passive" && n.def.family !== "egg" && !n.summoner && !n.penalty) {
+  if (n.def.temper !== "critter" && n.def.temper !== "passive" && n.def.family !== "egg" && !n.summoner && !n.spawned) {
     const c = PLANET_COSMETIC[planet];
     const key = `${top.identity.userId}|${planet}`;
     const pity = sys.cosmeticPity.get(key);
@@ -109,7 +109,7 @@ export function rewardKill(sys: NpcSystem, n: Npc, killerId: string | null, now:
     if (e.amount >= NPC_RULES.xpShare * maxHp || (killer && killer.identity.userId === e.userId)) xpTo.push(p);
   }
   if (killer && !killer.dead && !xpTo.includes(killer)) xpTo.push(killer);
-  const key = n.point ? `p${n.point.id}` : n.summoner ? `s${n.summoner}` : n.penalty ? `e${n.penalty.egg}` : `x${n.id}`;
+  const key = n.point ? `p${n.point.id}` : n.summoner ? `s${n.summoner}` : n.spawned ? (n.spawned.reason === "egg" ? `e${n.spawned.key}` : "stage") : `x${n.id}`;
   const gains = new Map<string, { p: PlayerActor; xp: number; coins: number }>();
   // XP, coins, drops, chest and saves land together; pile events go out after the commit (D26).
   const events: (() => void)[] = [];

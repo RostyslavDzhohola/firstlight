@@ -244,7 +244,7 @@ export class NpcSystem implements RoomSystem {
     level: number,
     pos: V3,
     now: number,
-    opts: { point?: SpawnPoint | null; member?: number; roam?: number; boss?: boolean; summoner?: string; instant?: boolean; penalty?: { egg: string; userId: string }; ttlMs?: number } = {},
+    opts: { point?: SpawnPoint | null; member?: number; roam?: number; boss?: boolean; summoner?: string; instant?: boolean; spawned?: Npc["spawned"]; ttlMs?: number } = {},
   ): Npc {
     const def = NPC_DEFS[defIndex]!;
     const state = this.world.newNpcState();
@@ -312,7 +312,7 @@ export class NpcSystem implements RoomSystem {
       hpAcc: 0,
       gridAxis: -1,
       strafeSign: this.seq & 1 ? 1 : -1,
-      penalty: opts.penalty ?? null,
+      spawned: opts.spawned ?? null,
       expiresAt: opts.ttlMs ? now + opts.ttlMs : 0,
       dead: false,
     };
@@ -324,10 +324,10 @@ export class NpcSystem implements RoomSystem {
     return n;
   }
 
-  /** Live egg-penalty NPCs in this room, or only those one account raised. */
-  penaltyCount(userId?: string): number {
+  /** Live NPCs raised by egg penalties or staged scenes in this room, or only those one account raised. */
+  spawnedCount(reason: "egg" | "stage", userId?: string): number {
     let k = 0;
-    for (const n of this.npcs.values()) if (n.penalty && !n.dead && (userId === undefined || n.penalty.userId === userId)) k++;
+    for (const n of this.npcs.values()) if (n.spawned?.reason === reason && !n.dead && (userId === undefined || n.spawned.userId === userId)) k++;
     return k;
   }
 

@@ -137,6 +137,20 @@ export interface OnboardingDoneEvent {
   playerId: string;
 }
 
+/**
+ * An admin used a tool (the room's `admin` message, or `npc:<cmd>` from the NPC system's admin
+ * message). Quests treat a boss fight an admin touched as assisted: no medals, no Hall of Firsts.
+ */
+export interface AdminActionEvent {
+  type: "admin";
+  playerId: string;
+  cmd: string;
+  /** Player session id (room commands) or NPC id (`npc:hurt`). */
+  targetId?: string;
+  /** `npc:boss` action (spawn, reset, info). */
+  action?: string;
+}
+
 export interface MissionDoneEvent {
   type: "missionDone";
   playerId: string;
@@ -175,6 +189,7 @@ export type GameEvent =
   | SecretStepEvent
   | PropBrokenEvent
   | OnboardingDoneEvent
+  | AdminActionEvent
   | MissionDoneEvent
   | MedalEvent
   | SpawnRequestEvent;

@@ -15,6 +15,18 @@ import { emitGameEvent } from "../events.ts";
 import { dist3 } from "../geometry.ts";
 import type { QuestSystem } from "./QuestSystem.ts";
 
+/**
+ * Staged scenes run in public copies, so nothing they leave behind is permanent: spawned NPCs are
+ * capped per room and dissolve, the loot pile expires, and for `stagedMs` after a scene the copy's
+ * boss kills and egg claims write no medals or Hall of Firsts entries (tests change and restore these).
+ */
+export const STAGE_LIMITS = {
+  perBody: 24,
+  ttlMs: 10 * 60_000,
+  pileTtlMs: 15 * 60_000,
+  stagedMs: 30 * 60_000,
+};
+
 export type Formation = "ring" | "line" | "arc" | "pair" | "duel";
 
 export interface StageDef {
@@ -128,11 +140,12 @@ export function runStage(sys: QuestSystem, admin: PlayerActor, n: number, all: b
     sys.toast(a, `Stage ${n}: ${def.name}`, "info");
   });
   const at = sys.room.snapToGround(centre);
+  sys.markStaged();
   if (def.boss) {
     const lair = sys.room.snapToGround(placeDir(BOSS_LAIRS[def.boss].place));
-    emitGameEvent(sys.room, { type: "spawnRequest", reason: "stage", bossId: def.boss, count: 1, pos: lair });
+    emitGameEvent(sys.room, { type: "spawnRequest", reason: "stage", bossId: def.boss, count: 1, pos: lair, playerId: admin.id });
   }
-  for (const s of def.spawns ?? []) emitGameEvent(sys.room, { type: "spawnRequest", reason: "stage", npcKind: s.npcKind, count: s.count, pos: at });
-  if (def.pile) sys.room.createPile(admin, def.pile.items.map((i) => ({ ...i })), def.pile.coins, at);
+  for (const s of def.spawns ?? []) emitGameEvent(sys.room, { type: "spawnRequest", reason: "stage", npcKind: s.npcKind, count: s.count, pos: at, playerId: admin.id });
+  if (def.pile) sys.room.createPile(admin, def.pile.items.map((i) => ({ ...i })), def.pile.coins, at, undefined, { kind: "staged", ttlMs: STAGE_LIMITS.pileTtlMs });
   sys.toast(admin, `${cast.length} in scene · ${def.tip}`, "info");
 }
