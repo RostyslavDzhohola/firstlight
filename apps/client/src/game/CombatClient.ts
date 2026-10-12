@@ -76,6 +76,8 @@ export class CombatClient {
       this.game.audio.play("ui", at);
     });
     room.onMessage("bubblePop", (m: { id: number }) => this.effects.popBubble(m.id));
+    // Bubbles deployed before we arrived (late join, reconnect): ask now that the handlers exist.
+    room.send("supportSync", {});
     room.onMessage("hit", (m: { attacker: string; target: string; amount: number; weak: boolean; x: number; y: number; z: number; kb?: number; kx?: number; ky?: number; kz?: number }) => {
       if (m.attacker === me && m.target !== me) {
         this.hud.hit(m.weak);

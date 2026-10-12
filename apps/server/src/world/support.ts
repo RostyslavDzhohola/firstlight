@@ -11,7 +11,9 @@
 // ignore it (true damage never asks). The item is kept; it has a cooldown (25 / 22 / 20 s).
 // Combat asks `host.bubbles` (BubbleHost); NPC ranged attacks ask it through NpcSystem.hitPlayer.
 
+import type { Client } from "@colyseus/core";
 import { HOTBAR_SLOTS } from "@firstlight/shared/content/character";
+import { z } from "zod";
 import type { InvItem } from "@firstlight/shared/net/protocol";
 import { WEAPON_BY_ID } from "@firstlight/shared/content/weapons";
 import { actorPos, type PlayerActor } from "./actors.ts";
@@ -184,9 +186,15 @@ export class SupportSystem implements RoomSystem {
   readonly channels = new Map<string, Channel>();
   private readonly unsub: () => void;
 
+  /** Session id → last snapshot request (one per second). */
+  private readonly synced = new Map<string, number>();
+
   constructor(room: BodyRoom) {
     this.room = room;
     this.bubbles = new BubbleField((b) => this.room.broadcastNear("bubblePop", { id: b.id }, b.c, SUPPORT.bubbleRadius));
+    // Late joiners and reconnects ask once their handlers are attached (F12 review S8): every active
+    // bubble with its remaining lifetime and HP, so no shell blocks their shots unseen.
+    room.onMessage("supportSync", z.object({}).passthrough().optional(), (c) => this.snapshot(c));
     // Damage to someone channelling a Patchkit cancels it (the kit is kept).
     this.unsub = onGameEvent(room, (e) => {
       if (e.type === "damage" && e.targetKind === "player" && e.amount > 0 && this.channels.has(e.targetId)) this.cancel(e.targetId, "interrupted");
@@ -281,8 +289,19 @@ export class SupportSystem implements RoomSystem {
     for (const [k, until] of SUPPORT_TIMERS.bubbleReady) if (until <= now) SUPPORT_TIMERS.bubbleReady.delete(k);
   }
 
+  private snapshot(c: Client) {
+    const now = Date.now();
+    if (now - (this.synced.get(c.sessionId) ?? 0) < 1000) return;
+    this.synced.set(c.sessionId, now);
+    for (const b of this.bubbles.list) {
+      const ms = b.until - now;
+      if (ms > 0) c.send("bubble", { id: b.id, by: b.owner, x: b.c[0], y: b.c[1], z: b.c[2], r: b.r, ms, hp: b.hp });
+    }
+  }
+
   onPlayerLeave(sessionId: string) {
     this.channels.delete(sessionId);
+    this.synced.delete(sessionId);
   }
 
   dispose() {

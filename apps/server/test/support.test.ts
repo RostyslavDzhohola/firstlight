@@ -203,3 +203,25 @@ describe("Prism Bubble", () => {
     expect(popped).toBe(false);
   });
 });
+
+describe("bubble sync (review S8)", () => {
+  it("a late joiner asking for a support snapshot gets the active bubbles with their remaining time and HP", async () => {
+    const a = await join("early", 40);
+    const b0 = await join("gunner2", 50);
+    await give(a, "bubble");
+    a.room.send("use", { slot: slotOf(a, "bubble") });
+    await waitFor(() => a.count("bubble") === 1);
+    // Chip the shell, then someone joins.
+    b0.room.send("fire", { slot: 0, ...aimAt(b0.room, a.room), t: Date.now() });
+    await waitFor(() => (supportOf(server(a.room))!.bubbles.list[0]?.hp ?? 150) < 150);
+    const late = await join("latecomer", 60);
+    expect(late.count("bubble")).toBe(0);
+    late.room.send("supportSync", {});
+    await waitFor(() => late.count("bubble") === 1);
+    const snap = late.last("bubble");
+    const live = supportOf(server(a.room))!.bubbles.list[0]!;
+    expect(snap).toMatchObject({ id: live.id, by: a.room.sessionId, r: 3, hp: live.hp });
+    expect(snap.ms).toBeGreaterThan(0);
+    expect(snap.ms).toBeLessThan(6000);
+  });
+});

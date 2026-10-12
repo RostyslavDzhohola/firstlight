@@ -125,6 +125,7 @@ export class Effects {
 
   /** Prism Bubble: a faint shimmering shell at the owner's feet until it pops or times out. */
   bubble(id: number, at: THREE.Vector3, radius: number, ms: number, color = 0x9fd8ff) {
+    if (this.bubbles.has(id)) return; // already shown (a snapshot after the live message)
     const m = new THREE.Mesh(ballGeo, glow(color, 0.12));
     m.position.copy(at);
     m.scale.setScalar(radius);
