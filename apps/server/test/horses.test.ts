@@ -233,6 +233,41 @@ describe("riding", () => {
   });
 });
 
+describe("combat and riders", () => {
+  /** Shot from `s` (eye height) at `t`'s up-axis `above` metres over its feet (server positions). */
+  function aim(s: Bot, t: Bot, above: number) {
+    const a = serverRoom(s).playerById(s.id)!.state, b = serverRoom(t).playerById(t.id)!.state;
+    const la = Math.hypot(a.x, a.y, a.z), lb = Math.hypot(b.x, b.y, b.z);
+    const o: V3 = [a.x + (a.x / la) * 1.6, a.y + (a.y / la) * 1.6, a.z + (a.z / la) * 1.6];
+    const p: V3 = [b.x + (b.x / lb) * above, b.y + (b.y / lb) * above, b.z + (b.z / lb) * above];
+    const d = norm([p[0] - o[0], p[1] - o[1], p[2] - o[2]]);
+    return { slot: 0, ox: o[0], oy: o[1], oz: o[2], dx: d[0], dy: d[1], dz: d[2], t: Date.now() };
+  }
+
+  it("the hit capsule rides in the saddle: the drawn head is a weak point, the horse's legs are not the rider", async () => {
+    const r = await rider("target");
+    const s = await bot("gunner", BODY, "admin", { starter: 3 });
+    await tpAndWait(s, offPad(BODY, 0, 52));
+    s.send("admin", { cmd: "unprotect" });
+    s.send("scope", { on: true }); // carbine spread 1.5° → 0.3° scoped: ±6 cm at 12 m
+    await sleep(300);
+    const hp0 = me(r).hp;
+    const head = HORSE.riderLift + 1.6; // a seated rider's head (2.2–2.45 m drawn); on foot the capsule tops out at 1.8
+    s.send("fire", aim(s, r, head)); // on foot that is over their head
+    await sleep(400);
+    expect(me(r).hp).toBe(hp0);
+
+    await summonAndMount(r);
+    await sleep(300);
+    s.send("fire", aim(s, r, 0.35)); // the horse's legs
+    await sleep(400);
+    expect(me(r).hp).toBe(hp0);
+    s.send("fire", aim(s, r, head));
+    await until("a weak-point hit on the rider", () => !!s.msgs.get("hit")?.some((h: any) => h.target === r.id && h.weak));
+    await until("damage", () => me(r).hp < hp0);
+  });
+});
+
 describe("the horse leaves with its owner", () => {
   it("on death: the whistle drops in the pile like everything else", async () => {
     const b = await rider("fallen");

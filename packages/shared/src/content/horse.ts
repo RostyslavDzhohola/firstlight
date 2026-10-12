@@ -35,6 +35,10 @@ export const HORSE = {
   wadeDepth: 1.0,
   /** Seat height above the horse's feet (m), from the GLB's saddle socket (tools/blender/horse). */
   seatHeight: 1.55,
+  /** A seated rider's feet sit about this high above the horse's (seat minus the seated pelvis,
+   *  0.73–0.87 m across the starters): the server lifts a mounted player's hit capsule by it, so
+   *  shots land where the rider is drawn (headshots included) and the horse's legs don't count. */
+  riderLift: 0.8,
 } as const;
 
 /** Coats: [coat, mane/tail/hooves, blanket]. A horse's coat comes from its owner (stable per account). */

@@ -47,6 +47,7 @@ describe("horse.glb", () => {
       const s = STARTER_SCALE[i]!;
       rider.scale.setScalar(s);
       rider.position.set(seat.x, seat.y - (0.917 * s - 0.1), seat.z); // AvatarView.seatDrop() without the foot sink
+      expect(Math.abs(rider.position.y - HORSE.riderLift), `${file} feet vs the server's rider lift`).toBeLessThan(0.12);
       const mixer = new THREE.AnimationMixer(rider);
       mixer.clipAction(clip).play();
       mixer.update(0);
