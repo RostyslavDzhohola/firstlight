@@ -3,7 +3,8 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BODIES, padDirs } from "@firstlight/shared";
-import { NPC_INDEX } from "@firstlight/shared/content/npcs";
+import { walk } from "@firstlight/shared/content/arenas";
+import { NF, NPC_INDEX } from "@firstlight/shared/content/npcs";
 import { dealDamage } from "../src/world/combat.ts";
 import type { V3 } from "../src/world/geometry.ts";
 import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
@@ -72,5 +73,67 @@ describe("unreachable targets (F12 should-fix 6)", () => {
     });
     expect(wolf.mode).not.toBe(MODE.EVADE);
     expect(hurt).toBe(true);
+  });
+});
+
+/** A ground point `a` m along the arena axis and `b` m to its side from the arena centre. */
+function arenaPoint(w: FakeWorld, a: number, b = 0): V3 {
+  const ar = w.sys.arena!;
+  return w.world.snapToGround(walk(ar.up, ar.axis, a, ar.side, b, w.world.body.radius));
+}
+
+/** Spawn the copy's boss and run past its 1 s materialise. */
+function bossReady(w: FakeWorld): Npc {
+  NPC_TUNING.bosses = true;
+  NPC_TUNING.bossAttacks = false;
+  NPC_TUNING.bossMechanics = [];
+  w.sys.boss!.forceSpawn(w.clock.t);
+  const n = w.sys.boss!.npc!;
+  run(w, 1500, () => !(n.state.flags & NF.INVULN));
+  expect(n.state.flags & NF.INVULN).toBe(0);
+  return n;
+}
+
+describe("boss arena reach (F12 should-fix 8)", () => {
+  it("damage from beyond the arena radius + 10 m is ignored; from inside that band it counts", () => {
+    const w = fakeWorld("arcadia", { immortal: true });
+    const ar = w.sys.arena!;
+    const sniper = w.addPlayer("sniper", arenaPoint(w, ar.radius + 25), 8);
+    const n = bossReady(w);
+    const hp = n.state.hp;
+    expect(dealDamage(w.world.host, sniper, n, 1000, false)).toBe(false);
+    expect(n.state.hp).toBe(hp);
+    w.movePlayer(sniper, arenaPoint(w, ar.radius + 6));
+    expect(dealDamage(w.world.host, sniper, n, 1000, false)).toBe(true);
+    expect(n.state.hp).toBeLessThan(hp);
+    // Mechanics (falling cover) and admin damage have no attacker and still count.
+    expect(dealDamage(w.world.host, null, n, 1000, false)).toBe(true);
+  });
+
+  it("anyone who damaged the boss in the last 10 s counts for HP scaling and can be targeted", () => {
+    const w = fakeWorld("arcadia", { immortal: true });
+    const ar = w.sys.arena!;
+    const a = w.addPlayer("a", arenaPoint(w, 0, 3), 8);
+    const b = w.addPlayer("b", arenaPoint(w, 0, -3), 8);
+    const s = w.addPlayer("s", arenaPoint(w, ar.radius + 6), 8);
+    const n = bossReady(w);
+    run(w, 200);
+    expect(w.sys.boss!.count).toBe(2);
+    expect(n.state.maxHp).toBe(12_000);
+    // The player just outside the edge chips in: three engaged → +35%, percentage kept.
+    dealDamage(w.world.host, s, n, 500, false);
+    run(w, 100);
+    expect(w.sys.boss!.count).toBe(3);
+    expect(n.state.maxHp).toBe(16_200);
+    // With the two inside gone, the boss turns on the one hitting it from the edge…
+    w.movePlayer(a, arenaPoint(w, -ar.radius - 60));
+    w.movePlayer(b, arenaPoint(w, -ar.radius - 60, 4));
+    dealDamage(w.world.host, s, n, 500, false);
+    run(w, 600);
+    expect(w.sys.boss!.count).toBe(1);
+    expect(n.target).toBe(s);
+    // …and forgets them 10 s after their last hit.
+    expect(run(w, 11_000, () => w.sys.boss!.count === 0)).toBeGreaterThan(9000);
+    expect(n.state.maxHp).toBe(12_000);
   });
 });

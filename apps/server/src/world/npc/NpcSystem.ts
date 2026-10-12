@@ -8,7 +8,7 @@ import {
   aiHitCap, npcMaxHp, npcShieldHp, type PlanetId, type StatusEffect,
 } from "@firstlight/shared/content/npcs";
 import { PF } from "@firstlight/shared/net/schema";
-import { actorPos, type PlayerActor } from "../actors.ts";
+import { actorPos, type NpcActor, type PlayerActor } from "../actors.ts";
 import { dealDamage } from "../combat.ts";
 import { loadCopy, saveCopy } from "../copyState.ts";
 import type { V3 } from "../geometry.ts";
@@ -318,7 +318,7 @@ export class NpcSystem implements RoomSystem {
     };
     n.onDamaged = (amount, by) => this.onDamaged(n, amount, by);
     n.onKilled = (by) => this.onKilled(n, by);
-    n.mitigate = (amount, weak, fromDir) => this.mitigate(n, amount, weak, fromDir);
+    n.mitigate = (amount, weak, fromDir, attacker) => this.mitigate(n, amount, weak, fromDir, attacker);
     this.npcs.set(id, n);
     this.world.addNpc(n);
     return n;
@@ -381,9 +381,9 @@ export class NpcSystem implements RoomSystem {
 
   // ------------------------------------------------------------------------------------ damage hooks
 
-  private mitigate(n: Npc, amount: number, weak: boolean, fromDir?: V3): number {
+  private mitigate(n: Npc, amount: number, weak: boolean, fromDir?: V3, attacker?: PlayerActor | NpcActor | null): number {
     if (n.dead || n.state.flags & NF.INVULN) return 0;
-    if (n.boss && this.boss) return this.boss.mitigate(n, amount, weak);
+    if (n.boss && this.boss) return this.boss.mitigate(n, amount, weak, attacker);
     if (n.shieldHp > 0 && fromDir) {
       const f = tangentize(n.pos, fromDir);
       if (dot(f, n.facing) > 0.25) {

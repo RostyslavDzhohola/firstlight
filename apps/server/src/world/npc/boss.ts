@@ -1,5 +1,6 @@
 // One boss per planet copy (content §4): spawns at its lair when players come near; HP = HP₂ ×
-// (1 + 0.35 × extra players inside the arena), recounted on every entry/exit with the percentage kept;
+// (1 + 0.35 × extra players inside the arena or hitting it from just outside in the last 10 s),
+// recounted on every entry/exit with the percentage kept; hits from beyond the edge + 10 m do nothing;
 // phases by HP; co-op mechanics with no hints:
 // - plates (Tidewrath's Tide Stones, The Receiver's Override Consoles): two bodies held 3 s together
 //   open an 8 s weak window (armour off, weak point ×1.5), then the plates go dark;
@@ -16,7 +17,7 @@ import {
   type AttackDef, type BossDef, type BossEventMsg, type NpcAttackMsg, type NpcDef,
 } from "@firstlight/shared/content/npcs";
 import { partyOf } from "../../social/parties.ts";
-import { actorPos, type PlayerActor } from "../actors.ts";
+import { actorPos, type NpcActor, type PlayerActor } from "../actors.ts";
 import { dealDamage } from "../combat.ts";
 import type { V3 } from "../geometry.ts";
 import { cancelAttack, playersInCircle, playersInLine, startAttack, updateAttack } from "./attacks.ts";
@@ -56,6 +57,10 @@ const BOSS_MSG_RADIUS = 220;
 const MAX_SUMMONS = 4;
 /** Lair-state snapshots go to players who come within this distance of the arena (and on request). */
 const SNAPSHOT_RADIUS = 260;
+/** Players who hit the boss this recently count for its HP and can be targeted, wherever they stand. */
+const RECENT_HIT_MS = 10_000;
+/** Hits from players farther than this beyond the arena edge do nothing (no sniping from outside). */
+const OUTSIDE_REACH = 10;
 
 /** Weak-point volumes in the boss's local frame (x right, y up, z forward), exposed only in their window. */
 const WEAK_VOLUMES: Record<string, { c: V3; r: number }> = {
@@ -76,6 +81,10 @@ export class BossController {
   engaged = false;
   count = 0;
   inArena: LivePlayer[] = [];
+  /** Inside the arena or hit the boss in the last RECENT_HIT_MS: HP scaling and targeting. */
+  fighters: LivePlayer[] = [];
+  /** Session id → last time that player damaged the boss. */
+  private readonly recentHits = new Map<string, number>();
   phase = 1;
   windowUntil = 0;
   darkUntil = 0;
@@ -198,6 +207,7 @@ export class BossController {
     this.emptySince = null;
     this.regenAcc = 0;
     this.wasOpen = false;
+    this.recentHits.clear();
     n.state.maxHp = this.def.id === n.def.id ? n.def.hp : n.state.maxHp;
     n.state.hp = n.state.maxHp;
     n.state.phase = 1;
@@ -300,9 +310,16 @@ export class BossController {
 
   private engagement(n: Npc, now: number) {
     const inArena: LivePlayer[] = [];
-    for (const lp of this.sys.live) if (flatDist(this.arena.centre, lp.pos) <= this.arena.radius) inArena.push(lp);
+    const fighters: LivePlayer[] = [];
+    for (const [id, at] of this.recentHits) if (now - at > RECENT_HIT_MS) this.recentHits.delete(id);
+    for (const lp of this.sys.live) {
+      const inside = flatDist(this.arena.centre, lp.pos) <= this.arena.radius;
+      if (inside) inArena.push(lp);
+      if (inside || this.recentHits.has(lp.a.id)) fighters.push(lp);
+    }
     this.inArena = inArena;
-    const count = inArena.length;
+    this.fighters = fighters;
+    const count = fighters.length;
     if (count !== this.count) {
       const oldMax = n.state.maxHp;
       const newMax = bossMaxHp(this.npcDef.hp, count, this.def.hpPerExtra, this.def.maxCounted);
@@ -417,9 +434,13 @@ export class BossController {
 
   // ------------------------------------------------------------------------------------ damage
 
-  /** Armour outside the weak window; weak-point hits are already multiplied by combat (weakMult). */
-  mitigate(n: Npc, amount: number, _weak: boolean): number {
+  /**
+   * Armour outside the weak window; weak-point hits are already multiplied by combat (weakMult).
+   * Players beyond the arena edge + OUTSIDE_REACH deal nothing (F12: a sniper 75 m out).
+   */
+  mitigate(n: Npc, amount: number, _weak: boolean, attacker?: PlayerActor | NpcActor | null): number {
     if (n.dead || n.state.flags & NF.INVULN) return 0;
+    if (attacker?.kind === "player" && flatDist(this.arena.centre, actorPos(attacker)) > this.arena.radius + OUTSIDE_REACH) return 0;
     const open = this.sys.world.now() < this.windowUntil;
     return amount * (open ? 1 : (this.npcDef.armour ?? 1));
   }
@@ -444,9 +465,10 @@ export class BossController {
     return dot(sub(q, c), sub(q, c)) <= v.r * v.r;
   }
 
-  onDamaged(n: Npc, _amount: number, by: unknown) {
-    // Contribution is tracked in n.damage by the system. A hit from outside the arena engages too,
-    // so the empty-arena reset (30 s) heals it: no free chip damage from range.
+  onDamaged(n: Npc, amount: number, by: PlayerActor | null) {
+    // Contribution is tracked in n.damage by the system. A hit from just outside the arena engages
+    // too and counts the hitter as a fighter for RECENT_HIT_MS (HP scaling, targeting).
+    if (by && amount > 0) this.recentHits.set(by.id, this.sys.world.now());
     if (!this.engaged && by && this.status === "alive") this.engage(n, this.sys.world.now());
   }
 
@@ -561,7 +583,7 @@ export class BossController {
   private pickTarget(n: Npc): LivePlayer | null {
     let best: LivePlayer | null = null;
     let bd = Infinity;
-    for (const lp of this.inArena) {
+    for (const lp of this.fighters) {
       if (lp.untouchable) continue;
       const d = flatDist(n.pos, lp.pos) - (n.target === lp.a ? 4 : 0);
       if (d < bd) {
