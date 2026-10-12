@@ -14,6 +14,7 @@ import { Hud, type YouPlus } from "../ui/hud.ts";
 import { PhraseWheel } from "../ui/phraseWheel.ts";
 import type { Game } from "./Game.ts";
 import { showSavePrompt } from "../ui/account.ts";
+import { SaveOffer } from "../ui/saveOffer.ts";
 import { getPlayToken, isDevGuest, readClaims } from "../net/auth.ts";
 
 const _v = new THREE.Vector3();
@@ -45,6 +46,9 @@ export class CombatClient {
   deadUntilRespawn = false;
   /** Onboarding hook (game/OnboardingClient.ts): handles an attack inside a safe zone; true = handled. */
   training: ((def: WeaponDef, tier: TierStats, now: number) => boolean) | null = null;
+  /** Onboarding hook: the tutorial is up (tips or its last card); the level-up save card waits for it. */
+  tutorialBusy: (() => boolean) | null = null;
+  private readonly saveOffer = new SaveOffer();
   private readonly wheel: PhraseWheel;
 
   constructor(private readonly game: Game) {
@@ -60,7 +64,7 @@ export class CombatClient {
     room.onMessage("you", (m: YouPlus) => {
       const prevLevel = this.hud.you?.level ?? m.level;
       this.hud.setYou(m);
-      if (m.level > prevLevel && m.level >= 2 && !isDevGuest()) void this.maybeOfferSave();
+      if (!isDevGuest()) this.saveOffer.levelUp(m.level, prevLevel);
       if (!m.dead) this.deadUntilRespawn = false;
     });
     room.onMessage("toast", (m: { text: string; kind: string }) => {
@@ -168,13 +172,13 @@ export class CombatClient {
     room.onMessage("updating", () => this.hud.toast("Server updating — reconnecting in a moment…", "warn"));
   }
 
-  private offeredSave = false;
-  /** After the first level-up, guests get a non-blocking "Save your character" card. */
-  async maybeOfferSave() {
-    if (this.offeredSave) return;
+  /**
+   * After the first level-up, guests get a non-blocking "Save your character" card (once; after the
+   * tutorial when it paid the level). It opens without taking keyboard focus: the player is playing.
+   */
+  private async offerSave() {
     const claims = readClaims(await getPlayToken().catch(() => ""));
     if (!claims?.guest) return;
-    this.offeredSave = true;
     void showSavePrompt({ name: claims.name, level: this.hud.you?.level });
   }
 
@@ -227,6 +231,7 @@ export class CombatClient {
     const room = g.net.room;
     const input = g.input;
     this.effects.update(dt, now);
+    if (this.saveOffer.poll(!!this.tutorialBusy?.())) void this.offerSave();
     if (!room) return;
     const meState = (room.state as any).players?.get(room.sessionId);
     if (meState) {

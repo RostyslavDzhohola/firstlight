@@ -41,7 +41,7 @@ export class InventoryPanel extends Panel {
       this.swallow(e);
       return;
     }
-    const r = this.cursor.key(e.code);
+    const r = this.cursor.key(e.code, e.repeat);
     if (!r.handled) return;
     this.swallow(e);
     this.send(r.actions);
@@ -70,6 +70,7 @@ export class InventoryPanel extends Panel {
   }
 
   close(relock = true) {
+    this.cursor.cancel();
     window.removeEventListener("keydown", this.onKeys, true);
     window.removeEventListener("pointermove", this.onMove);
     window.removeEventListener("pointerup", this.onUp);

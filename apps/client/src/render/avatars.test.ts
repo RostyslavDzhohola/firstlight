@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
 import { WEAPONS } from "@firstlight/shared/content/weapons";
 import { ANIM } from "@firstlight/shared/net/schema";
+import { watchDisposals } from "./disposeWatch.testutil.ts";
 
 // config.ts reads the URL at import time; ?nochars keeps AvatarView on capsules (no asset fetches).
 vi.stubGlobal("location", { search: "?nochars", hostname: "localhost" });
@@ -103,14 +104,34 @@ describe("held items", () => {
 });
 
 describe("avatar warm-up hook", () => {
-  it("is a no-op without loaded assets and is safe to switch off twice", () => {
+  it("stands every palette and every starter (T9: each palette in play compiles behind the loading screen)", () => {
+    const looks = mod.avatarWarmupLooks();
+    expect(new Set(looks.map((l) => l.palette))).toEqual(new Set(mod.PALETTES.map((_, i) => i)));
+    expect(new Set(looks.map((l) => l.starter)).size).toBe(4);
+  });
+
+  it("keeps its samples for the session: in the scene (hidden) while warming, out of it after, never disposed", () => {
     const scene = new THREE.Scene();
-    const hook = mod.avatarWarmupHook(scene, () => at(0));
     const before = mod.AvatarView.all.size;
+    const hook = mod.avatarWarmupHook(scene, () => at(0));
     hook.forceAll(true);
+    const kept = scene.getObjectByName("avatarWarmup")!;
+    expect(kept).toBeTruthy();
+    expect(kept.visible).toBe(false); // warmup() shows hidden objects while it runs
+    // One avatar and one far-LOD capsule per palette.
+    expect(kept.children).toHaveLength(mod.PALETTES.length * 2);
+    expect(mod.AvatarView.all.size).toBe(before); // never ranked by the LOD pass
+    const w = watchDisposals(kept);
     hook.forceAll(false);
     hook.forceAll(false);
-    expect(scene.children.length).toBe(0);
-    expect(mod.AvatarView.all.size).toBe(before);
+    expect(kept.parent).toBeNull(); // no per-frame cost in play
+    expect(w.disposed.size).toBe(0); // three keeps the builds while the render objects live
+    // The next warm-up (travel, graphics change) brings the same samples to its scene and spot.
+    const other = new THREE.Scene();
+    mod.avatarWarmupHook(other, () => at(50)).forceAll(true);
+    expect(other.getObjectByName("avatarWarmup")).toBe(kept);
+    expect(kept.children).toHaveLength(mod.PALETTES.length * 2);
+    for (const c of kept.children) expect(c.position.distanceTo(at(50))).toBeLessThan(1e-6);
+    expect(w.disposed.size).toBe(0);
   });
 });

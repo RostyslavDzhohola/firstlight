@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three/webgpu";
-import { forceProperty } from "./warmup.ts";
+import { forceProperty, keptSamples } from "./warmup.ts";
+import { watchDisposals } from "./disposeWatch.testutil.ts";
 
 describe("warm-up forced properties", () => {
   it("restores the original value when nothing wrote during warm-up", () => {
@@ -37,5 +38,34 @@ describe("warm-up forced properties", () => {
     expect(g.instanceCount).toBe(1); // still forced while warming
     restore();
     expect(g.instanceCount).toBe(3000);
+  });
+});
+
+describe("session warm-up samples (T9)", () => {
+  const mesh = () => new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicNodeMaterial());
+
+  it("are built once and come back hidden, with nothing disposed", () => {
+    let builds = 0;
+    const build = () => {
+      builds++;
+      return [mesh(), mesh()];
+    };
+    const g = keptSamples("test-a", build)!;
+    expect(g.visible).toBe(false); // drawn only while warmup() shows hidden objects
+    expect(g.userData.noWarmup).toBeUndefined();
+    expect(g.children).toHaveLength(2);
+    const w = watchDisposals(g);
+    expect(keptSamples("test-a", build)).toBe(g);
+    expect(builds).toBe(1);
+    expect(w.disposed.size).toBe(0);
+  });
+
+  it("retry a build that couldn't run yet; without a build they only look up", () => {
+    expect(keptSamples("test-b")).toBeNull();
+    expect(keptSamples("test-b", () => null)).toBeNull();
+    const g = keptSamples("test-b", () => [mesh()])!;
+    expect(g.children).toHaveLength(1);
+    expect(keptSamples("test-b", () => [mesh(), mesh()])).toBe(g);
+    expect(keptSamples("test-b")).toBe(g);
   });
 });

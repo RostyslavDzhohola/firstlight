@@ -41,36 +41,60 @@ export function travelRedirect(identity: Identity, body: BodyId, now: number): B
  * Accounts whose last change couldn't be saved (a death, F12 re-review S5). They aren't admitted
  * again until a storage health check for the account passes: its character row is read and written
  * back in a transaction. Otherwise a player whose saves keep failing would die, be sent back,
- * rejoin alive and die again. A mark lapses after LAPSE_MS (a new failure marks the account again),
- * so accounts that never come back aren't kept for good (F12 final review nit).
+ * rejoin alive and die again.
+ *
+ * Memory is bounded apart from that rule (F12 confirm Codex N-S2): a mark lapses after LAPSE_MS and
+ * the oldest is evicted beyond MAX_MARKS, but a dropped mark's account isn't forgotten as safe.
+ * Until some health write succeeds (storage works again), every account with a character runs the
+ * check before it is admitted, so a lapse never readmits anyone while saving still fails.
  */
-export const STORAGE_RECOVERY = { LAPSE_MS: 3_600_000 };
+export const STORAGE_RECOVERY = { LAPSE_MS: 3_600_000, MAX_MARKS: 10_000 };
 
-const recovering = new Map<string, number>(); // userId → marked at
+const recovering = new Map<string, number>(); // userId → marked at, oldest first
+/** A mark was dropped before its account passed a check: check everyone until a health write succeeds. */
+let unverified = false;
 
-function sweepLapsed(now: number): void {
-  for (const [u, at] of recovering) if (now - at >= STORAGE_RECOVERY.LAPSE_MS) recovering.delete(u);
+function sweep(now: number): void {
+  for (const [u, at] of recovering) {
+    if (now - at < STORAGE_RECOVERY.LAPSE_MS && recovering.size <= STORAGE_RECOVERY.MAX_MARKS) break; // the rest are newer
+    recovering.delete(u);
+    unverified = true;
+  }
+}
+
+/** Read the account's character row and write it back in one transaction; `wrote` if there was one. */
+function healthCheck(userId: string): { ok: boolean; wrote: boolean } {
+  let wrote = false;
+  try {
+    withTx(() => {
+      const c = characterRepo.current.load(userId);
+      if (c) {
+        characterRepo.current.save(userId, c);
+        wrote = true;
+      }
+    });
+  } catch {
+    return { ok: false, wrote: false };
+  }
+  return { ok: true, wrote };
 }
 
 export const storageRecovery = {
   mark(userId: string, now = Date.now()): void {
-    sweepLapsed(now);
+    recovering.delete(userId); // a new failure moves the account to the newest end
     recovering.set(userId, now);
+    sweep(now);
   },
-  /** May the account play? True unless recovering and the health check still fails. */
+  /** May the account play? True unless it (or a forgotten mark) needs a health check that fails. */
   ok(userId: string, now = Date.now()): boolean {
-    if (!recovering.size) return true;
-    sweepLapsed(now);
-    if (!recovering.has(userId)) return true;
-    try {
-      withTx(() => {
-        const c = characterRepo.current.load(userId);
-        if (c) characterRepo.current.save(userId, c);
-      });
-    } catch {
-      return false;
-    }
+    if (!recovering.size && !unverified) return true;
+    sweep(now);
+    if (!recovering.has(userId) && !unverified) return true;
+    const check = healthCheck(userId);
+    if (!check.ok) return false;
     recovering.delete(userId);
+    // Only a real write proves saving works (an account with no character wrote nothing).
+    if (check.wrote) unverified = false;
     return true;
   },
   /** Marked accounts (tests). */
@@ -79,5 +103,6 @@ export const storageRecovery = {
   },
   clear(): void {
     recovering.clear();
+    unverified = false;
   },
 };

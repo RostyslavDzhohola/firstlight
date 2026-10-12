@@ -62,8 +62,8 @@ export interface Sample {
   phrased: boolean;
   /** Voice chat is switched on. */
   voiceOn: boolean;
-  /** Standing in a portal. */
-  atPortal: boolean;
+  /** Standing in a portal's ring (what starts travel). */
+  inPortal: boolean;
 }
 
 const DIGITS = ["Digit1", "Digit2", "Digit3", "Digit4"];
@@ -93,7 +93,8 @@ export class OnboardingSteps {
     if (x.pressed.has("KeyM")) this.set("map", 1);
     if (x.phrased) this.set("wheel", 1);
     if (x.voiceOn || x.pressed.has("KeyV")) this.set("voice", 1);
-    if (x.atPortal) this.set("portal", 1);
+    // Only actually walking into a ring counts (T9): passing or standing in front of one doesn't.
+    if (x.inPortal) this.set("portal", 1);
     const cur = this.current;
     if (cur?.id !== this.cardId) {
       this.cardId = cur?.id ?? null;

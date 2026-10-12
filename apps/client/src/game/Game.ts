@@ -411,7 +411,7 @@ export class Game {
       this.combat.attach();
       const me = await waitFor(() => (room.state as any).players?.get(room.sessionId), { stage: "waiting for our player", timeoutMs: 15_000, watch: w });
       this.player.teleport(me.x, me.y, me.z);
-      this.net.onCorrect = (x, y, z) => this.player.teleport(x, y, z);
+      this.net.onCorrect = (x, y, z) => this.player.correct(x, y, z);
       this.systems = CLIENT_SYSTEMS.map((f) => f(this)).filter((x): x is ClientSystem => !!x);
     }
 

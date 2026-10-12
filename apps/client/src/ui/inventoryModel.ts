@@ -300,13 +300,19 @@ export const DROP_CONFIRM_HINT = "Press X again to drop it";
  * Focus (hover / keyboard) and the held slot (click-to-pick). Methods return the messages to send;
  * the panel re-renders from the next `you`.
  */
+/** Keys that act on an item: one action per physical press. */
+const ITEM_KEYS: ReadonlySet<string> = new Set(["KeyX", "Delete", "Backspace", "KeyE"]);
+
 export class InvCursor {
   focus = 0;
   held: number | null = null;
   private readonly state: () => InvState;
   private readonly now: () => number;
-  /** A first X on a pointed-at slot: the slot and when (a second X there within DROP_CONFIRM_MS drops). */
-  private armed: { slot: number; at: number } | null = null;
+  /**
+   * A first X on a pointed-at slot: the slot, the item there (id:tier) and when. A second physical X
+   * on the same item within DROP_CONFIRM_MS drops it.
+   */
+  private armed: { slot: number; item: string; at: number } | null = null;
 
   constructor(state: () => InvState, now: () => number = () => Date.now()) {
     this.state = state;
@@ -315,11 +321,17 @@ export class InvCursor {
 
   /** Is a drop of `slot` waiting for its second X? (The panel shows DROP_CONFIRM_HINT.) */
   dropArmed(slot: number): boolean {
-    return !!this.armed && this.armed.slot === slot && this.now() - this.armed.at <= DROP_CONFIRM_MS && this.has(slot);
+    return !!this.armed && this.armed.slot === slot && this.now() - this.armed.at <= DROP_CONFIRM_MS && this.armed.item === this.itemKey(slot);
   }
 
   private has(slot: number): boolean {
     return !!itemAt(this.state(), slot);
+  }
+
+  /** What is in a slot, for the drop confirmation ("" = empty). */
+  private itemKey(slot: number): string {
+    const it = itemAt(this.state(), slot);
+    return it ? `${it.id}:${it.tier}` : "";
   }
 
   hover(slot: number): boolean {
@@ -355,8 +367,10 @@ export class InvCursor {
     return [{ type: "move", from, to }];
   }
 
+  /** Panel opened or closed: nothing held, no drop waiting for its second X. */
   cancel() {
     this.held = null;
+    this.armed = null;
   }
 
   /** After a new `you`: forget a held slot that is empty now. */
@@ -365,8 +379,14 @@ export class InvCursor {
     this.focus = Math.max(0, Math.min(INV_SLOTS - 1, this.focus));
   }
 
-  key(code: string): KeyResult {
+  /**
+   * A key while the panel is open. `repeat` (KeyboardEvent.repeat, a held key): the item keys that
+   * act on an item (X / Delete / Backspace drop, E uses) swallow it, so holding X can't confirm a
+   * drop and holding E uses one item per press (F12 confirm Codex N-S3).
+   */
+  key(code: string, repeat = false): KeyResult {
     const src = this.held ?? this.focus;
+    if (repeat && ITEM_KEYS.has(code)) return done();
     switch (code) {
       case "ArrowLeft":
         if (this.focus % GRID_COLS > 0) this.focus--;
@@ -407,7 +427,7 @@ export class InvCursor {
           this.armed = null;
           return done([{ type: "drop", slot: src }]);
         }
-        this.armed = { slot: src, at: this.now() };
+        this.armed = { slot: src, item: this.itemKey(src), at: this.now() };
         return { handled: true, actions: [], hint: DROP_CONFIRM_HINT };
       }
       case "Escape":

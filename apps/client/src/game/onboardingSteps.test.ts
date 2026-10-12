@@ -3,7 +3,7 @@ import { ANIM } from "@firstlight/shared/net/schema";
 import { OnboardingSteps, STEPS, type Sample, type StepId } from "./onboardingSteps.ts";
 
 const s = (over: Partial<Sample> = {}): Sample => ({
-  dt: 1 / 60, moved: 0, lookRad: 0, anim: ANIM.IDLE, dummiesDown: 0, pressed: new Set(), phrased: false, voiceOn: false, atPortal: false, ...over,
+  dt: 1 / 60, moved: 0, lookRad: 0, anim: ANIM.IDLE, dummiesDown: 0, pressed: new Set(), phrased: false, voiceOn: false, inPortal: false, ...over,
 });
 const keys = (...codes: string[]) => s({ pressed: new Set(codes) });
 const FIRST: StepId[] = ["move", "look", "jump", "sprint", "dodge"];
@@ -106,9 +106,24 @@ describe("onboarding steps", () => {
     for (const x of STEPS) if (x.id !== "portal") o.complete(x.id);
     expect(o.current?.id).toBe("portal");
     expect(o.next).toBeNull();
-    expect(o.observe(s({ atPortal: true }))).toEqual(["portal"]);
+    expect(o.observe(s({ inPortal: true }))).toEqual(["portal"]);
     expect(o.current).toBeNull();
     expect(o.allDone).toBe(true);
     expect(o.doneCount).toBe(STEPS.length);
+  });
+
+  it("actually walking into a portal ticks it whatever the card says", () => {
+    const o = new OnboardingSteps();
+    expect(o.observe(s({ inPortal: true }))).toEqual(["portal"]);
+    expect(o.current?.id).toBe("move");
+  });
+
+  it("only entering a ring ticks it: being near one never does, even with the portal card up (T9 review)", () => {
+    const o = new OnboardingSteps();
+    for (const x of STEPS) if (x.id !== "portal") o.complete(x.id);
+    expect(o.current?.id).toBe("portal");
+    for (let i = 0; i < 30; i++) expect(o.observe(s({ moved: 0.1 }))).toEqual([]);
+    expect(o.isDone("portal")).toBe(false);
+    expect(o.observe(s({ inPortal: true }))).toEqual(["portal"]);
   });
 });

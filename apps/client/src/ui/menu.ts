@@ -215,7 +215,7 @@ export class Menu {
           const save = item("save", "Save your character", ready ? `Keep ${c.name || "this character"} on any browser with an email code` : "Unlocks at level 2: play a little first", "", saveSlot);
           el("span", "fl-menu__badge", save.right, "Guest");
           save.b.disabled = !ready;
-          save.b.onclick = () => void showSavePrompt({ name: c.name });
+          save.b.onclick = () => void showSavePrompt({ name: c.name, requested: true });
           saveSlot.hidden = false;
         })
         .catch(() => {});

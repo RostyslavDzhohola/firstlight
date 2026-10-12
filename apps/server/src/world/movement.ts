@@ -2,8 +2,9 @@
 //
 // The client predicts and sends positions; the server checks every step:
 // - Distance: a budget refilled at sprint speed (swim speed in the water) plus slack, banked up to
-//   `budgetCap`. A dodge or a shove adds a one-off bonus that expires. The per-packet tolerance is
-//   charged (the budget may dip below zero), so it can't be repeated into extra speed.
+//   `budgetCap`. A dodge (pre-paid from refill the full bank couldn't hold) or a shove adds a
+//   one-off bonus that expires. The per-packet tolerance is charged (the budget may dip below
+//   zero), so it can't be repeated into extra speed.
 //   Only ground covered is charged: the client walks up any slope at full speed and snaps onto it,
 //   so radial motion is the height rules' business (ground, envelope), not the run budget's.
 // - Height: off the ground, the body must follow a ballistic envelope from its last grounded
@@ -24,11 +25,14 @@ export const MOVE = {
   budgetCap: 3.5, // metres that can be banked (≈ 0.3 s of sprint + slack)
   swimBudgetCap: 1.5,
   stepTolerance: 0.05, // per packet, charged
-  // A dodge covers 4.5 m in 0.3 s (client) instead of sprinting, and the budget keeps refilling at
-  // sprint speed meanwhile: the burst only pays the difference (4.5 − 9 × 0.3) plus slack, so
-  // DODGE-animation spam can't buy ~40 % more speed (F12 final Opus nit).
-  dodgeBurst: 2.0,
-  dodgeCooldownMs: 1100,
+  // Dodging is paid from a reserve that refills over one dodge cooldown (T9 review). An honest
+  // player sprinting and rolling at every cooldown covers 13.1 m per 1.2 s (the 15 m/s roll plus
+  // its slow-down), more than the sprint allowance, and the same roll from an empty bank (right
+  // after a correction or a shove) needs 1.6 m on top of the refill. With 1.6 m honest rolling gets
+  // 0 corrections at 20–60 fps and 100 ms packet gaps; the price is that a modified client claiming
+  // a roll at every cooldown and moving as far as allowed sustains 12.2 m/s against 10.8 (+12 %).
+  dodgeBurst: 1.6,
+  dodgeCooldownMs: 1200, // client PlayerController MOVE.dodgeCooldown
   dodgeWindowMs: 800, // the dodge bonus must be used within this time
   knockbackWindowMs: 1500,
   groundTolerance: 0.5, // feet may be this far below the ground
@@ -130,12 +134,19 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
   const riding = limits.ride !== undefined;
   const speed = (riding ? limits.ride! : (inWater ? MOVE.swimSpeed : MOVE.maxSpeed) * limits.speed) * MOVE.speedSlack;
   const cap = riding ? HORSE.budgetCap : inWater ? MOVE.swimBudgetCap : MOVE.budgetCap;
-  a.moveBudget = Math.min(cap, a.moveBudget + speed * elapsed);
+  const refilled = a.moveBudget + speed * elapsed;
+  a.moveBudget = Math.min(cap, refilled);
+  // The dodge reserve refills over one dodge cooldown, whatever the bank does: an honest player
+  // sprinting and dodging at every cooldown averages ~10.9 m/s (a 15 m/s roll plus its slow-down),
+  // more than the sprint allowance, so a reserve fed only by bank overflow ran dry (T9 review).
+  a.dodgeReserve = Math.min(MOVE.dodgeBurst, a.dodgeReserve + (elapsed * 1000 * MOVE.dodgeBurst) / MOVE.dodgeCooldownMs);
   if (now >= a.moveBonusUntil) a.moveBonus = 0;
   // Dodge rolls only on foot on land (the client can't roll in the water or from the saddle).
   if (m.anim === ANIM.DODGE && !riding && !swimming && !a.swimming && limits.dodge > 0 && now - a.lastDodgeAt >= MOVE.dodgeCooldownMs) {
     a.lastDodgeAt = now;
-    a.moveBonus += MOVE.dodgeBurst * limits.dodge;
+    const burst = Math.min(a.dodgeReserve, MOVE.dodgeBurst * limits.dodge);
+    a.dodgeReserve -= burst;
+    a.moveBonus += burst;
     a.moveBonusUntil = Math.max(a.moveBonusUntil, now + MOVE.dodgeWindowMs);
   }
 
@@ -240,6 +251,7 @@ export function motionFields(len: number, now: number) {
     moveBudget: MOVE.budgetCap,
     lastBudgetAt: now,
     lastDodgeAt: 0,
+    dodgeReserve: MOVE.dodgeBurst,
     moveBonus: 0,
     moveBonusUntil: 0,
     peakRadius: len,

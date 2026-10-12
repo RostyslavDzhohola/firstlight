@@ -8,6 +8,7 @@
 import "./account.css";
 import { getPlayToken, NAME_PATTERN, readClaims, sendEmailCode, setDisplayName, verifyEmailCode } from "../net/auth.ts";
 import { button, el, icon, isolateKeys, overlayClosed, overlayOpened, sprite, uiRoot } from "./dom.ts";
+import { mayAutofocus } from "./saveOffer.ts";
 import { installSprites, portraitSprite } from "./sprites.ts";
 
 const RESEND_SECONDS = 60;
@@ -41,6 +42,38 @@ function field(type: string, placeholder: string, value = ""): HTMLInputElement 
   return i;
 }
 
+/**
+ * Focus for a card: `focus(el)` focuses `el` only when mayAutofocus allows it (never while the game
+ * holds the pointer; a card the game opened by itself waits until the player clicks or types into
+ * it). A click on the card's background focuses the last field asked for.
+ */
+function cardFocus(card: HTMLElement, requested: boolean): { focus(e: HTMLElement): void; request(): void } {
+  let interacted = false;
+  let target: HTMLElement | null = null;
+  const mark = () => {
+    interacted = true;
+  };
+  card.addEventListener("pointerdown", mark);
+  card.addEventListener("keydown", mark);
+  card.addEventListener("click", (ev) => {
+    if (target?.isConnected && !(ev.target as Element | null)?.closest("input, button, a, label, select, textarea")) target.focus();
+  });
+  const focus = (e: HTMLElement) => {
+    target = e;
+    setTimeout(() => {
+      if (e.isConnected && mayAutofocus({ pointerLocked: !!document.pointerLockElement, requested, interacted })) e.focus();
+    }, 0);
+  };
+  return {
+    focus,
+    /** The player asked for this card again (Esc menu): focus its field now. */
+    request: () => {
+      interacted = true;
+      if (target) focus(target);
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------------------------
 // Email → code flow shared by "save" and "sign in"
 
@@ -55,7 +88,7 @@ interface EmailFlowText {
 
 type FlowStep = "email" | "code" | "saved" | "busy";
 
-function emailFlow(container: HTMLElement, text: EmailFlowText, name: string | undefined, finish: (ok: boolean) => void, start: FlowStep = "email", startEmail = ""): void {
+function emailFlow(container: HTMLElement, text: EmailFlowText, name: string | undefined, finish: (ok: boolean) => void, focus: (e: HTMLElement) => void, start: FlowStep = "email", startEmail = ""): void {
   let email = startEmail;
   let resendTimer = 0;
 
@@ -119,7 +152,7 @@ function emailFlow(container: HTMLElement, text: EmailFlowText, name: string | u
     input.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") void go();
     });
-    setTimeout(() => input.focus(), 0);
+    focus(input);
   };
 
   const stepCode = () => {
@@ -236,7 +269,7 @@ function emailFlow(container: HTMLElement, text: EmailFlowText, name: string | u
       status.textContent = r.ok ? "New code sent." : r.message;
     };
     paint();
-    setTimeout(() => input.focus(), 0);
+    focus(input);
   };
 
   const stepSaved = () => {
@@ -257,7 +290,7 @@ function emailFlow(container: HTMLElement, text: EmailFlowText, name: string | u
     }
     const btns = el("div", "fl-acct__btns", container);
     const back = button(text.who ? "Back to the game" : "Continue", "fl-btn fl-btn--primary", btns, () => done());
-    back.focus();
+    focus(back);
     const t = window.setTimeout(() => done(), 4500);
     let closed = false;
     const done = () => {
@@ -277,7 +310,7 @@ function emailFlow(container: HTMLElement, text: EmailFlowText, name: string | u
     el("p", "", container, "Too many codes are going out right now. You're still playing as a guest on this browser. Nothing is lost.");
     el("span", "fl-fine", container, "Try again from Esc → Save your character in a little while.");
     const btns = el("div", "fl-acct__btns", container);
-    button("OK", "fl-btn fl-btn--primary", btns, () => finish(false)).focus();
+    focus(button("OK", "fl-btn fl-btn--primary", btns, () => finish(false)));
   };
 
   ({ email: stepEmail, code: stepCode, saved: stepSaved, busy: stepBusy })[start]();
@@ -311,19 +344,27 @@ export function nameProblem(v: string): string {
 // Public API
 
 let saveOpen: Promise<"saved" | "dismissed"> | null = null;
+let saveFocus: { request(): void } | null = null;
 
 /**
  * Non-blocking "Save your character" card (bottom-right; the game keeps running). Shown after the
  * first level-up. Resolves "saved" once the email code is accepted, else "dismissed".
+ * `requested`: the player asked for it (Esc menu), so its field takes focus; the level-up offer
+ * leaves the keyboard to the game until the player clicks into the card.
  */
-export function showSavePrompt(opts: { name?: string; level?: number; starter?: number; /** Dev gallery only: open on a later state. */ preview?: FlowStep } = {}): Promise<"saved" | "dismissed"> {
-  if (saveOpen) return saveOpen;
+export function showSavePrompt(opts: { name?: string; level?: number; starter?: number; requested?: boolean; /** Dev gallery only: open on a later state. */ preview?: FlowStep } = {}): Promise<"saved" | "dismissed"> {
+  if (saveOpen) {
+    if (opts.requested) saveFocus?.request();
+    return saveOpen;
+  }
   installSprites();
   saveOpen = new Promise((resolve) => {
     const card = el("section", "fl-savecard fl-panel fl-acct fl-ui", uiRoot());
     card.setAttribute("role", "dialog");
     card.setAttribute("aria-label", "Save your character");
     isolateKeys(card);
+    const focus = cardFocus(card, !!opts.requested);
+    saveFocus = focus;
     card.addEventListener("keydown", (ev) => {
       if (ev.key === "Escape") finish(false);
     });
@@ -333,6 +374,7 @@ export function showSavePrompt(opts: { name?: string; level?: number; starter?: 
       done = true;
       card.remove();
       saveOpen = null;
+      saveFocus = null;
       resolve(ok ? "saved" : "dismissed");
     };
     void (async () => {
@@ -348,6 +390,7 @@ export function showSavePrompt(opts: { name?: string; level?: number; starter?: 
         },
         name,
         finish,
+        focus.focus,
         opts.preview,
         opts.preview ? "wren@example.com" : "",
       );
@@ -384,6 +427,7 @@ export function showSignIn(): Promise<"signed-in" | "dismissed"> {
         },
         name,
         finish,
+        cardFocus(m.card, true).focus,
       );
     })();
   });

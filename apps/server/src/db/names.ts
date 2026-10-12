@@ -33,10 +33,24 @@ export type NameProblem = "length" | "chars" | "filtered" | "reserved";
 // anywhere in a name; the rest only as whole name parts (one or more consecutive parts, split at
 // underscores, camelCase, caps runs and letter/digit changes), so "Bob_Server", "AdminBob" and
 // "ADM1N" are reserved but "Observer", "Badminton" and "Unofficial" are not (F12 final Sonnet S6).
+// A name typed glued in lower case has a single part, so a few words also count at its ends
+// (F12 confirm Sonnet N-1): "admin", "oversight" and "sysop" at either end ("adminbob", "theadmin"),
+// which no ordinary word starts or ends with; "server", "support", "system" and "official" only at
+// the start ("serverbob", "supportteam"), and not where the name starts with an ordinary word made
+// from them ("Supporter", "Systemic", "Officially"). As suffixes they would hit Observer, Ecosystem
+// and Unofficial. "dev", "mod" and "staff" get no such rule: Devlin, Devraj, Modric, Modbury and
+// Staffan start the same way, so "devbob" and "modbob" stay allowed (their camelCase forms aren't).
 const RESERVED_ANYWHERE = ["administrator", "firstlight", "moderator", "gamemaster"];
 const RESERVED_PARTS = [
   "admin", "system", "oversight", "official", "developer", "support", "server",
   "mod", "mods", "dev", "devs", "staff", "gm", "owner", "root", "sysop", "team",
+];
+const RESERVED_ENDS = ["admin", "oversight", "sysop"];
+const RESERVED_STARTS = ["server", "support", "system", "official"];
+/** Ordinary words that begin with a RESERVED_STARTS word; a name starting with one is not caught by that rule. */
+const ORDINARY_STARTS = [
+  "serverus", "serverless", "supporter", "supportive", "supporting", "supported", "supportable",
+  "systemic", "systematic", "systematiz", "systemiz", "officially", "officialdom", "officialese",
 ];
 
 function reservedForm(s: string): string {
@@ -44,6 +58,9 @@ function reservedForm(s: string): string {
 }
 const RESERVED_FORMS = RESERVED_ANYWHERE.map(reservedForm);
 const RESERVED_PART_FORMS = new Set(RESERVED_PARTS.map(reservedForm));
+const RESERVED_END_FORMS = RESERVED_ENDS.map(reservedForm);
+const RESERVED_START_FORMS = RESERVED_STARTS.map(reservedForm);
+const ORDINARY_START_FORMS = ORDINARY_STARTS.map(reservedForm);
 
 /** The parts of a name: split at underscores, camelCase, caps runs ("XAdmin") and letter/digit changes. */
 function nameParts(name: string): string[] {
@@ -59,6 +76,8 @@ function nameParts(name: string): string[] {
 export function isReservedName(name: string): boolean {
   const flat = reservedForm(name);
   if (RESERVED_FORMS.some((w) => flat.includes(w))) return true;
+  if (RESERVED_END_FORMS.some((w) => flat.startsWith(w) || flat.endsWith(w))) return true;
+  if (RESERVED_START_FORMS.some((w) => flat.startsWith(w)) && !ORDINARY_START_FORMS.some((w) => flat.startsWith(w))) return true;
   const parts = nameParts(name);
   for (let i = 0; i < parts.length; i++) {
     let run = "";

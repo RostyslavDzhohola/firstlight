@@ -25,7 +25,8 @@ import { cancelAttack, chest, playersInCircle, playersInLine, startAttack, updat
 import { aggro } from "./brain.ts";
 import type { LivePlayer, NpcSystem } from "./NpcSystem.ts";
 import { MODE, type ActiveAttack, type Npc } from "./npc.ts";
-import { bossLoot } from "./rewards.ts";
+import { payBossLoot, rollBossLoot } from "./rewards.ts";
+import { recipientOf, stillEligible } from "./payouts.ts";
 import { step } from "./steer.ts";
 import { NPC_TUNING, emitNpcEvent } from "./tuning.ts";
 import { add, cross, dist, dot, flatDist, len, normalize, rotateAboutUp, sub, tangentDir, up } from "./vec.ts";
@@ -581,16 +582,25 @@ export class BossController {
     // unofficial first, so that mark is saved with the loot's XP and no level medal follows from
     // it (F12 final S1).
     emitNpcEvent({ kind: "bossKill", body: this.sys.world.body.id, boss: this.def.id, sessionIds: winners.map((p) => p.id), userIds: winners.map((p) => p.identity.userId), names: winners.map((p) => p.identity.name) });
+    // Each winner's loot is rolled once and paid in its own transaction; a failed save is retried on
+    // later ticks for a winner still here and alive on the same life (payouts.ts, F12 confirm Sonnet SF1).
     for (const p of winners) {
-      let loot: ReturnType<typeof bossLoot>;
-      try {
-        loot = bossLoot(this.sys, this.def, p);
-      } catch (err) {
-        console.error(`[boss ${this.def.id}] loot for ${p.identity.userId} not paid: ${(err as Error)?.message ?? err}`);
-        continue;
-      }
-      this.sys.world.send(p, "npcKill", { id: n.id, kind: n.defIndex, xp: loot.xp, coins: loot.coins });
-      this.sys.world.send(p, "toast", { text: `${this.npcDef.name} defeated: +${loot.coins} coins, +${loot.items.length} items`, kind: "coins" });
+      const who = recipientOf(p);
+      const items = rollBossLoot(this.def, Math.random);
+      const commit = () => {
+        const a = stillEligible(this.sys.world, who);
+        if (!a) {
+          console.error(`[boss ${this.def.id}] loot for ${who.userId} forfeited: left, died or reborn before it could be saved`);
+          return () => {};
+        }
+        const publish = payBossLoot(this.sys, this.def, a, items);
+        return () => {
+          publish();
+          this.sys.world.send(a, "npcKill", { id: n.id, kind: n.defIndex, xp: this.def.loot.xp, coins: this.def.loot.coins });
+          this.sys.world.send(a, "toast", { text: `${this.npcDef.name} defeated: +${this.def.loot.coins} coins, +${items.length} items`, kind: "coins" });
+        };
+      };
+      this.sys.payouts.pay(`boss:${n.id}:${who.userId}`, `boss ${this.def.id} loot for ${who.userId}`, commit, now);
     }
     this.event({ type: "defeat", hp: 0, maxHp: n.state.maxHp, engaged: winners.length });
     this.voice(this.def.voice.defeat);

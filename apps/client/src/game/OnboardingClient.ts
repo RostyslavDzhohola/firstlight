@@ -7,7 +7,7 @@
 // tutorial.
 
 import * as THREE from "three/webgpu";
-import { BODIES, portalNear, portalSpots, type PortalSpot } from "@firstlight/shared";
+import { BODIES, portalSpots, type PortalSpot } from "@firstlight/shared";
 import { ONBOARDING } from "@firstlight/shared/content/onboarding";
 import { WEAPONS, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
 import { config, flags } from "../config.ts";
@@ -16,6 +16,7 @@ import { pauseExtras, type PauseExtra } from "../ui/menu.ts";
 import { OnboardingHud } from "../ui/onboarding.ts";
 import { Panel } from "../ui/panels.ts";
 import { voice } from "../voice/index.ts";
+import { portalAt } from "../world/portalEntry.ts";
 import { TrainingDummies } from "../world/TrainingDummies.ts";
 import type { Game } from "./Game.ts";
 import { OnboardingSteps } from "./onboardingSteps.ts";
@@ -47,6 +48,8 @@ export class OnboardingClient implements ClientSystem {
   private readonly lastPos = new THREE.Vector3();
   private hasLast = false;
   private lastTrainAt = 0;
+  /** CombatClient hook: the tutorial's tips or its last card are up (the save card waits). */
+  private readonly busy = () => this.active || !!this.hud;
   private readonly pauseRow = (): PauseExtra | null =>
     this.active
       ? { icon: "arrow-r", title: "Skip tutorial", sub: this.paid ? "Hide the rest of the tips." : "No more XP and no Spark medal. It won't come back.", onClick: () => this.skip() }
@@ -63,6 +66,8 @@ export class OnboardingClient implements ClientSystem {
       if (m.by === room.sessionId) this.phrased = true;
     });
     game.combat.training = (def, tier, now) => this.attack(def, tier, now);
+    // Level 2 is paid on the dummies: the "Save your character" card waits until the HUD is gone.
+    game.combat.tutorialBusy = this.busy;
     pauseExtras.add(this.pauseRow);
   }
 
@@ -189,7 +194,7 @@ export class OnboardingClient implements ClientSystem {
       pressed: g.photo?.active ? NO_KEYS : g.input.pressed,
       phrased: this.phrased,
       voiceOn: !!voice()?.optedIn,
-      atPortal: !!portalNear(this.portals, p.x, p.y, p.z),
+      inPortal: !!portalAt(this.portals, p.x, p.y, p.z),
     });
     this.phrased = false;
     if (completed.length && completed[0] !== "attack") g.audio.play("ui");
@@ -229,9 +234,21 @@ export class OnboardingClient implements ClientSystem {
   dispose() {
     pauseExtras.delete(this.pauseRow);
     if (this.game.combat.training) this.game.combat.training = null;
-    this.hud?.dispose();
-    this.hud = null;
     this.dummies.dispose();
+    // Left through the portal (the last step): the "Tutorial complete" card stays up for the rest of
+    // its time, over the travel, and the save card keeps waiting for it.
+    const hud = this.hud;
+    const left = this.doneUntil - performance.now();
+    if (hud && this.doneUntil && left > 0) {
+      setTimeout(() => {
+        hud.dispose();
+        if (this.hud === hud) this.hud = null;
+      }, left);
+      return;
+    }
+    if (this.game.combat.tutorialBusy === this.busy) this.game.combat.tutorialBusy = null;
+    hud?.dispose();
+    this.hud = null;
   }
 }
 

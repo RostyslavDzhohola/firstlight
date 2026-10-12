@@ -1003,10 +1003,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     a.youDirty = true;
     const shown = a.state.level;
     if (a.char.level <= shown) return;
-    const oldMax = maxHp(shown);
-    const newMax = maxHp(a.char.level);
-    a.state.maxHp = newMax;
-    a.state.hp = Math.min(newMax, a.state.hp + (newMax - oldMax));
+    a.state.maxHp = maxHp(a.char.level);
+    a.state.hp = levelUpHp(a.state.hp, shown, a.char.level);
     a.state.level = a.char.level;
     a.client.send("toast", { text: `Level ${a.char.level}!`, kind: "xp" });
     emitGameEvent(this, { type: "levelUp", playerId: a.id, level: a.char.level });
@@ -1283,7 +1281,10 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   saveActor(a: PlayerActor) {
     if (a.superseded || a.identity.loadtest) return;
     if (!a.dead) a.char.pos = [a.state.x, a.state.y, a.state.z];
-    a.char.hp = a.state.hp;
+    // Inside a reward transaction the character may be levels ahead of the synced state, whose HP
+    // rises only after the commit (showLevel). Save the HP it will show, so a crash in between
+    // restarts with the level's HP (F12 confirm Codex N-S1). A failed save restores `char` (persist).
+    a.char.hp = a.dead ? a.state.hp : levelUpHp(a.state.hp, a.state.level, a.char.level);
     characterRepo.current.save(a.identity.userId, a.char);
   }
 
@@ -1358,6 +1359,13 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   newNpcState(): NpcState {
     return new NpcState();
   }
+}
+
+/** HP after levelling from `shown` to `level`: the max-HP gain is added, capped at the new max. */
+function levelUpHp(hp: number, shown: number, level: number): number {
+  if (level <= shown) return hp;
+  const newMax = maxHp(level);
+  return Math.min(newMax, hp + (newMax - maxHp(shown)));
 }
 
 function norm(v: readonly number[]): V3 {

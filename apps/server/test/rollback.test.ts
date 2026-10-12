@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { matchMaker } from "@colyseus/core";
 import type { Room } from "@colyseus/sdk";
-import { BODIES, padDirs } from "@firstlight/shared";
+import { BODIES, createTerrain, padDirs } from "@firstlight/shared";
 import { PROTOCOL_VERSION, type InvItem } from "@firstlight/shared/net/protocol";
 import { CLOSE } from "@firstlight/shared/net/social";
 import type { Game } from "../src/app.ts";
@@ -17,9 +17,14 @@ import { characterRepo } from "../src/world/characters.ts";
 import { pileStore } from "../src/world/piles.ts";
 import { SqliteCharacterRepo, SqlitePileStore } from "../src/world/sqliteStores.ts";
 import { placeDir } from "@firstlight/shared/content/places";
+import { maxHp } from "@firstlight/shared/content/progression";
+import { bossArena } from "@firstlight/shared/content/arenas";
+import { NF } from "@firstlight/shared/content/npcs";
+import { NPC_TUNING, npcSystemOf, onNpcEvent, resetTuning } from "../src/world/npc/index.ts";
+import { PAYOUT_RETRY } from "../src/world/npc/payouts.ts";
 import { emitGameEvent } from "../src/world/events.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
-import { spawnNpc } from "./npc-bots.ts";
+import { adminBot, bossInfo, spawnNpc } from "./npc-bots.ts";
 import { bot, ground, harness, objAt, serverRoom as questRoom, sleep as qsleep, tpAndWait, type Bot } from "./quest-helpers.ts";
 
 let game: Game;
@@ -28,6 +33,8 @@ let db: Db;
 let failing = false;
 /** When set, this many more character saves succeed, then every save fails (a second write failing). */
 let savesLeft: number | null = null;
+/** Character saves that threw (the injected failure was hit). */
+let failedSaves = 0;
 const rooms: Room[] = [];
 
 beforeEach(async () => {
@@ -37,14 +44,21 @@ beforeEach(async () => {
   const repo = new SqliteCharacterRepo(db);
   const save = repo.save.bind(repo);
   repo.save = (userId, data) => {
-    if (failing) throw new Error("disk I/O error (test)");
-    if (savesLeft !== null && savesLeft-- <= 0) throw new Error("disk I/O error (test, later write)");
+    if (failing) {
+      failedSaves++;
+      throw new Error("disk I/O error (test)");
+    }
+    if (savesLeft !== null && savesLeft-- <= 0) {
+      failedSaves++;
+      throw new Error("disk I/O error (test, later write)");
+    }
     save(userId, data);
   };
   characterRepo.current = repo;
   pileStore.current = new SqlitePileStore(db);
   failing = false;
   savesLeft = null;
+  failedSaves = 0;
   harness.game = game;
 });
 afterEach(async () => {
@@ -308,6 +322,10 @@ describe("mission XP commits with the completion (F12 final B1)", () => {
     expect(actor(b).char.level).toBe(2);
     expect(me(b.room).level).toBe(2);
     await waitFor(() => b.toasts.includes("Level 2!"));
+    // The completion's one save also carries the level-up's HP (F12 confirm Codex N-S1).
+    expect(stored("climber").hp).toBe(actor(b).state.hp);
+    expect(maxHp(stored("climber").level)).toBe(actor(b).state.maxHp);
+    expect(actor(b).state.maxHp).toBe(110);
     // Further triggers pay nothing more.
     kills(1);
     await qsleep(200);
@@ -335,35 +353,192 @@ describe("mission XP commits with the completion (F12 final B1)", () => {
   });
 });
 
-describe("kill rewards: XP and loot commit before anyone hears of a level-up (F12 final B1)", () => {
-  it("a kill whose save fails pays and announces nothing; the next kill pays once", async () => {
-    const r = await setup("hunter");
+describe("kill and boss payouts: committed before anyone hears of them, retried when the save fails (F12 final B1, F12 confirm Sonnet SF1)", () => {
+  const retry = [...PAYOUT_RETRY.delaysMs];
+  beforeEach(() => {
+    PAYOUT_RETRY.delaysMs = [150, 300, 450];
+  });
+  afterEach(() => {
+    PAYOUT_RETRY.delaysMs = [...retry];
+    resetTuning();
+  });
+  const npcs = (r: Room) => npcSystemOf(serverRoom(r))!;
+  /** The kill (and its first payout attempt) has happened: onKilled marks the NPC dead first. */
+  const dead = (r: Room, id: string) => npcs(r).npcs.get(id)?.dead !== false;
+  /** Server time has moved past every retry delay since `t0` (a retry would have run by now). */
+  const pastRetries = (r: Room, t0: number) => npcs(r).now > t0 + PAYOUT_RETRY.delaysMs.reduce((a, b) => a + b, 0) + 200;
+
+  /** An admin one XP short of level 2 with listeners for kill news and hunt credit. */
+  async function hunter(name: string) {
+    const r = await setup(name);
     const a = actorOf(r);
-    a.char.xp = 49; // one short of level 2
+    a.char.xp = 49;
     serverRoom(r).saveActor(a);
     const toasts: string[] = [];
-    let kills = 0;
+    const kills: any[] = [];
+    let credits = 0;
     r.onMessage("toast", (m: any) => toasts.push(m.text));
-    r.onMessage("npcKill", () => kills++);
-    const at = outside(44);
+    r.onMessage("npcKill", (m: any) => kills.push(m));
+    const off = onNpcEvent((e) => e.kind === "kill" && e.userIds.includes(name) && credits++);
+    offs.push(off);
+    const kill = async () => {
+      const id = await spawnNpc(r, "hopbit", outside(44), { instant: true });
+      r.send("npc", { cmd: "hurt", id, amount: 1e6, as: r.sessionId });
+      await waitFor(() => dead(r, id));
+    };
+    return { r, a, toasts, kills, credits: () => credits, kill };
+  }
+  const offs: (() => void)[] = [];
+  afterEach(() => {
+    for (const off of offs.splice(0)) off();
+  });
+
+  it("a kill whose save fails pays and announces nothing; once saving works a retry pays it exactly once", async () => {
+    const { r, a, toasts, kills, credits, kill } = await hunter("hunter");
     failing = true;
-    const first = await spawnNpc(r, "hopbit", at, { instant: true });
-    r.send("npc", { cmd: "hurt", id: first, amount: 1e6, as: r.sessionId });
-    await sleep(400);
+    await kill();
+    expect(npcs(r).payouts.size()).toBe(1); // queued for a retry
     expect(toasts).not.toContain("Level 2!");
-    expect(kills).toBe(0);
-    expect(a.char.xp).toBe(49);
-    expect(a.char.level).toBe(1);
-    expect(me(r).level).toBe(1);
+    expect(kills).toHaveLength(0);
+    expect(credits()).toBe(0);
+    expect([a.char.xp, a.char.level, a.char.coins, me(r).level]).toEqual([49, 1, 0, 1]);
     failing = false;
-    const second = await spawnNpc(r, "hopbit", at, { instant: true });
-    r.send("npc", { cmd: "hurt", id: second, amount: 1e6, as: r.sessionId });
-    await waitFor(() => kills === 1);
+    await waitFor(() => kills.length === 1);
     await waitFor(() => toasts.includes("Level 2!"));
+    const paid = kills[0];
+    expect(paid.xp).toBeGreaterThan(0);
+    expect(a.char.xp).toBe(49 + paid.xp);
+    expect(a.char.coins).toBe(paid.coins);
     expect(a.char.level).toBe(2);
-    expect(characterRepo.current.load("hunter")!.xp).toBe(a.char.xp);
-    expect(characterRepo.current.load("hunter")!.level).toBe(2);
+    expect(credits()).toBe(1); // hunt credit with the payout
+    const row = characterRepo.current.load("hunter")!;
+    expect([row.xp, row.level, row.coins]).toEqual([a.char.xp, 2, a.char.coins]);
+    // Nothing is left to retry, and nothing pays again.
+    const t0 = npcs(r).now;
+    expect(npcs(r).payouts.size()).toBe(0);
+    await waitFor(() => pastRetries(r, t0));
+    expect(kills).toHaveLength(1);
+    expect(credits()).toBe(1);
     expect(toasts.filter((t) => t === "Level 2!")).toHaveLength(1);
+    expect(a.char.xp).toBe(49 + paid.xp);
+    expect(characterRepo.current.load("hunter")!.xp).toBe(49 + paid.xp);
+  });
+
+  it("a kill whose save works first time is paid once and never retried", async () => {
+    const { r, a, kills, credits, kill } = await hunter("oneshot");
+    const t0 = npcs(r).now;
+    await kill();
+    expect(npcs(r).payouts.size()).toBe(0);
+    await waitFor(() => kills.length === 1);
+    const xp = a.char.xp;
+    expect(xp).toBe(49 + kills[0].xp);
+    await waitFor(() => pastRetries(r, t0));
+    expect(kills).toHaveLength(1);
+    expect(credits()).toBe(1);
+    expect(a.char.xp).toBe(xp);
+    expect(characterRepo.current.load("oneshot")!.xp).toBe(xp);
+    expect(failedSaves).toBe(0);
+  });
+
+  it("a payout whose saves keep failing is given up after the last retry; nothing arrives late", async () => {
+    const { r, a, kills, credits, kill } = await hunter("unpaid");
+    failing = true;
+    await kill();
+    await waitFor(() => failedSaves >= 1 + PAYOUT_RETRY.delaysMs.length && npcs(r).payouts.size() === 0);
+    failing = false;
+    const t0 = npcs(r).now;
+    await waitFor(() => pastRetries(r, t0));
+    expect(kills).toHaveLength(0);
+    expect(credits()).toBe(0);
+    expect([a.char.xp, a.char.coins]).toEqual([49, 0]);
+    expect(characterRepo.current.load("unpaid")!.xp).toBe(49);
+  });
+
+  it("boss loot whose save fails arrives exactly once on a retry (coins, XP, items)", async () => {
+    NPC_TUNING.bosses = true;
+    NPC_TUNING.bossAttacks = false;
+    NPC_TUNING.bossMechanics = [];
+    const ar = bossArena(createTerrain("arcadia"))!;
+    const r = await adminBot(game, rooms, "bosskiller", "arcadia", ar.centre as V, 8);
+    const a = actorOf(r);
+    const xp0 = a.char.xp;
+    const kills: any[] = [];
+    let defeat = false;
+    r.onMessage("npcKill", (m: any) => kills.push(m));
+    r.onMessage("boss", (m: any) => m.type === "defeat" && (defeat = true));
+    let info: any = null;
+    await waitFor(() => {
+      void bossInfo(r).then((i) => (info = i));
+      return info?.status === "alive" && info.engaged;
+    });
+    await waitFor(() => !!st(r).npcs?.get(info.id) && !(st(r).npcs.get(info.id).flags & NF.SPAWNING), 3000);
+    serverRoom(r).saveActor(a);
+    failing = true;
+    r.send("npc", { cmd: "hurt", id: info.id, amount: 1e7, as: r.sessionId });
+    await waitFor(() => defeat);
+    expect(npcs(r).payouts.size()).toBe(1);
+    expect(kills).toHaveLength(0);
+    expect([a.char.coins, a.char.xp, count(r, "tonic_large")]).toEqual([0, xp0, 0]);
+    failing = false;
+    await waitFor(() => kills.length === 1);
+    expect(kills[0]).toMatchObject({ xp: 2000, coins: 120 });
+    expect([a.char.coins, a.char.xp, count(r, "tonic_large")]).toEqual([120, xp0 + 2000, 2]);
+    const row = characterRepo.current.load("bosskiller")!;
+    expect([row.coins, row.xp]).toEqual([120, xp0 + 2000]);
+    expect([...row.hotbar, ...row.backpack].filter((s) => s?.id === "tonic_large").reduce((n, s) => n + s!.qty, 0)).toBe(2);
+    const t0 = npcs(r).now;
+    await waitFor(() => pastRetries(r, t0));
+    expect(kills).toHaveLength(1);
+    expect([a.char.coins, a.char.xp, count(r, "tonic_large")]).toEqual([120, xp0 + 2000, 2]);
+  }, 30_000);
+});
+
+describe("a level-up's extra HP is in the reward's save (F12 confirm Codex N-S1)", () => {
+  /** An admin one XP short of level 2, saved, and a hopbit kill that crosses the level. */
+  async function oneShort(name: string) {
+    const r = await setup(name);
+    const a = actorOf(r);
+    a.char.xp = 49;
+    serverRoom(r).saveActor(a);
+    const toasts: string[] = [];
+    r.onMessage("toast", (m: any) => toasts.push(m.text));
+    const kill = async () => {
+      const id = await spawnNpc(r, "hopbit", outside(44), { instant: true });
+      r.send("npc", { cmd: "hurt", id, amount: 1e6, as: r.sessionId });
+      await waitFor(() => npcSystemOf(serverRoom(r))!.npcs.get(id)?.dead !== false); // killed, payout tried
+    };
+    return { r, a, toasts, kill };
+  }
+
+  it("a kill that crosses a level stores the HP and max HP the player sees", async () => {
+    const { r, a, toasts, kill } = await oneShort("healed");
+    expect(a.state.hp).toBe(100);
+    await kill();
+    await waitFor(() => toasts.includes("Level 2!"));
+    expect(a.state.level).toBe(2);
+    expect(a.state.maxHp).toBe(110);
+    expect(a.state.hp).toBe(110);
+    // A crash now restarts from game.db: the row carries the healed HP, not the level-1 HP.
+    const db2 = openGameDb(join(dir, "game.db"));
+    const row = new SqliteCharacterRepo(db2).load("healed")!;
+    db2.close();
+    expect(row.level).toBe(2);
+    expect(row.hp).toBe(a.state.hp);
+    expect(maxHp(row.level)).toBe(a.state.maxHp);
+    await waitFor(() => me(r).hp === 110 && me(r).maxHp === 110); // published after the commit
+  });
+
+  it("a level-up reward whose save fails changes neither the live nor the stored HP", async () => {
+    const { a, toasts, kill } = await oneShort("unhealed");
+    failing = true;
+    await kill();
+    expect(failedSaves).toBeGreaterThan(0);
+    expect(toasts).not.toContain("Level 2!");
+    expect(a.char.level).toBe(1);
+    expect(a.char.hp).toBe(100);
+    expect([a.state.level, a.state.maxHp, a.state.hp]).toEqual([1, 100, 100]);
+    const row = characterRepo.current.load("unhealed")!;
+    expect([row.xp, row.level, row.hp]).toEqual([49, 1, 100]);
   });
 });
 

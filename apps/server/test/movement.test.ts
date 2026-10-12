@@ -157,9 +157,8 @@ describe("no shortcuts through the planet (F12 final Opus N-B1)", () => {
     r.send("input", { seq: 101, x: 0, y: 0, z: 0, fx: 0, fy: 0, fz: 1, anim: 1, t: Date.now() });
     await sleep(60);
     r.send("input", { seq: 102, x: target![0] * tr, y: target![1] * tr, z: target![2] * tr, fx: 0, fy: 0, fz: 1, anim: 1, t: Date.now() });
-    await sleep(300);
+    await waitFor(() => corrections > 0);
     const end = [me(r).x, me(r).y, me(r).z];
-    expect(corrections).toBeGreaterThan(0);
     expect(end.every(Number.isFinite)).toBe(true);
     expect(Math.hypot(end[0]! - start[0]!, end[1]! - start[1]!, end[2]! - start[2]!)).toBeLessThan(5);
   });
@@ -569,8 +568,7 @@ describe("standing on props (F12 client review should-fix 4)", () => {
       send(k.r, k.seq, d, groundR(d), 1);
       await sleep(80);
     }
-    await sleep(150);
-    expect(k.corrections.n).toBeGreaterThan(0);
+    await waitFor(() => k.corrections.n > 0);
     const p = me(k.r);
     const q = [p.x - b.px, p.y - b.py, p.z - b.pz];
     const lx = q[0]! * b.rx + q[1]! * b.ry + q[2]! * b.rz, lz = q[0]! * b.fx + q[1]! * b.fy + q[2]! * b.fz;
@@ -635,8 +633,7 @@ describe("no walking through props in one packet (F12 final S2)", () => {
       await sleep(400);
       k.corrections.n = 0;
       send(k.r, k.seq, norm(back), Math.hypot(...back), 1);
-      await sleep(300);
-      expect(k.corrections.n).toBeGreaterThan(0);
+      await waitFor(() => k.corrections.n > 0);
       const p = me(k.r);
       const lz = (p.x - w.px) * w.fx + (p.y - w.py) * w.fy + (p.z - w.pz) * w.fz;
       expect(lz).toBeLessThan(0); // still on the near side
@@ -787,54 +784,94 @@ describe("mounted limits go through the limits argument (F12 re-review nit)", ()
     const horse = rider(now - 5000, true);
     horse.moveBudget = 0;
     horse.lastBudgetAt = now - 10; // almost nothing refilled
-    expect(validateMove(horse, step(horse, 1.8, ANIM.DODGE), flat, moveLimits(horse, now), now).ok).toBe(false);
+    expect(validateMove(horse, step(horse, 1.3, ANIM.DODGE), flat, moveLimits(horse, now), now).ok).toBe(false);
     const foot = rider(now - 5000, false);
     foot.moveBudget = 0;
     foot.lastBudgetAt = now - 10;
-    expect(validateMove(foot, step(foot, 1.8, ANIM.DODGE), flat, moveLimits(foot, now), now).ok).toBe(true);
+    expect(validateMove(foot, step(foot, 1.3, ANIM.DODGE), flat, moveLimits(foot, now), now).ok).toBe(true);
   });
 
-  /** Run a packet pattern at 20 Hz on foot: `at(i)` gives each packet's step (m) and anim. Returns the refusals. */
-  function pattern(packets: number, at: (i: number) => { metres: number; anim: number }): number {
+  /**
+   * Run a packet pattern at 20 Hz on foot, along a great circle: `at(i)` gives each packet's step (m)
+   * and anim; `prep` adjusts the fresh actor (its clock starts at `now`). Returns the refusals.
+   */
+  function pattern(packets: number, at: (i: number) => { metres: number; anim: number }, prep?: (a: PlayerActor, now: number) => void): number {
     let now = 1_000_000;
     const a = rider(now - 5000, false);
+    prep?.(a, now);
     let refused = 0;
+    let arc = 0;
     for (let i = 0; i < packets; i++) {
       now += 50;
       const { metres, anim } = at(i);
-      const m = step(a, metres, anim);
+      const t = arc + metres / 1000;
+      const m = { x: Math.sin(t) * 1000, y: 0, z: Math.cos(t) * 1000, anim };
       if (validateMove(a, m, flat, moveLimits(a, now), now).ok) {
         a.lastX = m.x;
         a.lastY = m.y;
         a.lastZ = m.z;
+        arc = t;
       } else refused++;
     }
     return refused;
   }
+  /** The fastest constant speed (m/s) that 20 s of packets with these anims get through unrefused. */
+  function sustained(anim: (i: number) => number): number {
+    let lo = 5, hi = 30;
+    for (let k = 0; k < 30; k++) {
+      const mid = (lo + hi) / 2;
+      if (pattern(400, (i) => ({ metres: mid * 0.05, anim: anim(i) })) === 0) lo = mid;
+      else hi = mid;
+    }
+    return lo;
+  }
+  const dodgeStep = { metres: (4.5 / 0.3) * 0.05, anim: ANIM.DODGE }; // the client's 4.5 m in 0.3 s, per packet
+  const sprintStep = { metres: 9 * 0.05, anim: ANIM.SPRINT };
+  const emptyBank = (a: PlayerActor, now: number) => {
+    a.moveBudget = 0;
+    a.lastBudgetAt = now;
+  };
 
   it("dodge animations don't buy speed: 14 m/s with DODGE every 1.1 s is refused (F12 final Opus nit)", () => {
     // The sprint budget refills at 9 × 1.2 = 10.8 m/s; a 4.5 m burst per dodge let ~14.9 m/s through.
     expect(pattern(400, (i) => ({ metres: 14 * 0.05, anim: i % 22 === 0 ? ANIM.DODGE : ANIM.SPRINT }))).toBeGreaterThan(0);
   });
 
-  it("…and a real dodge from an empty bank still fits", () => {
-    let first = true;
-    expect(
-      pattern(6, () => {
-        const r = { metres: first ? 3.5 + (4.5 / 0.3) * 0.05 : (4.5 / 0.3) * 0.05, anim: ANIM.DODGE }; // spend the bank, then dodge
-        first = false;
-        return r;
-      }),
-    ).toBe(0);
+  it("DODGE spam every 1.1–1.2 s while sprinting buys at most ~12 % over plain sprinting (F12 confirm Sonnet N-3, T9 review)", () => {
+    // Before: a free 2 m burst every 1.1 s sustained ~12.6 m/s against ~10.8 m/s. An honest player
+    // rolling at every cooldown averages ~10.9 m/s and must never be corrected, even from an empty bank.
+    const plain = sustained(() => ANIM.SPRINT);
+    expect(plain).toBeGreaterThan(10.8);
+    expect(plain).toBeLessThan(11.2);
+    for (const every of [22, 23, 24]) {
+      const spam = sustained((i) => (i % every === 0 ? ANIM.DODGE : ANIM.SPRINT));
+      expect(spam / plain, `DODGE every ${every * 50} ms: ${spam.toFixed(2)} m/s`).toBeLessThanOrEqual(1.13);
+    }
   });
 
-  it("…while real dodges between sprints (4.5 m in 0.3 s, every 1.2 s) are never refused", () => {
-    expect(
-      pattern(400, (i) => {
-        const k = i % 24; // 1.2 s cycle: a 0.3 s dodge, then sprinting
-        return k < 6 ? { metres: (4.5 / 0.3) * 0.05, anim: ANIM.DODGE } : { metres: 9 * 0.05, anim: ANIM.SPRINT };
-      }),
-    ).toBe(0);
+  it("the server's dodge cooldown is the client's (1.2 s, PlayerController MOVE.dodgeCooldown)", () => {
+    expect(MOVE.dodgeCooldownMs).toBe(1200);
+  });
+
+  it("…and a real dodge (4.5 m in 0.3 s) from an empty bank still fits", () => {
+    expect(pattern(6, () => dodgeStep, emptyBank)).toBe(0);
+  });
+
+  it("the client's real roll (15 m/s for 1/3 s, then easing back to sprint) at every cooldown for 60 s is never refused (T9 review)", () => {
+    // Measured from PlayerController at 20–120 fps: 13.1 m per 1.2 s cycle, more than the sprint allowance.
+    const ease = [15, 15, 15, 15, 15, 15, 15, 11.4, 9.96, 9.39, 9.15, 9.06];
+    const cycle = (i: number) => {
+      const k = i % 24;
+      return k < ease.length ? { metres: ease[k]! * 0.05, anim: k < 7 ? ANIM.DODGE : ANIM.SPRINT } : sprintStep;
+    };
+    expect(pattern(1200, cycle)).toBe(0);
+    expect(pattern(1200, cycle, emptyBank)).toBe(0); // e.g. right after a correction or a shove
+  });
+
+  it("…while real dodges between sprints (4.5 m in 0.3 s, every 1.2 s) are never refused, even from an empty bank", () => {
+    const cycle = (i: number) => (i % 24 < 6 ? dodgeStep : sprintStep); // 1.2 s: a 0.3 s dodge, then sprinting
+    expect(pattern(400, cycle)).toBe(0);
+    expect(pattern(400, cycle, emptyBank)).toBe(0);
   });
 });
 

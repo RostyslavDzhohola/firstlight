@@ -219,6 +219,47 @@ describe("cursor: keyboard", () => {
     expect(c.key("KeyX").actions).toEqual([{ type: "drop", slot: 5 }]);
   });
 
+  it("holding X (key repeat) never confirms a drop: it takes a second physical press (F12 confirm Codex N-S3)", () => {
+    let now = 10_000;
+    const c = new InvCursor(() => state(), () => now);
+    c.focus = 5;
+    expect(c.key("KeyX").actions).toEqual([]);
+    for (let i = 0; i < 20; i++) {
+      now += 33; // autorepeat
+      expect(c.key("KeyX", true)).toMatchObject({ handled: true, actions: [] });
+      expect(c.key("Delete", true).actions).toEqual([]);
+    }
+    expect(c.dropArmed(5)).toBe(true); // the repeats neither drop nor re-arm
+    now += 100;
+    expect(c.key("KeyX").actions).toEqual([{ type: "drop", slot: 5 }]);
+    // A repeat can't drop a picked item either, nor use one (E) more than once per press.
+    c.click(4);
+    expect(c.key("KeyX", true)).toMatchObject({ handled: true, actions: [] });
+    expect(c.held).toBe(4);
+    c.cancel();
+    c.focus = 3;
+    expect(c.key("KeyE").actions).toEqual([{ type: "use", slot: 3 }]);
+    expect(c.key("KeyE", true)).toMatchObject({ handled: true, actions: [] });
+  });
+
+  it("an armed drop is forgotten when the panel closes or a different item lands in the slot", () => {
+    let now = 10_000;
+    let s = state();
+    const c = new InvCursor(() => s, () => now);
+    c.focus = 5;
+    c.key("KeyX");
+    c.cancel(); // the panel closed (and opens again)
+    expect(c.dropArmed(5)).toBe(false);
+    expect(c.key("KeyX").actions).toEqual([]);
+    // The wool tuft moved away and the patchkit took its slot before the second X.
+    const bp = [...s.backpack];
+    [bp[0], bp[1]] = [bp[1]!, bp[0]!];
+    s = { ...s, backpack: bp };
+    expect(c.dropArmed(5)).toBe(false);
+    expect(c.key("KeyX").actions).toEqual([]);
+    expect(c.key("KeyX").actions).toEqual([{ type: "drop", slot: 5 }]);
+  });
+
   it("number keys and X act on the held item when there is one; Esc cancels the hold first", () => {
     const c = new InvCursor(() => state());
     c.click(7);
