@@ -79,6 +79,8 @@ export class ResolutionLadder {
   private slow = 0;
   private fast = 0;
   private cooldownUntil = 0;
+  /** No up-steps for a while after a down-step (prevents oscillating around the budget). */
+  private noUpUntil = 0;
   onChange: (() => void) | null = null;
   onFloor: (() => void) | null = null;
 
@@ -88,6 +90,7 @@ export class ResolutionLadder {
 
   reset() {
     this.index = 0;
+    this.noUpUntil = 0;
     this.slow = this.fast = 0;
     this.frameMs = [];
     this.windowStart = 0;
@@ -121,6 +124,7 @@ export class ResolutionLadder {
         if (this.index < LADDER.length - 1) {
           this.index++;
           this.cooldownUntil = now + 3000;
+          this.noUpUntil = now + 30000;
           this.onChange?.();
         } else {
           this.cooldownUntil = now + 6000;
@@ -129,7 +133,7 @@ export class ResolutionLadder {
       }
     } else if (isFast) {
       this.slow = 0;
-      if (++this.fast >= 4 && this.index > 0) {
+      if (++this.fast >= 4 && this.index > 0 && now >= this.noUpUntil) {
         this.fast = 0;
         this.index--;
         this.cooldownUntil = now + 4000;
