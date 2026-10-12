@@ -11,8 +11,11 @@ import { PLAQUES, type HallLine } from "@firstlight/shared/content/secrets";
 import { objectPos, objectsOn, type WorldObjectDef } from "@firstlight/shared/content/world";
 import { ANIM } from "@firstlight/shared/net/schema";
 import { AvatarView } from "../render/Avatars.ts";
+import { disposeTree } from "../render/dispose.ts";
 
+/** Materials shared by every body's props (never freed); everything else a QuestWorld builds is its own. */
 const mats = new Map<string, THREE.Material>();
+const shared = new WeakSet<object>();
 function std(color: number, opts: { emissive?: number; metal?: number; rough?: number; opacity?: number } = {}): THREE.Material {
   const key = `s${color}:${opts.emissive ?? 0}:${opts.metal ?? 0}:${opts.rough ?? 0.6}:${opts.opacity ?? 1}`;
   let m = mats.get(key);
@@ -25,6 +28,7 @@ function std(color: number, opts: { emissive?: number; metal?: number; rough?: n
     }
     m = s;
     mats.set(key, m);
+    shared.add(m);
   }
   return m;
 }
@@ -36,6 +40,7 @@ function glow(color: number, k = 2, opacity = 1): THREE.Material {
     b.colorNode = materialColor.mul(atmo.glowBoost); // brighter at night
     m = b;
     mats.set(key, m);
+    shared.add(m);
   }
   return m;
 }
@@ -448,8 +453,12 @@ export class QuestWorld {
     }
   }
 
+  /** Leaving the body: NPC figures, then every geometry, label texture and one-off material here. */
   dispose() {
     for (const p of this.props) p.npc?.dispose();
     this.group.removeFromParent();
+    disposeTree(this.group, (r) => shared.has(r));
+    this.hallTexture = null;
+    this.hallCanvas = null;
   }
 }

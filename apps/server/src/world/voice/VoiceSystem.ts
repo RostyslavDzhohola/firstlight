@@ -14,6 +14,8 @@ import { actorPos, type PlayerActor } from "../actors.ts";
 import type { BodyRoom } from "../BodyRoom.ts";
 import { dist3 } from "../geometry.ts";
 import type { RoomSystem } from "../systems.ts";
+import { allowReport } from "../../social/limits.ts";
+import { applyBlock } from "../../social/system.ts";
 import { onBlockHooks } from "../../social/store.ts";
 import { voiceMutes, voiceSafety } from "./safety.ts";
 import { mintIceServers, turnConfigured, turnCredentials } from "./turn.ts";
@@ -65,17 +67,24 @@ class Bucket {
   }
 }
 
-const LIMITS = {
+/** Voice rate limits and timings (exported so tests can shorten them; restore after). */
+export const VOICE_LIMITS = {
   /** Signals per second (the client batches candidates and stays under ~15/s). */
   SIGNAL_BURST: 40,
   SIGNAL_PER_S: 20,
   ACTION_BURST: 12,
   ACTION_PER_S: 2,
-  REPORTS_PER_10_MIN: 5,
-  REPORT_SAME_TARGET_MS: 60_000,
   UNREACHABLE_EVERY_MS: 5_000,
   TURN_RETRY_MS: 30_000,
+  /** A block rotates the blocked player's relay credential at most this often (per account, F12 B1). */
+  ROTATE_EVERY_MS: 10 * 60_000,
+  /**
+   * A block rotates only if the pair relayed signalling within this window: a relay allocation can't
+   * outlive its credential, and live links renegotiate (ICE restart) on every 6-hour re-mint.
+   */
+  LINKED_WITHIN_MS: VOICE.TURN_TTL_S * 1000,
 };
+const LIMITS = VOICE_LIMITS;
 
 interface VoiceSession {
   sid: string;
@@ -90,17 +99,29 @@ interface VoiceSession {
   mintedAt: number;
   minting: boolean;
   turnRetryAt: number;
+  /** A block asked for fresh credentials: the next mint revokes every older one and isn't charged. */
+  rotatePending: boolean;
+  /** Peer session id → when signalling was last relayed between us (either way). */
+  signalledAt: Map<string, number>;
   /** Seen banned in game.db: voice stays off for this session. */
   banned: boolean;
   txSince: number;
   mutedSeen: boolean;
   unreachableAt: Map<string, number>;
-  reportTimes: number[];
-  reportedAt: Map<string, number>;
 }
 
 /** Live voice systems (one per room), so a Tab-list block anywhere reaches the right sessions. */
 const liveVoice = new Set<VoiceSystem>();
+/** Account id → when a block last rotated its relay credentials (process-wide: blocks reach every room). */
+const rotatedAt = new Map<string, number>();
+
+/** May a block rotate this account's credentials now? Counts the rotation. */
+function takeRotation(userId: string, now: number): boolean {
+  for (const [u, t] of rotatedAt) if (now - t >= LIMITS.ROTATE_EVERY_MS) rotatedAt.delete(u);
+  if (rotatedAt.has(userId)) return false;
+  rotatedAt.set(userId, now);
+  return true;
+}
 onBlockHooks.push((blocker, target) => {
   for (const v of liveVoice) v.blockedPair(blocker, target);
 });
@@ -147,12 +168,12 @@ export class VoiceSystem implements RoomSystem {
       mintedAt: 0,
       minting: false,
       turnRetryAt: 0,
+      rotatePending: false,
+      signalledAt: new Map(),
       banned: false,
       txSince: 0,
       mutedSeen: false,
       unreachableAt: new Map(),
-      reportTimes: [],
-      reportedAt: new Map(),
     });
     a.state.flags &= ~(PF.VOICE | PF.RADIO_TX);
     a.state.radioCh = 0;
@@ -168,7 +189,10 @@ export class VoiceSystem implements RoomSystem {
       p.flags &= ~(PF.VOICE | PF.RADIO_TX);
       p.radioCh = 0;
     }
-    for (const o of this.sessions.values()) o.unreachableAt.delete(sessionId);
+    for (const o of this.sessions.values()) {
+      o.unreachableAt.delete(sessionId);
+      o.signalledAt.delete(sessionId);
+    }
     if (!s) return;
     if (s.enabled) this.dropEverywhere(sessionId);
     if (s.iceUsernames.length) void turnCredentials.revoke(s.iceUsernames);
@@ -216,10 +240,15 @@ export class VoiceSystem implements RoomSystem {
       }
       if (s.enabled) {
         if (!(p.flags & PF.VOICE)) p.flags |= PF.VOICE;
-        if (turnConfigured() && !s.minting) {
-          const stale = s.ice && now - s.mintedAt >= VOICE.REMINT_MS;
-          const retry = !s.ice && now >= s.turnRetryAt;
-          if (stale || retry) void this.sendIce(a, s, true);
+        // Credentials kept through failed re-mints still run out at the end of their lifetime.
+        if (s.ice && now - s.mintedAt >= VOICE.TURN_TTL_S * 1000) {
+          s.ice = null;
+          a.client.send("voice:ice", { iceServers: [], relay: true, ttl: VOICE.TURN_TTL_S, available: false });
+        }
+        // Due (no credential, a 6-hour refresh, or a block's rotation) and past any retry deadline.
+        if (turnConfigured() && !s.minting && now >= s.turnRetryAt) {
+          const due = !s.ice || s.rotatePending || now - s.mintedAt >= VOICE.REMINT_MS;
+          if (due) void this.sendIce(a, s, true);
         }
       }
     }
@@ -263,6 +292,7 @@ export class VoiceSystem implements RoomSystem {
   private turnOff(a: PlayerActor, s: VoiceSession): void {
     const was = s.enabled;
     s.enabled = false;
+    s.rotatePending = false;
     a.state.flags &= ~(PF.VOICE | PF.RADIO_TX);
     if (was) this.dropEverywhere(s.sid);
     if (s.iceUsernames.length) {
@@ -287,9 +317,16 @@ export class VoiceSystem implements RoomSystem {
       return;
     }
     if (s.minting) return;
-    // After a failure, and beyond the per-account budget, wait instead of calling the TURN API again.
-    if (now < s.turnRetryAt || !turnCredentials.allowMint(s.userId, now)) {
-      s.turnRetryAt = Math.max(s.turnRetryAt, now + LIMITS.TURN_RETRY_MS);
+    // After a failure, wait out the deadline it set (asking again doesn't move it, F12 review).
+    if (now < s.turnRetryAt) {
+      if (!s.ice) a.client.send("voice:ice", { iceServers: [], relay: true, ttl, available: false });
+      return;
+    }
+    // Beyond the per-account budget: wait before calling the TURN API again. A rotation forced by
+    // someone else's block is never charged to this player's budget (F12 B1); takeRotation() bounds
+    // those to one per account per 10 minutes instead.
+    if (!s.rotatePending && !turnCredentials.allowMint(s.userId, now)) {
+      s.turnRetryAt = now + LIMITS.TURN_RETRY_MS;
       if (!s.ice) a.client.send("voice:ice", { iceServers: [], relay: true, ttl, available: false });
       return;
     }
@@ -302,17 +339,23 @@ export class VoiceSystem implements RoomSystem {
         void turnCredentials.revoke(minted.usernames);
         return;
       }
-      const stale = s.iceUsernames.slice(0, -2); // keep the current and previous credential valid
+      // A rotation cuts every older credential (and any relay path the blocked pair still holds);
+      // a routine re-mint keeps the current and previous one valid while clients switch over.
+      const keep = s.rotatePending ? [] : s.iceUsernames.slice(-2);
+      const stale = s.iceUsernames.slice(0, s.iceUsernames.length - keep.length);
       if (stale.length) void turnCredentials.revoke(stale);
+      s.rotatePending = false;
       s.ice = minted.iceServers;
-      s.iceUsernames = [...s.iceUsernames.slice(-2), ...minted.usernames];
+      s.iceUsernames = [...keep, ...minted.usernames];
       s.mintedAt = Date.now();
       a.client.send("voice:ice", { iceServers: minted.iceServers, relay: true, ttl, available: true });
     } catch (e) {
       console.warn(`voice: ${(e as Error).message}`);
-      s.ice = null;
       s.turnRetryAt = Date.now() + LIMITS.TURN_RETRY_MS;
-      if (this.sessions.get(s.sid) === s) a.client.send("voice:ice", { iceServers: [], relay: true, ttl, available: false });
+      // Credentials that are still valid stay in use until a mint succeeds (or they expire, see tick).
+      if (!s.ice) {
+        if (this.sessions.get(s.sid) === s) a.client.send("voice:ice", { iceServers: [], relay: true, ttl, available: false });
+      }
     } finally {
       s.minting = false;
     }
@@ -337,6 +380,8 @@ export class VoiceSystem implements RoomSystem {
       return;
     }
     const target = this.room.actors.get(to)!;
+    s.signalledAt.set(to, now);
+    this.sessions.get(to)?.signalledAt.set(c.sessionId, now);
     const out: Record<string, unknown> = { from: c.sessionId };
     if (r.data.sdp) out.sdp = r.data.sdp;
     if (r.data.candidate !== undefined) out.candidate = r.data.candidate;
@@ -408,6 +453,7 @@ export class VoiceSystem implements RoomSystem {
 
   // ---------------------------------------------------------------- safety
 
+  /** The voice panel's block: the same path as the Tab list (rate limit, list cap, parties, hooks). */
   private block(c: Client, m: unknown): void {
     const { a, s } = this.who(c);
     if (!a || !s || !s.actions.take(Date.now())) return;
@@ -415,38 +461,41 @@ export class VoiceSystem implements RoomSystem {
     if (!r.success) return this.deny(c, "voice:block", "invalid");
     const t = this.room.actors.get(r.data.target);
     if (!t || t === a) return this.deny(c, "voice:block", "no such player");
-    const fresh = voiceSafety.block(a.identity.userId, t.identity.userId);
+    const done = applyBlock(a.identity.userId, t.identity.userId, true); // a new block reaches blockedPair()
+    if (!done.ok) return this.deny(c, "voice:block", done.reason);
     c.send("voice:blocked", { target: t.id });
     c.send("social:blocked", { userIds: voiceSafety.blockedBy(a.identity.userId) }); // the Tab list's copy
-    this.hangUpPair(a, t, fresh);
   }
 
-  /** A block made elsewhere (Tab list): apply it to any of the pair's sessions in this room. */
+  /** A new block (voice panel or Tab list, any room): apply it to the pair's sessions in this room. */
   blockedPair(blockerUserId: string, targetUserId: string): void {
     let a: PlayerActor | undefined, t: PlayerActor | undefined;
     for (const x of this.room.actors.values()) {
       if (x.identity.userId === blockerUserId) a = x;
       else if (x.identity.userId === targetUserId) t = x;
     }
-    if (t) this.hangUpPair(a ?? null, t, true);
+    if (a && t) this.hangUpPair(a, t);
   }
 
   /** Both clients hang up now; the relay refuses the pair from here on (persisted, survives rejoin). */
-  private hangUpPair(a: PlayerActor | null, t: PlayerActor, rotate: boolean): void {
-    if (a) {
-      a.client.send("voice:drop", { peer: t.id });
-      t.client.send("voice:drop", { peer: a.id });
-    }
+  private hangUpPair(a: PlayerActor, t: PlayerActor): void {
+    a.client.send("voice:drop", { peer: t.id });
+    t.client.send("voice:drop", { peer: a.id });
     // Defence in depth against a modified client: cut the blocked player's relay allocations and give
-    // them fresh credentials for everyone else.
+    // them fresh credentials for everyone else. Only when the pair could hold a relay path at all
+    // (they relayed signalling recently), at most once per account per 10 minutes, outside the
+    // player's own mint budget, and the old credential stays until a new one is minted (F12 B1).
+    // So the server cutoff is conditional: a second blocker inside that cooldown gets the hang-up
+    // above and the relay's refusal of further signalling, but no revocation; an honest blocker's
+    // client closes its own connection. An unconditional cutoff would need revocation scoped to one
+    // pair's allocation, which per-player TURN credentials don't offer.
     const ts = this.sessions.get(t.id);
-    if (rotate && ts?.iceUsernames.length) {
-      const old = ts.iceUsernames;
-      ts.iceUsernames = [];
-      ts.ice = null;
-      void turnCredentials.revoke(old);
-      if (ts.enabled) void this.sendIce(t, ts, true);
-    }
+    const now = Date.now();
+    const linkedAt = this.sessions.get(a.id)?.signalledAt.get(t.id);
+    if (!ts?.enabled || !ts.iceUsernames.length || linkedAt === undefined || now - linkedAt > LIMITS.LINKED_WITHIN_MS) return;
+    if (!takeRotation(t.identity.userId, now)) return;
+    ts.rotatePending = true;
+    void this.sendIce(t, ts, true);
   }
 
   private report(c: Client, m: unknown): void {
@@ -457,13 +506,8 @@ export class VoiceSystem implements RoomSystem {
     if (!r.success) return this.deny(c, "voice:report", "invalid");
     const target = this.room.state.players.get(r.data.target);
     if (!target || r.data.target === c.sessionId || !target.userId) return this.deny(c, "voice:report", "no such player");
-    s.reportTimes = s.reportTimes.filter((t) => now - t < 10 * 60_000);
-    const lastSame = s.reportedAt.get(target.userId) ?? 0;
-    if (s.reportTimes.length >= LIMITS.REPORTS_PER_10_MIN || now - lastSame < LIMITS.REPORT_SAME_TARGET_MS) {
-      return this.deny(c, "voice:report", "too many reports");
-    }
-    s.reportTimes.push(now);
-    s.reportedAt.set(target.userId, now);
+    // Per account, so a rejoin doesn't reset it, and shared with the Tab list's reports.
+    if (!allowReport(a.identity.userId, target.userId, now)) return this.deny(c, "voice:report", "too many reports");
     const known = (VOICE_REPORT_REASONS as readonly string[]).includes(r.data.reason);
     voiceSafety.report(
       {

@@ -147,7 +147,18 @@ export const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (user_id, stat)
   );
   `,
-  // 3: pile kinds (eviction past the cap prefers staged, then loot piles, over death piles) and expiry
+  // 3: per-copy world state that outlives a room (boss timers and fights, cleared spawn groups,
+  // broken props). Self-contained and idempotent, so it can be renumbered when lanes merge.
+  `
+  CREATE TABLE IF NOT EXISTS copy_state (
+    copy_key    TEXT NOT NULL,
+    system      TEXT NOT NULL,
+    state_json  TEXT NOT NULL,
+    saved_at    INTEGER NOT NULL,
+    PRIMARY KEY (copy_key, system)
+  );
+  `,
+  // 4: pile kinds (eviction past the cap prefers staged, then loot piles, over death piles) and expiry
   `
   ALTER TABLE pile ADD COLUMN kind TEXT NOT NULL DEFAULT 'death';
   ALTER TABLE pile ADD COLUMN expires_at INTEGER;

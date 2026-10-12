@@ -109,7 +109,8 @@ function computeBake(terrain: Terrain, face: Face, cx: number, cy: number, bakeS
       const cav = Math.max(0, near / 4 - h) * 0.09 + Math.max(0, far / 4 - h) * 0.035;
       bake[v * 2] = Math.max(0.45, Math.min(1, 1 - cav));
 
-      // Sun visibility: march towards the sun (the sun as seen from this vertex's own frame).
+      // Sun visibility: march towards the look's reference sun (as seen from this vertex's own
+      // frame). Day/night moves the live sun; the material fades this by terrainUniforms.sunMatch.
       let vis = 1;
       if (bakeSun) {
         gridDir(face, gi, gj, n, dir);

@@ -1,4 +1,4 @@
-// /admin (SPEC §6.11): reports (dismiss, ban), bans (lift), players online per room (kick, ban,
+// /admin (SPEC §6.11): reports (paged; dismiss, ban), bans (lift), players online per room (kick, ban,
 // voice-mute), announcements and recent server errors. Server-rendered HTML, no scripts, admin
 // session required (requireAdmin). The client domain proxies /admin/* so the session cookie works.
 //
@@ -44,7 +44,8 @@ export function mountOps(app: Express, deps: OpsDeps): void {
 
   app.get("/admin", gate, (req, res) => {
     const flash = typeof req.query.done === "string" ? req.query.done.slice(0, 120) : undefined;
-    res.set(PAGE_HEADERS).send(page({ title: "Admin", active: "admin", who: `Signed in as ${admin(res).name}`, flash, body: adminBody(deps.db) }));
+    const reportsPage = Math.max(1, Math.floor(Number(req.query.reports)) || 1);
+    res.set(PAGE_HEADERS).send(page({ title: "Admin", active: "admin", who: `Signed in as ${admin(res).name}`, flash, body: adminBody(deps.db, reportsPage) }));
   });
 
   app.post("/admin/announce", gate, sameOrigin, form, (req, res) => {
@@ -102,7 +103,10 @@ function nameOf(db: Db, userId: string): string {
   return getAccount(db, userId)?.displayName ?? presenceOf(userId)?.name ?? userId.slice(0, 10);
 }
 
-function adminBody(db: Db): string {
+/** Reports per /admin page; older ones are reached with ?reports=<page> (a flood can't hide them). */
+const REPORTS_PER_PAGE = 50;
+
+function adminBody(db: Db, reportsPage = 1): string {
   const now = Date.now();
   // ---- players online per room
   const rooms = [...liveRooms].sort((a, b) => a.bodyDef.id.localeCompare(b.bodyDef.id) || a.state.copy - b.state.copy);
@@ -133,8 +137,16 @@ ${players ? `<table><tr><th>Player</th><th class="num">Level</th><th class="num"
     })
     .join("");
 
-  // ---- reports
-  const reports = listReports(db, 100);
+  // ---- reports (paged, newest first)
+  const reportTotal = (stmt(db, "SELECT COUNT(*) AS n FROM report").get() as { n: number }).n;
+  const reportPages = Math.max(1, Math.ceil(reportTotal / REPORTS_PER_PAGE));
+  const rp = Math.min(reportsPage, reportPages);
+  const reports = listReports(db, REPORTS_PER_PAGE, (rp - 1) * REPORTS_PER_PAGE);
+  const pageLink = (n: number, label: string) => `<a href="/admin?reports=${n}#reports">${label}</a>`;
+  const pager =
+    reportPages > 1
+      ? `<p class="muted">Page ${rp} of ${reportPages}, newest first. ${rp > 1 ? pageLink(rp - 1, "← Newer") : ""} ${rp < reportPages ? pageLink(rp + 1, "Older →") : ""}</p>`
+      : "";
   const reportRows = reports
     .map(
       (r) => `<tr><td class="num">${fmtTime(r.createdAt)}</td><td>${esc(nameOf(db, r.reporter))}</td><td>${esc(nameOf(db, r.target))}<div class="muted">${esc(r.target)}</div></td>
@@ -162,10 +174,10 @@ ${players ? `<table><tr><th>Player</th><th class="num">Level</th><th class="num"
   for (const r of rooms) if (!r.metadata?.loadtest) perBody.set(r.bodyDef.name, (perBody.get(r.bodyDef.name) ?? 0) + r.actors.size);
 
   return `
-<div class="kpis"><div class="kpi"><b>${total}</b><span>players online</span></div><div class="kpi"><b>${reports.length}</b><span>open reports</span></div><div class="kpi"><b>${bans.length}</b><span>active bans</span></div><div class="kpi"><b>${errors.length}</b><span>recent errors</span></div></div>
+<div class="kpis"><div class="kpi"><b>${total}</b><span>players online</span></div><div class="kpi"><b>${reportTotal}</b><span>open reports</span></div><div class="kpi"><b>${bans.length}</b><span>active bans</span></div><div class="kpi"><b>${errors.length}</b><span>recent errors</span></div></div>
 <section><h2>Announce</h2><form class="inline" method="post" action="/admin/announce"><input type="text" name="text" maxlength="200" placeholder="Banner text for every player" required><button>Send to everyone</button></form></section>
 <section><h2>Players online</h2>${bars([...perBody.entries()])}${roomRows || `<p class="muted">No rooms are open.</p>`}</section>
-<section><h2>Reports</h2>${reportRows ? `<table><tr><th>When</th><th>By</th><th>Player</th><th>Where</th><th>Reason</th><th>Actions</th></tr>${reportRows}</table>` : `<p class="muted">No reports.</p>`}</section>
+<section id="reports"><h2>Reports</h2>${pager}${reportRows ? `<table><tr><th>When</th><th>By</th><th>Player</th><th>Where</th><th>Reason</th><th>Actions</th></tr>${reportRows}</table>${pager}` : `<p class="muted">No reports.</p>`}</section>
 <section><h2>Bans</h2>${banRows ? `<table><tr><th>When</th><th>Account</th><th>Network</th><th>Reason</th><th>By</th><th>Until</th><th></th></tr>${banRows}</table>` : `<p class="muted">No active bans.</p>`}</section>
 <section><h2>Recent server errors</h2>${errorRows ? `<table><tr><th>When</th><th>Source</th><th>Message</th></tr>${errorRows}</table>` : `<p class="muted">None since the last restart.</p>`}</section>`;
 }

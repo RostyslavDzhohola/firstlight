@@ -59,13 +59,15 @@ export function chest(p: V3, h = 0.9): V3 {
   return [p[0] + u[0] * h, p[1] + u[1] * h, p[2] + u[2] * h];
 }
 
-/** Line of sight over the terrain from one point to another. */
+/** Line of sight from one point to another: terrain, intact breakable props and arena cover block it. */
 export function canSee(sys: NpcSystem, from: V3, to: V3): boolean {
   const d = sub(to, from);
   const l = len(d);
   if (l < 1) return true;
   const dir: V3 = [d[0] / l, d[1] / l, d[2] / l];
-  return rayTerrain(sys.world.terrain, from, dir, l, 2.5) >= l - 0.75;
+  if (rayTerrain(sys.world.terrain, from, dir, l, 2.5) < l - 0.75) return false;
+  // Cover works both ways (F12): the walls that stop players' shots hide them from NPCs too.
+  return !sys.world.host.props?.raycast(from, dir, l - 0.75);
 }
 
 function vertOk(a: V3, b: V3, tol = HEIGHT_TOL): boolean {
@@ -510,10 +512,16 @@ export function stepNpcProjectiles(sys: NpcSystem, now: number, dt: number) {
     }
     const u = up(pr.pos);
     pr.vel = add(pr.vel, u, -pr.g * dt);
-    const next = add(pr.pos, pr.vel, dt);
-    let gone = false;
-    // Nearest first along this step: the first player the bolt reaches, or a Prism Bubble shell
-    // (which then takes the hit). A player in front of a shell is hit; one behind it is not.
+    let next = add(pr.pos, pr.vel, dt);
+    // An intact prop (or arena cover) on this step stops the bolt where it touches it, as it stops
+    // players' shots; only players in front of it can still be hit.
+    const step0 = sub(next, pr.pos);
+    const sl = len(step0);
+    const wall = sl > 0 ? sys.world.host.props?.raycast(pr.pos, scale(step0, 1 / sl), sl) : null;
+    if (wall) next = add(pr.pos, step0, Math.max(0, wall.t - pr.radius) / sl);
+    let gone = !!wall;
+    // Nearest first along what's left of this step: the first player the bolt reaches, or a Prism
+    // Bubble shell (which then takes the hit). A player in front of a shell is hit; one behind is not.
     const seg = sub(next, pr.pos);
     const segLen = len(seg);
     let victim: LivePlayer | null = null;

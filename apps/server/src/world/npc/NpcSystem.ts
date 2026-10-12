@@ -8,13 +8,15 @@ import {
   aiHitCap, npcMaxHp, npcShieldHp, type PlanetId, type StatusEffect,
 } from "@firstlight/shared/content/npcs";
 import { PF } from "@firstlight/shared/net/schema";
-import { actorPos, type PlayerActor } from "../actors.ts";
+import { actorPos, type NpcActor, type PlayerActor } from "../actors.ts";
 import { dealDamage } from "../combat.ts";
+import { loadCopy, saveCopy } from "../copyState.ts";
 import type { V3 } from "../geometry.ts";
 import type { RoomSystem } from "../systems.ts";
 import { chest, stepNpcProjectiles, type NpcProjectile } from "./attacks.ts";
 import { BossController } from "./boss.ts";
 import { onNpcHurt, think } from "./brain.ts";
+import { NPC_COPY_SYSTEM, restoreNpcCopy, snapshotNpcCopy, type NpcCopyState } from "./persist.ts";
 import { MODE, MODE_NAME, type Mode, type Npc } from "./npc.ts";
 import { pruneRewardMaps, rewardKill } from "./rewards.ts";
 import { activePull, applyMoveEffect, applyPull } from "./effects.ts";
@@ -89,6 +91,9 @@ export class NpcSystem implements RoomSystem {
   readonly goldenBack = new Map<number, number>();
   private grid = new Map<number, Npc[]>();
   private readonly restore: (() => void)[] = [];
+  /** Copy state (boss timer, cleared groups) changed since the last save (persist.ts). */
+  copyDirty = false;
+  private lastCopySave = 0;
 
   constructor(world: NpcWorld) {
     this.world = world;
@@ -99,6 +104,8 @@ export class NpcSystem implements RoomSystem {
     this.groups = this.points.map((p) => ({ point: p, active: false, members: p.members.map(() => null), dead: p.members.map(() => false), cleared: false, respawnLeft: 0, lastNearAt: 0 }));
     const bd = BOSS_BY_BODY[world.body.id];
     this.boss = bd && this.arena ? new BossController(this, bd, this.arena) : null;
+    // A fresh room on a copy that was emptied or restarted keeps its dead boss and cleared groups (F12 B2).
+    if (world.copyKey) restoreNpcCopy(this, loadCopy<NpcCopyState>(world.copyKey, NPC_COPY_SYSTEM), world.now());
     this.hookNoise();
     world.onMessage("npc", (sid, msg) => this.admin(sid, msg));
     world.onMessage("phrase", (sid, msg) => this.onPhrase(sid, msg));
@@ -147,6 +154,7 @@ export class NpcSystem implements RoomSystem {
       this.sync(n);
     }
     stepNpcProjectiles(this, now, dt);
+    if (this.copyDirty && now - this.lastCopySave >= 1000) this.saveCopyState(now);
     this.lastTickMs = performance.now() - t0;
     this.avgTickMs = this.avgTickMs * 0.95 + this.lastTickMs * 0.05;
   }
@@ -161,6 +169,15 @@ export class NpcSystem implements RoomSystem {
   dispose() {
     for (const r of this.restore) r();
     this.restore.length = 0;
+    this.boss?.dispose();
+    this.saveCopyState(this.world.now());
+  }
+
+  /** Remember the boss timer and group state for the next room on this copy (copyState.ts). */
+  saveCopyState(now: number) {
+    this.copyDirty = false;
+    this.lastCopySave = now;
+    if (this.world.copyKey) saveCopy(this.world.copyKey, NPC_COPY_SYSTEM, snapshotNpcCopy(this, now));
   }
 
   private refreshLive(now: number) {
@@ -194,9 +211,12 @@ export class NpcSystem implements RoomSystem {
       if (g.cleared) {
         const slow = near <= NPC_RULES.respawnSlowRadius;
         g.respawnLeft -= sdt * (slow ? 0.5 : 1);
+        // A slowed countdown drifts from wall time: checkpoint it (≤ 1/s) so a crash can't respawn it early.
+        if (slow && sdt > 0) this.copyDirty = true;
         if (g.respawnLeft <= 0) {
           g.cleared = false;
           g.dead.fill(false);
+          this.copyDirty = true;
         }
       }
       // A Golden Hopbit whose own timer ran out comes back to its pack while the pack is still out.
@@ -338,7 +358,7 @@ export class NpcSystem implements RoomSystem {
     };
     n.onDamaged = (amount, by) => this.onDamaged(n, amount, by);
     n.onKilled = (by) => this.onKilled(n, by);
-    n.mitigate = (amount, weak, fromDir) => this.mitigate(n, amount, weak, fromDir);
+    n.mitigate = (amount, weak, fromDir, attacker) => this.mitigate(n, amount, weak, fromDir, attacker);
     this.npcs.set(id, n);
     this.world.addNpc(n);
     return n;
@@ -402,15 +422,16 @@ export class NpcSystem implements RoomSystem {
         g.active = false;
         g.respawnLeft = g.point.respawnSec * NPC_TUNING.respawnScale;
       }
+      this.copyDirty = true;
     }
     this.despawnNpc(n);
   }
 
   // ------------------------------------------------------------------------------------ damage hooks
 
-  private mitigate(n: Npc, amount: number, weak: boolean, fromDir?: V3): number {
+  private mitigate(n: Npc, amount: number, weak: boolean, fromDir?: V3, attacker?: PlayerActor | NpcActor | null): number {
     if (n.dead || n.state.flags & NF.INVULN) return 0;
-    if (n.boss && this.boss) return this.boss.mitigate(n, amount, weak);
+    if (n.boss && this.boss) return this.boss.mitigate(n, amount, weak, attacker);
     if (n.shieldHp > 0 && fromDir) {
       const f = tangentize(n.pos, fromDir);
       if (dot(f, n.facing) > 0.25) {
@@ -454,6 +475,7 @@ export class NpcSystem implements RoomSystem {
     n.removeAt = now + (n.boss ? 2500 : 1200);
     if (n.boss && this.boss) {
       this.boss.onKilled(n, by, now);
+      this.copyDirty = true;
       return;
     }
     const g = this.groupOf(n);
@@ -464,6 +486,7 @@ export class NpcSystem implements RoomSystem {
         g.active = false;
         g.respawnLeft = g.point.respawnSec * NPC_TUNING.respawnScale;
       }
+      this.copyDirty = true;
     }
     if (n.summoner) this.npcs.get(n.summoner)?.raised.delete(n.id);
     this.dissolveChildren(n);
@@ -494,6 +517,8 @@ export class NpcSystem implements RoomSystem {
         return 0;
       }
     }
+    // Contact: an NPC that just struck its target can reach it (brain.ts unreachable timer).
+    if (n && n.target === p) n.unreachSince = undefined;
     let dmg = amount;
     if (n && !opts.trueDamage) {
       if (n.state.flags & NF.BUFFED) dmg *= 1.15;

@@ -6,9 +6,10 @@ import { damageMult, falloff, maxHp, splashFalloff } from "@firstlight/shared/co
 import { WEAPONS, WEAPON_INDEX, type Destroys, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
 import type { Terrain } from "@firstlight/shared";
 import { PF } from "@firstlight/shared/net/schema";
-import { actorPos, positionAgo, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
+import { actorPos, mountedAt, positionAgo, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
 import { dist3, HEAD_FROM, inMeleeArc, PLAYER_HEIGHT, PLAYER_RADIUS, rayCapsule, rayTerrain, type V3 } from "./geometry.ts";
 import { splashShield, type BubbleHost } from "./support.ts";
+import { HORSE } from "@firstlight/shared/content/horse";
 
 export const REWIND_MS = 150;
 export const COMBAT_TAG_MS = 10_000;
@@ -110,6 +111,15 @@ export function canHurt(a: Actor | null, b: Actor, now: number): boolean {
   return true;
 }
 
+/** Feet of an actor's hit capsule `ms` ago: a mounted rider's sit HORSE.riderLift up, in the saddle. */
+function capsuleFeet(a: Actor, now: number, ms: number): V3 {
+  const f = positionAgo(a, now, ms);
+  if (a.kind !== "player" || !mountedAt(a, now - ms)) return f;
+  const l = Math.hypot(f[0], f[1], f[2]);
+  const k = 1 + HORSE.riderLift / l;
+  return [f[0] * k, f[1] * k, f[2] * k];
+}
+
 function headPos(p: PlayerActor): V3 {
   const [x, y, z] = actorPos(p);
   const l = Math.hypot(x, y, z);
@@ -148,8 +158,7 @@ function raycastActors(host: CombatHost, o: V3, d: V3, maxT: number, ignore: Set
   const now = host.now();
   const test = (a: Actor, r: number, h: number) => {
     if (ignore.has(a.id) || !canHurt(null, a, now)) return;
-    const feet = positionAgo(a, now, rewindMs);
-    const hit = rayCapsule(o, d, maxT, feet, r, h);
+    const hit = rayCapsule(o, d, maxT, capsuleFeet(a, now, rewindMs), r, h);
     if (hit && (!best || hit.t < best.t)) {
       // NPCs with weak-point volumes (bosses) decide for themselves where the weak spot is.
       const weak = a.kind === "player" ? hit.heightAboveFeet >= HEAD_FROM : a.weakPoint ? a.weakPoint(o, d, hit.t) : hit.heightAboveFeet >= h * 0.8;
@@ -417,7 +426,7 @@ function chain(host: CombatHost, p: PlayerActor, o: V3, d: V3, def: WeaponDef, t
     if (a.id === p.id || !canHurt(p, a, now)) continue;
     const r = a.kind === "player" ? PLAYER_RADIUS + 0.7 : a.radius + 0.7;
     const h = a.kind === "player" ? PLAYER_HEIGHT : a.height;
-    const hit = rayCapsule(o, d, aimEnd, positionAgo(a, now, REWIND_MS), r, h);
+    const hit = rayCapsule(o, d, aimEnd, capsuleFeet(a, now, REWIND_MS), r, h);
     if (!hit || hit.t < skip || hit.t >= bestT) continue;
     if (dist3(head, chestOf(a)) > def.range + 1) continue;
     bestT = hit.t;
@@ -478,6 +487,9 @@ function chain(host: CombatHost, p: PlayerActor, o: V3, d: V3, def: WeaponDef, t
       host.props!.damage(pr.index, dmg, def.destroys, def.id, hd, p.id);
     }
     end = [head[0] + hd[0] * t, head[1] + hd[1] * t, head[2] + hd[2] * t];
+    // Where the bolt ends on something, report it like hitscan does (boss-arena cover listens).
+    const onSomething = t < l - 1e-3 || (!first && aimEnd < skip + def.range);
+    if (!shell && onSomething) host.onPropHit?.(end, def.destroys === "heavy" ? "heavy" : "light", dmg);
   }
   host.broadcastNear("shot", { by: p.id, weapon: WEAPON_INDEX.get(def.id), ox: head[0], oy: head[1], oz: head[2], dx: d[0], dy: d[1], dz: d[2], hit: end, chain: points }, head, 160);
 }
@@ -565,7 +577,7 @@ export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | 
     target.logoutEndsAt = null; // damage cancels logout
     if (attacker) target.lastDamagedBy = attacker.id;
   } else {
-    dmg = target.mitigate ? target.mitigate(dmg, weak, fromDir) : dmg * (target.armour ?? 1);
+    dmg = target.mitigate ? target.mitigate(dmg, weak, fromDir, attacker) : dmg * (target.armour ?? 1);
     if (dmg <= 0) return false;
   }
   dmg = Math.max(1, Math.round(dmg));

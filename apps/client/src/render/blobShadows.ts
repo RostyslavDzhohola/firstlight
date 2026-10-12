@@ -47,24 +47,40 @@ export class BlobShadows {
     this.mesh.visible = this.enabled;
   }
 
-  /** Ground positions (planet space) and radii of the blobs this frame. */
-  update(items: readonly { x: number; y: number; z: number; r: number }[]) {
-    if (!this.enabled) return;
+  private n = 0;
+
+  /** Start this frame's blobs; then add() each one and end(). Writes straight into the buffer. */
+  begin() {
+    this.n = 0;
+  }
+
+  /** One blob: ground position (planet space) and radius. Ignored when full or disabled. */
+  add(x: number, y: number, z: number, r: number) {
+    if (!this.enabled || this.n >= MAX) return;
     const a = this.attr.array as Float32Array;
-    const n = Math.min(MAX, items.length);
-    for (let i = 0; i < n; i++) {
-      const it = items[i]!;
-      a[i * 4] = it.x;
-      a[i * 4 + 1] = it.y;
-      a[i * 4 + 2] = it.z;
-      a[i * 4 + 3] = it.r;
-    }
+    const o = this.n++ * 4;
+    a[o] = x;
+    a[o + 1] = y;
+    a[o + 2] = z;
+    a[o + 3] = r;
+  }
+
+  end() {
+    if (!this.enabled) return;
+    const n = this.n;
     this.geo.instanceCount = n;
     if (n > 0) {
       this.attr.clearUpdateRanges();
       this.attr.addUpdateRange(0, n * 4);
       this.attr.needsUpdate = true;
     }
+  }
+
+  /** Ground positions (planet space) and radii of the blobs this frame. */
+  update(items: readonly { x: number; y: number; z: number; r: number }[]) {
+    this.begin();
+    for (const it of items) this.add(it.x, it.y, it.z, it.r);
+    this.end();
   }
 
   dispose() {

@@ -12,14 +12,14 @@ import type { RoomSystem } from "../world/systems.ts";
 import { trackClientInfo, trackJoin, trackLeave, trackTick } from "./analytics.ts";
 import { announceAll, applyVoiceMute, banAccount, kickUser, refusesReconnect, removePlayer, seatRefusal, setVoiceMuted } from "./moderation.ts";
 import { parties, type Party } from "./parties.ts";
-import { clearPresence, clearRoomPresence, liveActor, liveRooms, presenceOf, sendTo, setPresence } from "./presence.ts";
+import { clearPresence, clearRoomPresence, liveActor, liveRooms, presenceOf, sendTo, setPresence, sharedCopyRecently, stintEnd, stintStart, sweepStints } from "./presence.ts";
+import { allow, allowReport, clearLimits, sweepLimits } from "./limits.ts";
 import { blockedBy, blockedEitherWay, onBlockHooks, setBlocked, storeReport } from "./store.ts";
 
 export const SOCIAL_RULES = {
   /** A member who stays offline this long leaves their party. */
   PARTY_OFFLINE_MS: 120_000,
   INVITES_PER_MINUTE: 10,
-  REPORTS_PER_10_MIN: 5,
   BLOCKS_PER_MINUTE: 20,
   MAX_BLOCKS: 200,
 };
@@ -40,26 +40,15 @@ const modSchema = z.object({
 // ---- process-wide helpers ------------------------------------------------------------------------
 
 const offlineTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const rate = new Map<string, number[]>(); // key → recent timestamps
 
 let lastSweep = 0;
 /** Drop stale rate-limit keys and names of players who are gone and partyless (bounded memory). */
 function sweep(now: number): void {
   if (now - lastSweep < 60_000) return;
   lastSweep = now;
-  for (const [k, list] of rate) if (!list.length || now - list[list.length - 1]! > 15 * 60_000) rate.delete(k);
+  sweepLimits(now);
+  sweepStints(now);
   for (const u of lastNames.keys()) if (!presenceOf(u) && !parties.of(u)) lastNames.delete(u);
-}
-
-function allow(key: string, max: number, windowMs: number, now = Date.now()): boolean {
-  const list = (rate.get(key) ?? []).filter((t) => now - t < windowMs);
-  if (list.length >= max) {
-    rate.set(key, list);
-    return false;
-  }
-  list.push(now);
-  rate.set(key, list);
-  return true;
 }
 
 function memberInfo(userId: string): PartyMemberInfo {
@@ -128,7 +117,74 @@ function scheduleOfflineLeave(userId: string): void {
 export function resetSocialTimers(): void {
   for (const t of offlineTimers.values()) clearTimeout(t);
   offlineTimers.clear();
-  rate.clear();
+  clearLimits();
+}
+
+/** True when `userId` blocked, or was blocked by, any of `members` (stalking, risk R1). */
+function blockedWithAny(userId: string, members: readonly string[]): boolean {
+  return members.some((m) => m !== userId && blockedEitherWay(userId, m));
+}
+
+/**
+ * A block between two members of one party splits it, so neither keeps getting the other's live
+ * position (party:state) or a way into their copy (partyRoomFor). The leader's block removes the
+ * other player; anyone else's block makes the blocker leave, so a block never removes someone the
+ * blocker couldn't kick anyway.
+ */
+function splitParty(blocker: string, target: string): void {
+  const p = parties.of(blocker);
+  if (!p || !p.members.includes(target)) return;
+  const leaving = p.leader === blocker ? target : blocker;
+  const r = parties.leave(leaving);
+  sendTo(leaving, "toast", { text: leaving === blocker ? "You left the party" : "You were removed from the party", kind: "warn" });
+  const name = lastNames.get(leaving) ?? "A player";
+  for (const other of r.affected) if (other !== leaving) sendTo(other, "toast", { text: `${name} left the party`, kind: "info" });
+  syncParty(r.affected);
+}
+
+/**
+ * After an account merge the account carries the guest's blocks and party (or keeps its own): split
+ * any party that now holds a blocked pair, and withdraw invites between blocked players, before
+ * party state or routing (partyRoomFor) can use them (F12 social review). Same rule as a block, with
+ * the merged account in the blocker's place: as leader it removes the other player, otherwise it
+ * leaves.
+ */
+export function enforceBlocksAfterMerge(userId: string): void {
+  for (const inv of [...parties.pendingFor(userId), ...parties.sentBy(userId)]) {
+    const other = inv.from === userId ? inv.to : inv.from;
+    if (!blockedEitherWay(userId, other)) continue;
+    parties.cancelBetween(userId, other);
+    sendTo(inv.to, "party:invite-closed", { from: inv.from, to: inv.to, reason: "cancelled" });
+  }
+  for (;;) {
+    const p = parties.of(userId);
+    const other = p?.members.find((m) => m !== userId && blockedEitherWay(userId, m));
+    if (!other) return;
+    splitParty(userId, other);
+  }
+}
+
+export type BlockOutcome = { ok: true; changed: boolean } | { ok: false; reason: string };
+
+/**
+ * Block or unblock: the one path for the Tab list and the voice panel (same rate limit and list cap).
+ * A block withdraws invites between the two and splits a party they share; only a new block runs the
+ * voice hooks (hang up, and rotate relay credentials when the pair was linked), so repeating it
+ * changes nothing (F12 B1).
+ */
+export function applyBlock(blocker: string, target: string, on: boolean, now = Date.now()): BlockOutcome {
+  if (blocker === target) return { ok: false, reason: "that's you" };
+  if (!allow(`blk:${blocker}`, SOCIAL_RULES.BLOCKS_PER_MINUTE, 60_000, now)) return { ok: false, reason: "slow down" };
+  const current = blockedBy(blocker);
+  const had = current.includes(target);
+  if (on && !had && current.length >= SOCIAL_RULES.MAX_BLOCKS) return { ok: false, reason: "your block list is full" };
+  const changed = had !== on && setBlocked(blocker, target, on, now);
+  if (on) {
+    for (const inv of parties.cancelBetween(blocker, target)) sendTo(inv.to, "party:invite-closed", { from: inv.from, to: inv.to, reason: "cancelled" });
+    splitParty(blocker, target);
+    if (changed) for (const h of onBlockHooks) h(blocker, target);
+  }
+  return { ok: true, changed };
 }
 
 // ---- the room system ------------------------------------------------------------------------------
@@ -164,7 +220,7 @@ export function createSocialSystem(room: BodyRoom): RoomSystem {
         if (!t) return deny(c, "party", "that player isn't in this world copy");
         if (t === me) return deny(c, "party", "you can't invite yourself");
         if (dist(me, t) > SOCIAL.INVITE_RANGE_M) return deny(c, "party", "too far away (30 m)");
-        if (blockedEitherWay(uid, t.identity.userId)) return deny(c, "party", "you can't invite this player");
+        if (blockedWithAny(t.identity.userId, parties.of(uid)?.members ?? [uid])) return deny(c, "party", "you can't invite this player");
         if (!allow(`inv:${uid}`, SOCIAL_RULES.INVITES_PER_MINUTE, 60_000)) return deny(c, "party", "slow down");
         const r = parties.invite(uid, me.identity.name, t.identity.userId);
         if (!r.ok) return deny(c, "party", r.reason);
@@ -174,6 +230,11 @@ export function createSocialSystem(room: BodyRoom): RoomSystem {
       }
       case "accept": {
         if (!m.target) return;
+        // The party may have changed since the invite (a block, or a member who blocked you joined).
+        if (parties.pendingFor(uid).some((i) => i.from === m.target) && blockedWithAny(uid, parties.of(m.target)?.members ?? [m.target])) {
+          parties.decline(uid, m.target);
+          return deny(c, "party", "you can't join this party");
+        }
         const r = parties.accept(uid, m.target);
         if (!r.ok) return deny(c, "party", r.reason);
         sendTo(m.target, "party:invite-closed", { from: m.target, to: uid, reason: "accepted" });
@@ -212,19 +273,13 @@ export function createSocialSystem(room: BodyRoom): RoomSystem {
     if (!me || me.identity.loadtest) return;
     const uid = me.identity.userId;
     const on = m.on ?? true;
-    if (!allow(`blk:${uid}`, SOCIAL_RULES.BLOCKS_PER_MINUTE, 60_000)) return deny(c, "block", "slow down");
-    const current = blockedBy(uid);
     // Block someone who is playing (this copy or anywhere); unblock anyone on your list.
-    const target = inRoom(m.target)?.identity.userId ?? (liveActor(m.target) || (!on && current.includes(m.target)) ? m.target : undefined);
+    const target = inRoom(m.target)?.identity.userId ?? (liveActor(m.target) || (!on && blockedBy(uid).includes(m.target)) ? m.target : undefined);
     if (!target) return deny(c, "block", "player not found");
     if (target === uid) return;
-    if (on && !current.includes(target) && current.length >= SOCIAL_RULES.MAX_BLOCKS) return deny(c, "block", "your block list is full");
-    setBlocked(uid, target, on);
-    if (on) {
-      parties.cancelBetween(me.identity.userId, target);
-      for (const h of onBlockHooks) h(uid, target);
-    }
-    c.send("social:blocked", { userIds: blockedBy(me.identity.userId) });
+    const r = applyBlock(uid, target, on);
+    if (!r.ok) return deny(c, "block", r.reason);
+    c.send("social:blocked", { userIds: blockedBy(uid) });
     toast(c, on ? "Blocked. You won't hear or get invites from them." : "Unblocked.");
   });
 
@@ -232,13 +287,13 @@ export function createSocialSystem(room: BodyRoom): RoomSystem {
     const me = actorOf(c);
     if (!me || me.identity.loadtest) return;
     const found = anywhere(m.target);
-    if (!found) return deny(c, "report", "player not found");
+    // Only players you could have seen or heard: in this copy, or in one you shared in the last 10 minutes.
+    if (!found || (found.room !== room && !sharedCopyRecently(me.identity.userId, found.actor.identity.userId))) return deny(c, "report", "player not found");
     const t = found.actor;
     const target = t.identity.userId;
     if (target === me.identity.userId) return;
-    if (!allow(`rep:${me.identity.userId}:${target}`, 1, 10 * 60_000) || !allow(`rep:${me.identity.userId}`, SOCIAL_RULES.REPORTS_PER_10_MIN, 10 * 60_000)) {
-      return toast(c, "Report already sent. Thanks.");
-    }
+    // Per account (survives rejoin) and shared with voice reports.
+    if (!allowReport(me.identity.userId, target)) return toast(c, "Report already sent. Thanks.");
     const note = m.note?.replace(/\s+/g, " ").trim();
     const name = t.identity.name;
     storeReport({
@@ -312,6 +367,7 @@ export function createSocialSystem(room: BodyRoom): RoomSystem {
         return;
       }
       sessionUser.set(sessionId, uid);
+      stintStart(uid, room.roomId, sessionId);
       setPresence({ userId: uid, name: a.identity.name, room, sessionId, body: room.bodyDef.id });
       lastNames.set(uid, a.identity.name);
       clearTimeout(offlineTimers.get(uid));
@@ -327,6 +383,7 @@ export function createSocialSystem(room: BodyRoom): RoomSystem {
       const u = sessionUser.get(sessionId);
       if (!u) return;
       sessionUser.delete(sessionId);
+      stintEnd(u, sessionId);
       trackLeave(u, sessionId);
       if (clearPresence(u, sessionId)) {
         scheduleOfflineLeave(u);

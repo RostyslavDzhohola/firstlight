@@ -27,10 +27,38 @@ export type BreakSize = "light" | "heavy";
 /** A weapon's destruction class (same values as WeaponDef.destroys). */
 export type BreakClass = "none" | "light" | "heavy";
 
-/** Collider at scale 1 in the prop's local frame (x = right, y = up from the base, z = forward). */
+/**
+ * An extra solid of a compound collider, local frame: a box (half extents hx, hz) or an upright
+ * cylinder (radius hx = hz) spanning y0..y1 above the base.
+ */
+export interface ColliderPart {
+  kind: "box" | "cyl";
+  hx: number;
+  hz: number;
+  y0: number;
+  y1: number;
+}
+
+/** A compound collider part as placed (scaled): shape 0 = box, 1 = cylinder. */
+export interface SolidPart {
+  shape: 0 | 1;
+  hx: number;
+  hz: number;
+  y0: number;
+  y1: number;
+}
+
+const box = (hx: number, hz: number, y0: number, y1: number): ColliderPart => ({ kind: "box", hx, hz, y0, y1 });
+const cyl = (r: number, y0: number, y1: number): ColliderPart => ({ kind: "cyl", hx: r, hz: r, y0, y1 });
+
+/**
+ * Collider at scale 1 in the prop's local frame (x = right, y = up from the base, z = forward): a box
+ * or an upright cylinder from the base to `h`, plus optional extra parts (a statue's square base and
+ * robe, a pillar's caps) so what stops a shot is what is drawn.
+ */
 export type ColliderShape =
-  | { kind: "box"; hx: number; hz: number; h: number }
-  | { kind: "cyl"; r: number; h: number };
+  | { kind: "box"; hx: number; hz: number; h: number; parts?: ColliderPart[] }
+  | { kind: "cyl"; r: number; h: number; parts?: ColliderPart[] };
 
 export interface ArchetypeDef {
   hp: number;
@@ -45,8 +73,14 @@ const ARCHETYPES: Record<BreakableArchetype, ArchetypeDef> = {
   crate: { hp: 40, size: "light", rebuildS: 180, collider: { kind: "box", hx: 0.5, hz: 0.5, h: 1.0 }, maxStep: 0.4 },
   barrel: { hp: 40, size: "light", rebuildS: 180, collider: { kind: "cyl", r: 0.42, h: 1.12 }, maxStep: 0.35 },
   fence: { hp: 60, size: "light", rebuildS: 180, collider: { kind: "box", hx: 1.0, hz: 0.09, h: 1.1 }, maxStep: 0.55 },
-  statue: { hp: 300, size: "heavy", rebuildS: 300, collider: { kind: "cyl", r: 0.6, h: 2.75 }, maxStep: 0.5 },
-  pillar: { hp: 500, size: "heavy", rebuildS: 300, collider: { kind: "cyl", r: 0.5, h: 4.2 }, maxStep: 0.6 },
+  // Colliders follow the client meshes (F12 reviews: one 0.6 m / 0.5 m cylinder blocked shots well
+  // clear of the figure and shaft, and a smaller one let shots through the square base and caps).
+  // Statue: head and core to the top, a square base, the robe wide below and narrower above.
+  statue: {
+    hp: 300, size: "heavy", rebuildS: 300, maxStep: 0.5,
+    collider: { kind: "cyl", r: 0.24, h: 2.75, parts: [box(0.45, 0.45, 0, 0.5), cyl(0.38, 0.5, 1.85), cyl(0.3, 1.85, 2.4)] },
+  },
+  pillar: { hp: 500, size: "heavy", rebuildS: 300, maxStep: 0.6, collider: { kind: "cyl", r: 0.38, h: 4.2, parts: [box(0.42, 0.42, 0, 0.3), box(0.42, 0.42, 3.9, 4.2)] } },
   campwall: { hp: 600, size: "heavy", rebuildS: 300, collider: { kind: "box", hx: 2.0, hz: 0.3, h: 2.6 }, maxStep: 1.1 },
   // Boss-arena cover differs per planet (content.md §4): see COVER below.
   cover: { hp: 400, size: "heavy", rebuildS: 180, collider: { kind: "cyl", r: 0.8, h: 3.0 }, maxStep: 0.9 },
@@ -62,15 +96,34 @@ export const FUEL_DRUM_BLAST = { radius: 3.5, centre: 0.25, edge: 0.08, props: 6
 
 /** Boss-arena cover per planet: Coral Pillars (Gull Point), Nave pillars, Freight Containers. */
 const COVER: Partial<Record<BodyId, ArchetypeDef>> = {
-  arcadia: { hp: 400, size: "heavy", rebuildS: 180, collider: { kind: "cyl", r: 0.8, h: 3.0 }, maxStep: 0.9 },
-  hollowmere: { hp: 600, size: "heavy", rebuildS: 180, collider: { kind: "cyl", r: 0.62, h: 5.6 }, maxStep: 0.8 },
+  // Coral pillars bulge below and thin out above.
+  arcadia: { hp: 400, size: "heavy", rebuildS: 180, collider: { kind: "cyl", r: 0.55, h: 3.0, parts: [cyl(0.8, 0, 1.15)] }, maxStep: 0.9 },
+  hollowmere: { hp: 600, size: "heavy", rebuildS: 180, maxStep: 0.8, collider: { kind: "cyl", r: 0.53, h: 5.6, parts: [box(0.55, 0.55, 0, 0.35), box(0.55, 0.55, 5.25, 5.6)] } },
   meridian: { hp: 900, size: "heavy", rebuildS: 180, collider: { kind: "box", hx: 3.0, hz: 1.2, h: 2.6 }, maxStep: 1.3 },
+};
+
+/** Meridian's statue is a corporate bust on a tall plinth, not a robed figure on a base. */
+const STATUE: Partial<Record<BodyId, ArchetypeDef>> = {
+  meridian: {
+    hp: 300, size: "heavy", rebuildS: 300, maxStep: 0.5,
+    collider: { kind: "cyl", r: 0.22, h: 2.52, parts: [box(0.35, 0.35, 0, 1.4), box(0.39, 0.21, 1.4, 2.02)] },
+  },
 };
 
 export function archetypeDef(body: BodyId, archetype: number | BreakableArchetype): ArchetypeDef {
   const name = typeof archetype === "number" ? BREAKABLE_ARCHETYPES[archetype] : archetype;
   if (!name) throw new Error(`unknown breakable archetype ${archetype}`);
-  return (name === "cover" ? COVER[body] : undefined) ?? ARCHETYPES[name];
+  return (name === "cover" ? COVER[body] : name === "statue" ? STATUE[body] : undefined) ?? ARCHETYPES[name];
+}
+
+/** A collider at scale `s`: main shape half extents and height, extra parts, footprint radius. */
+export function scaledCollider(col: ColliderShape, s: number): { shape: 0 | 1; hx: number; hz: number; h: number; parts: SolidPart[]; foot: number } {
+  const hx = (col.kind === "box" ? col.hx : col.r) * s;
+  const hz = (col.kind === "box" ? col.hz : col.r) * s;
+  const parts: SolidPart[] = (col.parts ?? []).map((q) => ({ shape: q.kind === "box" ? 0 : 1, hx: q.hx * s, hz: q.hz * s, y0: q.y0 * s, y1: q.y1 * s }));
+  let foot = col.kind === "box" ? Math.sqrt(hx * hx + hz * hz) : hx;
+  for (const q of parts) foot = Math.max(foot, q.shape === 0 ? Math.sqrt(q.hx * q.hx + q.hz * q.hz) : q.hx);
+  return { shape: col.kind === "box" ? 0 : 1, hx, hz, h: col.h * s, parts, foot };
 }
 
 export function archetypeIndex(a: BreakableArchetype): number {
@@ -106,6 +159,8 @@ export interface Breakable {
   hx: number;
   hz: number;
   h: number;
+  /** Extra solids (compound colliders: a statue's base and robe, pillar caps), scaled. */
+  parts?: SolidPart[];
   /** Collider centre and bounding-sphere radius (broadphase). */
   cx: number; cy: number; cz: number;
   bound: number;
@@ -609,6 +664,7 @@ interface Fit {
   hx: number;
   hz: number;
   h: number;
+  parts: SolidPart[];
   foot: number;
   gmin: number;
 }
@@ -629,10 +685,7 @@ function fitItem(terrain: Terrain, keep: KeepOut, site: V3, frame: { north: V3; 
   // forward = right × up (so right, up, forward is a right-handed basis).
   const fwd: V3 = [right[1] * dir[2] - right[2] * dir[1], right[2] * dir[0] - right[0] * dir[2], right[0] * dir[1] - right[1] * dir[0]];
   const col = def.collider;
-  const hx = (col.kind === "box" ? col.hx : col.r) * s;
-  const hz = (col.kind === "box" ? col.hz : col.r) * s;
-  const h = col.h * s;
-  const foot = col.kind === "box" ? Math.sqrt(hx * hx + hz * hz) : hx;
+  const { hx, hz, h, parts, foot } = scaledCollider(col, s);
   // Dry, not too steep: sample the ground at the centre and the footprint corners.
   const g0 = terrain.groundHeight(dir[0], dir[1], dir[2]);
   let gmin = g0, gmax = g0;
@@ -661,7 +714,7 @@ function fitItem(terrain: Terrain, keep: KeepOut, site: V3, frame: { north: V3; 
     }
     if (status === FIT_OK && keep.arena && chordMetres(keep.arena.dir, dir[0], dir[1], dir[2], R) < keep.arena.radius + foot) status = FIT_ARENA;
   }
-  return { status, steep, dir, right, fwd, hx, hz, h, foot, gmin };
+  return { status, steep, dir, right, fwd, hx, hz, h, parts, foot, gmin };
 }
 
 /** Candidate offsets (m) for a search of radius `r`: the origin, then rings of 8 at r/3, 2r/3, r. */
@@ -777,7 +830,7 @@ function place(terrain: Terrain, report?: PlacementReport[]): Breakable[] {
         }
         continue;
       }
-      const { dir, right, fwd, hx, hz, h, foot } = f;
+      const { dir, right, fwd, hx, hz, h, parts, foot } = f;
       const base = R + f.gmin - SINK;
       const bx = dir[0] * base, by = dir[1] * base, bz = dir[2] * base;
       // Trees, rocks and spires keep their place; the breakable yields.
@@ -830,6 +883,7 @@ function place(terrain: Terrain, report?: PlacementReport[]): Breakable[] {
         rebuildMs: def.rebuildS * 1000,
         shape: def.collider.kind === "box" ? 0 : 1,
         hx, hz, h,
+        ...(parts.length ? { parts } : {}),
         cx: bx + dir[0] * half, cy: by + dir[1] * half, cz: bz + dir[2] * half,
         bound: Math.sqrt(foot * foot + half * half),
         foot,
@@ -842,33 +896,26 @@ function place(terrain: Terrain, report?: PlacementReport[]): Breakable[] {
 // ------------------------------------------------------------------------------------ hit tests
 
 /**
- * Distance along a ray (origin o, unit direction d) to the breakable's collider within [0, maxT],
- * or Infinity. A ray starting inside returns 0.
+ * Ray (local origin l, local direction v) against one solid of a collider: a box (shape 0, half
+ * extents hx, hz) or an upright cylinder (shape 1, radius hx) spanning y0..y1. Entry distance within
+ * [0, maxT] (0 when starting inside) or Infinity.
  */
-export function rayBreakable(b: Breakable, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number): number {
-  const qx = ox - b.px, qy = oy - b.py, qz = oz - b.pz;
-  // Local origin and direction (x = right, y = up, z = forward).
-  const lx = qx * b.rx + qy * b.ry + qz * b.rz;
-  const ly = qx * b.ux + qy * b.uy + qz * b.uz;
-  const lz = qx * b.fx + qy * b.fy + qz * b.fz;
-  const vx = dx * b.rx + dy * b.ry + dz * b.rz;
-  const vy = dx * b.ux + dy * b.uy + dz * b.uz;
-  const vz = dx * b.fx + dy * b.fy + dz * b.fz;
+function raySolid(shape: 0 | 1, hx: number, hz: number, y0: number, y1: number, lx: number, ly: number, lz: number, vx: number, vy: number, vz: number, maxT: number): number {
   let t0 = 0, t1 = maxT;
-  // Height slab y ∈ [0, h].
+  // Height slab y ∈ [y0, y1].
   if (Math.abs(vy) < 1e-12) {
-    if (ly < 0 || ly > b.h) return Infinity;
+    if (ly < y0 || ly > y1) return Infinity;
   } else {
-    let a = -ly / vy, c = (b.h - ly) / vy;
+    let a = (y0 - ly) / vy, c = (y1 - ly) / vy;
     if (a > c) { const tmp = a; a = c; c = tmp; }
     if (a > t0) t0 = a;
     if (c < t1) t1 = c;
     if (t0 > t1) return Infinity;
   }
-  if (b.shape === 0) {
+  if (shape === 0) {
     // Box slabs x ∈ [-hx, hx], z ∈ [-hz, hz].
     for (let axis = 0; axis < 2; axis++) {
-      const o = axis === 0 ? lx : lz, v = axis === 0 ? vx : vz, e = axis === 0 ? b.hx : b.hz;
+      const o = axis === 0 ? lx : lz, v = axis === 0 ? vx : vz, e = axis === 0 ? hx : hz;
       if (Math.abs(v) < 1e-12) {
         if (o < -e || o > e) return Infinity;
       } else {
@@ -882,7 +929,7 @@ export function rayBreakable(b: Breakable, ox: number, oy: number, oz: number, d
     return t0;
   }
   // Cylinder x² + z² ≤ r².
-  const r = b.hx;
+  const r = hx;
   const A = vx * vx + vz * vz;
   const C = lx * lx + lz * lz - r * r;
   if (A < 1e-12) return C <= 0 ? t0 : Infinity;
@@ -896,30 +943,76 @@ export function rayBreakable(b: Breakable, ox: number, oy: number, oz: number, d
   return t0 <= t1 ? t0 : Infinity;
 }
 
+/**
+ * Distance along a ray (origin o, unit direction d) to the breakable's collider (every solid of a
+ * compound one) within [0, maxT], or Infinity. A ray starting inside returns 0.
+ */
+export function rayBreakable(b: Breakable, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number): number {
+  const qx = ox - b.px, qy = oy - b.py, qz = oz - b.pz;
+  // Local origin and direction (x = right, y = up, z = forward).
+  const lx = qx * b.rx + qy * b.ry + qz * b.rz;
+  const ly = qx * b.ux + qy * b.uy + qz * b.uz;
+  const lz = qx * b.fx + qy * b.fy + qz * b.fz;
+  const vx = dx * b.rx + dy * b.ry + dz * b.rz;
+  const vy = dx * b.ux + dy * b.uy + dz * b.uz;
+  const vz = dx * b.fx + dy * b.fy + dz * b.fz;
+  let best = raySolid(b.shape, b.hx, b.hz, 0, b.h, lx, ly, lz, vx, vy, vz, maxT);
+  if (b.parts) {
+    for (const q of b.parts) {
+      const t = raySolid(q.shape, q.hx, q.hz, q.y0, q.y1, lx, ly, lz, vx, vy, vz, Math.min(maxT, best));
+      if (t < best) best = t;
+    }
+  }
+  return best;
+}
+
+const _closest: V3 = [0, 0, 0];
+
+/** Closest local point of one solid to (lx, ly, lz), into `out`; returns the squared distance. */
+function closestOnSolid(shape: 0 | 1, hx: number, hz: number, y0: number, y1: number, lx: number, ly: number, lz: number, out: V3): number {
+  let cx: number, cz: number;
+  if (shape === 0) {
+    cx = Math.max(-hx, Math.min(hx, lx));
+    cz = Math.max(-hz, Math.min(hz, lz));
+  } else {
+    const rl = Math.sqrt(lx * lx + lz * lz);
+    const k = rl > hx ? hx / rl : 1;
+    cx = lx * k;
+    cz = lz * k;
+  }
+  const cy = Math.max(y0, Math.min(y1, ly));
+  out[0] = cx;
+  out[1] = cy;
+  out[2] = cz;
+  const ex = lx - cx, ey = ly - cy, ez = lz - cz;
+  return ex * ex + ey * ey + ez * ez;
+}
+
 /** Distance from a point to the breakable's collider (0 inside). Writes the closest point to `out` if given. */
 export function distanceToBreakable(b: Breakable, x: number, y: number, z: number, out?: V3): number {
   const qx = x - b.px, qy = y - b.py, qz = z - b.pz;
   const lx = qx * b.rx + qy * b.ry + qz * b.rz;
   const ly = qx * b.ux + qy * b.uy + qz * b.uz;
   const lz = qx * b.fx + qy * b.fy + qz * b.fz;
-  let cx: number, cz: number;
-  if (b.shape === 0) {
-    cx = Math.max(-b.hx, Math.min(b.hx, lx));
-    cz = Math.max(-b.hz, Math.min(b.hz, lz));
-  } else {
-    const rl = Math.sqrt(lx * lx + lz * lz);
-    const k = rl > b.hx ? b.hx / rl : 1;
-    cx = lx * k;
-    cz = lz * k;
+  let best = closestOnSolid(b.shape, b.hx, b.hz, 0, b.h, lx, ly, lz, _closest);
+  let cx = _closest[0], cy = _closest[1], cz = _closest[2];
+  if (b.parts) {
+    for (const q of b.parts) {
+      const d2 = closestOnSolid(q.shape, q.hx, q.hz, q.y0, q.y1, lx, ly, lz, _closest);
+      if (d2 < best) {
+        best = d2;
+        cx = _closest[0];
+        cy = _closest[1];
+        cz = _closest[2];
+      }
+    }
   }
-  const cy = Math.max(0, Math.min(b.h, ly));
   if (out) {
     out[0] = b.px + b.rx * cx + b.ux * cy + b.fx * cz;
     out[1] = b.py + b.ry * cx + b.uy * cy + b.fy * cz;
     out[2] = b.pz + b.rz * cx + b.uz * cy + b.fz * cz;
   }
-  const ex = lx - cx, ey = ly - cy, ez = lz - cz;
-  return Math.sqrt(ex * ex + ey * ey + ez * ez);
+  return Math.sqrt(best);
 }
 
 /** Does the segment (o, d, maxT) pass within `b.bound` of the collider centre? (broadphase) */

@@ -61,6 +61,12 @@ export interface PlayerActor {
   specialReadyAt: number;
   lastPhraseAt: number;
   healAcc: number;
+  /** Riding a horse (horses/HorseSystem). Movement allows horse speed, no dodge, no attacks. */
+  mounted?: boolean;
+  /** Mounted movement budget lasts until here after a dismount (the client learns a round trip later). */
+  mountGraceUntil?: number;
+  /** When `mounted` last changed (combat rewinds the rider's lifted hit capsule with the position). */
+  mountChangedAt?: number;
   /** NPC status effects enforced by movement validation (see npc/effects.ts). */
   npcFx?: NpcMoveFx;
 }
@@ -89,9 +95,10 @@ export interface NpcActor {
   armour?: number;
   /**
    * Optional mitigation (replaces `armour`): shields, boss weak windows, invulnerable states.
-   * Gets the damage after the weak-point multiplier and returns what to apply; ≤ 0 = no damage.
+   * Gets the damage after the weak-point multiplier (and who dealt it) and returns what to apply;
+   * ≤ 0 = no damage.
    */
-  mitigate?: (amount: number, weak: boolean, fromDir?: V3) => number;
+  mitigate?: (amount: number, weak: boolean, fromDir?: V3, attacker?: PlayerActor | NpcActor | null) => number;
   /**
    * Weak-point test for a ray that hit this NPC's capsule at distance `t` (bosses: does the ray pass
    * through an exposed weak-point volume?). Replaces the generic "top of the capsule" test.
@@ -127,4 +134,16 @@ export function positionAgo(a: Actor, now: number, ms: number): V3 {
   }
   const f = h[0]!;
   return [f.x, f.y, f.z];
+}
+
+/** Horses: riding, or just off the horse while the server still budgets horse speed for the
+ *  client's in-flight inputs (HORSE.dismountGraceMs). No weapons, guard, draw or scope meanwhile. */
+export function inSaddle(a: PlayerActor, now: number): boolean {
+  return !!a.mounted || now < (a.mountGraceUntil ?? 0);
+}
+
+/** Was the player riding at time `t`? Changes are at least HORSE.toggleCooldownMs apart, longer than
+ *  any rewind, so only the last one matters. */
+export function mountedAt(a: PlayerActor, t: number): boolean {
+  return t >= (a.mountChangedAt ?? 0) ? !!a.mounted : !a.mounted;
 }

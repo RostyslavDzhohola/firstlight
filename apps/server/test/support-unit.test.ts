@@ -174,7 +174,10 @@ describe("what the shell stops", () => {
 
 /** A destruction system on a fake world (the room surface it needs, nothing more). */
 function destructionOn(w: FakeWorld): DestructionSystem {
-  const room = { terrain: w.world.terrain, state: { broken: new Map<string, number>() }, broadcastNear: () => {}, host: w.world.host, actors: w.players } as unknown as BodyRoom;
+  const room = {
+    terrain: w.world.terrain, bodyDef: w.world.body, metadata: {}, state: { broken: new Map<string, number>(), copy: 0 },
+    broadcastNear: () => {}, host: w.world.host, actors: w.players,
+  } as unknown as BodyRoom;
   const sys = new DestructionSystem(room, () => w.clock.t);
   w.world.host.props = sys;
   return sys;

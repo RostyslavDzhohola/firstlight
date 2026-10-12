@@ -9,12 +9,15 @@ import type { NpcActor, PlayerActor } from "../actors.ts";
 import type { CombatHost } from "../combat.ts";
 import { withTx } from "../characters.ts";
 import { emitGameEvent } from "../events.ts";
+import { roomCopyKey } from "../copyState.ts";
 import type { V3 } from "../geometry.ts";
 
 export interface NpcWorld {
   body: BodyDef;
   terrain: Terrain;
   host: CombatHost;
+  /** `body:copy` key for state that outlives the room (copyState.ts); unset = nothing is kept. */
+  copyKey?: string;
   now(): number;
   /** Everyone NPCs can see and hurt: connected players and lingering bodies. */
   players(): Iterable<PlayerActor>;
@@ -43,6 +46,7 @@ export function roomWorld(room: BodyRoom): NpcWorld {
     body: room.bodyDef,
     terrain: room.terrain,
     host: room.host,
+    copyKey: roomCopyKey(room),
     now: () => room.host.now(),
     players: () => room.host.players(),
     connected: () => room.actors.values(),

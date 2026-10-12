@@ -1,5 +1,7 @@
 // One boss per planet copy (content §4): spawns at its lair when players come near; HP = HP₂ ×
-// (1 + 0.35 × extra players inside the arena), recounted on every entry/exit with the percentage kept;
+// (1 + 0.35 × extra players inside the arena or hitting it from just outside in the last 10 s),
+// recounted on every entry/exit with the percentage kept; hits from outside count only within 10 m of
+// the edge and only while someone is inside; the 30 s reset goes by who is inside;
 // phases by HP; co-op mechanics with no hints:
 // - plates (Tidewrath's Tide Stones, The Receiver's Override Consoles): two bodies held 3 s together
 //   open an 8 s weak window (armour off, weak point ×1.5), then the plates go dark;
@@ -16,8 +18,8 @@ import {
   type AttackDef, type BossDef, type BossEventMsg, type NpcAttackMsg, type NpcDef,
 } from "@firstlight/shared/content/npcs";
 import { partyOf } from "../../social/parties.ts";
-import { actorPos, type PlayerActor } from "../actors.ts";
-import { dealDamage } from "../combat.ts";
+import { actorPos, type NpcActor, type PlayerActor } from "../actors.ts";
+import { dealDamage, type BreakableHost } from "../combat.ts";
 import type { V3 } from "../geometry.ts";
 import { cancelAttack, chest, playersInCircle, playersInLine, startAttack, updateAttack } from "./attacks.ts";
 import { aggro } from "./brain.ts";
@@ -32,6 +34,25 @@ interface CoverState {
   def: ArenaCover;
   hp: number;
   broken: boolean;
+}
+
+/**
+ * An engaged fight as kept across room instances of the copy (persist.ts, Codex S3): it resumes
+ * if the boss comes back before the 30 s vacancy reset would have run, else the boss is fresh.
+ */
+export interface BossFight {
+  id: string;
+  /** Since when nobody has been inside the arena (the save time if someone still was). */
+  vacantSince: number;
+  /** HP as a fraction of max (max is recounted from the players present). */
+  frac: number;
+  phase: number;
+  /** Per cover index: HP and broken (1/0). */
+  cover: [number, number][];
+  /** Damage credit by account: [userId, name, amount]. */
+  damage: [string, string, number][];
+  plates: string[];
+  soakers: string[];
 }
 
 interface Mech {
@@ -56,6 +77,12 @@ const BOSS_MSG_RADIUS = 220;
 const MAX_SUMMONS = 4;
 /** Lair-state snapshots go to players who come within this distance of the arena (and on request). */
 const SNAPSHOT_RADIUS = 260;
+/** Players who hit the boss this recently count for its HP and can be targeted, wherever they stand. */
+const RECENT_HIT_MS = 10_000;
+/** Hits from players farther than this beyond the arena edge do nothing (no sniping from outside). */
+const OUTSIDE_REACH = 10;
+/** Arena cover shows up in combat's prop raycasts as index COVER_INDEX + cover index. */
+const COVER_INDEX = 1 << 20;
 
 /** Weak-point volumes in the boss's local frame (x right, y up, z forward), exposed only in their window. */
 const WEAK_VOLUMES: Record<string, { c: V3; r: number }> = {
@@ -76,6 +103,12 @@ export class BossController {
   engaged = false;
   count = 0;
   inArena: LivePlayer[] = [];
+  /** Inside the arena or hit the boss in the last RECENT_HIT_MS: HP scaling and targeting. */
+  fighters: LivePlayer[] = [];
+  /** Session id → last time that player damaged the boss. */
+  private readonly recentHits = new Map<string, number>();
+  /** A fight restored from the copy state, applied when the boss next spawns (if still in time). */
+  pendingFight: BossFight | null = null;
   phase = 1;
   windowUntil = 0;
   darkUntil = 0;
@@ -102,6 +135,9 @@ export class BossController {
   private platesKey = "";
   private propHook: ((point: V3, power: "light" | "heavy", amount: number) => void) | null = null;
   private propPrev: ((point: V3, power: "light" | "heavy", amount: number) => void) | undefined;
+  private coverHost: BreakableHost | null = null;
+  private coverPrev: BreakableHost | undefined;
+  private readonly coverRayHit = { i: -1, t: Infinity };
 
   constructor(sys: NpcSystem, def: BossDef, arena: ArenaLayout) {
     this.sys = sys;
@@ -116,6 +152,7 @@ export class BossController {
 
   tick(now: number, dt: number) {
     this.hookProps();
+    this.hookCover();
     if (!NPC_TUNING.bosses) {
       if (this.npc) this.despawn();
       return;
@@ -170,6 +207,45 @@ export class BossController {
     this.npc = n;
     this.status = "alive";
     this.resetState(n, now);
+    const f = this.pendingFight;
+    this.pendingFight = null;
+    if (f && f.id === this.def.id && now - f.vacantSince < NPC_TUNING.bossResetMs) this.resumeFight(n, f, now);
+  }
+
+  /** The engaged fight worth keeping across room instances, or null (persist.ts). */
+  fightState(now: number): BossFight | null {
+    const n = this.npc;
+    if (this.status !== "alive" || !this.engaged || !n || n.dead) return null;
+    return {
+      id: this.def.id,
+      vacantSince: this.inArena.length > 0 ? now : (this.emptySince ?? now),
+      frac: n.state.hp / n.state.maxHp,
+      phase: this.phase,
+      cover: this.cover.map((c) => [c.hp, c.broken ? 1 : 0]),
+      damage: [...n.damage.values()].map((e) => [e.userId, e.name, e.amount]),
+      plates: [...this.plateHolders],
+      soakers: [...this.soakers],
+    };
+  }
+
+  /** Pick a kept fight back up: HP share, phase, cover, credit; the vacancy clock keeps running. */
+  private resumeFight(n: Npc, f: BossFight, now: number) {
+    n.state.hp = Math.max(1, Math.min(n.state.maxHp, Math.round(n.state.maxHp * f.frac)));
+    this.phase = Math.max(1, Math.min(3, f.phase | 0));
+    n.state.phase = this.phase;
+    f.cover.forEach(([hp, broken], i) => {
+      const c = this.cover[i];
+      if (!c) return;
+      c.hp = Math.max(0, Math.min(c.def.hp, hp));
+      c.broken = broken === 1 || c.hp <= 0;
+    });
+    for (const [userId, name, amount] of f.damage) n.damage.set(userId, { userId, name, amount, sid: "" });
+    for (const u of f.plates) this.plateHolders.add(u);
+    for (const u of f.soakers) this.soakers.add(u);
+    this.engaged = true;
+    this.emptySince = f.vacantSince;
+    this.nextAttackAt = now + 1500;
+    n.state.flags |= NF.ENGAGED;
   }
 
   private despawn() {
@@ -198,6 +274,7 @@ export class BossController {
     this.emptySince = null;
     this.regenAcc = 0;
     this.wasOpen = false;
+    this.recentHits.clear();
     n.state.maxHp = this.def.id === n.def.id ? n.def.hp : n.state.maxHp;
     n.state.hp = n.state.maxHp;
     n.state.phase = 1;
@@ -212,6 +289,7 @@ export class BossController {
     cancelAttack(this.sys, n);
     this.clearSummons();
     this.resetState(n, now);
+    this.sys.copyDirty = true;
     n.state.flags &= ~(NF.ENGAGED | NF.WEAK_OPEN | NF.STUNNED);
     n.pos = [this.arena.home[0], this.arena.home[1], this.arena.home[2]];
     n.facing = this.arena.homeFacing;
@@ -300,9 +378,16 @@ export class BossController {
 
   private engagement(n: Npc, now: number) {
     const inArena: LivePlayer[] = [];
-    for (const lp of this.sys.live) if (flatDist(this.arena.centre, lp.pos) <= this.arena.radius) inArena.push(lp);
+    const fighters: LivePlayer[] = [];
+    for (const [id, at] of this.recentHits) if (now - at > RECENT_HIT_MS) this.recentHits.delete(id);
+    for (const lp of this.sys.live) {
+      const inside = flatDist(this.arena.centre, lp.pos) <= this.arena.radius;
+      if (inside) inArena.push(lp);
+      if (inside || this.recentHits.has(lp.a.id)) fighters.push(lp);
+    }
     this.inArena = inArena;
-    const count = inArena.length;
+    this.fighters = fighters;
+    const count = fighters.length;
     if (count !== this.count) {
       const oldMax = n.state.maxHp;
       const newMax = bossMaxHp(this.npcDef.hp, count, this.def.hpPerExtra, this.def.maxCounted);
@@ -313,11 +398,16 @@ export class BossController {
       this.count = count;
       this.event({ type: "hp", engaged: count, hp: n.state.hp, maxHp: n.state.maxHp });
     }
-    if (count > 0) {
+    // Engagement and the 30 s vacancy reset go by who is actually in the arena: hitters at the edge
+    // count for HP and targeting only (Codex B1).
+    if (inArena.length > 0) {
       this.emptySince = null;
       if (!this.engaged) this.engage(n, now);
     } else if (this.engaged) {
-      this.emptySince ??= now;
+      if (this.emptySince === null) {
+        this.emptySince = now;
+        this.sys.copyDirty = true; // keep the vacancy start for a room that comes back (persist.ts)
+      }
       if (now - this.emptySince >= NPC_TUNING.bossResetMs) this.reset(now);
     }
   }
@@ -417,11 +507,25 @@ export class BossController {
 
   // ------------------------------------------------------------------------------------ damage
 
-  /** Armour outside the weak window; weak-point hits are already multiplied by combat (weakMult). */
-  mitigate(n: Npc, amount: number, _weak: boolean): number {
+  /**
+   * Armour outside the weak window; weak-point hits are already multiplied by combat (weakMult).
+   * Players outside the arena deal nothing beyond its edge + OUTSIDE_REACH (F12: a sniper 75 m
+   * out), and nothing at all while nobody is inside (Codex B1: no chipping from the edge).
+   */
+  mitigate(n: Npc, amount: number, _weak: boolean, attacker?: PlayerActor | NpcActor | null): number {
     if (n.dead || n.state.flags & NF.INVULN) return 0;
+    if (attacker?.kind === "player") {
+      const d = flatDist(this.arena.centre, actorPos(attacker));
+      if (d > this.arena.radius + OUTSIDE_REACH || (d > this.arena.radius && !this.occupied())) return 0;
+    }
     const open = this.sys.world.now() < this.windowUntil;
     return amount * (open ? 1 : (this.npcDef.armour ?? 1));
+  }
+
+  /** Is anyone alive inside the arena right now (positions as of this moment, not the last tick)? */
+  private occupied(): boolean {
+    for (const p of this.sys.world.players()) if (!p.dead && p.state.hp > 0 && flatDist(this.arena.centre, actorPos(p)) <= this.arena.radius) return true;
+    return false;
   }
 
   /**
@@ -444,9 +548,11 @@ export class BossController {
     return dot(sub(q, c), sub(q, c)) <= v.r * v.r;
   }
 
-  onDamaged(n: Npc, _amount: number, by: unknown) {
-    // Contribution is tracked in n.damage by the system. A hit from outside the arena engages too,
-    // so the empty-arena reset (30 s) heals it: no free chip damage from range.
+  onDamaged(n: Npc, amount: number, by: PlayerActor | null) {
+    // Contribution is tracked in n.damage by the system. A hit from just outside the arena engages
+    // too and counts the hitter as a fighter for RECENT_HIT_MS (HP scaling, targeting).
+    if (by && amount > 0) this.recentHits.set(by.id, this.sys.world.now());
+    this.sys.copyDirty = true; // the fight's HP is worth keeping (persist.ts; saved at most once a second)
     if (!this.engaged && by && this.status === "alive") this.engage(n, this.sys.world.now());
   }
 
@@ -561,7 +667,7 @@ export class BossController {
   private pickTarget(n: Npc): LivePlayer | null {
     let best: LivePlayer | null = null;
     let bd = Infinity;
-    for (const lp of this.inArena) {
+    for (const lp of this.fighters) {
       if (lp.untouchable) continue;
       const d = flatDist(n.pos, lp.pos) - (n.target === lp.a ? 4 : 0);
       if (d < bd) {
@@ -843,6 +949,68 @@ export class BossController {
     host.onPropHit = this.propHook;
   }
 
+  /**
+   * Intact arena cover stops shots like a breakable prop (F12: a rocket aimed mid-pillar flew
+   * through): wrap the combat host's prop raycast so hitscan, chain bolts, projectiles and NPC line
+   * of sight stop at the first cover cylinder. The cover itself takes damage where the shot ends,
+   * through onPropHit (coverHit), so `damage` on a cover index does nothing here.
+   */
+  private hookCover() {
+    const host = this.sys.world.host;
+    if (this.coverHost && host.props === this.coverHost) return;
+    const inner = host.props;
+    this.coverPrev = inner;
+    const hit = { index: -1, t: 0 };
+    this.coverHost = {
+      raycast: (o, d, maxT) => {
+        const h = inner?.raycast(o, d, maxT) ?? null;
+        const propT = h ? h.t : Infinity;
+        const propIdx = h ? h.index : -1;
+        const c = this.coverRay(o, d, Math.min(maxT, propT));
+        if (c.i < 0 && propIdx < 0) return null;
+        hit.index = c.i >= 0 ? COVER_INDEX + c.i : propIdx;
+        hit.t = c.i >= 0 ? c.t : propT;
+        return hit;
+      },
+      damage: (index, ...rest) => {
+        if (index < COVER_INDEX) inner?.damage(index, ...rest);
+      },
+      splash: (...args) => inner?.splash(...args),
+      arc: (...args) => inner?.arc(...args),
+    };
+    host.props = this.coverHost;
+  }
+
+  /** First intact cover cylinder along a ray within maxT: its index and distance (i = −1: none; reused object). */
+  coverRay(o: V3, d: V3, maxT: number): { i: number; t: number } {
+    const out = this.coverRayHit;
+    out.i = -1;
+    out.t = Infinity;
+    let lim = maxT;
+    for (let i = 0; i < this.cover.length; i++) {
+      const c = this.cover[i]!;
+      if (c.broken) continue;
+      // Cheap reject: the whole cylinder is farther from the origin than the ray reaches.
+      const p = c.def.pos, reach = lim + c.def.radius + c.def.height;
+      const dx = p[0] - o[0], dy = p[1] - o[1], dz = p[2] - o[2];
+      if (dx * dx + dy * dy + dz * dz > reach * reach) continue;
+      const t = rayCylinder(o, d, lim, p, c.def.radius, c.def.height);
+      if (t === Infinity) continue;
+      out.i = i;
+      out.t = lim = t;
+    }
+    return out;
+  }
+
+  /** Unhook from the combat host (the room is going away). */
+  dispose() {
+    const host = this.sys.world.host;
+    if (this.coverHost && host.props === this.coverHost) host.props = this.coverPrev;
+    if (this.propHook && host.onPropHit === this.propHook) host.onPropHit = this.propPrev;
+    this.coverHost = null;
+    this.propHook = null;
+  }
+
   coverHit(point: V3, power: "light" | "heavy", amount: number) {
     if (this.status !== "alive") return;
     const now = this.sys.world.now();
@@ -887,4 +1055,37 @@ export class BossController {
       c.hp = c.def.hp;
     }
   }
+}
+
+/**
+ * Distance along a ray to an upright cylinder standing on `base` (radius r, height h, axis along the
+ * local up), or Infinity beyond maxT. A ray starting inside doesn't hit it (no trapping the shooter).
+ */
+export function rayCylinder(o: V3, d: V3, maxT: number, base: V3, r: number, h: number): number {
+  const u = normalize(base);
+  const w = sub(o, base);
+  const wu = dot(w, u), du = dot(d, u);
+  const wp = add(w, u, -wu), dp = add(d, u, -du);
+  const c = dot(wp, wp) - r * r;
+  if (c <= 0 && wu >= 0 && wu <= h) return Infinity;
+  let best = Infinity;
+  const a = dot(dp, dp);
+  if (a > 1e-9 && c > 0) {
+    const b = 2 * dot(wp, dp);
+    const disc = b * b - 4 * a * c;
+    if (disc >= 0) {
+      const t = (-b - Math.sqrt(disc)) / (2 * a);
+      const y = wu + du * t;
+      if (t >= 0 && t <= maxT && y >= 0 && y <= h) best = t;
+    }
+  }
+  // The top cap, for shots from above.
+  if (Math.abs(du) > 1e-9 && wu > h) {
+    const t = (h - wu) / du;
+    if (t >= 0 && t < best && t <= maxT) {
+      const q = add(wp, dp, t);
+      if (dot(q, q) <= r * r) best = t;
+    }
+  }
+  return best;
 }

@@ -135,7 +135,7 @@ removes every coin (D), so prices are set for one life.
 | Patchkit T1 / T2 / T3 (each) | 25 / 60 / 120 | (new) |
 | Prism Bubble T1 / T2 / T3 | 120 / 400 / 1,000 | (new) |
 | Radio | **100** | (D) |
-| Horse (extra after the core) | 1,500 | lost on death (D); price (new) |
+| Horse Whistle (extra after the core, §1.6) | 1,500 | a normal item: drops in the death pile, so the horse is lost on death (D); price (new) |
 | Common cosmetics (5 items, §8.3) | 120 each | (new) |
 
 Equipping still needs the level gate (T2 = L6, T3 = L12) (D). Anyone can buy, pick up or sell anything.
@@ -145,6 +145,20 @@ fixed values (new): Wool Tuft 2 · Wolf Pelt 8 · Bramblehorn Antler 120 · Fens
 Dunebreaker Scale 300 · cosmetics Common 30 / Uncommon 90 / Rare 250 / Legendary 500. Easter-egg items
 (§6, the Ferryman's Oar included) can't be sold: they can be claimed once per life, so a price would
 make them a coin faucet (F12 review).
+
+### 1.6 Horses (M11 extra #2; code: `packages/shared/src/content/horse.ts`) (new)
+
+| Rule | Value |
+|---|---|
+| Item | Horse Whistle, 1,500 ◎ at the Portus Exchange (gear, one per slot, sells back for 375). Carried like anything else: it drops in the death pile, whoever picks it up owns a horse |
+| Whistle (H) | Outside safe zones only (all of Portus and the 12 m pad rings refuse), with the whistle in the hotbar or backpack, not in deep water; 2 s between whistles. The horse appears 3 m to your side (a dry spot) with a corpuscle burst. One horse per player: whistling again brings the same horse over |
+| Get on / off | E (or H) within 3.5 m of your own horse. H while riding always gets off. At most one change per 0.5 s |
+| Speed | 14 m/s, Shift gallop 16 m/s (on foot: run 6, sprint 9). Heavier turns and acceleration. Jumping works; fall damage still applies. NPC chill/slow scale it; Cease-and-Desist holds it to 14 |
+| From the saddle | **No attacks of any kind** (fire, melee, block, bow draw, scope are refused by the server), also for 0.6 s after getting off (the server still allows horse speed for in-flight inputs); no dodge-roll. Tonics and Patchkits still work; the whistle in hand gets you off. Kept simple on purpose: no one-handed-sidearm exception to balance |
+| Thrown off | Any single hit of ≥ 20% of your max HP, or water deeper than 1 m (the horse won't swim; it waits on the last dry spot) |
+| Hit box | The rider can be shot in the saddle: the server lifts a mounted player's hit capsule 0.8 m (headshots land on the drawn head; shots at the horse's legs miss) |
+| The horse | Never a target, never saved. Leaves 30 s after you get off, and at once when you die, log out, drop your connection, travel (portal or pad fast travel; any teleport), or lose the whistle (sold, dropped). A rider who leaves outside a safe zone lingers on foot |
+| Coats | Six (chestnut, bay, grey, palomino, black, white), each with its own blanket colour; your coat is fixed by your account id |
 
 ---
 
@@ -339,8 +353,8 @@ build if any weapon's TTK leaves 0.6–1.6× of its class median [04].
 | Spawn | 1 s materialise as light particles; no damage while materialising | [12], (D) look |
 | Attack tokens on one player | 2 melee + 2 ranged (Arcadia, Hollowmere); 2 + 3 (Meridian); each held ≤ 1.5 s, released on a 0.4 s stagger | [12] |
 | Perception | sight cone 90°, 25 m (Associates 35 m); hearing 12 m; gunfire is a 30 m noise event; pack mates within 15 m share the target | [12] |
-| Leash | 45 m from anchor, or 20 s without line of sight; then EVADE: invulnerable, runs home at 1.5× speed, heals fully. Entering a safe zone drops all aggro instantly | [12] |
-| Respawn | pack 120 s after clear (×2 while a player is within 60 m); camp 300 s; neutral beast 15 min; boss 10 min (D) | [12], (new) |
+| Leash | 45 m from anchor, or 20 s without line of sight, or 5 s with the target where the NPC can't reach it (inside a pad's safe ring, or out of its medium) and out of its ranged attacks; then EVADE: invulnerable, runs home at 1.5× speed, heals fully. Entering a safe zone drops all aggro instantly | [12], (new) |
+| Respawn | pack 120 s after clear (×2 while a player is within 60 m); camp 300 s; neutral beast 15 min; boss 10 min (D). Timers are per copy and survive the copy emptying and server restarts | [12], (new) |
 | Telegraph language | colour + shape + sound, never colour alone: red wedge = dodge; amber line = ranged lock; teal ring = step out; white flash = projectile launch | [12] |
 | Death | dissolves into light particles; coins auto-credited; item drops appear as a small glowing pickup | (D) look, (new) |
 
@@ -462,10 +476,10 @@ Sixers' black-and-grey "6" look, IOI branding and Sorrento-like leaders [12].
 | Rule | Value | Src |
 |---|---|---|
 | Availability | always up; respawns **10 min** after a kill, separately in each world copy | (D) |
-| HP formula | `HP(n) = HP₂ × (1 + 0.35 × (max(n, 2) − 2))`. n = players alive inside the arena boundary (any party), recounted on every entry/exit; current HP keeps its percentage; n capped at 8 | (D) |
+| HP formula | `HP(n) = HP₂ × (1 + 0.35 × (max(n, 2) − 2))`. n = players alive inside the arena boundary plus anyone who damaged the boss in the last 10 s (any party), recounted on every change; current HP keeps its percentage; n capped at 8. The boss targets the same players. Hits from outside the boundary count only from within 10 m of it and only while someone is inside | (D), (new) |
 | Solo | impossible by design: each boss has a mechanic that needs two bodies in two places, or two bodies in one circle | (D), [r2-05] |
 | Hints | none: no UI, NPC or voice line explains a mechanic (D). Telegraphs are still fully readable | (D) |
-| Reset | no player in the arena for 30 s → full HP, cover rebuilds | (new) |
+| Reset | no player in the arena for 30 s → full HP, cover rebuilds. An engaged fight survives its room closing or a restart until then | (new) |
 | Damage cap | boss single hit ≤ 60% of the target's max HP after all modifiers; split circles are designed to deal exactly 60% each with 2 players | [12], [r2-05] |
 | Loot eligibility | alive in the arena at the kill **and** either you contributed (≥ 50% of an equal damage share, held a plate during an opened window, or stood in a split circle) **or** a party member did (party shares boss credit) | [r2-05], (D) |
 | Loot delivery | personal: every eligible player rolls their own table; items go into the inventory, and overflow drops at their feet as a normal pile | (D), (new) |
@@ -779,7 +793,7 @@ download date, modifications and hash [13]. **ElevenLabs outputs never go in the
 | Animations (fallback) | KayKit Character Animations, the **current** pack (161 clips), not the legacy one | https://kaylousberg.itch.io/kaykit-character-animations | CC0 | verified [08] |
 | Rigging aid + clips | Mesh2Motion (code MIT; its rigs and animations CC0) | https://mesh2motion.org/ · https://github.com/Mesh2Motion/mesh2motion-assets | MIT / CC0 | verified [08]; check any third-party sample models separately |
 | Prototype characters | Kenney Animated Characters (Protagonists, Retro, Survivors), Blocky Characters | https://kenney.nl/assets/animated-characters-protagonists | CC0 | verified [08] |
-| Animals (horse) | Quaternius low-poly animated animals | https://quaternius.itch.io/lowpoly-animated-animals | CC0 | horse verified [r2-04]; **wolf/sheep contents unverified** |
+| Animals (horse) | Quaternius low-poly animated animals | https://quaternius.itch.io/lowpoly-animated-animals | CC0 | horse verified [r2-04] and used (docs/ASSETS.md); the pack is cow, horse, llama, pig, pug, sheep, zebra (no wolf) |
 | Props, HDRIs, textures | Poly Haven | https://polyhaven.com/license | CC0 | verified [13], [07] |
 | Materials | ambientCG | https://docs.ambientcg.com/license/ | CC0 | verified [07] |
 | Props, UI | Kenney asset packs | https://kenney.nl/support | CC0 | verified [13] |

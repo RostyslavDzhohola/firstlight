@@ -134,8 +134,9 @@ function buildShop(): ShopEntry[] {
   const out: ShopEntry[] = [];
   for (const w of WEAPONS) {
     if (NOT_SOLD.has(w.id)) continue;
-    const category: ShopCategory = w.id.startsWith("tonic") ? "consumables" : w.id === "radio" ? "gear" : w.cls === "support" ? "support" : "weapons";
-    const tiers: (1 | 2 | 3)[] = w.id.startsWith("tonic") || w.id === "radio" ? [1] : [1, 2, 3];
+    const gear = w.id === "radio" || w.id === "horse_whistle";
+    const category: ShopCategory = w.id.startsWith("tonic") ? "consumables" : gear ? "gear" : w.cls === "support" ? "support" : "weapons";
+    const tiers: (1 | 2 | 3)[] = w.id.startsWith("tonic") || gear ? [1] : [1, 2, 3];
     for (const tier of tiers) {
       const t = w.tiers[tier - 1]!;
       if (t.price <= 0) continue;

@@ -11,6 +11,7 @@ import { MemoryProgressStore, progressStore } from "../src/world/quests/store.ts
 import { copyRestrictions, MemoryCopyRestrictions } from "../src/world/quests/restrictions.ts";
 import { EGG_TIMERS } from "../src/world/quests/eggs.ts";
 import { SUPPORT_TIMERS } from "../src/world/support.ts";
+import { copyStateStore, MemoryCopyStateStore } from "../src/world/copyState.ts";
 import { hub } from "../src/world/hub.ts";
 import type { BodyId } from "@firstlight/shared";
 
@@ -18,6 +19,7 @@ export async function startServer(limits: Partial<{ maxClients: number; soloFill
   characterRepo.current = new MemoryCharacterRepo();
   pileStore.current = new MemoryPileStore();
   progressStore.current = new MemoryProgressStore();
+  copyStateStore.current = new MemoryCopyStateStore();
   copyRestrictions.current = new MemoryCopyRestrictions();
   // Process-level account timers (puzzle lockouts, bubble cooldowns) start empty for each test.
   EGG_TIMERS.puzzles.clear();

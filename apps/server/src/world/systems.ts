@@ -10,6 +10,7 @@ import { createQuestSystem } from "./quests/QuestSystem.ts";
 import { createVoiceSystem } from "./voice/index.ts";
 import { createSkySystem } from "./SkySystem.ts";
 import { createSupportSystem } from "./support.ts";
+import { createHorseSystem } from "./horses/HorseSystem.ts";
 
 export interface RoomSystem {
   /** Called every simulation tick (50 ms). */
@@ -35,3 +36,5 @@ SYSTEM_FACTORIES.push(createDestructionSystem);
 SYSTEM_FACTORIES.push(createSkySystem);
 // Support items: Patchkit channels and Prism Bubbles (hooks combat via host.bubbles).
 SYSTEM_FACTORIES.push(createSupportSystem);
+// Horses lane (M11 #2, flag FEATURE_HORSES): whistle, riding, the mounted movement budget.
+SYSTEM_FACTORIES.push(createHorseSystem);

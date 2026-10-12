@@ -61,6 +61,27 @@ export function shaderMonitorFrame() {
   }
 }
 
+/**
+ * Hidden sample meshes for looks that only show up mid-game (shots, explosions, loot piles).
+ * warmup() shows hidden meshes, so these compile behind the loading screen; and while they live
+ * (never dispose them), three keeps their node build and pipeline cached — it frees a build when
+ * its last render object goes — so the first shot or pile of a session doesn't hitch.
+ * Colour and opacity aren't part of the cache key; transparency, blending and the geometry's
+ * attribute layout are, so one sample per (material settings, layout) is enough.
+ */
+export function warmupSamples(name: string, looks: readonly (readonly [THREE.BufferGeometry, THREE.Material])[]): THREE.Group {
+  const g = new THREE.Group();
+  g.name = name;
+  g.visible = false;
+  for (const [geo, mat] of looks) {
+    const m = new THREE.Mesh(geo, mat);
+    m.name = `${name}:${mat.name || mat.type}`;
+    m.frustumCulled = false;
+    g.add(m);
+  }
+  return g;
+}
+
 export interface WarmupHooks {
   /** Force every LOD / hidden variant on (true) or back to normal (false). */
   forceAll(on: boolean): void;
