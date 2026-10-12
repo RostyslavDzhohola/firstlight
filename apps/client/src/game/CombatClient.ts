@@ -40,7 +40,10 @@ export class CombatClient {
       if (m.level > prevLevel && m.level >= 2 && !isDevGuest()) void this.maybeOfferSave();
       if (!m.dead) this.deadUntilRespawn = false;
     });
-    room.onMessage("toast", (m: { text: string; kind: string }) => this.hud.toast(m.text, m.kind));
+    room.onMessage("toast", (m: { text: string; kind: string }) => {
+      this.hud.toast(m.text, m.kind);
+      this.game.audio.play(m.kind === "xp" ? "levelUp" : m.kind === "coins" ? "coins" : "ui");
+    });
     room.onMessage("denied", (m: { action: string; reason: string }) => {
       if (m.reason === "level gate") this.hud.toast("Your level is too low to use that tier", "warn");
       else if (m.action === "logout") this.hud.toast("Can't log out in combat — wait 10 s", "warn");
@@ -48,10 +51,14 @@ export class CombatClient {
     room.onMessage("hit", (m: { attacker: string; target: string; amount: number; weak: boolean; x: number; y: number; z: number }) => {
       if (m.attacker === me && m.target !== me) {
         this.hud.hit(m.weak);
+        this.game.audio.play("hitmark", null, m.weak ? 1.3 : 1, m.weak ? 1.3 : 1);
         const s = this.toScreen(_v.set(m.x, m.y, m.z), 1.9);
         if (s) this.hud.damageNumber(s.x, s.y, m.amount, m.weak);
       }
-      if (m.target === me) this.hud.hurt();
+      if (m.target === me) {
+        this.hud.hurt();
+        this.game.audio.play("hurt");
+      } else this.game.audio.play("impact", new THREE.Vector3(m.x, m.y, m.z), 0.7);
     });
     room.onMessage("shot", (m: { by: string; weapon: number; ox: number; oy: number; oz: number; dx: number; dy: number; dz: number; hit?: [number, number, number]; chain?: [number, number, number][] }) => {
       if (m.by === me) return; // drawn locally already
@@ -59,18 +66,25 @@ export class CombatClient {
       const from = shooter ? this.muzzleOf(shooter) : new THREE.Vector3(m.ox, m.oy, m.oz);
       const to = m.hit ? new THREE.Vector3(...m.hit) : new THREE.Vector3(m.ox + m.dx * 60, m.oy + m.dy * 60, m.oz + m.dz * 60);
       const color = weaponColor(m.weapon);
+      this.game.audio.play(this.game.audio.weaponSound(m.weapon), from);
       this.effects.tracer(from, to, color);
       if (m.chain) for (let i = 1; i < m.chain.length; i++) this.effects.tracer(new THREE.Vector3(...m.chain[i - 1]!), new THREE.Vector3(...m.chain[i]!), color, 1.5);
       this.effects.flash(from, color, 0.3);
     });
     room.onMessage("projectile", (m: { id: number; by: string; weapon: number; x: number; y: number; z: number; vx: number; vy: number; vz: number; g: number }) => {
       this.effects.spawnProjectile(m.id, m.weapon, new THREE.Vector3(m.x, m.y, m.z), new THREE.Vector3(m.vx, m.vy, m.vz), m.g);
+      this.game.audio.play(this.game.audio.weaponSound(m.weapon), m.by === me ? null : new THREE.Vector3(m.x, m.y, m.z));
     });
     room.onMessage("explode", (m: { id: number; x: number; y: number; z: number; radius: number; weapon: number }) => {
       if (m.id) this.effects.endProjectile(m.id);
       const at = new THREE.Vector3(m.x, m.y, m.z);
-      if (m.radius > 0) this.effects.explosion(at, m.radius, weaponColor(m.weapon));
-      else this.effects.impact(at, weaponColor(m.weapon));
+      if (m.radius > 0) {
+        this.effects.explosion(at, m.radius, weaponColor(m.weapon));
+        this.game.audio.play("explosion", at);
+      } else {
+        this.effects.impact(at, weaponColor(m.weapon));
+        this.game.audio.play("impact", at, 0.6);
+      }
     });
     room.onMessage("swing", (m: { by: string; weapon: number }) => {
       if (m.by === me) return;
@@ -78,6 +92,7 @@ export class CombatClient {
       if (!p) return;
       const pos = new THREE.Vector3(p.x, p.y, p.z);
       this.effects.arc(pos, new THREE.Vector3(p.fx, p.fy, p.fz), pos.clone().normalize(), WEAPONS[m.weapon]?.range ?? 2, weaponColor(m.weapon));
+      this.game.audio.play("swing", pos);
     });
     room.onMessage("phrase", (m: { by: string; id: number }) => {
       const p = m.by === me ? this.game.player.pos : (() => { const s = (room.state as any).players?.get(m.by); return s ? new THREE.Vector3(s.x, s.y, s.z) : null; })();
@@ -89,6 +104,7 @@ export class CombatClient {
       if (m.victim !== me || this.deadUntilRespawn) return;
       this.deadUntilRespawn = true;
       this.game.player.frozen = true;
+      this.game.audio.play("death");
       const choice = await this.hud.death(m);
       room.send("respawn", choice);
     });
@@ -184,10 +200,16 @@ export class CombatClient {
         room.send("block", { on: rmb });
       }
       if (heavyCapable) {
-        if (rmb && !this.wasRmb) this.chargeStart = now;
-        if (!rmb && this.wasRmb && now - this.chargeStart >= (t.heavyTime ?? 0.8) * 1000) {
-          room.send("melee", { slot: g.hud.you?.selected ?? 0, t: Date.now(), heavy: true });
-          this.lastFire = now;
+        // The server times the charge from this message (heavy without it is refused).
+        if (rmb && !this.wasRmb) {
+          this.chargeStart = now;
+          room.send("charge", { on: true });
+        }
+        if (!rmb && this.wasRmb) {
+          if (now - this.chargeStart >= (t.heavyTime ?? 0.8) * 1000) {
+            room.send("melee", { slot: g.hud.you?.selected ?? 0, t: Date.now(), heavy: true });
+            this.lastFire = now;
+          } else room.send("charge", { on: false });
         }
       }
     } else {
@@ -196,7 +218,10 @@ export class CombatClient {
         this.scoped = wantScope;
         room.send("scope", { on: wantScope });
       }
-      if (def.delivery === "arrow" && rmb && !this.wasRmb) this.chargeStart = now;
+      if (def.delivery === "arrow" && rmb && !this.wasRmb) {
+        this.chargeStart = now;
+        room.send("charge", { on: true }); // the server times the draw
+      }
     }
     this.wasRmb = rmb;
     const zoom = this.scoped ? (t.zoom ?? 1.35) : 1;
@@ -220,6 +245,7 @@ export class CombatClient {
     const slot = g.hud.you?.selected ?? 0;
     if (def.delivery === "melee") {
       room.send("melee", { slot, t: Date.now(), heavy: false });
+      g.audio.play("swing");
       const up = g.player.up();
       this.effects.arc(g.player.pos, g.player.facing, up, def.range, weaponColor(WEAPONS.indexOf(def)));
       return;
@@ -232,6 +258,11 @@ export class CombatClient {
     const dir = cam.getWorldDirection(new THREE.Vector3());
     const charge = def.delivery === "arrow" ? Math.min(1, (now - this.chargeStart) / ((t.draw ?? 1) * 1000)) : 1;
     room.send("fire", { slot, ox: origin.x, oy: origin.y, oz: origin.z, dx: dir.x, dy: dir.y, dz: dir.z, t: Date.now(), charge });
+    if (def.delivery === "arrow" && rmb) {
+      // Still holding the draw: the server's timer restarts after each shot, so restart ours too.
+      this.chargeStart = now;
+      room.send("charge", { on: true });
+    }
     // Local predicted tracer for hitscan weapons.
     if (def.delivery === "hitscan" || def.delivery === "pellets" || def.delivery === "chain") {
       const hitT = this.rayTerrain(origin, dir, def.falloffTo ?? def.range);
@@ -239,6 +270,7 @@ export class CombatClient {
       const muzzle = g.player.pos.clone().addScaledVector(g.player.up(), 1.35).addScaledVector(g.player.facing, 0.5);
       const color = weaponColor(WEAPONS.indexOf(def));
       this.effects.tracer(muzzle, to, color, def.delivery === "chain" ? 1.6 : 1);
+      g.audio.play(def.id in { carbine: 1, scatterpipe: 1, stillshot: 1, stormcoil: 1 } ? def.id : "carbine");
       this.effects.flash(muzzle, color, 0.3);
     }
   }

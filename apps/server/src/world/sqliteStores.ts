@@ -6,6 +6,7 @@ import { BACKPACK_SLOTS, type CharacterData, type LifeProgress } from "@firstlig
 import { STARTERS } from "@firstlight/shared/content/weapons";
 import type { InvItem } from "@firstlight/shared/net/protocol";
 import { dropPile, ensureAccount, getPile, listPiles, loadCharacter, saveCharacter, takeAll, takeItem, type Db } from "../db/index.ts";
+import { tx } from "../db/game-db.ts";
 import type { Pile } from "../db/piles.ts";
 import type { CharacterRepo } from "./characters.ts";
 import type { PileData, PileStore } from "./piles.ts";
@@ -17,6 +18,7 @@ interface StoredInventory {
   deaths: number;
   dead: boolean;
   worn?: CharacterData["worn"];
+  travelTo?: string;
 }
 
 /** mission_state_json: the accepted missions plus per-life quest progress (older rows: a bare array). */
@@ -58,11 +60,20 @@ export class SqliteCharacterRepo implements CharacterRepo {
       dead: !!inv.dead,
       ...(inv.worn ? { worn: inv.worn } : {}),
       ...(life ? { life } : {}),
+      travelTo: (inv.travelTo as BodyId | undefined) ?? undefined,
     };
   }
 
-  save(userId: string, d: CharacterData): void {
+  ensure(userId: string): void {
     ensureAccount(this.db, userId);
+  }
+
+  transaction<T>(fn: () => T): T {
+    return tx(this.db, fn);
+  }
+
+  /** Saves only if the account row exists (a merged-away guest must not be recreated). */
+  save(userId: string, d: CharacterData): void {
     saveCharacter(this.db, userId, {
       starter: STARTERS[d.starter]?.id ?? STARTERS[0].id,
       palette: d.palette,
@@ -76,7 +87,7 @@ export class SqliteCharacterRepo implements CharacterRepo {
       y: d.pos?.[1] ?? 0,
       z: d.pos?.[2] ?? 0,
       heading: 0,
-      inventory: { hotbar: d.hotbar, backpack: d.backpack, selected: d.selected, deaths: d.deaths, dead: !!d.dead, worn: d.worn ?? {} } satisfies StoredInventory,
+      inventory: { hotbar: d.hotbar, backpack: d.backpack, selected: d.selected, deaths: d.deaths, dead: !!d.dead, worn: d.worn ?? {}, travelTo: d.travelTo } satisfies StoredInventory,
       missionState: { list: d.missions, life: d.life ?? null } satisfies StoredMissions,
       lifeStartedAt: d.lifeStartedAt,
       protectedUntil: 0,

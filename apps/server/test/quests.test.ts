@@ -53,6 +53,14 @@ describe("pads and fast travel", () => {
 });
 
 describe("Portus Exchange", () => {
+  it("limits quest actions to 5 per second", async () => {
+    const b = await bot("spammer", "portus");
+    await tpAndWait(b, objAt("juno_vale"));
+    for (let i = 0; i < 8; i++) b.send("buy", { itemId: "carbine", tier: 1 });
+    await sleep(400);
+    expect(b.count("shop")).toBe(5);
+  });
+
   it("buys and sells with coin checks, only at Juno Vale", async () => {
     const b = await bot("shopper", "portus");
     await tpAndWait(b, objAt("juno_vale"));
@@ -74,6 +82,8 @@ describe("Portus Exchange", () => {
     b.send("buy", { itemId: "axe", tier: 2 });
     await waitFor(() => b.you.coins === 10);
     expect([...b.you.hotbar, ...b.you.backpack].some((i: any) => i?.id === "axe" && i.tier === 2)).toBe(true);
+
+    await sleep(1000); // quest actions are limited to 5 per second
 
     // Sell the carbine back at 25% (60 → 15).
     const slot = [...b.you.hotbar, ...b.you.backpack].findIndex((i: any) => i?.id === "carbine");

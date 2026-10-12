@@ -16,6 +16,8 @@ export interface RoomSystem {
   decorateYou?(actor: PlayerActor, you: YouState): void;
   /** Optional: handle an admin command the room doesn't know. Return true if handled. */
   onAdmin?(actor: PlayerActor, cmd: string, args: Record<string, unknown>): boolean;
+  /** Optional: return false to refuse a dropped client's reconnection (kicked or banned players). */
+  canReconnect?(sessionId: string): boolean;
   dispose?(): void;
 }
 

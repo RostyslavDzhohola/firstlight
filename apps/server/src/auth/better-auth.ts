@@ -53,6 +53,8 @@ export function authOptions(d: AuthDeps) {
     secret: d.secret,
     baseURL: d.baseURL,
     basePath: "/api/auth",
+    // Players never edit their Better Auth profile directly (names go through /api/account/name).
+    disabledPaths: ["/update-user", "/change-email", "/delete-user"],
     trustedOrigins: d.trustedOrigins,
     telemetry: { enabled: false },
     session: { expiresIn: 60 * 60 * 24 * 180, updateAge: 60 * 60 * 24 },
@@ -62,6 +64,8 @@ export function authOptions(d: AuthDeps) {
       customRules: {
         "/sign-in/anonymous": { window: 60, max: 20 },
         "/sign-in/email-otp": { window: 60, max: 5 },
+        // Per-IP cap on code emails (review: OTP abuse); per-address and daily caps live in otp-budget.
+        "/email-otp/send-verification-otp": { window: 3600, max: 8 },
       },
     },
     advanced: { ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] } },
@@ -75,7 +79,8 @@ export function authOptions(d: AuthDeps) {
         if (body.type !== "sign-in") throw APIError.from("BAD_REQUEST", { code: "UNSUPPORTED_OTP_TYPE", message: "Only sign-in codes are supported." });
         const email = typeof body.email === "string" ? body.email.toLowerCase() : "";
         if (!emailSchema.safeParse(email).success) return; // Better Auth rejects it
-        const r = d.reserveOtp(email);
+        // Budget key ignores "+tag" aliases so one inbox can't multiply its hourly allowance.
+        const r = d.reserveOtp(email.replace(/\+[^@]*@/, "@"));
         if (!r.ok) throw APIError.from("TOO_MANY_REQUESTS", { code: "SAVING_BUSY", message: SAVING_BUSY });
         const st = authRequestState.getStore();
         if (st) st.otpReservation = r.id;

@@ -26,6 +26,8 @@ export interface CharacterData {
   lifeStartedAt: number;
   deaths: number;
   dead?: boolean;
+  /** Server-issued travel ticket: the body this character may join next (portal or rebirth). */
+  travelTo?: BodyId;
   /** Worn cosmetics by slot (ids of cosmetic items that are in the inventory). Cleared on death. */
   worn?: Partial<Record<CosmeticSlot, string>>;
   /** Per-life progress for life-scoped medals and once-per-life eggs (quests lane). */

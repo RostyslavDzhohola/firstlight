@@ -7,6 +7,8 @@ import { chainVerifiers, devVerifier } from "../src/auth/identity.ts";
 import { characterRepo, MemoryCharacterRepo } from "../src/world/characters.ts";
 import { MemoryPileStore, pileStore } from "../src/world/piles.ts";
 import { MemoryProgressStore, progressStore } from "../src/world/quests/store.ts";
+import { hub } from "../src/world/hub.ts";
+import type { BodyId } from "@firstlight/shared";
 
 export async function startServer(limits: Partial<{ maxClients: number; soloFillLimit: number; maxCopiesPerBody: number; globalCap: number }> = {}): Promise<Game> {
   characterRepo.current = new MemoryCharacterRepo();
@@ -29,7 +31,23 @@ export async function playRequest(game: Game, token: string, body: Record<string
   return (await res.json()) as PlayResponse;
 }
 
-export async function joinAs(game: Game, userId: string, body = "arcadia", extra: Record<string, unknown> = {}, role = ""): Promise<Room> {
+/** Give a user a travel ticket to `body` (tests hop bodies without walking to a portal). */
+export function grantTravel(userId: string, body: string): void {
+  const live = hub.get(userId)?.actor.char;
+  if (live) {
+    live.travelTo = body as BodyId;
+    return;
+  }
+  const c = characterRepo.current.load(userId);
+  if (c && c.body !== body) {
+    c.travelTo = body as BodyId;
+    characterRepo.current.save(userId, c);
+  }
+}
+
+/** Join `body` as a dev identity. Grants a travel ticket first unless `ticket: false`. */
+export async function joinAs(game: Game, userId: string, body = "arcadia", extra: Record<string, unknown> = {}, role = "", ticket = true): Promise<Room> {
+  if (ticket) grantTravel(userId, body);
   const r = await playRequest(game, `dev:${userId}:${userId}${role ? `:${role}` : ""}`, { body, ...extra });
   if (!r.ok) throw new Error(`play refused: ${JSON.stringify(r)}`);
   const client = new Client(`http://127.0.0.1:${game.port}`);

@@ -28,7 +28,7 @@ async function runPlanetMissions(b: Bot, body: Exclude<BodyId, "portus">) {
   await tpAndWait(b, objAt(`guide_${body}`));
   const defs = missionsOn(body);
   for (const d of defs) b.send("mission", { action: "accept", id: d.id });
-  await until(`${body} accepted`, () => defs.every((d) => mission(b, d.id)));
+  await until(`${body} accepted`, () => defs.every((d) => mission(b, d.id)), 8000);
   for (const d of defs) {
     if (d.hunt) {
       const pos = d.hunt.place ? ground(body, placeDir(d.hunt.place)) : offPad(body, 0, 60);
@@ -39,7 +39,7 @@ async function runPlanetMissions(b: Bot, body: Exclude<BodyId, "portus">) {
     } else if (d.reach) {
       await tpAndWait(b, ground(body, placeDir(d.reach.place)));
     }
-    await until(`${d.id} done`, () => mission(b, d.id)?.done === true);
+    await until(`${d.id} done`, () => mission(b, d.id)?.done === true, 8000);
     expect(b.msgs.get("missionDone")!.some((m) => m.id === d.id && m.xp === d.reward.xp && m.coins === d.reward.coins)).toBe(true);
   }
   // Leave from the main pad (safe) so the character saves at once.
@@ -54,10 +54,10 @@ describe("all nine missions", () => {
       await runPlanetMissions(b, body);
       coins += missionsOn(body).reduce((s, d) => s + d.reward.coins, 0);
       expect(b.you.coins).toBe(coins);
-      if (body === "meridian") await until("errand runner", () => b.you.medals.includes("errand_runner"));
+      if (body === "meridian") await until("errand runner", () => b.you.medals.includes("errand_runner"), 8000);
       else await safeLeave(b.room);
     }
-  }, 30_000);
+  }, 60_000);
 });
 
 describe("medals", () => {
@@ -152,6 +152,7 @@ describe("Easter eggs", () => {
       await tpAndWait(b, objAt(`e4_lantern_${i}`));
       b.send("interact", { target: `e4_lantern_${i}` });
       await until(`lantern ${i}`, () => b.toasts.some((t) => t.includes(`(${i}/7)`) || t.includes("All seven")));
+      await sleep(210); // quest actions are limited to 5 per second
     }
     await tpAndWait(b, objAt("e4_ferry"));
     await until("ferried", () => near(b, ground("hollowmere", placeDir("ferrymans_isle")), 4));

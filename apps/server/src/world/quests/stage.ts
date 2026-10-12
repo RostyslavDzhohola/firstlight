@@ -96,6 +96,9 @@ export function runStage(sys: QuestSystem, admin: PlayerActor, n: number, all: b
     return;
   }
   if (sys.body !== def.body) {
+    // Travel ticket for /api/play (admins are exempt, but keep the character's record straight).
+    admin.char.travelTo = def.body;
+    sys.room.saveActor(admin);
     admin.client.send("stage", { n, body: def.body });
     sys.toast(admin, `Stage ${n} is on ${def.body}: travelling…`, "info");
     return;

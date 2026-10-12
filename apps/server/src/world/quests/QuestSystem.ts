@@ -18,6 +18,7 @@ import { PF } from "@firstlight/shared/net/schema";
 import { z } from "zod";
 import { accountLinks } from "../../auth/links.ts";
 import { actorPos, type PlayerActor } from "../actors.ts";
+import { withTx } from "../characters.ts";
 import type { BodyRoom } from "../BodyRoom.ts";
 import { emitGameEvent, onGameEvent, type DamageEvent, type DeathEvent, type GameEvent, type KillEvent } from "../events.ts";
 import { dist3, type V3 } from "../geometry.ts";
@@ -152,8 +153,8 @@ export class QuestSystem implements RoomSystem {
   private watchShots() {
     const host = this.room.host;
     const orig = host.broadcast;
-    host.broadcast = (type, msg, except) => {
-      orig(type, msg, except);
+    const origNear = host.broadcastNear;
+    const observe = (type: string, msg: unknown) => {
       if (type !== "shot") return;
       try {
         this.onShot(msg as ShotMsg);
@@ -161,9 +162,30 @@ export class QuestSystem implements RoomSystem {
         console.error("quest shot observer failed", err);
       }
     };
+    host.broadcast = (type, msg, except) => {
+      orig(type, msg, except);
+      observe(type, msg);
+    };
+    host.broadcastNear = (type, msg, at, radius, always) => {
+      origNear(type, msg, at, radius, always);
+      observe(type, msg);
+    };
     this.restoreBroadcast = () => {
       host.broadcast = orig;
+      host.broadcastNear = origNear;
     };
+  }
+
+  private readonly ops = new Map<string, number[]>();
+  /** Quest operations (shop, missions, objects, travel) save to SQLite: at most 5 per second per player. */
+  allowOp(a: PlayerActor | undefined): a is PlayerActor {
+    if (!a || a.dead || a.superseded) return false;
+    const now = Date.now();
+    const list = (this.ops.get(a.id) ?? []).filter((t) => now - t < 1000);
+    if (list.length >= 5) return false;
+    list.push(now);
+    this.ops.set(a.id, list);
+    return true;
   }
 
   private onShot(m: ShotMsg) {
@@ -265,13 +287,25 @@ export class QuestSystem implements RoomSystem {
     return false;
   }
 
-  /** Give, or drop at the player's feet when the bags are full. */
-  giveOrDrop(a: PlayerActor, items: InvItem[]) {
-    const left = items.filter((it) => !this.give(a, it));
-    if (left.length) {
-      this.room.createPile(a, left, 0, actorPos(a));
-      this.toast(a, "Your bags are full — the rest is on the ground at your feet", "warn");
-    }
+  /**
+   * Give items (or drop the overflow at the player's feet), apply `also` (coins, flags) and save,
+   * all in one transaction with the pile write (no dupes or losses on a crash).
+   */
+  grant(a: PlayerActor, items: InvItem[], also?: () => void) {
+    const events: (() => void)[] = [];
+    let dropped = false;
+    withTx(() => {
+      also?.();
+      const left = items.filter((it) => !this.give(a, it));
+      if (left.length) {
+        this.room.createPile(a, left, 0, actorPos(a), events);
+        dropped = true;
+      }
+      this.room.saveActor(a);
+    });
+    for (const e of events) e();
+    if (dropped) this.toast(a, "Your bags are full — the rest is on the ground at your feet", "warn");
+    a.youDirty = true;
   }
 
   // ---------------------------------------------------------------- lifecycle
@@ -379,7 +413,7 @@ export class QuestSystem implements RoomSystem {
 
   fastTravel(c: Client, pad: number) {
     const a = this.actor(c.sessionId);
-    if (!a || a.dead) return;
+    if (!this.allowOp(a)) return;
     const deny = (reason: string) => c.send("denied", { action: "fastTravel", reason });
     const def = this.room.bodyDef;
     const pads = padDirs(def);
@@ -407,7 +441,7 @@ export class QuestSystem implements RoomSystem {
 
   buy(c: Client, itemId: string, tier: 1 | 2 | 3, qty: number) {
     const a = this.actor(c.sessionId);
-    if (!a || a.dead) return;
+    if (!this.allowOp(a)) return;
     const fail = (reason: string, text: string) => {
       c.send("shop", { ok: false, action: "buy", reason });
       this.toast(a, text, "warn");
@@ -420,18 +454,17 @@ export class QuestSystem implements RoomSystem {
     if (a.char.coins < cost) return fail("coins", `Not enough coins (${cost} ◎ needed)`);
     const item: InvItem = { id: itemId, tier, qty: n };
     if (!this.canStore(a, item)) return fail("full", "Your bags are full — sell or drop something first");
-    a.char.coins -= cost;
-    this.give(a, item);
-    a.youDirty = true;
+    this.grant(a, [item], () => {
+      a.char.coins -= cost;
+    });
     c.send("shop", { ok: true, action: "buy" });
     const gate = entry.level > a.char.level ? ` (equip at level ${entry.level})` : "";
     this.toast(a, `Bought ${n > 1 ? `${n} × ` : ""}${entry.name}${tier > 1 ? ` ${"I".repeat(tier)}` : ""} for ${cost} ◎${gate}`, "coins");
-    this.room.saveActor(a);
   }
 
   sell(c: Client, slot: number, qty?: number) {
     const a = this.actor(c.sessionId);
-    if (!a || a.dead) return;
+    if (!this.allowOp(a)) return;
     const fail = (reason: string, text: string) => {
       c.send("shop", { ok: false, action: "sell", reason });
       this.toast(a, text, "warn");
@@ -459,7 +492,7 @@ export class QuestSystem implements RoomSystem {
 
   wear(c: Client, slot?: number, remove?: CosmeticSlot) {
     const a = this.actor(c.sessionId);
-    if (!a || a.dead) return;
+    if (!this.allowOp(a)) return;
     const worn = (a.char.worn ??= {});
     if (remove) {
       delete worn[remove];
@@ -504,7 +537,7 @@ export class QuestSystem implements RoomSystem {
 
   mission(c: Client, action: "accept" | "abandon", id: string) {
     const a = this.actor(c.sessionId);
-    if (!a || a.dead) return;
+    if (!this.allowOp(a)) return;
     const def = MISSION_BY_ID.get(id);
     if (!def) return;
     const list = a.char.missions;
@@ -541,15 +574,18 @@ export class QuestSystem implements RoomSystem {
     m.done = true;
     m.progress = missionGoal(def);
     this.room.grantXp(a, def.reward.xp);
-    a.char.coins += def.reward.coins;
-    if (def.reward.items.length) this.giveOrDrop(a, def.reward.items.map((i) => ({ ...i })));
-    a.youDirty = true;
+    this.grant(
+      a,
+      def.reward.items.map((i) => ({ ...i })),
+      () => {
+        a.char.coins += def.reward.coins;
+      },
+    );
     const extra = def.reward.items.map((i) => `${i.qty} × ${itemName(i)}`).join(", ");
     this.toast(a, `Mission complete: ${def.name} · +${def.reward.xp} XP · +${def.reward.coins} ◎${extra ? ` · ${extra}` : ""}`, "xp");
     a.client.send("missionDone", { id: def.id, xp: def.reward.xp, coins: def.reward.coins });
     emitGameEvent(this.room, { type: "missionDone", playerId: a.id, missionId: def.id });
     if (MISSIONS.every((d) => a.char.missions.some((x) => x.id === d.id && x.done))) this.award(a, "errand_runner");
-    this.room.saveActor(a);
   }
 
   private onKillForMissions(e: KillEvent) {
@@ -613,7 +649,7 @@ export class QuestSystem implements RoomSystem {
 
   setTitle(c: Client, medalId: string | null) {
     const a = this.actor(c.sessionId);
-    if (!a || a.identity.loadtest) return;
+    if (!a || a.identity.loadtest || !this.allowOp(a)) return;
     const q = this.qp(a);
     if (medalId !== null && (!MEDAL_BY_ID.has(medalId) || !q.medals.has(medalId))) {
       c.send("denied", { action: "title", reason: "not earned" });
@@ -633,7 +669,7 @@ export class QuestSystem implements RoomSystem {
 
   interact(c: Client, target: string, code?: string) {
     const a = this.actor(c.sessionId);
-    if (!a || a.dead) return;
+    if (!this.allowOp(a)) return;
     const o = WORLD_OBJECT_BY_ID.get(target);
     if (!o || o.body !== this.body || o.trigger !== "interact") return;
     if (!this.near(a, o)) return c.send("denied", { action: "interact", reason: "too far" });
@@ -655,15 +691,14 @@ export class QuestSystem implements RoomSystem {
       this.toast(a, `You already took the ${egg.itemName} in this life`, "info");
       return;
     }
-    life.eggs.push(eggId);
-    this.giveOrDrop(a, [{ ...egg.item }]);
+    this.grant(a, [{ ...egg.item }], () => {
+      life.eggs.push(eggId);
+    });
     this.toast(a, `Secret found: ${egg.name} — ${egg.itemName}`, "medal");
     this.award(a, egg.medal);
     if (!a.identity.loadtest && engrave(eggId, a.identity.userId, a.identity.name)) {
       this.toast(a, "You found it first — your name is engraved on the Hall of Firsts in Portus", "medal");
     }
-    a.youDirty = true;
-    this.room.saveActor(a);
   }
 
   // ---------------------------------------------------------------- events (medals, missions, eggs)
