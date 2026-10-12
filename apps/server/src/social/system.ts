@@ -114,6 +114,18 @@ function scheduleOfflineLeave(userId: string): void {
   offlineTimers.set(userId, t);
 }
 
+/**
+ * A guest saved (new account id). Its offline timer, if any, is for an id no party holds any more:
+ * the account takes over the countdown unless it is online, so a player who saves and never rejoins
+ * leaves the party like anyone who drops (F12 final review nit). Works in either order relative to
+ * the room retiring the guest session (whose leave hook may run before or after the re-key).
+ */
+export function rekeyOfflineTimer(from: string, to: string): void {
+  clearTimeout(offlineTimers.get(from));
+  offlineTimers.delete(from);
+  if (!presenceOf(to)) scheduleOfflineLeave(to);
+}
+
 export function resetSocialTimers(): void {
   for (const t of offlineTimers.values()) clearTimeout(t);
   offlineTimers.clear();
