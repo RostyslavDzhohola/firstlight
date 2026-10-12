@@ -50,9 +50,14 @@ const got = (r: Room, type: string) => inbox.get(r)!.filter((m) => m.type === ty
 const me = (r: Room) => (r.state as any).players.get(r.sessionId);
 
 let pingSeq = 0;
+const lastPing = new WeakMap<Room, number>();
 /** Every message sent by `r` before this call has been handled, and everything the server wrote to `r` before it has arrived. */
 async function barrier(...rs: Room[]) {
   for (const r of rs) {
+    // Pings are capped per client (20/s): keep barriers under that.
+    const wait = 60 - (Date.now() - (lastPing.get(r) ?? 0));
+    if (wait > 0) await new Promise((ok) => setTimeout(ok, wait));
+    lastPing.set(r, Date.now());
     const t = ++pingSeq;
     r.send("ping", { t });
     await waitFor(() => got(r, "pong").some((p) => p.t === t));

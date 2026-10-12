@@ -43,6 +43,9 @@ export interface PlayerActor {
   diedAt: number;
   lastDamagedBy: string | null;
   youDirty: boolean;
+  /** Minor private-state change (magazine count): send `you` soon, at most every YOU_LAZY_MS. */
+  youLazy?: boolean;
+  lastYouAt?: number;
   /** Retired by a newer session or an account merge: never save, never act. */
   superseded?: boolean;
   /** Leave hooks have run (BodyRoom.detach): no longer a connected player. */

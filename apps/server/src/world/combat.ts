@@ -5,12 +5,14 @@
 import { damageMult, falloff, maxHp, splashFalloff } from "@firstlight/shared/content/progression";
 import { WEAPONS, WEAPON_INDEX, type Destroys, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
 import type { Terrain } from "@firstlight/shared";
+import { NET } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
 import { actorPos, positionAgo, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
 import { noteKnockback } from "./movement.ts";
 import { dist3, HEAD_FROM, inMeleeArc, PLAYER_HEIGHT, PLAYER_RADIUS, rayCapsule, rayTerrain, type V3 } from "./geometry.ts";
 
-export const REWIND_MS = 150;
+/** Lag compensation window: the one shared constant (SPEC §5.3: history ≤ 200 ms). */
+export const REWIND_MS = NET.REWIND_MS;
 export const COMBAT_TAG_MS = 10_000;
 export const ORIGIN_SLACK = 7; // metres the shot origin may be from the shooter's head (camera offset)
 
@@ -187,8 +189,8 @@ export function consumeAttack(p: PlayerActor, def: WeaponDef, tier: TierStats, n
     if (item.mag <= 0) {
       p.reloadEndsAt = now + (tier.reload ?? 1.5) * 1000;
       item.mag = tier.mag;
-    }
-    p.youDirty = true;
+      p.youDirty = true;
+    } else p.youLazy = true; // the ammo readout catches up within ~0.4 s, not one full 'you' per shot
   }
   if (tier.heat !== undefined) {
     // Heat cools at one shot per second of not firing.

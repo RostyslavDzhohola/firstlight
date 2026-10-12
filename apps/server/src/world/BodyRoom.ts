@@ -109,6 +109,20 @@ export function pvpPairCount(): number {
   return pvpKills.size;
 }
 
+/** Lazy `you` updates (magazine counts) go out at most this often. */
+const YOU_LAZY_MS = 400;
+
+/**
+ * Per-client caps (messages per second) for types without a limiter of their own (F12 nits: travel
+ * and respawn write SQLite; ping, questSync and client:info answer with messages). Colyseus's 60/s
+ * per client still bounds everything else.
+ */
+export const MESSAGE_RATES: Record<string, number> = { ping: 20, travel: 2, respawn: 1, logout: 4, questSync: 2, "client:info": 2, skySync: 2, npcSync: 2 };
+/** Malformed messages are dropped (no kick for a harmless drift); this many within 10 s disconnects. */
+const BAD_MESSAGE_LIMIT = 20;
+
+type MessageSchema = { safeParse(v: unknown): { success: boolean; data?: unknown } };
+
 const CLIENT_ANIMS: ReadonlySet<number> = new Set([ANIM.IDLE, ANIM.WALK, ANIM.RUN, ANIM.SPRINT, ANIM.JUMP, ANIM.FALL, ANIM.SWIM, ANIM.DODGE, ANIM.ATTACK, ANIM.HEAVY, ANIM.BLOCK, ANIM.AIM, ANIM.CAST, ANIM.EMOTE]);
 
 export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadata }> implements HubRoom {
@@ -137,7 +151,57 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     throw new ServerError(403, "join through /api/play");
   }
 
+  private readonly msgWindows = new Map<string, Map<string, { at: number; n: number }>>();
+  private readonly badMessages = new Map<string, number[]>();
+
+  /**
+   * Every handler registered on this room (the room's and the systems') goes through here: per-type
+   * rate caps, and zod validation that drops a malformed message instead of letting Colyseus close
+   * the connection for it (F12 protocol-drift nit).
+   */
+  private guardMessages() {
+    const register = this.onMessage.bind(this) as unknown as (type: string, ...rest: unknown[]) => () => void;
+    const guarded = (type: string, a: unknown, b?: unknown): (() => void) => {
+      if (type === "*") return b === undefined ? register(type, a) : register(type, a, b);
+      const schema = typeof b === "function" ? (a as MessageSchema) : undefined;
+      const handler = (typeof b === "function" ? b : a) as (c: Client, m: unknown, ...rest: unknown[]) => unknown;
+      return register(type, (c: Client, raw: unknown, ...rest: unknown[]) => {
+        if (!this.withinRate(c.sessionId, type)) return;
+        if (!schema) return handler(c, raw, ...rest);
+        const r = schema.safeParse(raw);
+        if (!r.success) return this.badMessage(c);
+        return handler(c, r.data, ...rest);
+      });
+    };
+    (this as unknown as { onMessage: typeof guarded }).onMessage = guarded;
+  }
+
+  private withinRate(sessionId: string, type: string): boolean {
+    const limit = MESSAGE_RATES[type];
+    if (!limit) return true;
+    let windows = this.msgWindows.get(sessionId);
+    if (!windows) this.msgWindows.set(sessionId, (windows = new Map()));
+    const now = Date.now();
+    const w = windows.get(type);
+    if (!w || now - w.at >= 1000) {
+      windows.set(type, { at: now, n: 1 });
+      return true;
+    }
+    if (w.n >= limit) return false;
+    w.n++;
+    return true;
+  }
+
+  private badMessage(c: Client) {
+    const now = Date.now();
+    const list = (this.badMessages.get(c.sessionId) ?? []).filter((t) => now - t < 10_000);
+    list.push(now);
+    this.badMessages.set(c.sessionId, list);
+    if (list.length >= BAD_MESSAGE_LIMIT) c.leave(CloseCode.WITH_ERROR, "too many malformed messages");
+  }
+
   onCreate(options: BodyRoomOptions) {
+    this.guardMessages();
     // The client consumes its seat right after /api/play; short reservations stop seat hoarding.
     this.seatReservationTimeout = 8;
     this.bodyDef = BODIES[options.body];
@@ -438,6 +502,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     a.detached = true;
     if (this.actors.get(a.id) === a) this.actors.delete(a.id);
     this.invOps.delete(a.id);
+    this.msgWindows.delete(a.id);
+    this.badMessages.delete(a.id);
     liveSessions.unregister(a.identity.userId, a.id);
     for (const s of this.systems) {
       try {
@@ -1083,7 +1149,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       this.lastAoi = now;
       this.updateViews(false);
     }
-    for (const a of this.actors.values()) if (a.youDirty) this.sendYou(a);
+    for (const a of this.actors.values()) if (a.youDirty || (a.youLazy && now - (a.lastYouAt ?? 0) >= YOU_LAZY_MS)) this.sendYou(a);
     if (now - this.lastSave > RULES.SAVE_EVERY_MS) {
       this.lastSave = now;
       withTx(() => {
@@ -1117,6 +1183,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
   sendYou(a: PlayerActor) {
     a.youDirty = false;
+    a.youLazy = false;
+    a.lastYouAt = Date.now();
     const you: YouState = {
       xp: a.char.xp - xpAtLevel(a.char.level),
       xpToNext: xpToNext(a.char.level),
