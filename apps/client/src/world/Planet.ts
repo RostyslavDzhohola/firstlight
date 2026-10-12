@@ -3,7 +3,7 @@
 // time of day (R4 Q10 extra #4). Every system re-applies itself when the graphics settings change.
 
 import * as THREE from "three/webgpu";
-import { BODIES, CHUNK_QUADS, createTerrain, gridDir, SKY_PROFILES, type BodyDef, type BodyId, type Face, type Terrain } from "@firstlight/shared";
+import { BODIES, CHUNK_QUADS, createTerrain, gridDir, padDirs, SKY_PROFILES, type BodyDef, type BodyId, type Face, type Terrain } from "@firstlight/shared";
 import type { BakeResult, ChunkRequest, ChunkResult } from "./terrain.worker.ts";
 import { applyLook, atmo, radialFogNode, skyBackgroundNode, sunRigFor, type SunRig } from "../render/atmosphere.ts";
 import { applyGrassLook, GrassSystem, type GrassChunk } from "../render/grass.ts";
@@ -131,7 +131,7 @@ export class Planet {
     // cache key; new ones per planet would rebuild every lit material on each travel).
     this.rig = sunRigFor(this.scene, this.look, ctx.renderer);
     this.skyPlanets = skyPlanetsFor(this.scene, this.look.skyPlanets);
-    this.grass = new GrassSystem(this.body.radius, n);
+    this.grass = new GrassSystem(this.body.radius, n, this.body.terrain.kind === "hub" ? [] : padDirs(this.body));
     this.group.add(this.grass.group);
     this.props = new PropSystem(bodyId);
     this.group.add(this.props.group);

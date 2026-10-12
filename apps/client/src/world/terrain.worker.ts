@@ -5,11 +5,11 @@
 // when the Low tier's baked sun becomes active on chunks that were built without it).
 
 import {
-  buildChunk, chunkProps, CHUNK_QUADS, createTerrain, gridDir, hash01, packProps, type BodyId, type Face, type Terrain,
+  buildChunk, chunkProps, CHUNK_QUADS, createTerrain, gridDir, hash01, packProps, padDirs, type BodyId, type Face, type Terrain,
 } from "@firstlight/shared";
 import { LOOKS } from "../render/looks.ts";
 import { skyDir, type V3 } from "../render/sunFrame.ts";
-import { grassWeight, PALETTES, terrainColor } from "./palette.ts";
+import { grassWeight, padGrassMask, PALETTES, terrainColor } from "./palette.ts";
 
 export interface ChunkRequest {
   /** "full" (default) builds everything; "bake" returns only the bake attribute. */
@@ -180,6 +180,7 @@ self.onmessage = (e: MessageEvent<ChunkRequest>) => {
   const water = body.waterLevel;
   const i0 = req.cx * q, j0 = req.cy * q;
   const hub = body.terrain.kind === "hub";
+  const pads = hub ? [] : padDirs(body);
   const dir: V3 = [0, 0, 0];
 
   for (let v = 0; v < count; v++) {
@@ -199,6 +200,9 @@ self.onmessage = (e: MessageEvent<ChunkRequest>) => {
         gridDir(req.face, gi, gj, n, dir);
         const dc = Math.hypot(dir[0], dir[1] - 1, dir[2]) * R;
         w *= Math.max(0, Math.min(1, (dc - 26) / 8));
+      } else if (w > 0) {
+        gridDir(req.face, gi, gj, n, dir);
+        w *= padGrassMask(pads, dir[0], dir[1], dir[2], R);
       }
       grass[v] = w;
     }
