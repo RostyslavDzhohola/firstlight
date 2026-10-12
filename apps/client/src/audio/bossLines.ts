@@ -2,6 +2,7 @@
 // processing and subtitles. Subtitles always show, so the lines work with sound off (accessibility).
 
 import type { GameAudio } from "./Audio.ts";
+import { showSubtitle } from "../ui/subtitle.ts";
 
 export type BossId = "tidewrath" | "hollowking" | "receiver";
 export type BossTrigger = "engage" | "phase2" | "defeat";
@@ -30,22 +31,10 @@ function load(audio: GameAudio, url: string): Promise<AudioBuffer | null> {
   return p;
 }
 
-let subtitleEl: HTMLDivElement | null = null;
-function subtitle(speaker: string, text: string, ms: number) {
-  subtitleEl ??= Object.assign(document.createElement("div"), {
-    style: "position:fixed;left:50%;bottom:150px;transform:translateX(-50%);max-width:70vw;padding:8px 16px;border-radius:10px;background:#07060dcc;color:#f4f0ff;font:600 16px/1.35 ui-sans-serif,system-ui,sans-serif;text-align:center;z-index:30;pointer-events:none;transition:opacity .3s",
-  }) as HTMLDivElement;
-  if (!subtitleEl.isConnected) document.body.appendChild(subtitleEl);
-  subtitleEl.innerHTML = `<span style="color:#ffb86b">${speaker}:</span> ${text}`;
-  subtitleEl.style.opacity = "1";
-  clearTimeout(Number(subtitleEl.dataset.t));
-  subtitleEl.dataset.t = String(window.setTimeout(() => subtitleEl && (subtitleEl.style.opacity = "0"), ms));
-}
-
 /** Play a boss line with its voice treatment; shows a subtitle even if audio fails. */
 export async function playBossLine(audio: GameAudio, boss: BossId, trigger: BossTrigger) {
   const text = BOSS_LINES[boss][trigger];
-  subtitle(BOSS_NAMES[boss], text, 4500);
+  showSubtitle(BOSS_NAMES[boss], text, 4500);
   const buf = await load(audio, `${ASSET_BASE}/v/voice-1/${boss}-${trigger}.mp3`);
   if (!buf || audio.ctx.state !== "running") return;
   const c = audio.ctx;

@@ -21,7 +21,8 @@ export class CombatClient {
   private wasRmb = false;
   private blocking = false;
   private scoped = false;
-  private baseFov = 75;
+  /** Unzoomed field of view (Settings → Field of view). */
+  baseFov = 75;
   deadUntilRespawn = false;
   private phraseMode = false;
 
@@ -100,12 +101,13 @@ export class CombatClient {
       const s = this.toScreen(p.clone(), 2.3);
       if (s) this.hud.bubble(s.x, s.y, PHRASES[m.id] ?? "");
     });
-    room.onMessage("death", async (m: { victim: string; killerName: string; aliveMs: number; level: number }) => {
+    room.onMessage("death", async (m: { victim: string; killer: string | null; killerName: string; aliveMs: number; level: number; pileId: string }) => {
       if (m.victim !== me || this.deadUntilRespawn) return;
       this.deadUntilRespawn = true;
       this.game.player.frozen = true;
       this.game.audio.play("death");
-      const choice = await this.hud.death(m);
+      const k = m.killer ? (room.state as any).players?.get(m.killer) : null;
+      const choice = await this.hud.death({ ...m, body: this.game.bodyId, killerStarter: k?.starter, killerLevel: k?.level });
       room.send("respawn", choice);
     });
     room.onMessage("reborn", () => {
@@ -126,7 +128,7 @@ export class CombatClient {
     const claims = readClaims(await getPlayToken().catch(() => ""));
     if (!claims?.guest) return;
     this.offeredSave = true;
-    void showSavePrompt({ name: claims.name });
+    void showSavePrompt({ name: claims.name, level: this.hud.you?.level });
   }
 
   private muzzleOf(p: { x: number; y: number; z: number; fx: number; fy: number; fz: number }): THREE.Vector3 {
@@ -164,6 +166,7 @@ export class CombatClient {
     const meState = (room.state as any).players?.get(room.sessionId);
     if (meState) {
       g.hud.setHp(meState.hp, meState.maxHp);
+      g.hud.setIdentity(meState.name, meState.starter, meState.palette);
       g.hud.setSafe(!!(meState.flags & PF.SAFE));
       g.hud.setLogout(g.hud.you?.logoutEndsAt ?? null, Date.now() + g.net.serverOffset);
     }

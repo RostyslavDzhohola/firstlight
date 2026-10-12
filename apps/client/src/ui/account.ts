@@ -1,93 +1,44 @@
-// Minimal account UI (plain DOM, inline styles; the UI lane restyles later):
-//   showSavePrompt()   non-blocking "Save your character" card: email → 6-digit code → done
+// Account UI (verdict: Entry B save card, all four states):
+//   showSavePrompt()   non-blocking "Save your character" card docked bottom-right: email → 6-digit code
+//                      (resend locked 60 s with a ring) → saved; or "Saving is busy" when the OTP budget refuses
 //   showSignIn()       "Sign in with email" (second browser), modal
 //   pickDisplayName()  display-name picker, modal
 // Each returns a promise and is safe to call again while open (returns the open one).
 
+import "./account.css";
 import { getPlayToken, NAME_PATTERN, readClaims, sendEmailCode, setDisplayName, verifyEmailCode } from "../net/auth.ts";
+import { button, el, icon, isolateKeys, overlayClosed, overlayOpened, sprite, uiRoot } from "./dom.ts";
+import { installSprites, portraitSprite } from "./sprites.ts";
 
-const C = {
-  bg: "rgba(11, 6, 24, 0.94)",
-  border: "1px solid #3a2a5e",
-  text: "#ece8f6",
-  dim: "#b9b2cc",
-  faint: "#8f88a8",
-  accent: "linear-gradient(180deg, #ffb86b, #ff7edb)",
-  ok: "#7dffb0",
-  err: "#ff8a8a",
-};
+const RESEND_SECONDS = 60;
+const RING_C = 50.3; // 2π × 8
 
-type Kids = (Node | string | null | false)[];
-
-function h<K extends keyof HTMLElementTagNameMap>(tag: K, style: Partial<CSSStyleDeclaration> = {}, props: Record<string, unknown> = {}, kids: Kids = []): HTMLElementTagNameMap[K] {
-  const e = document.createElement(tag);
-  Object.assign(e.style, style);
-  for (const [k, v] of Object.entries(props)) (e as unknown as Record<string, unknown>)[k] = v;
-  for (const k of kids) if (k) e.append(k);
-  return e;
-}
-
-const inputStyle: Partial<CSSStyleDeclaration> = {
-  width: "100%",
-  boxSizing: "border-box",
-  font: "inherit",
-  fontSize: "16px",
-  padding: "10px 12px",
-  borderRadius: "8px",
-  border: "1px solid #4a3a72",
-  background: "#140d28",
-  color: C.text,
-  outline: "none",
-  margin: "8px 0",
-};
-
-function button(label: string, primary = true): HTMLButtonElement {
-  return h(
-    "button",
-    {
-      font: "inherit",
-      fontSize: "15px",
-      fontWeight: primary ? "700" : "500",
-      padding: primary ? "10px 22px" : "8px 12px",
-      borderRadius: "999px",
-      border: primary ? "1px solid #ffd8a8" : "none",
-      background: primary ? C.accent : "transparent",
-      color: primary ? "#1a0f2a" : C.dim,
-      cursor: "pointer",
-    },
-    { type: "button", textContent: label },
-  );
-}
-
-function uiRoot(): HTMLElement {
-  return document.getElementById("ui") ?? document.body;
-}
-
-/** Keys typed into our fields must not reach the game's window listeners. */
-function isolateKeys(e: HTMLElement): void {
-  for (const type of ["keydown", "keyup", "keypress"]) e.addEventListener(type, (ev) => ev.stopPropagation());
-}
-
-function modal(onEscape: (() => void) | null): { overlay: HTMLDivElement; card: HTMLDivElement; close(): void } {
+function modal(name: string, onEscape: (() => void) | null): { overlay: HTMLDivElement; card: HTMLElement; close(): void } {
   document.exitPointerLock?.();
-  const card = h("div", {
-    width: "min(380px, calc(100vw - 32px))",
-    background: C.bg,
-    border: C.border,
-    borderRadius: "16px",
-    padding: "24px",
-    color: C.text,
-    boxShadow: "0 20px 80px #000a",
-    fontSize: "15px",
-    lineHeight: "1.45",
-  });
-  const overlay = h("div", { position: "fixed", inset: "0", display: "grid", placeItems: "center", background: "rgba(5, 4, 9, 0.6)", zIndex: "60", pointerEvents: "auto" }, {}, [card]);
+  overlayOpened(name);
+  const overlay = el("div", "fl-overlay fl-overlay--modal fl-ui", uiRoot());
+  const card = el("section", "fl-modal fl-panel fl-acct", overlay);
+  card.setAttribute("role", "dialog");
   isolateKeys(overlay);
   overlay.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape" && onEscape) onEscape();
   });
-  uiRoot().append(overlay);
-  return { overlay, card, close: () => overlay.remove() };
+  return {
+    overlay,
+    card,
+    close: () => {
+      overlay.remove();
+      overlayClosed(name);
+    },
+  };
+}
+
+function field(type: string, placeholder: string, value = ""): HTMLInputElement {
+  const i = el("input", "fl-input");
+  i.type = type;
+  i.placeholder = placeholder;
+  i.value = value;
+  return i;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -98,43 +49,73 @@ interface EmailFlowText {
   intro: string;
   submit: string;
   done: string;
+  /** Optional header (portrait + level) for the save card. */
+  who?: { name?: string; level?: number; starter: number };
 }
 
-function emailFlow(container: HTMLElement, text: EmailFlowText, name: string | undefined, finish: (ok: boolean) => void): void {
-  const RESEND_SECONDS = 60;
-  let email = "";
+type FlowStep = "email" | "code" | "saved" | "busy";
+
+function emailFlow(container: HTMLElement, text: EmailFlowText, name: string | undefined, finish: (ok: boolean) => void, start: FlowStep = "email", startEmail = ""): void {
+  let email = startEmail;
   let resendTimer = 0;
 
-  const title = h("div", { fontSize: "18px", fontWeight: "700", marginBottom: "4px" }, { textContent: text.title });
-  const body = h("div");
-  const status = h("div", { minHeight: "20px", fontSize: "14px", color: C.err, marginTop: "6px" });
-  container.append(title, body, status);
-
-  const setStatus = (msg: string, color = C.err) => {
-    status.textContent = msg;
-    status.style.color = color;
+  const header = (h: HTMLElement, title: string) => {
+    if (!text.who) {
+      el("h2", "", h, title);
+      return;
+    }
+    const who = el("div", "fl-acct__who", h);
+    const face = el("div", "fl-face", who);
+    sprite(portraitSprite(text.who.starter), "", face);
+    if (text.who.level) el("span", "fl-lvl num", face, String(text.who.level));
+    const t = el("div", "", who);
+    el("h2", "", t, title);
+    el("span", "", t, `${text.who.name || name || "Your character"} · guest on this browser`);
   };
 
   const stepEmail = () => {
     clearInterval(resendTimer);
-    setStatus("");
-    const input = h("input", inputStyle, { type: "email", placeholder: "you@example.com", autocomplete: "email", value: email, inputMode: "email" });
-    const send = button("Send code");
-    const later = button("Not now", false);
-    const row = h("div", { display: "flex", gap: "8px", alignItems: "center", justifyContent: "space-between", marginTop: "6px" }, {}, [later, send]);
-    body.replaceChildren(h("div", { color: C.dim }, { textContent: text.intro }), input, row);
+    container.classList.remove("fl-panel--danger");
+    container.replaceChildren();
+    header(container, text.who?.level ? `Level ${text.who.level}!` : text.title);
+    el("p", "", container, text.intro);
+    const lab = el("label", "fl-label", container, "Email");
+    const input = field("email", "you@example.com", email);
+    input.id = `fl-email-${Math.random().toString(36).slice(2, 7)}`;
+    input.autocomplete = "email";
+    input.inputMode = "email";
+    lab.htmlFor = input.id;
+    container.appendChild(input);
+    const status = el("div", "fl-status", container);
+    const btns = el("div", "fl-acct__btns", container);
+    const send = button("", "fl-btn fl-btn--primary", btns);
+    icon("mail", "", send);
+    send.append("Send code");
+    button("Not now", "fl-btn fl-btn--ghost", btns, () => finish(false));
+    el("span", "fl-fine", container, "One email with the code. Nothing else, ever.");
     const go = async () => {
       email = input.value.trim();
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return setStatus("That email doesn't look right.");
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        status.className = "fl-status is-error";
+        status.textContent = "That email doesn't look right.";
+        input.classList.add("is-error");
+        return;
+      }
       send.disabled = true;
-      setStatus("Sending…", C.faint);
+      status.className = "fl-status";
+      status.textContent = "Sending…";
       const r = await sendEmailCode(email);
       send.disabled = false;
-      if (!r.ok) return setStatus(r.message);
+      if (!r.ok) {
+        if (r.busy) return stepBusy();
+        status.className = "fl-status is-error";
+        status.textContent = r.message;
+        return;
+      }
       stepCode();
     };
     send.onclick = () => void go();
-    later.onclick = () => finish(false);
+    input.addEventListener("input", () => input.classList.remove("is-error"));
     input.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") void go();
     });
@@ -142,30 +123,65 @@ function emailFlow(container: HTMLElement, text: EmailFlowText, name: string | u
   };
 
   const stepCode = () => {
-    setStatus("");
-    const input = h("input", { ...inputStyle, fontSize: "22px", letterSpacing: "0.4em", textAlign: "center" }, {
-      type: "text",
-      inputMode: "numeric",
-      autocomplete: "one-time-code",
-      maxLength: 6,
-      placeholder: "······",
-    });
-    const submit = button(text.submit);
-    const resend = button("Resend code", false);
-    const other = button("Use a different email", false);
-    const sent = h("div", { color: C.dim }, {}, ["We sent a 6-digit code to ", h("b", {}, { textContent: email }), ". It expires in 5 minutes."]);
-    body.replaceChildren(
-      sent,
-      input,
-      h("div", { display: "flex", gap: "8px", alignItems: "center", justifyContent: "space-between", marginTop: "6px" }, {}, [h("div", {}, {}, [resend, other]), submit]),
-    );
+    container.replaceChildren();
+    el("h2", "", container, "Check your email");
+    const sent = el("div", "fl-acct__sentto", container);
+    el("span", "", sent, `Sent to ${email}`);
+    button("Change", "", sent, () => stepEmail());
+
+    const code = el("div", "fl-code", container);
+    code.setAttribute("role", "group");
+    code.setAttribute("aria-label", "6-digit code");
+    const input = el("input", "", code);
+    input.type = "text";
+    input.inputMode = "numeric";
+    input.autocomplete = "one-time-code";
+    input.maxLength = 6;
+    input.setAttribute("aria-label", "6-digit code");
+    const cells = Array.from({ length: 6 }, () => el("span", "", code));
+    const paint = () => {
+      const v = input.value;
+      const focus = document.activeElement === input;
+      cells.forEach((c, i) => {
+        c.textContent = v[i] ?? "";
+        c.classList.toggle("is-filled", i < v.length);
+        c.classList.toggle("is-focus", focus && i === Math.min(v.length, 5) && v.length < 6);
+      });
+    };
+    el("span", "fl-fine", container, "The code is in the email. It works for 5 minutes.");
+    const status = el("div", "fl-status", container);
+
+    const resendRow = el("div", "fl-resend", container);
+    const ringT = el("span", "fl-resend__t", resendRow);
+    const svgNs = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(svgNs, "svg");
+    svg.setAttribute("viewBox", "0 0 20 20");
+    const bg = document.createElementNS(svgNs, "circle");
+    const fg = document.createElementNS(svgNs, "circle");
+    for (const c of [bg, fg]) {
+      c.setAttribute("cx", "10");
+      c.setAttribute("cy", "10");
+      c.setAttribute("r", "8");
+    }
+    bg.setAttribute("class", "bg");
+    fg.setAttribute("class", "fg");
+    svg.append(bg, fg);
+    ringT.appendChild(svg);
+    const ringText = el("span", "num", ringT);
+    const resend = button("", "fl-btn fl-btn--sm", resendRow);
+    icon("refresh", "", resend);
+    resend.append("Resend");
+
+    const btns = el("div", "fl-acct__btns", container);
+    const submit = button(text.submit, "fl-btn fl-btn--primary", btns);
+    button("Not now", "fl-btn fl-btn--ghost", btns, () => finish(false));
 
     let left = RESEND_SECONDS;
     const tick = () => {
       resend.disabled = left > 0;
-      resend.style.opacity = left > 0 ? "0.5" : "1";
-      resend.style.cursor = left > 0 ? "default" : "pointer";
-      resend.textContent = left > 0 ? `Resend in ${left}s` : "Resend code";
+      ringT.hidden = left <= 0;
+      ringText.textContent = `Resend in 0:${String(Math.max(0, left)).padStart(2, "0")}`;
+      fg.style.strokeDashoffset = String(RING_C * (1 - Math.max(0, left) / RESEND_SECONDS));
       left--;
       if (left < -1) clearInterval(resendTimer);
     };
@@ -174,39 +190,97 @@ function emailFlow(container: HTMLElement, text: EmailFlowText, name: string | u
     resendTimer = window.setInterval(tick, 1000);
 
     const go = async () => {
-      const code = input.value.replace(/\D/g, "");
-      if (code.length !== 6) return setStatus("Enter the 6 digits from the email.");
+      const value = input.value.replace(/\D/g, "");
+      if (value.length !== 6) {
+        status.className = "fl-status is-error";
+        status.textContent = "Enter the 6 digits from the email.";
+        return;
+      }
       submit.disabled = true;
-      setStatus("Checking…", C.faint);
-      const r = await verifyEmailCode(email, code, name);
+      status.className = "fl-status";
+      status.textContent = "Checking…";
+      const r = await verifyEmailCode(email, value, name);
       submit.disabled = false;
-      if (!r.ok) return setStatus(r.message);
+      if (!r.ok) {
+        status.className = "fl-status is-error";
+        status.textContent = r.message;
+        code.classList.add("is-error");
+        return;
+      }
       clearInterval(resendTimer);
-      body.replaceChildren(h("div", { color: C.ok }, { textContent: text.done }));
-      setStatus("");
-      setTimeout(() => finish(true), 2200);
+      stepSaved();
     };
     submit.onclick = () => void go();
     input.addEventListener("input", () => {
       input.value = input.value.replace(/\D/g, "").slice(0, 6);
+      code.classList.remove("is-error");
+      paint();
       if (input.value.length === 6) void go();
     });
+    input.addEventListener("focus", paint);
+    input.addEventListener("blur", paint);
     input.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") void go();
     });
     resend.onclick = async () => {
       if (resend.disabled) return;
       left = RESEND_SECONDS;
+      clearInterval(resendTimer);
       tick();
-      setStatus("Sending…", C.faint);
+      resendTimer = window.setInterval(tick, 1000);
+      status.className = "fl-status";
+      status.textContent = "Sending…";
       const r = await sendEmailCode(email);
-      setStatus(r.ok ? "New code sent." : r.message, r.ok ? C.ok : C.err);
+      if (!r.ok && r.busy) return stepBusy();
+      status.className = `fl-status ${r.ok ? "is-ok" : "is-error"}`;
+      status.textContent = r.ok ? "New code sent." : r.message;
     };
-    other.onclick = () => stepEmail();
+    paint();
     setTimeout(() => input.focus(), 0);
   };
 
-  stepEmail();
+  const stepSaved = () => {
+    container.replaceChildren();
+    icon("check", "", el("div", "fl-acct__mark is-ok", container));
+    el("h2", "", container, text.who ? "Saved." : text.done);
+    if (text.who) {
+      const p = el("p", "", container);
+      el("b", "", p, name || "Your character");
+      p.append(` is now tied to ${email}. Use `);
+      el("b", "", p, "Sign in with email");
+      p.append(" on any browser to carry on.");
+      const keeps = el("div", "fl-acct__keeps", container);
+      for (const [k, v] of [["Character, level, items", "this life"], ["Name, medals, Hall of Firsts", "forever"]]) {
+        const row = el("div", "", keeps, k);
+        el("b", "", row, v);
+      }
+    }
+    const btns = el("div", "fl-acct__btns", container);
+    const back = button(text.who ? "Back to the game" : "Continue", "fl-btn fl-btn--primary", btns, () => done());
+    back.focus();
+    const t = window.setTimeout(() => done(), 4500);
+    let closed = false;
+    const done = () => {
+      if (closed) return;
+      closed = true;
+      clearTimeout(t);
+      finish(true);
+    };
+  };
+
+  const stepBusy = () => {
+    clearInterval(resendTimer);
+    container.classList.add("fl-panel--danger");
+    container.replaceChildren();
+    icon("alert", "", el("div", "fl-acct__mark is-err", container));
+    el("h2", "", container, "Saving is busy, try again later.");
+    el("p", "", container, "Too many codes are going out right now. You're still playing as a guest on this browser. Nothing is lost.");
+    el("span", "fl-fine", container, "Try again from Esc → Save your character in a little while.");
+    const btns = el("div", "fl-acct__btns", container);
+    button("OK", "fl-btn fl-btn--primary", btns, () => finish(false)).focus();
+  };
+
+  ({ email: stepEmail, code: stepCode, saved: stepSaved, busy: stepBusy })[start]();
 }
 
 async function currentName(): Promise<string | undefined> {
@@ -226,43 +300,40 @@ let saveOpen: Promise<"saved" | "dismissed"> | null = null;
  * Non-blocking "Save your character" card (bottom-right; the game keeps running). Shown after the
  * first level-up. Resolves "saved" once the email code is accepted, else "dismissed".
  */
-export function showSavePrompt(opts: { name?: string } = {}): Promise<"saved" | "dismissed"> {
+export function showSavePrompt(opts: { name?: string; level?: number; starter?: number; /** Dev gallery only: open on a later state. */ preview?: FlowStep } = {}): Promise<"saved" | "dismissed"> {
   if (saveOpen) return saveOpen;
+  installSprites();
   saveOpen = new Promise((resolve) => {
-    const card = h("div", {
-      position: "fixed",
-      right: "20px",
-      bottom: "20px",
-      width: "min(340px, calc(100vw - 40px))",
-      background: C.bg,
-      border: C.border,
-      borderRadius: "14px",
-      padding: "18px 20px",
-      color: C.text,
-      fontSize: "15px",
-      lineHeight: "1.45",
-      zIndex: "50",
-      boxShadow: "0 10px 50px #0009",
-      pointerEvents: "auto",
-    });
+    const card = el("section", "fl-savecard fl-panel fl-acct fl-ui", uiRoot());
+    card.setAttribute("role", "dialog");
+    card.setAttribute("aria-label", "Save your character");
     isolateKeys(card);
-    uiRoot().append(card);
+    card.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") finish(false);
+    });
+    let done = false;
+    const finish = (ok: boolean) => {
+      if (done) return;
+      done = true;
+      card.remove();
+      saveOpen = null;
+      resolve(ok ? "saved" : "dismissed");
+    };
     void (async () => {
       const name = opts.name ?? (await currentName());
       emailFlow(
         card,
         {
           title: "Save your character",
-          intro: "Get a 6-digit code by email to keep your character, name and medals, and to play on other browsers.",
+          intro: `Save ${name || "your character"} to play on any browser. We'll email you a 6-digit code. No password.`,
           submit: "Save",
-          done: "Saved. Sign in with this email on any browser to keep playing.",
+          done: "Saved.",
+          who: { name, level: opts.level, starter: opts.starter ?? (Number(localStorage.getItem("fl.starter") ?? 0) || 0) },
         },
         name,
-        (ok) => {
-          card.remove();
-          saveOpen = null;
-          resolve(ok ? "saved" : "dismissed");
-        },
+        finish,
+        opts.preview,
+        opts.preview ? "wren@example.com" : "",
       );
     })();
   });
@@ -283,7 +354,8 @@ export function showSignIn(): Promise<"signed-in" | "dismissed"> {
       signInOpen = null;
       resolve(ok ? "signed-in" : "dismissed");
     };
-    const m = modal(() => finish(false));
+    const m = modal("signin", () => finish(false));
+    m.card.setAttribute("aria-label", "Sign in with email");
     void (async () => {
       const name = await currentName();
       emailFlow(
@@ -319,24 +391,25 @@ export function pickDisplayName(opts: { suggested?: string; dismissible?: boolea
       nameOpen = null;
       resolve(name);
     };
-    const m = modal(opts.dismissible ? () => finish(null) : null);
-    const input = h("input", inputStyle, { type: "text", maxLength: 16, autocomplete: "nickname", spellcheck: false, value: opts.suggested ?? "", placeholder: "Your name" });
-    const status = h("div", { minHeight: "20px", fontSize: "14px", color: C.faint, marginTop: "2px" }, { textContent: "3–16 letters, numbers or _" });
-    const ok = button("Play as this name");
-    const skip = opts.dismissible ? button("Later", false) : null;
-    m.card.append(
-      h("div", { fontSize: "18px", fontWeight: "700", marginBottom: "4px" }, { textContent: "Pick a name" }),
-      h("div", { color: C.dim }, { textContent: "Other players see it above your head." }),
-      input,
-      status,
-      h("div", { display: "flex", gap: "8px", justifyContent: skip ? "space-between" : "flex-end", marginTop: "8px" }, {}, [skip, ok]),
-    );
+    const m = modal("name", opts.dismissible ? () => finish(null) : null);
+    m.card.setAttribute("aria-label", "Pick a name");
+    el("h2", "", m.card, "Pick a name");
+    el("p", "", m.card, "Other players see it above your head.");
+    const input = field("text", "Your name", opts.suggested ?? "");
+    input.maxLength = 16;
+    input.setAttribute("autocomplete", "nickname");
+    input.spellcheck = false;
+    m.card.appendChild(input);
+    const status = el("div", "fl-status", m.card, "3–16 letters, numbers or _");
+    const btns = el("div", `fl-actions ${opts.dismissible ? "fl-actions--split" : "fl-actions--end"}`, m.card);
+    if (opts.dismissible) button("Later", "fl-btn fl-btn--ghost", btns, () => finish(null));
+    const ok = button("Play as this name", "fl-btn fl-btn--primary", btns);
     const check = () => {
       const v = input.value.trim();
       const valid = NAME_PATTERN.test(v);
       ok.disabled = !valid;
-      ok.style.opacity = valid ? "1" : "0.5";
-      status.style.color = C.faint;
+      input.classList.toggle("is-error", v.length > 0 && !valid);
+      status.className = "fl-status";
       status.textContent = v.length > 0 && !valid ? (v.length < 3 || v.length > 16 ? "Names are 3–16 characters." : "Use letters, numbers and _ only.") : "3–16 letters, numbers or _";
       return valid;
     };
@@ -347,7 +420,7 @@ export function pickDisplayName(opts: { suggested?: string; dismissible?: boolea
       const r = await setDisplayName(input.value.trim()).catch(() => ({ ok: false as const, message: "Couldn't reach the server. Try again." }));
       if (r.ok) return finish(r.name);
       ok.disabled = false;
-      status.style.color = C.err;
+      status.className = "fl-status is-error";
       status.textContent = r.message;
     };
     input.addEventListener("input", check);
@@ -355,7 +428,6 @@ export function pickDisplayName(opts: { suggested?: string; dismissible?: boolea
       if (ev.key === "Enter") void go();
     });
     ok.onclick = () => void go();
-    if (skip) skip.onclick = () => finish(null);
     check();
     setTimeout(() => input.focus(), 0);
   });

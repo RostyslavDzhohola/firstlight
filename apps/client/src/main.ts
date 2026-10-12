@@ -1,35 +1,71 @@
 // Landing page logic. The game bundle loads only after Play is pressed.
 
+import "./ui/styles/tokens.css";
+import "./ui/styles/components.css";
+import "./ui/styles/icons.css";
+import "./ui/styles/base.css";
+import "./ui/styles/landing.css";
+import "./ui/styles/loading.css";
 import { config } from "./config.ts";
+import { hideLoading, setLoading } from "./ui/loading.ts";
 
-const playBtn = document.getElementById("play") as HTMLButtonElement | null;
-const online = document.getElementById("online");
+const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T | null;
+const playBtn = $<HTMLButtonElement>("play");
+
+/** "N players online"; 0 reads as an invitation, not an empty room. */
+function onlineLabel(n: number): string {
+  if (n <= 0) return "Be the first one online";
+  return n === 1 ? "player online" : "players online";
+}
 
 async function refreshOnline() {
+  const box = $("online");
   try {
     const r = await fetch(`${config.apiUrl}/api/online`);
     const { online: n } = (await r.json()) as { online: number };
-    if (online) online.textContent = n === 1 ? "1 player online" : `${n} players online`;
+    if (!box || typeof n !== "number") return;
+    $("online-n")!.textContent = n > 0 ? n.toLocaleString("en-US") : "";
+    $("online-n")!.hidden = n <= 0;
+    $("online-label")!.textContent = onlineLabel(n);
+    box.hidden = false;
   } catch {
-    if (online) online.textContent = "";
+    if (box) box.hidden = true;
   }
 }
 void refreshOnline();
 setInterval(refreshOnline, 15000);
 
-document.getElementById("copy-link")?.addEventListener("click", async () => {
+// GitHub Star/Fork stay hidden until the owner makes the repo public (PUBLIC_REPO flag).
+if (config.publicRepo) {
+  $<HTMLAnchorElement>("repo-star")!.href = config.repoUrl;
+  $<HTMLAnchorElement>("repo-fork")!.href = `${config.repoUrl}/fork`;
+  $("repo")!.hidden = false;
+}
+
+$("copy-link")?.addEventListener("click", async () => {
   await navigator.clipboard.writeText(location.href).catch(() => {});
+  const c = $("copied");
+  if (c) c.hidden = false;
 });
 
 playBtn?.addEventListener("click", async () => {
   playBtn.disabled = true;
   // Fullscreen + pointer lock must be requested inside the click.
   await document.documentElement.requestFullscreen?.().catch(() => {});
-  const { startGame } = await import("./game/Game.ts");
-  await startGame();
+  setLoading("Loading the game…", 0.02);
+  try {
+    const { startGame } = await import("./game/Game.ts");
+    await startGame();
+  } catch (e) {
+    console.error("[boot] failed", e);
+    hideLoading();
+    const landing = $("landing");
+    if (landing) landing.style.display = "";
+    playBtn.disabled = false;
+  }
 });
 
-document.getElementById("signin")?.addEventListener("click", async (e) => {
+$("signin")?.addEventListener("click", async (e) => {
   e.preventDefault();
   const { showSignIn } = await import("./ui/account.ts");
   const r = await showSignIn();

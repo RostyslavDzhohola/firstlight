@@ -16,7 +16,9 @@ import { createRenderer, type RenderCtx } from "../render/renderer.ts";
 import { installShaderMonitor, shaderMonitorFrame, warmup } from "../render/warmup.ts";
 import type { Hud } from "../ui/hud.ts";
 import { Menu } from "../ui/menu.ts";
+import { bindUi } from "../ui/bind.ts";
 import { pickDisplayName } from "../ui/account.ts";
+import { hideLoading, setLoading, setLoadingBadge } from "../ui/loading.ts";
 import { getAccountInfo, invalidatePlayToken, isDevGuest } from "../net/auth.ts";
 import { PilesView } from "../world/PilesView.ts";
 import { Planet } from "../world/Planet.ts";
@@ -27,16 +29,6 @@ import { Input } from "./input.ts";
 import { PlayerController } from "./PlayerController.ts";
 import { CLIENT_SYSTEMS, type ClientSystem } from "./systems.ts";
 
-const loadingEl = () => document.getElementById("loading")!;
-function setLoading(text: string, frac: number) {
-  const el = loadingEl();
-  el.style.display = "grid";
-  document.getElementById("loading-text")!.textContent = text;
-  (document.getElementById("loading-bar") as HTMLElement).style.width = `${Math.round(frac * 100)}%`;
-}
-function hideLoading() {
-  loadingEl().style.display = "none";
-}
 
 /** ?bench runs without a server unless ?online is also given; ?offline forces it anywhere. */
 const OFFLINE = flags.has("offline") || (flags.has("bench") && !flags.has("online"));
@@ -77,6 +69,7 @@ export class Game {
     this.ctx = await createRenderer(container);
     installShaderMonitor(this.ctx);
     console.info(`[gfx] backend ${this.ctx.webgpu ? "WebGPU" : "WebGL2"}, tier ${this.ctx.tier}${this.ctx.settings.auto ? " (auto)" : ""}, gpu "${this.ctx.gpuName}"`);
+    setLoadingBadge(`${this.ctx.webgpu ? "WebGPU" : "WebGL2"} · ${this.ctx.tier}${this.ctx.settings.auto ? " (auto)" : ""}`);
     this.input = new Input(this.ctx.renderer.domElement);
     this.audio = new GameAudio();
     this.audio.resume();
@@ -105,19 +98,18 @@ export class Game {
     this.combat = new CombatClient(this);
     this.hud = this.combat.hud;
     this.menu = new Menu(this);
+    bindUi(this);
     document.getElementById("landing")!.style.display = "none";
     const automated = flags.has("autoplay") || OFFLINE;
-    // First visit: choose a starter before entering the world.
+    // First visit: choose a starter (and the display name, once per account) before entering the world.
+    // Dev guests and automated runs skip the name.
     let firstChoice: { starter: number; palette: number } | undefined;
+    const info = !isDevGuest() && !automated ? await getAccountInfo().catch(() => null) : null;
+    const needsName = !!info && !info.displayName;
     if (!localStorage.getItem("fl.starter") && !automated) {
       hideLoading();
-      firstChoice = await this.hud.characterPick();
-    }
-    // Pick a display name once per account (skipped for dev guests and automated runs).
-    if (!isDevGuest() && !automated) {
-      const info = await getAccountInfo().catch(() => null);
-      if (info && !info.displayName) await pickDisplayName({ suggested: info.name, dismissible: true });
-    }
+      firstChoice = await this.hud.characterPick({ askName: needsName ? { suggested: info!.name } : undefined });
+    } else if (needsName) await pickDisplayName({ suggested: info!.name, dismissible: true });
     await this.enterBody(body, firstChoice);
     this.running = true;
     if (!this.bench) this.input.lock();

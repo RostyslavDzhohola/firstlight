@@ -1,0 +1,61 @@
+/* Death (verdict: Entry B). The live world drains to grey behind the overlay; text sits on dark scrims. */
+
+.fl-death { overflow: hidden; }
+.fl-death__drain { position: absolute; inset: 0; background: rgba(8, 9, 11, .35); -webkit-backdrop-filter: grayscale(.88) brightness(.5) contrast(1.08) blur(1.2px); backdrop-filter: grayscale(.88) brightness(.5) contrast(1.08) blur(1.2px); animation: fl-fade-in 2.4s var(--ease-out) both; }
+.fl-lowfx .fl-death__drain { background: rgba(8, 9, 11, .8); }
+.fl-death__shade { position: absolute; inset: 0; background: linear-gradient(90deg, rgba(5, 6, 8, .94) 0%, rgba(5, 6, 8, .78) 38%, rgba(5, 6, 8, .22) 62%, rgba(5, 6, 8, .62) 100%); }
+
+.fl-death__screen { position: relative; z-index: 1; height: 100%; display: grid; grid-template-columns: minmax(0, calc(40 * var(--u))) 1fr minmax(0, calc(25 * var(--u))); gap: var(--sp-6); padding: calc(2.4 * var(--u)) calc(3 * var(--u)) calc(2.2 * var(--u)) calc(3.6 * var(--u)); align-items: center; }
+
+/* Left column on its own scrim so the numbers read over any freeze-frame. */
+.fl-death__left { padding: calc(1.6 * var(--u)) calc(1.8 * var(--u)); background: linear-gradient(180deg, rgba(5, 6, 8, .72), rgba(5, 6, 8, .6)); border-left: 1px solid var(--line-2); animation: fl-rise-in var(--dur-4) var(--ease-out) .6s both; }
+.fl-death__left .fl-eyebrow { color: var(--fog-3); }
+.fl-death__left h1 { margin: calc(1.1 * var(--u)) 0 calc(.6 * var(--u)); font: 300 var(--t-5xl)/.95 var(--font-display); letter-spacing: .02em; color: var(--paper); }
+.fl-death__lede { margin: 0 0 calc(1.6 * var(--u)); max-width: calc(30 * var(--u)); font-size: var(--t-lg); line-height: 1.45; color: var(--paper-2); }
+.fl-death__lede em { font-style: normal; color: var(--dawn-3); }
+
+/* Killer cards */
+.fl-killer { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-4); align-items: start; padding: var(--sp-4) calc(1.2 * var(--u)) var(--sp-4) var(--sp-4); max-width: calc(31 * var(--u)); }
+.fl-killer__k { font: 600 var(--t-xs)/1 var(--font-mono); letter-spacing: .24em; color: var(--cold-2); }
+.fl-killer__n { margin: calc(.45 * var(--u)) 0 calc(.35 * var(--u)); font: 700 var(--t-xl)/1.05 var(--font-mono); letter-spacing: .04em; text-transform: uppercase; color: var(--cold-1); overflow-wrap: anywhere; }
+.fl-killer__m { font: 500 var(--t-xs)/1.4 var(--font-mono); color: var(--cold-2); }
+.fl-killer__q { display: block; margin-top: calc(.7 * var(--u)); padding-top: calc(.6 * var(--u)); border-top: 1px solid rgba(228, 233, 239, .14); font: 500 var(--t-sm)/1.3 var(--font-mono); color: var(--cold-1); }
+.fl-killer__glyph { position: relative; width: calc(3.4 * var(--u)); height: calc(3.9 * var(--u)); display: grid; place-items: center; }
+.fl-killer__glyph .fl-hex { position: absolute; inset: 0; width: 100%; height: 100%; background: var(--cold-1); }
+.fl-killer__glyph .fl-hex + .fl-hex { inset: 3px; width: calc(100% - 6px); height: calc(100% - 6px); background: var(--cold-4); }
+.fl-killer__slit { position: relative; width: 60%; height: 4px; background: var(--cold-slit); }
+
+.fl-killer--warm { background: linear-gradient(180deg, rgba(40, 28, 16, .92), rgba(18, 14, 10, .92)); border: 1px solid rgba(255, 217, 155, .35); border-radius: var(--r-2); }
+.fl-killer--warm .fl-killer__k { color: var(--dawn-3); font-family: var(--font-display); letter-spacing: .2em; text-transform: uppercase; }
+.fl-killer--warm .fl-killer__n { font-family: var(--font-display); font-weight: 500; text-transform: none; color: var(--hero-cream); font-size: var(--t-2xl); }
+.fl-killer--warm .fl-killer__m { font-family: var(--font-body); color: var(--fog-4); }
+.fl-killer__joke { margin: calc(.6 * var(--u)) 0 0; padding: calc(.5 * var(--u)) calc(.7 * var(--u)); border-radius: var(--r-1); background: rgba(255, 201, 74, .1); border: 1px solid rgba(255, 201, 74, .3); font-size: var(--t-xs); line-height: 1.4; color: var(--hero-gold); }
+
+.fl-death__stats { display: flex; gap: calc(2.4 * var(--u)); margin: calc(1.6 * var(--u)) 0 calc(1.8 * var(--u)); }
+.fl-death__stats > div { display: grid; gap: calc(.45 * var(--u)); }
+.fl-death__stats b { font: 300 var(--t-3xl)/1 var(--font-display); color: var(--paper); }
+.fl-death__stats b small { font-size: .5em; color: var(--fog-3); margin-left: .1em; }
+
+.fl-death__actions { display: flex; align-items: center; gap: calc(1.4 * var(--u)); flex-wrap: wrap; }
+.fl-death__rise { min-width: calc(15 * var(--u)); }
+.fl-death__sub { display: block; margin-top: calc(.55 * var(--u)); font-size: var(--t-xs); color: var(--fog-3); }
+.fl-death__gh { display: flex; align-items: center; gap: calc(.6 * var(--u)); font-size: var(--t-xs); color: var(--fog-3); }
+
+/* Right: lost / kept */
+.fl-death__right { display: grid; gap: var(--sp-4); align-self: center; animation: fl-rise-in var(--dur-4) var(--ease-out) .9s both; }
+.fl-death__lost { padding: calc(1.1 * var(--u)) calc(1.2 * var(--u)) var(--sp-4); }
+.fl-death__lost h2, .fl-death__kept h2 { margin: 0 0 calc(.8 * var(--u)); display: flex; justify-content: space-between; align-items: baseline; }
+.fl-death__items { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: calc(.4 * var(--u)); margin-bottom: calc(.9 * var(--u)); }
+.fl-death__it { position: relative; aspect-ratio: 1; display: grid; place-items: center; background: rgba(255, 255, 255, .04); border: 1px solid var(--line-2); border-radius: 3px; }
+.fl-death__it .px { width: 66%; height: 66%; filter: grayscale(.35); }
+.fl-death__q { position: absolute; right: 3px; bottom: 2px; font: 700 var(--t-xs)/1 var(--font-mono); color: var(--paper-2); }
+.fl-death__where { margin: calc(.9 * var(--u)) 0 0; padding-top: calc(.8 * var(--u)); border-top: 1px solid var(--line-2); font-size: var(--t-xs); line-height: 1.5; color: var(--fog-3); }
+.fl-death__kept { padding: calc(.9 * var(--u)) calc(1.2 * var(--u)); }
+.fl-death__kept ul { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: 1fr; gap: calc(.45 * var(--u)) var(--sp-4); font-size: var(--t-sm); }
+.fl-death__kept li { display: flex; align-items: center; gap: calc(.45 * var(--u)); color: var(--paper-2); min-width: 0; }
+.fl-death__kept li .li { color: var(--ok); }
+
+@media (max-width: 1360px) {
+  .fl-death__screen { grid-template-columns: minmax(0, calc(36 * var(--u))) 1fr minmax(0, calc(22 * var(--u))); padding-left: calc(2.4 * var(--u)); padding-right: calc(2.2 * var(--u)); }
+  .fl-death__left h1 { font-size: var(--t-4xl); }
+}

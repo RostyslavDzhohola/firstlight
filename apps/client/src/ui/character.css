@@ -1,0 +1,101 @@
+/* Character pick (verdict: Entry B). Spotlit hero figure, pixel portraits, weapon stats, live palette. */
+
+.fl-charpick { z-index: var(--z-modal); overflow: hidden; }
+.fl-charpick__defs { position: absolute; width: 0; height: 0; overflow: hidden; }
+.fl-charpick__stage { position: absolute; inset: 0; background:
+  radial-gradient(40% 60% at 50% 58%, rgba(243, 174, 91, .1), transparent 70%),
+  radial-gradient(90% 70% at 50% 110%, #1a1d24 0%, transparent 60%),
+  linear-gradient(180deg, var(--ink-0), var(--ink-2) 60%, var(--ink-1)); }
+.fl-charpick__screen { position: relative; z-index: 1; height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+
+.fl-charpick__top { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: calc(1.4 * var(--u)) calc(2.5 * var(--u)) calc(.6 * var(--u)); }
+.fl-charpick__top h1 { margin: 0; text-align: center; font: 300 var(--t-xl)/1 var(--font-display); letter-spacing: .22em; text-transform: uppercase; }
+.fl-charpick__top h1 small { display: block; margin-top: var(--sp-2); font: 400 var(--t-xs)/1.3 var(--font-body); letter-spacing: .02em; text-transform: none; color: var(--fog-3); }
+.fl-charpick__chip { justify-self: end; }
+
+.fl-charpick__cols { display: grid; grid-template-columns: calc(21 * var(--u)) minmax(0, 1fr) calc(22 * var(--u)); gap: var(--sp-5); padding: calc(.6 * var(--u)) calc(2.5 * var(--u)) var(--sp-6); min-height: 0; }
+
+/* ---- starter list ---- */
+.fl-charpick__starters { display: flex; flex-direction: column; gap: calc(.6 * var(--u)); align-self: center; }
+.fl-charpick__starters > .fl-label { margin: 0 0 calc(.3 * var(--u)) calc(.1 * var(--u)); }
+.fl-starter { position: relative; display: grid; grid-template-columns: calc(3.4 * var(--u)) minmax(0, 1fr); gap: calc(.9 * var(--u)); align-items: center; padding: calc(.7 * var(--u)) calc(.9 * var(--u)) calc(.7 * var(--u)) calc(.7 * var(--u)); text-align: left; color: var(--paper); border: 1px solid var(--line-2); border-radius: var(--r-2); background: linear-gradient(180deg, rgba(255, 255, 255, .035), rgba(255, 255, 255, .01)); transition: border-color var(--dur-2), background var(--dur-2); }
+.fl-starter:hover { border-color: var(--line-3); background: rgba(255, 255, 255, .05); }
+.fl-starter__portrait { width: calc(3.4 * var(--u)); height: calc(3.4 * var(--u)); display: grid; place-items: center; background: rgba(0, 0, 0, .35); border: 1px solid var(--line-2); border-radius: var(--r-1); }
+.fl-starter__portrait .px { width: calc(2.6 * var(--u)); height: calc(2.6 * var(--u)); }
+.fl-starter__name { display: block; font: 500 var(--t-lg)/1.1 var(--font-display); letter-spacing: .04em; }
+.fl-starter__line { display: block; margin: calc(.2 * var(--u)) 0 calc(.35 * var(--u)); font-size: var(--t-xs); color: var(--fog-3); line-height: 1.3; }
+.fl-starter__wpn { display: inline-flex; align-items: center; gap: calc(.4 * var(--u)); font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: .08em; text-transform: uppercase; color: var(--fog-4); }
+.fl-starter__wpn .px { width: calc(1.25 * var(--u)); height: calc(1.25 * var(--u)); }
+.fl-starter.is-on { border-color: rgba(255, 217, 155, .55); background: linear-gradient(90deg, rgba(243, 174, 91, .12), rgba(243, 174, 91, .02)); box-shadow: 0 0 30px -12px rgba(243, 174, 91, .6); }
+.fl-starter.is-on::before { content: ""; position: absolute; left: -1px; top: 18%; bottom: 18%; width: 2px; background: var(--dawn-3); }
+.fl-starter.is-on .fl-starter__portrait { border-color: rgba(255, 217, 155, .5); }
+.fl-starter.is-on .fl-starter__name { color: #fff8ec; }
+
+/* ---- hero figure ---- */
+.fl-charpick__hero { position: relative; display: grid; grid-template-rows: minmax(0, 1fr) auto; justify-items: center; min-height: 0; }
+.fl-charpick__figure-wrap { position: relative; width: 100%; height: 100%; min-height: 0; display: grid; place-items: end center; }
+.fl-charpick__spot { position: absolute; left: 50%; bottom: 6%; width: calc(34 * var(--u)); max-width: 100%; height: 120%; transform: translateX(-50%); background: radial-gradient(50% 60% at 50% 100%, rgba(255, 226, 180, .16), transparent 70%); pointer-events: none; }
+.fl-charpick__beam { position: absolute; left: 50%; top: -10%; width: calc(16 * var(--u)); height: 110%; transform: translateX(-50%); background: linear-gradient(180deg, rgba(255, 230, 190, .07), transparent 80%); clip-path: polygon(40% 0, 60% 0, 100% 100%, 0 100%); pointer-events: none; }
+.fl-charpick__figure { position: relative; height: min(52vh, calc(30 * var(--u))); aspect-ratio: 240 / 360; filter: drop-shadow(0 18px 24px rgba(0, 0, 0, .6)); animation: fl-flicker .9s var(--ease-out) both; }
+.fl-charpick__figure svg { width: 100%; height: 100%; overflow: visible; }
+.fl-charpick__pedestal { position: absolute; left: 50%; bottom: 1.2%; width: calc(22 * var(--u)); max-width: 90%; height: calc(4.2 * var(--u)); transform: translateX(-50%); pointer-events: none; }
+.fl-charpick__pedestal i { position: absolute; inset: 0; border-radius: 50%; border: 1px solid rgba(255, 217, 155, .5); box-shadow: 0 0 22px rgba(243, 174, 91, .35), inset 0 0 22px rgba(243, 174, 91, .2); }
+.fl-charpick__pedestal i:nth-child(2) { inset: 18% 14%; border-color: rgba(255, 217, 155, .25); box-shadow: none; }
+.fl-charpick__pedestal i:nth-child(3) { inset: -26% -12%; border: 1px dashed rgba(222, 228, 238, .12); box-shadow: none; animation: fl-spin 60s linear infinite; }
+
+/* Palette → figure + swatches. Fill/stroke classes come from figures.ts. */
+.fl-pal--ivory { --p: var(--pal-ivory-p); --s: var(--pal-ivory-s); --a: var(--pal-ivory-a); }
+.fl-pal--sand { --p: var(--pal-sand-p); --s: var(--pal-sand-s); --a: var(--pal-sand-a); }
+.fl-pal--midnight { --p: var(--pal-midnight-p); --s: var(--pal-midnight-s); --a: var(--pal-midnight-a); }
+.fl-pal--moss { --p: var(--pal-moss-p); --s: var(--pal-moss-s); --a: var(--pal-moss-a); }
+.fl-pal--ember { --p: var(--pal-ember-p); --s: var(--pal-ember-s); --a: var(--pal-ember-a); }
+.fl-pal--dusk { --p: var(--pal-dusk-p); --s: var(--pal-dusk-s); --a: var(--pal-dusk-a); }
+.fl-charpick .fp { fill: var(--p); }
+.fl-charpick .fs { fill: var(--s); }
+.fl-charpick .fa { fill: var(--a); }
+.fl-charpick .sp { stroke: var(--p); }
+.fl-charpick .ss { stroke: var(--s); }
+.fl-charpick .sa { stroke: var(--a); }
+
+.fl-charpick__identity { width: min(100%, calc(34 * var(--u))); text-align: center; padding-top: calc(.6 * var(--u)); }
+.fl-charpick__identity h2 { margin: 0; font: 300 var(--t-3xl)/1 var(--font-display); letter-spacing: .08em; }
+.fl-charpick__role { margin: calc(.45 * var(--u)) 0 var(--sp-4); color: var(--fog-3); font-size: var(--t-md); }
+.fl-charpick__weapon { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--sp-4); align-items: center; padding: calc(.8 * var(--u)) var(--sp-4); text-align: left; }
+.fl-charpick__weapon > .px { width: calc(2.75 * var(--u)); height: calc(2.75 * var(--u)); }
+.fl-charpick__weapon b { display: block; font: 500 var(--t-lg)/1.1 var(--font-display); letter-spacing: .04em; }
+.fl-charpick__weapon span { font-size: var(--t-xs); color: var(--fog-3); }
+.fl-charpick__stats { display: flex; gap: calc(.4 * var(--u)); flex-wrap: wrap; justify-content: flex-end; max-width: calc(15 * var(--u)); }
+
+/* ---- config column ---- */
+.fl-charpick__config { align-self: center; display: flex; flex-direction: column; gap: var(--sp-5); padding: calc(1.4 * var(--u)); }
+.fl-charpick__h { margin: 0 0 calc(.8 * var(--u)); display: flex; justify-content: space-between; align-items: baseline; }
+.fl-charpick__h em { font: 500 var(--t-sm)/1 var(--font-display); letter-spacing: .06em; font-style: normal; color: var(--paper); text-transform: none; }
+.fl-charpick__swatches { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: calc(.45 * var(--u)); }
+.fl-swatchbtn { display: flex; align-items: center; gap: calc(.5 * var(--u)); min-width: 0; padding: calc(.35 * var(--u)) calc(.5 * var(--u)) calc(.35 * var(--u)) calc(.35 * var(--u)); border: 1px solid var(--line-2); border-radius: var(--r-pill); background: rgba(0, 0, 0, .2); font: 500 var(--t-xs)/1 var(--font-display); letter-spacing: .02em; color: var(--fog-3); text-align: left; }
+.fl-swatchbtn span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-swatchbtn:hover { border-color: var(--line-3); color: var(--paper); }
+.fl-swatchbtn.is-on { border-color: rgba(255, 217, 155, .65); background: rgba(243, 174, 91, .1); color: var(--dawn-3); }
+.fl-swatch { position: relative; flex: none; width: calc(1.7 * var(--u)); height: calc(1.7 * var(--u)); border-radius: 50%; background: conic-gradient(from 200deg, var(--p) 0 62%, var(--s) 62% 92%, var(--a) 92% 100%); box-shadow: 0 0 0 1px rgba(255, 255, 255, .14), inset 0 0 0 1px rgba(0, 0, 0, .3); }
+.fl-swatch::after { content: ""; position: absolute; left: 50%; top: 50%; width: 26%; height: 26%; transform: translate(-50%, -50%); border-radius: 50%; background: var(--a); }
+.fl-swatchbtn.is-on .fl-swatch { box-shadow: 0 0 0 2px var(--ink-2), 0 0 0 3px var(--dawn-3); }
+.fl-charpick__hint { margin: calc(.7 * var(--u)) 0 0; font-size: var(--t-xs); line-height: 1.4; color: var(--fog-3); }
+
+.fl-charpick__field { display: grid; gap: calc(.45 * var(--u)); }
+.fl-charpick__input { position: relative; }
+.fl-charpick__input .fl-input { padding-right: calc(2.6 * var(--u)); font-family: var(--font-display); font-size: var(--t-lg); letter-spacing: .04em; }
+.fl-charpick__ok { position: absolute; right: calc(.85 * var(--u)); top: 50%; transform: translateY(-50%); color: var(--ok); opacity: 0; }
+.fl-charpick__input .is-ok + .fl-charpick__ok { opacity: 1; }
+.fl-charpick__row { display: flex; justify-content: space-between; gap: var(--sp-2); }
+.fl-charpick__count { font: 500 var(--t-xs)/1.4 var(--font-mono); color: var(--fog-3); }
+.fl-charpick__rules { font-size: var(--t-xs); color: var(--fog-2); }
+
+.fl-charpick__kept ul { margin: calc(.6 * var(--u)) 0 0; padding: calc(.8 * var(--u)) var(--sp-4); list-style: none; display: grid; gap: calc(.45 * var(--u)); border: 1px solid var(--line-2); border-radius: var(--r-2); background: rgba(0, 0, 0, .25); font-size: var(--t-sm); color: var(--paper-2); }
+.fl-charpick__kept li { display: flex; align-items: center; gap: var(--sp-2); }
+.fl-charpick__kept li .li { color: var(--ok); }
+
+.fl-charpick__go small { display: block; margin-top: calc(.6 * var(--u)); text-align: center; font-size: var(--t-xs); color: var(--fog-3); }
+
+/* 1280×720: tighten the side columns so the hero keeps its room. */
+@media (max-width: 1360px) {
+  .fl-charpick__cols { grid-template-columns: calc(19 * var(--u)) minmax(0, 1fr) calc(20 * var(--u)); padding-left: var(--sp-6); padding-right: var(--sp-6); }
+}

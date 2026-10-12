@@ -1,0 +1,42 @@
+/* Save card, sign-in and name picker (verdict: Entry B, all four states: offer → code → saved, busy). */
+
+.fl-savecard { position: fixed; right: calc(1.4 * var(--u)); bottom: calc(1.4 * var(--u)); z-index: var(--z-modal); width: min(calc(21 * var(--u)), calc(100vw - 40px)); pointer-events: auto; animation: fl-rise-in var(--dur-3) var(--ease-out) both; }
+.fl-acct { display: grid; gap: calc(.9 * var(--u)); padding: calc(1.2 * var(--u)) calc(1.2 * var(--u)) calc(1.1 * var(--u)); align-content: start; }
+.fl-acct h2 { margin: 0; font: 500 var(--t-xl)/1.1 var(--font-display); letter-spacing: .03em; }
+.fl-acct p { margin: 0; font-size: var(--t-sm); line-height: 1.5; color: var(--paper-2); }
+.fl-acct p b { color: var(--paper); font-weight: 600; }
+.fl-acct .fl-label { display: block; }
+.fl-acct__who { display: flex; gap: calc(.75 * var(--u)); align-items: center; }
+.fl-acct__who span { font-size: var(--t-xs); color: var(--fog-3); }
+.fl-acct__who .fl-lvl { right: calc(-.5 * var(--u)); bottom: calc(-.5 * var(--u)); min-width: calc(1.5 * var(--u)); height: calc(1.5 * var(--u)); }
+.fl-acct__btns { display: flex; gap: var(--sp-2); }
+.fl-acct__btns .fl-btn--primary { flex: 1; }
+.fl-acct__sentto { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); font-size: var(--t-xs); color: var(--fog-3); min-width: 0; }
+.fl-acct__sentto span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-acct__sentto button { flex: none; border: 0; background: none; padding: 0; color: var(--dawn-3); font-size: var(--t-xs); }
+.fl-acct__sentto button:hover { text-decoration: underline; }
+
+/* Six code cells driven by one real input laid over them (paste and autofill keep working). */
+.fl-code { position: relative; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: calc(.4 * var(--u)); }
+.fl-code span { display: grid; place-items: center; height: calc(3.2 * var(--u)); border: 1px solid var(--line-3); border-radius: var(--r-2); background: rgba(0, 0, 0, .35); font: 600 var(--t-xl)/1 var(--font-mono); color: var(--paper); }
+.fl-code span:nth-child(4) { margin-left: calc(.4 * var(--u)); }
+.fl-code span.is-filled { border-color: rgba(255, 217, 155, .35); }
+.fl-code span.is-focus { border-color: var(--dawn-3); box-shadow: 0 0 0 3px rgba(243, 174, 91, .16); }
+.fl-code span.is-focus::after { content: ""; width: 2px; height: calc(1.4 * var(--u)); background: var(--dawn-3); animation: fl-pulse 1s steps(2) infinite; }
+.fl-code.is-error span { border-color: rgba(255, 111, 94, .7); }
+.fl-code input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; border: 0; padding: 0; font-size: 16px; cursor: text; }
+
+.fl-resend { display: flex; align-items: center; justify-content: space-between; gap: calc(.6 * var(--u)); }
+.fl-resend__t { display: inline-flex; align-items: center; gap: calc(.45 * var(--u)); font: 600 var(--t-xs)/1 var(--font-mono); color: var(--fog-3); }
+.fl-resend__t svg { width: calc(1.2 * var(--u)); height: calc(1.2 * var(--u)); transform: rotate(-90deg); }
+.fl-resend__t circle { fill: none; stroke-width: 2.5; }
+.fl-resend__t .bg { stroke: rgba(255, 255, 255, .15); }
+.fl-resend__t .fg { stroke: var(--fog-3); stroke-dasharray: 50.3; transition: stroke-dashoffset 1s linear; }
+
+.fl-acct__mark { width: calc(4.4 * var(--u)); height: calc(4.4 * var(--u)); margin: calc(.4 * var(--u)) 0 calc(.1 * var(--u)); display: grid; place-items: center; border-radius: 50%; }
+.fl-acct__mark .li { width: calc(2.2 * var(--u)); height: calc(2.2 * var(--u)); }
+.fl-acct__mark.is-ok { border: 1px solid rgba(127, 227, 176, .6); background: radial-gradient(circle, rgba(127, 227, 176, .25), rgba(127, 227, 176, 0) 70%); color: var(--ok); }
+.fl-acct__mark.is-err { border: 1px solid rgba(255, 111, 94, .55); background: radial-gradient(circle, rgba(255, 111, 94, .2), transparent 70%); color: var(--danger); }
+.fl-acct__keeps { display: grid; gap: calc(.4 * var(--u)); padding: calc(.75 * var(--u)) calc(.85 * var(--u)); border-radius: var(--r-2); background: rgba(255, 255, 255, .04); border: 1px solid var(--line-2); font-size: var(--t-xs); color: var(--fog-4); }
+.fl-acct__keeps div { display: flex; justify-content: space-between; gap: var(--sp-2); }
+.fl-acct__keeps b { color: var(--paper); font-weight: 600; }
