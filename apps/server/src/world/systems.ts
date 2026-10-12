@@ -2,6 +2,7 @@
 // with the room. Each lane adds its factory to SYSTEM_FACTORIES; the room creates them on start.
 
 import type { BodyRoom } from "./BodyRoom.ts";
+import { createVoiceSystem } from "./voice/index.ts";
 
 export interface RoomSystem {
   /** Called every simulation tick (50 ms). */
@@ -15,3 +16,4 @@ export interface RoomSystem {
 export type SystemFactory = (room: BodyRoom) => RoomSystem | null;
 
 export const SYSTEM_FACTORIES: SystemFactory[] = [];
+SYSTEM_FACTORIES.push(createVoiceSystem);
