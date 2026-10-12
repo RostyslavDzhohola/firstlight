@@ -1,4 +1,3 @@
-import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 // In production Vercel proxies /api/auth/* (and /admin/*, /stats) to the game server; in dev Vite does, so the
@@ -6,7 +5,6 @@ import { defineConfig } from "vite";
 const API_TARGET = process.env.API_PROXY_TARGET ?? "http://localhost:2567";
 
 export default defineConfig({
-  plugins: [react()],
   server: {
     port: Number(process.env.CLIENT_PORT ?? 5173),
     host: true,
@@ -18,7 +16,8 @@ export default defineConfig({
   },
   build: {
     target: "es2023",
-    sourcemap: true,
+    // No production source maps: they would be served from the public site next to the bundle.
+    sourcemap: false,
     chunkSizeWarningLimit: 2000,
   },
   worker: { format: "es" },

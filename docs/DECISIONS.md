@@ -8,7 +8,7 @@ Source tags: R1–R4 = grilling round, Q = question number in that round.
 
 ## Product
 
-- **What it is:** an original-IP, OASIS-style open-world multiplayer game in the browser. Free,
+- **What it is:** an original-IP multiplayer game in the browser: a persistent multi-planet open world. Free,
   open source, zero monetization. Desktop browsers only; phones get a "play on your computer"
   page with a copy-link button. (initial brief, R1 Q16)
 - **Name:** FIRSTLIGHT. Hub planet: Portus. Planets: Arcadia, Hollowmere, Meridian. (R1 Q1, R2 Q1)
@@ -316,3 +316,21 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   "4× CPU slowdown" is emulated with `?cpuslow=4` (busy-waits 3× each frame's main-thread time).
   three's WebGPU timestamp "GPU ms" sums overlapping passes on Apple GPUs (read 48–68 ms at 60 fps),
   so the probe and ladder ignore a GPU p50 above 1.25× the frame interval and use frame timing.
+- **D30 (run, 06:58Z):** player state is not interest-filtered. Every player's position, facing, HP,
+  level, weapon, party, name and `userId` in a body room copy goes to every client in that copy
+  (`BodyState.players` in `packages/shared/src/net/schema.ts` has no `.view()`; only NPCs and piles
+  are view-filtered in `BodyRoom.updateViews`). This is the fallback SPEC §5.2 names ("one shared
+  un-viewed player map"), now recorded as the shipped design. Why: copies are capped (40 players,
+  `MAX_CLIENTS`), the client needs it (map and compass party markers, party frames, the Tab player
+  list, nameplates, the voice planner's nearest peers), and per-client player views cost encode time
+  for little gain at this size. The trade-off, stated plainly: a modified client can draw every
+  player in its copy with HP through walls or as a radar, a wallhack the game can't prevent, and
+  the full player map costs bandwidth (the F12 Sonnet review measured about 17 KB/s per client with
+  40 players moving). `userId` is a random opaque account id, not PII and not a credential (D27).
+  Interest management or fog-of-war filtering (an unfiltered roster of name/level/party plus
+  view-filtered position/HP/weapon) is out of scope until copies grow past the cap or cheating shows up.
+- **D31 (run, 06:58Z):** before the repo goes public the owner works through `docs/pre-public.md`
+  (history scrub of `docs/reviews/firstlook-1.png`, Easter-egg solutions out of the public source,
+  no local paths or personal emails, licences, a secret scan of the whole history, third-party IP
+  wording). Why: making the repo public is an owner-only step (Process, R4 Q2), and some items rewrite
+  history or change live puzzles, which needs the owner's go-ahead.
