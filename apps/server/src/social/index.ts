@@ -12,19 +12,24 @@ import { SYSTEM_FACTORIES } from "../world/systems.ts";
 import { rekeyAnalytics } from "./analytics.ts";
 import { rekeyModeration } from "./moderation.ts";
 import { parties } from "./parties.ts";
-import { rekeyPresence } from "./presence.ts";
+import { rekeyPresence, sendTo } from "./presence.ts";
 import { createSocialSystem, rekeySessions, syncParty } from "./system.ts";
 
 SYSTEM_FACTORIES.push(createSocialSystem);
 
 // A guest saved their character and got a new account id: party, presence, sessions follow.
 accountLinks.on((ev) => {
-  const affected = parties.rekey(ev.fromUserId, ev.toUserId);
+  const { affected, reissued } = parties.rekey(ev.fromUserId, ev.toUserId);
   rekeyPresence(ev.fromUserId, ev.toUserId);
   rekeySessions(ev.fromUserId, ev.toUserId);
   rekeyAnalytics(ev.fromUserId, ev.toUserId);
   rekeyModeration(ev.fromUserId, ev.toUserId);
   syncParty([...affected, ev.toUserId, ...(parties.of(ev.toUserId)?.members ?? [])]);
+  // Invite cards the guest sent: swap them for ones from the saved account.
+  for (const inv of reissued) {
+    sendTo(inv.to, "party:invite-closed", { from: ev.fromUserId, to: inv.to, reason: "cancelled" });
+    sendTo(inv.to, "party:invite", { from: inv.from, fromName: ev.name || inv.fromName, partyId: parties.of(inv.from)?.id ?? null, expiresAt: inv.expiresAt });
+  }
 });
 
 export { endAllSessions, ANALYTICS } from "./analytics.ts";

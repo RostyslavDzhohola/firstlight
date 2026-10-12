@@ -66,7 +66,8 @@ describe("party registry", () => {
     const r = new PartyRegistry();
     form(r, "guest", "b");
     r.invite("guest", "guest", "c");
-    r.rekey("guest", "acct");
+    const { reissued } = r.rekey("guest", "acct");
+    expect(reissued.map((i) => [i.from, i.to])).toEqual([["acct", "c"]]);
     const p = r.of("acct")!;
     expect(p.leader).toBe("acct");
     expect(p.members).toEqual(["acct", "b"]);
@@ -79,7 +80,7 @@ describe("party registry", () => {
     const r = new PartyRegistry();
     form(r, "guest", "b");
     form(r, "acct", "c");
-    const affected = r.rekey("guest", "acct");
+    const { affected } = r.rekey("guest", "acct");
     expect(affected.sort()).toEqual(["b", "guest"]);
     expect(r.of("guest")).toBeNull();
     expect(r.of("b")).toBeNull(); // party of one disbanded

@@ -98,10 +98,17 @@ export function endAllSessions(now = Date.now()): number {
 export function rekeyAnalytics(from: string, to: string, now = Date.now()): void {
   const t = trackers.get(from);
   if (!t || from === to) return;
-  const displaced = trackers.get(to);
-  if (displaced) {
-    if (displaced.current) closeCurrent(displaced, now);
-    endTracker(displaced, now);
+  const dest = trackers.get(to);
+  if (dest && !t.current) {
+    // The guest had already left (grace period) and the account is tracked elsewhere: the
+    // account's session carries on; the guest's ends where it left off.
+    endTracker(t, now);
+    return;
+  }
+  if (dest) {
+    // The guest's live session displaces the account's other browser.
+    if (dest.current) closeCurrent(dest, now);
+    endTracker(dest, now);
   }
   trackers.delete(from);
   t.key = to;

@@ -187,12 +187,25 @@ describe("parties and saving", () => {
     b.send("party", { action: "accept", target: guestId });
     await waitFor(() => !!me(b)?.party && me(b).party === me(a)?.party);
 
+    // A pending invite the guest sent to a third player.
+    const c = await enter(s, "dev:pal_c:Cee", "portus");
+    await waitFor(() => st(a).players?.size === 3);
+    const cInvites = inbox<any>(c, "party:invite");
+    const cClosed = inbox<any>(c, "party:invite-closed");
+    a.send("party", { action: "invite", target: c.sessionId });
+    await waitFor(() => cInvites.length === 1);
+
     await guest.saveWithEmail("pal@example.test");
     const savedId = String(decodeJwt((await guest.client.token()).data!.token).sub);
     expect(savedId).not.toBe(guestId);
     expect(partyOf("pal_b").sort()).toEqual(["pal_b", savedId].sort());
     const states = inbox<any>(b, "party:state");
     await waitFor(() => states.some((x) => x.leader === savedId && x.members.some((m: any) => m.userId === savedId && m.online)));
+    // C's invite card is swapped for one from the saved account, and accepting it works.
+    await waitFor(() => cClosed.some((x) => x.from === guestId && x.reason === "cancelled") && cInvites.length === 2);
+    expect(cInvites[1].from).toBe(savedId);
+    c.send("party", { action: "accept", target: savedId });
+    await waitFor(() => !!me(c)?.party && me(c).party === me(b).party);
     // The saved player can still manage the party.
     a.send("party", { action: "kick", target: "pal_b" });
     await waitFor(() => me(b).party === "");

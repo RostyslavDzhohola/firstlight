@@ -140,11 +140,13 @@ export class PartyRegistry {
 
   /**
    * A guest saved and got a new account id. If the account already has a party (playing in another
-   * browser), it keeps that one and the guest's membership ends. Returns users whose party view changed.
+   * browser), it keeps that one and the guest's membership ends. Returns users whose party view
+   * changed, and the invites the guest had sent (now from the account) so recipients can be told.
    */
-  rekey(from: string, to: string): string[] {
-    if (from === to) return [];
+  rekey(from: string, to: string): { affected: string[]; reissued: Invite[] } {
+    if (from === to) return { affected: [], reissued: [] };
     const affected: string[] = [];
+    const reissued: Invite[] = [];
     const fromParty = this.of(from);
     if (fromParty) {
       if (this.of(to)) affected.push(...this.leave(from).affected);
@@ -177,10 +179,11 @@ export class PartyRegistry {
       if (invitee !== to && !m.has(to)) {
         inv.from = to;
         m.set(to, inv);
+        reissued.push(inv);
       }
       if (m.size === 0) this.invites.delete(invitee);
     }
-    return affected;
+    return { affected, reissued };
   }
 
   clear(): void {

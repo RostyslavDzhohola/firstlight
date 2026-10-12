@@ -58,6 +58,23 @@ describe("session analytics re-key", () => {
     expect(all.find((r) => r.max_level === 2)?.deaths).toBe(1);
   });
 
+  it("a guest who already left saves into an account playing elsewhere: the account's session carries on", async () => {
+    const live = actor("sL", "acct3", 6);
+    trackJoin(live, "meridian", 1_000);
+    trackJoin(actor("sG3", "guest3"), "portus", 1_500);
+    trackLeave("guest3", "sG3", 2_000);
+    stmt(db, "UPDATE session_log SET user_id = 'acct3' WHERE user_id = 'guest3'").run();
+    rekeyAnalytics("guest3", "acct3", 2_500);
+    await settle();
+    expect(openTrackers()).toBe(1); // the live account session
+    const r = rows();
+    expect(r.filter((x) => x.ended_at === null)).toHaveLength(1);
+    expect(r.find((x) => x.ended_at !== null)!.ended_at).toBe(2_000);
+    trackLeave("acct3", "sL", 3_000);
+    await settle();
+    expect(openTrackers()).toBe(0);
+  });
+
   it("a pending end timer still fires after the key changes", async () => {
     trackJoin(actor("s1", "g2"), "portus", 1_000);
     trackLeave("g2", "s1", 2_000);
