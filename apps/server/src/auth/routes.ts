@@ -123,6 +123,10 @@ export function mountAccountRoutes(app: Express, a: Accounts, cfg: AccountsConfi
       res.status(401).send("Play once in this browser (so you're signed in), then open this link again.");
       return;
     }
+    if (id.guest) {
+      res.status(403).send("Save your character with an email first (Esc → Save), then open this link again.");
+      return;
+    }
     if (claimAdmin(a.db, tokenHash, id.userId) === "burnt") {
       res.status(410).send("This claim link was already used.");
       return;

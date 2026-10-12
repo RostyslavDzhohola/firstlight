@@ -121,12 +121,17 @@ describe("combat (seam 1)", () => {
 
   it("logging out outside a safe zone takes a countdown; inside it is instant", async () => {
     RULES.LOGOUT_MS = 300;
-    const { a } = await setup();
+    const first = await setup();
     let out = false;
-    a.onMessage("loggedOut", () => (out = true));
-    a.send("logout", { start: true }); // still on the pad: instant
+    first.a.onMessage("loggedOut", () => (out = true));
+    first.a.send("logout", { start: true }); // still on the pad: instant
     await waitFor(() => out);
+    // Logging out disconnects; come back and try again outside the safe zone.
+    const a = await joinAs(game, "shooter", "arcadia", {}, "admin");
+    rooms.push(a);
+    a.onMessage("loggedOut", () => (out = true));
     out = false;
+    await waitFor(() => (a.state as any).players?.has(a.sessionId));
     place(a, awayFromPad(40));
     await new Promise((r) => setTimeout(r, 200));
     a.send("logout", { start: true });

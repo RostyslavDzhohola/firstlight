@@ -285,3 +285,15 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   `firstlight-assets.rosty-build.workers.dev`. The token can't create TURN keys (no Calls permission);
   the owner creates the TURN key in the dashboard and stores it with `~/.config/firstlight/save-turn-key.sh`
   (secret never shown to the builder).
+- **D25 (run, 01:30Z):** game UI is plain DOM + CSS (no React/Vue). Why: a handful of screens, the
+  canvas owns the frame loop, and a framework adds bundle and re-render cost for no gain here.
+- **D26 (run, 02:10Z):** server hardening after the three-model combat/auth review (Codex Sol, Opus,
+  Sonnet; docs/reviews/2026-10-12-*): one authoritative actor per user (process hub; a new session
+  takes over the old one, which is retired with app close code 4100; merges use 4101, bans 4102,
+  logout 4103); pile + character writes in one SQLite transaction; server-side movement budget, fall
+  damage, bow/heavy charge timers and cooldowns; travel only through a portal (`travel` → server
+  ticket in the character, checked by /api/play); party placement only from the server's party
+  system; account ids never synced to clients; load-test bots never persist; repeat PvP kills on the
+  same victim within 10 min give 10% XP; inventory ops ≤ 5/s; per-IP OTP cap 8/h and "+tag" aliases
+  share one budget; admin claim needs a saved (email) account. Note: the D20–D24 timestamps above were
+  mislabelled (the run started 00:46Z, commits confirm); order is right, clock times are not.

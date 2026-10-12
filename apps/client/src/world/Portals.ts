@@ -2,7 +2,7 @@
 // Portus' three portals. Walking into a portal travels to its body.
 
 import * as THREE from "three/webgpu";
-import { BODIES, padDirs, PAD_SAFE_RADIUS, type BodyId, type Terrain } from "@firstlight/shared";
+import { BODIES, padDirs, PAD_SAFE_RADIUS, portalSpots, type BodyId, type Terrain } from "@firstlight/shared";
 
 export const PORTAL_COLORS: Record<BodyId, number> = {
   portus: 0xffd8a8,
@@ -77,16 +77,7 @@ export class Portals {
     };
 
     if (def.terrain.kind === "hub") {
-      // Portus: three portals around the plaza.
-      const up = new THREE.Vector3(0, 1, 0);
-      const { right, fwd } = frame(up);
-      (["arcadia", "hollowmere", "meridian"] as BodyId[]).forEach((to, i) => {
-        const a = (i / 3) * Math.PI * 2 + Math.PI / 6;
-        const tangent = right.clone().multiplyScalar(Math.cos(a)).addScaledVector(fwd, Math.sin(a));
-        const dir = up.clone().addScaledVector(tangent, 17 / R).normalize();
-        const h = terrain.groundHeight(dir.x, dir.y, dir.z);
-        addPortal(to, dir, h, tangent.clone().negate());
-      });
+      // Portus: three portals around the plaza (positions shared with the server).
     } else {
       const pads = padDirs(def);
       pads.forEach((p, i) => {
@@ -110,12 +101,12 @@ export class Portals {
         this.group.add(pad, holder, bh);
         const at = dir.clone().multiplyScalar(R + h);
         for (const o of [pad, holder, bh]) this.cullables.push({ obj: o, at });
-        if (i === 0) {
-          const { fwd } = frame(dir);
-          const pdir = dir.clone().addScaledVector(fwd, 8.5 / R).normalize();
-          addPortal("portus", pdir, h - 0.2, fwd.clone().negate());
-        }
+
       });
+    }
+    // Portals at the shared, server-validated positions.
+    for (const spot of portalSpots(def, terrain)) {
+      addPortal(spot.to, new THREE.Vector3(...spot.dir), spot.h, new THREE.Vector3(...spot.facing));
     }
   }
 

@@ -21,6 +21,7 @@ describe("SQLite stores", () => {
     c.backpack[2] = { id: "grenade", tier: 2, qty: 3 };
     c.dead = true;
     c.deaths = 2;
+    repo.ensure("u1");
     repo.save("u1", c);
     const back = repo.load("u1")!;
     expect(back.starter).toBe(3);
@@ -31,6 +32,12 @@ describe("SQLite stores", () => {
     expect(back.backpack[2]).toEqual({ id: "grenade", tier: 2, qty: 3 });
     expect(back.dead).toBe(true);
     expect(back.deaths).toBe(2);
+  });
+
+  it("doesn't save (or recreate) a character whose account row is gone", () => {
+    const repo = new SqliteCharacterRepo(db());
+    repo.save("ghost", newCharacter(0, 0, 1));
+    expect(repo.load("ghost")).toBeNull();
   });
 
   it("piles survive a reopen and the first taker wins", () => {

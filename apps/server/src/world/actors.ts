@@ -43,6 +43,23 @@ export interface PlayerActor {
   diedAt: number;
   lastDamagedBy: string | null;
   youDirty: boolean;
+  /** Retired by a newer session or an account merge: never save, never act. */
+  superseded?: boolean;
+  /** Logout countdown start position (cancel if moved > 0.5 m from it). */
+  logoutFrom?: [number, number, number];
+  loggedOut?: boolean;
+  /** Movement budget (metres) refilled over time; dodge allowance once per cooldown. */
+  moveBudget: number;
+  lastBudgetAt: number;
+  lastDodgeAt: number;
+  /** Highest radius since last grounded (server-side fall damage). */
+  peakRadius: number;
+  airborne: boolean;
+  /** Server-side charge tracking (bow draw, heavy melee). */
+  chargeStartedAt: number;
+  specialReadyAt: number;
+  lastPhraseAt: number;
+  healAcc: number;
 }
 
 export interface NpcActor {

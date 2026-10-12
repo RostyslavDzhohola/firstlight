@@ -40,15 +40,15 @@
 
 | Lane | Owner | Worktree / task | Paths |
 |---|---|---|---|
-| Render look + G1 gate | Opus sub-agent | ../fl-wt-render (lane/render) | apps/client/src/render, world/Planet.ts, shared props.ts |
+| Render look + G1 gate | Opus sub-agent | DONE on lane/render (11 commits), awaiting review + merge | apps/client/src/render, world/Planet.ts, shared props.ts |
 | Accounts + persistence | Opus sub-agent | MERGED 61aa332 | apps/server/src/auth, db |
 | Enemies, wildlife, bosses | Opus sub-agent | ../fl-wt-npc (lane/npc) | server world/npc, client world/npcs, shared content/npcs.ts |
 | Voice + radio + phrase wheel | Opus sub-agent | ../fl-wt-voice (lane/voice) | server world/voice, client voice |
 | Social, moderation, stats, share | Opus sub-agent | ../fl-wt-social (lane/social) | parties, player list, /admin, /stats, screenshot |
 | Missions, medals, eggs, shop, pads, stage | Opus sub-agent | ../fl-wt-quests (lane/quests) | content missions/medals, server systems, map |
 | Characters (GLB, animations) | Opus sub-agent | ../fl-wt-chars (lane/chars) | Avatars.ts, assets-dev/characters, tools/blender |
-| UI design competition | Fable 5.1 (delegate) + Opus sub-agent | ../design/fable, ../design/opus | — |
-| Review combat+auth | Codex Sol high + Opus + Sonnet | delegate fl-review-combat-auth-sol-1 + 2 agents | — |
+| UI design competition | judged: Opus entry B base, Fable entry A for landing/loading/player list/onboarding | ../design/opus (base) | port to apps/client/src/ui |
+| Review combat+auth | done; fixes in D26 | docs/reviews/2026-10-12-* | — |
 | Audio (SFX + generative music) | Builder | main | apps/client/src/audio |
 
 ## Measured numbers
