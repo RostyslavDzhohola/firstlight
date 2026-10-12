@@ -92,11 +92,43 @@ describe("weather schedule", () => {
   });
 
   it("applies and expires admin overrides", () => {
-    const o = skyState("meridian", 0, T0, 0, { weather: "dust", intensity: 0.9, until: T0 + 60_000 });
+    const o = skyState("meridian", 0, T0, 0, { weather: "dust", intensity: 0.9, since: T0, until: T0 + 60_000 });
     expect(o.override).toBe(true);
     expect(o.weather).toBe("dust");
     expect(weatherAmount(o, T0)).toBeCloseTo(0.9, 6);
-    expect(skyState("meridian", 0, T0 + 61_000, 0, { weather: "dust", intensity: 0.9, until: T0 + 60_000 }).override).toBe(false);
+    expect(skyState("meridian", 0, T0 + 61_000, 0, { weather: "dust", intensity: 0.9, since: T0, until: T0 + 60_000 }).override).toBe(false);
+  });
+
+  it("keeps an override's state fixed while it runs, so every client flashes together", () => {
+    const o = { weather: "storm" as const, intensity: 0.9, since: T0, until: T0 + 30 * 60_000 };
+    // Two clients that last heard the state at different times (a broadcast and a later re-sync).
+    const a = skyState("arcadia", 0, T0 + 50, 0, o);
+    const b = skyState("arcadia", 0, T0 + 47_000, 0, o);
+    expect(b.slotStart).toBe(a.slotStart);
+    expect(b.nextChangeAt).toBe(a.nextChangeAt);
+    expect(a.slotStart).toBe(T0);
+    for (let ms = T0; ms < T0 + 5 * 60_000; ms += 7_000) expect(nextStrike(b, ms)).toEqual(nextStrike(a, ms));
+  });
+
+  it("keeps striking through a long storm override", () => {
+    const o = { weather: "storm" as const, intensity: 1, since: T0, until: T0 + 240 * 60_000 };
+    const s = skyState("arcadia", 0, T0, 0, o);
+    for (const min of [30, 59, 61, 120, 200, 239]) {
+      const at = T0 + min * 60_000;
+      const st = nextStrike(s, at);
+      expect(st, `strike after ${min} min`).not.toBeNull();
+      expect(st!.at - at).toBeLessThan(26_000);
+    }
+    // Strikes stay at least 6 s apart, also across the schedule's internal windows, and stop at the end.
+    let prev = -Infinity;
+    let n = 0;
+    for (let st = nextStrike(s, T0); st; st = nextStrike(s, st.at + 1)) {
+      expect(st.at - prev).toBeGreaterThanOrEqual(6000);
+      expect(st.at).toBeLessThan(o.until);
+      prev = st.at;
+      n++;
+    }
+    expect(n).toBeGreaterThan(500); // ~240 min / 15.5 s
   });
 
   it("schedules lightning only in storms, identically for every client", () => {
@@ -110,6 +142,6 @@ describe("weather schedule", () => {
     expect(a!.distance).toBeGreaterThanOrEqual(250);
     const b = nextStrike(s, a!.at + 1);
     if (b) expect(b.at - a!.at).toBeGreaterThanOrEqual(6000);
-    expect(nextStrike(skyState("meridian", 0, T0, 0, { weather: "dust", intensity: 1, until: T0 + 1e6 }), T0)).toBeNull();
+    expect(nextStrike(skyState("meridian", 0, T0, 0, { weather: "dust", intensity: 1, since: T0, until: T0 + 1e6 }), T0)).toBeNull();
   });
 });

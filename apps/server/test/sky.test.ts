@@ -2,7 +2,7 @@
 // slot changes are broadcast; an admin override reaches everyone on the copy.
 
 import type { Room } from "@colyseus/sdk";
-import { skyState, type SkyState } from "@firstlight/shared";
+import { nextStrike, skyState, type SkyState } from "@firstlight/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Game } from "../src/app.ts";
 import { SkySystem } from "../src/world/SkySystem.ts";
@@ -75,6 +75,28 @@ describe("sky (seam 1)", () => {
     expect(skies(admin).some((x) => x.override && x.weather === "storm")).toBe(true);
   });
 
+  it("sends an admin override once, not every tick, and every client gets the same lightning", async () => {
+    const admin = await bot("dir", "admin");
+    const other = await bot("cam");
+    admin.send("admin", { cmd: "sky", args: { weather: "storm", intensity: 0.8, minutes: 5 } });
+    await waitFor(() => skies(other).some((s) => s.override));
+    const t0 = skies(other).find((s) => s.override)!.serverTime;
+    await waitFor(() => ((other.state as any).time ?? 0) - t0 >= 1500); // 30 ticks
+    expect(skies(other).filter((s) => s.override)).toHaveLength(1);
+    // A later re-sync describes the same storm: the same strikes as the broadcast.
+    other.send("skySync", {});
+    await waitFor(() => skies(other).filter((s) => s.override).length === 2);
+    const [heard, synced] = skies(other).filter((s) => s.override) as [SkyState, SkyState];
+    expect(synced.serverTime).toBeGreaterThan(heard.serverTime);
+    expect(synced.slotStart).toBe(heard.slotStart);
+    const fromAdmin = skies(admin).find((s) => s.override)!;
+    for (let ms = heard.serverTime; ms < heard.serverTime + 120_000; ms += 5000) {
+      expect(nextStrike(synced, ms)).toEqual(nextStrike(heard, ms));
+      expect(nextStrike(fromAdmin, ms)).toEqual(nextStrike(heard, ms));
+    }
+    expect(nextStrike(heard, heard.serverTime)).not.toBeNull();
+  });
+
   it("ignores the sky command from non-admins", async () => {
     const a = await bot("plain");
     a.send("admin", { cmd: "sky", args: { weather: "storm" } });
@@ -112,4 +134,46 @@ describe("SkySystem (unit)", () => {
     expect(sent.length).toBe(1);
     expect(sent[0]!.slotStart).toBe(first.nextChangeAt);
   });
+
+  it("broadcasts an admin override once, then stays quiet until it ends", () => {
+    const { sys, sent, step } = unit();
+    sys.onAdmin(ADMIN, "sky", { weather: "storm", intensity: 0.8, minutes: 1 });
+    expect(sent).toHaveLength(1);
+    const until = sent[0]!.nextChangeAt;
+    for (let i = 0; i < 400; i++) step(50); // 20 s of ticks
+    expect(sent).toHaveLength(1);
+    // Same storm re-sent with a longer duration: a new end time, so one more message.
+    sys.onAdmin(ADMIN, "sky", { weather: "storm", intensity: 0.8, minutes: 2 });
+    expect(sent).toHaveLength(2);
+    expect(sent[1]!.nextChangeAt).toBeGreaterThan(until);
+    expect(sent[1]!.slotStart).toBe(sent[0]!.slotStart + 20_000);
+    // Expiry goes back to the schedule with one message.
+    while (sys.now() < sent[1]!.nextChangeAt + 100) step(50);
+    expect(sent).toHaveLength(3);
+    expect(sent[2]!.override).toBe(false);
+  });
 });
+
+const ADMIN = {} as never;
+
+/** A SkySystem on a fake room with an injected clock. */
+function unit(body = "arcadia") {
+  const sent: SkyState[] = [];
+  const handlers = new Map<string, unknown[]>();
+  const fakeRoom = {
+    bodyDef: { id: body },
+    state: { copy: 0 },
+    onMessage: (t: string, ...rest: unknown[]) => handlers.set(t, rest),
+    broadcast: (t: string, m: SkyState) => t === "sky" && sent.push(m),
+  };
+  let now = Date.UTC(2026, 9, 12, 5);
+  const sys = new SkySystem(fakeRoom as never);
+  sys.now = () => now;
+  sys.tick(50, now);
+  sent.length = 0;
+  const step = (ms: number) => {
+    now += ms;
+    sys.tick(ms, now);
+  };
+  return { sys, sent, step, handlers };
+}

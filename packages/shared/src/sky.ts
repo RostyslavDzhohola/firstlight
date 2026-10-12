@@ -131,6 +131,8 @@ export interface SkyState {
 export interface SkyOverride {
   weather: Weather;
   intensity: number;
+  /** Server time the override was set: its fixed "slot start", so its state (and lightning) doesn't drift. */
+  since: number;
   until: number;
 }
 
@@ -150,7 +152,7 @@ export function skyState(body: BodyId, copy: number, serverMs: number, dayOffset
   if (override && override.until > serverMs) {
     return {
       ...base, weather: override.weather, intensity: override.weather === "clear" ? 0 : override.intensity,
-      prevWeather: override.weather, slotStart: serverMs - WEATHER_RAMP_MS, nextChangeAt: override.until,
+      prevWeather: override.weather, slotStart: override.since, nextChangeAt: override.until,
       nextWeather: override.weather, override: true,
     };
   }
@@ -177,20 +179,31 @@ export interface Strike {
   seed: number;
 }
 
+/** Long storms (admin overrides, photo mode) schedule their strikes in windows this long. */
+const STRIKE_WINDOW_MS = 10 * 60_000;
+
 /**
  * The first lightning strike at or after `ms` in a storm slot (deterministic, so every client on
  * the copy flashes together), or null when the slot isn't a storm or no strike is left in it.
+ * Strikes come 6–25 s apart. A slot is split into 10-minute windows (scheduled slots fit in the
+ * first one), so a storm of any length keeps striking and a lookup only walks one or two windows.
  */
 export function nextStrike(s: SkyState, ms: number): Strike | null {
   if (s.weather !== "storm") return null;
   const k = Math.round(s.slotStart / 1000);
-  let t = s.slotStart;
-  for (let i = 0; i < 200; i++) {
-    t += 6000 + 19000 * hash01(BODY_SEED[s.body], s.copy, k, 100 + i);
-    if (t >= s.nextChangeAt) return null;
-    if (t >= ms) {
-      const seed = hash4(BODY_SEED[s.body], s.copy, k, 300 + i);
-      return { at: t, az: hash01(seed, 1) * Math.PI * 2, distance: 250 + 450 * hash01(seed, 2), seed };
+  const first = Math.max(0, Math.floor((ms - s.slotStart) / STRIKE_WINDOW_MS));
+  for (let w = first; w < first + 3; w++) {
+    const start = s.slotStart + w * STRIKE_WINDOW_MS;
+    if (start >= s.nextChangeAt) return null;
+    const end = Math.min(s.nextChangeAt, start + STRIKE_WINDOW_MS);
+    let t = start;
+    for (let i = 0; i < 100; i++) {
+      t += 6000 + 19000 * hash01(BODY_SEED[s.body], s.copy, k, 100 + i + 1000 * w);
+      if (t >= end) break;
+      if (t >= ms) {
+        const seed = hash4(BODY_SEED[s.body], s.copy, k, 300 + i + 1000 * w);
+        return { at: t, az: hash01(seed, 1) * Math.PI * 2, distance: 250 + 450 * hash01(seed, 2), seed };
+      }
     }
   }
   return null;

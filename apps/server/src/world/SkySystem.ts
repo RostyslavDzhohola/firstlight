@@ -39,8 +39,9 @@ export class SkySystem implements RoomSystem {
     return skyState(this.body, this.copy, now, this.dayOffset, this.override);
   }
 
+  /** What clients extrapolate from; a broadcast goes out only when it changes (an override's state is fixed). */
   private key(s: SkyState): string {
-    return `${s.weather}:${s.intensity.toFixed(3)}:${s.slotStart}:${s.override}:${this.dayOffset}`;
+    return `${s.weather}:${s.intensity.toFixed(3)}:${s.slotStart}:${s.nextChangeAt}:${s.override}:${this.dayOffset}`;
   }
 
   tick(_dtMs: number, now: number) {
@@ -63,7 +64,7 @@ export class SkySystem implements RoomSystem {
     if (isWeather(args.weather)) {
       const minutes = typeof args.minutes === "number" ? Math.max(0.1, Math.min(240, args.minutes)) : 15;
       const intensity = typeof args.intensity === "number" ? Math.max(0, Math.min(1, args.intensity)) : 0.9;
-      this.override = { weather: args.weather, intensity, until: now + minutes * 60_000 };
+      this.override = { weather: args.weather, intensity, since: now, until: now + minutes * 60_000 };
     }
     if (typeof args.dayT === "number" && Number.isFinite(args.dayT)) {
       // Shift the clock so the copy is at the requested time of day now.
