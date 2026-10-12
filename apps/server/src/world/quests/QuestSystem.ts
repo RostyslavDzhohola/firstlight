@@ -703,7 +703,7 @@ export class QuestSystem implements RoomSystem {
 
   /**
    * Award a medal once per account; true if newly earned. The permanent medal write: nothing is
-   * written while the copy is staging a scene, and a life that was part of a scene or credited with
+   * written while the copy is staging a scene (but Spark, STAGE_PROOF), and a life that was part of a scene or credited with
    * an assisted/staged boss kill never earns life-scoped medals (its level, bosses and progress came
    * partly from admin tools; F12 review S4). With `deferred`, the caller runs the write inside its own
    * transaction: the cache update and the player's messages wait in `deferred` until it commits.
@@ -711,10 +711,10 @@ export class QuestSystem implements RoomSystem {
   award(a: PlayerActor, medalId: string, deferred?: (() => void)[]): boolean {
     const def = MEDAL_BY_ID.get(medalId);
     if (!def || a.identity.loadtest) return false;
-    if (!this.official()) return false;
-    if (def.scope === "life" && this.life(a).unofficial) return false;
     const q = this.qp(a);
-    if (q.medals.has(medalId)) return false;
+    if (q.medals.has(medalId)) return false; // before official(), which reads the copy state
+    if (!STAGE_PROOF.has(medalId) && !this.official()) return false;
+    if (def.scope === "life" && this.life(a).unofficial) return false;
     const fresh = progressStore.current.awardMedal(a.identity.userId, medalId);
     const apply = () => {
       q.medals.add(medalId);
@@ -1041,6 +1041,13 @@ export class QuestSystem implements RoomSystem {
 }
 
 type CharacterMission = PlayerActor["char"]["missions"][number];
+
+/**
+ * Medals a staged copy doesn't withhold: Spark is earned on the training dummies only, which no
+ * staged scene or admin tool touches, and onboarding is offered once, so withholding it would lose
+ * it for good (F12 final Opus SF3).
+ */
+const STAGE_PROOF: ReadonlySet<string> = new Set(["spark"]);
 
 /** NPC lane boss def ids → quests boss ids. */
 const BOSS_OF_NPC: Record<string, BossId> = { tidewrath: "tidewrath", hollow_king: "hollow_king", the_receiver: "receiver" };

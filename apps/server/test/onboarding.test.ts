@@ -16,6 +16,8 @@ import { characterRepo } from "../src/world/characters.ts";
 import { OnboardingSystem } from "../src/world/onboarding.ts";
 import { pileStore } from "../src/world/piles.ts";
 import { progressStore, SqliteProgressStore } from "../src/world/quests/store.ts";
+import { copyRestrictions } from "../src/world/quests/restrictions.ts";
+import { roomCopyKey } from "../src/world/copyState.ts";
 import { SqliteCharacterRepo, SqlitePileStore } from "../src/world/sqliteStores.ts";
 import { safeLeave, startServer } from "./helpers.ts";
 import { bot, ground, harness, me, serverRoom, sleep, terrain, tpAndWait, until, type Bot } from "./quest-helpers.ts";
@@ -283,6 +285,21 @@ describe("onboarding completion pays once (SQLite, F12 final B2)", () => {
     expect(store.stat("leftover", ONBOARDING.STAT)).toBe(1);
     expect(repo.load("leftover")!.xp).toBe(50);
     expect(serverRoom(b).actors.get(b.id)!.char.xp).toBe(50);
+  }, 30_000);
+});
+
+describe("onboarding in a staged Portus copy (F12 final Opus SF3)", () => {
+  it("still earns the Spark medal (onboarding is offered once)", async () => {
+    const b = await bot("staged_newbie", "portus", "admin", { starter: 3 });
+    copyRestrictions.current.set(roomCopyKey(serverRoom(b)), { stagedUntil: Date.now() + 30 * 60_000, assistedUntil: 0 });
+    for (let i = 0; i < N; i++) {
+      await tpAndWait(b, inFront(i, 6));
+      await knockDown(b, i, "carbine");
+    }
+    await until("done", () => b.count("onboarding") === 1);
+    expect(progressStore.current.stat("staged_newbie", ONBOARDING.STAT)).toBe(1);
+    expect(progressStore.current.medals("staged_newbie")).toContain("spark");
+    await until("spark in you", () => b.you.medals.includes("spark"));
   }, 30_000);
 });
 
