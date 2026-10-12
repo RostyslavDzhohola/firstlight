@@ -52,6 +52,8 @@
 | Audio (SFX + generative music) | Builder | main | apps/client/src/audio |
 | UI port (design verdict) | Opus sub-agent | ../fl-wt-ui (lane/ui, based on lane/render + main) | apps/client/src/ui, index.html, main.ts |
 | Review lane/render | Codex Sol high + Opus | delegate fl-review-render-sol-1 + agent | — |
+| Destruction (§6.9) | Opus sub-agent | ../fl-wt-destruct (lane/destruct, main+render) | shared breakables.ts, server destruction.ts, client Breakables/debris |
+| Photo mode + F2 load test | Builder | ../fl-wt-photo / tools/bots | game/PhotoMode.ts |
 
 ## Measured numbers
 
