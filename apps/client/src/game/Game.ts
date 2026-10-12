@@ -44,6 +44,7 @@ function hideLoading() {
 /** ?bench runs without a server unless ?online is also given; ?offline forces it anywhere. */
 const OFFLINE = flags.has("offline") || (flags.has("bench") && !flags.has("online"));
 const FX_DEMO = flags.has("fxdemo");
+const CPU_SLOW = Math.max(1, Math.min(8, Number(flags.get("cpuslow")) || 1));
 
 export class Game {
   ctx!: RenderCtx;
@@ -500,7 +501,14 @@ export class Game {
     }
     if (this.input.pressed.has("F3")) this.perf.toggle();
     this.ctx.render();
-    const cpuMs = performance.now() - cpu0;
+    let cpuMs = performance.now() - cpu0;
+    if (CPU_SLOW > 1) {
+      // ?cpuslow=N (F11 weak-laptop profile): emulate an N× slower CPU on the main thread by
+      // busy-waiting (N−1)× this frame's CPU time, like DevTools CPU throttling.
+      const until = performance.now() + cpuMs * (CPU_SLOW - 1);
+      while (performance.now() < until) { /* spin */ }
+      cpuMs *= CPU_SLOW;
+    }
     this.ctx.afterFrame(now, rawMs);
     this.bench?.record(rawMs);
     shaderMonitorFrame();
