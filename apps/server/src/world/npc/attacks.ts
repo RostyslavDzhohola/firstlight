@@ -283,10 +283,11 @@ function fromDirOf(n: Npc, p: V3): V3 {
   return sub(n.pos, p);
 }
 
-function hitAll(sys: NpcSystem, n: Npc, list: LivePlayer[], a: AttackDef, at: ActiveAttack, from?: V3) {
+/** `src`: where splash comes from (lobbed circles), so a Prism Bubble between it and a player stops it. */
+function hitAll(sys: NpcSystem, n: Npc, list: LivePlayer[], a: AttackDef, at: ActiveAttack, from?: V3, src?: V3) {
   for (const lp of list) {
     if (n.boss && sys.boss && sys.boss.blocked(n.pos, lp.pos, a)) continue;
-    sys.hitPlayer(n, lp.a, dmgOf(n, a), { fromDir: from ? sub(from, lp.pos) : fromDirOf(n, lp.pos), knockback: a.knockback, effect: a.effect });
+    sys.hitPlayer(n, lp.a, dmgOf(n, a), { fromDir: from ? sub(from, lp.pos) : fromDirOf(n, lp.pos), knockback: a.knockback, effect: a.effect, ...(src ? { src } : {}) });
     at.hitIds.add(lp.a.id);
   }
 }
@@ -310,7 +311,7 @@ function resolve(sys: NpcSystem, n: Npc, at: ActiveAttack, now: number) {
       hitAll(sys, n, playersInCircle(sys, at.origin, a.radius ?? 3, a.inner ?? 0, n.boss ? 5 : HEIGHT_TOL), a, at, at.origin);
       break;
     case "circle":
-      for (const c of at.points) hitAll(sys, n, playersInCircle(sys, c, a.radius ?? 3), a, at, n.pos);
+      for (const c of at.points) hitAll(sys, n, playersInCircle(sys, c, a.radius ?? 3), a, at, n.pos, chest(c, 0.3));
       break;
     case "field":
       for (const c of at.points) for (const lp of playersInCircle(sys, c, a.radius ?? 4)) if (a.effect) sys.applyEffect(lp.a, a.effect, n);
@@ -362,7 +363,7 @@ function resolve(sys: NpcSystem, n: Npc, at: ActiveAttack, now: number) {
       const t = at.targetId ? sys.world.playerById(at.targetId) : undefined;
       if (t && !t.dead) {
         const tp = actorPos(t);
-        if (dist(n.pos, tp) <= a.range + 1.5 && canSee(sys, chest(n.pos, 0.3), chest(tp))) sys.hitPlayer(n, t, dmgOf(n, a), { fromDir: fromDirOf(n, tp) });
+        if (dist(n.pos, tp) <= a.range + 1.5 && canSee(sys, chest(n.pos, 0.3), chest(tp))) sys.hitPlayer(n, t, dmgOf(n, a), { fromDir: fromDirOf(n, tp), src: chest(n.pos, 0.3) });
         sys.sendNear(n.pos, TELEGRAPH_RADIUS, "npcShot", { id: n.id, x: n.pos[0], y: n.pos[1], z: n.pos[2], vx: tp[0], vy: tp[1], vz: tp[2], g: -1, ms: 150, k: n.defIndex });
       }
       break;
@@ -424,7 +425,7 @@ function runActive(sys: NpcSystem, n: Npc, at: ActiveAttack, now: number, dt: nu
         const from = chest(n.pos, Math.min(1.5, n.height * 0.75));
         if (at.aim === null || at.ticksLeft === (a.count ?? 1) - 1) at.aim = canSee(sys, from, chest(tp)) ? tp : null;
         sys.sendNear(n.pos, TELEGRAPH_RADIUS, "npcShot", { id: n.id, x: from[0], y: from[1], z: from[2], vx: aim[0], vy: aim[1], vz: aim[2], g: -1, ms: 90, k: n.defIndex });
-        if (at.aim && dist(aim, tp) <= 1.1 && dist(n.pos, tp) <= a.range + 3) sys.hitPlayer(n, t, dmgOf(n, a), { fromDir: fromDirOf(n, tp) });
+        if (at.aim && dist(aim, tp) <= 1.1 && dist(n.pos, tp) <= a.range + 3) sys.hitPlayer(n, t, dmgOf(n, a), { fromDir: fromDirOf(n, tp), src: from });
       }
       break;
     }
@@ -511,6 +512,13 @@ export function stepNpcProjectiles(sys: NpcSystem, now: number, dt: number) {
     pr.vel = add(pr.vel, u, -pr.g * dt);
     const next = add(pr.pos, pr.vel, dt);
     let gone = false;
+    // A Prism Bubble shell stops the bolt where it crosses, and takes the hit.
+    const shell = sys.world.host.bubbles?.between(pr.pos, next) ?? null;
+    if (shell) {
+      sys.world.host.bubbles!.absorb(shell, pr.damage);
+      list.splice(i, 1);
+      continue;
+    }
     for (const lp of sys.live) {
       if (lp.untouchable) continue;
       if (segPointDist(pr.pos, next, chest(lp.pos)) <= pr.radius + 0.55) {

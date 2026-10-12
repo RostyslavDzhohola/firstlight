@@ -26,7 +26,8 @@ export interface TierStats {
   heavyTime?: number;
   zoom?: number;
   headMult?: number;
-  heal?: number; // fraction of target max HP
+  heal?: number; // fraction of target max HP (Patchkit) or HP (tonics)
+  channel?: number; // Patchkit channel seconds before the heal starts
   shell?: number; // bubble HP per 100 owner max HP
   duration?: number;
   cooldown?: number;
@@ -130,7 +131,8 @@ export const WEAPONS: readonly WeaponDef[] = [
   {
     id: "patchkit", name: "Patchkit", cls: "support", delivery: "heal", range: 4,
     destroys: "none", stack: 5,
-    tiers: [T(1, 25, { damage: 0, heal: 0.3, rate: 1.0, cooldown: 6 }), T(6, 60, { damage: 0, heal: 0.4, rate: 0.9, cooldown: 6 }), T(12, 120, { damage: 0, heal: 0.5, rate: 0.8, cooldown: 6 })],
+    // Channel 1.0 / 0.9 / 0.8 s, then heal × the target's max HP over 2 s (content.md §2.3).
+    tiers: [T(1, 25, { damage: 0, heal: 0.3, rate: 1.0, channel: 1.0, duration: 2, cooldown: 6 }), T(6, 60, { damage: 0, heal: 0.4, rate: 0.9, channel: 0.9, duration: 2, cooldown: 6 }), T(12, 120, { damage: 0, heal: 0.5, rate: 0.8, channel: 0.8, duration: 2, cooldown: 6 })],
   },
   {
     id: "bubble", name: "Prism Bubble", cls: "support", delivery: "bubble", range: 0,

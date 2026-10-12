@@ -8,6 +8,7 @@ import type { Terrain } from "@firstlight/shared";
 import { PF } from "@firstlight/shared/net/schema";
 import { actorPos, positionAgo, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
 import { dist3, HEAD_FROM, inMeleeArc, PLAYER_HEIGHT, PLAYER_RADIUS, rayCapsule, rayTerrain, type V3 } from "./geometry.ts";
+import type { Bubble, BubbleHost } from "./support.ts";
 
 export const REWIND_MS = 150;
 export const COMBAT_TAG_MS = 10_000;
@@ -27,6 +28,8 @@ export interface CombatHost {
   onPropHit?(point: V3, power: "light" | "heavy", amount: number): void;
   /** Breakable props (set by destruction.ts): intact ones stop shots and take damage. */
   props?: BreakableHost;
+  /** Prism Bubbles (set by support.ts): shots, projectiles and splash crossing a shell stop at it. */
+  bubbles?: BubbleHost;
 }
 
 /**
@@ -110,6 +113,14 @@ function headPos(p: PlayerActor): V3 {
   const [x, y, z] = actorPos(p);
   const l = Math.hypot(x, y, z);
   return [x + (x / l) * 1.6, y + (y / l) * 1.6, z + (z / l) * 1.6];
+}
+
+/** Chest of an actor (splash and line-of-sight tests): 1 m above a player's feet, mid-height for NPCs. */
+function chestOf(a: Actor): V3 {
+  const [x, y, z] = actorPos(a);
+  const l = Math.hypot(x, y, z) || 1;
+  const h = a.kind === "player" ? 1.0 : Math.min(a.height * 0.5, 3);
+  return [x + (x / l) * h, y + (y / l) * h, z + (z / l) * h];
 }
 
 function upOf(v: V3): V3 {
@@ -337,7 +348,14 @@ function hitscan(host: CombatHost, p: PlayerActor, o: V3, d: V3, maxRange: numbe
   // An intact breakable in the way stops the shot and takes it instead (destruction.ts).
   const prop = propOnRay(host, o, d, Math.min(maxRange, terrainT));
   const propT = prop ? prop.t : Infinity, propIdx = prop ? prop.index : -1;
-  const hit = raycastActors(host, o, d, Math.min(maxRange, terrainT, propT), new Set([p.id]), REWIND_MS);
+  // A Prism Bubble shell in the way (either side) takes the shot.
+  const shell = host.bubbles?.cross(o, d, Math.min(maxRange, terrainT, propT)) ?? null;
+  const shellT = shell ? shell.t : Infinity;
+  const hit = raycastActors(host, o, d, Math.min(maxRange, terrainT, propT, shellT), new Set([p.id]), REWIND_MS);
+  if (!hit && shell) {
+    host.bubbles!.absorb(shell.bubble, baseDamage * falloff(shellT, def.range, def.falloffTo, def.falloffMin));
+    return shellT;
+  }
   if (!hit) {
     if (propIdx >= 0) host.props!.damage(propIdx, baseDamage * falloff(propT, def.range, def.falloffTo, def.falloffMin), def.destroys, def.id, d, p.id);
     const endT = propIdx >= 0 ? propT : terrainT;
@@ -499,11 +517,21 @@ export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | 
 
 /** Splash damage around a point (friendly fire on; the owner takes half). */
 export function explode(host: CombatHost, owner: PlayerActor | NpcActor, at: V3, radius: number, damage: number, weaponIndex: number, exclude?: string, excludeProp?: number) {
+  const shielded = new Set<Bubble>();
   for (const a of allActors(host)) {
     if (a.id === exclude) continue;
     const d = dist3(at, actorPos(a));
     if (d > radius + 0.5) continue;
     let dmg = damage * splashFalloff(Math.max(0, d - 0.5), radius);
+    // Splash crossing a Prism Bubble shell stops at it (the shell takes the blast once).
+    const shell = host.bubbles?.between(at, chestOf(a)) ?? null;
+    if (shell) {
+      if (!shielded.has(shell)) {
+        shielded.add(shell);
+        host.bubbles!.absorb(shell, damage * splashFalloff(Math.max(0, dist3(at, shell.c) - shell.r), radius));
+      }
+      continue;
+    }
     if (a.id === owner.id) dmg *= 0.5;
     if (dmg > 0) dealDamage(host, owner, a, dmg, false, [at[0] - actorPos(a)[0], at[1] - actorPos(a)[1], at[2] - actorPos(a)[2]], 4);
   }
@@ -546,6 +574,27 @@ export function stepProjectiles(host: CombatHost, dt: number) {
     // Intact breakables stop projectiles like terrain does (destruction.ts).
     const prop = propOnRay(host, p.pos, d, Math.min(step, terrainT));
     const propT = prop ? prop.t : Infinity, propIdx = prop ? prop.index : -1;
+    // A Prism Bubble shell stops the projectile where it crosses (rockets burst against it).
+    const shell = host.bubbles?.cross(p.pos, d, Math.min(step, terrainT, propT)) ?? null;
+    if (shell) {
+      const sh = shell.bubble, shT = shell.t;
+      if (!raycastActors(host, p.pos, d, shT, p.hit, 0)) {
+        const at: V3 = [p.pos[0] + d[0] * shT, p.pos[1] + d[1] * shT, p.pos[2] + d[2] * shT];
+        if (p.fuseAt !== null) {
+          // Grenades stop against the shell and wait for the fuse outside it.
+          p.pos = [at[0] - d[0] * 0.2, at[1] - d[1] * 0.2, at[2] - d[2] * 0.2];
+          p.stuck = true;
+          continue;
+        }
+        // The direct number includes the blast (content §2.3): the shell takes the rest from the splash.
+        host.bubbles!.absorb(sh, p.damage - (p.tier.splash && p.tier.radius ? p.tier.splash : 0));
+        const back: V3 = [at[0] - d[0] * 0.05, at[1] - d[1] * 0.05, at[2] - d[2] * 0.05];
+        if (p.tier.splash && p.tier.radius) explode(host, p.owner, back, p.tier.radius, p.tier.splash, WEAPON_INDEX.get(p.weapon.id) ?? 0);
+        else host.broadcastNear("explode", { id: p.id, x: at[0], y: at[1], z: at[2], radius: 0, weapon: WEAPON_INDEX.get(p.weapon.id) }, at, 200);
+        list.splice(i, 1);
+        continue;
+      }
+    }
     const hit = raycastActors(host, p.pos, d, Math.min(step, terrainT, propT), p.hit, 0);
     if (hit) {
       p.hit.add(hit.actor.id);
@@ -624,13 +673,20 @@ export function stepEffects(host: CombatHost, dt: number) {
       const mh = maxHp(p.char.level);
       let add = 0;
       p.heals = p.heals.filter((h) => {
-        if (now > h.until) return false;
-        add += h.perSec * dt;
-        return true;
+        if (h.left === undefined) {
+          if (now > h.until) return false;
+          add += h.perSec * dt;
+          return true;
+        }
+        // Heals that know their total pay exactly that, however the ticks fall.
+        const amt = Math.min(h.left, h.perSec * dt);
+        h.left -= amt;
+        add += amt;
+        return h.left > 1e-6 && now <= h.until + 1000;
       });
       // Accumulate fractional healing so a 40 HP tonic heals 40, independent of tick length.
       p.healAcc += add;
-      const whole = Math.floor(p.healAcc);
+      const whole = Math.floor(p.healAcc + 1e-6); // 40 × 0.75 must come to 30, not 29.999…
       if (whole > 0) {
         p.healAcc -= whole;
         if (p.state.hp < mh) p.state.hp = Math.min(mh, p.state.hp + whole);

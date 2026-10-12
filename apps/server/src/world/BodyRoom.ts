@@ -23,6 +23,7 @@ import { dist3, type V3 } from "./geometry.ts";
 import { emitGameEvent, npcKindOf } from "./events.ts";
 import { emitPileEvent, onPileEvent, pileStore, type PileData } from "./piles.ts";
 import { SYSTEM_FACTORIES, type RoomSystem } from "./systems.ts";
+import { supportOf } from "./support.ts";
 import { movementLimits } from "./npc/effects.ts";
 import { matchMaker } from "@colyseus/core";
 import { liveSessions } from "../auth/sessions.ts";
@@ -187,9 +188,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       const a = this.actor(c);
       if (a && !a.dead) this.equip(a, m.slot);
     });
-    this.onMessage("use", slotSchema, (c, m) => {
+    this.onMessage("use", slotSchema.extend({ targetId: z.string().max(64).optional() }), (c, m) => {
       const a = this.actor(c);
-      if (this.invAllowed(a)) this.use(a, m.slot);
+      if (this.invAllowed(a)) this.use(a, m.slot, m.targetId);
     });
     this.onMessage("pickup", pickupSchema, (c, m) => {
       const a = this.actor(c);
@@ -542,7 +543,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     a.youDirty = true;
   }
 
-  use(a: PlayerActor | undefined, slot: number) {
+  use(a: PlayerActor | undefined, slot: number, targetId?: string) {
     if (!a || a.dead) return;
     const item = slot < HOTBAR_SLOTS ? a.char.hotbar[slot] : a.char.backpack[slot - HOTBAR_SLOTS];
     if (!item) return;
@@ -558,13 +559,10 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       if (now < a.tonicCooldownUntil) return;
       a.tonicCooldownUntil = now + 8000;
       const dur = item.id === "tonic_small" ? 3 : 4;
-      a.heals.push({ perSec: (tier.heal ?? 40) / dur, until: now + dur * 1000 });
+      a.heals.push({ perSec: (tier.heal ?? 40) / dur, until: now + dur * 1000, left: tier.heal ?? 40 });
       this.consume(a, slot);
-    } else if (item.id === "patchkit") {
-      if (now < a.healCooldownUntil) return;
-      a.healCooldownUntil = now + (tier.cooldown ?? 6) * 1000;
-      a.heals.push({ perSec: ((tier.heal ?? 0.3) * maxHp(a.char.level)) / 2, until: now + 2000 + (tier.rate ?? 1) * 1000 });
-      this.consume(a, slot);
+    } else if (item.id === "patchkit" || item.id === "bubble") {
+      supportOf(this)?.use(a, slot, item, targetId); // channelled heal / shield bubble (support.ts)
     }
   }
 

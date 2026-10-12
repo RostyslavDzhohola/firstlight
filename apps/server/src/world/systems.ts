@@ -9,6 +9,7 @@ import { npcSystemFactory } from "./npc/index.ts";
 import { createQuestSystem } from "./quests/QuestSystem.ts";
 import { createVoiceSystem } from "./voice/index.ts";
 import { createSkySystem } from "./SkySystem.ts";
+import { createSupportSystem } from "./support.ts";
 
 export interface RoomSystem {
   /** Called every simulation tick (50 ms). */
@@ -32,3 +33,5 @@ export const SYSTEM_FACTORIES: SystemFactory[] = [npcSystemFactory, createVoiceS
 SYSTEM_FACTORIES.push(createDestructionSystem);
 // Weather + day/night lane: per-copy sky clock and weather schedule.
 SYSTEM_FACTORIES.push(createSkySystem);
+// Support items: Patchkit channels and Prism Bubbles (hooks combat via host.bubbles).
+SYSTEM_FACTORIES.push(createSupportSystem);

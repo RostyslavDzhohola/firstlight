@@ -65,6 +65,7 @@ export interface ProjectileSim {
 export class Effects {
   private readonly list: Fx[] = [];
   readonly projectiles = new Map<number, ProjectileSim>();
+  private readonly bubbles = new Map<number, THREE.Object3D>();
   readonly group = new THREE.Group();
 
   constructor(scene: THREE.Scene) {
@@ -122,6 +123,29 @@ export class Effects {
     setTimeout(() => geo.dispose(), 400);
   }
 
+  /** Prism Bubble: a faint shimmering shell at the owner's feet until it pops or times out. */
+  bubble(id: number, at: THREE.Vector3, radius: number, ms: number, color = 0x9fd8ff) {
+    const m = new THREE.Mesh(ballGeo, glow(color, 0.12));
+    m.position.copy(at);
+    m.scale.setScalar(radius);
+    const born = performance.now();
+    this.bubbles.set(id, m);
+    this.add(m, ms, true, (t) => {
+      if (!this.bubbles.has(id) || t >= born + ms - 20) {
+        this.bubbles.delete(id);
+        return true;
+      }
+      m.scale.setScalar(radius * (1 + 0.015 * Math.sin((t - born) / 120)));
+    });
+  }
+
+  popBubble(id: number) {
+    const m = this.bubbles.get(id);
+    if (!m) return;
+    this.bubbles.delete(id);
+    this.flash(m.position, 0x9fd8ff, m.scale.x, 160);
+  }
+
   spawnProjectile(id: number, weaponIndex: number, pos: THREE.Vector3, vel: THREE.Vector3, g: number) {
     const color = weaponColor(weaponIndex);
     const id_ = WEAPONS[weaponIndex]?.id;
@@ -167,5 +191,6 @@ export class Effects {
     this.group.removeFromParent();
     this.list.length = 0;
     this.projectiles.clear();
+    this.bubbles.clear();
   }
 }

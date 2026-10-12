@@ -12,7 +12,7 @@ import { actorPos, type PlayerActor } from "../actors.ts";
 import { dealDamage } from "../combat.ts";
 import type { V3 } from "../geometry.ts";
 import type { RoomSystem } from "../systems.ts";
-import { stepNpcProjectiles, type NpcProjectile } from "./attacks.ts";
+import { chest, stepNpcProjectiles, type NpcProjectile } from "./attacks.ts";
 import { BossController } from "./boss.ts";
 import { onNpcHurt, think } from "./brain.ts";
 import { MODE, MODE_NAME, type Mode, type Npc } from "./npc.ts";
@@ -458,10 +458,21 @@ export class NpcSystem implements RoomSystem {
     n.modeUntil = until;
   }
 
-  /** Damage a player from an NPC with the AI caps (content §0), buffs and status effects. */
-  hitPlayer(n: Npc | null, p: PlayerActor, amount: number, opts: { fromDir?: V3; knockback?: number; effect?: StatusEffect; trueDamage?: boolean } = {}): number {
+  /**
+   * Damage a player from an NPC with the AI caps (content §0), buffs and status effects. `src` is
+   * where a ranged hit comes from (rounds, lobbed splash): a Prism Bubble shell between it and the
+   * player's chest takes the hit instead. Melee passes no `src`; true damage ignores bubbles.
+   */
+  hitPlayer(n: Npc | null, p: PlayerActor, amount: number, opts: { fromDir?: V3; knockback?: number; effect?: StatusEffect; trueDamage?: boolean; src?: V3 } = {}): number {
     const now = this.world.now();
     if (p.dead) return 0;
+    if (opts.src && !opts.trueDamage && this.world.host.bubbles) {
+      const shell = this.world.host.bubbles.between(opts.src, chest(actorPos(p)));
+      if (shell) {
+        this.world.host.bubbles.absorb(shell, amount);
+        return 0;
+      }
+    }
     let dmg = amount;
     if (n && !opts.trueDamage) {
       if (n.state.flags & NF.BUFFED) dmg *= 1.15;
