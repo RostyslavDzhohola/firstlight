@@ -136,7 +136,7 @@ removes every coin (D), so prices are set for one life.
 | Prism Bubble T1 / T2 / T3 | 120 / 400 / 1,000 | (new) |
 | Radio | **100** | (D) |
 | Horse Whistle (extra after the core, §1.6) | 1,500 | a normal item: drops in the death pile, so the horse is lost on death (D); price (new) |
-| Common cosmetics (5 items, §8.3) | 120 each | (new) |
+| Common cosmetics (7 items, §8.4) | 120 each | (new) |
 
 Equipping still needs the level gate (T2 = L6, T3 = L12) (D). Anyone can buy, pick up or sell anything.
 
@@ -465,7 +465,7 @@ Sixers' black-and-grey "6" look, IOI branding and Sorrento-like leaders [12].
 | Weapon tier by enemy level | E ≤ 5: T1 · E 6–11: T1 30% / T2 70% · E ≥ 12: T2 40% / T3 60% |
 | Tonic | Arcadia Small Tonic 1/10; Hollowmere and Meridian Large Tonic 1/12 |
 | Scrapburst Grenade (tier as weapon) | 1/25 from listed enemies |
-| Planet cosmetic (any enemy on that planet) | Arcadia Messenger's Winged Cap 1/150 · Hollowmere Crowbeak Mask 1/100 · Meridian Hard Hat (Oversight Issue) 1/75; guaranteed after 3× the expected kills in one life (pity) |
+| Planet cosmetics (any eligible enemy on that planet) | Arcadia Messenger's Winged Cap 1/150 · Hollowmere Crowbeak Mask 1/100 · Meridian Hard Hat (Oversight Issue) 1/75; also Petalwake Mask 1/180 on Arcadia and Fenweave Cape 1/160 on Hollowmere; each guaranteed independently after 3× its expected kills in one life (pity) |
 
 ---
 
@@ -622,22 +622,22 @@ Rules (new):
 | H3 | Hollowmere | reach | The Tolling Tower | Reach the top platform of the Tolling Tower (ramps, no climbing) | 9–12 | 1,100 XP, 180 coins | **Boss lair**: the platform looks into the Hollow Nave's broken roof |
 | M1 | Meridian / **Rook Calder**, an ex-Oversight courier | hunt | Performance Review | Kill 6 Associates and the Compliance Officer at Checkpoint Seven | 13–16 | 2,000 XP, 300 coins | Checkpoint Seven guards the canyon road to Foreclosure Yard |
 | M2 | Meridian | find | Whistleblower | Pick up the memo drive on the manager's desk in the Oversight Lobby | 14–17 | 2,400 XP, 350 coins | **Egg E7**: the wall safe is in the same office; the break-room mirror is next door |
-| M3 | Meridian | reach | Site Visit | Reach the gantry overlook above Foreclosure Yard | 15–18 | 2,800 XP, 400 coins | **Boss lair**: both Override Consoles are visible from the gantry |
+| M3 | Meridian | reach | Site Visit | Reach the gantry overlook above Foreclosure Yard | 15–18 | 2,800 XP, 400 coins, Copper Orbit Pack | **Boss lair**: both Override Consoles are visible from the gantry |
 
 Totals: 10,280 XP and 1,630 coins per life.
 
 ---
 
-## 6. Easter eggs (3 per planet) (new)
+## 6. Easter eggs (4 per planet)
 
 Rules:
 - The item can be claimed once per life. It is an item, so it drops on death like everything else (D).
 - The hidden medal is earned once per account and stays hidden in the medal list until earned.
 - The first account to claim each egg is engraved on that egg's plaque in Portus's **Hall of Firsts**
-  (D): 9 plaques.
+  (D): 12 egg plaques, alongside the 3 boss plaques.
 - Anti-abuse (F12 review): a wrong E2/E5 answer locks that puzzle for the account for 15 s. Penalty
   spawns dissolve after 90 s, are capped at 6 per account and 12 per world copy, and pay nothing when
-  killed (no XP, coins or drops). The E7 keypad locks an account out for 60 s after 5 wrong codes in a row.
+  killed (no XP, coins or drops). The E7 and E12 keypads lock an account out for 60 s after 5 wrong codes in a row. E10 rejects wrong inputs for 15 s; E11 rejects premature claims and expired attempts for 15 s, with a 45 s attempt window. The new puzzles spawn no NPCs and pay no XP or coins. Lockouts follow accounts across copies and planet changes.
 
 | # | Planet | Name | Location concept | How to find it | Rare item | Hidden medal |
 |---|---|---|---|---|---|---|
@@ -650,10 +650,17 @@ Rules:
 | E7 | Meridian | Employee of the Month | Oversight Lobby manager's office (mission M2) | A wall safe has a 4-digit keypad. The break-room poster says "REFLECT ON YOUR PERFORMANCE". Digits painted mirror-reversed on the opposite wall read **7041** in the break-room mirror (a baked mirror texture, so it works on Low) | **Executive Visor** (Legendary mask: amber one-way visor with a scrolling ticker of light) | Employee of the Month |
 | E8 | Meridian | Lights Out | The Last Billboard, a broken Oversight billboard on a mesa above Glasspan | Shoot out its 5 lamp targets (0.4 m each, ≥ 60 m below, no path up) within 20 s; they relight after that. A maintenance hatch at the mesa base opens into the **Signal Room** (a CRT wall) | **Static Cloak** (Legendary cape: shimmering TV-static pattern) | Lights Out |
 | E9 | Meridian | Ticket #000 | Checkpoint Seven, back wall | One Associate stands facing a wall, non-hostile, with no level plate and ticket "000". Use the phrase wheel's **"Truce?"** within 5 m: it turns and walks 120 m to a freight lift, which descends to the **Vat Room** (rows of empty trooper pods, one open). Attacking it makes it vanish for 10 min | **Ticket #000 Helmet** (Legendary hat: an Associate helmet stencilled 000) | Not a Clone |
+| E10 | Arcadia | The Dewdial | Pinewhistle Wood, a weathered dial among the trees | Interact with the carvings; the dial carries a gardener's clue | **Dewdial Crown** (Legendary hat: twig circlet with orbiting dew beads) | Tended the Dawn |
+| E11 | Hollowmere | Afloat in the Dark | Thornwood, floating wicks around a reed coffer | A timed interaction puzzle; a wick keeper's stone carries a clue | **Wickfloat Mantle** (Legendary cape: dusk cloth with three caged amber lights) | Kept the Wicks |
+| E12 | Meridian | The Quiet Shift | Cinder Canyons, a discarded work slip beside a timebox | A keypad puzzle; the slip carries an inspection clue | **Quietshift Lens** (Legendary mask: one offset octagonal lens in a copper frame) | Off the Clock |
+
+M11 extra #5 is enabled by default. `FEATURE_COSMETICS_EXTRAS=0` disables its new sources and egg
+triggers. Already-owned cosmetics remain usable. New egg rewards cannot be sold. Staged copies,
+assisted copies and admin-assisted claims grant the item without writing a medal or first-finder entry.
 
 ---
 
-## 7. Achievements: 20 medals + 9 hidden egg medals (new)
+## 7. Achievements: 20 medals + 12 hidden egg medals
 
 Medals are account-bound and survive death (D). Wear one as a **title** under your name. "Life" means
 since the last rebirth; "account" means cumulative.
@@ -680,7 +687,10 @@ since the last rebirth; "account" means cumulative.
 | 18 | Killed by a Woolback | joke | Die to a Woolback buck, or to fall damage within 5 s of a Woolback's knockback | account | Fleeced |
 | 19 | With Friends Like These | joke | Be killed by a member of your current party | account | Trusting |
 | 20 | Own Goal | joke | Die to your own Comet rocket, Scrapburst or Emberglass splash | account | Self-Starter |
-| H1–H9 | the 9 egg medals in §6 | hidden | Claim that egg's item | account | same as the medal name |
+| H1–H9 | the original 9 egg medals in §6 | hidden | Claim that egg's item | account | same as the medal name |
+| H10 | Tended the Dawn | hidden | Claim the Dewdial Crown | account | Dawn Tender |
+| H11 | Kept the Wicks | hidden | Claim the Wickfloat Mantle | account | Wick Keeper |
+| H12 | Off the Clock | hidden | Claim the Quietshift Lens | account | Quietshift |
 
 ---
 
@@ -768,6 +778,22 @@ Cosmetics are items: they drop on death (D). Slots are hat, cape, mask and backp
 | Backpack | Lantern of Lacefall | Legendary | egg E1 |
 | Backpack | Golden Hopbit | Legendary | egg E3 |
 | Backpack | Bone Bell | Legendary | egg E6 |
+| Hat | Bracken Stitch Cap | Common | Portus shop, 120 |
+| Cape | Dockfold Cape | Common | Portus shop, 120 |
+| Mask | Petalwake Mask | Uncommon | any eligible Arcadia enemy 1/180; independent pity at 540 kills |
+| Cape | Fenweave Cape | Rare | any eligible Hollowmere enemy 1/160; independent pity at 480 kills |
+| Backpack | Copper Orbit Pack | Rare | Site Visit mission M3, once per life |
+| Hat | Dewdial Crown | Legendary | egg E10; cannot be sold |
+| Cape | Wickfloat Mantle | Legendary | egg E11; cannot be sold |
+| Mask | Quietshift Lens | Legendary | egg E12; cannot be sold |
+
+M11 looks are procedural shapes in `apps/client/src/render/Cosmetics.ts`. Bracken Stitch Cap is
+moss cloth with tan stitches; Dockfold Cape is slate cloth with folded side panels; Petalwake Mask is
+a faceted flower with a brass centre; Fenweave Cape is violet cloth with reed strips; Copper Orbit
+Pack is a copper courier box with a round dial. The three egg looks are described in §6. All eight
+use node materials, stay below 1,500 triangles, and compile in retained shader warm-up samples.
+The mask shapes use petals or one offset lens, with no bandanas, T-shaped visors, mouth grilles,
+crests, logos or franchise silhouettes from the §8.2 avoid lists.
 
 For the horse (an extra after the core), [r2-04] suggests a later "Sleipnir Saddle" eight-legged horse
 skin, if it is ever wanted.
@@ -842,6 +868,8 @@ not a trademark search.
 | Eggs and medals | Behind the Curtain, New High Score, Follow the Gold, Paid the Ferryman, Bellringer, Down the Well, Employee of the Month, Lights Out, Not a Clone; Spark, Ten Down, Firstlight, Grand Tour, Cartographer, Errand Runner, Tide Turner, Regicide, Decommissioned, Triple Crown, Demolition Crew, Arc Welder, Long Shot, Back For My Stuff, Untouchable, Old Timer, By a Thread, Killed by a Woolback, With Friends Like These, Own Goal | OK. I rejected "Kingsbane" (Hearthstone weapon), "Kingslayer" (Game of Thrones epithet), "Tidebreaker" (too close to Dota's "Tidebringer"), "Hawkeye" (Marvel) and "Leap of Faith" (Assassin's Creed) |
 | Titles | Newcomer, Seasoned, Firstlighter, Wanderer, Reliable, Decommissioner, Wrecker, Conductor, Farshot, Persistent, Lucky, Fleeced, Trusting, Self-Starter | OK |
 | Cosmetics | Woolly Beanie, Wide Straw Hat, Messenger's Winged Cap, Hard Hat (Oversight Issue), Antler Crown, Heron Plume Hat, Coral Crown, Hollow Crown, Pixel Halo, Candle Crown, Ticket #000 Helmet, Traveller's Cloak, Wolfpelt Cape, Tide Cape, Court Mantle, Saltplate Mantle, Static Cloak, Fox Mask, Voxel Visor, Crowbeak Mask, Funeral Veil, Executive Visor, Bedroll, Woolback Plushie, Wind-Up Key, Signal Dish, Tidewrath Tooth, Receiver Floodlamp, Lantern of Lacefall, Golden Hopbit, Bone Bell; palettes Ivory, Sand, Midnight, Moss, Ember, Dusk | OK. "Hollow Crown" is Shakespeare (public domain) |
+| M11 cosmetics | Bracken Stitch Cap, Dockfold Cape, Petalwake Mask, Fenweave Cape, Copper Orbit Pack, Dewdial Crown, Wickfloat Mantle, Quietshift Lens | Original descriptive names; no §10 franchise names, near-misses or exact game titles identified. Reasoned check only |
+| M11 eggs, medals and titles | The Dewdial, Afloat in the Dark, The Quiet Shift, Tended the Dawn, Kept the Wicks, Off the Clock, Dawn Tender, Wick Keeper, Quietshift | Original or ordinary phrases; no §10 franchise names, near-misses or exact game titles identified. Reasoned check only |
 
 ---
 

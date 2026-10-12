@@ -35,6 +35,8 @@ export const env = {
   /** M11 extra #2 (SPEC §6.14): horses. On in dev and production; FEATURE_HORSES=0 turns them off
    *  (no whistle sales, H refused, clients told through `you.horses`). Mutable for tests. */
   horses: process.env.FEATURE_HORSES !== "0",
+  /** M11 extra #5: new sources and puzzles. Existing owned cosmetics remain usable. */
+  cosmeticsExtras: process.env.FEATURE_COSMETICS_EXTRAS !== "0",
 };
 
 /**

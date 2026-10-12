@@ -5,9 +5,10 @@
 
 import { killXp } from "@firstlight/shared/content/progression";
 import {
-  DROP_WEAPONS, NPC_RULES, PLANET_COSMETIC, PLANET_TONIC, npcCoins, weaponTierFor,
+  DROP_WEAPONS, EXTRA_PLANET_COSMETICS, NPC_RULES, PLANET_COSMETIC, PLANET_TONIC, npcCoins, weaponTierFor,
   type BossDef, type CampChest, type PlanetId,
 } from "@firstlight/shared/content/npcs";
+import { env } from "../../env.ts";
 import type { InvItem } from "@firstlight/shared/net/protocol";
 import { actorPos, type PlayerActor } from "../actors.ts";
 import type { V3 } from "../geometry.ts";
@@ -69,15 +70,17 @@ export function rollDrops(sys: NpcSystem, n: Npc, top: PlayerActor, rng: Rng = M
     }
   }
   if (n.def.temper !== "critter" && n.def.temper !== "passive" && n.def.family !== "egg" && !n.summoner && !n.spawned) {
-    const c = PLANET_COSMETIC[planet];
-    const key = `${top.identity.userId}|${planet}`;
-    const pity = sys.cosmeticPity.get(key);
-    let kills = pity && pity.life === top.char.lifeStartedAt ? pity.kills + 1 : 1;
-    if (rng() < c.chance || kills >= 3 / c.chance) {
-      out.push({ id: c.id, tier: 1, qty: 1 });
-      kills = 0;
+    const original = PLANET_COSMETIC[planet];
+    for (const c of [original, ...(env.cosmeticsExtras ? EXTRA_PLANET_COSMETICS[planet] : [])]) {
+      const key = `${top.identity.userId}|${planet}${c === original ? "" : `|${c.id}`}`;
+      const pity = sys.cosmeticPity.get(key);
+      let kills = pity && pity.life === top.char.lifeStartedAt ? pity.kills + 1 : 1;
+      if (rng() < c.chance || kills >= 3 / c.chance) {
+        out.push({ id: c.id, tier: 1, qty: 1 });
+        kills = 0;
+      }
+      sys.cosmeticPity.set(key, { life: top.char.lifeStartedAt, kills, at: sys.world.now() });
     }
-    sys.cosmeticPity.set(key, { life: top.char.lifeStartedAt, kills, at: sys.world.now() });
   }
   return out;
 }

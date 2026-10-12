@@ -1,4 +1,4 @@
-// Easter eggs (docs/content.md §6) and the Hall of Firsts plaques. Three eggs per planet; each
+// Easter eggs (docs/content.md §6) and the Hall of Firsts plaques. Four eggs per planet; each
 // gives a rare item (once per life; it drops on death like any item) and a hidden medal (once per
 // account). The first account to claim each egg is engraved on its plaque in Portus.
 
@@ -6,7 +6,7 @@ import type { BodyId } from "../planet/bodies.ts";
 import type { InvItem } from "../net/protocol.ts";
 import type { BossId } from "./places.ts";
 
-export type EggId = "E1" | "E2" | "E3" | "E4" | "E5" | "E6" | "E7" | "E8" | "E9";
+export type EggId = "E1" | "E2" | "E3" | "E4" | "E5" | "E6" | "E7" | "E8" | "E9" | "E10" | "E11" | "E12";
 
 export interface EggDef {
   id: EggId;
@@ -17,6 +17,7 @@ export interface EggDef {
   item: InvItem & { skin?: string };
   itemName: string;
   medal: string;
+  extra?: boolean;
 }
 
 export const EGGS: readonly EggDef[] = [
@@ -29,6 +30,9 @@ export const EGGS: readonly EggDef[] = [
   { id: "E7", body: "meridian", name: "Employee of the Month", place: "oversight_lobby", item: { id: "executive_visor", tier: 1, qty: 1 }, itemName: "Executive Visor", medal: "employee_of_the_month" },
   { id: "E8", body: "meridian", name: "Lights Out", place: "last_billboard", item: { id: "static_cloak", tier: 1, qty: 1 }, itemName: "Static Cloak", medal: "lights_out" },
   { id: "E9", body: "meridian", name: "Ticket #000", place: "vat_room", item: { id: "ticket_000_helmet", tier: 1, qty: 1 }, itemName: "Ticket #000 Helmet", medal: "not_a_clone" },
+  { id: "E10", body: "arcadia", name: "The Dewdial", place: "pinewhistle_wood", item: { id: "dewdial_crown", tier: 1, qty: 1 }, itemName: "Dewdial Crown", medal: "tended_the_dawn", extra: true },
+  { id: "E11", body: "hollowmere", name: "Afloat in the Dark", place: "thornwood", item: { id: "wickfloat_mantle", tier: 1, qty: 1 }, itemName: "Wickfloat Mantle", medal: "kept_the_wicks", extra: true },
+  { id: "E12", body: "meridian", name: "The Quiet Shift", place: "cinder_canyons", item: { id: "quietshift_lens", tier: 1, qty: 1 }, itemName: "Quietshift Lens", medal: "off_the_clock", extra: true },
 ];
 
 export const EGG_BY_ID: ReadonlyMap<string, EggDef> = new Map(EGGS.map((e) => [e.id, e]));
@@ -68,10 +72,11 @@ export interface PlaqueDef {
 export const BOSS_FIRSTS: Record<BossId, string> = { tidewrath: "boss:tidewrath", hollow_king: "boss:hollow_king", receiver: "boss:receiver" };
 
 export const PLAQUES: readonly PlaqueDef[] = [
-  ...EGGS.map((e, i) => ({ id: e.id, hiddenLabel: `Secret ${i + 1} · ${e.body[0]!.toUpperCase()}${e.body.slice(1)}`, label: e.name })),
+  ...EGGS.slice(0, 9).map((e, i) => ({ id: e.id, hiddenLabel: `Secret ${i + 1} · ${e.body[0]!.toUpperCase()}${e.body.slice(1)}`, label: e.name })),
   { id: BOSS_FIRSTS.tidewrath, hiddenLabel: "First to fell Tidewrath", label: "Tidewrath falls" },
   { id: BOSS_FIRSTS.hollow_king, hiddenLabel: "First to fell the Hollow King", label: "The Hollow King falls" },
   { id: BOSS_FIRSTS.receiver, hiddenLabel: "First to fell The Receiver", label: "The Receiver falls" },
+  ...EGGS.slice(9).map((e, i) => ({ id: e.id, hiddenLabel: `Secret ${i + 10} · ${e.body[0]!.toUpperCase()}${e.body.slice(1)}`, label: e.name })),
 ];
 
 /** One engraved line, as sent to clients (`hall` message). */

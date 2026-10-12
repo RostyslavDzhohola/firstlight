@@ -32,9 +32,11 @@ export interface CosmeticDef {
   source: string;
   /** Portus Exchange price (common cosmetics only). */
   price?: number;
+  /** M11 extra #5 availability is controlled by the server. Existing items stay usable. */
+  extra?: boolean;
 }
 
-const C = (id: string, name: string, slot: CosmeticSlot, rarity: Rarity, source: string, price?: number): CosmeticDef => ({ id, name, slot, rarity, source, ...(price ? { price } : {}) });
+const C = (id: string, name: string, slot: CosmeticSlot, rarity: Rarity, source: string, price?: number, extra = false): CosmeticDef => ({ id, name, slot, rarity, source, ...(price ? { price } : {}), ...(extra ? { extra } : {}) });
 
 export const COSMETICS: readonly CosmeticDef[] = [
   C("woolly_beanie", "Woolly Beanie", "hat", "common", "Portus shop", 120),
@@ -68,12 +70,24 @@ export const COSMETICS: readonly CosmeticDef[] = [
   C("lantern_of_lacefall", "Lantern of Lacefall", "backpack", "legendary", "Easter egg E1"),
   C("golden_hopbit", "Golden Hopbit", "backpack", "legendary", "Easter egg E3"),
   C("bone_bell", "Bone Bell", "backpack", "legendary", "Easter egg E6"),
+  C("bracken_stitch_cap", "Bracken Stitch Cap", "hat", "common", "Portus shop", 120, true),
+  C("dockfold_cape", "Dockfold Cape", "cape", "common", "Portus shop", 120, true),
+  C("petalwake_mask", "Petalwake Mask", "mask", "uncommon", "any Arcadia enemy 1/180", undefined, true),
+  C("fenweave_cape", "Fenweave Cape", "cape", "rare", "any Hollowmere enemy 1/160", undefined, true),
+  C("copper_orbit_pack", "Copper Orbit Pack", "backpack", "rare", "Site Visit mission M3", undefined, true),
+  C("dewdial_crown", "Dewdial Crown", "hat", "legendary", "Easter egg E10", undefined, true),
+  C("wickfloat_mantle", "Wickfloat Mantle", "cape", "legendary", "Easter egg E11", undefined, true),
+  C("quietshift_lens", "Quietshift Lens", "mask", "legendary", "Easter egg E12", undefined, true),
 ];
 
 export const COSMETIC_BY_ID: ReadonlyMap<string, CosmeticDef> = new Map(COSMETICS.map((c) => [c.id, c]));
 
 export function isCosmetic(id: string): boolean {
   return COSMETIC_BY_ID.has(id);
+}
+
+export function isExtraCosmetic(id: string): boolean {
+  return COSMETIC_BY_ID.get(id)?.extra === true;
 }
 
 /** Cosmetic sell-back by rarity (content.md §1.5). */

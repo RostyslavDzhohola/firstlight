@@ -594,6 +594,13 @@ export const PLANET_COSMETIC: Record<PlanetId, { id: string; chance: number }> =
   meridian: { id: "hard_hat", chance: 1 / 75 },
 };
 
+/** Additional planet rolls use independent per-life pity counters. */
+export const EXTRA_PLANET_COSMETICS: Record<PlanetId, readonly { id: string; chance: number }[]> = {
+  arcadia: [{ id: "petalwake_mask", chance: 1 / 180 }],
+  hollowmere: [{ id: "fenweave_cape", chance: 1 / 160 }],
+  meridian: [],
+};
+
 // ------------------------------------------------------------------------------------------ camps and chests
 
 export interface CampChest {

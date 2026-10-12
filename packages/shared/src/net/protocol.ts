@@ -167,7 +167,7 @@ export type ServerMessages = {
   missionDone: { id: string; xp: number; coins: number };
   /** Result of buy/sell/wear (a toast carries the human text). */
   shop: { ok: boolean; action: "buy" | "sell" | "wear"; reason?: string };
-  /** A billboard lamp (egg E8) went dark or relit, for everyone nearby. */
+  /** A personal puzzle light changed state, for its solver only. */
   lamp: { id: string; on: boolean };
   /** Admin staged scene: travel to `body`, then send `admin {cmd:"stage", args:{n}}` again. */
   stage: { n: number; body: BodyId };
@@ -199,6 +199,8 @@ export interface YouState {
   protectedUntil: number;
   /** Horses are on in this room (server flag FEATURE_HORSES; set by the horse system). */
   horses?: boolean;
+  /** M11 extra #5 sources and world triggers are enabled. */
+  cosmeticsExtras?: boolean;
   /** Onboarding in progress (Portus only): hits on each training dummy. Absent once done or skipped. */
   onboarding?: { hits: number[] };
 }

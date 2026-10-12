@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BODIES, createTerrain, padDirs } from "@firstlight/shared";
 import { bossArena } from "@firstlight/shared/content/arenas";
 import { NF, NPC_INDEX, PLANET_COSMETIC } from "@firstlight/shared/content/npcs";
+import { env } from "../src/env.ts";
 import { dealDamage } from "../src/world/combat.ts";
 import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
 import { EGG_NPC } from "../src/world/npc/NpcSystem.ts";
@@ -95,6 +96,39 @@ describe("rewards", () => {
     expect(w.sys.npcs.has(n.id)).toBe(false);
     expect(p.char.xp).toBe(0);
     expect(w.sent.some((m) => m.type === "npcKill")).toBe(false);
+  });
+
+  it.each([
+    ["arcadia", "hopbit", "petalwake_mask", 540],
+    ["hollowmere", "bonewalker", "fenweave_cape", 480],
+  ] as const)("%s new drop has independent pity, resets on rebirth and excludes penalty spawns", (body, kind, id, limit) => {
+    const w = fakeWorld(body);
+    const p = w.addPlayer("p", arcadiaPoint(80), 3);
+    const n = w.sys.createNpc(NPC_INDEX.get(kind)!, 3, arcadiaPoint(84), w.clock.t, { instant: true });
+    for (let k = 1; k < limit; k++) expect(rollDrops(w.sys, n, p, () => 0.999).some((i) => i.id === id)).toBe(false);
+    expect(rollDrops(w.sys, n, p, () => 0.999)).toContainEqual({ id, tier: 1, qty: 1 });
+    expect(rollDrops(w.sys, n, p, () => 0.999).some((i) => i.id === id)).toBe(false);
+    for (let k = 1; k < limit - 1; k++) rollDrops(w.sys, n, p, () => 0.999);
+    p.char.lifeStartedAt++;
+    expect(rollDrops(w.sys, n, p, () => 0.999).some((i) => i.id === id)).toBe(false);
+    const penalty = w.sys.createNpc(NPC_INDEX.get(kind)!, 3, arcadiaPoint(84), w.clock.t, { instant: true, spawned: { reason: "egg", key: "E2", userId: "u-p" }, ttlMs: 1000 });
+    expect(rollDrops(w.sys, penalty, p, () => 0).some((i) => i.id === id)).toBe(false);
+    expect(rollDrops(w.sys, n, p, () => 0)).toContainEqual({ id, tier: 1, qty: 1 });
+    w.sys.dispose();
+  });
+
+  it("disabled extra rolls leave the original planet drops available", () => {
+    const enabled = env.cosmeticsExtras;
+    env.cosmeticsExtras = false;
+    try {
+      const w = fakeWorld("arcadia");
+      const p = w.addPlayer("p", arcadiaPoint(80), 3);
+      const n = w.sys.createNpc(NPC_INDEX.get("hopbit")!, 3, arcadiaPoint(84), w.clock.t, { instant: true });
+      const drops = rollDrops(w.sys, n, p, () => 0);
+      expect(drops).toContainEqual({ id: "winged_cap", tier: 1, qty: 1 });
+      expect(drops.some((i) => i.id === "petalwake_mask")).toBe(false);
+      w.sys.dispose();
+    } finally { env.cosmeticsExtras = enabled; }
   });
 
   it("reward bookkeeping is pruned: expired decay windows, idle pity counters, old Collector tags", () => {
