@@ -17,10 +17,11 @@ import { BossController } from "./boss.ts";
 import { onNpcHurt, think } from "./brain.ts";
 import { MODE, MODE_NAME, type Mode, type Npc } from "./npc.ts";
 import { rewardKill } from "./rewards.ts";
+import { activePull, applyMoveEffect, applyPull } from "./effects.ts";
 import { buildSpawnPoints, type SpawnPoint } from "./spawns.ts";
 import { makeGround, placeOnGround, type Ground } from "./steer.ts";
 import { NPC_TUNING } from "./tuning.ts";
-import { dist, dist2, dot, len, stableTangentAt, tangentDir, tangentize, up } from "./vec.ts";
+import { dist, dist2, dot, flatDist, len, stableTangentAt, tangentDir, tangentize, up } from "./vec.ts";
 import { walk } from "@firstlight/shared/content/arenas";
 import type { NpcWorld } from "./world.ts";
 
@@ -78,7 +79,6 @@ export class NpcSystem implements RoomSystem {
   private readonly tokens = new Map<string, TokenBook>();
   private readonly recentHits = new Map<string, { t: number; amt: number }[]>();
   readonly tagged = new Map<string, number>();
-  readonly chilled = new Map<string, number>();
   readonly repeatKills = new Map<string, number[]>();
   readonly cosmeticPity = new Map<string, { life: number; kills: number }>();
   private grid = new Map<number, Npc[]>();
@@ -96,6 +96,8 @@ export class NpcSystem implements RoomSystem {
     this.hookNoise();
     world.onMessage("npc", (sid, msg) => this.admin(sid, msg));
     world.onMessage("phrase", (sid, msg) => this.onPhrase(sid, msg));
+    // The client's NPC layer asks for the lair state once its handlers exist (late joiners).
+    world.onMessage("npcSync", (sid) => this.boss?.sendSnapshot(sid));
   }
 
   // ------------------------------------------------------------------------------------ lifecycle
@@ -106,11 +108,13 @@ export class NpcSystem implements RoomSystem {
     this.tickNo++;
     const dt = dtMs / 1000;
     this.refreshLive(now);
+    this.stepPulls(now, dt);
     if (this.noises.length) this.noises = this.noises.filter((n) => now - n.at < 400);
     if (now - this.lastScan >= NPC_TUNING.scanMs) {
       const sdt = this.lastScan ? (now - this.lastScan) / 1000 : 0;
       this.lastScan = now;
       this.scan(now, sdt);
+      this.auras();
     }
     this.boss?.tick(now, dt);
     this.buildGrid();
@@ -137,6 +141,7 @@ export class NpcSystem implements RoomSystem {
     this.tokens.delete(sessionId);
     this.recentHits.delete(sessionId);
     for (const n of this.npcs.values()) if (n.target?.id === sessionId) n.target = null;
+    this.boss?.forget(sessionId);
   }
 
   dispose() {
@@ -312,6 +317,32 @@ export class NpcSystem implements RoomSystem {
     const g = this.groupOf(n);
     if (g && g.members[n.member] === n) g.members[n.member] = null;
     if (n.summoner) this.npcs.get(n.summoner)?.raised.delete(n.id);
+    this.dissolveChildren(n);
+  }
+
+  /** Raised helpers (Cantor's Bonewalkers) crumble with their summoner. */
+  private dissolveChildren(n: Npc) {
+    if (!n.raised.size) return;
+    const now = this.world.now();
+    for (const id of [...n.raised]) {
+      const c = this.npcs.get(id);
+      if (c) this.dissolve(c, now);
+    }
+    n.raised.clear();
+  }
+
+  /** Dissolve into light without rewards (the client plays the death effect). */
+  dissolve(c: Npc, now: number) {
+    if (c.dead) return;
+    c.dead = true;
+    c.attack = null;
+    this.releaseToken(c);
+    this.setMode(c, MODE.DEAD, now);
+    c.state.flags = (c.state.flags | NF.DEAD) & ~(NF.TELEGRAPH | NF.AGGRO);
+    c.state.anim = NPC_ANIM.DEAD;
+    c.state.target = "";
+    c.removeAt = now + 1200;
+    this.dissolveChildren(c);
   }
 
   /** Remove an NPC as if it died, without rewards (egg exits, Ticket #000 vanishing). */
@@ -347,12 +378,16 @@ export class NpcSystem implements RoomSystem {
     return amount * (n.def.armour ?? 1);
   }
 
+  /** `amount` is HP actually removed (combat caps it by the HP before the hit). */
   private onDamaged(n: Npc, amount: number, by: string) {
     const p = by ? this.world.playerById(by) : undefined;
-    if (p) {
-      const e = n.damage.get(by);
-      if (e) e.amount += amount;
-      else n.damage.set(by, { amount, userId: p.identity.userId, name: p.identity.name, party: p.state.party });
+    if (p && amount > 0) {
+      const uid = p.identity.userId;
+      const e = n.damage.get(uid);
+      if (e) {
+        e.amount += amount;
+        e.sid = p.id;
+      } else n.damage.set(uid, { amount, userId: uid, sid: p.id, name: p.identity.name });
     }
     if (n.boss && this.boss) {
       this.boss.onDamaged(n, amount, p ?? null);
@@ -386,6 +421,7 @@ export class NpcSystem implements RoomSystem {
       }
     }
     if (n.summoner) this.npcs.get(n.summoner)?.raised.delete(n.id);
+    this.dissolveChildren(n);
     if (n.def.family === "egg") return; // eggs pay through their own rules (brain.ts)
     rewardKill(this, n, by, now);
   }
@@ -426,11 +462,51 @@ export class NpcSystem implements RoomSystem {
     return dealt;
   }
 
+  /** Status effect on a player: the server enforces movement effects (effects.ts); the client predicts them. */
   applyEffect(p: PlayerActor, e: StatusEffect, by: Npc | null) {
     const now = this.world.now();
     if (e.kind === "tag") this.tagged.set(p.id, now + e.seconds * 1000);
-    if (e.kind === "chill" || e.kind === "slow") this.chilled.set(p.id, now + e.seconds * 1000);
+    else applyMoveEffect(p, e, now);
     this.world.send(p, "npcFx", { kind: e.kind, ms: e.seconds * 1000, amount: e.amount, by: by?.id ?? "" });
+  }
+
+  /** Undertow: start or extend a pull on a player (server-simulated in stepPulls, predicted by the client). */
+  pullPlayer(p: PlayerActor, c: V3, speed: number, ms: number) {
+    applyPull(p, c, speed, ms, this.world.now());
+    this.world.send(p, "npcPull", { x: c[0], y: c[1], z: c[2], speed, ms });
+  }
+
+  /**
+   * Drag pulled players' authoritative positions toward the whirlpool each tick. Their next input is
+   * validated from the dragged position, so a client that ignores the pull spends its movement
+   * budget walking back out (it can't out-run the pull faster than an honest player could).
+   */
+  private stepPulls(now: number, dt: number) {
+    for (const a of this.world.players()) {
+      if (a.dead) continue;
+      const pull = activePull(a, now);
+      if (!pull) continue;
+      const pos = actorPos(a);
+      const t = tangentDir(pos, pull.c);
+      const d = Math.min(flatDist(pos, pull.c), pull.speed * dt);
+      if (d < 0.01 || dot(t, t) < 0.5) continue;
+      const g = this.world.snapToGround([pos[0] + t[0] * d, pos[1] + t[1] * d, pos[2] + t[2] * d]);
+      a.state.x = a.lastX = g[0];
+      a.state.y = a.lastY = g[1];
+      a.state.z = a.lastZ = g[2];
+    }
+  }
+
+  /** Compliance Officer aura: Oversight units within 15 m deal +15% (shown as NF.BUFFED). */
+  private auras() {
+    const officers: Npc[] = [];
+    for (const n of this.npcs.values()) if (n.def.aura && !n.dead) officers.push(n);
+    for (const n of this.npcs.values()) {
+      if (n.def.family !== "oversight" || n.def.aura) continue;
+      const buffed = officers.some((o) => dist2(o.pos, n.pos) <= o.def.aura!.radius * o.def.aura!.radius);
+      if (buffed) n.state.flags |= NF.BUFFED;
+      else if (n.state.flags & NF.BUFFED) n.state.flags &= ~NF.BUFFED;
+    }
   }
 
   /** Send to connected players within `radius` m of a point (the host's area broadcast, like player combat). */
@@ -598,10 +674,34 @@ export class NpcSystem implements RoomSystem {
         const idx = NPC_INDEX.get(str("kind"));
         if (idx === undefined) return;
         const def = NPC_DEFS[idx]!;
-        const at = placeOnGround(this.ground, [num("x"), num("y"), num("z")], def.locomotion, def.hover ?? 0);
-        const n = this.createNpc(idx, Math.max(1, Math.min(20, num("level", def.levels[0]))), at, now, { roam: num("roam", 6), instant: msg.instant === true });
-        if (typeof msg.facing === "object" && Array.isArray(msg.facing)) n.facing = tangentize(n.pos, msg.facing as V3);
+        // Finite and near the surface, else at the admin's feet (no NaN positions).
+        const R = this.ground.R;
+        const want: V3 = [num("x", NaN), num("y", NaN), num("z", NaN)];
+        const ok = want.every(Number.isFinite) && Math.abs(len(want) - R) < 300;
+        const at = placeOnGround(this.ground, ok ? want : actorPos(p), def.locomotion, def.hover ?? 0);
+        const level = Math.max(1, Math.min(20, Math.round(Number.isFinite(num("level")) ? num("level", def.levels[0]) : def.levels[0])));
+        const roam = Math.max(0, Math.min(60, Number.isFinite(num("roam", 6)) ? num("roam", 6) : 6));
+        const n = this.createNpc(idx, level, at, now, { roam, instant: msg.instant === true });
+        const f = msg.facing;
+        if (Array.isArray(f) && f.length === 3 && f.every((v) => typeof v === "number" && Number.isFinite(v))) {
+          const t = tangentize(n.pos, f as V3);
+          if (dot(t, t) > 0.5) n.facing = t;
+        }
         this.world.send(p, "npcInfo", { id: n.id, req: msg.req ?? null });
+        break;
+      }
+      case "fx": {
+        // Apply an NPC status effect to a player (tests and staged scenes): slow/chill/nosprint/pull.
+        const t = str("target") ? this.world.playerById(str("target")) : p;
+        if (!t) return;
+        const ms = Math.max(0, Math.min(30_000, num("ms", 3000)));
+        const kind = str("kind");
+        if (kind === "pull") {
+          const c: V3 = [num("x", NaN), num("y", NaN), num("z", NaN)];
+          if (c.every(Number.isFinite)) this.pullPlayer(t, c, Math.max(0, Math.min(10, num("speed", 2))), ms);
+        } else if (kind === "slow" || kind === "chill" || kind === "nosprint" || kind === "tag") {
+          this.applyEffect(t, { kind, seconds: ms / 1000, amount: Math.max(0, Math.min(1, num("amount", 0.5))) }, null);
+        }
         break;
       }
       case "hurt": {

@@ -64,6 +64,16 @@ export interface PlayerActor {
   mounted?: boolean;
   /** Mounted movement budget lasts until here after a dismount (the client learns a round trip later). */
   mountGraceUntil?: number;
+  /** NPC status effects enforced by movement validation (see npc/effects.ts). */
+  npcFx?: NpcMoveFx;
+}
+
+/** Movement effects from NPC attacks: chill/slow, Cease-and-Desist (no sprint, no dodge), Undertow pull. */
+export interface NpcMoveFx {
+  slow: number;
+  slowUntil: number;
+  noSprintUntil: number;
+  pull: { c: V3; speed: number; until: number } | null;
 }
 
 export interface NpcActor {
@@ -85,6 +95,13 @@ export interface NpcActor {
    * Gets the damage after the weak-point multiplier and returns what to apply; ≤ 0 = no damage.
    */
   mitigate?: (amount: number, weak: boolean, fromDir?: V3) => number;
+  /**
+   * Weak-point test for a ray that hit this NPC's capsule at distance `t` (bosses: does the ray pass
+   * through an exposed weak-point volume?). Replaces the generic "top of the capsule" test.
+   */
+  weakPoint?: (o: V3, d: V3, t: number) => boolean;
+  /** Multiplier for weak-point hits on this NPC; replaces the weapon's headshot multiplier when set. */
+  weakMult?: number;
   boss?: boolean;
 }
 

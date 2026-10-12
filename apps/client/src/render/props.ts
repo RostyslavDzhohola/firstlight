@@ -6,6 +6,8 @@
 
 import * as THREE from "three/webgpu";
 import { hash01, PROP_KINDS, PROP_STRIDE, PROP_STYLES, type BodyId, type PropKind } from "@firstlight/shared";
+import { float, materialColor, mix } from "three/tsl";
+import { atmo } from "./atmosphere.ts";
 import { propGeometry } from "./propGeometry.ts";
 import type { ResolvedSettings } from "./quality.ts";
 
@@ -33,6 +35,9 @@ function propMaterial(): THREE.MeshStandardNodeMaterial {
   if (!sharedMaterial) {
     sharedMaterial = new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.86, metalness: 0 });
     sharedMaterial.name = "props";
+    // Rain: bark, leaves and rocks darken and get a sheen (vertex/instance colours still multiply in).
+    sharedMaterial.colorNode = materialColor.mul(mix(float(1), float(0.78), atmo.wet));
+    sharedMaterial.roughnessNode = mix(float(0.86), float(0.4), atmo.wet);
   }
   return sharedMaterial;
 }

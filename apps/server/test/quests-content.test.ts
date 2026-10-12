@@ -13,7 +13,7 @@ import { npcSystemOf } from "../src/world/npc/index.ts";
 import { emitNpcEvent } from "../src/world/npc/tuning.ts";
 import { progressStore } from "../src/world/quests/store.ts";
 import { safeLeave, startServer } from "./helpers.ts";
-import { bot, ground, harness, invIds, me, near, objAt, offPad, padAt, serverRoom, sleep, tpAndWait, until, type Bot } from "./quest-helpers.ts";
+import { bot, ground, harness, invIds, me, near, objAt, offPad, padAt, serverRoom, sleep, tpAndWait, until, type Bot, tp } from "./quest-helpers.ts";
 
 beforeEach(async () => {
   harness.game = await startServer();
@@ -157,7 +157,8 @@ describe("Easter eggs", () => {
       await until(`lantern ${i}`, () => b.toasts.some((t) => t.includes(`(${i}/7)`) || t.includes("All seven")));
       await sleep(210); // quest actions are limited to 5 per second
     }
-    await tpAndWait(b, objAt("e4_ferry"));
+    // An enter trigger moves the player on at once: don't wait to be seen at the trigger itself.
+    tp(b, objAt("e4_ferry"));
     await until("ferried", () => near(b, ground("hollowmere", placeDir("ferrymans_isle")), 4));
     b.send("interact", { target: "e4_chest" });
     await until("oar", () => [...b.you.hotbar, ...b.you.backpack].some((i: any) => i?.id === "riverstaff" && i.tier === 2 && i.skin === "ferrymans_oar"));

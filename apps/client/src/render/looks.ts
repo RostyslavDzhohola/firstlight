@@ -60,9 +60,28 @@ export interface BodyLook {
   skyPlanets: SkyPlanetSpec[];
   /** Ambient light-mote tint (HDR-scaled in the particle system). */
   mote: number;
+  /**
+   * Night (sun below the horizon): sky palette, moonlight key and fill. Night must stay readable,
+   * never pitch black: the moon key is bright enough to walk by and exposure rises a little.
+   */
+  night: NightLook;
   /** Single-scattering sky (Medium+): Rayleigh colour multiplier, Mie (haze/dust) multiplier and
    * how much of it replaces the art gradient (0 = art only, 1 = physics only). */
   scatter: { rayleigh: [number, number, number]; mie: number; mix: number };
+}
+
+export interface NightLook {
+  zenith: number;
+  mid: number;
+  horizon: number;
+  ground: number;
+  moon: number;
+  moonIntensity: number;
+  hemiSky: number;
+  hemiGround: number;
+  hemiIntensity: number;
+  /** Exposure multiplier at full night. */
+  exposure: number;
 }
 
 export interface SkyPlanetPalette {
@@ -89,6 +108,7 @@ export const LOOKS: Record<BodyId, BodyLook> = {
     exposure: 1.0, bloomThreshold: 1.25, bloomStrength: 0.35,
     grade: { slope: [1.04, 1.0, 0.95], offset: [0, 0, 0], power: [1, 1, 1], saturation: 1.08, hue: 0 },
     mote: 0xffe2b0,
+    night: { zenith: 0x14204a, mid: 0x26386a, horizon: 0x5a4a6a, ground: 0x3a3048, moon: 0xa8bcff, moonIntensity: 0.7, hemiSky: 0x5a6aa8, hemiGround: 0x2a2228, hemiIntensity: 1.0, exposure: 1.35 },
     scatter: { rayleigh: [1, 1, 1], mie: 1.0, mix: 0.7 },
     skyPlanets: [
       { body: "arcadia", elevDeg: 28, azDeg: 35, sizeDeg: 7 },
@@ -106,6 +126,7 @@ export const LOOKS: Record<BodyId, BodyLook> = {
     exposure: 1.0, bloomThreshold: 1.25, bloomStrength: 0.35,
     grade: { slope: [0.97, 1.03, 1.02], offset: [0, 0.004, 0.006], power: [1, 1, 1], saturation: 1.18, hue: 0 },
     mote: 0xffe08a,
+    night: { zenith: 0x0b1636, mid: 0x15284f, horizon: 0x2a3f6a, ground: 0x1c2a44, moon: 0x9fb6ff, moonIntensity: 0.8, hemiSky: 0x3a5a9a, hemiGround: 0x141c26, hemiIntensity: 1.0, exposure: 1.45 },
     scatter: { rayleigh: [0.92, 1.0, 1.05], mie: 1.0, mix: 0.7 },
     skyPlanets: [
       { body: "portus", elevDeg: 22, azDeg: 300, sizeDeg: 3 },
@@ -123,6 +144,7 @@ export const LOOKS: Record<BodyId, BodyLook> = {
     exposure: 1.05, bloomThreshold: 1.1, bloomStrength: 0.4,
     grade: { slope: [1.0, 0.95, 1.08], offset: [0.006, 0, 0.016], power: [1.04, 1.02, 1.0], saturation: 1.06, hue: -0.02 },
     mote: 0x9effd8,
+    night: { zenith: 0x0d0920, mid: 0x1c1238, horizon: 0x3a2456, ground: 0x24183a, moon: 0xb59fff, moonIntensity: 0.75, hemiSky: 0x4a3a8a, hemiGround: 0x14101c, hemiIntensity: 1.0, exposure: 1.45 },
     scatter: { rayleigh: [1.35, 0.85, 1.2], mie: 1.7, mix: 0.75 },
     skyPlanets: [
       { body: "portus", elevDeg: 30, azDeg: 40, sizeDeg: 3 },
@@ -140,6 +162,7 @@ export const LOOKS: Record<BodyId, BodyLook> = {
     exposure: 1.0, bloomThreshold: 1.4, bloomStrength: 0.3,
     grade: { slope: [1.06, 0.99, 0.95], offset: [0, 0.004, 0.012], power: [1, 1, 1], saturation: 1.12, hue: 0 },
     mote: 0x8ff0ea,
+    night: { zenith: 0x0a1430, mid: 0x16254a, horizon: 0x3a3446, ground: 0x2a2230, moon: 0xaabfff, moonIntensity: 0.85, hemiSky: 0x405a8a, hemiGround: 0x24140e, hemiIntensity: 1.0, exposure: 1.4 },
     scatter: { rayleigh: [1.0, 1.0, 1.0], mie: 2.2, mix: 0.7 },
     skyPlanets: [
       { body: "portus", elevDeg: 18, azDeg: 80, sizeDeg: 2.5 },

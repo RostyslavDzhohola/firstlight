@@ -13,6 +13,7 @@ import {
   transformDirection, uniform, vec3, varying, renderGroup,
 } from "three/tsl";
 import { CHUNK_QUADS, hash4, mulberry32, type Face } from "@firstlight/shared";
+import { atmo } from "./atmosphere.ts";
 import type { BodyLook } from "./looks.ts";
 import type { ResolvedSettings } from "./quality.ts";
 
@@ -115,7 +116,7 @@ function grassMaterial(): THREE.MeshLambertNodeMaterial {
   const nW = varying(normalize(up.mul(0.8).add(facing.mul(0.2))), "vGrassN");
   m.normalNode = transformDirection(nW, cameraViewMatrix);
   const variation = seed.mul(0.3).add(0.85);
-  m.colorNode = mix(grassUniforms.root, grassUniforms.tip, pow(hf, 0.9)).mul(variation);
+  m.colorNode = mix(grassUniforms.root, grassUniforms.tip, pow(hf, 0.9)).mul(variation).mul(mix(float(1), float(0.8), atmo.wet));
   return m;
 }
 

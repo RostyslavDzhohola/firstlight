@@ -24,6 +24,7 @@ import { dist3, type V3 } from "./geometry.ts";
 import { emitGameEvent, npcKindOf } from "./events.ts";
 import { emitPileEvent, onPileEvent, pileStore, type PileData } from "./piles.ts";
 import { SYSTEM_FACTORIES, type RoomSystem } from "./systems.ts";
+import { movementLimits } from "./npc/effects.ts";
 import { matchMaker } from "@colyseus/core";
 import { liveSessions } from "../auth/sessions.ts";
 import { accountLinks } from "../auth/links.ts";
@@ -448,11 +449,14 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     const riding = !!a.mounted || now < (a.mountGraceUntil ?? 0);
     const elapsed = Math.min(0.25, (now - a.lastBudgetAt) / 1000);
     a.lastBudgetAt = now;
-    a.moveBudget = Math.min(riding ? HORSE.budgetCap : MOVE.budgetCap, a.moveBudget + (riding ? HORSE.sprint : MOVE.maxSpeed) * MOVE.speedSlack * elapsed);
+    // NPC slows / Cease-and-Desist (npc/effects.ts) scale the refill and can refuse the dodge burst.
+    const limits = movementLimits(a, now);
+    const refill = riding ? HORSE.sprint : MOVE.maxSpeed * limits.speed;
+    a.moveBudget = Math.min(riding ? HORSE.budgetCap : MOVE.budgetCap, a.moveBudget + refill * MOVE.speedSlack * elapsed);
     let dodge = 0;
-    if (msg.anim === ANIM.DODGE && !riding && now - a.lastDodgeAt >= MOVE.dodgeCooldownMs) {
+    if (msg.anim === ANIM.DODGE && !riding && limits.dodge > 0 && now - a.lastDodgeAt >= MOVE.dodgeCooldownMs) {
       a.lastDodgeAt = now;
-      dodge = MOVE.dodgeBurst;
+      dodge = MOVE.dodgeBurst * limits.dodge;
     }
     const dist = Math.hypot(msg.x - a.lastX, msg.y - a.lastY, msg.z - a.lastZ);
     const R = this.bodyDef.radius;

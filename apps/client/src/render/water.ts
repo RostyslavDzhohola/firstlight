@@ -10,7 +10,7 @@
 import * as THREE from "three/webgpu";
 import {
   attribute, cameraPosition, clamp, dot, exp, float, max, mix, mx_noise_float, mx_noise_vec3, normalize,
-  positionWorld, pow, reflect, sin, smoothstep, time, uniform, vec3, renderGroup,
+  positionWorld, pow, reflect, select, sin, smoothstep, time, uniform, vec3, renderGroup,
 } from "three/tsl";
 import { atmo, skyColor } from "./atmosphere.ts";
 import type { BodyLook } from "./looks.ts";
@@ -56,6 +56,10 @@ function build(level: number): THREE.MeshBasicNodeMaterial {
       const n2 = mx_noise_vec3(wp.mul(1.15).add(vec3(t.mul(-0.36), t.mul(0.29), t.mul(0.31))));
       g = g.add(n2.sub(up.mul(dot(n2, up))).mul(0.045));
     }
+    // Rain on the surface: a fast, fine chop that only shows while it rains.
+    // Uniform branch (select → if/else): the extra noise is skipped while it's dry.
+    const nr = mx_noise_vec3(wp.mul(5.0).add(vec3(t.mul(1.7), t.mul(-2.3), t.mul(1.9))));
+    g = select(atmo.rain.greaterThan(0.001), g.add(nr.sub(up.mul(dot(nr, up))).mul(atmo.rain.mul(0.12))), g);
     N = normalize(up.add(g));
   }
   const ndv = max(dot(N, V), 0.0);
@@ -66,7 +70,10 @@ function build(level: number): THREE.MeshBasicNodeMaterial {
   const refl = skyColor(Rl, float(level >= 1 ? 1 : 0));
   const k = float(1).sub(exp(max(depth, 0.0).mul(-0.35)));
   const sunUp = max(dot(up, atmo.sunDir), 0.0);
-  const body = mix(waterUniforms.shallow, waterUniforms.deep, k).mul(sunUp.mul(0.65).add(0.35));
+  const clear = mix(waterUniforms.shallow, waterUniforms.deep, k);
+  // Rain stirs and greys the water (puddle-ish tint).
+  const stirred = mix(clear, vec3(dot(clear, vec3(0.3, 0.45, 0.25))).mul(vec3(0.9, 1.0, 1.05)), atmo.wet.mul(0.45));
+  const body = stirred.mul(sunUp.mul(0.65).add(0.35));
   let col: any = mix(body, refl, fres);
   let alpha: any = clamp(mix(float(0.5), float(0.95), smoothstep(0.0, 3.0, depth)).add(fres.mul(0.5)), 0.0, 1.0);
   if (level >= 1) {

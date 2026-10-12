@@ -13,6 +13,7 @@
   "dependencies": {
     "@colyseus/schema": "5.0.36",
     "@colyseus/sdk": "0.18.5",
+    "@dgreenheck/three-pinata": "2.0.1",
     "@firstlight/shared": "workspace:*",
     "@fontsource/barlow-semi-condensed": "5.3.0",
     "@fontsource/inter": "5.3.0",

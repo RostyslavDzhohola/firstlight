@@ -1,0 +1,80 @@
+// Time of day and weather for one body copy (SPEC §6.14 #3/#4). The schedule is the shared,
+// deterministic one (@firstlight/shared sky.ts); this system makes the server authoritative:
+//   - "skySync" (client → server, sent right after its handler is registered) → "sky" to that client;
+//   - "sky" broadcast to the copy whenever the weather slot changes or an admin overrides it;
+//   - admin `sky` command: { weather?, intensity?, minutes?, dayT? } (staging for photos/videos).
+// Clients extrapolate the clock and weather fades between messages.
+
+import type { Client } from "@colyseus/core";
+import { isWeather, skyState, SKY_PROFILES, dayT as dayAt, type SkyOverride, type SkyState } from "@firstlight/shared";
+import { z } from "zod";
+import type { PlayerActor } from "./actors.ts";
+import type { BodyRoom } from "./BodyRoom.ts";
+import type { RoomSystem, SystemFactory } from "./systems.ts";
+
+export class SkySystem implements RoomSystem {
+  private readonly room: BodyRoom;
+  private override: SkyOverride | null = null;
+  /** Admin time shift (fraction of a day added to the clock). */
+  private dayOffset = 0;
+  private lastKey = "";
+  /** Injectable clock (tests). */
+  now: () => number = () => Date.now();
+
+  constructor(room: BodyRoom) {
+    this.room = room;
+    room.onMessage("skySync", z.object({}).passthrough().optional(), (c: Client) => c.send("sky", this.state()));
+    this.lastKey = this.key(this.state());
+  }
+
+  get body() {
+    return this.room.bodyDef.id;
+  }
+
+  get copy() {
+    return this.room.state.copy;
+  }
+
+  state(now = this.now()): SkyState {
+    return skyState(this.body, this.copy, now, this.dayOffset, this.override);
+  }
+
+  private key(s: SkyState): string {
+    return `${s.weather}:${s.intensity.toFixed(3)}:${s.slotStart}:${s.override}:${this.dayOffset}`;
+  }
+
+  tick(_dtMs: number, now: number) {
+    if (this.override && this.override.until <= now) this.override = null;
+    const s = this.state(now);
+    const k = this.key(s);
+    if (k !== this.lastKey) {
+      this.lastKey = k;
+      this.room.broadcast("sky" as never, s as never);
+    }
+  }
+
+  onAdmin(_actor: PlayerActor, cmd: string, args: Record<string, unknown>): boolean {
+    if (cmd !== "sky") return false;
+    const now = this.now();
+    if (args.clear === true) {
+      this.override = null;
+      this.dayOffset = 0;
+    }
+    if (isWeather(args.weather)) {
+      const minutes = typeof args.minutes === "number" ? Math.max(0.1, Math.min(240, args.minutes)) : 15;
+      const intensity = typeof args.intensity === "number" ? Math.max(0, Math.min(1, args.intensity)) : 0.9;
+      this.override = { weather: args.weather, intensity, until: now + minutes * 60_000 };
+    }
+    if (typeof args.dayT === "number" && Number.isFinite(args.dayT)) {
+      // Shift the clock so the copy is at the requested time of day now.
+      const want = ((args.dayT % 1) + 1) % 1;
+      this.dayOffset = want - dayAt(this.body, now);
+    }
+    const s = this.state(now);
+    this.lastKey = this.key(s);
+    this.room.broadcast("sky" as never, s as never);
+    return true;
+  }
+}
+
+export const createSkySystem: SystemFactory = (room) => (SKY_PROFILES[room.bodyDef.id] ? new SkySystem(room) : null);

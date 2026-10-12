@@ -12,6 +12,7 @@ import { Bench, benchConfig } from "../render/bench.ts";
 import { BlobShadows } from "../render/blobShadows.ts";
 import { ParticleSystem, type BurstOptions } from "../render/particles.ts";
 import { PerfOverlay } from "../render/PerfOverlay.ts";
+import { Environment } from "../render/environment.ts";
 import { MENU_GRADE } from "../render/post.ts";
 import { runProbe } from "../render/probe.ts";
 import { createRenderer, type RenderCtx } from "../render/renderer.ts";
@@ -49,6 +50,8 @@ export class Game {
   self!: AvatarView;
   perf!: PerfOverlay;
   particles!: ParticleSystem;
+  /** Day/night cycle and weather (render side). */
+  env!: Environment;
   blobs!: BlobShadows;
   bench: Bench | null = null;
   photo!: PhotoMode;
@@ -81,7 +84,8 @@ export class Game {
     this.photo = new PhotoMode({
       ctx: this.ctx,
       input: this.input,
-      planetGrade: () => this.planet.look.grade,
+      planetGrade: () => this.env.currentGrade(),
+      env: () => this.env,
       terrain: () => this.planet.terrain,
       anchor: () => this.player.pos,
     });
@@ -107,6 +111,7 @@ export class Game {
       if (this.running && !this.photo.active) this.setMenuMode(!document.pointerLockElement);
     });
     this.particles = new ParticleSystem(this.ctx.scene);
+    this.env = new Environment(this.ctx, this.audio, this.particles);
     this.blobs = new BlobShadows(this.ctx.scene);
     const applyFx = () => {
       this.particles.applySettings(this.ctx.settings);
@@ -156,6 +161,7 @@ export class Game {
 
   /** Look rule 1: muted grade while a menu/lobby is open, the body's saturated grade otherwise. */
   setMenuMode(on: boolean) {
+    if (this.env) this.env.menu = on;
     this.ctx.setGrade(on || !this.planet ? MENU_GRADE : this.planet.look.grade);
   }
 
@@ -261,6 +267,7 @@ export class Game {
     this.planet?.dispose();
     this.bodyId = body;
     this.planet = new Planet(this.ctx, body);
+    this.env.setBody(body, 0, this.planet.look, this.planet.rig);
     this.particles.setMoteColor(this.planet.look.mote);
     this.player ??= new PlayerController(this.planet.terrain, this.planet.body.waterLevel);
     this.player.setTerrain(this.planet.terrain, this.planet.body.waterLevel);
@@ -272,6 +279,8 @@ export class Game {
     if (OFFLINE) {
       const p = this.spawnPoint();
       this.player.teleport(p.x, p.y, p.z);
+      // Systems that work without a room (e.g. breakable props) still exist offline and in ?bench.
+      this.systems = CLIENT_SYSTEMS.filter((f) => f.offline).map((f) => f(this)).filter((x): x is ClientSystem => !!x);
     } else {
       setLoading("Connecting…", 0.3);
       let room;
@@ -353,6 +362,7 @@ export class Game {
       }, benchCfg);
       this.player.frozen = true;
       this.applyCharsVisibility();
+      this.env.setBenchMode(this.bodyId, this.planet.look);
       this.bench.update(0, performance.now(), this.ctx.camera);
     }
     setLoading("Warming up shaders…", 0.92);
@@ -390,7 +400,9 @@ export class Game {
 
   private updateWorldForWarmup() {
     const f = this.bench ? this.bench.focus : this.player.pos;
+    this.env.update(1 / 60);
     this.planet.update(f.x, f.y, f.z, this.ctx.camera, performance.now());
+    this.env.afterCamera(this.ctx.camera, 1 / 60);
     this.particles.update(1 / 60, this.ctx.camera.position, performance.now());
   }
 
@@ -463,6 +475,7 @@ export class Game {
       }
     }
 
+    this.env.update(dt);
     this.planet.update(focus.x, focus.y, focus.z, this.ctx.camera, now, dt);
     this.portals?.update(dt, focus, this.planet.loadRadius * 0.9);
     this.piles?.update(state, dt);
@@ -484,6 +497,7 @@ export class Game {
     else if (!this.bench) this.player.placeCamera(this.ctx.camera);
     this.audio.updateListener(this.ctx.camera);
     if (FX_DEMO && now >= this.nextFxDemo) this.fxDemo(now, focus);
+    this.env.afterCamera(this.ctx.camera, dt);
     this.particles.update(dt, this.ctx.camera.position, now);
     if (this.ctx.settings.on.chars) {
       const blobs: { x: number; y: number; z: number; r: number }[] = [];
@@ -525,7 +539,7 @@ export class Game {
       particles: this.particles.liveCount,
       entities: this.avatars.size + 1 + (this.bench?.crowdViews().length ?? 0),
       ping: this.net.rtt,
-      body: this.bodyId,
+      body: this.env.describe(),
     });
     this.input.endFrame();
   }

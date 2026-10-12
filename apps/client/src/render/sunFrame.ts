@@ -31,10 +31,14 @@ export function localFrame(ux: number, uy: number, uz: number, east: V3, north: 
   north[2] = ux * ey - uy * ex;
 }
 
+// Scratch for skyDir (called every frame by the sun rig and sky planets: no allocation).
+const SE: V3 = [0, 0, 0];
+const SN: V3 = [0, 0, 0];
+
 /** Direction for (elevation, azimuth) radians in the local frame of `up`. */
 export function skyDir(ux: number, uy: number, uz: number, elev: number, az: number, out: V3): V3 {
-  const e: V3 = [0, 0, 0];
-  const n: V3 = [0, 0, 0];
+  const e = SE;
+  const n = SN;
   localFrame(ux, uy, uz, e, n);
   const ce = Math.cos(elev), se = Math.sin(elev), ca = Math.cos(az), sa = Math.sin(az);
   out[0] = ux * se + (e[0] * ca + n[0] * sa) * ce;

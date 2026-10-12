@@ -55,6 +55,8 @@ export class ParticleSystem {
   private enabled = true;
   private readonly moteColor = new THREE.Color(1.0, 0.92, 0.7);
   private seed = 1;
+  /** Ambient motes brighten at night (the environment sets this every frame). */
+  moteBoost = 1;
 
   constructor(private readonly scene: THREE.Scene) {
     const g = ParticleSystem.makeGeometry(1);
@@ -218,7 +220,8 @@ export class ParticleSystem {
       const tw = 0.55 + 0.45 * Math.sin(t * 2.1 + ph * 2.7);
       const o = i * 4;
       P[o] = this.px[i]!; P[o + 1] = this.py[i]!; P[o + 2] = this.pz[i]!; P[o + 3] = this.size[i]!;
-      C[o] = this.cr[i]!; C[o + 1] = this.cg[i]!; C[o + 2] = this.cb[i]!; C[o + 3] = tw;
+      const k = this.moteBoost;
+      C[o] = this.cr[i]! * k; C[o + 1] = this.cg[i]! * k; C[o + 2] = this.cb[i]! * k; C[o + 3] = tw;
     }
     // Bursts.
     const drag = Math.exp(-1.6 * dt);

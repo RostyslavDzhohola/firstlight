@@ -67,49 +67,62 @@ export function rollDrops(sys: NpcSystem, n: Npc, top: PlayerActor, rng: Rng = M
   return out;
 }
 
+/** The live actor of an account in this room (connected players only), preferring its last session. */
+function actorOf(sys: NpcSystem, userId: string, sid: string): PlayerActor | null {
+  const bySid = sys.world.playerById(sid);
+  if (bySid && bySid.identity.userId === userId) return bySid;
+  for (const p of sys.world.connected()) if (p.identity.userId === userId) return p;
+  return null;
+}
+
 export function rewardKill(sys: NpcSystem, n: Npc, killerId: string | null, now: number) {
   const def = n.def;
   const world = sys.world;
   const maxHp = n.state.maxHp;
+  const killer = killerId ? world.playerById(killerId) ?? null : null;
   const xpTo: PlayerActor[] = [];
   let top: PlayerActor | null = null;
   let topAmt = -1;
-  for (const [sid, e] of n.damage) {
-    const p = world.playerById(sid);
+  // Credit is HP actually removed per account (overkill can't outrank earlier damage).
+  for (const e of n.damage.values()) {
+    const p = actorOf(sys, e.userId, e.sid);
     if (!p || p.dead) continue;
     if (e.amount > topAmt) {
       topAmt = e.amount;
       top = p;
     }
-    if (e.amount >= NPC_RULES.xpShare * maxHp || sid === killerId) xpTo.push(p);
+    if (e.amount >= NPC_RULES.xpShare * maxHp || (killer && killer.identity.userId === e.userId)) xpTo.push(p);
   }
-  if (killerId && !xpTo.some((p) => p.id === killerId)) {
-    const k = world.playerById(killerId);
-    if (k && !k.dead) xpTo.push(k);
-  }
+  if (killer && !killer.dead && !xpTo.includes(killer)) xpTo.push(killer);
   const key = n.point ? `p${n.point.id}` : n.summoner ? `s${n.summoner}` : `x${n.id}`;
   const gains = new Map<string, { p: PlayerActor; xp: number; coins: number }>();
-  for (const p of xpTo) {
-    const xp = killXp(def.tier, n.level, p.char.level, repeatDecay(sys, p.identity.userId, key, now));
-    if (xp > 0) world.grantXp(p, xp);
-    gains.set(p.id, { p, xp, coins: 0 });
-  }
-  if (top) {
-    const coins = npcCoins(def, n.level);
-    if (coins > 0) {
-      top.char.coins += coins;
-      top.youDirty = true;
+  // XP, coins, drops, chest and saves land together; pile events go out after the commit (D26).
+  const events: (() => void)[] = [];
+  world.withTx(() => {
+    for (const p of xpTo) {
+      const xp = killXp(def.tier, n.level, p.char.level, repeatDecay(sys, p.identity.userId, key, now));
+      if (xp > 0) world.grantXp(p, xp);
+      gains.set(p.id, { p, xp, coins: 0 });
     }
-    const g = gains.get(top.id) ?? { p: top, xp: 0, coins: 0 };
-    g.coins = coins;
-    gains.set(top.id, g);
-    const items = rollDrops(sys, n, top);
-    if (items.length) world.createPile(top, items, 0, n.pos);
-  }
-  if (n.point?.chest && n.point.chestKey === n.member) {
-    const owner = top ?? (killerId ? world.playerById(killerId) ?? null : null);
-    if (owner) openChest(sys, n.point.chest, owner, n.level, n.point.pos);
-  }
+    if (top) {
+      const coins = npcCoins(def, n.level);
+      if (coins > 0) {
+        top.char.coins += coins;
+        top.youDirty = true;
+      }
+      const g = gains.get(top.id) ?? { p: top, xp: 0, coins: 0 };
+      g.coins = coins;
+      gains.set(top.id, g);
+      const items = rollDrops(sys, n, top);
+      if (items.length) world.createPile(top, items, 0, n.pos, events);
+    }
+    if (n.point?.chest && n.point.chestKey === n.member) {
+      const owner = top ?? killer;
+      if (owner) openChest(sys, n.point.chest, owner, n.level, n.point.pos, Math.random, events);
+    }
+    for (const g of gains.values()) world.save(g.p);
+  });
+  for (const e of events) e();
   for (const g of gains.values()) world.send(g.p, "npcKill", { id: n.id, kind: n.defIndex, xp: g.xp, coins: g.coins });
   emitNpcEvent({
     kind: "kill",
@@ -123,14 +136,16 @@ export function rewardKill(sys: NpcSystem, n: Npc, killerId: string | null, now:
 }
 
 /** Camp chest (content §1.4): opens when the camp elite dies; a pile at the camp centre. */
-export function openChest(sys: NpcSystem, chest: CampChest, owner: PlayerActor, level: number, at: V3, rng: Rng = Math.random) {
+export function openChest(sys: NpcSystem, chest: CampChest, owner: PlayerActor, level: number, at: V3, rng: Rng = Math.random, deferred?: (() => void)[]) {
   const planet: PlanetId = sys.planet ?? "arcadia";
   const items: InvItem[] = [];
   for (let i = 0; i < chest.weapons; i++) items.push(randomWeapon(level, rng));
   if (chest.tonics > 0) items.push({ id: PLANET_TONIC[planet].id, tier: 1, qty: chest.tonics });
   if (chest.cosmetic && rng() < chest.cosmetic.chance) items.push({ id: chest.cosmetic.id, tier: 1, qty: 1 });
-  sys.world.createPile(owner, items, chest.coins, at);
-  sys.sendNear(at, 80, "npcChest", { x: at[0], y: at[1], z: at[2], coins: chest.coins, items: items.length });
+  sys.world.createPile(owner, items, chest.coins, at, deferred);
+  const announce = () => sys.sendNear(at, 80, "npcChest", { x: at[0], y: at[1], z: at[2], coins: chest.coins, items: items.length });
+  if (deferred) deferred.push(announce);
+  else announce();
 }
 
 /** Personal boss loot for one eligible player: coins, XP, items into the inventory, overflow at their feet. */
@@ -146,12 +161,17 @@ export function bossLoot(sys: NpcSystem, def: BossDef, p: PlayerActor, rng: Rng 
     if (id === "weapon") items.push(randomWeapon(def.level, rng, r.weaponTier ?? 2));
     else items.push({ id, tier: 1, qty: 1 });
   }
-  p.char.coins += def.loot.coins;
-  p.youDirty = true;
-  sys.world.grantXp(p, def.loot.xp);
-  const leftovers: InvItem[] = [];
-  for (const it of items) if (!sys.world.giveItem(p, it)) leftovers.push(it);
-  if (leftovers.length) sys.world.createPile(p, leftovers, 0, actorPos(p));
-  sys.world.save(p);
+  // Coins, XP, items and the overflow pile commit together; pile events go out after (D26).
+  const events: (() => void)[] = [];
+  sys.world.withTx(() => {
+    p.char.coins += def.loot.coins;
+    p.youDirty = true;
+    sys.world.grantXp(p, def.loot.xp);
+    const leftovers: InvItem[] = [];
+    for (const it of items) if (!sys.world.giveItem(p, it)) leftovers.push(it);
+    if (leftovers.length) sys.world.createPile(p, leftovers, 0, actorPos(p), events);
+    sys.world.save(p);
+  });
+  for (const e of events) e();
   return { xp: def.loot.xp, coins: def.loot.coins, items };
 }

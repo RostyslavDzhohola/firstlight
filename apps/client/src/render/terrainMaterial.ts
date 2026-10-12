@@ -115,11 +115,14 @@ function build(layers: number, normals: boolean): THREE.MeshStandardNodeMaterial
   // Wet band at the shore and darker lake bed.
   const wet = float(1).sub(smoothstep(0.0, 0.9, h)).mul(float(1).sub(rock.mul(0.5)));
   col = col.mul(mix(float(1), float(0.62), wet));
+  // Rain (weather): flat ground soaks darker than rock faces; puddle sheen via roughness below.
+  const rainWet = atmo.wet.mul(float(1).sub(rock.mul(0.4)));
+  col = col.mul(mix(float(1), float(0.72), rainWet));
   // Baked AO (always) and baked sun visibility (Low).
   col = col.mul(mix(float(1), bake.x, terrainUniforms.aoStrength));
   col = col.mul(mix(float(1), mix(float(0.55), float(1), bake.y), terrainUniforms.bakedSun));
   m.colorNode = col;
-  m.roughnessNode = mix(float(0.93), float(0.5), wet);
+  m.roughnessNode = mix(mix(float(0.93), float(0.5), wet), float(0.32), rainWet.mul(0.85));
 
   if (normals && height) {
     // Mikkelsen surface-gradient bump from screen-space derivatives of the procedural height.

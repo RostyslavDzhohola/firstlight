@@ -4,6 +4,8 @@
 // shared world-object table so they match the server's triggers exactly.
 
 import * as THREE from "three/webgpu";
+import { materialColor, materialEmissive } from "three/tsl";
+import { atmo } from "../render/atmosphere.ts";
 import type { BodyId, Terrain } from "@firstlight/shared";
 import { PLAQUES, type HallLine } from "@firstlight/shared/content/secrets";
 import { objectPos, objectsOn, type WorldObjectDef } from "@firstlight/shared/content/world";
@@ -19,6 +21,7 @@ function std(color: number, opts: { emissive?: number; metal?: number; rough?: n
     if (opts.emissive) {
       s.emissive = new THREE.Color(color);
       s.emissiveIntensity = opts.emissive;
+      s.emissiveNode = materialEmissive.mul(atmo.glowBoost); // brighter at night
     }
     m = s;
     mats.set(key, m);
@@ -29,7 +32,9 @@ function glow(color: number, k = 2, opacity = 1): THREE.Material {
   const key = `g${color}:${k}:${opacity}`;
   let m = mats.get(key);
   if (!m) {
-    m = new THREE.MeshBasicNodeMaterial({ color: new THREE.Color(color).multiplyScalar(k), transparent: opacity < 1, opacity, depthWrite: opacity >= 1 });
+    const b = new THREE.MeshBasicNodeMaterial({ color: new THREE.Color(color).multiplyScalar(k), transparent: opacity < 1, opacity, depthWrite: opacity >= 1 });
+    b.colorNode = materialColor.mul(atmo.glowBoost); // brighter at night
+    m = b;
     mats.set(key, m);
   }
   return m;

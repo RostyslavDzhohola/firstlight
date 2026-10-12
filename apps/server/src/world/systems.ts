@@ -4,9 +4,11 @@
 import type { YouState } from "@firstlight/shared/net/protocol";
 import type { PlayerActor } from "./actors.ts";
 import type { BodyRoom } from "./BodyRoom.ts";
+import { createDestructionSystem } from "./destruction.ts";
 import { npcSystemFactory } from "./npc/index.ts";
 import { createQuestSystem } from "./quests/QuestSystem.ts";
 import { createVoiceSystem } from "./voice/index.ts";
+import { createSkySystem } from "./SkySystem.ts";
 import { createHorseSystem } from "./horses/HorseSystem.ts";
 
 export interface RoomSystem {
@@ -26,4 +28,10 @@ export interface RoomSystem {
 
 export type SystemFactory = (room: BodyRoom) => RoomSystem | null;
 
-export const SYSTEM_FACTORIES: SystemFactory[] = [npcSystemFactory, createVoiceSystem, createQuestSystem, createHorseSystem];
+export const SYSTEM_FACTORIES: SystemFactory[] = [npcSystemFactory, createVoiceSystem, createQuestSystem];
+// Destruction lane: breakable props (per-copy HP, broken set, rebuilds; hooks combat via host.props).
+SYSTEM_FACTORIES.push(createDestructionSystem);
+// Weather + day/night lane: per-copy sky clock and weather schedule.
+SYSTEM_FACTORIES.push(createSkySystem);
+// Horses lane (M11 #2, flag FEATURE_HORSES): whistle, riding, the mounted movement budget.
+SYSTEM_FACTORIES.push(createHorseSystem);

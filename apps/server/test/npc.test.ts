@@ -5,6 +5,7 @@ import type { Room } from "@colyseus/sdk";
 import { BODIES, createTerrain, isSafe, padDirs, type BodyId } from "@firstlight/shared";
 import { bossArena, resolveAreaDir } from "@firstlight/shared/content/arenas";
 import { NF, NPC_ANIM, NPC_AREAS } from "@firstlight/shared/content/npcs";
+import { ANIM } from "@firstlight/shared/net/schema";
 import type { Game } from "../src/app.ts";
 import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
@@ -413,3 +414,210 @@ describe("bosses (seam 1)", () => {
 });
 
 
+
+// ------------------------------------------------------------------------------------ review blockers
+
+/** Ground point `metres` along a fixed tangent from `from` (feet on the rendered surface). */
+function groundAlong(body: BodyId, from: V, metres: number): V {
+  const t = createTerrain(body);
+  const p = offset(from, metres, 0, BODIES[body].radius);
+  const l = Math.hypot(p[0], p[1], p[2]);
+  const r = BODIES[body].radius + t.groundHeight(p[0] / l, p[1] / l, p[2] / l) + 0.02;
+  return [(p[0] / l) * r, (p[1] / l) * r, (p[2] / l) * r];
+}
+
+/** Input sequence numbers per bot (must keep increasing; the client view may not carry `seq` yet). */
+const seqs = new WeakMap<Room, number>();
+function nextSeq(r: Room): number {
+  const n = Math.max(seqs.get(r) ?? 0, me(r)?.seq ?? 0) + 1;
+  seqs.set(r, n);
+  return n;
+}
+
+/** Stream movement inputs along a tangent at `speed` m/s for `ms`; returns how many corrections came back. */
+async function run(r: Room, from: V, speed: number, ms: number, anim: number = ANIM.SPRINT): Promise<number> {
+  let corrections = 0;
+  const off = r.onMessage("correct", () => corrections++);
+  const t0 = Date.now();
+  await new Promise<void>((done) => {
+    const iv = setInterval(() => {
+      const k = (Date.now() - t0) / 1000;
+      if (k * 1000 >= ms) {
+        clearInterval(iv);
+        done();
+        return;
+      }
+      const p = groundAlong("arcadia", from, speed * k);
+      r.send("input", { seq: nextSeq(r), x: p[0], y: p[1], z: p[2], fx: 0, fy: 0, fz: 1, anim, t: Date.now() });
+    }, 50);
+  });
+  await sleep(150);
+  (off as unknown as () => void)?.();
+  return corrections;
+}
+
+describe("review blockers (seam 1)", () => {
+  it("overkill doesn't steal credit: coins go to the player who removed the most HP", async () => {
+    const at = nearPad("arcadia", 0, 70);
+    const A = await player("chipper", "arcadia", at);
+    const B = await player("finisher", "arcadia", offset(at, 0, 4, BODIES.arcadia.radius));
+    const id = await spawn(A, "hopbit", offset(at, 20, 0, BODIES.arcadia.radius), { level: 1, instant: true });
+    const kills: Record<string, any> = {};
+    A.onMessage("npcKill", (m: any) => (kills.A = m));
+    B.onMessage("npcKill", (m: any) => (kills.B = m));
+    // Hopbit L1 has 22 HP: A removes 15, then B's 500-damage hit removes only the last 7.
+    A.send("npc", { cmd: "hurt", id, amount: 15, as: A.sessionId });
+    await sleep(150);
+    B.send("npc", { cmd: "hurt", id, amount: 500, as: B.sessionId });
+    await waitFor(() => !!kills.A && !!kills.B, 3000);
+    expect(kills.A.coins).toBe(3);
+    expect(kills.B.coins).toBe(0);
+    expect(kills.B.xp).toBe(15); // killing blow still earns XP
+  });
+
+  it("Cease-and-Desist is enforced by the server: sprinting gets corrected, normal sprint doesn't", async () => {
+    const start = groundAlong("arcadia", nearPad("arcadia", 0, 60), 0);
+    const A = await player("sprinter", "arcadia", start);
+    await sleep(400);
+    expect(await run(A, start, 9, 2000)).toBe(0); // control: a plain sprint is fine
+    const here: V = [me(A).x, me(A).y, me(A).z];
+    A.send("npc", { cmd: "fx", kind: "nosprint", ms: 6000 });
+    await sleep(400);
+    expect(await run(A, here, 9, 3200)).toBeGreaterThan(0);
+  });
+
+  it("slows are enforced too (Grave Hands −50%: a sprint is corrected)", async () => {
+    const start = groundAlong("arcadia", nearPad("arcadia", 0, 60), 0);
+    const A = await player("slowed", "arcadia", start);
+    A.send("npc", { cmd: "fx", kind: "slow", amount: 0.5, ms: 6000 });
+    await sleep(400);
+    expect(await run(A, start, 9, 2500)).toBeGreaterThan(0);
+  });
+
+  it("no dodge bursts while under Cease-and-Desist", async () => {
+    const start = groundAlong("arcadia", nearPad("arcadia", 0, 60), 0);
+    const A = await player("roller", "arcadia", start);
+    let corrections = 0;
+    A.onMessage("correct", () => corrections++);
+    const dodgeTo = (from: V) => {
+      const p = groundAlong("arcadia", from, 4.4);
+      A.send("input", { seq: nextSeq(A), x: p[0], y: p[1], z: p[2], fx: 0, fy: 0, fz: 1, anim: ANIM.DODGE, t: Date.now() });
+    };
+    await sleep(500); // budget banks to its cap (3.5 m): a 4.4 m hop needs the dodge allowance
+    dodgeTo(start);
+    await sleep(300);
+    expect(corrections).toBe(0); // control: a dodge is allowed
+    const here: V = [me(A).x, me(A).y, me(A).z];
+    A.send("npc", { cmd: "fx", kind: "nosprint", ms: 5000 });
+    await sleep(1300); // past the dodge cooldown, budget banked again
+    dodgeTo(here);
+    await waitFor(() => corrections > 0, 2000);
+  });
+
+  it("Undertow drags the authoritative position toward the whirlpool (no client input needed)", async () => {
+    const start = groundAlong("arcadia", nearPad("arcadia", 0, 60), 0);
+    const A = await player("swimmer", "arcadia", start);
+    const centre = groundAlong("arcadia", start, 12);
+    const d0 = flat([me(A).x, me(A).y, me(A).z], centre);
+    A.send("npc", { cmd: "fx", kind: "pull", x: centre[0], y: centre[1], z: centre[2], speed: 2, ms: 2000 });
+    await sleep(2200);
+    const d1 = flat([me(A).x, me(A).y, me(A).z], centre);
+    expect(d0 - d1).toBeGreaterThan(3.2);
+    expect(d0 - d1).toBeLessThan(4.6);
+  });
+
+  it("running out of the arena doesn't dodge Royal Judgement: the marked participant still takes it", async () => {
+    NPC_TUNING.bosses = true;
+    NPC_TUNING.bossAttacks = false;
+    NPC_TUNING.bossMechanics = ["royal_judgement"];
+    NPC_TUNING.firstMechanicMs = 300;
+    const ar = hollowArena();
+    const A = await player("runner", "hollowmere", ar.centre as V, 14);
+    let died = false;
+    A.onMessage("death", (m: any) => m.victim === A.sessionId && (died = true));
+    let circle: any = null;
+    A.onMessage("boss", (m: any) => m.type === "mechanic" && m.mech === "royal_judgement" && (circle = m));
+    await bossUpIn(A);
+    await waitFor(() => circle !== null, 4000);
+    place(A, offset(ar.centre, 0, 140, BODIES.hollowmere.radius)); // well outside the 30 m Nave
+    await waitFor(() => died, 4000);
+  }, 30_000);
+});
+
+describe("review should-fix items (seam 1)", () => {
+  it("admin spawn with junk coordinates lands at the admin's feet, not NaN", async () => {
+    const at = nearPad("arcadia", 0, 70);
+    const A = await player("spawner", "arcadia", at);
+    const id = await ask<{ id: string }>(A, "npcInfo", { cmd: "spawn", kind: "woolback", x: "x", y: null, z: 1e9, level: "high", instant: true }).then((m) => m.id);
+    const n = await npcOf(A, id);
+    expect([n.x, n.y, n.z].every(Number.isFinite)).toBe(true);
+    expect(flat([n.x, n.y, n.z], [me(A).x, me(A).y, me(A).z])).toBeLessThan(1);
+  });
+
+  it("a Compliance Officer buffs Oversight units within 15 m (NF.BUFFED)", async () => {
+    const at = nearPad("meridian", 0, 80);
+    const A = await player("auditor", "meridian", at, 20);
+    const R = BODIES.meridian.radius;
+    const near = await spawn(A, "associate", offset(at, 30, 0, R), { level: 12, instant: true });
+    const far = await spawn(A, "associate", offset(at, 30, 30, R), { level: 12, instant: true });
+    await spawn(A, "compliance_officer", offset(at, 30, 6, R), { level: 16, instant: true });
+    await waitFor(() => !!((st(A).npcs?.get(near)?.flags ?? 0) & NF.BUFFED), 3000);
+    expect((st(A).npcs.get(far)?.flags ?? 0) & NF.BUFFED).toBe(0);
+  });
+
+  it("late joiners get the lair snapshot on request", async () => {
+    NPC_TUNING.bosses = true;
+    NPC_TUNING.bossAttacks = false;
+    NPC_TUNING.bossMechanics = [];
+    const ar = arcadiaArena();
+    const A = await player("latecomer", "arcadia", ar.centre as V, 8);
+    let snap: any = null;
+    A.onMessage("boss", (m: any) => m.type === "snapshot" && (snap = m));
+    await bossUpIn(A);
+    snap = null;
+    A.send("npcSync", {});
+    await waitFor(() => snap !== null, 2000);
+    expect(snap.broken).toEqual([]);
+    expect(snap.maxHp).toBe(12_000);
+  }, 30_000);
+});
+
+describe("late arrivals (seam 1)", () => {
+  it("a player arriving mid-telegraph sees the Royal Judgement already counting down", async () => {
+    NPC_TUNING.bosses = true;
+    NPC_TUNING.bossAttacks = false;
+    NPC_TUNING.bossMechanics = ["royal_judgement"];
+    NPC_TUNING.firstMechanicMs = 300;
+    const ar = hollowArena();
+    const R = BODIES.hollowmere.radius;
+    const A = await player("marked", "hollowmere", ar.centre as V, 14);
+    let circle: any = null;
+    A.onMessage("boss", (m: any) => m.type === "mechanic" && m.mech === "royal_judgement" && (circle = m));
+    await bossUpIn(A);
+    await waitFor(() => circle !== null, 4000);
+    const B = await player("arrival", "hollowmere", offset(ar.centre, 0, 60, R), 14);
+    let replay: any = null;
+    B.onMessage("npcAtk", (m: any) => m.sh === 9 && (replay = m));
+    B.send("npcSync", {});
+    await waitFor(() => replay !== null, 1500);
+    expect(replay.ms).toBeGreaterThan(0);
+    expect(replay.ms).toBeLessThan(2000);
+    expect(flat([replay.x, replay.y, replay.z], circle.pts)).toBeLessThan(0.5);
+  }, 30_000);
+});
+
+function hollowArena() {
+  return bossArena(createTerrain("hollowmere"))!;
+}
+function arcadiaArena() {
+  return bossArena(createTerrain("arcadia"))!;
+}
+async function bossUpIn(r: Room) {
+  let info: any = null;
+  await waitFor(() => {
+    void bossInfo(r).then((i) => (info = i));
+    return info?.status === "alive" && info.engaged;
+  }, 6000);
+  await waitFor(() => !!st(r).npcs?.get(info.id) && !(st(r).npcs.get(info.id).flags & NF.SPAWNING), 3000);
+  return info;
+}

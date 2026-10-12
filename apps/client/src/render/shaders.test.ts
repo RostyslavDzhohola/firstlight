@@ -17,6 +17,7 @@ import { BlobShadows } from "./blobShadows.ts";
 import { SkyPlanets } from "./skyPlanets.ts";
 import { LOOKS } from "./looks.ts";
 import { buildPost } from "./post.ts";
+import { WeatherFx } from "./weather.ts";
 import { SunLight } from "three/addons/lights/SunLight.js";
 import { SunLightNode } from "three/addons/lights/SunLightNode.js";
 
@@ -186,6 +187,14 @@ for (const backendName of ["webgpu", "webgl2"] as const) {
       expectClean(build(renderer, scene, camera, p.mesh));
       const blobs = new BlobShadows(scene);
       expectClean(build(renderer, scene, camera, blobs.mesh));
+    });
+
+    it("weather: rain/dust box and lightning bolt", () => {
+      const scene = sceneWithLights();
+      const fx = new WeatherFx(scene);
+      fx.setCapacity(64);
+      expectClean(build(renderer, scene, camera, fx.drops));
+      expectClean(build(renderer, scene, camera, fx.bolt));
     });
 
     it("sky planets, halos and the sky background", () => {

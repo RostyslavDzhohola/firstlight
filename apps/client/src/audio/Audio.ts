@@ -152,6 +152,114 @@ export class GameAudio {
     this.musicGen = body ? new MusicGen(this.ctx, this.music, body) : null;
     this.musicGen?.start();
   }
+
+  private ambience: WeatherAmbience | null = null;
+
+  /** Weather bed: rain hiss (0..1) and wind/dust (0..1). Cheap to call every frame. */
+  setWeather(rain: number, wind: number) {
+    if (this.ctx.state !== "running") return;
+    if (!this.ambience) {
+      if (rain < 0.01 && wind < 0.01) return;
+      this.ambience = new WeatherAmbience(this.ctx, this.sfx);
+    }
+    this.ambience.set(rain, wind);
+  }
+
+  /** A thunder rumble arriving after `delaySec` from a strike `distance` metres away. */
+  thunder(delaySec: number, distance: number) {
+    if (this.ctx.state !== "running") return;
+    (this.ambience ??= new WeatherAmbience(this.ctx, this.sfx)).thunder(delaySec, distance);
+  }
+}
+
+// ---------------------------------------------------------------- weather ambience (all synthesised)
+
+/** Looping noise beds for rain and wind plus thunder rumbles; no samples. */
+class WeatherAmbience {
+  private readonly rainGain: GainNode;
+  private readonly windGain: GainNode;
+  private readonly brown: AudioBuffer;
+  private rain = -1;
+  private wind = -1;
+
+  constructor(private readonly ctx: AudioContext, private readonly dest: AudioNode) {
+    const sr = ctx.sampleRate;
+    const len = sr * 3;
+    // White-ish noise for rain, brown noise for wind and thunder.
+    const white = ctx.createBuffer(1, len, sr);
+    const w = white.getChannelData(0);
+    for (let i = 0; i < len; i++) w[i] = Math.random() * 2 - 1;
+    this.brown = ctx.createBuffer(1, len, sr);
+    const b = this.brown.getChannelData(0);
+    let last = 0;
+    for (let i = 0; i < len; i++) {
+      last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02;
+      b[i] = last * 3.5;
+    }
+    this.rainGain = ctx.createGain();
+    this.rainGain.gain.value = 0;
+    this.windGain = ctx.createGain();
+    this.windGain.gain.value = 0;
+    const rainSrc = ctx.createBufferSource();
+    rainSrc.buffer = white;
+    rainSrc.loop = true;
+    const hp = ctx.createBiquadFilter();
+    hp.type = "highpass";
+    hp.frequency.value = 900;
+    const lp = ctx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = 7000;
+    rainSrc.connect(hp).connect(lp).connect(this.rainGain).connect(dest);
+    rainSrc.start();
+    const windSrc = ctx.createBufferSource();
+    windSrc.buffer = this.brown;
+    windSrc.loop = true;
+    const wlp = ctx.createBiquadFilter();
+    wlp.type = "lowpass";
+    wlp.frequency.value = 520;
+    wlp.Q.value = 0.9;
+    // Slow gusts.
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 0.11;
+    const lfoGain = ctx.createGain();
+    lfoGain.gain.value = 220;
+    lfo.connect(lfoGain).connect(wlp.frequency);
+    lfo.start();
+    windSrc.connect(wlp).connect(this.windGain).connect(dest);
+    windSrc.start();
+  }
+
+  set(rain: number, wind: number) {
+    const t = this.ctx.currentTime;
+    if (Math.abs(rain - this.rain) > 0.01) {
+      this.rain = rain;
+      this.rainGain.gain.setTargetAtTime(rain * 0.22, t, 0.6);
+    }
+    if (Math.abs(wind - this.wind) > 0.01) {
+      this.wind = wind;
+      this.windGain.gain.setTargetAtTime(wind * 0.35, t, 0.8);
+    }
+  }
+
+  thunder(delaySec: number, distance: number) {
+    const t = this.ctx.currentTime + Math.max(0, delaySec);
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.brown;
+    src.playbackRate.value = 0.55 + Math.random() * 0.2;
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.setValueAtTime(1100, t);
+    lp.frequency.exponentialRampToValueAtTime(110, t + 2.6);
+    const g = this.ctx.createGain();
+    const peak = Math.max(0.25, Math.min(1, 300 / Math.max(1, distance))) * 1.1;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(peak, t + 0.06);
+    g.gain.exponentialRampToValueAtTime(peak * 0.45, t + 0.7);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 3.6);
+    src.connect(lp).connect(g).connect(this.dest);
+    src.start(t, Math.random() * 0.5);
+    src.stop(t + 3.8);
+  }
 }
 
 // ---------------------------------------------------------------- generative ambient soundtrack

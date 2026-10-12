@@ -12,6 +12,8 @@ import type { BodyLook } from "./looks.ts";
 
 export const LUT_W = 64;
 export const LUT_H = 32;
+/** Slices by sun elevation (day/night): the atlas is LUT_W × (LUT_H · LUT_SLICES). */
+export const LUT_SLICES = 12;
 
 const R_PLANET = 6371; // km
 const R_ATMOS = 6471;
@@ -94,62 +96,92 @@ function scatter(dx: number, dy: number, dz: number, sx: number, sy: number, sz:
 }
 
 /**
- * Build the LUT pixels (RGBA float, linear) for a body. Texel (i, j): azimuth from the sun
+ * Build one LUT slice (RGBA float, linear) for a sun elevation. Texel (i, j): azimuth from the sun
  * φ = (i + .5)/W·π, elevation sine e = s² with s = (j + .5)/H (upper hemisphere only, dense at the
- * horizon; below the horizon the shader blends to the art haze colour).
- *
- * Art calibration: each row is scaled per channel so its azimuth-averaged colour equals the art
- * gradient mix(horizon, zenith, e^0.42) at that elevation. The palette stays art-directed; the
- * physics contributes the sun-side/anti-sun anisotropy, the Mie glow and sunset warming.
+ * horizon; below the horizon the shader blends to the art haze colour). `gains` (per row, per
+ * channel) are applied when given.
  */
-export function buildSkyLutData(look: BodyLook, p: Omit<ScatterParams, "sunElev">): Float32Array {
-  const data = new Float32Array(LUT_W * LUT_H * 4);
-  const se = Math.sin(look.sunElev), ce = Math.cos(look.sunElev);
-  const sx = ce, sy = se, sz = 0;
-  const params: ScatterParams = { ...p, sunElev: look.sunElev };
-  const out = [0, 0, 0];
-  const hz = new THREE.Color(look.horizon);
-  const md = new THREE.Color(look.mid);
-  const zn = new THREE.Color(look.zenith);
-  // The raw model has no sun irradiance factor; bring it to the palette's brightness first so the
-  // per-row channel gains below stay moderate.
-  {
-    let lum = 0, n = 0;
-    for (let k = 0; k < 64; k++) {
-      const e = 0.05 + (k / 63) * 0.9;
-      const ca = Math.sqrt(1 - e * e);
-      const phi = (k % 8) / 8 * Math.PI;
-      scatter(ca * Math.cos(phi), e, ca * Math.sin(phi), sx, sy, sz, params, out);
-      lum += 0.2126 * out[0]! + 0.7152 * out[1]! + 0.0722 * out[2]!;
-      n++;
-    }
-    const artLum = (0.2126 * (hz.r + md.r + zn.r) + 0.7152 * (hz.g + md.g + zn.g) + 0.0722 * (hz.b + md.b + zn.b)) / 3;
-    params.gain = lum > 0 ? artLum / (lum / n) : 1;
-  }
+function buildSlice(sunElev: number, p: Omit<ScatterParams, "sunElev">, gain: number, gains: Float32Array | null, out: Float32Array, offset: number) {
+  const sx = Math.cos(sunElev), sy = Math.sin(sunElev), sz = 0;
+  const params: ScatterParams = { ...p, sunElev, gain };
+  const px = [0, 0, 0];
   for (let j = 0; j < LUT_H; j++) {
     const s = (j + 0.5) / LUT_H;
     const e = Math.max(0.002, s * s);
     const ca = Math.sqrt(Math.max(0, 1 - e * e));
-    const avg = [0, 0, 0];
     for (let i = 0; i < LUT_W; i++) {
       const phi = ((i + 0.5) / LUT_W) * Math.PI;
-      const dx = ca * Math.cos(phi), dy = e, dz = ca * Math.sin(phi);
-      scatter(dx, dy, dz, sx, sy, sz, params, out);
-      const o = (j * LUT_W + i) * 4;
-      for (let c = 0; c < 3; c++) {
-        data[o + c] = out[c]!;
-        avg[c] += out[c]! / LUT_W;
-      }
-      data[o + 3] = 1;
-    }
-    const target = artSkyRow(hz, md, zn, e);
-    const gain = target.map((v, c) => Math.max(0.1, Math.min(10, v / Math.max(1e-6, avg[c]!))));
-    for (let i = 0; i < LUT_W; i++) {
-      const o = (j * LUT_W + i) * 4;
-      for (let c = 0; c < 3; c++) data[o + c] = data[o + c]! * gain[c]!;
+      scatter(ca * Math.cos(phi), e, ca * Math.sin(phi), sx, sy, sz, params, px);
+      const o = offset + (j * LUT_W + i) * 4;
+      for (let c = 0; c < 3; c++) out[o + c] = px[c]! * (gains ? gains[j * 3 + c]! : 1);
+      out[o + 3] = 1;
     }
   }
+}
+
+/**
+ * Build the LUT atlas for a body: LUT_SLICES slices for sun elevations spanning the body's day
+ * (`elevRange`), stacked vertically. The shader picks two slices by the current sun elevation
+ * and blends them, so the sky follows the day/night clock with uniforms only.
+ *
+ * Art calibration happens once, at the body's reference sun elevation (`look.sunElev`): each row is
+ * scaled per channel so its azimuth-averaged colour equals the art gradient at that elevation.
+ * The same gains apply to every slice, so dusk reddens and night darkens physically while the
+ * body keeps its palette.
+ */
+export function buildSkyLutData(look: BodyLook, p: Omit<ScatterParams, "sunElev">, elevRange: [number, number] = [look.sunElev, look.sunElev]): Float32Array {
+  const sliceSize = LUT_W * LUT_H * 4;
+  const data = new Float32Array(sliceSize * LUT_SLICES);
+  const hz = new THREE.Color(look.horizon);
+  const md = new THREE.Color(look.mid);
+  const zn = new THREE.Color(look.zenith);
+  const ref = Math.max(elevRange[0], Math.min(elevRange[1], look.sunElev));
+  const out = [0, 0, 0];
+  // Brightness: bring the raw model to the palette's luminance at the reference elevation.
+  let gain = 1;
+  {
+    const params: ScatterParams = { ...p, sunElev: ref };
+    const sx = Math.cos(ref), sy = Math.sin(ref);
+    let lum = 0, n = 0;
+    for (let k = 0; k < 64; k++) {
+      const e = 0.05 + (k / 63) * 0.9;
+      const ca = Math.sqrt(1 - e * e);
+      const phi = ((k % 8) / 8) * Math.PI;
+      scatter(ca * Math.cos(phi), e, ca * Math.sin(phi), sx, sy, 0, params, out);
+      lum += 0.2126 * out[0]! + 0.7152 * out[1]! + 0.0722 * out[2]!;
+      n++;
+    }
+    const artLum = (0.2126 * (hz.r + md.r + zn.r) + 0.7152 * (hz.g + md.g + zn.g) + 0.0722 * (hz.b + md.b + zn.b)) / 3;
+    gain = lum > 0 ? artLum / (lum / n) : 1;
+  }
+  // Per-row channel gains at the reference elevation.
+  const refSlice = new Float32Array(sliceSize);
+  buildSlice(ref, p, gain, null, refSlice, 0);
+  const gains = new Float32Array(LUT_H * 3);
+  for (let j = 0; j < LUT_H; j++) {
+    const s = (j + 0.5) / LUT_H;
+    const e = Math.max(0.002, s * s);
+    const avg = [0, 0, 0];
+    for (let i = 0; i < LUT_W; i++) for (let c = 0; c < 3; c++) avg[c] += refSlice[(j * LUT_W + i) * 4 + c]! / LUT_W;
+    const target = artSkyRow(hz, md, zn, e);
+    for (let c = 0; c < 3; c++) gains[j * 3 + c] = Math.max(0.1, Math.min(10, target[c]! / Math.max(1e-6, avg[c]!)));
+  }
+  for (let k = 0; k < LUT_SLICES; k++) {
+    const elev = sliceElev(k, elevRange);
+    buildSlice(elev, p, gain, gains, data, k * sliceSize);
+  }
   return data;
+}
+
+/** Sun elevation of slice k for a body's elevation range. */
+export function sliceElev(k: number, [lo, hi]: [number, number]): number {
+  return lo + ((hi - lo) * k) / (LUT_SLICES - 1);
+}
+
+/** Fractional slice index for a sun elevation (clamped). */
+export function sliceFor(elev: number, [lo, hi]: [number, number]): number {
+  if (hi - lo < 1e-6) return 0;
+  return Math.max(0, Math.min(LUT_SLICES - 1, ((elev - lo) / (hi - lo)) * (LUT_SLICES - 1)));
 }
 
 /** Mid-sky stop elevation (sine). Shared with the shader's art gradient. */
@@ -167,13 +199,12 @@ export function artSkyRow(hz: THREE.Color, md: THREE.Color, zn: THREE.Color, e: 
 
 let lutTexture: THREE.DataTexture | null = null;
 
-/** The shared LUT texture (one object for the app; its pixels change per body). */
+/** The shared LUT atlas (one object for the app; its pixels change per body). */
 export function skyLutTexture(): THREE.DataTexture {
   if (!lutTexture) {
-    const data = new Uint16Array(LUT_W * LUT_H * 4);
-    const one = THREE.DataUtils.toHalfFloat(0.5);
-    data.fill(one);
-    lutTexture = new THREE.DataTexture(data, LUT_W, LUT_H, THREE.RGBAFormat, THREE.HalfFloatType);
+    const data = new Uint16Array(LUT_W * LUT_H * LUT_SLICES * 4);
+    data.fill(THREE.DataUtils.toHalfFloat(0.5));
+    lutTexture = new THREE.DataTexture(data, LUT_W, LUT_H * LUT_SLICES, THREE.RGBAFormat, THREE.HalfFloatType);
     lutTexture.magFilter = THREE.LinearFilter;
     lutTexture.minFilter = THREE.LinearFilter;
     lutTexture.wrapS = THREE.ClampToEdgeWrapping;
@@ -188,15 +219,19 @@ export function skyLutTexture(): THREE.DataTexture {
 
 const cache = new Map<string, Uint16Array>();
 
-/** Fill the shared LUT for a body (cached per body). */
-export function applySkyLut(bodyKey: string, look: BodyLook) {
+/**
+ * Fill the shared LUT atlas for a body (cached per body; ~100 ms the first time, behind the loading
+ * screen). `elevRange` = the body's sun elevation range over the day.
+ */
+export function applySkyLut(bodyKey: string, look: BodyLook, elevRange: [number, number]) {
   const tex = skyLutTexture();
-  let half = cache.get(bodyKey);
+  const key = `${bodyKey}:${elevRange[0].toFixed(3)}:${elevRange[1].toFixed(3)}`;
+  let half = cache.get(key);
   if (!half) {
-    const f = buildSkyLutData(look, { rayleigh: look.scatter.rayleigh, mie: look.scatter.mie, steps: [16, 8] });
+    const f = buildSkyLutData(look, { rayleigh: look.scatter.rayleigh, mie: look.scatter.mie, steps: [12, 6] }, elevRange);
     half = new Uint16Array(f.length);
     for (let i = 0; i < f.length; i++) half[i] = THREE.DataUtils.toHalfFloat(Math.min(f[i]!, 60000));
-    cache.set(bodyKey, half);
+    cache.set(key, half);
   }
   (tex.image.data as Uint16Array).set(half);
   tex.needsUpdate = true;

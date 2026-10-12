@@ -3,7 +3,7 @@
 // blocking, burn, healing. The room calls these from message handlers and the tick.
 
 import { damageMult, falloff, maxHp, splashFalloff } from "@firstlight/shared/content/progression";
-import { WEAPONS, WEAPON_INDEX, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
+import { WEAPONS, WEAPON_INDEX, type Destroys, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
 import type { Terrain } from "@firstlight/shared";
 import { PF } from "@firstlight/shared/net/schema";
 import { actorPos, positionAgo, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
@@ -24,8 +24,45 @@ export interface CombatHost {
   broadcastNear(type: string, msg: unknown, at: V3, radius: number, always?: string[]): void;
   /** Called after damage is applied; handles deaths. */
   onDamage(target: Actor, amount: number, attacker: PlayerActor | NpcActor | null, weak: boolean): void;
-  /** Report a hit on a destructible prop (destruction system). */
+  /** Report where an attack landed (the NPC lane's boss-arena cover listens; npc/boss.ts). */
   onPropHit?(point: V3, power: "light" | "heavy", amount: number): void;
+  /** Breakable props (set by destruction.ts): intact ones stop shots and take damage. */
+  props?: BreakableHost;
+}
+
+/**
+ * Breakable props as seen by combat (implemented by world/destruction.ts). `cls` is the attack's
+ * destruction class (the weapon's `destroys`, or "heavy" for heavy attacks); the system decides
+ * whether that class can break the prop and applies weapon prop multipliers.
+ */
+export interface BreakableHost {
+  /** First intact prop along a segment (the returned object is reused), or null. */
+  raycast(o: V3, d: V3, maxT: number): { index: number; t: number } | null;
+  /** `by`: the attacking player's session id (credit for the Demolition Crew medal), or null. */
+  damage(index: number, amount: number, cls: Destroys, weaponId: string, dir: V3, by: string | null): void;
+  splash(at: V3, radius: number, amount: number, cls: Destroys, weaponId: string, by: string | null, exclude?: number): void;
+  arc(pos: V3, facing: V3, range: number, arcDeg: number, amount: number, cls: Destroys, weaponId: string, by: string | null): void;
+}
+
+const playerId = (a: PlayerActor | NpcActor | null): string | null => (a && a.kind === "player" ? a.id : null);
+
+const propHit = { index: -1, t: Infinity };
+/**
+ * First intact breakable along a ray, ignoring the first `skip` metres (camera rays start behind
+ * the shooter's head: props there must not catch the aim). Returns a reused object or null.
+ */
+function propOnRay(host: CombatHost, o: V3, d: V3, maxT: number, skip = 0): { index: number; t: number } | null {
+  if (!host.props || !(maxT > skip)) return null;
+  const h = host.props.raycast([o[0] + d[0] * skip, o[1] + d[1] * skip, o[2] + d[2] * skip], d, maxT - skip);
+  if (!h) return null;
+  propHit.index = h.index;
+  propHit.t = h.t + skip;
+  return propHit;
+}
+
+/** Distance along a camera ray to the shooter's head (where aiming starts to count). */
+function behind(o: V3, d: V3, head: V3): number {
+  return Math.max(0, (head[0] - o[0]) * d[0] + (head[1] - o[1]) * d[1] + (head[2] - o[2]) * d[2]);
 }
 
 export interface Projectile {
@@ -96,6 +133,13 @@ interface RayTargetHit {
   weak: boolean;
 }
 
+/** Weak-point multiplier: the NPC's own (bosses) or the weapon's headshot multiplier. */
+function weakMult(hit: RayTargetHit, tier: TierStats): number {
+  if (!hit.weak) return 1;
+  if (hit.actor.kind === "npc" && hit.actor.weakMult !== undefined) return hit.actor.weakMult;
+  return tier.headMult ?? 1.5;
+}
+
 /** Nearest actor hit by a ray, using rewound positions, ignoring `ignore`. */
 function raycastActors(host: CombatHost, o: V3, d: V3, maxT: number, ignore: Set<string>, rewindMs: number): RayTargetHit | null {
   let best: RayTargetHit | null = null;
@@ -103,7 +147,11 @@ function raycastActors(host: CombatHost, o: V3, d: V3, maxT: number, ignore: Set
   const test = (a: Actor, r: number, h: number) => {
     if (ignore.has(a.id) || !canHurt(null, a, now)) return;
     const hit = rayCapsule(o, d, maxT, capsuleFeet(a, now, rewindMs), r, h);
-    if (hit && (!best || hit.t < best.t)) best = { actor: a, t: hit.t, weak: a.kind === "player" ? hit.heightAboveFeet >= HEAD_FROM : hit.heightAboveFeet >= h * 0.8 };
+    if (hit && (!best || hit.t < best.t)) {
+      // NPCs with weak-point volumes (bosses) decide for themselves where the weak spot is.
+      const weak = a.kind === "player" ? hit.heightAboveFeet >= HEAD_FROM : a.weakPoint ? a.weakPoint(o, d, hit.t) : hit.heightAboveFeet >= h * 0.8;
+      best = { actor: a, t: hit.t, weak };
+    }
   };
   for (const p of host.players()) if (!p.dead) test(p, PLAYER_RADIUS, PLAYER_HEIGHT);
   for (const n of host.npcs()) if (n.state.hp > 0) test(n, n.radius, n.height);
@@ -194,7 +242,7 @@ export function fire(host: CombatHost, p: PlayerActor, msg: FireInput): FireResu
       // The camera ray only chooses the aim point; damage is traced from the authoritative muzzle,
       // so a camera behind cover can't shoot through it.
       const maxR = def.falloffTo ?? def.range;
-      const aimT = Math.min(maxR, rayTerrain(host.terrain, o, d, maxR, 1.5), aimActorT(host, p, o, d, maxR));
+      const aimT = Math.min(maxR, rayTerrain(host.terrain, o, d, maxR, 1.5), aimActorT(host, p, o, d, maxR), propOnRay(host, o, d, maxR, behind(o, d, head))?.t ?? Infinity);
       const aim: V3 = [o[0] + d[0] * aimT, o[1] + d[1] * aimT, o[2] + d[2] * aimT];
       const muzzle = head;
       let base: V3 = [aim[0] - muzzle[0], aim[1] - muzzle[1], aim[2] - muzzle[2]];
@@ -226,7 +274,7 @@ export function fire(host: CombatHost, p: PlayerActor, msg: FireInput): FireResu
       const speed = def.delivery === "arrow" ? 25 + 30 * charge : (def.speed ?? 30);
       const dmg = def.delivery === "arrow" ? ((tier.tap ?? tier.damage) + (tier.damage - (tier.tap ?? tier.damage)) * charge) * lvl : tier.damage * lvl;
       // Spawn from the shooter's hand, aimed at where the camera ray points.
-      const aimT = Math.min(def.range, rayTerrain(host.terrain, o, d, def.range, 2));
+      const aimT = Math.min(def.range, rayTerrain(host.terrain, o, d, def.range, 2), propOnRay(host, o, d, def.range, behind(o, d, head))?.t ?? Infinity);
       const aim: V3 = [o[0] + d[0] * aimT, o[1] + d[1] * aimT, o[2] + d[2] * aimT];
       const hand: V3 = [head[0], head[1], head[2]];
       let dir: V3 = [aim[0] - hand[0], aim[1] - hand[1], aim[2] - hand[2]];
@@ -295,13 +343,18 @@ function aimActorT(host: CombatHost, p: PlayerActor, o: V3, d: V3, maxT: number)
 
 function hitscan(host: CombatHost, p: PlayerActor, o: V3, d: V3, maxRange: number, baseDamage: number, def: WeaponDef, tier: TierStats): number | null {
   const terrainT = rayTerrain(host.terrain, o, d, maxRange, 1.5);
-  const hit = raycastActors(host, o, d, Math.min(maxRange, terrainT), new Set([p.id]), REWIND_MS);
+  // An intact breakable in the way stops the shot and takes it instead (destruction.ts).
+  const prop = propOnRay(host, o, d, Math.min(maxRange, terrainT));
+  const propT = prop ? prop.t : Infinity, propIdx = prop ? prop.index : -1;
+  const hit = raycastActors(host, o, d, Math.min(maxRange, terrainT, propT), new Set([p.id]), REWIND_MS);
   if (!hit) {
-    if (terrainT < maxRange) host.onPropHit?.([o[0] + d[0] * terrainT, o[1] + d[1] * terrainT, o[2] + d[2] * terrainT], def.destroys === "heavy" ? "heavy" : "light", baseDamage);
-    return terrainT === Infinity ? null : terrainT;
+    if (propIdx >= 0) host.props!.damage(propIdx, baseDamage * falloff(propT, def.range, def.falloffTo, def.falloffMin), def.destroys, def.id, d, p.id);
+    const endT = propIdx >= 0 ? propT : terrainT;
+    if (endT < maxRange) host.onPropHit?.([o[0] + d[0] * endT, o[1] + d[1] * endT, o[2] + d[2] * endT], def.destroys === "heavy" ? "heavy" : "light", baseDamage);
+    return endT === Infinity ? null : endT;
   }
   const f = falloff(hit.t, def.range, def.falloffTo, def.falloffMin);
-  const mult = hit.weak ? (tier.headMult ?? 1.5) : 1;
+  const mult = weakMult(hit, tier);
   dealDamage(host, p, hit.actor, baseDamage * f * mult, hit.weak, actorFacingFrom(o, hit.actor));
   return hit.t;
 }
@@ -313,7 +366,11 @@ function actorFacingFrom(from: V3, target: Actor): V3 {
 
 function chain(host: CombatHost, p: PlayerActor, o: V3, d: V3, def: WeaponDef, tier: TierStats, lvl: number) {
   const now = host.now();
-  const terrainT = rayTerrain(host.terrain, o, d, def.range, 1.5);
+  const terrainT0 = rayTerrain(host.terrain, o, d, def.range, 1.5);
+  // An intact breakable in front of the caster stops the bolt like terrain (destruction.ts).
+  const prop = propOnRay(host, o, d, Math.min(def.range, terrainT0), behind(o, d, headPos(p)));
+  const propIdx = prop ? prop.index : -1;
+  const terrainT = prop ? prop.t : terrainT0;
   // Generous aim: look for the actor closest to the ray within 1.2 m.
   let first: Actor | null = null;
   let bestT = Infinity;
@@ -350,6 +407,7 @@ function chain(host: CombatHost, p: PlayerActor, o: V3, d: V3, def: WeaponDef, t
       cur = next;
     }
   }
+  if (!first && propIdx >= 0) host.props!.damage(propIdx, tier.damage * lvl, def.destroys, def.id, d, p.id);
   const end: V3 = first ? actorPos(first) : [o[0] + d[0] * Math.min(def.range, terrainT), o[1] + d[1] * Math.min(def.range, terrainT), o[2] + d[2] * Math.min(def.range, terrainT)];
   host.broadcastNear("shot", { by: p.id, weapon: WEAPON_INDEX.get(def.id), ox: o[0], oy: o[1], oz: o[2], dx: d[0], dy: d[1], dz: d[2], hit: end, chain: points }, o, 160);
 }
@@ -394,6 +452,11 @@ export function melee(host: CombatHost, p: PlayerActor, heavy: boolean): FireRes
       if (d <= meleeTier.radius) dealDamage(host, p, a, dmg * (d <= meleeTier.radius / 2 ? 1 : 0.5), false, actorFacingFrom(pos, a));
     }
   }
+  // Breakable props in the arc (or the slam ring) take the hit too; heavy attacks are heavy class
+  // (the axe's charged chop), fists break nothing (destruction.ts).
+  const propCls: Destroys = useHeavy ? "heavy" : meleeDef.destroys;
+  if (slam) host.props?.splash(pos, meleeTier.radius!, dmg, propCls, meleeDef.id, p.id);
+  else host.props?.arc(pos, facing, meleeDef.range, meleeDef.arc ?? 90, dmg, propCls, meleeDef.id, p.id);
   const reach: V3 = [pos[0] + facing[0] * meleeDef.range, pos[1] + facing[1] * meleeDef.range, pos[2] + facing[2] * meleeDef.range];
   host.onPropHit?.(reach, useHeavy || meleeDef.destroys === "heavy" ? "heavy" : "light", dmg);
   host.broadcastNear("swing", { by: p.id, weapon: WEAPON_INDEX.get(meleeDef.id), heavy: useHeavy, hits: targets.length }, pos, 120);
@@ -423,8 +486,10 @@ export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | 
     if (dmg <= 0) return false;
   }
   dmg = Math.max(1, Math.round(dmg));
-  target.state.hp = Math.max(0, target.state.hp - dmg);
-  if (target.kind === "npc") target.onDamaged?.(dmg, attacker?.id ?? "");
+  const hpBefore = target.state.hp;
+  target.state.hp = Math.max(0, hpBefore - dmg);
+  // NPC credit counts HP actually removed (an overkill hit can't outrank earlier damage).
+  if (target.kind === "npc") target.onDamaged?.(hpBefore - target.state.hp, attacker?.id ?? "");
   const tp = actorPos(target);
   // Knockback: the shove direction (away from the attacker) rides on the hit; the victim's client
   // applies it, and the server widens that player's movement budget so the shove isn't "corrected".
@@ -442,7 +507,7 @@ export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | 
 }
 
 /** Splash damage around a point (friendly fire on; the owner takes half). */
-export function explode(host: CombatHost, owner: PlayerActor | NpcActor, at: V3, radius: number, damage: number, weaponIndex: number, exclude?: string) {
+export function explode(host: CombatHost, owner: PlayerActor | NpcActor, at: V3, radius: number, damage: number, weaponIndex: number, exclude?: string, excludeProp?: number) {
   for (const a of allActors(host)) {
     if (a.id === exclude) continue;
     const d = dist3(at, actorPos(a));
@@ -452,6 +517,9 @@ export function explode(host: CombatHost, owner: PlayerActor | NpcActor, at: V3,
     if (dmg > 0) dealDamage(host, owner, a, dmg, false, [at[0] - actorPos(a)[0], at[1] - actorPos(a)[1], at[2] - actorPos(a)[2]], 4);
   }
   host.onPropHit?.(at, "heavy", damage);
+  // Breakable props in the blast (NPC blasts count as heavy too).
+  const w = WEAPONS[weaponIndex];
+  host.props?.splash(at, radius, damage, owner.kind === "npc" ? "heavy" : (w?.destroys ?? "heavy"), w?.id ?? "", playerId(owner), excludeProp);
   host.broadcastNear("explode", { id: 0, x: at[0], y: at[1], z: at[2], radius, weapon: weaponIndex }, at, 200);
 }
 
@@ -484,10 +552,13 @@ export function stepProjectiles(host: CombatHost, dt: number) {
     const step = Math.hypot(p.vel[0], p.vel[1], p.vel[2]) * dt;
     const d: V3 = [p.vel[0] * dt / step, p.vel[1] * dt / step, p.vel[2] * dt / step];
     const terrainT = rayTerrain(host.terrain, p.pos, d, step, 0.75);
-    const hit = raycastActors(host, p.pos, d, Math.min(step, terrainT), p.hit, 0);
+    // Intact breakables stop projectiles like terrain does (destruction.ts).
+    const prop = propOnRay(host, p.pos, d, Math.min(step, terrainT));
+    const propT = prop ? prop.t : Infinity, propIdx = prop ? prop.index : -1;
+    const hit = raycastActors(host, p.pos, d, Math.min(step, terrainT, propT), p.hit, 0);
     if (hit) {
       p.hit.add(hit.actor.id);
-      const mult = hit.weak ? (p.tier.headMult ?? 1.5) : 1;
+      const mult = weakMult(hit, p.tier);
       const at: V3 = [p.pos[0] + d[0] * hit.t, p.pos[1] + d[1] * hit.t, p.pos[2] + d[2] * hit.t];
       if (p.fuseAt === null) {
         const applied = dealDamage(host, p.owner, hit.actor, p.damage * mult, hit.weak, [p.pos[0] - at[0], p.pos[1] - at[1], p.pos[2] - at[2]]);
@@ -502,6 +573,21 @@ export function stepProjectiles(host: CombatHost, dt: number) {
           continue;
         }
       }
+    }
+    if (propIdx >= 0 && propT < step && propT <= terrainT) {
+      const at: V3 = [p.pos[0] + d[0] * propT, p.pos[1] + d[1] * propT, p.pos[2] + d[2] * propT];
+      if (p.fuseAt !== null) {
+        // Grenades stop against the prop and wait for the fuse.
+        p.pos = [at[0] - d[0] * 0.2, at[1] - d[1] * 0.2, at[2] - d[2] * 0.2];
+        p.stuck = true;
+        continue;
+      }
+      host.props!.damage(propIdx, p.damage, p.weapon.destroys, p.weapon.id, d, playerId(p.owner));
+      if (p.tier.splash && p.tier.radius) explode(host, p.owner, at, p.tier.radius, p.tier.splash, WEAPON_INDEX.get(p.weapon.id) ?? 0, undefined, propIdx);
+      else host.onPropHit?.(at, p.weapon.destroys === "heavy" ? "heavy" : "light", p.damage);
+      host.broadcastNear("explode", { id: p.id, x: at[0], y: at[1], z: at[2], radius: 0, weapon: WEAPON_INDEX.get(p.weapon.id) }, at, 200);
+      list.splice(i, 1);
+      continue;
     }
     if (terrainT < step) {
       const at: V3 = [p.pos[0] + d[0] * terrainT, p.pos[1] + d[1] * terrainT, p.pos[2] + d[2] * terrainT];

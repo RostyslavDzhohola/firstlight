@@ -1,9 +1,11 @@
 // Photo mode (SPEC §6.13, F9): hides the HUD and flies a free camera on the sphere. WASD move,
 // mouse look, Q/E down/up, Shift fast, wheel FOV, [ ] focus distance, - = aperture, , . exposure,
-// G grade filter, H hides the panel. The player's body stays in the world (it can still die).
+// G grade filter, K/L time of day, U live sky, O weather, H hides the panel. Time and weather are
+// local overrides (only this screen changes) and reset on exit. The player's body stays in the
+// world (it can still die).
 
 import * as THREE from "three/webgpu";
-import type { Terrain } from "@firstlight/shared";
+import type { Terrain, Weather } from "@firstlight/shared";
 import { MENU_GRADE, NEUTRAL_GRADE, type GradeParams } from "../render/post.ts";
 import type { RenderCtx } from "../render/renderer.ts";
 import type { Input } from "./input.ts";
@@ -42,6 +44,23 @@ export function clampPhotoCamera(pos: THREE.Vector3, anchor: THREE.Vector3, terr
   return pos;
 }
 
+/** What photo mode needs from the day/night + weather environment (render/environment.ts). */
+export interface PhotoEnv {
+  photoGrade: GradeParams | null;
+  photoExposure: number;
+  readonly dayT: number;
+  readonly weather: Weather;
+  setOverrides(time: number | null, weather: { weather: Weather; intensity: number } | null): void;
+}
+
+/** Weather choices cycled with O ("planet" = the live sky). */
+export const PHOTO_WEATHERS: (Weather | null)[] = [null, "clear", "rain", "storm", "drizzle", "fog", "dust"];
+
+/** Step a time of day by `delta` (wraps 0..1). */
+export function stepTime(t: number, delta: number): number {
+  return (((t + delta) % 1) + 1) % 1;
+}
+
 export interface PhotoHost {
   ctx: RenderCtx;
   input: Input;
@@ -50,6 +69,8 @@ export interface PhotoHost {
   terrain(): Terrain;
   /** The player's body position (anchor). */
   anchor(): THREE.Vector3;
+  /** Day/night + weather environment (optional: without it, time/weather keys do nothing). */
+  env?(): PhotoEnv;
 }
 
 export class PhotoMode {
@@ -63,6 +84,9 @@ export class PhotoMode {
   bokeh = 2;
   exposure = 1;
   filter = 0;
+  /** Local time-of-day override (null = live) and weather choice index into PHOTO_WEATHERS. */
+  time: number | null = null;
+  weatherIndex = 0;
   private savedFov = 75;
   private panel: HTMLDivElement | null = null;
   private panelHidden = false;
@@ -98,7 +122,16 @@ export class PhotoMode {
     this.active = false;
     document.body.classList.remove("fl-photo");
     this.host.ctx.setPhotoPost(false);
-    this.host.ctx.renderer.toneMappingExposure = 1;
+    const env = this.host.env?.();
+    if (env) {
+      env.photoGrade = null;
+      env.photoExposure = 1;
+      env.setOverrides(null, null);
+      this.time = null;
+      this.weatherIndex = 0;
+    } else {
+      this.host.ctx.renderer.toneMappingExposure = 1;
+    }
     this.host.ctx.setGrade(this.host.planetGrade());
     camera.fov = this.savedFov;
     camera.updateProjectionMatrix();
@@ -108,8 +141,17 @@ export class PhotoMode {
 
   private applyLook() {
     const f = PHOTO_FILTERS[this.filter]!;
+    const env = this.host.env?.();
+    if (env) {
+      // The environment owns grade/exposure every frame (day/night): hand it the photo look.
+      env.photoGrade = f.grade;
+      env.photoExposure = this.exposure;
+      const w = PHOTO_WEATHERS[this.weatherIndex] ?? null;
+      env.setOverrides(this.time, w ? { weather: w, intensity: w === "clear" ? 0 : 0.9 } : null);
+    } else {
+      this.host.ctx.renderer.toneMappingExposure = this.exposure;
+    }
     this.host.ctx.setGrade(f.grade ?? this.host.planetGrade());
-    this.host.ctx.renderer.toneMappingExposure = this.exposure;
     this.host.ctx.setPhotoParams({ focus: this.focus, aperture: this.aperture, bokeh: this.bokeh });
   }
 
@@ -151,6 +193,9 @@ export class PhotoMode {
       ["Equal", () => (this.aperture = Math.min(60, this.aperture * 1.25))],
       ["Comma", () => (this.exposure = Math.max(0.3, +(this.exposure - 0.05).toFixed(2)))],
       ["Period", () => (this.exposure = Math.min(2.5, +(this.exposure + 0.05).toFixed(2)))],
+      // Time of day: 1/96 of a day per tap (15 in-game minutes).
+      ["KeyK", () => (this.time = stepTime(this.time ?? this.host.env?.().dayT ?? 0.5, -1 / 96))],
+      ["KeyL", () => (this.time = stepTime(this.time ?? this.host.env?.().dayT ?? 0.5, 1 / 96))],
     ];
     for (const [code, fn] of keys) {
       if (input.pressed.has(code) || (input.down(code) && input.down("AltLeft"))) {
@@ -160,6 +205,14 @@ export class PhotoMode {
     }
     if (input.pressed.has("KeyG")) {
       this.filter = (this.filter + 1) % PHOTO_FILTERS.length;
+      changed = true;
+    }
+    if (input.pressed.has("KeyU")) {
+      this.time = null;
+      changed = true;
+    }
+    if (input.pressed.has("KeyO")) {
+      this.weatherIndex = (this.weatherIndex + 1) % PHOTO_WEATHERS.length;
       changed = true;
     }
     if (input.pressed.has("KeyH")) {
@@ -198,6 +251,12 @@ export class PhotoMode {
       ["- =", `aperture ${this.aperture.toFixed(1)} m`],
       [", .", `exposure ${this.exposure.toFixed(2)}`],
       ["G", `filter: ${PHOTO_FILTERS[this.filter]!.name}`],
+      ...(this.host.env
+        ? ([
+            ["K L · U", `time ${this.time === null ? "live" : clock(this.time)} · live`],
+            ["O", `weather: ${PHOTO_WEATHERS[this.weatherIndex] ?? "planet"}`],
+          ] as [string, string][])
+        : []),
       ["H", "hide this panel"],
     ];
     this.panel.replaceChildren(
@@ -210,4 +269,10 @@ export class PhotoMode {
       }),
     );
   }
+}
+
+/** "06:45" for a time of day 0..1. */
+export function clock(t: number): string {
+  const mins = Math.floor((((t % 1) + 1) % 1) * 24 * 60);
+  return `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
 }

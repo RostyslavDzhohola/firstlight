@@ -51,7 +51,7 @@
 | F9 screenshot share | ✅ | browser E2E T7 |
 | F10 M1 ≥ 60 fps Medium | ✅* | ?bench=g1 59.9 fps p50, p95 17.6 ms (T3 Chromium, not plugged-in Chrome) |
 | F11 Low on weak profile | ✅* | `?bench=g1&tier=low&cpuslow=4`: 51.3 fps p50, p95 29.8 ms, 0 shader builds (D29 emulation) |
-| F12 three-model review | 🟡 | per-lane reviews done; whole-codebase review after the last merges |
+| F12 three-model review | ❌→🛠 | bb54dc3: Codex Sol (7 blockers) and Sonnet 5.5 (2 blockers) declined (docs/reviews/2026-10-12-f12-*); fixes in 5 lanes (core, data, ui, client, docs); Opus 5.5 reviewing 743d651 |
 | F13 photo mode + 5 scenes | ✅ | browser E2E T8; `stage <n>` + docs/staged-scenes.md |
 
 ## Lanes (who owns what right now)
@@ -61,13 +61,20 @@
 | Render look + G1 gate | MERGED a59d992 (Codex + Opus reviewed, fixed) | — |
 | Accounts + persistence | MERGED 61aa332 | — |
 | Social, moderation, stats, share | MERGED 1a2ee50 (Codex ×2) | — |
-| Enemies, wildlife, bosses | MERGED 7768535; fixing Codex review (3 blockers) | ../fl-wt-npc |
-| Characters (GLB, animations) | MERGED 2447afe; fixing Codex review | ../fl-wt-chars |
+| Enemies, wildlife, bosses | MERGED 7768535 + review fixes ec3f110 (deployed) | — |
+| Characters (GLB, animations) | MERGED 2447afe + review fixes 13cf0f5 | — |
 | Voice + radio + phrase wheel | MERGED d40d058 (Codex ×2); TURN key pending owner | — |
 | Missions, medals, eggs, shop, pads, stage | MERGED f8514dc (Codex) | — |
 | Photo mode | MERGED 4214419 | — |
-| UI port (design verdict) | Opus sub-agent, merging main then restyling lanes' panels | ../fl-wt-ui |
-| Destruction (§6.9) | Opus sub-agent | ../fl-wt-destruct |
+| UI port (design verdict) | MERGED 9f6dc14 (deployed) | — |
+| Destruction (§6.9) | MERGED bb54dc3 (deployed) | — |
+| Weather + day/night (M11 #3–4) | MERGED 743d651 (deployed 06:39Z) | — |
+| F12 server core (Codex B1–B6, S2/S3/S9/S10/S12/S14) | Opus sub-agent | ../fl-wt-core (lane/f12-core) |
+| F12 content (eggs, items, Patchkit, Prism Bubble, Hollow King, Associates look) | Opus sub-agent | ../fl-wt-data (lane/f12-data) |
+| F12 inventory panel (I) + onboarding | Opus sub-agent | ../fl-wt-inv (lane/f12-ui) |
+| F12 client robustness (S4–S8, N1) | Opus sub-agent | ../fl-wt-client (lane/f12-client) |
+| F12 docs + repo hygiene | Opus sub-agent | ../fl-wt-docs (lane/f12-docs) |
+| Horses (M11 #2) | Opus sub-agent (resumed after the spend-limit stop) | ../fl-wt-horses (lane/horses) |
 
 ## Measured numbers
 
@@ -93,8 +100,10 @@
 
 ## Open issues
 
+- Flaky under full-suite load (pass alone 3/3): voice "relays far apart on the same channel…" failed once (81 ms) in a full run at 04:50Z; watching.
+
 - NO CODEX COMPUTER USE (D23): visual/E2E checks run in T3 Code's built-in browser (preview tools). Never Chrome.
 - Concept art not generated yet (Codex task cancelled for safety). Retry only without computer use.
 - Character floats slightly above terrain (Codex first look) — investigate.
-- Cloudflare: Workers token OK (D24). TURN key pending the owner (save-turn-key.sh).
+- Cloudflare: Workers token OK (D24). TURN key pending the owner: the saved API token has no Calls permission (06:45Z check), so create the key in the dashboard (Realtime → TURN) and run save-turn-key.sh.
 - Resend: DNS records are live on Vercel DNS (checked against ns1.vercel-dns.com and 8.8.8.8), but Resend still says the domain is unverified (02:45Z). The send-only key is set on Railway, so mail turns on as soon as the domain verifies. **Owner: press "Verify" on resend.com/domains** (the builder's key is send-only, so it can't trigger verification).
