@@ -3,6 +3,8 @@
 
 import { PF } from "@firstlight/shared/net/schema";
 import type { Game } from "../game/Game.ts";
+import { showSavePrompt } from "./account.ts";
+import { getPlayToken, isDevGuest, readClaims } from "../net/auth.ts";
 
 const CONTROLS = [
   ["WASD", "move"], ["Mouse", "aim"], ["Left click", "attack"], ["Right click", "aim / block / charge"],
@@ -61,6 +63,12 @@ export class Menu {
       ctl.append(a, b);
     }
     this.panel.append(h, note, ctl, resume, logout);
+    if (!isDevGuest()) {
+      void getPlayToken().then((t) => {
+        const c = readClaims(t);
+        if (c?.guest) this.panel.append(this.button("Save your character", () => void showSavePrompt({ name: c.name }), true));
+      }).catch(() => {});
+    }
     this.el.style.display = "grid";
   }
 

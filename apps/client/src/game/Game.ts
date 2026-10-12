@@ -10,6 +10,8 @@ import { createRenderer, type RenderCtx } from "../render/renderer.ts";
 import { PerfOverlay } from "../render/PerfOverlay.ts";
 import type { Hud } from "../ui/hud.ts";
 import { Menu } from "../ui/menu.ts";
+import { pickDisplayName } from "../ui/account.ts";
+import { getAccountInfo, isDevGuest } from "../net/auth.ts";
 import { PilesView } from "../world/PilesView.ts";
 import { Planet } from "../world/Planet.ts";
 import { Portals } from "../world/Portals.ts";
@@ -65,6 +67,11 @@ export class Game {
     if (!localStorage.getItem("fl.starter") && !flags.has("autoplay")) {
       hideLoading();
       firstChoice = await this.hud.characterPick();
+    }
+    // Pick a display name once per account (skipped for dev guests and automated runs).
+    if (!isDevGuest() && !flags.has("autoplay")) {
+      const info = await getAccountInfo().catch(() => null);
+      if (info && !info.displayName) await pickDisplayName({ suggested: info.name, dismissible: true });
     }
     await this.enterBody(body, firstChoice);
     this.running = true;

@@ -8,6 +8,8 @@ import { PF } from "@firstlight/shared/net/schema";
 import { Effects, weaponColor } from "../render/effects.ts";
 import { Hud, type YouPlus } from "../ui/hud.ts";
 import type { Game } from "./Game.ts";
+import { showSavePrompt } from "../ui/account.ts";
+import { getPlayToken, isDevGuest, readClaims } from "../net/auth.ts";
 
 const _v = new THREE.Vector3();
 
@@ -33,7 +35,9 @@ export class CombatClient {
     const room = this.game.net.room!;
     const me = room.sessionId;
     room.onMessage("you", (m: YouPlus) => {
+      const prevLevel = this.hud.you?.level ?? m.level;
       this.hud.setYou(m);
+      if (m.level > prevLevel && m.level >= 2 && !isDevGuest()) void this.maybeOfferSave();
       if (!m.dead) this.deadUntilRespawn = false;
     });
     room.onMessage("toast", (m: { text: string; kind: string }) => this.hud.toast(m.text, m.kind));
@@ -97,6 +101,16 @@ export class CombatClient {
     });
     room.onMessage("announce", (m: { text: string }) => this.hud.toast(m.text, "medal"));
     room.onMessage("updating", () => this.hud.toast("Server updating — reconnecting in a moment…", "warn"));
+  }
+
+  private offeredSave = false;
+  /** After the first level-up, guests get a non-blocking "Save your character" card. */
+  async maybeOfferSave() {
+    if (this.offeredSave) return;
+    const claims = readClaims(await getPlayToken().catch(() => ""));
+    if (!claims?.guest) return;
+    this.offeredSave = true;
+    void showSavePrompt({ name: claims.name });
   }
 
   private muzzleOf(p: { x: number; y: number; z: number; fx: number; fy: number; fz: number }): THREE.Vector3 {
