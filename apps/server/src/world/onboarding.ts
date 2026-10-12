@@ -2,19 +2,23 @@
 // account to a brand-new character (level 1, never died). The client teaches move, look, jump,
 // sprint and dodge on its own (nothing is paid for those); the server counts hits on the three
 // training dummies from `train` messages (Portus is a safe zone, so real attacks are refused there),
-// pays 10 XP per dummy and, when all three are down, 20 XP and the Spark medal (via the
-// `onboardingDone` game event that the quests system turns into the medal). Skipping ends it with
+// pays 10 XP per dummy and, when all three are down, 20 XP and the Spark medal. Skipping ends it with
 // nothing more paid. Progress lives in account stats, so it survives reconnects and never repeats.
+// Every payout (the dummy's flag, the completion flag, the character's XP, the medal) commits in one
+// transaction (D26); the player hears about it only after the commit.
 
 import type { Client } from "@colyseus/core";
 import { dummyPos, dummyStat, ONBOARDING, TRAINING_DUMMIES } from "@firstlight/shared/content/onboarding";
 import type { YouState } from "@firstlight/shared/net/protocol";
 import { z } from "zod";
+import { levelForXp } from "@firstlight/shared/content/progression";
 import { actorPos, type PlayerActor } from "./actors.ts";
 import type { BodyRoom } from "./BodyRoom.ts";
+import { withTx } from "./characters.ts";
 import { ORIGIN_SLACK, selectedWeapon } from "./combat.ts";
 import { emitGameEvent } from "./events.ts";
 import { dist3, inMeleeArc, rayCapsule, type V3 } from "./geometry.ts";
+import { QuestSystem } from "./quests/QuestSystem.ts";
 import { progressStore } from "./quests/store.ts";
 import type { RoomSystem } from "./systems.ts";
 
@@ -27,12 +31,18 @@ export const ONBOARDING_RULES = {
   RAY_SLACK_M: 8,
   /** Never count hits faster than this, whatever the weapon. */
   MIN_GAP_MS: 200,
+  /** Drop trainees whose session is gone (leave hooks may not run, e.g. on a takeover). */
+  PRUNE_MS: 1000,
 };
+
+const SPARK = "spark";
 
 const vec = z.number().finite();
 const trainSchema = z.object({ ox: vec, oy: vec, oz: vec, dx: vec, dy: vec, dz: vec });
 
-interface Trainee {
+export interface Trainee {
+  /** The session training now (a takeover from another window replaces it). */
+  sessionId: string;
   hits: number[];
   lastAt: number;
 }
@@ -40,7 +50,9 @@ interface Trainee {
 export class OnboardingSystem implements RoomSystem {
   private readonly room: BodyRoom;
   private readonly dummies: V3[];
-  private readonly trainees = new Map<string, Trainee>();
+  /** By account (user id), so a second window replaces the entry instead of adding one. */
+  readonly trainees = new Map<string, Trainee>();
+  private lastPrune = 0;
 
   constructor(room: BodyRoom) {
     this.room = room;
@@ -50,25 +62,39 @@ export class OnboardingSystem implements RoomSystem {
     room.onMessage("onboarding", z.object({ action: z.literal("skip") }), (c) => this.skip(c));
   }
 
-  tick() {}
+  /** Idempotent cleanup: forget trainees whose session no longer has a live actor here. */
+  tick(_dtMs: number, now: number) {
+    if (now - this.lastPrune < ONBOARDING_RULES.PRUNE_MS) return;
+    this.lastPrune = now;
+    for (const [uid, t] of this.trainees) if (!this.room.actors.has(t.sessionId)) this.trainees.delete(uid);
+  }
 
   onPlayerJoin(sessionId: string) {
     const a = this.room.playerById(sessionId);
-    if (!a || !this.eligible(a)) return;
+    if (!a) return;
     const uid = a.identity.userId;
+    this.trainees.delete(uid);
+    if (!this.eligible(a)) return;
     const hits = this.dummies.map((_, i) => (progressStore.current.stat(uid, dummyStat(i)) > 0 ? ONBOARDING.HITS_PER_DUMMY : 0));
-    const t: Trainee = { hits, lastAt: 0 };
-    this.trainees.set(sessionId, t);
-    if (this.allDown(t)) this.finish(a, t);
+    const t: Trainee = { sessionId, hits, lastAt: 0 };
+    this.trainees.set(uid, t);
+    if (this.allDown(t)) this.complete(a, t); // paid every dummy, then the process stopped before the end
     a.youDirty = true;
   }
 
+  /** Safe to call more than once, and late: only the entry of that very session goes. */
   onPlayerLeave(sessionId: string) {
-    this.trainees.delete(sessionId);
+    for (const [uid, t] of this.trainees) if (t.sessionId === sessionId) this.trainees.delete(uid);
+  }
+
+  /** The trainee entry of this live actor (not of an older window of the same account). */
+  private trainee(a: PlayerActor): Trainee | undefined {
+    const t = this.trainees.get(a.identity.userId);
+    return t && t.sessionId === a.id ? t : undefined;
   }
 
   decorateYou(a: PlayerActor, you: YouState) {
-    const t = this.trainees.get(a.id);
+    const t = this.trainee(a);
     if (t) you.onboarding = { hits: [...t.hits] };
   }
 
@@ -89,8 +115,8 @@ export class OnboardingSystem implements RoomSystem {
   /** A training attack: which dummy (if any) does the held weapon reach from where we stand? */
   train(c: Client, m: z.infer<typeof trainSchema>) {
     const a = this.room.playerById(c.sessionId);
-    const t = this.trainees.get(c.sessionId);
-    if (!a || !t || a.dead) return;
+    const t = a ? this.trainee(a) : undefined;
+    if (!a || !t || a.dead || a.superseded) return;
     const { def, tier } = selectedWeapon(a);
     if (def.delivery === "heal" || def.delivery === "bubble" || def.delivery === "none" || tier.level > a.char.level) return;
     const now = Date.now();
@@ -100,16 +126,67 @@ export class OnboardingSystem implements RoomSystem {
     t.lastAt = now;
     const was = t.hits[i]!;
     t.hits[i] = Math.min(ONBOARDING.HITS_PER_DUMMY, was + 1);
-    const down = t.hits[i]! >= ONBOARDING.HITS_PER_DUMMY;
-    c.send("train", { dummy: i, hits: t.hits[i], down });
     a.youDirty = true;
-    if (!down || was >= ONBOARDING.HITS_PER_DUMMY) return;
-    if (progressStore.current.addStat(a.identity.userId, dummyStat(i), 1) === 1) {
-      this.room.grantXp(a, ONBOARDING.DUMMY_XP);
-      c.send("toast", { text: `Training dummy down · +${ONBOARDING.DUMMY_XP} XP`, kind: "xp" });
+    if (t.hits[i]! < ONBOARDING.HITS_PER_DUMMY || was >= ONBOARDING.HITS_PER_DUMMY) {
+      c.send("train", { dummy: i, hits: t.hits[i], down: t.hits[i]! >= ONBOARDING.HITS_PER_DUMMY });
+      if (was >= ONBOARDING.HITS_PER_DUMMY && this.allDown(t)) this.complete(a, t); // retry a failed completion
+      return;
     }
-    if (this.allDown(t)) this.finish(a, t);
-    else this.room.saveActor(a);
+    // This hit knocks the dummy down: pay it (and the completion, if it was the last) or undo the hit.
+    const done = this.allDown(t);
+    const r = this.payout(a, i, done);
+    if (!r) {
+      t.hits[i] = was;
+      c.send("train", { dummy: i, hits: was, down: false });
+      return;
+    }
+    c.send("train", { dummy: i, hits: t.hits[i], down: true });
+    if (r.dummyXp) c.send("toast", { text: `Training dummy down · +${r.dummyXp} XP`, kind: "xp" });
+    if (done) this.ended(a, t, "done");
+  }
+
+  /**
+   * Pay a knocked-down dummy and/or the completion. The payout flags, the character's new XP and the
+   * Spark medal commit in one transaction; after the commit the live actor takes the XP through
+   * grantXp (level-up HP, toasts, events) and the medal's messages go out. Returns null (nothing
+   * persisted, nothing sent) when the transaction fails.
+   */
+  private payout(a: PlayerActor, dummy: number | null, done: boolean): { dummyXp: number; doneXp: number } | null {
+    const uid = a.identity.userId;
+    const store = progressStore.current;
+    const quests = this.room.systems.find((s): s is QuestSystem => s instanceof QuestSystem);
+    const notify: (() => void)[] = [];
+    const before = { xp: a.char.xp, level: a.char.level };
+    let dummyXp = 0;
+    let doneXp = 0;
+    try {
+      withTx(() => {
+        if (dummy !== null && store.addStat(uid, dummyStat(dummy), 1) === 1) dummyXp = ONBOARDING.DUMMY_XP;
+        if (done) {
+          store.addStat(uid, ONBOARDING.STAT, 1);
+          doneXp = ONBOARDING.DONE_XP;
+          if (quests) quests.award(a, SPARK, notify);
+          else store.awardMedal(uid, SPARK);
+        }
+        a.char.xp = before.xp + dummyXp + doneXp;
+        a.char.level = levelForXp(a.char.xp);
+        this.room.saveActor(a);
+      });
+    } catch (err) {
+      console.error(`[onboarding] payout for ${uid} rolled back:`, err);
+      return null;
+    } finally {
+      a.char.xp = before.xp;
+      a.char.level = before.level;
+    }
+    this.room.grantXp(a, dummyXp + doneXp);
+    for (const f of notify) f();
+    return { dummyXp, doneXp };
+  }
+
+  /** Every dummy is down: pay the completion (from a join after an interrupted finish). */
+  private complete(a: PlayerActor, t: Trainee) {
+    if (this.payout(a, null, true)) this.ended(a, t, "done");
   }
 
   /** Nearest dummy inside the melee reach, judged by the body's facing or the camera's aim. */
@@ -162,22 +239,19 @@ export class OnboardingSystem implements RoomSystem {
   /** Skip: finished for good; what the dummies already paid stays, nothing more. */
   skip(c: Client) {
     const a = this.room.playerById(c.sessionId);
-    const t = this.trainees.get(c.sessionId);
+    const t = a ? this.trainee(a) : undefined;
     if (!a || !t) return;
-    this.trainees.delete(c.sessionId);
     progressStore.current.addStat(a.identity.userId, ONBOARDING.STAT, 1);
-    a.youDirty = true;
-    c.send("onboarding", { state: "skipped", xp: this.paid(t, false) });
+    this.ended(a, t, "skipped");
   }
 
-  private finish(a: PlayerActor, t: Trainee) {
-    this.trainees.delete(a.id);
-    progressStore.current.addStat(a.identity.userId, ONBOARDING.STAT, 1);
-    this.room.grantXp(a, ONBOARDING.DONE_XP);
-    this.room.saveActor(a);
-    emitGameEvent(this.room, { type: "onboardingDone", playerId: a.id });
+  /** After the commit: forget the trainee and tell the player (and the bus, on completion). */
+  private ended(a: PlayerActor, t: Trainee, state: "done" | "skipped") {
+    this.trainees.delete(a.identity.userId);
     a.youDirty = true;
-    a.client.send("onboarding", { state: "done", xp: this.paid(t, true) });
+    // The quests system already holds the medal (no second award); other listeners still hear it.
+    if (state === "done") emitGameEvent(this.room, { type: "onboardingDone", playerId: a.id });
+    a.client.send("onboarding", { state, xp: this.paid(t, state === "done") });
   }
 }
 

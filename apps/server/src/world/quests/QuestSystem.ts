@@ -635,19 +635,27 @@ export class QuestSystem implements RoomSystem {
   // ---------------------------------------------------------------- medals and titles
 
   /** Award a medal once per account. Returns true if newly earned. */
-  award(a: PlayerActor, medalId: string): boolean {
+  /**
+   * Award a medal (once per account). With `deferred`, the caller runs the write inside its own
+   * transaction: the cache update and the player's messages wait in `deferred` until it commits.
+   */
+  award(a: PlayerActor, medalId: string, deferred?: (() => void)[]): boolean {
     const def = MEDAL_BY_ID.get(medalId);
     if (!def || a.identity.loadtest) return false;
     const q = this.qp(a);
     if (q.medals.has(medalId)) return false;
-    q.medals.add(medalId);
     const fresh = progressStore.current.awardMedal(a.identity.userId, medalId);
-    a.youDirty = true;
-    if (!fresh) return false;
-    this.toast(a, `Medal earned: ${def.name} — wear the title “${def.title}” from the journal (J)`, "medal");
-    a.client.send("medal", { id: medalId });
-    emitGameEvent(this.room, { type: "medal", playerId: a.id, medalId });
-    return true;
+    const apply = () => {
+      q.medals.add(medalId);
+      a.youDirty = true;
+      if (!fresh) return;
+      this.toast(a, `Medal earned: ${def.name} — wear the title “${def.title}” from the journal (J)`, "medal");
+      a.client.send("medal", { id: medalId });
+      emitGameEvent(this.room, { type: "medal", playerId: a.id, medalId });
+    };
+    if (deferred) deferred.push(apply);
+    else apply();
+    return fresh;
   }
 
   setTitle(c: Client, medalId: string | null) {

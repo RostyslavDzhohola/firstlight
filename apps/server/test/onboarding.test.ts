@@ -6,9 +6,19 @@ import { BODIES } from "@firstlight/shared";
 import { dummyPos, ONBOARDING, TRAINING_DUMMIES } from "@firstlight/shared/content/onboarding";
 import { offsetDir, placeDir } from "@firstlight/shared/content/places";
 import { WEAPON_BY_ID } from "@firstlight/shared/content/weapons";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { dummyStat } from "@firstlight/shared/content/onboarding";
+import type { CharacterData } from "@firstlight/shared/content/character";
+import { openGameDb } from "../src/db/index.ts";
 import { characterRepo } from "../src/world/characters.ts";
+import { OnboardingSystem } from "../src/world/onboarding.ts";
+import { pileStore } from "../src/world/piles.ts";
+import { progressStore, SqliteProgressStore } from "../src/world/quests/store.ts";
+import { SqliteCharacterRepo, SqlitePileStore } from "../src/world/sqliteStores.ts";
 import { safeLeave, startServer } from "./helpers.ts";
-import { bot, ground, harness, me, sleep, terrain, tpAndWait, until, type Bot } from "./quest-helpers.ts";
+import { bot, ground, harness, me, serverRoom, sleep, terrain, tpAndWait, until, type Bot } from "./quest-helpers.ts";
 
 beforeEach(async () => {
   harness.game = await startServer();
@@ -154,5 +164,75 @@ describe("onboarding", () => {
     await safeLeave(d.room);
     const e = await bot("climber", "portus");
     expect(e.you.onboarding).toBeUndefined();
+  });
+});
+
+const onboardingOf = (b: Bot) => serverRoom(b).systems.find((x): x is OnboardingSystem => x instanceof OnboardingSystem)!;
+
+describe("onboarding rewards are atomic (SQLite, D26)", () => {
+  it("a failed save leaves no payout flag, completion, XP or medal behind, and a retry pays exactly once", async () => {
+    const db = openGameDb(join(mkdtempSync(join(tmpdir(), "fl-onb-")), "game.db"));
+    const repo = new SqliteCharacterRepo(db);
+    characterRepo.current = repo;
+    pileStore.current = new SqlitePileStore(db);
+    progressStore.current = new SqliteProgressStore(db);
+    const store = progressStore.current;
+    const b = await bot("fragile", "portus", "admin", { starter: 3 });
+    for (const i of [0, 1]) {
+      await tpAndWait(b, inFront(i, 6));
+      await knockDown(b, i, "carbine");
+    }
+    await until("two paid", () => b.you.xp === 2 * ONBOARDING.DUMMY_XP);
+    await tpAndWait(b, inFront(2, 6));
+    for (let n = 1; n < HITS; n++) {
+      await sleep(300);
+      b.send("train", aim(b, 2));
+      await until(`hit ${n}`, () => b.you.onboarding.hits[2] === n);
+    }
+    // The payout transaction's character save (the one carrying the new XP) fails once.
+    const save = repo.save.bind(repo);
+    let failing = true;
+    repo.save = (uid: string, c: CharacterData) => {
+      if (failing && uid === "fragile" && c.xp > 2 * ONBOARDING.DUMMY_XP) throw new Error("disk I/O error (injected)");
+      save(uid, c);
+    };
+    await sleep(300);
+    b.send("train", aim(b, 2));
+    await sleep(600);
+    expect(b.you.onboarding.hits[2]).toBe(HITS - 1); // the hit is undone
+    expect(b.count("onboarding")).toBe(0);
+    expect(b.last("train")).toEqual({ dummy: 2, hits: HITS - 1, down: false });
+    expect(store.stat("fragile", dummyStat(2))).toBe(0);
+    expect(store.stat("fragile", ONBOARDING.STAT)).toBe(0);
+    expect(store.medals("fragile")).not.toContain("spark");
+    expect(repo.load("fragile")!.xp).toBe(2 * ONBOARDING.DUMMY_XP);
+    expect(b.you.medals).not.toContain("spark");
+    // Retry once saving works again: everything lands together, once.
+    failing = false;
+    b.send("train", aim(b, 2));
+    await until("done", () => b.count("onboarding") === 1 && b.you.onboarding === undefined);
+    expect(b.last("onboarding")).toEqual({ state: "done", xp: 50 });
+    expect(store.stat("fragile", dummyStat(2))).toBe(1);
+    expect(store.stat("fragile", ONBOARDING.STAT)).toBe(1);
+    expect(store.medals("fragile")).toContain("spark");
+    expect(repo.load("fragile")!.xp).toBe(50);
+    await until("spark in you", () => b.you.medals.includes("spark"));
+    expect(b.toasts.filter((t) => t.startsWith("Medal earned: Spark"))).toHaveLength(1);
+  }, 30_000);
+});
+
+describe("onboarding sessions", () => {
+  it("a takeover from another window leaves exactly one trainee (the new session)", async () => {
+    const a = await bot("twin", "portus");
+    const sysA = onboardingOf(a);
+    const b = await bot("twin", "portus");
+    const sysB = onboardingOf(b);
+    await until("one trainee", () => sysB.trainees.size === 1 && (sysA === sysB || sysA.trainees.size === 0), 4000);
+    expect([...sysB.trainees.values()][0]!.sessionId).toBe(b.id);
+    expect(b.you.onboarding).toEqual({ hits: [0, 0, 0] });
+    // Leave hooks for the old session (late or repeated) must not remove the new entry.
+    sysB.onPlayerLeave(a.id);
+    sysB.onPlayerLeave(a.id);
+    expect(sysB.trainees.size).toBe(1);
   });
 });
