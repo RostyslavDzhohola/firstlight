@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FIRSTLIGHT</title>
+    <meta name="description" content="An open-world multiplayer game in your browser. One life. Built by Claude Opus 5.5 and Codex. Open source." />
+    <meta property="og:title" content="FIRSTLIGHT" />
+    <meta property="og:description" content="An open-world multiplayer game in your browser. One life." />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <style>
+      :root { color-scheme: dark; }
+      html, body { margin: 0; height: 100%; background: #07060d; color: #ece8f6; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
+      #game { position: fixed; inset: 0; }
+      #game canvas { display: block; width: 100%; height: 100%; }
+      #ui { position: fixed; inset: 0; pointer-events: none; }
+      #ui > * { pointer-events: auto; }
+      #landing { position: fixed; inset: 0; display: grid; place-items: center; text-align: center;
+        background: radial-gradient(ellipse at 50% 120%, #2a1b4f 0%, #0b0618 55%, #050409 100%); z-index: 10; transition: opacity .6s; }
+      #landing h1 { font-size: clamp(48px, 9vw, 120px); letter-spacing: .18em; margin: 0; font-weight: 800;
+        background: linear-gradient(180deg, #fff 0%, #ffd8a8 55%, #ff7edb 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+      #landing p { color: #b9b2cc; margin: .6em 0; }
+      #play { margin-top: 1.4em; font: inherit; font-size: 22px; font-weight: 700; letter-spacing: .12em; padding: 18px 64px; border-radius: 999px;
+        border: 1px solid #ffd8a8; background: linear-gradient(180deg, #ffb86b, #ff7edb); color: #1a0f2a; cursor: pointer; box-shadow: 0 0 40px #ff7edb55; }
+      #play:disabled { opacity: .6; cursor: wait; }
+      #online { font-size: 14px; color: #8f88a8; }
+      #mobile { display: none; }
+      @media (pointer: coarse) and (max-width: 900px) { #desktop { display: none; } #mobile { display: block; } }
+      #loading { position: fixed; inset: 0; display: none; place-items: center; background: #07060d; z-index: 9; color: #b9b2cc; font-size: 14px; letter-spacing: .1em; }
+      #loading .bar { width: min(420px, 70vw); height: 3px; background: #241c3a; margin-top: 14px; border-radius: 3px; overflow: hidden; }
+      #loading .bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #36f9f6, #ff7edb); transition: width .2s; }
+    </style>
+  </head>
+  <body>
+    <div id="game"></div>
+    <div id="ui"></div>
+    <div id="loading"><div><div id="loading-text">Preparing the world…</div><div class="bar"><i id="loading-bar"></i></div></div></div>
+    <section id="landing">
+      <div>
+        <h1>FIRSTLIGHT</h1>
+        <div id="desktop">
+          <p>An open world in your browser. One life. Everything you carry drops when you die.</p>
+          <p id="online">&nbsp;</p>
+          <button id="play">PLAY</button>
+          <p style="font-size:13px;margin-top:2em;color:#6f6889">Built by Claude Opus 5.5 and Codex. Open source.</p>
+        </div>
+        <div id="mobile">
+          <p>FIRSTLIGHT is played on a computer with a keyboard and mouse.</p>
+          <button id="copy-link" style="font:inherit;padding:12px 28px;border-radius:999px;border:1px solid #ffd8a8;background:transparent;color:#ffd8a8">Copy link</button>
+        </div>
+      </div>
+    </section>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

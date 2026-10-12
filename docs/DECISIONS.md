@@ -267,3 +267,9 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   boss lines (289 characters) + voice design ≈ 590 of the 794 credits.
 - **D19 (planning):** time to level 20 ≈ 112 minutes of focused play (`XP_to_next = round5(50 × L^1.5)`).
   Why: meets "level 2 in ~1 min, level 5 in ~10 min"; one knob to retune.
+- **D20 (run, 01:20Z):** Resend is on the owner's paid Transactional Pro plan (Codex checked), so the
+  global OTP budget rises from 80/day to 1,000/day; the per-email cap stays 3/hour. Supersedes D11's
+  global number.
+- **D21 (run, 01:20Z):** Cloudflare has no signed-in account in Chrome; creating one means accepting
+  Cloudflare's terms, which needs the owner. Asked the owner (non-blocking). Voice and asset hosting
+  are built and tested locally meanwhile.
