@@ -19,6 +19,7 @@ import { CombatClient } from "./CombatClient.ts";
 import { Input } from "./input.ts";
 import { PlayerController } from "./PlayerController.ts";
 import { CLIENT_SYSTEMS, type ClientSystem } from "./systems.ts";
+import { installSocial, partyRoomOn, removedFromWorld } from "../social/index.ts";
 
 const loadingEl = () => document.getElementById("loading")!;
 function setLoading(text: string, frac: number) {
@@ -61,6 +62,7 @@ export class Game {
     this.combat = new CombatClient(this);
     this.hud = this.combat.hud;
     this.menu = new Menu(this);
+    installSocial(this);
     document.getElementById("landing")!.style.display = "none";
     // First visit: choose a starter before entering the world.
     let firstChoice: { starter: number; palette: number } | undefined;
@@ -124,7 +126,8 @@ export class Game {
 
     setLoading("Connecting…", 0.3);
     const stored = { starter: Number(localStorage.getItem("fl.starter") ?? 0), palette: Number(localStorage.getItem("fl.palette") ?? 0) };
-    const room = await this.net.join(body, choice ?? stored);
+    // Party members land in the copy a member is already in (D12 headroom).
+    const room = await this.net.join(body, { ...(choice ?? stored), partyLeaderRoomId: partyRoomOn(body) });
     this.combat.attach();
     await new Promise<void>((resolve) => {
       const check = () => {
@@ -139,6 +142,11 @@ export class Game {
     this.net.onCorrect = (x, y, z) => this.player.teleport(x, y, z);
     this.net.onLeaveRoom = (code) => {
       if (this.travelling || !this.running) return;
+      // Kicked, banned or playing elsewhere: say so, don't rejoin.
+      if (removedFromWorld(code)) {
+        this.running = false;
+        return;
+      }
       // Unexpected disconnect (e.g. a server update): rejoin the same body.
       if (code !== 1000 && code !== 4000) setTimeout(() => void this.travel(this.bodyId), 1500);
     };

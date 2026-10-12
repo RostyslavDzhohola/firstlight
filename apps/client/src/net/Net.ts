@@ -33,6 +33,10 @@ export class Net {
   rtt = 0;
   onCorrect: ((x: number, y: number, z: number) => void) | null = null;
   onLeaveRoom: ((code: number) => void) | null = null;
+  /** Queue position while /api/play says the world is full (null once in, or on failure). */
+  onQueue: ((q: { position: number; etaSeconds: number } | null) => void) | null = null;
+  /** /api/play refused this account ("banned", or "kicked" for a short cooldown). */
+  onRefused: ((reason: string) => void) | null = null;
 
   async join(body: BodyId, opts: { partyLeaderRoomId?: string; starter?: number; palette?: number } = {}): Promise<Room> {
     let retried401 = false;
@@ -52,14 +56,18 @@ export class Net {
       }
       const r = (await res.json()) as PlayResponse;
       if (r.ok) {
+        this.onQueue?.(null);
         const room = await this.client.consumeSeatReservation(r.reservation as never);
         this.attach(room);
         return room;
       }
       if ("queue" in r) {
+        this.onQueue?.(r.queue);
         await new Promise((ok) => setTimeout(ok, 5000));
         continue;
       }
+      this.onQueue?.(null);
+      if (r.error === "banned" || r.error === "kicked") this.onRefused?.(r.error);
       throw new Error(r.error);
     }
   }
