@@ -33,6 +33,8 @@ interface Link {
   failedAt: number;
   createdAt: number;
   closed: boolean;
+  /** Set when apply() rebuilt this link from a fresh offer of the same remote. */
+  replacedBy?: Link;
 }
 
 const isRing = (p: SignalPayload) => !p.sdp && !p.candidate && !p.candidates?.length;
@@ -121,10 +123,15 @@ export class MeshTransport implements VoiceTransport {
       if (!this.hooks.accept(from) || this.links.size >= MAX_LINKS) return;
       link = this.open(from, false);
     }
+    // Bound to this link: if it is replaced before the work runs, the work is dropped (an answer or
+    // candidates for the old connection must never reach a new one). A link rebuilt from a fresh
+    // offer in apply() hands its queue on through `replacedBy`.
+    const bound = link;
     const next = (this.inbound.get(from) ?? Promise.resolve())
       .then(() => {
-        const l = this.links.get(from);
-        return l ? this.apply(l, payload) : undefined;
+        let l: Link | undefined = bound;
+        while (l?.replacedBy) l = l.replacedBy;
+        return l && this.links.get(from) === l ? this.apply(l, payload) : undefined;
       })
       .catch((e) => console.warn("voice: signalling failed", e));
     this.inbound.set(from, next);
@@ -150,6 +157,7 @@ export class MeshTransport implements VoiceTransport {
           this.close(link.peer);
           if (!this.hooks.accept(link.peer)) return;
           const fresh = this.open(link.peer, false);
+          link.replacedBy = fresh;
           return this.apply(fresh, payload, true);
         }
         throw e;

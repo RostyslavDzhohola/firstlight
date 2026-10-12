@@ -13,7 +13,7 @@ import type { Game } from "../game/Game.ts";
 import type { ClientSystem } from "../game/systems.ts";
 import { VoiceAudio } from "./audio.ts";
 import { MeshTransport } from "./MeshTransport.ts";
-import { onMyChannel, planLinks, shouldSend, type Me, type PeerView } from "./planner.ts";
+import { acceptsIncoming, onMyChannel, planLinks, shouldSend, type Me, type PeerView } from "./planner.ts";
 import type { IceSettings, SignalPayload, VoiceTransport } from "./transport.ts";
 import { VoiceUi } from "./ui.ts";
 
@@ -411,9 +411,15 @@ export class VoiceRoom implements ClientSystem {
   private accepts(peer: string): boolean {
     const vc = this.vc;
     if (!vc.enabled || vc.adminMuted || !vc.ice) return false;
-    const p = (this.room.state as any)?.players?.get(peer);
-    if (!p || !(p.flags & PF.VOICE) || p.flags & PF.VOICE_MUTED) return false;
-    return !vc.blockedUsers.has(p.userId);
+    const state = this.room.state as any;
+    const p = state?.players?.get(peer);
+    const me = state?.players?.get(this.room.sessionId);
+    if (!p || !me || !(p.flags & PF.VOICE) || p.flags & PF.VOICE_MUTED || vc.blockedUsers.has(p.userId)) return false;
+    // Only links the planner would keep: a radio mate, or one of the nearest MAX_PEERS within DROP.
+    const d = (q: any) => Math.hypot(q.x - me.x, q.y - me.y, q.z - me.z);
+    const my = this.myInfo(me);
+    const linked = this.transport.peers().map((id) => state.players.get(id)).filter(Boolean);
+    return acceptsIncoming(my, { radioCh: p.radioCh, dist: d(p) }, linked.map((q: any) => ({ radioCh: q.radioCh, dist: d(q) })));
   }
 
   // ---------------------------------------------------------------- per frame
@@ -444,18 +450,20 @@ export class VoiceRoom implements ClientSystem {
   private keys(me: any): void {
     const vc = this.vc;
     const input = this.game.input;
-    if (this.typing()) return;
-    if (input.pressed.has("KeyV") && !vc.enabled) {
+    // Typing in a field counts as both talk keys released (never stay on air).
+    const typing = this.typing();
+    const vPressed = !typing && input.pressed.has("KeyV");
+    if (vPressed && !vc.enabled) {
       if (vc.optedIn) void vc.enableFromGesture();
       else vc.ui.openPanel();
     }
     const canTalk = vc.enabled && !vc.panic && !vc.adminMuted && vc.micState === "live";
-    if (input.pressed.has("KeyV") && vc.enabled && vc.micState !== "live") this.game.hud.toast("No microphone — listening only (Esc → Voice & radio to retry)", "warn");
+    if (vPressed && vc.enabled && vc.micState !== "live") this.game.hud.toast("No microphone — listening only (Esc → Voice & radio to retry)", "warn");
     const wasPtt = vc.ptt;
     const wasRadio = vc.radioTx;
-    vc.ptt = canTalk && input.down("KeyV");
+    vc.ptt = canTalk && !typing && input.down("KeyV");
 
-    const b = input.down("KeyB");
+    const b = !typing && input.down("KeyB");
     if (b && !this.bHeld) {
       this.txDenied = false;
       if (!vc.enabled) this.game.hud.toast("Turn voice on first (press V)", "warn");

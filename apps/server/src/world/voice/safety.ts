@@ -2,7 +2,7 @@
 // mutes are process-wide by account. Without an open game.db (unit tests, bare dev runs) blocks and
 // reports fall back to memory so the rules still hold.
 
-import { blockUser, fileReport, gameDb, isBlockedEitherWay, type Db } from "../../db/index.ts";
+import { blockUser, fileReport, gameDb, isBanned, isBlockedEitherWay, type Db } from "../../db/index.ts";
 
 function db(): Db | null {
   try {
@@ -41,6 +41,12 @@ export const voiceSafety = {
     return memBlocks.has(`${a}\n${b}`) || memBlocks.has(`${b}\n${a}`);
   },
 
+  /** Banned accounts lose voice at once (the ban itself kicks them; that's the admin tools' job). */
+  isBanned(userId: string, now = Date.now()): boolean {
+    const d = db();
+    return d ? isBanned(d, userId, now) : false;
+  },
+
   /** File a report (who, when, where, why; never audio). Returns the report id. */
   report(r: VoiceReport, now = Date.now()): number {
     const d = db();
@@ -59,5 +65,8 @@ export const voiceMutes = {
   },
   has(userId: string): boolean {
     return mutedUsers.has(userId);
+  },
+  rekey(fromUserId: string, toUserId: string): void {
+    if (mutedUsers.delete(fromUserId)) mutedUsers.add(toUserId);
   },
 };

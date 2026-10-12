@@ -154,8 +154,14 @@ export class CombatClient {
       g.hud.setLogout(g.hud.you?.logoutEndsAt ?? null, Date.now() + g.net.serverOffset);
     }
     this.updatePickupPrompt();
-    // The phrase wheel (G) owns the mouse and number keys while it is open.
-    if (this.wheel.update(input, now, !this.deadUntilRespawn)) return;
+    // The phrase wheel (G) owns the mouse and number keys while it is open: drop block/scope and any
+    // charge, so nothing fires or stays raised when it closes.
+    if (this.wheel.update(input, now, !this.deadUntilRespawn)) {
+      if (this.blocking) room.send("block", { on: false });
+      if (this.scoped) room.send("scope", { on: false });
+      this.blocking = this.scoped = this.wasRmb = false;
+      return;
+    }
     if (this.deadUntilRespawn || !input.locked) return;
 
     // Hotbar and utility keys.

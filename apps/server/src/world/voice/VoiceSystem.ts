@@ -8,6 +8,7 @@ import type { Client } from "@colyseus/core";
 import { PF } from "@firstlight/shared/net/schema";
 import { VOICE, VOICE_REPORT_REASONS, type IceServerConfig } from "@firstlight/shared/net/voice";
 import { z } from "zod";
+import { accountLinks } from "../../auth/links.ts";
 import { env } from "../../env.ts";
 import { actorPos, type PlayerActor } from "../actors.ts";
 import type { BodyRoom } from "../BodyRoom.ts";
@@ -100,9 +101,14 @@ export class VoiceSystem implements RoomSystem {
   private readonly room: BodyRoom;
   private lastSlow = 0;
   private disposed = false;
+  private readonly unsubscribeLinks: () => void;
 
   constructor(room: BodyRoom) {
     this.room = room;
+    // A guest saved mid-session: the voice session follows the account id.
+    this.unsubscribeLinks = accountLinks.on((ev) => {
+      for (const s of this.sessions.values()) if (s.userId === ev.fromUserId) s.userId = ev.toUserId;
+    });
     const on = (type: string, fn: (c: Client, m: unknown) => void) => room.onMessage(type, (c: Client, m: unknown) => fn(c, m));
     on("voice:enable", (c, m) => this.enable(c, m));
     on("voice:disable", (c) => this.disable(c));
@@ -151,14 +157,16 @@ export class VoiceSystem implements RoomSystem {
       p.flags &= ~(PF.VOICE | PF.RADIO_TX);
       p.radioCh = 0;
     }
+    for (const o of this.sessions.values()) o.unreachableAt.delete(sessionId);
     if (!s) return;
     if (s.enabled) this.dropEverywhere(sessionId);
-    if (s.iceUsernames.length) void turnCredentials.revoke(s.userId, s.iceUsernames);
+    if (s.iceUsernames.length) void turnCredentials.revoke(s.iceUsernames);
   }
 
   dispose(): void {
     this.disposed = true;
-    for (const s of this.sessions.values()) if (s.iceUsernames.length) void turnCredentials.revoke(s.userId, s.iceUsernames);
+    this.unsubscribeLinks();
+    for (const s of this.sessions.values()) if (s.iceUsernames.length) void turnCredentials.revoke(s.iceUsernames);
     this.sessions.clear();
   }
 
@@ -188,6 +196,11 @@ export class VoiceSystem implements RoomSystem {
           if (s.enabled) this.dropEverywhere(s.sid);
         }
         a.client.send("voice:muted", { on: muted });
+      }
+      // Banned (by the admin tools, any room): voice ends now and relay credentials are revoked.
+      if ((s.enabled || s.iceUsernames.length) && voiceSafety.isBanned(a.identity.userId, now)) {
+        this.turnOff(a, s);
+        continue;
       }
       if (s.enabled) {
         if (!(p.flags & PF.VOICE)) p.flags |= PF.VOICE;
@@ -220,12 +233,17 @@ export class VoiceSystem implements RoomSystem {
   private disable(c: Client): void {
     const { a, s } = this.who(c);
     if (!a || !s || !s.actions.take(Date.now())) return;
+    this.turnOff(a, s);
+  }
+
+  /** Voice off: hang up everywhere and revoke relay credentials. */
+  private turnOff(a: PlayerActor, s: VoiceSession): void {
     const was = s.enabled;
     s.enabled = false;
     a.state.flags &= ~(PF.VOICE | PF.RADIO_TX);
     if (was) this.dropEverywhere(s.sid);
     if (s.iceUsernames.length) {
-      void turnCredentials.revoke(s.userId, s.iceUsernames);
+      void turnCredentials.revoke(s.iceUsernames);
       s.iceUsernames = [];
       s.ice = null;
       s.mintedAt = 0;
@@ -246,18 +264,26 @@ export class VoiceSystem implements RoomSystem {
       return;
     }
     if (s.minting) return;
+    // After a failure, and beyond the per-account budget, wait instead of calling the TURN API again.
+    if (now < s.turnRetryAt || !turnCredentials.allowMint(s.userId, now)) {
+      s.turnRetryAt = Math.max(s.turnRetryAt, now + LIMITS.TURN_RETRY_MS);
+      if (!s.ice) a.client.send("voice:ice", { iceServers: [], relay: true, ttl, available: false });
+      return;
+    }
     s.minting = true;
     try {
       const minted = await mintIceServers(ttl);
+      turnCredentials.remember(s.userId, minted.usernames, ttl);
       const live = this.sessions.get(s.sid) === s && s.enabled && !this.disposed;
       if (!live) {
-        void turnCredentials.revoke(s.userId, minted.usernames);
+        void turnCredentials.revoke(minted.usernames);
         return;
       }
+      const stale = s.iceUsernames.slice(0, -2); // keep the current and previous credential valid
+      if (stale.length) void turnCredentials.revoke(stale);
       s.ice = minted.iceServers;
-      s.iceUsernames = [...s.iceUsernames, ...minted.usernames].slice(-4); // current + previous stay valid
+      s.iceUsernames = [...s.iceUsernames.slice(-2), ...minted.usernames];
       s.mintedAt = Date.now();
-      turnCredentials.remember(s.userId, minted.usernames);
       a.client.send("voice:ice", { iceServers: minted.iceServers, relay: true, ttl, available: true });
     } catch (e) {
       console.warn(`voice: ${(e as Error).message}`);
@@ -278,6 +304,7 @@ export class VoiceSystem implements RoomSystem {
     const r = voiceSchemas.signal.safeParse(m);
     if (!r.success || r.data.to === c.sessionId) return;
     const to = r.data.to;
+    if (!this.room.actors.has(to)) return; // unknown ids get no answer and leave no trace
     if (!this.allowed(c.sessionId, to)) {
       const last = s.unreachableAt.get(to) ?? 0;
       if (now - last >= LIMITS.UNREACHABLE_EVERY_MS) {
@@ -375,7 +402,7 @@ export class VoiceSystem implements RoomSystem {
       const old = ts.iceUsernames;
       ts.iceUsernames = [];
       ts.ice = null;
-      void turnCredentials.revoke(ts.userId, old);
+      void turnCredentials.revoke(old);
       if (ts.enabled) void this.sendIce(t, ts, true);
     }
   }

@@ -75,8 +75,37 @@ export function planLinks({ me, peers, linked, farSince, now }: PlanInput): Plan
     }
   }
   for (const id of farSince.keys()) if (!linked.has(id)) farSince.delete(id);
+
+  // Proximity quota: keep at most MAX_PEERS non-radio links, nearest first (radio mates have their
+  // own room: a channel holds at most RADIO_CAP). New near peers displace the farthest kept ones.
+  const closing = new Set(close);
+  const prox = [...linked]
+    .map((id) => byId.get(id))
+    .filter((p): p is PeerView => !!p && !closing.has(p.id) && !onMyChannel(me, p));
+  for (const p of near) if (!linked.has(p.id) && !onMyChannel(me, p)) prox.push(p);
+  prox.sort((a, b) => a.dist - b.dist);
+  const keep = new Set(prox.slice(0, VOICE.MAX_PEERS).map((p) => p.id));
+  for (const p of prox) {
+    if (keep.has(p.id)) continue;
+    if (linked.has(p.id)) {
+      close.push(p.id);
+      farSince.delete(p.id);
+    } else wanted.delete(p.id);
+  }
   const open = [...wanted].filter((id) => !linked.has(id));
   return { open, close };
+}
+
+/**
+ * Should we accept a link a peer opened to us? Only if the planner would keep it: a radio mate, or a
+ * peer within DROP that ranks among our MAX_PEERS nearest proximity links (no accept-then-evict churn).
+ */
+export function acceptsIncoming(me: Me, peer: { radioCh: number; dist: number }, linked: readonly { radioCh: number; dist: number }[]): boolean {
+  if (me.adminMuted) return false;
+  if (onMyChannel(me, peer)) return true;
+  if (peer.dist > VOICE.DROP) return false;
+  const prox = linked.filter((p) => !onMyChannel(me, p)).map((p) => p.dist).sort((a, b) => a - b);
+  return prox.length < VOICE.MAX_PEERS || peer.dist < prox[VOICE.MAX_PEERS - 1]!;
 }
 
 /** Should my mic go to this peer right now? (V: proximity; B: radio, which is also heard nearby.) */

@@ -63,32 +63,78 @@ export async function revokeCredential(username: string): Promise<boolean> {
   }
 }
 
-// Process-wide registry of live credentials per account, so a ban (from any room or the admin page)
-// can revoke them.
-const liveByUser = new Map<string, Set<string>>();
+// Process-wide registry of live (unrevoked) credentials: TURN username → owner account and expiry,
+// so a ban (from any room or the admin page) can revoke them, and a failed revocation is retried.
+
+interface LiveCredential {
+  userId: string;
+  expiresAt: number;
+}
+
+const live = new Map<string, LiveCredential>();
+const RETRY_MS = [30_000, 120_000, 600_000];
+
+function prune(now: number): void {
+  for (const [u, c] of live) if (c.expiresAt <= now) live.delete(u);
+}
+
+async function revokeOne(username: string, attempt = 0): Promise<boolean> {
+  if (await revokeCredential(username)) {
+    live.delete(username);
+    return true;
+  }
+  const wait = RETRY_MS[attempt];
+  if (wait !== undefined) {
+    const t = setTimeout(() => {
+      if (live.has(username)) void revokeOne(username, attempt + 1);
+    }, wait);
+    t.unref?.();
+  }
+  return false;
+}
+
+// Mint budget per account (a modified client toggling voice can't make us hammer the TURN API).
+const MINTS_PER_WINDOW = 10;
+const MINT_WINDOW_MS = 10 * 60_000;
+const mints = new Map<string, number[]>();
 
 export const turnCredentials = {
-  remember(userId: string, usernames: readonly string[]): void {
-    let s = liveByUser.get(userId);
-    if (!s) liveByUser.set(userId, (s = new Set()));
-    for (const u of usernames) s.add(u);
+  remember(userId: string, usernames: readonly string[], ttlS: number = VOICE.TURN_TTL_S, now = Date.now()): void {
+    prune(now);
+    for (const u of usernames) live.set(u, { userId, expiresAt: now + ttlS * 1000 });
   },
 
-  /** Revoke the given credentials (and forget them). */
-  async revoke(userId: string, usernames: readonly string[]): Promise<void> {
-    const s = liveByUser.get(userId);
-    for (const u of usernames) s?.delete(u);
-    if (s && !s.size) liveByUser.delete(userId);
-    await Promise.all(usernames.map((u) => revokeCredential(u)));
+  /** A guest saved: their credentials now belong to the account. */
+  rekey(fromUserId: string, toUserId: string): void {
+    for (const c of live.values()) if (c.userId === fromUserId) c.userId = toUserId;
+    const m = mints.get(fromUserId);
+    if (m) {
+      mints.delete(fromUserId);
+      mints.set(toUserId, [...(mints.get(toUserId) ?? []), ...m]);
+    }
   },
 
-  /** Revoke every live credential of an account (ban). */
+  /** Revoke credentials; failures stay registered and are retried with backoff. Returns how many were revoked. */
+  async revoke(usernames: readonly string[]): Promise<number> {
+    const ok = await Promise.all(usernames.map((u) => revokeOne(u)));
+    return ok.filter(Boolean).length;
+  },
+
+  /** Revoke every live credential of an account (ban). Returns how many were revoked now. */
   async revokeUser(userId: string): Promise<number> {
-    const s = liveByUser.get(userId);
-    if (!s) return 0;
-    liveByUser.delete(userId);
-    const list = [...s];
-    await Promise.all(list.map((u) => revokeCredential(u)));
-    return list.length;
+    prune(Date.now());
+    return this.revoke([...live].filter(([, c]) => c.userId === userId).map(([u]) => u));
+  },
+
+  /** May this account mint another credential now? (counts the attempt) */
+  allowMint(userId: string, now = Date.now()): boolean {
+    const list = (mints.get(userId) ?? []).filter((t) => now - t < MINT_WINDOW_MS);
+    if (list.length >= MINTS_PER_WINDOW) {
+      mints.set(userId, list);
+      return false;
+    }
+    list.push(now);
+    mints.set(userId, list);
+    return true;
   },
 };

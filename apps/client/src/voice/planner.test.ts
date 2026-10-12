@@ -1,6 +1,6 @@
 import { VOICE } from "@firstlight/shared/net/voice";
 import { describe, expect, it } from "vitest";
-import { planLinks, shouldSend, type Me, type PeerView } from "./planner.ts";
+import { acceptsIncoming, planLinks, shouldSend, type Me, type PeerView } from "./planner.ts";
 
 const me: Me = { radioCh: 0, hasRadio: false, adminMuted: false };
 const peer = (id: string, dist: number, extra: Partial<PeerView> = {}): PeerView => ({ id, dist, voice: true, adminMuted: false, radioCh: 0, blocked: false, ...extra });
@@ -50,6 +50,30 @@ describe("voice link planner", () => {
     const peers = [peer("mate", 900, { radioCh: 2 })];
     expect(plan(peers, ["mate"], { me: tuned, farSince, now: 0 }).close).toEqual([]);
     expect(plan(peers, ["mate"], { me: tuned, farSince, now: 60_000 }).close).toEqual([]);
+  });
+
+  it("keeps at most 12 proximity links: nearer newcomers displace the farthest, radio mates don't count", () => {
+    const tuned: Me = { radioCh: 5, hasRadio: true, adminMuted: false };
+    // 14 linked within DROP (some in the 45–60 m hysteresis band) + 2 radio mates far away.
+    const linkedPeers = Array.from({ length: 14 }, (_, i) => peer(`l${i}`, 10 + i * 3.5)); // 10..55.5 m
+    const mates = [peer("m1", 300, { radioCh: 5 }), peer("m2", 800, { radioCh: 5 })];
+    const newcomer = peer("new", 4);
+    const out = plan([...linkedPeers, ...mates, newcomer], [...linkedPeers.map((p) => p.id), "m1", "m2"], { me: tuned });
+    expect(out.open).toEqual(["new"]);
+    // 14 linked + 1 new = 15 proximity candidates → the 3 farthest linked go.
+    expect(out.close.sort()).toEqual(["l11", "l12", "l13"]);
+    expect(out.close).not.toContain("m1");
+  });
+
+  it("accepts incoming links only when the planner would keep them", () => {
+    const tuned: Me = { radioCh: 5, hasRadio: true, adminMuted: false };
+    const twelve = Array.from({ length: 12 }, (_, i) => ({ radioCh: 0, dist: 5 + i * 3 })); // farthest at 38 m
+    expect(acceptsIncoming(me, { radioCh: 0, dist: 20 }, [])).toBe(true);
+    expect(acceptsIncoming(me, { radioCh: 0, dist: VOICE.DROP + 1 }, [])).toBe(false);
+    expect(acceptsIncoming(me, { radioCh: 0, dist: 30 }, twelve)).toBe(true); // nearer than our 12th
+    expect(acceptsIncoming(me, { radioCh: 0, dist: 40 }, twelve)).toBe(false); // would be 13th
+    expect(acceptsIncoming(tuned, { radioCh: 5, dist: 900 }, twelve)).toBe(true); // radio mate
+    expect(acceptsIncoming({ ...me, adminMuted: true }, { radioCh: 0, dist: 3 }, [])).toBe(false);
   });
 
   it("drops everything while I'm admin-muted", () => {

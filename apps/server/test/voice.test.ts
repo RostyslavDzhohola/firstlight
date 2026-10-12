@@ -7,8 +7,10 @@ import { PF } from "@firstlight/shared/net/schema";
 import { VOICE } from "@firstlight/shared/net/voice";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Game } from "../src/app.ts";
-import { isBlockedEitherWay, listReports, openGameDb, setGameDb, type Db } from "../src/db/index.ts";
+import { accountLinks } from "../src/auth/links.ts";
+import { banUser, isBlockedEitherWay, listReports, openGameDb, setGameDb, type Db } from "../src/db/index.ts";
 import { env } from "../src/env.ts";
+import { revokeVoiceForUser } from "../src/world/voice/index.ts";
 import { TURN_API } from "../src/world/voice/turn.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 
@@ -138,6 +140,14 @@ describe("voice signalling relay", () => {
     expect(got(a, "voice:drop")).toContainEqual({ peer: b.sessionId });
     expect(await relays(a, b)).toBe(false);
     expect(await relays(b, a)).toBe(false);
+  });
+
+  it("ignores signals to ids that aren't in the room (no reply, no relay)", async () => {
+    const a = await bot("ann");
+    await enable(a);
+    for (let i = 0; i < 5; i++) a.send("voice:signal", { to: `ghost-${i}`, sdp: OFFER });
+    await barrier(a);
+    expect(got(a, "voice:unreachable")).toHaveLength(0);
   });
 
   it("refuses to opt in without the 16+ declaration", async () => {
@@ -332,23 +342,20 @@ describe("voice safety persistence", () => {
 
 describe("TURN credentials", () => {
   const saved = { id: env.turnKeyId, token: env.turnKeyToken };
-  afterEach(() => {
-    env.turnKeyId = saved.id;
-    env.turnKeyToken = saved.token;
-    vi.restoreAllMocks();
-  });
-
-  it("mints per-player relay credentials with the right request, filters STUN and :53, revokes on block and leave", async () => {
+  let calls: { url: string; init: RequestInit }[];
+  /** Mock Cloudflare: mint returns user-<n>; `revokeStatus` decides each revoke's HTTP status. */
+  function mockTurn(opts: { mintStatus?: number; revokeStatus?: () => number } = {}) {
     env.turnKeyId = "key-123";
     env.turnKeyToken = "tok-secret";
     const realFetch = globalThis.fetch;
-    const calls: { url: string; init: RequestInit }[] = [];
+    calls = [];
     let n = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input instanceof Request ? input.url : input);
       if (!url.startsWith(TURN_API)) return realFetch(input as never, init);
       calls.push({ url, init: init ?? {} });
-      if (url.endsWith("/revoke")) return new Response(null, { status: 204 });
+      if (url.endsWith("/revoke")) return new Response(null, { status: opts.revokeStatus?.() ?? 204 });
+      if (opts.mintStatus && opts.mintStatus !== 201) return new Response("nope", { status: opts.mintStatus });
       n++;
       return new Response(
         JSON.stringify({
@@ -356,7 +363,7 @@ describe("TURN credentials", () => {
             { urls: ["stun:stun.cloudflare.com:3478", "stun:stun.cloudflare.com:53"] },
             {
               urls: ["turn:turn.cloudflare.com:3478?transport=udp", "turn:turn.cloudflare.com:53?transport=udp", "turn:turn.cloudflare.com:3478?transport=tcp", "turns:turn.cloudflare.com:5349?transport=tcp", "turns:turn.cloudflare.com:443?transport=tcp"],
-              username: `user-${n}`,
+              username: `user-${n}-${run}`,
               credential: `cred-${n}`,
             },
           ],
@@ -364,7 +371,18 @@ describe("TURN credentials", () => {
         { status: 201, headers: { "Content-Type": "application/json" } },
       );
     });
+  }
+  const mintCalls = () => calls.filter((c) => c.url.endsWith("generate-ice-servers"));
+  const revokes = (user: string) => calls.filter((c) => c.url.endsWith(`/credentials/${user}/revoke`));
 
+  afterEach(() => {
+    env.turnKeyId = saved.id;
+    env.turnKeyToken = saved.token;
+    vi.restoreAllMocks();
+  });
+
+  it("mints per-player relay credentials with the right request, filters STUN and :53, revokes on block and leave", async () => {
+    mockTurn();
     const a = await bot("ann"), b = await bot("ben");
     a.send("voice:enable", { age16: true });
     await waitFor(() => got(a, "voice:ice").length > 0);
@@ -381,45 +399,89 @@ describe("TURN credentials", () => {
     expect(urls.length).toBe(4);
     expect(urls.some((u) => u.startsWith("stun:"))).toBe(false);
     expect(urls.some((u) => /:53(\?|$)/.test(u))).toBe(false);
-    expect(ice.iceServers[0]).toMatchObject({ username: "user-1", credential: "cred-1" });
+    const annUser = ice.iceServers[0].username;
+    expect(ice.iceServers[0]).toMatchObject({ username: `user-1-${run}`, credential: "cred-1" });
 
     // Re-enabling inside the refresh window re-sends the same credential (no second mint).
     a.send("voice:enable", { age16: true });
     await waitFor(() => got(a, "voice:ice").length === 2);
-    expect(calls.filter((c) => c.url.endsWith("generate-ice-servers"))).toHaveLength(1);
+    expect(mintCalls()).toHaveLength(1);
 
     // Blocking ann revokes her relay credential and hands her a fresh one.
     b.send("voice:enable", { age16: true });
     await waitFor(() => got(b, "voice:ice").length > 0);
     b.send("voice:block", { target: a.sessionId });
-    await waitFor(() => calls.some((c) => c.url.endsWith("/credentials/user-1/revoke")));
+    await waitFor(() => revokes(annUser).length > 0);
     await waitFor(() => got(a, "voice:ice").length === 3);
-    expect(got(a, "voice:ice")[2].iceServers[0].username).not.toBe("user-1");
+    expect(got(a, "voice:ice")[2].iceServers[0].username).not.toBe(annUser);
 
     // Leaving revokes what is left.
     const benUser = got(b, "voice:ice")[0].iceServers[0].username;
     await safeLeave(b);
     rooms.splice(rooms.indexOf(b), 1);
-    await waitFor(() => calls.some((c) => c.url.endsWith(`/credentials/${benUser}/revoke`)));
-    const revoke = calls.find((c) => c.url.endsWith("/revoke"))!;
+    await waitFor(() => revokes(benUser).length > 0);
+    const revoke = revokes(benUser)[0]!;
     expect(revoke.init.method).toBe("POST");
     expect(new Headers(revoke.init.headers).get("authorization")).toBe("Bearer tok-secret");
   });
 
-  it("tells the client voice is unavailable when the relay can't be reached (never falls back to direct)", async () => {
-    env.turnKeyId = "key-123";
-    env.turnKeyToken = "tok-secret";
-    const realFetch = globalThis.fetch;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      const url = String(input instanceof Request ? input.url : input);
-      if (url.startsWith(TURN_API)) return new Response("nope", { status: 500 });
-      return realFetch(input as never, init);
-    });
+  it("keeps a credential whose revocation failed, so the next attempt retries it", async () => {
+    let status = 503;
+    mockTurn({ revokeStatus: () => status });
+    const a = await bot("ann");
+    await enable(a);
+    const user = got(a, "voice:ice")[0].iceServers[0].username;
+    expect(await revokeVoiceForUser(uid("ann"))).toBe(0);
+    expect(revokes(user)).toHaveLength(1);
+    status = 204;
+    expect(await revokeVoiceForUser(uid("ann"))).toBe(1);
+    expect(revokes(user)).toHaveLength(2);
+    expect(await revokeVoiceForUser(uid("ann"))).toBe(0); // nothing left to revoke
+    expect(revokes(user)).toHaveLength(2);
+  });
+
+  it("credentials follow the account when a guest saves", async () => {
+    mockTurn();
+    const a = await bot("ann");
+    await enable(a);
+    const user = got(a, "voice:ice")[0].iceServers[0].username;
+    accountLinks.emit({ fromUserId: uid("ann"), toUserId: uid("acct"), name: "ann", character: "guest", merged: false, moved: null, displaced: null });
+    expect(await revokeVoiceForUser(uid("ann"))).toBe(0);
+    expect(await revokeVoiceForUser(uid("acct"))).toBe(1);
+    expect(revokes(user)).toHaveLength(1);
+  });
+
+  it("a ban ends the player's voice and revokes their relay credentials", async () => {
+    mockTurn();
+    const db = openGameDb(":memory:");
+    setGameDb(db);
+    try {
+      const a = await bot("ann"), b = await bot("ben");
+      await enable(a, b);
+      const user = got(a, "voice:ice")[0].iceServers[0].username;
+      banUser(db, { userId: uid("ann"), ipHash: null, reason: "test" });
+      await waitFor(() => revokes(user).length > 0, 3000);
+      await waitFor(() => got(b, "voice:drop").some((d) => d.peer === a.sessionId));
+      await waitFor(() => !(me(a).flags & PF.VOICE));
+      expect(await relays(b, a)).toBe(false);
+    } finally {
+      setGameDb(null);
+      db.close();
+    }
+  });
+
+  it("tells the client voice is unavailable when the relay can't be reached, and backs off (never falls back to direct)", async () => {
+    mockTurn({ mintStatus: 500 });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const a = await bot("ann");
     a.send("voice:enable", { age16: true });
     await waitFor(() => got(a, "voice:ice").length > 0);
     expect(got(a, "voice:ice")[0]).toMatchObject({ iceServers: [], relay: true, available: false });
     expect(warn.mock.calls.flat().join(" ")).not.toContain("tok-secret");
+    // Asking again right away doesn't hit the TURN API again.
+    a.send("voice:enable", { age16: true });
+    await waitFor(() => got(a, "voice:ice").length === 2);
+    expect(got(a, "voice:ice")[1]).toMatchObject({ available: false });
+    expect(mintCalls()).toHaveLength(1);
   });
 });
