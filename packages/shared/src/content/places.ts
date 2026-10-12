@@ -193,5 +193,6 @@ export function padName(body: BodyId, index: number): string {
       best = p;
     }
   }
-  return best && bestD < 360 ? `${best.name} pad` : `Waypoint ${index}`;
+  if (!best || bestD >= 360) return `Waypoint ${index}`;
+  return `${best.name[0]!.toUpperCase()}${best.name.slice(1)} pad`;
 }
