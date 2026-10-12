@@ -3,7 +3,7 @@
 import { createGame } from "./app.ts";
 import { accountsConfigFromEnv, createAccounts } from "./auth/accounts.ts";
 import { devVerifier } from "./auth/identity.ts";
-import { env } from "./env.ts";
+import { env, productionConfigProblems } from "./env.ts";
 import { isBanned } from "./db/index.ts";
 import { bannedCheck } from "./world/BodyRoom.ts";
 import { gameDb } from "./db/index.ts";
@@ -18,12 +18,7 @@ import { banExplainer } from "./social/refusal.ts";
 // Refuse to boot an insecure production config (review): dev guests would allow impersonation, and a
 // missing origin secret makes forwarded IPs spoofable.
 if (env.production) {
-  const problems: string[] = [];
-  if (env.allowDevGuests) problems.push("ALLOW_DEV_GUESTS must not be set in production");
-  if (!env.originSecret) problems.push("ORIGIN_SECRET is required in production");
-  if (!process.env.BETTER_AUTH_URL) problems.push("BETTER_AUTH_URL is required in production");
-  if (!process.env.CLIENT_ORIGIN) problems.push("CLIENT_ORIGIN is required in production");
-  if (!process.env.BETTER_AUTH_SECRET) problems.push("BETTER_AUTH_SECRET is required in production");
+  const problems = productionConfigProblems();
   if (problems.length) {
     for (const p of problems) console.error(`config: ${p}`);
     process.exit(1);
