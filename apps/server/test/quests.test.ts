@@ -325,5 +325,11 @@ describe("admin staged scenes", () => {
     bystander.send("admin", { cmd: "stage", args: { n: 2 } }); // not an admin: ignored
     await sleep(200);
     expect(bystander.count("stage")).toBe(0);
+
+    // Party members of the admin are crew too (how guest windows join a scene in production).
+    room.actors.get(director.id)!.state.party = "film";
+    room.actors.get(bystander.id)!.state.party = "film";
+    director.send("admin", { cmd: "stage", args: { n: 2, all: true } });
+    await waitFor(() => near(bystander, overlook, 10));
   });
 });

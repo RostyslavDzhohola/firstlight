@@ -1,6 +1,6 @@
 // Admin `stage <n>`: the five staged scenes for the video (SPEC §6.13, docs/staged-scenes.md).
-// Teleports the admin plus nearby admins and load-test bots (or every admin/bot in the room with
-// `all: true`) into a formation at the scene spot, heals them and sets the scene: boss and NPC
+// Teleports the admin plus the crew — other admins, load-test bots and members of the admin's
+// party — within 80 m (or anywhere in the room with `all: true`) into a formation at the scene spot, heals them and sets the scene: boss and NPC
 // spawns are requested on the event bus (`spawnRequest`, reason "stage") for the NPC lane to honour.
 // If the admin is on another body the client is told to travel there and repeat the command.
 
@@ -101,10 +101,11 @@ export function runStage(sys: QuestSystem, admin: PlayerActor, n: number, all: b
     return;
   }
   const here = actorPos(admin);
+  const party = admin.state.party;
   const cast = [admin];
   for (const a of sys.room.actors.values()) {
     if (a === admin || a.dead) continue;
-    const crew = a.identity.admin || a.identity.loadtest || (a.state.flags & (PF.ADMIN | PF.LOADTEST)) !== 0;
+    const crew = a.identity.admin || a.identity.loadtest || (a.state.flags & (PF.ADMIN | PF.LOADTEST)) !== 0 || (!!party && a.state.party === party);
     if (crew && (all || dist3(actorPos(a), here) <= 80)) cast.push(a);
   }
   const centre = sys.around(placeDir(def.place), def.east ?? 0, def.north ?? 0);
