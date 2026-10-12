@@ -111,7 +111,8 @@ export type ServerMessages = {
   projectile: { id: number; by: string; weapon: number; x: number; y: number; z: number; vx: number; vy: number; vz: number; g: number };
   explode: { id: number; x: number; y: number; z: number; radius: number; weapon: number };
   death: { victim: string; killer: string | null; killerName: string; aliveMs: number; level: number; pileId: string };
-  broke: { id: string; archetype: number; variant: number; ix: number; iy: number; iz: number };
+  /** A breakable prop shattered: pre-fractured `variant`, impact direction (unit), push strength `f`. */
+  broke: { id: string; archetype: number; variant: number; ix: number; iy: number; iz: number; f?: number };
   rebuilt: { id: string };
   toast: { text: string; kind: "info" | "xp" | "coins" | "medal" | "warn" };
   phrase: { by: string; id: number };

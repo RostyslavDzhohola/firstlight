@@ -4,7 +4,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BODIES, createTerrain, padDirs } from "@firstlight/shared";
 import { bossArena } from "@firstlight/shared/content/arenas";
-import { NPC_INDEX, PLANET_COSMETIC } from "@firstlight/shared/content/npcs";
+import { NF, NPC_INDEX, PLANET_COSMETIC } from "@firstlight/shared/content/npcs";
+import { dealDamage } from "../src/world/combat.ts";
 import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
 import { repeatDecay, rollDrops } from "../src/world/npc/rewards.ts";
 import { buildSpawnPoints } from "../src/world/npc/spawns.ts";
@@ -105,5 +106,56 @@ describe("spawn points", () => {
       }
       expect(a.length).toBeGreaterThan(50);
     }
+  });
+});
+
+describe("review fixes (units)", () => {
+  it("boss weak points are volumes exposed only in their window, with the boss's own multiplier", () => {
+    const w = fakeWorld("arcadia");
+    const boss = w.sys.boss!;
+    boss.forceSpawn(w.clock.t);
+    const n = boss.npc!;
+    n.state.flags &= ~(NF.SPAWNING | NF.INVULN); // past the 1 s materialise
+    const u = n.pos.map((v) => v / Math.hypot(...n.pos)) as [number, number, number];
+    const f = n.facing;
+    const vent: [number, number, number] = [0, 1, 2].map((i) => n.pos[i]! + u[i]! * 2.1 + f[i]! * 3.3) as [number, number, number];
+    const crown: [number, number, number] = [0, 1, 2].map((i) => n.pos[i]! + u[i]! * 6.8) as [number, number, number];
+    // A shot from 20 m in front of the boss, aimed at a target point; the capsule entry is ~4 m short of the axis.
+    const shot = (target: [number, number, number]) => {
+      const o = [0, 1, 2].map((i) => target[i]! + f[i]! * 20) as [number, number, number];
+      const d = [0, 1, 2].map((i) => (target[i]! - o[i]!) / 20) as [number, number, number];
+      return n.weakPoint!(o, d, 20 - 1.2);
+    };
+    expect(n.weakMult).toBe(1.5);
+    expect(shot(vent)).toBe(false); // closed: no weak point at all
+    expect(boss.mitigate(n, 1000, true)).toBe(200); // and armour applies (no generic headshot leak)
+    boss.windowUntil = w.clock.t + 5000; // Moored
+    expect(shot(vent)).toBe(true);
+    expect(shot(crown)).toBe(false); // the top of the shell isn't the vent
+    expect(boss.mitigate(n, 1000, true)).toBe(1000);
+  });
+
+  it("an overkill hit only credits the HP it actually removed", () => {
+    const w = fakeWorld("arcadia");
+    const a = w.addPlayer("a", arcadiaPoint(80), 1);
+    const b = w.addPlayer("b", arcadiaPoint(82), 1);
+    const n = w.sys.createNpc(NPC_INDEX.get("hopbit")!, 1, arcadiaPoint(90), w.clock.t, { instant: true });
+    dealDamage(w.world.host, a, n, 15, false);
+    dealDamage(w.world.host, b, n, 500, false);
+    expect(n.damage.get(a.identity.userId)!.amount).toBe(15);
+    expect(n.damage.get(b.identity.userId)!.amount).toBe(7);
+  });
+
+  it("raised Bonewalkers crumble when their Cantor dies", () => {
+    const w = fakeWorld("hollowmere");
+    const R = 750;
+    const at: [number, number, number] = [0, R, 0];
+    const cantor = w.sys.createNpc(NPC_INDEX.get("cantor")!, 9, at, w.clock.t, { instant: true });
+    const child = w.sys.createNpc(NPC_INDEX.get("bonewalker")!, 9, [3, R, 0], w.clock.t, { instant: true, summoner: cantor.id });
+    cantor.raised.add(child.id);
+    dealDamage(w.world.host, null, cantor, 10_000, false);
+    expect(cantor.dead).toBe(true);
+    expect(child.dead).toBe(true);
+    expect(child.state.flags & NF.DEAD).toBeTruthy();
   });
 });

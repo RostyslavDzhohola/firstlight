@@ -51,7 +51,7 @@
 | F9 screenshot share | ✅ | browser E2E T7 |
 | F10 M1 ≥ 60 fps Medium | ✅* | ?bench=g1 59.9 fps p50, p95 17.6 ms (T3 Chromium, not plugged-in Chrome) |
 | F11 Low on weak profile | ✅* | `?bench=g1&tier=low&cpuslow=4`: 51.3 fps p50, p95 29.8 ms, 0 shader builds (D29 emulation) |
-| F12 three-model review | 🟡 | per-lane reviews done; whole-codebase review after the last merges |
+| F12 three-model review | 🟡 | whole-codebase review of bb54dc3 running (Codex Sol 6.1 high, Opus 5.5, Sonnet 5.5) |
 | F13 photo mode + 5 scenes | ✅ | browser E2E T8; `stage <n>` + docs/staged-scenes.md |
 
 ## Lanes (who owns what right now)
@@ -61,13 +61,15 @@
 | Render look + G1 gate | MERGED a59d992 (Codex + Opus reviewed, fixed) | — |
 | Accounts + persistence | MERGED 61aa332 | — |
 | Social, moderation, stats, share | MERGED 1a2ee50 (Codex ×2) | — |
-| Enemies, wildlife, bosses | MERGED 7768535; fixing Codex review (3 blockers) | ../fl-wt-npc |
-| Characters (GLB, animations) | MERGED 2447afe; fixing Codex review | ../fl-wt-chars |
+| Enemies, wildlife, bosses | MERGED 7768535 + review fixes ec3f110 (deployed) | — |
+| Characters (GLB, animations) | MERGED 2447afe + review fixes 13cf0f5 | — |
 | Voice + radio + phrase wheel | MERGED d40d058 (Codex ×2); TURN key pending owner | — |
 | Missions, medals, eggs, shop, pads, stage | MERGED f8514dc (Codex) | — |
 | Photo mode | MERGED 4214419 | — |
-| UI port (design verdict) | Opus sub-agent, merging main then restyling lanes' panels | ../fl-wt-ui |
-| Destruction (§6.9) | Opus sub-agent | ../fl-wt-destruct |
+| UI port (design verdict) | MERGED 9f6dc14 (deployed) | — |
+| Destruction (§6.9) | MERGED bb54dc3 (deployed) | — |
+| Horses (M11 #2) | Opus sub-agent | ../fl-wt-horses (lane/horses) |
+| Weather + day/night (M11 #3–4) | Opus (render agent) | ../fl-wt-render (lane/weather) |
 
 ## Measured numbers
 
@@ -92,6 +94,8 @@
   **51.3 fps p50 (mean 47.5), frame p95 29.8 ms, p99 35.7 ms, 0 shader builds**, draws mean 174.
 
 ## Open issues
+
+- Flaky under full-suite load (pass alone 3/3): voice "relays far apart on the same channel…" failed once (81 ms) in a full run at 04:50Z; watching.
 
 - NO CODEX COMPUTER USE (D23): visual/E2E checks run in T3 Code's built-in browser (preview tools). Never Chrome.
 - Concept art not generated yet (Codex task cancelled for safety). Retry only without computer use.

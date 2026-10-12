@@ -5,6 +5,7 @@ import type { Game } from "./Game.ts";
 import { npcClientSystem } from "../world/npcs/index.ts";
 import { createQuestClient } from "./QuestClient.ts";
 import { createVoiceSystem } from "../voice/index.ts";
+import { createBreakables } from "../world/Breakables.ts";
 import { createSkyClient } from "./SkyClient.ts";
 
 export interface ClientSystem {
@@ -12,6 +13,11 @@ export interface ClientSystem {
   dispose(): void;
 }
 
-export type ClientSystemFactory = (game: Game) => ClientSystem | null;
+/** `offline: true` factories also run without a server (?offline, ?bench); the rest need a room. */
+export type ClientSystemFactory = ((game: Game) => ClientSystem | null) & { offline?: boolean };
 
-export const CLIENT_SYSTEMS: ClientSystemFactory[] = [npcClientSystem, createVoiceSystem, createQuestClient, createSkyClient];
+export const CLIENT_SYSTEMS: ClientSystemFactory[] = [npcClientSystem, createVoiceSystem, createQuestClient];
+// Destruction lane: breakable props (intact meshes, debris, rebuild effect).
+CLIENT_SYSTEMS.push(createBreakables);
+// Weather + day/night lane: server sky sync (the environment runs offline from the shared schedule).
+CLIENT_SYSTEMS.push(createSkyClient);
