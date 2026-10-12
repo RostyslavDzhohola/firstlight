@@ -246,4 +246,42 @@ describe("splash and shells (review B2, S3, S7)", () => {
     expect(sheltered.state.hp).toBe(100);
     expect(shell.hp).toBeLessThan(150);
   });
+
+  it("the Receiver's Sweep Laser stops at a shell (review S6)", () => {
+    const w = fakeWorld("meridian");
+    const field = new BubbleField();
+    w.world.host.bubbles = field;
+    const boss = w.sys.boss!;
+    const centre = w.world.snapToGround(boss.arena.centre);
+    const n = w.sys.createNpc(NPC_INDEX.get("the_receiver")!, 20, centre, w.clock.t, { instant: true, boss: true });
+    const laser = npcDef("the_receiver").attacks.find((a) => a.id === "sweep_laser")!;
+    // A spot 12 m out that no container covers.
+    let spot: V3 | null = null;
+    let dir: V3 = [0, 0, 0];
+    const u = lift(centre, 1).map((v, i) => v - centre[i]!) as V3;
+    const ref: V3 = Math.abs(u[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
+    for (let k = 0; k < 16 && !spot; k++) {
+      const a = (k / 16) * Math.PI * 2;
+      const e1 = [ref[1] * u[2] - ref[2] * u[1], ref[2] * u[0] - ref[0] * u[2], ref[0] * u[1] - ref[1] * u[0]];
+      const el = Math.hypot(e1[0]!, e1[1]!, e1[2]!);
+      const e = e1.map((v) => v / el);
+      const f = [u[1] * e[2]! - u[2] * e[1]!, u[2] * e[0]! - u[0] * e[2]!, u[0] * e[1]! - u[1] * e[0]!];
+      const t: V3 = [e[0]! * Math.cos(a) + f[0]! * Math.sin(a), e[1]! * Math.cos(a) + f[1]! * Math.sin(a), e[2]! * Math.cos(a) + f[2]! * Math.sin(a)];
+      const p = w.world.snapToGround([centre[0] + t[0] * 12, centre[1] + t[1] * 12, centre[2] + t[2] * 12]);
+      if (!boss.blocked(centre, p, laser)) {
+        spot = p;
+        dir = t;
+      }
+    }
+    expect(spot).not.toBeNull();
+    const p = w.addPlayer("bubbled", spot!, 20);
+    const shell = field.add(p.id, spot!, 3, 400, w.clock.t + 6000);
+    w.sys.live = [{ a: p, pos: spot!, untouchable: false }];
+    const dur = (laser.interval ?? 2) * 1000;
+    const at = { def: laser, index: 0, start: w.clock.t, resolveAt: w.clock.t, origin: centre, dir, points: [], tracked: [], lockAt: 0, locked: true, targetId: null,
+      resolved: true, activeUntil: w.clock.t + dur / 2, travelled: 0, hitIds: new Set<string>(), nextTickAt: 0, ticksLeft: 0, repeatAt: 0, repeatDir: null, aim: null };
+    boss.runActive(n, at as never, w.clock.t, 0.05); // halfway through the sweep the beam points at the player
+    expect(p.state.hp).toBe(290);
+    expect(shell.hp).toBe(250);
+  });
 });

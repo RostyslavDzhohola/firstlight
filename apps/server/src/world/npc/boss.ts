@@ -19,7 +19,7 @@ import { partyOf } from "../../social/parties.ts";
 import { actorPos, type PlayerActor } from "../actors.ts";
 import { dealDamage } from "../combat.ts";
 import type { V3 } from "../geometry.ts";
-import { cancelAttack, playersInCircle, playersInLine, startAttack, updateAttack } from "./attacks.ts";
+import { cancelAttack, chest, playersInCircle, playersInLine, startAttack, updateAttack } from "./attacks.ts";
 import { aggro } from "./brain.ts";
 import type { LivePlayer, NpcSystem } from "./NpcSystem.ts";
 import { MODE, type ActiveAttack, type Npc } from "./npc.ts";
@@ -635,7 +635,8 @@ export class BossController {
         if (dot(tangentDir(n.pos, lp.pos), beam) < cosTol) continue;
         if (this.blocked(n.pos, lp.pos, a)) continue;
         at.hitIds.add(lp.a.id);
-        this.sys.hitPlayer(n, lp.a, attackDamage(a, n.level), { fromDir: sub(n.pos, lp.pos) });
+        // The beam comes from the Receiver's body: a Prism Bubble shell in between takes it.
+        this.sys.hitPlayer(n, lp.a, attackDamage(a, n.level), { fromDir: sub(n.pos, lp.pos), src: chest(n.pos, 2) });
       }
     }
   }
