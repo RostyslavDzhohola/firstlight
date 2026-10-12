@@ -38,22 +38,18 @@
 
 ## Lanes (who owns what right now)
 
-| Lane | Owner | Worktree / task | Paths |
-|---|---|---|---|
-| Render look + G1 gate | Opus sub-agent | lane/render: fixing Codex+Opus review findings, then merge | apps/client/src/render, world/Planet.ts, shared props.ts |
-| Accounts + persistence | Opus sub-agent | MERGED 61aa332 | apps/server/src/auth, db |
-| Enemies, wildlife, bosses | Opus sub-agent | MERGED 7768535 (Codex review running) | server world/npc, client world/npcs, shared content/npcs.ts |
-| Voice + radio + phrase wheel | Opus sub-agent | ../fl-wt-voice (lane/voice) | server world/voice, client voice |
-| Social, moderation, stats, share | Opus sub-agent | MERGED 1a2ee50 | parties, player list, /admin, /stats, screenshot |
-| Missions, medals, eggs, shop, pads, stage | Opus sub-agent | ../fl-wt-quests (lane/quests) | content missions/medals, server systems, map |
-| Characters (GLB, animations) | Opus sub-agent | MERGED 2447afe (Codex review running) | Avatars.ts, assets-dev/characters, tools/blender |
-| UI design competition | judged: Opus entry B base, Fable entry A for landing/loading/player list/onboarding | ../design/opus (base) | port to apps/client/src/ui |
-| Review combat+auth | done; fixes in D26 | docs/reviews/2026-10-12-* | — |
-| Audio (SFX + generative music) | Builder | main | apps/client/src/audio |
-| UI port (design verdict) | Opus sub-agent | ../fl-wt-ui (lane/ui, based on lane/render + main) | apps/client/src/ui, index.html, main.ts |
-| Review lane/render | Codex Sol high + Opus | delegate fl-review-render-sol-1 + agent | — |
-| Destruction (§6.9) | Opus sub-agent | ../fl-wt-destruct (lane/destruct, main+render) | shared breakables.ts, server destruction.ts, client Breakables/debris |
-| Photo mode + F2 load test | Builder | ../fl-wt-photo / tools/bots | game/PhotoMode.ts |
+| Lane | State | Where |
+|---|---|---|
+| Render look + G1 gate | MERGED a59d992 (Codex + Opus reviewed, fixed) | — |
+| Accounts + persistence | MERGED 61aa332 | — |
+| Social, moderation, stats, share | MERGED 1a2ee50 (Codex ×2) | — |
+| Enemies, wildlife, bosses | MERGED 7768535; fixing Codex review (3 blockers) | ../fl-wt-npc |
+| Characters (GLB, animations) | MERGED 2447afe; fixing Codex review | ../fl-wt-chars |
+| Voice + radio + phrase wheel | MERGED d40d058 (Codex ×2); TURN key pending owner | — |
+| Missions, medals, eggs, shop, pads, stage | MERGED f8514dc (Codex) | — |
+| Photo mode | MERGED 4214419 | — |
+| UI port (design verdict) | Opus sub-agent, merging main then restyling lanes' panels | ../fl-wt-ui |
+| Destruction (§6.9) | Opus sub-agent | ../fl-wt-destruct |
 
 ## Measured numbers
 
