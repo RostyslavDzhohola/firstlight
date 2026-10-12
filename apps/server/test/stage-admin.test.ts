@@ -15,6 +15,11 @@ import { matchMaker } from "@colyseus/core";
 import { emitGameEvent } from "../src/world/events.ts";
 import type { QuestSystem } from "../src/world/quests/QuestSystem.ts";
 import type { BodyRoom } from "../src/world/BodyRoom.ts";
+import { rmSync } from "node:fs";
+import { join } from "node:path";
+import { openGameDb } from "../src/db/index.ts";
+import { copyStateStore, MemoryCopyStateStore, SqliteCopyStateStore } from "../src/world/copyState.ts";
+import { tempDir } from "./auth-helpers.ts";
 import { safeLeave, startServer } from "./helpers.ts";
 import { bot, ground, harness, invIds, objAt, padAt, serverRoom, tpAndWait, until, type Bot } from "./quest-helpers.ts";
 
@@ -188,4 +193,37 @@ describe("record restrictions outlive the room (review B3, S4)", () => {
     emitGameEvent(serverRoom(d), { type: "propBroken", playerId: other.id });
     await until("counted", () => progressStore.current.stat("bystander2", "props_broken") === 1);
   }, 20_000);
+});
+
+describe("record restrictions survive a restart (copy state)", () => {
+  it("a staged copy is still staged after a graceful restart on the same game.db", async () => {
+    const dir = tempDir();
+    const path = join(dir, "game.db");
+    const db1 = openGameDb(path);
+    try {
+      copyStateStore.current = new SqliteCopyStateStore(db1);
+      const d = await bot("restarted", "arcadia");
+      d.send("admin", { cmd: "stage", args: { n: 2 } });
+      await until("staged", () => d.toasts.some((t) => t.startsWith("Stage 2")));
+      expect(questsOf(serverRoom(d)).official()).toBe(false);
+      for (const r of harness.rooms.splice(0)) await safeLeave(r);
+      await harness.game!.close(); // SIGTERM path
+      db1.close();
+      // A new process: only game.db remembers.
+      const db2 = openGameDb(path);
+      try {
+        harness.game = await startServer();
+        copyStateStore.current = new SqliteCopyStateStore(db2);
+        const again = await bot("restarted", "arcadia");
+        expect(questsOf(serverRoom(again)).official()).toBe(false);
+        for (const r of harness.rooms.splice(0)) await safeLeave(r);
+      } finally {
+        copyStateStore.current = new MemoryCopyStateStore();
+        db2.close();
+      }
+    } finally {
+      if (db1.open) db1.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
 });

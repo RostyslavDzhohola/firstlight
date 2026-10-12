@@ -30,7 +30,8 @@ import { dist3, type V3 } from "../geometry.ts";
 import type { RoomSystem } from "../systems.ts";
 import { EGG_LIMITS, EggLogic } from "./eggs.ts";
 import { engrave, hallLines, onHallChanged } from "./hall.ts";
-import { copyKey, copyRestrictions, type CopyRestrictions } from "./restrictions.ts";
+import { copyRestrictions, type CopyRestrictions } from "./restrictions.ts";
+import { roomCopyKey } from "../copyState.ts";
 import { runStage, STAGE_LIMITS } from "./stage.ts";
 import { progressStore } from "./store.ts";
 import { emitPileEvent, pileStore } from "../piles.ts";
@@ -132,7 +133,7 @@ export class QuestSystem implements RoomSystem {
   constructor(room: BodyRoom) {
     this.room = room;
     this.body = room.bodyDef.id;
-    this.copyKey = copyKey(this.body, room.state.copy);
+    this.copyKey = roomCopyKey(room);
     this.objects = objectsOn(this.body);
     const t = room.terrain;
     for (const o of this.objects) this.objPos.set(o.id, objectPos(o, (x, y, z) => t.groundHeight(x, y, z)));

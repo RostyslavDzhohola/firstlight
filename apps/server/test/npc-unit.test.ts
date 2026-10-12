@@ -8,6 +8,7 @@ import { NF, NPC_INDEX, PLANET_COSMETIC } from "@firstlight/shared/content/npcs"
 import { dealDamage } from "../src/world/combat.ts";
 import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
 import { EGG_NPC } from "../src/world/npc/NpcSystem.ts";
+import { copyStateStore, MemoryCopyStateStore } from "../src/world/copyState.ts";
 import { onNpcEvent, type NpcEvent } from "../src/world/npc/tuning.ts";
 import { PITY_IDLE_MS, pruneRewardMaps, repeatDecay, rollDrops } from "../src/world/npc/rewards.ts";
 import { buildSpawnPoints } from "../src/world/npc/spawns.ts";
@@ -191,6 +192,39 @@ describe("egg NPCs", () => {
     for (let i = 0; i < 4 && !golden(); i++) w.step(600);
     expect(golden()).not.toBeNull();
     expect(g.members.filter((m) => m && !m.dead && m.def.id !== "golden_hopbit").map((m) => m!.id)).toEqual(pack);
+  });
+});
+
+describe("egg NPC timers in the copy state", () => {
+  it("a popped Golden Hopbit's return time survives a new room on the same copy", () => {
+    copyStateStore.current = new MemoryCopyStateStore();
+    try {
+      NPC_TUNING.respawnScale = 0.01;
+      const w = fakeWorld("arcadia", { copyKey: "arcadia:0" });
+      w.sys.ambientOn = true;
+      const g = w.sys.groups.find((x) => x.point.members.some((m) => m.golden))!;
+      w.addPlayer("p", g.point.pos, 3);
+      for (let i = 0; i < 4 && !g.active; i++) w.step(600);
+      const golden = g.members.find((m) => m?.def.id === "golden_hopbit")!;
+      w.sys.retire(golden);
+      const back = w.sys.goldenBack.get(g.point.id)!;
+      expect(back).toBeGreaterThan(w.clock.t);
+      w.sys.dispose(); // the copy empties
+      // A new room on the same copy, two minutes later.
+      const w2 = fakeWorld("arcadia", { copyKey: "arcadia:0", start: w.clock.t + 120_000 });
+      w2.sys.ambientOn = true;
+      expect(w2.sys.goldenBack.get(g.point.id)).toBe(back);
+      const g2 = w2.sys.groups[g.point.id]!;
+      w2.addPlayer("p", g2.point.pos, 3);
+      for (let i = 0; i < 4 && !g2.active; i++) w2.step(600);
+      const gi = g2.point.members.findIndex((m) => m.golden);
+      expect(g2.members[gi]).toBeNull(); // still away
+      w2.clock.t = back;
+      for (let i = 0; i < 4 && !g2.members[gi]; i++) w2.step(600);
+      expect(g2.members[gi]?.def.id).toBe("golden_hopbit"); // back on its own timer
+    } finally {
+      copyStateStore.current = new MemoryCopyStateStore();
+    }
   });
 });
 
