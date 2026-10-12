@@ -310,7 +310,7 @@ describe("bodies and NPCs (F12 Opus should-fix 9)", () => {
   it("NPCs can hit a lingering body, and let go of it once it is gone", async () => {
     const saved = RULES.LINGER_MS;
     try {
-      RULES.LINGER_MS = 1500;
+      RULES.LINGER_MS = 4000; // long enough for the first hit (notice, chase, 0.5 s telegraph)
       const watcher = await join("npcwatch");
       const r = await join("bait");
       const at = nearPad("arcadia", 70);
@@ -329,13 +329,13 @@ describe("bodies and NPCs (F12 Opus should-fix 9)", () => {
       const sid = r.sessionId;
       await leaveRoom(r); // lingers: outside the safe ring
       const hp0 = body.state.hp;
-      await waitFor(() => body.state.hp < hp0 || body.dead, 6000); // still attacked while it lingers
-      await waitFor(() => !st(watcher).players.has(sid), 4000);
+      await waitFor(() => body.state.hp < hp0 || body.dead, 3500); // still attacked while it lingers
+      await waitFor(() => !st(watcher).players.has(sid), 6000);
       await waitFor(() => npc().target !== body, 1000);
     } finally {
       RULES.LINGER_MS = saved;
     }
-  }, 20_000);
+  }, 25_000);
 });
 
 describe("fast travel (F12 Opus should-fix 7)", () => {
