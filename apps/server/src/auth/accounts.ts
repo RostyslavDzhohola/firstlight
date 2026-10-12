@@ -17,7 +17,8 @@ import { linkAccounts } from "../db/link.ts";
 import { setDisplayName } from "../db/accounts.ts";
 import { reserveOtpSend, releaseOtpSend } from "../db/otp-budget.ts";
 import { closeDanglingSessions, pruneSessionLog } from "../db/sessions.ts";
-import { authOptions, authRequestState, buildAuth, type FirstlightAuth } from "./better-auth.ts";
+import { stmt } from "../db/game-db.ts";
+import { authOptions, authRequestState, buildAuth, OTP_MIN_LEVEL, type FirstlightAuth } from "./better-auth.ts";
 import { hmacHex, safeEqual } from "./crypto.ts";
 import type { Identity, TokenVerifier, VerifyContext } from "./identity.ts";
 import { banKey, CLIENT_IP_HEADER, firstForwardedFor, normalizeIp } from "./ip.ts";
@@ -99,6 +100,12 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
   if (cfg.mailer instanceof DevOutbox) devOutbox = cfg.mailer;
 
   const hashIp = (ip: string) => hmacHex(`${cfg.secret}:ip`, banKey(ip)).slice(0, 32);
+  // Prepared on first use: Better Auth's tables exist only after the migrations below.
+  let savedEmailStmt: Database.Statement | null = null;
+  const savedEmail = (email: string) => {
+    savedEmailStmt ??= authDb.prepare(`SELECT 1 FROM "user" WHERE email = ? AND ("isAnonymous" IS NULL OR "isAnonymous" = 0) LIMIT 1`);
+    return !!savedEmailStmt.get(email);
+  };
   const hashEmail = (email: string) => hmacHex(`${cfg.secret}:email`, email.toLowerCase());
 
   const options = authOptions({
@@ -108,6 +115,7 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
     trustedOrigins: cfg.trustedOrigins,
     rateLimit: cfg.rateLimit ?? cfg.production,
     ipBanned: (ip) => isIpBanned(db, hashIp(ip)),
+    mayEmailCode: (email, userId) => savedEmail(email) || (!!userId && bestLevel(db, userId) >= OTP_MIN_LEVEL),
     reserveOtp: (email) => {
       const r = reserveOtpSend(db, hashEmail(email), { perEmailPerHour: cfg.otpPerEmailPerHour, perDay: cfg.otpDailyBudget });
       if (!r.ok) console.warn(`otp send refused: ${r.reason} budget`);
@@ -238,6 +246,13 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
   accounts.identify = (req) => identifyRequest(accounts, req);
   accounts.requireAdmin = requireAdminFor(accounts);
   return accounts;
+}
+
+/** The highest level the account's character has reached (live row, or any recorded session). */
+function bestLevel(db: Db, userId: string): number {
+  const live = (stmt(db, "SELECT level FROM character WHERE user_id = ?").get(userId) as { level: number } | undefined)?.level ?? 0;
+  const seen = (stmt(db, "SELECT MAX(max_level) AS m FROM session_log WHERE user_id = ?").get(userId) as { m: number | null }).m ?? 0;
+  return Math.max(live, seen);
 }
 
 /** Map server env to the accounts config. */

@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { Room } from "@colyseus/sdk";
 import { awardMedal, discoverPad, getAccount, loadCharacter, saveCharacter, type CharacterData } from "../src/db/index.ts";
+import { otpSendsToday } from "../src/db/otp-budget.ts";
 import type { AccountLinkedEvent } from "../src/auth/links.ts";
 import { api, Browser, decodeJwt, joinWithToken, play, startAuthServer, type AuthServer } from "./auth-helpers.ts";
 import { waitFor } from "./helpers.ts";
@@ -416,6 +417,44 @@ describe("OTP budget", () => {
     const b = new Browser(server);
     const r = await b.client.emailOtp.sendVerificationOtp({ email: "x@example.test", type: "forget-password" });
     expect(r.error?.status).toBe(400);
+  });
+});
+
+describe("who can ask for a code (F12: the global OTP budget can't be drained)", () => {
+  const ask = (b: Browser, email: string) => b.client.emailOtp.sendVerificationOtp({ email, type: "sign-in" });
+
+  it("a fresh guest, or a request without a session, gets no email for a new address and uses no budget", async () => {
+    server = await startAuthServer();
+    const out = server.accounts.devOutbox!;
+    const fresh = new Browser(server, "198.51.100.60");
+    await fresh.playToken();
+    expect((await ask(fresh, "new1@example.test")).error).toBeNull(); // the same answer as a real send
+    const none = new Browser(server, "198.51.100.61");
+    expect((await ask(none, "new2@example.test")).error).toBeNull();
+    expect(out.sent).toBe(0);
+    expect(out.lastCode("new1@example.test")).toBeNull();
+    expect(otpSendsToday(server.accounts.db)).toBe(0);
+    // After the first level-up the same guest can save.
+    await fresh.levelUp(2);
+    expect((await ask(fresh, "new1@example.test")).error).toBeNull();
+    expect(out.lastCode("new1@example.test")).toMatch(/^\d{6}$/);
+    expect(otpSendsToday(server.accounts.db)).toBe(1);
+  });
+
+  it("a returning player gets a code for their saved email on any browser, with or without a guest session", async () => {
+    server = await startAuthServer();
+    const out = server.accounts.devOutbox!;
+    const a = new Browser(server, "198.51.100.62");
+    await a.playToken();
+    await a.saveWithEmail("back@example.test");
+    const landing = new Browser(server, "198.51.100.63"); // no session yet
+    expect((await ask(landing, "Back@example.test")).error).toBeNull();
+    const freshGuest = new Browser(server, "198.51.100.64");
+    await freshGuest.playToken(); // level 1
+    expect((await ask(freshGuest, "back@example.test")).error).toBeNull();
+    expect(out.sent).toBe(3);
+    const code = out.lastCode("back@example.test")!;
+    expect((await freshGuest.signInWithCode("back@example.test", code)).error).toBeNull();
   });
 });
 

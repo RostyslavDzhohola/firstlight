@@ -6,12 +6,15 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomInt } from "node:crypto";
 import type Database from "better-sqlite3";
 import { betterAuth, type BetterAuthOptions } from "better-auth";
-import { APIError, createAuthMiddleware, isAPIError } from "better-auth/api";
+import { APIError, createAuthMiddleware, getSessionFromCtx, isAPIError } from "better-auth/api";
 import { anonymous, emailOTP, jwt } from "better-auth/plugins";
 import { z } from "zod";
 import { CLIENT_IP_HEADER } from "./ip.ts";
 
 export const SAVING_BUSY = "Saving is busy, try again later";
+
+/** A new address only gets a code from a player who reached this level (the save card's first level-up). */
+export const OTP_MIN_LEVEL = 2;
 
 /** Per-request state shared by the before hook, the send function and the after hook. */
 interface AuthRequestState {
@@ -34,6 +37,12 @@ export interface AuthDeps {
   rateLimit: boolean;
   /** True if this client IP is banned. */
   ipBanned(ip: string): boolean;
+  /**
+   * May this request email a code to this (lower-cased) address? Yes for an address that already has
+   * a saved account (a returning player, any browser), or for a signed-in player who reached
+   * OTP_MIN_LEVEL (saving a guest). Anything else is answered like a send but nothing is sent.
+   */
+  mayEmailCode(email: string, sessionUserId: string | null): boolean;
   /** Reserve one OTP send for this (lower-cased) email; false = over budget. Returns a reservation id. */
   reserveOtp(email: string): { ok: true; id: number } | { ok: false; reason: string };
   releaseOtp(id: number): void;
@@ -79,6 +88,11 @@ export function authOptions(d: AuthDeps) {
         if (body.type !== "sign-in") throw APIError.from("BAD_REQUEST", { code: "UNSUPPORTED_OTP_TYPE", message: "Only sign-in codes are supported." });
         const email = typeof body.email === "string" ? body.email.toLowerCase() : "";
         if (!emailSchema.safeParse(email).success) return; // Better Auth rejects it
+        // F12: fresh guests and session-less requests could otherwise drain the global daily budget
+        // from many networks. They get the same answer as a send (no hint whether the address is
+        // saved), but no code is made, sent or counted.
+        const session = await getSessionFromCtx(ctx, { disableRefresh: true }).catch(() => null);
+        if (!d.mayEmailCode(email, session?.user.id ?? null)) return ctx.json({ success: true });
         // Budget key ignores "+tag" aliases so one inbox can't multiply its hourly allowance.
         const r = d.reserveOtp(email.replace(/\+[^@]*@/, "@"));
         if (!r.ok) throw APIError.from("TOO_MANY_REQUESTS", { code: "SAVING_BUSY", message: SAVING_BUSY });
