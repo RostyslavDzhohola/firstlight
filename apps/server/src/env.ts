@@ -13,7 +13,7 @@ export const env = {
     .map((s) => s.trim())
     .filter(Boolean),
   authUrl: process.env.BETTER_AUTH_URL ?? "http://localhost:5173",
-  authSecret: process.env.BETTER_AUTH_SECRET ?? "dev-only-secret-change-me-dev-only-secret",
+  authSecret: process.env.BETTER_AUTH_SECRET || "dev-only-secret-change-me-dev-only-secret",
   authDbPath: process.env.AUTH_DB_PATH ?? "./data/auth.db",
   gameDbPath: process.env.GAME_DB_PATH ?? "./data/game.db",
   originSecret: process.env.ORIGIN_SECRET ?? "",
@@ -28,5 +28,8 @@ export const env = {
   maxCopiesPerBody: num("MAX_COPIES_PER_BODY", 2),
   soloFillLimit: num("SOLO_FILL_LIMIT", 36),
   globalCap: num("GLOBAL_CAP", 320),
-  otpDailyBudget: num("OTP_DAILY_BUDGET", 80),
+  otpDailyBudget: num("OTP_DAILY_BUDGET", 1000), // D20
+  otpPerEmailPerHour: num("OTP_PER_EMAIL_PER_HOUR", 3),
+  /** Print dev OTP codes to the console (dev outbox only: no RESEND_API_KEY and not production). */
+  devMailLog: process.env.DEV_MAIL_LOG === "1",
 };
