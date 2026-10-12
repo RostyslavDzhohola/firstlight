@@ -366,6 +366,39 @@ describe("standing on props (F12 client review should-fix 4)", () => {
     expect(aboveGround(me(c.r))).toBeLessThan(0.5);
   });
 
+  it("an idle player whose crate breaks falls on the server and is told where it landed", async () => {
+    const c = await onTheCrate("idlefaller");
+    for (let i = 0; i < 4; i++) {
+      send(c.r, c.seq, c.at, c.top, 0);
+      await sleep(50);
+    }
+    await sleep(600); // idle on the top
+    const actor = roomOf(c.r).actors.get(c.r.sessionId)!;
+    expect(aboveGround(me(c.r))).toBeGreaterThan(0.6);
+    c.sys.damage(c.b.index, 1e6, "heavy", "comet", [0, 0, 1]); // no more input from here on
+    await waitFor(() => aboveGround(me(c.r)) < 0.3, 3000);
+    await waitFor(() => !actor.airborne, 1000);
+    expect(c.corrections.n).toBeGreaterThan(0);
+  });
+
+  it("a long idle fall after losing support lands with fall damage on the server", async () => {
+    const k = await joinOutside("dropped");
+    k.r.send("admin", { cmd: "unprotect" });
+    await waitFor(() => !(me(k.r).flags & 3));
+    const actor = roomOf(k.r).actors.get(k.r.sessionId)!;
+    const hp0 = actor.state.hp;
+    // Standing (not airborne) 14 m up, as if on something that just vanished; no input from the client.
+    const up = groundR(k.dir) + 14;
+    actor.state.x = actor.lastX = k.dir[0] * up;
+    actor.state.y = actor.lastY = k.dir[1] * up;
+    actor.state.z = actor.lastZ = k.dir[2] * up;
+    actor.lastMoveAt = Date.now() - 1000;
+    await waitFor(() => actor.airborne, 1000);
+    await waitFor(() => aboveGround(actor.state) < 0.3 && !actor.airborne, 4000);
+    await waitFor(() => actor.state.hp < hp0, 1000);
+    expect(hp0 - actor.state.hp).toBeGreaterThan(0.2 * actor.state.maxHp); // (14 − 8) m × 8 % ≈ 48 %
+  });
+
   it("a move that ends inside a crate's solid part is refused", async () => {
     const k = await joinOutside("ghost");
     const sys = destructionOf(k.r);

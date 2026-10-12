@@ -26,7 +26,7 @@ import { SYSTEM_FACTORIES, type RoomSystem } from "./systems.ts";
 import { identityCheck, ticketFor, travelRedirect } from "./admission.ts";
 import { pendingSeats } from "./reservations.ts";
 import { seatRefusal } from "../social/moderation.ts";
-import { groundMotion, motionFields, moveLimits, settle, validateMove, MOVE, type MoveWorld } from "./movement.ts";
+import { groundMotion, heightAboveSupport, motionFields, moveLimits, settle, startFall, validateMove, MOVE, type MoveWorld } from "./movement.ts";
 import { matchMaker } from "@colyseus/core";
 import { liveSessions } from "../auth/sessions.ts";
 import { accountLinks } from "../auth/links.ts";
@@ -602,6 +602,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (!a || a.dead || a.superseded || msg.seq <= a.state.seq) return;
     const p = a.state;
     const now = Date.now();
+    a.lastInputAt = now;
     // NPC slows / Cease-and-Desist (npc/effects.ts) and riding (horses) set the refill; see movement.ts.
     const r = validateMove(a, msg, this.moveWorld, moveLimits(a, now), now);
     if (!r.ok) {
@@ -1129,15 +1130,11 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       if (a.logoutEndsAt === null) p.flags &= ~PF.LOGGING_OUT;
       else if (now >= a.logoutEndsAt) this.completeLogout(a);
       if (!a.dead) a.char.hp = p.hp;
-      // A body left in mid-air (no input) falls on the server; the client is told where it is.
-      if (a.airborne && now - a.lastMoveAt > MOVE.silentFallMs) {
-        const at = settle(a, this.moveWorld, now);
-        if (at) a.client.send("correct", { x: at[0], y: at[1], z: at[2], seq: p.seq });
-      }
+      if (now - Math.max(a.lastMoveAt, a.lastInputAt ?? 0) > MOVE.silentFallMs) this.idleGravity(a, now, true);
     }
     for (const n of this.npcActors.values()) pushHistory(n, now);
     for (const [sid, l] of this.lingering) {
-      if (l.actor.airborne) settle(l.actor, this.moveWorld, now);
+      this.idleGravity(l.actor, now, false);
       pushHistory(l.actor, now);
       if (l.actor.dead || now >= l.until) {
         this.finalLeave(l.actor);
@@ -1164,6 +1161,29 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
         for (const a of this.actors.values()) this.saveActor(a);
       });
     }
+  }
+
+  /**
+   * Gravity for a body the client isn't moving (idle, lingering): if what held it up is gone (a prop
+   * broke) it starts to fall; a falling body follows the air envelope down; on landing the fall is
+   * resolved here, fall damage included (F12 re-review S3). The client hears where it ended up.
+   */
+  private idleGravity(a: PlayerActor, now: number, connected: boolean) {
+    if (a.dead) return;
+    if (!a.airborne) {
+      if (heightAboveSupport(a, this.moveWorld) <= MOVE.groundedAbove) return;
+      startFall(a, now);
+    }
+    const at = settle(a, this.moveWorld, now);
+    if (at && connected) a.client.send("correct", { x: at[0], y: at[1], z: at[2], seq: a.state.seq });
+    if (heightAboveSupport(a, this.moveWorld) > MOVE.groundedAbove) return;
+    // Landed.
+    const len = Math.hypot(a.state.x, a.state.y, a.state.z);
+    const frac = fallDamageFraction(a.peakRadius - len);
+    a.airborne = false;
+    a.peakRadius = len;
+    groundMotion(a, len, now);
+    if (frac > 0) dealDamage(this.host, null, a, frac * maxHp(a.char.level), false);
   }
 
   /** Distance-based views for NPCs and piles (players are not view-filtered). */

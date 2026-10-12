@@ -156,6 +156,28 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
 }
 
 /**
+ * How high the feet are above whatever holds them up (terrain or an intact prop top); 0 while
+ * swimming. Used for bodies the client isn't moving (idle, lingering).
+ */
+export function heightAboveSupport(a: PlayerActor, w: MoveWorld): number {
+  const x = a.state.x, y = a.state.y, z = a.state.z;
+  const len = Math.hypot(x, y, z);
+  const terrain = w.groundAt(x, y, z);
+  if (swimmingAt(w, len, terrain)) return 0;
+  return len - w.radius - supportAt(w, x, y, z, terrain);
+}
+
+/** Support vanished under a standing body (a prop broke): it falls from rest, from here. */
+export function startFall(a: PlayerActor, now: number) {
+  const len = Math.hypot(a.state.x, a.state.y, a.state.z);
+  a.airborne = true;
+  a.peakRadius = Math.max(a.peakRadius, len);
+  a.airStartAt = now;
+  a.airStartLen = len;
+  a.airLiftV = 0;
+}
+
+/**
  * Server gravity: an airborne body above its envelope (silent client, refused steps) is pulled
  * down onto the envelope or the ground. Moves the actor and returns the new position, or null.
  */

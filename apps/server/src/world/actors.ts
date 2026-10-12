@@ -25,6 +25,8 @@ export interface PlayerActor {
   lastY: number;
   lastZ: number;
   lastMoveAt: number;
+  /** Last input message received, accepted or refused (idle bodies get server gravity). */
+  lastInputAt?: number;
   joinedAt: number;
   violations: number;
   lastAttackAt: number;
