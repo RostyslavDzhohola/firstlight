@@ -36,8 +36,10 @@ export interface CombatHost {
  * whether that class can break the prop and applies weapon prop multipliers.
  */
 export interface BreakableHost {
-  /** First intact prop along a segment (the returned object is reused), or null. */
+  /** First intact prop along a segment (the returned object is reused), or null. Props containing `o` are ignored. */
   raycast(o: V3, d: V3, maxT: number): { index: number; t: number } | null;
+  /** Is the point inside intact prop `index`? */
+  contains(index: number, p: V3): boolean;
   /** `by`: the attacking player's session id (credit for the Demolition Crew medal), or null. */
   damage(index: number, amount: number, cls: Destroys, weaponId: string, dir: V3, by: string | null): void;
   splash(at: V3, radius: number, amount: number, cls: Destroys, weaponId: string, by: string | null, exclude?: number): void;
@@ -333,12 +335,24 @@ function aimActorT(host: CombatHost, p: PlayerActor, o: V3, d: V3, maxT: number)
   return hit ? hit.t : Infinity;
 }
 
+/**
+ * An actor the ray reaches inside the prop that stopped it (at `propIdx`): standing in a prop is no
+ * shield (F12). Null when nobody is hit there.
+ */
+function actorInsideProp(host: CombatHost, propIdx: number, o: V3, d: V3, maxT: number, ignore: Set<string>, rewindMs: number): RayTargetHit | null {
+  if (propIdx < 0 || !host.props) return null;
+  const hit = raycastActors(host, o, d, maxT, ignore, rewindMs);
+  if (!hit) return null;
+  return host.props.contains(propIdx, [o[0] + d[0] * hit.t, o[1] + d[1] * hit.t, o[2] + d[2] * hit.t]) ? hit : null;
+}
+
 function hitscan(host: CombatHost, p: PlayerActor, o: V3, d: V3, maxRange: number, baseDamage: number, def: WeaponDef, tier: TierStats): number | null {
   const terrainT = rayTerrain(host.terrain, o, d, maxRange, 1.5);
   // An intact breakable in the way stops the shot and takes it instead (destruction.ts).
   const prop = propOnRay(host, o, d, Math.min(maxRange, terrainT));
   const propT = prop ? prop.t : Infinity, propIdx = prop ? prop.index : -1;
-  const hit = raycastActors(host, o, d, Math.min(maxRange, terrainT, propT), new Set([p.id]), REWIND_MS);
+  const ignore = new Set([p.id]);
+  const hit = raycastActors(host, o, d, Math.min(maxRange, terrainT, propT), ignore, REWIND_MS) ?? actorInsideProp(host, propIdx, o, d, Math.min(maxRange, terrainT), ignore, REWIND_MS);
   if (!hit) {
     if (propIdx >= 0) host.props!.damage(propIdx, baseDamage * falloff(propT, def.range, def.falloffTo, def.falloffMin), def.destroys, def.id, d, p.id);
     const endT = propIdx >= 0 ? propT : terrainT;
@@ -547,7 +561,7 @@ export function stepProjectiles(host: CombatHost, dt: number) {
     // Intact breakables stop projectiles like terrain does (destruction.ts).
     const prop = propOnRay(host, p.pos, d, Math.min(step, terrainT));
     const propT = prop ? prop.t : Infinity, propIdx = prop ? prop.index : -1;
-    const hit = raycastActors(host, p.pos, d, Math.min(step, terrainT, propT), p.hit, 0);
+    const hit = raycastActors(host, p.pos, d, Math.min(step, terrainT, propT), p.hit, 0) ?? (propT < step ? actorInsideProp(host, propIdx, p.pos, d, Math.min(step, terrainT), p.hit, 0) : null);
     if (hit) {
       p.hit.add(hit.actor.id);
       const mult = weakMult(hit, p.tier);

@@ -76,6 +76,8 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
       const b = this.list[i]!;
       if (!segmentNearBreakable(b, o[0], o[1], o[2], d[0], d[1], d[2], lim)) continue;
       const t = rayBreakable(b, o[0], o[1], o[2], d[0], d[1], d[2], Math.min(lim, best));
+      // A ray that starts inside a prop ignores it (standing in a prop is no shield; F12).
+      if (t <= 1e-6) continue;
       if (t < best) {
         best = t;
         bestIdx = i;
@@ -85,6 +87,13 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
     this.rayHit.index = bestIdx;
     this.rayHit.t = best;
     return this.rayHit;
+  }
+
+  /** Is point `p` inside intact prop `index`? */
+  contains(index: number, p: V3): boolean {
+    const b = this.list[index];
+    if (!b || this.brokenUntil[index]! > 0) return false;
+    return rayBreakable(b, p[0], p[1], p[2], b.ux, b.uy, b.uz, 1e-3) === 0;
   }
 
   damage(index: number, amount: number, cls: BreakClass, weaponId: string, dir: V3, by: string | null = null, force = 1): boolean {
