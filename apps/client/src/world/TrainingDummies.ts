@@ -11,9 +11,14 @@ const DOWN_ANGLE = 1.2; // radians leaned back once knocked down
 const SPRING = 90;
 const DAMP = 7;
 
+const TARGET = 0xff8a3d;
+const TARGET_DOWN = 0x7ad8ff;
+
 interface Dummy {
   root: THREE.Group;
   pivot: THREE.Group;
+  /** Own target material: knocking down recolours it (a uniform change, no new shader to compile). */
+  target: THREE.MeshStandardNodeMaterial;
   pos: THREE.Vector3;
   angle: number;
   vel: number;
@@ -25,8 +30,6 @@ export class TrainingDummies {
   readonly dummies: Dummy[] = [];
   private readonly geos: THREE.BufferGeometry[] = [];
   private readonly mats: THREE.Material[] = [];
-  private readonly target: THREE.MeshStandardNodeMaterial;
-  private readonly targetDown: THREE.MeshStandardNodeMaterial;
 
   constructor(scene: THREE.Scene, terrain: Terrain) {
     this.group.name = "trainingDummies";
@@ -47,8 +50,6 @@ export class TrainingDummies {
     const burlap = mat(0xc9a46a, 0.95);
     const rope = mat(0x8a6a3e, 0.9);
     const base = mat(0x3a3a40, 0.7);
-    this.target = mat(0xff8a3d, 0.5, 1.6);
-    this.targetDown = mat(0x7ad8ff, 0.5, 1.6);
     const gBase = geo(new THREE.CylinderGeometry(0.42, 0.48, 0.12, 14));
     const gPost = geo(new THREE.CylinderGeometry(0.07, 0.08, 1.1, 8));
     const gBody = geo(new THREE.CylinderGeometry(0.3, 0.34, 0.75, 12));
@@ -82,12 +83,10 @@ export class TrainingDummies {
         band.rotation.x = Math.PI / 2;
         pivot.add(band);
       }
-      const ring = this.mesh(gRing, this.target, 0, 1.32, 0.33);
-      const dot = this.mesh(gDot, this.target, 0, 1.32, 0.345);
-      ring.name = dot.name = "target";
-      pivot.add(ring, dot);
+      const target = mat(TARGET, 0.5, 1.6);
+      pivot.add(this.mesh(gRing, target, 0, 1.32, 0.33), this.mesh(gDot, target, 0, 1.32, 0.345));
       this.group.add(root);
-      this.dummies.push({ root, pivot, pos, angle: 0, vel: 0, down: false });
+      this.dummies.push({ root, pivot, target, pos, angle: 0, vel: 0, down: false });
     });
     scene.add(this.group);
   }
@@ -110,9 +109,8 @@ export class TrainingDummies {
     const d = this.dummies[i];
     if (!d || d.down === down) return;
     d.down = down;
-    d.pivot.traverse((o) => {
-      if (o.name === "target") (o as THREE.Mesh).material = down ? this.targetDown : this.target;
-    });
+    d.target.color.setHex(down ? TARGET_DOWN : TARGET);
+    d.target.emissive.setHex(down ? TARGET_DOWN : TARGET);
   }
 
   /** Chest position of dummy `i` (for the callout and effects). */

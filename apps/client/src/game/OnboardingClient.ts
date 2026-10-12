@@ -66,10 +66,15 @@ export class OnboardingClient implements ClientSystem {
     this.active = false;
     this.ended = true;
     this.hasLast = false;
-    if (!this.doneUntil) {
-      this.hud?.dispose();
-      this.hud = null;
-    }
+    if (!this.doneUntil) this.closeHud();
+  }
+
+  /** Hide the HUD and stand the dummies back up for the next newcomer. */
+  private closeHud() {
+    this.hud?.dispose();
+    this.hud = null;
+    this.doneUntil = 0;
+    for (let i = 0; i < this.dummies.dummies.length; i++) this.dummies.setDown(i, false);
   }
 
   private onTrain(m: { dummy: number; hits: number; down: boolean }) {
@@ -140,11 +145,7 @@ export class OnboardingClient implements ClientSystem {
   update(dt: number, now: number) {
     this.dummies.update(dt);
     const g = this.game;
-    if (this.hud && this.doneUntil && now > this.doneUntil) {
-      this.hud.dispose();
-      this.hud = null;
-      this.doneUntil = 0;
-    }
+    if (this.hud && this.doneUntil && now > this.doneUntil) this.closeHud();
     const ob = g.hud.you?.onboarding;
     if (ob && !this.active && !this.ended && !flags.has("autoplay")) this.start();
     else if (!ob && this.active) this.finish();

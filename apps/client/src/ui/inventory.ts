@@ -347,7 +347,10 @@ export class InventoryPanel extends Panel {
     if (d.sell > 0) el("span", "fl-coin", foot, d.sell.toLocaleString("en-US"));
   }
 
-  /** What you can do with the focused (or held) item, as buttons with their keys. */
+  /**
+   * The picked (held) item's actions as buttons with their keys. Buttons follow the click, never the
+   * hover: on the way to them the pointer crosses other slots. Without a pick, a hint for the focus.
+   */
   private renderActs(s: InvState, views: InvSlot[]) {
     const held = this.cursor.held;
     const slot = held ?? this.cursor.focus;
@@ -359,26 +362,32 @@ export class InventoryPanel extends Panel {
     const a = this.actsEl;
     a.replaceChildren();
     const v = views[slot]!;
-    el("div", "fl-label", a, v.key ? `Hotbar ${v.key}` : `Backpack ${slot - HOTBAR_SLOTS + 1}`);
+    const where = v.key ? `Hotbar ${v.key}` : `Backpack ${slot - HOTBAR_SLOTS + 1}`;
+    el("div", "fl-label", a, held !== null ? `Picked up · ${where}` : where);
     if (!item) {
       el("p", "", a, "Nothing here.");
       return;
     }
     el("b", "", a, `${v.name}${v.qty > 1 ? ` ×${v.qty}` : ""}`);
+    if (held === null) {
+      el("p", "", a, `Click to pick it up, then click where it goes.${qa ? ` Right-click or E: ${qa.label.toLowerCase()}.` : ""} X drops it.`);
+      return;
+    }
+    el("p", "", a, "Click a slot to put it there, or the drop zone to leave it on the ground.");
     const btn = (label: string, k: string, cls: string, fn: () => void) => {
       const b = button(label, `fl-btn fl-btn--sm fl-btn--block${cls}`, a, fn);
       el("span", "fl-key", b, k);
     };
-    if (held !== null) {
-      el("p", "", a, "Click a slot to put it there, or the drop zone to leave it on the ground.");
-      btn("Cancel", "Esc", " fl-btn--ghost", () => {
+    if (qa)
+      btn(qa.label, "E", "", () => {
         this.cursor.cancel();
-        this.render();
+        this.send(qa.actions);
       });
-      return;
-    }
-    if (qa) btn(qa.label, "E", "", () => this.send(qa.actions));
-    btn("Drop", "X", " fl-btn--danger", () => this.send([{ type: "drop", slot }]));
+    btn("Drop", "X", " fl-btn--danger", () => this.send(this.cursor.dropHeld()));
+    btn("Cancel", "Esc", " fl-btn--ghost", () => {
+      this.cursor.cancel();
+      this.render();
+    });
   }
 }
 
