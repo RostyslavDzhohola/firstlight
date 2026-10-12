@@ -70,7 +70,7 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 | F9 screenshot share | ✅ | browser E2E T7 |
 | F10 M1 ≥ 60 fps Medium | ✅* | ?bench=g1 59.9 fps p50, p95 17.6 ms (T3 Chromium, not plugged-in Chrome) |
 | F11 Low on weak profile | ✅* | `?bench=g1&tier=low&cpuslow=4`: 51.3 fps p50, p95 29.8 ms, 0 shader builds (D29 emulation) |
-| F12 three-model review | ❌→🛠 | bb54dc3: Codex Sol (7 blockers) and Sonnet 5.5 (2 blockers) declined (docs/reviews/2026-10-12-f12-*); fixes in 5 lanes (core, data, ui, client, docs); Opus 5.5 reviewing 743d651 |
+| F12 three-model review | ❌→🛠 | bb54dc3: Codex Sol (7 blockers) and Sonnet 5.5 (2 blockers) declined (docs/reviews/2026-10-12-f12-*); Opus 5.5 (743d651) declined too: 2 more blockers (voice-block DoS, boss respawn reset); fixes in lanes below; docs lane merged |
 | F13 photo mode + 5 scenes | ✅ | browser E2E T8; `stage <n>` + docs/staged-scenes.md |
 
 ## Lanes (who owns what right now)
@@ -90,9 +90,12 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 | Weather + day/night (M11 #3–4) | MERGED 743d651 (deployed 06:39Z) | — |
 | F12 server core (Codex B1–B6, S2/S3/S9/S10/S12/S14) | Opus sub-agent | ../fl-wt-core (lane/f12-core) |
 | F12 content (eggs, items, Patchkit, Prism Bubble, Hollow King, Associates look) | Opus sub-agent | ../fl-wt-data (lane/f12-data) |
-| F12 inventory panel (I) + onboarding | Opus sub-agent | ../fl-wt-inv (lane/f12-ui) |
 | F12 client robustness (S4–S8, N1) | Opus sub-agent | ../fl-wt-client (lane/f12-client) |
-| F12 docs + repo hygiene | Opus sub-agent | ../fl-wt-docs (lane/f12-docs) |
+| F12 docs + repo hygiene | MERGED 8535ae7 | — |
+| F12 inventory panel + onboarding | done 346b99a; Codex review running | ../fl-wt-inv (lane/f12-ui) |
+| F12 social/voice (Opus B1, block/party, reports, OTP, guest pruning) | Opus sub-agent | ../fl-wt-social (lane/f12-social) |
+| F12 NPC/boss (Opus B2 respawn persistence, evade, arena scaling/cover, NPC LOS) | Opus sub-agent | ../fl-wt-npc (lane/f12-npc) |
+| F12 weather/sky (override broadcast, stage sky, Hollowmere look, nits) | Opus sub-agent | ../fl-wt-sky (lane/f12-sky) |
 | Horses (M11 #2) | Opus sub-agent (resumed after the spend-limit stop) | ../fl-wt-horses (lane/horses) |
 
 ## Measured numbers
