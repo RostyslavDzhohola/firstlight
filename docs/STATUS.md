@@ -51,7 +51,7 @@
 | F9 screenshot share | ✅ | browser E2E T7 |
 | F10 M1 ≥ 60 fps Medium | ✅* | ?bench=g1 59.9 fps p50, p95 17.6 ms (T3 Chromium, not plugged-in Chrome) |
 | F11 Low on weak profile | ✅* | `?bench=g1&tier=low&cpuslow=4`: 51.3 fps p50, p95 29.8 ms, 0 shader builds (D29 emulation) |
-| F12 three-model review | 🟡 | whole-codebase review of bb54dc3 running (Codex Sol 6.1 high, Opus 5.5, Sonnet 5.5) |
+| F12 three-model review | ❌→🛠 | bb54dc3: Codex Sol (7 blockers) and Sonnet 5.5 (2 blockers) declined (docs/reviews/2026-10-12-f12-*); fixes in 5 lanes (core, data, ui, client, docs); Opus 5.5 reviewing 743d651 |
 | F13 photo mode + 5 scenes | ✅ | browser E2E T8; `stage <n>` + docs/staged-scenes.md |
 
 ## Lanes (who owns what right now)
@@ -68,8 +68,13 @@
 | Photo mode | MERGED 4214419 | — |
 | UI port (design verdict) | MERGED 9f6dc14 (deployed) | — |
 | Destruction (§6.9) | MERGED bb54dc3 (deployed) | — |
-| Horses (M11 #2) | Opus sub-agent | ../fl-wt-horses (lane/horses) |
-| Weather + day/night (M11 #3–4) | Opus (render agent) | ../fl-wt-render (lane/weather) |
+| Weather + day/night (M11 #3–4) | MERGED 743d651 (deployed 06:39Z) | — |
+| F12 server core (Codex B1–B6, S2/S3/S9/S10/S12/S14) | Opus sub-agent | ../fl-wt-core (lane/f12-core) |
+| F12 content (eggs, items, Patchkit, Prism Bubble, Hollow King, Associates look) | Opus sub-agent | ../fl-wt-data (lane/f12-data) |
+| F12 inventory panel (I) + onboarding | Opus sub-agent | ../fl-wt-inv (lane/f12-ui) |
+| F12 client robustness (S4–S8, N1) | Opus sub-agent | ../fl-wt-client (lane/f12-client) |
+| F12 docs + repo hygiene | Opus sub-agent | ../fl-wt-docs (lane/f12-docs) |
+| Horses (M11 #2) | Opus sub-agent (resumed after the spend-limit stop) | ../fl-wt-horses (lane/horses) |
 
 ## Measured numbers
 
@@ -100,5 +105,5 @@
 - NO CODEX COMPUTER USE (D23): visual/E2E checks run in T3 Code's built-in browser (preview tools). Never Chrome.
 - Concept art not generated yet (Codex task cancelled for safety). Retry only without computer use.
 - Character floats slightly above terrain (Codex first look) — investigate.
-- Cloudflare: Workers token OK (D24). TURN key pending the owner (save-turn-key.sh).
+- Cloudflare: Workers token OK (D24). TURN key pending the owner: the saved API token has no Calls permission (06:45Z check), so create the key in the dashboard (Realtime → TURN) and run save-turn-key.sh.
 - Resend: DNS records are live on Vercel DNS (checked against ns1.vercel-dns.com and 8.8.8.8), but Resend still says the domain is unverified (02:45Z). The send-only key is set on Railway, so mail turns on as soon as the domain verifies. **Owner: press "Verify" on resend.com/domains** (the builder's key is send-only, so it can't trigger verification).
