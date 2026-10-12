@@ -6,11 +6,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { NF } from "@firstlight/shared/content/npcs";
 import { npcSystemOf } from "../src/world/npc/index.ts";
-import { EGG_LIMITS } from "../src/world/quests/eggs.ts";
+import { EGG_LIMITS, EGG_TIMERS } from "../src/world/quests/eggs.ts";
+import { matchMaker } from "@colyseus/core";
 import { pileStore } from "../src/world/piles.ts";
 import type { QuestSystem } from "../src/world/quests/QuestSystem.ts";
 import { safeLeave, startServer } from "./helpers.ts";
-import { bot, harness, invIds, objAt, serverRoom, sleep, tpAndWait, until, type Bot } from "./quest-helpers.ts";
+import { bot, harness, invIds, objAt, padAt, serverRoom, sleep, tpAndWait, until, type Bot } from "./quest-helpers.ts";
 
 const saved = { ...EGG_LIMITS };
 beforeEach(async () => {
@@ -118,5 +119,55 @@ describe("E7 keypad", () => {
     await until("lockout over", () => !quests(m).eggs.keypadLocked("guesser"), 4000);
     await press(m, "e7_safe", "7041");
     await until("visor", () => invIds(m).includes("executive_visor"));
+  });
+});
+
+describe("account timers outlive rooms (review S2, N1)", () => {
+  it("puzzle and keypad lockouts follow the account to a recreated room", async () => {
+    EGG_LIMITS.lockMs = 60_000;
+    const b = await bot("hopper", "arcadia");
+    await tpAndWait(b, objAt("e2_btn_leaf"));
+    expect(await press(b, "e2_btn_flame")).toContain("GAME OVER");
+    const m = await bot("hopper2", "meridian");
+    await tpAndWait(m, objAt("e7_safe"));
+    for (let i = 0; i < 5; i++) await press(m, "e7_safe", `999${i}`);
+    expect(m.toasts.at(-1)).toContain("KEYPAD LOCKED");
+    // Both log out from a pad and their rooms go away; new rooms start for the same copies.
+    for (const [x, body] of [[b, "arcadia"], [m, "meridian"]] as const) {
+      const old = serverRoom(x);
+      await tpAndWait(x, padAt(body, 0));
+      await safeLeave(x.room);
+      harness.rooms.splice(harness.rooms.indexOf(x.room), 1);
+      await until("disposed", () => !matchMaker.getLocalRoomById(old.roomId), 8000);
+    }
+    const b2 = await bot("hopper", "arcadia");
+    await tpAndWait(b2, objAt("e2_btn_leaf"));
+    expect(await press(b2, "e2_btn_rain")).toContain("rebooting");
+    const m2 = await bot("hopper2", "meridian");
+    await tpAndWait(m2, objAt("e7_safe"));
+    expect(await press(m2, "e7_safe", "7041")).toContain("KEYPAD LOCKED");
+  }, 30_000);
+
+  it("a Prism Bubble cooldown follows the account to another planet", async () => {
+    const a = await bot("shieldy", "arcadia");
+    a.send("admin", { cmd: "give", args: { id: "bubble", tier: 1 } });
+    await until("bubble", () => invIds(a).includes("bubble"));
+    const slot = [...a.you.hotbar, ...a.you.backpack].findIndex((i: any) => i?.id === "bubble");
+    a.send("use", { slot });
+    await until("deployed", () => a.count("bubble") === 1);
+    await safeLeave(a.room);
+    harness.rooms.splice(harness.rooms.indexOf(a.room), 1);
+    const h = await bot("shieldy", "hollowmere");
+    h.send("use", { slot });
+    await until("cooldown", () => h.last("denied")?.reason === "cooldown");
+  });
+
+  it("idle partial keypad counters are forgotten; lockouts are kept while they last", async () => {
+    const m = await bot("forgetful", "meridian");
+    await tpAndWait(m, objAt("e7_safe"));
+    await press(m, "e7_safe", "1111");
+    expect(EGG_TIMERS.keypads.has("forgetful")).toBe(true);
+    EGG_LIMITS.keypadIdleMs = 0;
+    await until("pruned", () => !EGG_TIMERS.keypads.has("forgetful"), 3000);
   });
 });

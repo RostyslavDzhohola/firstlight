@@ -20,6 +20,15 @@ import { onGameEvent } from "./events.ts";
 import type { V3 } from "./geometry.ts";
 import type { RoomSystem } from "./systems.ts";
 
+/**
+ * Account timers at process level, so a copy switch, a body hop or a recreated room doesn't reset
+ * them (F12 review S2). A server restart does (they are short).
+ */
+export const SUPPORT_TIMERS = {
+  /** Account id → when the Prism Bubble can be deployed again. */
+  bubbleReady: new Map<string, number>(),
+};
+
 export const SUPPORT = {
   /** Extra metres allowed on the Patchkit's 4 m reach (latency between client and server positions). */
   reachSlack: 1.5,
@@ -173,8 +182,6 @@ export class SupportSystem implements RoomSystem {
   readonly bubbles: BubbleField;
   /** Session id → the Patchkit channel in progress. */
   readonly channels = new Map<string, Channel>();
-  /** Account id → when the Prism Bubble can be deployed again (survives relog). */
-  private readonly bubbleReady = new Map<string, number>();
   private readonly unsub: () => void;
 
   constructor(room: BodyRoom) {
@@ -253,8 +260,8 @@ export class SupportSystem implements RoomSystem {
   private deploy(a: PlayerActor, item: InvItem) {
     const now = Date.now();
     const tier = WEAPON_BY_ID.get("bubble")!.tiers[item.tier - 1]!;
-    if ((this.bubbleReady.get(a.identity.userId) ?? 0) > now) return this.deny(a, "cooldown");
-    this.bubbleReady.set(a.identity.userId, now + (tier.cooldown ?? 25) * 1000);
+    if ((SUPPORT_TIMERS.bubbleReady.get(a.identity.userId) ?? 0) > now) return this.deny(a, "cooldown");
+    SUPPORT_TIMERS.bubbleReady.set(a.identity.userId, now + (tier.cooldown ?? 25) * 1000);
     const at = actorPos(a);
     const r = tier.radius ?? 3;
     const hp = Math.round(((tier.shell ?? 150) / 100) * a.state.maxHp);
@@ -271,7 +278,7 @@ export class SupportSystem implements RoomSystem {
       else this.channels.delete(id);
     }
     this.bubbles.expire(now);
-    for (const [k, until] of this.bubbleReady) if (until <= now) this.bubbleReady.delete(k);
+    for (const [k, until] of SUPPORT_TIMERS.bubbleReady) if (until <= now) SUPPORT_TIMERS.bubbleReady.delete(k);
   }
 
   onPlayerLeave(sessionId: string) {

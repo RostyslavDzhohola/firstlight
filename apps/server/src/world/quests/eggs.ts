@@ -32,6 +32,19 @@ export const EGG_LIMITS = {
   perBody: 12,
   keypadTries: 5,
   keypadLockMs: 60_000,
+  /** Wrong keypad codes are forgotten after this long without another try. */
+  keypadIdleMs: 10 * 60_000,
+};
+
+/**
+ * Account timers at process level, not per room, so switching copies or bodies and recreating a room
+ * don't reset them (F12 review S2). A server restart does reset them: they are short anti-abuse timers.
+ */
+export const EGG_TIMERS = {
+  /** `${userId}|${egg}` → when that puzzle unlocks again after a wrong answer. */
+  puzzles: new Map<string, number>(),
+  /** userId → wrong E7 codes in a row, the lockout end (0 = none) and the last try. */
+  keypads: new Map<string, { fails: number; until: number; last: number }>(),
 };
 
 const RIDDLES: Partial<Record<EggId, string>> = {
@@ -44,10 +57,6 @@ export class EggLogic {
   private readonly lamps: WorldObjectDef[];
   /** Session id → lamp id → when that player's lamp relights (ms); absent = lit. */
   private readonly dark = new Map<string, Map<string, number>>();
-  /** `${userId}|${egg}` → when the puzzle unlocks again after a wrong answer (survives relog and death). */
-  private readonly locked = new Map<string, number>();
-  /** userId → wrong keypad codes in a row and the lockout end (E7). */
-  private readonly keypad = new Map<string, { fails: number; until: number }>();
 
   constructor(sys: QuestSystem) {
     this.sys = sys;
@@ -79,8 +88,11 @@ export class EggLogic {
   }
 
   tickRoom(now: number) {
-    for (const [k, until] of this.locked) if (until <= now) this.locked.delete(k);
-    for (const [k, v] of this.keypad) if (v.until && v.until <= now) this.keypad.delete(k);
+    for (const [k, until] of EGG_TIMERS.puzzles) if (until <= now) EGG_TIMERS.puzzles.delete(k);
+    for (const [k, v] of EGG_TIMERS.keypads) {
+      if (v.until > now) continue; // locked out: keep
+      if (v.until || now - v.last >= EGG_LIMITS.keypadIdleMs) EGG_TIMERS.keypads.delete(k); // lockout over, or idle
+    }
     for (const [sid, lamps] of this.dark) {
       const a = this.sys.actor(sid);
       for (const [id, until] of lamps) {
@@ -106,18 +118,18 @@ export class EggLogic {
   }
 
   private penalty(a: PlayerActor, egg: EggId, npcKind: string, count: number) {
-    this.locked.set(`${a.identity.userId}|${egg}`, Date.now() + EGG_LIMITS.lockMs);
+    EGG_TIMERS.puzzles.set(`${a.identity.userId}|${egg}`, Date.now() + EGG_LIMITS.lockMs);
     emitGameEvent(this.sys.room, { type: "spawnRequest", reason: "egg", npcKind, count, pos: actorPos(a), playerId: a.id, egg });
   }
 
   /** The account is locked out of the E7 keypad right now. */
   keypadLocked(userId: string, now = Date.now()): boolean {
-    return (this.keypad.get(userId)?.until ?? 0) > now;
+    return (EGG_TIMERS.keypads.get(userId)?.until ?? 0) > now;
   }
 
   /** Milliseconds until the account may try this puzzle again (0 = open). */
   lockedFor(userId: string, egg: EggId, now = Date.now()): number {
-    return Math.max(0, (this.locked.get(`${userId}|${egg}`) ?? 0) - now);
+    return Math.max(0, (EGG_TIMERS.puzzles.get(`${userId}|${egg}`) ?? 0) - now);
   }
 
   // ---------------------------------------------------------------- triggers
@@ -200,23 +212,23 @@ export class EggLogic {
         if (this.isOpen(q, "E6")) return this.sys.claimEgg(a, "E6");
         return toast("The bell hangs from the “floor” above, out of reach from this side.");
       case "E7": {
-        const k = this.keypad.get(a.identity.userId);
+        const k = EGG_TIMERS.keypads.get(a.identity.userId);
         if (k && k.until > now) return toast(`KEYPAD LOCKED. Try again in ${Math.ceil((k.until - now) / 1000)} s`, "warn");
         if (code === undefined) {
           a.client.send("prompt", { kind: "keypad", target: o.id });
           return;
         }
         if (code === EGG_RULES.E7_CODE) {
-          this.keypad.delete(a.identity.userId);
+          EGG_TIMERS.keypads.delete(a.identity.userId);
           toast("The safe clicks open.");
           return this.sys.claimEgg(a, "E7");
         }
         const fails = (k?.fails ?? 0) + 1;
         if (fails >= EGG_LIMITS.keypadTries) {
-          this.keypad.set(a.identity.userId, { fails: 0, until: now + EGG_LIMITS.keypadLockMs });
+          EGG_TIMERS.keypads.set(a.identity.userId, { fails: 0, until: now + EGG_LIMITS.keypadLockMs, last: now });
           return toast(`ACCESS DENIED. KEYPAD LOCKED for ${Math.round(EGG_LIMITS.keypadLockMs / 1000)} s`, "warn");
         }
-        this.keypad.set(a.identity.userId, { fails, until: 0 });
+        EGG_TIMERS.keypads.set(a.identity.userId, { fails, until: 0, last: now });
         return toast("ACCESS DENIED", "warn");
       }
       case "E8":
