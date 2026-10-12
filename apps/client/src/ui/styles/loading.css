@@ -63,3 +63,10 @@
 .fl-loading--compact .fl-loading__card { width: min(calc(26 * var(--u)), calc(100vw - 48px)); padding: calc(1.1 * var(--u)) calc(1.3 * var(--u)); background: var(--panel-bg); border: 1px solid var(--line-2); border-radius: var(--r-2); box-shadow: var(--panel-shadow); }
 .fl-loading--compact .fl-loading__status { font-size: var(--t-sm); }
 .fl-loading--compact .fl-loading__pct { font-size: var(--t-md); }
+
+/* Boot failure: the progress gives way to what went wrong and a Retry button. */
+.fl-loading--error .fl-loading__prog { display: none; }
+.fl-loading__error { display: grid; gap: calc(.8 * var(--u)); }
+.fl-loading__errtitle { margin: 0; font: 600 var(--t-xl)/1.2 var(--font-display); letter-spacing: .06em; text-transform: uppercase; color: var(--dawn-3); }
+.fl-loading__errtext { margin: 0; font-size: var(--t-md); line-height: 1.45; color: var(--paper-2); }
+.fl-loading__erractions { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; margin-top: calc(.4 * var(--u)); }

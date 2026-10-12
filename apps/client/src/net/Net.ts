@@ -42,6 +42,7 @@ export class Net {
   serverOffset = 0; // serverTime - localTime
   rtt = 0;
   onCorrect: ((x: number, y: number, z: number) => void) | null = null;
+  /** The current room closed without us leaving it (rooms we left or replaced don't report). */
   onLeaveRoom: ((code: number) => void) | null = null;
   /** Queue position while /api/play says the world is full (null once in, or on failure). */
   onQueue: ((q: { position: number; etaSeconds: number } | null) => void) | null = null;
@@ -58,6 +59,7 @@ export class Net {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ body, ...opts }),
+        signal: AbortSignal.timeout(20_000), // a server that never answers fails the arrival (retry/reconnect), not a spinner
       });
       if (res.status === 401 && !retried401) {
         // Stale token (e.g. the guest just saved and got a new id): fetch a fresh one once.
@@ -118,10 +120,9 @@ export class Net {
       this.serverOffset = m.serverTime - (Date.now() - this.rtt / 2);
     });
     room.onLeave((code: number) => {
-      if (this.room === room) {
-        this.room = null;
-        this.stopPing();
-      }
+      if (this.room !== room) return; // we left it (leave() clears this.room first) or joined another
+      this.room = null;
+      this.stopPing();
       this.onLeaveRoom?.(code);
     });
     this.stopPing();
