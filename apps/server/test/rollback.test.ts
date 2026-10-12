@@ -15,7 +15,10 @@ import type { BodyRoom } from "../src/world/BodyRoom.ts";
 import { characterRepo } from "../src/world/characters.ts";
 import { pileStore } from "../src/world/piles.ts";
 import { SqliteCharacterRepo, SqlitePileStore } from "../src/world/sqliteStores.ts";
+import { placeDir } from "@firstlight/shared/content/places";
+import { emitGameEvent } from "../src/world/events.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
+import { bot, ground, harness, objAt, serverRoom as questRoom, sleep as qsleep, tpAndWait, type Bot } from "./quest-helpers.ts";
 
 let game: Game;
 let dir: string;
@@ -36,10 +39,12 @@ beforeEach(async () => {
   characterRepo.current = repo;
   pileStore.current = new SqlitePileStore(db);
   failing = false;
+  harness.game = game;
 });
 afterEach(async () => {
   failing = false;
   for (const r of rooms.splice(0)) await safeLeave(r);
+  for (const r of harness.rooms.splice(0)) await safeLeave(r);
   await game.close();
   db.close();
   rmSync(dir, { recursive: true, force: true });
@@ -127,3 +132,92 @@ describe("a failed save undoes the room's changes (F12 B6)", () => {
     expect(count(back, "axe")).toBe(1);
   });
 });
+
+describe("a failed save undoes quest and shop rewards too (F12 B6, Codex re-review)", () => {
+  const stored = (userId: string) => characterRepo.current.load(userId)!;
+  const storedCount = (userId: string, id: string) => [...stored(userId).hotbar, ...stored(userId).backpack].filter((s) => s?.id === id).reduce((n, s) => n + s!.qty, 0);
+  const memCount = (b: Bot, id: string) => {
+    const a = questRoom(b).actors.get(b.id)!;
+    return [...a.char.hotbar, ...a.char.backpack].filter((s) => s?.id === id).reduce((n, s) => n + s!.qty, 0);
+  };
+  const actor = (b: Bot) => questRoom(b).actors.get(b.id)!;
+
+  it("a purchase whose save fails keeps the coins and gives nothing; the retry buys exactly once", async () => {
+    const b = await bot("buyer", "portus");
+    b.send("admin", { cmd: "coins", args: { amount: 500 } });
+    await tpAndWait(b, objAt("juno_vale"));
+    await waitFor(() => actor(b).char.coins === 500);
+    questRoom(b).saveActor(actor(b));
+    failing = true;
+    b.send("buy", { itemId: "tonic_small", tier: 1, qty: 1 });
+    await waitFor(() => b.last("shop") !== undefined);
+    expect(b.last("shop")).toMatchObject({ ok: false, action: "buy" });
+    expect(actor(b).char.coins).toBe(500);
+    expect(memCount(b, "tonic_small")).toBe(0);
+    failing = false;
+    await qsleep(250);
+    b.send("buy", { itemId: "tonic_small", tier: 1, qty: 1 });
+    await waitFor(() => memCount(b, "tonic_small") === 1);
+    const paid = 500 - actor(b).char.coins;
+    expect(paid).toBeGreaterThan(0);
+    expect(storedCount("buyer", "tonic_small")).toBe(1);
+    expect(stored("buyer").coins).toBe(500 - paid);
+  });
+
+  it("a mission whose reward save fails stays open with no XP, coins or items; the next completion pays once", async () => {
+    const b = await bot("missioner", "arcadia");
+    await tpAndWait(b, objAt("guide_arcadia"));
+    b.send("mission", { action: "accept", id: "A1" });
+    await waitFor(() => actor(b).char.missions.some((m) => m.id === "A1"));
+    const xp0 = actor(b).char.xp;
+    questRoom(b).saveActor(actor(b));
+    const room = questRoom(b);
+    const fields = ground("arcadia", placeDir("clover_fields"));
+    failing = true;
+    for (let i = 0; i < 8; i++) emitGameEvent(room, { type: "kill", npcKind: "hopbit", killerId: b.id, pos: fields });
+    await qsleep(200);
+    const m = () => actor(b).char.missions.find((x) => x.id === "A1")!;
+    expect(m().done).toBe(false);
+    expect(actor(b).char.xp).toBe(xp0);
+    expect(actor(b).char.coins).toBe(0);
+    expect(memCount(b, "tonic_small")).toBe(0);
+    failing = false;
+    emitGameEvent(room, { type: "kill", npcKind: "hopbit", killerId: b.id, pos: fields });
+    await waitFor(() => m().done);
+    emitGameEvent(room, { type: "kill", npcKind: "hopbit", killerId: b.id, pos: fields });
+    await qsleep(200);
+    expect(actor(b).char.coins).toBe(30);
+    expect(actor(b).char.xp).toBe(xp0 + 80);
+    expect(memCount(b, "tonic_small")).toBe(2);
+    expect(stored("missioner").coins).toBe(30);
+    expect(storedCount("missioner", "tonic_small")).toBe(2);
+    expect(stored("missioner").missions.find((x) => x.id === "A1")!.done).toBe(true);
+  });
+
+  it("an overflow pile from a reward is rolled back with the save; the retry drops exactly one", async () => {
+    const b = await bot("overflow", "arcadia");
+    for (let i = 0; i < 20; i++) b.send("admin", { cmd: "give", args: { id: "axe" } });
+    await waitFor(() => [...actor(b).char.hotbar, ...actor(b).char.backpack].every((x) => !!x)); // bags full
+    await tpAndWait(b, objAt("guide_arcadia"));
+    b.send("mission", { action: "accept", id: "A1" });
+    await waitFor(() => actor(b).char.missions.some((m) => m.id === "A1"));
+    questRoom(b).saveActor(actor(b));
+    const room = questRoom(b);
+    const fields = ground("arcadia", placeDir("clover_fields"));
+    const piles0 = pileStore.current.list("arcadia").length;
+    failing = true;
+    for (let i = 0; i < 8; i++) emitGameEvent(room, { type: "kill", npcKind: "hopbit", killerId: b.id, pos: fields });
+    await qsleep(200);
+    expect(pileStore.current.list("arcadia").length).toBe(piles0);
+    expect(actor(b).char.coins).toBe(0);
+    failing = false;
+    emitGameEvent(room, { type: "kill", npcKind: "hopbit", killerId: b.id, pos: fields });
+    await waitFor(() => actor(b).char.missions.find((x) => x.id === "A1")!.done);
+    await qsleep(100);
+    const piles = pileStore.current.list("arcadia");
+    expect(piles.length).toBe(piles0 + 1);
+    expect(piles.at(-1)!.items.map((i) => `${i.id}:${i.qty}`)).toEqual(["tonic_small:2"]);
+    expect(stored("overflow").coins).toBe(30);
+  });
+});
+
