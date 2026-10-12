@@ -5,7 +5,7 @@ import { BODIES, padDirs, type BodyId } from "@firstlight/shared";
 import { flags } from "../config.ts";
 import { Net } from "../net/Net.ts";
 import { AvatarView } from "../render/Avatars.ts";
-import { Bench } from "../render/bench.ts";
+import { Bench, benchConfig } from "../render/bench.ts";
 import { BlobShadows } from "../render/blobShadows.ts";
 import { ParticleSystem, type BurstOptions } from "../render/particles.ts";
 import { PerfOverlay } from "../render/PerfOverlay.ts";
@@ -65,7 +65,7 @@ export class Game {
       setScale: (s) => this.ctx.setRenderScale(s),
       reprobe: () => void this.reprobe(),
       reset: () => {
-        localStorage.removeItem("fl.gfx.v1");
+        this.ctx.resetSettings();
         location.reload();
       },
     };
@@ -168,24 +168,23 @@ export class Game {
     const updateWorld = () => this.updateWorldForWarmup();
 
     // Quality probe on first visit (SPEC §7.3), then the warm-up protocol (SPEC §4.1).
-    const st = this.ctx.stored();
     const wantProbe = !this.probed && !flags.has("tier") && !flags.has("noprobe") &&
-      (flags.has("reprobe") || (!st.tier && !st.autoTier && !flags.has("bench")));
+      (flags.has("reprobe") || (this.ctx.needsProbe() && !flags.has("bench")));
     if (wantProbe) {
       this.probed = true;
       setLoading("Tuning graphics for this computer…", 0.82);
       try {
         const r = await runProbe(this.ctx, updateWorld);
-        console.info(`[gfx] probe → ${r.tier}`, r);
-        this.ctx.setProbedTier(r.tier);
+        console.info(`[gfx] probe → ${r.tier}${r.valid ? "" : " (not saved)"}`, r);
+        this.ctx.setProbedTier(r.tier, { persist: r.valid });
       } catch (e) {
         console.warn("[gfx] probe failed, staying on medium", e);
-        this.ctx.setProbedTier("medium");
+        this.ctx.setProbedTier("medium", { persist: false });
       }
     }
     // The bench crowd exists before warm-up so its shaders compile behind the loading screen.
-    if (flags.has("bench") && !this.bench) {
-      const crowd = Math.max(0, Math.min(200, Number(flags.get("benchcrowd")) || 0));
+    const benchCfg = benchConfig();
+    if (benchCfg && !this.bench) {
       const spawn = this.player.pos.clone();
       this.bench = new Bench({
         ctx: this.ctx,
@@ -194,7 +193,7 @@ export class Game {
         spawn,
         stats: () => this.planet.stats(),
         body: this.bodyId,
-      }, crowd);
+      }, benchCfg);
       this.player.frozen = true;
       this.applyCharsVisibility();
       this.bench.update(0, performance.now(), this.ctx.camera);
@@ -238,9 +237,8 @@ export class Game {
     setLoading("Tuning graphics for this computer…", 0.5);
     try {
       const r = await runProbe(this.ctx);
-      console.info(`[gfx] probe → ${r.tier}`, r);
-      this.ctx.setProbedTier(r.tier);
-      this.ctx.setAutoTier();
+      console.info(`[gfx] probe → ${r.tier}${r.valid ? "" : " (not saved)"}`, r);
+      this.ctx.setProbedTier(r.tier, { persist: r.valid, clearPinned: true });
       await warmup(this.ctx, { frames: 3, hooks: [this.warmupHook()] });
     } finally {
       hideLoading();
@@ -336,7 +334,7 @@ export class Game {
     this.bench?.record(rawMs);
     shaderMonitorFrame();
     const st = this.planet.stats();
-    this.perf.frame(now, dt, {
+    this.perf.frame(now, rawMs / 1000, {
       cpuMs,
       chunks: st.chunks,
       visibleChunks: st.visibleChunks,
@@ -358,7 +356,7 @@ export async function startGame() {
   if (game) return;
   game = new Game();
   (window as unknown as { __game: Game }).__game = game;
-  const want = flags.get("body") as BodyId | null;
+  const want = (flags.get("body") ?? benchConfig()?.body ?? null) as BodyId | null;
   const start = want && want in BODIES ? want : "portus";
   await game.start(start);
 }

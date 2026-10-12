@@ -6,8 +6,8 @@ import * as THREE from "three/webgpu";
 import { flags } from "../config.ts";
 import { buildPost, MENU_GRADE, setGrade, type GradeParams, type PostBuild } from "./post.ts";
 import {
-  FEATURES, killSwitches, loadStored, resolveSettings, saveStored, TIERS, tierIndex, urlScale, urlTier,
-  type Feature, type ResolvedSettings, type StoredGfx, type Tier,
+  clearStored, emptyStored, FEATURES, killSwitches, loadStored, resolveSettings, saveStored, TIERS, tierIndex,
+  urlScale, urlTier, validAutoTier, type Feature, type ResolvedSettings, type StoredGfx, type Tier,
 } from "./quality.ts";
 import { GpuTimer, ResolutionLadder } from "./timing.ts";
 
@@ -32,14 +32,29 @@ export interface RenderCtx {
   setTier(t: Tier, opts?: { persist?: boolean; auto?: boolean }): void;
   /** Return to the automatic (probed) tier. */
   setAutoTier(): void;
-  /** Record a probe result (persisted as the automatic tier). */
-  setProbedTier(t: Tier): void;
+  /**
+   * Apply a probe result. `persist: false` (invalid probe) uses it for this session only;
+   * `clearPinned` also drops a user-pinned tier (F3 "re-probe"). Applies settings once.
+   */
+  setProbedTier(t: Tier, opts?: { persist?: boolean; clearPinned?: boolean }): void;
+  /** True when no tier is pinned and no saved probe result matches this backend + GPU. */
+  needsProbe(): boolean;
+  /**
+   * The ladder wants to drop a tier (auto mode, resolution at the floor). Listeners get the
+   * change as a function and should run it behind the loading overlay + warm-up
+   * (Game.applyGraphics). With no listener it's applied immediately (may hitch).
+   */
+  onTierDrop(cb: (from: Tier, to: Tier, apply: () => void) => void): () => void;
+  /** GPU device lost. With no listener a reload prompt is shown. */
+  onDeviceLost(cb: (info: { api: string; message: string; reason: string | null }) => void): () => void;
+  /** Forget all saved graphics settings (tolerates disabled storage). Caller reloads. */
+  resetSettings(): void;
   setFeature(f: Feature, on: boolean | null): void;
   /** User render scale on top of the tier (null = tier default). */
   setRenderScale(s: number | null): void;
   setGrade(g: GradeParams): void;
   onChange(cb: SettingsListener): () => void;
-  /** Effective pixel ratio after DPR cap × render scale × ladder. */
+  /** Effective pixel ratio after DPR cap × render scale × ladder, never above devicePixelRatio. */
   pixelRatio(): number;
   resize(): void;
   render(): void;
@@ -102,9 +117,13 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
   const listeners = new Set<SettingsListener>();
   const ladder = new ResolutionLadder();
   ladder.enabled = !flags.has("noladder") && !flags.has("bench");
-  const gpu = new GpuTimer(renderer);
+  const gpu = new GpuTimer(renderer as unknown as ConstructorParameters<typeof GpuTimer>[0]);
+  ladder.hasGpuTimer = gpu.available;
+  const backendName = webgpu ? "webgpu" : "webgl2";
+  const tierDropListeners = new Set<(from: Tier, to: Tier, apply: () => void) => void>();
+  const deviceLostListeners = new Set<(info: { api: string; message: string; reason: string | null }) => void>();
 
-  let tier: Tier = forcedTier ?? stored.tier ?? stored.autoTier ?? "medium";
+  let tier: Tier = forcedTier ?? stored.tier ?? validAutoTier(stored, backendName, gpuName) ?? "medium";
   let auto = !forcedTier && !stored.tier;
   let settings = resolveSettings(tier, auto, webgpu, stored, kills);
   let post: PostBuild | null = null;
@@ -167,19 +186,35 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
     setAutoTier() {
       stored = { ...stored, tier: null };
       saveStored(stored);
-      tier = forcedTier ?? stored.autoTier ?? "medium";
+      tier = forcedTier ?? validAutoTier(stored, backendName, gpuName) ?? "medium";
       auto = !forcedTier;
       ladder.reset();
       apply();
     },
-    setProbedTier(t) {
-      stored = { ...stored, autoTier: t };
-      saveStored(stored);
+    setProbedTier(t, opts = {}) {
+      if (opts.clearPinned) stored = { ...stored, tier: null };
+      if (opts.persist !== false) stored = { ...stored, autoTier: t, autoBackend: backendName, autoGpu: gpuName };
+      if (opts.clearPinned || opts.persist !== false) saveStored(stored);
       // The probe switches tiers while measuring; always land on the effective choice.
       tier = forcedTier ?? stored.tier ?? t;
       auto = !forcedTier && !stored.tier;
       ladder.reset();
       apply();
+    },
+    needsProbe() {
+      return !forcedTier && !stored.tier && validAutoTier(stored, backendName, gpuName) === null;
+    },
+    onTierDrop(cb) {
+      tierDropListeners.add(cb);
+      return () => tierDropListeners.delete(cb);
+    },
+    onDeviceLost(cb) {
+      deviceLostListeners.add(cb);
+      return () => deviceLostListeners.delete(cb);
+    },
+    resetSettings() {
+      clearStored();
+      stored = emptyStored();
     },
     setFeature(f, on) {
       const features = { ...stored.features };
@@ -203,7 +238,8 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
     },
     pixelRatio() {
       const scale = forcedScale ?? settings.userScale ?? settings.renderScale;
-      return Math.min(devicePixelRatio, settings.dprCap) * scale * ladder.scale;
+      const dpr = devicePixelRatio || 1;
+      return Math.min(dpr, Math.min(dpr, settings.dprCap) * scale * ladder.scale);
     },
     resize() {
       renderer.setPixelRatio(ctx.pixelRatio());
@@ -218,7 +254,7 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
     },
     afterFrame(now, frameMs) {
       gpu.frame();
-      ladder.sample(now, frameMs, gpu.p50(), settings.gpuTargetMs);
+      ladder.sample(now, frameMs, gpu.takeSamples(), settings.gpuTargetMs);
     },
     stored() {
       return stored;
@@ -227,13 +263,30 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
 
   ladder.onChange = () => ctx.resize();
   ladder.onFloor = () => {
-    // At the ladder floor drop a tier, but only when the tier is automatic.
+    // At the ladder floor drop a tier, but only when the tier is automatic. The drop is saved
+    // as the automatic tier, so the next session starts there instead of walking down again.
     if (!auto || tierIndex(tier) === 0) return;
+    const from = tier;
     const lower = TIERS[tierIndex(tier) - 1]!;
-    console.info(`[gfx] resolution ladder at floor, dropping tier ${tier} → ${lower}`);
-    tier = lower;
-    ladder.reset();
-    apply();
+    let done = false;
+    const change = () => {
+      if (done || tier !== from || !auto) return;
+      done = true;
+      console.info(`[gfx] resolution ladder at floor, dropping tier ${from} → ${lower}`);
+      ctx.setProbedTier(lower);
+    };
+    if (tierDropListeners.size === 0) change();
+    else for (const l of tierDropListeners) l(from, lower, change);
+  };
+
+  // Device lost (macOS sleep, driver reset): tell listeners, else offer a reload.
+  (renderer as unknown as { onDeviceLost: (info: { api: string; message: string; reason: string | null }) => void }).onDeviceLost = (info) => {
+    console.error("[gfx] GPU device lost", info);
+    if (deviceLostListeners.size) {
+      for (const l of deviceLostListeners) l(info);
+      return;
+    }
+    showReloadPrompt();
   };
 
   setGrade(MENU_GRADE);
@@ -242,4 +295,15 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
   ctx.resize();
   addEventListener("resize", () => ctx.resize());
   return ctx;
+}
+
+function showReloadPrompt() {
+  if (document.getElementById("gfx-lost")) return;
+  const el = document.createElement("div");
+  el.id = "gfx-lost";
+  el.style.cssText =
+    "position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:#07060dcc;color:#ece8f6;font:16px ui-sans-serif,system-ui,sans-serif;text-align:center";
+  el.innerHTML = `<div><p>The graphics device was reset (this can happen after the computer sleeps).</p><button style="font:inherit;padding:10px 28px;border-radius:999px;cursor:pointer">Reload</button></div>`;
+  el.querySelector("button")!.addEventListener("click", () => location.reload());
+  document.body.appendChild(el);
 }

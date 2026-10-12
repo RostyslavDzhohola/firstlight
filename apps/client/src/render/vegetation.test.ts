@@ -6,10 +6,10 @@ import * as THREE from "three/webgpu";
 import { BODIES, buildChunk, chunkOf, chunkProps, createTerrain, packProps, padDirs, type Face } from "@firstlight/shared";
 import { GrassSystem, type GrassChunk } from "./grass.ts";
 import { PropSystem } from "./props.ts";
-import { resolveSettings, type StoredGfx, type Tier } from "./quality.ts";
+import { emptyStored, resolveSettings, type StoredGfx, type Tier } from "./quality.ts";
 import { grassWeight, PALETTES } from "../world/palette.ts";
 
-const stored: StoredGfx = { v: 1, tier: null, autoTier: null, renderScale: null, features: {} };
+const stored: StoredGfx = emptyStored();
 const settingsFor = (t: Tier) => resolveSettings(t, false, true, stored, new Set());
 
 function chunksAround(body: "arcadia", d: readonly [number, number, number], radius: number) {

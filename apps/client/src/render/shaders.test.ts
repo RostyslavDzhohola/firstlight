@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
 import { mrt, output, velocity } from "three/tsl";
-import { TIER_TABLE, resolveSettings, type StoredGfx, type Tier } from "./quality.ts";
+import { emptyStored, TIER_TABLE, resolveSettings, type StoredGfx, type Tier } from "./quality.ts";
 import { radialFogNode, skyBackgroundNode } from "./atmosphere.ts";
 import { terrainMaterialFor } from "./terrainMaterial.ts";
 import { waterMaterialFor } from "./water.ts";
@@ -23,7 +23,7 @@ import { SunLightNode } from "three/addons/lights/SunLightNode.js";
 const fakeCanvas = () =>
   ({ style: {}, width: 800, height: 600, addEventListener() {}, removeEventListener() {}, getContext() { return null; } }) as unknown as HTMLCanvasElement;
 
-const stored: StoredGfx = { v: 1, tier: null, autoTier: null, renderScale: null, features: {} };
+const stored: StoredGfx = emptyStored();
 const settingsFor = (t: Tier, webgpu = true) => resolveSettings(t, false, webgpu, stored, new Set());
 
 interface Built {
