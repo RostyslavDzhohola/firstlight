@@ -5,7 +5,8 @@ import * as THREE from "three/webgpu";
 import type { BodyId } from "@firstlight/shared";
 import { flags } from "../config.ts";
 import { Net } from "../net/Net.ts";
-import { AvatarView } from "../render/Avatars.ts";
+import { AvatarView, preloadAvatars } from "../render/Avatars.ts";
+import "../render/avatars/system.ts";
 import { createRenderer, type RenderCtx } from "../render/renderer.ts";
 import { PerfOverlay } from "../render/PerfOverlay.ts";
 import type { Hud } from "../ui/hud.ts";
@@ -56,6 +57,7 @@ export class Game {
     setLoading("Starting the renderer…", 0.05);
     const container = document.getElementById("game")!;
     this.ctx = await createRenderer(container);
+    void preloadAvatars(); // character GLBs stream in while we connect and build the world
     this.input = new Input(this.ctx.renderer.domElement);
     this.perf = new PerfOverlay(this.ctx);
     this.combat = new CombatClient(this);
@@ -152,7 +154,9 @@ export class Game {
       if (pending === 0 || performance.now() - t0 > 15000) break;
       await new Promise((r) => setTimeout(r, 50));
     }
-    this.self ??= new AvatarView(0, 0);
+    setLoading("Loading characters…", 0.92);
+    await preloadAvatars(); // resolves null on failure: avatars fall back to capsules
+    this.self ??= new AvatarView(choice?.palette ?? stored.palette, choice?.starter ?? stored.starter);
     this.ctx.scene.add(this.self.root);
     this.player.placeCamera(this.ctx.camera);
     setLoading("Warming up shaders…", 0.95);
