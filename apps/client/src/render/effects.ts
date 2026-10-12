@@ -4,6 +4,7 @@
 import * as THREE from "three/webgpu";
 import { WEAPONS } from "@firstlight/shared/content/weapons";
 import { releaseObjects } from "./dispose.ts";
+import { warmupSamples } from "./warmup.ts";
 
 const WEAPON_COLORS: Record<string, number> = {
   carbine: 0x7af8ff,
@@ -77,12 +78,28 @@ export interface ProjectileSim {
   until: number;
 }
 
+/** Every effect look (material settings × geometry layout), for the shader warm-up (S8). */
+function effectLooks(): [THREE.BufferGeometry, THREE.Material][] {
+  const c = WEAPON_COLORS.fists!;
+  return [
+    [tracerGeo, glow(c, 0.9)], // tracers
+    [ballGeo, glow(c, 0.9)], // muzzle flashes, impacts
+    [ballGeo, glow(c, 0.85)], // explosion cores
+    [ringGeo, glow(c, 0.8)], // explosion rings, melee arcs (same layout)
+    [boltGeo, glow(c)], // bolts, orbs, grenades (opaque)
+    [arrowGeo, glow(c)], // arrows
+  ];
+}
+
 export class Effects {
   private readonly list: Fx[] = [];
   readonly projectiles = new Map<number, ProjectileSim>();
   readonly group = new THREE.Group();
+  /** Hidden samples the warm-up compiles; kept for the session so the first shot doesn't hitch. */
+  readonly samples = warmupSamples("effectsWarmup", effectLooks());
 
   constructor(scene: THREE.Scene) {
+    this.group.add(this.samples);
     scene.add(this.group);
   }
 

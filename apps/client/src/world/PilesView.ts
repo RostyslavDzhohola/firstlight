@@ -3,6 +3,7 @@
 
 import * as THREE from "three/webgpu";
 import { releaseObjects } from "../render/dispose.ts";
+import { warmupSamples } from "../render/warmup.ts";
 
 const cubeGeo = new THREE.BoxGeometry(0.28, 0.28, 0.28);
 const beamGeo = new THREE.CylinderGeometry(0.12, 0.35, 6, 8, 1, true);
@@ -10,6 +11,15 @@ beamGeo.translate(0, 3, 0);
 const cubeMat = new THREE.MeshBasicNodeMaterial({ color: new THREE.Color(0xffd166).multiplyScalar(3) });
 const cubeMat2 = new THREE.MeshBasicNodeMaterial({ color: new THREE.Color(0x36f9f6).multiplyScalar(3) });
 const beamMat = new THREE.MeshBasicNodeMaterial({ color: new THREE.Color(0xffd8a8).multiplyScalar(1.4), transparent: true, opacity: 0.22, depthWrite: false });
+
+/**
+ * Hidden samples of the pile look, compiled by every warm-up and kept for the session (moved into
+ * each body's scene, never disposed) so the first pile you see doesn't hitch (S8).
+ */
+let samples: THREE.Group | null = null;
+export function pileSamples(): THREE.Group {
+  return (samples ??= warmupSamples("pilesWarmup", [[cubeGeo, cubeMat], [cubeGeo, cubeMat2], [beamGeo, beamMat]]));
+}
 
 interface PileView {
   group: THREE.Group;
@@ -28,7 +38,9 @@ export class PilesView {
   private readonly seen = new Set<string>();
   private t = 0;
 
-  constructor(private readonly scene: THREE.Scene) {}
+  constructor(private readonly scene: THREE.Scene) {
+    scene.add(pileSamples());
+  }
 
   update(state: any, dt: number) {
     this.t += dt;
@@ -81,5 +93,6 @@ export class PilesView {
   dispose() {
     for (const v of this.views.values()) drop(v);
     this.views.clear();
+    if (samples?.parent === this.scene) samples.removeFromParent(); // kept alive: not released
   }
 }

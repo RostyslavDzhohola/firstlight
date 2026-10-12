@@ -3,7 +3,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import * as THREE from "three/webgpu";
 import { createTerrain, type BodyId } from "@firstlight/shared";
 import { stubCanvasDocument, watchDisposals } from "../render/disposeWatch.testutil.ts";
-import { PilesView } from "./PilesView.ts";
+import { lookKey } from "../render/warmupLooks.testutil.ts";
+import { pileSamples, PilesView } from "./PilesView.ts";
 import { Portals } from "./Portals.ts";
 
 let restore: () => void;
@@ -59,7 +60,7 @@ describe("PilesView", () => {
     const piles = new PilesView(scene);
     const state = { piles: new Map<string, ReturnType<typeof pile>>([["p1", pile(0, 1)], ["p2", pile(5, 2)]]) };
     piles.update(state, 0.016);
-    const groups = scene.children.filter((c) => c.type === "Group");
+    const groups = scene.children.filter((c) => c.type === "Group" && c !== pileSamples());
     expect(groups.length).toBeGreaterThanOrEqual(2);
     const w = { all: new Set<object>(), disposed: new Set<object>() };
     for (const g of groups) watchDisposals(g, w);
@@ -72,5 +73,28 @@ describe("PilesView", () => {
     expect(shared.length).toBeGreaterThan(0);
     for (const x of shared) expect(w.disposed.has(x)).toBe(false);
     piles.dispose();
+  });
+});
+
+describe("PilesView warm-up samples (S8)", () => {
+  it("covers every pile look, stays hidden, and survives travel", () => {
+    const scene = new THREE.Scene();
+    const piles = new PilesView(scene);
+    const samples = pileSamples();
+    expect(samples.parent).toBe(scene);
+    expect(samples.visible).toBe(false);
+    const sampled = new Set(samples.children.map(lookKey));
+    piles.update({ piles: new Map([["p", { x: 0, y: 500, z: 0, items: 6, coins: 5, owner: "a" }]]) }, 0.016);
+    const meshes: THREE.Object3D[] = [];
+    for (const c of scene.children) if (c !== samples) c.traverse((o) => (o as THREE.Mesh).isMesh && meshes.push(o));
+    expect(meshes.length).toBeGreaterThan(4);
+    for (const m of meshes) expect(sampled.has(lookKey(m))).toBe(true);
+    const w = watchDisposals(samples);
+    piles.dispose();
+    const next = new PilesView(scene); // the next body's view reuses the same, still-compiled samples
+    expect(pileSamples()).toBe(samples);
+    expect(samples.parent).toBe(scene);
+    expect(w.disposed.size).toBe(0);
+    next.dispose();
   });
 });

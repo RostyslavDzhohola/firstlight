@@ -3,6 +3,7 @@ import * as THREE from "three/webgpu";
 import { WEAPONS } from "@firstlight/shared/content/weapons";
 import { Effects } from "./effects.ts";
 import { watchDisposals, type DisposalWatch } from "./disposeWatch.testutil.ts";
+import { lookKey } from "./warmupLooks.testutil.ts";
 
 const v = (x: number, y = 500, z = 0) => new THREE.Vector3(x, y, z);
 
@@ -42,5 +43,21 @@ describe("Effects", () => {
     const shared = [...w.all].filter((x) => !(x as THREE.Mesh).isMesh && x !== arc.geometry);
     expect(shared.length).toBeGreaterThan(3);
     for (const x of shared) expect(w.disposed.has(x)).toBe(false);
+  });
+
+  it("has a hidden warm-up sample of every look it can spawn, kept for the session (S8)", () => {
+    const fx = new Effects(new THREE.Scene());
+    expect(fx.samples.visible).toBe(false); // drawn only while warmup() shows hidden meshes
+    expect(fx.samples.userData.noWarmup).toBeUndefined();
+    const sampled = new Set(fx.samples.children.map(lookKey));
+    spawnAll(fx);
+    const spawned = fx.group.children.filter((c) => c !== fx.samples);
+    for (const m of spawned) expect(sampled.has(lookKey(m)), lookKey(m)).toBe(true);
+    const w = watchDisposals(fx.samples);
+    fx.update(0.016, performance.now() + 10_000);
+    fx.endProjectile(1);
+    fx.endProjectile(2);
+    expect(fx.samples.parent).toBe(fx.group);
+    expect(w.disposed.size).toBe(0);
   });
 });
