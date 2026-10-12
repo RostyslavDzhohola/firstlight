@@ -64,8 +64,7 @@ export class SocialUi {
     const room = this.room();
     if (!room) return null;
     const state = () => (room.state as any)?.players as Map<string, any> | undefined;
-    const self = state()?.get(room.sessionId);
-    setSessionResolver((sid) => state()?.get(sid)?.userId || undefined, self?.userId ?? "");
+    setSessionResolver((sid) => state()?.get(sid)?.userId || undefined, () => state()?.get(room.sessionId)?.userId ?? "");
     room.onMessage("party:state", (m: PartyStateMsg) => setParty(m));
     room.onMessage("party:invite", (m: PartyInviteMsg) => {
       addInvite(m);

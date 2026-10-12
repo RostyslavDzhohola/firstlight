@@ -21,7 +21,7 @@ let blocked = new Set<string>();
 let party: PartyStateMsg = { id: null, leader: null, members: [] };
 let invites: PartyInviteMsg[] = [];
 let resolve: (sessionId: string) => string | undefined = () => undefined;
-let selfUserId = "";
+let selfUserId: () => string = () => "";
 
 function loadMuted(): string[] {
   try {
@@ -55,7 +55,7 @@ export function onSocialChange(fn: Listener): () => void {
 }
 
 /** Installed by the social system for the current room: sessionId → account id. */
-export function setSessionResolver(fn: (sessionId: string) => string | undefined, self: string) {
+export function setSessionResolver(fn: (sessionId: string) => string | undefined, self: () => string) {
   resolve = fn;
   selfUserId = self;
   emit();
@@ -116,13 +116,14 @@ export function partyState(): PartyStateMsg {
 
 export function isPartyMember(sessionOrUserId: string): boolean {
   const u = resolve(sessionOrUserId) ?? sessionOrUserId;
-  return !!party.id && u !== selfUserId && party.members.some((m) => m.userId === u);
+  return !!party.id && u !== selfUserId() && party.members.some((m) => m.userId === u);
 }
 
 /** The room a party member is in on `body` (leader first): pass as partyLeaderRoomId when travelling there. */
 export function partyRoomOn(body: string): string | undefined {
   if (!party.id) return undefined;
-  const there = party.members.filter((m) => m.userId !== selfUserId && m.online && m.body === body && m.roomId);
+  const me = selfUserId();
+  const there = party.members.filter((m) => m.userId !== me && m.online && m.body === body && m.roomId);
   return (there.find((m) => m.userId === party.leader) ?? there[0])?.roomId ?? undefined;
 }
 

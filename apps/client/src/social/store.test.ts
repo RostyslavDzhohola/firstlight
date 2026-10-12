@@ -4,7 +4,7 @@ import { isBlocked, isMuted, isMutedLocally, isPartyMember, onSocialChange, part
 const sessions: Record<string, string> = { s1: "u1", s2: "u2", s3: "u3", me: "u0" };
 
 describe("social client store", () => {
-  setSessionResolver((sid) => sessions[sid], "u0");
+  setSessionResolver((sid) => sessions[sid], () => "u0");
 
   it("mutes follow the account across session ids; blocks count as muted for voice", () => {
     let changes = 0;
