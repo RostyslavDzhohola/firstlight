@@ -38,6 +38,13 @@ export function fakeWorld(body: BodyId, opts: { immortal?: boolean; start?: numb
     players: () => players.values(),
     npcs: () => npcs.values(),
     broadcast: () => {},
+    broadcastNear: (type, msg, at, radius) => {
+      const r2 = radius * radius;
+      for (const p of players.values()) {
+        const dx = p.state.x - at[0], dy = p.state.y - at[1], dz = p.state.z - at[2];
+        if (dx * dx + dy * dy + dz * dz <= r2 && sent.length < 10_000) sent.push({ to: p.id, type, msg });
+      }
+    },
     onDamage: (target, _amount, attacker) => {
       if (target.kind === "npc") {
         if (target.state.hp <= 0) target.onKilled?.(attacker?.id ?? null);

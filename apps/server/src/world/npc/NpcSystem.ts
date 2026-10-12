@@ -433,13 +433,9 @@ export class NpcSystem implements RoomSystem {
     this.world.send(p, "npcFx", { kind: e.kind, ms: e.seconds * 1000, amount: e.amount, by: by?.id ?? "" });
   }
 
-  /** Send to connected players within `radius` m of a point. */
+  /** Send to connected players within `radius` m of a point (the host's area broadcast, like player combat). */
   sendNear(pos: V3, radius: number, type: string, msg: unknown) {
-    const r2 = radius * radius;
-    for (const p of this.world.connected()) {
-      const pp = actorPos(p);
-      if (dist2(pp, pos) <= r2) this.world.send(p, type, msg);
-    }
+    this.world.host.broadcastNear(type, msg, pos, radius);
   }
 
   /** Attack tokens: at most 2 melee + 2 ranged (3 on Meridian) NPCs attacking one player at once. */
@@ -548,19 +544,28 @@ export class NpcSystem implements RoomSystem {
 
   // ------------------------------------------------------------------------------------ noise & phrases
 
+  /** Gunfire and explosions are noise events (30 m): listen to the combat host's event fan-out. */
   private hookNoise() {
     const host = this.world.host;
-    const orig = host.broadcast;
+    const hear = (type: string, msg: unknown) => {
+      if (type !== "shot" && type !== "explode") return;
+      const m = msg as { by?: string; ox?: number; oy?: number; oz?: number; x?: number; y?: number; z?: number; radius?: number };
+      if (type === "shot" && m.ox !== undefined) this.noises.push({ pos: [m.ox, m.oy!, m.oz!], by: m.by ?? "", at: this.world.now(), explosion: false });
+      if (type === "explode" && m.x !== undefined && (m.radius ?? 0) > 0) this.noises.push({ pos: [m.x, m.y!, m.z!], by: "", at: this.world.now(), explosion: true });
+    };
+    const origAll = host.broadcast;
+    const origNear = host.broadcastNear;
     host.broadcast = (type, msg, except) => {
-      if (type === "shot" || type === "explode") {
-        const m = msg as { by?: string; ox?: number; oy?: number; oz?: number; x?: number; y?: number; z?: number; radius?: number };
-        if (type === "shot" && m.ox !== undefined) this.noises.push({ pos: [m.ox, m.oy!, m.oz!], by: m.by ?? "", at: this.world.now(), explosion: false });
-        if (type === "explode" && m.x !== undefined && (m.radius ?? 0) > 0) this.noises.push({ pos: [m.x, m.y!, m.z!], by: "", at: this.world.now(), explosion: true });
-      }
-      orig(type, msg, except);
+      hear(type, msg);
+      origAll(type, msg, except);
+    };
+    host.broadcastNear = (type, msg, at, radius, always) => {
+      hear(type, msg);
+      origNear(type, msg, at, radius, always);
     };
     this.restore.push(() => {
-      host.broadcast = orig;
+      host.broadcast = origAll;
+      host.broadcastNear = origNear;
     });
   }
 

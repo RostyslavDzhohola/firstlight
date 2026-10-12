@@ -15,6 +15,7 @@ import {
   NF, NPC_ANIM, NPC_INDEX, SHAPE_CODE, attackDamage, bossMaxHp, npcDef,
   type AttackDef, type BossDef, type BossEventMsg, type NpcAttackMsg, type NpcDef,
 } from "@firstlight/shared/content/npcs";
+import { partyOf } from "../../social/parties.ts";
 import { dealDamage } from "../combat.ts";
 import type { V3 } from "../geometry.ts";
 import { cancelAttack, playersInCircle, playersInLine, startAttack, updateAttack } from "./attacks.ts";
@@ -374,9 +375,10 @@ export class BossController {
       const dmg = n.damage.get(lp.a.id)?.amount ?? 0;
       if (dmg >= 0.5 * share || this.plateHolders.has(lp.a.id) || this.soakers.has(lp.a.id)) eligible.add(lp.a.id);
     }
-    // Parties share boss credit.
-    const parties = new Set(present.filter((lp) => eligible.has(lp.a.id) && lp.a.state.party).map((lp) => lp.a.state.party));
-    for (const lp of present) if (lp.a.state.party && parties.has(lp.a.state.party)) eligible.add(lp.a.id);
+    // Parties share boss credit (social lane: partyOf(userId) → member account ids, self included).
+    const credited = new Set<string>();
+    for (const lp of present) if (eligible.has(lp.a.id)) for (const uid of partyOf(lp.a.identity.userId)) credited.add(uid);
+    for (const lp of present) if (credited.has(lp.a.identity.userId)) eligible.add(lp.a.id);
     const winners = present.filter((lp) => eligible.has(lp.a.id)).map((lp) => lp.a);
     for (const p of winners) {
       const loot = bossLoot(this.sys, this.def, p);
