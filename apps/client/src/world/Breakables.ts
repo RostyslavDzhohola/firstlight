@@ -6,11 +6,15 @@
 // Sync: `broke` (sent to clients near the prop) shatters it; BodyState.broken (synced to everyone,
 // late joiners included) hides props that broke elsewhere; `rebuilt` (or the id leaving the map)
 // brings it back with a re-materialise burst.
+//
+// Intact props are solid: the view is the local player's MoveColliders (shared planet/collide).
 
 import * as THREE from "three/webgpu";
 import { attribute, uniform } from "three/tsl";
 import { BREAKABLE_ARCHETYPES, type BodyId, type Breakable } from "@firstlight/shared";
+import { BreakableCollider, resetContact, type PropContact } from "@firstlight/shared/planet/collide";
 import type { Game } from "../game/Game.ts";
+import type { MoveColliders } from "../game/PlayerController.ts";
 import type { ClientSystem } from "../game/systems.ts";
 import { Debris, type DebrisPiece } from "../render/debris.ts";
 import type { ResolvedSettings } from "../render/quality.ts";
@@ -120,7 +124,7 @@ const BUDGET: Record<ResolvedSettings["tier"], number> = { low: 60, medium: 120,
 /** Rotation/scale elements of a column-major 4×4 matrix. */
 const LINEAR = [0, 1, 2, 4, 5, 6, 8, 9, 10] as const;
 
-export class BreakablesView implements ClientSystem {
+export class BreakablesView implements ClientSystem, MoveColliders {
   readonly group = new THREE.Group();
   private readonly game: Game;
   private readonly body: BodyId;
@@ -154,6 +158,9 @@ export class BreakablesView implements ClientSystem {
   private readonly inbox: BreakableAssets[] = [];
   private readonly unsub: (() => void)[] = [];
   private readonly scratch = new THREE.Vector3();
+  /** Movement collision against the intact props (null until the worker's list arrives). */
+  private collider: BreakableCollider | null = null;
+  private readonly solid = (i: number) => this.hidden[i] === 0;
 
   constructor(game: Game) {
     this.game = game;
@@ -225,6 +232,8 @@ export class BreakablesView implements ClientSystem {
       }
       this.ready = true;
       this.dirty = true;
+      this.collider = new BreakableCollider(this.list);
+      this.game.player?.setColliders(this);
       this.pollBroken(performance.now());
       // Shatters that arrived before the assets: just hide them (they're long gone).
       for (const m of this.early.splice(0)) this.hide(m.id, performance.now());
@@ -268,6 +277,15 @@ export class BreakablesView implements ClientSystem {
     this.debris.setBudget(s.on.destruct ? BUDGET[s.tier] : 0);
     this.wantDebris();
     this.dirty = true;
+  }
+
+  /** MoveColliders: intact props block the local player; broken (hidden) ones don't. */
+  resolve(pos: THREE.Vector3, out: PropContact): boolean {
+    if (!this.collider) {
+      resetContact(out);
+      return false;
+    }
+    return this.collider.resolve(pos, this.solid, out);
   }
 
   // ------------------------------------------------------------------ server events
@@ -454,6 +472,8 @@ export class BreakablesView implements ClientSystem {
 
   dispose() {
     this.disposed = true;
+    if (this.game.player?.getColliders() === this) this.game.player.setColliders(null);
+    this.collider = null;
     for (const u of this.unsub) u();
     this.unsub.length = 0;
     this.debris.dispose();
