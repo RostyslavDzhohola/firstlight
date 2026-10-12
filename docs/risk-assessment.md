@@ -1,7 +1,8 @@
 # Proximity voice: illegal-content risk assessment (UK Online Safety Act)
 
 **Service:** FIRSTLIGHT, a free open-world browser game. **Feature assessed:** proximity voice and
-radio (SPEC §5.7). **Written:** 2026-10-11, at build (M5). **Review:** before launch, after any
+radio (SPEC §5.7). **Written:** 2026-10-11, at build (M5); checked against the code 2026-10-12
+(F12 review). **Review:** before launch, after any
 report of serious harm, after any change to how voice works, and at least once a year.
 **Owner:** the game's operator (the admin account).
 
@@ -9,9 +10,10 @@ report of serious harm, after any change to how voice works, and at least once a
 
 - Players talk by **live speech only**. There is no text chat, no voice messages, no file or image
   sharing, no private DMs. The only other user-to-user channel is six fixed phrases ("Truce?", "Help!",
-  "Follow me", "Boss here", "Thanks", "GG").
+  "Follow me", "Boss here", "Thanks", "GG"). (A report from the Tab player list may carry an optional
+  note of up to 200 characters; only admins see it.)
 - **Proximity voice:** you hear players within 35 m of you in the same world copy (at most 40 players
-  per copy; links to the 12 nearest). **Radio:** players who own an in-game radio and tune to the same
+  per copy; links to the 12 nearest within 45 m). **Radio:** players who own an in-game radio and tune to the same
   channel (1–9, at most 8 per channel) hear each other anywhere on that planet copy.
 - **Off by default.** Hearing and speaking both start off. Turning voice on needs an opt-in panel
   with an "I'm 16 or older" checkbox and a microphone permission prompt. Push-to-talk (V; B for
@@ -23,8 +25,9 @@ report of serious harm, after any change to how voice works, and at least once a
 
 ## 2. Users
 
-Anonymous guests and email-saved accounts; display names are unique, 3–16 characters and filtered
-for slurs. The game is not aimed at children, but a browser game will attract some.
+Anonymous guests and email-saved accounts. Chosen display names are unique (case-insensitive),
+3–16 characters (letters, digits, `_`) and filtered for slurs. A guest who skips the name prompt
+plays as an auto-generated `Wanderer-NNNN`, which is not checked for uniqueness. The game is not aimed at children, but a browser game will attract some.
 **The 16+ checkbox is a self-declaration, not age assurance** (it is not "highly effective age
 assurance" under the Act and can be ticked by anyone). It sets expectations and is a condition of
 use; it does not stop a determined child. Mitigations below therefore assume minors may be present.
@@ -51,16 +54,16 @@ anonymous guests, live speech can't be checked in advance, and radio channels ar
 | Mitigation | Risks | Where |
 |---|---|---|
 | Voice **off by default**; opt-in panel explains range, push-to-talk, no recording, and how to mute/block/report | all | client `voice/ui.ts` |
-| **16+ self-declaration** before enabling (not age assurance; see §2); the server refuses to enable without it | R3, R4 | server `voice:enable` |
+| **16+ self-declaration** before enabling (not age assurance; see §2): the panel's checkbox gates the request, and the server refuses `voice:enable` without the flag. The opt-in is remembered per browser, after which V turns voice on without the panel | R3, R4 | client `voice/ui.ts`, server `voice:enable` |
 | **Push-to-talk** (V, B); the mic is not sent otherwise; listen-only if the mic is denied | R1, R2, R4 | client sender gating |
-| **Mute** any player (local, remembered by account; from the voice panel or the Tab player list) and **"mute strangers"** (hear only your party) | R1, R2, R4 | client `voice/`, `social/store.ts` |
+| **Mute** any player (local to this browser: kept in localStorage, keyed by the muted player's account id; from the voice panel or the Tab player list) and **"mute strangers"** (hear only your party; also per browser) | R1, R2, R4 | client `voice/`, `social/store.ts` |
 | **Panic mute-all** (Shift+Esc) silences everyone at once and stops transmitting | all | client |
-| **Block** (persisted on the server, both directions, across sessions; from the voice panel or the Tab list): the server stops relaying connection set-up between the pair; a voice-panel block also tells both clients to hang up at once and revokes the blocked player's relay credential | R1–R6 | server `voice:block`, `social:block`, game.db `block` |
+| **Block** (persisted on the server, both directions, across sessions; from the voice panel or the Tab list): the server stops relaying connection set-up between the pair, tells both clients to hang up at once and revokes the blocked player's relay credential | R1–R6 | server `voice:block`, `social:block`, game.db `block` |
 | **Report** in game: who, when, which planet and where, and a reason category. **Never audio** (none exists). Stored in game.db `report` | all | server `voice:report` |
-| **Report review on `/admin`** by the admin: dismiss, kick, ban (account + network), and **voice-mute** (stops all relaying to and from the player); also from the Tab list for admins | all | `ops/admin.ts`, `social/moderation.ts`, server `voice:mute` |
-| **Ban → voice ends:** a ban revokes all the account's relay credentials at once (failed revocations are retried), removes the player, and any room still holding them turns their voice off within a second | all | `banAccount` → `revokeVoiceForUser`, `VoiceSystem` tick |
+| **Report review on `/admin`** by the admin: each report can be dismissed or the target banned (account + network). Kick and **voice-mute** (stops all relaying to and from the player) sit in the "Players online" table, so they work only while the player is online; admins also have kick/mute/ban in the Tab list | all | `ops/admin.ts`, `social/moderation.ts`, server `voice:mute` |
+| **Ban → voice ends:** a ban revokes all the account's relay credentials at once (failed revocations are retried after 30 s, 2 min and 10 min), removes the player, and any room still holding them turns their voice off within a second | all | `banAccount` → `turnCredentials.revokeUser`, `VoiceSystem` tick |
 | **Relay-only connections** in production (`iceTransportPolicy: "relay"`, per-player Cloudflare TURN credentials, 12 h lifetime, re-minted every 6 h): players never see each other's IP address. If the relay is down, voice is unavailable rather than falling back to direct connections | R7 | server `voice/turn.ts` |
-| The server relays set-up messages only for players **within 60 m or on the same radio channel**, never across the world; rate-limited | R1, R6 | server `voice/VoiceSystem.ts` |
+| The server relays set-up messages only for players **within 60 m or on the same radio channel** (both holding a radio), never across the world; rate-limited (signals 20/s, burst 40; actions 2/s, burst 12) | R1, R6 | server `voice/VoiceSystem.ts` |
 | Radio channels capped at 8 holders; radio drops on death | R3 | server |
 | No DMs, text chat, media, friend lists or user profiles exist to move contact elsewhere | R3, R6, R8 | design |
 
@@ -72,9 +75,15 @@ anonymous guests, live speech can't be checked in advance, and radio channels ar
 - **Report handling:** the admin checks `/admin` reports at least daily during launch week, then
   weekly; serious reports (R3, R5, threats) are handled the same day, with ban and preservation of
   the report row. Reports involving a child at risk are referred to the police / CEOP.
-- **Not yet built (planned):** a public contact address for complaints and appeals (s.20/s.21
-  reporting and complaints), a published terms page that states the voice rules and the 16+
-  condition, and admin voice-mutes persisted in game.db (today they last until the server restarts).
+- **Not yet built (planned; checked against the code 2026-10-12, tracked in `docs/STATUS.md` M9):**
+  - a public contact address for complaints and appeals (s.20/s.21 reporting and complaints); the
+    only address in the code is the sign-in sender;
+  - a published terms page that states the voice rules and the 16+ condition (the landing page links
+    only to the source code);
+  - admin voice-mutes persisted in game.db (today they are an in-memory set and end when the server
+    restarts or redeploys);
+  - personal mutes are per browser (localStorage), so they don't follow a signed-in player to a
+    second browser.
 - **If risk rises** (repeated R3/R4 reports, or many under-16 users): switch voice to party-only
   by default, require a saved account for voice, or add real age assurance before voice.
 

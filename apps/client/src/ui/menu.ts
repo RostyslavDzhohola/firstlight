@@ -28,7 +28,7 @@ export const CONTROLS: { title: string; rows: Ctl[] }[] = [
   },
   {
     title: "World",
-    rows: [[["E"], "Interact · pick up"], [["M"], "Map · fast travel"], [["J"], "Journal"], [["Tab"], "Players"], [["P"], "Screenshot"], [["F9"], "Photo mode"]],
+    rows: [[["E"], "Interact · pick up"], [["H"], "Whistle · ride horse"], [["M"], "Map · fast travel"], [["J"], "Journal"], [["Tab"], "Players"], [["P"], "Screenshot"], [["F9"], "Photo mode"]],
   },
   {
     title: "Voice",

@@ -135,7 +135,7 @@ removes every coin (D), so prices are set for one life.
 | Patchkit T1 / T2 / T3 (each) | 25 / 60 / 120 | (new) |
 | Prism Bubble T1 / T2 / T3 | 120 / 400 / 1,000 | (new) |
 | Radio | **100** | (D) |
-| Horse (extra after the core) | 1,500 | lost on death (D); price (new) |
+| Horse Whistle (extra after the core, §1.6) | 1,500 | a normal item: drops in the death pile, so the horse is lost on death (D); price (new) |
 | Common cosmetics (5 items, §8.3) | 120 each | (new) |
 
 Equipping still needs the level gate (T2 = L6, T3 = L12) (D). Anyone can buy, pick up or sell anything.
@@ -143,6 +143,20 @@ Equipping still needs the level gate (T2 = L6, T3 = L12) (D). Anyone can buy, pi
 **Sell-back:** 25% of the shop price, rounded down, minimum 1 [r2-05]. Items the shop doesn't sell use
 fixed values (new): Wool Tuft 2 · Wolf Pelt 8 · Bramblehorn Antler 120 · Fenstalker Plume 200 ·
 Dunebreaker Scale 300 · cosmetics Common 30 / Uncommon 90 / Rare 250 / Legendary 500 · Ferryman's Oar 500.
+
+### 1.6 Horses (M11 extra #2; code: `packages/shared/src/content/horse.ts`) (new)
+
+| Rule | Value |
+|---|---|
+| Item | Horse Whistle, 1,500 ◎ at the Portus Exchange (gear, one per slot, sells back for 375). Carried like anything else: it drops in the death pile, whoever picks it up owns a horse |
+| Whistle (H) | Outside safe zones only (all of Portus and the 12 m pad rings refuse), with the whistle in the hotbar or backpack, not in deep water; 2 s between whistles. The horse appears 3 m to your side (a dry spot) with a corpuscle burst. One horse per player: whistling again brings the same horse over |
+| Get on / off | E (or H) within 3.5 m of your own horse. H while riding always gets off. At most one change per 0.5 s |
+| Speed | 14 m/s, Shift gallop 16 m/s (on foot: run 6, sprint 9). Heavier turns and acceleration. Jumping works; fall damage still applies. NPC chill/slow scale it; Cease-and-Desist holds it to 14 |
+| From the saddle | **No attacks of any kind** (fire, melee, block, bow draw, scope are refused by the server), also for 0.6 s after getting off (the server still allows horse speed for in-flight inputs); no dodge-roll. Tonics and Patchkits still work; the whistle in hand gets you off. Kept simple on purpose: no one-handed-sidearm exception to balance |
+| Thrown off | Any single hit of ≥ 20% of your max HP, or water deeper than 1 m (the horse won't swim; it waits on the last dry spot) |
+| Hit box | The rider can be shot in the saddle: the server lifts a mounted player's hit capsule 0.8 m (headshots land on the drawn head; shots at the horse's legs miss) |
+| The horse | Never a target, never saved. Leaves 30 s after you get off, and at once when you die, log out, drop your connection, travel (portal or pad fast travel; any teleport), or lose the whistle (sold, dropped). A rider who leaves outside a safe zone lingers on foot |
+| Coats | Six (chestnut, bay, grey, palomino, black, white), each with its own blanket colour; your coat is fixed by your account id |
 
 ---
 
@@ -774,7 +788,7 @@ download date, modifications and hash [13]. **ElevenLabs outputs never go in the
 | Animations (fallback) | KayKit Character Animations, the **current** pack (161 clips), not the legacy one | https://kaylousberg.itch.io/kaykit-character-animations | CC0 | verified [08] |
 | Rigging aid + clips | Mesh2Motion (code MIT; its rigs and animations CC0) | https://mesh2motion.org/ · https://github.com/Mesh2Motion/mesh2motion-assets | MIT / CC0 | verified [08]; check any third-party sample models separately |
 | Prototype characters | Kenney Animated Characters (Protagonists, Retro, Survivors), Blocky Characters | https://kenney.nl/assets/animated-characters-protagonists | CC0 | verified [08] |
-| Animals (horse) | Quaternius low-poly animated animals | https://quaternius.itch.io/lowpoly-animated-animals | CC0 | horse verified [r2-04]; **wolf/sheep contents unverified** |
+| Animals (horse) | Quaternius low-poly animated animals | https://quaternius.itch.io/lowpoly-animated-animals | CC0 | horse verified [r2-04] and used (docs/ASSETS.md); the pack is cow, horse, llama, pig, pug, sheep, zebra (no wolf) |
 | Props, HDRIs, textures | Poly Haven | https://polyhaven.com/license | CC0 | verified [13], [07] |
 | Materials | ambientCG | https://docs.ambientcg.com/license/ | CC0 | verified [07] |
 | Props, UI | Kenney asset packs | https://kenney.nl/support | CC0 | verified [13] |

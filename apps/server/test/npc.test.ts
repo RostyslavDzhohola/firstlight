@@ -534,13 +534,15 @@ describe("review blockers (seam 1)", () => {
     const ar = hollowArena();
     const A = await player("runner", "hollowmere", ar.centre as V, 14);
     let died = false;
-    A.onMessage("death", (m: any) => m.victim === A.sessionId && (died = true));
+    let killerName = "";
+    A.onMessage("death", (m: any) => m.victim === A.sessionId && ((died = true), (killerName = m.killerName)));
     let circle: any = null;
     A.onMessage("boss", (m: any) => m.type === "mechanic" && m.mech === "royal_judgement" && (circle = m));
     await bossUpIn(A);
     await waitFor(() => circle !== null, 4000);
     place(A, offset(ar.centre, 0, 140, BODIES.hollowmere.radius)); // well outside the 30 m Nave
     await waitFor(() => died, 4000);
+    expect(killerName).toBe("npc:hollow_king"); // content id: the death screen maps it to "The Hollow King"
   }, 30_000);
 });
 

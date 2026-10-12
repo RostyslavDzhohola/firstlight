@@ -20,6 +20,7 @@ export const PF = {
   SCOPED: 2048,
   VOICE_MUTED: 4096, // admin voice-mute
   LOADTEST: 8192,
+  MOUNTED: 16384, // riding a horse (server-owned; content/horse.ts)
 } as const;
 
 /** Animation states (client picks clips from these). */
@@ -107,6 +108,24 @@ export const PileState = schema(
 );
 export type PileState = SchemaType<typeof PileState>;
 
+/** A summoned horse (content/horse.ts), keyed by its owner's session id. Not view-filtered: one per
+ *  player at most. While ridden the client draws it under the rider (rider's own interpolation) and
+ *  these fields only matter once the rider gets off. */
+export const HorseState = schema(
+  {
+    x: t.float32(),
+    y: t.float32(),
+    z: t.float32(),
+    fx: unit(),
+    fy: unit(),
+    fz: unit(),
+    ridden: t.boolean(),
+    coat: t.uint8(),
+  },
+  "Horse",
+);
+export type HorseState = SchemaType<typeof HorseState>;
+
 export const BodyState = schema(
   {
     time: t.float64(), // server ms clock
@@ -117,6 +136,7 @@ export const BodyState = schema(
     body: t.string(),
     copy: t.uint8(),
     announce: t.string(),
+    horses: t.map(HorseState),
   },
   "BodyState",
 );

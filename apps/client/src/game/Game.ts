@@ -6,6 +6,7 @@ import { BODIES, padDirs, type BodyId } from "@firstlight/shared";
 import { flags } from "../config.ts";
 import { Net, TravelRedirect, type Snapshot } from "../net/Net.ts";
 import { AvatarView, avatarWarmupHook, preloadAvatars } from "../render/Avatars.ts";
+import { HorseView, horseWarmupHook, preloadHorse } from "../render/Horses.ts";
 import "../render/avatars/system.ts";
 import { Bench, benchConfig } from "../render/bench.ts";
 import { BlobShadows } from "../render/blobShadows.ts";
@@ -95,6 +96,7 @@ export class Game {
     }
     installShaderMonitor(this.ctx);
     void preloadAvatars(); // character GLBs stream in while we connect and build the world
+    void preloadHorse(); // 147 KB: horses are in the warm-up, so they never compile mid-game
     console.info(`[gfx] backend ${this.ctx.webgpu ? "WebGPU" : "WebGL2"}, tier ${this.ctx.tier}${this.ctx.settings.auto ? " (auto)" : ""}, gpu "${this.ctx.gpuName}"`);
     setLoadingBadge(`${this.ctx.webgpu ? "WebGPU" : "WebGL2"} · ${this.ctx.tier}${this.ctx.settings.auto ? " (auto)" : ""}`);
     this.input = new Input(this.ctx.renderer.domElement);
@@ -400,7 +402,7 @@ export class Game {
       alive("building the world");
     }
     setLoading("Loading characters…", 0.8);
-    await preloadAvatars(); // resolves null on failure: avatars fall back to capsules
+    await Promise.all([preloadAvatars(), preloadHorse()]); // resolve null on failure: capsules / box horses
     alive("loading characters");
     if (!this.self) {
       this.self = new AvatarView(choice?.palette ?? stored.palette, choice?.starter ?? stored.starter);
@@ -459,10 +461,12 @@ export class Game {
   private warmupHook() {
     // every palette's skinned toon variant, weapons and LOD proxies compile behind the loading screen
     const avatars = avatarWarmupHook(this.ctx.scene, () => this.player.pos);
+    const horses = horseWarmupHook(this.ctx.scene, () => this.player.pos); // the six coat materials
     return {
       forceAll: (on: boolean) => {
         this.planet.props.setForceAll(on);
         avatars.forceAll(on);
+        horses.forceAll(on);
       },
     };
   }
@@ -595,6 +599,7 @@ export class Game {
       this.blobs.begin();
       if (!this.bench && this.self) this.addBlob(this.player.pos);
       for (const a of this.avatars.values()) this.addBlob(a.root.position);
+      for (const h of HorseView.all) if (h.root.parent && h.root.visible) this.addBlob(h.root.position, 1.0);
       if (this.bench) for (const b of this.bench.crowdBlobs()) this.blobs.add(b.x, b.y, b.z, b.r);
       this.blobs.end();
     }
@@ -629,14 +634,14 @@ export class Game {
     this.input.endFrame();
   }
 
-  /** Contact shadow under a character standing within 6 m of the ground. */
-  private addBlob(pos: THREE.Vector3) {
+  /** Contact shadow under a character (or horse, r = 1) standing within 6 m of the ground. */
+  private addBlob(pos: THREE.Vector3, r = 0.55) {
     const l = pos.length();
     const g = this.planet.terrain.groundHeight(pos.x / l, pos.y / l, pos.z / l) + this.planet.body.radius;
     const lift = l - g;
     if (lift > 6) return;
     const k = g / l;
-    this.blobs.add(pos.x * k, pos.y * k, pos.z * k, 0.55 * (1 - lift / 8));
+    this.blobs.add(pos.x * k, pos.y * k, pos.z * k, r * (1 - lift / 8));
   }
 }
 

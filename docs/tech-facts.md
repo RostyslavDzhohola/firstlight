@@ -29,9 +29,9 @@ Versions come from `npm view {pkg} version` and publish dates from `time[<versio
 | **`@colyseus/sdk`** (client) | 0.18.5 | 2026-10-03 | **`0.18.5`** | **The 0.18 client.** `colyseus.js` stopped at 0.16.22 (2025-10-22). It depends on `@colyseus/schema ^3` and can't talk to a 0.18 server ([migrating/0.17](https://docs.colyseus.io/migrating/0.17)) |
 | `better-auth` | 1.7.7 | 2026-09-30 | `1.7.7` exact | `anonymous`, `emailOTP` and `jwt` plugins all exist (§5) |
 | `vite` | 8.3.4 | 2026-10-08 | `^8.3.4` | Rolldown-based. Needs Node `^20.19 \|\| >=22.12` |
-| `@vitejs/plugin-react` | 6.1.2 | 2026-10-05 | `6.1.2` | Peer `vite ^8` |
-| `react`, `react-dom` | 19.3.0 | 2026-09-09 | `19.3.0` | DOM UI only (D7) |
-| `zustand` | 5.0.15 | 2026-08-13 | `5.0.15` | |
+| `@vitejs/plugin-react` | 6.1.2 | 2026-10-05 | **not installed** | D25: plain DOM UI. Peer `vite ^8` |
+| `react`, `react-dom` | 19.3.0 | 2026-09-09 | **not installed** | D25 (plain DOM + CSS) supersedes D7's React DOM UI |
+| `zustand` | 5.0.15 | 2026-08-13 | **not installed** | D25 |
 | `@dimforge/rapier3d-compat` | 0.21.0 | 2026-09-25 | `0.21.0` exact | 0.20 moved the compat files into `dist/`. 0.21 changes low-level pipeline signatures (soft bodies) ([changelog](https://github.com/dimforge/rapier/blob/master/bindings/typescript/CHANGELOG.md)). The bindings now live in `dimforge/rapier/bindings/typescript`, and the old `rapier.js` repo is archived in all but name |
 | `three-mesh-bvh` | 0.9.16 | 2026-10-08 | `0.9.16` | 0.9.16 fixes the BVH helper on r186 ([release](https://github.com/gkjohnson/three-mesh-bvh/releases/tag/v0.9.16)). CPU raycast doesn't depend on the renderer; WebGPU compute helpers exist |
 | `recast-navigation` | 0.43.1 | 2026-02-04 | **not installed** | D4: no navmesh |
