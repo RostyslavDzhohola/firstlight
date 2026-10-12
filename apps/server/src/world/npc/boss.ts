@@ -18,7 +18,7 @@ import {
 } from "@firstlight/shared/content/npcs";
 import { partyOf } from "../../social/parties.ts";
 import { actorPos, type NpcActor, type PlayerActor } from "../actors.ts";
-import { dealDamage } from "../combat.ts";
+import { dealDamage, type BreakableHost } from "../combat.ts";
 import type { V3 } from "../geometry.ts";
 import { cancelAttack, playersInCircle, playersInLine, startAttack, updateAttack } from "./attacks.ts";
 import { aggro } from "./brain.ts";
@@ -61,6 +61,8 @@ const SNAPSHOT_RADIUS = 260;
 const RECENT_HIT_MS = 10_000;
 /** Hits from players farther than this beyond the arena edge do nothing (no sniping from outside). */
 const OUTSIDE_REACH = 10;
+/** Arena cover shows up in combat's prop raycasts as index COVER_INDEX + cover index. */
+const COVER_INDEX = 1 << 20;
 
 /** Weak-point volumes in the boss's local frame (x right, y up, z forward), exposed only in their window. */
 const WEAK_VOLUMES: Record<string, { c: V3; r: number }> = {
@@ -111,6 +113,9 @@ export class BossController {
   private platesKey = "";
   private propHook: ((point: V3, power: "light" | "heavy", amount: number) => void) | null = null;
   private propPrev: ((point: V3, power: "light" | "heavy", amount: number) => void) | undefined;
+  private coverHost: BreakableHost | null = null;
+  private coverPrev: BreakableHost | undefined;
+  private readonly coverRayHit = { i: -1, t: Infinity };
 
   constructor(sys: NpcSystem, def: BossDef, arena: ArenaLayout) {
     this.sys = sys;
@@ -125,6 +130,7 @@ export class BossController {
 
   tick(now: number, dt: number) {
     this.hookProps();
+    this.hookCover();
     if (!NPC_TUNING.bosses) {
       if (this.npc) this.despawn();
       return;
@@ -863,6 +869,64 @@ export class BossController {
     host.onPropHit = this.propHook;
   }
 
+  /**
+   * Intact arena cover stops shots like a breakable prop (F12: a rocket aimed mid-pillar flew
+   * through): wrap the combat host's prop raycast so hitscan, chain bolts, projectiles and NPC line
+   * of sight stop at the first cover cylinder. The cover itself takes damage where the shot ends,
+   * through onPropHit (coverHit), so `damage` on a cover index does nothing here.
+   */
+  private hookCover() {
+    const host = this.sys.world.host;
+    if (this.coverHost && host.props === this.coverHost) return;
+    const inner = host.props;
+    this.coverPrev = inner;
+    const hit = { index: -1, t: 0 };
+    this.coverHost = {
+      raycast: (o, d, maxT) => {
+        const h = inner?.raycast(o, d, maxT) ?? null;
+        const propT = h ? h.t : Infinity;
+        const propIdx = h ? h.index : -1;
+        const c = this.coverRay(o, d, Math.min(maxT, propT));
+        if (c.i < 0 && propIdx < 0) return null;
+        hit.index = c.i >= 0 ? COVER_INDEX + c.i : propIdx;
+        hit.t = c.i >= 0 ? c.t : propT;
+        return hit;
+      },
+      damage: (index, ...rest) => {
+        if (index < COVER_INDEX) inner?.damage(index, ...rest);
+      },
+      splash: (...args) => inner?.splash(...args),
+      arc: (...args) => inner?.arc(...args),
+    };
+    host.props = this.coverHost;
+  }
+
+  /** First intact cover cylinder along a ray within maxT: its index and distance (i = −1: none; reused object). */
+  coverRay(o: V3, d: V3, maxT: number): { i: number; t: number } {
+    const out = this.coverRayHit;
+    out.i = -1;
+    out.t = Infinity;
+    let lim = maxT;
+    for (let i = 0; i < this.cover.length; i++) {
+      const c = this.cover[i]!;
+      if (c.broken) continue;
+      const t = rayCylinder(o, d, lim, c.def.pos, c.def.radius, c.def.height);
+      if (t === Infinity) continue;
+      out.i = i;
+      out.t = lim = t;
+    }
+    return out;
+  }
+
+  /** Unhook from the combat host (the room is going away). */
+  dispose() {
+    const host = this.sys.world.host;
+    if (this.coverHost && host.props === this.coverHost) host.props = this.coverPrev;
+    if (this.propHook && host.onPropHit === this.propHook) host.onPropHit = this.propPrev;
+    this.coverHost = null;
+    this.propHook = null;
+  }
+
   coverHit(point: V3, power: "light" | "heavy", amount: number) {
     if (this.status !== "alive") return;
     const now = this.sys.world.now();
@@ -907,4 +971,37 @@ export class BossController {
       c.hp = c.def.hp;
     }
   }
+}
+
+/**
+ * Distance along a ray to an upright cylinder standing on `base` (radius r, height h, axis along the
+ * local up), or Infinity beyond maxT. A ray starting inside doesn't hit it (no trapping the shooter).
+ */
+export function rayCylinder(o: V3, d: V3, maxT: number, base: V3, r: number, h: number): number {
+  const u = normalize(base);
+  const w = sub(o, base);
+  const wu = dot(w, u), du = dot(d, u);
+  const wp = add(w, u, -wu), dp = add(d, u, -du);
+  const c = dot(wp, wp) - r * r;
+  if (c <= 0 && wu >= 0 && wu <= h) return Infinity;
+  let best = Infinity;
+  const a = dot(dp, dp);
+  if (a > 1e-9 && c > 0) {
+    const b = 2 * dot(wp, dp);
+    const disc = b * b - 4 * a * c;
+    if (disc >= 0) {
+      const t = (-b - Math.sqrt(disc)) / (2 * a);
+      const y = wu + du * t;
+      if (t >= 0 && t <= maxT && y >= 0 && y <= h) best = t;
+    }
+  }
+  // The top cap, for shots from above.
+  if (Math.abs(du) > 1e-9 && wu > h) {
+    const t = (h - wu) / du;
+    if (t >= 0 && t < best && t <= maxT) {
+      const q = add(wp, dp, t);
+      if (dot(q, q) <= r * r) best = t;
+    }
+  }
+  return best;
 }

@@ -5,9 +5,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BODIES, padDirs } from "@firstlight/shared";
 import { walk } from "@firstlight/shared/content/arenas";
 import { NF, NPC_INDEX } from "@firstlight/shared/content/npcs";
-import { dealDamage } from "../src/world/combat.ts";
+import { PF } from "@firstlight/shared/net/schema";
+import type { PlayerActor } from "../src/world/actors.ts";
+import { dealDamage, fire, stepProjectiles } from "../src/world/combat.ts";
 import type { V3 } from "../src/world/geometry.ts";
 import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
+import { rayCylinder } from "../src/world/npc/boss.ts";
 import { MODE, type Npc } from "../src/world/npc/npc.ts";
 import { fakeWorld, type FakeWorld } from "./npcWorld.ts";
 
@@ -82,11 +85,12 @@ function arenaPoint(w: FakeWorld, a: number, b = 0): V3 {
   return w.world.snapToGround(walk(ar.up, ar.axis, a, ar.side, b, w.world.body.radius));
 }
 
-/** Spawn the copy's boss and run past its 1 s materialise. */
+/** Spawn the copy's boss and run past its 1 s materialise (a watcher outside the arena keeps it up). */
 function bossReady(w: FakeWorld): Npc {
   NPC_TUNING.bosses = true;
   NPC_TUNING.bossAttacks = false;
   NPC_TUNING.bossMechanics = [];
+  w.addPlayer("watcher", arenaPoint(w, -(w.sys.arena!.radius + 40)), 8);
   w.sys.boss!.forceSpawn(w.clock.t);
   const n = w.sys.boss!.npc!;
   run(w, 1500, () => !(n.state.flags & NF.INVULN));
@@ -135,5 +139,93 @@ describe("boss arena reach (F12 should-fix 8)", () => {
     // …and forgets them 10 s after their last hit.
     expect(run(w, 11_000, () => w.sys.boss!.count === 0)).toBeGreaterThan(9000);
     expect(n.state.maxHp).toBe(12_000);
+  });
+});
+
+/** Up at a point, and a point `h` metres above it. */
+const upAt = (p: V3): V3 => {
+  const l = Math.hypot(p[0], p[1], p[2]);
+  return [p[0] / l, p[1] / l, p[2] / l];
+};
+const above = (p: V3, h: number): V3 => {
+  const u = upAt(p);
+  return [p[0] + u[0] * h, p[1] + u[1] * h, p[2] + u[2] * h];
+};
+
+/** Fire `weapon` (scoped, no spread) from the player's head at a world point. */
+function shoot(w: FakeWorld, p: PlayerActor, weapon: string, at: V3) {
+  p.char.hotbar[0] = { id: weapon, tier: 1, qty: 1 };
+  p.char.selected = 0;
+  p.state.flags |= PF.SCOPED;
+  p.lastAttackAt = 0;
+  p.reloadEndsAt = 0;
+  const head = above([p.state.x, p.state.y, p.state.z], 1.6);
+  const d: V3 = [at[0] - head[0], at[1] - head[1], at[2] - head[2]];
+  const l = Math.hypot(...d);
+  const r = fire(w.world.host, p, { ox: head[0], oy: head[1], oz: head[2], dx: d[0] / l, dy: d[1] / l, dz: d[2] / l });
+  expect(r).toEqual({ ok: true });
+}
+
+/** Advance combat projectiles only (the boss stays put). */
+function flyProjectiles(w: FakeWorld, ms: number) {
+  for (let t = 0; t < ms; t += 50) {
+    w.clock.t += 50;
+    stepProjectiles(w.world.host, 0.05);
+  }
+}
+
+describe("boss arena cover stops ranged shots (F12 should-fix 11)", () => {
+  /** Hollow King at home (15, 0); Nave pillar 7 at (18, 8); the shooter behind it at (21.6, 17.6). */
+  function nave() {
+    const w = fakeWorld("hollowmere", { immortal: true });
+    const king = bossReady(w);
+    const pillar = w.sys.boss!.cover.find((c) => c.def.id === 7)!;
+    const chest = above(king.pos, 2.5);
+    const clear = w.addPlayer("clear", arenaPoint(w, 0, 0), 20);
+    const hidden = w.addPlayer("hidden", arenaPoint(w, 21.6, 17.6), 20);
+    return { w, king, pillar, chest, clear, hidden };
+  }
+
+  it("a rifle shot with a clear line hits the King; one through a pillar stops at it", () => {
+    const { w, king, pillar, chest, clear, hidden } = nave();
+    const hp = king.state.hp;
+    shoot(w, clear, "stillshot", chest);
+    expect(king.state.hp).toBeLessThan(hp);
+    const hp2 = king.state.hp;
+    shoot(w, hidden, "stillshot", chest);
+    expect(king.state.hp).toBe(hp2);
+    expect(pillar.hp).toBe(pillar.def.hp); // light rounds can't hurt heavy-only cover
+  });
+
+  it("a rocket aimed through a pillar explodes on it (damaging it), not on the King", () => {
+    const { w, king, pillar, chest, hidden } = nave();
+    const hp = king.state.hp;
+    shoot(w, hidden, "comet", chest);
+    flyProjectiles(w, 1500);
+    expect(king.state.hp).toBe(hp);
+    expect(pillar.hp).toBeLessThan(pillar.def.hp);
+  });
+
+  it("a chain bolt aimed through a pillar ends on it (heavy: the pillar takes the hit)", () => {
+    const { w, king, pillar, chest, hidden } = nave();
+    const hp = king.state.hp;
+    shoot(w, hidden, "stormcoil", chest);
+    expect(king.state.hp).toBe(hp);
+    expect(pillar.hp).toBeLessThan(pillar.def.hp);
+  });
+});
+
+describe("rayCylinder", () => {
+  // A 9 m pillar of radius 1 standing at the north pole of a 750 m sphere (up = +y).
+  const base: V3 = [0, 750, 0];
+  it("hits the side at the near surface, misses above the top and beside it", () => {
+    expect(rayCylinder([-10, 752, 0], [1, 0, 0], 50, base, 1, 9)).toBeCloseTo(9, 6);
+    expect(rayCylinder([-10, 760, 0], [1, 0, 0], 50, base, 1, 9)).toBe(Infinity);
+    expect(rayCylinder([-10, 752, 1.5], [1, 0, 0], 50, base, 1, 9)).toBe(Infinity);
+    expect(rayCylinder([-10, 752, 0], [1, 0, 0], 8, base, 1, 9)).toBe(Infinity); // beyond maxT
+  });
+  it("hits the top cap from above; a ray from inside doesn't trap the shooter", () => {
+    expect(rayCylinder([0.2, 770, 0], [0, -1, 0], 50, base, 1, 9)).toBeCloseTo(11, 6);
+    expect(rayCylinder([0, 752, 0], [1, 0, 0], 50, base, 1, 9)).toBe(Infinity);
   });
 });

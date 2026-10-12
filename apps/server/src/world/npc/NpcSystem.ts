@@ -155,6 +155,7 @@ export class NpcSystem implements RoomSystem {
   dispose() {
     for (const r of this.restore) r();
     this.restore.length = 0;
+    this.boss?.dispose();
     this.saveCopyState(this.world.now());
   }
 
