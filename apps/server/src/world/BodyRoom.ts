@@ -316,11 +316,21 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     this.setTimestep((dt) => this.tick(dt), NET.TICK_MS);
   }
 
+  /** Each system and each player on its own: one failure doesn't stop the rest (F12 final Opus nit). */
   onDispose() {
     this.unsubscribePiles?.();
-    for (const s of this.systems) s.dispose?.();
-    for (const a of this.actors.values()) this.finalLeave(a);
-    for (const l of this.lingering.values()) this.finalLeave(l.actor);
+    for (const s of this.systems) this.guarded("dispose", () => s.dispose?.());
+    for (const a of this.actors.values()) this.guarded("final leave", () => this.finalLeave(a));
+    for (const l of this.lingering.values()) this.guarded("final leave", () => this.finalLeave(l.actor));
+  }
+
+  /** Run `fn`, logging (not throwing) a failure: shutdown and dispose go on for everyone else. */
+  private guarded(what: string, fn: () => void) {
+    try {
+      fn();
+    } catch (err) {
+      console.error(`[room ${this.roomId}] ${what} failed: ${(err as Error)?.message ?? err}`);
+    }
   }
 
   /**
@@ -501,7 +511,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     }
     // Left without logging out (outside a safe zone, or in a fight): the body stays for 30 s and can die.
     a.state.flags |= PF.LINGER;
-    this.saveActor(a);
+    this.guarded("linger save", () => this.saveActor(a));
     this.lingering.set(client.sessionId, { actor: a, until: now + RULES.LINGER_MS });
     this.autoDispose = false; // keep simulating the body even if nobody else is here
   }
@@ -531,7 +541,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   private finalLeave(a: PlayerActor) {
     if (a.superseded) return;
     this.removeBody(a);
-    this.saveActor(a);
+    // A failed last save leaves the last good one in the database (as after a crash); the actor
+    // still goes, so a leave or a shutdown never stalls on it.
+    this.guarded("final save", () => this.saveActor(a));
     hub.release(a.identity.userId, a);
   }
 
@@ -563,10 +575,13 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   onBeforeShutdown() {
     this.shuttingDown = true;
     this.broadcast("updating", { seconds: 5 });
-    withTx(() => {
-      for (const a of this.actors.values()) this.saveActor(a);
-      for (const l of this.lingering.values()) this.saveActor(l.actor);
-    });
+    // One transaction for speed; a player whose save fails is logged and skipped, not everyone.
+    this.guarded("shutdown save", () =>
+      withTx(() => {
+        for (const a of this.actors.values()) this.guarded("shutdown save", () => this.saveActor(a));
+        for (const l of this.lingering.values()) this.guarded("shutdown save", () => this.saveActor(l.actor));
+      }),
+    );
     super.onBeforeShutdown?.();
   }
 

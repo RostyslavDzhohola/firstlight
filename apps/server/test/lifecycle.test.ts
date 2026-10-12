@@ -13,6 +13,7 @@ import { accountLinks } from "../src/auth/links.ts";
 import { RULES, type BodyRoom } from "../src/world/BodyRoom.ts";
 import { NPC_TUNING, npcSystemOf, resetTuning } from "../src/world/npc/index.ts";
 import { SYSTEM_FACTORIES, type SystemFactory } from "../src/world/systems.ts";
+import { characterRepo, MemoryCharacterRepo } from "../src/world/characters.ts";
 import { grantTravel, joinAs, playRequest, safeLeave, startServer, waitFor } from "./helpers.ts";
 
 let game: Game;
@@ -353,3 +354,36 @@ describe("fast travel (F12 Opus should-fix 7)", () => {
   });
 });
 
+
+describe("shutdown and dispose are per player and per system (F12 final Opus nit)", () => {
+  it("one failing save or system dispose doesn't stop the other players being saved or systems disposed", async () => {
+    let disposedAfter = 0;
+    const throwing: SystemFactory = () => ({ tick() {}, dispose() { throw new Error("dispose failed (test)"); } });
+    const after: SystemFactory = () => ({ tick() {}, dispose() { disposedAfter++; } });
+    SYSTEM_FACTORIES.unshift(throwing);
+    SYSTEM_FACTORIES.push(after);
+    try {
+      const repo = new MemoryCharacterRepo();
+      const save = repo.save.bind(repo);
+      let failing = false;
+      repo.save = (uid, data) => {
+        if (failing && uid === "broken") throw new Error("disk I/O error (test)");
+        save(uid, data);
+      };
+      characterRepo.current = repo;
+      const broken = await join("broken");
+      const fine = await join("fine");
+      expect(broken.roomId).toBe(fine.roomId);
+      failing = true;
+      actorOf(fine).char.coins = 55;
+      rooms.splice(0); // the shutdown below closes them
+      await game.close();
+      expect(repo.load("fine")?.coins).toBe(55);
+      expect(disposedAfter).toBe(1);
+    } finally {
+      SYSTEM_FACTORIES.splice(SYSTEM_FACTORIES.indexOf(throwing), 1);
+      SYSTEM_FACTORIES.splice(SYSTEM_FACTORIES.indexOf(after), 1);
+      game = await startServer(); // afterEach closes it
+    }
+  });
+});
