@@ -8,13 +8,17 @@ import { emptyStored, resolveSettings } from "./quality.ts";
 // Real deterministic terrain, sampled at four directions per body, including the pad approach
 // and the densely vegetated cube seams. Count actual compressed geometry, never the manifest.
 describe("vegetation tier budgets", () => {
+  // Placement does not depend on quality. Reuse deterministic fixtures across tier runs so
+  // a busy shared machine spends its CPU on selection/counting rather than regenerating worlds.
+  const terrains = new Map(BODY_IDS.map((body) => [body, createTerrain(body)]));
+  const chunks = new Map<string, { packed: Float32Array; center: THREE.Vector3; radius: number }>();
   for (const tier of ["low", "medium", "high", "ultra"] as const) {
-    it(`${tier}: limits prop instances, triangles and draws including a shadow pass`, async () => {
+    it(`${tier}: limits prop instances, triangles and draws including a shadow pass`, { timeout: 60_000 }, async () => {
       const assets = await testVegetationAssets();
       const settings = resolveSettings(tier, false, true, emptyStored(), new Set());
       const results: { body: string; instances: number; triangles: number; draws: number }[] = [];
       for (const body of BODY_IDS) {
-        const terrain = createTerrain(body), R = terrain.body.radius;
+        const terrain = terrains.get(body)!, R = terrain.body.radius;
         const directions = [[1, 0, 0], [0.3, 1, 0.4], [1, 1, 0.2], padDirs(BODIES[body])[0]!] as const;
         for (const d of directions) {
           const up = new THREE.Vector3(...d).normalize();
@@ -32,9 +36,18 @@ describe("vegetation tier budgets", () => {
           await sys.ready;
           sys.applySettings(settings);
           for (const [key, [face, cx, cy]] of keys) {
-            const g = buildChunk(terrain, face, cx, cy);
-            const center = new THREE.Vector3(...g.center).multiplyScalar(R + (g.minHeight + g.maxHeight) / 2);
-            sys.addChunk(key, packProps(chunkProps(terrain, face, cx, cy)), center, g.boundRadius);
+            const fixtureKey = `${body}:${key}`;
+            let chunk = chunks.get(fixtureKey);
+            if (!chunk) {
+              const g = buildChunk(terrain, face, cx, cy);
+              chunk = {
+                center: new THREE.Vector3(...g.center).multiplyScalar(R + (g.minHeight + g.maxHeight) / 2),
+                packed: packProps(chunkProps(terrain, face, cx, cy)),
+                radius: g.boundRadius,
+              };
+              chunks.set(fixtureKey, chunk);
+            }
+            sys.addChunk(key, chunk.packed, chunk.center, chunk.radius);
           }
           sys.update(cam, 1000);
           let triangles = 0, draws = 0;
