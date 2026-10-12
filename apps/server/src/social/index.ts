@@ -13,7 +13,7 @@ import { rekeyAnalytics } from "./analytics.ts";
 import { rekeyModeration } from "./moderation.ts";
 import { parties } from "./parties.ts";
 import { rekeyPresence, sendTo } from "./presence.ts";
-import { createSocialSystem, rekeySessions, syncParty } from "./system.ts";
+import { createSocialSystem, enforceBlocksAfterMerge, rekeySessions, syncParty } from "./system.ts";
 
 SYSTEM_FACTORIES.push(createSocialSystem);
 
@@ -24,10 +24,13 @@ accountLinks.on((ev) => {
   rekeySessions(ev.fromUserId, ev.toUserId);
   rekeyAnalytics(ev.fromUserId, ev.toUserId);
   rekeyModeration(ev.fromUserId, ev.toUserId);
+  // The merged blocks (game.db moved them before this event) apply to the merged party and invites.
+  enforceBlocksAfterMerge(ev.toUserId);
   syncParty([...affected, ev.toUserId, ...(parties.of(ev.toUserId)?.members ?? [])]);
-  // Invite cards the guest sent: swap them for ones from the saved account.
+  // Invite cards the guest sent: swap them for ones from the saved account (unless withdrawn above).
   for (const inv of reissued) {
     sendTo(inv.to, "party:invite-closed", { from: ev.fromUserId, to: inv.to, reason: "cancelled" });
+    if (!parties.pendingFor(inv.to).some((i) => i.from === inv.from)) continue;
     sendTo(inv.to, "party:invite", { from: inv.from, fromName: ev.name || inv.fromName, partyId: parties.of(inv.from)?.id ?? null, expiresAt: inv.expiresAt });
   }
 });

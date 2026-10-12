@@ -142,6 +142,28 @@ function splitParty(blocker: string, target: string): void {
   syncParty(r.affected);
 }
 
+/**
+ * After an account merge the account carries the guest's blocks and party (or keeps its own): split
+ * any party that now holds a blocked pair, and withdraw invites between blocked players, before
+ * party state or routing (partyRoomFor) can use them (F12 social review). Same rule as a block, with
+ * the merged account in the blocker's place: as leader it removes the other player, otherwise it
+ * leaves.
+ */
+export function enforceBlocksAfterMerge(userId: string): void {
+  for (const inv of [...parties.pendingFor(userId), ...parties.sentBy(userId)]) {
+    const other = inv.from === userId ? inv.to : inv.from;
+    if (!blockedEitherWay(userId, other)) continue;
+    parties.cancelBetween(userId, other);
+    sendTo(inv.to, "party:invite-closed", { from: inv.from, to: inv.to, reason: "cancelled" });
+  }
+  for (;;) {
+    const p = parties.of(userId);
+    const other = p?.members.find((m) => m !== userId && blockedEitherWay(userId, m));
+    if (!other) return;
+    splitParty(userId, other);
+  }
+}
+
 export type BlockOutcome = { ok: true; changed: boolean } | { ok: false; reason: string };
 
 /**

@@ -10,7 +10,7 @@ import { accountLinks } from "../src/auth/links.ts";
 import { mountOps } from "../src/ops/admin.ts";
 import { banExplainer } from "../src/social/refusal.ts";
 import { recordError } from "../src/ops/errors.ts";
-import { ANALYTICS, blockedEitherWay, partyOf } from "../src/social/index.ts";
+import { ANALYTICS, blockedEitherWay, partyOf, partyRoomFor } from "../src/social/index.ts";
 import { api, Browser, decodeJwt, ORIGIN, play, startAuthServer, type AuthServer } from "./auth-helpers.ts";
 import { safeLeave, waitFor } from "./helpers.ts";
 
@@ -216,6 +216,98 @@ describe("parties and saving", () => {
     a2.send("party", { action: "kick", target: "pal_b" });
     await waitFor(() => me(b).party === "");
     off();
+  });
+});
+
+describe("account merges and blocks (F12 social review 1)", () => {
+  /** A saved account (email) that is not in the world. */
+  async function savedAccount(s: AuthServer, ip: string, email: string) {
+    const b = new Browser(s, ip);
+    await b.playToken();
+    await b.saveWithEmail(email);
+    const token = (await b.client.token()).data!.token;
+    return { id: String(decodeJwt(token).sub), token };
+  }
+
+  /** A guest on a new browser who enters `body` and joins `leader`'s party. */
+  async function guestInParty(s: AuthServer, ip: string, leader: Room) {
+    const b = new Browser(s, ip);
+    const token = await b.playToken();
+    const id = String(decodeJwt(token).sub);
+    const g = await enter(s, token, "portus", ip);
+    await waitFor(() => st(leader).players?.has(g.sessionId));
+    const invites = inbox<any>(g, "party:invite");
+    leader.send("party", { action: "invite", target: g.sessionId });
+    await waitFor(() => invites.length > 0);
+    g.send("party", { action: "accept", target: invites[0].from });
+    await waitFor(() => !!me(g)?.party && me(g).party === me(leader)?.party);
+    return { b, id, room: g };
+  }
+
+  it("signing a guest into an account that blocked, or was blocked by, a party member splits the party before routing", async () => {
+    const s = await start();
+    const off = s.accounts.links.on((e) => accountLinks.emit(e));
+    try {
+      const bee = await enter(s, "dev:mrg_bee:Bee", "portus");
+      // Outgoing: account A blocked Bee earlier.
+      const a = await savedAccount(s, "198.51.100.80", "mrg-a@example.test");
+      const aRoom = await enter(s, a.token, "portus", "198.51.100.80");
+      await waitFor(() => st(bee).players?.has(aRoom.sessionId));
+      aRoom.send("social:block", { target: bee.sessionId });
+      await waitFor(() => blockedEitherWay(a.id, "mrg_bee"));
+      await safeLeave(aRoom);
+      const ga = await guestInParty(s, "198.51.100.81", bee);
+      await ga.b.saveWithEmail("mrg-a@example.test");
+      expect(partyOf(a.id)).toEqual([a.id]);
+      expect(partyOf("mrg_bee")).toEqual(["mrg_bee"]);
+      expect(partyRoomFor(a.id, "portus")).toBeUndefined();
+
+      // Incoming: Bee blocked account C earlier.
+      const c = await savedAccount(s, "198.51.100.82", "mrg-c@example.test");
+      const cRoom = await enter(s, c.token, "portus", "198.51.100.82");
+      await waitFor(() => st(bee).players?.has(cRoom.sessionId));
+      bee.send("social:block", { target: cRoom.sessionId });
+      await waitFor(() => blockedEitherWay("mrg_bee", c.id));
+      await safeLeave(cRoom);
+      const gc = await guestInParty(s, "198.51.100.83", bee);
+      await gc.b.saveWithEmail("mrg-c@example.test");
+      expect(partyOf(c.id)).toEqual([c.id]);
+      expect(partyOf("mrg_bee")).toEqual(["mrg_bee"]);
+      expect(partyRoomFor(c.id, "portus")).toBeUndefined();
+    } finally {
+      off();
+    }
+  });
+
+  it("an account that keeps its own party loses the members its guest blocked", async () => {
+    const s = await start();
+    const off = s.accounts.links.on((e) => accountLinks.emit(e));
+    try {
+      // Account D leads a party with Cid.
+      const d = await savedAccount(s, "198.51.100.84", "mrg-d@example.test");
+      const dRoom = await enter(s, d.token, "portus", "198.51.100.84");
+      const cid = await enter(s, "dev:mrg_cid:Cid", "portus");
+      await waitFor(() => st(dRoom).players?.has(cid.sessionId));
+      const invites = inbox<any>(cid, "party:invite");
+      dRoom.send("party", { action: "invite", target: cid.sessionId });
+      await waitFor(() => invites.length > 0);
+      cid.send("party", { action: "accept", target: d.id });
+      await waitFor(() => partyOf(d.id).length === 2);
+      // On another browser D plays as a guest, blocks Cid, then signs in: the blocks merge into D.
+      const gb = new Browser(s, "198.51.100.85");
+      const gToken = await gb.playToken();
+      const g = await enter(s, gToken, "portus", "198.51.100.85");
+      await waitFor(() => st(g).players?.has(cid.sessionId));
+      g.send("social:block", { target: cid.sessionId });
+      await waitFor(() => blockedEitherWay(String(decodeJwt(gToken).sub), "mrg_cid"));
+      await gb.saveWithEmail("mrg-d@example.test");
+      expect(blockedEitherWay(d.id, "mrg_cid")).toBe(true);
+      expect(partyOf(d.id)).toEqual([d.id]);
+      expect(partyOf("mrg_cid")).toEqual(["mrg_cid"]);
+      expect(partyRoomFor("mrg_cid", "portus")).toBeUndefined();
+    } finally {
+      off();
+    }
   });
 });
 
