@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { HORSE } from "@firstlight/shared/content/horse";
-import { MountState, horseKeys, mountedSpeed, rideBlockedByWater, rideCamera } from "./mount.ts";
+import { MountState, horseKeys, horsesEnabled, mountedSpeed, rideBlockedByWater, rideCamera } from "./mount.ts";
 
 describe("MountState (local riding state)", () => {
   it("follows the server's flag and never gets on before it", () => {
@@ -61,5 +61,14 @@ describe("riding rules on the client", () => {
     expect(horseKeys({ riding: false, haveHorse: true, near: true, moving: false })).toEqual({ e: "ride", prompt: "E — Ride your horse" });
     expect(horseKeys({ riding: false, haveHorse: true, near: false, moving: false })).toEqual({ e: null, prompt: null });
     expect(horseKeys({ riding: false, haveHorse: false, near: false, moving: false }).e).toBeNull();
+  });
+});
+
+describe("the horses flag", () => {
+  it("is on only when the server says so and the ?nohorses kill switch is off", () => {
+    expect(horsesEnabled({ horses: true }, false)).toBe(true);
+    expect(horsesEnabled({ horses: true }, true)).toBe(false);
+    expect(horsesEnabled({}, false)).toBe(false);
+    expect(horsesEnabled(null, false)).toBe(false);
   });
 });

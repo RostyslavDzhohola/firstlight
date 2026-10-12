@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BODIES, portalSpots, type BodyId } from "@firstlight/shared";
 import { HORSE, HORSE_WHISTLE, tooDeepToRide } from "@firstlight/shared/content/horse";
 import { PF } from "@firstlight/shared/net/schema";
+import { env } from "../src/env.ts";
 import { HorseSystem } from "../src/world/horses/HorseSystem.ts";
 import { pileStore } from "../src/world/piles.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
@@ -134,6 +135,41 @@ describe("the Horse Whistle", () => {
     expect(b.last("denied").reason).toBe("safe zone");
     await sleep(200);
     expect(horses(b).size).toBe(0);
+  });
+});
+
+describe("the horses flag (FEATURE_HORSES)", () => {
+  it("on by default: clients are told through you.horses", async () => {
+    const b = await rider("flagged", false);
+    await until("you", () => b.you?.horses === true);
+  });
+
+  it("off: no horse system, the whistle isn't sold, and H is refused without dropping the client", async () => {
+    env.horses = false;
+    try {
+      const b = await bot("nohorses", "portus");
+      await tpAndWait(b, objAt("juno_vale"));
+      b.send("admin", { cmd: "coins", args: { amount: 5000 } });
+      await until("coins", () => b.you.coins === 5000);
+      expect(b.you.horses).toBeUndefined();
+      expect(serverRoom(b).systems.some((s) => s instanceof HorseSystem)).toBe(false);
+      b.send("buy", { itemId: HORSE_WHISTLE });
+      await until("refused", () => b.last("shop")?.ok === false);
+      expect(b.last("shop").reason).toBe("not sold");
+
+      const r = await bot("nohorses2", BODY);
+      await tpAndWait(r, offPad(BODY, 0, 40));
+      r.send("admin", { cmd: "give", args: { id: HORSE_WHISTLE } }); // an old whistle still in the bags
+      await until("whistle", () => invIds(r).includes(HORSE_WHISTLE));
+      r.send("horse", { action: "whistle" });
+      await until("denied", () => r.last("denied")?.action === "horse");
+      expect(r.last("denied").reason).toBe("off");
+      await sleep(150);
+      expect(horses(r).size).toBe(0);
+      expect(r.room.connection.isOpen).toBe(true);
+    } finally {
+      env.horses = true;
+    }
   });
 });
 

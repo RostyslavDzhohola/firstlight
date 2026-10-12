@@ -37,6 +37,11 @@ export class MountState {
   }
 }
 
+/** Horses are on: the server says so (`you.horses`, its FEATURE_HORSES flag) and no ?nohorses kill switch. */
+export function horsesEnabled(you: { horses?: boolean } | null | undefined, killSwitch: boolean): boolean {
+  return !killSwitch && you?.horses === true;
+}
+
 /** Camera while riding: eyes higher and further back (blend 0 = on foot, 1 = in the saddle). */
 export function rideCamera(blend: number): { lift: number; back: number } {
   return { lift: 1.0 * blend, back: 1.8 * blend };

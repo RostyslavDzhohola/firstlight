@@ -3,6 +3,7 @@
 
 import * as THREE from "three/webgpu";
 import { isBlocked, partyState } from "../social/store.ts";
+import { HORSE_WHISTLE } from "@firstlight/shared/content/horse";
 import { WEAPONS, WEAPON_BY_ID, type WeaponDef } from "@firstlight/shared/content/weapons";
 import { PHRASES } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
@@ -265,6 +266,11 @@ export class CombatClient {
 
     // Left mouse: attack.
     if (!input.lmb && !input.lmbPressed) return;
+    if (def.id === HORSE_WHISTLE) {
+      // The whistle in hand works like H (the server explains a refusal, safe zones included).
+      if (input.lmbPressed && g.hud.you?.horses) room.send("horse", { action: "whistle" });
+      return;
+    }
     if (meState && meState.flags & PF.SAFE) {
       if (input.lmbPressed) g.hud.toast("Weapons are holstered in safe zones", "warn");
       return;

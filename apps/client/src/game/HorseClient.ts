@@ -13,7 +13,8 @@ import { ANIM, PF } from "@firstlight/shared/net/schema";
 import { HorseView } from "../render/Horses.ts";
 import type { AvatarView } from "../render/Avatars.ts";
 import type { Game } from "./Game.ts";
-import { MountState, horseKeys, rideBlockedByWater } from "./mount.ts";
+import { flags } from "../config.ts";
+import { MountState, horseKeys, horsesEnabled, rideBlockedByWater } from "./mount.ts";
 import type { ClientSystem } from "./systems.ts";
 
 const _pos = new THREE.Vector3();
@@ -134,6 +135,7 @@ export class HorseClient {
     const g = this.game;
     const room = g.net.room;
     if (!room || g.photo?.active || g.combat.deadUntilRespawn || !g.input.locked) return;
+    if (!horsesEnabled(g.hud.you, false)) return; // server flag off: H and E stay free
     const state = room.state as any;
     const own = state.horses?.get(room.sessionId);
     const near = !!own && g.player.pos.distanceTo(_v.set(own.x, own.y, own.z)) <= HORSE.mountRange;
@@ -184,7 +186,7 @@ export class HorseClient {
 
 /** Created per body (first in CLIENT_SYSTEMS). */
 export function horseClientSystem(game: Game): ClientSystem | null {
-  if (!game.net.room) return null;
+  if (!game.net.room || flags.has("nohorses")) return null;
   const c = new HorseClient(game);
   current = c;
   return { update: (dt) => c.update(dt), dispose: () => c.dispose() };
@@ -192,6 +194,7 @@ export function horseClientSystem(game: Game): ClientSystem | null {
 
 /** Runs after the quests client; no state of its own. */
 export function horseInputSystem(): ClientSystem | null {
+  if (flags.has("nohorses")) return null;
   return {
     update: () => current?.input(),
     dispose: () => {},

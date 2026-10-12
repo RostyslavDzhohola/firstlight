@@ -9,7 +9,9 @@ import type { Client } from "@colyseus/core";
 import { isSafe } from "@firstlight/shared";
 import { HORSE, hasWhistle, horseCoat, tooDeepToRide, WHISTLE_REFUSAL_TEXT, whistleRefusal } from "@firstlight/shared/content/horse";
 import { HorseState, PF } from "@firstlight/shared/net/schema";
+import type { YouState } from "@firstlight/shared/net/protocol";
 import { z } from "zod";
+import { env } from "../../env.ts";
 import { actorPos, type PlayerActor } from "../actors.ts";
 import type { BodyRoom } from "../BodyRoom.ts";
 import { onGameEvent, type GameEvent } from "../events.ts";
@@ -164,6 +166,10 @@ export class HorseSystem implements RoomSystem {
     }
   }
 
+  decorateYou(_a: PlayerActor, you: YouState) {
+    you.horses = true; // the client only offers H, E-to-ride and the whistle in the shop when this is set
+  }
+
   onPlayerLeave(sessionId: string) {
     this.despawn(sessionId, "left"); // logout, travel, closed tab (a lingering body walks, it doesn't ride)
     this.lastWhistle.delete(sessionId);
@@ -238,4 +244,11 @@ export class HorseSystem implements RoomSystem {
   }
 }
 
-export const createHorseSystem: SystemFactory = (room) => new HorseSystem(room);
+/** SYSTEM_FACTORIES entry. With the flag off (env.horses, FEATURE_HORSES=0) there is no horse
+ *  system, but "horse" stays registered: in production Colyseus drops a client that sends an
+ *  unregistered message type, and a stale tab may still press H. */
+export const createHorseSystem: SystemFactory = (room) => {
+  if (env.horses) return new HorseSystem(room);
+  room.onMessage("horse", actionSchema, (c) => c.send("denied", { action: "horse", reason: "off" }));
+  return null;
+};

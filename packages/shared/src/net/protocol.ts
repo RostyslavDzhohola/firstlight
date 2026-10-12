@@ -154,6 +154,8 @@ export interface YouState {
   worn?: Partial<Record<CosmeticSlot, string>>;
   logoutEndsAt: number | null;
   protectedUntil: number;
+  /** Horses are on in this room (server flag FEATURE_HORSES; set by the horse system). */
+  horses?: boolean;
 }
 
 export interface InvItem {

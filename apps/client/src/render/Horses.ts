@@ -30,7 +30,7 @@ export function horseAssets(): HorseAssets | null {
 
 /** Start (or join) the one-off load (147 KB). Resolves to null on failure: views keep the box horse. */
 export function preloadHorse(): Promise<HorseAssets | null> {
-  if (flags.has("nochars")) return Promise.resolve(null);
+  if (flags.has("nochars") || flags.has("nohorses")) return Promise.resolve(null);
   promise ??= load().catch((err) => {
     console.warn("[horses] horse.glb failed to load; using the box horse", err);
     return null;
