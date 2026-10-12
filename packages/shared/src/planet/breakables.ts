@@ -13,6 +13,8 @@ import type { BodyDef, BodyId, FeatureAnchor } from "./bodies.ts";
 import { chunkOf } from "./cubesphere.ts";
 import { anchorDir, chordMetres, padDirs, PAD_SAFE_RADIUS, type Dir } from "./pads.ts";
 import { chunkProps, PROP_DEFS, type PropInstance } from "./props.ts";
+import { bossArena } from "../content/arenas.ts";
+import { placeDir } from "../content/places.ts";
 import type { Terrain } from "./terrain.ts";
 
 // ------------------------------------------------------------------------------------ archetypes
@@ -163,9 +165,9 @@ type Rng = () => number;
 
 interface SiteDef {
   name: string;
-  /** Anchor, then optional "walk toward" and tangent offsets (mirrors content/places.ts). */
-  at: FeatureAnchor;
-  toward?: FeatureAnchor;
+  /** A named place (content/places.ts) or a pad anchor, then optional "walk toward" and tangent offsets. */
+  at: FeatureAnchor | { place: string };
+  toward?: FeatureAnchor | { place: string };
   dist?: number;
   east?: number;
   north?: number;
@@ -323,12 +325,16 @@ function padCover(body: BodyId) {
   };
 }
 
-// --- points of interest per planet (positions mirror lane/quests content/places.ts) ---
+// --- points of interest per planet, anchored on content/places.ts ---
+// Boss-arena cover (Coral Pillars, Nave pillars, Freight Containers, Crane Legs) belongs to the NPC
+// lane's arena layout (content/arenas.ts: HP, toppling, blocking boss attacks); nothing here is
+// placed inside a boss arena. The `cover` archetype (the same heavy coral/pillar/container shapes)
+// is used as ordinary fight cover elsewhere.
 
 const SITES: Partial<Record<BodyId, SiteDef[]>> = {
   arcadia: [
     {
-      name: "Blockyard Camp", at: { mid: [3, 5] }, search: 45,
+      name: "Blockyard Camp", at: { place: "blockyard_camp" }, search: 45,
       build: (rng, o) => {
         o.begin(0, 0, rng() * TAU);
         campRing(rng, o, 15, 2);
@@ -341,7 +347,7 @@ const SITES: Partial<Record<BodyId, SiteDef[]>> = {
       },
     },
     {
-      name: "Highscore Hill ruins", at: { mid: [1, 6] }, search: 60,
+      name: "Highscore Hill ruins", at: { place: "highscore_hill" }, search: 60,
       build: (rng, o) => {
         o.begin(0, 0, rng() * TAU);
         colonnade(rng, o, 2, 4, 5, 7);
@@ -350,7 +356,7 @@ const SITES: Partial<Record<BodyId, SiteDef[]>> = {
       },
     },
     {
-      name: "Clover Fields farm", at: { pad: 0 }, toward: { pad: 3 }, dist: 150, north: 40, search: 30,
+      name: "Clover Fields farm", at: { place: "lone_oak" }, east: -30, north: 20, search: 30,
       build: (rng, o) => {
         o.begin(0, 0, rng() * TAU);
         pen(rng, o, 4, 3);
@@ -365,25 +371,20 @@ const SITES: Partial<Record<BodyId, SiteDef[]>> = {
       },
     },
     {
-      // Tidewrath's arena: six Coral Pillars on the shore around Gull Point (content.md §4.2).
-      name: "Gull Point", at: { mid: [3, 7] }, east: 86, search: 30,
-      build: (rng, o) => {
-        o.begin(0, 0, 0);
-        ring(o, "cover", 6, 18, rng() * TAU);
-        o.begin(-12, 22, rng() * TAU);
-        crates(rng, o);
-      },
-    },
-    {
-      name: "Glasswater shore", at: { mid: [3, 7] }, north: 84,
+      // Coral outcrops and a dock's worth of crates on the Glasswater shore (away from Gull Point).
+      name: "Glasswater shore", at: { place: "glasswater_lake" }, north: 84,
       build: (rng, o) => {
         scatter(rng, o, 4, 22, (r, s) => (r() < 0.5 ? crates(r, s) : barrels(r, s)));
+        scatter(rng, o, 3, 26, (r, s) => {
+          s.add("cover", 0, 0, r() * TAU);
+          if (r() < 0.5) s.add("crate", 1.5, 0.3, r() * TAU, 0.9);
+        });
       },
     },
   ],
   hollowmere: [
     {
-      name: "Saint Orrin's ruin", at: { mid: [0, 2] }, search: 45,
+      name: "Saint Orrin's ruin", at: { place: "saint_orrins" }, search: 45,
       build: (rng, o) => {
         o.begin(0, 0, rng() * TAU);
         colonnade(rng, o, 2, 5, 5, 9);
@@ -395,26 +396,19 @@ const SITES: Partial<Record<BodyId, SiteDef[]>> = {
       },
     },
     {
-      name: "Drowned Chapel", at: { mid: [2, 8] }, toward: { pad: 2 }, dist: 92, search: 25,
+      // Tall nave-style pillars (heavy cover) around the flooded chapel.
+      name: "Drowned Chapel", at: { place: "drowned_chapel" }, search: 25,
       build: (rng, o) => {
         o.begin(0, 0, rng() * TAU);
-        colonnade(rng, o, 2, 3, 5, 8);
+        for (let i = 0; i < 3; i++) {
+          o.add("cover", -5, -8 + i * 8, 0);
+          o.add("cover", 5, -8 + i * 8, 0);
+        }
         o.add("statue", 0, 0, rng() * TAU);
       },
     },
     {
-      // The Hollow King's nave: eight stone pillars in two rows (content.md §4.3).
-      name: "Hollow Nave", at: { pad: 10 }, toward: { pad: 4 }, dist: 125, search: 30,
-      build: (rng, o) => {
-        o.begin(0, 0, rng() * TAU);
-        for (let i = 0; i < 4; i++) {
-          o.add("cover", -7, -15 + i * 10, 0);
-          o.add("cover", 7, -15 + i * 10, 0);
-        }
-      },
-    },
-    {
-      name: "Ossuary Camp", at: { pad: 10 }, toward: { pad: 4 }, dist: 235, search: 40,
+      name: "Ossuary Camp", at: { place: "ossuary_camp" }, search: 40,
       build: (rng, o) => {
         o.begin(0, 0, rng() * TAU);
         campRing(rng, o, 13, 2);
@@ -425,7 +419,7 @@ const SITES: Partial<Record<BodyId, SiteDef[]>> = {
       },
     },
     {
-      name: "Thornwood ruins", at: { mid: [1, 2] },
+      name: "Thornwood ruins", at: { place: "thornwood" },
       build: (rng, o) => {
         scatter(rng, o, 5, 60, (r, s) => {
           s.add("pillar", 0, 0, r() * TAU);
@@ -437,10 +431,10 @@ const SITES: Partial<Record<BodyId, SiteDef[]>> = {
   ],
   meridian: [
     {
-      name: "Checkpoint Seven", at: { mid: [0, 3] }, search: 40,
+      name: "Checkpoint Seven", at: { place: "checkpoint_seven" }, search: 40,
       build: (rng, o) => {
         const rot = rng() * TAU;
-        // Two barrier walls either side of the road, a gate gap in the middle.
+        // Two barrier walls either side of the road, a gate gap in the middle, containers as cover.
         o.begin(0, 8, rot);
         barrierLine(rng, o, 3);
         o.begin(0, -8, rot);
@@ -453,37 +447,43 @@ const SITES: Partial<Record<BodyId, SiteDef[]>> = {
         barrels(rng, o);
         o.begin(-12, 0, rot + Math.PI / 2);
         fenceRun(rng, o, 4);
+        o.begin(-3, -16, rot);
+        o.add("cover", 0, 0, 0);
+        o.begin(5, 16, rot);
+        o.add("cover", 0, 0, 0);
       },
     },
     {
-      // The Receiver's yard: eight Freight Containers (content.md §4.4).
-      name: "Foreclosure Yard", at: { mid: [3, 9] }, search: 60,
+      name: "Signal Ridge cover", at: { mid: [2, 0] },
       build: (rng, o) => {
-        o.begin(0, 0, 0);
-        ring(o, "cover", 8, 17, rng() * TAU, true);
+        scatter(rng, o, 8, 70, (r, s) => (r() < 0.5 ? barrierLine(r, s, 2) : r() < 0.5 ? crates(r, s) : barrels(r, s)));
       },
     },
     {
-      // On Chrome Spires' flank. (Signal Ridge's anchor, mid [2, 17], is two antipodal pads: no direction.)
-      name: "Chrome Spires ridge cover", at: { tri: [7, 12, 15] }, toward: { pad: 12 }, dist: 80,
+      name: "Chrome Spires slopes", at: { place: "chrome_spires" }, toward: { pad: 15 }, dist: 95,
       build: (rng, o) => {
-        scatter(rng, o, 8, 60, (r, s) => (r() < 0.5 ? barrierLine(r, s, 2) : r() < 0.5 ? crates(r, s) : barrels(r, s)));
+        scatter(rng, o, 6, 50, (r, s) => (r() < 0.4 ? barrierLine(r, s, 2) : r() < 0.6 ? s.add("cover", 0, 0, r() * TAU) : crates(r, s)));
       },
     },
     {
-      name: "Cinder Canyons cover", at: { mid: [0, 2] },
+      name: "Cinder Canyons cover", at: { place: "cinder_canyons" },
       build: (rng, o) => {
-        scatter(rng, o, 8, 90, (r, s) => (r() < 0.45 ? barrierLine(r, s, 2) : r() < 0.6 ? crates(r, s) : barrels(r, s)));
+        scatter(rng, o, 8, 90, (r, s) => (r() < 0.4 ? barrierLine(r, s, 2) : r() < 0.55 ? crates(r, s) : r() < 0.8 ? barrels(r, s) : s.add("cover", 0, 0, r() * TAU)));
       },
     },
     {
-      name: "Oversight Lobby plaza", at: { pad: 15 }, toward: { pad: 9 }, dist: 165, search: 30,
+      name: "Oversight Lobby plaza", at: { place: "oversight_lobby" }, search: 30,
       build: (rng, o) => {
         o.begin(0, 0, rng() * TAU);
         colonnade(rng, o, 2, 4, 6, 10);
         o.add("statue", 0, 0, rng() * TAU);
         o.begin(12, 6, rng() * TAU);
         crates(rng, o);
+        // Freight containers parked at the plaza's edge.
+        o.begin(-16, -4, rng() * TAU);
+        o.add("cover", 0, 0, 0);
+        o.begin(16, -6, rng() * TAU);
+        o.add("cover", 0, 0, 0);
       },
     },
   ],
@@ -509,9 +509,10 @@ function siteDirs(body: BodyDef): ResolvedSite[] {
   const out: ResolvedSite[] = [];
   const pads = padDirs(body);
   for (let i = 0; i < pads.length; i++) out.push({ name: `pad ${i}`, dir: [...pads[i]!] as V3, search: 0, build: padCover(body.id) });
+  const resolve = (a: FeatureAnchor | { place: string }): Dir => ("place" in a ? placeDir(a.place) : anchorDir(body, a));
   for (const s of SITES[body.id] ?? []) {
-    let d: V3 = [...anchorDir(body, s.at)] as V3;
-    if (s.toward && s.dist) d = towardDir(d, anchorDir(body, s.toward), s.dist, body.radius);
+    let d: V3 = [...resolve(s.at)] as V3;
+    if (s.toward && s.dist) d = towardDir(d, resolve(s.toward), s.dist, body.radius);
     if (s.east || s.north) d = offsetDir(d, s.east ?? 0, s.north ?? 0, body.radius);
     if (!Number.isFinite(d[0] + d[1] + d[2])) throw new Error(`${body.id}: site ${s.name} has no direction (antipodal anchor?)`);
     out.push({ name: s.name, dir: d, search: s.search ?? 0, build: s.build });
@@ -548,6 +549,7 @@ export interface PlacementReport {
   water: number;
   steep: number;
   safe: number;
+  arena: number;
   props: number;
   overlap: number;
 }
@@ -555,12 +557,26 @@ export interface PlacementReport {
 /** Re-run placement and count, per site, how many items were kept or dropped and why. */
 export function breakablePlacementReport(terrain: Terrain): PlacementReport[] {
   if (terrain.body.terrain.kind === "hub") return [];
-  const report = siteDirs(terrain.body).map((s) => ({ site: s.name, kept: 0, water: 0, steep: 0, safe: 0, props: 0, overlap: 0 }));
+  const report = siteDirs(terrain.body).map((s) => ({ site: s.name, kept: 0, water: 0, steep: 0, safe: 0, arena: 0, props: 0, overlap: 0 }));
   place(terrain, report);
   return report;
 }
 
-const FIT_OK = 0, FIT_WATER = 1, FIT_STEEP = 2, FIT_SAFE = 3;
+const FIT_OK = 0, FIT_WATER = 1, FIT_STEEP = 2, FIT_SAFE = 3, FIT_ARENA = 4;
+
+/** Ground the breakables keep out of: every pad's safe ring, and the boss arena (NPC-owned cover). */
+interface KeepOut {
+  pads: readonly Dir[];
+  arena: { dir: Dir; radius: number } | null;
+}
+
+/** Extra clearance around a boss arena's engagement radius (m). */
+export const BREAKABLE_ARENA_MARGIN = 6;
+
+function keepOutFor(terrain: Terrain): KeepOut {
+  const a = bossArena(terrain);
+  return { pads: padDirs(terrain.body), arena: a ? { dir: a.up, radius: a.radius + BREAKABLE_ARENA_MARGIN } : null };
+}
 
 /** One item fitted to the ground at a site: frame, collider size and the ground under it. */
 interface Fit {
@@ -577,7 +593,7 @@ interface Fit {
   gmin: number;
 }
 
-function fitItem(terrain: Terrain, pads: readonly Dir[], site: V3, frame: { north: V3; east: V3 }, it: Item, de: number, dn: number): Fit {
+function fitItem(terrain: Terrain, keep: KeepOut, site: V3, frame: { north: V3; east: V3 }, it: Item, de: number, dn: number): Fit {
   const body = terrain.body;
   const R = body.radius;
   const def = archetypeDef(body.id, it.a);
@@ -617,12 +633,13 @@ function fitItem(terrain: Terrain, pads: readonly Dir[], site: V3, frame: { nort
   if (gmin - body.waterLevel < BREAKABLE_MIN_DRY) status = FIT_WATER;
   else if (steep > 1) status = FIT_STEEP;
   else {
-    for (const p of pads) {
+    for (const p of keep.pads) {
       if (chordMetres(p, dir[0], dir[1], dir[2], R) < PAD_SAFE_RADIUS + foot + BREAKABLE_SAFE_MARGIN) {
         status = FIT_SAFE;
         break;
       }
     }
+    if (status === FIT_OK && keep.arena && chordMetres(keep.arena.dir, dir[0], dir[1], dir[2], R) < keep.arena.radius + foot) status = FIT_ARENA;
   }
   return { status, steep, dir, right, fwd, hx, hz, h, foot, gmin };
 }
@@ -642,10 +659,10 @@ function searchOffsets(r: number): [number, number][] {
 }
 
 /** Score items at an offset: failures dominate, then summed steepness. Lower is better. */
-function scoreAt(terrain: Terrain, pads: readonly Dir[], site: V3, frame: { north: V3; east: V3 }, items: readonly Item[], de: number, dn: number): number {
+function scoreAt(terrain: Terrain, keep: KeepOut, site: V3, frame: { north: V3; east: V3 }, items: readonly Item[], de: number, dn: number): number {
   let fails = 0, steep = 0;
   for (const it of items) {
-    const f = fitItem(terrain, pads, site, frame, it, de, dn);
+    const f = fitItem(terrain, keep, site, frame, it, de, dn);
     if (f.status !== FIT_OK) fails++;
     steep += Math.min(2, f.steep);
   }
@@ -655,7 +672,7 @@ function scoreAt(terrain: Terrain, pads: readonly Dir[], site: V3, frame: { nort
 function place(terrain: Terrain, report?: PlacementReport[]): Breakable[] {
   const body = terrain.body;
   const R = body.radius;
-  const pads = padDirs(body);
+  const keep = keepOutFor(terrain);
   const sites = siteDirs(body);
   const out: Breakable[] = [];
   const propCache = new Map<string, PropInstance[]>();
@@ -699,7 +716,7 @@ function place(terrain: Terrain, report?: PlacementReport[]): Breakable[] {
     if (site.search > 0) {
       let best = Infinity;
       for (const [de, dn] of searchOffsets(site.search)) {
-        const sc = scoreAt(terrain, pads, site.dir, frame, items, de, dn);
+        const sc = scoreAt(terrain, keep, site.dir, frame, items, de, dn);
         if (sc < best) {
           best = sc;
           sde = de;
@@ -716,7 +733,7 @@ function place(terrain: Terrain, report?: PlacementReport[]): Breakable[] {
       if (!members.length) continue;
       let best = Infinity, bde = 0, bdn = 0;
       for (const [de, dn] of searchOffsets(r)) {
-        const sc = scoreAt(terrain, pads, site.dir, frame, members, sde + de, sdn + dn);
+        const sc = scoreAt(terrain, keep, site.dir, frame, members, sde + de, sdn + dn);
         if (sc < best) {
           best = sc;
           bde = de;
@@ -730,11 +747,12 @@ function place(terrain: Terrain, report?: PlacementReport[]): Breakable[] {
     for (let slot = 0; slot < items.length; slot++) {
       const it = items[slot]!;
       const cs = shift.get(it.cluster);
-      const f = fitItem(terrain, pads, site.dir, frame, it, sde + (cs?.[0] ?? 0), sdn + (cs?.[1] ?? 0));
+      const f = fitItem(terrain, keep, site.dir, frame, it, sde + (cs?.[0] ?? 0), sdn + (cs?.[1] ?? 0));
       if (f.status !== FIT_OK) {
         if (rep) {
           if (f.status === FIT_WATER) rep.water++;
           else if (f.status === FIT_STEEP) rep.steep++;
+          else if (f.status === FIT_ARENA) rep.arena++;
           else rep.safe++;
         }
         continue;

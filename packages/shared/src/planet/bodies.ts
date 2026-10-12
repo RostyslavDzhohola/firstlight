@@ -5,8 +5,12 @@ export type BodyId = "portus" | "arcadia" | "hollowmere" | "meridian";
 export const BODY_IDS: readonly BodyId[] = ["portus", "arcadia", "hollowmere", "meridian"];
 export const PLANET_IDS: readonly Exclude<BodyId, "portus">[] = ["arcadia", "hollowmere", "meridian"];
 
-/** Where a feature sits: midpoint of two pads, or centre of three pads (indices into the pad list). */
-export type FeatureAnchor = { mid: [number, number] } | { tri: [number, number, number] } | { pad: number };
+/**
+ * Where a feature sits: midpoint of two pads, centre of three pads, a pad, or (`between`) a fraction `t` of the
+ * way from pad a to pad b (indices into the pad list). Pairs/triples must not include opposite
+ * pads (the centre would collapse onto a pad or vanish); `anchors.test.ts` checks every feature.
+ */
+export type FeatureAnchor = { mid: [number, number] } | { tri: [number, number, number] } | { pad: number } | { between: [number, number, number] };
 
 export interface LakeFeature {
   name: string;
@@ -112,7 +116,8 @@ export const BODIES: Record<BodyId, BodyDef> = {
       { name: "Mourning Mere", at: { mid: [2, 8] }, radius: 95, depth: 12 },
       { name: "Whisper Fen", at: { tri: [0, 3, 4] }, radius: 50, depth: 3 },
     ],
-    peaks: [{ name: "Tolling Tower", at: { tri: [5, 6, 10] }, height: 80, radius: 110 }],
+    // 125 m from pad 10 toward pad 8: the pad sits at the tower's foot, the Hollow Nave just beyond.
+    peaks: [{ name: "Tolling Tower", at: { between: [10, 8, 0.15] }, height: 80, radius: 110 }],
     levels: [6, 13],
   },
   meridian: {
@@ -126,8 +131,8 @@ export const BODIES: Record<BodyId, BodyDef> = {
     terrain: { ...planetDefaults, hillAmp: 12, mountainAmp: 34, mountainScale: 120, offset: 4, terrace: 6 },
     lakes: [{ name: "Brinewater Lake", at: { mid: [4, 11] }, radius: 120, depth: 10 }],
     peaks: [
-      { name: "Chrome Spires", at: { tri: [7, 12, 15] }, height: 110, radius: 140 },
-      { name: "Signal Ridge", at: { mid: [2, 17] }, height: 70, radius: 100 },
+      { name: "Chrome Spires", at: { between: [15, 9, 0.45] }, height: 110, radius: 140 }, // 330 m from pad 15; the Oversight Lobby sits at its foot
+      { name: "Signal Ridge", at: { mid: [2, 0] }, height: 70, radius: 100 },
     ],
     levels: [12, 20],
   },

@@ -20,6 +20,7 @@ import { CLOSE, hub, type HubRoom } from "./hub.ts";
 export const bannedCheck: { current: (userId: string) => boolean } = { current: () => false };
 import { dealDamage, fire, melee, selectedWeapon, stepEffects, stepProjectiles, type CombatHost } from "./combat.ts";
 import { dist3, type V3 } from "./geometry.ts";
+import { emitGameEvent, npcKindOf } from "./events.ts";
 import { emitPileEvent, onPileEvent, pileStore, type PileData } from "./piles.ts";
 import { SYSTEM_FACTORIES, type RoomSystem } from "./systems.ts";
 import { matchMaker } from "@colyseus/core";
@@ -135,7 +136,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       npcs: () => this.npcActors.values(),
       broadcast: (type, msg, except) => this.broadcast(type as never, msg as never, except ? { except: except.client } : undefined),
       broadcastNear: (type, msg, at, radius, always) => this.broadcastNear(type, msg, at, radius, always),
-      onDamage: (target, _amount, attacker) => this.afterDamage(target, attacker),
+      onDamage: (target, amount, attacker) => this.afterDamage(target, attacker, amount),
     };
 
     for (const p of pileStore.current.list(options.body)) this.addPileToState(p);
@@ -270,7 +271,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     p.maxHp = maxHp(char.level);
     p.hp = char.dead ? 0 : Math.max(1, Math.min(p.maxHp, char.hp || p.maxHp));
     p.name = auth.name;
-    p.userId = ""; // never broadcast account ids (review); systems map sessionId → user server-side
+    p.userId = auth.userId; // random opaque id (not a credential): clients need it for blocks, mutes, parties (D27)
     p.starter = char.starter;
     p.palette = char.palette;
     p.flags = (auth.admin ? PF.ADMIN : 0) | (auth.loadtest ? PF.LOADTEST : 0) | (char.dead ? PF.DEAD : 0);
@@ -323,6 +324,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     client.view = new StateView();
     this.updateViews(true);
     for (const s of this.systems) s.onPlayerJoin?.(client.sessionId);
+    emitGameEvent(this, { type: "travel", playerId: client.sessionId, body: this.bodyDef.id });
     this.sendYou(a);
     if (a.dead) client.send("death", { victim: client.sessionId, killer: null, killerName: "", aliveMs: 0, level: char.level, pileId: "" });
   }
@@ -331,11 +333,15 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     const a = this.actors.get(client.sessionId);
     if (!a || a.superseded || this.shuttingDown) return;
     a.state.flags |= PF.LINGER;
+    // Kicked or banned: no reconnection seat (onLeave runs next and removes the body).
+    if (this.systems.some((s) => s.canReconnect?.(client.sessionId) === false)) return;
     // The promise rejects when the window expires or the room disposes; never let that escape.
     this.allowReconnection(client, NET.RECONNECT_WINDOW_S).catch(() => {});
   }
 
   onReconnect(client: Client) {
+    // Reconnects skip /api/play, so bans are checked here too (SPEC §5.2).
+    if (this.systems.some((s) => s.canReconnect?.(client.sessionId) === false)) throw new ServerError(CLOSE.BANNED, "not allowed back");
     const a = this.actors.get(client.sessionId);
     if (!a || a.superseded || hub.get(a.identity.userId)?.actor !== a || this.isBanned(a.identity.userId)) {
       client.leave(CLOSE.ELSEWHERE, "session replaced");
@@ -630,6 +636,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     });
     for (const e of events) e();
     if (!result) return;
+    emitGameEvent(this, { type: "pickup", playerId: a.id, pileId, pileOwnerUserId: pile.ownerUserId, pileCreatedAt: pile.createdAt, items: result.taken.items.length - result.leftovers.length, coins: result.taken.coins });
     a.youDirty = true;
     const { taken, leftovers } = result;
     if (taken.coins || taken.items.length) a.client.send("toast", { text: `Picked up ${taken.items.length - leftovers.length} item(s)${taken.coins ? ` and ${taken.coins} coins` : ""}`, kind: "coins" });
@@ -706,7 +713,12 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
   // ---------------------------------------------------------------- damage, death, rebirth
 
-  afterDamage(target: Actor, attacker: PlayerActor | NpcActor | null) {
+  afterDamage(target: Actor, attacker: PlayerActor | NpcActor | null, amount = 0) {
+    const npc = target.kind === "npc" ? target : attacker?.kind === "npc" ? attacker : null;
+    emitGameEvent(this, {
+      type: "damage", targetId: target.id, targetKind: target.kind, attackerId: attacker?.id ?? null, attackerKind: attacker?.kind ?? "world",
+      npcKind: npc ? npcKindOf(npc) : undefined, boss: !!npc?.boss, amount, hpAfter: target.state.hp, maxHp: target.state.maxHp, at: Date.now(),
+    });
     if (target.kind === "player") {
       target.youDirty = true;
       if (target.state.hp <= 0 && !target.dead) this.kill(target, attacker);
@@ -739,6 +751,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     const killerName = killer ? (killer.kind === "player" ? killer.identity.name : `npc:${killer.state.kind}`) : "the fall";
     const pileId = (pile as PileData | null)?.id ?? "";
     this.broadcast("death", { victim: victim.id, killer: killer?.id ?? null, killerName, aliveMs: now - victim.char.lifeStartedAt, level: victim.char.level, pileId });
+    emitGameEvent(this, { type: "death", victimId: victim.id, killerId: killer?.id ?? null, killerKind: killer?.kind ?? "world", npcKind: killer?.kind === "npc" ? npcKindOf(killer) : undefined, pos: actorPos(victim) });
     if (killer && killer.kind === "player" && killer.id !== victim.id) {
       const key = `${killer.identity.userId}>${victim.identity.userId}`;
       const recent = pvpKills.get(key) ?? 0;
@@ -771,6 +784,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       a.state.hp = Math.min(newMax, a.state.hp + (newMax - oldMax));
       a.state.level = a.char.level;
       a.client.send("toast", { text: `Level ${a.char.level}!`, kind: "xp" });
+      emitGameEvent(this, { type: "levelUp", playerId: a.id, level: a.char.level });
       this.saveActor(a);
     }
     a.youDirty = true;
@@ -863,6 +877,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
         this.presence.publish("announce", String(args.text ?? "").slice(0, 200));
         this.broadcast("announce", { text: String(args.text ?? "").slice(0, 200) });
         break;
+      default:
+        for (const s of this.systems) if (s.onAdmin?.(a, cmd, args)) break;
     }
   }
 
@@ -962,6 +978,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       logoutEndsAt: a.logoutEndsAt,
       protectedUntil: a.protectedUntil,
     };
+    for (const s of this.systems) s.decorateYou?.(a, you);
     a.client.send("you", { ...you, selected: a.char.selected, level: a.char.level, dead: a.dead });
   }
 

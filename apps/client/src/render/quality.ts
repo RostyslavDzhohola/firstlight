@@ -121,31 +121,48 @@ export const TIER_TABLE: Record<Tier, TierSpec> = {
 export interface StoredGfx {
   v: 1;
   tier: Tier | null;
+  /** Last probe result (or a ladder floor drop), valid only for the same backend + GPU. */
   autoTier: Tier | null;
+  autoBackend: string | null;
+  autoGpu: string | null;
   renderScale: number | null;
   features: Partial<Record<Feature, boolean>>;
 }
 
-const STORAGE_KEY = "fl.gfx.v1";
+export const STORAGE_KEY = "fl.gfx.v1";
 
-export function loadStored(): StoredGfx {
-  const empty: StoredGfx = { v: 1, tier: null, autoTier: null, renderScale: null, features: {} };
+export function emptyStored(): StoredGfx {
+  return { v: 1, tier: null, autoTier: null, autoBackend: null, autoGpu: null, renderScale: null, features: {} };
+}
+
+/** Parse stored settings (tolerates junk, older shapes and missing fields). */
+export function parseStored(raw: string | null): StoredGfx {
+  const empty = emptyStored();
+  if (!raw) return empty;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return empty;
     const s = JSON.parse(raw) as Partial<StoredGfx>;
-    if (s.v !== 1) return empty;
+    if (!s || s.v !== 1) return empty;
     const features: Partial<Record<Feature, boolean>> = {};
     for (const f of FEATURES) if (typeof s.features?.[f] === "boolean") features[f] = s.features[f];
     return {
       v: 1,
       tier: isTier(s.tier) ? s.tier : null,
       autoTier: isTier(s.autoTier) ? s.autoTier : null,
+      autoBackend: typeof s.autoBackend === "string" ? s.autoBackend : null,
+      autoGpu: typeof s.autoGpu === "string" ? s.autoGpu : null,
       renderScale: typeof s.renderScale === "number" && s.renderScale >= 0.25 && s.renderScale <= 2 ? s.renderScale : null,
       features,
     };
   } catch {
     return empty;
+  }
+}
+
+export function loadStored(): StoredGfx {
+  try {
+    return parseStored(localStorage.getItem(STORAGE_KEY));
+  } catch {
+    return emptyStored();
   }
 }
 
@@ -155,6 +172,23 @@ export function saveStored(s: StoredGfx) {
   } catch {
     /* private mode: settings just don't persist */
   }
+}
+
+export function clearStored() {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* storage disabled */
+  }
+}
+
+/**
+ * The saved automatic tier, if it was measured on this backend and GPU. A result from WebGL2
+ * isn't reused on WebGPU, and a software-rendered session (e.g. after a GPU-process crash)
+ * doesn't pin Low once the real GPU is back.
+ */
+export function validAutoTier(s: StoredGfx, backend: string, gpu: string): Tier | null {
+  return s.autoTier && s.autoBackend === backend && s.autoGpu === gpu ? s.autoTier : null;
 }
 
 /** Features forced off by `?no<feature>` URL flags (never persisted). */

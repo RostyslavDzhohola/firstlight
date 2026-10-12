@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Client } from "@colyseus/sdk";
 import type { Room } from "@colyseus/sdk";
 import type { Game } from "../src/app.ts";
-import { partyPlacement } from "../src/world/matchmaking.ts";
 import { joinAs, playRequest, safeLeave, startServer, waitFor } from "./helpers.ts";
 
 let game: Game;
@@ -77,21 +76,31 @@ describe("entering the world", () => {
   });
 
   it("a party member can still enter the leader's copy using the headroom seats", async () => {
+    // Headroom is for real parties only: form one in Portus first (invites need the same copy).
+    const leaderHub = await joinAs(game, "p0", "portus");
+    const friendHub = await joinAs(game, "friend", "portus");
+    rooms.push(leaderHub, friendHub);
+    let invite: { from: string } | null = null;
+    friendHub.onMessage("party:invite", (m) => (invite = m));
+    await waitFor(() => (friendHub.state as any).players?.size === 2);
+    leaderHub.send("party", { action: "invite", target: friendHub.sessionId });
+    await waitFor(() => invite !== null);
+    friendHub.send("party", { action: "accept", target: invite!.from });
+    await waitFor(() => !!(friendHub.state as any).players.get(friendHub.sessionId)?.party);
+    await safeLeave(leaderHub);
+
     const joined: Room[] = [];
     for (let i = 0; i < 4; i++) joined.push(await joinAs(game, `p${i}`, "hollowmere"));
     rooms.push(...joined);
     const leaderRoom = joined[0]!.roomId;
-    // Client party claims are ignored; only the server's party placement counts.
-    const liar = await playRequest(game, "dev:liar:liar", { body: "hollowmere", partyLeaderRoomId: leaderRoom, partySize: 2 });
-    expect(liar.ok && liar.reservation.roomId).not.toBe(leaderRoom);
-    partyPlacement.current = (userId) => (userId === "friend" ? { leaderRoomId: leaderRoom, size: 2 } : undefined);
-    try {
-      const friend = await joinAs(game, "friend", "hollowmere");
-      rooms.push(friend);
-      expect(friend.roomId).toBe(leaderRoom);
-    } finally {
-      partyPlacement.current = () => undefined;
-    }
+    // A stranger naming the leader's room gets no headroom seat.
+    const stranger = await joinAs(game, "stranger", "hollowmere", { partyLeaderRoomId: leaderRoom });
+    rooms.push(stranger);
+    expect(stranger.roomId).not.toBe(leaderRoom);
+    await safeLeave(friendHub);
+    const friend = await joinAs(game, "friend", "hollowmere", { partyLeaderRoomId: leaderRoom });
+    rooms.push(friend);
+    expect(friend.roomId).toBe(leaderRoom);
   });
 
   it("direct joins that bypass /api/play are refused", async () => {

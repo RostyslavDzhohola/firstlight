@@ -9,6 +9,7 @@ import { BODIES, createTerrain, isSafe, type Breakable, type BodyId, type Terrai
 import type { Game } from "../src/app.ts";
 import type { BodyRoom } from "../src/world/BodyRoom.ts";
 import { DESTRUCTION, DestructionSystem } from "../src/world/destruction.ts";
+import { onGameEvent, type GameEvent } from "../src/world/events.ts";
 import { rayTerrain, type V3 } from "../src/world/geometry.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 
@@ -161,6 +162,8 @@ describe("destruction (seam 1)", () => {
     const a = await join("gunner", "arcadia");
     const sys = destruction(a);
     const broke = collect<{ id: string; archetype: number; variant: number; ix: number; iy: number; iz: number }>(a, "broke");
+    const events: GameEvent[] = [];
+    onGameEvent(serverRoom(a), (e) => events.push(e));
     const crate = findSetup(sys, "arcadia", "crate", 6);
     await placeAt(a, crate.shooter);
     a.send("scope", { on: true });
@@ -179,6 +182,8 @@ describe("destruction (seam 1)", () => {
     expect(broke[0]!.ix * d[0] + broke[0]!.iy * d[1] + broke[0]!.iz * d[2]).toBeGreaterThan(0.9);
     await waitFor(() => st(a).broken?.has(crate.b.id));
     expect(st(a).broken.get(crate.b.id)).toBeGreaterThan(Date.now() + 170_000);
+    // The quests lane hears who broke it (Demolition Crew medal).
+    expect(events).toContainEqual({ type: "propBroken", playerId: a.sessionId, propId: crate.b.id });
 
     // Light weapons don't damage heavy props.
     const wall = findSetup(sys, "arcadia", "campwall", 6);

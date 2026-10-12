@@ -11,6 +11,8 @@ import type { ResolvedSettings } from "./quality.ts";
 
 interface ChunkProps {
   key: string;
+  /** Unique per registration (instance identity for upload signatures). */
+  serial: number;
   center: THREE.Vector3;
   radius: number;
   /** Per kind: precomputed instance matrices (16 floats each) and colours (3 floats each). */
@@ -49,6 +51,7 @@ export class PropSystem {
   /** Forces both LODs to draw everything in range (shader warm-up). */
   forceAll = false;
   instances = 0;
+  private serial = 0;
 
   constructor(body: BodyId) {
     this.group.name = "props";
@@ -59,9 +62,7 @@ export class PropSystem {
       const capacity = CAPACITY[kind] ?? 2500;
       const mk = (lod: 0 | 1) => {
         const m = new THREE.InstancedMesh(propGeometry(body, kind, lod), material, capacity);
-        m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
         m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3).fill(1), 3);
-        m.instanceColor.setUsage(THREE.DynamicDrawUsage);
         m.count = 0;
         m.frustumCulled = false;
         m.receiveShadow = true;
@@ -136,7 +137,7 @@ export class PropSystem {
       e.positions[e.count * 3 + 2] = pos.z;
       e.count++;
     }
-    this.chunks.set(key, { key, center: center.clone(), radius, byKind });
+    this.chunks.set(key, { key, serial: ++this.serial, center: center.clone(), radius, byKind });
     this.dirty = true;
   }
 
@@ -155,6 +156,8 @@ export class PropSystem {
     let total = 0;
     for (const [k, km] of this.kinds) {
       let n0 = 0, n1 = 0;
+      // Order-dependent signature of the selected instances: upload only when it changes.
+      let sig0 = 0x9e3779b9, sig1 = 0x85ebca6b;
       const a0 = km.lod0.instanceMatrix.array as Float32Array;
       const a1 = km.lod1.instanceMatrix.array as Float32Array;
       const c0 = km.lod0.instanceColor!.array as Float32Array;
@@ -163,35 +166,46 @@ export class PropSystem {
         const e = ch.byKind.get(k);
         if (!e || e.count === 0) continue;
         if (ch.center.distanceTo(cam) - ch.radius > this.lodTo) continue;
+        const M = e.matrices, C = e.colors, P = e.positions;
         for (let i = 0; i < e.count; i++) {
-          const dx = e.positions[i * 3]! - cam.x, dy = e.positions[i * 3 + 1]! - cam.y, dz = e.positions[i * 3 + 2]! - cam.z;
+          const dx = P[i * 3]! - cam.x, dy = P[i * 3 + 1]! - cam.y, dz = P[i * 3 + 2]! - cam.z;
           const d2 = dx * dx + dy * dy + dz * dz;
+          const id = ch.serial * 4096 + i;
           if (d2 < full2 && n0 < km.capacity) {
-            a0.set(e.matrices.subarray(i * 16, i * 16 + 16), n0 * 16);
-            c0.set(e.colors.subarray(i * 3, i * 3 + 3), n0 * 3);
+            for (let j = 0; j < 16; j++) a0[n0 * 16 + j] = M[i * 16 + j]!;
+            c0[n0 * 3] = C[i * 3]!; c0[n0 * 3 + 1] = C[i * 3 + 1]!; c0[n0 * 3 + 2] = C[i * 3 + 2]!;
+            sig0 = Math.imul(sig0 ^ id, 0x27d4eb2d);
             n0++;
           }
           if ((d2 >= full2 || this.forceAll) && d2 < lod2 && n1 < km.capacity) {
-            a1.set(e.matrices.subarray(i * 16, i * 16 + 16), n1 * 16);
-            c1.set(e.colors.subarray(i * 3, i * 3 + 3), n1 * 3);
+            for (let j = 0; j < 16; j++) a1[n1 * 16 + j] = M[i * 16 + j]!;
+            c1[n1 * 3] = C[i * 3]!; c1[n1 * 3 + 1] = C[i * 3 + 1]!; c1[n1 * 3 + 2] = C[i * 3 + 2]!;
+            sig1 = Math.imul(sig1 ^ id, 0x27d4eb2d);
             n1++;
           }
         }
       }
-      for (const [mesh, n] of [[km.lod0, n0], [km.lod1, n1]] as const) {
-        mesh.count = n;
-        if (n > 0) {
-          mesh.instanceMatrix.clearUpdateRanges();
-          mesh.instanceMatrix.addUpdateRange(0, n * 16);
-          mesh.instanceMatrix.needsUpdate = true;
-          mesh.instanceColor!.clearUpdateRanges();
-          mesh.instanceColor!.addUpdateRange(0, n * 3);
-          mesh.instanceColor!.needsUpdate = true;
-        }
-      }
+      this.commit(km.lod0, n0, sig0);
+      this.commit(km.lod1, n1, sig1);
       total += n0 + n1;
     }
     this.instances = total;
+  }
+
+  private readonly signatures = new WeakMap<THREE.InstancedMesh, number>();
+
+  private commit(mesh: THREE.InstancedMesh, n: number, sig: number) {
+    const key = (sig ^ Math.imul(n, 0x165667b1)) >>> 0;
+    const changed = this.signatures.get(mesh) !== key || mesh.count !== n;
+    mesh.count = n;
+    if (!changed || n === 0) return;
+    this.signatures.set(mesh, key);
+    mesh.instanceMatrix.clearUpdateRanges();
+    mesh.instanceMatrix.addUpdateRange(0, n * 16);
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.instanceColor!.clearUpdateRanges();
+    mesh.instanceColor!.addUpdateRange(0, n * 3);
+    mesh.instanceColor!.needsUpdate = true;
   }
 
   dispose() {

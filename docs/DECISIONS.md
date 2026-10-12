@@ -297,3 +297,17 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   same victim within 10 min give 10% XP; inventory ops ≤ 5/s; per-IP OTP cap 8/h and "+tag" aliases
   share one budget; admin claim needs a saved (email) account. Note: the D20–D24 timestamps above were
   mislabelled (the run started 00:46Z, commits confirm); order is right, clock times are not.
+- **D27 (run, 02:35Z):** merged lane/social. Player user ids stay in the room state (they are random
+  opaque ids, not credentials; blocks, mutes and parties need them) — reverses that part of D26.
+  One close-code table in `packages/shared/src/net/social.ts`: 4100 elsewhere, 4101 merged, 4102
+  banned, 4103 logged out, 4104 kicked (social's 4001/4003/4004 sat in Colyseus's reserved range).
+  Party headroom comes from the social party system (`partyRoomFor`); a client room hint is honoured
+  only if a party member is in it. `/api/play` checks bans/kicks before travel tickets. Test helper
+  `joinAs` grants a travel ticket (tests hop bodies); `rules.test.ts` covers the real ticket path.
+- **D28 (run, 03:25Z):** terrain landmarks moved off degenerate anchors (lanes reported them):
+  Tolling Tower was centred exactly on Hollowmere pad 10 (its triple held two opposite pads) → now
+  `between: [10, 8, 0.15]` (125 m from pad 10; the Hollow Nave lies past its foot). Chrome Spires sat
+  on Meridian pad 15 → `between: [15, 9, 0.45]` (the Oversight Lobby stays on flat ground at its
+  foot). Signal Ridge was the midpoint of two opposite pads (no direction) → `mid: [2, 0]`. New anchor
+  form `between`; `anchors.test.ts` rejects collapsing anchors and pads inside a feature's core.
+  F2 re-run with NPCs on production: 40 bots × 600 s, 0 failures, tick p95 ≤ 2.94 ms, RSS ≤ 218 MB.

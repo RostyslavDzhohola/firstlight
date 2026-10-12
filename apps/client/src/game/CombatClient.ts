@@ -7,6 +7,7 @@ import { PHRASES } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
 import { Effects, weaponColor } from "../render/effects.ts";
 import { Hud, type YouPlus } from "../ui/hud.ts";
+import { PhraseWheel } from "../ui/phraseWheel.ts";
 import type { Game } from "./Game.ts";
 import { showSavePrompt } from "../ui/account.ts";
 import { getPlayToken, isDevGuest, readClaims } from "../net/auth.ts";
@@ -23,11 +24,12 @@ export class CombatClient {
   private scoped = false;
   private baseFov = 75;
   deadUntilRespawn = false;
-  private phraseMode = false;
+  private readonly wheel: PhraseWheel;
 
   constructor(private readonly game: Game) {
     this.effects = new Effects(game.ctx.scene);
     this.hud = new Hud();
+    this.wheel = new PhraseWheel((id) => this.game.net.room?.send("phrase", { id }));
   }
 
   /** Attach room message handlers (call after each join). */
@@ -48,7 +50,7 @@ export class CombatClient {
       if (m.reason === "level gate") this.hud.toast("Your level is too low to use that tier", "warn");
       else if (m.action === "logout") this.hud.toast("Can't log out in combat — wait 10 s", "warn");
     });
-    room.onMessage("hit", (m: { attacker: string; target: string; amount: number; weak: boolean; x: number; y: number; z: number }) => {
+    room.onMessage("hit", (m: { attacker: string; target: string; amount: number; weak: boolean; x: number; y: number; z: number; kb?: number; kx?: number; ky?: number; kz?: number }) => {
       if (m.attacker === me && m.target !== me) {
         this.hud.hit(m.weak);
         this.game.audio.play("hitmark", null, m.weak ? 1.3 : 1, m.weak ? 1.3 : 1);
@@ -56,6 +58,7 @@ export class CombatClient {
         if (s) this.hud.damageNumber(s.x, s.y, m.amount, m.weak);
       }
       if (m.target === me) {
+        if (m.kb && (m.kx || m.ky || m.kz)) this.game.player.knockback(new THREE.Vector3(m.kx, m.ky, m.kz), m.kb);
         this.hud.hurt();
         this.game.audio.play("hurt");
       } else this.game.audio.play("impact", new THREE.Vector3(m.x, m.y, m.z), 0.7);
@@ -103,6 +106,7 @@ export class CombatClient {
     room.onMessage("death", async (m: { victim: string; killerName: string; aliveMs: number; level: number }) => {
       if (m.victim !== me || this.deadUntilRespawn) return;
       this.deadUntilRespawn = true;
+      this.game.photo?.exit(this.game.ctx.camera);
       this.game.player.frozen = true;
       this.game.audio.play("death");
       const choice = await this.hud.death(m);
@@ -168,25 +172,23 @@ export class CombatClient {
       g.hud.setLogout(g.hud.you?.logoutEndsAt ?? null, Date.now() + g.net.serverOffset);
     }
     this.updatePickupPrompt();
+    // Photo mode owns the keys (G cycles its filters there), and the body takes no actions.
+    if (g.photo?.active) return;
+    // The phrase wheel (G) owns the mouse and number keys while it is open: drop block/scope and any
+    // charge, so nothing fires or stays raised when it closes.
+    if (this.wheel.update(input, now, !this.deadUntilRespawn)) {
+      if (this.blocking) room.send("block", { on: false });
+      if (this.scoped) room.send("scope", { on: false });
+      if (this.wasRmb) room.send("charge", { on: false }); // a charge or draw in progress is cancelled
+      this.blocking = this.scoped = this.wasRmb = false;
+      return;
+    }
     if (this.deadUntilRespawn || !input.locked) return;
 
     // Hotbar and utility keys.
     for (let i = 0; i < 4; i++) if (input.pressed.has(`Digit${i + 1}`)) room.send("equip", { slot: i });
     if (input.pressed.has("KeyR")) room.send("reload", { slot: g.hud.you?.selected ?? 0 });
     if (input.pressed.has("KeyE")) this.tryPickup();
-    if (input.pressed.has("KeyG")) {
-      this.phraseMode = !this.phraseMode;
-      if (this.phraseMode) g.hud.toast("Phrase: press 1 Truce? · 2 Help! · 3 Follow me · 4 Boss here · 5 Thanks · 6 GG", "info");
-    }
-    if (this.phraseMode) {
-      for (let i = 0; i < PHRASES.length; i++) {
-        if (input.pressed.has(`Digit${i + 1}`)) {
-          room.send("phrase", { id: i });
-          this.phraseMode = false;
-        }
-      }
-      return;
-    }
 
     const { def, tier } = this.currentWeapon();
     const t = def.tiers[tier - 1]!;
@@ -309,5 +311,6 @@ export class CombatClient {
 
   dispose() {
     this.effects.dispose();
+    this.wheel.dispose();
   }
 }

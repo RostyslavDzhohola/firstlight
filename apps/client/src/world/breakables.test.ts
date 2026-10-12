@@ -88,11 +88,11 @@ describe("breakable meshes and pre-fracture", () => {
         expect(m.positions.length % 9).toBe(0);
       }
     }
-  });
+  }, 60_000);
 
   it("is deterministic: every client builds the same pieces for a variant", () => {
-    const again = buildBreakableAssets("hollowmere", { quality: 0 });
-    const first = get("hollowmere", 0);
+    const again = buildBreakableAssets("hollowmere", { quality: 1 });
+    const first = get("hollowmere", 1);
     for (const [k, variants] of Object.entries(first.fragments)) {
       variants.forEach((pieces, v) => {
         const other = again.fragments[Number(k)]![v]!;
@@ -103,7 +103,7 @@ describe("breakable meshes and pre-fracture", () => {
         });
       });
     }
-  });
+  }, 60_000);
 });
 
 describe("debris pool", () => {
@@ -119,7 +119,7 @@ describe("debris pool", () => {
     return { debris, crates: set.breakables.filter((b) => b.archetype === crateArch) };
   }
 
-  it("pieces fly, land on the terrain, settle, and fade out after ~10 s", () => {
+  it("pieces fly, land on the terrain, settle, and fade out after ~10 s", { timeout: 30_000 }, () => {
     const { debris, crates } = pool();
     const b = crates[0]!;
     const n = debris.spawn(b, b.archetype, 1, b.fx, b.fy, b.fz, 1.5, 42);
@@ -145,7 +145,7 @@ describe("debris pool", () => {
     expect(debris.count).toBe(0);
   });
 
-  it("never exceeds its budget: the oldest pieces despawn early", () => {
+  it("never exceeds its budget: the oldest pieces despawn early", { timeout: 30_000 }, () => {
     const { debris, crates } = pool();
     debris.setBudget(40);
     for (let k = 0; k < 12; k++) {

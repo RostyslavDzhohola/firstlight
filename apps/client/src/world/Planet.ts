@@ -4,22 +4,23 @@
 
 import * as THREE from "three/webgpu";
 import { BODIES, CHUNK_QUADS, createTerrain, gridDir, type BodyDef, type BodyId, type Face, type Terrain } from "@firstlight/shared";
-import type { ChunkRequest, ChunkResult } from "./terrain.worker.ts";
-import { applyLook, atmo, radialFogNode, skyBackgroundNode, SunRig } from "../render/atmosphere.ts";
+import type { BakeResult, ChunkRequest, ChunkResult } from "./terrain.worker.ts";
+import { applyLook, atmo, radialFogNode, skyBackgroundNode, sunRigFor, type SunRig } from "../render/atmosphere.ts";
 import { applyGrassLook, GrassSystem, type GrassChunk } from "../render/grass.ts";
 import { LOOKS, type BodyLook } from "../render/looks.ts";
 import { postUniforms, setGrade } from "../render/post.ts";
 import { PropSystem } from "../render/props.ts";
 import type { RenderCtx, ResolvedSettings } from "../render/renderer.ts";
 import { applySkyLut } from "../render/skyLut.ts";
-import { SkyPlanets } from "../render/skyPlanets.ts";
+import { skyPlanetsFor, type SkyPlanets } from "../render/skyPlanets.ts";
 import { localFrame, type V3 } from "../render/sunFrame.ts";
-import { applyTerrainSettings, terrainMaterialFor } from "../render/terrainMaterial.ts";
+import { applyTerrainSettings, terrainMaterialFor, terrainUniforms } from "../render/terrainMaterial.ts";
 import { applyWaterLook, createWaterMesh, waterMaterialFor } from "../render/water.ts";
 
 export { LOOKS, type BodyLook };
 
 interface ChunkInfo {
+  key: string;
   face: Face;
   cx: number;
   cy: number;
@@ -28,7 +29,13 @@ interface ChunkInfo {
 
 interface LoadedChunk {
   key: string;
+  face: Face;
+  cx: number;
+  cy: number;
   mesh: THREE.Mesh | null;
+  /** The bake attribute includes sun visibility (Low tier). */
+  sunBaked: boolean;
+  rebaking: boolean;
   water: THREE.Mesh | null;
   pending: boolean;
   grass: GrassChunk | null;
@@ -67,6 +74,7 @@ export class Planet {
   private readonly unsubscribe: () => void;
   private readonly focus = new THREE.Vector3();
   private readonly east: V3 = [1, 0, 0];
+  private readonly wind = new THREE.Vector3();
   private readonly north: V3 = [0, 0, 1];
   loadRadius: number;
   /** Chunks drawn after horizon culling (stats). */
@@ -90,7 +98,7 @@ export class Planet {
       for (let cy = 0; cy < this.body.chunksPerFace; cy++) {
         for (let cx = 0; cx < this.body.chunksPerFace; cx++) {
           gridDir(f as Face, cx * CHUNK_QUADS + CHUNK_QUADS / 2, cy * CHUNK_QUADS + CHUNK_QUADS / 2, n, d);
-          this.chunkInfos.push({ face: f as Face, cx, cy, dir: [d[0], d[1], d[2]] });
+          this.chunkInfos.push({ key: `${f}:${cx}:${cy}`, face: f as Face, cx, cy, dir: [d[0], d[1], d[2]] });
         }
       }
     }
@@ -98,7 +106,10 @@ export class Planet {
     const workerCount = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 1));
     for (let i = 0; i < workerCount; i++) {
       const w = new Worker(new URL("./terrain.worker.ts", import.meta.url), { type: "module" });
-      w.onmessage = (e: MessageEvent<ChunkResult>) => this.onChunk(e.data);
+      w.onmessage = (e: MessageEvent<ChunkResult | BakeResult>) => {
+        if (e.data.kind === "bake") this.onBake(e.data);
+        else this.onChunk(e.data);
+      };
       w.onerror = (e) => console.error("[planet] terrain worker error", e.message);
       this.workers.push(w);
     }
@@ -115,8 +126,10 @@ export class Planet {
     postUniforms.bloomStrength.value = this.look.bloomStrength;
     setGrade(this.look.grade);
 
-    this.rig = new SunRig(this.scene, this.look, ctx.renderer);
-    this.skyPlanets = new SkyPlanets(this.scene, this.look.skyPlanets);
+    // Lights and sky planets live as long as the renderer (light ids are in three's lighting
+    // cache key; new ones per planet would rebuild every lit material on each travel).
+    this.rig = sunRigFor(this.scene, this.look, ctx.renderer);
+    this.skyPlanets = skyPlanetsFor(this.scene, this.look.skyPlanets);
     this.grass = new GrassSystem(this.body.radius, n);
     this.group.add(this.grass.group);
     this.props = new PropSystem(bodyId);
@@ -159,6 +172,7 @@ export class Planet {
     atmo.fogHeight.value = s.fog.height ? 1 : 0;
     atmo.scatterMix.value = s.sky.scatterSteps[0] > 0 ? this.look.scatter.mix : 0;
     applyTerrainSettings(s);
+    if (terrainUniforms.bakedSun.value > 0) this.rebakeSun();
     const mat = terrainMaterialFor(s);
     if (mat !== this.material) {
       this.material = mat;
@@ -188,7 +202,7 @@ export class Planet {
     this.rig.update(this.focus, dt);
     this.skyPlanets.update(camera);
     localFrame(ux, uy, uz, this.east, this.north);
-    this.grass.setWind(new THREE.Vector3(this.east[0] * 0.8 + this.north[0] * 0.6, this.east[1] * 0.8 + this.north[1] * 0.6, this.east[2] * 0.8 + this.north[2] * 0.6).normalize());
+    this.grass.setWind(this.wind.set(this.east[0] * 0.8 + this.north[0] * 0.6, this.east[1] * 0.8 + this.north[1] * 0.6, this.east[2] * 0.8 + this.north[2] * 0.6).normalize());
     this.cullHorizon(camera.position);
     this.grass.update(camera.position, this.grassChunks(), now);
     this.props.update(camera.position, now);
@@ -201,7 +215,7 @@ export class Planet {
     const wanted: { info: ChunkInfo; dot: number }[] = [];
     for (const info of this.chunkInfos) {
       const dtp = info.dir[0] * ux + info.dir[1] * uy + info.dir[2] * uz;
-      const key = `${info.face}:${info.cx}:${info.cy}`;
+      const key = info.key;
       if (dtp >= cosLimit) {
         if (!this.loaded.has(key)) wanted.push({ info, dot: dtp });
       } else if (dtp < cosUnload) {
@@ -263,23 +277,50 @@ export class Planet {
     let n = 0;
     for (const info of this.chunkInfos) {
       if (info.dir[0] * ux + info.dir[1] * uy + info.dir[2] * uz < cos) continue;
-      const c = this.loaded.get(`${info.face}:${info.cx}:${info.cy}`);
+      const c = this.loaded.get(info.key);
       if (!c || c.pending) n++;
     }
     return n;
   }
 
   private request(info: ChunkInfo) {
-    const key = `${info.face}:${info.cx}:${info.cy}`;
+    const key = info.key;
     this.loaded.set(key, {
-      key, mesh: null, water: null, pending: true, grass: null,
-      dir: new THREE.Vector3(...info.dir), angle: 0, topR: this.body.radius,
+      key, face: info.face, cx: info.cx, cy: info.cy, mesh: null, water: null, pending: true, grass: null,
+      sunBaked: false, rebaking: false, dir: new THREE.Vector3(...info.dir), angle: 0, topR: this.body.radius,
     });
     const req: ChunkRequest = {
-      id: ++this.reqId, body: this.body.id, face: info.face, cx: info.cx, cy: info.cy,
+      kind: "full", id: ++this.reqId, body: this.body.id, face: info.face, cx: info.cx, cy: info.cy,
       bakeSun: this.settings.terrain.bakedSun,
     };
     this.workers[this.nextWorker++ % this.workers.length]!.postMessage(req);
+  }
+
+  /**
+   * The Low tier darkens terrain by baked sun visibility. Chunks built on another tier don't
+   * have it: ask the workers for just the bake attribute (cheap; heights are cached there).
+   */
+  private rebakeSun() {
+    for (const c of this.loaded.values()) this.requestBake(c);
+  }
+
+  private requestBake(c: LoadedChunk) {
+    if (c.pending || c.sunBaked || c.rebaking || !c.mesh) return;
+    c.rebaking = true;
+    const req: ChunkRequest = { kind: "bake", id: ++this.reqId, body: this.body.id, face: c.face, cx: c.cx, cy: c.cy, bakeSun: true };
+    this.workers[this.nextWorker++ % this.workers.length]!.postMessage(req);
+  }
+
+  private onBake(r: BakeResult) {
+    if (r.body !== this.body.id) return;
+    const c = this.loaded.get(`${r.face}:${r.cx}:${r.cy}`);
+    if (!c) return;
+    c.rebaking = false;
+    const attr = c.mesh?.geometry.getAttribute("bake") as THREE.BufferAttribute | undefined;
+    if (!attr || attr.array.length !== r.bake.length) return;
+    (attr.array as Float32Array).set(r.bake);
+    attr.needsUpdate = true;
+    c.sunBaked = r.bakedSun;
   }
 
   private onChunk(r: ChunkResult) {
@@ -307,6 +348,9 @@ export class Planet {
     this.group.add(mesh);
     entry.mesh = mesh;
     entry.pending = false;
+    entry.sunBaked = r.bakedSun;
+    // Requested before a switch to Low: fetch the sun bake now.
+    if (!r.bakedSun && terrainUniforms.bakedSun.value > 0) this.requestBake(entry);
     entry.dir.set(c[0], c[1], c[2]);
     entry.angle = (r.boundRadius + 2) / R;
     entry.topR = R + r.maxHeight + 2;
@@ -342,8 +386,7 @@ export class Planet {
     for (const c of [...this.loaded.values()]) this.unload(c);
     this.grass.dispose();
     this.props.dispose();
-    this.skyPlanets.dispose();
-    this.rig.dispose();
+    // The sun rig and sky planets are shared across bodies (re-skinned by the next Planet).
     this.waterDummy.geometry.dispose();
     this.scene.remove(this.group);
   }

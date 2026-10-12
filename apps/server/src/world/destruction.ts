@@ -9,6 +9,7 @@
 import { BreakableGrid, bodyBreakables, canBreak, distanceToBreakable, hash4, rayBreakable, segmentNearBreakable, type Breakable, type BreakClass } from "@firstlight/shared";
 import { splashFalloff } from "@firstlight/shared/content/progression";
 import type { BodyRoom } from "./BodyRoom.ts";
+import { emitGameEvent } from "./events.ts";
 import type { BreakableHost } from "./combat.ts";
 import type { V3 } from "./geometry.ts";
 import type { RoomSystem } from "./systems.ts";
@@ -24,8 +25,8 @@ export const DESTRUCTION = {
   broadcastRadius: 260,
 };
 
-/** The room surface this system needs (BodyRoom satisfies it; tests may fake it). */
-type Room = Pick<BodyRoom, "terrain" | "state" | "host" | "broadcastNear">;
+/** The room surface this system needs. */
+type Room = BodyRoom;
 
 export class DestructionSystem implements RoomSystem, BreakableHost {
   readonly list: readonly Breakable[];
@@ -86,16 +87,16 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
     return this.rayHit;
   }
 
-  damage(index: number, amount: number, cls: BreakClass, weaponId: string, dir: V3, force = 1): boolean {
+  damage(index: number, amount: number, cls: BreakClass, weaponId: string, dir: V3, by: string | null = null, force = 1): boolean {
     const b = this.list[index];
     if (!b || this.brokenUntil[index]! > 0 || !(amount > 0)) return false;
     if (!canBreak(b.size, cls)) return false;
     this.hp[index] = this.hp[index]! - amount * (DESTRUCTION.propMult[weaponId] ?? 1);
-    if (this.hp[index]! <= 0) this.breakProp(b, dir, force);
+    if (this.hp[index]! <= 0) this.breakProp(b, dir, force, by);
     return true;
   }
 
-  splash(at: V3, radius: number, amount: number, cls: BreakClass, weaponId: string, exclude = -1): void {
+  splash(at: V3, radius: number, amount: number, cls: BreakClass, weaponId: string, by: string | null = null, exclude = -1): void {
     if (!(radius > 0) || cls === "none") return;
     const n = this.grid.collect(at[0], at[1], at[2], 0, 0, 0, 0, radius, this.candidates);
     for (let k = 0; k < n; k++) {
@@ -105,11 +106,11 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
       const dist = distanceToBreakable(b, at[0], at[1], at[2]);
       if (dist >= radius) continue;
       const dir: V3 = [b.cx - at[0], b.cy - at[1], b.cz - at[2]];
-      this.damage(i, amount * splashFalloff(dist, radius), cls, weaponId, dir, 2.2);
+      this.damage(i, amount * splashFalloff(dist, radius), cls, weaponId, dir, by, 2.2);
     }
   }
 
-  arc(pos: V3, facing: V3, range: number, arcDeg: number, amount: number, cls: BreakClass, weaponId: string): void {
+  arc(pos: V3, facing: V3, range: number, arcDeg: number, amount: number, cls: BreakClass, weaponId: string, by: string | null = null): void {
     if (cls === "none") return;
     // Chest height: melee swings at about 1 m above the feet.
     const l = Math.hypot(pos[0], pos[1], pos[2]);
@@ -134,12 +135,12 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
       best = i;
       bestD = dist;
     }
-    if (best >= 0) this.damage(best, amount, cls, weaponId, [facing[0] / fl, facing[1] / fl, facing[2] / fl], 1.3);
+    if (best >= 0) this.damage(best, amount, cls, weaponId, [facing[0] / fl, facing[1] / fl, facing[2] / fl], by, 1.3);
   }
 
   // ------------------------------------------------------------------ breaking and rebuilding
 
-  private breakProp(b: Breakable, dir: V3, force: number) {
+  private breakProp(b: Breakable, dir: V3, force: number, by: string | null) {
     const now = this.now();
     const until = now + (DESTRUCTION.rebuildMsOverride ?? b.rebuildMs);
     this.brokenUntil[b.index] = until;
@@ -150,6 +151,8 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
     const variant = hash4(b.index, ++this.breaks, 0xb4ea) % DESTRUCTION.variants;
     const dl = Math.hypot(dir[0], dir[1], dir[2]) || 1;
     this.room.broadcastNear("broke", { id: b.id, archetype: b.archetype, variant, ix: dir[0] / dl, iy: dir[1] / dl, iz: dir[2] / dl, f: force }, [b.cx, b.cy, b.cz], DESTRUCTION.broadcastRadius);
+    // Quests: the Demolition Crew medal counts props a player breaks.
+    emitGameEvent(this.room, { type: "propBroken", playerId: by, propId: b.id });
   }
 
   rebuild(index: number) {

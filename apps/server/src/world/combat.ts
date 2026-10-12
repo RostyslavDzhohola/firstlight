@@ -23,6 +23,8 @@ export interface CombatHost {
   broadcastNear(type: string, msg: unknown, at: V3, radius: number, always?: string[]): void;
   /** Called after damage is applied; handles deaths. */
   onDamage(target: Actor, amount: number, attacker: PlayerActor | NpcActor | null, weak: boolean): void;
+  /** Report where an attack landed (the NPC lane's boss-arena cover listens; npc/boss.ts). */
+  onPropHit?(point: V3, power: "light" | "heavy", amount: number): void;
   /** Breakable props (set by destruction.ts): intact ones stop shots and take damage. */
   props?: BreakableHost;
 }
@@ -35,10 +37,13 @@ export interface CombatHost {
 export interface BreakableHost {
   /** First intact prop along a segment (the returned object is reused), or null. */
   raycast(o: V3, d: V3, maxT: number): { index: number; t: number } | null;
-  damage(index: number, amount: number, cls: Destroys, weaponId: string, dir: V3): void;
-  splash(at: V3, radius: number, amount: number, cls: Destroys, weaponId: string, exclude?: number): void;
-  arc(pos: V3, facing: V3, range: number, arcDeg: number, amount: number, cls: Destroys, weaponId: string): void;
+  /** `by`: the attacking player's session id (credit for the Demolition Crew medal), or null. */
+  damage(index: number, amount: number, cls: Destroys, weaponId: string, dir: V3, by: string | null): void;
+  splash(at: V3, radius: number, amount: number, cls: Destroys, weaponId: string, by: string | null, exclude?: number): void;
+  arc(pos: V3, facing: V3, range: number, arcDeg: number, amount: number, cls: Destroys, weaponId: string, by: string | null): void;
 }
+
+const playerId = (a: PlayerActor | NpcActor | null): string | null => (a && a.kind === "player" ? a.id : null);
 
 const propHit = { index: -1, t: Infinity };
 /**
@@ -323,11 +328,10 @@ function hitscan(host: CombatHost, p: PlayerActor, o: V3, d: V3, maxRange: numbe
   const propT = prop ? prop.t : Infinity, propIdx = prop ? prop.index : -1;
   const hit = raycastActors(host, o, d, Math.min(maxRange, terrainT, propT), new Set([p.id]), REWIND_MS);
   if (!hit) {
-    if (propIdx >= 0) {
-      host.props!.damage(propIdx, baseDamage * falloff(propT, def.range, def.falloffTo, def.falloffMin), def.destroys, def.id, d);
-      return propT;
-    }
-    return terrainT === Infinity ? null : terrainT;
+    if (propIdx >= 0) host.props!.damage(propIdx, baseDamage * falloff(propT, def.range, def.falloffTo, def.falloffMin), def.destroys, def.id, d, p.id);
+    const endT = propIdx >= 0 ? propT : terrainT;
+    if (endT < maxRange) host.onPropHit?.([o[0] + d[0] * endT, o[1] + d[1] * endT, o[2] + d[2] * endT], def.destroys === "heavy" ? "heavy" : "light", baseDamage);
+    return endT === Infinity ? null : endT;
   }
   const f = falloff(hit.t, def.range, def.falloffTo, def.falloffMin);
   const mult = hit.weak ? (tier.headMult ?? 1.5) : 1;
@@ -383,7 +387,7 @@ function chain(host: CombatHost, p: PlayerActor, o: V3, d: V3, def: WeaponDef, t
       cur = next;
     }
   }
-  if (!first && propIdx >= 0) host.props!.damage(propIdx, tier.damage * lvl, def.destroys, def.id, d);
+  if (!first && propIdx >= 0) host.props!.damage(propIdx, tier.damage * lvl, def.destroys, def.id, d, p.id);
   const end: V3 = first ? actorPos(first) : [o[0] + d[0] * Math.min(def.range, terrainT), o[1] + d[1] * Math.min(def.range, terrainT), o[2] + d[2] * Math.min(def.range, terrainT)];
   host.broadcastNear("shot", { by: p.id, weapon: WEAPON_INDEX.get(def.id), ox: o[0], oy: o[1], oz: o[2], dx: d[0], dy: d[1], dz: d[2], hit: end, chain: points }, o, 160);
 }
@@ -431,8 +435,10 @@ export function melee(host: CombatHost, p: PlayerActor, heavy: boolean): FireRes
   // Breakable props in the arc (or the slam ring) take the hit too; heavy attacks are heavy class
   // (the axe's charged chop), fists break nothing (destruction.ts).
   const propCls: Destroys = useHeavy ? "heavy" : meleeDef.destroys;
-  if (slam) host.props?.splash(pos, meleeTier.radius!, dmg, propCls, meleeDef.id);
-  else host.props?.arc(pos, facing, meleeDef.range, meleeDef.arc ?? 90, dmg, propCls, meleeDef.id);
+  if (slam) host.props?.splash(pos, meleeTier.radius!, dmg, propCls, meleeDef.id, p.id);
+  else host.props?.arc(pos, facing, meleeDef.range, meleeDef.arc ?? 90, dmg, propCls, meleeDef.id, p.id);
+  const reach: V3 = [pos[0] + facing[0] * meleeDef.range, pos[1] + facing[1] * meleeDef.range, pos[2] + facing[2] * meleeDef.range];
+  host.onPropHit?.(reach, useHeavy || meleeDef.destroys === "heavy" ? "heavy" : "light", dmg);
   host.broadcastNear("swing", { by: p.id, weapon: WEAPON_INDEX.get(meleeDef.id), heavy: useHeavy, hits: targets.length }, pos, 120);
   return { ok: true };
 }
@@ -456,13 +462,24 @@ export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | 
     target.logoutEndsAt = null; // damage cancels logout
     if (attacker) target.lastDamagedBy = attacker.id;
   } else {
-    dmg *= target.armour ?? 1;
+    dmg = target.mitigate ? target.mitigate(dmg, weak, fromDir) : dmg * (target.armour ?? 1);
+    if (dmg <= 0) return false;
   }
   dmg = Math.max(1, Math.round(dmg));
   target.state.hp = Math.max(0, target.state.hp - dmg);
   if (target.kind === "npc") target.onDamaged?.(dmg, attacker?.id ?? "");
   const tp = actorPos(target);
-  host.broadcastNear("hit", { attacker: attacker?.id ?? "", target: target.id, amount: dmg, weak, kind: target.kind, x: tp[0], y: tp[1], z: tp[2], kb: knockback ?? 0 }, tp, 120, [target.id, attacker?.id ?? ""]);
+  // Knockback: the shove direction (away from the attacker) rides on the hit; the victim's client
+  // applies it, and the server widens that player's movement budget so the shove isn't "corrected".
+  let kx = 0, ky = 0, kz = 0;
+  if (knockback && fromDir) {
+    const l = Math.hypot(fromDir[0], fromDir[1], fromDir[2]) || 1;
+    kx = +(-fromDir[0] / l).toFixed(3);
+    ky = +(-fromDir[1] / l).toFixed(3);
+    kz = +(-fromDir[2] / l).toFixed(3);
+    if (target.kind === "player") target.moveBudget += knockback * 1.5;
+  }
+  host.broadcastNear("hit", { attacker: attacker?.id ?? "", target: target.id, amount: dmg, weak, kind: target.kind, x: tp[0], y: tp[1], z: tp[2], kb: knockback ?? 0, kx, ky, kz }, tp, 120, [target.id, attacker?.id ?? ""]);
   host.onDamage(target, dmg, attacker, weak);
   return true;
 }
@@ -477,9 +494,10 @@ export function explode(host: CombatHost, owner: PlayerActor | NpcActor, at: V3,
     if (a.id === owner.id) dmg *= 0.5;
     if (dmg > 0) dealDamage(host, owner, a, dmg, false, [at[0] - actorPos(a)[0], at[1] - actorPos(a)[1], at[2] - actorPos(a)[2]], 4);
   }
-  // Breakable props in the blast (NPC blasts count as heavy: boss attacks break arena cover).
+  host.onPropHit?.(at, "heavy", damage);
+  // Breakable props in the blast (NPC blasts count as heavy too).
   const w = WEAPONS[weaponIndex];
-  host.props?.splash(at, radius, damage, owner.kind === "npc" ? "heavy" : (w?.destroys ?? "heavy"), w?.id ?? "", excludeProp);
+  host.props?.splash(at, radius, damage, owner.kind === "npc" ? "heavy" : (w?.destroys ?? "heavy"), w?.id ?? "", playerId(owner), excludeProp);
   host.broadcastNear("explode", { id: 0, x: at[0], y: at[1], z: at[2], radius, weapon: weaponIndex }, at, 200);
 }
 
@@ -542,8 +560,9 @@ export function stepProjectiles(host: CombatHost, dt: number) {
         p.stuck = true;
         continue;
       }
-      host.props!.damage(propIdx, p.damage, p.weapon.destroys, p.weapon.id, d);
+      host.props!.damage(propIdx, p.damage, p.weapon.destroys, p.weapon.id, d, playerId(p.owner));
       if (p.tier.splash && p.tier.radius) explode(host, p.owner, at, p.tier.radius, p.tier.splash, WEAPON_INDEX.get(p.weapon.id) ?? 0, undefined, propIdx);
+      else host.onPropHit?.(at, p.weapon.destroys === "heavy" ? "heavy" : "light", p.damage);
       host.broadcastNear("explode", { id: p.id, x: at[0], y: at[1], z: at[2], radius: 0, weapon: WEAPON_INDEX.get(p.weapon.id) }, at, 200);
       list.splice(i, 1);
       continue;
@@ -557,6 +576,7 @@ export function stepProjectiles(host: CombatHost, dt: number) {
       }
       if (p.tier.splash && p.tier.radius) explode(host, p.owner, at, p.tier.radius, p.tier.splash, WEAPON_INDEX.get(p.weapon.id) ?? 0);
       else {
+        host.onPropHit?.(at, p.weapon.destroys === "heavy" ? "heavy" : "light", p.damage);
         host.broadcastNear("explode", { id: p.id, x: at[0], y: at[1], z: at[2], radius: 0, weapon: WEAPON_INDEX.get(p.weapon.id) }, at, 200);
       }
       list.splice(i, 1);

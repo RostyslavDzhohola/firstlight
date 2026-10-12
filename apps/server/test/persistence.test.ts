@@ -43,6 +43,7 @@ import {
   type Db,
 } from "../src/db/index.ts";
 import { isOffensiveName, nameShapeProblem } from "../src/db/names.ts";
+import { MIGRATIONS } from "../src/db/schema.ts";
 import { reserveOtpSend, releaseOtpSend } from "../src/db/otp-budget.ts";
 import { tempDir } from "./auth-helpers.ts";
 
@@ -86,7 +87,7 @@ describe("game.db", () => {
     db = openGameDb(join(dir, "game.db"));
     expect(getAccount(db, "u1")).not.toBeNull();
     expect(db.pragma("journal_mode", { simple: true })).toBe("wal");
-    expect(db.pragma("user_version", { simple: true })).toBe(1);
+    expect(db.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length);
   });
 });
 

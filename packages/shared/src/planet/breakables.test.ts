@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mulberry32 } from "../rng.ts";
 import { BODIES, BODY_IDS, PLANET_IDS, type BodyId } from "./bodies.ts";
 import {
-  archetypeDef, bodyBreakables, BREAKABLE_ARCHETYPES, BREAKABLE_MIN_DRY, BREAKABLE_SAFE_MARGIN, BreakableGrid,
+  archetypeDef, bodyBreakables, BREAKABLE_ARCHETYPES, BREAKABLE_ARENA_MARGIN, BREAKABLE_MIN_DRY, BREAKABLE_SAFE_MARGIN, BreakableGrid,
   breakablePlacementReport, breakableSites, canBreak, distanceToBreakable, placeBreakables, rayBreakable,
   segmentNearBreakable, type Breakable,
 } from "./breakables.ts";
@@ -10,6 +10,7 @@ import { chunkOf } from "./cubesphere.ts";
 import { chordMetres, padDirs, PAD_SAFE_RADIUS } from "./pads.ts";
 import { chunkProps, PROP_DEFS } from "./props.ts";
 import { createTerrain, type Terrain } from "./terrain.ts";
+import { bossArena } from "../content/arenas.ts";
 
 const terrains = Object.fromEntries(BODY_IDS.map((id) => [id, createTerrain(id)])) as Record<BodyId, Terrain>;
 
@@ -118,19 +119,31 @@ describe("breakable placement", () => {
     }
   });
 
-  it("every planet has every archetype, and the boss arenas keep their cover", () => {
+  it("every planet has every archetype; nothing sits in a boss arena (the NPC lane owns arena cover)", () => {
     for (const id of PLANET_IDS) {
       const kinds = new Set(bodyBreakables(terrains[id]).map((b) => b.kind));
       for (const a of BREAKABLE_ARCHETYPES) expect(kinds, `${id} ${a}`).toContain(a);
+      const arena = bossArena(terrains[id])!;
+      expect(arena).toBeTruthy();
+      for (const b of bodyBreakables(terrains[id])) {
+        const l = Math.hypot(b.px, b.py, b.pz);
+        expect(chordMetres(arena.up, b.px / l, b.py / l, b.pz / l, BODIES[id].radius)).toBeGreaterThanOrEqual(arena.radius + BREAKABLE_ARENA_MARGIN + b.foot - 1e-6);
+      }
     }
-    const arena = (id: BodyId, site: string) => breakablePlacementReport(terrains[id]).find((r) => r.site === site)!;
-    expect(arena("arcadia", "Gull Point").kept).toBeGreaterThanOrEqual(6);
-    expect(arena("hollowmere", "Hollow Nave").kept).toBeGreaterThanOrEqual(6);
-    expect(arena("meridian", "Foreclosure Yard").kept).toBeGreaterThanOrEqual(6);
-    // Cover is heavy-only and tougher per planet (content.md §4).
+    // Heavy cover is tougher per planet (content.md §4 numbers).
     expect(archetypeDef("arcadia", "cover").hp).toBe(400);
     expect(archetypeDef("hollowmere", "cover").hp).toBe(600);
     expect(archetypeDef("meridian", "cover").hp).toBe(900);
+  });
+
+  it("points of interest keep most of their props", () => {
+    for (const id of PLANET_IDS) {
+      for (const r of breakablePlacementReport(terrains[id])) {
+        if (r.site.startsWith("pad ")) continue;
+        const total = r.kept + r.water + r.steep + r.safe + r.arena + r.props + r.overlap;
+        expect(r.kept / total, `${id} ${r.site}`).toBeGreaterThan(0.55);
+      }
+    }
   });
 
   it("destruction classes: light breaks crates, barrels and fences; heavy breaks everything; none breaks nothing", () => {

@@ -138,6 +138,15 @@ export const MIGRATIONS: readonly string[] = [
   CREATE INDEX otp_send_email ON otp_send(email_hash, sent_at);
   CREATE INDEX otp_send_at ON otp_send(sent_at);
   `,
+  // 2: account-level counters for cumulative medals (e.g. props broken for Demolition Crew)
+  `
+  CREATE TABLE account_stat (
+    user_id  TEXT NOT NULL,
+    stat     TEXT NOT NULL,
+    value    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, stat)
+  );
+  `,
 ];
 
 /** Apply every migration newer than the database's user_version, each in its own transaction. */

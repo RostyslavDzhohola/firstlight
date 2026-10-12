@@ -1,20 +1,60 @@
-// ?bench (SPEC §7.4): a scripted camera path around the spawn of the current body for 60 s,
-// recording frame times (p50/p95/p99), GPU time, draw calls, triangles and heap, reported to the
-// console as JSON and to window.__bench. ?benchcrowd=N spawns N local dummy avatars walking near
-// the path (no server needed) and periodic particle bursts, to emulate the busiest scene.
-// Options: ?benchtime=S (default 60), ?benchwarm=S warm-up before recording (default 5).
-// No pointer lock needed; works with ?autoplay.
+// Benchmarks (SPEC §7.4). A scripted camera path around the spawn of the current body, recording
+// frame times (p50/p95/p99), GPU time, draw calls, triangles and heap, reported to the console as
+// JSON and to window.__bench. No pointer lock needed; works with ?autoplay. Phases and the camera
+// run on the wall clock; only the crowd simulation uses the clamped frame dt.
+//
+// Presets (both run offline unless ?online is given):
+//   ?bench        renderer bench: the current body, 5 s warm-up, 60 s run, no crowd unless
+//                 ?benchcrowd=N (then with bursts).
+//   ?bench=g1     the G1 gate workload (SPEC §7.1/§7.4): Portus (unless ?body=…), 40 local dummy
+//                 avatars + particle bursts, 180 s warm-up (the Air throttles), 60 s run.
+// Overrides: ?benchcrowd=N, ?benchwarm=S, ?benchtime=S.
 
 import * as THREE from "three/webgpu";
 import { ANIM } from "@firstlight/shared/net/schema";
-import type { Terrain } from "@firstlight/shared";
+import { BODY_IDS, type BodyId, type Terrain } from "@firstlight/shared";
 import { flags } from "../config.ts";
 import { AvatarView } from "./Avatars.ts";
 import type { ParticleSystem } from "./particles.ts";
 import type { RenderCtx } from "./renderer.ts";
 import { localFrame, type V3 } from "./sunFrame.ts";
-import { percentile } from "./timing.ts";
+import { maxOf, percentile } from "./timing.ts";
 import { shaderStats } from "./warmup.ts";
+
+export interface BenchConfig {
+  preset: "renderer" | "g1";
+  crowd: number;
+  bursts: boolean;
+  warmSeconds: number;
+  runSeconds: number;
+  /** Body to load for the bench (null = whatever the game would load). */
+  body: BodyId | null;
+}
+
+const num = (name: string): number | null => {
+  const v = flags.get(name);
+  if (v === null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+/** The bench requested by the URL, or null. */
+export function benchConfig(): BenchConfig | null {
+  const v = flags.get("bench");
+  if (v === null) return null;
+  const g1 = v.toLowerCase() === "g1";
+  const want = flags.get("body");
+  const urlBody = want && (BODY_IDS as readonly string[]).includes(want) ? (want as BodyId) : null;
+  const crowd = Math.max(0, Math.min(200, num("benchcrowd") ?? (g1 ? 40 : 0)));
+  return {
+    preset: g1 ? "g1" : "renderer",
+    crowd,
+    bursts: g1 || crowd > 0,
+    warmSeconds: Math.max(0, num("benchwarm") ?? (g1 ? 180 : 5)),
+    runSeconds: Math.max(5, num("benchtime") ?? 60),
+    body: urlBody ?? (g1 ? "portus" : null),
+  };
+}
 
 export interface BenchHost {
   ctx: RenderCtx;
@@ -39,6 +79,7 @@ const PALETTE_BURST = [0x36f9f6, 0xffb86b, 0xff7edb, 0x9cff6b, 0xffd166, 0xb48cf
 
 export interface BenchResult {
   v: 1;
+  preset: "renderer" | "g1";
   when: string;
   body: string;
   backend: "webgpu" | "webgl2";
@@ -48,7 +89,10 @@ export interface BenchResult {
   devicePixelRatio: number;
   pixelRatio: number;
   canvas: [number, number];
+  /** Measured wall-clock length of the recorded run. */
   seconds: number;
+  plannedSeconds: number;
+  warmSeconds: number;
   frames: number;
   frameMs: { p50: number; p95: number; p99: number; mean: number; max: number };
   fps: { mean: number; p50: number };
@@ -70,9 +114,11 @@ export interface BenchResult {
 const r2 = (v: number) => Math.round(v * 100) / 100;
 
 export class Bench {
-  readonly duration = Math.max(5, Number(flags.get("benchtime")) || 60);
-  readonly warm = Math.max(0, Number(flags.get("benchwarm") ?? 5) || 0);
-  private t = 0;
+  readonly duration: number;
+  readonly warm: number;
+  private readonly startWall = performance.now();
+  private runStart = 0;
+  private runEnd = 0;
   private phase: "warm" | "run" | "done" = "warm";
   private readonly frames: number[] = [];
   private readonly gpu: number[] = [];
@@ -90,7 +136,10 @@ export class Bench {
   readonly focus = new THREE.Vector3();
   result: BenchResult | null = null;
 
-  constructor(private readonly host: BenchHost, crowdCount: number) {
+  constructor(private readonly host: BenchHost, readonly config: BenchConfig) {
+    this.duration = config.runSeconds;
+    this.warm = config.warmSeconds;
+    const crowdCount = config.crowd;
     this.up.copy(host.spawn).normalize();
     const e: V3 = [0, 0, 0], n: V3 = [0, 0, 0];
     localFrame(this.up.x, this.up.y, this.up.z, e, n);
@@ -111,7 +160,7 @@ export class Bench {
     this.el.style.cssText =
       "position:fixed;right:8px;top:8px;z-index:60;font:12px/1.4 ui-monospace,monospace;color:#cfe;background:#000b;padding:8px 10px;border-radius:6px;max-width:46vw;max-height:80vh;overflow:auto;white-space:pre-wrap";
     document.body.appendChild(this.el);
-    console.info(`[bench] start: warm ${this.warm}s, run ${this.duration}s, crowd ${crowdCount}`);
+    console.info(`[bench] ${config.preset}: warm ${this.warm}s, run ${this.duration}s, crowd ${crowdCount}, bursts ${config.bursts}`);
   }
 
   /** Direction of the ground point at tangent offset (x east, y north) metres from the spawn. */
@@ -166,22 +215,26 @@ export class Bench {
     return this.phase !== "done";
   }
 
-  /** Before rendering: drive the camera and the crowd. */
+  /** Before rendering: drive the camera (wall clock) and the crowd (clamped dt). */
   update(dt: number, now: number, camera: THREE.PerspectiveCamera) {
     if (this.phase === "done") return;
-    this.t += dt;
-    const s = this.phase === "warm" ? (this.t / Math.max(this.warm, 1)) * 0.05 : this.t / this.duration;
-    this.pose(Math.min(0.9999, s % 1), camera);
-    this.updateCrowd(dt, now);
+    const runMs = this.duration * 1000;
     if (this.phase === "warm") {
-      this.el.textContent = `BENCH warming up ${this.t.toFixed(1)} / ${this.warm}s`;
-      if (this.t >= Math.max(this.warm, 0.001)) {
+      const warmed = now - this.startWall;
+      // Warm-up flies the same path so the GPU reaches its steady (throttled) state on the load.
+      this.pose((warmed / runMs) % 1, camera);
+      this.el.textContent = `BENCH ${this.config.preset} warming up ${(warmed / 1000).toFixed(0)} / ${this.warm} s`;
+      if (warmed >= this.warm * 1000) {
         this.phase = "run";
-        this.t = 0;
+        this.runStart = now;
         this.shaderBuildsAtStart = shaderStats().total;
         this.recording = false;
+        this.pose(0, camera);
       }
+    } else {
+      this.pose(Math.min(0.9999, (now - this.runStart) / runMs), camera);
     }
+    this.updateCrowd(dt, now);
   }
 
   private recording = false;
@@ -192,6 +245,7 @@ export class Bench {
    */
   record(frameMs: number) {
     if (this.phase !== "run") return;
+    const now = performance.now();
     // Skip the first run frame: its interval straddles the warm/run switch.
     if (!this.recording) {
       this.recording = true;
@@ -206,8 +260,12 @@ export class Bench {
     if (g !== null) this.gpu.push(g);
     const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
     if (mem && this.frames.length % 30 === 0) this.heap.push(mem.usedJSHeapSize / 1048576);
-    if (this.frames.length % 15 === 0) this.el.textContent = `BENCH ${this.t.toFixed(1)} / ${this.duration}s  ${this.frames.length} frames`;
-    if (this.t >= this.duration) this.finish();
+    const elapsed = (now - this.runStart) / 1000;
+    if (this.frames.length % 15 === 0) this.el.textContent = `BENCH ${this.config.preset} ${elapsed.toFixed(1)} / ${this.duration} s  ${this.frames.length} frames`;
+    if (elapsed >= this.duration) {
+      this.runEnd = now;
+      this.finish();
+    }
   }
 
   private updateCrowd(dt: number, now: number) {
@@ -227,7 +285,7 @@ export class Bench {
       const anim = g < wr - 1.2 ? ANIM.SWIM : d.speed > 3.5 ? ANIM.RUN : ANIM.WALK;
       d.view.set(d.pos.x, d.pos.y, d.pos.z, d.heading.x, d.heading.y, d.heading.z, anim, dt);
     }
-    if (this.crowd.length && now >= this.nextBurst) {
+    if (this.config.bursts && this.crowd.length && now >= this.nextBurst) {
       this.nextBurst = now + 350;
       const d = this.crowd[Math.floor(Math.random() * this.crowd.length)]!;
       const p = d.pos.clone().addScaledVector(d.dir, 1.0);
@@ -235,13 +293,28 @@ export class Bench {
     }
   }
 
-  /** Ground positions of the crowd for blob shadows. */
+  private readonly blobs: { x: number; y: number; z: number; r: number }[] = [];
+  private readonly views: AvatarView[] = [];
+
+  /** Ground positions of the crowd for blob shadows (the same array every call). */
   crowdBlobs(): { x: number; y: number; z: number; r: number }[] {
-    return this.crowd.map((d) => ({ x: d.pos.x, y: d.pos.y, z: d.pos.z, r: 0.55 }));
+    for (let i = 0; i < this.crowd.length; i++) {
+      const d = this.crowd[i]!;
+      const b = (this.blobs[i] ??= { x: 0, y: 0, z: 0, r: 0.55 });
+      b.x = d.pos.x;
+      b.y = d.pos.y;
+      b.z = d.pos.z;
+    }
+    return this.blobs;
   }
 
+  /** The crowd's avatar views (the same array every call). */
   crowdViews(): AvatarView[] {
-    return this.crowd.map((d) => d.view);
+    if (this.views.length !== this.crowd.length) {
+      this.views.length = 0;
+      for (const d of this.crowd) this.views.push(d.view);
+    }
+    return this.views;
   }
 
   private finish() {
@@ -253,6 +326,7 @@ export class Bench {
     const avg = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
     const res: BenchResult = {
       v: 1,
+      preset: this.config.preset,
       when: new Date().toISOString(),
       body: this.host.body,
       backend: ctx.webgpu ? "webgpu" : "webgl2",
@@ -262,16 +336,18 @@ export class Bench {
       devicePixelRatio: devicePixelRatio,
       pixelRatio: r2(ctx.pixelRatio()),
       canvas: [ctx.renderer.domElement.width, ctx.renderer.domElement.height],
-      seconds: this.duration,
+      seconds: r2((this.runEnd - this.runStart) / 1000),
+      plannedSeconds: this.duration,
+      warmSeconds: this.warm,
       frames: f.length,
-      frameMs: { p50: r2(percentile(f, 0.5)), p95: r2(percentile(f, 0.95)), p99: r2(percentile(f, 0.99)), mean: r2(mean), max: r2(Math.max(0, ...f)) },
+      frameMs: { p50: r2(percentile(f, 0.5)), p95: r2(percentile(f, 0.95)), p99: r2(percentile(f, 0.99)), mean: r2(mean), max: r2(maxOf(f)) },
       fps: { mean: r2(1000 / Math.max(0.001, mean)), p50: r2(1000 / Math.max(0.001, percentile(f, 0.5))) },
       gpuMs: this.gpu.length ? { p50: r2(percentile(this.gpu, 0.5)), p95: r2(percentile(this.gpu, 0.95)) } : null,
-      draws: { mean: r2(avg(this.draws)), max: Math.max(0, ...this.draws) },
-      triangles: { mean: Math.round(avg(this.tris)), max: Math.max(0, ...this.tris) },
-      heapMB: this.heap.length ? { start: r2(this.heap[0]!), end: r2(this.heap[this.heap.length - 1]!), max: r2(Math.max(...this.heap)) } : null,
+      draws: { mean: r2(avg(this.draws)), max: maxOf(this.draws) },
+      triangles: { mean: Math.round(avg(this.tris)), max: maxOf(this.tris) },
+      heapMB: this.heap.length ? { start: r2(this.heap[0]!), end: r2(this.heap[this.heap.length - 1]!), max: r2(maxOf(this.heap)) } : null,
       crowd: this.crowd.length,
-      particles: { mean: Math.round(avg(this.parts)), max: Math.max(0, ...this.parts) },
+      particles: { mean: Math.round(avg(this.parts)), max: maxOf(this.parts) },
       chunks: st.chunks,
       visibleChunks: st.visibleChunks,
       grassBlades: st.grassBlades,
