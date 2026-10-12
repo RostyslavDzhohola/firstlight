@@ -11,10 +11,8 @@ import type { Client } from "@colyseus/core";
 import { dummyPos, dummyStat, ONBOARDING, TRAINING_DUMMIES } from "@firstlight/shared/content/onboarding";
 import type { YouState } from "@firstlight/shared/net/protocol";
 import { z } from "zod";
-import { levelForXp } from "@firstlight/shared/content/progression";
 import { actorPos, type PlayerActor } from "./actors.ts";
 import type { BodyRoom } from "./BodyRoom.ts";
-import { withTx } from "./characters.ts";
 import { ORIGIN_SLACK, selectedWeapon } from "./combat.ts";
 import { emitGameEvent } from "./events.ts";
 import { dist3, inMeleeArc, rayCapsule, type V3 } from "./geometry.ts";
@@ -140,53 +138,66 @@ export class OnboardingSystem implements RoomSystem {
       c.send("train", { dummy: i, hits: was, down: false });
       return;
     }
+    // Committed. A finished trainee is retired before anything that could still go wrong.
+    if (done) this.retire(a, t);
+    r.show();
     c.send("train", { dummy: i, hits: t.hits[i], down: true });
     if (r.dummyXp) c.send("toast", { text: `Training dummy down · +${r.dummyXp} XP`, kind: "xp" });
     if (done) this.ended(a, t, "done");
   }
 
   /**
-   * Pay a knocked-down dummy and/or the completion. The payout flags, the character's new XP and the
-   * Spark medal commit in one transaction; after the commit the live actor takes the XP through
-   * grantXp (level-up HP, toasts, events) and the medal's messages go out. Returns null (nothing
-   * persisted, nothing sent) when the transaction fails.
+   * Pay a knocked-down dummy and/or the completion. Each pays on its first durable transition only
+   * (its flag goes from 0 to 1 inside the transaction), so a retry after a committed payout pays
+   * nothing (F12 final B2). The flags, the character's XP and level, and the Spark medal commit in
+   * one transaction; nothing here saves again. Returns null when the transaction fails (nothing
+   * persisted, nothing sent), else the amounts and `show`, which runs after the commit: level-up
+   * effects and the medal's messages.
    */
-  private payout(a: PlayerActor, dummy: number | null, done: boolean): { dummyXp: number; doneXp: number } | null {
+  private payout(a: PlayerActor, dummy: number | null, done: boolean): { dummyXp: number; doneXp: number; show: () => void } | null {
     const uid = a.identity.userId;
     const store = progressStore.current;
     const quests = this.room.systems.find((s): s is QuestSystem => s instanceof QuestSystem);
     const notify: (() => void)[] = [];
-    const before = { xp: a.char.xp, level: a.char.level };
     let dummyXp = 0;
     let doneXp = 0;
     try {
-      withTx(() => {
+      this.room.persist([a], () => {
         if (dummy !== null && store.addStat(uid, dummyStat(dummy), 1) === 1) dummyXp = ONBOARDING.DUMMY_XP;
-        if (done) {
+        if (done && store.stat(uid, ONBOARDING.STAT) === 0) {
           store.addStat(uid, ONBOARDING.STAT, 1);
           doneXp = ONBOARDING.DONE_XP;
           if (quests) quests.award(a, SPARK, notify);
           else store.awardMedal(uid, SPARK);
         }
-        a.char.xp = before.xp + dummyXp + doneXp;
-        a.char.level = levelForXp(a.char.xp);
+        notify.unshift(this.room.addXp(a, dummyXp + doneXp));
         this.room.saveActor(a);
       });
     } catch (err) {
       console.error(`[onboarding] payout for ${uid} rolled back:`, err);
       return null;
-    } finally {
-      a.char.xp = before.xp;
-      a.char.level = before.level;
     }
-    this.room.grantXp(a, dummyXp + doneXp);
-    for (const f of notify) f();
-    return { dummyXp, doneXp };
+    return {
+      dummyXp,
+      doneXp,
+      show: () => {
+        for (const f of notify) f();
+      },
+    };
   }
 
-  /** Every dummy is down: pay the completion (from a join after an interrupted finish). */
+  /** Every dummy is down: pay the completion (from a join after an interrupted finish, or a retry). */
   private complete(a: PlayerActor, t: Trainee) {
-    if (this.payout(a, null, true)) this.ended(a, t, "done");
+    const r = this.payout(a, null, true);
+    if (!r) return;
+    this.retire(a, t);
+    r.show();
+    this.ended(a, t, "done");
+  }
+
+  /** Forget a trainee (only if it is still this one). */
+  private retire(a: PlayerActor, t: Trainee) {
+    if (this.trainees.get(a.identity.userId) === t) this.trainees.delete(a.identity.userId);
   }
 
   /** Nearest dummy inside the melee reach, judged by the body's facing or the camera's aim. */
@@ -247,7 +258,7 @@ export class OnboardingSystem implements RoomSystem {
 
   /** After the commit: forget the trainee and tell the player (and the bus, on completion). */
   private ended(a: PlayerActor, t: Trainee, state: "done" | "skipped") {
-    this.trainees.delete(a.identity.userId);
+    this.retire(a, t);
     a.youDirty = true;
     // The quests system already holds the medal (no second award); other listeners still hear it.
     if (state === "done") emitGameEvent(this.room, { type: "onboardingDone", playerId: a.id });

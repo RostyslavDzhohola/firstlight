@@ -221,6 +221,71 @@ describe("onboarding rewards are atomic (SQLite, D26)", () => {
   }, 30_000);
 });
 
+describe("onboarding completion pays once (SQLite, F12 final B2)", () => {
+  async function trainee(uid: string) {
+    const db = openGameDb(join(mkdtempSync(join(tmpdir(), "fl-onb-")), "game.db"));
+    const repo = new SqliteCharacterRepo(db);
+    characterRepo.current = repo;
+    pileStore.current = new SqlitePileStore(db);
+    progressStore.current = new SqliteProgressStore(db);
+    const b = await bot(uid, "portus", "admin", { starter: 3 });
+    for (const i of [0, 1]) {
+      await tpAndWait(b, inFront(i, 6));
+      await knockDown(b, i, "carbine");
+    }
+    await tpAndWait(b, inFront(2, 6));
+    for (let n = 1; n < HITS; n++) {
+      await sleep(300);
+      b.send("train", aim(b, 2));
+      await until(`hit ${n}`, () => b.you.onboarding.hits[2] === n);
+    }
+    return { b, repo, store: progressStore.current };
+  }
+
+  it("a write failing after the completion committed can't leave the trainee behind to be paid again", async () => {
+    const { b, repo, store } = await trainee("doubled");
+    // The completion's save goes through; every later save fails (the probe's second write).
+    const save = repo.save.bind(repo);
+    let committed = false;
+    repo.save = (uid: string, c: CharacterData) => {
+      if (committed) throw new Error("disk I/O error (injected, after the commit)");
+      save(uid, c);
+      if (c.xp >= 50) committed = true;
+    };
+    await sleep(300);
+    b.send("train", aim(b, 2));
+    await until("done", () => b.count("onboarding") === 1);
+    expect(store.stat("doubled", ONBOARDING.STAT)).toBe(1);
+    expect(onboardingOf(b).trainees.has("doubled")).toBe(false);
+    // Another training attack after the cooldown: nothing more is paid.
+    await sleep(600);
+    b.send("train", aim(b, 2));
+    await sleep(400);
+    repo.save = save;
+    expect(store.stat("doubled", ONBOARDING.STAT)).toBe(1);
+    expect(repo.load("doubled")!.xp).toBe(50);
+    expect(serverRoom(b).actors.get(b.id)!.char.xp).toBe(50);
+    expect(b.toasts.filter((t) => t.startsWith("Medal earned: Spark"))).toHaveLength(1);
+  }, 30_000);
+
+  it("a trainee still active after its completion committed is retired without a second payout", async () => {
+    const { b, repo, store } = await trainee("leftover");
+    await sleep(300);
+    b.send("train", aim(b, 2));
+    await until("done", () => b.count("onboarding") === 1);
+    expect(repo.load("leftover")!.xp).toBe(50);
+    // As if the after-commit step had failed before retiring it: the trainee is back, all down.
+    const sys = onboardingOf(b);
+    sys.trainees.set("leftover", { sessionId: b.id, hits: [HITS, HITS, HITS], lastAt: 0 });
+    b.send("train", aim(b, 2));
+    await until("retired", () => !sys.trainees.has("leftover"));
+    await sleep(200);
+    expect(store.stat("leftover", ONBOARDING.STAT)).toBe(1);
+    expect(repo.load("leftover")!.xp).toBe(50);
+    expect(serverRoom(b).actors.get(b.id)!.char.xp).toBe(50);
+  }, 30_000);
+});
+
 describe("onboarding sessions", () => {
   it("a takeover from another window leaves exactly one trainee (the new session)", async () => {
     const a = await bot("twin", "portus");
