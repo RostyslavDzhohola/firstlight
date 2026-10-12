@@ -120,12 +120,18 @@ describe("review fixes (units)", () => {
     const f = n.facing;
     const vent: [number, number, number] = [0, 1, 2].map((i) => n.pos[i]! + u[i]! * 2.1 + f[i]! * 3.3) as [number, number, number];
     const crown: [number, number, number] = [0, 1, 2].map((i) => n.pos[i]! + u[i]! * 6.8) as [number, number, number];
+    // A shot from 20 m in front of the boss, aimed at a target point; the capsule entry is ~4 m short of the axis.
+    const shot = (target: [number, number, number]) => {
+      const o = [0, 1, 2].map((i) => target[i]! + f[i]! * 20) as [number, number, number];
+      const d = [0, 1, 2].map((i) => (target[i]! - o[i]!) / 20) as [number, number, number];
+      return n.weakPoint!(o, d, 20 - 1.2);
+    };
     expect(n.weakMult).toBe(1.5);
-    expect(n.weakPoint!(vent)).toBe(false); // closed: no weak point at all
+    expect(shot(vent)).toBe(false); // closed: no weak point at all
     expect(boss.mitigate(n, 1000, true)).toBe(200); // and armour applies (no generic headshot leak)
     boss.windowUntil = w.clock.t + 5000; // Moored
-    expect(n.weakPoint!(vent)).toBe(true);
-    expect(n.weakPoint!(crown)).toBe(false); // the top of the shell isn't the vent
+    expect(shot(vent)).toBe(true);
+    expect(shot(crown)).toBe(false); // the top of the shell isn't the vent
     expect(boss.mitigate(n, 1000, true)).toBe(1000);
   });
 

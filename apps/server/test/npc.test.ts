@@ -582,6 +582,30 @@ describe("review should-fix items (seam 1)", () => {
   }, 30_000);
 });
 
+describe("late arrivals (seam 1)", () => {
+  it("a player arriving mid-telegraph sees the Royal Judgement already counting down", async () => {
+    NPC_TUNING.bosses = true;
+    NPC_TUNING.bossAttacks = false;
+    NPC_TUNING.bossMechanics = ["royal_judgement"];
+    NPC_TUNING.firstMechanicMs = 300;
+    const ar = hollowArena();
+    const R = BODIES.hollowmere.radius;
+    const A = await player("marked", "hollowmere", ar.centre as V, 14);
+    let circle: any = null;
+    A.onMessage("boss", (m: any) => m.type === "mechanic" && m.mech === "royal_judgement" && (circle = m));
+    await bossUpIn(A);
+    await waitFor(() => circle !== null, 4000);
+    const B = await player("arrival", "hollowmere", offset(ar.centre, 0, 60, R), 14);
+    let replay: any = null;
+    B.onMessage("npcAtk", (m: any) => m.sh === 9 && (replay = m));
+    B.send("npcSync", {});
+    await waitFor(() => replay !== null, 1500);
+    expect(replay.ms).toBeGreaterThan(0);
+    expect(replay.ms).toBeLessThan(2000);
+    expect(flat([replay.x, replay.y, replay.z], circle.pts)).toBeLessThan(0.5);
+  }, 30_000);
+});
+
 function hollowArena() {
   return bossArena(createTerrain("hollowmere"))!;
 }

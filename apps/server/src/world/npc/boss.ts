@@ -47,6 +47,8 @@ interface Mech {
   cover: CoverState | null;
   /** Split circles: everyone in the arena when the stamp fell (session ids), held through detonation. */
   participants?: string[];
+  /** The telegraph clients were sent (replayed to late arrivals with the remaining time). */
+  msg?: NpcAttackMsg;
 }
 
 const BOSS_MSG_RADIUS = 220;
@@ -163,7 +165,7 @@ export class BossController {
     const n = this.sys.createNpc(this.defIndex, this.def.level, this.arena.home, now, { boss: true, roam: this.arena.roam });
     n.facing = this.arena.homeFacing;
     // Boss-specific weak point and multiplier (content §4), not the generic headshot rule.
-    n.weakPoint = (pt) => this.weakPoint(n, pt);
+    n.weakPoint = (o, d, t) => this.weakPoint(n, o, d, t);
     n.weakMult = this.def.plates?.weakMult ?? 1.5;
     this.npc = n;
     this.status = "alive";
@@ -286,6 +288,8 @@ export class BossController {
       dark: !open && now < this.darkUntil ? Math.ceil((this.darkUntil - now) / 1000) : 0,
       pts: this.arena.plates.flat(),
     } satisfies BossEventMsg);
+    // Mechanics already counting down (split circles, surges, summons, toppling cover).
+    for (const m of this.mechs) if (m.msg && m.at > now) this.sys.world.send(p, "npcAtk", { ...m.msg, ms: Math.round(m.at - now) });
   }
 
   forget(sessionId: string) {
@@ -420,8 +424,12 @@ export class BossController {
     return amount * (open ? 1 : (this.npcDef.armour ?? 1));
   }
 
-  /** Is a hit point on the boss's exposed weak point? (chest vent / rib cage / reactor hatch) */
-  weakPoint(n: Npc, pt: V3): boolean {
+  /**
+   * Does a ray that hit the boss's capsule at distance `t` pass through its exposed weak point
+   * (chest vent / rib cage / reactor hatch)? The capsule is coarse, so the ray is tested against the
+   * weak-point sphere itself, near the capsule entry (not through the whole body).
+   */
+  weakPoint(n: Npc, o: V3, d: V3, t: number): boolean {
     const now = this.sys.world.now();
     const exposed = this.def.id === "hollow_king" ? now < this.weakUntil : now < this.windowUntil;
     const v = WEAK_VOLUMES[this.def.id];
@@ -429,9 +437,11 @@ export class BossController {
     const u = up(n.pos);
     const f = n.facing;
     const r = cross(u, f);
-    const d = sub(pt, n.pos);
-    const lx = dot(d, r) - v.c[0], ly = dot(d, u) - v.c[1], lz = dot(d, f) - v.c[2];
-    return lx * lx + ly * ly + lz * lz <= v.r * v.r;
+    const c: V3 = add(add(add(n.pos, r, v.c[0]), u, v.c[1]), f, v.c[2]);
+    const s = dot(sub(c, o), d); // closest approach along the ray
+    if (s < t - 1 || s > t + n.radius * 2) return false;
+    const q = add(o, d, s);
+    return dot(sub(q, c), sub(q, c)) <= v.r * v.r;
   }
 
   onDamaged(n: Npc, _amount: number, by: unknown) {
@@ -707,6 +717,8 @@ export class BossController {
   private sendTelegraph(n: Npc, a: AttackDef, c: V3, dir: V3, ms: number, extra: Partial<NpcAttackMsg>) {
     const msg: NpcAttackMsg = { id: n.id, a: this.npcDef.attacks.indexOf(a), sh: SHAPE_CODE[a.shape], ms: Math.round(ms), x: c[0], y: c[1], z: c[2], dx: dir[0], dy: dir[1], dz: dir[2], r: a.radius ?? 4, w: 0, l: 0, ang: 0, c: a.shape === "split" || a.shape === "raise" ? 4 : 2, ...extra };
     this.sys.sendNear(this.arena.centre, BOSS_MSG_RADIUS, "npcAtk", msg);
+    const last = this.mechs[this.mechs.length - 1];
+    if (last && !last.msg) last.msg = msg;
   }
 
   private runMechs(n: Npc, now: number) {
@@ -862,8 +874,8 @@ export class BossController {
     const length = crane ? 28 : c.def.height;
     const width = crane ? 3 : 2.5;
     const ms = crane ? 1200 : 1000;
-    this.mechs.push({ kind: "topple", atk: null, at: now + ms, centre: c.def.pos, points: [], dir, radius: 0, length, width, cover: c });
     const msg: NpcAttackMsg = { id: n.id, a: -2, sh: SHAPE_CODE.line, ms, x: c.def.pos[0], y: c.def.pos[1], z: c.def.pos[2], dx: dir[0], dy: dir[1], dz: dir[2], r: width / 2, w: width, l: length, ang: 0, c: 0 };
+    this.mechs.push({ kind: "topple", atk: null, at: now + ms, centre: c.def.pos, points: [], dir, radius: 0, length, width, cover: c, msg });
     this.sys.sendNear(this.arena.centre, BOSS_MSG_RADIUS, "npcAtk", msg);
   }
 

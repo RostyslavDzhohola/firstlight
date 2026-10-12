@@ -103,7 +103,7 @@ function raycastActors(host: CombatHost, o: V3, d: V3, maxT: number, ignore: Set
     const hit = rayCapsule(o, d, maxT, feet, r, h);
     if (hit && (!best || hit.t < best.t)) {
       // NPCs with weak-point volumes (bosses) decide for themselves where the weak spot is.
-      const weak = a.kind === "player" ? hit.heightAboveFeet >= HEAD_FROM : a.weakPoint ? a.weakPoint([o[0] + d[0] * hit.t, o[1] + d[1] * hit.t, o[2] + d[2] * hit.t]) : hit.heightAboveFeet >= h * 0.8;
+      const weak = a.kind === "player" ? hit.heightAboveFeet >= HEAD_FROM : a.weakPoint ? a.weakPoint(o, d, hit.t) : hit.heightAboveFeet >= h * 0.8;
       best = { actor: a, t: hit.t, weak };
     }
   };

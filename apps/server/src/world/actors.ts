@@ -91,8 +91,11 @@ export interface NpcActor {
    * Gets the damage after the weak-point multiplier and returns what to apply; ≤ 0 = no damage.
    */
   mitigate?: (amount: number, weak: boolean, fromDir?: V3) => number;
-  /** Weak-point volume test for a ray hit point (bosses); replaces the generic "top of the capsule" test. */
-  weakPoint?: (point: V3) => boolean;
+  /**
+   * Weak-point test for a ray that hit this NPC's capsule at distance `t` (bosses: does the ray pass
+   * through an exposed weak-point volume?). Replaces the generic "top of the capsule" test.
+   */
+  weakPoint?: (o: V3, d: V3, t: number) => boolean;
   /** Multiplier for weak-point hits on this NPC; replaces the weapon's headshot multiplier when set. */
   weakMult?: number;
   boss?: boolean;
