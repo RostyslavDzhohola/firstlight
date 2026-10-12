@@ -6,6 +6,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { bossArena } from "@firstlight/shared/content/arenas";
 import { createTerrain } from "@firstlight/shared";
 import { NPC_TUNING, npcSystemOf } from "../src/world/npc/index.ts";
+import { NF } from "@firstlight/shared/content/npcs";
+import { xpAtLevel } from "@firstlight/shared/content/progression";
+import { characterRepo } from "../src/world/characters.ts";
 import { emitNpcEvent } from "../src/world/npc/tuning.ts";
 import { pileStore } from "../src/world/piles.ts";
 import { QUEST_RULES } from "../src/world/quests/QuestSystem.ts";
@@ -21,7 +24,7 @@ import { openGameDb } from "../src/db/index.ts";
 import { copyStateStore, MemoryCopyStateStore, SqliteCopyStateStore } from "../src/world/copyState.ts";
 import { tempDir } from "./auth-helpers.ts";
 import { safeLeave, startServer } from "./helpers.ts";
-import { bot, ground, harness, invIds, objAt, padAt, serverRoom, tpAndWait, until, type Bot } from "./quest-helpers.ts";
+import { bot, ground, harness, invIds, objAt, padAt, serverRoom, sleep, tpAndWait, until, type Bot } from "./quest-helpers.ts";
 
 const questsOf = (room: BodyRoom) => room.systems.find((s) => "eggs" in s) as unknown as QuestSystem;
 /** Wait for the quest system's next level check (it runs once a second). */
@@ -119,6 +122,40 @@ describe("admin assistance", () => {
     expect(c.you.medals).not.toContain("decommissioned");
     expect(hall()).not.toContain("boss:receiver");
   });
+
+  for (const [from, to, medal] of [[9, 10, "ten_down"], [19, 20, "firstlight"]] as const) {
+    it(`an assisted boss kill that takes level ${from} past ${to} awards no ${medal}: the life is unofficial before the XP lands (F12 final S1)`, async () => {
+      NPC_TUNING.bosses = true;
+      NPC_TUNING.bossAttacks = false;
+      NPC_TUNING.bossMechanics = [];
+      const uid = `lifted${to}`;
+      const b = await bot(uid, "arcadia");
+      const arena = bossArena(createTerrain("arcadia"))!;
+      await tpAndWait(b, ground("arcadia", arena.centre.map((v) => v / Math.hypot(...arena.centre))));
+      const room = serverRoom(b);
+      const a = room.actors.get(b.id)!;
+      b.send("admin", { cmd: "unprotect" });
+      b.send("admin", { cmd: "level", args: { level: from } });
+      await until("level set", () => a.char.level === from);
+      a.char.xp = xpAtLevel(to) - 100; // the boss's 2000 XP crosses `to`
+      const npcs = npcSystemOf(room)!;
+      await until("fight on", () => npcs.boss!.engaged, 8000);
+      const tide = () => [...npcs.npcs.values()].find((n) => n.boss);
+      await until("boss up", () => !!tide() && !(tide()!.state.flags & NF.SPAWNING), 4000);
+      // An admin tool lands the killing blow: the fight is assisted.
+      b.send("npc", { cmd: "hurt", id: tide()!.id, amount: 1e7, as: b.id });
+      await until("loot", () => b.count("npcKill") > 0);
+      expect(a.char.level).toBeGreaterThanOrEqual(to);
+      await sleepUntilQuestTick(b);
+      await sleepUntilQuestTick(b);
+      expect(b.you.medals).not.toContain(medal);
+      expect(progressStore.current.medals(uid)).not.toContain(medal);
+      // Saved with the XP: a restart can't find a level-${to} life that counts.
+      const row = characterRepo.current.load(uid)!;
+      expect(row.level).toBeGreaterThanOrEqual(to);
+      expect(row.life?.unofficial).toBe(true);
+    }, 30_000);
+  }
 
   it("admin egg claims (and steps an admin opened) give the item but no medal or plaque", async () => {
     const b = await bot("tester", "hollowmere");

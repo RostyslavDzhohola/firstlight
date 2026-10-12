@@ -577,14 +577,23 @@ export class BossController {
       if (flatDist(this.arena.centre, actorPos(p)) > this.arena.radius) continue;
       if (credited.has(p.identity.userId)) winners.push(p);
     }
+    // The kill is announced before the loot: an assisted or staged fight marks the winners' lives
+    // unofficial first, so that mark is saved with the loot's XP and no level medal follows from
+    // it (F12 final S1).
+    emitNpcEvent({ kind: "bossKill", body: this.sys.world.body.id, boss: this.def.id, sessionIds: winners.map((p) => p.id), userIds: winners.map((p) => p.identity.userId), names: winners.map((p) => p.identity.name) });
     for (const p of winners) {
-      const loot = bossLoot(this.sys, this.def, p);
+      let loot: ReturnType<typeof bossLoot>;
+      try {
+        loot = bossLoot(this.sys, this.def, p);
+      } catch (err) {
+        console.error(`[boss ${this.def.id}] loot for ${p.identity.userId} not paid: ${(err as Error)?.message ?? err}`);
+        continue;
+      }
       this.sys.world.send(p, "npcKill", { id: n.id, kind: n.defIndex, xp: loot.xp, coins: loot.coins });
       this.sys.world.send(p, "toast", { text: `${this.npcDef.name} defeated: +${loot.coins} coins, +${loot.items.length} items`, kind: "coins" });
     }
     this.event({ type: "defeat", hp: 0, maxHp: n.state.maxHp, engaged: winners.length });
     this.voice(this.def.voice.defeat);
-    emitNpcEvent({ kind: "bossKill", body: this.sys.world.body.id, boss: this.def.id, sessionIds: winners.map((p) => p.id), userIds: winners.map((p) => p.identity.userId), names: winners.map((p) => p.identity.name) });
   }
 
   // ------------------------------------------------------------------------------------ AI
