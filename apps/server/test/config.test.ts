@@ -12,8 +12,14 @@ describe("reserved display names", () => {
     }
   });
 
-  it("ordinary names that merely contain short words still pass", () => {
-    for (const name of ["Admiral", "Modesty", "Devon", "Mira_7", "Systole", "Overture"]) {
+  it("…also as name parts: camelCase, digits and caps runs split a name", () => {
+    for (const name of ["AdminBob", "xXAdminXx", "Admin99", "Bob_Server", "SystemOne", "Support_Desk", "OfficialNews", "Dev_Ann", "TeamLead", "5ystem", "SUPPORT"]) {
+      expect(displayNameProblem(name), name).toBe("reserved");
+    }
+  });
+
+  it("ordinary names that merely contain those words inside a part still pass (F12 final Sonnet S6)", () => {
+    for (const name of ["Admiral", "Modesty", "Devon", "Mira_7", "Systole", "Overture", "Observer", "Badminton", "Ecosystem", "Supporter", "Unofficial", "Systemic", "Preserver"]) {
       expect(displayNameProblem(name), name).toBeNull();
     }
   });
