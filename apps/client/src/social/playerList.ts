@@ -29,8 +29,12 @@ export class PlayerList {
   private reportFor: string | null = null;
   private confirmBan: { sid: string; until: number } | null = null;
   private lastRender = 0;
+  /** A mouse button is held on the panel: don't rebuild under the cursor (the click would be lost). */
+  private pressing = false;
 
-  constructor(private readonly host: ListHost) {}
+  constructor(private readonly host: ListHost) {
+    window.addEventListener("mouseup", () => (this.pressing = false));
+  }
 
   get isOpen() {
     return this.mode !== "closed";
@@ -68,7 +72,7 @@ export class PlayerList {
 
   /** Re-render periodically while open (positions, joins, leaves), but not while typing a report. */
   update(now: number) {
-    if (this.mode === "closed" || now - this.lastRender < 400) return;
+    if (this.mode === "closed" || this.pressing || now - this.lastRender < 400) return;
     if (this.panel?.contains(document.activeElement) && document.activeElement?.tagName !== "BUTTON") return;
     this.render(false);
   }
@@ -91,6 +95,7 @@ export class PlayerList {
     this.overlay.addEventListener("mousedown", (e) => {
       if (e.target === this.overlay) this.close(true);
     });
+    this.panel.addEventListener("mousedown", () => (this.pressing = true));
     document.body.appendChild(this.overlay);
     this.render(true);
   }
