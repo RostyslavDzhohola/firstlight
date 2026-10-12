@@ -363,7 +363,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (inheritedPos && char.body === this.bodyDef.id) char.pos = inheritedPos;
     const p = new PlayerState();
     let pos: V3;
-    if (char.pos && char.body === this.bodyDef.id && !char.dead) pos = this.snapToGround(char.pos);
+    if (char.pos && char.body === this.bodyDef.id && !char.dead && this.plausible(char.pos)) pos = this.snapToGround(char.pos);
     else pos = this.spawnPoint(client.sessionId);
     char.body = this.bodyDef.id;
     char.travelTo = undefined;
@@ -1257,12 +1257,23 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
   // ---------------------------------------------------------------- helpers
 
+  /** The ground (or swim surface) under a position; a degenerate one (zero, NaN) snaps to the main pad. */
   snapToGround(p: readonly number[]): V3 {
-    const d = norm(p);
+    const l = Math.hypot(p[0]!, p[1]!, p[2]!);
+    const d = l > 1e-6 && Number.isFinite(l) ? norm(p) : (padDirs(this.bodyDef)[0]! as V3);
     const g = this.terrain.groundHeight(d[0], d[1], d[2]);
     const R = this.bodyDef.radius;
     const r = R + Math.max(g, this.bodyDef.waterLevel - 1.05) + 0.02;
     return [d[0] * r, d[1] * r, d[2] * r];
+  }
+
+  /** A saved position worth restoring: finite, and not metres under the ground (F12 final Opus N-B1). */
+  private plausible(p: readonly number[]): boolean {
+    if (p.length !== 3 || !p.every(Number.isFinite)) return false;
+    const l = Math.hypot(p[0]!, p[1]!, p[2]!);
+    if (!(l >= this.bodyDef.radius * 0.5)) return false;
+    const g = this.terrain.groundHeight(p[0]! / l, p[1]! / l, p[2]! / l);
+    return l - this.bodyDef.radius - g >= -3;
   }
 
   spawnPoint(seed: string): V3 {

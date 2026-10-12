@@ -16,6 +16,8 @@ import { ANIM } from "@firstlight/shared/net/schema";
 import { isSafe, type Breakable } from "@firstlight/shared";
 import type { BodyId } from "@firstlight/shared";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
+import { characterRepo } from "../src/world/characters.ts";
+import { newCharacter } from "@firstlight/shared/content/character";
 
 let game: Game;
 const rooms: Room[] = [];
@@ -127,6 +129,69 @@ describe("no flying (F12 B1)", () => {
     }
     await sleep(150);
     expect(corrections.n).toBe(0);
+  });
+});
+
+describe("no shortcuts through the planet (F12 final Opus N-B1)", () => {
+  it("a step to the centre and back out to a far point is corrected: the body stays where it was", async () => {
+    const r = await joinAs(game, "diver", "arcadia", {});
+    rooms.push(r);
+    await waitFor(() => !!me(r));
+    let corrections = 0;
+    r.onMessage("correct", () => corrections++);
+    await sleep(300);
+    const start = [me(r).x, me(r).y, me(r).z];
+    const sd = norm(start);
+    // A dry target more than 300 m away.
+    let target: V3 | null = null;
+    for (const cand of [[1, 0, 0], [0, 0, 1], [-1, 0, 0], [0, 0, -1], [0, -1, 0], [0.6, 0.2, 0.77]]) {
+      const d = norm(cand);
+      if (terrain.groundHeight(d[0], d[1], d[2]) > BODY.waterLevel + 0.5 && Math.hypot(d[0] - sd[0], d[1] - sd[1], d[2] - sd[2]) * R > 300) {
+        target = d;
+        break;
+      }
+    }
+    const tr = groundR(target!) + 0.02;
+    r.send("input", { seq: 101, x: 0, y: 0, z: 0, fx: 0, fy: 0, fz: 1, anim: 1, t: Date.now() });
+    await sleep(60);
+    r.send("input", { seq: 102, x: target![0] * tr, y: target![1] * tr, z: target![2] * tr, fx: 0, fy: 0, fz: 1, anim: 1, t: Date.now() });
+    await sleep(300);
+    const end = [me(r).x, me(r).y, me(r).z];
+    expect(corrections).toBeGreaterThan(0);
+    expect(end.every(Number.isFinite)).toBe(true);
+    expect(Math.hypot(end[0]! - start[0]!, end[1]! - start[1]!, end[2]! - start[2]!)).toBeLessThan(5);
+  });
+
+  it("a step deep below the surface is refused however short its ground distance", () => {
+    const len = R + terrain.groundHeight(0, 1, 0);
+    const a = { lastX: 0, lastY: len, lastZ: 0, ...motionFields(len, 0) } as unknown as PlayerActor;
+    const w: MoveWorld = { radius: R, waterLevel: BODY.waterLevel, groundAt: (x, y, z) => terrain.groundHeightAt(x, y, z) };
+    for (const m of [{ x: 0, y: 0, z: 0 }, { x: 0, y: R * 0.3, z: 0 }, { x: 0, y: len - 6, z: 0 }]) {
+      const r = validateMove({ ...a }, { ...m, anim: 1 }, w, { speed: 1, dodge: 1 }, 100);
+      expect(r.ok).toBe(false);
+    }
+  });
+
+  it("a character saved at the centre (or at NaN) rejoins at the pad and can walk", async () => {
+    for (const [uid, pos] of [["zeroed", [0, 0, 0]], ["nanned", [NaN, 1, 2]]] as const) {
+      characterRepo.current.save(uid, { ...newCharacter(0, 0), body: "arcadia", pos: [...pos] as V3 });
+      const r = await joinAs(game, uid, "arcadia", {});
+      rooms.push(r);
+      await waitFor(() => !!me(r));
+      const p = [me(r).x, me(r).y, me(r).z];
+      expect(p.every(Number.isFinite)).toBe(true);
+      const pad = padDirs(BODY)[0]!;
+      expect(Math.hypot(p[0]! / R - pad[0]!, p[1]! / R - pad[1]!, p[2]! / R - pad[2]!) * R).toBeLessThan(15);
+      expect(aboveGround({ x: p[0]!, y: p[1]!, z: p[2]! })).toBeLessThan(0.5);
+      let corrections = 0;
+      r.onMessage("correct", () => corrections++);
+      const d = norm(p);
+      const step = walk(d, tangent(d), 0.4);
+      send(r, { n: 10 }, step, groundR(step), 1);
+      await sleep(200);
+      expect(corrections).toBe(0);
+      await safeLeave(r);
+    }
   });
 });
 

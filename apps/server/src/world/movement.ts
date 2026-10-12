@@ -110,6 +110,9 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
   a.lastBudgetAt = now;
   const len = Math.hypot(m.x, m.y, m.z);
   const terrain = w.groundAt(m.x, m.y, m.z);
+  // Nowhere near the surface (the centre gives NaN ground, and a radial step there is free; F12
+  // final Opus N-B1). Every check below is written so that NaN fails it.
+  if (!(len >= w.radius * 0.5) || !Number.isFinite(len) || !Number.isFinite(terrain)) return { ok: false, reason: "ground" };
   const swimming = swimmingAt(w, len, terrain);
   // Intact props are solid and standable (F12): their tops count as ground; their insides don't.
   const foot = swimming ? null : (w.footing?.(m.x, m.y, m.z, MOVE.groundedAbove) ?? null);
@@ -131,11 +134,11 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
   }
 
   // Below the ground, deeper in a lake than swimmers float, or inside a solid prop.
-  if (!swimming && (above < -MOVE.groundTolerance || (terrain < w.waterLevel - 1 && len - w.radius < w.waterLevel - MOVE.swimDepthSlack))) return { ok: false, reason: "ground" };
+  if (!swimming && (!(above >= -MOVE.groundTolerance) || (terrain < w.waterLevel - 1 && len - w.radius < w.waterLevel - MOVE.swimDepthSlack))) return { ok: false, reason: "ground" };
   // Walking into a prop is refused; a body that was put inside one (teleport, a rebuild) may walk out.
   if (foot?.inside && !w.footing!(a.lastX, a.lastY, a.lastZ, MOVE.groundedAbove).inside) return { ok: false, reason: "prop" };
   const grounded = swimming || above <= MOVE.groundedAbove;
-  if (!grounded && len > airCeiling(a, now)) return { ok: false, reason: "height" };
+  if (!grounded && !(len <= airCeiling(a, now))) return { ok: false, reason: "height" };
 
   const dx = m.x - a.lastX, dy = m.y - a.lastY, dz = m.z - a.lastZ;
   const dist = Math.hypot(dx, dy, dz);
@@ -144,7 +147,7 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
   // envelope's business: supported climbing follows the ground, airborne lift is bounded above.
   const radial = len - Math.hypot(a.lastX, a.lastY, a.lastZ);
   const charged = Math.sqrt(Math.max(0, dist * dist - radial * radial));
-  if (charged > a.moveBudget + a.moveBonus + MOVE.stepTolerance) return { ok: false, reason: "speed" };
+  if (!(charged <= a.moveBudget + a.moveBonus + MOVE.stepTolerance)) return { ok: false, reason: "speed" };
 
   // Allowed: spend the expiring bonus first, then the budget (which may dip by the tolerance).
   const fromBonus = Math.min(a.moveBonus, charged);
