@@ -2,10 +2,14 @@
 // (manual clock): unreachable targets, outside-arena damage, arena cover and props in NPC sight.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { BODIES, padDirs } from "@firstlight/shared";
+import { BODIES, isSafe, padDirs, type Breakable } from "@firstlight/shared";
 import { walk } from "@firstlight/shared/content/arenas";
 import { NF, NPC_INDEX } from "@firstlight/shared/content/npcs";
-import { PF } from "@firstlight/shared/net/schema";
+import { BodyState, PF } from "@firstlight/shared/net/schema";
+import type { BodyRoom } from "../src/world/BodyRoom.ts";
+import { copyStateStore, MemoryCopyStateStore } from "../src/world/copyState.ts";
+import { DestructionSystem } from "../src/world/destruction.ts";
+import { rayTerrain } from "../src/world/geometry.ts";
 import type { PlayerActor } from "../src/world/actors.ts";
 import { dealDamage, fire, stepProjectiles } from "../src/world/combat.ts";
 import type { V3 } from "../src/world/geometry.ts";
@@ -344,6 +348,93 @@ describe("breakable props block NPC sight and bolts (F12 should-fix 12)", () => 
     w.world.host.props = undefined;
     fireBolt();
     run(w, 2000, () => w.sys.projectiles.length === 0);
+    expect(p.state.hp).toBeLessThan(p.state.maxHp);
+  });
+});
+
+describe("NPC sight and bolts against a real prop (Codex N1)", () => {
+  /** The production destruction system for the fake world's body, installed as the combat host's props. */
+  function realProps(w: FakeWorld): DestructionSystem {
+    copyStateStore.current = new MemoryCopyStateStore();
+    const state = new BodyState();
+    state.body = "arcadia";
+    const room = { bodyDef: BODIES.arcadia, terrain: w.world.terrain, state, metadata: { body: "arcadia", copy: 0, loadtest: false }, host: w.world.host, broadcastNear() {} } as unknown as BodyRoom;
+    const d = new DestructionSystem(room, () => w.clock.t);
+    w.world.host.props = d;
+    return d;
+  }
+
+  const dirTo = (a: V3, b: V3): [V3, number] => {
+    const v: V3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    const l = Math.hypot(...v);
+    return [[v[0] / l, v[1] / l, v[2] / l], l];
+  };
+
+  /**
+   * An intact prop with open, dry, non-pad ground 8 m to either side, where it alone blocks the
+   * hopbit's eye line (0.72 m) to the player's chest (1.4 m) and the bolt line (0.6 m → 0.9 m).
+   */
+  function blockingProp(w: FakeWorld, d: DestructionSystem): { b: Breakable; npcAt: V3; playerAt: V3 } {
+    const body = BODIES.arcadia;
+    const lines = (npcAt: V3, playerAt: V3) => [[above(npcAt, 0.72), above(playerAt, 1.4)], [above(npcAt, 0.6), above(playerAt, 0.9)]] as [V3, V3][];
+    for (const b of d.list) {
+      for (const axis of [[b.fx, b.fy, b.fz], [b.rx, b.ry, b.rz]] as V3[]) {
+        const side = (k: number) => w.world.snapToGround([b.px + axis[0] * k, b.py + axis[1] * k, b.pz + axis[2] * k]);
+        const npcAt = side(8), playerAt = side(-8);
+        const dry = (p: V3) => Math.hypot(...p) - body.radius > body.waterLevel + 0.3 && !isSafe(body, p[0], p[1], p[2]);
+        if (!dry(npcAt) || !dry(playerAt)) continue;
+        const ok = lines(npcAt, playerAt).every(([o, t]) => {
+          const [dir, l] = dirTo(o, t);
+          return rayTerrain(w.world.terrain, o, dir, l, 2.5) >= l - 0.75 && d.raycast(o, dir, l - 0.75)?.index === b.index;
+        });
+        if (!ok) continue;
+        // Broken, nothing else is in the way.
+        d.damage(b.index, 1e6, "heavy", "", axis);
+        const open = lines(npcAt, playerAt).every(([o, t]) => {
+          const [dir, l] = dirTo(o, t);
+          return !d.raycast(o, dir, l - 0.75);
+        });
+        d.rebuild(b.index);
+        if (open) return { b, npcAt, playerAt };
+      }
+    }
+    throw new Error("no Arcadia prop blocks a clear 16 m line");
+  }
+
+  it("an intact prop hides the player from a hopbit; once broken, it notices", () => {
+    const w = fakeWorld("arcadia", { immortal: true });
+    const d = realProps(w);
+    const { b, npcAt, playerAt } = blockingProp(w, d);
+    const p = w.addPlayer("hidden", playerAt, 5);
+    const n = w.sys.createNpc(NPC_INDEX.get("hopbit")!, 3, npcAt, w.clock.t, { instant: true, roam: 0 }) as Npc;
+    const [toP] = dirTo(n.pos, [p.state.x, p.state.y, p.state.z]);
+    const u = upAt(n.pos);
+    const k = toP[0] * u[0] + toP[1] * u[1] + toP[2] * u[2];
+    const f: V3 = [toP[0] - u[0] * k, toP[1] - u[1] * k, toP[2] - u[2] * k];
+    const fl = Math.hypot(...f);
+    n.facing = [f[0] / fl, f[1] / fl, f[2] / fl];
+    run(w, 2000);
+    expect(n.target).toBeNull();
+    d.damage(b.index, 1e6, "heavy", "", [1, 0, 0]);
+    expect(d.isBroken(b.index)).toBe(true);
+    expect(run(w, 2000, () => n.target === p)).toBeGreaterThan(0);
+  });
+
+  it("an intact prop stops an NPC bolt; once broken, the bolt gets through", () => {
+    const w = fakeWorld("arcadia", { immortal: true });
+    const d = realProps(w);
+    const { b, npcAt, playerAt } = blockingProp(w, d);
+    const p = w.addPlayer("behind", playerAt, 5);
+    const shooter = w.sys.createNpc(NPC_INDEX.get("sparkfly")!, 3, npcAt, w.clock.t, { instant: true }) as Npc;
+    w.sys.despawnNpc(shooter);
+    const fireBolt = () => spawnBolt(w.sys, shooter, above(npcAt, 0.6), above(playerAt, 0.9), shooter.def.attacks[0]!, 8, w.clock.t);
+    fireBolt();
+    run(w, 3000, () => w.sys.projectiles.length === 0);
+    expect(w.sys.projectiles.length).toBe(0);
+    expect(p.state.hp).toBe(p.state.maxHp);
+    d.damage(b.index, 1e6, "heavy", "", [1, 0, 0]);
+    fireBolt();
+    run(w, 3000, () => w.sys.projectiles.length === 0);
     expect(p.state.hp).toBeLessThan(p.state.maxHp);
   });
 });
