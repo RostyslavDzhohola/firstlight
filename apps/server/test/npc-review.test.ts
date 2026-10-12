@@ -104,8 +104,10 @@ describe("boss arena reach (F12 should-fix 8)", () => {
   it("damage from beyond the arena radius + 10 m is ignored; from inside that band it counts", () => {
     const w = fakeWorld("arcadia", { immortal: true });
     const ar = w.sys.arena!;
+    w.addPlayer("inside", arenaPoint(w, 0, 3), 8);
     const sniper = w.addPlayer("sniper", arenaPoint(w, ar.radius + 25), 8);
     const n = bossReady(w);
+    run(w, 100);
     const hp = n.state.hp;
     expect(dealDamage(w.world.host, sniper, n, 1000, false)).toBe(false);
     expect(n.state.hp).toBe(hp);
@@ -131,16 +133,55 @@ describe("boss arena reach (F12 should-fix 8)", () => {
     run(w, 100);
     expect(w.sys.boss!.count).toBe(3);
     expect(n.state.maxHp).toBe(16_200);
-    // With the two inside gone, the boss turns on the one hitting it from the edge…
+    // With the two inside gone, the boss turns on the one who hit it from the edge…
     w.movePlayer(a, arenaPoint(w, -ar.radius - 60));
     w.movePlayer(b, arenaPoint(w, -ar.radius - 60, 4));
-    dealDamage(w.world.host, s, n, 500, false);
     run(w, 600);
     expect(w.sys.boss!.count).toBe(1);
     expect(n.target).toBe(s);
     // …and forgets them 10 s after their last hit.
-    expect(run(w, 11_000, () => w.sys.boss!.count === 0)).toBeGreaterThan(9000);
+    expect(run(w, 11_000, () => w.sys.boss!.count === 0)).toBeGreaterThan(8500);
     expect(n.state.maxHp).toBe(12_000);
+  });
+
+  it("with nobody inside, hits from the outer band don't stick and don't hold off the reset (Codex B1)", () => {
+    const w = fakeWorld("arcadia", { immortal: true });
+    const ar = w.sys.arena!;
+    const s = w.addPlayer("edge", arenaPoint(w, ar.radius + 6), 8);
+    const n = bossReady(w);
+    // Every 5 s for a minute: no damage, no engagement.
+    for (let i = 0; i < 12; i++) {
+      expect(dealDamage(w.world.host, s, n, 1000, false)).toBe(false);
+      run(w, 5000);
+    }
+    expect(n.state.hp).toBe(n.state.maxHp);
+    expect(w.sys.boss!.engaged).toBe(false);
+  });
+
+  it("once the arena empties, band hits stop counting and the boss resets 30 s later (Codex B1)", () => {
+    const w = fakeWorld("arcadia", { immortal: true });
+    const ar = w.sys.arena!;
+    const a = w.addPlayer("tank", arenaPoint(w, 0, 3), 8);
+    const s = w.addPlayer("edge", arenaPoint(w, ar.radius + 6), 8);
+    const n = bossReady(w);
+    run(w, 100);
+    expect(dealDamage(w.world.host, s, n, 1000, false)).toBe(true);
+    expect(w.sys.boss!.engaged).toBe(true);
+    const hurt = n.state.hp;
+    expect(hurt).toBeLessThan(n.state.maxHp);
+    w.movePlayer(a, arenaPoint(w, -ar.radius - 60));
+    const emptied = w.clock.t;
+    let resetAfter = -1;
+    while (w.clock.t - emptied < 40_000) {
+      expect(dealDamage(w.world.host, s, n, 1000, false)).toBe(false); // every 5 s, for nothing
+      if (run(w, 5000, () => n.state.hp === n.state.maxHp) >= 0) {
+        resetAfter = w.clock.t - emptied;
+        break;
+      }
+      expect(n.state.hp).toBe(hurt);
+    }
+    expect(resetAfter).toBeGreaterThanOrEqual(30_000);
+    expect(resetAfter).toBeLessThanOrEqual(31_000);
   });
 });
 

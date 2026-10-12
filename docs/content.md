@@ -460,7 +460,7 @@ Sixers' black-and-grey "6" look, IOI branding and Sorrento-like leaders [12].
 | Rule | Value | Src |
 |---|---|---|
 | Availability | always up; respawns **10 min** after a kill, separately in each world copy | (D) |
-| HP formula | `HP(n) = HP₂ × (1 + 0.35 × (max(n, 2) − 2))`. n = players alive inside the arena boundary plus anyone who damaged the boss in the last 10 s (any party), recounted on every change; current HP keeps its percentage; n capped at 8. The boss targets the same players. Hits from players more than 10 m outside the boundary deal nothing | (D), (new) |
+| HP formula | `HP(n) = HP₂ × (1 + 0.35 × (max(n, 2) − 2))`. n = players alive inside the arena boundary plus anyone who damaged the boss in the last 10 s (any party), recounted on every change; current HP keeps its percentage; n capped at 8. The boss targets the same players. Hits from outside the boundary count only from within 10 m of it and only while someone is inside | (D), (new) |
 | Solo | impossible by design: each boss has a mechanic that needs two bodies in two places, or two bodies in one circle | (D), [r2-05] |
 | Hints | none: no UI, NPC or voice line explains a mechanic (D). Telegraphs are still fully readable | (D) |
 | Reset | no player in the arena for 30 s → full HP, cover rebuilds | (new) |

@@ -1,6 +1,7 @@
 // One boss per planet copy (content §4): spawns at its lair when players come near; HP = HP₂ ×
 // (1 + 0.35 × extra players inside the arena or hitting it from just outside in the last 10 s),
-// recounted on every entry/exit with the percentage kept; hits from beyond the edge + 10 m do nothing;
+// recounted on every entry/exit with the percentage kept; hits from outside count only within 10 m of
+// the edge and only while someone is inside; the 30 s reset goes by who is inside;
 // phases by HP; co-op mechanics with no hints:
 // - plates (Tidewrath's Tide Stones, The Receiver's Override Consoles): two bodies held 3 s together
 //   open an 8 s weak window (armour off, weak point ×1.5), then the plates go dark;
@@ -336,7 +337,9 @@ export class BossController {
       this.count = count;
       this.event({ type: "hp", engaged: count, hp: n.state.hp, maxHp: n.state.maxHp });
     }
-    if (count > 0) {
+    // Engagement and the 30 s vacancy reset go by who is actually in the arena: hitters at the edge
+    // count for HP and targeting only (Codex B1).
+    if (inArena.length > 0) {
       this.emptySince = null;
       if (!this.engaged) this.engage(n, now);
     } else if (this.engaged) {
@@ -442,13 +445,23 @@ export class BossController {
 
   /**
    * Armour outside the weak window; weak-point hits are already multiplied by combat (weakMult).
-   * Players beyond the arena edge + OUTSIDE_REACH deal nothing (F12: a sniper 75 m out).
+   * Players outside the arena deal nothing beyond its edge + OUTSIDE_REACH (F12: a sniper 75 m
+   * out), and nothing at all while nobody is inside (Codex B1: no chipping from the edge).
    */
   mitigate(n: Npc, amount: number, _weak: boolean, attacker?: PlayerActor | NpcActor | null): number {
     if (n.dead || n.state.flags & NF.INVULN) return 0;
-    if (attacker?.kind === "player" && flatDist(this.arena.centre, actorPos(attacker)) > this.arena.radius + OUTSIDE_REACH) return 0;
+    if (attacker?.kind === "player") {
+      const d = flatDist(this.arena.centre, actorPos(attacker));
+      if (d > this.arena.radius + OUTSIDE_REACH || (d > this.arena.radius && !this.occupied())) return 0;
+    }
     const open = this.sys.world.now() < this.windowUntil;
     return amount * (open ? 1 : (this.npcDef.armour ?? 1));
+  }
+
+  /** Is anyone alive inside the arena right now (positions as of this moment, not the last tick)? */
+  private occupied(): boolean {
+    for (const p of this.sys.world.players()) if (!p.dead && p.state.hp > 0 && flatDist(this.arena.centre, actorPos(p)) <= this.arena.radius) return true;
+    return false;
   }
 
   /**
