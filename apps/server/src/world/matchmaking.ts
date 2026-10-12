@@ -60,7 +60,8 @@ export async function onlineCount(includeLoadtest = false): Promise<number> {
 
 export async function play(identity: Identity, input: PlayInput, limits: MatchmakingLimits): Promise<PlayResponse> {
   const loadtest = !!input.loadtest;
-  if (loadtest && !identity.loadtest) return { ok: false, error: "forbidden" };
+  // Bots only in load-test rooms, players only in public rooms ("no fake players, ever").
+  if (loadtest !== !!identity.loadtest) return { ok: false, error: "forbidden" };
   const partySize = Math.max(1, Math.min(4, input.partySize ?? 1));
 
   return withLock(`${loadtest ? "lt" : "pub"}:${input.body}`, async () => {
@@ -84,7 +85,7 @@ export async function play(identity: Identity, input: PlayInput, limits: Matchma
     }
     if (!target) {
       target = mine.find((r) =>
-        !r.locked && (partySize > 1 ? r.clients + partySize <= limits.maxClients : r.clients < limits.soloFillLimit),
+        !r.locked && (partySize > 1 || loadtest ? r.clients + partySize <= limits.maxClients : r.clients < limits.soloFillLimit),
       );
     }
     if (!target) {

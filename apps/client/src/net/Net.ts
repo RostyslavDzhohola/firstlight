@@ -5,7 +5,7 @@ import { Client, type Room } from "@colyseus/sdk";
 import type { BodyId } from "@firstlight/shared";
 import { NET, type InputMsg, type PlayResponse } from "@firstlight/shared/net/protocol";
 import { config } from "../config.ts";
-import { getPlayToken } from "./auth.ts";
+import { getPlayToken, invalidatePlayToken } from "./auth.ts";
 
 export interface Snapshot {
   t: number; // local receive time (ms)
@@ -23,6 +23,16 @@ export interface RemotePlayerView {
   buf: Snapshot[];
 }
 
+/** The server sent us to the body our character is actually on (no travel ticket for the one asked). */
+export class TravelRedirect extends Error {
+  constructor(readonly body: BodyId) {
+    super(`travel: character is on ${body}`);
+  }
+}
+
+/** App close codes (shared with the server). */
+export { CLOSE } from "@firstlight/shared/net/social";
+
 export class Net {
   room: Room | null = null;
   readonly client = new Client(config.apiUrl);
@@ -33,25 +43,47 @@ export class Net {
   rtt = 0;
   onCorrect: ((x: number, y: number, z: number) => void) | null = null;
   onLeaveRoom: ((code: number) => void) | null = null;
+  /** Queue position while /api/play says the world is full (null once in, or on failure). */
+  onQueue: ((q: { position: number; etaSeconds: number } | null) => void) | null = null;
+  /** /api/play refused this account ("banned", or "kicked" for a short cooldown). */
+  onRefused: ((reason: string) => void) | null = null;
+  private pingTimer: ReturnType<typeof setInterval> | null = null;
 
-  async join(body: BodyId, opts: { partyLeaderRoomId?: string } = {}): Promise<Room> {
-    const token = await getPlayToken();
+  async join(body: BodyId, opts: { partyLeaderRoomId?: string; starter?: number; palette?: number } = {}): Promise<Room> {
+    let retried401 = false;
     for (;;) {
+      // Per attempt: queues can outlast the 15-minute JWT (getPlayToken caches and refreshes it).
+      const token = await getPlayToken();
       const res = await fetch(`${config.apiUrl}/api/play`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ body, ...opts }),
       });
+      if (res.status === 401 && !retried401) {
+        // Stale token (e.g. the guest just saved and got a new id): fetch a fresh one once.
+        retried401 = true;
+        invalidatePlayToken();
+        continue;
+      }
+      if (res.status === 429) {
+        await new Promise((ok) => setTimeout(ok, 2500));
+        continue;
+      }
       const r = (await res.json()) as PlayResponse;
       if (r.ok) {
+        this.onQueue?.(null);
         const room = await this.client.consumeSeatReservation(r.reservation as never);
         this.attach(room);
         return room;
       }
       if ("queue" in r) {
+        this.onQueue?.(r.queue);
         await new Promise((ok) => setTimeout(ok, 5000));
         continue;
       }
+      this.onQueue?.(null);
+      if (r.error === "travel" && r.body) throw new TravelRedirect(r.body);
+      if (r.error === "banned" || r.error === "kicked") this.onRefused?.(r.error);
       throw new Error(r.error);
     }
   }
@@ -86,10 +118,40 @@ export class Net {
       this.serverOffset = m.serverTime - (Date.now() - this.rtt / 2);
     });
     room.onLeave((code: number) => {
-      if (this.room === room) this.room = null;
+      if (this.room === room) {
+        this.room = null;
+        this.stopPing();
+      }
       this.onLeaveRoom?.(code);
     });
-    setInterval(() => this.room === room && room.send("ping", { t: performance.now() }), 2000);
+    this.stopPing();
+    this.pingTimer = setInterval(() => this.room === room && room.send("ping", { t: performance.now() }), 2000);
+  }
+
+  private stopPing() {
+    if (this.pingTimer) clearInterval(this.pingTimer);
+    this.pingTimer = null;
+  }
+
+  /** Ask the server to authorise travel through the portal we're standing in. */
+  requestTravel(to: BodyId, timeoutMs = 3000): Promise<boolean> {
+    const room = this.room;
+    if (!room) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (ok: boolean) => {
+        if (done) return;
+        done = true;
+        offOk();
+        offDenied();
+        clearTimeout(timer);
+        resolve(ok);
+      };
+      const offOk = room.onMessage("travelOk", (m: { to: BodyId }) => m.to === to && finish(true));
+      const offDenied = room.onMessage("denied", (m: { action: string }) => m.action === "travel" && finish(false));
+      const timer = setTimeout(() => finish(false), timeoutMs);
+      room.send("travel", { to });
+    });
   }
 
   sendInput(now: number, m: Omit<InputMsg, "seq" | "t">) {
@@ -126,6 +188,7 @@ export class Net {
   async leave() {
     const r = this.room;
     this.room = null;
+    this.stopPing();
     await r?.leave().catch(() => {});
   }
 }

@@ -1,0 +1,276 @@
+// The accounts-and-persistence module: opens auth.db and game.db, runs migrations, builds Better
+// Auth, and provides the token verifier and the Express mounts for createGame().
+//
+//   const accounts = await createAccounts(accountsConfigFromEnv(env));
+//   createGame({ verify: accounts.verify, mountBeforeJson: accounts.mountBeforeJson,
+//                mountAfterJson: accounts.mountAfterJson, onShutdown: accounts.close, ... });
+
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import Database from "better-sqlite3";
+import { getMigrations } from "better-auth/db/migration";
+import { toNodeHandler } from "better-auth/node";
+import type { Express, NextFunction, Request, Response } from "express";
+import { ensureAccount, isBanned, isIpBanned } from "../db/accounts.ts";
+import { openGameDb, setGameDb, type Db } from "../db/game-db.ts";
+import { linkAccounts } from "../db/link.ts";
+import { setDisplayName } from "../db/accounts.ts";
+import { reserveOtpSend, releaseOtpSend } from "../db/otp-budget.ts";
+import { closeDanglingSessions, pruneSessionLog } from "../db/sessions.ts";
+import { authOptions, authRequestState, buildAuth, type FirstlightAuth } from "./better-auth.ts";
+import { hmacHex, safeEqual } from "./crypto.ts";
+import type { Identity, TokenVerifier, VerifyContext } from "./identity.ts";
+import { banKey, CLIENT_IP_HEADER, firstForwardedFor, normalizeIp } from "./ip.ts";
+import { accountLinks, type LinkEvents } from "./links.ts";
+import { DevOutbox, disabledMailer, resendMailer, type Mailer } from "./mailer.ts";
+import { identifyRequest, mountAccountRoutes, requireAdminFor } from "./routes.ts";
+import { liveSessions, type SessionRegistry } from "./sessions.ts";
+
+export const DEV_AUTH_SECRET = "dev-only-secret-change-me-dev-only-secret";
+
+export interface AccountsConfig {
+  production: boolean;
+  /** Public origin of the client (Better Auth baseURL, JWT iss/aud). */
+  baseURL: string;
+  secret: string;
+  authDbPath: string;
+  gameDbPath: string;
+  trustedOrigins: string[];
+  /** When set, /api/auth/* requires a matching x-origin-secret header (set by the Vercel proxy). */
+  originSecret: string;
+  emailFrom: string;
+  resendKey: string;
+  adminClaimToken: string;
+  loadtestSecret: string;
+  otpPerEmailPerHour: number;
+  otpDailyBudget: number;
+  /** Better Auth rate limiting (default: on in production only). */
+  rateLimit?: boolean;
+  /** Print dev OTP codes to the console (only when the dev outbox is in use). */
+  devMailLog?: boolean;
+  /** Accepted after the Better Auth verifier (dev guest tokens when ALLOW_DEV_GUESTS=1). */
+  fallbackVerifier?: TokenVerifier;
+  mailer?: Mailer;
+  sessions?: SessionRegistry;
+  links?: LinkEvents;
+}
+
+export interface Accounts {
+  auth: FirstlightAuth;
+  authDb: Database.Database;
+  db: Db;
+  /** Better Auth JWT verifier, then the fallback verifier. Pass to createGame({ verify }). */
+  verify: TokenVerifier;
+  sessions: SessionRegistry;
+  links: LinkEvents;
+  mailer: Mailer;
+  /** Only when the dev outbox is in use (no RESEND_API_KEY, not production). Test-only. */
+  devOutbox: DevOutbox | null;
+  hashIp(ip: string): string;
+  /** Resolve the caller from the Better Auth session cookie, else a Bearer JWT. */
+  identify(req: Request): Promise<Identity | null>;
+  /** Express middleware for /admin and /stats routes: 401 unless signed in, 403 unless admin. Sets res.locals.identity. */
+  requireAdmin: (req: Request, res: Response, next: NextFunction) => Promise<void>;
+  mountBeforeJson(app: Express): void;
+  mountAfterJson(app: Express): void;
+  close(): void;
+}
+
+export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
+  if (cfg.production && (cfg.secret.length < 32 || cfg.secret === DEV_AUTH_SECRET)) {
+    throw new Error("BETTER_AUTH_SECRET must be set (32+ chars) in production");
+  }
+  const sessions = cfg.sessions ?? liveSessions;
+  const links = cfg.links ?? accountLinks;
+
+  if (cfg.authDbPath !== ":memory:") mkdirSync(dirname(cfg.authDbPath), { recursive: true });
+  const authDb = new Database(cfg.authDbPath);
+  authDb.pragma("journal_mode = WAL");
+  authDb.pragma("busy_timeout = 5000");
+  const db = openGameDb(cfg.gameDbPath);
+  setGameDb(db);
+
+  let devOutbox: DevOutbox | null = null;
+  let mailer: Mailer;
+  if (cfg.mailer) mailer = cfg.mailer;
+  else if (cfg.resendKey) mailer = resendMailer(cfg.resendKey, cfg.emailFrom);
+  else if (cfg.production) mailer = disabledMailer();
+  else mailer = devOutbox = new DevOutbox(!!cfg.devMailLog);
+  if (cfg.mailer instanceof DevOutbox) devOutbox = cfg.mailer;
+
+  const hashIp = (ip: string) => hmacHex(`${cfg.secret}:ip`, banKey(ip)).slice(0, 32);
+  const hashEmail = (email: string) => hmacHex(`${cfg.secret}:email`, email.toLowerCase());
+
+  const options = authOptions({
+    authDb,
+    baseURL: cfg.baseURL,
+    secret: cfg.secret,
+    trustedOrigins: cfg.trustedOrigins,
+    rateLimit: cfg.rateLimit ?? cfg.production,
+    ipBanned: (ip) => isIpBanned(db, hashIp(ip)),
+    reserveOtp: (email) => {
+      const r = reserveOtpSend(db, hashEmail(email), { perEmailPerHour: cfg.otpPerEmailPerHour, perDay: cfg.otpDailyBudget });
+      if (!r.ok) console.warn(`otp send refused: ${r.reason} budget`);
+      return r;
+    },
+    releaseOtp: (id) => releaseOtpSend(db, id),
+    sendOtp: async (email, otp) => {
+      const r = await mailer.sendOtp(email, otp);
+      if (!r.ok) console.warn(`otp send failed: ${r.error}`);
+      return r.ok;
+    },
+    onLink: (guest, account) => {
+      links.emitBefore(guest.id, account.id); // rooms flush live characters first
+      const r = linkAccounts(db, guest.id, account.id);
+      const { moved, displaced } = sessions.rekey(guest.id, account.id);
+      const name = r.displayName ?? (account.name || guest.name);
+      links.emit({ fromUserId: guest.id, toUserId: account.id, name, character: r.character, merged: r.merged, moved, displaced });
+      return r.displayName ?? guest.name;
+    },
+  });
+
+  // Migrate before the instance exists, so its startup schema check sees the final schema.
+  const { runMigrations } = await getMigrations(options);
+  await runMigrations();
+  const auth = buildAuth(options);
+  // Settle Better Auth's startup schema check now (it would otherwise run in the background).
+  const authCtx = await auth.$context;
+  await authCtx.checkSchema?.();
+  closeDanglingSessions(db);
+  pruneSessionLog(db);
+  const pruneTimer = setInterval(() => pruneSessionLog(db), 24 * 3_600_000);
+  pruneTimer.unref();
+
+  const userStmt = authDb.prepare(`SELECT id, name, "isAnonymous" AS anon FROM "user" WHERE id = ?`);
+
+  const betterAuthVerifier: TokenVerifier = async (token, vctx?: VerifyContext) => {
+    let payload: Record<string, unknown> | null = null;
+    try {
+      payload = (await auth.api.verifyJWT({ body: { token } })).payload as Record<string, unknown> | null;
+    } catch {
+      return null;
+    }
+    const sub = payload?.sub;
+    if (!payload || typeof sub !== "string" || !sub) return null;
+    const tokenName = typeof payload.name === "string" ? payload.name : "";
+    if (payload.loadtest === true) {
+      // Bot identities are minted only by /api/test/bot-token and only honoured during load tests.
+      if (!cfg.loadtestSecret) return null;
+      return { userId: sub, name: tokenName || "Bot", guest: true, admin: false, loadtest: true };
+    }
+    const user = userStmt.get(sub) as { id: string; name: string; anon: number | null } | undefined;
+    if (!user) return null; // merged/deleted guest or deleted account
+    const now = Date.now();
+    if (isBanned(db, sub, now)) return null;
+    const ip = normalizeIp(vctx?.ip);
+    const ipHash = ip ? hashIp(ip) : null;
+    if (ipHash && isIpBanned(db, ipHash, now)) return null;
+    const acc = ensureAccount(db, sub, now, ipHash);
+    // Only validated display names are shown; otherwise a generated guest-style name (review:
+    // Better Auth's free-form user.name must never become the in-game name).
+    const generated = /^Wanderer-\d{4}$/.test(user.name) ? user.name : `Wanderer-${(parseInt(sub.replace(/[^0-9a-f]/gi, "").slice(-6) || "0", 16) % 9000) + 1000}`;
+    let display = acc.displayName;
+    // A name supplied at sign-in is only adopted if it passes the display-name rules and is free.
+    if (!display && user.name && user.name !== generated) {
+      const r = setDisplayName(db, sub, user.name, now);
+      if (r.ok) display = r.name;
+    }
+    return { userId: sub, name: display ?? generated, guest: user.anon === 1, admin: acc.isAdmin, loadtest: false };
+  };
+
+  const fallback = cfg.fallbackVerifier;
+  const verify: TokenVerifier = async (token, vctx) => (await betterAuthVerifier(token, vctx)) ?? (fallback ? fallback(token, vctx) : null);
+
+  const handler = toNodeHandler(auth);
+
+  const accounts: Accounts = {
+    auth,
+    authDb,
+    db,
+    verify,
+    sessions,
+    links,
+    mailer,
+    devOutbox,
+    hashIp,
+    identify: async () => null,
+    requireAdmin: async () => {},
+    mountBeforeJson(app) {
+      app.use("/api/auth", (req, res, next) => {
+        res.setHeader("Cache-Control", "no-store");
+        // Only this middleware may set the client-IP header Better Auth trusts.
+        delete req.headers[CLIENT_IP_HEADER];
+        if (cfg.originSecret) {
+          const got = req.headers["x-origin-secret"];
+          if (typeof got !== "string" || !safeEqual(got, cfg.originSecret)) {
+            res.status(403).json({ error: "forbidden" });
+            return;
+          }
+        }
+        delete req.headers["x-origin-secret"];
+        const ip = firstForwardedFor(req) ?? normalizeIp(req.socket.remoteAddress);
+        if (ip) req.headers[CLIENT_IP_HEADER] = ip;
+        next();
+      });
+      app.all("/api/auth/*splat", (req, res) => {
+        authRequestState.run({}, () => {
+          handler(req, res).catch((err: unknown) => {
+            console.error("auth handler failed", err);
+            if (!res.headersSent) res.status(500).json({ error: "auth failed" });
+          });
+        });
+      });
+    },
+    mountAfterJson(app) {
+      mountAccountRoutes(app, accounts, cfg);
+    },
+    close() {
+      clearInterval(pruneTimer);
+      setGameDb(null);
+      try {
+        db.close();
+      } catch {}
+      try {
+        authDb.close();
+      } catch {}
+    },
+  };
+  accounts.identify = (req) => identifyRequest(accounts, req);
+  accounts.requireAdmin = requireAdminFor(accounts);
+  return accounts;
+}
+
+/** Map server env to the accounts config. */
+export function accountsConfigFromEnv(env: {
+  production: boolean;
+  authUrl: string;
+  authSecret: string;
+  authDbPath: string;
+  gameDbPath: string;
+  clientOrigins: string[];
+  originSecret: string;
+  emailFrom: string;
+  resendKey: string;
+  adminClaimToken: string;
+  loadtestSecret: string;
+  otpDailyBudget: number;
+  otpPerEmailPerHour: number;
+  devMailLog: boolean;
+}): AccountsConfig {
+  return {
+    production: env.production,
+    baseURL: env.authUrl,
+    secret: env.authSecret,
+    authDbPath: env.authDbPath,
+    gameDbPath: env.gameDbPath,
+    trustedOrigins: env.clientOrigins,
+    originSecret: env.originSecret,
+    emailFrom: env.emailFrom,
+    resendKey: env.resendKey,
+    adminClaimToken: env.adminClaimToken,
+    loadtestSecret: env.loadtestSecret,
+    otpDailyBudget: env.otpDailyBudget,
+    otpPerEmailPerHour: env.otpPerEmailPerHour,
+    devMailLog: env.devMailLog,
+  };
+}

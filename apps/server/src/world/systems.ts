@@ -10,6 +10,8 @@ export interface RoomSystem {
   /** Optional: a player joined/left (sessionId). */
   onPlayerJoin?(sessionId: string): void;
   onPlayerLeave?(sessionId: string): void;
+  /** Optional: return false to refuse a dropped client's reconnection (kicked or banned players). */
+  canReconnect?(sessionId: string): boolean;
   dispose?(): void;
 }
 

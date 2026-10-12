@@ -6,8 +6,13 @@ import { matchMaker, Server } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import type { TokenVerifier } from "./auth/identity.ts";
+import { directRequestIp } from "./auth/ip.ts";
 import { BodyRoom } from "./world/BodyRoom.ts";
 import { isBodyId, onlineCount, play, type MatchmakingLimits } from "./world/matchmaking.ts";
+import { characterRepo } from "./world/characters.ts";
+import { hub } from "./world/hub.ts";
+import { timingSafeEqual } from "node:crypto";
+import { partyOf, partyRoomFor, playRefusal } from "./social/index.ts";
 
 export interface GameOptions {
   port: number;
@@ -19,6 +24,8 @@ export interface GameOptions {
   mountAfterJson?: (app: Express) => void;
   gracefulShutdown?: boolean;
   onShutdown?: () => Promise<void> | void;
+  /** When verification fails: is this a validly signed token of a banned account/network? (403 "banned" instead of 401.) */
+  explainRefusal?: (token: string, ip: string | null) => Promise<string | null>;
 }
 
 export interface Game {
@@ -29,7 +36,19 @@ export interface Game {
   close(): Promise<void>;
 }
 
+function secretMatches(given: unknown, expected: string): boolean {
+  if (typeof given !== "string" || !expected) return false;
+  const a = Buffer.from(given), b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 export async function createGame(opts: GameOptions): Promise<Game> {
+  const playCalls = new Map<string, number[]>();
+  const pruneCalls = setInterval(() => {
+    const now = Date.now();
+    for (const [k, v] of playCalls) if (v.every((t) => now - t > 10_000)) playCalls.delete(k);
+  }, 60_000);
+  pruneCalls.unref();
   const app = express();
   app.disable("x-powered-by");
   app.set("trust proxy", true);
@@ -80,9 +99,11 @@ export async function createGame(opts: GameOptions): Promise<Game> {
   app.post("/api/play", async (req, res) => {
     const auth = req.headers.authorization ?? "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-    const identity = token ? await opts.verify(token) : null;
+    const identity = token ? await opts.verify(token, { ip: directRequestIp(req) }) : null;
     if (!identity) {
-      res.status(401).json({ ok: false, error: "unauthorized" });
+      const why = token && opts.explainRefusal ? await opts.explainRefusal(token, directRequestIp(req)).catch(() => null) : null;
+      if (why) res.status(403).json({ ok: false, error: why });
+      else res.status(401).json({ ok: false, error: "unauthorized" });
       return;
     }
     const body = req.body?.body;
@@ -90,13 +111,40 @@ export async function createGame(opts: GameOptions): Promise<Game> {
       res.status(400).json({ ok: false, error: "bad body" });
       return;
     }
+    // Per-user rate limit: 6 requests per 10 s (each request reserves a seat for a while).
+    const now = Date.now();
+    const recent = (playCalls.get(identity.userId) ?? []).filter((t) => now - t < 10_000);
+    if (recent.length >= 6) {
+      res.status(429).json({ ok: false, error: "slow down" });
+      return;
+    }
+    recent.push(now);
+    playCalls.set(identity.userId, recent);
+    // Banned (also covers dev identities) or recently kicked by an admin.
+    const refusal = identity.loadtest ? null : playRefusal(identity.userId);
+    if (refusal) {
+      res.status(403).json({ ok: false, error: refusal });
+      return;
+    }
+    // Travel tickets: an existing character may only rejoin its current body or the one it was
+    // authorised to travel to (portal or rebirth). Admins and load-test bots are exempt.
+    if (!identity.admin && !identity.loadtest) {
+      const ch = hub.get(identity.userId)?.actor.char ?? characterRepo.current.load(identity.userId);
+      if (ch && body !== ch.body && body !== ch.travelTo) {
+        res.json({ ok: false, error: "travel", body: ch.body });
+        return;
+      }
+    }
+    // Party headroom (D12) only for real party members: the copy another member is in on this body
+    // (a client hint is honoured only if it names such a room).
+    const partyRoom = partyRoomFor(identity.userId, body, typeof req.body.partyLeaderRoomId === "string" ? req.body.partyLeaderRoomId : undefined);
     try {
       const result = await play(
         identity,
         {
           body,
-          partyLeaderRoomId: typeof req.body.partyLeaderRoomId === "string" ? req.body.partyLeaderRoomId : undefined,
-          partySize: typeof req.body.partySize === "number" ? req.body.partySize : undefined,
+          partyLeaderRoomId: partyRoom,
+          partySize: partyRoom ? partyOf(identity.userId).length : undefined,
           starter: Number.isInteger(req.body.starter) ? Math.max(0, Math.min(3, req.body.starter)) : undefined,
           palette: Number.isInteger(req.body.palette) ? Math.max(0, Math.min(5, req.body.palette)) : undefined,
           loadtest: req.body.loadtest === true,
@@ -108,6 +156,25 @@ export async function createGame(opts: GameOptions): Promise<Game> {
       console.error("play failed", err);
       res.status(500).json({ ok: false, error: "play failed" });
     }
+  });
+
+  // Load-test and admin metrics: per-room tick time and process usage. Guarded by the load-test secret.
+  app.get("/api/metrics", async (req, res) => {
+    const secret = process.env.LOADTEST_SECRET;
+    if (!secret || !secretMatches(req.headers["x-loadtest-secret"], secret)) {
+      res.status(403).json({ error: "forbidden" });
+      return;
+    }
+    const rooms = await matchMaker.query({ name: "body" });
+    const stats = rooms.map((r) => {
+      const room = matchMaker.getLocalRoomById(r.roomId) as BodyRoom | undefined;
+      const t = [...(room?.tickTimes ?? [])].sort((a, b) => a - b);
+      const q = (p: number) => (t.length ? +t[Math.min(t.length - 1, Math.floor(t.length * p))]!.toFixed(2) : 0);
+      return { roomId: r.roomId, metadata: r.metadata, clients: r.clients, tickP50: q(0.5), tickP95: q(0.95), tickMax: q(1) };
+    });
+    const mem = process.memoryUsage();
+    const cpu = process.cpuUsage();
+    res.json({ rooms: stats, rssMB: Math.round(mem.rss / 1048576), heapMB: Math.round(mem.heapUsed / 1048576), cpuUserS: cpu.user / 1e6, cpuSystemS: cpu.system / 1e6, uptimeS: process.uptime() });
   });
 
   opts.mountAfterJson?.(app);

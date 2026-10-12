@@ -5,7 +5,6 @@
 import { damageMult, falloff, maxHp, splashFalloff } from "@firstlight/shared/content/progression";
 import { WEAPONS, WEAPON_INDEX, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
 import type { Terrain } from "@firstlight/shared";
-import { mulberry32 } from "@firstlight/shared";
 import { PF } from "@firstlight/shared/net/schema";
 import { actorPos, positionAgo, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
 import { dist3, HEAD_FROM, inMeleeArc, PLAYER_HEIGHT, PLAYER_RADIUS, rayCapsule, rayTerrain, type V3 } from "./geometry.ts";
@@ -20,6 +19,8 @@ export interface CombatHost {
   players(): Iterable<PlayerActor>;
   npcs(): Iterable<NpcActor>;
   broadcast(type: string, msg: unknown, except?: PlayerActor): void;
+  /** Send only to clients within `radius` metres of `at` (plus the `always` session ids). */
+  broadcastNear(type: string, msg: unknown, at: V3, radius: number, always?: string[]): void;
   /** Called after damage is applied; handles deaths. */
   onDamage(target: Actor, amount: number, attacker: PlayerActor | NpcActor | null, weak: boolean): void;
   /** Report a hit on a destructible prop (destruction system). */
@@ -90,7 +91,7 @@ function raycastActors(host: CombatHost, o: V3, d: V3, maxT: number, ignore: Set
   let best: RayTargetHit | null = null;
   const now = host.now();
   const test = (a: Actor, r: number, h: number) => {
-    if (ignore.has(a.id)) return;
+    if (ignore.has(a.id) || !canHurt(null, a, now)) return;
     const feet = positionAgo(a, now, rewindMs);
     const hit = rayCapsule(o, d, maxT, feet, r, h);
     if (hit && (!best || hit.t < best.t)) best = { actor: a, t: hit.t, weak: a.kind === "player" ? hit.heightAboveFeet >= HEAD_FROM : hit.heightAboveFeet >= h * 0.8 };
@@ -114,8 +115,10 @@ export type FireResult = { ok: true } | { ok: false; reason: string };
 
 /** Rate limit, gates, magazine/heat. Mutates actor state when the attack is allowed. */
 export function consumeAttack(p: PlayerActor, def: WeaponDef, tier: TierStats, now: number, rateScale = 1): FireResult {
-  if (p.dead) return { ok: false, reason: "dead" };
+  if (p.dead || p.superseded) return { ok: false, reason: "dead" };
   if (p.state.flags & PF.SAFE) return { ok: false, reason: "safe zone" };
+  if (p.protectedUntil > now) return { ok: false, reason: "protected" };
+  if (p.state.flags & PF.SWIMMING) return { ok: false, reason: "swimming" };
   if (tier.level > p.char.level) return { ok: false, reason: "level gate" };
   if (now - p.lastAttackAt < tier.rate * 1000 * 0.85 * rateScale) return { ok: false, reason: "rate" };
   if (now < p.reloadEndsAt) return { ok: false, reason: "reloading" };
@@ -147,6 +150,11 @@ export function consumeAttack(p: PlayerActor, def: WeaponDef, tier: TierStats, n
   }
   p.lastAttackAt = now;
   p.combatUntil = now + COMBAT_TAG_MS;
+  p.logoutEndsAt = null; // attacking cancels a logout countdown
+  if (p.blocking) {
+    p.blocking = false; // no blocking while attacking
+    p.state.flags &= ~PF.BLOCKING;
+  }
   return { ok: true };
 }
 
@@ -160,27 +168,43 @@ export function fire(host: CombatHost, p: PlayerActor, msg: FireInput): FireResu
   const dl = Math.hypot(msg.dx, msg.dy, msg.dz);
   if (!(dl > 0.5 && dl < 1.5)) return { ok: false, reason: "dir" };
   const d: V3 = [msg.dx / dl, msg.dy / dl, msg.dz / dl];
-  const charge = Math.max(0, Math.min(1, msg.charge ?? 1));
-  const res = consumeAttack(p, def, tier, now, def.delivery === "arrow" ? 0.5 : 1);
+  // Bow draw is timed on the server from the `charge` start message; the client value is ignored.
+  let charge = 1;
+  if (def.delivery === "arrow") {
+    const drawMs = (tier.draw ?? 1) * 1000;
+    charge = p.chargeStartedAt > 0 ? Math.max(0, Math.min(1, (now - p.chargeStartedAt) / drawMs)) : 0;
+    p.chargeStartedAt = 0;
+  }
+  const res = consumeAttack(p, def, tier, now, 1);
   if (!res.ok) return res;
   const lvl = damageMult(p.char.level);
 
   switch (def.delivery) {
-    case "hitscan": {
-      const spreadDeg = p.state.flags & PF.SCOPED ? (def.adsSpread ?? 0) : (def.spread ?? 0);
-      const dir = jitter(d, spreadDeg, mulberry32(now ^ p.state.seq));
-      const hitT = hitscan(host, p, o, dir, def.falloffTo ?? def.range, tier.damage * lvl, def, tier);
-      host.broadcast("shot", { by: p.id, weapon: WEAPON_INDEX.get(def.id), ox: o[0], oy: o[1], oz: o[2], dx: dir[0], dy: dir[1], dz: dir[2], hit: hitT === null ? undefined : [o[0] + dir[0] * hitT, o[1] + dir[1] * hitT, o[2] + dir[2] * hitT] });
-      return { ok: true };
-    }
+    case "hitscan":
     case "pellets": {
-      const rand = mulberry32((now * 31) ^ p.state.seq);
+      // The camera ray only chooses the aim point; damage is traced from the authoritative muzzle,
+      // so a camera behind cover can't shoot through it.
+      const maxR = def.falloffTo ?? def.range;
+      const aimT = Math.min(maxR, rayTerrain(host.terrain, o, d, maxR, 1.5), aimActorT(host, p, o, d, maxR));
+      const aim: V3 = [o[0] + d[0] * aimT, o[1] + d[1] * aimT, o[2] + d[2] * aimT];
+      const muzzle = head;
+      let base: V3 = [aim[0] - muzzle[0], aim[1] - muzzle[1], aim[2] - muzzle[2]];
+      const bl = Math.hypot(base[0], base[1], base[2]) || 1;
+      base = [base[0] / bl, base[1] / bl, base[2] / bl];
       const spreadDeg = p.state.flags & PF.SCOPED ? (def.adsSpread ?? 0) : (def.spread ?? 0);
-      for (let i = 0; i < (tier.pellets ?? 6); i++) {
-        const dir = jitter(d, spreadDeg, rand);
-        hitscan(host, p, o, dir, def.falloffTo ?? def.range, tier.damage * lvl, def, tier);
+      const rand = Math.random;
+      const shots = def.delivery === "pellets" ? (tier.pellets ?? 6) : 1;
+      let firstHit: number | null = null;
+      let firstDir = base;
+      for (let i = 0; i < shots; i++) {
+        const dir = jitter(base, spreadDeg, rand);
+        const t = hitscan(host, p, muzzle, dir, maxR, tier.damage * lvl, def, tier);
+        if (i === 0) {
+          firstHit = t;
+          firstDir = dir;
+        }
       }
-      host.broadcast("shot", { by: p.id, weapon: WEAPON_INDEX.get(def.id), ox: o[0], oy: o[1], oz: o[2], dx: d[0], dy: d[1], dz: d[2] });
+      host.broadcastNear("shot", { by: p.id, weapon: WEAPON_INDEX.get(def.id), ox: muzzle[0], oy: muzzle[1], oz: muzzle[2], dx: firstDir[0], dy: firstDir[1], dz: firstDir[2], hit: firstHit === null ? undefined : [muzzle[0] + firstDir[0] * firstHit, muzzle[1] + firstDir[1] * firstHit, muzzle[2] + firstDir[2] * firstHit] }, muzzle, 160);
       return { ok: true };
     }
     case "chain": {
@@ -222,7 +246,7 @@ export function fire(host: CombatHost, p: PlayerActor, msg: FireInput): FireResu
         stuck: false,
       };
       projectiles(host).push(pr);
-      host.broadcast("projectile", { id: pr.id, by: p.id, weapon: WEAPON_INDEX.get(def.id), x: hand[0], y: hand[1], z: hand[2], vx: pr.vel[0], vy: pr.vel[1], vz: pr.vel[2], g: pr.gravity });
+      host.broadcastNear("projectile", { id: pr.id, by: p.id, weapon: WEAPON_INDEX.get(def.id), x: hand[0], y: hand[1], z: hand[2], vx: pr.vel[0], vy: pr.vel[1], vz: pr.vel[2], g: pr.gravity }, hand, 200);
       if (def.delivery === "thrown") consumeStack(p);
       return { ok: true };
     }
@@ -252,6 +276,12 @@ function jitter(d: V3, deg: number, rand: () => number): V3 {
   const s = Math.sin(a), c = Math.cos(a);
   const cp = Math.cos(phi) * s, sp = Math.sin(phi) * s;
   return [d[0] * c + ux * cp + vx * sp, d[1] * c + uy * cp + vy * sp, d[2] * c + uz * cp + vz * sp];
+}
+
+/** Distance along the camera ray to the first actor (aim assist for choosing the aim point). */
+function aimActorT(host: CombatHost, p: PlayerActor, o: V3, d: V3, maxT: number): number {
+  const hit = raycastActors(host, o, d, maxT, new Set([p.id]), REWIND_MS);
+  return hit ? hit.t : Infinity;
 }
 
 function hitscan(host: CombatHost, p: PlayerActor, o: V3, d: V3, maxRange: number, baseDamage: number, def: WeaponDef, tier: TierStats): number | null {
@@ -312,7 +342,7 @@ function chain(host: CombatHost, p: PlayerActor, o: V3, d: V3, def: WeaponDef, t
     }
   }
   const end: V3 = first ? actorPos(first) : [o[0] + d[0] * Math.min(def.range, terrainT), o[1] + d[1] * Math.min(def.range, terrainT), o[2] + d[2] * Math.min(def.range, terrainT)];
-  host.broadcast("shot", { by: p.id, weapon: WEAPON_INDEX.get(def.id), ox: o[0], oy: o[1], oz: o[2], dx: d[0], dy: d[1], dz: d[2], hit: end, chain: points });
+  host.broadcastNear("shot", { by: p.id, weapon: WEAPON_INDEX.get(def.id), ox: o[0], oy: o[1], oz: o[2], dx: d[0], dy: d[1], dz: d[2], hit: end, chain: points }, o, 160);
 }
 
 function* allActors(host: CombatHost): Iterable<Actor> {
@@ -325,9 +355,14 @@ export function melee(host: CombatHost, p: PlayerActor, heavy: boolean): FireRes
   const { def, tier } = selectedWeapon(p);
   const meleeDef = def.delivery === "melee" ? def : WEAPONS[0]!;
   const meleeTier = def.delivery === "melee" ? tier : WEAPONS[0]!.tiers[0]!;
-  const useHeavy = heavy && meleeTier.heavy !== undefined;
-  const res = consumeAttack(p, meleeDef, meleeTier, now, useHeavy ? (meleeTier.heavyTime ?? 1) / meleeTier.rate : 1);
+  // Heavy attacks need a server-timed charge (the `charge` start message) and respect cooldowns.
+  let useHeavy = heavy && meleeTier.heavy !== undefined && p.chargeStartedAt > 0 && now - p.chargeStartedAt >= (meleeTier.heavyTime ?? 1) * 1000 * 0.9;
+  if (useHeavy && meleeTier.cooldown && now < p.specialReadyAt) useHeavy = false;
+  p.chargeStartedAt = 0;
+  if (heavy && !useHeavy) return { ok: false, reason: "not charged" };
+  const res = consumeAttack(p, meleeDef, meleeTier, now, 1);
   if (!res.ok) return res;
+  if (useHeavy && meleeTier.cooldown) p.specialReadyAt = now + meleeTier.cooldown * 1000;
   const lvl = damageMult(p.char.level);
   const pos = actorPos(p);
   const facing: V3 = [p.state.fx, p.state.fy, p.state.fz];
@@ -335,13 +370,15 @@ export function melee(host: CombatHost, p: PlayerActor, heavy: boolean): FireRes
   const targets: { a: Actor; d: number }[] = [];
   for (const a of allActors(host)) {
     if (a.id === p.id) continue;
+    if (!canHurt(p, a, now)) continue;
     const ap = positionAgo(a, now, REWIND_MS);
     if (inMeleeArc(pos, facing, ap, meleeDef.range, meleeDef.arc ?? 90)) targets.push({ a, d: dist3(pos, ap) });
   }
   targets.sort((x, y) => x.d - y.d);
-  for (const t of targets.slice(0, meleeDef.maxTargets ?? 1)) dealDamage(host, p, t.a, dmg, false, actorFacingFrom(pos, t.a), meleeTier.knockback);
-  // Hammer slam: radius damage around the attacker.
-  if (useHeavy && meleeTier.radius) {
+  const slam = useHeavy && !!meleeTier.radius;
+  if (!slam) for (const t of targets.slice(0, meleeDef.maxTargets ?? 1)) dealDamage(host, p, t.a, dmg, false, actorFacingFrom(pos, t.a), meleeTier.knockback);
+  // Hammer slam replaces the arc: radius damage around the attacker.
+  if (slam && meleeTier.radius) {
     for (const a of allActors(host)) {
       if (a.id === p.id) continue;
       const d = dist3(pos, actorPos(a));
@@ -350,19 +387,19 @@ export function melee(host: CombatHost, p: PlayerActor, heavy: boolean): FireRes
   }
   const reach: V3 = [pos[0] + facing[0] * meleeDef.range, pos[1] + facing[1] * meleeDef.range, pos[2] + facing[2] * meleeDef.range];
   host.onPropHit?.(reach, useHeavy || meleeDef.destroys === "heavy" ? "heavy" : "light", dmg);
-  host.broadcast("swing", { by: p.id, weapon: WEAPON_INDEX.get(meleeDef.id), heavy: useHeavy, hits: targets.length });
+  host.broadcastNear("swing", { by: p.id, weapon: WEAPON_INDEX.get(meleeDef.id), heavy: useHeavy, hits: targets.length }, pos, 120);
   return { ok: true };
 }
 
 /** Apply damage with block, armour and the safe-zone/protection rules. */
-export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | null, target: Actor, amount: number, weak: boolean, fromDir?: V3, knockback?: number) {
+export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | null, target: Actor, amount: number, weak: boolean, fromDir?: V3, knockback?: number): boolean {
   const now = host.now();
-  if (!canHurt(attacker, target, now)) return;
+  if (!canHurt(attacker, target, now)) return false;
   let dmg = amount;
   if (target.kind === "player") {
     if (target.blocking && fromDir) {
       const { tier, def } = selectedWeapon(target);
-      if (def.delivery === "melee" && tier.block) {
+      if (def.delivery === "melee" && tier.block && tier.level <= target.char.level) {
         const f: V3 = [target.state.fx, target.state.fy, target.state.fz];
         const l = Math.hypot(fromDir[0], fromDir[1], fromDir[2]) || 1;
         const cos = (f[0] * fromDir[0] + f[1] * fromDir[1] + f[2] * fromDir[2]) / l;
@@ -380,13 +417,15 @@ export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | 
   target.state.hp = Math.max(0, target.state.hp - dmg);
   if (target.kind === "npc") target.onDamaged?.(dmg, attacker?.id ?? "");
   const tp = actorPos(target);
-  host.broadcast("hit", { attacker: attacker?.id ?? "", target: target.id, amount: dmg, weak, kind: target.kind, x: tp[0], y: tp[1], z: tp[2], kb: knockback ?? 0 });
+  host.broadcastNear("hit", { attacker: attacker?.id ?? "", target: target.id, amount: dmg, weak, kind: target.kind, x: tp[0], y: tp[1], z: tp[2], kb: knockback ?? 0 }, tp, 120, [target.id, attacker?.id ?? ""]);
   host.onDamage(target, dmg, attacker, weak);
+  return true;
 }
 
 /** Splash damage around a point (friendly fire on; the owner takes half). */
-export function explode(host: CombatHost, owner: PlayerActor | NpcActor, at: V3, radius: number, damage: number, weaponIndex: number) {
+export function explode(host: CombatHost, owner: PlayerActor | NpcActor, at: V3, radius: number, damage: number, weaponIndex: number, exclude?: string) {
   for (const a of allActors(host)) {
+    if (a.id === exclude) continue;
     const d = dist3(at, actorPos(a));
     if (d > radius + 0.5) continue;
     let dmg = damage * splashFalloff(Math.max(0, d - 0.5), radius);
@@ -394,7 +433,7 @@ export function explode(host: CombatHost, owner: PlayerActor | NpcActor, at: V3,
     if (dmg > 0) dealDamage(host, owner, a, dmg, false, [at[0] - actorPos(a)[0], at[1] - actorPos(a)[1], at[2] - actorPos(a)[2]], 4);
   }
   host.onPropHit?.(at, "heavy", damage);
-  host.broadcast("explode", { id: 0, x: at[0], y: at[1], z: at[2], radius, weapon: weaponIndex });
+  host.broadcastNear("explode", { id: 0, x: at[0], y: at[1], z: at[2], radius, weapon: weaponIndex }, at, 200);
 }
 
 const projectileLists = new WeakMap<CombatHost, Projectile[]>();
@@ -432,13 +471,14 @@ export function stepProjectiles(host: CombatHost, dt: number) {
       const mult = hit.weak ? (p.tier.headMult ?? 1.5) : 1;
       const at: V3 = [p.pos[0] + d[0] * hit.t, p.pos[1] + d[1] * hit.t, p.pos[2] + d[2] * hit.t];
       if (p.fuseAt === null) {
-        dealDamage(host, p.owner, hit.actor, p.damage * mult, hit.weak, [p.pos[0] - at[0], p.pos[1] - at[1], p.pos[2] - at[2]]);
-        if (p.tier.burn && hit.actor.kind === "player") hit.actor.burn = { perSec: p.tier.burn, until: now + 3000, by: p.owner.id };
-        if (p.tier.splash && p.tier.radius) explode(host, p.owner, at, p.tier.radius, p.tier.splash, WEAPON_INDEX.get(p.weapon.id) ?? 0);
+        const applied = dealDamage(host, p.owner, hit.actor, p.damage * mult, hit.weak, [p.pos[0] - at[0], p.pos[1] - at[1], p.pos[2] - at[2]]);
+        if (applied && p.tier.burn && hit.actor.kind === "player") hit.actor.burn = { perSec: p.tier.burn, until: now + 3000, by: p.owner.id };
+        // The direct-hit number already includes the blast for the victim (content.md §2.3).
+        if (p.tier.splash && p.tier.radius) explode(host, p.owner, at, p.tier.radius, p.tier.splash, WEAPON_INDEX.get(p.weapon.id) ?? 0, hit.actor.id);
         if (p.pierceLeft > 0) {
           p.pierceLeft--;
         } else {
-          host.broadcast("explode", { id: p.id, x: at[0], y: at[1], z: at[2], radius: 0, weapon: WEAPON_INDEX.get(p.weapon.id) });
+          host.broadcastNear("explode", { id: p.id, x: at[0], y: at[1], z: at[2], radius: 0, weapon: WEAPON_INDEX.get(p.weapon.id) }, at, 200);
           list.splice(i, 1);
           continue;
         }
@@ -454,7 +494,7 @@ export function stepProjectiles(host: CombatHost, dt: number) {
       if (p.tier.splash && p.tier.radius) explode(host, p.owner, at, p.tier.radius, p.tier.splash, WEAPON_INDEX.get(p.weapon.id) ?? 0);
       else {
         host.onPropHit?.(at, p.weapon.destroys === "heavy" ? "heavy" : "light", p.damage);
-        host.broadcast("explode", { id: p.id, x: at[0], y: at[1], z: at[2], radius: 0, weapon: WEAPON_INDEX.get(p.weapon.id) });
+        host.broadcastNear("explode", { id: p.id, x: at[0], y: at[1], z: at[2], radius: 0, weapon: WEAPON_INDEX.get(p.weapon.id) }, at, 200);
       }
       list.splice(i, 1);
       continue;
@@ -492,7 +532,13 @@ export function stepEffects(host: CombatHost, dt: number) {
         add += h.perSec * dt;
         return true;
       });
-      if (add > 0 && p.state.hp < mh) p.state.hp = Math.min(mh, Math.round(p.state.hp + add + 0.49));
+      // Accumulate fractional healing so a 40 HP tonic heals 40, independent of tick length.
+      p.healAcc += add;
+      const whole = Math.floor(p.healAcc);
+      if (whole > 0) {
+        p.healAcc -= whole;
+        if (p.state.hp < mh) p.state.hp = Math.min(mh, p.state.hp + whole);
+      }
     }
   }
 }
