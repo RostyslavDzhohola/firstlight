@@ -366,3 +366,25 @@ describe("kill rewards: XP and loot commit before anyone hears of a level-up (F1
     expect(toasts.filter((t) => t === "Level 2!")).toHaveLength(1);
   });
 });
+
+describe("egg offerings are part of the claim's save (F12 final Opus nit)", () => {
+  it("E1: a claim whose save fails keeps the coin; the retry takes exactly one coin with the lantern", async () => {
+    const b = await bot("offerer", "arcadia");
+    const a = questRoom(b).actors.get(b.id)!;
+    b.send("admin", { cmd: "coins", args: { amount: 3 } });
+    await waitFor(() => a.char.coins === 3);
+    await tpAndWait(b, objAt("e1_bowl"));
+    questRoom(b).saveActor(a);
+    failing = true;
+    b.send("interact", { target: "e1_bowl" });
+    await qsleep(300);
+    expect(a.char.coins).toBe(3);
+    expect(a.char.life?.eggs ?? []).not.toContain("E1");
+    failing = false;
+    await qsleep(250); // quest ops: 5/s
+    b.send("interact", { target: "e1_bowl" });
+    await waitFor(() => [...a.char.hotbar, ...a.char.backpack].some((s) => s?.id === "lantern_of_lacefall"));
+    expect(a.char.coins).toBe(2);
+    expect(characterRepo.current.load("offerer")!.coins).toBe(2);
+  });
+});

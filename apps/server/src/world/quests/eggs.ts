@@ -156,10 +156,8 @@ export class EggLogic {
       case "E1": {
         if (this.sys.life(a).eggs.includes("E1")) return this.sys.claimEgg(a, "E1"); // explains, keeps the coin
         if (a.char.coins < EGG_RULES.E1_COST) return toast("The offering bowl is empty. It seems to want a coin.");
-        a.char.coins -= EGG_RULES.E1_COST;
-        a.youDirty = true;
-        toast("You leave a coin. The sleeping Hopbit shrine glows…");
-        return this.sys.claimEgg(a, "E1");
+        // The coin goes in the claim's own save: a failed save keeps it (F12 final Opus nit).
+        return this.sys.claimEgg(a, "E1", { cost: EGG_RULES.E1_COST, note: "You leave a coin. The sleeping Hopbit shrine glows…" });
       }
       case "E2":
       case "E5": {

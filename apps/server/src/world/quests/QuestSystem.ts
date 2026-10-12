@@ -775,7 +775,7 @@ export class QuestSystem implements RoomSystem {
    * Firsts. Admin-assisted claims (the admin `egg` command, or a step an admin opened) and claims in a
    * staged copy give the item only: no medal, no plaque.
    */
-  claimEgg(a: PlayerActor, eggId: EggId, opts: { assisted?: boolean } = {}) {
+  claimEgg(a: PlayerActor, eggId: EggId, opts: { assisted?: boolean; cost?: number; note?: string } = {}) {
     const egg = EGG_BY_ID.get(eggId);
     if (!egg || a.dead) return;
     const life = this.life(a);
@@ -785,8 +785,15 @@ export class QuestSystem implements RoomSystem {
     }
     const assistKey = `${a.identity.userId}|${eggId}`;
     const helped = this.assistedEggs.has(assistKey);
-    if (!this.grant(a, [{ ...egg.item }], () => life.eggs.push(eggId))) return; // save failed: nothing changed, try again
+    // The offering (E1's coin), the life flag, the item and any overflow commit together; a failed
+    // save changes nothing and the claim can be tried again.
+    const paid = this.grant(a, [{ ...egg.item }], () => {
+      if (opts.cost) a.char.coins -= opts.cost;
+      life.eggs.push(eggId);
+    });
+    if (!paid) return;
     this.assistedEggs.delete(assistKey);
+    if (opts.note) this.toast(a, opts.note, "info");
     this.toast(a, `Secret found: ${egg.name} — ${egg.itemName}`, "medal");
     if (opts.assisted || helped || !this.official()) {
       this.toast(a, "Admin-assisted or staged: no medal or Hall of Firsts entry", "info");
