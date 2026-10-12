@@ -70,7 +70,7 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 | F8 2-player boss | ✅ | browser E2E T6: Tidewrath killed by two players (admin heals) |
 | F9 screenshot share | ✅ | browser E2E T7 |
 | F10 M1 ≥ 60 fps Medium | ✅* | re-run on 668ec82 (weather, NPCs, horses, collision): ?bench=g1 59.9 fps p50, p95 18.6 ms; night storm 59.9 fps p50, p95 18.5 ms; 0 shader builds (T3 Chromium, not plugged-in Chrome) |
-| F11 Low on weak profile | ✅* | `?bench=g1&tier=low&cpuslow=4`: 51.3 fps p50, p95 29.8 ms, 0 shader builds (D29 emulation) |
+| F11 Low on weak profile | ✅* | re-run on 668ec82: `?bench=g1&tier=low&cpuslow=4`: 59.2 fps p50 (mean 57.0), p95 21.9 ms, p99 25.6 ms, 0 shader builds (D29 emulation) |
 | F12 three-model review | 🛠 | Round 1: Codex 7, Sonnet 2, Opus 2 blockers, all fixed and verified closed. Final round on 668ec82: **Sonnet yes**; Codex no (2 payout-after-commit blockers); Opus no (two-packet teleport via the planet centre). Fixing in lane/f12-r2 + lane/f12-r2-auth (docs/reviews/2026-10-12-f12-final-*) |
 | F13 photo mode + 5 scenes | ✅ | browser E2E T8; `stage <n>` + docs/staged-scenes.md |
 
@@ -102,6 +102,11 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 | F12 round 2: auth/social (OTP enumeration and drain, self-delete, prune) | Opus sub-agent | ../fl-wt-f12r2b (lane/f12-r2-auth) |
 
 ## Measured numbers
+
+- 09:30Z F11 re-run on the live site at 668ec82: `?bench=g1&tier=low&cpuslow=4` (4× main-thread slowdown, D29),
+  Low, 1125×661 internal, 40-avatar crowd, 180 s warm + 60 s: **59.2 fps p50 (mean 57.0), frame p95 21.9 ms, p99
+  25.6 ms, max 40.5 ms, 0 shader builds**, draws mean 182 (was 51.3 fps p50 / p95 29.8 ms at 03:45Z: the F12 client
+  lane removed per-frame allocations).
 
 - 09:20Z F10 re-run on the live site at 668ec82 (all F12 fixes + weather/day-night, horses, prop collision), T3 Code's
   built-in browser (Chromium/WebGPU) on the owner's M1, 1785×1048 canvas, Medium, `?bench=g1` (180 s warm + 60 s):
