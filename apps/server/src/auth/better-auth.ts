@@ -20,6 +20,15 @@ export const OTP_MIN_LEVEL = 2;
 export const OTP_PER_ACCOUNT_PER_DAY = 10;
 
 /**
+ * Public requests (no session that may save: returning players signing in) may use this share of
+ * the global daily budget, so they can never use up what saving needs (F12 confirmation Opus SF2).
+ */
+export const OTP_PUBLIC_SHARE = 0.6;
+
+/** Public codes per client IP (IPv6: per /64, the ban key) per UTC day. */
+export const OTP_PUBLIC_PER_IP_PER_DAY = 5;
+
+/**
  * Better Auth endpoints the game never calls (F12 final review S6, S8). It uses only anonymous
  * sign-in, get-session, token, sign-in codes (send-verification-otp, type "sign-in") and
  * sign-in/email-otp. The other email-OTP endpoints answered differently for saved and unknown
@@ -64,6 +73,8 @@ interface AuthRequestState {
   otpSendFailed?: boolean;
   /** A queued background send (the public request was already answered). */
   otpQueued?: boolean;
+  /** The client IP the queued send was asked from (its per-IP cap). */
+  otpIp?: string | null;
 }
 
 export const authRequestState = new AsyncLocalStorage<AuthRequestState>();
@@ -89,17 +100,18 @@ export interface AuthDeps {
   maySave(userId: string): boolean;
   /**
    * Send a code to this saved address in the background: reserve the budget and deliver later, so
-   * the public answer never depends on the budget, the delivery result or its timing.
+   * the public answer never depends on the budget, the delivery result or its timing. `ip`: the
+   * client that asked.
    */
-  queueOtp(email: string): void;
+  queueOtp(email: string, ip: string | null): void;
   /**
    * Reserve one OTP send for this (lower-cased) email; false = over budget. Returns a reservation id.
    * `userId` is the signed-in player asking (OTP_PER_ACCOUNT_PER_DAY applies), or null for a queued
-   * public send.
+   * public send from `ip` (OTP_PUBLIC_SHARE of the day and OTP_PUBLIC_PER_IP_PER_DAY apply).
    * The two kinds have separate per-address hourly caps, so public requests (which only reach saved
    * addresses) never change what a player who may save is told about an address.
    */
-  reserveOtp(email: string, userId: string | null): { ok: true; id: number } | { ok: false; reason: string };
+  reserveOtp(email: string, userId: string | null, ip: string | null): { ok: true; id: number } | { ok: false; reason: string };
   releaseOtp(id: number, userId: string | null): void;
   sendOtp(email: string, otp: string): Promise<boolean>;
   /** Guest → account. Synchronous game.db move + live re-key; returns the name to keep on the account. */
@@ -148,19 +160,22 @@ export function authOptions(d: AuthDeps) {
         // same immediate answer, whatever the address, budget or delivery result (no enumeration);
         // saved addresses are served by a queued background send. A player who may save gets the
         // synchronous path with clear errors: its outcome doesn't depend on whose address it is.
+        // Public sends are capped per client IP and to a share of the day in the background, so the
+        // answer stays the same (F12 confirmation Opus SF2).
         let userId: string | null = null;
-        if (!authRequestState.getStore()?.otpQueued) {
+        const queued = authRequestState.getStore();
+        if (!queued?.otpQueued) {
           const session = await getSessionFromCtx(ctx, { disableRefresh: true }).catch(() => null);
           userId = session?.user.id ?? null;
           // A banned account's session gets nothing (F12 final review S7).
           if (userId && d.accountBanned(userId)) throw APIError.from("FORBIDDEN", { code: "BANNED", message: "This account is banned." });
           if (!userId || !d.maySave(userId)) {
-            if (d.savedEmail(email)) d.queueOtp(email);
+            if (d.savedEmail(email)) d.queueOtp(email, ip ?? null);
             return ctx.json({ success: true });
           }
         }
         // Budget key ignores "+tag" aliases so one inbox can't multiply its hourly allowance.
-        const r = d.reserveOtp(email.replace(/\+[^@]*@/, "@"), userId);
+        const r = d.reserveOtp(email.replace(/\+[^@]*@/, "@"), userId, userId ? null : (queued?.otpIp ?? null));
         if (!r.ok) throw APIError.from("TOO_MANY_REQUESTS", { code: "SAVING_BUSY", message: SAVING_BUSY });
         const st = authRequestState.getStore();
         if (st) st.otpReservation = { id: r.id, userId };

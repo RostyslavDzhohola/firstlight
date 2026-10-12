@@ -1,11 +1,11 @@
 // Seam 1: accounts over HTTP + SDK against the real server (Better Auth, game.db, /api/play).
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Room } from "@colyseus/sdk";
 import { awardMedal, discoverPad, getAccount, loadCharacter, saveCharacter, type CharacterData } from "../src/db/index.ts";
 import { otpSendsToday } from "../src/db/otp-budget.ts";
 import { DevOutbox, type SendResult } from "../src/auth/mailer.ts";
-import { OTP_PER_ACCOUNT_PER_DAY } from "../src/auth/better-auth.ts";
+import { OTP_PER_ACCOUNT_PER_DAY, OTP_PUBLIC_PER_IP_PER_DAY, OTP_PUBLIC_SHARE } from "../src/auth/better-auth.ts";
 
 import type { AccountLinkedEvent } from "../src/auth/links.ts";
 import { api, Browser, decodeJwt, joinWithToken, play, startAuthServer, type AuthServer } from "./auth-helpers.ts";
@@ -673,6 +673,83 @@ describe("one session can't drain the OTP budget (F12 final review S7)", () => {
     expect((await ask(b, "saved-elsewhere@example.test")).error).toMatchObject({ status: 403, code: "BANNED" });
     expect(out.sent).toBe(sent);
     expect(otpSendsToday(server.accounts.db)).toBe(1);
+  });
+});
+
+describe("requests without a session can't use up the OTP budget (F12 confirmation Opus SF2)", () => {
+  /** Saved accounts made on earlier days (plain auth rows: making them through saves would use budget). */
+  function savedAccounts(s: AuthServer, prefix: string, n: number): string[] {
+    const now = new Date().toISOString();
+    const ins = s.accounts.authDb.prepare(`INSERT INTO "user" (id, name, email, "emailVerified", "createdAt", "updatedAt", "isAnonymous") VALUES (?, ?, ?, 1, ?, ?, 0)`);
+    return Array.from({ length: n }, (_, i) => {
+      const email = `${prefix}${i}@example.test`;
+      ins.run(`${prefix}-${i}`, `${prefix}${i}`, email, now, now);
+      return email;
+    });
+  }
+  /** A public (session-less) code request from `ip`: the raw answer. */
+  async function publicAsk(s: AuthServer, email: string, ip: string) {
+    const res = await new Browser(s, ip).fetch("/api/auth/email-otp/send-verification-otp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email, type: "sign-in" }) });
+    return { status: res.status, body: await res.text() };
+  }
+  /** Count the background sends that were refused (each logs its budget), until every queued request is done. */
+  function refusals() {
+    const reasons: string[] = [];
+    const spy = vi.spyOn(console, "warn").mockImplementation((msg: unknown) => {
+      const m = /^otp send refused: (\w+) budget$/.exec(String(msg));
+      if (m) reasons.push(m[1]!);
+    });
+    return { reasons, restore: () => spy.mockRestore() };
+  }
+
+  it("the review's drain: 81 public asks for 27 owned addresses from 11 IPs use at most the public share, and saving still works", async () => {
+    server = await startAuthServer({ otpDailyBudget: 80 });
+    const out = server.accounts.devOutbox!;
+    const owned = savedAccounts(server, "mine", 27);
+    const log = refusals();
+    try {
+      const answers = new Set<string>();
+      let n = 0;
+      for (const email of owned) {
+        for (let k = 0; k < 3; k++) {
+          const r = await publicAsk(server, email, `203.0.113.${10 + Math.floor(n++ / 8)}`); // a new IP every 8 asks
+          answers.add(`${r.status} ${r.body}`);
+        }
+      }
+      expect([...answers]).toEqual([`200 ${JSON.stringify({ success: true })}`]); // one answer for all (no enumeration)
+      await waitFor(() => out.sent + log.reasons.length === n);
+      const share = Math.floor(80 * OTP_PUBLIC_SHARE);
+      expect(out.sent).toBe(share);
+      expect(log.reasons.filter((r) => r === "ip")).toHaveLength(9 * (8 - OTP_PUBLIC_PER_IP_PER_DAY)); // IPs 1–9 asked 8 times
+      expect(otpSendsToday(server.accounts.db)).toBe(share);
+    } finally {
+      log.restore();
+    }
+    // A level-2 guest saving now still gets its code.
+    const saver = new Browser(server, "198.51.100.77");
+    await saver.playToken();
+    await saver.levelUp(2);
+    expect((await saver.client.emailOtp.sendVerificationOtp({ email: "legit@example.test", type: "sign-in" })).error).toBeNull();
+    expect(out.lastCode("legit@example.test")).toMatch(/^\d{6}$/);
+  });
+
+  it(`one IP gets ${OTP_PUBLIC_PER_IP_PER_DAY} public codes a day; IPv6 counts per /64`, async () => {
+    server = await startAuthServer();
+    const out = server.accounts.devOutbox!;
+    const owned = savedAccounts(server, "v6", 8);
+    const log = refusals();
+    try {
+      // Two addresses in one /64 share a cap; the next /64 has its own.
+      const ips = ["2001:db8:1:2::a", "2001:db8:1:2::a", "2001:db8:1:2::a", "2001:db8:1:2:ffff::b", "2001:db8:1:2::c", "2001:db8:1:2::d", "2001:db8:1:3::a", "203.0.113.200"];
+      for (let i = 0; i < owned.length; i++) expect((await publicAsk(server, owned[i]!, ips[i]!)).status).toBe(200);
+      await waitFor(() => out.sent + log.reasons.length === owned.length);
+      expect(log.reasons).toEqual(["ip"]);
+      expect(out.lastCode(owned[5]!)).toBeNull(); // the sixth from 2001:db8:1:2::/64
+      expect(out.lastCode(owned[6]!)).toMatch(/^\d{6}$/);
+      expect(out.lastCode(owned[7]!)).toMatch(/^\d{6}$/);
+    } finally {
+      log.restore();
+    }
   });
 });
 

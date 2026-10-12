@@ -18,7 +18,7 @@ import { setDisplayName } from "../db/accounts.ts";
 import { reserveOtpSend, releaseOtpSend } from "../db/otp-budget.ts";
 import { closeDanglingSessions, pruneSessionLog } from "../db/sessions.ts";
 import { stmt } from "../db/game-db.ts";
-import { authOptions, authRequestState, buildAuth, OTP_MIN_LEVEL, OTP_PER_ACCOUNT_PER_DAY, type FirstlightAuth } from "./better-auth.ts";
+import { authOptions, authRequestState, buildAuth, OTP_MIN_LEVEL, OTP_PER_ACCOUNT_PER_DAY, OTP_PUBLIC_PER_IP_PER_DAY, OTP_PUBLIC_SHARE, type FirstlightAuth } from "./better-auth.ts";
 import { hmacHex, safeEqual } from "./crypto.ts";
 import type { Identity, TokenVerifier, VerifyContext } from "./identity.ts";
 import { banKey, CLIENT_IP_HEADER, firstForwardedFor, normalizeIp } from "./ip.ts";
@@ -127,24 +127,32 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
     savedEmail: (email) => savedEmail(email),
     accountBanned: (userId) => isBanned(db, userId, Date.now()),
     maySave: (userId) => bestLevel(db, userId) >= OTP_MIN_LEVEL,
-    queueOtp: (email) => {
+    queueOtp: (email, ip) => {
       // One at a time, after this response is on its way; failures are logged by sendOtp/reserveOtp.
       otpQueue = otpQueue
         .then(() => new Promise<void>((ok) => setImmediate(ok)))
         .then(() => {
           if (!authRef || closed) return;
           const api = authRef.api;
-          return authRequestState.run({ otpQueued: true }, () => api.sendVerificationOTP({ body: { email, type: "sign-in" } }));
+          return authRequestState.run({ otpQueued: true, otpIp: ip }, () => api.sendVerificationOTP({ body: { email, type: "sign-in" } }));
         })
         .then(
           () => {},
           () => {},
         );
     },
-    reserveOtp: (email, userId) => {
-      // Public (queued) sends count under their own per-address key (F12 final review S6).
+    reserveOtp: (email, userId, ip) => {
+      // Public (queued) sends count under their own per-address key (F12 final review S6), a share of
+      // the day and their client IP's ban key (F12 confirmation Opus SF2).
       const key = hashEmail(userId ? email : `public:${email}`);
-      const r = reserveOtpSend(db, key, { perEmailPerHour: cfg.otpPerEmailPerHour, perDay: cfg.otpDailyBudget, perAccountPerDay: OTP_PER_ACCOUNT_PER_DAY }, Date.now(), userId);
+      const limits = {
+        perEmailPerHour: cfg.otpPerEmailPerHour,
+        perDay: cfg.otpDailyBudget,
+        perAccountPerDay: OTP_PER_ACCOUNT_PER_DAY,
+        publicPerDay: Math.floor(cfg.otpDailyBudget * OTP_PUBLIC_SHARE),
+        publicPerIpPerDay: OTP_PUBLIC_PER_IP_PER_DAY,
+      };
+      const r = reserveOtpSend(db, key, limits, Date.now(), userId, userId || !ip ? null : hashIp(ip));
       if (!r.ok) console.warn(`otp send refused: ${r.reason} budget`);
       return r;
     },
