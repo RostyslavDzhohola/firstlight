@@ -158,7 +158,10 @@ export const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (copy_key, system)
   );
   `,
-  // 4: pile kinds (eviction past the cap prefers staged, then loot piles, over death piles) and expiry
+  // 4: pile kinds (eviction past the cap prefers staged, then loot piles, over death piles) and expiry.
+  // Not idempotent (SQLite has no ADD COLUMN IF NOT EXISTS): it runs once per database, guarded by
+  // user_version in its own transaction. Production is past it (v5); leave it as it is, and write
+  // new migrations idempotent and append-only (F12 final Opus nit).
   `
   ALTER TABLE pile ADD COLUMN kind TEXT NOT NULL DEFAULT 'death';
   ALTER TABLE pile ADD COLUMN expires_at INTEGER;
