@@ -638,8 +638,10 @@ export class QuestSystem implements RoomSystem {
   completeMission(a: PlayerActor, m: CharacterMission, def: MissionDef) {
     if (m.done) return;
     const goal = missionGoal(def);
-    // The done flag, coins, items and any overflow pile commit together; a failed save leaves the
-    // mission open (it completes on the next trigger). XP and the news follow the commit (F12 B6).
+    // The done flag, XP and level, coins, items and any overflow pile commit together; a failed save
+    // leaves the mission open (it completes on the next trigger). Level-up effects and the news
+    // follow the commit, and nothing after it saves again (F12 B6, final B1).
+    let showXp = (): void => {};
     const paid = this.grant(
       a,
       def.reward.items.map((i) => ({ ...i })),
@@ -647,10 +649,11 @@ export class QuestSystem implements RoomSystem {
         m.done = true;
         m.progress = goal;
         a.char.coins += def.reward.coins;
+        showXp = this.room.addXp(a, def.reward.xp);
       },
     );
     if (!paid) return;
-    this.room.grantXp(a, def.reward.xp);
+    showXp();
     const extra = def.reward.items.map((i) => `${i.qty} × ${itemName(i)}`).join(", ");
     this.toast(a, `Mission complete: ${def.name} · +${def.reward.xp} XP · +${def.reward.coins} ◎${extra ? ` · ${extra}` : ""}`, "xp");
     a.client.send("missionDone", { id: def.id, xp: def.reward.xp, coins: def.reward.coins });

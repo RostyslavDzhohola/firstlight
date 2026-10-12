@@ -25,7 +25,11 @@ export interface NpcWorld {
   addNpc(n: NpcActor): void;
   removeNpc(id: string): void;
   newNpcState(): NpcState;
-  grantXp(p: PlayerActor, amount: number): void;
+  /**
+   * XP into the character only (call inside withTx, with the save); returns what to run after the
+   * commit: level-up effects and news (BodyRoom.addXp, F12 final B1).
+   */
+  addXp(p: PlayerActor, amount: number): () => void;
   giveItem(p: PlayerActor, item: InvItem): boolean;
   /** Create a loot pile; with `deferred`, pile events are queued until after the transaction. */
   createPile(owner: PlayerActor, items: InvItem[], coins: number, at: V3, deferred?: (() => void)[]): void;
@@ -52,7 +56,7 @@ export function roomWorld(room: BodyRoom): NpcWorld {
     addNpc: (n) => room.addNpc(n),
     removeNpc: (id) => room.removeNpc(id),
     newNpcState: () => room.newNpcState(),
-    grantXp: (p, amount) => room.grantXp(p, amount),
+    addXp: (p, amount) => room.addXp(p, amount),
     giveItem: (p, it) => room.giveItem(p, it),
     createPile: (owner, items, coins, at, deferred) => {
       room.createPile(owner, items, coins, at, deferred);

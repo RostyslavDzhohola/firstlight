@@ -19,12 +19,15 @@ import { SqliteCharacterRepo, SqlitePileStore } from "../src/world/sqliteStores.
 import { placeDir } from "@firstlight/shared/content/places";
 import { emitGameEvent } from "../src/world/events.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
+import { spawnNpc } from "./npc-bots.ts";
 import { bot, ground, harness, objAt, serverRoom as questRoom, sleep as qsleep, tpAndWait, type Bot } from "./quest-helpers.ts";
 
 let game: Game;
 let dir: string;
 let db: Db;
 let failing = false;
+/** When set, this many more character saves succeed, then every save fails (a second write failing). */
+let savesLeft: number | null = null;
 const rooms: Room[] = [];
 
 beforeEach(async () => {
@@ -35,15 +38,18 @@ beforeEach(async () => {
   const save = repo.save.bind(repo);
   repo.save = (userId, data) => {
     if (failing) throw new Error("disk I/O error (test)");
+    if (savesLeft !== null && savesLeft-- <= 0) throw new Error("disk I/O error (test, later write)");
     save(userId, data);
   };
   characterRepo.current = repo;
   pileStore.current = new SqlitePileStore(db);
   failing = false;
+  savesLeft = null;
   harness.game = game;
 });
 afterEach(async () => {
   failing = false;
+  savesLeft = null;
   for (const r of rooms.splice(0)) await safeLeave(r);
   for (const r of harness.rooms.splice(0)) await safeLeave(r);
   await game.close();
@@ -247,3 +253,116 @@ describe("a failed save undoes quest and shop rewards too (F12 B6, Codex re-revi
   });
 });
 
+
+describe("mission XP commits with the completion (F12 final B1)", () => {
+  const stored = (userId: string) => characterRepo.current.load(userId)!;
+  const actor = (b: Bot) => questRoom(b).actors.get(b.id)!;
+  const a1 = (b: Bot) => actor(b).char.missions.find((x) => x.id === "A1")!;
+
+  /** Accept A1 at the Arcadia guide and save; returns a function that reports eight Clover Fields hopbit kills. */
+  async function onA1(b: Bot) {
+    await tpAndWait(b, objAt("guide_arcadia"));
+    b.send("mission", { action: "accept", id: "A1" });
+    await waitFor(() => actor(b).char.missions.some((m) => m.id === "A1"));
+    questRoom(b).saveActor(actor(b));
+    const room = questRoom(b);
+    const fields = ground("arcadia", placeDir("clover_fields"));
+    return (n = 8) => {
+      for (let i = 0; i < n; i++) emitGameEvent(room, { type: "kill", npcKind: "hopbit", killerId: b.id, pos: fields, area: "clover_fields" });
+    };
+  }
+
+  it("below a level-up the XP is in the same save as done=true: a restart right after keeps it", async () => {
+    const b = await bot("veteran", "arcadia");
+    b.send("admin", { cmd: "level", args: { level: 5 } });
+    await waitFor(() => actor(b).char.level === 5);
+    const xp0 = actor(b).char.xp;
+    const kills = await onA1(b);
+    kills();
+    await waitFor(() => a1(b).done);
+    expect(actor(b).char.xp).toBe(xp0 + 80);
+    expect(actor(b).char.level).toBe(5); // no level-up: nothing else saves
+    // A restart now reads game.db: the completed mission comes back with its XP.
+    const db2 = openGameDb(join(dir, "game.db"));
+    const row = new SqliteCharacterRepo(db2).load("veteran")!;
+    db2.close();
+    expect(row.missions.find((m) => m.id === "A1")!.done).toBe(true);
+    expect(row.coins).toBe(30);
+    expect(row.xp).toBe(xp0 + 80);
+    expect(row.level).toBe(5);
+  });
+
+  it("a level-up adds no second write that could fail after the completion committed", async () => {
+    const b = await bot("climber", "arcadia");
+    const kills = await onA1(b);
+    expect(actor(b).char.xp).toBe(0);
+    savesLeft = 1; // the completion's save goes through; any later write fails
+    kills();
+    await waitFor(() => a1(b).done);
+    await qsleep(200);
+    savesLeft = null;
+    expect(stored("climber").missions.find((m) => m.id === "A1")!.done).toBe(true);
+    expect(stored("climber").xp).toBe(80);
+    expect(stored("climber").level).toBe(2);
+    expect(actor(b).char.xp).toBe(80);
+    expect(actor(b).char.level).toBe(2);
+    expect(me(b.room).level).toBe(2);
+    await waitFor(() => b.toasts.includes("Level 2!"));
+    // Further triggers pay nothing more.
+    kills(1);
+    await qsleep(200);
+    expect(actor(b).char.xp).toBe(80);
+    expect(actor(b).char.coins).toBe(30);
+  });
+
+  it("a completion whose save fails pays its XP exactly once on the retry, in the database too", async () => {
+    const b = await bot("retrier", "arcadia");
+    const kills = await onA1(b);
+    failing = true;
+    kills();
+    await qsleep(200);
+    expect(a1(b).done).toBe(false);
+    expect(b.toasts).not.toContain("Level 2!");
+    failing = false;
+    kills(1);
+    await waitFor(() => a1(b).done);
+    kills(1);
+    await qsleep(200);
+    expect(actor(b).char.xp).toBe(80);
+    expect(stored("retrier").xp).toBe(80);
+    expect(stored("retrier").level).toBe(2);
+    expect(b.toasts.filter((t) => t === "Level 2!")).toHaveLength(1);
+  });
+});
+
+describe("kill rewards: XP and loot commit before anyone hears of a level-up (F12 final B1)", () => {
+  it("a kill whose save fails pays and announces nothing; the next kill pays once", async () => {
+    const r = await setup("hunter");
+    const a = actorOf(r);
+    a.char.xp = 49; // one short of level 2
+    serverRoom(r).saveActor(a);
+    const toasts: string[] = [];
+    let kills = 0;
+    r.onMessage("toast", (m: any) => toasts.push(m.text));
+    r.onMessage("npcKill", () => kills++);
+    const at = outside(44);
+    failing = true;
+    const first = await spawnNpc(r, "hopbit", at, { instant: true });
+    r.send("npc", { cmd: "hurt", id: first, amount: 1e6, as: r.sessionId });
+    await sleep(400);
+    expect(toasts).not.toContain("Level 2!");
+    expect(kills).toBe(0);
+    expect(a.char.xp).toBe(49);
+    expect(a.char.level).toBe(1);
+    expect(me(r).level).toBe(1);
+    failing = false;
+    const second = await spawnNpc(r, "hopbit", at, { instant: true });
+    r.send("npc", { cmd: "hurt", id: second, amount: 1e6, as: r.sessionId });
+    await waitFor(() => kills === 1);
+    await waitFor(() => toasts.includes("Level 2!"));
+    expect(a.char.level).toBe(2);
+    expect(characterRepo.current.load("hunter")!.xp).toBe(a.char.xp);
+    expect(characterRepo.current.load("hunter")!.level).toBe(2);
+    expect(toasts.filter((t) => t === "Level 2!")).toHaveLength(1);
+  });
+});

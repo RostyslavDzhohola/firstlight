@@ -65,8 +65,9 @@ export function fakeWorld(body: BodyId, opts: { immortal?: boolean; start?: numb
     addNpc: (n) => npcs.set(n.id, n),
     removeNpc: (id) => npcs.delete(id),
     newNpcState: () => new NpcState(),
-    grantXp: (p, amount) => {
+    addXp: (p, amount) => {
       p.char.xp += amount;
+      return () => {};
     },
     giveItem: () => true,
     createPile: () => {},

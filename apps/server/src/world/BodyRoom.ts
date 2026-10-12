@@ -948,22 +948,54 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     client.send("reborn", { body: "portus" });
   }
 
-  grantXp(a: PlayerActor, amount: number) {
-    if (amount <= 0 || a.dead) return;
-    const before = a.char.level;
+  /**
+   * The durable half of an XP reward: the character's XP and level, nothing else (no save, no
+   * messages). Call it inside the transaction that saves whatever the XP comes with (a mission's
+   * done flag and coins, loot, onboarding flags), so they commit together or not at all (F12 final
+   * B1). Returns the live half, to run once that transaction has committed: level-up HP and level
+   * on the synced state, the toast and the levelUp event. Neither half saves or adds XP again.
+   */
+  addXp(a: PlayerActor, amount: number): () => void {
+    if (!(amount > 0) || a.dead) return () => {};
     a.char.xp += amount;
     a.char.level = levelForXp(a.char.xp);
-    if (a.char.level > before) {
-      const oldMax = maxHp(before);
-      const newMax = maxHp(a.char.level);
-      a.state.maxHp = newMax;
-      a.state.hp = Math.min(newMax, a.state.hp + (newMax - oldMax));
-      a.state.level = a.char.level;
-      a.client.send("toast", { text: `Level ${a.char.level}!`, kind: "xp" });
-      emitGameEvent(this, { type: "levelUp", playerId: a.id, level: a.char.level });
-      this.saveActor(a);
-    }
     a.youDirty = true;
+    return () => this.showLevel(a);
+  }
+
+  /**
+   * After a committed XP change: the levels the synced state doesn't show yet (more HP, the level,
+   * a toast, the levelUp event). Idempotent: a second call finds nothing new.
+   */
+  private showLevel(a: PlayerActor) {
+    a.youDirty = true;
+    const shown = a.state.level;
+    if (a.char.level <= shown) return;
+    const oldMax = maxHp(shown);
+    const newMax = maxHp(a.char.level);
+    a.state.maxHp = newMax;
+    a.state.hp = Math.min(newMax, a.state.hp + (newMax - oldMax));
+    a.state.level = a.char.level;
+    a.client.send("toast", { text: `Level ${a.char.level}!`, kind: "xp" });
+    emitGameEvent(this, { type: "levelUp", playerId: a.id, level: a.char.level });
+  }
+
+  /**
+   * XP that comes with nothing else durable (a PvP kill): a level-up is saved at once, in a
+   * transaction of its own, before anyone hears of it; a failed save leaves the XP unpaid.
+   */
+  grantXp(a: PlayerActor, amount: number) {
+    let live = (): void => {};
+    try {
+      this.persist([a], () => {
+        const before = a.char.level;
+        live = this.addXp(a, amount);
+        if (a.char.level > before) this.saveActor(a);
+      });
+    } catch {
+      return;
+    }
+    live();
   }
 
   // ---------------------------------------------------------------- logout
