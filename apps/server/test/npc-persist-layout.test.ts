@@ -61,6 +61,31 @@ describe("spawn-group copy state across a layout change", () => {
     expect(after.goldenBack.size).toBe(goldens.length);
   });
 
+  it("a server from before keys (rollback) skips new saves instead of clearing another pack", () => {
+    const pack = layout.find((p) => p.kind === "pack" && p.members.length >= 3 && !p.members.some((m) => m.golden))!;
+    const golden = layout.find((p) => p.members.some((m) => m.golden))!;
+    const before = fakeSystem(shifted());
+    before.groups[pack.id + 1]!.cleared = true;
+    before.groups[pack.id + 1]!.dead.fill(true);
+    before.groups[pack.id + 1]!.respawnLeft = 100;
+    before.goldenBack.set(golden.id + 1, now + 15 * 60_000);
+    const saved = JSON.parse(JSON.stringify(snapshotNpcCopy(before, now))) as NpcCopyState;
+    // main's reader (c9ddf29 persist.ts): groups by numeric p + make-up, Goldens by numeric id.
+    const old = fakeSystem(layout);
+    const sigOf = (p: SpawnPoint) => `${p.kind}:${p.members.map((m) => m.def).join(".")}`;
+    for (const e of saved.groups) {
+      if (typeof e.p !== "number") continue;
+      const g = old.groups[e.p];
+      if (g && sigOf(g.point) === e.sig) g.cleared = true;
+    }
+    for (const [p, back] of saved.golden ?? []) {
+      const pt = old.groups[p]?.point;
+      if (pt && pt.members.some((m) => m.golden)) old.goldenBack.set(p, back);
+    }
+    expect(old.groups.some((g) => g.cleared)).toBe(false);
+    expect(old.goldenBack.size).toBe(0);
+  });
+
   it("the same layout restores exactly as before (round trip)", () => {
     const pack = layout.find((p) => p.kind === "pack" && p.members.length >= 3)!;
     const before = fakeSystem(layout);

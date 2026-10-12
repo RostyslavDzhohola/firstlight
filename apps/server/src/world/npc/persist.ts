@@ -19,12 +19,16 @@ export interface NpcCopyState {
   /** An engaged boss fight (HP, phase, cover, credit) and when its arena emptied. */
   fight?: BossFight;
   /**
-   * p = spawn point id, sig = its make-up, k = make-up and place. Ids shift when a layout change
-   * adds or drops a group, so state follows k; entries without one (older saves) can't be placed
-   * safely and are dropped (those groups just start fresh).
+   * k = the group's make-up and place. Ids shift when a layout change adds or drops a group, so
+   * state follows k. Older saves wrote p (spawn point id) and sig (make-up) instead; those can't
+   * be placed safely and are dropped (the groups start fresh). New saves leave p out, so a server
+   * from before keys (which matched on p) skips them instead of clearing some other pack.
    */
-  groups: { p: number; sig: string; k?: string; dead?: number[]; left?: number }[];
-  /** Golden Hopbits that were popped or ran into their burrow: [spawn point id, return time (ms), k]. */
+  groups: { p?: number; sig?: string; k?: string; dead?: number[]; left?: number }[];
+  /**
+   * Golden Hopbits that were popped or ran into their burrow: [-1, return time (ms), k]. Older
+   * saves have [spawn point id, return time]; -1 keeps a pre-key server from reading the id.
+   */
   golden?: [number, number, string?][];
 }
 
@@ -41,18 +45,19 @@ export function spawnKey(p: SpawnPoint): string {
 export function snapshotNpcCopy(sys: NpcSystem, now: number): NpcCopyState | null {
   const groups: NpcCopyState["groups"] = [];
   for (const g of sys.groups) {
-    const id = { p: g.point.id, sig: sig(g.point), k: spawnKey(g.point) };
-    if (g.cleared) groups.push({ ...id, left: g.respawnLeft });
-    else if (g.dead.some((d) => d)) groups.push({ ...id, dead: g.dead.flatMap((d, i) => (d ? [i] : [])) });
+    const k = spawnKey(g.point);
+    if (g.cleared) groups.push({ k, left: g.respawnLeft });
+    else if (g.dead.some((d) => d)) groups.push({ k, dead: g.dead.flatMap((d, i) => (d ? [i] : [])) });
   }
   const b = sys.boss;
   const boss = b && b.status === "dead" && b.respawnAt > now ? { id: b.def.id, respawnAt: b.respawnAt } : undefined;
   const fight = b?.fightState(now) ?? undefined;
   // Absolute times; an expired one is kept too, so a restored dead slot still comes back (NpcSystem scan).
-  const golden: [number, number, string?][] = [...sys.goldenBack].map(([p, back]) => {
+  const golden: [number, number, string?][] = [];
+  for (const [p, back] of sys.goldenBack) {
     const pt = sys.groups[p]?.point;
-    return pt ? [p, back, spawnKey(pt)] : [p, back];
-  });
+    if (pt) golden.push([-1, back, spawnKey(pt)]);
+  }
   if (!groups.length && !boss && !fight && !golden.length) return null;
   return { v: 1, at: now, groups, ...(boss ? { boss } : {}), ...(fight ? { fight } : {}), ...(golden.length ? { golden } : {}) };
 }
