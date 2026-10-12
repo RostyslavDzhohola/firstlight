@@ -6,6 +6,7 @@ import { BACKPACK_SLOTS, type CharacterData } from "@firstlight/shared/content/c
 import { STARTERS } from "@firstlight/shared/content/weapons";
 import type { InvItem } from "@firstlight/shared/net/protocol";
 import { dropPile, ensureAccount, getPile, listPiles, loadCharacter, saveCharacter, takeAll, takeItem, type Db } from "../db/index.ts";
+import { tx } from "../db/game-db.ts";
 import type { Pile } from "../db/piles.ts";
 import type { CharacterRepo } from "./characters.ts";
 import type { PileData, PileStore } from "./piles.ts";
@@ -16,6 +17,7 @@ interface StoredInventory {
   selected: number;
   deaths: number;
   dead: boolean;
+  travelTo?: string;
 }
 
 export class SqliteCharacterRepo implements CharacterRepo {
@@ -46,11 +48,20 @@ export class SqliteCharacterRepo implements CharacterRepo {
       lifeStartedAt: c.lifeStartedAt,
       deaths: inv.deaths ?? 0,
       dead: !!inv.dead,
+      travelTo: (inv.travelTo as BodyId | undefined) ?? undefined,
     };
   }
 
-  save(userId: string, d: CharacterData): void {
+  ensure(userId: string): void {
     ensureAccount(this.db, userId);
+  }
+
+  transaction<T>(fn: () => T): T {
+    return tx(this.db, fn);
+  }
+
+  /** Saves only if the account row exists (a merged-away guest must not be recreated). */
+  save(userId: string, d: CharacterData): void {
     saveCharacter(this.db, userId, {
       starter: STARTERS[d.starter]?.id ?? STARTERS[0].id,
       palette: d.palette,
@@ -64,7 +75,7 @@ export class SqliteCharacterRepo implements CharacterRepo {
       y: d.pos?.[1] ?? 0,
       z: d.pos?.[2] ?? 0,
       heading: 0,
-      inventory: { hotbar: d.hotbar, backpack: d.backpack, selected: d.selected, deaths: d.deaths, dead: !!d.dead } satisfies StoredInventory,
+      inventory: { hotbar: d.hotbar, backpack: d.backpack, selected: d.selected, deaths: d.deaths, dead: !!d.dead, travelTo: d.travelTo } satisfies StoredInventory,
       missionState: d.missions,
       lifeStartedAt: d.lifeStartedAt,
       protectedUntil: 0,

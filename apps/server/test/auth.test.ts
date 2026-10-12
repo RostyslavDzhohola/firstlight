@@ -319,7 +319,10 @@ describe("admin claim", () => {
       extraRoutes: (app, a) => app.get("/admin/ping", a.requireAdmin, (_req, res) => void res.json({ ok: true })),
     });
     const owner = new Browser(server);
-    const ownerToken = await owner.playToken();
+    await owner.playToken();
+    expect((await owner.fetch("/admin/claim?token=claim-me-once")).status).toBe(403); // guests can't claim
+    await owner.saveWithEmail("owner@example.test");
+    const ownerToken = (await owner.client.token()).data!.token;
     expect((await api(server, "/admin/ping", ownerToken)).status).toBe(403);
 
     expect((await api(server, "/admin/claim?token=claim-me-once", null)).status).toBe(401);
@@ -333,7 +336,9 @@ describe("admin claim", () => {
     expect((await api(server, "/api/account/me", ownerToken)).json.admin).toBe(true);
 
     const other = new Browser(server);
-    const otherToken = await other.playToken();
+    await other.playToken();
+    await other.saveWithEmail("other@example.test");
+    const otherToken = (await other.client.token()).data!.token;
     expect((await other.fetch("/admin/claim?token=claim-me-once")).status).toBe(410);
     expect((await api(server, "/admin/ping", otherToken)).status).toBe(403);
     expect((await api(server, "/admin/ping", null)).status).toBe(401);
@@ -348,13 +353,16 @@ describe("admin claim", () => {
     expect((await api(server, "/api/account/me", ownerToken)).json.admin).toBe(true);
   });
 
-  it("an admin keeps admin after saving", async () => {
+  it("an admin keeps admin after a fresh sign-in on another browser", async () => {
     server = await startAuthServer({ adminClaimToken: "tok" });
     const b = new Browser(server);
     await b.playToken();
-    expect((await b.fetch("/admin/claim?token=tok")).status).toBe(200);
     await b.saveWithEmail("owner@example.test");
-    const t = (await b.client.token()).data!.token;
+    expect((await b.fetch("/admin/claim?token=tok")).status).toBe(200);
+    const c = new Browser(server);
+    await c.playToken();
+    await c.saveWithEmail("owner@example.test");
+    const t = (await c.client.token()).data!.token;
     expect((await api(server, "/api/account/me", t)).json).toMatchObject({ admin: true, guest: false });
   });
 });

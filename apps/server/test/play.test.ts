@@ -76,10 +76,28 @@ describe("entering the world", () => {
   });
 
   it("a party member can still enter the leader's copy using the headroom seats", async () => {
+    // Headroom is for real parties only: form one in Portus first (invites need the same copy).
+    const leaderHub = await joinAs(game, "p0", "portus");
+    const friendHub = await joinAs(game, "friend", "portus");
+    rooms.push(leaderHub, friendHub);
+    let invite: { from: string } | null = null;
+    friendHub.onMessage("party:invite", (m) => (invite = m));
+    await waitFor(() => (friendHub.state as any).players?.size === 2);
+    leaderHub.send("party", { action: "invite", target: friendHub.sessionId });
+    await waitFor(() => invite !== null);
+    friendHub.send("party", { action: "accept", target: invite!.from });
+    await waitFor(() => !!(friendHub.state as any).players.get(friendHub.sessionId)?.party);
+    await safeLeave(leaderHub);
+
     const joined: Room[] = [];
     for (let i = 0; i < 4; i++) joined.push(await joinAs(game, `p${i}`, "hollowmere"));
     rooms.push(...joined);
     const leaderRoom = joined[0]!.roomId;
+    // A stranger naming the leader's room gets no headroom seat.
+    const stranger = await joinAs(game, "stranger", "hollowmere", { partyLeaderRoomId: leaderRoom });
+    rooms.push(stranger);
+    expect(stranger.roomId).not.toBe(leaderRoom);
+    await safeLeave(friendHub);
     const friend = await joinAs(game, "friend", "hollowmere", { partyLeaderRoomId: leaderRoom });
     rooms.push(friend);
     expect(friend.roomId).toBe(leaderRoom);
