@@ -69,6 +69,12 @@ export function fakeWorld(body: BodyId, opts: { immortal?: boolean; start?: numb
     },
     giveItem: () => true,
     createPile: () => {},
+    withTx: (fn) => fn(),
+    snapToGround: (p) => {
+      const l = Math.hypot(p[0]!, p[1]!, p[2]!);
+      const r = BODIES[body].radius + Math.max(terrain.groundHeight(p[0]! / l, p[1]! / l, p[2]! / l), BODIES[body].waterLevel - 1.05);
+      return [(p[0]! / l) * r, (p[1]! / l) * r, (p[2]! / l) * r];
+    },
     send: (p, type, msg) => {
       if (sent.length < 10_000) sent.push({ to: p.id, type, msg });
     },

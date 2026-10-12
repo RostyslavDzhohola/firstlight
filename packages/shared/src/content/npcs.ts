@@ -826,7 +826,8 @@ export const NPC_AREAS: readonly NpcArea[] = [
     },
   },
   {
-    id: "tolling_approach", name: "Tolling Tower approach", planet: "hollowmere", at: { lerp: [{ pad: 10 }, { pad: 8 }, 0.14] }, radius: 90, levels: [11, 13], density: 0.7,
+    // D28 moved the Tolling Tower 125 m toward pad 8; its approach is the ridge foot toward pad 4.
+    id: "tolling_approach", name: "Tolling Tower approach", planet: "hollowmere", at: { lerp: [{ pad: 10 }, { pad: 4 }, 0.3] }, radius: 90, levels: [11, 13], density: 0.7,
     groups: [
       { members: [{ kind: "bone_archer", count: [2, 2] }], weight: 2, ground: "ridge" },
       { members: [{ kind: "gnawer", count: [2, 3] }], weight: 2 },
@@ -871,7 +872,8 @@ export const NPC_AREAS: readonly NpcArea[] = [
     ],
   },
   {
-    id: "last_billboard", name: "The Last Billboard mesa", planet: "meridian", at: { mid: [9, 15] }, radius: 60, levels: [16, 18], density: 0.8,
+    // Off the Chrome Spires (D28 put them between pads 15 and 9), on the rise above Glasspan.
+    id: "last_billboard", name: "The Last Billboard mesa", planet: "meridian", at: { lerp: [{ pad: 9 }, { pad: 15 }, 0.2] }, radius: 60, levels: [16, 18], density: 0.8,
     groups: [{ members: [{ kind: "auditor", count: [2, 2] }], weight: 1 }],
   },
   {
@@ -973,7 +975,7 @@ export interface NpcShotMsg {
 }
 
 export interface BossEventMsg {
-  type: "engage" | "phase" | "voice" | "mechanic" | "mechanicEnd" | "plates" | "window" | "defeat" | "reset" | "respawn" | "hp";
+  type: "engage" | "phase" | "voice" | "mechanic" | "mechanicEnd" | "plates" | "window" | "defeat" | "reset" | "respawn" | "hp" | "snapshot";
   boss: string; // def id
   id: string; // npc id
   phase?: number;
@@ -993,6 +995,9 @@ export interface BossEventMsg {
   engaged?: number;
   hp?: number;
   maxHp?: number;
+  /** Snapshot (sent on join / when a player comes near the lair): broken cover ids, open window (ms left). */
+  broken?: number[];
+  windowMs?: number;
 }
 
 export type NpcServerMessages = {

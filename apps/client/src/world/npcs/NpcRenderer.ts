@@ -144,7 +144,7 @@ export class NpcRenderer implements ClientSystem {
   private readonly shots: Shot[] = [];
   private readonly pulls: { c: THREE.Vector3; speed: number; until: number }[] = [];
   private readonly effects: { kind: StatusEffect["kind"]; until: number; amount: number }[] = [];
-  private readonly baseMove = { run: MOVE.run, sprint: MOVE.sprint };
+  private readonly baseMove = { run: MOVE.run, sprint: MOVE.sprint, dodge: MOVE.dodgeDistance };
   private readonly offs: (() => void)[] = [];
   private readonly onState: (state: any) => void;
   private bossEngaged = 0;
@@ -184,6 +184,8 @@ export class NpcRenderer implements ClientSystem {
     on("npcList", () => {});
     on("bossInfo", () => {});
     on("boss", (m: BossEventMsg) => this.onBoss(m));
+    // Ask for the lair snapshot now that our handlers exist (cover broken before we arrived, etc.).
+    room.send("npcSync", {});
     on("hit", (m: { target: string; kind: string }) => {
       if (m.kind !== "npc") return;
       const v = this.views.get(m.target);
@@ -593,8 +595,10 @@ export class NpcRenderer implements ClientSystem {
       if (e.kind === "chill" || e.kind === "slow") slow = Math.max(slow, e.amount);
       if (e.kind === "nosprint") noSprint = true;
     }
+    // Prediction of what the server enforces (npc/effects.ts): slower, no sprint, no dodge burst.
     MOVE.run = this.baseMove.run * (1 - slow);
     MOVE.sprint = noSprint ? MOVE.run : this.baseMove.sprint * (1 - slow);
+    MOVE.dodgeDistance = noSprint ? 0 : this.baseMove.dodge * (1 - slow);
   }
 
   // ------------------------------------------------------------------------------------ boss HUD
@@ -632,6 +636,7 @@ export class NpcRenderer implements ClientSystem {
     for (const off of this.offs) off();
     MOVE.run = this.baseMove.run;
     MOVE.sprint = this.baseMove.sprint;
+    MOVE.dodgeDistance = this.baseMove.dodge;
     this.batch.dispose();
     this.particles.dispose();
     this.telegraphs.dispose();

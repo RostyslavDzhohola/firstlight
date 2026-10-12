@@ -55,11 +55,12 @@ export interface ActiveAttack {
   aim: V3 | null;
 }
 
+/** Damage credit per account (Npc.damage is keyed by userId): HP actually removed, last session id. */
 export interface DamageEntry {
   amount: number;
   userId: string;
+  sid: string;
   name: string;
-  party: string;
 }
 
 export interface Npc extends NpcActor {

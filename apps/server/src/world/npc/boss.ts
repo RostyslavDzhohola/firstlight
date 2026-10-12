@@ -16,6 +16,7 @@ import {
   type AttackDef, type BossDef, type BossEventMsg, type NpcAttackMsg, type NpcDef,
 } from "@firstlight/shared/content/npcs";
 import { partyOf } from "../../social/parties.ts";
+import { actorPos, type PlayerActor } from "../actors.ts";
 import { dealDamage } from "../combat.ts";
 import type { V3 } from "../geometry.ts";
 import { cancelAttack, playersInCircle, playersInLine, startAttack, updateAttack } from "./attacks.ts";
@@ -44,9 +45,24 @@ interface Mech {
   length: number;
   width: number;
   cover: CoverState | null;
+  /** Split circles: everyone in the arena when the stamp fell (session ids), held through detonation. */
+  participants?: string[];
+  /** The telegraph clients were sent (replayed to late arrivals with the remaining time). */
+  msg?: NpcAttackMsg;
 }
 
 const BOSS_MSG_RADIUS = 220;
+/** Live summons per boss at most (Court Summons / Collector Drones stop when the cap is reached). */
+const MAX_SUMMONS = 4;
+/** Lair-state snapshots go to players who come within this distance of the arena (and on request). */
+const SNAPSHOT_RADIUS = 260;
+
+/** Weak-point volumes in the boss's local frame (x right, y up, z forward), exposed only in their window. */
+const WEAK_VOLUMES: Record<string, { c: V3; r: number }> = {
+  tidewrath: { c: [0, 2.1, 3.3], r: 1.4 }, // chest vent, open while Moored
+  the_receiver: { c: [0, 9.6, -1.5], r: 1.9 }, // rear reactor hatch, open while kneeling (Asset Freeze / crane arm)
+  hollow_king: { c: [0, 2.75, 0.3], r: 0.9 }, // rib cage, open 3 s after a pillar lands on him
+};
 
 export class BossController {
   readonly sys: NpcSystem;
@@ -68,8 +84,12 @@ export class BossController {
   staggerUntil = 0;
   held = [false, false];
   holdMs = 0;
+  /** Account ids credited for holding a plate as a window opened / standing in a split circle. */
   readonly plateHolders = new Set<string>();
   readonly soakers = new Set<string>();
+  /** Sessions that already got the lair snapshot (cleared when they move away or leave). */
+  private readonly synced = new Set<string>();
+  private lastSyncScan = 0;
   readonly cover: CoverState[];
   readonly summons = new Set<string>();
   private emptySince: number | null = null;
@@ -102,6 +122,10 @@ export class BossController {
     }
     const near = this.sys.nearestLive(this.arena.centre);
     if (near <= NPC_TUNING.bossSpawnRadius) this.lastNearAt = now;
+    if (now - this.lastSyncScan >= 500) {
+      this.lastSyncScan = now;
+      this.syncNewcomers();
+    }
     if (this.status === "dead") {
       if (now >= this.respawnAt) {
         this.status = "dormant";
@@ -140,6 +164,9 @@ export class BossController {
   private spawn(now: number) {
     const n = this.sys.createNpc(this.defIndex, this.def.level, this.arena.home, now, { boss: true, roam: this.arena.roam });
     n.facing = this.arena.homeFacing;
+    // Boss-specific weak point and multiplier (content §4), not the generic headshot rule.
+    n.weakPoint = (o, d, t) => this.weakPoint(n, o, d, t);
+    n.weakMult = this.def.plates?.weakMult ?? 1.5;
     this.npc = n;
     this.status = "alive";
     this.resetState(n, now);
@@ -225,6 +252,48 @@ export class BossController {
     // Heard within 120 m of the boss (content §4.1); subtitles as "NAME: line" on the client.
     const at = this.npc?.pos ?? this.arena.centre;
     this.sys.sendNear(at, 120 + this.arena.radius, "boss", { type: "voice", boss: this.def.id, id: this.npc?.id ?? "", name: this.npcDef.name, line } satisfies BossEventMsg);
+  }
+
+  // ------------------------------------------------------------------------------------ late joiners
+
+  /** Players who come near the lair (or just joined) get the current lair state once. */
+  private syncNewcomers() {
+    for (const p of this.sys.world.connected()) {
+      const d = dist(actorPos(p), this.arena.centre);
+      if (d <= SNAPSHOT_RADIUS && !this.synced.has(p.id)) this.sendSnapshot(p.id);
+      else if (d > SNAPSHOT_RADIUS + 60) this.synced.delete(p.id);
+    }
+  }
+
+  /** Lair snapshot: broken cover, plate state, weak window, phase and HP scaling. */
+  sendSnapshot(sessionId: string) {
+    const p = this.sys.world.playerById(sessionId);
+    if (!p) return;
+    this.synced.add(sessionId);
+    const now = this.sys.world.now();
+    const n = this.npc;
+    const open = now < this.windowUntil;
+    this.sys.world.send(p, "boss", {
+      type: "snapshot",
+      boss: this.def.id,
+      id: n?.id ?? "",
+      phase: this.phase,
+      engaged: this.count,
+      hp: n?.state.hp ?? 0,
+      maxHp: n?.state.maxHp ?? 0,
+      broken: this.cover.filter((c) => c.broken).map((c) => c.def.id),
+      windowMs: open ? this.windowUntil - now : 0,
+      held: this.held.map((h) => +h),
+      progress: this.def.plates ? Math.min(1, this.holdMs / (this.def.plates.hold * 1000)) : 0,
+      dark: !open && now < this.darkUntil ? Math.ceil((this.darkUntil - now) / 1000) : 0,
+      pts: this.arena.plates.flat(),
+    } satisfies BossEventMsg);
+    // Mechanics already counting down (split circles, surges, summons, toppling cover).
+    for (const m of this.mechs) if (m.msg && m.at > now) this.sys.world.send(p, "npcAtk", { ...m.msg, ms: Math.round(m.at - now) });
+  }
+
+  forget(sessionId: string) {
+    this.synced.delete(sessionId);
   }
 
   // ------------------------------------------------------------------------------------ engagement, HP, phases
@@ -314,7 +383,10 @@ export class BossController {
     else if (this.held[0] && this.held[1]) {
       this.holdMs += dt * 1000;
       if (this.holdMs >= pd.hold * 1000) {
-        for (const h of holders) for (const id of h) this.plateHolders.add(id);
+        for (const h of holders) for (const id of h) {
+          const p = this.sys.world.playerById(id);
+          if (p) this.plateHolders.add(p.identity.userId);
+        }
         this.openWindow(n, now, pd.window * 1000, true);
       }
     } else this.holdMs = 0;
@@ -345,15 +417,31 @@ export class BossController {
 
   // ------------------------------------------------------------------------------------ damage
 
-  mitigate(n: Npc, amount: number, weak: boolean): number {
+  /** Armour outside the weak window; weak-point hits are already multiplied by combat (weakMult). */
+  mitigate(n: Npc, amount: number, _weak: boolean): number {
     if (n.dead || n.state.flags & NF.INVULN) return 0;
+    const open = this.sys.world.now() < this.windowUntil;
+    return amount * (open ? 1 : (this.npcDef.armour ?? 1));
+  }
+
+  /**
+   * Does a ray that hit the boss's capsule at distance `t` pass through its exposed weak point
+   * (chest vent / rib cage / reactor hatch)? The capsule is coarse, so the ray is tested against the
+   * weak-point sphere itself, near the capsule entry (not through the whole body).
+   */
+  weakPoint(n: Npc, o: V3, d: V3, t: number): boolean {
     const now = this.sys.world.now();
-    const open = now < this.windowUntil;
-    let m = open ? 1 : (this.npcDef.armour ?? 1);
-    // The weak point (chest vent / reactor hatch) only exists while the window is open.
-    if (this.def.plates && !open && weak) m /= 1.5;
-    if (now < this.weakUntil) m *= 1.5;
-    return amount * m;
+    const exposed = this.def.id === "hollow_king" ? now < this.weakUntil : now < this.windowUntil;
+    const v = WEAK_VOLUMES[this.def.id];
+    if (!exposed || !v) return false;
+    const u = up(n.pos);
+    const f = n.facing;
+    const r = cross(u, f);
+    const c: V3 = add(add(add(n.pos, r, v.c[0]), u, v.c[1]), f, v.c[2]);
+    const s = dot(sub(c, o), d); // closest approach along the ray
+    if (s < t - 1 || s > t + n.radius * 2) return false;
+    const q = add(o, d, s);
+    return dot(sub(q, c), sub(q, c)) <= v.r * v.r;
   }
 
   onDamaged(n: Npc, _amount: number, by: unknown) {
@@ -368,18 +456,20 @@ export class BossController {
     this.engaged = false;
     this.mechs = [];
     this.clearSummons();
+    // Contributors by account: ≥ 50% of an equal damage share, held a plate as a window opened, or
+    // stood in a split circle; then their parties (partyOf), so a fallen contributor's party still earns.
     const share = n.state.maxHp / Math.max(1, this.count);
-    const present = this.sys.live.filter((lp) => flatDist(this.arena.centre, lp.pos) <= this.arena.radius + 5);
-    const eligible = new Set<string>();
-    for (const lp of present) {
-      const dmg = n.damage.get(lp.a.id)?.amount ?? 0;
-      if (dmg >= 0.5 * share || this.plateHolders.has(lp.a.id) || this.soakers.has(lp.a.id)) eligible.add(lp.a.id);
-    }
-    // Parties share boss credit (social lane: partyOf(userId) → member account ids, self included).
+    const contributors = new Set<string>([...this.plateHolders, ...this.soakers]);
+    for (const e of n.damage.values()) if (e.amount >= 0.5 * share) contributors.add(e.userId);
     const credited = new Set<string>();
-    for (const lp of present) if (eligible.has(lp.a.id)) for (const uid of partyOf(lp.a.identity.userId)) credited.add(uid);
-    for (const lp of present) if (credited.has(lp.a.identity.userId)) eligible.add(lp.a.id);
-    const winners = present.filter((lp) => eligible.has(lp.a.id)).map((lp) => lp.a);
+    for (const uid of contributors) for (const m of partyOf(uid)) credited.add(m);
+    // Recipients: connected, alive, inside the arena boundary right now.
+    const winners: PlayerActor[] = [];
+    for (const p of this.sys.world.connected()) {
+      if (p.dead || p.state.hp <= 0) continue;
+      if (flatDist(this.arena.centre, actorPos(p)) > this.arena.radius) continue;
+      if (credited.has(p.identity.userId)) winners.push(p);
+    }
     for (const p of winners) {
       const loot = bossLoot(this.sys, this.def, p);
       this.sys.world.send(p, "npcKill", { id: n.id, kind: n.defIndex, xp: loot.xp, coins: loot.coins });
@@ -522,7 +612,7 @@ export class BossController {
         at.nextTickAt += (a.interval ?? 0.5) * 1000;
         for (const lp of playersInCircle(this.sys, c, a.radius ?? 8, 0, 6)) {
           this.sys.hitPlayer(n, lp.a, attackDamage(a, n.level), { fromDir: sub(c, lp.pos) });
-          this.sys.world.send(lp.a, "npcPull", { x: c[0], y: c[1], z: c[2], speed: a.speed ?? 2, ms: (a.interval ?? 0.5) * 1000 + 100 });
+          this.sys.pullPlayer(lp.a, c, a.speed ?? 2, (a.interval ?? 0.5) * 1000 + 100);
         }
       }
     } else if (a.shape === "beam") {
@@ -598,7 +688,7 @@ export class BossController {
       if (!pool.length) return false;
       const victim = pool[Math.floor(Math.random() * pool.length)]!;
       const c = this.groundAt(victim.pos);
-      this.mechs.push({ ...base, kind: "split", centre: c });
+      this.mechs.push({ ...base, kind: "split", centre: c, participants: this.inArena.map((lp) => lp.a.id) });
       this.sendTelegraph(n, a, c, n.facing, ms, { r: a.radius ?? 4 });
       this.event({ type: "mechanic", mech: a.id, pts: [...c], r: a.radius, ms });
       return true;
@@ -627,6 +717,8 @@ export class BossController {
   private sendTelegraph(n: Npc, a: AttackDef, c: V3, dir: V3, ms: number, extra: Partial<NpcAttackMsg>) {
     const msg: NpcAttackMsg = { id: n.id, a: this.npcDef.attacks.indexOf(a), sh: SHAPE_CODE[a.shape], ms: Math.round(ms), x: c[0], y: c[1], z: c[2], dx: dir[0], dy: dir[1], dz: dir[2], r: a.radius ?? 4, w: 0, l: 0, ang: 0, c: a.shape === "split" || a.shape === "raise" ? 4 : 2, ...extra };
     this.sys.sendNear(this.arena.centre, BOSS_MSG_RADIUS, "npcAtk", msg);
+    const last = this.mechs[this.mechs.length - 1];
+    if (last && !last.msg) last.msg = msg;
   }
 
   private runMechs(n: Npc, now: number) {
@@ -643,10 +735,17 @@ export class BossController {
       case "split": {
         const total = a ? attackDamage(a, n.level) : 0;
         const inside = playersInCircle(this.sys, m.centre, m.radius, 0, 4);
-        const victims = inside.length ? inside : this.inArena.filter((lp) => !lp.untouchable);
+        let victims: PlayerActor[];
+        if (inside.length) victims = inside.map((lp) => lp.a);
+        else {
+          // Empty circle: everyone who was in the arena when it was stamped takes it, wherever they
+          // went (running out, or closing the tab, doesn't dodge the curse), plus anyone in the arena now.
+          const ids = new Set([...(m.participants ?? []), ...this.inArena.filter((lp) => !lp.untouchable).map((lp) => lp.a.id)]);
+          victims = [...this.sys.world.players()].filter((p) => ids.has(p.id) && !p.dead);
+        }
         const each = inside.length ? total / inside.length : total;
-        for (const lp of inside) this.soakers.add(lp.a.id);
-        for (const lp of victims) this.sys.hitPlayer(n, lp.a, each, { trueDamage: true });
+        for (const lp of inside) this.soakers.add(lp.a.identity.userId);
+        for (const p of victims) this.sys.hitPlayer(n, p, each, { trueDamage: true });
         this.event({ type: "mechanicEnd", mech: a?.id ?? "split", pts: [...m.centre], r: m.radius, engaged: inside.length });
         break;
       }
@@ -674,7 +773,9 @@ export class BossController {
       case "raise": {
         if (!a?.summon) break;
         const idx = NPC_INDEX.get(a.summon)!;
+        for (const id of [...this.summons]) if (!this.sys.npcs.has(id) || this.sys.npcs.get(id)!.dead) this.summons.delete(id);
         for (const p of m.points) {
+          if (this.summons.size >= MAX_SUMMONS) break;
           const s = this.sys.createNpc(idx, a.summonLevel ?? n.level, p, now, { roam: this.arena.radius, summoner: n.id });
           s.anchor = this.arena.centre;
           this.summons.add(s.id);
@@ -773,8 +874,8 @@ export class BossController {
     const length = crane ? 28 : c.def.height;
     const width = crane ? 3 : 2.5;
     const ms = crane ? 1200 : 1000;
-    this.mechs.push({ kind: "topple", atk: null, at: now + ms, centre: c.def.pos, points: [], dir, radius: 0, length, width, cover: c });
     const msg: NpcAttackMsg = { id: n.id, a: -2, sh: SHAPE_CODE.line, ms, x: c.def.pos[0], y: c.def.pos[1], z: c.def.pos[2], dx: dir[0], dy: dir[1], dz: dir[2], r: width / 2, w: width, l: length, ang: 0, c: 0 };
+    this.mechs.push({ kind: "topple", atk: null, at: now + ms, centre: c.def.pos, points: [], dir, radius: 0, length, width, cover: c, msg });
     this.sys.sendNear(this.arena.centre, BOSS_MSG_RADIUS, "npcAtk", msg);
   }
 

@@ -38,6 +38,14 @@ export class ArenaView {
       this.windowUntil = m.ms ? now + m.ms : 0;
     } else if (m.type === "mechanic" && m.mech === "cover" && m.pts) {
       this.broken.add(m.pts[0]!);
+    } else if (m.type === "snapshot") {
+      // Late joiners / players arriving at the lair: the current state, not the default.
+      this.broken.clear();
+      for (const id of m.broken ?? []) this.broken.add(id);
+      this.windowUntil = m.windowMs ? now + m.windowMs : 0;
+      this.held = m.held ?? [0, 0];
+      this.progress = m.progress ?? 0;
+      this.darkUntil = m.dark ? now + m.dark * 1000 : 0;
     } else if (m.type === "reset" || m.type === "respawn") {
       this.broken.clear();
       this.windowUntil = 0;
