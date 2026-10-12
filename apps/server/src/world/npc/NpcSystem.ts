@@ -534,7 +534,10 @@ export class NpcSystem implements RoomSystem {
       }
     }
     // Contact: an NPC that just struck its target can reach it (brain.ts unreachable timer).
-    if (n && n.target === p) n.unreachSince = undefined;
+    if (n && n.target === p) {
+      n.unreachSince = undefined;
+      n.unreachBy = undefined;
+    }
     let dmg = amount;
     if (n && !opts.trueDamage) {
       if (n.state.flags & NF.BUFFED) dmg *= 1.15;

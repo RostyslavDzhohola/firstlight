@@ -136,11 +136,20 @@ function perceive(sys: NpcSystem, n: Npc, now: number): PlayerActor | null {
 /** Take a target; pack mates within 15 m share it. Wolves howl first (1.5 s). */
 export function aggro(sys: NpcSystem, n: Npc, p: PlayerActor, now: number, share: boolean) {
   if (n.dead || n.mode === MODE.EVADE) return;
+  // Woken again by the target it already gave up on, still out of reach: give up again at once
+  // (no howl, no fresh window for a pad shooter; F12 final Opus SF9).
+  if (n.unreachBy?.id === p.id && now - n.unreachBy.since >= NPC_TUNING.unreachableMs) {
+    const tp = actorPos(p);
+    if (outOfReach(sys, n, tp, flatDist(n.pos, tp))) {
+      startEvade(sys, n, now);
+      return;
+    }
+  }
   const calmBefore = n.mode === MODE.IDLE || n.mode === MODE.WANDER || n.mode === MODE.RETURN || n.mode === MODE.FLEE;
   n.target = p;
   n.lastSeenAt = now;
   n.lastLosAt = now;
-  n.unreachSince = undefined;
+  n.unreachSince = n.unreachBy?.id === p.id ? n.unreachBy.since : undefined;
   n.state.flags |= NF.AGGRO;
   if (calmBefore) {
     n.anchor = n.roam > 30 ? [n.pos[0], n.pos[1], n.pos[2]] : n.home;
@@ -190,10 +199,14 @@ function chase(sys: NpcSystem, n: Npc, now: number, dt: number) {
   if (outOfReach(sys, n, tp, d)) {
     n.unreachSince ??= now;
     if (now - n.unreachSince >= NPC_TUNING.unreachableMs) {
+      n.unreachBy = { id: t.id, since: n.unreachSince };
       startEvade(sys, n, now);
       return;
     }
-  } else n.unreachSince = undefined;
+  } else {
+    n.unreachSince = undefined;
+    n.unreachBy = undefined;
+  }
   if (def.fleeBelow && n.state.hp < n.state.maxHp * def.fleeBelow && sys.mates(n).length < 2) {
     startFlee(sys, n, tp, now, 6000);
     n.target = null;
