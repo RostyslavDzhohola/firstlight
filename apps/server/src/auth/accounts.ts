@@ -140,8 +140,10 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
           () => {},
         );
     },
-    reserveOtp: (email) => {
-      const r = reserveOtpSend(db, hashEmail(email), { perEmailPerHour: cfg.otpPerEmailPerHour, perDay: cfg.otpDailyBudget });
+    reserveOtp: (email, userId) => {
+      // Public (queued) sends count under their own per-address key (F12 final review S6).
+      const key = hashEmail(userId ? email : `public:${email}`);
+      const r = reserveOtpSend(db, key, { perEmailPerHour: cfg.otpPerEmailPerHour, perDay: cfg.otpDailyBudget });
       if (!r.ok) console.warn(`otp send refused: ${r.reason} budget`);
       return r;
     },
