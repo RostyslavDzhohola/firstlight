@@ -61,6 +61,9 @@ export class CombatClient {
   attach() {
     const room = this.game.net.room!;
     const me = room.sessionId;
+    // Body systems are created after the schema player arrives. They may use a `you` received
+    // during that wait, but must never mistake the previous room's HUD state for this room's.
+    this.hud.you = null;
     room.onMessage("you", (m: YouPlus) => {
       const prevLevel = this.hud.you?.level ?? m.level;
       this.hud.setYou(m);

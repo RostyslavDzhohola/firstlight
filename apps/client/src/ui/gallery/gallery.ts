@@ -35,7 +35,7 @@ import { INVENTORY_HTML, ONBOARDING_HTML } from "./kitExamples.ts";
 const SCREENS = [
   "landing", "loading", "loading-compact", "charpick", "charpick-rebirth", "hud", "hud-oversight", "hud-states",
   "death", "death-player", "death-party", "death-world", "menu", "menu-logout", "settings",
-  "players", "compass", "wheel", "shop", "journal", "invite", "removed", "kit-inventory", "kit-onboarding", "inventory", "inventory-drag", "onboarding", "onboarding-attack", "onboarding-portal", "onboarding-done", "save", "save-code", "save-saved", "save-busy", "signin", "name", "notice",
+  "players", "compass", "wheel", "shop", "journal", "invite", "removed", "kit-inventory", "kit-onboarding", "inventory", "inventory-drag", "onboarding", "onboarding-attack", "onboarding-loot", "onboarding-portal", "onboarding-done", "save", "save-code", "save-saved", "save-busy", "signin", "name", "notice",
 ] as const;
 type Screen = (typeof SCREENS)[number];
 
@@ -310,6 +310,7 @@ async function run() {
     }
     case "onboarding":
     case "onboarding-attack":
+    case "onboarding-loot":
     case "onboarding-portal":
     case "onboarding-done": {
       // The live onboarding HUD: step 4 (sprint, bar half full), the dummies with their callout, the
@@ -319,13 +320,14 @@ async function run() {
       hud.setIdentity("Wren_07", 3, 0);
       hud.setYou(you({ level: 1, xp: 20, xpToNext: 50, coins: 0, hotbar: [{ id: "carbine", tier: 1, qty: 1, mag: 24 }, null, null, null] }));
       hud.setHp(100, 100);
-      const onb = new OnboardingHud(hud.root.querySelector<HTMLElement>(".fl-hud__layer")!, () => {}, "https://github.com/example/firstlight");
+      const onb = new OnboardingHud(hud.root.querySelector<HTMLElement>(".fl-hud__layer")!, () => {}, "https://github.com/example/firstlight", { expanded: q.has("expanded"), onExpanded: () => {} });
       const steps = new OnboardingSteps();
       const sample = { dt: 0, moved: 0, lookRad: 0, anim: ANIM.IDLE as number, dummiesDown: 0, pressed: new Set<string>(), phrased: false, voiceOn: false, atPortal: false, inPortal: false };
       for (const id of ["move", "look", "jump"] as const) steps.complete(id);
       steps.observe({ ...sample, dt: 1.1, anim: ANIM.SPRINT });
       if (screen !== "onboarding") for (const id of ["sprint", "dodge"] as const) steps.complete(id);
       if (screen === "onboarding-attack") steps.observe({ ...sample, dummiesDown: 1 });
+      if (screen === "onboarding-loot") for (const id of ["attack", "switch"] as const) steps.complete(id);
       if (screen === "onboarding-portal") for (const id of ["attack", "switch", "pickup", "map", "wheel", "voice"] as const) steps.complete(id);
       onb.render(steps, screen === "onboarding-portal");
       if (screen === "onboarding-attack") onb.setCallout(innerWidth * 0.41, innerHeight * 0.42, "Training dummies · 1 / 3 down", "10 XP each. Three hits knock one down.");
