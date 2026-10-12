@@ -108,6 +108,27 @@ describe("day/night", () => {
     expect(lum(atmo.horizon.value)).toBeGreaterThan(0.005);
   });
 
+  it("the key light hands over between sun and moon without a jump", () => {
+    for (const b of ["arcadia", "hollowmere", "meridian"] as const) {
+      const { env, rig } = setup(b);
+      env.weatherOverride = { weather: "clear", intensity: 0 };
+      let prev: number | null = null;
+      let moon: boolean | null = null;
+      let maxStep = 0;
+      let switches = 0;
+      for (let i = 0; i <= 3000; i++) {
+        env.timeOverride = (0.7 + i * 0.0002) % 1; // sunset … midnight … sunrise
+        env.update(1 / 60);
+        if (prev !== null) maxStep = Math.max(maxStep, Math.abs(rig.sun.intensity - prev));
+        if (moon !== null && moon !== rig.sky.keyIsMoon) switches++;
+        prev = rig.sun.intensity;
+        moon = rig.sky.keyIsMoon;
+      }
+      expect(switches, b).toBe(2);
+      expect(maxStep, b).toBeLessThan(0.03);
+    }
+  });
+
   it("noon is daylight: sun key, no stars", () => {
     const { env, rig, look } = setup("arcadia");
     env.timeOverride = 0.5;

@@ -349,8 +349,10 @@ export class Environment {
     sk.sunAz = az;
     sk.keyIsMoon = night > 0.4;
     this.c1.copy(C.sun).lerp(DUSK_SUN, dusk * 0.8);
-    const sunI = look.sunIntensity * sunUp * (1 - cloud * 0.75);
-    const moonI = look.night.moonIntensity * night * (1 - cloud * 0.5);
+    // The key switches to the moon at night 0.4: the sun has faded to zero by then and the moon
+    // ramps in from there, so the key light never jumps at sunset or sunrise.
+    const sunI = look.sunIntensity * sunUp * (1 - cloud * 0.75) * (1 - smooth(0.2, 0.4, night));
+    const moonI = look.night.moonIntensity * smooth(0.4, 0.9, night) * (1 - cloud * 0.5);
     if (sk.keyIsMoon) rig.setKey(C.moon, moonI);
     else rig.setKey(this.c1, sunI);
     this.c1.copy(C.hemiSky).lerp(C.nightHemiSky, night);
