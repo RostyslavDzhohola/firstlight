@@ -70,7 +70,7 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 | F9 screenshot share | ✅ | browser E2E T7 |
 | F10 M1 ≥ 60 fps Medium | ✅* | ?bench=g1 59.9 fps p50, p95 17.6 ms (T3 Chromium, not plugged-in Chrome) |
 | F11 Low on weak profile | ✅* | `?bench=g1&tier=low&cpuslow=4`: 51.3 fps p50, p95 29.8 ms, 0 shader builds (D29 emulation) |
-| F12 three-model review | ❌→🛠 | bb54dc3: Codex Sol (7 blockers) and Sonnet 5.5 (2 blockers) declined (docs/reviews/2026-10-12-f12-*); Opus 5.5 (743d651) declined too: 2 more blockers (voice-block DoS, boss respawn reset); fixes in lanes below; docs lane merged |
+| F12 three-model review | 🛠→🔎 | Round 1 (bb54dc3/743d651): Codex 7, Sonnet 2, Opus 2 blockers. All fixed in 9 lanes, each Codex-reviewed (docs/reviews/2026-10-12-f12-*); merged at 668ec82 (deployed 08:42Z; 902 tests). Final three-model review of 668ec82 running |
 | F13 photo mode + 5 scenes | ✅ | browser E2E T8; `stage <n>` + docs/staged-scenes.md |
 
 ## Lanes (who owns what right now)
@@ -88,11 +88,11 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 | UI port (design verdict) | MERGED 9f6dc14 (deployed) | — |
 | Destruction (§6.9) | MERGED bb54dc3 (deployed) | — |
 | Weather + day/night (M11 #3–4) | MERGED 743d651 (deployed 06:39Z) | — |
-| F12 server core (Codex B1–B6, S2/S3/S9/S10/S12/S14) | Opus sub-agent | ../fl-wt-core (lane/f12-core) |
-| F12 content (eggs, items, Patchkit, Prism Bubble, Hollow King, Associates look) | Opus sub-agent | ../fl-wt-data (lane/f12-data) |
+| F12 server core (Codex B1–B6, S2/S3/S9/S10/S12/S14) | MERGED 668ec82 (Codex round 1 fixed; migration 5) | — |
+| F12 content (eggs, items, Patchkit, Prism Bubble, Hollow King, Associates look) | MERGED c57d406 (Codex round 1 fixed; migration 4) | — |
 | F12 client robustness (S4–S8, N1, Opus 13–14) | MERGED b020746 (Codex round 1 fixed) | — |
 | F12 docs + repo hygiene | MERGED 8535ae7 | — |
-| F12 inventory panel + onboarding | Codex round 1 fixed; waits for the data lane (bubble test) | ../fl-wt-inv (lane/f12-ui) |
+| F12 inventory panel + onboarding | MERGED 1c30f4e (Codex round 1 fixed; live: onboarding seen on a fresh guest) | — |
 | F12 social/voice (Opus B1, block/party, reports, OTP, guest pruning) | MERGED c45f556 (Codex round 1 fixed) | — |
 | F12 NPC/boss (Opus B2 respawn persistence, evade, arena scaling/cover, NPC LOS) | MERGED f787f37 (Codex round 1 fixed; migration 3 = copy_state) | — |
 | F12 weather/sky (override broadcast, stage sky, Hollowmere look, nits) | MERGED 5e9d5ce (Codex round 1 fixed) | — |
