@@ -21,6 +21,7 @@ const USE_DENIED: Record<string, string> = {
   busy: "Already patching",
   "out of reach": "Too far — get within 4 m",
   "no target": "Nobody to patch there",
+  "no line of sight": "Something's in the way",
 };
 
 export class CombatClient {
@@ -68,7 +69,7 @@ export class CombatClient {
       this.game.self?.trigger("attack");
     });
     room.onMessage("channelEnd", (m: { ok: boolean; reason?: string }) => {
-      if (!m.ok) this.hud.toast(m.reason === "interrupted" ? "Patchkit interrupted — kit kept" : "Patchkit cancelled — kit kept", "warn");
+      if (!m.ok) this.hud.toast(m.reason === "interrupted" ? "Patchkit interrupted — kit kept" : m.reason === "out of sight" ? "Lost sight of them — kit kept" : "Patchkit cancelled — kit kept", "warn");
     });
     room.onMessage("bubble", (m: { id: number; x: number; y: number; z: number; r: number; ms: number }) => {
       const at = new THREE.Vector3(m.x, m.y, m.z);
@@ -341,7 +342,13 @@ export class CombatClient {
       if (id === room.sessionId || p.flags & PF.DEAD) return;
       chest.set(p.x, p.y, p.z);
       if (chest.distanceTo(mine) > range + 0.5) return;
-      chest.addScaledVector(_v.copy(chest).normalize(), 1.0).sub(o);
+      chest.addScaledVector(_v.copy(chest).normalize(), 1.0);
+      // Not through the ground (the server also checks cover).
+      const myChest = mine.clone().addScaledVector(mine.clone().normalize(), 1.0);
+      const to = chest.clone().sub(myChest);
+      const len = to.length();
+      if (len > 0.01 && this.rayTerrain(myChest, to.divideScalar(len), len) < len) return;
+      chest.sub(o);
       const t = chest.dot(d);
       if (t <= 0) return;
       const off = chest.addScaledVector(d, -t).length();

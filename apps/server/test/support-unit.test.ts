@@ -11,7 +11,8 @@ import { DestructionSystem } from "../src/world/destruction.ts";
 import type { BodyRoom } from "../src/world/BodyRoom.ts";
 import type { V3 } from "../src/world/geometry.ts";
 import { spawnBolt, stepNpcProjectiles } from "../src/world/npc/attacks.ts";
-import { BubbleField, segmentShellT } from "../src/world/support.ts";
+import { BubbleField, segmentShellT, SupportSystem } from "../src/world/support.ts";
+import type { BreakableHost } from "../src/world/combat.ts";
 import { fakeWorld, type FakeWorld } from "./npcWorld.ts";
 
 /** Ground point `metres` along a fixed tangent from Arcadia's main pad. */
@@ -283,5 +284,55 @@ describe("splash and shells (review B2, S3, S7)", () => {
     boss.runActive(n, at as never, w.clock.t, 0.05); // halfway through the sweep the beam points at the player
     expect(p.state.hp).toBe(290);
     expect(shell.hp).toBe(250);
+  });
+});
+
+/** A support system on a fake world: players get a recording client. */
+function supportOn(w: FakeWorld) {
+  const sent: { to: string; type: string; msg: any }[] = [];
+  for (const p of w.players.values()) (p as { client: unknown }).client = { sessionId: p.id, send: (type: string, msg: unknown) => sent.push({ to: p.id, type, msg }) };
+  const room = { actors: w.players, host: w.world.host, onMessage: () => {}, broadcastNear: () => {}, equip: () => {} } as unknown as BodyRoom;
+  return { sys: new SupportSystem(room), sent };
+}
+
+/** Spherical cover props (stand-ins for a wall). */
+function sphereCover(spheres: { c: V3; r: number }[]): BreakableHost {
+  return {
+    raycast(o, d, maxT) {
+      let best: { index: number; t: number } | null = null;
+      spheres.forEach((sp, index) => {
+        const t = segmentShellT(o, d, maxT, sp.c, sp.r);
+        if (t !== null && (!best || t < best.t)) best = { index, t };
+      });
+      return best;
+    },
+    damage() {},
+    splash() {},
+    arc() {},
+  };
+}
+
+describe("Patchkit line of sight (review S9)", () => {
+  it("won't start on an ally behind cover, and a channel ends if cover comes between", () => {
+    const w = fakeWorld("arcadia");
+    const medic = w.addPlayer("medic", at(w, 84), 1);
+    const ally = w.addPlayer("ally", at(w, 87), 1);
+    ally.state.hp = 40;
+    medic.char.hotbar[1] = { id: "patchkit", tier: 1, qty: 2 };
+    const { sys, sent } = supportOn(w);
+    const wall = { c: lift(at(w, 85.5), 1.0), r: 0.6 };
+    w.world.host.props = sphereCover([wall]);
+    sys.use(medic, 1, medic.char.hotbar[1]!, ally.id);
+    expect(sent.at(-1)).toMatchObject({ to: "medic", type: "denied", msg: { reason: "no line of sight" } });
+    // In the open the channel starts; cover appearing before it completes cancels it (kit kept).
+    w.world.host.props = undefined;
+    sys.use(medic, 1, medic.char.hotbar[1]!, ally.id);
+    expect(sent.at(-1)).toMatchObject({ type: "channel" });
+    w.world.host.props = sphereCover([wall]);
+    w.clock.t += 1100;
+    sys.tick(50, Date.now() + 1100);
+    expect(sent.at(-1)).toMatchObject({ type: "channelEnd", msg: { ok: false, reason: "out of sight" } });
+    expect(medic.char.hotbar[1]!.qty).toBe(2);
+    expect(ally.heals).toHaveLength(0);
   });
 });

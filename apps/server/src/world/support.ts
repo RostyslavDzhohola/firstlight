@@ -17,6 +17,7 @@ import { z } from "zod";
 import type { InvItem } from "@firstlight/shared/net/protocol";
 import { WEAPON_BY_ID } from "@firstlight/shared/content/weapons";
 import { actorPos, type PlayerActor } from "./actors.ts";
+import { lineOfSight } from "./combat.ts";
 import type { BodyRoom } from "./BodyRoom.ts";
 import { onGameEvent } from "./events.ts";
 import type { V3 } from "./geometry.ts";
@@ -221,11 +222,17 @@ export class SupportSystem implements RoomSystem {
       const t = this.room.actors.get(targetId);
       if (!t || t.dead) return this.deny(a, "no target");
       if (!this.inReach(a, t)) return this.deny(a, "out of reach");
+      if (!this.inSight(a, t)) return this.deny(a, "no line of sight");
       target = t;
     }
     const ms = Math.round((tier.channel ?? 1) * 1000);
     this.channels.set(a.id, { slot, tier: item.tier, target: target.id, endsAt: now + ms });
     a.client.send("channel", { kind: "patchkit", ms, target: target.id });
+  }
+
+  /** Nothing solid (terrain, intact cover) between the two players' chests (F12 review S9). */
+  private inSight(a: PlayerActor, t: PlayerActor): boolean {
+    return lineOfSight(this.room.host, chestOf(actorPos(a)), chestOf(actorPos(t)));
   }
 
   private inReach(a: PlayerActor, t: PlayerActor): boolean {
@@ -243,6 +250,7 @@ export class SupportSystem implements RoomSystem {
     const target = ch.target === a.id ? a : this.room.actors.get(ch.target);
     if (!target || target.dead) return this.end(a, false, "no target");
     if (target !== a && !this.inReach(a, target)) return this.end(a, false, "out of reach");
+    if (target !== a && !this.inSight(a, target)) return this.end(a, false, "out of sight");
     const tier = WEAPON_BY_ID.get("patchkit")!.tiers[ch.tier - 1]!;
     const over = tier.duration ?? 2;
     const amount = (tier.heal ?? 0.3) * target.state.maxHp;
