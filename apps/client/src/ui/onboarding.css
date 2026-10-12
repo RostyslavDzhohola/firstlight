@@ -10,7 +10,7 @@
 .fl-onb .fl-callout[hidden] { display: none; }
 
 /* Live HUD and gallery share the compact variant; the static kit example keeps its original layout. */
-.fl-onb--compact .fl-onb__widget { position: absolute; top: calc(7 * var(--u)); left: calc(1.5 * var(--u)); width: min(calc(20 * var(--u)), calc(100vw - 3 * var(--u))); max-height: calc(100dvh - 16 * var(--u)); overflow-y: auto; display: flex; flex-direction: column; gap: calc(.45 * var(--u)); scrollbar-width: thin; }
+.fl-onb--compact .fl-onb__widget { position: absolute; top: calc(7 * var(--u)); left: calc(1.5 * var(--u)); width: min(calc(20 * var(--u)), calc(100vw - 3 * var(--u))); max-height: calc(100dvh - 19 * var(--u)); overflow-y: auto; display: flex; flex-direction: column; gap: calc(.45 * var(--u)); scrollbar-width: thin; }
 .fl-onb--compact .fl-onb__step { position: static; order: 0; transform: none; width: 100%; padding: calc(.8 * var(--u)) var(--u); gap: calc(.5 * var(--u)); }
 .fl-onb--compact .fl-onb__step h2 { font-size: var(--t-lg); letter-spacing: .08em; }
 .fl-onb--compact .fl-onb__keys { flex-wrap: wrap; gap: calc(.4 * var(--u)); }

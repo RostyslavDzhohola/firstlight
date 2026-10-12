@@ -1,7 +1,7 @@
 // Per-body terrain colours (linear RGB) chosen from height above water and flatness.
 // Film rule 1: each planet is saturated around one key hue plus one accent.
 
-import type { BodyId } from "@firstlight/shared";
+import { chordMetres, type BodyId, type Dir } from "@firstlight/shared";
 
 type RGB = [number, number, number];
 
@@ -92,4 +92,11 @@ export function grassWeight(p: TerrainPalette, height: number, water: number, fl
   let w = (1 - rockiness) * (1 - sand);
   if (h > p.snowLine - 15) w *= 1 - smooth(p.snowLine - 15, p.snowLine - 5, h);
   return Math.max(0, Math.min(1, w * p.grassDensity * (0.75 + 0.25 * n)));
+}
+
+/** Landing pads' stone discs are 8.6 m across the base: no grass on them, back to full just past the rim. */
+export function padGrassMask(pads: readonly Dir[], x: number, y: number, z: number, radius: number): number {
+  let m = 1;
+  for (const pad of pads) m *= Math.max(0, Math.min(1, (chordMetres(pad, x, y, z, radius) - 9.2) / 2));
+  return m;
 }
