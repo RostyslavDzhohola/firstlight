@@ -8,6 +8,7 @@ import type { Terrain } from "@firstlight/shared";
 import { PF } from "@firstlight/shared/net/schema";
 import { actorPos, mountedAt, positionAgo, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
 import { dist3, HEAD_FROM, inMeleeArc, PLAYER_HEIGHT, PLAYER_RADIUS, rayCapsule, rayTerrain, type V3 } from "./geometry.ts";
+import { splashShield, type BubbleHost } from "./support.ts";
 import { HORSE } from "@firstlight/shared/content/horse";
 
 export const REWIND_MS = 150;
@@ -28,6 +29,8 @@ export interface CombatHost {
   onPropHit?(point: V3, power: "light" | "heavy", amount: number): void;
   /** Breakable props (set by destruction.ts): intact ones stop shots and take damage. */
   props?: BreakableHost;
+  /** Prism Bubbles (set by support.ts): shots, projectiles and splash crossing a shell stop at it. */
+  bubbles?: BubbleHost;
 }
 
 /**
@@ -40,7 +43,8 @@ export interface BreakableHost {
   raycast(o: V3, d: V3, maxT: number): { index: number; t: number } | null;
   /** `by`: the attacking player's session id (credit for the Demolition Crew medal), or null. */
   damage(index: number, amount: number, cls: Destroys, weaponId: string, dir: V3, by: string | null): void;
-  splash(at: V3, radius: number, amount: number, cls: Destroys, weaponId: string, by: string | null, exclude?: number): void;
+  /** `blocked(point)`: a Prism Bubble shell lies between the blast and that prop centre (skip it). */
+  splash(at: V3, radius: number, amount: number, cls: Destroys, weaponId: string, by: string | null, exclude?: number, blocked?: (point: V3) => boolean): void;
   arc(pos: V3, facing: V3, range: number, arcDeg: number, amount: number, cls: Destroys, weaponId: string, by: string | null): void;
 }
 
@@ -120,6 +124,14 @@ function headPos(p: PlayerActor): V3 {
   const [x, y, z] = actorPos(p);
   const l = Math.hypot(x, y, z);
   return [x + (x / l) * 1.6, y + (y / l) * 1.6, z + (z / l) * 1.6];
+}
+
+/** Chest of an actor (splash and line-of-sight tests): 1 m above a player's feet, mid-height for NPCs. */
+function chestOf(a: Actor): V3 {
+  const [x, y, z] = actorPos(a);
+  const l = Math.hypot(x, y, z) || 1;
+  const h = a.kind === "player" ? 1.0 : Math.min(a.height * 0.5, 3);
+  return [x + (x / l) * h, y + (y / l) * h, z + (z / l) * h];
 }
 
 function upOf(v: V3): V3 {
@@ -299,7 +311,7 @@ export function fire(host: CombatHost, p: PlayerActor, msg: FireInput): FireResu
         maxDist: def.range * 1.2,
         pierceLeft: tier.pierce ?? 0,
         hit: new Set([p.id]),
-        fuseAt: def.delivery === "thrown" ? now + (def.fuse ?? 1.6) * 1000 : null,
+        fuseAt: def.delivery === "thrown" ? now + (tier.fuse ?? def.fuse ?? 1.6) * 1000 : null,
         stuck: false,
       };
       projectiles(host).push(pr);
@@ -346,7 +358,14 @@ function hitscan(host: CombatHost, p: PlayerActor, o: V3, d: V3, maxRange: numbe
   // An intact breakable in the way stops the shot and takes it instead (destruction.ts).
   const prop = propOnRay(host, o, d, Math.min(maxRange, terrainT));
   const propT = prop ? prop.t : Infinity, propIdx = prop ? prop.index : -1;
-  const hit = raycastActors(host, o, d, Math.min(maxRange, terrainT, propT), new Set([p.id]), REWIND_MS);
+  // A Prism Bubble shell in the way (either side) takes the shot.
+  const shell = host.bubbles?.cross(o, d, Math.min(maxRange, terrainT, propT)) ?? null;
+  const shellT = shell ? shell.t : Infinity;
+  const hit = raycastActors(host, o, d, Math.min(maxRange, terrainT, propT, shellT), new Set([p.id]), REWIND_MS);
+  if (!hit && shell) {
+    host.bubbles!.absorb(shell.bubble, baseDamage * falloff(shellT, def.range, def.falloffTo, def.falloffMin));
+    return shellT;
+  }
   if (!hit) {
     if (propIdx >= 0) host.props!.damage(propIdx, baseDamage * falloff(propT, def.range, def.falloffTo, def.falloffMin), def.destroys, def.id, d, p.id);
     const endT = propIdx >= 0 ? propT : terrainT;
@@ -364,59 +383,132 @@ function actorFacingFrom(from: V3, target: Actor): V3 {
   return [from[0] - t[0], from[1] - t[1], from[2] - t[2]];
 }
 
+/** Line of sight between two points: no terrain and no intact breakable in the way (shells aside). */
+export function lineOfSight(host: CombatHost, a: V3, b: V3): boolean {
+  const v: V3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const l = Math.hypot(v[0], v[1], v[2]);
+  if (l < 1e-6) return true;
+  const d: V3 = [v[0] / l, v[1] / l, v[2] / l];
+  return rayTerrain(host.terrain, a, d, l, 1) >= l && !propOnRay(host, a, d, l);
+}
+
+/** The first Prism Bubble shell between two points, and where along the line it is. */
+function shellBetween(host: CombatHost, a: V3, b: V3): { bubble: NonNullable<ReturnType<BubbleHost["between"]>>; at: V3 } | null {
+  if (!host.bubbles) return null;
+  const v: V3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const l = Math.hypot(v[0], v[1], v[2]);
+  if (l < 1e-6) return null;
+  const d: V3 = [v[0] / l, v[1] / l, v[2] / l];
+  const hit = host.bubbles.cross(a, d, l);
+  return hit ? { bubble: hit.bubble, at: [a[0] + d[0] * hit.t, a[1] + d[1] * hit.t, a[2] + d[2] * hit.t] } : null;
+}
+
+/**
+ * Stormcoil (content §2.3): the camera ray only picks the first target (generous aim, 0.7 m extra);
+ * the bolt is traced from the caster's head on the server and needs a clear line to it, and every
+ * jump (to the nearest damageable entity within 6 m that it can see, allies included, never twice)
+ * needs a clear line from the previous target (F12 review: it used to trace from the client's origin,
+ * up to 7 m from the head, and jumped through cover). A Prism Bubble shell on the chosen line takes
+ * that bolt or jump and ends the chain.
+ */
 function chain(host: CombatHost, p: PlayerActor, o: V3, d: V3, def: WeaponDef, tier: TierStats, lvl: number) {
   const now = host.now();
-  const terrainT0 = rayTerrain(host.terrain, o, d, def.range, 1.5);
-  // An intact breakable in front of the caster stops the bolt like terrain (destruction.ts).
-  const prop = propOnRay(host, o, d, Math.min(def.range, terrainT0), behind(o, d, headPos(p)));
-  const propIdx = prop ? prop.index : -1;
-  const terrainT = prop ? prop.t : terrainT0;
-  // Generous aim: look for the actor closest to the ray within 1.2 m.
+  const head = headPos(p);
+  const skip = behind(o, d, head);
+  const terrainT = rayTerrain(host.terrain, o, d, skip + def.range, 1.5);
+  const prop = propOnRay(host, o, d, Math.min(skip + def.range, terrainT), skip);
+  const aimEnd = Math.min(skip + def.range, terrainT, prop ? prop.t : Infinity);
+  let dmg = tier.damage * lvl;
+  // First target: closest to the camera ray, in front of the head, within range of the head.
   let first: Actor | null = null;
   let bestT = Infinity;
   for (const a of allActors(host)) {
     if (a.id === p.id || !canHurt(p, a, now)) continue;
     const r = a.kind === "player" ? PLAYER_RADIUS + 0.7 : a.radius + 0.7;
     const h = a.kind === "player" ? PLAYER_HEIGHT : a.height;
-    const hit = rayCapsule(o, d, Math.min(def.range, terrainT), capsuleFeet(a, now, REWIND_MS), r, h);
-    if (hit && hit.t < bestT) {
-      bestT = hit.t;
-      first = a;
-    }
+    const hit = rayCapsule(o, d, aimEnd, capsuleFeet(a, now, REWIND_MS), r, h);
+    if (!hit || hit.t < skip || hit.t >= bestT) continue;
+    if (dist3(head, chestOf(a)) > def.range + 1) continue;
+    bestT = hit.t;
+    first = a;
   }
   const points: V3[] = [];
-  if (first) {
-    const hitSet = new Set<string>([p.id]);
-    let cur: Actor | null = first;
-    let dmg = tier.damage * lvl;
-    for (let j = 0; cur && j <= (tier.jumps ?? 2); j++) {
-      hitSet.add(cur.id);
-      points.push(actorPos(cur));
-      dealDamage(host, p, cur, dmg, false, actorFacingFrom(o, cur));
-      dmg *= 0.7;
-      let next: Actor | null = null;
-      let nd = 6;
-      for (const a of allActors(host)) {
-        if (hitSet.has(a.id) || !canHurt(p, a, now)) continue;
-        const dd = dist3(actorPos(a), actorPos(cur));
-        if (dd <= nd) {
-          nd = dd;
-          next = a;
+  let end: V3;
+  if (first && lineOfSight(host, head, chestOf(first))) {
+    const shell = shellBetween(host, head, chestOf(first));
+    if (shell) {
+      host.bubbles!.absorb(shell.bubble, dmg);
+      end = shell.at;
+    } else {
+      const hitSet = new Set<string>([p.id]);
+      let cur: Actor | null = first;
+      for (let j = 0; cur && j <= (tier.jumps ?? 2); j++) {
+        hitSet.add(cur.id);
+        points.push(actorPos(cur));
+        dealDamage(host, p, cur, dmg, false, actorFacingFrom(j === 0 ? head : points[j - 1]!, cur));
+        dmg *= 0.7;
+        const from = chestOf(cur);
+        let next: Actor | null = null;
+        let nd = 6;
+        for (const a of allActors(host)) {
+          if (hitSet.has(a.id) || !canHurt(p, a, now)) continue;
+          const dd = dist3(actorPos(a), actorPos(cur));
+          if (dd <= nd && lineOfSight(host, from, chestOf(a))) {
+            nd = dd;
+            next = a;
+          }
         }
+        // The jump goes to the nearest visible target; a shell on that line takes it and ends the chain.
+        const shellJ = next ? shellBetween(host, from, chestOf(next)) : null;
+        if (shellJ) {
+          host.bubbles!.absorb(shellJ.bubble, dmg);
+          next = null;
+        }
+        cur = next;
       }
-      cur = next;
+      end = actorPos(first);
     }
+  } else {
+    // No target (or the first is behind cover): the bolt flies from the head toward the aim point
+    // and stops at the first thing in the way; an intact breakable or a bubble shell there takes it.
+    const aim: V3 = first ? chestOf(first) : [o[0] + d[0] * aimEnd, o[1] + d[1] * aimEnd, o[2] + d[2] * aimEnd];
+    const v: V3 = [aim[0] - head[0], aim[1] - head[1], aim[2] - head[2]];
+    const l = Math.hypot(v[0], v[1], v[2]) || 1;
+    const hd: V3 = [v[0] / l, v[1] / l, v[2] / l];
+    const tT = rayTerrain(host.terrain, head, hd, l, 1);
+    const pr = propOnRay(host, head, hd, Math.min(l, tT));
+    const shell = host.bubbles?.cross(head, hd, Math.min(l, tT, pr ? pr.t : Infinity)) ?? null;
+    let t = Math.min(l, tT);
+    if (shell) {
+      t = shell.t;
+      host.bubbles!.absorb(shell.bubble, dmg);
+    } else if (pr) {
+      t = pr.t;
+      host.props!.damage(pr.index, dmg, def.destroys, def.id, hd, p.id);
+    }
+    end = [head[0] + hd[0] * t, head[1] + hd[1] * t, head[2] + hd[2] * t];
+    // Where the bolt ends on something, report it like hitscan does (boss-arena cover listens).
+    const onSomething = t < l - 1e-3 || (!first && aimEnd < skip + def.range);
+    if (!shell && onSomething) host.onPropHit?.(end, def.destroys === "heavy" ? "heavy" : "light", dmg);
   }
-  if (!first && propIdx >= 0) host.props!.damage(propIdx, tier.damage * lvl, def.destroys, def.id, d, p.id);
-  const end: V3 = first ? actorPos(first) : [o[0] + d[0] * Math.min(def.range, terrainT), o[1] + d[1] * Math.min(def.range, terrainT), o[2] + d[2] * Math.min(def.range, terrainT)];
-  // Where the bolt ends on something, report it like hitscan does (boss-arena cover listens).
-  if (!first && terrainT < def.range) host.onPropHit?.(end, def.destroys === "heavy" ? "heavy" : "light", tier.damage * lvl);
-  host.broadcastNear("shot", { by: p.id, weapon: WEAPON_INDEX.get(def.id), ox: o[0], oy: o[1], oz: o[2], dx: d[0], dy: d[1], dz: d[2], hit: end, chain: points }, o, 160);
+  host.broadcastNear("shot", { by: p.id, weapon: WEAPON_INDEX.get(def.id), ox: head[0], oy: head[1], oz: head[2], dx: d[0], dy: d[1], dz: d[2], hit: end, chain: points }, head, 160);
 }
 
 function* allActors(host: CombatHost): Iterable<Actor> {
   yield* host.players();
   yield* host.npcs();
+}
+
+/** Riverstaff swings that hit, in a row (a miss or a pause longer than this resets the count). */
+const STAFF_COMBO_MS = 1500;
+const staffHits = new WeakMap<PlayerActor, { n: number; at: number }>();
+
+/** Riverstaff knockback (content §2.3): only every 3rd hit in a row knocks back. */
+function staffCombo(p: PlayerActor, hit: boolean, now: number): number | undefined {
+  const prev = staffHits.get(p);
+  const n = hit ? (prev && now - prev.at <= STAFF_COMBO_MS ? prev.n : 0) + 1 : 0;
+  staffHits.set(p, { n: n % 3, at: now });
+  return n === 3 ? selectedWeapon(p).tier.knockback : undefined;
 }
 
 export function melee(host: CombatHost, p: PlayerActor, heavy: boolean): FireResult {
@@ -445,7 +537,8 @@ export function melee(host: CombatHost, p: PlayerActor, heavy: boolean): FireRes
   }
   targets.sort((x, y) => x.d - y.d);
   const slam = useHeavy && !!meleeTier.radius;
-  if (!slam) for (const t of targets.slice(0, meleeDef.maxTargets ?? 1)) dealDamage(host, p, t.a, dmg, false, actorFacingFrom(pos, t.a), meleeTier.knockback);
+  const kb = meleeDef.id === "riverstaff" ? staffCombo(p, targets.length > 0, now) : meleeTier.knockback;
+  if (!slam) for (const t of targets.slice(0, meleeDef.maxTargets ?? 1)) dealDamage(host, p, t.a, dmg, false, actorFacingFrom(pos, t.a), kb);
   // Hammer slam replaces the arc: radius damage around the attacker.
   if (slam && meleeTier.radius) {
     for (const a of allActors(host)) {
@@ -510,18 +603,26 @@ export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | 
 
 /** Splash damage around a point (friendly fire on; the owner takes half). */
 export function explode(host: CombatHost, owner: PlayerActor | NpcActor, at: V3, radius: number, damage: number, weaponIndex: number, exclude?: string, excludeProp?: number) {
+  // Prism Bubble shells: decide who (and which props) they shelter before charging any of them.
+  const shield = splashShield(host.bubbles, at);
+  const hits: { a: Actor; d: number }[] = [];
   for (const a of allActors(host)) {
     if (a.id === exclude) continue;
     const d = dist3(at, actorPos(a));
     if (d > radius + 0.5) continue;
+    if (shield.blocks(chestOf(a))) continue;
+    hits.push({ a, d });
+  }
+  for (const { a, d } of hits) {
     let dmg = damage * splashFalloff(Math.max(0, d - 0.5), radius);
     if (a.id === owner.id) dmg *= 0.5;
     if (dmg > 0) dealDamage(host, owner, a, dmg, false, [at[0] - actorPos(a)[0], at[1] - actorPos(a)[1], at[2] - actorPos(a)[2]], 4);
   }
   host.onPropHit?.(at, "heavy", damage);
-  // Breakable props in the blast (NPC blasts count as heavy too).
+  // Breakable props in the blast (NPC blasts count as heavy too); not through a shell.
   const w = WEAPONS[weaponIndex];
-  host.props?.splash(at, radius, damage, owner.kind === "npc" ? "heavy" : (w?.destroys ?? "heavy"), w?.id ?? "", playerId(owner), excludeProp);
+  host.props?.splash(at, radius, damage, owner.kind === "npc" ? "heavy" : (w?.destroys ?? "heavy"), w?.id ?? "", playerId(owner), excludeProp, (c) => shield.blocks(c));
+  shield.charge((b) => damage * splashFalloff(Math.max(0, dist3(at, b.c) - b.r), radius));
   host.broadcastNear("explode", { id: 0, x: at[0], y: at[1], z: at[2], radius, weapon: weaponIndex }, at, 200);
 }
 
@@ -553,70 +654,142 @@ export function stepProjectiles(host: CombatHost, dt: number) {
     p.vel[2] -= up[2] * p.gravity * dt;
     const step = Math.hypot(p.vel[0], p.vel[1], p.vel[2]) * dt;
     const d: V3 = [p.vel[0] * dt / step, p.vel[1] * dt / step, p.vel[2] * dt / step];
-    const terrainT = rayTerrain(host.terrain, p.pos, d, step, 0.75);
+    if (!advance(host, p, d, step, now)) list.splice(i, 1);
+    else if (!p.stuck && p.travelled > p.maxDist) list.splice(i, 1);
+  }
+}
+
+/**
+ * Move a projectile `step` metres along `d`, resolving collisions nearest first: an actor, a Prism
+ * Bubble shell, an intact breakable, then terrain. A piercing bolt carries on through the rest of the
+ * segment after each actor it pierces (F12 review: it used to jump the whole step, skipping a shell
+ * just behind the first victim). Returns false when the projectile is gone; grenades stop (stuck)
+ * against shells, props and terrain and wait for their fuse.
+ */
+function advance(host: CombatHost, p: Projectile, d: V3, step: number, now: number): boolean {
+  const wi = WEAPON_INDEX.get(p.weapon.id) ?? 0;
+  const splash = p.tier.splash && p.tier.radius ? p.tier.splash : 0;
+  const burst = (at: V3) => host.broadcastNear("explode", { id: p.id, x: at[0], y: at[1], z: at[2], radius: 0, weapon: wi }, at, 200);
+  const moveTo = (t: number) => {
+    p.pos = [p.pos[0] + d[0] * t, p.pos[1] + d[1] * t, p.pos[2] + d[2] * t];
+    p.travelled += t;
+  };
+  let left = step;
+  for (let guard = 0; guard < 8 && left > 1e-6; guard++) {
+    const o = p.pos;
+    const terrainT = rayTerrain(host.terrain, o, d, left, 0.75);
     // Intact breakables stop projectiles like terrain does (destruction.ts).
-    const prop = propOnRay(host, p.pos, d, Math.min(step, terrainT));
+    const prop = propOnRay(host, o, d, Math.min(left, terrainT));
     const propT = prop ? prop.t : Infinity, propIdx = prop ? prop.index : -1;
-    const hit = raycastActors(host, p.pos, d, Math.min(step, terrainT, propT), p.hit, 0);
+    // A Prism Bubble shell stops the projectile where it crosses (rockets burst against it).
+    const shell = host.bubbles?.cross(o, d, Math.min(left, terrainT, propT)) ?? null;
+    const shellT = shell ? shell.t : Infinity;
+    const sh = shell ? shell.bubble : null;
+    const hit = raycastActors(host, o, d, Math.min(left, terrainT, propT, shellT), p.hit, 0);
     if (hit) {
       p.hit.add(hit.actor.id);
-      const mult = weakMult(hit, p.tier);
-      const at: V3 = [p.pos[0] + d[0] * hit.t, p.pos[1] + d[1] * hit.t, p.pos[2] + d[2] * hit.t];
+      const at: V3 = [o[0] + d[0] * hit.t, o[1] + d[1] * hit.t, o[2] + d[2] * hit.t];
       if (p.fuseAt === null) {
-        const applied = dealDamage(host, p.owner, hit.actor, p.damage * mult, hit.weak, [p.pos[0] - at[0], p.pos[1] - at[1], p.pos[2] - at[2]]);
-        if (applied && p.tier.burn && hit.actor.kind === "player") hit.actor.burn = { perSec: p.tier.burn, until: now + 3000, by: p.owner.id };
-        // The direct-hit number already includes the blast for the victim (content.md §2.3).
-        if (p.tier.splash && p.tier.radius) explode(host, p.owner, at, p.tier.radius, p.tier.splash, WEAPON_INDEX.get(p.weapon.id) ?? 0, hit.actor.id);
-        if (p.pierceLeft > 0) {
-          p.pierceLeft--;
-        } else {
-          host.broadcastNear("explode", { id: p.id, x: at[0], y: at[1], z: at[2], radius: 0, weapon: WEAPON_INDEX.get(p.weapon.id) }, at, 200);
-          list.splice(i, 1);
-          continue;
+        const mult = weakMult(hit, p.tier);
+        const applied = dealDamage(host, p.owner, hit.actor, p.damage * mult, hit.weak, [o[0] - at[0], o[1] - at[1], o[2] - at[2]]);
+        // Burn refreshes, never stacks; NPCs burn too (F12 review).
+        if (applied && p.tier.burn) {
+          if (hit.actor.kind === "player") hit.actor.burn = { perSec: p.tier.burn, until: now + 3000, by: p.owner.id };
+          else npcBurns(host).set(hit.actor, { perSec: p.tier.burn, until: now + 3000, by: p.owner.id, acc: 0 });
         }
+        // The direct-hit number already includes the blast for the victim (content.md §2.3).
+        if (splash) explode(host, p.owner, at, p.tier.radius!, splash, wi, hit.actor.id);
+        if (p.pierceLeft <= 0) {
+          burst(at);
+          return false;
+        }
+        p.pierceLeft--;
       }
+      // Pierced (or a grenade rolling past someone): carry on from just beyond the hit.
+      const t = Math.min(left, hit.t + 0.01);
+      moveTo(t);
+      left -= t;
+      continue;
     }
-    if (propIdx >= 0 && propT < step && propT <= terrainT) {
-      const at: V3 = [p.pos[0] + d[0] * propT, p.pos[1] + d[1] * propT, p.pos[2] + d[2] * propT];
+    if (sh) {
+      const at: V3 = [o[0] + d[0] * shellT, o[1] + d[1] * shellT, o[2] + d[2] * shellT];
+      if (p.fuseAt !== null) {
+        // Grenades stop against the shell and wait for the fuse on the side they came from.
+        moveTo(Math.max(0, shellT - 0.2));
+        p.stuck = true;
+        return true;
+      }
+      // The direct number includes the blast (content §2.3): the shell takes the rest from the splash.
+      host.bubbles!.absorb(sh, p.damage - splash);
+      const back: V3 = [at[0] - d[0] * 0.05, at[1] - d[1] * 0.05, at[2] - d[2] * 0.05];
+      if (splash) explode(host, p.owner, back, p.tier.radius!, splash, wi);
+      else burst(at);
+      return false;
+    }
+    if (propIdx >= 0 && propT < left && propT <= terrainT) {
+      const at: V3 = [o[0] + d[0] * propT, o[1] + d[1] * propT, o[2] + d[2] * propT];
       if (p.fuseAt !== null) {
         // Grenades stop against the prop and wait for the fuse.
-        p.pos = [at[0] - d[0] * 0.2, at[1] - d[1] * 0.2, at[2] - d[2] * 0.2];
+        moveTo(Math.max(0, propT - 0.2));
         p.stuck = true;
-        continue;
+        return true;
       }
       host.props!.damage(propIdx, p.damage, p.weapon.destroys, p.weapon.id, d, playerId(p.owner));
-      if (p.tier.splash && p.tier.radius) explode(host, p.owner, at, p.tier.radius, p.tier.splash, WEAPON_INDEX.get(p.weapon.id) ?? 0, undefined, propIdx);
+      if (splash) explode(host, p.owner, at, p.tier.radius!, splash, wi, undefined, propIdx);
       else host.onPropHit?.(at, p.weapon.destroys === "heavy" ? "heavy" : "light", p.damage);
-      host.broadcastNear("explode", { id: p.id, x: at[0], y: at[1], z: at[2], radius: 0, weapon: WEAPON_INDEX.get(p.weapon.id) }, at, 200);
-      list.splice(i, 1);
-      continue;
+      burst(at);
+      return false;
     }
-    if (terrainT < step) {
-      const at: V3 = [p.pos[0] + d[0] * terrainT, p.pos[1] + d[1] * terrainT, p.pos[2] + d[2] * terrainT];
+    if (terrainT < left) {
+      const at: V3 = [o[0] + d[0] * terrainT, o[1] + d[1] * terrainT, o[2] + d[2] * terrainT];
       if (p.fuseAt !== null) {
-        p.pos = at;
+        moveTo(terrainT);
         p.stuck = true;
-        continue;
+        return true;
       }
-      if (p.tier.splash && p.tier.radius) explode(host, p.owner, at, p.tier.radius, p.tier.splash, WEAPON_INDEX.get(p.weapon.id) ?? 0);
+      if (splash) explode(host, p.owner, at, p.tier.radius!, splash, wi);
       else {
         host.onPropHit?.(at, p.weapon.destroys === "heavy" ? "heavy" : "light", p.damage);
-        host.broadcastNear("explode", { id: p.id, x: at[0], y: at[1], z: at[2], radius: 0, weapon: WEAPON_INDEX.get(p.weapon.id) }, at, 200);
+        burst(at);
       }
-      list.splice(i, 1);
-      continue;
+      return false;
     }
-    p.pos = [p.pos[0] + d[0] * step, p.pos[1] + d[1] * step, p.pos[2] + d[2] * step];
-    p.travelled += step;
-    if (p.travelled > p.maxDist) list.splice(i, 1);
+    moveTo(left);
+    left = 0;
   }
+  return true;
 }
 
 const burnAcc = new WeakMap<PlayerActor, number>();
 
-/** Per-tick effects on players: burn, heals over time. */
+/** Burning NPCs per room (Emberglass): the attacker's session id gets the credit. */
+const npcBurnLists = new WeakMap<CombatHost, Map<NpcActor, { perSec: number; until: number; by: string; acc: number }>>();
+function npcBurns(host: CombatHost) {
+  let m = npcBurnLists.get(host);
+  if (!m) npcBurnLists.set(host, (m = new Map()));
+  return m;
+}
+
+/** Per-tick effects: burn (players and NPCs), heals over time. */
 export function stepEffects(host: CombatHost, dt: number) {
   const now = host.now();
+  const burning = npcBurnLists.get(host);
+  if (burning?.size) {
+    for (const [n, b] of burning) {
+      if (n.state.hp <= 0 || now > b.until) {
+        burning.delete(n);
+        continue;
+      }
+      b.acc += b.perSec * dt;
+      if (b.acc + 1e-6 >= 1) {
+        const whole = Math.floor(b.acc + 1e-6);
+        b.acc -= whole;
+        let by: PlayerActor | null = null;
+        for (const x of host.players()) if (x.id === b.by) by = x;
+        dealDamage(host, by, n, whole, false);
+      }
+    }
+  }
   for (const p of host.players()) {
     if (p.dead) continue;
     if (p.burn) {
@@ -635,13 +808,20 @@ export function stepEffects(host: CombatHost, dt: number) {
       const mh = maxHp(p.char.level);
       let add = 0;
       p.heals = p.heals.filter((h) => {
-        if (now > h.until) return false;
-        add += h.perSec * dt;
-        return true;
+        if (h.left === undefined) {
+          if (now > h.until) return false;
+          add += h.perSec * dt;
+          return true;
+        }
+        // Heals that know their total pay exactly that, however the ticks fall.
+        const amt = Math.min(h.left, h.perSec * dt);
+        h.left -= amt;
+        add += amt;
+        return h.left > 1e-6 && now <= h.until + 1000;
       });
       // Accumulate fractional healing so a 40 HP tonic heals 40, independent of tick length.
       p.healAcc += add;
-      const whole = Math.floor(p.healAcc);
+      const whole = Math.floor(p.healAcc + 1e-6); // 40 × 0.75 must come to 30, not 29.999…
       if (whole > 0) {
         p.healAcc -= whole;
         if (p.state.hp < mh) p.state.hp = Math.min(mh, p.state.hp + whole);

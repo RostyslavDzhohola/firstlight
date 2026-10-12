@@ -315,4 +315,34 @@ describe("destruction (seam 1)", () => {
     expect(serverRoom(p).systems.some((x) => x instanceof DestructionSystem)).toBe(false);
     expect(serverRoom(p).host.props).toBeUndefined();
   });
+
+  it("fuel drums (Meridian camps) break to any hit and explode for 25% → 8% of max HP within 3.5 m", async () => {
+    const a = await join("drumshot", "meridian");
+    const v = await join("drumvictim", "meridian", 1);
+    const sys = destruction(a);
+    const drums = sys.list.filter((b) => b.kind === "fueldrum");
+    expect(drums.length).toBeGreaterThanOrEqual(4);
+    expect(drums[0]!.hp).toBe(30);
+    const drum = findSetup(sys, "meridian", "fueldrum", 6);
+    const explode = collect<{ x: number; y: number; z: number; radius: number }>(a, "explode");
+    await placeAt(a, drum.shooter);
+    // The victim stands 1 m off the drum, on the far side from the shooter.
+    const angle = Math.atan2(
+      (drum.shooter[0] - drum.b.px) * drum.b.fx + (drum.shooter[1] - drum.b.py) * drum.b.fy + (drum.shooter[2] - drum.b.pz) * drum.b.fz,
+      (drum.shooter[0] - drum.b.px) * drum.b.rx + (drum.shooter[1] - drum.b.py) * drum.b.ry + (drum.shooter[2] - drum.b.pz) * drum.b.rz,
+    );
+    await placeAt(v, around("meridian", drum.b, angle + Math.PI, 1.0));
+    a.send("scope", { on: true });
+    for (let i = 0; i < 12 && !st(a).broken?.has(drum.b.id); i++) {
+      serverRoom(a).actors.get(a.sessionId)!.lastAttackAt = 0;
+      fire(a, 0, drum.aim);
+      await waitFor(() => sys.hp[drum.b.index]! < 30 - 8 * (i + 1) + 0.5 || st(a).broken?.has(drum.b.id), 2000).catch(() => {});
+    }
+    await waitFor(() => st(a).broken?.has(drum.b.id));
+    await waitFor(() => explode.some((m) => m.radius === 3.5));
+    await waitFor(() => st(a).players.get(v.sessionId).hp < 100);
+    const hp = st(a).players.get(v.sessionId).hp;
+    expect(100 - hp).toBeGreaterThanOrEqual(8); // at least the 8% edge, one drum's worth at most a chain's
+    expect(me(a).hp).toBe(100); // 6 m away: outside the blast
+  });
 });

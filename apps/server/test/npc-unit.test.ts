@@ -7,7 +7,10 @@ import { bossArena } from "@firstlight/shared/content/arenas";
 import { NF, NPC_INDEX, PLANET_COSMETIC } from "@firstlight/shared/content/npcs";
 import { dealDamage } from "../src/world/combat.ts";
 import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
-import { repeatDecay, rollDrops } from "../src/world/npc/rewards.ts";
+import { EGG_NPC } from "../src/world/npc/NpcSystem.ts";
+import { copyStateStore, MemoryCopyStateStore } from "../src/world/copyState.ts";
+import { onNpcEvent, type NpcEvent } from "../src/world/npc/tuning.ts";
+import { PITY_IDLE_MS, pruneRewardMaps, repeatDecay, rollDrops } from "../src/world/npc/rewards.ts";
 import { buildSpawnPoints } from "../src/world/npc/spawns.ts";
 import { fakeWorld } from "./npcWorld.ts";
 
@@ -74,6 +77,44 @@ describe("rewards", () => {
     expect(repeatDecay(w.sys, "u1", "p7", t + 9000 + 301_000)).toBe(1);
   });
 
+  it("egg penalty NPCs dissolve at their TTL without rewards, and never feed the cosmetic pity", () => {
+    const w = fakeWorld("arcadia");
+    const p = w.addPlayer("p", arcadiaPoint(80), 3);
+    const n = w.sys.createNpc(NPC_INDEX.get("hopbit")!, 3, arcadiaPoint(84), w.clock.t, { instant: true, spawned: { reason: "egg", key: "E2", userId: "u-p" }, ttlMs: 1000 });
+    expect(w.sys.spawnedCount("egg")).toBe(1);
+    expect(w.sys.spawnedCount("egg", "u-p")).toBe(1);
+    expect(w.sys.spawnedCount("egg", "someone-else")).toBe(0);
+    expect(rollDrops(w.sys, n, p, () => 0)).not.toContainEqual(expect.objectContaining({ id: PLANET_COSMETIC.arcadia.id }));
+    w.step(900);
+    expect(n.dead).toBe(false);
+    w.step(200);
+    expect(n.dead).toBe(true);
+    expect(w.sys.spawnedCount("egg")).toBe(0);
+    w.step(1300);
+    expect(w.sys.npcs.has(n.id)).toBe(false);
+    expect(p.char.xp).toBe(0);
+    expect(w.sent.some((m) => m.type === "npcKill")).toBe(false);
+  });
+
+  it("reward bookkeeping is pruned: expired decay windows, idle pity counters, old Collector tags", () => {
+    const w = fakeWorld("arcadia");
+    const t = w.clock.t;
+    repeatDecay(w.sys, "u1", "p7", t);
+    repeatDecay(w.sys, "u2", "p7", t + 200_000);
+    w.sys.cosmeticPity.set("u1|arcadia", { life: 1, kills: 4, at: t });
+    w.sys.cosmeticPity.set("u2|arcadia", { life: 1, kills: 4, at: t + PITY_IDLE_MS });
+    w.sys.tagged.set("s1", t + 1000);
+    w.sys.tagged.set("s2", t + 400_000);
+    pruneRewardMaps(w.sys, t + 301_000);
+    expect([...w.sys.repeatKills.keys()]).toEqual(["u2|p7"]);
+    expect([...w.sys.cosmeticPity.keys()]).toEqual(["u1|arcadia", "u2|arcadia"]);
+    expect([...w.sys.tagged.keys()]).toEqual(["s2"]);
+    pruneRewardMaps(w.sys, t + PITY_IDLE_MS + 1);
+    expect([...w.sys.repeatKills.keys()]).toEqual([]);
+    expect([...w.sys.cosmeticPity.keys()]).toEqual(["u2|arcadia"]);
+    expect([...w.sys.tagged.keys()]).toEqual([]);
+  });
+
   it("the planet cosmetic is guaranteed after 3× its expected kills in one life (pity)", () => {
     const w = fakeWorld("arcadia");
     const p = w.addPlayer("p", arcadiaPoint(80), 3);
@@ -88,6 +129,102 @@ describe("rewards", () => {
       }
     }
     expect(got).toBe(3 * expected);
+  });
+});
+
+describe("egg NPCs", () => {
+  it("the Golden Hopbit runs to its burrow for whoever stays within 15 m of it for 60 s; walking off resets it; a hit pops it", () => {
+    const w = fakeWorld("arcadia");
+    const events: NpcEvent[] = [];
+    const off = onNpcEvent((e) => events.push(e));
+    try {
+      const golden = w.sys.createNpc(NPC_INDEX.get("golden_hopbit")!, 1, arcadiaPoint(84), w.clock.t, { instant: true, roam: 0 });
+      const p = w.addPlayer("p", arcadiaPoint(94), 3); // 10 m: close enough to follow, too far to make it flee
+      const run = (ms: number) => {
+        for (let t = 0; t < ms; t += 500) w.step(500);
+      };
+      run(30_000);
+      expect(events.filter((e) => e.kind === "egg")).toHaveLength(0);
+      w.movePlayer(p, arcadiaPoint(140)); // walks off: the follow resets
+      run(2_000);
+      w.movePlayer(p, arcadiaPoint(94));
+      run(58_000);
+      expect(events.filter((e) => e.kind === "egg")).toHaveLength(0);
+      run(4_000);
+      expect(events.filter((e) => e.kind === "egg")).toEqual([{ kind: "egg", body: "arcadia", egg: "E3", sessionId: "p", userId: "u-p" }]);
+      expect(golden.dead).toBe(true);
+      // Another one, popped by a hit: 25 coins, no egg.
+      const second = w.sys.createNpc(NPC_INDEX.get("golden_hopbit")!, 1, arcadiaPoint(84), w.clock.t, { instant: true, roam: 0 });
+      const coins = p.char.coins;
+      dealDamage(w.world.host, p, second, 5, false);
+      expect(second.dead).toBe(true);
+      expect(p.char.coins).toBe(coins + 25);
+      expect(events.filter((e) => e.kind === "egg")).toHaveLength(1);
+    } finally {
+      off();
+    }
+  });
+
+  it("a Golden Hopbit that was popped stays away on its own timer, not the pack's", () => {
+    const w = fakeWorld("arcadia");
+    NPC_TUNING.respawnScale = 0.01;
+    w.sys.ambientOn = true;
+    const g = w.sys.groups.find((x) => x.point.members.some((m) => m.golden))!;
+    expect(g).toBeTruthy();
+    w.addPlayer("p", g.point.pos, 3);
+    const golden = () => g.members.find((m) => m?.def.id === "golden_hopbit") ?? null;
+    const clearPack = () => {
+      for (const m of [...g.members]) if (m && !m.dead) w.sys.retire(m);
+    };
+    for (let i = 0; i < 4 && !g.active; i++) w.step(600);
+    expect(golden()).not.toBeNull();
+    w.sys.retire(golden()!); // popped (or ran into its burrow)
+    clearPack();
+    expect(g.cleared).toBe(true);
+    for (let i = 0; i < 40 && !g.active; i++) w.step(600); // the pack respawns quickly…
+    expect(g.active).toBe(true);
+    expect(g.members.some((m) => m && m.def.id === "hopbit")).toBe(true);
+    expect(golden()).toBeNull(); // …without the Golden Hopbit
+    // Its own timer runs out while this pack is still alive: it comes back on its own.
+    const pack = g.members.filter((m) => m && !m.dead).map((m) => m!.id);
+    expect(pack.length).toBeGreaterThan(0);
+    w.clock.t += EGG_NPC.goldenBackMs;
+    for (let i = 0; i < 4 && !golden(); i++) w.step(600);
+    expect(golden()).not.toBeNull();
+    expect(g.members.filter((m) => m && !m.dead && m.def.id !== "golden_hopbit").map((m) => m!.id)).toEqual(pack);
+  });
+});
+
+describe("egg NPC timers in the copy state", () => {
+  it("a popped Golden Hopbit's return time survives a new room on the same copy", () => {
+    copyStateStore.current = new MemoryCopyStateStore();
+    try {
+      NPC_TUNING.respawnScale = 0.01;
+      const w = fakeWorld("arcadia", { copyKey: "arcadia:0" });
+      w.sys.ambientOn = true;
+      const g = w.sys.groups.find((x) => x.point.members.some((m) => m.golden))!;
+      w.addPlayer("p", g.point.pos, 3);
+      for (let i = 0; i < 4 && !g.active; i++) w.step(600);
+      const golden = g.members.find((m) => m?.def.id === "golden_hopbit")!;
+      w.sys.retire(golden);
+      const back = w.sys.goldenBack.get(g.point.id)!;
+      expect(back).toBeGreaterThan(w.clock.t);
+      w.sys.dispose(); // the copy empties
+      // A new room on the same copy, two minutes later.
+      const w2 = fakeWorld("arcadia", { copyKey: "arcadia:0", start: w.clock.t + 120_000 });
+      w2.sys.ambientOn = true;
+      expect(w2.sys.goldenBack.get(g.point.id)).toBe(back);
+      const g2 = w2.sys.groups[g.point.id]!;
+      w2.addPlayer("p", g2.point.pos, 3);
+      for (let i = 0; i < 4 && !g2.active; i++) w2.step(600);
+      const gi = g2.point.members.findIndex((m) => m.golden);
+      expect(g2.members[gi]).toBeNull(); // still away
+      w2.clock.t = back;
+      for (let i = 0; i < 4 && !g2.members[gi]; i++) w2.step(600);
+      expect(g2.members[gi]?.def.id).toBe("golden_hopbit"); // back on its own timer
+    } finally {
+      copyStateStore.current = new MemoryCopyStateStore();
+    }
   });
 });
 

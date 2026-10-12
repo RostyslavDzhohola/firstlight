@@ -21,6 +21,15 @@ const _head = new THREE.Vector3();
 const _up = new THREE.Vector3();
 const _from = new THREE.Vector3();
 
+/** Why the server refused a `use` (Patchkit, Prism Bubble), as player-facing text. */
+const USE_DENIED: Record<string, string> = {
+  cooldown: "Not ready yet",
+  busy: "Already patching",
+  "out of reach": "Too far — get within 4 m",
+  "no target": "Nobody to patch there",
+  "no line of sight": "Something's in the way",
+};
+
 export class CombatClient {
   readonly effects: Effects;
   readonly hud: Hud;
@@ -57,7 +66,25 @@ export class CombatClient {
     room.onMessage("denied", (m: { action: string; reason: string }) => {
       if (m.reason === "level gate") this.hud.toast("Your level is too low to use that tier", "warn");
       else if (m.action === "logout") this.hud.toast("Can't log out in combat — wait 10 s", "warn");
+      else if (m.action === "use" && USE_DENIED[m.reason]) this.hud.toast(USE_DENIED[m.reason]!, "warn");
     });
+    // Support items: Patchkit channel (server-timed; damage interrupts it) and Prism Bubbles.
+    room.onMessage("channel", (m: { kind: string; ms: number; target: string }) => {
+      const who = m.target === me ? "" : ` ${(room.state as any).players?.get(m.target)?.name ?? "an ally"}`;
+      this.hud.toast(`Patching up${who}…`, "info");
+      this.game.self?.trigger("attack");
+    });
+    room.onMessage("channelEnd", (m: { ok: boolean; reason?: string }) => {
+      if (!m.ok) this.hud.toast(m.reason === "interrupted" ? "Patchkit interrupted — kit kept" : m.reason === "out of sight" ? "Lost sight of them — kit kept" : "Patchkit cancelled — kit kept", "warn");
+    });
+    room.onMessage("bubble", (m: { id: number; x: number; y: number; z: number; r: number; ms: number }) => {
+      const at = new THREE.Vector3(m.x, m.y, m.z);
+      this.effects.bubble(m.id, at, m.r, m.ms);
+      this.game.audio.play("ui", at);
+    });
+    room.onMessage("bubblePop", (m: { id: number }) => this.effects.popBubble(m.id));
+    // Bubbles deployed before we arrived (late join, reconnect): ask now that the handlers exist.
+    room.send("supportSync", {});
     room.onMessage("hit", (m: { attacker: string; target: string; amount: number; weak: boolean; x: number; y: number; z: number; kb?: number; kx?: number; ky?: number; kz?: number }) => {
       if (m.attacker === me && m.target !== me) {
         this.hud.hit(m.weak);
@@ -266,6 +293,8 @@ export class CombatClient {
         this.chargeStart = now;
         room.send("charge", { on: true }); // the server times the draw
       }
+      // Patchkit: right mouse patches yourself (left mouse: the ally in the crosshair).
+      if (def.id === "patchkit" && rmb && !this.wasRmb) room.send("use", { slot: g.hud.you?.selected ?? 0 });
     }
     this.wasRmb = rmb;
     // Own avatar: hold the guard / aim pose from local input instead of waiting for the server flags.
@@ -301,6 +330,12 @@ export class CombatClient {
       this.effects.arc(g.player.pos, g.player.facing, up, def.range, weaponColor(WEAPONS.indexOf(def)));
       return;
     }
+    if (def.id === "patchkit") {
+      const ally = this.allyInCrosshair(def.range);
+      if (ally) room.send("use", { slot, targetId: ally });
+      else g.hud.toast("No ally in reach — right-click to patch yourself", "info");
+      return;
+    }
     if (def.delivery === "heal" || def.delivery === "bubble" || def.delivery === "none") {
       room.send("use", { slot });
       return;
@@ -325,6 +360,43 @@ export class CombatClient {
       g.audio.play(def.id in { carbine: 1, scatterpipe: 1, stillshot: 1, stormcoil: 1 } ? def.id : "carbine");
       this.effects.flash(muzzle, color, 0.3);
     }
+  }
+
+  /** The live player nearest the crosshair ray within `range` metres of us (Patchkit target), or null. */
+  private allyInCrosshair(range: number): string | null {
+    const room = this.game.net.room;
+    if (!room) return null;
+    const cam = this.game.ctx.camera;
+    const o = cam.getWorldPosition(new THREE.Vector3());
+    const d = cam.getWorldDirection(new THREE.Vector3());
+    const mine = this.game.player.pos;
+    const chest = new THREE.Vector3();
+    let best: string | null = null;
+    let bestOff = 1.0;
+    (room.state as any).players?.forEach((p: any, id: string) => {
+      if (id === room.sessionId || p.flags & PF.DEAD) return;
+      chest.set(p.x, p.y, p.z);
+      if (chest.distanceTo(mine) > range + 0.5) return;
+      chest.addScaledVector(_v.copy(chest).normalize(), 1.0);
+      // Not through the ground or a prop (the server checks the same line).
+      const myChest = mine.clone().addScaledVector(mine.clone().normalize(), 1.0);
+      const to = chest.clone().sub(myChest);
+      const len = to.length();
+      if (len > 0.01) {
+        to.divideScalar(len);
+        if (this.rayTerrain(myChest, to, len) < len) return;
+        if ((this.game.player.getColliders()?.raycast?.(myChest, to, len) ?? Infinity) < len) return;
+      }
+      chest.sub(o);
+      const t = chest.dot(d);
+      if (t <= 0) return;
+      const off = chest.addScaledVector(d, -t).length();
+      if (off < bestOff) {
+        bestOff = off;
+        best = id;
+      }
+    });
+    return best;
   }
 
   /**

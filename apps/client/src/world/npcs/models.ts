@@ -2,7 +2,9 @@
 // +z forward (facing), +x right; sizes in metres at the def's real scale. All designs are original:
 // - Brightbits (Arcadia): chunky voxel boxes, 4-colour palettes, emissive faces and screens.
 // - Hollow Court (Hollowmere): bone-white skeletons and robed figures, violet emissive eyes, teal grave-light.
-// - Meridian Oversight: identical ivory-and-chrome troopers and hovering drones with red emissive visors.
+// - Meridian Oversight: identical slate-grey segmented hardsuits (matte) with one amber slit visor and a
+//   hexagonal corporate glyph, plus hovering drones (content §3.4). Kept clearly apart from Unit 7
+//   (ivory plates, one round lens) and from white-armour clone-trooper looks (F12 review).
 // - Wildlife: fluffy Woolbacks (wool colour per planet), slate Dusk Wolves with amber eyes, three beasts.
 // - Bosses: Tidewrath (crocodilian-turtle, stone-and-coral shell, cyan vents and chest weak point),
 //   the Hollow King (gaunt robed monarch, bone cage-crown with bells, chain veil, bell sceptre),
@@ -260,28 +262,38 @@ function cryptSentinel(): ModelDef {
 
 // ------------------------------------------------------------------------------------ Meridian Oversight
 
-const IVORY = 0xf1ede4;
-const CHROME = 0xc9d2dc;
+// Slate hardsuit plates over a darker segmented undersuit; matte (std material), no chrome.
+const SLATE = 0x56606b;
+const SLATE_DARK = 0x3a424b;
+const GUNMETAL = 0x2c3138;
+const AMBER = 0xffb547;
+/** Drone casings stay metallic (they're machines, not suits). */
+const CHROME = 0x8c96a2;
+/** The Receiver's warning lights (boss look, content §4.4). */
 const RED = 0xff2a3d;
 
 function trooper(extra: PartDef[] = [], bulk = 1): ModelDef {
   const b = bulk;
   return {
-    style: "walk", fx: RED, gait: 1.6,
+    style: "walk", fx: AMBER, gait: 1.6,
     parts: [
       ...pair((s, k) => [
-        box(IVORY, [0.13 * s * b, 0.45, 0], [0.2 * b, 0.9, 0.24 * b], { a: k("legL", "legR"), pv: [0.13 * s * b, 0.9, 0] }),
-        mbox(CHROME, [0.13 * s * b, 0.5, 0.13 * b], [0.16 * b, 0.14, 0.04], { a: k("legL", "legR"), pv: [0.13 * s * b, 0.9, 0], d: true }),
-        box(IVORY, [0.36 * s * b, 1.25, 0], [0.15 * b, 0.55, 0.15 * b], { a: k("armL", "armR"), pv: [0.36 * s * b, 1.5, 0] }),
-        mbox(CHROME, [0.36 * s * b, 1.48, 0], [0.2 * b, 0.12, 0.2 * b], { d: true }),
+        box(SLATE, [0.13 * s * b, 0.45, 0], [0.2 * b, 0.9, 0.24 * b], { a: k("legL", "legR"), pv: [0.13 * s * b, 0.9, 0] }),
+        box(SLATE_DARK, [0.13 * s * b, 0.5, 0.13 * b], [0.18 * b, 0.12, 0.04], { a: k("legL", "legR"), pv: [0.13 * s * b, 0.9, 0], d: true }),
+        box(SLATE, [0.36 * s * b, 1.25, 0], [0.15 * b, 0.55, 0.15 * b], { a: k("armL", "armR"), pv: [0.36 * s * b, 1.5, 0] }),
+        box(SLATE_DARK, [0.36 * s * b, 1.48, 0], [0.21 * b, 0.12, 0.21 * b], { d: true }),
       ]),
-      box(IVORY, [0, 1.25, 0], [0.56 * b, 0.62, 0.34 * b]),
-      mbox(CHROME, [0, 1.32, 0.17 * b], [0.42 * b, 0.32, 0.04]),
-      box(0x39404a, [0, 0.95, 0], [0.5 * b, 0.08, 0.32 * b], { d: true }),
-      sph(IVORY, [0, 1.7, 0], [0.36, 0.38, 0.38]),
-      mbox(CHROME, [0, 1.62, 0.12], [0.3, 0.1, 0.18], { d: true }),
-      gbox(RED, [0, 1.71, 0.18], [0.26, 0.06, 0.04], { i: 3.4 }),
-      gbox(RED, [-0.3 * b, 1.45, 0.06], [0.03, 0.08, 0.08], { i: 2, d: true }),
+      // Segmented torso: three horizontal plates with dark gaps.
+      box(SLATE_DARK, [0, 1.25, 0], [0.54 * b, 0.62, 0.32 * b]),
+      ...[1.06, 1.27, 1.48].map((y) => box(SLATE, [0, y, 0.01], [0.57 * b, 0.17, 0.34 * b])),
+      box(GUNMETAL, [0, 0.95, 0], [0.5 * b, 0.08, 0.32 * b], { d: true }),
+      // Angular helmet with one narrow amber slit across the face (not a rounded dome, not a T).
+      box(SLATE, [0, 1.71, 0], [0.32, 0.34, 0.36]),
+      box(SLATE_DARK, [0, 1.6, 0.08], [0.3, 0.12, 0.24], { d: true }),
+      gbox(AMBER, [0, 1.74, 0.185], [0.24, 0.035, 0.02], { i: 3.4 }),
+      // Hexagonal corporate glyph on the chest.
+      gcyl(AMBER, [0, 1.37, 0.18 * b], [0.12, 0.02, 0.12], { r: [HALF_PI, 0, 0], i: 1.4, d: true }),
+      gbox(AMBER, [-0.3 * b, 1.45, 0.06], [0.03, 0.08, 0.08], { i: 2, d: true }),
       ...extra,
     ],
   };
@@ -293,15 +305,15 @@ function associate(): ModelDef {
 
 function enforcer(): ModelDef {
   return trooper([
-    mbox(0x9fb3c8, [-0.12, 1.15, 0.52], [0.85, 1.3, 0.06], { tag: "shield", a: "armL", pv: [-0.4, 1.5, 0] }),
-    gbox(RED, [-0.12, 1.75, 0.56], [0.6, 0.04, 0.02], { tag: "shield", a: "armL", pv: [-0.4, 1.5, 0], i: 2 }),
+    mbox(0x7d8794, [-0.12, 1.15, 0.52], [0.85, 1.3, 0.06], { tag: "shield", a: "armL", pv: [-0.4, 1.5, 0] }),
+    gbox(AMBER, [-0.12, 1.75, 0.56], [0.6, 0.04, 0.02], { tag: "shield", a: "armL", pv: [-0.4, 1.5, 0], i: 2 }),
     cyl(0x22262c, [0.42, 0.95, 0.35], [0.06, 0.7, 0.06], { r: [0.6, 0, 0], a: "armR", pv: [0.4, 1.5, 0] }),
   ], 1.15);
 }
 
 function complianceOfficer(): ModelDef {
   return trooper([
-    box(0xd9d2c3, [0, 0.82, -0.14], [0.5, 0.75, 0.05]),
+    box(0x2f353d, [0, 0.82, -0.14], [0.5, 0.75, 0.05]),
     ...pair((s) => [gbox(0xffb547, [0.33 * s, 1.56, 0], [0.18, 0.05, 0.16], { i: 2.2 })]),
     mbox(0x2c3138, [0.22, 1.18, 0.3], [0.07, 0.14, 0.32], { a: "armR", pv: [0.36, 1.5, 0] }),
     gtor(0xffb547, [0, 0.08, 0], [1.6, 1.6, 1.6], { r: [HALF_PI, 0, 0], i: 1.6, tag: "aura" }),
@@ -310,11 +322,11 @@ function complianceOfficer(): ModelDef {
 
 function collector(): ModelDef {
   return {
-    style: "hover", fx: RED,
+    style: "hover", fx: AMBER,
     parts: [
       msph(CHROME, [0, 0.4, 0], [0.7, 0.5, 0.7]),
-      gtor(RED, [0, 0.4, 0], [0.72, 0.72, 0.72], { r: [HALF_PI, 0, 0], i: 2.6 }),
-      gbox(RED, [0, 0.42, 0.33], [0.16, 0.08, 0.04], { i: 3.4 }),
+      gtor(AMBER, [0, 0.4, 0], [0.72, 0.72, 0.72], { r: [HALF_PI, 0, 0], i: 2.6 }),
+      gbox(AMBER, [0, 0.42, 0.33], [0.16, 0.08, 0.04], { i: 3.4 }),
       ...pair((s) => [
         box(0x2c3138, [0.38 * s, 0.5, 0], [0.3, 0.06, 0.08], { d: true }),
         cyl(0x2c3138, [0.55 * s, 0.56, 0], [0.42, 0.03, 0.42], { a: "spin" }),
@@ -326,13 +338,13 @@ function collector(): ModelDef {
 
 function auditor(): ModelDef {
   return {
-    style: "hover", fx: RED,
+    style: "hover", fx: AMBER,
     parts: [
-      box(IVORY, [0, 0.5, 0], [1.2, 0.55, 1.0]),
+      box(SLATE, [0, 0.5, 0], [1.2, 0.55, 1.0]),
       mbox(CHROME, [0, 0.2, 0], [1.0, 0.12, 0.85]),
       ...[-0.32, 0, 0.32].map((x) => mcyl(0x2c3138, [x, 0.95, -0.1], [0.18, 0.5, 0.18], { r: [-0.3, 0, 0] })),
-      gbox(RED, [0, 0.55, 0.51], [0.5, 0.08, 0.03], { i: 3.4 }),
-      gtor(0x9a1a28, [0, 0.12, 0], [1.3, 1.3, 1.3], { r: [HALF_PI, 0, 0], a: "spin", i: 1.6 }),
+      gbox(AMBER, [0, 0.55, 0.51], [0.5, 0.08, 0.03], { i: 3.4 }),
+      gtor(0x9a6a1a, [0, 0.12, 0], [1.3, 1.3, 1.3], { r: [HALF_PI, 0, 0], a: "spin", i: 1.6 }),
     ],
   };
 }

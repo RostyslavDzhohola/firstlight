@@ -6,12 +6,15 @@
 // into BodyState.broken (id → rebuild time, synced to everyone, so late joiners see it broken),
 // and after the archetype's rebuild time it comes back with `rebuilt {id}`.
 
-import { BreakableGrid, bodyBreakables, canBreak, distanceToBreakable, hash4, rayBreakable, segmentNearBreakable, type Breakable, type BreakClass } from "@firstlight/shared";
+import { BreakableGrid, bodyBreakables, canBreak, distanceToBreakable, FUEL_DRUM_BLAST, hash4, rayBreakable, segmentNearBreakable, type Breakable, type BreakClass } from "@firstlight/shared";
 import { splashFalloff } from "@firstlight/shared/content/progression";
+import { WEAPON_INDEX } from "@firstlight/shared/content/weapons";
+import { actorPos, type Actor } from "./actors.ts";
 import type { BodyRoom } from "./BodyRoom.ts";
 import { loadCopy, roomCopyKey, saveCopy } from "./copyState.ts";
 import { emitGameEvent } from "./events.ts";
-import type { BreakableHost } from "./combat.ts";
+import { dealDamage, type BreakableHost } from "./combat.ts";
+import { splashShield } from "./support.ts";
 import type { V3 } from "./geometry.ts";
 import type { RoomSystem } from "./systems.ts";
 
@@ -125,28 +128,35 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
   damage(index: number, amount: number, cls: BreakClass, weaponId: string, dir: V3, by: string | null = null, force = 1): boolean {
     const b = this.list[index];
     if (!b || this.brokenUntil[index]! > 0 || !(amount > 0)) return false;
-    if (!canBreak(b.size, cls)) return false;
+    // Fuel drums take any hit, fists included (content.md §2.2).
+    if (b.kind !== "fueldrum" && !canBreak(b.size, cls)) return false;
     this.hp[index] = this.hp[index]! - amount * (DESTRUCTION.propMult[weaponId] ?? 1);
     if (this.hp[index]! <= 0) this.breakProp(b, dir, force, by);
     return true;
   }
 
-  splash(at: V3, radius: number, amount: number, cls: BreakClass, weaponId: string, by: string | null = null, exclude = -1): void {
+  splash(at: V3, radius: number, amount: number, cls: BreakClass, weaponId: string, by: string | null = null, exclude = -1, blocked?: (point: V3) => boolean): void {
     if (!(radius > 0) || cls === "none") return;
     const n = this.grid.collect(at[0], at[1], at[2], 0, 0, 0, 0, radius, this.candidates);
+    // Decide every target first (a drum that goes up mid-loop can't change who else is hit).
+    const hits: { i: number; dist: number }[] = [];
     for (let k = 0; k < n; k++) {
       const i = this.candidates[k]!;
       if (i === exclude || this.brokenUntil[i]! > 0) continue;
       const b = this.list[i]!;
       const dist = distanceToBreakable(b, at[0], at[1], at[2]);
       if (dist >= radius) continue;
+      if (blocked?.([b.cx, b.cy, b.cz])) continue; // a Prism Bubble shell is in the way
+      hits.push({ i, dist });
+    }
+    for (const { i, dist } of hits) {
+      const b = this.list[i]!;
       const dir: V3 = [b.cx - at[0], b.cy - at[1], b.cz - at[2]];
       this.damage(i, amount * splashFalloff(dist, radius), cls, weaponId, dir, by, 2.2);
     }
   }
 
   arc(pos: V3, facing: V3, range: number, arcDeg: number, amount: number, cls: BreakClass, weaponId: string, by: string | null = null): void {
-    if (cls === "none") return;
     // Chest height: melee swings at about 1 m above the feet.
     const l = Math.hypot(pos[0], pos[1], pos[2]);
     const ux = pos[0] / l, uy = pos[1] / l, uz = pos[2] / l;
@@ -189,6 +199,39 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
     this.room.broadcastNear("broke", { id: b.id, archetype: b.archetype, variant, ix: dir[0] / dl, iy: dir[1] / dl, iz: dir[2] / dl, f: force }, [b.cx, b.cy, b.cz], DESTRUCTION.broadcastRadius);
     // Quests: the Demolition Crew medal counts props a player breaks.
     emitGameEvent(this.room, { type: "propBroken", playerId: by, propId: b.id });
+    if (b.kind === "fueldrum") this.blast(b, by);
+  }
+
+  /**
+   * A fuel drum goes up (content.md §2.2): everyone within 3.5 m of it takes 25% of their max HP at
+   * the centre falling to 8% at the edge, credited to whoever broke it (friendly fire on, like any
+   * explosion; Prism Bubble shells stop it); nearby props take a heavy blast, so drums chain.
+   */
+  private blast(b: Breakable, by: string | null) {
+    const host = this.room.host;
+    const at: V3 = [b.cx, b.cy, b.cz];
+    const R = FUEL_DRUM_BLAST.radius;
+    const attacker = by ? (this.room.actors.get(by) ?? null) : null;
+    // Shells: decided for every victim and prop first, then each intercepting shell is charged once.
+    const shield = splashShield(host.bubbles, at);
+    const hits: { a: Actor; d: number; p: V3 }[] = [];
+    for (const a of [...host.players(), ...host.npcs()] as Actor[]) {
+      if (a.kind === "npc" && a.boss) continue;
+      const p = actorPos(a);
+      const l = Math.hypot(p[0], p[1], p[2]) || 1;
+      const chest: V3 = [p[0] + p[0] / l, p[1] + p[1] / l, p[2] + p[2] / l];
+      const d = Math.min(Math.hypot(chest[0] - at[0], chest[1] - at[1], chest[2] - at[2]), Math.hypot(p[0] - at[0], p[1] - at[1], p[2] - at[2]));
+      if (d > R || a.state.hp <= 0) continue;
+      if (shield.blocks(chest)) continue;
+      hits.push({ a, d, p });
+    }
+    for (const { a, d, p } of hits) {
+      const share = FUEL_DRUM_BLAST.centre + (FUEL_DRUM_BLAST.edge - FUEL_DRUM_BLAST.centre) * (d / R);
+      dealDamage(host, attacker, a, share * a.state.maxHp, false, [at[0] - p[0], at[1] - p[1], at[2] - p[2]], 2);
+    }
+    this.splash(at, R, FUEL_DRUM_BLAST.props, "heavy", "fueldrum", by, b.index, (c) => shield.blocks(c));
+    shield.charge((s) => FUEL_DRUM_BLAST.props * splashFalloff(Math.max(0, Math.hypot(s.c[0] - at[0], s.c[1] - at[1], s.c[2] - at[2]) - s.r), R));
+    this.room.broadcastNear("explode", { id: 0, x: at[0], y: at[1], z: at[2], radius: R, weapon: WEAPON_INDEX.get("grenade") ?? 0 }, at, 200);
   }
 
   rebuild(index: number) {

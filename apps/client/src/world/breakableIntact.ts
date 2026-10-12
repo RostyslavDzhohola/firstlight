@@ -192,6 +192,22 @@ export function archetypeShape(body: BodyId, kind: BreakableArchetype): ShapePar
       if (body === "hollowmere") return pillar(P, 1.1, 0.35, 0.5, 4.9, P.cover, P.cover2);
       if (body === "meridian") return [container(P)];
       return [coral(P)];
+    case "fueldrum":
+      // A squat red drum with a hazard band and a dark lid: reads as "this explodes" (content.md §2.2).
+      return [{
+        geometry: lathe(0.95, 10, 5, () => 0.355),
+        pieces: [8, 5],
+        inner: P.metalIn,
+        color: (x, y, z, _nx, ny, _nz, out) => {
+          if (Math.abs(ny) > 0.9) return shaded(0x2a2e34, x, y, z, 21, out);
+          const row = Math.floor((y / 0.95) * 5);
+          if (row === 2) {
+            const stripe = Math.floor(((Math.atan2(z, x) + Math.PI) / (Math.PI * 2)) * 10);
+            return shaded(HAZARD[stripe % 2]!, x, y, z, 22, out);
+          }
+          shaded(row === 0 || row === 4 ? 0x8e2a1e : 0xc23a26, x, y, z, 23, out);
+        },
+      }];
   }
 }
 

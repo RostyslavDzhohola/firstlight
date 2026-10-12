@@ -22,8 +22,9 @@ export const bannedCheck: { current: (userId: string) => boolean } = { current: 
 import { dealDamage, fire, melee, selectedWeapon, stepEffects, stepProjectiles, type CombatHost } from "./combat.ts";
 import { dist3, type V3 } from "./geometry.ts";
 import { emitGameEvent, npcKindOf } from "./events.ts";
-import { emitPileEvent, onPileEvent, pileStore, type PileData } from "./piles.ts";
+import { emitPileEvent, onPileEvent, pileStore, type PileData, type PileKind } from "./piles.ts";
 import { SYSTEM_FACTORIES, type RoomSystem } from "./systems.ts";
+import { supportOf } from "./support.ts";
 import { activeMoveFx, movementLimits } from "./npc/effects.ts";
 import { matchMaker } from "@colyseus/core";
 import { liveSessions } from "../auth/sessions.ts";
@@ -190,9 +191,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       const a = this.actor(c);
       if (a && !a.dead) this.equip(a, m.slot);
     });
-    this.onMessage("use", slotSchema, (c, m) => {
+    this.onMessage("use", slotSchema.extend({ targetId: z.string().max(64).optional() }), (c, m) => {
       const a = this.actor(c);
-      if (this.invAllowed(a)) this.use(a, m.slot);
+      if (this.invAllowed(a)) this.use(a, m.slot, m.targetId);
     });
     this.onMessage("pickup", pickupSchema, (c, m) => {
       const a = this.actor(c);
@@ -550,7 +551,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     a.youDirty = true;
   }
 
-  use(a: PlayerActor | undefined, slot: number) {
+  use(a: PlayerActor | undefined, slot: number, targetId?: string) {
     if (!a || a.dead) return;
     const item = slot < HOTBAR_SLOTS ? a.char.hotbar[slot] : a.char.backpack[slot - HOTBAR_SLOTS];
     if (!item) return;
@@ -566,13 +567,10 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       if (now < a.tonicCooldownUntil) return;
       a.tonicCooldownUntil = now + 8000;
       const dur = item.id === "tonic_small" ? 3 : 4;
-      a.heals.push({ perSec: (tier.heal ?? 40) / dur, until: now + dur * 1000 });
+      a.heals.push({ perSec: (tier.heal ?? 40) / dur, until: now + dur * 1000, left: tier.heal ?? 40 });
       this.consume(a, slot);
-    } else if (item.id === "patchkit") {
-      if (now < a.healCooldownUntil) return;
-      a.healCooldownUntil = now + (tier.cooldown ?? 6) * 1000;
-      a.heals.push({ perSec: ((tier.heal ?? 0.3) * maxHp(a.char.level)) / 2, until: now + 2000 + (tier.rate ?? 1) * 1000 });
-      this.consume(a, slot);
+    } else if (item.id === "patchkit" || item.id === "bubble") {
+      supportOf(this)?.use(a, slot, item, targetId); // channelled heal / shield bubble (support.ts)
     }
   }
 
@@ -672,7 +670,12 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     a.youDirty = true;
   }
 
-  createPile(owner: PlayerActor, items: InvItem[], coins: number, at: V3, deferred?: (() => void)[]): PileData {
+  /**
+   * Leave a pile on the ground. `kind`: "death" for what a player carried when they died (the cap
+   * protects these), "loot" by default (drops, chests, boss overflow), "staged" for admin scenes;
+   * `ttlMs` makes it expire (swept by the quest system).
+   */
+  createPile(owner: PlayerActor, items: InvItem[], coins: number, at: V3, deferred?: (() => void)[], opts: { kind?: PileKind; ttlMs?: number } = {}): PileData {
     const g = this.snapToGround(at);
     const { pile, evicted } = pileStore.current.add({
       body: this.bodyDef.id,
@@ -684,6 +687,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       createdAt: Date.now(),
       items,
       coins,
+      kind: opts.kind ?? "loot",
+      ...(opts.ttlMs ? { expiresAt: Date.now() + opts.ttlMs } : {}),
     });
     const publish = () => {
       emitPileEvent({ kind: "add", pile });
@@ -749,7 +754,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     const events: (() => void)[] = [];
     let pile: PileData | null = null;
     withTx(() => {
-      pile = (items.length || victim.char.coins) && !victim.identity.loadtest ? this.createPile(victim, items, victim.char.coins, actorPos(victim), events) : null;
+      pile = (items.length || victim.char.coins) && !victim.identity.loadtest ? this.createPile(victim, items, victim.char.coins, actorPos(victim), events, { kind: "death" }) : null;
       victim.char.hotbar = [null, null, null, null];
       victim.char.backpack = Array.from({ length: BACKPACK_SLOTS }, () => null);
       victim.char.coins = 0;
@@ -841,6 +846,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   admin(client: Client, cmd: string, args: Record<string, unknown>) {
     const a = this.actors.get(client.sessionId);
     if (!a || !a.identity.admin) return;
+    emitGameEvent(this, { type: "admin", playerId: a.id, cmd, ...(typeof args.target === "string" ? { targetId: args.target } : {}) });
     const num = (k: string, d = 0) => (typeof args[k] === "number" ? (args[k] as number) : d);
     const target = typeof args.target === "string" ? this.actors.get(args.target) : a;
     switch (cmd) {

@@ -117,6 +117,8 @@ export function buildSpawnPoints(terrain: Terrain, arena: ArenaLayout | null): S
   const wilds = PLANET_WILDS[planet];
   const areas: ResolvedArea[] = NPC_AREAS.filter((a) => a.planet === planet).map((a) => ({ area: a, dir: resolveAreaDir(body, a.at) }));
   const points: SpawnPoint[] = [];
+  /** Packs that may carry the Golden Hopbit (egg E3), with their roll. */
+  const goldenCandidates: { point: SpawnPoint; roll: number }[] = [];
   const chord = (a: readonly number[], b: readonly number[]) => Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!) * R;
   const farFromPads = (d: V3) => pads.every((p) => chord(p, d) >= MIN_PAD_DIST);
   const farFromArena = (d: V3, extra: number) => !arena || chord(arena.up, d) >= arena.radius + extra;
@@ -217,11 +219,13 @@ export function buildSpawnPoints(terrain: Terrain, arena: ArenaLayout | null): S
         members.push({ def: NPC_INDEX.get(m.kind)!, level: clampLevel(m.kind, planet, level), a: Math.cos(ang) * rad, b: Math.sin(ang) * rad });
       }
     }
-    if (g.goldenOneIn && hash01(key, 10) < 1 / g.goldenOneIn) {
+    const roll = g.goldenOneIn ? hash01(key, 10) : 1;
+    if (g.goldenOneIn && roll < 1 / g.goldenOneIn) {
       members.push({ def: NPC_INDEX.get("golden_hopbit")!, level: 1, a: 3, b: 3, golden: true });
     }
     const roam = members.some((m) => npcDef(npcIdOf(m.def)).family === "woolback") ? 14 : 10;
     add({ kind: "pack", area: inArea?.area.id ?? null, dir: d, members, roam });
+    if (g.goldenOneIn) goldenCandidates.push({ point: points[points.length - 1]!, roll });
     return true;
   };
 
@@ -261,6 +265,12 @@ export function buildSpawnPoints(terrain: Terrain, arena: ArenaLayout | null): S
         }
       }
     }
+  }
+  // Egg E3 needs at least one Golden Hopbit: if no pack's 1-in-N roll came up (every planet missed
+  // with the shipped seeds), the pack with the lowest roll carries it.
+  if (goldenCandidates.length && !points.some((p) => p.members.some((m) => m.golden))) {
+    const best = goldenCandidates.reduce((x, y) => (y.roll < x.roll ? y : x));
+    best.point.members.push({ def: NPC_INDEX.get("golden_hopbit")!, level: 1, a: 3, b: 3, golden: true });
   }
   return points;
 }

@@ -8,6 +8,9 @@ import { characterRepo, MemoryCharacterRepo } from "../src/world/characters.ts";
 import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
 import { MemoryPileStore, pileStore } from "../src/world/piles.ts";
 import { MemoryProgressStore, progressStore } from "../src/world/quests/store.ts";
+import { copyRestrictions, CopyStateRestrictions } from "../src/world/quests/restrictions.ts";
+import { EGG_TIMERS } from "../src/world/quests/eggs.ts";
+import { SUPPORT_TIMERS } from "../src/world/support.ts";
 import { copyStateStore, MemoryCopyStateStore } from "../src/world/copyState.ts";
 import { hub } from "../src/world/hub.ts";
 import type { BodyId } from "@firstlight/shared";
@@ -17,6 +20,11 @@ export async function startServer(limits: Partial<{ maxClients: number; soloFill
   pileStore.current = new MemoryPileStore();
   progressStore.current = new MemoryProgressStore();
   copyStateStore.current = new MemoryCopyStateStore();
+  copyRestrictions.current = new CopyStateRestrictions(); // backed by the (fresh) copy state above
+  // Process-level account timers (puzzle lockouts, bubble cooldowns) start empty for each test.
+  EGG_TIMERS.puzzles.clear();
+  EGG_TIMERS.keypads.clear();
+  SUPPORT_TIMERS.bubbleReady.clear();
   // Quiet worlds by default: tests that need ambient enemies or bosses opt in via NPC_TUNING.
   resetTuning();
   NPC_TUNING.ambient = false;
