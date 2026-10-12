@@ -131,11 +131,12 @@ export class HorseSystem implements RoomSystem {
   despawn(owner: string, reason: LeaveReason) {
     const h = this.horses.get(owner);
     const a = this.room.playerById(owner);
-    if (a?.mounted) this.clearMounted(a);
+    const ridden = !!a?.mounted;
+    if (a && ridden) this.clearMounted(a);
     if (!h) return;
     this.horses.delete(owner);
     this.room.state.horses.delete(owner);
-    this.announce(owner, "leave", [h.state.x, h.state.y, h.state.z]);
+    this.announce(owner, "leave", a && ridden ? actorPos(a) : [h.state.x, h.state.y, h.state.z]);
     if (a && !a.dead && reason === "idle") a.client.send("toast", { text: "Your horse wandered off. Whistle (H) to call it back", kind: "info" });
   }
 
@@ -161,8 +162,9 @@ export class HorseSystem implements RoomSystem {
         continue;
       }
       if (a.mounted) {
+        // A ridden horse's synced spot stays where it was mounted: clients draw it under the rider,
+        // so streaming the rider's position twice would only cost bandwidth. Dismounts place it.
         h.state.ridden = true;
-        this.follow(a, h);
         const p = a.state;
         if (this.deep(p.x, p.y, p.z)) this.dismount(a, "water");
         else if (!a.airborne) h.lastDry = [p.x, p.y, p.z];
@@ -199,7 +201,7 @@ export class HorseSystem implements RoomSystem {
 
   // ---------------------------------------------------------------- helpers
 
-  /** Rider and horse share a position while mounted (the client draws the horse under the rider). */
+  /** Put the horse on the rider's spot (at mount time; while ridden the client draws it under the rider). */
   private follow(a: PlayerActor, h: Horse) {
     const p = a.state;
     h.state.x = p.x;

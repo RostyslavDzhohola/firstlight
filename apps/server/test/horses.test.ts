@@ -194,7 +194,8 @@ describe("riding", () => {
     expect(galloped.corrections).toBe(0);
     expect(galloped.moved).toBeGreaterThan(30); // 35 m in 2.5 s
     const hh = horses(b).get(b.id);
-    expect(Math.hypot(hh.x - me(b).x, hh.y - me(b).y, hh.z - me(b).z)).toBeLessThan(1); // the horse is under the rider
+    const parked = { x: hh.x, y: hh.y, z: hh.z }; // a ridden horse's synced spot doesn't stream (clients draw it under the rider)
+    expect(Math.hypot(parked.x - me(b).x, parked.y - me(b).y, parked.z - me(b).z)).toBeGreaterThan(25);
 
     // No weapons from the saddle.
     b.send("fire", { slot: 0, ox: me(b).x, oy: me(b).y, oz: me(b).z, dx: 1, dy: 0, dz: 0, t: Date.now() });
@@ -204,6 +205,10 @@ describe("riding", () => {
     b.send("horse", { action: "dismount" });
     await until("dismounted", () => !mounted(b));
     expect(horses(b).get(b.id).ridden).toBe(false);
+    await until("the horse steps out beside the rider", () => {
+      const h = horses(b).get(b.id);
+      return Math.hypot(h.x - me(b).x, h.y - me(b).y, h.z - me(b).z) < 3;
+    });
     await sleep(HORSE.dismountGraceMs + 100);
     const sprinted = await run(b, 14, 2.5);
     expect(sprinted.corrections).toBeGreaterThan(0);

@@ -28,6 +28,8 @@ interface Shown {
   /** Displayed feet position (eases to the server's spot after a dismount). */
   pos: THREE.Vector3;
   fwd: THREE.Vector3;
+  /** Drawn somewhere real yet (a ridden horse's synced spot is stale: the server doesn't stream it). */
+  placed: boolean;
 }
 
 interface HorseMsg {
@@ -80,7 +82,7 @@ export class HorseClient {
       seen.add(owner);
       let s = this.shown.get(owner);
       if (!s) {
-        s = { view: new HorseView(h.coat ?? 0), pos: new THREE.Vector3(h.x, h.y, h.z), fwd: new THREE.Vector3(h.fx, h.fy, h.fz) };
+        s = { view: new HorseView(h.coat ?? 0), pos: new THREE.Vector3(h.x, h.y, h.z), fwd: new THREE.Vector3(h.fx, h.fy, h.fz), placed: false };
         g.ctx.scene.add(s.view.root);
         this.shown.set(owner, s);
       }
@@ -105,12 +107,18 @@ export class HorseClient {
         }
         s.pos.copy(_pos);
         s.fwd.copy(_fwd);
+        s.placed = true;
+      } else if (h.ridden) {
+        // Ridden but not under a rider here (our own slide-off awaiting the server, or a rider whose
+        // avatar doesn't exist yet): hold the last drawn spot; the server places it on the dismount.
+        if (!s.placed) s.view.root.visible = false;
       } else {
         // Standing: ease to the server's spot (a dismount moves it a step aside).
         const before = _v.copy(s.pos);
         s.pos.lerp(_pos.set(h.x, h.y, h.z), Math.min(1, dt * 6));
         speed = dt > 0 ? before.distanceTo(s.pos) / dt : 0;
         s.fwd.set(h.fx, h.fy, h.fz);
+        s.placed = true;
       }
       s.view.set(s.pos.x, s.pos.y, s.pos.z, s.fwd.x, s.fwd.y, s.fwd.z, speed, airborne, dt);
       if (ridden && rider) {
