@@ -157,9 +157,8 @@ describe("no shortcuts through the planet (F12 final Opus N-B1)", () => {
     r.send("input", { seq: 101, x: 0, y: 0, z: 0, fx: 0, fy: 0, fz: 1, anim: 1, t: Date.now() });
     await sleep(60);
     r.send("input", { seq: 102, x: target![0] * tr, y: target![1] * tr, z: target![2] * tr, fx: 0, fy: 0, fz: 1, anim: 1, t: Date.now() });
-    await sleep(300);
+    await waitFor(() => corrections > 0);
     const end = [me(r).x, me(r).y, me(r).z];
-    expect(corrections).toBeGreaterThan(0);
     expect(end.every(Number.isFinite)).toBe(true);
     expect(Math.hypot(end[0]! - start[0]!, end[1]! - start[1]!, end[2]! - start[2]!)).toBeLessThan(5);
   });
@@ -569,8 +568,7 @@ describe("standing on props (F12 client review should-fix 4)", () => {
       send(k.r, k.seq, d, groundR(d), 1);
       await sleep(80);
     }
-    await sleep(150);
-    expect(k.corrections.n).toBeGreaterThan(0);
+    await waitFor(() => k.corrections.n > 0);
     const p = me(k.r);
     const q = [p.x - b.px, p.y - b.py, p.z - b.pz];
     const lx = q[0]! * b.rx + q[1]! * b.ry + q[2]! * b.rz, lz = q[0]! * b.fx + q[1]! * b.fy + q[2]! * b.fz;
@@ -635,8 +633,7 @@ describe("no walking through props in one packet (F12 final S2)", () => {
       await sleep(400);
       k.corrections.n = 0;
       send(k.r, k.seq, norm(back), Math.hypot(...back), 1);
-      await sleep(300);
-      expect(k.corrections.n).toBeGreaterThan(0);
+      await waitFor(() => k.corrections.n > 0);
       const p = me(k.r);
       const lz = (p.x - w.px) * w.fx + (p.y - w.py) * w.fy + (p.z - w.pz) * w.fz;
       expect(lz).toBeLessThan(0); // still on the near side
