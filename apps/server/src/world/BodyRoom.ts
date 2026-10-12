@@ -21,7 +21,7 @@ export const bannedCheck: { current: (userId: string) => boolean } = { current: 
 import { dealDamage, fire, melee, selectedWeapon, stepEffects, stepProjectiles, type CombatHost } from "./combat.ts";
 import { dist3, type V3 } from "./geometry.ts";
 import { emitGameEvent, npcKindOf } from "./events.ts";
-import { emitPileEvent, onPileEvent, pileStore, type PileData } from "./piles.ts";
+import { emitPileEvent, onPileEvent, pileStore, type PileData, type PileKind } from "./piles.ts";
 import { SYSTEM_FACTORIES, type RoomSystem } from "./systems.ts";
 import { supportOf } from "./support.ts";
 import { movementLimits } from "./npc/effects.ts";
@@ -662,7 +662,12 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     a.youDirty = true;
   }
 
-  createPile(owner: PlayerActor, items: InvItem[], coins: number, at: V3, deferred?: (() => void)[]): PileData {
+  /**
+   * Leave a pile on the ground. `kind`: "death" for what a player carried when they died (the cap
+   * protects these), "loot" by default (drops, chests, boss overflow), "staged" for admin scenes;
+   * `ttlMs` makes it expire (swept by the quest system).
+   */
+  createPile(owner: PlayerActor, items: InvItem[], coins: number, at: V3, deferred?: (() => void)[], opts: { kind?: PileKind; ttlMs?: number } = {}): PileData {
     const g = this.snapToGround(at);
     const { pile, evicted } = pileStore.current.add({
       body: this.bodyDef.id,
@@ -674,6 +679,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       createdAt: Date.now(),
       items,
       coins,
+      kind: opts.kind ?? "loot",
+      ...(opts.ttlMs ? { expiresAt: Date.now() + opts.ttlMs } : {}),
     });
     const publish = () => {
       emitPileEvent({ kind: "add", pile });
@@ -739,7 +746,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     const events: (() => void)[] = [];
     let pile: PileData | null = null;
     withTx(() => {
-      pile = (items.length || victim.char.coins) && !victim.identity.loadtest ? this.createPile(victim, items, victim.char.coins, actorPos(victim), events) : null;
+      pile = (items.length || victim.char.coins) && !victim.identity.loadtest ? this.createPile(victim, items, victim.char.coins, actorPos(victim), events, { kind: "death" }) : null;
       victim.char.hotbar = [null, null, null, null];
       victim.char.backpack = Array.from({ length: BACKPACK_SLOTS }, () => null);
       victim.char.coins = 0;

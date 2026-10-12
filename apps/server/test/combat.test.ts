@@ -3,6 +3,7 @@ import type { Room } from "@colyseus/sdk";
 import { BODIES, padDirs } from "@firstlight/shared";
 import type { Game } from "../src/app.ts";
 import { RULES } from "../src/world/BodyRoom.ts";
+import { pileStore } from "../src/world/piles.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 
 let game: Game;
@@ -98,6 +99,7 @@ describe("combat (seam 1)", () => {
     a.send("admin", { cmd: "damage", args: { target: b.sessionId, amount: 500 } });
     await waitFor(() => death !== null);
     expect(death.pileId).toBeTruthy();
+    expect(pileStore.current.get(death.pileId)?.kind).toBe("death"); // protected from eviction past the cap
     await waitFor(() => st(a).piles?.has(death.pileId));
     // Rebirth (a new life in Portus), then come back for the pile.
     b.send("respawn", { starter: 0, palette: 2 });

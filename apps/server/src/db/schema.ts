@@ -147,6 +147,11 @@ export const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (user_id, stat)
   );
   `,
+  // 3: pile kinds (eviction past the cap prefers staged, then loot piles, over death piles) and expiry
+  `
+  ALTER TABLE pile ADD COLUMN kind TEXT NOT NULL DEFAULT 'death';
+  ALTER TABLE pile ADD COLUMN expires_at INTEGER;
+  `,
 ];
 
 /** Apply every migration newer than the database's user_version, each in its own transaction. */

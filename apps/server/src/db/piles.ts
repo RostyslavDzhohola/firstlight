@@ -24,6 +24,9 @@ export interface Pile<T = unknown> {
   ownerId: string | null;
   ownerName: string;
   createdAt: number;
+  /** "death" | "loot" | "staged" (eviction order past the cap: staged, loot, then death). */
+  kind: string;
+  expiresAt: number | null;
 }
 
 interface PileRow {
@@ -37,6 +40,8 @@ interface PileRow {
   owner_id: string | null;
   owner_name: string;
   created_at: number;
+  kind: string;
+  expires_at: number | null;
 }
 
 function toPile<T>(r: PileRow): Pile<T> {
@@ -51,6 +56,8 @@ function toPile<T>(r: PileRow): Pile<T> {
     ownerId: r.owner_id,
     ownerName: r.owner_name,
     createdAt: r.created_at,
+    kind: r.kind,
+    expiresAt: r.expires_at,
   };
 }
 
@@ -64,17 +71,22 @@ export interface DropPileInput<T> {
   ownerId?: string | null;
   ownerName: string;
   now?: number;
+  kind?: "death" | "loot" | "staged";
+  expiresAt?: number | null;
 }
 
-/** Insert a pile; evicts the oldest piles on that body beyond the cap. Returns evicted ids. */
+/**
+ * Insert a pile; beyond the cap evicts other piles on that body: staged, then loot, then death piles,
+ * oldest first (never the new one). Returns evicted ids.
+ */
 export function dropPile<T>(db: Db, input: DropPileInput<T>, cap = PILE_CAP_PER_BODY): { pile: Pile<T>; evicted: number[] } {
   return tx(db, () => {
     const entries: PileEntry<T>[] = input.items.map((item, key) => ({ key, item }));
     const now = input.now ?? Date.now();
     const res = stmt(
       db,
-      "INSERT INTO pile (body, pos_x, pos_y, pos_z, items_json, coins, owner_id, owner_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    ).run(input.body, input.x, input.y, input.z, JSON.stringify(entries), Math.max(0, Math.floor(input.coins)), input.ownerId ?? null, input.ownerName, now);
+      "INSERT INTO pile (body, pos_x, pos_y, pos_z, items_json, coins, owner_id, owner_name, created_at, kind, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run(input.body, input.x, input.y, input.z, JSON.stringify(entries), Math.max(0, Math.floor(input.coins)), input.ownerId ?? null, input.ownerName, now, input.kind ?? "death", input.expiresAt ?? null);
     const id = Number(res.lastInsertRowid);
     const count = (stmt(db, "SELECT COUNT(*) AS n FROM pile WHERE body = ?").get(input.body) as { n: number }).n;
     let evicted: number[] = [];
@@ -82,12 +94,18 @@ export function dropPile<T>(db: Db, input: DropPileInput<T>, cap = PILE_CAP_PER_
       evicted = (
         stmt(
           db,
-          "DELETE FROM pile WHERE id IN (SELECT id FROM pile WHERE body = ? ORDER BY created_at, id LIMIT ?) RETURNING id",
-        ).all(input.body, count - cap) as { id: number }[]
+          `DELETE FROM pile WHERE id IN (SELECT id FROM pile WHERE body = ? AND id <> ?
+             ORDER BY CASE kind WHEN 'staged' THEN 0 WHEN 'loot' THEN 1 ELSE 2 END, created_at, id LIMIT ?) RETURNING id`,
+        ).all(input.body, id, count - cap) as { id: number }[]
       ).map((r) => r.id);
     }
     return { pile: getPile<T>(db, id)!, evicted };
   });
+}
+
+/** Delete a body's piles whose expiry has passed. Returns their ids. */
+export function sweepPiles(db: Db, body: string, now: number): number[] {
+  return (stmt(db, "DELETE FROM pile WHERE body = ? AND expires_at IS NOT NULL AND expires_at <= ? RETURNING id").all(body, now) as { id: number }[]).map((r) => r.id);
 }
 
 export function getPile<T = unknown>(db: Db, id: number): Pile<T> | null {
