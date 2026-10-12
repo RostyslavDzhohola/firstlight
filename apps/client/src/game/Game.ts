@@ -191,7 +191,7 @@ export class Game {
       }, crowd);
       this.player.frozen = true;
       this.applyCharsVisibility();
-      this.bench.update(0, performance.now(), 16, this.ctx.camera);
+      this.bench.update(0, performance.now(), this.ctx.camera);
     }
     setLoading("Warming up shaders…", 0.92);
     await warmup(this.ctx, { frames: 4, hooks: [this.warmupHook()], beforeFrame: updateWorld });
@@ -271,7 +271,7 @@ export class Game {
 
     let focus: THREE.Vector3;
     if (this.bench) {
-      this.bench.update(dt, now, rawMs, this.ctx.camera);
+      this.bench.update(dt, now, this.ctx.camera);
       focus = this.bench.focus;
     } else {
       this.player.update(dt, this.input, this.input.rmb);
@@ -327,6 +327,7 @@ export class Game {
     this.ctx.render();
     const cpuMs = performance.now() - cpu0;
     this.ctx.afterFrame(now, rawMs);
+    this.bench?.record(rawMs);
     shaderMonitorFrame();
     const st = this.planet.stats();
     this.perf.frame(now, dt, {

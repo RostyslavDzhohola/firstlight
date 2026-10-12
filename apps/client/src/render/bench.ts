@@ -166,25 +166,37 @@ export class Bench {
     return this.phase !== "done";
   }
 
-  /** Drive the camera and the crowd. `frameMs` = unclamped frame time of the previous frame. */
-  update(dt: number, now: number, frameMs: number, camera: THREE.PerspectiveCamera) {
+  /** Before rendering: drive the camera and the crowd. */
+  update(dt: number, now: number, camera: THREE.PerspectiveCamera) {
     if (this.phase === "done") return;
     this.t += dt;
-    const total = this.phase === "warm" ? Math.max(this.warm, 0.001) : this.duration;
     const s = this.phase === "warm" ? (this.t / Math.max(this.warm, 1)) * 0.05 : this.t / this.duration;
     this.pose(Math.min(0.9999, s % 1), camera);
     this.updateCrowd(dt, now);
-
     if (this.phase === "warm") {
       this.el.textContent = `BENCH warming up ${this.t.toFixed(1)} / ${this.warm}s`;
-      if (this.t >= total) {
+      if (this.t >= Math.max(this.warm, 0.001)) {
         this.phase = "run";
         this.t = 0;
         this.shaderBuildsAtStart = shaderStats().total;
+        this.recording = false;
       }
+    }
+  }
+
+  private recording = false;
+
+  /**
+   * After rendering: record this frame. `frameMs` = the unclamped interval since the previous
+   * frame; renderer.info still holds this frame's draw calls (it resets at the next loop tick).
+   */
+  record(frameMs: number) {
+    if (this.phase !== "run") return;
+    // Skip the first run frame: its interval straddles the warm/run switch.
+    if (!this.recording) {
+      this.recording = true;
       return;
     }
-    // Record the previous frame (its draw stats are still in renderer.info).
     const info = this.host.ctx.renderer.info.render;
     this.frames.push(frameMs);
     this.draws.push(info.drawCalls);
