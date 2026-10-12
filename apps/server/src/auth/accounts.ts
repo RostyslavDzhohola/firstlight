@@ -14,12 +14,13 @@ import type { Express, NextFunction, Request, Response } from "express";
 import { ensureAccount, isBanned, isIpBanned } from "../db/accounts.ts";
 import { openGameDb, setGameDb, type Db } from "../db/game-db.ts";
 import { linkAccounts } from "../db/link.ts";
+import { setDisplayName } from "../db/accounts.ts";
 import { reserveOtpSend, releaseOtpSend } from "../db/otp-budget.ts";
 import { closeDanglingSessions, pruneSessionLog } from "../db/sessions.ts";
 import { authOptions, authRequestState, buildAuth, type FirstlightAuth } from "./better-auth.ts";
 import { hmacHex, safeEqual } from "./crypto.ts";
 import type { Identity, TokenVerifier, VerifyContext } from "./identity.ts";
-import { CLIENT_IP_HEADER, firstForwardedFor, normalizeIp } from "./ip.ts";
+import { banKey, CLIENT_IP_HEADER, firstForwardedFor, normalizeIp } from "./ip.ts";
 import { accountLinks, type LinkEvents } from "./links.ts";
 import { DevOutbox, disabledMailer, resendMailer, type Mailer } from "./mailer.ts";
 import { identifyRequest, mountAccountRoutes, requireAdminFor } from "./routes.ts";
@@ -97,7 +98,7 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
   else mailer = devOutbox = new DevOutbox(!!cfg.devMailLog);
   if (cfg.mailer instanceof DevOutbox) devOutbox = cfg.mailer;
 
-  const hashIp = (ip: string) => hmacHex(`${cfg.secret}:ip`, ip).slice(0, 32);
+  const hashIp = (ip: string) => hmacHex(`${cfg.secret}:ip`, banKey(ip)).slice(0, 32);
   const hashEmail = (email: string) => hmacHex(`${cfg.secret}:email`, email.toLowerCase());
 
   const options = authOptions({
@@ -119,6 +120,7 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
       return r.ok;
     },
     onLink: (guest, account) => {
+      links.emitBefore(guest.id, account.id); // rooms flush live characters first
       const r = linkAccounts(db, guest.id, account.id);
       const { moved, displaced } = sessions.rekey(guest.id, account.id);
       const name = r.displayName ?? (account.name || guest.name);
@@ -164,7 +166,16 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
     const ipHash = ip ? hashIp(ip) : null;
     if (ipHash && isIpBanned(db, ipHash, now)) return null;
     const acc = ensureAccount(db, sub, now, ipHash);
-    return { userId: sub, name: acc.displayName ?? (user.name || tokenName || `Wanderer-${sub.slice(0, 4)}`), guest: user.anon === 1, admin: acc.isAdmin, loadtest: false };
+    // Only validated display names are shown; otherwise a generated guest-style name (review:
+    // Better Auth's free-form user.name must never become the in-game name).
+    const generated = /^Wanderer-\d{4}$/.test(user.name) ? user.name : `Wanderer-${(parseInt(sub.replace(/[^0-9a-f]/gi, "").slice(-6) || "0", 16) % 9000) + 1000}`;
+    let display = acc.displayName;
+    // A name supplied at sign-in is only adopted if it passes the display-name rules and is free.
+    if (!display && user.name && user.name !== generated) {
+      const r = setDisplayName(db, sub, user.name, now);
+      if (r.ok) display = r.name;
+    }
+    return { userId: sub, name: display ?? generated, guest: user.anon === 1, admin: acc.isAdmin, loadtest: false };
   };
 
   const fallback = cfg.fallbackVerifier;

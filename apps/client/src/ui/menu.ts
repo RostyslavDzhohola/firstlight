@@ -89,6 +89,24 @@ export class Menu {
     this.el.style.display = "grid";
   }
 
+  /** A full-screen notice (connection lost, playing elsewhere, banned) with an optional action. */
+  showNotice(title: string, text: string, action: string | null, fn: (() => void) | null) {
+    this.suppressed = true;
+    this.panel.innerHTML = "";
+    const h = document.createElement("h2");
+    h.textContent = title;
+    const p = document.createElement("p");
+    p.textContent = text;
+    this.panel.append(h, p);
+    if (action && fn) {
+      this.panel.append(this.button(action, () => {
+        this.suppressed = false;
+        fn();
+      }));
+    }
+    this.el.style.display = "grid";
+  }
+
   private button(text: string, fn: () => void, ghost = false): HTMLButtonElement {
     const b = document.createElement("button");
     b.className = `fl-btn${ghost ? " ghost" : ""}`;

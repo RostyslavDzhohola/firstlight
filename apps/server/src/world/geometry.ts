@@ -15,40 +15,57 @@ export interface CapsuleHit {
 }
 
 /**
- * Ray (origin o, unit dir d, max length maxT) against a capsule standing on `feet` along the
- * local up of a planet-centred world, with radius r and height h. Returns the nearest hit.
+ * Segment (origin o, unit dir d, length maxT) against a capsule standing on `feet` along the local
+ * up of a planet-centred world, radius r, height h. Exact: closest points between the segment and
+ * the capsule axis (Ericson, Real-Time Collision Detection §5.1.9), then the entry point by solving
+ * against the sphere around the closest axis point. Returns the nearest hit or null.
  */
 export function rayCapsule(o: V3, d: V3, maxT: number, feet: V3, r: number, h: number): CapsuleHit | null {
   const l = Math.hypot(feet[0], feet[1], feet[2]);
   const up: V3 = [feet[0] / l, feet[1] / l, feet[2] / l];
-  // Segment A..B is the capsule's core.
   const A: V3 = [feet[0] + up[0] * r, feet[1] + up[1] * r, feet[2] + up[2] * r];
-  const B: V3 = [feet[0] + up[0] * (h - r), feet[1] + up[1] * (h - r), feet[2] + up[2] * (h - r)];
-  // Closest approach between the ray and the segment (sample-free analytic solution).
-  const u: V3 = [B[0] - A[0], B[1] - A[1], B[2] - A[2]];
-  const w: V3 = [o[0] - A[0], o[1] - A[1], o[2] - A[2]];
-  const a = 1; // d·d
-  const b = d[0] * u[0] + d[1] * u[1] + d[2] * u[2];
-  const c = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
-  const dd = d[0] * w[0] + d[1] * w[1] + d[2] * w[2];
-  const e = u[0] * w[0] + u[1] * w[1] + u[2] * w[2];
-  const den = a * c - b * b;
-  let sc = den > 1e-9 ? (b * e - c * dd) / den : 0;
-  let tc = den > 1e-9 ? (a * e - b * dd) / den : e / c;
-  tc = Math.max(0, Math.min(1, tc));
-  sc = Math.max(0, Math.min(maxT, sc));
-  // Refine: recompute sc for clamped tc.
-  const P: V3 = [A[0] + u[0] * tc, A[1] + u[1] * tc, A[2] + u[2] * tc];
-  sc = Math.max(0, Math.min(maxT, (P[0] - o[0]) * d[0] + (P[1] - o[1]) * d[1] + (P[2] - o[2]) * d[2]));
-  const Q: V3 = [o[0] + d[0] * sc, o[1] + d[1] * sc, o[2] + d[2] * sc];
-  const dist = Math.hypot(Q[0] - P[0], Q[1] - P[1], Q[2] - P[2]);
+  const axisLen = Math.max(0, h - 2 * r);
+  // Segment 1: P(s) = o + d*s, s in [0, maxT]; segment 2: Q(t) = A + up*t, t in [0, axisLen].
+  const rx = o[0] - A[0], ry = o[1] - A[1], rz = o[2] - A[2];
+  const a = maxT * maxT; // |d*maxT|^2 with unit d
+  const e = axisLen * axisLen;
+  const f = (up[0] * rx + up[1] * ry + up[2] * rz) * axisLen;
+  const c = (d[0] * rx + d[1] * ry + d[2] * rz) * maxT;
+  const b = (d[0] * up[0] + d[1] * up[1] + d[2] * up[2]) * maxT * axisLen;
+  let s: number, t: number; // normalised parameters in [0, 1]
+  const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
+  if (a <= 1e-12 && e <= 1e-12) {
+    s = 0; t = 0;
+  } else if (a <= 1e-12) {
+    s = 0; t = clamp01(f / e);
+  } else if (e <= 1e-12) {
+    t = 0; s = clamp01(-c / a);
+  } else {
+    const denom = a * e - b * b;
+    s = denom > 1e-12 ? clamp01((b * f - c * e) / denom) : 0;
+    t = (b * s + f) / e;
+    if (t < 0) { t = 0; s = clamp01(-c / a); }
+    else if (t > 1) { t = 1; s = clamp01((b - c) / a); }
+  }
+  const S = s * maxT;
+  const T = t * axisLen;
+  const P: V3 = [o[0] + d[0] * S, o[1] + d[1] * S, o[2] + d[2] * S];
+  const Q: V3 = [A[0] + up[0] * T, A[1] + up[1] * T, A[2] + up[2] * T];
+  const dist = Math.hypot(P[0] - Q[0], P[1] - Q[1], P[2] - Q[2]);
   if (dist > r) return null;
-  // Back off to the entry point.
-  const back = Math.sqrt(Math.max(0, r * r - dist * dist));
-  const t = Math.max(0, sc - back);
-  const hit: V3 = [o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t];
+  // Entry point: first intersection of the ray with the sphere (centre Q, radius r).
+  const mx = o[0] - Q[0], my = o[1] - Q[1], mz = o[2] - Q[2];
+  const bb = mx * d[0] + my * d[1] + mz * d[2];
+  const cc = mx * mx + my * my + mz * mz - r * r;
+  let tHit = 0;
+  if (cc > 0) {
+    const disc = bb * bb - cc;
+    tHit = disc > 0 ? Math.max(0, -bb - Math.sqrt(disc)) : S;
+  }
+  tHit = Math.min(tHit, maxT);
+  const hit: V3 = [o[0] + d[0] * tHit, o[1] + d[1] * tHit, o[2] + d[2] * tHit];
   const heightAboveFeet = (hit[0] - feet[0]) * up[0] + (hit[1] - feet[1]) * up[1] + (hit[2] - feet[2]) * up[2];
-  return { t, heightAboveFeet };
+  return { t: tHit, heightAboveFeet };
 }
 
 /** Distance along the ray to the first terrain intersection, or Infinity. Marches in `step` metres. */

@@ -21,8 +21,27 @@ export interface AccountLinkedEvent {
 
 export type AccountLinkedListener = (ev: AccountLinkedEvent) => void;
 
+export type BeforeLinkListener = (fromUserId: string, toUserId: string) => void;
+
 export class LinkEvents {
   private listeners = new Set<AccountLinkedListener>();
+  private before = new Set<BeforeLinkListener>();
+
+  /** Called synchronously before rows move, so rooms can flush live characters of both ids. */
+  onBeforeLink(fn: BeforeLinkListener): () => void {
+    this.before.add(fn);
+    return () => this.before.delete(fn);
+  }
+
+  emitBefore(fromUserId: string, toUserId: string): void {
+    for (const fn of this.before) {
+      try {
+        fn(fromUserId, toUserId);
+      } catch (err) {
+        console.error("before-link listener failed", err);
+      }
+    }
+  }
 
   /** Subscribe; returns an unsubscribe function (call it in the room's onDispose). */
   on(fn: AccountLinkedListener): () => void {

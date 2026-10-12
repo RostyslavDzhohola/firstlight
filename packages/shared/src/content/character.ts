@@ -24,6 +24,8 @@ export interface CharacterData {
   lifeStartedAt: number;
   deaths: number;
   dead?: boolean;
+  /** Server-issued travel ticket: the body this character may join next (portal or rebirth). */
+  travelTo?: BodyId;
 }
 
 /** A fresh life: level 1, starter weapon, no coins, in Portus. */
