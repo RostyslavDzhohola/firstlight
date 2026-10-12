@@ -5,6 +5,7 @@ import type { Room } from "@colyseus/sdk";
 import { awardMedal, discoverPad, getAccount, loadCharacter, saveCharacter, type CharacterData } from "../src/db/index.ts";
 import { otpSendsToday } from "../src/db/otp-budget.ts";
 import { DevOutbox, type SendResult } from "../src/auth/mailer.ts";
+import { OTP_PER_ACCOUNT_PER_DAY } from "../src/auth/better-auth.ts";
 
 import type { AccountLinkedEvent } from "../src/auth/links.ts";
 import { api, Browser, decodeJwt, joinWithToken, play, startAuthServer, type AuthServer } from "./auth-helpers.ts";
@@ -616,6 +617,62 @@ describe("Better Auth endpoints the game doesn't use are off (F12 final review S
     const b = await attacker.client.emailOtp.sendVerificationOtp({ email: "nobody@example.test", type: "sign-in" });
     expect(a.error).toBeNull();
     expect(b.error).toBeNull();
+  });
+});
+
+describe("one session can't drain the OTP budget (F12 final review S7)", () => {
+  const ask = (b: Browser, email: string) => b.client.emailOtp.sendVerificationOtp({ email, type: "sign-in" });
+
+  it(`a player who may save gets ${OTP_PER_ACCOUNT_PER_DAY} codes a day, whatever its IP; other players are unaffected`, async () => {
+    server = await startAuthServer({ rateLimit: true });
+    const b = new Browser(server, "198.51.100.95");
+    await b.playToken();
+    await b.levelUp(2);
+    for (let i = 0; i < OTP_PER_ACCOUNT_PER_DAY; i++) {
+      b.ip = `203.0.113.${100 + i}`; // a new address every request (the per-IP cap doesn't help)
+      expect((await ask(b, `drain${i}@example.test`)).error).toBeNull();
+    }
+    b.ip = "203.0.113.150";
+    const over = await ask(b, "drain-over@example.test");
+    expect(over.error).toMatchObject({ status: 429, code: "SAVING_BUSY" });
+    expect(server.accounts.devOutbox!.lastCode("drain-over@example.test")).toBeNull();
+    expect(otpSendsToday(server.accounts.db)).toBe(OTP_PER_ACCOUNT_PER_DAY);
+    const other = new Browser(server, "198.51.100.96");
+    await other.playToken();
+    await other.levelUp(2);
+    expect((await ask(other, "other@example.test")).error).toBeNull();
+  });
+
+  it("a failed send doesn't count against the player's daily cap", async () => {
+    const mailer = new ControlledOutbox();
+    server = await startAuthServer({ mailer });
+    const b = new Browser(server, "198.51.100.97");
+    await b.playToken();
+    await b.levelUp(2);
+    mailer.fail = true;
+    for (let i = 0; i < OTP_PER_ACCOUNT_PER_DAY; i++) expect((await ask(b, `fail${i}@example.test`)).error?.status).toBe(503);
+    mailer.fail = false;
+    expect((await ask(b, "works@example.test")).error).toBeNull();
+  });
+
+  it("a banned account's session gets no code at all", async () => {
+    server = await startAuthServer();
+    const out = server.accounts.devOutbox!;
+    const b = new Browser(server, "198.51.100.98");
+    const id = String(decodeJwt(await b.playToken()).sub);
+    await b.levelUp(2);
+    const { banUser } = await import("../src/db/index.ts");
+    banUser(server.accounts.db, { userId: id, ipHash: null, reason: "test" });
+    const r = await ask(b, "banned-new@example.test");
+    expect(r.error).toMatchObject({ status: 403, code: "BANNED" });
+    // Not even through the public path for a saved address.
+    const saver = new Browser(server, "198.51.100.99");
+    await saver.playToken();
+    await saver.saveWithEmail("saved-elsewhere@example.test");
+    const sent = out.sent;
+    expect((await ask(b, "saved-elsewhere@example.test")).error).toMatchObject({ status: 403, code: "BANNED" });
+    expect(out.sent).toBe(sent);
+    expect(otpSendsToday(server.accounts.db)).toBe(1);
   });
 });
 

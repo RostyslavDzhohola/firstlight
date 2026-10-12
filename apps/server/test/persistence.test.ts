@@ -303,6 +303,23 @@ describe("OTP send budget", () => {
     expect(reserveOtpSend(db, "e3", lim, t + 3_600_004).ok).toBe(true);
     expect(reserveOtpSend(db, "e4", lim, t + 86_400_000).ok).toBe(true); // next UTC day
   });
+
+  it("caps one account's sends per UTC day; a released send is refunded (F12 final review S7)", () => {
+    const lim = { perEmailPerHour: 3, perDay: 100, perAccountPerDay: 2 };
+    const t = 60 * 86_400_000;
+    expect(reserveOtpSend(db, "a1", lim, t, "acct").ok).toBe(true);
+    const second = reserveOtpSend(db, "a2", lim, t + 1, "acct");
+    expect(second.ok).toBe(true);
+    expect(reserveOtpSend(db, "a3", lim, t + 2, "acct")).toEqual({ ok: false, reason: "account" });
+    expect(reserveOtpSend(db, "a3", lim, t + 3, "other").ok).toBe(true); // other accounts are unaffected
+    expect(reserveOtpSend(db, "a3", lim, t + 4).ok).toBe(true); // public sends have no account
+    if (second.ok) releaseOtpSend(db, second.id, "acct");
+    expect(reserveOtpSend(db, "a4", lim, t + 5, "acct").ok).toBe(true);
+    expect(reserveOtpSend(db, "a5", lim, t + 6, "acct")).toEqual({ ok: false, reason: "account" });
+    expect(reserveOtpSend(db, "a5", lim, t + 86_400_000, "acct").ok).toBe(true); // next UTC day
+    // Only today's counter is kept per account.
+    expect((db.prepare("SELECT COUNT(*) AS n FROM account_stat WHERE user_id = ?").get("acct") as { n: number }).n).toBe(1);
+  });
 });
 
 describe("display-name filter", () => {

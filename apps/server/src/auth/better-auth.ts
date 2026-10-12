@@ -16,6 +16,9 @@ export const SAVING_BUSY = "Saving is busy, try again later";
 /** A new address only gets a code from a player who reached this level (the save card's first level-up). */
 export const OTP_MIN_LEVEL = 2;
 
+/** Codes one account may ask for per UTC day (saving a guest), so one session can't drain the global budget. */
+export const OTP_PER_ACCOUNT_PER_DAY = 10;
+
 /**
  * Better Auth endpoints the game never calls (F12 final review S6, S8). It uses only anonymous
  * sign-in, get-session, token, sign-in codes (send-verification-otp, type "sign-in") and
@@ -80,6 +83,8 @@ export interface AuthDeps {
   ipBanned(ip: string): boolean;
   /** Does this (lower-cased) address belong to a saved account? (A returning player.) */
   savedEmail(email: string): boolean;
+  /** Is this account banned? (Its session gets no codes at all.) */
+  accountBanned(userId: string): boolean;
   /** May this signed-in player get a code for any address? (Saving a guest after OTP_MIN_LEVEL.) */
   maySave(userId: string): boolean;
   /**
@@ -89,7 +94,8 @@ export interface AuthDeps {
   queueOtp(email: string): void;
   /**
    * Reserve one OTP send for this (lower-cased) email; false = over budget. Returns a reservation id.
-   * `userId` is the signed-in player asking, or null for a queued public send.
+   * `userId` is the signed-in player asking (OTP_PER_ACCOUNT_PER_DAY applies), or null for a queued
+   * public send.
    * The two kinds have separate per-address hourly caps, so public requests (which only reach saved
    * addresses) never change what a player who may save is told about an address.
    */
@@ -146,6 +152,8 @@ export function authOptions(d: AuthDeps) {
         if (!authRequestState.getStore()?.otpQueued) {
           const session = await getSessionFromCtx(ctx, { disableRefresh: true }).catch(() => null);
           userId = session?.user.id ?? null;
+          // A banned account's session gets nothing (F12 final review S7).
+          if (userId && d.accountBanned(userId)) throw APIError.from("FORBIDDEN", { code: "BANNED", message: "This account is banned." });
           if (!userId || !d.maySave(userId)) {
             if (d.savedEmail(email)) d.queueOtp(email);
             return ctx.json({ success: true });
