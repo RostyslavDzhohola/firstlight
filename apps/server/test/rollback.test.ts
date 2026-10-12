@@ -17,6 +17,7 @@ import { characterRepo } from "../src/world/characters.ts";
 import { pileStore } from "../src/world/piles.ts";
 import { SqliteCharacterRepo, SqlitePileStore } from "../src/world/sqliteStores.ts";
 import { placeDir } from "@firstlight/shared/content/places";
+import { maxHp } from "@firstlight/shared/content/progression";
 import { emitGameEvent } from "../src/world/events.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 import { spawnNpc } from "./npc-bots.ts";
@@ -28,6 +29,8 @@ let db: Db;
 let failing = false;
 /** When set, this many more character saves succeed, then every save fails (a second write failing). */
 let savesLeft: number | null = null;
+/** Character saves that threw (the injected failure was hit). */
+let failedSaves = 0;
 const rooms: Room[] = [];
 
 beforeEach(async () => {
@@ -37,14 +40,21 @@ beforeEach(async () => {
   const repo = new SqliteCharacterRepo(db);
   const save = repo.save.bind(repo);
   repo.save = (userId, data) => {
-    if (failing) throw new Error("disk I/O error (test)");
-    if (savesLeft !== null && savesLeft-- <= 0) throw new Error("disk I/O error (test, later write)");
+    if (failing) {
+      failedSaves++;
+      throw new Error("disk I/O error (test)");
+    }
+    if (savesLeft !== null && savesLeft-- <= 0) {
+      failedSaves++;
+      throw new Error("disk I/O error (test, later write)");
+    }
     save(userId, data);
   };
   characterRepo.current = repo;
   pileStore.current = new SqlitePileStore(db);
   failing = false;
   savesLeft = null;
+  failedSaves = 0;
   harness.game = game;
 });
 afterEach(async () => {
@@ -308,6 +318,10 @@ describe("mission XP commits with the completion (F12 final B1)", () => {
     expect(actor(b).char.level).toBe(2);
     expect(me(b.room).level).toBe(2);
     await waitFor(() => b.toasts.includes("Level 2!"));
+    // The completion's one save also carries the level-up's HP (F12 confirm Codex N-S1).
+    expect(stored("climber").hp).toBe(actor(b).state.hp);
+    expect(maxHp(stored("climber").level)).toBe(actor(b).state.maxHp);
+    expect(actor(b).state.maxHp).toBe(110);
     // Further triggers pay nothing more.
     kills(1);
     await qsleep(200);
@@ -364,6 +378,54 @@ describe("kill rewards: XP and loot commit before anyone hears of a level-up (F1
     expect(characterRepo.current.load("hunter")!.xp).toBe(a.char.xp);
     expect(characterRepo.current.load("hunter")!.level).toBe(2);
     expect(toasts.filter((t) => t === "Level 2!")).toHaveLength(1);
+  });
+});
+
+describe("a level-up's extra HP is in the reward's save (F12 confirm Codex N-S1)", () => {
+  /** An admin one XP short of level 2, saved, and a hopbit kill that crosses the level. */
+  async function oneShort(name: string) {
+    const r = await setup(name);
+    const a = actorOf(r);
+    a.char.xp = 49;
+    serverRoom(r).saveActor(a);
+    const toasts: string[] = [];
+    r.onMessage("toast", (m: any) => toasts.push(m.text));
+    const kill = async () => {
+      const id = await spawnNpc(r, "hopbit", outside(44), { instant: true });
+      r.send("npc", { cmd: "hurt", id, amount: 1e6, as: r.sessionId });
+    };
+    return { r, a, toasts, kill };
+  }
+
+  it("a kill that crosses a level stores the HP and max HP the player sees", async () => {
+    const { r, a, toasts, kill } = await oneShort("healed");
+    expect(a.state.hp).toBe(100);
+    await kill();
+    await waitFor(() => toasts.includes("Level 2!"));
+    expect(a.state.level).toBe(2);
+    expect(a.state.maxHp).toBe(110);
+    expect(a.state.hp).toBe(110);
+    // A crash now restarts from game.db: the row carries the healed HP, not the level-1 HP.
+    const db2 = openGameDb(join(dir, "game.db"));
+    const row = new SqliteCharacterRepo(db2).load("healed")!;
+    db2.close();
+    expect(row.level).toBe(2);
+    expect(row.hp).toBe(a.state.hp);
+    expect(maxHp(row.level)).toBe(a.state.maxHp);
+    await waitFor(() => me(r).hp === 110 && me(r).maxHp === 110); // published after the commit
+  });
+
+  it("a level-up reward whose save fails changes neither the live nor the stored HP", async () => {
+    const { a, toasts, kill } = await oneShort("unhealed");
+    failing = true;
+    await kill();
+    await waitFor(() => failedSaves > 0);
+    expect(toasts).not.toContain("Level 2!");
+    expect(a.char.level).toBe(1);
+    expect(a.char.hp).toBe(100);
+    expect([a.state.level, a.state.maxHp, a.state.hp]).toEqual([1, 100, 100]);
+    const row = characterRepo.current.load("unhealed")!;
+    expect([row.xp, row.level, row.hp]).toEqual([49, 1, 100]);
   });
 });
 
