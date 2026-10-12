@@ -1,34 +1,19 @@
-// Renderer creation, backend detection, quality tier and the post pipeline (TSL RenderPipeline).
-// Low/Medium are identical on WebGPU and WebGL2; High/Ultra extras are WebGPU-only (SPEC §7.1).
+// Renderer creation, backend detection, quality tiers + settings API, and the post pipeline (TSL
+// RenderPipeline). Low/Medium are identical on WebGPU and WebGL2; High/Ultra extras are WebGPU-only
+// (SPEC §7.1). Systems subscribe with ctx.onChange() and re-apply when the resolved settings change.
 
 import * as THREE from "three/webgpu";
-import { pass, renderOutput, uniform } from "three/tsl";
-import { bloom } from "three/addons/tsl/display/BloomNode.js";
-import { fxaa } from "three/addons/tsl/display/FXAANode.js";
 import { flags } from "../config.ts";
+import { buildPost, MENU_GRADE, postUniforms, setGrade, type GradeParams, type PostBuild } from "./post.ts";
+import {
+  clearStored, emptyStored, FEATURES, killSwitches, loadStored, resolveSettings, saveStored, TIERS, tierIndex,
+  urlScale, urlTier, validAutoTier, type Feature, type ResolvedSettings, type StoredGfx, type Tier,
+} from "./quality.ts";
+import { GpuTimer, ResolutionLadder } from "./timing.ts";
 
-export type Tier = "low" | "medium" | "high" | "ultra";
-export const TIERS: readonly Tier[] = ["low", "medium", "high", "ultra"];
+export { TIERS, FEATURES, type Tier, type Feature, type ResolvedSettings };
 
-export interface TierSettings {
-  dprCap: number;
-  renderScale: number;
-  bloomStrength: number;
-  shadows: "blob" | "single" | "cascades";
-  shadowMapSize: number;
-  grass: number;
-  grassRadius: number;
-  particles: number;
-  fullAvatars: number;
-  fxaa: boolean;
-}
-
-export const TIER_SETTINGS: Record<Tier, TierSettings> = {
-  low: { dprCap: 1, renderScale: 0.67, bloomStrength: 0.35, shadows: "blob", shadowMapSize: 0, grass: 25_000, grassRadius: 25, particles: 2_000, fullAvatars: 8, fxaa: false },
-  medium: { dprCap: 1.25, renderScale: 0.85, bloomStrength: 0.4, shadows: "single", shadowMapSize: 1024, grass: 80_000, grassRadius: 40, particles: 5_000, fullAvatars: 16, fxaa: true },
-  high: { dprCap: 1.5, renderScale: 1, bloomStrength: 0.45, shadows: "cascades", shadowMapSize: 1024, grass: 200_000, grassRadius: 60, particles: 15_000, fullAvatars: 24, fxaa: true },
-  ultra: { dprCap: 2, renderScale: 1, bloomStrength: 0.5, shadows: "cascades", shadowMapSize: 2048, grass: 500_000, grassRadius: 85, particles: 30_000, fullAvatars: 40, fxaa: true },
-};
+export type SettingsListener = (s: ResolvedSettings, prev: ResolvedSettings | null) => void;
 
 export interface RenderCtx {
   renderer: THREE.WebGPURenderer;
@@ -36,39 +21,145 @@ export interface RenderCtx {
   camera: THREE.PerspectiveCamera;
   pipeline: THREE.RenderPipeline;
   webgpu: boolean;
-  tier: Tier;
-  settings: TierSettings;
-  bloomStrength: { value: number };
-  setTier(t: Tier): void;
+  /** GPU adapter / WebGL renderer string (best effort, may be empty). */
+  gpuName: string;
+  /** Current resolved settings. */
+  readonly settings: ResolvedSettings;
+  readonly tier: Tier;
+  readonly ladder: ResolutionLadder;
+  readonly gpu: GpuTimer;
+  /** Pin a tier (persisted unless `persist: false`). */
+  setTier(t: Tier, opts?: { persist?: boolean; auto?: boolean }): void;
+  /** Return to the automatic (probed) tier. */
+  setAutoTier(): void;
+  /**
+   * Apply a probe result. `persist: false` (invalid probe) uses it for this session only;
+   * `clearPinned` also drops a user-pinned tier (F3 "re-probe"). Applies settings once.
+   */
+  setProbedTier(t: Tier, opts?: { persist?: boolean; clearPinned?: boolean }): void;
+  /** True when no tier is pinned and no saved probe result matches this backend + GPU. */
+  needsProbe(): boolean;
+  /**
+   * The ladder wants to drop a tier (auto mode, resolution at the floor). Listeners get the
+   * change as a function and should run it behind the loading overlay + warm-up
+   * (Game.applyGraphics). With no listener it's applied immediately (may hitch).
+   */
+  onTierDrop(cb: (from: Tier, to: Tier, apply: () => void) => void): () => void;
+  /** GPU device lost. With no listener a reload prompt is shown. */
+  onDeviceLost(cb: (info: { api: string; message: string; reason: string | null }) => void): () => void;
+  /** Forget all saved graphics settings (tolerates disabled storage). Caller reloads. */
+  resetSettings(): void;
+  setFeature(f: Feature, on: boolean | null): void;
+  /** User render scale on top of the tier (null = tier default). */
+  setRenderScale(s: number | null): void;
+  setGrade(g: GradeParams): void;
+  /** Photo mode: add depth of field to the post pipeline (rebuilds it). */
+  setPhotoPost(on: boolean): void;
+  setPhotoParams(p: { focus: number; aperture: number; bokeh: number }): void;
+  onChange(cb: SettingsListener): () => void;
+  /** Effective pixel ratio after DPR cap × render scale × ladder, never above devicePixelRatio. */
+  pixelRatio(): number;
   resize(): void;
   render(): void;
+  /** Per-frame bookkeeping after render (GPU timer, ladder). */
+  afterFrame(now: number, frameMs: number): void;
+  stored(): StoredGfx;
+}
+
+function detectGpuName(renderer: THREE.WebGPURenderer, webgpu: boolean): string {
+  try {
+    const b = renderer.backend as unknown as {
+      adapter?: { info?: { vendor?: string; architecture?: string; description?: string; device?: string; isFallbackAdapter?: boolean } };
+      gl?: WebGL2RenderingContext;
+    };
+    if (webgpu) {
+      const i = b.adapter?.info;
+      if (!i) return "";
+      return [i.vendor, i.architecture, i.device, i.description, i.isFallbackAdapter ? "fallback-adapter" : ""].filter(Boolean).join(" ");
+    }
+    const gl = b.gl;
+    if (!gl) return "";
+    const ext = gl.getExtension("WEBGL_debug_renderer_info");
+    return String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+  } catch {
+    return "";
+  }
+}
+
+/** Software rasterisers and blocklisted adapters go straight to Low (replaces detect-gpu, see report). */
+export function isSoftwareRenderer(name: string): boolean {
+  return /swiftshader|llvmpipe|softpipe|software|basic render|microsoft basic|mesa offscreen|fallback-adapter|lavapipe/i.test(name);
 }
 
 export async function createRenderer(container: HTMLElement): Promise<RenderCtx> {
-  const renderer = new THREE.WebGPURenderer({ antialias: false, forceWebGL: flags.has("webgl"), powerPreference: "high-performance" });
+  const renderer = new THREE.WebGPURenderer({
+    antialias: false,
+    forceWebGL: flags.has("webgl"),
+    powerPreference: "high-performance",
+    trackTimestamp: !flags.has("notimer"),
+  } as ConstructorParameters<typeof THREE.WebGPURenderer>[0]);
   await renderer.init();
   const webgpu = !!(renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend;
-  renderer.toneMapping = THREE.AgXToneMapping;
+  const tm = flags.get("tonemap");
+  renderer.toneMapping = tm === "agx" ? THREE.AgXToneMapping : tm === "aces" ? THREE.ACESFilmicToneMapping : THREE.NeutralToneMapping;
   renderer.toneMappingExposure = 1.0;
-  renderer.shadowMap.enabled = !flags.has("noshadows");
+  renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   container.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.3, 6000);
-
-  const bloomStrength = uniform(0.4);
   const pipeline = new THREE.RenderPipeline(renderer);
-  const scenePass = pass(scene, camera);
-  const color = scenePass.getTextureNode("output");
-  let graded: THREE.Node = color;
-  if (!flags.has("nobloom") && !flags.has("nopost")) {
-    const b = bloom(color, 0.4, 0.35, 0.92);
-    b.strength = bloomStrength;
-    graded = color.add(b);
-  }
   pipeline.outputColorTransform = false;
-  const out = renderOutput(graded);
+  const gpuName = detectGpuName(renderer, webgpu);
+
+  let stored = loadStored();
+  const kills = killSwitches();
+  const forcedTier = urlTier();
+  const forcedScale = urlScale();
+  const listeners = new Set<SettingsListener>();
+  const ladder = new ResolutionLadder();
+  ladder.enabled = !flags.has("noladder") && !flags.has("bench");
+  const gpu = new GpuTimer(renderer as unknown as ConstructorParameters<typeof GpuTimer>[0]);
+  ladder.hasGpuTimer = gpu.available;
+  const backendName = webgpu ? "webgpu" : "webgl2";
+  const tierDropListeners = new Set<(from: Tier, to: Tier, apply: () => void) => void>();
+  const deviceLostListeners = new Set<(info: { api: string; message: string; reason: string | null }) => void>();
+
+  let tier: Tier = forcedTier ?? stored.tier ?? validAutoTier(stored, backendName, gpuName) ?? "medium";
+  let auto = !forcedTier && !stored.tier;
+  let settings = resolveSettings(tier, auto, webgpu, stored, kills);
+  let post: PostBuild | null = null;
+  let postKey = "";
+  let photo = false;
+
+  const postKeyOf = (s: ResolvedSettings) =>
+    [s.on.bloom, s.on.ao, s.on.traa, s.on.fxaa, s.on.grade, s.on.grain, s.on.vignette, s.post.ao, s.post.bloomScale, photo].join(",");
+
+  function rebuildPost() {
+    const key = postKeyOf(settings);
+    if (post && key === postKey) return;
+    post?.dispose();
+    post = buildPost(scene, camera, settings, photo);
+    postKey = key;
+    pipeline.outputNode = post.outputNode;
+    pipeline.needsUpdate = true;
+  }
+
+  function apply() {
+    const prev = settings;
+    settings = resolveSettings(tier, auto, webgpu, stored, kills);
+    renderer.shadowMap.enabled = settings.on.shadows && settings.shadows.mode === "map";
+    rebuildPost();
+    ctx.resize();
+    for (const l of listeners) {
+      try {
+        l(settings, prev);
+      } catch (e) {
+        console.error("[gfx] settings listener failed", e);
+      }
+    }
+  }
 
   const ctx: RenderCtx = {
     renderer,
@@ -76,20 +167,95 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
     camera,
     pipeline,
     webgpu,
-    tier: "medium",
-    settings: TIER_SETTINGS.medium,
-    bloomStrength,
-    setTier(t) {
-      ctx.tier = t;
-      ctx.settings = TIER_SETTINGS[t];
-      bloomStrength.value = ctx.settings.bloomStrength;
-      pipeline.outputNode = ctx.settings.fxaa && !flags.has("nopost") ? fxaa(out) : out;
-      pipeline.needsUpdate = true;
-      ctx.resize();
+    gpuName,
+    get settings() {
+      return settings;
+    },
+    get tier() {
+      return tier;
+    },
+    ladder,
+    gpu,
+    setTier(t, opts = {}) {
+      if (!TIERS.includes(t)) return;
+      tier = t;
+      auto = opts.auto ?? false;
+      if (opts.persist !== false && !auto) {
+        stored = { ...stored, tier: t };
+        saveStored(stored);
+      }
+      ladder.reset();
+      apply();
+    },
+    setAutoTier() {
+      stored = { ...stored, tier: null };
+      saveStored(stored);
+      tier = forcedTier ?? validAutoTier(stored, backendName, gpuName) ?? "medium";
+      auto = !forcedTier;
+      ladder.reset();
+      apply();
+    },
+    setProbedTier(t, opts = {}) {
+      if (opts.clearPinned) stored = { ...stored, tier: null };
+      if (opts.persist !== false) stored = { ...stored, autoTier: t, autoBackend: backendName, autoGpu: gpuName };
+      if (opts.clearPinned || opts.persist !== false) saveStored(stored);
+      // The probe switches tiers while measuring; always land on the effective choice.
+      tier = forcedTier ?? stored.tier ?? t;
+      auto = !forcedTier && !stored.tier;
+      ladder.reset();
+      apply();
+    },
+    needsProbe() {
+      return !forcedTier && !stored.tier && validAutoTier(stored, backendName, gpuName) === null;
+    },
+    onTierDrop(cb) {
+      tierDropListeners.add(cb);
+      return () => tierDropListeners.delete(cb);
+    },
+    onDeviceLost(cb) {
+      deviceLostListeners.add(cb);
+      return () => deviceLostListeners.delete(cb);
+    },
+    resetSettings() {
+      clearStored();
+      stored = emptyStored();
+    },
+    setFeature(f, on) {
+      const features = { ...stored.features };
+      if (on === null) delete features[f];
+      else features[f] = on;
+      stored = { ...stored, features };
+      saveStored(stored);
+      apply();
+    },
+    setRenderScale(s) {
+      stored = { ...stored, renderScale: s };
+      saveStored(stored);
+      apply();
+    },
+    setGrade(g) {
+      setGrade(g);
+    },
+    setPhotoPost(on) {
+      photo = on;
+      rebuildPost();
+    },
+    setPhotoParams(p) {
+      postUniforms.dofFocus.value = p.focus;
+      postUniforms.dofFocal.value = p.aperture;
+      postUniforms.dofBokeh.value = p.bokeh;
+    },
+    onChange(cb) {
+      listeners.add(cb);
+      return () => listeners.delete(cb);
+    },
+    pixelRatio() {
+      const scale = forcedScale ?? settings.userScale ?? settings.renderScale;
+      const dpr = devicePixelRatio || 1;
+      return Math.min(dpr, Math.min(dpr, settings.dprCap) * scale * ladder.scale);
     },
     resize() {
-      const dpr = Math.min(devicePixelRatio, ctx.settings.dprCap) * ctx.settings.renderScale;
-      renderer.setPixelRatio(dpr);
+      renderer.setPixelRatio(ctx.pixelRatio());
       renderer.setSize(innerWidth, innerHeight, false);
       renderer.domElement.style.width = "100%";
       renderer.domElement.style.height = "100%";
@@ -99,9 +265,58 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
     render() {
       pipeline.render();
     },
+    afterFrame(now, frameMs) {
+      gpu.frame();
+      ladder.sample(now, frameMs, gpu.takeSamples(), settings.gpuTargetMs);
+    },
+    stored() {
+      return stored;
+    },
   };
-  const forced = flags.get("tier") as Tier | null;
-  ctx.setTier(forced && TIERS.includes(forced) ? forced : "medium");
+
+  ladder.onChange = () => ctx.resize();
+  ladder.onFloor = () => {
+    // At the ladder floor drop a tier, but only when the tier is automatic. The drop is saved
+    // as the automatic tier, so the next session starts there instead of walking down again.
+    if (!auto || tierIndex(tier) === 0) return;
+    const from = tier;
+    const lower = TIERS[tierIndex(tier) - 1]!;
+    let done = false;
+    const change = () => {
+      if (done || tier !== from || !auto) return;
+      done = true;
+      console.info(`[gfx] resolution ladder at floor, dropping tier ${from} → ${lower}`);
+      ctx.setProbedTier(lower);
+    };
+    if (tierDropListeners.size === 0) change();
+    else for (const l of tierDropListeners) l(from, lower, change);
+  };
+
+  // Device lost (macOS sleep, driver reset): tell listeners, else offer a reload.
+  (renderer as unknown as { onDeviceLost: (info: { api: string; message: string; reason: string | null }) => void }).onDeviceLost = (info) => {
+    console.error("[gfx] GPU device lost", info);
+    if (deviceLostListeners.size) {
+      for (const l of deviceLostListeners) l(info);
+      return;
+    }
+    showReloadPrompt();
+  };
+
+  setGrade(MENU_GRADE);
+  rebuildPost();
+  renderer.shadowMap.enabled = settings.on.shadows && settings.shadows.mode === "map";
+  ctx.resize();
   addEventListener("resize", () => ctx.resize());
   return ctx;
+}
+
+function showReloadPrompt() {
+  if (document.getElementById("gfx-lost")) return;
+  const el = document.createElement("div");
+  el.id = "gfx-lost";
+  el.style.cssText =
+    "position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:#07060dcc;color:#ece8f6;font:16px ui-sans-serif,system-ui,sans-serif;text-align:center";
+  el.innerHTML = `<div><p>The graphics device was reset (this can happen after the computer sleeps).</p><button style="font:inherit;padding:10px 28px;border-radius:999px;cursor:pointer">Reload</button></div>`;
+  el.querySelector("button")!.addEventListener("click", () => location.reload());
+  document.body.appendChild(el);
 }

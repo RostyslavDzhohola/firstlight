@@ -17,6 +17,8 @@ export interface TerrainPalette {
   /** Banded rock by height (Meridian canyons). */
   bands?: RGB[];
   bandHeight?: number;
+  /** Body-wide grass density factor (0..1): Meridian is sparse dry scrub. */
+  grassDensity: number;
 }
 
 const srgb = (hex: number): RGB => {
@@ -30,21 +32,22 @@ const srgb = (hex: number): RGB => {
 export const PALETTES: Record<BodyId, TerrainPalette> = {
   portus: {
     grass: srgb(0x6fb85a), grass2: srgb(0x9ccc6a), rock: srgb(0xc9b8a0), rock2: srgb(0xe8d9c0),
-    sand: srgb(0xe6d2a8), bed: srgb(0x7a6b55), snow: srgb(0xf4f0ff), snowLine: 999,
+    sand: srgb(0xe6d2a8), bed: srgb(0x7a6b55), snow: srgb(0xf4f0ff), snowLine: 999, grassDensity: 0.7,
   },
   arcadia: {
     grass: srgb(0x3fae4a), grass2: srgb(0x8fd14f), rock: srgb(0x6f7d74), rock2: srgb(0x9aa39c),
-    sand: srgb(0xf2d58a), bed: srgb(0x2e7f78), snow: srgb(0xf6fbff), snowLine: 70,
+    sand: srgb(0xf2d58a), bed: srgb(0x2e7f78), snow: srgb(0xf6fbff), snowLine: 70, grassDensity: 1,
   },
   hollowmere: {
     grass: srgb(0x4f5a3c), grass2: srgb(0x6e6a4a), rock: srgb(0x4a4258), rock2: srgb(0x6c6080),
-    sand: srgb(0x6b5f55), bed: srgb(0x2b2633), snow: srgb(0xd8d2ea), snowLine: 65,
+    sand: srgb(0x6b5f55), bed: srgb(0x2b2633), snow: srgb(0xd8d2ea), snowLine: 65, grassDensity: 0.8,
   },
   meridian: {
     grass: srgb(0x9a6a3c), grass2: srgb(0xb8854a), rock: srgb(0xa8452c), rock2: srgb(0xc9663a),
     sand: srgb(0xf0e6d8), bed: srgb(0xd8d0c4), snow: srgb(0xf0e6d8), snowLine: 999,
     bands: [srgb(0xb24a2c), srgb(0xd27a44), srgb(0x8e3524), srgb(0xe09a5a), srgb(0xa5402a)],
     bandHeight: 6,
+    grassDensity: 0.18,
   },
 };
 
@@ -78,4 +81,15 @@ export function terrainColor(p: TerrainPalette, height: number, water: number, f
   out[o] = c[0];
   out[o + 1] = c[1];
   out[o + 2] = c[2];
+}
+
+/** Grass density weight (0..1) for one vertex: flat, above the beach, below the snow. */
+export function grassWeight(p: TerrainPalette, height: number, water: number, flatness: number, n: number): number {
+  const h = height - water;
+  if (h < 0.15) return 0;
+  const rockiness = 1 - smooth(0.74, 0.9, flatness);
+  const sand = 1 - smooth(0.6, 1.8, h);
+  let w = (1 - rockiness) * (1 - sand);
+  if (h > p.snowLine - 15) w *= 1 - smooth(p.snowLine - 15, p.snowLine - 5, h);
+  return Math.max(0, Math.min(1, w * p.grassDensity * (0.75 + 0.25 * n)));
 }

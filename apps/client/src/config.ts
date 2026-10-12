@@ -1,6 +1,6 @@
 // Client configuration: endpoints from build-time env, feature flags from the URL (kill switches).
 
-const params = new URLSearchParams(location.search);
+const params = new URLSearchParams(typeof location === "undefined" ? "" : location.search);
 
 export const config = {
   apiUrl: (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:2567",

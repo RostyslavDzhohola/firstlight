@@ -48,7 +48,7 @@ export class CombatClient {
       if (m.reason === "level gate") this.hud.toast("Your level is too low to use that tier", "warn");
       else if (m.action === "logout") this.hud.toast("Can't log out in combat — wait 10 s", "warn");
     });
-    room.onMessage("hit", (m: { attacker: string; target: string; amount: number; weak: boolean; x: number; y: number; z: number }) => {
+    room.onMessage("hit", (m: { attacker: string; target: string; amount: number; weak: boolean; x: number; y: number; z: number; kb?: number; kx?: number; ky?: number; kz?: number }) => {
       if (m.attacker === me && m.target !== me) {
         this.hud.hit(m.weak);
         this.game.audio.play("hitmark", null, m.weak ? 1.3 : 1, m.weak ? 1.3 : 1);
@@ -56,6 +56,7 @@ export class CombatClient {
         if (s) this.hud.damageNumber(s.x, s.y, m.amount, m.weak);
       }
       if (m.target === me) {
+        if (m.kb && (m.kx || m.ky || m.kz)) this.game.player.knockback(new THREE.Vector3(m.kx, m.ky, m.kz), m.kb);
         this.hud.hurt();
         this.game.audio.play("hurt");
       } else this.game.audio.play("impact", new THREE.Vector3(m.x, m.y, m.z), 0.7);
@@ -103,6 +104,7 @@ export class CombatClient {
     room.onMessage("death", async (m: { victim: string; killerName: string; aliveMs: number; level: number }) => {
       if (m.victim !== me || this.deadUntilRespawn) return;
       this.deadUntilRespawn = true;
+      this.game.photo?.exit(this.game.ctx.camera);
       this.game.player.frozen = true;
       this.game.audio.play("death");
       const choice = await this.hud.death(m);
@@ -168,7 +170,7 @@ export class CombatClient {
       g.hud.setLogout(g.hud.you?.logoutEndsAt ?? null, Date.now() + g.net.serverOffset);
     }
     this.updatePickupPrompt();
-    if (this.deadUntilRespawn || !input.locked) return;
+    if (this.deadUntilRespawn || !input.locked || g.photo?.active) return;
 
     // Hotbar and utility keys.
     for (let i = 0; i < 4; i++) if (input.pressed.has(`Digit${i + 1}`)) room.send("equip", { slot: i });

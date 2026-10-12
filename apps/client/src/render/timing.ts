@@ -1,0 +1,256 @@
+// Frame timing helpers: GPU timestamp queries (WebGPU 'timestamp-query' or WebGL2
+// EXT_disjoint_timer_query_webgl2 through three's trackTimestamp), percentiles, the runtime
+// resolution ladder (SPEC §7.3: [1, 0.79, 0.62, 0.5]; at the floor, drop a tier) and the probe's
+// tier decision.
+
+import type { Tier } from "./quality.ts";
+
+export function percentile(values: readonly number[], p: number): number {
+  if (values.length === 0) return 0;
+  const s = [...values].sort((a, b) => a - b);
+  const i = Math.min(s.length - 1, Math.max(0, Math.floor(p * (s.length - 1) + 0.5)));
+  return s[i]!;
+}
+
+/** Largest value without spreading (no argument-count limit on long runs). */
+export function maxOf(values: readonly number[]): number {
+  let m = 0;
+  for (const v of values) if (v > m) m = v;
+  return m;
+}
+
+/** What GpuTimer needs from the renderer (a fake in tests). */
+export interface TimestampSource {
+  backend: unknown;
+  resolveTimestampsAsync(type?: "render" | "compute"): Promise<number | undefined>;
+  info: { frame: number; reset(): void };
+}
+
+/**
+ * Per-frame GPU time from three's timestamp pool. In r186 `resolveTimestampsAsync` returns the GPU
+ * time of the *last frame* it has queries for (queries are tagged with `renderer.info.frame`), so
+ * the value is recorded as is. Resolves are asynchronous, so a sample arrives every 1–3 frames.
+ * Outside the animation loop `info.frame` doesn't advance: call `beginManualFrame()` before each
+ * manually rendered frame so samples stay per-frame there too.
+ */
+export class GpuTimer {
+  /** Most recent GPU ms per frame, or null when the backend has no timer. */
+  last: number | null = null;
+  private pending = false;
+  /** Rolling window for display (F3). */
+  private readonly recent: number[] = [];
+  /** Samples not yet taken by the ladder/probe. */
+  private fresh: number[] = [];
+  readonly available: boolean;
+
+  constructor(private readonly renderer: TimestampSource) {
+    const b = renderer.backend as { trackTimestamp?: boolean; disjoint?: unknown; isWebGPUBackend?: boolean };
+    // WebGPU: trackTimestamp is cleared at init when the feature is missing. WebGL2: needs the disjoint extension.
+    this.available = !!b.trackTimestamp && (b.isWebGPUBackend ? true : !!b.disjoint);
+  }
+
+  /** Call once after each rendered frame. */
+  frame() {
+    if (!this.available || this.pending) return;
+    this.pending = true;
+    this.renderer
+      .resolveTimestampsAsync("render")
+      .then((ms) => {
+        if (typeof ms === "number" && ms > 0 && Number.isFinite(ms)) {
+          this.last = ms;
+          this.recent.push(ms);
+          if (this.recent.length > 120) this.recent.shift();
+          this.fresh.push(ms);
+          if (this.fresh.length > 600) this.fresh.shift();
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        this.pending = false;
+      });
+  }
+
+  /** Median of the recent samples (display only; ~2–6 s depending on frame rate). */
+  p50(): number | null {
+    return this.recent.length ? percentile(this.recent, 0.5) : null;
+  }
+
+  /** Samples that arrived since the last call. */
+  takeSamples(): number[] {
+    const s = this.fresh;
+    this.fresh = [];
+    return s;
+  }
+
+  /** Start a fresh measurement: returns pending samples and clears the display window too. */
+  drain(): number[] {
+    this.recent.length = 0;
+    return this.takeSamples();
+  }
+}
+
+/** Emulate the animation loop's per-frame bookkeeping for frames rendered manually (probe, warm-up). */
+export function beginManualFrame(renderer: TimestampSource) {
+  renderer.info.reset();
+  renderer.info.frame++;
+}
+
+export const LADDER = [1, 0.79, 0.62, 0.5] as const;
+
+const MIN_FRAMES_PER_WINDOW = 5;
+const UP_HOLD_INITIAL = 30_000;
+const UP_HOLD_MAX = 480_000;
+
+/**
+ * Runtime resolution ladder over ≥ 2 s windows (a window stays open until it has at least
+ * 5 frames, so it keeps adapting at very low frame rates).
+ * - With a GPU timer: slow = GPU p50 over 1.15× the tier budget while frames also miss 60 Hz;
+ *   fast = GPU p50 under 0.6× the budget. Steps up after 4 fast windows.
+ * - Without one, rAF time is vsync-limited and can't show headroom: it only steps down
+ *   (p50 over 20 ms); it never steps up.
+ * Up-steps are held off after any down-step; the hold-off doubles each time an up-step is
+ * followed by a quick down-step, so it can't oscillate. Windows are cleared on every change, so
+ * decisions never use samples from the previous resolution. At the floor it calls `onFloor`.
+ */
+export class ResolutionLadder {
+  index = 0;
+  enabled = true;
+  /** Whether GPU samples will arrive (enables up-steps). */
+  hasGpuTimer = false;
+  private frames: number[] = [];
+  private gpu: number[] = [];
+  private windowStart = 0;
+  private slow = 0;
+  private fast = 0;
+  private cooldownUntil = 0;
+  private noUpUntil = 0;
+  private upHold = UP_HOLD_INITIAL;
+  private lastUpAt = -Infinity;
+  onChange: (() => void) | null = null;
+  onFloor: (() => void) | null = null;
+
+  get scale(): number {
+    return LADDER[this.index]!;
+  }
+
+  reset() {
+    this.index = 0;
+    this.noUpUntil = 0;
+    this.upHold = UP_HOLD_INITIAL;
+    this.lastUpAt = -Infinity;
+    this.slow = this.fast = 0;
+    this.clearWindow(0);
+  }
+
+  private clearWindow(now: number) {
+    this.frames = [];
+    this.gpu = [];
+    this.windowStart = now;
+  }
+
+  /** Per frame: the frame interval and any GPU samples that arrived since the last call. */
+  sample(now: number, frameMs: number, gpuSamples: readonly number[] | null, targetMs: number) {
+    if (!this.enabled) return;
+    // Frames over 2 s are tab switches or loading stalls, not rendering cost.
+    if (frameMs > 0 && frameMs < 2000) this.frames.push(frameMs);
+    if (gpuSamples) for (const g of gpuSamples) this.gpu.push(g);
+    if (this.windowStart === 0) this.windowStart = now;
+    if (now - this.windowStart < 2000 || this.frames.length < MIN_FRAMES_PER_WINDOW) return;
+    if (now < this.cooldownUntil) {
+      this.clearWindow(now);
+      return;
+    }
+    const rafP50 = percentile(this.frames, 0.5);
+    const gpuP50 = this.hasGpuTimer && this.gpu.length >= 3 ? percentile(this.gpu, 0.5) : null;
+    this.clearWindow(now);
+    let isSlow: boolean;
+    let isFast: boolean;
+    if (gpuP50 !== null) {
+      isSlow = gpuP50 > targetMs * 1.15 && rafP50 > 17.5;
+      isFast = gpuP50 < targetMs * 0.6;
+    } else {
+      isSlow = rafP50 > 20;
+      isFast = false;
+    }
+    if (isSlow) {
+      this.fast = 0;
+      if (++this.slow >= 2) {
+        this.slow = 0;
+        if (this.index < LADDER.length - 1) {
+          this.index++;
+          this.cooldownUntil = now + 3000;
+          // An up-step that didn't hold: back off twice as long next time.
+          if (now - this.lastUpAt < this.upHold) this.upHold = Math.min(UP_HOLD_MAX, this.upHold * 2);
+          this.noUpUntil = now + this.upHold;
+          this.onChange?.();
+        } else {
+          this.cooldownUntil = now + 6000;
+          this.onFloor?.();
+        }
+      }
+    } else if (isFast) {
+      this.slow = 0;
+      if (++this.fast >= 4 && this.index > 0 && now >= this.noUpUntil) {
+        this.fast = 0;
+        this.index--;
+        this.lastUpAt = now;
+        this.cooldownUntil = now + 4000;
+        this.onChange?.();
+      }
+    } else {
+      this.slow = Math.max(0, this.slow - 1);
+      this.fast = 0;
+    }
+  }
+}
+
+export interface ProbeSamples {
+  /** Frame intervals (ms) at Medium. */
+  raf: readonly number[];
+  /** GPU ms per frame at Medium. */
+  gpu: readonly number[];
+  gpuAvailable: boolean;
+  /** document.visibilityState was "visible" for the whole measurement. */
+  visible: boolean;
+}
+
+export interface ProbeDecision {
+  tier: Tier;
+  /** False → use Medium for this session and don't save anything. */
+  valid: boolean;
+  method: "gpu-timer" | "raf" | "invalid";
+  gpuP50: number | null;
+  rafP50: number;
+  /** Ask for a short re-probe at High (GPU timer only) to decide Ultra. */
+  reprobeHigh: boolean;
+}
+
+export const PROBE_MIN_FRAMES = 30;
+export const PROBE_MIN_GPU = 20;
+
+/**
+ * SPEC §7.3 thresholds. GPU timer: p50 > 14 ms → Low, < 6 ms → High (and re-probe at High),
+ * else Medium. rAF only (vsync-limited): > 20 ms → Low, < 6 ms → High (very high refresh
+ * displays), else Medium. Too few frames or a hidden tab → invalid (Medium, not saved).
+ */
+export function decideProbe(s: ProbeSamples): ProbeDecision {
+  const rafP50 = percentile(s.raf, 0.5);
+  if (!s.visible || s.raf.length < PROBE_MIN_FRAMES) {
+    return { tier: "medium", valid: false, method: "invalid", gpuP50: null, rafP50, reprobeHigh: false };
+  }
+  if (s.gpuAvailable && s.gpu.length >= PROBE_MIN_GPU) {
+    const g = percentile(s.gpu, 0.5);
+    if (g > 14) return { tier: "low", valid: true, method: "gpu-timer", gpuP50: g, rafP50, reprobeHigh: false };
+    if (g >= 6) return { tier: "medium", valid: true, method: "gpu-timer", gpuP50: g, rafP50, reprobeHigh: false };
+    return { tier: "high", valid: true, method: "gpu-timer", gpuP50: g, rafP50, reprobeHigh: true };
+  }
+  const tier: Tier = rafP50 > 20 ? "low" : rafP50 < 6 ? "high" : "medium";
+  return { tier, valid: true, method: "raf", gpuP50: null, rafP50, reprobeHigh: false };
+}
+
+/** After a re-probe at High: Ultra only with clear headroom (p50 < 4 ms over ≥ 15 samples). */
+export function decideUltra(highGpu: readonly number[]): { tier: Tier; gpuP50: number | null } {
+  if (highGpu.length < 15) return { tier: "high", gpuP50: null };
+  const g = percentile(highGpu, 0.5);
+  return { tier: g < 4 ? "ultra" : "high", gpuP50: g };
+}

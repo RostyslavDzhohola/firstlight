@@ -61,6 +61,16 @@ export class PlayerController {
     this.fallStartRadius = this.pos.length();
   }
 
+  /** A shove (m/s) along `dir` (projected onto the ground plane), with a little lift. */
+  knockback(dir: THREE.Vector3, strength: number) {
+    if (this.frozen || strength <= 0) return;
+    const up = this.up(new THREE.Vector3());
+    const h = dir.clone().addScaledVector(up, -dir.dot(up));
+    if (h.lengthSq() < 1e-6) return;
+    this.vel.addScaledVector(h.normalize(), strength).addScaledVector(up, strength * 0.4);
+    this.onGround = false;
+  }
+
   up(out = new THREE.Vector3()) {
     return out.copy(this.pos).normalize();
   }
