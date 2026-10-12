@@ -46,7 +46,7 @@ const FADE_S = 0.8;
 
 /** A tiny closed tetrahedron with the debris attribute layout (shader warm-up before the worker answers). */
 function placeholderGeometry(): THREE.BufferGeometry {
-  const g = new THREE.TetrahedronGeometry(0.01).toNonIndexed();
+  const g = new THREE.TetrahedronGeometry(0.01); // polyhedra are already non-indexed
   g.deleteAttribute("uv");
   const n = g.getAttribute("position").count;
   g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(n * 3).fill(1), 3));
@@ -55,8 +55,11 @@ function placeholderGeometry(): THREE.BufferGeometry {
 }
 
 export class Debris {
-  mesh: THREE.BatchedMesh;
+  readonly mesh: THREE.BatchedMesh;
   private readonly parent: THREE.Object3D;
+  private placeholderVerts = 0;
+  /** Vertex capacity of the batch geometry. */
+  private capacity = 0;
   private readonly material: THREE.Material;
   private readonly sets = new Map<number, PieceSet>();
   private budget = DEBRIS_MAX;
@@ -98,7 +101,7 @@ export class Debris {
   constructor(parent: THREE.Object3D, material: THREE.Material) {
     this.parent = parent;
     this.material = material;
-    this.mesh = this.createMesh([]);
+    this.mesh = this.createMesh();
   }
 
   get count(): number {
@@ -112,23 +115,36 @@ export class Debris {
   }
 
   /**
-   * Replace every piece geometry (keyed `archetype * 16 + variant`). Builds a fresh BatchedMesh:
-   * same material and attribute layout, so no new shader compiles.
+   * Replace every piece geometry (keyed `archetype * 16 + variant`) in the same BatchedMesh: the
+   * object, material and attribute layout never change, so its shader built in the warm-up stays
+   * valid (a new BatchedMesh would need a new node build). Call from the frame loop, not during a
+   * warm-up.
    */
   install(sets: Map<number, DebrisPiece[]>) {
     this.clear();
+    const mesh = this.mesh;
+    // Park every pool instance on the placeholder, then drop the old pieces and compact.
+    for (let id = 1; id <= DEBRIS_MAX; id++) mesh.setGeometryIdAt(id, 0);
+    for (const s of this.sets.values()) for (const gid of s.geometryIds) mesh.deleteGeometry(gid);
     this.sets.clear();
-    const old = this.mesh;
-    const pieces: DebrisPiece[] = [];
-    for (const list of sets.values()) for (const p of list) pieces.push(p);
-    this.mesh = this.createMesh(pieces);
-    old.removeFromParent();
-    old.dispose();
-    let gid = 1; // 0 = the placeholder
+    mesh.optimize();
+    let verts = this.placeholderVerts;
+    for (const list of sets.values()) for (const p of list) verts += p.positions.length / 3;
+    if (verts > this.capacity) {
+      mesh.setGeometrySize(verts, verts);
+      this.capacity = verts;
+    }
+    const g = new THREE.BufferGeometry();
     for (const [key, list] of sets) {
       const s: PieceSet = { geometryIds: [], cx: new Float32Array(list.length), cy: new Float32Array(list.length), cz: new Float32Array(list.length), radius: new Float32Array(list.length) };
       list.forEach((p, i) => {
-        s.geometryIds.push(gid++);
+        g.setAttribute("position", new THREE.BufferAttribute(p.positions, 3));
+        g.setAttribute("normal", new THREE.BufferAttribute(p.normals, 3));
+        g.setAttribute("color", new THREE.BufferAttribute(p.colors, 3));
+        g.setAttribute("inner", new THREE.BufferAttribute(p.inner, 1));
+        g.boundingBox = null;
+        g.boundingSphere = null;
+        s.geometryIds.push(mesh.addGeometry(g));
         s.cx[i] = p.center[0];
         s.cy[i] = p.center[1];
         s.cz[i] = p.center[2];
@@ -138,11 +154,11 @@ export class Debris {
     }
   }
 
-  private createMesh(pieces: DebrisPiece[]): THREE.BatchedMesh {
+  private createMesh(): THREE.BatchedMesh {
     const ph = placeholderGeometry();
-    let verts = ph.getAttribute("position").count;
-    for (const p of pieces) verts += p.positions.length / 3;
-    const mesh = new THREE.BatchedMesh(DEBRIS_MAX + 1, verts, verts, this.material);
+    this.placeholderVerts = ph.getAttribute("position").count;
+    this.capacity = this.placeholderVerts;
+    const mesh = new THREE.BatchedMesh(DEBRIS_MAX + 1, this.capacity, this.capacity, this.material);
     mesh.name = "debris";
     mesh.perObjectFrustumCulled = false;
     mesh.sortObjects = false;
@@ -150,16 +166,7 @@ export class Debris {
     mesh.castShadow = false;
     mesh.receiveShadow = true;
     mesh.addGeometry(ph);
-    ph.dispose();
-    for (const p of pieces) {
-      const g = new THREE.BufferGeometry();
-      g.setAttribute("position", new THREE.BufferAttribute(p.positions, 3));
-      g.setAttribute("normal", new THREE.BufferAttribute(p.normals, 3));
-      g.setAttribute("color", new THREE.BufferAttribute(p.colors, 3));
-      g.setAttribute("inner", new THREE.BufferAttribute(p.inner, 1));
-      mesh.addGeometry(g);
-    }
-    // Instance 0 keeps one (invisible, 1 cm) draw alive so the shader compiles in the warm-up.
+    // Instance 0 keeps one (invisible, 1 mm) draw alive so the shader compiles in the warm-up.
     mesh.addInstance(0);
     mesh.setMatrixAt(0, this.m4.makeScale(1e-3, 1e-3, 1e-3));
     this.freeCount = 0;
@@ -203,7 +210,7 @@ export class Debris {
       const ol = Math.hypot(ox, oy, oz) || 1;
       ox /= ol; oy /= ol; oz /= ol;
       const r1 = hash01(seed, k, 1), r2 = hash01(seed, k, 2), r3 = hash01(seed, k, 3);
-      const kImp = (1.0 + 2.2 * r1) * f, kOut = (0.8 + 1.8 * r2) * Math.sqrt(f), kUp = 1.0 + 2.0 * r3;
+      const kImp = (1.4 + 2.8 * r1) * f, kOut = (1.2 + 2.2 * r2) * Math.sqrt(f), kUp = 1.5 + 2.5 * r3;
       this.vx[slot] = ix * kImp + ox * kOut + src.ux * kUp;
       this.vy[slot] = iy * kImp + oy * kOut + src.uy * kUp;
       this.vz[slot] = iz * kImp + oz * kOut + src.uz * kUp;

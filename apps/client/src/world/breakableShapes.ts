@@ -29,16 +29,17 @@ interface Palette {
 /** Planet palettes: saturated around each body's key hue + accent (film rule 1, content.md looks). */
 const PALETTES: Record<Exclude<BodyId, "portus">, Palette> = {
   arcadia: {
-    wood: 0xc8914a, wood2: 0xb37d3e, frame: 0x7a4f2a,
+    wood: 0xd8a560, wood2: 0xb37d3e, frame: 0xa06a36,
     barrel: 0x2fb3a3, barrel2: 0x279a8c, band: 0x3b3b44,
     stone: 0xd8d0bc, stone2: 0xc4baa2, joint: 0x9a907c,
     figure: 0x4a7fd0, figure2: 0xf2c14e,
-    wall: [0x3b7dd8, 0xf2c94c, 0xe8605a, 0x5cc96b], wallJoint: 0x2c2c3c,
+    // Mostly slate blocks, some turquoise, a few gold (the planet's key hue + accent).
+    wall: [0x8a96a8, 0x7c889a, 0x939fb0, 0x8590a3, 0x3fb8b0, 0x36a8a2, 0xe0b850], wallJoint: 0x4a5262,
     cover: 0xf08a7a, cover2: 0xffd2b8,
     woodIn: 0xf0d6a8, stoneIn: 0xf0ead8, metalIn: 0xd8dde2, coverIn: 0xfff0e6,
   },
   hollowmere: {
-    wood: 0x5e4a3a, wood2: 0x4f3e31, frame: 0x2e2620,
+    wood: 0x7a6250, wood2: 0x5e4a3a, frame: 0x45382e,
     barrel: 0x4a3a30, barrel2: 0x3e3028, band: 0x24242c,
     stone: 0x7c7290, stone2: 0x6a6080, joint: 0x4a4258,
     figure: 0xd8d0c0, figure2: 0x7f9478,

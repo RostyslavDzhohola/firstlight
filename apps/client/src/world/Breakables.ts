@@ -29,7 +29,7 @@ export function breakableMaterial(): THREE.MeshStandardNodeMaterial {
   if (!material) {
     material = new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.84, metalness: 0 });
     material.name = "breakables";
-    material.emissiveNode = accent.mul(attribute("inner", "float").mul(0.22));
+    material.emissiveNode = accent.mul(attribute("inner", "float").mul(0.07));
   }
   return material;
 }
@@ -79,14 +79,22 @@ function geometryFrom(m: MeshArrays): THREE.BufferGeometry {
   return g;
 }
 
-/** Same attribute layout as the real meshes: lets the warm-up compile the shader early. */
+let placeholderGeo: THREE.BufferGeometry | null = null;
+/**
+ * Same attribute layout as the real meshes. The archetype meshes are created with it before the
+ * warm-up (so their shaders compile behind the loading screen) and get the real geometry later:
+ * swapping geometry keeps the render object, while a new InstancedMesh would need a new node build.
+ */
 function placeholder(): THREE.BufferGeometry {
-  const g = new THREE.TetrahedronGeometry(0.01).toNonIndexed();
-  g.deleteAttribute("uv");
-  const n = g.getAttribute("position").count;
-  g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(n * 3).fill(1), 3));
-  g.setAttribute("inner", new THREE.BufferAttribute(new Float32Array(n), 1));
-  return g;
+  if (!placeholderGeo) {
+    const g = new THREE.TetrahedronGeometry(0.01); // polyhedra are already non-indexed
+    g.deleteAttribute("uv");
+    const n = g.getAttribute("position").count;
+    g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(n * 3).fill(1), 3));
+    g.setAttribute("inner", new THREE.BufferAttribute(new Float32Array(n), 1));
+    placeholderGeo = g;
+  }
+  return placeholderGeo;
 }
 
 // ------------------------------------------------------------------------------------ the view
@@ -101,8 +109,12 @@ interface BrokeMsg {
   f?: number;
 }
 
-const REBUILD_S = 0.55;
+/** Re-materialise: light corpuscles first, then the prop grows back in (s). */
+const REBUILD_S = 1.0;
+const REBUILD_DELAY_S = 0.3;
 const STREAM_MAX = 260;
+/** Instances per archetype mesh (the most of one archetype on a planet is under 100). */
+const CAPACITY = 256;
 const FX_RANGE = 140;
 const BUDGET: Record<ResolvedSettings["tier"], number> = { low: 60, medium: 120, high: 150, ultra: 150 };
 /** Rotation/scale elements of a column-major 4×4 matrix. */
@@ -114,9 +126,8 @@ export class BreakablesView implements ClientSystem {
   private readonly body: BodyId;
   private list: Breakable[] = [];
   private readonly ids = new Map<string, number>();
-  /** Per archetype: InstancedMesh + its breakable indices. */
+  /** Per archetype index: InstancedMesh + its breakable indices. */
   private meshes: { mesh: THREE.InstancedMesh; members: Int32Array }[] = [];
-  private warm: THREE.InstancedMesh | null;
   private base = new Float32Array(0);
   private hidden = new Uint8Array(0);
   private inMap = new Uint8Array(0);
@@ -136,6 +147,11 @@ export class BreakablesView implements ClientSystem {
   private lastPoll = 0;
   private breakSeq = 0;
   private readonly early: BrokeMsg[] = [];
+  /**
+   * Worker results wait here and are installed from update(): the frame loop never runs during a
+   * warm-up, whose compileAsync yields mid-traversal (swapping meshes then would break it).
+   */
+  private readonly inbox: BreakableAssets[] = [];
   private readonly unsub: (() => void)[] = [];
   private readonly scratch = new THREE.Vector3();
 
@@ -146,12 +162,17 @@ export class BreakablesView implements ClientSystem {
     game.ctx.scene.add(this.group);
     accent.value.setHex(ACCENT[this.body]);
     this.settings = game.ctx.settings;
-    // Warm-up stand-ins (same material + attribute layout as the real meshes).
-    this.warm = new THREE.InstancedMesh(placeholder(), breakableMaterial(), 1);
-    this.warm.count = 0;
-    this.warm.frustumCulled = false;
-    this.warm.name = "breakables:warmup";
-    this.group.add(this.warm);
+    // Every archetype's mesh exists from the start (placeholder geometry until the worker answers).
+    for (let a = 0; a < BREAKABLE_ARCHETYPES.length; a++) {
+      const mesh = new THREE.InstancedMesh(placeholder(), breakableMaterial(), CAPACITY);
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      mesh.count = 0;
+      mesh.frustumCulled = false;
+      mesh.receiveShadow = true;
+      mesh.name = `breakable:${BREAKABLE_ARCHETYPES[a]}`;
+      this.group.add(mesh);
+      this.meshes.push({ mesh, members: new Int32Array(0) });
+    }
     this.debris = new Debris(this.group, breakableMaterial());
     this.applySettings(this.settings);
     this.unsub.push(game.ctx.onChange((s) => this.applySettings(s)));
@@ -163,7 +184,7 @@ export class BreakablesView implements ClientSystem {
     }
     const q = this.wantedQuality();
     if (this.settings.on.destruct) this.requested = q;
-    void requestAssets(this.body, q, this.settings.on.destruct).then((a) => a && this.install(a));
+    void requestAssets(this.body, q, this.settings.on.destruct).then((a) => a && this.inbox.push(a));
     (window as unknown as { __breakables?: BreakablesView }).__breakables = this;
   }
 
@@ -197,22 +218,10 @@ export class BreakablesView implements ClientSystem {
       }
       for (const [arch, members] of byArch) {
         const arrays = a.intact[arch];
-        if (!arrays) continue;
-        const mesh = new THREE.InstancedMesh(geometryFrom(arrays), breakableMaterial(), members.length);
-        mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-        mesh.count = 0;
-        mesh.frustumCulled = false;
-        mesh.receiveShadow = true;
-        mesh.castShadow = this.castShadow();
-        mesh.name = `breakable:${BREAKABLE_ARCHETYPES[arch]}`;
-        this.group.add(mesh);
-        this.meshes.push({ mesh, members: Int32Array.from(members) });
-      }
-      if (this.warm) {
-        this.warm.removeFromParent();
-        this.warm.geometry.dispose();
-        this.warm.dispose();
-        this.warm = null;
+        const slot = this.meshes[arch];
+        if (!arrays || !slot) continue;
+        slot.mesh.geometry = geometryFrom(arrays);
+        slot.members = Int32Array.from(members);
       }
       this.ready = true;
       this.dirty = true;
@@ -234,7 +243,7 @@ export class BreakablesView implements ClientSystem {
     const q = this.wantedQuality();
     if (this.debrisQuality === q || this.requested === q) return;
     this.requested = q;
-    void requestAssets(this.body, q, true).then((a) => a && !this.disposed && this.requested === q && this.installDebris(a));
+    void requestAssets(this.body, q, true).then((a) => a && this.requested === q && this.inbox.push(a));
   }
 
   private installDebris(a: BreakableAssets) {
@@ -308,7 +317,7 @@ export class BreakablesView implements ClientSystem {
     this.appear[i] = 0;
     this.appearing++;
     const c = this.scratch.set(b.cx, b.cy, b.cz);
-    this.game.burst(c, ACCENT[this.body], Math.round(18 + 10 * b.h), { speed: [0.3, 1.4], life: [0.5, 1.1], size: [0.04, 0.1], lift: 0.9, spread: 0.9 });
+    this.game.burst(c, ACCENT[this.body], Math.round(24 + 12 * b.h), { speed: [0.3, 1.2], life: [0.6, 1.3], size: [0.04, 0.1], lift: 0.7, spread: 1 });
     this.game.audio.play("portal", c, 0.35, 1.8);
   }
 
@@ -374,6 +383,7 @@ export class BreakablesView implements ClientSystem {
   // ------------------------------------------------------------------ frame
 
   update(dt: number, now: number) {
+    while (this.inbox.length) this.install(this.inbox.shift()!);
     if (!this.ready) return;
     if (now - this.lastPoll > 250) {
       this.lastPoll = now;
@@ -405,7 +415,7 @@ export class BreakablesView implements ClientSystem {
     for (const { mesh, members } of this.meshes) {
       const arr = mesh.instanceMatrix.array as Float32Array;
       let n = 0;
-      for (let k = 0; k < members.length; k++) {
+      for (let k = 0; k < members.length && n < CAPACITY; k++) {
         const i = members[k]!;
         if (this.hidden[i]) continue;
         const b = this.list[i]!;
@@ -415,9 +425,9 @@ export class BreakablesView implements ClientSystem {
         arr.set(this.base.subarray(i * 16, i * 16 + 16), o);
         const t = this.appear[i]!;
         if (t >= 0) {
-          // Re-materialise: grow from the base with a little overshoot.
-          const x = t / REBUILD_S;
-          const k2 = Math.max(0.02, 1 + 2.2 * Math.pow(x - 1, 3) + 1.2 * Math.pow(x - 1, 2));
+          // Re-materialise: corpuscles first, then grow from the base with a little overshoot.
+          const x = Math.max(0, (t - REBUILD_DELAY_S) / (REBUILD_S - REBUILD_DELAY_S));
+          const k2 = Math.max(0.01, 1 + 2.4 * Math.pow(x - 1, 3) + 1.4 * Math.pow(x - 1, 2));
           for (const e of LINEAR) arr[o + e] = arr[o + e]! * k2;
         }
         n++;
@@ -437,7 +447,9 @@ export class BreakablesView implements ClientSystem {
     for (const m of this.meshes) instances += m.mesh.count;
     let broken = 0;
     for (let i = 0; i < this.hidden.length; i++) broken += this.hidden[i]!;
-    return { props: this.list.length, instances, broken, debris: this.debris.count, draws: this.meshes.length + 1 };
+    let draws = 1;
+    for (const m of this.meshes) if (m.mesh.count > 0) draws++;
+    return { props: this.list.length, instances, broken, debris: this.debris.count, draws };
   }
 
   dispose() {
@@ -446,14 +458,10 @@ export class BreakablesView implements ClientSystem {
     this.unsub.length = 0;
     this.debris.dispose();
     for (const { mesh } of this.meshes) {
-      mesh.geometry.dispose();
+      if (mesh.geometry !== placeholderGeo) mesh.geometry.dispose();
       mesh.dispose();
     }
     this.meshes = [];
-    if (this.warm) {
-      this.warm.geometry.dispose();
-      this.warm.dispose();
-    }
     this.group.removeFromParent();
     const w = window as unknown as { __breakables?: BreakablesView };
     if (w.__breakables === this) w.__breakables = undefined;
