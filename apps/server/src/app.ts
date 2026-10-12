@@ -9,8 +9,7 @@ import type { TokenVerifier } from "./auth/identity.ts";
 import { directRequestIp } from "./auth/ip.ts";
 import { BodyRoom } from "./world/BodyRoom.ts";
 import { isBodyId, onlineCount, play, type MatchmakingLimits } from "./world/matchmaking.ts";
-import { characterRepo } from "./world/characters.ts";
-import { hub } from "./world/hub.ts";
+import { travelRedirect } from "./world/admission.ts";
 import { timingSafeEqual } from "node:crypto";
 import { partyOf, partyRoomFor, playRefusal } from "./social/index.ts";
 
@@ -126,14 +125,17 @@ export async function createGame(opts: GameOptions): Promise<Game> {
       res.status(403).json({ ok: false, error: refusal });
       return;
     }
-    // Travel tickets: an existing character may only rejoin its current body or the one it was
-    // authorised to travel to (portal or rebirth). Admins and load-test bots are exempt.
-    if (!identity.admin && !identity.loadtest) {
-      const ch = hub.get(identity.userId)?.actor.char ?? characterRepo.current.load(identity.userId);
-      if (ch && body !== ch.body && body !== ch.travelTo) {
-        res.json({ ok: false, error: "travel", body: ch.body });
-        return;
-      }
+    // Bots only in load-test rooms, players only in public rooms ("no fake players, ever").
+    if ((req.body.loadtest === true) !== !!identity.loadtest) {
+      res.json({ ok: false, error: "forbidden" });
+      return;
+    }
+    // Travel tickets: a character may only rejoin its current body or the one an unexpired ticket
+    // names (portal, out of combat); brand-new characters start home. Admins and bots are exempt.
+    const redirect = travelRedirect(identity, body, Date.now());
+    if (redirect) {
+      res.json({ ok: false, error: "travel", body: redirect });
+      return;
     }
     // Party headroom (D12) only for real party members: the copy another member is in on this body
     // (a client hint is honoured only if it names such a room).

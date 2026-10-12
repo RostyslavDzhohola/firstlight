@@ -45,7 +45,7 @@ interface Mech {
   length: number;
   width: number;
   cover: CoverState | null;
-  /** Split circles: everyone in the arena when the stamp fell (session ids), held through detonation. */
+  /** Split circles: everyone in the arena when the stamp fell (account ids, so a new session can't shed it), held through detonation. */
   participants?: string[];
   /** The telegraph clients were sent (replayed to late arrivals with the remaining time). */
   msg?: NpcAttackMsg;
@@ -688,7 +688,7 @@ export class BossController {
       if (!pool.length) return false;
       const victim = pool[Math.floor(Math.random() * pool.length)]!;
       const c = this.groundAt(victim.pos);
-      this.mechs.push({ ...base, kind: "split", centre: c, participants: this.inArena.map((lp) => lp.a.id) });
+      this.mechs.push({ ...base, kind: "split", centre: c, participants: this.inArena.map((lp) => lp.a.identity.userId) });
       this.sendTelegraph(n, a, c, n.facing, ms, { r: a.radius ?? 4 });
       this.event({ type: "mechanic", mech: a.id, pts: [...c], r: a.radius, ms });
       return true;
@@ -739,9 +739,9 @@ export class BossController {
         if (inside.length) victims = inside.map((lp) => lp.a);
         else {
           // Empty circle: everyone who was in the arena when it was stamped takes it, wherever they
-          // went (running out, or closing the tab, doesn't dodge the curse), plus anyone in the arena now.
-          const ids = new Set([...(m.participants ?? []), ...this.inArena.filter((lp) => !lp.untouchable).map((lp) => lp.a.id)]);
-          victims = [...this.sys.world.players()].filter((p) => ids.has(p.id) && !p.dead);
+          // went (running out, closing the tab or swapping sessions doesn't dodge the curse), plus anyone in the arena now.
+          const ids = new Set([...(m.participants ?? []), ...this.inArena.filter((lp) => !lp.untouchable).map((lp) => lp.a.identity.userId)]);
+          victims = [...this.sys.world.players()].filter((p) => ids.has(p.identity.userId) && !p.dead);
         }
         const each = inside.length ? total / inside.length : total;
         for (const lp of inside) this.soakers.add(lp.a.identity.userId);

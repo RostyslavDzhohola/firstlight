@@ -45,6 +45,8 @@ export interface PlayerActor {
   youDirty: boolean;
   /** Retired by a newer session or an account merge: never save, never act. */
   superseded?: boolean;
+  /** Leave hooks have run (BodyRoom.detach): no longer a connected player. */
+  detached?: boolean;
   /** Logout countdown start position (cancel if moved > 0.5 m from it). */
   logoutFrom?: [number, number, number];
   loggedOut?: boolean;

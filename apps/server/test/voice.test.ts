@@ -11,7 +11,7 @@ import { accountLinks } from "../src/auth/links.ts";
 import { banUser, isBlockedEitherWay, listReports, openGameDb, setGameDb, type Db } from "../src/db/index.ts";
 import { env } from "../src/env.ts";
 import { revokeVoiceForUser } from "../src/world/voice/index.ts";
-import { TURN_API } from "../src/world/voice/turn.ts";
+import { TURN_API, turnCredentials } from "../src/world/voice/turn.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 
 let game: Game;
@@ -463,12 +463,20 @@ describe("TURN credentials", () => {
 
   it("credentials follow the account when a guest saves", async () => {
     mockTurn();
+    // Registry level: a credential minted for the guest is revoked by the account's id afterwards.
+    turnCredentials.remember(uid("gus"), [`gus-user-${run}`]);
+    turnCredentials.rekey(uid("gus"), uid("gus-acct"));
+    expect(await revokeVoiceForUser(uid("gus"))).toBe(0);
+    expect(await revokeVoiceForUser(uid("gus-acct"))).toBe(1);
+    // In a room the merged guest session is retired (it rejoins as the account): its leave hook
+    // revokes the credential exactly once (F12 B4) and nothing is left under either id.
     const a = await bot("ann");
     await enable(a);
     const user = got(a, "voice:ice")[0].iceServers[0].username;
     accountLinks.emit({ fromUserId: uid("ann"), toUserId: uid("acct"), name: "ann", character: "guest", merged: false, moved: null, displaced: null });
+    await waitFor(() => revokes(user).length === 1);
     expect(await revokeVoiceForUser(uid("ann"))).toBe(0);
-    expect(await revokeVoiceForUser(uid("acct"))).toBe(1);
+    expect(await revokeVoiceForUser(uid("acct"))).toBe(0);
     expect(revokes(user)).toHaveLength(1);
   });
 

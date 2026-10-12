@@ -28,6 +28,8 @@ export interface CharacterData {
   dead?: boolean;
   /** Server-issued travel ticket: the body this character may join next (portal or rebirth). */
   travelTo?: BodyId;
+  /** When the travel ticket stops being valid (ms epoch); a ticket without it is expired. */
+  travelUntil?: number;
   /** Worn cosmetics by slot (ids of cosmetic items that are in the inventory). Cleared on death. */
   worn?: Partial<Record<CosmeticSlot, string>>;
   /** Per-life progress for life-scoped medals and once-per-life eggs (quests lane). */

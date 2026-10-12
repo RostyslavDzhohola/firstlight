@@ -24,6 +24,7 @@ import { emitGameEvent, npcKindOf } from "./events.ts";
 import { emitPileEvent, onPileEvent, pileStore, type PileData } from "./piles.ts";
 import { SYSTEM_FACTORIES, type RoomSystem } from "./systems.ts";
 import { movementLimits } from "./npc/effects.ts";
+import { ticketFor } from "./admission.ts";
 import { groundMotion, motionFields, settle, validateMove, MOVE, type MoveWorld } from "./movement.ts";
 import { matchMaker } from "@colyseus/core";
 import { liveSessions } from "../auth/sessions.ts";
@@ -59,7 +60,15 @@ export const RULES = {
   AOI_ADD: 80,
   AOI_REMOVE: 100,
   SAVE_EVERY_MS: 30_000,
+  /** A portal travel ticket must be used within this time (F12 B3). */
+  TRAVEL_TICKET_MS: 60_000,
 };
+
+/**
+ * Runtime state a takeover hands from the old actor to the new session's (F12 B2): protection keeps
+ * its expiry, and cooldowns, damage/heal-over-time and NPC effects survive a reload.
+ */
+const CARRIED_ON_TAKEOVER = ["protectedUntil", "heals", "healAcc", "burn", "healCooldownUntil", "tonicCooldownUntil", "lastAttackAt", "reloadEndsAt", "heat", "overheatUntil", "specialReadyAt", "lastDodgeAt", "lastPhraseAt", "lastDamagedBy", "npcFx", "violations"] as const satisfies readonly (keyof PlayerActor)[];
 
 const vec = z.number().finite();
 const inputSchema = z.object({ seq: z.number().int().nonnegative(), x: vec, y: vec, z: vec, fx: z.number().min(-1).max(1), fy: z.number().min(-1).max(1), fz: z.number().min(-1).max(1), anim: z.number().int().min(0).max(31), t: vec });
@@ -235,6 +244,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     let inheritedCombat = false;
     let inheritedPos: V3 | null = null;
     const prev = hub.get(auth.userId);
+    const old = prev?.actor ?? null;
     if (prev) {
       char = prev.actor.char;
       inheritedCombat = prev.actor.combatUntil > now && !prev.actor.dead;
@@ -255,6 +265,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     else pos = this.spawnPoint(client.sessionId);
     char.body = this.bodyDef.id;
     char.travelTo = undefined;
+    char.travelUntil = undefined;
     p.x = pos[0];
     p.y = pos[1];
     p.z = pos[2];
@@ -308,8 +319,13 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       lastPhraseAt: 0,
       healAcc: 0,
     };
+    if (old) {
+      const carried = a as unknown as Record<string, unknown>, from = old as unknown as Record<string, unknown>;
+      for (const k of CARRIED_ON_TAKEOVER) carried[k] = from[k];
+      if (inheritedCombat) a.protectedUntil = 0;
+    }
     this.equip(a, char.selected);
-    if (!inheritedCombat) p.flags |= PF.PROTECTED;
+    if (a.protectedUntil > now) p.flags |= PF.PROTECTED;
     this.state.players.set(client.sessionId, p);
     this.actors.set(client.sessionId, a);
     hub.set(auth.userId, this, a);
@@ -323,7 +339,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
   onDrop(client: Client) {
     const a = this.actors.get(client.sessionId);
-    if (!a || a.superseded || this.shuttingDown) return;
+    if (!a || a.superseded || a.loggedOut || this.shuttingDown) return;
     a.state.flags |= PF.LINGER;
     // Kicked or banned: no reconnection seat (onLeave runs next and removes the body).
     if (this.systems.some((s) => s.canReconnect?.(client.sessionId) === false)) return;
@@ -349,25 +365,46 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     client.view?.dispose();
     const a = this.actors.get(client.sessionId);
     if (!a) return;
-    this.actors.delete(client.sessionId);
-    liveSessions.unregister(a.identity.userId, client.sessionId);
-    for (const s of this.systems) s.onPlayerLeave?.(client.sessionId);
+    this.detach(a);
     if (a.superseded) {
       this.state.players.delete(client.sessionId);
       return;
     }
+    const now = Date.now();
+    // Safe zones and portal handoffs only skip the linger out of combat (F12 B3, SPEC §5.6).
+    const calm = now >= a.combatUntil;
     const safe = isSafe(this.bodyDef, a.state.x, a.state.y, a.state.z);
+    const handoff = !!a.char.travelTo && ticketFor(a.char, a.char.travelTo, now) && portalNear(this.portals, a.state.x, a.state.y, a.state.z)?.to === a.char.travelTo;
     const dropped = code !== CloseCode.CONSENTED; // the 30 s reconnection window already elapsed
-    if (a.dead || safe || a.loggedOut || dropped || this.shuttingDown || a.char.travelTo) {
+    if (a.dead || a.loggedOut || dropped || this.shuttingDown || (calm && (safe || handoff))) {
       this.finalLeave(a);
       this.state.players.delete(client.sessionId);
       return;
     }
-    // Left outside a safe zone without logging out: the body stays for 30 s and can die.
+    // Left without logging out (outside a safe zone, or in a fight): the body stays for 30 s and can die.
     a.state.flags |= PF.LINGER;
     this.saveActor(a);
-    this.lingering.set(client.sessionId, { actor: a, until: Date.now() + RULES.LINGER_MS });
+    this.lingering.set(client.sessionId, { actor: a, until: now + RULES.LINGER_MS });
     this.autoDispose = false; // keep simulating the body even if nobody else is here
+  }
+
+  /**
+   * The one way an actor stops being a connected player here (leave, takeover, merge, kick): drop
+   * it from the live map and run every system's leave hook, exactly once (F12 B4).
+   */
+  private detach(a: PlayerActor) {
+    if (a.detached) return;
+    a.detached = true;
+    if (this.actors.get(a.id) === a) this.actors.delete(a.id);
+    this.invOps.delete(a.id);
+    liveSessions.unregister(a.identity.userId, a.id);
+    for (const s of this.systems) {
+      try {
+        s.onPlayerLeave?.(a.id);
+      } catch (err) {
+        console.error(`[room ${this.roomId}] leave hook failed: ${(err as Error)?.message ?? err}`);
+      }
+    }
   }
 
   /** Save and forget an actor that is leaving the world. */
@@ -380,10 +417,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   /** Remove an actor without saving (superseded by a newer session or an account merge). */
   retire(a: PlayerActor, code: number, reason: string) {
     a.superseded = true;
-    this.actors.delete(a.id);
+    this.detach(a);
     this.lingering.delete(a.id);
     this.state.players.delete(a.id);
-    liveSessions.unregister(a.identity.userId, a.id);
     const c = this.clients.getById(a.id);
     if (c) c.leave(code, reason);
   }
@@ -418,7 +454,13 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       client.send("denied", { action: "travel", reason: "not at a portal" });
       return;
     }
+    // No portal escapes from a fight (F12 B3): the ticket waits for the combat tag to run out.
+    if (Date.now() < a.combatUntil) {
+      client.send("denied", { action: "travel", reason: "in combat" });
+      return;
+    }
     a.char.travelTo = to;
+    a.char.travelUntil = Date.now() + RULES.TRAVEL_TICKET_MS;
     this.saveActor(a);
     client.send("travelOk", { to });
   }
