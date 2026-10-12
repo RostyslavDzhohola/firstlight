@@ -173,7 +173,8 @@ describe("all nine missions", () => {
 describe("medals", () => {
   it("progress medals: Spark, Firstlight, Cartographer", async () => {
     const b = await bot("progressor", "arcadia");
-    // Spark: no production emitter yet (the onboarding lane adds it; contracts.test.ts tracks the gap).
+    // Spark through the bus listener for onboardingDone. The real path (training dummies on Portus,
+    // OnboardingSystem paying and awarding it in one transaction) is driven in onboarding.test.ts.
     emitGameEvent(serverRoom(b), { type: "onboardingDone", playerId: b.id });
     await until("spark", () => b.you.medals.includes("spark"));
     b.send("admin", { cmd: "level", args: { level: 20 } });
@@ -190,6 +191,9 @@ describe("medals", () => {
     const kills = [["arcadia", "tidewrath", "tide_turner"], ["hollowmere", "hollow_king", "regicide"], ["meridian", "the_receiver", "decommissioned"]] as const;
     for (const [body, boss, medal] of kills) {
       const b = await bot("featster", body);
+      // The boss system's own event, emitted here: a test kill needs an admin tool (npc hurt), which
+      // makes the fight assisted and withholds every medal. Real assisted kills (boss.ts emitting
+      // bossKill before its loot) are driven in stage-admin.test.ts.
       emitNpcEvent({ kind: "bossKill", body, boss, sessionIds: [b.id], userIds: ["featster"], names: ["featster"] });
       await until(medal, () => b.you.medals.includes(medal));
       if (body === "meridian") await until("triple crown", () => b.you.medals.includes("triple_crown"));
@@ -451,6 +455,7 @@ describe("NPC lane bridge", () => {
     for (let i = 0; i < 3; i++) emitNpcEvent({ kind: "kill", body: "arcadia", def: "hopbit", npcLevel: 2, players: [b.id], userIds: ["bridger"], area: "clover_fields" });
     await until("hunt progress", () => mission(b, "A1")?.progress === 3);
 
+    // Synthetic for the same reason as above (an admin kill would be assisted: no medal to see).
     emitNpcEvent({ kind: "bossKill", body: "arcadia", boss: "tidewrath", sessionIds: [b.id], userIds: ["bridger"], names: ["bridger"] });
     await until("tide turner", () => b.you.medals.includes("tide_turner"));
 
