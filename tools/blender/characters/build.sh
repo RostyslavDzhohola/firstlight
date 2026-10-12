@@ -16,7 +16,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 BLENDER="${BLENDER:-/opt/homebrew/bin/blender}"
-GLTF="npx -y @gltf-transform/cli@4.5.1"
+GLTF="pnpm dlx @gltf-transform/cli@4.5.1"
 OUT_DEV="$ROOT/apps/client/public/assets-dev/characters"
 OUT_SRC="$ROOT/assets-src/characters"
 WORK="$(mktemp -d /tmp/fl-chars-build.XXXXXX)"
