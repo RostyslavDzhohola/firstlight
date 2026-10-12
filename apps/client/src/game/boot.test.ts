@@ -79,6 +79,21 @@ describe("describeBootFailure", () => {
     }
   });
 
+  it("names a stale version, a storage lockout and a refused device instead of blaming the connection (F12 final Opus nit)", () => {
+    const version = describeBootFailure(new Error("version"))!;
+    expect(version.action).toBe("reload");
+    expect(version.title).toMatch(/new version/i);
+    const storage = describeBootFailure(new Error("storage"))!;
+    expect(storage.action).toBe("retry");
+    expect(storage.text).toMatch(/sav/i);
+    expect(storage.text).not.toMatch(/connection/i);
+    const device = Object.assign(new Error("This device is banned."), { status: 403 });
+    const banned = describeBootFailure(device)!;
+    expect(banned.title).toMatch(/can't play/i);
+    expect(banned.text).toContain("This device is banned.");
+    for (const f of [version, storage, banned]) expect(f.text).not.toMatch(/check your connection/i);
+  });
+
   it("stays quiet when the removal screen already explains (banned, kicked, playing elsewhere)", () => {
     expect(describeBootFailure(new Error("banned"))).toBeNull();
     expect(describeBootFailure(new Error("kicked"))).toBeNull();
