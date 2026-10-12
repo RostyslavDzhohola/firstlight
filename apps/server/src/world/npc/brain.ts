@@ -11,9 +11,9 @@ import type { V3 } from "../geometry.ts";
 import { cancelAttack, canSee, chest, isMelee, startAttack, updateAttack } from "./attacks.ts";
 import type { NpcSystem } from "./NpcSystem.ts";
 import { MODE, type Npc } from "./npc.ts";
-import { step } from "./steer.ts";
+import { feetHeight, nearSafeRing, step } from "./steer.ts";
 import { NPC_TUNING, emitNpcEvent } from "./tuning.ts";
-import { add, cross, dist, dot, flatDist, normalize, rotateAboutUp, stableTangentAt, sub, tangentDir, tangentize, up } from "./vec.ts";
+import { add, cross, dist, dot, flatDist, len, normalize, rotateAboutUp, stableTangentAt, sub, tangentDir, tangentize, up } from "./vec.ts";
 
 export function think(sys: NpcSystem, n: Npc, now: number, dt: number) {
   if (n.dead) return;
@@ -140,6 +140,7 @@ export function aggro(sys: NpcSystem, n: Npc, p: PlayerActor, now: number, share
   n.target = p;
   n.lastSeenAt = now;
   n.lastLosAt = now;
+  n.unreachSince = undefined;
   n.state.flags |= NF.AGGRO;
   if (calmBefore) {
     n.anchor = n.roam > 30 ? [n.pos[0], n.pos[1], n.pos[2]] : n.home;
@@ -184,6 +185,15 @@ function chase(sys: NpcSystem, n: Npc, now: number, dt: number) {
     startEvade(sys, n, now);
     return;
   }
+  // Can't reach (F12): a combat-tagged player on a pad ring keeps shooting while melee NPCs may not
+  // step in. After unreachableMs the NPC evades home and heals, as for leash (content §3.1).
+  if (outOfReach(sys, n, tp, d)) {
+    n.unreachSince ??= now;
+    if (now - n.unreachSince >= NPC_TUNING.unreachableMs) {
+      startEvade(sys, n, now);
+      return;
+    }
+  } else n.unreachSince = undefined;
   if (def.fleeBelow && n.state.hp < n.state.maxHp * def.fleeBelow && sys.mates(n).length < 2) {
     startFlee(sys, n, tp, now, 6000);
     n.target = null;
@@ -240,6 +250,17 @@ function chase(sys: NpcSystem, n: Npc, now: number, dt: number) {
   if (!def.gridMove || d <= reach * 0.8) n.facing = toward;
 }
 
+/**
+ * The target stands where this NPC can't follow — inside a pad's safe ring (plus the NPC's margin)
+ * or outside its medium — and none of its ranged attacks reaches it from here.
+ */
+function outOfReach(sys: NpcSystem, n: Npc, tp: V3, d: number): boolean {
+  for (const a of n.def.attacks) if (!isMelee(a) && d <= a.range) return false;
+  if (nearSafeRing(sys.ground, tp[0], tp[1], tp[2], NPC_RULES.safeMargin + n.radius)) return true;
+  const l = len(tp);
+  return feetHeight(sys.ground, tp[0] / l, tp[1] / l, tp[2] / l, n.def.locomotion, n.def.hover ?? 0) === null;
+}
+
 function meleeReach(n: Npc): number {
   let best = 0;
   for (const a of n.def.attacks) if (isMelee(a) && !a.minRange) best = Math.max(best, a.range);
@@ -271,6 +292,7 @@ function drop(sys: NpcSystem, n: Npc, now: number) {
 export function startEvade(sys: NpcSystem, n: Npc, now: number) {
   cancelAttack(sys, n);
   n.target = null;
+  n.unreachSince = undefined;
   sys.releaseToken(n);
   n.damage.clear();
   n.state.flags = (n.state.flags | NF.EVADING | NF.INVULN) & ~(NF.AGGRO | NF.TELEGRAPH | NF.STUNNED);
