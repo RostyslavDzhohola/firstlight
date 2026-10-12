@@ -102,7 +102,7 @@ export class Browser {
     this.client = makeAuthClient(server.base, this.fetch);
   }
 
-  fetch = async (input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> => {
+  fetch = async (input: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
     const url = new URL(typeof input === "string" || input instanceof URL ? input.toString() : input.url, this.server.base);
     const headers = new Headers(init.headers ?? (input instanceof Request ? input.headers : undefined));
     if (this.cookies.size) headers.set("cookie", [...this.cookies].map(([k, v]) => `${k}=${v}`).join("; "));

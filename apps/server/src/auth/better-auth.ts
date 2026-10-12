@@ -5,7 +5,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomInt } from "node:crypto";
 import type Database from "better-sqlite3";
-import { betterAuth } from "better-auth";
+import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { APIError, createAuthMiddleware, isAPIError } from "better-auth/api";
 import { anonymous, emailOTP, jwt } from "better-auth/plugins";
 import { z } from "zod";
@@ -45,8 +45,9 @@ export interface AuthDeps {
 const IP_CHECKED_PATHS = new Set(["/sign-in/anonymous", "/sign-in/email-otp", "/email-otp/send-verification-otp"]);
 const emailSchema = z.email();
 
-export function buildAuth(d: AuthDeps) {
-  return betterAuth({
+/** Better Auth options (exported separately so migrations can run before the instance exists). */
+export function authOptions(d: AuthDeps) {
+  return {
     appName: "FIRSTLIGHT",
     database: d.authDb,
     secret: d.secret,
@@ -125,7 +126,11 @@ export function buildAuth(d: AuthDeps) {
         },
       }),
     ],
-  });
+  } satisfies BetterAuthOptions;
+}
+
+export function buildAuth(options: ReturnType<typeof authOptions>) {
+  return betterAuth(options);
 }
 
 export type FirstlightAuth = ReturnType<typeof buildAuth>;

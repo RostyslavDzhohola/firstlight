@@ -16,7 +16,7 @@ import { openGameDb, setGameDb, type Db } from "../db/game-db.ts";
 import { linkAccounts } from "../db/link.ts";
 import { reserveOtpSend, releaseOtpSend } from "../db/otp-budget.ts";
 import { closeDanglingSessions, pruneSessionLog } from "../db/sessions.ts";
-import { authRequestState, buildAuth, type FirstlightAuth } from "./better-auth.ts";
+import { authOptions, authRequestState, buildAuth, type FirstlightAuth } from "./better-auth.ts";
 import { hmacHex, safeEqual } from "./crypto.ts";
 import type { Identity, TokenVerifier, VerifyContext } from "./identity.ts";
 import { CLIENT_IP_HEADER, firstForwardedFor, normalizeIp } from "./ip.ts";
@@ -100,7 +100,7 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
   const hashIp = (ip: string) => hmacHex(`${cfg.secret}:ip`, ip).slice(0, 32);
   const hashEmail = (email: string) => hmacHex(`${cfg.secret}:email`, email.toLowerCase());
 
-  const auth = buildAuth({
+  const options = authOptions({
     authDb,
     baseURL: cfg.baseURL,
     secret: cfg.secret,
@@ -127,8 +127,13 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
     },
   });
 
-  const { runMigrations } = await getMigrations(auth.options);
+  // Migrate before the instance exists, so its startup schema check sees the final schema.
+  const { runMigrations } = await getMigrations(options);
   await runMigrations();
+  const auth = buildAuth(options);
+  // Settle Better Auth's startup schema check now (it would otherwise run in the background).
+  const authCtx = await auth.$context;
+  await authCtx.checkSchema?.();
   closeDanglingSessions(db);
   pruneSessionLog(db);
   const pruneTimer = setInterval(() => pruneSessionLog(db), 24 * 3_600_000);
