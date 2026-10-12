@@ -13,6 +13,7 @@
   "dependencies": {
     "@colyseus/schema": "5.0.36",
     "@colyseus/sdk": "0.18.5",
+    "@dgreenheck/three-pinata": "2.0.1",
     "@firstlight/shared": "workspace:*",
     "better-auth": "1.7.7",
     "react": "19.3.0",

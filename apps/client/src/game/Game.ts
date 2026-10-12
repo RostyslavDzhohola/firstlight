@@ -254,6 +254,8 @@ export class Game {
     if (OFFLINE) {
       const p = this.spawnPoint();
       this.player.teleport(p.x, p.y, p.z);
+      // Systems that work without a room (e.g. breakable props) still exist offline and in ?bench.
+      this.systems = CLIENT_SYSTEMS.filter((f) => f.offline).map((f) => f(this)).filter((x): x is ClientSystem => !!x);
     } else {
       setLoading("Connecting…", 0.3);
       const stored = { starter: Number(localStorage.getItem("fl.starter") ?? 0), palette: Number(localStorage.getItem("fl.palette") ?? 0) };

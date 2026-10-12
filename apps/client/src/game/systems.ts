@@ -2,12 +2,16 @@
 // updated every frame. Lanes add their factory to CLIENT_SYSTEMS.
 
 import type { Game } from "./Game.ts";
+import { createBreakables } from "../world/Breakables.ts";
 
 export interface ClientSystem {
   update(dt: number, now: number): void;
   dispose(): void;
 }
 
-export type ClientSystemFactory = (game: Game) => ClientSystem | null;
+/** `offline: true` factories also run without a server (?offline, ?bench); the rest need a room. */
+export type ClientSystemFactory = ((game: Game) => ClientSystem | null) & { offline?: boolean };
 
 export const CLIENT_SYSTEMS: ClientSystemFactory[] = [];
+// Destruction lane: breakable props (intact meshes, debris, rebuild effect).
+CLIENT_SYSTEMS.push(createBreakables);

@@ -32,6 +32,9 @@ importers:
       '@colyseus/sdk':
         specifier: 0.18.5
         version: 0.18.5(@colyseus/core@0.18.18)(typescript@7.0.2)(zod@4.6.6)
+      '@dgreenheck/three-pinata':
+        specifier: 2.0.1
+        version: 2.0.1(three@0.186.1)
       '@firstlight/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -397,6 +400,11 @@ packages:
   '@cspotcode/source-map-support@0.8.1':
     resolution: {integrity: sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw==}
     engines: {node: '>=12'}
+
+  '@dgreenheck/three-pinata@2.0.1':
+    resolution: {integrity: sha512-1pQU68B5xguxvRryl6nxZBARDqOW+/lXf7Xpz8QZ87awadSpN85mDNChTEdA4fPfJYyrft+thHS6Ooe7E5rdFA==}
+    peerDependencies:
+      three: '>=0.158.0'
 
   '@dimforge/rapier3d-compat@0.12.0':
     resolution: {integrity: sha512-uekIGetywIgopfD97oDL5PfeezkFpNhwlzlaEYNOA0N6ghdsOvh/HYjSMek5Q2O1PYvRSDFcqFVJl4r4ZBwOow==}
@@ -2369,6 +2377,10 @@ snapshots:
   '@cspotcode/source-map-support@0.8.1':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.9
+
+  '@dgreenheck/three-pinata@2.0.1(three@0.186.1)':
+    dependencies:
+      three: 0.186.1
 
   '@dimforge/rapier3d-compat@0.12.0': {}
 
