@@ -130,7 +130,8 @@ Source: Quaternius, [Stylized Nature MegaKit Standard](https://quaternius.itch.i
 CC0 1.0 Universal. Download supplied on 2026-10-12; licence supplied in `License_Standard.txt`.
 Archive SHA-256: `298f6732b872e4cf7b30e6e7abf9641c7f6dc6b326df37ac089533ed7e3d58c9`.
 The archive is not in git. `tools/blender/vegetation/build.sh` verifies it and rebuilds offline from
-`SRC/download.zip` and `SRC/x/glTF/`. The pinned gltf-transform 4.5.1 CLI must already be in the
+`SRC/download.zip`, extracted into a fresh temporary directory for each build. Blender imports
+only that verified extraction; the temporary files are removed on exit. The pinned gltf-transform 4.5.1 CLI must already be in the
 pnpm cache, or be provided through `GLTF_CLI`; the script never downloads it.
 
 Only glTF, referenced geometry buffers and PNG textures are imported, in headless Blender 5.2.1
@@ -159,7 +160,7 @@ Shipped outputs, 2026-10-12:
 | File | Bytes | SHA-256 | Contents |
 |---|---:|---|---|
 | `vegetation.glb` | 2,353,020 | `87cc1e48fe162a07443f46c193ee8c322dd379a1eb585acfa26bddaded2e3bb4` | 26 models × 2 LODs, two embedded PNG atlases; 14,489 near and 491 far triangles across all templates |
-| `manifest.json` | 3,821 | generated alongside the GLB | per-model source/LOD triangle counts, heights and far-LOD method |
+| `manifest.json` | 3,821 | `cf608802bb22feaeac244b0e1fc9b7622eb1fb481be9dc5c0919c08e5bbb63b4` | per-model source/LOD triangle counts, heights and far-LOD method |
 
 Total download: 2,356,841 bytes, under the 4 MB target. The client downloads only the GLB; the
 manifest is build/test metadata. See `docs/reviews/2026-10-12-vegetation-gpt-6.1-sol.md` for the
