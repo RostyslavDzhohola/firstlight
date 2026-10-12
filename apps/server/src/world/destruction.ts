@@ -80,9 +80,11 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
     if (!s || s.v !== 1 || !Array.isArray(s.broken)) return;
     const now = this.now();
     const byId = new Map(this.list.map((b) => [b.id, b]));
-    for (const [id, until] of s.broken) {
-      const b = byId.get(id);
-      if (!b || !(until > now)) continue;
+    for (const e of s.broken) {
+      if (!Array.isArray(e)) continue; // a malformed row never stops a room opening
+      const [id, until] = e as unknown[];
+      const b = typeof id === "string" ? byId.get(id) : undefined;
+      if (!b || typeof until !== "number" || !(until > now)) continue;
       this.brokenUntil[b.index] = until;
       this.hp[b.index] = 0;
       this.broken.add(b.index);
@@ -90,12 +92,12 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
     }
   }
 
+  /** Checkpoint the broken set; it stays dirty (and is tried again) until a save succeeds (F12 final S3). */
   private saveCopy() {
-    this.copyDirty = false;
     this.lastCopySave = this.now();
     const broken: [string, number][] = [];
     for (const i of this.broken) broken.push([this.list[i]!.id, this.brokenUntil[i]!]);
-    saveCopy(roomCopyKey(this.room), "destruction", broken.length ? ({ v: 1, broken } satisfies DestructionCopyState) : null);
+    this.copyDirty = !saveCopy(roomCopyKey(this.room), "destruction", broken.length ? ({ v: 1, broken } satisfies DestructionCopyState) : null);
   }
 
   isBroken(index: number): boolean {

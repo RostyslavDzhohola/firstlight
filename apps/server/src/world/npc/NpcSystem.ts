@@ -183,11 +183,13 @@ export class NpcSystem implements RoomSystem {
     this.saveCopyState(this.world.now());
   }
 
-  /** Remember the boss timer and group state for the next room on this copy (copyState.ts). */
+  /**
+   * Remember the boss timer and group state for the next room on this copy (copyState.ts). Stays
+   * dirty (and is tried again, with copyState's backoff) until a save succeeds (F12 final S3).
+   */
   saveCopyState(now: number) {
-    this.copyDirty = false;
     this.lastCopySave = now;
-    if (this.world.copyKey) saveCopy(this.world.copyKey, NPC_COPY_SYSTEM, snapshotNpcCopy(this, now));
+    this.copyDirty = !!this.world.copyKey && !saveCopy(this.world.copyKey, NPC_COPY_SYSTEM, snapshotNpcCopy(this, now));
   }
 
   private refreshLive(now: number) {

@@ -13,7 +13,8 @@ import { NF } from "@firstlight/shared/content/npcs";
 import { BodyState, PF } from "@firstlight/shared/net/schema";
 import type { Game } from "../src/app.ts";
 import { openGameDb, type Db } from "../src/db/index.ts";
-import { copyStateStore, MemoryCopyStateStore, SqliteCopyStateStore } from "../src/world/copyState.ts";
+import { COPY_RETRY, copyStateStore, loadCopy, MemoryCopyStateStore, saveCopy, SqliteCopyStateStore, type CopyStateStore } from "../src/world/copyState.ts";
+import { CopyStateRestrictions, RESTRICTIONS_SYSTEM } from "../src/world/quests/restrictions.ts";
 import type { BodyRoom } from "../src/world/BodyRoom.ts";
 import { DestructionSystem } from "../src/world/destruction.ts";
 import { dealDamage } from "../src/world/combat.ts";
@@ -232,6 +233,141 @@ describe("crash recovery: broken props (no dispose)", () => {
     expect(b.isBroken(prop.index)).toBe(true);
     expect(room.state.broken.has(prop.id)).toBe(true);
     expect(b.brokenUntil[prop.index]).toBe(a.brokenUntil[prop.index]);
+  });
+});
+
+/** A copy-state store whose writes fail while `failing` is set (a transient storage error). */
+class FlakyStore implements CopyStateStore {
+  failing = false;
+  attempts = 0;
+  readonly inner: CopyStateStore;
+  constructor(inner: CopyStateStore) {
+    this.inner = inner;
+  }
+  load<T>(key: string, system: string): T | null {
+    return this.inner.load<T>(key, system);
+  }
+  save(key: string, system: string, state: unknown): void {
+    this.attempts++;
+    if (this.failing) throw new Error("disk I/O error (test)");
+    this.inner.save(key, system, state);
+  }
+}
+
+/** game.db for a crash test: the store over it, and a reopen that sees only what was committed. */
+function crashDb() {
+  const dir = tempDir();
+  dirs.push(dir);
+  const path = join(dir, "game.db");
+  const db = openGameDb(path);
+  dbs.push(db);
+  return {
+    db,
+    reopen: () => {
+      db.close(); // the process dies: no dispose
+      const db2 = openGameDb(path);
+      dbs.push(db2);
+      copyStateStore.current = new SqliteCopyStateStore(db2);
+      return db2;
+    },
+  };
+}
+
+describe("failed checkpoints are retried until storage recovers (F12 final S3)", () => {
+  const saved = { ...COPY_RETRY };
+  afterEach(() => Object.assign(COPY_RETRY, saved));
+
+  it("a broken prop whose checkpoint failed is saved once storage works again", () => {
+    COPY_RETRY.firstMs = 0; // retry on the next tick (the backoff has its own test)
+    const { db, reopen } = crashDb();
+    const flaky = new FlakyStore(new SqliteCopyStateStore(db));
+    copyStateStore.current = flaky;
+    let now = 5_000_000;
+    const a = new DestructionSystem(propRoom(), () => now);
+    const prop = a.list.find((b) => b.hp < 400)!;
+    a.damage(prop.index, 1e6, "heavy", "", [1, 0, 0]);
+    flaky.failing = true;
+    now += 1000;
+    a.tick(1000, now);
+    expect(flaky.attempts).toBe(1);
+    flaky.failing = false; // storage is back; nothing else changes in the copy
+    for (let i = 0; i < 3; i++) {
+      now += 1000;
+      a.tick(1000, now);
+    }
+    reopen();
+    const b = new DestructionSystem(propRoom(), () => now);
+    expect(b.isBroken(prop.index)).toBe(true);
+  });
+
+  it("a cleared camp whose checkpoint failed is saved once storage works again", () => {
+    COPY_RETRY.firstMs = 0;
+    NPC_TUNING.ambient = true;
+    const { db, reopen } = crashDb();
+    const flaky = new FlakyStore(new SqliteCopyStateStore(db));
+    copyStateStore.current = flaky;
+    const w1 = fakeWorld("arcadia", { copyKey: "arcadia:0", immortal: true });
+    const camp = w1.sys.groups.find((g) => g.point.kind === "camp")!;
+    w1.addPlayer("camper", camp.point.pos);
+    for (let i = 0; i < 12 && !camp.active; i++) w1.step(500);
+    for (let i = 0; i < 30; i++) w1.step(100);
+    w1.sys.copyDirty = false; // checkpointed so far
+    flaky.failing = true;
+    for (const m of camp.members) if (m) dealDamage(w1.world.host, null, m, 1e7, false);
+    expect(camp.cleared).toBe(true);
+    for (let i = 0; i < 3; i++) w1.step(500);
+    const failed = flaky.attempts;
+    expect(failed).toBeGreaterThan(0);
+    // Nobody near the camp now: its countdown runs at full speed and no longer dirties the state.
+    w1.players.delete("camper");
+    flaky.failing = false;
+    for (let i = 0; i < 6; i++) w1.step(500);
+    expect(flaky.attempts).toBeGreaterThan(failed);
+    reopen();
+    const w2 = fakeWorld("arcadia", { copyKey: "arcadia:0", start: w1.clock.t });
+    expect(w2.sys.groups[camp.point.id]!.cleared).toBe(true);
+  });
+
+  it("retries back off (1 s, 2 s, 4 s…) and a timer writes the newest state without any further change", async () => {
+    COPY_RETRY.firstMs = 40;
+    COPY_RETRY.maxMs = 200;
+    const flaky = new FlakyStore(new MemoryCopyStateStore());
+    copyStateStore.current = flaky;
+    flaky.failing = true;
+    expect(saveCopy("arcadia:0", "test", { n: 1 })).toBe(false);
+    expect(flaky.attempts).toBe(1);
+    // While backing off, newer state is kept in memory (and read back) without touching storage.
+    expect(saveCopy("arcadia:0", "test", { n: 2 })).toBe(false);
+    expect(flaky.attempts).toBe(1);
+    expect(loadCopy<{ n: number }>("arcadia:0", "test")).toEqual({ n: 2 });
+    await waitFor(() => flaky.attempts >= 3, 2000); // the timer keeps trying (40 ms, then 80 ms)
+    flaky.failing = false;
+    await waitFor(() => flaky.inner.load<{ n: number }>("arcadia:0", "test")?.n === 2, 2000);
+    expect(saveCopy("arcadia:0", "test", { n: 3 })).toBe(true);
+  });
+
+  it("a staged-copy restriction holds in memory while its write fails, and is written once storage recovers", async () => {
+    COPY_RETRY.firstMs = 20;
+    const flaky = new FlakyStore(new MemoryCopyStateStore());
+    copyStateStore.current = flaky;
+    const store = new CopyStateRestrictions();
+    flaky.failing = true;
+    store.set("portus:0", { stagedUntil: Date.now() + 60_000, assistedUntil: 0 });
+    expect(store.get("portus:0")?.stagedUntil).toBeGreaterThan(Date.now());
+    flaky.failing = false;
+    await waitFor(() => !!flaky.inner.load("portus:0", RESTRICTIONS_SYSTEM), 2000);
+  });
+});
+
+describe("a malformed copy-state row doesn't stop a room opening (F12 final Opus nit)", () => {
+  it("the NPC system and the props start fresh", () => {
+    const store = new MemoryCopyStateStore();
+    copyStateStore.current = store;
+    store.save("arcadia:0", "npc", { v: 1, at: 5, groups: 7, golden: [[1]], boss: { id: "tidewrath", respawnAt: "soon" } });
+    store.save("arcadia:0", "destruction", { v: 1, broken: [5, null, ["0.0"]] });
+    const w = fakeWorld("arcadia", { copyKey: "arcadia:0" });
+    expect(w.sys.groups.every((g) => !g.cleared && !g.dead.some((d) => d))).toBe(true);
+    expect(() => new DestructionSystem(propRoom(), () => 5_000_000)).not.toThrow();
   });
 });
 
