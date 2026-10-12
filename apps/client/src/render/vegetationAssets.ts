@@ -2,7 +2,7 @@
 import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
-import { abs, attribute, cross, float, normalize, materialColor, mix, positionGeometry, positionLocal, select, sin, texture, time, vec3 } from "three/tsl";
+import { abs, attribute, cameraViewMatrix, cross, float, normalize, materialColor, mix, normalView, positionGeometry, positionLocal, positionWorld, select, sin, texture, time, vec3, vec4 } from "three/tsl";
 import { type BodyId, type PropKind } from "@firstlight/shared";
 import { config } from "../config.ts";
 import { atmo } from "./atmosphere.ts";
@@ -70,6 +70,8 @@ function tintRatio(target: number, source: number): THREE.Color {
   return new THREE.Color(a.r / b.r, a.g / b.g, a.b / b.b);
 }
 
+const FOLIAGE_GAIN = 3.6;
+
 const materials = new Map<string, THREE.MeshStandardNodeMaterial>();
 /** One opaque alpha-tested atlas material per kind/body. The color attribute is a role mask,
  * not vertex colour: r foliage, g bark, b stone, black flower/mushroom paint. */
@@ -86,7 +88,10 @@ export function vegetationMaterial(body: BodyId, kind: PropKind, atlas: THREE.Te
   const neutral = abs(sample.r.sub(sample.g)).add(abs(sample.g.sub(sample.b))).lessThan(0.025);
   const foliage = select(neutral, float(1), float(0));
   const role = impostor ? kind === "deadtree" ? vec3(0, 1, 0) : vec3(foliage, float(1).sub(foliage), 0) : attribute("color", "vec3");
-  const leaf = new THREE.Color(kind === "blossom" ? p.blossom : kind === "pine" ? p.pine : kind === "scrub" ? p.scrub : p.leaf);
+  // Neutral foliage texels average ~0.25 linear (median 0.20) in both atlases; scale the tint back
+  // up so a typical leaf lands near the body's palette colour instead of a third of it.
+  const leaf = new THREE.Color(kind === "blossom" ? p.blossom : kind === "pine" ? p.pine : kind === "scrub" ? p.scrub : p.leaf)
+    .multiplyScalar(FOLIAGE_GAIN);
   const bark = tintRatio(p.bark, 0x6b4a2f);
   const stone = tintRatio(kind === "boulder" ? p.rock2 : p.rock, 0xa3ada6);
   const tint = vec3(leaf.r, leaf.g, leaf.b).mul(role.r).add(vec3(bark.r, bark.g, bark.b).mul(role.g)).add(vec3(stone.r, stone.g, stone.b).mul(role.b))
@@ -94,6 +99,12 @@ export function vegetationMaterial(body: BodyId, kind: PropKind, atlas: THREE.Te
   m.colorNode = sample.rgb.mul(tint).mul(mix(float(1), float(0.78), atmo.wet));
   m.opacityNode = sample.a;
   m.roughnessNode = mix(float(0.86), float(0.4), atmo.wet);
+  // Foliage is lit as a canopy facing the sky. Leaf cards' own normals flip on back faces, which
+  // left half of every crown dark; crossed impostor cards are entirely horizontal. Near meshes keep
+  // some of their own shading so the switch to impostors doesn't pop in brightness.
+  const upView = normalize(cameraViewMatrix.mul(vec4(normalize(positionWorld), 0)).xyz);
+  if (impostor) m.normalNode = upView;
+  else if (!["rock", "boulder", "mushroom", "deadtree"].includes(kind)) m.normalNode = normalize(mix(normalView, upView, role.r.mul(0.65)));
   if (!["rock", "boulder", "mushroom"].includes(kind)) {
     // No compute/storage buffers: attribute + time works on WebGPU and WebGL2.
     // Roots stay still; each instance carries its packed yaw seed through LOD changes.
