@@ -27,6 +27,10 @@ export class PlayerList {
   private overlay: HTMLDivElement | null = null;
   private panel: HTMLDivElement | null = null;
   private reportFor: string | null = null;
+  /** Drafts survive re-renders (the list rebuilds as players move, join and leave). */
+  private reportReason: string = REPORT_REASONS[0];
+  private reportNote = "";
+  private announceDraft = "";
   private confirmBan: { sid: string; until: number } | null = null;
   private lastRender = 0;
   /** A mouse button is held on the panel: don't rebuild under the cursor (the click would be lost). */
@@ -72,13 +76,19 @@ export class PlayerList {
 
   /** Re-render periodically while open (positions, joins, leaves), but not while typing a report. */
   update(now: number) {
-    if (this.mode === "closed" || this.pressing || now - this.lastRender < 400) return;
-    if (this.panel?.contains(document.activeElement) && document.activeElement?.tagName !== "BUTTON") return;
+    if (this.mode === "closed" || this.busy() || now - this.lastRender < 400) return;
     this.render(false);
   }
 
+  /** Data changed (party, blocks): re-render now unless the player is mid-click or typing. */
   refresh() {
-    if (this.mode !== "closed") this.render(true);
+    if (this.mode === "closed" || this.busy()) return;
+    this.render(true);
+  }
+
+  private busy(): boolean {
+    const active = document.activeElement;
+    return this.pressing || (!!active && !!this.panel?.contains(active) && active.tagName !== "BUTTON");
   }
 
   private build() {
@@ -187,6 +197,7 @@ export class PlayerList {
       sbtn("Report", () => {
         this.reportFor = sid;
         this.render(true);
+        this.panel?.querySelector("select")?.focus();
       }, "", acts);
       if (iAmAdmin) {
         const mod = el("span", "mod", acts);
@@ -213,10 +224,12 @@ export class PlayerList {
       input.type = "text";
       input.maxLength = 200;
       input.placeholder = "Banner text";
+      input.value = this.announceDraft;
+      input.addEventListener("input", () => (this.announceDraft = input.value));
       const send = () => {
         if (!input.value.trim()) return;
         this.host.send("mod", { action: "announce", text: input.value.trim() });
-        input.value = "";
+        input.value = this.announceDraft = "";
       };
       input.addEventListener("keydown", (e) => {
         if (e.key === "Enter") send();
@@ -233,19 +246,24 @@ export class PlayerList {
       const o = el("option", "", select, r[0]!.toUpperCase() + r.slice(1));
       o.value = r;
     }
+    select.value = this.reportReason;
+    select.addEventListener("change", () => (this.reportReason = select.value));
     const note = el("input", "", box);
     note.type = "text";
     note.maxLength = 200;
     note.placeholder = "What happened? (optional)";
+    note.value = this.reportNote;
+    note.addEventListener("input", () => (this.reportNote = note.value));
+    const done = () => {
+      this.reportFor = null;
+      this.reportReason = REPORT_REASONS[0];
+      this.reportNote = "";
+      this.render(true);
+    };
     sbtn("Send", () => {
       this.host.send("report", { target: sid, reason: select.value, ...(note.value.trim() ? { note: note.value.trim() } : {}) });
-      this.reportFor = null;
-      this.render(true);
+      done();
     }, "primary", box);
-    sbtn("Cancel", () => {
-      this.reportFor = null;
-      this.render(true);
-    }, "", box);
-    setTimeout(() => select.focus(), 0);
+    sbtn("Cancel", done, "", box);
   }
 }

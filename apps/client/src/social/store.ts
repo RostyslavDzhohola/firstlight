@@ -104,10 +104,15 @@ export function isBlocked(sessionOrUserId: string): boolean {
 
 // ---- party --------------------------------------------------------------------------------------
 
+/** Party view without positions (they change every second; listeners care about membership). */
+function partyKey(p: PartyStateMsg): string {
+  return JSON.stringify([p.id, p.leader, p.members.map((m) => [m.userId, m.name, m.level, m.online, m.body, m.roomId])]);
+}
+
 export function setParty(p: PartyStateMsg): void {
-  const before = JSON.stringify(party);
+  const changed = partyKey(p) !== partyKey(party);
   party = p;
-  if (JSON.stringify(p) !== before) emit();
+  if (changed) emit();
 }
 
 export function partyState(): PartyStateMsg {

@@ -8,6 +8,7 @@ import { isBlockedEitherWay, listBans, listReports } from "../src/db/index.ts";
 import { stmt } from "../src/db/game-db.ts";
 import { accountLinks } from "../src/auth/links.ts";
 import { mountOps } from "../src/ops/admin.ts";
+import { banExplainer } from "../src/social/refusal.ts";
 import { recordError } from "../src/ops/errors.ts";
 import { ANALYTICS, blockedEitherWay, partyOf } from "../src/social/index.ts";
 import { api, Browser, decodeJwt, ORIGIN, play, startAuthServer, type AuthServer } from "./auth-helpers.ts";
@@ -57,8 +58,15 @@ describe("bans with real accounts", () => {
     const victimBrowser = new Browser(s, badIp);
     const victimToken = await victimBrowser.playToken();
     const victim = await enter(s, victimToken, "arcadia", badIp);
+    // An alt account on the same network, and a bystander elsewhere.
+    const alt = await enter(s, await new Browser(s, badIp).playToken(), "arcadia", badIp);
+    const bystander = await enter(s, await new Browser(s, "198.51.100.2").playToken(), "arcadia", "198.51.100.2");
     const admin = await enter(s, "dev:mod1:Moderator:admin", "arcadia", "198.51.100.1");
-    await waitFor(() => st(admin).players?.size === 2);
+    await waitFor(() => st(admin).players?.size === 4);
+    let altCode = 0;
+    alt.onLeave((c: number) => (altCode = c));
+    let bystanderLeft = false;
+    bystander.onLeave(() => (bystanderLeft = true));
 
     let code = 0;
     victim.onLeave((c: number) => (code = c));
@@ -68,6 +76,9 @@ describe("bans with real accounts", () => {
     expect(code).toBe(CLOSE.BANNED);
     expect(kicked[0]).toMatchObject({ code: CLOSE.BANNED });
     await waitFor(() => !st(admin).players.has(victim.sessionId));
+    // The network ban removes the alt at once; the bystander stays.
+    await waitFor(() => altCode === CLOSE.BANNED);
+    expect(bystanderLeft).toBe(false);
 
     const victimId = String(decodeJwt(victimToken).sub);
     const ban = listBans(s.accounts.db).find((b) => b.userId === victimId)!;
@@ -82,6 +93,13 @@ describe("bans with real accounts", () => {
     const otherToken = await new Browser(s, "198.51.100.78").playToken();
     expect((await play(s, otherToken, { body: "portus" }, { "x-real-ip": badIp })).status).toBe(401);
     expect((await play(s, otherToken, { body: "portus" }, { "x-real-ip": "198.51.100.78" })).json.ok).toBe(true);
+
+    // In production /api/play then answers 403 "banned" (signed tokens only) so the client shows why.
+    const explain = banExplainer(s.accounts);
+    expect(await explain(victimToken, "198.51.100.77")).toBe("banned");
+    expect(await explain(otherToken, badIp)).toBe("banned");
+    expect(await explain(otherToken, "198.51.100.78")).toBeNull();
+    expect(await explain("not-a-token", badIp)).toBeNull();
   });
 });
 
@@ -98,6 +116,12 @@ describe("blocks and reports", () => {
     expect(isBlockedEitherWay(s.accounts.db, "blk_b", "blk_a")).toBe(true);
     expect(blockedEitherWay("blk_a", "blk_b")).toBe(true);
     expect(blockedEitherWay("blk_b", "blk_a")).toBe(true);
+
+    // Only real players can be blocked (no junk rows).
+    const deniedA = inbox<any>(a, "denied");
+    a.send("social:block", { target: "nobody-by-that-id" });
+    await waitFor(() => deniedA.length > 0);
+    expect(deniedA[0]).toEqual({ action: "block", reason: "player not found" });
 
     // Neither side can invite the other.
     const deniedB = inbox<any>(b, "denied");

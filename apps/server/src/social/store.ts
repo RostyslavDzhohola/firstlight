@@ -11,8 +11,10 @@ import {
   blockUser,
   endSession,
   fileReport,
+  getAccount,
   isBanned,
   isBlockedEitherWay,
+  isIpBanned,
   listBlocked,
   startSession,
   unblockUser,
@@ -107,6 +109,26 @@ export function userBanned(userId: string, now = Date.now()): boolean {
   const db = currentDb();
   if (db) return isBanned(db, userId, now);
   return memBans.has(userId);
+}
+
+/** The network (IP hash) the account last entered the world from (/api/play), or null. */
+export function lastIpHashOf(userId: string): string | null {
+  const db = currentDb();
+  return db ? (getAccount(db, userId)?.lastIpHash ?? null) : null;
+}
+
+/** The network the account last played from is banned (catches alt accounts holding seats). */
+export function networkBanned(userId: string, now = Date.now()): boolean {
+  const db = currentDb();
+  const hash = db ? getAccount(db, userId)?.lastIpHash : null;
+  return !!db && !!hash && isIpBanned(db, hash, now);
+}
+
+/** The IP hash stored on a ban row. */
+export function banIpHash(banId: number): string | null {
+  const db = currentDb();
+  if (!db || !banId) return null;
+  return (stmt(db, "SELECT ip_hash FROM ban WHERE id = ?").get(banId) as { ip_hash: string | null } | undefined)?.ip_hash ?? null;
 }
 
 /** Clear the account's banned_until once no active ban remains (after lifting one ban by id). */

@@ -7,7 +7,7 @@ import { CLOSE, SOCIAL } from "@firstlight/shared/net/social";
 import type { BodyRoom } from "../world/BodyRoom.ts";
 import type { PlayerActor } from "../world/actors.ts";
 import { liveActor, liveRooms } from "./presence.ts";
-import { storeBan, userBanned } from "./store.ts";
+import { banIpHash, lastIpHashOf, networkBanned, storeBan, userBanned } from "./store.ts";
 
 const kickedUntil = new Map<string, number>();
 const voiceMuted = new Set<string>();
@@ -23,6 +23,14 @@ export function playRefusal(userId: string, now = Date.now()): "banned" | "kicke
     kickedUntil.delete(userId);
   }
   return null;
+}
+
+/**
+ * Refusal for a player already holding a seat (join or reconnect, which skip /api/play's checks):
+ * account ban, kick cooldown, or a ban on the network the account last played from.
+ */
+export function seatRefusal(userId: string, now = Date.now()): "banned" | "kicked" | null {
+  return playRefusal(userId, now) ?? (networkBanned(userId, now) ? "banned" : null);
 }
 
 export function refusesReconnect(sessionId: string): boolean {
@@ -53,6 +61,16 @@ export function banAccount(userId: string, reason: string, createdBy: string | n
   const id = storeBan({ userId, reason: reason.slice(0, 200), createdBy });
   const live = liveActor(userId);
   if (live) removePlayer(live.room, live.actor, CLOSE.BANNED, "Banned by an admin");
+  // The network ban also removes other accounts playing from that network right now (not admins).
+  const hash = banIpHash(id);
+  if (hash) {
+    for (const room of liveRooms) {
+      for (const a of [...room.actors.values()]) {
+        if (a.identity.userId === userId || a.identity.admin || a.identity.loadtest) continue;
+        if (lastIpHashOf(a.identity.userId) === hash) removePlayer(room, a, CLOSE.BANNED, "Banned by an admin");
+      }
+    }
+  }
   return id;
 }
 

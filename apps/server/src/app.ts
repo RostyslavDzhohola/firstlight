@@ -21,6 +21,8 @@ export interface GameOptions {
   mountAfterJson?: (app: Express) => void;
   gracefulShutdown?: boolean;
   onShutdown?: () => Promise<void> | void;
+  /** When verification fails: is this a validly signed token of a banned account/network? (403 "banned" instead of 401.) */
+  explainRefusal?: (token: string, ip: string | null) => Promise<string | null>;
 }
 
 export interface Game {
@@ -84,7 +86,9 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
     const identity = token ? await opts.verify(token, { ip: directRequestIp(req) }) : null;
     if (!identity) {
-      res.status(401).json({ ok: false, error: "unauthorized" });
+      const why = token && opts.explainRefusal ? await opts.explainRefusal(token, directRequestIp(req)).catch(() => null) : null;
+      if (why) res.status(403).json({ ok: false, error: why });
+      else res.status(401).json({ ok: false, error: "unauthorized" });
       return;
     }
     const body = req.body?.body;

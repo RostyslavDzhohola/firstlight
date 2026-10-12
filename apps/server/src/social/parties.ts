@@ -138,30 +138,49 @@ export class PartyRegistry {
     return out;
   }
 
-  /** A guest saved and got a new account id. */
-  rekey(from: string, to: string): void {
-    const id = this.memberOf.get(from);
-    if (id) {
-      const p = this.parties.get(id)!;
-      p.members = p.members.map((m) => (m === from ? to : m));
-      if (p.leader === from) p.leader = to;
-      this.memberOf.delete(from);
-      this.memberOf.set(to, id);
+  /**
+   * A guest saved and got a new account id. If the account already has a party (playing in another
+   * browser), it keeps that one and the guest's membership ends. Returns users whose party view changed.
+   */
+  rekey(from: string, to: string): string[] {
+    if (from === to) return [];
+    const affected: string[] = [];
+    const fromParty = this.of(from);
+    if (fromParty) {
+      if (this.of(to)) affected.push(...this.leave(from).affected);
+      else {
+        fromParty.members = fromParty.members.map((m) => (m === from ? to : m));
+        if (fromParty.leader === from) fromParty.leader = to;
+        this.memberOf.delete(from);
+        this.memberOf.set(to, fromParty.id);
+        affected.push(...fromParty.members);
+      }
     }
+    // Invites to the guest become invites to the account (one per inviter).
     const mine = this.invites.get(from);
     if (mine) {
       this.invites.delete(from);
-      for (const inv of mine.values()) inv.to = to;
-      this.invites.set(to, mine);
+      let dest = this.invites.get(to);
+      if (!dest) this.invites.set(to, (dest = new Map()));
+      for (const [inviter, inv] of mine) {
+        if (inviter === to || dest.has(inviter)) continue;
+        inv.to = to;
+        dest.set(inviter, inv);
+      }
+      if (dest.size === 0) this.invites.delete(to);
     }
-    for (const m of this.invites.values()) {
+    // Invites the guest sent now come from the account.
+    for (const [invitee, m] of this.invites) {
       const inv = m.get(from);
-      if (inv) {
-        m.delete(from);
+      if (!inv) continue;
+      m.delete(from);
+      if (invitee !== to && !m.has(to)) {
         inv.from = to;
         m.set(to, inv);
       }
+      if (m.size === 0) this.invites.delete(invitee);
     }
+    return affected;
   }
 
   clear(): void {

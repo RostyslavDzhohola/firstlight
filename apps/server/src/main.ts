@@ -10,6 +10,7 @@ import { pileStore } from "./world/piles.ts";
 import { SqliteCharacterRepo, SqlitePileStore } from "./world/sqliteStores.ts";
 import { mountOps } from "./ops/admin.ts";
 import { endAllSessions } from "./social/index.ts";
+import { banExplainer } from "./social/refusal.ts";
 
 const accounts = await createAccounts({
   ...accountsConfigFromEnv(env),
@@ -32,6 +33,7 @@ const game = await createGame({
   allowedOrigins: env.clientOrigins,
   gracefulShutdown: true,
   mountBeforeJson: accounts.mountBeforeJson,
+  explainRefusal: banExplainer(accounts),
   mountAfterJson: (app) => {
     accounts.mountAfterJson(app);
     mountOps(app, { db: accounts.db, requireAdmin: accounts.requireAdmin, allowedOrigins: env.clientOrigins });

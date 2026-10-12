@@ -19,13 +19,12 @@ SYSTEM_FACTORIES.push(createSocialSystem);
 
 // A guest saved their character and got a new account id: party, presence, sessions follow.
 accountLinks.on((ev) => {
-  parties.rekey(ev.fromUserId, ev.toUserId);
+  const affected = parties.rekey(ev.fromUserId, ev.toUserId);
   rekeyPresence(ev.fromUserId, ev.toUserId);
   rekeySessions(ev.fromUserId, ev.toUserId);
   rekeyAnalytics(ev.fromUserId, ev.toUserId);
   rekeyModeration(ev.fromUserId, ev.toUserId);
-  const p = parties.of(ev.toUserId);
-  if (p) syncParty(p.members);
+  syncParty([...affected, ev.toUserId, ...(parties.of(ev.toUserId)?.members ?? [])]);
 });
 
 export { endAllSessions, ANALYTICS } from "./analytics.ts";

@@ -74,4 +74,23 @@ describe("party registry", () => {
     expect(r.pendingFor("c")[0]!.from).toBe("acct");
     expect(r.accept("c", "acct").ok).toBe(true);
   });
+
+  it("re-keying into an account that already has a party keeps that party and drops the guest's", () => {
+    const r = new PartyRegistry();
+    form(r, "guest", "b");
+    form(r, "acct", "c");
+    const affected = r.rekey("guest", "acct");
+    expect(affected.sort()).toEqual(["b", "guest"]);
+    expect(r.of("guest")).toBeNull();
+    expect(r.of("b")).toBeNull(); // party of one disbanded
+    expect(r.of("acct")!.members).toEqual(["acct", "c"]);
+  });
+
+  it("re-keying two members of one party never duplicates a member", () => {
+    const r = new PartyRegistry();
+    form(r, "acct", "guest", "c");
+    r.rekey("guest", "acct");
+    expect(r.of("acct")!.members).toEqual(["acct", "c"]);
+    expect(new Set(r.of("c")!.members).size).toBe(2);
+  });
 });

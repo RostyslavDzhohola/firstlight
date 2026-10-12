@@ -179,6 +179,30 @@ describe("admin actions", () => {
     expect(again).toMatchObject({ ok: false, error: "kicked" });
   });
 
+  it("a seat reserved before the kick can't be used during the cooldown", async () => {
+    const boss = await join(uid("admin"), "portus", "admin");
+    const victimId = uid("sly");
+    const victim = await join(victimId);
+    await waitFor(() => st(boss).players.size === 2);
+    const spare = await playRequest(game, `dev:${victimId}:${victimId}`, { body: "portus" });
+    expect(spare.ok).toBe(true);
+    let code = 0;
+    victim.onLeave((c: number) => (code = c));
+    boss.send("mod", { action: "kick", target: victim.sessionId });
+    await waitFor(() => code === CLOSE.KICKED);
+    let sneakyCode = 0;
+    try {
+      const sneaky = await new Client(`http://127.0.0.1:${game.port}`).consumeSeatReservation((spare as any).reservation);
+      sneaky.onLeave((c: number) => (sneakyCode = c));
+      await waitFor(() => sneakyCode !== 0);
+      expect(sneakyCode).toBe(CLOSE.KICKED);
+    } catch {
+      // Refused outright is fine too.
+    }
+    await new Promise((r) => setTimeout(r, 100));
+    expect([...st(boss).players.values()].some((p: any) => p.userId === victimId)).toBe(false);
+  });
+
   it("admin ban disconnects and refuses rejoin (dev identities: account ban)", async () => {
     const boss = await join(uid("admin"), "arcadia", "admin");
     const victimId = uid("cheat");

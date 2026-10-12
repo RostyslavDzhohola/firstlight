@@ -76,7 +76,7 @@ export class SocialUi {
     room.onMessage("social:blocked", (m: { userIds: string[] }) => setBlockedList(m.userIds));
     room.onMessage("kicked", (m: { reason: string }) => noteRemovalReason(m.reason));
     room.onMessage("denied", (m: { action: string; reason: string }) => {
-      if (m.action === "party" || m.action === "mod") this.game.hud.toast(m.reason[0]!.toUpperCase() + m.reason.slice(1), "warn");
+      if (["party", "mod", "block", "report"].includes(m.action)) this.game.hud.toast(m.reason[0]!.toUpperCase() + m.reason.slice(1), "warn");
     });
     // Analytics hello; the server answers with the party, block list and pending invites.
     room.send("client:info", { backend: this.game.ctx.webgpu ? "webgpu" : "webgl2", tier: this.game.ctx.tier });

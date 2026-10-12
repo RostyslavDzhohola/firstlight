@@ -10,16 +10,18 @@ import type { BodyRoom } from "../world/BodyRoom.ts";
 import type { PlayerActor } from "../world/actors.ts";
 import type { RoomSystem } from "../world/systems.ts";
 import { trackClientInfo, trackJoin, trackLeave, trackTick } from "./analytics.ts";
-import { announceAll, applyVoiceMute, banAccount, kickUser, refusesReconnect, removePlayer, setVoiceMuted } from "./moderation.ts";
+import { announceAll, applyVoiceMute, banAccount, kickUser, refusesReconnect, removePlayer, seatRefusal, setVoiceMuted } from "./moderation.ts";
 import { parties, type Party } from "./parties.ts";
 import { clearPresence, clearRoomPresence, liveActor, liveRooms, presenceOf, sendTo, setPresence } from "./presence.ts";
-import { blockedBy, blockedEitherWay, setBlocked, storeReport, userBanned } from "./store.ts";
+import { blockedBy, blockedEitherWay, setBlocked, storeReport } from "./store.ts";
 
 export const SOCIAL_RULES = {
   /** A member who stays offline this long leaves their party. */
   PARTY_OFFLINE_MS: 120_000,
   INVITES_PER_MINUTE: 10,
   REPORTS_PER_10_MIN: 5,
+  BLOCKS_PER_MINUTE: 20,
+  MAX_BLOCKS: 200,
 };
 
 const id = z.string().min(1).max(64);
@@ -208,10 +210,16 @@ export function createSocialSystem(room: BodyRoom): RoomSystem {
   room.onMessage("social:block", blockSchema, (c, m) => {
     const me = actorOf(c);
     if (!me || me.identity.loadtest) return;
-    const target = inRoom(m.target)?.identity.userId ?? m.target;
-    if (target === me.identity.userId) return;
+    const uid = me.identity.userId;
     const on = m.on ?? true;
-    setBlocked(me.identity.userId, target, on);
+    if (!allow(`blk:${uid}`, SOCIAL_RULES.BLOCKS_PER_MINUTE, 60_000)) return deny(c, "block", "slow down");
+    const current = blockedBy(uid);
+    // Block someone who is playing (this copy or anywhere); unblock anyone on your list.
+    const target = inRoom(m.target)?.identity.userId ?? (liveActor(m.target) || (!on && current.includes(m.target)) ? m.target : undefined);
+    if (!target) return deny(c, "block", "player not found");
+    if (target === uid) return;
+    if (on && !current.includes(target) && current.length >= SOCIAL_RULES.MAX_BLOCKS) return deny(c, "block", "your block list is full");
+    setBlocked(uid, target, on);
     if (on) parties.cancelBetween(me.identity.userId, target);
     c.send("social:blocked", { userIds: blockedBy(me.identity.userId) });
     toast(c, on ? "Blocked. You won't hear or get invites from them." : "Unblocked.");
@@ -220,19 +228,21 @@ export function createSocialSystem(room: BodyRoom): RoomSystem {
   room.onMessage("report", reportSchema, (c, m) => {
     const me = actorOf(c);
     if (!me || me.identity.loadtest) return;
-    const t = inRoom(m.target);
-    const target = t?.identity.userId ?? m.target;
+    const found = anywhere(m.target);
+    if (!found) return deny(c, "report", "player not found");
+    const t = found.actor;
+    const target = t.identity.userId;
     if (target === me.identity.userId) return;
     if (!allow(`rep:${me.identity.userId}:${target}`, 1, 10 * 60_000) || !allow(`rep:${me.identity.userId}`, SOCIAL_RULES.REPORTS_PER_10_MIN, 10 * 60_000)) {
       return toast(c, "Report already sent. Thanks.");
     }
     const note = m.note?.replace(/\s+/g, " ").trim();
-    const name = t?.identity.name ?? presenceOf(target)?.name ?? "";
+    const name = t.identity.name;
     storeReport({
       reporter: me.identity.userId,
       target,
-      body: room.bodyDef.id,
-      pos: t ? [t.state.x, t.state.y, t.state.z] : [me.state.x, me.state.y, me.state.z],
+      body: found.room.bodyDef.id,
+      pos: [t.state.x, t.state.y, t.state.z],
       reason: `${m.reason}${name ? ` [${name}]` : ""}${note ? `: ${note}` : ""}`,
     });
     toast(c, "Report sent. Thanks — an admin will look at it.");
@@ -292,8 +302,10 @@ export function createSocialSystem(room: BodyRoom): RoomSystem {
       const a = room.playerById(sessionId);
       if (!a) return;
       const uid = a.identity.userId;
-      if (userBanned(uid)) {
-        removePlayer(room, a, CLOSE.BANNED, "Banned by an admin");
+      // A seat reserved before a kick or ban must not get them back in.
+      const refusal = a.identity.loadtest ? null : seatRefusal(uid);
+      if (refusal) {
+        removePlayer(room, a, refusal === "kicked" ? CLOSE.KICKED : CLOSE.BANNED, refusal === "kicked" ? "Removed by an admin" : "Banned by an admin");
         return;
       }
       sessionUser.set(sessionId, uid);
@@ -323,7 +335,7 @@ export function createSocialSystem(room: BodyRoom): RoomSystem {
     canReconnect(sessionId) {
       if (refusesReconnect(sessionId)) return false;
       const a = room.playerById(sessionId);
-      return !(a && userBanned(a.identity.userId));
+      return !(a && !a.identity.loadtest && seatRefusal(a.identity.userId));
     },
 
     tick(_dt, now) {

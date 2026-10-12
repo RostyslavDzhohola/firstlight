@@ -17,6 +17,8 @@ const BACKENDS = new Set(["webgpu", "webgl2", "unknown"]);
 const TIERS = new Set(["low", "medium", "high", "ultra", "unknown"]);
 
 interface Tracker {
+  /** Account id this tracker is filed under (changes when a guest saves). */
+  key: string;
   logId: number | null;
   bodyTime: Record<string, number>;
   deaths: number;
@@ -40,7 +42,7 @@ export function trackJoin(actor: PlayerActor, body: string, now = Date.now()): v
   }
   if (t?.current) closeCurrent(t, now);
   if (!t) {
-    t = { logId: sessionStart(userId, now), bodyTime: {}, deaths: 0, maxLevel: actor.char.level, lastFlush: now, lastLeftAt: null, current: null, endTimer: null };
+    t = { key: userId, logId: sessionStart(userId, now), bodyTime: {}, deaths: 0, maxLevel: actor.char.level, lastFlush: now, lastLeftAt: null, current: null, endTimer: null };
     trackers.set(userId, t);
   }
   t.lastLeftAt = null;
@@ -56,7 +58,8 @@ export function trackLeave(userId: string, sessionId: string, now = Date.now()):
   t.lastFlush = now;
   t.lastLeftAt = now;
   if (t.endTimer) clearTimeout(t.endTimer);
-  t.endTimer = setTimeout(() => endTracker(userId), ANALYTICS.END_GRACE_MS);
+  const tracker = t;
+  t.endTimer = setTimeout(() => endTracker(tracker), ANALYTICS.END_GRACE_MS);
   t.endTimer.unref?.();
 }
 
@@ -80,19 +83,28 @@ export function trackClientInfo(userId: string, backend: string, tier: string): 
 /** End every open session now (graceful shutdown). */
 export function endAllSessions(now = Date.now()): number {
   let n = 0;
-  for (const userId of [...trackers.keys()]) {
-    const t = trackers.get(userId)!;
+  for (const t of [...trackers.values()]) {
     if (t.current) closeCurrent(t, now);
-    endTracker(userId, now);
+    endTracker(t, now);
     n++;
   }
   return n;
 }
 
-export function rekeyAnalytics(from: string, to: string): void {
+/**
+ * A guest saved (new account id). The guest's live session continues under the account id; if the
+ * account was being tracked too (another browser, about to be displaced), that session ends now.
+ */
+export function rekeyAnalytics(from: string, to: string, now = Date.now()): void {
   const t = trackers.get(from);
-  if (!t || trackers.has(to)) return;
+  if (!t || from === to) return;
+  const displaced = trackers.get(to);
+  if (displaced) {
+    if (displaced.current) closeCurrent(displaced, now);
+    endTracker(displaced, now);
+  }
   trackers.delete(from);
+  t.key = to;
   trackers.set(to, t);
 }
 
@@ -119,10 +131,9 @@ function progress(t: Tracker, now: number) {
   return { bodyTime, deaths, maxLevel: t.maxLevel };
 }
 
-function endTracker(userId: string, now = Date.now()): void {
-  const t = trackers.get(userId);
-  if (!t) return;
+function endTracker(t: Tracker, now = Date.now()): void {
   if (t.endTimer) clearTimeout(t.endTimer);
-  trackers.delete(userId);
+  t.endTimer = null;
+  if (trackers.get(t.key) === t) trackers.delete(t.key);
   sessionEnd(t.logId, { ...progress(t, now), endedAt: t.current ? now : (t.lastLeftAt ?? now) });
 }
