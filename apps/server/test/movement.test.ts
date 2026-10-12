@@ -837,14 +837,15 @@ describe("mounted limits go through the limits argument (F12 re-review nit)", ()
     expect(pattern(400, (i) => ({ metres: 14 * 0.05, anim: i % 22 === 0 ? ANIM.DODGE : ANIM.SPRINT }))).toBeGreaterThan(0);
   });
 
-  it("DODGE spam every 1.1–1.2 s while sprinting buys at most ~5 % over plain sprinting (F12 confirm Sonnet N-3)", () => {
-    // Before: a free 2 m burst every 1.1 s sustained ~12.6 m/s against ~10.8 m/s.
+  it("DODGE spam every 1.1–1.2 s while sprinting buys at most ~12 % over plain sprinting (F12 confirm Sonnet N-3, T9 review)", () => {
+    // Before: a free 2 m burst every 1.1 s sustained ~12.6 m/s against ~10.8 m/s. An honest player
+    // rolling at every cooldown averages ~10.9 m/s and must never be corrected, even from an empty bank.
     const plain = sustained(() => ANIM.SPRINT);
     expect(plain).toBeGreaterThan(10.8);
     expect(plain).toBeLessThan(11.2);
     for (const every of [22, 23, 24]) {
       const spam = sustained((i) => (i % every === 0 ? ANIM.DODGE : ANIM.SPRINT));
-      expect(spam / plain, `DODGE every ${every * 50} ms: ${spam.toFixed(2)} m/s`).toBeLessThanOrEqual(1.05);
+      expect(spam / plain, `DODGE every ${every * 50} ms: ${spam.toFixed(2)} m/s`).toBeLessThanOrEqual(1.13);
     }
   });
 
@@ -854,6 +855,17 @@ describe("mounted limits go through the limits argument (F12 re-review nit)", ()
 
   it("…and a real dodge (4.5 m in 0.3 s) from an empty bank still fits", () => {
     expect(pattern(6, () => dodgeStep, emptyBank)).toBe(0);
+  });
+
+  it("the client's real roll (15 m/s for 1/3 s, then easing back to sprint) at every cooldown for 60 s is never refused (T9 review)", () => {
+    // Measured from PlayerController at 20–120 fps: 13.1 m per 1.2 s cycle, more than the sprint allowance.
+    const ease = [15, 15, 15, 15, 15, 15, 15, 11.4, 9.96, 9.39, 9.15, 9.06];
+    const cycle = (i: number) => {
+      const k = i % 24;
+      return k < ease.length ? { metres: ease[k]! * 0.05, anim: k < 7 ? ANIM.DODGE : ANIM.SPRINT } : sprintStep;
+    };
+    expect(pattern(1200, cycle)).toBe(0);
+    expect(pattern(1200, cycle, emptyBank)).toBe(0); // e.g. right after a correction or a shove
   });
 
   it("…while real dodges between sprints (4.5 m in 0.3 s, every 1.2 s) are never refused, even from an empty bank", () => {
