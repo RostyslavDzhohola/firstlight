@@ -591,38 +591,8 @@ export const PLANET_TONIC: Record<PlanetId, { id: string; chance: number }> = {
 export const PLANET_COSMETIC: Record<PlanetId, { id: string; chance: number }> = {
   arcadia: { id: "winged_cap", chance: 1 / 150 },
   hollowmere: { id: "crowbeak_mask", chance: 1 / 100 },
-  meridian: { id: "hard_hat_oversight", chance: 1 / 75 },
+  meridian: { id: "hard_hat", chance: 1 / 75 },
 };
-
-/**
- * Items that NPCs drop but the weapon catalogue doesn't define yet (materials and cosmetics).
- * The economy/cosmetics lanes should merge these into the item catalogue; sell values from content §1.5.
- */
-export const NPC_LOOT_ITEMS: readonly { id: string; name: string; kind: "material" | "cosmetic"; slot?: "hat" | "cape" | "mask" | "backpack"; rarity?: "common" | "uncommon" | "rare" | "legendary"; sell: number }[] = [
-  { id: "wool_tuft", name: "Wool Tuft", kind: "material", sell: 2 },
-  { id: "wolf_pelt", name: "Wolf Pelt", kind: "material", sell: 8 },
-  { id: "bramblehorn_antler", name: "Bramblehorn Antler", kind: "material", sell: 120 },
-  { id: "fenstalker_plume", name: "Fenstalker Plume", kind: "material", sell: 200 },
-  { id: "dunebreaker_scale", name: "Dunebreaker Scale", kind: "material", sell: 300 },
-  { id: "woolback_plushie", name: "Woolback Plushie", kind: "cosmetic", slot: "backpack", rarity: "uncommon", sell: 90 },
-  { id: "wolfpelt_cape", name: "Wolfpelt Cape", kind: "cosmetic", slot: "cape", rarity: "uncommon", sell: 90 },
-  { id: "antler_crown", name: "Antler Crown", kind: "cosmetic", slot: "hat", rarity: "rare", sell: 250 },
-  { id: "heron_plume_hat", name: "Heron Plume Hat", kind: "cosmetic", slot: "hat", rarity: "rare", sell: 250 },
-  { id: "saltplate_mantle", name: "Saltplate Mantle", kind: "cosmetic", slot: "cape", rarity: "rare", sell: 250 },
-  { id: "winged_cap", name: "Messenger's Winged Cap", kind: "cosmetic", slot: "hat", rarity: "uncommon", sell: 90 },
-  { id: "crowbeak_mask", name: "Crowbeak Mask", kind: "cosmetic", slot: "mask", rarity: "uncommon", sell: 90 },
-  { id: "hard_hat_oversight", name: "Hard Hat (Oversight Issue)", kind: "cosmetic", slot: "hat", rarity: "uncommon", sell: 90 },
-  { id: "voxel_visor", name: "Voxel Visor", kind: "cosmetic", slot: "mask", rarity: "uncommon", sell: 90 },
-  { id: "coral_crown", name: "Coral Crown", kind: "cosmetic", slot: "hat", rarity: "rare", sell: 250 },
-  { id: "tide_cape", name: "Tide Cape", kind: "cosmetic", slot: "cape", rarity: "rare", sell: 250 },
-  { id: "tidewrath_tooth", name: "Tidewrath Tooth", kind: "cosmetic", slot: "backpack", rarity: "legendary", sell: 500 },
-  { id: "court_mantle", name: "Court Mantle", kind: "cosmetic", slot: "cape", rarity: "rare", sell: 250 },
-  { id: "funeral_veil", name: "Funeral Veil", kind: "cosmetic", slot: "mask", rarity: "rare", sell: 250 },
-  { id: "hollow_crown", name: "Hollow Crown", kind: "cosmetic", slot: "hat", rarity: "legendary", sell: 500 },
-  { id: "windup_key", name: "Wind-Up Key", kind: "cosmetic", slot: "backpack", rarity: "rare", sell: 250 },
-  { id: "signal_dish", name: "Signal Dish", kind: "cosmetic", slot: "backpack", rarity: "rare", sell: 250 },
-  { id: "receiver_floodlamp", name: "Receiver Floodlamp", kind: "cosmetic", slot: "backpack", rarity: "legendary", sell: 500 },
-];
 
 // ------------------------------------------------------------------------------------------ camps and chests
 
@@ -687,7 +657,7 @@ export const BOSS_DEFS: readonly BossDef[] = [
     loot: {
       coins: 600, xp: 4400,
       always: [{ id: "weapon", tier: "random3", qty: 1 }],
-      rolls: [{ chance: 1 / 3, oneOf: ["weapon"], weaponTier: 3 }, { chance: 1 / 6, oneOf: ["windup_key", "signal_dish"] }, { chance: 1 / 25, oneOf: ["receiver_floodlamp"] }],
+      rolls: [{ chance: 1 / 3, oneOf: ["weapon"], weaponTier: 3 }, { chance: 1 / 6, oneOf: ["wind_up_key", "signal_dish"] }, { chance: 1 / 25, oneOf: ["receiver_floodlamp"] }],
     },
     voice: { engage: "This planet is now under new management.", phase2: "Resistance has been noted on your file.", defeat: "Shutting down... pending review." },
   },

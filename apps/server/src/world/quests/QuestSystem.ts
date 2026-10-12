@@ -6,7 +6,7 @@
 import type { Client } from "@colyseus/core";
 import { chordMetres, padDirs, PLANET_IDS, safePadAt, type BodyId } from "@firstlight/shared";
 import { BACKPACK_SLOTS, HOTBAR_SLOTS, emptyLife, type LifeProgress } from "@firstlight/shared/content/character";
-import { COSMETIC_BY_ID, COSMETIC_SLOTS, itemName, itemStack, sellValue, shopEntry, type CosmeticSlot } from "@firstlight/shared/content/items";
+import { COSMETIC_BY_ID, COSMETIC_SLOTS, isEggItem, itemName, itemStack, sellValue, shopEntry, type CosmeticSlot } from "@firstlight/shared/content/items";
 import { MEDAL_BY_ID, MEDAL_RULES } from "@firstlight/shared/content/medals";
 import { MISSION_BY_ID, MISSIONS, missionGoal, type MissionDef } from "@firstlight/shared/content/missions";
 import { offsetDir, padName, place, placeDir } from "@firstlight/shared/content/places";
@@ -477,7 +477,7 @@ export class QuestSystem implements RoomSystem {
     if (!item) return fail("empty", "Nothing in that slot");
     const n = Math.max(1, Math.min(item.qty, qty ?? item.qty));
     const value = sellValue(item, n);
-    if (value <= 0) return fail("worthless", "Juno shakes her head: “I can't sell that on.”");
+    if (value <= 0) return fail("worthless", isEggItem(item) ? "Juno turns it over: “One of a kind. Keep it — nobody would believe where you found it.”" : "Juno shakes her head: “I can't sell that on.”");
     item.qty -= n;
     if (item.qty <= 0) list[i] = null;
     a.char.coins += value;

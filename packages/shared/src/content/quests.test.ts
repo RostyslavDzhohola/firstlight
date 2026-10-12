@@ -155,8 +155,10 @@ describe("Portus Exchange and cosmetics (content.md §1.5, §8.4)", () => {
     expect(sellValue({ id: "tonic_small", tier: 1, qty: 4 })).toBe(8);
     expect(unitSellValue({ id: "wool_tuft", tier: 1 })).toBe(2);
     expect(unitSellValue({ id: "woolly_beanie", tier: 1 })).toBe(30);
-    expect(unitSellValue({ id: "pixel_halo", tier: 1 })).toBe(500);
-    expect(unitSellValue({ id: "riverstaff", tier: 2, skin: "ferrymans_oar" })).toBe(500);
+    expect(unitSellValue({ id: "hollow_crown", tier: 1 })).toBe(500);
+    // Easter-egg items are claimable once per life, so the Exchange won't buy them (catalogue.test.ts).
+    expect(unitSellValue({ id: "pixel_halo", tier: 1 })).toBe(0);
+    expect(unitSellValue({ id: "riverstaff", tier: 2, skin: "ferrymans_oar" })).toBe(0);
     expect(unitSellValue({ id: "fists", tier: 1 })).toBe(0);
   });
 

@@ -142,7 +142,9 @@ Equipping still needs the level gate (T2 = L6, T3 = L12) (D). Anyone can buy, pi
 
 **Sell-back:** 25% of the shop price, rounded down, minimum 1 [r2-05]. Items the shop doesn't sell use
 fixed values (new): Wool Tuft 2 · Wolf Pelt 8 · Bramblehorn Antler 120 · Fenstalker Plume 200 ·
-Dunebreaker Scale 300 · cosmetics Common 30 / Uncommon 90 / Rare 250 / Legendary 500 · Ferryman's Oar 500.
+Dunebreaker Scale 300 · cosmetics Common 30 / Uncommon 90 / Rare 250 / Legendary 500. Easter-egg items
+(§6, the Ferryman's Oar included) can't be sold: they can be claimed once per life, so a price would
+make them a coin faucet (F12 review).
 
 ---
 

@@ -100,6 +100,16 @@ describe("Portus Exchange", () => {
     b.send("buy", { itemId: "tonic_small" });
     await waitFor(() => b.last("shop")?.reason === "too far");
     expect(b.you.coins).toBe(25);
+
+    // Easter-egg items are once-per-life trophies: Juno won't buy them (no coin faucet).
+    await tpAndWait(b, objAt("juno_vale"));
+    b.send("admin", { cmd: "egg", args: { id: "E2" } });
+    await until("pixel halo", () => invIds(b).includes("pixel_halo"));
+    b.send("sell", { slot: [...b.you.hotbar, ...b.you.backpack].findIndex((i: any) => i?.id === "pixel_halo") });
+    await waitFor(() => b.last("shop")?.reason === "worthless");
+    expect(b.toasts.at(-1)).toContain("One of a kind");
+    expect(b.you.coins).toBe(25);
+    expect(invIds(b)).toContain("pixel_halo");
   });
 });
 
