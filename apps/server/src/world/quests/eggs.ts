@@ -140,6 +140,7 @@ export class EggLogic {
     const toast = (t: string, k: "info" | "warn" = "info") => this.sys.toast(a, t, k);
     switch (egg) {
       case "E1": {
+        if (this.sys.life(a).eggs.includes("E1")) return this.sys.claimEgg(a, "E1"); // explains, keeps the coin
         if (a.char.coins < EGG_RULES.E1_COST) return toast("The offering bowl is empty. It seems to want a coin.");
         a.char.coins -= EGG_RULES.E1_COST;
         a.youDirty = true;
