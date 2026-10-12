@@ -188,6 +188,7 @@ export class CombatClient {
     if (this.wheel.update(input, now, !this.deadUntilRespawn)) {
       if (this.blocking) room.send("block", { on: false });
       if (this.scoped) room.send("scope", { on: false });
+      g.self?.setLocalFlags(0);
       if (this.wasRmb) room.send("charge", { on: false }); // a charge or draw in progress is cancelled
       this.blocking = this.scoped = this.wasRmb = false;
       return;
@@ -219,6 +220,7 @@ export class CombatClient {
         if (!rmb && this.wasRmb) {
           if (now - this.chargeStart >= (t.heavyTime ?? 0.8) * 1000) {
             room.send("melee", { slot: g.hud.you?.selected ?? 0, t: Date.now(), heavy: true });
+            g.self?.trigger("heavy"); // own avatar animates now; remote views follow the server's swing
             this.lastFire = now;
           } else room.send("charge", { on: false });
         }
@@ -235,6 +237,8 @@ export class CombatClient {
       }
     }
     this.wasRmb = rmb;
+    // Own avatar: hold the guard / aim pose from local input instead of waiting for the server flags.
+    g.self?.setLocalFlags((this.blocking ? PF.BLOCKING : 0) | (this.scoped || this.aiming() ? PF.SCOPED : 0));
     const zoom = this.scoped ? (t.zoom ?? 1.35) : 1;
     const cam = g.ctx.camera;
     const targetFov = this.baseFov / zoom;
@@ -254,6 +258,8 @@ export class CombatClient {
     if (now - this.lastFire < t.rate * 1000) return;
     this.lastFire = now;
     const slot = g.hud.you?.selected ?? 0;
+    // own avatar: swing / shot / cast / throw picked from the held item, without the round trip
+    if (def.delivery !== "none") g.self?.trigger("attack");
     if (def.delivery === "melee") {
       room.send("melee", { slot, t: Date.now(), heavy: false });
       g.audio.play("swing");

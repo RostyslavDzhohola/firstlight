@@ -9,7 +9,7 @@ export const config = {
   repoUrl: "https://github.com/RostyslavDzhohola/firstlight",
 };
 
-/** URL flags: ?nobloom ?nofog ?nosky ?nograss ?notrees ?nowater ?noshadows ?noao ?noparticles ?nopost ?nochars ?nodestruct ?webgl ?tier=… ?bench */
+/** URL flags (also ?cpuslow=N for the F11 weak-laptop profile): ?nobloom ?nofog ?nosky ?nograss ?notrees ?nowater ?noshadows ?noao ?noparticles ?nopost ?nochars ?nodestruct ?webgl ?tier=… ?bench */
 export const flags = {
   has(name: string): boolean {
     return params.has(name);

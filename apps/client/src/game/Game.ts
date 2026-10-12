@@ -5,7 +5,7 @@ import * as THREE from "three/webgpu";
 import { BODIES, padDirs, type BodyId } from "@firstlight/shared";
 import { flags } from "../config.ts";
 import { CLOSE, Net, TravelRedirect } from "../net/Net.ts";
-import { AvatarView, preloadAvatars } from "../render/Avatars.ts";
+import { AvatarView, avatarWarmupHook, preloadAvatars } from "../render/Avatars.ts";
 import "../render/avatars/system.ts";
 import { Bench, benchConfig } from "../render/bench.ts";
 import { BlobShadows } from "../render/blobShadows.ts";
@@ -36,6 +36,7 @@ import { installSocial, partyRoomOn, removedFromWorld } from "../social/index.ts
 /** ?bench runs without a server unless ?online is also given; ?offline forces it anywhere. */
 const OFFLINE = flags.has("offline") || (flags.has("bench") && !flags.has("online"));
 const FX_DEMO = flags.has("fxdemo");
+const CPU_SLOW = Math.max(1, Math.min(8, Number(flags.get("cpuslow")) || 1));
 
 export class Game {
   ctx!: RenderCtx;
@@ -353,9 +354,12 @@ export class Game {
   }
 
   private warmupHook() {
+    // every palette's skinned toon variant, weapons and LOD proxies compile behind the loading screen
+    const avatars = avatarWarmupHook(this.ctx.scene, () => this.player.pos);
     return {
       forceAll: (on: boolean) => {
         this.planet.props.setForceAll(on);
+        avatars.forceAll(on);
       },
     };
   }
@@ -489,7 +493,14 @@ export class Game {
     }
     if (this.input.pressed.has("F3")) this.perf.toggle();
     this.ctx.render();
-    const cpuMs = performance.now() - cpu0;
+    let cpuMs = performance.now() - cpu0;
+    if (CPU_SLOW > 1) {
+      // ?cpuslow=N (F11 weak-laptop profile): emulate an N× slower CPU on the main thread by
+      // busy-waiting (N−1)× this frame's CPU time, like DevTools CPU throttling.
+      const until = performance.now() + cpuMs * (CPU_SLOW - 1);
+      while (performance.now() < until) { /* spin */ }
+      cpuMs *= CPU_SLOW;
+    }
     this.ctx.afterFrame(now, rawMs);
     this.bench?.record(rawMs);
     shaderMonitorFrame();

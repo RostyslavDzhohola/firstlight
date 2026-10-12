@@ -311,3 +311,8 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   foot). Signal Ridge was the midpoint of two opposite pads (no direction) → `mid: [2, 0]`. New anchor
   form `between`; `anchors.test.ts` rejects collapsing anchors and pads inside a feature's core.
   F2 re-run with NPCs on production: 40 bots × 600 s, 0 failures, tick p95 ≤ 2.94 ms, RSS ≤ 218 MB.
+- **D29 (run, 03:40Z):** performance gates are measured in T3 Code's built-in browser (Chromium 152,
+  WebGPU) on the owner's M1 instead of Chrome (D23 forbids driving the owner's Chrome). F11's DevTools
+  "4× CPU slowdown" is emulated with `?cpuslow=4` (busy-waits 3× each frame's main-thread time).
+  three's WebGPU timestamp "GPU ms" sums overlapping passes on Apple GPUs (read 48–68 ms at 60 fps),
+  so the probe and ladder ignore a GPU p50 above 1.25× the frame interval and use frame timing.

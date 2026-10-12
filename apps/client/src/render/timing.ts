@@ -95,6 +95,16 @@ export function beginManualFrame(renderer: TimestampSource) {
   renderer.info.frame++;
 }
 
+/**
+ * three sums the begin→end time of every render pass in a frame. On tile-based GPUs (Apple M-series)
+ * passes overlap, so that sum can be several times the real frame cost (measured 48–68 ms "GPU time"
+ * on an M1 holding 60 fps). A GPU frame time can't exceed the frame interval by much in a steady
+ * state, so a median over 1.25× the rAF median means the timer can't be trusted on this machine.
+ */
+export function gpuPlausible(gpuP50: number, rafP50: number): boolean {
+  return gpuP50 <= rafP50 * 1.25;
+}
+
 export const LADDER = [1, 0.79, 0.62, 0.5] as const;
 
 const MIN_FRAMES_PER_WINDOW = 5;
@@ -117,6 +127,8 @@ export class ResolutionLadder {
   enabled = true;
   /** Whether GPU samples will arrive (enables up-steps). */
   hasGpuTimer = false;
+  /** Set once GPU samples prove implausible (see gpuPlausible): frame times only from then on. */
+  gpuUntrusted = false;
   private frames: number[] = [];
   private gpu: number[] = [];
   private windowStart = 0;
@@ -161,7 +173,11 @@ export class ResolutionLadder {
       return;
     }
     const rafP50 = percentile(this.frames, 0.5);
-    const gpuP50 = this.hasGpuTimer && this.gpu.length >= 3 ? percentile(this.gpu, 0.5) : null;
+    let gpuP50 = this.hasGpuTimer && this.gpu.length >= 3 ? percentile(this.gpu, 0.5) : null;
+    if (gpuP50 !== null && !gpuPlausible(gpuP50, rafP50)) {
+      this.gpuUntrusted = true; // e.g. overlapping passes on tile-based GPUs: fall back to frame times
+    }
+    if (this.gpuUntrusted) gpuP50 = null;
     this.clearWindow(now);
     let isSlow: boolean;
     let isFast: boolean;
@@ -238,7 +254,8 @@ export function decideProbe(s: ProbeSamples): ProbeDecision {
   if (!s.visible || s.raf.length < PROBE_MIN_FRAMES) {
     return { tier: "medium", valid: false, method: "invalid", gpuP50: null, rafP50, reprobeHigh: false };
   }
-  if (s.gpuAvailable && s.gpu.length >= PROBE_MIN_GPU) {
+  const gTrusted = s.gpuAvailable && s.gpu.length >= PROBE_MIN_GPU && gpuPlausible(percentile(s.gpu, 0.5), rafP50);
+  if (gTrusted) {
     const g = percentile(s.gpu, 0.5);
     if (g > 14) return { tier: "low", valid: true, method: "gpu-timer", gpuP50: g, rafP50, reprobeHigh: false };
     if (g >= 6) return { tier: "medium", valid: true, method: "gpu-timer", gpuP50: g, rafP50, reprobeHigh: false };

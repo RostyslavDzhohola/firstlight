@@ -81,6 +81,18 @@ describe("GpuTimer", () => {
 });
 
 describe("resolution ladder", () => {
+  it("stops trusting a GPU timer that reads above the frame interval", () => {
+    const l = new ResolutionLadder();
+    l.hasGpuTimer = true;
+    // 60 fps held, timer claims 48 ms: no down-steps, and the timer is marked untrusted.
+    let t = feed(l, 1000, 30, 16.7, 48);
+    expect(l.scale).toBe(1);
+    expect(l.gpuUntrusted).toBe(true);
+    // A real slowdown is still caught from frame times alone.
+    t = feed(l, t, 30, 28, 48);
+    expect(l.scale).toBeLessThan(1);
+  });
+
   it("steps down when frames are slow, then asks to drop a tier at the floor", () => {
     const l = new ResolutionLadder();
     let floors = 0;
@@ -169,6 +181,11 @@ describe("probe decision", () => {
     expect(decideProbe({ raf: frames(10, 16), gpu: frames(10, 3), gpuAvailable: true, visible: true })).toMatchObject({ tier: "medium", valid: false });
     expect(decideProbe({ raf: frames(120, 16), gpu: frames(60, 3), gpuAvailable: true, visible: false })).toMatchObject({ tier: "medium", valid: false });
     expect(decideProbe({ raf: [], gpu: [], gpuAvailable: false, visible: true })).toMatchObject({ tier: "medium", valid: false });
+  });
+
+  it("ignores an implausible GPU timer (M1: overlapping passes summed to 48 ms at 60 fps)", () => {
+    const d = decideProbe({ raf: frames(120, 16.7), gpu: frames(60, 48), gpuAvailable: true, visible: true });
+    expect(d).toMatchObject({ tier: "medium", valid: true, method: "raf" });
   });
 
   it("uses the GPU timer thresholds", () => {

@@ -36,6 +36,24 @@
 - [ ] M10 Video-ready
 - [ ] M11 Extras
 
+## Finish line (SPEC §1)
+
+| # | State | Evidence |
+|---|---|---|
+| F1 live | ✅ | https://firstlight.one4all.dev + api health; T3 browser loads and plays |
+| F2 40 bots | ✅ | 600 s, 0 failures, tick p95 ≤ 2.94 ms with NPCs (Measured numbers) |
+| F3 < 30 s to play | ✅ | 8.0 s landing → playing (probe 3.5 s, warm-up 2.2 s), T3 browser, 03:20Z |
+| F4 fighting | 🟡 | seam-1 tests (PvP + PvE); browser E2E pending |
+| F5 death + own pile | 🟡 | seam-1 tests; browser E2E pending |
+| F6 voice | ⛔ | built + tested with bots; needs owner's TURN key; mic E2E needs two real browsers |
+| F7 email sign-in | ⛔ | built + tested; Resend domain unverified (owner: press Verify) |
+| F8 2-player boss | 🟡 | seam-1 duo tests for all 3 bosses; browser E2E pending |
+| F9 screenshot share | 🟡 | built; browser check pending |
+| F10 M1 ≥ 60 fps Medium | ✅* | ?bench=g1 59.9 fps p50, p95 17.6 ms (T3 Chromium, not plugged-in Chrome) |
+| F11 Low on weak profile | ✅* | `?bench=g1&tier=low&cpuslow=4`: 51.3 fps p50, p95 29.8 ms, 0 shader builds (D29 emulation) |
+| F12 three-model review | 🟡 | per-lane reviews done; whole-codebase review after the last merges |
+| F13 photo mode + 5 scenes | 🟡 | photo mode + `stage <n>` + docs/staged-scenes.md merged; browser check pending |
+
 ## Lanes (who owns what right now)
 
 | Lane | State | Where |
@@ -61,6 +79,17 @@
   on one Arcadia copy for 600 s with `--fire`, 0 failures/disconnects; tick p50 ≤ 0.65 ms, p95 ≤ 1.88 ms,
   max 10.2 ms (limit p95 ≤ 25 ms); RSS ≤ 192 MB; CPU ≈ 6 % of one core; downstream 11.7 KB/s per bot on
   average (0.043 GB per player-hour). Re-run with NPCs (03:10Z, commit d40d058): 40 bots × 600 s, 0 failures, tick p50 ≤ 1.36 ms, p95 ≤ 2.94 ms, max 5.7 ms, RSS ≤ 218 MB, CPU ≈ 6 %, 8.3 KB/s per bot. **F2 passes.**
+
+- 03:13Z G1 / F10 stand-in: `?bench=g1` on the live site in T3 Code's built-in browser (Chromium 152 /
+  Electron 44, WebGPU) on the owner's MacBook Air M1, 1785×1048 canvas, Medium, 40-avatar crowd with
+  particle bursts, Portus, 180 s warm-up + 60 s run: **59.9 fps p50, frame p95 17.6 ms, p99 19.4 ms,
+  max 78.8 ms, 0 shader builds during the run**, draws mean 296 / max 445, 1.05 M triangles,
+  104,699 grass blades, heap ≤ 132 MB. Not plugged-in Chrome as SPEC asks (D23: no Chrome control),
+  but same machine and Chromium engine. It exposed a GPU-timer bug (fixed: probe would have picked Low).
+
+- 03:45Z F11 stand-in: `?bench=g1&tier=low&cpuslow=4` (4× main-thread slowdown emulation, D29),
+  Low, 1125×661 internal (more pixels than the 1280×720 profile), 40-avatar crowd, 60 s warm + 60 s:
+  **51.3 fps p50 (mean 47.5), frame p95 29.8 ms, p99 35.7 ms, 0 shader builds**, draws mean 174.
 
 ## Open issues
 
