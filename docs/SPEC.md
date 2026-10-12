@@ -744,8 +744,8 @@ issues". The builder reviews the diff before merging.
   mission checks, slur filter.
 - **Server integration:** in-process Colyseus + SDK bot clients: join, move, fight, die, loot, travel,
   party travel, caps/queue, graceful restart.
-- **E2E cards** (`docs/tests/T1…T8.md`, exact steps + expected results + screenshot names), run by
-  Codex computer use: T1 landing→play < 30 s, T2 fight PvE/PvP, T3 death + own pile, T4 voice + radio,
+- **E2E cards** (`docs/tests/e2e-cards.md`, exact steps + expected results + screenshot names), run by
+  Codex computer use (D23: now T3 Code's built-in browser): T1 landing→play < 30 s, T2 fight PvE/PvP, T3 death + own pile, T4 voice + radio,
   T5 email sign-in + second browser, T6 2-player boss kill (two windows; an admin `stage` command may
   pre-place the players), T7 screenshot share, T8 photo mode.
 - **When Codex control breaks:** retry up to 3 times ~10 min apart (keep building meanwhile); then run
