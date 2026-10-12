@@ -827,9 +827,12 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   /**
    * Leave a pile on the ground. `kind`: "death" for what a player carried when they died (the cap
    * protects these), "loot" by default (drops, chests, boss overflow), "staged" for admin scenes;
-   * `ttlMs` makes it expire (swept by the quest system).
+   * `ttlMs` makes it expire (swept by the quest system). Load-test bots and load-test copies leave
+   * nothing (null): piles belong to a body, not a copy, so they would show up in public copies and
+   * count toward the body's cap (F12 final Opus SF4).
    */
-  createPile(owner: PlayerActor, items: InvItem[], coins: number, at: V3, deferred?: (() => void)[], opts: { kind?: PileKind; ttlMs?: number } = {}): PileData {
+  createPile(owner: PlayerActor, items: InvItem[], coins: number, at: V3, deferred?: (() => void)[], opts: { kind?: PileKind; ttlMs?: number } = {}): PileData | null {
+    if (owner.identity.loadtest || this.metadata?.loadtest) return null;
     const g = this.snapToGround(at);
     const { pile, evicted } = pileStore.current.add({
       body: this.bodyDef.id,
@@ -909,7 +912,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     let pile: PileData | null = null;
     try {
       this.persist([victim], () => {
-        pile = (items.length || victim.char.coins) && !victim.identity.loadtest ? this.createPile(victim, items, victim.char.coins, actorPos(victim), events, { kind: "death" }) : null;
+        pile = items.length || victim.char.coins ? this.createPile(victim, items, victim.char.coins, actorPos(victim), events, { kind: "death" }) : null;
         victim.char.hotbar = [null, null, null, null];
         victim.char.backpack = Array.from({ length: BACKPACK_SLOTS }, () => null);
         victim.char.coins = 0;

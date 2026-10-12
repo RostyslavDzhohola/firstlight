@@ -29,7 +29,7 @@ describe("inventory", () => {
   it("picked-up loot goes to the backpack and weapons to the hotbar; trophies stack", async () => {
     const b = await bot("looter", "arcadia");
     const a = actorOf(b);
-    const pile = serverRoom(b).createPile(a, [{ id: "wool_tuft", tier: 1, qty: 3 }, { id: "carbine", tier: 2, qty: 1 }, { id: "fox_mask", tier: 1, qty: 1 }, { id: "wool_tuft", tier: 1, qty: 2 }], 0, actorPos(a));
+    const pile = serverRoom(b).createPile(a, [{ id: "wool_tuft", tier: 1, qty: 3 }, { id: "carbine", tier: 2, qty: 1 }, { id: "fox_mask", tier: 1, qty: 1 }, { id: "wool_tuft", tier: 1, qty: 2 }], 0, actorPos(a))!;
     b.send("pickup", { pileId: pile.id });
     await until("picked up", () => b.you.backpack[0]?.id === "wool_tuft" && b.you.hotbar[1]?.id === "carbine");
     expect(ids(b.you.hotbar)).toEqual(["hexquill", "carbine", null, null]); // the default starter, then the weapon
