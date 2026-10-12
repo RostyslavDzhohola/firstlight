@@ -65,11 +65,8 @@ const MEDAL_NEEDS: Record<string, string[]> = {
   own_goal: ["game:death"],
 };
 
-/**
- * Known gaps, owned by another lane. Spark needs the onboarding flow (SPEC §6.12) to emit
- * `onboardingDone`; remove the entry when it does.
- */
-const PENDING = new Set(["spark"]);
+/** Known gaps, owned by another lane (none now: onboarding pays Spark since lane/f12-ui). */
+const PENDING = new Set<string>();
 
 describe("production emitters (contract)", () => {
   it("every signal name used here has a pattern", () => {
@@ -102,5 +99,11 @@ describe("production emitters (contract)", () => {
     }
   });
 
-  it.todo("Spark: the onboarding flow emits onboardingDone (onboarding lane)");
+  it("Spark: the onboarding flow awards it on completion (in the payout transaction) and emits onboardingDone", () => {
+    expect(SIGNALS["game:onboardingDone"]!.test(SRC)).toBe(true);
+    const onboarding = readFileSync(join(import.meta.dirname, "../src/world/onboarding.ts"), "utf8");
+    expect(onboarding).toMatch(/const SPARK = "spark"/);
+    expect(onboarding).toMatch(/quests\.award\(a, SPARK, notify\)/);
+    expect(QUESTS).toMatch(/case "onboardingDone"[\s\S]*?this\.award\(a, "spark"\)/);
+  });
 });

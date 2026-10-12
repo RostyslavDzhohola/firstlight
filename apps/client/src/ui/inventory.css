@@ -1,0 +1,27 @@
+/* Inventory panel (I) on top of the kit's inventory pieces (styles/kit.css): the tooltip column, the
+   selected-item actions, the drag ghost and drop targets. */
+
+.fl-inv { max-height: calc(100vh - 32px); overflow-y: auto; }
+.fl-inv .fl-islot { touch-action: none; user-select: none; -webkit-user-select: none; }
+.fl-inv .fl-islot.is-empty { cursor: default; }
+.fl-inv .fl-islot.is-target { --edge: linear-gradient(180deg, #fff3dc, #f3ae5b); }
+.fl-inv.is-dragging, .fl-inv.is-dragging .fl-islot { cursor: grabbing; }
+
+/* Tooltip column: the static item card, or a hint for an empty slot. */
+.fl-inv__tipwrap { min-width: 0; }
+.fl-inv__tipwrap .fl-itip { width: auto; }
+.fl-inv__hint { margin: 0; padding: var(--u) calc(1.1 * var(--u)); border: 1px dashed var(--line-2); border-radius: var(--r-2); font-size: var(--t-xs); line-height: 1.5; color: var(--fog-3); }
+.fl-inv__hint b { display: block; margin-bottom: calc(.3 * var(--u)); font: 600 var(--t-sm)/1.2 var(--font-display); letter-spacing: .06em; text-transform: uppercase; color: var(--paper-2); }
+
+/* Selected item: what you can do with it. */
+.fl-inv__acts { display: grid; gap: calc(.5 * var(--u)); }
+.fl-inv__acts > b { font: 500 var(--t-md)/1.15 var(--font-display); letter-spacing: .03em; color: var(--hero-cream); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-inv__acts > p { margin: 0; font-size: var(--t-xs); line-height: 1.45; color: var(--fog-3); }
+.fl-inv__acts .fl-btn { justify-content: space-between; }
+.fl-inv__acts .fl-btn .fl-key { font-size: var(--t-xs); }
+
+.fl-inv .fl-dropzone { cursor: pointer; user-select: none; -webkit-user-select: none; }
+.fl-inv .fl-dropzone.is-target { border-style: solid; border-color: var(--danger); background: rgba(255, 111, 94, .14); }
+
+/* The item under the pointer while dragging. */
+.fl-inv__ghost { position: fixed; left: 0; top: 0; z-index: calc(var(--z-modal) + 1); pointer-events: none; opacity: .92; }

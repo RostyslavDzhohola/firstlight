@@ -680,27 +680,32 @@ export class QuestSystem implements RoomSystem {
 
   // ---------------------------------------------------------------- medals and titles
 
-  /** Award a medal once per account. Returns true if newly earned. */
   /**
-   * The permanent medal write. Nothing is written while the copy is staging a scene, and a life that
-   * was part of a scene or credited with an assisted/staged boss kill never earns life-scoped medals
-   * (its level, bosses and progress came partly from admin tools; F12 review S4).
+   * Award a medal once per account; true if newly earned. The permanent medal write: nothing is
+   * written while the copy is staging a scene, and a life that was part of a scene or credited with
+   * an assisted/staged boss kill never earns life-scoped medals (its level, bosses and progress came
+   * partly from admin tools; F12 review S4). With `deferred`, the caller runs the write inside its own
+   * transaction: the cache update and the player's messages wait in `deferred` until it commits.
    */
-  award(a: PlayerActor, medalId: string): boolean {
+  award(a: PlayerActor, medalId: string, deferred?: (() => void)[]): boolean {
     const def = MEDAL_BY_ID.get(medalId);
     if (!def || a.identity.loadtest) return false;
     if (!this.official()) return false;
     if (def.scope === "life" && this.life(a).unofficial) return false;
     const q = this.qp(a);
     if (q.medals.has(medalId)) return false;
-    q.medals.add(medalId);
     const fresh = progressStore.current.awardMedal(a.identity.userId, medalId);
-    a.youDirty = true;
-    if (!fresh) return false;
-    this.toast(a, `Medal earned: ${def.name} — wear the title “${def.title}” from the journal (J)`, "medal");
-    a.client.send("medal", { id: medalId });
-    emitGameEvent(this.room, { type: "medal", playerId: a.id, medalId });
-    return true;
+    const apply = () => {
+      q.medals.add(medalId);
+      a.youDirty = true;
+      if (!fresh) return;
+      this.toast(a, `Medal earned: ${def.name} — wear the title “${def.title}” from the journal (J)`, "medal");
+      a.client.send("medal", { id: medalId });
+      emitGameEvent(this.room, { type: "medal", playerId: a.id, medalId });
+    };
+    if (deferred) deferred.push(apply);
+    else apply();
+    return fresh;
   }
 
   setTitle(c: Client, medalId: string | null) {

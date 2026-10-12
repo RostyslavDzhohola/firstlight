@@ -6,7 +6,8 @@ Plain DOM + CSS (D25). The look is the design verdict in `docs/design/ui-judging
 
 See every screen and state with mock data, no server needed: run the client dev server and open
 `/ui-gallery.html?screen=hud&nav` (screens: landing, loading, charpick, hud, hud-oversight, death,
-menu, settings, save-code, players, compass, wheel, shop, kit-inventory, kit-onboarding, …). Add
+menu, settings, save-code, players, compass, wheel, shop, inventory, inventory-drag, onboarding,
+onboarding-attack, onboarding-portal, onboarding-done, kit-inventory, kit-onboarding, …). Add
 `&live` to keep animations running and `&low` for the Low-tier look (no blur).
 
 ## Rules

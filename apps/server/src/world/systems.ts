@@ -11,6 +11,7 @@ import { createVoiceSystem } from "./voice/index.ts";
 import { createSkySystem } from "./SkySystem.ts";
 import { createSupportSystem } from "./support.ts";
 import { createHorseSystem } from "./horses/HorseSystem.ts";
+import { createOnboardingSystem } from "./onboarding.ts";
 
 export interface RoomSystem {
   /** Called every simulation tick (50 ms). */
@@ -38,3 +39,5 @@ SYSTEM_FACTORIES.push(createSkySystem);
 SYSTEM_FACTORIES.push(createSupportSystem);
 // Horses lane (M11 #2, flag FEATURE_HORSES): whistle, riding, the mounted movement budget.
 SYSTEM_FACTORIES.push(createHorseSystem);
+// Onboarding (Portus): training dummies, 50 XP and the Spark medal once per account.
+SYSTEM_FACTORIES.push(createOnboardingSystem);

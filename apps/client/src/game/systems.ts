@@ -7,6 +7,8 @@ import { createQuestClient } from "./QuestClient.ts";
 import { createVoiceSystem } from "../voice/index.ts";
 import { createBreakables } from "../world/Breakables.ts";
 import { createSkyClient } from "./SkyClient.ts";
+import { createInventoryClient } from "./InventoryClient.ts";
+import { createOnboardingClient } from "./OnboardingClient.ts";
 import { horseClientSystem, horseInputSystem } from "./HorseClient.ts";
 
 export interface ClientSystem {
@@ -22,6 +24,10 @@ export const CLIENT_SYSTEMS: ClientSystemFactory[] = [npcClientSystem, createVoi
 CLIENT_SYSTEMS.push(createBreakables);
 // Weather + day/night lane: server sky sync (the environment runs offline from the shared schedule).
 CLIENT_SYSTEMS.push(createSkyClient);
+// Inventory panel (I): move, drop, use and wear from the hotbar and backpack.
+CLIENT_SYSTEMS.push(createInventoryClient);
+// Onboarding (Portus): training dummies and the first-minute tutorial HUD.
+CLIENT_SYSTEMS.push(createOnboardingClient);
 // Horses lane: horses draw first (riders sit in the saddle before nameplates read their position)
 // and take keys after the quests client (piles and world objects keep E when in reach).
 CLIENT_SYSTEMS.unshift(horseClientSystem);

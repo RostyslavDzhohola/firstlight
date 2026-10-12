@@ -6,7 +6,7 @@ import { isBlocked, partyState } from "../social/store.ts";
 import { HORSE_WHISTLE } from "@firstlight/shared/content/horse";
 import { flags } from "../config.ts";
 import { horsesEnabled } from "./mount.ts";
-import { WEAPONS, WEAPON_BY_ID, type WeaponDef } from "@firstlight/shared/content/weapons";
+import { WEAPONS, WEAPON_BY_ID, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
 import { PHRASES } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
 import { Effects, weaponColor } from "../render/effects.ts";
@@ -41,6 +41,8 @@ export class CombatClient {
   /** Unzoomed field of view (Settings → Field of view). */
   baseFov = 75;
   deadUntilRespawn = false;
+  /** Onboarding hook (game/OnboardingClient.ts): handles an attack inside a safe zone; true = handled. */
+  training: ((def: WeaponDef, tier: TierStats, now: number) => boolean) | null = null;
   private readonly wheel: PhraseWheel;
 
   constructor(private readonly game: Game) {
@@ -313,6 +315,7 @@ export class CombatClient {
       return;
     }
     if (meState && meState.flags & PF.SAFE) {
+      if (this.training?.(def, t, now)) return; // onboarding: the Portus training dummies take swings
       if (input.lmbPressed) g.hud.toast("Weapons are holstered in safe zones", "warn");
       return;
     }

@@ -6,6 +6,7 @@ import { CloseCode, Room, ServerError, type Client } from "@colyseus/core";
 import { StateView } from "@colyseus/schema";
 import { BODIES, createTerrain, isSafe, padDirs, portalNear, portalSpots, type BodyDef, type BodyId, type PortalSpot, type Terrain } from "@firstlight/shared";
 import { BACKPACK_SLOTS, HOTBAR_SLOTS, newCharacter, type CharacterData } from "@firstlight/shared/content/character";
+import { INV_SLOTS, moveSlot, storeItem } from "@firstlight/shared/content/inventory";
 import { HORSE, rideSpeed } from "@firstlight/shared/content/horse";
 import { fallDamageFraction, levelForXp, maxHp, pvpKillXp, xpAtLevel, xpToNext } from "@firstlight/shared/content/progression";
 import { WEAPON_BY_ID, WEAPON_INDEX } from "@firstlight/shared/content/weapons";
@@ -203,7 +204,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       const a = this.actor(c);
       if (this.invAllowed(a)) this.drop(a, m.slot);
     });
-    this.onMessage("move", z.object({ from: z.number().int().min(0).max(19), to: z.number().int().min(0).max(19) }), (c, m) => {
+    this.onMessage("move", z.object({ from: z.number().int().min(0).max(INV_SLOTS - 1), to: z.number().int().min(0).max(INV_SLOTS - 1) }), (c, m) => {
       const a = this.actor(c);
       if (this.invAllowed(a)) this.moveItem(a, m.from, m.to);
     });
@@ -585,41 +586,18 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     a.youDirty = true;
   }
 
-  /** Add an item to the first free (or stackable) slot: hotbar first, then backpack. */
+  /** Add an item (shared/content/inventory.ts storeItem): weapons and consumables to the hotbar first, loot to the backpack first. */
   giveItem(a: PlayerActor, item: InvItem): boolean {
-    const def = WEAPON_BY_ID.get(item.id);
-    const stack = def?.stack ?? 1;
-    for (const list of [a.char.hotbar, a.char.backpack]) {
-      for (const s of list) {
-        if (s && s.id === item.id && s.tier === item.tier && stack > 1 && s.qty + item.qty <= stack) {
-          s.qty += item.qty;
-          a.youDirty = true;
-          return true;
-        }
-      }
-    }
-    for (const list of [a.char.hotbar, a.char.backpack]) {
-      const i = list.findIndex((s) => !s);
-      if (i >= 0) {
-        list[i] = { ...item };
-        if (list === a.char.hotbar && i === a.char.selected) this.equip(a, i);
-        a.youDirty = true;
-        return true;
-      }
-    }
-    return false;
+    const slot = storeItem(a.char, item);
+    if (slot < 0) return false;
+    if (slot === a.char.selected) this.equip(a, slot);
+    a.youDirty = true;
+    return true;
   }
 
+  /** Move, merge or swap two inventory slots (0–3 hotbar, 4–19 backpack). */
   moveItem(a: PlayerActor | undefined, from: number, to: number) {
-    if (!a || a.dead || from === to) return;
-    const get = (s: number) => (s < HOTBAR_SLOTS ? a.char.hotbar[s] : a.char.backpack[s - HOTBAR_SLOTS]) ?? null;
-    const set = (s: number, v: InvItem | null) => {
-      if (s < HOTBAR_SLOTS) a.char.hotbar[s] = v;
-      else a.char.backpack[s - HOTBAR_SLOTS] = v;
-    };
-    const x = get(from);
-    set(from, get(to));
-    set(to, x);
+    if (!a || a.dead || !moveSlot(a.char, from, to)) return;
     this.equip(a, a.char.selected);
   }
 
