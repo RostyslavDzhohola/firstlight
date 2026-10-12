@@ -12,7 +12,7 @@ import { hash4, mulberry32 } from "../rng.ts";
 import type { BodyDef, BodyId, FeatureAnchor } from "./bodies.ts";
 import { chunkOf } from "./cubesphere.ts";
 import { anchorDir, chordMetres, padDirs, PAD_SAFE_RADIUS, type Dir } from "./pads.ts";
-import { chunkProps, PROP_DEFS, type PropInstance } from "./props.ts";
+import { naturalChunkProps, PROP_DEFS, type PropInstance } from "./props.ts";
 import { bossArena } from "../content/arenas.ts";
 import { placeDir } from "../content/places.ts";
 import type { Terrain } from "./terrain.ts";
@@ -767,7 +767,7 @@ function place(terrain: Terrain, report?: PlacementReport[]): Breakable[] {
       let p = propCache.get(key);
       if (!p) {
         const [f, cx, cy] = key.split(":").map(Number) as [number, number, number];
-        p = chunkProps(terrain, f as 0 | 1 | 2 | 3 | 4 | 5, cx, cy).filter((q) => PROP_DEFS[q.kind].collider !== "none");
+        p = naturalChunkProps(terrain, f as 0 | 1 | 2 | 3 | 4 | 5, cx, cy).filter((q) => PROP_DEFS[q.kind].collider !== "none");
         propCache.set(key, p);
       }
       for (const x of p) all.push(x);

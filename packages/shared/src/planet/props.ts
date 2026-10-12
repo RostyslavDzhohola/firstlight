@@ -6,6 +6,10 @@
 // rendered triangle under it (same split as the chunk mesh), and kept only if it passes the rule:
 // above water, not on steep rock, outside pad clearings and the Portus plaza.
 
+import { bossArena } from "../content/arenas.ts";
+import { objectsOn, objectDir } from "../content/world.ts";
+import { bodyBreakables } from "./breakables.ts";
+import { portalSpots } from "./portals.ts";
 import { createNoise3, type Noise3 } from "../noise.ts";
 import { hash01, hash4 } from "../rng.ts";
 import type { BodyDef, BodyId } from "./bodies.ts";
@@ -17,13 +21,14 @@ import type { Terrain } from "./terrain.ts";
  * Bump whenever placement output changes (rules, their order, jitter, filters): clients and the
  * server must agree on it (colliders). v2: jitter kept inside [0.15, 0.85] of each cell and a
  * margin at each face's far edge, so same-rule props are ≥ 0.3 cells apart even across seams.
+ * v3: forest undergrowth, arena/interaction clearings and fitted-breakable exclusions.
  */
-export const PROPS_VERSION = 2;
+export const PROPS_VERSION = 3;
 
 /** Jitter range inside a candidate cell (fraction of the cell), and the face-edge margin. */
 export const PROP_JITTER_MIN = 0.15;
 
-export const PROP_KINDS = ["oak", "pine", "bush", "rock", "boulder", "deadtree", "reed", "scrub", "spire", "blossom"] as const;
+export const PROP_KINDS = ["oak", "pine", "bush", "rock", "boulder", "deadtree", "reed", "scrub", "spire", "blossom", "fern", "flower", "mushroom"] as const;
 export type PropKind = (typeof PROP_KINDS)[number];
 
 export interface PropDef {
@@ -46,6 +51,9 @@ export const PROP_DEFS: Record<PropKind, PropDef> = {
   scrub: { radius: 0.6, height: 0.9, collider: "none" },
   spire: { radius: 1.8, height: 15, collider: "capsule" },
   blossom: { radius: 0.35, height: 5.5, collider: "capsule" },
+  fern: { radius: 0.5, height: 0.8, collider: "none" },
+  flower: { radius: 0.4, height: 0.65, collider: "none" },
+  mushroom: { radius: 0.3, height: 0.45, collider: "none" },
 };
 
 export interface PropRule {
@@ -57,6 +65,8 @@ export interface PropRule {
   /** Optional cluster mask (forests): low-frequency noise in metres; keep where noise > maskMin. */
   maskScale?: number;
   maskMin?: number;
+  /** Share a forest mask with another rule so undergrowth follows its clumps. */
+  maskSeed?: number;
   /** Minimum flatness = dot(surface normal, radial up). */
   minFlat: number;
   /** Height range above the water level (m). */
@@ -78,19 +88,27 @@ export const PROP_STYLES: Record<BodyId, PropRule[]> = {
   portus: [
     { kind: "blossom", every: 4, chance: 0.22, minFlat: 0.85, minH: 0.5, maxH: 999, scale: [0.85, 1.25] },
     { kind: "rock", every: 5, chance: 0.08, minFlat: 0.78, minH: 0.3, maxH: 999, scale: [0.7, 1.3] },
+    { kind: "bush", every: 4, chance: 0.12, minFlat: 0.85, minH: 0.5, maxH: 999, scale: [0.7, 1.1] },
+    { kind: "flower", every: 3, chance: 0.15, minFlat: 0.85, minH: 0.5, maxH: 999, scale: [0.8, 1.2] },
   ],
   arcadia: [
-    { kind: "oak", every: 2, chance: 0.5, maskScale: 140, maskMin: 0.08, minFlat: 0.84, minH: 1.0, maxH: 55, scale: [0.8, 1.35] },
-    { kind: "pine", every: 2, chance: 0.45, maskScale: 110, maskMin: 0.18, minFlat: 0.8, minH: 6, maxH: 95, scale: [0.75, 1.3] },
-    { kind: "bush", every: 3, chance: 0.14, minFlat: 0.82, minH: 0.6, maxH: 60, scale: [0.7, 1.3] },
+    { kind: "oak", every: 2, chance: 0.6, maskScale: 140, maskMin: 0.08, minFlat: 0.84, minH: 1.0, maxH: 55, scale: [0.8, 1.35] },
+    { kind: "pine", every: 2, chance: 0.5, maskScale: 110, maskMin: 0.18, minFlat: 0.8, minH: 6, maxH: 95, scale: [0.75, 1.3] },
+    { kind: "bush", every: 2, chance: 0.22, maskScale: 140, maskMin: 0.08, maskSeed: 0, minFlat: 0.82, minH: 0.6, maxH: 60, scale: [0.7, 1.3] },
     { kind: "rock", every: 3, chance: 0.07, minFlat: 0.76, minH: 0.2, maxH: 999, scale: [0.6, 1.4] },
     { kind: "boulder", every: 7, chance: 0.08, minFlat: 0.78, minH: 0.5, maxH: 999, scale: [0.7, 1.3] },
+    { kind: "fern", every: 2, chance: 0.18, maskScale: 140, maskMin: 0.08, maskSeed: 0, minFlat: 0.82, minH: 0.6, maxH: 60, scale: [0.7, 1.3] },
+    { kind: "flower", every: 3, chance: 0.10, maskScale: 140, maskMin: 0.08, maskSeed: 0, minFlat: 0.82, minH: 0.6, maxH: 60, scale: [0.7, 1.2] },
+    { kind: "mushroom", every: 3, chance: 0.12, maskScale: 140, maskMin: 0.08, maskSeed: 0, minFlat: 0.82, minH: 0.6, maxH: 50, scale: [0.7, 1.2] },
   ],
   hollowmere: [
     { kind: "deadtree", every: 2, chance: 0.3, maskScale: 120, maskMin: 0.02, minFlat: 0.8, minH: 0.8, maxH: 70, scale: [0.8, 1.45] },
     { kind: "reed", every: 1, chance: 0.6, minFlat: 0.86, minH: 0.05, maxH: 0.9, scale: [0.8, 1.3] },
     { kind: "rock", every: 3, chance: 0.07, minFlat: 0.76, minH: 0.2, maxH: 999, scale: [0.6, 1.4] },
     { kind: "boulder", every: 7, chance: 0.06, minFlat: 0.78, minH: 0.5, maxH: 999, scale: [0.7, 1.4] },
+    { kind: "oak", every: 3, chance: 0.28, maskScale: 120, maskMin: 0.02, maskSeed: 0, minFlat: 0.8, minH: 1, maxH: 70, scale: [0.8, 1.3] },
+    { kind: "fern", every: 2, chance: 0.12, maskScale: 120, maskMin: 0.02, maskSeed: 0, minFlat: 0.82, minH: 0.6, maxH: 40, scale: [0.7, 1.2] },
+    { kind: "mushroom", every: 3, chance: 0.14, maskScale: 120, maskMin: 0.02, maskSeed: 0, minFlat: 0.82, minH: 0.6, maxH: 40, scale: [0.7, 1.2] },
   ],
   meridian: [
     { kind: "scrub", every: 2, chance: 0.13, minFlat: 0.8, minH: 0.5, maxH: 90, scale: [0.7, 1.4] },
@@ -191,7 +209,7 @@ function maskFor(body: BodyDef, rule: number): Noise3 {
 }
 
 /** Props whose candidate lands inside chunk (face, cx, cy). Deterministic and order-stable. */
-export function chunkProps(terrain: Terrain, face: Face, cx: number, cy: number): PropInstance[] {
+export function naturalChunkProps(terrain: Terrain, face: Face, cx: number, cy: number): PropInstance[] {
   const body = terrain.body;
   const rules = PROP_STYLES[body.id];
   const out: PropInstance[] = [];
@@ -203,6 +221,12 @@ export function chunkProps(terrain: Terrain, face: Face, cx: number, cy: number)
   const n = terrain.n;
   const R = body.radius;
   const sp: SurfacePoint = { x: 0, y: 0, z: 0, h: 0, flatness: 0 };
+  const arena = bossArena(terrain);
+  const clearings = [
+    ...(arena ? [{ dir: arena.up, radius: arena.radius + 6 }] : []),
+    ...objectsOn(body.id).map((o) => ({ dir: objectDir(o), radius: Math.max(2, o.range) + 4 })),
+    ...portalSpots(body, terrain).map((o) => ({ dir: o.dir, radius: 6 })),
+  ];
   const faceSeed = hash4(body.seed, face, 0x5eed);
 
   for (let r = 0; r < rules.length; r++) {
@@ -211,7 +235,7 @@ export function chunkProps(terrain: Terrain, face: Face, cx: number, cy: number)
     const E = rule.every;
     const minFlat = Math.max(PROP_MIN_FLATNESS, rule.minFlat);
     const minH = Math.max(PROP_MIN_ABOVE_WATER, rule.minH);
-    const mask = rule.maskScale ? maskFor(body, r) : null;
+    const mask = rule.maskScale ? maskFor(body, rule.maskSeed ?? r) : null;
     // Global cells overlapping this chunk.
     const ca = Math.floor(i0 / E), cb = Math.floor((i1 - 1) / E);
     const da = Math.floor(j0 / E), db = Math.floor((j1 - 1) / E);
@@ -245,6 +269,7 @@ export function chunkProps(terrain: Terrain, face: Face, cx: number, cy: number)
           }
         }
         if (blocked) continue;
+        if (clearings.some((c) => chordMetres(c.dir, ux, uy, uz, R) < c.radius)) continue;
         if (hub) {
           const dx = ux, dy = uy - 1, dz = uz;
           if (Math.sqrt(dx * dx + dy * dy + dz * dz) * R < PORTUS_PLAZA_CLEAR) continue;
@@ -255,6 +280,20 @@ export function chunkProps(terrain: Terrain, face: Face, cx: number, cy: number)
     }
   }
   return out;
+}
+
+/** Second stage: breakables yield to solid natural props, then all vegetation yields to the
+ * actual fitted breakable footprints. This avoids a props -> breakables -> props recursion.
+ * Portus' authored walkways are inside its existing 48 m plaza clearing; elsewhere there are
+ * no separate path meshes. Portal approaches and quest interactions have their own clearings. */
+export function chunkProps(terrain: Terrain, face: Face, cx: number, cy: number): PropInstance[] {
+  const props = naturalChunkProps(terrain, face, cx, cy);
+  const breakables = bodyBreakables(terrain);
+  return props.filter((p) => {
+    const l = Math.hypot(p.x, p.y, p.z);
+    const clearance = Math.max(1.5, PROP_DEFS[p.kind].radius * p.scale);
+    return !breakables.some((b) => chordMetres([b.ux, b.uy, b.uz], p.x / l, p.y / l, p.z / l, terrain.body.radius) < b.foot + clearance);
+  });
 }
 
 /** Floats per prop in the packed transfer format: kindIndex, x, y, z, scale, yaw. */
