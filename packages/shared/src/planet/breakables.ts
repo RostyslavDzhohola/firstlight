@@ -137,23 +137,18 @@ export function canBreak(size: BreakSize, cls: BreakClass): boolean {
 
 // ------------------------------------------------------------------------------------ instances
 
-export interface Breakable {
-  /** Stable id `${site}.${slot}` (also the key of BodyState.broken). */
-  id: string;
-  /** Index in the body's list (a cheap handle; not sent over the wire). */
+/**
+ * What the player-vs-solid code (planet/collide.ts) and the grid need of a collider: a breakable
+ * prop, or an indestructible town structure solid (planet/town.ts).
+ */
+export interface SolidFrame {
+  /** Index in its list (a cheap handle; not sent over the wire). */
   index: number;
-  site: number;
-  archetype: number;
-  kind: BreakableArchetype;
   /** Base centre (on the ground, planet space) and the local frame: right (x), up (y), forward (z). */
   px: number; py: number; pz: number;
   rx: number; ry: number; rz: number;
   ux: number; uy: number; uz: number;
   fx: number; fy: number; fz: number;
-  scale: number;
-  hp: number;
-  size: BreakSize;
-  rebuildMs: number;
   /** 0 = box (hx, hz half extents), 1 = cylinder (radius hx = hz). Height h. All scaled. */
   shape: 0 | 1;
   hx: number;
@@ -164,6 +159,18 @@ export interface Breakable {
   /** Collider centre and bounding-sphere radius (broadphase). */
   cx: number; cy: number; cz: number;
   bound: number;
+}
+
+export interface Breakable extends SolidFrame {
+  /** Stable id `${site}.${slot}` (also the key of BodyState.broken). */
+  id: string;
+  site: number;
+  archetype: number;
+  kind: BreakableArchetype;
+  scale: number;
+  hp: number;
+  size: BreakSize;
+  rebuildMs: number;
   /** Horizontal footprint radius (overlap checks). */
   foot: number;
 }
@@ -947,7 +954,7 @@ function raySolid(shape: 0 | 1, hx: number, hz: number, y0: number, y1: number, 
  * Distance along a ray (origin o, unit direction d) to the breakable's collider (every solid of a
  * compound one) within [0, maxT], or Infinity. A ray starting inside returns 0.
  */
-export function rayBreakable(b: Breakable, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number): number {
+export function rayBreakable(b: SolidFrame, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number): number {
   const qx = ox - b.px, qy = oy - b.py, qz = oz - b.pz;
   // Local origin and direction (x = right, y = up, z = forward).
   const lx = qx * b.rx + qy * b.ry + qz * b.rz;
@@ -989,7 +996,7 @@ function closestOnSolid(shape: 0 | 1, hx: number, hz: number, y0: number, y1: nu
 }
 
 /** Distance from a point to the breakable's collider (0 inside). Writes the closest point to `out` if given. */
-export function distanceToBreakable(b: Breakable, x: number, y: number, z: number, out?: V3): number {
+export function distanceToBreakable(b: SolidFrame, x: number, y: number, z: number, out?: V3): number {
   const qx = x - b.px, qy = y - b.py, qz = z - b.pz;
   const lx = qx * b.rx + qy * b.ry + qz * b.rz;
   const ly = qx * b.ux + qy * b.uy + qz * b.uz;
@@ -1016,7 +1023,7 @@ export function distanceToBreakable(b: Breakable, x: number, y: number, z: numbe
 }
 
 /** Does the segment (o, d, maxT) pass within `b.bound` of the collider centre? (broadphase) */
-export function segmentNearBreakable(b: Breakable, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number): boolean {
+export function segmentNearBreakable(b: SolidFrame, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number): boolean {
   const qx = b.cx - ox, qy = b.cy - oy, qz = b.cz - oz;
   let t = qx * dx + qy * dy + qz * dz;
   if (t < 0) t = 0;
@@ -1027,17 +1034,17 @@ export function segmentNearBreakable(b: Breakable, ox: number, oy: number, oz: n
 
 // ------------------------------------------------------------------------------------ spatial index
 
-/** Uniform grid over the breakables of one body: candidates for segments and spheres. */
-export class BreakableGrid {
+/** Uniform grid over the breakables (or other solids) of one body: candidates for segments and spheres. */
+export class BreakableGrid<T extends SolidFrame = Breakable> {
   readonly cell: number;
   private readonly cells = new Map<number, number[]>();
   private readonly seen: Uint32Array;
   private stamp = 0;
   private readonly maxBound: number;
 
-  readonly list: readonly Breakable[];
+  readonly list: readonly T[];
 
-  constructor(list: readonly Breakable[], cell = 24) {
+  constructor(list: readonly T[], cell = 24) {
     this.list = list;
     this.cell = cell;
     this.seen = new Uint32Array(list.length);

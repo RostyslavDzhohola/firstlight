@@ -12,6 +12,10 @@ import type { BodyDef, BodyId } from "./bodies.ts";
 import { CHUNK_QUADS, gridDir, type Face } from "./cubesphere.ts";
 import { chordMetres, padDirs } from "./pads.ts";
 import type { Terrain } from "./terrain.ts";
+import { townCoords } from "./townFrame.ts";
+import { townPropClear } from "./townGround.ts";
+
+const townAt: [number, number] = [0, 0];
 
 /**
  * Bump whenever placement output changes (rules, their order, jitter, filters): clients and the
@@ -71,8 +75,11 @@ export const PROP_MIN_FLATNESS = 0.75;
 export const PROP_PAD_CLEARANCE = 14;
 /** Minimum height above the water surface for any prop (m). */
 export const PROP_MIN_ABOVE_WATER = 0.05;
-/** The Portus plaza (crater bowl around +Y) stays clear out to this radius (m). */
-export const PORTUS_PLAZA_CLEAR = 48;
+/**
+ * No natural props inside the Portus town walls (chord metres from +Y; the walls and towers end
+ * at about 49 m). Beyond, the town's roads, structures and trees keep them away (townGround.ts).
+ */
+export const PORTUS_PLAZA_CLEAR = 52;
 
 export const PROP_STYLES: Record<BodyId, PropRule[]> = {
   portus: [
@@ -248,6 +255,9 @@ export function chunkProps(terrain: Terrain, face: Face, cx: number, cy: number)
         if (hub) {
           const dx = ux, dy = uy - 1, dz = uz;
           if (Math.sqrt(dx * dx + dy * dy + dz * dz) * R < PORTUS_PLAZA_CLEAR) continue;
+          // The castle town (D38): not on its roads or paving, by its structures or under its trees.
+          townCoords(ux, uy, uz, R, townAt);
+          if (!townPropClear(townAt[0], townAt[1])) continue;
         }
         const s = rule.scale[0] + (rule.scale[1] - rule.scale[0]) * hash01(hseed, 4);
         out.push({ kind: rule.kind, kindIndex, x: sp.x, y: sp.y, z: sp.z, scale: s, yaw: hash01(hseed, 5) * Math.PI * 2 });
