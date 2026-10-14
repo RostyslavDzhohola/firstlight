@@ -26,7 +26,7 @@ Not third-party: the music (generated at runtime per planet by `MusicGen` in
 weapon, NPC, boss and terrain geometry, procedural prop fallbacks and Meridian spires (built in code), `favicon.svg`, and the character
 heads, clothing and atlas listed below as our own work.
 
-Build tools that ship nothing themselves: Blender (headless, `tools/blender/characters/build.sh`, `tools/blender/horse/build.sh`, `tools/blender/vegetation/build.sh`),
+Build tools that ship nothing themselves: Blender (headless, `tools/blender/characters/build.sh`, `tools/blender/horse/build.sh`, `tools/blender/vegetation/build.sh`, `tools/blender/portus/build.sh`),
 `@gltf-transform/cli` 4.5.1 via `pnpm dlx`, Vite, Vitest, TypeScript, tsx, esbuild, wrangler.
 
 When you add a dependency that ends up in the client bundle, add it to
