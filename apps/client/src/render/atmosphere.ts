@@ -24,6 +24,9 @@ import { skyDir, type V3 } from "./sunFrame.ts";
 const col = (hex = 0xffffff) => uniform(new THREE.Color(hex));
 
 /** Shared atmosphere uniforms (one set per renderer). */
+/** Object layer drawn only into the sun's shadow map (layer 0 is everything the view camera draws). */
+export const SHADOW_ONLY_LAYER = 5;
+
 export const atmo = {
   up: uniform(new THREE.Vector3(0, 1, 0)).setGroup(renderGroup),
   sunDir: uniform(new THREE.Vector3(0, 1, 0)).setGroup(renderGroup),
@@ -62,6 +65,11 @@ export const atmo = {
   fogTintAmt: uniform(0).setGroup(renderGroup),
   /** Multiplier for emissive "glow" materials (pads, portals, lamps): brighter at night. */
   glowBoost: uniform(1).setGroup(renderGroup),
+  /**
+   * Lamplight 0..1 (lit windows): night, or late dusk (Portus' sun never sets: its evening is as
+   * dark as it gets). Not raised by clouds, so windows stay unlit on a rainy day.
+   */
+  lamps: uniform(0).setGroup(renderGroup),
   /** Surface wetness 0..1 (darker, shinier terrain/props/grass after rain). */
   wet: uniform(0).setGroup(renderGroup),
   /** Rain hitting water now 0..1 (ripples). */
@@ -244,6 +252,10 @@ export class SunRig {
     this.sun.name = "sun";
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.04;
+    // The sun's shadow map also draws shadow-only objects (the Portus town's shadow cells), which
+    // the view camera never sees. (three uses the shadow camera's own mask once it has a layer
+    // besides 0.)
+    this.sun.shadow.camera.layers.enable(SHADOW_ONLY_LAYER);
     this.hemi = new THREE.HemisphereLight(look.hemiSky, look.hemiGround, look.hemiIntensity);
     this.hemi.name = "skyFill";
     scene.add(this.sun, this.sun.target, this.hemi);

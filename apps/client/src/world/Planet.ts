@@ -16,6 +16,9 @@ import { skyPlanetsFor, type SkyPlanets } from "../render/skyPlanets.ts";
 import { localFrame, type V3 } from "../render/sunFrame.ts";
 import { applyTerrainSettings, terrainMaterialFor, terrainUniforms } from "../render/terrainMaterial.ts";
 import { applyWaterLook, createWaterMesh, waterMaterialFor } from "../render/water.ts";
+import { PortusTown } from "./PortusTown.ts";
+import { townGrass } from "@firstlight/shared/planet/townGround";
+import { townCoords } from "@firstlight/shared/planet/townFrame";
 
 export { LOOKS, type BodyLook };
 
@@ -59,6 +62,8 @@ export class Planet {
   readonly skyPlanets: SkyPlanets;
   readonly grass: GrassSystem;
   readonly props: PropSystem;
+  /** The Portus castle town (D38); null on the planets. */
+  readonly town: PortusTown | null;
   readonly waterGroup = new THREE.Group();
   private readonly scene: THREE.Scene;
   private readonly chunkInfos: ChunkInfo[] = [];
@@ -131,10 +136,17 @@ export class Planet {
     // cache key; new ones per planet would rebuild every lit material on each travel).
     this.rig = sunRigFor(this.scene, this.look, ctx.renderer);
     this.skyPlanets = skyPlanetsFor(this.scene, this.look.skyPlanets);
-    this.grass = new GrassSystem(this.body.radius, n, this.body.terrain.kind === "hub" ? [] : padDirs(this.body));
+    const hub = this.body.terrain.kind === "hub";
+    const R = this.body.radius;
+    const at: [number, number] = [0, 0];
+    // Hub: no blade roots on the town's paving, streets or footprints (townGround.ts).
+    const grassMask = hub ? (x: number, y: number, z: number) => townGrass(...townCoords(x, y, z, R, at)) : null;
+    this.grass = new GrassSystem(this.body.radius, n, hub ? [] : padDirs(this.body), grassMask);
     this.group.add(this.grass.group);
     this.props = new PropSystem(bodyId);
     this.group.add(this.props.group);
+    this.town = hub ? new PortusTown(this.terrain, this.settings) : null;
+    if (this.town) this.group.add(this.town.group);
     this.material = terrainMaterialFor(this.settings);
     this.waterMaterial = waterMaterialFor(this.settings.water);
     // A hidden one-triangle water patch at the planet centre: the warm-up protocol shows hidden
@@ -190,6 +202,7 @@ export class Planet {
     this.skyPlanets.applySettings(s);
     this.grass.applySettings(s);
     this.props.applySettings(s);
+    this.town?.applySettings(s);
   }
 
   /**
@@ -207,6 +220,7 @@ export class Planet {
     this.cullHorizon(camera.position);
     this.grass.update(camera.position, this.grassChunks(), now);
     this.props.update(camera.position, now);
+    this.town?.update(camera);
 
     if (now - this.lastStream < 200) return this.pendingNear(ux, uy, uz);
     this.lastStream = now;
@@ -387,6 +401,7 @@ export class Planet {
     for (const c of [...this.loaded.values()]) this.unload(c);
     this.grass.dispose();
     this.props.dispose();
+    this.town?.dispose();
     // The sun rig and sky planets are shared across bodies (re-skinned by the next Planet).
     this.waterDummy.geometry.dispose();
     this.scene.remove(this.group);

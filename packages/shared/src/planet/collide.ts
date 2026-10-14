@@ -6,7 +6,7 @@
 // differs from the player's by metres / planet radius, which is negligible). Pushes are sideways in
 // the prop's tangent plane, by the shortest way out, so walking into a prop slides along it.
 
-import { BreakableGrid, rayBreakable, segmentNearBreakable, type Breakable } from "./breakables.ts";
+import { BreakableGrid, rayBreakable, segmentNearBreakable, type Breakable, type SolidFrame } from "./breakables.ts";
 
 export interface XYZ {
   x: number;
@@ -56,7 +56,7 @@ export function resetContact(c: PropContact): PropContact {
  *   direction goes into `out`.
  * Returns true if `p` moved.
  */
-export function pushOutOfBreakable(b: Breakable, p: XYZ, radius: number, height: number, step: number, out: PropContact): boolean {
+export function pushOutOfBreakable(b: SolidFrame, p: XYZ, radius: number, height: number, step: number, out: PropContact): boolean {
   let moved = pushOutOfSolid(b, b.shape, b.hx, b.hz, 0, b.h, p, radius, height, step, out);
   if (b.parts) for (const q of b.parts) if (pushOutOfSolid(b, q.shape, q.hx, q.hz, q.y0, q.y1, p, radius, height, step, out)) moved = true;
   return moved;
@@ -64,7 +64,7 @@ export function pushOutOfBreakable(b: Breakable, p: XYZ, radius: number, height:
 
 /** Local frame coordinates of `p` relative to a prop's base. */
 const _l = { x: 0, y: 0, z: 0 };
-function toLocal(b: Breakable, p: XYZ) {
+function toLocal(b: SolidFrame, p: XYZ) {
   const qx = p.x - b.px, qy = p.y - b.py, qz = p.z - b.pz;
   _l.x = qx * b.rx + qy * b.ry + qz * b.rz;
   _l.y = qx * b.ux + qy * b.uy + qz * b.uz;
@@ -82,13 +82,13 @@ function outsideFootprint(shape: 0 | 1, hx: number, hz: number, lx: number, lz: 
 }
 
 /** The top of a solid under the feet at `p` (local height ly), as a distance from the planet centre. */
-function topRadius(b: Breakable, p: XYZ, ly: number, y1: number): number {
+function topRadius(b: SolidFrame, p: XYZ, ly: number, y1: number): number {
   const lift = y1 - ly;
   const tx = p.x + b.ux * lift, ty = p.y + b.uy * lift, tz = p.z + b.uz * lift;
   return Math.sqrt(tx * tx + ty * ty + tz * tz);
 }
 
-function pushOutOfSolid(b: Breakable, shape: 0 | 1, hx: number, hz: number, y0: number, y1: number, p: XYZ, radius: number, height: number, step: number, out: PropContact): boolean {
+function pushOutOfSolid(b: SolidFrame, shape: 0 | 1, hx: number, hz: number, y0: number, y1: number, p: XYZ, radius: number, height: number, step: number, out: PropContact): boolean {
   const { x: lx, y: ly, z: lz } = toLocal(b, p);
   if (ly >= y1 + TOP_SLACK || ly + height <= y0) return false;
   // Unit escape direction (local x, z), how far to move along it, and how far the centre is
@@ -147,7 +147,7 @@ function pushOutOfSolid(b: Breakable, shape: 0 | 1, hx: number, hz: number, y0: 
  * half the body radius, as the client lands) and the feet no deeper than `step` below it. Distance
  * from the planet centre, or 0.
  */
-function supportOf(b: Breakable, p: XYZ, radius: number, step: number): number {
+function supportOf(b: SolidFrame, p: XYZ, radius: number, step: number): number {
   let best = 0;
   for (let k = -1; k < (b.parts?.length ?? 0); k++) {
     const q = k < 0 ? null : b.parts![k]!;
@@ -207,7 +207,7 @@ function footprintSpan(shape: 0 | 1, hx: number, hz: number, ax: number, az: num
  * (the centre inside its footprint while the body overlaps it below its standable band: feet more
  * than `step` under its top, head above its bottom); 2 = the start is already inside it that way.
  */
-function sweepSolid(b: Breakable, shape: 0 | 1, hx: number, hz: number, y0: number, y1: number, a: XYZ, bb: XYZ, height: number, step: number): 0 | 1 | 2 {
+function sweepSolid(b: SolidFrame, shape: 0 | 1, hx: number, hz: number, y0: number, y1: number, a: XYZ, bb: XYZ, height: number, step: number): 0 | 1 | 2 {
   const lo = y0 - height + SWEEP_SLACK, hi = y1 - step - SWEEP_SLACK;
   if (hi <= lo) return 0;
   const { x: ax, y: ay, z: az } = toLocal(b, a);
@@ -245,19 +245,22 @@ const _p: XYZ = { x: 0, y: 0, z: 0 };
  *   const props = new BreakableCollider(destruction.list, destruction.grid); // once per room
  *   const support = supportHeightAt(props, x, y, z, (i) => !destruction.isBroken(i));
  */
-export function supportHeightAt(props: BreakableCollider, x: number, y: number, z: number, solid: (index: number) => boolean = () => true, body: { radius: number; step: number } = PLAYER_BODY): number {
+export function supportHeightAt<T extends SolidFrame>(props: BreakableCollider<T>, x: number, y: number, z: number, solid: (index: number) => boolean = () => true, body: { radius: number; step: number } = PLAYER_BODY): number {
   return props.support(x, y, z, solid, body);
 }
 
-/** Every breakable of a body behind a grid: resolves the player against the solid ones near it. */
-export class BreakableCollider {
-  readonly grid: BreakableGrid;
-  readonly list: readonly Breakable[];
+/**
+ * Every breakable of a body (or every town structure solid: planet/town.ts) behind a grid: resolves
+ * the player against the solid ones near it.
+ */
+export class BreakableCollider<T extends SolidFrame = Breakable> {
+  readonly grid: BreakableGrid<T>;
+  readonly list: readonly T[];
   private readonly candidates: number[] = [];
 
-  constructor(list: readonly Breakable[], grid?: BreakableGrid) {
+  constructor(list: readonly T[], grid?: BreakableGrid<T>) {
     this.list = list;
-    this.grid = grid ?? new BreakableGrid(list);
+    this.grid = grid ?? new BreakableGrid<T>(list);
   }
 
   /**

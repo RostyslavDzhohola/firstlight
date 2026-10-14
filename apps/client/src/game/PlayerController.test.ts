@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Breakable, Terrain } from "@firstlight/shared";
+import { BODIES, createTerrain, type Breakable, type Terrain } from "@firstlight/shared";
+import { structureCollider, townCoords, townDir } from "@firstlight/shared/planet/town";
 import { BreakableCollider, PLAYER_BODY } from "@firstlight/shared/planet/collide";
 import type { Input } from "./input.ts";
 import { PlayerController, type MoveColliders } from "./PlayerController.ts";
@@ -55,6 +56,25 @@ function spawn(): PlayerController {
   run(pc, fakeInput(), 0.2); // settle on the ground
   return pc;
 }
+
+describe("PlayerController in the Portus town (D38)", () => {
+  it("is stopped by a house's wall (the shared structures) and slides along it", () => {
+    const portus = createTerrain("portus");
+    const town = structureCollider(portus)!;
+    const pc = new PlayerController(portus, BODIES.portus.waterLevel);
+    pc.setStructures({ resolve: (p, out) => town.resolve(p, out) });
+    // On the east street, south of the house at (26.2, 6.1) whose front faces the street.
+    const d = townDir(26.2, 1, BODIES.portus.radius);
+    pc.teleport(d[0] * BODIES.portus.radius, d[1] * BODIES.portus.radius, d[2] * BODIES.portus.radius);
+    run(pc, fakeInput(), 0.2);
+    run(pc, fakeInput(["KeyW"]), 2.5); // north, into the house
+    const [, north] = townCoords(pc.pos.x, pc.pos.y, pc.pos.z, BODIES.portus.radius);
+    expect(north).toBeGreaterThan(2.5);
+    expect(north).toBeLessThan(3.8);
+    expect(town.footing(pc.pos.x, pc.pos.y, pc.pos.z, PLAYER_BODY.step).inside).toBe(false);
+    expect(pc.onGround).toBe(true);
+  });
+});
 
 describe("PlayerController", () => {
   it("runs forward at run speed along the surface", () => {

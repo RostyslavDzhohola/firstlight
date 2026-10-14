@@ -51,9 +51,12 @@ export interface MoveWorld {
   radius: number;
   waterLevel: number;
   groundAt(x: number, y: number, z: number): number;
-  /** Intact breakable props: the highest top under the feet (radius from the centre, 0 = none) and whether the feet are inside one. */
+  /**
+   * Intact breakable props and the Portus town's structures (D38): the highest top under the feet
+   * (radius from the centre, 0 = none) and whether the feet are inside one.
+   */
   footing?(x: number, y: number, z: number, step: number): { top: number; inside: boolean };
-  /** Do feet moving straight from a to b pass through an intact prop (shared collider sweep)? */
+  /** Do feet moving straight from a to b pass through an intact prop or a town structure (shared collider sweep)? */
   crosses?(ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean;
 }
 

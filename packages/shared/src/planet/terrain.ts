@@ -19,6 +19,12 @@ interface ResolvedFeature {
   amount: number; // lake depth or peak height
 }
 
+/**
+ * Portus: the town floor is flat out to this chord distance (m) from the arrival point (+Y): the
+ * walls stand at 43–46 m, the castle's far towers at 64 m (content/portusTown.ts, D38).
+ */
+export const PORTUS_TOWN_FLAT = 72;
+
 export interface Terrain {
   body: BodyDef;
   /** Quads per face edge. */
@@ -98,14 +104,18 @@ export function createTerrain(bodyOrId: BodyDef | BodyId): Terrain {
   }
 
   function hubBase(x: number, y: number, z: number): number {
-    // Crater-bowl plaza around +Y: flat floor, a ring rim, gentle hills beyond.
+    // The town floor around +Y: flat (exactly the radius) out to PORTUS_TOWN_FLAT, so the walled
+    // town and its castle stand on the sphere as built; then a ring rim and gentle hills beyond.
+    // From PORTUS_TOWN_FLAT + 60 m on it is the old bowl's outer terrain unchanged (D38).
     const d = Math.sqrt(x * x + (y - 1) * (y - 1) + z * z) * R;
+    const F = PORTUS_TOWN_FLAT;
+    if (d <= F) return 0;
     const px = x * R;
     const py = y * R;
     const pz = z * R;
     const hills = fbm(nHills, px / 60, py / 60, pz / 60, 3) * p.hillAmp;
-    const rim = smoothstep(30, 44, d) * 7 - smoothstep(52, 85, d) * 4;
-    return rim + hills * smoothstep(40, 90, d) + nDetail(px / 9, py / 9, pz / 9) * 0.15 * smoothstep(28, 40, d);
+    const rim = smoothstep(F, F + 20, d) * 7 - smoothstep(F + 26, F + 60, d) * 4;
+    return rim + hills * smoothstep(F + 4, F + 50, d) + nDetail(px / 9, py / 9, pz / 9) * 0.15 * smoothstep(F, F + 12, d);
   }
 
   const base = body.terrain.kind === "hub" ? hubBase : planetBase;

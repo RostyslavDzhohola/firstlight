@@ -83,6 +83,11 @@ export interface LightFactors {
   sunUp: number;
 }
 
+/** Lamplight from the light factors: full at night, rising through late dusk (dusk 0.55 → 0.95). */
+export function lampLight(night: number, dusk: number): number {
+  return Math.max(night, Math.min(1, Math.max(0, (dusk - 0.55) / 0.4)));
+}
+
 /**
  * Derived per-frame factors from a sun elevation (exported for tests). Dusk warmth and the sun's
  * ramp-up are measured against the body's reference sun `refElev` when that is low: Hollowmere's
@@ -371,6 +376,7 @@ export class Environment {
     atmo.wet.value = this.wetness;
     atmo.rain.value = wl.dust ? 0 : Math.min(1, a * wl.drops * 1.2);
     atmo.glowBoost.value = 1 + 0.75 * night + 0.25 * cloud;
+    atmo.lamps.value = lampLight(night, dusk);
 
     // ---- fog / haze
     atmo.fogDensity.value = look.fogDensity * lerp(1, wl.fogMul, a) * (1 + night * 0.25);

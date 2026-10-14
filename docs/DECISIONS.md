@@ -397,3 +397,58 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   the tutorial is over and never takes focus while the pointer is locked. Loot goes to the backpack
   except weapon-table items (not the radio), which prefer the hotbar; X on a hovered slot needs a
   second press. Why: Sonnet F12 B2 and should-fix 6, and the T9 browser run.
+- **D38 (run, 21:15Z):** Portus is the castle town (the owner's pick: the Opus design): 215 placed
+  prefabs from the CC0 Quaternius village and nature kits, rebuilt by `tools/blender/portus/build.sh`
+  (verified archives, data-only extraction) into a 2.8 MB asset and generated shared data
+  (`content/portusTown.ts`: layout, collider solids, paved ground). The town frame is the game's
+  pole frame (east −X, north +Z, geodesic offsets like `places.offsetDir`); the portal courts sit at
+  the portals' real arc (16.928 m, `portals.ts` uses 17 m on the tangent plane). The Portus floor is
+  flat (exactly the radius) out to 72 m chord, not 50: the castle's far towers stand at 64 m; the
+  rim and hills start beyond it and the terrain is unchanged from 132 m on. Spawn, pads, portals,
+  Juno, the Hall wall and the dummies were already on flat ground (≤ 28 m) and did not move; Portus
+  keeps 0 breakables. Natural props stay outside 52 m, 3 m off the town's paving, roads and
+  structures and out from under its trees (render-only; nothing authoritative reads Portus props;
+  `PROPS_VERSION` 3 → 4 on top of the vegetation lane's 3). Why: the owner wanted the start
+  inside a village with a castle, and the design's walls (r 43–46) and castle sat on the old 0–7 m rim.
+- **D39 (run, 21:15Z):** the town's walls, towers, gatehouses, keep, houses, halls, courts, stalls
+  and props are shared, indestructible colliders (`planet/town.ts` StructureCollider: one box or
+  upright cylinder per solid, resolved by the breakable collider code generalised to `SolidFrame`),
+  never in the breakable list (its ids and indices are wire/persistence keys). The client controller
+  (`setStructures`) and the server's movement world (tops hold feet; inside and crossing refused) use
+  the same solids. Gate passages are 3.8 m (2.2 m for the body's centre between the open doors), the
+  castle gate 3.4 m. Solids follow their prefab's frame, so the keep's front steps stand 0.44 m above
+  the curved ground at their far edge: a hop, like the drawn step. Client tracers stop at town walls;
+  the server's shot and NPC sight paths don't consult them, because Portus refuses shots (safe zone)
+  and has no NPCs (`StructureCollider.raycast` is ready if that changes). The server puts players
+  down (restored saves, the spawn ring, admin and quest teleports, stage spots) with
+  `BodyRoom.placeBody`: on the ground and cleared of structures the way the client's first frame
+  pushes (`clearSpot`, 2 cm to spare; nearest clear ring spot where pushes can't settle), so a save
+  inside the keep can't loop on corrections (review round 1, B1); the move budget is unchanged.
+  The Hall of Firsts board's stand (plinth, backing, posts, cornice; drawn by QuestWorld) is part of
+  the same shared solids, placed at the authoritative `hall_wall` spot facing the plaza (round 2, S4).
+  Why: the brief's "solid to walk into", with one set of solids so the server never corrects an
+  honest client.
+- **D40 (run, 21:15Z):** deploying the town: `PROTOCOL_VERSION` 2 → 3, and the client (Vercel, with
+  `assets-dev/portus`) goes first, the server right after in the same batch (D9). An old client on
+  the new server walks the old 7 m rim at 28–72 m (the server sees it hovering: height refusals and
+  pull-downs, rubber-banding) and into invisible houses (prop refusals); a new client on the old
+  server can't walk past ~32 m (its floor is up to 7 m under the old rim: ground refusals) and is
+  stricter around buildings (no corrections). Without the bump old tabs would keep the first case
+  until reloaded; with it their rejoin after the server deploy gets 409 and reloads once into the new
+  client. Client first means only page loads in the gap can't join (409, one reload, then an error);
+  server first would lock every player out until the client lands. Why: corrections are harmless in
+  a safe zone but constant ones aren't playable; the version gate ends mixed sessions.
+- **D41 (run, 21:15Z):** the town renders as one merged mesh per material and LOD, baked at load
+  from the shared layout: opaque and alpha-tested cutout, LOD0 (198k triangles) and LOD1 (146k: roof
+  shells, no vines, tree cards). All kit materials are per-vertex slots over two 16-layer 512 px
+  texture arrays (WebP strips, canvas-decoded, cutout colour premultiplied), so the town is 2 draws
+  + 2 shadow draws on Medium; measured against 32/64/96 m cells (19–23 + 19, 8–12 + 10, 6 + 8 draws)
+  because frustum culling saved < 15 % of the triangles from the plaza. The opaque town casts through
+  a depth-only copy on a layer only the sun's shadow camera renders (positions only, roof shells,
+  no paving or window glass: 136.8k instead of 170.8k triangles, no texture work in the shadow pass);
+  shadow cells were measured and rejected (48 m: +8 draws at the spawn for −9 % triangles). Medium+ shows LOD0 unless
+  the camera is 60/90/140 m beyond the town's bounds; Low shows LOD1 without normal maps or shadows.
+  If the asset fails, or isn't there 18 s into the arrival (the download itself aborts at 15 s), the
+  colliders are drawn as stone boxes (2 draws) before the probe and the warm-up, and a later arrival
+  of the asset is ignored until the next visit (review round 1, S1). Why: Medium was already at
+  ~290 draws against 250 (F10); triangles are cheap next to draws on Metal (#30560).

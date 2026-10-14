@@ -16,6 +16,10 @@ import type { BodyDef, BodyId } from "./bodies.ts";
 import { CHUNK_QUADS, gridDir, type Face } from "./cubesphere.ts";
 import { chordMetres, padDirs } from "./pads.ts";
 import type { Terrain } from "./terrain.ts";
+import { townCoords } from "./townFrame.ts";
+import { townPropClear } from "./townGround.ts";
+
+const townAt: [number, number] = [0, 0];
 
 /**
  * Bump whenever placement output changes (rules, their order, jitter, filters): clients and the
@@ -23,8 +27,10 @@ import type { Terrain } from "./terrain.ts";
  * v2: jitter kept inside [0.15, 0.85] of each cell and a
  * margin at each face's far edge, so same-rule props are ≥ 0.3 cells apart even across seams.
  * v3: forest undergrowth, arena/interaction clearings and fitted-breakable exclusions.
+ * v4: the Portus castle town (D38): its flat floor, a 52 m clearing inside the walls, and its roads,
+ * paving, structures and trees kept clear (townGround.ts).
  */
-export const PROPS_VERSION = 3;
+export const PROPS_VERSION = 4;
 
 /** Jitter range inside a candidate cell (fraction of the cell), and the face-edge margin. */
 export const PROP_JITTER_MIN = 0.15;
@@ -82,8 +88,11 @@ export const PROP_MIN_FLATNESS = 0.75;
 export const PROP_PAD_CLEARANCE = 14;
 /** Minimum height above the water surface for any prop (m). */
 export const PROP_MIN_ABOVE_WATER = 0.05;
-/** The Portus plaza (crater bowl around +Y) stays clear out to this radius (m). */
-export const PORTUS_PLAZA_CLEAR = 48;
+/**
+ * No natural props inside the Portus town walls (chord metres from +Y; the walls and towers end
+ * at about 49 m). Beyond, the town's roads, structures and trees keep them away (townGround.ts).
+ */
+export const PORTUS_PLAZA_CLEAR = 52;
 
 export const PROP_STYLES: Record<BodyId, PropRule[]> = {
   portus: [
@@ -274,6 +283,9 @@ export function naturalChunkProps(terrain: Terrain, face: Face, cx: number, cy: 
         if (hub) {
           const dx = ux, dy = uy - 1, dz = uz;
           if (Math.sqrt(dx * dx + dy * dy + dz * dz) * R < PORTUS_PLAZA_CLEAR) continue;
+          // The castle town (D38): not on its roads or paving, by its structures or under its trees.
+          townCoords(ux, uy, uz, R, townAt);
+          if (!townPropClear(townAt[0], townAt[1])) continue;
         }
         const s = rule.scale[0] + (rule.scale[1] - rule.scale[0]) * hash01(hseed, 4);
         out.push({ kind: rule.kind, kindIndex, x: sp.x, y: sp.y, z: sp.z, scale: s, yaw: hash01(hseed, 5) * Math.PI * 2 });
@@ -285,8 +297,9 @@ export function naturalChunkProps(terrain: Terrain, face: Face, cx: number, cy: 
 
 /** Breakables yield to the frozen v2 solid placement, then all visual vegetation yields to the
  * authoritative fitted breakable footprints. This avoids a props -> breakables -> props recursion.
- * Portus' authored walkways are inside its existing 48 m plaza clearing; elsewhere there are
- * no separate path meshes. Portal approaches and quest interactions have their own clearings. */
+ * Portus' castle town keeps its own walls, roads and paving clear (naturalChunkProps, D38);
+ * elsewhere there are no separate path meshes. Portal approaches and quest interactions have
+ * their own clearings. */
 export function chunkProps(terrain: Terrain, face: Face, cx: number, cy: number): PropInstance[] {
   const props = naturalChunkProps(terrain, face, cx, cy);
   const breakables = bodyBreakables(terrain);

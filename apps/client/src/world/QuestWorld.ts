@@ -1,14 +1,15 @@
 // World props for the quests lane on the current body: Juno Vale's stall, the planet guides, the
-// Hall of Firsts hologram wall, mission pickups (only while that mission is active) and the subtle
+// Hall of Firsts board, mission pickups (only while that mission is active) and the subtle
 // Easter-egg parts. Placeholder geometry until the art lane replaces it; positions come from the
 // shared world-object table so they match the server's triggers exactly.
 
 import * as THREE from "three/webgpu";
-import { materialColor, materialEmissive } from "three/tsl";
+import { materialColor, materialEmissive, texture } from "three/tsl";
 import { atmo } from "../render/atmosphere.ts";
 import type { BodyId, Terrain } from "@firstlight/shared";
 import { EGG_BY_ID, PLAQUES, type HallLine } from "@firstlight/shared/content/secrets";
 import { objectPos, objectsOn, type WorldObjectDef } from "@firstlight/shared/content/world";
+import { HALL_BOARD } from "@firstlight/shared/planet/town";
 import { ANIM } from "@firstlight/shared/net/schema";
 import { AvatarView } from "../render/Avatars.ts";
 import { disposeTree } from "../render/dispose.ts";
@@ -100,6 +101,29 @@ function iconPlate(icon: string, color: string): THREE.Mesh {
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return new THREE.Mesh(new THREE.PlaneGeometry(0.32, 0.32), new THREE.MeshBasicNodeMaterial({ map: tex }));
+}
+
+/** The Hall of Firsts board (m, in its frame): text face width and height, and its lower edge.
+ * Shared: its stand is solid on both sides (planet/town.ts HALL_STAND_SOLIDS draws these volumes). */
+export { HALL_BOARD };
+
+/**
+ * The Hall board's canvas layout (px): the brass border, the heading and its rule, and the rows,
+ * fitted between the rule and a bottom margin as wide as the heading's top margin, so the last row
+ * clears the frame (browser round 2). Rows keep a 30 px font while they fit (a pitch of 1.33 × the
+ * font), smaller only if more rows are ever added.
+ */
+export function hallBoardLayout(rows: number, width = 1024, height = 768) {
+  const border = 14, stroke = 6;
+  const inner = border + stroke / 2; // inner edge of the brass line
+  const headingFont = 60, headingY = 78; // alphabetic baseline: cap tops at about 78 - 0.72·60 = 35
+  const margin = headingY - Math.round(headingFont * 0.72) - inner; // the heading's clearance below the top border
+  const ruleY = 100;
+  const top = ruleY + 18;
+  const bottom = height - inner - Math.max(margin, 18);
+  const pitch = (bottom - top) / rows;
+  const rowFont = Math.min(30, Math.floor(pitch / 1.33));
+  return { border, stroke, inner, headingFont, headingY, ruleY, top, bottom, pitch, rowFont, side: 54, width, rowY: (i: number) => top + pitch * (i + 0.5) };
 }
 
 const ICONS: Record<string, string> = { dew: "◇", root: "⋎", bloom: "✿", rain: "💧", leaf: "🍃", sun: "☀", flame: "🔥", skull: "☠", lantern: "🏮", candle: "🕯" };
@@ -212,19 +236,38 @@ export class QuestWorld {
         break;
       }
       case "hall": {
+        // A carved board on a stone stand in front of the Hall of Firsts' steps (Portus castle town,
+        // D38): opaque, wooden, framed, its heading at about 3.6 m so it reads from the plaza and
+        // from close by. Lettering is painted onto the board's canvas texture (setHall). The stand is
+        // solid for player and server alike: these volumes are shared/planet/town.ts HALL_STAND_SOLIDS.
         const c = document.createElement("canvas");
         c.width = 1024;
         c.height = 768;
         this.hallCanvas = c;
         this.hallTexture = new THREE.CanvasTexture(c);
         this.hallTexture.colorSpace = THREE.SRGBColorSpace;
-        const wall = new THREE.Mesh(new THREE.PlaneGeometry(8, 6), new THREE.MeshBasicNodeMaterial({ map: this.hallTexture, transparent: true, opacity: 0.92, side: THREE.DoubleSide, depthWrite: false }));
-        wall.position.set(0, 3.6, 0);
-        const frame = mesh(new THREE.BoxGeometry(8.4, 0.2, 0.3), std(0xc9a46a, { metal: 0.6, rough: 0.35 }), 0, 0.5, 0);
-        const frameTop = mesh(new THREE.BoxGeometry(8.4, 0.12, 0.2), glow(0xff7edb, 2), 0, 6.7, 0);
-        const pillarL = mesh(new THREE.BoxGeometry(0.25, 6.4, 0.3), std(0xc9a46a, { metal: 0.6, rough: 0.35 }), -4.2, 3.6, 0);
-        const pillarR = mesh(new THREE.BoxGeometry(0.25, 6.4, 0.3), std(0xc9a46a, { metal: 0.6, rough: 0.35 }), 4.2, 3.6, 0);
-        r.add(wall, frame, frameTop, pillarL, pillarR);
+        this.hallTexture.anisotropy = 4;
+        const face = new THREE.MeshStandardNodeMaterial({ map: this.hallTexture, roughness: 0.85, metalness: 0 });
+        // A little self-light so the lettering stays legible in the hall's shade (far under bloom).
+        face.emissiveNode = texture(this.hallTexture).rgb.mul(0.3);
+        const board = new THREE.Mesh(new THREE.PlaneGeometry(HALL_BOARD.w, HALL_BOARD.h), face);
+        board.position.set(0, HALL_BOARD.bottom + HALL_BOARD.h / 2, 0.075);
+        board.castShadow = false;
+        const stone = std(0x9a9186, { rough: 0.9 });
+        const wood = std(0x4a3020, { rough: 0.85 });
+        const brass = std(0xc9a46a, { metal: 0.6, rough: 0.35 });
+        const midY = HALL_BOARD.bottom + HALL_BOARD.h / 2;
+        const postX = HALL_BOARD.w / 2 + 0.28;
+        r.add(
+          board,
+          mesh(new THREE.BoxGeometry(HALL_BOARD.w + 0.3, HALL_BOARD.h + 0.3, 0.12), wood, 0, midY, 0), // backing panel
+          mesh(new THREE.BoxGeometry(HALL_BOARD.w + 0.42, 0.1, 0.18), brass, 0, HALL_BOARD.bottom - 0.12, 0.02), // frame bottom
+          mesh(new THREE.BoxGeometry(HALL_BOARD.w + 0.42, 0.1, 0.18), brass, 0, HALL_BOARD.bottom + HALL_BOARD.h + 0.12, 0.02), // frame top
+          mesh(new THREE.BoxGeometry(0.34, HALL_BOARD.bottom + HALL_BOARD.h + 0.45, 0.34), stone, -postX, (HALL_BOARD.bottom + HALL_BOARD.h + 0.45) / 2, 0),
+          mesh(new THREE.BoxGeometry(0.34, HALL_BOARD.bottom + HALL_BOARD.h + 0.45, 0.34), stone, postX, (HALL_BOARD.bottom + HALL_BOARD.h + 0.45) / 2, 0),
+          mesh(new THREE.BoxGeometry(HALL_BOARD.w + 1.1, 0.22, 0.5), stone, 0, HALL_BOARD.bottom + HALL_BOARD.h + 0.56, 0), // cornice
+          mesh(new THREE.BoxGeometry(HALL_BOARD.w + 0.9, HALL_BOARD.bottom - 0.2, 0.46), stone, 0, (HALL_BOARD.bottom - 0.2) / 2, 0), // plinth
+        );
         this.setHall([]);
         break;
       }
@@ -395,32 +438,36 @@ export class QuestWorld {
     const c = this.hallCanvas;
     if (!c || !this.hallTexture) return;
     const g = c.getContext("2d")!;
-    g.clearRect(0, 0, c.width, c.height);
+    // An opaque, dark-stained board: no alpha anywhere, so nothing behind it shows through.
+    const L = hallBoardLayout(PLAQUES.length, c.width, c.height);
     const grad = g.createLinearGradient(0, 0, 0, c.height);
-    grad.addColorStop(0, "#2a0f3acc");
-    grad.addColorStop(1, "#0a1a2acc");
+    grad.addColorStop(0, "#3d2818");
+    grad.addColorStop(1, "#2a1a10");
     g.fillStyle = grad;
     g.fillRect(0, 0, c.width, c.height);
-    g.strokeStyle = "#ff7edb88";
-    g.lineWidth = 4;
-    g.strokeRect(8, 8, c.width - 16, c.height - 16);
+    g.strokeStyle = "#c9a46a";
+    g.lineWidth = L.stroke;
+    g.strokeRect(L.border, L.border, c.width - 2 * L.border, c.height - 2 * L.border);
     g.textAlign = "center";
-    g.fillStyle = "#ffffff";
-    g.font = "800 54px ui-sans-serif, system-ui, sans-serif";
-    g.fillText("HALL OF FIRSTS", c.width / 2, 72);
+    g.textBaseline = "alphabetic";
+    g.fillStyle = "#f2d08a";
+    g.font = `800 ${L.headingFont}px ui-serif, Georgia, serif`;
+    g.fillText("HALL OF FIRSTS", c.width / 2, L.headingY);
+    g.fillRect(c.width / 2 - 220, L.ruleY, 440, 3);
     const by = new Map(lines.map((l) => [l.id, l]));
-    const rowH = (c.height - 120) / PLAQUES.length;
+    // Rows sit on their own middle lines, fitted between the rule and the bottom margin.
+    g.textBaseline = "middle";
     PLAQUES.forEach((p, i) => {
-      const y = 120 + rowH * i + rowH * 0.6;
+      const y = L.rowY(i);
       const got = by.get(p.id);
       g.textAlign = "left";
-      g.font = "600 28px ui-sans-serif, system-ui, sans-serif";
-      g.fillStyle = got ? "#ffd8a8" : "#8f88a8";
-      g.fillText(got ? p.label : p.hiddenLabel, 48, y);
+      g.font = `600 ${L.rowFont}px ui-sans-serif, system-ui, sans-serif`;
+      g.fillStyle = got ? "#f5e6c8" : "#b8a588";
+      g.fillText(got ? p.label : p.hiddenLabel, L.side, y);
       g.textAlign = "right";
-      g.font = got ? "800 28px ui-sans-serif, system-ui, sans-serif" : "italic 26px ui-sans-serif, system-ui, sans-serif";
-      g.fillStyle = got ? "#36f9f6" : "#6a6482";
-      g.fillText(got ? got.name.slice(0, 40) : "unclaimed", c.width - 48, y);
+      g.font = got ? `800 ${L.rowFont}px ui-sans-serif, system-ui, sans-serif` : `italic ${L.rowFont - 2}px ui-sans-serif, system-ui, sans-serif`;
+      g.fillStyle = got ? "#ffd27a" : "#8c7a62";
+      g.fillText(got ? got.name.slice(0, 40) : "unclaimed", c.width - L.side, y);
     });
     this.hallTexture.needsUpdate = true;
   }

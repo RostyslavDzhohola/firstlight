@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
 import { dayT, nextStrike, SKY_PROFILES, skyState, sunAngles } from "@firstlight/shared";
 import { atmo, SunRig } from "./atmosphere.ts";
-import { bakedSunMatch, Environment, lightFactors, referenceDayT } from "./environment.ts";
+import { bakedSunMatch, Environment, lampLight, lightFactors, referenceDayT } from "./environment.ts";
 import { LOOKS } from "./looks.ts";
 import { emptyStored, resolveSettings, type Feature } from "./quality.ts";
 import { terrainUniforms } from "./terrainMaterial.ts";
@@ -108,6 +108,28 @@ describe("day/night", () => {
     // Sky never goes black.
     const lum = (c: THREE.Color) => c.r * 0.2126 + c.g * 0.7152 + c.b * 0.0722;
     expect(lum(atmo.horizon.value)).toBeGreaterThan(0.005);
+  });
+
+  it("Portus' windows light up in its evening, never by day or for rain (lamps, round 1 item 3)", () => {
+    const { env, rig } = setup("portus");
+    env.weatherOverride = { weather: "clear", intensity: 0 };
+    env.timeOverride = 0.95; // Portus' late evening: the sun is low but never sets
+    run(env, 2);
+    expect(env.night).toBe(0);
+    expect(rig.sky.sunElev).toBeLessThan(0.1);
+    expect(atmo.lamps.value).toBeGreaterThan(0.8);
+    let maxDay = 0;
+    for (const w of ["clear", "drizzle"] as const) {
+      env.weatherOverride = { weather: w, intensity: w === "clear" ? 0 : 1 };
+      for (const t of [0.3, 0.4, 0.5, 0.6]) {
+        env.timeOverride = t;
+        run(env, 3);
+        if (rig.sky.sunElev > 0.4) maxDay = Math.max(maxDay, atmo.lamps.value);
+      }
+    }
+    expect(maxDay).toBe(0);
+    expect(lampLight(0, 0.5)).toBe(0);
+    expect(lampLight(1, 0)).toBe(1);
   });
 
   it("the key light hands over between sun and moon without a jump", () => {

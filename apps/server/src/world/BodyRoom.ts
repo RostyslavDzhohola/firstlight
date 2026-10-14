@@ -16,6 +16,7 @@ import type { Identity } from "../auth/identity.ts";
 import { actorPos, inSaddle, pushHistory, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
 import { characterRepo, withTx } from "./characters.ts";
 import { SWIM_FLOAT } from "@firstlight/shared/planet/water";
+import { structureCollider, type StructureCollider } from "@firstlight/shared/planet/town";
 import { CLOSE, hub, type HubRoom } from "./hub.ts";
 
 /** Ban lookup for reconnects; set at boot when the database is available. */
@@ -148,6 +149,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   private lastSave = 0;
   host!: CombatHost;
   moveWorld!: MoveWorld;
+  /** The Portus town's structures (null on the planets): blocks movement, and placement (placeBody). */
+  private structures: StructureCollider | null = null;
   systems: RoomSystem[] = [];
   portals: PortalSpot[] = [];
 
@@ -211,12 +214,24 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     this.bodyDef = BODIES[options.body];
     this.terrain = createTerrain(this.bodyDef);
     const terrain = this.terrain;
+    // Portus town structures (D38): indestructible walls, houses and towers, the same shared solids
+    // the client controller collides with; they count like intact props (tops hold feet, insides refuse).
+    const structures = (this.structures = structureCollider(terrain));
+    const footing = { top: 0, inside: false };
     this.moveWorld = {
       radius: this.bodyDef.radius,
       waterLevel: this.bodyDef.waterLevel,
       groundAt: (x, y, z) => terrain.groundHeightAt(x, y, z),
-      footing: (x, y, z, step) => this.host.props?.footing?.(x, y, z, step) ?? NO_FOOTING,
-      crosses: (ax, ay, az, bx, by, bz) => this.host.props?.crosses?.(ax, ay, az, bx, by, bz) ?? false,
+      footing: (x, y, z, step) => {
+        const props = this.host.props?.footing?.(x, y, z, step) ?? NO_FOOTING;
+        if (!structures) return props;
+        const town = structures.footing(x, y, z, step);
+        footing.top = Math.max(props.top, town.top);
+        footing.inside = props.inside || town.inside;
+        return footing;
+      },
+      crosses: (ax, ay, az, bx, by, bz) =>
+        (this.host.props?.crosses?.(ax, ay, az, bx, by, bz) ?? false) || (structures?.crosses(ax, ay, az, bx, by, bz) ?? false),
     };
     this.state.body = options.body;
     this.state.copy = options.copy;
@@ -378,7 +393,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (inheritedPos && char.body === this.bodyDef.id) char.pos = inheritedPos;
     const p = new PlayerState();
     let pos: V3;
-    if (char.pos && char.body === this.bodyDef.id && !char.dead && this.plausible(char.pos)) pos = this.snapToGround(char.pos);
+    if (char.pos && char.body === this.bodyDef.id && !char.dead && this.plausible(char.pos)) pos = this.placeBody(char.pos, client.sessionId);
     else pos = this.spawnPoint(client.sessionId);
     char.body = this.bodyDef.id;
     char.travelTo = undefined;
@@ -1093,7 +1108,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
         const want: V3 = [num("x", NaN, -4 * R, 4 * R), num("y", NaN, -4 * R, 4 * R), num("z", NaN, -4 * R, 4 * R)];
         if (!bad && !(Math.hypot(...want) > R * 0.5)) bad = "position";
         if (refuse()) return;
-        const p = this.snapToGround(want);
+        const p = this.placeBody(want, t.id);
         t.state.x = t.lastX = p[0];
         t.state.y = t.lastY = p[1];
         t.state.z = t.lastZ = p[2];
@@ -1303,6 +1318,26 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     return [d[0] * r, d[1] * r, d[2] * r];
   }
 
+  /**
+   * Where to put a player (a restored save, a teleport, a stage spot): the ground under `p`, pushed
+   * out of the Portus town's structures exactly as the client's first frame would push it (D39,
+   * round-1 B1), so client and server start from the same clear point; a push longer than the move
+   * budget would otherwise be refused and corrected back inside, forever. A spot that can't be
+   * cleared (boxed in) falls back to the spawn ring.
+   */
+  placeBody(p: readonly number[], seed = ""): V3 {
+    return this.clearOfStructures(this.snapToGround(p)) ?? this.spawnPoint(seed);
+  }
+
+  /** `g` (on the ground) pushed out of the town's structures, or null if it stays inside one. */
+  private clearOfStructures(g: V3): V3 | null {
+    if (!this.structures) return g;
+    const q = { x: g[0], y: g[1], z: g[2] };
+    const R = this.bodyDef.radius;
+    const feetR = (x: number, y: number, z: number) => R + Math.max(this.terrain.groundHeight(x, y, z), this.bodyDef.waterLevel - SWIM_FLOAT) + 0.02;
+    return this.structures.clearSpot(q, feetR) ? [q.x, q.y, q.z] : null;
+  }
+
   /** A saved position worth restoring: finite, and not metres under the ground (F12 final Opus N-B1). */
   private plausible(p: readonly number[]): boolean {
     if (p.length !== 3 || !p.every(Number.isFinite)) return false;
@@ -1327,7 +1362,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       d[1] + ((Math.cos(ang) * t1[1] + Math.sin(ang) * t2[1]) * r) / R,
       d[2] + ((Math.cos(ang) * t1[2] + Math.sin(ang) * t2[2]) * r) / R,
     ]);
-    return this.snapToGround(dir);
+    // The spawn ring is clear of the town (shared tests); clear it anyway, never recursing.
+    const g = this.snapToGround(dir);
+    return this.clearOfStructures(g) ?? g;
   }
 
   /** Send to clients within `radius` of `at`, plus `always` session ids (bandwidth: review). */

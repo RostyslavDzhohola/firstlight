@@ -279,10 +279,10 @@ export class QuestSystem implements RoomSystem {
     a.client.send("toast", { text, kind });
   }
 
-  /** Move a player (server-authoritative), like the admin teleport. */
+  /** Move a player (server-authoritative), like the admin teleport: on clear ground (placeBody). */
   teleport(a: PlayerActor, at: readonly number[]) {
     this.qp(a).reachArmed.clear();
-    const p = this.room.snapToGround(at);
+    const p = this.room.placeBody(at, a.id);
     a.state.x = a.lastX = p[0];
     a.state.y = a.lastY = p[1];
     a.state.z = a.lastZ = p[2];

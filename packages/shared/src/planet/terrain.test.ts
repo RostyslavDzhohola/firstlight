@@ -4,7 +4,8 @@ import { BODIES, BODY_IDS } from "./bodies.ts";
 import { buildChunk } from "./chunk.ts";
 import { chunkOf, faceOf, gridDir, type Face } from "./cubesphere.ts";
 import { anchorDir, isSafe, padDirs, PAD_SAFE_RADIUS } from "./pads.ts";
-import { createTerrain } from "./terrain.ts";
+import { createNoise3, fbm } from "../noise.ts";
+import { createTerrain, PORTUS_TOWN_FLAT } from "./terrain.ts";
 
 function randomDir(rand: () => number): [number, number, number] {
   for (;;) {
@@ -138,6 +139,54 @@ describe("terrain", () => {
     const terrain = createTerrain("portus");
     expect(Math.abs(terrain.groundHeight(0, 1, 0))).toBeLessThan(0.05);
     expect(isSafe(BODIES.portus, 0, 150, 0)).toBe(true);
+  });
+
+  it("Portus town floor is flat out to PORTUS_TOWN_FLAT and unchanged far outside (D38)", () => {
+    const terrain = createTerrain("portus");
+    const R = BODIES.portus.radius;
+    const rand = mulberry32(38);
+    // The pre-town bowl (main 6d69731), for the far-field comparison.
+    const nHills = createNoise3(BODIES.portus.seed);
+    const nDetail = createNoise3(BODIES.portus.seed + 47);
+    const ss = (e0: number, e1: number, x: number) => {
+      const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+      return t * t * (3 - 2 * t);
+    };
+    const oldBowl = (x: number, y: number, z: number) => {
+      const d = Math.sqrt(x * x + (y - 1) * (y - 1) + z * z) * R;
+      const px = x * R, py = y * R, pz = z * R;
+      const hills = fbm(nHills, px / 60, py / 60, pz / 60, 3) * BODIES.portus.terrain.hillAmp;
+      const rim = ss(30, 44, d) * 7 - ss(52, 85, d) * 4;
+      return rim + hills * ss(40, 90, d) + nDetail(px / 9, py / 9, pz / 9) * 0.15 * ss(28, 40, d);
+    };
+    let farChecked = 0;
+    for (let k = 0; k < 4000; k++) {
+      const d = randomDir(rand);
+      const chord = Math.hypot(d[0], d[1] - 1, d[2]) * R;
+      if (chord <= PORTUS_TOWN_FLAT) {
+        expect(terrain.rawHeight(...d)).toBe(0);
+        // The rendered floor (flat triangles between grid vertices on the sphere) sags at most about
+        // a centimetre below the sphere and never rises above it: the paving decal (2–7.5 cm up) stays clear.
+        // (One quad diagonal inside the edge, where every vertex of the triangle is on the floor.)
+        if (chord <= PORTUS_TOWN_FLAT - 3.5) {
+          const g = terrain.groundHeight(...d);
+          expect(g).toBeLessThanOrEqual(1e-9);
+          expect(g).toBeGreaterThan(-0.012);
+        }
+      } else if (chord >= PORTUS_TOWN_FLAT + 60) {
+        expect(terrain.rawHeight(...d)).toBe(oldBowl(...d));
+        farChecked++;
+      }
+    }
+    expect(farChecked).toBeGreaterThan(1000);
+    // A gentle rim beyond the flat floor: it rises outside the town, no cliff.
+    const at = (m: number) => {
+      const a = (2 * Math.asin(m / (2 * R)));
+      return terrain.rawHeight(Math.sin(a) * 0.6, Math.cos(a), Math.sin(a) * 0.8);
+    };
+    expect(at(PORTUS_TOWN_FLAT + 2)).toBeLessThan(0.3);
+    expect(at(PORTUS_TOWN_FLAT + 20)).toBeGreaterThan(4);
+    for (let m = PORTUS_TOWN_FLAT; m < PORTUS_TOWN_FLAT + 60; m += 1) expect(Math.abs(at(m + 1) - at(m))).toBeLessThan(1.2);
   });
 
   it("groundHeight is fast enough for the server (100k samples)", () => {
