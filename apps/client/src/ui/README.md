@@ -157,7 +157,7 @@ Full example: `ui/gallery/kitExamples.ts` (`INVENTORY_HTML`).
 </div>
 ```
 
-Set the bar fill with `--fill` (0–1) and the callout position with `--x` / `--y`.
+Set the bar fill with `--fill` (0–1) and the callout position with `--x` / `--y`. A callout pinned to the screen edge gets `.is-edge` (an arrow, `.fl-callout__arrow`, turned by `--a`) and `.is-flip` to put its label on the left. A tip that moved on by itself is a checklist row with `.is-moved`.
 Full example: `ui/gallery/kitExamples.ts` (`ONBOARDING_HTML`).
 
 ### Phrase wheel, shop, map, journal

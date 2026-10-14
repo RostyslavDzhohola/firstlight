@@ -6,6 +6,7 @@ import "./styles/kit.css";
 import "./onboarding.css";
 import { STEPS, type OnboardingSteps, type StepDef } from "../game/onboardingSteps.ts";
 import { button, el, icon } from "./dom.ts";
+import { placeCallout, type Rect } from "./calloutPlace.ts";
 
 function keys(parent: HTMLElement, list: readonly string[], cls = "fl-keys"): HTMLElement {
   const wrap = el("span", cls, parent);
@@ -34,7 +35,13 @@ export class OnboardingHud {
   private card: HTMLElement;
   private barFill: HTMLElement | null = null;
   private barText: HTMLElement | null = null;
+  private readonly widget: HTMLElement;
   private readonly callout: HTMLElement;
+  private readonly calloutBox: HTMLElement;
+  /** Cached layout for callout placement (re-measured when the panel or the label text changes). */
+  private avoid: Rect | null = null;
+  private boxSize: { w: number; h: number } | null = null;
+  private readonly onResize = () => { this.avoid = null; };
   private readonly calloutText: HTMLElement;
   private readonly calloutSub: HTMLElement;
   private readonly skipNote: HTMLElement;
@@ -50,6 +57,8 @@ export class OnboardingHud {
     this.root = el("div", "fl-onb fl-onb--compact fl-ui", parent);
     this.root.dataset.hud = "";
     const widget = el("div", "fl-onb__widget", this.root);
+    this.widget = widget;
+    addEventListener("resize", this.onResize);
     this.checklist = el("details", "fl-onb__list fl-holo", widget);
     this.list = this.checklist;
     this.list.setAttribute("aria-label", "Tutorial");
@@ -60,6 +69,7 @@ export class OnboardingHud {
     this.checklist.open = preference?.expanded ?? false;
     this.checklist.addEventListener("toggle", () => {
       this.onExpanded?.(this.checklist.open);
+      this.avoid = null;
       this.revealCurrent();
     });
     for (const s of STEPS) {
@@ -90,7 +100,9 @@ export class OnboardingHud {
     this.callout.hidden = true;
     el("div", "fl-callout__line", this.callout);
     el("div", "fl-callout__dot", this.callout);
+    el("div", "fl-callout__arrow", this.callout);
     const box = el("div", "fl-callout__box fl-holo", this.callout);
+    this.calloutBox = box;
     this.calloutText = el("span", "", box);
     this.calloutSub = el("small", "", box);
   }
@@ -110,9 +122,12 @@ export class OnboardingHud {
       this.root.querySelector(".fl-onb__rail")?.setAttribute("aria-valuenow", String(n));
       STEPS.forEach((s, i) => {
         const done = steps.isDone(s.id);
-        this.rows[i]!.className = `fl-onb__st${done ? " is-done" : s === cur ? " is-now" : ""}${s.optional ? " is-opt" : ""}`;
+        // A tip that moved on by itself isn't ticked: the player didn't do it.
+        const moved = done && steps.movedOn(s.id);
+        this.rows[i]!.className = `fl-onb__st${moved ? " is-moved" : done ? " is-done" : s === cur ? " is-now" : ""}${s.optional ? " is-opt" : ""}`;
         this.segs[i]!.className = done ? "is-done" : s === cur ? "is-now" : "";
       });
+      this.avoid = null;
       this.revealCurrent();
       this.railText.replaceChildren("Step ");
       el("b", "", this.railText, String(cur ? STEPS.indexOf(cur) + 1 : STEPS.length));
@@ -122,6 +137,7 @@ export class OnboardingHud {
     if (stepKey !== this.last.step) {
       this.last.step = stepKey;
       this.last.bar = "";
+      this.avoid = null;
       if (cur) this.buildCard(cur);
     }
     if (cur?.bar && this.barFill && this.barText) {
@@ -139,7 +155,12 @@ export class OnboardingHud {
   private revealCurrent() {
     if (!this.checklist.open) return;
     const row = this.rows.find((r) => r.classList.contains("is-now"));
-    row?.scrollIntoView({ block: "nearest" });
+    if (!row) return;
+    // Scroll the list itself (scrollIntoView would also scroll the panel and push the card's heading out).
+    const list = this.checklist;
+    const top = row.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop;
+    if (top < list.scrollTop) list.scrollTop = top;
+    else if (top + row.offsetHeight > list.scrollTop + list.clientHeight) list.scrollTop = top + row.offsetHeight - list.clientHeight;
   }
 
   /** T while playing, or the native details summary when the mouse is free. */
@@ -185,23 +206,38 @@ export class OnboardingHud {
     }
   }
 
-  /** A world callout at screen (x, y) with a title and a line under it, or hidden (x = null). */
-  setCallout(x: number | null, y = 0, title = "", sub = "") {
-    const key = x === null ? "" : `${Math.round(x)},${Math.round(y)}`;
-    if (key !== this.last.callout) {
-      this.last.callout = key;
-      this.callout.hidden = x === null;
-      if (x !== null) {
-        this.callout.style.setProperty("--x", `${Math.round(x)}px`);
-        this.callout.style.setProperty("--y", `${Math.round(y)}px`);
-      }
-    }
+  /** A world callout for a point projected with three's `Vector3.project()`, or hidden (null).
+   *  On screen it stands on the point; off screen, behind the camera or under the tutorial panel
+   *  it's pinned beside them with an arrow towards the point. */
+  setCallout(ndc: { x: number; y: number; z: number } | null, title = "", sub = "") {
     const text = `${title}\u0001${sub}`;
     if (text !== this.last.calloutText) {
       this.last.calloutText = text;
       this.calloutText.textContent = title;
       this.calloutSub.textContent = sub;
+      this.boxSize = null;
     }
+    if (ndc === null) {
+      this.last.callout = "";
+      this.callout.hidden = true;
+      return;
+    }
+    this.callout.hidden = false;
+    // Measured once per label or panel change, not every frame.
+    this.boxSize ??= { w: this.calloutBox.offsetWidth || 160, h: this.calloutBox.offsetHeight || 48 };
+    if (!this.avoid && !this.widget.hidden) {
+      const r = this.widget.getBoundingClientRect();
+      this.avoid = r.width > 0 ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom } : null;
+    }
+    const p = placeCallout(ndc, innerWidth, innerHeight, this.boxSize, this.avoid);
+    const key = `${Math.round(p.x)},${Math.round(p.y)},${p.edge ? Math.round(p.angle * 20) : "-"},${p.flip ? 1 : 0}`;
+    if (key === this.last.callout) return;
+    this.last.callout = key;
+    this.callout.style.setProperty("--x", `${Math.round(p.x)}px`);
+    this.callout.style.setProperty("--y", `${Math.round(p.y)}px`);
+    this.callout.style.setProperty("--a", `${p.angle.toFixed(3)}rad`);
+    this.callout.classList.toggle("is-edge", p.edge);
+    this.callout.classList.toggle("is-flip", p.flip);
   }
 
   /** The end card: XP, the medal, and the Star/Fork links once the repo is public. */
@@ -219,6 +255,7 @@ export class OnboardingHud {
   }
 
   dispose() {
+    removeEventListener("resize", this.onResize);
     this.root.remove();
   }
 }

@@ -330,8 +330,8 @@ async function run() {
       if (screen === "onboarding-loot") for (const id of ["attack", "switch"] as const) steps.complete(id);
       if (screen === "onboarding-portal") for (const id of ["attack", "switch", "pickup", "map", "wheel", "voice"] as const) steps.complete(id);
       onb.render(steps, screen === "onboarding-portal");
-      if (screen === "onboarding-attack") onb.setCallout(innerWidth * 0.41, innerHeight * 0.42, "Training dummies · 1 / 3 down", "10 XP each. Three hits knock one down.");
-      if (screen === "onboarding-portal") onb.setCallout(innerWidth * 0.3, innerHeight * 0.45, "Arcadia", "Levels 1–7 · walk in");
+      if (screen === "onboarding-attack") onb.setCallout({ x: -0.18, y: 0.16, z: 0.5 }, "Training dummies · 1 / 3 down", "10 XP each. Three hits knock one down.");
+      if (screen === "onboarding-portal") onb.setCallout({ x: -0.4, y: 0.1, z: 0.5 }, "Arcadia", "Levels 1–7 · walk in");
       if (screen === "onboarding-done") onb.showDone(50);
       break;
     }
