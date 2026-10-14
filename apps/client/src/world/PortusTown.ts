@@ -25,6 +25,7 @@ import { SHADOW_ONLY_LAYER } from "../render/atmosphere.ts";
 import type { ResolvedSettings } from "../render/quality.ts";
 import { preloadTown, type TownAssets, type TownPart, type TownSlot } from "../render/townAssets.ts";
 import { TOWN_EMISSIVE, townFallbackMaterial, townMaterial, type TownMaterialKind } from "../render/townMaterial.ts";
+import { conformDecal } from "./townDecal.ts";
 
 /**
  * Ground cell size (m) and the half extent of the cell grid around the pole. Measured at the spawn
@@ -38,8 +39,8 @@ const GRID_HALF = 96;
 const GRID_N = Math.round((2 * GRID_HALF) / TOWN_CELL);
 
 /**
- * Prefabs wider than this (m) are ground decals spanning the town (the paving): their triangles are
- * split between cells, and their vertices follow the ground where it rises off the flat floor.
+ * Prefabs wider than this (m) are ground decals spanning the town (the paving): laid onto the ground
+ * where it rises off the flat floor (townDecal.ts), and their triangles split between cells.
  */
 const DECAL_RADIUS = 30;
 
@@ -199,12 +200,15 @@ export class PortusTown {
       const p = placements[i]!;
       const l0 = assets.meshes.get(pre.name)!;
       const l1 = pre.tris[1] > 0 ? assets.meshes.get(`${pre.name}__L1`)! : l0;
+      const decal = pre.radius > DECAL_RADIUS;
       for (const kind of ["opaque", "cutout"] as const) {
-        const parts: [TownPart | null, TownPart | null] = [l0[kind], l1[kind]];
+        // A decal (the paving) is laid onto the ground once and used for both LODs.
+        const laid = decal && l0[kind] ? conformDecal(l0[kind]!, p, this.terrain) : null;
+        const parts: [TownPart | null, TownPart | null] = laid ? [laid, laid] : [l0[kind], l1[kind]];
         for (const variant of [0, 1] as const) {
           const part = parts[variant];
           if (!part) continue;
-          if (pre.radius > DECAL_RADIUS) {
+          if (decal) {
             // A decal spanning many cells (the paving): split its triangles by their centroid. At the
             // pole with yaw 0, prefab x = east and z = -north.
             const byCell = new Map<number, number[]>();
@@ -339,23 +343,11 @@ export class PortusTown {
     for (const { part, p, tris } of b.parts) {
       const n = part.position.length / 3;
       const s = p.scale;
-      const conform = TOWN_PREFABS[p.prefab]!.radius > DECAL_RADIUS;
       for (let i = 0; i < n; i++) {
         const x = part.position[i * 3]! * s, y = part.position[i * 3 + 1]! * s, z = part.position[i * 3 + 2]! * s;
-        let wx = p.px + p.rx * x + p.ux * y + p.fx * z;
-        let wy = p.py + p.ry * x + p.uy * y + p.fy * z;
-        let wz = p.pz + p.rz * x + p.uz * y + p.fz * z;
-        if (conform) {
-          // The paving decal lies on the sphere; outside the flat town floor it follows the ground.
-          const l = Math.hypot(wx, wy, wz);
-          const g = this.terrain.groundHeight(wx / l, wy / l, wz / l);
-          if (g > 0) {
-            const k = (l + g) / l;
-            wx *= k;
-            wy *= k;
-            wz *= k;
-          }
-        }
+        const wx = p.px + p.rx * x + p.ux * y + p.fx * z;
+        const wy = p.py + p.ry * x + p.uy * y + p.fy * z;
+        const wz = p.pz + p.rz * x + p.uz * y + p.fz * z;
         const o = (vo + i) * 3;
         pos[o] = wx;
         pos[o + 1] = wy;

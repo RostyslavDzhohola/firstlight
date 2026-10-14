@@ -75,8 +75,10 @@ describe("Portus town view", () => {
       expect(materials.size).toBeLessThanOrEqual(2);
       expect([...materials].every((m) => m.name.startsWith("town:"))).toBe(true);
       if (t === "low") expect([...materials].every((m) => m.name.endsWith(":flat"))).toBe(true);
-      // LOD0 cells hold the whole layout at full detail (the paving is split across cells).
-      expect(lod0).toBe(TOWN_LAYOUT.reduce((s, it) => s + TOWN_PREFABS[it[0]]!.tris[0], 0));
+      // LOD0 cells hold the whole layout at full detail, plus the paving's pieces laid onto the rim.
+      const layout = TOWN_LAYOUT.reduce((s, it) => s + TOWN_PREFABS[it[0]]!.tris[0], 0);
+      expect(lod0).toBeGreaterThan(layout);
+      expect(lod0).toBeLessThan(layout + 6000);
       town.dispose();
     }
   });
@@ -124,7 +126,7 @@ describe("Portus town view", () => {
         expect(st.draws, `${t} ${name}`).toBe(2);
         expect(st.shadowDraws, `${t} ${name}`).toBe(t === "low" ? 0 : 2);
         expect(st.draws + st.shadowDraws).toBeLessThanOrEqual(Math.round(TIER_TABLE[t].drawBudget * 0.02));
-        expect(st.triangles, `${t} ${name}`).toBeLessThanOrEqual(t === "low" ? 150_000 : 200_000);
+        expect(st.triangles, `${t} ${name}`).toBeLessThanOrEqual(t === "low" ? 155_000 : 205_000);
         // The shadow pass: the depth-only copy and the cutout mesh, under the drawn LOD0 town.
         if (t !== "low") expect(st.shadowTriangles, `${t} ${name}`).toBeLessThan(185_000);
         if (t === "low") expect(st.shadowDraws).toBe(0);
