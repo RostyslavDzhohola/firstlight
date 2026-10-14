@@ -441,7 +441,10 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   shells, no vines, tree cards). All kit materials are per-vertex slots over two 16-layer 512 px
   texture arrays (WebP strips, canvas-decoded, cutout colour premultiplied), so the town is 2 draws
   + 2 shadow draws on Medium; measured against 32/64/96 m cells (19–23 + 19, 8–12 + 10, 6 + 8 draws)
-  because frustum culling saved < 15 % of the triangles from the plaza. Medium+ shows LOD0 unless
+  because frustum culling saved < 15 % of the triangles from the plaza. The opaque town casts through
+  a depth-only copy on a layer only the sun's shadow camera renders (positions only, roof shells,
+  no paving or window glass: 136.8k instead of 170.8k triangles, no texture work in the shadow pass);
+  shadow cells were measured and rejected (48 m: +8 draws at the spawn for −9 % triangles). Medium+ shows LOD0 unless
   the camera is 60/90/140 m beyond the town's bounds; Low shows LOD1 without normal maps or shadows.
   If the asset fails, or isn't there 18 s into the arrival (the download itself aborts at 15 s), the
   colliders are drawn as stone boxes (2 draws) before the probe and the warm-up, and a later arrival

@@ -212,3 +212,34 @@ Worked in `fl-wt-village-fix` on `lane/portus-village-fix`.
   and manifest byte for byte); stage spots are cleared by `placeBody`, with a test over every Portus
   stage formation for 1–40 players (the target prop stays where the design put it).
 
+## Browser round 1 fixes (Codex headless WebGPU/WebGL2, `round1/report.md`)
+
+- **East road terrain breakthrough:** the paving's triangles off the flat floor are cut into pieces
+  under 0.75 m (one cut count per connected road strip or curb run, so shared edges stay watertight),
+  lifted onto the rendered ground plus up to 6 cm, with slope normals (`world/townDecal.ts`). A test
+  samples both outer roads (300+ pieces each, 15 points per piece): at least 1 cm above the terrain
+  everywhere (the old corner-only lift dipped 1.4 cm below). +3.9k triangles.
+- **Hall of Firsts board:** now a 4 × 3 m opaque painted board on a wooden backing in a brass frame
+  between stone posts, in front of the hall's steps and parallel to its front, heading at ~3.6 m;
+  lettering lit plus a little self-light. Same authoritative position.
+- **Evening light:** windows follow a new shared lamplight factor (`atmo.lamps`: night, or late dusk;
+  no cloud term). Portus' evening (sun ~0.08 rad at 0.95) lights them; by day they stay dark in any
+  weather (before, rain clouds lit them a little). Braziers were fine and are unchanged. No night was
+  added to Portus.
+- **Portal bloom:** Portus' rings glow at 2.2 instead of 4 (planets unchanged), still over the bloom
+  threshold.
+- **Shadow cost:** the opaque town casts through a depth-only copy (layer drawn only by the sun's
+  shadow camera; positions only; roof shells; no paving or window glass). Spawn view, all tiers:
+
+  | | View draws | View triangles | Shadow draws | Shadow triangles |
+  |---|---:|---:|---:|---:|
+  | Medium/High/Ultra before | 2 | 198.2k | 2 | 198.2k (170.8k opaque with the full colour shader + 27.3k cutout) |
+  | Medium/High/Ultra after | 2 | 202.0k (paving pieces) | 2 | 164.1k (136.8k depth-only + 27.3k cutout) |
+  | Low before → after | 2 | 146.2k → 150.1k | 0 | 0 |
+
+  Shadow cells were measured (shadow camera = the rig's, Portus' reference sun): at the spawn 48 m
+  cells give 10 draws / 179.7k, 32 m 19 / 173.8k, 24 m 26 / 172.5k, 16 m 39 / 150.7k, 12 m 57 /
+  152.2k; averaged over ten spots in and around town (Medium) 48 m: 9.6 / 156.8k, 16 m: 30.9 /
+  100.4k. The Medium shadow box (±20 m, ~53 × 40 m on the ground under Portus' 49° sun) holds most of
+  the plaza's houses, so cells buy little at the spawn for many draws: one copy it is.
+
