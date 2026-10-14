@@ -66,7 +66,14 @@ export interface TownAssets {
 
 let pending: Promise<TownAssets | null> | null = null;
 
-/** Start (or reuse) the download. Resolves null if anything fails (the town then draws its colliders as plain stone). */
+/**
+ * The whole download (manifest, GLB, both strips) is aborted after this many milliseconds, so a hung
+ * request can't stay in the session cache: the next arrival tries again. PortusTown's own deadline
+ * (a little longer) shows the plain fallback before the probe and the warm-up either way.
+ */
+export const TOWN_FETCH_TIMEOUT_MS = 15_000;
+
+/** Start (or reuse) the download. Resolves null if anything fails or times out (the town then draws its colliders as plain stone). */
 export function preloadTown(): Promise<TownAssets | null> {
   return (pending ??= loadTown().catch((e: unknown) => {
     console.warn("[town] Portus town assets failed to load; drawing plain colliders", e);
@@ -75,37 +82,48 @@ export function preloadTown(): Promise<TownAssets | null> {
   }));
 }
 
-async function loadTown(): Promise<TownAssets> {
-  const base = `${config.assetBase}/portus/`;
-  const res = await fetch(`${base}manifest.json`);
-  if (!res.ok) throw new Error(`manifest ${res.status}`);
-  const manifest = (await res.json()) as TownManifest;
-  if (manifest.version !== PORTUS_TOWN_VERSION) {
-    // A stale cache or a half-finished deploy: the geometry may not match the layout.
-    throw new Error(`asset version ${manifest.version} does not match the layout ${PORTUS_TOWN_VERSION}`);
-  }
-  const [gltfBytes, color, normal] = await Promise.all([
-    fetchBytes(base + manifest.files.glb.name),
-    decodeStrip(base + manifest.files.color.name, manifest.layerSize, true),
-    decodeStrip(base + manifest.files.normal.name, manifest.layerSize, false),
-  ]);
-  const meshes = await parseTownGlb(gltfBytes);
-  validateTown(meshes, manifest);
-  return { manifest, meshes, color, normal };
-}
+type Fetch = (url: string, init: { signal: AbortSignal }) => Promise<Response>;
 
-async function fetchBytes(url: string): Promise<ArrayBuffer> {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`${url} ${r.status}`);
-  return r.arrayBuffer();
+/** Download, decode and validate the town; rejects on any failure, or when `timeoutMs` runs out (every request is aborted). */
+export async function loadTown(fetchImpl: Fetch = (u, i) => fetch(u, i), timeoutMs = TOWN_FETCH_TIMEOUT_MS): Promise<TownAssets> {
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(new Error(`town assets: no answer in ${timeoutMs} ms`)), timeoutMs);
+  const { signal } = abort;
+  // Every await below also settles when the signal fires (a body stream that stalls, a decode).
+  const bounded = <T>(p: Promise<T>): Promise<T> =>
+    new Promise<T>((resolve, reject) => {
+      if (signal.aborted) return reject(signal.reason);
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      p.then(resolve, reject);
+    });
+  const get = async (url: string) => {
+    const r = await bounded(fetchImpl(url, { signal }));
+    if (!r.ok) throw new Error(`${url} ${r.status}`);
+    return r;
+  };
+  try {
+    const base = `${config.assetBase}/portus/`;
+    const manifest = (await bounded((await get(`${base}manifest.json`)).json())) as TownManifest;
+    if (manifest.version !== PORTUS_TOWN_VERSION) {
+      // A stale cache or a half-finished deploy: the geometry may not match the layout.
+      throw new Error(`asset version ${manifest.version} does not match the layout ${PORTUS_TOWN_VERSION}`);
+    }
+    const [gltfBytes, color, normal] = await Promise.all([
+      get(base + manifest.files.glb.name).then((r) => bounded(r.arrayBuffer())),
+      get(base + manifest.files.color.name).then((r) => bounded(r.blob())).then((b) => bounded(decodeStrip(b, manifest.layerSize, true))),
+      get(base + manifest.files.normal.name).then((r) => bounded(r.blob())).then((b) => bounded(decodeStrip(b, manifest.layerSize, false))),
+    ]);
+    const meshes = await bounded(parseTownGlb(gltfBytes));
+    validateTown(meshes, manifest);
+    return { manifest, meshes, color, normal };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** A WebP layer strip → a repeat-wrapped, mipmapped DataArrayTexture (one layer per kit texture). */
-async function decodeStrip(url: string, size: number, srgb: boolean): Promise<THREE.DataArrayTexture> {
-  const blob = await (await fetch(url).then((r) => {
-    if (!r.ok) throw new Error(`${url} ${r.status}`);
-    return r;
-  })).blob();
+async function decodeStrip(blob: Blob, size: number, srgb: boolean): Promise<THREE.DataArrayTexture> {
+  const url = "layer strip";
   const bmp = await createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" });
   const w = bmp.width, h = bmp.height;
   if (w !== size || h % size !== 0) throw new Error(`${url}: ${w}×${h} is not a strip of ${size} px layers`);

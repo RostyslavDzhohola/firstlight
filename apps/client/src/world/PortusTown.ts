@@ -10,8 +10,10 @@
 // are hidden, and three frustum-culls the rest. All meshes share two materials, so the warm-up
 // (which shows every hidden mesh) compiles the town's pipelines once.
 //
-// Fallback: if the asset can't load, the collider solids are drawn as plain stone boxes and
-// cylinders (two instanced draws), so nothing blocks the player invisibly.
+// Fallback: if the asset can't load, or hasn't arrived by TOWN_LOAD_DEADLINE_MS, the collider solids
+// are drawn as plain stone boxes and cylinders (two instanced draws) before the quality probe and
+// the warm-up, so nothing blocks the player invisibly and nothing compiles in play. A later
+// completion is ignored for this arrival (the next arrival in Portus uses the cached asset).
 
 import * as THREE from "three/webgpu";
 import { TOWN_LAYOUT, TOWN_PREFABS } from "@firstlight/shared/content/portusTown";
@@ -39,6 +41,13 @@ const GRID_N = Math.round((2 * GRID_HALF) / TOWN_CELL);
  * split between cells, and their vertices follow the ground where it rises off the flat floor.
  */
 const DECAL_RADIUS = 30;
+
+/**
+ * How long an arrival waits for the town asset (ms) before it shows the fallback instead. A little
+ * longer than the download's own abort (townAssets.ts TOWN_FETCH_TIMEOUT_MS), so it only matters if
+ * decoding stalls or a test hands in a source that never settles.
+ */
+export const TOWN_LOAD_DEADLINE_MS = 18_000;
 
 /** Camera distance (m, to a cell's bounding sphere) beyond which a cell shows LOD1; 0 = always LOD1. */
 export const TOWN_LOD_DISTANCE: Record<ResolvedSettings["tier"], number> = { low: 0, medium: 60, high: 90, ultra: 140 };
@@ -97,7 +106,12 @@ export class PortusTown {
   private forceAll = false;
 
   /** @param source the town asset (tests pass a decoded one; the game downloads it once per session). */
-  constructor(private readonly terrain: Terrain, settings: ResolvedSettings, source: Promise<TownAssets | null> = preloadTown()) {
+  constructor(
+    private readonly terrain: Terrain,
+    settings: ResolvedSettings,
+    source: Promise<TownAssets | null> = preloadTown(),
+    deadlineMs = TOWN_LOAD_DEADLINE_MS,
+  ) {
     this.group.name = "portusTown";
     const collider = (this.collider = structureCollider(terrain)!);
     this.moveColliders = {
@@ -106,12 +120,20 @@ export class PortusTown {
     };
     this.settings = settings;
     this.group.visible = !flags.has("notown");
-    this.ready = this.build(source);
+    this.ready = this.build(source, deadlineMs);
   }
 
-  private async build(source: Promise<TownAssets | null>) {
-    const assets = await source;
+  private async build(source: Promise<TownAssets | null>, deadlineMs: number) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<"late">((resolve) => (timer = setTimeout(() => resolve("late"), deadlineMs)));
+    const assets = await Promise.race([source, deadline]);
+    clearTimeout(timer);
     if (this.disposed) return;
+    if (assets === "late") {
+      // Show the fallback now (before the probe and warm-up); whatever arrives later is ignored here.
+      console.warn(`[town] Portus town assets not ready after ${deadlineMs} ms; drawing plain colliders`);
+      return this.buildFallback();
+    }
     if (!assets) return this.buildFallback();
     try {
       this.assets = assets;
@@ -309,7 +331,9 @@ export class PortusTown {
     const solids = townSolids(this.terrain);
     const boxes = solids.filter((s) => s.shape === 0), cyls = solids.filter((s) => s.shape === 1);
     const boxGeo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
-    const cylGeo = new THREE.CylinderGeometry(1, 1, 1, 14).translate(0, 0.5, 0);
+    // Unit-wide sources (a box 1 m across, a cylinder 1 m across): the instance basis scales them by
+    // the solid's full width (2·hx, 2·hz) and height.
+    const cylGeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 14).translate(0, 0.5, 0);
     const m = new THREE.Matrix4(), r = new THREE.Vector3(), u = new THREE.Vector3(), f = new THREE.Vector3();
     for (const [list, geo] of [[boxes, boxGeo], [cyls, cylGeo]] as const) {
       const mesh = new THREE.InstancedMesh(geo, townFallbackMaterial(), Math.max(1, list.length));

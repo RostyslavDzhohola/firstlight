@@ -134,16 +134,65 @@ describe("Portus town view", () => {
     low.dispose();
   });
 
-  it("draws the colliders as plain stone when the asset is missing (nothing blocks invisibly)", async () => {
+  it("draws the colliders as plain stone, at the colliders' size, when the asset is missing", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const town = new PortusTown(terrain, settingsFor("medium"), Promise.resolve(null));
       await town.ready;
       expect(town.cells).toHaveLength(0);
       const meshes = town.group.children as THREE.InstancedMesh[];
-      expect(meshes.reduce((s, m) => s + m.count, 0)).toBe(townSolids(terrain).length);
+      const solids = townSolids(terrain);
+      expect(meshes.reduce((s, m) => s + m.count, 0)).toBe(solids.length);
       expect(town.stats().draws).toBe(2);
+      // Every instance's drawn extent is its solid: half widths hx, hz across, 0..h up (review S2).
+      const lists = [solids.filter((x) => x.shape === 0), solids.filter((x) => x.shape === 1)];
+      const m = new THREE.Matrix4(), v = new THREE.Vector3();
+      meshes.forEach((mesh, k) => {
+        const pos = mesh.geometry.getAttribute("position");
+        lists[k]!.forEach((sol, i) => {
+          mesh.getMatrixAt(i, m);
+          let ex = 0, ez = 0, rad = 0, y0 = Infinity, y1 = -Infinity;
+          for (let j = 0; j < pos.count; j++) {
+            v.fromBufferAttribute(pos, j).applyMatrix4(m).sub(new THREE.Vector3(sol.px, sol.py, sol.pz));
+            const lx = v.x * sol.rx + v.y * sol.ry + v.z * sol.rz, lz = v.x * sol.fx + v.y * sol.fy + v.z * sol.fz;
+            const ly = v.x * sol.ux + v.y * sol.uy + v.z * sol.uz;
+            ex = Math.max(ex, Math.abs(lx));
+            ez = Math.max(ez, Math.abs(lz));
+            rad = Math.max(rad, Math.hypot(lx, lz));
+            y0 = Math.min(y0, ly);
+            y1 = Math.max(y1, ly);
+          }
+          if (k === 0) {
+            expect(ex, `box ${i}`).toBeCloseTo(sol.hx, 4);
+            expect(ez, `box ${i}`).toBeCloseTo(sol.hz, 4);
+          } else expect(rad, `cylinder ${i}`).toBeCloseTo(sol.hx, 4); // its rim is the collider's radius
+          expect(y0).toBeCloseTo(0, 4);
+          expect(y1).toBeCloseTo(sol.h, 4);
+        });
+      });
       town.dispose();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("shows the fallback by its deadline when the asset never arrives, and ignores a late one (review S1)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const never = new PortusTown(terrain, settingsFor("medium"), new Promise(() => {}), 30);
+      await never.ready; // settles at the deadline
+      expect(never.cells).toHaveLength(0);
+      expect(never.group.children).toHaveLength(2);
+      never.dispose();
+      const assets = await testTownAssets();
+      const late = new PortusTown(terrain, settingsFor("medium"), new Promise((r) => setTimeout(() => r(assets), 120)), 30);
+      await late.ready;
+      expect(late.group.children).toHaveLength(2);
+      await new Promise((r) => setTimeout(r, 200)); // the asset lands after the deadline
+      expect(late.cells).toHaveLength(0);
+      expect(late.group.children).toHaveLength(2); // still the fallback: no meshes after the warm-up
+      expect(warn).toHaveBeenCalled();
+      late.dispose();
     } finally {
       warn.mockRestore();
     }

@@ -433,10 +433,10 @@ export class Game {
     alive("loading characters");
     if (this.planet.town) {
       // Portus: the castle town is in the scene before the probe and the warm-up (falls back to plain colliders).
-      // A stalled download doesn't hold the arrival hostage: after 20 s play on (the town appears
-      // when it lands; its colliders block from the start either way).
+      // Bounded: the download aborts after 15 s and the town shows its stone fallback by 18 s, so
+      // the probe and the warm-up always see what will be drawn (no late meshes, no live builds).
       setLoading("Raising the town…", 0.81);
-      await Promise.race([this.planet.town.ready, new Promise((r) => setTimeout(r, 20_000))]);
+      await this.planet.town.ready;
       alive("raising the town");
     }
     if (!this.self) {

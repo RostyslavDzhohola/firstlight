@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { PORTUS_TOWN_VERSION, TOWN_LAYOUT, TOWN_PREFABS } from "@firstlight/shared/content/portusTown";
-import { validateTown } from "./townAssets.ts";
+import { loadTown, validateTown } from "./townAssets.ts";
 import { testTownAssets, townBytes as bytes, townDir as dir, townManifest as manifest } from "./townAssets.testutil.ts";
 
 /** Width and height of a WebP file (VP8, VP8L or VP8X header). */
@@ -17,6 +17,26 @@ function webpSize(b: Buffer): [number, number] {
   const bits = b.readUInt32LE(21);
   return [1 + (bits & 0x3fff), 1 + ((bits >> 14) & 0x3fff)];
 }
+
+describe("town asset download", () => {
+  it("aborts every request and rejects when the answer never comes (review S1)", async () => {
+    const aborted: string[] = [];
+    const hang = (url: string, init: { signal: AbortSignal }) =>
+      new Promise<Response>((_, reject) => init.signal.addEventListener("abort", () => {
+        aborted.push(url);
+        reject(init.signal.reason);
+      }));
+    const t0 = Date.now();
+    await expect(loadTown(hang, 40)).rejects.toThrow(/no answer in 40 ms/);
+    expect(Date.now() - t0).toBeLessThan(2000);
+    expect(aborted).toEqual([expect.stringMatching(/manifest\.json$/)]);
+  });
+
+  it("rejects a manifest from another layout version", async () => {
+    const stale = async () => new Response(JSON.stringify({ ...manifest, version: "0000000000000000" }));
+    await expect(loadTown(stale, 1000)).rejects.toThrow(/does not match the layout/);
+  });
+});
 
 describe("shipped Portus town asset", () => {
   it("matches the shared layout version and stays under 6 MB", () => {
