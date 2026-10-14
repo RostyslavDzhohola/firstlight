@@ -2,6 +2,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import * as THREE from "three/webgpu";
 import { createTerrain, type BodyId } from "@firstlight/shared";
+import { emptyContact, PLAYER_BODY } from "@firstlight/shared/planet/collide";
+import { structureCollider } from "@firstlight/shared/planet/town";
 import { stubCanvasDocument, watchDisposals } from "../render/disposeWatch.testutil.ts";
 import { lookKey } from "../render/warmupLooks.testutil.ts";
 import { pileSamples, PilesView } from "./PilesView.ts";
@@ -49,6 +51,48 @@ describe("QuestWorld", () => {
     const mats = [...w.all].filter((x) => (x as THREE.Material).isMaterial) as THREE.Material[];
     expect(mats.some((m) => !w.disposed.has(m))).toBe(true);
     expect(mats.filter((m) => (m as { map?: unknown }).map).every((m) => w.disposed.has(m))).toBe(true);
+  });
+});
+
+describe("Hall of Firsts board in the Portus town (browser round 1, item 2)", () => {
+  it("is an opaque framed board in front of the hall, its heading low enough to read, clear of the hall", async () => {
+    const { QuestWorld, HALL_BOARD } = await import("./QuestWorld.ts");
+    const terrain = createTerrain("portus");
+    const world = new QuestWorld(new THREE.Scene(), "portus", terrain);
+    const hall = world.props.find((p) => p.def.look === "hall")!;
+    hall.root.updateMatrixWorld(true);
+    // Nothing see-through: every material of the board is opaque and writes depth.
+    hall.root.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.Material | undefined;
+      if (!m) return;
+      expect(m.transparent, o.name || o.type).toBe(false);
+      expect(m.opacity).toBe(1);
+      expect(m.depthWrite).toBe(true);
+    });
+    // Its size in its own frame: about a 4 m board, the heading (top tenth of the face) under 4 m.
+    const box = new THREE.Box3();
+    const inv = hall.root.matrixWorld.clone().invert();
+    hall.root.traverse((o) => {
+      const g = (o as THREE.Mesh).geometry as THREE.BufferGeometry | undefined;
+      if (!g) return;
+      g.computeBoundingBox();
+      box.union(g.boundingBox!.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld)));
+    });
+    expect(box.max.y).toBeLessThan(4.8);
+    expect(box.max.x - box.min.x).toBeLessThan(6);
+    expect(HALL_BOARD.bottom + HALL_BOARD.h * 0.9).toBeLessThan(4);
+    // Free-standing in front of the hall's steps: its footprint is outside every town structure.
+    const town = structureCollider(terrain)!;
+    for (const x of [box.min.x, box.max.x]) {
+      for (const z of [box.min.z, box.max.z]) {
+        const q = new THREE.Vector3(x, 0.05, z).applyMatrix4(hall.root.matrixWorld);
+        expect(town.footing(q.x, q.y, q.z, PLAYER_BODY.step).inside).toBe(false);
+        const c = { x: q.x, y: q.y, z: q.z };
+        town.resolve(c, emptyContact());
+        expect(Math.hypot(c.x - q.x, c.y - q.y, c.z - q.z)).toBeLessThan(PLAYER_BODY.radius); // at most brushing a step
+      }
+    }
+    world.dispose();
   });
 });
 
