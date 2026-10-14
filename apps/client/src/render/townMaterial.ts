@@ -50,9 +50,10 @@ export function townMaterial(kind: TownMaterialKind, normals: boolean, color: TH
   m.metalnessNode = tm.z;
   if (normals) m.normalNode = normalMap(texture(normal, uv()).depth(layer), vec2(tint.a, tint.a));
   const mode = tm.w.mul(255).round();
-  const night = atmo.glowBoost.sub(1).div(0.75).clamp(0, 1);
+  // Flames burn day and night (brighter at night); windows light up with the lamps: at night, and
+  // in Portus' late-dusk evening, never by day or for rain clouds.
   const flame = vec3(FLAME.r, FLAME.g, FLAME.b).mul(atmo.glowBoost);
-  const lit = vec3(WINDOW.r, WINDOW.g, WINDOW.b).mul(night);
+  const lit = vec3(WINDOW.r, WINDOW.g, WINDOW.b).mul(atmo.lamps);
   m.emissiveNode = select(mode.equal(TOWN_EMISSIVE.flame), flame, select(mode.equal(TOWN_EMISSIVE.window), lit, vec3(0, 0, 0)));
   cache.set(key, m);
   return m;
