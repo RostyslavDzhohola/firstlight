@@ -132,8 +132,8 @@ Results: see "Final run" below.
 - Wall-walks and wall stairs are solid blocks (not walkable), as the design notes suggest.
 - The keep's and Hall of Firsts' front steps read 0.44 m at their far edge on the curve: players hop
   them (the doors are closed anyway).
-- Saved positions inside a house (players who logged out where a house now stands) are pushed out by
-  the client on arrival; the server lets a body walk out of a solid it starts in.
+- ~~Saved positions inside a house are pushed out by the client on arrival.~~ Wrong for big
+  buildings (Codex round 1, B1: a 4–6 m push was refused as speed and looped); fixed below.
 
 ## Merge with main
 
@@ -187,3 +187,28 @@ Run your own stack on free ports (others use 5294/5295): `PORT`, `CLIENT_PORT`, 
   rerun green, client typecheck clean.
 - The outer road ends climb the rim (up to 5 m over their last 13 m): a hill road; its quads follow
   the ground per vertex, so check them for poking terrain in the browser (item 10).
+
+## Round 1 fixes (Codex review `2026-10-14-portus-village-review-gpt-6.1-sol.md`)
+
+Worked in `fl-wt-village-fix` on `lane/portus-village-fix`.
+
+- **B1:** `BodyRoom.placeBody` puts players down on clear ground: restored saves, the spawn ring,
+  admin teleports and `QuestSystem.teleport` (quests, eggs, stage formations). It snaps to the ground
+  and runs the shared `StructureCollider.clearSpot`: the client controller's own push-out with 2 cm
+  to spare, and where pushes can't settle (the keep and its front steps push a body back and forth)
+  the nearest clear spot on 0.5 m rings. The move budget is unchanged. Real-path tests: saves at the
+  keep, Market Hall and Hall of Firsts centres and an admin teleport into the keep, driven by the real
+  client `PlayerController` with every correction fed back: 0 corrections in 20 frames (all failed
+  before the fix).
+- **S1:** the download aborts after 15 s (every request, body read and decode); `PortusTown` shows
+  the stone fallback 18 s into the arrival at the latest, before the probe and warm-up, and ignores a
+  later completion for that visit (the next visit uses the cached asset or retries).
+- **S2:** fallback cylinders now draw at the collider's radius; a test checks every instance's
+  vertices against its solid.
+- **S3:** `server/test/town.test.ts` waits for the last sent input to be replicated; no fixed waits
+  before routes (the teleport's correction precedes its state patch on the same socket).
+- **Nits:** D38's `PROPS_VERSION` text; the generated header now says the manifest (not the GLB)
+  carries the layout version (regenerating from the kept build output reproduces the committed TS
+  and manifest byte for byte); stage spots are cleared by `placeBody`, with a test over every Portus
+  stage formation for 1–40 players (the target prop stays where the design put it).
+

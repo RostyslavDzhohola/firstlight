@@ -408,7 +408,7 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   Juno, the Hall wall and the dummies were already on flat ground (≤ 28 m) and did not move; Portus
   keeps 0 breakables. Natural props stay outside 52 m, 3 m off the town's paving, roads and
   structures and out from under its trees (render-only; nothing authoritative reads Portus props;
-  `PROPS_VERSION` is left to the vegetation merge, which made it 3). Why: the owner wanted the start
+  `PROPS_VERSION` 3 → 4 on top of the vegetation lane's 3). Why: the owner wanted the start
   inside a village with a castle, and the design's walls (r 43–46) and castle sat on the old 0–7 m rim.
 - **D39 (run, 21:15Z):** the town's walls, towers, gatehouses, keep, houses, halls, courts, stalls
   and props are shared, indestructible colliders (`planet/town.ts` StructureCollider: one box or
@@ -419,8 +419,13 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   castle gate 3.4 m. Solids follow their prefab's frame, so the keep's front steps stand 0.44 m above
   the curved ground at their far edge: a hop, like the drawn step. Client tracers stop at town walls;
   the server's shot and NPC sight paths don't consult them, because Portus refuses shots (safe zone)
-  and has no NPCs (`StructureCollider.raycast` is ready if that changes). Why: the brief's "solid to
-  walk into", with one set of solids so the server never corrects an honest client.
+  and has no NPCs (`StructureCollider.raycast` is ready if that changes). The server puts players
+  down (restored saves, the spawn ring, admin and quest teleports, stage spots) with
+  `BodyRoom.placeBody`: on the ground and cleared of structures the way the client's first frame
+  pushes (`clearSpot`, 2 cm to spare; nearest clear ring spot where pushes can't settle), so a save
+  inside the keep can't loop on corrections (review round 1, B1); the move budget is unchanged.
+  Why: the brief's "solid to walk into", with one set of solids so the server never corrects an
+  honest client.
 - **D40 (run, 21:15Z):** deploying the town: `PROTOCOL_VERSION` 2 → 3, and the client (Vercel, with
   `assets-dev/portus`) goes first, the server right after in the same batch (D9). An old client on
   the new server walks the old 7 m rim at 28–72 m (the server sees it hovering: height refusals and
@@ -438,5 +443,7 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   + 2 shadow draws on Medium; measured against 32/64/96 m cells (19–23 + 19, 8–12 + 10, 6 + 8 draws)
   because frustum culling saved < 15 % of the triangles from the plaza. Medium+ shows LOD0 unless
   the camera is 60/90/140 m beyond the town's bounds; Low shows LOD1 without normal maps or shadows.
-  If the asset fails, the colliders are drawn as stone boxes (2 draws). Why: Medium was already at
+  If the asset fails, or isn't there 18 s into the arrival (the download itself aborts at 15 s), the
+  colliders are drawn as stone boxes (2 draws) before the probe and the warm-up, and a later arrival
+  of the asset is ignored until the next visit (review round 1, S1). Why: Medium was already at
   ~290 draws against 250 (F10); triangles are cheap next to draws on Metal (#30560).
