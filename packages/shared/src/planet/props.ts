@@ -27,8 +27,10 @@ const townAt: [number, number] = [0, 0];
  * v2: jitter kept inside [0.15, 0.85] of each cell and a
  * margin at each face's far edge, so same-rule props are ≥ 0.3 cells apart even across seams.
  * v3: forest undergrowth, arena/interaction clearings and fitted-breakable exclusions.
+ * v4: the Portus castle town (D38): its flat floor, a 52 m clearing inside the walls, and its roads,
+ * paving, structures and trees kept clear (townGround.ts).
  */
-export const PROPS_VERSION = 3;
+export const PROPS_VERSION = 4;
 
 /** Jitter range inside a candidate cell (fraction of the cell), and the face-edge margin. */
 export const PROP_JITTER_MIN = 0.15;
@@ -295,8 +297,9 @@ export function naturalChunkProps(terrain: Terrain, face: Face, cx: number, cy: 
 
 /** Breakables yield to the frozen v2 solid placement, then all visual vegetation yields to the
  * authoritative fitted breakable footprints. This avoids a props -> breakables -> props recursion.
- * Portus' authored walkways are inside its existing 48 m plaza clearing; elsewhere there are
- * no separate path meshes. Portal approaches and quest interactions have their own clearings. */
+ * Portus' castle town keeps its own walls, roads and paving clear (naturalChunkProps, D38);
+ * elsewhere there are no separate path meshes. Portal approaches and quest interactions have
+ * their own clearings. */
 export function chunkProps(terrain: Terrain, face: Face, cx: number, cy: number): PropInstance[] {
   const props = naturalChunkProps(terrain, face, cx, cy);
   const breakables = bodyBreakables(terrain);
