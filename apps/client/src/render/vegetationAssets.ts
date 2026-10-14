@@ -2,7 +2,7 @@
 import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
-import { abs, attribute, cameraViewMatrix, cross, float, normalize, materialColor, mix, normalView, positionGeometry, positionLocal, positionWorld, select, sin, texture, time, vec3, vec4 } from "three/tsl";
+import { abs, attribute, cameraViewMatrix, cross, dot, float, normalize, materialColor, mix, normalView, positionGeometry, positionLocal, positionViewDirection, positionWorld, select, sin, texture, time, vec3, vec4 } from "three/tsl";
 import { BODY_IDS, PROP_KINDS, type BodyId, type PropKind } from "@firstlight/shared";
 import { vegetationModels } from "./vegetationModels.ts";
 import { config } from "../config.ts";
@@ -142,7 +142,10 @@ export function vegetationMaterial(body: BodyId, kind: PropKind, atlas: THREE.Te
   // left half of every crown dark; crossed impostor cards are entirely horizontal. Near meshes keep
   // some of their own shading so the switch to impostors doesn't pop in brightness.
   const upView = normalize(cameraViewMatrix.mul(vec4(normalize(positionWorld), 0)).xyz);
-  if (impostor) m.normalNode = upView;
+  // A card's bark stands for the trunk side facing the viewer, so a back-lit trunk stays dark
+  // like the mesh it replaces. The small up term keeps it defined when looking straight down.
+  const towardViewer = normalize(positionViewDirection.sub(upView.mul(dot(positionViewDirection, upView))).add(upView.mul(0.1)));
+  if (impostor) m.normalNode = normalize(mix(towardViewer, upView, role.r));
   else if (!["rock", "boulder", "mushroom", "deadtree"].includes(kind)) m.normalNode = normalize(mix(normalView, upView, role.r.mul(NEAR_FOLIAGE_UP)));
   if (!["rock", "boulder", "mushroom"].includes(kind)) {
     // No compute/storage buffers: attribute + time works on WebGPU and WebGL2.
