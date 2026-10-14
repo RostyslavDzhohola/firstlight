@@ -2,6 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import * as THREE from "three/webgpu";
 import { createTerrain, type BodyId } from "@firstlight/shared";
+import { PLAQUES } from "@firstlight/shared/content/secrets";
 import { emptyContact, PLAYER_BODY } from "@firstlight/shared/planet/collide";
 import { hallBoardPlacement, HALL_STAND_SOLIDS, StructureCollider, structureCollider, townSolids } from "@firstlight/shared/planet/town";
 import { stubCanvasDocument, watchDisposals } from "../render/disposeWatch.testutil.ts";
@@ -149,6 +150,51 @@ describe("Hall of Firsts board in the Portus town (browser round 1, item 2)", ()
     const q = new THREE.Vector3(0, 0.02, 0).applyMatrix4(hall.root.matrixWorld);
     expect(town.footing(q.x, q.y, q.z, PLAYER_BODY.step).inside).toBe(true);
     world.dispose();
+  });
+});
+
+describe("Hall of Firsts board lettering (browser round 2)", () => {
+  it("keeps every row clear of the brass border, with a bottom margin like the heading's top one", async () => {
+    const { QuestWorld, hallBoardLayout } = await import("./QuestWorld.ts");
+    // A canvas that records what setHall writes, with the font and baseline in force at the time.
+    const texts: { text: string; y: number; px: number; baseline: string }[] = [];
+    const strokes: number[][] = [];
+    const state = { font: "", textBaseline: "alphabetic" };
+    const ctx = new Proxy(state as Record<string, unknown>, {
+      get: (t, k) =>
+        k === "fillText" ? (text: string, _x: number, y: number) => texts.push({ text, y, px: Number(/(\d+)px/.exec(String(t.font))?.[1]), baseline: String(t.textBaseline) })
+        : k === "strokeRect" ? (...a: number[]) => strokes.push(a)
+        : k === "createLinearGradient" ? () => ({ addColorStop() {} })
+        : k === "measureText" ? () => ({ width: 10 })
+        : k in t ? t[k as string] : () => {},
+      set: (t, k, v) => ((t[k as string] = v), true),
+    });
+    const g = globalThis as { document?: unknown };
+    const prev = g.document;
+    g.document = { createElement: () => ({ width: 0, height: 0, getContext: () => ctx, style: {} }) };
+    try {
+      const world = new QuestWorld(new THREE.Scene(), "portus", createTerrain("portus"));
+      const L = hallBoardLayout(PLAQUES.length);
+      const [bx, by, bw, bh] = strokes.at(-1)!;
+      expect([bx, by, bw, bh]).toEqual([L.border, L.border, 1024 - 2 * L.border, 768 - 2 * L.border]);
+      const innerBottom = by! + bh! - L.stroke / 2;
+      const at = texts.findIndex((t) => t.text === "HALL OF FIRSTS");
+      const heading = texts[at]!;
+      const topMargin = heading.y - heading.px * 0.72 - (by! + L.stroke / 2); // cap tops below the top border
+      const rows = texts.slice(at + 1, at + 1 + PLAQUES.length * 2); // the board's rows (labels elsewhere draw too)
+      expect(rows).toHaveLength(PLAQUES.length * 2); // label and claim per plaque
+      for (const r of rows) {
+        expect(r.baseline).toBe("middle");
+        expect(r.px).toBeGreaterThanOrEqual(26); // legible: the rows keep about a 30 px font
+        expect(r.y - r.px / 2).toBeGreaterThan(L.ruleY + 6); // below the heading's rule
+      }
+      const last = Math.max(...rows.map((r) => r.y + r.px / 2));
+      expect(innerBottom - last).toBeGreaterThanOrEqual(Math.min(topMargin, 18));
+      expect(L.pitch).toBeGreaterThanOrEqual(L.rowFont * 1.3);
+      world.dispose();
+    } finally {
+      g.document = prev;
+    }
   });
 });
 

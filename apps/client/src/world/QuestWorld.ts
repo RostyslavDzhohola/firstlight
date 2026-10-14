@@ -107,6 +107,25 @@ function iconPlate(icon: string, color: string): THREE.Mesh {
  * Shared: its stand is solid on both sides (planet/town.ts HALL_STAND_SOLIDS draws these volumes). */
 export { HALL_BOARD };
 
+/**
+ * The Hall board's canvas layout (px): the brass border, the heading and its rule, and the rows,
+ * fitted between the rule and a bottom margin as wide as the heading's top margin, so the last row
+ * clears the frame (browser round 2). Rows keep a 30 px font while they fit (a pitch of 1.33 × the
+ * font), smaller only if more rows are ever added.
+ */
+export function hallBoardLayout(rows: number, width = 1024, height = 768) {
+  const border = 14, stroke = 6;
+  const inner = border + stroke / 2; // inner edge of the brass line
+  const headingFont = 60, headingY = 78; // alphabetic baseline: cap tops at about 78 - 0.72·60 = 35
+  const margin = headingY - Math.round(headingFont * 0.72) - inner; // the heading's clearance below the top border
+  const ruleY = 100;
+  const top = ruleY + 18;
+  const bottom = height - inner - Math.max(margin, 18);
+  const pitch = (bottom - top) / rows;
+  const rowFont = Math.min(30, Math.floor(pitch / 1.33));
+  return { border, stroke, inner, headingFont, headingY, ruleY, top, bottom, pitch, rowFont, side: 54, width, rowY: (i: number) => top + pitch * (i + 0.5) };
+}
+
 const ICONS: Record<string, string> = { dew: "◇", root: "⋎", bloom: "✿", rain: "💧", leaf: "🍃", sun: "☀", flame: "🔥", skull: "☠", lantern: "🏮", candle: "🕯" };
 
 export interface QuestWorldState {
@@ -420,32 +439,35 @@ export class QuestWorld {
     if (!c || !this.hallTexture) return;
     const g = c.getContext("2d")!;
     // An opaque, dark-stained board: no alpha anywhere, so nothing behind it shows through.
+    const L = hallBoardLayout(PLAQUES.length, c.width, c.height);
     const grad = g.createLinearGradient(0, 0, 0, c.height);
     grad.addColorStop(0, "#3d2818");
     grad.addColorStop(1, "#2a1a10");
     g.fillStyle = grad;
     g.fillRect(0, 0, c.width, c.height);
     g.strokeStyle = "#c9a46a";
-    g.lineWidth = 6;
-    g.strokeRect(14, 14, c.width - 28, c.height - 28);
+    g.lineWidth = L.stroke;
+    g.strokeRect(L.border, L.border, c.width - 2 * L.border, c.height - 2 * L.border);
     g.textAlign = "center";
+    g.textBaseline = "alphabetic";
     g.fillStyle = "#f2d08a";
-    g.font = "800 60px ui-serif, Georgia, serif";
-    g.fillText("HALL OF FIRSTS", c.width / 2, 78);
-    g.fillRect(c.width / 2 - 220, 100, 440, 3);
+    g.font = `800 ${L.headingFont}px ui-serif, Georgia, serif`;
+    g.fillText("HALL OF FIRSTS", c.width / 2, L.headingY);
+    g.fillRect(c.width / 2 - 220, L.ruleY, 440, 3);
     const by = new Map(lines.map((l) => [l.id, l]));
-    const rowH = (c.height - 132) / PLAQUES.length;
+    // Rows sit on their own middle lines, fitted between the rule and the bottom margin.
+    g.textBaseline = "middle";
     PLAQUES.forEach((p, i) => {
-      const y = 132 + rowH * i + rowH * 0.62;
+      const y = L.rowY(i);
       const got = by.get(p.id);
       g.textAlign = "left";
-      g.font = "600 30px ui-sans-serif, system-ui, sans-serif";
+      g.font = `600 ${L.rowFont}px ui-sans-serif, system-ui, sans-serif`;
       g.fillStyle = got ? "#f5e6c8" : "#b8a588";
-      g.fillText(got ? p.label : p.hiddenLabel, 54, y);
+      g.fillText(got ? p.label : p.hiddenLabel, L.side, y);
       g.textAlign = "right";
-      g.font = got ? "800 30px ui-sans-serif, system-ui, sans-serif" : "italic 28px ui-sans-serif, system-ui, sans-serif";
+      g.font = got ? `800 ${L.rowFont}px ui-sans-serif, system-ui, sans-serif` : `italic ${L.rowFont - 2}px ui-sans-serif, system-ui, sans-serif`;
       g.fillStyle = got ? "#ffd27a" : "#8c7a62";
-      g.fillText(got ? got.name.slice(0, 40) : "unclaimed", c.width - 54, y);
+      g.fillText(got ? got.name.slice(0, 40) : "unclaimed", c.width - L.side, y);
     });
     this.hallTexture.needsUpdate = true;
   }
