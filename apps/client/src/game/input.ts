@@ -57,7 +57,12 @@ export class Input {
   }
 
   lock() {
-    void (this.el.requestPointerLock as (o?: unknown) => Promise<void> | void).call(this.el, { unadjustedMovement: true });
+    const request = (...opts: [object?]) => Promise.resolve((this.el.requestPointerLock as (o?: object) => Promise<void> | void).call(this.el, ...opts));
+    request({ unadjustedMovement: true }).catch((e: unknown) => {
+      // Raw mouse movement isn't available everywhere: fall back to ordinary pointer lock.
+      if ((e as { name?: string } | null)?.name === "NotSupportedError") return request().catch(() => {});
+      // Otherwise refused (no user gesture, or re-locking too soon after Esc): the pointer stays free.
+    });
   }
 
   down(code: string): boolean {
