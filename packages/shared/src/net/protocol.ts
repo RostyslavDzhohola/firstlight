@@ -21,7 +21,10 @@ export const NET = {
  * Wire protocol version. Bump it whenever client and server messages stop being compatible: the
  * server refuses /api/play from other versions with `{error: "version"}` and the client reloads.
  */
-export const PROTOCOL_VERSION = 2; // 2: F12 core message changes + the sky lane's lightning schedule
+// 2: F12 core message changes + the sky lane's lightning schedule. 3: the Portus town (D40): the
+// server validates movement against the new town floor and the town's walls and houses, which an
+// older client neither has nor draws, so stale tabs must reload instead of being corrected forever.
+export const PROTOCOL_VERSION = 3;
 
 // ---- HTTP: entering the world -------------------------------------------------------------
 
