@@ -269,7 +269,7 @@ describe("tier table", () => {
     expect([TIER_TABLE.ultra.dprCap, TIER_TABLE.ultra.renderScale]).toEqual([2, 1]);
     expect([TIER_TABLE.low.particles, TIER_TABLE.medium.particles, TIER_TABLE.high.particles, TIER_TABLE.ultra.particles]).toEqual([2000, 5000, 15000, 30000]);
     expect([TIER_TABLE.low.fullAvatars, TIER_TABLE.medium.fullAvatars, TIER_TABLE.high.fullAvatars, TIER_TABLE.ultra.fullAvatars]).toEqual([8, 16, 24, 40]);
-    expect([TIER_TABLE.low.props.fullTo, TIER_TABLE.medium.props.fullTo, TIER_TABLE.high.props.fullTo, TIER_TABLE.ultra.props.fullTo]).toEqual([0, 20, 40, 60]);
+    expect([TIER_TABLE.low.props.fullTo, TIER_TABLE.medium.props.fullTo, TIER_TABLE.high.props.fullTo, TIER_TABLE.ultra.props.fullTo]).toEqual([0, 30, 40, 60]);
   });
 
   it("never enables WebGPU-only extras on the WebGL2 fallback", () => {

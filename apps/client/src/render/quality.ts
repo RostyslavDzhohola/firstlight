@@ -90,7 +90,7 @@ export const TIER_TABLE: Record<Tier, TierSpec> = {
     terrain: { detailLayers: 2, normals: false, bakedSun: false },
     shadows: { mode: "map", mapSize: 1024, extent: 20, far: 40, cascadeSize: 0 },
     grass: { count: 80_000, radius: 40, segments: 2 },
-    props: { fullTo: 20, lodTo: 150 },
+    props: { fullTo: 30, lodTo: 150 },
     water: 1,
     post: { bloomScale: 0.5, fxaa: true, vignette: true, grain: true, ao: "off", traa: false },
     particles: 5_000, motes: 160, fullAvatars: 16, weatherDrops: 4_000,

@@ -107,7 +107,7 @@ function tintRatio(target: number, source: number): THREE.Color {
 
 const FOLIAGE_GAIN = 3.6;
 /** Near crowns self-shadow and keep some of their own shading; flat impostor cards get neither.
- *  Browser check: far cards read brighter than the near meshes, so the switch at ~20 m popped. */
+ *  Browser check: far cards read brighter than the near meshes, so the LOD switch popped. */
 const NEAR_FOLIAGE_UP = 0.85;
 const IMPOSTOR_FOLIAGE = 0.88;
 
