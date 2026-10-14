@@ -105,8 +105,8 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 | M11 #5 more cosmetics + 3 Easter eggs | MERGED (Codex-built, Codex-reviewed; atomic egg claims for all eggs) | — |
 | Chrome play-test: black world after Settings → Low | MERGED c9ddf29 (deployed) | — |
 | Chrome play-test UX (tutorial HUD + T toggle, map labels, menu hints, hostile spawns ≥ 45 m off pads, keyed NPC copy state) | MERGED 9356edb (Codex ×2; deployed 16:08Z; 1081 tests). Deferred nit: OnboardingClient lifecycle tests | — |
-| Vegetation (CC0 Quaternius trees/undergrowth, impostors, wind) | Codex fixing round-1 review (blocker: breakable layout must stay identical to main); builder's foliage colour fix e7cb36b | fl-wt-veg, lane/vegetation |
-| Portus walled village (Blender bake-off) | Codex design done (/tmp/fl-design-codex); Opus design in progress (/tmp/fl-design-opus) | — |
+| Vegetation (CC0 Quaternius trees/undergrowth, impostors, wind; Medium meshes to 30 m) | MERGED 868fb34 (Codex rounds 1–4; hardware-GPU A/B: no frame-time regression, draws +1–13 %; 1106 tests) | — |
+| Portus walled village (Blender bake-off) | Opus design chosen; Opus integrating (town floor, shared colliders, packed assets, LOD) | fl-wt-village, lane/portus-village |
 
 ## Measured numbers
 
