@@ -193,6 +193,26 @@ describe("Portus town structures (D38)", () => {
     }
   });
 
+  it("clears a body put down inside a building: out past the client's push, nothing left to push (clearSpot)", () => {
+    const groundR = (x: number, y: number, z: number) => R + terrain.groundHeight(x, y, z) + 0.02;
+    for (const name of ["keep", "market_hall", "hall_of_firsts", "house_b", "tower_round"]) {
+      const it = TOWN_LAYOUT.find((x) => x[0] === index(name))!;
+      const p = feetAt(it[1], it[2], 0.02);
+      expect(town.footing(p.x, p.y, p.z, PLAYER_BODY.step).inside, name).toBe(true);
+      expect(town.clearSpot(p, groundR), name).toBe(true);
+      expect(town.footing(p.x, p.y, p.z, PLAYER_BODY.step).inside, name).toBe(false);
+      // The client's own resolve finds nothing to push there, and clearing again doesn't move it.
+      const q = { ...p };
+      expect(town.resolve(q, emptyContact()), name).toBe(false);
+      expect(town.clearSpot(q, groundR)).toBe(true);
+      expect(Math.hypot(q.x - p.x, q.y - p.y, q.z - p.z)).toBeLessThan(1e-6);
+      // Out through the nearest face (or round a neighbouring wall), not across the town.
+      const half = Math.max(...TOWN_PREFABS[it[0]]!.solids.map((sd) => Math.max(sd[3], sd[4]) + Math.hypot(sd[1], sd[2])));
+      const moved = Math.hypot(p.x - feetAt(it[1], it[2], 0.02).x, p.y - feetAt(it[1], it[2], 0.02).y, p.z - feetAt(it[1], it[2], 0.02).z);
+      expect(moved, name).toBeLessThan(half + 1.5);
+    }
+  });
+
   it("holds feet on low steps and on top of a wall (supportHeightAt)", () => {
     // The Hall of Firsts' front step is 0.32 m high: walkable up, and its top supports the feet.
     const hall = townPlacements(terrain).find((p) => p.prefab === index("hall_of_firsts"))!;

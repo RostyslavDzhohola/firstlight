@@ -97,6 +97,9 @@ export function townSolids(terrain: Terrain): readonly StructureSolid[] {
   return list;
 }
 
+/** clearSpot leaves this much room (m) beyond the player's radius. */
+const CLEAR_MARGIN = 0.02;
+
 /** Feet this far inside a solid's footprint (and below its top) are inside it, not pressed against it (server rule). */
 const INSIDE_MARGIN = 0.1;
 const always = (): boolean => true;
@@ -112,6 +115,7 @@ export class StructureCollider {
   private readonly candidates: number[] = [];
   private readonly scratch: XYZ = { x: 0, y: 0, z: 0 };
   private readonly contact: PropContact = emptyContact();
+  private readonly clearContact: PropContact = emptyContact();
   private readonly footingOut = { top: 0, inside: false };
   private readonly a: XYZ = { x: 0, y: 0, z: 0 };
   private readonly b: XYZ = { x: 0, y: 0, z: 0 };
@@ -151,6 +155,70 @@ export class StructureCollider {
       if (Math.hypot(p.x - x, p.y - y, p.z - z) >= PLAYER_BODY.radius + INSIDE_MARGIN) out.inside = true;
     }
     return out;
+  }
+
+  /**
+   * Where a body put down at feet `p` (on the ground) can stand. First the client controller's own
+   * push-out (resolve, re-snapped to the ground by `groundR(dirX, dirY, dirZ)`: the radius its feet
+   * rest at) until nothing moves it; where that can't settle (pushed back and forth between touching
+   * solids, like a keep and its front steps), the nearest clear spot on rings around `p` (0.5 m apart,
+   * 24 bearings, out to 30 m). Writes `p`; returns false if nothing clear was found. The server places
+   * joining and teleported bodies with this (round-1 B1): a push longer than the move budget would
+   * otherwise be refused and corrected back inside, forever.
+   */
+  clearSpot(p: XYZ, groundR: (x: number, y: number, z: number) => number): boolean {
+    const x0 = p.x, y0 = p.y, z0 = p.z;
+    // A body 2 cm wider than the player's: the spot ends a little outside the client's push range,
+    // so float rounding of the replicated position can't start a push of its own.
+    const body = { radius: PLAYER_BODY.radius + CLEAR_MARGIN, height: PLAYER_BODY.height, step: PLAYER_BODY.step };
+    const snap = (q: XYZ) => {
+      const l = Math.hypot(q.x, q.y, q.z);
+      const r = groundR(q.x / l, q.y / l, q.z / l) / l;
+      q.x *= r;
+      q.y *= r;
+      q.z *= r;
+    };
+    for (let k = 0; k < 12; k++) {
+      const px = p.x, py = p.y, pz = p.z;
+      this.collider.resolve(p, always, this.clearContact, body);
+      snap(p);
+      if (Math.hypot(p.x - px, p.y - py, p.z - pz) < 1e-4) break;
+    }
+    if (this.isClear(p)) return true;
+    // Rings round the original spot, in its tangent plane (a fixed, deterministic order).
+    const l0 = Math.hypot(x0, y0, z0);
+    const ux = x0 / l0, uy = y0 / l0, uz = z0 / l0;
+    const ref = Math.abs(uz) < 0.9 ? [0, 0, 1] : [1, 0, 0];
+    const k0 = ref[0]! * ux + ref[1]! * uy + ref[2]! * uz;
+    let ax = ref[0]! - k0 * ux, ay = ref[1]! - k0 * uy, az = ref[2]! - k0 * uz;
+    const al = Math.hypot(ax, ay, az);
+    ax /= al; ay /= al; az /= al;
+    const bx = uy * az - uz * ay, by = uz * ax - ux * az, bz = ux * ay - uy * ax;
+    const q: XYZ = { x: 0, y: 0, z: 0 };
+    for (let ring = 1; ring <= 60; ring++) {
+      const d = ring * 0.5;
+      for (let i = 0; i < 24; i++) {
+        const a = (i / 24) * Math.PI * 2;
+        const c = Math.cos(a) * d, sn = Math.sin(a) * d;
+        q.x = x0 + ax * c + bx * sn;
+        q.y = y0 + ay * c + by * sn;
+        q.z = z0 + az * c + bz * sn;
+        snap(q);
+        if (!this.isClear(q, body)) continue;
+        p.x = q.x;
+        p.y = q.y;
+        p.z = q.z;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Nothing pushes feet at `p` and they aren't inside a solid (for `body`, default the player). */
+  private isClear(p: XYZ, body: { radius: number; height: number; step: number } = PLAYER_BODY): boolean {
+    const q = { x: p.x, y: p.y, z: p.z };
+    this.collider.resolve(q, always, this.clearContact, body);
+    return Math.hypot(q.x - p.x, q.y - p.y, q.z - p.z) < 1e-6 && !this.footing(p.x, p.y, p.z, PLAYER_BODY.step).inside;
   }
 
   /** Do feet moving straight from a to b pass through a structure (a start already inside one doesn't count)? */
