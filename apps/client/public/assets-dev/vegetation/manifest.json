@@ -1,0 +1,236 @@
+{
+  "CommonTree_1": {
+    "height": 6.2,
+    "sourceTriangles": 6265,
+    "lodTriangles": [
+      900,
+      4
+    ],
+    "far": "crossed-impostor"
+  },
+  "CommonTree_2": {
+    "height": 6.2,
+    "sourceTriangles": 5648,
+    "lodTriangles": [
+      900,
+      4
+    ],
+    "far": "crossed-impostor"
+  },
+  "CommonTree_3": {
+    "height": 6.2,
+    "sourceTriangles": 3505,
+    "lodTriangles": [
+      900,
+      4
+    ],
+    "far": "crossed-impostor"
+  },
+  "Pine_1": {
+    "height": 8.2,
+    "sourceTriangles": 3947,
+    "lodTriangles": [
+      900,
+      4
+    ],
+    "far": "crossed-impostor"
+  },
+  "Pine_2": {
+    "height": 8.2,
+    "sourceTriangles": 3648,
+    "lodTriangles": [
+      900,
+      4
+    ],
+    "far": "crossed-impostor"
+  },
+  "Pine_3": {
+    "height": 8.2,
+    "sourceTriangles": 4964,
+    "lodTriangles": [
+      899,
+      4
+    ],
+    "far": "crossed-impostor"
+  },
+  "TwistedTree_1": {
+    "height": 6.2,
+    "sourceTriangles": 9564,
+    "lodTriangles": [
+      900,
+      4
+    ],
+    "far": "crossed-impostor"
+  },
+  "TwistedTree_2": {
+    "height": 6.2,
+    "sourceTriangles": 9134,
+    "lodTriangles": [
+      900,
+      4
+    ],
+    "far": "crossed-impostor"
+  },
+  "TwistedTree_3": {
+    "height": 6.2,
+    "sourceTriangles": 10089,
+    "lodTriangles": [
+      900,
+      4
+    ],
+    "far": "crossed-impostor"
+  },
+  "DeadTree_1": {
+    "height": 5.7,
+    "sourceTriangles": 6169,
+    "lodTriangles": [
+      900,
+      4
+    ],
+    "far": "crossed-impostor"
+  },
+  "DeadTree_2": {
+    "height": 5.7,
+    "sourceTriangles": 6557,
+    "lodTriangles": [
+      899,
+      4
+    ],
+    "far": "crossed-impostor"
+  },
+  "DeadTree_3": {
+    "height": 5.7,
+    "sourceTriangles": 5802,
+    "lodTriangles": [
+      900,
+      4
+    ],
+    "far": "crossed-impostor"
+  },
+  "Bush_Common": {
+    "height": 1.1,
+    "sourceTriangles": 900,
+    "lodTriangles": [
+      320,
+      32
+    ],
+    "far": "decimated"
+  },
+  "Bush_Common_Flowers": {
+    "height": 1.1,
+    "sourceTriangles": 1368,
+    "lodTriangles": [
+      320,
+      32
+    ],
+    "far": "decimated"
+  },
+  "Fern_1": {
+    "height": 0.8,
+    "sourceTriangles": 288,
+    "lodTriangles": [
+      288,
+      31
+    ],
+    "far": "decimated"
+  },
+  "Plant_1": {
+    "height": 0.9,
+    "sourceTriangles": 120,
+    "lodTriangles": [
+      120,
+      32
+    ],
+    "far": "decimated"
+  },
+  "Plant_1_Big": {
+    "height": 1.6,
+    "sourceTriangles": 360,
+    "lodTriangles": [
+      320,
+      32
+    ],
+    "far": "decimated"
+  },
+  "Plant_7": {
+    "height": 0.8,
+    "sourceTriangles": 48,
+    "lodTriangles": [
+      48,
+      32
+    ],
+    "far": "decimated"
+  },
+  "Plant_7_Big": {
+    "height": 0.9,
+    "sourceTriangles": 112,
+    "lodTriangles": [
+      112,
+      32
+    ],
+    "far": "decimated"
+  },
+  "Flower_3_Group": {
+    "height": 0.65,
+    "sourceTriangles": 755,
+    "lodTriangles": [
+      320,
+      32
+    ],
+    "far": "decimated"
+  },
+  "Flower_4_Group": {
+    "height": 0.65,
+    "sourceTriangles": 1690,
+    "lodTriangles": [
+      320,
+      32
+    ],
+    "far": "decimated"
+  },
+  "Mushroom_Common": {
+    "height": 0.45,
+    "sourceTriangles": 880,
+    "lodTriangles": [
+      319,
+      30
+    ],
+    "far": "decimated"
+  },
+  "Mushroom_Laetiporus": {
+    "height": 0.45,
+    "sourceTriangles": 3216,
+    "lodTriangles": [
+      320,
+      32
+    ],
+    "far": "decimated"
+  },
+  "Rock_Medium_1": {
+    "height": 0.9,
+    "sourceTriangles": 342,
+    "lodTriangles": [
+      320,
+      32
+    ],
+    "far": "decimated"
+  },
+  "Rock_Medium_2": {
+    "height": 0.9,
+    "sourceTriangles": 244,
+    "lodTriangles": [
+      244,
+      30
+    ],
+    "far": "decimated"
+  },
+  "Rock_Medium_3": {
+    "height": 0.9,
+    "sourceTriangles": 522,
+    "lodTriangles": [
+      320,
+      32
+    ],
+    "far": "decimated"
+  }
+}

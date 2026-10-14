@@ -429,7 +429,7 @@ export class Game {
       alive("building the world");
     }
     setLoading("Loading characters…", 0.8);
-    await Promise.all([preloadAvatars(), preloadHorse()]); // resolve null on failure: capsules / box horses
+    await Promise.all([preloadAvatars(), preloadHorse(), this.planet.props.ready]); // resolve null on failure: capsules / box horses
     alive("loading characters");
     if (this.planet.town) {
       // Portus: the castle town is in the scene before the probe and the warm-up (falls back to plain colliders).
