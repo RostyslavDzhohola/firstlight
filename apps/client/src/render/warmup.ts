@@ -151,6 +151,9 @@ export async function warmup(
   const { scene, camera, renderer } = ctx;
   const restore: (() => void)[] = [];
   const t0 = performance.now();
+  // Builds during a warm-up are the point of it, not post-warm-up hitches: e.g. the first-visit
+  // probe's warm-up opens a window and the full warm-up right after compiles what it didn't draw.
+  stats.watching = 0;
   const src = renderer as unknown as TimestampSource;
   try {
     for (const h of opts.hooks ?? []) h.forceAll(true);
