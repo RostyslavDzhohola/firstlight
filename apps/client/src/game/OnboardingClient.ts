@@ -223,7 +223,7 @@ export class OnboardingClient implements ClientSystem {
     this.phrased = false;
     if (completed.length && completed[0] !== "attack") g.audio.play("ui");
     if (steps.allDone) {
-      this.hud.showDone(this.xpPaid || ONBOARDING.DONE_XP + down * ONBOARDING.DUMMY_XP);
+      this.hud.showDone(this.xpPaid || ONBOARDING.DONE_XP + down * ONBOARDING.DUMMY_XP, !steps.movedOn("portal"));
       this.doneUntil = now + DONE_CARD_MS;
       this.finish();
       return;

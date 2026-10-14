@@ -41,7 +41,11 @@ export class OnboardingHud {
   /** Cached layout for callout placement (re-measured when the panel or the label text changes). */
   private avoid: Rect | null = null;
   private boxSize: { w: number; h: number } | null = null;
-  private readonly onResize = () => { this.avoid = null; };
+  private readonly onResize = () => {
+    this.avoid = null;
+    this.boxSize = null;
+    this.revealCurrent();
+  };
   private readonly calloutText: HTMLElement;
   private readonly calloutSub: HTMLElement;
   private readonly skipNote: HTMLElement;
@@ -113,6 +117,7 @@ export class OnboardingHud {
       this.last.paid = paid;
       this.skipNote.textContent = paid ? "XP and the Spark medal are yours; the rest is tips." : "Esc → Skip tutorial. Skipping pays nothing more.";
     }
+    let reveal = false;
     const cur = steps.current;
     const state = STEPS.map((s) => (steps.isDone(s.id) ? "d" : s === cur ? "n" : "-")).join("");
     if (state !== this.last.state) {
@@ -128,7 +133,7 @@ export class OnboardingHud {
         this.segs[i]!.className = done ? "is-done" : s === cur ? "is-now" : "";
       });
       this.avoid = null;
-      this.revealCurrent();
+      reveal = true;
       this.railText.replaceChildren("Step ");
       el("b", "", this.railText, String(cur ? STEPS.indexOf(cur) + 1 : STEPS.length));
       this.railText.append(` of ${STEPS.length}`);
@@ -138,8 +143,11 @@ export class OnboardingHud {
       this.last.step = stepKey;
       this.last.bar = "";
       this.avoid = null;
+      reveal = true;
       if (cur) this.buildCard(cur);
     }
+    // After the new card is in: a taller card leaves the list less room.
+    if (reveal) this.revealCurrent();
     if (cur?.bar && this.barFill && this.barText) {
       const text = steps.progressText(cur.id);
       if (text !== this.last.bar) {
@@ -223,13 +231,17 @@ export class OnboardingHud {
       return;
     }
     this.callout.hidden = false;
-    // Measured once per label or panel change, not every frame.
-    this.boxSize ??= { w: this.calloutBox.offsetWidth || 160, h: this.calloutBox.offsetHeight || 48 };
+    // Measured once per label, panel or window change, not every frame (a zero size isn't kept).
+    if (!this.boxSize) {
+      const w = this.calloutBox.offsetWidth;
+      const h = this.calloutBox.offsetHeight;
+      if (w > 0 && h > 0) this.boxSize = { w, h };
+    }
     if (!this.avoid && !this.widget.hidden) {
       const r = this.widget.getBoundingClientRect();
       this.avoid = r.width > 0 ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom } : null;
     }
-    const p = placeCallout(ndc, innerWidth, innerHeight, this.boxSize, this.avoid);
+    const p = placeCallout(ndc, innerWidth, innerHeight, this.boxSize ?? { w: 160, h: 48 }, this.avoid);
     const key = `${Math.round(p.x)},${Math.round(p.y)},${p.edge ? Math.round(p.angle * 20) : "-"},${p.flip ? 1 : 0}`;
     if (key === this.last.callout) return;
     this.last.callout = key;
@@ -240,8 +252,9 @@ export class OnboardingHud {
     this.callout.classList.toggle("is-flip", p.flip);
   }
 
-  /** The end card: XP, the medal, and the Star/Fork links once the repo is public. */
-  showDone(xp: number) {
+  /** The end card: XP, the medal, and the Star/Fork links once the repo is public. `portalTaken`:
+   *  the player walked into a portal (else the last tip moved on by itself and the card says where to go). */
+  showDone(xp: number, portalTaken = true) {
     this.list.hidden = true;
     this.callout.hidden = true;
     this.root.querySelector(".fl-onb__rail")?.remove();
@@ -250,7 +263,7 @@ export class OnboardingHud {
     const k = el("span", "fl-onb__step-k", c, "Tutorial complete · ");
     el("b", "", k, `+${xp} XP`);
     el("h2", "", c, "You're ready");
-    rich(el("p", "", c), "The **Spark** medal is yours: wear its title from the journal (**J**). Your inventory is on **I**. The portals around the plaza lead to the three planets.");
+    rich(el("p", "", c), `The **Spark** medal is yours: wear its title from the journal (**J**). Your inventory is on **I**. ${portalTaken ? "The portals around the plaza lead to the three planets." : "When you're ready, walk into the **Arcadia** portal on the plaza (levels 1–7)."}`);
     if (this.repoUrl) this.repoLinks(c, this.repoUrl);
   }
 

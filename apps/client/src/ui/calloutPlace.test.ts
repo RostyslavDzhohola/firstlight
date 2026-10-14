@@ -50,4 +50,36 @@ describe("world callout placement", () => {
       expect(underPanel).toBe(false);
     }
   });
+
+  it("points outward for a target almost or exactly behind the camera (review: the arrow pointed back in)", () => {
+    const near = placeCallout({ x: 0.01, y: 0, z: 1.2 }, W, H, BOX, null);
+    expect(near.x).toBeLessThan(W / 2);
+    expect(Math.abs(near.angle)).toBeGreaterThan(Math.PI * 0.9); // left, towards its edge
+    const dead = placeCallout({ x: 0, y: 0, z: 1.2 }, W, H, BOX, null);
+    expect(dead.y).toBeGreaterThan(H / 2);
+    expect(dead.angle).toBeCloseTo(Math.PI / 2, 5); // down
+    const beside = placeCallout({ x: 0.0228, y: -0.0167, z: 1.05 }, 1280, 720, BOX, { left: 18, top: 86, right: 262, bottom: 574 });
+    expect(beside.x).toBeGreaterThan(262);
+    expect(Math.cos(beside.angle)).toBeLessThan(0); // still towards the upper left, past the panel
+    expect(Math.sin(beside.angle)).toBeLessThan(0);
+  });
+
+  it("stays finite for a point on the camera plane", () => {
+    const p = placeCallout({ x: Infinity, y: NaN, z: NaN }, W, H, BOX, PANEL);
+    for (const v of [p.x, p.y, p.angle]) expect(Number.isFinite(v)).toBe(true);
+    expect(p.edge).toBe(true);
+  });
+
+  it("keeps the label off the panel on a narrow screen, and on screen near the right edge", () => {
+    const panel = { left: 21, top: 80, right: 301, bottom: 600 };
+    const box = { w: 270, h: 50 };
+    const p = placeCallout({ x: -0.6, y: 0, z: 0.5 }, 600, 720, box, panel);
+    expect(p.x).toBeGreaterThan(panel.right);
+    expect(p.flip).toBe(false); // flipping would put the label back over the panel
+    const right = placeCallout(ndc(1550, 450), W, H, BOX, PANEL);
+    expect(right.edge).toBe(false);
+    expect(right.flip).toBe(true);
+    const left = placeCallout(ndc(900, 450), W, H, BOX, PANEL);
+    expect(left.flip).toBe(false);
+  });
 });

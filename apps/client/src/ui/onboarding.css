@@ -41,3 +41,4 @@
 .fl-onb .fl-callout.is-edge .fl-callout__arrow { display: block; position: absolute; left: -9px; top: -9px; width: 18px; height: 18px; background: var(--photon-2); clip-path: polygon(0 15%, 100% 50%, 0 85%, 25% 50%); transform: rotate(var(--a, 0rad)); }
 .fl-onb .fl-callout.is-edge .fl-callout__box { left: 16px; top: -24px; }
 .fl-onb .fl-callout.is-edge.is-flip .fl-callout__box { left: auto; right: 16px; }
+.fl-onb .fl-callout.is-flip:not(.is-edge) .fl-callout__box { left: auto; right: 10px; }
