@@ -16,6 +16,7 @@ import type { Identity } from "../auth/identity.ts";
 import { actorPos, inSaddle, pushHistory, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
 import { characterRepo, withTx } from "./characters.ts";
 import { SWIM_FLOAT } from "@firstlight/shared/planet/water";
+import { structureCollider } from "@firstlight/shared/planet/town";
 import { CLOSE, hub, type HubRoom } from "./hub.ts";
 
 /** Ban lookup for reconnects; set at boot when the database is available. */
@@ -211,12 +212,24 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     this.bodyDef = BODIES[options.body];
     this.terrain = createTerrain(this.bodyDef);
     const terrain = this.terrain;
+    // Portus town structures (D38): indestructible walls, houses and towers, the same shared solids
+    // the client controller collides with; they count like intact props (tops hold feet, insides refuse).
+    const structures = structureCollider(terrain);
+    const footing = { top: 0, inside: false };
     this.moveWorld = {
       radius: this.bodyDef.radius,
       waterLevel: this.bodyDef.waterLevel,
       groundAt: (x, y, z) => terrain.groundHeightAt(x, y, z),
-      footing: (x, y, z, step) => this.host.props?.footing?.(x, y, z, step) ?? NO_FOOTING,
-      crosses: (ax, ay, az, bx, by, bz) => this.host.props?.crosses?.(ax, ay, az, bx, by, bz) ?? false,
+      footing: (x, y, z, step) => {
+        const props = this.host.props?.footing?.(x, y, z, step) ?? NO_FOOTING;
+        if (!structures) return props;
+        const town = structures.footing(x, y, z, step);
+        footing.top = Math.max(props.top, town.top);
+        footing.inside = props.inside || town.inside;
+        return footing;
+      },
+      crosses: (ax, ay, az, bx, by, bz) =>
+        (this.host.props?.crosses?.(ax, ay, az, bx, by, bz) ?? false) || (structures?.crosses(ax, ay, az, bx, by, bz) ?? false),
     };
     this.state.body = options.body;
     this.state.copy = options.copy;
