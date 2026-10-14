@@ -424,6 +424,8 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   `BodyRoom.placeBody`: on the ground and cleared of structures the way the client's first frame
   pushes (`clearSpot`, 2 cm to spare; nearest clear ring spot where pushes can't settle), so a save
   inside the keep can't loop on corrections (review round 1, B1); the move budget is unchanged.
+  The Hall of Firsts board's stand (plinth, backing, posts, cornice; drawn by QuestWorld) is part of
+  the same shared solids, placed at the authoritative `hall_wall` spot facing the plaza (round 2, S4).
   Why: the brief's "solid to walk into", with one set of solids so the server never corrects an
   honest client.
 - **D40 (run, 21:15Z):** deploying the town: `PROTOCOL_VERSION` 2 → 3, and the client (Vercel, with

@@ -243,3 +243,13 @@ Worked in `fl-wt-village-fix` on `lane/portus-village-fix`.
   100.4k. The Medium shadow box (±20 m, ~53 × 40 m on the ground under Portus' 49° sun) holds most of
   the plaza's houses, so cells buy little at the spawn for many draws: one copy it is.
 
+## Round 2 fix (Codex review `2026-10-14-portus-village-review-r2-gpt-6.1-sol.md`, S4)
+
+The Hall of Firsts board's stand is solid: `HALL_STAND_SOLIDS` (plinth, backing with face and frame,
+posts, cornice) in `planet/town.ts`, built from the shared `HALL_BOARD` sizes that QuestWorld draws,
+placed in the board's frame at `hall_wall` and appended to `townSolids`, so the client controller, the
+server's movement validation and `placeBody` all use it. Tests on all three sides (shared walk and
+push-out, server teleport and walk-through, client drawn volumes inside the solids) fail without it.
+Known limit: offline mode (`?offline`, `?bench`) has no QuestWorld, so there the stand blocks without
+being drawn, at the Hall wall spot only.
+
