@@ -106,7 +106,7 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 | Chrome play-test: black world after Settings → Low | MERGED c9ddf29 (deployed) | — |
 | Chrome play-test UX (tutorial HUD + T toggle, map labels, menu hints, hostile spawns ≥ 45 m off pads, keyed NPC copy state) | MERGED 9356edb (Codex ×2; deployed 16:08Z; 1081 tests). Deferred nit: OnboardingClient lifecycle tests | — |
 | Vegetation (CC0 Quaternius trees/undergrowth, impostors, wind; Medium meshes to 30 m) | MERGED 868fb34 (Codex rounds 1–4; hardware-GPU A/B: no frame-time regression, draws +1–13 %; 1106 tests) | — |
-| Portus walled village (Blender bake-off) | Opus design chosen; Opus integrating (town floor, shared colliders, packed assets, LOD) | fl-wt-village, lane/portus-village |
+| Portus castle town (Opus 5.5 Blender design; flat floor, shared colliders, 2.8 MB packed town, protocol 3) | MERGED 3eda935 (Codex code ×3 + browser ×3; Medium no measured cost, Low cpuslow=4 p50 60 fps, p95 18.6 → 23.9 ms; 1162 tests) | — |
 
 ## Measured numbers
 
