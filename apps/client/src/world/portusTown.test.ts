@@ -4,8 +4,8 @@ import { writeFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
 import { createTerrain } from "@firstlight/shared";
-import { TOWN_LAYOUT, TOWN_PREFABS } from "@firstlight/shared/content/portusTown";
-import { townDir, townSolids } from "@firstlight/shared/planet/town";
+import { TOWN_LAYOUT, TOWN_PREFABS, TOWN_STREETS } from "@firstlight/shared/content/portusTown";
+import { townCoords, townDir, townSolids } from "@firstlight/shared/planet/town";
 import { emptyStored, resolveSettings, TIER_TABLE, type Tier } from "../render/quality.ts";
 import { testTownAssets } from "../render/townAssets.testutil.ts";
 import { PortusTown, TOWN_LOD_DISTANCE } from "./PortusTown.ts";
@@ -60,6 +60,32 @@ describe("Portus town view", () => {
       expect(lod0).toBe(TOWN_LAYOUT.reduce((s, it) => s + TOWN_PREFABS[it[0]]!.tris[0], 0));
       town.dispose();
     }
+  });
+
+  it("lays the road paving onto the rising rim beyond the flat floor (no buried decal)", async () => {
+    const town = await townFor("medium");
+    const road = TOWN_STREETS.find((st) => st.name === "east")!.pts;
+    const nearRoad = (e: number, n: number) => road.some(([a, b], k) => {
+      const q = road[k + 1];
+      if (!q) return false;
+      const de = q[0] - a, dn = q[1] - b, t = Math.max(0, Math.min(1, ((e - a) * de + (n - b) * dn) / (de * de + dn * dn)));
+      return Math.hypot(e - a - de * t, n - b - dn * t) < 3.5; // the strip's edge vertices sit 3 m out
+    });
+    let checked = 0;
+    for (const m of town.cells[0]!.variants[0]) {
+      const a = m.mesh.geometry.getAttribute("position").array as Float32Array;
+      for (let i = 0; i < a.length; i += 3) {
+        const [e, n] = townCoords(a[i]!, a[i + 1]!, a[i + 2]!, R);
+        if (Math.hypot(e, n) < 76 || !nearRoad(e, n)) continue;
+        const l = Math.hypot(a[i]!, a[i + 1]!, a[i + 2]!);
+        const above = l - R - terrain.groundHeight(a[i]! / l, a[i + 1]! / l, a[i + 2]! / l);
+        expect(above).toBeGreaterThan(-0.02);
+        expect(above).toBeLessThan(0.25);
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(10);
+    town.dispose();
   });
 
   it("stays within the draw and triangle budget at the spawn views on every tier", async () => {

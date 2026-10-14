@@ -34,6 +34,12 @@ export const TOWN_CELL = 192;
 const GRID_HALF = 96;
 const GRID_N = Math.round((2 * GRID_HALF) / TOWN_CELL);
 
+/**
+ * Prefabs wider than this (m) are ground decals spanning the town (the paving): their triangles are
+ * split between cells, and their vertices follow the ground where it rises off the flat floor.
+ */
+const DECAL_RADIUS = 30;
+
 /** Camera distance (m, to a cell's bounding sphere) beyond which a cell shows LOD1; 0 = always LOD1. */
 export const TOWN_LOD_DISTANCE: Record<ResolvedSettings["tier"], number> = { low: 0, medium: 60, high: 90, ultra: 140 };
 const LOD_HYSTERESIS = 4;
@@ -148,7 +154,7 @@ export class PortusTown {
         for (const variant of [0, 1] as const) {
           const part = parts[variant];
           if (!part) continue;
-          if (pre.radius > TOWN_CELL / 2) {
+          if (pre.radius > DECAL_RADIUS) {
             // A decal spanning many cells (the paving): split its triangles by their centroid. At the
             // pole with yaw 0, prefab x = east and z = -north.
             const byCell = new Map<number, number[]>();
@@ -237,7 +243,7 @@ export class PortusTown {
     for (const { part, p, tris } of b.parts) {
       const n = part.position.length / 3;
       const s = p.scale;
-      const conform = TOWN_PREFABS[p.prefab]!.radius > TOWN_CELL / 2;
+      const conform = TOWN_PREFABS[p.prefab]!.radius > DECAL_RADIUS;
       for (let i = 0; i < n; i++) {
         const x = part.position[i * 3]! * s, y = part.position[i * 3 + 1]! * s, z = part.position[i * 3 + 2]! * s;
         let wx = p.px + p.rx * x + p.ux * y + p.fx * z;
