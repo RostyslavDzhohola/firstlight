@@ -10,6 +10,10 @@ import {
 import { LOOKS } from "../render/looks.ts";
 import { skyDir, type V3 } from "../render/sunFrame.ts";
 import { grassWeight, padGrassMask, PALETTES, terrainColor } from "./palette.ts";
+import { townCoords } from "@firstlight/shared/planet/townFrame";
+import { townGrass } from "@firstlight/shared/planet/townGround";
+
+const townAt: [number, number] = [0, 0];
 
 export interface ChunkRequest {
   /** "full" (default) builds everything; "bake" returns only the bake attribute. */
@@ -197,9 +201,13 @@ self.onmessage = (e: MessageEvent<ChunkRequest>) => {
       const nz = hash01(gi, gj, req.face, 77) * 2 - 1;
       let w = grassWeight(pal, g.heights[v]!, water, g.flatness[v]!, nz);
       if (hub) {
-        gridDir(req.face, gi, gj, n, dir);
-        const dc = Math.hypot(dir[0], dir[1] - 1, dir[2]) * R;
-        w *= Math.max(0, Math.min(1, (dc - 26) / 8));
+        // The castle town (D38): no grass on its paving, streets or under its buildings; it grows
+        // in the gaps, the gardens and the meadow outside the walls.
+        if (w > 0) {
+          gridDir(req.face, gi, gj, n, dir);
+          townCoords(dir[0], dir[1], dir[2], R, townAt);
+          w *= townGrass(townAt[0], townAt[1]);
+        }
       } else if (w > 0) {
         gridDir(req.face, gi, gj, n, dir);
         w *= padGrassMask(pads, dir[0], dir[1], dir[2], R);

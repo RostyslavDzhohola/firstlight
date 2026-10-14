@@ -18,6 +18,8 @@ import { SkyPlanets } from "./skyPlanets.ts";
 import { LOOKS } from "./looks.ts";
 import { buildPost } from "./post.ts";
 import { WeatherFx } from "./weather.ts";
+import { stripTexture } from "./townAssets.ts";
+import { townMaterial } from "./townMaterial.ts";
 import { SunLight } from "three/addons/lights/SunLight.js";
 import { SunLightNode } from "three/addons/lights/SunLightNode.js";
 
@@ -177,6 +179,32 @@ for (const backendName of ["webgpu", "webgl2"] as const) {
       for (const m of props.group.children) {
         (m as THREE.InstancedMesh).count = 1;
         expectClean(build(renderer, scene, camera, m));
+      }
+    });
+
+    it("Portus town: opaque and cutout, with and without normal maps, casting and receiving shadows", () => {
+      const layers = 16;
+      const color = stripTexture(new Uint8Array(4 * layers).fill(200), 1, layers, true);
+      const normal = stripTexture(new Uint8Array(4 * layers).fill(128), 1, layers, false);
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(new Float32Array([0, 150, 0, 1, 150, 0, 0, 150, 1]), 3));
+      g.setAttribute("normal", new THREE.BufferAttribute(new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]), 3));
+      g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array([0, 0, 2, 0, 0, 2]), 2));
+      g.setAttribute("color", new THREE.BufferAttribute(new Uint8Array(12).fill(255), 4, true));
+      g.setAttribute("townMat", new THREE.BufferAttribute(new Uint8Array([3, 200, 0, 2, 3, 200, 0, 2, 3, 200, 0, 2]), 4, true));
+      g.setIndex([0, 1, 2]);
+      for (const kind of ["opaque", "cutout"] as const) {
+        for (const normals of [true, false]) {
+          const scene = sceneWithLights();
+          const mesh = new THREE.Mesh(g, townMaterial(kind, normals, color, normal));
+          mesh.receiveShadow = true;
+          mesh.castShadow = true;
+          scene.add(mesh);
+          const b = build(renderer, scene, camera, mesh);
+          expectClean(b);
+          // Both kit-texture lookups go through the layer arrays.
+          expect(b.fragment).toMatch(backendName === "webgpu" ? /texture_2d_array/ : /sampler2DArray/);
+        }
       }
     });
 

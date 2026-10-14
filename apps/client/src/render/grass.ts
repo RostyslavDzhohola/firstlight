@@ -146,8 +146,15 @@ export class GrassSystem {
   blades = 0;
 
   /** @param pads landing pads: no blade roots on their stone discs (the per-vertex weight alone
-   *  bleeds into the disc through interpolation). */
-  constructor(private readonly radiusOfBody: number, private readonly quadsPerFace: number, private readonly pads: readonly Dir[] = []) {
+   *  bleeds into the disc through interpolation).
+   *  @param mask optional per-blade factor 0..1 at a planet point (the Portus town's paving and
+   *  footprints): a blade root survives only where it is above 0.5. */
+  constructor(
+    private readonly radiusOfBody: number,
+    private readonly quadsPerFace: number,
+    private readonly pads: readonly Dir[] = [],
+    private readonly mask: ((x: number, y: number, z: number) => number) | null = null,
+  ) {
     this.group.name = "grass";
   }
 
@@ -334,6 +341,7 @@ export class GrassSystem {
         const l = Math.hypot(x, y, z);
         if (padGrassMask(this.pads, x / l, y / l, z / l, this.radiusOfBody) <= 0) continue;
       }
+      if (this.mask && this.mask(x, y, z) <= 0.5) continue;
       const scale = 0.55 + rand() * 0.75 * (0.6 + 0.4 * gw);
       const o = n * 4;
       arr[o] = x;

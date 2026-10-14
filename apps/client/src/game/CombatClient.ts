@@ -440,12 +440,15 @@ export class CombatClient {
    */
   private rayProps(o: THREE.Vector3, d: THREE.Vector3, max: number): number {
     const props = this.game.player.getColliders();
-    if (!props?.raycast) return Infinity;
+    const town = this.game.player.getStructures(); // the Portus town's walls stop tracers too (D38)
+    if (!props?.raycast && !town?.raycast) return Infinity;
     const p = this.game.player.pos;
     const head = _head.copy(p).addScaledVector(_up.copy(p).normalize(), 1.6);
     const skip = Math.max(0, head.sub(o).dot(d));
     if (skip >= max) return Infinity;
-    return skip + props.raycast(_from.copy(o).addScaledVector(d, skip), d, max - skip);
+    _from.copy(o).addScaledVector(d, skip);
+    const t = Math.min(props?.raycast?.(_from, d, max - skip) ?? Infinity, town?.raycast?.(_from, d, max - skip) ?? Infinity);
+    return skip + t;
   }
 
   private rayTerrain(o: THREE.Vector3, d: THREE.Vector3, max: number): number {

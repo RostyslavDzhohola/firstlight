@@ -381,6 +381,8 @@ export class Game {
     this.particles.setMoteColor(this.planet.look.mote);
     this.player ??= new PlayerController(this.planet.terrain, this.planet.body.waterLevel);
     this.player.setTerrain(this.planet.terrain, this.planet.body.waterLevel);
+    // The Portus town's structures block like the server's (null off Portus).
+    this.player.setStructures(this.planet.town?.moveColliders ?? null);
     this.portals = new Portals(this.ctx.scene, body, this.planet.terrain);
     this.audio.setMusic(body);
     this.piles = new PilesView(this.ctx.scene);
@@ -429,6 +431,12 @@ export class Game {
     setLoading("Loading characters…", 0.8);
     await Promise.all([preloadAvatars(), preloadHorse()]); // resolve null on failure: capsules / box horses
     alive("loading characters");
+    if (this.planet.town) {
+      // Portus: the castle town is in the scene before the probe and the warm-up (falls back to plain colliders).
+      setLoading("Raising the town…", 0.81);
+      await this.planet.town.ready;
+      alive("raising the town");
+    }
     if (!this.self) {
       this.self = new AvatarView(choice?.palette ?? stored.palette, choice?.starter ?? stored.starter);
       this.self.root.name = "selfAvatar";
@@ -491,6 +499,7 @@ export class Game {
     return {
       forceAll: (on: boolean) => {
         this.planet.props.setForceAll(on);
+        this.planet.town?.setForceAll(on);
         avatars.forceAll(on);
         cosmetics.forceAll(on);
         horses.forceAll(on);

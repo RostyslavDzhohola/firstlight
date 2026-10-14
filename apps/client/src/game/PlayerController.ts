@@ -1,11 +1,12 @@
 // Local player movement on a sphere: run/sprint/jump/dodge/swim/fall damage, client-predicted.
 // The server validates (SPEC §5.3); `correct` messages snap us back. Intact breakable props block
-// (the player slides along them) and can be stood on (MoveColliders, set by the destruction view).
+// (the player slides along them) and can be stood on (MoveColliders, set by the destruction view),
+// and so do the Portus town's structures (setStructures: the shared solids the server checks, D38).
 // Runs every frame: module scratch vectors, no allocations.
 
 import * as THREE from "three/webgpu";
 import type { Terrain } from "@firstlight/shared";
-import { emptyContact, type PropContact } from "@firstlight/shared/planet/collide";
+import { emptyContact, resetContact, type PropContact } from "@firstlight/shared/planet/collide";
 import { ANIM } from "@firstlight/shared/net/schema";
 import { deepWater, SWIM_FLOAT } from "@firstlight/shared/planet/water";
 import type { Input } from "./input.ts";
@@ -85,7 +86,9 @@ export class PlayerController {
   /** Riding or just off the horse (HorseClient): weapons stay lowered (CombatClient), as on the server. */
   saddleLocked = false;
   private colliders: MoveColliders | null = null;
+  private structures: MoveColliders | null = null;
   private readonly contact = emptyContact();
+  private readonly structureContact = emptyContact();
 
   constructor(private terrain: Terrain, private waterLevel: number) {}
 
@@ -101,6 +104,15 @@ export class PlayerController {
 
   getColliders(): MoveColliders | null {
     return this.colliders;
+  }
+
+  /** Indestructible structures of this body (the Portus town; null elsewhere). */
+  setStructures(c: MoveColliders | null) {
+    this.structures = c;
+  }
+
+  getStructures(): MoveColliders | null {
+    return this.structures;
   }
 
   /**
@@ -216,22 +228,21 @@ export class PlayerController {
     // carry the body across a thin prop (a fence blocks 0.47 m either side of its middle), and a
     // fast fall can't skip a top's 0.4 m landing band.
     let floorR = 0;
-    if (!this.colliders) this.pos.addScaledVector(this.vel, dt);
+    if (!this.colliders && !this.structures) this.pos.addScaledVector(this.vel, dt);
     else {
       const c = this.contact;
+      const sc = this.structureContact;
       const steps = Math.min(MAX_SUBSTEPS, Math.max(1, Math.ceil(Math.max((vH.length() * dt) / SUBSTEP_H, (Math.abs(vUpNew) * dt) / SUBSTEP_V))));
       const h = dt / steps;
       for (let k = 0; k < steps; k++) {
         this.pos.addScaledVector(this.vel, h);
-        this.colliders.resolve(this.pos, c);
-        if (c.pushed) {
-          const n = _dir.set(c.nx, c.ny, c.nz);
-          const into = this.vel.dot(n);
-          if (into < 0) this.vel.addScaledVector(n, -into);
-          const intoH = vH.dot(n);
-          if (intoH < 0) vH.addScaledVector(n, -intoH);
-          const intoDodge = this.dodgeDir.dot(n);
-          if (this.dodgeT > 0 && intoDodge < 0) this.dodgeDir.addScaledVector(n, -intoDodge);
+        if (this.colliders) this.colliders.resolve(this.pos, c);
+        else resetContact(c);
+        if (c.pushed) this.slide(c, vH);
+        if (this.structures) {
+          this.structures.resolve(this.pos, sc);
+          if (sc.pushed) this.slide(sc, vH);
+          if (sc.floor > c.floor) c.floor = sc.floor;
         }
         // A prop top only catches a player who isn't rising (a jump past an edge keeps going up).
         const su = _newUp.copy(this.pos).normalize();
@@ -295,6 +306,17 @@ export class PlayerController {
   }
 
   /** Over-the-shoulder camera. */
+  /** Drop the motion into a push (`c` from a resolve), so the body slides along what pushed it. */
+  private slide(c: PropContact, vH: THREE.Vector3) {
+    const n = _dir.set(c.nx, c.ny, c.nz);
+    const into = this.vel.dot(n);
+    if (into < 0) this.vel.addScaledVector(n, -into);
+    const intoH = vH.dot(n);
+    if (intoH < 0) vH.addScaledVector(n, -intoH);
+    const intoDodge = this.dodgeDir.dot(n);
+    if (this.dodgeT > 0 && intoDodge < 0) this.dodgeDir.addScaledVector(n, -intoDodge);
+  }
+
   placeCamera(camera: THREE.PerspectiveCamera) {
     const up = _up.copy(this.pos).normalize();
     const right = _right.crossVectors(this.camForward, up).normalize();
