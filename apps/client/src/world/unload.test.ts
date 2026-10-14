@@ -8,6 +8,7 @@ import { stubCanvasDocument, watchDisposals } from "../render/disposeWatch.testu
 import { lookKey } from "../render/warmupLooks.testutil.ts";
 import { pileSamples, PilesView } from "./PilesView.ts";
 import { Portals } from "./Portals.ts";
+import { LOOKS } from "../render/looks.ts";
 
 let restore: () => void;
 beforeAll(() => {
@@ -51,6 +52,27 @@ describe("QuestWorld", () => {
     const mats = [...w.all].filter((x) => (x as THREE.Material).isMaterial) as THREE.Material[];
     expect(mats.some((m) => !w.disposed.has(m))).toBe(true);
     expect(mats.filter((m) => (m as { map?: unknown }).map).every((m) => w.disposed.has(m))).toBe(true);
+  });
+});
+
+describe("portal rings", () => {
+  it("glow softer in Portus' town courts than on the planets, still over Portus' bloom threshold", () => {
+    const peak = (body: BodyId) => {
+      const portals = new Portals(new THREE.Scene(), body, createTerrain(body));
+      let best = 0;
+      portals.group.traverse((o) => {
+        const m = o as THREE.Mesh;
+        const p = (m.geometry as THREE.TorusGeometry | undefined)?.parameters as { radius?: number; tube?: number } | undefined;
+        if (!m.isMesh || p?.radius !== 2.2 || p.tube !== 0.16) return;
+        const c = (m.material as THREE.MeshBasicNodeMaterial).color;
+        best = Math.max(best, c.r, c.g, c.b);
+      });
+      portals.dispose();
+      return best;
+    };
+    const portus = peak("portus"), arcadia = peak("arcadia");
+    expect(portus).toBeLessThan(arcadia * 0.6);
+    expect(portus).toBeGreaterThan(LOOKS.portus.bloomThreshold);
   });
 });
 

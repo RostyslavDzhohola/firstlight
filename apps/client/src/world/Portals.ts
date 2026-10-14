@@ -15,6 +15,9 @@ export const PORTAL_COLORS: Record<BodyId, number> = {
   meridian: 0xff7a4a,
 };
 
+/** Portal ring brightness in Portus (the planets' portal homes use 4). */
+export const PORTUS_RING_GLOW = 2.2;
+
 function glow(color: number, k = 3, opacity = 1) {
   const m = new THREE.MeshBasicNodeMaterial({ color: new THREE.Color(color).multiplyScalar(k), transparent: opacity < 1, opacity, depthWrite: opacity >= 1 });
   // Glows brighter at night (shared uniform: no recompile as the day turns).
@@ -52,10 +55,13 @@ export class Portals {
       obj.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, fwd));
     };
 
+    // Portus' rings stand in the town's masonry courts: at the planets' strength their bloom washed out
+    // the arches round them by day (browser round 1). Still over the bloom threshold, so they glow.
+    const ringK = def.terrain.kind === "hub" ? PORTUS_RING_GLOW : 4;
     const addPortal = (to: BodyId, dir: THREE.Vector3, h: number, faceDir: THREE.Vector3) => {
       const color = PORTAL_COLORS[to];
       const g = new THREE.Group();
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(2.2, 0.16, 12, 48), glow(color, 4));
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(2.2, 0.16, 12, 48), glow(color, ringK));
       ring.position.y = 2.6;
       const disc = new THREE.Mesh(new THREE.CircleGeometry(2.05, 40), glow(color, 0.9, 0.35));
       disc.position.y = 2.6;
