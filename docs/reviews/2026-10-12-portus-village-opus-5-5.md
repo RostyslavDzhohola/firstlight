@@ -178,4 +178,12 @@ Run your own stack on free ports (others use 5294/5295): `PORT`, `CLIENT_PORT`, 
 
 ## Final run
 
-(filled in below after the full `pnpm test`.)
+- `pnpm typecheck`: shared, server and client clean (after the merge with main).
+- `pnpm test` (load average 20–29): **1,138 of 1,139 passed, 125 files**. The one failure,
+  `server/test/m11-egg-persistence.test.ts` (E1 on Arcadia: "timed out waiting for: offering coins"),
+  passes alone (16/16); it doesn't touch Portus. Before the merge the server project ran 664/664.
+- After that run: the paving lift beyond the flat floor was found broken by the one-cell change and
+  fixed (1752e2d, with a test that fails without it); `portusTown.test.ts` and `townAssets.test.ts`
+  rerun green, client typecheck clean.
+- The outer road ends climb the rim (up to 5 m over their last 13 m): a hill road; its quads follow
+  the ground per vertex, so check them for poking terrain in the browser (item 10).
