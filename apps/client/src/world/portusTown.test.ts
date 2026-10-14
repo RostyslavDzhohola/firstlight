@@ -8,11 +8,30 @@ import { TOWN_LAYOUT, TOWN_PREFABS, TOWN_STREETS } from "@firstlight/shared/cont
 import { townCoords, townDir, townSolids } from "@firstlight/shared/planet/town";
 import { emptyStored, resolveSettings, TIER_TABLE, type Tier } from "../render/quality.ts";
 import { testTownAssets } from "../render/townAssets.testutil.ts";
+import { SHADOW_ONLY_LAYER, sunRigFor } from "../render/atmosphere.ts";
+import { LOOKS } from "../render/looks.ts";
+import { skyDir } from "../render/sunFrame.ts";
 import { PortusTown, TOWN_LOD_DISTANCE } from "./PortusTown.ts";
 
 const terrain = createTerrain("portus");
 const R = terrain.body.radius;
 const settingsFor = (t: Tier) => resolveSettings(t, false, true, emptyStored(), new Set());
+
+/** The sun's shadow camera as the rig sets it (render/atmosphere.ts): Portus' reference sun over `focus`. */
+function sunShadowCamera(focusDir: readonly number[], extent: number): THREE.OrthographicCamera {
+  const focus = new THREE.Vector3(focusDir[0], focusDir[1], focusDir[2]).multiplyScalar(R);
+  const up = focus.clone().normalize();
+  const t = skyDir(up.x, up.y, up.z, LOOKS.portus.sunElev, LOOKS.portus.sunAz, [0, 0, 0]);
+  const z = new THREE.Vector3(t[0], t[1], t[2]);
+  const y = new THREE.Vector3(Math.abs(z.x) < 0.9 ? 1 : 0, 0, Math.abs(z.x) < 0.9 ? 0 : 1).cross(z).negate().normalize();
+  const cam = new THREE.OrthographicCamera(-extent, extent, extent, -extent, 1, 400);
+  cam.up.copy(y);
+  cam.position.copy(focus).addScaledVector(z, 200);
+  cam.lookAt(focus);
+  cam.layers.enable(SHADOW_ONLY_LAYER);
+  cam.updateMatrixWorld();
+  return cam;
+}
 
 /** Eye camera at town point `from`, 1.7 m up, looking at town point `to` (1.7 m up). */
 function eye(from: [number, number], to: [number, number]): THREE.PerspectiveCamera {
@@ -88,7 +107,7 @@ describe("Portus town view", () => {
     town.dispose();
   });
 
-  it("stays within the draw and triangle budget at the spawn views on every tier", async () => {
+  it("stays within the draw and triangle budget at the spawn views on every tier, shadow map included", async () => {
     const report: Record<string, unknown> = {};
     for (const t of ["low", "medium", "high", "ultra"] as const) {
       const town = await townFor(t);
@@ -96,19 +115,50 @@ describe("Portus town view", () => {
       for (const [name, [from, to]] of Object.entries(views)) {
         const cam = eye(from, to);
         town.update(cam);
-        const focus = cam.position.clone().setLength(R);
-        const st = town.stats(cam, focus, s.shadows.mode === "map" ? s.shadows.extent * Math.SQRT2 : 0);
-        report[`${t} ${name}`] = `${st.draws} draws + ${st.shadowDraws} shadow, ${(st.triangles / 1000).toFixed(1)}k tris`;
-        // A small, fixed share of the tier's draw budget, whatever the view.
-        // Two draws (opaque + cutout) and the same two in the shadow map, whatever the view: a
-        // sliver of every tier's budget (SPEC §7.3: Low 150, Medium 250).
-        expect(st.draws + st.shadowDraws, `${t} ${name}`).toBeLessThanOrEqual(Math.min(4, Math.round(TIER_TABLE[t].drawBudget * 0.02)));
+        const shadow = s.shadows.mode === "map" ? sunShadowCamera(townDir(from[0], from[1], R), s.shadows.extent) : undefined;
+        const st = town.stats(cam, shadow);
+        report[`${t} ${name}`] = `${st.draws} draws ${(st.triangles / 1000).toFixed(1)}k tris + shadow ${st.shadowDraws} draws ${(st.shadowTriangles / 1000).toFixed(1)}k tris`;
+        if (process.env.TOWN_BUDGET_OUT) writeFileSync(process.env.TOWN_BUDGET_OUT, JSON.stringify(report, null, 1));
+        // Two view draws (opaque + cutout) and two shadow draws (the depth-only copy + cutout): a
+        // sliver of every tier's draw budget (SPEC §7.3: Low 150, Medium 250, High 400, Ultra 600).
+        expect(st.draws, `${t} ${name}`).toBe(2);
+        expect(st.shadowDraws, `${t} ${name}`).toBe(t === "low" ? 0 : 2);
+        expect(st.draws + st.shadowDraws).toBeLessThanOrEqual(Math.round(TIER_TABLE[t].drawBudget * 0.02));
         expect(st.triangles, `${t} ${name}`).toBeLessThanOrEqual(t === "low" ? 150_000 : 200_000);
+        // The shadow pass: the depth-only copy and the cutout mesh, under the drawn LOD0 town.
+        if (t !== "low") expect(st.shadowTriangles, `${t} ${name}`).toBeLessThan(185_000);
         if (t === "low") expect(st.shadowDraws).toBe(0);
       }
       town.dispose();
     }
-    if (process.env.TOWN_BUDGET_OUT) writeFileSync(process.env.TOWN_BUDGET_OUT, JSON.stringify(report, null, 1));
+  });
+
+  it("casts the opaque town's shadow from a depth-only copy the view camera never draws", async () => {
+    const town = await townFor("medium");
+    const sm = town.shadowMesh!;
+    expect(sm.mesh.layers.isEnabled(SHADOW_ONLY_LAYER) && !sm.mesh.layers.isEnabled(0)).toBe(true);
+    expect(sm.mesh.castShadow).toBe(true);
+    expect(Object.keys(sm.mesh.geometry.attributes)).toEqual(["position"]); // no texture work in the shadow pass
+    expect((sm.mesh.material as THREE.Material & { colorNode?: unknown }).colorNode ?? null).toBeNull();
+    const lod0 = town.cells[0]!.variants[0];
+    for (const m of [...lod0, ...town.cells[0]!.variants[1]]) expect(m.mesh.castShadow).toBe(m.kind === "cutout");
+    // Fewer triangles than the drawn LOD0 opaque mesh: roof shells, no paving, no window glass.
+    const opaque0 = lod0.find((m) => m.kind === "opaque")!.triangles;
+    expect(sm.triangles).toBeLessThan(opaque0 * 0.92);
+    // ...and nothing that throws a shadow is missing: every house, tower and the keep is in it.
+    const bb = sm.mesh.geometry.boundingSphere!;
+    expect(bb.radius).toBeGreaterThan(60);
+    // The sun rig's shadow camera renders the layer (atmosphere.ts).
+    const rig = sunRigFor(new THREE.Scene(), LOOKS.portus);
+    expect(rig.sun.shadow.camera.layers.isEnabled(SHADOW_ONLY_LAYER)).toBe(true);
+    // With the cascaded sun (opt-in) the drawn town casts instead; without shadow maps nothing does.
+    const high = settingsFor("high");
+    town.applySettings({ ...high, on: { ...high.on, cascades: true } });
+    expect(sm.mesh.castShadow).toBe(false);
+    expect(lod0.every((m) => m.mesh.castShadow)).toBe(true);
+    town.applySettings(settingsFor("low"));
+    expect([sm, ...lod0].every((m) => !m.mesh.castShadow)).toBe(true);
+    town.dispose();
   });
 
   it("shows LOD1 beyond the tier's distance (always on Low) and hides the town below the horizon", async () => {

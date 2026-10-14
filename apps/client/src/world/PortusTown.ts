@@ -21,6 +21,7 @@ import { structureCollider, townPlacements, townSolids, type StructureCollider, 
 import type { Terrain } from "@firstlight/shared";
 import { flags } from "../config.ts";
 import type { MoveColliders } from "../game/PlayerController.ts";
+import { SHADOW_ONLY_LAYER } from "../render/atmosphere.ts";
 import type { ResolvedSettings } from "../render/quality.ts";
 import { preloadTown, type TownAssets, type TownPart, type TownSlot } from "../render/townAssets.ts";
 import { TOWN_EMISSIVE, townFallbackMaterial, townMaterial, type TownMaterialKind } from "../render/townMaterial.ts";
@@ -48,6 +49,29 @@ const DECAL_RADIUS = 30;
  * decoding stalls or a test hands in a source that never settles.
  */
 export const TOWN_LOAD_DEADLINE_MS = 18_000;
+
+/**
+ * Shadows (Medium+ shadow map). The drawn opaque town casts nothing; a shadow-only copy of it casts
+ * instead, on SHADOW_ONLY_LAYER (render/atmosphere.ts: only the sun's shadow camera renders it).
+ * It holds positions only, with a plain material, so the shadow pass doesn't sample the town's
+ * texture arrays; it leaves out what can't change a shadow map texel (the paving decal lying on the
+ * ground, the window glass inset in the walls) and uses the roof shells for buildings (the same
+ * silhouette; the tile relief is below a texel). The cutout meshes (leaves, vines) cast themselves:
+ * they need their alpha. Measured against cutting the shadow copy into 16–48 m cells that the shadow
+ * camera culls: from the plaza the shadow box needs most of the town anyway (48 m cells: +8 draws for
+ * −9 % triangles), so one mesh, 2 shadow draws as before.
+ */
+export const TOWN_SHADOW_LAYER = SHADOW_ONLY_LAYER;
+
+let shadowMaterial: THREE.MeshBasicNodeMaterial | null = null;
+/** Depth-only caster material for the shadow copy (no colour node: plain depth in the shadow pass). */
+function townShadowMaterial(): THREE.MeshBasicNodeMaterial {
+  if (!shadowMaterial) {
+    shadowMaterial = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide });
+    shadowMaterial.name = "town:shadow";
+  }
+  return shadowMaterial;
+}
 
 /** Camera distance (m, to a cell's bounding sphere) beyond which a cell shows LOD1; 0 = always LOD1. */
 export const TOWN_LOD_DISTANCE: Record<ResolvedSettings["tier"], number> = { low: 0, medium: 60, high: 90, ultra: 140 };
@@ -97,6 +121,8 @@ export class PortusTown {
   /** Resolves once the town meshes (or the fallback) are in the scene. */
   readonly ready: Promise<void>;
   readonly cells: Cell[] = [];
+  /** The shadow-only opaque copy (TOWN_SHADOW_LAYER), or null (fallback, or not built yet). */
+  shadowMesh: CellMesh | null = null;
   private fallback: THREE.InstancedMesh[] = [];
   private settings: ResolvedSettings;
   private assets: TownAssets | null = null;
@@ -141,7 +167,9 @@ export class PortusTown {
     } catch (e) {
       console.error("[town] building the town meshes failed; drawing plain colliders", e);
       for (const c of this.cells) for (const v of c.variants) for (const m of v) m.mesh.geometry.dispose();
+      this.shadowMesh?.mesh.geometry.dispose();
       this.cells.length = 0;
+      this.shadowMesh = null;
       this.group.clear();
       this.assets = null;
       this.buildFallback();
@@ -246,6 +274,52 @@ export class PortusTown {
       this.cells.push(cell);
     }
     this.cells.sort((a, b) => a.index - b.index);
+    this.buildShadowMesh(assets, placements);
+  }
+
+  /** The shadow-only opaque copy: positions only, roof shells, no paving or window glass. */
+  private buildShadowMesh(assets: TownAssets, placements: readonly TownPlacement[]) {
+    const glass = assets.manifest.slots.findIndex((x) => x.name === "MI_WindowGlass");
+    const parts: { part: TownPart; p: TownPlacement }[] = [];
+    let verts = 0;
+    TOWN_LAYOUT.forEach((item, i) => {
+      const pre = TOWN_PREFABS[item[0]]!;
+      if (pre.radius > DECAL_RADIUS) return; // the paving lies on the ground
+      const mesh = assets.meshes.get(pre.cls === "building" ? `${pre.name}__L1` : pre.name)!;
+      if (!mesh.opaque) return;
+      parts.push({ part: mesh.opaque, p: placements[i]! });
+      verts += mesh.opaque.position.length / 3;
+    });
+    const pos = new Float32Array(verts * 3);
+    const idx: number[] = [];
+    let vo = 0;
+    for (const { part, p } of parts) {
+      const n = part.position.length / 3, s = p.scale;
+      for (let i = 0; i < n; i++) {
+        const x = part.position[i * 3]! * s, y = part.position[i * 3 + 1]! * s, z = part.position[i * 3 + 2]! * s;
+        pos[(vo + i) * 3] = p.px + p.rx * x + p.ux * y + p.fx * z;
+        pos[(vo + i) * 3 + 1] = p.py + p.ry * x + p.uy * y + p.fy * z;
+        pos[(vo + i) * 3 + 2] = p.pz + p.rz * x + p.uz * y + p.fz * z;
+      }
+      for (let t = 0; t < part.index.length; t += 3) {
+        const a = part.index[t]!, b = part.index[t + 1]!, c = part.index[t + 2]!;
+        if (part.color[a * 4 + 3] === glass) continue; // inset panes: inside the wall's shadow anyway
+        idx.push(a + vo, b + vo, c + vo);
+      }
+      vo += n;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    g.setIndex(new THREE.BufferAttribute(Uint32Array.from(idx), 1));
+    g.computeBoundingSphere();
+    const mesh = new THREE.Mesh(g, townShadowMaterial());
+    mesh.name = "town:shadow";
+    mesh.layers.set(TOWN_SHADOW_LAYER);
+    mesh.matrixAutoUpdate = false;
+    (mesh as unknown as { static: boolean }).static = true;
+    mesh.receiveShadow = false;
+    this.shadowMesh = { mesh, kind: "opaque", triangles: idx.length / 3 };
+    this.group.add(mesh);
   }
 
   /** Bake a bucket's placed parts into one geometry (world positions; slot data per vertex). */
@@ -358,14 +432,21 @@ export class PortusTown {
     this.settings = s;
     this.lodDistance = TOWN_LOD_DISTANCE[s.tier];
     const cast = s.on.shadows && s.shadows.mode === "map";
+    // The cascaded SunLight (High/Ultra opt-in) renders its own cameras' layers: there the drawn
+    // town casts, as it did before the shadow copy.
+    const copy = cast && !s.on.cascades && !!this.shadowMesh;
     const normals = s.tier !== "low";
     for (const c of this.cells) {
       for (const v of c.variants) {
         for (const m of v) {
-          m.mesh.castShadow = cast;
+          m.mesh.castShadow = cast && (m.kind === "cutout" || !copy);
           if (this.assets) m.mesh.material = townMaterial(m.kind, normals, this.assets.color, this.assets.normal);
         }
       }
+    }
+    if (this.shadowMesh) {
+      this.shadowMesh.mesh.castShadow = copy;
+      this.shadowMesh.mesh.visible = copy;
     }
     for (const m of this.fallback) m.castShadow = cast;
   }
@@ -399,45 +480,48 @@ export class PortusTown {
   }
 
   /**
-   * Draws and triangles the town adds for this camera (frustum and the current LOD state), plus
-   * the shadow-map draws of the casters within `shadowReach` m of `focus`.
+   * Draws and triangles the town adds for this camera (frustum and the current LOD state), and in
+   * the shadow map for `shadowCamera` (the casters on its layers whose bounds meet its frustum).
    */
-  stats(camera?: THREE.Camera, focus?: THREE.Vector3, shadowReach = 0): { draws: number; triangles: number; shadowDraws: number; meshes: number } {
-    let draws = 0, triangles = 0, shadowDraws = 0, meshes = 0;
-    const frustum = new THREE.Frustum();
-    if (camera) {
-      camera.updateMatrixWorld();
-      frustum.setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
-    }
-    for (const c of this.cells) {
-      for (const v of c.variants) {
-        for (const m of v) {
-          meshes++;
-          if (!m.mesh.visible) continue;
-          const sphere = m.mesh.geometry.boundingSphere!;
-          if (!camera || frustum.intersectsSphere(sphere)) {
-            draws++;
-            triangles += m.triangles;
-          }
-          if (focus && m.mesh.castShadow && sphere.center.distanceTo(focus) <= sphere.radius + shadowReach) shadowDraws++;
-        }
+  stats(camera?: THREE.Camera, shadowCamera?: THREE.Camera): { draws: number; triangles: number; shadowDraws: number; shadowTriangles: number; meshes: number } {
+    let draws = 0, triangles = 0, shadowDraws = 0, shadowTriangles = 0, meshes = 0;
+    const frustum = new THREE.Frustum(), shadowFrustum = new THREE.Frustum();
+    const setFrom = (f: THREE.Frustum, c: THREE.Camera) => {
+      c.updateMatrixWorld();
+      f.setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(c.projectionMatrix, c.matrixWorldInverse));
+    };
+    if (camera) setFrom(frustum, camera);
+    if (shadowCamera) setFrom(shadowFrustum, shadowCamera);
+    const sees = (c: THREE.Camera | undefined, f: THREE.Frustum, m: THREE.Mesh) => !c || (m.layers.test(c.layers) && f.intersectsSphere(m.geometry.boundingSphere!));
+    for (const m of [...this.cells.flatMap((c) => [...c.variants[0], ...c.variants[1]]), ...(this.shadowMesh ? [this.shadowMesh] : [])]) {
+      meshes++;
+      if (!m.mesh.visible) continue;
+      if (m.mesh.layers.isEnabled(0) && sees(camera, frustum, m.mesh)) {
+        draws++;
+        triangles += m.triangles;
+      }
+      if (shadowCamera && m.mesh.castShadow && sees(shadowCamera, shadowFrustum, m.mesh)) {
+        shadowDraws++;
+        shadowTriangles += m.triangles;
       }
     }
     for (const m of this.fallback) if (m.count > 0) {
       draws++;
       meshes++;
     }
-    return { draws, triangles, shadowDraws, meshes };
+    return { draws, triangles, shadowDraws, shadowTriangles, meshes };
   }
 
   dispose() {
     this.disposed = true;
     for (const c of this.cells) for (const v of c.variants) for (const m of v) m.mesh.geometry.dispose();
+    this.shadowMesh?.mesh.geometry.dispose();
     for (const m of this.fallback) {
       m.geometry.dispose();
       m.dispose();
     }
     this.cells.length = 0;
+    this.shadowMesh = null;
     this.fallback.length = 0;
     this.group.removeFromParent();
   }
