@@ -427,7 +427,7 @@ export class Game {
       alive("building the world");
     }
     setLoading("Loading characters…", 0.8);
-    await Promise.all([preloadAvatars(), preloadHorse()]); // resolve null on failure: capsules / box horses
+    await Promise.all([preloadAvatars(), preloadHorse(), this.planet.props.ready]); // resolve null on failure: capsules / box horses
     alive("loading characters");
     if (!this.self) {
       this.self = new AvatarView(choice?.palette ?? stored.palette, choice?.starter ?? stored.starter);

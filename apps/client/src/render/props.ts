@@ -1,34 +1,40 @@
-// Trees, rocks, reeds, spires (SPEC §7.3 trees/rocks row): one InstancedMesh per kind per LOD for
+// Trees, rocks, plants and spires: one InstancedMesh per model variant per LOD for
 // the whole planet, refilled a few times a second from the props of the loaded chunks (placed by
-// the shared, deterministic chunkProps in the worker). LOD0 (full mesh, casts shadows) up to the
+// the shared, deterministic chunkProps in the worker). LOD0 (full mesh, large props cast shadows) up to the
 // tier's "full mesh to" distance, LOD1 (low poly, no shadow) to the draw distance.
-// Draws: ≤ 2 per kind present on the body, +1 shadow draw per kind.
+// One draw per deterministic model variant/LOD, plus nearby LOD0 shadow draws.
 
 import * as THREE from "three/webgpu";
 import { hash01, PROP_KINDS, PROP_STRIDE, PROP_STYLES, type BodyId, type PropKind } from "@firstlight/shared";
 import { float, materialColor, mix } from "three/tsl";
 import { atmo } from "./atmosphere.ts";
-import { propGeometry } from "./propGeometry.ts";
+import { propGeometry, PROP_PALETTES } from "./propGeometry.ts";
+import { preloadVegetation, validateVegetationAssets, vegetationMaterial, type VegetationAssets } from "./vegetationAssets.ts";
+import { vegetationModels, vegetationVariant } from "./vegetationModels.ts";
+import { keptSamples } from "./warmup.ts";
 import type { ResolvedSettings } from "./quality.ts";
 
 interface ChunkProps {
   key: string;
+  packed: Float32Array;
   /** Unique per registration (instance identity for upload signatures). */
   serial: number;
   center: THREE.Vector3;
   radius: number;
   /** Per kind: precomputed instance matrices (16 floats each) and colours (3 floats each). */
-  byKind: Map<number, { matrices: Float32Array; colors: Float32Array; positions: Float32Array; count: number }>;
+  byKind: Map<number, { matrices: Float32Array; colors: Float32Array; positions: Float32Array; count: number; winds: Float32Array }>;
 }
 
 interface KindMeshes {
   kind: PropKind;
+  variant: number;
   lod0: THREE.InstancedMesh;
   lod1: THREE.InstancedMesh;
   capacity: number;
 }
 
 const CAPACITY: Partial<Record<PropKind, number>> = { reed: 6000, oak: 4000, scrub: 4000 };
+const SMALL = new Set<PropKind>(["bush", "fern", "flower", "mushroom", "scrub", "reed"]);
 
 let sharedMaterial: THREE.MeshStandardNodeMaterial | null = null;
 function propMaterial(): THREE.MeshStandardNodeMaterial {
@@ -58,26 +64,92 @@ export class PropSystem {
   instances = 0;
   private serial = 0;
 
-  constructor(body: BodyId) {
+  readonly ready: Promise<void>;
+  private samples: THREE.Group | null = null;
+  private assetsInstalled = false;
+  private mergedRocks = false;
+
+  constructor(private readonly body: BodyId, assets?: VegetationAssets) {
     this.group.name = "props";
     const material = propMaterial();
     const kinds = new Set(PROP_STYLES[body].map((r) => r.kind));
     for (const kind of kinds) {
-      const k = PROP_KINDS.indexOf(kind);
-      const capacity = CAPACITY[kind] ?? 2500;
-      const mk = (lod: 0 | 1) => {
-        const m = new THREE.InstancedMesh(propGeometry(body, kind, lod), material, capacity);
-        m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3).fill(1), 3);
-        m.count = 0;
-        m.frustumCulled = false;
-        m.receiveShadow = true;
-        m.castShadow = lod === 0;
-        m.name = `prop:${kind}:L${lod}`;
-        this.group.add(m);
-        return m;
-      };
-      this.kinds.set(k, { kind, lod0: mk(0), lod1: mk(1), capacity });
+      for (let variant = 0; variant < vegetationModels(body, kind).length; variant++) {
+        const k = PROP_KINDS.indexOf(kind);
+        // Reserve both populations for shared rock/boulder model batches after assets install.
+        const capacity = kind === "rock" && kinds.has("boulder") ? 5000 : CAPACITY[kind] ?? 2500;
+        const mk = (lod: 0 | 1) => {
+          const m = new THREE.InstancedMesh(propGeometry(body, kind, lod), material, capacity);
+          m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3).fill(1), 3);
+          m.count = 0;
+          m.frustumCulled = false;
+          m.receiveShadow = true;
+          m.castShadow = lod === 0 && !SMALL.has(kind);
+          m.name = `prop:${kind}:${variant}:L${lod}`;
+          this.group.add(m);
+          return m;
+        };
+        this.kinds.set(k * 8 + variant, { kind, variant, lod0: mk(0), lod1: mk(1), capacity });
+      }
     }
+    this.ready = (assets ? Promise.resolve(assets) : preloadVegetation())
+      .then((assets) => { if (assets) this.installAssets(assets); })
+      .catch((err: unknown) => { console.warn("[vegetation] assets failed to install; using procedural props", err); });
+  }
+
+  private disposed = false;
+
+  private installAssets(assets: VegetationAssets) {
+    if (this.disposed) return;
+    validateVegetationAssets(assets);
+    const mergeRocks = this.kinds.has(PROP_KINDS.indexOf("rock") * 8) && this.kinds.has(PROP_KINDS.indexOf("boulder") * 8);
+    const replacements: { mesh: THREE.InstancedMesh; geometry: THREE.BufferGeometry; material: THREE.Material }[] = [];
+    const chunks = new Map<string, ChunkProps>();
+    try {
+      for (const km of this.kinds.values()) {
+        if (mergeRocks && km.kind === "boulder") continue;
+        const name = vegetationModels(this.body, km.kind)[km.variant];
+        if (!name) continue;
+        for (const lod of [0, 1] as const) {
+          const mesh = lod === 0 ? km.lod0 : km.lod1;
+          const geometry = assets.geometry.get(`${name}_L${lod}`)!.clone();
+          // Track ownership before preparing so a preparation failure also disposes this clone.
+          const replacement = { mesh, geometry, material: mesh.material as THREE.Material };
+          replacements.push(replacement);
+          if (km.kind === "boulder") geometry.scale(2.3 / 0.9, 2.3 / 0.9, 2.3 / 0.9);
+          if (km.kind === "blossom") geometry.scale(5.2 / 6.2, 5.2 / 6.2, 5.2 / 6.2);
+          geometry.setAttribute("iWind", new THREE.InstancedBufferAttribute(new Float32Array(km.capacity), 1));
+          const impostor = lod === 1 && ["oak", "pine", "deadtree", "blossom"].includes(km.kind);
+          replacement.material = vegetationMaterial(this.body, km.kind, impostor ? assets.impostors! : assets.atlas, impostor);
+        }
+      }
+      // Terrain can arrive before ready. Prepare its reclassification before touching live data.
+      for (const ch of this.chunks.values()) chunks.set(ch.key, this.makeChunk(ch.key, ch.packed, ch.center, ch.radius, mergeRocks));
+    } catch (err) {
+      for (const r of replacements) r.geometry.dispose();
+      throw err;
+    }
+    // All validation and preparation succeeded. Only now replace the complete procedural set.
+    const old = replacements.map((r) => r.mesh.geometry);
+    for (const r of replacements) {
+      r.mesh.geometry = r.geometry;
+      r.mesh.material = r.material;
+    }
+    for (const geometry of old) geometry.dispose();
+    if (mergeRocks) {
+      for (const [key, km] of this.kinds) if (km.kind === "boulder") {
+        for (const m of [km.lod0, km.lod1]) {
+          m.geometry.dispose();
+          m.dispose();
+          m.removeFromParent();
+        }
+        this.kinds.delete(key);
+      }
+    }
+    this.assetsInstalled = true;
+    this.mergedRocks = mergeRocks;
+    for (const [key, chunk] of chunks) this.chunks.set(key, chunk);
+    this.dirty = true;
   }
 
   applySettings(s: ResolvedSettings) {
@@ -86,27 +158,75 @@ export class PropSystem {
     this.fullTo = s.props.fullTo;
     this.lodTo = s.props.lodTo;
     this.castShadow = s.on.shadows && s.shadows.mode === "map";
-    for (const k of this.kinds.values()) k.lod0.castShadow = this.castShadow;
+    for (const k of this.kinds.values()) k.lod0.castShadow = this.castShadow && !SMALL.has(k.kind);
+    this.syncSampleShadows();
     this.dirty = true;
   }
 
   /** Warm-up: draw every instance in range with both LODs (so both shaders compile). */
   setForceAll(on: boolean) {
+    if (on) {
+      this.samples ??= keptSamples(`vegetation:${this.body}${this.assetsInstalled ? "" : ":procedural"}`, () => [...this.kinds.values()].flatMap((km) =>
+        [km.lod0, km.lod1].map((source) => {
+          const mesh = new THREE.InstancedMesh(source.geometry, source.material, source.instanceMatrix.count);
+          mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(source.instanceMatrix.count * 3).fill(1), 3);
+          mesh.count = 1;
+          mesh.setMatrixAt(0, new THREE.Matrix4());
+          mesh.frustumCulled = false;
+          mesh.castShadow = source.castShadow;
+          mesh.receiveShadow = true;
+          mesh.name = `warm:${source.name}`;
+          return mesh;
+        })));
+      if (this.samples) {
+        this.syncSampleShadows();
+        // Put samples inside the camera-local shadow map as well as the colour scene.
+        const p = this.lastPos.length() < 1e8 ? this.lastPos : new THREE.Vector3(0, 1, 0);
+        const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), p.clone().normalize());
+        const matrix = new THREE.Matrix4().compose(p, q, new THREE.Vector3(1, 1, 1));
+        for (const o of this.samples.children) {
+          const mesh = o as THREE.InstancedMesh;
+          mesh.setMatrixAt(0, matrix);
+          mesh.instanceMatrix.needsUpdate = true;
+        }
+        this.group.add(this.samples);
+      }
+    } else {
+      this.samples?.removeFromParent();
+    }
     this.forceAll = on;
     this.dirty = true;
   }
 
+  private syncSampleShadows() {
+    if (!this.samples) return;
+    const live = [...this.kinds.values()].flatMap((km) => [km.lod0, km.lod1]);
+    this.samples.children.forEach((sample, i) => { (sample as THREE.Mesh).castShadow = live[i]!.castShadow; });
+  }
+
+  private batchKey(kind: PropKind, yaw: number, mergedRocks: boolean): number {
+    const batchKind = mergedRocks && kind === "boulder" ? "rock" : kind;
+    return PROP_KINDS.indexOf(batchKind) * 8 + vegetationVariant(this.body, kind, yaw);
+  }
+
   /** Register a chunk's packed props (from the worker). */
   addChunk(key: string, packed: Float32Array, center: THREE.Vector3, radius: number) {
+    this.chunks.set(key, this.makeChunk(key, packed, center, radius, this.mergedRocks));
+    this.dirty = true;
+  }
+
+  private makeChunk(key: string, packed: Float32Array, center: THREE.Vector3, radius: number, mergedRocks: boolean): ChunkProps {
     const count = packed.length / PROP_STRIDE;
     const byKindCount = new Map<number, number>();
     for (let i = 0; i < count; i++) {
-      const k = packed[i * PROP_STRIDE]!;
+      const o = i * PROP_STRIDE;
+      const kind = PROP_KINDS[packed[o]!]!;
+      const k = this.batchKey(kind, packed[o + 5]!, mergedRocks);
       if (this.kinds.has(k)) byKindCount.set(k, (byKindCount.get(k) ?? 0) + 1);
     }
     const byKind: ChunkProps["byKind"] = new Map();
     for (const [k, n] of byKindCount) {
-      byKind.set(k, { matrices: new Float32Array(n * 16), colors: new Float32Array(n * 3), positions: new Float32Array(n * 3), count: 0 });
+      byKind.set(k, { matrices: new Float32Array(n * 16), colors: new Float32Array(n * 3), positions: new Float32Array(n * 3), winds: new Float32Array(n), count: 0 });
     }
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
@@ -116,9 +236,13 @@ export class PropSystem {
     const scl = new THREE.Vector3();
     const Y = new THREE.Vector3(0, 1, 0);
     const c = new THREE.Color();
+    const palette = PROP_PALETTES[this.body];
+    const rock = new THREE.Color(palette.rock), boulder = new THREE.Color(palette.rock2);
     for (let i = 0; i < count; i++) {
       const o = i * PROP_STRIDE;
-      const k = packed[o]!;
+      const kind = PROP_KINDS[packed[o]!]!;
+      const sourceKey = packed[o]! * 8 + vegetationVariant(this.body, kind, packed[o + 5]!);
+      const k = this.batchKey(kind, packed[o + 5]!, mergedRocks);
       const e = byKind.get(k);
       if (!e) continue;
       pos.set(packed[o + 1]!, packed[o + 2]!, packed[o + 3]!);
@@ -130,20 +254,22 @@ export class PropSystem {
       q.multiply(qYaw);
       // Sink a little so bases never float on slopes.
       pos.addScaledVector(up, -0.12 * s);
-      scl.setScalar(s);
+      scl.setScalar(s * (mergedRocks && kind === "boulder" ? 2.3 / 0.9 : 1));
       m.compose(pos, q, scl);
       m.toArray(e.matrices, e.count * 16);
-      const v = 0.86 + hash01(Math.floor(yaw * 1e4), k, 3) * 0.26;
-      const hueShift = (hash01(Math.floor(yaw * 1e4), k, 4) - 0.5) * 0.06;
+      const v = 0.86 + hash01(Math.floor(yaw * 1e4), sourceKey, 3) * 0.26;
+      const hueShift = (hash01(Math.floor(yaw * 1e4), sourceKey, 4) - 0.5) * 0.06;
       c.setRGB(v * (1 + hueShift), v, v * (1 - hueShift));
+      // Shared geometry/material; boulder's distinct stone palette is per instance.
+      if (mergedRocks && kind === "boulder") c.setRGB(c.r * boulder.r / rock.r, c.g * boulder.g / rock.g, c.b * boulder.b / rock.b);
       c.toArray(e.colors, e.count * 3);
       e.positions[e.count * 3] = pos.x;
       e.positions[e.count * 3 + 1] = pos.y;
       e.positions[e.count * 3 + 2] = pos.z;
+      e.winds[e.count] = yaw * 17;
       e.count++;
     }
-    this.chunks.set(key, { key, serial: ++this.serial, center: center.clone(), radius, byKind });
-    this.dirty = true;
+    return { key, packed, serial: ++this.serial, center: center.clone(), radius, byKind };
   }
 
   removeChunk(key: string) {
@@ -161,12 +287,16 @@ export class PropSystem {
     let total = 0;
     for (const [k, km] of this.kinds) {
       let n0 = 0, n1 = 0;
+      const small = SMALL.has(km.kind);
+      const kindLod2 = small && !this.forceAll ? Math.min(this.lodTo, 65) ** 2 : lod2;
       // Order-dependent signature of the selected instances: upload only when it changes.
       let sig0 = 0x9e3779b9, sig1 = 0x85ebca6b;
       const a0 = km.lod0.instanceMatrix.array as Float32Array;
       const a1 = km.lod1.instanceMatrix.array as Float32Array;
       const c0 = km.lod0.instanceColor!.array as Float32Array;
       const c1 = km.lod1.instanceColor!.array as Float32Array;
+      const w0 = km.lod0.geometry.getAttribute("iWind")?.array as Float32Array | undefined;
+      const w1 = km.lod1.geometry.getAttribute("iWind")?.array as Float32Array | undefined;
       for (const ch of this.chunks.values()) {
         const e = ch.byKind.get(k);
         if (!e || e.count === 0) continue;
@@ -176,15 +306,17 @@ export class PropSystem {
           const dx = P[i * 3]! - cam.x, dy = P[i * 3 + 1]! - cam.y, dz = P[i * 3 + 2]! - cam.z;
           const d2 = dx * dx + dy * dy + dz * dz;
           const id = ch.serial * 4096 + i;
-          if (d2 < full2 && n0 < km.capacity) {
+          if (d2 < full2 && d2 < kindLod2 && n0 < km.capacity) {
             for (let j = 0; j < 16; j++) a0[n0 * 16 + j] = M[i * 16 + j]!;
             c0[n0 * 3] = C[i * 3]!; c0[n0 * 3 + 1] = C[i * 3 + 1]!; c0[n0 * 3 + 2] = C[i * 3 + 2]!;
+            if (w0) w0[n0] = e.winds[i]!;
             sig0 = Math.imul(sig0 ^ id, 0x27d4eb2d);
             n0++;
           }
-          if ((d2 >= full2 || this.forceAll) && d2 < lod2 && n1 < km.capacity) {
+          if ((d2 >= full2 || this.forceAll) && d2 < kindLod2 && n1 < km.capacity) {
             for (let j = 0; j < 16; j++) a1[n1 * 16 + j] = M[i * 16 + j]!;
             c1[n1 * 3] = C[i * 3]!; c1[n1 * 3 + 1] = C[i * 3 + 1]!; c1[n1 * 3 + 2] = C[i * 3 + 2]!;
+            if (w1) w1[n1] = e.winds[i]!;
             sig1 = Math.imul(sig1 ^ id, 0x27d4eb2d);
             n1++;
           }
@@ -205,6 +337,12 @@ export class PropSystem {
     mesh.count = n;
     if (!changed || n === 0) return;
     this.signatures.set(mesh, key);
+    const wind = mesh.geometry.getAttribute("iWind") as THREE.InstancedBufferAttribute | undefined;
+    if (wind) {
+      wind.clearUpdateRanges();
+      wind.addUpdateRange(0, n);
+      wind.needsUpdate = true;
+    }
     mesh.instanceMatrix.clearUpdateRanges();
     mesh.instanceMatrix.addUpdateRange(0, n * 16);
     mesh.instanceMatrix.needsUpdate = true;
@@ -214,9 +352,11 @@ export class PropSystem {
   }
 
   dispose() {
+    this.disposed = true;
     for (const k of this.kinds.values()) {
       for (const m of [k.lod0, k.lod1]) {
-        m.geometry.dispose();
+        const retained = this.samples?.children.some((o) => (o as THREE.Mesh).geometry === m.geometry);
+        if (!retained) m.geometry.dispose();
         m.dispose();
       }
     }

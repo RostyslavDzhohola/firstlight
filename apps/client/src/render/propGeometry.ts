@@ -22,7 +22,7 @@ interface Palette {
   spire: Hex[];
 }
 
-const PALETTES: Record<BodyId, Palette> = {
+export const PROP_PALETTES: Record<BodyId, Palette> = {
   portus: { bark: 0x6b4a2f, leaf: 0x5fae4a, leaf2: 0x8ccf5a, pine: 0x2e6b3a, rock: 0xc9b8a0, rock2: 0xe0d2bc, dead: 0x6a5a50, reed: 0x8a9a5a, scrub: 0x9a8a5a, blossom: 0xf6a8cc, blossom2: 0xfff0f6, spire: [0xc9b8a0] },
   arcadia: { bark: 0x6b4a2f, leaf: 0x3f9a3a, leaf2: 0x7cc84a, pine: 0x2a6a3c, rock: 0x7d8a80, rock2: 0xa3ada6, dead: 0x6a5a50, reed: 0x7a9a4a, scrub: 0x8a9a4a, blossom: 0xffd27a, blossom2: 0xfff0b0, spire: [0x7d8a80] },
   hollowmere: { bark: 0x4a3a40, leaf: 0x4f5a3c, leaf2: 0x6e6a4a, pine: 0x2f3a30, rock: 0x5a5068, rock2: 0x7a6e8c, dead: 0x5e5060, reed: 0x6b7a4a, scrub: 0x5a5a40, blossom: 0x9effd8, blossom2: 0xc8ffe8, spire: [0x5a5068] },
@@ -98,6 +98,9 @@ function build(kind: PropKind, lod: 0 | 1, p: Palette, seed: number): THREE.Buff
       }
       return finish(parts);
     }
+    case "fern":
+    case "flower":
+    case "mushroom":
     case "bush": {
       if (!hi) return finish([part(new THREE.IcosahedronGeometry(0.75, 0), p.leaf, M(0, 0.45, 0, 1, 0.75, 1), seed)]);
       return finish([
@@ -186,7 +189,7 @@ function build(kind: PropKind, lod: 0 | 1, p: Palette, seed: number): THREE.Buff
 }
 
 export function propGeometry(body: BodyId, kind: PropKind, lod: 0 | 1): THREE.BufferGeometry {
-  const g = build(kind, lod, PALETTES[body], 1000 + kind.length * 37 + lod);
+  const g = build(kind, lod, PROP_PALETTES[body], 1000 + kind.length * 37 + lod);
   g.name = `${body}:${kind}:L${lod}`;
   return g;
 }

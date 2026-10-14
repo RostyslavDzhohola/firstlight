@@ -6,8 +6,12 @@ import { chunkOf, type Face } from "./cubesphere.ts";
 import { chordMetres, padDirs } from "./pads.ts";
 import {
   chunkProps, packProps, PORTUS_PLAZA_CLEAR, PROP_JITTER_MIN, PROP_KINDS, PROP_MIN_FLATNESS, PROP_PAD_CLEARANCE, PROP_STRIDE, PROPS_VERSION,
-  PROP_STYLES, surfaceAtGrid, type PropInstance, type SurfacePoint,
+  PROP_DEFS, PROP_STYLES, surfaceAtGrid, type PropInstance, type SurfacePoint,
 } from "./props.ts";
+import { bodyBreakables } from "./breakables.ts";
+import { bossArena } from "../content/arenas.ts";
+import { objectsOn, objectDir } from "../content/world.ts";
+import { portalSpots } from "./portals.ts";
 import { createTerrain, type Terrain } from "./terrain.ts";
 
 function sampleChunks(id: BodyId, count: number, seed: number): [Face, number, number][] {
@@ -116,6 +120,32 @@ describe("props", () => {
     expect(outside).toBeGreaterThanOrEqual(0);
   });
 
+  it("keeps vegetation outside arenas, interactions, portals and placed breakable footprints", () => {
+    let checked = 0;
+    for (const id of BODY_IDS) {
+      const terrain = terrains[id], body = terrain.body;
+      const arena = bossArena(terrain);
+      const circles = [
+        ...(arena ? [{ dir: arena.up, radius: arena.radius + 6 }] : []),
+        ...objectsOn(id).map((o) => ({ dir: objectDir(o), radius: Math.max(2, o.range) + 4 })),
+        ...portalSpots(body, terrain).map((o) => ({ dir: o.dir, radius: 6 })),
+      ];
+      const breakables = bodyBreakables(terrain);
+      const dirs = [...circles.map((c) => c.dir), ...breakables.filter((_, i) => i % 20 === 0).map((b) => [b.ux, b.uy, b.uz] as const)];
+      for (const d of dirs) for (const [f, cx, cy] of chunksAround(terrain, d, 25)) {
+        for (const p of chunkProps(terrain, f, cx, cy)) {
+          const l = Math.hypot(p.x, p.y, p.z);
+          const nearestCircle = Math.min(...circles.map((c) => chordMetres(c.dir, p.x / l, p.y / l, p.z / l, body.radius) - c.radius));
+          const nearestBreakable = Math.min(...breakables.map((b) => chordMetres([b.ux, b.uy, b.uz], p.x / l, p.y / l, p.z / l, body.radius) - b.foot));
+          expect(nearestCircle).toBeGreaterThanOrEqual(0);
+          expect(nearestBreakable).toBeGreaterThanOrEqual(1.5);
+          checked++;
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(100);
+  });
+
   it("does not depend on chunk boundaries: neighbours never duplicate a prop", () => {
     const terrain = terrains.arcadia;
     const seen = new Set<string>();
@@ -154,7 +184,25 @@ describe("props", () => {
         }
       }
     }
-    expect(PROPS_VERSION).toBe(2);
+    expect(PROPS_VERSION).toBe(3);
+  });
+
+  it("grows forest undergrowth close to trees and keeps the original collider dimensions", () => {
+    let plants = 0, nearTrees = 0;
+    for (const [face, cx, cy] of sampleChunks("arcadia", 100, 42)) {
+      const props = chunkProps(terrains.arcadia, face, cx, cy);
+      const trees = props.filter((p) => p.kind === "oak" || p.kind === "pine");
+      for (const p of props.filter((p) => ["fern", "flower", "mushroom"].includes(p.kind))) {
+        plants++;
+        if (trees.some((t) => Math.hypot(t.x - p.x, t.y - p.y, t.z - p.z) < 30)) nearTrees++;
+      }
+    }
+    expect(plants).toBeGreaterThan(100);
+    expect(nearTrees / plants).toBeGreaterThan(0.8);
+    expect(["oak", "pine", "deadtree", "blossom", "rock", "boulder", "spire"].map((k) => {
+      const d = PROP_DEFS[k as keyof typeof PROP_DEFS];
+      return [d.radius, d.height, d.collider];
+    })).toEqual([[0.35, 6.5, "capsule"], [0.3, 8.5, "capsule"], [0.3, 6, "capsule"], [0.35, 5.5, "capsule"], [0.7, 0.9, "sphere"], [1.7, 2.3, "sphere"], [1.8, 15, "capsule"]]);
   });
 
   it("surfaceAtGrid matches groundHeight at random grid points", () => {
