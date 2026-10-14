@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BODIES } from "@firstlight/shared";
 import { offsetDir, placeDir } from "@firstlight/shared/content/places";
 import { newCharacter } from "@firstlight/shared/content/character";
-import { TOWN_LAYOUT, TOWN_PREFABS, TOWN_STREETS } from "@firstlight/shared/content/portusTown";
+import { TOWN_FIXED, TOWN_LAYOUT, TOWN_PREFABS, TOWN_STREETS } from "@firstlight/shared/content/portusTown";
 import { structureCollider, townCoords, townDir } from "@firstlight/shared/planet/town";
 import { PLAYER_BODY } from "@firstlight/shared/planet/collide";
 import { characterRepo } from "../src/world/characters.ts";
@@ -171,6 +171,26 @@ describe("placing players clear of the town's buildings (round-1 B1)", () => {
     expect(inside(Q.me(b))).toBe(false);
     const { corrections } = await drive(b);
     expect(corrections).toBe(0);
+  });
+
+  it("the Hall of Firsts board's stand is solid on the server too: a teleport onto it lands clear, walking through it is refused (S4)", async () => {
+    const b = await Q.bot("town_board_tester", "portus");
+    const [pe, pn] = TOWN_FIXED.plaque;
+    const toward = [-pe / Math.hypot(pe, pn), -pn / Math.hypot(pe, pn)] as const;
+    const front = (d: number) => [pe + toward[0] * d, pn + toward[1] * d] as [number, number];
+    // Onto the stand: placed beside it, and the real controller starts where the server does.
+    Q.tp(b, at(pe, pn));
+    await Q.until("teleported by the board", () => Q.near(b, at(pe, pn), 6) && !Q.near(b, at(0, 0), 15));
+    expect(inside(Q.me(b))).toBe(false);
+    expect((await drive(b)).corrections).toBe(0);
+    // From 2.5 m in front, straight through the board to 2.5 m behind it: refused and corrected,
+    // never inside the stand, still on the plaza side.
+    await Q.tpAndWait(b, at(...front(2.5)));
+    expect(await run(b, [front(2.5), front(-2.5)])).toBeGreaterThan(0);
+    const p = Q.me(b);
+    expect(inside(p)).toBe(false);
+    const [e, n] = townCoords(p.x, p.y, p.z, R);
+    expect((e - pe) * toward[0] + (n - pn) * toward[1]).toBeGreaterThan(0.2);
   });
 
   it("stage formations in Portus put nobody inside a structure (every count up to 40)", async () => {

@@ -11,7 +11,8 @@
 // counter-clockwise seen from above; 0 = the prefab's front faces south). Its base sits on the
 // rendered ground under its centre (the town floor is flat: terrain.ts PORTUS_TOWN_FLAT).
 
-import { TOWN_LAYOUT, TOWN_PREFABS, type TownItem } from "../content/portusTown.ts";
+import { TOWN_LAYOUT, TOWN_PREFABS, type TownItem, type TownSolid } from "../content/portusTown.ts";
+import { objectDir, WORLD_OBJECT_BY_ID } from "../content/world.ts";
 import { townFrame, type TownPlacement } from "./townFrame.ts";
 import { BreakableCollider, emptyContact, PLAYER_BODY, pushOutOfBreakable, resetContact, supportHeightAt, type PropContact, type XYZ } from "./collide.ts";
 import type { SolidFrame } from "./breakables.ts";
@@ -50,16 +51,20 @@ export function townPlacements(terrain: Terrain): readonly TownPlacement[] {
 
 /** One indestructible collider solid of a town item (a box or an upright cylinder). */
 export interface StructureSolid extends SolidFrame {
-  /** Layout index and prefab index it belongs to. */
+  /** Layout index and prefab index it belongs to (-1 for the Hall of Firsts board's stand). */
   item: number;
   prefab: number;
 }
 
 /** The structure solids of one placed item, appended to `out` (indices continue from out.length). */
 export function itemSolids(p: TownPlacement, out: StructureSolid[]): void {
-  const pre = TOWN_PREFABS[p.prefab]!;
+  placeSolids(p, TOWN_PREFABS[p.prefab]!.solids, out);
+}
+
+/** `solids` (prefab frame: x right, z front, y up from the base) placed by `p`, appended to `out`. */
+function placeSolids(p: TownPlacement, solids: readonly TownSolid[], out: StructureSolid[]): void {
   const s = p.scale;
-  for (const sol of pre.solids) {
+  for (const sol of solids) {
     const [shape, cx, cz, hx, hz, y0, y1, yaw] = sol;
     const a = (yaw * Math.PI) / 180;
     const c = Math.cos(a), sn = Math.sin(a);
@@ -82,15 +87,64 @@ export function itemSolids(p: TownPlacement, out: StructureSolid[]): void {
   }
 }
 
+/**
+ * The Hall of Firsts board (world object `hall_wall`, drawn by the client's QuestWorld) in its own
+ * frame: x right, y up from the ground, z toward the plaza centre. The painted face is `w` × `h` m
+ * with its lower edge at `bottom`.
+ */
+export const HALL_BOARD = { w: 4.0, h: 3.0, bottom: 0.9 } as const;
+
+/**
+ * The board's stand as solids in the board frame (round 2, S4): the plinth, the backing with the
+ * face and brass frame, the two stone posts and the cornice; QuestWorld draws exactly these volumes.
+ */
+export const HALL_STAND_SOLIDS: readonly TownSolid[] = (() => {
+  const { w, h, bottom } = HALL_BOARD;
+  const top = bottom + h;
+  const postX = w / 2 + 0.28;
+  return [
+    [0, 0, 0, (w + 0.9) / 2, 0.23, 0, bottom - 0.2, 0], // plinth
+    [0, 0, 0.025, (w + 0.42) / 2, 0.085, bottom - 0.2, top + 0.17, 0], // backing, face and brass frame
+    [0, -postX, 0, 0.17, 0.17, 0, top + 0.45, 0], // posts
+    [0, postX, 0, 0.17, 0.17, 0, top + 0.45, 0],
+    [0, 0, 0, (w + 1.1) / 2, 0.25, top + 0.45, top + 0.67, 0], // cornice
+  ];
+})();
+
+/** The board's frame on `terrain` (where QuestWorld puts it): at `hall_wall`, facing the plaza centre. */
+export function hallBoardPlacement(terrain: Terrain): TownPlacement | null {
+  const o = WORLD_OBJECT_BY_ID.get("hall_wall");
+  if (!o || o.body !== terrain.body.id) return null;
+  const d = objectDir(o);
+  const up = [d[0], d[1], d[2]];
+  // Toward the plaza centre (+Y): the tangent part of +Y at the board.
+  let fx = -up[1]! * up[0]!, fy = 1 - up[1]! * up[1]!, fz = -up[1]! * up[2]!;
+  const fl = Math.hypot(fx, fy, fz);
+  fx /= fl; fy /= fl; fz /= fl;
+  // right = up × toward (QuestWorld's basis).
+  const rx = up[1]! * fz - up[2]! * fy, ry = up[2]! * fx - up[0]! * fz, rz = up[0]! * fy - up[1]! * fx;
+  const base = terrain.body.radius + terrain.groundHeight(d[0], d[1], d[2]);
+  return {
+    item: -1, prefab: -1, scale: 1,
+    px: up[0]! * base, py: up[1]! * base, pz: up[2]! * base,
+    rx, ry, rz, ux: up[0]!, uy: up[1]!, uz: up[2]!, fx, fy, fz,
+  };
+}
+
 const solidCache = new WeakMap<Terrain, readonly StructureSolid[]>();
 
-/** Every structure solid of the town on `terrain` (empty off Portus). Deterministic; cached per terrain. */
+/**
+ * Every structure solid of the town on `terrain` (empty off Portus): the layout's prefabs, then the
+ * Hall of Firsts board's stand (item and prefab -1). Deterministic; cached per terrain.
+ */
 export function townSolids(terrain: Terrain): readonly StructureSolid[] {
   if (terrain.body.id !== TOWN_BODY) return [];
   let list = solidCache.get(terrain);
   if (!list) {
     const out: StructureSolid[] = [];
     for (const p of townPlacements(terrain)) itemSolids(p, out);
+    const board = hallBoardPlacement(terrain);
+    if (board) placeSolids(board, HALL_STAND_SOLIDS, out);
     list = out;
     solidCache.set(terrain, list);
   }

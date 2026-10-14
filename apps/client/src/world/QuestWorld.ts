@@ -9,6 +9,7 @@ import { atmo } from "../render/atmosphere.ts";
 import type { BodyId, Terrain } from "@firstlight/shared";
 import { EGG_BY_ID, PLAQUES, type HallLine } from "@firstlight/shared/content/secrets";
 import { objectPos, objectsOn, type WorldObjectDef } from "@firstlight/shared/content/world";
+import { HALL_BOARD } from "@firstlight/shared/planet/town";
 import { ANIM } from "@firstlight/shared/net/schema";
 import { AvatarView } from "../render/Avatars.ts";
 import { disposeTree } from "../render/dispose.ts";
@@ -102,8 +103,9 @@ function iconPlate(icon: string, color: string): THREE.Mesh {
   return new THREE.Mesh(new THREE.PlaneGeometry(0.32, 0.32), new THREE.MeshBasicNodeMaterial({ map: tex }));
 }
 
-/** The Hall of Firsts board (m, in its frame): text face width and height, and its lower edge. */
-export const HALL_BOARD = { w: 4.0, h: 3.0, bottom: 0.9 } as const;
+/** The Hall of Firsts board (m, in its frame): text face width and height, and its lower edge.
+ * Shared: its stand is solid on both sides (planet/town.ts HALL_STAND_SOLIDS draws these volumes). */
+export { HALL_BOARD };
 
 const ICONS: Record<string, string> = { dew: "◇", root: "⋎", bloom: "✿", rain: "💧", leaf: "🍃", sun: "☀", flame: "🔥", skull: "☠", lantern: "🏮", candle: "🕯" };
 
@@ -217,7 +219,8 @@ export class QuestWorld {
       case "hall": {
         // A carved board on a stone stand in front of the Hall of Firsts' steps (Portus castle town,
         // D38): opaque, wooden, framed, its heading at about 3.6 m so it reads from the plaza and
-        // from close by. Lettering is painted onto the board's canvas texture (setHall).
+        // from close by. Lettering is painted onto the board's canvas texture (setHall). The stand is
+        // solid for player and server alike: these volumes are shared/planet/town.ts HALL_STAND_SOLIDS.
         const c = document.createElement("canvas");
         c.width = 1024;
         c.height = 768;

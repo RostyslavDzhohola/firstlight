@@ -394,7 +394,8 @@ export class PortusTown {
 
   /** No asset: the solids as stone boxes and cylinders (the same shapes that block the player). */
   private buildFallback() {
-    const solids = townSolids(this.terrain);
+    // The layout's solids; the Hall board's stand (item -1) is drawn by QuestWorld with its board.
+    const solids = townSolids(this.terrain).filter((x) => x.item >= 0);
     const boxes = solids.filter((s) => s.shape === 0), cyls = solids.filter((s) => s.shape === 1);
     const boxGeo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
     // Unit-wide sources (a box 1 m across, a cylinder 1 m across): the instance basis scales them by

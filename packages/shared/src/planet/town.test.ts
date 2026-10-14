@@ -7,7 +7,7 @@ import { bodyBreakables } from "./breakables.ts";
 import { emptyContact, PLAYER_BODY, type XYZ } from "./collide.ts";
 import { portalSpots } from "./portals.ts";
 import { createTerrain } from "./terrain.ts";
-import { placeTownItem, structureCollider, townCoords, townDir, townPlacements, townSolids, TOWN_EAST, TOWN_NORTH } from "./town.ts";
+import { hallBoardPlacement, HALL_STAND_SOLIDS, placeTownItem, structureCollider, townCoords, townDir, townPlacements, townSolids, TOWN_EAST, TOWN_NORTH, type StructureSolid } from "./town.ts";
 
 const terrain = createTerrain("portus");
 const R = BODIES.portus.radius;
@@ -44,11 +44,12 @@ function walk(a: readonly [number, number], b: readonly [number, number]): [numb
   return null;
 }
 
-/** Horizontal clearance (m) from a town point to the nearest structure solid below head height. */
-function clearance(east: number, north: number): number {
+/** Horizontal clearance (m) from a town point to the nearest structure solid below head height (optionally only some). */
+function clearance(east: number, north: number, which: (s: StructureSolid) => boolean = () => true): number {
   const p = feetAt(east, north, 0.5);
   let best = Infinity;
   for (const s of townSolids(terrain)) {
+    if (!which(s)) continue;
     const qx = p.x - s.px, qy = p.y - s.py, qz = p.z - s.pz;
     const lx = qx * s.rx + qy * s.ry + qz * s.rz, lz = qx * s.fx + qy * s.fy + qz * s.fz;
     const ly = qx * s.ux + qy * s.uy + qz * s.uz;
@@ -155,13 +156,51 @@ describe("Portus town structures (D38)", () => {
   it("keeps Juno's counter, the Hall wall and the dummies reachable from the spawn", () => {
     expect(walk([0, 0], [0, TOWN_FIXED.juno[1] - 1.6])).toBeNull();
     expect(clearance(0, TOWN_FIXED.juno[1])).toBeGreaterThan(1);
+    // The Hall board stands clear of the hall and its steps (its own stand aside), and its front
+    // can be walked up to from the spawn.
     const plaque = TOWN_FIXED.plaque;
-    expect(clearance(plaque[0], plaque[1])).toBeGreaterThan(0.6);
+    expect(clearance(plaque[0], plaque[1], (x) => x.item >= 0)).toBeGreaterThan(0.6);
     expect(walk([0, 0], [plaque[0] * 0.92, plaque[1] * 0.92])).toBeNull();
     for (const d of TOWN_FIXED.dummies) {
       expect(clearance(d[0], d[1])).toBeGreaterThan(1);
       expect(walk([0, 0], [d[0] - 1.2, d[1]])).toBeNull();
     }
+  });
+
+  it("makes the Hall of Firsts board's stand solid: no walking through it, nobody left inside it (S4)", () => {
+    const stand = townSolids(terrain).filter((x) => x.item === -1);
+    expect(stand).toHaveLength(HALL_STAND_SOLIDS.length);
+    const board = hallBoardPlacement(terrain)!;
+    // The board faces the plaza centre from the authoritative Hall wall position.
+    const wall = objectDir(WORLD_OBJECT_BY_ID.get("hall_wall")!);
+    expect(Math.hypot(board.ux - wall[0], board.uy - wall[1], board.uz - wall[2])).toBeLessThan(1e-12);
+    const [pe, pn] = TOWN_FIXED.plaque;
+    const toward = [-pe / Math.hypot(pe, pn), -pn / Math.hypot(pe, pn)] as const; // town plane, at the board
+    const at = (d: number) => [pe + toward[0] * d, pn + toward[1] * d] as [number, number];
+    // Straight through the board centre from 2 m in front to 2 m behind: the step into the stand is
+    // the refused one (the walk reports where that step would have ended).
+    const stop = walk(at(2), at(-2));
+    expect(stop).not.toBeNull();
+    expect(Math.hypot(stop![0] - pe, stop![1] - pn)).toBeLessThan(0.3);
+    // ...and the same from behind (the hall side).
+    expect(walk(at(-2), at(2))).not.toBeNull();
+    // Feet put on the stand (a teleport, an old save) are inside it; the shared push-out and the
+    // server's placement both move them clear.
+    const p = feetAt(pe, pn);
+    expect(town.footing(p.x, p.y, p.z, PLAYER_BODY.step).inside).toBe(true);
+    const q = { ...p };
+    expect(town.resolve(q, emptyContact())).toBe(true);
+    expect(town.footing(q.x, q.y, q.z, PLAYER_BODY.step).inside).toBe(false);
+    const c = { ...p };
+    expect(town.clearSpot(c, (x, y, z) => R + terrain.groundHeight(x, y, z) + 0.02)).toBe(true);
+    expect(town.footing(c.x, c.y, c.z, PLAYER_BODY.step).inside).toBe(false);
+    // Readable up close: 1 m in front of the board is open ground.
+    expect(clearance(...at(1.2))).toBeGreaterThan(0.6);
+    // Rays (shots, tracers) stop at the board too.
+    const eye = feetAt(...at(4), 1.6);
+    const back = feetAt(...at(-1), 1.6);
+    const L = Math.hypot(back.x - eye.x, back.y - eye.y, back.z - eye.z);
+    expect(town.raycast(eye.x, eye.y, eye.z, (back.x - eye.x) / L, (back.y - eye.y) / L, (back.z - eye.z) / L, L)).toBeLessThan(L);
   });
 
   it("opens the gate passages and the castle gate: the streets are walkable end to end", () => {

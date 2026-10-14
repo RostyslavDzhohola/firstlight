@@ -193,7 +193,7 @@ describe("Portus town view", () => {
       await town.ready;
       expect(town.cells).toHaveLength(0);
       const meshes = town.group.children as THREE.InstancedMesh[];
-      const solids = townSolids(terrain);
+      const solids = townSolids(terrain).filter((x) => x.item >= 0); // the Hall board's stand is QuestWorld's
       expect(meshes.reduce((s, m) => s + m.count, 0)).toBe(solids.length);
       expect(town.stats().draws).toBe(2);
       // Every instance's drawn extent is its solid: half widths hx, hz across, 0..h up (review S2).

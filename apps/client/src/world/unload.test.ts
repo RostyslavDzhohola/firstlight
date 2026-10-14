@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import * as THREE from "three/webgpu";
 import { createTerrain, type BodyId } from "@firstlight/shared";
 import { emptyContact, PLAYER_BODY } from "@firstlight/shared/planet/collide";
-import { structureCollider } from "@firstlight/shared/planet/town";
+import { hallBoardPlacement, HALL_STAND_SOLIDS, StructureCollider, structureCollider, townSolids } from "@firstlight/shared/planet/town";
 import { stubCanvasDocument, watchDisposals } from "../render/disposeWatch.testutil.ts";
 import { lookKey } from "../render/warmupLooks.testutil.ts";
 import { pileSamples, PilesView } from "./PilesView.ts";
@@ -103,8 +103,9 @@ describe("Hall of Firsts board in the Portus town (browser round 1, item 2)", ()
     expect(box.max.y).toBeLessThan(4.8);
     expect(box.max.x - box.min.x).toBeLessThan(6);
     expect(HALL_BOARD.bottom + HALL_BOARD.h * 0.9).toBeLessThan(4);
-    // Free-standing in front of the hall's steps: its footprint is outside every town structure.
-    const town = structureCollider(terrain)!;
+    // Free-standing in front of the hall's steps: its footprint is outside every town structure
+    // (the hall and its steps; the board's own stand is solid too, checked below).
+    const town = new StructureCollider(townSolids(terrain).filter((x) => x.item >= 0).map((x, i) => ({ ...x, index: i })));
     for (const x of [box.min.x, box.max.x]) {
       for (const z of [box.min.z, box.max.z]) {
         const q = new THREE.Vector3(x, 0.05, z).applyMatrix4(hall.root.matrixWorld);
@@ -114,6 +115,39 @@ describe("Hall of Firsts board in the Portus town (browser round 1, item 2)", ()
         expect(Math.hypot(c.x - q.x, c.y - q.y, c.z - q.z)).toBeLessThan(PLAYER_BODY.radius); // at most brushing a step
       }
     }
+    world.dispose();
+  });
+
+  it("draws its stand inside the shared stand solids, which block the player there (S4)", async () => {
+    const { QuestWorld } = await import("./QuestWorld.ts");
+    const terrain = createTerrain("portus");
+    const world = new QuestWorld(new THREE.Scene(), "portus", terrain);
+    const hall = world.props.find((p) => p.def.look === "hall")!;
+    hall.root.updateMatrixWorld(true);
+    const board = hallBoardPlacement(terrain)!;
+    // The client's frame is the shared one (QuestWorld lifts its root 2 cm off the ground).
+    const e = hall.root.matrixWorld.elements;
+    expect(Math.hypot(e[0]! - board.rx, e[1]! - board.ry, e[2]! - board.rz)).toBeLessThan(1e-9);
+    expect(Math.hypot(e[8]! - board.fx, e[9]! - board.fy, e[10]! - board.fz)).toBeLessThan(1e-9);
+    // Every drawn volume of the stand (all but the painted face) lies in one of the shared solids.
+    const inv = hall.root.matrixWorld.clone().invert();
+    let volumes = 0;
+    hall.root.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || (m.geometry as THREE.PlaneGeometry).type === "PlaneGeometry") return;
+      m.geometry.computeBoundingBox();
+      const b = m.geometry.boundingBox!.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld));
+      const fits = HALL_STAND_SOLIDS.some(([, cx, cz, hx, hz, y0, y1]) =>
+        b.min.x >= cx - hx - 0.025 && b.max.x <= cx + hx + 0.025 && b.min.z >= cz - hz - 0.025 && b.max.z <= cz + hz + 0.025 &&
+        b.min.y >= y0 - 0.025 && b.max.y <= y1 + 0.025);
+      expect(fits, `${m.name || m.type} at y ${b.min.y.toFixed(2)}–${b.max.y.toFixed(2)}`).toBe(true);
+      volumes++;
+    });
+    expect(volumes).toBeGreaterThanOrEqual(6);
+    // The shared collider the local player uses holds the stand: feet at the board are pushed out.
+    const town = structureCollider(terrain)!;
+    const q = new THREE.Vector3(0, 0.02, 0).applyMatrix4(hall.root.matrixWorld);
+    expect(town.footing(q.x, q.y, q.z, PLAYER_BODY.step).inside).toBe(true);
     world.dispose();
   });
 });
