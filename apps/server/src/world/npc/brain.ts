@@ -11,7 +11,7 @@ import type { V3 } from "../geometry.ts";
 import { cancelAttack, canSee, chest, groundOnly, isMelee, meleeHeightTol, startAttack, updateAttack } from "./attacks.ts";
 import type { NpcSystem } from "./NpcSystem.ts";
 import { MODE, type Npc } from "./npc.ts";
-import { feetHeight, nearSafeRing, npcBody, slideAngle, step } from "./steer.ts";
+import { feetHeight, nearSafeRing, npcBody, slideAngle, step, type SafeAvoid } from "./steer.ts";
 import { NPC_TUNING, emitNpcEvent } from "./tuning.ts";
 import { add, cross, dist, dot, flatDist, len, normalize, rotateAboutUp, stableTangentAt, sub, tangentDir, tangentize, up } from "./vec.ts";
 
@@ -254,19 +254,20 @@ function chase(sys: NpcSystem, n: Npc, now: number, dt: number) {
     startAttack(sys, n, i, t, now);
     return;
   }
-  // Movement.
+  // Movement: after a target outside every safe zone it may come right up to a zone's edge (D-evade-1).
+  const keep: SafeAvoid = nearSafeRing(sys.ground, tp[0], tp[1], tp[2], 0) ? true : "close";
   const toward = tangentDir(n.pos, tp);
   if (dot(toward, toward) > 0.5 && !def.gridMove) n.facing = toward;
   const away: V3 = [-toward[0], -toward[1], -toward[2]];
   if (def.preferRange) {
     const [lo, hi] = def.preferRange;
-    if (def.relocateWithin && d < def.relocateWithin) moveDir(sys, n, away, def.runSpeed, dt, NPC_ANIM.RUN);
-    else if (d > hi) moveDir(sys, n, toward, def.runSpeed, dt, NPC_ANIM.RUN);
-    else if (d < lo) moveDir(sys, n, away, def.speed, dt, NPC_ANIM.WALK);
+    if (def.relocateWithin && d < def.relocateWithin) moveDir(sys, n, away, def.runSpeed, dt, NPC_ANIM.RUN, keep);
+    else if (d > hi) moveDir(sys, n, toward, def.runSpeed, dt, NPC_ANIM.RUN, keep);
+    else if (d < lo) moveDir(sys, n, away, def.speed, dt, NPC_ANIM.WALK, keep);
     else {
       if (Math.random() < dt / 3) n.strafeSign = -n.strafeSign;
       const side = cross(up(n.pos), toward);
-      moveDir(sys, n, [side[0] * n.strafeSign, side[1] * n.strafeSign, side[2] * n.strafeSign], def.speed * 0.6, dt, NPC_ANIM.WALK);
+      moveDir(sys, n, [side[0] * n.strafeSign, side[1] * n.strafeSign, side[2] * n.strafeSign], def.speed * 0.6, dt, NPC_ANIM.WALK, keep);
     }
     if (!def.gridMove) n.facing = toward;
     return;
@@ -277,16 +278,16 @@ function chase(sys: NpcSystem, n: Npc, now: number, dt: number) {
     // Dusk Wolves circle at 6–8 m while their bites recharge, then dart in.
     const side = cross(up(n.pos), toward);
     const radial = d < 6 ? -1 : d > 8 ? 1 : 0;
-    moveDir(sys, n, normalize(add(scaleV(side, n.strafeSign), toward, radial * 0.8)), def.runSpeed * 0.7, dt, NPC_ANIM.RUN);
+    moveDir(sys, n, normalize(add(scaleV(side, n.strafeSign), toward, radial * 0.8)), def.runSpeed * 0.7, dt, NPC_ANIM.RUN, keep);
     n.facing = toward;
     return;
   }
-  if (d > reach * 0.8) moveDir(sys, n, toward, def.runSpeed, dt, NPC_ANIM.RUN);
+  if (d > reach * 0.8) moveDir(sys, n, toward, def.runSpeed, dt, NPC_ANIM.RUN, keep);
   else if (blockedStrike) {
     // Step round the structure in the way, to the side it keeps for rounding structures.
     const side = cross(up(n.pos), toward);
     const k = n.slideSide;
-    if (!moveDir(sys, n, normalize(add(scaleV(side, k), toward, 0.35)), def.speed, dt, NPC_ANIM.WALK)) n.slideSide = -k;
+    if (!moveDir(sys, n, normalize(add(scaleV(side, k), toward, 0.35)), def.speed, dt, NPC_ANIM.WALK, keep)) n.slideSide = -k;
   } else sys.setAnim(n, NPC_ANIM.IDLE);
   if (!def.gridMove || d <= reach * 0.8) n.facing = toward;
 }
@@ -311,7 +312,9 @@ function outOfReach(sys: NpcSystem, n: Npc, tp: V3, d: number): boolean {
     if (groundOnly(a) && !isMelee(a) && perch > tol) continue; // lands on the ground under it
     return false;
   }
-  if (nearSafeRing(sys.ground, tp[0], tp[1], tp[2], NPC_RULES.safeMargin + n.radius)) return true;
+  // Inside a safe zone (D-evade-1): out of reach. Just outside one it isn't: the chase comes right up
+  // to the zone's edge (CHASE_MARGIN), within any melee reach of a target standing outside it.
+  if (nearSafeRing(sys.ground, tp[0], tp[1], tp[2], 0)) return true;
   if (under === null) return true;
   return perch > tol && n.def.attacks.every(groundOnly);
 }
@@ -607,7 +610,7 @@ function quantize(n: Npc, d: V3): V3 {
 }
 
 /** Move along a tangent direction with separation from neighbours. Returns false if blocked. */
-export function moveDir(sys: NpcSystem, n: Npc, dir: V3, speed: number, dt: number, anim: number, avoidSafe = true): boolean {
+export function moveDir(sys: NpcSystem, n: Npc, dir: V3, speed: number, dt: number, anim: number, avoidSafe: SafeAvoid = true): boolean {
   if (dot(dir, dir) < 0.5 || speed <= 0) return false;
   let d = dir;
   const nb = sys.neighbours(n, n.radius + 1.4);
@@ -638,7 +641,7 @@ export function moveDir(sys: NpcSystem, n: Npc, dir: V3, speed: number, dt: numb
 }
 
 /** Walk toward a point; true when within `within` metres (or stuck right next to it). */
-function moveTo(sys: NpcSystem, n: Npc, goal: V3, speed: number, dt: number, within = 1, avoidSafe = true): boolean {
+function moveTo(sys: NpcSystem, n: Npc, goal: V3, speed: number, dt: number, within = 1, avoidSafe: SafeAvoid = true): boolean {
   const d = flatDist(n.pos, goal);
   if (d <= within) return true;
   const dir = tangentDir(n.pos, goal);

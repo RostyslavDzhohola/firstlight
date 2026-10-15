@@ -8,7 +8,7 @@ import { wallBetween } from "../combat.ts";
 import { PLAYER_RADIUS, rayTerrain, type V3 } from "../geometry.ts";
 import type { LivePlayer, NpcSystem } from "./NpcSystem.ts";
 import { MODE, type ActiveAttack, type Npc } from "./npc.ts";
-import { blockedByStructure, feetHeight, nearSafeRing, npcBody, step } from "./steer.ts";
+import { blockedByStructure, CHASE_MARGIN, feetHeight, nearSafeRing, npcBody, step } from "./steer.ts";
 import { add, cross, dist, dot, flatDist, len, normalize, rotateAboutUp, scale, sub, tangentDir, up } from "./vec.ts";
 
 export interface NpcProjectile {
@@ -352,7 +352,8 @@ function resolve(sys: NpcSystem, n: Npc, at: ActiveAttack, now: number) {
         const l = len(land);
         const ux = land[0] / l, uy = land[1] / l, uz = land[2] / l;
         const fh = feetHeight(sys.ground, ux, uy, uz, n.def.locomotion, n.def.hover ?? 0);
-        if (fh !== null && !nearSafeRing(sys.ground, land[0], land[1], land[2], 3 + n.radius)) {
+        // Lands anywhere outside the zones' least margin (D-evade-1): a player just outside a ring can be leapt at.
+        if (fh !== null && !nearSafeRing(sys.ground, land[0], land[1], land[2], CHASE_MARGIN + n.radius)) {
           const r = sys.ground.R + fh;
           const to: V3 = [ux * r, uy * r, uz * r];
           // Never through or into a building (D44): the leap stops where it started.
@@ -425,7 +426,7 @@ function runActive(sys: NpcSystem, n: Npc, at: ActiveAttack, now: number, dt: nu
       const speed = a.speed ?? 10;
       const out: V3 = [0, 0, 0];
       const d = Math.min(speed * dt, (a.length ?? 8) - at.travelled);
-      const used = d > 0 ? step(sys.ground, n.pos, at.dir, d, n.def.locomotion, n.def.hover ?? 0, n.radius, out, true, 1, n.height) : -1;
+      const used = d > 0 ? step(sys.ground, n.pos, at.dir, d, n.def.locomotion, n.def.hover ?? 0, n.radius, out, "close", 1, n.height) : -1;
       if (used !== 0) {
         // Hit an obstacle (cliff, water, safe ring): the Pixel Lancer is stunned (punish window).
         at.activeUntil = now;
