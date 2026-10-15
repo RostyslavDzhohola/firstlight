@@ -4,7 +4,7 @@ import { cosmeticWarmupHook } from "../render/Cosmetics.ts";
 
 import * as THREE from "three/webgpu";
 import { BODIES, padDirs, type BodyId } from "@firstlight/shared";
-import { flags } from "../config.ts";
+import { config, flags } from "../config.ts";
 import { Net, TravelRedirect, type Snapshot } from "../net/Net.ts";
 import { AvatarView, avatarWarmupHook, preloadAvatars } from "../render/Avatars.ts";
 import { HorseView, horseWarmupHook, preloadHorse } from "../render/Horses.ts";
@@ -114,6 +114,7 @@ export class Game {
     });
     this.audio = new GameAudio();
     this.audio.resume();
+    if (!flags.has("zzfx")) void this.audio.loadSamples(config.sfxBase); // ZzFX plays until (or unless) they land
     this.ctx.renderer.domElement.addEventListener("mousedown", () => this.audio.resume());
     window.addEventListener("keydown", () => this.audio.resume(), { once: true });
     this.perf = new PerfOverlay(this.ctx);
