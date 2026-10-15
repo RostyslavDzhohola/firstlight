@@ -36,18 +36,20 @@ def parts():
     torso = A.torso(chest=(0.16, 0.115, 0.13), belly=(0.14, 0.105, 0.11), hips=(0.158, 0.118, 0.1))
     arms = A.arms(sk, upper=(0.056, 0.048), fore=(0.046, 0.038))
     legs = A.legs(sk, thigh=(0.096, 0.07), calf=(0.066, 0.05), knee=0.064)
-    neck = S.round_cone(vec((0, 0.01, 1.42)), vec((0, 0.008, 1.62)), 0.062, 0.056)
+    neck = S.round_cone(vec((0, 0.01, 1.42)), vec((0, 0.008, 1.64)), 0.074, 0.066)
 
-    def suit(P):
+    def suit_smooth(P):
         d = S.smin(torso(P), arms(P), 0.05)
         d = S.smin(d, legs(P), 0.05)
         d = S.smin(d, neck(P), 0.03)
         d = S.smax(d, 0.13 - P[:, 2], 0.01)
         ax = np.abs(P[:, 0])
-        d = S.smax(d, ax - 0.745, 0.01)  # sleeves end at the gloves
-        # quilting: a diamond lattice of soft puffs
-        q = (np.sin((P[:, 0] + P[:, 2]) * 140) * np.sin((P[:, 0] - P[:, 2] + P[:, 1]) * 140))
-        return d - 0.0018 * np.abs(q)
+        return S.smax(d, ax - 0.745, 0.01)  # sleeves end at the gloves
+
+    def suit(P):
+        # quilting: a soft diamond lattice of padded cells (broad and shallow, so it reads as padding)
+        q = (np.sin((P[:, 0] + P[:, 2]) * 85) * np.sin((P[:, 0] - P[:, 2] + P[:, 1]) * 85))
+        return suit_smooth(P) - 0.0011 * np.abs(q)
 
     def paint_suit(ctx):
         rgb = PT.fill(ctx.n, (0.9, 0.9, 0.9))
@@ -55,8 +57,8 @@ def parts():
         return PT.shade(rgb, ctx.P, ctx.N, ctx.ao, ctx.cav, ao_tint="#404a58", ao_amt=0.7, top_light=0.12,
                         cav_amt=0.55, edge_amt=0.15, z_range=(0, 1.8))
 
-    # --- armour plates (primary ivory) ---------------------------------------------------------
-    base = suit
+    # --- armour plates (primary ivory): they follow the smooth suit, not its quilting -------------
+    base = suit_smooth
 
     def region_box(c_, half, R=None, rad=0.02):
         return S.box(c_, half, R, rad)

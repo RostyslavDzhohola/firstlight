@@ -113,3 +113,22 @@ the bigger heads and scale hats and masks per starter (`render/Avatars.ts`).
   Heavy destruction like the other spells. The server times the hold, enforces the cooldown, and the
   seal spends no kunai. Never a one-shot at equal level (30 + 12 burn of 100 HP at L1).
 - **Smoke-step dodge:** proposed, not built (the dodge lane owns the roll).
+
+## Approval renders (Phase A, 2026-10-15) and what is still rough
+
+Renders: `/tmp/fl-go/chars/` (turnarounds in a neutral studio light; "game" renders emulate the
+client's toon avatar shader under the Portus sun and sky; line-ups; the ninja in all six palettes; a
+walk/idle contact sheet). Rebuild everything with `tools/blender/chars3d/build.sh`.
+
+Known rough spots, to fix after the owner's notes:
+- **Texel use:** the automatic unwrap packs only about a third of each 1024² atlas (many small
+  islands), so textures are softer than they could be. Next: seam-based unwrapping to roughly double
+  the density, faces first.
+- **Hoods** (Brother Ash, Hinoko) read a little like bags; the ninja's cowl drape is a tall tube. Next:
+  a shorter, wider capelet and a softer hood peak.
+- **Toon light on faces:** the game's hard terminator draws a dark band across noses and cheeks. A
+  softer ramp for skin (or the whole avatar) would suit the sculpted look better.
+- **Secondary motion:** scarves, robe hems and hood tails are only skinned. Proposal: 6–8 spring bones
+  per starter (within the 75-bone budget), simulated in the client for the nearest avatars only.
+- **Small things:** Ash's prayer beads hang off the chest; hands are fists in the idle clip; Unit 7's
+  first padding pattern read as scales (rebuilt with broad padding and smooth plates).
