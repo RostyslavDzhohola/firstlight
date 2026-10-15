@@ -1,4 +1,4 @@
-/* "Saved." sits above the loading box (both direct children of <body>): the game rejoins as the account behind it. */
+/* "Saved." sits above the loading screen (both on <body>): the game rejoins as the account behind it. */
 .fl-overlay--modal.fl-overlay--top { z-index: calc(var(--z-loading) + 1); }
 
 /* Save card, sign-in and name picker (verdict: Entry B states: email → code → saved, busy; plus

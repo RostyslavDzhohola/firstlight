@@ -9,7 +9,7 @@
 
 import "./account.css";
 import { getAccountInfo, NAME_PATTERN, saveStatus, savingStatus, sendEmailCode, setDisplayName, verifyEmailCode, type AccountInfo } from "../net/auth.ts";
-import { button, el, icon, isolateKeys, overlayClosed, overlayOpened, sprite, uiRoot } from "./dom.ts";
+import { button, el, icon, isolateKeys, overlayClosed, overlayOpened, sprite } from "./dom.ts";
 import { codeFromText, firstSaveStep, mayOpenSaveCard, SAVE_MIN_LEVEL, type SaveStatus, type SaveStep as FlowStep } from "./saveOffer.ts";
 import { installSprites, portraitSprite } from "./sprites.ts";
 
@@ -21,7 +21,9 @@ const CHECK_TIMEOUT_MS = 2500;
 function modal(name: string, onEscape: (() => void) | null): { overlay: HTMLDivElement; card: HTMLElement; close(): void } {
   document.exitPointerLock?.();
   overlayOpened(name);
-  const overlay = el("div", "fl-overlay fl-overlay--modal fl-ui", uiRoot());
+  // On <body>, not in #ui: #ui is its own stacking context under the landing page (z 20), so a card
+  // in it opened from the landing ("Sign in", the home page's "Save your progress") was invisible.
+  const overlay = el("div", "fl-overlay fl-overlay--modal fl-ui", document.body);
   const card = el("section", "fl-modal fl-panel fl-acct", overlay);
   card.setAttribute("role", "dialog");
   card.setAttribute("aria-modal", "true");
@@ -298,13 +300,8 @@ function emailFlow(container: HTMLElement, o: FlowOpts): void {
 
   const stepSaved = () => {
     reset();
-    // The game rejoins as the account now (close code 4101): its "Reconnecting…" box stays behind this
-    // card. #ui is its own stacking context under #loading, so the card moves up to <body>.
-    const overlay = container.closest(".fl-overlay");
-    if (overlay) {
-      overlay.classList.add("fl-overlay--top");
-      document.body.appendChild(overlay);
-    }
+    // The game rejoins as the account now (close code 4101): its loading screen stays behind this card.
+    container.closest(".fl-overlay")?.classList.add("fl-overlay--top");
     icon("check", "", el("div", "fl-acct__mark is-ok", container));
     el("h2", "", container, save ? "Saved." : "Signed in.");
     if (save) {
