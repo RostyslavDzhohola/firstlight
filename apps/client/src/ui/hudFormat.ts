@@ -3,9 +3,34 @@
 import { WEAPON_BY_ID, type WeaponDef } from "@firstlight/shared/content/weapons";
 import { itemName, itemStack } from "@firstlight/shared/content/items";
 import type { InvItem } from "@firstlight/shared/net/protocol";
+import { features } from "../config.ts";
 import { itemSprite } from "./sprites.ts";
 
 export const TIER_NUMERALS = ["", "I", "II", "III"] as const;
+
+/** Items this build hides: the radio while voice is off (D-controls-1). The server still holds them. */
+export const HIDDEN_ITEMS: ReadonlySet<string> = new Set(features.voice ? [] : ["radio"]);
+
+/** The item as the HUD and the inventory show it: a hidden item reads as an empty slot. */
+export function shownItem<T extends { id: string }>(item: T | null | undefined, hidden: ReadonlySet<string> = HIDDEN_ITEMS): T | null {
+  return item && !hidden.has(item.id) ? item : null;
+}
+
+/**
+ * The death screen's "Left in your pile": what the server put in the pile. Hidden items (the radio
+ * while voice is off) never land there (BodyRoom.kill), so they aren't listed or counted either.
+ */
+export function deathPile(
+  lastAlive: { hotbar: readonly (InvItem | null)[]; backpack: readonly (InvItem | null)[]; coins: number } | null,
+  hidden: ReadonlySet<string> = HIDDEN_ITEMS,
+): { items: InvItem[]; coins: number; note: string } {
+  const items = lastAlive ? [...lastAlive.hotbar, ...lastAlive.backpack].map((x) => shownItem(x, hidden)).filter((x): x is InvItem => !!x) : [];
+  const coins = lastAlive?.coins ?? 0;
+  const note = items.length || coins
+    ? "Your pile stays where you fell and never expires. Anyone can loot it, including the next you, if you can get back."
+    : "You weren't carrying anything this time.";
+  return { items, coins, note };
+}
 
 // ------------------------------------------------------------------------------------------------ damage numbers
 

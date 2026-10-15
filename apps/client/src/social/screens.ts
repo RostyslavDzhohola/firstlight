@@ -4,6 +4,7 @@
 import { CLOSE } from "@firstlight/shared/net/social";
 import { el } from "./dom.ts";
 import { overlayClosed, overlayOpened } from "../ui/dom.ts";
+import { goHome } from "../home/leave.ts";
 
 let queueEl: HTMLDivElement | null = null;
 
@@ -61,8 +62,8 @@ export function showRemoved(code: number | string): void {
   el("p", "", p, t.body);
   if (lastReason && code !== CLOSE.ELSEWHERE) el("p", "", p, `Reason: ${lastReason}`);
   if (t.again) {
-    const b = el("button", "fl-btn", p, code === CLOSE.ELSEWHERE ? "Play here instead" : "Back to the start");
-    b.onclick = () => location.reload();
+    const b = el("button", "fl-btn", p, code === CLOSE.ELSEWHERE ? "Play here instead" : "Back to the home page");
+    b.onclick = () => goHome();
   }
   document.body.appendChild(removedEl);
 }

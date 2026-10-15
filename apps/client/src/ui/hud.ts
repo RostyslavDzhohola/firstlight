@@ -10,7 +10,7 @@ import "./styles/kit.css";
 import { STARTERS, PALETTE_NAMES, WEAPON_BY_ID } from "@firstlight/shared/content/weapons";
 import { PHRASES, type YouState } from "@firstlight/shared/net/protocol";
 import { el, icon, sprite, uiRoot } from "./dom.ts";
-import { formatDamage, isLowHp, parsePrompt, slotView, type DamageKind, type SlotView } from "./hudFormat.ts";
+import { formatDamage, isLowHp, parsePrompt, shownItem, slotView, type DamageKind, type SlotView } from "./hudFormat.ts";
 import { installSprites, portraitSprite } from "./sprites.ts";
 import { uiSettings, type UiSettings } from "./uiSettings.ts";
 import { showSubtitle } from "./subtitle.ts";
@@ -106,6 +106,8 @@ export class Hud {
 
   readonly party = el("section", "fl-party", this.layer);
   private readonly right = el("div", "fl-hud__right", this.layer);
+  /** The minimap's place (ui/minimap.ts): first in the right column, so missions and toasts flow below it. */
+  readonly minimapSlot = el("div", "fl-hud__minimap", this.right);
   private readonly missions = el("section", "fl-missions fl-holo fl-corners", this.right);
   private readonly toasts = el("div", "fl-toasts", this.right);
 
@@ -330,7 +332,7 @@ export class Hud {
     }
     let selectedView: SlotView | null = null;
     you.hotbar.forEach((it, i) => {
-      const view = slotView(it, you.level);
+      const view = slotView(shownItem(it), you.level);
       if (i === you.selected) selectedView = view;
       this.renderSlot(this.slots[i]!, view, i === you.selected);
     });
@@ -347,7 +349,7 @@ export class Hud {
         this.ammo.classList.toggle("is-low", sel.ammo.cur <= Math.ceil(sel.ammo.max / 4));
       }
     }
-    const item = you.hotbar[you.selected];
+    const item = shownItem(you.hotbar[you.selected]);
     const ranged = !!item && WEAPON_BY_ID.get(item.id)?.delivery !== "melee";
     if (ranged !== c.ranged) this.cross.classList.toggle("is-melee", !(c.ranged = ranged));
   }

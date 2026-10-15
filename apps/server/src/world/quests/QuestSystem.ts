@@ -21,6 +21,7 @@ import { PF } from "@firstlight/shared/net/schema";
 import { z } from "zod";
 import { accountLinks } from "../../auth/links.ts";
 import { env } from "../../env.ts";
+import { voiceItemHidden } from "../voice/index.ts";
 import { actorPos, type PlayerActor } from "../actors.ts";
 import type { BodyRoom } from "../BodyRoom.ts";
 import { emitGameEvent, onGameEvent, type DamageEvent, type DeathEvent, type GameEvent, type KillEvent, type SpawnRequestEvent } from "../events.ts";
@@ -550,7 +551,7 @@ export class QuestSystem implements RoomSystem {
       this.toast(a, text, "warn");
     };
     if (!this.atShop(a)) return fail("too far", "Talk to Juno Vale at the Portus Exchange to buy");
-    const disabled = (itemId === HORSE_WHISTLE && !env.horses) || (isExtraCosmetic(itemId) && !env.cosmeticsExtras);
+    const disabled = (itemId === HORSE_WHISTLE && !env.horses) || (isExtraCosmetic(itemId) && !env.cosmeticsExtras) || voiceItemHidden(itemId);
     const entry = disabled ? undefined : shopEntry(itemId, tier);
     if (!entry) return fail("not sold", "The Exchange doesn't sell that");
     const n = entry.stack > 1 ? Math.max(1, Math.min(entry.stack, qty)) : 1;

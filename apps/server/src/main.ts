@@ -13,6 +13,8 @@ import { SqliteCharacterRepo, SqlitePileStore } from "./world/sqliteStores.ts";
 import { progressStore, SqliteProgressStore } from "./world/quests/store.ts";
 import { copyStateStore, SqliteCopyStateStore } from "./world/copyState.ts";
 import { mountOps } from "./ops/admin.ts";
+import { dataFastVisits } from "./ops/datafast.ts";
+import { mountHome } from "./ops/home.ts";
 import { endAllSessions } from "./social/index.ts";
 import { banExplainer } from "./social/refusal.ts";
 
@@ -57,6 +59,7 @@ const game = await createGame({
   mountAfterJson: (app) => {
     accounts.mountAfterJson(app);
     mountOps(app, { db: accounts.db, requireAdmin: accounts.requireAdmin, allowedOrigins: env.clientOrigins });
+    mountHome(app, { db: accounts.db, visits: dataFastVisits({ apiKey: env.datafastApiKey }) });
   },
   onShutdown: () => {
     // Each step on its own: a failure in one must not skip closing the databases.
