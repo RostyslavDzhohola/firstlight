@@ -85,6 +85,7 @@ describe("takes and jitter", () => {
 describe("sample bank and the ZzFX fallback", () => {
   it("plays samples it loaded and ZzFX for everything else", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
     const { io } = host(
       {
         set: "sfx-1",

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { STARTERS, weapon, WEAPONS } from "@firstlight/shared/content/weapons";
 import { PRESETS } from "./presets.ts";
+import { SOUNDS } from "../../../../tools/sfx/sounds.ts";
 import { attackSound, fallbackOf, impactSound, SAMPLE_FALLBACKS, SAMPLE_NAMES, swingSound } from "./sounds.ts";
 
 describe("sound mapping", () => {
@@ -49,6 +50,15 @@ describe("sound mapping", () => {
       const p = PRESETS[fallbackOf(name).preset];
       expect(p[2], name).toBeLessThanOrEqual(600); // frequency (was 1.6 kHz and 900 Hz)
       expect((p[4] ?? 0) + (p[5] ?? 0.1), name).toBeLessThan(0.06); // sustain + release (s)
+    }
+  });
+
+  it("has a generation spec for every sample, and 2+ kept takes for the frequent ones", () => {
+    expect(SOUNDS.map((s) => s.name).sort()).toEqual([...SAMPLE_NAMES].sort());
+    const frequent = ["hitmark", "crit", "ui", "impact", "hurt", "swing_sword", "swing_staff", "swing_fists", "hexquill", "magic_hit", "carbine"];
+    for (const s of SOUNDS.filter((s) => frequent.includes(s.name))) {
+      const kept = s.prompts.length - Object.keys(s.drop ?? {}).length;
+      expect(kept, s.name).toBeGreaterThanOrEqual(2);
     }
   });
 });

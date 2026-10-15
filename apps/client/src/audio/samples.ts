@@ -91,6 +91,7 @@ export class SampleBank<B> {
       }),
     );
     if (failed.length) console.warn(`[sfx] ${failed.length} sample file(s) failed, ZzFX stands in: ${failed.join(", ")}`);
+    console.info(`[sfx] ${this.loaded.size} sampled sounds from ${manifest.set || base}`);
     return this.loaded.size;
   }
 
