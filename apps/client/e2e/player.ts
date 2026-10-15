@@ -235,9 +235,14 @@ export class Player {
     expect((await this.snap()).input.pointerLocked, "pointer lock after clicking the world").toBe(true);
   }
 
+  /** Mouse sensitivity and invert-Y (Settings; read once, they don't change during a journey). */
+  private sensCache: { s: number; inv: boolean } | null = null;
   private async sens(): Promise<{ s: number; inv: boolean }> {
+    if (this.sensCache) return this.sensCache;
     const s = await this.snap();
-    return { s: s.input.sensitivity ?? 0.0022, inv: !!s.input.invertY };
+    const v = { s: s.input.sensitivity ?? 0.0022, inv: !!s.input.invertY };
+    if (s.input.sensitivity !== null) this.sensCache = v;
+    return v;
   }
 
   /** Turn the camera right by `deg` (negative: left), with a real mouse move. */
@@ -267,8 +272,8 @@ export class Player {
   }
 
   /** Put a target under the crosshair (yaw and pitch from the camera, the way the server aims). */
-  async aim(target: (s: Snap) => Target | null) {
-    for (let i = 0; i < 5; i++) {
+  async aim(target: (s: Snap) => Target | null, tries = 4) {
+    for (let i = 0; i < tries; i++) {
       const t = target(await this.snap());
       if (!t || t.aimYaw === null || t.aimPitch === null) return false;
       if (Math.abs(t.aimYaw) < 0.015 && Math.abs(t.aimPitch) < 0.02) return true;
@@ -314,6 +319,11 @@ export class Player {
     return r?.npcs ?? [];
   }
 
+  /** Any other NPC admin command (`spawn` {kind, level, roam}…; dev admin guests only). */
+  async npc(cmd: string, args: Record<string, unknown> = {}) {
+    return this.page.evaluate(([c, a]) => (window as unknown as { __fl: { act: { npc(c: string, a: object): Promise<unknown> } } }).__fl.act.npc(c, a), [cmd, args] as const);
+  }
+
   /** Distance, bearing and aim from us to a world point. */
   targetOf(p: readonly number[]): Promise<Target | null> {
     return this.page.evaluate(([x, y, z]) => (window as unknown as { __fl: { targetOf(x: number, y: number, z: number): Target | null } }).__fl.targetOf(x!, y!, z!), [p[0], p[1], p[2]]);
@@ -352,19 +362,29 @@ export class Player {
     return arrived(await this.snap());
   }
 
-  /** Walk out of the pad's safe ring, away from the portal home (on planets) or the given bearing. */
-  async walkOutOfRing(timeoutMs = 25_000) {
+  /**
+   * Walk out of the pad's safe ring, keeping the portal home behind us (walking into it would travel
+   * back to Portus). Steers every step: the camera can be re-aimed by an arrival correction.
+   */
+  async walkOutOfRing(timeoutMs = 30_000) {
     const s0 = await this.snap();
-    const home = s0.portals?.[0];
-    await this.turn(home ? home.bearing + 180 : 180);
+    const body = s0.body;
+    await this.page.waitForTimeout(800); // let the arrival settle (first corrections re-aim the camera)
     const until = Date.now() + timeoutMs;
     let lastPos = s0.player!.pos;
+    let detour = 0;
     while (Date.now() < until) {
-      await this.hold(["ShiftLeft", "KeyW"], 700);
       const s = await this.snap();
+      expect(s.body, "still on the same body (didn't walk into the portal)").toBe(body);
       if (s.zone?.local === "danger" && s.zone.padDist > s.zone.safeRadius + 4 && !s.player?.swimming) return s;
-      const p = s.player!.pos;
-      if (Math.hypot(p[0]! - lastPos[0]!, p[1]! - lastPos[1]!, p[2]! - lastPos[2]!) < 1.5 || s.player?.swimming) await this.turn(50);
+      const home = s.portals?.[0];
+      if (home && home.surface < 25 && Math.abs(home.bearing) < 100) await this.turn(home.bearing + 180 + detour);
+      await this.hold(["ShiftLeft", "KeyW"], 600);
+      const p = (await this.snap()).player!.pos;
+      if (Math.hypot(p[0]! - lastPos[0]!, p[1]! - lastPos[1]!, p[2]! - lastPos[2]!) < 1.5 || s.player?.swimming) {
+        detour = detour >= 0 ? -(detour + 40) : -detour; // try +40°, −40°, +80°… around obstacles and water
+        await this.turn(detour);
+      }
       lastPos = p;
     }
     throw new Error("couldn't walk out of the safe ring");

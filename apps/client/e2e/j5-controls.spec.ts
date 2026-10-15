@@ -65,7 +65,10 @@ test.describe("J5 controls", () => {
     for (let i = 0; i < 6; i++) {
       const running = i % 2 === 1;
       await player.page.waitForTimeout(1500); // past the 1.2 s dodge cooldown
+      const before = await player.snap();
+      if (before.player?.swimming) await player.note("skipped", `try ${i + 1}: in water`);
       if (running) {
+        await player.turn(180); // back and forth over the same ground, not off into a lake
         await player.page.keyboard.down("ShiftLeft");
         await player.page.keyboard.down("KeyW");
         await player.page.waitForTimeout(700);

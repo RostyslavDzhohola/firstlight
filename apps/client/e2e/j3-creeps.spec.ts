@@ -102,43 +102,52 @@ test.describe("J3 creeps", () => {
     const xp0 = start.you?.xp ?? 0;
     const level0 = start.you?.level ?? 1;
 
-    // The nearest weak hostile the server has. Walk to it when it's close; otherwise (no creeps near
-    // the arrival, item 6c) the admin teleport puts us 10 m from it so the kill itself is still tested.
+    // A weak hostile near the arrival, with the fewest friends around it (a level-1 player takes one
+    // at a time). Without one (no creeps near the arrival yet, item 6c) the admin NPC command spawns a
+    // single Hopbit outside the ring, so the kill → XP path is still tested every run.
     const list = (await player.npcList()).filter((n) => HOSTILE.has(n.def) && n.hp > 0 && !n.boss);
-    expect(list.length, "the server has hostiles on Arcadia").toBeGreaterThan(0);
-    const ranked = (await Promise.all(list.map(async (n) => ({ n, t: await player.targetOf([n.x, n.y, n.z]) })))).filter((x): x is { n: ServerNpc; t: Target } => !!x.t);
-    expect(ranked.length, "hostiles we can locate").toBeGreaterThan(0);
-    ranked.sort((a, b) => a.n.level - b.n.level || a.t.surface - b.t.surface);
-    const pick = ranked[0]!;
-    await player.note("target", { def: pick.n.def, level: pick.n.level, fromUsM: pick.t.surface });
-    if (pick.t.surface > 60) {
-      const p = [pick.n.x, pick.n.y, pick.n.z];
-      const me = start.player!.pos;
-      const d = Math.max(1, Math.hypot(me[0]! - p[0]!, me[1]! - p[1]!, me[2]! - p[2]!));
-      const k = 10 / d;
-      await player.admin("teleport", { x: p[0]! + (me[0]! - p[0]!) * k, y: p[1]! + (me[1]! - p[1]!) * k, z: p[2]! + (me[2]! - p[2]!) * k });
-      await player.note("placement", "admin teleport to 10 m from the hostile (nothing within 60 m of the arrival)");
-      await player.page.waitForTimeout(1500);
+    const friends = (n: ServerNpc) => list.filter((m) => m !== n && Math.hypot(m.x - n.x, m.y - n.y, m.z - n.z) < 14).length;
+    const ranked = (await Promise.all(list.map(async (n) => ({ n, pack: friends(n), t: await player.targetOf([n.x, n.y, n.z]) })))).filter(
+      (x): x is { n: ServerNpc; pack: number; t: Target } => !!x.t,
+    );
+    ranked.sort((a, b) => a.n.level - b.n.level || a.pack - b.pack || a.t.surface - b.t.surface);
+    const near = ranked.find((x) => x.t.surface <= 60 && x.pack <= 2 && x.n.level <= 2);
+    if (near) {
+      await player.note("target", { def: near.n.def, level: near.n.level, pack: near.pack + 1, fromUsM: near.t.surface });
+    } else {
+      await player.walkOutOfRing();
+      await player.npc("spawn", { kind: "hopbit", level: 1, roam: 0 });
+      await player.hold(["KeyW"], 1500); // on outward, away from the ring, then face it
+      await player.turn(180);
+      await player.note("placement", `admin npc spawn: one Hopbit outside the ring (nearest natural hostile ${ranked[0] ? `${ranked[0].n.def} ${ranked[0].t.surface} m` : "none"})`);
     }
 
-    // Fight: the nearest live hostile within 40 m, aimed at through the camera like a player, healed by
+    // Fight: the nearest live hostile within 60 m, aimed at through the camera like a player, healed by
     // the admin command when low (the test is about the kill paying XP, not about surviving a pack).
-    await player.until((x) => !!x.npcs?.some((n) => n.hostile && !n.dead && n.dist < 40), "a hostile within 40 m", 30_000);
+    await player.until((x) => !!x.npcs?.some((n) => n.hostile && !n.dead && n.dist < 60), "a hostile within 60 m", 30_000);
     const until = Date.now() + 75_000;
     let shots = 0;
     while (Date.now() < until) {
       const s = await player.snap();
       if ((s.you?.xp ?? 0) > xp0 || (s.you?.level ?? 1) > level0 || s.player?.dead) break;
-      if ((s.player?.hp ?? 100) < 60) await player.admin("heal");
-      const foe = s.npcs?.find((n) => n.hostile && !n.dead && n.dist < 40);
-      if (!foe) {
-        await player.walkTo((x) => x.npcs?.find((n) => n.hostile && !n.dead) ?? null, (x) => !!x.npcs?.find((n) => n.hostile && !n.dead && n.dist < 30), { timeoutMs: 3000 });
+      if ((s.player?.hp ?? 100) < 80) await player.admin("heal");
+      // Weapons are holstered in safe zones: fight from outside the ring.
+      if (s.zone?.server === "safe") {
+        await player.walkOutOfRing();
         continue;
       }
-      await player.aim((x) => x.npcs?.find((n) => n.id === foe.id && !n.dead) ?? null);
+      const foe = s.npcs?.find((n) => n.hostile && !n.dead && n.dist < 60);
+      if (!foe) continue;
+      // Hostiles come to us (Hopbits leap in): only walk when it's far, one step at a time.
+      if (foe.dist > 30) {
+        await player.turn(foe.bearing);
+        await player.hold(["KeyW"], 500);
+        continue;
+      }
+      await player.aim((x) => x.npcs?.find((n) => n.id === foe.id && !n.dead) ?? null, 3);
       await player.attack();
       shots++;
-      await player.page.waitForTimeout(250);
+      await player.page.waitForTimeout(200);
     }
     const end = await player.snap();
     await player.note("fight", { shots, xp: [xp0, end.you?.xp], level: [level0, end.you?.level], dead: end.player?.dead });

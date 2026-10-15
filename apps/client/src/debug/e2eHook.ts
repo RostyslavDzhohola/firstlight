@@ -190,10 +190,14 @@ export function installE2eHook(win: Window & typeof globalThis): void {
 
   // Toasts (server and client ones) as they appear: the toast stack is watched, not the whole page.
   let toastBox: Element | null = null;
+  const seenToasts = new WeakSet<Node>(); // the HUD appends a toast, then moves it to the top: one toast, two records
   const toastObserver = new MutationObserver((records) => {
     for (const r of records)
       for (const n of r.addedNodes)
-        if (n instanceof HTMLElement && n.classList.contains("fl-toast")) push({ t: performance.now(), kind: "toast", text: n.textContent ?? "", cls: n.className });
+        if (n instanceof HTMLElement && n.classList.contains("fl-toast") && !seenToasts.has(n)) {
+          seenToasts.add(n);
+          push({ t: performance.now(), kind: "toast", text: n.textContent ?? "", cls: n.className });
+        }
   });
 
   // ---- room messages (re-attached after every travel)
