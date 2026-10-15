@@ -1,7 +1,8 @@
 // Local player movement on a sphere: run/sprint/jump/dodge/swim/fall damage, client-predicted.
 // The server validates (SPEC §5.3); `correct` messages snap us back. Intact breakable props block
 // (the player slides along them) and can be stood on (MoveColliders, set by the destruction view),
-// and so do the Portus town's structures (setStructures: the shared solids the server checks, D38).
+// and so do the body's structures: the Portus town's, a planet outpost's and its waystones (setStructures:
+// the shared solids the server checks, D38, D42).
 // Runs every frame: module scratch vectors, no allocations.
 
 import * as THREE from "three/webgpu";
@@ -117,7 +118,7 @@ export class PlayerController {
     return this.colliders;
   }
 
-  /** Indestructible structures of this body (the Portus town; null elsewhere). */
+  /** Indestructible structures of this body (the Portus town, a planet's outpost and waystones; null if none). */
   setStructures(c: MoveColliders | null) {
     this.structures = c;
   }

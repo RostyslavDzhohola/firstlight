@@ -80,12 +80,16 @@ const actorOf = (r: Room) => serverRoom(r).actors.get(r.sessionId)!;
 const slots = (r: Room): (InvItem | null)[] => [...actorOf(r).char.hotbar, ...actorOf(r).char.backpack];
 const count = (r: Room, id: string) => slots(r).filter((s) => s?.id === id).reduce((n, s) => n + s!.qty, 0);
 
+/** `metres` east-north-east of Arcadia's main pad (due north is the Dawnpad outpost's barn, D42). */
 function outside(metres = 40): V {
   const R = BODIES.arcadia.radius;
   const d = padDirs(BODIES.arcadia)[0]!;
   const ref = Math.abs(d[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
   const k = ref[0]! * d[0] + ref[1]! * d[1] + ref[2]! * d[2];
-  const t = [ref[0]! - k * d[0], ref[1]! - k * d[1], ref[2]! - k * d[2]];
+  const n = [ref[0]! - k * d[0], ref[1]! - k * d[1], ref[2]! - k * d[2]];
+  const w = [d[1] * n[2]! - d[2] * n[1]!, d[2] * n[0]! - d[0] * n[2]!, d[0] * n[1]! - d[1] * n[0]!];
+  const a = (75 * Math.PI) / 180;
+  const t = n.map((v, i) => v * Math.cos(a) - w[i]! * Math.sin(a));
   const tl = Math.hypot(t[0]!, t[1]!, t[2]!);
   const v = [d[0] + (t[0]! / tl) * (metres / R), d[1] + (t[1]! / tl) * (metres / R), d[2] + (t[2]! / tl) * (metres / R)];
   const l = Math.hypot(v[0]!, v[1]!, v[2]!);

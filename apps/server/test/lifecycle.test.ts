@@ -52,17 +52,22 @@ const serverRoom = (r: Room) => matchMaker.getLocalRoomById(r.roomId) as unknown
 const actorOf = (r: Room) => serverRoom(r).actors.get(r.sessionId)!;
 
 /** A ground point `metres` from a body's main pad (outside its 12 m safe ring when > 12). */
+/** Near a planet's main pad, east-north-east of it: due north is the pad-0 outpost (D42). */
 function nearPad(body: BodyId, metres: number, sideways = 0): V {
   const R = BODIES[body].radius;
   const d = padDirs(BODIES[body])[0]!;
-  return offset([d[0] * R, d[1] * R, d[2] * R], metres, sideways, R);
+  return offset([d[0] * R, d[1] * R, d[2] * R], metres, sideways, R, 75);
 }
-function offset(p: readonly number[], metres: number, sideways: number, R: number): V {
+/** `metres` from `p` toward `bearing` degrees from north (toward east), and `sideways` to its left. */
+function offset(p: readonly number[], metres: number, sideways: number, R: number, bearing = 0): V {
   const l = Math.hypot(p[0]!, p[1]!, p[2]!);
   const d = [p[0]! / l, p[1]! / l, p[2]! / l];
   const ref = Math.abs(d[2]!) < 0.9 ? [0, 0, 1] : [1, 0, 0];
   const k = ref[0]! * d[0]! + ref[1]! * d[1]! + ref[2]! * d[2]!;
-  const t = [ref[0]! - k * d[0]!, ref[1]! - k * d[1]!, ref[2]! - k * d[2]!];
+  const n = [ref[0]! - k * d[0]!, ref[1]! - k * d[1]!, ref[2]! - k * d[2]!];
+  const w = [d[1]! * n[2]! - d[2]! * n[1]!, d[2]! * n[0]! - d[0]! * n[2]!, d[0]! * n[1]! - d[1]! * n[0]!];
+  const a = (bearing * Math.PI) / 180;
+  const t = n.map((v, i) => v * Math.cos(a) - w[i]! * Math.sin(a));
   const tl = Math.hypot(t[0]!, t[1]!, t[2]!);
   for (let i = 0; i < 3; i++) t[i]! /= tl;
   const s = [d[1]! * t[2]! - d[2]! * t[1]!, d[2]! * t[0]! - d[0]! * t[2]!, d[0]! * t[1]! - d[1]! * t[0]!];
