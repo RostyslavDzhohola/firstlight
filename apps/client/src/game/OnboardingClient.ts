@@ -223,7 +223,7 @@ export class OnboardingClient implements ClientSystem {
     this.phrased = false;
     if (completed.length && completed[0] !== "attack") g.audio.play("ui");
     if (steps.allDone) {
-      this.hud.showDone(this.xpPaid || ONBOARDING.DONE_XP + down * ONBOARDING.DUMMY_XP);
+      this.hud.showDone(this.xpPaid || ONBOARDING.DONE_XP + down * ONBOARDING.DUMMY_XP, !steps.movedOn("portal"));
       this.doneUntil = now + DONE_CARD_MS;
       this.finish();
       return;
@@ -245,14 +245,8 @@ export class OnboardingClient implements ClientSystem {
       title = "Arcadia";
       sub = "Levels 1–7 · walk in";
     }
-    if (at && at.distanceTo(p) < 80) {
-      const sp = at.project(g.ctx.camera);
-      if (sp.z < 1 && Math.abs(sp.x) < 0.95 && Math.abs(sp.y) < 0.95) {
-        this.hud.setCallout((sp.x * 0.5 + 0.5) * innerWidth, (-sp.y * 0.5 + 0.5) * innerHeight, title, sub);
-        return;
-      }
-    }
-    this.hud.setCallout(null);
+    // Off screen or behind the camera it's pinned to the screen edge with an arrow (wayfinding).
+    this.hud.setCallout(at && at.distanceTo(p) < 80 ? at.project(g.ctx.camera) : null, title, sub);
   }
 
   dispose() {

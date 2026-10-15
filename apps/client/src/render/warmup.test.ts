@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
-import { forceProperty, keptSamples } from "./warmup.ts";
+import { forceProperty, installShaderMonitor, keptSamples, shaderStats, warmup } from "./warmup.ts";
+import type { RenderCtx } from "./renderer.ts";
 import { watchDisposals } from "./disposeWatch.testutil.ts";
 
 describe("warm-up forced properties", () => {
@@ -67,5 +68,39 @@ describe("session warm-up samples (T9)", () => {
     expect(g.children).toHaveLength(1);
     expect(keptSamples("test-b", () => [mesh(), mesh()])).toBe(g);
     expect(keptSamples("test-b")).toBe(g);
+  });
+});
+
+describe("post-warm-up shader window", () => {
+  it("doesn't count a later warm-up's own builds as builds after warm-up (first-visit probe, then the full warm-up)", async () => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => setTimeout(cb, 0));
+    const debug: { onNodeBuilderCreated?: (builder: unknown, ro: unknown) => void } = {};
+    const watchingDuringCompile: number[] = [];
+    const ctx = {
+      scene: new THREE.Scene(),
+      camera: new THREE.PerspectiveCamera(),
+      renderer: {
+        debug,
+        info: { frame: 0, reset() {} },
+        compileAsync: async () => {
+          watchingDuringCompile.push(shaderStats().watching);
+          debug.onNodeBuilderCreated?.({}, { object: new THREE.Mesh(), material: new THREE.MeshBasicNodeMaterial() });
+        },
+      },
+      render() {},
+      gpu: { frame() {}, drain: () => [] },
+    } as unknown as RenderCtx;
+    installShaderMonitor(ctx);
+    try {
+      await warmup(ctx, { frames: 1 }); // the probe's warm-up opens a watch window
+      expect(shaderStats().watching).toBe(120);
+      await warmup(ctx, { frames: 1 }); // the full warm-up right after compiles what the probe didn't draw
+      expect(watchingDuringCompile).toEqual([0, 0]);
+      expect(shaderStats().afterWarmup).toBe(0);
+      expect(shaderStats().watching).toBe(120);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

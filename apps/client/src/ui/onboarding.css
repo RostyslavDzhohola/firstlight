@@ -10,17 +10,18 @@
 .fl-onb .fl-callout[hidden] { display: none; }
 
 /* Live HUD and gallery share the compact variant; the static kit example keeps its original layout. */
-.fl-onb--compact .fl-onb__widget { position: absolute; top: calc(7 * var(--u)); left: calc(1.5 * var(--u)); width: min(calc(20 * var(--u)), calc(100vw - 3 * var(--u))); max-height: calc(100dvh - 19 * var(--u)); overflow-y: auto; display: flex; flex-direction: column; gap: calc(.45 * var(--u)); scrollbar-width: thin; }
-.fl-onb--compact .fl-onb__step { position: static; order: 0; transform: none; width: 100%; padding: calc(.8 * var(--u)) var(--u); gap: calc(.5 * var(--u)); }
+/* Only the checklist scrolls: the current card stays whole above it while the list follows the step. */
+.fl-onb--compact .fl-onb__widget { position: absolute; top: calc(7 * var(--u)); left: calc(1.5 * var(--u)); width: min(calc(20 * var(--u)), calc(100vw - 3 * var(--u))); max-height: calc(100dvh - 19 * var(--u)); overflow: hidden; display: flex; flex-direction: column; gap: calc(.45 * var(--u)); }
+.fl-onb--compact .fl-onb__step { position: static; order: 0; flex: none; transform: none; width: 100%; padding: calc(.8 * var(--u)) var(--u); gap: calc(.5 * var(--u)); }
 .fl-onb--compact .fl-onb__step h2 { font-size: var(--t-lg); letter-spacing: .08em; }
 .fl-onb--compact .fl-onb__keys { flex-wrap: wrap; gap: calc(.4 * var(--u)); }
 .fl-onb--compact .fl-onb__keys .fl-key { min-width: calc(1.7 * var(--u)); height: calc(1.7 * var(--u)); font-size: var(--t-sm); border-radius: var(--r-2); }
 .fl-onb--compact .fl-onb__keys .fl-key--wide { min-width: calc(3.5 * var(--u)); }
-.fl-onb--compact .fl-onb__rail { position: static; order: 1; transform: none; display: block; padding: 0 calc(.2 * var(--u)); pointer-events: none; }
+.fl-onb--compact .fl-onb__rail { position: static; order: 1; flex: none; transform: none; display: block; padding: 0 calc(.2 * var(--u)); pointer-events: none; }
 .fl-onb--compact .fl-onb__rail-t { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .fl-onb--compact .fl-onb__segs { gap: 3px; }
 .fl-onb--compact .fl-onb__segs i { flex: 1; width: auto; height: 3px; }
-.fl-onb--compact .fl-onb__list { position: static; order: 2; width: 100%; display: block; padding: calc(.6 * var(--u)) calc(.8 * var(--u)); }
+.fl-onb--compact .fl-onb__list { position: static; order: 2; min-height: 0; overflow-y: auto; scrollbar-width: thin; width: 100%; display: block; padding: calc(.6 * var(--u)) calc(.8 * var(--u)); }
 .fl-onb--compact .fl-onb__list[hidden] { display: none; }
 .fl-onb__toggle { cursor: pointer; color: var(--photon); font: 600 var(--t-xs)/1.3 var(--font-display); }
 .fl-onb__toggle .fl-keys { display: inline-flex; margin-left: calc(.4 * var(--u)); }
@@ -28,3 +29,19 @@
 .fl-onb--compact .fl-onb__list[open] .fl-onb__toggle { margin-bottom: calc(.6 * var(--u)); }
 .fl-onb--compact .fl-onb__st { line-height: 1.3; gap: calc(.4 * var(--u)); }
 .fl-onb--compact .fl-onb__st .fl-keys { flex-wrap: wrap; justify-content: flex-end; max-width: calc(7 * var(--u)); }
+
+/* A tip that moved on by itself: a dash, not a tick. */
+.fl-onb__st.is-moved { color: var(--fog-4); }
+.fl-onb__st.is-moved > i { border-style: dashed; }
+.fl-onb__st.is-moved > i::after { content: ""; width: 6px; height: 1.5px; background: var(--fog-4); }
+
+/* World callout pinned to the screen edge (or beside the panel): an arrow towards its target. */
+.fl-callout__arrow { display: none; }
+.fl-onb .fl-callout.is-edge .fl-callout__line, .fl-onb .fl-callout.is-edge .fl-callout__dot { display: none; }
+.fl-onb .fl-callout.is-edge .fl-callout__arrow { display: block; position: absolute; left: -9px; top: -9px; width: 18px; height: 18px; background: var(--photon-2); clip-path: polygon(0 15%, 100% 50%, 0 85%, 25% 50%); transform: rotate(var(--a, 0rad)); }
+.fl-onb .fl-callout.is-edge .fl-callout__box { left: 16px; top: -24px; }
+.fl-onb .fl-callout.is-edge.is-flip .fl-callout__box { left: auto; right: 16px; }
+.fl-onb .fl-callout.is-flip:not(.is-edge) .fl-callout__box { left: auto; right: 10px; }
+/* On a narrow screen a label that can't fit on either side wraps instead of running off the edge. */
+.fl-onb .fl-callout__box { width: max-content; white-space: normal; max-width: max(9rem, calc(100vw - var(--x) - 40px)); }
+.fl-onb .fl-callout.is-flip .fl-callout__box { max-width: max(9rem, calc(var(--x) - 40px)); }

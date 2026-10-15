@@ -73,6 +73,8 @@ const WALKING: ReadonlySet<number> = new Set([ANIM.WALK, ANIM.RUN, ANIM.SPRINT])
 export class OnboardingSteps {
   private readonly progress = new Map<StepId, number>(STEPS.map((s) => [s.id, 0]));
   private readonly finished = new Set<StepId>();
+  /** Tips that moved on by themselves: done for the flow, but not something the player did. */
+  private readonly timedOut = new Set<StepId>();
   private readonly slots = new Set<string>();
   /** Seconds the current card has been up (for steps that move on by themselves). */
   private cardTime = 0;
@@ -102,7 +104,10 @@ export class OnboardingSteps {
     }
     if (cur?.autoAfter) {
       this.cardTime += x.dt;
-      if (this.cardTime >= cur.autoAfter) this.complete(cur.id);
+      if (this.cardTime >= cur.autoAfter) {
+        this.timedOut.add(cur.id);
+        this.complete(cur.id);
+      }
     }
     return STEPS.filter((s) => this.finished.has(s.id) && !before.has(s.id)).map((s) => s.id);
   }
@@ -124,6 +129,11 @@ export class OnboardingSteps {
 
   isDone(id: StepId): boolean {
     return this.finished.has(id);
+  }
+
+  /** The step moved on by itself (its time on the card ran out) rather than being done. */
+  movedOn(id: StepId): boolean {
+    return this.timedOut.has(id);
   }
 
   get doneCount(): number {
@@ -154,7 +164,8 @@ export class OnboardingSteps {
   progressText(id: StepId): string {
     const def = STEP_BY_ID.get(id)!;
     const v = this.progress.get(id) ?? 0;
-    if (def.unit === "s") return `${v.toFixed(1)} / ${def.goal} s`;
+    // Rounded down, so the counter never shows the goal before the step completes.
+    if (def.unit === "s") return `${(Math.floor(v * 10) / 10).toFixed(1)} / ${def.goal} s`;
     if (def.unit === "°") return `${Math.floor(v)} / ${def.goal}°`;
     if (def.unit === "m") return `${Math.floor(v)} / ${def.goal} m`;
     return `${Math.floor(v)} / ${def.goal}`;

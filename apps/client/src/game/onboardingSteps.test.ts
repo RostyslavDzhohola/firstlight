@@ -126,4 +126,26 @@ describe("onboarding steps", () => {
     expect(o.isDone("portal")).toBe(false);
     expect(o.observe(s({ inPortal: true }))).toEqual(["portal"]);
   });
+
+  it("sprint's counter never shows the goal before the step completes (live tutorial run: '2.0 / 2 s' unticked)", () => {
+    const o = new OnboardingSteps();
+    for (const x of FIRST.slice(0, 3)) o.complete(x);
+    o.observe(s({ anim: ANIM.SPRINT, dt: 1.96 }));
+    expect(o.isDone("sprint")).toBe(false);
+    expect(o.progressText("sprint")).toBe("1.9 / 2 s");
+  });
+
+  it("a tip that moves on by itself is marked as moved on, not as done by the player", () => {
+    const o = new OnboardingSteps();
+    for (const x of STEPS) if (x.id !== "portal") o.complete(x.id);
+    for (let i = 0; i < 46; i++) o.observe(s({ dt: 1 }));
+    expect(o.isDone("portal")).toBe(true);
+    expect(o.allDone).toBe(true);
+    expect(o.movedOn("portal")).toBe(true);
+    const walked = new OnboardingSteps();
+    for (const x of STEPS) if (x.id !== "portal") walked.complete(x.id);
+    walked.observe(s({ inPortal: true }));
+    expect(walked.movedOn("portal")).toBe(false);
+    expect(walked.movedOn("move")).toBe(false);
+  });
 });
