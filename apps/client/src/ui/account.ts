@@ -298,6 +298,13 @@ function emailFlow(container: HTMLElement, o: FlowOpts): void {
 
   const stepSaved = () => {
     reset();
+    // The game rejoins as the account now (close code 4101): its "Reconnecting…" box stays behind this
+    // card. #ui is its own stacking context under #loading, so the card moves up to <body>.
+    const overlay = container.closest(".fl-overlay");
+    if (overlay) {
+      overlay.classList.add("fl-overlay--top");
+      document.body.appendChild(overlay);
+    }
     icon("check", "", el("div", "fl-acct__mark is-ok", container));
     el("h2", "", container, save ? "Saved." : "Signed in.");
     if (save) {
