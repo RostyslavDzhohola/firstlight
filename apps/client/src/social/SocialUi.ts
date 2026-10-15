@@ -8,6 +8,7 @@ import type { PartyInviteMsg, PartyStateMsg } from "@firstlight/shared/net/socia
 import type { Room } from "@colyseus/sdk";
 import type { ClientSystem } from "../game/systems.ts";
 import type { Game } from "../game/Game.ts";
+import { HOTKEYS, hits } from "../game/keys.ts";
 import { Compass, PARTY_COLOURS, type CompassMarker } from "./compass.ts";
 import { el, typing } from "./dom.ts";
 import { InviteCards } from "./invites.ts";
@@ -143,10 +144,10 @@ export class SocialUi {
     }
     if (e.repeat) return;
     if (e.code === "Escape" && this.list.isOpen) {
-      this.list.close(false);
+      this.list.close(true); // back into the game (the list freed the pointer itself)
       return;
     }
-    if (e.code === "KeyP" && !e.metaKey && !e.ctrlKey) {
+    if (hits(HOTKEYS.screenshot, e.code, e.shiftKey) && !e.metaKey && !e.ctrlKey) {
       void this.screenshot();
       return;
     }
