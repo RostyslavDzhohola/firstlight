@@ -27,6 +27,9 @@ const { values: args } = parseArgs({
 
 const budget = Number(args.budget);
 const maxPriority = Number(args["max-priority"]);
+// NaN would make every `spent + cost > cap` check false, i.e. no cap at all.
+if (!Number.isFinite(budget) || budget < 0) throw new Error(`--budget must be a number of credits ≥ 0, got "${args.budget}"`);
+if (!Number.isFinite(maxPriority)) throw new Error(`--max-priority must be a number, got "${args["max-priority"]}"`);
 const only = args.only ? new Set(args.only.split(",")) : null;
 const raw = join(OUT, "raw");
 mkdirSync(raw, { recursive: true });
