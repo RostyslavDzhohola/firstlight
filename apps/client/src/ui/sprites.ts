@@ -2,6 +2,8 @@
 // Each map row is 16 characters; '.' is transparent. installSprites() turns them into `.px-<name>`
 // CSS rules once at startup, so the art stays editable here instead of as data URIs in CSS.
 
+import { config } from "../config.ts";
+
 export const SPRITE_PALETTE: Readonly<Record<string, string>> = {
   "K": "#1d1512",
   "k": "#4a3a33",
@@ -333,6 +335,42 @@ export const SPRITES: Readonly<Record<string, readonly string[]>> = {
     ".KCK.....C......",
     "KCK.....CcC.....",
     "CK.......C......",
+    "................",
+  ],
+  "kunai": [
+    "................",
+    "............KKK.",
+    "...........KSWK.",
+    "..........KSWgK.",
+    ".........KSWgK..",
+    "........KSWgK...",
+    ".......KSWgK....",
+    "......KKggK.....",
+    ".....KkKKK......",
+    "....KnkK........",
+    "...KknK.........",
+    "..KnkK..........",
+    ".KGGK...........",
+    "KG.GK...........",
+    ".KGK............",
+    "................",
+  ],
+  "ember-seal": [
+    "................",
+    ".....KKKKKK.....",
+    "...KKOOOOOOKK...",
+    "..KOOK.KK.KOOK..",
+    "..KOK.KYYK.KOK..",
+    ".KOK..KYYK..KOK.",
+    ".KOK.KYWYYK.KOK.",
+    ".KOK.KYWWYK.KOK.",
+    ".KOK.KYWWYK.KOK.",
+    ".KOK..KYYK..KOK.",
+    "..KOK..KK..KOK..",
+    "..KOOK....KOOK..",
+    "...KKOOOOOOKK...",
+    ".....KKKKKK.....",
+    "................",
     "................",
   ],
   "emberglass": [
@@ -713,6 +751,24 @@ export const SPRITES: Readonly<Record<string, readonly string[]>> = {
     ".KAAAAAKKAAAAAK.",
     ".KKKKKKKKKKKKKK.",
   ],
+  "head-ninja": [
+    "................",
+    ".....KKKKKK.....",
+    "...KKkkkkkkKK...",
+    "..KkkkkkkkkkkK..",
+    "..KkkkkkkkkkkK..",
+    ".KkkkkkkkkkkkkK.",
+    ".KkkKsssssskkkK.",
+    ".KkKsKOsssOKskK.",
+    ".KkKsKYsssYKskK.",
+    ".KkkKkkkkkkkkkK.",
+    ".KkkkkkkkkkkkkK.",
+    "..KkkkkkkkkkkK..",
+    "..KRRkkkkkkkRK..",
+    "...KRRRRRRRRK...",
+    "....KKKKKKKK....",
+    "................",
+  ],
   "lock": [
     "................",
     "................",
@@ -771,6 +827,8 @@ export const ITEM_SPRITE: Readonly<Record<string, string>> = {
   bubble: "prism",
   radio: "radio",
   horse_whistle: "whistle",
+  kunai: "kunai",
+  ember_seal: "ember-seal",
   tonic_small: "tonic-s",
   tonic_large: "tonic-l",
   // Cosmetics and trophies with their own art; others fall back to the chest.
@@ -791,15 +849,18 @@ export const ITEM_SPRITE: Readonly<Record<string, string>> = {
   wool_tuft: "wool",
 };
 
-/** Starter index (STARTERS order) → portrait sprite. */
-export const STARTER_PORTRAIT = ["head-hexwick", "head-ash", "head-kappa", "head-unit7"] as const;
+/** Starter index (STARTERS order) → pixel portrait sprite (kept for the UI gallery and fallbacks). */
+export const STARTER_PORTRAIT = ["head-hexwick", "head-ash", "head-kappa", "head-unit7", "head-ninja"] as const;
+/** Starter ids (STARTERS order) for the rendered 3D portraits (tools/blender/chars3d render.py). */
+const PORTRAIT_IDS = ["hexwick", "ash", "kappa", "unit7", "ninja"] as const;
 
 export function itemSprite(id: string | null | undefined): string {
   return (id && ITEM_SPRITE[id]) || "chest";
 }
 
+/** Starter → portrait class name: a render of the real 3D model (`.px-portrait-<id>`, smooth). */
 export function portraitSprite(starter: number | null | undefined): string {
-  return STARTER_PORTRAIT[starter ?? 0] ?? STARTER_PORTRAIT[0];
+  return `portrait-${PORTRAIT_IDS[starter ?? 0] ?? PORTRAIT_IDS[0]}`;
 }
 
 /** One crisp SVG per sprite: each colour is one path of 1-pixel-high runs. */
@@ -838,6 +899,7 @@ export function installSprites(doc: Document = document): void {
   installed = true;
   const style = doc.createElement("style");
   style.dataset.flSprites = "";
-  style.textContent = Object.keys(SPRITES).map((n) => `.px-${n}{--i:${spriteUrl(n)}}`).join("\n");
+  style.textContent = Object.keys(SPRITES).map((n) => `.px-${n}{--i:${spriteUrl(n)}}`).join("\n") + "\n" +
+    PORTRAIT_IDS.map((id) => `.px-portrait-${id}{--i:url("${config.assetBase}/characters/portrait_${id}.webp");image-rendering:auto;background-size:cover}`).join("\n");
   doc.head.appendChild(style);
 }

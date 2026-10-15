@@ -1,5 +1,6 @@
-// Character pick (verdict: Entry B): starter list with pixel portraits, a spotlit hero figure with live
-// palette recolour, weapon stats, palette swatches and, on first play, the display-name field.
+// Character pick (verdict: Entry B): starter list with rendered portraits, a spotlit hero figure (a
+// render of the real 3D model in the chosen palette), weapon stats, palette swatches and, on first
+// play, the display-name field. Renders come from tools/blender/chars3d (render.py, the game look).
 // Used for the first play and for rebirth (no life counter: the server doesn't send one).
 
 import "./character.css";
@@ -7,7 +8,7 @@ import { STARTERS, PALETTE_NAMES, WEAPON_BY_ID } from "@firstlight/shared/conten
 import { NAME_PATTERN, setDisplayName } from "../net/auth.ts";
 import { nameProblem, validSuggestion } from "./account.ts";
 import { button, el, icon, isolateKeys, overlayClosed, overlayOpened, sprite, uiRoot } from "./dom.ts";
-import { FIGURE_DEFS, FIGURE_IDS } from "./figures.ts";
+import { config } from "../config.ts";
 import { weaponChips } from "./hudFormat.ts";
 import { installSprites, itemSprite, portraitSprite } from "./sprites.ts";
 
@@ -25,13 +26,18 @@ const STARTER_COPY = [
   { role: "Hooded desert monk-knight", line: "Blocks bolts with a blade of sunlight.", weapon: "Energy blade · stowed on the back", pal: "Robe, wraps and the hilt inlays. The Sunbrand blade always burns the same colour." },
   { role: "River ninja from the old stories", line: "Sweeps whole crowds with a bo staff.", weapon: "Bo staff · knocks back", pal: "Shell rim, hat band and wraps. Kappa's skin stays river-green." },
   { role: "Ivory-armoured trooper", line: "Steady blaster, one round lens.", weapon: "Compact carbine · battery cell", pal: "Armour plates, undersuit and the lens." },
+  { role: "Fire ninja", line: "Throws kunai; a hand seal looses a fireball.", weapon: "Thrown kunai · hold RMB: Ember Seal", pal: "Hood, jacket and scarf, and the ember emblem on the back." },
 ] as const;
 
-/** content.md §8.2: each starter's default palette (Midnight, Sand, Moss, Ivory). */
-const DEFAULT_PALETTE = [2, 1, 3, 0];
+/** content.md §8.2: each starter's default palette (Midnight, Sand, Moss, Ivory, Ember). */
+const DEFAULT_PALETTE = [2, 1, 3, 0, 4];
+
+/** The hero render of a starter in a palette (480×720 WebP). */
+const heroUrl = (starter: number, palette: number) => `${config.assetBase}/characters/hero_${STARTERS[starter]!.id}_${palette}.webp`;
 const PAL_KEYS = ["ivory", "sand", "midnight", "moss", "ember", "dusk"];
 
 let open: Promise<{ starter: number; palette: number }> | null = null;
+const preloaded = new Set<string>();
 
 export function showCharacterPick(opts: CharacterPickOptions = {}): Promise<{ starter: number; palette: number }> {
   if (open) return open;
@@ -49,11 +55,6 @@ export function showCharacterPick(opts: CharacterPickOptions = {}): Promise<{ st
     ov.setAttribute("role", "dialog");
     ov.setAttribute("aria-label", rebirth ? "Rise again" : "Choose your starter");
     isolateKeys(ov);
-    const defs = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    defs.setAttribute("class", "fl-charpick__defs");
-    defs.setAttribute("aria-hidden", "true");
-    defs.innerHTML = `<defs>${FIGURE_DEFS}</defs>`;
-    ov.appendChild(defs);
     el("div", "fl-charpick__stage", ov);
     el("div", "fl-grain", ov);
 
@@ -98,10 +99,9 @@ export function showCharacterPick(opts: CharacterPickOptions = {}): Promise<{ st
     const ped = el("div", "fl-charpick__pedestal", wrap);
     for (let i = 0; i < 3; i++) el("i", "", ped);
     const fig = el("div", "fl-charpick__figure", wrap);
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("viewBox", "0 0 240 360");
-    svg.setAttribute("role", "img");
-    fig.appendChild(svg);
+    const img = el("img", "", fig);
+    img.decoding = "async";
+    img.draggable = false;
     const ident = el("div", "fl-charpick__identity", hero);
     const heroName = el("h2", "", ident);
     const heroRole = el("p", "fl-charpick__role", ident);
@@ -200,9 +200,15 @@ export function showCharacterPick(opts: CharacterPickOptions = {}): Promise<{ st
       palName.textContent = PALETTE_NAMES[palette]!;
       palHint.textContent = STARTER_COPY[starter]!.pal;
       fig.className = `fl-charpick__figure fl-pal--${PAL_KEYS[palette]}`;
-      // Copy the symbol in (not <use>): page CSS must reach the parts for the palette classes.
-      svg.innerHTML = defs.querySelector(`#${FIGURE_IDS[starter]}`)?.innerHTML ?? "";
-      svg.setAttribute("aria-label", `${STARTERS[starter]!.name} in the ${PALETTE_NAMES[palette]} palette`);
+      img.src = heroUrl(starter, palette);
+      img.alt = `${STARTERS[starter]!.name} in the ${PALETTE_NAMES[palette]} palette`;
+      // The other palettes of this starter load in the background so swatches swap instantly.
+      for (let p = 0; p < PALETTE_NAMES.length; p++) {
+        const url = heroUrl(starter, p);
+        if (preloaded.has(url)) continue;
+        preloaded.add(url);
+        new Image().src = url;
+      }
       // Re-run the projector flicker on change.
       fig.getAnimations().forEach((a) => {
         a.cancel();
