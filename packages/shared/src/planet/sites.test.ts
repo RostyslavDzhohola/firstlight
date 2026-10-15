@@ -237,6 +237,27 @@ describe("structure sites: the outposts keep clear of everything authoritative",
     }
   });
 
+  it("stops a ray that starts inside a structure at once (the Portus town's walls and an outpost's barn alike)", () => {
+    const cases: [Terrain, (x: StructureSolid) => boolean][] = [
+      [createTerrain("portus"), (x) => x.shape === 0 && x.hx > 3 && x.h > 6], // a curtain wall run
+      [terrains.get("arcadia")!, (x) => x.item === OUTPOSTS.arcadia.layout.findIndex((it) => OUTPOSTS.arcadia.prefabs[it[0]]!.name === "a_barn")],
+    ];
+    for (const [t, pick] of cases) {
+      const c = structureCollider(t);
+      const s = c.solids.find(pick)!;
+      expect(s, t.body.id).toBeDefined();
+      // Just inside the solid's front face, at chest height, looking out through the face and on.
+      const k = s.hz - 0.025, h = Math.min(1.5, s.h / 2) + 1.5;
+      const o = [s.px + s.fx * k + s.ux * h, s.py + s.fy * k + s.uy * h, s.pz + s.fz * k + s.uz * h] as const;
+      for (const dir of [[s.fx, s.fy, s.fz], [-s.fx, -s.fy, -s.fz], [s.rx, s.ry, s.rz]] as const) {
+        expect(c.raycast(o[0], o[1], o[2], dir[0], dir[1], dir[2], 30), t.body.id).toBe(0);
+      }
+      const far = [o[0] + s.fx * 10, o[1] + s.fy * 10, o[2] + s.fz * 10] as const;
+      expect(c.blocks(o[0], o[1], o[2], far[0], far[1], far[2]), t.body.id).toBe(true);
+      expect(c.blocks(far[0], far[1], far[2], o[0], o[1], o[2]), t.body.id).toBe(true);
+    }
+  });
+
   it("leaves no perch: no top a player can jump onto stands more than 1.6 m over the ground (breakables count as steps)", () => {
     for (const b of PLANETS) {
       const t = terrains.get(b)!;

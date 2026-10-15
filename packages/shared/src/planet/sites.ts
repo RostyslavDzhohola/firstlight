@@ -14,7 +14,7 @@ import { OUTPOSTS, WAYSTONE_AT, type OutpostBody, type OutpostSite } from "../co
 import { TOWN_LAYOUT, TOWN_PREFABS, type TownItem, type TownPrefab, type TownSolid } from "../content/portusTown.ts";
 import { objectDir, WORLD_OBJECT_BY_ID } from "../content/world.ts";
 import { BreakableCollider, emptyContact, PLAYER_BODY, pushOutOfBreakable, resetContact, supportHeightAt, type PropContact, type XYZ } from "./collide.ts";
-import { rayBreakable, segmentNearBreakable, type SolidFrame } from "./breakables.ts";
+import type { SolidFrame } from "./breakables.ts";
 import type { BodyId } from "./bodies.ts";
 import { padDirs } from "./pads.ts";
 import type { Terrain } from "./terrain.ts";
@@ -266,7 +266,6 @@ export class StructureCollider {
   readonly solids: readonly StructureSolid[];
   readonly collider: BreakableCollider<StructureSolid>;
   private readonly candidates: number[] = [];
-  private readonly rayCandidates: number[] = [];
   private readonly scratch: XYZ = { x: 0, y: 0, z: 0 };
   private readonly contact: PropContact = emptyContact();
   private readonly clearContact: PropContact = emptyContact();
@@ -285,30 +284,22 @@ export class StructureCollider {
   }
 
   /**
-   * Distance along a ray (unit d) to the first structure within maxT, or Infinity. A solid the ray
-   * starts inside is ignored (like the breakables in destruction.ts: a blast or a shot that starts in
-   * a wall's surface isn't stopped by that wall from inside).
+   * Distance along a ray (unit d) to the first structure within maxT, or Infinity; 0 when the ray
+   * starts inside a solid. Structures are indestructible, so a solid that holds the origin stops it
+   * at once: a shooter standing a few centimetres into a wall (within the move tolerance) can't shoot
+   * through it. Blasts against a wall burst on its near side (combat.ts advance), so no legitimate
+   * line starts inside one.
    */
   raycast(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number): number {
-    if (!(maxT > 0) || this.solids.length === 0) return Infinity;
-    const n = this.collider.grid.collect(ox, oy, oz, dx, dy, dz, maxT, 0, this.rayCandidates);
-    let best = Infinity;
-    for (let k = 0; k < n; k++) {
-      const b = this.solids[this.rayCandidates[k]!]!;
-      if (!segmentNearBreakable(b, ox, oy, oz, dx, dy, dz, maxT)) continue;
-      const t = rayBreakable(b, ox, oy, oz, dx, dy, dz, Math.min(maxT, best));
-      if (t > 1e-6 && t < best) best = t;
-    }
-    return best;
+    return this.collider.raycast(ox, oy, oz, dx, dy, dz, maxT, always);
   }
 
-  /** Does the segment from a to b pass through a structure (rays leaving a solid they start inside don't count)? */
+  /** Does the segment from a to b pass through a structure, or start or end inside one? */
   blocks(ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean {
     const dx = bx - ax, dy = by - ay, dz = bz - az;
     const l = Math.hypot(dx, dy, dz);
     if (!(l > 1e-6) || this.solids.length === 0) return false;
-    const t = this.raycast(ax, ay, az, dx / l, dy / l, dz / l, l);
-    return t > 1e-6 && t < l;
+    return this.raycast(ax, ay, az, dx / l, dy / l, dz / l, l) <= l;
   }
 
   /**

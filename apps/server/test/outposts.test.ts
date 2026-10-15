@@ -246,6 +246,46 @@ describe("pad outposts in the real movement path (D44)", () => {
     shoot(a2, c2);
     await Q.until("the control shot hits", () => Q.me(target).hp < hp1, 3000);
   });
+
+  it("a shooter who steps a few centimetres into the barn's face (within the move tolerance) still can't shoot through it", async () => {
+    const shooter = await Q.bot("outpost_wall_shooter", "arcadia", "admin", { starter: 3 });
+    const target = await Q.bot("outpost_wall_target", "arcadia", "admin", { starter: 3 });
+    const barn = footprint("arcadia", "a_barn");
+    const groundAt = (e: number, n: number) => Q.ground("arcadia", siteDir(anchor("arcadia"), e, n, R("arcadia")));
+    const outsideFace = barn.local(0, barn.hz + 1), inFace = barn.local(0, barn.hz - 0.025);
+    const behind = groundAt(...barn.local(0, -barn.hz - 2.5));
+    for (const [b, p] of [[shooter, groundAt(...outsideFace)], [target, behind]] as const) {
+      b.send("admin", { cmd: "teleport", args: { x: p[0], y: p[1], z: p[2] } });
+      b.send("admin", { cmd: "unprotect" });
+      await Q.until("placed", () => Q.near(b, p, 0.3) && !(Q.me(b).flags & 3));
+    }
+    // Walk up to and 2.5 cm into the front face: the movement tolerance accepts it.
+    let corrections = 0;
+    const off = shooter.room.onMessage("correct", () => corrections++);
+    let seq = (Q.me(shooter).seq ?? 0) + 100;
+    const fd = siteDir(anchor("arcadia"), inFace[0], inFace[1], R("arcadia"));
+    for (let i = 1; i <= 10; i++) {
+      const k = i / 10;
+      const p = groundAt(outsideFace[0] + (inFace[0] - outsideFace[0]) * k, outsideFace[1] + (inFace[1] - outsideFace[1]) * k);
+      shooter.send("input", { seq: ++seq, x: p[0], y: p[1], z: p[2], fx: fd[0] - p[0] / Math.hypot(...p), fy: fd[1] - p[1] / Math.hypot(...p), fz: fd[2] - p[2] / Math.hypot(...p), anim: 1, t: Date.now() });
+      await Q.sleep(50);
+    }
+    await Q.until("input replicated", () => (Q.me(shooter).seq ?? 0) >= seq);
+    off();
+    const feet = groundAt(...inFace);
+    expect(corrections).toBe(0);
+    expect(Q.near(shooter, feet, 0.05)).toBe(true);
+    // From there, through the barn at the target behind it: the wall the shooter stands in stops it.
+    await Q.sleep(300);
+    const hp0 = Q.me(target).hp;
+    const o = lift(feet, 1.6), c = lift(behind, 1.1);
+    const d: V3 = [c[0] - o[0], c[1] - o[1], c[2] - o[2]];
+    const l = Math.hypot(...d);
+    shooter.send("scope", { on: true });
+    shooter.send("fire", { slot: 0, ox: o[0], oy: o[1], oz: o[2], dx: d[0] / l, dy: d[1] / l, dz: d[2] / l, t: Date.now() });
+    await Q.sleep(900);
+    expect(Q.me(target).hp).toBe(hp0);
+  });
 });
 
 // ------------------------------------------------------------------------------------ NPCs and combat
