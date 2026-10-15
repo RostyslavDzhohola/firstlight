@@ -2,7 +2,7 @@
 
 import { Client, type Room } from "@colyseus/sdk";
 import { PROTOCOL_VERSION, type PlayResponse } from "@firstlight/shared/net/protocol";
-import { createGame, type Game } from "../src/app.ts";
+import { createGame, type Game, type GameOptions } from "../src/app.ts";
 import { chainVerifiers, devVerifier } from "../src/auth/identity.ts";
 import { storageRecovery } from "../src/world/admission.ts";
 import { characterRepo, MemoryCharacterRepo } from "../src/world/characters.ts";
@@ -18,7 +18,10 @@ import { hub } from "../src/world/hub.ts";
 import type { BodyId } from "@firstlight/shared";
 import { newCharacter } from "@firstlight/shared/content/character";
 
-export async function startServer(limits: Partial<{ maxClients: number; soloFillLimit: number; maxCopiesPerBody: number; globalCap: number }> = {}): Promise<Game> {
+export async function startServer(
+  limits: Partial<{ maxClients: number; soloFillLimit: number; maxCopiesPerBody: number; globalCap: number }> = {},
+  opts: Pick<GameOptions, "mountAfterJson"> = {},
+): Promise<Game> {
   characterRepo.current = new MemoryCharacterRepo();
   storageRecovery.clear();
   pileStore.current = new MemoryPileStore();
@@ -39,6 +42,7 @@ export async function startServer(limits: Partial<{ maxClients: number; soloFill
     verify: chainVerifiers(devVerifier(true)),
     limits: { maxClients: 40, soloFillLimit: 36, maxCopiesPerBody: 2, globalCap: 320, ...limits },
     allowedOrigins: ["http://localhost:5173"],
+    ...opts,
   });
 }
 

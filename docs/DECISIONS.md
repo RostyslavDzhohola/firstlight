@@ -484,3 +484,46 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
     attribution, and asks users not to use the output to build competing products.
   So the files stay out of the repo and out of any reusable pack, and the set carries a `NOTICE.txt`.
   Why: the owner set a hard limit of the credits left, with no top-up.
+- **D-home-1 (run, 2026-10-15 05:20Z):** the landing page is now the home page (6a): Play/Continue,
+  my progress, Save your progress (guests), Sign in / Sign out, online now per world, the
+  leaderboard (top levels, Hall of Firsts, medals) and the four worlds. Opening it never creates a
+  guest: it reads `/api/account/me` only when this browser already has a session, and only Play signs
+  in anonymously. Sign out is offered to saved accounts only (signing a guest out would orphan its
+  character) and clears the local starter, palette and body so the next player picks their own.
+  Why: one click to play stays guest-friendly, and a returning player sees their character first.
+- **D-home-2 (run, 2026-10-15 05:20Z):** logging out (and "Back to the home page" after a removal)
+  reloads the page into the home page instead of showing the LOGGED OUT card over the stopped game
+  (`home/leave.ts`, `?autoplay` stripped, a one-shot notice in sessionStorage). Navigation frees the
+  renderer, the GPU device, the frame loop, workers, audio and every listener at once; tearing the
+  game down in place would need a dispose path through every system and lane. The server has saved
+  the character before it sends `loggedOut`, so the client waits at most 2.5 s for the leave. Why:
+  robust teardown with no leak risk; the cached bundle makes Continue as fast as before.
+- **D-home-3 (run, 2026-10-15 05:20Z):** `GET /api/home` is public and shows display names only:
+  per-body counts with up to 12 in-world names each (the names every player already sees above heads
+  and in the Tab list; load-test bots excluded), the top 10 live characters by level, the top 10
+  accounts by medal count (medals survive death, so an account between lives stays on that board),
+  both for accounts with a chosen display name only and never banned ones, and the claimed Hall of
+  Firsts plaques. No ids, emails, positions or room copies. Cached (online 3 s, board 60 s) and
+  limited to 30 requests per address per minute (IPv6 per /64), keyed by `directRequestIp`, the
+  helper `/api/play`'s per-address limits and IP bans use. Both boards read their top rows from
+  indexes (migration 6: `character_rank`, and `medal_count` kept by triggers on `medal`), so a
+  refresh costs well under a millisecond at 100,000 characters instead of ~120 ms of sorting each. There is no "hide me
+  from the home page" setting yet; add one if players ask. Why: the owner asked for names "if
+  privacy allows"; public names that are already public in the world, nothing more.
+- **D-home-4 (run, 2026-10-15 05:20Z):** DataFast (6f) is optional on both sides. The client build
+  injects DataFast's script into `index.html` only when `VITE_DATAFAST_WEBSITE_ID` and
+  `VITE_DATAFAST_DOMAIN` are set (`vite.config.ts`, values validated), and uses the cookieless script
+  (`script.cookieless.js`, no visitor cookies, so no cookie banner for DataFast; turn on
+  "Cookieless / privacy mode" in the DataFast website settings to match; `VITE_DATAFAST_COOKIELESS=false`
+  switches to the cookie script). The server reads realtime visitors (last 10 min) and all-time
+  sessions with `DATAFAST_API_KEY` (a `df_` website key, server-only, never logged), cached ≥ 60 s,
+  one request pair at a time, the last numbers kept on failure. Without it the home page shows our
+  own online count and no visits; with it, "Online now: N · Total visits: M". Whenever the script is
+  in the page a one-line note says so: "Cookieless analytics by DataFast", or that DataFast sets
+  cookies when the cookie script was chosen. Why: the key stays secret, the page works tonight with or without the account.
+- **D-home-5 (run, 2026-10-15 05:20Z):** share row (6e) on the home page and in the Esc menu: Share
+  uses the Web Share sheet where there is one, else copies `https://firstlight.one4all.dev` with a
+  toast; Email is a `mailto:` invite; "Follow on 𝕏" appears only when `VITE_X_HANDLE` is a valid
+  handle (never guessed: it publishes under the owner's name); the eye hides the home page to show
+  the backdrop. Screenshots stay on P (its own share dialog). Why: the owner's littleprince.dev bar,
+  without inventing an account.

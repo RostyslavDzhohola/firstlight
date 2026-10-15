@@ -1,10 +1,12 @@
-// Landing page logic. The game bundle loads only after Play is pressed.
+// Home page entry (6a). The page paints from index.html; Play works as soon as this module runs, and
+// the home cards (src/home/home.ts) fill in after. The game bundle loads only after Play is pressed.
 
 import "./ui/styles/tokens.css";
 import "./ui/styles/components.css";
 import "./ui/styles/icons.css";
 import "./ui/styles/base.css";
 import "./ui/styles/landing.css";
+import "./ui/styles/home.css";
 import "./ui/styles/loading.css";
 import { config } from "./config.ts";
 import { runBoot } from "./game/boot.ts";
@@ -12,29 +14,7 @@ import { hideLoading, setLoading, showLoadingError } from "./ui/loading.ts";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T | null;
 const playBtn = $<HTMLButtonElement>("play");
-
-/** "N players online"; 0 reads as an invitation, not an empty room. */
-function onlineLabel(n: number): string {
-  if (n <= 0) return "Be the first one online";
-  return n === 1 ? "player online" : "players online";
-}
-
-async function refreshOnline() {
-  const box = $("online");
-  try {
-    const r = await fetch(`${config.apiUrl}/api/online`);
-    const { online: n } = (await r.json()) as { online: number };
-    if (!box || typeof n !== "number") return;
-    $("online-n")!.textContent = n > 0 ? n.toLocaleString("en-US") : "";
-    $("online-n")!.hidden = n <= 0;
-    $("online-label")!.textContent = onlineLabel(n);
-    box.hidden = false;
-  } catch {
-    if (box) box.hidden = true;
-  }
-}
-void refreshOnline();
-setInterval(refreshOnline, 15000);
+const params = new URLSearchParams(location.search);
 
 // GitHub Star/Fork stay hidden until the owner makes the repo public (PUBLIC_REPO flag).
 if (config.publicRepo) {
@@ -44,16 +24,24 @@ if (config.publicRepo) {
 }
 
 $("copy-link")?.addEventListener("click", async () => {
-  await navigator.clipboard.writeText(location.href).catch(() => {});
+  await navigator.clipboard.writeText(location.origin + location.pathname).catch(() => {});
   const c = $("copied");
   if (c) c.hidden = false;
 });
+
+/** The home cards, account buttons and share row (src/home/home.ts), started once. */
+let home: Promise<void> | null = null;
+function startHome(): Promise<void> {
+  home ??= import("./home/home.ts").then((m) => m.initHome()).catch((err) => console.warn("home page", err));
+  return home;
+}
 
 function backToLanding() {
   hideLoading();
   const landing = $("landing");
   if (landing) landing.style.display = "";
   if (playBtn) playBtn.disabled = false;
+  void startHome(); // ?autoplay never started it: a failed boot comes back to a live page
 }
 
 /**
@@ -81,7 +69,7 @@ async function boot() {
             void document.documentElement.requestFullscreen?.().catch(() => {});
             void boot();
           },
-          back: "Back to the start page",
+          back: "Back to the home page",
           onBack: backToLanding,
         }),
     },
@@ -95,17 +83,11 @@ playBtn?.addEventListener("click", async () => {
   await boot();
 });
 
-$("signin")?.addEventListener("click", async (e) => {
-  e.preventDefault();
-  const { showSignIn } = await import("./ui/account.ts");
-  const r = await showSignIn();
-  if (r === "signed-in") playBtn?.click();
-});
-
-// Bench and dev shortcuts: ?autoplay skips the landing (for Codex and benchmarks); ?avatars opens the
+// Bench and dev shortcuts: ?autoplay skips the home page (for Codex and benchmarks); ?avatars opens the
 // character lineup (4 starters x 6 palettes cycling every clip) instead of the game.
-if (new URLSearchParams(location.search).has("avatars")) {
+if (params.has("avatars")) {
   void import("./render/avatars/devpage.ts").then((m) => m.startAvatarDevPage());
-} else if (new URLSearchParams(location.search).has("horses")) {
+} else if (params.has("horses")) {
   void import("./render/horses/devpage.ts").then((m) => m.startHorseDevPage()); // six coats with riders
-} else if (new URLSearchParams(location.search).has("autoplay")) playBtn?.click();
+} else if (params.has("autoplay")) playBtn?.click();
+else void startHome();
