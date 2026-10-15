@@ -18,7 +18,7 @@ import { mapAtlas, type ViewImage } from "./mapAtlas.ts";
 import { atlasResolution } from "./mapRaster.ts";
 import { missionTargets, staticMarkers, type MapMarker } from "./mapMarkers.ts";
 import { mapView, metresPerPixel, placeUnder, project, screenAngle, unproject, zoomView, type MapView, type Projected } from "./mapView.ts";
-import { arrow, diamond, star } from "./minimap.ts";
+import { arrow, diamond, star } from "./minimapMarkers.ts";
 import { uiSettings } from "./uiSettings.ts";
 import { WAYPOINT_COLOUR, waypoints } from "./waypoint.ts";
 

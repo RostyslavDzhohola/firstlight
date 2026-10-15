@@ -17,6 +17,7 @@ import { mapAtlas, type ViewImage } from "./mapAtlas.ts";
 import { missionTargets, staticMarkers, type MapMarker } from "./mapMarkers.ts";
 import { mapView, project, screenAngle, type MapView, type Projected } from "./mapView.ts";
 import { minimapRange, minimapSize, preferredMinimapSize } from "./minimapLayout.ts";
+import { arrow, diamond, drawMissionStars, drawPartyMarkers, drawWaypointMarker, minimapPlace } from "./minimapMarkers.ts";
 import { uiSettings } from "./uiSettings.ts";
 import { WAYPOINT_COLOUR, waypoints } from "./waypoint.ts";
 
@@ -135,33 +136,22 @@ export class Minimap {
 
     // Static markers in range.
     for (const m of this.markers) {
-      const s = project(v, m.dir, this.p);
-      if (s.z <= 0 || Math.hypot(s.x - half, s.y - half) > rim + 6) continue;
-      this.marker(m, s.x, s.y);
+      const at = minimapPlace(v, me, m.dir, R, range * 1.1, rim + 6, false);
+      if (at) this.marker(m, at.x, at.y);
     }
     // Active mission targets (recomputed when the `you` state changes).
     if (g.hud.you !== this.targetsFor) {
       this.targetsFor = g.hud.you;
       this.targets = missionTargets(body, g.hud.you?.missions ?? []);
     }
-    for (const t of this.targets) {
-      const s = project(v, t.dir, this.p);
-      if (Math.hypot(s.x - half, s.y - half) <= rim) star(ctx, s.x, s.y, 5, "#ffd166");
-    }
+    drawMissionStars(ctx, v, me, this.targets, R, range, rim);
     this.drawNpcs(v, half, rim);
-    this.drawParty(v, half, rim);
+    drawPartyMarkers(ctx, v, me, this.partyMembers(), R, range, rim);
     ctx.restore();
 
     // Waypoint: on the map, or pinned to the rim pointing at it.
     const wp = waypoints.get(body);
-    if (wp) {
-      const s = project(v, wp, this.p);
-      const dx = s.x - half, dy = s.y - half;
-      const d = Math.hypot(dx, dy);
-      const far = d > rim - 5 || s.z <= 0 || surfaceDistance(me, wp, 1) * R > range * 1.05;
-      const k = far ? (rim - 5) / (d || 1) : 1;
-      diamond(ctx, half + dx * k, half + dy * k, far ? 4.5 : 5.5, WAYPOINT_COLOUR);
-    }
+    if (wp) drawWaypointMarker(ctx, v, me, wp, R, range, rim, WAYPOINT_COLOUR);
 
     // You: an arrow along your facing, relative to the view's up.
     const fc = g.player.facing;
@@ -302,32 +292,20 @@ export class Minimap {
     ctx.stroke(boss);
   }
 
-  private drawParty(v: MapView, half: number, rim: number) {
+  /** Party members on this body with their slot colours (world positions). */
+  private partyMembers(): { pos: readonly number[]; colour: string }[] {
     const room = this.game.net.room;
     const players = (room?.state as { players?: Map<string, { x: number; y: number; z: number; userId: string }> } | undefined)?.players;
-    if (!room || !players) return;
+    if (!room || !players) return [];
     const myId = players.get(room.sessionId)?.userId;
-    const ctx = this.ctx;
+    const out: { pos: readonly number[]; colour: string }[] = [];
     partyState().members.forEach((m, i) => {
       if (m.userId === myId || !m.online || m.body !== this.game.bodyId) return;
       const here = m.roomId === room.roomId && m.sessionId ? players.get(m.sessionId) : null;
       const at = here ?? (m.x || m.y || m.z ? m : null);
-      if (!at) return;
-      const s = project(v, unit(at.x, at.y, at.z), this.p);
-      let x = s.x, y = s.y;
-      const d = Math.hypot(x - half, y - half);
-      if (d > rim - 4) {
-        x = half + ((x - half) * (rim - 4)) / d;
-        y = half + ((y - half) * (rim - 4)) / d;
-      }
-      ctx.beginPath();
-      ctx.arc(x, y, 4, 0, Math.PI * 2);
-      ctx.fillStyle = PARTY_COLOURS[i % PARTY_COLOURS.length]!;
-      ctx.strokeStyle = "#0b1016";
-      ctx.lineWidth = 1.5;
-      ctx.fill();
-      ctx.stroke();
+      if (at) out.push({ pos: [at.x, at.y, at.z], colour: PARTY_COLOURS[i % PARTY_COLOURS.length]! });
     });
+    return out;
   }
 
   dispose() {
@@ -337,52 +315,4 @@ export class Minimap {
     this.tile = null;
     this.root.remove();
   }
-}
-
-/** Your arrow: white with a dark edge, pointing `angle` radians clockwise from up. */
-export function arrow(ctx: CanvasRenderingContext2D, x: number, y: number, angle: number, r: number) {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(angle);
-  ctx.beginPath();
-  ctx.moveTo(0, -r);
-  ctx.lineTo(r * 0.72, r * 0.8);
-  ctx.lineTo(0, r * 0.38);
-  ctx.lineTo(-r * 0.72, r * 0.8);
-  ctx.closePath();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = "#0b1016";
-  ctx.stroke();
-  ctx.fillStyle = "#ffffff";
-  ctx.fill();
-  ctx.restore();
-}
-
-export function diamond(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, colour: string) {
-  ctx.beginPath();
-  ctx.moveTo(x, y - r);
-  ctx.lineTo(x + r, y);
-  ctx.lineTo(x, y + r);
-  ctx.lineTo(x - r, y);
-  ctx.closePath();
-  ctx.lineWidth = 1.5;
-  ctx.strokeStyle = "#0b1016";
-  ctx.stroke();
-  ctx.fillStyle = colour;
-  ctx.fill();
-}
-
-export function star(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, colour: string) {
-  ctx.beginPath();
-  for (let i = 0; i < 10; i++) {
-    const a = -Math.PI / 2 + (i * Math.PI) / 5;
-    const rr = i % 2 === 0 ? r : r * 0.45;
-    ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
-  }
-  ctx.closePath();
-  ctx.lineWidth = 1.5;
-  ctx.strokeStyle = "#0b1016";
-  ctx.stroke();
-  ctx.fillStyle = colour;
-  ctx.fill();
 }
