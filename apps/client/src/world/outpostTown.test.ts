@@ -123,6 +123,13 @@ describe.each(BODIES_)("%s pad outpost view (D42)", (body) => {
     }
     expect(low).toBeGreaterThan(0.003);
     expect(high).toBeLessThan(0.25); // never floating visibly over a hollow
+    // ...and where the ground dips just under the water (Arcadia's causeway) the paving stays above it.
+    const water = terrain.body.waterLevel;
+    for (let v = 0; v < P.length / 3; v++) {
+      const x = P[v * 3]!, y = P[v * 3 + 1]!, z = P[v * 3 + 2]!;
+      const l = Math.hypot(x, y, z);
+      if (terrain.groundHeight(x / l, y / l, z / l) > water - 0.3) expect(l - R, `${body} vertex ${v}`).toBeGreaterThan(water + 0.03);
+    }
     // ...and the decals are in the drawn cell, both LODs.
     const town = await outpostFor(body, "medium");
     for (const v of town.cells[0]!.variants) {

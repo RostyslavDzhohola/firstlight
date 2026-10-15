@@ -5,8 +5,8 @@
 // vertices across. Each vertex sits PATH_LIFT m over the ground, plus however far a crease of the
 // rendered terrain rises above the straight line to a neighbouring vertex (along, across and the
 // quads' diagonals), so the ground never pokes through between vertices and plain slopes get no
-// extra lift; each path is a few millimetres higher than the one before so their crossings don't
-// flicker. UVs follow the design build (tools/blender/pads/design.py build_paths):
+// extra lift; paving over ground just under the water stays above the surface (a causeway); each
+// path is a few millimetres higher than the one before so their crossings don't flicker. UVs follow the design build (tools/blender/pads/design.py build_paths):
 // the RockTrim trim sheet's fieldstone band at 4 m per U, tiling kit textures at 2 m per UV.
 
 import type { Terrain } from "@firstlight/shared";
@@ -20,6 +20,8 @@ export const PATH_STEP = 0.5;
 export const PATH_ACROSS = 5;
 /** Lift (m) off the highest ground round a vertex. */
 export const PATH_LIFT = 0.04;
+/** Paving over ground less than this (m) under the water stays above the water's surface. */
+export const PATH_WADE = 0.3;
 /** The RockTrim trim sheet's fieldstone band (v range: tools/blender/portus/build.py BAND.field). */
 const FIELD_BAND: readonly [number, number] = [0.7, 0.98];
 /** Slots drawn with the trim sheet's band (the others tile). */
@@ -29,6 +31,7 @@ const TRIM_SLOTS = new Set(["MI_RockTrim"]);
 export function outpostPaths(body: OutpostBody, terrain: Terrain, slots: readonly TownSlot[]): TownPart | null {
   const site = OUTPOSTS[body];
   const R = terrain.body.radius;
+  const water = terrain.body.waterLevel;
   const anchor = outpostAnchor(terrain);
   const pos: number[] = [], nrm: number[] = [], uv: number[] = [], col: number[] = [], idx: number[] = [];
   const dir: [number, number, number] = [0, 0, 0];
@@ -85,7 +88,9 @@ export function outpostPaths(body: OutpostBody, terrain: Terrain, slots: readonl
           for (const k of [1, -1]) crease = Math.max(crease, groundAt(ve + (k * de) / 2, vn + (k * dn) / 2) - (g0 + groundAt(ve + k * de, vn + k * dn)) / 2);
         }
         siteDir(anchor, ve, vn, R, dir);
-        const r = R + g0 + crease + lift;
+        // Where the ground dips just under the water (Arcadia's causeway), the paving stays above it.
+        const top = g0 + crease + lift;
+        const r = R + (g0 > water - PATH_WADE ? Math.max(top, water + PATH_LIFT) : top);
         pos.push(dir[0] * r, dir[1] * r, dir[2] * r);
         nrm.push(dir[0], dir[1], dir[2]);
         if (trim) uv.push(run / 4, FIELD_BAND[0] + ((a + 1) / 2) * (FIELD_BAND[1] - FIELD_BAND[0]));
