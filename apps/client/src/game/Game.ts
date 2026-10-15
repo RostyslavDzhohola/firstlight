@@ -171,7 +171,7 @@ export class Game {
     }
     if (!localStorage.getItem("fl.starter") && !automated) {
       hideLoading();
-      this.firstChoice = await this.hud.characterPick({ askName: needsName ? { suggested: info!.name } : undefined });
+      this.firstChoice = (await this.hud.characterPick({ askName: needsName ? { suggested: info!.name } : undefined })) ?? undefined;
     } else if (needsName) {
       hideLoading(); // the name card sits in #ui, under the loading screen
       await pickDisplayName({ suggested: info!.name, dismissible: true });

@@ -10,6 +10,7 @@ import { config } from "../config.ts";
 import { button, el, icon, overlayClosed, overlayOpened, sprite, uiRoot } from "./dom.ts";
 import { aliveParts, classifyKiller, deathPile, type KillerInfo } from "./hudFormat.ts";
 import { itemSprite, portraitSprite } from "./sprites.ts";
+import { cancelCharacterPick } from "./characterPick.ts";
 
 export interface DeathInfo {
   killerName: string;
@@ -38,7 +39,8 @@ interface DeathContext {
   name: string;
   starter: number;
   lastAlive: { hotbar: (InvItem | null)[]; backpack: (InvItem | null)[]; coins: number; level: number } | null;
-  pick: () => Promise<{ starter: number; palette: number }>;
+  /** The rebirth pick; null when it was cancelled (cancelCharacterPick). */
+  pick: () => Promise<{ starter: number; palette: number } | null>;
 }
 
 const BARKS = ["Asset non-compliant. Escalating.", "Your access has been revoked.", "Thank you for your cooperation.", "Incident closed. Next."];
@@ -84,7 +86,8 @@ let closeOpen: (() => void) | null = null;
 
 /**
  * Close the death screen without a pick (resolves it with null): the character turned out to be alive,
- * e.g. saving from this screen moved us to an account whose character lives (game/deathFlow.ts).
+ * e.g. saving from this screen moved us to an account whose character lives (game/deathFlow.ts). Works
+ * in both phases: the death screen, and the rebirth picker after "Rise again".
  */
 export function closeDeath(): void {
   closeOpen?.();
@@ -200,15 +203,20 @@ export function showDeath(info: DeathInfo, ctx: DeathContext): Promise<{ starter
     const leave = () => {
       ov.remove();
       overlayClosed("death");
+    };
+    const settle = (r: { starter: number; palette: number } | null) => {
       open = closeOpen = null;
+      resolve(r);
     };
     closeOpen = () => {
       leave();
-      resolve(null);
+      settle(null);
     };
     rise.onclick = async () => {
       leave();
-      resolve(await ctx.pick());
+      // The picker phase stays cancellable: closeDeath() closes the picker, which then answers null.
+      closeOpen = () => cancelCharacterPick();
+      settle(await ctx.pick());
     };
     rise.focus();
   });
