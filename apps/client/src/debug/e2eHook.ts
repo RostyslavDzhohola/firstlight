@@ -26,7 +26,7 @@
 // elsewhere shows up as a null field, not a crashed hook.
 
 import { bearingTo, headingOf, surfaceDistance, type V3 } from "../social/compassMath.ts";
-import { detectFlaps, detectFlashes, frameStats, meanLuma, Ring, screenAim, type Flash } from "./e2eProbe.ts";
+import { detectFlaps, detectFlashes, frameStats, lumaWorkerSource, meanLuma, Ring, screenAim, type Flash } from "./e2eProbe.ts";
 
 // ---------------------------------------------------------------------------------------------- structural views
 
@@ -307,6 +307,8 @@ export function installE2eHook(win: Window & typeof globalThis): void {
 
   // ---- blink probe (only while a journey runs it)
   const luma = new Ring(4096);
+  /** Degrees the camera rotated since the previous luma sample, keyed like `luma` (by sample time). */
+  const turns = new Ring(4096);
   const flips: { t: number; key: string }[] = [];
   let probe: { stop(): void; startedAt: number; every: number; skipped: number; errors: number } | null = null;
   const elementKeys = new WeakMap<Element, string>();
@@ -329,11 +331,22 @@ export function installE2eHook(win: Window & typeof globalThis): void {
     const every = Math.max(1, Math.floor(opts.every ?? 2));
     const w = opts.width ?? 32;
     const h = opts.height ?? 18;
+    // The pixel readback runs in a worker (lumaWorkerSource): on the main thread it waited for the
+    // GPU inside the game's frames. Main-thread fallback where workers can't draw bitmaps.
+    let worker: Worker | null = null;
+    let workerUrl = "";
+    if (typeof Worker !== "undefined" && typeof OffscreenCanvas !== "undefined") {
+      workerUrl = URL.createObjectURL(new Blob([lumaWorkerSource()], { type: "text/javascript" }));
+      worker = new Worker(workerUrl);
+    }
     const small = document.createElement("canvas");
     small.width = w;
     small.height = h;
     const c2d = small.getContext("2d", { willReadFrequently: true })!;
     luma.clear();
+    turns.clear();
+    const camera = ctx.camera as { quaternion?: { x: number; y: number; z: number; w: number } } | undefined;
+    let lastQ: [number, number, number, number] | null = null;
     flips.length = 0;
     const own = Object.prototype.hasOwnProperty.call(ctx, "render");
     const original = ctx.render;
@@ -349,8 +362,24 @@ export function installE2eHook(win: Window & typeof globalThis): void {
       }
       pending = true;
       const t = performance.now();
+      // The rendered frame's camera: how far it turned since the last sample (a look-step changes
+      // the picture without anything blinking).
+      const q = camera?.quaternion;
+      if (q) {
+        const d = lastQ ? Math.min(1, Math.abs(q.x * lastQ[0] + q.y * lastQ[1] + q.z * lastQ[2] + q.w * lastQ[3])) : 1;
+        turns.push(t, (2 * Math.acos(d) * 180) / Math.PI);
+        lastQ = [q.x, q.y, q.z, q.w];
+      }
       // Same task as the render: the drawing buffer still holds this frame (WebGL and WebGPU alike).
-      createImageBitmap(canvas, { resizeWidth: w, resizeHeight: h, resizeQuality: "low" })
+      const shot = createImageBitmap(canvas, { resizeWidth: w, resizeHeight: h, resizeQuality: "low" });
+      if (worker) {
+        shot.then((bmp) => worker!.postMessage({ bmp, t, w, h }, [bmp])).catch(() => {
+          state.errors++;
+          pending = false;
+        });
+        return result;
+      }
+      shot
         .then((bmp) => {
           c2d.clearRect(0, 0, w, h);
           c2d.drawImage(bmp, 0, 0);
@@ -376,7 +405,20 @@ export function installE2eHook(win: Window & typeof globalThis): void {
       if (flips.length > 5000) flips.splice(0, flips.length - 5000);
     });
     mo.observe(document.body, { subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ["hidden"] });
+    if (worker) {
+      worker.onmessage = (e: MessageEvent<{ t: number; v?: number; error?: string }>) => {
+        pending = false;
+        if (typeof e.data.v === "number") luma.push(e.data.t, e.data.v);
+        else state.errors++;
+      };
+      worker.onerror = () => {
+        pending = false;
+        state.errors++;
+      };
+    }
     state.stop = () => {
+      worker?.terminate();
+      if (workerUrl) URL.revokeObjectURL(workerUrl);
       mo.disconnect();
       if (own) ctx.render = original;
       else delete (ctx as { render?: unknown }).render;
@@ -390,8 +432,11 @@ export function installE2eHook(win: Window & typeof globalThis): void {
     if (!p) return null;
     p.stop();
     probe = null;
-    const series = luma.since(p.startedAt).map((s) => ({ t: s.t, v: Math.round(s.v * 10) / 10 }));
+    const turnAt = new Map(turns.since(p.startedAt).map((x) => [x.t, x.v] as const));
+    const series = luma.since(p.startedAt).map((s) => ({ t: s.t, v: Math.round(s.v * 10) / 10, turn: Math.round((turnAt.get(s.t) ?? 0) * 10) / 10 }));
     const flashes: Flash[] = detectFlashes(series, opts.threshold ?? 40);
+    // Candidates skipped because the camera turned into and out of them (reported, not hidden).
+    const viewChanges = detectFlashes(series.map((x) => ({ t: x.t, v: x.v })), opts.threshold ?? 40).length - flashes.length;
     return {
       every: p.every,
       samples: series.length,
@@ -400,6 +445,7 @@ export function installE2eHook(win: Window & typeof globalThis): void {
       lumaMin: series.length ? Math.min(...series.map((s) => s.v)) : null,
       lumaMax: series.length ? Math.max(...series.map((s) => s.v)) : null,
       flashes,
+      viewChanges,
       flaps: detectFlaps(flips),
       series,
     };

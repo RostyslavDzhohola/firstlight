@@ -17,7 +17,8 @@ export async function playAWhile(player: Player) {
 
 export interface BlinkReport {
   frames: { frames: number; p50: number; p95: number; p99: number; max: number; over100: number; over250: number; worst: { t: number; ms: number }[] };
-  probe: { samples: number; flashes: { t: number; jump: number; samples: number }[]; flaps: { key: string; t: number; gapMs: number }[]; lumaMin: number | null; lumaMax: number | null; errors: number };
+  /** `viewChanges`: luma jumps skipped because the camera turned into and out of them (look-steps). */
+  probe: { samples: number; flashes: { t: number; jump: number; samples: number }[]; viewChanges?: number; flaps: { key: string; t: number; gapMs: number }[]; lumaMin: number | null; lumaMax: number | null; errors: number };
 }
 
 /** Run `during` with the blink probe on; returns frame stats and probe results for that window. */

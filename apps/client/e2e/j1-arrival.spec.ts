@@ -30,7 +30,7 @@ test.describe("J1 arrival", () => {
 
     await player.lock();
     const r = await measureBlinks(player, () => playAWhile(player));
-    await player.note("blinks", { frames: r.frames, flashes: r.probe.flashes, flaps: r.probe.flaps, luma: [r.probe.lumaMin, r.probe.lumaMax] });
+    await player.note("blinks", { frames: r.frames, flashes: r.probe.flashes, viewChanges: r.probe.viewChanges, flaps: r.probe.flaps, luma: [r.probe.lumaMin, r.probe.lumaMax] });
     expectNoBlinking(r);
     await player.shot("after-walk");
   });

@@ -129,6 +129,18 @@ export class Player {
   async open(extra: Record<string, string | number | true> = {}) {
     await this.page.goto(this.url(extra));
     await this.page.waitForFunction(() => !!(window as unknown as { __fl?: unknown }).__fl, null, { timeout: 45_000 });
+    await this.parkMouse();
+  }
+
+  /**
+   * Put the real cursor where `this.mouse` says it is. Under pointer lock every move turns the camera
+   * by its distance, so the two must agree before the game locks by itself at the hand-over: a cursor
+   * left on the "Play as" button made the first nudge a ~476 px move, a 60° turn that walked J1.2
+   * straight into the Hollowmere portal (a travel and a loading screen in the stall window).
+   */
+  private async parkMouse() {
+    this.mouse = { x: 640, y: 360 };
+    await this.page.mouse.move(this.mouse.x, this.mouse.y);
   }
 
   /** The Play button: the home page's (item 6a contract) or, until that lands, the landing page's #play. */
@@ -154,7 +166,9 @@ export class Player {
     if (await name.isVisible()) await name.fill(opts.name ?? newName());
     await this.shot("starter-pick");
     await pick.getByRole("button", { name: new RegExp(`^Play as ${opts.starter}`) }).click();
-    return { clickedAt, pickShownAt, playAsAt: Date.now() };
+    const playAsAt = Date.now();
+    await this.parkMouse(); // the world is still loading: the game drops this move
+    return { clickedAt, pickShownAt, playAsAt };
   }
 
   /**
@@ -240,13 +254,21 @@ export class Player {
         const lockAt = (await this.events()).filter((e) => e.kind === "lock" && e.locked === true).pop()?.t ?? 0;
         const age = s.t - lockAt;
         if (age < 700) await this.page.waitForTimeout(700 - age);
-        if ((await this.snap()).input.pointerLocked) {
+        const before = await this.snap();
+        if (before.input.pointerLocked) {
           // Chrome drops the first mouse movement after a lock: spend it on a 1 px nudge, so the
           // next real turn counts (a lost 180° turn once walked a journey into the portal).
           this.mouse.x += 1;
           await this.page.mouse.move(this.mouse.x, this.mouse.y);
           this.mouse.x -= 1;
           await this.page.mouse.move(this.mouse.x, this.mouse.y);
+          // If the real cursor was somewhere else (a click this class didn't make), the nudge was a
+          // long move and turned the camera: turn back, so a lock never changes where we look.
+          const h0 = before.player?.heading, h1 = (await this.snap()).player?.heading;
+          if (h0 !== undefined && h1 !== undefined) {
+            const off = ((h0 - h1 + 540) % 360) - 180;
+            if (Math.abs(off) > 1) await this.turn(off);
+          }
           return;
         }
         continue;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectFlaps, detectFlashes, frameStats, meanLuma, Ring, screenAim } from "./e2eProbe.ts";
+import { detectFlaps, detectFlashes, frameStats, lumaWorkerSource, meanLuma, Ring, screenAim } from "./e2eProbe.ts";
 
 describe("Ring", () => {
   it("keeps the newest `size` entries, oldest first", () => {
@@ -39,6 +39,40 @@ describe("meanLuma", () => {
   });
 });
 
+describe("lumaWorkerSource", () => {
+  // Runs the worker's source against a stand-in OffscreenCanvas: the readback that used to stall the
+  // page's main thread now happens there, and it must answer the same luma the page computed.
+  function runWorker(pixels: number[], data: { t: number; w: number; h: number; bmp?: unknown }) {
+    const posted: unknown[] = [];
+    const self: { onmessage?: (e: { data: unknown }) => void; postMessage(m: unknown): void } = { postMessage: (m) => posted.push(m) };
+    let drawn: unknown = null;
+    let closed = 0;
+    class FakeOffscreenCanvas {
+      constructor(readonly width: number, readonly height: number) {}
+      getContext() {
+        return { canvas: this, clearRect() {}, drawImage: (b: unknown) => (drawn = b), getImageData: () => ({ data: pixels }) };
+      }
+    }
+    new Function("self", "OffscreenCanvas", lumaWorkerSource())(self, FakeOffscreenCanvas);
+    const bmp = data.bmp ?? { close: () => closed++ };
+    self.onmessage!({ data: { ...data, bmp } });
+    return { posted, drawn, bmp, closed };
+  }
+
+  it("answers the mean luma of the bitmap with the sample's time and closes the bitmap", () => {
+    const px = [0, 0, 0, 255, 255, 255, 255, 255, 0, 255, 0, 255];
+    const r = runWorker(px, { t: 42, w: 3, h: 1 });
+    expect(r.drawn).toBe(r.bmp);
+    expect(r.closed).toBe(1);
+    expect(r.posted).toEqual([{ t: 42, v: meanLuma(px) }]);
+  });
+
+  it("reports a failed draw as an error instead of throwing", () => {
+    const r = runWorker([], { t: 7, w: 1, h: 1, bmp: { close: () => { throw new Error("detached"); } } });
+    expect(r.posted).toEqual([{ t: 7, error: "Error: detached" }]);
+  });
+});
+
 describe("detectFlashes", () => {
   const s = (vals: number[]) => vals.map((v, i) => ({ t: i, v }));
 
@@ -48,6 +82,21 @@ describe("detectFlashes", () => {
 
   it("finds a dark blink lasting two samples", () => {
     expect(detectFlashes(s([90, 90, 5, 6, 91, 90]))).toEqual([{ t: 2, jump: -85, samples: 2 }]);
+  });
+
+  it("ignores a jump while the camera turned (a look-step at a dark wall and on, J1.2 on the castle street)", () => {
+    const series = [110.7, 110.7, 54.8, 54.7, 54.7, 98].map((v, i) => ({ t: i, v, turn: i === 2 || i === 5 ? 30 : 0 }));
+    expect(detectFlashes(series)).toEqual([]);
+    // The same luma with a still camera is a blink.
+    expect(detectFlashes(series.map((x) => ({ ...x, turn: 0 })))).toEqual([{ t: 2, jump: -56, samples: 3 }]);
+  });
+
+  it("still reports a blink that starts or ends while the camera is still, even mid-turn", () => {
+    // The camera turned into the dark sample, but the picture came back without a turn: a blink.
+    const into = [100, 100, 20, 100, 100].map((v, i) => ({ t: i, v, turn: i === 2 ? 30 : 0 }));
+    expect(detectFlashes(into)).toEqual([{ t: 2, jump: -80, samples: 1 }]);
+    const outOf = [100, 100, 20, 100, 100].map((v, i) => ({ t: i, v, turn: i === 3 ? 30 : 0 }));
+    expect(detectFlashes(outOf)).toEqual([{ t: 2, jump: -80, samples: 1 }]);
   });
 
   it("ignores a lasting change and gentle drift", () => {

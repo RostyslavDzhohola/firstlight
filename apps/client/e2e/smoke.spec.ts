@@ -25,7 +25,7 @@ test.describe("smoke", () => {
       await player.shot("world");
       await player.lock();
       const r = await measureBlinks(player, () => playAWhile(player));
-      await player.note("blinks", { frames: r.frames, flashes: r.probe.flashes, flaps: r.probe.flaps });
+      await player.note("blinks", { frames: r.frames, flashes: r.probe.flashes, viewChanges: r.probe.viewChanges, flaps: r.probe.flaps });
       expectNoBlinking(r);
     }
     const errors = consoleErrors.filter((e) => !BENIGN.some((re) => re.test(e)));
