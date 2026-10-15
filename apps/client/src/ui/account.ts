@@ -18,7 +18,10 @@ const RING_C = 50.3; // 2π × 8
 /** The longest the card waits for its checks (normally ~50 ms) before showing the email field anyway. */
 const CHECK_TIMEOUT_MS = 2500;
 
+const FOCUSABLE = "input:not([disabled]), button:not([disabled]), a[href], select, textarea, [tabindex]:not([tabindex='-1'])";
+
 function modal(name: string, onEscape: (() => void) | null): { overlay: HTMLDivElement; card: HTMLElement; close(): void } {
+  const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   document.exitPointerLock?.();
   overlayOpened(name);
   // On <body>, not in #ui: #ui is its own stacking context under the landing page (z 20), so a card
@@ -28,12 +31,38 @@ function modal(name: string, onEscape: (() => void) | null): { overlay: HTMLDivE
   card.setAttribute("role", "dialog");
   card.setAttribute("aria-modal", "true");
   isolateKeys(overlay);
-  // Esc belongs to the card while it's open, wherever the focus is: it never reaches the game or the
-  // Esc menu underneath (which would resume play behind the card).
+  // A real modal: everything else on the page is inert (Tab and clicks can't reach the home page's
+  // Sign in / Play or the game behind), and focus goes back where it was on close.
+  const inerted: Element[] = [];
+  for (const c of Array.from(document.body.children)) {
+    if (c === overlay || c.hasAttribute("inert") || c.tagName === "SCRIPT") continue;
+    c.setAttribute("inert", "");
+    inerted.push(c);
+  }
+  const trapTab = (ev: KeyboardEvent) => {
+    const items = Array.from(card.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((e) => !e.closest("[hidden]"));
+    if (!items.length) return;
+    const first = items[0]!;
+    const last = items[items.length - 1]!;
+    const at = document.activeElement;
+    let to: HTMLElement | null = null;
+    if (!card.contains(at)) to = ev.shiftKey ? last : first;
+    else if (ev.shiftKey && at === first) to = last;
+    else if (!ev.shiftKey && at === last) to = first;
+    if (!to) return;
+    ev.preventDefault();
+    to.focus();
+  };
+  // Esc and Tab belong to the card while it's open, wherever the focus is: they never reach the game
+  // or the Esc menu underneath (which would resume play behind the card).
   const onKey = (ev: KeyboardEvent) => {
-    if (ev.key !== "Escape") return;
-    ev.stopPropagation();
-    onEscape?.();
+    if (ev.key === "Tab") {
+      ev.stopPropagation();
+      trapTab(ev);
+    } else if (ev.key === "Escape") {
+      ev.stopPropagation();
+      onEscape?.();
+    }
   };
   document.addEventListener("keydown", onKey, true);
   return {
@@ -42,7 +71,9 @@ function modal(name: string, onEscape: (() => void) | null): { overlay: HTMLDivE
     close: () => {
       document.removeEventListener("keydown", onKey, true);
       overlay.remove();
+      for (const c of inerted) c.removeAttribute("inert");
       overlayClosed(name);
+      if (returnFocus?.isConnected && !document.pointerLockElement) returnFocus.focus();
     },
   };
 }
