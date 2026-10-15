@@ -50,6 +50,8 @@ export interface Snap {
   net?: { roomId: string; sessionId: string } | null;
   player?: { pos: number[]; heading: number; pitch: number; anim: number; clip: string | null; onGround: boolean; swimming: boolean; name: string | null; starter: number | null; hp: number | null; level: number | null; flags: number; protected: boolean; inCombat: boolean; dead: boolean };
   zone?: { server: "safe" | "danger" | null; label: string | null; labelText: string | null; chip: boolean; local: "safe" | "danger" | null; kind: "town" | "pad" | "wild" | null; padIndex: number; padDist: number; safeRadius: number; toSafe: number | null };
+  /** The nearest pad's centre (Portus: the plaza). */
+  pad?: Target | null;
   /** Portus town gates and a point 25 m outside each. */
   gates?: (Target & { out: Target })[];
   /** The planet's mission guide by the main pad. */
@@ -480,23 +482,31 @@ export class Player {
     throw new Error("couldn't walk out of the safe ring");
   }
 
-  /** Walk out of the Portus town through the nearest gate, into the wild (D-zones-1). */
-  async walkOutOfTown(timeoutMs = 60_000) {
+  /**
+   * Walk out of the Portus town through the nearest gate, into the wild (D-zones-1). From the plaza
+   * (the town's open middle) to the gate and on outside; when the streets turn us round, back to the
+   * plaza and try again (a player who got lost does the same).
+   */
+  async walkOutOfTown(timeoutMs = 75_000) {
+    const until = Date.now() + timeoutMs;
     const s0 = await this.snap();
-    const gates = s0.gates ?? [];
-    expect(gates.length, "Portus has town gates").toBeGreaterThan(0);
-    const g = gates.map((x, i) => ({ x, i })).sort((a, b) => a.x.dist - b.x.dist)[0]!.i;
-    const half = Date.now() + timeoutMs / 2;
-    const atGate = await this.walkTo((s) => s.gates?.[g] ?? null, (s) => (s.gates?.[g]?.surface ?? 99) < 3 || s.zone?.local === "danger", { timeoutMs: half - Date.now() });
-    expect(atGate, "walked to the town gate").toBe(true);
-    const out = await this.walkTo(
-      (s) => s.gates?.[g]?.out ?? null,
-      (s) => s.zone?.local === "danger" && (s.zone.toSafe ?? 0) > 6,
-      { timeoutMs },
-    );
-    expect(out, "walked out of the gate into the wild").toBe(true);
-    expect((await this.snap()).body, "still in Portus (no portal on the way)").toBe("portus");
-    return this.snap();
+    expect(s0.gates?.length ?? 0, "Portus has town gates").toBeGreaterThan(0);
+    const outside = (s: Snap) => s.zone?.local === "danger" && (s.zone.toSafe ?? 0) > 6;
+    for (let attempt = 0; attempt < 3 && Date.now() < until; attempt++) {
+      const s = await this.snap();
+      if (outside(s)) break;
+      if ((s.pad?.surface ?? 0) > 4 && (attempt > 0 || (s.gates ?? []).every((g) => g.surface > 20))) {
+        await this.walkTo((x) => x.pad ?? null, (x) => (x.pad?.surface ?? 0) < 4, { timeoutMs: Math.min(20_000, until - Date.now()) });
+      }
+      const g = ((await this.snap()).gates ?? []).map((x, i) => ({ x, i })).sort((a, b) => a.x.dist - b.x.dist)[0]!.i;
+      const atGate = await this.walkTo((x) => x.gates?.[g] ?? null, (x) => (x.gates?.[g]?.surface ?? 99) < 3 || x.zone?.local === "danger", { timeoutMs: Math.min(25_000, until - Date.now()) });
+      if (!atGate) continue;
+      if (await this.walkTo((x) => x.gates?.[g]?.out ?? null, outside, { timeoutMs: Math.min(20_000, until - Date.now()) })) break;
+    }
+    const s = await this.snap();
+    expect(outside(s), "walked out of a town gate into the wild").toBe(true);
+    expect(s.body, "still in Portus (no portal on the way)").toBe("portus");
+    return s;
   }
 
   /**

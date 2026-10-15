@@ -649,6 +649,8 @@ export function installE2eHook(win: Window & typeof globalThis): void {
         /** Metres to the nearest way into safety (a pad ring's edge, or a Portus town gate). */
         toSafe: bodyDef ? r1(surfaceDistance(pos, [...S.nearestSafeEntry(bodyDef, pos[0], pos[1], pos[2]).dir] as V3, R) - S.nearestSafeEntry(bodyDef, pos[0], pos[1], pos[2]).edge) : null,
       },
+      // The nearest pad's centre (Portus: the plaza, the town's open middle).
+      pad: bodyDef && padIndex >= 0 && terrain ? target(...onGround(pads[padIndex]!, 0)) : null,
       // Portus town gates (the safe border runs through them) and a point 25 m outside each.
       gates: body === "portus" && terrain ? S.TOWN_GATES.map((d) => ({ ...target(...onGround(d, 0)), out: target(...onGround(d, 25)) })) : [],
       // The planet's mission guide by the main pad (QuestClient's interactables).
