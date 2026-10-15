@@ -1,5 +1,7 @@
-// Compass math on a sphere. North is the direction toward the body's +Y pole along the surface
-// (+Z near the poles); bearings are clockwise in degrees, 0 = straight ahead / north.
+// Compass math on a sphere. North is the game's pole frame (D38, content/places.ts tangentFrame,
+// planet/townFrame.ts): toward the body's +Z pole along the surface, so at the Portus town centre
+// (+Y) north is +Z and east is -X. The compass, the map and the minimap all take north from here.
+// Bearings are clockwise in degrees, 0 = straight ahead / north.
 
 export type V3 = readonly [number, number, number];
 
@@ -20,11 +22,16 @@ export function wrapDeg(d: number): number {
   return ((((d + 180) % 360) + 360) % 360) - 180;
 }
 
-/** Unit tangent pointing north at `pos`. */
+/** Unit tangent pointing north at `pos` (toward +Z; at the ±Z poles themselves, toward +Y). */
 export function northAt(pos: V3): V3 {
   const up = norm(pos);
-  const ref: V3 = Math.abs(up[1]) > 0.999 ? [0, 0, -Math.sign(up[1])] : [0, 1, 0];
+  const ref: V3 = Math.abs(up[2]) > 0.99999 ? [0, 1, 0] : [0, 0, 1];
   return norm(tangent(ref, up));
+}
+
+/** Unit tangent pointing east at `pos`: north × up, so east is on the right when you face north. */
+export function eastAt(pos: V3): V3 {
+  return cross(northAt(pos), norm(pos));
 }
 
 /** Signed angle (degrees, clockwise = right) from `forward` to the surface direction of `target`. */

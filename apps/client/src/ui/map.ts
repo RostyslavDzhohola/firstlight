@@ -9,6 +9,7 @@ import { BOSS_LAIRS, padName, place, placeDir, placesOn, tangentFrame } from "@f
 import { objectDir, WORLD_OBJECT_BY_ID } from "@firstlight/shared/content/world";
 import type { Game } from "../game/Game.ts";
 import { Panel } from "./panels.ts";
+import { eastAt, northAt } from "../social/compassMath.ts";
 import { layoutMapLabels, type MapLabel } from "./mapLabels.ts";
 
 type V = [number, number, number];
@@ -80,12 +81,11 @@ export class MapPanel extends Panel {
   }
 
   open() {
-    // Centre on the player, north up.
+    // Centre on the player, north up (the compass's north, so the two always agree).
     const p = this.game.player.pos;
     this.c = norm([p.x, p.y, p.z]);
-    const f = tangentFrame(this.c);
-    this.e = [...f.east] as V;
-    this.n = [...f.north] as V;
+    this.e = [...eastAt(this.c)] as V;
+    this.n = [...northAt(this.c)] as V;
     this.terrainKey = "";
     super.open();
     window.addEventListener("mouseup", this.onUp);
