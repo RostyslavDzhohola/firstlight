@@ -219,11 +219,22 @@ function weakMult(hit: RayTargetHit, tier: TierStats): number {
   return tier.headMult ?? 1.5;
 }
 
+/** How far an actor can be from where it was REWIND_MS ago (a gallop or a knockback, with margin). */
+const REWIND_REACH_M = 8;
+
 /** Nearest actor hit by a ray, using rewound positions, ignoring `ignore`. */
 function raycastActors(host: CombatHost, o: V3, d: V3, maxT: number, ignore: Set<string>, rewindMs: number): RayTargetHit | null {
   let best: RayTargetHit | null = null;
   const now = host.now();
+  // Cheap pre-check before the rewind and the exact capsule test: only actors whose current
+  // position lies within the segment's bounding sphere (grown by their size and by how far anyone
+  // moves in the rewind window) can be hit. Every shot, aim and projectile step scans all actors.
+  const half = Math.min(maxT, 1e4) / 2;
+  const mx = o[0] + d[0] * half, my = o[1] + d[1] * half, mz = o[2] + d[2] * half;
   const test = (a: Actor, r: number, h: number) => {
+    const reach = half + r + h + REWIND_REACH_M;
+    const dx = a.state.x - mx, dy = a.state.y - my, dz = a.state.z - mz;
+    if (dx * dx + dy * dy + dz * dz > reach * reach) return;
     if (ignore.has(a.id) || !canHurt(null, a, now, host)) return;
     const hit = rayCapsule(o, d, maxT, capsuleFeet(a, now, rewindMs), r, h);
     if (hit && (!best || hit.t < best.t)) {
