@@ -65,6 +65,8 @@ export interface Snap {
   portals?: (Target & { to: string })[];
   npcs?: Npc[];
   npcCount?: number;
+  /** Other players in this copy (journeys run side by side). */
+  players?: (Target & { id: string; name: string; dead: boolean })[];
 }
 /** One row of the server's `npc list` (apps/server/src/world/npc/NpcSystem.ts). */
 export interface ServerNpc {

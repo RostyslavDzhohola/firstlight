@@ -141,7 +141,7 @@ interface SharedMods {
 
 export type FlEvent = { t: number; kind: string; [k: string]: unknown };
 
-const IN_TYPES = ["denied", "shot", "projectile", "swing", "hit", "toast", "death", "reborn", "explode", "loggedOut", "train", "onboarding", "correct"] as const;
+const IN_TYPES = ["immune", "npcKill", "denied", "shot", "projectile", "swing", "hit", "toast", "death", "reborn", "explode", "loggedOut", "train", "onboarding", "correct"] as const;
 const OUT_TYPES = new Set(["fire", "melee", "train", "equip", "charge", "block", "scope", "use", "respawn", "logout", "travel", "onboarding", "admin", "interact", "pickup"]);
 const HUD_PARTS: [string, string][] = [
   ["playerCard", ".fl-me"],
@@ -244,6 +244,10 @@ export function installE2eHook(win: Window & typeof globalThis): void {
             e.mine = m.attacker === me;
             e.onMe = m.target === me;
             e.amount = m.amount;
+            // Who took it: a player (PvP) or a creature.
+            e.targetPlayer = !!room.state.players?.get(String(m.target));
+            e.target = m.target;
+            e.targetKind = m.kind;
           }
           if (type === "denied") {
             e.action = m.action;
@@ -678,6 +682,14 @@ export function installE2eHook(win: Window & typeof globalThis): void {
       portals,
       npcs: npcs.slice(0, 40),
       npcCount: room?.state.npcs?.size ?? 0,
+      // Other players in this copy (journeys run side by side in one copy: don't shoot through them).
+      players: (() => {
+        const out: Record<string, unknown>[] = [];
+        room?.state.players?.forEach((o, id) => {
+          if (id !== room.sessionId) out.push({ id, name: o.name, dead: (o.flags & PF.DEAD!) !== 0, ...target(o.x, o.y, o.z) });
+        });
+        return out;
+      })(),
     };
   };
 
