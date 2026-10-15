@@ -17,6 +17,12 @@ import { safeEqual, sha256Hex } from "./crypto.ts";
 import type { Identity } from "./identity.ts";
 import { directRequestIp } from "./ip.ts";
 
+/** mission_state_json → `life.playMs` (0 for older rows without per-life progress). */
+function lifePlayMs(ms: unknown): number {
+  const v = (ms as { life?: { playMs?: unknown } | null } | null)?.life?.playMs;
+  return typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.round(v)) : 0;
+}
+
 function bearerToken(req: Request): string {
   const h = req.headers.authorization ?? "";
   return h.startsWith("Bearer ") ? h.slice(7).trim() : "";
@@ -85,6 +91,8 @@ export function mountAccountRoutes(app: Express, a: Accounts, cfg: AccountsConfi
       character: c ? { level: c.level, xp: c.xp, coins: c.coins, starter: Math.max(0, STARTERS.findIndex((s) => s.id === c.starter)), palette: c.palette, body: c.body } : null,
       // A guest the server will email a code for a new address (D34: from level 2), i.e. who can save now.
       saveReady: !id.loadtest && id.guest && a.maySave(id.userId),
+      /** Online time in this life (the Old Timer clock), for the home page's progress card. */
+      playMs: lifePlayMs(c?.missionState),
       medals: id.loadtest ? [] : listMedals(a.db, id.userId).map((m) => m.medalId),
       pads: id.loadtest ? [] : listDiscoveredPads(a.db, id.userId),
     });

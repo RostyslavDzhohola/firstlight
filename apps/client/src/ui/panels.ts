@@ -12,6 +12,7 @@ import type { InvItem } from "@firstlight/shared/net/protocol";
 import type { Game } from "../game/Game.ts";
 import type { Hud, MissionLine, YouPlus } from "./hud.ts";
 import { overlayClosed, overlayOpened } from "./dom.ts";
+import { HIDDEN_ITEMS, shownItem } from "./hudFormat.ts";
 import { parseSkyArgs, SKY_HELP } from "./skyCommand.ts";
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", parent?: HTMLElement, text?: string): HTMLElementTagNameMap[K] {
@@ -35,7 +36,9 @@ export class Panel {
     if (e.code === "Escape" || (this.closeKeys.includes(e.code) && !(e.target instanceof HTMLInputElement))) {
       e.preventDefault();
       e.stopPropagation();
-      this.close(e.code !== "Escape");
+      // Esc too goes back into the game: the panel freed the pointer itself, so the browser lets the
+      // page take it back without a click (if it refuses, the "Click to look around" hint shows).
+      this.close(true);
     }
   };
   protected closeKeys: string[] = [];
@@ -127,8 +130,9 @@ export class ShopPanel extends Panel {
     const level = you?.level ?? 1;
     let cat: ShopCategory | null = null;
     const order: ShopCategory[] = ["consumables", "weapons", "support", "gear", "cosmetics"];
-    // Horses behind their server flag (you.horses): no whistle for sale when they are off.
-    const entries = SHOP.filter((e) => (e.itemId !== HORSE_WHISTLE || !!you?.horses) && (!isExtraCosmetic(e.itemId) || !!you?.cosmeticsExtras)).sort((a, c) => order.indexOf(a.category) - order.indexOf(c.category) || a.name.localeCompare(c.name) || a.tier - c.tier);
+    // Horses behind their server flag (you.horses): no whistle for sale when they are off. The radio
+    // is hidden with voice (HIDDEN_ITEMS, D-controls-1).
+    const entries = SHOP.filter((e) => (e.itemId !== HORSE_WHISTLE || !!you?.horses) && (!isExtraCosmetic(e.itemId) || !!you?.cosmeticsExtras) && !HIDDEN_ITEMS.has(e.itemId)).sort((a, c) => order.indexOf(a.category) - order.indexOf(c.category) || a.name.localeCompare(c.name) || a.tier - c.tier);
     for (const e of entries) {
       if (e.category !== cat) {
         cat = e.category;
@@ -173,8 +177,8 @@ export class ShopPanel extends Panel {
   private renderSell(body: HTMLElement, you: YouPlus | null) {
     if (!you) return;
     const items: { slot: number; it: InvItem }[] = [];
-    you.hotbar.forEach((it, i) => it && items.push({ slot: i, it }));
-    you.backpack.forEach((it, i) => it && items.push({ slot: i + 4, it }));
+    you.hotbar.forEach((it, i) => shownItem(it) && items.push({ slot: i, it: it! }));
+    you.backpack.forEach((it, i) => shownItem(it) && items.push({ slot: i + 4, it: it! }));
     if (!items.length) el("p", "sub", body, "Your bags are empty.");
     for (const { slot, it } of items) {
       const row = el("div", "row", body);
@@ -440,7 +444,7 @@ export class MissionTracker {
   }
 }
 
-// ---------------------------------------------------------------- admin console (` key)
+// ---------------------------------------------------------------- admin console (Shift+` ; ` alone is the performance overlay)
 
 const CONSOLE_HELP = `stage <1-5> [all] · coins <n> · level <n> · give <id> [tier] [qty] · medal <id> · egg <E1-E12> · heal · unprotect · announce <text> · ${SKY_HELP}`;
 
@@ -501,7 +505,7 @@ export class AdminConsole {
       e.stopPropagation();
       if (e.code === "Escape" || e.code === "Backquote") {
         e.preventDefault();
-        this.close();
+        this.close(true); // back into the game (Panel.onKey explains why Esc may re-lock)
       } else if (e.code === "Enter") {
         const m = parseAdminLine(input.value);
         if (m) this.game.net.room?.send("admin", m as never);

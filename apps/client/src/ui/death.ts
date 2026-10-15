@@ -8,7 +8,7 @@ import { STARTERS } from "@firstlight/shared/content/weapons";
 import type { InvItem } from "@firstlight/shared/net/protocol";
 import { config } from "../config.ts";
 import { button, el, icon, overlayClosed, overlayOpened, sprite, uiRoot } from "./dom.ts";
-import { aliveParts, classifyKiller, type KillerInfo } from "./hudFormat.ts";
+import { aliveParts, classifyKiller, deathPile, type KillerInfo } from "./hudFormat.ts";
 import { itemSprite, portraitSprite } from "./sprites.ts";
 
 export interface DeathInfo {
@@ -78,10 +78,6 @@ function killerCard(parent: HTMLElement, k: KillerInfo, info: DeathInfo): void {
   else m.textContent = bodyName(info.body);
 }
 
-function lostItems(ctx: DeathContext): InvItem[] {
-  const a = ctx.lastAlive;
-  return a ? [...a.hotbar, ...a.backpack].filter((x): x is InvItem => !!x) : [];
-}
 
 let open: Promise<{ starter: number; palette: number }> | null = null;
 
@@ -144,7 +140,7 @@ export function showDeath(info: DeathInfo, ctx: DeathContext): Promise<{ starter
 
     const right = el("aside", "fl-death__right", screen);
     const lost = el("section", "fl-death__lost fl-panel", right);
-    const items = lostItems(ctx);
+    const { items, coins: pileCoins, note } = deathPile(ctx.lastAlive);
     const h = el("h2", "fl-label", lost, "Left in your pile ");
     el("span", "fl-muted num", h, `${items.length} item${items.length === 1 ? "" : "s"}`);
     if (items.length) {
@@ -158,13 +154,11 @@ export function showDeath(info: DeathInfo, ctx: DeathContext): Promise<{ starter
     const rows = el("div", "fl-rows", lost);
     const coins = el("div", "", rows);
     el("span", "", coins, "Coins");
-    el("b", "num fl-coin", coins, (ctx.lastAlive?.coins ?? 0).toLocaleString("en-US"));
+    el("b", "num fl-coin", coins, pileCoins.toLocaleString("en-US"));
     const lvl = el("div", "", rows);
     el("span", "", lvl, "Level");
     el("b", "num", lvl, `${info.level} → 1`);
-    el("p", "fl-death__where", lost, items.length || ctx.lastAlive?.coins
-      ? "Your pile stays where you fell and never expires. Anyone can loot it, including the next you, if you can get back."
-      : "You weren't carrying anything this time.");
+    el("p", "fl-death__where", lost, note);
 
     const kept = el("section", "fl-death__kept fl-panel fl-panel--quiet", right);
     el("h2", "fl-label", kept, "You keep");

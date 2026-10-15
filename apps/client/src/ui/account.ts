@@ -1,7 +1,7 @@
 // Account UI (HANDOFF 5c, the owner's final decision: guests play with one click; the email is asked
 // for only to save progress, and the save card never needs the mouse while the game holds it):
 //   openSaveProgress()  the save card, modal: email → 6-digit code → saved. Opens only with the mouse
-//                       free (Esc menu, death screen, logged-out card, home page); says up front when
+//                       free (Esc menu, death screen, home page); says up front when
 //                       saving is unavailable, busy or not unlocked yet. Saved players never get it.
 //   showSignIn()        "Sign in" for a returning player on a new browser, modal (same flow)
 //   pickDisplayName()   display-name picker, modal
@@ -385,7 +385,7 @@ let saveOpen: Promise<SaveResult> | null = null;
 
 /**
  * The save card ("Save your progress": email → 6-digit code → saved), modal. For the Esc menu, the
- * death screen, the logged-out card and the home page. Never opens while the game holds the pointer,
+ * death screen and the home page (logging out lands there). Never opens while the game holds the pointer,
  * and resolves "saved" at once for a saved account (nothing to ask). Moving the guest's character to
  * the account is the server's guest→account merge; the game rejoins as the account by itself (4101).
  * `later`: where to try again, for the busy/unavailable notes (e.g. "Esc → Save progress").
@@ -440,15 +440,6 @@ export function openSaveProgress(opts: { name?: string; level?: number; starter?
     })();
   });
   return saveOpen;
-}
-
-/**
- * The old entry point, kept so callers written against it (the home page's first cut) still build
- * after the merge: the same card as openSaveProgress(). `requested` no longer matters (the card only
- * ever opens when asked). New code: openSaveProgress().
- */
-export function showSavePrompt(opts: { name?: string; level?: number; starter?: number; requested?: boolean } = {}): Promise<SaveResult> {
-  return openSaveProgress({ name: opts.name, level: opts.level, starter: opts.starter });
 }
 
 let signInOpen: Promise<"signed-in" | "dismissed"> | null = null;

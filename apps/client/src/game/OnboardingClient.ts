@@ -162,7 +162,7 @@ export class OnboardingClient implements ClientSystem {
     const color = weaponColor(WEAPONS.indexOf(def));
     g.self?.trigger("attack");
     if (def.delivery === "melee") {
-      g.audio.play("swing");
+      g.audio.play(g.audio.swingSound(WEAPONS.indexOf(def)));
       g.combat.effects.arc(me, g.player.facing, g.player.up(), def.range, color);
       return true;
     }

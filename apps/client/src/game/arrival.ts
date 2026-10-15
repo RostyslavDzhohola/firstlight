@@ -10,7 +10,7 @@ import { CLOSE } from "@firstlight/shared/net/social";
 export type CloseAction = "ignore" | "removed" | "rejoin" | "rejoin-fresh" | "storage";
 
 export function closeAction(code: number): CloseAction {
-  if (code === CLOSE.LOGGED_OUT) return "ignore"; // the logged-out screen is up
+  if (code === CLOSE.LOGGED_OUT) return "ignore"; // logged out: the page is going home (Game.loggedOut)
   if (code === CLOSE.STORAGE) return "storage"; // saving failed: rejoin later, spaced out (StorageBackoff)
   if (code === CLOSE.KICKED || code === CLOSE.BANNED || code === CLOSE.ELSEWHERE) return "removed";
   if (code === CLOSE.MERGED) return "rejoin-fresh"; // saved/signed in: rejoin with a fresh token

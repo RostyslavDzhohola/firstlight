@@ -6,6 +6,11 @@ radio (SPEC §5.7). **Written:** 2026-10-11, at build (M5); checked against the 
 report of serious harm, after any change to how voice works, and at least once a year.
 **Owner:** the game's operator (the admin account).
 
+> **Status (2026-10-15): voice and the radio are switched off in the current build** (D-controls-1:
+> server `FEATURE_VOICE`, client `VITE_FEATURE_VOICE`; the Esc menu says "Voice chat: coming soon").
+> No voice signalling is relayed and no relay credentials are minted while it is off. Before turning
+> it on, close the items under "Not yet built" in §5 and get a real legal check.
+
 ## 1. What the feature is
 
 - Players talk by **live speech only**. There is no text chat, no voice messages, no file or image

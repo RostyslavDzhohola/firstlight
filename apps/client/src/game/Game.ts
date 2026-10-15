@@ -4,7 +4,7 @@ import { cosmeticWarmupHook } from "../render/Cosmetics.ts";
 
 import * as THREE from "three/webgpu";
 import { BODIES, padDirs, type BodyId } from "@firstlight/shared";
-import { flags } from "../config.ts";
+import { config, flags } from "../config.ts";
 import { Net, TravelRedirect, type Snapshot } from "../net/Net.ts";
 import { AvatarView, avatarWarmupHook, preloadAvatars } from "../render/Avatars.ts";
 import { HorseView, horseWarmupHook, preloadHorse } from "../render/Horses.ts";
@@ -32,10 +32,12 @@ import { BootGate, RendererUnavailable, shouldKeepReconnecting } from "./boot.ts
 import { CombatClient } from "./CombatClient.ts";
 import { GameAudio } from "../audio/Audio.ts";
 import { Input } from "./input.ts";
+import { HOTKEYS } from "./keys.ts";
 import { PhotoMode } from "./PhotoMode.ts";
 import { PlayerController } from "./PlayerController.ts";
 import { CLIENT_SYSTEMS, type ClientSystem } from "./systems.ts";
 import { installSocial, partyRoomOn, removedFromWorld } from "../social/index.ts";
+import { goHome } from "../home/leave.ts";
 
 
 /** ?bench runs without a server unless ?online is also given; ?offline forces it anywhere. */
@@ -113,6 +115,7 @@ export class Game {
     });
     this.audio = new GameAudio();
     this.audio.resume();
+    if (!flags.has("zzfx")) void this.audio.loadSamples(config.sfxBase); // ZzFX plays until (or unless) they land
     this.ctx.renderer.domElement.addEventListener("mousedown", () => this.audio.resume());
     window.addEventListener("keydown", () => this.audio.resume(), { once: true });
     this.perf = new PerfOverlay(this.ctx);
@@ -128,10 +131,6 @@ export class Game {
     };
     // A ladder floor drop changes the tier mid-game: apply it behind the loading screen + warm-up.
     this.ctx.onTierDrop((_from, _to, apply) => void this.applyGraphics(apply));
-    // Look rule 1: muted grade while the mouse is released (menus), the body's grade in play.
-    document.addEventListener("pointerlockchange", () => {
-      if (this.running && !this.photo.active) this.setMenuMode(!document.pointerLockElement);
-    });
     this.particles = new ParticleSystem(this.ctx.scene);
     this.env = new Environment(this.ctx, this.audio, this.particles);
     this.blobs = new BlobShadows(this.ctx.scene);
@@ -145,6 +144,11 @@ export class Game {
     this.combat = new CombatClient(this);
     this.hud = this.combat.hud;
     this.menu = new Menu(this);
+    // Look rule 1: muted grade while a menu or panel is up, the body's grade in play (also with the
+    // pointer free after Esc → back to the game).
+    this.menu.onState = (s) => {
+      if (this.running && !this.photo.active) this.setMenuMode(s === "menu" || s === "away");
+    };
     installSocial(this);
     bindUi(this);
     document.getElementById("landing")!.style.display = "none";
@@ -162,7 +166,10 @@ export class Game {
     if (!localStorage.getItem("fl.starter") && !automated) {
       hideLoading();
       this.firstChoice = await this.hud.characterPick({ askName: needsName ? { suggested: info!.name } : undefined });
-    } else if (needsName) await pickDisplayName({ suggested: info!.name, dismissible: true });
+    } else if (needsName) {
+      hideLoading(); // the name card sits in #ui, under the loading screen
+      await pickDisplayName({ suggested: info!.name, dismissible: true });
+    }
     await this.firstArrival(body);
   }
 
@@ -341,10 +348,14 @@ export class Game {
     if (code !== null) this.onRoomClosed(code);
   }
 
+  /**
+   * Logged out (the server saved us and closes the room): back to the home page (6a), by reloading
+   * into it (leave.ts). The leave is a courtesy, so a hung socket can't keep the player here.
+   */
   async loggedOut() {
     this.stop();
-    await this.net.leave();
-    this.menu.showLoggedOut();
+    await Promise.race([this.net.leave(), new Promise((r) => setTimeout(r, 2500))]);
+    goHome("logged-out");
   }
 
   async resume() {
@@ -535,7 +546,7 @@ export class Game {
   }
 
   private async reprobe() {
-    // Only from live play (F3 panel): leave menus, logged-out and notice screens alone.
+    // Only from live play (performance panel): leave menus, logged-out and notice screens alone.
     if (!this.running || this.travelling) return;
     this.running = false;
     this.rewarming = true;
@@ -573,8 +584,8 @@ export class Game {
       this.bench.update(dt, now, this.ctx.camera);
       focus = this.bench.focus;
     } else {
-      // Photo mode (F9): the body stays put (and can still be hurt) while the camera flies.
-      if (this.input.pressed.has("F9")) this.photo.toggle(this.ctx.camera);
+      // Photo mode (Shift+P): the body stays put (and can still be hurt) while the camera flies.
+      if (this.input.hit(HOTKEYS.photo)) this.photo.toggle(this.ctx.camera);
       if (!this.photo.active) this.player.update(dt, this.input, this.combat.aiming());
       const p = this.player.pos;
       const f = this.player.facing;
@@ -641,7 +652,7 @@ export class Game {
       if (this.bench) for (const b of this.bench.crowdBlobs()) this.blobs.add(b.x, b.y, b.z, b.r);
       this.blobs.end();
     }
-    if (this.input.pressed.has("F3")) this.perf.toggle();
+    if (this.input.hit(HOTKEYS.perf)) this.perf.toggle();
     this.ctx.render();
     let cpuMs = performance.now() - cpu0;
     if (CPU_SLOW > 1) {

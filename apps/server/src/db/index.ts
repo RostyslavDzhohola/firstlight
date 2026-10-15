@@ -8,5 +8,6 @@ export * from "./piles.ts";
 export * from "./stats.ts";
 export * from "./copy-state.ts";
 export * from "./sessions.ts";
+export * from "./leaderboard.ts";
 export { linkAccounts, type LinkResult } from "./link.ts";
 export { displayNameProblem, isOffensiveName, NAME_MESSAGES, type NameProblem } from "./names.ts";

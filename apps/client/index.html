@@ -16,10 +16,9 @@
   </head>
   <body>
     <div id="game"></div>
-    <div id="ui" class="fl-ui"></div>
-    <div id="loading" class="fl-ui fl-loading" hidden></div>
 
-    <section id="landing" class="fl-ui fl-landing">
+    <!-- The home page (6a). Before #ui so the sign-in and save cards (in #ui) open above it. -->
+    <section id="landing" class="fl-ui fl-landing fl-home" data-e2e="home">
       <!-- Flythrough placeholder (swap for <video autoplay muted loop playsinline> in M10). Muted menu grade. -->
       <div class="fl-fly" aria-hidden="true">
         <div class="fl-fly__sky"></div>
@@ -31,50 +30,81 @@
         <div class="fl-grain"></div>
       </div>
 
-      <div class="fl-landing__page" id="desktop">
-        <header class="fl-landing__top">
-          <div class="fl-worlds" aria-label="Worlds">
-            <span class="fl-world fl-world--portus">Portus</span>
-            <span class="fl-world fl-world--arcadia">Arcadia</span>
-            <span class="fl-world fl-world--hollowmere">Hollowmere</span>
-            <span class="fl-world fl-world--meridian">Meridian</span>
+      <div class="fl-home__page" id="desktop">
+        <header class="fl-home__top">
+          <div class="fl-wordmark fl-wordmark--sm fl-home__mark" aria-label="Firstlight">First<b>light</b></div>
+          <div class="fl-home__account">
+            <span id="home-who" class="fl-home__who" hidden></span>
+            <button id="signin" data-e2e="signin" class="fl-btn fl-btn--sm" type="button"><i class="li li-key"></i>Sign in</button>
+            <button id="signout" class="fl-btn fl-btn--sm fl-btn--ghost" type="button" hidden><i class="li li-logout"></i>Sign out</button>
           </div>
-          <button id="signin" data-e2e="signin" class="fl-btn fl-btn--sm fl-landing__signin" type="button" title="Returning? Sign in with the email you saved with"><i class="li li-mail"></i>Sign in</button>
         </header>
 
-        <main class="fl-landing__hero">
-          <div class="fl-eyebrow">An open world in your browser</div>
-          <h1 class="fl-wordmark fl-landing__wordmark" aria-label="Firstlight">First<b>light</b></h1>
-          <p class="fl-landing__tag">Three planets, a crowd of strangers, <b>one life.</b> Die, and everything you carried drops into a glowing pile for anyone to take.</p>
-          <div class="fl-landing__cta">
-            <button id="play" class="fl-btn fl-btn--primary fl-btn--lg fl-landing__play" type="button"><i class="li li-play"></i>Play</button>
-            <span id="online" class="fl-online" hidden><i class="fl-live-dot"></i><b id="online-n" class="num">0</b> <span id="online-label">players online</span></span>
-            <span class="fl-landing__sub"><span>Free</span><i></i><span>No download</span><i></i><span>Keyboard + mouse</span></span>
+        <main class="fl-home__main">
+          <div class="fl-home__hero">
+            <div id="home-notice" class="fl-home__notice" role="status" hidden></div>
+            <div class="fl-eyebrow">An open world in your browser</div>
+            <h1 class="fl-wordmark fl-home__wordmark" aria-label="Firstlight">First<b>light</b></h1>
+            <p class="fl-landing__tag fl-home__tag">Three planets, a crowd of strangers, <b>one life.</b> Die, and everything you carried drops into a glowing pile for anyone to take.</p>
+
+            <div class="fl-home__cta">
+              <button id="play" data-e2e="home-play" class="fl-btn fl-btn--primary fl-btn--lg fl-landing__play" type="button"><i class="li li-play"></i><span id="play-label">Play</span></button>
+              <div class="fl-home__cta2">
+                <button id="home-save" class="fl-btn fl-btn--sm" type="button" hidden><i class="li li-save"></i>Save your progress</button>
+                <span id="play-sub" class="fl-landing__sub"><span>Free</span><i></i><span>No download</span><i></i><span>Keyboard + mouse</span></span>
+              </div>
+            </div>
+
+            <div class="fl-home__phone" id="mobile">
+              <div class="fl-panel fl-phone-card">
+                <h2>Play on your computer</h2>
+                <p>FIRSTLIGHT is a desktop game for keyboard and mouse. Send yourself the link and open it in a laptop or desktop browser.</p>
+                <div class="fl-copybox"><span>firstlight.one4all.dev</span><button id="copy-link" class="fl-btn fl-btn--sm fl-btn--primary" type="button"><i class="li li-copy"></i>Copy link</button></div>
+                <div id="copied" class="fl-copied" hidden><i class="li li-check"></i>Link copied</div>
+              </div>
+            </div>
+
+            <article id="home-progress" data-e2e="home-progress" class="fl-panel fl-home__card fl-home__progress" aria-label="My progress" hidden></article>
+          </div>
+
+          <div class="fl-home__side">
+            <article id="home-online" data-e2e="home-online" class="fl-panel fl-home__card fl-home__online" aria-labelledby="home-online-h">
+              <header class="fl-home__head"><h2 id="home-online-h">Online now</h2><span id="home-online-total" class="fl-home__live"><i class="fl-live-dot"></i><b class="num">–</b></span></header>
+              <ul id="home-online-list" class="fl-home__onlist"></ul>
+            </article>
+
+            <article id="home-leaderboard" data-e2e="home-leaderboard" class="fl-panel fl-home__card fl-home__board" aria-labelledby="home-board-h">
+              <header class="fl-home__head">
+                <h2 id="home-board-h">Leaderboard</h2>
+                <div class="fl-tabs fl-home__tabs" role="tablist" aria-label="Leaderboard">
+                  <button class="fl-tab" role="tab" type="button" aria-selected="true" data-tab="levels">Top levels</button>
+                  <button class="fl-tab" role="tab" type="button" aria-selected="false" data-tab="hall">Hall of Firsts</button>
+                  <button class="fl-tab" role="tab" type="button" aria-selected="false" data-tab="medals">Medals</button>
+                </div>
+              </header>
+              <div id="home-board" class="fl-home__boardbody" role="tabpanel"></div>
+            </article>
+
+            <div id="home-worlds" data-e2e="home-worlds" class="fl-home__worlds" role="list" aria-label="The worlds"></div>
           </div>
         </main>
 
-        <footer class="fl-landing__foot">
-          <div class="fl-landing__credit">
+        <footer class="fl-home__foot">
+          <div id="home-share" class="fl-home__share"></div>
+          <div id="home-visits" data-e2e="home-visits" class="fl-home__visits" hidden></div>
+          <div class="fl-landing__credit fl-home__credit">
             <span><b>Built by Claude Opus 5.5 and Codex.</b> Open source.</span>
             <span id="repo" class="fl-repo" hidden>
               <a id="repo-star" class="fl-btn fl-btn--sm" target="_blank" rel="noopener"><i class="li li-star"></i>Star</a>
               <a id="repo-fork" class="fl-btn fl-btn--sm" target="_blank" rel="noopener"><i class="li li-fork"></i>Fork</a>
             </span>
           </div>
-          <span class="fl-landing__meta">Desktop browser · WebGPU or WebGL2</span>
         </footer>
       </div>
-
-      <div class="fl-landing__phone" id="mobile">
-        <div class="fl-panel fl-phone-card">
-          <div class="fl-wordmark fl-phone-card__mark">First<b>light</b></div>
-          <h2>Play on your computer</h2>
-          <p>FIRSTLIGHT is a desktop game for keyboard and mouse. Send yourself the link and open it in a laptop or desktop browser.</p>
-          <div class="fl-copybox"><span>firstlight.one4all.dev</span><button id="copy-link" class="fl-btn fl-btn--sm fl-btn--primary" type="button"><i class="li li-copy"></i>Copy link</button></div>
-          <div id="copied" class="fl-copied" hidden><i class="li li-check"></i>Link copied</div>
-        </div>
-      </div>
     </section>
+
+    <div id="ui" class="fl-ui"></div>
+    <div id="loading" class="fl-ui fl-loading" hidden></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

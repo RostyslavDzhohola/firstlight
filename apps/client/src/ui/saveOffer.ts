@@ -3,8 +3,8 @@
 //   - a "Progress not saved · Esc → Save progress" toast, once per session, after the first level-up
 //     to 2+ (the tutorial pays level 2 within its first minute; the toast waits until its tips and
 //     end card are gone, and while a menu or the death screen is up);
-//   - a Save progress row in the Esc menu, a line on the death screen, a button on the logged-out card,
-//     and the home page (home lane, through `openSaveProgress()`).
+//   - a Save progress row in the Esc menu, a line on the death screen, and the home page's "Save your
+//     progress" (home/home.ts, through `openSaveProgress()`; logging out lands there).
 // The save card itself opens only with the mouse free. Saved players never see any of it.
 // Pure (unit-tested; no DOM).
 
