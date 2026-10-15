@@ -16,7 +16,7 @@ describe("home model", () => {
   it("lists the four worlds with level ranges, players, bosses and pads", () => {
     const w = worldCards(online);
     expect(w.map((x) => x.name)).toEqual(["Portus", "Arcadia", "Hollowmere", "Meridian"]);
-    expect(w[0]).toMatchObject({ levels: "Safe hub", players: 2, boss: null, pads: 0 });
+    expect(w[0]).toMatchObject({ levels: "Safe town · Lv 1–2 outside", players: 2, boss: null, pads: 0 });
     expect(w[1]).toMatchObject({ levels: "Levels 1–7", players: 3, boss: { name: "Tidewrath", level: 8 }, pads: 12 });
     expect(w[2]).toMatchObject({ levels: "Levels 6–13", boss: { name: "The Hollow King", level: 14 } });
     expect(w[3]).toMatchObject({ levels: "Levels 12–20", boss: { name: "The Receiver", level: 20 }, pads: 20 });

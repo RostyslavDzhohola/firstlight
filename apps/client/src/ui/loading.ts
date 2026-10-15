@@ -24,7 +24,7 @@ export const TIPS = [
   "Touch a fast-travel pad to discover it. Discovered pads are one of the few things death doesn't take, along with your name and medals.",
   "Portus town is safe inside its walls, and every pad has a 12 m safe ring: no damage in or out.",
   "Die and everything you carry drops into a pile of light. It never expires, so you can walk back for it.",
-  "Logging out outside a safe zone takes 30 seconds, standing still. On a pad it's instant.",
+  "Logging out outside a safe zone takes 30 seconds, standing still. In Portus town or on a pad it's instant.",
   "No boss can be beaten alone. Bring friends.",
   "C dodge-rolls, with a moment of invulnerability. R reloads.",
   "Hold the right mouse button to aim, block or charge, depending on your weapon.",

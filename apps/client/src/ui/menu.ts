@@ -333,7 +333,7 @@ export class Menu {
       icon(safe ? "shield" : "alert", "", this.zone);
       const s = el("span", "", this.zone);
       el("b", "", s, safe ? "In a safe zone" : "Outside a safe zone");
-      s.append(safe ? " · no damage in or out" : " · anyone can hit you");
+      s.append(safe ? " · no damage in or out" : " · creeps and players can hurt you");
       this.lede.textContent = safe
         ? `You're standing in ${body}, inside a safe zone. Nobody can hurt you here.`
         : `You're still standing in ${body}. Anyone nearby can see you, and hit you.`;
@@ -360,7 +360,7 @@ export class Menu {
       this.logoutTitle!.textContent = "Log out";
       this.logoutSub!.textContent = denied
         ? "Not right now: you were in a fight in the last 10 s."
-        : safe ? "Instant here: you're in a safe zone." : "Takes 30 s out here, standing still. Instant on a pad.";
+        : safe ? "Instant here: you're in a safe zone." : "Takes 30 s out here, standing still. Instant in Portus town or on a pad.";
       const t = el("span", "fl-menu__timer", this.logoutRight);
       icon("clock", "", t);
       t.append(safe ? "now" : "30 s");
