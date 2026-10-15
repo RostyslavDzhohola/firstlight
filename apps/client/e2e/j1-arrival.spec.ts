@@ -34,4 +34,21 @@ test.describe("J1 arrival", () => {
     expectNoBlinking(r);
     await player.shot("after-walk");
   });
+
+  test("J1.3 · item 1 · through a portal: the loading screen never freezes, nothing compiles after it", { tag: ["@J1", "@J1.3", "@item-1"] }, async ({ player, page }) => {
+    await player.joinAsDevAdmin({ starter: "Hexwick", body: "portus" });
+    await player.waitInWorld(180_000, "portus");
+    await player.lock();
+    const t0 = await player.now();
+    await player.walkThroughPortal("arcadia");
+    const arrived = await player.now();
+    const frames = await page.evaluate((t) => (window as any).__fl.frames.stats(t), t0);
+    await page.waitForTimeout(3000); // the warm-up's watch window: 120 frames after the hand-over
+    const shaders = await page.evaluate(() => (window as any).__shaders as { afterWarmup: number; recent: unknown[] } | undefined);
+    await player.note("travel", { ms: arrived - t0, frames, afterWarmup: shaders?.afterWarmup, recent: shaders?.recent });
+    await player.shot("arcadia");
+    // The warm-up used to compile everything again in its first real frame (WebGL: 0.7-3.3 s frozen).
+    expect.soft(frames.max, `no frozen frame from the portal to Arcadia (worst: ${JSON.stringify(frames.worst)})`).toBeLessThan(500);
+    expect.soft(shaders?.afterWarmup, `no shader builds after the warm-up (${JSON.stringify(shaders?.recent)})`).toBe(0);
+  });
 });

@@ -3,6 +3,7 @@
   "gates": [
     { "id": "J1.1", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Home page with Play (6a)" },
     { "id": "J1.2", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Play → world < 30 s, no blinking (item 1). WebGL joined after lane/arrival-stalls: its stall cluster was the walk turned into the Hollowmere portal (a travel) and the probe's own readback. Frame-time journey: run the gate on a quiet machine" },
+    { "id": "J1.3", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Portal walk to Arcadia: no frame over 500 ms on the loading screen, no shader builds after the warm-up (item 1, D-travel-1)" },
     { "id": "J2.1", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Hexwick the real way: trains or holsters in the Portus town, fires outside the gate (2, D-zones-1)" },
     { "id": "J2.2", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Hexwick + Hexquill I on Arcadia: refused on the pad, accepted outside" },
     { "id": "J2.3", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Brother Ash + Sunbrand I on Arcadia" },

@@ -799,3 +799,11 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   gated on WebGL too. From the hand-over through the walk, WebGL Portus frames are 16.6–16.8 ms with
   no shader builds. Why: a journey must measure the game, and a deploy gate that fails on its own
   measurement trains people to ignore it.
+- **D-travel-1 (2026-10-15 16:00Z):** Travel warm-up: compile in the scene pass's render context
+  (render/compilePass.ts touches three r186's private `_renderContexts.get` for one synchronous call,
+  falling back to plain `compileAsync` if it isn't there), add shadow casters a few predicted builds
+  per frame, and share vegetation shaders across bodies (palette in render-group uniforms). J1.3 (a
+  portal walk to Arcadia: no frame over 500 ms, no builds after the warm-up) is gated on both
+  renderers. Why: the WebGL loading screen froze for 0.7–3.3 s on every first travel (one frame
+  compiling everything compileAsync had built for the wrong context); three's fix (#34681) isn't
+  upstream, and three is pinned (SPEC §3), so a version bump must re-check this file.
