@@ -467,7 +467,8 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   target → evade after 5 s). Kills pay from Arcadia's tonic and cosmetic tables. The HUD shows an
   always-on zone label (Safe / Danger, `[data-e2e="zone-label"]` with `data-zone`) from the
   server's flag, the border banner ("Leaving the safe zone · Creeps and other players can hurt you",
-  "Safe zone · Portus town · no damage in or out") and the compass's SAFE marker points at the
+  "Safe zone · Portus town · no damage in or out"), a glowing line in the pad rings' colour marks
+  the border across both gate passages (one draw), and the compass's SAFE marker points at the
   nearer gate. The server's shot and NPC-sight paths still ignore the town's walls (no shot crosses
   the town: inside refuses them); generalised structure occlusion is the pad-outposts lane's
   follow-up. No `PROTOCOL_VERSION` bump: the client's label and refusals read the server's flag,
@@ -487,4 +488,9 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   150 m, full detail within 45 m), so Meridian showed nothing on arrival. Also: an attack the
   server refuses for "protected" (the 5 s after arriving), "swimming", "mounted", "overheated" or
   "safe zone" now shows a toast (one per reason per 1.5 s), and melee refusals are sent as
-  `denied` like ranged ones. Why: "Where are all the creeps outside? Let's see the creeps."
+  `denied` like ranged ones. The tracked hunt mission (the HUD tracker's first open one) gets a
+  world callout, pinned to the screen edge when off screen: the nearest creep in view that counts
+  for it (by kind, inside the mission's area when it has one), else the area (A1 points at the
+  Clover Fields Hopbits 68 m from Dawnpad; H1 at a Cantor in view; M1 at Checkpoint Seven). H1
+  and M1 still send players to their designed camps, not to the arrival packs; changing those
+  missions is the owner's call. Why: "Where are all the creeps outside? Let's see the creeps."
