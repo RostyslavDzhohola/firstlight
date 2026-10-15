@@ -1,0 +1,406 @@
+{
+ "version": "a800b46bd3275243",
+ "body": "meridian",
+ "files": {
+  "glb": {
+   "name": "meridian.glb",
+   "bytes": 237256,
+   "sha256": "2dda86faab56c1877461f1b248289e75433ac3eeaec9d3862f2e7fdde8a5853c"
+  },
+  "color": {
+   "name": "meridian_color.webp",
+   "bytes": 80498,
+   "sha256": "027578b27bf9067bd4cc20ed252408a7efd8827527334a809b4e7a2f403e355b"
+  },
+  "normal": {
+   "name": "meridian_normal.webp",
+   "bytes": 144758,
+   "sha256": "528c7e8e4b90396513bce17a9afd1c38dac89a60b5635c8791a82b86c530d32c"
+  }
+ },
+ "layerSize": 512,
+ "layers": [
+  "trim01",
+  "trim02",
+  "trim02v",
+  "trim03",
+  "cables",
+  "padded",
+  "rocktrim",
+  "cloth",
+  "white"
+ ],
+ "slots": [
+  {
+   "name": "MI_Trim_01",
+   "layer": 0,
+   "tint": [
+    1,
+    1,
+    1
+   ],
+   "rough": 0.55,
+   "metal": 0.15,
+   "normal": 1.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "MI_Trim_02",
+   "layer": 1,
+   "tint": [
+    1,
+    1,
+    1
+   ],
+   "rough": 0.55,
+   "metal": 0.15,
+   "normal": 1.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "MI_Trim_02_Variation",
+   "layer": 2,
+   "tint": [
+    1,
+    1,
+    1
+   ],
+   "rough": 0.55,
+   "metal": 0.15,
+   "normal": 1.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "MI_Trim_03",
+   "layer": 3,
+   "tint": [
+    1,
+    1,
+    1
+   ],
+   "rough": 0.6,
+   "metal": 0.1,
+   "normal": 1.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "MI_Trim_03_Deck",
+   "layer": 3,
+   "tint": [
+    0.82,
+    0.82,
+    0.82
+   ],
+   "rough": 0.62,
+   "metal": 0.1,
+   "normal": 1.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "MI_Trim_03_Cables",
+   "layer": 4,
+   "tint": [
+    1,
+    1,
+    1
+   ],
+   "rough": 0.6,
+   "metal": 0.1,
+   "normal": 1.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "MI_Trim_03_Dark",
+   "layer": 4,
+   "tint": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "rough": 0.6,
+   "metal": 0.1,
+   "normal": 1.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "MI_PaddedWall",
+   "layer": 5,
+   "tint": [
+    1,
+    1,
+    1
+   ],
+   "rough": 0.75,
+   "metal": 0.0,
+   "normal": 1.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "MI_RockTrim",
+   "layer": 6,
+   "tint": [
+    1.0,
+    0.86,
+    0.76
+   ],
+   "rough": 0.86,
+   "metal": 0.0,
+   "normal": 1.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "MI_WindowGlass",
+   "layer": 8,
+   "tint": [
+    0.05,
+    0.075,
+    0.1
+   ],
+   "rough": 0.2,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    1.0,
+    0.72,
+    0.38,
+    0.85
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "M_Glass",
+   "layer": 8,
+   "tint": [
+    0.05,
+    0.075,
+    0.1
+   ],
+   "rough": 0.2,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    1.0,
+    0.72,
+    0.38,
+    0.85
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "M_Cloth",
+   "layer": 7,
+   "tint": [
+    1,
+    1,
+    1
+   ],
+   "rough": 0.9,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "M_GlowTeal",
+   "layer": 8,
+   "tint": [
+    0.1119,
+    1.0,
+    0.6308
+   ],
+   "rough": 0.5,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 1.0
+  },
+  {
+   "name": "M_GlowAmber",
+   "layer": 8,
+   "tint": [
+    1.0,
+    0.4508,
+    0.063
+   ],
+   "rough": 0.5,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 1.0
+  }
+ ],
+ "sharedStrips": null,
+ "look": {
+  "albedoFloor": 0.0
+ },
+ "prefabs": 13,
+ "items": 21,
+ "trianglesLod0": 15159
+}

@@ -805,9 +805,9 @@ def build_pad_platform():
         def cell(ri, si, am):
             if ri == 0: return ("MI_Trim_01", "planar", None)
             if ri == 1: return ("M_GlowAmber", "planar", None)
-            if ri == 2: return ("MI_Trim_03", "planar", None)
+            if ri == 2: return ("MI_Trim_03_Deck", "planar", None)
             if ri == 3: return ("MI_Trim_01", "planar", None)
-            if ri == 4: return ("MI_Trim_03", "planar", None)
+            if ri == 4: return ("MI_Trim_03_Deck", "planar", None)
             if ri == 5: return ("M_GlowAmber", "planar", None)
             if ri == 6: return ("MI_Trim_01", "planar", None)
             return ("M_Cloth", "pal", "gold") if si % 2 == 0 else ("M_Cloth", "pal", "dark")
@@ -997,6 +997,8 @@ def sf(name):
     P._MOD[key] = out
     return out
 
+DECK_TINT = 0.82   # Meridian's pad deck: the light composite toned down (Phase B review)
+
 def setup_scifi_materials():
     for m in ("WallAstra_Straight", "WallWindow_Straight", "TopPlastic_Straight", "Platform_Simple", "Door_Metal"):
         sf(m)
@@ -1012,6 +1014,10 @@ def setup_scifi_materials():
                 b.inputs["Metallic"].default_value = 0.15
             except StopIteration:
                 pass
+    deck = P.MATS["MI_Trim_03"].copy()
+    deck.name = "MI_Trim_03_Deck"
+    tint_material(deck, (DECK_TINT,) * 3)
+    P.MATS["MI_Trim_03_Deck"] = deck
     log("sci-fi materials:", sorted(k for k in P.MATS if k.startswith("MI_Trim") or k.startswith("MI_Padded") or k.startswith("M_")))
 
 # ============================================================================================
@@ -1538,7 +1544,9 @@ def build_arcadia():
     for sx in (-1, 1):
         box(mb, sx * 1.0 - 0.14, -0.9, 0.42, sx * 1.0 + 0.14, -0.62, 1.1, "MI_RockTrim", mode="band", band="ashlar")
         frustum(mb, 0.06, 0.06, 1.1, 1.32, 6, "M_GlowWarm", cap=True)
-    p.k("Flower_3_Group", 0.0, 1.2, 0.2, 0)
+    for i, (x, c) in enumerate(((-0.7, "red"), (-0.25, "gold"), (0.25, "white"), (0.7, "gold"))):
+        box(mb, x - 0.2, 0.95, 0.2, x + 0.2, 1.45, 0.42, "MI_RockTrim", mode="band", band="field")
+        oriented_box(mb, T(x, 1.2, 0.42), 0.32, 0.36, 0.16, "M_Cloth", pal=c)
     sbox("a_shrine", -1.6, -1.6, 1.6, 1.6, 0, 0.42)
     scyl("a_shrine", 0, 0, 0.52, 0, 2.72)
     finish(p, "prop", "dawn shrine: a stepped plinth, a column and a brass sun facing both ways")
@@ -2353,8 +2361,10 @@ def main():
         log("BUDGET", l)
     log("BUDGET total", total)
     build_paths()
-    if PLAN_ONLY:
+    if PLAN_ONLY or opt("--export-only", False):
         write_outputs(problems, warns, stats)
+        if opt("--export-only", False):
+            export_prefabs()
         return
     # the scene
     def keep_out(e, n, r):
@@ -2473,7 +2483,7 @@ PADCAM = dict(
 def export_prefabs():
     """One GLB per prefab used (Y-up, front +Z in glTF), textures shared in prefabs/textures."""
     import shutil
-    pdir = os.path.join(OUT, f"{BODY}_prefabs")
+    pdir = str(opt("--export-dir", os.path.join(OUT, f"{BODY}_prefabs")))
     tmp = os.path.join(OUT, "scratch", f"gltf_{BODY}")
     shutil.rmtree(tmp, ignore_errors=True)
     os.makedirs(tmp, exist_ok=True)

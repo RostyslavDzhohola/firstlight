@@ -35,14 +35,21 @@ def opt(name, default=None):
     return default
 
 
-DESIGN = os.path.abspath(opt("--design", ""))
-OUT = os.path.abspath(opt("--out", ""))
-if not os.path.isdir(os.path.join(DESIGN, "prefabs")) or not opt("--out"):
-    raise SystemExit("pack.py: pass --design <build.py output dir> --out <dir>")
-os.makedirs(OUT, exist_ok=True)
-PREFAB_DIR = os.path.join(DESIGN, "prefabs")
-TEX_DIR = os.path.join(PREFAB_DIR, "textures")
+# Set by configure() (the pad outposts' pack, tools/blender/pads/pack.py, imports this module and
+# reuses its readers, LOD builders, texture packing and GLB writer).
+DESIGN = OUT = PREFAB_DIR = TEX_DIR = None
 LAYER = 512
+
+
+def configure(design, out):
+    global DESIGN, OUT, PREFAB_DIR, TEX_DIR
+    DESIGN = os.path.abspath(design)
+    OUT = os.path.abspath(out)
+    if not os.path.isdir(os.path.join(DESIGN, "prefabs")):
+        raise SystemExit("pack.py: pass --design <build.py output dir> --out <dir>")
+    os.makedirs(OUT, exist_ok=True)
+    PREFAB_DIR = os.path.join(DESIGN, "prefabs")
+    TEX_DIR = os.path.join(PREFAB_DIR, "textures")
 
 
 def log(*a):
@@ -821,4 +828,8 @@ def main():
     log("done")
 
 
-main()
+if __name__ == "__main__":
+    if not opt("--design") or not opt("--out"):
+        raise SystemExit("pack.py: pass --design <build.py output dir> --out <dir>")
+    configure(opt("--design"), opt("--out"))
+    main()
