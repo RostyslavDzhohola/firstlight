@@ -195,7 +195,11 @@ export class Effects {
     mesh.position.copy(pos);
     this.group.add(mesh);
     const now = performance.now();
-    this.projectiles.set(id, { id, mesh, pos: pos.clone(), vel: vel.clone(), g, until: now + 6000, trailAt: id_ === "ember_seal" ? now : undefined });
+    // Gone where the server drops it: at its range (specials exactly; other bolts with 20% grace).
+    const def = WEAPONS[weaponIndex];
+    const reach = def ? def.range * (def.hidden ? 1 : 1.2) : 0;
+    const life = reach > 0 ? Math.min(6000, (reach / Math.max(1, vel.length())) * 1000 + 100) : 6000;
+    this.projectiles.set(id, { id, mesh, pos: pos.clone(), vel: vel.clone(), g, until: now + life, trailAt: id_ === "ember_seal" ? now : undefined });
   }
 
   /** A spark that drifts and shrinks (`vel` m/s, `grav` m/s² along -up). */

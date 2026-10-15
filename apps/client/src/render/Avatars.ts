@@ -602,16 +602,23 @@ export { PALETTES };
 
 const WARMUP_ITEMS = ["sunbrand", "hexquill", "carbine", "riverstaff", "emberglass", "stillshot"] as const;
 
-/** What the avatar warm-up stands: one avatar per palette, cycling the starters and held items. */
+/** What the avatar warm-up stands: every starter in every palette (each pair is its own material,
+ *  with that starter's textures), cycling the held items. */
 export function avatarWarmupLooks(): { palette: number; starter: number; item: string }[] {
-  return PALETTES.map((_, i) => ({ palette: i, starter: i % STARTER_FILES.length, item: WARMUP_ITEMS[i % WARMUP_ITEMS.length]! }));
+  const looks: { palette: number; starter: number; item: string }[] = [];
+  for (let starter = 0; starter < STARTER_FILES.length; starter++) {
+    for (let palette = 0; palette < PALETTES.length; palette++) {
+      looks.push({ palette, starter, item: WARMUP_ITEMS[looks.length % WARMUP_ITEMS.length]! });
+    }
+  }
+  return looks;
 }
 
 let warmupViews: AvatarView[] = [];
 
 /**
- * Shader warm-up hook (render/warmup.ts WarmupHooks): while forced on, stands one avatar per palette
- * (avatarWarmupLooks, each holding an item plus a palette-accent item in the left hand) and the six
+ * Shader warm-up hook (render/warmup.ts WarmupHooks): while forced on, stands every starter in every
+ * palette (avatarWarmupLooks, each holding an item plus a palette-accent item in the left hand) and the six
  * far-LOD capsules at `at()`. Every skinned toon variant, its shadow pass, and every weapon/proxy
  * material then compiles behind the loading screen instead of on first sight of another player or an
  * NPC. Forced off, the samples leave the scene but are kept for the session (keptSamples): disposing
