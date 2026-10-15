@@ -452,3 +452,19 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   colliders are drawn as stone boxes (2 draws) before the probe and the warm-up, and a later arrival
   of the asset is ignored until the next visit (review round 1, S1). Why: Medium was already at
   ~290 draws against 250 (F10); triangles are cheap next to draws on Metal (#30560).
+- **D-chars-1 (run, 2026-10-15 07:10 CDT):** a fifth starter, the fire ninja "Hinoko" (owner, HANDOFF
+  6h), is appended to `STARTERS` (id `ninja`, starter index 4, default palette Ember) with the Ember
+  Kunai (ranged, 3 tiers) and its alt, the Ember Seal: hold RMB 0.4 s (server-timed `charge`), release
+  to cast a fireball (direct + splash + burn, heavy destruction, 8/7.5/7 s cooldown by tier). The seal
+  is a hidden weapon def (`ember_seal`, `hidden: true`): never sold, never fired directly, reached only
+  through the kunai's `special`. Starter clamps follow `STARTERS.length`. Why: the owner asked for a
+  ninja with a fireball technique; a hidden def reuses the projectile, splash, burn and VFX paths
+  instead of a new delivery type, and old clients only see an unknown starter or weapon index.
+- **D-chars-2 (run, 2026-10-15 07:10 CDT):** the starters are rebuilt as sculpted 3D characters by
+  `tools/blender/chars3d` (signed-distance sculpts meshed with OpenVDB, decimated per part, heat-
+  weighted on the unchanged UAL rig, textured from the sculpt in numpy). Heads are 1.1–1.15× life size;
+  each starter ships a 1024² albedo (alpha = 1 − painted accent mask) and a 1024² tangent normal map as
+  WebP, with a 512² set on Low; the avatar toon material gains the normal map (normalScale (1, −1) for
+  glTF UVs). Head and face sockets move per starter and scale hats and masks. The 2D portraits and the
+  SVG hero figures are replaced by renders of these models. Why: the owner found the 2D art
+  "hilarious" and expected real 3D characters at the littleprince.dev level; one rig keeps every clip.

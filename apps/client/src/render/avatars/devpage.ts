@@ -1,4 +1,4 @@
-// Dev lineup (?avatars): the 4 starters × 6 palettes on a lit stage, cycling through every clip.
+// Dev lineup (?avatars): the 5 starters × 6 palettes on a lit stage, cycling through every clip.
 // Keys: ← / → previous/next clip · Space pause/resume cycling · W next weapon · S toggle sockets
 // · G toggle the sun's shadow. Drag to orbit, wheel to zoom. Add ?tier=low|medium|high|ultra as usual.
 
@@ -52,11 +52,11 @@ export async function startAvatarDevPage() {
 
   const avatars: { a: AvatarView; x: number; z: number }[] = [];
   const dx = 1.25, dz = 2.0;
-  for (let s = 0; s < 4; s++) {
+  for (let s = 0; s < STARTERS.length; s++) {
     for (let p = 0; p < 6; p++) {
       const a = new AvatarView(p, s);
       const x = (p - 2.5) * dx;
-      const z = (1.5 - s) * dz;
+      const z = ((STARTERS.length - 1) / 2 - s) * dz;
       scene.add(a.root);
       avatars.push({ a, x, z });
     }
@@ -128,8 +128,8 @@ export async function startAvatarDevPage() {
       if (tmp.z > 1) return;
       html += `<div style="position:absolute;left:${((tmp.x + 1) / 2) * innerWidth}px;top:${((1 - tmp.y) / 2) * innerHeight}px;transform:translate(-50%,-50%)">${s}</div>`;
     };
-    for (let s = 0; s < 4; s++) put(new THREE.Vector3(-3.4 * dx, R + 1, (1.5 - s) * dz), STARTERS[s]!.name);
-    for (let p = 0; p < 6; p++) put(new THREE.Vector3((p - 2.5) * dx, R + 2.15, 1.5 * dz), PALETTE_NAMES[p]!);
+    for (let s = 0; s < STARTERS.length; s++) put(new THREE.Vector3(-3.4 * dx, R + 1, ((STARTERS.length - 1) / 2 - s) * dz), STARTERS[s]!.name);
+    for (let p = 0; p < 6; p++) put(new THREE.Vector3((p - 2.5) * dx, R + 2.15, ((STARTERS.length - 1) / 2) * dz), PALETTE_NAMES[p]!);
     labels.innerHTML = html;
   });
 }

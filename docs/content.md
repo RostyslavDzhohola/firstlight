@@ -298,6 +298,12 @@ Heat = shots until a 1.5 s overheat lockout. Explosions fall off linearly from t
 | | II | 6 | 200 per 100 max HP | 22 s | r 3.5 m, 7 s | | | | none | 400 |
 | | III | 12 | 260 per 100 max HP | 20 s | r 4.0 m, 8 s | | | | none | 1,000 |
 | **Radio** (item) | – | 1 | – | – | same planet, any distance | channels 1–9, talk on B, crackle filter, max 8 per channel | – | drops on death | none | **100** (D) |
+| **Ember Kunai** (ranged; the ninja's starter, HANDOFF 6h) | I | 1 | 13 | 0.38 | 35 m | thrown dart, 42 m/s, gravity 4 | mag 8, reload 1.3 s | RMB: hold 0.4 s hand seal, release: **Ember Seal** fireball (below), 8 s cooldown | light | 60 |
+| | II | 6 | 18 | 0.38 | same | same, pierce 1 | mag 9, 1.2 s | seal cooldown 7.5 s | light | 300 |
+| | III | 12 | 24 | 0.38 | same | same, pierce 1 | mag 10, 1.1 s | seal cooldown 7 s | light | 900 |
+| **Ember Seal** (the kunai's alt; not an item) | I | 1 | 30 direct incl. blast; splash 20 in 2.5 m; burn 4/s × 3 s | cooldown | 30 m | fireball 24 m/s, straight | the kunai tier's cooldown | spends no kunai; the server times the 0.4 s seal | heavy | – |
+| | II | 6 | 40; splash 27 in 2.75 m; burn 5/s | | same | same | | | heavy | – |
+| | III | 12 | 52; splash 35 in 3.0 m; burn 6/s | | same | same | | | heavy | – |
 
 ### 2.4 Starter weapons (D)
 
@@ -307,6 +313,7 @@ Heat = shots until a 1.5 s overheat lockout. Explosions fall off linearly from t
 | Brother Ash | Sunbrand I | Fists |
 | Kappa | Riverstaff I (bo staff) | Fists |
 | Unit 7 | Pocket Carbine I (the blaster family) | Fists |
+| Hinoko (the ninja, 5th starter) | Ember Kunai I (with the Ember Seal) | Fists |
 
 On rebirth: level 1, the chosen starter's T1 weapon, 0 coins (D).
 
@@ -336,6 +343,7 @@ any level against any level.
 | Yew Longbow (full draws, first one pre-drawn) | 2.7 / 3 | 2.5 / 3 | 2.3 / 3 | 2.3 / 3 | 5.4 / 5 |
 | Stillshot Rifle, body / head + body | 2.8 / 3 · 1.4 / 2 | same | same | same | 7.8 / 5 |
 | Comet Launcher (direct hits) | 1.8 / 2 | 1.7 / 2 | 1.6 / 2 | 1.6 / 2 | 3.6 / 3 |
+| Ember Kunai (all darts) | 2.7 / 8 | 2.7 / 8 | 2.3 / 7 | 2.7 / 8 | 5.3 / 15 |
 
 Format: seconds from the first hit / hits needed. PvE comparison: a regular L1 enemy with 22–60 HP dies to
 the Pocket Carbine in 0.5–1.5 s, inside [05]'s 1.1–1.8 s band. Build a headless sim that fails the
@@ -698,8 +706,9 @@ since the last rebirth; "account" means cumulative.
 
 ### 8.1 Shared avatar contract
 
-- **Rig:** one humanoid skeleton for all four starters, which differ only in looks and starter weapon (D).
-- **Base mesh:** Quaternius Universal Base Characters (CC0), restyled in Blender [08] (D).
+- **Rig:** one humanoid skeleton for all five starters, which differ only in looks and starter weapon (D).
+- **Base mesh:** sculpted in code on the shared Quaternius UAL rig (`tools/blender/chars3d`, docs/design/characters-3d.md);
+  the Universal Base Characters body (CC0) [08] was the first restyle and is no longer used.
 - **Budget [r2-15]:** 10–15k triangles, 1 skinned mesh, ≤ 2 materials, ≤ 75 bones, one 1024² atlas
   (512² on Low).
 - **Shading [r2-15] rule 6:** anime-leaning faces with big rounded eyes that read at three-quarter
@@ -715,6 +724,7 @@ since the last rebirth; "account" means cumulative.
 | **Brother Ash**: hooded desert monk-knight, Sunbrand | Tall; the hood is deep and asymmetric, with layered sand cloth wrapped over one shoulder; a brass face-guard under the hood; brass prayer beads. Sunbrand: a lantern-cage brass hilt and an amber-white blade with a flame ribbon and forge-crackle sound [r2-04]; stowed on the back. Pattern mask: woven sun-and-ash stripes | layered linen, worn leather, hammered brass, emissive blade | Sand palette: sand cloth, umber wraps, amber accents | a brown robe over a cream tunic with a belted sash; a plain cylinder hilt with an emitter; the hum sound; **blade colour coding (the Sunbrand blade is always amber-white whatever the palette; the palette only tints the hilt inlays)**; the words "Jedi" and "lightsaber" |
 | **Kappa**: folklore turtle-shell ninja, bo staff | ONE character. Squat and wide, with a domed tortoise shell patterned like river stones; a beaked face; webbed hands; the kappa's water dish on the crown, covered by a wide straw hat (kasa); a wooden Riverstaff lashed with reed cord. Pattern mask: shell-plate lines | matte green skin, shell keratin, straw, cord, wood | Moss palette: natural moss-green skin, straw hat, bark-brown wraps | coloured bandana masks; initial-letter belt buckles; elbow and knee pads; four brothers; Renaissance-artist names; pizza; a rat master; sewers; the words "Ninja Turtle". Also no yellow skin with a spiky green-and-white-rimmed shell and sneakers (a famous platformer's turtles) |
 | **Unit 7**: white-armour trooper, Pocket Carbine | Compact and solid. Ivory ceramic plates over a **grey** padded undersuit (never black); a rounded helmet with **ONE round lens visor** [r3]; a "07" stencil on the shoulder; a small radio pack. Pocket Carbine: a boxy compact carbine with a top-mounted battery cell. Pattern mask: panel seams | glazed ceramic, rubberised grey suit, gunmetal | Ivory palette: ivory plates, grey suit, amber lens and bolt tracers | a T-shaped visor; a frowning mouth grille; a black undersuit showing between white plates; bucket helmets with ear caps; DL-44 / E-11 blaster silhouettes; red "pew" bolts [r2-04]. Also keep Unit 7 visibly different from Meridian's slate-grey slit-visor Associates |
+| **Hinoko**: fire ninja, Ember Kunai (5th starter, HANDOFF 6h) | Lean and quick: a charcoal hooded cowl draping onto the shoulders, a cloth face mask, sharp amber eyes and a few dark bangs; a long rust scarf with two tattered tails trailing behind; a short wrap-front jacket with side slits, a wide belt with a knotted rope, baggy trousers into shin wraps, forearm bandages, fingerless gloves, split-toe tabi, a kunai pouch on the right thigh. Ember Seal: a 0.4 s hand seal, then a fireball. Pattern mask: an original ember-in-a-ring emblem on the back | matte cotton, wraps, leather, steel | Ember palette: charcoal cloth, rust scarf and lapel, orange emblem and fire | an orange jumpsuit; a forehead plate or headband with a symbol; leaf or spiral symbols; whisker marks; spiky blond hair; copied technique names ("Rasengan", "Shadow Clone", "Hidden Leaf", "Sharingan", any "jutsu" name from the show) |
 
 ### 8.3 The 6 palettes (new); any starter can wear any palette
 
@@ -724,7 +734,7 @@ since the last rebirth; "account" means cumulative.
 | 2 | Sand | #C8A97E | #6B4A32 | #F5A623 | Brother Ash |
 | 3 | Midnight | #1E2F5C | #C9CED6 | #6FD3FF | Hexwick |
 | 4 | Moss | #5E7A3A | #8A6A43 | #9BE564 | Kappa |
-| 5 | Ember | #2E2A2B | #A3402B | #FF8A3D | – |
+| 5 | Ember | #2E2A2B | #A3402B | #FF8A3D | Hinoko |
 | 6 | Dusk | #4A3260 | #3E5568 | #F09A7A | – |
 
 Mapping:
@@ -732,6 +742,8 @@ Mapping:
 - **Secondary** = trim, wraps or undersuit.
 - **Accent** = glyphs, visor lens, bolt tracers or hilt inlays.
 - Kappa's skin stays in a natural green ramp (only the shell rim, hat band and wraps recolour).
+- Hinoko: hood, mask, jacket and trousers primary; scarf and lapel secondary; the back emblem and the
+  Ember Seal glow take the accent.
 - The Sunbrand blade colour never changes.
 
 ### 8.4 First cosmetics list (new names except where marked)
@@ -859,6 +871,7 @@ not a trademark search.
 | Group | Names | Result |
 |---|---|---|
 | Decided (D) | FIRSTLIGHT, Portus, Arcadia, Hollowmere, Meridian, Hall of Firsts, Hexwick, Brother Ash, Unit 7, Hexquill, Sunbrand, Pocket Carbine, Woolback, Dusk Wolf, Tidewrath, The Receiver, Meridian Oversight, Hollow Court | OK, with flags: **Hollow King** is one word from *Hollow Knight* (Team Cherry); keep, with fallback "the Barrow King". **Kappa** is folklore (fine), but also an apparel trademark and a Twitch emote; low risk in games. **Tidewrath** is flagged Y in [r2-04] because of the kaiju archetype; mitigated by the design rules in 4.2 |
+| Ninja starter (new, 6h) | Hinoko, Ember Kunai, Ember Seal | OK. "Hinoko" is the Japanese common noun for flying sparks (火の粉); no franchise character of that name known to us. "Ember Seal" and "Ember Kunai" are generic words (a kunai is a real tool). Rejected: "Kage", "Rin", "Hotaru", "Homura", "Hibana", "Kitsune"/fox motifs (all close to famous anime characters or the nine-tailed fox), "Wren" (already the example player name in UI copy and tests). Reasoned check only |
 | Weapons (new / [05]) | Riverstaff, Bearded Axe, Quarry Hammer, Emberglass Staff [05], Stormcoil, Scatterpipe [05], Yew Longbow, Stillshot Rifle, Comet Launcher, Scrapburst Grenade [05], Patchkit [05], Prism Bubble, Radio, Small/Large Tonic, Ferryman's Oar | OK. I rejected "Skyhammer" (Warhammer), "Boomtube" (DC's "Boom Tube"), "Farsight" (Warhammer 40k) and "Stonemaul" (WoW) |
 | Arcadia creatures (new) | Brightbits (faction), Hopbit, Golden Hopbit, Sparkfly, Linewyrm, Bomblet, Pixel Lancer, Cabinet Golem | OK, except "Hopbit": one letter from a franchise word, which this section's own rule bans; owner decision before going public (docs/pre-public.md §6; display name only, the id can stay). Silhouettes must follow the avoid list in 3.2 |
 | Hollow Court [12] / (new) | Bonewalker, Gnawer, Cantor, Crypt Sentinel [12]; Bone Archer, Marsh Wisp [r2-04] | OK (generic) |
