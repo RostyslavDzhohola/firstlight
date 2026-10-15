@@ -84,6 +84,9 @@ export interface FireMsg {
   t: number;
   /** 0..1 draw/charge for bows and charged melee. */
   charge?: number;
+  /** Release of a held RMB on a weapon with a `special` (Ember Kunai: the Ember Seal fireball). The
+   *  server times the hold from the `charge` message and enforces the cooldown. */
+  seal?: boolean;
 }
 
 export type ClientMessages = {

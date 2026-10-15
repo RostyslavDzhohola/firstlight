@@ -117,9 +117,9 @@ def parts():
 
     # --- helmet, lens, collar ------------------------------------------------------------------
     hc = c + vec((0, 0.006, 0.02))
-    dome = S.ellipsoid(hc, (0.142, 0.15, 0.158))
-    jaw = S.ellipsoid(hc + vec((0, -0.03, -0.085)), (0.12, 0.12, 0.09))
-    lens_c = c + vec((0.0, -0.148, 0.0))
+    dome = S.ellipsoid(hc, (0.152, 0.16, 0.168))
+    jaw = S.ellipsoid(hc + vec((0, -0.03, -0.09)), (0.128, 0.128, 0.096))
+    lens_c = c + vec((0.0, -0.158, 0.0))
     lens_hole = S.cyl(lens_c, 0.06, 0.04, S.frame((0, 1, 0), (0, 0, 1)) @ S.rot((1, 0, 0), 0))
 
     def helmet(P):
@@ -223,8 +223,8 @@ def parts():
         Part("suit", suit, "secondary", vox=0.0022, tris=3800, weights=("auto", upper_bones, "spine_02"),
              paint=paint_suit, texel=0.9),
         Part("plates", plates, "primary", vox=0.0016, tris=3600, weights=("copy", "suit"),
-             paint=paint_plates, texel=1.1),
-        Part("gloves", glove_f, "fixed", vox=0.0012, tris=1400, weights=("auto", hand_bones, "hand_l"), paint=paint_gun,
+             paint=paint_plates, texel=1.1, single_side=True),
+        Part("gloves", glove_f, "fixed", vox=0.0012, tris=1700, weights=("auto", hand_bones, "hand_l"), paint=paint_gun,
              texel=1.0),
         Part("boots", boots, "primary", vox=0.0018, tris=1000, weights=("auto", foot_bones, "foot_l"), paint=paint_boots,
              texel=0.9),

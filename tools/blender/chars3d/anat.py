@@ -98,8 +98,8 @@ class Head:
         c = self.c
         self.eye_x, self.eye_z, self.eye_w, self.eye_h = eye_x, eye_z, eye_w, eye_h
         prof, zr = head_profile(profile, crown, chin)
-        pc = {k: curve([(z * scale, v * scale) for z, v in prof[k]]) for k in prof}
-        zr = (zr[0] * scale, zr[1] * scale)
+        pc = {k: curve(prof[k]) for k in prof}
+        self.scale = scale
         V, T, Q = S.loft(pc, z_range=zr)
         V = V + c
         self.mesh = (V, T, Q)
@@ -132,16 +132,21 @@ class Head:
             for e in ear_shapes:
                 d = S.smin(d, e(P), 0.012)
             return d
-        self.field = field
+        if scale != 1.0:
+            # stylisation: the whole head (face paint included, see face_uv) grows about the eye line
+            inv = F(1.0 / scale)
+            self.field = lambda P: field((P - c) * inv + c) * F(scale)
+        else:
+            self.field = field
 
     # face-space helpers for painting: front projection relative to the cranium centre
     def face_uv(self, P):
         """(u, v) in metres: u = character-left distance from the midline, v = height above the eye line."""
-        return P[:, 0] - self.c[0], P[:, 2] - (self.c[2] + self.eye_z)
+        return (P[:, 0] - self.c[0]) / self.scale, (P[:, 2] - self.c[2]) / self.scale - self.eye_z
 
     def front(self, P, N=None):
         """Weight that a point is on the face side (soft)."""
-        w = S.smoothstep(-0.02, -0.07, P[:, 1] - self.c[1])
+        w = S.smoothstep(-0.02, -0.07, (P[:, 1] - self.c[1]) / self.scale)
         if N is not None:
             w = w * S.smoothstep(0.1, 0.5, -N[:, 1])
         return w

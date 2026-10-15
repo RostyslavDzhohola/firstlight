@@ -131,15 +131,19 @@ def make_material(name, albedo_path, normal_path, pal, look, sun_dir=None):
     nt.links.new(nrm.outputs["Color"], nmap.inputs["Color"])
     tint, role_b, acc = palette_tint(nt, pal)
     base = mul(nt, alb.outputs["Color"], tint)
-    # accent: role-accent parts glow, plus the albedo alpha mask (embroidery, lenses)
+    # accent: role-accent parts glow, plus the painted mask (embroidery, lenses) = 1 - albedo alpha
+    painted = nt.nodes.new("ShaderNodeMath")
+    painted.operation = "SUBTRACT"
+    painted.inputs[0].default_value = 1.0
+    nt.links.new(alb.outputs["Alpha"], painted.inputs[1])
     amax = nt.nodes.new("ShaderNodeMath")
     amax.operation = "MAXIMUM"
     nt.links.new(role_b, amax.inputs[0])
-    nt.links.new(alb.outputs["Alpha"], amax.inputs[1])
-    # alpha-masked accents take the accent colour in the albedo too
+    nt.links.new(painted.outputs[0], amax.inputs[1])
+    # painted accents take the accent colour in the albedo too
     am = nt.nodes.new("ShaderNodeMix")
     am.data_type = "RGBA"
-    nt.links.new(alb.outputs["Alpha"], am.inputs["Factor"])
+    nt.links.new(painted.outputs[0], am.inputs["Factor"])
     nt.links.new(base, am.inputs["A"])
     am.inputs["B"].default_value = acc
     base = am.outputs["Result"]
@@ -230,15 +234,16 @@ def add_character(dir_, name, pal, look, x=0.0, rot_z=0.0, action=None, frame=0,
     mat = make_material(f"{name}_{pal}_{look}", os.path.join(dir_, f"{name}_albedo.png"),
                         os.path.join(dir_, f"{name}_normal.png"), pal, look)
     arm = None
-    root = None
     for o in new:
+        if o.type == "MESH" and o.parent is None:  # the importer's bone-shape icosphere
+            bpy.data.objects.remove(o, do_unlink=True)
+            continue
         if o.type == "MESH":
             o.data.materials.clear()
             o.data.materials.append(mat)
         if o.type == "ARMATURE":
             arm = o
-        if o.parent is None:
-            root = o
+    root = arm
     s = SCALE.get(name, 1.0)
     root.scale = (s, s, s)
     root.location = (x, y, 0)

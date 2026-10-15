@@ -23,7 +23,7 @@ class Part:
     bbox: optional ((x0,y0,z0),(x1,y1,z1)), otherwise found by a coarse scan."""
 
     def __init__(self, name, field, role="fixed", vox=0.002, tris=800, weights=None, paint=None, occlude=True,
-                 cull=True, texel=1.0, bbox=None, cull_eps=0.0015, uv_angle=60.0, keep=None, bump=None):
+                 cull=True, texel=1.0, bbox=None, cull_eps=0.0015, uv_angle=60.0, keep=None, bump=None, single_side=False):
         self.name = name
         self.field = field
         self.role = role
@@ -37,6 +37,7 @@ class Part:
         self.bbox = bbox
         self.cull_eps = cull_eps
         self.uv_angle = uv_angle
+        self.single_side = single_side  # cloth: keep only the side facing away from the body
         self.bump = bump  # optional f(P, N) -> N: fine relief (weave, strands) added to the normal map
         self.keep = keep  # optional f(face centres) -> bool mask of faces to keep (manual trims)
 

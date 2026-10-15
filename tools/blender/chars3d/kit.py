@@ -62,7 +62,7 @@ class Hair:
         self.head = head
         self.cap_t = cap
         self.c = head.c
-        self.centre = head.c + vec((0, 0.008, 0.045))
+        self.centre = head.c + vec((0, 0.008, 0.045)) * F(getattr(head, "scale", 1.0))
         self.clumps = []
         self.k = k
         self.hairline = hairline or (lambda th, ph: 0.0)
@@ -110,8 +110,8 @@ class Hair:
             q = P - centre
             az = np.degrees(np.arctan2(q[:, 0], -q[:, 1]))
             el = np.degrees(np.arctan2(q[:, 2], np.sqrt(q[:, 0] ** 2 + q[:, 1] ** 2)))
+            # solid (the head inside it is culled away): thin shells crumple when decimated
             cap = head(P) - cap_t
-            cap = S.smax(cap, -head(P) - 0.002, 0.004)  # a shell, not a solid (keeps the face clear)
             cut = (hl(az, el) - el) * F(0.0015)  # degrees -> metres-ish
             d = S.smax(cap, cut, 0.006)
             for c in clumps:

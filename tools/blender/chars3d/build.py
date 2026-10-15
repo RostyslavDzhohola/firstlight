@@ -65,6 +65,38 @@ def face_centres(ob):
     return c.reshape(-1, 3)
 
 
+def face_normals(ob):
+    me = ob.data
+    n = np.empty(len(me.polygons) * 3, dtype=F)
+    me.polygons.foreach_get("normal", n)
+    return n.reshape(-1, 3)
+
+
+_SEGS = None
+
+
+def skeleton_point(P):
+    """Nearest point on the shared skeleton's bone segments (rest pose) for each point."""
+    global _SEGS
+    if _SEGS is None:
+        from skel import Skel
+        sk = Skel()
+        names = [n for n in sk.names() if "leaf" not in n and n != "root"]
+        _SEGS = (np.stack([sk.head(n) for n in names]), np.stack([sk.tail(n) for n in names]))
+    A, B = _SEGS
+    best = np.full(len(P), np.inf, dtype=F)
+    out = np.zeros_like(P)
+    for a, b in zip(A, B):
+        ab = b - a
+        t = np.clip(((P - a) @ ab) / max(float(ab @ ab), 1e-9), 0, 1)
+        q = a + t[:, None] * ab
+        d = np.einsum("ij,ij->i", P - q, P - q)
+        m = d < best
+        best[m] = d[m]
+        out[m] = q[m]
+    return out
+
+
 def delete_faces(ob, kill):
     if not kill.any():
         return
@@ -235,16 +267,32 @@ def blend_weights(ob, fn):
 
 
 def uv_unwrap(ob, angle, texel):
+    """Smart-project a smoothed copy (decimated sculpts have noisy face normals that shatter the
+    islands), then copy the UVs back: same topology, so loop order matches."""
+    proxy = copy_object(ob, ob.name + "_uvproxy")
+    bm = bmesh.new()
+    bm.from_mesh(proxy.data)
+    for _ in range(12):
+        bmesh.ops.smooth_vert(bm, verts=[v for v in bm.verts if not v.is_boundary], factor=0.6,
+                              use_axis_x=True, use_axis_y=True, use_axis_z=True)
+    bm.to_mesh(proxy.data)
+    bm.free()
     for o in bpy.context.scene.objects:
         o.select_set(False)
-    ob.select_set(True)
-    bpy.context.view_layer.objects.active = ob
+    proxy.select_set(True)
+    bpy.context.view_layer.objects.active = proxy
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
     bpy.ops.uv.smart_project(angle_limit=math.radians(angle), island_margin=0.0, area_weight=0.0,
                              correct_aspect=True, scale_to_bounds=False)
     bpy.ops.object.mode_set(mode="OBJECT")
     me = ob.data
+    if not me.uv_layers:
+        me.uv_layers.new(name="UVMap")
+    uvp = np.empty(len(proxy.data.loops) * 2, dtype=F)
+    proxy.data.uv_layers.active.data.foreach_get("uv", uvp)
+    me.uv_layers.active.data.foreach_set("uv", uvp)
+    bpy.data.objects.remove(proxy, do_unlink=True)
     uv = np.empty(len(me.loops) * 2, dtype=F)
     me.uv_layers.active.data.foreach_get("uv", uv)
     uv = uv.reshape(-1, 2)
@@ -304,6 +352,15 @@ def build(recipe_name, ual1, out_dir, tex=1024, fast=False, keep_blend=None, onl
         V, T, Q, frac = S.mesh_field(p.field, bb[0], bb[1], vox)
         lo = bl.mesh_from_arrays(p.name, V, Q, T)
         nhi = len(V)
+        if p.single_side:
+            # cloth is modelled as a thin solid; the game keeps only the side facing away from the
+            # body (the material is double-sided). Thin = the part ends within 2.2 cm behind the face.
+            cen = face_centres(lo)
+            nrm = face_normals(lo)
+            thin = p.field(cen - nrm * F(0.022)) > 0
+            to_body = skeleton_point(cen) - cen
+            inner = thin & (np.einsum("ij,ij->i", nrm, to_body) > 0)
+            delete_faces(lo, inner)
         # pre-decimate, cull what is buried inside other parts, then decimate to the budget
         bl.decimate(lo, target_tris=p.tris * 12)
         cen = face_centres(lo)
@@ -383,7 +440,9 @@ def build(recipe_name, ual1, out_dir, tex=1024, fast=False, keep_blend=None, onl
         res = p.paint(ctx) if p.paint else np.full((ctx.n, 3), 0.7, F)
         rgb, emis = res if isinstance(res, tuple) else (res, None)
         albedo[sel, :3] = np.clip(rgb, 0, 1)
-        albedo[sel, 3] = 0.0 if emis is None else np.clip(emis, 0, 1)
+        # alpha = 1 - accent: most texels stay opaque, so a browser that premultiplies alpha on decode
+        # can't wipe the colour (the client reads painted = 1 - alpha)
+        albedo[sel, 3] = 1.0 if emis is None else 1.0 - np.clip(emis, 0, 1)
         nmap[sel, :3] = TB.tangent_normals(Nhi, nrm_lo[sel], tan[sel], bit[sel])
         log(f"  paint {p.name}: {int(sel.sum())} texels, {time.time() - t:.1f}s")
     albedo, _ = TB.dilate(albedo, covered, 12)

@@ -29,7 +29,8 @@ def parts():
         "w": [(-0.104, 0.07), (-0.081, 0.092), (-0.054, 0.108), (-0.027, 0.115), (0.0, 0.118), (0.03, 0.12)],
         "yf": [(-0.104, -0.09), (-0.081, -0.104), (-0.054, -0.114), (-0.027, -0.12), (0.0, -0.12), (0.03, -0.118)],
     }
-    head = A.Head(c=(0.0, 0.0, 1.715), profile=prof, crown={"r": (0.122, 0.128, 0.115)},
+    HS = 1.15  # stylised head scale
+    head = A.Head(c=(0.0, 0.0, 1.735), scale=HS, profile=prof, crown={"r": (0.122, 0.128, 0.115)},
                   chin={"z": -0.098, "y": -0.05, "r": (0.065, 0.045, 0.03)}, ears=None, nose_r=(0.001, 0.001, 0.001),
                   nose_tip=0.0005, eye_x=0.052, eye_w=0.046, eye_h=0.05, socket=0.0025, neck_r=0.06)
     c = head.c
@@ -38,22 +39,22 @@ def parts():
                    sclera="#f4f0dc", lash_w=0.0028, look=(0.0, 0.04))
 
     # --- beak --------------------------------------------------------------------------------
-    up_b = S.ellipsoid(c + vec((0, -0.112, -0.046)), (0.042, 0.042, 0.022), S.rot((1, 0, 0), -12))
-    hook = S.ellipsoid(c + vec((0, -0.146, -0.058)), (0.016, 0.014, 0.016))
-    lo_b = S.ellipsoid(c + vec((0, -0.103, -0.071)), (0.034, 0.034, 0.013), S.rot((1, 0, 0), 8))
+    up_b = S.ellipsoid(c + vec((0, -0.112, -0.046)) * F(HS), vec((0.042, 0.042, 0.022)) * F(HS), S.rot((1, 0, 0), -12))
+    hook = S.ellipsoid(c + vec((0, -0.146, -0.058)) * F(HS), vec((0.016, 0.014, 0.016)) * F(HS))
+    lo_b = S.ellipsoid(c + vec((0, -0.103, -0.071)) * F(HS), vec((0.034, 0.034, 0.013)) * F(HS), S.rot((1, 0, 0), 8))
 
     def beak(P):
         d = S.smin(up_b(P), hook(P), 0.02)
         d = np.minimum(d, lo_b(P))
         # nostrils
         for s in (1, -1):
-            n = S.sphere(c + vec((s * 0.012, -0.146, -0.036)), 0.0035)(P)
+            n = S.sphere(c + vec((s * 0.012, -0.146, -0.036)) * F(HS), 0.0035)(P)
             d = S.smax(d, -n, 0.002)
         return d
 
     def paint_beak(ctx):
         rgb = PT.fill(ctx.n, PT.hexc("#a29a48"))
-        tip = np.clip((-(ctx.P[:, 1] - c[1]) - 0.11) / 0.04, 0, 1)
+        tip = np.clip((-(ctx.P[:, 1] - c[1]) / HS - 0.11) / 0.04, 0, 1)
         rgb = PT.mix(rgb, PT.hexc("#5e5a2c"), tip * 0.6)
         return PT.shade(rgb, ctx.P, ctx.N, ctx.ao, ctx.cav, ao_amt=0.6, cav_amt=0.6, edge_amt=0.25)
 
@@ -194,7 +195,7 @@ def parts():
         bob.clump(az, 30, (math.sin(a) * 0.25, -math.cos(a) * 0.25, -1.0), 0.09, 0.04, lift=0.003, tip_lift=0.012,
                   flat=0.5)
     bob_f = bob.field()
-    dish = S.cyl(c + vec((0, 0.006, 0.168)), 0.06, 0.008, rad=0.004)
+    dish = S.cyl(c + vec((0, 0.006, 0.168)) * F(HS), 0.06, 0.008, rad=0.004)
 
     def hair(P):
         d = bob_f(P)
@@ -207,14 +208,14 @@ def parts():
         rgb = rgb * PT.strands(ctx.P, (0, 0, 1), 700, 0.25)[:, None]
         return PT.shade(rgb, ctx.P, ctx.N, ctx.ao, ctx.cav, ao_amt=0.5, cav_amt=0.4, edge_amt=0.25)
 
-    hat_c = c + vec((0.0, -0.01, 0.105))
+    hat_c = c + vec((0.0, -0.01, 0.105)) * F(HS)
     tilt = S.rot((1, 0, 0), -8)
 
     def kasa(P):
         q = (P - hat_c) @ tilt
         r = np.sqrt(q[:, 0] ** 2 + q[:, 1] ** 2)
-        R = 0.36
-        H = 0.16
+        R = 0.38
+        H = 0.17
         # a gently convex cone: height falls with radius, slight upturn at the rim
         prof = H * (1 - (r / R) ** 0.9) - 0.01 * S.smoothstep(R * 0.8, R, r)
         d = np.abs(q[:, 2] - prof) - 0.006
@@ -226,7 +227,7 @@ def parts():
     def kasa_band(P):
         q = (P - hat_c) @ tilt
         r = np.sqrt(q[:, 0] ** 2 + q[:, 1] ** 2)
-        band = np.maximum(np.abs(r - 0.112) - 0.008, np.abs(q[:, 2] - 0.0) - 0.022)
+        band = np.maximum(np.abs(r - 0.112 * HS) - 0.008, np.abs(q[:, 2] - 0.0) - 0.022)
         return band
 
     def paint_straw(ctx):
@@ -241,9 +242,8 @@ def parts():
         rgb = PT.variation(rgb, ctx.P, 0.08, 9, 66, 0.02)
         return PT.shade(rgb, ctx.P, ctx.N, ctx.ao, ctx.cav, ao_tint="#6a4a20", ao_amt=0.55, cav_amt=0.4, edge_amt=0.2)
 
-    cords = S.union(S.tube([c + vec((0.1, -0.0, 0.08)), c + vec((0.098, -0.03, -0.03)), c + vec((0.05, -0.07, -0.1))],
-                           [0.0035] * 3), S.tube([c + vec((-0.1, -0.0, 0.08)), c + vec((-0.098, -0.03, -0.03)),
-                                                   c + vec((-0.05, -0.07, -0.1))], [0.0035] * 3))
+    cords = S.union(*[S.tube([c + vec((sx * 0.1, -0.0, 0.08)) * F(HS), c + vec((sx * 0.098, -0.03, -0.03)) * F(HS),
+                              c + vec((sx * 0.05, -0.07, -0.1)) * F(HS)], [0.0035] * 3) for sx in (1, -1)])
 
     upper = ["spine_01", "spine_02", "spine_03", "neck_01", "Head", "clavicle_l", "clavicle_r", "upperarm_l", "upperarm_r",
              "lowerarm_l", "lowerarm_r", "hand_l", "hand_r", "pelvis", "thigh_l", "thigh_r", "calf_l", "calf_r", "foot_l",
@@ -256,20 +256,22 @@ def parts():
         Part("bob", hair, "fixed", vox=0.0012, tris=900, weights=("rigid", "Head"), paint=paint_hair, texel=0.8,
              cull=False),
         Part("kasa", kasa, "fixed", vox=0.0016, tris=1300, weights=("rigid", "Head"), paint=paint_straw, texel=1.0,
-             cull=False),
+             cull=False, single_side=True),
         Part("band", kasa_band, "primary", vox=0.0012, tris=300, weights=("rigid", "Head"), paint=paint_wrap, texel=0.6),
         Part("cords", cords, "fixed", vox=0.001, tris=200, weights=("rigid", "Head"),
              paint=lambda ctx: PT.fill(ctx.n, PT.hexc("#c9b48a")), texel=0.4, occlude=False),
         Part("body", body, "fixed", vox=0.0022, tris=3600, weights=("auto", upper, "spine_02"), paint=paint_skin,
              texel=0.9),
-        Part("hands", hands, "fixed", vox=0.001, tris=1400, weights=("auto", hand_bones, "hand_l"), paint=paint_skin,
+        Part("hands", hands, "fixed", vox=0.001, tris=1800, weights=("auto", hand_bones, "hand_l"), paint=paint_skin,
              texel=1.1),
         Part("shell", carapace, "fixed", vox=0.002, tris=1600, weights=("auto", ["spine_01", "spine_02", "spine_03"], "spine_02"),
              paint=paint_shell, texel=1.1),
-        Part("rim", rim, "primary", vox=0.0016, tris=700, weights=("copy", "shell"), paint=paint_wrap, texel=0.7),
+        Part("rim", rim, "primary", vox=0.0016, tris=700, weights=("copy", "shell"), paint=paint_wrap, texel=0.7,
+             single_side=True),
         Part("plastron", plastron, "fixed", vox=0.0018, tris=700, weights=("copy", "body"), paint=paint_plastron,
              texel=0.9),
-        Part("wraps", wraps, "secondary", vox=0.002, tris=1200, weights=("fn", wrap_w), paint=paint_wrap, texel=0.8),
+        Part("wraps", wraps, "secondary", vox=0.002, tris=1200, weights=("fn", wrap_w), paint=paint_wrap, texel=0.8,
+             single_side=True),
         Part("armwraps", arm_wraps, "secondary", vox=0.0015, tris=600, weights=("copy", "body"), paint=paint_wrap,
              texel=0.7),
     ]

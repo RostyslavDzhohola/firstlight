@@ -24,7 +24,7 @@ HAIR_HI = "#7a4e36"
 
 def parts():
     sk = Skel()
-    head = A.Head(c=(0.0, 0.0, 1.725))
+    head = A.Head(c=(0.0, 0.0, 1.742), scale=1.12)
     c = head.c
     face = PT.Face(iris="#2f9fc8", iris_dark="#123c5c", lash="#24160f", brow="#3f281d", smile=0.0045,
                    brow_tilt=0.0015, look=(0.0, 0.05))
@@ -45,27 +45,26 @@ def parts():
         a = np.abs(az)
         return np.interp(a, [0, 40, 80, 100, 135, 180], [9, 3, -12, -18, -42, -52]).astype(F)
 
-    hair = K.Hair(head, cap=0.012, hairline=hairline, k=0.007)
-    # swept fringe: from the crown-front, falling forward and sweeping to the character's right (-X)
-    for i, (az, el, L, w, sw) in enumerate([(-35, 38, 0.13, 0.03, -0.25), (-15, 42, 0.14, 0.032, -0.35),
-                                            (5, 44, 0.15, 0.033, -0.45), (25, 40, 0.14, 0.032, -0.5),
-                                            (45, 34, 0.12, 0.03, -0.45), (-55, 30, 0.1, 0.028, -0.1)]):
-        hair.clump(az, el, (sw, -0.75, -0.55), L, w, bend=(0, 0.25, -0.35), lift=0.003, tip_lift=0.012,
-                   flat=0.42)
-    # sides over the ears
+    hair = K.Hair(head, cap=0.013, hairline=hairline, k=0.007)
+    # swept fringe: from the crown-front, falling forward and sweeping to the character's right (-X);
+    # the tips stop on the forehead, above the brows
+    for i, (az, el, L, w, sw) in enumerate([(-30, 52, 0.095, 0.032, -0.35), (-10, 55, 0.1, 0.034, -0.45),
+                                            (10, 55, 0.1, 0.034, -0.55), (30, 50, 0.09, 0.032, -0.6),
+                                            (48, 44, 0.08, 0.03, -0.5), (-50, 42, 0.09, 0.03, -0.2)]):
+        hair.clump(az, el, (sw, -0.85, -0.35), L, w, bend=(0, 0.15, -0.25), lift=0.003, tip_lift=0.01, flat=0.42)
+    # sides over the ears, back flaring at the nape
     for s in (1, -1):
-        for az, el, L in ((75, 22, 0.13), (100, 18, 0.14), (120, 15, 0.14)):
-            hair.clump(s * az, el, (s * 0.15, 0.1, -1.0), L, 0.034, bend=(s * 0.05, 0.05, 0), lift=0.002,
+        for az, el, L in ((70, 25, 0.11), (95, 20, 0.12), (118, 18, 0.13)):
+            hair.clump(s * az, el, (s * 0.15, 0.1, -1.0), L, 0.036, bend=(s * 0.05, 0.05, 0), lift=0.002,
                        tip_lift=0.016, flat=0.45)
-    # back, flaring at the nape
     for az in (140, 160, 180, 200, 220):
         a = math.radians(az)
-        hair.clump(az, 25, (math.sin(a) * 0.2, 0.35, -1.0), 0.17, 0.038, bend=(math.sin(a) * 0.08, 0.12, 0.0),
+        hair.clump(az, 25, (math.sin(a) * 0.2, 0.35, -1.0), 0.16, 0.04, bend=(math.sin(a) * 0.08, 0.12, 0.0),
                    lift=0.002, tip_lift=0.02, flat=0.45)
     # messy crown tufts
     for az, el, d in ((150, 70, (0.3, 0.6, 0.6)), (200, 65, (-0.4, 0.7, 0.4)), (100, 62, (0.8, 0.2, 0.5)),
                       (250, 60, (-0.8, 0.3, 0.4)), (180, 80, (0.0, 0.8, 0.7))):
-        hair.clump(az, el, d, 0.09, 0.03, bend=(0, 0, -0.3), lift=0.004, tip_lift=0.028, flat=0.5)
+        hair.clump(az, el, d, 0.085, 0.032, bend=(0, 0, -0.3), lift=0.004, tip_lift=0.026, flat=0.5)
     hair_f = hair.field()
 
     def paint_hair(ctx):
@@ -122,10 +121,10 @@ def parts():
     def constellation(P, N):
         """Faint embroidered star dots and joining threads, on the robe (accent mask)."""
         f1, f2, cid = S.voronoi(P, 22, 5, 0.9)
-        star = (f1 < 0.0045) & (cid > 0.55)
-        star = star.astype(F) * (0.6 + 0.4 * (cid > 0.8))
-        edge = (np.abs(f2 - f1) < 0.0012) & (cid > 0.75)
-        return np.clip(star + edge * 0.35, 0, 1)
+        star = (f1 < 0.0035) & (cid > 0.82)
+        star = star.astype(F) * (0.55 + 0.45 * (cid > 0.95))
+        edge = (np.abs(f2 - f1) < 0.0009) & (cid > 0.93)
+        return np.clip(star + edge * 0.3, 0, 1)
 
     def paint_robe(ctx, base=0.9):
         rgb = PT.fill(ctx.n, (base, base, base))
@@ -134,8 +133,8 @@ def parts():
         rgb = PT.shade(rgb, ctx.P, ctx.N, ctx.ao, ctx.cav, ao_tint="#6a6a8a", ao_amt=0.6, top_light=0.14,
                        cav_amt=0.4, edge_amt=0.18, z_range=(0.1, 1.6))
         st = constellation(ctx.P, ctx.N)
-        rgb = PT.mix(rgb, PT.fill(ctx.n, (1, 1, 1)), st * 0.5)
-        return rgb, st * 0.45
+        rgb = PT.mix(rgb, PT.fill(ctx.n, (1, 1, 1)), st * 0.35)
+        return rgb, st * 0.3
 
     # --- robe skirt (open front) ----------------------------------------------------------
     skirt = K.skirt(1.03, 0.13, rx=(0.175, 0.33), ry=(0.135, 0.27), cy=0.02, thick=0.013, gap=(4, 17), folds=9,
@@ -315,17 +314,19 @@ def parts():
     return [
         Part("head", head.field, "fixed", vox=0.0011, tris=2300, weights=("auto", ["neck_01", "Head"], "Head"),
              paint=paint_head, texel=2.6, uv_angle=70),
-        Part("hair", hair_f, "fixed", vox=0.0012, tris=2600, weights=("rigid", "Head"), paint=paint_hair,
-             texel=1.2, cull=False),
-        Part("hands", hands, "fixed", vox=0.001, tris=1500, weights=("auto", hand_bones, "hand_l"), paint=paint_hands,
+        Part("hair", hair_f, "fixed", vox=0.0012, tris=2400, weights=("rigid", "Head"), paint=paint_hair,
+             texel=1.1),
+        Part("hands", hands, "fixed", vox=0.001, tris=1900, weights=("auto", hand_bones, "hand_l"), paint=paint_hands,
              texel=1.4),
-        Part("robe_top", robe_up, "primary", vox=0.0022, tris=2200, weights=("auto", upper_bones, "spine_03"),
-             paint=paint_robe, texel=1.0),
+        Part("robe_top", robe_up, "primary", vox=0.0022, tris=2000, weights=("auto", upper_bones, "spine_03"),
+             paint=paint_robe, texel=1.0, single_side=True),
         Part("cuffs", cuffs, "secondary", vox=0.0015, tris=500, weights=("auto", ["lowerarm_l", "lowerarm_r", "hand_l", "hand_r"], "lowerarm_l"),
-             paint=paint_cuffs, texel=1.2),
-        Part("skirt", skirt, "primary", vox=0.0025, tris=1900, weights=("fn", skirt_w), paint=paint_robe, texel=0.9),
-        Part("trim", trim, "secondary", vox=0.0018, tris=900, weights=("fn", skirt_w), paint=paint_trim, texel=0.9),
-        Part("trousers", trousers, "fixed", vox=0.0025, tris=900, weights=("auto", leg_bones, "pelvis"),
+             paint=paint_cuffs, texel=1.2, single_side=True),
+        Part("skirt", skirt, "primary", vox=0.0025, tris=1600, weights=("fn", skirt_w), paint=paint_robe, texel=0.9,
+             single_side=True),
+        Part("trim", trim, "secondary", vox=0.0018, tris=700, weights=("fn", skirt_w), paint=paint_trim, texel=0.9,
+             single_side=True),
+        Part("trousers", trousers, "fixed", vox=0.0025, tris=700, weights=("auto", leg_bones, "pelvis"),
              paint=paint_trousers, texel=0.6),
         Part("boots", boots, "fixed", vox=0.0018, tris=900, weights=("auto", boot_bones, "foot_l"), paint=paint_boots,
              texel=1.0),
@@ -334,7 +335,8 @@ def parts():
              texel=1.0, cull=False),
         Part("strap", strap, "fixed", vox=0.0015, tris=500, weights=("auto", ["spine_01", "spine_02", "spine_03", "pelvis", "clavicle_l"], "spine_02"),
              paint=paint_strap, texel=0.8, occlude=False),
-        Part("scarf", scarf, "primary", vox=0.002, tris=1100, weights=("fn", scarf_w), paint=paint_scarf, texel=1.0),
+        Part("scarf", scarf, "primary", vox=0.002, tris=1000, weights=("fn", scarf_w), paint=paint_scarf, texel=1.0,
+             single_side=True),
         Part("clasp", clasp, "accent", vox=0.001, tris=120, weights=("rigid", "spine_03"), paint=paint_clasp,
              texel=0.6, occlude=False, cull=False),
     ]

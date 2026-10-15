@@ -36,7 +36,8 @@ def stripes(P, base=0.9):
 
 def parts():
     sk = Skel()
-    head = A.Head(c=(0.0, 0.0, 1.725), eye_w=0.034, eye_h=0.036)
+    HS = 1.1  # stylised head scale (a little less than the younger starters)
+    head = A.Head(c=(0.0, 0.0, 1.74), eye_w=0.034, eye_h=0.036, scale=HS)
     c = head.c
     face = PT.Face(iris="#b9822e", iris_dark="#4a2a10", lash="#20140e", brow="#2a1c14", brow_w=0.0042,
                    brow_tilt=-0.002, mouth_on=False, blush_amt=0.0, eye_w=0.034, eye_h=0.036, iris_r=0.0145, lid=0.22,
@@ -56,13 +57,13 @@ def parts():
 
     def guard(P):
         d = S.smax(g_shell(P), -head.field(P) - 0.001, 0.004)
-        q = P - c
-        d = S.smax(d, q[:, 2] - (-0.034 + 0.01 * np.abs(q[:, 0]) / 0.06), 0.004)
-        d = S.smax(d, (-0.115) - q[:, 2], 0.006)
-        d = S.smax(d, q[:, 1] + 0.035, 0.012)
+        q = (P - c) / F(HS)
+        d = S.smax(d, (q[:, 2] - (-0.034 + 0.01 * np.abs(q[:, 0]) / 0.06)) * F(HS), 0.004)
+        d = S.smax(d, ((-0.115) - q[:, 2]) * F(HS), 0.006)
+        d = S.smax(d, (q[:, 1] + 0.035) * F(HS), 0.012)
         # hammered dents and two engraved lines
         d = d + 0.0008 * S.vnoise(P, 300, 4)
-        d = d + 0.0012 * np.exp(-((q[:, 2] + 0.06) / 0.0018) ** 2) + 0.0012 * np.exp(-((q[:, 2] + 0.09) / 0.0018) ** 2)
+        d = d + 0.0012 * np.exp(-((q[:, 2] + 0.06) / 0.0016) ** 2) + 0.0012 * np.exp(-((q[:, 2] + 0.09) / 0.0016) ** 2)
         return d
 
     def paint_brass(ctx):
@@ -86,8 +87,8 @@ def parts():
         inner = S.smin(hood_i(P), drape_i(P), 0.05)
         d = S.smax(d, -inner, 0.006)
         q = P - win_c
-        win = np.sqrt((q[:, 0] / 0.12) ** 2 + (q[:, 2] / 0.13) ** 2) - 1.0
-        cut = np.maximum(win * 0.06, q[:, 1] - 0.12)
+        win = A.ellipse2(q[:, 0], q[:, 2], F(0.125), F(0.135))
+        cut = np.maximum(win, q[:, 1] - 0.12)
         d = S.smax(d, -cut, 0.01)
         d = S.smax(d, (c[2] - 0.38 - 0.06 * np.clip(P[:, 0] / 0.2, 0, 1)) - P[:, 2], 0.012)  # lower on the left
         fold = 0.004 * np.sin(np.arctan2(P[:, 0], P[:, 1] - c[1]) * 6 + S.vnoise(P, 8, 2) * 1.6)
@@ -239,19 +240,20 @@ def parts():
     return [
         Part("head", head.field, "fixed", vox=0.0011, tris=1800, weights=("auto", ["neck_01", "Head"], "Head"),
              paint=paint_head, texel=2.4, uv_angle=70),
-        Part("guard", guard, "fixed", vox=0.001, tris=600, weights=("rigid", "Head"), paint=paint_brass, texel=1.3),
+        Part("guard", guard, "fixed", vox=0.001, tris=600, weights=("rigid", "Head"), paint=paint_brass, texel=1.3,
+             single_side=True),
         Part("hood", hood, "primary", vox=0.0018, tris=2200, weights=("auto", ["Head", "neck_01", "spine_03", "clavicle_l", "clavicle_r"], "Head"),
-             paint=paint_cloth, texel=1.2),
+             paint=paint_cloth, texel=1.2, single_side=True),
         Part("robe", robe, "primary", vox=0.0024, tris=3000, weights=("auto", upper_bones + ["thigh_l", "thigh_r"], "spine_02", robe_w),
-             paint=paint_cloth, texel=0.95),
+             paint=paint_cloth, texel=0.95, single_side=True),
         Part("hem", skirt_band, "secondary", vox=0.0018, tris=800, weights=("copy", "robe"), paint=paint_stripes,
-             texel=0.9),
+             texel=0.9, single_side=True),
         Part("mantle", mantle, "secondary", vox=0.0018, tris=1500, weights=("copy", "robe"), paint=paint_mantle,
-             texel=1.0),
+             texel=1.0, single_side=True),
         Part("belt", belt, "fixed", vox=0.0014, tris=400, weights=("rigid", "pelvis"), paint=paint_belt, texel=0.8),
         Part("brass", brass_bits, "fixed", vox=0.001, tris=900, weights=("copy", "robe"), paint=paint_brass, texel=0.8,
              occlude=False),
-        Part("hands", hands, "fixed", vox=0.001, tris=1300, weights=("auto", hand_bones, "hand_l"), paint=paint_hands,
+        Part("hands", hands, "fixed", vox=0.001, tris=1800, weights=("auto", hand_bones, "hand_l"), paint=paint_hands,
              texel=1.2),
         Part("wraps", wraps, "secondary", vox=0.0014, tris=600,
              weights=("auto", ["lowerarm_l", "lowerarm_r", "hand_l", "hand_r", "upperarm_l", "upperarm_r"], "lowerarm_l"),

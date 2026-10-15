@@ -25,7 +25,8 @@ WRAP = "#d9cfbc"
 
 def parts():
     sk = Skel()
-    head = A.Head(c=(0.0, 0.0, 1.725))
+    HS = 1.12  # stylised head scale
+    head = A.Head(c=(0.0, 0.0, 1.742), scale=HS)
     c = head.c
     face = PT.Face(iris="#e0922a", iris_dark="#5a2a10", lash="#1a1414", brow="#231a18", brow_tilt=-0.004,
                    brow_lift=-0.001, brow_w=0.0036, mouth_on=False, blush_amt=0.15, lid=0.12, look=(0.05, 0.0))
@@ -42,20 +43,20 @@ def parts():
 
     # --- hood (cowl) with the face opening, and the mask -----------------------------------
     hood_outer = S.offset(head.field, 0.024)
-    open_c = c + vec((0.0, -0.16, -0.006))
+    open_c = c + vec((0.0, -0.16, -0.006)) * F(HS)
 
     def hood(P):
         d = hood_outer(P)
         d = S.smax(d, -head.field(P) - 0.004, 0.006)  # hollow
         # face opening: an oval window from the brow to below the eyes (the mask fills the rest)
-        q = P - open_c
-        win = np.sqrt((q[:, 0] / 0.092) ** 2 + (q[:, 2] / 0.052) ** 2) - 1.0
-        cut = np.maximum(win * 0.05, q[:, 1] - 0.09)
+        q = (P - open_c) / F(HS)
+        win = A.ellipse2(q[:, 0], q[:, 2], F(0.088), F(0.05))  # an oval window from brow to cheekbones
+        cut = np.maximum(win, q[:, 1] - 0.09) * F(HS)
         d = S.smax(d, -cut, 0.008)
         # cowl drapes onto the shoulders: widen below the jaw
-        drape = S.round_cone(c + vec((0, 0.03, -0.32)), c + vec((0, 0.02, -0.12)), 0.17, 0.1)(P)
-        drape = S.smax(drape, -(S.round_cone(c + vec((0, 0.03, -0.4)), c + vec((0, 0.02, -0.1)), 0.15, 0.075)(P)), 0.01)
-        drape = S.smax(drape, (c[2] - 0.31) - P[:, 2], 0.01)
+        drape = S.round_cone(c + vec((0, 0.03, -0.34)), c + vec((0, 0.02, -0.13)), 0.17, 0.105)(P)
+        drape = S.smax(drape, -(S.round_cone(c + vec((0, 0.03, -0.42)), c + vec((0, 0.02, -0.11)), 0.15, 0.08)(P)), 0.01)
+        drape = S.smax(drape, (c[2] - 0.33) - P[:, 2], 0.01)
         d = S.smin(d, drape, 0.04)
         # soft folds radiating from the crown and across the back
         fold = 0.0035 * np.sin(np.arctan2(P[:, 0], P[:, 1] - c[1]) * 7 + S.vnoise(P, 10, 3) * 1.4)
@@ -65,10 +66,10 @@ def parts():
 
     def mask(P):
         d = S.smax(mask_shell(P), -head.field(P) - 0.002, 0.004)
-        q = P - c
+        q = (P - c) / F(HS)
         top = (q[:, 2] - (-0.03 + 0.012 * np.abs(q[:, 0]) / 0.05))  # edge just under the eyes
-        d = S.smax(d, top, 0.004)
-        d = S.smax(d, q[:, 1] - 0.03, 0.01)  # front half only, tucks under the hood at the sides
+        d = S.smax(d, top * F(HS), 0.004)
+        d = S.smax(d, (q[:, 1] - 0.03) * F(HS), 0.01)  # front half only, tucks under the hood at the sides
         d = d + 0.0016 * np.sin(q[:, 2] * 180 + np.abs(q[:, 0]) * 60) * S.smoothstep(-0.04, -0.12, q[:, 2])
         return d
 
@@ -301,20 +302,20 @@ def parts():
         Part("head", head.field, "fixed", vox=0.0011, tris=2000, weights=("auto", ["neck_01", "Head"], "Head"),
              paint=paint_head, texel=2.6, uv_angle=70),
         Part("hood", hood, "primary", vox=0.0016, tris=1800, weights=("auto", ["Head", "neck_01", "spine_03"], "Head"),
-             paint=paint_cloth, texel=1.3),
+             paint=paint_cloth, texel=1.3, single_side=True),
         Part("mask", mask, "primary", vox=0.0012, tris=700, weights=("auto", ["Head", "neck_01"], "Head"),
-             paint=lambda ctx: paint_cloth(ctx, 0.78, 0.09), texel=1.6),
-        Part("bangs", bangs_f, "fixed", vox=0.0011, tris=600, weights=("rigid", "Head"), paint=paint_hair, texel=1.2,
-             cull=False),
-        Part("scarf", scarf, "secondary", vox=0.002, tris=1500, weights=("fn", scarf_w), paint=paint_cloth, texel=1.0),
+             paint=lambda ctx: paint_cloth(ctx, 0.78, 0.09), texel=1.6, single_side=True),
+        Part("bangs", bangs_f, "fixed", vox=0.0011, tris=600, weights=("rigid", "Head"), paint=paint_hair, texel=1.2),
+        Part("scarf", scarf, "secondary", vox=0.002, tris=1400, weights=("fn", scarf_w), paint=paint_cloth, texel=1.0,
+             single_side=True),
         Part("jacket", jacket, "primary", vox=0.002, tris=2300, weights=("auto", upper_bones + ["thigh_l", "thigh_r"], "spine_02", jacket_w),
-             paint=paint_emblem, texel=1.0),
+             paint=paint_emblem, texel=1.0, single_side=True),
         Part("lapel", lapel_trim, "secondary", vox=0.0014, tris=500, weights=("auto", ["spine_02", "spine_03", "neck_01", "spine_01"], "spine_03"),
-             paint=paint_cloth, texel=0.8, occlude=False),
+             paint=paint_cloth, texel=0.8, occlude=False, single_side=True),
         Part("belt", belt, "fixed", vox=0.0015, tris=350, weights=("rigid", "pelvis"), paint=paint_belt, texel=0.8),
         Part("rope", rope_f, "fixed", vox=0.0012, tris=500, weights=("rigid", "pelvis"), paint=paint_rope, texel=0.6,
              occlude=False),
-        Part("hands", hands, "fixed", vox=0.001, tris=1400, weights=("auto", hand_bones, "hand_l"), paint=paint_hands,
+        Part("hands", hands, "fixed", vox=0.001, tris=1900, weights=("auto", hand_bones, "hand_l"), paint=paint_hands,
              texel=1.3),
         Part("armwraps", forearm_wraps, "fixed", vox=0.0014, tris=700,
              weights=("auto", ["lowerarm_l", "lowerarm_r", "hand_l", "hand_r", "upperarm_l", "upperarm_r"], "lowerarm_l"),
