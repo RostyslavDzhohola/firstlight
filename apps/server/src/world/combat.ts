@@ -38,6 +38,12 @@ export interface CombatHost {
    * shelter whoever stands behind them from blasts. Never damaged.
    */
   walls?: WallHost;
+  /**
+   * Is this player in a safe zone right now, where they stand (set by BodyRoom; D-zones-3)? The
+   * tick's SAFE flag can be a tick old after a move, so the attack and damage gates ask this
+   * instead. Without it (socket-free tests), the flag.
+   */
+  safeNow?(a: PlayerActor, now: number): boolean;
   /** Prism Bubbles (set by support.ts): shots, projectiles and splash crossing a shell stop at it. */
   bubbles?: BubbleHost;
 }
@@ -150,16 +156,21 @@ export function selectedWeapon(p: PlayerActor): { def: WeaponDef; tier: TierStat
   return { def, tier: def.tiers[tierIndex]!, tierIndex, slot: p.char.selected };
 }
 
+/** Is player `a` in a safe zone right now (the zone where they stand, not the tick-old flag)? */
+function safeNow(host: CombatHost | undefined, a: PlayerActor, now: number): boolean {
+  return host?.safeNow ? host.safeNow(a, now) : (a.state.flags & PF.SAFE) !== 0;
+}
+
 /** Can `a` hurt `b` right now? Safe zones protect both ways; protection after login/respawn. */
-export function canHurt(a: Actor | null, b: Actor, now: number): boolean {
+export function canHurt(a: Actor | null, b: Actor, now: number, host?: CombatHost): boolean {
   if (b.kind === "player") {
     if (b.dead) return false;
-    if (b.state.flags & PF.SAFE) return false;
+    if (safeNow(host, b, now)) return false;
     if (b.protectedUntil > now) return false;
   } else if (b.state.hp <= 0) return false;
   if (a && a.kind === "player") {
     if (a.dead) return false;
-    if (a.state.flags & PF.SAFE) return false;
+    if (safeNow(host, a, now)) return false;
     if (a.protectedUntil > now) return false;
   }
   return true;
@@ -211,7 +222,7 @@ function raycastActors(host: CombatHost, o: V3, d: V3, maxT: number, ignore: Set
   let best: RayTargetHit | null = null;
   const now = host.now();
   const test = (a: Actor, r: number, h: number) => {
-    if (ignore.has(a.id) || !canHurt(null, a, now)) return;
+    if (ignore.has(a.id) || !canHurt(null, a, now, host)) return;
     const hit = rayCapsule(o, d, maxT, capsuleFeet(a, now, rewindMs), r, h);
     if (hit && (!best || hit.t < best.t)) {
       // NPCs with weak-point volumes (bosses) decide for themselves where the weak spot is.
@@ -237,9 +248,9 @@ export interface FireInput {
 export type FireResult = { ok: true } | { ok: false; reason: string };
 
 /** Rate limit, gates, magazine/heat. Mutates actor state when the attack is allowed. */
-export function consumeAttack(p: PlayerActor, def: WeaponDef, tier: TierStats, now: number, rateScale = 1): FireResult {
+export function consumeAttack(p: PlayerActor, def: WeaponDef, tier: TierStats, now: number, rateScale = 1, host?: CombatHost): FireResult {
   if (p.dead || p.superseded) return { ok: false, reason: "dead" };
-  if (p.state.flags & PF.SAFE) return { ok: false, reason: "safe zone" };
+  if (safeNow(host, p, now)) return { ok: false, reason: "safe zone" };
   if (p.protectedUntil > now) return { ok: false, reason: "protected" };
   if (p.state.flags & PF.SWIMMING) return { ok: false, reason: "swimming" };
   if (tier.level > p.char.level) return { ok: false, reason: "level gate" };
@@ -298,7 +309,7 @@ export function fire(host: CombatHost, p: PlayerActor, msg: FireInput): FireResu
     charge = p.chargeStartedAt > 0 ? Math.max(0, Math.min(1, (now - p.chargeStartedAt) / drawMs)) : 0;
     p.chargeStartedAt = 0;
   }
-  const res = consumeAttack(p, def, tier, now, 1);
+  const res = consumeAttack(p, def, tier, now, 1, host);
   if (!res.ok) return res;
   const lvl = damageMult(p.char.level);
 
@@ -490,7 +501,7 @@ function chain(host: CombatHost, p: PlayerActor, o: V3, d: V3, def: WeaponDef, t
   let first: Actor | null = null;
   let bestT = Infinity;
   for (const a of allActors(host)) {
-    if (a.id === p.id || !canHurt(p, a, now)) continue;
+    if (a.id === p.id || !canHurt(p, a, now, host)) continue;
     const r = a.kind === "player" ? PLAYER_RADIUS + 0.7 : a.radius + 0.7;
     const h = a.kind === "player" ? PLAYER_HEIGHT : a.height;
     const hit = rayCapsule(o, d, aimEnd, capsuleFeet(a, now, REWIND_MS), r, h);
@@ -518,7 +529,7 @@ function chain(host: CombatHost, p: PlayerActor, o: V3, d: V3, def: WeaponDef, t
         let next: Actor | null = null;
         let nd = 6;
         for (const a of allActors(host)) {
-          if (hitSet.has(a.id) || !canHurt(p, a, now)) continue;
+          if (hitSet.has(a.id) || !canHurt(p, a, now, host)) continue;
           const dd = dist3(actorPos(a), actorPos(cur));
           if (dd <= nd && lineOfSight(host, from, chestOf(a))) {
             nd = dd;
@@ -588,7 +599,7 @@ export function melee(host: CombatHost, p: PlayerActor, heavy: boolean): FireRes
   if (useHeavy && meleeTier.cooldown && now < p.specialReadyAt) useHeavy = false;
   p.chargeStartedAt = 0;
   if (heavy && !useHeavy) return { ok: false, reason: "not charged" };
-  const res = consumeAttack(p, meleeDef, meleeTier, now, 1);
+  const res = consumeAttack(p, meleeDef, meleeTier, now, 1, host);
   if (!res.ok) return res;
   if (useHeavy && meleeTier.cooldown) p.specialReadyAt = now + meleeTier.cooldown * 1000;
   const lvl = damageMult(p.char.level);
@@ -598,7 +609,7 @@ export function melee(host: CombatHost, p: PlayerActor, heavy: boolean): FireRes
   const targets: { a: Actor; d: number }[] = [];
   for (const a of allActors(host)) {
     if (a.id === p.id) continue;
-    if (!canHurt(p, a, now)) continue;
+    if (!canHurt(p, a, now, host)) continue;
     const ap = positionAgo(a, now, REWIND_MS);
     if (!inMeleeArc(pos, facing, ap, meleeDef.range, meleeDef.arc ?? 90)) continue;
     if (wallBetween(host, chestOf(p), chestOf(a))) continue; // not through a wall (D-zones-3)
@@ -613,13 +624,14 @@ export function melee(host: CombatHost, p: PlayerActor, heavy: boolean): FireRes
     for (const a of allActors(host)) {
       if (a.id === p.id) continue;
       const d = dist3(pos, actorPos(a));
-      if (d <= meleeTier.radius) dealDamage(host, p, a, dmg * (d <= meleeTier.radius / 2 ? 1 : 0.5), false, actorFacingFrom(pos, a));
+      if (d > meleeTier.radius || wallBetween(host, chestOf(p), chestOf(a))) continue; // not through a wall (D-zones-3)
+      dealDamage(host, p, a, dmg * (d <= meleeTier.radius / 2 ? 1 : 0.5), false, actorFacingFrom(pos, a));
     }
   }
   // Breakable props in the arc (or the slam ring) take the hit too; heavy attacks are heavy class
   // (the axe's charged chop), fists break nothing (destruction.ts).
   const propCls: Destroys = useHeavy ? "heavy" : meleeDef.destroys;
-  if (slam) host.props?.splash(pos, meleeTier.radius!, dmg, propCls, meleeDef.id, p.id);
+  if (slam) host.props?.splash(pos, meleeTier.radius!, dmg, propCls, meleeDef.id, p.id, undefined, (c) => wallBetween(host, chestOf(p), c));
   else host.props?.arc(pos, facing, meleeDef.range, meleeDef.arc ?? 90, dmg, propCls, meleeDef.id, p.id);
   const reach: V3 = [pos[0] + facing[0] * meleeDef.range, pos[1] + facing[1] * meleeDef.range, pos[2] + facing[2] * meleeDef.range];
   host.onPropHit?.(reach, useHeavy || meleeDef.destroys === "heavy" ? "heavy" : "light", dmg);
@@ -630,7 +642,7 @@ export function melee(host: CombatHost, p: PlayerActor, heavy: boolean): FireRes
 /** Apply damage with block, armour and the safe-zone/protection rules. */
 export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | null, target: Actor, amount: number, weak: boolean, fromDir?: V3, knockback?: number): boolean {
   const now = host.now();
-  if (!canHurt(attacker, target, now)) return false;
+  if (!canHurt(attacker, target, now, host)) return false;
   let dmg = amount;
   if (target.kind === "player") {
     if (target.blocking && fromDir) {

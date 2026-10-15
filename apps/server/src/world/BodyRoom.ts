@@ -252,6 +252,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       onDamage: (target, amount, attacker) => this.afterDamage(target, attacker, amount),
       // The town's walls stop shots, blasts, melee and sight (D-zones-3).
       ...(structures ? { walls: structures } : {}),
+      // Attack and damage gates ask the zone where the player stands now, not the tick-old flag.
+      safeNow: (a, now) => this.safeNow(a, now),
     };
 
     // Load-test copies neither show nor touch the public world's piles (piles belong to a body, not a copy).
@@ -1196,9 +1198,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     for (const a of this.actors.values()) {
       const p = a.state;
       pushHistory(a, now);
-      // Pad rings protect only once out of combat (no running onto a pad mid-fight, F12); the Portus
-      // town protects whoever is inside its walls at once, combat tag or not (D-zones-3).
-      const safe = isSafe(this.bodyDef, p.x, p.y, p.z) && (this.bodyDef.terrain.kind === "hub" || now >= a.combatUntil);
+      const safe = this.safeNow(a, now);
       p.flags = safe ? p.flags | PF.SAFE : p.flags & ~PF.SAFE;
       if (a.protectedUntil <= now) p.flags &= ~PF.PROTECTED;
       if (now < a.combatUntil) p.flags |= PF.IN_COMBAT;
@@ -1354,6 +1354,17 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (!(l >= this.bodyDef.radius * 0.5)) return false;
     const g = this.terrain.groundHeight(p[0]! / l, p[1]! / l, p[2]! / l);
     return l - this.bodyDef.radius - g >= -3;
+  }
+
+  /**
+   * Is `a` in a safe zone right now, where it stands? Pad rings protect only once out of combat (no
+   * running onto a pad mid-fight, F12); the Portus town protects whoever is inside its walls at once,
+   * combat tag or not (D-zones-3). The tick writes it into the SAFE flag; combat's attack and damage
+   * gates call it directly, so a move into the town counts before the next tick (Codex round 2).
+   */
+  safeNow(a: PlayerActor, now: number): boolean {
+    const p = a.state;
+    return isSafe(this.bodyDef, p.x, p.y, p.z) && (this.bodyDef.terrain.kind === "hub" || now >= a.combatUntil);
   }
 
   spawnPoint(seed: string): V3 {

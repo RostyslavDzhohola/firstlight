@@ -11,8 +11,10 @@ import { structureCollider } from "@firstlight/shared/planet/town";
 import { townDir } from "@firstlight/shared/planet/townFrame";
 import { WEAPON_INDEX, WEAPONS } from "@firstlight/shared/content/weapons";
 import { PF } from "@firstlight/shared/net/schema";
+import { matchMaker } from "@colyseus/core";
 import type { Game } from "../src/app.ts";
-import { explode, projectiles, stepProjectiles, type Projectile } from "../src/world/combat.ts";
+import type { BodyRoom } from "../src/world/BodyRoom.ts";
+import { explode, fire, melee, projectiles, stepProjectiles, type Projectile } from "../src/world/combat.ts";
 import { canSee, chest, startAttack } from "../src/world/npc/attacks.ts";
 import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
 import { makeGround, step } from "../src/world/npc/steer.ts";
@@ -102,6 +104,41 @@ describe("players' attacks on the real path", () => {
     }
     await new Promise((ok) => setTimeout(ok, 300));
     expect(st(shooter).players.get(target.sessionId).hp).toBe(100);
+  }, 30_000);
+
+  it("a move into the town counts before the next tick: a shot right after it does nothing, and the mover can't shoot out (both gates)", async () => {
+    for (const s of [1, -1]) {
+      const shooter = await join(`gun${s > 0 ? "e" : "w"}`, 3, town(s * 58, 0));
+      const mover = await join(`mover${s > 0 ? "e" : "w"}`, 3, town(s * 46.4, 0));
+      await waitFor(() => !(me(mover).flags & PF.SAFE));
+      const room = matchMaker.getLocalRoomById(mover.roomId) as unknown as BodyRoom;
+      const target = room.actors.get(mover.sessionId)!;
+      const gun = room.actors.get(shooter.sessionId)!;
+      gun.state.flags |= PF.SCOPED; // aimed: no spread to speak of
+      const shotAt = (from: typeof gun, to: readonly number[]) => {
+        const l = Math.hypot(from.state.x, from.state.y, from.state.z);
+        const o = [from.state.x + (from.state.x / l) * 1.6, from.state.y + (from.state.y / l) * 1.6, from.state.z + (from.state.z / l) * 1.6];
+        const tl = Math.hypot(to[0]!, to[1]!, to[2]!);
+        const c = [to[0]! + (to[0]! / tl), to[1]! + (to[1]! / tl), to[2]! + (to[2]! / tl)];
+        const d = [c[0]! - o[0]!, c[1]! - o[1]!, c[2]! - o[2]!];
+        const dl = Math.hypot(d[0]!, d[1]!, d[2]!);
+        return { slot: 0, ox: o[0]!, oy: o[1]!, oz: o[2]!, dx: d[0]! / dl, dy: d[1]! / dl, dz: d[2]! / dl, t: Date.now() };
+      };
+      // Control: on the wild side of the border the shot lands.
+      const hp0 = target.state.hp;
+      expect(fire(room.host, gun, shotAt(gun, [target.state.x, target.state.y, target.state.z]))).toEqual({ ok: true });
+      expect(target.state.hp).toBeLessThan(hp0);
+      target.state.hp = target.state.maxHp;
+      gun.lastAttackAt = 0;
+      // One synchronous run, no tick between: the accepted move onto the border, then the shot.
+      const to = town(s * 46, 0);
+      room.handleInput({ sessionId: mover.sessionId, send: () => {} } as never, { seq: target.state.seq + 1, x: to[0], y: to[1], z: to[2], fx: 0, fy: 0, fz: 1, anim: 0, t: Date.now() });
+      expect(d3([target.state.x, target.state.y, target.state.z], to)).toBeLessThan(0.01); // accepted
+      expect(target.state.flags & PF.SAFE).toBeFalsy(); // the tick hasn't written the flag yet
+      expect(fire(room.host, gun, shotAt(gun, to))).toEqual({ ok: true });
+      expect(target.state.hp).toBe(target.state.maxHp);
+      expect(fire(room.host, target, shotAt(target, [gun.state.x, gun.state.y, gun.state.z]))).toEqual({ ok: false, reason: "safe zone" });
+    }
   }, 30_000);
 
   it("a Comet fired from outside the east gate at someone standing in it does no damage", async () => {
@@ -228,6 +265,20 @@ describe("the AI and blasts (socket-free NPC world on Portus)", () => {
     expect(projectiles(fw.world.host)).toHaveLength(0);
     expect(near.state.hp).toBeLessThan(near.state.maxHp); // 2.2 m from the impact, same side
     expect(far.state.hp).toBe(far.state.maxHp);
+  });
+
+  it("a charged hammer slam doesn't reach through the wall (the arc's own targets never did)", () => {
+    for (const [north, hurt] of [[52, false], [70, true]] as const) {
+      const fw = walled();
+      const t = fw.world.terrain;
+      const smith = fw.addPlayer("smith", town(17, north, 0, t), 12);
+      const other = fw.addPlayer("other", town(13.3, north, 0, t), 12); // 3.7 m off: inside the slam's 4 m
+      smith.char.hotbar[0] = { id: "hammer", tier: 3, qty: 1 };
+      smith.char.selected = 0;
+      smith.chargeStartedAt = fw.clock.t - 1100; // charged for 1.1 s
+      expect(melee(fw.world.host, smith, true)).toEqual({ ok: true });
+      expect(other.state.hp < other.state.maxHp, `north ${north}`).toBe(hurt);
+    }
   });
 
   it("NPCs walk round the structures outside the walls (no stepping through the crates by the east road)", () => {
