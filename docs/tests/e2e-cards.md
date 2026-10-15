@@ -41,7 +41,7 @@ Fresh browser profile (cold cache), production.
    `T1-1-loading.png` while the loading screen shows ("Loading the game…", "Connecting…", "Building
    the world…", "Warming up shaders…").
 2. In-world means the loading screen is hidden (`#loading` has `hidden`) and the HUD shows: player card
-   (name, Lv 1, "Safe" chip, HP 100/100, "XP 0 / 50"), the hotbar and the "Safe zone · No damage in or
+   (name, Lv 1, "Safe" zone label, HP 100/100, "XP 0 / 50"), the hotbar and the "Safe zone · No damage in or
    out" banner. Read the time with `performance.now()` at that moment (time since navigation start).
    Screenshot `T1-2-in-world.png`.
 3. Also run it once by hand without `?autoplay`: landing ("Firstlight", **PLAY**) → **Choose your
@@ -54,8 +54,9 @@ Fresh browser profile (cold cache), production.
 
 Two profiles, A and B, both pick **Unit 7** (starter weapon: Pocket Carbine, 9 damage per shot).
 
-1. In Portus, left-click: toast "Weapons are holstered in safe zones" (all of Portus and 12 m around
-   every pad are safe).
+1. In Portus town, left-click: toast "Weapons are holstered in town: head out of the gates to fight"
+   (the town inside its walls and 12 m around every pad are safe; D-zones-1). Outside the east or west
+   gate the zone label reads Danger and Woolbacks and Hopbits are in view.
 2. Walk into the **ARCADIA** portal ring on the plaza. You arrive at Arcadia's first pad.
 3. **PvE:** walk more than 12 m out ("Leaving safe zone · Anyone can hurt you") into Clover Fields and
    shoot a Hopbit (22 HP at level 1, so 3 hits). Expect hit markers and "9" damage numbers, the Hopbit

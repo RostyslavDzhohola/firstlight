@@ -452,3 +452,39 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   colliders are drawn as stone boxes (2 draws) before the probe and the warm-up, and a later arrival
   of the asset is ignored until the next visit (review round 1, S1). Why: Medium was already at
   ~290 draws against 250 (F10); triangles are cheap next to draws on Metal (#30560).
+- **D-zones-1 (run, 2026-10-15):** Portus: the castle town is the safe zone and the land outside its
+  walls is wild, with creeps. Amends "Safe zones: all of Portus" (R2 Q3) and D39's "Portus refuses
+  shots and has no NPCs". The safe footprint is the curtain-wall ring, 46 m from the pole (through
+  the middle of both gatehouses: the gates are the border), plus the castle ward (|east| ≤ 16.4 m,
+  north ≤ 64.1 m). One shared function decides it, `packages/shared/src/planet/zones.ts`
+  (`zoneAt`, `isSafe`, `nearSafeZone`, `nearestSafeEntry`): the server's SAFE flag (with the 10 s
+  combat tag), logout, horses (the whistle now works outside the walls), NPC steering and the
+  client's HUD zone label all read it. Arrival, respawn, rebirth, the dummies, the portals, Juno and
+  the Hall are inside. Outside: eight fixed groups (`PORTUS_WILDS`, levels 1–2): Woolbacks within
+  ~20 m of each gate, three Hopbits ~30 m out from each, Hopbits south and behind the castle,
+  Woolbacks and two Sparkflies over the rim. Hostile homes keep their wander room plus the 3 m NPC
+  margin clear of the town; steering keeps every NPC out (as at pad rings, D36: an unreachable
+  target → evade after 5 s). Kills pay from Arcadia's tonic and cosmetic tables. The HUD shows an
+  always-on zone label (Safe / Danger, `[data-e2e="zone-label"]` with `data-zone`) from the
+  server's flag, the border banner ("Leaving the safe zone · Creeps and other players can hurt you",
+  "Safe zone · Portus town · no damage in or out") and the compass's SAFE marker points at the
+  nearer gate. The server's shot and NPC-sight paths still ignore the town's walls (no shot crosses
+  the town: inside refuses them); generalised structure occlusion is the pad-outposts lane's
+  follow-up. No `PROTOCOL_VERSION` bump: the client's label and refusals read the server's flag,
+  and old clients draw the Portus creeps with the existing NPC layer. Why: the owner started in the
+  castle, "fired" at the training dummies inside (tutorial `train` shots), walked out of the gate
+  into what reads as danger, found shots refused ("Weapons are holstered in safe zones") and no
+  creeps: "the safe zone was not on the inside, it was on the outside". Inside the walls safe,
+  outside danger is what a player expects.
+- **D-zones-2 (run, 2026-10-15):** creeps near every arrival. Each planet's main pad has a grazing
+  herd at ~42 m and a pack of the planet's weakest hostiles at ~62 m (outside the 45 m rule with
+  their wander room, which stays), placed toward where the arrival camera looks (the portal home)
+  on dry ground (`ARRIVAL_GROUPS`, spawns.ts step 0): Hollowmere Woolbacks L6 and three Bonewalkers
+  L6, Meridian Woolbacks L12 and three Associates L12. Arcadia already had both ahead of the camera
+  (Woolbacks at 47 m, Hopbits at 68 m; npc-spawns.test.ts holds all three). Measured before: the
+  first hostile was 68 / 66 / 134 m and the first wildlife 47 / 181 / 1,095 m from the Arcadia /
+  Hollowmere / Meridian arrival, and the client only receives NPCs within 80 m (server AOI; drawn to
+  150 m, full detail within 45 m), so Meridian showed nothing on arrival. Also: an attack the
+  server refuses for "protected" (the 5 s after arriving), "swimming", "mounted", "overheated" or
+  "safe zone" now shows a toast (one per reason per 1.5 s), and melee refusals are sent as
+  `denied` like ranged ones. Why: "Where are all the creeps outside? Let's see the creeps."
