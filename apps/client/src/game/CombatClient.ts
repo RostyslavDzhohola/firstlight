@@ -238,6 +238,16 @@ export class CombatClient {
     if (horsesEnabled(this.game.hud.you, flags.has("nohorses"))) this.game.net.room?.send("horse", { action: "whistle" });
   }
 
+  /** Lower any guard and scope and cancel a charge or draw in progress (nothing fires on release). */
+  private dropMouseActions() {
+    const room = this.game.net.room;
+    if (this.blocking) room?.send("block", { on: false });
+    if (this.scoped) room?.send("scope", { on: false });
+    if (this.wasRmb) room?.send("charge", { on: false });
+    this.game.self?.setLocalFlags(0);
+    this.blocking = this.scoped = this.wasRmb = false;
+  }
+
   aiming(): boolean {
     const { def } = this.currentWeapon();
     return this.game.input.rmb && def.delivery !== "melee" && !this.game.player.saddleLocked;
@@ -266,21 +276,32 @@ export class CombatClient {
     // The phrase wheel (G) owns the mouse and number keys while it is open: drop block/scope and any
     // charge, so nothing fires or stays raised when it closes.
     if (this.wheel.update(input, now, !this.deadUntilRespawn)) {
-      if (this.blocking) room.send("block", { on: false });
-      if (this.scoped) room.send("scope", { on: false });
-      g.self?.setLocalFlags(0);
-      if (this.wasRmb) room.send("charge", { on: false }); // a charge or draw in progress is cancelled
-      this.blocking = this.scoped = this.wasRmb = false;
+      this.dropMouseActions();
       return;
     }
-    // Keys work in the "Click to look around" state too (Input.inPlay); attacks still need a click,
-    // which locks the pointer first, so the mouse buttons below only ever act while locked.
+    // Mouse combat needs the pointer locked. Whenever it's gone (menu, panel, the hint state), cancel
+    // any guard, scope or charge in progress: Input reports the right button released when the lock
+    // goes, which would otherwise land a charged heavy now, or on the next lock.
+    if (!input.locked) {
+      this.dropMouseActions();
+      this.saddleRmb = false;
+    }
+    // Keys work in the "Click to look around" state too (Input.inPlay, D-controls-4).
     if (this.deadUntilRespawn || !input.inPlay) return;
 
     // Hotbar and utility keys.
     for (let i = 0; i < 4; i++) if (input.pressed.has(`Digit${i + 1}`)) room.send("equip", { slot: i });
     if (input.pressed.has("KeyR")) room.send("reload", { slot: g.hud.you?.selected ?? 0 });
     if (input.pressed.has("KeyE")) this.tryPickup();
+
+    if (!input.locked) {
+      const cam = g.ctx.camera;
+      if (Math.abs(cam.fov - this.baseFov) > 0.1) {
+        cam.fov += (this.baseFov - cam.fov) * Math.min(1, dt * 14);
+        cam.updateProjectionMatrix();
+      }
+      return;
+    }
 
     const { def, tier } = this.currentWeapon();
     const t = def.tiers[tier - 1]!;
