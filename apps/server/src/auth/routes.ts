@@ -6,6 +6,7 @@
 //   POST /api/test/bot-token     x-loadtest-secret → a loadtest play token (only when LOADTEST_SECRET is set)
 
 import { randomUUID } from "node:crypto";
+import { STARTERS } from "@firstlight/shared/content/weapons";
 import { fromNodeHeaders } from "better-auth/node";
 import type { Express, NextFunction, Request, Response } from "express";
 import { claimAdmin, ensureAccount, getAccount, isBanned, isClaimBurnt, setDisplayName } from "../db/accounts.ts";
@@ -79,7 +80,9 @@ export function mountAccountRoutes(app: Express, a: Accounts, cfg: AccountsConfi
       guest: id.guest,
       admin: id.admin,
       titleMedal: acc?.titleMedal ?? null,
-      character: c ? { level: c.level, xp: c.xp, coins: c.coins, starter: c.starter, palette: c.palette, body: c.body } : null,
+      // `starter` is the index the game uses everywhere (PlayerState.starter, fl.starter), not the stored
+      // id: a second browser signing in stores it as fl.starter (HANDOFF 5b). Same mapping as the rooms.
+      character: c ? { level: c.level, xp: c.xp, coins: c.coins, starter: Math.max(0, STARTERS.findIndex((s) => s.id === c.starter)), palette: c.palette, body: c.body } : null,
       // A guest the server will email a code for a new address (D34: from level 2), i.e. who can save now.
       saveReady: !id.loadtest && id.guest && a.maySave(id.userId),
       medals: id.loadtest ? [] : listMedals(a.db, id.userId).map((m) => m.medalId),

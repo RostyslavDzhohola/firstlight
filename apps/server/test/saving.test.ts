@@ -5,7 +5,7 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { classifyMailFailure, DevOutbox, MailHealth, type Mailer, type SendResult } from "../src/auth/mailer.ts";
-import { Browser, startAuthServer, type AuthServer } from "./auth-helpers.ts";
+import { Browser, decodeJwt, startAuthServer, type AuthServer } from "./auth-helpers.ts";
 import { waitFor } from "./helpers.ts";
 
 let server: AuthServer | null = null;
@@ -163,5 +163,35 @@ describe("GET /api/account/me tells a guest whether a code can be sent yet", () 
     expect(await me()).toMatchObject({ guest: true, saveReady: true });
     await b.saveWithEmail("ready@example.test");
     expect(await me()).toMatchObject({ guest: false, saveReady: false });
+  });
+});
+
+describe("a second browser restores the same starter (HANDOFF 5b)", () => {
+  it("/api/account/me sends the starter as the index the game uses (not the stored id), equal to the room's", async () => {
+    server = await startAuthServer();
+    const a = new Browser(server, "198.51.100.150");
+    const guestToken = await a.playToken();
+    const guestId = String(decodeJwt(guestToken).sub);
+    await a.levelUp(2);
+    const { loadCharacter, saveCharacter } = await import("../src/db/index.ts");
+    saveCharacter(server.accounts.db, guestId, { ...loadCharacter(server.accounts.db, guestId)!, starter: "kappa", palette: 4 });
+    await a.saveWithEmail("kappa@example.test", "Kappa_Fan");
+
+    // Browser B signs in with the same email: the client stores `character.starter` as fl.starter.
+    const b = new Browser(server, "198.51.100.151");
+    const out = server.accounts.devOutbox!;
+    const before = out.sent;
+    expect((await b.client.emailOtp.sendVerificationOtp({ email: "kappa@example.test", type: "sign-in" })).error).toBeNull();
+    await waitFor(() => out.sent > before);
+    expect((await b.signInWithCode("kappa@example.test", out.lastCode("kappa@example.test")!)).error).toBeNull();
+    const token = await b.playToken();
+    const me = (await (await fetch(`${server.base}/api/account/me`, { headers: { Authorization: `Bearer ${token}` } })).json()) as { character: { starter: unknown; palette: number } };
+    expect(me.character).toMatchObject({ starter: 2, palette: 4 }); // STARTERS[2] is Kappa
+    expect(Number(String(me.character.starter))).toBe(2); // what the client puts in localStorage reads back
+
+    // The rooms load the same row through SqliteCharacterRepo: the same starter as PlayerState.starter.
+    const { SqliteCharacterRepo } = await import("../src/world/sqliteStores.ts");
+    const accountId = String(decodeJwt(token).sub);
+    expect(new SqliteCharacterRepo(server.accounts.db).load(accountId)?.starter).toBe(me.character.starter);
   });
 });

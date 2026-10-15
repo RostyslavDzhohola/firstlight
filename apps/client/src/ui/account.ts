@@ -440,6 +440,15 @@ export function openSaveProgress(opts: { name?: string; level?: number; starter?
   return saveOpen;
 }
 
+/**
+ * The old entry point, kept so callers written against it (the home page's first cut) still build
+ * after the merge: the same card as openSaveProgress(). `requested` no longer matters (the card only
+ * ever opens when asked). New code: openSaveProgress().
+ */
+export function showSavePrompt(opts: { name?: string; level?: number; starter?: number; requested?: boolean } = {}): Promise<SaveResult> {
+  return openSaveProgress({ name: opts.name, level: opts.level, starter: opts.starter });
+}
+
 let signInOpen: Promise<"signed-in" | "dismissed"> | null = null;
 
 /** "Sign in" (a returning player on a new browser): same account and character. */

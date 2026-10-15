@@ -131,7 +131,7 @@ describe("saving a guest (email OTP)", () => {
     expect(claims.name).toBe("Mira_7");
 
     const me = (await api(server, "/api/account/me", savedToken)).json;
-    expect(me).toMatchObject({ ok: true, userId: savedId, displayName: "Mira_7", guest: false, character: { level: 3, starter: "ember", palette: 2, body: "arcadia" }, medals: ["first-blood"], pads: [{ body: "arcadia", padId: "pad-north" }] });
+    expect(me).toMatchObject({ ok: true, userId: savedId, displayName: "Mira_7", guest: false, character: { level: 3, starter: 0, palette: 2, body: "arcadia" }, medals: ["first-blood"], pads: [{ body: "arcadia", padId: "pad-north" }] });
     expect(loadCharacter(db, savedId)?.inventory).toEqual([{ id: "hexquill" }]);
     expect(loadCharacter(db, guestId)).toBeNull();
     expect(getAccount(db, guestId)).toBeNull();
