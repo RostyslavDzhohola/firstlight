@@ -26,7 +26,7 @@ export const PAUSE_TIMING = {
   /** An unlock must last this long before the menu shows: a lock that flickers off and on shows nothing. */
   menuDelayMs: 150,
   /** A lock lost sooner than this after it was granted didn't stick: back to the game with the hint, never the menu. */
-  stickMs: 700,
+  stickMs: 500,
 };
 
 export interface PauseClock {

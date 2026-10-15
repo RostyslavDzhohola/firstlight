@@ -452,3 +452,34 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   colliders are drawn as stone boxes (2 draws) before the probe and the warm-up, and a later arrival
   of the asset is ignored until the next visit (review round 1, S1). Why: Medium was already at
   ~290 draws against 250 (F10); triangles are cheap next to draws on Metal (#30560).
+- **D-controls-1 (2026-10-15):** Voice chat and the radio are hidden in this build ("Voice chat: coming
+  soon"), behind a flag on each side, not deleted. Server `FEATURE_VOICE=1` / client build
+  `VITE_FEATURE_VOICE=1` bring them back (both, together). Off: no voice system (the voice and radio
+  message types stay registered and answer `voice:denied {reason: "off"}`, so older tabs aren't
+  dropped), no TURN credentials minted, the Exchange doesn't sell the radio, a radio can't be dropped
+  and one carried into death goes with the old life instead of into the pile; the client has no V/B
+  keys, no mic prompt, no voice pill, no voice tutorial tip (step ids unchanged; a saved voice tip is
+  kept), no Voice volume or voice column, no voice column or mute in the Tab list, and an owned radio
+  reads as an empty slot. The Esc menu shows one disabled "Voice chat: coming soon" line. Block and
+  report (Tab list) and the phrase wheel stay. Why: the owner isn't sure about the legal side of live
+  voice (risk-assessment §5: the terms page, a public complaints contact and a real legal check are
+  still missing), and wants "character should just walk around and do basic" for this build.
+- **D-controls-2 (2026-10-15):** No F-key bindings. Performance overlay `` ` `` (was F3), photo mode
+  Shift+P (was F9; P alone stays the screenshot), admin console Shift+`` ` `` (was `` ` ``). The game
+  no longer swallows F-keys (the browser keeps F5/F11/F12); it swallows `` ` `` and `'` while locked.
+  `game/keys.ts` lists every binding and a test checks for F-keys and clashes. Why: on a Mac F1–F12
+  are system keys (F3 is Mission Control) and the owner's Fn key belongs to another app.
+- **D-controls-3 (2026-10-15):** The pause menu follows a state machine (`ui/pauseFlow.ts`), not every
+  `pointerlockchange`. Esc in the menu (also Enter/Space, Resume, a click on the backdrop) goes back to
+  the game: the menu closes, a "Click to look around" hint shows, and the next click on the world
+  re-locks without reopening the menu. An unlock opens the menu only after it has lasted 150 ms, and a
+  lock lost within 500 ms of being granted lands in the game with the hint instead of reopening the
+  menu (the owner's blink: Chrome granted the lock and dropped it a few frames later, and the old menu
+  mirrored both changes). Refused lock requests (no gesture, Chrome's ~1 s block after an Esc) show the
+  hint. Esc in a panel closes it and asks for the pointer back (the panel freed it itself, so Chrome
+  allows it without a click). Play still goes fullscreen, now with Keyboard Lock for Esc where it
+  exists (Chromium): a short Esc reaches the game (menu, then straight back in without a click) instead
+  of dropping out of fullscreen, and holding Esc leaves fullscreen; the menu has a Full screen button.
+  The cost: an Esc pressed within 500 ms of clicking into the game shows the hint rather than the
+  menu (a second Esc opens it). Why: Esc alone can't re-lock the pointer (it isn't a user gesture),
+  and Esc dropping fullscreen gave the owner a full-screen jump on every pause.

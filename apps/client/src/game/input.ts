@@ -14,6 +14,8 @@ export function preventsDefault(code: string, locked: boolean): boolean {
 export class Input {
   readonly keys = new Set<string>();
   readonly pressed = new Set<string>(); // went down this frame
+  /** Of `pressed`, the keys that went down with Shift held (read at the key press, not at the frame). */
+  private readonly pressedShift = new Set<string>();
   mouseDX = 0;
   mouseDY = 0;
   lmb = false;
@@ -34,7 +36,10 @@ export class Input {
     window.addEventListener("keydown", (e) => {
       if (!this.enabled) return;
       if (preventsDefault(e.code, this.locked)) e.preventDefault();
-      if (!this.keys.has(e.code)) this.pressed.add(e.code);
+      if (!this.keys.has(e.code)) {
+        this.pressed.add(e.code);
+        if (e.shiftKey) this.pressedShift.add(e.code);
+      }
       this.keys.add(e.code);
     });
     window.addEventListener("keyup", (e) => this.keys.delete(e.code));
@@ -95,14 +100,9 @@ export class Input {
       .finally(() => (this.requesting = false));
   }
 
-  /** Shift is held. */
-  shift(): boolean {
-    return this.keys.has("ShiftLeft") || this.keys.has("ShiftRight");
-  }
-
-  /** The hotkey went down this frame (with Shift exactly as it wants). */
+  /** The hotkey went down this frame (with Shift exactly as it wants, as it was at the key press). */
   hit(k: Hotkey): boolean {
-    return this.enabled && this.pressed.has(k.code) && hits(k, k.code, this.shift());
+    return this.enabled && this.pressed.has(k.code) && hits(k, k.code, this.pressedShift.has(k.code));
   }
 
   down(code: string): boolean {
@@ -112,6 +112,7 @@ export class Input {
   /** Call at the end of each frame. */
   endFrame() {
     this.pressed.clear();
+    this.pressedShift.clear();
     this.mouseDX = 0;
     this.mouseDY = 0;
     this.lmbPressed = false;
