@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { compileForPass, passCallDepth, type PassCompileRenderer } from "./compilePass.ts";
+import * as THREE from "three/webgpu";
+import { pass } from "three/tsl";
+import { compileForPass, passCallDepth, saveRenderState, type GuardedRenderer, type PassCompileRenderer } from "./compilePass.ts";
 
 /** A stand-in for three's Renderer: records the target, MRT and context depth compileAsync sees. */
 function fakeRenderer(opts: { throws?: boolean } = {}) {
@@ -83,5 +85,106 @@ describe("passCallDepth", () => {
     expect(passCallDepth(r as unknown as PassCompileRenderer, "passRT", () => {})).toBe(null);
     delete (r as { _renderContexts?: unknown })._renderContexts;
     expect(passCallDepth(r as unknown as PassCompileRenderer, "passRT", () => {})).toBe(null);
+  });
+});
+
+describe("saveRenderState (three's real RenderPipeline and PassNode, a stub renderer that fails mid-pass)", () => {
+  /**
+   * The pipeline's quad render runs the scene pass (as three's node update does), and the pass's
+   * scene render throws after pushing three's render stack, the way Renderer._renderScene would.
+   */
+  function setup() {
+    const scene = new THREE.Scene();
+    scene.name = "world";
+    const camera = new THREE.PerspectiveCamera();
+    camera.layers.mask = 0b101;
+    const scenePass = pass(scene, camera);
+    const contextNode = { tag: "renderer context" };
+    const lighting = { _cache: [[]] as unknown[][] };
+    const r = {
+      toneMapping: THREE.ACESFilmicToneMapping as THREE.ToneMapping,
+      outputColorSpace: THREE.SRGBColorSpace as string,
+      xr: { enabled: true, isPresenting: false },
+      autoClear: false, autoClearColor: false, autoClearDepth: false, autoClearStencil: false,
+      transparent: false, opaque: false,
+      lighting: lighting as unknown,
+      contextNode: contextNode as unknown,
+      _callDepth: -1,
+      _currentRenderContext: "outer context" as unknown,
+      _currentRenderObjectFunction: "outer render object fn" as unknown,
+      _handleObjectFunction: "outer handle fn" as unknown,
+      _nodes: { nodeFrame: { renderId: 7 } },
+      target: "canvas target" as unknown,
+      mrt: null as unknown,
+      getRenderTarget() { return this.target; },
+      setRenderTarget(t: unknown) { this.target = t; },
+      getMRT() { return this.mrt; },
+      setMRT(m: unknown) { this.mrt = m; },
+      getActiveCubeFace: () => 0,
+      getActiveMipmapLevel: () => 0,
+      getOutputRenderTarget: () => null,
+      getDrawingBufferSize: (v: THREE.Vector2) => v.set(64, 32),
+      render(what: { isQuadMesh?: boolean }) {
+        this._callDepth++;
+        lighting._cache.push([]);
+        this._currentRenderContext = "nested context";
+        this._currentRenderObjectFunction = "nested fn";
+        this._nodes.nodeFrame.renderId++;
+        if (what.isQuadMesh) scenePass.updateBefore({ renderer: this } as never);
+        else throw new Error("draw failed");
+      },
+    };
+    const pipeline = new THREE.RenderPipeline(r as unknown as THREE.WebGPURenderer, scenePass as never);
+    pipeline.outputColorTransform = false;
+    return { scene, camera, scenePass, r, lighting, contextNode, pipeline };
+  }
+
+  it("without it, a throw leaves the renderer half-switched (the bug)", () => {
+    const { r, pipeline, scenePass } = setup();
+    expect(() => pipeline.render()).toThrow("draw failed");
+    expect(r.toneMapping).toBe(THREE.NoToneMapping);
+    expect(r.xr.enabled).toBe(false);
+    expect(r.target).toBe(scenePass.renderTarget);
+    expect(r.autoClear).toBe(true);
+    expect(r._callDepth).toBe(1);
+  });
+
+  it("puts back the public state, the scene and camera, and three's render stack after a throw", () => {
+    const { scene, camera, r, lighting, contextNode, pipeline } = setup();
+    const state = saveRenderState(r as unknown as GuardedRenderer, scene, camera);
+    try {
+      scene.visible = false;
+      expect(() => pipeline.render()).toThrow("draw failed");
+    } finally {
+      state.restore(true);
+    }
+    expect(r.toneMapping).toBe(THREE.ACESFilmicToneMapping);
+    expect(r.outputColorSpace).toBe(THREE.SRGBColorSpace);
+    expect(r.xr.enabled).toBe(true);
+    expect(r.target).toBe("canvas target");
+    expect(r.mrt).toBe(null);
+    expect([r.autoClear, r.autoClearColor, r.autoClearDepth, r.autoClearStencil, r.transparent, r.opaque]).toEqual([false, false, false, false, false, false]);
+    expect(r.lighting).toBe(lighting);
+    expect(r.contextNode).toBe(contextNode);
+    expect(scene.visible).toBe(true);
+    expect(scene.name).toBe("world");
+    expect(scene.overrideMaterial).toBe(null);
+    expect(camera.layers.mask).toBe(0b101);
+    expect(r._callDepth).toBe(-1);
+    expect(r._currentRenderContext).toBe("outer context");
+    expect(r._currentRenderObjectFunction).toBe("outer render object fn");
+    expect(r._handleObjectFunction).toBe("outer handle fn");
+    expect(r._nodes.nodeFrame.renderId).toBe(7);
+    expect(lighting._cache).toHaveLength(1);
+  });
+
+  it("after a normal render, restore(false) leaves three's own stack alone", () => {
+    const { scene, camera, r } = setup();
+    const state = saveRenderState(r as unknown as GuardedRenderer, scene, camera);
+    r._callDepth = 3; // whatever a successful render left there is three's business
+    r.toneMapping = THREE.NoToneMapping;
+    state.restore(false);
+    expect(r._callDepth).toBe(3);
+    expect(r.toneMapping).toBe(THREE.ACESFilmicToneMapping);
   });
 });

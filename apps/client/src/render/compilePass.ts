@@ -92,3 +92,101 @@ export function compileForPass(renderer: PassCompileRenderer, scene: unknown, ca
     renderer.setMRT(prevMrt);
   }
 }
+
+/** The renderer state a pipeline render changes (public, plus three's render stack). Loosely typed:
+ *  three's private fields aren't in its typings. */
+export interface GuardedRenderer {
+  getRenderTarget(): unknown;
+  setRenderTarget(target: unknown, activeCubeFace?: number, activeMipmapLevel?: number): void;
+  getActiveCubeFace?(): number;
+  getActiveMipmapLevel?(): number;
+  getMRT(): unknown;
+  setMRT(mrt: unknown): void;
+  toneMapping: unknown;
+  outputColorSpace: unknown;
+  xr?: { enabled: boolean };
+  autoClear: boolean;
+  autoClearColor: boolean;
+  autoClearDepth: boolean;
+  autoClearStencil: boolean;
+  transparent: boolean;
+  opaque: boolean;
+  lighting: unknown;
+  contextNode: unknown;
+  _callDepth?: number;
+  _currentRenderContext?: unknown;
+  _currentRenderObjectFunction?: unknown;
+  _handleObjectFunction?: unknown;
+  _nodes?: { nodeFrame?: { renderId: number } };
+}
+
+/**
+ * Save what a RenderPipeline render changes and only puts back when nothing throws (three r186:
+ * RenderPipeline.render and PassNode.updateBefore restore without `finally`; Renderer._renderScene
+ * leaves its call depth, current context and the lighting stack unbalanced). `restore(false)` after a
+ * normal render puts the public state back; `restore(true)` after a throw also rebalances three's
+ * render stack to where it was. The caller should still stop trusting the pipeline (see compileScene).
+ */
+export function saveRenderState(
+  renderer: GuardedRenderer,
+  scene: { visible: boolean; name: string; overrideMaterial: unknown },
+  camera: { layers: { mask: number } },
+): { restore(failed: boolean): void } {
+  const r = renderer;
+  const lightingStack = (r.lighting as { _cache?: unknown[] } | null)?._cache;
+  const saved = {
+    target: r.getRenderTarget(),
+    cubeFace: r.getActiveCubeFace?.() ?? 0,
+    mip: r.getActiveMipmapLevel?.() ?? 0,
+    mrt: r.getMRT(),
+    toneMapping: r.toneMapping,
+    outputColorSpace: r.outputColorSpace,
+    xr: r.xr?.enabled,
+    autoClear: r.autoClear,
+    autoClearColor: r.autoClearColor,
+    autoClearDepth: r.autoClearDepth,
+    autoClearStencil: r.autoClearStencil,
+    transparent: r.transparent,
+    opaque: r.opaque,
+    lighting: r.lighting,
+    contextNode: r.contextNode,
+    visible: scene.visible,
+    name: scene.name,
+    overrideMaterial: scene.overrideMaterial,
+    layers: camera.layers.mask,
+    callDepth: r._callDepth,
+    renderContext: r._currentRenderContext,
+    renderObjectFunction: r._currentRenderObjectFunction,
+    handleObjectFunction: r._handleObjectFunction,
+    renderId: r._nodes?.nodeFrame?.renderId,
+    lightingStack: lightingStack?.length,
+  };
+  return {
+    restore(failed: boolean) {
+      r.setRenderTarget(saved.target, saved.cubeFace, saved.mip);
+      r.setMRT(saved.mrt);
+      r.toneMapping = saved.toneMapping;
+      r.outputColorSpace = saved.outputColorSpace;
+      if (r.xr && saved.xr !== undefined) r.xr.enabled = saved.xr;
+      r.autoClear = saved.autoClear;
+      r.autoClearColor = saved.autoClearColor;
+      r.autoClearDepth = saved.autoClearDepth;
+      r.autoClearStencil = saved.autoClearStencil;
+      r.transparent = saved.transparent;
+      r.opaque = saved.opaque;
+      r.lighting = saved.lighting;
+      r.contextNode = saved.contextNode;
+      scene.visible = saved.visible;
+      scene.name = saved.name;
+      scene.overrideMaterial = saved.overrideMaterial;
+      camera.layers.mask = saved.layers;
+      if (!failed) return;
+      if (saved.callDepth !== undefined) r._callDepth = saved.callDepth;
+      if ("_currentRenderContext" in r) r._currentRenderContext = saved.renderContext;
+      if ("_currentRenderObjectFunction" in r) r._currentRenderObjectFunction = saved.renderObjectFunction;
+      if ("_handleObjectFunction" in r) r._handleObjectFunction = saved.handleObjectFunction;
+      if (saved.renderId !== undefined && r._nodes?.nodeFrame) r._nodes.nodeFrame.renderId = saved.renderId;
+      if (lightingStack && saved.lightingStack !== undefined) lightingStack.length = saved.lightingStack;
+    },
+  };
+}
