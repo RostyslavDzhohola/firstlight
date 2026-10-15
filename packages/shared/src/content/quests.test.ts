@@ -7,7 +7,7 @@ import { padDirs } from "../planet/pads.ts";
 import { createTerrain } from "../planet/terrain.ts";
 import { COSMETIC_BY_ID, COSMETICS, isCosmetic, SHOP, SKIN_BY_ID, TROPHIES, itemName, sellValue, shopEntry, unitSellValue } from "./items.ts";
 import { MEDAL_BY_ID, MEDALS } from "./medals.ts";
-import { GUIDES, MISSION_BY_ID, MISSIONS, missionGoal } from "./missions.ts";
+import { GUIDES, huntCredit, huntTargetIndex, MISSION_BY_ID, MISSIONS, missionGoal, trackedMission } from "./missions.ts";
 import { arcMetres, BOSS_LAIRS, MAIN_PAD, PLACE_BY_ID, PLACES, padName, placeDir } from "./places.ts";
 import { EGGS, PLAQUES } from "./secrets.ts";
 import { NPC_AREAS, PLANET_WILDS } from "./npcs.ts";
@@ -184,5 +184,38 @@ describe("Portus Exchange and cosmetics (content.md §1.5, §8.4)", () => {
     const bySlot = (s: string) => COSMETICS.filter((c) => c.slot === s).length;
     expect([bySlot("hat"), bySlot("cape"), bySlot("mask"), bySlot("backpack")]).toEqual([13, 9, 7, 10]);
     expect(COSMETICS.every((c) => !WEAPON_BY_ID.has(c.id) && isCosmetic(c.id))).toBe(true);
+  });
+});
+
+describe("hunt credit and the tracked mission (D-zones-2)", () => {
+  const A1 = MISSION_BY_ID.get("A1")!;
+  const M1 = MISSION_BY_ID.get("M1")!;
+  it("counts the right kind in the mission's place only", () => {
+    expect(huntTargetIndex(A1, "hopbit", "clover_fields")).toBe(0);
+    expect(huntTargetIndex(A1, "hopbit", null)).toBe(-1);
+    expect(huntTargetIndex(A1, "hopbit", "lacefall")).toBe(-1);
+    expect(huntTargetIndex(A1, "woolback", "clover_fields")).toBe(-1);
+    expect(huntTargetIndex(MISSION_BY_ID.get("H1")!, "cantor", null)).toBe(0); // no place: anywhere
+    expect(huntTargetIndex(MISSION_BY_ID.get("A2")!, "hopbit", "clover_fields")).toBe(-1); // not a hunt
+  });
+
+  it("stops crediting a target once its quota is full, in either completion order (M1)", () => {
+    const at = "checkpoint_seven";
+    // Six Associates first: Associates no longer count, the Compliance Officer still does.
+    expect(huntCredit(M1, [5, 0], "associate", at)).toBe(0);
+    expect(huntCredit(M1, [6, 0], "associate", at)).toBe(-1);
+    expect(huntCredit(M1, [6, 0], "compliance_officer", at)).toBe(1);
+    // The Compliance Officer first: Associates still count, a second Officer doesn't.
+    expect(huntCredit(M1, [0, 1], "compliance_officer", at)).toBe(-1);
+    expect(huntCredit(M1, [0, 1], "associate", at)).toBe(0);
+    expect(huntCredit(M1, undefined, "associate", at)).toBe(0);
+    expect(huntCredit(M1, [0, 0], "associate", null)).toBe(-1);
+  });
+
+  it("tracks the first open mission given out here, else the first open one", () => {
+    const list = [{ id: "A1", done: true }, { id: "H1", done: false }, { id: "A3", done: false }];
+    expect(trackedMission(list, "arcadia")?.id).toBe("A3");
+    expect(trackedMission(list, "meridian")?.id).toBe("H1");
+    expect(trackedMission([{ id: "A1", done: true }], "arcadia")).toBeNull();
   });
 });

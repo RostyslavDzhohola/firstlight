@@ -131,7 +131,7 @@ describe("saving a guest (email OTP)", () => {
     expect(claims.name).toBe("Mira_7");
 
     const me = (await api(server, "/api/account/me", savedToken)).json;
-    expect(me).toMatchObject({ ok: true, userId: savedId, displayName: "Mira_7", guest: false, character: { level: 3, starter: "ember", palette: 2, body: "arcadia" }, medals: ["first-blood"], pads: [{ body: "arcadia", padId: "pad-north" }], playMs: 0 });
+    expect(me).toMatchObject({ ok: true, userId: savedId, displayName: "Mira_7", guest: false, character: { level: 3, starter: 0, palette: 2, body: "arcadia" }, medals: ["first-blood"], pads: [{ body: "arcadia", padId: "pad-north" }], playMs: 0 });
     expect(loadCharacter(db, savedId)?.inventory).toEqual([{ id: "hexquill" }]);
     expect(loadCharacter(db, guestId)).toBeNull();
     expect(getAccount(db, guestId)).toBeNull();
@@ -401,8 +401,8 @@ describe("OTP budget", () => {
     expect((await b.signInWithCode("busy@example.test", code)).error).toBeNull();
   });
 
-  it("enforces the global daily budget", async () => {
-    server = await startAuthServer({ otpDailyBudget: 2 });
+  it("enforces the daily budget for saving (its share of OTP_DAILY_BUDGET)", async () => {
+    server = await startAuthServer({ otpDailyBudget: 5 }); // public 3 (60 %), saving 2
     const b = new Browser(server);
     await b.playToken();
     expect((await b.sendCode("one@example.test")).error).toBeNull();
@@ -838,13 +838,13 @@ describe("production safety", () => {
     ).rejects.toThrow(/BETTER_AUTH_SECRET/);
   });
 
-  it("without a Resend key in production, saving reports busy instead of pretending to send", async () => {
+  it("without a Resend key in production, saving reports unavailable instead of pretending to send", async () => {
     server = await startAuthServer({ production: true, rateLimit: false });
     expect(server.accounts.mailer.kind).toBe("disabled");
     expect(server.accounts.devOutbox).toBeNull();
     const b = new Browser(server);
     await b.playToken();
     const r = await b.sendCode("prod@example.test");
-    expect(r.error?.message).toBe("Saving is busy, try again later");
+    expect(r.error?.message).toBe("Saving is temporarily unavailable");
   });
 });

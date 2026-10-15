@@ -84,17 +84,4 @@ export const PAD_SAFE_RADIUS = 12;
 export const PAD_FLAT_INNER = 10;
 export const PAD_FLAT_OUTER = 26;
 
-/** Index of the pad whose safe ring contains this position, or -1. Portus is safe everywhere. */
-export function safePadAt(body: BodyDef, x: number, y: number, z: number): number {
-  if (body.terrain.kind === "hub") return 0;
-  const l = Math.sqrt(x * x + y * y + z * z);
-  const pads = padDirs(body);
-  for (let i = 0; i < pads.length; i++) {
-    if (chordMetres(pads[i]!, x / l, y / l, z / l, body.radius) <= PAD_SAFE_RADIUS) return i;
-  }
-  return -1;
-}
-
-export function isSafe(body: BodyDef, x: number, y: number, z: number): boolean {
-  return safePadAt(body, x, y, z) >= 0;
-}
+// Which positions are safe (pad rings, the Portus town): planet/zones.ts.

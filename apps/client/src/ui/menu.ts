@@ -1,15 +1,16 @@
 // Esc menu (verdict: Entry B): shown when the mouse is released (pauseFlow.ts decides when: Esc in the
 // menu goes back to the game, with a "Click to look around" hint until the next click). Rows with
 // descriptions, an inline 30 s logout countdown with Cancel, an "outside a safe zone" warning, How to
-// play with keys next to their labels, Settings, and Save your character for guests. Also the
+// play with keys next to their labels, Settings, and Save progress for guests (HANDOFF 5c). Also the
 // full-screen notices (logged out, connection lost, playing elsewhere, banned).
 
 import "./menu.css";
 import { PF } from "@firstlight/shared/net/schema";
 import { STARTERS } from "@firstlight/shared/content/weapons";
 import type { Game } from "../game/Game.ts";
-import { showSavePrompt } from "./account.ts";
-import { getPlayToken, isDevGuest, readClaims } from "../net/auth.ts";
+import { openSaveProgress } from "./account.ts";
+import { saveStatus } from "../net/auth.ts";
+import { offersSave, SAVE_MIN_LEVEL, saveReady } from "./saveOffer.ts";
 import { button, el, icon, isOverlayOpen, keycaps, onOverlayChange, sprite, uiRoot } from "./dom.ts";
 import { installSprites, portraitSprite } from "./sprites.ts";
 import { openSettings } from "./settingsScreen.ts";
@@ -54,7 +55,7 @@ export const pauseExtras = new Set<() => PauseExtra | null>();
 
 const RULES: [sprite: string, title: string, text: string][] = [
   ["heart", "One life", "Die and everything you carry drops in a pile of light. Anyone can loot it."],
-  ["prism", "Pads are safe", "A 12 m ring around every pad: no damage in or out. All of Portus is safe."],
+  ["prism", "Safe zones", "Portus town inside its walls, and a 12 m ring around every pad: no damage in or out. Outside them, creeps and players can hurt you."],
   ["crown", "Bosses need friends", "Bring a friend, watch for the opening, and take them on together."],
 ];
 
@@ -157,6 +158,7 @@ export class Menu {
   /** Draw a pause state: the menu, the click-to-look hint, or neither. */
   private render(s: PauseState) {
     this.hint.classList.toggle("is-on", s === "free");
+    this.game.input.free = s === "free"; // keys keep working in the hint state (Input.inPlay)
     if (s === "menu") {
       if (this.mode !== "pause" && this.mode !== "settings") this.showPause();
     } else if (this.mode === "pause" || this.mode === "settings") this.hideAll();
@@ -224,6 +226,25 @@ export class Menu {
     const resume = item("resume", "Resume", "Esc, or click anywhere in the world", "is-resume");
     resume.b.onclick = () => this.flow.resume();
 
+    // Guests only: saved players, dev guests and offline runs never see it.
+    const saveSlot = el("li", "", items);
+    saveSlot.hidden = true;
+    void saveStatus().then((status) => {
+      if (!offersSave(status) || this.mode !== "pause" || !saveSlot.isConnected) return;
+      sub.textContent += " · Guest";
+      // The server emails a new address only from level 2 (D34); a rebirth keeps it unlocked.
+      const ready = saveReady(Math.max(this.game.hud.you?.level ?? 1, this.game.combat?.saveNudge.best ?? 0));
+      const save = item("save", "Save progress", ready ? "Progress lives in this browser until saved · email code, no password" : `Unlocks at level ${SAVE_MIN_LEVEL}: play a little first. Until then progress lives in this browser.`, "", saveSlot);
+      save.b.dataset.e2e = "menu-save";
+      el("span", "fl-menu__badge", save.right, "Not saved");
+      save.b.disabled = !ready;
+      save.b.onclick = () =>
+        void openSaveProgress({ name: me?.name, level: me?.level, starter: me?.starter, later: "Esc → Save progress" }).then((r) => {
+          if (r === "saved" && this.mode === "pause") this.showPause();
+        });
+      saveSlot.hidden = false;
+    });
+
     const settings = item("sliders", "Settings", "Graphics, controls, audio, comfort");
     icon("chev-r", "", settings.right);
     settings.b.onclick = () => this.showSettings();
@@ -249,25 +270,6 @@ export class Menu {
     this.logoutBar = el("span", "fl-menu__lobar", lo.b);
     el("i", "", this.logoutBar);
     lo.b.onclick = () => this.logoutClick();
-
-    const saveSlot = el("li", "", items);
-    saveSlot.hidden = true;
-    if (!isDevGuest()) {
-      void getPlayToken()
-        .then((t) => {
-          const c = readClaims(t);
-          if (!c?.guest || this.mode !== "pause") return;
-          sub.textContent += " · Guest";
-          // The server only emails a code to a new address after the first level-up (F12: OTP budget).
-          const ready = (this.game.hud.you?.level ?? 1) >= 2;
-          const save = item("save", "Save your character", ready ? `Keep ${c.name || "this character"} on any browser with an email code` : "Unlocks at level 2: play a little first", "", saveSlot);
-          el("span", "fl-menu__badge", save.right, "Guest");
-          save.b.disabled = !ready;
-          save.b.onclick = () => void showSavePrompt({ name: c.name, requested: true });
-          saveSlot.hidden = false;
-        })
-        .catch(() => {});
-    }
 
     for (const extra of pauseExtras) {
       const x = extra();
@@ -333,7 +335,7 @@ export class Menu {
       icon(safe ? "shield" : "alert", "", this.zone);
       const s = el("span", "", this.zone);
       el("b", "", s, safe ? "In a safe zone" : "Outside a safe zone");
-      s.append(safe ? " · no damage in or out" : " · anyone can hit you");
+      s.append(safe ? " · no damage in or out" : " · creeps and players can hurt you");
       this.lede.textContent = safe
         ? `You're standing in ${body}, inside a safe zone. Nobody can hurt you here.`
         : `You're still standing in ${body}. Anyone nearby can see you, and hit you.`;
@@ -360,7 +362,7 @@ export class Menu {
       this.logoutTitle!.textContent = "Log out";
       this.logoutSub!.textContent = denied
         ? "Not right now: you were in a fight in the last 10 s."
-        : safe ? "Instant here: you're in a safe zone." : "Takes 30 s out here, standing still. Instant on a pad.";
+        : safe ? "Instant here: you're in a safe zone." : "Takes 30 s out here, standing still. Instant in Portus town or on a pad.";
       const t = el("span", "fl-menu__timer", this.logoutRight);
       icon("clock", "", t);
       t.append(safe ? "now" : "30 s");

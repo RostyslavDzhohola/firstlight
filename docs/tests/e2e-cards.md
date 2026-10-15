@@ -41,7 +41,7 @@ Fresh browser profile (cold cache), production.
    `T1-1-loading.png` while the loading screen shows ("Loading the game…", "Connecting…", "Building
    the world…", "Warming up shaders…").
 2. In-world means the loading screen is hidden (`#loading` has `hidden`) and the HUD shows: player card
-   (name, Lv 1, "Safe" chip, HP 100/100, "XP 0 / 50"), the hotbar and the "Safe zone · No damage in or
+   (name, Lv 1, "Safe" zone label, HP 100/100, "XP 0 / 50"), the hotbar and the "Safe zone · No damage in or
    out" banner. Read the time with `performance.now()` at that moment (time since navigation start).
    Screenshot `T1-2-in-world.png`.
 3. Also run it once by hand without `?autoplay`: landing ("Firstlight", **PLAY**) → **Choose your
@@ -54,8 +54,9 @@ Fresh browser profile (cold cache), production.
 
 Two profiles, A and B, both pick **Unit 7** (starter weapon: Pocket Carbine, 9 damage per shot).
 
-1. In Portus, left-click: toast "Weapons are holstered in safe zones" (all of Portus and 12 m around
-   every pad are safe).
+1. In Portus town, left-click: toast "Weapons are holstered in town: head out of the gates to fight"
+   (the town inside its walls and 12 m around every pad are safe; D-zones-1). Outside the east or west
+   gate the zone label reads Danger and Woolbacks and Hopbits are in view.
 2. Walk into the **ARCADIA** portal ring on the plaza. You arrive at Arcadia's first pad.
 3. **PvE:** walk more than 12 m out ("Leaving safe zone · Anyone can hurt you") into Clover Fields and
    shoot a Hopbit (22 HP at level 1, so 3 hits). Expect hit markers and "9" damage numbers, the Hopbit
@@ -107,13 +108,17 @@ voice widget says the relay is unavailable. Locally, without TURN, connections a
 
 Profiles A and B, no `?devguest`.
 
-1. A: Play, pick **Kappa** + **Moss**, name it (e.g. "Carol"), get in-world.
-2. A: Esc → **Save your character** ("Guest" badge) → **Email** → **Send code**.
+1. A: Play, pick **Kappa** + **Moss**, name it (e.g. "Carol"), get in-world. No save card pops up.
+   Reach level 2 (the tutorial pays it): a **"Progress not saved · Esc → Save progress"** toast shows
+   once (`[data-e2e="save-toast"]`).
+2. A: Esc → **Save progress** ("Not saved" badge, `[data-e2e="menu-save"]`; disabled below level 2)
+   → **Email** → **Send code**. If it says **"Saving is temporarily unavailable"**
+   (`[data-e2e="save-unavailable"]`), the server can't send mail (production: Resend's domain).
 3. Read the code (local: server stdout `[dev-mail]`; production: the disposable test inbox, D6, never
-   the owner's).
-4. Enter the code → **Save**. Expect **"Saved."** and **Back to the game**; the client rejoins by
-   itself (close code 4101). Screenshot `T5-4-saved.png`.
-5. B: landing → **Sign in with email** → Send code → code → **Sign in** → "Signed in." →
+   the owner's). Pasting the whole email sentence works.
+4. Enter the code → **Save**. Expect **"Saved."** and **Done**; the client rejoins by itself (close
+   code 4101), and the Esc menu no longer shows Save progress. Screenshot `T5-4-saved.png`.
+5. B: landing → **Sign in** (`[data-e2e="signin"]`) → Send code → code → **Sign in** → "Signed in." →
    **Continue**. Play starts without a starter pick: the same Carol, Kappa, Moss, level and items.
    Screenshot `T5-5-same-character.png`.
 6. A now shows **PLAYING ELSEWHERE** with **Play here instead** (close code 4100). Screenshot

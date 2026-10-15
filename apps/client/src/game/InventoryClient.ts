@@ -14,7 +14,7 @@ export class InventoryClient implements ClientSystem {
     if (e.code !== "KeyI" || e.repeat) return;
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
     const g = this.game;
-    if (Panel.current || !g.input.locked || g.photo?.active || g.combat.deadUntilRespawn || !g.net.room) return;
+    if (Panel.current || !g.input.inPlay || g.photo?.active || g.combat.deadUntilRespawn || !g.net.room) return;
     e.preventDefault();
     this.panel.open();
   };

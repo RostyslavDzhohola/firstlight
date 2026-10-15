@@ -3,7 +3,7 @@ import { BODIES, isSafe, padDirs } from "../index.ts";
 import { createTerrain } from "../planet/terrain.ts";
 import { bossArena } from "./arenas.ts";
 import {
-  AI_CAPS, BOSS_DEFS, HEAVY_RECOVERY_FLOOR, HEAVY_SHARE, LETHAL_SHARE, NPC_AREAS, NPC_DEFS, NPC_INDEX, PLANET_WILDS, TELEGRAPH_FLOORS,
+  AI_CAPS, ARRIVAL_GROUPS, BOSS_DEFS, HEAVY_RECOVERY_FLOOR, HEAVY_SHARE, LETHAL_SHARE, NPC_AREAS, NPC_DEFS, NPC_INDEX, PLANET_WILDS, PORTUS_WILDS, TELEGRAPH_FLOORS,
   aiHitCap, attackDamage, bossMaxHp, hitShare, npcCoins, npcDef, npcMaxHp, splitDamage, splitTotal, weaponTierFor,
 } from "./npcs.ts";
 import { maxHp } from "./progression.ts";
@@ -107,6 +107,7 @@ describe("npc roster", () => {
       for (const s of area.singles ?? []) expect(NPC_INDEX.has(s.kind)).toBe(true);
     }
     for (const w of Object.values(PLANET_WILDS)) for (const g of w.groups) for (const m of g.members) expect(NPC_INDEX.has(m.kind)).toBe(true);
+    for (const g of [...PORTUS_WILDS, ...Object.values(ARRIVAL_GROUPS).flat()]) for (const m of g.members) expect(NPC_INDEX.has(m.kind), `${g.id}:${m.kind}`).toBe(true);
     for (const b of BOSS_DEFS) expect(npcDef(b.id).family).toBe("boss");
     for (const d of NPC_DEFS) for (const r of d.drops) if (r.kind === "item" && r.id.startsWith("tonic")) expect(WEAPON_BY_ID.has(r.id)).toBe(true);
   });

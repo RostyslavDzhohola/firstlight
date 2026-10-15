@@ -1,4 +1,5 @@
 import { cosmeticWarmupHook } from "../render/Cosmetics.ts";
+import { listenHuntTargets } from "./huntTargets.ts";
 // Game orchestration: renderer, current body, local player, network, remote avatars, combat,
 // portals, piles, HUD and the main loop.
 
@@ -105,6 +106,8 @@ export class Game {
     console.info(`[gfx] backend ${this.ctx.webgpu ? "WebGPU" : "WebGL2"}, tier ${this.ctx.tier}${this.ctx.settings.auto ? " (auto)" : ""}, gpu "${this.ctx.gpuName}"`);
     setLoadingBadge(`${this.ctx.webgpu ? "WebGPU" : "WebGL2"} · ${this.ctx.tier}${this.ctx.settings.auto ? " (auto)" : ""}`);
     this.input = new Input(this.ctx.renderer.domElement);
+    // Behind a loading screen (first arrival, travel, rejoin, re-warm) panel and world keys wait.
+    this.input.suspendedWhile = () => !this.running || this.travelling;
     this.photo = new PhotoMode({
       ctx: this.ctx,
       input: this.input,
@@ -194,6 +197,9 @@ export class Game {
   /** First arrival done: start the loop and give the player control. */
   private handOver() {
     this.running = true;
+    // The loop starts only now: presses made during the first load are dropped, not played on the
+    // first frame (a C pressed on the loading screen rolled at once; Codex review). Held keys stay.
+    this.input.endFrame();
     if (!this.bench) this.input.lock();
     this.ctx.renderer.setAnimationLoop(() => this.frame());
   }
@@ -423,6 +429,7 @@ export class Game {
       this.net.onLeaveRoom = w.onClose; // until the hand-over below
       localStorage.setItem("fl.body", body);
       this.combat.attach();
+      listenHuntTargets(room); // before anything else can arrive unheard (huntTargets.ts)
       const me = await waitFor(() => (room.state as any).players?.get(room.sessionId), { stage: "waiting for our player", timeoutMs: 15_000, watch: w });
       this.player.teleport(me.x, me.y, me.z);
       this.net.onCorrect = (x, y, z) => this.player.correct(x, y, z);
@@ -576,7 +583,12 @@ export class Game {
     const rawMs = now - this.last;
     const dt = Math.min(0.05, rawMs / 1000);
     this.last = now;
-    if (!this.running || this.travelling) return this.env.silence();
+    if (!this.running || this.travelling) {
+      // Presses made behind a loading screen are dropped, not kept for the first frame back (a C
+      // pressed while travelling rolled the moment the world appeared).
+      this.input.endFrame();
+      return this.env.silence();
+    }
     const cpu0 = performance.now();
 
     let focus: THREE.Vector3;

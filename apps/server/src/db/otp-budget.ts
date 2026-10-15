@@ -1,8 +1,10 @@
 // Our own OTP send budget (SPEC §5.4.4, D11, D20): ≤ 3 codes per email per hour, a cap per asking
 // account per day (F12 final review S7), a share of the day and a cap per client IP for public sends
 // (no account asking; F12 confirmation Opus SF2) and a global daily cap (OTP_DAILY_BUDGET); days
-// reset at 00:00 UTC like Resend's. Persisted in game.db so restarts don't reset it. Emails and IPs
-// are stored only as keyed hashes.
+// reset at 00:00 UTC like Resend's. With a public share, the day splits into two independent pools:
+// public sends count only against theirs and saving sends only against the rest, so a saver's answer
+// never shows whether a public probe reached a saved address (Codex review, D-save-2). Persisted in
+// game.db so restarts don't reset it. Emails and IPs are stored only as keyed hashes.
 
 import { stmt, tx, type Db } from "./game-db.ts";
 
@@ -14,13 +16,16 @@ export interface OtpLimits {
   perDay: number;
   /** Sends one account may ask for per UTC day (F12 final review S7); no cap when unset. */
   perAccountPerDay?: number;
-  /** Public sends per UTC day in all, so they can't use up what saving needs; no cap when unset. */
+  /**
+   * Public sends per UTC day; saving sends then get `perDay − publicPerDay`, and neither pool sees the
+   * other. Unset: one shared pool of `perDay`.
+   */
   publicPerDay?: number;
   /** Public sends per client IP (its ban key) per UTC day; no cap when unset. */
   publicPerIpPerDay?: number;
 }
 
-export type OtpReservation = { ok: true; id: number } | { ok: false; reason: "email" | "global" | "account" | "public" | "ip" };
+export type OtpReservation = { ok: true; id: number } | { ok: false; reason: "email" | "global" | "account" | "public" | "saving" | "ip" };
 
 /**
  * A public send's row key (no migration): `pub:<ip hash>|<email hash>`, so one table counts the
@@ -63,8 +68,13 @@ export function reserveOtpSend(db: Db, emailHash: string, limits: OtpLimits, now
       const publicToday = (stmt(db, "SELECT COUNT(*) AS n FROM otp_send WHERE substr(email_hash, 1, 4) = ? AND sent_at >= ?").get(PUBLIC, day * DAY) as { n: number }).n;
       if (publicToday >= limits.publicPerDay) return { ok: false as const, reason: "public" as const };
     }
-    const today = (stmt(db, "SELECT COUNT(*) AS n FROM otp_send WHERE sent_at >= ?").get(day * DAY) as { n: number }).n;
-    if (today >= limits.perDay) return { ok: false as const, reason: "global" as const };
+    if (userId && limits.publicPerDay !== undefined) {
+      const savingToday = (stmt(db, "SELECT COUNT(*) AS n FROM otp_send WHERE substr(email_hash, 1, 4) <> ? AND sent_at >= ?").get(PUBLIC, day * DAY) as { n: number }).n;
+      if (savingToday >= limits.perDay - limits.publicPerDay) return { ok: false as const, reason: "saving" as const };
+    } else if (limits.publicPerDay === undefined) {
+      const today = (stmt(db, "SELECT COUNT(*) AS n FROM otp_send WHERE sent_at >= ?").get(day * DAY) as { n: number }).n;
+      if (today >= limits.perDay) return { ok: false as const, reason: "global" as const };
+    }
     const r = stmt(db, "INSERT INTO otp_send (email_hash, sent_at) VALUES (?, ?)").run(userId ? emailHash : publicKey(emailHash, ip), now);
     stmt(db, "DELETE FROM otp_send WHERE sent_at < ?").run(now - 2 * DAY);
     if (userId) {

@@ -110,7 +110,7 @@ export class QuestClient implements ClientSystem {
       return;
     }
     if (this.console.isOpen || Panel.current) return; // panels close themselves (Esc / their key)
-    if (!this.game.input.locked || this.game.photo?.active) return;
+    if (!this.game.input.inPlay || this.game.photo?.active) return;
     if (e.code === "KeyM") this.map.open();
     else if (e.code === "KeyJ") this.journal.show();
   }
@@ -162,7 +162,7 @@ export class QuestClient implements ClientSystem {
     const you = g.hud.you;
     const active = new Set((you?.missions ?? []).filter((m) => !m.done).map((m) => m.id));
     this.world.update(dt, { activeMissions: active, cosmeticsExtras: !!you?.cosmeticsExtras });
-    this.tracker.update(you);
+    this.tracker.update(you, this.game.bodyId);
     if (you !== this.lastYou) {
       this.lastYou = you;
       if (Panel.current && Panel.current !== this.map && Panel.current !== this.keypad) Panel.current.refresh();
@@ -173,7 +173,7 @@ export class QuestClient implements ClientSystem {
       const o = this.nearestObject(active);
       if (o) {
         g.hud.setPrompt(this.promptFor(o));
-        if (g.input.locked && g.input.pressed.has("KeyE")) this.use(o);
+        if (g.input.inPlay && g.input.pressed.has("KeyE")) this.use(o);
       }
     }
 

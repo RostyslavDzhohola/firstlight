@@ -1,0 +1,11 @@
+/* The tracked hunt mission's world callout (game/MissionPointer.ts): the kit's callout in the hunt
+   colour, pinned to the screen edge with an arrow when its point is off screen (like the tutorial's). */
+.fl-mpoint { position: absolute; inset: 0; pointer-events: none; }
+.fl-mpoint .fl-callout[hidden] { display: none; }
+.fl-mpoint .fl-callout__dot { background: var(--danger); }
+.fl-mpoint .fl-callout__line { background: linear-gradient(0deg, var(--danger), transparent); }
+.fl-mpoint .fl-callout.is-edge .fl-callout__line, .fl-mpoint .fl-callout.is-edge .fl-callout__dot { display: none; }
+.fl-mpoint .fl-callout.is-edge .fl-callout__arrow { display: block; position: absolute; left: -9px; top: -9px; width: 18px; height: 18px; background: var(--danger); clip-path: polygon(0 15%, 100% 50%, 0 85%, 25% 50%); transform: rotate(var(--a, 0rad)); }
+.fl-mpoint .fl-callout.is-edge .fl-callout__box { left: 16px; top: -24px; }
+.fl-mpoint .fl-callout.is-edge.is-flip .fl-callout__box { left: auto; right: 16px; }
+.fl-mpoint .fl-callout.is-flip:not(.is-edge) .fl-callout__box { left: auto; right: 10px; }
