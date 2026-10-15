@@ -15,6 +15,7 @@ import { HORSE } from "@firstlight/shared/content/horse";
 import { ANIM } from "@firstlight/shared/net/schema";
 import { isSafe, type Breakable } from "@firstlight/shared";
 import { emptyContact, PLAYER_BODY } from "@firstlight/shared/planet/collide";
+import { structureCollider } from "@firstlight/shared/planet/sites";
 import { SWIM_DEPTH } from "@firstlight/shared/planet/water";
 import type { BodyId } from "@firstlight/shared";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
@@ -64,9 +65,13 @@ async function joinOutside(name: string, at?: V3): Promise<{ r: Room; dir: V3; t
   const r = await joinAs(game, name, "arcadia", {}, "admin");
   rooms.push(r);
   await waitFor(() => !!me(r));
-  const pad = padDirs(BODY)[0]!;
-  const t0 = tangent(pad as V3);
-  const dir = at ?? walk(pad as V3, t0, 40);
+  const pad = padDirs(BODY)[0]! as V3;
+  // 40 m east-north-east of the main pad: open, gently sloping ground (40 m due north is the Dawnpad
+  // outpost's barn since D42, and the server puts teleports down clear of buildings).
+  const n0 = tangent(pad), e0 = norm([n0[1] * pad[2] - n0[2] * pad[1], n0[2] * pad[0] - n0[0] * pad[2], n0[0] * pad[1] - n0[1] * pad[0]]);
+  const a = (75 * Math.PI) / 180;
+  const t0 = norm([n0[0] * Math.cos(a) + e0[0] * Math.sin(a), n0[1] * Math.cos(a) + e0[1] * Math.sin(a), n0[2] * Math.cos(a) + e0[2] * Math.sin(a)]);
+  const dir = at ?? walk(pad, t0, 40);
   const h = Math.max(groundR(dir), R + BODY.waterLevel - 1.03); // swimmers float
   const p = [dir[0] * h, dir[1] * h, dir[2] * h];
   r.send("admin", { cmd: "teleport", args: { x: p[0], y: p[1], z: p[2] } });
@@ -692,6 +697,8 @@ describe("sprinting over real terrain like the client (F12 Codex re-review S1)",
         if (g < def.waterLevel + 0.5) ok = false;
         const p: V3 = [d[0] * gR(d), d[1] * gR(d), d[2] * gR(d)];
         if (sys.list.some((b) => Math.hypot(b.px - p[0], b.py - p[1], b.pz - p[2]) < b.foot + 1.5)) ok = false;
+        // ... and clear of the pad outpost's buildings (D42).
+        if (!structureCollider(tr).isClear({ x: p[0], y: p[1], z: p[2] }, { radius: 1.5, height: 1.8, step: 0.35 })) ok = false;
         climb += Math.max(0, gR(d) - prev);
         prev = gR(d);
       }

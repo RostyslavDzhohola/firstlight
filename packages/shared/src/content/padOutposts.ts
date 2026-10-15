@@ -23,8 +23,8 @@ export interface OutpostSite {
   prefabs: readonly TownPrefab[];
   /** Pad 0's outpost (its pad platform and portal gate included). */
   layout: readonly OutpostItem[];
-  /** Paved paths: centre lines with widths (render-only: grass and prop masks). */
-  paths: readonly { width: number; pts: readonly (readonly [number, number])[] }[];
+  /** Paved paths: centre lines with widths and their material slot (render-only: decals, grass and prop masks). */
+  paths: readonly { width: number; mat: string; pts: readonly (readonly [number, number])[] }[];
   /** The landing platform drawn on every other pad (visual only: no solids) and the waystone beside it. */
   pad: number;
   waystone: number;
@@ -36,29 +36,29 @@ export const WAYSTONE_AT = [0, -9.6, 180] as const;
 export const OUTPOSTS: Readonly<Record<OutpostBody, OutpostSite>> = {
   arcadia: {
     body: "arcadia",
-    version: "2058778d8e5e7336",
+    version: "a075f862034a7f81",
     prefabs: [
       { name: "a_pad", cls: "static", tris: [976, 0], height: 0.02, radius: 10.35, solids: [] },
-      { name: "a_gate", cls: "static", tris: [758, 0], height: 8.43, radius: 4.77, solids: [[0, -3.75, 0, 0.55, 0.55, 0, 5.75, 0], [0, 3.75, 0, 0.55, 0.55, 0, 5.75, 0]] },
-      { name: "a_windmill", cls: "static", tris: [914, 0], height: 16.28, radius: 6.37, solids: [[1, 0, 0, 3.15, 3.15, 0, 9.7, 0], [0, 0, -3.475, 1.65, 0.975, 0, 2.9, 0]] },
-      { name: "a_hut", cls: "building", tris: [3731, 2879], height: 6.85, radius: 3.76, solids: [[0, 0, 0.175, 2.417, 2.375, 0, 6.85, 0]] },
-      { name: "a_oak", cls: "tree", tris: [1643, 4], height: 9.18, radius: 2.35, solids: [[1, 0, 0, 0.45, 0.45, 0, 4, 0]] },
-      { name: "a_barn", cls: "building", tris: [4727, 2187], height: 10, radius: 7.67, solids: [[0, 0, 0.025, 4.2, 5.225, 0, 4.1, 0], [0, 0, 0, 2.6, 5, 4, 7.6, 0]] },
-      { name: "a_hay", cls: "prop", tris: [49, 0], height: 3.1, radius: 1.35, solids: [[1, 0, 0, 1.3, 1.3, 0, 2.7, 0]] },
-      { name: "a_cottage", cls: "building", tris: [6250, 4967], height: 9.96, radius: 4.57, solids: [[0, 0, 0.108, 3.417, 2.308, 0, 9.97, 0]] },
-      { name: "a_woodpile", cls: "prop", tris: [280, 0], height: 2.1, radius: 1.67, solids: [[0, 0, 0.05, 1.3, 0.65, 0, 2.1, 0]] },
-      { name: "a_well", cls: "prop", tris: [262, 0], height: 3.38, radius: 1.88, solids: [[1, 0, 0, 1.1, 1.1, 0, 3.05, 0]] },
-      { name: "a_bench", cls: "prop", tris: [48, 0], height: 0.95, radius: 0.93, solids: [[0, 0, 0, 0.9, 0.24, 0, 0.5, 0]] },
+      { name: "a_gate", cls: "static", tris: [758, 0], height: 8.43, radius: 4.77, solids: [[0, -3.75, 0, 0.55, 0.55, -1.5, 5.75, 0], [0, 3.75, 0, 0.55, 0.55, -1.5, 5.75, 0]] },
+      { name: "a_windmill", cls: "static", tris: [914, 0], height: 16.28, radius: 6.37, solids: [[1, 0, 0, 3.15, 3.15, -1.5, 9.7, 0], [0, 0, -3.475, 1.65, 0.975, -1.5, 2.9, 0]] },
+      { name: "a_hut", cls: "building", tris: [3731, 2879], height: 6.85, radius: 3.76, solids: [[0, 0, 0.175, 2.417, 2.375, -1.5, 6.85, 0]] },
+      { name: "a_oak", cls: "tree", tris: [1643, 4], height: 9.18, radius: 2.35, solids: [[1, 0, 0, 0.45, 0.45, -1.5, 4, 0]] },
+      { name: "a_barn", cls: "building", tris: [4727, 2187], height: 10, radius: 7.67, solids: [[0, 0, 0.025, 4.2, 5.225, -1.5, 4.1, 0], [0, 0, 0, 2.6, 5, 4, 7.6, 0]] },
+      { name: "a_hay", cls: "prop", tris: [49, 0], height: 3.1, radius: 1.35, solids: [[1, 0, 0, 1.3, 1.3, -1.5, 2.7, 0]] },
+      { name: "a_cottage", cls: "building", tris: [6250, 4967], height: 9.96, radius: 4.57, solids: [[0, 0, 0.108, 3.417, 2.308, -1.5, 9.97, 0]] },
+      { name: "a_woodpile", cls: "prop", tris: [280, 0], height: 2.1, radius: 1.67, solids: [[0, 0, 0.05, 1.3, 0.65, -1.5, 2.1, 0]] },
+      { name: "a_well", cls: "prop", tris: [262, 0], height: 3.38, radius: 1.88, solids: [[1, 0, 0, 1.1, 1.1, -1.5, 3.05, 0]] },
+      { name: "a_bench", cls: "prop", tris: [48, 0], height: 0.95, radius: 0.93, solids: [[0, 0, 0, 0.9, 0.24, -1.5, 0.5, 0]] },
       { name: "a_jetty", cls: "static", tris: [252, 0], height: 2.4, radius: 7.06, solids: [[0, 0, -3.5, 1.05, 3.5, -2.4, 0.3, 0]] },
       { name: "a_rowboat", cls: "prop", tris: [52, 0], height: 0.8, radius: 2.61, solids: [] },
-      { name: "a_shrine", cls: "prop", tris: [312, 0], height: 4.41, radius: 2.26, solids: [[0, 0, 0, 1.6, 1.6, 0, 0.42, 0], [1, 0, 0, 0.52, 0.52, 0, 2.72, 0]] },
-      { name: "a_fold", cls: "static", tris: [123, 0], height: 1.9, radius: 5.5, solids: [[0, 0, 0, 1.2, 0.45, 0, 0.85, 0], [0, 0, -3, 4.35, 0.35, 0, 1.12, 0], [0, -4, -0.575, 0.35, 2.775, 0, 1.12, 0], [0, 4, -0.575, 0.35, 2.775, 0, 1.12, 0]] },
+      { name: "a_shrine", cls: "prop", tris: [312, 0], height: 4.41, radius: 2.26, solids: [[0, 0, 0, 1.6, 1.6, -1.5, 0.42, 0], [1, 0, 0, 0.52, 0.52, -1.5, 2.72, 0]] },
+      { name: "a_fold", cls: "static", tris: [123, 0], height: 1.9, radius: 5.5, solids: [[0, 0, 0, 1.2, 0.45, -1.5, 0.85, 0], [0, 0, -3, 4.35, 0.35, -1.5, 1.12, 0], [0, -4, -0.575, 0.35, 2.775, -1.5, 1.12, 0], [0, 4, -0.575, 0.35, 2.775, -1.5, 1.12, 0]] },
       { name: "a_garden", cls: "prop", tris: [172, 0], height: 0.33, radius: 3.34, solids: [] },
-      { name: "a_hives", cls: "prop", tris: [108, 0], height: 1.05, radius: 1.33, solids: [[0, 0, 0, 1.35, 0.32, 0, 1.05, 0]] },
-      { name: "a_banner", cls: "prop", tris: [99, 0], height: 6.49, radius: 0.61, solids: [[1, 0, 0, 0.25, 0.25, 0, 6, 0]] },
-      { name: "a_signpost", cls: "prop", tris: [48, 0], height: 2.7, radius: 1.15, solids: [[1, 0, 0, 0.2, 0.2, 0, 2.7, 0]] },
-      { name: "a_lamp", cls: "prop", tris: [132, 0], height: 3.3, radius: 0.83, solids: [[1, 0, 0, 0.22, 0.22, 0, 3.3, 0]] },
-      { name: "a_waystone", cls: "prop", tris: [82, 0], height: 2, radius: 0.54, solids: [[1, 0, 0, 0.45, 0.45, 0, 2, 0]] },
+      { name: "a_hives", cls: "prop", tris: [108, 0], height: 1.05, radius: 1.33, solids: [[0, 0, 0, 1.35, 0.32, -1.5, 1.05, 0]] },
+      { name: "a_banner", cls: "prop", tris: [99, 0], height: 6.49, radius: 0.61, solids: [[1, 0, 0, 0.25, 0.25, -1.5, 6, 0]] },
+      { name: "a_signpost", cls: "prop", tris: [48, 0], height: 2.7, radius: 1.15, solids: [[1, 0, 0, 0.2, 0.2, -1.5, 2.7, 0]] },
+      { name: "a_lamp", cls: "prop", tris: [132, 0], height: 3.3, radius: 0.83, solids: [[1, 0, 0, 0.22, 0.22, -1.5, 3.3, 0]] },
+      { name: "a_waystone", cls: "prop", tris: [82, 0], height: 2, radius: 0.54, solids: [[1, 0, 0, 0.45, 0.45, -1.5, 2, 0]] },
     ],
     layout: [
       [0, 0, 0, 0, 1, 1.5], // a_pad
@@ -94,37 +94,37 @@ export const OUTPOSTS: Readonly<Record<OutpostBody, OutpostSite>> = {
       [19, 10, -11, 42.27, 1, 1.338], // lamp
     ],
     paths: [
-      { width: 2.2, pts: [[-4.5, 9.4], [-3.6, 16], [-2.2, 22], [-1.6, 29], [0.6, 35], [2.6, 38]] }, // north causeway
-      { width: 1.8, pts: [[0.6, 35], [8, 35], [16.2, 34.6]] }, // windmill
-      { width: 2, pts: [[-7.8, 5.5], [-11.2, 9.6], [-14.2, 13.9]] }, // jetty
-      { width: 1.8, pts: [[-9.6, 2.2], [-13.4, 4.4]] }, // hut
-      { width: 2, pts: [[8.8, 4.3], [13.6, 7.6]] }, // cottage
-      { width: 2, pts: [[-2.2, -9.9], [-3, -16.4]] }, // shrine
-      { width: 1.8, pts: [[5.2, -8.6], [8.2, -12.2]] }, // fold
+      { width: 2.2, mat: "MI_RockTrim", pts: [[-4.5, 9.4], [-3.6, 16], [-2.2, 22], [-1.6, 29], [0.6, 35], [2.6, 38]] }, // north causeway
+      { width: 1.8, mat: "MI_RockTrim", pts: [[0.6, 35], [8, 35], [16.2, 34.6]] }, // windmill
+      { width: 2, mat: "MI_RockTrim", pts: [[-7.8, 5.5], [-11.2, 9.6], [-14.2, 13.9]] }, // jetty
+      { width: 1.8, mat: "MI_RockTrim", pts: [[-9.6, 2.2], [-13.4, 4.4]] }, // hut
+      { width: 2, mat: "MI_RockTrim", pts: [[8.8, 4.3], [13.6, 7.6]] }, // cottage
+      { width: 2, mat: "MI_RockTrim", pts: [[-2.2, -9.9], [-3, -16.4]] }, // shrine
+      { width: 1.8, mat: "MI_RockTrim", pts: [[5.2, -8.6], [8.2, -12.2]] }, // fold
     ],
     pad: 0,
     waystone: 20,
   },
   hollowmere: {
     body: "hollowmere",
-    version: "37dea9e571788d94",
+    version: "6fec809202027bb3",
     prefabs: [
       { name: "h_pad", cls: "static", tris: [1168, 0], height: 0.02, radius: 10.35, solids: [] },
-      { name: "h_gate", cls: "static", tris: [884, 0], height: 8.53, radius: 4.56, solids: [[1, -3.6, 0, 0.45, 0.45, 0, 5.6, 0], [1, 3.6, 0, 0.45, 0.45, 0, 5.6, 0]] },
-      { name: "h_chapel", cls: "building", tris: [1290, 0], height: 19.5, radius: 10.18, solids: [[0, 0, 0, 6.3, 4.3, 0, 5.2, 0], [0, 0, 0, 6, 3.5, 5.2, 7.8, 0], [0, -7.8, 0, 2.1, 2.1, 0, 12.35, 0], [0, 1, 4.45, 1.4, 0.95, 0, 2.6, 0]] },
-      { name: "h_house", cls: "building", tris: [3719, 0], height: 10.14, radius: 4.16, solids: [[0, 0, 0.108, 2.417, 3.308, 0, 9.24, 0]] },
-      { name: "h_bell", cls: "static", tris: [176, 0], height: 3.85, radius: 2.06, solids: [[0, -1.5, 0, 0.3, 1, 0, 3.85, 0], [0, 1.5, 0, 0.3, 1, 0, 3.85, 0]] },
-      { name: "h_shrine", cls: "prop", tris: [191, 0], height: 2.87, radius: 1.15, solids: [[0, 0, 0, 0.9, 0.55, 0, 2.5, 0]] },
+      { name: "h_gate", cls: "static", tris: [884, 0], height: 8.53, radius: 4.56, solids: [[1, -3.6, 0, 0.45, 0.45, -1.5, 5.6, 0], [1, 3.6, 0, 0.45, 0.45, -1.5, 5.6, 0]] },
+      { name: "h_chapel", cls: "building", tris: [1290, 0], height: 19.5, radius: 10.18, solids: [[0, 0, 0, 6.3, 4.3, -1.5, 5.2, 0], [0, 0, 0, 6, 3.5, 5.2, 7.8, 0], [0, -7.8, 0, 2.1, 2.1, -1.5, 12.35, 0], [0, 1, 4.45, 1.4, 0.95, -1.5, 2.6, 0]] },
+      { name: "h_house", cls: "building", tris: [3719, 0], height: 10.14, radius: 4.16, solids: [[0, 0, 0.108, 2.417, 3.308, -1.5, 9.24, 0]] },
+      { name: "h_bell", cls: "static", tris: [176, 0], height: 3.85, radius: 2.06, solids: [[0, -1.5, 0, 0.3, 1, -1.5, 3.85, 0], [0, 1.5, 0, 0.3, 1, -1.5, 3.85, 0]] },
+      { name: "h_shrine", cls: "prop", tris: [191, 0], height: 2.87, radius: 1.15, solids: [[0, 0, 0, 0.9, 0.55, -1.5, 2.5, 0]] },
       { name: "h_boardwalk", cls: "static", tris: [252, 0], height: 2.92, radius: 7.57, solids: [[0, 0, -3.75, 1.1, 3.75, -2.4, 0.3, 0]] },
       { name: "h_skiff", cls: "prop", tris: [136, 0], height: 2.02, radius: 2.9, solids: [] },
-      { name: "h_shed", cls: "static", tris: [84, 0], height: 2.75, radius: 2.34, solids: [[0, 0, 0, 1.6, 1.1, 0, 2.6, 0]] },
-      { name: "h_cottage", cls: "building", tris: [1523, 0], height: 6.62, radius: 3.32, solids: [[0, 0, 0.127, 2.417, 2.327, 0, 5.72, 0]] },
-      { name: "h_wall", cls: "static", tris: [20, 0], height: 1.07, radius: 2.07, solids: [[0, 0, 0, 2.05, 0.31, 0, 1.07, 0]] },
-      { name: "h_stone_a", cls: "prop", tris: [38, 0], height: 1.07, radius: 0.33, solids: [[0, 0, 0, 0.34, 0.1, 0, 1.07, 0]] },
-      { name: "h_stone_b", cls: "prop", tris: [34, 0], height: 1.25, radius: 0.43, solids: [[0, 0, 0, 0.42, 0.3, 0, 1.25, 0]] },
-      { name: "h_stone_c", cls: "prop", tris: [24, 0], height: 2.55, radius: 0.64, solids: [[0, 0, 0, 0.45, 0.45, 0, 2.55, 0]] },
-      { name: "h_lantern", cls: "prop", tris: [144, 0], height: 3.81, radius: 1.2, solids: [[1, 0, 0, 0.28, 0.28, 0, 3.6, 0]] },
-      { name: "h_waystone", cls: "prop", tris: [132, 0], height: 2.9, radius: 0.73, solids: [[1, 0, 0, 0.36, 0.36, 0, 2.9, 0]] },
+      { name: "h_shed", cls: "static", tris: [84, 0], height: 2.75, radius: 2.34, solids: [[0, 0, 0, 1.6, 1.1, -1.5, 2.6, 0]] },
+      { name: "h_cottage", cls: "building", tris: [1523, 0], height: 6.62, radius: 3.32, solids: [[0, 0, 0.127, 2.417, 2.327, -1.5, 5.72, 0]] },
+      { name: "h_wall", cls: "static", tris: [20, 0], height: 1.07, radius: 2.07, solids: [[0, 0, 0, 2.05, 0.31, -1.5, 1.07, 0]] },
+      { name: "h_stone_a", cls: "prop", tris: [38, 0], height: 1.07, radius: 0.33, solids: [[0, 0, 0, 0.34, 0.1, -1.5, 1.07, 0]] },
+      { name: "h_stone_b", cls: "prop", tris: [34, 0], height: 1.25, radius: 0.43, solids: [[0, 0, 0, 0.42, 0.3, -1.5, 1.25, 0]] },
+      { name: "h_stone_c", cls: "prop", tris: [24, 0], height: 2.55, radius: 0.64, solids: [[0, 0, 0, 0.45, 0.45, -1.5, 2.55, 0]] },
+      { name: "h_lantern", cls: "prop", tris: [144, 0], height: 3.81, radius: 1.2, solids: [[1, 0, 0, 0.28, 0.28, -1.5, 3.6, 0]] },
+      { name: "h_waystone", cls: "prop", tris: [132, 0], height: 2.9, radius: 0.73, solids: [[1, 0, 0, 0.36, 0.36, -1.5, 2.9, 0]] },
     ],
     layout: [
       [0, 0, 0, 0, 1, 1.5], // h_pad
@@ -165,33 +165,33 @@ export const OUTPOSTS: Readonly<Record<OutpostBody, OutpostSite>> = {
       [14, 14.5, 12.5, 40.76, 1, 1.084], // lantern
     ],
     paths: [
-      { width: 2, pts: [[-4.6, 9.2], [-3.2, 13.5], [-0.6, 15.6], [0.5, 16.6]] }, // chapel
-      { width: 1.8, pts: [[-0.6, 15.6], [6, 18.8], [14.4, 19], [14.6, 21.6]] }, // graveyard
-      { width: 1.8, pts: [[-8.4, 5], [-13, 11], [-16.5, 15.2]] }, // house
-      { width: 1.8, pts: [[-9.8, 1.6], [-14, 2.6], [-18.4, 3.2]] }, // landing
-      { width: 1.6, pts: [[-7.2, -6.6], [-11.2, -12.2]] }, // bell
-      { width: 1.6, pts: [[6.8, -7.6], [11.4, -16.8]] }, // shrine
+      { width: 2, mat: "MI_UnevenBrick", pts: [[-4.6, 9.2], [-3.2, 13.5], [-0.6, 15.6], [0.5, 16.6]] }, // chapel
+      { width: 1.8, mat: "MI_UnevenBrick", pts: [[-0.6, 15.6], [6, 18.8], [14.4, 19], [14.6, 21.6]] }, // graveyard
+      { width: 1.8, mat: "MI_UnevenBrick", pts: [[-8.4, 5], [-13, 11], [-16.5, 15.2]] }, // house
+      { width: 1.8, mat: "MI_UnevenBrick", pts: [[-9.8, 1.6], [-14, 2.6], [-18.4, 3.2]] }, // landing
+      { width: 1.6, mat: "MI_UnevenBrick", pts: [[-7.2, -6.6], [-11.2, -12.2]] }, // bell
+      { width: 1.6, mat: "MI_UnevenBrick", pts: [[6.8, -7.6], [11.4, -16.8]] }, // shrine
     ],
     pad: 0,
     waystone: 15,
   },
   meridian: {
     body: "meridian",
-    version: "a800b46bd3275243",
+    version: "f44b1e943680dc64",
     prefabs: [
       { name: "m_pad", cls: "static", tris: [1472, 0], height: 0.02, radius: 10.35, solids: [] },
-      { name: "m_gate", cls: "static", tris: [484, 0], height: 8.6, radius: 4.54, solids: [[0, -3.75, 0, 0.65, 0.75, 0, 6.2, 0], [0, 3.75, 0, 0.65, 0.75, 0, 6.2, 0]] },
-      { name: "m_mast", cls: "static", tris: [1448, 0], height: 29.25, radius: 3.39, solids: [[1, -1.5, 1.5, 0.28, 0.28, 0, 8, 0], [1, -1.5, -1.5, 0.28, 0.28, 0, 8, 0], [1, 1.5, 1.5, 0.28, 0.28, 0, 8, 0], [1, 1.5, -1.5, 0.28, 0.28, 0, 8, 0], [0, 2.15, 0, 0.45, 0.9, 0, 2.2, 0]] },
-      { name: "m_office", cls: "building", tris: [4525, 0], height: 8.7, radius: 6.77, solids: [[0, 0, 0, 4.6, 4.6, 0, 5.6, 0], [0, 0, 5.4, 2.6, 0.8, 3.4, 3.65, 0], [0, -2.4, 5.975, 0.15, 0.175, 0, 3.4, 0], [0, 2.4, 5.975, 0.15, 0.175, 0, 3.4, 0]] },
-      { name: "m_hab", cls: "building", tris: [2236, 0], height: 4.3, radius: 5.01, solids: [[0, 0, 0, 4.4, 2.4, 0, 3.55, 0]] },
-      { name: "m_condenser", cls: "static", tris: [352, 0], height: 8.6, radius: 10.21, solids: [[0, -1.6, 1.6, 0.2, 0.2, 0, 3, 0], [0, -1.6, -1.6, 0.2, 0.2, 0, 3, 0], [0, 1.6, 1.6, 0.2, 0.2, 0, 3, 0], [0, 1.6, -1.6, 0.2, 0.2, 0, 3, 0], [1, 0, 0, 2.35, 2.35, 3, 8.6, 0], [0, 0, 3.15, 1.4, 0.75, 0, 2.4, 0], [0, 5, 0, 0.15, 0.15, 0, 3.2, 0], [0, 8, 0, 0.15, 0.15, 0, 3.2, 0]] },
-      { name: "m_billboard", cls: "static", tris: [294, 0], height: 7.6, radius: 3.41, solids: [[0, -2.6, 0, 0.25, 0.25, 0, 4, 0], [0, 2.6, 0, 0.25, 0.25, 0, 4, 0]] },
-      { name: "m_hangar", cls: "building", tris: [986, 0], height: 6.52, radius: 8.12, solids: [[0, 0, 0, 5, 6.4, 0, 2.6, 0], [0, 0, 0, 3.4, 6.3, 2.6, 4.9, 0]] },
-      { name: "m_fuel", cls: "static", tris: [322, 0], height: 4.65, radius: 5.08, solids: [[0, 0, 0, 3.2, 1.1, 0, 0.22, 0], [0, -1.4, 0, 0.47, 0.37, 0, 2.05, 0], [0, 1.4, 0, 0.47, 0.37, 0, 2.05, 0], [1, -3, 0, 0.25, 0.25, 0, 4.3, 0], [1, 3, 0, 0.25, 0.25, 0, 4.3, 0]] },
-      { name: "m_solar", cls: "static", tris: [144, 0], height: 3.54, radius: 4.12, solids: [[1, -3, 0, 0.16, 0.16, 0, 2.6, 0], [1, 0, 0, 0.16, 0.16, 0, 2.6, 0], [1, 3, 0, 0.16, 0.16, 0, 2.6, 0]] },
-      { name: "m_kiosk", cls: "prop", tris: [48, 0], height: 2.25, radius: 0.72, solids: [[0, 0, 0, 0.6, 0.45, 0, 2.25, 0]] },
-      { name: "m_pylon", cls: "prop", tris: [68, 0], height: 5.1, radius: 0.57, solids: [[1, 0, 0, 0.4, 0.4, 0, 4.4, 0]] },
-      { name: "m_waystone", cls: "prop", tris: [52, 0], height: 2.75, radius: 0.57, solids: [[1, 0, 0, 0.4, 0.4, 0, 2.75, 0]] },
+      { name: "m_gate", cls: "static", tris: [484, 0], height: 8.6, radius: 4.54, solids: [[0, -3.75, 0, 0.65, 0.75, -1.5, 6.2, 0], [0, 3.75, 0, 0.65, 0.75, -1.5, 6.2, 0]] },
+      { name: "m_mast", cls: "static", tris: [1448, 0], height: 29.25, radius: 3.39, solids: [[1, -1.5, 1.5, 0.28, 0.28, -1.5, 8, 0], [1, -1.5, -1.5, 0.28, 0.28, -1.5, 8, 0], [1, 1.5, 1.5, 0.28, 0.28, -1.5, 8, 0], [1, 1.5, -1.5, 0.28, 0.28, -1.5, 8, 0], [0, 2.15, 0, 0.45, 0.9, -1.5, 2.2, 0]] },
+      { name: "m_office", cls: "building", tris: [4525, 0], height: 8.7, radius: 6.77, solids: [[0, 0, 0, 4.6, 4.6, -1.5, 5.6, 0], [0, 0, 5.4, 2.6, 0.8, 3.4, 3.65, 0], [0, -2.4, 5.975, 0.15, 0.175, -1.5, 3.4, 0], [0, 2.4, 5.975, 0.15, 0.175, -1.5, 3.4, 0]] },
+      { name: "m_hab", cls: "building", tris: [2236, 0], height: 4.3, radius: 5.01, solids: [[0, 0, 0, 4.4, 2.4, -1.5, 3.55, 0]] },
+      { name: "m_condenser", cls: "static", tris: [352, 0], height: 8.6, radius: 10.21, solids: [[0, -1.6, 1.6, 0.2, 0.2, -1.5, 3, 0], [0, -1.6, -1.6, 0.2, 0.2, -1.5, 3, 0], [0, 1.6, 1.6, 0.2, 0.2, -1.5, 3, 0], [0, 1.6, -1.6, 0.2, 0.2, -1.5, 3, 0], [1, 0, 0, 2.35, 2.35, 3, 8.6, 0], [0, 0, 3.15, 1.4, 0.75, -1.5, 2.4, 0], [0, 5, 0, 0.15, 0.15, -1.5, 3.2, 0], [0, 8, 0, 0.15, 0.15, -1.5, 3.2, 0]] },
+      { name: "m_billboard", cls: "static", tris: [294, 0], height: 7.6, radius: 3.41, solids: [[0, -2.6, 0, 0.25, 0.25, -1.5, 4, 0], [0, 2.6, 0, 0.25, 0.25, -1.5, 4, 0]] },
+      { name: "m_hangar", cls: "building", tris: [986, 0], height: 6.52, radius: 8.12, solids: [[0, 0, 0, 5, 6.4, -1.5, 2.6, 0], [0, 0, 0, 3.4, 6.3, 2.6, 4.9, 0]] },
+      { name: "m_fuel", cls: "static", tris: [322, 0], height: 4.65, radius: 5.08, solids: [[0, 0, 0, 3.2, 1.1, -1.5, 0.22, 0], [0, -1.4, 0, 0.47, 0.37, -1.5, 2.05, 0], [0, 1.4, 0, 0.47, 0.37, -1.5, 2.05, 0], [1, -3, 0, 0.25, 0.25, -1.5, 4.3, 0], [1, 3, 0, 0.25, 0.25, -1.5, 4.3, 0]] },
+      { name: "m_solar", cls: "static", tris: [144, 0], height: 3.54, radius: 4.12, solids: [[1, -3, 0, 0.16, 0.16, -1.5, 2.6, 0], [1, 0, 0, 0.16, 0.16, -1.5, 2.6, 0], [1, 3, 0, 0.16, 0.16, -1.5, 2.6, 0]] },
+      { name: "m_kiosk", cls: "prop", tris: [48, 0], height: 2.25, radius: 0.72, solids: [[0, 0, 0, 0.6, 0.45, -1.5, 2.25, 0]] },
+      { name: "m_pylon", cls: "prop", tris: [68, 0], height: 5.1, radius: 0.57, solids: [[1, 0, 0, 0.4, 0.4, -1.5, 4.4, 0]] },
+      { name: "m_waystone", cls: "prop", tris: [52, 0], height: 2.75, radius: 0.57, solids: [[1, 0, 0, 0.4, 0.4, -1.5, 2.75, 0]] },
     ],
     layout: [
       [0, 0, 0, 0, 1, 1.5], // m_pad
@@ -217,13 +217,13 @@ export const OUTPOSTS: Readonly<Record<OutpostBody, OutpostSite>> = {
       [11, -5, 33, 0, 1, 1.338], // light pylon
     ],
     paths: [
-      { width: 2.4, pts: [[-3.6, 9.6], [-2.6, 16], [-4, 22], [-6.4, 24]] }, // north
-      { width: 2, pts: [[-2.6, 16], [-0.6, 26], [-1.4, 33], [-4.6, 37.6]] }, // mast
-      { width: 2, pts: [[3.4, 10], [6.4, 19]] }, // hab N
-      { width: 2, pts: [[8, 5.6], [8.4, 9.4]] }, // condenser
-      { width: 2.4, pts: [[-9.2, -4.4], [-14.4, -6.6]] }, // depot
-      { width: 2.2, pts: [[-1, -10.3], [-1.4, -19.8]] }, // south
-      { width: 2, pts: [[5.6, -8.6], [8, -12.4]] }, // fuel
+      { width: 2.4, mat: "MI_RockTrim", pts: [[-3.6, 9.6], [-2.6, 16], [-4, 22], [-6.4, 24]] }, // north
+      { width: 2, mat: "MI_RockTrim", pts: [[-2.6, 16], [-0.6, 26], [-1.4, 33], [-4.6, 37.6]] }, // mast
+      { width: 2, mat: "MI_RockTrim", pts: [[3.4, 10], [6.4, 19]] }, // hab N
+      { width: 2, mat: "MI_RockTrim", pts: [[8, 5.6], [8.4, 9.4]] }, // condenser
+      { width: 2.4, mat: "MI_RockTrim", pts: [[-9.2, -4.4], [-14.4, -6.6]] }, // depot
+      { width: 2.2, mat: "MI_RockTrim", pts: [[-1, -10.3], [-1.4, -19.8]] }, // south
+      { width: 2, mat: "MI_RockTrim", pts: [[5.6, -8.6], [8, -12.4]] }, // fuel
     ],
     pad: 0,
     waystone: 12,

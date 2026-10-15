@@ -1,66 +1,79 @@
-// The Portus castle town on the client (D38). Placements come from the shared layout
-// (planet/town.ts), so what is drawn stands exactly where the shared colliders block; the geometry
-// comes from the shipped GLB (render/townAssets.ts).
+// A body's structure sites on the client (D38, D42): the Portus castle town, or a planet's pad-0
+// outpost with a landing platform and a waystone at each other pad. Placements come from the shared
+// sites (planet/sites.ts), so what is drawn stands exactly where the shared colliders block; the
+// geometry comes from the shipped GLB (render/townAssets.ts).
 //
-// Draw-call budget: the town is static, so at load every placed prefab is baked into merged meshes
-// per ground cell (CELL m squares in the town frame), two variants per cell (LOD0: full houses and
+// Draw-call budget: a site is static, so at load every placed prefab is baked into merged meshes
+// per ground cell (CELL m squares in the site frame), two variants per cell (LOD0: full houses and
 // trees; LOD1: roof shells and tree cards; walls, props and paving in both) and two materials
 // (opaque, cutout). Each frame one variant per cell is shown (the camera's distance to the cell,
 // the tier's LOD distance; Low always shows LOD1 and drops normal maps), cells below the horizon
 // are hidden, and three frustum-culls the rest. All meshes share two materials, so the warm-up
-// (which shows every hidden mesh) compiles the town's pipelines once.
+// (which shows every hidden mesh) compiles the site's pipelines once. On a planet the outpost's
+// paths are ground decals built here from the shared path data (the same strips the grass mask
+// clears), and the other pads' platforms and waystones are one instanced mesh per material (one
+// fixed offset between the two at every pad: sites.ts waystonePlacement), drawn at the pads in range.
 //
 // Fallback: if the asset can't load, or hasn't arrived by TOWN_LOAD_DEADLINE_MS, the collider solids
 // are drawn as plain stone boxes and cylinders (two instanced draws) before the quality probe and
-// the warm-up, so nothing blocks the player invisibly and nothing compiles in play. A later
-// completion is ignored for this arrival (the next arrival in Portus uses the cached asset).
+// the warm-up, so nothing blocks the player invisibly and nothing compiles in play (on a planet the
+// old pad discs stay: Portals.setPadModels). A later completion is ignored for this arrival (the
+// next arrival uses the cached asset).
 
 import * as THREE from "three/webgpu";
-import { TOWN_LAYOUT, TOWN_PREFABS } from "@firstlight/shared/content/portusTown";
-import { structureCollider, townPlacements, townSolids, type StructureCollider, type TownPlacement } from "@firstlight/shared/planet/town";
-import type { Terrain } from "@firstlight/shared";
+import { padDirs, type Terrain } from "@firstlight/shared";
+import { OUTPOSTS, type OutpostBody } from "@firstlight/shared/content/padOutposts";
+import { TOWN_LAYOUT } from "@firstlight/shared/content/portusTown";
+import {
+  padPlatformPlacement, sitePlacements, sitePrefabs, siteSolids, structureCollider, TOWN_BODY,
+  type StructureCollider,
+} from "@firstlight/shared/planet/sites";
+import type { TownPlacement } from "@firstlight/shared/planet/townFrame";
 import { flags } from "../config.ts";
 import type { MoveColliders } from "../game/PlayerController.ts";
 import { SHADOW_ONLY_LAYER } from "../render/atmosphere.ts";
 import type { ResolvedSettings } from "../render/quality.ts";
-import { preloadTown, type TownAssets, type TownPart, type TownSlot } from "../render/townAssets.ts";
+import { preloadSite, type SiteId, type TownAssets, type TownPart, type TownSlot } from "../render/townAssets.ts";
 import { TOWN_EMISSIVE, townFallbackMaterial, townMaterial, type TownMaterialKind } from "../render/townMaterial.ts";
 import { conformDecal } from "./townDecal.ts";
+import { outpostPaths } from "./outpostPaths.ts";
 
 /**
- * Ground cell size (m) and the half extent of the cell grid around the pole. Measured at the spawn
- * views (portusTown.test.ts): 32 m cells cost 19–23 draws + 19 shadow draws on Medium, 64 m cells
- * 8–12 + 10, 96 m cells 6 + 8, one cell 2 + 2, while frustum culling saved under 15 % of the
- * triangles (from the plaza nearly the whole town is in view). So the whole town is one cell: one
- * opaque and one cutout draw (+ the same two in the shadow map), LOD per tier.
+ * Ground cell size (m) and the half extent of the cell grid around the site's centre. Measured at
+ * the Portus spawn views (portusTown.test.ts): 32 m cells cost 19–23 draws + 19 shadow draws on
+ * Medium, 64 m cells 8–12 + 10, 96 m cells 6 + 8, one cell 2 + 2, while frustum culling saved under
+ * 15 % of the triangles (from the plaza nearly the whole town is in view). So the whole town is one
+ * cell: one opaque and one cutout draw (+ the same two in the shadow map), LOD per tier. An outpost
+ * (within 64 m of pad 0) is one cell too.
  */
 export const TOWN_CELL = 192;
 const GRID_HALF = 96;
 const GRID_N = Math.round((2 * GRID_HALF) / TOWN_CELL);
 
 /**
- * Prefabs wider than this (m) are ground decals spanning the town (the paving): laid onto the ground
- * where it rises off the flat floor (townDecal.ts), and their triangles split between cells.
+ * Prefabs wider than this (m) are ground decals spanning the town (Portus' paving): laid onto the
+ * ground where it rises off the flat floor (townDecal.ts), and their triangles split between cells.
  */
 const DECAL_RADIUS = 30;
 
 /**
- * How long an arrival waits for the town asset (ms) before it shows the fallback instead. A little
+ * How long an arrival waits for the site asset (ms) before it shows the fallback instead. A little
  * longer than the download's own abort (townAssets.ts TOWN_FETCH_TIMEOUT_MS), so it only matters if
  * decoding stalls or a test hands in a source that never settles.
  */
 export const TOWN_LOAD_DEADLINE_MS = 18_000;
 
 /**
- * Shadows (Medium+ shadow map). The drawn opaque town casts nothing; a shadow-only copy of it casts
+ * Shadows (Medium+ shadow map). The drawn opaque site casts nothing; a shadow-only copy of it casts
  * instead, on SHADOW_ONLY_LAYER (render/atmosphere.ts: only the sun's shadow camera renders it).
- * It holds positions only, with a plain material, so the shadow pass doesn't sample the town's
- * texture arrays; it leaves out what can't change a shadow map texel (the paving decal lying on the
- * ground, the window glass inset in the walls) and uses the roof shells for buildings (the same
+ * It holds positions only, with a plain material, so the shadow pass doesn't sample the site's
+ * texture arrays; it leaves out what can't change a shadow map texel (the paving and paths lying on
+ * the ground, the window glass inset in the walls) and uses the roof shells for buildings (the same
  * silhouette; the tile relief is below a texel). The cutout meshes (leaves, vines) cast themselves:
  * they need their alpha. Measured against cutting the shadow copy into 16–48 m cells that the shadow
  * camera culls: from the plaza the shadow box needs most of the town anyway (48 m cells: +8 draws for
- * −9 % triangles), so one mesh, 2 shadow draws as before.
+ * −9 % triangles), so one mesh, 2 shadow draws as before. The other pads' waystones cast with their
+ * own instanced mesh (one more shadow draw, only where pads are in range).
  */
 export const TOWN_SHADOW_LAYER = SHADOW_ONLY_LAYER;
 
@@ -77,6 +90,12 @@ function townShadowMaterial(): THREE.MeshBasicNodeMaterial {
 /** Camera distance (m, to a cell's bounding sphere) beyond which a cell shows LOD1; 0 = always LOD1. */
 export const TOWN_LOD_DISTANCE: Record<ResolvedSettings["tier"], number> = { low: 0, medium: 60, high: 90, ultra: 140 };
 const LOD_HYSTERESIS = 4;
+
+/** The other pads' platforms and waystones are drawn within this distance (m) of the camera (the old pad discs' range). */
+export const PAD_MODEL_RANGE = 450;
+
+/** Slot names whose triangles the shadow copy leaves out (inset window panes). */
+const GLASS_SLOTS = new Set(["MI_WindowGlass", "M_Glass"]);
 
 interface CellMesh {
   mesh: THREE.Mesh;
@@ -104,26 +123,59 @@ interface Bucket {
   indices: number;
 }
 
+/** The other pads' platform + waystone (outposts): one instanced mesh per material kind. */
+interface PadModels {
+  meshes: { mesh: THREE.InstancedMesh; kind: TownMaterialKind; triangles: number }[];
+  /** Instance frames of pads 1..n and their positions (range test). */
+  frames: THREE.Matrix4[];
+  at: THREE.Vector3[];
+  /** Which pad each instance slot holds, and how many slots are drawn. */
+  order: Int32Array;
+  shown: number;
+}
+
 const _v = new THREE.Vector3();
 
-/** Cell index of a town point (or -1 outside the grid). */
+/** Identity frame: geometry already in the target space. */
+const IDENTITY: TownPlacement = { item: 0, prefab: -1, scale: 1, px: 0, py: 0, pz: 0, rx: 1, ry: 0, rz: 0, ux: 0, uy: 1, uz: 0, fx: 0, fy: 0, fz: 1 };
+
+/** Cell index of a site point (or -1 outside the grid). */
 function cellOf(east: number, north: number): number {
   const i = Math.floor((east + GRID_HALF) / TOWN_CELL), j = Math.floor((north + GRID_HALF) / TOWN_CELL);
   if (i < 0 || j < 0 || i >= GRID_N || j >= GRID_N) return -1;
   return j * GRID_N + i;
 }
 
-export class PortusTown {
+/** Placement `w` in the frame of placement `p` (x = right, y = up, z = front of p). */
+function relative(p: TownPlacement, w: TownPlacement): TownPlacement {
+  const d = [w.px - p.px, w.py - p.py, w.pz - p.pz] as const;
+  const into = (x: number, y: number, z: number): [number, number, number] => [
+    p.rx * x + p.ry * y + p.rz * z,
+    p.ux * x + p.uy * y + p.uz * z,
+    p.fx * x + p.fy * y + p.fz * z,
+  ];
+  const [px, py, pz] = into(d[0], d[1], d[2]);
+  const [rx, ry, rz] = into(w.rx, w.ry, w.rz);
+  const [ux, uy, uz] = into(w.ux, w.uy, w.uz);
+  const [fx, fy, fz] = into(w.fx, w.fy, w.fz);
+  return { item: w.item, prefab: w.prefab, scale: w.scale, px, py, pz, rx, ry, rz, ux, uy, uz, fx, fy, fz };
+}
+
+export class SiteTown {
   readonly group = new THREE.Group();
+  /** Which site: Portus' town or the planet's outpost. */
+  readonly site: SiteId;
   /** The shared structure solids (the local player's MoveColliders use them). */
   readonly collider: StructureCollider;
   /** The structures as the local player's MoveColliders (PlayerController.setStructures). */
   readonly moveColliders: MoveColliders;
-  /** Resolves once the town meshes (or the fallback) are in the scene. */
+  /** Resolves once the site meshes (or the fallback) are in the scene. */
   readonly ready: Promise<void>;
   readonly cells: Cell[] = [];
   /** The shadow-only opaque copy (TOWN_SHADOW_LAYER), or null (fallback, or not built yet). */
   shadowMesh: CellMesh | null = null;
+  /** The other pads' platforms and waystones (outposts with assets), or null. */
+  pads: PadModels | null = null;
   private fallback: THREE.InstancedMesh[] = [];
   private settings: ResolvedSettings;
   private assets: TownAssets | null = null;
@@ -132,15 +184,16 @@ export class PortusTown {
   /** Warm-up: show both variants of every cell (so both compile and upload). */
   private forceAll = false;
 
-  /** @param source the town asset (tests pass a decoded one; the game downloads it once per session). */
+  /** @param source the site asset (tests pass a decoded one; the game downloads it once per session). */
   constructor(
     private readonly terrain: Terrain,
     settings: ResolvedSettings,
-    source: Promise<TownAssets | null> = preloadTown(),
+    source: Promise<TownAssets | null> = preloadSite(terrain.body.id as SiteId),
     deadlineMs = TOWN_LOAD_DEADLINE_MS,
   ) {
-    this.group.name = "portusTown";
-    const collider = (this.collider = structureCollider(terrain)!);
+    this.site = terrain.body.id as SiteId;
+    this.group.name = this.site === TOWN_BODY ? "portusTown" : `outpost:${this.site}`;
+    const collider = (this.collider = structureCollider(terrain));
     this.moveColliders = {
       resolve: (pos, out) => collider.resolve(pos, out),
       raycast: (o, d, maxT) => collider.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT),
@@ -148,6 +201,11 @@ export class PortusTown {
     this.settings = settings;
     this.group.visible = !flags.has("notown");
     this.ready = this.build(source, deadlineMs);
+  }
+
+  /** The site's own models are drawn (not the plain-collider fallback): the planets' old pad discs and portal base can go. */
+  get drawsModels(): boolean {
+    return this.assets !== null;
   }
 
   private async build(source: Promise<TownAssets | null>, deadlineMs: number) {
@@ -158,19 +216,17 @@ export class PortusTown {
     if (this.disposed) return;
     if (assets === "late") {
       // Show the fallback now (before the probe and warm-up); whatever arrives later is ignored here.
-      console.warn(`[town] Portus town assets not ready after ${deadlineMs} ms; drawing plain colliders`);
+      console.warn(`[town] ${this.site} structure assets not ready after ${deadlineMs} ms; drawing plain colliders`);
       return this.buildFallback();
     }
     if (!assets) return this.buildFallback();
     try {
       this.assets = assets;
       this.buildCells(assets);
+      if (this.site !== TOWN_BODY) this.buildPads(assets);
     } catch (e) {
-      console.error("[town] building the town meshes failed; drawing plain colliders", e);
-      for (const c of this.cells) for (const v of c.variants) for (const m of v) m.mesh.geometry.dispose();
-      this.shadowMesh?.mesh.geometry.dispose();
-      this.cells.length = 0;
-      this.shadowMesh = null;
+      console.error("[town] building the site meshes failed; drawing plain colliders", e);
+      this.disposeMeshes();
       this.group.clear();
       this.assets = null;
       this.buildFallback();
@@ -181,7 +237,9 @@ export class PortusTown {
   // ------------------------------------------------------------------ building
 
   private buildCells(assets: TownAssets) {
-    const placements = townPlacements(this.terrain);
+    const placements = sitePlacements(this.terrain);
+    const prefabs = sitePrefabs(this.terrain.body.id);
+    const portus = this.site === TOWN_BODY;
     const buckets = new Map<string, Bucket>();
     const bucket = (cell: number, variant: 0 | 1, kind: TownMaterialKind) => {
       const k = `${cell}:${variant}:${kind}`;
@@ -195,12 +253,19 @@ export class PortusTown {
       b.verts += part.position.length / 3;
       b.indices += tris ? tris.length * 3 : part.index.length;
     };
-    TOWN_LAYOUT.forEach((item, i) => {
-      const pre = TOWN_PREFABS[item[0]]!;
-      const p = placements[i]!;
+    // The layout (Portus' town, or pad 0's outpost): placement i is layout item i, at site point
+    // (east, north); the waystones of the other pads (item < 0) are drawn with the pad models.
+    const coords = (i: number): [number, number] => {
+      const it = portus ? TOWN_LAYOUT[i]! : OUTPOSTS[this.site as OutpostBody].layout[i]!;
+      return [it[1], it[2]];
+    };
+    placements.forEach((p, i) => {
+      if (p.item < 0) return;
+      const pre = prefabs[p.prefab]!;
       const l0 = assets.meshes.get(pre.name)!;
       const l1 = pre.tris[1] > 0 ? assets.meshes.get(`${pre.name}__L1`)! : l0;
-      const decal = pre.radius > DECAL_RADIUS;
+      const decal = portus && pre.radius > DECAL_RADIUS;
+      const [e0, n0] = coords(i);
       for (const kind of ["opaque", "cutout"] as const) {
         // A decal (the paving) is laid onto the ground once and used for both LODs.
         const laid = decal && l0[kind] ? conformDecal(l0[kind]!, p, this.terrain) : null;
@@ -219,7 +284,7 @@ export class PortusTown {
                 e += part.position[v * 3]!;
                 n -= part.position[v * 3 + 2]!;
               }
-              const c = cellOf(item[1] + e / 3, item[2] + n / 3);
+              const c = cellOf(e0 + e / 3, n0 + n / 3);
               if (c < 0) continue;
               let l = byCell.get(c);
               if (!l) byCell.set(c, (l = []));
@@ -227,19 +292,25 @@ export class PortusTown {
             }
             for (const [c, l] of byCell) add(c, variant, kind, part, p, Uint32Array.from(l));
           } else {
-            const c = cellOf(item[1], item[2]);
+            const c = cellOf(e0, n0);
             if (c >= 0) add(c, variant, kind, part, p, null);
           }
         }
       }
     });
+    // The outpost's paths: ground decals (world space) in both LODs of pad 0's cell.
+    if (!portus) {
+      const paths = outpostPaths(this.site as OutpostBody, this.terrain, assets.manifest.slots);
+      if (paths) for (const variant of [0, 1] as const) add(cellOf(0, 0), variant, "opaque", paths, IDENTITY, null);
+    }
     const slots = assets.manifest.slots;
+    const floor = assets.manifest.look?.albedoFloor ?? 0;
     const byCell = new Map<number, Cell>();
     for (const [key, b] of buckets) {
       const [cs, vs, kind] = key.split(":") as [string, string, TownMaterialKind];
       const ci = Number(cs), variant = Number(vs) as 0 | 1;
       const geo = this.merge(b, slots);
-      const mat = townMaterial(kind, true, assets.color, assets.normal);
+      const mat = townMaterial(kind, true, assets.color, assets.normal, floor);
       const mesh = new THREE.Mesh(geo, mat);
       mesh.name = `town:${ci}:L${variant}:${kind}`;
       mesh.matrixAutoUpdate = false;
@@ -281,19 +352,21 @@ export class PortusTown {
     this.buildShadowMesh(assets, placements);
   }
 
-  /** The shadow-only opaque copy: positions only, roof shells, no paving or window glass. */
+  /** The shadow-only opaque copy: positions only, roof shells, no paving, paths or window glass. */
   private buildShadowMesh(assets: TownAssets, placements: readonly TownPlacement[]) {
-    const glass = assets.manifest.slots.findIndex((x) => x.name === "MI_WindowGlass");
+    const prefabs = sitePrefabs(this.terrain.body.id);
+    const glass = new Set(assets.manifest.slots.flatMap((x, i) => (GLASS_SLOTS.has(x.name) ? [i] : [])));
     const parts: { part: TownPart; p: TownPlacement }[] = [];
     let verts = 0;
-    TOWN_LAYOUT.forEach((item, i) => {
-      const pre = TOWN_PREFABS[item[0]]!;
-      if (pre.radius > DECAL_RADIUS) return; // the paving lies on the ground
-      const mesh = assets.meshes.get(pre.cls === "building" ? `${pre.name}__L1` : pre.name)!;
-      if (!mesh.opaque) return;
-      parts.push({ part: mesh.opaque, p: placements[i]! });
+    for (const p of placements) {
+      if (p.item < 0) continue; // the other pads' waystones cast with their own mesh
+      const pre = prefabs[p.prefab]!;
+      if (pre.radius > DECAL_RADIUS) continue; // the paving lies on the ground
+      const mesh = assets.meshes.get(pre.cls === "building" && pre.tris[1] > 0 ? `${pre.name}__L1` : pre.name)!;
+      if (!mesh.opaque) continue;
+      parts.push({ part: mesh.opaque, p });
       verts += mesh.opaque.position.length / 3;
-    });
+    }
     const pos = new Float32Array(verts * 3);
     const idx: number[] = [];
     let vo = 0;
@@ -307,7 +380,7 @@ export class PortusTown {
       }
       for (let t = 0; t < part.index.length; t += 3) {
         const a = part.index[t]!, b = part.index[t + 1]!, c = part.index[t + 2]!;
-        if (part.color[a * 4 + 3] === glass) continue; // inset panes: inside the wall's shadow anyway
+        if (glass.has(part.color[a * 4 + 3]!)) continue; // inset panes: inside the wall's shadow anyway
         idx.push(a + vo, b + vo, c + vo);
       }
       vo += n;
@@ -326,7 +399,52 @@ export class PortusTown {
     this.group.add(mesh);
   }
 
-  /** Bake a bucket's placed parts into one geometry (world positions; slot data per vertex). */
+  /**
+   * The other pads' platform + waystone (pads 1..n): one geometry per material kind in a pad's frame
+   * (the waystone at its fixed offset from the platform), instanced at every pad.
+   */
+  private buildPads(assets: TownAssets) {
+    const site = OUTPOSTS[this.site as OutpostBody];
+    const n = padDirs(this.terrain.body).length;
+    if (n < 2) return;
+    const prefabs = site.prefabs;
+    const placements = sitePlacements(this.terrain);
+    const stone = placements.find((p) => p.item === -2)!;
+    const offset = relative(padPlatformPlacement(this.terrain, 1), stone);
+    const platform = assets.meshes.get(prefabs[site.pad]!.name)!;
+    const waystone = assets.meshes.get(prefabs[site.waystone]!.name)!;
+    const frames: THREE.Matrix4[] = [], at: THREE.Vector3[] = [];
+    const r = new THREE.Vector3(), u = new THREE.Vector3(), f = new THREE.Vector3();
+    for (let k = 1; k < n; k++) {
+      const p = padPlatformPlacement(this.terrain, k);
+      frames.push(new THREE.Matrix4().makeBasis(r.set(p.rx, p.ry, p.rz), u.set(p.ux, p.uy, p.uz), f.set(p.fx, p.fy, p.fz)).setPosition(p.px, p.py, p.pz));
+      at.push(new THREE.Vector3(p.px, p.py, p.pz));
+    }
+    const floor = assets.manifest.look?.albedoFloor ?? 0;
+    const meshes: PadModels["meshes"] = [];
+    for (const kind of ["opaque", "cutout"] as const) {
+      const b: Bucket = { parts: [], verts: 0, indices: 0 };
+      for (const [part, p] of [[platform[kind], IDENTITY], [waystone[kind], offset]] as const) {
+        if (!part) continue;
+        b.parts.push({ part, p, tris: null });
+        b.verts += part.position.length / 3;
+        b.indices += part.index.length;
+      }
+      if (b.parts.length === 0) continue;
+      const mesh = new THREE.InstancedMesh(this.merge(b, assets.manifest.slots), townMaterial(kind, true, assets.color, assets.normal, floor), frames.length);
+      mesh.name = `town:pads:${kind}`;
+      frames.forEach((m, i) => mesh.setMatrixAt(i, m));
+      mesh.count = frames.length;
+      // The instances span the planet: culled per pad by range here, never by three's one sphere.
+      mesh.frustumCulled = false;
+      mesh.receiveShadow = true;
+      meshes.push({ mesh, kind, triangles: b.indices / 3 });
+      this.group.add(mesh);
+    }
+    this.pads = { meshes, frames, at, order: Int32Array.from(frames, (_, i) => i), shown: frames.length };
+  }
+
+  /** Bake a bucket's placed parts into one geometry (positions in the placements' space; slot data per vertex). */
   private merge(b: Bucket, slots: readonly TownSlot[]): THREE.BufferGeometry {
     const pos = new Float32Array(b.verts * 3), nrm = new Float32Array(b.verts * 3), uv = new Float32Array(b.verts * 2);
     const col = new Uint8Array(b.verts * 4), mat = new Uint8Array(b.verts * 4);
@@ -337,7 +455,7 @@ export class PortusTown {
       layer: s.layer,
       rough: Math.round(s.rough * 255),
       metal: Math.round(s.metal * 255),
-      mode: s.emissive[3] > 0 ? TOWN_EMISSIVE.flame : s.night[3] > 0 ? TOWN_EMISSIVE.window : TOWN_EMISSIVE.none,
+      mode: (s.glow ?? 0) > 0 ? TOWN_EMISSIVE.glow : s.emissive[3] > 0 ? TOWN_EMISSIVE.flame : s.night[3] > 0 ? TOWN_EMISSIVE.window : TOWN_EMISSIVE.none,
     }));
     let vo = 0, io = 0;
     for (const { part, p, tris } of b.parts) {
@@ -394,8 +512,9 @@ export class PortusTown {
 
   /** No asset: the solids as stone boxes and cylinders (the same shapes that block the player). */
   private buildFallback() {
-    // The layout's solids; the Hall board's stand (item -1) is drawn by QuestWorld with its board.
-    const solids = townSolids(this.terrain).filter((x) => x.item >= 0);
+    // Portus: the layout's solids (the Hall board's stand, item -1, is drawn by QuestWorld with its
+    // board). A planet: the outpost's and the other pads' waystones (items < 0).
+    const solids = siteSolids(this.terrain).filter((x) => this.site !== TOWN_BODY || x.item >= 0);
     const boxes = solids.filter((s) => s.shape === 0), cyls = solids.filter((s) => s.shape === 1);
     const boxGeo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
     // Unit-wide sources (a box 1 m across, a cylinder 1 m across): the instance basis scales them by
@@ -429,13 +548,18 @@ export class PortusTown {
     // town casts, as it did before the shadow copy.
     const copy = cast && !s.on.cascades && !!this.shadowMesh;
     const normals = s.tier !== "low";
+    const floor = this.assets?.manifest.look?.albedoFloor ?? 0;
     for (const c of this.cells) {
       for (const v of c.variants) {
         for (const m of v) {
           m.mesh.castShadow = cast && (m.kind === "cutout" || !copy);
-          if (this.assets) m.mesh.material = townMaterial(m.kind, normals, this.assets.color, this.assets.normal);
+          if (this.assets) m.mesh.material = townMaterial(m.kind, normals, this.assets.color, this.assets.normal, floor);
         }
       }
+    }
+    for (const m of this.pads?.meshes ?? []) {
+      m.mesh.castShadow = cast;
+      if (this.assets) m.mesh.material = townMaterial(m.kind, normals, this.assets.color, this.assets.normal, floor);
     }
     if (this.shadowMesh) {
       this.shadowMesh.mesh.castShadow = copy;
@@ -449,7 +573,7 @@ export class PortusTown {
     this.forceAll = on;
   }
 
-  /** LOD per cell and horizon culling (from the camera). */
+  /** LOD per cell, horizon culling (from the camera) and the pads in range. */
   update(camera: THREE.Camera) {
     const cam = camera.position;
     const R = this.terrain.body.radius;
@@ -470,10 +594,30 @@ export class PortusTown {
         for (const m of c.variants[v]) m.mesh.visible = on;
       }
     }
+    const pads = this.pads;
+    if (pads) {
+      // The pads in range, packed at the front of the instance list (all of them while warming up).
+      let k = 0, changed = false;
+      for (let i = 0; i < pads.frames.length; i++) {
+        if (!this.forceAll && pads.at[i]!.distanceTo(cam) > PAD_MODEL_RANGE) continue;
+        if (pads.order[k] !== i) {
+          pads.order[k] = i;
+          for (const m of pads.meshes) m.mesh.setMatrixAt(k, pads.frames[i]!);
+          changed = true;
+        }
+        k++;
+      }
+      if (changed) for (const m of pads.meshes) m.mesh.instanceMatrix.needsUpdate = true;
+      pads.shown = k;
+      for (const m of pads.meshes) {
+        m.mesh.count = k;
+        m.mesh.visible = k > 0;
+      }
+    }
   }
 
   /**
-   * Draws and triangles the town adds for this camera (frustum and the current LOD state), and in
+   * Draws and triangles the site adds for this camera (frustum and the current LOD state), and in
    * the shadow map for `shadowCamera` (the casters on its layers whose bounds meet its frustum).
    */
   stats(camera?: THREE.Camera, shadowCamera?: THREE.Camera): { draws: number; triangles: number; shadowDraws: number; shadowTriangles: number; meshes: number } {
@@ -498,6 +642,17 @@ export class PortusTown {
         shadowTriangles += m.triangles;
       }
     }
+    // The pads' instanced meshes are never frustum-culled: every shown instance is drawn.
+    for (const m of this.pads?.meshes ?? []) {
+      meshes++;
+      if (!m.mesh.visible || m.mesh.count === 0) continue;
+      draws++;
+      triangles += m.triangles * m.mesh.count;
+      if (shadowCamera && m.mesh.castShadow) {
+        shadowDraws++;
+        shadowTriangles += m.triangles * m.mesh.count;
+      }
+    }
     for (const m of this.fallback) if (m.count > 0) {
       draws++;
       meshes++;
@@ -505,16 +660,25 @@ export class PortusTown {
     return { draws, triangles, shadowDraws, shadowTriangles, meshes };
   }
 
-  dispose() {
-    this.disposed = true;
+  private disposeMeshes() {
     for (const c of this.cells) for (const v of c.variants) for (const m of v) m.mesh.geometry.dispose();
     this.shadowMesh?.mesh.geometry.dispose();
+    for (const m of this.pads?.meshes ?? []) {
+      m.mesh.geometry.dispose();
+      m.mesh.dispose();
+    }
+    this.cells.length = 0;
+    this.shadowMesh = null;
+    this.pads = null;
+  }
+
+  dispose() {
+    this.disposed = true;
+    this.disposeMeshes();
     for (const m of this.fallback) {
       m.geometry.dispose();
       m.dispose();
     }
-    this.cells.length = 0;
-    this.shadowMesh = null;
     this.fallback.length = 0;
     this.group.removeFromParent();
   }

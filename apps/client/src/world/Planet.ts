@@ -4,6 +4,7 @@
 
 import * as THREE from "three/webgpu";
 import { BODIES, CHUNK_QUADS, createTerrain, gridDir, padDirs, SKY_PROFILES, type BodyDef, type BodyId, type Face, type Terrain } from "@firstlight/shared";
+import { OUTPOSTS } from "@firstlight/shared/content/padOutposts";
 import type { BakeResult, ChunkRequest, ChunkResult } from "./terrain.worker.ts";
 import { applyLook, atmo, radialFogNode, skyBackgroundNode, sunRigFor, type SunRig } from "../render/atmosphere.ts";
 import { applyGrassLook, GrassSystem, type GrassChunk } from "../render/grass.ts";
@@ -16,9 +17,8 @@ import { skyPlanetsFor, type SkyPlanets } from "../render/skyPlanets.ts";
 import { localFrame, type V3 } from "../render/sunFrame.ts";
 import { applyTerrainSettings, terrainMaterialFor, terrainUniforms } from "../render/terrainMaterial.ts";
 import { applyWaterLook, createWaterMesh, waterMaterialFor } from "../render/water.ts";
-import { PortusTown } from "./PortusTown.ts";
-import { townGrass } from "@firstlight/shared/planet/townGround";
-import { townCoords } from "@firstlight/shared/planet/townFrame";
+import { SiteTown } from "./SiteTown.ts";
+import { siteGrassMask } from "./siteGrass.ts";
 
 export { LOOKS, type BodyLook };
 
@@ -62,8 +62,8 @@ export class Planet {
   readonly skyPlanets: SkyPlanets;
   readonly grass: GrassSystem;
   readonly props: PropSystem;
-  /** The Portus castle town (D38); null on the planets. */
-  readonly town: PortusTown | null;
+  /** The body's structure site: the Portus castle town (D38) or the planet's pad-0 outpost (D42). */
+  readonly town: SiteTown | null;
   readonly waterGroup = new THREE.Group();
   private readonly scene: THREE.Scene;
   private readonly chunkInfos: ChunkInfo[] = [];
@@ -137,15 +137,13 @@ export class Planet {
     this.rig = sunRigFor(this.scene, this.look, ctx.renderer);
     this.skyPlanets = skyPlanetsFor(this.scene, this.look.skyPlanets);
     const hub = this.body.terrain.kind === "hub";
-    const R = this.body.radius;
-    const at: [number, number] = [0, 0];
-    // Hub: no blade roots on the town's paving, streets or footprints (townGround.ts).
-    const grassMask = hub ? (x: number, y: number, z: number) => townGrass(...townCoords(x, y, z, R, at)) : null;
+    // No blade roots on the site's paving, paths or footprints (townGround.ts, outpostGround.ts).
+    const grassMask = siteGrassMask(this.body);
     this.grass = new GrassSystem(this.body.radius, n, hub ? [] : padDirs(this.body), grassMask);
     this.group.add(this.grass.group);
     this.props = new PropSystem(bodyId);
     this.group.add(this.props.group);
-    this.town = hub ? new PortusTown(this.terrain, this.settings) : null;
+    this.town = hub || bodyId in OUTPOSTS ? new SiteTown(this.terrain, this.settings) : null;
     if (this.town) this.group.add(this.town.group);
     this.material = terrainMaterialFor(this.settings);
     this.waterMaterial = waterMaterialFor(this.settings.water);

@@ -149,7 +149,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   private lastSave = 0;
   host!: CombatHost;
   moveWorld!: MoveWorld;
-  /** The Portus town's structures (null on the planets): blocks movement, and placement (placeBody). */
+  /** The body's structure sites (Portus' town, a planet's pad outpost): block movement and placement (placeBody). */
   private structures: StructureCollider | null = null;
   systems: RoomSystem[] = [];
   portals: PortalSpot[] = [];
@@ -214,8 +214,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     this.bodyDef = BODIES[options.body];
     this.terrain = createTerrain(this.bodyDef);
     const terrain = this.terrain;
-    // Portus town structures (D38): indestructible walls, houses and towers, the same shared solids
-    // the client controller collides with; they count like intact props (tops hold feet, insides refuse).
+    // Structure sites (D38, D42): Portus' town and the planets' pad outposts: indestructible walls,
+    // houses and towers, the same shared solids the client controller collides with; they count like
+    // intact props (tops hold feet, insides refuse), stop shots and sight (host.walls, D43) and NPCs (D44).
     const structures = (this.structures = structureCollider(terrain));
     const footing = { top: 0, inside: false };
     this.moveWorld = {
@@ -249,6 +250,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       broadcast: (type, msg, except) => this.broadcast(type as never, msg as never, except ? { except: except.client } : undefined),
       broadcastNear: (type, msg, at, radius, always) => this.broadcastNear(type, msg, at, radius, always),
       onDamage: (target, amount, attacker) => this.afterDamage(target, attacker, amount),
+      walls: structures,
     };
 
     // Load-test copies neither show nor touch the public world's piles (piles belong to a body, not a copy).
@@ -1320,7 +1322,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
   /**
    * Where to put a player (a restored save, a teleport, a stage spot): the ground under `p`, pushed
-   * out of the Portus town's structures exactly as the client's first frame would push it (D39,
+   * out of the body's structures (Portus' town, a pad outpost) exactly as the client's first frame would push it (D39,
    * round-1 B1), so client and server start from the same clear point; a push longer than the move
    * budget would otherwise be refused and corrected back inside, forever. A spot that can't be
    * cleared (boxed in) falls back to the spawn ring.
@@ -1329,7 +1331,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     return this.clearOfStructures(this.snapToGround(p)) ?? this.spawnPoint(seed);
   }
 
-  /** `g` (on the ground) pushed out of the town's structures, or null if it stays inside one. */
+  /** `g` (on the ground) pushed out of the body's structures, or null if it stays inside one. */
   private clearOfStructures(g: V3): V3 | null {
     if (!this.structures) return g;
     const q = { x: g[0], y: g[1], z: g[2] };

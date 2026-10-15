@@ -1,5 +1,5 @@
 {
- "version": "37dea9e571788d94",
+ "version": "6fec809202027bb3",
  "body": "hollowmere",
  "files": {
   "glb": {
@@ -8,12 +8,12 @@
    "sha256": "09254a72cf231cff1ed404b3b3c6ee41a782c801356aa055f8c759ee7945967e"
   },
   "color": {
-   "name": "../portus/portus_color.webp",
+   "name": "../../portus/portus_color.webp",
    "bytes": 167220,
    "sha256": "02997d204f4e42e14bbe7192e88af48797683f424ef8e4734cb1d3a816eafda6"
   },
   "normal": {
-   "name": "../portus/portus_normal.webp",
+   "name": "../../portus/portus_normal.webp",
    "bytes": 255836,
    "sha256": "9658a29258d9c3112b8299510ff572c432116824aec6916ade7bcbb5bbf8d735"
   }

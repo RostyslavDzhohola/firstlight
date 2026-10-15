@@ -29,6 +29,20 @@ def pt(p):
     return f"[{num(p[0])}, {num(p[1])}]"
 
 
+# Ground-touching solids reach FOUNDATION m below their item's base (D44). A base stands up to 1.3 m
+# over the downhill ground under its footprint (the plinth takes up the slope: design.py
+# resolve_bases), so a solid starting at the base would leave a gap under the wall there: short NPCs
+# would walk under it and shots and blast lines would pass below it. Walkable tops are unchanged.
+FOUNDATION = 1.5
+
+
+def solid(s):
+    y0 = float(s[5])
+    if y0 <= 0.05:
+        y0 = min(y0, -FOUNDATION)
+    return "[" + ", ".join([str(int(s[0]))] + [num(v) for v in s[1:5]] + [num(y0)] + [num(v) for v in s[6:]]) + "]"
+
+
 def fileinfo(path, name):
     data = open(path, "rb").read()
     return {"name": name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
@@ -60,8 +74,8 @@ L.append("  version: string;")
 L.append("  prefabs: readonly TownPrefab[];")
 L.append("  /** Pad 0's outpost (its pad platform and portal gate included). */")
 L.append("  layout: readonly OutpostItem[];")
-L.append("  /** Paved paths: centre lines with widths (render-only: grass and prop masks). */")
-L.append("  paths: readonly { width: number; pts: readonly (readonly [number, number])[] }[];")
+L.append("  /** Paved paths: centre lines with widths and their material slot (render-only: decals, grass and prop masks). */")
+L.append("  paths: readonly { width: number; mat: string; pts: readonly (readonly [number, number])[] }[];")
 L.append("  /** The landing platform drawn on every other pad (visual only: no solids) and the waystone beside it. */")
 L.append("  pad: number;")
 L.append("  waystone: number;")
@@ -83,7 +97,7 @@ for b in BODIES:
     L.append(f'    version: "{version}",')
     L.append("    prefabs: [")
     for p in site["prefabs"]:
-        solids = ", ".join("[" + ", ".join([str(int(s[0]))] + [num(v) for v in s[1:]]) + "]" for s in p["solids"])
+        solids = ", ".join(solid(s) for s in p["solids"])
         L.append(f'      {{ name: "{p["name"]}", cls: "{p["cls"]}", tris: [{p["tris"][0]}, {p["tris"][1]}], height: {num(p["height"], 2)}, radius: {num(p["radius"], 2)}, solids: [{solids}] }},')
     L.append("    ],")
     L.append("    layout: [")
@@ -92,7 +106,7 @@ for b in BODIES:
     L.append("    ],")
     L.append("    paths: [")
     for pa in site["paths"]:
-        L.append(f'      {{ width: {num(pa["width"])}, pts: [{", ".join(pt(p) for p in pa["pts"])}] }}, // {pa["name"]}')
+        L.append(f'      {{ width: {num(pa["width"])}, mat: "{pa["mat"]}", pts: [{", ".join(pt(p) for p in pa["pts"])}] }}, // {pa["name"]}')
     L.append("    ],")
     L.append(f'    pad: {site["pad"]},')
     L.append(f'    waystone: {site["waystone"]},')
@@ -102,8 +116,8 @@ for b in BODIES:
     d = os.path.join(ship, b)
     files = {"glb": fileinfo(os.path.join(d, f"{b}.glb"), f"{b}.glb")}
     if report["sharedStrips"]:
-        files["color"] = fileinfo(os.path.join(portus_dir, "portus_color.webp"), "../portus/portus_color.webp")
-        files["normal"] = fileinfo(os.path.join(portus_dir, "portus_normal.webp"), "../portus/portus_normal.webp")
+        files["color"] = fileinfo(os.path.join(portus_dir, "portus_color.webp"), "../../portus/portus_color.webp")
+        files["normal"] = fileinfo(os.path.join(portus_dir, "portus_normal.webp"), "../../portus/portus_normal.webp")
     else:
         files["color"] = fileinfo(os.path.join(d, f"{b}_color.webp"), f"{b}_color.webp")
         files["normal"] = fileinfo(os.path.join(d, f"{b}_normal.webp"), f"{b}_normal.webp")

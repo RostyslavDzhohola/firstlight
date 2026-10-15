@@ -1,5 +1,5 @@
 {
- "version": "2058778d8e5e7336",
+ "version": "a075f862034a7f81",
  "body": "arcadia",
  "files": {
   "glb": {
@@ -8,12 +8,12 @@
    "sha256": "5ba9d15b4f61ef27852ee85b710025ccf62fbbc416e45b881e48eb54459f28c6"
   },
   "color": {
-   "name": "../portus/portus_color.webp",
+   "name": "../../portus/portus_color.webp",
    "bytes": 167220,
    "sha256": "02997d204f4e42e14bbe7192e88af48797683f424ef8e4734cb1d3a816eafda6"
   },
   "normal": {
-   "name": "../portus/portus_normal.webp",
+   "name": "../../portus/portus_normal.webp",
    "bytes": 255836,
    "sha256": "9658a29258d9c3112b8299510ff572c432116824aec6916ade7bcbb5bbf8d735"
   }

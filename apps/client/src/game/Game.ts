@@ -381,7 +381,7 @@ export class Game {
     this.particles.setMoteColor(this.planet.look.mote);
     this.player ??= new PlayerController(this.planet.terrain, this.planet.body.waterLevel);
     this.player.setTerrain(this.planet.terrain, this.planet.body.waterLevel);
-    // The Portus town's structures block like the server's (null off Portus).
+    // The body's structures (Portus' town, a planet's outpost and waystones) block like the server's.
     this.player.setStructures(this.planet.town?.moveColliders ?? null);
     this.portals = new Portals(this.ctx.scene, body, this.planet.terrain);
     this.audio.setMusic(body);
@@ -432,12 +432,14 @@ export class Game {
     await Promise.all([preloadAvatars(), preloadHorse(), this.planet.props.ready]); // resolve null on failure: capsules / box horses
     alive("loading characters");
     if (this.planet.town) {
-      // Portus: the castle town is in the scene before the probe and the warm-up (falls back to plain colliders).
-      // Bounded: the download aborts after 15 s and the town shows its stone fallback by 18 s, so
-      // the probe and the warm-up always see what will be drawn (no late meshes, no live builds).
-      setLoading("Raising the town…", 0.81);
+      // The castle town (Portus) or the pad outpost (a planet) is in the scene before the probe and
+      // the warm-up (falls back to plain colliders). Bounded: the download aborts after 15 s and the
+      // site shows its stone fallback by 18 s, so the probe and the warm-up always see what will be
+      // drawn (no late meshes, no live builds). With the outpost's models the plain pad discs go.
+      setLoading(this.planet.body.terrain.kind === "hub" ? "Raising the town…" : "Raising the outpost…", 0.81);
       await this.planet.town.ready;
       alive("raising the town");
+      this.portals?.setPadModels(this.planet.town.drawsModels);
     }
     if (!this.self) {
       this.self = new AvatarView(choice?.palette ?? stored.palette, choice?.starter ?? stored.starter);

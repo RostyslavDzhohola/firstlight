@@ -7,7 +7,7 @@ import { PLAYER_BODY, type XYZ } from "./collide.ts";
 import { padDirs, PAD_SAFE_RADIUS } from "./pads.ts";
 import { portalSpots } from "./portals.ts";
 import {
-  outpostAnchor, placeSiteItem, POLE_ANCHOR, siteAnchor, siteCoords, siteDir, sitePlacements, sitePrefabs, siteSolids, structureCollider,
+  outpostAnchor, padPlatformPlacement, placeSiteItem, POLE_ANCHOR, siteAnchor, siteCoords, siteDir, sitePlacements, sitePrefabs, siteSolids, structureCollider,
   type StructureSolid,
 } from "./sites.ts";
 import { createTerrain, type Terrain } from "./terrain.ts";
@@ -122,10 +122,26 @@ describe("structure sites: frames", () => {
       expect(placed.length).toBe(OUTPOSTS[b].layout.length + pads.length - 1);
       const waystones = placed.filter((p) => p.item < 0);
       expect(waystones.map((p) => p.prefab)).toEqual(new Array(pads.length - 1).fill(OUTPOSTS[b].waystone));
+      // One fixed offset from each pad's platform frame (the client instances platform + waystone).
+      const rel = (w: TownPlacement) => {
+        const p = padPlatformPlacement(t, -1 - w.item);
+        const d = [w.px - p.px, w.py - p.py, w.pz - p.pz];
+        const dot = (ax: number, ay: number, az: number, b: readonly number[]) => ax * b[0]! + ay * b[1]! + az * b[2]!;
+        const axes = (q: TownPlacement) => [[q.rx, q.ry, q.rz], [q.ux, q.uy, q.uz], [q.fx, q.fy, q.fz]] as const;
+        return [
+          ...[dot(p.rx, p.ry, p.rz, d), dot(p.ux, p.uy, p.uz, d), dot(p.fx, p.fy, p.fz, d)],
+          ...axes(w).flatMap((v) => axes(p).map((u) => dot(u[0], u[1], u[2], v))),
+        ];
+      };
+      const first = rel(waystones[0]!);
       for (const w of waystones) {
         const k = -1 - w.item;
+        rel(w).forEach((v, i) => expect(v).toBeCloseTo(first[i]!, 6));
+        // Where WAYSTONE_AT puts it (the geodesic offset shrinks a little with the pad's height), on the ground.
         const c = siteCoords(siteAnchor(pads[k]!), w.px, w.py, w.pz, t.body.radius);
-        expect(Math.hypot(c[0] - WAYSTONE_AT[0], c[1] - WAYSTONE_AT[1])).toBeLessThan(0.01);
+        expect(Math.hypot(c[0] - WAYSTONE_AT[0], c[1] - WAYSTONE_AT[1])).toBeLessThan(0.35);
+        const l = Math.hypot(w.px, w.py, w.pz);
+        expect(Math.abs(l - t.body.radius - t.groundHeight(w.px / l, w.py / l, w.pz / l))).toBeLessThan(0.1);
       }
       expect(sitePrefabs(b)).toBe(OUTPOSTS[b].prefabs);
     }

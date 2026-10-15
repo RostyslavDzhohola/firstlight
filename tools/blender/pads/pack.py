@@ -189,7 +189,7 @@ def main():
     index = {p["name"]: i for i, p in enumerate(prefabs)}
     layout = [dict(prefab=it["prefab"], east=it["east"], north=it["north"], yaw=it["yaw"], scale=it["scale"], base=it["base"],
                    label=it["label"]) for it in LAYOUT["layout"]]
-    site = dict(body=BODY, prefabs=prefabs, layout=layout, paths=[dict(name=p["name"], width=p["width"], pts=p["pts"]) for p in LAYOUT["paths"]],
+    site = dict(body=BODY, prefabs=prefabs, layout=layout, paths=[dict(name=p["name"], width=p["width"], mat=p["mat"], pts=p["pts"]) for p in LAYOUT["paths"]],
                 pad=index[f"{b}_pad"], waystone=index[f"{b}_waystone"])
     with open(os.path.join(PP.OUT, "site.json"), "w") as f:
         json.dump(site, f, indent=1)

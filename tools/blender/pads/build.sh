@@ -68,7 +68,7 @@ for BODY in arcadia hollowmere meridian; do
   if [ -f "$WORK/packed/$BODY/${BODY}_color.webp" ]; then cp "$WORK/packed/$BODY/${BODY}_color.webp" "$WORK/packed/$BODY/${BODY}_normal.webp" "$WORK/ship/$BODY/"; fi
 done
 
-# 4. Shared data + manifests (Arcadia and Hollowmere reference the shipped Portus strips), then install.
+# 4. Shared data + manifests (Arcadia and Hollowmere reference the shipped Portus strips: "../../portus/…" from their folder), then install.
 python3 -I "$HERE/gen_outposts.py" "$WORK/packed" "$WORK/ship" "$TS" "$PORTUS"
 for BODY in arcadia hollowmere meridian; do
   mkdir -p "$OUT/$BODY"

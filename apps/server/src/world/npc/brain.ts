@@ -11,9 +11,14 @@ import type { V3 } from "../geometry.ts";
 import { cancelAttack, canSee, chest, groundOnly, isMelee, meleeHeightTol, startAttack, updateAttack } from "./attacks.ts";
 import type { NpcSystem } from "./NpcSystem.ts";
 import { MODE, type Npc } from "./npc.ts";
-import { feetHeight, nearSafeRing, step } from "./steer.ts";
+import { feetHeight, lastStep, nearSafeRing, npcBody, step } from "./steer.ts";
 import { NPC_TUNING, emitNpcEvent } from "./tuning.ts";
 import { add, cross, dist, dot, flatDist, len, normalize, rotateAboutUp, stableTangentAt, sub, tangentDir, tangentize, up } from "./vec.ts";
+
+/** A wander walk ends after this long even short of its goal (a building in the way, D44). */
+const WANDER_MS = 30_000;
+/** A walk home (RETURN) that hasn't arrived after this long puts the NPC home (D44). */
+const RETURN_MS = 30_000;
 
 export function think(sys: NpcSystem, n: Npc, now: number, dt: number) {
   if (n.dead) return;
@@ -80,7 +85,8 @@ function calm(sys: NpcSystem, n: Npc, now: number, dt: number) {
   }
   if (n.mode === MODE.WANDER && n.goal) {
     sys.setAnim(n, NPC_ANIM.WALK);
-    if (moveTo(sys, n, n.goal, def.speed, dt)) {
+    // A walk a building holds up ends after WANDER_MS (D44); elsewhere goals are reached well before.
+    if (moveTo(sys, n, n.goal, def.speed, dt) || now - n.modeAt > WANDER_MS) {
       n.goal = null;
       sys.setMode(n, MODE.IDLE, now, now + 2000 + Math.random() * 4000);
     }
@@ -92,7 +98,13 @@ function calm(sys: NpcSystem, n: Npc, now: number, dt: number) {
       const ang = Math.random() * 360;
       const r = Math.random() * n.roam;
       const t = rotateAboutUp(n.home, stableTangentAt(n.home), ang);
-      n.goal = add(n.home, t, r);
+      const goal = add(n.home, t, r);
+      // Never a goal inside a building (D44): it idles a little longer instead.
+      if (sys.ground.structures.solids.length > 0 && !sys.ground.structures.isClear({ x: goal[0], y: goal[1], z: goal[2] }, npcBody(n.radius, n.height))) {
+        n.modeUntil = now + 2000 + Math.random() * 3000;
+        return;
+      }
+      n.goal = goal;
       sys.setMode(n, MODE.WANDER, now);
     } else n.modeUntil = now + 2000 + Math.random() * 3000;
   }
@@ -207,6 +219,12 @@ function chase(sys: NpcSystem, n: Npc, now: number, dt: number) {
     n.unreachSince = undefined;
     n.unreachBy = undefined;
   }
+  // Walled off (D44): it steers round buildings, but one that keeps it from getting closer for
+  // unreachableMs sends it home to heal, as an unreachable target does. Never stuck at a wall.
+  if (walledOff(sys, n, tp, d, now)) {
+    startEvade(sys, n, now);
+    return;
+  }
   if (def.fleeBelow && n.state.hp < n.state.maxHp * def.fleeBelow && sys.mates(n).length < 2) {
     startFlee(sys, n, tp, now, 6000);
     n.target = null;
@@ -288,6 +306,26 @@ function outOfReach(sys: NpcSystem, n: Npc, tp: V3, d: number): boolean {
   return perch > tol && n.def.attacks.every(groundOnly);
 }
 
+/**
+ * A structure stands between the NPC and its target (a segment 0.6 m above both feet, over the step
+ * band) and the NPC hasn't got 1 m closer than its best since: for unreachableMs, it's walled off.
+ * Open ground (or a target in melee reach) clears the clock, so this never acts away from structures.
+ */
+function walledOff(sys: NpcSystem, n: Npc, tp: V3, d: number, now: number): boolean {
+  const s = sys.ground.structures;
+  if (s.solids.length === 0 || d <= meleeReach(n) + 0.5) {
+    n.walled = undefined;
+    return false;
+  }
+  const a = chest(n.pos, 0.6), b = chest(tp, 0.6);
+  if (!s.blocks(a[0], a[1], a[2], b[0], b[1], b[2])) {
+    n.walled = undefined;
+    return false;
+  }
+  if (!n.walled || d < n.walled.best - 1) n.walled = { since: now, best: d };
+  return now - n.walled.since >= NPC_TUNING.unreachableMs;
+}
+
 function meleeReach(n: Npc): number {
   let best = 0;
   for (const a of n.def.attacks) if (isMelee(a) && !a.minRange) best = Math.max(best, a.range);
@@ -320,6 +358,7 @@ export function startEvade(sys: NpcSystem, n: Npc, now: number) {
   cancelAttack(sys, n);
   n.target = null;
   n.unreachSince = undefined;
+  n.walled = undefined;
   sys.releaseToken(n);
   n.damage.clear();
   n.state.flags = (n.state.flags | NF.EVADING | NF.INVULN) & ~(NF.AGGRO | NF.TELEGRAPH | NF.STUNNED);
@@ -349,7 +388,10 @@ function goHome(sys: NpcSystem, n: Npc, now: number, dt: number) {
     if (p) return aggro(sys, n, p, now, true);
   }
   sys.setAnim(n, NPC_ANIM.WALK);
-  if (moveTo(sys, n, n.home, n.def.speed * 1.3, dt, 1.5)) {
+  const arrived = moveTo(sys, n, n.home, n.def.speed * 1.3, dt, 1.5);
+  // Held up (by a building, D44) for RETURN_MS: put home, as evade does after 20 s.
+  if (arrived || now - n.modeAt > RETURN_MS) {
+    if (!arrived) n.pos = [n.home[0], n.home[1], n.home[2]];
     n.howled = false;
     sys.setMode(n, MODE.IDLE, now, now + 1500);
   }
@@ -560,9 +602,11 @@ export function moveDir(sys: NpcSystem, n: Npc, dir: V3, speed: number, dt: numb
     n.facing = d;
   }
   const out: V3 = [0, 0, 0];
-  const used = step(sys.ground, n.pos, d, speed * dt, n.def.locomotion, n.def.hover ?? 0, n.radius, out, avoidSafe);
+  const used = step(sys.ground, n.pos, d, speed * dt, n.def.locomotion, n.def.hover ?? 0, n.radius, out, avoidSafe, n.height, n.slideSide);
   sys.setAnim(n, anim);
   if (used < 0) return false;
+  // Rounding a building (D44): keep to the side that got past its wall, so it walks on round the corner.
+  if (lastStep.wall && lastStep.side !== 0) n.slideSide = lastStep.side;
   n.pos = out;
   return true;
 }

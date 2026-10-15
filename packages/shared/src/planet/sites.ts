@@ -14,7 +14,7 @@ import { OUTPOSTS, WAYSTONE_AT, type OutpostBody, type OutpostSite } from "../co
 import { TOWN_LAYOUT, TOWN_PREFABS, type TownItem, type TownPrefab, type TownSolid } from "../content/portusTown.ts";
 import { objectDir, WORLD_OBJECT_BY_ID } from "../content/world.ts";
 import { BreakableCollider, emptyContact, PLAYER_BODY, pushOutOfBreakable, resetContact, supportHeightAt, type PropContact, type XYZ } from "./collide.ts";
-import type { SolidFrame } from "./breakables.ts";
+import { rayBreakable, segmentNearBreakable, type SolidFrame } from "./breakables.ts";
 import type { BodyId } from "./bodies.ts";
 import { padDirs } from "./pads.ts";
 import type { Terrain } from "./terrain.ts";
@@ -100,14 +100,29 @@ export function sitePlacements(terrain: Terrain): readonly TownPlacement[] {
     const a0 = outpostAnchor(terrain);
     site.layout.forEach((it, i) => out.push(placeSiteItem(a0, it[1], it[2], it[3], R, R + it[5], emptyPlacement(i, it[0], it[4]))));
     const pads = padDirs(terrain.body);
-    for (let k = 1; k < pads.length; k++) {
-      const a = siteAnchor(pads[k]!);
-      out.push(placeSiteItem(a, WAYSTONE_AT[0], WAYSTONE_AT[1], WAYSTONE_AT[2], R, R + terrain.padHeights[k]!, emptyPlacement(-1 - k, site.waystone, 1)));
-    }
+    for (let k = 1; k < pads.length; k++) out.push(waystonePlacement(terrain, k, site.waystone));
     list = out;
   }
   placementCache.set(terrain, list);
   return list;
+}
+
+/**
+ * The waystone beside pad `k` (k >= 1): one fixed offset from the pad's platform frame
+ * (padPlatformPlacement), the same at every pad, so the client draws all the pads' platforms and
+ * waystones as one instanced mesh. The offset is WAYSTONE_AT placed at the planet radius (its tilt
+ * and the curve's drop there), carried up to the pad's height with the platform: the stone stands
+ * 9.6 m out on the flattened apron at any pad height.
+ */
+function waystonePlacement(terrain: Terrain, k: number, prefab: number): TownPlacement {
+  const R = terrain.body.radius;
+  const a = siteAnchor(padDirs(terrain.body)[k]!);
+  const w = placeSiteItem(a, WAYSTONE_AT[0], WAYSTONE_AT[1], WAYSTONE_AT[2], R, R, emptyPlacement(-1 - k, prefab, 1));
+  const h = terrain.padHeights[k]!;
+  w.px += a.up[0] * h;
+  w.py += a.up[1] * h;
+  w.pz += a.up[2] * h;
+  return w;
 }
 
 /** The prefab table the placements of `body` index. */
@@ -251,6 +266,7 @@ export class StructureCollider {
   readonly solids: readonly StructureSolid[];
   readonly collider: BreakableCollider<StructureSolid>;
   private readonly candidates: number[] = [];
+  private readonly rayCandidates: number[] = [];
   private readonly scratch: XYZ = { x: 0, y: 0, z: 0 };
   private readonly contact: PropContact = emptyContact();
   private readonly clearContact: PropContact = emptyContact();
@@ -268,9 +284,22 @@ export class StructureCollider {
     return this.collider.resolve(p, always, out);
   }
 
-  /** Distance along a ray (unit d) to the first structure within maxT, or Infinity. */
+  /**
+   * Distance along a ray (unit d) to the first structure within maxT, or Infinity. A solid the ray
+   * starts inside is ignored (like the breakables in destruction.ts: a blast or a shot that starts in
+   * a wall's surface isn't stopped by that wall from inside).
+   */
   raycast(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number): number {
-    return this.collider.raycast(ox, oy, oz, dx, dy, dz, maxT, always);
+    if (!(maxT > 0) || this.solids.length === 0) return Infinity;
+    const n = this.collider.grid.collect(ox, oy, oz, dx, dy, dz, maxT, 0, this.rayCandidates);
+    let best = Infinity;
+    for (let k = 0; k < n; k++) {
+      const b = this.solids[this.rayCandidates[k]!]!;
+      if (!segmentNearBreakable(b, ox, oy, oz, dx, dy, dz, maxT)) continue;
+      const t = rayBreakable(b, ox, oy, oz, dx, dy, dz, Math.min(maxT, best));
+      if (t > 1e-6 && t < best) best = t;
+    }
+    return best;
   }
 
   /** Does the segment from a to b pass through a structure (rays leaving a solid they start inside don't count)? */

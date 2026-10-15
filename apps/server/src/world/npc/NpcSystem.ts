@@ -22,7 +22,7 @@ import { pruneRewardMaps, rewardKill } from "./rewards.ts";
 import { PayoutQueue } from "./payouts.ts";
 import { activePull, applyMoveEffect, applyPull } from "./effects.ts";
 import { buildSpawnPoints, type SpawnPoint } from "./spawns.ts";
-import { makeGround, placeOnGround, type Ground } from "./steer.ts";
+import { clearOfStructures, makeGround, npcBody, placeOnGround, type Ground } from "./steer.ts";
 import { NPC_TUNING } from "./tuning.ts";
 import { dist, dist2, dot, flatDist, len, stableTangentAt, tangentDir, tangentize, up } from "./vec.ts";
 import { walk } from "@firstlight/shared/content/arenas";
@@ -304,6 +304,8 @@ export class NpcSystem implements RoomSystem {
     opts: { point?: SpawnPoint | null; member?: number; roam?: number; boss?: boolean; summoner?: string; instant?: boolean; spawned?: Npc["spawned"]; ttlMs?: number } = {},
   ): Npc {
     const def = NPC_DEFS[defIndex]!;
+    // Never inside a building (D44): spawns, summons and admin spawns are pushed clear of structures.
+    pos = clearOfStructures(this.ground, pos, def.locomotion, def.hover ?? 0, npcBody(def.radius, def.height));
     const state = this.world.newNpcState();
     const hp = npcMaxHp(def, level);
     state.kind = defIndex;
@@ -369,6 +371,7 @@ export class NpcSystem implements RoomSystem {
       hpAcc: 0,
       gridAxis: -1,
       strafeSign: this.seq & 1 ? 1 : -1,
+      slideSide: 1,
       spawned: opts.spawned ?? null,
       expiresAt: opts.ttlMs ? now + opts.ttlMs : 0,
       dead: false,
@@ -595,6 +598,8 @@ export class NpcSystem implements RoomSystem {
       const d = Math.min(flatDist(pos, pull.c), pull.speed * dt);
       if (d < 0.01 || dot(t, t) < 0.5) continue;
       const g = this.world.snapToGround([pos[0] + t[0] * d, pos[1] + t[1] * d, pos[2] + t[2] * d]);
+      // Not through a building (D44): the pull stops at the wall.
+      if (this.ground.structures.solids.length > 0 && this.ground.structures.crosses(pos[0], pos[1], pos[2], g[0], g[1], g[2])) continue;
       a.state.x = a.lastX = g[0];
       a.state.y = a.lastY = g[1];
       a.state.z = a.lastZ = g[2];

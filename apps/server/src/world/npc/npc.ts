@@ -106,8 +106,15 @@ export interface Npc extends NpcActor {
   /** Brightbits' current 90° movement axis (0–3), −1 = none. */
   gridAxis: number;
   strafeSign: number;
+  /** The side (+1 left, -1 right) it rounds a structure by: the turn that last got it past one (steer.ts step, D44). */
+  slideSide: number;
   /** Since when the chased target has stood where this NPC can't reach it (brain.ts), if it has. */
   unreachSince?: number;
+  /**
+   * A structure stands between it and its chased target: since when, and the closest it has got
+   * since then (brain.ts walledOff, D44). Unset while the way is open or the target is in reach.
+   */
+  walled?: { since: number; best: number };
   /**
    * The unreachable target it last gave up on and when that clock started: the same target waking it
    * again keeps the clock (a pad shooter gets no fresh window after each heal; F12 final Opus SF9).
