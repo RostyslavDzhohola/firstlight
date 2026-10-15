@@ -157,6 +157,7 @@ export class Menu {
   /** Draw a pause state: the menu, the click-to-look hint, or neither. */
   private render(s: PauseState) {
     this.hint.classList.toggle("is-on", s === "free");
+    this.game.input.free = s === "free"; // keys keep working in the hint state (Input.inPlay)
     if (s === "menu") {
       if (this.mode !== "pause" && this.mode !== "settings") this.showPause();
     } else if (this.mode === "pause" || this.mode === "settings") this.hideAll();

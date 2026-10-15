@@ -610,3 +610,13 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   owner's "it takes a second before it rolls": measured headless, the roll pose showed 75–150 ms
   after the key (the clip stood up first), presses in the cooldown's last moment or just before
   landing were lost, and a C pressed while travelling rolled on arrival. Now 25–75 ms.
+- **D-controls-4 (2026-10-15):** Keys work in the "Click to look around" state. Panel and world keys
+  (M, I, J, T, E, 1–4, R, H) are gated on `Input.inPlay` (pointer locked, or free with the hint) instead
+  of the pointer lock, so a refused or lost lock, or Esc → Esc, never dead-keys them; they stay off
+  while the pause menu, a panel or a notice is up. Movement (WASD, Space, C, Shift) works there too, as
+  it did; mouse-look and attacks wait for the click that locks the pointer, and so does the phrase
+  wheel (G), which is aimed with the mouse. Tab, `` ` ``, Shift+P and P already worked. Behind a
+  loading screen (first arrival, travel, rejoin, re-warm) these keys and Tab/P wait for the hand-over
+  (`Input.suspendedWhile`, set by Game), and whenever the pointer isn't locked a guard, scope or charge
+  in progress is cancelled (no heavy on release or on the next lock). Why: Codex's production smoke
+  test found M dead in that state, and real Chrome lands there after a refused lock.
