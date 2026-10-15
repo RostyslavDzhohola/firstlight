@@ -8,7 +8,7 @@ import { BODIES, createTerrain, isSafe, padDirs, portalNear, portalSpots, type B
 import { BACKPACK_SLOTS, HOTBAR_SLOTS, newCharacter, type CharacterData } from "@firstlight/shared/content/character";
 import { INV_SLOTS, moveSlot, storeItem } from "@firstlight/shared/content/inventory";
 import { fallDamageFraction, levelForXp, maxHp, pvpKillXp, xpAtLevel, xpToNext } from "@firstlight/shared/content/progression";
-import { WEAPON_BY_ID, WEAPON_INDEX } from "@firstlight/shared/content/weapons";
+import { STARTERS, WEAPON_BY_ID, WEAPON_INDEX } from "@firstlight/shared/content/weapons";
 import { NET, PHRASES, type InvItem, type YouState } from "@firstlight/shared/net/protocol";
 import { ANIM, BodyState, NpcState, PF, PileState, PlayerState } from "@firstlight/shared/net/schema";
 import { z } from "zod";
@@ -77,11 +77,11 @@ const CARRIED_ON_TAKEOVER = ["protectedUntil", "heals", "healAcc", "burn", "heal
 
 const vec = z.number().finite();
 const inputSchema = z.object({ seq: z.number().int().nonnegative(), x: vec, y: vec, z: vec, fx: z.number().min(-1).max(1), fy: z.number().min(-1).max(1), fz: z.number().min(-1).max(1), anim: z.number().int().min(0).max(31), t: vec });
-const fireSchema = z.object({ slot: z.number().int().min(0).max(3), ox: vec, oy: vec, oz: vec, dx: vec, dy: vec, dz: vec, t: vec, charge: z.number().min(0).max(1).optional() });
+const fireSchema = z.object({ slot: z.number().int().min(0).max(3), ox: vec, oy: vec, oz: vec, dx: vec, dy: vec, dz: vec, t: vec, charge: z.number().min(0).max(1).optional(), seal: z.boolean().optional() });
 const meleeSchema = z.object({ slot: z.number().int().min(0).max(3), t: vec, heavy: z.boolean().optional() });
 const slotSchema = z.object({ slot: z.number().int().min(0).max(HOTBAR_SLOTS + BACKPACK_SLOTS - 1) });
 const pickupSchema = z.object({ pileId: z.string().max(64), itemIndex: z.number().int().min(0).max(64).optional() });
-const respawnSchema = z.object({ starter: z.number().int().min(0).max(3), palette: z.number().int().min(0).max(5) });
+const respawnSchema = z.object({ starter: z.number().int().min(0).max(STARTERS.length - 1), palette: z.number().int().min(0).max(5) });
 const adminSchema = z.object({ cmd: z.string().max(32), args: z.record(z.string(), z.unknown()).optional() });
 
 

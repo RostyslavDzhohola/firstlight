@@ -54,6 +54,11 @@ export interface WeaponDef {
   destroys: Destroys;
   stack: number; // max per inventory slot
   tiers: [TierStats, TierStats, TierStats];
+  /** Alt attack that fires another (hidden) def: RMB held for the tier's `heavyTime`, then released
+   *  (the Ember Kunai's Ember Seal). Its cooldown is the holder's tier `cooldown`. */
+  special?: string;
+  /** Not an item: only reachable through another weapon's `special` (never sold, never fired directly). */
+  hidden?: boolean;
 }
 
 const T = (level: number, price: number, s: Omit<TierStats, "level" | "price">): TierStats => ({ level, price, ...s });
@@ -163,6 +168,19 @@ export const WEAPONS: readonly WeaponDef[] = [
     destroys: "none", stack: 1,
     tiers: [T(1, 1500, { damage: 0, rate: 0 }), T(1, 1500, { damage: 0, rate: 0 }), T(1, 1500, { damage: 0, rate: 0 })],
   },
+  // The ninja starter's line (content.md §2.3, HANDOFF 6h): thrown kunai on LMB; hold RMB for a 0.4 s
+  // hand seal, release to cast the Ember Seal fireball (the hidden def below) on the tier's cooldown.
+  {
+    id: "kunai", name: "Ember Kunai", cls: "ranged", delivery: "projectile", range: 35, speed: 42, gravity: 4,
+    destroys: "light", stack: 1, special: "ember_seal",
+    tiers: [T(1, 60, { damage: 13, rate: 0.38, mag: 8, reload: 1.3, heavyTime: 0.4, cooldown: 8 }), T(6, 300, { damage: 18, rate: 0.38, mag: 9, reload: 1.2, pierce: 1, heavyTime: 0.4, cooldown: 7.5 }), T(12, 900, { damage: 24, rate: 0.38, mag: 10, reload: 1.1, pierce: 1, heavyTime: 0.4, cooldown: 7 })],
+  },
+  {
+    id: "ember_seal", name: "Ember Seal", cls: "magic", delivery: "projectile", range: 30, speed: 24, gravity: 0,
+    destroys: "heavy", stack: 1, hidden: true,
+    // Direct hit includes the blast for the victim (like rockets); burn refreshes, never stacks.
+    tiers: [T(1, 0, { damage: 30, splash: 20, radius: 2.5, burn: 4, rate: 0.4 }), T(6, 0, { damage: 40, splash: 27, radius: 2.75, burn: 5, rate: 0.4 }), T(12, 0, { damage: 52, splash: 35, radius: 3, burn: 6, rate: 0.4 })],
+  },
 ];
 
 export const WEAPON_INDEX: ReadonlyMap<string, number> = new Map(WEAPONS.map((w, i) => [w.id, i]));
@@ -180,6 +198,7 @@ export const STARTERS = [
   { id: "ash", name: "Brother Ash", weapon: "sunbrand" },
   { id: "kappa", name: "Kappa", weapon: "riverstaff" },
   { id: "unit7", name: "Unit 7", weapon: "carbine" },
+  { id: "ninja", name: "Hinoko", weapon: "kunai" },
 ] as const;
 
 export const PALETTE_NAMES = ["Ivory", "Sand", "Midnight", "Moss", "Ember", "Dusk"] as const;
