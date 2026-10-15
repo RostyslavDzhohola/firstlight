@@ -25,11 +25,7 @@ vi.mock("../net/auth.ts", async (importOriginal) => {
 
 const ME = { userId: "g", name: "Wren_07", displayName: "Wren_07", guest: true, admin: false, titleMedal: null, character: { level: 3, xp: 0, coins: 0, starter: 1, palette: 0, body: "portus" }, medals: [], pads: [], saveReady: true, playMs: 0 };
 
-let auth: typeof AuthT;
-beforeAll(async () => {
-  history.replaceState(null, "", "/");
-  vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 503 }))); // /api/home: down, irrelevant here
-  document.body.innerHTML = `
+const MARKUP = `
     <section id="landing" data-e2e="home">
       <span id="home-who" hidden></span>
       <button id="signin" data-e2e="signin">Sign in</button>
@@ -39,6 +35,12 @@ beforeAll(async () => {
       <button id="home-save" hidden>Save your progress</button>
       <section id="home-progress"></section>
     </section>`;
+
+let auth: typeof AuthT;
+beforeAll(async () => {
+  history.replaceState(null, "", "/");
+  vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 503 }))); // /api/home: down, irrelevant here
+  document.body.innerHTML = MARKUP;
   auth = await import("../net/auth.ts");
 });
 afterAll(() => vi.unstubAllGlobals());
@@ -61,5 +63,26 @@ describe("the home page after another tab saves", () => {
     expect(await until(() => save.hidden === true)).toBe(true);
     expect(document.getElementById("signout")!.hidden).toBe(false);
     expect(document.getElementById("signin")!.hidden).toBe(true);
+  });
+
+  it("a change while the first lookup runs is seen, and the slower, older answer doesn't overwrite it", async () => {
+    listeners.clear();
+    document.body.innerHTML = MARKUP;
+    let releaseSlow: () => void = () => {};
+    vi.mocked(auth.saveStatus).mockResolvedValue("guest");
+    vi.mocked(auth.getAccountInfo)
+      .mockReset()
+      .mockImplementationOnce(() => new Promise((ok) => (releaseSlow = () => ok(ME as never)))) // the first load: slow, a guest
+      .mockResolvedValue({ ...ME, userId: "a", guest: false, saveReady: false } as never); // after the other tab saved
+    const { initHome } = await import("./home.ts");
+    const init = initHome();
+    expect(await until(() => listeners.size > 0)).toBe(true); // listening before the first answer
+    vi.mocked(auth.saveStatus).mockResolvedValue("saved");
+    for (const fn of [...listeners]) fn(null, { elsewhere: true });
+    expect(await until(() => document.getElementById("signout")!.hidden === false)).toBe(true);
+    releaseSlow();
+    await init;
+    expect(document.getElementById("home-save")!.hidden).toBe(true);
+    expect(document.getElementById("signout")!.hidden).toBe(false);
   });
 });

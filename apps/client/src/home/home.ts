@@ -296,8 +296,13 @@ export async function initHome(): Promise<void> {
   };
   const actions: MeActions = { save: () => void saveProgress(), signOut: () => void signOut() };
   const paintMe = () => renderMe(state, actions);
+  // Lookups can overlap (the first load, another tab's broadcast, a save): only the newest one paints.
+  let meSeq = 0;
   const refreshMe = async () => {
-    state.me = await fetchMe();
+    const seq = ++meSeq;
+    const me = await fetchMe();
+    if (seq !== meSeq) return;
+    state.me = me;
     paintMe();
   };
 
@@ -342,6 +347,7 @@ export async function initHome(): Promise<void> {
       // The next player on this browser starts fresh (a signed-in account restores these from the server).
       for (const k of ["fl.starter", "fl.palette", "fl.body"]) localStorage.removeItem(k);
       state.notice = null;
+      meSeq++; // a lookup still in flight must not bring the signed-out account back
       state.me = null;
     }
     paintMe(); // on failure the account stays, with the error and a retry
@@ -363,13 +369,14 @@ export async function initHome(): Promise<void> {
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) void poll();
   });
-  await refreshMe();
   // Another tab saved, signed in or renamed: repaint my progress and the guest's Save button from a
   // fresh session lookup (fetchMe asks the session; the broadcast already dropped the cached token).
+  // Listening before the first lookup, so a change while it runs isn't missed.
   const auth = await import("../net/auth.ts");
   auth.onAccountChange((_claims, { elsewhere }) => {
     if (elsewhere) void refreshMe();
   });
+  await refreshMe();
 }
 
 /** Dev gallery: paint the page from mock data, no network. */
