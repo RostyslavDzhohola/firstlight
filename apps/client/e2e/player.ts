@@ -471,6 +471,19 @@ export class Player {
     return this.snap();
   }
 
+  /**
+   * The warm-up's shader watch window (render/warmup.ts: the 120 frames after a warm-up) has closed;
+   * returns the monitor then. A fixed wait isn't enough: below 40 fps the window is still open after
+   * 3 s and `afterWarmup` can still grow. Fails if the window doesn't close within `timeoutMs`.
+   */
+  async shaderWatchClosed(timeoutMs = 30_000): Promise<{ afterWarmup: number; watching: number; recent: unknown[] }> {
+    const read = () => this.page.evaluate(() => (window as unknown as { __shaders?: { afterWarmup: number; watching: number; recent: unknown[] } }).__shaders ?? null);
+    await expect
+      .poll(async () => (await read())?.watching ?? -1, { timeout: timeoutMs, intervals: [250], message: "the post-warm-up shader watch window closes (120 rendered frames)" })
+      .toBe(0);
+    return (await read())!;
+  }
+
   /** Travel through a Portus plaza portal on foot. */
   async walkThroughPortal(to: string, timeoutMs = 60_000) {
     const ok = await this.walkTo(

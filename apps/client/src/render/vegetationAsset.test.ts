@@ -95,7 +95,7 @@ describe("shipped vegetation", () => {
       expect(lookKey(sample)).toBe(lookKey(live[i]!));
       expect(sample.instanceMatrix.count).toBe(live[i]!.instanceMatrix.count);
       expect(sample.receiveShadow).toBe(true);
-      const mat = vegetationMaterial("arcadia", "oak", assets.atlas);
+      const mat = vegetationMaterial("oak", assets.atlas);
       expect(mat.transparent).toBe(false);
       expect(mat.alphaTest).toBe(0.5);
       expect(mat.opacityNode).toBeTruthy();

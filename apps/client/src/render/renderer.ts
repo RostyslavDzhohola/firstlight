@@ -11,6 +11,7 @@ import {
 } from "./quality.ts";
 import { startRenderer } from "./rendererStart.ts";
 import { GpuTimer, ResolutionLadder } from "./timing.ts";
+import { compileForPass, passCallDepth, saveRenderState, type GuardedRenderer, type PassCompileRenderer } from "./compilePass.ts";
 
 export { TIERS, FEATURES, type Tier, type Feature, type ResolvedSettings };
 
@@ -62,6 +63,8 @@ export interface RenderCtx {
   pixelRatio(): number;
   resize(): void;
   render(): void;
+  /** Compile the scene for the context its frames use (the post pipeline's scene pass): warm-up. */
+  compileScene(): Promise<unknown>;
   /** Per-frame bookkeeping after render (GPU timer, ladder). */
   afterFrame(now: number, frameMs: number): void;
   stored(): StoredGfx;
@@ -136,17 +139,23 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
   let auto = !forcedTier && !stored.tier;
   let settings = resolveSettings(tier, auto, webgpu, stored, kills);
   let post: PostBuild | null = null;
+  /** Call depth of the current post build's scene pass (compilePass.ts), learned on first use. */
+  let passDepth: number | null = null;
+  /** The scene-pass probe render failed once: plain compileAsync for the rest of the session. */
+  let passCompileOff = false;
   let postKey = "";
   let photo = false;
 
   const postKeyOf = (s: ResolvedSettings) =>
     [s.on.bloom, s.on.ao, s.on.traa, s.on.fxaa, s.on.grade, s.on.grain, s.on.vignette, s.post.ao, s.post.bloomScale, photo].join(",");
 
-  function rebuildPost() {
+  /** Build the post pipeline for the current settings (`force`: also when they haven't changed). */
+  function rebuildPost(force = false) {
     const key = postKeyOf(settings);
-    if (post && key === postKey) return;
+    if (post && key === postKey && !force) return;
     post?.dispose();
     post = buildPost(scene, camera, settings, photo);
+    passDepth = null;
     postKey = key;
     pipeline.outputNode = post.outputNode;
     pipeline.needsUpdate = true;
@@ -270,6 +279,36 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
     },
     render() {
       pipeline.render();
+    },
+    compileScene() {
+      if (passCompileOff) return renderer.compileAsync(scene, camera);
+      const r = renderer as unknown as PassCompileRenderer;
+      const sp = post?.scenePass ?? null;
+      if (sp && passDepth === null) {
+        // Learn the scene pass's call depth from one render with the scene hidden (background and
+        // post quads only); it depends on the pipeline's render-to-texture steps (FXAA, TRAA, …).
+        // three restores its renderer state only when that render doesn't throw: save and restore it
+        // here, and after a failure stop trusting this pipeline (rebuilt, compiled the old way).
+        const state = saveRenderState(renderer as unknown as GuardedRenderer, scene, camera);
+        let failed = false;
+        try {
+          passDepth = passCallDepth(r, sp.renderTarget, () => {
+            scene.visible = false;
+            pipeline.render();
+          });
+        } catch (e) {
+          failed = true;
+          console.warn("[warmup] the scene-pass probe render failed; compiling without the pass context this session", e);
+        } finally {
+          state.restore(failed);
+        }
+        if (failed) {
+          passCompileOff = true;
+          rebuildPost(true);
+          return renderer.compileAsync(scene, camera);
+        }
+      }
+      return compileForPass(r, scene, camera, sp, passDepth);
     },
     afterFrame(now, frameMs) {
       gpu.frame();

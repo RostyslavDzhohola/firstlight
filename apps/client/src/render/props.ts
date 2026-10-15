@@ -9,7 +9,7 @@ import { hash01, PROP_KINDS, PROP_STRIDE, PROP_STYLES, type BodyId, type PropKin
 import { float, materialColor, mix } from "three/tsl";
 import { atmo } from "./atmosphere.ts";
 import { propGeometry, PROP_PALETTES } from "./propGeometry.ts";
-import { preloadVegetation, validateVegetationAssets, vegetationMaterial, type VegetationAssets } from "./vegetationAssets.ts";
+import { applyVegetationPalette, preloadVegetation, validateVegetationAssets, vegetationMaterial, type VegetationAssets } from "./vegetationAssets.ts";
 import { vegetationModels, vegetationVariant } from "./vegetationModels.ts";
 import { keptSamples } from "./warmup.ts";
 import type { ResolvedSettings } from "./quality.ts";
@@ -71,6 +71,8 @@ export class PropSystem {
 
   constructor(private readonly body: BodyId, assets?: VegetationAssets) {
     this.group.name = "props";
+    // Vegetation materials are shared by every body; this body's colours go into their uniforms.
+    applyVegetationPalette(body);
     const material = propMaterial();
     const kinds = new Set(PROP_STYLES[body].map((r) => r.kind));
     for (const kind of kinds) {
@@ -120,7 +122,7 @@ export class PropSystem {
           if (km.kind === "blossom") geometry.scale(5.2 / 6.2, 5.2 / 6.2, 5.2 / 6.2);
           geometry.setAttribute("iWind", new THREE.InstancedBufferAttribute(new Float32Array(km.capacity), 1));
           const impostor = lod === 1 && ["oak", "pine", "deadtree", "blossom"].includes(km.kind);
-          replacement.material = vegetationMaterial(this.body, km.kind, impostor ? assets.impostors! : assets.atlas, impostor);
+          replacement.material = vegetationMaterial(km.kind, impostor ? assets.impostors! : assets.atlas, impostor);
         }
       }
       // Terrain can arrive before ready. Prepare its reclassification before touching live data.
