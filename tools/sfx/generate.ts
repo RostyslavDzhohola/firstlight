@@ -13,8 +13,7 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { apiKey, OUT } from "./lib.ts";
 import { estimateCredits, SOUNDS } from "./sounds.ts";
-
-const API = "https://api.elevenlabs.io/v1";
+import { creditsLeft, generateTakes, parseBudget, type Job, type SpendIo } from "./spend.ts";
 
 const { values: args } = parseArgs({
   options: {
@@ -25,24 +24,11 @@ const { values: args } = parseArgs({
   },
 });
 
-const budget = Number(args.budget);
+const budget = parseBudget(args.budget);
 const maxPriority = Number(args["max-priority"]);
-// NaN would make every `spent + cost > cap` check false, i.e. no cap at all.
-if (!Number.isFinite(budget) || budget < 0) throw new Error(`--budget must be a number of credits ≥ 0, got "${args.budget}"`);
 if (!Number.isFinite(maxPriority)) throw new Error(`--max-priority must be a number, got "${args["max-priority"]}"`);
 const only = args.only ? new Set(args.only.split(",")) : null;
 const raw = join(OUT, "raw");
-mkdirSync(raw, { recursive: true });
-
-interface Job {
-  name: string;
-  take: number;
-  prompt: string;
-  seconds: number;
-  influence: number;
-  file: string;
-  estimate: number;
-}
 
 const jobs: Job[] = [];
 for (const s of [...SOUNDS].sort((a, b) => a.priority - b.priority)) {
@@ -56,41 +42,18 @@ const planned = jobs.reduce((a, j) => a + j.estimate, 0);
 console.log(`${jobs.length} takes to generate, about ${planned} credits`);
 for (const j of jobs) console.log(`  ${j.name}-${j.take}  ${j.seconds} s  ~${j.estimate}`);
 
-async function subscription(key: string): Promise<{ used: number; limit: number; reset: string }> {
-  const r = await fetch(`${API}/user/subscription`, { headers: { "xi-api-key": key } });
-  if (!r.ok) throw new Error(`subscription: HTTP ${r.status}`);
-  const d = (await r.json()) as { character_count: number; character_limit: number; next_character_count_reset_unix: number };
-  return { used: d.character_count, limit: d.character_limit, reset: new Date(d.next_character_count_reset_unix * 1000).toISOString() };
-}
-
 if (args["dry-run"] || !jobs.length) process.exit(0);
 
+mkdirSync(raw, { recursive: true });
+const io: SpendIo = {
+  fetch,
+  save(j, bytes, cost) {
+    writeFileSync(j.file, bytes);
+    appendFileSync(join(raw, "log.jsonl"), JSON.stringify({ at: new Date().toISOString(), name: j.name, take: j.take, prompt: j.prompt, seconds: j.seconds, influence: j.influence, cost: cost ?? j.estimate, costReported: cost !== null }) + "\n");
+  },
+  log: (line) => console.log(line),
+};
 const key = apiKey();
-const sub = await subscription(key);
-const left = sub.limit - sub.used;
-console.log(`account: ${left} credits left of ${sub.limit} (resets ${sub.reset}); budget ${budget}`);
-const cap = Math.min(budget, left);
-let spent = 0;
-for (const j of jobs) {
-  if (spent + j.estimate > cap) {
-    console.log(`stop: ${j.name}-${j.take} (~${j.estimate}) would pass the cap of ${cap} (spent ${spent})`);
-    break;
-  }
-  const r = await fetch(`${API}/sound-generation?output_format=mp3_44100_128`, {
-    method: "POST",
-    headers: { "xi-api-key": key, "content-type": "application/json" },
-    body: JSON.stringify({ text: j.prompt, duration_seconds: j.seconds, prompt_influence: j.influence, model_id: "eleven_text_to_sound_v2" }),
-  });
-  if (!r.ok) {
-    console.log(`fail: ${j.name}-${j.take}: HTTP ${r.status} ${(await r.text()).slice(0, 300)}`);
-    if (r.status === 401 || r.status === 402 || r.status === 429) break;
-    continue;
-  }
-  const cost = Number(r.headers.get("character-cost") ?? j.estimate);
-  writeFileSync(j.file, Buffer.from(await r.arrayBuffer()));
-  spent += cost;
-  appendFileSync(join(raw, "log.jsonl"), JSON.stringify({ at: new Date().toISOString(), name: j.name, take: j.take, prompt: j.prompt, seconds: j.seconds, influence: j.influence, cost }) + "\n");
-  console.log(`ok: ${j.name}-${j.take}  ${cost} credits (spent ${spent})`);
-}
-const after = await subscription(key);
-console.log(`done: ${spent} credits by the response headers; the account shows ${after.limit - after.used} left`);
+const r = await generateTakes(jobs, budget, key, io);
+const after = await creditsLeft(io, key).then((a) => `${a.left}`, (e: unknown) => `unknown (${String(e)})`);
+console.log(`done: ${r.made} takes, ${r.billed} credits by the response headers (${r.committed} committed); the account shows ${after} left (it lags)`);
