@@ -77,7 +77,7 @@ hud.setParty(members)                 // already driven by the social lane (ui/p
 hud.setMissions(lines, header)        // already driven by the quests MissionTracker
 hud.voiceSlot                         // bottom-right container for voice indicators
 hud.minimapSlot                       // top of the right column: the minimap (ui/minimap.ts, driven by game/MapClient.ts)
-hud.death(info) / hud.characterPick(opts)   // both resolve { starter, palette }; death resolves null if closeDeath() closed it
+hud.death(info) / hud.characterPick(opts)   // both resolve { starter, palette }, or null when closeDeath() / cancelCharacterPick() closed them
 ```
 
 ## Saving progress (HANDOFF 5c)
