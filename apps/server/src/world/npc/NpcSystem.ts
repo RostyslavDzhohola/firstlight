@@ -102,7 +102,8 @@ export class NpcSystem implements RoomSystem {
     this.ground = makeGround(world.terrain);
     this.planet = world.body.terrain.kind === "hub" ? null : (world.body.id as PlanetId);
     this.arena = this.planet ? bossArena(world.terrain) : null;
-    this.points = this.planet ? buildSpawnPoints(world.terrain, this.arena) : [];
+    // Portus has no boss and no planet tables, but its wild land outside the town walls has creeps (D-zones-1).
+    this.points = buildSpawnPoints(world.terrain, this.arena);
     this.groups = this.points.map((p) => ({ point: p, active: false, members: p.members.map(() => null), dead: p.members.map(() => false), cleared: false, respawnLeft: 0, lastNearAt: 0 }));
     const bd = BOSS_BY_BODY[world.body.id];
     this.boss = bd && this.arena ? new BossController(this, bd, this.arena) : null;

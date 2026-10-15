@@ -1,8 +1,9 @@
 // Steering on the sphere (D4: no navmesh). NPCs walk the shared height field: each step moves along a
 // tangent, re-projects onto the ground, and is refused when it climbs too steeply, leaves the NPC's
-// medium (land / shallows / lake / air) or enters a pad's safe ring; refused steps slide sideways.
+// medium (land / shallows / lake / air) or enters a safe zone (a pad's ring, the Portus town);
+// refused steps slide sideways.
 
-import { PAD_SAFE_RADIUS, padDirs, type BodyDef, type Dir, type Terrain } from "@firstlight/shared";
+import { nearSafeZone, padDirs, type BodyDef, type Dir, type Terrain } from "@firstlight/shared";
 import type { Locomotion } from "@firstlight/shared/content/npcs";
 import { NPC_RULES } from "@firstlight/shared/content/npcs";
 import type { V3 } from "../geometry.ts";
@@ -39,17 +40,9 @@ export function feetHeight(g: Ground, x: number, y: number, z: number, loco: Loc
   }
 }
 
-/** Inside (or within `margin` m of) any pad's safe ring. */
+/** Inside (or within `margin` m of) a safe zone: any pad's ring, or the Portus town (shared zones.ts). */
 export function nearSafeRing(g: Ground, x: number, y: number, z: number, margin: number): boolean {
-  const l = Math.hypot(x, y, z);
-  const ux = x / l, uy = y / l, uz = z / l;
-  const lim = (PAD_SAFE_RADIUS + margin) / g.R;
-  const lim2 = lim * lim;
-  for (const p of g.pads) {
-    const dx = p[0] - ux, dy = p[1] - uy, dz = p[2] - uz;
-    if (dx * dx + dy * dy + dz * dz <= lim2) return true;
-  }
-  return false;
+  return nearSafeZone(g.body, x, y, z, margin);
 }
 
 /** Place a point on the ground for a locomotion (falls back to the plain ground height). */

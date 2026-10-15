@@ -1,7 +1,7 @@
 // Onboarding on Portus (SPEC §6.12, content.md §1.1, shared/content/onboarding.ts): offered once per
 // account to a brand-new character (level 1, never died). The client teaches move, look, jump,
 // sprint and dodge on its own (nothing is paid for those); the server counts hits on the three
-// training dummies from `train` messages (Portus is a safe zone, so real attacks are refused there),
+// training dummies from `train` messages (Portus town is a safe zone, so real attacks are refused there),
 // pays 10 XP per dummy and, when all three are down, 20 XP and the Spark medal. Skipping ends it with
 // nothing more paid. Progress lives in account stats, so it survives reconnects and never repeats.
 // Every payout (the dummy's flag, the completion flag, the character's XP, the medal) commits in one

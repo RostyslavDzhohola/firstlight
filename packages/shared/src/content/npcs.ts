@@ -915,6 +915,56 @@ export const PLANET_WILDS: Record<PlanetId, { density: number; groups: SpawnGrou
   },
 };
 
+/** A fixed group: a kind, how many and at what level. */
+export interface FixedMember {
+  kind: string;
+  count: number;
+  level: number;
+}
+
+/**
+ * Portus outside the town walls (D-zones-1): fixed groups in the town frame (east, north: geodesic
+ * metres from the pole, D38), weak enough for a first fight (levels 1–2). Woolbacks graze in sight of
+ * both gates (the border runs through the gatehouses at ±46 m east), small Hopbit packs wait a
+ * short walk out, and the far side has a little more. Hostile homes stay ≥ 65 m from the town's
+ * edge plus their wander room (server spawns.ts checks it); steering keeps every NPC out of the town.
+ */
+export const PORTUS_WILDS: readonly { id: string; east: number; north: number; members: FixedMember[] }[] = [
+  // East gate: the road out runs past the paddock fence.
+  { id: "east_meadow", east: 63, north: 17, members: [{ kind: "woolback", count: 4, level: 1 }] },
+  { id: "east_hopbits", east: 76, north: -16, members: [{ kind: "hopbit", count: 3, level: 1 }] },
+  // West gate.
+  { id: "west_meadow", east: -63, north: -17, members: [{ kind: "woolback", count: 4, level: 1 }] },
+  { id: "west_hopbits", east: -76, north: 17, members: [{ kind: "hopbit", count: 3, level: 1 }] },
+  // Round the walls and over the rim.
+  { id: "south_hopbits", east: 8, north: -84, members: [{ kind: "hopbit", count: 4, level: 2 }] },
+  { id: "north_hopbits", east: -12, north: 100, members: [{ kind: "hopbit", count: 3, level: 2 }] },
+  { id: "far_meadow", east: -95, north: -85, members: [{ kind: "woolback", count: 5, level: 1 }] },
+  { id: "far_sparkflies", east: 105, north: 85, members: [{ kind: "sparkfly", count: 2, level: 2 }] },
+];
+
+/**
+ * Creeps in sight of each planet's arrival pad (pad 0, where the portal home stands) (D-zones-2): a
+ * grazing herd just past the pad's platform and a small pack of the planet's weakest hostiles just
+ * outside the 45 m hostile rule, both placed toward where the arrival camera looks (the portal),
+ * so a new arrival sees creeps at once and reaches a fight within ~20 s. `bearing` is degrees
+ * clockwise from the arrival camera's direction (the search widens from there to dry ground);
+ * `area` credits kills to a named area (for hunts that count kills by area).
+ */
+export const ARRIVAL_GROUPS: Record<PlanetId, readonly { id: string; metres: number; bearing: number; members: FixedMember[]; area?: string }[]> = {
+  // Dawnpad already has both in view from the hashed Clover Fields groups (Woolbacks at 47 m, the
+  // small Hopbit pack at 68 m, both ahead of the arrival camera); npc-spawns.test.ts holds that.
+  arcadia: [],
+  hollowmere: [
+    { id: "lanternfall_herd", metres: 34, bearing: 20, members: [{ kind: "woolback", count: 4, level: 6 }] },
+    { id: "lanternfall_bonewalkers", metres: 62, bearing: -30, members: [{ kind: "bonewalker", count: 3, level: 6 }] },
+  ],
+  meridian: [
+    { id: "waystation_herd", metres: 34, bearing: 10, members: [{ kind: "woolback", count: 4, level: 12 }] },
+    { id: "waystation_associates", metres: 62, bearing: -30, members: [{ kind: "associate", count: 3, level: 12 }] },
+  ],
+};
+
 /** Level range a def can spawn at on a planet. */
 export function defLevels(def: NpcDef, planet: PlanetId): [number, number] {
   return def.levelsByPlanet?.[planet] ?? def.levels;
