@@ -29,11 +29,19 @@ $("copy-link")?.addEventListener("click", async () => {
   if (c) c.hidden = false;
 });
 
+/** The home cards, account buttons and share row (src/home/home.ts), started once. */
+let home: Promise<void> | null = null;
+function startHome(): Promise<void> {
+  home ??= import("./home/home.ts").then((m) => m.initHome()).catch((err) => console.warn("home page", err));
+  return home;
+}
+
 function backToLanding() {
   hideLoading();
   const landing = $("landing");
   if (landing) landing.style.display = "";
   if (playBtn) playBtn.disabled = false;
+  void startHome(); // ?autoplay never started it: a failed boot comes back to a live page
 }
 
 /**
@@ -82,4 +90,4 @@ if (params.has("avatars")) {
 } else if (params.has("horses")) {
   void import("./render/horses/devpage.ts").then((m) => m.startHorseDevPage()); // six coats with riders
 } else if (params.has("autoplay")) playBtn?.click();
-else void import("./home/home.ts").then((m) => m.initHome()).catch((err) => console.warn("home page", err));
+else void startHome();
