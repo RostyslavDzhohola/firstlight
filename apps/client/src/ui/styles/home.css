@@ -9,7 +9,7 @@
 /* The backdrop's small planets sit where the home page leaves sky: above the cards, low on the left. */
 .fl-home .fl-fly__planet--meridian { left: 47%; top: 2.2%; }
 .fl-home .fl-fly__planet--hollowmere { left: 34%; top: 79%; }
-.fl-home .fl-fly__planet--arcadia { right: 8%; top: 76%; }
+.fl-home .fl-fly__planet--arcadia { display: none; } /* its spot is under the cards; the world cards show it */
 .fl-home__page { position: relative; z-index: 1; min-height: 100%; display: grid; grid-template-rows: auto 1fr auto; gap: calc(1.2 * var(--u)); padding: calc(1.2 * var(--u)) calc(2.4 * var(--u)) calc(1.2 * var(--u)); }
 
 /* ---- top bar ---- */
@@ -160,7 +160,7 @@
   .fl-home__foot { flex-direction: column; align-items: center; text-align: center; }
   .fl-home__credit { justify-content: center; }
   .fl-home__mark { --wm-size: 13px; }
-  .fl-home .fl-fly__planet--arcadia { width: 64px; height: 64px; right: -18px; top: 76px; bottom: auto; }
+  .fl-home .fl-fly__planet--arcadia { display: block; width: 64px; height: 64px; right: -18px; top: 76px; }
   .fl-home .fl-fly__planet--hollowmere { width: 34px; height: 34px; left: -10px; top: 300px; }
   .fl-home .fl-fly__planet--meridian { display: none; }
 }
