@@ -22,9 +22,14 @@ onboarding-attack, onboarding-portal, onboarding-done, kit-inventory, kit-onboar
   `transform: scaleX(var(--fill))`, never `width`. No layout reads in the frame loop.
 - **No glow filters on things that update every frame.** Backdrop blur is off on the Low tier
   automatically (`fl-lowfx` on `<html>`), so don't fake it with images.
-- **HUD roots** carry `.fl-hud` or `data-hud` so photo mode (F9) hides them. Menus and overlays don't.
+- **HUD roots** carry `.fl-hud` or `data-hud` so photo mode (Shift+P) hides them. Menus and overlays don't.
 - **Full-screen overlays that free the mouse** call `overlayOpened(name)` / `overlayClosed(name)`
-  (`ui/dom.ts`) so the Esc menu doesn't pop over them.
+  (`ui/dom.ts`) so the Esc menu doesn't pop over them. When the last one closes without taking the
+  pointer back, the game shows the "Click to look around" hint (`ui/pauseFlow.ts`, D-controls-3).
+  Close on Esc with `game.input.lock()`: the overlay freed the pointer itself, so Chrome lets the page
+  take it back without a click.
+- **Keys:** every binding is in `game/keys.ts` (no F-keys, D-controls-2); hotkeys are read with
+  `input.hit(HOTKEYS.x)` in the frame loop or `hits(HOTKEYS.x, e.code, e.shiftKey)` in a listener.
 
 ## Files
 

@@ -32,6 +32,7 @@ import { BootGate, RendererUnavailable, shouldKeepReconnecting } from "./boot.ts
 import { CombatClient } from "./CombatClient.ts";
 import { GameAudio } from "../audio/Audio.ts";
 import { Input } from "./input.ts";
+import { HOTKEYS } from "./keys.ts";
 import { PhotoMode } from "./PhotoMode.ts";
 import { PlayerController } from "./PlayerController.ts";
 import { CLIENT_SYSTEMS, type ClientSystem } from "./systems.ts";
@@ -130,10 +131,6 @@ export class Game {
     };
     // A ladder floor drop changes the tier mid-game: apply it behind the loading screen + warm-up.
     this.ctx.onTierDrop((_from, _to, apply) => void this.applyGraphics(apply));
-    // Look rule 1: muted grade while the mouse is released (menus), the body's grade in play.
-    document.addEventListener("pointerlockchange", () => {
-      if (this.running && !this.photo.active) this.setMenuMode(!document.pointerLockElement);
-    });
     this.particles = new ParticleSystem(this.ctx.scene);
     this.env = new Environment(this.ctx, this.audio, this.particles);
     this.blobs = new BlobShadows(this.ctx.scene);
@@ -147,6 +144,11 @@ export class Game {
     this.combat = new CombatClient(this);
     this.hud = this.combat.hud;
     this.menu = new Menu(this);
+    // Look rule 1: muted grade while a menu or panel is up, the body's grade in play (also with the
+    // pointer free after Esc → back to the game).
+    this.menu.onState = (s) => {
+      if (this.running && !this.photo.active) this.setMenuMode(s === "menu" || s === "away");
+    };
     installSocial(this);
     bindUi(this);
     document.getElementById("landing")!.style.display = "none";
@@ -544,7 +546,7 @@ export class Game {
   }
 
   private async reprobe() {
-    // Only from live play (F3 panel): leave menus, logged-out and notice screens alone.
+    // Only from live play (performance panel): leave menus, logged-out and notice screens alone.
     if (!this.running || this.travelling) return;
     this.running = false;
     this.rewarming = true;
@@ -582,8 +584,8 @@ export class Game {
       this.bench.update(dt, now, this.ctx.camera);
       focus = this.bench.focus;
     } else {
-      // Photo mode (F9): the body stays put (and can still be hurt) while the camera flies.
-      if (this.input.pressed.has("F9")) this.photo.toggle(this.ctx.camera);
+      // Photo mode (Shift+P): the body stays put (and can still be hurt) while the camera flies.
+      if (this.input.hit(HOTKEYS.photo)) this.photo.toggle(this.ctx.camera);
       if (!this.photo.active) this.player.update(dt, this.input, this.combat.aiming());
       const p = this.player.pos;
       const f = this.player.facing;
@@ -650,7 +652,7 @@ export class Game {
       if (this.bench) for (const b of this.bench.crowdBlobs()) this.blobs.add(b.x, b.y, b.z, b.r);
       this.blobs.end();
     }
-    if (this.input.pressed.has("F3")) this.perf.toggle();
+    if (this.input.hit(HOTKEYS.perf)) this.perf.toggle();
     this.ctx.render();
     let cpuMs = performance.now() - cpu0;
     if (CPU_SLOW > 1) {

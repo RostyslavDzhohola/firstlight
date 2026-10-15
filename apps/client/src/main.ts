@@ -10,6 +10,7 @@ import "./ui/styles/home.css";
 import "./ui/styles/loading.css";
 import { config } from "./config.ts";
 import { runBoot } from "./game/boot.ts";
+import { enterFullscreen } from "./game/fullscreen.ts";
 import { hideLoading, setLoading, showLoadingError } from "./ui/loading.ts";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T | null;
@@ -66,7 +67,7 @@ async function boot() {
           onAction: () => {
             if (f.action === "reload") return location.reload();
             // A click again: fullscreen can be requested here.
-            void document.documentElement.requestFullscreen?.().catch(() => {});
+            void enterFullscreen();
             void boot();
           },
           back: "Back to the home page",
@@ -78,8 +79,8 @@ async function boot() {
 
 playBtn?.addEventListener("click", async () => {
   playBtn.disabled = true;
-  // Fullscreen + pointer lock must be requested inside the click.
-  await document.documentElement.requestFullscreen?.().catch(() => {});
+  // Fullscreen (with Keyboard Lock for Esc) + pointer lock must be requested inside the click.
+  await enterFullscreen();
   await boot();
 });
 

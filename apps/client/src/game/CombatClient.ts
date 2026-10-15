@@ -68,7 +68,12 @@ export class CombatClient {
       const prevLevel = this.hud.you?.level ?? m.level;
       this.hud.setYou(m);
       if (!isDevGuest()) this.saveOffer.levelUp(m.level, prevLevel);
-      if (!m.dead) this.deadUntilRespawn = false;
+      if (!m.dead && this.deadUntilRespawn) {
+        this.deadUntilRespawn = false;
+        // The death screen may have closed long before the server confirmed the respawn: the pause
+        // flow kept the screen "away" while we were dead and must hear that it no longer is.
+        this.game.menu?.blockersChanged();
+      }
     });
     room.onMessage("toast", (m: { text: string; kind: string }) => {
       this.hud.toast(m.text, m.kind);

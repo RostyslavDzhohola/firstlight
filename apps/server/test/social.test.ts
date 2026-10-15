@@ -5,6 +5,7 @@ import { Client, type Room } from "@colyseus/sdk";
 import { PF } from "@firstlight/shared/net/schema";
 import { CLOSE } from "@firstlight/shared/net/social";
 import type { Game } from "../src/app.ts";
+import { env } from "../src/env.ts";
 import { isVoiceMuted, partyOf } from "../src/social/index.ts";
 import { memoryReports } from "../src/social/store.ts";
 import { joinAs, playRequest, safeLeave, startServer, waitFor } from "./helpers.ts";
@@ -15,12 +16,16 @@ let n = 0;
 /** Unique account ids per test: the party registry is process-wide. */
 const uid = (name: string) => `${name}${++n}`;
 
+// Voice-panel blocks and admin voice mutes need the voice system, off in this build (D-controls-1).
+const voiceWas = env.voice;
 beforeEach(async () => {
+  env.voice = true;
   game = await startServer({ maxClients: 8, soloFillLimit: 5 });
 });
 afterEach(async () => {
   for (const r of rooms.splice(0)) await safeLeave(r);
   await game.close();
+  env.voice = voiceWas;
 });
 
 const st = (r: Room) => r.state as any;
