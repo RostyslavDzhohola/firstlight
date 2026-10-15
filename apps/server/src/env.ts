@@ -23,6 +23,8 @@ export const env = {
   turnKeyToken: process.env.TURN_KEY_API_TOKEN ?? "",
   adminClaimToken: process.env.ADMIN_CLAIM_TOKEN ?? "",
   loadtestSecret: process.env.LOADTEST_SECRET ?? "",
+  /** DataFast website API key (`df_…`) for the home page's visit counts (6f); empty = not shown. */
+  datafastApiKey: process.env.DATAFAST_API_KEY ?? "",
   allowDevGuests: process.env.ALLOW_DEV_GUESTS === "1",
   maxClients: num("MAX_CLIENTS", 40),
   maxCopiesPerBody: num("MAX_COPIES_PER_BODY", 2),
