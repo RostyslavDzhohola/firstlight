@@ -470,7 +470,9 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   server's flag, the border banner ("Leaving the safe zone · Creeps and other players can hurt you",
   "Safe zone · Portus town · no damage in or out"), a glowing line in the pad rings' colour marks
   the border across both gate passages (one draw), and the compass's SAFE marker points at the
-  nearer gate. The server's shot and NPC-sight paths still ignore the town's walls (no shot crosses
+  nearer gate. Inside the walls (away from the gates and below the wall tops) the client draws no
+  creeps (they are hidden by the walls anyway), so the NPC layer's ~10–14 draws stay off the plaza's
+  budget (D41). The server's shot and NPC-sight paths still ignore the town's walls (no shot crosses
   the town: inside refuses them); generalised structure occlusion is the pad-outposts lane's
   follow-up. No `PROTOCOL_VERSION` bump: the client's label and refusals read the server's flag,
   and old clients draw the Portus creeps with the existing NPC layer. Why: the owner started in the
