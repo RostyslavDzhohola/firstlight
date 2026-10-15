@@ -612,3 +612,10 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   on `<body>` (the landing's z 20 hid cards inside `#ui`). Why: the old level-2 card popped up mid-play
   and couldn't be clicked while the pointer was locked, the landing's sign-in card was invisible, and
   with Resend's domain unverified every save ended at a "Check your email" that never came.
+- **D-save-2 (2026-10-15):** the OTP day splits into two independent pools: public sends (sign-ins
+  with no session that may save) use `OTP_PUBLIC_SHARE` of `OTP_DAILY_BUDGET` (600 of 1,000), saving
+  sends use the rest (400), and neither counts the other; a refused saving send says `saving`. Before,
+  saving shared one global cap with public sends, which only reach saved addresses, so near the cap a
+  level-2 player could probe an address publicly and read "sent" vs `SAVING_BUSY` on their own send
+  (Codex review). Supersedes D34's "saving keeps the rest" (it could use idle public slots). Why: no
+  enumeration oracle across paths; easy to retune the share.

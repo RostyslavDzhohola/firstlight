@@ -401,8 +401,8 @@ describe("OTP budget", () => {
     expect((await b.signInWithCode("busy@example.test", code)).error).toBeNull();
   });
 
-  it("enforces the global daily budget", async () => {
-    server = await startAuthServer({ otpDailyBudget: 2 });
+  it("enforces the daily budget for saving (its share of OTP_DAILY_BUDGET)", async () => {
+    server = await startAuthServer({ otpDailyBudget: 5 }); // public 3 (60 %), saving 2
     const b = new Browser(server);
     await b.playToken();
     expect((await b.sendCode("one@example.test")).error).toBeNull();

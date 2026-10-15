@@ -195,3 +195,35 @@ describe("a second browser restores the same starter (HANDOFF 5b)", () => {
     expect(new SqliteCharacterRepo(server.accounts.db).load(accountId)?.starter).toBe(me.character.starter);
   });
 });
+
+describe("the OTP budget is no enumeration oracle across paths (Codex review)", () => {
+  /** Near the cap, a saver's own send must answer the same whether a public probe hit a saved address. */
+  async function probe(candidate: string) {
+    const s = await startAuthServer({ otpDailyBudget: 3 }); // public share 1, saving share 2
+    try {
+      const owner = new Browser(s, "198.51.100.160");
+      await owner.playToken();
+      await owner.saveWithEmail("existing@example.test"); // saving: 1 of 2
+      const attacker = new Browser(s, "198.51.100.161");
+      await attacker.playToken();
+      await attacker.levelUp();
+      const out = s.accounts.devOutbox!;
+      const before = out.sent;
+      const pub = new Browser(s, "198.51.100.162");
+      const q = await pub.client.emailOtp.sendVerificationOtp({ email: candidate, type: "sign-in" });
+      if (candidate === "existing@example.test") await waitFor(() => out.sent > before); // the queued send went out
+      const own = await attacker.sendCode("attacker@example.test"); // saving: 2 of 2
+      const again = await attacker.sendCode("attacker2@example.test"); // saving: over its share either way
+      return { publicError: q.error, own: own.error?.code ?? "sent", again: again.error?.code ?? "sent" };
+    } finally {
+      await s.close();
+    }
+  }
+
+  it("a public probe of a saved address changes nothing a saver can see", async () => {
+    const saved = await probe("existing@example.test");
+    const unknown = await probe("unknown@example.test");
+    expect(saved).toEqual(unknown);
+    expect(saved).toEqual({ publicError: null, own: "sent", again: "SAVING_BUSY" });
+  });
+});
