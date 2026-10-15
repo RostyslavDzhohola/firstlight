@@ -452,3 +452,20 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   colliders are drawn as stone boxes (2 draws) before the probe and the warm-up, and a later arrival
   of the asset is ignored until the next visit (review round 1, S1). Why: Medium was already at
   ~290 draws against 250 (F10); triangles are cheap next to draws on Metal (#30560).
+- **D-combat-1 (2026-10-15 overnight):** a ranged shot's origin slides along the aim ray to the
+  point nearest the shooter's head before the 7 m `ORIGIN_SLACK` check (`aimOrigin`, combat.ts;
+  training shots too). The client sends the camera position, and the mouse wheel zooms the camera
+  out to 9 m: past ~7 m every Hexquill and carbine shot was refused as "origin", silently (a likely
+  cause of the owner's "weapons don't work outside"). A line that never comes near the head is still
+  refused. Melee refusals now answer `denied` like fire, and the client shows a notice for each
+  attack refusal (safe zone, arrival protection, overheat, reload, swimming, saddle). Why: the aim
+  line is what counts; where along it the camera sits is a view setting, not a cheat.
+- **D-combat-2 (2026-10-15 overnight):** the dodge-roll keeps C (SPEC §4.4, D1; S stays the back
+  step, no double-tap). It starts on the frame C is read, as before, plus: content §0's 100 ms input
+  buffer (a press that early rolls when the cooldown ends or on touchdown; an earlier press is
+  dropped, never queued into a late roll), 0.12 s of ground grace after stepping off an edge (not
+  after a jump), the body turned to the roll at once, and the clip cut from the lean (frame 6, not
+  the crouch at 2) with a 0.05 s blend. Keys pressed behind a loading screen are dropped. Why: the
+  owner's "it takes a second before it rolls": measured headless, the roll pose showed 75–150 ms
+  after the key (the clip stood up first), presses in the cooldown's last moment or just before
+  landing were lost, and a C pressed while travelling rolled on arrival. Now 25–75 ms.
