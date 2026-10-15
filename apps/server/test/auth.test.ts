@@ -838,13 +838,13 @@ describe("production safety", () => {
     ).rejects.toThrow(/BETTER_AUTH_SECRET/);
   });
 
-  it("without a Resend key in production, saving reports busy instead of pretending to send", async () => {
+  it("without a Resend key in production, saving reports unavailable instead of pretending to send", async () => {
     server = await startAuthServer({ production: true, rateLimit: false });
     expect(server.accounts.mailer.kind).toBe("disabled");
     expect(server.accounts.devOutbox).toBeNull();
     const b = new Browser(server);
     await b.playToken();
     const r = await b.sendCode("prod@example.test");
-    expect(r.error?.message).toBe("Saving is busy, try again later");
+    expect(r.error?.message).toBe("Saving is temporarily unavailable");
   });
 });

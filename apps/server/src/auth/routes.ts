@@ -1,6 +1,7 @@
 // Account HTTP routes (mounted after express.json()):
 //   GET  /api/account/me         Bearer JWT → account summary (display name, guest, admin, character, medals, pads)
 //   POST /api/account/name       Bearer JWT, {name} → set the display name (unique, filtered)
+//   GET  /api/account/save-status  public → {saving: "ok" | "busy" | "unavailable"}: can sign-in codes go out?
 //   GET  /admin/claim?token=…    session cookie or Bearer → make this account admin, burn the token
 //   POST /api/test/bot-token     x-loadtest-secret → a loadtest play token (only when LOADTEST_SECRET is set)
 
@@ -79,9 +80,16 @@ export function mountAccountRoutes(app: Express, a: Accounts, cfg: AccountsConfi
       admin: id.admin,
       titleMedal: acc?.titleMedal ?? null,
       character: c ? { level: c.level, xp: c.xp, coins: c.coins, starter: c.starter, palette: c.palette, body: c.body } : null,
+      // A guest the server will email a code for a new address (D34: from level 2), i.e. who can save now.
+      saveReady: !id.loadtest && id.guest && a.maySave(id.userId),
       medals: id.loadtest ? [] : listMedals(a.db, id.userId).map((m) => m.medalId),
       pads: id.loadtest ? [] : listDiscoveredPads(a.db, id.userId),
     });
+  });
+
+  // The save card and the sign-in card ask before the player types an address (HANDOFF 5c).
+  app.get("/api/account/save-status", noStore, (_req, res) => {
+    res.json({ ok: true, saving: a.mailHealth.state() });
   });
 
   app.post("/api/account/name", noStore, async (req, res) => {
