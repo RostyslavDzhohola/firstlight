@@ -92,6 +92,11 @@ function slim(clip: THREE.AnimationClip): THREE.AnimationClip {
   return clip;
 }
 
+/** First frame (30 fps) of the Roll clip the dodge plays: the lean into the dive (pelvis ~40° over). */
+export const ROLL_FROM_FRAME = 6;
+/** Playback speed of the dodge's roll: the tumble fits the 0.3 s roll (PlayerController MOVE.dodgeTime). */
+export const ROLL_SPEED = 2.4;
+
 function addSubclips(clips: Map<string, THREE.AnimationClip>) {
   const sub = (src: string, name: string, a: number, b: number) => {
     const c = clips.get(src);
@@ -99,6 +104,8 @@ function addSubclips(clips: Map<string, THREE.AnimationClip>) {
   };
   sub("jump", "jump_air", 9, 40); // skip the crouch: the game jump leaves the ground at once
   sub("block", "block_hold", 9, 17); // held guard (ping-pong)
-  sub("roll", "roll_fast", 2, 36); // the tumble itself
+  // The tumble itself, from the forward lean. Frames 2–5 rise out of a crouch: from frame 2 the body
+  // stood tall for the roll's first ~70 ms while it already slid, so the roll looked late.
+  sub("roll", "roll_fast", ROLL_FROM_FRAME, 36);
   sub("land", "land_short", 0, 14);
 }
