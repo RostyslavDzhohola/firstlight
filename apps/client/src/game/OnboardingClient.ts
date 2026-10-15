@@ -174,10 +174,11 @@ export class OnboardingClient implements ClientSystem {
     return true;
   }
 
-  /** Where a training shot visibly ends: the first dummy it passes close to, else its range. */
+  /** Where a training shot visibly ends: the first standing dummy it passes close to (like the server), else its range. */
   private rayLength(o: THREE.Vector3, d: THREE.Vector3, max: number): number {
     let best = max;
     for (let i = 0; i < this.dummies.dummies.length; i++) {
+      if (this.dummies.dummies[i]!.down) continue; // knocked down: the server lets shots pass over it
       const c = this.dummies.chest(i, _b);
       const t = c.clone().sub(o).dot(d);
       if (t <= 0 || t >= best) continue;
