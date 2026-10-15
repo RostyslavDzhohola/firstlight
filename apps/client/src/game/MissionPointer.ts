@@ -1,6 +1,7 @@
-// The tracked hunt mission's world callout (D-zones-2): on a planet, the first open mission (the
-// one the HUD tracker marks as tracked) points at the nearest creep in view that counts for it, or
-// at its area. Pinned to the screen edge with an arrow when the point is off screen (placeCallout).
+// The tracked hunt mission's world callout (D-zones-2): on a planet, the first open mission given
+// out there (the HUD tracker's tracked one, unless an older planet's mission is still open) points
+// at the nearest creep in view that counts for it, or at its area. Pinned to the screen edge with
+// an arrow when the point is off screen (placeCallout).
 
 import "../ui/missionPointer.css";
 import * as THREE from "three/webgpu";
@@ -51,7 +52,8 @@ class MissionPointer implements ClientSystem {
     const p = g.player.pos;
     if (now - this.pickedAt >= PICK_MS) {
       this.pickedAt = now;
-      const open = g.hud.you?.missions.find((m) => !m.done);
+      // The first open mission given out on this planet (missions from other planets can't point here).
+      const open = g.hud.you?.missions.find((m) => !m.done && MISSION_BY_ID.get(m.id)?.body === g.bodyId);
       const def = open ? MISSION_BY_ID.get(open.id) : undefined;
       this.mission = def ? `${def.name} · ${open!.progress}/${missionGoal(def)}` : "";
       const npcs: PointerNpc[] = [];

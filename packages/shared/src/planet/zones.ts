@@ -68,8 +68,9 @@ function padRingAt(body: BodyDef, x: number, y: number, z: number, margin: numbe
   return -1;
 }
 
+/** zoneAt(...).safe without the allocation (the server asks for every player every tick). */
 export function isSafe(body: BodyDef, x: number, y: number, z: number): boolean {
-  return zoneAt(body, x, y, z).safe;
+  return body.terrain.kind === "hub" ? inTown(body, x, y, z, 0) : padRingAt(body, x, y, z, 0) >= 0;
 }
 
 /** Index of the pad whose safe ring contains this position, or -1 (Portus: 0 inside the town walls). */
