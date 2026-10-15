@@ -28,3 +28,9 @@ export function dataFastScript(env: DataFastEnv): DataFastScript | null {
   const cookieless = (env.VITE_DATAFAST_COOKIELESS ?? "").trim().toLowerCase() !== "false";
   return { src: `https://datafa.st/js/script${cookieless ? ".cookieless" : ""}.js`, websiteId, domain, cookieless };
 }
+
+/** The page's one-line analytics note: only claim "cookieless" when the cookieless script is the one in the page. */
+export function dataFastNote(s: DataFastScript | null): string | null {
+  if (!s) return null;
+  return s.cookieless ? "Cookieless analytics by DataFast" : "Analytics by DataFast, which sets cookies";
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dataFastScript } from "./datafast.ts";
+import { dataFastNote, dataFastScript } from "./datafast.ts";
 
 describe("DataFast script", () => {
   it("is absent unless both the website id and the domain are set", () => {
@@ -21,5 +21,12 @@ describe("DataFast script", () => {
       cookieless: true,
     });
     expect(dataFastScript({ VITE_DATAFAST_WEBSITE_ID: "dfid_abc123", VITE_DATAFAST_DOMAIN: "one4all.dev", VITE_DATAFAST_COOKIELESS: "false" })?.src).toBe("https://datafa.st/js/script.js");
+  });
+
+  it("claims cookieless only for the cookieless script", () => {
+    const env = { VITE_DATAFAST_WEBSITE_ID: "dfid_abc123", VITE_DATAFAST_DOMAIN: "one4all.dev" };
+    expect(dataFastNote(dataFastScript({}))).toBeNull();
+    expect(dataFastNote(dataFastScript(env))).toBe("Cookieless analytics by DataFast");
+    expect(dataFastNote(dataFastScript({ ...env, VITE_DATAFAST_COOKIELESS: "false" }))).toBe("Analytics by DataFast, which sets cookies");
   });
 });

@@ -11,6 +11,7 @@ import { installSprites, portraitSprite } from "../ui/sprites.ts";
 import { fmtNum, hallRows, namesLine, progressView, visitsLine, worldCards, type MeInfo } from "./homeModel.ts";
 import { takeHomeNotice, type HomeNotice } from "./leave.ts";
 import { signOutSession } from "./signOut.ts";
+import { dataFastNote } from "./datafast.ts";
 
 const POLL_MS = 20_000;
 type Tab = "levels" | "hall" | "medals";
@@ -133,8 +134,9 @@ export function renderVisits(visits: HomeVisits | null, ourOnline: number | null
     const tot = el("span", "", box, "Total visits: ");
     el("b", "num", tot, line.total);
   }
-  // The page carries DataFast's script (cookieless: no cookies, nothing personal): say so.
-  if (config.datafast) el("span", "note", box, "· Cookieless analytics by DataFast");
+  // The page carries DataFast's script: say so, and say "cookieless" only when it is.
+  const note = dataFastNote(config.datafast);
+  if (note) el("span", "note", box, `· ${note}`);
 }
 
 export interface MeState {

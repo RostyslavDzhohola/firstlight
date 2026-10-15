@@ -13,8 +13,8 @@ export const config = {
   repoUrl: "https://github.com/RostyslavDzhohola/firstlight",
   /** The owner's X handle for "Follow on X" in the share row; unset hides the button (6e). */
   xHandle: (import.meta.env.VITE_X_HANDLE as string | undefined) ?? "",
-  /** DataFast's script is in the page (vite.config.ts): show the one-line privacy note (6f). */
-  datafast: dataFastScript(import.meta.env as Record<string, string | undefined>) !== null,
+  /** DataFast's script as vite.config.ts puts it in the page (null: none), for the privacy note (6f). */
+  datafast: dataFastScript(import.meta.env as Record<string, string | undefined>),
 };
 
 /** URL flags (also ?cpuslow=N for the F11 weak-laptop profile): ?nobloom ?nofog ?nosky ?nograss ?notrees ?nowater ?noshadows ?noao ?noparticles ?nopost ?nochars ?nodestruct ?nohorses ?webgl ?tier=… ?bench */
