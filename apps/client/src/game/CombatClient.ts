@@ -20,7 +20,7 @@ import { closeDeath, type DeathInfo } from "../ui/death.ts";
 import { DeathFlow } from "./deathFlow.ts";
 import { offerNudge, offersSave, SaveNudge, saveReady } from "../ui/saveOffer.ts";
 import { saveStatus } from "../net/auth.ts";
-import { attackDeniedText, holsteredText, NoticeGate } from "./notices.ts";
+import { attackDeniedText, holsteredText, immuneText, NoticeGate } from "./notices.ts";
 
 const NUDGED_KEY = "fl.saveNudged";
 const _v = new THREE.Vector3();
@@ -114,6 +114,11 @@ export class CombatClient {
         const text = attackDeniedText(m.action, m.reason, this.game.bodyId);
         if (text && this.deniedGate.allow(text)) this.hud.toast(text, "warn");
       }
+    });
+    // A hit that landed and did nothing (spawning, evading home, a shield) isn't a miss: say why.
+    room.onMessage("immune", (m: { reason: string }) => {
+      const text = immuneText(m.reason);
+      if (text && this.deniedGate.allow(text)) this.hud.toast(text, "warn");
     });
     // Support items: Patchkit channel (server-timed; damage interrupts it) and Prism Bubbles.
     room.onMessage("channel", (m: { kind: string; ms: number; target: string }) => {
