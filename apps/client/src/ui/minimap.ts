@@ -15,7 +15,7 @@ import { partyState } from "../social/store.ts";
 import { el } from "./dom.ts";
 import { mapAtlas, type ViewImage } from "./mapAtlas.ts";
 import { missionTargets, staticMarkers, type MapMarker } from "./mapMarkers.ts";
-import { mapView, project, type MapView, type Projected } from "./mapView.ts";
+import { mapView, project, screenAngle, type MapView, type Projected } from "./mapView.ts";
 import { minimapRange, minimapSize, preferredMinimapSize } from "./minimapLayout.ts";
 import { uiSettings } from "./uiSettings.ts";
 import { WAYPOINT_COLOUR, waypoints } from "./waypoint.ts";
@@ -165,8 +165,7 @@ export class Minimap {
 
     // You: an arrow along your facing, relative to the view's up.
     const fc = g.player.facing;
-    const facing = headingOf([pos.x, pos.y, pos.z], [fc.x, fc.y, fc.z]);
-    arrow(ctx, half, half, (facing - v.rot) * DEG, 7);
+    arrow(ctx, half, half, screenAngle(v, [fc.x, fc.y, fc.z]), 7);
 
     // Rim and north.
     ctx.beginPath();

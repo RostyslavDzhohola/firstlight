@@ -17,7 +17,7 @@ import { layoutMapLabels, type MapLabel } from "./mapLabels.ts";
 import { mapAtlas, type ViewImage } from "./mapAtlas.ts";
 import { atlasResolution } from "./mapRaster.ts";
 import { missionTargets, staticMarkers, type MapMarker } from "./mapMarkers.ts";
-import { mapView, metresPerPixel, placeUnder, project, unproject, zoomView, type MapView, type Projected } from "./mapView.ts";
+import { mapView, metresPerPixel, placeUnder, project, screenAngle, unproject, zoomView, type MapView, type Projected } from "./mapView.ts";
 import { arrow, diamond, star } from "./minimap.ts";
 import { uiSettings } from "./uiSettings.ts";
 import { WAYPOINT_COLOUR, waypoints } from "./waypoint.ts";
@@ -504,7 +504,7 @@ export class MapPanel extends Panel {
 
     if (sMe.z > 0) {
       const f = this.game.player.facing;
-      arrow(ctx, sMe.x, sMe.y, (headingOf([pos.x, pos.y, pos.z], [f.x, f.y, f.z]) - v.rot) * DEG, 11);
+      arrow(ctx, sMe.x, sMe.y, screenAngle(v, [f.x, f.y, f.z]), 11);
     }
     this.drawNorth(ctx, v);
     this.drawScale(ctx, mpp);

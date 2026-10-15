@@ -137,6 +137,17 @@ export function zoomView(v: MapView, k: number, x: number, y: number): MapView {
   return placeUnder(v, under, x, y, v.ppr * k);
 }
 
+/**
+ * Screen angle (radians, clockwise from up) of a tangent direction, e.g. your facing, drawn at any
+ * point of the view. Orthographic projection is linear, so the direction is (t·e, t·n) wherever the
+ * map is panned; "heading minus the map's turn" is only right at the view centre.
+ */
+export function screenAngle(v: MapView, t: V3 | readonly number[]): number {
+  const x = t[0]! * v.e[0] + t[1]! * v.e[1] + t[2]! * v.e[2];
+  const y = t[0]! * v.n[0] + t[1]! * v.n[1] + t[2]! * v.n[2];
+  return Math.atan2(x, y);
+}
+
 /** Ground metres per screen pixel at the view centre. */
 export function metresPerPixel(v: MapView, radius: number): number {
   return radius / v.ppr;

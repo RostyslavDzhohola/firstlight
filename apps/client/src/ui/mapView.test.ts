@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { bearingTo, headingOf, northAt, wrapDeg, type V3 } from "../social/compassMath.ts";
-import { headingTo, mapView, metresPerPixel, offsetDir, panView, project, unproject, zoomView, type MapView } from "./mapView.ts";
+import { headingTo, mapView, metresPerPixel, offsetDir, panView, project, screenAngle, unproject, zoomView, type MapView } from "./mapView.ts";
 
 const R = 500;
 const at = (d: V3, r = R): V3 => [d[0] * r, d[1] * r, d[2] * r];
@@ -128,6 +128,29 @@ describe("map navigation", () => {
     const z = zoomView(v, 0.4, 420, 210);
     const p = panView(z, 300, -200);
     for (const n of [...z.c, ...p.c, ...p.e, ...p.n]) expect(Number.isFinite(n)).toBe(true);
+  });
+
+  it("points your arrow along your facing wherever the map is panned (review: ~90° off near the pole)", () => {
+    const deg = (r: number) => (r * 180) / Math.PI;
+    // You stand near the +Z pole, facing north; the map is panned 60 m away, north-up.
+    const me = unit([0.03, 0.04, 1]);
+    const north = northAt(at(me));
+    const v = mapView(offsetDir(me, 60, -10, R), 0, 4000, 600, 600);
+    const s = project(v, me);
+    const ahead = project(v, offsetDir(me, 0, 5, R));
+    const drawn = Math.atan2(ahead.x - s.x, -(ahead.y - s.y));
+    expect(Math.abs(wrapDeg(deg(screenAngle(v, north)) - deg(drawn)))).toBeLessThan(1);
+    // Centring the map on yourself would give heading - turn = 0 (straight up); panned, it isn't.
+    expect(Math.abs(wrapDeg(deg(drawn)))).toBeGreaterThan(20);
+    // Everywhere else it still agrees with the projected direction, in either turn.
+    for (const d of PLACES) {
+      for (const rot of [0, 130]) {
+        const pv = mapView(offsetDir(d, -40, 25, R), rot, 3000, 600, 600);
+        const f = northAt(at(offsetDir(d, 0, 0, R)));
+        const p0 = project(pv, d), p1 = project(pv, offsetDir(d, 0, 3, R));
+        expect(Math.abs(wrapDeg(deg(screenAngle(pv, f)) - deg(Math.atan2(p1.x - p0.x, -(p1.y - p0.y)))))).toBeLessThan(1);
+      }
+    }
   });
 
   it("reports the ground scale at the centre", () => {
