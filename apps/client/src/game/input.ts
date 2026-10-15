@@ -1,8 +1,21 @@
 // Keyboard and mouse state with pointer lock. Game code reads this each frame.
 
+import type { Hotkey } from "./keys.ts";
+import { hits } from "./keys.ts";
+
+/** Keys whose browser default (focus move, page scroll, a dead-key accent, quick find) must not act mid-game. */
+const PLAY_KEYS: ReadonlySet<string> = new Set(["Tab", "Space", "Slash", "Quote", "Backquote"]);
+
+/** Swallow the key's default while the pointer is locked (F-keys are left alone: the game binds none). */
+export function preventsDefault(code: string, locked: boolean): boolean {
+  return locked && PLAY_KEYS.has(code);
+}
+
 export class Input {
   readonly keys = new Set<string>();
   readonly pressed = new Set<string>(); // went down this frame
+  /** Of `pressed`, the keys that went down with Shift held (read at the key press, not at the frame). */
+  private readonly pressedShift = new Set<string>();
   mouseDX = 0;
   mouseDY = 0;
   lmb = false;
@@ -10,15 +23,34 @@ export class Input {
   lmbPressed = false;
   wheel = 0;
   locked = false;
+  /**
+   * Back in the game with the pointer free: the "Click to look around" hint (pause flow "free", set by
+   * the Esc menu). Keys work as in play; only mouse-look waits for the click that locks the pointer.
+   */
+  free = false;
+  /**
+   * True while the game is loading (first arrival, travel, a rejoin, a graphics re-warm): Game sets
+   * it. Keys that act in the world or open panels wait for the hand-over; nothing is buffered for it
+   * (the paused frame loop and the hand-over end the input frame).
+   */
+  suspendedWhile: (() => boolean) | null = null;
   sensitivity = 0.0022;
   invertY = false;
   enabled = true;
+  /** A lock request failed for good (after the raw-movement fallback): the pointer stays free. */
+  onLockError: (() => void) | null = null;
+  /** A promise-based request is in flight: its own outcome reports, not the pointerlockerror event. */
+  private requesting = false;
+  private requestedAt = 0;
 
   constructor(private readonly el: HTMLElement) {
     window.addEventListener("keydown", (e) => {
       if (!this.enabled) return;
-      if (this.locked && (e.code === "Tab" || e.code === "Space" || e.code.startsWith("F") || e.code === "Slash")) e.preventDefault();
-      if (!this.keys.has(e.code)) this.pressed.add(e.code);
+      if (preventsDefault(e.code, this.locked)) e.preventDefault();
+      if (!this.keys.has(e.code)) {
+        this.pressed.add(e.code);
+        if (e.shiftKey) this.pressedShift.add(e.code);
+      }
       this.keys.add(e.code);
     });
     window.addEventListener("keyup", (e) => this.keys.delete(e.code));
@@ -54,15 +86,48 @@ export class Input {
         this.lmb = this.rmb = false;
       }
     });
+    // Browsers whose requestPointerLock returns nothing only report a refusal this way.
+    document.addEventListener("pointerlockerror", () => {
+      if (!this.requesting) this.onLockError?.();
+    });
   }
 
   lock() {
-    const request = (...opts: [object?]) => Promise.resolve((this.el.requestPointerLock as (o?: object) => Promise<void> | void).call(this.el, ...opts));
-    request({ unadjustedMovement: true }).catch((e: unknown) => {
-      // Raw mouse movement isn't available everywhere: fall back to ordinary pointer lock.
-      if ((e as { name?: string } | null)?.name === "NotSupportedError") return request().catch(() => {});
-      // Otherwise refused (no user gesture, or re-locking too soon after Esc): the pointer stays free.
-    });
+    // One request at a time (a double click asks once); a request that never settles stops blocking after 2 s.
+    if (this.locked || (this.requesting && performance.now() - this.requestedAt < 2000)) return;
+    const call = (...opts: [object?]) => (this.el.requestPointerLock as (o?: object) => Promise<void> | void).call(this.el, ...opts);
+    const first = call({ unadjustedMovement: true });
+    if (!first || typeof (first as Promise<void>).then !== "function") return; // older API: events report
+    this.requesting = true;
+    this.requestedAt = performance.now();
+    const refused = () => this.onLockError?.();
+    (first as Promise<void>)
+      .catch((e: unknown) => {
+        // Raw mouse movement isn't available everywhere: fall back to ordinary pointer lock.
+        if ((e as { name?: string } | null)?.name === "NotSupportedError") return Promise.resolve(call()).catch(refused);
+        // Otherwise refused (no user gesture, or re-locking too soon after Esc): the pointer stays free.
+        refused();
+      })
+      .finally(() => (this.requesting = false));
+  }
+
+  /** The hotkey went down this frame (with Shift exactly as it wants, as it was at the key press). */
+  hit(k: Hotkey): boolean {
+    return this.enabled && this.pressed.has(k.code) && hits(k, k.code, this.pressedShift.has(k.code));
+  }
+
+  /**
+   * The player is in the game: the pointer is locked, or free with the hint. Gate keys that act in
+   * the world or open panels on this, not on `locked` (a refused or lost lock must not dead-key M, I,
+   * J, T, E, 1–4, R or H). False while the pause menu, a panel, a notice or a loading screen is up.
+   */
+  get inPlay(): boolean {
+    return this.enabled && !this.suspended && (this.locked || this.free);
+  }
+
+  /** The game is loading (see suspendedWhile). */
+  get suspended(): boolean {
+    return this.suspendedWhile?.() ?? false;
   }
 
   down(code: string): boolean {
@@ -72,6 +137,7 @@ export class Input {
   /** Call at the end of each frame. */
   endFrame() {
     this.pressed.clear();
+    this.pressedShift.clear();
     this.mouseDX = 0;
     this.mouseDY = 0;
     this.lmbPressed = false;

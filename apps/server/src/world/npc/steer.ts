@@ -1,10 +1,11 @@
 // Steering on the sphere (D4: no navmesh). NPCs walk the shared height field: each step moves along a
 // tangent, re-projects onto the ground, and is refused when it climbs too steeply, leaves the NPC's
-// medium (land / shallows / lake / air), enters a pad's safe ring or walks into a structure (the
-// shared sites' solids: a pad outpost's buildings, D44); refused steps slide sideways, so NPCs steer
-// round buildings. An NPC that still can't reach its target falls back to D36 (evade after 5 s).
+// medium (land / shallows / lake / air), enters a safe zone (a pad's ring, the Portus town) or walks
+// into a structure (the shared sites' solids: the Portus town's, a planet outpost's and waystones,
+// D-zones-3, D44); refused steps slide sideways, and among structures the NPC follows the obstacle
+// round. An NPC that still can't get at its target falls back to D36 (evade after 5 s: brain.ts).
 
-import { PAD_SAFE_RADIUS, padDirs, type BodyDef, type Dir, type Terrain } from "@firstlight/shared";
+import { nearSafeZone, padDirs, type BodyDef, type Dir, type Terrain } from "@firstlight/shared";
 import { structureCollider, type ColliderBody, type StructureCollider } from "@firstlight/shared/planet/sites";
 import type { Locomotion } from "@firstlight/shared/content/npcs";
 import { NPC_RULES } from "@firstlight/shared/content/npcs";
@@ -17,23 +18,30 @@ export interface Ground {
   R: number;
   water: number;
   pads: readonly Dir[];
-  /** The body's structure solids (planet/sites.ts): NPCs don't walk through them. */
-  structures: StructureCollider;
+  /**
+   * The body's structures (planet/sites.ts; null if it has none): NPCs walk round the Portus town's
+   * crates, trees and towers outside the walls and round a planet outpost's buildings.
+   */
+  structures: StructureCollider | null;
+  /** Follow obstacles everywhere (Portus: its wild land rings the town), not only near a structure. */
+  followAll: boolean;
 }
 
 export function makeGround(terrain: Terrain): Ground {
   const body = terrain.body;
-  return { terrain, body, R: body.radius, water: body.waterLevel, pads: body.terrain.kind === "hub" ? [] : padDirs(body), structures: structureCollider(terrain) };
+  const c = structureCollider(terrain);
+  const hub = body.terrain.kind === "hub";
+  return { terrain, body, R: body.radius, water: body.waterLevel, pads: hub ? [] : padDirs(body), structures: c.solids.length > 0 ? c : null, followAll: hub };
 }
 
-/** An NPC's body for the structure queries (the player's step band). */
+/** An NPC's body for the structure queries (its own radius and height, the player's step band). */
 export function npcBody(radius: number, height = 1.8): ColliderBody {
   return { radius, height, step: 0.35 };
 }
 
 /** Would moving straight from `a` to `b` walk this body into a structure? */
 export function blockedByStructure(g: Ground, a: V3, b: V3, body: ColliderBody): boolean {
-  return g.structures.solids.length > 0 && g.structures.crosses(a[0], a[1], a[2], b[0], b[1], b[2], body);
+  return !!g.structures && g.structures.crosses(a[0], a[1], a[2], b[0], b[1], b[2], body);
 }
 
 /**
@@ -41,7 +49,7 @@ export function blockedByStructure(g: Ground, a: V3, b: V3, body: ColliderBody):
  * clear spot on its medium, or `p` unchanged when nothing is there (or nowhere clear was found).
  */
 export function clearOfStructures(g: Ground, p: V3, loco: Locomotion, hover: number, body: ColliderBody): V3 {
-  if (g.structures.solids.length === 0) return p;
+  if (!g.structures) return p;
   const q = { x: p[0], y: p[1], z: p[2] };
   if (g.structures.isClear(q, body)) return p;
   const ground = (x: number, y: number, z: number) => g.R + (feetHeight(g, x, y, z, loco, hover) ?? g.terrain.groundHeight(x, y, z));
@@ -66,17 +74,9 @@ export function feetHeight(g: Ground, x: number, y: number, z: number, loco: Loc
   }
 }
 
-/** Inside (or within `margin` m of) any pad's safe ring. */
+/** Inside (or within `margin` m of) a safe zone: any pad's ring, or the Portus town (shared zones.ts). */
 export function nearSafeRing(g: Ground, x: number, y: number, z: number, margin: number): boolean {
-  const l = Math.hypot(x, y, z);
-  const ux = x / l, uy = y / l, uz = z / l;
-  const lim = (PAD_SAFE_RADIUS + margin) / g.R;
-  const lim2 = lim * lim;
-  for (const p of g.pads) {
-    const dx = p[0] - ux, dy = p[1] - uy, dz = p[2] - uz;
-    if (dx * dx + dy * dy + dz * dz <= lim2) return true;
-  }
-  return false;
+  return nearSafeZone(g.body, x, y, z, margin);
 }
 
 /** Place a point on the ground for a locomotion (falls back to the plain ground height). */
@@ -90,55 +90,53 @@ export function placeOnGround(g: Ground, p: V3, loco: Locomotion, hover = 0): V3
 
 const SLIDES = [0, 35, -35, 70, -70];
 /**
- * Wall following (D44): once a structure has refused a direction, turns on the NPC's preferred side
- * first, out to 140° (along a building's face and a little away from it), then the other side.
+ * Among structures an NPC follows the obstacle: it turns further to its preferred side first, as far
+ * as sideways and back (a crate's far face, a barn's long wall), before trying the other side; the
+ * caller keeps the side it last slid to (Npc.slideSide), so it walks round, not to and fro.
  */
-const WALL_TURNS = [35, 70, 105, 140, -35, -70, -105, -140];
+const FOLLOW = [0, 35, 70, 105, 140, -35, -70, -105, -140, 180];
+/** On a planet an NPC follows obstacles within this many metres of a structure (elsewhere: SLIDES). */
+const FOLLOW_NEAR = 8;
 
-/** What the last step() met: whether a structure refused a direction, and the side of the turn it took (+1 left, -1 right, 0 straight). */
-export const lastStep = { wall: false, side: 0 };
+/** Did the last step() use FOLLOW (slideAngle reads it)? */
+let followed = false;
+
+/** The angle (degrees, + = the preferred side's turn) the last step() moved at for its return value `i`. */
+export function slideAngle(g: Ground, i: number, side = 1): number {
+  if (i < 0) return 0;
+  return followed && g.structures ? FOLLOW[i]! * side : SLIDES[i]!;
+}
 
 /**
  * Move `pos` by `d` metres along tangent `t`. Writes the new position into `out` and returns the
- * index of the direction used (0 = straight, 1–4 = slid, 5–12 = followed a structure's wall), or -1
- * if every direction was refused. Near no structure this is the plain slide (SLIDES). When a
- * structure refuses the straight way (or every slide), the NPC follows the wall instead (WALL_TURNS),
- * turning to the `prefer` side (+1 / -1) first: an NPC rounding a building keeps the side that first
- * got it past (brain.ts moveDir), so it walks on round the corner instead of stopping where the
- * two sides balance.
+ * index of the direction used (0 = straight, then slides: slideAngle), or -1 if every direction was
+ * refused. `side` (±1): which way to turn first round a structure; `height` is the NPC's (with its
+ * radius, the body the structures are checked against).
  */
-export function step(g: Ground, pos: V3, t: V3, d: number, loco: Locomotion, hover: number, radius: number, out: V3, avoidSafe = true, height = 1.8, prefer = 1): number {
+export function step(g: Ground, pos: V3, t: V3, d: number, loco: Locomotion, hover: number, radius: number, out: V3, avoidSafe = true, side = 1, height = 1.8): number {
   const curH = Math.hypot(pos[0], pos[1], pos[2]) - g.R;
   const margin = NPC_RULES.safeMargin + radius;
-  const body = g.structures.solids.length > 0 ? npcBody(radius, height) : null;
-  lastStep.wall = false;
-  lastStep.side = 0;
-  const tryTurn = (turn: number): boolean => {
-    const dir = turn === 0 ? t : rotateAboutUp(pos, t, turn);
+  const walls = g.structures;
+  const body = walls ? npcBody(radius, height) : null;
+  followed = !!walls && (g.followAll || walls.near(pos[0], pos[1], pos[2], FOLLOW_NEAR + radius));
+  const angles = followed ? FOLLOW : SLIDES;
+  for (let i = 0; i < angles.length; i++) {
+    const ang = followed ? angles[i]! * side : angles[i]!;
+    const dir = ang === 0 ? t : rotateAboutUp(pos, t, ang);
     const qx = pos[0] + dir[0] * d, qy = pos[1] + dir[1] * d, qz = pos[2] + dir[2] * d;
     const l = Math.hypot(qx, qy, qz);
     const ux = qx / l, uy = qy / l, uz = qz / l;
     const fh = feetHeight(g, ux, uy, uz, loco, hover);
-    if (fh === null) return false;
-    if ((loco === "ground" || loco === "wade") && fh - curH > d * MAX_SLOPE + 0.25) return false;
-    if (avoidSafe && nearSafeRing(g, qx, qy, qz, margin)) return false;
+    if (fh === null) continue;
+    if ((loco === "ground" || loco === "wade") && fh - curH > d * MAX_SLOPE + 0.25) continue;
+    if (avoidSafe && nearSafeRing(g, qx, qy, qz, margin)) continue;
     const r = g.R + fh;
-    if (body && g.structures.crosses(pos[0], pos[1], pos[2], ux * r, uy * r, uz * r, body)) {
-      lastStep.wall = true;
-      return false;
-    }
+    // Not through a structure (a step whose start is already inside one may leave it).
+    if (walls && walls.crosses(pos[0], pos[1], pos[2], ux * r, uy * r, uz * r, body!)) continue;
     out[0] = ux * r;
     out[1] = uy * r;
     out[2] = uz * r;
-    lastStep.side = Math.sign(turn);
-    return true;
-  };
-  for (let i = 0; i < SLIDES.length; i++) {
-    if (tryTurn(SLIDES[i]!)) return i;
-    if (i === 0 && lastStep.wall) break;
-  }
-  if (lastStep.wall) {
-    for (let k = 0; k < WALL_TURNS.length; k++) if (tryTurn(WALL_TURNS[k]! * prefer)) return SLIDES.length + k;
+    return i;
   }
   return -1;
 }

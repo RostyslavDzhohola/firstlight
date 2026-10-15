@@ -5,7 +5,7 @@ Plain DOM + CSS (D25). The look is the design verdict in `docs/design/ui-judging
 80s arcade sprites for anything the player owns, cold mono only for Meridian Oversight).
 
 See every screen and state with mock data, no server needed: run the client dev server and open
-`/ui-gallery.html?screen=hud&nav` (screens: landing, loading, charpick, hud, hud-oversight, death,
+`/ui-gallery.html?screen=hud&nav` (screens: landing (the home page with mock data), home-guest, loading, charpick, hud, hud-oversight, death,
 menu, settings, save-code, players, compass, wheel, shop, inventory, inventory-drag, onboarding,
 onboarding-attack, onboarding-portal, onboarding-done, kit-inventory, kit-onboarding, …). Add
 `&live` to keep animations running and `&low` for the Low-tier look (no blur).
@@ -22,9 +22,16 @@ onboarding-attack, onboarding-portal, onboarding-done, kit-inventory, kit-onboar
   `transform: scaleX(var(--fill))`, never `width`. No layout reads in the frame loop.
 - **No glow filters on things that update every frame.** Backdrop blur is off on the Low tier
   automatically (`fl-lowfx` on `<html>`), so don't fake it with images.
-- **HUD roots** carry `.fl-hud` or `data-hud` so photo mode (F9) hides them. Menus and overlays don't.
+- **HUD roots** carry `.fl-hud` or `data-hud` so photo mode (Shift+P) hides them. Menus and overlays don't.
 - **Full-screen overlays that free the mouse** call `overlayOpened(name)` / `overlayClosed(name)`
-  (`ui/dom.ts`) so the Esc menu doesn't pop over them.
+  (`ui/dom.ts`) so the Esc menu doesn't pop over them. When the last one closes without taking the
+  pointer back, the game shows the "Click to look around" hint (`ui/pauseFlow.ts`, D-controls-3).
+  Close on Esc with `game.input.lock()`: the overlay freed the pointer itself, so Chrome lets the page
+  take it back without a click.
+- **Keys:** every binding is in `game/keys.ts` (no F-keys, D-controls-2); hotkeys are read with
+  `input.hit(HOTKEYS.x)` in the frame loop or `hits(HOTKEYS.x, e.code, e.shiftKey)` in a listener.
+  Gate keys that act in the world or open panels on `input.inPlay`, not `input.locked`: the pointer
+  may be free with the "Click to look around" hint and the player is still playing (D-controls-4).
 
 ## Files
 
@@ -32,12 +39,19 @@ onboarding-attack, onboarding-portal, onboarding-done, kit-inventory, kit-onboar
 |---|---|
 | `styles/tokens.css` | Variables (colours, type scale, spacing, radii, motion, z-scale) on `:root` and `.fl-ui`, fonts |
 | `styles/components.css` | Primitives: panel, holo, buttons, keycaps, chips, bars, tier pips, forms, tabs, table, tooltip, overlay/modal, wordmark, Oversight and arcade frames, icons, portraits, pips, rarity |
-| `styles/icons.css` | 48 line icons: `<i class="li li-mic"></i>` (take `currentColor`) |
+| `styles/icons.css` | 50 line icons: `<i class="li li-mic"></i>` (take `currentColor`) |
 | `sprites.ts` | 16×16 pixel sprites as editable maps; `installSprites()` adds `.px-<name>`; `itemSprite(id)`, `portraitSprite(starter)` |
 | `styles/kit.css` | Inventory and onboarding pieces (below) |
 | `styles/compat.css` | Legacy `.fl-overlay > .fl-panel` markup gets the kit's centred card |
 | `dom.ts` | `el`, `sprite`, `icon`, `button`, `keycaps`, `uiRoot`, `isolateKeys`, overlay registry |
 | `hud.ts` | The HUD (API below) |
+| `account.ts` | Save card, sign-in and name picker (API below) |
+| `saveOffer.ts` | When saving is offered: the pure rules (unit-tested) |
+| `share.ts` | `shareRow(parent, { onHideUi? })`: the share bar (Share / Email / Follow on 𝕏 when `VITE_X_HANDLE` is set / hide-UI eye), on the home page and in the Esc menu (6e) |
+| `styles/home.css`, `../home/` | The home page (6a): `home.ts` fills the cards in `index.html` from `/api/home` and `/api/account/me`; `homeModel.ts` is the pure part; `leave.ts` goes home after a logout |
+| `map.ts`, `mapView.ts`, `mapMarkers.ts`, `mapRaster.ts`, `mapAtlas.ts` | The map (M): projection (north = the compass's, `social/compassMath.ts`), markers, the per-body ground atlas (baked and drawn in `world/mapAtlas.worker.ts`) |
+| `minimap.ts`, `minimapLayout.ts` | The HUD minimap and its size/avoid rules |
+| `waypoint.ts` | The player's waypoint (one per body, localStorage; `WAYPOINT_COLOUR` / `--waypoint`) |
 
 **Size unit.** Use `calc(N * var(--u))` where a design says N rem (`--u` is 14 px at 1280 wide, 19 px
 at 2560). Tokens: `--t-xs … --t-5xl`, `--sp-1 … --sp-8`, `--r-1/2/3/pill`, `--z-vignette 5`,
@@ -54,7 +68,7 @@ hud.setLogout(endsAt, serverNow)      // 30 s ring
 hud.setPrompt("E — take everything from Wren's pile")   // or setPrompt(text, "E")
 hud.hit(weak); hud.hurt()
 hud.damageNumber(x, y, amount, weak, kind?)              // kind: "normal" | "weak" | "armour" | "shield" | "heal"
-hud.toast(text, kind?, { title?, sub?, sprite?, ms? })   // kind: info | xp | coins | medal | warn | mission
+hud.toast(text, kind?, { title?, sub?, sprite?, ms? })   // kind: info | xp | coins | medal | warn | mission; returns the element
 hud.bubble(x, y, text, { name?, slot? })                 // phrase-wheel lines get their icon
 hud.subtitle(speaker, text, ms?)
 hud.bossBar({ name, hp, max, level?, phase?, phaseName?, variant?: "monster" | "oversight", notches?, note? })
@@ -62,8 +76,30 @@ hud.hideBossBar()                     // already driven by world/npcs/bossStore 
 hud.setParty(members)                 // already driven by the social lane (ui/partyFrames.ts)
 hud.setMissions(lines, header)        // already driven by the quests MissionTracker
 hud.voiceSlot                         // bottom-right container for voice indicators
-hud.death(info) / hud.characterPick(opts)   // both resolve { starter, palette }
+hud.minimapSlot                       // top of the right column: the minimap (ui/minimap.ts, driven by game/MapClient.ts)
+hud.death(info) / hud.characterPick(opts)   // both resolve { starter, palette }; death resolves null if closeDeath() closed it
 ```
+
+## Saving progress (HANDOFF 5c)
+
+Guests play with one click; the email is asked for only to save, at moments that never need the
+locked mouse. Entry points: the "Progress not saved · Esc → Save progress" toast (once per tab
+session after the first level-up, `data-e2e="save-toast"`), the Esc menu row (`menu-save`), the death
+screen (`death-save`) and the home page's "Save your progress" (`src/home/home.ts`; logging out lands there).
+
+```ts
+import { saveStatus } from "../net/auth.ts";        // "guest" | "saved" | "none": never creates a session
+import { openSaveProgress, showSignIn } from "./account.ts";
+
+if ((await saveStatus()) === "guest") showSaveButton();       // saved players never see a save prompt
+await openSaveProgress({ later: "Esc → Save progress" });     // "saved" | "dismissed"; the card is data-e2e="save-card"
+await showSignIn();                                           // "signed-in" | "dismissed" (data-e2e="signin-card")
+```
+
+`openSaveProgress()` refuses to open while the pointer is locked, resolves "saved" at once for a saved
+account, and checks the server first (`GET /api/account/save-status`, `saveReady` on
+`/api/account/me`): it opens on "Saving is temporarily unavailable" (`data-e2e="save-unavailable"`),
+"busy" or "Play a little first" (below level 2, D34) instead of an email field that leads nowhere.
 
 ## Markup
 

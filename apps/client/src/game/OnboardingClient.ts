@@ -52,7 +52,7 @@ export class OnboardingClient implements ClientSystem {
   private readonly lastPos = new THREE.Vector3();
   private hasLast = false;
   private lastTrainAt = 0;
-  /** CombatClient hook: the tutorial's tips or its last card are up (the save card waits). */
+  /** CombatClient hook: the tutorial's tips or its last card are up (the "Progress not saved" toast waits). */
   private readonly busy = () => this.active || !!this.hud;
   private readonly pauseRow = (): PauseExtra | null =>
     this.active
@@ -83,7 +83,7 @@ export class OnboardingClient implements ClientSystem {
       if (m.by === room.sessionId) this.phrased = true;
     });
     game.combat.training = (def, tier, now) => this.attack(def, tier, now);
-    // Level 2 is paid on the dummies: the "Save your character" card waits until the HUD is gone.
+    // Level 2 is paid on the dummies: the "Progress not saved" toast waits until the HUD is gone.
     game.combat.tutorialBusy = this.busy;
     pauseExtras.add(this.pauseRow);
   }
@@ -162,7 +162,7 @@ export class OnboardingClient implements ClientSystem {
     const color = weaponColor(WEAPONS.indexOf(def));
     g.self?.trigger("attack");
     if (def.delivery === "melee") {
-      g.audio.play("swing");
+      g.audio.play(g.audio.swingSound(WEAPONS.indexOf(def)));
       g.combat.effects.arc(me, g.player.facing, g.player.up(), def.range, color);
       return true;
     }
@@ -204,7 +204,7 @@ export class OnboardingClient implements ClientSystem {
     if (moved > MAX_STEP_M) moved = 0;
     this.lastPos.copy(p);
     this.hasLast = true;
-    const playing = g.input.locked && !g.photo?.active && !Panel.current;
+    const playing = g.input.inPlay && !g.photo?.active && !Panel.current;
     if (playing && g.input.pressed.has("KeyT")) this.hud.toggleChecklist();
     const look = playing ? (Math.abs(g.input.mouseDX) + Math.abs(g.input.mouseDY)) * g.input.sensitivity : 0;
     const completed = steps.observe({
@@ -255,7 +255,7 @@ export class OnboardingClient implements ClientSystem {
     if (this.game.combat.training) this.game.combat.training = null;
     this.dummies.dispose();
     // Left through the portal (the last step): the "Tutorial complete" card stays up for the rest of
-    // its time, over the travel, and the save card keeps waiting for it.
+    // its time, over the travel, and the "Progress not saved" toast keeps waiting for it.
     const hud = this.hud;
     const left = this.doneUntil - performance.now();
     if (hud && this.doneUntil && left > 0) {

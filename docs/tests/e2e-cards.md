@@ -41,7 +41,7 @@ Fresh browser profile (cold cache), production.
    `T1-1-loading.png` while the loading screen shows ("Loading the game…", "Connecting…", "Building
    the world…", "Warming up shaders…").
 2. In-world means the loading screen is hidden (`#loading` has `hidden`) and the HUD shows: player card
-   (name, Lv 1, "Safe" chip, HP 100/100, "XP 0 / 50"), the hotbar and the "Safe zone · No damage in or
+   (name, Lv 1, "Safe" zone label, HP 100/100, "XP 0 / 50"), the hotbar and the "Safe zone · No damage in or
    out" banner. Read the time with `performance.now()` at that moment (time since navigation start).
    Screenshot `T1-2-in-world.png`.
 3. Also run it once by hand without `?autoplay`: landing ("Firstlight", **PLAY**) → **Choose your
@@ -54,8 +54,9 @@ Fresh browser profile (cold cache), production.
 
 Two profiles, A and B, both pick **Unit 7** (starter weapon: Pocket Carbine, 9 damage per shot).
 
-1. In Portus, left-click: toast "Weapons are holstered in safe zones" (all of Portus and 12 m around
-   every pad are safe).
+1. In Portus town, left-click: toast "Weapons are holstered in town: head out of the gates to fight"
+   (the town inside its walls and 12 m around every pad are safe; D-zones-1). Outside the east or west
+   gate the zone label reads Danger and Woolbacks and Hopbits are in view.
 2. Walk into the **ARCADIA** portal ring on the plaza. You arrive at Arcadia's first pad.
 3. **PvE:** walk more than 12 m out ("Leaving safe zone · Anyone can hurt you") into Clover Fields and
    shoot a Hopbit (22 HP at level 1, so 3 hits). Expect hit markers and "9" damage numbers, the Hopbit
@@ -83,6 +84,10 @@ One profile on Arcadia, outside the ring, carrying items.
 
 ## T4 Proximity voice and radio (F6)
 
+**Hidden in this build (D-controls-1):** run this card only on a stack with `FEATURE_VOICE=1` on the
+server and a client built with `VITE_FEATURE_VOICE=1`. Without them, check instead that the Esc menu
+shows the disabled "Voice chat: coming soon" line, V does nothing and no microphone prompt appears.
+
 Two real browsers with microphones (or Chromium's fake media flags locally), within 35 m.
 Production needs the Cloudflare TURN key (`TURN_KEY_ID`, `TURN_KEY_API_TOKEN`); without it the
 voice widget says the relay is unavailable. Locally, without TURN, connections are direct.
@@ -103,13 +108,17 @@ voice widget says the relay is unavailable. Locally, without TURN, connections a
 
 Profiles A and B, no `?devguest`.
 
-1. A: Play, pick **Kappa** + **Moss**, name it (e.g. "Carol"), get in-world.
-2. A: Esc → **Save your character** ("Guest" badge) → **Email** → **Send code**.
+1. A: Play, pick **Kappa** + **Moss**, name it (e.g. "Carol"), get in-world. No save card pops up.
+   Reach level 2 (the tutorial pays it): a **"Progress not saved · Esc → Save progress"** toast shows
+   once (`[data-e2e="save-toast"]`).
+2. A: Esc → **Save progress** ("Not saved" badge, `[data-e2e="menu-save"]`; disabled below level 2)
+   → **Email** → **Send code**. If it says **"Saving is temporarily unavailable"**
+   (`[data-e2e="save-unavailable"]`), the server can't send mail (production: Resend's domain).
 3. Read the code (local: server stdout `[dev-mail]`; production: the disposable test inbox, D6, never
-   the owner's).
-4. Enter the code → **Save**. Expect **"Saved."** and **Back to the game**; the client rejoins by
-   itself (close code 4101). Screenshot `T5-4-saved.png`.
-5. B: landing → **Sign in with email** → Send code → code → **Sign in** → "Signed in." →
+   the owner's). Pasting the whole email sentence works.
+4. Enter the code → **Save**. Expect **"Saved."** and **Done**; the client rejoins by itself (close
+   code 4101), and the Esc menu no longer shows Save progress. Screenshot `T5-4-saved.png`.
+5. B: landing → **Sign in** (`[data-e2e="signin"]`) → Send code → code → **Sign in** → "Signed in." →
    **Continue**. Play starts without a starter pick: the same Carol, Kappa, Moss, level and items.
    Screenshot `T5-5-same-character.png`.
 6. A now shows **PLAYING ELSEWHERE** with **Play here instead** (close code 4100). Screenshot
@@ -122,7 +131,8 @@ admin heals, write that in the results, because then it doesn't show the pair ca
 
 1. Both in Portus. A presses **Tab** (tap) → **Invite** next to B (needs to be within 30 m). B
    presses **Y** (Accept). The list shows "Your party (2/4)".
-2. Each window opens the admin console with **`** (backquote) and types `level 20`, then
+2. Each window opens the admin console with **Shift+`** (backquote; `` ` `` alone is the performance
+   overlay) and types `level 20`, then
    `give stillshot 3` (or another tier-3 weapon).
 3. A types `stage 2` (or opens A with `?stage=2&all`). The client travels to Arcadia and repeats the
    command; the party lines up on the Gull Point overlook, healed, and Tidewrath spawns at its lair on
@@ -148,13 +158,13 @@ admin heals, write that in the results, because then it doesn't show the pair ca
 
 ## T8 Photo mode (F13)
 
-1. In-world, press **F9**: the HUD hides and the photo panel shows the keys (F9 leave, WASD · Q/E ·
+1. In-world, press **Shift+P**: the HUD hides and the photo panel shows the keys (Shift+P leave, WASD · Q/E ·
    Shift fly, wheel FOV, `[ ]` focus, `- =` aperture, `, .` exposure, G filter, H hide). Screenshot
    `T8-1-panel.png`.
 2. Fly the camera with WASD and the mouse (up to 180 m from your body).
 3. Press **G** repeatedly: Planet → Neutral → Muted → Noir → Golden hour → Cold dawn. Screenshot
    `T8-3-filter.png`.
-4. Press **F9**: the panel goes, the HUD and the normal camera return.
+4. Press **Shift+P**: the panel goes, the HUD and the normal camera return.
 
 Staged scenes for F13: `docs/staged-scenes.md`.
 
@@ -162,13 +172,15 @@ Staged scenes for F13: `docs/staged-scenes.md`.
 
 Setup: a fresh guest (clean browser profile) on a stack with an empty database, or production.
 
-1. Play → pick a name. The "First minute · 0 / 12" checklist, the step rail and the Walk card appear.
+1. Play → pick a name. The "First minute · 0 / 11" checklist (12 in builds with voice), the step rail
+   and the Walk card appear.
 2. Walk 6 m, move the mouse, Space, hold Shift+W, C: each step ticks.
 3. Walk to the three training dummies south-east of spawn and hit each three times with the
    starter weapon (melee starters need to stand within reach). Each third hit knocks one down
    with "+10 XP"; the last pays +20, level 2 and "Medal earned: Spark".
 4. Press 2 then 1 (switch weapons), E (pick up tip), M twice (map), hold G and pick a phrase
-   (phrase wheel), wait 8 s on the voice card. The tutorial ends.
+   (phrase wheel), then walk into a portal (builds with voice show an optional voice card first,
+   which moves on after 8 s). The tutorial ends.
 5. Press I: hotbar + 16-slot backpack, the item card and the drop zone. Click the weapon, click a
    backpack slot: the HUD hotbar shows Fists. Click it back.
 6. Click the weapon, click "Drop here": a pile appears at your feet. Close with I, stand on the

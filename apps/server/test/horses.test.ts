@@ -145,7 +145,7 @@ async function run(b: Bot, speed: number, seconds: number): Promise<{ correction
 }
 
 describe("the Horse Whistle", () => {
-  it("is sold at the Portus Exchange for 1,500 coins, and Portus (all safe) refuses the whistle", async () => {
+  it("is sold at the Portus Exchange for 1,500 coins, and the Portus town (a safe zone) refuses the whistle", async () => {
     const b = await bot("buyer", "portus");
     await tpAndWait(b, objAt("juno_vale"));
     b.send("admin", { cmd: "coins", args: { amount: 1499 } });

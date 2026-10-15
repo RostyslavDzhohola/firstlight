@@ -3,6 +3,7 @@
 // invite to party (30 m), report; admins also kick, ban, voice-mute, go to, bring and announce.
 
 import { STARTERS } from "@firstlight/shared/content/weapons";
+import { features } from "../config.ts";
 import { PF } from "@firstlight/shared/net/schema";
 import { REPORT_REASONS, SOCIAL } from "@firstlight/shared/net/social";
 import { el, isolateKeys, sbtn } from "./dom.ts";
@@ -99,7 +100,7 @@ export class PlayerList {
     this.panel = el("div", "fl-panel", this.overlay);
     isolateKeys(this.panel);
     this.panel.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") this.close(false);
+      if (e.key === "Escape") this.close(true); // back into the game (the list freed the pointer itself)
       else if (e.code === "Tab") {
         e.preventDefault();
         this.close(true);
@@ -158,7 +159,8 @@ export class PlayerList {
     el("h3", "", panel, "In this world copy");
     const table = el("table", "", panel);
     const head = el("tr", "", table);
-    for (const h of ["Player", "Level", "Character", "Voice", "Distance", ""]) el("th", h === "Level" || h === "Distance" ? "num" : "", head, h);
+    // Voice is hidden in this build (features.voice, D-controls-1): no voice column, mute or voice-mute.
+    for (const h of ["Player", "Level", "Character", ...(features.voice ? ["Voice"] : []), "Distance", ""]) el("th", h === "Level" || h === "Distance" ? "num" : "", head, h);
     const rows = [...(players?.entries() ?? [])].sort(([a, pa], [b, pb]) => (a === selfSid ? -1 : b === selfSid ? 1 : String(pa.name).localeCompare(String(pb.name))));
     for (const [sid, p] of rows) {
       const me = sid === selfSid;
@@ -173,8 +175,10 @@ export class PlayerList {
       if (isBlocked(sid)) el("span", "fl-chip bad", name, "BLOCKED");
       el("td", "num", tr, String(p.level));
       el("td", "", tr, STARTERS[p.starter]?.name ?? "");
-      const voice = p.flags & PF.VOICE_MUTED ? ["muted", "admin-muted"] : isMutedLocally(sid) ? ["muted", "muted by you"] : p.flags & PF.VOICE ? ["live", "voice on"] : ["", "voice off"];
-      el("td", `fl-voice ${voice[0]}`, tr, voice[1]);
+      if (features.voice) {
+        const voice = p.flags & PF.VOICE_MUTED ? ["muted", "admin-muted"] : isMutedLocally(sid) ? ["muted", "muted by you"] : p.flags & PF.VOICE ? ["live", "voice on"] : ["", "voice off"];
+        el("td", `fl-voice ${voice[0]}`, tr, voice[1]);
+      }
       const d = Math.hypot(p.x - mx, p.y - my, p.z - mz);
       el("td", "num", tr, me ? "" : `${Math.round(d)} m`);
       const cell = el("td", "", tr);
@@ -185,13 +189,15 @@ export class PlayerList {
         continue;
       }
       const acts = el("div", "acts", cell);
-      const muted = isMutedLocally(sid);
-      sbtn(muted ? "Unmute" : "Mute", () => {
-        setMuted(sid, !muted);
-        this.render(true);
-      }, muted ? "on" : "", acts, "Mute their voice for you only");
+      if (features.voice) {
+        const muted = isMutedLocally(sid);
+        sbtn(muted ? "Unmute" : "Mute", () => {
+          setMuted(sid, !muted);
+          this.render(true);
+        }, muted ? "on" : "", acts, "Mute their voice for you only");
+      }
       const blocked = isBlocked(sid);
-      sbtn(blocked ? "Unblock" : "Block", () => this.host.send("social:block", { target: p.userId || sid, on: !blocked }), blocked ? "on" : "", acts, "No voice or invites between you, kept on your account");
+      sbtn(blocked ? "Unblock" : "Block", () => this.host.send("social:block", { target: p.userId || sid, on: !blocked }), blocked ? "on" : "", acts, features.voice ? "No voice or invites between you, kept on your account" : "No invites between you, kept on your account");
       if (p.party !== myParty || !myParty) {
         const why = blocked ? "blocked" : d > SOCIAL.INVITE_RANGE_M ? "get within 30 m" : partyFull ? "your party is full" : "";
         const inv = sbtn("Invite", () => this.host.send("party", { action: "invite", target: sid }), "", acts, why || "Invite to your party");
@@ -206,8 +212,10 @@ export class PlayerList {
         const mod = el("span", "mod", acts);
         sbtn("Go to", () => this.host.send("mod", { action: "goto", target: sid }), "", mod);
         sbtn("Bring", () => this.host.send("mod", { action: "bring", target: sid }), "", mod);
-        const vm = (p.flags & PF.VOICE_MUTED) !== 0;
-        sbtn(vm ? "Voice on" : "Voice off", () => this.host.send("mod", { action: "voicemute", target: sid, on: !vm }), vm ? "on" : "", mod, "Admin voice-mute");
+        if (features.voice) {
+          const vm = (p.flags & PF.VOICE_MUTED) !== 0;
+          sbtn(vm ? "Voice on" : "Voice off", () => this.host.send("mod", { action: "voicemute", target: sid, on: !vm }), vm ? "on" : "", mod, "Admin voice-mute");
+        }
         sbtn("Kick", () => this.host.send("mod", { action: "kick", target: sid }), "warn", mod);
         const confirming = this.confirmBan?.sid === sid && this.confirmBan.until > Date.now();
         sbtn(confirming ? "Confirm ban" : "Ban", () => {

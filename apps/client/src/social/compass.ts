@@ -1,9 +1,10 @@
 // Compass strip at the top of the HUD: N/E/S/W relative to the camera, party members on the same
-// body, and the nearest safe pad (its 12 m ring) while you're outside safe zones.
+// body, the way back to safety while you're outside safe zones (the nearest pad's 12 m ring, or on
+// Portus the nearest town gate: shared zones.ts), and your waypoint (ui/waypoint.ts) with its distance.
 
-import { BODIES, padDirs, PAD_SAFE_RADIUS, type BodyId } from "@firstlight/shared";
+import { BODIES, nearestSafeEntry, type BodyId } from "@firstlight/shared";
 import { el } from "./dom.ts";
-import { bearingTo, headingOf, nearestDir, stripX, surfaceDistance, type V3 } from "./compassMath.ts";
+import { bearingTo, headingOf, stripX, surfaceDistance, type V3 } from "./compassMath.ts";
 
 const HALF_SPAN = 95; // degrees visible either side of centre
 const CARDINALS: [number, string][] = [[0, "N"], [45, "NE"], [90, "E"], [135, "SE"], [180, "S"], [225, "SW"], [270, "W"], [315, "NW"]];
@@ -24,6 +25,9 @@ export class Compass {
   private readonly markers = new Map<string, { e: HTMLElement; dot: HTMLElement; text: HTMLElement }>();
   private readonly pad = el("div", "mk pad");
   private readonly padText: HTMLElement;
+  private readonly wp = el("div", "mk wp");
+  private readonly wpText: HTMLElement;
+  private wpLabel = "";
 
   /** Mount inside the HUD root so it hides with the HUD (photo mode). */
   constructor(parent: HTMLElement = document.body) {
@@ -42,6 +46,11 @@ export class Compass {
     el("i", "", this.pad);
     this.padText = el("span", "", this.pad);
     this.root.appendChild(this.pad);
+    this.wp.dataset.e2e = "compass-waypoint";
+    this.wp.style.display = "none";
+    el("i", "", this.wp);
+    this.wpText = el("span", "", this.wp);
+    this.root.appendChild(this.wp);
   }
 
   setVisible(on: boolean) {
@@ -53,8 +62,9 @@ export class Compass {
    * @param forward camera forward tangent
    * @param body    current body (pads)
    * @param safe    standing in a safe zone (hides the pad marker)
+   * @param waypoint your waypoint's unit direction on this body, if any
    */
-  update(pos: V3, forward: V3, body: BodyId, safe: boolean, markers: CompassMarker[]) {
+  update(pos: V3, forward: V3, body: BodyId, safe: boolean, markers: CompassMarker[], waypoint: V3 | null = null) {
     if (this.root.style.display === "none") this.root.style.display = "";
     const heading = headingOf(pos, forward);
     const place = (e: HTMLElement, rel: number, hideOff = true) => {
@@ -66,18 +76,34 @@ export class Compass {
     for (const t of this.ticks) place(t, Number(t.dataset.deg) - heading);
     for (const c of this.cards) place(c.e, c.deg - heading);
 
-    // Nearest safe pad (planets only; Portus is safe everywhere).
+    // The way back to safety: the nearest pad's ring, or a Portus town gate.
     const def = BODIES[body];
-    if (def.terrain.kind === "hub" || safe) this.pad.style.display = "none";
+    if (safe) this.pad.style.display = "none";
     else {
-      const dirs = padDirs(def) as readonly V3[];
-      const i = nearestDir(pos, dirs);
-      const d = dirs[i]!;
+      const entry = nearestSafeEntry(def, pos[0], pos[1], pos[2]);
+      const d = entry.dir;
       const R = def.radius;
       const target: V3 = [d[0] * R, d[1] * R, d[2] * R];
       const clamped = place(this.pad, bearingTo(pos, forward, target), false);
       this.pad.classList.toggle("edge", clamped);
-      this.padText.textContent = `SAFE ${Math.max(0, Math.round(surfaceDistance(pos, target, R) - PAD_SAFE_RADIUS))} m`;
+      this.padText.textContent = `SAFE ${Math.max(0, Math.round(surfaceDistance(pos, target, R) - entry.edge))} m`;
+    }
+
+    // Waypoint: always shown, pinned to the strip's end when it's behind you.
+    if (!waypoint) {
+      if (this.wpLabel) {
+        this.wp.style.display = "none";
+        this.wpLabel = "";
+      }
+    } else {
+      const R = def.radius;
+      const target: V3 = [waypoint[0] * R, waypoint[1] * R, waypoint[2] * R];
+      this.wp.classList.toggle("edge", place(this.wp, bearingTo(pos, forward, target), false));
+      const label = `${Math.round(surfaceDistance(pos, target, R))} m`;
+      if (label !== this.wpLabel) {
+        this.wpLabel = label;
+        this.wpText.textContent = label;
+      }
     }
 
     // Party members.

@@ -49,9 +49,23 @@
 .fl-keypad .keys button { height: calc(3 * var(--u)); font: 600 var(--t-lg)/1 var(--font-mono); border-radius: var(--r-2); border: 1px solid var(--line-3); border-bottom-width: 2px; background: linear-gradient(180deg, rgba(255, 255, 255, .1), rgba(255, 255, 255, .03)); color: var(--paper); cursor: pointer; }
 .fl-keypad .keys button:hover { border-color: rgba(255, 217, 155, .65); }
 
-.fl-map { width: min(calc(54 * var(--u)), 96vw); }
-.fl-map canvas { display: block; margin: 0 auto; cursor: grab; }
+.fl-map { width: auto; max-width: 96vw; }
+.fl-map__head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; margin-bottom: calc(.6 * var(--u)); }
+.fl-map__tools { display: flex; gap: calc(.4 * var(--u)); flex-wrap: wrap; }
+.fl-map__tools .fl-btn { min-width: calc(2.2 * var(--u)); }
+/* Sized here, not inline: it may shrink to fit the panel, and ui/map.ts follows its shown size. */
+.fl-map__view { position: relative; flex: 0 1 auto; margin: 0 auto; width: min(1040px, calc(90vw - 40px)); height: min(700px, calc(86vh - 170px)); min-width: 280px; min-height: 160px; border-radius: var(--r-2); overflow: hidden; background: #0b0f14; box-shadow: inset 0 0 0 1px var(--photon-line); }
+.fl-map canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
 .fl-map canvas.drag { cursor: grabbing; }
+/* The waypoint's DOM marker sits exactly on the drawn diamond (transparent: the canvas draws it). */
+.fl-map__wp { position: absolute; left: -9px; top: -9px; width: 18px; height: 18px; pointer-events: none; }
+.fl-map__wp[hidden] { display: none; }
+.fl-map .legend .k { display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: -1px; border-radius: 50%; border: 2px solid #c9c2e0; }
+.fl-map .legend .k.pad.on { background: #36f9f6; border-color: #0b1016; }
+.fl-map .legend .k.portal { border: 3px solid #36f9f6; }
+.fl-map .legend .k.guide, .fl-map .legend .k.shop { background: #ffd166; border-color: #0b1016; }
+.fl-map .legend .k.lair { border-radius: 1px; background: #ff5a6a; border-color: #0b1016; transform: rotate(45deg) scale(.85); }
+.fl-map .legend .k.wp { border-radius: 1px; background: var(--waypoint); border-color: #0b1016; transform: rotate(45deg) scale(.85); }
 .fl-map .tip { min-height: 1.4em; text-align: center; color: var(--dawn-3); font: 600 var(--t-sm)/1.3 var(--font-display); letter-spacing: .04em; margin-top: calc(.4 * var(--u)); }
 .fl-map .legend { display: flex; flex-wrap: wrap; gap: calc(.5 * var(--u)) var(--sp-4); justify-content: center; font-size: var(--t-xs); color: var(--fog-3); margin-top: calc(.4 * var(--u)); }
 

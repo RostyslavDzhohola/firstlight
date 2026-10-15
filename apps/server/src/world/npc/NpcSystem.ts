@@ -102,7 +102,8 @@ export class NpcSystem implements RoomSystem {
     this.ground = makeGround(world.terrain);
     this.planet = world.body.terrain.kind === "hub" ? null : (world.body.id as PlanetId);
     this.arena = this.planet ? bossArena(world.terrain) : null;
-    this.points = this.planet ? buildSpawnPoints(world.terrain, this.arena) : [];
+    // Portus has no boss and no planet tables, but its wild land outside the town walls has creeps (D-zones-1).
+    this.points = buildSpawnPoints(world.terrain, this.arena);
     this.groups = this.points.map((p) => ({ point: p, active: false, members: p.members.map(() => null), dead: p.members.map(() => false), cleared: false, respawnLeft: 0, lastNearAt: 0 }));
     const bd = BOSS_BY_BODY[world.body.id];
     this.boss = bd && this.arena ? new BossController(this, bd, this.arena) : null;
@@ -599,7 +600,7 @@ export class NpcSystem implements RoomSystem {
       if (d < 0.01 || dot(t, t) < 0.5) continue;
       const g = this.world.snapToGround([pos[0] + t[0] * d, pos[1] + t[1] * d, pos[2] + t[2] * d]);
       // Not through a building (D44): the pull stops at the wall.
-      if (this.ground.structures.solids.length > 0 && this.ground.structures.crosses(pos[0], pos[1], pos[2], g[0], g[1], g[2])) continue;
+      if (this.ground.structures?.crosses(pos[0], pos[1], pos[2], g[0], g[1], g[2])) continue;
       a.state.x = a.lastX = g[0];
       a.state.y = a.lastY = g[1];
       a.state.z = a.lastZ = g[2];

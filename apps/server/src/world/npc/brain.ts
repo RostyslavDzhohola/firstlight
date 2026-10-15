@@ -11,7 +11,7 @@ import type { V3 } from "../geometry.ts";
 import { cancelAttack, canSee, chest, groundOnly, isMelee, meleeHeightTol, startAttack, updateAttack } from "./attacks.ts";
 import type { NpcSystem } from "./NpcSystem.ts";
 import { MODE, type Npc } from "./npc.ts";
-import { feetHeight, lastStep, nearSafeRing, npcBody, step } from "./steer.ts";
+import { feetHeight, nearSafeRing, npcBody, slideAngle, step } from "./steer.ts";
 import { NPC_TUNING, emitNpcEvent } from "./tuning.ts";
 import { add, cross, dist, dot, flatDist, len, normalize, rotateAboutUp, stableTangentAt, sub, tangentDir, tangentize, up } from "./vec.ts";
 
@@ -100,7 +100,7 @@ function calm(sys: NpcSystem, n: Npc, now: number, dt: number) {
       const t = rotateAboutUp(n.home, stableTangentAt(n.home), ang);
       const goal = add(n.home, t, r);
       // Never a goal inside a building (D44): it idles a little longer instead.
-      if (sys.ground.structures.solids.length > 0 && !sys.ground.structures.isClear({ x: goal[0], y: goal[1], z: goal[2] }, npcBody(n.radius, n.height))) {
+      if (sys.ground.structures && !sys.ground.structures.isClear({ x: goal[0], y: goal[1], z: goal[2] }, npcBody(n.radius, n.height))) {
         n.modeUntil = now + 2000 + Math.random() * 3000;
         return;
       }
@@ -313,7 +313,7 @@ function outOfReach(sys: NpcSystem, n: Npc, tp: V3, d: number): boolean {
  */
 function walledOff(sys: NpcSystem, n: Npc, tp: V3, d: number, now: number): boolean {
   const s = sys.ground.structures;
-  if (s.solids.length === 0 || d <= meleeReach(n) + 0.5) {
+  if (!s || d <= meleeReach(n) + 0.5) {
     n.walled = undefined;
     return false;
   }
@@ -602,11 +602,12 @@ export function moveDir(sys: NpcSystem, n: Npc, dir: V3, speed: number, dt: numb
     n.facing = d;
   }
   const out: V3 = [0, 0, 0];
-  const used = step(sys.ground, n.pos, d, speed * dt, n.def.locomotion, n.def.hover ?? 0, n.radius, out, avoidSafe, n.height, n.slideSide);
+  const used = step(sys.ground, n.pos, d, speed * dt, n.def.locomotion, n.def.hover ?? 0, n.radius, out, avoidSafe, n.slideSide, n.height);
   sys.setAnim(n, anim);
   if (used < 0) return false;
-  // Rounding a building (D44): keep to the side that got past its wall, so it walks on round the corner.
-  if (lastStep.wall && lastStep.side !== 0) n.slideSide = lastStep.side;
+  // Round a structure: keep turning to the side that worked (straight on or straight back keeps it).
+  const ang = slideAngle(sys.ground, used, n.slideSide);
+  if (ang !== 0 && Math.abs(ang) !== 180) n.slideSide = Math.sign(ang);
   n.pos = out;
   return true;
 }

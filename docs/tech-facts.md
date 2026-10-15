@@ -871,6 +871,28 @@ vercel dns add one4all.dev _dmarc.firstlight TXT "v=DMARC1; p=none;"
 
 ---
 
+## 10. DataFast (docs checked 2026-10-15)
+
+### Verified facts
+
+- Script: `<script defer data-website-id="dfid_…" data-domain="<root domain>" src="https://datafa.st/js/script.js">`;
+  the cookieless variant is `https://datafa.st/js/script.cookieless.js` (website settings → General →
+  "Cookieless / privacy mode"). Localhost isn't tracked unless `data-allow-localhost="true"`.
+  DataFast says the default script uses cookies (a banner may be needed) and the cookieless one
+  usually doesn't need a banner for DataFast. Sources: datafa.st/docs/script-configuration,
+  datafa.st/docs/gdpr-cookieless-tracking.
+- API: base `https://datafa.st/api/v1/`, `Authorization: Bearer df_…` (website key; `dft_` account
+  tokens also need `websiteId`). `GET /analytics/realtime?fields=visitors` → `{status, data: [{visitors}]}`,
+  visitors with a pageview in the last 10 minutes. `GET /analytics/overview?fields=visitors,sessions`
+  without `startAt`/`endAt` is all-time. Rate limits are per token (429 with `X-RateLimit-*`; the docs
+  show a limit of 60 in an example but don't state the policy). Sources: datafa.st/docs/api-introduction,
+  datafa.st/docs/api/website/analytics/realtime, …/overview.
+
+### Spec implications
+
+- `apps/server/src/ops/datafast.ts` caches both numbers for ≥ 60 s with one request pair in flight,
+  so the home page costs DataFast at most two calls a minute (D-home-4).
+
 ## Risks and surprises
 
 These would break the plan or quietly undermine it if missed, most severe first.

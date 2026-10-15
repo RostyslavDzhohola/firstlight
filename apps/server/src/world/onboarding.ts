@@ -1,7 +1,7 @@
 // Onboarding on Portus (SPEC §6.12, content.md §1.1, shared/content/onboarding.ts): offered once per
 // account to a brand-new character (level 1, never died). The client teaches move, look, jump,
 // sprint and dodge on its own (nothing is paid for those); the server counts hits on the three
-// training dummies from `train` messages (Portus is a safe zone, so real attacks are refused there),
+// training dummies from `train` messages (Portus town is a safe zone, so real attacks are refused there),
 // pays 10 XP per dummy and, when all three are down, 20 XP and the Spark medal. Skipping ends it with
 // nothing more paid. Progress lives in account stats, so it survives reconnects and never repeats.
 // Every payout (the dummy's flag, the completion flag, the character's XP, the medal) commits in one
@@ -13,7 +13,7 @@ import type { YouState } from "@firstlight/shared/net/protocol";
 import { z } from "zod";
 import { actorPos, type PlayerActor } from "./actors.ts";
 import type { BodyRoom } from "./BodyRoom.ts";
-import { ORIGIN_SLACK, selectedWeapon } from "./combat.ts";
+import { aimOrigin, ORIGIN_SLACK, selectedWeapon } from "./combat.ts";
 import { emitGameEvent } from "./events.ts";
 import { dist3, inMeleeArc, rayCapsule, type V3 } from "./geometry.ts";
 import { QuestSystem } from "./quests/QuestSystem.ts";
@@ -230,11 +230,11 @@ export class OnboardingSystem implements RoomSystem {
     const pos = actorPos(a);
     const l = Math.hypot(pos[0], pos[1], pos[2]) || 1;
     const head: V3 = [pos[0] + (pos[0] / l) * 1.6, pos[1] + (pos[1] / l) * 1.6, pos[2] + (pos[2] / l) * 1.6];
-    const o: V3 = [m.ox, m.oy, m.oz];
-    if (dist3(o, head) > ORIGIN_SLACK) return -1;
     const dl = Math.hypot(m.dx, m.dy, m.dz);
     if (!(dl > 0.5 && dl < 1.5)) return -1;
     const d: V3 = [m.dx / dl, m.dy / dl, m.dz / dl];
+    const o = aimOrigin([m.ox, m.oy, m.oz], d, head); // a zoomed-out camera counts from the head too
+    if (!(dist3(o, head) <= ORIGIN_SLACK)) return -1;
     let best = -1;
     let bestT = Infinity;
     this.dummies.forEach((f, i) => {

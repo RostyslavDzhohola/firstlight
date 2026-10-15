@@ -7,16 +7,22 @@ import { HORSE_WHISTLE } from "@firstlight/shared/content/horse";
 import { flags } from "../config.ts";
 import { horsesEnabled, usableAnywhere } from "./mount.ts";
 import { WEAPONS, WEAPON_BY_ID, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
+import { BODIES, zoneAt } from "@firstlight/shared";
 import { PHRASES } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
 import { Effects, weaponColor } from "../render/effects.ts";
 import { Hud, type YouPlus } from "../ui/hud.ts";
+import { zoneInfo } from "../ui/zoneLabel.ts";
 import { PhraseWheel } from "../ui/phraseWheel.ts";
 import type { Game } from "./Game.ts";
-import { showSavePrompt } from "../ui/account.ts";
-import { SaveOffer } from "../ui/saveOffer.ts";
-import { getPlayToken, isDevGuest, readClaims } from "../net/auth.ts";
+import { openSaveProgress } from "../ui/account.ts";
+import { closeDeath, type DeathInfo } from "../ui/death.ts";
+import { DeathFlow } from "./deathFlow.ts";
+import { offerNudge, offersSave, SaveNudge, saveReady } from "../ui/saveOffer.ts";
+import { saveStatus } from "../net/auth.ts";
+import { attackDeniedText, holsteredText, NoticeGate } from "./notices.ts";
 
+const NUDGED_KEY = "fl.saveNudged";
 const _v = new THREE.Vector3();
 const _head = new THREE.Vector3();
 const _up = new THREE.Vector3();
@@ -43,13 +49,38 @@ export class CombatClient {
   private scoped = false;
   /** Unzoomed field of view (Settings → Field of view). */
   baseFov = 75;
-  deadUntilRespawn = false;
+  /** Dying and rising again, across a rejoin (saving from the death screen moves us to the account's room). */
+  readonly death = new DeathFlow<DeathInfo>({
+    showScreen: (info) => this.hud.death({ ...info, save: this.saveOnDeath(info.level) }),
+    closeScreen: () => closeDeath(),
+    freeze: (on) => {
+      this.game.player.frozen = on;
+    },
+    // Through the room we're in now, never the one that showed the death (Codex review).
+    sendRespawn: (choice) => {
+      const room = this.game.net.room;
+      if (!room) return false;
+      room.send("respawn", choice);
+      return true;
+    },
+    // The death screen may have closed long before the server confirmed the respawn: the pause flow
+    // kept the screen "away" while we were dead and must hear that it no longer is.
+    changed: () => this.game.menu?.blockersChanged(),
+  });
+  get deadUntilRespawn(): boolean {
+    return this.death.dead;
+  }
   /** Onboarding hook (game/OnboardingClient.ts): handles an attack inside a safe zone; true = handled. */
   training: ((def: WeaponDef, tier: TierStats, now: number) => boolean) | null = null;
-  /** Onboarding hook: the tutorial is up (tips or its last card); the level-up save card waits for it. */
+  /** Onboarding hook: the tutorial is up (tips or its last card); the "Progress not saved" toast waits for it. */
   tutorialBusy: (() => boolean) | null = null;
-  private readonly saveOffer = new SaveOffer();
+  /** The "Progress not saved" toast (once per tab session) and the best level seen (Esc menu → Save progress). */
+  readonly saveNudge = new SaveNudge(sessionStorage.getItem(NUDGED_KEY) === "1");
+  /** Refusal notices: each reason once per press of an attack button. */
+  private readonly deniedGate = new NoticeGate();
+  private gateRmb = false;
   private readonly wheel: PhraseWheel;
+  private loadingEl: HTMLElement | null = null;
 
   constructor(private readonly game: Game) {
     this.effects = new Effects(game.ctx.scene);
@@ -67,8 +98,8 @@ export class CombatClient {
     room.onMessage("you", (m: YouPlus) => {
       const prevLevel = this.hud.you?.level ?? m.level;
       this.hud.setYou(m);
-      if (!isDevGuest()) this.saveOffer.levelUp(m.level, prevLevel);
-      if (!m.dead) this.deadUntilRespawn = false;
+      this.saveNudge.levelUp(m.level, prevLevel);
+      this.death.onYou(!!m.dead);
     });
     room.onMessage("toast", (m: { text: string; kind: string }) => {
       this.hud.toast(m.text, m.kind);
@@ -78,6 +109,11 @@ export class CombatClient {
       if (m.reason === "level gate") this.hud.toast("Your level is too low to use that tier", "warn");
       else if (m.action === "logout") this.hud.toast("Can't log out in combat — wait 10 s", "warn");
       else if (m.action === "use" && USE_DENIED[m.reason]) this.hud.toast(USE_DENIED[m.reason]!, "warn");
+      else {
+        // A refused attack says why (a refused Hexquill bolt used to show nothing at all).
+        const text = attackDeniedText(m.action, m.reason, this.game.bodyId);
+        if (text && this.deniedGate.allow(text)) this.hud.toast(text, "warn");
+      }
     });
     // Support items: Patchkit channel (server-timed; damage interrupts it) and Prism Bubbles.
     room.onMessage("channel", (m: { kind: string; ms: number; target: string }) => {
@@ -91,7 +127,7 @@ export class CombatClient {
     room.onMessage("bubble", (m: { id: number; x: number; y: number; z: number; r: number; ms: number }) => {
       const at = new THREE.Vector3(m.x, m.y, m.z);
       this.effects.bubble(m.id, at, m.r, m.ms);
-      this.game.audio.play("ui", at);
+      this.game.audio.play("bubble", at);
     });
     room.onMessage("bubblePop", (m: { id: number }) => this.effects.popBubble(m.id));
     // Bubbles deployed before we arrived (late join, reconnect): ask now that the handlers exist.
@@ -99,7 +135,7 @@ export class CombatClient {
     room.onMessage("hit", (m: { attacker: string; target: string; amount: number; weak: boolean; x: number; y: number; z: number; kb?: number; kx?: number; ky?: number; kz?: number }) => {
       if (m.attacker === me && m.target !== me) {
         this.hud.hit(m.weak);
-        this.game.audio.play("hitmark", null, m.weak ? 1.3 : 1, m.weak ? 1.3 : 1);
+        this.game.audio.play(m.weak ? "crit" : "hitmark");
         const s = this.toScreen(_v.set(m.x, m.y, m.z), 1.9);
         if (s) this.hud.damageNumber(s.x, s.y, m.amount, m.weak);
       }
@@ -132,7 +168,7 @@ export class CombatClient {
         this.game.audio.play("explosion", at);
       } else {
         this.effects.impact(at, weaponColor(m.weapon));
-        this.game.audio.play("impact", at, 0.6);
+        this.game.audio.play(this.game.audio.impactSound(m.weapon), at, 0.6);
       }
     });
     room.onMessage("swing", (m: { by: string; weapon: number }) => {
@@ -141,7 +177,7 @@ export class CombatClient {
       if (!p) return;
       const pos = new THREE.Vector3(p.x, p.y, p.z);
       this.effects.arc(pos, new THREE.Vector3(p.fx, p.fy, p.fz), pos.clone().normalize(), WEAPONS[m.weapon]?.range ?? 2, weaponColor(m.weapon));
-      this.game.audio.play("swing", pos);
+      this.game.audio.play(this.game.audio.swingSound(m.weapon), pos);
     });
     room.onMessage("phrase", (m: { by: string; id: number }) => {
       if (m.by !== me && isBlocked(m.by)) return; // no speech bubbles from blocked players
@@ -154,18 +190,18 @@ export class CombatClient {
       const slot = partyState().members.findIndex((x) => x.sessionId === m.by) + 1;
       this.hud.bubble(s.x, s.y, PHRASES[m.id] ?? "", { name: speaker?.name, slot: slot > 0 && slot <= 4 ? (slot as 1 | 2 | 3 | 4) : undefined });
     });
-    room.onMessage("death", async (m: { victim: string; killer: string | null; killerName: string; aliveMs: number; level: number; pileId: string }) => {
-      if (m.victim !== me || this.deadUntilRespawn) return;
-      this.deadUntilRespawn = true;
-      this.game.photo?.exit(this.game.ctx.camera);
-      this.game.player.frozen = true;
-      this.game.audio.play("death");
+    room.onMessage("death", (m: { victim: string; killer: string | null; killerName: string; aliveMs: number; level: number; pileId: string }) => {
+      if (m.victim !== me) return;
+      if (!this.death.dead) {
+        this.game.photo?.exit(this.game.ctx.camera);
+        this.game.audio.play("death");
+      }
       const k = m.killer ? (room.state as any).players?.get(m.killer) : null;
-      const choice = await this.hud.death({ ...m, body: this.game.bodyId, killerStarter: k?.starter, killerLevel: k?.level });
-      room.send("respawn", choice);
+      // A rejoined room re-sends this for a dead character: DeathFlow keeps the screen and re-sends the pick.
+      void this.death.onDeath({ ...m, body: this.game.bodyId, killerStarter: k?.starter, killerLevel: k?.level });
     });
     room.onMessage("reborn", () => {
-      this.game.player.frozen = false;
+      this.death.onReborn();
       void this.game.travel("portus");
     });
     room.onMessage("loggedOut", () => {
@@ -176,13 +212,29 @@ export class CombatClient {
   }
 
   /**
-   * After the first level-up, guests get a non-blocking "Save your character" card (once; after the
-   * tutorial when it paid the level). It opens without taking keyboard focus: the player is playing.
+   * The "Progress not saved" toast is held while the tutorial is up, a menu has the mouse, the player
+   * is dead, or a travel or rejoin is under way (no room, or the loading screen is up).
    */
-  private async offerSave() {
-    const claims = readClaims(await getPlayToken().catch(() => ""));
-    if (!claims?.guest) return;
-    void showSavePrompt({ name: claims.name, level: this.hud.you?.level });
+  private nudgeHeld(): boolean {
+    this.loadingEl ??= document.getElementById("loading");
+    return !!this.tutorialBusy?.() || !this.game.input.locked || this.deadUntilRespawn || !this.game.net.room || this.loadingEl?.hidden === false;
+  }
+
+  /**
+   * After the first level-up (after the tutorial when it paid the level), a guest gets a toast with a
+   * key hint, once per tab session. Never a card: the player is playing and the game holds the mouse;
+   * the save card opens from the Esc menu (HANDOFF 5c). Saved players, dev guests and offline runs get nothing.
+   */
+  private showNudge() {
+    sessionStorage.setItem(NUDGED_KEY, "1");
+    const t = this.hud.toast("Progress not saved", "info", { title: "Guest", sub: "Esc → Save progress", sprite: "chest", ms: 9000 });
+    t.dataset.e2e = "save-toast";
+  }
+
+  /** The death screen's "Save so your medals and name stay" line, for a guest who can save. */
+  private async saveOnDeath(level: number): Promise<(() => Promise<"saved" | "dismissed">) | null> {
+    if (!offersSave(await saveStatus()) || !saveReady(Math.max(level, this.saveNudge.best))) return null;
+    return () => openSaveProgress({ level });
   }
 
   private muzzleOf(p: { x: number; y: number; z: number; fx: number; fy: number; fz: number }): THREE.Vector3 {
@@ -224,6 +276,16 @@ export class CombatClient {
     if (horsesEnabled(this.game.hud.you, flags.has("nohorses"))) this.game.net.room?.send("horse", { action: "whistle" });
   }
 
+  /** Lower any guard and scope and cancel a charge or draw in progress (nothing fires on release). */
+  private dropMouseActions() {
+    const room = this.game.net.room;
+    if (this.blocking) room?.send("block", { on: false });
+    if (this.scoped) room?.send("scope", { on: false });
+    if (this.wasRmb) room?.send("charge", { on: false });
+    this.game.self?.setLocalFlags(0);
+    this.blocking = this.scoped = this.wasRmb = false;
+  }
+
   aiming(): boolean {
     const { def } = this.currentWeapon();
     return this.game.input.rmb && def.delivery !== "melee" && !this.game.player.saddleLocked;
@@ -234,13 +296,19 @@ export class CombatClient {
     const room = g.net.room;
     const input = g.input;
     this.effects.update(dt, now);
-    if (this.saveOffer.poll(!!this.tutorialBusy?.())) void this.offerSave();
+    // A fresh press of either attack button (the right one charges heavies): refusals may show again.
+    if (input.lmbPressed || (input.rmb && !this.gateRmb)) this.deniedGate.press();
+    this.gateRmb = input.rmb;
+    // Due a moment after the level-up's own toasts; eligibility and the hold are checked again right before it shows.
+    if (this.saveNudge.poll(this.nudgeHeld(), now)) void offerNudge(this.saveNudge, { status: saveStatus, held: () => this.nudgeHeld(), show: () => this.showNudge() });
     if (!room) return;
     const meState = (room.state as any).players?.get(room.sessionId);
     if (meState) {
       g.hud.setHp(meState.hp, meState.maxHp);
       g.hud.setIdentity(meState.name, meState.starter, meState.palette);
-      g.hud.setSafe(!!(meState.flags & PF.SAFE));
+      // The label shows what the server enforces (its flag); the shared zone function says where.
+      const p = g.player.pos;
+      g.hud.setZone(zoneInfo(g.bodyId, zoneAt(BODIES[g.bodyId], p.x, p.y, p.z), !!(meState.flags & PF.SAFE)));
       g.hud.setLogout(g.hud.you?.logoutEndsAt ?? null, Date.now() + g.net.serverOffset);
     }
     this.updatePickupPrompt();
@@ -249,19 +317,32 @@ export class CombatClient {
     // The phrase wheel (G) owns the mouse and number keys while it is open: drop block/scope and any
     // charge, so nothing fires or stays raised when it closes.
     if (this.wheel.update(input, now, !this.deadUntilRespawn)) {
-      if (this.blocking) room.send("block", { on: false });
-      if (this.scoped) room.send("scope", { on: false });
-      g.self?.setLocalFlags(0);
-      if (this.wasRmb) room.send("charge", { on: false }); // a charge or draw in progress is cancelled
-      this.blocking = this.scoped = this.wasRmb = false;
+      this.dropMouseActions();
       return;
     }
-    if (this.deadUntilRespawn || !input.locked) return;
+    // Mouse combat needs the pointer locked. Whenever it's gone (menu, panel, the hint state), cancel
+    // any guard, scope or charge in progress: Input reports the right button released when the lock
+    // goes, which would otherwise land a charged heavy now, or on the next lock.
+    if (!input.locked) {
+      this.dropMouseActions();
+      this.saddleRmb = false;
+    }
+    // Keys work in the "Click to look around" state too (Input.inPlay, D-controls-4).
+    if (this.deadUntilRespawn || !input.inPlay) return;
 
     // Hotbar and utility keys.
     for (let i = 0; i < 4; i++) if (input.pressed.has(`Digit${i + 1}`)) room.send("equip", { slot: i });
     if (input.pressed.has("KeyR")) room.send("reload", { slot: g.hud.you?.selected ?? 0 });
     if (input.pressed.has("KeyE")) this.tryPickup();
+
+    if (!input.locked) {
+      const cam = g.ctx.camera;
+      if (Math.abs(cam.fov - this.baseFov) > 0.1) {
+        cam.fov += (this.baseFov - cam.fov) * Math.min(1, dt * 14);
+        cam.updateProjectionMatrix();
+      }
+      return;
+    }
 
     const { def, tier } = this.currentWeapon();
     const t = def.tiers[tier - 1]!;
@@ -350,7 +431,9 @@ export class CombatClient {
     // Safe zones holster weapons; support items still work there (the server takes them anywhere).
     if (meState && meState.flags & PF.SAFE && !usableAnywhere(def)) {
       if (this.training?.(def, t, now)) return; // onboarding: the Portus training dummies take swings
-      if (input.lmbPressed) g.hud.toast("Weapons are holstered in safe zones", "warn");
+      // The same text and gate as the server's "safe zone" refusal: one notice per press (notices.ts).
+      const text = holsteredText(g.bodyId);
+      if (input.lmbPressed && this.deniedGate.allow(text)) g.hud.toast(text, "warn");
       return;
     }
     const semi = def.delivery !== "hitscan" || def.id === "stillshot";
@@ -362,7 +445,7 @@ export class CombatClient {
     if (def.delivery !== "none") g.self?.trigger("attack");
     if (def.delivery === "melee") {
       room.send("melee", { slot, t: Date.now(), heavy: false });
-      g.audio.play("swing");
+      g.audio.play(g.audio.swingSound(WEAPONS.indexOf(def)));
       const up = g.player.up();
       this.effects.arc(g.player.pos, g.player.facing, up, def.range, weaponColor(WEAPONS.indexOf(def)));
       return;
@@ -392,7 +475,7 @@ export class CombatClient {
       const muzzle = g.player.pos.clone().addScaledVector(g.player.up(), 1.35).addScaledVector(g.player.facing, 0.5);
       const color = weaponColor(WEAPONS.indexOf(def));
       this.effects.tracer(muzzle, to, color, def.delivery === "chain" ? 1.6 : 1);
-      g.audio.play(def.id in { carbine: 1, scatterpipe: 1, stillshot: 1, stormcoil: 1 } ? def.id : "carbine");
+      g.audio.play(g.audio.weaponSound(WEAPONS.indexOf(def)));
       this.effects.flash(muzzle, color, 0.3);
     }
   }

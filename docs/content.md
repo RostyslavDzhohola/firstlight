@@ -18,11 +18,11 @@ The models behind the tables were computed in this session. Section 1.1 gives th
 | Constant | Value | Src |
 |---|---|---|
 | Move speed: run / sprint / swim | 6 / 9 / 3 m/s | [r2-10], [r2-11]; swim (new) |
-| Dodge-roll (C key) | 4.5 m over 0.30 s; i-frames 0.05–0.30 s; cooldown 1.2 s; 100 ms input buffer | [05], [r2-05]; key (D) D1 |
+| Dodge-roll (C key) | 4.5 m over 0.30 s; i-frames 0.05–0.30 s; cooldown 1.2 s; 100 ms input buffer; 0.12 s grace after stepping off an edge (D-combat-2) | [05], [r2-05]; key (D) D1 |
 | Fall damage | 0 up to 8 m; then 8% max HP per metre (lethal at ≥ 20.5 m); landing in water ≥ 1.5 m deep = 0 | (new) |
 | Weak point / headshot | ×1.5 (Stillshot ×1.8); one multiplier per hit, no random crits | [05] |
 | Friendly fire | On everywhere outside safe zones, including party, own explosives (self ×0.5) | (D); self ×0.5 (new) |
-| Safe zones | All of Portus + a ring around every fast-travel pad (radius 12 m) (new radius); no damage in or out | (D) |
+| Safe zones | Portus town inside its walls (the gates are the border; D-zones-1) + a ring around every fast-travel pad (radius 12 m) (new radius); no damage in or out. Portus outside the walls is wild land with level 1–2 creeps | (D) |
 | Hit-stop (local only) | light 40 ms, heavy 80 ms, kill 120 ms, boss kill 400 ms | [r2-05] |
 | Screen shake (trauma model) | 0.2 / 0.4 / 0.8; roll ≤ 2°; toggle in settings | [r2-05] |
 | Damage numbers (colour-blind safe) | normal: white, regular size; weak point: yellow, 1.3× size + "!"; armour-reduced: grey, small; shield absorbed: cyan outline glyph | (new), per (D) settings rule |
@@ -151,7 +151,7 @@ make them a coin faucet (F12 review).
 | Rule | Value |
 |---|---|
 | Item | Horse Whistle, 1,500 ◎ at the Portus Exchange (gear, one per slot, sells back for 375). Carried like anything else: it drops in the death pile, whoever picks it up owns a horse |
-| Whistle (H) | Outside safe zones only (all of Portus and the 12 m pad rings refuse), with the whistle in the hotbar or backpack, not in deep water; 2 s between whistles. The horse appears 3 m to your side (a dry spot) with a corpuscle burst. One horse per player: whistling again brings the same horse over |
+| Whistle (H) | Outside safe zones only (the Portus town and the 12 m pad rings refuse), with the whistle in the hotbar or backpack, not in deep water; 2 s between whistles. The horse appears 3 m to your side (a dry spot) with a corpuscle burst. One horse per player: whistling again brings the same horse over |
 | Get on / off | E (or H) within 3.5 m of your own horse. H while riding always gets off. At most one change per 0.5 s |
 | Speed | 14 m/s, Shift gallop 16 m/s (on foot: run 6, sprint 9). Heavier turns and acceleration. Jumping works; fall damage still applies. NPC chill/slow scale it; Cease-and-Desist holds it to 14 |
 | From the saddle | **No attacks of any kind** (fire, melee, block, bow draw, scope are refused by the server), also for 0.6 s after getting off (the server still allows horse speed for in-flight inputs); no dodge-roll. Tonics, Patchkits and the Prism Bubble still work; the whistle in hand gets you off. Kept simple on purpose: no one-handed-sidearm exception to balance |

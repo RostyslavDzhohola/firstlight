@@ -26,6 +26,7 @@ import { dist3, type V3 } from "./geometry.ts";
 import { emitGameEvent, npcKindOf } from "./events.ts";
 import { emitPileEvent, onPileEvent, pileStore, type PileData, type PileKind } from "./piles.ts";
 import { SYSTEM_FACTORIES, type RoomSystem } from "./systems.ts";
+import { voiceItemHidden } from "./voice/index.ts";
 import { supportOf } from "./support.ts";
 import { identityCheck, storageRecovery, ticketFor, travelRedirect } from "./admission.ts";
 import { pendingSeats } from "./reservations.ts";
@@ -250,7 +251,10 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       broadcast: (type, msg, except) => this.broadcast(type as never, msg as never, except ? { except: except.client } : undefined),
       broadcastNear: (type, msg, at, radius, always) => this.broadcastNear(type, msg, at, radius, always),
       onDamage: (target, amount, attacker) => this.afterDamage(target, attacker, amount),
-      walls: structures,
+      // The structures (the town's walls, a planet outpost's buildings) stop shots, blasts, melee and sight (D-zones-3, D43).
+      ...(structures.solids.length > 0 ? { walls: structures } : {}),
+      // Attack and damage gates ask the zone where the player stands now, not the tick-old flag.
+      safeNow: (a, now) => this.safeNow(a, now),
     };
 
     // Load-test copies neither show nor touch the public world's piles (piles belong to a body, not a copy).
@@ -282,7 +286,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       if (!a || a.dead) return;
       if (inSaddle(a, Date.now())) return void c.send("denied", { action: "melee", reason: "mounted" });
       if (m.slot !== a.char.selected) this.equip(a, m.slot);
-      melee(this.host, a, !!m.heavy);
+      // Refusals get a reason, like `fire` (safe zone, arrival protection…): the client shows it.
+      const r = melee(this.host, a, !!m.heavy);
+      if (!r.ok && r.reason !== "rate") c.send("denied", { action: "melee", reason: r.reason });
     });
     this.onMessage("block", z.object({ on: z.boolean() }), (c, m) => {
       const a = this.actor(c);
@@ -829,6 +835,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     const i = slot < HOTBAR_SLOTS ? slot : slot - HOTBAR_SLOTS;
     const item = list[i];
     if (!item) return;
+    // The radio is hidden while voice is off: it never lands on the ground (D-controls-1).
+    if (voiceItemHidden(item.id)) return void a.client.send("denied", { action: "drop", reason: "off" });
     const pos = actorPos(a);
     const f: V3 = [a.state.fx, a.state.fy, a.state.fz];
     const events: (() => void)[] = [];
@@ -954,7 +962,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     victim.state.flags |= PF.DEAD;
     victim.state.anim = ANIM.DEAD;
     victim.logoutEndsAt = null;
-    const items = [...victim.char.hotbar, ...victim.char.backpack].filter((x): x is InvItem => !!x);
+    // A hidden radio (voice off, D-controls-1) goes with the old life instead of dropping as loot.
+    const items = [...victim.char.hotbar, ...victim.char.backpack].filter((x): x is InvItem => !!x && !voiceItemHidden(x.id));
     const events: (() => void)[] = [];
     let pile: PileData | null = null;
     try {
@@ -1190,8 +1199,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     for (const a of this.actors.values()) {
       const p = a.state;
       pushHistory(a, now);
-      // Safe-zone protection only applies once out of combat (no running onto a pad mid-fight).
-      const safe = isSafe(this.bodyDef, p.x, p.y, p.z) && now >= a.combatUntil;
+      const safe = this.safeNow(a, now);
       p.flags = safe ? p.flags | PF.SAFE : p.flags & ~PF.SAFE;
       if (a.protectedUntil <= now) p.flags &= ~PF.PROTECTED;
       if (now < a.combatUntil) p.flags |= PF.IN_COMBAT;
@@ -1347,6 +1355,17 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (!(l >= this.bodyDef.radius * 0.5)) return false;
     const g = this.terrain.groundHeight(p[0]! / l, p[1]! / l, p[2]! / l);
     return l - this.bodyDef.radius - g >= -3;
+  }
+
+  /**
+   * Is `a` in a safe zone right now, where it stands? Pad rings protect only once out of combat (no
+   * running onto a pad mid-fight, F12); the Portus town protects whoever is inside its walls at once,
+   * combat tag or not (D-zones-3). The tick writes it into the SAFE flag; combat's attack and damage
+   * gates call it directly, so a move into the town counts before the next tick (Codex round 2).
+   */
+  safeNow(a: PlayerActor, now: number): boolean {
+    const p = a.state;
+    return isSafe(this.bodyDef, p.x, p.y, p.z) && (this.bodyDef.terrain.kind === "hub" || now >= a.combatUntil);
   }
 
   spawnPoint(seed: string): V3 {

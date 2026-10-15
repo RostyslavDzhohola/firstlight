@@ -170,6 +170,8 @@ export type ServerMessages = {
   hall: { lines: HallLine[] };
   medal: { id: string };
   missionDone: { id: string; xp: number; coins: number };
+  /** The tracked hunt mission's NPCs within reach whose kill would count (missions.ts huntCredit): what the mission pointer follows. Sent when the list changes. */
+  huntTargets: { id: string; npcs: string[] };
   /** Result of buy/sell/wear (a toast carries the human text). */
   shop: { ok: boolean; action: "buy" | "sell" | "wear"; reason?: string };
   /** A personal puzzle light changed state, for its solver only. */
@@ -193,7 +195,8 @@ export interface YouState {
   coins: number;
   hotbar: (InvItem | null)[];
   backpack: (InvItem | null)[];
-  missions: { id: string; progress: number; goal: number; done: boolean }[];
+  /** `counts`: kills per hunt target (hunts only), so a full quota stops being pointed at. Optional: older servers don't send it. */
+  missions: { id: string; progress: number; goal: number; done: boolean; counts?: number[] }[];
   medals: string[];
   pads: number[]; // discovered pad indices on this body
   /** Medal worn as a title (null = none). */

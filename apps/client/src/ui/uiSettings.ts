@@ -1,5 +1,6 @@
 // Player settings that are not graphics (graphics live in render/quality.ts, volumes in audio/Audio.ts,
-// the voice opt-in in voice/VoiceClient.ts): mouse, field of view, comfort and damage numbers.
+// the voice opt-in in voice/VoiceClient.ts): mouse, field of view, comfort, damage numbers and the
+// map (minimap on/off and turning, the map's north-up or player-up).
 // Stored in localStorage as `fl.ui.v1`; every value is validated on load.
 
 export interface UiSettings {
@@ -13,6 +14,12 @@ export interface UiSettings {
   damageNumbers: boolean;
   /** Colour-blind damage colours: yellow weak points, cyan shields (size and "!" always mark weak points). */
   cbDamage: boolean;
+  /** HUD minimap (top right). */
+  minimap: boolean;
+  /** The minimap turns with the camera (ahead is up); off keeps north up. */
+  minimapRotate: boolean;
+  /** The map (M) opens with your heading up instead of north. */
+  mapPlayerUp: boolean;
 }
 
 export const UI_DEFAULTS: Readonly<UiSettings> = Object.freeze({
@@ -23,6 +30,9 @@ export const UI_DEFAULTS: Readonly<UiSettings> = Object.freeze({
   shake: true,
   damageNumbers: true,
   cbDamage: true,
+  minimap: true,
+  minimapRotate: true,
+  mapPlayerUp: false,
 }) as UiSettings;
 
 export const SENSITIVITY_RANGE = [0.2, 3] as const;
@@ -47,6 +57,9 @@ export function normalizeUiSettings(raw: unknown): UiSettings {
     shake: bool(r.shake, d.shake),
     damageNumbers: bool(r.damageNumbers, d.damageNumbers),
     cbDamage: bool(r.cbDamage, d.cbDamage),
+    minimap: bool(r.minimap, d.minimap),
+    minimapRotate: bool(r.minimapRotate, d.minimapRotate),
+    mapPlayerUp: bool(r.mapPlayerUp, d.mapPlayerUp),
   };
 }
 

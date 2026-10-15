@@ -18,6 +18,7 @@ import { LightParticles } from "./fx.ts";
 import { buildModels, type ModelDef, type PartDef } from "./models.ts";
 import { PartBatcher } from "./parts.ts";
 import { TELEGRAPH_COLORS, Telegraphs } from "./telegraphs.ts";
+import { creepsHiddenByTown } from "./townCull.ts";
 
 interface Snap {
   t: number;
@@ -319,6 +320,10 @@ export class NpcRenderer implements ClientSystem {
     this.batch.begin();
     this.bars.begin();
     let boss: View | null = null;
+    // Portus: inside the town walls (away from the gates, below the wall tops) the creeps outside
+    // can't be seen, so none are drawn and the NPC batches stay hidden (townCull.ts).
+    const terrain = this.game.planet.terrain;
+    const hidden = creepsHiddenByTown(this.game.planet.body, cam.position.x, cam.position.y, cam.position.z, (x, y, z) => terrain.groundHeight(x, y, z));
     for (const [id, v] of this.views) {
       if (v.gone && (!v.dyingAt || now - v.dyingAt > 1100)) {
         if (!v.dyingAt && v.dist < 70) this.particles.burst(v.pos, v.pm.model.fx, 10, { radius: v.def.radius, height: v.pm.height, life: 0.6 });
@@ -346,7 +351,7 @@ export class NpcRenderer implements ClientSystem {
       v.speed += (inst - v.speed) * Math.min(1, dt * 8);
       v.walk += moved * (v.pm.model.gait ?? 1.5);
       if (v.def.family === "boss" && !v.dyingAt) boss = v;
-      if (v.dist > 150) continue;
+      if (v.dist > 150 || hidden) continue;
       this.drawView(v, now, dt);
       // Health bar over NPCs being fought (bosses use the HUD bar).
       if (v.def.family !== "boss" && !v.dyingAt && !(v.flags & NF.SPAWNING)) {

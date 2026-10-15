@@ -2,9 +2,10 @@
 // Pure (unit-tested): the onboarding client feeds it one sample per frame from the local player and
 // the server's dummy count. Only the dummies (counted by the server) pay XP; every other step is
 // taught here and pays nothing. After the dummies come weapons, pick-up, map, phrase wheel, the
-// optional voice tip and the final pointer to a portal (about 60–90 s in all).
+// optional voice tip (only in builds with voice chat) and the final pointer to a portal (about 60–90 s in all).
 
 import { ANIM } from "@firstlight/shared/net/schema";
+import { features } from "../config.ts";
 
 export type StepId = "move" | "look" | "jump" | "sprint" | "dodge" | "attack" | "switch" | "pickup" | "map" | "wheel" | "voice" | "portal";
 
@@ -28,7 +29,8 @@ export interface StepDef {
   autoAfter?: number;
 }
 
-export const STEPS: readonly StepDef[] = [
+/** Every step. The ids are persisted per account (onboardingProgress.ts): never rename or reuse one. */
+export const ALL_STEPS: readonly StepDef[] = [
   { id: "move", label: "Move", keys: ["W", "A", "S", "D"], heading: "Walk", cardKeys: ["W", "A", "S", "D"], text: "Walk with **W A S D**. The camera follows your mouse.", goal: 6, unit: "m", bar: true },
   { id: "look", label: "Look", keys: ["Mouse"], heading: "Look around", cardKeys: ["Mouse"], text: "Move the **mouse** to turn. Those planets in the sky are where the portals go.", goal: 180, unit: "°", bar: true },
   { id: "jump", label: "Jump", keys: ["Space"], heading: "Jump", cardKeys: ["Space"], text: "Press **Space** to jump. Falls of more than 8 m hurt.", goal: 1, unit: "", bar: false },
@@ -43,7 +45,15 @@ export const STEPS: readonly StepDef[] = [
   { id: "portal", label: "Walk through a portal", keys: [], heading: "Off you go", cardKeys: [], text: "The three rings around the plaza lead to the planets. Start on **Arcadia** (levels 1–7): walk into its portal.", goal: 1, unit: "", bar: false, autoAfter: 45 },
 ];
 
-export const STEP_BY_ID: ReadonlyMap<StepId, StepDef> = new Map(STEPS.map((s) => [s.id, s]));
+/** The steps a build teaches: the voice tip only when voice chat is on (hidden in this build, D-controls-1). */
+export function activeSteps(voice: boolean = features.voice): readonly StepDef[] {
+  return voice ? ALL_STEPS : ALL_STEPS.filter((s) => s.id !== "voice");
+}
+
+/** This build's steps, in order (the HUD counts "3 / 11" from these). */
+export const STEPS: readonly StepDef[] = activeSteps();
+
+export const STEP_BY_ID: ReadonlyMap<StepId, StepDef> = new Map(ALL_STEPS.map((s) => [s.id, s]));
 
 /** One frame of what the player did. */
 export interface Sample {
@@ -71,7 +81,7 @@ const DIGITS = ["Digit1", "Digit2", "Digit3", "Digit4"];
 const WALKING: ReadonlySet<number> = new Set([ANIM.WALK, ANIM.RUN, ANIM.SPRINT]);
 
 export class OnboardingSteps {
-  private readonly progress = new Map<StepId, number>(STEPS.map((s) => [s.id, 0]));
+  private readonly progress: Map<StepId, number>;
   private readonly finished = new Set<StepId>();
   /** Tips that moved on by themselves: done for the flow, but not something the player did. */
   private readonly timedOut = new Set<StepId>();
@@ -79,6 +89,10 @@ export class OnboardingSteps {
   /** Seconds the current card has been up (for steps that move on by themselves). */
   private cardTime = 0;
   private cardId: StepId | null = null;
+
+  constructor(readonly steps: readonly StepDef[] = STEPS) {
+    this.progress = new Map(steps.map((s) => [s.id, 0]));
+  }
 
   /** Feed one frame; returns the steps that completed on it. */
   observe(x: Sample): StepId[] {
@@ -109,7 +123,7 @@ export class OnboardingSteps {
         this.complete(cur.id);
       }
     }
-    return STEPS.filter((s) => this.finished.has(s.id) && !before.has(s.id)).map((s) => s.id);
+    return this.steps.filter((s) => this.finished.has(s.id) && !before.has(s.id)).map((s) => s.id);
   }
 
   complete(id: StepId) {
@@ -121,7 +135,7 @@ export class OnboardingSteps {
   }
 
   private set(id: StepId, v: number) {
-    if (this.finished.has(id)) return;
+    if (this.finished.has(id) || !this.progress.has(id)) return; // done, or not taught in this build
     const goal = STEP_BY_ID.get(id)!.goal;
     this.progress.set(id, Math.min(goal, v));
     if (v >= goal) this.finished.add(id);
@@ -141,19 +155,19 @@ export class OnboardingSteps {
   }
 
   get allDone(): boolean {
-    return this.finished.size === STEPS.length;
+    return this.finished.size === this.steps.length;
   }
 
   /** The first step not done yet (the big card), or null when all are. */
   get current(): StepDef | null {
-    return STEPS.find((s) => !this.finished.has(s.id)) ?? null;
+    return this.steps.find((s) => !this.finished.has(s.id)) ?? null;
   }
 
   /** The step after the current one that is still to do. */
   get next(): StepDef | null {
     const cur = this.current;
     if (!cur) return null;
-    return STEPS.find((s) => s !== cur && !this.finished.has(s.id) && STEPS.indexOf(s) > STEPS.indexOf(cur)) ?? null;
+    return this.steps.find((s) => s !== cur && !this.finished.has(s.id) && this.steps.indexOf(s) > this.steps.indexOf(cur)) ?? null;
   }
 
   fraction(id: StepId): number {

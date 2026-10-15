@@ -146,3 +146,30 @@ export function missionGoal(m: MissionDef): number {
 
 /** Every NPC kind a hunt mission listens for (the NPC lane must emit these ids). */
 export const MISSION_NPC_KINDS: readonly string[] = [...new Set(MISSIONS.flatMap((m) => m.hunt?.targets.map((t) => t.npcKind) ?? []))];
+
+/**
+ * The hunt target an NPC of `npcKind` that spawned in `area` (its spawn point's area: null for
+ * wilds and admin spawns) is for, ignoring quotas, or -1. The mission's place, if any, must match.
+ */
+export function huntTargetIndex(def: MissionDef, npcKind: string, area: string | null): number {
+  if (!def.hunt || (def.hunt.place && area !== def.hunt.place)) return -1;
+  return def.hunt.targets.findIndex((t) => t.npcKind === npcKind);
+}
+
+/**
+ * The hunt target a kill of that NPC would advance (its quota in `counts`, per target, isn't full
+ * yet), or -1. One rule for the server's kill credit and the client's mission pointer (D-zones-2).
+ */
+export function huntCredit(def: MissionDef, counts: readonly number[] | undefined, npcKind: string, area: string | null): number {
+  const i = huntTargetIndex(def, npcKind, area);
+  if (i < 0) return -1;
+  return (counts?.[i] ?? 0) < def.hunt!.targets[i]!.count ? i : -1;
+}
+
+/**
+ * The mission the HUD tracker marks as tracked and the mission pointer follows: the first open one
+ * given out on `body`, else the first open one anywhere.
+ */
+export function trackedMission<T extends { id: string; done: boolean }>(missions: readonly T[], body: BodyId): T | null {
+  return missions.find((m) => !m.done && MISSION_BY_ID.get(m.id)?.body === body) ?? missions.find((m) => !m.done) ?? null;
+}

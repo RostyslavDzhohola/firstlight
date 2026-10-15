@@ -390,6 +390,11 @@ export class StructureCollider {
     return false;
   }
 
+  /** Is any solid within `r` metres of point (x, y, z) (its bounding sphere)? NPC steering follows obstacles there. */
+  near(x: number, y: number, z: number, r: number): boolean {
+    return this.solids.length > 0 && this.collider.grid.collect(x, y, z, 0, 0, 0, 0, r, this.candidates) > 0;
+  }
+
   /** Nothing pushes feet at `p` and they aren't inside a solid (for `body`, default the player). */
   isClear(p: XYZ, body: ColliderBody = PLAYER_BODY): boolean {
     const q = { x: p.x, y: p.y, z: p.z };

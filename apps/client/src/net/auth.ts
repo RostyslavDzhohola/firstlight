@@ -9,7 +9,8 @@
 
 import { createAuthClient } from "better-auth/client";
 import { anonymousClient, emailOTPClient, jwtClient } from "better-auth/client/plugins";
-import { config, flags } from "../config.ts";
+import { config, flags, offlineRun } from "../config.ts";
+import { saveStatusOf, sendCodeFailure, type SaveStatus, type SendFailure } from "../ui/saveOffer.ts";
 
 export const SAVING_BUSY = "Saving is busy, try again later";
 
@@ -125,34 +126,86 @@ export function invalidatePlayToken(): void {
 // ---------------------------------------------------------------------------------------------
 // Account changes
 
-type AccountListener = (claims: PlayClaims | null) => void;
+/** `elsewhere`: another tab of this browser changed it (claims are then null: ask again if you need them). */
+type AccountListener = (claims: PlayClaims | null, change: { elsewhere: boolean }) => void;
 const listeners = new Set<AccountListener>();
 
-/** Called after the account changes (saved, signed in, renamed). Returns an unsubscribe function. */
+/** Called after the account changes (saved, signed in, renamed), here or in another tab. Returns an unsubscribe function. */
 export function onAccountChange(fn: AccountListener): () => void {
   listeners.add(fn);
   return () => listeners.delete(fn);
 }
 
+/**
+ * Tabs share the session cookie but each caches its own play token: a save, sign-in or rename in one
+ * tab makes the others' tokens (and any save prompt they show) stale (Codex review). They hear it here.
+ */
+export const ACCOUNT_CHANNEL = "fl.account";
+let channel: BroadcastChannel | null = null;
+if (typeof window !== "undefined" && typeof BroadcastChannel !== "undefined") {
+  channel = new BroadcastChannel(ACCOUNT_CHANNEL);
+  (channel as { unref?: () => void }).unref?.(); // Node (tests): don't hold the process open
+  channel.onmessage = () => {
+    invalidatePlayToken();
+    for (const fn of listeners) fn(null, { elsewhere: true });
+  };
+}
+
 async function accountChanged(): Promise<void> {
   invalidatePlayToken();
+  channel?.postMessage("changed");
   let claims: PlayClaims | null = null;
   try {
     claims = readClaims(await getPlayToken());
   } catch {}
-  for (const fn of listeners) fn(claims);
+  for (const fn of listeners) fn(claims, { elsewhere: false });
 }
 
-export type Result = { ok: true } | { ok: false; message: string; busy?: boolean };
+export type Result = { ok: true } | { ok: false; message: string; failure?: SendFailure };
 
-/** Step 1 of "Save your character" / "Sign in with email": email a 6-digit code. */
+const SEND_MESSAGE: Record<SendFailure, string> = {
+  unavailable: "Saving is temporarily unavailable",
+  busy: SAVING_BUSY,
+  rejected: "That email doesn't look right.",
+  retry: "Couldn't send the code. Try again.",
+};
+
+/** Step 1 of "Save progress" / "Sign in": email a 6-digit code. */
 export async function sendEmailCode(email: string): Promise<Result> {
-  const r = await authClient().emailOtp.sendVerificationOtp({ email: email.trim(), type: "sign-in" });
+  const r = await authClient()
+    .emailOtp.sendVerificationOtp({ email: email.trim(), type: "sign-in" })
+    .catch(() => ({ error: { status: 0 } }));
   if (!r.error) return { ok: true };
-  const e = r.error as { status?: number; code?: string; message?: string };
-  if (e.code === "SAVING_BUSY" || e.status === 429 || e.status === 503) return { ok: false, message: SAVING_BUSY, busy: true };
-  if (e.status === 400) return { ok: false, message: "That email doesn't look right." };
-  return { ok: false, message: "Couldn't send the code. Try again." };
+  const failure = sendCodeFailure(r.error as { status?: number; code?: string });
+  return { ok: false, message: SEND_MESSAGE[failure], failure };
+}
+
+/**
+ * Can this browser save: a guest session, a saved account, or neither (a `?devguest` token, an
+ * offline run, no session yet)? Asks the session every time, never the cached play token: the cookie
+ * is shared with other tabs, so a save in one of them shows here at once (Codex review). Never creates
+ * a session: a first visit to the home page stays "none".
+ */
+export async function saveStatus(): Promise<SaveStatus> {
+  const devGuest = isDevGuest();
+  const offline = offlineRun();
+  if (devGuest || offline) return saveStatusOf({ devGuest, offline, guest: null });
+  const s = await authClient()
+    .getSession()
+    .catch(() => null);
+  const user = s?.data?.user as { isAnonymous?: boolean | null } | undefined;
+  return saveStatusOf({ devGuest, offline, guest: user ? !!user.isAnonymous : null });
+}
+
+/** Can sign-in codes go out right now (server: GET /api/account/save-status)? "ok" when unsure. */
+export async function savingStatus(): Promise<"ok" | "busy" | "unavailable"> {
+  try {
+    const res = await fetch(`${config.apiUrl}/api/account/save-status`);
+    const body = (await res.json()) as { saving?: unknown };
+    return body.saving === "busy" || body.saving === "unavailable" ? body.saving : "ok";
+  } catch {
+    return "ok";
+  }
 }
 
 /**
@@ -182,6 +235,8 @@ export interface AccountInfo {
   admin: boolean;
   titleMedal: string | null;
   character: { level: number; xp: number; coins: number; starter: number; palette: number; body: string } | null;
+  /** A guest the server will email a code for (level 2+): saving works now. Older servers omit it. */
+  saveReady?: boolean;
   medals: string[];
   pads: { body: string; padId: string }[];
 }

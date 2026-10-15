@@ -1,11 +1,14 @@
 // Fast-travel pads (with their 12 m safe rings), the portal home on each planet's main pad, and
-// Portus' three portals. Walking into a portal travels to its body. On a planet whose outpost
-// assets are drawn (SiteTown, D42) the landing platforms and pad 0's portal gate replace the plain
-// pad discs and the portal's base (setPadModels); the rings, beams and portals stay.
+// Portus' three portals and the safe-zone line across its two gates. Walking into a portal travels
+// to its body. On a planet whose outpost assets are drawn (SiteTown, D42) the landing platforms and
+// pad 0's portal gate replace the plain pad discs and the portal's base (setPadModels); the rings,
+// beams and portals stay.
 
 import * as THREE from "three/webgpu";
 import { materialColor } from "three/tsl";
-import { BODIES, padDirs, PAD_SAFE_RADIUS, portalSpots, type BodyId, type PortalSpot, type Terrain } from "@firstlight/shared";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { BODIES, padDirs, PAD_SAFE_RADIUS, portalSpots, TOWN_SAFE, type BodyId, type PortalSpot, type Terrain } from "@firstlight/shared";
+import { townDir, townFrame, type TownPlacement } from "@firstlight/shared/planet/townFrame";
 import { atmo } from "../render/atmosphere.ts";
 import { disposeTree } from "../render/dispose.ts";
 import { portalAt } from "./portalEntry.ts";
@@ -92,7 +95,22 @@ export class Portals {
     };
 
     if (def.terrain.kind === "hub") {
-      // Portus: three portals around the plaza (positions shared with the server).
+      // Portus: three portals around the plaza (positions shared with the server), and the safe-zone
+      // border (D-zones-1) drawn where it crosses the two gate passages: a glowing line on the paving
+      // in the pad rings' colour, both gates in one draw.
+      const strips: THREE.BufferGeometry[] = [];
+      const f: TownPlacement = { item: -1, prefab: -1, scale: 1, px: 0, py: 0, pz: 0, rx: 0, ry: 0, rz: 0, ux: 0, uy: 0, uz: 0, fx: 0, fy: 0, fz: 0 };
+      for (const east of [TOWN_SAFE.radius, -TOWN_SAFE.radius]) {
+        const d = townDir(east, 0, R);
+        townFrame(east, 0, 0, R, f); // right = east, front = south: the strip spans the passage north–south
+        const h = R + terrain.groundHeight(d[0], d[1], d[2]) + 0.03;
+        const m = new THREE.Matrix4().makeBasis(new THREE.Vector3(f.rx, f.ry, f.rz), new THREE.Vector3(f.ux, f.uy, f.uz), new THREE.Vector3(f.fx, f.fy, f.fz));
+        m.setPosition(d[0] * h, d[1] * h, d[2] * h);
+        strips.push(new THREE.BoxGeometry(0.22, 0.05, 3.9).applyMatrix4(m));
+      }
+      const border = new THREE.Mesh(mergeGeometries(strips, false)!, ringMat);
+      for (const g of strips) g.dispose();
+      this.group.add(border);
     } else {
       const pads = padDirs(def);
       pads.forEach((p, i) => {

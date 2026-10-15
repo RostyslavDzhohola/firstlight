@@ -4,6 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { placeDir } from "@firstlight/shared/content/places";
+import { env } from "../src/env.ts";
 import { emitGameEvent, onGameEvent, type GameEvent } from "../src/world/events.ts";
 import { pileStore } from "../src/world/piles.ts";
 import { EGG_LIMITS } from "../src/world/quests/eggs.ts";
@@ -111,6 +112,33 @@ describe("Portus Exchange", () => {
     expect(b.toasts.at(-1)).toContain("One of a kind");
     expect(b.you.coins).toBe(25);
     expect(invIds(b)).toContain("pixel_halo");
+  });
+
+  it("with voice off (this build) the radio isn't sold, can't be dropped and never lands in a pile (D-controls-1)", async () => {
+    expect(env.voice).toBe(false); // FEATURE_VOICE is unset in tests and in production
+    const b = await bot("radioless", "portus");
+    await tpAndWait(b, objAt("juno_vale"));
+    b.send("admin", { cmd: "coins", args: { amount: 400 } });
+    await waitFor(() => b.you.coins === 400);
+    b.send("buy", { itemId: "radio", tier: 1 });
+    await waitFor(() => b.last("shop")?.reason === "not sold");
+    expect(b.you.coins).toBe(400);
+    expect(invIds(b)).not.toContain("radio");
+
+    // A radio bought before voice was hidden stays out of loot.
+    await safeLeave(b.room);
+    const a = await bot("radioless", "arcadia");
+    a.send("admin", { cmd: "give", args: { id: "radio" } });
+    a.send("admin", { cmd: "give", args: { id: "axe" } });
+    await until("radio and axe", () => invIds(a).includes("radio") && invIds(a).includes("axe"));
+    a.send("drop", { slot: [...a.you.hotbar, ...a.you.backpack].findIndex((i: any) => i?.id === "radio") });
+    await waitFor(() => a.last("denied")?.action === "drop");
+    expect(a.last("denied")).toEqual({ action: "drop", reason: "off" });
+    expect(invIds(a)).toContain("radio");
+    const { pileId } = await dieAndRejoin(a, "radioless", "arcadia");
+    const pile = pileStore.current.get(pileId)!;
+    expect(pile.items.map((i) => i.id)).toContain("axe");
+    expect(pile.items.map((i) => i.id)).not.toContain("radio");
   });
 });
 

@@ -16,6 +16,7 @@ import { MapPanel } from "../ui/map.ts";
 import { AdminConsole, GuidePanel, JournalPanel, KeypadPanel, MissionTracker, Panel, ShopPanel } from "../ui/panels.ts";
 import { QuestWorld } from "../world/QuestWorld.ts";
 import type { Game } from "./Game.ts";
+import { HOTKEYS, hits } from "./keys.ts";
 import type { ClientSystem } from "./systems.ts";
 
 /** Survives body changes: the latest Hall of Firsts and a staged scene waiting for travel to finish. */
@@ -103,13 +104,13 @@ export class QuestClient implements ClientSystem {
   private key(e: KeyboardEvent) {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
     if (this.game.combat.deadUntilRespawn || !this.game.net.room) return;
-    if (e.code === "Backquote" && this.isAdmin()) {
+    if (hits(HOTKEYS.adminConsole, e.code, e.shiftKey) && this.isAdmin()) {
       e.preventDefault();
       this.console.toggle();
       return;
     }
     if (this.console.isOpen || Panel.current) return; // panels close themselves (Esc / their key)
-    if (!this.game.input.locked || this.game.photo?.active) return;
+    if (!this.game.input.inPlay || this.game.photo?.active) return;
     if (e.code === "KeyM") this.map.open();
     else if (e.code === "KeyJ") this.journal.show();
   }
@@ -161,7 +162,7 @@ export class QuestClient implements ClientSystem {
     const you = g.hud.you;
     const active = new Set((you?.missions ?? []).filter((m) => !m.done).map((m) => m.id));
     this.world.update(dt, { activeMissions: active, cosmeticsExtras: !!you?.cosmeticsExtras });
-    this.tracker.update(you);
+    this.tracker.update(you, this.game.bodyId);
     if (you !== this.lastYou) {
       this.lastYou = you;
       if (Panel.current && Panel.current !== this.map && Panel.current !== this.keypad) Panel.current.refresh();
@@ -172,7 +173,7 @@ export class QuestClient implements ClientSystem {
       const o = this.nearestObject(active);
       if (o) {
         g.hud.setPrompt(this.promptFor(o));
-        if (g.input.locked && g.input.pressed.has("KeyE")) this.use(o);
+        if (g.input.inPlay && g.input.pressed.has("KeyE")) this.use(o);
       }
     }
 

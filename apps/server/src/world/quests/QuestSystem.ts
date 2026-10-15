@@ -9,7 +9,7 @@ import { BACKPACK_SLOTS, HOTBAR_SLOTS, emptyLife, type LifeProgress } from "@fir
 import { HORSE_WHISTLE } from "@firstlight/shared/content/horse";
 import { COSMETIC_BY_ID, COSMETIC_SLOTS, isEggItem, isExtraCosmetic, itemName, itemStack, sellValue, shopEntry, type CosmeticSlot } from "@firstlight/shared/content/items";
 import { MEDAL_BY_ID, MEDAL_RULES } from "@firstlight/shared/content/medals";
-import { MISSION_BY_ID, MISSIONS, missionGoal, type MissionDef } from "@firstlight/shared/content/missions";
+import { huntCredit, huntTargetIndex, MISSION_BY_ID, MISSIONS, missionGoal, trackedMission, type MissionDef } from "@firstlight/shared/content/missions";
 import { offsetDir, padName, placeDir } from "@firstlight/shared/content/places";
 import { BOSS_FIRSTS, EGG_BY_ID, type EggId } from "@firstlight/shared/content/secrets";
 import { inReach, objectPos, objectsOn, surfaceDistance, WORLD_OBJECT_BY_ID, type WorldObjectDef } from "@firstlight/shared/content/world";
@@ -21,6 +21,7 @@ import { PF } from "@firstlight/shared/net/schema";
 import { z } from "zod";
 import { accountLinks } from "../../auth/links.ts";
 import { env } from "../../env.ts";
+import { voiceItemHidden } from "../voice/index.ts";
 import { actorPos, type PlayerActor } from "../actors.ts";
 import type { BodyRoom } from "../BodyRoom.ts";
 import { emitGameEvent, onGameEvent, type DamageEvent, type DeathEvent, type GameEvent, type KillEvent, type SpawnRequestEvent } from "../events.ts";
@@ -55,6 +56,8 @@ export const QUEST_RULES = {
   /** Expired piles (staged scenes) are swept this often. */
   PILE_SWEEP_MS: 5000,
   SLOW_TICK_MS: 200,
+  /** The mission pointer's NPCs (huntTargets): within this many metres (past the client's 100 m view). */
+  HUNT_TARGET_M: 110,
 };
 
 /** Transient per-session quest state (account data is cached here, life data lives in char.life). */
@@ -131,6 +134,8 @@ export class QuestSystem implements RoomSystem {
   /** `${userId}|${egg}`: steps an admin opened for that player (the claim that follows is assisted). */
   private readonly assistedEggs = new Set<string>();
   private lastSweep = 0;
+  /** The last huntTargets each player was sent (only changes go out). */
+  private readonly huntSent = new WeakMap<PlayerActor, string>();
 
   constructor(room: BodyRoom) {
     this.room = room;
@@ -402,7 +407,7 @@ export class QuestSystem implements RoomSystem {
     const q = this.qp(a);
     you.missions = a.char.missions.map((m) => {
       const def = MISSION_BY_ID.get(m.id);
-      return { id: m.id, progress: m.progress, goal: def ? missionGoal(def) : 1, done: m.done };
+      return { id: m.id, progress: m.progress, goal: def ? missionGoal(def) : 1, done: m.done, ...(def?.hunt ? { counts: def.hunt.targets.map((_, i) => m.counts?.[i] ?? 0) } : {}) };
     });
     you.medals = [...q.medals];
     you.pads = [...q.pads].sort((x, y) => x - y);
@@ -435,6 +440,7 @@ export class QuestSystem implements RoomSystem {
       this.checkReach(a, q);
       this.eggs.tickPlayer(a, q, now);
       this.refreshCosmetics(a);
+      this.sendHuntTargets(a);
       if (q.lowHpAt !== null && now - q.lowHpAt >= MEDAL_RULES.BY_A_THREAD_MS) {
         q.lowHpAt = null;
         this.award(a, "by_a_thread");
@@ -455,6 +461,32 @@ export class QuestSystem implements RoomSystem {
       // Expired piles (staged scenes): gone for every copy of the body.
       for (const id of pileStore.current.sweep(this.body, now)) emitPileEvent({ kind: "remove", id, body: this.body });
     }
+  }
+
+  /**
+   * The tracked hunt mission's NPCs within reach whose kill would count, by the same rule as the
+   * credit (huntCredit: kind, the spawn area for place-bound hunts, quotas not yet full): the
+   * client's mission pointer follows these (D-zones-2). Sent when the list changes.
+   */
+  private sendHuntTargets(a: PlayerActor) {
+    const m = trackedMission(a.char.missions, this.body);
+    const def = m ? MISSION_BY_ID.get(m.id) : undefined;
+    const hunt = !!m && !!def?.hunt && def.body === this.body;
+    const ids: string[] = [];
+    const npcs = hunt ? npcSystemOf(this.room)?.npcs : undefined;
+    if (npcs) {
+      const p = actorPos(a);
+      for (const n of npcs.values()) {
+        if (n.dead || n.state.hp <= 0 || dist3(p, n.pos) > QUEST_RULES.HUNT_TARGET_M) continue;
+        if (huntCredit(def!, m!.counts, n.def.id, n.point?.area ?? null) >= 0) ids.push(n.id);
+      }
+      ids.sort();
+    }
+    const msg = { id: hunt ? m!.id : "", npcs: ids };
+    const key = `${msg.id}:${ids.join(",")}`;
+    if (this.huntSent.get(a) === key) return;
+    this.huntSent.set(a, key);
+    a.client.send("huntTargets", msg);
   }
 
   // ---------------------------------------------------------------- pads and fast travel
@@ -519,7 +551,7 @@ export class QuestSystem implements RoomSystem {
       this.toast(a, text, "warn");
     };
     if (!this.atShop(a)) return fail("too far", "Talk to Juno Vale at the Portus Exchange to buy");
-    const disabled = (itemId === HORSE_WHISTLE && !env.horses) || (isExtraCosmetic(itemId) && !env.cosmeticsExtras);
+    const disabled = (itemId === HORSE_WHISTLE && !env.horses) || (isExtraCosmetic(itemId) && !env.cosmeticsExtras) || voiceItemHidden(itemId);
     const entry = disabled ? undefined : shopEntry(itemId, tier);
     if (!entry) return fail("not sold", "The Exchange doesn't sell that");
     const n = entry.stack > 1 ? Math.max(1, Math.min(entry.stack, qty)) : 1;
@@ -682,12 +714,12 @@ export class QuestSystem implements RoomSystem {
       if (!a || a.dead) continue;
       for (const { m, def } of this.activeMissions(a)) {
         if (!def.hunt) continue;
-        // Kills count by the spawn area the NPC lane reports (NPCs without one never count for a place).
-        if (def.hunt.place && e.area !== def.hunt.place) continue;
-        const ti = def.hunt.targets.findIndex((t) => t.npcKind === e.npcKind);
+        // Kills count by the spawn area the NPC lane reports (NPCs without one never count for a
+        // place); the shared rule (missions.ts) is the one the mission pointer follows too.
+        const ti = huntTargetIndex(def, e.npcKind, e.area ?? null);
         if (ti < 0) continue;
         const counts = (m.counts ??= def.hunt.targets.map(() => 0));
-        if ((counts[ti] ?? 0) < def.hunt.targets[ti]!.count) {
+        if (huntCredit(def, counts, e.npcKind, e.area ?? null) === ti) {
           counts[ti] = (counts[ti] ?? 0) + 1;
           m.progress = def.hunt.targets.reduce((s, t, k) => s + Math.min(t.count, counts[k] ?? 0), 0);
           a.youDirty = true;

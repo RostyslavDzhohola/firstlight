@@ -54,6 +54,11 @@
 .fl-death__kept ul { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: 1fr; gap: calc(.45 * var(--u)) var(--sp-4); font-size: var(--t-sm); }
 .fl-death__kept li { display: flex; align-items: center; gap: calc(.45 * var(--u)); color: var(--paper-2); min-width: 0; }
 .fl-death__kept li .li { color: var(--ok); }
+.fl-death__save { display: grid; gap: calc(.55 * var(--u)); justify-items: start; margin-top: calc(.8 * var(--u)); padding-top: calc(.8 * var(--u)); border-top: 1px solid var(--line-2); }
+.fl-death__save p { margin: 0; font-size: var(--t-xs); line-height: 1.45; color: var(--fog-4); }
+.fl-death__save p b { color: var(--paper); font-weight: 600; }
+.fl-death__save p.is-ok { display: flex; align-items: center; gap: calc(.4 * var(--u)); color: var(--paper-2); }
+.fl-death__save p.is-ok .li { color: var(--ok); }
 
 @media (max-width: 1360px) {
   .fl-death__screen { grid-template-columns: minmax(0, calc(36 * var(--u))) 1fr minmax(0, calc(22 * var(--u))); padding-left: calc(2.4 * var(--u)); padding-right: calc(2.2 * var(--u)); }

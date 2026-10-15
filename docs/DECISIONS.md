@@ -452,3 +452,261 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   colliders are drawn as stone boxes (2 draws) before the probe and the warm-up, and a later arrival
   of the asset is ignored until the next visit (review round 1, S1). Why: Medium was already at
   ~290 draws against 250 (F10); triangles are cheap next to draws on Metal (#30560).
+- **D-zones-1 (run, 2026-10-15):** Portus: the castle town is the safe zone and the land outside its
+  walls is wild, with creeps. Amends "Safe zones: all of Portus" (R2 Q3) and D39's "Portus refuses
+  shots and has no NPCs". The safe footprint is the curtain-wall ring, 46 m from the pole (through
+  the middle of both gatehouses: the gates are the border), plus the castle ward (|east| ≤ 16.4 m,
+  north ≤ 64.1 m). One shared function decides it, `packages/shared/src/planet/zones.ts`
+  (`zoneAt`, `isSafe`, `nearSafeZone`, `nearestSafeEntry`): the server's SAFE flag (with the 10 s
+  combat tag), logout, horses (the whistle now works outside the walls), NPC steering and the
+  client's HUD zone label all read it. Arrival, respawn, rebirth, the dummies, the portals, Juno and
+  the Hall are inside. Outside: eight fixed groups (`PORTUS_WILDS`, levels 1–2): Woolbacks within
+  ~20 m of each gate, three Hopbits on the rim ~45 m out from each (past their 25 m sight from the
+  gate, so nobody is jumped on the doorstep), Hopbits south and behind the castle, Woolbacks and
+  two Sparkflies over the rim. Hostile homes keep their wander room plus the 3 m NPC
+  margin clear of the town; steering keeps every NPC out (as at pad rings, D36: an unreachable
+  target → evade after 5 s). Kills pay from Arcadia's tonic and cosmetic tables. The HUD shows an
+  always-on zone label (Safe / Danger, `[data-e2e="zone-label"]` with `data-zone`) from the
+  server's flag, the border banner ("Leaving the safe zone · Creeps and other players can hurt you",
+  "Safe zone · Portus town · no damage in or out"), a glowing line in the pad rings' colour marks
+  the border across both gate passages (one draw), and the compass's SAFE marker points at the
+  nearer gate. Inside the walls (away from the gates and below the wall tops) the client draws no
+  creeps (they are hidden by the walls anyway), so the NPC layer's ~10–14 draws stay off the plaza's
+  budget (D41). The town's walls stop combat too (D-zones-3). No `PROTOCOL_VERSION` bump: the
+  client's label and refusals read the server's flag, and old clients draw the Portus creeps with
+  the existing NPC layer. Why: the owner started in the
+  castle, "fired" at the training dummies inside (tutorial `train` shots), walked out of the gate
+  into what reads as danger, found shots refused ("Weapons are holstered in safe zones") and no
+  creeps: "the safe zone was not on the inside, it was on the outside". Inside the walls safe,
+  outside danger is what a player expects.
+- **D-zones-2 (run, 2026-10-15):** creeps near every arrival. Each planet's main pad has a grazing
+  herd at ~42 m and a pack of the planet's weakest hostiles at ~62 m (outside the 45 m rule with
+  their wander room, which stays), placed toward where the arrival camera looks (the portal home)
+  on dry ground (`ARRIVAL_GROUPS`, spawns.ts step 0): Hollowmere Woolbacks L6 and three Bonewalkers
+  L6, Meridian Woolbacks L12 and three Associates L12. Arcadia already had both ahead of the camera
+  (Woolbacks at 47 m, Hopbits at 68 m; npc-spawns.test.ts holds all three). Measured before: the
+  first hostile was 68 / 66 / 134 m and the first wildlife 47 / 181 / 1,095 m from the Arcadia /
+  Hollowmere / Meridian arrival, and the client only receives NPCs within 80 m (server AOI; drawn to
+  150 m, full detail within 45 m), so Meridian showed nothing on arrival. Also: an attack the
+  server refuses for "protected" (the 5 s after arriving), "swimming", "mounted", "overheated" or
+  "safe zone" now shows a toast (one per reason per 1.5 s), and melee refusals are sent as
+  `denied` like ranged ones. The tracked hunt mission (missions.ts `trackedMission`: the first open
+  mission given out on this planet, else the first open one; the HUD tracker and the pointer share
+  it) gets a world callout, pinned to the screen edge when off screen: the nearest creep in view
+  whose kill would count, else the area. Which creeps count is the server's answer: `huntTargets`
+  {id, npcs} lists the tracked hunt's NPCs within 110 m by the kill-credit rule itself
+  (`huntCredit`: kind, the NPC's spawn area for place-bound hunts, quotas from the per-target
+  `counts` now in `you.missions`), sent when the list changes (A1 points at the
+  Clover Fields Hopbits 68 m from Dawnpad; H1 at a Cantor in view; M1 at Checkpoint Seven). H1
+  and M1 still send players to their designed camps, not to the arrival packs; changing those
+  missions is the owner's call. Why: "Where are all the creeps outside? Let's see the creeps."
+- **D-zones-3 (run, 2026-10-15, Codex review):** the Portus town's walls stop combat, and the town
+  protects at once. The town's indestructible structures (the shared `StructureCollider`, the same
+  solids movement uses) are the combat host's `walls`: they stop hitscan shots, pellets, chain
+  bolts, projectiles (a rocket bursts on the near side), melee, line of sight and Patchkit/chain
+  lines, shelter whoever stands behind them from blasts (breakable props keep their old rule), stop
+  NPC sight, NPC bolts and NPC strikes (from the strike's source to the player's chest), and the
+  hammer's slam; NPCs walk round the crates, trees and towers outside the walls (blocked, they
+  keep turning to the side they last slid to, sideways and back if need be). Combat tags: whoever
+  is inside the town walls is protected at once, tagged or not, and the attack and damage gates
+  ask where the player stands now (`BodyRoom.safeNow`), not the flag the tick writes, so a move
+  into the town counts before the next tick (Codex round 2); the 10 s tag still holds on the pad rings (F12:
+  no running onto a pad mid-fight) and still blocks an instant logout everywhere. Why: Codex showed
+  a tagged player inside the walls taking carbine hits through 14 m of wall. The town is the one
+  place a new player must be able to trust, its 8 m walls and two gates make "inside" obvious, and
+  NPCs can't follow anyone in. The cost: a player can step out of a gate, shoot and step back in;
+  the gates are narrow and in plain view, and the planets' pad rings keep the stricter rule.
+- **D-sfx-1 (run, 10:00Z):** sound effects become ElevenLabs samples served like the boss lines:
+  never in git, a versioned set on the asset Worker at `/v/sfx-1/` (`config.sfxBase`,
+  `VITE_SFX_BASE`) with a `manifest.json` listing each sound's takes and playback gain. The client
+  (`audio/samples.ts`) fetches the manifest at start, decodes every file once and plays a random take
+  (never the same one twice in a row) with ±6 % pitch and −1.5 dB…0 level jitter. Any sound without a
+  loaded file plays its ZzFX preset (`audio/presets.ts`, mapping in `audio/sounds.ts`), so a missing
+  set, file or decode never silences an event; `?zzfx` skips the samples. The owner's "ping" was the
+  hit marker, a 1.6 kHz triangle on every landed hit (tutorial dummies included); it and the 900 Hz
+  UI blip also get soft low ZzFX stand-ins. Melee swings are per weapon (sword, staff, fists, axe and
+  hammer), magic bolts land with a magic hit, and weak-point hits have their own sound. Each sound is
+  levelled to the ZzFX sound it replaces (loudest 400 ms, K-weighted). Its playback gain is capped
+  so that the loudest decoded take stays under −1 dBFS with master and effects at 100 %. `process.ts`
+  applies the cap and checks it, and the client caps again from the decoded buffers. So sounds
+  whose ZzFX version was loud play quieter than before: the carbine and the hurt sound by about
+  5 dB, the sword swish by about 7 dB, and the portal, Emberglass and Comet by 9–14 dB. The prompts and processing are in `tools/sfx`, which
+  writes to `/tmp/fl-go/sfx`. Why: the owner asked for a sword swish, a magic wand and better weapon
+  and UI sounds. The boss-line rule (D18, ASSETS) keeps ElevenLabs output out of the CC BY repo, and
+  the manifest keeps the client free of file lists: takes can be dropped or added before the upload
+  with no code change. After the upload a change needs a new set (`sfx-2` and a `config.sfxBase`
+  bump), because `/v/*` is cached as immutable.
+- **D-sfx-2 (run, 10:00Z):** ElevenLabs budget and terms for the SFX. The account had 678 of 40,000
+  credits left (Starter; resets 16 Oct 2026 19:53Z; the boss lines were already made). The
+  sound-effects API bills 10 credits per second of the requested `duration_seconds` (the
+  `character-cost` header: 0.5 s = 5, 1.5 s = 15), so the tools always set the duration. The first
+  set took 67 takes for 470 credits, keeping 65 files (412 KB), which leaves 208 credits for retakes
+  after the owner hears the preview. Terms (checked 15 Oct 2026):
+  - paid plans may use the output commercially (Terms of Use §1(c));
+  - the user keeps the rights in their output (§4(c)(ii)), and ElevenLabs keeps a licence to it (§4(d));
+  - the sound-effects FAQ (elevenlabs.io/sound-effects/commercial) says paid plans need no
+    attribution, and asks users not to use the output to build competing products.
+  So the files stay out of the repo and out of any reusable pack, and the set carries a `NOTICE.txt`.
+  Why: the owner set a hard limit of the credits left, with no top-up.
+- **D-home-1 (run, 2026-10-15 05:20Z):** the landing page is now the home page (6a): Play/Continue,
+  my progress, Save your progress (guests), Sign in / Sign out, online now per world, the
+  leaderboard (top levels, Hall of Firsts, medals) and the four worlds. Opening it never creates a
+  guest: it reads `/api/account/me` only when this browser already has a session, and only Play signs
+  in anonymously. Sign out is offered to saved accounts only (signing a guest out would orphan its
+  character) and clears the local starter, palette and body so the next player picks their own.
+  Why: one click to play stays guest-friendly, and a returning player sees their character first.
+- **D-home-2 (run, 2026-10-15 05:20Z):** logging out (and "Back to the home page" after a removal)
+  reloads the page into the home page instead of showing the LOGGED OUT card over the stopped game
+  (`home/leave.ts`, `?autoplay` stripped, a one-shot notice in sessionStorage). Navigation frees the
+  renderer, the GPU device, the frame loop, workers, audio and every listener at once; tearing the
+  game down in place would need a dispose path through every system and lane. The server has saved
+  the character before it sends `loggedOut`, so the client waits at most 2.5 s for the leave. Why:
+  robust teardown with no leak risk; the cached bundle makes Continue as fast as before.
+- **D-home-3 (run, 2026-10-15 05:20Z):** `GET /api/home` is public and shows display names only:
+  per-body counts with up to 12 in-world names each (the names every player already sees above heads
+  and in the Tab list; load-test bots excluded), the top 10 live characters by level, the top 10
+  accounts by medal count (medals survive death, so an account between lives stays on that board),
+  both for accounts with a chosen display name only and never banned ones, and the claimed Hall of
+  Firsts plaques. No ids, emails, positions or room copies. Cached (online 3 s, board 60 s) and
+  limited to 30 requests per address per minute (IPv6 per /64), keyed by `directRequestIp`, the
+  helper `/api/play`'s per-address limits and IP bans use. Both boards read their top rows from
+  indexes (migration 6: `character_rank`, and `medal_count` kept by triggers on `medal`), so a
+  refresh costs well under a millisecond at 100,000 characters instead of ~120 ms of sorting each. There is no "hide me
+  from the home page" setting yet; add one if players ask. Why: the owner asked for names "if
+  privacy allows"; public names that are already public in the world, nothing more.
+- **D-home-4 (run, 2026-10-15 05:20Z):** DataFast (6f) is optional on both sides. The client build
+  injects DataFast's script into `index.html` only when `VITE_DATAFAST_WEBSITE_ID` and
+  `VITE_DATAFAST_DOMAIN` are set (`vite.config.ts`, values validated), and uses the cookieless script
+  (`script.cookieless.js`, no visitor cookies, so no cookie banner for DataFast; turn on
+  "Cookieless / privacy mode" in the DataFast website settings to match; `VITE_DATAFAST_COOKIELESS=false`
+  switches to the cookie script). The server reads realtime visitors (last 10 min) and all-time
+  sessions with `DATAFAST_API_KEY` (a `df_` website key, server-only, never logged), cached ≥ 60 s,
+  one request pair at a time, the last numbers kept on failure. Without it the home page shows our
+  own online count and no visits; with it, "Online now: N · Total visits: M". Whenever the script is
+  in the page a one-line note says so: "Cookieless analytics by DataFast", or that DataFast sets
+  cookies when the cookie script was chosen. Why: the key stays secret, the page works tonight with or without the account.
+- **D-home-5 (run, 2026-10-15 05:20Z):** share row (6e) on the home page and in the Esc menu: Share
+  uses the Web Share sheet where there is one, else copies `https://firstlight.one4all.dev` with a
+  toast; Email is a `mailto:` invite; "Follow on 𝕏" appears only when `VITE_X_HANDLE` is a valid
+  handle (never guessed: it publishes under the owner's name); the eye hides the home page to show
+  the backdrop. Screenshots stay on P (its own share dialog). Why: the owner's littleprince.dev bar,
+  without inventing an account.
+- **D-controls-1 (2026-10-15):** Voice chat and the radio are hidden in this build ("Voice chat: coming
+  soon"), behind a flag on each side, not deleted. Server `FEATURE_VOICE=1` / client build
+  `VITE_FEATURE_VOICE=1` bring them back (both, together). Off: no voice system (the voice and radio
+  message types stay registered and answer `voice:denied {reason: "off"}`, so older tabs aren't
+  dropped), no TURN credentials minted, the Exchange doesn't sell the radio, a radio can't be dropped
+  and one carried into death goes with the old life instead of into the pile; the client has no V/B
+  keys, no mic prompt, no voice pill, no voice tutorial tip (step ids unchanged; a saved voice tip is
+  kept), no Voice volume or voice column, no voice column or mute in the Tab list, and an owned radio
+  reads as an empty slot. The Esc menu shows one disabled "Voice chat: coming soon" line. Block and
+  report (Tab list) and the phrase wheel stay. Why: the owner isn't sure about the legal side of live
+  voice (risk-assessment §5: the terms page, a public complaints contact and a real legal check are
+  still missing), and wants "character should just walk around and do basic" for this build.
+- **D-controls-2 (2026-10-15):** No F-key bindings. Performance overlay `` ` `` (was F3), photo mode
+  Shift+P (was F9; P alone stays the screenshot), admin console Shift+`` ` `` (was `` ` ``). The game
+  no longer swallows F-keys (the browser keeps F5/F11/F12); it swallows `` ` `` and `'` while locked.
+  `game/keys.ts` lists every binding and a test checks for F-keys and clashes. Why: on a Mac F1–F12
+  are system keys (F3 is Mission Control) and the owner's Fn key belongs to another app.
+- **D-controls-3 (2026-10-15):** The pause menu follows a state machine (`ui/pauseFlow.ts`), not every
+  `pointerlockchange`. Esc in the menu (also Enter/Space, Resume, a click on the backdrop) goes back to
+  the game: the menu closes, a "Click to look around" hint shows, and the next click on the world
+  re-locks without reopening the menu. An unlock opens the menu only after it has lasted 150 ms, and a
+  lock lost within 500 ms of being granted lands in the game with the hint instead of reopening the
+  menu (the owner's blink: Chrome granted the lock and dropped it a few frames later, and the old menu
+  mirrored both changes). Refused lock requests (no gesture, Chrome's ~1 s block after an Esc) show the
+  hint. Esc in a panel closes it and asks for the pointer back (the panel freed it itself, so Chrome
+  allows it without a click). Play still goes fullscreen, now with Keyboard Lock for Esc where it
+  exists (Chromium): a short Esc reaches the game (menu, then straight back in without a click) instead
+  of dropping out of fullscreen, and holding Esc leaves fullscreen; the menu has a Full screen button.
+  The cost: an Esc pressed within 500 ms of clicking into the game shows the hint rather than the
+  menu (a second Esc opens it). Why: Esc alone can't re-lock the pointer (it isn't a user gesture),
+  and Esc dropping fullscreen gave the owner a full-screen jump on every pause.
+- **D-map-1 (map lane, 2026-10-15):** one north for the whole client: the D38 pole frame, toward
+  the body's +Z pole (`social/compassMath.ts` `northAt`/`eastAt`, the same as `places.tangentFrame`
+  wherever that frame is taken from +Z). The compass used to point north at the +Y pole, where
+  Portus sits: at the plaza it fell back to −Z and around it pointed back at the centre, so facing
+  the castle (town north) it read S while the map drew the castle up — the owner's "the map is
+  inverted". The map and the minimap take north from the same functions, and tests pin "a point due
+  east draws right of you, north up" and "every target sits at its compass bearing". Why: the town,
+  the places' east/north offsets and the map already used +Z; a north at the hub's own pole is
+  undefined exactly where every player starts.
+- **D-map-2 (map lane, 2026-10-15):** the map and the minimap draw the ground from one colour atlas
+  per body (six cube faces, ~0.75 m texels on Portus, 2–3 m on the planets), baked once per arrival
+  in a worker (`world/mapAtlas.worker.ts`, the face under you first) from the shared height function
+  and the terrain palette, hill-shaded from the north-west; Portus adds its town plan from a 0.5 m
+  raster of the shared layout. The worker also renders the views (the map's globe, the minimap's
+  north-up tile around you, refreshed after a quarter of its span) and hands back bitmaps, so the
+  main thread only draws images and markers: the minimap is one canvas, ~0.1–0.2 ms a frame (tile
+  swaps included, p99 0.3 ms), and Medium held 60 fps with it on and off in a headless WebGPU A/B.
+  Why: the old map re-sampled terrain on the main thread per view (22k samples, 72-res while
+  dragging); a per-frame minimap couldn't afford that.
+- **D-map-3 (map lane, 2026-10-15):** the waypoint is client-only, one per body in localStorage
+  (`fl.waypoint.<body>`), dropped by clicking the map (or F over it), cleared by right-click, the
+  map's button or arriving within 8 m. It shows on the map, the minimap (pinned to the rim when far),
+  the compass (magenta diamond with its distance) and in the world as an unfogged magenta pillar that
+  widens with distance (normal blending: additive vanished against daylight sky). Clicking a pad still
+  fast-travels when you stand on one; otherwise it sets the waypoint there. On the map, unnamed pads
+  read "Pad N" (shared `padName` says "Waypoint N", which the server's pad toasts still use). Why:
+  the owner wants "a dot where to go"; sharing it with the party can come later over the party channel.
+- **D-map-4 (map lane, 2026-10-15):** the minimap is the first child of the HUD's right column (top
+  right; the mission tracker and toasts flow below it), round, turning with the camera by default
+  (settings: Minimap, Turn the minimap with the camera; the map's North up / Heading up is
+  remembered too). Twice a second it measures the tutorial panel, the player card, the hotbar and
+  the save card (the `calloutPlace` idea) and shrinks, down to 110 px, then hides rather than overlap
+  them. It shows 60 m around you on Portus and 110 m on the planets: NPCs (hostile or aggroed red,
+  bosses ringed, wildlife cream), pads, portals, the guide, mission stars, party and the waypoint.
+  Why: top right is the one corner nothing else owns at play time.
+- **D-combat-1 (2026-10-15 overnight):** a ranged shot's origin slides along the aim ray to the
+  point nearest the shooter's head before the 7 m `ORIGIN_SLACK` check (`aimOrigin`, combat.ts;
+  training shots too). The client sends the camera position, and the mouse wheel zooms the camera
+  out to 9 m: past ~7 m every Hexquill and carbine shot was refused as "origin", silently (a likely
+  cause of the owner's "weapons don't work outside"). A line that never comes near the head is still
+  refused. Melee refusals now answer `denied` like fire, and the client shows a notice for each
+  attack refusal (safe zone, arrival protection, overheat, reload, swimming, saddle). Why: the aim
+  line is what counts; where along it the camera sits is a view setting, not a cheat.
+- **D-combat-2 (2026-10-15 overnight):** the dodge-roll keeps C (SPEC §4.4, D1; S stays the back
+  step, no double-tap). It starts on the frame C is read, as before, plus: content §0's 100 ms input
+  buffer (a press that early rolls when the cooldown ends or on touchdown; an earlier press is
+  dropped, never queued into a late roll), 0.12 s of ground grace after stepping off an edge (not
+  after a jump), the body turned to the roll at once, and the clip cut from the lean (frame 6, not
+  the crouch at 2) with a 0.05 s blend. Keys pressed behind a loading screen are dropped. Why: the
+  owner's "it takes a second before it rolls": measured headless, the roll pose showed 75–150 ms
+  after the key (the clip stood up first), presses in the cooldown's last moment or just before
+  landing were lost, and a C pressed while travelling rolled on arrival. Now 25–75 ms.
+- **D-controls-4 (2026-10-15):** Keys work in the "Click to look around" state. Panel and world keys
+  (M, I, J, T, E, 1–4, R, H) are gated on `Input.inPlay` (pointer locked, or free with the hint) instead
+  of the pointer lock, so a refused or lost lock, or Esc → Esc, never dead-keys them; they stay off
+  while the pause menu, a panel or a notice is up. Movement (WASD, Space, C, Shift) works there too, as
+  it did; mouse-look and attacks wait for the click that locks the pointer, and so does the phrase
+  wheel (G), which is aimed with the mouse. Tab, `` ` ``, Shift+P and P already worked. Behind a
+  loading screen (first arrival, travel, rejoin, re-warm) these keys and Tab/P wait for the hand-over
+  (`Input.suspendedWhile`, set by Game), and whenever the pointer isn't locked a guard, scope or charge
+  in progress is cancelled (no heavy on release or on the next lock). Why: Codex's production smoke
+  test found M dead in that state, and real Chrome lands there after a refused lock.
+- **D-save-1 (2026-10-15):** saving progress (HANDOFF 5b/5c, the owner's final word: guest play kept,
+  email only to save). No card ever opens by itself: a guest gets a "Progress not saved · Esc → Save
+  progress" toast once per tab session after the first level-up to 2+ (held while the tutorial, a
+  menu or the death screen is up), plus Save progress in the Esc menu, on the death screen and on the home
+  page (logging out lands there). The save card is modal and opens only with the mouse free;
+  saved accounts, `?devguest` tokens and `?offline`/`?bench` runs never see any of it. The landing's
+  "Sign in with email" link is a Sign in button. The level-2 rule for new addresses (D34) stays: below
+  it the Esc row is disabled and the card says "Play a little first" (the tutorial pays level 2).
+  Mail failures get their own answers: provider quota → `SAVING_BUSY` (503), a recipient Resend
+  rejects (422) → `EMAIL_REJECTED` (400), anything else (no key, unverified domain 403, bad key,
+  network) → `SAVING_UNAVAILABLE` (503). The last player-initiated send's failure holds for 10 min
+  (`MailHealth`); meanwhile public sign-in requests all get the same `SAVING_UNAVAILABLE`/`SAVING_BUSY`
+  (address-independent, so D34's no-enumeration holds), and `GET /api/account/save-status` reports it
+  so the cards say so before the player types. Background sends to saved addresses never change it.
+  `/api/account/me` gains `saveReady`, and its `character.starter` is now the starter index (as in
+  PlayerState), not the stored id: a second browser stores it as `fl.starter`. The account cards mount
+  on `<body>` (the landing's z 20 hid cards inside `#ui`). Why: the old level-2 card popped up mid-play
+  and couldn't be clicked while the pointer was locked, the landing's sign-in card was invisible, and
+  with Resend's domain unverified every save ended at a "Check your email" that never came.
+- **D-save-2 (2026-10-15):** the OTP day splits into two independent pools: public sends (sign-ins
+  with no session that may save) use `OTP_PUBLIC_SHARE` of `OTP_DAILY_BUDGET` (600 of 1,000), saving
+  sends use the rest (400), and neither counts the other; a refused saving send says `saving`. Before,
+  saving shared one global cap with public sends, which only reach saved addresses, so near the cap a
+  level-2 player could probe an address publicly and read "sent" vs `SAVING_BUSY` on their own send
+  (Codex review). Supersedes D34's "saving keeps the rest" (it could use idle public slots). Why: no
+  enumeration oracle across paths; easy to retune the share.

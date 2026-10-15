@@ -7,6 +7,7 @@ import "../styles/components.css";
 import "../styles/icons.css";
 import "../styles/base.css";
 import "../styles/landing.css";
+import "../styles/home.css";
 import "../styles/loading.css";
 import "./gallery.css";
 import "../../social/social.css";
@@ -16,7 +17,7 @@ import { loadStored, resolveSettings, type Feature, type Tier } from "../../rend
 import { Hud, type YouPlus } from "../hud.ts";
 import { setLoading, setLoadingBadge } from "../loading.ts";
 import { Menu } from "../menu.ts";
-import { showSavePrompt, showSignIn, pickDisplayName } from "../account.ts";
+import { openSaveProgress, showSignIn, pickDisplayName } from "../account.ts";
 import { installSprites } from "../sprites.ts";
 import { el } from "../dom.ts";
 import { Compass } from "../../social/compass.ts";
@@ -31,11 +32,13 @@ import { OnboardingHud } from "../onboarding.ts";
 import { OnboardingSteps } from "../../game/onboardingSteps.ts";
 import { ANIM } from "@firstlight/shared/net/schema";
 import { INVENTORY_HTML, ONBOARDING_HTML } from "./kitExamples.ts";
+import { paintHomeMock } from "../../home/home.ts";
+import type { HomeData } from "@firstlight/shared/net/home";
 
 const SCREENS = [
-  "landing", "loading", "loading-compact", "charpick", "charpick-rebirth", "hud", "hud-oversight", "hud-states",
+  "landing", "home-guest", "loading", "loading-compact", "charpick", "charpick-rebirth", "hud", "hud-oversight", "hud-states",
   "death", "death-player", "death-party", "death-world", "menu", "menu-logout", "settings",
-  "players", "compass", "wheel", "shop", "journal", "invite", "removed", "kit-inventory", "kit-onboarding", "inventory", "inventory-drag", "onboarding", "onboarding-attack", "onboarding-loot", "onboarding-portal", "onboarding-done", "save", "save-code", "save-saved", "save-busy", "signin", "name", "notice",
+  "players", "compass", "wheel", "shop", "journal", "invite", "removed", "kit-inventory", "kit-onboarding", "inventory", "inventory-drag", "onboarding", "onboarding-attack", "onboarding-loot", "onboarding-portal", "onboarding-done", "save", "save-code", "save-saved", "save-busy", "save-unavailable", "save-locked", "signin", "signin-unavailable", "name", "notice",
 ] as const;
 type Screen = (typeof SCREENS)[number];
 
@@ -56,6 +59,46 @@ function you(over: Partial<YouPlus> = {}): YouPlus {
     ...over,
   };
 }
+
+const HOME_MOCK: HomeData = {
+  online: {
+    total: 37,
+    bodies: {
+      portus: { players: 9, names: ["Ashfall", "Juno_V", "Kestrel", "Maren", "Pip_Lark", "Tamsin"] },
+      arcadia: { players: 17, names: ["Bramble", "Cinder_7", "Mossback", "Wren_07"] },
+      hollowmere: { players: 8, names: ["Lumen_K", "Orbit_9"] },
+      meridian: { players: 3, names: ["Vexa_77"] },
+    },
+  },
+  board: {
+    levels: [
+      { name: "Vexa_77", level: 19, starter: 3, title: "Triple Crown" },
+      { name: "Mossback", level: 17, starter: 1, title: "Regicide" },
+      { name: "Wren_07", level: 14, starter: 3, title: "Tide Turner" },
+      { name: "Lumen_K", level: 11, starter: 0, title: "Seasoned" },
+      { name: "Ashfall", level: 9, starter: 2, title: null },
+      { name: "Tamsin", level: 6, starter: 0, title: null },
+    ],
+    medals: [
+      { name: "Vexa_77", medals: 14, title: "Triple Crown" },
+      { name: "Mossback", medals: 11, title: "Regicide" },
+      { name: "Wren_07", medals: 7, title: "Tide Turner" },
+    ],
+    hall: [
+      { id: "boss:tidewrath", name: "Mossback", foundAt: Date.UTC(2026, 9, 12) },
+      { id: "E2", name: "Wren_07", foundAt: Date.UTC(2026, 9, 13) },
+    ],
+  },
+  visits: { online: 52, total: 12840 },
+  at: 0,
+};
+const ME_MOCK = {
+  name: "Wren_07", displayName: "Wren_07", guest: false, titleMedal: "tide_turner",
+  character: { level: 14, xp: 14_000, coins: 812, starter: "unit7", palette: 2, body: "hollowmere" },
+  medals: ["spark", "ten_down", "grand_tour", "tide_turner", "regicide", "new_high_score", "bellringer"],
+  pads: Array.from({ length: 19 }, (_, i) => ({ body: i < 12 ? "arcadia" : "hollowmere", padId: String(i % 12) })),
+  playMs: 4 * 3600_000 + 12 * 60_000,
+};
 
 /** Enough of Game for the menu and settings screens. */
 function fakeGame(hud: Hud | null, opts: { logout?: boolean } = {}): Game {
@@ -170,11 +213,12 @@ async function run() {
   const nav = el("nav", "fl-gallery-nav", document.body);
   if (q.has("nav")) for (const s of SCREENS) el("a", s === screen ? "is-on" : "", nav, s).setAttribute("href", `?screen=${s}&nav`);
   switch (screen) {
-    case "landing": {
+    case "landing":
+    case "home-guest": {
       const m = /<section id="landing"[\s\S]*?<\/section>/.exec(indexHtml);
       document.body.insertAdjacentHTML("beforeend", m ? m[0] : "");
-      document.getElementById("online")!.hidden = false;
-      document.getElementById("online-n")!.textContent = "1,284";
+      const guest = screen === "home-guest";
+      paintHomeMock(HOME_MOCK, guest ? { ...ME_MOCK, guest: true, displayName: null, name: "Wanderer-4410", titleMedal: null, character: { ...ME_MOCK.character!, level: 3, xp: 260 } } : ME_MOCK, guest ? "logged-out" : null);
       break;
     }
     case "loading":
@@ -241,12 +285,15 @@ async function run() {
     case "save-code":
     case "save-saved":
     case "save-busy":
+    case "save-unavailable":
+    case "save-locked":
       hudScene("monster");
-      void showSavePrompt({ name: "Wren_07", level: 2, starter: 3, requested: true, preview: screen === "save" ? undefined : (screen.slice(5) as "code" | "saved" | "busy") });
+      void openSaveProgress({ name: "Wren_07", level: 2, starter: 3, later: "Esc → Save progress", preview: screen === "save" ? "email" : (screen.slice(5) as "code" | "saved" | "busy" | "unavailable" | "locked") });
       break;
     case "signin":
+    case "signin-unavailable":
       gameEl.className = "fl-gallery-dark";
-      void showSignIn();
+      void showSignIn({ preview: screen === "signin" ? "email" : "unavailable" });
       break;
     case "name":
       gameEl.className = "fl-gallery-dark";

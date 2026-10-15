@@ -45,14 +45,24 @@ export function isolateKeys(e: HTMLElement): void {
 // ------------------------------------------------------------------------------------------------ overlay registry
 
 const open = new Set<string>();
+const listeners = new Set<() => void>();
 
 /** Mark a full-screen overlay as open (death, character pick, sign-in…). The Esc menu stays away while any is open. */
 export function overlayOpened(name: string): void {
+  if (open.has(name)) return;
   open.add(name);
+  for (const fn of listeners) fn();
 }
 
 export function overlayClosed(name: string): void {
-  open.delete(name);
+  if (!open.delete(name)) return;
+  for (const fn of listeners) fn();
+}
+
+/** Called after an overlay opens or closes (the Esc menu's state follows: pauseFlow.ts). */
+export function onOverlayChange(fn: () => void): () => void {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
 }
 
 export function isOverlayOpen(except?: string): boolean {

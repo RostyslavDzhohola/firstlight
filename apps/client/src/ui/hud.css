@@ -94,6 +94,11 @@
 
 /* ---------------------------------------------------------------- top-right: missions + toasts in ONE column (no overlap) */
 .fl-hud__right { position: absolute; top: calc(1.2 * var(--u)); right: calc(1.5 * var(--u)); width: calc(19.5 * var(--u)); display: flex; flex-direction: column; align-items: flex-end; gap: calc(.6 * var(--u)); }
+/* Minimap (ui/minimap.ts): a round canvas at the top of the right column; its size is set inline. */
+.fl-hud__minimap { display: contents; }
+.fl-minimap { position: relative; flex: none; border-radius: 50%; background: rgba(5, 10, 15, .55); box-shadow: 0 0 0 1px rgba(0, 0, 0, .5), 0 4px 18px rgba(0, 0, 0, .35); }
+.fl-minimap[hidden] { display: none; }
+.fl-minimap canvas { display: block; width: 100%; height: 100%; }
 .fl-missions { width: 100%; padding: calc(.75 * var(--u)) calc(.9 * var(--u)) calc(.8 * var(--u)); }
 .fl-missions header { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-2); margin-bottom: calc(.55 * var(--u)); }
 .fl-missions header .fl-label { color: var(--photon); }
@@ -150,7 +155,8 @@
 .fl-me__who { min-width: 0; }
 .fl-me__who b { display: block; font: 600 var(--t-md)/1.1 var(--font-display); letter-spacing: .05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fl-me__who span { font-size: var(--t-xs); color: var(--fog-3); white-space: nowrap; }
-.fl-me__safe { margin-left: calc(.4 * var(--u)); }
+.fl-me__zone { margin-left: calc(.4 * var(--u)); gap: calc(.25 * var(--u)); }
+.fl-me__zone .li { font-size: .95em; }
 .fl-me__purse { margin-left: auto; display: flex; align-items: center; gap: calc(.35 * var(--u)); font: 700 var(--t-md)/1 var(--font-mono); color: var(--coin); }
 .fl-me__purse .px { width: calc(1.4 * var(--u)); height: calc(1.4 * var(--u)); }
 .fl-hp { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: calc(.55 * var(--u)); align-items: center; }

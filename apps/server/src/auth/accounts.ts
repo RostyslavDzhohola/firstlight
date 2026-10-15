@@ -23,7 +23,7 @@ import { hmacHex, safeEqual } from "./crypto.ts";
 import type { Identity, TokenVerifier, VerifyContext } from "./identity.ts";
 import { banKey, CLIENT_IP_HEADER, firstForwardedFor, normalizeIp } from "./ip.ts";
 import { accountLinks, type LinkEvents } from "./links.ts";
-import { DevOutbox, disabledMailer, resendMailer, type Mailer } from "./mailer.ts";
+import { classifyMailFailure, DevOutbox, disabledMailer, MailHealth, resendMailer, type Mailer } from "./mailer.ts";
 import { identifyRequest, mountAccountRoutes, requireAdminFor } from "./routes.ts";
 import { pruneGuests } from "./prune.ts";
 import { liveSessions, type SessionRegistry } from "./sessions.ts";
@@ -66,6 +66,10 @@ export interface Accounts {
   sessions: SessionRegistry;
   links: LinkEvents;
   mailer: Mailer;
+  /** Can sign-in codes go out right now (GET /api/account/save-status)? */
+  mailHealth: MailHealth;
+  /** May this account get a code for a new address (OTP_MIN_LEVEL)? Guests only use it to save. */
+  maySave(userId: string): boolean;
   /** Only when the dev outbox is in use (no RESEND_API_KEY, not production). Test-only. */
   devOutbox: DevOutbox | null;
   hashIp(ip: string): string;
@@ -104,6 +108,7 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
   else if (cfg.production) mailer = disabledMailer();
   else mailer = devOutbox = new DevOutbox(!!cfg.devMailLog);
   if (cfg.mailer instanceof DevOutbox) devOutbox = cfg.mailer;
+  const mailHealth = new MailHealth(mailer);
 
   const hashIp = (ip: string) => hmacHex(`${cfg.secret}:ip`, banKey(ip)).slice(0, 32);
   let authRef: FirstlightAuth | null = null;
@@ -160,9 +165,13 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
     releaseOtp: (id, userId) => releaseOtpSend(db, id, userId),
     sendOtp: async (email, otp) => {
       const r = await mailer.sendOtp(email, otp);
-      if (!r.ok) console.warn(`otp send failed: ${r.error}`);
-      return r.ok;
+      // A player's own save reports health; background sends to saved addresses don't (no enumeration).
+      if (!authRequestState.getStore()?.otpQueued) mailHealth.record(r);
+      if (r.ok) return null;
+      console.warn(`otp send failed: ${r.error}${r.status ? ` (${r.status})` : ""}`);
+      return classifyMailFailure(r);
     },
+    mailState: () => mailHealth.state(),
     onLink: (guest, account) => {
       links.emitBefore(guest.id, account.id); // rooms flush live characters first
       const r = linkAccounts(db, guest.id, account.id);
@@ -254,6 +263,8 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
     sessions,
     links,
     mailer,
+    mailHealth,
+    maySave: (userId) => bestLevel(db, userId) >= OTP_MIN_LEVEL,
     devOutbox,
     hashIp,
     revalidate,
