@@ -80,7 +80,7 @@ GPU costs come from the A/B in §3 where measured; others are marked as estimate
   Apple's tile-based GPUs depend on, so geometry blades are the better bet on an M1. (c) Compute
   culling and LOD with indirect draws on WebGPU (SPEC already plans compute grass on High): worth it
   only at High/Ultra counts.
-- **Cost.** Prototype at the dense spot: triangles 0.31 M → 0.72 M per frame, draws unchanged,
+- **Cost.** Prototype at the dense spot: triangles 0.31 M → 0.69 M per frame, draws unchanged,
   GPU see §3.
 
 ### 2.2 Wildflowers and ferns
@@ -243,7 +243,7 @@ changes. `?meadow=nograss,noclouds,noground,norocks,nograde` turns single pieces
 - **Grade:** ACES, S-curve, +18 % saturation.
 
 GPU time per frame, Arcadia dense-meadow spot, Medium, 1785×1115 canvas (the owner's M1 window
-size), WebGPU timestamp queries, median of 3 runs:
+size), WebGPU timestamp queries, median of 5 interleaved runs:
 
 | Config | GPU ms per frame (median of 5 runs) | Run medians | Triangles | Draws |
 |---|---|---|---|---|
