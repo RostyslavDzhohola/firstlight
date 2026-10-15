@@ -16,10 +16,12 @@ import type { BodyDef, BodyId } from "./bodies.ts";
 import { CHUNK_QUADS, gridDir, type Face } from "./cubesphere.ts";
 import { chordMetres, padDirs } from "./pads.ts";
 import type { Terrain } from "./terrain.ts";
-import { townCoords } from "./townFrame.ts";
+import { siteAnchor, siteCoords, townCoords, type SiteAnchor } from "./townFrame.ts";
 import { townPropClear } from "./townGround.ts";
+import { OUTPOST_GROUND_HALF, outpostPropClear } from "./outpostGround.ts";
 
 const townAt: [number, number] = [0, 0];
+const outpostAt: [number, number] = [0, 0];
 
 /**
  * Bump whenever placement output changes (rules, their order, jitter, filters): clients and the
@@ -29,8 +31,10 @@ const townAt: [number, number] = [0, 0];
  * v3: forest undergrowth, arena/interaction clearings and fitted-breakable exclusions.
  * v4: the Portus castle town (D38): its flat floor, a 52 m clearing inside the walls, and its roads,
  * paving, structures and trees kept clear (townGround.ts).
+ * v5: the planets' pad-0 outposts (D42): their apron, paths, structures and trees kept clear
+ * (outpostGround.ts).
  */
-export const PROPS_VERSION = 4;
+export const PROPS_VERSION = 5;
 
 /** Jitter range inside a candidate cell (fraction of the cell), and the face-edge margin. */
 export const PROP_JITTER_MIN = 0.15;
@@ -238,6 +242,9 @@ export function naturalChunkProps(terrain: Terrain, face: Face, cx: number, cy: 
     ...portalSpots(body, terrain).map((o) => ({ dir: o.dir, radius: 6 })),
   ];
   const faceSeed = hash4(body.seed, face, 0x5eed);
+  // The pad-0 outpost (D42): its frame, to test props near pad 0 against its ground mask.
+  const outpost: SiteAnchor | null = hub ? null : siteAnchor(pads[0]!);
+  const outpostReach = (OUTPOST_GROUND_HALF * 1.45) / R; // chord (unit sphere) that covers the mask's corners
 
   for (let r = 0; r < rules.length; r++) {
     const rule = rules[r]!;
@@ -286,6 +293,9 @@ export function naturalChunkProps(terrain: Terrain, face: Face, cx: number, cy: 
           // The castle town (D38): not on its roads or paving, by its structures or under its trees.
           townCoords(ux, uy, uz, R, townAt);
           if (!townPropClear(townAt[0], townAt[1])) continue;
+        } else if (outpost && chordMetres(pads[0]!, ux, uy, uz, 1) < outpostReach) {
+          siteCoords(outpost, ux, uy, uz, R, outpostAt);
+          if (!outpostPropClear(body.id, outpostAt[0], outpostAt[1])) continue;
         }
         const s = rule.scale[0] + (rule.scale[1] - rule.scale[0]) * hash01(hseed, 4);
         out.push({ kind: rule.kind, kindIndex, x: sp.x, y: sp.y, z: sp.z, scale: s, yaw: hash01(hseed, 5) * Math.PI * 2 });

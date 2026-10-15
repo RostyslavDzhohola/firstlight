@@ -24,7 +24,9 @@ export const NET = {
 // 2: F12 core message changes + the sky lane's lightning schedule. 3: the Portus town (D40): the
 // server validates movement against the new town floor and the town's walls and houses, which an
 // older client neither has nor draws, so stale tabs must reload instead of being corrected forever.
-export const PROTOCOL_VERSION = 3;
+// 4: the planets' pad-0 outposts (D42-D46): the server blocks movement, shots, NPC sight and NPC
+// steering at their buildings, which an older client neither has nor draws.
+export const PROTOCOL_VERSION = 4;
 
 // ---- HTTP: entering the world -------------------------------------------------------------
 
