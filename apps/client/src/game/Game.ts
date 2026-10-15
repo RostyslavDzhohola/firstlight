@@ -1,4 +1,5 @@
 import { cosmeticWarmupHook } from "../render/Cosmetics.ts";
+import { listenHuntTargets } from "./huntTargets.ts";
 // Game orchestration: renderer, current body, local player, network, remote avatars, combat,
 // portals, piles, HUD and the main loop.
 
@@ -430,6 +431,7 @@ export class Game {
       this.net.onLeaveRoom = w.onClose; // until the hand-over below
       localStorage.setItem("fl.body", body);
       this.combat.attach();
+      listenHuntTargets(room); // before anything else can arrive unheard (huntTargets.ts)
       const me = await waitFor(() => (room.state as any).players?.get(room.sessionId), { stage: "waiting for our player", timeoutMs: 15_000, watch: w });
       this.player.teleport(me.x, me.y, me.z);
       this.net.onCorrect = (x, y, z) => this.player.correct(x, y, z);

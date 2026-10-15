@@ -162,7 +162,7 @@ export class QuestClient implements ClientSystem {
     const you = g.hud.you;
     const active = new Set((you?.missions ?? []).filter((m) => !m.done).map((m) => m.id));
     this.world.update(dt, { activeMissions: active, cosmeticsExtras: !!you?.cosmeticsExtras });
-    this.tracker.update(you);
+    this.tracker.update(you, this.game.bodyId);
     if (you !== this.lastYou) {
       this.lastYou = you;
       if (Panel.current && Panel.current !== this.map && Panel.current !== this.keypad) Panel.current.refresh();

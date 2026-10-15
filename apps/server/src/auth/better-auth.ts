@@ -10,8 +10,18 @@ import { APIError, createAuthMiddleware, getSessionFromCtx, isAPIError } from "b
 import { anonymous, emailOTP, jwt } from "better-auth/plugins";
 import { z } from "zod";
 import { CLIENT_IP_HEADER } from "./ip.ts";
+import type { MailFailure } from "./mailer.ts";
 
 export const SAVING_BUSY = "Saving is busy, try again later";
+/** No code can go out (e.g. the sending domain isn't verified yet): the client says so up front. */
+export const SAVING_UNAVAILABLE = "Saving is temporarily unavailable";
+
+/** The answer to a code that couldn't be sent. Codes: SAVING_UNAVAILABLE, SAVING_BUSY, EMAIL_REJECTED. */
+export function mailError(f: MailFailure): APIError {
+  if (f === "rejected") return APIError.from("BAD_REQUEST", { code: "EMAIL_REJECTED", message: "That address can't receive email" });
+  if (f === "busy") return APIError.from("SERVICE_UNAVAILABLE", { code: "SAVING_BUSY", message: SAVING_BUSY });
+  return APIError.from("SERVICE_UNAVAILABLE", { code: "SAVING_UNAVAILABLE", message: SAVING_UNAVAILABLE });
+}
 
 /** A new address only gets a code from a player who reached this level (the save card's first level-up). */
 export const OTP_MIN_LEVEL = 2;
@@ -70,7 +80,8 @@ const CODE_FAILURES: ReadonlySet<string> = new Set(["INVALID_OTP", "OTP_EXPIRED"
 interface AuthRequestState {
   /** The budget reservation of this send, and the account it counts against (null: a public send). */
   otpReservation?: { id: number; userId: string | null };
-  otpSendFailed?: boolean;
+  /** Why this request's send failed (mailError maps it to the answer). */
+  otpSendFailed?: MailFailure;
   /** A queued background send (the public request was already answered). */
   otpQueued?: boolean;
   /** The client IP the queued send was asked from (its per-IP cap). */
@@ -115,7 +126,13 @@ export interface AuthDeps {
    */
   reserveOtp(email: string, userId: string | null, ip: string | null): { ok: true; id: number } | { ok: false; reason: string };
   releaseOtp(id: number, userId: string | null): void;
-  sendOtp(email: string, otp: string): Promise<boolean>;
+  /** Deliver a code; null when it went out, else why not. */
+  sendOtp(email: string, otp: string): Promise<MailFailure | null>;
+  /**
+   * Can codes go out at all (MailHealth)? While not "ok", every public request gets the same error
+   * instead of a queued send that would fail: it doesn't depend on the address (no enumeration).
+   */
+  mailState(): "ok" | "busy" | "unavailable";
   /** Guest → account. Synchronous game.db move + live re-key; returns the name to keep on the account. */
   onLink(guest: LinkedUser, account: LinkedUser): string | null;
 }
@@ -172,6 +189,8 @@ export function authOptions(d: AuthDeps) {
           // A banned account's session gets nothing (F12 final review S7).
           if (userId && d.accountBanned(userId)) throw APIError.from("FORBIDDEN", { code: "BANNED", message: "This account is banned." });
           if (!userId || !d.maySave(userId)) {
+            const mail = d.mailState();
+            if (mail !== "ok") throw mailError(mail);
             if (d.savedEmail(email)) d.queueOtp(email, ip ?? null);
             return ctx.json({ success: true });
           }
@@ -197,7 +216,7 @@ export function authOptions(d: AuthDeps) {
         if (!failed) return;
         d.releaseOtp(res.id, res.userId);
         st.otpReservation = undefined;
-        if (st.otpSendFailed) throw APIError.from("SERVICE_UNAVAILABLE", { code: "SAVING_BUSY", message: SAVING_BUSY });
+        if (st.otpSendFailed) throw mailError(st.otpSendFailed);
       }),
     },
     plugins: [
@@ -219,10 +238,10 @@ export function authOptions(d: AuthDeps) {
         allowedAttempts: 3,
         async sendVerificationOTP({ email, otp, type }) {
           if (type !== "sign-in") return;
-          const ok = await d.sendOtp(email, otp);
-          if (!ok) {
+          const failed = await d.sendOtp(email, otp);
+          if (failed) {
             const st = authRequestState.getStore();
-            if (st) st.otpSendFailed = true;
+            if (st) st.otpSendFailed = failed;
           }
         },
       }),

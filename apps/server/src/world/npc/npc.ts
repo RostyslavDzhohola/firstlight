@@ -106,6 +106,8 @@ export interface Npc extends NpcActor {
   /** Brightbits' current 90° movement axis (0–3), −1 = none. */
   gridAxis: number;
   strafeSign: number;
+  /** Which way (±1) the NPC last slid round a structure: it keeps that side (steer.ts FOLLOW). */
+  slideSide: number;
   /** Since when the chased target has stood where this NPC can't reach it (brain.ts), if it has. */
   unreachSince?: number;
   /**

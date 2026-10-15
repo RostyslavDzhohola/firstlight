@@ -17,7 +17,7 @@ import { loadStored, resolveSettings, type Feature, type Tier } from "../../rend
 import { Hud, type YouPlus } from "../hud.ts";
 import { setLoading, setLoadingBadge } from "../loading.ts";
 import { Menu } from "../menu.ts";
-import { showSavePrompt, showSignIn, pickDisplayName } from "../account.ts";
+import { openSaveProgress, showSignIn, pickDisplayName } from "../account.ts";
 import { installSprites } from "../sprites.ts";
 import { el } from "../dom.ts";
 import { Compass } from "../../social/compass.ts";
@@ -38,7 +38,7 @@ import type { HomeData } from "@firstlight/shared/net/home";
 const SCREENS = [
   "landing", "home-guest", "loading", "loading-compact", "charpick", "charpick-rebirth", "hud", "hud-oversight", "hud-states",
   "death", "death-player", "death-party", "death-world", "menu", "menu-logout", "settings",
-  "players", "compass", "wheel", "shop", "journal", "invite", "removed", "kit-inventory", "kit-onboarding", "inventory", "inventory-drag", "onboarding", "onboarding-attack", "onboarding-loot", "onboarding-portal", "onboarding-done", "save", "save-code", "save-saved", "save-busy", "signin", "name", "notice",
+  "players", "compass", "wheel", "shop", "journal", "invite", "removed", "kit-inventory", "kit-onboarding", "inventory", "inventory-drag", "onboarding", "onboarding-attack", "onboarding-loot", "onboarding-portal", "onboarding-done", "save", "save-code", "save-saved", "save-busy", "save-unavailable", "save-locked", "signin", "signin-unavailable", "name", "notice",
 ] as const;
 type Screen = (typeof SCREENS)[number];
 
@@ -285,12 +285,15 @@ async function run() {
     case "save-code":
     case "save-saved":
     case "save-busy":
+    case "save-unavailable":
+    case "save-locked":
       hudScene("monster");
-      void showSavePrompt({ name: "Wren_07", level: 2, starter: 3, requested: true, preview: screen === "save" ? undefined : (screen.slice(5) as "code" | "saved" | "busy") });
+      void openSaveProgress({ name: "Wren_07", level: 2, starter: 3, later: "Esc → Save progress", preview: screen === "save" ? "email" : (screen.slice(5) as "code" | "saved" | "busy" | "unavailable" | "locked") });
       break;
     case "signin":
+    case "signin-unavailable":
       gameEl.className = "fl-gallery-dark";
-      void showSignIn();
+      void showSignIn({ preview: screen === "signin" ? "email" : "unavailable" });
       break;
     case "name":
       gameEl.className = "fl-gallery-dark";

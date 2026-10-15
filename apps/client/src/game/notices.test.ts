@@ -4,6 +4,8 @@ import { attackDeniedText, NoticeGate } from "./notices.ts";
 describe("attack refusal notices", () => {
   it("say why the server refused a shot or a swing", () => {
     expect(attackDeniedText("fire", "safe zone")).toBe("Weapons are holstered in safe zones");
+    expect(attackDeniedText("fire", "safe zone", "portus")).toMatch(/in town: head out of the gates/);
+    expect(attackDeniedText("melee", "safe zone", "arcadia")).toMatch(/on the pad: step out of the ring/);
     expect(attackDeniedText("melee", "safe zone")).toBe("Weapons are holstered in safe zones");
     expect(attackDeniedText("fire", "protected")).toMatch(/protection/);
     expect(attackDeniedText("fire", "overheated")).toMatch(/Overheated/);
