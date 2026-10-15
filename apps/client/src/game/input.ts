@@ -28,6 +28,12 @@ export class Input {
    * the Esc menu). Keys work as in play; only mouse-look waits for the click that locks the pointer.
    */
   free = false;
+  /**
+   * True while the game is loading (first arrival, travel, a rejoin, a graphics re-warm): Game sets
+   * it. Keys that act in the world or open panels wait for the hand-over; nothing is buffered for it
+   * (the paused frame loop and the hand-over end the input frame).
+   */
+  suspendedWhile: (() => boolean) | null = null;
   sensitivity = 0.0022;
   invertY = false;
   enabled = true;
@@ -113,10 +119,15 @@ export class Input {
   /**
    * The player is in the game: the pointer is locked, or free with the hint. Gate keys that act in
    * the world or open panels on this, not on `locked` (a refused or lost lock must not dead-key M, I,
-   * J, T, E, 1–4, R or H). False while the pause menu, a panel or a notice is up.
+   * J, T, E, 1–4, R or H). False while the pause menu, a panel, a notice or a loading screen is up.
    */
   get inPlay(): boolean {
-    return this.enabled && (this.locked || this.free);
+    return this.enabled && !this.suspended && (this.locked || this.free);
+  }
+
+  /** The game is loading (see suspendedWhile). */
+  get suspended(): boolean {
+    return this.suspendedWhile?.() ?? false;
   }
 
   down(code: string): boolean {

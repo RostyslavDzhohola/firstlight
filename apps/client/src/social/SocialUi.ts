@@ -128,7 +128,7 @@ export class SocialUi {
   // ---- keys ---------------------------------------------------------------------------------------
 
   private inWorld(): boolean {
-    return !!this.room() && !this.shooting;
+    return !!this.room() && !this.shooting && !this.game.input.suspended; // not behind a loading screen
   }
 
   private keyDown(e: KeyboardEvent) {
