@@ -467,7 +467,9 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   Emberglass) therefore play 6–11 dB quieter. The prompts and processing are in `tools/sfx`, which
   writes to `/tmp/fl-go/sfx`. Why: the owner asked for a sword swish, a magic wand and better weapon
   and UI sounds. The boss-line rule (D18, ASSETS) keeps ElevenLabs output out of the CC BY repo, and
-  the manifest lets the owner drop a take without a client deploy.
+  the manifest keeps the client free of file lists: takes can be dropped or added before the upload
+  with no code change. After the upload a change needs a new set (`sfx-2` and a `config.sfxBase`
+  bump), because `/v/*` is cached as immutable.
 - **D-sfx-2 (run, 10:00Z):** ElevenLabs budget and terms for the SFX. The account had 678 of 40,000
   credits left (Starter; resets 16 Oct 2026 19:53Z; the boss lines were already made). The
   sound-effects API bills 10 credits per second of the requested `duration_seconds` (the
