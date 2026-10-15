@@ -30,6 +30,8 @@ onboarding-attack, onboarding-portal, onboarding-done, kit-inventory, kit-onboar
   take it back without a click.
 - **Keys:** every binding is in `game/keys.ts` (no F-keys, D-controls-2); hotkeys are read with
   `input.hit(HOTKEYS.x)` in the frame loop or `hits(HOTKEYS.x, e.code, e.shiftKey)` in a listener.
+  Gate keys that act in the world or open panels on `input.inPlay`, not `input.locked`: the pointer
+  may be free with the "Click to look around" hint and the player is still playing (D-controls-4).
 
 ## Files
 

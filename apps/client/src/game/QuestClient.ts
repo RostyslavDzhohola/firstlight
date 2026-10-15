@@ -110,7 +110,7 @@ export class QuestClient implements ClientSystem {
       return;
     }
     if (this.console.isOpen || Panel.current) return; // panels close themselves (Esc / their key)
-    if (!this.game.input.locked || this.game.photo?.active) return;
+    if (!this.game.input.inPlay || this.game.photo?.active) return;
     if (e.code === "KeyM") this.map.open();
     else if (e.code === "KeyJ") this.journal.show();
   }
@@ -173,7 +173,7 @@ export class QuestClient implements ClientSystem {
       const o = this.nearestObject(active);
       if (o) {
         g.hud.setPrompt(this.promptFor(o));
-        if (g.input.locked && g.input.pressed.has("KeyE")) this.use(o);
+        if (g.input.inPlay && g.input.pressed.has("KeyE")) this.use(o);
       }
     }
 

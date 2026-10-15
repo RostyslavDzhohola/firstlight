@@ -204,7 +204,7 @@ export class OnboardingClient implements ClientSystem {
     if (moved > MAX_STEP_M) moved = 0;
     this.lastPos.copy(p);
     this.hasLast = true;
-    const playing = g.input.locked && !g.photo?.active && !Panel.current;
+    const playing = g.input.inPlay && !g.photo?.active && !Panel.current;
     if (playing && g.input.pressed.has("KeyT")) this.hud.toggleChecklist();
     const look = playing ? (Math.abs(g.input.mouseDX) + Math.abs(g.input.mouseDY)) * g.input.sensitivity : 0;
     const completed = steps.observe({

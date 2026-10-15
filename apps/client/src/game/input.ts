@@ -23,6 +23,11 @@ export class Input {
   lmbPressed = false;
   wheel = 0;
   locked = false;
+  /**
+   * Back in the game with the pointer free: the "Click to look around" hint (pause flow "free", set by
+   * the Esc menu). Keys work as in play; only mouse-look waits for the click that locks the pointer.
+   */
+  free = false;
   sensitivity = 0.0022;
   invertY = false;
   enabled = true;
@@ -103,6 +108,15 @@ export class Input {
   /** The hotkey went down this frame (with Shift exactly as it wants, as it was at the key press). */
   hit(k: Hotkey): boolean {
     return this.enabled && this.pressed.has(k.code) && hits(k, k.code, this.pressedShift.has(k.code));
+  }
+
+  /**
+   * The player is in the game: the pointer is locked, or free with the hint. Gate keys that act in
+   * the world or open panels on this, not on `locked` (a refused or lost lock must not dead-key M, I,
+   * J, T, E, 1–4, R or H). False while the pause menu, a panel or a notice is up.
+   */
+  get inPlay(): boolean {
+    return this.enabled && (this.locked || this.free);
   }
 
   down(code: string): boolean {

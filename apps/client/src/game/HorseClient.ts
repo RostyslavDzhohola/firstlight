@@ -141,7 +141,7 @@ export class HorseClient {
   input() {
     const g = this.game;
     const room = g.net.room;
-    if (!room || g.photo?.active || g.combat.deadUntilRespawn || !g.input.locked) return;
+    if (!room || g.photo?.active || g.combat.deadUntilRespawn || !g.input.inPlay) return;
     if (!horsesEnabled(g.hud.you, false)) return; // server flag off: H and E stay free
     const state = room.state as any;
     const own = state.horses?.get(room.sessionId);

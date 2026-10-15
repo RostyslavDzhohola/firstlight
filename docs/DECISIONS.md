@@ -593,3 +593,10 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   them. It shows 60 m around you on Portus and 110 m on the planets: NPCs (hostile or aggroed red,
   bosses ringed, wildlife cream), pads, portals, the guide, mission stars, party and the waypoint.
   Why: top right is the one corner nothing else owns at play time.
+- **D-controls-4 (2026-10-15):** Keys work in the "Click to look around" state. Panel and world keys
+  (M, I, J, T, E, 1–4, R, H) are gated on `Input.inPlay` (pointer locked, or free with the hint) instead
+  of the pointer lock, so a refused or lost lock, or Esc → Esc, never dead-keys them; they stay off
+  while the pause menu, a panel or a notice is up. Movement (WASD, Space, C, Shift) works there too, as
+  it did; mouse-look and attacks wait for the click that locks the pointer, and so does the phrase
+  wheel (G), which is aimed with the mouse. Tab, `` ` ``, Shift+P and P already worked. Why: Codex's
+  production smoke test found M dead in that state, and real Chrome lands there after a refused lock.

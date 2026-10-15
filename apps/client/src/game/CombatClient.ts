@@ -261,7 +261,9 @@ export class CombatClient {
       this.blocking = this.scoped = this.wasRmb = false;
       return;
     }
-    if (this.deadUntilRespawn || !input.locked) return;
+    // Keys work in the "Click to look around" state too (Input.inPlay); attacks still need a click,
+    // which locks the pointer first, so the mouse buttons below only ever act while locked.
+    if (this.deadUntilRespawn || !input.inPlay) return;
 
     // Hotbar and utility keys.
     for (let i = 0; i < 4; i++) if (input.pressed.has(`Digit${i + 1}`)) room.send("equip", { slot: i });
