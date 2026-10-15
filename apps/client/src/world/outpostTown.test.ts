@@ -11,6 +11,9 @@ import { outpostAnchor, padPlatformPlacement, siteDir, sitePlacements, siteSolid
 import { emptyStored, resolveSettings, TIER_TABLE, type Tier } from "../render/quality.ts";
 import { testSiteAssets } from "../render/townAssets.testutil.ts";
 import { TOWN_EMISSIVE } from "../render/townMaterial.ts";
+import { SHADOW_ONLY_LAYER } from "../render/atmosphere.ts";
+import { LOOKS } from "../render/looks.ts";
+import { skyDir } from "../render/sunFrame.ts";
 import { PAD_MODEL_RANGE, SiteTown } from "./SiteTown.ts";
 import { outpostPaths, PATH_ACROSS, PATH_STEP } from "./outpostPaths.ts";
 
@@ -34,6 +37,21 @@ function eye(body: OutpostBody, from: [number, number], to: [number, number], h 
   cam.position.set(f[0], f[1], f[2]).multiplyScalar(ground(f) + h);
   cam.up.set(f[0], f[1], f[2]);
   cam.lookAt(new THREE.Vector3(g[0], g[1], g[2]).multiplyScalar(ground(g) + 1.7));
+  cam.updateMatrixWorld();
+  return cam;
+}
+
+/** The sun's shadow camera as the rig sets it (render/atmosphere.ts): the body's reference sun over `focus`. */
+function sunShadowCamera(body: OutpostBody, focus: THREE.Vector3, extent: number): THREE.OrthographicCamera {
+  const up = focus.clone().normalize();
+  const t = skyDir(up.x, up.y, up.z, LOOKS[body].sunElev, LOOKS[body].sunAz, [0, 0, 0]);
+  const z = new THREE.Vector3(t[0], t[1], t[2]);
+  const y = new THREE.Vector3(Math.abs(z.x) < 0.9 ? 1 : 0, 0, Math.abs(z.x) < 0.9 ? 0 : 1).cross(z).negate().normalize();
+  const cam = new THREE.OrthographicCamera(-extent, extent, extent, -extent, 1, 400);
+  cam.up.copy(y);
+  cam.position.copy(focus).addScaledVector(z, 200);
+  cam.lookAt(focus);
+  cam.layers.enable(SHADOW_ONLY_LAYER);
   cam.updateMatrixWorld();
   return cam;
 }
@@ -166,8 +184,10 @@ describe.each(BODIES_)("%s pad outpost view (D42)", (body) => {
       for (const [name, [from, to, h]] of Object.entries(views)) {
         const cam = eye(body, from, to, h);
         town.update(cam);
-        const st = town.stats(cam);
-        report[`${t} ${name}`] = `${st.draws} draws ${(st.triangles / 1000).toFixed(1)}k tris`;
+        const shadow = s.shadows.mode === "map" ? sunShadowCamera(body, cam.position, s.shadows.extent) : undefined;
+        const st = town.stats(cam, shadow);
+        report[`${t} ${name}`] = `${st.draws} draws ${(st.triangles / 1000).toFixed(1)}k tris + shadow ${st.shadowDraws} draws ${(st.shadowTriangles / 1000).toFixed(1)}k tris`;
+        expect(st.shadowDraws, `${t} ${name}`).toBeLessThanOrEqual(t === "low" ? 0 : 2);
         // Opaque + cutout (Meridian has no cutout), the other pads out of range.
         expect(st.draws, `${t} ${name}`).toBeLessThanOrEqual(2);
         expect(st.draws).toBeLessThanOrEqual(Math.round(TIER_TABLE[t].drawBudget * 0.02));
