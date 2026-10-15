@@ -18,6 +18,7 @@ import { CAMERA_ICON, captureShot, flash, shareDialog } from "./screenshot.ts";
 import { addInvite, onSocialChange, partyState, removeInvite, setBlockedList, setParty, setSessionResolver } from "./store.ts";
 import type { V3 } from "./compassMath.ts";
 import { partyFrames } from "../ui/partyFrames.ts";
+import { waypoints } from "../ui/waypoint.ts";
 import { voice } from "../voice/index.ts";
 
 const PEEK_MS = 250;
@@ -109,7 +110,7 @@ export class SocialUi {
       const at: V3 | null = here ? [here.x, here.y, here.z] : m.x || m.y || m.z ? [m.x, m.y, m.z] : null;
       if (at) markers.push({ key: m.userId, label: m.name, colour: PARTY_COLOURS[i % PARTY_COLOURS.length]!, pos: at });
     });
-    this.compass.update(pos, [f.x, f.y, f.z], this.game.bodyId, !!me && (me.flags & PF.SAFE) !== 0, markers);
+    this.compass.update(pos, [f.x, f.y, f.z], this.game.bodyId, !!me && (me.flags & PF.SAFE) !== 0, markers, waypoints.get(this.game.bodyId));
     // HUD party frames (top-left), 4 Hz.
     if (now - this.partyAt > 250) {
       this.partyAt = now;

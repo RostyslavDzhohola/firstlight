@@ -105,6 +105,8 @@ export class Hud {
 
   readonly party = el("section", "fl-party", this.layer);
   private readonly right = el("div", "fl-hud__right", this.layer);
+  /** The minimap's place (ui/minimap.ts): first in the right column, so missions and toasts flow below it. */
+  readonly minimapSlot = el("div", "fl-hud__minimap", this.right);
   private readonly missions = el("section", "fl-missions fl-holo fl-corners", this.right);
   private readonly toasts = el("div", "fl-toasts", this.right);
 

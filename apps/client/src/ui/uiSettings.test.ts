@@ -28,6 +28,12 @@ describe("ui settings persistence", () => {
     expect(s.shake).toBe(true);
   });
 
+  it("defaults the map settings for saves from before the minimap, and validates them", () => {
+    const old = memStore({ "fl.ui.v1": JSON.stringify({ v: 1, sensitivity: 1.2, invertY: false, fov: 80, shake: true, damageNumbers: true, cbDamage: true }) });
+    expect(loadUiSettings(old)).toMatchObject({ sensitivity: 1.2, minimap: true, minimapRotate: true, mapPlayerUp: false });
+    expect(normalizeUiSettings({ minimap: "no", minimapRotate: 0, mapPlayerUp: true })).toMatchObject({ minimap: true, minimapRotate: true, mapPlayerUp: true });
+  });
+
   it("keeps unrelated values when patching", () => {
     const s = patchUiSettings(patchUiSettings(UI_DEFAULTS, { fov: 88 }), { shake: false });
     expect(s).toMatchObject({ fov: 88, shake: false, sensitivity: 1 });

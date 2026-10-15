@@ -45,6 +45,9 @@ onboarding-attack, onboarding-portal, onboarding-done, kit-inventory, kit-onboar
 | `hud.ts` | The HUD (API below) |
 | `share.ts` | `shareRow(parent, { onHideUi? })`: the share bar (Share / Email / Follow on 𝕏 when `VITE_X_HANDLE` is set / hide-UI eye), on the home page and in the Esc menu (6e) |
 | `styles/home.css`, `../home/` | The home page (6a): `home.ts` fills the cards in `index.html` from `/api/home` and `/api/account/me`; `homeModel.ts` is the pure part; `leave.ts` goes home after a logout |
+| `map.ts`, `mapView.ts`, `mapMarkers.ts`, `mapRaster.ts`, `mapAtlas.ts` | The map (M): projection (north = the compass's, `social/compassMath.ts`), markers, the per-body ground atlas (baked and drawn in `world/mapAtlas.worker.ts`) |
+| `minimap.ts`, `minimapLayout.ts` | The HUD minimap and its size/avoid rules |
+| `waypoint.ts` | The player's waypoint (one per body, localStorage; `WAYPOINT_COLOUR` / `--waypoint`) |
 
 **Size unit.** Use `calc(N * var(--u))` where a design says N rem (`--u` is 14 px at 1280 wide, 19 px
 at 2560). Tokens: `--t-xs … --t-5xl`, `--sp-1 … --sp-8`, `--r-1/2/3/pill`, `--z-vignette 5`,
@@ -69,6 +72,7 @@ hud.hideBossBar()                     // already driven by world/npcs/bossStore 
 hud.setParty(members)                 // already driven by the social lane (ui/partyFrames.ts)
 hud.setMissions(lines, header)        // already driven by the quests MissionTracker
 hud.voiceSlot                         // bottom-right container for voice indicators
+hud.minimapSlot                       // top of the right column: the minimap (ui/minimap.ts, driven by game/MapClient.ts)
 hud.death(info) / hud.characterPick(opts)   // both resolve { starter, palette }
 ```
 
