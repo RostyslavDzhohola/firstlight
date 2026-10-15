@@ -283,3 +283,42 @@ describe("saving from the death screen (Codex review, should-fix 1)", () => {
     }
   });
 });
+
+describe("review gaps (Codex): hostile origins and two tabs saving at once", () => {
+  it("production refuses a cross-site request that carries the player's session (CSRF) over HTTP", async () => {
+    server = await startAuthServer({ production: true, rateLimit: false });
+    const b = new Browser(server, "198.51.100.180");
+    await b.playToken(); // a guest session cookie
+    const cookie = [...b.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
+    const ask = (origin: string) =>
+      fetch(`${server!.base}/api/auth/email-otp/send-verification-otp`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin, cookie, "x-forwarded-for": "198.51.100.180" },
+        body: JSON.stringify({ email: "x@example.test", type: "sign-in" }),
+      });
+    expect((await ask("https://evil.example")).status).toBe(403);
+    expect((await ask("http://localhost:5173")).status).not.toBe(403); // the trusted client origin gets an answer
+  });
+
+  it("two tabs saving the same guest at once: the character ends up in exactly one account", async () => {
+    server = await startAuthServer();
+    const { loadCharacter, saveCharacter } = await import("../src/db/index.ts");
+    const b = new Browser(server, "198.51.100.181"); // one cookie jar: two tabs of one browser
+    const guestId = String(decodeJwt(await b.playToken()).sub);
+    await b.levelUp(3);
+    const db = server.accounts.db;
+    saveCharacter(db, guestId, { ...loadCharacter(db, guestId)!, coins: 77 });
+    const out = server.accounts.devOutbox!;
+    expect((await b.sendCode("tab1@example.test")).error).toBeNull();
+    expect((await b.sendCode("tab2@example.test")).error).toBeNull();
+    const [r1, r2] = await Promise.all([
+      b.signInWithCode("tab1@example.test", out.lastCode("tab1@example.test")!),
+      b.signInWithCode("tab2@example.test", out.lastCode("tab2@example.test")!),
+    ]);
+    const ids = [r1, r2].map((r) => (r.data as { user?: { id: string } } | null)?.user?.id).filter((x): x is string => !!x);
+    expect(ids.length).toBeGreaterThan(0);
+    const withCoins = ids.filter((id) => loadCharacter(db, id)?.coins === 77);
+    expect(withCoins).toHaveLength(1); // moved once, never copied
+    expect(loadCharacter(db, guestId)).toBeNull();
+  });
+});
