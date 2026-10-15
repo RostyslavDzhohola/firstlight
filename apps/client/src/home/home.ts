@@ -37,7 +37,7 @@ export function renderOnline(online: HomeOnline | null): void {
     const li = el("li", `is-${w.id}`, list);
     el("i", "dot", li).setAttribute("aria-hidden", "true");
     el("span", "w", li, w.name);
-    el("b", `n num${w.players ? "" : " is-zero"}`, li, fmtNum(w.players));
+    el("b", `n num${w.players ? "" : " is-zero"}`, li, online ? fmtNum(w.players) : "–");
     el("span", "who", li, online ? namesLine(online.bodies[w.id].names, w.players) : "…");
   }
 }
@@ -69,7 +69,7 @@ export function renderWorlds(online: HomeOnline | null): void {
       s.append("No fighting");
     }
     const p = el("span", "", meta);
-    el("b", "num", p, fmtNum(w.players));
+    el("b", "num", p, online ? fmtNum(w.players) : "–");
     p.append(" here");
   }
 }
@@ -316,10 +316,10 @@ export async function initHome(): Promise<void> {
   const poll = async () => {
     if (document.hidden || !landingVisible()) return;
     const next = await fetchHome();
-    if (next || !data) {
-      data = next ?? data;
+    if (next) {
+      data = next;
       paintData();
-    }
+    } else if (!data) renderBoard(null, tab); // the server is unreachable: say so instead of an empty card
   };
   void poll();
   window.setInterval(() => void poll(), POLL_MS);
