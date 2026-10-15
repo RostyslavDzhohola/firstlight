@@ -46,6 +46,11 @@ export class OnboardingHud {
     this.boxSize = null;
     this.revealCurrent();
   };
+  /** Any later change in the panel's size (a card growing, fonts arriving) re-measures and re-reveals. */
+  private readonly panelObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => {
+    this.avoid = null;
+    this.revealCurrent();
+  });
   private readonly calloutText: HTMLElement;
   private readonly calloutSub: HTMLElement;
   private readonly skipNote: HTMLElement;
@@ -63,6 +68,7 @@ export class OnboardingHud {
     const widget = el("div", "fl-onb__widget", this.root);
     this.widget = widget;
     addEventListener("resize", this.onResize);
+
     this.checklist = el("details", "fl-onb__list fl-holo", widget);
     this.list = this.checklist;
     this.list.setAttribute("aria-label", "Tutorial");
@@ -71,6 +77,9 @@ export class OnboardingHud {
     this.title = el("span", "", summary, "Tutorial checklist");
     keys(summary, ["T"]);
     this.checklist.open = preference?.expanded ?? false;
+    // The list shrinks when the card above it grows (the widget itself stops at its max height).
+    this.panelObserver?.observe(widget);
+    this.panelObserver?.observe(this.checklist);
     this.checklist.addEventListener("toggle", () => {
       this.onExpanded?.(this.checklist.open);
       this.avoid = null;
@@ -146,8 +155,6 @@ export class OnboardingHud {
       reveal = true;
       if (cur) this.buildCard(cur);
     }
-    // After the new card is in: a taller card leaves the list less room.
-    if (reveal) this.revealCurrent();
     if (cur?.bar && this.barFill && this.barText) {
       const text = steps.progressText(cur.id);
       if (text !== this.last.bar) {
@@ -156,6 +163,8 @@ export class OnboardingHud {
         this.barText.textContent = text;
       }
     }
+    // Once the new card is complete (bar text included): a taller card leaves the list less room.
+    if (reveal) this.revealCurrent();
   }
 
   /** On a short screen the open checklist scrolls inside the widget, and while playing the mouse
@@ -269,6 +278,7 @@ export class OnboardingHud {
 
   dispose() {
     removeEventListener("resize", this.onResize);
+    this.panelObserver?.disconnect();
     this.root.remove();
   }
 }
