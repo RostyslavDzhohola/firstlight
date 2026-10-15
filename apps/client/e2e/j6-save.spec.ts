@@ -56,16 +56,33 @@ test.describe("J6 save progress", () => {
     // Second browser (fresh profile): Sign in → same character, no starter pick.
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
     try {
-      const b = new Player(await ctx.newPage(), info, gfx);
+      // The second browser renders with WebGL2 on both projects: headless Chrome can stall creating a
+      // WebGPU device while other WebGPU pages run (seen with two J6.2s in parallel: "Starting the
+      // renderer…" forever). This check is about the account, not the renderer.
+      void gfx;
+      const b = new Player(await ctx.newPage(), info, "webgl");
       await b.open({ tier: "medium" });
       await b.page.locator('[data-e2e="signin"]').first().click();
       const card = b.page.locator('[data-e2e="signin-card"]');
       await emailCodeFlow(b, card, email);
       // "Signed in" → Continue (or it closes by itself), then Play / Continue on the home page.
       await card.getByRole("button", { name: /^continue$/i }).click({ timeout: 8000 }).catch(() => {});
+      // Then Play / Continue on the home page, unless signing in already started the game.
       const play = b.playButton();
-      if (await play.isVisible().catch(() => false)) await play.click();
-      const s = await b.waitInWorld(90_000);
+      for (let i = 0; i < 40; i++) {
+        const st = await b.snap();
+        if (st.stage !== "landing") break;
+        if ((await play.isVisible().catch(() => false)) && (await play.isEnabled().catch(() => false))) {
+          await play.click();
+          break;
+        }
+        await b.page.waitForTimeout(500);
+      }
+      const s = await b.waitInWorld(90_000).catch(async (e: unknown) => {
+        await b.shot("second-browser-stuck");
+        await b.note("second browser", { snap: await b.snap().catch(() => null), events: (await b.events().catch(() => [])).filter((x) => x.kind !== "anim" && x.kind !== "clip").slice(-20) });
+        throw e;
+      });
       await b.shot("second-browser");
       expect(await b.page.locator(".fl-charpick").isVisible(), "no starter pick for a saved character").toBe(false);
       expect(s.player?.name, "same name").toBe(before.player?.name);
