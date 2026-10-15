@@ -307,9 +307,11 @@ function outOfReach(sys: NpcSystem, n: Npc, tp: V3, d: number): boolean {
 }
 
 /**
- * A structure stands between the NPC and its target (a segment 0.6 m above both feet, over the step
- * band) and the NPC hasn't got 1 m closer than its best since: for unreachableMs, it's walled off.
- * Open ground (or a target in melee reach) clears the clock, so this never acts away from structures.
+ * Walled off: a structure stands between the NPC and its target (a segment 0.6 m above both feet,
+ * over the step band), or the NPC is wedged against one (its last step was refused every way, say
+ * between a hangar and a pad's no-go ring), and it hasn't got 1 m closer than its best since: after
+ * unreachableMs it gives up. Open ground (or a target in melee reach) clears the clock, so this
+ * never acts away from structures.
  */
 function walledOff(sys: NpcSystem, n: Npc, tp: V3, d: number, now: number): boolean {
   const s = sys.ground.structures;
@@ -318,7 +320,8 @@ function walledOff(sys: NpcSystem, n: Npc, tp: V3, d: number, now: number): bool
     return false;
   }
   const a = chest(n.pos, 0.6), b = chest(tp, 0.6);
-  if (!s.blocks(a[0], a[1], a[2], b[0], b[1], b[2])) {
+  const wedged = n.blockedMove === true && s.near(n.pos[0], n.pos[1], n.pos[2], n.radius + 3);
+  if (!wedged && !s.blocks(a[0], a[1], a[2], b[0], b[1], b[2])) {
     n.walled = undefined;
     return false;
   }
@@ -604,6 +607,7 @@ export function moveDir(sys: NpcSystem, n: Npc, dir: V3, speed: number, dt: numb
   const out: V3 = [0, 0, 0];
   const used = step(sys.ground, n.pos, d, speed * dt, n.def.locomotion, n.def.hover ?? 0, n.radius, out, avoidSafe, n.slideSide, n.height);
   sys.setAnim(n, anim);
+  n.blockedMove = used < 0;
   if (used < 0) return false;
   // Round a structure: keep turning to the side that worked (straight on or straight back keeps it).
   const ang = slideAngle(sys.ground, used, n.slideSide);

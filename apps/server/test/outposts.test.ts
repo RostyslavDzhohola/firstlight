@@ -5,13 +5,16 @@
 // Unit level (the real NpcSystem and combat on the real terrain, a manual clock): NPCs don't see
 // through buildings, their bolts and strikes stop at walls, a blast doesn't reach round a corner, a
 // melee NPC chasing round the barn or the hangar reaches its target or evades (never stuck at a
-// wall), and one whose target stands at the end of the jetty evades instead of waiting at the shore.
+// wall), one whose target stands at the end of the jetty evades instead of waiting at the shore, and
+// the creep groups near pad 0 start beside the outpost, not inside it.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BODIES, type BodyId } from "@firstlight/shared";
-import { NPC_INDEX } from "@firstlight/shared/content/npcs";
+import { bossArena, walk } from "@firstlight/shared/content/arenas";
+import { NPC_DEFS, NPC_INDEX } from "@firstlight/shared/content/npcs";
 import { OUTPOSTS, type OutpostBody } from "@firstlight/shared/content/padOutposts";
 import { PLAYER_BODY } from "@firstlight/shared/planet/collide";
+import { outpostGroundDistance } from "@firstlight/shared/planet/outpostGround";
 import { outpostAnchor, siteCoords, siteDir, siteSolids, structureCollider, type StructureSolid } from "@firstlight/shared/planet/sites";
 import { newCharacter } from "@firstlight/shared/content/character";
 import { characterRepo } from "../src/world/characters.ts";
@@ -20,6 +23,7 @@ import { rayTerrain, type V3 } from "../src/world/geometry.ts";
 import { canSee, chest, spawnBolt } from "../src/world/npc/attacks.ts";
 import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
 import { MODE, type Npc } from "../src/world/npc/npc.ts";
+import { buildSpawnPoints } from "../src/world/npc/spawns.ts";
 import { npcBody } from "../src/world/npc/steer.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 import { fakeWorld, type FakeWorld } from "./npcWorld.ts";
@@ -378,6 +382,23 @@ describe("pad outposts against NPCs and blasts (D43, D44)", () => {
     expect(p.state.hp).toBe(p.state.maxHp);
     // And it never walked onto the jetty or into the lake.
     expect(npcInside("arcadia", n)).toBe(false);
+  });
+
+  it("creep groups near pad 0 (the arrival herds and packs, D-zones-2) start on open ground beside the outpost", () => {
+    for (const body of ["arcadia", "hollowmere", "meridian"] as const) {
+      const t = Q.terrain(body);
+      let near = 0;
+      for (const p of buildSpawnPoints(t, bossArena(t))) {
+        for (const m of p.members) {
+          const q = walk(p.dir, p.t1, m.a, p.t2, m.b, R(body));
+          const [e, n] = siteCoords(anchor(body), q[0], q[1], q[2], R(body));
+          if (Math.hypot(e, n) > 90) continue;
+          near++;
+          expect(outpostGroundDistance(body, e, n), `${body} group ${p.id}`).toBeGreaterThanOrEqual(1.5 + NPC_DEFS[m.def]!.radius);
+        }
+      }
+      expect(near, body).toBeGreaterThan(0);
+    }
   });
 
   it("a big NPC put down against the barn is pushed clear for its own body (radius 1.1), not the player's", () => {
