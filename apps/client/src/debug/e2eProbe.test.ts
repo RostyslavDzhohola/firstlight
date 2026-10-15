@@ -91,6 +91,14 @@ describe("detectFlashes", () => {
     expect(detectFlashes(series.map((x) => ({ ...x, turn: 0 })))).toEqual([{ t: 2, jump: -56, samples: 3 }]);
   });
 
+  it("still reports a blink that starts or ends while the camera is still, even mid-turn", () => {
+    // The camera turned into the dark sample, but the picture came back without a turn: a blink.
+    const into = [100, 100, 20, 100, 100].map((v, i) => ({ t: i, v, turn: i === 2 ? 30 : 0 }));
+    expect(detectFlashes(into)).toEqual([{ t: 2, jump: -80, samples: 1 }]);
+    const outOf = [100, 100, 20, 100, 100].map((v, i) => ({ t: i, v, turn: i === 3 ? 30 : 0 }));
+    expect(detectFlashes(outOf)).toEqual([{ t: 2, jump: -80, samples: 1 }]);
+  });
+
   it("ignores a lasting change and gentle drift", () => {
     expect(detectFlashes(s([100, 150, 151, 152, 150, 149]))).toEqual([]);
     expect(detectFlashes(s([100, 110, 120, 130, 140, 150]))).toEqual([]);

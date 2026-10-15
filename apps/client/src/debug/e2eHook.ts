@@ -435,6 +435,8 @@ export function installE2eHook(win: Window & typeof globalThis): void {
     const turnAt = new Map(turns.since(p.startedAt).map((x) => [x.t, x.v] as const));
     const series = luma.since(p.startedAt).map((s) => ({ t: s.t, v: Math.round(s.v * 10) / 10, turn: Math.round((turnAt.get(s.t) ?? 0) * 10) / 10 }));
     const flashes: Flash[] = detectFlashes(series, opts.threshold ?? 40);
+    // Candidates skipped because the camera turned into and out of them (reported, not hidden).
+    const viewChanges = detectFlashes(series.map((x) => ({ t: x.t, v: x.v })), opts.threshold ?? 40).length - flashes.length;
     return {
       every: p.every,
       samples: series.length,
@@ -443,6 +445,7 @@ export function installE2eHook(win: Window & typeof globalThis): void {
       lumaMin: series.length ? Math.min(...series.map((s) => s.v)) : null,
       lumaMax: series.length ? Math.max(...series.map((s) => s.v)) : null,
       flashes,
+      viewChanges,
       flaps: detectFlaps(flips),
       series,
     };

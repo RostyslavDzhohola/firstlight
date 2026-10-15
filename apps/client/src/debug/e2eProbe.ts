@@ -128,19 +128,18 @@ export interface Flash {
  */
 export function detectFlashes(series: { t: number; v: number; turn?: number }[], threshold = 40, maxSamples = 3, maxTurnDeg = 2): Flash[] {
   const out: Flash[] = [];
-  // `turn`: degrees the camera rotated since the previous sample. A jump while the camera turned is
-  // the view changing (a 30° look-step at a dark wall and on), not the picture blinking.
-  const turned = (a: number, b: number) => {
-    for (let j = a; j <= b; j++) if ((series[j]?.turn ?? 0) > maxTurnDeg) return true;
-    return false;
-  };
+  // `turn`: degrees the camera rotated since the previous sample. A jump into a different picture and
+  // the jump back that both land on camera turns is the view changing (a 30° look-step at a dark wall,
+  // then the next step), not the picture blinking. A blink that starts or ends with the camera still
+  // is still reported; journeys see the skipped ones as `viewChanges`.
+  const turned = (j: number) => (series[j]?.turn ?? 0) > maxTurnDeg;
   for (let i = 1; i < series.length; i++) {
     const before = series[i - 1]!.v;
     const jump = series[i]!.v - before;
     if (Math.abs(jump) < threshold) continue;
     for (let k = 1; k <= maxSamples && i + k < series.length; k++) {
       if (Math.abs(series[i + k]!.v - before) <= threshold / 3) {
-        if (turned(i, i + k)) break;
+        if (turned(i) && turned(i + k)) break;
         out.push({ t: series[i]!.t, jump: Math.round(jump), samples: k });
         i += k;
         break;
