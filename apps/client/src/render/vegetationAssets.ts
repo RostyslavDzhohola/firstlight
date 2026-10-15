@@ -2,7 +2,7 @@
 import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
-import { abs, attribute, cameraViewMatrix, cross, dot, float, normalize, materialColor, mix, normalView, positionGeometry, positionLocal, positionViewDirection, positionWorld, select, sin, texture, time, vec3, vec4 } from "three/tsl";
+import { abs, attribute, cameraViewMatrix, cross, dot, float, normalize, materialColor, mix, normalView, positionGeometry, positionLocal, positionViewDirection, positionWorld, renderGroup, select, sin, texture, time, uniform, vec3, vec4 } from "three/tsl";
 import { BODY_IDS, PROP_KINDS, type BodyId, type PropKind } from "@firstlight/shared";
 import { vegetationModels } from "./vegetationModels.ts";
 import { config } from "../config.ts";
@@ -111,14 +111,60 @@ const FOLIAGE_GAIN = 3.6;
 const NEAR_FOLIAGE_UP = 0.85;
 const IMPOSTOR_FOLIAGE = 0.88;
 
+/**
+ * Per-kind tints from the current body's palette (applyVegetationPalette), shared render-group
+ * uniforms. Baked in as constants they made every body's vegetation a different shader: a travel
+ * compiled and linked them all again (WebGL: a synchronous link each). As uniforms the shader is the
+ * same on every body, so the programs the kept warm-up samples hold are reused.
+ */
+const tints = new Map<PropKind, { leaf: ReturnType<typeof colorUniform>; bark: ReturnType<typeof colorUniform>; stone: ReturnType<typeof colorUniform> }>();
+const colorUniform = () => uniform(new THREE.Color(1, 1, 1)).setGroup(renderGroup);
+function tintsFor(kind: PropKind) {
+  let t = tints.get(kind);
+  if (!t) tints.set(kind, (t = { leaf: colorUniform(), bark: colorUniform(), stone: colorUniform() }));
+  return t;
+}
+let paletteBody: BodyId | null = null;
+
+/** The palette tints for `kind` on `body` (leaf includes FOLIAGE_GAIN; bark and stone are ratios to the atlas paint). */
+export function vegetationTints(body: BodyId, kind: PropKind): { leaf: THREE.Color; bark: THREE.Color; stone: THREE.Color } {
+  const p = PROP_PALETTES[body];
+  const leaf = new THREE.Color(kind === "blossom" ? p.blossom : kind === "pine" ? p.pine : kind === "scrub" ? p.scrub : p.leaf).multiplyScalar(FOLIAGE_GAIN);
+  return { leaf, bark: tintRatio(p.bark, 0x6b4a2f), stone: tintRatio(kind === "boulder" ? p.rock2 : p.rock, 0xa3ada6) };
+}
+
+/** Load `body`'s vegetation tints into the shared uniforms (one body's props are live at a time). */
+export function applyVegetationPalette(body: BodyId) {
+  paletteBody = body;
+  for (const kind of PROP_KINDS) {
+    const t = tintsFor(kind);
+    const v = vegetationTints(body, kind);
+    t.leaf.value.copy(v.leaf);
+    t.bark.value.copy(v.bark);
+    t.stone.value.copy(v.stone);
+  }
+}
+
+/** The shared tint uniforms of `kind` (tests and debugging). */
+export function vegetationTintUniforms(kind: PropKind): { leaf: THREE.Color; bark: THREE.Color; stone: THREE.Color } {
+  const t = tintsFor(kind);
+  return { leaf: t.leaf.value, bark: t.bark.value, stone: t.stone.value };
+}
+
+/** The body whose palette the vegetation uniforms hold (null before the first PropSystem). */
+export function vegetationPaletteBody(): BodyId | null {
+  return paletteBody;
+}
+
 const materials = new Map<string, THREE.MeshStandardNodeMaterial>();
-/** One opaque alpha-tested atlas material per kind/body. The color attribute is a role mask,
- * not vertex colour: r foliage, g bark, b stone, black flower/mushroom paint. */
-export function vegetationMaterial(body: BodyId, kind: PropKind, atlas: THREE.Texture, impostor = false): THREE.MeshStandardNodeMaterial {
-  const key = `${body}:${kind}:${impostor ? "far" : "mesh"}`;
+/** One opaque alpha-tested atlas material per kind (and near/far), shared by every body: the body's
+ * colours come from applyVegetationPalette. The color attribute is a role mask, not vertex colour:
+ * r foliage, g bark, b stone, black flower/mushroom paint. */
+export function vegetationMaterial(kind: PropKind, atlas: THREE.Texture, impostor = false): THREE.MeshStandardNodeMaterial {
+  const key = `${kind}:${impostor ? "far" : "mesh"}`;
   let m = materials.get(key);
   if (m) return m;
-  const p = PROP_PALETTES[body];
+  const t = tintsFor(kind);
   m = new THREE.MeshStandardNodeMaterial({ map: atlas, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.86, metalness: 0 });
   m.name = `vegetation:${key}`;
   const sample = texture(atlas);
@@ -127,13 +173,10 @@ export function vegetationMaterial(body: BodyId, kind: PropKind, atlas: THREE.Te
   const neutral = abs(sample.r.sub(sample.g)).add(abs(sample.g.sub(sample.b))).lessThan(0.025);
   const foliage = select(neutral, float(1), float(0));
   const role = impostor ? kind === "deadtree" ? vec3(0, 1, 0) : vec3(foliage, float(1).sub(foliage), 0) : attribute("color", "vec3");
-  // Neutral foliage texels average ~0.25 linear (median 0.20) in both atlases; scale the tint back
-  // up so a typical leaf lands near the body's palette colour instead of a third of it.
-  const leaf = new THREE.Color(kind === "blossom" ? p.blossom : kind === "pine" ? p.pine : kind === "scrub" ? p.scrub : p.leaf)
-    .multiplyScalar(FOLIAGE_GAIN * (impostor ? IMPOSTOR_FOLIAGE : 1));
-  const bark = tintRatio(p.bark, 0x6b4a2f);
-  const stone = tintRatio(kind === "boulder" ? p.rock2 : p.rock, 0xa3ada6);
-  const tint = vec3(leaf.r, leaf.g, leaf.b).mul(role.r).add(vec3(bark.r, bark.g, bark.b).mul(role.g)).add(vec3(stone.r, stone.g, stone.b).mul(role.b))
+  // Neutral foliage texels average ~0.25 linear (median 0.20) in both atlases; the leaf tint carries
+  // FOLIAGE_GAIN so a typical leaf lands near the body's palette colour instead of a third of it.
+  const leaf = impostor ? t.leaf.mul(IMPOSTOR_FOLIAGE) : t.leaf;
+  const tint = leaf.mul(role.r).add(t.bark.mul(role.g)).add(t.stone.mul(role.b))
     .add(vec3(1).mul(float(1).sub(role.r.add(role.g).add(role.b))));
   m.colorNode = sample.rgb.mul(tint).mul(mix(float(1), float(0.78), atmo.wet));
   m.opacityNode = sample.a;
