@@ -4,7 +4,7 @@
 
 import { NPC_DEFS } from "@firstlight/shared/content/npcs";
 import { expect, test } from "./fixtures.ts";
-import { COMBAT_PLANETS, type Npc, type Player, type ServerNpc, type Snap, type Target } from "./player.ts";
+import { COMBAT_PLANETS, wrap180, type Npc, type Player, type ServerNpc, type Snap, type Target } from "./player.ts";
 
 const HOSTILE = new Set(NPC_DEFS.filter((d) => d.temper === "hostile").map((d) => d.id));
 const CREATURE = new Set(NPC_DEFS.filter((d) => d.family !== "egg").map((d) => d.id));
@@ -84,10 +84,10 @@ async function lookForCreeps(player: Player, budgetMs: number) {
     const f = await found(how, { tookMission: took, guideMs, followMs: Date.now() - f0 });
     if (f) return f;
     const to = s.mission?.bearing !== undefined && s.mission.at ? (s.mission as unknown as { bearing: number; surface: number }) : s.npcs?.find((n) => !n.dead && CREATURE.has(n.kind)) ?? null;
-    const home = s.portals?.[0];
-    if (home && home.surface < 7 && Math.abs(home.bearing) < 40) await player.hold([home.bearing > 0 ? "KeyA" : "KeyD"], 500); // round the portal
-    if (to && Math.abs(to.bearing) > 8) await player.turn(to.bearing);
-    await player.hold(["ShiftLeft", "KeyW"], 900);
+    // Toward it, round the outpost's buildings and clear of the portal (Player.steer).
+    const go = await player.steer(to ? to.bearing : 0, 4, s);
+    if (Math.abs(go.bearing) > 8) await player.turn(go.bearing);
+    await player.hold(["ShiftLeft", "KeyW"], Math.max(300, Math.min(900, (go.clear / 9) * 1000)));
     if (++step % 2 === 0) {
       for (const d of [-40, 80, -40]) {
         await player.turn(d);
@@ -136,29 +136,36 @@ test.describe("J3 creeps", () => {
     );
     ranked.sort((a, b) => a.n.level - b.n.level || a.pack - b.pack || a.t.surface - b.t.surface);
     const near = ranked.find((x) => x.t.surface <= 60 && x.pack <= 2 && x.n.level <= 2);
-    if (near) {
-      await player.note("target", { def: near.n.def, level: near.n.level, pack: near.pack + 1, fromUsM: near.t.surface });
-    } else {
+    /** The fallback: out of the ring, somewhere of our own, one Hopbit spawned in the open in front of us. */
+    const spawnOne = async (why: string) => {
       await player.walkOutOfRing();
       // Journeys run in parallel in the same planet copy: go somewhere of our own first, so another
       // test's player isn't in the line of fire (the bolts hit players outside safe zones too).
-      await player.turn(Math.random() * 120 - 60);
+      let want = Math.random() * 120 - 60;
       for (let i = 0; i < 4; i++) {
+        const go = await player.steer(want, 6);
+        if (Math.abs(go.bearing) > 8) await player.turn(go.bearing);
+        want = 0;
         await player.hold(["ShiftLeft", "KeyW"], 700);
         const w = await player.snap();
-        if (w.player?.swimming || w.zone?.server === "safe") await player.turn(150);
+        if (w.player?.swimming || w.zone?.server === "safe") want = 150;
       }
+      // Spawn it in the open: a clear line ahead (no outpost wall between us and it), then step back.
+      const open = await player.steer(0, 10);
+      if (Math.abs(open.bearing) > 8) await player.turn(open.bearing);
       await player.npc("spawn", { kind: "hopbit", level: 1, roam: 0 });
-      await player.hold(["KeyW"], 1000); // on outward, away from the ring, then face it
-      await player.turn(180);
-      await player.note("placement", `admin npc spawn: one Hopbit outside the ring (nearest natural hostile ${ranked[0] ? `${ranked[0].n.def} ${ranked[0].t.surface} m` : "none"})`);
-    }
+      await player.hold(["KeyS"], 900); // back off from it, facing it
+      await player.note("placement", `admin npc spawn: one Hopbit outside the ring (${why})`);
+    };
+    if (near) await player.note("target", { def: near.n.def, level: near.n.level, pack: near.pack + 1, fromUsM: near.t.surface });
+    else await spawnOne(`nearest natural hostile ${ranked[0] ? `${ranked[0].n.def} ${ranked[0].t.surface} m` : "none"}`);
 
     // Fight: the nearest live hostile within 60 m, aimed at through the camera like a player, healed by
     // the admin command when low (the test is about the kill paying XP, not about surviving a pack).
-    await player.until((x) => !!x.npcs?.some((n) => n.hostile && !n.dead && n.dist < 60), "a hostile within 60 m", 30_000);
-    const until = Date.now() + 75_000;
+    const until = Date.now() + 90_000;
     let shots = 0;
+    let spawned = !near;
+    let lastFoeAt = Date.now();
     while (Date.now() < until) {
       const s = await player.snap();
       if ((s.you?.xp ?? 0) > xp0 || (s.you?.level ?? 1) > level0 || s.player?.dead) break;
@@ -175,10 +182,23 @@ test.describe("J3 creeps", () => {
         continue;
       }
       const foe = s.npcs?.find((n) => n.hostile && !n.dead && n.dist < 60);
-      if (!foe) continue;
-      // Hostiles come to us (Hopbits leap in): only walk when it's far, one step at a time.
-      if (foe.dist > 30) {
-        await player.turn(foe.bearing);
+      if (!foe) {
+        // The natural pack went (another journey in this copy took it, or it wandered off): spawn one.
+        if (!spawned && Date.now() - lastFoeAt > 8000) {
+          spawned = true;
+          await spawnOne("the natural hostile near the arrival was gone");
+        }
+        await player.page.waitForTimeout(300);
+        continue;
+      }
+      lastFoeAt = Date.now();
+      // Walls stop bolts (D43): only shoot along a clear line; otherwise go round toward it.
+      const line = (await player.clearance([foe.bearing], foe.surface))?.[0]?.clear ?? foe.surface;
+      const blocked = line < foe.surface - 1.5;
+      // Hostiles come to us (Hopbits leap in): only walk when it's far or behind a building, one step at a time.
+      if (foe.dist > 30 || blocked) {
+        const go = await player.steer(foe.bearing, Math.min(4, foe.surface), s);
+        if (Math.abs(go.bearing) > 8) await player.turn(go.bearing);
         await player.hold(["KeyW"], 500);
         continue;
       }
@@ -188,6 +208,12 @@ test.describe("J3 creeps", () => {
         await player.hold(["KeyS"], 500);
         continue;
       }
+      // Never through another player (journeys share the copy; a bolt would hit them, PvP): side-step.
+      const inLine = s.players?.find((p) => !p.dead && p.surface < foe.surface && Math.abs(p.surface * Math.sin((wrap180(p.bearing - foe.bearing) * Math.PI) / 180)) < 2 && Math.abs(wrap180(p.bearing - foe.bearing)) < 90);
+      if (inLine) {
+        await player.hold([wrap180(inLine.bearing - foe.bearing) > 0 ? "KeyA" : "KeyD"], 600);
+        continue;
+      }
       await player.aim((x) => x.npcs?.find((n) => n.id === foe.id && !n.dead) ?? null, 3);
       await player.attack();
       shots++;
@@ -195,8 +221,9 @@ test.describe("J3 creeps", () => {
     }
     const end = await player.snap();
     const ev = await player.events();
-    const hits = ev.filter((e) => e.kind === "in" && e.type === "hit" && e.mine === true).length;
-    await player.note("fight", { shots, hits, xp: [xp0, end.you?.xp], level: [level0, end.you?.level], dead: end.player?.dead });
+    const hits = ev.filter((e) => e.kind === "in" && e.type === "hit" && e.mine === true && !e.targetPlayer).length;
+    const pvp = ev.filter((e) => e.kind === "in" && e.type === "hit" && e.mine === true && e.targetPlayer).length;
+    await player.note("fight", { shots, hits, playerHits: pvp, xp: [xp0, end.you?.xp], level: [level0, end.you?.level], dead: end.player?.dead });
     await player.shot("after-fight");
     expect(end.player?.dead, "we didn't die").toBeFalsy();
     expect((end.you?.xp ?? 0) > xp0 || (end.you?.level ?? 1) > level0, "killing a hostile paid XP").toBe(true);

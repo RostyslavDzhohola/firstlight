@@ -50,6 +50,8 @@ export interface Snap {
   net?: { roomId: string; sessionId: string } | null;
   player?: { pos: number[]; heading: number; pitch: number; anim: number; clip: string | null; onGround: boolean; swimming: boolean; name: string | null; starter: number | null; hp: number | null; level: number | null; flags: number; protected: boolean; inCombat: boolean; dead: boolean };
   zone?: { server: "safe" | "danger" | null; label: string | null; labelText: string | null; chip: boolean; local: "safe" | "danger" | null; kind: "town" | "pad" | "wild" | null; padIndex: number; padDist: number; safeRadius: number; toSafe: number | null };
+  /** The nearest pad's centre (Portus: the plaza). */
+  pad?: Target | null;
   /** Portus town gates and a point 25 m outside each. */
   gates?: (Target & { out: Target })[];
   /** The planet's mission guide by the main pad. */
@@ -65,6 +67,8 @@ export interface Snap {
   portals?: (Target & { to: string })[];
   npcs?: Npc[];
   npcCount?: number;
+  /** Other players in this copy (journeys run side by side). */
+  players?: (Target & { id: string; name: string; dead: boolean })[];
 }
 /** One row of the server's `npc list` (apps/server/src/world/npc/NpcSystem.ts). */
 export interface ServerNpc {
@@ -386,7 +390,35 @@ export class Player {
    * Walk toward a target until `arrived`, steering with the mouse and getting round obstacles by
    * strafing. False on timeout.
    */
-  async walkTo(target: (s: Snap) => Target | null, arrived: (s: Snap) => boolean, opts: { timeoutMs?: number; sprint?: boolean } = {}) {
+  /** Clear walking distance (m) along bearings relative to the camera, from the movement colliders. */
+  async clearance(bearings: number[], max = 12): Promise<{ bearing: number; clear: number }[] | null> {
+    return this.page.evaluate(([b, m]) => (window as unknown as { __fl: { clearance(b: number[], m: number): { bearing: number; clear: number }[] | null } }).__fl.clearance(b, m), [bearings, max] as const);
+  }
+
+  private lastSide = 1;
+
+  /**
+   * The bearing to walk toward `want` (degrees from the camera, right = +) without running into a
+   * building, wall or tree: the nearest bearing to `want` with `need` metres clear (the outposts and
+   * the town are solid, D42), and never into a portal ring we aren't heading for.
+   */
+  async steer(want: number, need = 4, s?: Snap, avoidPortal = true): Promise<{ bearing: number; clear: number }> {
+    const offsets = [0, 15, 30, 45, 60, 80, 100, 125, 150];
+    const cands = offsets.flatMap((o) => (o === 0 ? [0] : [o * this.lastSide, -o * this.lastSide])).map((o) => wrap180(want + o));
+    const got = (await this.clearance(cands)) ?? cands.map((b) => ({ bearing: b, clear: 12 }));
+    const portal = avoidPortal ? (s ?? (await this.snap())).portals?.find((p) => p.surface < 10) : undefined;
+    const ok = (c: { bearing: number }) => !portal || Math.abs(wrap180(c.bearing - portal.bearing)) > 30;
+    const pick = got.find((c) => c.clear >= need && ok(c)) ?? [...got].filter(ok).sort((a, b) => b.clear - a.clear)[0] ?? got[0]!;
+    const side = Math.sign(wrap180(pick.bearing - want));
+    if (side) this.lastSide = side; // keep going round the same side of an obstacle
+    return pick;
+  }
+
+  /**
+   * Walk toward a target until `arrived`, steering round structures and props with the colliders
+   * (clearance) and, if still stuck, backing off and side-stepping. False on timeout.
+   */
+  async walkTo(target: (s: Snap) => Target | null, arrived: (s: Snap) => boolean, opts: { timeoutMs?: number; sprint?: boolean; avoidPortal?: boolean } = {}) {
     const until = Date.now() + (opts.timeoutMs ?? 30_000);
     const trail: number[][] = [];
     let side = "KeyD";
@@ -395,15 +427,16 @@ export class Player {
       if (arrived(s)) return true;
       const t = target(s);
       if (!t) return false;
-      if (Math.abs(t.bearing) > 8) await this.turn(t.bearing);
-      const ms = Math.max(150, Math.min(900, (t.surface / 6) * 1000));
+      const go = await this.steer(t.bearing, Math.min(4, t.surface + 0.5), s, opts.avoidPortal ?? true);
+      if (Math.abs(go.bearing) > 8) await this.turn(go.bearing);
+      const ms = Math.max(150, Math.min(900, (Math.min(t.surface, go.clear) / 6) * 1000));
       await this.hold(opts.sprint === false ? ["KeyW"] : ["ShiftLeft", "KeyW"], ms);
       trail.push(s.player!.pos);
       if (trail.length >= 4) {
         const a = trail[trail.length - 4]!;
         const b = s.player!.pos;
         if (Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!) < 1) {
-          // Stuck on something: back off, side-step round it (alternating sides), hop.
+          // Still stuck (a slope, a creature, a corner the rays missed): back off, side-step, hop.
           await this.hold(["KeyS"], 400);
           await this.hold([side], 900);
           await this.hold([side, "KeyW"], 700);
@@ -418,8 +451,7 @@ export class Player {
 
   /**
    * Walk out of the pad's safe ring, keeping the portal home behind us (walking into it would travel
-   * back to Portus). Re-aims every step (an arrival correction can turn the camera) and steps round
-   * obstacles and water by turning further each time it gets stuck, never back toward the portal.
+   * back to Portus) and steering round the outpost's buildings (D42) with the colliders.
    */
   async walkOutOfRing(timeoutMs = 30_000) {
     const s0 = await this.snap();
@@ -427,48 +459,56 @@ export class Player {
     await this.page.waitForTimeout(800); // let the arrival settle (first corrections re-aim the camera)
     const until = Date.now() + timeoutMs;
     let lastPos = s0.player!.pos;
-    let detour = 0;
-    let away: number | null = null;
+    let recovery = 0; // a turn away from where we just stalled or swam (degrees), used on the next step
     while (Date.now() < until) {
       const s = await this.snap();
       expect(s.body, "still on the same body (didn't walk into the portal)").toBe(body);
       if (s.zone?.server === "danger" && s.zone.local === "danger" && (s.zone.toSafe ?? s.zone.padDist - s.zone.safeRadius) > 1.5 && !s.player?.swimming) return s;
       const home = s.portals?.[0];
-      if (home && home.surface < 20) {
-        // Straight away from the portal, plus the current detour (±45° steps, never past ±90°).
-        const want = wrap180(home.bearing + 180 + detour);
-        if (Math.abs(want) > 8) await this.turn(want);
-        away = null;
-      } else if (away === null) away = 0;
+      // Near the portal: away from it, with any recovery turn added on top (±70° keeps it ≥ 110° off
+      // the portal); elsewhere the recovery turn alone (relative to where we face).
+      const want = home && home.surface < 25 ? wrap180(home.bearing + 180 + recovery) : recovery;
+      const go = await this.steer(want, 4, s);
+      if (Math.abs(go.bearing) > 8) await this.turn(go.bearing);
+      recovery = 0;
       await this.hold(["ShiftLeft", "KeyW"], 500);
       const p = (await this.snap()).player!.pos;
       const moved = Math.hypot(p[0]! - lastPos[0]!, p[1]! - lastPos[1]!, p[2]! - lastPos[2]!);
       if (moved < 0.8 || s.player?.swimming) {
-        detour = detour > 0 ? -detour : Math.min(90, -detour + 45);
-        if (away !== null) await this.turn(detour >= 0 ? 60 : -60); // clear of the portal: just turn
+        await this.hold(["KeyS"], 300);
+        recovery = this.lastSide * 70; // round the other way next step
+        this.lastSide = -this.lastSide;
       }
       lastPos = p;
     }
     throw new Error("couldn't walk out of the safe ring");
   }
 
-  /** Walk out of the Portus town through the nearest gate, into the wild (D-zones-1). */
-  async walkOutOfTown(timeoutMs = 60_000) {
+  /**
+   * Walk out of the Portus town through the nearest gate, into the wild (D-zones-1). From the plaza
+   * (the town's open middle) to the gate and on outside; when the streets turn us round, back to the
+   * plaza and try again (a player who got lost does the same).
+   */
+  async walkOutOfTown(timeoutMs = 75_000) {
+    const until = Date.now() + timeoutMs;
     const s0 = await this.snap();
-    const gates = s0.gates ?? [];
-    expect(gates.length, "Portus has town gates").toBeGreaterThan(0);
-    const g = gates.map((x, i) => ({ x, i })).sort((a, b) => a.x.dist - b.x.dist)[0]!.i;
-    const half = Date.now() + timeoutMs / 2;
-    const atGate = await this.walkTo((s) => s.gates?.[g] ?? null, (s) => (s.gates?.[g]?.surface ?? 99) < 3 || s.zone?.local === "danger", { timeoutMs: half - Date.now() });
-    expect(atGate, "walked to the town gate").toBe(true);
-    const out = await this.walkTo(
-      (s) => s.gates?.[g]?.out ?? null,
-      (s) => s.zone?.local === "danger" && (s.zone.toSafe ?? 0) > 6,
-      { timeoutMs },
-    );
-    expect(out, "walked out of the gate into the wild").toBe(true);
-    expect((await this.snap()).body, "still in Portus (no portal on the way)").toBe("portus");
-    return this.snap();
+    expect(s0.gates?.length ?? 0, "Portus has town gates").toBeGreaterThan(0);
+    const outside = (s: Snap) => s.zone?.local === "danger" && (s.zone.toSafe ?? 0) > 6;
+    for (let attempt = 0; attempt < 3 && Date.now() < until; attempt++) {
+      const s = await this.snap();
+      if (outside(s)) break;
+      if ((s.pad?.surface ?? 0) > 4 && (attempt > 0 || (s.gates ?? []).every((g) => g.surface > 20))) {
+        await this.walkTo((x) => x.pad ?? null, (x) => (x.pad?.surface ?? 0) < 4, { timeoutMs: Math.min(20_000, until - Date.now()) });
+      }
+      const g = ((await this.snap()).gates ?? []).map((x, i) => ({ x, i })).sort((a, b) => a.x.dist - b.x.dist)[0]!.i;
+      const atGate = await this.walkTo((x) => x.gates?.[g] ?? null, (x) => (x.gates?.[g]?.surface ?? 99) < 3 || x.zone?.local === "danger", { timeoutMs: Math.min(25_000, until - Date.now()) });
+      if (!atGate) continue;
+      if (await this.walkTo((x) => x.gates?.[g]?.out ?? null, outside, { timeoutMs: Math.min(20_000, until - Date.now()) })) break;
+    }
+    const s = await this.snap();
+    expect(outside(s), "walked out of a town gate into the wild").toBe(true);
+    expect(s.body, "still in Portus (no portal on the way)").toBe("portus");
+    return s;
   }
 
   /**
@@ -489,7 +529,7 @@ export class Player {
     const ok = await this.walkTo(
       (s) => s.portals?.find((p) => p.to === to) ?? null,
       (s) => s.body === to || s.stage !== "playing",
-      { timeoutMs },
+      { timeoutMs, avoidPortal: false },
     );
     expect(ok, `walked into the ${to} portal`).toBe(true);
     return this.waitInWorld(90_000, to);
