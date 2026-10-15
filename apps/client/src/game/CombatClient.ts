@@ -50,8 +50,9 @@ export class CombatClient {
   /** Onboarding hook: the tutorial is up (tips or its last card); the level-up save card waits for it. */
   tutorialBusy: (() => boolean) | null = null;
   private readonly saveOffer = new SaveOffer();
-  /** Refusal notices, not repeated while the attack button is held. */
+  /** Refusal notices: each reason once per press of an attack button. */
   private readonly deniedGate = new NoticeGate();
+  private gateRmb = false;
   private readonly wheel: PhraseWheel;
 
   constructor(private readonly game: Game) {
@@ -89,7 +90,7 @@ export class CombatClient {
       else {
         // A refused attack says why (a refused Hexquill bolt used to show nothing at all).
         const text = attackDeniedText(m.action, m.reason);
-        if (text && this.deniedGate.allow(text, performance.now())) this.hud.toast(text, "warn");
+        if (text && this.deniedGate.allow(text)) this.hud.toast(text, "warn");
       }
     });
     // Support items: Patchkit channel (server-timed; damage interrupts it) and Prism Bubbles.
@@ -247,6 +248,9 @@ export class CombatClient {
     const room = g.net.room;
     const input = g.input;
     this.effects.update(dt, now);
+    // A fresh press of either attack button (the right one charges heavies): refusals may show again.
+    if (input.lmbPressed || (input.rmb && !this.gateRmb)) this.deniedGate.press();
+    this.gateRmb = input.rmb;
     if (this.saveOffer.poll(!!this.tutorialBusy?.())) void this.offerSave();
     if (!room) return;
     const meState = (room.state as any).players?.get(room.sessionId);

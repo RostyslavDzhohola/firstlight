@@ -1,5 +1,5 @@
 // Player-facing text for the server's attack refusals (`denied {action: "fire" | "melee", reason}`),
-// and a gate so a held attack button doesn't stack the same notice at the weapon's fire rate.
+// and a gate so a held attack button shows each notice once, not at the weapon's fire rate.
 
 const ATTACK_DENIED: Record<string, string> = {
   "safe zone": "Weapons are holstered in safe zones",
@@ -17,17 +17,22 @@ export function attackDeniedText(action: string, reason: string): string | null 
   return ATTACK_DENIED[reason] ?? null;
 }
 
-/** Lets the same notice through at most once per `ms`; a different one at once. */
+/**
+ * Each notice once per press of an attack button: a held carbine is refused at its fire rate (and
+ * through all 5 s of arrival protection), so a time throttle still stacked the same notice. A
+ * reason shown during this hold stays quiet until the next press; a different one shows at once.
+ */
 export class NoticeGate {
-  private last = "";
-  private at = -Infinity;
+  private readonly shown = new Set<string>();
 
-  constructor(private readonly ms = 1500) {}
+  /** A fresh press of an attack button: every reason may show again. */
+  press() {
+    this.shown.clear();
+  }
 
-  allow(text: string, now: number): boolean {
-    if (text === this.last && now - this.at < this.ms) return false;
-    this.last = text;
-    this.at = now;
+  allow(text: string): boolean {
+    if (this.shown.has(text)) return false;
+    this.shown.add(text);
     return true;
   }
 }

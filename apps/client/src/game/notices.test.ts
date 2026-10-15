@@ -16,12 +16,18 @@ describe("attack refusal notices", () => {
     expect(attackDeniedText("melee", "not charged")).toBeNull();
   });
 
-  it("don't repeat while the button is held, but a new reason shows at once", () => {
-    const gate = new NoticeGate(1500);
-    expect(gate.allow("Overheated", 0)).toBe(true);
-    expect(gate.allow("Overheated", 400)).toBe(false);
-    expect(gate.allow("Reloading…", 500)).toBe(true);
-    expect(gate.allow("Overheated", 600)).toBe(true);
-    expect(gate.allow("Overheated", 2200)).toBe(true);
+  it("show once per press: a sustained refusal stream shows one notice; a new reason at once; a new press again", () => {
+    const gate = new NoticeGate();
+    // Holding the carbine through arrival protection: a refusal every 0.25 s for 5 s.
+    let shown = 0;
+    for (let i = 0; i < 20; i++) if (gate.allow("Arrival protection")) shown++;
+    expect(shown).toBe(1);
+    expect(gate.allow("Overheated")).toBe(true); // another reason in the same hold
+    expect(gate.allow("Overheated")).toBe(false);
+    // Released: refusals of that hold still arriving stay quiet.
+    expect(gate.allow("Arrival protection")).toBe(false);
+    gate.press(); // a new press
+    expect(gate.allow("Arrival protection")).toBe(true);
+    expect(gate.allow("Arrival protection")).toBe(false);
   });
 });
