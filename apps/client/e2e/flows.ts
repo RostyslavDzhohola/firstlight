@@ -19,13 +19,22 @@ export async function emailCodeFlow(player: Player, card: Locator, email: string
   const codeInput = card.locator('input[autocomplete="one-time-code"], input[inputmode="numeric"], input[name*="code" i]').first();
   await expect(codeInput, "the code field appears after sending").toBeVisible();
   await codeInput.fill(code);
-  const confirm = card.getByRole("button", { name: /^(save|verify|confirm|sign in|continue)/i }).first();
-  if (await confirm.isVisible().catch(() => false)) await confirm.click();
+  // Six digits submit by themselves (ui/account.ts); press the button only if the field is still there.
+  const submitted = await codeInput.waitFor({ state: "hidden", timeout: 4000 }).then(() => true, () => false);
+  if (!submitted) {
+    const confirm = card.getByRole("button", { name: /^(save|verify|confirm|sign in)$/i }).first();
+    if (await confirm.isVisible().catch(() => false)) await confirm.click();
+  }
   return code;
 }
 
-/** Esc → "Save progress" → the save card (mouse free) → saved. Ends back in the game. */
+/**
+ * Esc → "Save progress" → the save card (mouse free) → saved. Saving unlocks at level 2 (the
+ * tutorial's dummies pay it), so a level-1 guest trains first. Ends back in the game.
+ */
 export async function saveWithEmail(player: Player, email: string) {
+  if (((await player.snap()).you?.level ?? 1) < 2) expect(await hitTrainingDummies(player), "level 2 from the training dummies").toBeGreaterThanOrEqual(2);
+  await player.lock();
   await player.escape();
   const menu = player.page.locator('[data-e2e="pause-menu"]');
   await expect(menu, "Esc opens the pause menu").toBeVisible();

@@ -42,28 +42,35 @@ async function expectStarterWeapon(player: Player, starter: StarterName) {
 }
 
 test.describe("J2 safe zones and weapons", () => {
-  test("J2.1 · item 2 · Hexwick + Hexquill I, the real way: refused in Portus, accepted outside on Arcadia", { tag: ["@J2", "@J2.1", "@item-2"] }, async ({ player }) => {
+  test("J2.1 · item 2 · Hexwick + Hexquill I, the real way: holstered in the Portus town, fires outside its gate", { tag: ["@J2", "@J2.1", "@item-2"] }, async ({ player, page }) => {
     await player.playAsNewGuest({ starter: "Hexwick", extra: { tier: "medium" } });
     await player.waitInWorld(90_000, "portus");
     await expectStarterWeapon(player, "Hexwick");
     await player.lock();
-    // Face away from the training dummies: a new player shooting at the sky over the plaza.
-    const s = await player.snap();
+    let s = await player.snap();
+    expect.soft(s.zone?.label, "HUD label in the town").toBe("safe");
+    // During the tutorial the town's training dummies take shots (D-zones-1): a training shot or the
+    // holstered notice, never a real attack.
     const dummy = s.dummies?.[0];
     if (dummy) await player.turn(dummy.bearing + 180);
     await player.lookUp(0.25);
-    await player.shot("portus-before-attack");
-    const inside = await expectRefusedInside(player, "Portus plaza");
-    if (inside.sent.includes("train")) await player.note("finding", "Portus attacks go to the tutorial's training dummies (sent `train`), so weapons look like they work in the safe zone.");
-    await player.lookUp(-0.25);
-
-    await player.walkThroughPortal("arcadia");
+    await player.shot("town-during-tutorial");
+    const training = await attackOnce(player);
+    await player.note("town, tutorial running", training);
+    expect(training.accepted, "nothing fires for real inside the town").toBe(false);
+    expect.soft(training.notice || training.sent.includes("train"), "a training shot or the holstered notice").toBe(true);
+    // After the tutorial (skipped from Esc, like a player who knows the game): the notice.
+    await player.escape();
+    await page.getByRole("menuitem", { name: /skip tutorial/i }).or(page.getByRole("button", { name: /skip tutorial/i })).first().click();
     await player.lock();
-    await player.shot("arcadia-arrival");
-    await expectRefusedInside(player, "Arcadia arrival pad");
-    await player.walkOutOfRing();
-    await expectAcceptedOutside(player, "Arcadia, outside the pad ring");
-    await player.shot("arcadia-outside");
+    await expectRefusedInside(player, "Portus town, after the tutorial");
+    await player.lookUp(-0.25);
+    // Out of the gate: the wild, where weapons work.
+    await player.walkOutOfTown();
+    s = await player.until((x) => x.zone?.server === "danger", "the server has us outside the town", 10_000);
+    expect.soft(s.zone?.label, "HUD label outside the gate").toBe("danger");
+    await expectAcceptedOutside(player, "Portus, outside the town gate");
+    await player.shot("outside-the-gate");
   });
 
   for (const starter of STARTERS) {

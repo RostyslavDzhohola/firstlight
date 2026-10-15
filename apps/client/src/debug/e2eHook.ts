@@ -113,6 +113,9 @@ interface SharedMods {
   padDirs(body: unknown): readonly (readonly [number, number, number])[];
   isSafe(body: unknown, x: number, y: number, z: number): boolean;
   PAD_SAFE_RADIUS: number;
+  zoneAt(body: unknown, x: number, y: number, z: number): { safe: boolean; kind: string; pad: number };
+  nearestSafeEntry(body: unknown, x: number, y: number, z: number): { dir: readonly [number, number, number]; edge: number };
+  TOWN_GATES: readonly (readonly [number, number, number])[];
   portalSpots(body: unknown, terrain: any): { to: string; center: [number, number, number] }[];
   NPC_DEFS: readonly { id: string; name: string; temper: string; tier: string; height: number }[];
   NF: { DEAD: number };
@@ -167,7 +170,7 @@ export function installE2eHook(win: Window & typeof globalThis): void {
     sharedLoading = true;
     void Promise.all([import("@firstlight/shared"), import("@firstlight/shared/content/npcs"), import("@firstlight/shared/net/schema"), import("@firstlight/shared/content/weapons")])
       .then(([s, n, sc, w]) => {
-        shared = { BODIES: s.BODIES, padDirs: s.padDirs, isSafe: s.isSafe, PAD_SAFE_RADIUS: s.PAD_SAFE_RADIUS, portalSpots: s.portalSpots, NPC_DEFS: n.NPC_DEFS, NF: n.NF, PF: sc.PF, WEAPONS: w.WEAPONS, WEAPON_BY_ID: w.WEAPON_BY_ID } as unknown as SharedMods;
+        shared = { BODIES: s.BODIES, padDirs: s.padDirs, isSafe: s.isSafe, PAD_SAFE_RADIUS: s.PAD_SAFE_RADIUS, zoneAt: s.zoneAt, nearestSafeEntry: s.nearestSafeEntry, TOWN_GATES: s.TOWN_GATES, portalSpots: s.portalSpots, NPC_DEFS: n.NPC_DEFS, NF: n.NF, PF: sc.PF, WEAPONS: w.WEAPONS, WEAPON_BY_ID: w.WEAPON_BY_ID } as unknown as SharedMods;
       })
       .catch((e: unknown) => console.warn("[e2e] shared modules", e))
       .finally(() => (sharedLoading = false));
@@ -428,6 +431,10 @@ export function installE2eHook(win: Window & typeof globalThis): void {
   const onboarding = (g: GameLike): OnboardingLike | null =>
     ((g.systems ?? []).find((s) => !!s && typeof s === "object" && "progress" in s && "dummies" in s) as OnboardingLike | undefined) ?? null;
 
+  /** The tracked hunt mission's world callout (game/MissionPointer.ts), planets only. */
+  const missionPointer = (g: GameLike): { callout: HTMLElement; title: HTMLElement; target: { at: [number, number, number]; title: string; creep: boolean } | null } | null =>
+    ((g.systems ?? []).find((s) => !!s && typeof s === "object" && "callout" in s && "pickedAt" in s && "mission" in s) as never) ?? null;
+
   const npcRenderer = (g: GameLike): { views: Map<string, { dist: number; gone: boolean }> } | null =>
     ((g.systems ?? []).find((s) => !!s && typeof s === "object" && (s as { views?: unknown }).views instanceof Map && "telegraphs" in s) as { views: Map<string, { dist: number; gone: boolean }> } | undefined) ?? null;
 
@@ -501,6 +508,7 @@ export function installE2eHook(win: Window & typeof globalThis): void {
         temper: def?.temper ?? null,
         hostile: def?.temper === "hostile",
         tier: def?.tier ?? null,
+        height: def?.height ?? null,
         level: n.level,
         hp: n.hp,
         maxHp: n.maxHp,
@@ -518,6 +526,20 @@ export function installE2eHook(win: Window & typeof globalThis): void {
     } catch {
       portals = [];
     }
+    /** A unit direction (pushed `out` metres away from the +Y pole along the ground) as a world point on the terrain. */
+    const onGround = (d: readonly [number, number, number], out: number): [number, number, number] => {
+      let u: [number, number, number] = [d[0], d[1], d[2]];
+      if (out) {
+        const k = u[1];
+        const t: [number, number, number] = [k * u[0], k * u[1] - 1, k * u[2]]; // away from the pole, in the tangent plane
+        const tl = Math.hypot(...t) || 1;
+        u = [u[0] + (t[0] / tl) * (out / R), u[1] + (t[1] / tl) * (out / R), u[2] + (t[2] / tl) * (out / R)];
+        const ul = Math.hypot(...u);
+        u = [u[0] / ul, u[1] / ul, u[2] / ul];
+      }
+      const h = (terrain as { groundHeight(x: number, y: number, z: number): number }).groundHeight(u[0], u[1], u[2]);
+      return [u[0] * (R + h), u[1] * (R + h), u[2] * (R + h)];
+    };
     const ob = onboarding(g);
     const you = g.hud?.you ?? null;
     const item = you ? you.hotbar[you.selected] : null;
@@ -555,10 +577,29 @@ export function installE2eHook(win: Window & typeof globalThis): void {
         labelText: label ? (label.textContent ?? "").trim() : null,
         chip: visible(document.querySelector(".fl-me__safe")),
         local: bodyDef ? (S.isSafe(bodyDef, pos[0], pos[1], pos[2]) ? "safe" : "danger") : null,
+        kind: bodyDef ? S.zoneAt(bodyDef, pos[0], pos[1], pos[2]).kind : null,
         padIndex,
         padDist: r1(padDist),
         safeRadius: S.PAD_SAFE_RADIUS,
+        /** Metres to the nearest way into safety (a pad ring's edge, or a Portus town gate). */
+        toSafe: bodyDef ? r1(surfaceDistance(pos, [...S.nearestSafeEntry(bodyDef, pos[0], pos[1], pos[2]).dir] as V3, R) - S.nearestSafeEntry(bodyDef, pos[0], pos[1], pos[2]).edge) : null,
       },
+      // Portus town gates (the safe border runs through them) and a point 25 m outside each.
+      gates: body === "portus" && terrain ? S.TOWN_GATES.map((d) => ({ ...target(...onGround(d, 0)), out: target(...onGround(d, 25)) })) : [],
+      // The planet's mission guide by the main pad (QuestClient's interactables).
+      guide: (() => {
+        const q = (g.systems ?? []).find((x) => !!x && typeof x === "object" && Array.isArray((x as { interactables?: unknown }).interactables)) as
+          | { interactables: { def: { look?: string; name?: string }; pos: [number, number, number] }[] }
+          | undefined;
+        const o = q?.interactables.find((i) => i.def.look === "guide");
+        return o ? { name: o.def.name ?? null, ...target(...o.pos) } : null;
+      })(),
+      mission: (() => {
+        const mp = missionPointer(g);
+        if (!mp) return null;
+        const t = mp.target;
+        return { shown: !mp.callout.hidden, title: mp.title.textContent ?? "", creep: t?.creep ?? false, at: t?.at ?? null, ...(t ? target(...t.at) : {}) };
+      })(),
       you: you ? { xp: you.xp, xpToNext: you.xpToNext, coins: you.coins, level: you.level, dead: you.dead } : null,
       weapon: def ? { id: def.id, name: def.name, delivery: def.delivery, range: def.range, tier: item?.tier ?? 1, slot: you?.selected ?? 0 } : null,
       hotbar: you ? you.hotbar.map((h) => (h ? { id: h.id, tier: h.tier, qty: h.qty } : null)) : null,

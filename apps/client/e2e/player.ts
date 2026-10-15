@@ -30,6 +30,7 @@ export interface Npc extends Target {
   name: string | null;
   temper: string | null;
   hostile: boolean;
+  height: number | null;
   level: number;
   hp: number;
   maxHp: number;
@@ -48,7 +49,13 @@ export interface Snap {
   lastDenied: { action: string; reason: string; t: number } | null;
   net?: { roomId: string; sessionId: string } | null;
   player?: { pos: number[]; heading: number; pitch: number; anim: number; clip: string | null; onGround: boolean; swimming: boolean; name: string | null; starter: number | null; hp: number | null; level: number | null; flags: number; protected: boolean; inCombat: boolean; dead: boolean };
-  zone?: { server: "safe" | "danger" | null; label: string | null; labelText: string | null; chip: boolean; local: "safe" | "danger" | null; padIndex: number; padDist: number; safeRadius: number };
+  zone?: { server: "safe" | "danger" | null; label: string | null; labelText: string | null; chip: boolean; local: "safe" | "danger" | null; kind: "town" | "pad" | "wild" | null; padIndex: number; padDist: number; safeRadius: number; toSafe: number | null };
+  /** Portus town gates and a point 25 m outside each. */
+  gates?: (Target & { out: Target })[];
+  /** The planet's mission guide by the main pad. */
+  guide?: (Target & { name: string | null }) | null;
+  /** The tracked hunt mission's callout (planets): where it points. */
+  mission?: (Partial<Target> & { shown: boolean; title: string; creep: boolean; at: number[] | null }) | null;
   you?: { xp: number; xpToNext: number; coins: number; level: number; dead: boolean } | null;
   weapon?: { id: string; name: string; delivery: string; range: number; tier: number; slot: number } | null;
   hotbar?: ({ id: string; tier: number; qty: number } | null)[] | null;
@@ -386,7 +393,7 @@ export class Player {
     while (Date.now() < until) {
       const s = await this.snap();
       expect(s.body, "still on the same body (didn't walk into the portal)").toBe(body);
-      if (s.zone?.local === "danger" && s.zone.padDist > s.zone.safeRadius + 4 && !s.player?.swimming) return s;
+      if (s.zone?.local === "danger" && (s.zone.toSafe ?? s.zone.padDist - s.zone.safeRadius) > 4 && !s.player?.swimming) return s;
       const home = s.portals?.[0];
       if (home && home.surface < 20) {
         // Straight away from the portal, plus the current detour (±45° steps, never past ±90°).
@@ -404,6 +411,25 @@ export class Player {
       lastPos = p;
     }
     throw new Error("couldn't walk out of the safe ring");
+  }
+
+  /** Walk out of the Portus town through the nearest gate, into the wild (D-zones-1). */
+  async walkOutOfTown(timeoutMs = 60_000) {
+    const s0 = await this.snap();
+    const gates = s0.gates ?? [];
+    expect(gates.length, "Portus has town gates").toBeGreaterThan(0);
+    const g = gates.map((x, i) => ({ x, i })).sort((a, b) => a.x.dist - b.x.dist)[0]!.i;
+    const half = Date.now() + timeoutMs / 2;
+    const atGate = await this.walkTo((s) => s.gates?.[g] ?? null, (s) => (s.gates?.[g]?.surface ?? 99) < 3 || s.zone?.local === "danger", { timeoutMs: half - Date.now() });
+    expect(atGate, "walked to the town gate").toBe(true);
+    const out = await this.walkTo(
+      (s) => s.gates?.[g]?.out ?? null,
+      (s) => s.zone?.local === "danger" && (s.zone.toSafe ?? 0) > 6,
+      { timeoutMs },
+    );
+    expect(out, "walked out of the gate into the wild").toBe(true);
+    expect((await this.snap()).body, "still in Portus (no portal on the way)").toBe("portus");
+    return this.snap();
   }
 
   /** Travel through a Portus plaza portal on foot. */

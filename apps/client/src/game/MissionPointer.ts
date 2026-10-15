@@ -37,6 +37,7 @@ class MissionPointer implements ClientSystem {
     const layer = game.hud.root.querySelector<HTMLElement>(".fl-hud__layer") ?? game.hud.root;
     this.root = el("div", "fl-mpoint", layer);
     this.callout = el("div", "fl-callout", this.root);
+    this.callout.dataset.e2e = "mission-pointer";
     this.callout.hidden = true;
     el("div", "fl-callout__line", this.callout);
     el("div", "fl-callout__dot", this.callout);

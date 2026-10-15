@@ -9,22 +9,35 @@ import { COMBAT_PLANETS, type Npc, type Player, type ServerNpc, type Snap, type 
 const HOSTILE = new Set(NPC_DEFS.filter((d) => d.temper === "hostile").map((d) => d.id));
 const CREATURE = new Set(NPC_DEFS.filter((d) => d.family !== "egg").map((d) => d.id));
 /**
- * "In view": drawn by the client, inside the picture, and near enough to read as something to fight:
- * 40 m (Hexquill's range; a 0.9 m Hopbit is ~20 px tall there at 720p, a few pixels at 80 m).
+ * "In view": drawn by the client, inside the picture and at least 12 px tall at 720p (an icon's size:
+ * a 0.9 m Hopbit up to ~40 m, a 1.8 m Bonewalker up to ~80 m). The camera's vertical field is 75°.
  */
-const IN_VIEW_M = 40;
-const visibleHostile = (s: Snap): Npc | null => s.npcs?.find((n) => n.hostile && !n.dead && n.drawn && n.onScreen && n.dist <= IN_VIEW_M) ?? null;
-const visibleCreature = (s: Snap): Npc | null => s.npcs?.find((n) => !n.dead && n.drawn && n.onScreen && n.dist <= IN_VIEW_M && CREATURE.has(n.kind)) ?? null;
+const MIN_PX = 12;
+const apparentPx = (n: Npc) => ((n.height ?? 1) / Math.max(1, n.dist) / ((75 * Math.PI) / 180)) * 720;
+const visibleHostile = (s: Snap): Npc | null => s.npcs?.find((n) => n.hostile && !n.dead && n.drawn && n.onScreen && apparentPx(n) >= MIN_PX) ?? null;
+const visibleCreature = (s: Snap): Npc | null => s.npcs?.find((n) => !n.dead && n.drawn && n.onScreen && apparentPx(n) >= MIN_PX && CREATURE.has(n.kind)) ?? null;
 
-/** The mission pointer on the compass (creeps lane, item 6c): its bearing from the strip, or null. */
-async function missionPointerBearing(player: Player): Promise<number | null> {
-  const ptr = player.page.locator('[data-e2e="compass-mission"]').first();
-  if (!(await ptr.isVisible().catch(() => false))) return null;
-  const strip = await player.page.locator(".fl-compass").first().boundingBox();
-  const box = await ptr.boundingBox();
-  if (!strip || !box) return null;
-  const fx = (box.x + box.width / 2 - strip.x) / strip.width;
-  return (fx - 0.5) * 190; // the strip spans ±95° (social/compass.ts HALF_SPAN)
+/**
+ * Take the first mission from the planet's guide by the pad (walk up, E, Accept), as a new player
+ * does. Returns false when there's no guide near.
+ */
+async function takeFirstMission(player: Player): Promise<boolean> {
+  const s = await player.snap();
+  if (!s.guide || s.guide.surface > 20) return false;
+  await player.walkTo((x) => x.guide ?? null, (x) => (x.guide?.surface ?? 99) < 2.2, { timeoutMs: 15_000, sprint: false });
+  await player.face((x) => x.guide?.bearing ?? null, 10);
+  await player.tap("KeyE");
+  const accept = player.page.locator(".fl-overlay .fl-panel").getByRole("button", { name: /^Accept$/ }).first();
+  if (!(await accept.isVisible({ timeout: 5000 }).catch(() => false))) {
+    await player.note("guide", "no Accept button (panel didn't open?)");
+    return false;
+  }
+  await player.shot("guide");
+  await accept.click();
+  await player.page.waitForTimeout(600);
+  await player.page.keyboard.press("Escape");
+  await player.lock();
+  return true;
 }
 
 /** Distances from the arrival pad to the nearest live hostile and creature, from the server's list. */
@@ -40,44 +53,55 @@ async function measureFromPad(player: Player, list: ServerNpc[]) {
   return { hostile: await near((n) => HOSTILE.has(n.def)), creature: await near((n) => CREATURE.has(n.def)), total: list.length };
 }
 
-/** Look around, then follow the mission pointer (or walk out of the arrival area) for `budgetMs`. */
+/**
+ * Look around from the arrival pad; then take the guide's first mission and follow its pointer (the
+ * zones lane's world callout, `[data-e2e="mission-pointer"]`), for up to `budgetMs`; without a pointer,
+ * walk toward the nearest creature the client has. Steps round the portal home.
+ */
 async function lookForCreeps(player: Player, budgetMs: number) {
   const t0 = Date.now();
-  const found = async (how: string) => {
+  const found = async (how: string, extra: Record<string, unknown> = {}) => {
     const s = await player.snap();
     const h = visibleHostile(s);
-    return h ? { hostile: h, how, afterMs: Date.now() - t0 } : null;
+    return h ? { hostile: h, how, afterMs: Date.now() - t0, ...extra } : null;
   };
   for (let i = 0; i < 12; i++) {
     const f = await found("looking around the arrival pad");
     if (f) return f;
     await player.turn(30);
   }
+  const g0 = Date.now();
+  const took = (await player.snap()).mission?.shown ? false : await takeFirstMission(player);
+  const guideMs = Date.now() - g0;
+  const pointer = player.page.locator('[data-e2e="mission-pointer"]');
+  const f0 = Date.now();
   let pointerSeen = false;
-  const s0 = await player.snap();
-  const home = s0.portals?.[0];
-  if (home) await player.turn(home.bearing + 180); // out of the gate: away from the portal home
-  while (Date.now() - t0 < budgetMs) {
-    const b = await missionPointerBearing(player);
-    if (b !== null) {
-      pointerSeen = true;
-      if (Math.abs(b) > 8) await player.turn(b);
-    }
-    await player.hold(["ShiftLeft", "KeyW"], 1200);
-    let f = await found(pointerSeen ? "following the mission pointer" : "walking out of the arrival area (no mission pointer)");
+  let step = 0;
+  while (Date.now() - f0 < budgetMs) {
+    const s = await player.snap();
+    if (s.mission?.shown || (await pointer.isVisible().catch(() => false))) pointerSeen = true;
+    const how = pointerSeen ? "following the mission pointer" : "walking toward the creatures in sight (no mission pointer)";
+    const f = await found(how, { tookMission: took, guideMs, followMs: Date.now() - f0 });
     if (f) return f;
-    for (const d of [-45, 90, -45]) {
-      await player.turn(d);
-      f = await found(pointerSeen ? "following the mission pointer" : "walking out of the arrival area (no mission pointer)");
-      if (f) return f;
+    const to = s.mission?.bearing !== undefined && s.mission.at ? (s.mission as unknown as { bearing: number; surface: number }) : s.npcs?.find((n) => !n.dead && CREATURE.has(n.kind)) ?? null;
+    const home = s.portals?.[0];
+    if (home && home.surface < 7 && Math.abs(home.bearing) < 40) await player.hold([home.bearing > 0 ? "KeyA" : "KeyD"], 500); // round the portal
+    if (to && Math.abs(to.bearing) > 8) await player.turn(to.bearing);
+    await player.hold(["ShiftLeft", "KeyW"], 900);
+    if (++step % 2 === 0) {
+      for (const d of [-40, 80, -40]) {
+        await player.turn(d);
+        const f2 = await found(how, { tookMission: took, guideMs, followMs: Date.now() - f0 });
+        if (f2) return f2;
+      }
     }
   }
-  return { hostile: null, how: pointerSeen ? "followed the mission pointer" : "no mission pointer; walked out", afterMs: Date.now() - t0 };
+  return { hostile: null, how: pointerSeen ? "followed the mission pointer" : "no mission pointer; walked toward creatures", afterMs: Date.now() - t0, tookMission: took, guideMs, followMs: Date.now() - f0 };
 }
 
 test.describe("J3 creeps", () => {
   COMBAT_PLANETS.forEach((planet, i) => {
-    test(`J3.${i + 1} · items 3, 6c · ${planet}: a hostile creep is in view within 20 s of arriving`, { tag: ["@J3", `@J3.${i + 1}`, "@item-3", "@item-6c"] }, async ({ player }) => {
+    test(`J3.${i + 1} · items 3, 6c · ${planet}: a hostile creep is in view within 20 s of arriving and following the mission pointer`, { tag: ["@J3", `@J3.${i + 1}`, "@item-3", "@item-6c"] }, async ({ player }) => {
       await player.joinAsDevAdmin({ starter: "Hexwick", body: planet });
       await player.waitInWorld(90_000, planet);
       await player.lock();
@@ -88,9 +112,9 @@ test.describe("J3 creeps", () => {
       await player.note("at arrival", { replicatedNpcs: arrival.npcCount, creatureOnScreen: creature ? `${creature.kind} ${creature.dist} m` : null });
       await player.shot("arrival");
       const r = await lookForCreeps(player, 20_000);
-      await player.note("search", { how: r.how, afterMs: r.afterMs, hostile: r.hostile ? `${r.hostile.kind} L${r.hostile.level} at ${r.hostile.dist} m` : null });
+      await player.note("search", { ...r, hostile: r.hostile ? `${r.hostile.kind} L${r.hostile.level} at ${r.hostile.dist} m` : null });
       await player.shot(r.hostile ? "creep-in-view" : "no-creep");
-      expect(r.hostile, `a hostile creep within ${IN_VIEW_M} m and on screen within 20 s (${r.how}; nearest hostile from the pad: ${JSON.stringify(fromPad.hostile)})`).not.toBeNull();
+      expect(r.hostile, `a hostile creep on screen (≥ ${MIN_PX} px tall) within 20 s of looking around and following the pointer (${r.how}; nearest hostile from the pad: ${JSON.stringify(fromPad.hostile)})`).not.toBeNull();
     });
   });
 

@@ -59,8 +59,10 @@ test.describe("J6 save progress", () => {
       const b = new Player(await ctx.newPage(), info, gfx);
       await b.open({ tier: "medium" });
       await b.page.locator('[data-e2e="signin"]').first().click();
-      const card = b.page.locator('[data-e2e="save-card"], .fl-acct, [role="dialog"]').filter({ has: b.page.locator('input[type="email"]') }).first();
+      const card = b.page.locator('[data-e2e="signin-card"]');
       await emailCodeFlow(b, card, email);
+      // "Signed in" → Continue (or it closes by itself), then Play / Continue on the home page.
+      await card.getByRole("button", { name: /^continue$/i }).click({ timeout: 8000 }).catch(() => {});
       const play = b.playButton();
       if (await play.isVisible().catch(() => false)) await play.click();
       const s = await b.waitInWorld(90_000);
