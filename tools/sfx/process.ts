@@ -164,7 +164,7 @@ const rows = [...reports]
       <td>${esc(r.spec.event)}</td>
       <td><figure><figcaption>live today (ZzFX “${r.preset}”)</figcaption><audio controls preload="none" src="${live}"></audio></figure>
         <figure><figcaption>fallback now (ZzFX)</figcaption><audio controls preload="none" src="zzfx/${r.preset}.wav"></audio></figure></td>
-      <td>${takes}<button data-files='${files}' data-gain="${r.gain}">▶ as in game ×6</button><span class="p"> gain ${r.gain}, ${f1(r.target)} LUFS-M</span></td></tr>`;
+      <td>${takes}<div><button data-files='${files}' data-gain="${r.gain}">▶ as in game ×6</button><span class="p"> playback gain ${r.gain} · ${f1(r.target)} LUFS (loudest 400 ms)</span></div></td></tr>`;
   })
   .join("\n");
 
@@ -187,16 +187,15 @@ with ±6 % pitch and up to −1.5 dB level jitter; “as in game ×6” plays si
 Greyed takes are left out of the set. ${kept.length} files, ${(kept.reduce((a, t) => a + t.bytes, 0) / 1024).toFixed(0)} KB, ${spent} ElevenLabs credits.</p>
 <table>${rows}</table>
 <script>
-  const ctx = new AudioContext(); const cache = new Map();
-  const load = (u) => cache.get(u) ?? (cache.set(u, fetch(u).then((r) => r.arrayBuffer()).then((b) => ctx.decodeAudioData(b))), cache.get(u));
-  for (const b of document.querySelectorAll("button[data-files]")) b.onclick = async () => {
-    await ctx.resume(); const files = JSON.parse(b.dataset.files); const bufs = await Promise.all(files.map(load));
-    let last = -1;
+  // Plain <audio> playback so the page also works opened straight from disk (file:// can't fetch).
+  for (const b of document.querySelectorAll("button[data-files]")) b.onclick = () => {
+    const files = JSON.parse(b.dataset.files); let last = -1;
     for (let k = 0; k < 6; k++) {
-      let i = Math.floor(Math.random() * bufs.length); if (bufs.length > 1 && i === last) i = (i + 1) % bufs.length; last = i;
-      const s = ctx.createBufferSource(); s.buffer = bufs[i]; s.playbackRate.value = 0.94 + Math.random() * 0.12;
-      const g = ctx.createGain(); g.gain.value = ${BUS} * Number(b.dataset.gain) * (0.84 + Math.random() * 0.16);
-      s.connect(g).connect(ctx.destination); s.start(ctx.currentTime + k * 0.45);
+      let i = Math.floor(Math.random() * files.length); if (files.length > 1 && i === last) i = (i + 1) % files.length; last = i;
+      setTimeout(() => {
+        const a = new Audio(files[i]); a.preservesPitch = false; a.playbackRate = 0.94 + Math.random() * 0.12;
+        a.volume = Math.min(1, ${BUS} * Number(b.dataset.gain) * (0.84 + Math.random() * 0.16)); void a.play();
+      }, k * 450);
     }
   };
 </script>
