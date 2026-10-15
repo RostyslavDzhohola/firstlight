@@ -466,6 +466,8 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   (`MailHealth`); meanwhile public sign-in requests all get the same `SAVING_UNAVAILABLE`/`SAVING_BUSY`
   (address-independent, so D34's no-enumeration holds), and `GET /api/account/save-status` reports it
   so the cards say so before the player types. Background sends to saved addresses never change it.
-  `/api/account/me` gains `saveReady`. Why: the old level-2 card popped up mid-play and couldn't be
-  clicked while the pointer was locked, and with Resend's domain unverified every save ended at a
-  "Check your email" that never came.
+  `/api/account/me` gains `saveReady`, and its `character.starter` is now the starter index (as in
+  PlayerState), not the stored id: a second browser stores it as `fl.starter`. The account cards mount
+  on `<body>` (the landing's z 20 hid cards inside `#ui`). Why: the old level-2 card popped up mid-play
+  and couldn't be clicked while the pointer was locked, the landing's sign-in card was invisible, and
+  with Resend's domain unverified every save ended at a "Check your email" that never came.
