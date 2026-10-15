@@ -18,7 +18,7 @@ The models behind the tables were computed in this session. Section 1.1 gives th
 | Constant | Value | Src |
 |---|---|---|
 | Move speed: run / sprint / swim | 6 / 9 / 3 m/s | [r2-10], [r2-11]; swim (new) |
-| Dodge-roll (C key) | 4.5 m over 0.30 s; i-frames 0.05–0.30 s; cooldown 1.2 s; 100 ms input buffer | [05], [r2-05]; key (D) D1 |
+| Dodge-roll (C key) | 4.5 m over 0.30 s; i-frames 0.05–0.30 s; cooldown 1.2 s; 100 ms input buffer; 0.12 s grace after stepping off an edge (D-combat-2) | [05], [r2-05]; key (D) D1 |
 | Fall damage | 0 up to 8 m; then 8% max HP per metre (lethal at ≥ 20.5 m); landing in water ≥ 1.5 m deep = 0 | (new) |
 | Weak point / headshot | ×1.5 (Stillshot ×1.8); one multiplier per hit, no random crits | [05] |
 | Friendly fire | On everywhere outside safe zones, including party, own explosives (self ×0.5) | (D); self ×0.5 (new) |
