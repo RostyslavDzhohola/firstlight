@@ -221,18 +221,39 @@ describe("PlayerController", () => {
       expect(rolledAt).toBeLessThan(0.1);
     });
 
-    it("the cooldown counts wall-clock time: at 10 fps (frames clamped to 50 ms) C 1.25 s after a roll rolls", () => {
+    it("the cooldown is a wall-clock deadline: at 10 fps (frames clamped to 50 ms) C 1.25 s after a roll rolls", () => {
       // A slow machine: 100 ms frames, simulated as 50 ms steps (Game's clamp). In game time only
       // 0.62 s have passed, which used to drop the press until 2.4 s of real time had gone by.
       const pc = spawn();
       const input = fakeInput();
+      let now = 10_000;
       input.pressed.add("KeyC");
-      pc.update(0.05, input, false, 0.1);
+      pc.update(0.05, input, false, now);
       input.pressed.clear();
-      for (let i = 0; i < 12; i++) pc.update(0.05, input, false, 0.1); // 1.2 s of real time
+      for (let i = 0; i < 12; i++) pc.update(0.05, input, false, (now += 100)); // 1.2 s of real time
       input.pressed.add("KeyC");
-      pc.update(0.05, input, false, 0.1);
+      pc.update(0.05, input, false, (now += 100));
       expect(pc.anim).toBe(ANIM.DODGE);
+    });
+
+    it("a stall longer than the cooldown counts in full: C on the first frame back rolls (Codex review)", () => {
+      // The roll, then the tab or the machine stalls 1.5 s (one frame, its step clamped to 50 ms):
+      // the server is ready again, and so is the client, however long the stall.
+      for (const [stallTo, rolls] of [[1100, false], [1250, true], [1500, true], [5000, true]] as const) {
+        const pc = spawn();
+        const input = fakeInput();
+        const t0 = 10_000;
+        let now = t0;
+        input.pressed.add("KeyC");
+        pc.update(1 / 60, input, false, now);
+        input.pressed.clear();
+        for (let i = 0; i < 25; i++) pc.update(1 / 60, input, false, (now += 1000 / 60)); // the roll ends
+        expect(pc.anim).not.toBe(ANIM.DODGE);
+        pc.update(0.05, input, false, (now = t0 + stallTo)); // one stalled frame, clamped to 50 ms
+        input.pressed.add("KeyC");
+        pc.update(1 / 60, input, false, (now += 1000 / 60));
+        expect(pc.anim === ANIM.DODGE, `C after a stall to ${stallTo} ms`).toBe(rolls);
+      }
     });
 
     it("a press earlier in the cooldown is dropped, not stored for a late roll", () => {
