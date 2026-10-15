@@ -51,21 +51,31 @@ export const CLIENT_ENV: Record<string, string> = {
   CLIENT_PORT: String(CLIENT_PORT),
 };
 
-/**
- * The 6-digit code the local server "sent" to `email` (DEV_MAIL_LOG=1 prints
- * `[dev-mail] FIRSTLIGHT code for <email>: <code>`). Polls the server log; the newest code wins.
- */
-export async function mailCode(email: string, timeoutMs = 15_000): Promise<string> {
+function mailCodes(email: string): string[] {
   const re = new RegExp(`\\[dev-mail\\] FIRSTLIGHT code for ${email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: (\\d{6})`, "g");
+  let text = "";
+  try {
+    text = readFileSync(SERVER_LOG, "utf8");
+  } catch {}
+  return [...text.matchAll(re)].map((m) => m[1]!);
+}
+
+/** How many codes the local server has "sent" to `email` so far (take it before clicking Send). */
+export function mailCount(email: string): number {
+  return mailCodes(email).length;
+}
+
+/**
+ * The 6-digit code the local server "sent" to `email` after `seen` earlier ones (DEV_MAIL_LOG=1 prints
+ * `[dev-mail] FIRSTLIGHT code for <email>: <code>`). Waits for a code written after the Send click,
+ * so a second send to the same address (save, then sign in) never reuses the first, spent code.
+ */
+export async function mailCode(email: string, seen: number, timeoutMs = 15_000): Promise<string> {
   const until = Date.now() + timeoutMs;
   for (;;) {
-    let text = "";
-    try {
-      text = readFileSync(SERVER_LOG, "utf8");
-    } catch {}
-    const all = [...text.matchAll(re)];
-    if (all.length) return all[all.length - 1]![1]!;
-    if (Date.now() > until) throw new Error(`no dev-mail code for ${email} in ${SERVER_LOG}`);
+    const all = mailCodes(email);
+    if (all.length > seen) return all[all.length - 1]!;
+    if (Date.now() > until) throw new Error(`no new dev-mail code for ${email} in ${SERVER_LOG} (had ${seen})`);
     await new Promise((r) => setTimeout(r, 250));
   }
 }

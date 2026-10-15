@@ -4,7 +4,7 @@
 
 import { expect, type Locator } from "@playwright/test";
 import type { Player } from "./player.ts";
-import { mailCode } from "./stack.ts";
+import { mailCode, mailCount } from "./stack.ts";
 
 export function newEmail(tag: string): string {
   return `e2e-${tag}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}@example.test`;
@@ -14,8 +14,9 @@ export function newEmail(tag: string): string {
 export async function emailCodeFlow(player: Player, card: Locator, email: string) {
   await expect(card).toBeVisible();
   await card.locator('input[type="email"], input[autocomplete="email"]').first().fill(email);
+  const seen = mailCount(email); // a code already sent to this address (the save) must not be reused
   await card.getByRole("button", { name: /send/i }).first().click();
-  const code = await mailCode(email);
+  const code = await mailCode(email, seen);
   const codeInput = card.locator('input[autocomplete="one-time-code"], input[inputmode="numeric"], input[name*="code" i]').first();
   await expect(codeInput, "the code field appears after sending").toBeVisible();
   await codeInput.fill(code);
