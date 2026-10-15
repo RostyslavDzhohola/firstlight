@@ -459,22 +459,24 @@ export class Player {
     await this.page.waitForTimeout(800); // let the arrival settle (first corrections re-aim the camera)
     const until = Date.now() + timeoutMs;
     let lastPos = s0.player!.pos;
-    let heading = 0; // keep a direction once clear of the portal
+    let recovery = 0; // a turn away from where we just stalled or swam (degrees), used on the next step
     while (Date.now() < until) {
       const s = await this.snap();
       expect(s.body, "still on the same body (didn't walk into the portal)").toBe(body);
       if (s.zone?.server === "danger" && s.zone.local === "danger" && (s.zone.toSafe ?? s.zone.padDist - s.zone.safeRadius) > 1.5 && !s.player?.swimming) return s;
       const home = s.portals?.[0];
-      const want = home && home.surface < 25 ? wrap180(home.bearing + 180) : heading;
+      // Near the portal: away from it, with any recovery turn added on top (±70° keeps it ≥ 110° off
+      // the portal); elsewhere the recovery turn alone (relative to where we face).
+      const want = home && home.surface < 25 ? wrap180(home.bearing + 180 + recovery) : recovery;
       const go = await this.steer(want, 4, s);
       if (Math.abs(go.bearing) > 8) await this.turn(go.bearing);
-      heading = 0;
+      recovery = 0;
       await this.hold(["ShiftLeft", "KeyW"], 500);
       const p = (await this.snap()).player!.pos;
       const moved = Math.hypot(p[0]! - lastPos[0]!, p[1]! - lastPos[1]!, p[2]! - lastPos[2]!);
       if (moved < 0.8 || s.player?.swimming) {
         await this.hold(["KeyS"], 300);
-        heading = this.lastSide * 70; // round the other way next step
+        recovery = this.lastSide * 70; // round the other way next step
         this.lastSide = -this.lastSide;
       }
       lastPos = p;
