@@ -3,7 +3,7 @@
 // so the main thread only draws finished images. Requests are served between faces while baking.
 
 import { BODIES, createTerrain, FACES, type BodyId, type Face } from "@firstlight/shared";
-import { atlasResolution, bakeFace, renderView, townRaster, type Atlas, type TownRaster } from "../ui/mapRaster.ts";
+import { atlasResolution, bakeFace, renderView, siteRaster, type Atlas, type TownRaster } from "../ui/mapRaster.ts";
 import { mapView } from "../ui/mapView.ts";
 import type { V3 } from "../social/compassMath.ts";
 
@@ -35,7 +35,7 @@ async function bake(body: BodyId, near: V3, g: number) {
     const na = FACES[a]!.n, nb = FACES[b]!.n;
     return nb[0] * near[0] + nb[1] * near[1] + nb[2] * near[2] - (na[0] * near[0] + na[1] * near[1] + na[2] * near[2]);
   });
-  if (body === "portus") town = townRaster();
+  town = siteRaster(body); // the Portus town, a planet's pad outpost (D42)
   for (const face of order) {
     await new Promise((r) => setTimeout(r, 0)); // let render requests and a new body in
     if (g !== gen) return;
@@ -58,7 +58,7 @@ async function drain() {
         continue;
       }
       const out = new Uint32Array(r.w * r.h);
-      renderView(atlas, mapView(r.c, r.rot, r.ppr, r.w, r.h), out, { radius: BODIES[r.body].radius, town: r.body === "portus" ? town : null, limb: r.limb });
+      renderView(atlas, mapView(r.c, r.rot, r.ppr, r.w, r.h), out, { radius: BODIES[r.body].radius, town, limb: r.limb });
       const pixels = new Uint8ClampedArray(out.buffer);
       let bitmap: ImageBitmap | null = null;
       if (typeof createImageBitmap === "function" && typeof ImageData === "function") {
