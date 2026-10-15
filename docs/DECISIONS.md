@@ -620,3 +620,29 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   (`Input.suspendedWhile`, set by Game), and whenever the pointer isn't locked a guard, scope or charge
   in progress is cancelled (no heavy on release or on the next lock). Why: Codex's production smoke
   test found M dead in that state, and real Chrome lands there after a refused lock.
+- **D-save-1 (2026-10-15):** saving progress (HANDOFF 5b/5c, the owner's final word: guest play kept,
+  email only to save). No card ever opens by itself: a guest gets a "Progress not saved · Esc → Save
+  progress" toast once per tab session after the first level-up to 2+ (held while the tutorial, a
+  menu or the death screen is up), plus Save progress in the Esc menu, on the death screen and on the home
+  page (logging out lands there). The save card is modal and opens only with the mouse free;
+  saved accounts, `?devguest` tokens and `?offline`/`?bench` runs never see any of it. The landing's
+  "Sign in with email" link is a Sign in button. The level-2 rule for new addresses (D34) stays: below
+  it the Esc row is disabled and the card says "Play a little first" (the tutorial pays level 2).
+  Mail failures get their own answers: provider quota → `SAVING_BUSY` (503), a recipient Resend
+  rejects (422) → `EMAIL_REJECTED` (400), anything else (no key, unverified domain 403, bad key,
+  network) → `SAVING_UNAVAILABLE` (503). The last player-initiated send's failure holds for 10 min
+  (`MailHealth`); meanwhile public sign-in requests all get the same `SAVING_UNAVAILABLE`/`SAVING_BUSY`
+  (address-independent, so D34's no-enumeration holds), and `GET /api/account/save-status` reports it
+  so the cards say so before the player types. Background sends to saved addresses never change it.
+  `/api/account/me` gains `saveReady`, and its `character.starter` is now the starter index (as in
+  PlayerState), not the stored id: a second browser stores it as `fl.starter`. The account cards mount
+  on `<body>` (the landing's z 20 hid cards inside `#ui`). Why: the old level-2 card popped up mid-play
+  and couldn't be clicked while the pointer was locked, the landing's sign-in card was invisible, and
+  with Resend's domain unverified every save ended at a "Check your email" that never came.
+- **D-save-2 (2026-10-15):** the OTP day splits into two independent pools: public sends (sign-ins
+  with no session that may save) use `OTP_PUBLIC_SHARE` of `OTP_DAILY_BUDGET` (600 of 1,000), saving
+  sends use the rest (400), and neither counts the other; a refused saving send says `saving`. Before,
+  saving shared one global cap with public sends, which only reach saved addresses, so near the cap a
+  level-2 player could probe an address publicly and read "sent" vs `SAVING_BUSY` on their own send
+  (Codex review). Supersedes D34's "saving keeps the rest" (it could use idle public slots). Why: no
+  enumeration oracle across paths; easy to retune the share.

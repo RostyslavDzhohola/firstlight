@@ -184,8 +184,8 @@ export function renderMe({ me, notice, error }: MeState, actions?: MeActions): v
   const save = $<HTMLButtonElement>("home-save");
   if (save) {
     save.hidden = !(v && !saved && v.playing);
-    // The server emails a code to a new address only after the first level-up (F12 OTP budget).
-    save.disabled = !!v && v.level < 2;
+    // The server emails a code to a new address only from level 2 (D34); it says so in `saveReady`.
+    save.disabled = !!v && !(me?.saveReady ?? v.level >= 2);
     save.title = save.disabled ? "Unlocks at level 2: play a little first" : "Keep this character on any browser with an email code";
     if (actions) save.onclick = () => actions.save();
   }
@@ -260,10 +260,8 @@ async function fetchHome(): Promise<HomeData | null> {
 async function fetchMe(): Promise<MeInfo | null> {
   try {
     const auth = await import("../net/auth.ts");
-    if (!auth.isDevGuest()) {
-      const s = await auth.authClient().getSession();
-      if (!s.data) return null;
-    }
+    // saveStatus() never creates a session: "none" is no session yet (or ?offline). Dev guests read /me as before.
+    if (!auth.isDevGuest() && (await auth.saveStatus()) === "none") return null;
     return (await auth.getAccountInfo()) as unknown as MeInfo;
   } catch {
     return null;
@@ -304,15 +302,16 @@ export async function initHome(): Promise<void> {
   };
 
   async function saveProgress() {
-    // TODO(save lane): open the new save card here: `openSaveProgress()` from ui/account.ts.
-    const { showSavePrompt } = await import("../ui/account.ts");
+    // The save card (5c): it checks the session and the server first, and opens on "Saving is
+    // temporarily unavailable" or "Play a little first" instead of an email field that leads nowhere.
+    const { openSaveProgress } = await import("../ui/account.ts");
     const v = state.me ? progressView(state.me) : null;
-    const r = await showSavePrompt({ name: v?.name, level: v?.level, starter: v?.starter, requested: true });
+    const r = await openSaveProgress({ name: v?.name, level: v?.level, starter: v?.starter });
     if (r === "saved") await refreshMe();
   }
 
   $("signin")?.addEventListener("click", async () => {
-    // TODO(save lane): the save lane's sign-in card replaces this when it lands (same promise contract).
+    // A returning player on a new browser (5b): a guest session here merges into the account.
     const { showSignIn } = await import("../ui/account.ts");
     if ((await showSignIn()) === "signed-in") {
       await refreshMe();

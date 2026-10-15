@@ -1,10 +1,12 @@
 // Account HTTP routes (mounted after express.json()):
 //   GET  /api/account/me         Bearer JWT → account summary (display name, guest, admin, character, medals, pads)
 //   POST /api/account/name       Bearer JWT, {name} → set the display name (unique, filtered)
+//   GET  /api/account/save-status  public → {saving: "ok" | "busy" | "unavailable"}: can sign-in codes go out?
 //   GET  /admin/claim?token=…    session cookie or Bearer → make this account admin, burn the token
 //   POST /api/test/bot-token     x-loadtest-secret → a loadtest play token (only when LOADTEST_SECRET is set)
 
 import { randomUUID } from "node:crypto";
+import { STARTERS } from "@firstlight/shared/content/weapons";
 import { fromNodeHeaders } from "better-auth/node";
 import type { Express, NextFunction, Request, Response } from "express";
 import { claimAdmin, ensureAccount, getAccount, isBanned, isClaimBurnt, setDisplayName } from "../db/accounts.ts";
@@ -84,12 +86,21 @@ export function mountAccountRoutes(app: Express, a: Accounts, cfg: AccountsConfi
       guest: id.guest,
       admin: id.admin,
       titleMedal: acc?.titleMedal ?? null,
-      character: c ? { level: c.level, xp: c.xp, coins: c.coins, starter: c.starter, palette: c.palette, body: c.body } : null,
+      // `starter` is the index the game uses everywhere (PlayerState.starter, fl.starter), not the stored
+      // id: a second browser signing in stores it as fl.starter (HANDOFF 5b). Same mapping as the rooms.
+      character: c ? { level: c.level, xp: c.xp, coins: c.coins, starter: Math.max(0, STARTERS.findIndex((s) => s.id === c.starter)), palette: c.palette, body: c.body } : null,
+      // A guest the server will email a code for a new address (D34: from level 2), i.e. who can save now.
+      saveReady: !id.loadtest && id.guest && a.maySave(id.userId),
       /** Online time in this life (the Old Timer clock), for the home page's progress card. */
       playMs: lifePlayMs(c?.missionState),
       medals: id.loadtest ? [] : listMedals(a.db, id.userId).map((m) => m.medalId),
       pads: id.loadtest ? [] : listDiscoveredPads(a.db, id.userId),
     });
+  });
+
+  // The save card and the sign-in card ask before the player types an address (HANDOFF 5c).
+  app.get("/api/account/save-status", noStore, (_req, res) => {
+    res.json({ ok: true, saving: a.mailHealth.state() });
   });
 
   app.post("/api/account/name", noStore, async (req, res) => {

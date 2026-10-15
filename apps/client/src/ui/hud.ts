@@ -487,7 +487,8 @@ export class Hud {
 
   // ---------------------------------------------------------------------------------------------- toasts, bubbles, subtitles
 
-  toast(text: string, kind = "info", opts: ToastOptions = {}) {
+  /** Returns the toast element (e.g. for a `data-e2e` hook). */
+  toast(text: string, kind = "info", opts: ToastOptions = {}): HTMLElement {
     const lit = kind === "medal";
     const t = el("div", `fl-toast fl-arcade${lit ? " fl-arcade--lit" : ""} is-${kind}`, this.toasts);
     const sp = opts.sprite ?? TOAST_SPRITE[kind];
@@ -504,6 +505,7 @@ export class Hud {
       t.classList.add("is-out");
       window.setTimeout(() => t.remove(), 220);
     }, ms);
+    return t;
   }
 
   /** Speech bubble at screen (x, y) for 3 s. Phrase-wheel lines get their icon. */
@@ -627,7 +629,7 @@ export class Hud {
   // ---------------------------------------------------------------------------------------------- full-screen flows
 
   /** Death screen; resolves with the chosen starter and palette for rebirth. */
-  death(info: DeathInfo): Promise<{ starter: number; palette: number }> {
+  death(info: DeathInfo): Promise<{ starter: number; palette: number } | null> {
     return showDeath(info, {
       name: this.name,
       starter: this.starter,

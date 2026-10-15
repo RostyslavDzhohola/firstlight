@@ -45,6 +45,8 @@ onboarding-attack, onboarding-portal, onboarding-done, kit-inventory, kit-onboar
 | `styles/compat.css` | Legacy `.fl-overlay > .fl-panel` markup gets the kit's centred card |
 | `dom.ts` | `el`, `sprite`, `icon`, `button`, `keycaps`, `uiRoot`, `isolateKeys`, overlay registry |
 | `hud.ts` | The HUD (API below) |
+| `account.ts` | Save card, sign-in and name picker (API below) |
+| `saveOffer.ts` | When saving is offered: the pure rules (unit-tested) |
 | `share.ts` | `shareRow(parent, { onHideUi? })`: the share bar (Share / Email / Follow on 𝕏 when `VITE_X_HANDLE` is set / hide-UI eye), on the home page and in the Esc menu (6e) |
 | `styles/home.css`, `../home/` | The home page (6a): `home.ts` fills the cards in `index.html` from `/api/home` and `/api/account/me`; `homeModel.ts` is the pure part; `leave.ts` goes home after a logout |
 | `map.ts`, `mapView.ts`, `mapMarkers.ts`, `mapRaster.ts`, `mapAtlas.ts` | The map (M): projection (north = the compass's, `social/compassMath.ts`), markers, the per-body ground atlas (baked and drawn in `world/mapAtlas.worker.ts`) |
@@ -66,7 +68,7 @@ hud.setLogout(endsAt, serverNow)      // 30 s ring
 hud.setPrompt("E — take everything from Wren's pile")   // or setPrompt(text, "E")
 hud.hit(weak); hud.hurt()
 hud.damageNumber(x, y, amount, weak, kind?)              // kind: "normal" | "weak" | "armour" | "shield" | "heal"
-hud.toast(text, kind?, { title?, sub?, sprite?, ms? })   // kind: info | xp | coins | medal | warn | mission
+hud.toast(text, kind?, { title?, sub?, sprite?, ms? })   // kind: info | xp | coins | medal | warn | mission; returns the element
 hud.bubble(x, y, text, { name?, slot? })                 // phrase-wheel lines get their icon
 hud.subtitle(speaker, text, ms?)
 hud.bossBar({ name, hp, max, level?, phase?, phaseName?, variant?: "monster" | "oversight", notches?, note? })
@@ -75,8 +77,29 @@ hud.setParty(members)                 // already driven by the social lane (ui/p
 hud.setMissions(lines, header)        // already driven by the quests MissionTracker
 hud.voiceSlot                         // bottom-right container for voice indicators
 hud.minimapSlot                       // top of the right column: the minimap (ui/minimap.ts, driven by game/MapClient.ts)
-hud.death(info) / hud.characterPick(opts)   // both resolve { starter, palette }
+hud.death(info) / hud.characterPick(opts)   // both resolve { starter, palette }; death resolves null if closeDeath() closed it
 ```
+
+## Saving progress (HANDOFF 5c)
+
+Guests play with one click; the email is asked for only to save, at moments that never need the
+locked mouse. Entry points: the "Progress not saved · Esc → Save progress" toast (once per tab
+session after the first level-up, `data-e2e="save-toast"`), the Esc menu row (`menu-save`), the death
+screen (`death-save`) and the home page's "Save your progress" (`src/home/home.ts`; logging out lands there).
+
+```ts
+import { saveStatus } from "../net/auth.ts";        // "guest" | "saved" | "none": never creates a session
+import { openSaveProgress, showSignIn } from "./account.ts";
+
+if ((await saveStatus()) === "guest") showSaveButton();       // saved players never see a save prompt
+await openSaveProgress({ later: "Esc → Save progress" });     // "saved" | "dismissed"; the card is data-e2e="save-card"
+await showSignIn();                                           // "signed-in" | "dismissed" (data-e2e="signin-card")
+```
+
+`openSaveProgress()` refuses to open while the pointer is locked, resolves "saved" at once for a saved
+account, and checks the server first (`GET /api/account/save-status`, `saveReady` on
+`/api/account/me`): it opens on "Saving is temporarily unavailable" (`data-e2e="save-unavailable"`),
+"busy" or "Play a little first" (below level 2, D34) instead of an email field that leads nowhere.
 
 ## Markup
 

@@ -19,6 +19,11 @@ export const config = {
   datafast: dataFastScript(import.meta.env as Record<string, string | undefined>),
 };
 
+/** A run with no server (`?offline`, or `?bench` without `?online`); the same rule as Game.ts. */
+export function offlineRun(): boolean {
+  return params.has("offline") || (params.has("bench") && !params.has("online"));
+}
+
 /** Build-time feature switches. */
 export const features = {
   /** Proximity voice and the radio: hidden in this build ("Voice chat: coming soon", D-controls-1). No

@@ -58,6 +58,8 @@ export interface MeInfo {
   medals: string[];
   pads: { body: string; padId: string }[];
   playMs?: number;
+  /** A guest the server will email a code for (level 2+, D34); older servers omit it. */
+  saveReady?: boolean;
 }
 
 export interface ProgressView {
