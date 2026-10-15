@@ -18,6 +18,7 @@ import { closeDeath, type DeathInfo } from "../ui/death.ts";
 import { DeathFlow } from "./deathFlow.ts";
 import { offerNudge, offersSave, SaveNudge, saveReady } from "../ui/saveOffer.ts";
 import { saveStatus } from "../net/auth.ts";
+import { attackDeniedText, NoticeGate } from "./notices.ts";
 
 const NUDGED_KEY = "fl.saveNudged";
 const _v = new THREE.Vector3();
@@ -73,6 +74,9 @@ export class CombatClient {
   tutorialBusy: (() => boolean) | null = null;
   /** The "Progress not saved" toast (once per tab session) and the best level seen (Esc menu → Save progress). */
   readonly saveNudge = new SaveNudge(sessionStorage.getItem(NUDGED_KEY) === "1");
+  /** Refusal notices: each reason once per press of an attack button. */
+  private readonly deniedGate = new NoticeGate();
+  private gateRmb = false;
   private readonly wheel: PhraseWheel;
   private loadingEl: HTMLElement | null = null;
 
@@ -103,6 +107,11 @@ export class CombatClient {
       if (m.reason === "level gate") this.hud.toast("Your level is too low to use that tier", "warn");
       else if (m.action === "logout") this.hud.toast("Can't log out in combat — wait 10 s", "warn");
       else if (m.action === "use" && USE_DENIED[m.reason]) this.hud.toast(USE_DENIED[m.reason]!, "warn");
+      else {
+        // A refused attack says why (a refused Hexquill bolt used to show nothing at all).
+        const text = attackDeniedText(m.action, m.reason);
+        if (text && this.deniedGate.allow(text)) this.hud.toast(text, "warn");
+      }
     });
     // Support items: Patchkit channel (server-timed; damage interrupts it) and Prism Bubbles.
     room.onMessage("channel", (m: { kind: string; ms: number; target: string }) => {
@@ -275,6 +284,9 @@ export class CombatClient {
     const room = g.net.room;
     const input = g.input;
     this.effects.update(dt, now);
+    // A fresh press of either attack button (the right one charges heavies): refusals may show again.
+    if (input.lmbPressed || (input.rmb && !this.gateRmb)) this.deniedGate.press();
+    this.gateRmb = input.rmb;
     // Due a moment after the level-up's own toasts; eligibility and the hold are checked again right before it shows.
     if (this.saveNudge.poll(this.nudgeHeld(), now)) void offerNudge(this.saveNudge, { status: saveStatus, held: () => this.nudgeHeld(), show: () => this.showNudge() });
     if (!room) return;

@@ -29,6 +29,10 @@ export const MOVE = {
   dodgeDistance: 4.5,
   dodgeTime: 0.3,
   dodgeCooldown: 1.2,
+  /** A press this early still rolls (the cooldown ending, landing): content §0's input buffer. */
+  dodgeBuffer: 0.1,
+  /** Stepping off an edge (or a low frame rate losing the ground on a slope) still rolls this long after. */
+  dodgeGroundGrace: 0.12,
   accel: 12,
   mountAccel: 5, // a horse has weight: slower to speed up, stop and turn
   airAccel: 3,
@@ -74,6 +78,13 @@ export class PlayerController {
   anim: number = ANIM.IDLE;
   private dodgeT = 0;
   private dodgeCooldown = 0;
+  /** Seconds a C press stays wanted (MOVE.dodgeBuffer), so a press a moment early isn't lost. */
+  private dodgeWanted = 0;
+  /** Seconds since the feet last touched ground, and whether a jump took them off it. */
+  private airTime = Infinity;
+  private jumped = false;
+  /** A roll just ended and its extra speed is still bleeding off. */
+  private rollTail = false;
   private readonly dodgeDir = new THREE.Vector3();
   private fallStartRadius = 0;
   /** Fall damage as a fraction of max HP, reported to the game for the server to apply. */
@@ -191,12 +202,21 @@ export class PlayerController {
     const sprint = input.down("ShiftLeft") || input.down("ShiftRight");
     const speed = this.swimming ? MOVE.swim : this.mounted ? mountedSpeed(sprint, MOVE.slow, MOVE.noSprint) : sprint && mz > 0 && !aiming ? MOVE.sprint : MOVE.run;
 
+    // Dodge-roll: starts this frame (no wind-up, no server round trip; the server checks the move).
+    // A press up to MOVE.dodgeBuffer early is kept; one earlier in the cooldown is dropped, never
+    // stored for a roll a second later. The body turns to the roll at once, so a back or side roll
+    // reads as a roll (the clip tumbles forward).
     this.dodgeCooldown = Math.max(0, this.dodgeCooldown - dt);
-    if (!this.frozen && !this.mounted && input.pressed.has("KeyC") && this.dodgeCooldown <= 0 && this.onGround && !this.swimming) {
+    if (input.pressed.has("KeyC")) this.dodgeWanted = MOVE.dodgeBuffer;
+    const footing = this.onGround || (!this.jumped && this.airTime <= MOVE.dodgeGroundGrace);
+    if (this.dodgeWanted > 0 && !this.frozen && !this.mounted && this.dodgeCooldown <= 0 && footing && !this.swimming) {
+      this.dodgeWanted = 0;
       this.dodgeT = MOVE.dodgeTime;
       this.dodgeCooldown = MOVE.dodgeCooldown;
       this.dodgeDir.copy(wish.lengthSq() > 0 ? wish : this.facing);
+      this.facing.copy(this.dodgeDir);
     }
+    this.dodgeWanted = Math.max(0, this.dodgeWanted - dt);
 
     // Split velocity into vertical (radial) and horizontal (tangent) parts.
     const vUp = this.vel.dot(up);
@@ -204,10 +224,19 @@ export class PlayerController {
     if (this.dodgeT > 0) {
       this.dodgeT -= dt;
       vH.copy(this.dodgeDir).multiplyScalar(MOVE.dodgeDistance / MOVE.dodgeTime);
+      if (this.dodgeT <= 0) this.rollTail = true;
     } else {
       const target = wish.multiplyScalar(speed);
       const a = this.onGround || this.swimming ? (this.mounted ? MOVE.mountAccel : MOVE.accel) : MOVE.airAccel;
       vH.lerp(target, Math.min(1, a * dt));
+      // A roll's extra speed bleeds off at the ground rate even in the air (off an edge, or rolled
+      // over one): the server's dodge reserve assumes that slowdown, and air control alone kept a
+      // 15 m/s tail long enough to be refused (Codex review).
+      if (this.rollTail) {
+        const len = vH.length();
+        if (len > speed) vH.multiplyScalar((speed + (len - speed) * Math.max(0, 1 - MOVE.accel * dt)) / len);
+        else this.rollTail = false;
+      }
     }
 
     let vUpNew = vUp;
@@ -218,6 +247,7 @@ export class PlayerController {
       if (this.onGround && !this.frozen && input.pressed.has("Space")) {
         vUpNew = MOVE.jumpSpeed;
         this.onGround = false;
+        this.jumped = true;
         this.fallStartRadius = this.pos.length();
       }
     }
@@ -291,9 +321,14 @@ export class PlayerController {
       if (!this.onGround) this.fallStartRadius = Math.max(this.fallStartRadius, r);
     }
 
-    // Face movement (or the camera when aiming).
+    if (this.onGround || this.swimming) {
+      this.airTime = 0;
+      this.jumped = false;
+    } else this.airTime += dt;
+
+    // Face movement (or the camera when aiming; a roll keeps facing where it goes).
     const hSpeed = vH.length();
-    if (aiming) this.facing.lerp(this.camForward, Math.min(1, 18 * dt)).normalize();
+    if (aiming && this.dodgeT <= 0) this.facing.lerp(this.camForward, Math.min(1, 18 * dt)).normalize();
     else if (hSpeed > 0.5) this.facing.lerp(_dir.copy(vH).normalize(), Math.min(1, (this.mounted ? 6 : 10) * dt)).normalize();
 
     this.anim = this.dodgeT > 0 ? ANIM.DODGE
