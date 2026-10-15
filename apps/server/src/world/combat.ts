@@ -7,12 +7,11 @@ import { WEAPONS, WEAPON_INDEX, type Destroys, type TierStats, type WeaponDef } 
 import type { Terrain } from "@firstlight/shared";
 import { NET } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
-import { actorPos, mountedAt, positionAgo, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
+import { actorPos, mountedAt, positionAgo, type Actor, type ImmuneWhy, type NpcActor, type PlayerActor } from "./actors.ts";
 import { noteKnockback } from "./movement.ts";
 import { dist3, HEAD_FROM, inMeleeArc, PLAYER_HEIGHT, PLAYER_RADIUS, rayCapsule, rayTerrain, type V3 } from "./geometry.ts";
 import { splashShield, type BubbleHost } from "./support.ts";
 import { HORSE } from "@firstlight/shared/content/horse";
-import { NF } from "@firstlight/shared/content/npcs";
 
 /** Lag compensation window: the one shared constant (SPEC §5.3: history ≤ 200 ms). */
 export const REWIND_MS = NET.REWIND_MS;
@@ -221,11 +220,22 @@ function weakMult(hit: RayTargetHit, tier: TierStats): number {
   return tier.headMult ?? 1.5;
 }
 
+/** How far an actor can be from where it was REWIND_MS ago (a gallop or a knockback, with margin). */
+const REWIND_REACH_M = 8;
+
 /** Nearest actor hit by a ray, using rewound positions, ignoring `ignore`. */
 function raycastActors(host: CombatHost, o: V3, d: V3, maxT: number, ignore: Set<string>, rewindMs: number): RayTargetHit | null {
   let best: RayTargetHit | null = null;
   const now = host.now();
+  // Cheap pre-check before the rewind and the exact capsule test: only actors whose current
+  // position lies within the segment's bounding sphere (grown by their size and by how far anyone
+  // moves in the rewind window) can be hit. Every shot, aim and projectile step scans all actors.
+  const half = Math.min(maxT, 1e4) / 2;
+  const mx = o[0] + d[0] * half, my = o[1] + d[1] * half, mz = o[2] + d[2] * half;
   const test = (a: Actor, r: number, h: number) => {
+    const reach = half + r + h + REWIND_REACH_M;
+    const dx = a.state.x - mx, dy = a.state.y - my, dz = a.state.z - mz;
+    if (dx * dx + dy * dy + dz * dz > reach * reach) return;
     if (ignore.has(a.id) || !canHurt(null, a, now, host)) return;
     const hit = rayCapsule(o, d, maxT, capsuleFeet(a, now, rewindMs), r, h);
     if (hit && (!best || hit.t < best.t)) {
@@ -669,11 +679,12 @@ export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | 
     target.logoutEndsAt = null; // damage cancels logout
     if (attacker) target.lastDamagedBy = attacker.id;
   } else {
-    dmg = target.mitigate ? target.mitigate(dmg, weak, fromDir, attacker) : dmg * (target.armour ?? 1);
+    immuneWhy.reason = null;
+    dmg = target.mitigate ? target.mitigate(dmg, weak, fromDir, attacker, immuneWhy) : dmg * (target.armour ?? 1);
     if (dmg <= 0) {
-      // Landed but did nothing (spawning, evading home, a boss phase, a shield): say so to the
-      // attacker, or the shot looks like a miss ("weapons don't work").
-      if (attacker?.kind === "player") attacker.client?.send("immune", { target: target.id, reason: immuneReason(target) });
+      // Landed but did nothing (spawning, evading home, a shield, a boss out of reach): say so to the
+      // attacker, or the shot looks like a miss ("weapons don't work"). The NPC names the cause.
+      if (attacker?.kind === "player") attacker.client?.send("immune", { target: target.id, reason: immuneWhy.reason ?? "invulnerable" });
       return false;
     }
   }
@@ -698,14 +709,8 @@ export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | 
   return true;
 }
 
-/** Why an NPC took no damage from a hit: its flags (npcs.ts NF), else a shield took it. */
-function immuneReason(n: NpcActor): "spawning" | "evading" | "invulnerable" | "shield" {
-  const f = n.state.flags;
-  if (f & NF.SPAWNING) return "spawning";
-  if (f & NF.EVADING) return "evading";
-  if (f & NF.INVULN) return "invulnerable";
-  return "shield";
-}
+/** Filled by an NPC's mitigate when a hit deals nothing (reused: dealDamage is synchronous). */
+const immuneWhy: ImmuneWhy = { reason: null };
 
 /** Splash damage around a point (friendly fire on; the owner takes half). */
 export function explode(host: CombatHost, owner: PlayerActor | NpcActor, at: V3, radius: number, damage: number, weaponIndex: number, exclude?: string, excludeProp?: number) {

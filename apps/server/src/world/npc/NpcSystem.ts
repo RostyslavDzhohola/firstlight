@@ -8,7 +8,7 @@ import {
   aiHitCap, npcMaxHp, npcShieldHp, type PlanetId, type StatusEffect,
 } from "@firstlight/shared/content/npcs";
 import { PF } from "@firstlight/shared/net/schema";
-import { actorPos, type NpcActor, type PlayerActor } from "../actors.ts";
+import { actorPos, type ImmuneWhy, type NpcActor, type PlayerActor } from "../actors.ts";
 import { dealDamage } from "../combat.ts";
 import { loadCopy, saveCopy } from "../copyState.ts";
 import type { V3 } from "../geometry.ts";
@@ -379,7 +379,7 @@ export class NpcSystem implements RoomSystem {
     };
     n.onDamaged = (amount, by) => this.onDamaged(n, amount, by);
     n.onKilled = (by) => this.onKilled(n, by);
-    n.mitigate = (amount, weak, fromDir, attacker) => this.mitigate(n, amount, weak, fromDir, attacker);
+    n.mitigate = (amount, weak, fromDir, attacker, why) => this.mitigate(n, amount, weak, fromDir, attacker, why);
     this.npcs.set(id, n);
     this.world.addNpc(n);
     return n;
@@ -453,12 +453,16 @@ export class NpcSystem implements RoomSystem {
 
   // ------------------------------------------------------------------------------------ damage hooks
 
-  private mitigate(n: Npc, amount: number, weak: boolean, fromDir?: V3, attacker?: PlayerActor | NpcActor | null): number {
-    if (n.dead || n.state.flags & NF.INVULN) return 0;
-    if (n.boss && this.boss) return this.boss.mitigate(n, amount, weak, attacker);
+  private mitigate(n: Npc, amount: number, weak: boolean, fromDir?: V3, attacker?: PlayerActor | NpcActor | null, why?: ImmuneWhy): number {
+    if (n.dead || n.state.flags & NF.INVULN) {
+      if (why) why.reason = n.state.flags & NF.SPAWNING ? "spawning" : n.state.flags & NF.EVADING ? "evading" : "invulnerable";
+      return 0;
+    }
+    if (n.boss && this.boss) return this.boss.mitigate(n, amount, weak, attacker, why);
     if (n.shieldHp > 0 && fromDir) {
       const f = tangentize(n.pos, fromDir);
       if (dot(f, n.facing) > 0.25) {
+        if (why) why.reason = "shield"; // the shield takes the hit, also the one that breaks it
         n.shieldHp = Math.max(0, n.shieldHp - amount);
         if (n.shieldHp <= n.shieldMax / 2) n.state.flags |= NF.SHIELD_CRACKED;
         if (n.shieldHp <= 0) n.state.flags &= ~(NF.SHIELD | NF.SHIELD_CRACKED);

@@ -26,6 +26,7 @@ const IMMUNE: Record<string, string> = {
   evading: "It's running home: no damage until it gets there",
   invulnerable: "It can't be hurt right now",
   shield: "Its shield took that: hit it from the side or back",
+  arena: "Step into its arena to hurt it",
 };
 
 /** The notice for a hit that landed on an NPC and did nothing (server `immune`), or null. */
