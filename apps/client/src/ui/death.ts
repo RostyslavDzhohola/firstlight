@@ -79,9 +79,19 @@ function killerCard(parent: HTMLElement, k: KillerInfo, info: DeathInfo): void {
 }
 
 
-let open: Promise<{ starter: number; palette: number }> | null = null;
+let open: Promise<{ starter: number; palette: number } | null> | null = null;
+let closeOpen: (() => void) | null = null;
 
-export function showDeath(info: DeathInfo, ctx: DeathContext): Promise<{ starter: number; palette: number }> {
+/**
+ * Close the death screen without a pick (resolves it with null): the character turned out to be alive,
+ * e.g. saving from this screen moved us to an account whose character lives (game/deathFlow.ts).
+ */
+export function closeDeath(): void {
+  closeOpen?.();
+}
+
+/** The death screen; resolves with the rebirth pick, or null when closeDeath() closed it. */
+export function showDeath(info: DeathInfo, ctx: DeathContext): Promise<{ starter: number; palette: number } | null> {
   if (open) return open;
   open = new Promise((resolve) => {
     document.exitPointerLock?.();
@@ -187,10 +197,17 @@ export function showDeath(info: DeathInfo, ctx: DeathContext): Promise<{ starter
         });
     });
 
-    rise.onclick = async () => {
+    const leave = () => {
       ov.remove();
       overlayClosed("death");
-      open = null;
+      open = closeOpen = null;
+    };
+    closeOpen = () => {
+      leave();
+      resolve(null);
+    };
+    rise.onclick = async () => {
+      leave();
       resolve(await ctx.pick());
     };
     rise.focus();

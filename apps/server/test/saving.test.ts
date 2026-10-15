@@ -227,3 +227,59 @@ describe("the OTP budget is no enumeration oracle across paths (Codex review)", 
     expect(saved).toEqual({ publicError: null, own: "sent", again: "SAVING_BUSY" });
   });
 });
+
+describe("saving from the death screen (Codex review, should-fix 1)", () => {
+  it("the account's room re-sends the death, and respawn through it is answered with reborn", async () => {
+    const { accountLinks } = await import("../src/auth/links.ts");
+    const { liveSessions } = await import("../src/auth/sessions.ts");
+    const { characterRepo } = await import("../src/world/characters.ts");
+    const { SqliteCharacterRepo } = await import("../src/world/sqliteStores.ts");
+    const { hub } = await import("../src/world/hub.ts");
+    const { joinWithToken } = await import("./auth-helpers.ts");
+    // The real link events, live sessions and SQLite characters, so the save moves the dead character
+    // and closes the guest's room like production.
+    server = await startAuthServer({ links: accountLinks, sessions: liveSessions });
+    const prevRepo = characterRepo.current;
+    characterRepo.current = new SqliteCharacterRepo(server.accounts.db);
+    const rooms: { leave(): Promise<unknown> }[] = [];
+    try {
+      const b = new Browser(server, "198.51.100.170");
+      const guestToken = await b.playToken();
+      const guestId = String(decodeJwt(guestToken).sub);
+      const old = await joinWithToken(server, guestToken);
+      rooms.push(old);
+      let closeCode = 0;
+      old.onLeave((code: number) => (closeCode = code));
+      let guestDeaths = 0;
+      old.onMessage("death", () => guestDeaths++);
+      await waitFor(() => !!hub.get(guestId));
+      const ent = hub.get(guestId)!;
+      const room = ent.room as unknown as { grantXp(a: unknown, n: number): void; kill(a: unknown, k: null): void };
+      room.grantXp(ent.actor, 1000); // level 2+: may save
+      room.kill(ent.actor, null);
+      await waitFor(() => guestDeaths > 0);
+
+      await b.saveWithEmail("deathsave@example.test"); // from the death screen
+      await waitFor(() => closeCode !== 0);
+      expect(closeCode).toBe(4101); // merged: the client rejoins as the account
+
+      const accountToken = (await b.client.token()).data!.token;
+      const accountId = String(decodeJwt(accountToken).sub);
+      const next = await joinWithToken(server, accountToken);
+      rooms.push(next);
+      const seen: string[] = [];
+      next.onMessage("death", () => seen.push("death"));
+      next.onMessage("you", (m: { dead: boolean }) => seen.push(m.dead ? "you:dead" : "you:alive"));
+      next.onMessage("reborn", () => seen.push("reborn"));
+      await waitFor(() => seen.includes("death") && seen.includes("you:dead"));
+      expect(hub.get(accountId)!.actor.dead).toBe(true);
+      // Rise again: the client sends the pick through the room it's in now.
+      next.send("respawn", { starter: 2, palette: 1 });
+      await waitFor(() => seen.includes("reborn"));
+    } finally {
+      // The guest's room is already closed (4101): its leave() never settles, so don't wait long on any.
+      for (const r of rooms) await Promise.race([r.leave().catch(() => {}), new Promise((ok) => setTimeout(ok, 500))]);
+      characterRepo.current = prevRepo;
+    }
+  });
+});

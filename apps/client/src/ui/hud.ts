@@ -629,7 +629,7 @@ export class Hud {
   // ---------------------------------------------------------------------------------------------- full-screen flows
 
   /** Death screen; resolves with the chosen starter and palette for rebirth. */
-  death(info: DeathInfo): Promise<{ starter: number; palette: number }> {
+  death(info: DeathInfo): Promise<{ starter: number; palette: number } | null> {
     return showDeath(info, {
       name: this.name,
       starter: this.starter,
