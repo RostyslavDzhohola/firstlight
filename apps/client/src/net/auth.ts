@@ -126,22 +126,39 @@ export function invalidatePlayToken(): void {
 // ---------------------------------------------------------------------------------------------
 // Account changes
 
-type AccountListener = (claims: PlayClaims | null) => void;
+/** `elsewhere`: another tab of this browser changed it (claims are then null: ask again if you need them). */
+type AccountListener = (claims: PlayClaims | null, change: { elsewhere: boolean }) => void;
 const listeners = new Set<AccountListener>();
 
-/** Called after the account changes (saved, signed in, renamed). Returns an unsubscribe function. */
+/** Called after the account changes (saved, signed in, renamed), here or in another tab. Returns an unsubscribe function. */
 export function onAccountChange(fn: AccountListener): () => void {
   listeners.add(fn);
   return () => listeners.delete(fn);
 }
 
+/**
+ * Tabs share the session cookie but each caches its own play token: a save, sign-in or rename in one
+ * tab makes the others' tokens (and any save prompt they show) stale (Codex review). They hear it here.
+ */
+export const ACCOUNT_CHANNEL = "fl.account";
+let channel: BroadcastChannel | null = null;
+if (typeof window !== "undefined" && typeof BroadcastChannel !== "undefined") {
+  channel = new BroadcastChannel(ACCOUNT_CHANNEL);
+  (channel as { unref?: () => void }).unref?.(); // Node (tests): don't hold the process open
+  channel.onmessage = () => {
+    invalidatePlayToken();
+    for (const fn of listeners) fn(null, { elsewhere: true });
+  };
+}
+
 async function accountChanged(): Promise<void> {
   invalidatePlayToken();
+  channel?.postMessage("changed");
   let claims: PlayClaims | null = null;
   try {
     claims = readClaims(await getPlayToken());
   } catch {}
-  for (const fn of listeners) fn(claims);
+  for (const fn of listeners) fn(claims, { elsewhere: false });
 }
 
 export type Result = { ok: true } | { ok: false; message: string; failure?: SendFailure };
@@ -165,13 +182,14 @@ export async function sendEmailCode(email: string): Promise<Result> {
 
 /**
  * Can this browser save: a guest session, a saved account, or neither (a `?devguest` token, an
- * offline run, no session yet)? Never creates a session: a first visit to the home page stays "none".
+ * offline run, no session yet)? Asks the session every time, never the cached play token: the cookie
+ * is shared with other tabs, so a save in one of them shows here at once (Codex review). Never creates
+ * a session: a first visit to the home page stays "none".
  */
 export async function saveStatus(): Promise<SaveStatus> {
   const devGuest = isDevGuest();
   const offline = offlineRun();
   if (devGuest || offline) return saveStatusOf({ devGuest, offline, guest: null });
-  if (cached && cached.exp - 60_000 > Date.now()) return saveStatusOf({ devGuest, offline, guest: readClaims(cached.token)?.guest ?? null });
   const s = await authClient()
     .getSession()
     .catch(() => null);

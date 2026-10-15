@@ -8,7 +8,7 @@
 // Each returns a promise and is safe to call again while open (returns the open one).
 
 import "./account.css";
-import { getAccountInfo, NAME_PATTERN, saveStatus, savingStatus, sendEmailCode, setDisplayName, verifyEmailCode, type AccountInfo } from "../net/auth.ts";
+import { AuthError, getAccountInfo, invalidatePlayToken, NAME_PATTERN, onAccountChange, saveStatus, savingStatus, sendEmailCode, setDisplayName, verifyEmailCode, type AccountInfo } from "../net/auth.ts";
 import { button, el, icon, isolateKeys, overlayClosed, overlayOpened, sprite } from "./dom.ts";
 import { codeFromText, firstSaveStep, mayOpenSaveCard, SAVE_MIN_LEVEL, type SaveStatus, type SaveStep as FlowStep } from "./saveOffer.ts";
 import { installSprites, portraitSprite } from "./sprites.ts";
@@ -91,6 +91,21 @@ function focusSoon(e: HTMLElement): void {
   setTimeout(() => {
     if (e.isConnected && !document.pointerLockElement) e.focus();
   }, 0);
+}
+
+/**
+ * This browser's account for the save card. A 401 means our cached token is stale (another tab saved
+ * this guest): ask once more with whatever the session is now. Any other failure is null, never "go
+ * ahead": an account we couldn't look up doesn't get an email form (Codex review).
+ */
+async function lookUpAccount(): Promise<AccountInfo | null> {
+  try {
+    return await getAccountInfo();
+  } catch (e) {
+    if (!(e instanceof AuthError) || e.status !== 401) return null;
+    invalidatePlayToken();
+    return getAccountInfo().catch(() => null);
+  }
 }
 
 /** Wait for `p`, or give `fallback` after `ms`. */
@@ -430,10 +445,15 @@ export function openSaveProgress(opts: { name?: string; level?: number; starter?
     const finish = (r: SaveResult) => {
       if (done) return;
       done = true;
+      stopListening();
       m.close();
       saveOpen = null;
       resolve(r);
     };
+    // Another tab saved (or signed in) meanwhile: this card is moot.
+    const stopListening = onAccountChange((_claims, { elsewhere }) => {
+      if (elsewhere && !done && !opts.preview) void saveStatus().then((s) => s !== "guest" && finish(s === "saved" ? "saved" : "dismissed"));
+    });
     const m = modal("save", () => finish("dismissed"));
     m.card.classList.add("fl-acct--save");
     m.card.dataset.e2e = "save-card";
@@ -461,13 +481,15 @@ export function openSaveProgress(opts: { name?: string; level?: number; starter?
       if (status === "saved") return finish("saved");
       if (status === "none") return finish("dismissed");
       const [saving, info] = await within(
-        Promise.all([savingStatus(), getAccountInfo().catch(() => null)]),
+        Promise.all([savingStatus(), lookUpAccount()]),
         CHECK_TIMEOUT_MS,
         ["ok", null] as ["ok" | "busy" | "unavailable", AccountInfo | null],
       );
       if (done) return;
       if (info?.guest === false) return finish("saved");
-      run(firstSaveStep({ saving, saveReady: info?.saveReady }), info);
+      // No account to look at: say saving can't happen right now rather than ask for an email.
+      if (!info) return run("unavailable", null);
+      run(firstSaveStep({ saving, saveReady: info.saveReady }), info);
     })();
   });
   return saveOpen;
