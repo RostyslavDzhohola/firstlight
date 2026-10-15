@@ -228,7 +228,9 @@ export class Effects {
     ring.position.copy(at);
     ring.lookAt(at.clone().add(facing));
     const born = performance.now();
-    this.add(ring, ms, true, (t) => ring.scale.setScalar(0.05 + 0.2 * Math.min(1, (t - born) / ms)));
+    this.add(ring, ms, true, (t) => {
+      ring.scale.setScalar(0.05 + 0.2 * Math.min(1, (t - born) / ms));
+    });
     this.spark(at, facing.clone().multiplyScalar(0.4), 0.05, ms);
   }
 
