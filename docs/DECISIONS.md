@@ -486,8 +486,9 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   switches to the cookie script). The server reads realtime visitors (last 10 min) and all-time
   sessions with `DATAFAST_API_KEY` (a `df_` website key, server-only, never logged), cached ≥ 60 s,
   one request pair at a time, the last numbers kept on failure. Without it the home page shows our
-  own online count and no visits; with it, "Online now: N · Total visits: M" and a one-line
-  "cookieless" note. Why: the key stays secret, the page works tonight with or without the account.
+  own online count and no visits; with it, "Online now: N · Total visits: M". Whenever the script is
+  in the page a one-line note says so: "Cookieless analytics by DataFast", or that DataFast sets
+  cookies when the cookie script was chosen. Why: the key stays secret, the page works tonight with or without the account.
 - **D-home-5 (run, 2026-10-15 05:20Z):** share row (6e) on the home page and in the Esc menu: Share
   uses the Web Share sheet where there is one, else copies `https://firstlight.one4all.dev` with a
   toast; Email is a `mailto:` invite; "Follow on 𝕏" appears only when `VITE_X_HANDLE` is a valid
