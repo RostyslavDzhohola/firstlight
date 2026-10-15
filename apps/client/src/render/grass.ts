@@ -17,6 +17,7 @@ import { padGrassMask } from "../world/palette.ts";
 import { atmo } from "./atmosphere.ts";
 import type { BodyLook } from "./looks.ts";
 import type { ResolvedSettings } from "./quality.ts";
+import { MEADOW_DENSITY, MEADOW_NEAR, meadowClumpGeometry, meadowGrassMaterial, meadowMeta, meadowOn } from "./meadow.ts";
 
 export const grassUniforms = {
   radius: uniform(40).setGroup(renderGroup),
@@ -53,6 +54,11 @@ interface Cell {
   mesh: THREE.Mesh;
   geo: THREE.InstancedBufferGeometry;
   attr: THREE.InstancedBufferAttribute;
+  /** `?meadow` only: per-clump data, the far (lite) geometry sharing the instance buffers, and
+   *  which of the two the mesh draws (0 near, 1 far). */
+  meta: THREE.InstancedBufferAttribute | null;
+  geoLite: THREE.InstancedBufferGeometry | null;
+  band: 0 | 1;
   center: THREE.Vector3;
   radius: number;
   inUse: boolean;
@@ -122,9 +128,10 @@ function grassMaterial(): THREE.MeshLambertNodeMaterial {
 }
 
 let sharedMaterial: THREE.MeshLambertNodeMaterial | null = null;
-/** One grass material for the app's lifetime (all bodies; values come from shared uniforms). */
+/** One grass material for the app's lifetime (all bodies; values come from shared uniforms).
+ *  `?meadow` (graphics-uplift prototype, off by default) swaps in clumps with wildflowers. */
 function grassMaterialShared(): THREE.MeshLambertNodeMaterial {
-  sharedMaterial ??= grassMaterial();
+  sharedMaterial ??= meadowOn.grass ? meadowGrassMaterial(grassUniforms) : grassMaterial();
   return sharedMaterial;
 }
 
@@ -132,6 +139,7 @@ export class GrassSystem {
   readonly group = new THREE.Group();
   private material: THREE.MeshLambertNodeMaterial | null = null;
   private blade: THREE.BufferGeometry | null = null;
+  private bladeLite: THREE.BufferGeometry | null = null;
   private segments = 0;
   private cellQuads = 4;
   private density = 16;
@@ -163,7 +171,7 @@ export class GrassSystem {
     this.group.visible = this.enabled;
     const radius = s.grass.radius;
     grassUniforms.radius.value = radius;
-    const density = s.grass.count / (Math.PI * radius * radius);
+    const density = (s.grass.count * (meadowOn.grass ? MEADOW_DENSITY : 1)) / (Math.PI * radius * radius);
     this.receiveShadow = s.on.shadows && s.shadows.mode === "map";
     // Largest quad (at a face centre, quads are 2R/n wide). Small quads (Portus ~2.3 m) or a large
     // radius → 8×8-quad cells, else 4×4: keeps grass at a few dozen draws.
@@ -188,6 +196,7 @@ export class GrassSystem {
     for (const c of [...this.cells.values(), ...this.free]) {
       this.group.remove(c.mesh);
       c.geo.dispose();
+      c.geoLite?.dispose();
     }
     this.cells.clear();
     this.free.length = 0;
@@ -195,7 +204,9 @@ export class GrassSystem {
     this.segments = segments;
     this.cellQuads = cellQuads;
     this.capacity = capacity;
-    this.blade = bladeGeometry(segments);
+    this.blade = meadowOn.grass ? meadowClumpGeometry(false) : bladeGeometry(segments);
+    this.bladeLite?.dispose();
+    this.bladeLite = meadowOn.grass ? meadowClumpGeometry(true) : null;
     this.material = grassMaterialShared();
   }
 
@@ -207,23 +218,37 @@ export class GrassSystem {
     }
     const geo = new THREE.InstancedBufferGeometry();
     geo.index = this.blade!.index;
-    geo.setAttribute("position", this.blade!.getAttribute("position"));
+    for (const [name, a] of Object.entries(this.blade!.attributes)) geo.setAttribute(name, a);
     const attr = new THREE.InstancedBufferAttribute(new Float32Array(this.capacity * 4), 4);
     geo.setAttribute("iPos", attr);
     geo.instanceCount = 0;
+    let meta: THREE.InstancedBufferAttribute | null = null;
+    let geoLite: THREE.InstancedBufferGeometry | null = null;
+    if (this.bladeLite) {
+      meta = new THREE.InstancedBufferAttribute(new Float32Array(this.capacity * 4), 4);
+      geo.setAttribute("iMeta", meta);
+      geoLite = new THREE.InstancedBufferGeometry();
+      geoLite.index = this.bladeLite.index;
+      for (const [name, a] of Object.entries(this.bladeLite.attributes)) geoLite.setAttribute(name, a);
+      geoLite.setAttribute("iPos", attr);
+      geoLite.setAttribute("iMeta", meta);
+      geoLite.instanceCount = 0;
+      geoLite.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1);
+    }
     const mesh = new THREE.Mesh(geo, this.material!);
     mesh.matrixAutoUpdate = false;
     mesh.castShadow = false;
     mesh.receiveShadow = this.receiveShadow;
     mesh.name = "grassCell";
     geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1);
-    return { key: "", mesh, geo, attr, center: new THREE.Vector3(), radius: 1, inUse: true };
+    return { key: "", mesh, geo, attr, meta, geoLite, band: 0, center: new THREE.Vector3(), radius: 1, inUse: true };
   }
 
   private release(c: Cell) {
     this.group.remove(c.mesh);
     c.inUse = false;
     c.geo.instanceCount = 0;
+    if (c.geoLite) c.geoLite.instanceCount = 0;
     this.free.push(c);
   }
 
@@ -256,7 +281,9 @@ export class GrassSystem {
             const reach = radius + this.cellQuads * 3.2;
             if (d < reach) {
               keep.add(key);
-              if (!this.cells.has(key)) this.wanted.push({ key, chunk: ch, ca, cb, d });
+              const have = this.cells.get(key);
+              if (!have) this.wanted.push({ key, chunk: ch, ca, cb, d });
+              else this.setBand(have, d);
             } else if (d < reach + 12 && this.cells.has(key)) {
               keep.add(key); // hysteresis
             }
@@ -278,12 +305,22 @@ export class GrassSystem {
       const c = this.acquire();
       c.key = w.key;
       this.fill(c, w.chunk, w.ca, w.cb);
+      this.setBand(c, w.d);
       this.cells.set(w.key, c);
       this.group.add(c.mesh);
     }
     let n = 0;
     for (const c of this.cells.values()) n += c.geo.instanceCount;
     this.blades = n;
+  }
+
+  /** `?meadow`: near cells draw the full clumps, far cells the lite ones (same instance data). */
+  private setBand(c: Cell, d: number) {
+    if (!c.geoLite) return;
+    const band = d < MEADOW_NEAR ? 0 : d > MEADOW_NEAR + 4 || c.band === 1 ? 1 : 0;
+    if (band === c.band && c.mesh.geometry === (band ? c.geoLite : c.geo)) return;
+    c.band = band;
+    c.mesh.geometry = band ? c.geoLite : c.geo;
   }
 
   /** Forget cells that belong to a chunk that was unloaded. */
@@ -348,6 +385,7 @@ export class GrassSystem {
       arr[o + 1] = y;
       arr[o + 2] = z;
       arr[o + 3] = Math.round(scale * 100) + Math.min(0.999, rand());
+      if (c.meta) meadowMeta(x, y, z, rand(), rand(), c.meta.array as Float32Array, o);
       n++;
       if (x < minx) minx = x; if (y < miny) miny = y; if (z < minz) minz = z;
       if (x > maxx) maxx = x; if (y > maxy) maxy = y; if (z > maxz) maxz = z;
@@ -365,6 +403,14 @@ export class GrassSystem {
     }
     c.geo.boundingSphere!.center.copy(c.center);
     c.geo.boundingSphere!.radius = c.radius;
+    if (c.geoLite && c.meta) {
+      c.geoLite.instanceCount = n;
+      c.geoLite.boundingSphere!.center.copy(c.center);
+      c.geoLite.boundingSphere!.radius = c.radius;
+      c.meta.clearUpdateRanges();
+      c.meta.addUpdateRange(0, Math.max(4, n * 4));
+      c.meta.needsUpdate = true;
+    }
     c.mesh.visible = n > 0;
   }
 
@@ -377,10 +423,12 @@ export class GrassSystem {
     for (const c of [...this.cells.values(), ...this.free]) {
       this.group.remove(c.mesh);
       c.geo.dispose();
+      c.geoLite?.dispose();
     }
     this.cells.clear();
     this.free.length = 0;
     this.blade?.dispose();
+    this.bladeLite?.dispose();
     this.group.removeFromParent();
   }
 }

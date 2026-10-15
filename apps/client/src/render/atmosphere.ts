@@ -20,6 +20,7 @@ import { SunLight } from "three/addons/lights/SunLight.js";
 import { SunLightNode } from "three/addons/lights/SunLightNode.js";
 import type { ResolvedSettings } from "./quality.ts";
 import { skyDir, type V3 } from "./sunFrame.ts";
+import { meadowOn, withClouds } from "./meadow.ts";
 
 const col = (hex = 0xffffff) => uniform(new THREE.Color(hex));
 
@@ -143,7 +144,9 @@ export const skyColor = Fn(([dir, disc]: [any, any]) => {
 
 /** Background node: the sky in the view direction (plus stars at night). */
 export function skyBackgroundNode(): THREE.Node {
-  return skyColor(positionWorldDirection, float(1)).add(starField(positionWorldDirection));
+  const sky = skyColor(positionWorldDirection, float(1)).add(starField(positionWorldDirection));
+  // `?meadow` (graphics-uplift prototype, off by default): a drifting cumulus layer.
+  return meadowOn.clouds ? withClouds(normalize(positionWorldDirection), sky) : sky;
 }
 
 /** Fog amount (0..1) for the current fragment. Exposed for custom materials (sky planets, particles). */

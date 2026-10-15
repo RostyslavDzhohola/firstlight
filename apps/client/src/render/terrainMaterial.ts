@@ -13,6 +13,7 @@ import {
 import { atmo } from "./atmosphere.ts";
 import { detailNoiseTexture } from "./noiseTexture.ts";
 import type { ResolvedSettings } from "./quality.ts";
+import { meadowGround, meadowOn } from "./meadow.ts";
 
 export const terrainUniforms = {
   /** How much of the baked concavity AO to apply (less when GTAO runs). */
@@ -118,6 +119,8 @@ function build(layers: number, normals: boolean): THREE.MeshStandardNodeMaterial
     }
   }
 
+  // `?meadow` (graphics-uplift prototype, off by default): olive ground under the grass.
+  if (meadowOn.ground) col = meadowGround(col, rock);
   // Wet band at the shore and darker lake bed.
   const wet = float(1).sub(smoothstep(0.0, 0.9, h)).mul(float(1).sub(rock.mul(0.5)));
   col = col.mul(mix(float(1), float(0.62), wet));

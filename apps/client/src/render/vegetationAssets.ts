@@ -8,6 +8,7 @@ import { vegetationModels } from "./vegetationModels.ts";
 import { config } from "../config.ts";
 import { atmo } from "./atmosphere.ts";
 import { PROP_PALETTES } from "./propGeometry.ts";
+import { meadowOn, mossy } from "./meadow.ts";
 
 export interface VegetationAssets {
   geometry: Map<string, THREE.BufferGeometry>;
@@ -135,7 +136,10 @@ export function vegetationMaterial(body: BodyId, kind: PropKind, atlas: THREE.Te
   const stone = tintRatio(kind === "boulder" ? p.rock2 : p.rock, 0xa3ada6);
   const tint = vec3(leaf.r, leaf.g, leaf.b).mul(role.r).add(vec3(bark.r, bark.g, bark.b).mul(role.g)).add(vec3(stone.r, stone.g, stone.b).mul(role.b))
     .add(vec3(1).mul(float(1).sub(role.r.add(role.g).add(role.b))));
-  m.colorNode = sample.rgb.mul(tint).mul(mix(float(1), float(0.78), atmo.wet));
+  const painted = sample.rgb.mul(tint);
+  // `?meadow` (graphics-uplift prototype, off by default): moss on the tops of rocks.
+  const rocky = meadowOn.rocks && !impostor && (kind === "rock" || kind === "boulder");
+  m.colorNode = (rocky ? mossy(painted) : painted).mul(mix(float(1), float(0.78), atmo.wet));
   m.opacityNode = sample.a;
   m.roughnessNode = mix(float(0.86), float(0.4), atmo.wet);
   // Foliage is lit as a canopy facing the sky. Leaf cards' own normals flip on back faces, which

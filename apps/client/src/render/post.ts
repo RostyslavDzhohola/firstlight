@@ -16,6 +16,7 @@ import { dof } from "three/addons/tsl/display/DepthOfFieldNode.js";
 import { traa } from "three/addons/tsl/display/TRAANode.js";
 import { vignette } from "three/addons/tsl/display/CRT.js";
 import type { ResolvedSettings } from "./quality.ts";
+import { meadowGrade, meadowOn } from "./meadow.ts";
 
 export interface GradeParams {
   slope: [number, number, number];
@@ -121,6 +122,8 @@ export function buildPost(scene: THREE.Scene, camera: THREE.Camera, s: ResolvedS
     out = cdl(out, postUniforms.gradeSlope, postUniforms.gradeOffset, postUniforms.gradePower, postUniforms.gradeSat);
     out = vec4(hue(out.rgb, postUniforms.gradeHue), out.a);
   }
+  // `?meadow` (graphics-uplift prototype, off by default): S-curve + saturation after the grade.
+  if (meadowOn.grade) out = vec4(meadowGrade(out.rgb), out.a);
   if (s.on.vignette) out = vec4(vignette(out.rgb, postUniforms.vignette, float(0.55)), out.a);
   if (s.on.grain) {
     const jitter = vec2(fract(time.mul(7.13)).mul(64), fract(time.mul(3.71)).mul(64));
