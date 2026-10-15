@@ -240,7 +240,15 @@ export class Player {
         const lockAt = (await this.events()).filter((e) => e.kind === "lock" && e.locked === true).pop()?.t ?? 0;
         const age = s.t - lockAt;
         if (age < 700) await this.page.waitForTimeout(700 - age);
-        if ((await this.snap()).input.pointerLocked) return;
+        if ((await this.snap()).input.pointerLocked) {
+          // Chrome drops the first mouse movement after a lock: spend it on a 1 px nudge, so the
+          // next real turn counts (a lost 180° turn once walked a journey into the portal).
+          this.mouse.x += 1;
+          await this.page.mouse.move(this.mouse.x, this.mouse.y);
+          this.mouse.x -= 1;
+          await this.page.mouse.move(this.mouse.x, this.mouse.y);
+          return;
+        }
         continue;
       }
       // The pause menu covers the world (e.g. after a rejoin): Esc goes back to the game first.
@@ -373,6 +381,9 @@ export class Player {
         const a = trail[trail.length - 4]!;
         const b = s.player!.pos;
         if (Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!) < 1) {
+          // Stuck on something: back off, side-step round it (alternating sides), hop.
+          await this.hold(["KeyS"], 400);
+          await this.hold([side], 900);
           await this.hold([side, "KeyW"], 700);
           await this.tap("Space");
           side = side === "KeyD" ? "KeyA" : "KeyD";
@@ -399,7 +410,7 @@ export class Player {
     while (Date.now() < until) {
       const s = await this.snap();
       expect(s.body, "still on the same body (didn't walk into the portal)").toBe(body);
-      if (s.zone?.local === "danger" && (s.zone.toSafe ?? s.zone.padDist - s.zone.safeRadius) > 4 && !s.player?.swimming) return s;
+      if (s.zone?.server === "danger" && s.zone.local === "danger" && (s.zone.toSafe ?? s.zone.padDist - s.zone.safeRadius) > 1.5 && !s.player?.swimming) return s;
       const home = s.portals?.[0];
       if (home && home.surface < 20) {
         // Straight away from the portal, plus the current detour (±45° steps, never past ±90°).

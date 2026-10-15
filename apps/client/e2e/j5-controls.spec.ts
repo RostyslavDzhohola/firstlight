@@ -90,7 +90,12 @@ test.describe("J5 controls", () => {
       const running = i % 2 === 1;
       await player.page.waitForTimeout(1500); // past the 1.2 s dodge cooldown
       const before = await player.snap();
-      if (before.player?.swimming) await player.note("skipped", `try ${i + 1}: in water`);
+      if (before.player?.swimming) {
+        await player.note("skipped", `try ${i + 1}: in water (no dodging while swimming)`);
+        await player.turn(180);
+        await player.hold(["KeyW"], 1500);
+        continue;
+      }
       if (running) {
         await player.turn(180); // back and forth over the same ground, not off into a lake
         await player.page.keyboard.down("ShiftLeft");
@@ -118,6 +123,7 @@ test.describe("J5 controls", () => {
       tries.push({ running, controllerMs: key && anim ? Math.round(anim.t - key.t) : null, avatarMs: key && clip ? Math.round(clip.t - key.t) : null, corrected, animAtKey: ANIM_NAMES[animAtKey as number] ?? animAtKey });
     }
     await player.note("dodge tries", tries);
+    expect(tries.length, "at least 4 tries on dry ground").toBeGreaterThanOrEqual(4);
     for (const [i, t] of tries.entries()) {
       const ms = t.avatarMs ?? t.controllerMs;
       expect.soft(ms, `try ${i + 1} (${t.running ? "running" : "standing"}, ${String(t.animAtKey)} when C went down): the roll started`).not.toBeNull();
