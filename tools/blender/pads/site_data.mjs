@@ -20,7 +20,7 @@ const { tangentFrame, placesOn, placeDir } = await S("content/places.ts");
 const { NPC_AREAS } = await S("content/npcs.ts");
 const { resolveAreaDir, bossArena } = await S("content/arenas.ts");
 const { skyDir } = await import(pathToFileURL(`${repo}/apps/client/src/render/sunFrame.ts`).href);
-const { LOOKS } = await import(pathToFileURL(`${repo}/apps/client/src/render/looks.ts`).href).catch(() => ({ LOOKS: null }));
+const { LOOKS } = await import(pathToFileURL(`${repo}/apps/client/src/render/looks.ts`).href);
 
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -122,12 +122,9 @@ for (const id of ["arcadia", "hollowmere", "meridian"]) {
   const arena = bossArena(terrain);
 
   // Reference sun in the pad frame.
-  let sun = null;
-  if (LOOKS) {
-    const lk = LOOKS[id];
-    const s = skyDir(up[0], up[1], up[2], lk.sunElev, lk.sunAz, [0, 0, 0]);
-    sun = { elev: lk.sunElev, az: lk.sunAz, dir: ldir(s), color: lk.sun, intensity: lk.sunIntensity, hemiSky: lk.hemiSky, hemiGround: lk.hemiGround, hemiIntensity: lk.hemiIntensity, zenith: lk.zenith, mid: lk.mid, horizon: lk.horizon, ground: lk.ground, fogDensity: lk.fogDensity, fogStart: lk.fogStart, grassRoot: lk.grassRoot, grassTip: lk.grassTip, exposure: lk.exposure, grade: lk.grade };
-  }
+  const lk = LOOKS[id];
+  const sd = skyDir(up[0], up[1], up[2], lk.sunElev, lk.sunAz, [0, 0, 0]);
+  const sun = { elev: lk.sunElev, az: lk.sunAz, dir: ldir(sd), color: lk.sun, intensity: lk.sunIntensity, hemiSky: lk.hemiSky, hemiGround: lk.hemiGround, hemiIntensity: lk.hemiIntensity, zenith: lk.zenith, mid: lk.mid, horizon: lk.horizon, ground: lk.ground, fogDensity: lk.fogDensity, fogStart: lk.fogStart, grassRoot: lk.grassRoot, grassTip: lk.grassTip, exposure: lk.exposure, grade: lk.grade };
 
   const data = {
     body: id, R, padH: r3(padH), waterLevel: body.waterLevel, up, east, north,
