@@ -116,8 +116,16 @@ test.describe("J3 creeps", () => {
       await player.note("target", { def: near.n.def, level: near.n.level, pack: near.pack + 1, fromUsM: near.t.surface });
     } else {
       await player.walkOutOfRing();
+      // Journeys run in parallel in the same planet copy: go somewhere of our own first, so another
+      // test's player isn't in the line of fire (the bolts hit players outside safe zones too).
+      await player.turn(Math.random() * 120 - 60);
+      for (let i = 0; i < 4; i++) {
+        await player.hold(["ShiftLeft", "KeyW"], 700);
+        const w = await player.snap();
+        if (w.player?.swimming || w.zone?.server === "safe") await player.turn(150);
+      }
       await player.npc("spawn", { kind: "hopbit", level: 1, roam: 0 });
-      await player.hold(["KeyW"], 1500); // on outward, away from the ring, then face it
+      await player.hold(["KeyW"], 1000); // on outward, away from the ring, then face it
       await player.turn(180);
       await player.note("placement", `admin npc spawn: one Hopbit outside the ring (nearest natural hostile ${ranked[0] ? `${ranked[0].n.def} ${ranked[0].t.surface} m` : "none"})`);
     }
@@ -131,6 +139,12 @@ test.describe("J3 creeps", () => {
       const s = await player.snap();
       if ((s.you?.xp ?? 0) > xp0 || (s.you?.level ?? 1) > level0 || s.player?.dead) break;
       if ((s.player?.hp ?? 100) < 80) await player.admin("heal");
+      // No casting while swimming (the server says "swimming"): back out of the lake first.
+      if (s.player?.swimming) {
+        await player.turn(180);
+        await player.hold(["KeyW"], 1000);
+        continue;
+      }
       // Weapons are holstered in safe zones: fight from outside the ring.
       if (s.zone?.server === "safe") {
         await player.walkOutOfRing();
@@ -144,13 +158,21 @@ test.describe("J3 creeps", () => {
         await player.hold(["KeyW"], 500);
         continue;
       }
+      // Point blank the bolt (it leaves from the hand) flies past a Hopbit at our feet: back off first.
+      if (foe.dist < 5) {
+        await player.turn(foe.bearing);
+        await player.hold(["KeyS"], 500);
+        continue;
+      }
       await player.aim((x) => x.npcs?.find((n) => n.id === foe.id && !n.dead) ?? null, 3);
       await player.attack();
       shots++;
       await player.page.waitForTimeout(200);
     }
     const end = await player.snap();
-    await player.note("fight", { shots, xp: [xp0, end.you?.xp], level: [level0, end.you?.level], dead: end.player?.dead });
+    const ev = await player.events();
+    const hits = ev.filter((e) => e.kind === "in" && e.type === "hit" && e.mine === true).length;
+    await player.note("fight", { shots, hits, xp: [xp0, end.you?.xp], level: [level0, end.you?.level], dead: end.player?.dead });
     await player.shot("after-fight");
     expect(end.player?.dead, "we didn't die").toBeFalsy();
     expect((end.you?.xp ?? 0) > xp0 || (end.you?.level ?? 1) > level0, "killing a hostile paid XP").toBe(true);
