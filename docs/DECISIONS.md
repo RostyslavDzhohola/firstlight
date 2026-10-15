@@ -734,3 +734,12 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   after each deploy against `docs/tests/player-expectations.md`. Why: the owner found the game had no
   creeps outside the castle, a reversed-feeling safe zone and no minimap while every test passed;
   the tests checked pieces against the spec and nothing played the game.
+- **D-stalls-1 (2026-10-15 15:15Z):** J1.2's WebGL "stall cluster after arrival" was the harness, not
+  the game: the cursor left on "Play as" made lock()'s 1 px nudge a ~476 px move under pointer lock,
+  a 60° turn onto the Hollowmere portal, and the walk travelled (loading screen plus a 0.7–3.2 s WebGL
+  warm-up frame) in about half the runs; under a busy GPU the blink probe's main-thread readback added
+  60–200 ms frames of its own. The harness parks the cursor before the game locks and lock() keeps the
+  heading; the probe reads back in a worker and ignores luma jumps while the camera turns; J1.2 is
+  gated on WebGL too. From the hand-over through the walk, WebGL Portus frames are 16.6–16.8 ms with
+  no shader builds. Why: a journey must measure the game, and a deploy gate that fails on its own
+  measurement trains people to ignore it.
