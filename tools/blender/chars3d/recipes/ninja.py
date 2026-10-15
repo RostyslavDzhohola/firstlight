@@ -35,8 +35,8 @@ def parts():
     def paint_head(ctx):
         rgb = PT.fill(ctx.n, PT.hexc(SKIN))
         rgb = PT.variation(rgb, ctx.P, 0.03, 14, 2, 0.01)
-        rgb = PT.shade(rgb, ctx.P, ctx.N, ctx.ao, ctx.cav, ao_tint="#9a4050", ao_amt=0.55, top_light=0.06,
-                       cav_amt=0.25, edge_amt=0.08, z_range=(1.45, 1.9))
+        rgb = PT.shade(rgb, ctx.P, ctx.N, ctx.ao, ctx.cav, ao_tint="#c87a70", ao_amt=0.3, top_light=0.06,
+                       cav_amt=0.12, edge_amt=0.06, z_range=(1.45, 1.9))
         u, v = head.face_uv(ctx.P)
         rgb, _ = face.paint(rgb, u, v, head.front(ctx.P, ctx.N))
         return rgb
@@ -81,9 +81,9 @@ def parts():
                         cav_amt=0.45, edge_amt=0.18, z_range=(0.0, 1.9))
 
     # --- bangs ------------------------------------------------------------------------------
-    bangs = K.Hair(head, cap=0.004, hairline=lambda az, el: np.full_like(az, 89.0), k=0.006)
-    for az, L, sw in ((-28, 0.085, -0.15), (-8, 0.095, 0.05), (14, 0.09, 0.2), (32, 0.075, 0.3), (-44, 0.07, -0.3)):
-        bangs.clump(az, 36, (sw, -0.6, -0.8), L, 0.026, bend=(0, -0.1, -0.2), lift=0.004, tip_lift=0.01, flat=0.45)
+    bangs = K.Hair(head, cap=0.004, hairline=lambda az, el: np.full_like(az, 89.0), k=0.01)
+    for az, L, sw in ((-22, 0.09, -0.1), (6, 0.1, 0.1), (32, 0.085, 0.3)):
+        bangs.clump(az, 36, (sw, -0.6, -0.8), L, 0.045, bend=(0, -0.1, -0.2), lift=0.005, tip_lift=0.012, flat=0.6)
     bangs_f = bangs.field()
 
     def paint_hair(ctx):
@@ -101,18 +101,18 @@ def parts():
           vec((0.16, 0.41, 1.1)), vec((0.15, 0.46, 0.98))]
     t2 = [vec((0.03, 0.1, 1.48)), vec((0.03, 0.18, 1.39)), vec((0.02, 0.25, 1.28)), vec((0.0, 0.3, 1.17)),
           vec((-0.02, 0.33, 1.07))]
-    tail1 = S.tube(t1, [0.055, 0.06, 0.062, 0.06, 0.056, 0.05], k=0.01, flat=0.2, up=(0, 0.6, 0.8))
-    tail2 = S.tube(t2, [0.05, 0.052, 0.052, 0.05, 0.046], k=0.01, flat=0.2, up=(0, 0.6, 0.8))
+    tail1 = S.tube(t1, [0.055, 0.06, 0.062, 0.06, 0.056, 0.05], k=0.01, flat=0.36, up=(0, 0.6, 0.8))
+    tail2 = S.tube(t2, [0.05, 0.052, 0.052, 0.05, 0.046], k=0.01, flat=0.36, up=(0, 0.6, 0.8))
 
     def scarf(P):
         d = S.smin(wrap(P), wrap2(P), 0.02)
         d = S.smin(d, tail1(P), 0.03)
         d = S.smin(d, tail2(P), 0.03)
-        # tattered ends: notches cut into the tail tips
+        # tattered ends: a couple of shallow notches in the tail tips (kept gentle: steep displacements
+        # break the meshing and the decimation)
         tip = S.smoothstep(1.12, 1.0, P[:, 2]) * (P[:, 1] > 0.2)
-        notch = 0.01 * np.maximum(np.sin(P[:, 0] * 220 + P[:, 1] * 60), 0) * tip
-        d = d + notch
-        return d + 0.003 * np.sin(P[:, 2] * 70 + P[:, 0] * 60 + S.vnoise(P, 18, 21) * 2)
+        notch = 0.006 * np.maximum(np.sin(P[:, 0] * 90 + P[:, 1] * 40), 0) * tip
+        return d + notch + 0.003 * np.sin(P[:, 2] * 50 + P[:, 0] * 40 + S.vnoise(P, 18, 21) * 2)
 
     def scarf_w(P):
         z = P[:, 2]
@@ -234,8 +234,10 @@ def parts():
     # --- trousers, shin wraps, tabi ---------------------------------------------------------
     legs = A.legs(sk, thigh=(0.1, 0.075), calf=(0.07, 0.05), knee=0.068)
 
+    hip_piece = S.ellipsoid((0.0, 0.015, 0.9), (0.16, 0.12, 0.13))
+
     def trousers(P):
-        d = legs(P) - 0.01
+        d = S.smin(legs(P) - 0.01, hip_piece(P), 0.06)
         d = S.smax(d, P[:, 2] - 1.0, 0.02)
         d = S.smax(d, 0.3 - P[:, 2], 0.012)
         fold = 0.004 * np.sin(P[:, 2] * 55 + np.arctan2(P[:, 1], P[:, 0] - np.sign(P[:, 0]) * 0.09) * 3 +
@@ -305,10 +307,9 @@ def parts():
              paint=paint_cloth, texel=1.3, single_side=True),
         Part("mask", mask, "primary", vox=0.0012, tris=700, weights=("auto", ["Head", "neck_01"], "Head"),
              paint=lambda ctx: paint_cloth(ctx, 0.78, 0.09), texel=1.6, single_side=True),
-        Part("bangs", bangs_f, "fixed", vox=0.0011, tris=600, weights=("rigid", "Head"), paint=paint_hair, texel=1.2),
-        Part("scarf", scarf, "secondary", vox=0.002, tris=1400, weights=("fn", scarf_w), paint=paint_cloth, texel=1.0,
-             single_side=True),
-        Part("jacket", jacket, "primary", vox=0.002, tris=2300, weights=("auto", upper_bones + ["thigh_l", "thigh_r"], "spine_02", jacket_w),
+        Part("bangs", bangs_f, "fixed", vox=0.0012, tris=500, weights=("rigid", "Head"), paint=paint_hair, texel=1.2),
+        Part("scarf", scarf, "secondary", vox=0.002, tris=1250, weights=("fn", scarf_w), paint=paint_cloth, texel=1.0),
+        Part("jacket", jacket, "primary", vox=0.002, tris=2100, weights=("auto", upper_bones + ["thigh_l", "thigh_r"], "spine_02", jacket_w),
              paint=paint_emblem, texel=1.0, single_side=True),
         Part("lapel", lapel_trim, "secondary", vox=0.0014, tris=500, weights=("auto", ["spine_02", "spine_03", "neck_01", "spine_01"], "spine_03"),
              paint=paint_cloth, texel=0.8, occlude=False, single_side=True),

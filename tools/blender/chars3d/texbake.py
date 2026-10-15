@@ -146,6 +146,14 @@ def tangent_normals(Nhi, Nlo, T, B):
     s = 1.0 / np.sqrt(np.maximum(np.maximum(np.einsum("ij,ij->i", T, T), np.einsum("ij,ij->i", B, B)), 1e-18))
     T = T * s[:, None]
     B = B * s[:, None]
+    # UV-degenerate triangles give a singular frame: fall back to any orthonormal frame there
+    bad = np.abs(np.einsum("ij,ij->i", np.cross(T, B), Nlo)) < 1e-4
+    if bad.any():
+        ref = np.where(np.abs(Nlo[bad, 2:3]) < 0.9, np.array([[0, 0, 1]], F), np.array([[1, 0, 0]], F))
+        t = np.cross(ref, Nlo[bad])
+        t /= np.maximum(np.linalg.norm(t, axis=1, keepdims=True), 1e-9)
+        T[bad] = t
+        B[bad] = np.cross(Nlo[bad], t)
     M = np.stack([T, B, Nlo], axis=2)  # columns
     n = np.linalg.solve(M.astype(np.float64), Nhi.astype(np.float64)[:, :, None])[:, :, 0]
     n = n / np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-9)

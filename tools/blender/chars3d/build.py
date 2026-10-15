@@ -322,7 +322,7 @@ def pack_uvs(ob, margin):
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
     bpy.ops.uv.select_all(action="SELECT")
-    bpy.ops.uv.pack_islands(rotate=True, margin=margin, shape_method="CONCAVE")
+    bpy.ops.uv.pack_islands(rotate=True, margin_method="FRACTION", margin=margin, shape_method="CONCAVE")
     bpy.ops.object.mode_set(mode="OBJECT")
 
 
@@ -380,6 +380,10 @@ def build(recipe_name, ual1, out_dir, tex=1024, fast=False, keep_blend=None, onl
         delete_faces(lo, kill)
         bl.decimate(lo, target_tris=p.tris)
         drop_small_islands(lo)
+        if len(lo.data.polygons) == 0:  # entirely hidden under other parts
+            bpy.data.objects.remove(lo, do_unlink=True)
+            log(f"part {p.name}: fully hidden, skipped")
+            continue
         lo.data.shade_smooth()
         apply_weights(lo, rig, p.weights or ("rigid", "spine_02"), {o.name: o for o in lows})
         uv_unwrap(lo, p.uv_angle, p.texel)

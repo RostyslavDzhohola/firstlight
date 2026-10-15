@@ -1,7 +1,8 @@
-# FIRSTLIGHT sculpted characters: the build's PNG textures -> WebP for the client (1024² and a 512²
-# set for the Low tier). Albedo keeps its alpha (the painted accent mask). Our own code: MIT.
+# FIRSTLIGHT sculpted characters: PNG -> WebP for the client. Our own code: MIT.
 #
-#   python3 -I webp.py <raw dir> <out dir> hexwick ash ...
+#   python3 -I webp.py <raw dir> <out dir> hexwick ash ...     textures (1024² + a 512² Low set);
+#                                                               albedo keeps its alpha (accent mask)
+#   python3 -I webp.py --ui <render dir> <out dir>              hero_*.png / portrait_*.png renders
 
 import os
 import sys
@@ -9,7 +10,20 @@ import sys
 from PIL import Image
 
 
+def ui(src, out):
+    os.makedirs(out, exist_ok=True)
+    for f in sorted(os.listdir(src)):
+        if not (f.startswith("hero_") or f.startswith("portrait_") or f.startswith("lineup")) or not f.endswith(".png"):
+            continue
+        im = Image.open(os.path.join(src, f)).convert("RGBA")
+        path = os.path.join(out, f[:-4] + ".webp")
+        im.save(path, "WEBP", quality=88, method=6)
+        print("WEBP", os.path.basename(path), os.path.getsize(path))
+
+
 def main():
+    if sys.argv[1] == "--ui":
+        return ui(sys.argv[2], sys.argv[3])
     src, out, names = sys.argv[1], sys.argv[2], sys.argv[3:]
     os.makedirs(out, exist_ok=True)
     for n in names:

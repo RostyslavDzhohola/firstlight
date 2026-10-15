@@ -162,9 +162,11 @@ def plane(p, n):
     return lambda P: (P - p) @ n
 
 
-def bounded(f, lo, hi, margin=0.0):
-    """Evaluate f only inside the box [lo, hi] (+ margin); outside, return the distance to the box,
-    which never exceeds the true distance of a shape contained in it. Big speed-up for small parts."""
+def bounded(f, lo, hi, margin=0.04):
+    """Evaluate f only inside the box [lo, hi] grown by `margin`; outside, return the distance to the
+    grown box plus `margin`, still a lower bound of the true distance. The added margin matters: a
+    value near zero at the box faces would make smooth unions (which dip by up to k/4) cross zero
+    there and grow box-shaped sheets. Big speed-up for small parts."""
     lo = vec(lo) - margin
     hi = vec(hi) + margin
 
@@ -172,7 +174,7 @@ def bounded(f, lo, hi, margin=0.0):
         out = np.maximum(np.maximum(lo - P, P - hi), 0.0)
         dbox = np.sqrt(np.einsum("ij,ij->i", out, out))
         inside = dbox <= 0.0
-        res = dbox.astype(F)
+        res = (dbox + margin).astype(F)
         if inside.any():
             res[inside] = f(P[inside])
         return res
@@ -182,7 +184,7 @@ def bounded(f, lo, hi, margin=0.0):
 def tube(pts, radii, k=0.0, flat=None, up=(0, 0, 1)):
     f = _tube(pts, radii, k, flat, up)
     P = np.asarray(pts, dtype=F)
-    r = float(max(radii)) + 0.01
+    r = float(max(radii))
     return bounded(f, P.min(axis=0) - r, P.max(axis=0) + r)
 
 
@@ -369,7 +371,10 @@ def voronoi(P, freq, seed=0, jitter=0.85):
 # meshing
 
 
-def evaluate_grid(f, bmin, bmax, vox, block=16, bw_vox=3.0, chunk=3_000_000):
+SAFETY = 1.6
+
+
+def evaluate_grid(f, bmin, bmax, vox, block=16, bw_vox=3.0, chunk=3_000_000, safety=None):
     """Narrow-band evaluation on a dense grid. Returns (array, origin, voxel). Blocks whose centre is
     far from the surface are filled with +-band without evaluating every voxel."""
     bmin, bmax = vec(bmin), vec(bmax)
@@ -379,7 +384,11 @@ def evaluate_grid(f, bmin, bmax, vox, block=16, bw_vox=3.0, chunk=3_000_000):
     centres = bmin + (np.indices(nb).reshape(3, -1).T.astype(F) + 0.5) * F(block * vox)
     dc = f(centres.astype(F))
     hd = block * vox * math.sqrt(3) * 0.5
-    active = np.abs(dc) < hd * 1.25 + 2 * vox
+    # a block is skipped only when its centre is far from the surface; fields whose slope exceeds 1
+    # (displacements, angular cuts) need the extra safety, or a skipped block leaves a box-shaped
+    # artefact where the true surface crossed it
+    safety = SAFETY if safety is None else safety
+    active = np.abs(dc) < hd * safety + 2 * vox
     arr = np.empty(tuple(dims), dtype=F)
     core = arr[:-1, :-1, :-1].reshape(nb[0], block, nb[1], block, nb[2], block)
     fill = np.where(dc > 0, bw, -bw).reshape(tuple(nb)).astype(F)

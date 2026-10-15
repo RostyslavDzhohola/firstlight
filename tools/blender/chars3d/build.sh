@@ -60,3 +60,13 @@ done
 rm -f "$OUT_DEV/starters_atlas.png"
 ls -l "$OUT_DEV"
 echo "work dir: $WORK"
+
+# UI art: hero renders (every palette) and portraits, in the game look, as WebP
+mkdir -p "$WORK/ui"
+for c in $CHARS; do
+  "$BLENDER" -b --disable-autoexec --factory-startup --python "$HERE/render.py" -- --dir "$WORK/raw" \
+    --anims "$WORK/raw/starters_anims.glb" --mode heroes --chars "$c" --look game --out "$WORK/ui/hero" >/dev/null
+  "$BLENDER" -b --disable-autoexec --factory-startup --python "$HERE/render.py" -- --dir "$WORK/raw" \
+    --anims "$WORK/raw/starters_anims.glb" --mode portraits --chars "$c" --look game --out "$WORK/ui/portrait" >/dev/null
+done
+python3 -I "$HERE/webp.py" --ui "$WORK/ui" "$OUT_DEV"

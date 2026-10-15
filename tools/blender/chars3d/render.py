@@ -245,6 +245,7 @@ def add_character(dir_, name, pal, look, x=0.0, rot_z=0.0, action=None, frame=0,
             arm = o
     root = arm
     s = SCALE.get(name, 1.0)
+    root.rotation_mode = "XYZ"  # the glTF importer leaves objects in quaternion mode
     root.scale = (s, s, s)
     root.location = (x, y, 0)
     root.rotation_euler = (0, 0, math.radians(rot_z))
@@ -259,7 +260,17 @@ def add_character(dir_, name, pal, look, x=0.0, rot_z=0.0, action=None, frame=0,
 def setup_world(look, transparent=False):
     sc = bpy.context.scene
     if look == "game":
-        w = bl.world_gradient(bl.hex_lin("#93c0f2"), bl.hex_lin("#e9c3a6"), 0.0, bl.hex_lin("#ffdcc0"))
+        # Portus sky as the backdrop only: the characters' fill comes from the emulated hemisphere light
+        # in their material, so the world must not light them (camera rays see it, lighting doesn't)
+        w = bl.world_gradient(bl.hex_lin("#93c0f2"), bl.hex_lin("#e9c3a6"), 1.0, bl.hex_lin("#ffdcc0"))
+        nt = w.node_tree
+        bg = nt.nodes["Background"]
+        lp = nt.nodes.new("ShaderNodeLightPath")
+        mul = nt.nodes.new("ShaderNodeMath")
+        mul.operation = "MULTIPLY"
+        mul.inputs[1].default_value = 1.0
+        nt.links.new(lp.outputs["Is Camera Ray"], mul.inputs[0])
+        nt.links.new(mul.outputs[0], bg.inputs["Strength"])
         sc.view_settings.view_transform = "Khronos PBR Neutral"
     else:
         w = bl.world_gradient((0.42, 0.47, 0.56), (0.22, 0.2, 0.19), 0.7)
@@ -376,6 +387,45 @@ def main():
         sc.render.resolution_x = a.res
         sc.render.resolution_y = int(a.res * 0.42)
         cam = bl.camera("cam", (0, 0, 0.95), (0.05, -1, 0.06), 8.6, lens=50)
+    elif a.mode in ("heroes", "portraits"):
+        # UI art: one character, transparent background, every palette (heroes) or the default one
+        n = names[0]
+        sc.render.film_transparent = True
+        for o in list(sc.objects):
+            if o.type == "MESH" and o.name.startswith("Plane"):
+                bpy.data.objects.remove(o, do_unlink=True)
+        root, arm = add_character(a.dir, n, pals[0], a.look, rot_z=-24, action=act)
+        sc.frame_set(a.frame)
+        mesh = next(o for o in sc.objects if o.type == "MESH" and o.parent is arm)
+        if a.mode == "heroes":
+            sc.render.resolution_x, sc.render.resolution_y = 480, 720
+            cam = bl.camera("cam", (0, 0, 0.98), (0.1, -1, 0.06), 5.0, lens=55)
+            todo = [(i, f"{a.out}_{n}_{i}.png") for i in range(6)]
+        else:
+            sc.render.resolution_x = sc.render.resolution_y = 256
+            cam = bl.camera("cam", (0, 0, 1.63), (0.25, -1, 0.04), 1.55, lens=75)
+            todo = [(pals[0], f"{a.out}_{n}.png")]
+        sc.camera = cam
+        for pal, path in todo:
+            mat = make_material(f"{n}_{pal}_{a.look}_ui", os.path.join(a.dir, f"{n}_albedo.png"),
+                                os.path.join(a.dir, f"{n}_normal.png"), pal, a.look)
+            mesh.data.materials.clear()
+            mesh.data.materials.append(mat)
+            bl.render(path)
+        return
+    elif a.mode == "sheet":
+        # animation contact sheet: frames of one clip, side-on, one image per frame (stitched outside)
+        n = names[0]
+        add_character(a.dir, n, pals[0], a.look, rot_z=-70, action=act)
+        sc.render.resolution_x, sc.render.resolution_y = 360, 520
+        cam = bl.camera("cam", (0, 0, 0.95), (0.15, -1, 0.05), 4.4, lens=50)
+        sc.camera = cam
+        end = int(act.frame_range[1]) if act else 30
+        for k in range(8):
+            f = int(round(k * end / 8))
+            sc.frame_set(f)
+            bl.render(f"{a.out}_{a.clip}_{k}.png")
+        return
     else:
         raise SystemExit(f"unknown mode {a.mode}")
     sc.camera = cam

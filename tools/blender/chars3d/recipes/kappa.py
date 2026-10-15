@@ -156,7 +156,7 @@ def parts():
     sash = K.belt_ring(1.04, 0.215, 0.172, cy=0.02, h=0.06, t=0.018)
     knot = S.ellipsoid((0.1, -0.165, 1.03), (0.03, 0.02, 0.03))
     tails = S.union(S.tube([(0.1, -0.17, 1.02), (0.11, -0.185, 0.94), (0.105, -0.19, 0.86)], [0.018, 0.017, 0.015],
-                           flat=0.3, up=(0, -1, 0)),
+                           flat=0.5, up=(0, -1, 0)),
                     S.tube([(0.085, -0.17, 1.02), (0.07, -0.185, 0.95), (0.06, -0.19, 0.89)], [0.016, 0.015, 0.013],
                            flat=0.3, up=(0, -1, 0)))
 
@@ -190,10 +190,10 @@ def parts():
 
     # --- hair bob and kasa -----------------------------------------------------------------------
     bob = K.Hair(head, cap=0.014, hairline=lambda az, el: np.where(np.abs(az) < 60, 25.0, -5.0 - 0.15 * np.abs(az)).astype(F), k=0.008)
-    for az in range(-150, 181, 30):
+    for az in range(-135, 181, 45):
         a = math.radians(az)
-        bob.clump(az, 30, (math.sin(a) * 0.25, -math.cos(a) * 0.25, -1.0), 0.09, 0.04, lift=0.003, tip_lift=0.012,
-                  flat=0.5)
+        bob.clump(az, 30, (math.sin(a) * 0.25, -math.cos(a) * 0.25, -1.0), 0.09, 0.058, lift=0.004, tip_lift=0.012,
+                  flat=0.62)
     bob_f = bob.field()
     dish = S.cyl(c + vec((0, 0.006, 0.168)) * F(HS), 0.06, 0.008, rad=0.004)
 
@@ -243,7 +243,7 @@ def parts():
         return PT.shade(rgb, ctx.P, ctx.N, ctx.ao, ctx.cav, ao_tint="#6a4a20", ao_amt=0.55, cav_amt=0.4, edge_amt=0.2)
 
     cords = S.union(*[S.tube([c + vec((sx * 0.1, -0.0, 0.08)) * F(HS), c + vec((sx * 0.098, -0.03, -0.03)) * F(HS),
-                              c + vec((sx * 0.05, -0.07, -0.1)) * F(HS)], [0.0035] * 3) for sx in (1, -1)])
+                              c + vec((sx * 0.05, -0.07, -0.1)) * F(HS)], [0.005] * 3) for sx in (1, -1)])
 
     upper = ["spine_01", "spine_02", "spine_03", "neck_01", "Head", "clavicle_l", "clavicle_r", "upperarm_l", "upperarm_r",
              "lowerarm_l", "lowerarm_r", "hand_l", "hand_r", "pelvis", "thigh_l", "thigh_r", "calf_l", "calf_r", "foot_l",
@@ -251,7 +251,7 @@ def parts():
 
     return [
         Part("head", head.field, "fixed", vox=0.0011, tris=2000, weights=("auto", ["neck_01", "Head"], "Head"),
-             paint=paint_head, texel=2.2, uv_angle=70),
+             paint=paint_head, texel=3.6, uv_angle=70),
         Part("beak", beak, "fixed", vox=0.001, tris=500, weights=("rigid", "Head"), paint=paint_beak, texel=1.4),
         Part("bob", hair, "fixed", vox=0.0012, tris=900, weights=("rigid", "Head"), paint=paint_hair, texel=0.8,
              cull=False),

@@ -239,7 +239,7 @@ def parts():
 
     return [
         Part("head", head.field, "fixed", vox=0.0011, tris=1800, weights=("auto", ["neck_01", "Head"], "Head"),
-             paint=paint_head, texel=2.4, uv_angle=70),
+             paint=paint_head, texel=3.6, uv_angle=70),
         Part("guard", guard, "fixed", vox=0.001, tris=600, weights=("rigid", "Head"), paint=paint_brass, texel=1.3,
              single_side=True),
         Part("hood", hood, "primary", vox=0.0018, tris=2200, weights=("auto", ["Head", "neck_01", "spine_03", "clavicle_l", "clavicle_r"], "Head"),
