@@ -269,7 +269,7 @@ export function meadowGrassMaterial(u: MeadowGrassInputs): THREE.MeshLambertNode
   const rootC = mix(mix(u.root, col(0x1c3014), 0.7), col(0x34340f), vDry.mul(0.4));
   const tipC = mix(mix(u.tip, col(0x9fb04c), 0.75), col(0xcdb46a), vDry);
   const ao = mix(float(0.32), float(1), smoothstep(0.0, 0.5, vHf));
-  const bladeCol = mix(rootC, tipC, pow(vHf, 0.85)).mul(vSeed.mul(0.28).add(0.86)).mul(ao);
+  const bladeCol = mix(rootC, tipC, pow(vHf, 0.85)).mul(vSeed.mul(0.28).add(0.74)).mul(ao);
   const petal = select(vSpecies.lessThan(0.5), col(0xf4f1e6),
     select(vSpecies.lessThan(1.5), col(0xf2c21b), select(vSpecies.lessThan(2.5), col(0xe8a0b8), col(0x8a6ad6))));
   const centre = select(vSpecies.lessThan(0.5), col(0xf0b020), petal.mul(0.8));
@@ -327,9 +327,10 @@ export const cloudLayer = Fn(([dir, sky]: [any, any]) => {
   const core = clamp(dSun.sub(d).mul(5.0).add(0.35), 0.0, 1.0).mul(0.75).add(smoothstep(cover.add(0.1), cover.add(0.35), d).mul(0.25));
   const sunUp = smoothstep(-0.08, 0.2, dot(atmo.sunDir, atmo.up));
   const toward = pow(max(dot(dir, atmo.sunDir), 0.0), 6.0);
-  const lit = mix(vec3(1.0, 0.98, 0.95), atmo.sunColor, 0.45).mul(sunUp.mul(1.05).add(0.08));
+  // Kept under the bloom threshold: a bright cloud deck would veil the whole frame with bloom.
+  const lit = mix(vec3(1.0, 0.98, 0.95), atmo.sunColor, 0.45).mul(sunUp.mul(0.82).add(0.06));
   const shade = mix(atmo.zenith, atmo.horizon, 0.45).mul(mix(float(0.55), float(0.95), sunUp));
-  const rgb = mix(lit, shade, core.mul(0.7)).add(atmo.sunColor.mul(toward.mul(float(1).sub(core)).mul(0.6).mul(sunUp)));
+  const rgb = mix(lit, shade, core.mul(0.7)).add(atmo.sunColor.mul(toward.mul(float(1).sub(core)).mul(0.35).mul(sunUp)));
   // Aerial perspective: far clouds near the horizon take the sky colour.
   const far = smoothstep(500.0, 1600.0, t).mul(0.65);
   return vec4(mix(rgb, sky, far), alpha);
@@ -364,11 +365,11 @@ export function mossy(colIn: any): any {
 // ---------------------------------------------------------------------------------------------
 // Grade
 
-/** After the per-body grade (display space): a gentle S-curve and a saturation lift. */
+/** After the per-body grade (display space): a gentle S-curve and a saturation lift (+18 %). */
 export function meadowGrade(rgb: any): any {
   const c: any = clamp(rgb, 0.0, 1.0);
   const s: any = c.mul(c).mul(float(3).sub(c.mul(2)));
-  const curved: any = mix(c, s, 0.35);
+  const curved: any = mix(c, s, 0.45);
   const l: any = dot(curved, vec3(0.2126, 0.7152, 0.0722));
-  return mix(vec3(l, l, l), curved, 1.12);
+  return mix(vec3(l, l, l), curved, 1.18);
 }
