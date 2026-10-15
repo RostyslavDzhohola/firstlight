@@ -23,6 +23,8 @@ export interface MapMarker {
   pad?: number;
   /** Portal destination (kind "portal"). */
   to?: BodyId;
+  /** Hunt-area radius in metres (places that are NPC areas): the map rings them when zoomed in. */
+  area?: number;
 }
 
 const cap = (s: string) => s[0]!.toUpperCase() + s.slice(1);
@@ -41,7 +43,7 @@ export function staticMarkers(body: BodyId, terrain: Terrain): MapMarker[] {
   const names = new Set<string>();
   for (const p of placesOn(body)) {
     if (p.kind === "hidden" || p.kind === "pad" || p.kind === "lair") continue;
-    out.push({ id: `place:${p.id}`, kind: "place", dir: placeDir(p), label: p.name, priority: 1 });
+    out.push({ id: `place:${p.id}`, kind: "place", dir: placeDir(p), label: p.name, priority: 1, ...(p.kind === "area" ? { area: p.radius } : {}) });
     names.add(p.name.toLowerCase());
   }
   for (const pk of def.peaks) {
@@ -57,7 +59,8 @@ export function staticMarkers(body: BodyId, terrain: Terrain): MapMarker[] {
     out.push({ id: `lair:${lair.place}`, kind: "lair", dir: placeDir(lair.place), label: `${place(lair.place).name} · ${lair.name}`, priority: 2 });
   }
   if (def.padLayout !== "none") {
-    padDirs(def).forEach((d, i) => out.push({ id: `pad:${i}`, kind: "pad", dir: d, label: padName(body, i), priority: 3, pad: i }));
+    // Unnamed pads are "Waypoint N" in shared content; on the map that reads like your waypoint.
+    padDirs(def).forEach((d, i) => out.push({ id: `pad:${i}`, kind: "pad", dir: d, label: padName(body, i).replace(/^Waypoint (\d+)$/, "Pad $1"), priority: 3, pad: i }));
     const guide = GUIDES[body as Exclude<BodyId, "portus">];
     const g = guide && WORLD_OBJECT_BY_ID.get(guide.id);
     if (g) out.push({ id: `guide:${guide.id}`, kind: "guide", dir: objectDir(g), label: `${guide.name} · missions`, priority: 2 });

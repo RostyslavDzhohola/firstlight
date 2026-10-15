@@ -1,5 +1,6 @@
 // The waypoint in the world: a magenta light pillar rising from a ground ring at the waypoint
-// (ui/waypoint.ts). Additive, unfogged and wider with distance, so it reads from across the body.
+// (ui/waypoint.ts). Unfogged, solid at the base and wider with distance, so it reads against a
+// bright sky from across the body (additive washed out in daylight).
 // Built once per body and added hidden, so the warm-up compiles its two materials.
 
 import * as THREE from "three/webgpu";
@@ -15,11 +16,10 @@ const _y = new THREE.Vector3(0, 1, 0);
 
 function glowMaterial(fade: boolean, opacity: number): THREE.MeshBasicNodeMaterial {
   const m = new THREE.MeshBasicNodeMaterial({
-    color: new THREE.Color(WAYPOINT_COLOUR).multiplyScalar(1.6),
+    color: new THREE.Color(WAYPOINT_COLOUR).multiplyScalar(1.15),
     transparent: true,
     opacity,
     depthWrite: false,
-    blending: THREE.AdditiveBlending,
     side: THREE.DoubleSide,
     fog: false,
   });
@@ -39,7 +39,7 @@ export class WaypointBeacon {
   constructor(private readonly scene: THREE.Scene, private readonly terrain: Terrain, private readonly radius: number) {
     const pg = new THREE.CylinderGeometry(1, 1, 1, 16, 1, true);
     pg.translate(0, 0.5, 0);
-    this.pillar = new THREE.Mesh(pg, glowMaterial(true, 0.6));
+    this.pillar = new THREE.Mesh(pg, glowMaterial(true, 0.85));
     this.pillar.scale.set(0.8, PILLAR_HEIGHT, 0.8);
     const rg = new THREE.RingGeometry(2.1, 2.7, 40);
     rg.rotateX(-Math.PI / 2);
@@ -72,7 +72,7 @@ export class WaypointBeacon {
   /** Keep the pillar a few pixels wide however far away it is. */
   update(camera: THREE.Vector3) {
     if (!this.group.visible) return;
-    const w = Math.max(0.7, camera.distanceTo(this.base) * 0.006);
+    const w = Math.max(0.8, camera.distanceTo(this.base) * 0.009);
     this.pillar.scale.x = this.pillar.scale.z = w;
   }
 

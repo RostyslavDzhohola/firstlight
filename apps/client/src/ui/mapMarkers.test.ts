@@ -30,6 +30,7 @@ describe("map markers", () => {
     expect(ms.find((m) => m.kind === "guide")?.label).toBe("Lark · missions");
     expect(ms.find((m) => m.kind === "lair")?.label).toContain("Tidewrath");
     expect(ms.some((m) => m.kind === "peak" || m.label === "Kestrel Peak")).toBe(true);
+    expect(ms.some((m) => /waypoint/i.test(m.label))).toBe(false); // that word is the player's marker
   });
 
   it("points each active mission on this body at its target", () => {
