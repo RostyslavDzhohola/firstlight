@@ -409,6 +409,32 @@ describe("pad outposts against NPCs and blasts (D43, D44)", () => {
     }
   }
 
+  it("a melee NPC with its target 2 m away behind a lantern post goes round it or gives up; it never swings at the post forever", () => {
+    const w = fakeWorld("hollowmere", { immortal: true });
+    const site = OUTPOSTS.hollowmere;
+    const index = site.layout.map((it, i) => [it, i] as const).filter(([it]) => site.prefabs[it[0]]!.name === "h_lantern").at(-1)![1];
+    const post = siteSolids(Q.terrain("hollowmere")).find((x) => x.item === index)!;
+    const [ce, cn] = siteCoords(anchor("hollowmere"), post.px, post.py, post.pz, R("hollowmere"));
+    // Either side of the post along a line through it, 1 m from its centre each.
+    const along = (k: number) => spot(w, "hollowmere", ce + k, cn);
+    const p = w.addPlayer("hider", along(-1));
+    const n = npc(w, "bonewalker", 6, along(1));
+    expect(npcInside("hollowmere", n)).toBe(false);
+    const a = chest(n.pos, Math.min(n.height * 0.8, 2)), b = chest([p.state.x, p.state.y, p.state.z], 1.1);
+    expect(walls("hollowmere").blocks(...a, ...b)).toBe(true); // the post is in the way
+    const start = [...n.pos] as V3;
+    dealDamage(w.world.host, p, n, 1, false);
+    let reached = false, evaded = false;
+    const t = run(w, 15_000, () => {
+      if (p.state.hp < p.state.maxHp) reached = true;
+      if (n.mode === MODE.EVADE) evaded = true;
+      return reached || evaded;
+    });
+    expect(reached || evaded, `mode ${n.mode}, moved ${Math.hypot(n.pos[0] - start[0], n.pos[1] - start[1], n.pos[2] - start[2]).toFixed(2)} m`).toBe(true);
+    expect(t).toBeLessThan(NPC_TUNING.unreachableMs + 3000);
+    expect(npcInside("hollowmere", n)).toBe(false);
+  });
+
   it("a melee-only NPC whose target stands at the end of the jetty evades instead of waiting at the shore", () => {
     const w = fakeWorld("arcadia", { immortal: true });
     const jetty = footprint("arcadia", "a_jetty");
