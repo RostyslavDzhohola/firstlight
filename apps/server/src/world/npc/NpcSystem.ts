@@ -370,6 +370,7 @@ export class NpcSystem implements RoomSystem {
       hpAcc: 0,
       gridAxis: -1,
       strafeSign: this.seq & 1 ? 1 : -1,
+      slideSide: 1,
       spawned: opts.spawned ?? null,
       expiresAt: opts.ttlMs ? now + opts.ttlMs : 0,
       dead: false,

@@ -17,7 +17,8 @@ import type { BodyRoom } from "../src/world/BodyRoom.ts";
 import { explode, fire, melee, projectiles, stepProjectiles, type Projectile } from "../src/world/combat.ts";
 import { canSee, chest, startAttack } from "../src/world/npc/attacks.ts";
 import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
-import { makeGround, step } from "../src/world/npc/steer.ts";
+import { makeGround } from "../src/world/npc/steer.ts";
+import { MODE } from "../src/world/npc/npc.ts";
 import { fakeWorld } from "./npcWorld.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 
@@ -281,24 +282,25 @@ describe("the AI and blasts (socket-free NPC world on Portus)", () => {
     }
   });
 
-  it("NPCs walk round the structures outside the walls (no stepping through the crates by the east road)", () => {
-    const fw = walled();
-    const t = fw.world.terrain;
-    const g = makeGround(t);
-    const col = g.structures!;
-    let pos = town(52.5, -6, 0, t);
-    const goal = town(58.5, -6, 0, t);
-    const out: V = [0, 0, 0];
-    for (let i = 0; i < 80; i++) {
-      const d = [goal[0] - pos[0], goal[1] - pos[1], goal[2] - pos[2]];
-      const u = pos.map((v) => v / Math.hypot(...pos));
-      const k = d[0]! * u[0]! + d[1]! * u[1]! + d[2]! * u[2]!;
-      const tg = [d[0]! - u[0]! * k, d[1]! - u[1]! * k, d[2]! - u[2]! * k];
-      const tl = Math.hypot(...tg);
-      if (tl < 0.3) break;
-      if (step(g, pos, [tg[0]! / tl, tg[1]! / tl, tg[2]! / tl], 0.25, "ground", 0, 0.45, out) < 0) break;
-      expect(col.footing(out[0], out[1], out[2], 0.3).inside, `step ${i}`).toBe(false);
-      pos = [out[0], out[1], out[2]];
+  it("NPCs walk round the structures outside the walls: a Woolback heading through the crates by the east road gets past them", () => {
+    for (const [from, to] of [[[52.5, -6], [58.5, -6]], [[58.5, -6.4], [52.5, -5.6]]] as const) {
+      const fw = walled();
+      const t = fw.world.terrain;
+      const col = makeGround(t).structures!;
+      const goal = town(to[0], to[1], 0, t);
+      // The crates stand on the straight line between the two spots.
+      expect(col.crosses(...town(from[0], from[1], 0, t), ...goal)).toBe(true);
+      const n = fw.sys.createNpc(NPC_INDEX.get("woolback")!, 1, town(from[0], from[1], 0, t), fw.clock.t, { instant: true, roam: 0 });
+      n.goal = goal;
+      fw.sys.setMode(n, MODE.WANDER, fw.clock.t);
+      let arrived = false;
+      for (let i = 0; i < 400 && !arrived; i++) {
+        fw.step(50);
+        expect(col.footing(n.pos[0], n.pos[1], n.pos[2], 0.3).inside, `tick ${i}`).toBe(false);
+        arrived = n.goal === null; // moveTo arrived (within 1 m) and the Woolback went idle
+      }
+      expect(arrived, `from ${from} to ${to}`).toBe(true);
+      expect(d3(n.pos, goal)).toBeLessThan(1.6);
     }
   });
 });

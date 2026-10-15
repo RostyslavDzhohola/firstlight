@@ -58,16 +58,31 @@ export function placeOnGround(g: Ground, p: V3, loco: Locomotion, hover = 0): V3
 }
 
 const SLIDES = [0, 35, -35, 70, -70];
+/**
+ * Among structures (Portus outside the walls) an NPC follows the obstacle: it turns further to its
+ * preferred side first, as far as sideways and back (a crate's far face), before trying the other
+ * side; the caller keeps the side it last slid to (Npc.slideSide), so it walks round, not to and fro.
+ */
+const FOLLOW = [0, 35, 70, 105, 140, -35, -70, -105, -140, 180];
+
+/** The angle (degrees, + = the preferred side's turn) step() moved at for its return value `i`. */
+export function slideAngle(g: Ground, i: number, side = 1): number {
+  if (i < 0) return 0;
+  return g.structures ? FOLLOW[i]! * side : SLIDES[i]!;
+}
 
 /**
  * Move `pos` by `d` metres along tangent `t`. Writes the new position into `out` and returns the
- * index of the direction used (0 = straight, 1–4 = slid), or -1 if every direction was refused.
+ * index of the direction used (0 = straight, then slides: slideAngle), or -1 if every direction was
+ * refused. `side` (±1): which way to turn first round a structure.
  */
-export function step(g: Ground, pos: V3, t: V3, d: number, loco: Locomotion, hover: number, radius: number, out: V3, avoidSafe = true): number {
+export function step(g: Ground, pos: V3, t: V3, d: number, loco: Locomotion, hover: number, radius: number, out: V3, avoidSafe = true, side = 1): number {
   const curH = Math.hypot(pos[0], pos[1], pos[2]) - g.R;
   const margin = NPC_RULES.safeMargin + radius;
-  for (let i = 0; i < SLIDES.length; i++) {
-    const dir = SLIDES[i] === 0 ? t : rotateAboutUp(pos, t, SLIDES[i]!);
+  const angles = g.structures ? FOLLOW : SLIDES;
+  for (let i = 0; i < angles.length; i++) {
+    const ang = g.structures ? angles[i]! * side : angles[i]!;
+    const dir = ang === 0 ? t : rotateAboutUp(pos, t, ang);
     const qx = pos[0] + dir[0] * d, qy = pos[1] + dir[1] * d, qz = pos[2] + dir[2] * d;
     const l = Math.hypot(qx, qy, qz);
     const ux = qx / l, uy = qy / l, uz = qz / l;
