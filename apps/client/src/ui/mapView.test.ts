@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { bearingTo, headingOf, northAt, wrapDeg, type V3 } from "../social/compassMath.ts";
-import { headingTo, mapView, metresPerPixel, offsetDir, panView, project, screenAngle, unproject, zoomView, type MapView } from "./mapView.ts";
+import { headingTo, mapView, metresPerPixel, offsetDir, panView, pointerToCanvas, project, resizeView, screenAngle, unproject, zoomView, type MapView } from "./mapView.ts";
 
 const R = 500;
 const at = (d: V3, r = R): V3 => [d[0] * r, d[1] * r, d[2] * r];
@@ -151,6 +151,31 @@ describe("map navigation", () => {
         expect(Math.abs(wrapDeg(deg(screenAngle(pv, f)) - deg(Math.atan2(p1.x - p0.x, -(p1.y - p0.y)))))).toBeLessThan(1);
       }
     }
+  });
+
+  it("puts the waypoint under the pointer when the canvas is shown at another size (review: 8.88 m off at 640×500)", () => {
+    const d = unit([1, (1 + Math.sqrt(5)) / 2, 0]); // Dawnpad
+    // The map was laid out for 536×260 but the panel shrank it to 536×231 on screen.
+    const v = mapView(d, 0, 1200, 536, 260);
+    const shown = { left: 52, top: 140, width: 536, height: 231 };
+    const centre = { x: shown.left + shown.width / 2, y: shown.top + shown.height / 2 };
+    const miss = (vv: MapView, rect: typeof shown) => {
+      const p = pointerToCanvas(centre.x, centre.y, rect, vv.w, vv.h);
+      const hit = unproject(vv, p.x, p.y)!;
+      return Math.hypot(hit[0] - d[0], hit[1] - d[1], hit[2] - d[2]) * R;
+    };
+    // Before the resize lands: the pointer is scaled into the laid-out canvas.
+    expect(miss(v, shown)).toBeLessThan(0.01);
+    // After it: the view takes the shown size and keeps its centre, turn and scale.
+    const r = resizeView(v, shown.width, shown.height);
+    expect([r.w, r.h, r.ppr, r.rot]).toEqual([536, 231, 1200, 0]);
+    expect(miss(r, shown)).toBeLessThan(0.01);
+    // And a waypoint dropped off-centre lands where it's drawn.
+    const target = offsetDir(d, 15, -6, R);
+    const s = project(r, target);
+    const p = pointerToCanvas(shown.left + s.x, shown.top + s.y, shown, r.w, r.h);
+    const back = unproject(r, p.x, p.y)!;
+    expect(Math.hypot(back[0] - target[0], back[1] - target[1], back[2] - target[2]) * R).toBeLessThan(0.01);
   });
 
   it("reports the ground scale at the centre", () => {

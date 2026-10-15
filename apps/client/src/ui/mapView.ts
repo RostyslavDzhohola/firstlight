@@ -148,6 +148,22 @@ export function screenAngle(v: MapView, t: V3 | readonly number[]): number {
   return Math.atan2(x, y);
 }
 
+/** The same view for a canvas of another size (same centre, turn and scale). */
+export function resizeView(v: MapView, w: number, h: number): MapView {
+  return mapView(v.c, v.rot, v.ppr, w, h);
+}
+
+/**
+ * Pointer position in the view's pixels (w × h), from client coordinates and the canvas's shown
+ * rectangle: CSS can show the canvas at another size than the view was laid out for.
+ */
+export function pointerToCanvas(clientX: number, clientY: number, rect: { left: number; top: number; width: number; height: number }, w: number, h: number): { x: number; y: number } {
+  return {
+    x: ((clientX - rect.left) * w) / (rect.width || w),
+    y: ((clientY - rect.top) * h) / (rect.height || h),
+  };
+}
+
 /** Ground metres per screen pixel at the view centre. */
 export function metresPerPixel(v: MapView, radius: number): number {
   return radius / v.ppr;

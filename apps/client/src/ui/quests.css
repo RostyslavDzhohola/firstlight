@@ -53,7 +53,8 @@
 .fl-map__head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; margin-bottom: calc(.6 * var(--u)); }
 .fl-map__tools { display: flex; gap: calc(.4 * var(--u)); flex-wrap: wrap; }
 .fl-map__tools .fl-btn { min-width: calc(2.2 * var(--u)); }
-.fl-map__view { position: relative; margin: 0 auto; border-radius: var(--r-2); overflow: hidden; background: #0b0f14; box-shadow: inset 0 0 0 1px var(--photon-line); }
+/* Sized here, not inline: it may shrink to fit the panel, and ui/map.ts follows its shown size. */
+.fl-map__view { position: relative; flex: 0 1 auto; margin: 0 auto; width: min(1040px, calc(90vw - 40px)); height: min(700px, calc(86vh - 170px)); min-width: 280px; min-height: 160px; border-radius: var(--r-2); overflow: hidden; background: #0b0f14; box-shadow: inset 0 0 0 1px var(--photon-line); }
 .fl-map canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
 .fl-map canvas.drag { cursor: grabbing; }
 /* The waypoint's DOM marker sits exactly on the drawn diamond (transparent: the canvas draws it). */

@@ -17,7 +17,7 @@ import { layoutMapLabels, type MapLabel } from "./mapLabels.ts";
 import { mapAtlas, type ViewImage } from "./mapAtlas.ts";
 import { atlasResolution } from "./mapRaster.ts";
 import { missionTargets, staticMarkers, type MapMarker } from "./mapMarkers.ts";
-import { mapView, metresPerPixel, placeUnder, project, screenAngle, unproject, zoomView, type MapView, type Projected } from "./mapView.ts";
+import { mapView, metresPerPixel, placeUnder, pointerToCanvas, project, resizeView, screenAngle, unproject, zoomView, type MapView, type Projected } from "./mapView.ts";
 import { arrow, diamond, star } from "./minimapMarkers.ts";
 import { uiSettings } from "./uiSettings.ts";
 import { WAYPOINT_COLOUR, waypoints } from "./waypoint.ts";
@@ -101,6 +101,12 @@ export class MapPanel extends Panel {
   constructor(game: Game) {
     super(game, "fl-q fl-map");
     this.box.dataset.e2e = "world-map";
+    if (typeof ResizeObserver !== "undefined") {
+      new ResizeObserver((entries) => {
+        const r = entries[entries.length - 1]?.contentRect;
+        if (r && this.isOpen) this.fit(r.width, r.height);
+      }).observe(this.view);
+    }
     this.wpEl.dataset.e2e = "map-waypoint";
     this.wpEl.hidden = true;
     this.canvas.addEventListener("mousedown", (e) => {
@@ -130,6 +136,8 @@ export class MapPanel extends Panel {
 
   open() {
     super.open();
+    const box = this.view.getBoundingClientRect(); // laid out now; the observer follows resizes
+    this.fit(box.width, box.height);
     const body = this.game.bodyId;
     const R = BODIES[body].radius;
     this.markers ??= staticMarkers(body, this.game.planet.terrain);
@@ -189,13 +197,7 @@ export class MapPanel extends Panel {
     }, this.clearBtn);
     this.syncButtons();
 
-    this.w = Math.max(320, Math.min(1040, Math.floor(window.innerWidth * 0.9) - 40));
-    this.h = Math.max(260, Math.min(700, Math.floor(window.innerHeight * 0.86) - 170));
-    this.dpr = Math.min(2, window.devicePixelRatio || 1);
-    this.canvas.width = Math.round(this.w * this.dpr);
-    this.canvas.height = Math.round(this.h * this.dpr);
-    this.view.style.width = `${this.w}px`;
-    this.view.style.height = `${this.h}px`;
+    // The view box takes its size from CSS (and may shrink to fit the panel); fit() follows it.
     b.appendChild(this.view);
     this.tip.className = "tip";
     b.appendChild(this.tip);
@@ -205,8 +207,21 @@ export class MapPanel extends Panel {
       def.padLayout === "none"
         ? "<span><i class=\"k portal\"></i>portal to a planet</span><span><i class=\"k shop\"></i>shop</span><span><i class=\"k wp\"></i>waypoint</span><span>click: set a waypoint · right-click: clear · drag: pan · wheel: zoom · M: close</span>"
         : "<span><i class=\"k pad on\"></i>discovered pad</span><span><i class=\"k pad\"></i>undiscovered</span><span><i class=\"k guide\"></i>mission guide</span><span><i class=\"k lair\"></i>boss lair</span><span>★ mission</span><span><i class=\"k wp\"></i>waypoint</span><span>click: waypoint · right-click: clear · click a pad while on one: travel · drag · wheel · M</span>";
+  }
+
+  /** Match the canvas and the projection to the size the view box is shown at. */
+  private fit(width: number, height: number) {
+    const w = Math.round(width), h = Math.round(height);
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    if (w < 40 || h < 40 || (w === this.w && h === this.h && dpr === this.dpr && this.canvas.width === Math.round(w * dpr))) return;
+    this.w = w;
+    this.h = h;
+    this.dpr = dpr;
+    this.canvas.width = Math.round(w * dpr);
+    this.canvas.height = Math.round(h * dpr);
     if (this.v) {
-      this.v = mapView(this.v.c, this.v.rot, this.v.ppr, this.w, this.h);
+      const r = resizeView(this.v, w, h);
+      this.v = mapView(r.c, r.rot, this.clampPpr(r.ppr), w, h);
       this.changed();
     }
   }
@@ -214,8 +229,7 @@ export class MapPanel extends Panel {
   // ------------------------------------------------------------------------------------------ view
 
   private local(e: MouseEvent): { x: number; y: number } {
-    const r = this.canvas.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
+    return pointerToCanvas(e.clientX, e.clientY, this.canvas.getBoundingClientRect(), this.w, this.h);
   }
 
   private heading(): number {
