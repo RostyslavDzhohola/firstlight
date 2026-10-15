@@ -394,16 +394,17 @@ def main():
         for o in list(sc.objects):
             if o.type == "MESH" and o.name.startswith("Plane"):
                 bpy.data.objects.remove(o, do_unlink=True)
-        root, arm = add_character(a.dir, n, pals[0], a.look, rot_z=-24, action=act)
+        root, arm = add_character(a.dir, n, pals[0], a.look, rot_z=-18, action=act)
         sc.frame_set(a.frame)
         mesh = next(o for o in sc.objects if o.type == "MESH" and o.parent is arm)
+        s = SCALE.get(n, 1.0)
         if a.mode == "heroes":
             sc.render.resolution_x, sc.render.resolution_y = 480, 720
-            cam = bl.camera("cam", (0, 0, 0.98), (0.1, -1, 0.06), 5.0, lens=55)
+            cam = bl.camera("cam", (0, 0, 0.98 * s), (0.0, -1, 0.05), 3.55, lens=55)
             todo = [(i, f"{a.out}_{n}_{i}.png") for i in range(6)]
         else:
             sc.render.resolution_x = sc.render.resolution_y = 256
-            cam = bl.camera("cam", (0, 0, 1.63), (0.25, -1, 0.04), 1.55, lens=75)
+            cam = bl.camera("cam", (0, 0, 1.66 * s), (0.12, -1, 0.02), 1.75, lens=70)
             todo = [(pals[0], f"{a.out}_{n}.png")]
         sc.camera = cam
         for pal, path in todo:
