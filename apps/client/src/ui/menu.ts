@@ -332,10 +332,14 @@ export class Menu {
     if (!offersSave(await saveStatus()) || this.mode !== "notice") return;
     const card = this.el.querySelector(".fl-notice");
     if (!card) return;
-    const note = el("p", "fl-notice__save", card, "As a guest, it lives in this browser only. ");
+    // Above "Play again": the line belongs to the card's text.
+    const play = card.querySelector(".fl-btn--primary");
+    const note = el("p", "fl-notice__save", null, "As a guest, it lives in this browser only. ");
+    card.insertBefore(note, play);
     if (!saveReady(Math.max(this.game.hud.you?.level ?? 1, this.game.combat?.saveNudge.best ?? 0))) return;
     note.append("Save it to play on any browser.");
-    const b = button("", "fl-btn fl-btn--sm", card);
+    const b = button("", "fl-btn fl-btn--sm", null);
+    card.insertBefore(b, play);
     icon("save", "", b);
     b.append("Save progress");
     b.dataset.e2e = "logout-save";

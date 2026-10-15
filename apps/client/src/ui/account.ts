@@ -26,13 +26,19 @@ function modal(name: string, onEscape: (() => void) | null): { overlay: HTMLDivE
   card.setAttribute("role", "dialog");
   card.setAttribute("aria-modal", "true");
   isolateKeys(overlay);
-  overlay.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape" && onEscape) onEscape();
-  });
+  // Esc belongs to the card while it's open, wherever the focus is: it never reaches the game or the
+  // Esc menu underneath (which would resume play behind the card).
+  const onKey = (ev: KeyboardEvent) => {
+    if (ev.key !== "Escape") return;
+    ev.stopPropagation();
+    onEscape?.();
+  };
+  document.addEventListener("keydown", onKey, true);
   return {
     overlay,
     card,
     close: () => {
+      document.removeEventListener("keydown", onKey, true);
       overlay.remove();
       overlayClosed(name);
     },
