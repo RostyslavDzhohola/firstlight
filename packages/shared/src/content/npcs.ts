@@ -925,17 +925,18 @@ export interface FixedMember {
 /**
  * Portus outside the town walls (D-zones-1): fixed groups in the town frame (east, north: geodesic
  * metres from the pole, D38), weak enough for a first fight (levels 1–2). Woolbacks graze in sight of
- * both gates (the border runs through the gatehouses at ±46 m east), small Hopbit packs wait a
- * short walk out, and the far side has a little more. Hostile homes stay ≥ 65 m from the town's
- * edge plus their wander room (server spawns.ts checks it); steering keeps every NPC out of the town.
+ * both gates (the border runs through the gatehouses at ±46 m east); small Hopbit packs wait on the
+ * rim ~40 m out, past their 25 m sight from the gate, so nobody is jumped on the doorstep; the far
+ * side has a little more. Hostile homes keep their wander room and the NPC margin clear of the town
+ * (server spawns.ts checks it); steering keeps every NPC out of the town.
  */
 export const PORTUS_WILDS: readonly { id: string; east: number; north: number; members: FixedMember[] }[] = [
   // East gate: the road out runs past the paddock fence.
   { id: "east_meadow", east: 63, north: 17, members: [{ kind: "woolback", count: 4, level: 1 }] },
-  { id: "east_hopbits", east: 76, north: -16, members: [{ kind: "hopbit", count: 3, level: 1 }] },
+  { id: "east_hopbits", east: 86, north: -20, members: [{ kind: "hopbit", count: 3, level: 1 }] },
   // West gate.
   { id: "west_meadow", east: -63, north: -17, members: [{ kind: "woolback", count: 4, level: 1 }] },
-  { id: "west_hopbits", east: -76, north: 17, members: [{ kind: "hopbit", count: 3, level: 1 }] },
+  { id: "west_hopbits", east: -86, north: 20, members: [{ kind: "hopbit", count: 3, level: 1 }] },
   // Round the walls and over the rim.
   { id: "south_hopbits", east: 8, north: -84, members: [{ kind: "hopbit", count: 4, level: 2 }] },
   { id: "north_hopbits", east: -12, north: 100, members: [{ kind: "hopbit", count: 3, level: 2 }] },

@@ -461,8 +461,9 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   combat tag), logout, horses (the whistle now works outside the walls), NPC steering and the
   client's HUD zone label all read it. Arrival, respawn, rebirth, the dummies, the portals, Juno and
   the Hall are inside. Outside: eight fixed groups (`PORTUS_WILDS`, levels 1–2): Woolbacks within
-  ~20 m of each gate, three Hopbits ~30 m out from each, Hopbits south and behind the castle,
-  Woolbacks and two Sparkflies over the rim. Hostile homes keep their wander room plus the 3 m NPC
+  ~20 m of each gate, three Hopbits on the rim ~45 m out from each (past their 25 m sight from the
+  gate, so nobody is jumped on the doorstep), Hopbits south and behind the castle, Woolbacks and
+  two Sparkflies over the rim. Hostile homes keep their wander room plus the 3 m NPC
   margin clear of the town; steering keeps every NPC out (as at pad rings, D36: an unreachable
   target → evade after 5 s). Kills pay from Arcadia's tonic and cosmetic tables. The HUD shows an
   always-on zone label (Safe / Danger, `[data-e2e="zone-label"]` with `data-zone`) from the

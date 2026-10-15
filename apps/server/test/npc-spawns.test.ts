@@ -58,12 +58,14 @@ describe("Portus outside the town walls (D-zones-1)", () => {
     }
   });
 
-  it("each gate looks out on a herd within 25 m and a hostile pack within 40 m", () => {
+  it("each gate looks out on a herd within 25 m and a hostile pack within 50 m, out of its 25 m sight from the gate", () => {
     expect(TOWN_GATES).toHaveLength(2);
     for (const g of TOWN_GATES) {
       const near = (hostile: boolean) => Math.min(...points.filter((p) => p.members.some((m) => NPC_DEFS[m.def]!.temper === "hostile") === hostile).map((p) => distance(p.dir, g, R)));
       expect(near(false)).toBeLessThan(25);
-      expect(near(true)).toBeLessThan(40);
+      expect(near(true)).toBeLessThan(50);
+      // Members wander 10 m and stand 4 m from home: still beyond a Hopbit's 25 m sight from the gate.
+      expect(near(true) - 14).toBeGreaterThan(25);
     }
   });
 });
