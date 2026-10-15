@@ -1,6 +1,7 @@
 {
   "$comment": "Journeys that must pass before a deploy (pnpm e2e:gate). Ids are the @J tags in apps/client/e2e/*.spec.ts. Add a journey when its feature lane lands and it passes on the listed projects; remove one only with a decision in docs/DECISIONS.md.",
   "gates": [
+    { "id": "J1.1", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Home page with Play (6a)" },
     { "id": "J2.2", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Hexwick + Hexquill I on Arcadia: refused on the pad, accepted outside" },
     { "id": "J2.3", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Brother Ash + Sunbrand I on Arcadia" },
     { "id": "J2.4", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Kappa + Riverstaff I on Arcadia" },
@@ -8,6 +9,13 @@
     { "id": "J2.6", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Hexwick + Hexquill I on Hollowmere" },
     { "id": "J2.7", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Hexwick + Hexquill I on Meridian" },
     { "id": "J3.4", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Hexwick kills a hostile on Arcadia for XP (natural one near the arrival, else an admin-spawned Hopbit)" },
-    { "id": "J5.3", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Dodge roll starts < 100 ms after C, standing and running, no server snap-back" }
+    { "id": "J4.1", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Minimap visible, clear of the tutorial, player card, hotbar and save card (6b)" },
+    { "id": "J4.2", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Due east on the map is east on the compass (6b)" },
+    { "id": "J4.3", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Waypoint drops, clears with right-click and on arrival (6b)" },
+    { "id": "J5.1", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Esc → menu → Esc back into the game, twice (6d)" },
+    { "id": "J5.2", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "No F-keys; photo mode from its listed key (6d)" },
+    { "id": "J5.3", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Dodge roll starts < 100 ms after C, standing and running, no server snap-back" },
+    { "id": "J5.4", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Voice hidden: no pill, no mic request, coming-soon line (6)" },
+    { "id": "J7.1", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Guest logout → home with leaderboard, online, worlds, Play, Sign in (6a)" }
   ]
 }

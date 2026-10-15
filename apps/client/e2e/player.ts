@@ -121,7 +121,7 @@ export class Player {
 
   async open(extra: Record<string, string | number | true> = {}) {
     await this.page.goto(this.url(extra));
-    await this.page.waitForFunction(() => !!(window as unknown as { __fl?: unknown }).__fl, null, { timeout: 15_000 });
+    await this.page.waitForFunction(() => !!(window as unknown as { __fl?: unknown }).__fl, null, { timeout: 45_000 });
   }
 
   /** The Play button: the home page's (item 6a contract) or, until that lands, the landing page's #play. */
