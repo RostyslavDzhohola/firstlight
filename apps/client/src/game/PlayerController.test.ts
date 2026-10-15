@@ -287,6 +287,26 @@ describe("PlayerController", () => {
       }
     });
 
+    it("no grace before the first touchdown: a body placed in the air (arrival) can't roll until it lands", () => {
+      const pc = new PlayerController(terrain, -100);
+      pc.teleport(0, R + 3, 0);
+      const input = fakeInput();
+      pressC(pc, input);
+      expect(pc.anim).not.toBe(ANIM.DODGE);
+    });
+
+    it("a roll's extra speed bleeds off at the ground rate in the air too (off an edge)", () => {
+      const pc = spawn();
+      const input = fakeInput(["KeyW"]);
+      pressC(pc, input);
+      run(pc, input, MOVE.dodgeTime);
+      pc.vel.addScaledVector(pc.up(), 8); // thrown up as the roll ends: the rest happens in the air
+      pc.onGround = false;
+      run(pc, input, 0.25);
+      expect(pc.onGround).toBe(false);
+      expect(hSpeed(pc)).toBeLessThan(MOVE.run + 0.5); // air control alone would still be ~10 m/s
+    });
+
     it("no roll from the saddle, in the water or while frozen", () => {
       for (const set of [(p: PlayerController) => (p.mounted = true), (p: PlayerController) => (p.frozen = true)]) {
         const pc = spawn();

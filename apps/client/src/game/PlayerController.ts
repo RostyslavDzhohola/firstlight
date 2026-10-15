@@ -81,8 +81,10 @@ export class PlayerController {
   /** Seconds a C press stays wanted (MOVE.dodgeBuffer), so a press a moment early isn't lost. */
   private dodgeWanted = 0;
   /** Seconds since the feet last touched ground, and whether a jump took them off it. */
-  private airTime = 0;
+  private airTime = Infinity;
   private jumped = false;
+  /** A roll just ended and its extra speed is still bleeding off. */
+  private rollTail = false;
   private readonly dodgeDir = new THREE.Vector3();
   private fallStartRadius = 0;
   /** Fall damage as a fraction of max HP, reported to the game for the server to apply. */
@@ -222,10 +224,19 @@ export class PlayerController {
     if (this.dodgeT > 0) {
       this.dodgeT -= dt;
       vH.copy(this.dodgeDir).multiplyScalar(MOVE.dodgeDistance / MOVE.dodgeTime);
+      if (this.dodgeT <= 0) this.rollTail = true;
     } else {
       const target = wish.multiplyScalar(speed);
       const a = this.onGround || this.swimming ? (this.mounted ? MOVE.mountAccel : MOVE.accel) : MOVE.airAccel;
       vH.lerp(target, Math.min(1, a * dt));
+      // A roll's extra speed bleeds off at the ground rate even in the air (off an edge, or rolled
+      // over one): the server's dodge reserve assumes that slowdown, and air control alone kept a
+      // 15 m/s tail long enough to be refused (Codex review).
+      if (this.rollTail) {
+        const len = vH.length();
+        if (len > speed) vH.multiplyScalar((speed + (len - speed) * Math.max(0, 1 - MOVE.accel * dt)) / len);
+        else this.rollTail = false;
+      }
     }
 
     let vUpNew = vUp;
