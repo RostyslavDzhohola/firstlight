@@ -1,13 +1,13 @@
 {
   "$comment": "Journeys that must pass before a deploy (pnpm e2e:gate). Ids are the @J tags in apps/client/e2e/*.spec.ts. Add a journey when its feature lane lands and it passes on the listed projects; remove one only with a decision in docs/DECISIONS.md.",
   "gates": [
-    {"id":  "J2.2", "projects":  ["webgl", "webgpu"], "since":  "2026-10-15", "note":  "Hexwick + Hexquill I on Arcadia: refused on the pad, accepted outside"},
-    {"id":  "J2.3", "projects":  ["webgl", "webgpu"], "since":  "2026-10-15", "note":  "Brother Ash + Sunbrand I on Arcadia"},
-    {"id":  "J2.4", "projects":  ["webgl", "webgpu"], "since":  "2026-10-15", "note":  "Kappa + Riverstaff I on Arcadia"},
-    {"id":  "J2.5", "projects":  ["webgl", "webgpu"], "since":  "2026-10-15", "note":  "Unit 7 + Pocket Carbine I on Arcadia"},
-    {"id":  "J2.6", "projects":  ["webgl", "webgpu"], "since":  "2026-10-15", "note":  "Hexwick + Hexquill I on Hollowmere"},
-    {"id":  "J2.7", "projects":  ["webgl", "webgpu"], "since":  "2026-10-15", "note":  "Hexwick + Hexquill I on Meridian"},
-    {"id":  "J3.4", "projects":  ["webgl", "webgpu"], "since":  "2026-10-15", "note":  "Hexwick kills a hostile on Arcadia for XP (natural one near the arrival, else an admin-spawned Hopbit)"},
-    {"id":  "J5.3", "projects":  ["webgl", "webgpu"], "since":  "2026-10-15", "note":  "Dodge roll starts < 100 ms after C, standing and running, no server snap-back"}
+    { "id": "J2.2", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Hexwick + Hexquill I on Arcadia: refused on the pad, accepted outside" },
+    { "id": "J2.3", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Brother Ash + Sunbrand I on Arcadia" },
+    { "id": "J2.4", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Kappa + Riverstaff I on Arcadia" },
+    { "id": "J2.5", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Unit 7 + Pocket Carbine I on Arcadia" },
+    { "id": "J2.6", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Hexwick + Hexquill I on Hollowmere" },
+    { "id": "J2.7", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Hexwick + Hexquill I on Meridian" },
+    { "id": "J3.4", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Hexwick kills a hostile on Arcadia for XP (natural one near the arrival, else an admin-spawned Hopbit)" },
+    { "id": "J5.3", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Dodge roll starts < 100 ms after C, standing and running, no server snap-back" }
   ]
 }
