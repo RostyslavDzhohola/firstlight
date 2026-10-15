@@ -39,7 +39,7 @@ with the Quaternius kits, so nothing from it was used or registered.
 ## Numbers
 
 Download per planet (own files; the Portus strips, 423 KB, are already cached from Portus):
-Arcadia 624,073 bytes, Hollowmere 237,541, Meridian 467,236.
+Arcadia 624,073 bytes, Hollowmere 237,541, Meridian 467,213.
 
 Draws and triangles the outpost adds at the pad-0 arrival views (`world/outpostTown.test.ts`, four
 views from the pad; the outposts are inside one LOD distance, so Medium, High and Ultra match):
@@ -86,6 +86,23 @@ Runs (machine shared with other lanes, load average 10–76):
   map raster, Portus town view.
 - CodeRabbit (`coderabbit review --agent --base main`): one minor finding, fixed (the Blender site
   data no longer writes a null sun when the looks can't be read).
+
+## Review round 1 (Codex gpt-6.1-sol, approve after fixes) and the browser check
+
+- **Blocker, fixed:** `StructureCollider.raycast` skipped a solid holding the ray's origin, so a
+  shooter 2.5 cm into the barn's face (within the move tolerance) shot a target behind it. It now
+  returns 0 there (main's Portus walls did; the sites refactor had regressed Portus too). Tests: the
+  real-path step into the face and shot through; inside-origin rays at a Portus curtain wall and the
+  barn.
+- **Should-fix, fixed:** a target in melee reach behind a structure (Hollowmere's last lantern post)
+  cleared the give-up clock while every swing hit the post. With the strike line blocked the NPC no
+  longer swings, steps round, and the 5 s clock runs. Test: the lantern-post case.
+- **Browser nits, fixed:** the third-person camera now stops 0.3 m short of a structure between the
+  head and its spot (Hollowmere's house, Meridian's awning and tower; Portus too) and eases back out;
+  path paving over ground just under the water stays above the surface (Arcadia's causeway);
+  Meridian's sci-fi trims shade as non-metal (no environment map in the game, so metalness only
+  darkened the back-lit gate pillars and tank). The rest of the "darker, purple" read is the
+  planet's hemisphere light (blue sky, red ground) on vertical faces, left as is.
 
 ## Deploy order (D46)
 

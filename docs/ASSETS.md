@@ -119,7 +119,7 @@ What we used and changed:
   roughness replaced by per-material constants). **Changed:** every face using the kit's decal sheet
   (`T_Decals`: a fictional brand logo and signage) is deleted from every module, and the sheet never
   ships (IP line: Meridian Oversight's hex glyph and our stencil lettering replace it). The deck slot
-  (`MI_Trim_03_Deck`) is the trim texture at 82 % albedo.
+  (`MI_Trim_03_Deck`) is the trim texture at 82 % albedo; the trims shade as non-metal painted panels (the game's town material has no environment map).
 - **Packing** (`tools/blender/pads/pack.py`, the Portus packer): one meshopt GLB per planet, one node
   per prefab and LOD, two materials; per-vertex material slots over the layer strips; LOD1 roof shells
   and tree cards.
@@ -138,10 +138,10 @@ Shipped output (2026-10-14 build; Arcadia and Hollowmere add nothing to the Port
 | `outposts/arcadia/manifest.json` | 7,437 | `423c2f86ffa43a4f5b99b18be15bceebdb7e581139efac63086858fe58072e3c` | files (strips: `../../portus/`), slots, look, layout version |
 | `outposts/hollowmere/hollowmere.glb` | 230,080 | `09254a72cf231cff1ed404b3b3c6ee41a782c801356aa055f8c759ee7945967e` | 16 prefabs, 2 materials; 11,365 triangles at LOD0 |
 | `outposts/hollowmere/manifest.json` | 7,461 | `b51330ebc913a30133d89c5d2eeaab0daca1c429cd43a1caea169681d7db94da` | as above, albedo floor 0.045 |
-| `outposts/meridian/meridian.glb` | 237,256 | `2dda86faab56c1877461f1b248289e75433ac3eeaec9d3862f2e7fdde8a5853c` | 13 prefabs, opaque only; 15,159 triangles at LOD0 |
+| `outposts/meridian/meridian.glb` | 237,236 | `c8efbcf37003861baffafdd8576e0c8e6ae7b9ed98834ff25c6bae9a4fa53c96` | 13 prefabs, opaque only; 15,159 triangles at LOD0 |
 | `outposts/meridian/meridian_color.webp` | 80,498 | `027578b27bf9067bd4cc20ed252408a7efd8827527334a809b4e7a2f403e355b` | 9 colour layers of 512² |
 | `outposts/meridian/meridian_normal.webp` | 144,758 | `528c7e8e4b90396513bce17a9afd1c38dac89a60b5635c8791a82b86c530d32c` | the same 9 layers' normals |
-| `outposts/meridian/manifest.json` | 4,724 | `7c79f444ce708d27e658dd833f86e01133249e37271364be897f2ee7fe6e66a4` | files, slots, look, layout version |
+| `outposts/meridian/manifest.json` | 4,721 | `b083601e4dd3f504c4c73fcace13676b074a84d04ef3fda7a78df84def077b87` | files, slots, look, layout version |
 
 The layouts, paths and collider solids ship as code from the same build:
 `packages/shared/src/content/padOutposts.ts`.

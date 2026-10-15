@@ -102,14 +102,17 @@ else:
     LAYER_INDEX = {k[0]: i for i, k in enumerate(LAYERS)}
     L = LAYER_INDEX
     DECK = 0.82  # design.py DECK_TINT
+    # The kit's trims are painted metal, but the game's town material has no environment map: any
+    # metalness only takes from the diffuse light, and the back-lit gate pillars and tank read dark
+    # (browser check). So they shade as plain painted panels.
     SLOTS = [
-        slot("MI_Trim_01", L["trim01"], (1, 1, 1), 0.55, 0.15, 1.0),
-        slot("MI_Trim_02", L["trim02"], (1, 1, 1), 0.55, 0.15, 1.0),
-        slot("MI_Trim_02_Variation", L["trim02v"], (1, 1, 1), 0.55, 0.15, 1.0),
-        slot("MI_Trim_03", L["trim03"], (1, 1, 1), 0.6, 0.1, 1.0),
-        slot("MI_Trim_03_Deck", L["trim03"], (DECK, DECK, DECK), 0.62, 0.1, 1.0),
-        slot("MI_Trim_03_Cables", L["cables"], (1, 1, 1), 0.6, 0.1, 1.0),
-        slot("MI_Trim_03_Dark", L["cables"], (0.5, 0.5, 0.5), 0.6, 0.1, 1.0),
+        slot("MI_Trim_01", L["trim01"], (1, 1, 1), 0.55, 0.0, 1.0),
+        slot("MI_Trim_02", L["trim02"], (1, 1, 1), 0.55, 0.0, 1.0),
+        slot("MI_Trim_02_Variation", L["trim02v"], (1, 1, 1), 0.55, 0.0, 1.0),
+        slot("MI_Trim_03", L["trim03"], (1, 1, 1), 0.6, 0.0, 1.0),
+        slot("MI_Trim_03_Deck", L["trim03"], (DECK, DECK, DECK), 0.62, 0.0, 1.0),
+        slot("MI_Trim_03_Cables", L["cables"], (1, 1, 1), 0.6, 0.0, 1.0),
+        slot("MI_Trim_03_Dark", L["cables"], (0.5, 0.5, 0.5), 0.6, 0.0, 1.0),
         slot("MI_PaddedWall", L["padded"], (1, 1, 1), 0.75, 0.0, 1.0),
         slot("MI_RockTrim", L["rocktrim"], (1.0, 0.86, 0.76), 0.86, 0.0, 1.0),
         slot("MI_WindowGlass", L["white"], (0.05, 0.075, 0.1), 0.2, 0.0, 0.0, night=(1.0, 0.72, 0.38, 0.85)),

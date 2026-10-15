@@ -4,8 +4,8 @@
  "files": {
   "glb": {
    "name": "meridian.glb",
-   "bytes": 237256,
-   "sha256": "2dda86faab56c1877461f1b248289e75433ac3eeaec9d3862f2e7fdde8a5853c"
+   "bytes": 237236,
+   "sha256": "c8efbcf37003861baffafdd8576e0c8e6ae7b9ed98834ff25c6bae9a4fa53c96"
   },
   "color": {
    "name": "meridian_color.webp",
@@ -40,7 +40,7 @@
     1
    ],
    "rough": 0.55,
-   "metal": 0.15,
+   "metal": 0.0,
    "normal": 1.0,
    "emissive": [
     0,
@@ -66,7 +66,7 @@
     1
    ],
    "rough": 0.55,
-   "metal": 0.15,
+   "metal": 0.0,
    "normal": 1.0,
    "emissive": [
     0,
@@ -92,7 +92,7 @@
     1
    ],
    "rough": 0.55,
-   "metal": 0.15,
+   "metal": 0.0,
    "normal": 1.0,
    "emissive": [
     0,
@@ -118,7 +118,7 @@
     1
    ],
    "rough": 0.6,
-   "metal": 0.1,
+   "metal": 0.0,
    "normal": 1.0,
    "emissive": [
     0,
@@ -144,7 +144,7 @@
     0.82
    ],
    "rough": 0.62,
-   "metal": 0.1,
+   "metal": 0.0,
    "normal": 1.0,
    "emissive": [
     0,
@@ -170,7 +170,7 @@
     1
    ],
    "rough": 0.6,
-   "metal": 0.1,
+   "metal": 0.0,
    "normal": 1.0,
    "emissive": [
     0,
@@ -196,7 +196,7 @@
     0.5
    ],
    "rough": 0.6,
-   "metal": 0.1,
+   "metal": 0.0,
    "normal": 1.0,
    "emissive": [
     0,
