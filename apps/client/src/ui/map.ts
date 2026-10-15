@@ -333,7 +333,11 @@ export class MapPanel extends Panel {
     const pos = this.game.player.pos;
     const here = def.padLayout === "none" ? -1 : safePadAt(def, pos.x, pos.y, pos.z);
 
-    // Area rings (hunt areas, lakes) when they're big enough to read.
+    // Hunt-area rings when they're big enough to read (on the globe, and not where it's foreshortened).
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(W / 2, H / 2, v.ppr, 0, Math.PI * 2);
+    ctx.clip();
     ctx.setLineDash([4, 5]);
     ctx.lineWidth = 1;
     ctx.strokeStyle = "rgba(255, 255, 255, .28)";
@@ -342,12 +346,12 @@ export class MapPanel extends Panel {
       const r = m.area / mpp;
       if (r < 24 || r > 900) continue;
       const s = project(v, m.dir, this.p);
-      if (s.z <= 0) continue;
+      if (s.z <= 0.8) continue;
       ctx.beginPath();
       ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
       ctx.stroke();
     }
-    ctx.setLineDash([]);
+    ctx.restore();
 
     for (const m of this.markers ?? []) {
       const s = project(v, m.dir, { x: 0, y: 0, z: 0 });
