@@ -126,14 +126,21 @@ export interface Flash {
  * of the threshold of where it was) within `maxSamples` samples. A lasting change (walking into shade,
  * turning toward the sun) is not a blink. The owner's recording showed +72 then −72 in one frame.
  */
-export function detectFlashes(series: { t: number; v: number }[], threshold = 40, maxSamples = 3): Flash[] {
+export function detectFlashes(series: { t: number; v: number; turn?: number }[], threshold = 40, maxSamples = 3, maxTurnDeg = 2): Flash[] {
   const out: Flash[] = [];
+  // `turn`: degrees the camera rotated since the previous sample. A jump while the camera turned is
+  // the view changing (a 30° look-step at a dark wall and on), not the picture blinking.
+  const turned = (a: number, b: number) => {
+    for (let j = a; j <= b; j++) if ((series[j]?.turn ?? 0) > maxTurnDeg) return true;
+    return false;
+  };
   for (let i = 1; i < series.length; i++) {
     const before = series[i - 1]!.v;
     const jump = series[i]!.v - before;
     if (Math.abs(jump) < threshold) continue;
     for (let k = 1; k <= maxSamples && i + k < series.length; k++) {
       if (Math.abs(series[i + k]!.v - before) <= threshold / 3) {
+        if (turned(i, i + k)) break;
         out.push({ t: series[i]!.t, jump: Math.round(jump), samples: k });
         i += k;
         break;

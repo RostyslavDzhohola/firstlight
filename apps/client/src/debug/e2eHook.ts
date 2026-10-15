@@ -307,6 +307,8 @@ export function installE2eHook(win: Window & typeof globalThis): void {
 
   // ---- blink probe (only while a journey runs it)
   const luma = new Ring(4096);
+  /** Degrees the camera rotated since the previous luma sample, keyed like `luma` (by sample time). */
+  const turns = new Ring(4096);
   const flips: { t: number; key: string }[] = [];
   let probe: { stop(): void; startedAt: number; every: number; skipped: number; errors: number } | null = null;
   const elementKeys = new WeakMap<Element, string>();
@@ -342,6 +344,9 @@ export function installE2eHook(win: Window & typeof globalThis): void {
     small.height = h;
     const c2d = small.getContext("2d", { willReadFrequently: true })!;
     luma.clear();
+    turns.clear();
+    const camera = ctx.camera as { quaternion?: { x: number; y: number; z: number; w: number } } | undefined;
+    let lastQ: [number, number, number, number] | null = null;
     flips.length = 0;
     const own = Object.prototype.hasOwnProperty.call(ctx, "render");
     const original = ctx.render;
@@ -357,6 +362,14 @@ export function installE2eHook(win: Window & typeof globalThis): void {
       }
       pending = true;
       const t = performance.now();
+      // The rendered frame's camera: how far it turned since the last sample (a look-step changes
+      // the picture without anything blinking).
+      const q = camera?.quaternion;
+      if (q) {
+        const d = lastQ ? Math.min(1, Math.abs(q.x * lastQ[0] + q.y * lastQ[1] + q.z * lastQ[2] + q.w * lastQ[3])) : 1;
+        turns.push(t, (2 * Math.acos(d) * 180) / Math.PI);
+        lastQ = [q.x, q.y, q.z, q.w];
+      }
       // Same task as the render: the drawing buffer still holds this frame (WebGL and WebGPU alike).
       const shot = createImageBitmap(canvas, { resizeWidth: w, resizeHeight: h, resizeQuality: "low" });
       if (worker) {
@@ -419,7 +432,8 @@ export function installE2eHook(win: Window & typeof globalThis): void {
     if (!p) return null;
     p.stop();
     probe = null;
-    const series = luma.since(p.startedAt).map((s) => ({ t: s.t, v: Math.round(s.v * 10) / 10 }));
+    const turnAt = new Map(turns.since(p.startedAt).map((x) => [x.t, x.v] as const));
+    const series = luma.since(p.startedAt).map((s) => ({ t: s.t, v: Math.round(s.v * 10) / 10, turn: Math.round((turnAt.get(s.t) ?? 0) * 10) / 10 }));
     const flashes: Flash[] = detectFlashes(series, opts.threshold ?? 40);
     return {
       every: p.every,

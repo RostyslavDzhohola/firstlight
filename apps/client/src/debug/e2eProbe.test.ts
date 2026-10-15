@@ -84,6 +84,13 @@ describe("detectFlashes", () => {
     expect(detectFlashes(s([90, 90, 5, 6, 91, 90]))).toEqual([{ t: 2, jump: -85, samples: 2 }]);
   });
 
+  it("ignores a jump while the camera turned (a look-step at a dark wall and on, J1.2 on the castle street)", () => {
+    const series = [110.7, 110.7, 54.8, 54.7, 54.7, 98].map((v, i) => ({ t: i, v, turn: i === 2 || i === 5 ? 30 : 0 }));
+    expect(detectFlashes(series)).toEqual([]);
+    // The same luma with a still camera is a blink.
+    expect(detectFlashes(series.map((x) => ({ ...x, turn: 0 })))).toEqual([{ t: 2, jump: -56, samples: 3 }]);
+  });
+
   it("ignores a lasting change and gentle drift", () => {
     expect(detectFlashes(s([100, 150, 151, 152, 150, 149]))).toEqual([]);
     expect(detectFlashes(s([100, 110, 120, 130, 140, 150]))).toEqual([]);
