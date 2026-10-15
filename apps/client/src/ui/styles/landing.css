@@ -39,8 +39,7 @@
 .fl-world--arcadia { --c: var(--arcadia); }
 .fl-world--hollowmere { --c: var(--hollowmere); }
 .fl-world--meridian { --c: var(--meridian); }
-.fl-landing__signin { font-size: var(--t-sm); color: var(--fog-3); text-decoration: none; }
-.fl-landing__signin:hover .fl-link { color: var(--dawn-3); border-color: var(--dawn-3); }
+.fl-landing__signin { flex: none; }
 
 .fl-landing__hero { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: calc(1.4 * var(--u)); padding-bottom: 4vh; }
 .fl-landing__hero .fl-eyebrow { color: var(--fog-4); }

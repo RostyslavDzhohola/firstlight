@@ -13,10 +13,11 @@ import { Effects, weaponColor } from "../render/effects.ts";
 import { Hud, type YouPlus } from "../ui/hud.ts";
 import { PhraseWheel } from "../ui/phraseWheel.ts";
 import type { Game } from "./Game.ts";
-import { showSavePrompt } from "../ui/account.ts";
-import { SaveOffer } from "../ui/saveOffer.ts";
-import { getPlayToken, isDevGuest, readClaims } from "../net/auth.ts";
+import { openSaveProgress } from "../ui/account.ts";
+import { offersSave, SaveNudge, saveReady } from "../ui/saveOffer.ts";
+import { saveStatus } from "../net/auth.ts";
 
+const NUDGED_KEY = "fl.saveNudged";
 const _v = new THREE.Vector3();
 const _head = new THREE.Vector3();
 const _up = new THREE.Vector3();
@@ -46,9 +47,10 @@ export class CombatClient {
   deadUntilRespawn = false;
   /** Onboarding hook (game/OnboardingClient.ts): handles an attack inside a safe zone; true = handled. */
   training: ((def: WeaponDef, tier: TierStats, now: number) => boolean) | null = null;
-  /** Onboarding hook: the tutorial is up (tips or its last card); the level-up save card waits for it. */
+  /** Onboarding hook: the tutorial is up (tips or its last card); the "Progress not saved" toast waits for it. */
   tutorialBusy: (() => boolean) | null = null;
-  private readonly saveOffer = new SaveOffer();
+  /** The "Progress not saved" toast (once per tab session) and the best level seen (Esc menu → Save progress). */
+  readonly saveNudge = new SaveNudge(sessionStorage.getItem(NUDGED_KEY) === "1");
   private readonly wheel: PhraseWheel;
 
   constructor(private readonly game: Game) {
@@ -67,7 +69,7 @@ export class CombatClient {
     room.onMessage("you", (m: YouPlus) => {
       const prevLevel = this.hud.you?.level ?? m.level;
       this.hud.setYou(m);
-      if (!isDevGuest()) this.saveOffer.levelUp(m.level, prevLevel);
+      this.saveNudge.levelUp(m.level, prevLevel);
       if (!m.dead) this.deadUntilRespawn = false;
     });
     room.onMessage("toast", (m: { text: string; kind: string }) => {
@@ -161,7 +163,7 @@ export class CombatClient {
       this.game.player.frozen = true;
       this.game.audio.play("death");
       const k = m.killer ? (room.state as any).players?.get(m.killer) : null;
-      const choice = await this.hud.death({ ...m, body: this.game.bodyId, killerStarter: k?.starter, killerLevel: k?.level });
+      const choice = await this.hud.death({ ...m, body: this.game.bodyId, killerStarter: k?.starter, killerLevel: k?.level, save: this.saveOnDeath(m.level) });
       room.send("respawn", choice);
     });
     room.onMessage("reborn", () => {
@@ -176,13 +178,23 @@ export class CombatClient {
   }
 
   /**
-   * After the first level-up, guests get a non-blocking "Save your character" card (once; after the
-   * tutorial when it paid the level). It opens without taking keyboard focus: the player is playing.
+   * After the first level-up (after the tutorial when it paid the level), a guest gets a toast with a
+   * key hint, once per tab session. Never a card: the player is playing and the game holds the mouse;
+   * the save card opens from the Esc menu (HANDOFF 5c). Saved players, dev guests and offline runs get nothing.
    */
-  private async offerSave() {
-    const claims = readClaims(await getPlayToken().catch(() => ""));
-    if (!claims?.guest) return;
-    void showSavePrompt({ name: claims.name, level: this.hud.you?.level });
+  private async nudgeSave() {
+    // A moment after the level-up's own toasts, so it isn't lost in that burst.
+    await new Promise((ok) => setTimeout(ok, 1500));
+    if (!offersSave(await saveStatus())) return;
+    sessionStorage.setItem(NUDGED_KEY, "1");
+    const t = this.hud.toast("Progress not saved", "info", { title: "Guest", sub: "Esc → Save progress", sprite: "chest", ms: 9000 });
+    t.dataset.e2e = "save-toast";
+  }
+
+  /** The death screen's "Save so your medals and name stay" line, for a guest who can save. */
+  private async saveOnDeath(level: number): Promise<(() => Promise<"saved" | "dismissed">) | null> {
+    if (!offersSave(await saveStatus()) || !saveReady(Math.max(level, this.saveNudge.best))) return null;
+    return () => openSaveProgress({ level });
   }
 
   private muzzleOf(p: { x: number; y: number; z: number; fx: number; fy: number; fz: number }): THREE.Vector3 {
@@ -234,7 +246,7 @@ export class CombatClient {
     const room = g.net.room;
     const input = g.input;
     this.effects.update(dt, now);
-    if (this.saveOffer.poll(!!this.tutorialBusy?.())) void this.offerSave();
+    if (this.saveNudge.poll(!!this.tutorialBusy?.() || !g.input.locked || this.deadUntilRespawn || !room)) void this.nudgeSave();
     if (!room) return;
     const meState = (room.state as any).players?.get(room.sessionId);
     if (meState) {

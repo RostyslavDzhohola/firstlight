@@ -122,6 +122,7 @@
 .fl-notice { position: relative; z-index: 1; width: min(calc(30 * var(--u)), calc(100vw - 48px)); padding: calc(1.8 * var(--u)) calc(1.8 * var(--u)) calc(1.6 * var(--u)); display: grid; gap: var(--sp-4); text-align: center; justify-items: center; animation: fl-rise-in var(--dur-3) var(--ease-out) both; }
 .fl-notice h2 { margin: 0; font: 300 var(--t-2xl)/1.1 var(--font-display); letter-spacing: .14em; text-transform: uppercase; }
 .fl-notice p { margin: 0; font-size: var(--t-sm); line-height: 1.5; color: var(--paper-2); max-width: calc(24 * var(--u)); }
+.fl-notice p.fl-notice__save { margin-top: calc(-.4 * var(--u)); font-size: var(--t-xs); color: var(--fog-4); }
 
 @media (max-width: 1360px) {
   .fl-menu__screen { grid-template-columns: calc(24 * var(--u)) minmax(0, 1fr); gap: var(--sp-6); padding-left: calc(2.4 * var(--u)); padding-right: calc(2.2 * var(--u)); }

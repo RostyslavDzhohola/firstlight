@@ -11,6 +11,11 @@ export const config = {
   repoUrl: "https://github.com/RostyslavDzhohola/firstlight",
 };
 
+/** A run with no server (`?offline`, or `?bench` without `?online`); the same rule as Game.ts. */
+export function offlineRun(): boolean {
+  return params.has("offline") || (params.has("bench") && !params.has("online"));
+}
+
 /** URL flags (also ?cpuslow=N for the F11 weak-laptop profile): ?nobloom ?nofog ?nosky ?nograss ?notrees ?nowater ?noshadows ?noao ?noparticles ?nopost ?nochars ?nodestruct ?nohorses ?webgl ?tier=… ?bench */
 export const flags = {
   has(name: string): boolean {

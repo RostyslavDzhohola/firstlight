@@ -1,6 +1,6 @@
-/* Save card, sign-in and name picker (verdict: Entry B, all four states: offer → code → saved, busy). */
+/* Save card, sign-in and name picker (verdict: Entry B states: email → code → saved, busy; plus
+   unavailable and "play a little first", HANDOFF 5c). All modal: they open only with the mouse free. */
 
-.fl-savecard { position: fixed; right: calc(1.4 * var(--u)); bottom: calc(1.4 * var(--u)); z-index: var(--z-modal); width: min(calc(21 * var(--u)), calc(100vw - 40px)); pointer-events: auto; animation: fl-rise-in var(--dur-3) var(--ease-out) both; }
 .fl-acct { display: grid; gap: calc(.9 * var(--u)); padding: calc(1.2 * var(--u)) calc(1.2 * var(--u)) calc(1.1 * var(--u)); align-content: start; }
 .fl-acct h2 { margin: 0; font: 500 var(--t-xl)/1.1 var(--font-display); letter-spacing: .03em; }
 .fl-acct p { margin: 0; font-size: var(--t-sm); line-height: 1.5; color: var(--paper-2); }
@@ -37,6 +37,9 @@
 .fl-acct__mark .li { width: calc(2.2 * var(--u)); height: calc(2.2 * var(--u)); }
 .fl-acct__mark.is-ok { border: 1px solid rgba(127, 227, 176, .6); background: radial-gradient(circle, rgba(127, 227, 176, .25), rgba(127, 227, 176, 0) 70%); color: var(--ok); }
 .fl-acct__mark.is-err { border: 1px solid rgba(255, 111, 94, .55); background: radial-gradient(circle, rgba(255, 111, 94, .2), transparent 70%); color: var(--danger); }
+.fl-acct__mark.is-wait { border: 1px solid rgba(243, 174, 91, .5); background: radial-gradient(circle, rgba(243, 174, 91, .18), transparent 70%); color: var(--dawn-3); }
+.fl-acct__note { display: grid; gap: calc(.5 * var(--u)); }
+.fl-acct p.fl-acct__guest { margin-top: calc(-.4 * var(--u)); font-size: var(--t-xs); color: var(--fog-3); }
 .fl-acct__keeps { display: grid; gap: calc(.4 * var(--u)); padding: calc(.75 * var(--u)) calc(.85 * var(--u)); border-radius: var(--r-2); background: rgba(255, 255, 255, .04); border: 1px solid var(--line-2); font-size: var(--t-xs); color: var(--fog-4); }
 .fl-acct__keeps div { display: flex; justify-content: space-between; gap: var(--sp-2); }
 .fl-acct__keeps b { color: var(--paper); font-weight: 600; }

@@ -27,6 +27,11 @@ export interface DeathInfo {
   killerLevel?: number;
   /** Social lane: is this session in our party? */
   isParty?: (id: string) => boolean;
+  /**
+   * Guests (HANDOFF 5c): resolves to "open the save card" when this player can save, else null.
+   * The line appears when it resolves, so the screen never waits for it.
+   */
+  save?: Promise<(() => Promise<"saved" | "dismissed">) | null>;
 }
 
 interface DeathContext {
@@ -169,6 +174,24 @@ export function showDeath(info: DeathInfo, ctx: DeathContext): Promise<{ starter
       icon("check", "", li);
       li.append(k);
     }
+    void info.save?.then((openSave) => {
+      if (!openSave || !kept.isConnected) return;
+      const box = el("div", "fl-death__save", kept);
+      const p = el("p", "", box, "As a guest, these live in this browser only. ");
+      el("b", "", p, "Save so your medals and name stay.");
+      const b = button("", "fl-btn fl-btn--sm", box);
+      icon("save", "", b);
+      b.append("Save progress");
+      b.dataset.e2e = "death-save";
+      b.onclick = () =>
+        void openSave().then((r) => {
+          if (r !== "saved") return;
+          box.replaceChildren();
+          const ok = el("p", "is-ok", box);
+          icon("check", "", ok);
+          ok.append("Saved. Sign in on any browser to carry on.");
+        });
+    });
 
     rise.onclick = async () => {
       ov.remove();

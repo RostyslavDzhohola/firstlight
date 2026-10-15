@@ -95,8 +95,8 @@ playBtn?.addEventListener("click", async () => {
   await boot();
 });
 
-$("signin")?.addEventListener("click", async (e) => {
-  e.preventDefault();
+// Sign in: a returning player on a new browser (HANDOFF 5b). A guest session here merges into the account.
+$("signin")?.addEventListener("click", async () => {
   const { showSignIn } = await import("./ui/account.ts");
   const r = await showSignIn();
   if (r === "signed-in") playBtn?.click();
