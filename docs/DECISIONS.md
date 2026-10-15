@@ -484,6 +484,115 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
     attribution, and asks users not to use the output to build competing products.
   So the files stay out of the repo and out of any reusable pack, and the set carries a `NOTICE.txt`.
   Why: the owner set a hard limit of the credits left, with no top-up.
+- **D-home-1 (run, 2026-10-15 05:20Z):** the landing page is now the home page (6a): Play/Continue,
+  my progress, Save your progress (guests), Sign in / Sign out, online now per world, the
+  leaderboard (top levels, Hall of Firsts, medals) and the four worlds. Opening it never creates a
+  guest: it reads `/api/account/me` only when this browser already has a session, and only Play signs
+  in anonymously. Sign out is offered to saved accounts only (signing a guest out would orphan its
+  character) and clears the local starter, palette and body so the next player picks their own.
+  Why: one click to play stays guest-friendly, and a returning player sees their character first.
+- **D-home-2 (run, 2026-10-15 05:20Z):** logging out (and "Back to the home page" after a removal)
+  reloads the page into the home page instead of showing the LOGGED OUT card over the stopped game
+  (`home/leave.ts`, `?autoplay` stripped, a one-shot notice in sessionStorage). Navigation frees the
+  renderer, the GPU device, the frame loop, workers, audio and every listener at once; tearing the
+  game down in place would need a dispose path through every system and lane. The server has saved
+  the character before it sends `loggedOut`, so the client waits at most 2.5 s for the leave. Why:
+  robust teardown with no leak risk; the cached bundle makes Continue as fast as before.
+- **D-home-3 (run, 2026-10-15 05:20Z):** `GET /api/home` is public and shows display names only:
+  per-body counts with up to 12 in-world names each (the names every player already sees above heads
+  and in the Tab list; load-test bots excluded), the top 10 live characters by level, the top 10
+  accounts by medal count (medals survive death, so an account between lives stays on that board),
+  both for accounts with a chosen display name only and never banned ones, and the claimed Hall of
+  Firsts plaques. No ids, emails, positions or room copies. Cached (online 3 s, board 60 s) and
+  limited to 30 requests per address per minute (IPv6 per /64), keyed by `directRequestIp`, the
+  helper `/api/play`'s per-address limits and IP bans use. Both boards read their top rows from
+  indexes (migration 6: `character_rank`, and `medal_count` kept by triggers on `medal`), so a
+  refresh costs well under a millisecond at 100,000 characters instead of ~120 ms of sorting each. There is no "hide me
+  from the home page" setting yet; add one if players ask. Why: the owner asked for names "if
+  privacy allows"; public names that are already public in the world, nothing more.
+- **D-home-4 (run, 2026-10-15 05:20Z):** DataFast (6f) is optional on both sides. The client build
+  injects DataFast's script into `index.html` only when `VITE_DATAFAST_WEBSITE_ID` and
+  `VITE_DATAFAST_DOMAIN` are set (`vite.config.ts`, values validated), and uses the cookieless script
+  (`script.cookieless.js`, no visitor cookies, so no cookie banner for DataFast; turn on
+  "Cookieless / privacy mode" in the DataFast website settings to match; `VITE_DATAFAST_COOKIELESS=false`
+  switches to the cookie script). The server reads realtime visitors (last 10 min) and all-time
+  sessions with `DATAFAST_API_KEY` (a `df_` website key, server-only, never logged), cached ≥ 60 s,
+  one request pair at a time, the last numbers kept on failure. Without it the home page shows our
+  own online count and no visits; with it, "Online now: N · Total visits: M". Whenever the script is
+  in the page a one-line note says so: "Cookieless analytics by DataFast", or that DataFast sets
+  cookies when the cookie script was chosen. Why: the key stays secret, the page works tonight with or without the account.
+- **D-home-5 (run, 2026-10-15 05:20Z):** share row (6e) on the home page and in the Esc menu: Share
+  uses the Web Share sheet where there is one, else copies `https://firstlight.one4all.dev` with a
+  toast; Email is a `mailto:` invite; "Follow on 𝕏" appears only when `VITE_X_HANDLE` is a valid
+  handle (never guessed: it publishes under the owner's name); the eye hides the home page to show
+  the backdrop. Screenshots stay on P (its own share dialog). Why: the owner's littleprince.dev bar,
+  without inventing an account.
+- **D-controls-1 (2026-10-15):** Voice chat and the radio are hidden in this build ("Voice chat: coming
+  soon"), behind a flag on each side, not deleted. Server `FEATURE_VOICE=1` / client build
+  `VITE_FEATURE_VOICE=1` bring them back (both, together). Off: no voice system (the voice and radio
+  message types stay registered and answer `voice:denied {reason: "off"}`, so older tabs aren't
+  dropped), no TURN credentials minted, the Exchange doesn't sell the radio, a radio can't be dropped
+  and one carried into death goes with the old life instead of into the pile; the client has no V/B
+  keys, no mic prompt, no voice pill, no voice tutorial tip (step ids unchanged; a saved voice tip is
+  kept), no Voice volume or voice column, no voice column or mute in the Tab list, and an owned radio
+  reads as an empty slot. The Esc menu shows one disabled "Voice chat: coming soon" line. Block and
+  report (Tab list) and the phrase wheel stay. Why: the owner isn't sure about the legal side of live
+  voice (risk-assessment §5: the terms page, a public complaints contact and a real legal check are
+  still missing), and wants "character should just walk around and do basic" for this build.
+- **D-controls-2 (2026-10-15):** No F-key bindings. Performance overlay `` ` `` (was F3), photo mode
+  Shift+P (was F9; P alone stays the screenshot), admin console Shift+`` ` `` (was `` ` ``). The game
+  no longer swallows F-keys (the browser keeps F5/F11/F12); it swallows `` ` `` and `'` while locked.
+  `game/keys.ts` lists every binding and a test checks for F-keys and clashes. Why: on a Mac F1–F12
+  are system keys (F3 is Mission Control) and the owner's Fn key belongs to another app.
+- **D-controls-3 (2026-10-15):** The pause menu follows a state machine (`ui/pauseFlow.ts`), not every
+  `pointerlockchange`. Esc in the menu (also Enter/Space, Resume, a click on the backdrop) goes back to
+  the game: the menu closes, a "Click to look around" hint shows, and the next click on the world
+  re-locks without reopening the menu. An unlock opens the menu only after it has lasted 150 ms, and a
+  lock lost within 500 ms of being granted lands in the game with the hint instead of reopening the
+  menu (the owner's blink: Chrome granted the lock and dropped it a few frames later, and the old menu
+  mirrored both changes). Refused lock requests (no gesture, Chrome's ~1 s block after an Esc) show the
+  hint. Esc in a panel closes it and asks for the pointer back (the panel freed it itself, so Chrome
+  allows it without a click). Play still goes fullscreen, now with Keyboard Lock for Esc where it
+  exists (Chromium): a short Esc reaches the game (menu, then straight back in without a click) instead
+  of dropping out of fullscreen, and holding Esc leaves fullscreen; the menu has a Full screen button.
+  The cost: an Esc pressed within 500 ms of clicking into the game shows the hint rather than the
+  menu (a second Esc opens it). Why: Esc alone can't re-lock the pointer (it isn't a user gesture),
+  and Esc dropping fullscreen gave the owner a full-screen jump on every pause.
+- **D-map-1 (map lane, 2026-10-15):** one north for the whole client: the D38 pole frame, toward
+  the body's +Z pole (`social/compassMath.ts` `northAt`/`eastAt`, the same as `places.tangentFrame`
+  wherever that frame is taken from +Z). The compass used to point north at the +Y pole, where
+  Portus sits: at the plaza it fell back to −Z and around it pointed back at the centre, so facing
+  the castle (town north) it read S while the map drew the castle up — the owner's "the map is
+  inverted". The map and the minimap take north from the same functions, and tests pin "a point due
+  east draws right of you, north up" and "every target sits at its compass bearing". Why: the town,
+  the places' east/north offsets and the map already used +Z; a north at the hub's own pole is
+  undefined exactly where every player starts.
+- **D-map-2 (map lane, 2026-10-15):** the map and the minimap draw the ground from one colour atlas
+  per body (six cube faces, ~0.75 m texels on Portus, 2–3 m on the planets), baked once per arrival
+  in a worker (`world/mapAtlas.worker.ts`, the face under you first) from the shared height function
+  and the terrain palette, hill-shaded from the north-west; Portus adds its town plan from a 0.5 m
+  raster of the shared layout. The worker also renders the views (the map's globe, the minimap's
+  north-up tile around you, refreshed after a quarter of its span) and hands back bitmaps, so the
+  main thread only draws images and markers: the minimap is one canvas, ~0.1–0.2 ms a frame (tile
+  swaps included, p99 0.3 ms), and Medium held 60 fps with it on and off in a headless WebGPU A/B.
+  Why: the old map re-sampled terrain on the main thread per view (22k samples, 72-res while
+  dragging); a per-frame minimap couldn't afford that.
+- **D-map-3 (map lane, 2026-10-15):** the waypoint is client-only, one per body in localStorage
+  (`fl.waypoint.<body>`), dropped by clicking the map (or F over it), cleared by right-click, the
+  map's button or arriving within 8 m. It shows on the map, the minimap (pinned to the rim when far),
+  the compass (magenta diamond with its distance) and in the world as an unfogged magenta pillar that
+  widens with distance (normal blending: additive vanished against daylight sky). Clicking a pad still
+  fast-travels when you stand on one; otherwise it sets the waypoint there. On the map, unnamed pads
+  read "Pad N" (shared `padName` says "Waypoint N", which the server's pad toasts still use). Why:
+  the owner wants "a dot where to go"; sharing it with the party can come later over the party channel.
+- **D-map-4 (map lane, 2026-10-15):** the minimap is the first child of the HUD's right column (top
+  right; the mission tracker and toasts flow below it), round, turning with the camera by default
+  (settings: Minimap, Turn the minimap with the camera; the map's North up / Heading up is
+  remembered too). Twice a second it measures the tutorial panel, the player card, the hotbar and
+  the save card (the `calloutPlace` idea) and shrinks, down to 110 px, then hides rather than overlap
+  them. It shows 60 m around you on Portus and 110 m on the planets: NPCs (hostile or aggroed red,
+  bosses ringed, wildlife cream), pads, portals, the guide, mission stars, party and the waypoint.
+  Why: top right is the one corner nothing else owns at play time.
 - **D-combat-1 (2026-10-15 overnight):** a ranged shot's origin slides along the aim ray to the
   point nearest the shooter's head before the 7 m `ORIGIN_SLACK` check (`aimOrigin`, combat.ts;
   training shots too). The client sends the camera position, and the mouse wheel zooms the camera

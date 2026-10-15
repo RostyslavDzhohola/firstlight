@@ -1,5 +1,5 @@
 // Only completed client tips persist. Dummy hits, XP and completion remain server-owned.
-import { OnboardingSteps, STEPS } from "./onboardingSteps.ts";
+import { ALL_STEPS, OnboardingSteps, STEPS, type StepId } from "./onboardingSteps.ts";
 
 type Store = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
@@ -11,6 +11,8 @@ export class OnboardingProgress {
   readonly steps = new OnboardingSteps();
   private readonly key: string | null;
   private ended = false;
+  /** Saved tips this build doesn't teach (the voice tip while voice is hidden): kept for builds that do. */
+  private readonly elsewhere: StepId[] = [];
   expanded = false;
 
   constructor(userId: string, private readonly store: Store | null = defaultStore()) {
@@ -21,12 +23,13 @@ export class OnboardingProgress {
       const saved = raw ? JSON.parse(raw) : null;
       if (saved?.v !== 1 || !Array.isArray(saved.done)) return;
       for (const step of STEPS) if (step.id !== "attack" && saved.done.includes(step.id)) this.steps.complete(step.id);
+      for (const step of ALL_STEPS) if (!STEPS.includes(step) && saved.done.includes(step.id)) this.elsewhere.push(step.id);
     } catch { /* unavailable or corrupt storage: continue with in-memory tips */ }
   }
 
   save() {
     if (!this.key || this.ended) return;
-    const done = STEPS.filter((s) => s.id !== "attack" && this.steps.isDone(s.id)).map((s) => s.id);
+    const done = [...STEPS.filter((s) => s.id !== "attack" && this.steps.isDone(s.id)).map((s) => s.id), ...this.elsewhere];
     try { this.store?.setItem(this.key, JSON.stringify({ v: 1, done })); } catch { /* private mode / quota */ }
   }
 

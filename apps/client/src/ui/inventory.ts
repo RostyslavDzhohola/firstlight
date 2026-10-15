@@ -11,6 +11,7 @@ import { slotItem } from "@firstlight/shared/content/inventory";
 import { RARITY_STYLE } from "@firstlight/shared/content/items";
 import type { Game } from "../game/Game.ts";
 import { button, el, icon, sprite } from "./dom.ts";
+import { shownItem } from "./hudFormat.ts";
 import { DROP_CONFIRM_HINT, DROP_CONFIRM_MS, InvCursor, invSlots, itemActions, itemDetails, quickAction, type InvAction, type InvSlot, type InvState } from "./inventoryModel.ts";
 import { Panel } from "./panels.ts";
 
@@ -87,7 +88,8 @@ export class InventoryPanel extends Panel {
   state(): InvState {
     const y = this.you();
     if (!y) return EMPTY;
-    return { hotbar: y.hotbar, backpack: y.backpack, selected: y.selected, level: y.level, worn: y.worn };
+    // Hidden items (the radio while voice is off) read as empty slots here and on the HUD.
+    return { hotbar: y.hotbar.map((it) => shownItem(it)), backpack: y.backpack.map((it) => shownItem(it)), selected: y.selected, level: y.level, worn: y.worn };
   }
 
   // ---------------------------------------------------------------------------------------------- build (once)
@@ -315,7 +317,7 @@ export class InventoryPanel extends Panel {
         p.append(`Drag a weapon here, or point at one and press ${v.key}.`);
       } else {
         el("b", "", p, "Backpack · empty");
-        p.append("Loot, cosmetics and the radio land in the backpack first; weapons and tonics in the hotbar.");
+        p.append("Loot, cosmetics and gear land in the backpack first; weapons and tonics in the hotbar.");
       }
       return;
     }
