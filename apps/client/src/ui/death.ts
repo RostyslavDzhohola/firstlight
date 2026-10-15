@@ -11,6 +11,7 @@ import { button, el, icon, overlayClosed, overlayOpened, sprite, uiRoot } from "
 import { aliveParts, classifyKiller, deathPile, type KillerInfo } from "./hudFormat.ts";
 import { itemSprite, portraitSprite } from "./sprites.ts";
 import { cancelCharacterPick } from "./characterPick.ts";
+import { onAccountChange, saveStatus } from "../net/auth.ts";
 
 export interface DeathInfo {
   killerName: string;
@@ -190,15 +191,29 @@ export function showDeath(info: DeathInfo, ctx: DeathContext): Promise<{ starter
       icon("save", "", b);
       b.append("Save progress");
       b.dataset.e2e = "death-save";
-      b.onclick = () =>
-        void openSave().then((r) => {
-          if (r !== "saved") return;
-          box.replaceChildren();
-          const ok = el("p", "is-ok", box);
-          icon("check", "", ok);
-          ok.append("Saved. Sign in on any browser to carry on.");
+      const saved = () => {
+        stopWatching();
+        box.replaceChildren();
+        const ok = el("p", "is-ok", box);
+        icon("check", "", ok);
+        ok.append("Saved. Sign in on any browser to carry on.");
+      };
+      b.onclick = () => void openSave().then((r) => r === "saved" && saved());
+      // Another tab saved (or signed out) while this screen is up: ask the session again.
+      const stopWatching = onAccountChange((_claims, { elsewhere }) => {
+        if (!elsewhere) return;
+        void saveStatus().then((s) => {
+          if (!box.isConnected || s === "guest") return;
+          if (s === "saved") saved();
+          else {
+            stopWatching();
+            box.remove();
+          }
         });
+      });
+      stopOnClose = stopWatching;
     });
+    let stopOnClose: (() => void) | null = null;
 
     const leave = () => {
       ov.remove();
@@ -206,6 +221,7 @@ export function showDeath(info: DeathInfo, ctx: DeathContext): Promise<{ starter
     };
     const settle = (r: { starter: number; palette: number } | null) => {
       open = closeOpen = null;
+      stopOnClose?.();
       resolve(r);
     };
     closeOpen = () => {

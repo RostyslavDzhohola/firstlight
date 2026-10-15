@@ -364,6 +364,12 @@ export async function initHome(): Promise<void> {
     if (!document.hidden) void poll();
   });
   await refreshMe();
+  // Another tab saved, signed in or renamed: repaint my progress and the guest's Save button from a
+  // fresh session lookup (fetchMe asks the session; the broadcast already dropped the cached token).
+  const auth = await import("../net/auth.ts");
+  auth.onAccountChange((_claims, { elsewhere }) => {
+    if (elsewhere) void refreshMe();
+  });
 }
 
 /** Dev gallery: paint the page from mock data, no network. */
