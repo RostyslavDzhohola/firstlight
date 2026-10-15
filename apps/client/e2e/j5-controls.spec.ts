@@ -58,27 +58,42 @@ test.describe("J5 controls", () => {
     await player.until((s) => s.ui.photo === false, "the same key leaves photo mode", 5000);
   });
 
-  test("J5.3 · item 4 · the dodge roll starts within 100 ms of pressing C", { tag: ["@J5", "@J5.3", "@item-4"] }, async ({ player }) => {
+  test("J5.3 · item 4 · the dodge roll starts within 100 ms of pressing C, standing and running, every time", { tag: ["@J5", "@J5.3", "@item-4"] }, async ({ player }) => {
     await arrive(player);
-    const results: { controllerMs: number | null; avatarMs: number | null }[] = [];
-    for (let i = 0; i < 3; i++) {
-      await player.page.waitForTimeout(1600); // past the 1.2 s dodge cooldown
+    await player.walkOutOfRing(); // uneven ground, like the owner's play, not the flat pad
+    const tries: { running: boolean; controllerMs: number | null; avatarMs: number | null; corrected: boolean }[] = [];
+    for (let i = 0; i < 6; i++) {
+      const running = i % 2 === 1;
+      await player.page.waitForTimeout(1500); // past the 1.2 s dodge cooldown
+      if (running) {
+        await player.page.keyboard.down("ShiftLeft");
+        await player.page.keyboard.down("KeyW");
+        await player.page.waitForTimeout(700);
+      }
       const since = await player.now();
-      await player.hold(["KeyW"], 150); // a dodge needs no movement, but players roll on the move
       await player.page.keyboard.down("KeyC");
       await player.page.waitForTimeout(60);
       await player.page.keyboard.up("KeyC");
-      await player.page.waitForTimeout(1200);
+      await player.page.waitForTimeout(900);
+      if (running) {
+        await player.page.keyboard.up("KeyW");
+        await player.page.keyboard.up("ShiftLeft");
+      }
       const ev = await player.events(since);
       const key = ev.find((e) => e.kind === "key" && e.code === "KeyC");
-      const anim = ev.find((e) => e.kind === "anim" && e.to === 7 && key && e.t >= key.t);
-      const clip = ev.find((e) => e.kind === "clip" && /dodge|roll/i.test(String(e.name)) && key && e.t >= key.t);
-      results.push({ controllerMs: key && anim ? Math.round(anim.t - key.t) : null, avatarMs: key && clip ? Math.round(clip.t - key.t) : null });
+      const anim = ev.find((e) => e.kind === "anim" && e.to === 7 && !!key && e.t >= key.t);
+      const clip = ev.find((e) => e.kind === "clip" && /dodge|roll/i.test(String(e.name)) && !!key && e.t >= key.t);
+      // A server correction right after the roll would snap it back (D3: the server validates movement).
+      const corrected = ev.some((e) => e.kind === "in" && e.type === "correct" && !!key && e.t - key.t < 800);
+      tries.push({ running, controllerMs: key && anim ? Math.round(anim.t - key.t) : null, avatarMs: key && clip ? Math.round(clip.t - key.t) : null, corrected });
     }
-    await player.note("dodge latency", results);
-    const avatar = results.map((r) => r.avatarMs ?? r.controllerMs).filter((x): x is number => x !== null).sort((a, b) => a - b);
-    expect(avatar.length, "the dodge happened every time").toBe(3);
-    expect(avatar[1]!, "median key → roll on screen (ms)").toBeLessThan(100);
+    await player.note("dodge tries", tries);
+    for (const [i, t] of tries.entries()) {
+      const ms = t.avatarMs ?? t.controllerMs;
+      expect.soft(ms, `try ${i + 1} (${t.running ? "running" : "standing"}): the roll started`).not.toBeNull();
+      if (ms !== null) expect.soft(ms, `try ${i + 1} (${t.running ? "running" : "standing"}): key → roll on screen (ms)`).toBeLessThan(100);
+      expect.soft(t.corrected, `try ${i + 1}: the server didn't snap the roll back`).toBe(false);
+    }
   });
 
   test("J5.4 · item 6 · voice and radio are hidden: no pill, V does nothing, Esc menu says coming soon", { tag: ["@J5", "@J5.4", "@item-6"] }, async ({ player, page }) => {

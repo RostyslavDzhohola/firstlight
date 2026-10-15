@@ -562,7 +562,13 @@ export function installE2eHook(win: Window & typeof globalThis): void {
       onboarding: ob
         ? { active: ob.active, paid: ob.paid, ended: ob.ended, step: ob.progress.steps.current?.id ?? null, done: ob.progress.steps.doneCount, allDone: ob.progress.steps.allDone }
         : null,
-      dummies: ob ? ob.dummies.dummies.map((d, i) => ({ ...target(d.pos.x, d.pos.y, d.pos.z), down: d.down, hits: you?.onboarding?.hits?.[i] ?? null })) : [],
+      // Aimed at the chest (1.1 m up the 1.9 m dummy), like the NPCs.
+      dummies: ob
+        ? ob.dummies.dummies.map((d, i) => {
+            const k = 1 + 1.1 / (Math.hypot(d.pos.x, d.pos.y, d.pos.z) || 1);
+            return { ...target(d.pos.x * k, d.pos.y * k, d.pos.z * k), down: d.down, hits: you?.onboarding?.hits?.[i] ?? null };
+          })
+        : [],
       portals,
       npcs: npcs.slice(0, 40),
       npcCount: room?.state.npcs?.size ?? 0,
