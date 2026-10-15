@@ -18,15 +18,25 @@ export function isFullscreen(): boolean {
   return !!document.fullscreenElement;
 }
 
+let watching = false;
+
+/** However fullscreen ends (holding Esc, the browser's own controls, our button), give Esc back. */
+function watchExit(): void {
+  if (watching) return;
+  watching = true;
+  document.addEventListener("fullscreenchange", () => {
+    if (!isFullscreen()) keyboard()?.unlock();
+  });
+}
+
 /** Enter fullscreen (call inside a click or key press) and keep Esc for the game while there. */
 export async function enterFullscreen(): Promise<void> {
+  watchExit();
   await document.documentElement.requestFullscreen?.().catch(() => {});
   if (isFullscreen()) await keyboard()?.lock(["Escape"]).catch(() => {});
 }
 
 export async function toggleFullscreen(): Promise<void> {
-  if (isFullscreen()) {
-    keyboard()?.unlock();
-    await document.exitFullscreen?.().catch(() => {});
-  } else await enterFullscreen();
+  if (isFullscreen()) await document.exitFullscreen?.().catch(() => {}); // fullscreenchange unlocks Esc
+  else await enterFullscreen();
 }
