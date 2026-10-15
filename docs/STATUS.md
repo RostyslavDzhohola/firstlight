@@ -4,6 +4,27 @@
 **Resume protocol:** SPEC §0. Read this file, check running tasks, continue at the first unchecked item.
 **Paused 2026-10-14 20:10 CDT by the owner:** their open requests (blinking, weapons, creeps, dodge delay, email-first sign-in, voice/radio removal, 3D characters, ElevenLabs SFX, pad outposts) are in the workspace handoff `../HANDOFF.md` (outside the repo). Start there.
 
+**Resumed 2026-10-15 ("go"); live at main 28e6683, protocol 4.** Merged and deployed today, each after
+Codex gpt-6.1-sol review (and CodeRabbit for small fixes):
+- **Owner's play-test bugs:** the pause-menu flicker ("blinking") and fullscreen swaps (D-controls-1..4);
+  shots now aim at the creature under the crosshair (the wand "didn't work outside", D-combat-1..3);
+  faster dodge; the Portus castle town is the safe zone with creeps outside the walls and walls that
+  block combat (D-zones-1..3); creeps near arrival on every planet; tutorial training hits go to
+  standing dummies.
+- **Owner's requests:** home page (leaderboard, online, worlds, my progress, share row; logout lands
+  there; D-home-1..5); guest play kept with save-progress-by-email at natural moments and a real Sign in
+  button (D-save-1..2); voice and radio hidden ("coming soon", `FEATURE_VOICE` off); F-keys moved to Mac
+  keys and Esc resumes; map fix (one north), waypoints and minimap (D-map-1..4); ElevenLabs sound effects
+  on the asset Worker `/v/sfx-1/` (D-sfx-1..2); pad outposts and designed pads on the three planets
+  (D42–D46, protocol 4).
+- **Testing:** Playwright journeys J1–J7 with deploy gates (`pnpm e2e`, `pnpm e2e:gate`, `pnpm e2e:prod`;
+  D-e2e-1) and `docs/tests/player-expectations.md`.
+- **Waiting on the owner:** the 3D characters + ninja starter (`lane/chars-3d`, merge-ready) and the
+  `?meadow` graphics prototype (`lane/graphics-study`) need the owner's pick; Resend domain verification
+  (saving shows "temporarily unavailable" until then); DataFast setup; the 𝕏 handle.
+- **Open:** WebGL frame stalls in the first seconds after arrival (`lane/arrival-stalls`, in progress);
+  the egg-persistence and movement hill-sprint tests are timing-flaky under load (also on 8b02ce4).
+
 ## Infra
 
 | Thing | State |
