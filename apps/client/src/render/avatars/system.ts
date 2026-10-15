@@ -20,7 +20,7 @@ function avatarSystem(game: Game): ClientSystem | null {
   const kindFor = (weapon: number, fallback: OneShot): OneShot => {
     const w = WEAPONS[weapon];
     if (!w) return fallback;
-    if (w.delivery === "thrown") return "throw";
+    if (w.delivery === "thrown" || w.id === "kunai") return "throw"; // kunai are thrown overhand
     if (w.cls === "magic" || w.delivery === "heal" || w.delivery === "bubble") return "cast";
     return fallback;
   };

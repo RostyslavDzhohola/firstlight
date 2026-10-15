@@ -110,6 +110,16 @@ function design(id: string): Piece[] {
       }
       return ps;
     }
+    case "kunai": {
+      // Ember Kunai: a leaf blade, a cord-wrapped grip and a ring pommel with an ember bead
+      return [
+        P(new THREE.ConeGeometry(0.022, 0.15, 4).rotateX(H), "metalLight", [0, 0, 0.16], [0, 0, Math.PI / 4], [1, 0.32, 1]),
+        P(cylZ(0.012, 0.012, 0.012, 8), "metal", [0, 0, 0.08]),
+        P(cylZ(0.009, 0.009, 0.1, 8), "cord", [0, 0, 0.02]),
+        P(torus(0.016, 0.004, 10), "metal", [0, 0, -0.045], [H, 0, 0]),
+        P(sph(0.006, 8, 6), "accent", [0, 0, 0.08]),
+      ];
+    }
     case "riverstaff": {
       const ps: Piece[] = [P(cylZ(0.022, 0.02, 1.75, 8), "wood", [0, 0, 0.25])];
       for (const z of [-0.5, -0.1, 0.12, 0.62, 1.05]) ps.push(P(torus(0.024, 0.006, 10), "cord", [0, 0, z]));

@@ -75,10 +75,10 @@ describe("avatar teardown", () => {
 });
 
 describe("held items", () => {
-  it("builds a model for every weapon id except fists", () => {
+  it("builds a model for every weapon id except fists and hidden specials", () => {
     for (const w of WEAPONS) {
       const m = weapons.weaponModel(w.id, 0);
-      if (w.id === "fists") expect(m).toBeNull();
+      if (w.id === "fists" || w.hidden) expect(m).toBeNull();
       else {
         expect(m, w.id).not.toBeNull();
         let meshes = 0;
@@ -107,7 +107,7 @@ describe("avatar warm-up hook", () => {
   it("stands every palette and every starter (T9: each palette in play compiles behind the loading screen)", () => {
     const looks = mod.avatarWarmupLooks();
     expect(new Set(looks.map((l) => l.palette))).toEqual(new Set(mod.PALETTES.map((_, i) => i)));
-    expect(new Set(looks.map((l) => l.starter)).size).toBe(4);
+    expect(new Set(looks.map((l) => l.starter)).size).toBe(5);
   });
 
   it("keeps its samples for the session: in the scene (hidden) while warming, out of it after, never disposed", () => {

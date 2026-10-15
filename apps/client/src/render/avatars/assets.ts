@@ -1,6 +1,7 @@
-// Starter character assets: four skinned GLBs on one shared skeleton, one GLB of clips, one atlas.
-// Loaded once (meshopt-compressed) behind the loading screen; every AvatarView clones from here.
-// Built by tools/blender/characters/build.sh.
+// Starter character assets: five sculpted, skinned GLBs on one shared skeleton, one GLB of clips, and
+// per starter an albedo (alpha = painted accent mask) and a tangent-space normal map. Loaded once
+// (meshopt-compressed) behind the loading screen; every AvatarView clones from here.
+// Built by tools/blender/chars3d/build.sh (the clips by tools/blender/characters/build_anims.py).
 
 import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
@@ -9,16 +10,29 @@ import { config } from "../../config.ts";
 import { makeRideClip } from "./ride.ts";
 
 /** Order matches PlayerState.starter and STARTERS in @firstlight/shared/content/weapons. */
-export const STARTER_FILES = ["hexwick", "ash", "kappa", "unit7"] as const;
+export const STARTER_FILES = ["hexwick", "ash", "kappa", "unit7", "ninja"] as const;
 
 /** Per-starter model scale (one skeleton; silhouettes differ in build): Hexwick slim and young,
- *  Brother Ash tall, Kappa squat, Unit 7 compact. */
-export const STARTER_SCALE = [0.95, 1.04, 0.9, 0.98] as const;
+ *  Brother Ash tall, Kappa squat, Unit 7 compact, the ninja lean. */
+export const STARTER_SCALE = [0.95, 1.04, 0.9, 0.98, 0.96] as const;
+
+export interface StarterTextures {
+  /** sRGB colour; 1 - alpha marks painted accents (glyphs, lens, emblem) that take the palette accent. */
+  albedo: THREE.Texture;
+  /** Tangent-space normals (OpenGL convention, Blender UVs: the material flips Y for glTF UVs). */
+  normal: THREE.Texture;
+}
 
 export interface AvatarAssets {
   starters: THREE.Object3D[]; // template scenes (never added to the scene graph)
+  textures: StarterTextures[];
   clips: Map<string, THREE.AnimationClip>;
-  atlas: THREE.Texture;
+}
+
+/** Texture size: 1024² by default, 512² on the Low tier (set before the first preload). */
+let lowRes = false;
+export function setAvatarTextureLowRes(low: boolean) {
+  lowRes = low;
 }
 
 let promise: Promise<AvatarAssets | null> | null = null;
@@ -48,18 +62,27 @@ async function load(onProgress?: (frac: number) => void): Promise<AvatarAssets> 
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
   let done = 0;
-  const total = STARTER_FILES.length + 2;
+  const total = STARTER_FILES.length * 3 + 1;
   const tick = <T>(p: Promise<T>) => p.then((v) => { onProgress?.(++done / total); return v; });
+  const texLoader = new THREE.TextureLoader();
+  const suffix = lowRes ? "_512" : "";
+  const tex = (name: string, srgb: boolean) =>
+    tick(texLoader.loadAsync(`${base}${name}${suffix}.webp`)).then((t) => {
+      t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+      t.flipY = false; // glTF UV convention
+      t.anisotropy = 4;
+      t.needsUpdate = true;
+      return t;
+    });
 
-  const [atlas, anims, ...chars] = await Promise.all([
-    tick(new THREE.TextureLoader().loadAsync(`${base}starters_atlas.png`)),
+  const [anims, chars, textures] = await Promise.all([
     tick(loader.loadAsync(`${base}starters_anims.glb`)),
-    ...STARTER_FILES.map((f) => tick(loader.loadAsync(`${base}${f}.glb`))),
+    Promise.all(STARTER_FILES.map((f) => tick(loader.loadAsync(`${base}${f}.glb`)))),
+    Promise.all(STARTER_FILES.map(async (f) => {
+      const [albedo, normal] = await Promise.all([tex(`${f}_albedo`, true), tex(`${f}_normal`, false)]);
+      return { albedo, normal };
+    })),
   ]);
-  atlas.colorSpace = THREE.SRGBColorSpace;
-  atlas.flipY = false; // glTF UV convention
-  atlas.anisotropy = 4;
-  atlas.needsUpdate = true;
 
   const clips = new Map<string, THREE.AnimationClip>();
   for (const c of anims.animations) clips.set(c.name, slim(c));
@@ -77,7 +100,7 @@ async function load(onProgress?: (frac: number) => void): Promise<AvatarAssets> 
   });
   const idle = clips.get("idle");
   if (idle && starters[0]) clips.set("ride", makeRideClip(idle, starters[0])); // horses: no CC0 riding clip
-  loaded = { starters, clips, atlas };
+  loaded = { starters, textures, clips };
   return loaded;
 }
 

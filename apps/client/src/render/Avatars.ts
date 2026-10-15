@@ -67,7 +67,7 @@ type WeaponKind = "fists" | "melee" | "ranged" | "magic" | "thrown" | "support";
 function weaponKind(index: number): WeaponKind {
   const w = WEAPONS[index];
   if (!w || w.id === "fists") return "fists";
-  if (w.delivery === "thrown") return "thrown";
+  if (w.delivery === "thrown" || w.id === "kunai") return "thrown"; // kunai are thrown overhand
   if (w.cls === "melee") return "melee";
   if (w.cls === "magic") return "magic";
   if (w.cls === "ranged") return "ranged";
@@ -95,15 +95,20 @@ function oneShotClip(kind: OneShot, w: WeaponKind): string {
 
 // ---- sockets ---------------------------------------------------------------------------------
 export type SocketName = "hand_r" | "hand_l" | "head" | "face" | "back" | "belt";
-const SOCKETS: Record<SocketName, { bone: string; at: (b: (n: string) => THREE.Vector3) => THREE.Vector3 }> = {
+const SOCKETS: Record<SocketName, { bone: string; at: (b: (n: string) => THREE.Vector3, starter: number) => THREE.Vector3 }> = {
   // grip centre: in the palm, between the wrist and the middle knuckle, a little below
   hand_r: { bone: "hand_r", at: (b) => b("hand_r").lerp(b("middle_01_r"), 0.75).add(new THREE.Vector3(0, -0.025, 0)) },
   hand_l: { bone: "hand_l", at: (b) => b("hand_l").lerp(b("middle_01_l"), 0.75).add(new THREE.Vector3(0, -0.025, 0)) },
-  head: { bone: "Head", at: () => new THREE.Vector3(0, 1.84, 0) },
-  face: { bone: "Head", at: () => new THREE.Vector3(0, 1.69, 0.115) },
+  head: { bone: "Head", at: (_b, s) => new THREE.Vector3(0, HEAD_SOCKET[s]![0], 0) },
+  face: { bone: "Head", at: (_b, s) => new THREE.Vector3(0, FACE_SOCKET[s]![0], FACE_SOCKET[s]![1]) },
   back: { bone: "spine_03", at: () => new THREE.Vector3(0, 1.3, -0.2) },
   belt: { bone: "pelvis", at: () => new THREE.Vector3(0, 1.0, 0.16) },
 };
+/** The sculpted heads are ~1.1-1.15x life size (tools/blender/chars3d recipes): where hats sit (crown
+ *  height, model space) and how much bigger hats and masks are drawn, per starter. */
+const HEAD_SOCKET: readonly (readonly [number, number])[] = [[1.915, 1.15], [1.93, 1.2], [1.9, 1.22], [1.905, 1.2], [1.93, 1.18]];
+/** Face socket per starter: eye-line height and how far forward the face (mask, visor, beak) reaches. */
+const FACE_SOCKET: readonly (readonly [number, number])[] = [[1.742, 0.138], [1.74, 0.136], [1.735, 0.15], [1.745, 0.17], [1.742, 0.146]];
 
 // weapon +Z (muzzle) → model -X (right hand's knuckles at rest), weapon +Y (top) → model +Z (thumb)
 export const GUN_GRIP = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(
@@ -134,7 +139,7 @@ type Lod = "full" | "mid" | "far";
 /** The avatar stands on the analytic ground height, but the rendered terrain is a triangulated mesh
  *  and feet are spread on slopes: sink the model a few cm so feet read as planted (Kappa's bare feet
  *  already sit 2 cm low). */
-const FOOT_SINK = [0.035, 0.035, 0.015, 0.035] as const;
+const FOOT_SINK = [0.035, 0.035, 0.015, 0.035, 0.03] as const;
 /** Rest pelvis joint height on the shared skeleton (m, unscaled), and how far the seat of the
  *  trousers sits below it: together they put a rider on a horse's saddle socket. */
 const PELVIS_HEIGHT = 0.917;
@@ -392,7 +397,8 @@ export class AvatarView {
     if (!tpl) return;
     const model = cloneSkinned(tpl);
     model.scale.setScalar(STARTER_SCALE[this.starter % STARTER_SCALE.length] ?? 1);
-    const mat = avatarMaterial(a.atlas, this.palette);
+    const tex = a.textures[this.starter % a.textures.length] ?? a.textures[0]!;
+    const mat = avatarMaterial(tex, this.palette);
     let mesh: THREE.SkinnedMesh | null = null;
     model.traverse((o) => {
       const m = o as THREE.SkinnedMesh;
@@ -450,11 +456,13 @@ export class AvatarView {
     for (const [name, def] of Object.entries(SOCKETS) as [SocketName, (typeof SOCKETS)[SocketName]][]) {
       const bone = bones.get(def.bone);
       if (!bone) continue;
-      const target = new THREE.Matrix4().makeTranslation(def.at(pos));
+      const st = this.starter % HEAD_SOCKET.length;
+      const target = new THREE.Matrix4().makeTranslation(def.at(pos, st));
       const local = bone.matrixWorld.clone().invert().multiply(target);
       const sock = new THREE.Object3D();
       sock.name = `socket:${name}`;
       local.decompose(sock.position, sock.quaternion, sock.scale);
+      if (name === "head" || name === "face") sock.scale.multiplyScalar(HEAD_SOCKET[st]![1]); // hats and masks fit the bigger heads
       bone.add(sock);
       this.sockets.set(name, sock);
     }

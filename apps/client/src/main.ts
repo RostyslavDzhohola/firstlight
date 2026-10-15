@@ -103,7 +103,7 @@ $("signin")?.addEventListener("click", async (e) => {
 });
 
 // Bench and dev shortcuts: ?autoplay skips the landing (for Codex and benchmarks); ?avatars opens the
-// character lineup (4 starters x 6 palettes cycling every clip) instead of the game.
+// character lineup (5 starters x 6 palettes cycling every clip) instead of the game.
 if (new URLSearchParams(location.search).has("avatars")) {
   void import("./render/avatars/devpage.ts").then((m) => m.startAvatarDevPage());
 } else if (new URLSearchParams(location.search).has("horses")) {
