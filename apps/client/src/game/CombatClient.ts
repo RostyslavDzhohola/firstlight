@@ -110,7 +110,7 @@ export class CombatClient {
     room.onMessage("bubble", (m: { id: number; x: number; y: number; z: number; r: number; ms: number }) => {
       const at = new THREE.Vector3(m.x, m.y, m.z);
       this.effects.bubble(m.id, at, m.r, m.ms);
-      this.game.audio.play("ui", at);
+      this.game.audio.play("bubble", at);
     });
     room.onMessage("bubblePop", (m: { id: number }) => this.effects.popBubble(m.id));
     // Bubbles deployed before we arrived (late join, reconnect): ask now that the handlers exist.
@@ -118,7 +118,7 @@ export class CombatClient {
     room.onMessage("hit", (m: { attacker: string; target: string; amount: number; weak: boolean; x: number; y: number; z: number; kb?: number; kx?: number; ky?: number; kz?: number }) => {
       if (m.attacker === me && m.target !== me) {
         this.hud.hit(m.weak);
-        this.game.audio.play("hitmark", null, m.weak ? 1.3 : 1, m.weak ? 1.3 : 1);
+        this.game.audio.play(m.weak ? "crit" : "hitmark");
         const s = this.toScreen(_v.set(m.x, m.y, m.z), 1.9);
         if (s) this.hud.damageNumber(s.x, s.y, m.amount, m.weak);
       }
@@ -151,7 +151,7 @@ export class CombatClient {
         this.game.audio.play("explosion", at);
       } else {
         this.effects.impact(at, weaponColor(m.weapon));
-        this.game.audio.play("impact", at, 0.6);
+        this.game.audio.play(this.game.audio.impactSound(m.weapon), at, 0.6);
       }
     });
     room.onMessage("swing", (m: { by: string; weapon: number }) => {
@@ -160,7 +160,7 @@ export class CombatClient {
       if (!p) return;
       const pos = new THREE.Vector3(p.x, p.y, p.z);
       this.effects.arc(pos, new THREE.Vector3(p.fx, p.fy, p.fz), pos.clone().normalize(), WEAPONS[m.weapon]?.range ?? 2, weaponColor(m.weapon));
-      this.game.audio.play("swing", pos);
+      this.game.audio.play(this.game.audio.swingSound(m.weapon), pos);
     });
     room.onMessage("phrase", (m: { by: string; id: number }) => {
       if (m.by !== me && isBlocked(m.by)) return; // no speech bubbles from blocked players
@@ -383,7 +383,7 @@ export class CombatClient {
     if (def.delivery !== "none") g.self?.trigger("attack");
     if (def.delivery === "melee") {
       room.send("melee", { slot, t: Date.now(), heavy: false });
-      g.audio.play("swing");
+      g.audio.play(g.audio.swingSound(WEAPONS.indexOf(def)));
       const up = g.player.up();
       this.effects.arc(g.player.pos, g.player.facing, up, def.range, weaponColor(WEAPONS.indexOf(def)));
       return;
@@ -413,7 +413,7 @@ export class CombatClient {
       const muzzle = g.player.pos.clone().addScaledVector(g.player.up(), 1.35).addScaledVector(g.player.facing, 0.5);
       const color = weaponColor(WEAPONS.indexOf(def));
       this.effects.tracer(muzzle, to, color, def.delivery === "chain" ? 1.6 : 1);
-      g.audio.play(def.id in { carbine: 1, scatterpipe: 1, stillshot: 1, stormcoil: 1 } ? def.id : "carbine");
+      g.audio.play(g.audio.weaponSound(WEAPONS.indexOf(def)));
       this.effects.flash(muzzle, color, 0.3);
     }
   }
