@@ -1,0 +1,31 @@
+{
+  "$comment": "Journeys that must pass before a deploy (pnpm e2e:gate). Ids are the @J tags in apps/client/e2e/*.spec.ts. Add a journey when its feature lane lands and it passes on the listed projects; remove one only with a decision in docs/DECISIONS.md.",
+  "gates": [
+    { "id": "J1.1", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Home page with Play (6a)" },
+    { "id": "J1.2", "projects": ["webgpu"], "since": "2026-10-15", "note": "Play → world < 30 s, no blinking (WebGPU; WebGL still shows a 100–216 ms stall cluster after arrival: item 1). Frame-time journey: run the gate on a quiet machine" },
+    { "id": "J2.1", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Hexwick the real way: trains or holsters in the Portus town, fires outside the gate (2, D-zones-1)" },
+    { "id": "J2.2", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Hexwick + Hexquill I on Arcadia: refused on the pad, accepted outside" },
+    { "id": "J2.3", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Brother Ash + Sunbrand I on Arcadia" },
+    { "id": "J2.4", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Kappa + Riverstaff I on Arcadia" },
+    { "id": "J2.5", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Unit 7 + Pocket Carbine I on Arcadia" },
+    { "id": "J2.6", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Hexwick + Hexquill I on Hollowmere" },
+    { "id": "J2.7", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Hexwick + Hexquill I on Meridian" },
+    { "id": "J2.8", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "HUD zone label matches the server, pad and outside (2)" },
+    { "id": "J3.1", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Arcadia: hostile in view within 20 s, guide's mission pointer (3, 6c)" },
+    { "id": "J3.2", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Hollowmere: hostile in view within 20 s (3, 6c)" },
+    { "id": "J3.3", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Meridian: hostile in view within 20 s (3, 6c)" },
+    { "id": "J3.4", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Hexwick kills a hostile for XP (3)" },
+    { "id": "J4.1", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Minimap visible, clear of the tutorial, player card, hotbar and save card (6b)" },
+    { "id": "J4.2", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Due east on the map is east on the compass (6b)" },
+    { "id": "J4.3", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Waypoint drops, clears with right-click and on arrival (6b)" },
+    { "id": "J5.1", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Esc → menu → Esc back into the game, twice (6d)" },
+    { "id": "J5.2", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "No F-keys; photo mode from its listed key (6d)" },
+    { "id": "J5.3", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Dodge starts < 100 ms after C, standing and running, no snap-back (4)" },
+    { "id": "J5.4", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Voice hidden: no pill, no mic request, coming-soon line (6)" },
+    { "id": "J6.1", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Save toast after the first level-up, never a card while locked (5c)" },
+    { "id": "J6.2", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Save with an email code, sign in from a second browser, same character (5c)" },
+    { "id": "J7.1", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Guest logout → home with leaderboard, online, worlds, Play, Sign in (6a)" },
+    { "id": "J7.2", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Saved player logs out → home shows my progress (6a)" },
+    { "id": "smoke", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Guest joins, sees the world, no blinking, no console errors. Frame-time journey: run the gate on a quiet machine" }
+  ]
+}
