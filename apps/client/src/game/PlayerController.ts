@@ -60,6 +60,13 @@ const _look = new THREE.Vector3();
 const _head = new THREE.Vector3();
 const _cam = new THREE.Vector3();
 const _camUp = new THREE.Vector3();
+const _camDir = new THREE.Vector3();
+/** The camera stops this far (m) short of a structure between the head and where it would be. */
+export const CAMERA_WALL_GAP = 0.3;
+/** ...and never comes closer to the head than this (m). */
+export const CAMERA_MIN_REACH = 0.6;
+/** How fast (m per placement) the camera eases back out once the structure is out of the way. */
+const CAMERA_EASE_OUT = 0.25;
 const AXIS_X = new THREE.Vector3(1, 0, 0);
 const AXIS_Z = new THREE.Vector3(0, 0, 1);
 /** Server corrections closer than this (metres) keep the camera heading (F12 confirm Sonnet N-6). */
@@ -74,6 +81,8 @@ export class PlayerController {
   readonly camForward = new THREE.Vector3(0, 0, 1);
   camPitch = -0.15;
   camDistance = 4.6;
+  /** How far behind the head the camera may sit now (a structure in the way pulls it in). */
+  private camReach = Infinity;
   onGround = false;
   swimming = false;
   anim: number = ANIM.IDLE;
@@ -369,6 +378,15 @@ export class PlayerController {
     const ride = rideCamera(this.rideBlend); // in the saddle: eyes higher, camera further back
     const head = _head.copy(this.pos).addScaledVector(up, 1.65 + ride.lift);
     const camPos = _cam.copy(head).addScaledVector(look, -(this.camDistance + ride.back)).addScaledVector(right, 0.55).addScaledVector(up, 0.25);
+    // Not through a structure (a house, a tower, an awning): the camera comes in to just short of it
+    // along the line from the head, and eases back out once it's clear (no popping in and out).
+    const dir = _camDir.copy(camPos).sub(head);
+    const full = dir.length();
+    dir.divideScalar(full);
+    const hit = this.structures?.raycast?.(head, dir, full + CAMERA_WALL_GAP) ?? Infinity;
+    const want = hit < Infinity ? Math.max(CAMERA_MIN_REACH, hit - CAMERA_WALL_GAP) : full;
+    this.camReach = want < this.camReach ? want : Math.min(want, this.camReach + CAMERA_EASE_OUT);
+    if (this.camReach < full) camPos.copy(head).addScaledVector(dir, this.camReach);
     // Keep the camera above ground.
     const cu = _camUp.copy(camPos).normalize();
     const g = this.terrain.groundHeight(cu.x, cu.y, cu.z) + this.terrain.body.radius + 0.4;
