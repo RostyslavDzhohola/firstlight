@@ -3,9 +3,18 @@
 import { WEAPON_BY_ID, type WeaponDef } from "@firstlight/shared/content/weapons";
 import { itemName, itemStack } from "@firstlight/shared/content/items";
 import type { InvItem } from "@firstlight/shared/net/protocol";
+import { features } from "../config.ts";
 import { itemSprite } from "./sprites.ts";
 
 export const TIER_NUMERALS = ["", "I", "II", "III"] as const;
+
+/** Items this build hides: the radio while voice is off (D-controls-1). The server still holds them. */
+export const HIDDEN_ITEMS: ReadonlySet<string> = new Set(features.voice ? [] : ["radio"]);
+
+/** The item as the HUD and the inventory show it: a hidden item reads as an empty slot. */
+export function shownItem<T extends { id: string }>(item: T | null | undefined, hidden: ReadonlySet<string> = HIDDEN_ITEMS): T | null {
+  return item && !hidden.has(item.id) ? item : null;
+}
 
 // ------------------------------------------------------------------------------------------------ damage numbers
 

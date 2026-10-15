@@ -11,6 +11,14 @@ export const config = {
   repoUrl: "https://github.com/RostyslavDzhohola/firstlight",
 };
 
+/** Build-time feature switches. */
+export const features = {
+  /** Proximity voice and the radio: hidden in this build ("Voice chat: coming soon", D-controls-1). No
+   *  V key, no microphone prompt, no voice pill, no tutorial voice step, no radio in the shop or the
+   *  inventory. VITE_FEATURE_VOICE=1 brings them back, together with the server's FEATURE_VOICE=1. */
+  voice: import.meta.env.VITE_FEATURE_VOICE === "1",
+};
+
 /** URL flags (also ?cpuslow=N for the F11 weak-laptop profile): ?nobloom ?nofog ?nosky ?nograss ?notrees ?nowater ?noshadows ?noao ?noparticles ?nopost ?nochars ?nodestruct ?nohorses ?webgl ?tier=… ?bench */
 export const flags = {
   has(name: string): boolean {

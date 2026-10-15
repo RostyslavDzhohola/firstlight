@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { WEAPON_BY_ID } from "@firstlight/shared/content/weapons";
-import { aliveParts, classifyKiller, formatDamage, isLowHp, parsePrompt, prettyKind, slotView, weaponChips } from "./hudFormat.ts";
+import { aliveParts, classifyKiller, formatDamage, HIDDEN_ITEMS, isLowHp, parsePrompt, prettyKind, shownItem, slotView, weaponChips } from "./hudFormat.ts";
 
 describe("damage numbers", () => {
   it("formats each kind with text and shape cues, not colour alone", () => {
@@ -71,5 +71,18 @@ describe("killer", () => {
     expect(classifyKiller({ killer: "n3", killerName: "npc:dusk_wolf" }, "me")).toEqual({ kind: "creature", name: "Dusk Wolf" });
     expect(classifyKiller({ killer: null, killerName: "the fall" }, "me")).toEqual({ kind: "world", name: "The fall" });
     expect(prettyKind("hollow-king")).toBe("Hollow King");
+  });
+});
+
+describe("hidden items (voice and the radio are off in this build, D-controls-1)", () => {
+  it("a radio reads as an empty slot on the HUD and in the inventory; everything else shows", () => {
+    const radio = { id: "radio", tier: 1 as const, qty: 1 };
+    const carbine = { id: "carbine", tier: 1 as const, qty: 1 };
+    expect(HIDDEN_ITEMS.has("radio")).toBe(true);
+    expect(shownItem(radio)).toBeNull();
+    expect(shownItem(carbine)).toBe(carbine);
+    expect(shownItem(null)).toBeNull();
+    expect(shownItem(radio, new Set())).toBe(radio); // a build with voice
+    expect(slotView(shownItem(radio), 1).empty).toBe(true);
   });
 });
