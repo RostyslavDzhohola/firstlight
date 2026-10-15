@@ -119,7 +119,12 @@ export class OnboardingSystem implements RoomSystem {
     if (def.delivery === "heal" || def.delivery === "bubble" || def.delivery === "none" || tier.level > a.char.level) return;
     const now = Date.now();
     if (now - t.lastAt < Math.max(ONBOARDING_RULES.MIN_GAP_MS, tier.rate * 1000 * 0.85)) return;
-    const i = def.delivery === "melee" ? this.meleeTarget(a, m, def.range, def.arc ?? 90) : this.rayTarget(a, m, def.falloffTo ?? def.range);
+    // Knocked-down dummies take no more hits while one still stands (a swing or a shot at a standing
+    // dummy used to land on a nearer or nearer-along-the-ray down one, e2e); with all down they do,
+    // so a failed completion can be retried.
+    const all = this.allDown(t);
+    const open = (i: number) => all || t.hits[i]! < ONBOARDING.HITS_PER_DUMMY;
+    const i = def.delivery === "melee" ? this.meleeTarget(a, m, def.range, def.arc ?? 90, open) : this.rayTarget(a, m, def.falloffTo ?? def.range, open);
     if (i < 0) return;
     t.lastAt = now;
     const was = t.hits[i]!;
@@ -200,8 +205,8 @@ export class OnboardingSystem implements RoomSystem {
     if (this.trainees.get(a.identity.userId) === t) this.trainees.delete(a.identity.userId);
   }
 
-  /** Nearest dummy inside the melee reach, judged by the body's facing or the camera's aim. */
-  private meleeTarget(a: PlayerActor, m: z.infer<typeof trainSchema>, range: number, arcDeg: number): number {
+  /** Nearest open dummy inside the melee reach, judged by the body's facing or the camera's aim. */
+  private meleeTarget(a: PlayerActor, m: z.infer<typeof trainSchema>, range: number, arcDeg: number, open: (i: number) => boolean): number {
     const pos = actorPos(a);
     const facing: V3 = [a.state.fx, a.state.fy, a.state.fz];
     // The camera ray flattened onto the ground plane (players aim with the mouse).
@@ -216,7 +221,7 @@ export class OnboardingSystem implements RoomSystem {
     const aimOk = Math.hypot(aim[0], aim[1], aim[2]) > 0.1;
     this.dummies.forEach((f, i) => {
       const d = dist3(pos, f);
-      if (d >= bestD) return;
+      if (d >= bestD || !open(i)) return;
       if (inMeleeArc(pos, facing, f, reach, arc) || (aimOk && inMeleeArc(pos, aim, f, reach, arc))) {
         best = i;
         bestD = d;
@@ -225,8 +230,8 @@ export class OnboardingSystem implements RoomSystem {
     return best;
   }
 
-  /** First dummy along the aim ray, which must start near our head (like a real shot). */
-  private rayTarget(a: PlayerActor, m: z.infer<typeof trainSchema>, range: number): number {
+  /** First open dummy along the aim ray, which must start near our head (like a real shot). */
+  private rayTarget(a: PlayerActor, m: z.infer<typeof trainSchema>, range: number, open: (i: number) => boolean): number {
     const pos = actorPos(a);
     const l = Math.hypot(pos[0], pos[1], pos[2]) || 1;
     const head: V3 = [pos[0] + (pos[0] / l) * 1.6, pos[1] + (pos[1] / l) * 1.6, pos[2] + (pos[2] / l) * 1.6];
@@ -238,6 +243,7 @@ export class OnboardingSystem implements RoomSystem {
     let best = -1;
     let bestT = Infinity;
     this.dummies.forEach((f, i) => {
+      if (!open(i)) return; // a down dummy lies flat: shots pass over it
       const hit = rayCapsule(o, d, range + ONBOARDING_RULES.RAY_SLACK_M, f, ONBOARDING.DUMMY_RADIUS, ONBOARDING.DUMMY_HEIGHT);
       if (hit && hit.t < bestT) {
         best = i;
