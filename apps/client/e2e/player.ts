@@ -54,10 +54,24 @@ export interface Snap {
   hotbar?: ({ id: string; tier: number; qty: number } | null)[] | null;
   combat?: { training: boolean; deadUntilRespawn: boolean };
   onboarding?: { active: boolean; paid: boolean; ended: boolean; step: string | null; done: number; allDone: boolean } | null;
-  dummies?: Target[];
+  dummies?: (Target & { down: boolean; hits: number | null })[];
   portals?: (Target & { to: string })[];
   npcs?: Npc[];
   npcCount?: number;
+}
+/** One row of the server's `npc list` (apps/server/src/world/npc/NpcSystem.ts). */
+export interface ServerNpc {
+  id: string;
+  def: string;
+  level: number;
+  x: number;
+  y: number;
+  z: number;
+  hp: number;
+  maxHp: number;
+  mode: string;
+  boss: boolean;
+  area: string | null;
 }
 export interface FlEvent {
   t: number;
@@ -287,6 +301,17 @@ export class Player {
   /** An admin console command (dev admin guests only). */
   async admin(cmd: string, args: Record<string, unknown> = {}) {
     return this.page.evaluate(([c, a]) => (window as unknown as { __fl: { act: { admin(c: string, a: object): boolean } } }).__fl.act.admin(c, a), [cmd, args] as const);
+  }
+
+  /** The server's full NPC list for this copy (dev admin guests only; not view-filtered). */
+  async npcList(): Promise<ServerNpc[]> {
+    const r = await this.page.evaluate(() => (window as unknown as { __fl: { act: { npc(c: string): Promise<{ npcs: ServerNpc[] } | null> } } }).__fl.act.npc("list"));
+    return r?.npcs ?? [];
+  }
+
+  /** Distance, bearing and aim from us to a world point. */
+  targetOf(p: readonly number[]): Promise<Target | null> {
+    return this.page.evaluate(([x, y, z]) => (window as unknown as { __fl: { targetOf(x: number, y: number, z: number): Target | null } }).__fl.targetOf(x!, y!, z!), [p[0], p[1], p[2]]);
   }
 
   // ------------------------------------------------------------------------------------------ moving

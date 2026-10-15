@@ -1,0 +1,4 @@
+{
+  "$comment": "Journeys that must pass before a deploy (pnpm e2e:gate). Ids are the @J tags in apps/client/e2e/*.spec.ts. Add a journey when its feature lane lands and it passes on the listed projects; remove one only with a decision in docs/DECISIONS.md.",
+  "gates": []
+}

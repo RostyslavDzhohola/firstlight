@@ -1,0 +1,110 @@
+// J5 (HANDOFF 6i; items 4, 6, 6d): Esc resumes the game (a click re-locks without reopening the menu);
+// no action needs an F-key; the dodge starts within ~100 ms of C; voice is hidden ("coming soon").
+
+import { expect, test } from "./fixtures.ts";
+import type { Player } from "./player.ts";
+
+const pauseMenu = (p: Player) => p.page.locator('[data-e2e="pause-menu"]');
+
+/** A keycap label from How to play ("P", "`", "Shift") as a Playwright key. */
+function keyName(k: string): string {
+  if (/^[A-Z]$/i.test(k)) return `Key${k.toUpperCase()}`;
+  if (/^\d$/.test(k)) return `Digit${k}`;
+  return ({ "`": "Backquote", Esc: "Escape", Space: "Space", Tab: "Tab", Shift: "Shift", Ctrl: "Control", Alt: "Alt" } as Record<string, string>)[k] ?? k;
+}
+
+async function arrive(player: Player, body = "arcadia") {
+  await player.joinAsDevAdmin({ starter: "Hexwick", body });
+  await player.waitInWorld(90_000, body);
+  await player.lock();
+}
+
+test.describe("J5 controls", () => {
+  test("J5.1 · item 6d · Esc opens the menu, Esc again goes back to the game, a click looks around again", { tag: ["@J5", "@J5.1", "@item-6d"] }, async ({ player, page }) => {
+    await arrive(player);
+    await player.escape(); // the browser releases the pointer
+    await expect(pauseMenu(player), "Esc opens the pause menu").toBeVisible();
+    await player.shot("pause-menu");
+    await page.keyboard.press("Escape");
+    await expect(pauseMenu(player), "Esc in the menu closes it").toBeHidden();
+    await expect(page.locator('[data-e2e="click-to-look"]'), '"Click to look around" hint').toBeVisible();
+    await player.shot("click-to-look");
+    await page.mouse.click(640, 360);
+    await player.until((s) => s.input.pointerLocked, "one click re-locks the pointer", 5000);
+    await expect(pauseMenu(player), "the click doesn't reopen the menu").toBeHidden();
+    await expect(page.locator('[data-e2e="click-to-look"]')).toBeHidden();
+  });
+
+  test("J5.2 · item 6d · no action needs an F-key (How to play lists none; photo mode works from its listed key)", { tag: ["@J5", "@J5.2", "@item-6d"] }, async ({ player, page }) => {
+    await arrive(player);
+    await player.escape();
+    const menu = pauseMenu(player);
+    await expect(menu).toBeVisible();
+    const caps = (await menu.locator(".fl-key").allInnerTexts()).map((s) => s.trim());
+    await player.note("keycaps", caps);
+    expect(caps.length, "How to play lists keys").toBeGreaterThan(5);
+    expect(caps.filter((k) => /^F\d{1,2}$/.test(k)), "no F1–F12 keys anywhere in the menu").toEqual([]);
+    // Photo mode from the key How to play gives it.
+    const row = menu.locator("dl dd", { hasText: /^Photo mode$/ }).first();
+    const keys = (await row.locator("xpath=preceding-sibling::dt[1]").locator(".fl-key").allInnerTexts()).map((s) => s.trim());
+    expect(keys.length, "How to play gives photo mode a key").toBeGreaterThan(0);
+    await page.keyboard.press("Escape");
+    await page.mouse.click(640, 360);
+    await player.until((s) => s.input.pointerLocked, "back in the game");
+    await page.keyboard.press(keys.map(keyName).join("+"));
+    await player.until((s) => s.ui.photo === true, `photo mode opens with ${keys.join("+")}`, 5000);
+    await player.shot("photo-mode");
+    await page.keyboard.press(keys.map(keyName).join("+"));
+    await player.until((s) => s.ui.photo === false, "the same key leaves photo mode", 5000);
+  });
+
+  test("J5.3 · item 4 · the dodge roll starts within 100 ms of pressing C", { tag: ["@J5", "@J5.3", "@item-4"] }, async ({ player }) => {
+    await arrive(player);
+    const results: { controllerMs: number | null; avatarMs: number | null }[] = [];
+    for (let i = 0; i < 3; i++) {
+      await player.page.waitForTimeout(1600); // past the 1.2 s dodge cooldown
+      const since = await player.now();
+      await player.hold(["KeyW"], 150); // a dodge needs no movement, but players roll on the move
+      await player.page.keyboard.down("KeyC");
+      await player.page.waitForTimeout(60);
+      await player.page.keyboard.up("KeyC");
+      await player.page.waitForTimeout(1200);
+      const ev = await player.events(since);
+      const key = ev.find((e) => e.kind === "key" && e.code === "KeyC");
+      const anim = ev.find((e) => e.kind === "anim" && e.to === 7 && key && e.t >= key.t);
+      const clip = ev.find((e) => e.kind === "clip" && /dodge|roll/i.test(String(e.name)) && key && e.t >= key.t);
+      results.push({ controllerMs: key && anim ? Math.round(anim.t - key.t) : null, avatarMs: key && clip ? Math.round(clip.t - key.t) : null });
+    }
+    await player.note("dodge latency", results);
+    const avatar = results.map((r) => r.avatarMs ?? r.controllerMs).filter((x): x is number => x !== null).sort((a, b) => a - b);
+    expect(avatar.length, "the dodge happened every time").toBe(3);
+    expect(avatar[1]!, "median key → roll on screen (ms)").toBeLessThan(100);
+  });
+
+  test("J5.4 · item 6 · voice and radio are hidden: no pill, V does nothing, Esc menu says coming soon", { tag: ["@J5", "@J5.4", "@item-6"] }, async ({ player, page }) => {
+    await page.addInitScript(() => {
+      const w = window as unknown as { __micRequests: number };
+      w.__micRequests = 0;
+      const md = navigator.mediaDevices;
+      if (md?.getUserMedia) {
+        const orig = md.getUserMedia.bind(md);
+        md.getUserMedia = (c) => {
+          w.__micRequests++;
+          return orig(c);
+        };
+      }
+    });
+    await arrive(player, "portus");
+    await expect(page.locator(".fl-hud").getByText(/voice/i), "no voice pill on the HUD").toHaveCount(0);
+    await player.tap("KeyV");
+    await page.waitForTimeout(800);
+    const s = await player.snap();
+    expect(s.input.pointerLocked, "V doesn't open a voice panel (the pointer stays locked)").toBe(true);
+    expect(await page.evaluate(() => (window as unknown as { __micRequests: number }).__micRequests), "no microphone request").toBe(0);
+    await player.escape();
+    await expect(pauseMenu(player)).toBeVisible();
+    await expect(page.locator('[data-e2e="voice-coming-soon"]'), '"Voice chat: coming soon" in the menu').toBeVisible();
+    await expect(pauseMenu(player).getByText(/Voice & radio/), "no Voice & radio row").toHaveCount(0);
+    await player.shot("menu-voice-coming-soon");
+  });
+});

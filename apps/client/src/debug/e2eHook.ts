@@ -92,7 +92,7 @@ interface GameLike {
   planet?: { terrain?: unknown; body?: { radius: number } };
   input?: { locked: boolean; enabled: boolean; sensitivity: number; invertY: boolean };
   net?: { room: RoomLike | null; rtt?: number };
-  hud?: { you: { xp: number; xpToNext: number; coins: number; level: number; selected: number; hotbar: (Item | null)[]; dead: boolean } | null };
+  hud?: { you: { xp: number; xpToNext: number; coins: number; level: number; selected: number; hotbar: (Item | null)[]; dead: boolean; onboarding?: { hits: number[] } } | null };
   combat?: { training: unknown; deadUntilRespawn: boolean };
   menu?: { mode?: string };
   photo?: { active: boolean };
@@ -104,7 +104,7 @@ interface OnboardingLike {
   paid: boolean;
   ended: boolean;
   progress: { steps: { current: { id: string } | null; doneCount: number; allDone: boolean } };
-  dummies: { dummies: { pos: Vec }[] };
+  dummies: { dummies: { pos: Vec; down: boolean }[] };
 }
 
 // Shared catalogues, loaded once the game is up (the game chunk has them by then: no early fetch on the landing page).
@@ -198,10 +198,20 @@ export function installE2eHook(win: Window & typeof globalThis): void {
 
   // ---- room messages (re-attached after every travel)
   let hookedRoom: RoomLike | null = null;
+  let npcReq = 0;
+  const npcWaiters = new Map<string, (v: unknown) => void>();
   const hookRoom = (room: RoomLike) => {
     hookedRoom = room;
     const me = room.sessionId;
     push({ t: performance.now(), kind: "room", roomId: room.roomId, sessionId: me });
+    // Replies to act.npc("list") (NpcRenderer ignores them).
+    room.onMessage("npcList", (m: { req?: string }) => {
+      const w = m?.req ? npcWaiters.get(m.req) : undefined;
+      if (w) {
+        npcWaiters.delete(m.req!);
+        w(m);
+      }
+    });
     for (const type of IN_TYPES) {
       room.onMessage(type, (m: Record<string, unknown> | undefined) => {
         const t = performance.now();
@@ -389,6 +399,27 @@ export function installE2eHook(win: Window & typeof globalThis): void {
 
   // ---- snapshot
 
+  /** Distance, bearing (degrees, right = +) and camera aim to a world point, from the player now. */
+  const targetFrom = (g: GameLike | null, radius?: number) => {
+    const p = g?.player;
+    if (!p) return null;
+    const pos = v3(p.pos);
+    const fwd = v3(p.camForward);
+    const R = radius ?? (shared?.BODIES[g!.bodyId ?? ""]?.radius ?? Math.hypot(...pos));
+    const cam = g!.ctx?.camera;
+    return (x: number, y: number, z: number) => {
+      const a = cam ? screenAim(cam.matrixWorldInverse.elements, cam.projectionMatrix.elements, x, y, z) : null;
+      return {
+        dist: r1(Math.hypot(x - pos[0], y - pos[1], z - pos[2])),
+        surface: r1(surfaceDistance(pos, [x, y, z], R)),
+        bearing: r1(bearingTo(pos, fwd, [x, y, z])),
+        onScreen: a?.onScreen ?? false,
+        aimYaw: a ? Math.round(a.yaw * 1000) / 1000 : null,
+        aimPitch: a ? Math.round(a.pitch * 1000) / 1000 : null,
+      };
+    };
+  };
+
   const onboarding = (g: GameLike): OnboardingLike | null =>
     ((g.systems ?? []).find((s) => !!s && typeof s === "object" && "progress" in s && "dummies" in s) as OnboardingLike | undefined) ?? null;
 
@@ -449,19 +480,7 @@ export function installE2eHook(win: Window & typeof globalThis): void {
       }
     });
     const label = document.querySelector<HTMLElement>('[data-e2e="zone-label"]');
-    const cam = g.ctx?.camera;
-    const aim = (x: number, y: number, z: number) => (cam ? screenAim(cam.matrixWorldInverse.elements, cam.projectionMatrix.elements, x, y, z) : null);
-    const target = (x: number, y: number, z: number) => {
-      const a = aim(x, y, z);
-      return {
-        dist: r1(Math.hypot(x - pos[0], y - pos[1], z - pos[2])),
-        surface: r1(surfaceDistance(pos, [x, y, z], R)),
-        bearing: r1(bearingTo(pos, fwd, [x, y, z])),
-        onScreen: a?.onScreen ?? false,
-        aimYaw: a ? Math.round(a.yaw * 1000) / 1000 : null,
-        aimPitch: a ? Math.round(a.pitch * 1000) / 1000 : null,
-      };
-    };
+    const target = targetFrom(g, R)!;
 
     const rendered = npcRenderer(g);
     const npcs: Record<string, unknown>[] = [];
@@ -542,7 +561,7 @@ export function installE2eHook(win: Window & typeof globalThis): void {
       onboarding: ob
         ? { active: ob.active, paid: ob.paid, ended: ob.ended, step: ob.progress.steps.current?.id ?? null, done: ob.progress.steps.doneCount, allDone: ob.progress.steps.allDone }
         : null,
-      dummies: ob ? ob.dummies.dummies.map((d) => target(d.pos.x, d.pos.y, d.pos.z)) : [],
+      dummies: ob ? ob.dummies.dummies.map((d, i) => ({ ...target(d.pos.x, d.pos.y, d.pos.z), down: d.down, hits: you?.onboarding?.hits?.[i] ?? null })) : [],
       portals,
       npcs: npcs.slice(0, 40),
       npcCount: room?.state.npcs?.size ?? 0,
@@ -586,6 +605,8 @@ export function installE2eHook(win: Window & typeof globalThis): void {
       raw: (since = -Infinity) => frames.since(since).map((f) => Math.round(f.v * 10) / 10),
     },
     probe: { start: startProbe, stop: stopProbe, running: () => !!probe },
+    /** Distance, bearing and camera aim from the player to a world point (null before the game). */
+    targetOf: (x: number, y: number, z: number) => targetFrom(game())?.(x, y, z) ?? null,
     hudRects,
     auth,
     act: {
@@ -598,6 +619,26 @@ export function installE2eHook(win: Window & typeof globalThis): void {
         if (!room) return false;
         room.send("admin", { cmd, args });
         return true;
+      },
+      /**
+       * An NPC admin command (`list`, `spawn`…; server world/npc/NpcSystem.ts). `list` resolves with
+       * the server's whole NPC list (not view-filtered); others resolve true once sent.
+       */
+      npc: (cmd: string, args: Record<string, unknown> = {}) => {
+        const room = game()?.net?.room;
+        if (!room) return Promise.resolve(null);
+        const req = `e2e-${++npcReq}`;
+        if (cmd !== "list") {
+          room.send("npc", { ...args, cmd, req });
+          return Promise.resolve(true);
+        }
+        return new Promise((resolve) => {
+          npcWaiters.set(req, resolve);
+          room.send("npc", { ...args, cmd, req });
+          setTimeout(() => {
+            if (npcWaiters.delete(req)) resolve(null);
+          }, 5000);
+        });
       },
     },
   };
