@@ -66,6 +66,9 @@ async function standAt(r: Room, at: V, toward: V) {
   await waitFor(() => Math.abs(me(r).fx - f[0]) < 1e-3 && Math.abs(me(r).fz - f[2]) < 1e-3);
 }
 
+/** The server's actor behind a client room. */
+const actorOf = (r: Room) => serverRoom(r).actors.get(r.sessionId)!;
+
 /** A camera ray at the NPC's chest: from the head, or from `back` metres behind it along the same line. */
 function aim(r: Room, npc: { x: number; y: number; z: number }, back = 0) {
   const p = pos(r);
@@ -108,7 +111,10 @@ describe("starter weapons on the combat planets", () => {
         // Inside the ring: refused, with the reason the client shows ("Weapons are holstered…").
         const target0 = at(inside);
         await standAt(r, inside, target0);
-        expect(me(r).flags & PF.SAFE).toBeTruthy();
+        // The attack gate asks the server's safeNow; the SAFE flag the client sees follows on the
+        // next tick and patch, so wait for it rather than racing it (no combat tag yet: no attack).
+        expect(serverRoom(r).safeNow(actorOf(r), Date.now())).toBe(true);
+        await waitFor(() => (me(r).flags & PF.SAFE) !== 0);
         attack(r, ranged, { x: target0[0], y: target0[1], z: target0[2] });
         await waitFor(() => denied.length > 0);
         expect(denied[0]).toEqual({ action: ranged ? "fire" : "melee", reason: "safe zone" });
@@ -116,7 +122,8 @@ describe("starter weapons on the combat planets", () => {
         // Outside: accepted, and the NPC takes the hit.
         const target = at(outside);
         await standAt(r, outside, target);
-        expect(me(r).flags & (PF.SAFE | PF.SWIMMING)).toBe(0);
+        expect(serverRoom(r).safeNow(actorOf(r), Date.now())).toBe(false);
+        await waitFor(() => (me(r).flags & (PF.SAFE | PF.SWIMMING)) === 0);
         const id = await spawnNpc(r, "woolback", target, { instant: true, roam: 0 });
         await waitFor(() => !!st(r).npcs?.get(id));
         const npc = st(r).npcs.get(id);
