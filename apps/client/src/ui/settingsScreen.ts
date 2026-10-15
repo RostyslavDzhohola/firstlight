@@ -63,14 +63,17 @@ function toggle(parent: HTMLElement, cls: string, label: string, sub: string | n
   return i;
 }
 
-/** Build the settings screen into `host`. Returns a cleanup function. */
-export function openSettings(game: Game, host: HTMLElement, back: () => void): () => void {
+/**
+ * Build the settings screen into `host`. Returns a cleanup function. `back` is the Menu button (to the
+ * pause menu); `escape` is Esc, which goes straight back into the game like Esc on the menu.
+ */
+export function openSettings(game: Game, host: HTMLElement, back: () => void, escape: () => void = back): () => void {
   const ctx = game.ctx;
   const root = el("div", "fl-settings", host);
   isolateKeys(root);
-  // Keys don't leave the screen (isolateKeys), so Esc → back is handled here.
+  // Keys don't leave the screen (isolateKeys), so Esc is handled here: back into the game.
   root.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") back();
+    if (e.key === "Escape" && !e.repeat) escape();
   });
   const cleanups: (() => void)[] = [];
 
@@ -98,7 +101,7 @@ export function openSettings(game: Game, host: HTMLElement, back: () => void): (
   const saved = el("span", "fl-saved", bottom);
   icon("check", "", saved);
   saved.append("Saved");
-  el("span", "", bottom, "Esc or Menu to go back");
+  el("span", "", bottom, "Menu goes back · Esc returns to the game");
   el("span", "fl-grow", bottom);
   el("span", "", bottom, "Quality changes re-warm the shaders for a moment. No reload.");
   let savedTimer = 0;

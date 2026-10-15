@@ -142,7 +142,7 @@ export class Menu {
     // Esc toggles menu ↔ game, Enter or Space on the menu resumes. Panels and cards handle their own keys.
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && this.mode === "settings" && !e.repeat) {
-        this.showPause(); // focus outside the settings screen (it handles its own Esc)
+        this.flow.resume(); // focus outside the settings screen (it handles Esc inside the same way)
         e.preventDefault();
       } else pauseKey(this.flow, e);
     });
@@ -364,7 +364,8 @@ export class Menu {
   showSettings() {
     this.reset("");
     this.mode = "settings";
-    this.closeSettings = openSettings(this.game, this.el, () => this.showPause());
+    // The Menu button goes back to the pause menu; Esc goes back into the game, as on the menu.
+    this.closeSettings = openSettings(this.game, this.el, () => this.showPause(), () => this.flow.resume());
   }
 
   showLoggedOut() {
