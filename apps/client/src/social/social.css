@@ -20,6 +20,10 @@
 .fl-compass .mk span { position: absolute; top: calc(1.85 * var(--u)); padding: 2px 6px; border-radius: 2px; background: rgba(5, 10, 15, .66); font: 600 var(--t-xs)/1 var(--font-mono); letter-spacing: 0; color: var(--paper); }
 .fl-compass .mk.pad span { color: var(--safe); }
 .fl-compass .mk.edge { opacity: .7; }
+/* The waypoint: a magenta diamond with its distance, on top of the other markers. */
+.fl-compass .mk.wp { z-index: 1; }
+.fl-compass .mk.wp i { width: calc(.85 * var(--u)); height: calc(.85 * var(--u)); border-radius: 1px; background: var(--waypoint); transform: rotate(45deg); }
+.fl-compass .mk.wp span { color: var(--waypoint); }
 
 /* ---------------------------------------------------------------- player list (Tab) */
 .fl-plist { z-index: 45; }

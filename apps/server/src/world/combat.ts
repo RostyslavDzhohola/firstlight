@@ -78,6 +78,18 @@ function behind(o: V3, d: V3, head: V3): number {
   return Math.max(0, (head[0] - o[0]) * d[0] + (head[1] - o[1]) * d[1] + (head[2] - o[2]) * d[2]);
 }
 
+/**
+ * The point of a camera ray (`d` unit) nearest the shooter's head, never behind the camera. The
+ * client sends the camera position as the origin, and a camera zoomed all the way out sits ~9 m
+ * behind the head, beyond ORIGIN_SLACK: every ranged shot was refused there, silently (owner report
+ * 2026-10-14). The aim line is what counts, so the origin slides along it before the slack check; a
+ * line that never comes near the head is still refused.
+ */
+export function aimOrigin(o: V3, d: V3, head: V3): V3 {
+  const t = behind(o, d, head);
+  return [o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t];
+}
+
 export interface Projectile {
   id: number;
   owner: PlayerActor | NpcActor;
@@ -256,11 +268,11 @@ export function fire(host: CombatHost, p: PlayerActor, msg: FireInput): FireResu
   if (def.hidden) return { ok: false, reason: "not a weapon" };
   if (def.delivery === "melee" || def.delivery === "none" || def.delivery === "heal" || def.delivery === "bubble") return { ok: false, reason: "not a ranged weapon" };
   const head = headPos(p);
-  const o: V3 = [msg.ox, msg.oy, msg.oz];
-  if (dist3(o, head) > ORIGIN_SLACK) return { ok: false, reason: "origin" };
   const dl = Math.hypot(msg.dx, msg.dy, msg.dz);
   if (!(dl > 0.5 && dl < 1.5)) return { ok: false, reason: "dir" };
   const d: V3 = [msg.dx / dl, msg.dy / dl, msg.dz / dl];
+  const o = aimOrigin([msg.ox, msg.oy, msg.oz], d, head);
+  if (!(dist3(o, head) <= ORIGIN_SLACK)) return { ok: false, reason: "origin" };
   if (msg.seal) return castSpecial(host, p, def, tier, tierIndex, o, d, head, now);
   // Bow draw is timed on the server from the `charge` start message; the client value is ignored.
   let charge = 1;

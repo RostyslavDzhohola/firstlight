@@ -13,7 +13,7 @@ import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
 import { ANIM, PF } from "@firstlight/shared/net/schema";
 import { STARTERS, WEAPONS } from "@firstlight/shared/content/weapons";
 import { flags } from "../config.ts";
-import { avatarAssets, preloadAvatars, STARTER_FILES, STARTER_SCALE, type AvatarAssets } from "./avatars/assets.ts";
+import { avatarAssets, preloadAvatars, ROLL_SPEED, STARTER_FILES, STARTER_SCALE, type AvatarAssets } from "./avatars/assets.ts";
 import { avatarMaterial, PALETTES, proxyMaterial } from "./avatars/material.ts";
 import { weaponModel } from "./avatars/weapons.ts";
 import { keptSamples } from "./warmup.ts";
@@ -60,6 +60,8 @@ export type Emote = (typeof EMOTES)[number];
 
 const LOOPING = new Set(["idle", "walk", "run", "sprint", "fall", "swim", "swim_idle", "block_hold", "aim", "emote_dance", "ride"]);
 const FADE = 0.18;
+/** Blend into the dodge-roll (s): its lean shows within two frames of the key. */
+const ROLL_FADE = 0.05;
 // natural ground speed of each locomotion clip (measured from the CC0 root-motion variants), m/s
 const CLIP_SPEED: Record<string, number> = { walk: 0.97, run: 5.36, sprint: 8.25, swim: 2.18 };
 
@@ -557,7 +559,7 @@ export class AvatarView {
       case ANIM.SWIM:
         if (sp > 0.6) { name = "swim"; ts = clamp(sp / CLIP_SPEED.swim!, 0.7, 1.6); } else name = "swim_idle";
         break;
-      case ANIM.DODGE: name = "roll_fast"; ts = 2.4; break;
+      case ANIM.DODGE: name = "roll_fast"; ts = ROLL_SPEED; break;
       case ANIM.ATTACK: name = oneShotClip("attack", weaponKind(this.weaponIndex)); ts = 1.15; break;
       case ANIM.HEAVY: name = oneShotClip("heavy", weaponKind(this.weaponIndex)); break;
       case ANIM.BLOCK: name = "block_hold"; ts = 0.35; break;
@@ -577,7 +579,8 @@ export class AvatarView {
     // one-shot states restart when they finish while the state holds (held fire)
     const act = this.actions.get(name);
     const restart = !!act && act === this.current && !LOOPING.has(name) && !act.isRunning() && anim !== ANIM.DODGE;
-    this.play(name, name === "roll_fast" || name === "jump_air" ? 0.08 : FADE, restart, ts);
+    // Rolls and jumps blend in fast: they start on the frame the key is read and must show at once.
+    this.play(name, name === "roll_fast" ? ROLL_FADE : name === "jump_air" ? 0.08 : FADE, restart, ts);
   }
 
   private capsuleMotion(anim: number, dt: number) {

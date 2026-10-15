@@ -1,0 +1,25 @@
+/* Share row (6e): a compact pill bar of quiet buttons (home page foot, Esc menu). */
+
+.fl-share { position: relative; display: inline-flex; align-items: center; gap: 2px; max-width: 100%; padding: 3px; border: 1px solid var(--line-2); border-radius: var(--r-pill); background: rgba(5, 7, 10, .55); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); pointer-events: auto; }
+.fl-share__btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: .45em; height: calc(2.05 * var(--u)); padding: 0 calc(.8 * var(--u));
+  border: 0; border-radius: var(--r-pill); background: none; color: var(--fog-4);
+  font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: .12em; text-transform: uppercase; text-decoration: none; white-space: nowrap; cursor: pointer;
+  transition: color var(--dur-2), background var(--dur-2);
+}
+.fl-share__btn:hover { color: var(--paper); background: rgba(255, 255, 255, .07); }
+.fl-share__btn:active { transform: translateY(1px); }
+.fl-share__btn .li { width: 1.15em; height: 1.15em; }
+.fl-share__btn--icon { width: calc(2.05 * var(--u)); padding: 0; }
+.fl-share__btn[aria-pressed="true"] { color: var(--dawn-3); }
+.fl-share__x { font: 700 1.2em/1 var(--font-body); letter-spacing: 0; text-transform: none; }
+.fl-share__sep { flex: none; width: 1px; height: calc(1.1 * var(--u)); background: var(--line-2); }
+.fl-share__toast {
+  position: absolute; left: 50%; bottom: calc(100% + 8px); z-index: 1; transform: translate(-50%, 4px); opacity: 0; pointer-events: none;
+  padding: calc(.4 * var(--u)) calc(.75 * var(--u)); border: 1px solid rgba(127, 227, 176, .4); border-radius: var(--r-2); background: rgba(9, 12, 17, .94);
+  font-size: var(--t-xs); color: var(--ok); white-space: nowrap; transition: opacity var(--dur-2), transform var(--dur-2) var(--ease-out);
+}
+.fl-share__toast.is-on { opacity: 1; transform: translate(-50%, 0); }
+
+/* In the Esc menu: under the key hints, left-aligned. */
+.fl-menu__left > .fl-share { align-self: flex-start; margin-top: var(--sp-3); }

@@ -16,6 +16,7 @@ import type { Game } from "./Game.ts";
 import { showSavePrompt } from "../ui/account.ts";
 import { SaveOffer } from "../ui/saveOffer.ts";
 import { getPlayToken, isDevGuest, readClaims } from "../net/auth.ts";
+import { attackDeniedText, NoticeGate } from "./notices.ts";
 
 const _v = new THREE.Vector3();
 const _head = new THREE.Vector3();
@@ -52,6 +53,9 @@ export class CombatClient {
   /** Onboarding hook: the tutorial is up (tips or its last card); the level-up save card waits for it. */
   tutorialBusy: (() => boolean) | null = null;
   private readonly saveOffer = new SaveOffer();
+  /** Refusal notices: each reason once per press of an attack button. */
+  private readonly deniedGate = new NoticeGate();
+  private gateRmb = false;
   private readonly wheel: PhraseWheel;
 
   constructor(private readonly game: Game) {
@@ -71,7 +75,12 @@ export class CombatClient {
       const prevLevel = this.hud.you?.level ?? m.level;
       this.hud.setYou(m);
       if (!isDevGuest()) this.saveOffer.levelUp(m.level, prevLevel);
-      if (!m.dead) this.deadUntilRespawn = false;
+      if (!m.dead && this.deadUntilRespawn) {
+        this.deadUntilRespawn = false;
+        // The death screen may have closed long before the server confirmed the respawn: the pause
+        // flow kept the screen "away" while we were dead and must hear that it no longer is.
+        this.game.menu?.blockersChanged();
+      }
     });
     room.onMessage("toast", (m: { text: string; kind: string }) => {
       this.hud.toast(m.text, m.kind);
@@ -81,6 +90,11 @@ export class CombatClient {
       if (m.reason === "level gate") this.hud.toast("Your level is too low to use that tier", "warn");
       else if (m.action === "logout") this.hud.toast("Can't log out in combat — wait 10 s", "warn");
       else if (m.action === "use" && USE_DENIED[m.reason]) this.hud.toast(USE_DENIED[m.reason]!, "warn");
+      else {
+        // A refused attack says why (a refused Hexquill bolt used to show nothing at all).
+        const text = attackDeniedText(m.action, m.reason);
+        if (text && this.deniedGate.allow(text)) this.hud.toast(text, "warn");
+      }
     });
     // Support items: Patchkit channel (server-timed; damage interrupts it) and Prism Bubbles.
     room.onMessage("channel", (m: { kind: string; ms: number; target: string }) => {
@@ -94,7 +108,7 @@ export class CombatClient {
     room.onMessage("bubble", (m: { id: number; x: number; y: number; z: number; r: number; ms: number }) => {
       const at = new THREE.Vector3(m.x, m.y, m.z);
       this.effects.bubble(m.id, at, m.r, m.ms);
-      this.game.audio.play("ui", at);
+      this.game.audio.play("bubble", at);
     });
     room.onMessage("bubblePop", (m: { id: number }) => this.effects.popBubble(m.id));
     // Bubbles deployed before we arrived (late join, reconnect): ask now that the handlers exist.
@@ -102,7 +116,7 @@ export class CombatClient {
     room.onMessage("hit", (m: { attacker: string; target: string; amount: number; weak: boolean; x: number; y: number; z: number; kb?: number; kx?: number; ky?: number; kz?: number }) => {
       if (m.attacker === me && m.target !== me) {
         this.hud.hit(m.weak);
-        this.game.audio.play("hitmark", null, m.weak ? 1.3 : 1, m.weak ? 1.3 : 1);
+        this.game.audio.play(m.weak ? "crit" : "hitmark");
         const s = this.toScreen(_v.set(m.x, m.y, m.z), 1.9);
         if (s) this.hud.damageNumber(s.x, s.y, m.amount, m.weak);
       }
@@ -136,7 +150,7 @@ export class CombatClient {
         this.game.audio.play("explosion", at);
       } else {
         this.effects.impact(at, weaponColor(m.weapon));
-        this.game.audio.play("impact", at, 0.6);
+        this.game.audio.play(this.game.audio.impactSound(m.weapon), at, 0.6);
       }
     });
     room.onMessage("swing", (m: { by: string; weapon: number }) => {
@@ -145,7 +159,7 @@ export class CombatClient {
       if (!p) return;
       const pos = new THREE.Vector3(p.x, p.y, p.z);
       this.effects.arc(pos, new THREE.Vector3(p.fx, p.fy, p.fz), pos.clone().normalize(), WEAPONS[m.weapon]?.range ?? 2, weaponColor(m.weapon));
-      this.game.audio.play("swing", pos);
+      this.game.audio.play(this.game.audio.swingSound(m.weapon), pos);
     });
     room.onMessage("phrase", (m: { by: string; id: number }) => {
       if (m.by !== me && isBlocked(m.by)) return; // no speech bubbles from blocked players
@@ -228,6 +242,16 @@ export class CombatClient {
     if (horsesEnabled(this.game.hud.you, flags.has("nohorses"))) this.game.net.room?.send("horse", { action: "whistle" });
   }
 
+  /** Lower any guard and scope and cancel a charge or draw in progress (nothing fires on release). */
+  private dropMouseActions() {
+    const room = this.game.net.room;
+    if (this.blocking) room?.send("block", { on: false });
+    if (this.scoped) room?.send("scope", { on: false });
+    if (this.wasRmb) room?.send("charge", { on: false });
+    this.game.self?.setLocalFlags(0);
+    this.blocking = this.scoped = this.wasRmb = false;
+  }
+
   aiming(): boolean {
     const { def } = this.currentWeapon();
     return this.game.input.rmb && def.delivery !== "melee" && !this.game.player.saddleLocked;
@@ -238,6 +262,9 @@ export class CombatClient {
     const room = g.net.room;
     const input = g.input;
     this.effects.update(dt, now);
+    // A fresh press of either attack button (the right one charges heavies): refusals may show again.
+    if (input.lmbPressed || (input.rmb && !this.gateRmb)) this.deniedGate.press();
+    this.gateRmb = input.rmb;
     if (this.saveOffer.poll(!!this.tutorialBusy?.())) void this.offerSave();
     if (!room) return;
     const meState = (room.state as any).players?.get(room.sessionId);
@@ -253,19 +280,32 @@ export class CombatClient {
     // The phrase wheel (G) owns the mouse and number keys while it is open: drop block/scope and any
     // charge, so nothing fires or stays raised when it closes.
     if (this.wheel.update(input, now, !this.deadUntilRespawn)) {
-      if (this.blocking) room.send("block", { on: false });
-      if (this.scoped) room.send("scope", { on: false });
-      g.self?.setLocalFlags(0);
-      if (this.wasRmb) room.send("charge", { on: false }); // a charge or draw in progress is cancelled
-      this.blocking = this.scoped = this.wasRmb = false;
+      this.dropMouseActions();
       return;
     }
-    if (this.deadUntilRespawn || !input.locked) return;
+    // Mouse combat needs the pointer locked. Whenever it's gone (menu, panel, the hint state), cancel
+    // any guard, scope or charge in progress: Input reports the right button released when the lock
+    // goes, which would otherwise land a charged heavy now, or on the next lock.
+    if (!input.locked) {
+      this.dropMouseActions();
+      this.saddleRmb = false;
+    }
+    // Keys work in the "Click to look around" state too (Input.inPlay, D-controls-4).
+    if (this.deadUntilRespawn || !input.inPlay) return;
 
     // Hotbar and utility keys.
     for (let i = 0; i < 4; i++) if (input.pressed.has(`Digit${i + 1}`)) room.send("equip", { slot: i });
     if (input.pressed.has("KeyR")) room.send("reload", { slot: g.hud.you?.selected ?? 0 });
     if (input.pressed.has("KeyE")) this.tryPickup();
+
+    if (!input.locked) {
+      const cam = g.ctx.camera;
+      if (Math.abs(cam.fov - this.baseFov) > 0.1) {
+        cam.fov += (this.baseFov - cam.fov) * Math.min(1, dt * 14);
+        cam.updateProjectionMatrix();
+      }
+      return;
+    }
 
     const { def, tier } = this.currentWeapon();
     const t = def.tiers[tier - 1]!;
@@ -367,7 +407,7 @@ export class CombatClient {
     if (def.delivery !== "none") g.self?.trigger("attack");
     if (def.delivery === "melee") {
       room.send("melee", { slot, t: Date.now(), heavy: false });
-      g.audio.play("swing");
+      g.audio.play(g.audio.swingSound(WEAPONS.indexOf(def)));
       const up = g.player.up();
       this.effects.arc(g.player.pos, g.player.facing, up, def.range, weaponColor(WEAPONS.indexOf(def)));
       return;
@@ -397,7 +437,7 @@ export class CombatClient {
       const muzzle = g.player.pos.clone().addScaledVector(g.player.up(), 1.35).addScaledVector(g.player.facing, 0.5);
       const color = weaponColor(WEAPONS.indexOf(def));
       this.effects.tracer(muzzle, to, color, def.delivery === "chain" ? 1.6 : 1);
-      g.audio.play(def.id in { carbine: 1, scatterpipe: 1, stillshot: 1, stormcoil: 1 } ? def.id : "carbine");
+      g.audio.play(g.audio.weaponSound(WEAPONS.indexOf(def)));
       this.effects.flash(muzzle, color, 0.3);
     }
   }

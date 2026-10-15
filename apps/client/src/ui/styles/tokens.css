@@ -129,6 +129,8 @@
   --warn: #ffc94a;
   --danger: #ff6f5e;
   --safe: #8ff3ff;
+  /* The player's waypoint (map, minimap, compass, world pillar): ui/waypoint.ts WAYPOINT_COLOUR. */
+  --waypoint: #ff5fd2;
   --hostile: #ff5d4d;
 
   /* Damage numbers (colour-blind safe: colour + size + glyph) */

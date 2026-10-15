@@ -83,6 +83,10 @@ One profile on Arcadia, outside the ring, carrying items.
 
 ## T4 Proximity voice and radio (F6)
 
+**Hidden in this build (D-controls-1):** run this card only on a stack with `FEATURE_VOICE=1` on the
+server and a client built with `VITE_FEATURE_VOICE=1`. Without them, check instead that the Esc menu
+shows the disabled "Voice chat: coming soon" line, V does nothing and no microphone prompt appears.
+
 Two real browsers with microphones (or Chromium's fake media flags locally), within 35 m.
 Production needs the Cloudflare TURN key (`TURN_KEY_ID`, `TURN_KEY_API_TOKEN`); without it the
 voice widget says the relay is unavailable. Locally, without TURN, connections are direct.
@@ -122,7 +126,8 @@ admin heals, write that in the results, because then it doesn't show the pair ca
 
 1. Both in Portus. A presses **Tab** (tap) → **Invite** next to B (needs to be within 30 m). B
    presses **Y** (Accept). The list shows "Your party (2/4)".
-2. Each window opens the admin console with **`** (backquote) and types `level 20`, then
+2. Each window opens the admin console with **Shift+`** (backquote; `` ` `` alone is the performance
+   overlay) and types `level 20`, then
    `give stillshot 3` (or another tier-3 weapon).
 3. A types `stage 2` (or opens A with `?stage=2&all`). The client travels to Arcadia and repeats the
    command; the party lines up on the Gull Point overlook, healed, and Tidewrath spawns at its lair on
@@ -148,13 +153,13 @@ admin heals, write that in the results, because then it doesn't show the pair ca
 
 ## T8 Photo mode (F13)
 
-1. In-world, press **F9**: the HUD hides and the photo panel shows the keys (F9 leave, WASD · Q/E ·
+1. In-world, press **Shift+P**: the HUD hides and the photo panel shows the keys (Shift+P leave, WASD · Q/E ·
    Shift fly, wheel FOV, `[ ]` focus, `- =` aperture, `, .` exposure, G filter, H hide). Screenshot
    `T8-1-panel.png`.
 2. Fly the camera with WASD and the mouse (up to 180 m from your body).
 3. Press **G** repeatedly: Planet → Neutral → Muted → Noir → Golden hour → Cold dawn. Screenshot
    `T8-3-filter.png`.
-4. Press **F9**: the panel goes, the HUD and the normal camera return.
+4. Press **Shift+P**: the panel goes, the HUD and the normal camera return.
 
 Staged scenes for F13: `docs/staged-scenes.md`.
 
@@ -162,13 +167,15 @@ Staged scenes for F13: `docs/staged-scenes.md`.
 
 Setup: a fresh guest (clean browser profile) on a stack with an empty database, or production.
 
-1. Play → pick a name. The "First minute · 0 / 12" checklist, the step rail and the Walk card appear.
+1. Play → pick a name. The "First minute · 0 / 11" checklist (12 in builds with voice), the step rail
+   and the Walk card appear.
 2. Walk 6 m, move the mouse, Space, hold Shift+W, C: each step ticks.
 3. Walk to the three training dummies south-east of spawn and hit each three times with the
    starter weapon (melee starters need to stand within reach). Each third hit knocks one down
    with "+10 XP"; the last pays +20, level 2 and "Medal earned: Spark".
 4. Press 2 then 1 (switch weapons), E (pick up tip), M twice (map), hold G and pick a phrase
-   (phrase wheel), wait 8 s on the voice card. The tutorial ends.
+   (phrase wheel), then walk into a portal (builds with voice show an optional voice card first,
+   which moves on after 8 s). The tutorial ends.
 5. Press I: hotbar + 16-slot backpack, the item card and the drop zone. Click the weapon, click a
    backpack slot: the HUD hotbar shows Fists. Click it back.
 6. Click the weapon, click "Drop here": a pile appears at your feet. Close with I, stand on the

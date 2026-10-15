@@ -26,6 +26,7 @@ import { dist3, type V3 } from "./geometry.ts";
 import { emitGameEvent, npcKindOf } from "./events.ts";
 import { emitPileEvent, onPileEvent, pileStore, type PileData, type PileKind } from "./piles.ts";
 import { SYSTEM_FACTORIES, type RoomSystem } from "./systems.ts";
+import { voiceItemHidden } from "./voice/index.ts";
 import { supportOf } from "./support.ts";
 import { identityCheck, storageRecovery, ticketFor, travelRedirect } from "./admission.ts";
 import { pendingSeats } from "./reservations.ts";
@@ -280,7 +281,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       if (!a || a.dead) return;
       if (inSaddle(a, Date.now())) return void c.send("denied", { action: "melee", reason: "mounted" });
       if (m.slot !== a.char.selected) this.equip(a, m.slot);
-      melee(this.host, a, !!m.heavy);
+      // Refusals get a reason, like `fire` (safe zone, arrival protection…): the client shows it.
+      const r = melee(this.host, a, !!m.heavy);
+      if (!r.ok && r.reason !== "rate") c.send("denied", { action: "melee", reason: r.reason });
     });
     this.onMessage("block", z.object({ on: z.boolean() }), (c, m) => {
       const a = this.actor(c);
@@ -827,6 +830,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     const i = slot < HOTBAR_SLOTS ? slot : slot - HOTBAR_SLOTS;
     const item = list[i];
     if (!item) return;
+    // The radio is hidden while voice is off: it never lands on the ground (D-controls-1).
+    if (voiceItemHidden(item.id)) return void a.client.send("denied", { action: "drop", reason: "off" });
     const pos = actorPos(a);
     const f: V3 = [a.state.fx, a.state.fy, a.state.fz];
     const events: (() => void)[] = [];
@@ -952,7 +957,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     victim.state.flags |= PF.DEAD;
     victim.state.anim = ANIM.DEAD;
     victim.logoutEndsAt = null;
-    const items = [...victim.char.hotbar, ...victim.char.backpack].filter((x): x is InvItem => !!x);
+    // A hidden radio (voice off, D-controls-1) goes with the old life instead of dropping as loot.
+    const items = [...victim.char.hotbar, ...victim.char.backpack].filter((x): x is InvItem => !!x && !voiceItemHidden(x.id));
     const events: (() => void)[] = [];
     let pile: PileData | null = null;
     try {

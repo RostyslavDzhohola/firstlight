@@ -1,40 +1,14 @@
-// Game audio: one AudioContext, master/music/SFX/voice buses, positional SFX generated with ZzFX
-// (MIT; no sample files), and a generative ambient soundtrack per body. All original.
+// Game audio: one AudioContext, master/music/SFX/voice buses, positional SFX, and a generative
+// ambient soundtrack per body. SFX are ElevenLabs samples from the asset Worker where the set has
+// them (samples.ts, never in the repo) and ZzFX presets (MIT, synthesised) for everything else.
 
 import * as THREE from "three/webgpu";
 import { ZZFX } from "zzfx";
 import { WEAPONS } from "@firstlight/shared/content/weapons";
 import type { BodyId } from "@firstlight/shared";
-
-type Preset = (number | undefined)[];
-
-// ZzFX parameter order: volume, randomness, frequency, attack, sustain, release, shape, shapeCurve,
-// slide, deltaSlide, pitchJump, pitchJumpTime, repeatTime, noise, modulation, bitCrush, delay,
-// sustainVolume, decay, tremolo, filter.
-const P: Record<string, Preset> = {
-  carbine: [1.1, 0.05, 420, 0.005, 0.02, 0.08, 4, 1.6, -6, , , , , 0.8, , , , 0.6, 0.03],
-  scatterpipe: [1.7, 0.05, 120, 0.005, 0.05, 0.25, 4, 1.9, , , , , , 1.5, , 0.4, , 0.5, 0.08],
-  stillshot: [1.9, 0.02, 300, 0.005, 0.06, 0.45, 4, 2.4, -4, , , , , 1, , 0.2, 0.05, 0.6, 0.1],
-  hexquill: [0.9, 0.05, 820, 0.02, 0.04, 0.15, 1, 1.5, 12, , 200, 0.05, , , , , , 0.7, 0.05],
-  emberglass: [1.2, 0.05, 200, 0.05, 0.1, 0.3, 3, 2, -2, , , , , 0.6, , 0.2, , 0.7, 0.1],
-  stormcoil: [1.3, 0.05, 1200, 0.01, 0.08, 0.2, 3, 2.5, , , , , 0.02, 2, 30, 0.1, , 0.5, 0.05],
-  longbow: [0.9, 0.05, 520, 0.01, 0.01, 0.12, 2, 1.2, -20, , , , , , , , , 0.8],
-  comet: [1.5, 0.05, 90, 0.04, 0.2, 0.4, 3, 1.5, 2, , , , , 0.8, , 0.2, , 0.7, 0.2],
-  grenade: [0.8, 0.05, 300, 0.01, 0.02, 0.1, 3, 1.5, -10],
-  explosion: [2.6, 0.1, 60, 0.02, 0.2, 0.9, 4, 2.5, -1, , , , , 1.5, , 0.6, 0.2, 0.4, 0.4],
-  swing: [0.7, 0.1, 300, 0.01, 0.02, 0.1, 3, 1.5, -30, , , , , , , , , 0.5],
-  meleeHit: [1.3, 0.05, 150, 0.005, 0.03, 0.15, 4, 2.5, -10, , , , , 1, , 0.3, , 0.6],
-  impact: [0.6, 0.1, 200, 0.005, 0.01, 0.08, 4, 2, -5, , , , , 1.2],
-  hitmark: [0.5, 0, 1600, , 0.01, 0.04, 1, 2, , , , , , , , , , 0.5],
-  hurt: [1, 0.05, 220, 0.01, 0.05, 0.2, 2, 2, -6, , , , , 0.5, , , , 0.7],
-  coins: [0.8, 0, 1200, 0.01, 0.05, 0.2, 1, 1.5, , , 400, 0.05],
-  levelUp: [1.1, 0, 500, 0.05, 0.2, 0.4, 1, 1, , , 300, 0.1, 0.1],
-  death: [1.4, 0, 300, 0.05, 0.3, 0.8, 2, 1, -2, , , , , , , , , 0.5, 0.2],
-  portal: [0.9, 0, 200, 0.4, 0.3, 0.6, 1, 0, 8, , , , , , , , , 0.6],
-  ui: [0.4, 0, 900, , 0.01, 0.03, 1, 1.5],
-  denied: [0.5, 0, 160, , 0.04, 0.08, 2, 1],
-  whistle: [0.6, 0, 1250, 0.02, 0.12, 0.12, 0, 1, 4, , 420, 0.1, , , , , , 0.8, 0.04], // two-note horse whistle
-};
+import { PRESETS, type PresetName } from "./presets.ts";
+import { resolveSound, SampleBank } from "./samples.ts";
+import { attackSound, impactSound, swingSound, type SoundName } from "./sounds.ts";
 
 export interface Volumes {
   master: number;
@@ -51,7 +25,8 @@ export class GameAudio {
   readonly music: GainNode;
   readonly sfx: GainNode;
   readonly voice: GainNode;
-  private readonly buffers = new Map<string, AudioBuffer>();
+  private readonly buffers = new Map<PresetName, AudioBuffer>();
+  private samples: SampleBank<AudioBuffer> | null = null;
   private musicGen: MusicGen | null = null;
   volumes: Volumes;
 
@@ -83,28 +58,56 @@ export class GameAudio {
     if (this.ctx.state !== "running") void this.ctx.resume();
   }
 
-  private buffer(name: string): AudioBuffer | null {
+  /**
+   * Fetch and decode the sample set once (a failing manifest or file leaves those sounds on ZzFX).
+   * decodeAudioData works while the context waits for a user gesture, so this can start at once.
+   */
+  loadSamples(base: string): Promise<number> {
+    const bank = new SampleBank<AudioBuffer>({
+      json: async (url) => {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      },
+      buffer: async (url) => {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return this.ctx.decodeAudioData(await r.arrayBuffer());
+      },
+      peak: (b) => {
+        let p = 0;
+        for (let c = 0; c < b.numberOfChannels; c++) for (const v of b.getChannelData(c)) p = Math.max(p, Math.abs(v));
+        return p;
+      },
+    });
+    this.samples = bank;
+    return bank.load(base);
+  }
+
+  private zzfx(name: PresetName): AudioBuffer {
     let b = this.buffers.get(name);
     if (b) return b;
-    const preset = P[name];
-    if (!preset) return null;
-    const samples = (ZZFX.buildSamples as (...p: (number | undefined)[]) => number[])(...preset);
+    const samples = (ZZFX.buildSamples as (...p: (number | undefined)[]) => number[])(...PRESETS[name]);
     b = this.ctx.createBuffer(1, samples.length, ZZFX.sampleRate);
     b.getChannelData(0).set(samples);
     this.buffers.set(name, b);
     return b;
   }
 
-  /** Play a sound, positional if `at` is given. */
-  play(name: string, at?: THREE.Vector3 | null, gain = 1, rate = 1) {
+  /** Play a sound, positional if `at` is given: a random sample take if loaded, else its ZzFX preset. */
+  play(name: SoundName, at?: THREE.Vector3 | null, gain = 1, rate = 1) {
     if (this.ctx.state !== "running") return;
-    const b = this.buffer(name);
-    if (!b) return;
+    const r = resolveSound(name, this.samples);
     const src = this.ctx.createBufferSource();
-    src.buffer = b;
-    src.playbackRate.value = rate * (0.94 + Math.random() * 0.12);
+    if (r.kind === "sample") {
+      src.buffer = r.buffer;
+      src.playbackRate.value = rate * r.rate;
+    } else {
+      src.buffer = this.zzfx(r.preset);
+      src.playbackRate.value = rate * r.rate * (0.94 + Math.random() * 0.12);
+    }
     const g = this.ctx.createGain();
-    g.gain.value = gain;
+    g.gain.value = gain * r.gain;
     if (at) {
       const p = this.ctx.createPanner();
       p.panningModel = "equalpower";
@@ -122,9 +125,19 @@ export class GameAudio {
     src.start();
   }
 
-  weaponSound(weaponIndex: number): string {
-    const id = WEAPONS[weaponIndex]?.id ?? "fists";
-    return P[id] ? id : "swing";
+  /** A weapon's fire, cast or throw sound (melee weapons: their swing), by weapon index. */
+  weaponSound(weaponIndex: number): SoundName {
+    return attackSound(WEAPONS[weaponIndex]);
+  }
+
+  /** A melee weapon's swing, by weapon index. */
+  swingSound(weaponIndex: number): SoundName {
+    return swingSound(WEAPONS[weaponIndex]?.id ?? "fists");
+  }
+
+  /** A non-exploding projectile landing, by weapon index. */
+  impactSound(weaponIndex: number): SoundName {
+    return impactSound(WEAPONS[weaponIndex]);
   }
 
   /** Listener follows the camera. */

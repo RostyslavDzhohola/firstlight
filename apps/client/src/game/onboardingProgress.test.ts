@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import { OnboardingProgress } from "./onboardingProgress.ts";
+import { STEPS } from "./onboardingSteps.ts";
 
 function store() {
   const data = new Map<string, string>();
@@ -12,7 +13,7 @@ it("resumes completed client tips on reload/travel for the same account without 
   for (const id of ["move", "look", "jump", "sprint", "dodge", "attack", "switch", "pickup", "map", "wheel", "voice", "portal"] as const) first.steps.complete(id);
   first.save();
   const back = new OnboardingProgress("guest-a", storage);
-  expect(back.steps.doneCount).toBe(11);
+  expect(back.steps.doneCount).toBe(STEPS.length - 1); // all but the dummies (server-owned)
   expect(back.steps.current?.id).toBe("attack");
   expect(back.steps.isDone("portal")).toBe(true);
   expect(new OnboardingProgress("guest-b", storage).steps.doneCount).toBe(0);
@@ -69,4 +70,14 @@ it("starts with a collapsed checklist and remembers the choice per account separ
   expect(new OnboardingProgress("b", storage).expanded).toBe(false);
   first.setExpanded(false);
   expect(new OnboardingProgress("a", storage).expanded).toBe(false);
+});
+
+it("keeps a saved tip this build doesn't teach (the voice tip while voice is hidden) for builds that do", () => {
+  const storage = store();
+  storage.setItem("fl.onboarding.v1:c", '{"v":1,"done":["move","voice"]}');
+  const p = new OnboardingProgress("c", storage);
+  expect(p.steps.isDone("move")).toBe(true);
+  p.steps.complete("jump");
+  p.save();
+  expect(JSON.parse(storage.data.get("fl.onboarding.v1:c")!).done.sort()).toEqual(["jump", "move", "voice"]);
 });
