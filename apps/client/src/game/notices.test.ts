@@ -34,7 +34,7 @@ describe("attack refusal notices", () => {
   });
 
   it("say why a hit did nothing (the server's immune reasons)", () => {
-    for (const r of ["spawning", "evading", "invulnerable", "shield"]) expect(immuneText(r)).toBeTruthy();
+    for (const r of ["spawning", "evading", "invulnerable", "shield", "arena"]) expect(immuneText(r)).toBeTruthy();
     expect(immuneText("other")).toBeNull();
   });
 });

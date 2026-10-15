@@ -77,7 +77,10 @@ export class PlayerController {
   swimming = false;
   anim: number = ANIM.IDLE;
   private dodgeT = 0;
-  private dodgeCooldown = 0;
+  /** Wall-clock time (ms, the `now` update gets) when the next roll may start (D-combat-3). */
+  private dodgeReadyAt = -Infinity;
+  /** The clock when no `now` is given (tests, tools): the sum of the simulation steps. */
+  private simMs = 0;
   /** Seconds a C press stays wanted (MOVE.dodgeBuffer), so a press a moment early isn't lost. */
   private dodgeWanted = 0;
   /** Seconds since the feet last touched ground, and whether a jump took them off it. */
@@ -175,10 +178,12 @@ export class PlayerController {
 
   /**
    * One frame. `dt` is the simulation step (Game clamps it to 50 ms, so a slow frame runs in slow
-   * motion); `realDt` is the wall-clock time since the last frame, which the dodge cooldown counts
-   * in, like the server's 1.2 s (D-combat-3).
+   * motion); `now` is the wall clock (ms), which the dodge cooldown is a deadline on, like the
+   * server's 1.2 s: a stall of any length counts in full (D-combat-3). Without `now` the clock is
+   * the sum of the steps.
    */
-  update(dt: number, input: Input, aiming: boolean, realDt = dt) {
+  update(dt: number, input: Input, aiming: boolean, now = this.simMs + dt * 1000) {
+    this.simMs = now;
     const R = this.terrain.body.radius;
     const up = _up.copy(this.pos).normalize();
     // Parallel-transport camera and facing to the new tangent plane.
@@ -211,13 +216,12 @@ export class PlayerController {
     // A press up to MOVE.dodgeBuffer early is kept; one earlier in the cooldown is dropped, never
     // stored for a roll a second later. The body turns to the roll at once, so a back or side roll
     // reads as a roll (the clip tumbles forward).
-    this.dodgeCooldown = Math.max(0, this.dodgeCooldown - realDt);
     if (input.pressed.has("KeyC")) this.dodgeWanted = MOVE.dodgeBuffer;
     const footing = this.onGround || (!this.jumped && this.airTime <= MOVE.dodgeGroundGrace);
-    if (this.dodgeWanted > 0 && !this.frozen && !this.mounted && this.dodgeCooldown <= 0 && footing && !this.swimming) {
+    if (this.dodgeWanted > 0 && !this.frozen && !this.mounted && now >= this.dodgeReadyAt && footing && !this.swimming) {
       this.dodgeWanted = 0;
       this.dodgeT = MOVE.dodgeTime;
-      this.dodgeCooldown = MOVE.dodgeCooldown;
+      this.dodgeReadyAt = now + MOVE.dodgeCooldown * 1000;
       this.dodgeDir.copy(wish.lengthSq() > 0 ? wish : this.facing);
       this.facing.copy(this.dodgeDir);
     }

@@ -615,7 +615,7 @@ export class Game {
     } else {
       // Photo mode (Shift+P): the body stays put (and can still be hurt) while the camera flies.
       if (this.input.hit(HOTKEYS.photo)) this.photo.toggle(this.ctx.camera);
-      if (!this.photo.active) this.player.update(dt, this.input, this.combat.aiming(), Math.min(1, rawMs / 1000));
+      if (!this.photo.active) this.player.update(dt, this.input, this.combat.aiming(), now);
       const p = this.player.pos;
       const f = this.player.facing;
       const m = this.inputMsg;

@@ -90,6 +90,12 @@ export interface PlayerActor {
   npcFx?: NpcMoveFx;
 }
 
+/** Why a hit on an NPC dealt nothing (ServerMessages `immune`); unset = an unspecified cause. */
+export type ImmuneReason = "spawning" | "evading" | "invulnerable" | "shield" | "arena";
+export interface ImmuneWhy {
+  reason: ImmuneReason | null;
+}
+
 /** Movement effects from NPC attacks: chill/slow, Cease-and-Desist (no sprint, no dodge), Undertow pull. */
 export interface NpcMoveFx {
   slow: number;
@@ -115,9 +121,9 @@ export interface NpcActor {
   /**
    * Optional mitigation (replaces `armour`): shields, boss weak windows, invulnerable states.
    * Gets the damage after the weak-point multiplier (and who dealt it) and returns what to apply;
-   * ≤ 0 = no damage.
+   * ≤ 0 = no damage, with the cause in `why` when it knows one (the attacker is told; combat.ts).
    */
-  mitigate?: (amount: number, weak: boolean, fromDir?: V3, attacker?: PlayerActor | NpcActor | null) => number;
+  mitigate?: (amount: number, weak: boolean, fromDir?: V3, attacker?: PlayerActor | NpcActor | null, why?: ImmuneWhy) => number;
   /**
    * Weak-point test for a ray that hit this NPC's capsule at distance `t` (bosses: does the ray pass
    * through an exposed weak-point volume?). Replaces the generic "top of the capsule" test.
