@@ -163,7 +163,10 @@ export class Game {
     if (!localStorage.getItem("fl.starter") && !automated) {
       hideLoading();
       this.firstChoice = await this.hud.characterPick({ askName: needsName ? { suggested: info!.name } : undefined });
-    } else if (needsName) await pickDisplayName({ suggested: info!.name, dismissible: true });
+    } else if (needsName) {
+      hideLoading(); // the name card sits in #ui, under the loading screen
+      await pickDisplayName({ suggested: info!.name, dismissible: true });
+    }
     await this.firstArrival(body);
   }
 
@@ -342,10 +345,13 @@ export class Game {
     if (code !== null) this.onRoomClosed(code);
   }
 
-  /** Logged out (the server saved us): back to the home page (6a), by reloading into it (leave.ts). */
+  /**
+   * Logged out (the server saved us and closes the room): back to the home page (6a), by reloading
+   * into it (leave.ts). The leave is a courtesy, so a hung socket can't keep the player here.
+   */
   async loggedOut() {
     this.stop();
-    await this.net.leave();
+    await Promise.race([this.net.leave(), new Promise((r) => setTimeout(r, 2500))]);
     goHome("logged-out");
   }
 

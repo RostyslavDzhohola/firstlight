@@ -117,10 +117,10 @@ export function progressView(me: MeInfo, fallbackStarter = 0): ProgressView {
   };
 }
 
-/** "2 h 14 min", "38 min", "under a minute". */
+/** "2 h 14 min", "38 min", "< 1 min". */
 export function fmtPlayTime(ms: number): string {
   const min = Math.floor(Math.max(0, ms) / 60_000);
-  if (min < 1) return "under a minute";
+  if (min < 1) return "< 1 min";
   const h = Math.floor(min / 60);
   const m = min % 60;
   return h ? `${h} h ${m} min` : `${m} min`;
@@ -166,10 +166,11 @@ export function onlineLabel(n: number): { count: string; label: string } {
   return { count: fmtNum(n), label: n === 1 ? "player online" : "players online" };
 }
 
-/** Names line under a world's count: "Wren_07, Mossback and 3 more". */
-export function namesLine(names: readonly string[], players: number): string {
+/** Names line under a world's count: "Wren_07, Mossback, Ashfall and 3 more" (short enough to fit). */
+export function namesLine(names: readonly string[], players: number, max = 3): string {
   if (!players) return "Nobody right now";
   if (!names.length) return `${players} ${players === 1 ? "player" : "players"}`;
-  const more = players - names.length;
-  return more > 0 ? `${names.join(", ")} and ${more} more` : names.join(", ");
+  const shown = names.slice(0, max);
+  const more = players - shown.length;
+  return more > 0 ? `${shown.join(", ")} and ${more} more` : shown.join(", ");
 }

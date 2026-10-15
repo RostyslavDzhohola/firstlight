@@ -216,7 +216,7 @@ export function renderMe({ me, notice }: MeState, actions?: { save(): void }): v
   stat("medal", null, "Medals", `${v.medals} / ${v.medalsTotal}`);
   stat("prism", null, "Pads found", `${v.pads} / ${v.padsTotal}`);
   stat(null, "clock", "This life", v.playTime);
-  if (!saved) el("p", "fl-home__guest", card, "Guest progress lives in this browser only, until you save it with your email.");
+  if (!saved) el("p", "fl-home__guest", card, v.playing && v.level < 2 ? "Guest progress lives in this browser only. From level 2 you can save it with your email." : "Guest progress lives in this browser only, until you save it with your email.");
 }
 
 // ------------------------------------------------------------------------------------------- data

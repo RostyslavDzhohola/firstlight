@@ -41,12 +41,12 @@ describe("home model", () => {
     expect(starterIndex(9)).toBe(0);
     expect(starterIndex("ash")).toBe(1);
     const guest = { name: "Wren_07", displayName: null, guest: true, titleMedal: null, character: null, medals: [], pads: [] };
-    expect(progressView(guest, 2)).toMatchObject({ name: "Wren_07", level: 1, starter: 2, playing: false, title: null, playTime: "under a minute" });
+    expect(progressView(guest, 2)).toMatchObject({ name: "Wren_07", level: 1, starter: 2, playing: false, title: null, playTime: "< 1 min" });
     expect(progressView({ ...guest, character: { level: 20, xp: 999_999, coins: 0, starter: 0, palette: 0, body: "meridian" } }).xpText).toBe("Max level");
   });
 
   it("formats play time", () => {
-    expect(fmtPlayTime(0)).toBe("under a minute");
+    expect(fmtPlayTime(0)).toBe("< 1 min");
     expect(fmtPlayTime(38 * 60_000 + 59_000)).toBe("38 min");
     expect(fmtPlayTime(3600_000)).toBe("1 h 0 min");
   });
@@ -69,5 +69,6 @@ describe("home model", () => {
     expect(namesLine(["Mossback"], 3)).toBe("Mossback and 2 more");
     expect(namesLine(["Ashfall", "Wren_07"], 2)).toBe("Ashfall, Wren_07");
     expect(namesLine([], 4)).toBe("4 players");
+    expect(namesLine(["A", "B", "C", "D", "E"], 9)).toBe("A, B, C and 6 more");
   });
 });
