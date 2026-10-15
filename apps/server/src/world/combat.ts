@@ -400,7 +400,8 @@ function launch(host: CombatHost, p: PlayerActor, def: WeaponDef, tier: TierStat
     vel: [dir[0] * speed, dir[1] * speed, dir[2] * speed],
     gravity: def.gravity ?? 0,
     travelled: 0,
-    maxDist: def.range * 1.2,
+    // Specials (the Ember Seal) reach exactly their stated range; other bolts keep the 20% grace.
+    maxDist: def.hidden ? def.range : def.range * 1.2,
     pierceLeft: tier.pierce ?? 0,
     hit: new Set([p.id]),
     fuseAt: def.delivery === "thrown" ? now + (tier.fuse ?? def.fuse ?? 1.6) * 1000 : null,
@@ -418,8 +419,11 @@ function launch(host: CombatHost, p: PlayerActor, def: WeaponDef, tier: TierStat
  */
 function castSpecial(host: CombatHost, p: PlayerActor, def: WeaponDef, tier: TierStats, tierIndex: number, o: V3, d: V3, head: V3, now: number): FireResult {
   const sp = def.special ? WEAPON_BY_ID.get(def.special) : undefined;
-  const held = p.chargeStartedAt > 0 ? now - p.chargeStartedAt : 0;
+  // The seal must have been held with this very item in hand (not fists, not another slot).
+  const sameItem = !!p.chargeItem && p.chargeItem === p.char.hotbar[p.char.selected];
+  const held = p.chargeStartedAt > 0 && sameItem ? now - p.chargeStartedAt : 0;
   p.chargeStartedAt = 0;
+  p.chargeItem = null;
   if (!sp || !tier.cooldown) return { ok: false, reason: "no special" };
   const spTier = sp.tiers[tierIndex]!;
   const gate = attackGate(p, tier, now, host);
@@ -778,10 +782,16 @@ export function stepProjectiles(host: CombatHost, dt: number) {
     p.vel[0] -= up[0] * p.gravity * dt;
     p.vel[1] -= up[1] * p.gravity * dt;
     p.vel[2] -= up[2] * p.gravity * dt;
-    const step = Math.hypot(p.vel[0], p.vel[1], p.vel[2]) * dt;
-    const d: V3 = [p.vel[0] * dt / step, p.vel[1] * dt / step, p.vel[2] * dt / step];
+    const full = Math.hypot(p.vel[0], p.vel[1], p.vel[2]) * dt;
+    const d: V3 = [p.vel[0] * dt / full, p.vel[1] * dt / full, p.vel[2] * dt / full];
+    // A tick's segment never reaches past the projectile's range: nothing is hit beyond it.
+    const step = p.fuseAt === null ? Math.min(full, p.maxDist - p.travelled) : full;
+    if (step <= 1e-6) {
+      list.splice(i, 1);
+      continue;
+    }
     if (!advance(host, p, d, step, now)) list.splice(i, 1);
-    else if (!p.stuck && p.travelled > p.maxDist) list.splice(i, 1);
+    else if (!p.stuck && p.travelled >= p.maxDist - 1e-6) list.splice(i, 1);
   }
 }
 

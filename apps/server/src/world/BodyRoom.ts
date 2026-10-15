@@ -297,7 +297,10 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     });
     this.onMessage("charge", z.object({ on: z.boolean() }), (c, m) => {
       const a = this.actor(c);
-      if (a && !a.dead) a.chargeStartedAt = m.on && !inSaddle(a, Date.now()) ? Date.now() : 0;
+      if (!a || a.dead) return;
+      const on = m.on && !inSaddle(a, Date.now());
+      a.chargeStartedAt = on ? Date.now() : 0;
+      a.chargeItem = on ? (a.char.hotbar[a.char.selected] ?? null) : null;
     });
     this.onMessage("travel", z.object({ to: z.enum(["portus", "arcadia", "hollowmere", "meridian"]) }), (c, m) => this.travelRequest(c, m.to));
     this.onMessage("scope", z.object({ on: z.boolean() }), (c, m) => {
@@ -454,6 +457,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       youDirty: true,
       ...motionFields(Math.hypot(p.x, p.y, p.z), now),
       chargeStartedAt: 0,
+      chargeItem: null,
       specialReadyAt: 0,
       lastPhraseAt: 0,
       healAcc: 0,
@@ -716,6 +720,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
   equip(a: PlayerActor, slot: number) {
     a.char.selected = Math.max(0, Math.min(HOTBAR_SLOTS - 1, slot));
+    // A charge (draw, heavy, hand seal) belongs to the item it started with: switching ends it.
+    a.chargeStartedAt = 0;
+    a.chargeItem = null;
     const item = a.char.hotbar[a.char.selected];
     a.state.weapon = item ? (WEAPON_INDEX.get(item.id) ?? 0) : 0;
     a.blocking = false;
