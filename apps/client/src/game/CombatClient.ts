@@ -14,7 +14,7 @@ import { Hud, type YouPlus } from "../ui/hud.ts";
 import { PhraseWheel } from "../ui/phraseWheel.ts";
 import type { Game } from "./Game.ts";
 import { openSaveProgress } from "../ui/account.ts";
-import { offersSave, SaveNudge, saveReady } from "../ui/saveOffer.ts";
+import { offerNudge, offersSave, SaveNudge, saveReady } from "../ui/saveOffer.ts";
 import { saveStatus } from "../net/auth.ts";
 
 const NUDGED_KEY = "fl.saveNudged";
@@ -52,6 +52,7 @@ export class CombatClient {
   /** The "Progress not saved" toast (once per tab session) and the best level seen (Esc menu → Save progress). */
   readonly saveNudge = new SaveNudge(sessionStorage.getItem(NUDGED_KEY) === "1");
   private readonly wheel: PhraseWheel;
+  private loadingEl: HTMLElement | null = null;
 
   constructor(private readonly game: Game) {
     this.effects = new Effects(game.ctx.scene);
@@ -183,14 +184,20 @@ export class CombatClient {
   }
 
   /**
+   * The "Progress not saved" toast is held while the tutorial is up, a menu has the mouse, the player
+   * is dead, or a travel or rejoin is under way (no room, or the loading screen is up).
+   */
+  private nudgeHeld(): boolean {
+    this.loadingEl ??= document.getElementById("loading");
+    return !!this.tutorialBusy?.() || !this.game.input.locked || this.deadUntilRespawn || !this.game.net.room || this.loadingEl?.hidden === false;
+  }
+
+  /**
    * After the first level-up (after the tutorial when it paid the level), a guest gets a toast with a
    * key hint, once per tab session. Never a card: the player is playing and the game holds the mouse;
    * the save card opens from the Esc menu (HANDOFF 5c). Saved players, dev guests and offline runs get nothing.
    */
-  private async nudgeSave() {
-    // A moment after the level-up's own toasts, so it isn't lost in that burst.
-    await new Promise((ok) => setTimeout(ok, 1500));
-    if (!offersSave(await saveStatus())) return;
+  private showNudge() {
     sessionStorage.setItem(NUDGED_KEY, "1");
     const t = this.hud.toast("Progress not saved", "info", { title: "Guest", sub: "Esc → Save progress", sprite: "chest", ms: 9000 });
     t.dataset.e2e = "save-toast";
@@ -251,7 +258,8 @@ export class CombatClient {
     const room = g.net.room;
     const input = g.input;
     this.effects.update(dt, now);
-    if (this.saveNudge.poll(!!this.tutorialBusy?.() || !g.input.locked || this.deadUntilRespawn || !room)) void this.nudgeSave();
+    // Due a moment after the level-up's own toasts; eligibility and the hold are checked again right before it shows.
+    if (this.saveNudge.poll(this.nudgeHeld(), now)) void offerNudge(this.saveNudge, { status: saveStatus, held: () => this.nudgeHeld(), show: () => this.showNudge() });
     if (!room) return;
     const meState = (room.state as any).players?.get(room.sessionId);
     if (meState) {

@@ -38,16 +38,28 @@ export function mayOpenSaveCard(s: { pointerLocked: boolean }): boolean {
   return !s.pointerLocked;
 }
 
-/** The "Progress not saved" toast: once per session, after the first level-up to 2+. */
+/** How long after the level-up (counted while nothing holds it) the toast shows: after the level-up's own toasts. */
+export const NUDGE_DELAY_MS = 1500;
+
+/**
+ * The "Progress not saved" toast: once per session, after the first level-up to 2+. It's due
+ * NUDGE_DELAY_MS of unheld time after the level-up; the caller then checks eligibility (async) and
+ * rechecks `held` right before showing (`offerNudge`), so an Esc, a death or a travel during either
+ * wait keeps it pending instead of showing it behind a menu and using up the session's one toast.
+ */
 export class SaveNudge {
   private pending = false;
   private shown: boolean;
+  private checking = false;
+  private dueAt = -1;
+  private readonly delayMs: number;
   /** Highest level seen this session (a rebirth drops to 1; the server still counts the best). */
   best = 0;
 
   /** `shownThisSession`: the toast already showed in this tab (a reload doesn't nag again). */
-  constructor(shownThisSession = false) {
+  constructor(shownThisSession = false, delayMs = NUDGE_DELAY_MS) {
     this.shown = shownThisSession;
+    this.delayMs = delayMs;
   }
 
   /** Every `you` update: a rise to level 2 or more asks for the toast. Joining at level 5 isn't a rise. */
@@ -57,15 +69,53 @@ export class SaveNudge {
   }
 
   /**
-   * Once per frame. `held` while the tutorial is up, a menu has the mouse, or the player is dead.
-   * True on the one frame the toast should show (the caller still checks the player is a guest).
+   * Once per frame. `held` while the tutorial is up, a menu has the mouse, the player is dead or
+   * travelling: the wait starts over once free. True on the frame the caller should check (then
+   * `shownNow()`, `later()` or `never()`; `offerNudge` does that).
    */
-  poll(held: boolean): boolean {
-    if (!this.pending || this.shown || held) return false;
-    this.pending = false;
-    this.shown = true;
+  poll(held: boolean, now: number): boolean {
+    if (!this.pending || this.shown || this.checking) return false;
+    if (held) {
+      this.dueAt = -1;
+      return false;
+    }
+    if (this.dueAt < 0) this.dueAt = now + this.delayMs;
+    if (now < this.dueAt) return false;
+    this.checking = true;
     return true;
   }
+
+  /** The toast went up: the session's one. */
+  shownNow(): void {
+    this.checking = this.pending = false;
+    this.shown = true;
+  }
+
+  /** It couldn't show just now (held again, or the check failed): stays pending. */
+  later(): void {
+    this.checking = false;
+    this.dueAt = -1;
+  }
+
+  /** Not a guest (saved, a dev token, offline): nothing this session. */
+  never(): void {
+    this.checking = this.pending = false;
+    this.shown = true;
+  }
+}
+
+/** The caller's half of a due toast: eligibility first, then `held` again right before it shows. */
+export async function offerNudge(n: SaveNudge, io: { status(): Promise<SaveStatus>; held(): boolean; show(): void }): Promise<void> {
+  let status: SaveStatus;
+  try {
+    status = await io.status();
+  } catch {
+    return n.later();
+  }
+  if (!offersSave(status)) return n.never();
+  if (io.held()) return n.later();
+  n.shownNow();
+  io.show();
 }
 
 /**
