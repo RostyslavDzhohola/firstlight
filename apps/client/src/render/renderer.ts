@@ -11,6 +11,7 @@ import {
 } from "./quality.ts";
 import { startRenderer } from "./rendererStart.ts";
 import { GpuTimer, ResolutionLadder } from "./timing.ts";
+import { compileForPass, passCallDepth, type PassCompileRenderer } from "./compilePass.ts";
 
 export { TIERS, FEATURES, type Tier, type Feature, type ResolvedSettings };
 
@@ -62,6 +63,8 @@ export interface RenderCtx {
   pixelRatio(): number;
   resize(): void;
   render(): void;
+  /** Compile the scene for the context its frames use (the post pipeline's scene pass): warm-up. */
+  compileScene(): Promise<unknown>;
   /** Per-frame bookkeeping after render (GPU timer, ladder). */
   afterFrame(now: number, frameMs: number): void;
   stored(): StoredGfx;
@@ -136,6 +139,8 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
   let auto = !forcedTier && !stored.tier;
   let settings = resolveSettings(tier, auto, webgpu, stored, kills);
   let post: PostBuild | null = null;
+  /** Call depth of the current post build's scene pass (compilePass.ts), learned on first use. */
+  let passDepth: number | null = null;
   let postKey = "";
   let photo = false;
 
@@ -147,6 +152,7 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
     if (post && key === postKey) return;
     post?.dispose();
     post = buildPost(scene, camera, settings, photo);
+    passDepth = null;
     postKey = key;
     pipeline.outputNode = post.outputNode;
     pipeline.needsUpdate = true;
@@ -270,6 +276,24 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
     },
     render() {
       pipeline.render();
+    },
+    compileScene() {
+      const r = renderer as unknown as PassCompileRenderer;
+      const sp = post?.scenePass ?? null;
+      if (sp && passDepth === null) {
+        // Learn the scene pass's call depth from one render with the scene hidden (background and
+        // post quads only); it depends on the pipeline's render-to-texture steps (FXAA, TRAA, …).
+        passDepth = passCallDepth(r, sp.renderTarget, () => {
+          const v = scene.visible;
+          scene.visible = false;
+          try {
+            pipeline.render();
+          } finally {
+            scene.visible = v;
+          }
+        });
+      }
+      return compileForPass(r, scene, camera, sp, passDepth);
     },
     afterFrame(now, frameMs) {
       gpu.frame();

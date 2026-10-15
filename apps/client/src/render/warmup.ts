@@ -1,7 +1,8 @@
 // Shader warm-up protocol (SPEC §4.1, tech-facts §2). compileAsync() alone frustum-culls, compiles
 // only active LODs, skips shadow maps and post passes (three #34681), so:
 //   1. make every mesh visible, disable frustum culling, force every LOD / instanced mesh to draw;
-//   2. await renderer.compileAsync(scene, camera);
+//   2. await ctx.compileScene(): compileAsync for the post pipeline's scene pass context
+//      (compilePass.ts; the canvas context compileAsync picks by itself is a variant no frame uses);
 //   3. (WebGPU only) compileComputeAsync for compute nodes — none yet;
 //   4. render a few real frames of the full RenderPipeline (shadows + post) behind the loading screen;
 //   5. restore, then watch renderer.debug.onNodeBuilderCreated: any shader built during the next
@@ -170,7 +171,7 @@ export async function warmup(
     });
     opts.beforeFrame?.();
     try {
-      await renderer.compileAsync(scene, camera);
+      await (ctx.compileScene ? ctx.compileScene() : renderer.compileAsync(scene, camera));
     } catch (e) {
       console.warn("[warmup] compileAsync failed (continuing with real frames)", e);
     }
