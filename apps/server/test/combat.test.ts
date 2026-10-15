@@ -24,9 +24,14 @@ function awayFromPad(metres: number, sideways = 0): [number, number, number] {
   const d = padDirs(BODIES.arcadia)[0]!;
   const ref = Math.abs(d[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
   const k = ref[0]! * d[0] + ref[1]! * d[1] + ref[2]! * d[2];
-  let t = [ref[0]! - k * d[0], ref[1]! - k * d[1], ref[2]! - k * d[2]];
-  const tl = Math.hypot(t[0]!, t[1]!, t[2]!);
-  t = t.map((v) => v / tl);
+  let n = [ref[0]! - k * d[0], ref[1]! - k * d[1], ref[2]! - k * d[2]];
+  const nl = Math.hypot(n[0]!, n[1]!, n[2]!);
+  n = n.map((v) => v / nl);
+  // East-north-east of the pad (75° from north): open ground. Due north is the Dawnpad outpost's
+  // barn since D42, and its walls stop shots.
+  const w = [d[1] * n[2]! - d[2] * n[1]!, d[2] * n[0]! - d[0] * n[2]!, d[0] * n[1]! - d[1] * n[0]!];
+  const a = (75 * Math.PI) / 180;
+  const t = n.map((v, i) => v * Math.cos(a) - w[i]! * Math.sin(a));
   const s = [d[1] * t[2]! - d[2] * t[1]!, d[2] * t[0]! - d[0] * t[2]!, d[0] * t[1]! - d[1] * t[0]!];
   const v = [d[0] + (t[0]! * metres + s[0]! * sideways) / R, d[1] + (t[1]! * metres + s[1]! * sideways) / R, d[2] + (t[2]! * metres + s[2]! * sideways) / R];
   const l = Math.hypot(v[0]!, v[1]!, v[2]!);
