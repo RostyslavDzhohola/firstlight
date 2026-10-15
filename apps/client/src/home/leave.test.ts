@@ -8,4 +8,9 @@ describe("leaving for the home page", () => {
     expect(homeUrl("https://firstlight.one4all.dev/?autoplay")).toBe("https://firstlight.one4all.dev/");
     expect(homeUrl("https://firstlight.one4all.dev/")).toBe("https://firstlight.one4all.dev/");
   });
+
+  it("tolerates malformed escapes instead of throwing", () => {
+    expect(homeUrl("https://firstlight.one4all.dev/?%=&autoplay")).toBe("https://firstlight.one4all.dev/?%=");
+    expect(homeUrl("https://firstlight.one4all.dev/?%E0%A4%A&webgl&auto%70lay=1")).toBe("https://firstlight.one4all.dev/?%E0%A4%A&webgl");
+  });
 });

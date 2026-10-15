@@ -10,7 +10,16 @@ export type HomeNotice = "logged-out";
 /** The home page URL: same page and flags, minus ?autoplay (it would start the game again) and the hash. */
 export function homeUrl(href: string): string {
   const u = new URL(href);
-  const kept = u.search.slice(1).split("&").filter((p) => p && decodeURIComponent(p.split("=")[0]!) !== "autoplay");
+  // Malformed escapes (`?%=`) must not throw here: logout would stay on the stopped game.
+  const key = (p: string) => {
+    const k = p.split("=")[0]!;
+    try {
+      return decodeURIComponent(k.replace(/\+/g, " "));
+    } catch {
+      return k;
+    }
+  };
+  const kept = u.search.slice(1).split("&").filter((p) => p && key(p) !== "autoplay");
   u.search = kept.length ? `?${kept.join("&")}` : "";
   u.hash = "";
   return u.toString();
@@ -21,7 +30,13 @@ export function goHome(notice?: HomeNotice): void {
     if (notice) sessionStorage.setItem(HOME_NOTICE_KEY, notice);
   } catch {}
   document.exitPointerLock?.();
-  location.replace(homeUrl(location.href));
+  let url: string;
+  try {
+    url = homeUrl(location.href);
+  } catch {
+    url = location.origin + location.pathname; // never stay on the stopped game
+  }
+  location.replace(url);
 }
 
 /** The notice left by goHome, once. */
