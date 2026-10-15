@@ -185,6 +185,7 @@ export function installE2eHook(win: Window & typeof globalThis): void {
   win.addEventListener("keydown", (e) => push({ t: e.timeStamp, kind: "key", code: e.code, repeat: e.repeat }), { capture: true, passive: true });
   win.addEventListener("keyup", (e) => push({ t: e.timeStamp, kind: "keyup", code: e.code }), { capture: true, passive: true });
   win.addEventListener("mousedown", (e) => push({ t: e.timeStamp, kind: "mouse", button: e.button }), { capture: true, passive: true });
+  win.addEventListener("mouseup", (e) => push({ t: e.timeStamp, kind: "mouseup", button: e.button }), { capture: true, passive: true });
   document.addEventListener("pointerlockchange", () => push({ t: performance.now(), kind: "lock", locked: !!document.pointerLockElement }));
 
   // Toasts (server and client ones) as they appear: the toast stack is watched, not the whole page.
@@ -342,12 +343,21 @@ export function installE2eHook(win: Window & typeof globalThis): void {
         .catch(() => state.errors++)
         .finally(() => (pending = false));
     };
+    // Only real show/hide changes count: code that re-sets `hidden = true` every frame queues a record
+    // each time without changing anything on screen.
+    const shown = new WeakMap<Element, boolean>();
     const mo = new MutationObserver((records) => {
       const t = performance.now();
-      for (const r of records) if (r.target instanceof Element) flips.push({ t, key: keyOf(r.target) });
+      for (const r of records) {
+        if (!(r.target instanceof Element)) continue;
+        const was = shown.has(r.target) ? shown.get(r.target)! : r.oldValue === null;
+        const now = !r.target.hasAttribute("hidden");
+        shown.set(r.target, now);
+        if (now !== was) flips.push({ t, key: keyOf(r.target) });
+      }
       if (flips.length > 5000) flips.splice(0, flips.length - 5000);
     });
-    mo.observe(document.body, { subtree: true, attributes: true, attributeFilter: ["hidden"] });
+    mo.observe(document.body, { subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ["hidden"] });
     state.stop = () => {
       mo.disconnect();
       if (own) ctx.render = original;
