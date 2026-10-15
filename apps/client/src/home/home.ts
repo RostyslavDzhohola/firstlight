@@ -84,10 +84,21 @@ function boardRow(list: HTMLElement, opts: { rank?: number; sprite: string; name
   if (opts.unit) el("small", "", v, opts.unit);
 }
 
+/** Fade the leaderboard's foot while more rows sit below. */
+function markMore(body: HTMLElement): void {
+  body.classList.toggle("is-more", body.scrollTop + body.clientHeight < body.scrollHeight - 4);
+}
+
 /** The leaderboard's open tab. */
 export function renderBoard(board: HomeBoard | null, tab: Tab): void {
   const body = $("home-board");
   if (!body) return;
+  if (!body.dataset.more) {
+    body.dataset.more = "1";
+    body.addEventListener("scroll", () => markMore(body), { passive: true });
+  }
+  requestAnimationFrame(() => markMore(body));
+  body.scrollTop = 0;
   body.replaceChildren();
   if (!board) {
     el("p", "fl-home__empty", body, "The leaderboard is resting. Check back in a minute.");
@@ -121,8 +132,8 @@ export function renderVisits(visits: HomeVisits | null, ourOnline: number | null
     const tot = el("span", "", box, "Total visits: ");
     el("b", "num", tot, line.total);
   }
-  // DataFast's cookieless script: no cookies, nothing personal. Say so wherever its numbers show.
-  if (config.datafast) el("span", "note", box, visits ? "· Visit counts by DataFast, cookieless" : "· Cookieless visit counts by DataFast");
+  // The page carries DataFast's script (cookieless: no cookies, nothing personal): say so.
+  if (config.datafast) el("span", "note", box, "· Cookieless analytics by DataFast");
 }
 
 export interface MeState {

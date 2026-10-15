@@ -9,6 +9,7 @@
 /* The backdrop's small planets sit where the home page leaves sky: above the cards, low on the left. */
 .fl-home .fl-fly__planet--meridian { left: 47%; top: 2.2%; }
 .fl-home .fl-fly__planet--hollowmere { left: 34%; top: 79%; }
+.fl-home .fl-fly__planet--arcadia { right: 8%; top: 76%; }
 .fl-home__page { position: relative; z-index: 1; min-height: 100%; display: grid; grid-template-rows: auto 1fr auto; gap: calc(1.2 * var(--u)); padding: calc(1.2 * var(--u)) calc(2.4 * var(--u)) calc(1.2 * var(--u)); }
 
 /* ---- top bar ---- */
@@ -83,6 +84,8 @@
 .fl-home__tabs { gap: calc(1 * var(--u)); border-bottom: 0; }
 .fl-home__tabs .fl-tab { padding: calc(.35 * var(--u)) 0; }
 .fl-home__boardbody { max-height: calc(14.5 * var(--u)); overflow-y: auto; scrollbar-width: thin; margin: 0 calc(-.3 * var(--u)); padding: 0 calc(.3 * var(--u)); }
+/* More rows below: fade the last one so the cut reads as "scroll", not as a glitch. */
+.fl-home__boardbody.is-more { -webkit-mask-image: linear-gradient(180deg, #000 78%, transparent); mask-image: linear-gradient(180deg, #000 78%, transparent); }
 .fl-home__rows { display: grid; margin: 0; padding: 0; list-style: none; }
 .fl-home__rows li { display: grid; grid-template-columns: calc(1.6 * var(--u)) auto minmax(0, 1fr) auto; align-items: center; gap: calc(.6 * var(--u)); min-height: calc(2.3 * var(--u)); padding: calc(.2 * var(--u)) 0; border-bottom: 1px solid var(--line-1); font-size: var(--t-sm); }
 .fl-home__rows li:last-child { border-bottom: 0; }
@@ -157,7 +160,7 @@
   .fl-home__foot { flex-direction: column; align-items: center; text-align: center; }
   .fl-home__credit { justify-content: center; }
   .fl-home__mark { --wm-size: 13px; }
-  .fl-home .fl-fly__planet--arcadia { width: 64px; height: 64px; right: -18px; top: 76px; }
+  .fl-home .fl-fly__planet--arcadia { width: 64px; height: 64px; right: -18px; top: 76px; bottom: auto; }
   .fl-home .fl-fly__planet--hollowmere { width: 34px; height: 34px; left: -10px; top: 300px; }
   .fl-home .fl-fly__planet--meridian { display: none; }
 }
