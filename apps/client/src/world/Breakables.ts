@@ -445,7 +445,8 @@ export class BreakablesView implements ClientSystem, MoveColliders {
     if (this.settings.on.destruct) this.debris.spawn(b, b.archetype, variant, ix, iy, iz, force, seed);
     const c = this.scratch.set(b.cx, b.cy, b.cz);
     this.game.burst(c, 0xe8dcc8, 10 + Math.round(4 * b.h), { speed: [1, 3.5], life: [0.25, 0.6], size: [0.03, 0.07], intensity: 1.3, lift: -0.6 });
-    this.game.audio.play(b.size === "heavy" ? "explosion" : "meleeHit", c, b.size === "heavy" ? 0.45 : 0.9, b.size === "heavy" ? 1.5 : 0.7);
+    if (b.size === "heavy") this.game.audio.play("explosion", c, 0.45, 1.5);
+    else this.game.audio.play("shatter", c, 0.9);
   }
 
   /** Debug / offline: shatter the prop nearest to the camera locally (no server state). */

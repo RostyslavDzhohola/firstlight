@@ -1,4 +1,4 @@
-// Photo mode (SPEC §6.13, F9): hides the HUD and flies a free camera on the sphere. WASD move,
+// Photo mode (SPEC §6.13, Shift+P): hides the HUD and flies a free camera on the sphere. WASD move,
 // mouse look, Q/E down/up, Shift fast, wheel FOV, [ ] focus distance, - = aperture, , . exposure,
 // G grade filter, K/L time of day, U live sky, O weather, H hides the panel. Time and weather are
 // local overrides (only this screen changes) and reset on exit. The player's body stays in the
@@ -244,7 +244,7 @@ export class PhotoMode {
   private renderPanel() {
     if (!this.panel) return;
     const rows: [string, string][] = [
-      ["F9", "leave photo mode"],
+      ["Shift+P", "leave photo mode · P takes a picture"],
       ["WASD · Q/E · Shift", "fly · down/up · fast"],
       ["Wheel", `FOV ${Math.round(this.fov)}°`],
       ["[ ]", `focus ${this.focus.toFixed(1)} m`],

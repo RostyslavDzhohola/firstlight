@@ -10,7 +10,7 @@ NPC spawns, a loot pile, PvP protection off, the sky). Code: `apps/server/src/wo
   the admin's party**. In production only the owner's account is admin, so the other windows join
   the owner's party (Tab → invite, within 30 m) before staging. Crew within 80 m of the admin are
   pulled in; add `all` (`stage 3 all`) to pull every crew member in the same planet copy.
-- **Typing it:** in the admin window press <kbd>`</kbd> (backquote) to open the admin console and
+- **Typing it:** in the admin window press <kbd>Shift</kbd>+<kbd>`</kbd> (backquote) to open the admin console and
   type `stage 2`. Or open the admin window with `?stage=2` in the URL (add `&all` for `all`): it
   stages itself once it has joined.
 - **Other bodies:** if the scene is on another body, the admin's client travels there and repeats the
@@ -24,7 +24,7 @@ NPC spawns, a loot pile, PvP protection off, the sky). Code: `apps/server/src/wo
   copy: `sky time 19:30 hold` (or `time 0.81`; without `hold` the clock keeps running from there),
   `sky storm 0.8`, `sky clear`, `for <minutes>` (default 15, max 240), and `sky reset` back to the
   live schedule. Photo mode's own time and weather keys (K/L/U, O) change only that window's view.
-- **Camera:** photo mode (<kbd>F9</kbd>, photo-mode lane) in the admin window: free camera, FOV, DoF,
+- **Camera:** photo mode (<kbd>Shift</kbd>+<kbd>P</kbd>, photo-mode lane) in the admin window: free camera, FOV, DoF,
   exposure, planet grade. Hide the HUD there. Record with the screen recorder of your choice.
 - **Spawns:** bosses and NPC groups are requested on the game event bus (`spawnRequest`, reason
   `"stage"`), and the quest system hands them to the NPC system (`QuestSystem.spawn`): a scene boss

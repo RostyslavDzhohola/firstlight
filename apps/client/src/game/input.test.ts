@@ -1,5 +1,6 @@
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { Input } from "./input.ts";
+import { HOTKEYS } from "./keys.ts";
 
 const listeners = { addEventListener() {} };
 
@@ -60,5 +61,30 @@ describe("Input.lock", () => {
     expect(() => new Input(el).lock()).not.toThrow();
     await settle();
     expect(unhandled).toEqual([]);
+  });
+});
+
+describe("Input.hit (hotkeys, D-controls-2)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("reads Shift as it was at the key press, so a quick Shift+P between two slow frames still counts", () => {
+    const win = new EventTarget();
+    vi.stubGlobal("window", win);
+    vi.stubGlobal("document", new EventTarget());
+    const input = new Input(Object.assign(new EventTarget(), { requestPointerLock: () => Promise.resolve() }) as unknown as HTMLElement);
+    const key = (type: string, code: string, shiftKey: boolean) => win.dispatchEvent(Object.assign(new Event(type, { cancelable: true }), { code, shiftKey }));
+    key("keydown", "ShiftLeft", true);
+    key("keydown", "KeyP", true);
+    key("keyup", "KeyP", true);
+    key("keyup", "ShiftLeft", false); // all before the next frame
+    expect(input.hit(HOTKEYS.photo)).toBe(true);
+    expect(input.hit(HOTKEYS.screenshot)).toBe(false);
+    input.endFrame();
+    key("keydown", "KeyP", false);
+    expect(input.hit(HOTKEYS.photo)).toBe(false);
+    expect(input.hit(HOTKEYS.screenshot)).toBe(true);
+    key("keydown", "Backquote", false);
+    expect(input.hit(HOTKEYS.perf)).toBe(true);
+    expect(input.hit(HOTKEYS.adminConsole)).toBe(false);
   });
 });

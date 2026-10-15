@@ -16,6 +16,7 @@ import { MapPanel } from "../ui/map.ts";
 import { AdminConsole, GuidePanel, JournalPanel, KeypadPanel, MissionTracker, Panel, ShopPanel } from "../ui/panels.ts";
 import { QuestWorld } from "../world/QuestWorld.ts";
 import type { Game } from "./Game.ts";
+import { HOTKEYS, hits } from "./keys.ts";
 import type { ClientSystem } from "./systems.ts";
 
 /** Survives body changes: the latest Hall of Firsts and a staged scene waiting for travel to finish. */
@@ -103,7 +104,7 @@ export class QuestClient implements ClientSystem {
   private key(e: KeyboardEvent) {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
     if (this.game.combat.deadUntilRespawn || !this.game.net.room) return;
-    if (e.code === "Backquote" && this.isAdmin()) {
+    if (hits(HOTKEYS.adminConsole, e.code, e.shiftKey) && this.isAdmin()) {
       e.preventDefault();
       this.console.toggle();
       return;

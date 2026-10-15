@@ -23,6 +23,8 @@ export const env = {
   turnKeyToken: process.env.TURN_KEY_API_TOKEN ?? "",
   adminClaimToken: process.env.ADMIN_CLAIM_TOKEN ?? "",
   loadtestSecret: process.env.LOADTEST_SECRET ?? "",
+  /** DataFast website API key (`df_…`) for the home page's visit counts (6f); empty = not shown. */
+  datafastApiKey: process.env.DATAFAST_API_KEY ?? "",
   allowDevGuests: process.env.ALLOW_DEV_GUESTS === "1",
   maxClients: num("MAX_CLIENTS", 40),
   maxCopiesPerBody: num("MAX_COPIES_PER_BODY", 2),
@@ -37,6 +39,10 @@ export const env = {
   horses: process.env.FEATURE_HORSES !== "0",
   /** M11 extra #5: new sources and puzzles. Existing owned cosmetics remain usable. */
   cosmeticsExtras: process.env.FEATURE_COSMETICS_EXTRAS !== "0",
+  /** Proximity voice and the radio (SPEC §5.7). Off in this build ("coming soon", D-controls-1):
+   *  no voice signalling, no TURN credentials, no radio in the shop or in piles. FEATURE_VOICE=1 turns
+   *  it back on (with the client's VITE_FEATURE_VOICE=1). Mutable for tests. */
+  voice: process.env.FEATURE_VOICE === "1",
 };
 
 /**

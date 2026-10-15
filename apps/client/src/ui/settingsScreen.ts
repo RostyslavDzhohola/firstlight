@@ -8,8 +8,9 @@ import { button, el, icon, isolateKeys } from "./dom.ts";
 import { formatDamage } from "./hudFormat.ts";
 import { FOV_RANGE, SENSITIVITY_RANGE, uiSettings, type UiSettings, type UiSettingsPatch } from "./uiSettings.ts";
 import { openVoicePanel, voice } from "../voice/index.ts";
+import { features } from "../config.ts";
 
-/** Player-facing toggles (F3 keeps the rest: sky planets, vignette, post, chars, motes, detail). */
+/** Player-facing toggles (the ` performance overlay keeps the rest: sky planets, vignette, post, chars, motes, detail). */
 const TOGGLES: [Feature, string][] = [
   ["bloom", "Bloom"],
   ["fog", "Fog & haze"],
@@ -28,7 +29,8 @@ const TOGGLES: [Feature, string][] = [
 ];
 
 const TIER_LABEL: Record<Tier | "auto", string> = { auto: "Auto", low: "Low", medium: "Medium", high: "High", ultra: "Ultra" };
-const VOLUMES: [keyof Game["audio"]["volumes"], string][] = [["master", "Master"], ["music", "Music"], ["sfx", "Effects"], ["voice", "Voice"]];
+// The Voice slider goes with voice chat (hidden in this build, D-controls-1).
+const VOLUMES: [keyof Game["audio"]["volumes"], string][] = [["master", "Master"], ["music", "Music"], ["sfx", "Effects"], ...(features.voice ? [["voice", "Voice"] as [keyof Game["audio"]["volumes"], string]] : [])];
 
 function range(parent: HTMLElement, id: string, min: number, max: number, step: number, value: number): HTMLInputElement {
   const r = el("input", "fl-range", parent);
@@ -61,14 +63,17 @@ function toggle(parent: HTMLElement, cls: string, label: string, sub: string | n
   return i;
 }
 
-/** Build the settings screen into `host`. Returns a cleanup function. */
-export function openSettings(game: Game, host: HTMLElement, back: () => void): () => void {
+/**
+ * Build the settings screen into `host`. Returns a cleanup function. `back` is the Menu button (to the
+ * pause menu); `escape` is Esc, which goes straight back into the game like Esc on the menu.
+ */
+export function openSettings(game: Game, host: HTMLElement, back: () => void, escape: () => void = back): () => void {
   const ctx = game.ctx;
   const root = el("div", "fl-settings", host);
   isolateKeys(root);
-  // Keys don't leave the screen (isolateKeys), so Esc → back is handled here.
+  // Keys don't leave the screen (isolateKeys), so Esc is handled here: back into the game.
   root.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") back();
+    if (e.key === "Escape" && !e.repeat) escape();
   });
   const cleanups: (() => void)[] = [];
 
@@ -96,7 +101,7 @@ export function openSettings(game: Game, host: HTMLElement, back: () => void): (
   const saved = el("span", "fl-saved", bottom);
   icon("check", "", saved);
   saved.append("Saved");
-  el("span", "", bottom, "Esc or Menu to go back");
+  el("span", "", bottom, "Menu goes back · Esc returns to the game");
   el("span", "fl-grow", bottom);
   el("span", "", bottom, "Quality changes re-warm the shaders for a moment. No reload.");
   let savedTimer = 0;
@@ -233,40 +238,56 @@ export function openSettings(game: Game, host: HTMLElement, back: () => void): (
   const dmg = toggle(mid, "fl-line", "Damage numbers", "Float above whatever you hit", ui.damageNumbers);
   dmg.onchange = () => setUi({ damageNumbers: dmg.checked });
 
+  el("hr", "", mid);
+  const mapH = el("h2", "", mid);
+  icon("compass", "", mapH);
+  mapH.append("Map");
+  const mm = toggle(mid, "fl-line", "Minimap", "Top right: the ground, creeps, pads and your waypoint", ui.minimap);
+  const mr = toggle(mid, "fl-line", "Turn the minimap with the camera", "Ahead is up. Off keeps north up.", ui.minimapRotate);
+  mm.onchange = () => setUi({ minimap: mm.checked });
+  mr.onchange = () => setUi({ minimapRotate: mr.checked });
+
   // ------------------------------------------------------------------------------------------ voice + colour
   // The voice lane owns the opt-in (16+), devices and radio (its "Voice & radio" panel); this column
   // shows the state, the strangers switch and opens that panel.
   const right = el("section", "fl-settings__col fl-panel", cols);
-  const vc = voice();
-  const vh = el("h2", "", right);
-  icon("mic", "", vh);
-  vh.append("Voice");
-  el("small", "", vh, vc?.optedIn ? (vc.enabled ? "On" : "Opted in, off") : "Off until you opt in");
-  const card = el("div", "fl-voicecard", right);
-  const age = el("div", "fl-age", card);
-  icon(vc?.optedIn ? "check" : "lock", "", age);
-  const ageT = el("span", "", age, vc?.optedIn ? "You confirmed you're 16 or older" : "Voice needs you to be 16 or older");
-  el("small", "", ageT, vc?.optedIn ? "Push to talk with V, the radio with B." : "Opt in once from the Voice & radio panel.");
-  if (vc) {
-    const ms = toggle(card, "fl-line", "Mute strangers", "Only hear your party", vc.muteStrangers);
-    ms.onchange = () => {
-      vc.setMuteStrangers(ms.checked);
-      flashSaved();
-    };
+  if (features.voice) {
+    const vc = voice();
+    const vh = el("h2", "", right);
+    icon("mic", "", vh);
+    vh.append("Voice");
+    el("small", "", vh, vc?.optedIn ? (vc.enabled ? "On" : "Opted in, off") : "Off until you opt in");
+    const card = el("div", "fl-voicecard", right);
+    const age = el("div", "fl-age", card);
+    icon(vc?.optedIn ? "check" : "lock", "", age);
+    const ageT = el("span", "", age, vc?.optedIn ? "You confirmed you're 16 or older" : "Voice needs you to be 16 or older");
+    el("small", "", ageT, vc?.optedIn ? "Push to talk with V, the radio with B." : "Opt in once from the Voice & radio panel.");
+    if (vc) {
+      const ms = toggle(card, "fl-line", "Mute strangers", "Only hear your party", vc.muteStrangers);
+      ms.onchange = () => {
+        vc.setMuteStrangers(ms.checked);
+        flashSaved();
+      };
+    }
+    const open = button("", "fl-btn fl-btn--block", card, () => openVoicePanel());
+    icon("radio", "", open);
+    open.append("Voice & radio");
+    open.disabled = !vc;
+    if (!vc) el("div", "fl-setting__hint", card, "Voice starts when you join a world (needs WebRTC).");
+
+    const priv = el("div", "fl-private", right);
+    icon("shield", "", priv);
+    const pt = el("span", "", priv);
+    el("b", "", pt, "Never recorded. ");
+    pt.append("Voice goes player to player through a relay and is not stored anywhere. Shift + Esc mutes everyone instantly.");
+
+    el("hr", "", right);
+  } else {
+    // Hidden in this build (D-controls-1): the column keeps colours; the Esc menu says "coming soon".
+    const ch = el("h2", "", right);
+    icon("eye", "", ch);
+    ch.append("Colour");
   }
-  const open = button("", "fl-btn fl-btn--block", card, () => openVoicePanel());
-  icon("radio", "", open);
-  open.append("Voice & radio");
-  open.disabled = !vc;
-  if (!vc) el("div", "fl-setting__hint", card, "Voice starts when you join a world (needs WebRTC).");
-
-  const priv = el("div", "fl-private", right);
-  icon("shield", "", priv);
-  const pt = el("span", "", priv);
-  el("b", "", pt, "Never recorded. ");
-  pt.append("Voice goes player to player through a relay and is not stored anywhere. Shift + Esc mutes everyone instantly.");
-
-  el("hr", "", right);
   const cb = toggle(right, "fl-line", "Colour-blind damage colours", "Yellow weak points, cyan shields. Size and “!” always mark weak points.", ui.cbDamage);
   cb.onchange = () => setUi({ cbDamage: cb.checked });
   const prev = el("div", "fl-dmgprev", right);

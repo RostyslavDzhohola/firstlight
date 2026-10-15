@@ -10,6 +10,7 @@ import { createSkyClient } from "./SkyClient.ts";
 import { createInventoryClient } from "./InventoryClient.ts";
 import { createOnboardingClient } from "./OnboardingClient.ts";
 import { horseClientSystem, horseInputSystem } from "./HorseClient.ts";
+import { createMapClient } from "./MapClient.ts";
 
 export interface ClientSystem {
   update(dt: number, now: number): void;
@@ -32,3 +33,5 @@ CLIENT_SYSTEMS.push(createOnboardingClient);
 // and take keys after the quests client (piles and world objects keep E when in reach).
 CLIENT_SYSTEMS.unshift(horseClientSystem);
 CLIENT_SYSTEMS.push(horseInputSystem);
+// Map lane: the map atlas bake, the waypoint's world pillar and the HUD minimap.
+CLIENT_SYSTEMS.push(createMapClient);

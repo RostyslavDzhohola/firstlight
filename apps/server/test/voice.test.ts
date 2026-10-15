@@ -40,8 +40,11 @@ function guardFetch() {
   });
 }
 
+// Voice is off in this build (FEATURE_VOICE unset, D-controls-1): these tests turn it on.
+const voiceWas = env.voice;
 beforeEach(async () => {
   run++;
+  env.voice = true;
   env.turnKeyId = "";
   env.turnKeyToken = "";
   turnStub = null;
@@ -51,6 +54,7 @@ beforeEach(async () => {
 afterEach(async () => {
   for (const r of rooms.splice(0)) await safeLeave(r);
   await game.close();
+  env.voice = voiceWas;
   env.turnKeyId = "";
   env.turnKeyToken = "";
   turnStub = null;
@@ -736,5 +740,33 @@ describe("TURN credentials", () => {
     session.mintedAt -= VOICE.TURN_TTL_S * 1000; // now past its lifetime
     await waitFor(() => unavailable(vic).length === 1, 4000);
     expect(session.ice).toBeNull();
+  });
+});
+
+describe("voice off (this build: FEATURE_VOICE unset, D-controls-1)", () => {
+  it("no voice system: requests are refused with \"off\", nothing is relayed, no TURN credential is minted, nobody is dropped", async () => {
+    env.voice = false;
+    env.turnKeyId = "key-123"; // a configured relay must still never be asked for credentials
+    env.turnKeyToken = "tok-secret";
+    const turnCalls: string[] = [];
+    turnStub = async (url) => (turnCalls.push(url), new Response(null, { status: 500 }));
+    const ann = await bot("quiet_ann");
+    const ben = await bot("quiet_ben");
+    await waitFor(() => (ann.state as any).players.size === 2);
+    expect([...liveRooms].flatMap((r) => r.systems).some((s) => s instanceof VoiceSystem)).toBe(false);
+    for (const type of ["voice:enable", "radio:tune", "radio:tx", "voice:block", "voice:report", "voice:mute"] as const) {
+      const msg = { "voice:enable": { age16: true }, "radio:tune": { ch: 3 }, "radio:tx": { on: true }, "voice:block": { target: ben.sessionId }, "voice:report": { target: ben.sessionId, reason: "Other" }, "voice:mute": { target: ben.sessionId, on: true } }[type];
+      ann.send(type, msg);
+    }
+    expect(await relays(ann, ben)).toBe(false);
+    ann.send("voice:disable", {});
+    await barrier(ann, ben);
+    expect(got(ann, "voice:denied").map((d) => d.action)).toEqual(["voice:enable", "radio:tune", "radio:tx", "voice:block", "voice:report", "voice:mute"]);
+    expect(got(ann, "voice:denied").every((d) => d.reason === "off")).toBe(true);
+    expect(got(ann, "voice:ice")).toEqual([]);
+    expect(turnCalls).toEqual([]);
+    expect(me(ann).flags & (PF.VOICE | PF.RADIO_TX)).toBe(0);
+    expect(me(ann).radioCh ?? 0).toBe(0);
+    expect(ann.connection.isOpen && ben.connection.isOpen).toBe(true);
   });
 });

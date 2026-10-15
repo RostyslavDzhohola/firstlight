@@ -208,9 +208,13 @@ maps + systems.
 ### 4.4 Input map
 
 WASD move · mouse aim · LMB attack · RMB aim/block/charge · Shift sprint · Space jump · **C dodge** ·
-**R reload** (D13) · 1–4 hotbar · E interact/pick up · Tab player list · V push-to-talk · B radio · G phrase wheel ·
-M map · I inventory · P screenshot · F9 photo mode · Esc menu · Shift+Esc panic mute-all ·
-F3 perf overlay. `contextmenu` and Tab defaults are suppressed while pointer-locked.
+**R reload** (D13) · 1–4 hotbar · E interact/pick up · Tab player list · G phrase wheel · M map ·
+I inventory · J journal · H horse · T tutorial checklist · P screenshot · **Shift+P photo mode** ·
+**`` ` `` perf overlay** · Shift+`` ` `` admin console (admins) · Esc menu (Esc again, Enter or a click goes
+back into the game) · V push-to-talk, B radio and Shift+Esc panic mute-all only in builds with voice
+(hidden in this one, D-controls-1). **No F-keys** (D-controls-2: macOS keeps them). `contextmenu`,
+Tab, Space, `/`, `'` and `` ` `` defaults are suppressed while pointer-locked; every binding is listed in
+`apps/client/src/game/keys.ts`.
 
 ---
 
@@ -342,6 +346,9 @@ medals, Easter eggs + Hall of Firsts, bosses (per copy, 10-min respawn), destruc
 parties, voice signalling relay, radio channels, moderation, analytics.
 
 ### 5.7 Voice (r2-13 §10, condensed)
+
+**Hidden in the current build (D-controls-1):** everything below is behind `FEATURE_VOICE` (server) and
+`VITE_FEATURE_VOICE` (client build), both off; the Esc menu shows "Voice chat: coming soon".
 
 - Config: `HEAR 35 m`, `CONNECT 45 m`, `DROP 60 m` (held 3 s), `MAX_PEERS 12`, `RADIO_CAP 8`,
   `OPUS_MAX 24000` bps.
@@ -492,7 +499,7 @@ mountains and Portus buildings never break. Depend on the npm package (MIT); don
 
 ### 6.13 Photo mode and staged scenes
 
-- **Photo mode (F9):** hide the HUD; free camera (WASD/mouse, Q/E down/up, Shift fast); FOV, DoF
+- **Photo mode (Shift+P):** hide the HUD; free camera (WASD/mouse, Q/E down/up, Shift fast); FOV, DoF
   focus/aperture, exposure, planet-grade filter. Your body stays in the world (it can die).
 - **Staged scenes** (`docs/staged-scenes.md` + admin command `stage <n>` that teleports you and
   sets the scene): 1 Portus crowd under the sky planets; 2 Arcadia vista with Tidewrath rising from
@@ -581,9 +588,9 @@ rendering a fixed Portus view at Medium (GPU timer query where available, else r
 High (re-probe for Ultra), > 14 ms → Low. Runtime resolution ladder `[1, 0.79, 0.62, 0.5]`; at the
 floor, drop a tier. Stored in `localStorage`; the settings menu overrides.
 
-**Kill switches** (URL flags, also toggles in the F3 overlay): `?nobloom ?nofog ?nosky ?nograss
+**Kill switches** (URL flags, also toggles in the `` ` `` performance overlay): `?nobloom ?nofog ?nosky ?nograss
 ?notrees ?nowater ?noshadows ?noao ?noparticles ?nopost ?nochars ?nodestruct ?webgl ?tier=low|medium|high|ultra
-?bench`. The F3 overlay shows fps, CPU/GPU ms, draw calls, triangles, backend, tier, chunk count,
+?bench`. The performance overlay (`` ` ``) shows fps, CPU/GPU ms, draw calls, triangles, backend, tier, chunk count,
 entity count, ping.
 
 ### 7.4 Performance measurement
@@ -626,7 +633,7 @@ screenshot. Significant merges get the three-model review (§9.4).
 
 - Test scene on Arcadia: streamed chunk terrain with smooth normals, scattering sky + height fog,
   80k grass, instanced trees/rocks, one lake, bloom + tone map + LUT, 40 placeholder animated
-  characters, 2k particles, F3 overlay, kill switches, tier switch, `?bench`.
+  characters, 2k particles, perf overlay, kill switches, tier switch, `?bench`.
 - Run `?bench` on the M1 (Codex) on WebGPU and `?webgl`.
 - **Done when:** G1 decided and logged (§7.1).
 
