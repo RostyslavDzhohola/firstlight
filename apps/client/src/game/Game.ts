@@ -36,6 +36,7 @@ import { PhotoMode } from "./PhotoMode.ts";
 import { PlayerController } from "./PlayerController.ts";
 import { CLIENT_SYSTEMS, type ClientSystem } from "./systems.ts";
 import { installSocial, partyRoomOn, removedFromWorld } from "../social/index.ts";
+import { goHome } from "../home/leave.ts";
 
 
 /** ?bench runs without a server unless ?online is also given; ?offline forces it anywhere. */
@@ -341,10 +342,11 @@ export class Game {
     if (code !== null) this.onRoomClosed(code);
   }
 
+  /** Logged out (the server saved us): back to the home page (6a), by reloading into it (leave.ts). */
   async loggedOut() {
     this.stop();
     await this.net.leave();
-    this.menu.showLoggedOut();
+    goHome("logged-out");
   }
 
   async resume() {

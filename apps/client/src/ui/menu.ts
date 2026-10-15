@@ -12,6 +12,7 @@ import { getPlayToken, isDevGuest, readClaims } from "../net/auth.ts";
 import { button, el, icon, isOverlayOpen, keycaps, sprite, uiRoot } from "./dom.ts";
 import { installSprites, portraitSprite } from "./sprites.ts";
 import { openSettings } from "./settingsScreen.ts";
+import { shareRow } from "./share.ts";
 import { openVoicePanel, voice } from "../voice/index.ts";
 
 type Ctl = [keys: string[] | "mouse-l" | "mouse-r" | "mouse-move", label: string];
@@ -249,6 +250,7 @@ export class Menu {
     const photo = el("span", "", foot);
     keycaps(["F9"], photo);
     photo.append("Photo mode");
+    shareRow(left); // 6e
 
     buildHowTo(screen);
     this.tick();

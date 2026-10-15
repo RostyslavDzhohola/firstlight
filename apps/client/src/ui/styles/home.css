@@ -1,0 +1,163 @@
+/* Home page (6a): the landing page as a game home screen. Hero and Play on the left with my progress
+   under it; online now, the leaderboard and the worlds on the right; the share row, visit counts and
+   credits at the foot. The page scrolls when it doesn't fit (small laptops, phones); the backdrop
+   (landing.css .fl-fly) stays put behind it. Phones get the same cards with "Play on your computer"
+   in place of Play. */
+
+.fl-home { z-index: 0; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; }
+.fl-home .fl-fly { position: fixed; }
+/* The backdrop's small planets sit where the home page leaves sky: above the cards, low on the left. */
+.fl-home .fl-fly__planet--meridian { left: 47%; top: 2.2%; }
+.fl-home .fl-fly__planet--hollowmere { left: 34%; top: 79%; }
+.fl-home__page { position: relative; z-index: 1; min-height: 100%; display: grid; grid-template-rows: auto 1fr auto; gap: calc(1.2 * var(--u)); padding: calc(1.2 * var(--u)) calc(2.4 * var(--u)) calc(1.2 * var(--u)); }
+
+/* ---- top bar ---- */
+.fl-home__top { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); min-height: calc(2.4 * var(--u)); }
+.fl-home__mark { --wm-size: calc(1.15 * var(--u)); }
+.fl-home__account { display: flex; align-items: center; gap: var(--sp-2); }
+.fl-home__who { display: inline-flex; align-items: center; gap: .5em; max-width: calc(16 * var(--u)); font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: .1em; text-transform: uppercase; color: var(--paper-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-home__who .li { color: var(--ok); }
+
+/* ---- main grid ---- */
+.fl-home__main { align-self: center; display: grid; grid-template-columns: minmax(0, .92fr) minmax(0, 1.28fr); gap: calc(2.4 * var(--u)); align-items: start; padding-bottom: calc(1.5 * var(--u)); }
+.fl-home__hero { display: flex; flex-direction: column; align-items: flex-start; gap: calc(.9 * var(--u)); padding-top: calc(1.6 * var(--u)); min-width: 0; }
+.fl-home__hero > .fl-eyebrow { color: var(--fog-4); }
+.fl-home__wordmark { --wm-size: clamp(calc(2.8 * var(--u)), 4.6vw, calc(5.6 * var(--u))); margin: 0 0 calc(.3 * var(--u)) calc(-.06 * var(--wm-size)); animation: fl-flicker 1.4s var(--ease-out) both; }
+.fl-home__tag { max-width: calc(29 * var(--u)); font-size: var(--t-md); text-wrap: pretty; }
+.fl-home__notice { display: flex; align-items: center; gap: .6em; padding: calc(.55 * var(--u)) calc(.9 * var(--u)); border: 1px solid rgba(255, 217, 155, .35); border-radius: var(--r-2); background: rgba(243, 174, 91, .1); font-size: var(--t-sm); color: var(--dawn-4); animation: fl-rise-in var(--dur-3) var(--ease-out) both; }
+.fl-home__notice .li { color: var(--dawn-3); }
+
+.fl-home__cta { display: flex; flex-wrap: wrap; align-items: center; gap: calc(.9 * var(--u)) calc(1.4 * var(--u)); margin: calc(.6 * var(--u)) 0 calc(.4 * var(--u)) 8px; }
+.fl-home__cta .fl-landing__play { min-width: calc(15 * var(--u)); }
+.fl-home__cta2 { display: grid; gap: calc(.5 * var(--u)); justify-items: start; }
+.fl-home__phone { display: none; }
+
+/* ---- cards ---- */
+.fl-home__card { padding: calc(1 * var(--u)) calc(1.1 * var(--u)) calc(1.05 * var(--u)); min-width: 0; animation: fl-rise-in var(--dur-3) var(--ease-out) both; }
+.fl-home__head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin-bottom: calc(.7 * var(--u)); min-width: 0; }
+.fl-home__head h2 { margin: 0; font: 600 var(--t-xs)/1.2 var(--font-display); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--fog-4); white-space: nowrap; }
+.fl-home__live { display: inline-flex; align-items: center; gap: .55em; font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: .1em; text-transform: uppercase; color: var(--paper-2); white-space: nowrap; }
+.fl-home__live b { font: 600 var(--t-md)/1 var(--font-display); letter-spacing: .02em; color: var(--paper); }
+.fl-home__empty { margin: 0; padding: calc(.5 * var(--u)) 0; font-size: var(--t-sm); color: var(--fog-3); }
+
+/* my progress */
+.fl-home__progress { width: min(100%, calc(27 * var(--u))); margin-top: calc(.6 * var(--u)); }
+.fl-home__me { display: flex; align-items: center; gap: calc(.9 * var(--u)); min-width: 0; }
+.fl-home__me .fl-face { width: calc(3.2 * var(--u)); height: calc(3.2 * var(--u)); }
+.fl-home__me > div { min-width: 0; }
+.fl-home__me b { display: block; font: 600 var(--t-lg)/1.15 var(--font-display); letter-spacing: .02em; color: var(--paper); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-home__me span { display: block; font-size: var(--t-xs); color: var(--fog-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-home__title { color: var(--dawn-3); }
+.fl-home__xp { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: calc(.6 * var(--u)); margin: calc(.85 * var(--u)) 0 calc(.75 * var(--u)); font: 600 var(--t-xs)/1 var(--font-mono); color: var(--fog-4); }
+.fl-home__xp .fl-bar { --c: var(--xp); }
+.fl-home__stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: calc(.45 * var(--u)) var(--sp-4); margin: 0; }
+.fl-home__stats > div { display: flex; align-items: center; gap: .5em; min-width: 0; font-size: var(--t-xs); color: var(--fog-3); white-space: nowrap; }
+.fl-home__stats dt { display: inline-flex; align-items: center; gap: .45em; }
+.fl-home__stats dd { margin: 0 0 0 auto; font: 600 var(--t-sm)/1 var(--font-mono); color: var(--paper); }
+.fl-home__stats .px { width: calc(1.1 * var(--u)); height: calc(1.1 * var(--u)); }
+.fl-home__stats .li { color: var(--fog-4); }
+.fl-home__guest { margin: calc(.75 * var(--u)) 0 0; font-size: var(--t-xs); color: var(--fog-3); }
+
+/* right column: online + leaderboard over the worlds */
+.fl-home__side { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); grid-template-areas: "online board" "worlds worlds"; gap: calc(1 * var(--u)); min-width: 0; }
+.fl-home__online { grid-area: online; }
+.fl-home__board { grid-area: board; display: flex; flex-direction: column; }
+.fl-home__worlds { grid-area: worlds; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: calc(.8 * var(--u)); }
+
+/* online now */
+.fl-home__onlist { display: grid; gap: calc(.15 * var(--u)); margin: 0; padding: 0; list-style: none; }
+.fl-home__onlist li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "dot w n" "dot who n"; column-gap: calc(.7 * var(--u)); row-gap: calc(.1 * var(--u)); align-items: center; padding: calc(.45 * var(--u)) calc(.2 * var(--u)); border-bottom: 1px solid var(--line-1); }
+.fl-home__onlist li:last-child { border-bottom: 0; }
+.fl-home__onlist .dot { grid-area: dot; width: 8px; height: 8px; border-radius: 50%; background: var(--c); box-shadow: 0 0 10px var(--c); }
+.fl-home__onlist .w { grid-area: w; font: 600 var(--t-sm)/1.2 var(--font-display); letter-spacing: .08em; text-transform: uppercase; color: var(--paper); }
+.fl-home__onlist .n { grid-area: n; font: 600 var(--t-xl)/1 var(--font-display); color: var(--paper); }
+.fl-home__onlist .n.is-zero { color: var(--fog-1); }
+.fl-home__onlist .who { grid-area: who; font-size: var(--t-xs); line-height: 1.35; color: var(--fog-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-home__worldc--portus, .fl-home__onlist .is-portus { --c: var(--portus); }
+.fl-home__worldc--arcadia, .fl-home__onlist .is-arcadia { --c: var(--arcadia); }
+.fl-home__worldc--hollowmere, .fl-home__onlist .is-hollowmere { --c: var(--hollowmere); }
+.fl-home__worldc--meridian, .fl-home__onlist .is-meridian { --c: var(--meridian); }
+
+/* leaderboard */
+.fl-home__board .fl-home__head { flex-wrap: wrap; row-gap: calc(.4 * var(--u)); }
+.fl-home__tabs { gap: calc(1 * var(--u)); border-bottom: 0; }
+.fl-home__tabs .fl-tab { padding: calc(.35 * var(--u)) 0; }
+.fl-home__boardbody { max-height: calc(14.5 * var(--u)); overflow-y: auto; scrollbar-width: thin; margin: 0 calc(-.3 * var(--u)); padding: 0 calc(.3 * var(--u)); }
+.fl-home__rows { display: grid; margin: 0; padding: 0; list-style: none; }
+.fl-home__rows li { display: grid; grid-template-columns: calc(1.6 * var(--u)) auto minmax(0, 1fr) auto; align-items: center; gap: calc(.6 * var(--u)); min-height: calc(2.3 * var(--u)); padding: calc(.2 * var(--u)) 0; border-bottom: 1px solid var(--line-1); font-size: var(--t-sm); }
+.fl-home__rows li:last-child { border-bottom: 0; }
+.fl-home__rows .rank { font: 600 var(--t-sm)/1 var(--font-mono); color: var(--fog-2); text-align: right; }
+.fl-home__rows li:nth-child(1) .rank { color: var(--hero-gold); }
+.fl-home__rows li:nth-child(2) .rank { color: var(--paper-2); }
+.fl-home__rows li:nth-child(3) .rank { color: var(--dawn-1); }
+.fl-home__rows .icon { display: grid; place-items: center; width: calc(1.7 * var(--u)); height: calc(1.7 * var(--u)); border: 1px solid rgba(255, 243, 220, .3); border-radius: 3px; background: rgba(0, 0, 0, .35); }
+.fl-home__rows .icon .px { width: 80%; height: 80%; }
+.fl-home__rows .name { min-width: 0; color: var(--paper); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-home__rows .name small { margin-left: .5em; font-size: var(--t-xs); color: var(--dawn-3); }
+.fl-home__rows .val { font: 600 var(--t-sm)/1 var(--font-mono); color: var(--paper); white-space: nowrap; }
+.fl-home__rows .val small { font: 500 var(--t-xs)/1 var(--font-body); color: var(--fog-3); }
+.fl-home__rows li.is-open .name, .fl-home__rows li.is-open .val { color: var(--fog-2); }
+.fl-home__rows li.is-open .icon { opacity: .45; }
+
+/* worlds */
+.fl-home__world { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: calc(.35 * var(--u)); padding: calc(.85 * var(--u)) calc(.9 * var(--u)) calc(.8 * var(--u)); min-width: 0; overflow: hidden; }
+.fl-home__world::after { content: ""; position: absolute; inset: auto 0 0 0; height: 2px; background: linear-gradient(90deg, transparent, var(--c), transparent); opacity: .7; }
+.fl-home__wtop { display: flex; align-items: center; gap: calc(.7 * var(--u)); min-width: 0; }
+.fl-home__wtop h3 { margin: 0; font: 500 var(--t-lg)/1.05 var(--font-display); letter-spacing: .04em; color: var(--paper); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-home__wtop small { display: block; margin-top: .2em; font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: .1em; text-transform: uppercase; color: var(--c); white-space: nowrap; }
+.fl-home__blurb { margin: 0; font-size: var(--t-xs); line-height: 1.4; color: var(--fog-3); }
+.fl-home__wmeta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: calc(.3 * var(--u)) calc(.6 * var(--u)); font-size: var(--t-xs); color: var(--fog-4); }
+.fl-home__wmeta span { display: inline-flex; align-items: center; gap: .4em; white-space: nowrap; }
+.fl-home__wmeta .px { width: calc(1 * var(--u)); height: calc(1 * var(--u)); }
+.fl-home__wmeta b { font: 600 var(--t-sm)/1 var(--font-display); color: var(--paper); }
+
+/* The planet "image": a lit sphere in the world's colours (no image files). */
+.fl-planet { position: relative; flex: none; width: calc(2.9 * var(--u)); height: calc(2.9 * var(--u)); border-radius: 50%; background: var(--pl); box-shadow: 0 0 calc(1.1 * var(--u)) -2px var(--glow), inset calc(-.55 * var(--u)) calc(-.45 * var(--u)) calc(.9 * var(--u)) rgba(0, 0, 0, .65); }
+.fl-planet::after { content: ""; position: absolute; inset: -3px; border-radius: 50%; box-shadow: inset 2px 2px 3px -1px rgba(255, 255, 255, .35); }
+.fl-planet--portus { --glow: rgba(242, 195, 139, .55); --pl: radial-gradient(circle at 32% 30%, #fff1d6 0 6%, transparent 7%), radial-gradient(circle at 60% 58%, #9b6f4b 0 9%, transparent 10%), radial-gradient(circle at 38% 34%, #f6d7a7, #d39a62 45%, #6b4328 100%); }
+.fl-planet--arcadia { --glow: rgba(56, 207, 192, .5); --pl: radial-gradient(ellipse 40% 22% at 58% 56%, #1b7f94 0 70%, transparent 72%), radial-gradient(circle at 35% 35%, #9df0c4, #38cfa0 45%, #0e4f43 100%); }
+.fl-planet--hollowmere { --glow: rgba(139, 111, 214, .55); --pl: radial-gradient(ellipse 34% 20% at 40% 62%, #3fb8a0 0 60%, transparent 64%), radial-gradient(circle at 35% 35%, #c3a6ec, #7a5ba6 45%, #251839 100%); }
+.fl-planet--meridian { --glow: rgba(210, 85, 58, .55); --pl: repeating-linear-gradient(170deg, transparent 0 7px, rgba(60, 14, 8, .25) 7px 9px), radial-gradient(circle at 35% 35%, #f5b08c, #d2553a 45%, #4a1a12 100%); }
+
+/* ---- foot: share row, visits, credits ---- */
+.fl-home__foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-3) var(--sp-5); }
+.fl-home__visits { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .3em .6em; font-size: var(--t-xs); color: var(--fog-3); }
+.fl-home__visits b { font: 600 var(--t-sm)/1 var(--font-mono); color: var(--paper); }
+.fl-home__visits i.sep { width: 3px; height: 3px; border-radius: 50%; background: var(--fog-2); }
+.fl-home__visits .note { color: var(--fog-2); }
+.fl-home__credit { font-size: var(--t-xs); }
+
+/* Hide-UI (the share row's eye): only the backdrop and the share row stay. */
+.fl-home.is-bare .fl-home__top, .fl-home.is-bare .fl-home__main, .fl-home.is-bare .fl-home__visits, .fl-home.is-bare .fl-home__credit { visibility: hidden; }
+.fl-home.is-bare .fl-fly { filter: none; }
+
+/* ---- narrower laptops: hero on top, cards below ---- */
+@media (max-width: 1080px) {
+  .fl-home__main { grid-template-columns: minmax(0, 1fr); gap: calc(1.4 * var(--u)); }
+  .fl-home__hero { padding-top: var(--sp-3); }
+}
+
+/* ---- phones (and touch-only tablets): the same cards, "Play on your computer" instead of Play ---- */
+@media (max-width: 760px), (pointer: coarse) and (hover: none) {
+  .fl-home__page { padding: 14px 14px 18px; gap: 16px; }
+  .fl-home__hero { align-items: stretch; padding-top: 0; gap: 10px; }
+  .fl-home__hero > .fl-eyebrow, .fl-home__wordmark { align-self: center; }
+  .fl-home__wordmark { --wm-size: clamp(30px, 10.5vw, 56px); margin: 4px 0; }
+  .fl-home__tag { align-self: center; text-align: center; font-size: var(--t-sm); }
+  .fl-home__cta { display: none; }
+  .fl-home__phone { display: block; }
+  .fl-home__phone .fl-phone-card { width: 100%; padding: 18px 16px 16px; }
+  .fl-home__phone .fl-phone-card h2 { font-size: var(--t-lg); }
+  .fl-home__progress { width: 100%; }
+  .fl-home__side { grid-template-columns: minmax(0, 1fr); grid-template-areas: "online" "board" "worlds"; }
+  .fl-home__worlds { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .fl-home__world { padding: 12px; }
+  .fl-home__blurb { display: none; }
+  .fl-home__boardbody { max-height: none; }
+  .fl-home__foot { flex-direction: column; align-items: center; text-align: center; }
+  .fl-home__credit { justify-content: center; }
+  .fl-home__mark { --wm-size: 13px; }
+  .fl-home .fl-fly__planet--arcadia { width: 64px; height: 64px; right: -18px; top: 76px; }
+  .fl-home .fl-fly__planet--hollowmere { width: 34px; height: 34px; left: -10px; top: 300px; }
+  .fl-home .fl-fly__planet--meridian { display: none; }
+}
