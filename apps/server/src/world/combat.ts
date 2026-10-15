@@ -208,6 +208,8 @@ interface RayTargetHit {
   actor: Actor;
   t: number;
   weak: boolean;
+  /** Distance along the ray to the middle of the actor (its point nearest the capsule axis). */
+  deep: number;
 }
 
 /** Weak-point multiplier: the NPC's own (bosses) or the weapon's headshot multiplier. */
@@ -227,7 +229,7 @@ function raycastActors(host: CombatHost, o: V3, d: V3, maxT: number, ignore: Set
     if (hit && (!best || hit.t < best.t)) {
       // NPCs with weak-point volumes (bosses) decide for themselves where the weak spot is.
       const weak = a.kind === "player" ? hit.heightAboveFeet >= HEAD_FROM : a.weakPoint ? a.weakPoint(o, d, hit.t) : hit.heightAboveFeet >= h * 0.8;
-      best = { actor: a, t: hit.t, weak };
+      best = { actor: a, t: hit.t, weak, deep: hit.deep };
     }
   };
   for (const p of host.players()) if (!p.dead) test(p, PLAYER_RADIUS, PLAYER_HEIGHT);
@@ -319,8 +321,7 @@ export function fire(host: CombatHost, p: PlayerActor, msg: FireInput): FireResu
       // The camera ray only chooses the aim point; damage is traced from the authoritative muzzle,
       // so a camera behind cover can't shoot through it.
       const maxR = def.falloffTo ?? def.range;
-      const aimT = Math.min(maxR, rayTerrain(host.terrain, o, d, maxR, 1.5), aimActorT(host, p, o, d, maxR), propOnRay(host, o, d, maxR, behind(o, d, head))?.t ?? Infinity);
-      const aim: V3 = [o[0] + d[0] * aimT, o[1] + d[1] * aimT, o[2] + d[2] * aimT];
+      const aim = aimPoint(host, p, o, d, maxR, head, 1.5);
       const muzzle = head;
       let base: V3 = [aim[0] - muzzle[0], aim[1] - muzzle[1], aim[2] - muzzle[2]];
       const bl = Math.hypot(base[0], base[1], base[2]) || 1;
@@ -350,9 +351,8 @@ export function fire(host: CombatHost, p: PlayerActor, msg: FireInput): FireResu
     case "thrown": {
       const speed = def.delivery === "arrow" ? 25 + 30 * charge : (def.speed ?? 30);
       const dmg = def.delivery === "arrow" ? ((tier.tap ?? tier.damage) + (tier.damage - (tier.tap ?? tier.damage)) * charge) * lvl : tier.damage * lvl;
-      // Spawn from the shooter's hand, aimed at where the camera ray points.
-      const aimT = Math.min(def.range, rayTerrain(host.terrain, o, d, def.range, 2), propOnRay(host, o, d, def.range, behind(o, d, head))?.t ?? Infinity);
-      const aim: V3 = [o[0] + d[0] * aimT, o[1] + d[1] * aimT, o[2] + d[2] * aimT];
+      // Spawn from the shooter's hand, aimed at what the camera ray points at (as far as it flies).
+      const aim = aimPoint(host, p, o, d, def.range * 1.2, head, 2);
       const hand: V3 = [head[0], head[1], head[2]];
       let dir: V3 = [aim[0] - hand[0], aim[1] - hand[1], aim[2] - hand[2]];
       const l = Math.hypot(dir[0], dir[1], dir[2]) || 1;
@@ -412,10 +412,19 @@ function jitter(d: V3, deg: number, rand: () => number): V3 {
   return [d[0] * c + ux * cp + vx * sp, d[1] * c + uy * cp + vy * sp, d[2] * c + uz * cp + vz * sp];
 }
 
-/** Distance along the camera ray to the first actor (aim assist for choosing the aim point). */
-function aimActorT(host: CombatHost, p: PlayerActor, o: V3, d: V3, maxT: number): number {
-  const hit = raycastActors(host, o, d, maxT, new Set([p.id]), REWIND_MS);
-  return hit ? hit.t : Infinity;
+/**
+ * What the crosshair is on: the first thing along the camera ray (from `o`, already slid to the head,
+ * aimOrigin) within `maxT`: terrain, an intact prop, or an actor as the player saw it (rewound),
+ * which is aimed at through its middle. Shots then leave the head toward this point. Projectiles used
+ * to ignore actors and aim at the ground or sky behind them: with the camera over the right
+ * shoulder, the head-to-there line passed 0.4–0.6 m from the creature under the crosshair, a Hopbit's
+ * whole radius (e2e J3.4: 40 bolts at a Hopbit, no hit). Hitscan aimed at an actor's near surface.
+ */
+function aimPoint(host: CombatHost, p: PlayerActor, o: V3, d: V3, maxT: number, head: V3, terrainStep: number): V3 {
+  let t = Math.min(maxT, rayTerrain(host.terrain, o, d, maxT, terrainStep), propOnRay(host, o, d, maxT, behind(o, d, head))?.t ?? Infinity);
+  const actor = raycastActors(host, o, d, t, new Set([p.id]), REWIND_MS);
+  if (actor) t = actor.deep;
+  return [o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t];
 }
 
 /**
