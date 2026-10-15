@@ -47,7 +47,7 @@ export const pauseExtras = new Set<() => PauseExtra | null>();
 
 const RULES: [sprite: string, title: string, text: string][] = [
   ["heart", "One life", "Die and everything you carry drops in a pile of light. Anyone can loot it."],
-  ["prism", "Pads are safe", "A 12 m ring around every pad: no damage in or out. All of Portus is safe."],
+  ["prism", "Safe zones", "Portus town inside its walls, and a 12 m ring around every pad: no damage in or out. Outside them, creeps and players can hurt you."],
   ["crown", "Bosses need friends", "Bring a friend, watch for the opening, and take them on together."],
 ];
 

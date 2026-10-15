@@ -14,7 +14,7 @@ export const BOOT_STEPS = [
 ] as const;
 
 const BODY_INFO: Record<BodyKey, { name: string; blurb: string }> = {
-  portus: { name: "Portus", blurb: "The hub. Safe everywhere. Three portals, one shop, a wall of first names." },
+  portus: { name: "Portus", blurb: "The hub town: safe inside its walls, creeps outside. Three portals, one shop, a wall of first names." },
   arcadia: { name: "Arcadia", blurb: "Green fields, a turquoise lake and the Brightbits. Levels 1–7." },
   hollowmere: { name: "Hollowmere", blurb: "Violet dusk over the marsh. The Hollow Court walks here. Levels 6–13." },
   meridian: { name: "Meridian", blurb: "Red canyons and chrome towers. Meridian Oversight is watching. Levels 12–20." },
@@ -22,7 +22,7 @@ const BODY_INFO: Record<BodyKey, { name: string; blurb: string }> = {
 
 export const TIPS = [
   "Touch a fast-travel pad to discover it. Discovered pads are one of the few things death doesn't take, along with your name and medals.",
-  "Every pad has a 12 m safe ring: no damage in or out. All of Portus is safe.",
+  "Portus town is safe inside its walls, and every pad has a 12 m safe ring: no damage in or out.",
   "Die and everything you carry drops into a pile of light. It never expires, so you can walk back for it.",
   "Logging out outside a safe zone takes 30 seconds, standing still. On a pad it's instant.",
   "No boss can be beaten alone. Bring friends.",

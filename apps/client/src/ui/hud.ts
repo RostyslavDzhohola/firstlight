@@ -1,5 +1,5 @@
 // In-game HUD (verdict: Entry B): player card (HP, XP, level, coins), hotbar + ammo, crosshair + hit
-// marker, damage numbers, hurt/low-HP vignette, toasts and missions (one column), zone banner, logout
+// marker, damage numbers, hurt/low-HP vignette, toasts and missions (one column), zone label and border banner, logout
 // countdown, pickup prompt, speech bubbles, boss bar and party frames. Plain DOM (D25).
 // Every setter caches what it last wrote, so per-frame calls (setHp, setSafe, setLogout, setPrompt…)
 // touch the DOM only when a value changes; nothing in here reads layout.
@@ -16,6 +16,7 @@ import { uiSettings, type UiSettings } from "./uiSettings.ts";
 import { showSubtitle } from "./subtitle.ts";
 import { showCharacterPick, type CharacterPickOptions } from "./characterPick.ts";
 import { showDeath, type DeathInfo } from "./death.ts";
+import type { ZoneInfo } from "./zoneLabel.ts";
 
 export type YouPlus = YouState & { selected: number; level: number; dead: boolean };
 export type { DamageKind } from "./hudFormat.ts";
@@ -122,7 +123,8 @@ export class Hud {
   private lvlEl!: HTMLElement;
   private nameEl!: HTMLElement;
   private subEl!: HTMLElement;
-  private safeChip!: HTMLElement;
+  /** Zone label (safe / danger), always shown: e2e `[data-e2e="zone-label"]` with `data-zone`. */
+  private zoneChip!: HTMLElement;
   private coinsEl!: HTMLElement;
   private hpRow!: HTMLElement;
   private hpFill!: HTMLElement;
@@ -154,7 +156,7 @@ export class Hud {
 
   // last written values (batching)
   private c = {
-    hp: -1, max: -1, low: false, safe: null as boolean | null, logout: -2, prompt: "\u0000", level: -1, coins: -1,
+    hp: -1, max: -1, low: false, safe: null as boolean | null, zone: "", logout: -2, prompt: "\u0000", level: -1, coins: -1,
     xp: "", wname: "", ammo: "", ranged: null as boolean | null, identity: "", selected: -1,
     boss: "", bossFill: -1, bossNotches: "", party: "", missions: "",
   };
@@ -223,8 +225,9 @@ export class Hud {
     this.nameEl = el("b", "", who, "You");
     const sub = el("span", "", who);
     this.subEl = el("span", "", sub, "");
-    this.safeChip = el("span", "fl-chip fl-chip--photon fl-me__safe", sub, "Safe");
-    this.safeChip.hidden = true;
+    this.zoneChip = el("span", "fl-chip fl-me__zone", sub);
+    this.zoneChip.dataset.e2e = "zone-label";
+    this.zoneChip.hidden = true; // until the first zone arrives
     const purse = el("div", "fl-me__purse num", id);
     sprite("coin", "", purse);
     this.coinsEl = el("span", "", purse, "0");
@@ -398,27 +401,46 @@ export class Hud {
     }
   }
 
-  setSafe(on: boolean) {
+  /** Zone label and, when it flips, the border banner ("Leaving the safe zone" / "Safe zone"). */
+  setZone(z: ZoneInfo) {
+    const key = `${z.zone}|${z.label}|${z.place}`;
+    if (key === this.c.zone) return;
+    this.c.zone = key;
+    const safe = z.zone === "safe";
+    const chip = this.zoneChip;
+    chip.hidden = false;
+    chip.dataset.zone = z.zone;
+    chip.className = `fl-chip fl-me__zone ${safe ? "fl-chip--photon" : "fl-chip--danger"}`;
+    chip.title = `${z.place}: ${safe ? "no damage in or out" : "creeps and other players can hurt you"}`;
+    chip.replaceChildren();
+    icon(safe ? "shield" : "alert", "", chip);
+    el("span", "", chip, z.label);
     const prev = this.c.safe;
-    if (on === prev) return;
-    this.c.safe = on;
-    this.safeChip.hidden = !on;
-    if (prev === null && !on) return; // spawned outside: nothing was left
-    this.showBanner(on);
+    if (prev === safe) return;
+    this.c.safe = safe;
+    if (prev === null && !safe) return; // arrived outside: nothing was left
+    this.showBanner(safe, z.title, z.sub);
   }
 
-  private showBanner(safe: boolean) {
+  /** The zone without a place (gallery, older callers). */
+  setSafe(on: boolean) {
+    this.setZone(on
+      ? { zone: "safe", label: "Safe", place: "Safe zone", title: "Safe zone", sub: "No damage in or out" }
+      : { zone: "danger", label: "Danger", place: "Outside", title: "Leaving the safe zone", sub: "Creeps and other players can hurt you" });
+  }
+
+  private showBanner(safe: boolean, title: string, sub: string) {
     this.banner?.remove();
     const b = el("div", `fl-banner fl-holo ${safe ? "is-safe" : "is-pvp"}`);
     if (safe) icon("shield", "", b);
-    b.append(safe ? "Safe zone" : "Leaving safe zone");
-    el("small", "", b, safe ? "No damage in or out" : "Anyone can hurt you");
+    b.append(title);
+    el("small", "", b, sub);
     this.top.prepend(b);
     this.banner = b;
     window.setTimeout(() => {
       if (this.banner === b) this.banner = null;
       b.remove();
-    }, 2500);
+    }, 3000);
   }
 
   setLogout(endsAt: number | null, serverNow: number) {

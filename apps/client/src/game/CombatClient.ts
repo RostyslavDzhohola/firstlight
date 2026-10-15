@@ -7,10 +7,12 @@ import { HORSE_WHISTLE } from "@firstlight/shared/content/horse";
 import { flags } from "../config.ts";
 import { horsesEnabled, usableAnywhere } from "./mount.ts";
 import { WEAPONS, WEAPON_BY_ID, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
+import { BODIES, zoneAt } from "@firstlight/shared";
 import { PHRASES } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
 import { Effects, weaponColor } from "../render/effects.ts";
 import { Hud, type YouPlus } from "../ui/hud.ts";
+import { zoneInfo } from "../ui/zoneLabel.ts";
 import { PhraseWheel } from "../ui/phraseWheel.ts";
 import type { Game } from "./Game.ts";
 import { showSavePrompt } from "../ui/account.ts";
@@ -21,6 +23,15 @@ const _v = new THREE.Vector3();
 const _head = new THREE.Vector3();
 const _up = new THREE.Vector3();
 const _from = new THREE.Vector3();
+
+/** Why the server refused an attack (`fire` / `melee`), as player-facing text (rate limits stay quiet). */
+const ATTACK_DENIED: Record<string, string> = {
+  "safe zone": "Weapons are holstered in safe zones",
+  protected: "Arrival protection: weapons ready in a moment",
+  swimming: "Can't attack while swimming",
+  mounted: "No weapons from the saddle: E to get off",
+  overheated: "Overheated: cooling down",
+};
 
 /** Why the server refused a `use` (Patchkit, Prism Bubble), as player-facing text. */
 const USE_DENIED: Record<string, string> = {
@@ -50,6 +61,8 @@ export class CombatClient {
   tutorialBusy: (() => boolean) | null = null;
   private readonly saveOffer = new SaveOffer();
   private readonly wheel: PhraseWheel;
+  /** Last time each refusal was shown (one toast per reason per 1.5 s, not one per shot). */
+  private readonly deniedAt = new Map<string, number>();
 
   constructor(private readonly game: Game) {
     this.effects = new Effects(game.ctx.scene);
@@ -78,6 +91,12 @@ export class CombatClient {
       if (m.reason === "level gate") this.hud.toast("Your level is too low to use that tier", "warn");
       else if (m.action === "logout") this.hud.toast("Can't log out in combat — wait 10 s", "warn");
       else if (m.action === "use" && USE_DENIED[m.reason]) this.hud.toast(USE_DENIED[m.reason]!, "warn");
+      else if ((m.action === "fire" || m.action === "melee") && ATTACK_DENIED[m.reason]) {
+        const now = performance.now();
+        if (now - (this.deniedAt.get(m.reason) ?? -Infinity) < 1500) return;
+        this.deniedAt.set(m.reason, now);
+        this.hud.toast(m.reason === "safe zone" ? this.holsteredText() : ATTACK_DENIED[m.reason]!, "warn");
+      }
     });
     // Support items: Patchkit channel (server-timed; damage interrupts it) and Prism Bubbles.
     room.onMessage("channel", (m: { kind: string; ms: number; target: string }) => {
@@ -240,7 +259,9 @@ export class CombatClient {
     if (meState) {
       g.hud.setHp(meState.hp, meState.maxHp);
       g.hud.setIdentity(meState.name, meState.starter, meState.palette);
-      g.hud.setSafe(!!(meState.flags & PF.SAFE));
+      // The label shows what the server enforces (its flag); the shared zone function says where.
+      const p = g.player.pos;
+      g.hud.setZone(zoneInfo(g.bodyId, zoneAt(BODIES[g.bodyId], p.x, p.y, p.z), !!(meState.flags & PF.SAFE)));
       g.hud.setLogout(g.hud.you?.logoutEndsAt ?? null, Date.now() + g.net.serverOffset);
     }
     this.updatePickupPrompt();
@@ -350,7 +371,7 @@ export class CombatClient {
     // Safe zones holster weapons; support items still work there (the server takes them anywhere).
     if (meState && meState.flags & PF.SAFE && !usableAnywhere(def)) {
       if (this.training?.(def, t, now)) return; // onboarding: the Portus training dummies take swings
-      if (input.lmbPressed) g.hud.toast("Weapons are holstered in safe zones", "warn");
+      if (input.lmbPressed) g.hud.toast(this.holsteredText(), "warn");
       return;
     }
     const semi = def.delivery !== "hitscan" || def.id === "stillshot";
@@ -395,6 +416,11 @@ export class CombatClient {
       g.audio.play(def.id in { carbine: 1, scatterpipe: 1, stillshot: 1, stormcoil: 1 } ? def.id : "carbine");
       this.effects.flash(muzzle, color, 0.3);
     }
+  }
+
+  /** The safe-zone refusal, with the way out of this zone. */
+  private holsteredText(): string {
+    return this.game.bodyId === "portus" ? "Weapons are holstered in town: head out of the gates to fight" : "Weapons are holstered on the pad: step out of the ring to fight";
   }
 
   /** The live player nearest the crosshair ray within `range` metres of us (Patchkit target), or null. */
