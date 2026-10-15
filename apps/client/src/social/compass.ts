@@ -1,10 +1,10 @@
 // Compass strip at the top of the HUD: N/E/S/W relative to the camera, party members on the same
-// body, the nearest safe pad (its 12 m ring) while you're outside safe zones, and your waypoint
-// (ui/waypoint.ts) with its distance.
+// body, the way back to safety while you're outside safe zones (the nearest pad's 12 m ring, or on
+// Portus the nearest town gate: shared zones.ts), and your waypoint (ui/waypoint.ts) with its distance.
 
-import { BODIES, padDirs, PAD_SAFE_RADIUS, type BodyId } from "@firstlight/shared";
+import { BODIES, nearestSafeEntry, type BodyId } from "@firstlight/shared";
 import { el } from "./dom.ts";
-import { bearingTo, headingOf, nearestDir, stripX, surfaceDistance, type V3 } from "./compassMath.ts";
+import { bearingTo, headingOf, stripX, surfaceDistance, type V3 } from "./compassMath.ts";
 
 const HALF_SPAN = 95; // degrees visible either side of centre
 const CARDINALS: [number, string][] = [[0, "N"], [45, "NE"], [90, "E"], [135, "SE"], [180, "S"], [225, "SW"], [270, "W"], [315, "NW"]];
@@ -76,18 +76,17 @@ export class Compass {
     for (const t of this.ticks) place(t, Number(t.dataset.deg) - heading);
     for (const c of this.cards) place(c.e, c.deg - heading);
 
-    // Nearest safe pad (planets only; Portus is safe everywhere).
+    // The way back to safety: the nearest pad's ring, or a Portus town gate.
     const def = BODIES[body];
-    if (def.terrain.kind === "hub" || safe) this.pad.style.display = "none";
+    if (safe) this.pad.style.display = "none";
     else {
-      const dirs = padDirs(def) as readonly V3[];
-      const i = nearestDir(pos, dirs);
-      const d = dirs[i]!;
+      const entry = nearestSafeEntry(def, pos[0], pos[1], pos[2]);
+      const d = entry.dir;
       const R = def.radius;
       const target: V3 = [d[0] * R, d[1] * R, d[2] * R];
       const clamped = place(this.pad, bearingTo(pos, forward, target), false);
       this.pad.classList.toggle("edge", clamped);
-      this.padText.textContent = `SAFE ${Math.max(0, Math.round(surfaceDistance(pos, target, R) - PAD_SAFE_RADIUS))} m`;
+      this.padText.textContent = `SAFE ${Math.max(0, Math.round(surfaceDistance(pos, target, R) - entry.edge))} m`;
     }
 
     // Waypoint: always shown, pinned to the strip's end when it's behind you.

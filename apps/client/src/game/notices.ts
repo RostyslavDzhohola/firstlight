@@ -1,5 +1,8 @@
 // Player-facing text for the server's attack refusals (`denied {action: "fire" | "melee", reason}`),
-// and a gate so a held attack button shows each notice once, not at the weapon's fire rate.
+// and a gate so a held attack button shows each notice once, not at the weapon's fire rate. The
+// client's own safe-zone holster check uses the same text and gate, so one press shows one notice.
+
+import type { BodyId } from "@firstlight/shared";
 
 const ATTACK_DENIED: Record<string, string> = {
   "safe zone": "Weapons are holstered in safe zones",
@@ -11,9 +14,17 @@ const ATTACK_DENIED: Record<string, string> = {
   empty: "Reloading…",
 };
 
+/** The safe-zone refusal with the way out of this zone (D-zones-1): the town's gates, or the pad's ring. */
+export function holsteredText(body: BodyId | null | undefined): string {
+  if (body === "portus") return "Weapons are holstered in town: head out of the gates to fight";
+  if (body) return "Weapons are holstered on the pad: step out of the ring to fight";
+  return ATTACK_DENIED["safe zone"]!;
+}
+
 /** The notice for a refused attack, or null (not an attack, or a reason players needn't see, like the rate limit). */
-export function attackDeniedText(action: string, reason: string): string | null {
+export function attackDeniedText(action: string, reason: string, body?: BodyId): string | null {
   if (action !== "fire" && action !== "melee") return null;
+  if (reason === "safe zone") return holsteredText(body);
   return ATTACK_DENIED[reason] ?? null;
 }
 

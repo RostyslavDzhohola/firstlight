@@ -4,6 +4,7 @@
 
 import { NF, NPC_ANIM, SHAPE_CODE, attackDamage, type AttackDef, type NpcAttackMsg, type StatusEffect } from "@firstlight/shared/content/npcs";
 import { actorPos, positionAgo, type PlayerActor } from "../actors.ts";
+import { wallBetween } from "../combat.ts";
 import { PLAYER_RADIUS, rayTerrain, type V3 } from "../geometry.ts";
 import type { LivePlayer, NpcSystem } from "./NpcSystem.ts";
 import { MODE, type ActiveAttack, type Npc } from "./npc.ts";
@@ -73,14 +74,17 @@ export function chest(p: V3, h = 0.9): V3 {
   return [p[0] + u[0] * h, p[1] + u[1] * h, p[2] + u[2] * h];
 }
 
-/** Line of sight from one point to another: terrain, intact breakable props and arena cover block it. */
+/** Line of sight from one point to another: terrain, intact breakable props, arena cover and the town's structures block it. */
 export function canSee(sys: NpcSystem, from: V3, to: V3): boolean {
   const d = sub(to, from);
   const l = len(d);
   if (l < 1) return true;
   const dir: V3 = [d[0] / l, d[1] / l, d[2] / l];
   if (rayTerrain(sys.world.terrain, from, dir, l, 2.5) < l - 0.75) return false;
-  // Cover works both ways (F12): the walls that stop players' shots hide them from NPCs too.
+  // Cover works both ways (F12): the walls that stop players' shots hide them from NPCs too, and so
+  // do the Portus town's walls and buildings (D-zones-3).
+  const walls = sys.world.host.walls;
+  if (walls && walls.raycast(from[0], from[1], from[2], dir[0], dir[1], dir[2], l - 0.75) < l - 0.75) return false;
   return !sys.world.host.props?.raycast(from, dir, l - 0.75);
 }
 
@@ -299,10 +303,16 @@ function fromDirOf(n: Npc, p: V3): V3 {
   return sub(n.pos, p);
 }
 
-/** `src`: where splash comes from (lobbed circles), so a Prism Bubble between it and a player stops it. */
+/**
+ * `src`: where splash comes from (lobbed circles), so a Prism Bubble between it and a player stops it.
+ * A town structure between the strike's source (the splash, else the NPC's chest) and the player's
+ * chest stops it too (D-zones-3); breakable props keep their old rule (they don't).
+ */
 function hitAll(sys: NpcSystem, n: Npc, list: LivePlayer[], a: AttackDef, at: ActiveAttack, from?: V3, src?: V3) {
+  const o = sys.world.host.walls ? (src ?? chest(n.pos, Math.min(n.height * 0.8, 2))) : null;
   for (const lp of list) {
     if (n.boss && sys.boss && sys.boss.blocked(n.pos, lp.pos, a)) continue;
+    if (o && wallBetween(sys.world.host, o, chest(lp.pos, 1.1))) continue;
     sys.hitPlayer(n, lp.a, dmgOf(n, a), { fromDir: from ? sub(from, lp.pos) : fromDirOf(n, lp.pos), knockback: a.knockback, effect: a.effect, ...(src ? { src } : {}) });
     at.hitIds.add(lp.a.id);
   }
@@ -531,7 +541,12 @@ export function stepNpcProjectiles(sys: NpcSystem, now: number, dt: number) {
     // players' shots; only players in front of it can still be hit.
     const step0 = sub(next, pr.pos);
     const sl = len(step0);
-    const wall = sl > 0 ? sys.world.host.props?.raycast(pr.pos, scale(step0, 1 / sl), sl) : null;
+    const dir0 = sl > 0 ? scale(step0, 1 / sl) : step0;
+    const propT = sl > 0 ? (sys.world.host.props?.raycast(pr.pos, dir0, sl)?.t ?? Infinity) : Infinity;
+    // …and so does a town structure (D-zones-3).
+    const walls = sys.world.host.walls;
+    const wallT = sl > 0 && walls ? walls.raycast(pr.pos[0], pr.pos[1], pr.pos[2], dir0[0], dir0[1], dir0[2], Math.min(sl, propT)) : Infinity;
+    const wall = Math.min(propT, wallT) < Infinity ? { t: Math.min(propT, wallT) } : null;
     if (wall) next = add(pr.pos, step0, Math.max(0, wall.t - pr.radius) / sl);
     let gone = !!wall;
     // Nearest first along what's left of this step: the first player the bolt reaches, or a Prism

@@ -68,7 +68,7 @@ export function renderWorlds(online: HomeOnline | null): void {
     } else {
       const s = el("span", "", meta);
       icon("shield", "", s);
-      s.append("No fighting");
+      s.append("Safe inside the walls");
     }
     const p = el("span", "", meta);
     el("b", "num", p, online ? fmtNum(w.players) : "–");

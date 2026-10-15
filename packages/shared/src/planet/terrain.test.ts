@@ -3,7 +3,8 @@ import { mulberry32 } from "../rng.ts";
 import { BODIES, BODY_IDS } from "./bodies.ts";
 import { buildChunk } from "./chunk.ts";
 import { chunkOf, faceOf, gridDir, type Face } from "./cubesphere.ts";
-import { anchorDir, isSafe, padDirs, PAD_SAFE_RADIUS } from "./pads.ts";
+import { anchorDir, padDirs, PAD_SAFE_RADIUS } from "./pads.ts";
+import { isSafe } from "./zones.ts";
 import { createNoise3, fbm } from "../noise.ts";
 import { createTerrain, PORTUS_TOWN_FLAT } from "./terrain.ts";
 

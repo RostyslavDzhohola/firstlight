@@ -11,7 +11,7 @@ import type { V3 } from "../geometry.ts";
 import { cancelAttack, canSee, chest, groundOnly, isMelee, meleeHeightTol, startAttack, updateAttack } from "./attacks.ts";
 import type { NpcSystem } from "./NpcSystem.ts";
 import { MODE, type Npc } from "./npc.ts";
-import { feetHeight, nearSafeRing, step } from "./steer.ts";
+import { feetHeight, nearSafeRing, slideAngle, step } from "./steer.ts";
 import { NPC_TUNING, emitNpcEvent } from "./tuning.ts";
 import { add, cross, dist, dot, flatDist, len, normalize, rotateAboutUp, stableTangentAt, sub, tangentDir, tangentize, up } from "./vec.ts";
 
@@ -560,9 +560,12 @@ export function moveDir(sys: NpcSystem, n: Npc, dir: V3, speed: number, dt: numb
     n.facing = d;
   }
   const out: V3 = [0, 0, 0];
-  const used = step(sys.ground, n.pos, d, speed * dt, n.def.locomotion, n.def.hover ?? 0, n.radius, out, avoidSafe);
+  const used = step(sys.ground, n.pos, d, speed * dt, n.def.locomotion, n.def.hover ?? 0, n.radius, out, avoidSafe, n.slideSide);
   sys.setAnim(n, anim);
   if (used < 0) return false;
+  // Round a structure: keep turning to the side that worked (straight on or straight back keeps it).
+  const ang = slideAngle(sys.ground, used, n.slideSide);
+  if (ang !== 0 && Math.abs(ang) !== 180) n.slideSide = Math.sign(ang);
   n.pos = out;
   return true;
 }

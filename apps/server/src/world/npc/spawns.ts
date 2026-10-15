@@ -2,11 +2,12 @@
 // (named areas raise the density and pick their own tables), plus fixed camps at named POIs and
 // fixed singles (beasts, sentinels, egg NPCs). Same body → same points in every room copy.
 
-import { CHUNK_QUADS, gridDir, hash01, hash4, padDirs, type Face, type Terrain } from "@firstlight/shared";
+import { CHUNK_QUADS, gridDir, hash01, hash4, nearSafeZone, padDirs, tangentFrame, type Face, type Terrain } from "@firstlight/shared";
+import { townDir } from "@firstlight/shared/planet/townFrame";
 import { resolveAreaDir, stableTangent, walk, type ArenaLayout } from "@firstlight/shared/content/arenas";
 import {
-  NPC_AREAS, NPC_DEFS, NPC_INDEX, NPC_RULES, PLANET_WILDS, defLevels, npcDef,
-  type CampChest, type NpcArea, type PlanetId, type SpawnGroupDef,
+  ARRIVAL_GROUPS, NPC_AREAS, NPC_DEFS, NPC_INDEX, NPC_RULES, PLANET_WILDS, PORTUS_WILDS, defLevels, npcDef,
+  type CampChest, type FixedMember, type NpcArea, type PlanetId, type SpawnGroupDef,
 } from "@firstlight/shared/content/npcs";
 import type { V3 } from "../geometry.ts";
 import { cross } from "./vec.ts";
@@ -40,6 +41,8 @@ const MIN_PAD_DIST = 40;
 /** Hostile homes include room for member offsets and wandering toward the arrival pad. */
 const MIN_HOSTILE_PAD_DIST = 45;
 const MIN_POINT_DIST = 28;
+/** Fixed groups (Portus, arrival groups): members stand this far from the home at most. */
+const FIXED_SPREAD = 4;
 /** Named areas get one group per this many square metres × density. */
 const AREA_M2_PER_GROUP = 6000;
 
@@ -107,9 +110,53 @@ function pickGroup(groups: SpawnGroupDef[], r: number): SpawnGroupDef | null {
   return groups[groups.length - 1]!;
 }
 
+/** Members of a fixed group around its home: the first in the middle, the rest on a small ring. */
+function fixedMembers(list: readonly FixedMember[]): SpawnMember[] {
+  const total = list.reduce((s, m) => s + m.count, 0);
+  const out: SpawnMember[] = [];
+  for (const m of list) {
+    for (let k = 0; k < m.count; k++) {
+      const i = out.length;
+      const ang = (i / total) * Math.PI * 2 + 0.4;
+      const rad = i === 0 ? 0 : 2.5 + (i % 2) * 1.5;
+      out.push({ def: NPC_INDEX.get(m.kind)!, level: m.level, a: Math.cos(ang) * rad, b: Math.sin(ang) * rad });
+    }
+  }
+  return out;
+}
+
+const roamOf = (members: readonly SpawnMember[]) => (members.some((m) => NPC_DEFS[m.def]!.family === "woolback") ? 14 : 10);
+
+/**
+ * Portus outside the town walls (D-zones-1): the fixed PORTUS_WILDS groups. A hostile group whose
+ * members could wander to within the NPC margin of the town is left out (npc-spawns.test.ts keeps
+ * the list clean).
+ */
+function portusPoints(terrain: Terrain): SpawnPoint[] {
+  const body = terrain.body;
+  const R = body.radius;
+  const points: SpawnPoint[] = [];
+  for (const g of PORTUS_WILDS) {
+    const members = fixedMembers(g.members);
+    const roam = roamOf(members);
+    const d = townDir(g.east, g.north, R);
+    const dir: V3 = [d[0], d[1], d[2]];
+    // Hostiles keep their whole wander room clear of the town (like the 45 m pad rule); grazers only
+    // need their spread: steering keeps every NPC out of the town either way.
+    const hostile = members.some((m) => NPC_DEFS[m.def]!.temper === "hostile");
+    const keep = NPC_RULES.safeMargin + FIXED_SPREAD + (hostile ? roam : 0) + Math.max(...members.map((m) => NPC_DEFS[m.def]!.radius));
+    const r0 = R + terrain.groundHeight(dir[0], dir[1], dir[2]);
+    if (nearSafeZone(body, dir[0] * r0, dir[1] * r0, dir[2] * r0, keep)) continue;
+    const t1 = stableTangent(dir);
+    const t2 = cross(dir, t1);
+    points.push({ id: points.length, kind: "pack", area: null, dir, pos: [dir[0] * r0, dir[1] * r0, dir[2] * r0], t1, t2, members, respawnSec: NPC_RULES.respawnPack, roam });
+  }
+  return points;
+}
+
 export function buildSpawnPoints(terrain: Terrain, arena: ArenaLayout | null): SpawnPoint[] {
   const body = terrain.body;
-  if (body.terrain.kind === "hub") return [];
+  if (body.terrain.kind === "hub") return portusPoints(terrain);
   const planet = body.id as PlanetId;
   const R = body.radius;
   const seed = body.seed;
@@ -160,6 +207,40 @@ export function buildSpawnPoints(terrain: Terrain, arena: ArenaLayout | null): S
     }
     return null;
   };
+
+  // 0. Arrival groups (D-zones-2): in front of the arrival camera at the main pad, on dry ground
+  // with room to graze (no water within 8 m), the hostile pack just outside the 45 m rule.
+  {
+    const { fwd, right } = tangentFrame([main[0], main[1], main[2]]);
+    const dryAround = (d: V3) => {
+      if (!classify(terrain, d).land) return false;
+      const t1 = stableTangent(d);
+      const t2 = cross(d, t1);
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * Math.PI * 2;
+        const q = walk(d, t1, Math.cos(a) * 8, t2, Math.sin(a) * 8, R);
+        if (terrain.groundHeight(q[0], q[1], q[2]) < body.waterLevel + 0.5) return false;
+      }
+      return true;
+    };
+    for (const g of ARRIVAL_GROUPS[planet]) {
+      const members = fixedMembers(g.members);
+      const roam = roamOf(members);
+      let placed = false;
+      for (let k = 0; k <= 36 && !placed; k++) {
+        const off = (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 10; // 0, +10, -10, +20, …
+        const a = ((g.bearing + off) * Math.PI) / 180;
+        for (const m of [g.metres, g.metres + 8, g.metres + 16]) {
+          const d = walk(main, fwd, Math.cos(a) * m, right, Math.sin(a) * m, R);
+          if (!dryAround(d) || !farFromArena(d, 25) || !farFromPoints(d)) continue;
+          if (add({ kind: "pack", area: g.area ?? null, dir: d, members, roam })) {
+            placed = true;
+            break;
+          }
+        }
+      }
+    }
+  }
 
   // 1. Camps at named POIs (one fixed group each).
   for (const { area, dir } of areas) {

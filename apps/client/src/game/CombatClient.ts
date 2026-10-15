@@ -7,10 +7,12 @@ import { HORSE_WHISTLE } from "@firstlight/shared/content/horse";
 import { flags } from "../config.ts";
 import { horsesEnabled, usableAnywhere } from "./mount.ts";
 import { WEAPONS, WEAPON_BY_ID, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
+import { BODIES, zoneAt } from "@firstlight/shared";
 import { PHRASES } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
 import { Effects, weaponColor } from "../render/effects.ts";
 import { Hud, type YouPlus } from "../ui/hud.ts";
+import { zoneInfo } from "../ui/zoneLabel.ts";
 import { PhraseWheel } from "../ui/phraseWheel.ts";
 import type { Game } from "./Game.ts";
 import { openSaveProgress } from "../ui/account.ts";
@@ -18,7 +20,7 @@ import { closeDeath, type DeathInfo } from "../ui/death.ts";
 import { DeathFlow } from "./deathFlow.ts";
 import { offerNudge, offersSave, SaveNudge, saveReady } from "../ui/saveOffer.ts";
 import { saveStatus } from "../net/auth.ts";
-import { attackDeniedText, NoticeGate } from "./notices.ts";
+import { attackDeniedText, holsteredText, NoticeGate } from "./notices.ts";
 
 const NUDGED_KEY = "fl.saveNudged";
 const _v = new THREE.Vector3();
@@ -109,7 +111,7 @@ export class CombatClient {
       else if (m.action === "use" && USE_DENIED[m.reason]) this.hud.toast(USE_DENIED[m.reason]!, "warn");
       else {
         // A refused attack says why (a refused Hexquill bolt used to show nothing at all).
-        const text = attackDeniedText(m.action, m.reason);
+        const text = attackDeniedText(m.action, m.reason, this.game.bodyId);
         if (text && this.deniedGate.allow(text)) this.hud.toast(text, "warn");
       }
     });
@@ -304,7 +306,9 @@ export class CombatClient {
     if (meState) {
       g.hud.setHp(meState.hp, meState.maxHp);
       g.hud.setIdentity(meState.name, meState.starter, meState.palette);
-      g.hud.setSafe(!!(meState.flags & PF.SAFE));
+      // The label shows what the server enforces (its flag); the shared zone function says where.
+      const p = g.player.pos;
+      g.hud.setZone(zoneInfo(g.bodyId, zoneAt(BODIES[g.bodyId], p.x, p.y, p.z), !!(meState.flags & PF.SAFE)));
       g.hud.setLogout(g.hud.you?.logoutEndsAt ?? null, Date.now() + g.net.serverOffset);
     }
     this.updatePickupPrompt();
@@ -427,7 +431,9 @@ export class CombatClient {
     // Safe zones holster weapons; support items still work there (the server takes them anywhere).
     if (meState && meState.flags & PF.SAFE && !usableAnywhere(def)) {
       if (this.training?.(def, t, now)) return; // onboarding: the Portus training dummies take swings
-      if (input.lmbPressed) g.hud.toast("Weapons are holstered in safe zones", "warn");
+      // The same text and gate as the server's "safe zone" refusal: one notice per press (notices.ts).
+      const text = holsteredText(g.bodyId);
+      if (input.lmbPressed && this.deniedGate.allow(text)) g.hud.toast(text, "warn");
       return;
     }
     const semi = def.delivery !== "hitscan" || def.id === "stillshot";

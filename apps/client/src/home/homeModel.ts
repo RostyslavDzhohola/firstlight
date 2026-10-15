@@ -2,7 +2,7 @@
 // text lines, built from shared content and the /api/home and /api/account/me answers. No DOM.
 
 import { BODIES, BODY_IDS, type BodyId } from "@firstlight/shared/planet/bodies";
-import { BOSS_BY_BODY, npcDef } from "@firstlight/shared/content/npcs";
+import { BOSS_BY_BODY, npcDef, PORTUS_WILDS } from "@firstlight/shared/content/npcs";
 import { MEDAL_BY_ID, MEDALS } from "@firstlight/shared/content/medals";
 import { LEVEL_CAP, xpAtLevel, xpToNext } from "@firstlight/shared/content/progression";
 import { PLAQUES, type HallLine } from "@firstlight/shared/content/secrets";
@@ -12,18 +12,23 @@ import type { HomeOnline, HomeVisits } from "@firstlight/shared/net/home";
 // ------------------------------------------------------------------------------------------- worlds
 
 const BLURB: Record<BodyId, string> = {
-  portus: "The castle town between the worlds: shop, portals, Hall of Firsts.",
+  portus: "The castle town between the worlds: shop, portals, Hall of Firsts. Creeps roam outside its walls.",
   arcadia: "Golden meadows round Glasswater Lake, where the Brightbits roam.",
   hollowmere: "Violet dusk over Mourning Mere. The Hollow Court keeps the fen.",
   meridian: "Red canyons and chrome spires, run by Meridian Oversight.",
 };
 const PADS: Record<string, number> = { icosa: 12, dodeca: 20, none: 0 };
+/** Portus: the town is safe; the creeps outside its walls (D-zones-1) span these levels. */
+const PORTUS_LEVELS = (() => {
+  const lv = PORTUS_WILDS.flatMap((g) => g.members.map((m) => m.level));
+  return [Math.min(...lv), Math.max(...lv)] as const;
+})();
 
 export interface WorldCard {
   id: BodyId;
   name: string;
   blurb: string;
-  /** "Levels 1–7", or "Safe hub" for Portus. */
+  /** "Levels 1–7"; for Portus "Safe town · Lv 1–2 outside" (the creeps outside its walls). */
   levels: string;
   players: number;
   boss: { name: string; level: number } | null;
@@ -38,7 +43,7 @@ export function worldCards(online: HomeOnline | null): WorldCard[] {
       id,
       name: b.name,
       blurb: BLURB[id],
-      levels: b.levels[1] > 0 ? `Levels ${b.levels[0]}–${b.levels[1]}` : "Safe hub",
+      levels: b.levels[1] > 0 ? `Levels ${b.levels[0]}–${b.levels[1]}` : `Safe town · Lv ${PORTUS_LEVELS[0]}–${PORTUS_LEVELS[1]} outside`,
       players: online?.bodies[id]?.players ?? 0,
       boss: boss ? { name: npcDef(boss.id).name, level: boss.level } : null,
       pads: PADS[b.padLayout] ?? 0,

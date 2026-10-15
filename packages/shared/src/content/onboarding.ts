@@ -1,6 +1,6 @@
 // Onboarding (SPEC §6.12, content.md §1.1): about 60 s in Portus, skippable, once per account. Move,
 // look, jump, sprint, dodge, then knock down three training dummies by the arrival point. The server
-// counts the hits (Portus is a safe zone, so training swings are their own `train` message) and pays
+// counts the hits (Portus town is a safe zone, so training swings are their own `train` message) and pays
 // 3 × 10 XP + 20 on completion = 50 XP (level 2) and the Spark medal. Skipping pays nothing more.
 // Shared so the client draws the dummies exactly where the server tests the hits.
 

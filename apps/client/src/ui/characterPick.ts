@@ -172,7 +172,7 @@ export function showCharacterPick(opts: CharacterPickOptions = {}): Promise<{ st
     }
     const goWrap = el("div", "fl-charpick__go", cfg);
     const play = button("", "fl-btn fl-btn--primary fl-btn--lg fl-btn--block", goWrap);
-    el("small", "", goWrap, rebirth ? "Your old pile is still where you fell." : "You start in Portus. It's safe everywhere.");
+    el("small", "", goWrap, rebirth ? "Your old pile is still where you fell." : "You start in Portus town, a safe zone. Creeps roam outside its walls.");
 
     function checkName(): boolean {
       if (!nameInput || !nameStatus || !nameCount) return true;
