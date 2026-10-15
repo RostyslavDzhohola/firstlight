@@ -221,6 +221,20 @@ describe("PlayerController", () => {
       expect(rolledAt).toBeLessThan(0.1);
     });
 
+    it("the cooldown counts wall-clock time: at 10 fps (frames clamped to 50 ms) C 1.25 s after a roll rolls", () => {
+      // A slow machine: 100 ms frames, simulated as 50 ms steps (Game's clamp). In game time only
+      // 0.62 s have passed, which used to drop the press until 2.4 s of real time had gone by.
+      const pc = spawn();
+      const input = fakeInput();
+      input.pressed.add("KeyC");
+      pc.update(0.05, input, false, 0.1);
+      input.pressed.clear();
+      for (let i = 0; i < 12; i++) pc.update(0.05, input, false, 0.1); // 1.2 s of real time
+      input.pressed.add("KeyC");
+      pc.update(0.05, input, false, 0.1);
+      expect(pc.anim).toBe(ANIM.DODGE);
+    });
+
     it("a press earlier in the cooldown is dropped, not stored for a late roll", () => {
       const pc = spawn();
       const input = fakeInput();
