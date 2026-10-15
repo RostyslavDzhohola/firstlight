@@ -3,7 +3,8 @@ import { BODIES, createTerrain, type Breakable, type Terrain } from "@firstlight
 import { structureCollider, townCoords, townDir } from "@firstlight/shared/planet/town";
 import { BreakableCollider, PLAYER_BODY } from "@firstlight/shared/planet/collide";
 import type { Input } from "./input.ts";
-import { PlayerController, type MoveColliders } from "./PlayerController.ts";
+import { ANIM } from "@firstlight/shared/net/schema";
+import { MOVE, PlayerController, type MoveColliders } from "./PlayerController.ts";
 
 const R = 500;
 /** A flat, dry sphere. */
@@ -181,6 +182,138 @@ describe("PlayerController", () => {
       run(pc, fakeInput(["KeyW", "ShiftLeft"]), 3, 20, () => (maxZ = Math.max(maxZ, pc.pos.z)));
       expect(maxZ).toBeLessThan(-0.09 - PLAYER_BODY.radius + 0.01);
       expect(pc.pos.z).toBeCloseTo(-0.09 - PLAYER_BODY.radius, 2);
+    });
+  });
+
+  describe("dodge-roll (C; content §0: 4.5 m over 0.3 s, cooldown 1.2 s, 100 ms input buffer)", () => {
+    /** One frame with C pressed (the key went down since the last frame), then the rest at `fps`. */
+    function pressC(pc: PlayerController, input: ReturnType<typeof fakeInput>, fps = 60) {
+      input.pressed.add("KeyC");
+      pc.update(1 / fps, input, false);
+      input.pressed.clear();
+    }
+    const hSpeed = (pc: PlayerController) => pc.vel.clone().addScaledVector(pc.up(), -pc.vel.dot(pc.up())).length();
+
+    it("rolls on the frame the key is read: roll state and roll speed at once, no wind-up", () => {
+      const pc = spawn();
+      const input = fakeInput();
+      pressC(pc, input);
+      expect(pc.anim).toBe(ANIM.DODGE);
+      expect(hSpeed(pc)).toBeCloseTo(MOVE.dodgeDistance / MOVE.dodgeTime, 1);
+      run(pc, input, MOVE.dodgeTime);
+      expect(pc.pos.z).toBeGreaterThan(MOVE.dodgeDistance - 0.3);
+    });
+
+    it("a press in the last 100 ms of the cooldown rolls the moment it ends (input buffer)", () => {
+      const pc = spawn();
+      const input = fakeInput();
+      pressC(pc, input);
+      run(pc, input, MOVE.dodgeCooldown - 0.08);
+      expect(pc.anim).not.toBe(ANIM.DODGE);
+      pressC(pc, input);
+      let rolledAt = -1;
+      let t = 0;
+      run(pc, input, 0.15, 60, () => {
+        t += 1 / 60;
+        if (rolledAt < 0 && pc.anim === ANIM.DODGE) rolledAt = t;
+      });
+      expect(rolledAt).toBeGreaterThan(0);
+      expect(rolledAt).toBeLessThan(0.1);
+    });
+
+    it("a press earlier in the cooldown is dropped, not stored for a late roll", () => {
+      const pc = spawn();
+      const input = fakeInput();
+      pressC(pc, input);
+      run(pc, input, 0.6);
+      pressC(pc, input);
+      let rolled = false;
+      run(pc, input, 1.2, 60, () => (rolled ||= pc.anim === ANIM.DODGE));
+      expect(rolled).toBe(false);
+    });
+
+    it("a press just before landing from a jump rolls on touchdown", () => {
+      const pc = spawn();
+      const input = fakeInput();
+      input.pressed.add("Space");
+      pc.update(1 / 60, input, false);
+      input.pressed.clear();
+      // A 6.6 m/s jump lands after ~0.73 s: press 60 ms before that.
+      run(pc, input, 0.67);
+      expect(pc.onGround).toBe(false);
+      pressC(pc, input);
+      let rolled = false;
+      run(pc, input, 0.15, 60, () => (rolled ||= pc.anim === ANIM.DODGE));
+      expect(rolled).toBe(true);
+    });
+
+    it("no roll straight out of a jump (only stepping off an edge gets a moment of grace)", () => {
+      const pc = spawn();
+      const input = fakeInput();
+      input.pressed.add("Space");
+      pc.update(1 / 60, input, false);
+      input.pressed.clear();
+      pressC(pc, input);
+      let rolled = false;
+      run(pc, input, 0.3, 60, () => (rolled ||= pc.anim === ANIM.DODGE));
+      expect(rolled).toBe(false);
+    });
+
+    it("stepping off a ledge, a press within a moment still rolls (low frame rates lose the ground for a frame)", () => {
+      const pc = spawn();
+      pc.setColliders(collidersFor([crate(0, 0, 0, 1, 1, 1)]));
+      pc.teleport(0, R + 1, 0.5);
+      const input = fakeInput();
+      run(pc, input, 0.1, 20);
+      expect(pc.onGround).toBe(true);
+      input.hold("KeyW", true);
+      while (pc.onGround) pc.update(1 / 20, input, false); // walk off the front edge
+      pressC(pc, input, 20);
+      expect(pc.anim).toBe(ANIM.DODGE);
+    });
+
+    it("the body faces the roll from its first frame: back and side rolls look like rolls", () => {
+      for (const [key, want] of [["KeyS", [0, 0, -1]], ["KeyA", [1, 0, 0]]] as const) {
+        const pc = spawn();
+        const input = fakeInput([key]);
+        pressC(pc, input);
+        expect(pc.facing.x).toBeCloseTo(want[0], 3);
+        expect(pc.facing.z).toBeCloseTo(want[2], 3);
+        run(pc, input, MOVE.dodgeTime / 2, 60, () => {});
+        // Aiming doesn't turn it back mid-roll either.
+        pc.update(1 / 60, input, true);
+        expect(pc.facing.x).toBeCloseTo(want[0], 3);
+        expect(pc.facing.z).toBeCloseTo(want[2], 3);
+      }
+    });
+
+    it("no grace before the first touchdown: a body placed in the air (arrival) can't roll until it lands", () => {
+      const pc = new PlayerController(terrain, -100);
+      pc.teleport(0, R + 3, 0);
+      const input = fakeInput();
+      pressC(pc, input);
+      expect(pc.anim).not.toBe(ANIM.DODGE);
+    });
+
+    it("a roll's extra speed bleeds off at the ground rate in the air too (off an edge)", () => {
+      const pc = spawn();
+      const input = fakeInput(["KeyW"]);
+      pressC(pc, input);
+      run(pc, input, MOVE.dodgeTime);
+      pc.vel.addScaledVector(pc.up(), 8); // thrown up as the roll ends: the rest happens in the air
+      pc.onGround = false;
+      run(pc, input, 0.25);
+      expect(pc.onGround).toBe(false);
+      expect(hSpeed(pc)).toBeLessThan(MOVE.run + 0.5); // air control alone would still be ~10 m/s
+    });
+
+    it("no roll from the saddle, in the water or while frozen", () => {
+      for (const set of [(p: PlayerController) => (p.mounted = true), (p: PlayerController) => (p.frozen = true)]) {
+        const pc = spawn();
+        set(pc);
+        pressC(pc, fakeInput());
+        expect(pc.anim).not.toBe(ANIM.DODGE);
+      }
     });
   });
 

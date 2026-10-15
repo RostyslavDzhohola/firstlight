@@ -281,7 +281,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       if (!a || a.dead) return;
       if (inSaddle(a, Date.now())) return void c.send("denied", { action: "melee", reason: "mounted" });
       if (m.slot !== a.char.selected) this.equip(a, m.slot);
-      melee(this.host, a, !!m.heavy);
+      // Refusals get a reason, like `fire` (safe zone, arrival protection…): the client shows it.
+      const r = melee(this.host, a, !!m.heavy);
+      if (!r.ok && r.reason !== "rate") c.send("denied", { action: "melee", reason: r.reason });
     });
     this.onMessage("block", z.object({ on: z.boolean() }), (c, m) => {
       const a = this.actor(c);
