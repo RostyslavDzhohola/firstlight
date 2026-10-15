@@ -9,6 +9,7 @@ import { MISSION_BY_ID, missionGoal, trackedMission } from "@firstlight/shared/c
 import { placeCallout } from "../ui/calloutPlace.ts";
 import { el } from "../ui/dom.ts";
 import type { Game } from "./Game.ts";
+import { huntTargets } from "./huntTargets.ts";
 import { missionTarget, type PointerNpc, type PointerTarget } from "./missionTarget.ts";
 import type { ClientSystem } from "./systems.ts";
 
@@ -30,8 +31,6 @@ class MissionPointer implements ClientSystem {
   private pickedAt = -Infinity;
   private last = { text: "", key: "" };
   private boxSize: { w: number; h: number } | null = null;
-  /** The server's huntTargets (null until the first one: an older server never sends it). */
-  private hunt: { id: string; npcs: ReadonlySet<string> } | null = null;
 
   constructor(game: Game) {
     this.game = game;
@@ -45,10 +44,6 @@ class MissionPointer implements ClientSystem {
     this.box = el("div", "fl-callout__box fl-holo", this.callout);
     this.title = el("span", "", this.box);
     this.sub = el("small", "", this.box);
-    game.net.room?.onMessage("huntTargets", (m: { id: string; npcs: string[] }) => {
-      this.hunt = { id: m.id, npcs: new Set(m.npcs) };
-      this.pickedAt = -Infinity; // re-pick on the next frame
-    });
   }
 
   update(_dt: number, now: number) {
@@ -65,7 +60,9 @@ class MissionPointer implements ClientSystem {
       const npcs: PointerNpc[] = [];
       (room.state as any).npcs?.forEach((n: any, id: string) => npcs.push({ id, kind: n.kind, hp: n.hp, x: n.x, y: n.y, z: n.z }));
       const terrain = g.planet.terrain;
-      const eligible = this.hunt && open && this.hunt.id === open.id ? this.hunt.npcs : null;
+      // The server's list, held since the join (huntTargets.ts): null until one came (older servers never send it).
+      const hunt = huntTargets();
+      const eligible = hunt && open && hunt.id === open.id ? hunt.npcs : null;
       this.target = def ? missionTarget(def, g.bodyId, [p.x, p.y, p.z], npcs, (x, y, z) => terrain.groundHeight(x, y, z), { eligible, counts: open!.counts }) : null;
     }
     const t = this.target;

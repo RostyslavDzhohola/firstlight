@@ -9,6 +9,8 @@ import { objectPos, WORLD_OBJECT_BY_ID } from "@firstlight/shared/content/world"
 import { createTerrain } from "@firstlight/shared";
 import type { Game } from "../src/app.ts";
 import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
+import { characterRepo } from "../src/world/characters.ts";
+import { newCharacter } from "@firstlight/shared/content/character";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 
 type V = [number, number, number];
@@ -105,4 +107,19 @@ describe("huntTargets and per-target counts (A1, Clover Fields Hopbits)", () => 
     await new Promise((ok) => setTimeout(ok, 300));
     expect(you.missions.find((m: any) => m.id === "A1").progress).toBe(1);
   }, 40_000);
+
+  it("a saved active hunt gets its list right after joining (the client holds it from the join)", async () => {
+    NPC_TUNING.ambient = true;
+    const c = newCharacter(0, 0);
+    c.body = "arcadia";
+    c.pos = ahead(25);
+    c.missions = [{ id: "A1", progress: 0, done: false, counts: [0] }];
+    characterRepo.current.save("returning-hunter", c);
+    const r = await joinAs(game, "returning-hunter", "arcadia", {}, "admin", false);
+    rooms.push(r);
+    // Registered at once, like Game does right after joining (huntTargets.ts).
+    const lists: { id: string; npcs: string[] }[] = [];
+    r.onMessage("huntTargets", (m) => lists.push(m));
+    await waitFor(() => lists.some((l) => l.id === "A1" && l.npcs.length > 0), 10_000);
+  }, 30_000);
 });
