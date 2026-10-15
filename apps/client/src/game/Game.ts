@@ -565,7 +565,12 @@ export class Game {
     const rawMs = now - this.last;
     const dt = Math.min(0.05, rawMs / 1000);
     this.last = now;
-    if (!this.running || this.travelling) return this.env.silence();
+    if (!this.running || this.travelling) {
+      // Presses made behind a loading screen are dropped, not kept for the first frame back (a C
+      // pressed while travelling rolled the moment the world appeared).
+      this.input.endFrame();
+      return this.env.silence();
+    }
     const cpu0 = performance.now();
 
     let focus: THREE.Vector3;
