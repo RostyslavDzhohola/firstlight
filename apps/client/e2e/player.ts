@@ -228,9 +228,13 @@ export class Player {
     for (let i = 0; i < 4; i++) {
       const s = await this.snap();
       if (s.input.pointerLocked) {
-        // A lock lost within 500 ms "didn't stick" (ui/pauseFlow.ts): let it settle like a player would.
-        if (i > 0) await this.page.waitForTimeout(600);
-        return;
+        // A lock lost within 500 ms "didn't stick" (ui/pauseFlow.ts): a player's Esc comes later than
+        // that, so let the lock age past it (the game also locks by itself at the hand-over).
+        const lockAt = (await this.events()).filter((e) => e.kind === "lock" && e.locked === true).pop()?.t ?? 0;
+        const age = s.t - lockAt;
+        if (age < 700) await this.page.waitForTimeout(700 - age);
+        if ((await this.snap()).input.pointerLocked) return;
+        continue;
       }
       this.mouse = { x: 640, y: 360 };
       await this.page.mouse.click(this.mouse.x, this.mouse.y);

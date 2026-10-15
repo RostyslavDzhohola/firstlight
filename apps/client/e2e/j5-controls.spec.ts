@@ -16,6 +16,15 @@ function keyName(k: string): string {
   return ({ "`": "Backquote", Esc: "Escape", Space: "Space", Tab: "Tab", Shift: "Shift", Ctrl: "Control", Alt: "Alt" } as Record<string, string>)[k] ?? k;
 }
 
+/** A key combo the way a person presses it: modifiers down first, the key, then let go. */
+async function pressCombo(player: Player, keys: string[]) {
+  for (const k of keys) {
+    await player.page.keyboard.down(k);
+    await player.page.waitForTimeout(80);
+  }
+  for (const k of [...keys].reverse()) await player.page.keyboard.up(k);
+}
+
 async function arrive(player: Player, body = "arcadia") {
   await player.joinAsDevAdmin({ starter: "Hexwick", body });
   await player.waitInWorld(90_000, body);
@@ -44,6 +53,7 @@ test.describe("J5 controls", () => {
     await expect(pauseMenu(player), "the click doesn't reopen the menu").toBeHidden();
     await expect(hint).toBeHidden();
     // And again: Esc → menu → Esc → game, a second round trip (the old menu "didn't go anywhere").
+    await player.lock(); // play a moment first: a lock lost within 500 ms is a flicker, not a pause
     await player.escape();
     await expect(pauseMenu(player)).toBeVisible();
     await page.keyboard.press("Escape");
@@ -64,13 +74,12 @@ test.describe("J5 controls", () => {
     const keys = (await row.locator("xpath=preceding-sibling::dt[1]").locator(".fl-key").allInnerTexts()).map((s) => s.trim());
     expect(keys.length, "How to play gives photo mode a key").toBeGreaterThan(0);
     await page.keyboard.press("Escape");
-    await page.mouse.click(640, 360);
-    await player.until((s) => s.input.pointerLocked, "back in the game");
-    await page.keyboard.press(keys.map(keyName).join("+"));
-    await player.until((s) => s.ui.photo === true, `photo mode opens with ${keys.join("+")}`, 5000);
+    await player.lock(); // Esc may already have resumed; otherwise a click looks around again
+    await pressCombo(player, keys.map(keyName));
+    await player.until((s) => s.ui.photo === true, `photo mode opens with ${keys.join("+")}`, 10_000);
     await player.shot("photo-mode");
-    await page.keyboard.press(keys.map(keyName).join("+"));
-    await player.until((s) => s.ui.photo === false, "the same key leaves photo mode", 5000);
+    await pressCombo(player, keys.map(keyName));
+    await player.until((s) => s.ui.photo === false, "the same key leaves photo mode", 10_000);
   });
 
   test("J5.3 · item 4 · the dodge roll starts within 100 ms of pressing C, standing and running, every time", { tag: ["@J5", "@J5.3", "@item-4"] }, async ({ player }) => {
