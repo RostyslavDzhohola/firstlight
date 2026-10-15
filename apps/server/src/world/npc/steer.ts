@@ -108,14 +108,28 @@ export function slideAngle(g: Ground, i: number, side = 1): number {
 }
 
 /**
+ * How an NPC keeps off the safe zones (pad rings, the Portus town; D-evade-1): `true` keeps the full
+ * NPC_RULES.safeMargin (wandering, going home: creeps stay visibly off the pads), `"close"` only
+ * CHASE_MARGIN (chasing a target who stands outside every zone: it may come right up to the zone's
+ * edge, so a player just outside a ring can be fought), `false` not at all. Never closer than
+ * CHASE_MARGIN; an NPC already inside the full margin (after a chase) may move about and out of it.
+ */
+export type SafeAvoid = boolean | "close";
+/** The least room (m, plus the NPC's radius) an NPC keeps from a safe zone's edge. */
+export const CHASE_MARGIN = 0.3;
+
+/**
  * Move `pos` by `d` metres along tangent `t`. Writes the new position into `out` and returns the
  * index of the direction used (0 = straight, then slides: slideAngle), or -1 if every direction was
- * refused. `side` (±1): which way to turn first round a structure; `height` is the NPC's (with its
- * radius, the body the structures are checked against).
+ * refused. `avoidSafe`: SafeAvoid. `side` (±1): which way to turn first round a structure; `height` is
+ * the NPC's (with its radius, the body the structures are checked against).
  */
-export function step(g: Ground, pos: V3, t: V3, d: number, loco: Locomotion, hover: number, radius: number, out: V3, avoidSafe = true, side = 1, height = 1.8): number {
+export function step(g: Ground, pos: V3, t: V3, d: number, loco: Locomotion, hover: number, radius: number, out: V3, avoidSafe: SafeAvoid = true, side = 1, height = 1.8): number {
   const curH = Math.hypot(pos[0], pos[1], pos[2]) - g.R;
-  const margin = NPC_RULES.safeMargin + radius;
+  const tight = CHASE_MARGIN + radius;
+  const margin = avoidSafe === "close" ? tight : NPC_RULES.safeMargin + radius;
+  // Already within the full margin (a chase brought it there): it may move about in it and out of it.
+  const inMargin = avoidSafe === true && nearSafeRing(g, pos[0], pos[1], pos[2], margin);
   const walls = g.structures;
   const body = walls ? npcBody(radius, height) : null;
   followed = !!walls && (g.followAll || walls.near(pos[0], pos[1], pos[2], FOLLOW_NEAR + radius));
@@ -129,7 +143,7 @@ export function step(g: Ground, pos: V3, t: V3, d: number, loco: Locomotion, hov
     const fh = feetHeight(g, ux, uy, uz, loco, hover);
     if (fh === null) continue;
     if ((loco === "ground" || loco === "wade") && fh - curH > d * MAX_SLOPE + 0.25) continue;
-    if (avoidSafe && nearSafeRing(g, qx, qy, qz, margin)) continue;
+    if (avoidSafe && (nearSafeRing(g, qx, qy, qz, tight) || (!inMargin && margin > tight && nearSafeRing(g, qx, qy, qz, margin)))) continue;
     const r = g.R + fh;
     // Not through a structure (a step whose start is already inside one may leave it).
     if (walls && walls.crosses(pos[0], pos[1], pos[2], ux * r, uy * r, uz * r, body!)) continue;

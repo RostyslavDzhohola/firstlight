@@ -807,3 +807,16 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   renderers. Why: the WebGL loading screen froze for 0.7–3.3 s on every first travel (one frame
   compiling everything compileAsync had built for the wrong context); three's fix (#34681) isn't
   upstream, and three is pinned (SPEC §3), so a version bump must re-check this file.
+- **D-evade-1 (2026-10-15):** creeps give up only on targets they can't reach. "Out of reach" is
+  the target standing inside a safe zone (a pad's ring, the Portus town), off the creep's medium or
+  perched above its melee (D36, content.md "Leash") — no longer the 3 m band outside a ring.
+  Chasing a target who stands outside every zone, a creep may come right up to a zone's edge (0.3 m
+  plus its radius), and leaps and charges may land there; wandering and going home it still keeps the
+  3 m margin, and one a chase left inside it walks about in it and out. Give-ups (5 s out of reach,
+  5 s walled off by a structure, leash, lost sight) still send it home invulnerable to heal, and a
+  target that is truly out of reach (a combat-tagged shooter inside a ring) still makes it give up at
+  once when it wakes again (F12 SF9: no pad cheese). Why: e2e logging on Arcadia showed new players
+  standing ~1.8 m outside Dawnpad's ring land 19–24 carbine hits on a 22 HP Hopbit: it could never
+  get within reach (it kept 3 m off the ring), gave up after 5 s, healed to full, and from then on
+  every shot woke it into giving up again — "my hits don't work". Tested on Arcadia, Meridian and a
+  Hollowmere pad, on the real server path, and against the pad shooter.
