@@ -41,7 +41,7 @@ test.describe("J6 save progress", () => {
   });
 
   test("J6.2 · item 5c · save with an email code, then sign in from a second browser and get the same character", { tag: ["@J6", "@J6.2", "@item-5c"] }, async ({ player, browser, gfx }, info) => {
-    await player.playAsNewGuest({ starter: "Kappa", extra: { tier: "medium" } });
+    await player.playAsNewGuest({ starter: "Unit 7", extra: { tier: "medium" } });
     await player.waitInWorld(90_000, "portus");
     await player.lock();
     const before = await player.snap();

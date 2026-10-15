@@ -232,7 +232,7 @@ export class Player {
 
   /** Click into the world until the pointer is locked (the game only takes mouse and keys then). */
   async lock() {
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 6; i++) {
       const s = await this.snap();
       if (s.input.pointerLocked) {
         // A lock lost within 500 ms "didn't stick" (ui/pauseFlow.ts): a player's Esc comes later than
@@ -241,6 +241,12 @@ export class Player {
         const age = s.t - lockAt;
         if (age < 700) await this.page.waitForTimeout(700 - age);
         if ((await this.snap()).input.pointerLocked) return;
+        continue;
+      }
+      // The pause menu covers the world (e.g. after a rejoin): Esc goes back to the game first.
+      if (s.ui.visibleE2e.includes("pause-menu")) {
+        await this.page.keyboard.press("Escape");
+        await this.page.waitForTimeout(400);
         continue;
       }
       this.mouse = { x: 640, y: 360 };

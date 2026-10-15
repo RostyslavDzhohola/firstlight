@@ -46,6 +46,11 @@ export async function saveWithEmail(player: Player, email: string) {
   await emailCodeFlow(player, card, email);
   await expect.poll(async () => (await player.page.evaluate(() => (window as any).__fl.auth()))?.kind, { message: "the account is saved", timeout: 20_000 }).toBe("saved");
   await player.shot("saved");
+  // "Saved." → Done (it also closes by itself); the server moves the character to the account and
+  // the client rejoins (close 4101), so wait to be back in the world.
+  await card.getByRole("button", { name: /^done$/i }).click({ timeout: 8000 }).catch(() => {});
+  await expect(card, "the save card closes").toBeHidden({ timeout: 15_000 });
+  await player.waitInWorld();
 }
 
 /** Pause menu → Log out (instant in a safe zone). */
