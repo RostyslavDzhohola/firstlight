@@ -11,6 +11,9 @@ import { STARTERS, WEAPON_BY_ID, WEAPON_INDEX } from "@firstlight/shared/content
 import { PF } from "@firstlight/shared/net/schema";
 import type { Game } from "../src/app.ts";
 import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
+import { newCharacter } from "@firstlight/shared/content/character";
+import { characterRepo } from "../src/world/characters.ts";
+import { pileStore } from "../src/world/piles.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 
 let game: Game;
@@ -237,6 +240,49 @@ describe("Portus: the castle town is safe, outside the walls is wild (D-zones-1)
       await waitFor(() => seen().hostile > 0 && seen().calm > 0, 10_000);
       expect(seen().maxLevel).toBeLessThanOrEqual(2);
     }
+  }, 30_000);
+});
+
+describe("Portus after the deploy (D-zones-1)", () => {
+  it("a character saved outside the walls (all of Portus was safe then) comes back there, wild, under arrival protection", async () => {
+    const c = newCharacter(0, 0);
+    c.body = "portus";
+    c.pos = town(70, 12);
+    characterRepo.current.save("returner", c);
+    NPC_TUNING.ambient = true;
+    const r = await joinAs(game, "returner", "portus", {}, "admin", false);
+    rooms.push(r);
+    await waitFor(() => !!me(r));
+    expect(flatM(pos(me(r)), town(70, 12))).toBeLessThan(2);
+    let patches = 0;
+    r.onStateChange(() => patches++);
+    await waitFor(() => patches >= 3); // server ticks have set the flags for where they stand
+    expect(me(r).flags & PF.SAFE).toBeFalsy();
+    expect(me(r).flags & PF.PROTECTED).toBeTruthy(); // 5 s to get bearings before anything can hurt them
+    expect(me(r).hp).toBe(100);
+  });
+
+  it("a death outside the walls leaves a Portus pile that persists and shows after rebirth in town", async () => {
+    const r = await join("faller", "portus", 3);
+    teleport(r, town(55, 2));
+    await waitFor(() => !(me(r).flags & PF.SAFE) && !(me(r).flags & PF.PROTECTED));
+    let death: any = null;
+    r.onMessage("death", (m) => (death = m));
+    let reborn = false;
+    r.onMessage("reborn", () => (reborn = true));
+    r.send("admin", { cmd: "damage", args: { target: r.sessionId, amount: 500 } });
+    await waitFor(() => death !== null);
+    expect(death.pileId).toBeTruthy();
+    expect(pileStore.current.get(death.pileId)).toMatchObject({ body: "portus", kind: "death" });
+    r.send("respawn", { starter: 0, palette: 1 });
+    await waitFor(() => reborn);
+    // Rebirth: the client leaves and joins Portus again, inside the town, and sees its pile out there.
+    await safeLeave(r);
+    const back = await joinAs(game, "faller", "portus", {}, "admin", false);
+    rooms.push(back);
+    await waitFor(() => !!me(back));
+    expect(zoneAt(BODIES.portus, ...pos(me(back))).safe).toBe(true);
+    await waitFor(() => !!st(back).piles?.has(death.pileId), 8000);
   }, 30_000);
 });
 
