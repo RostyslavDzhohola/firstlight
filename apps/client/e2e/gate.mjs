@@ -32,6 +32,7 @@ for (const [project, ids] of byProject) {
     stdio: "inherit",
     cwd: path.resolve(here, ".."),
   });
+  if (r.error) console.error(`[e2e:gate] ${project}: couldn't start Playwright: ${r.error.message}`);
   if (r.status !== 0) failed = true;
 }
 console.log(failed ? "\n[e2e:gate] FAILED: a gated journey failed; don't deploy." : "\n[e2e:gate] all gated journeys passed.");

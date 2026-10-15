@@ -333,12 +333,12 @@ export function installE2eHook(win: Window & typeof globalThis): void {
     let n = 0;
     let pending = false;
     const state = { startedAt: performance.now(), every, skipped: 0, errors: 0, stop: () => {} };
-    ctx.render = function (this: unknown) {
-      original.call(ctx);
-      if (++n % every !== 0) return;
+    ctx.render = function (this: unknown, ...args: unknown[]) {
+      const result = (original as (...a: unknown[]) => unknown).apply(ctx, args);
+      if (++n % every !== 0) return result;
       if (pending) {
         state.skipped++;
-        return;
+        return result;
       }
       pending = true;
       const t = performance.now();
@@ -352,6 +352,7 @@ export function installE2eHook(win: Window & typeof globalThis): void {
         })
         .catch(() => state.errors++)
         .finally(() => (pending = false));
+      return result;
     };
     // Only real show/hide changes count: code that re-sets `hidden = true` every frame queues a record
     // each time without changing anything on screen.

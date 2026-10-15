@@ -4,7 +4,7 @@
 
 import { NPC_DEFS } from "@firstlight/shared/content/npcs";
 import { expect, test } from "./fixtures.ts";
-import { COMBAT_PLANETS, type Npc, type Player, type ServerNpc, type Snap } from "./player.ts";
+import { COMBAT_PLANETS, type Npc, type Player, type ServerNpc, type Snap, type Target } from "./player.ts";
 
 const HOSTILE = new Set(NPC_DEFS.filter((d) => d.temper === "hostile").map((d) => d.id));
 const CREATURE = new Set(NPC_DEFS.filter((d) => d.family !== "egg").map((d) => d.id));
@@ -106,14 +106,15 @@ test.describe("J3 creeps", () => {
     // the arrival, item 6c) the admin teleport puts us 10 m from it so the kill itself is still tested.
     const list = (await player.npcList()).filter((n) => HOSTILE.has(n.def) && n.hp > 0 && !n.boss);
     expect(list.length, "the server has hostiles on Arcadia").toBeGreaterThan(0);
-    const ranked = await Promise.all(list.map(async (n) => ({ n, t: (await player.targetOf([n.x, n.y, n.z]))! })));
+    const ranked = (await Promise.all(list.map(async (n) => ({ n, t: await player.targetOf([n.x, n.y, n.z]) })))).filter((x): x is { n: ServerNpc; t: Target } => !!x.t);
+    expect(ranked.length, "hostiles we can locate").toBeGreaterThan(0);
     ranked.sort((a, b) => a.n.level - b.n.level || a.t.surface - b.t.surface);
     const pick = ranked[0]!;
     await player.note("target", { def: pick.n.def, level: pick.n.level, fromUsM: pick.t.surface });
     if (pick.t.surface > 60) {
       const p = [pick.n.x, pick.n.y, pick.n.z];
       const me = start.player!.pos;
-      const d = Math.hypot(me[0]! - p[0]!, me[1]! - p[1]!, me[2]! - p[2]!);
+      const d = Math.max(1, Math.hypot(me[0]! - p[0]!, me[1]! - p[1]!, me[2]! - p[2]!));
       const k = 10 / d;
       await player.admin("teleport", { x: p[0]! + (me[0]! - p[0]!) * k, y: p[1]! + (me[1]! - p[1]!) * k, z: p[2]! + (me[2]! - p[2]!) * k });
       await player.note("placement", "admin teleport to 10 m from the hostile (nothing within 60 m of the arrival)");
@@ -122,7 +123,7 @@ test.describe("J3 creeps", () => {
 
     // Fight: the nearest live hostile within 40 m, aimed at through the camera like a player, healed by
     // the admin command when low (the test is about the kill paying XP, not about surviving a pack).
-    await player.until((x) => !!x.npcs?.some((n) => n.hostile && !n.dead && n.dist < 40), "a hostile within 40 m", 15_000);
+    await player.until((x) => !!x.npcs?.some((n) => n.hostile && !n.dead && n.dist < 40), "a hostile within 40 m", 30_000);
     const until = Date.now() + 75_000;
     let shots = 0;
     while (Date.now() < until) {

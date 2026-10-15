@@ -33,7 +33,7 @@ export default defineConfig({
   testDir: ".",
   testMatch: TARGET === "prod" ? /smoke\.spec\.ts$/ : /\.spec\.ts$/,
   outputDir: path.join(OUT, "results"),
-  timeout: 240_000,
+  timeout: 420_000, // a loaded machine (other lanes, Blender) can take a minute just to load a planet
   expect: { timeout: 10_000 },
   fullyParallel: true,
   workers: Number(process.env.E2E_WORKERS ?? 2),

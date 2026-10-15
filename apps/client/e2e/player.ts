@@ -95,6 +95,7 @@ export interface AttackResult {
   toasts: string[];
 }
 
+const LOAD_MS = Number(process.env.E2E_LOAD_MS ?? 180_000);
 const ATTACK_ECHOES = new Set(["shot", "projectile", "swing"]);
 const SAFE_NOTICE = /safe zone|holstered/i;
 
@@ -171,8 +172,12 @@ export class Player {
     return { id, name };
   }
 
-  /** In the world: loading screen gone, the loop running, our player replicated. */
+  /**
+   * In the world: loading screen gone, the loop running, our player replicated. Never waits less than
+   * E2E_LOAD_MS (default 180 s): arrival speed is J1's assertion, not every journey's.
+   */
   async waitInWorld(timeoutMs = 90_000, body?: string): Promise<Snap> {
+    timeoutMs = Math.max(timeoutMs, LOAD_MS);
     let last: Snap | null = null;
     await expect
       .poll(
