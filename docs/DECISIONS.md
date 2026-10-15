@@ -452,3 +452,20 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   colliders are drawn as stone boxes (2 draws) before the probe and the warm-up, and a later arrival
   of the asset is ignored until the next visit (review round 1, S1). Why: Medium was already at
   ~290 draws against 250 (F10); triangles are cheap next to draws on Metal (#30560).
+- **D-save-1 (2026-10-15):** saving progress (HANDOFF 5b/5c, the owner's final word: guest play kept,
+  email only to save). No card ever opens by itself: a guest gets a "Progress not saved · Esc → Save
+  progress" toast once per tab session after the first level-up to 2+ (held while the tutorial, a
+  menu or the death screen is up), plus Save progress in the Esc menu, on the death screen, on the
+  logged-out card and on the home page. The save card is modal and opens only with the mouse free;
+  saved accounts, `?devguest` tokens and `?offline`/`?bench` runs never see any of it. The landing's
+  "Sign in with email" link is a Sign in button. The level-2 rule for new addresses (D34) stays: below
+  it the Esc row is disabled and the card says "Play a little first" (the tutorial pays level 2).
+  Mail failures get their own answers: provider quota → `SAVING_BUSY` (503), a recipient Resend
+  rejects (422) → `EMAIL_REJECTED` (400), anything else (no key, unverified domain 403, bad key,
+  network) → `SAVING_UNAVAILABLE` (503). The last player-initiated send's failure holds for 10 min
+  (`MailHealth`); meanwhile public sign-in requests all get the same `SAVING_UNAVAILABLE`/`SAVING_BUSY`
+  (address-independent, so D34's no-enumeration holds), and `GET /api/account/save-status` reports it
+  so the cards say so before the player types. Background sends to saved addresses never change it.
+  `/api/account/me` gains `saveReady`. Why: the old level-2 card popped up mid-play and couldn't be
+  clicked while the pointer was locked, and with Resend's domain unverified every save ended at a
+  "Check your email" that never came.

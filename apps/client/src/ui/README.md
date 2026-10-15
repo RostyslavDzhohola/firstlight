@@ -38,6 +38,8 @@ onboarding-attack, onboarding-portal, onboarding-done, kit-inventory, kit-onboar
 | `styles/compat.css` | Legacy `.fl-overlay > .fl-panel` markup gets the kit's centred card |
 | `dom.ts` | `el`, `sprite`, `icon`, `button`, `keycaps`, `uiRoot`, `isolateKeys`, overlay registry |
 | `hud.ts` | The HUD (API below) |
+| `account.ts` | Save card, sign-in and name picker (API below) |
+| `saveOffer.ts` | When saving is offered: the pure rules (unit-tested) |
 
 **Size unit.** Use `calc(N * var(--u))` where a design says N rem (`--u` is 14 px at 1280 wide, 19 px
 at 2560). Tokens: `--t-xs … --t-5xl`, `--sp-1 … --sp-8`, `--r-1/2/3/pill`, `--z-vignette 5`,
@@ -54,7 +56,7 @@ hud.setLogout(endsAt, serverNow)      // 30 s ring
 hud.setPrompt("E — take everything from Wren's pile")   // or setPrompt(text, "E")
 hud.hit(weak); hud.hurt()
 hud.damageNumber(x, y, amount, weak, kind?)              // kind: "normal" | "weak" | "armour" | "shield" | "heal"
-hud.toast(text, kind?, { title?, sub?, sprite?, ms? })   // kind: info | xp | coins | medal | warn | mission
+hud.toast(text, kind?, { title?, sub?, sprite?, ms? })   // kind: info | xp | coins | medal | warn | mission; returns the element
 hud.bubble(x, y, text, { name?, slot? })                 // phrase-wheel lines get their icon
 hud.subtitle(speaker, text, ms?)
 hud.bossBar({ name, hp, max, level?, phase?, phaseName?, variant?: "monster" | "oversight", notches?, note? })
@@ -64,6 +66,27 @@ hud.setMissions(lines, header)        // already driven by the quests MissionTra
 hud.voiceSlot                         // bottom-right container for voice indicators
 hud.death(info) / hud.characterPick(opts)   // both resolve { starter, palette }
 ```
+
+## Saving progress (HANDOFF 5c)
+
+Guests play with one click; the email is asked for only to save, at moments that never need the
+locked mouse. Entry points: the "Progress not saved · Esc → Save progress" toast (once per tab
+session after the first level-up, `data-e2e="save-toast"`), the Esc menu row (`menu-save`), the death
+screen (`death-save`), the logged-out card (`logout-save`) and the home page.
+
+```ts
+import { saveStatus } from "../net/auth.ts";        // "guest" | "saved" | "none": never creates a session
+import { openSaveProgress, showSignIn } from "./account.ts";
+
+if ((await saveStatus()) === "guest") showSaveButton();       // saved players never see a save prompt
+await openSaveProgress({ later: "Esc → Save progress" });     // "saved" | "dismissed"; the card is data-e2e="save-card"
+await showSignIn();                                           // "signed-in" | "dismissed" (data-e2e="signin-card")
+```
+
+`openSaveProgress()` refuses to open while the pointer is locked, resolves "saved" at once for a saved
+account, and checks the server first (`GET /api/account/save-status`, `saveReady` on
+`/api/account/me`): it opens on "Saving is temporarily unavailable" (`data-e2e="save-unavailable"`),
+"busy" or "Play a little first" (below level 2, D34) instead of an email field that leads nowhere.
 
 ## Markup
 

@@ -103,13 +103,17 @@ voice widget says the relay is unavailable. Locally, without TURN, connections a
 
 Profiles A and B, no `?devguest`.
 
-1. A: Play, pick **Kappa** + **Moss**, name it (e.g. "Carol"), get in-world.
-2. A: Esc → **Save your character** ("Guest" badge) → **Email** → **Send code**.
+1. A: Play, pick **Kappa** + **Moss**, name it (e.g. "Carol"), get in-world. No save card pops up.
+   Reach level 2 (the tutorial pays it): a **"Progress not saved · Esc → Save progress"** toast shows
+   once (`[data-e2e="save-toast"]`).
+2. A: Esc → **Save progress** ("Not saved" badge, `[data-e2e="menu-save"]`; disabled below level 2)
+   → **Email** → **Send code**. If it says **"Saving is temporarily unavailable"**
+   (`[data-e2e="save-unavailable"]`), the server can't send mail (production: Resend's domain).
 3. Read the code (local: server stdout `[dev-mail]`; production: the disposable test inbox, D6, never
-   the owner's).
-4. Enter the code → **Save**. Expect **"Saved."** and **Back to the game**; the client rejoins by
-   itself (close code 4101). Screenshot `T5-4-saved.png`.
-5. B: landing → **Sign in with email** → Send code → code → **Sign in** → "Signed in." →
+   the owner's). Pasting the whole email sentence works.
+4. Enter the code → **Save**. Expect **"Saved."** and **Done**; the client rejoins by itself (close
+   code 4101), and the Esc menu no longer shows Save progress. Screenshot `T5-4-saved.png`.
+5. B: landing → **Sign in** (`[data-e2e="signin"]`) → Send code → code → **Sign in** → "Signed in." →
    **Continue**. Play starts without a starter pick: the same Carol, Kappa, Moss, level and items.
    Screenshot `T5-5-same-character.png`.
 6. A now shows **PLAYING ELSEWHERE** with **Play here instead** (close code 4100). Screenshot
