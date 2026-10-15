@@ -48,7 +48,7 @@ async function shooter(body: BodyId, starter: number) {
   r.onMessage("hit", (m: { attacker: string; target: string; amount: number }) => {
     if (m.attacker === r.sessionId) hits.push({ ...m });
   });
-  for (const t of ["you", "toast", "shot", "projectile", "explode", "swing", "npcInfo"]) r.onMessage(t, () => {});
+  for (const t of ["you", "toast", "shot", "projectile", "explode", "swing", "npcInfo", "immune"]) r.onMessage(t, () => {});
   return { r, denied, hits };
 }
 
@@ -244,6 +244,23 @@ describe("starter weapons on the combat planets", () => {
     };
     expect(await shoot(30)).toBe(true); // control: in range, from the same zoomed-out camera
     expect(await shoot(54)).toBe(false);
+    expect(denied).toEqual([]);
+  });
+
+  it("a bolt that lands on a creature still arriving (invulnerable) says so instead of looking like a miss", async () => {
+    const { r, denied, hits } = await shooter("arcadia", 0); // Hexquill
+    const immune: { target: string; reason: string }[] = [];
+    r.onMessage("immune", (m: { target: string; reason: string }) => immune.push(m));
+    const { outside } = spots("arcadia");
+    const target = offset(outside, 9, 0, BODIES.arcadia.radius);
+    await standAt(r, outside, target);
+    const id = await spawnNpc(r, "woolback", target, { roam: 0 }); // not instant: it fades in, invulnerable
+    await waitFor(() => !!st(r).npcs?.get(id));
+    expect(st(r).npcs.get(id).flags & 16).toBeTruthy(); // NF.SPAWNING
+    attack(r, true, st(r).npcs.get(id));
+    await waitFor(() => immune.length > 0 || hits.some((h) => h.target === id));
+    expect(immune[0]).toEqual({ target: id, reason: "spawning" });
+    expect(hits.filter((h) => h.target === id)).toEqual([]);
     expect(denied).toEqual([]);
   });
 

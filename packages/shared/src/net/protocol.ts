@@ -140,6 +140,8 @@ export type ServerMessages = {
   swing: { by: string; weapon: number; heavy: boolean; hits: number };
   /** The server refused an action (`reason` is short and human-readable). */
   denied: { action: string; reason: string };
+  /** To the attacker only: a hit landed on an NPC that took no damage (spawning, evading, a shield). */
+  immune: { target: string; reason: "spawning" | "evading" | "invulnerable" | "shield" };
   /** Movement snap-back: the authoritative position for input `seq`. */
   correct: { x: number; y: number; z: number; seq: number };
   /** A portal travel ticket was issued: leave and join `to` through /api/play. */

@@ -12,6 +12,7 @@ import { noteKnockback } from "./movement.ts";
 import { dist3, HEAD_FROM, inMeleeArc, PLAYER_HEIGHT, PLAYER_RADIUS, rayCapsule, rayTerrain, type V3 } from "./geometry.ts";
 import { splashShield, type BubbleHost } from "./support.ts";
 import { HORSE } from "@firstlight/shared/content/horse";
+import { NF } from "@firstlight/shared/content/npcs";
 
 /** Lag compensation window: the one shared constant (SPEC §5.3: history ≤ 200 ms). */
 export const REWIND_MS = NET.REWIND_MS;
@@ -668,7 +669,12 @@ export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | 
     if (attacker) target.lastDamagedBy = attacker.id;
   } else {
     dmg = target.mitigate ? target.mitigate(dmg, weak, fromDir, attacker) : dmg * (target.armour ?? 1);
-    if (dmg <= 0) return false;
+    if (dmg <= 0) {
+      // Landed but did nothing (spawning, evading home, a boss phase, a shield): say so to the
+      // attacker, or the shot looks like a miss ("weapons don't work").
+      if (attacker?.kind === "player") attacker.client?.send("immune", { target: target.id, reason: immuneReason(target) });
+      return false;
+    }
   }
   dmg = Math.max(1, Math.round(dmg));
   const hpBefore = target.state.hp;
@@ -689,6 +695,15 @@ export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | 
   host.broadcastNear("hit", { attacker: attacker?.id ?? "", target: target.id, amount: dmg, weak, kind: target.kind, x: tp[0], y: tp[1], z: tp[2], kb: knockback ?? 0, kx, ky, kz }, tp, 120, [target.id, attacker?.id ?? ""]);
   host.onDamage(target, dmg, attacker, weak);
   return true;
+}
+
+/** Why an NPC took no damage from a hit: its flags (npcs.ts NF), else a shield took it. */
+function immuneReason(n: NpcActor): "spawning" | "evading" | "invulnerable" | "shield" {
+  const f = n.state.flags;
+  if (f & NF.SPAWNING) return "spawning";
+  if (f & NF.EVADING) return "evading";
+  if (f & NF.INVULN) return "invulnerable";
+  return "shield";
 }
 
 /** Splash damage around a point (friendly fire on; the owner takes half). */
