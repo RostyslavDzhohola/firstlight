@@ -452,3 +452,31 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   colliders are drawn as stone boxes (2 draws) before the probe and the warm-up, and a later arrival
   of the asset is ignored until the next visit (review round 1, S1). Why: Medium was already at
   ~290 draws against 250 (F10); triangles are cheap next to draws on Metal (#30560).
+- **D-sfx-1 (run, 10:00Z):** sound effects become ElevenLabs samples served like the boss lines:
+  never in git, a versioned set on the asset Worker at `/v/sfx-1/` (`config.sfxBase`,
+  `VITE_SFX_BASE`) with a `manifest.json` listing each sound's takes and playback gain. The client
+  (`audio/samples.ts`) fetches the manifest at start, decodes every file once and plays a random take
+  (never the same one twice in a row) with ±6 % pitch and −1.5 dB…0 level jitter. Any sound without a
+  loaded file plays its ZzFX preset (`audio/presets.ts`, mapping in `audio/sounds.ts`), so a missing
+  set, file or decode never silences an event; `?zzfx` skips the samples. The owner's "ping" was the
+  hit marker, a 1.6 kHz triangle on every landed hit (tutorial dummies included); it and the 900 Hz
+  UI blip also get soft low ZzFX stand-ins. Melee swings are per weapon (sword, staff, fists, axe and
+  hammer), magic bolts land with a magic hit, and weak-point hits have their own sound. Each sound is
+  levelled to the ZzFX sound it replaces (loudest 400 ms, K-weighted), with playback gain capped at
+  1.4 so peaks stay under full scale through the default bus. Loud ZzFX sustains (portal, comet,
+  Emberglass) therefore play 6–11 dB quieter. The prompts and processing are in `tools/sfx`, which
+  writes to `/tmp/fl-go/sfx`. Why: the owner asked for a sword swish, a magic wand and better weapon
+  and UI sounds. The boss-line rule (D18, ASSETS) keeps ElevenLabs output out of the CC BY repo, and
+  the manifest lets the owner drop a take without a client deploy.
+- **D-sfx-2 (run, 10:00Z):** ElevenLabs budget and terms for the SFX. The account had 678 of 40,000
+  credits left (Starter; resets 16 Oct 2026 19:53Z; the boss lines were already made). The
+  sound-effects API bills 10 credits per second of the requested `duration_seconds` (the
+  `character-cost` header: 0.5 s = 5, 1.5 s = 15), so the tools always set the duration. The first
+  set took 67 takes for 470 credits, keeping 65 files (412 KB), which leaves 208 credits for retakes
+  after the owner hears the preview. Terms (checked 15 Oct 2026):
+  - paid plans may use the output commercially (Terms of Use §1(c));
+  - the user keeps the rights in their output (§4(c)(ii)), and ElevenLabs keeps a licence to it (§4(d));
+  - the sound-effects FAQ (elevenlabs.io/sound-effects/commercial) says paid plans need no
+    attribution, and asks users not to use the output to build competing products.
+  So the files stay out of the repo and out of any reusable pack, and the set carries a `NOTICE.txt`.
+  Why: the owner set a hard limit of the credits left, with no top-up.

@@ -22,7 +22,7 @@ Code is MIT (`LICENSE`), our own art CC BY 4.0 (`LICENSE-ART`).
   plain DOM + CSS (D25). `src/render` renderer and quality tiers, `src/world` planet, props, NPC
   rendering, `src/game` loop, controller, combat/quest clients, photo mode, `src/net` Colyseus client
   and auth, `src/ui` HUD, panels and screens (`ui/README.md` is the HUD API), `src/social`,
-  `src/voice`, `src/audio` (ZzFX SFX, generated music).
+  `src/voice`, `src/audio` (SFX: ElevenLabs samples from the asset Worker with ZzFX stand-ins; generated music).
 - `apps/server`: Node 24, Express, Colyseus 0.18, Better Auth, SQLite (better-sqlite3). `src/world`
   holds `BodyRoom` (one room = one copy of one body) and the systems: `npc/`, `quests/`, `voice/`,
   destruction, sky. Also `src/auth`, `src/db` (game.db schema and migrations), `src/social`,
@@ -30,7 +30,8 @@ Code is MIT (`LICENSE`), our own art CC BY 4.0 (`LICENSE-ART`).
 - `packages/shared`: deterministic code both sides import: `planet/` (terrain height function, pads,
   portals), `content/` (catalogues), `net/` (protocol types, Colyseus schema, close codes). No DOM, no three.
 - `apps/assets-worker`: Cloudflare Worker serving large assets under `/v/<buildId>/…`.
-- `tools/bots` load-test bots; `tools/blender/characters` headless Blender build of the starter GLBs.
+- `tools/bots` load-test bots; `tools/blender/characters` headless Blender build of the starter GLBs;
+  `tools/sfx` ElevenLabs sound-effect generation and processing (writes to `/tmp`, never the repo).
 
 ## Commands
 
