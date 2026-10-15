@@ -4,6 +4,7 @@
 // refused steps slide sideways.
 
 import { nearSafeZone, padDirs, type BodyDef, type Dir, type Terrain } from "@firstlight/shared";
+import { structureCollider, type StructureCollider } from "@firstlight/shared/planet/town";
 import type { Locomotion } from "@firstlight/shared/content/npcs";
 import { NPC_RULES } from "@firstlight/shared/content/npcs";
 import type { V3 } from "../geometry.ts";
@@ -15,11 +16,13 @@ export interface Ground {
   R: number;
   water: number;
   pads: readonly Dir[];
+  /** The Portus town's structures (null on the planets): NPCs walk round the crates, trees and towers outside the walls. */
+  structures: StructureCollider | null;
 }
 
 export function makeGround(terrain: Terrain): Ground {
   const body = terrain.body;
-  return { terrain, body, R: body.radius, water: body.waterLevel, pads: body.terrain.kind === "hub" ? [] : padDirs(body) };
+  return { terrain, body, R: body.radius, water: body.waterLevel, pads: body.terrain.kind === "hub" ? [] : padDirs(body), structures: structureCollider(terrain) };
 }
 
 /** Max rise per metre walked (≈ 48°). */
@@ -73,6 +76,8 @@ export function step(g: Ground, pos: V3, t: V3, d: number, loco: Locomotion, hov
     if ((loco === "ground" || loco === "wade") && fh - curH > d * MAX_SLOPE + 0.25) continue;
     if (avoidSafe && nearSafeRing(g, qx, qy, qz, margin)) continue;
     const r = g.R + fh;
+    // Not through a structure (a step whose start is already inside one may leave it).
+    if (g.structures && g.structures.crosses(pos[0], pos[1], pos[2], ux * r, uy * r, uz * r)) continue;
     out[0] = ux * r;
     out[1] = uy * r;
     out[2] = uz * r;

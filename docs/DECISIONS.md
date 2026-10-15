@@ -472,10 +472,9 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   the border across both gate passages (one draw), and the compass's SAFE marker points at the
   nearer gate. Inside the walls (away from the gates and below the wall tops) the client draws no
   creeps (they are hidden by the walls anyway), so the NPC layer's ~10–14 draws stay off the plaza's
-  budget (D41). The server's shot and NPC-sight paths still ignore the town's walls (no shot crosses
-  the town: inside refuses them); generalised structure occlusion is the pad-outposts lane's
-  follow-up. No `PROTOCOL_VERSION` bump: the client's label and refusals read the server's flag,
-  and old clients draw the Portus creeps with the existing NPC layer. Why: the owner started in the
+  budget (D41). The town's walls stop combat too (D-zones-3). No `PROTOCOL_VERSION` bump: the
+  client's label and refusals read the server's flag, and old clients draw the Portus creeps with
+  the existing NPC layer. Why: the owner started in the
   castle, "fired" at the training dummies inside (tutorial `train` shots), walked out of the gate
   into what reads as danger, found shots refused ("Weapons are holstered in safe zones") and no
   creeps: "the safe zone was not on the inside, it was on the outside". Inside the walls safe,
@@ -497,6 +496,19 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   Clover Fields Hopbits 68 m from Dawnpad; H1 at a Cantor in view; M1 at Checkpoint Seven). H1
   and M1 still send players to their designed camps, not to the arrival packs; changing those
   missions is the owner's call. Why: "Where are all the creeps outside? Let's see the creeps."
+- **D-zones-3 (run, 2026-10-15, Codex review):** the Portus town's walls stop combat, and the town
+  protects at once. The town's indestructible structures (the shared `StructureCollider`, the same
+  solids movement uses) are the combat host's `walls`: they stop hitscan shots, pellets, chain
+  bolts, projectiles (a rocket bursts on the near side), melee, line of sight and Patchkit/chain
+  lines, shelter whoever stands behind them from blasts (breakable props keep their old rule), stop
+  NPC sight, NPC bolts and NPC strikes (from the strike's source to the player's chest), and NPCs
+  walk round the crates, trees and towers outside the walls. Combat tags: whoever is inside the
+  town walls is protected at once, tagged or not; the 10 s tag still holds on the pad rings (F12:
+  no running onto a pad mid-fight) and still blocks an instant logout everywhere. Why: Codex showed
+  a tagged player inside the walls taking carbine hits through 14 m of wall. The town is the one
+  place a new player must be able to trust, its 8 m walls and two gates make "inside" obvious, and
+  NPCs can't follow anyone in. The cost: a player can step out of a gate, shoot and step back in;
+  the gates are narrow and in plain view, and the planets' pad rings keep the stricter rule.
 - **D-sfx-1 (run, 10:00Z):** sound effects become ElevenLabs samples served like the boss lines:
   never in git, a versioned set on the asset Worker at `/v/sfx-1/` (`config.sfxBase`,
   `VITE_SFX_BASE`) with a `manifest.json` listing each sound's takes and playback gain. The client

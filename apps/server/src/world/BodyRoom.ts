@@ -249,6 +249,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       broadcast: (type, msg, except) => this.broadcast(type as never, msg as never, except ? { except: except.client } : undefined),
       broadcastNear: (type, msg, at, radius, always) => this.broadcastNear(type, msg, at, radius, always),
       onDamage: (target, amount, attacker) => this.afterDamage(target, attacker, amount),
+      // The town's walls stop shots, blasts, melee and sight (D-zones-3).
+      ...(structures ? { walls: structures } : {}),
     };
 
     // Load-test copies neither show nor touch the public world's piles (piles belong to a body, not a copy).
@@ -1189,8 +1191,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     for (const a of this.actors.values()) {
       const p = a.state;
       pushHistory(a, now);
-      // Safe-zone protection only applies once out of combat (no running onto a pad mid-fight).
-      const safe = isSafe(this.bodyDef, p.x, p.y, p.z) && now >= a.combatUntil;
+      // Pad rings protect only once out of combat (no running onto a pad mid-fight, F12); the Portus
+      // town protects whoever is inside its walls at once, combat tag or not (D-zones-3).
+      const safe = isSafe(this.bodyDef, p.x, p.y, p.z) && (this.bodyDef.terrain.kind === "hub" || now >= a.combatUntil);
       p.flags = safe ? p.flags | PF.SAFE : p.flags & ~PF.SAFE;
       if (a.protectedUntil <= now) p.flags &= ~PF.PROTECTED;
       if (now < a.combatUntil) p.flags |= PF.IN_COMBAT;

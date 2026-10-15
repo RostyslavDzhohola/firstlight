@@ -32,6 +32,12 @@ export interface CombatHost {
   onPropHit?(point: V3, power: "light" | "heavy", amount: number): void;
   /** Breakable props (set by destruction.ts): intact ones stop shots and take damage. */
   props?: BreakableHost;
+  /**
+   * Indestructible structures (the Portus town's walls, houses and towers: planet/town.ts, set by
+   * BodyRoom; D-zones-3): they stop shots, projectiles, chain bolts, melee and line of sight, and
+   * shelter whoever stands behind them from blasts. Never damaged.
+   */
+  walls?: WallHost;
   /** Prism Bubbles (set by support.ts): shots, projectiles and splash crossing a shell stop at it. */
   bubbles?: BubbleHost;
 }
@@ -57,16 +63,43 @@ export interface BreakableHost {
   arc(pos: V3, facing: V3, range: number, arcDeg: number, amount: number, cls: Destroys, weaponId: string, by: string | null): void;
 }
 
+/** Indestructible structures as seen by combat (planet/town.ts StructureCollider). */
+export interface WallHost {
+  /** Distance along a ray (unit d) to the first structure within maxT, or Infinity. */
+  raycast(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number): number;
+}
+
 const playerId = (a: PlayerActor | NpcActor | null): string | null => (a && a.kind === "player" ? a.id : null);
+
+/** propOnRay's index for an indestructible structure (never damaged; nobody stands inside one). */
+export const WALL_HIT = -2;
+
+/** Does a structure stand between two points (blasts, melee and NPC strikes don't reach past it)? */
+export function wallBetween(host: CombatHost, a: V3, b: V3): boolean {
+  if (!host.walls) return false;
+  const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+  const l = Math.hypot(dx, dy, dz);
+  if (l < 1e-6) return false;
+  return host.walls.raycast(a[0], a[1], a[2], dx / l, dy / l, dz / l, l) < l;
+}
 
 const propHit = { index: -1, t: Infinity };
 /**
- * First intact breakable along a ray, ignoring the first `skip` metres (camera rays start behind
- * the shooter's head: props there must not catch the aim). Returns a reused object or null.
+ * First intact breakable or structure along a ray, ignoring the first `skip` metres (camera rays
+ * start behind the shooter's head: props there must not catch the aim). A structure returns the
+ * index WALL_HIT. Returns a reused object or null.
  */
 function propOnRay(host: CombatHost, o: V3, d: V3, maxT: number, skip = 0): { index: number; t: number } | null {
-  if (!host.props || !(maxT > skip)) return null;
-  const h = host.props.raycast([o[0] + d[0] * skip, o[1] + d[1] * skip, o[2] + d[2] * skip], d, maxT - skip);
+  if ((!host.props && !host.walls) || !(maxT > skip)) return null;
+  const s: V3 = [o[0] + d[0] * skip, o[1] + d[1] * skip, o[2] + d[2] * skip];
+  const h = host.props?.raycast(s, d, maxT - skip) ?? null;
+  const propT = h ? h.t : Infinity;
+  const wallT = host.walls ? host.walls.raycast(s[0], s[1], s[2], d[0], d[1], d[2], Math.min(maxT - skip, propT)) : Infinity;
+  if (wallT < propT) {
+    propHit.index = WALL_HIT;
+    propHit.t = wallT + skip;
+    return propHit;
+  }
   if (!h) return null;
   propHit.index = h.index;
   propHit.t = h.t + skip;
@@ -390,7 +423,7 @@ function hitscan(host: CombatHost, p: PlayerActor, o: V3, d: V3, maxRange: numbe
   }
   if (!hit) {
     if (propIdx >= 0) host.props!.damage(propIdx, baseDamage * falloff(propT, def.range, def.falloffTo, def.falloffMin), def.destroys, def.id, d, p.id);
-    const endT = propIdx >= 0 ? propT : terrainT;
+    const endT = prop ? propT : terrainT;
     if (endT < maxRange) host.onPropHit?.([o[0] + d[0] * endT, o[1] + d[1] * endT, o[2] + d[2] * endT], def.destroys === "heavy" ? "heavy" : "light", baseDamage);
     return endT === Infinity ? null : endT;
   }
@@ -506,7 +539,7 @@ function chain(host: CombatHost, p: PlayerActor, o: V3, d: V3, def: WeaponDef, t
       host.bubbles!.absorb(shell.bubble, dmg);
     } else if (pr) {
       t = pr.t;
-      host.props!.damage(pr.index, dmg, def.destroys, def.id, hd, p.id);
+      if (pr.index >= 0) host.props!.damage(pr.index, dmg, def.destroys, def.id, hd, p.id);
     }
     end = [head[0] + hd[0] * t, head[1] + hd[1] * t, head[2] + hd[2] * t];
     // Where the bolt ends on something, report it like hitscan does (boss-arena cover listens).
@@ -555,7 +588,9 @@ export function melee(host: CombatHost, p: PlayerActor, heavy: boolean): FireRes
     if (a.id === p.id) continue;
     if (!canHurt(p, a, now)) continue;
     const ap = positionAgo(a, now, REWIND_MS);
-    if (inMeleeArc(pos, facing, ap, meleeDef.range, meleeDef.arc ?? 90)) targets.push({ a, d: dist3(pos, ap) });
+    if (!inMeleeArc(pos, facing, ap, meleeDef.range, meleeDef.arc ?? 90)) continue;
+    if (wallBetween(host, chestOf(p), chestOf(a))) continue; // not through a wall (D-zones-3)
+    targets.push({ a, d: dist3(pos, ap) });
   }
   targets.sort((x, y) => x.d - y.d);
   const slam = useHeavy && !!meleeTier.radius;
@@ -633,6 +668,8 @@ export function explode(host: CombatHost, owner: PlayerActor | NpcActor, at: V3,
     const d = dist3(at, actorPos(a));
     if (d > radius + 0.5) continue;
     if (shield.blocks(chestOf(a))) continue;
+    // A structure between the blast and the victim shelters it (D-zones-3; breakables don't).
+    if (wallBetween(host, at, chestOf(a))) continue;
     hits.push({ a, d });
   }
   for (const { a, d } of hits) {
@@ -643,7 +680,7 @@ export function explode(host: CombatHost, owner: PlayerActor | NpcActor, at: V3,
   host.onPropHit?.(at, "heavy", damage);
   // Breakable props in the blast (NPC blasts count as heavy too); not through a shell.
   const w = WEAPONS[weaponIndex];
-  host.props?.splash(at, radius, damage, owner.kind === "npc" ? "heavy" : (w?.destroys ?? "heavy"), w?.id ?? "", playerId(owner), excludeProp, (c) => shield.blocks(c));
+  host.props?.splash(at, radius, damage, owner.kind === "npc" ? "heavy" : (w?.destroys ?? "heavy"), w?.id ?? "", playerId(owner), excludeProp, (c) => shield.blocks(c) || wallBetween(host, at, c));
   shield.charge((b) => damage * splashFalloff(Math.max(0, dist3(at, b.c) - b.r), radius));
   host.broadcastNear("explode", { id: 0, x: at[0], y: at[1], z: at[2], radius, weapon: weaponIndex }, at, 200);
 }
@@ -748,16 +785,18 @@ function advance(host: CombatHost, p: Projectile, d: V3, step: number, now: numb
       else burst(at);
       return false;
     }
-    if (propIdx >= 0 && propT < left && propT <= terrainT) {
-      const at: V3 = [o[0] + d[0] * propT, o[1] + d[1] * propT, o[2] + d[2] * propT];
+    if (prop && propT < left && propT <= terrainT) {
+      // A structure: the burst stays on the near side of the wall, so its blast lines start outside it.
+      const back = propIdx === WALL_HIT ? 0.05 : 0;
+      const at: V3 = [o[0] + d[0] * (propT - back), o[1] + d[1] * (propT - back), o[2] + d[2] * (propT - back)];
       if (p.fuseAt !== null) {
-        // Grenades stop against the prop and wait for the fuse.
+        // Grenades stop against the prop (or wall) and wait for the fuse.
         moveTo(Math.max(0, propT - 0.2));
         p.stuck = true;
         return true;
       }
-      host.props!.damage(propIdx, p.damage, p.weapon.destroys, p.weapon.id, d, playerId(p.owner));
-      if (splash) explode(host, p.owner, at, p.tier.radius!, splash, wi, undefined, propIdx);
+      if (propIdx >= 0) host.props!.damage(propIdx, p.damage, p.weapon.destroys, p.weapon.id, d, playerId(p.owner));
+      if (splash) explode(host, p.owner, at, p.tier.radius!, splash, wi, undefined, propIdx >= 0 ? propIdx : undefined);
       else host.onPropHit?.(at, p.weapon.destroys === "heavy" ? "heavy" : "light", p.damage);
       burst(at);
       return false;

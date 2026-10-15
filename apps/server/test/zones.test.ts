@@ -31,6 +31,11 @@ const me = (r: Room) => st(r).players.get(r.sessionId);
 const pos = (s: { x: number; y: number; z: number }): V => [s.x, s.y, s.z];
 const d3 = (a: V, b: V) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 const R_PORTUS = BODIES.portus.radius;
+/** Metres between two points' spots on the ground (heights ignored). */
+const flatM = (a: V, b: V) => {
+  const la = Math.hypot(...a), lb = Math.hypot(...b);
+  return Math.hypot(a[0] / la - b[0] / lb, a[1] / la - b[1] / lb, a[2] / la - b[2] / lb) * R_PORTUS;
+};
 
 /** Portus town coordinates (east, north: metres from the pole, D38) → planet space at the radius. */
 function town(east: number, north: number): V {
@@ -99,13 +104,17 @@ async function attack(r: Room, weapon: string): Promise<{ ok: true; via: string 
 describe("Portus: the castle town is safe, outside the walls is wild (D-zones-1)", () => {
   it("the server's SAFE flag matches the shared zone everywhere a player can stand", async () => {
     const r = await join("zoner", "portus", 0);
-    const spots: [number, number][] = [[0, 0], [10, -5], [-20, -12], [30, 5], [44, 0], [0, 55], [-12, 60], [52, 0], [-52, 1], [0, -60], [70, 30], [-90, -80], [140, 0]];
+    const spots: [number, number][] = [[0, 0], [10, -5], [-20, -12], [30, 5], [44, 0], [0, 60], [-9, 50], [52, 0], [-52, 1], [0, -60], [70, 30], [-90, -80], [140, 0]];
     for (const [e, n] of spots) {
-      teleport(r, town(e, n));
-      await waitFor(() => d3(pos(me(r)), town(e, n)) < 4 || zoneAt(BODIES.portus, ...pos(me(r))).safe === !!(me(r).flags & PF.SAFE));
-      await new Promise((ok) => setTimeout(ok, 120)); // a tick or two for the flag
+      const want = town(e, n);
+      const expectSafe = zoneAt(BODIES.portus, ...want).safe;
+      teleport(r, want);
+      // Arrived there AND the server's flag says what the shared zone says (it times out otherwise).
+      await waitFor(() => flatM(pos(me(r)), want) < 3 && !!(me(r).flags & PF.SAFE) === expectSafe).catch(() => {
+        throw new Error(`at ${e}, ${n}: ${flatM(pos(me(r)), want).toFixed(1)} m off, flag ${me(r).flags & PF.SAFE}, zone ${expectSafe}`);
+      });
       const z = zoneAt(BODIES.portus, ...pos(me(r)));
-      expect(!!(me(r).flags & PF.SAFE), `at ${e}, ${n}`).toBe(z.safe);
+      expect(z.safe, `at ${e}, ${n}`).toBe(expectSafe);
       expect(z.kind, `at ${e}, ${n}`).toBe(Math.hypot(e, n) <= 46 || (Math.abs(e) <= 16 && n <= 64 && n >= 0) ? "town" : "wild");
     }
   });
@@ -166,7 +175,7 @@ describe("Portus: the castle town is safe, outside the walls is wild (D-zones-1)
     await waitFor(() => !!you && (you.xp > xp0 || you.level > 1));
   }, 40_000);
 
-  it("NPCs never walk into the town: Hopbits chasing a player to the east gate stop outside and give up", async () => {
+  it("NPCs never walk into the town: Hopbits chasing a tagged player to the east gate stop outside and give up at once", async () => {
     NPC_TUNING.ambient = true;
     const r = await join("bait", "portus", 0);
     teleport(r, town(76, -15)); // ~11 m from the east gate's Hopbits
@@ -190,24 +199,23 @@ describe("Portus: the castle town is safe, outside the walls is wild (D-zones-1)
     r.send("fire", shotAt(r, near.p)); // a fresh 10 s tag for the run in
     await new Promise((ok) => setTimeout(ok, 100));
     teleport(r, town(43.5, 0));
+    let hpInside = 0;
     await waitFor(() => zoneAt(BODIES.portus, ...pos(me(r))).safe);
-    const taggedInside = !(me(r).flags & PF.SAFE); // inside the zone, but still fair game
-    let evaded = false;
-    let closest = Infinity;
+    // Still combat-tagged, but inside the walls: protected at once (D-zones-3).
+    await waitFor(() => !!(me(r).flags & PF.SAFE));
+    expect(me(r).flags & PF.IN_COMBAT).toBeTruthy();
+    hpInside = me(r).hp;
     const t0 = Date.now();
-    while (Date.now() - t0 < 9000) {
+    while (Date.now() - t0 < 6000) {
       for (const n of hostiles()) {
         expect(zoneAt(BODIES.portus, ...n.p).safe).toBe(false);
         expect(nearSafeZone(BODIES.portus, ...n.p, NPC_RULES.safeMargin)).toBe(false);
-        closest = Math.min(closest, d3(n.p, pos(me(r))));
-        if (n.flags & NF.EVADING) evaded = true;
       }
       await new Promise((ok) => setTimeout(ok, 100));
     }
-    expect(taggedInside).toBe(true); // combat-tagged inside the gate: a real target they want
-    expect(closest).toBeLessThan(12); // they came to the gate after us
-    // …and gave up: evaded home once unreachable (or dropped us when the tag ran out).
-    expect(evaded || hostiles().every((n) => !(n.flags & NF.AGGRO))).toBe(true);
+    // They were on us at the gate (above), and gave us up: nobody hunts a player inside the walls.
+    expect(hostiles().every((n) => !(n.flags & NF.AGGRO))).toBe(true);
+    expect(me(r).hp).toBe(hpInside);
   }, 30_000);
 
   it("creeps are in view from both gates: a herd close by and a weak pack to walk to (levels 1–2)", async () => {
