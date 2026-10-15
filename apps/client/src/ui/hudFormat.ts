@@ -16,6 +16,22 @@ export function shownItem<T extends { id: string }>(item: T | null | undefined, 
   return item && !hidden.has(item.id) ? item : null;
 }
 
+/**
+ * The death screen's "Left in your pile": what the server put in the pile. Hidden items (the radio
+ * while voice is off) never land there (BodyRoom.kill), so they aren't listed or counted either.
+ */
+export function deathPile(
+  lastAlive: { hotbar: readonly (InvItem | null)[]; backpack: readonly (InvItem | null)[]; coins: number } | null,
+  hidden: ReadonlySet<string> = HIDDEN_ITEMS,
+): { items: InvItem[]; coins: number; note: string } {
+  const items = lastAlive ? [...lastAlive.hotbar, ...lastAlive.backpack].map((x) => shownItem(x, hidden)).filter((x): x is InvItem => !!x) : [];
+  const coins = lastAlive?.coins ?? 0;
+  const note = items.length || coins
+    ? "Your pile stays where you fell and never expires. Anyone can loot it, including the next you, if you can get back."
+    : "You weren't carrying anything this time.";
+  return { items, coins, note };
+}
+
 // ------------------------------------------------------------------------------------------------ damage numbers
 
 /** normal: white · weak point: yellow, 1.3×, "!" · armour-reduced: grey, small · shield: white, cyan outline. */

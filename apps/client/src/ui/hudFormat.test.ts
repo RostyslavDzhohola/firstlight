@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { WEAPON_BY_ID } from "@firstlight/shared/content/weapons";
-import { aliveParts, classifyKiller, formatDamage, HIDDEN_ITEMS, isLowHp, parsePrompt, prettyKind, shownItem, slotView, weaponChips } from "./hudFormat.ts";
+import { aliveParts, classifyKiller, deathPile, formatDamage, HIDDEN_ITEMS, isLowHp, parsePrompt, prettyKind, shownItem, slotView, weaponChips } from "./hudFormat.ts";
 
 describe("damage numbers", () => {
   it("formats each kind with text and shape cues, not colour alone", () => {
@@ -84,5 +84,33 @@ describe("hidden items (voice and the radio are off in this build, D-controls-1)
     expect(shownItem(null)).toBeNull();
     expect(shownItem(radio, new Set())).toBe(radio); // a build with voice
     expect(slotView(shownItem(radio), 1).empty).toBe(true);
+  });
+});
+
+describe("the death recap matches the pile the server left (a hidden radio never lands in it)", () => {
+  const radio = { id: "radio", tier: 1 as const, qty: 1 };
+  const axe = { id: "axe", tier: 1 as const, qty: 1 };
+  const tonic = { id: "tonic_small", tier: 1 as const, qty: 3 };
+  const NOTHING = "You weren't carrying anything this time.";
+
+  it("a mixed inventory lists and counts everything but the radio", () => {
+    const r = deathPile({ hotbar: [axe, null, radio, null], backpack: [tonic, radio, null], coins: 0 });
+    expect(r.items).toEqual([axe, tonic]);
+    expect(r.note).not.toBe(NOTHING);
+  });
+
+  it("a radio-only inventory is an empty pile: 0 items and the nothing-carried line (unless there are coins)", () => {
+    const r = deathPile({ hotbar: [null, null, null, null], backpack: [radio], coins: 0 });
+    expect(r.items).toEqual([]);
+    expect(r.note).toBe(NOTHING);
+    const withCoins = deathPile({ hotbar: [radio, null, null, null], backpack: [], coins: 12 });
+    expect(withCoins.items).toEqual([]);
+    expect(withCoins.coins).toBe(12);
+    expect(withCoins.note).not.toBe(NOTHING);
+  });
+
+  it("builds with voice list the radio like any item", () => {
+    expect(deathPile({ hotbar: [radio], backpack: [], coins: 0 }, new Set()).items).toEqual([radio]);
+    expect(deathPile(null).items).toEqual([]);
   });
 });
