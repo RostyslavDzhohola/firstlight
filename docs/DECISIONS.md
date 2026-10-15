@@ -468,10 +468,14 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   robust teardown with no leak risk; the cached bundle makes Continue as fast as before.
 - **D-home-3 (run, 2026-10-15 05:20Z):** `GET /api/home` is public and shows display names only:
   per-body counts with up to 12 in-world names each (the names every player already sees above heads
-  and in the Tab list; load-test bots excluded), the top 10 live characters by level and by medal
-  count (accounts with a chosen display name only; banned accounts and dead characters left out) and
-  the claimed Hall of Firsts plaques. No ids, emails, positions or room copies. Cached (online 3 s,
-  board 60 s) and limited to 30 requests per address per minute (IPv6 per /64). There is no "hide me
+  and in the Tab list; load-test bots excluded), the top 10 live characters by level, the top 10
+  accounts by medal count (medals survive death, so an account between lives stays on that board),
+  both for accounts with a chosen display name only and never banned ones, and the claimed Hall of
+  Firsts plaques. No ids, emails, positions or room copies. Cached (online 3 s, board 60 s) and
+  limited to 30 requests per address per minute (IPv6 per /64), keyed by `directRequestIp`, the
+  helper `/api/play`'s per-address limits and IP bans use. Both boards read their top rows from
+  indexes (migration 6: `character_rank`, and `medal_count` kept by triggers on `medal`), so a
+  refresh costs well under a millisecond at 100,000 characters instead of ~120 ms of sorting each. There is no "hide me
   from the home page" setting yet; add one if players ask. Why: the owner asked for names "if
   privacy allows"; public names that are already public in the world, nothing more.
 - **D-home-4 (run, 2026-10-15 05:20Z):** DataFast (6f) is optional on both sides. The client build

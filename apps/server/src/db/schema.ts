@@ -173,6 +173,33 @@ export const MIGRATIONS: readonly string[] = [
     muted_at  INTEGER NOT NULL
   );
   `,
+  // 6 (lane home-page): the public leaderboard reads its top rows from indexes instead of sorting
+  // every character (D-home-3). Medal counts per account are kept by triggers on \`medal\` (awards,
+  // merges and prunes all go through inserts and deletes there). Idempotent, so it can be renumbered.
+  `
+  CREATE INDEX IF NOT EXISTS character_rank ON character(level DESC, xp DESC, updated_at);
+  CREATE TABLE IF NOT EXISTS medal_count (
+    user_id  TEXT PRIMARY KEY,
+    n        INTEGER NOT NULL,
+    last_at  INTEGER NOT NULL
+  );
+  INSERT OR REPLACE INTO medal_count (user_id, n, last_at) SELECT user_id, COUNT(*), MAX(earned_at) FROM medal GROUP BY user_id;
+  CREATE INDEX IF NOT EXISTS medal_count_rank ON medal_count(n DESC, last_at);
+  CREATE TRIGGER IF NOT EXISTS medal_count_insert AFTER INSERT ON medal BEGIN
+    INSERT INTO medal_count (user_id, n, last_at) VALUES (NEW.user_id, 1, NEW.earned_at)
+      ON CONFLICT(user_id) DO UPDATE SET n = n + 1, last_at = MAX(last_at, excluded.last_at);
+  END;
+  CREATE TRIGGER IF NOT EXISTS medal_count_delete AFTER DELETE ON medal BEGIN
+    UPDATE medal_count SET n = n - 1, last_at = COALESCE((SELECT MAX(earned_at) FROM medal WHERE user_id = OLD.user_id), 0) WHERE user_id = OLD.user_id;
+    DELETE FROM medal_count WHERE user_id = OLD.user_id AND n <= 0;
+  END;
+  CREATE TRIGGER IF NOT EXISTS medal_count_update AFTER UPDATE OF user_id, earned_at ON medal BEGIN
+    UPDATE medal_count SET n = n - 1, last_at = COALESCE((SELECT MAX(earned_at) FROM medal WHERE user_id = OLD.user_id), 0) WHERE user_id = OLD.user_id;
+    DELETE FROM medal_count WHERE user_id = OLD.user_id AND n <= 0;
+    INSERT INTO medal_count (user_id, n, last_at) VALUES (NEW.user_id, 1, NEW.earned_at)
+      ON CONFLICT(user_id) DO UPDATE SET n = n + 1, last_at = MAX(last_at, excluded.last_at);
+  END;
+  `,
 ];
 
 /** Apply every migration newer than the database's user_version, each in its own transaction. */

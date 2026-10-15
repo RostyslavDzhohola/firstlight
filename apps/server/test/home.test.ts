@@ -6,7 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newCharacter } from "@firstlight/shared/content/character";
 import type { HomeData } from "@firstlight/shared/net/home";
 import type { Game } from "../src/app.ts";
-import { awardMedal, banUser, claimFirst, ensureAccount, medalLeaders, openGameDb, setDisplayName, setTitleMedal, topLevels, type Db } from "../src/db/index.ts";
+import Database from "better-sqlite3";
+import { awardMedal, banUser, claimFirst, ensureAccount, leaderboardPlans, linkAccounts, medalLeaders, openGameDb, setDisplayName, setTitleMedal, topLevels, type Db } from "../src/db/index.ts";
+import { migrate, MIGRATIONS } from "../src/db/schema.ts";
 import { dataFastVisits } from "../src/ops/datafast.ts";
 import { HOME_LIMITS, mountHome, onlineSnapshot, readBoard } from "../src/ops/home.ts";
 import { SqliteCharacterRepo } from "../src/world/sqliteStores.ts";
@@ -79,6 +81,90 @@ describe("leaderboard reads", () => {
       { id: "E2", name: "Wren_07", foundAt: 5000 },
     ]);
   });
+});
+
+describe("leaderboard at scale (migration 6)", () => {
+  let db: Db;
+  beforeEach(() => {
+    db = openGameDb(":memory:");
+  });
+  afterEach(() => db.close());
+
+  it("keeps medal counts through awards, merges and deletes, and keeps a dead holder on the medal board", () => {
+    seed(db, "u1", "Wren_07", 5);
+    seed(db, "u2", "Mossback", 9, 0, { dead: true }); // between lives: off the levels board only
+    seed(db, "g1", null, 3);
+    awardMedal(db, "u1", "spark", 10);
+    awardMedal(db, "u1", "spark", 99); // already earned: ignored, no double count
+    awardMedal(db, "u2", "spark", 20);
+    awardMedal(db, "u2", "ten_down", 30);
+    awardMedal(db, "g1", "grand_tour", 5);
+    awardMedal(db, "g1", "spark", 6);
+    expect(topLevels(db).map((r) => r.name)).toEqual(["Wren_07"]);
+    expect(medalLeaders(db).map((r) => [r.name, r.medals])).toEqual([["Mossback", 2], ["Wren_07", 1]]);
+    // A guest saved into Wren's account: medals union (spark is shared), the guest's rows go.
+    linkAccounts(db, "g1", "u1");
+    expect(medalLeaders(db).map((r) => [r.name, r.medals])).toEqual([["Wren_07", 2], ["Mossback", 2]]); // tie: Wren's two medals are older
+    expect(db.prepare("SELECT n FROM medal_count WHERE user_id = 'g1'").get()).toBeUndefined();
+    db.prepare("DELETE FROM medal WHERE user_id = 'u2'").run(); // a pruned account
+    expect(medalLeaders(db).map((r) => [r.name, r.medals])).toEqual([["Wren_07", 2]]);
+    expect(db.prepare("SELECT n, last_at FROM medal_count WHERE user_id = 'u1'").get()).toEqual({ n: 2, last_at: 10 });
+  });
+
+  it("backfills the counts when an existing database migrates", () => {
+    const old = new Database(":memory:");
+    try {
+      for (let v = 0; v < 5; v++) old.exec(MIGRATIONS[v]!);
+      old.pragma("user_version = 5");
+      old.prepare("INSERT INTO medal (user_id, medal_id, earned_at) VALUES ('a', 'spark', 1), ('a', 'ten_down', 7), ('b', 'spark', 3)").run();
+      migrate(old);
+      expect(old.prepare("SELECT user_id, n, last_at FROM medal_count ORDER BY user_id").all()).toEqual([
+        { user_id: "a", n: 2, last_at: 7 },
+        { user_id: "b", n: 1, last_at: 3 },
+      ]);
+    } finally {
+      old.close();
+    }
+  });
+
+  it("reads both boards from an index, fast, with 100,000 named characters", () => {
+    const plans = leaderboardPlans(db);
+    for (const p of [plans.levels, plans.medals]) expect(p.join(" | ")).not.toMatch(/TEMP B-TREE/);
+    expect(plans.levels.join(" | ")).toMatch(/USING INDEX character_rank/);
+    expect(plans.medals.join(" | ")).toMatch(/USING INDEX medal_count_rank/);
+
+    const N = 100_000;
+    const acc = db.prepare("INSERT INTO account (user_id, display_name, created_at, last_seen_at) VALUES (?, ?, 1, 1)");
+    const chr = db.prepare("INSERT INTO character (user_id, starter, level, xp, coins, hp, body, pos_x, pos_y, pos_z, life_started_at, updated_at) VALUES (?, 'ash', ?, ?, 0, 100, 'arcadia', 0, 0, 0, 1, ?)");
+    const med = db.prepare("INSERT INTO medal (user_id, medal_id, earned_at) VALUES (?, ?, ?)");
+    const ids = ["spark", "ten_down", "grand_tour", "cartographer"];
+    db.transaction(() => {
+      for (let i = 0; i < N; i++) {
+        const id = `p${i}`;
+        acc.run(id, `Player_${i}`);
+        chr.run(id, 1 + ((i * 7919) % 20), (i * 104729) % 50_000, i);
+        for (let m = 0; m < (i * 31) % 5; m++) med.run(id, ids[m]!, i + m);
+      }
+    })();
+    const time = (fn: () => unknown) => {
+      const runs: number[] = [];
+      for (let k = 0; k < 5; k++) {
+        const t = performance.now();
+        fn();
+        runs.push(performance.now() - t);
+      }
+      return runs.sort((a, b) => a - b)[2]!; // median
+    };
+    const levels = time(() => topLevels(db));
+    const medals = time(() => medalLeaders(db));
+    expect(topLevels(db)).toHaveLength(10);
+    expect(topLevels(db)[0]!.level).toBe(20);
+    expect(medalLeaders(db)[0]!.medals).toBe(4);
+    // Unindexed, these took 114 ms and 127 ms (review); indexed they're well under a millisecond.
+    // The bound is generous because the suite shares a loaded machine.
+    expect(levels).toBeLessThan(40);
+    expect(medals).toBeLessThan(40);
+  }, 120_000);
 });
 
 describe("DataFast visit counts", () => {
