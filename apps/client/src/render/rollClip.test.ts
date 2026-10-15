@@ -4,13 +4,14 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 
 vi.stubGlobal("location", { search: "?nochars", hostname: "localhost" });
 
-const dir = decodeURIComponent(new URL("../../public/assets-dev/", import.meta.url).pathname);
+const dir = fileURLToPath(new URL("../../public/assets-dev/", import.meta.url));
 
 interface Pose {
   /** Pelvis tilt from the idle stance (degrees). */
