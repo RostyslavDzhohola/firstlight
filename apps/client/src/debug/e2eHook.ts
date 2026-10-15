@@ -26,7 +26,7 @@
 // elsewhere shows up as a null field, not a crashed hook.
 
 import { bearingTo, headingOf, surfaceDistance, type V3 } from "../social/compassMath.ts";
-import { detectFlaps, detectFlashes, frameStats, meanLuma, Ring, screenAim, type Flash } from "./e2eProbe.ts";
+import { detectFlaps, detectFlashes, frameStats, lumaWorkerSource, meanLuma, Ring, screenAim, type Flash } from "./e2eProbe.ts";
 
 // ---------------------------------------------------------------------------------------------- structural views
 
@@ -329,6 +329,14 @@ export function installE2eHook(win: Window & typeof globalThis): void {
     const every = Math.max(1, Math.floor(opts.every ?? 2));
     const w = opts.width ?? 32;
     const h = opts.height ?? 18;
+    // The pixel readback runs in a worker (lumaWorkerSource): on the main thread it waited for the
+    // GPU inside the game's frames. Main-thread fallback where workers can't draw bitmaps.
+    let worker: Worker | null = null;
+    let workerUrl = "";
+    if (typeof Worker !== "undefined" && typeof OffscreenCanvas !== "undefined") {
+      workerUrl = URL.createObjectURL(new Blob([lumaWorkerSource()], { type: "text/javascript" }));
+      worker = new Worker(workerUrl);
+    }
     const small = document.createElement("canvas");
     small.width = w;
     small.height = h;
@@ -350,7 +358,15 @@ export function installE2eHook(win: Window & typeof globalThis): void {
       pending = true;
       const t = performance.now();
       // Same task as the render: the drawing buffer still holds this frame (WebGL and WebGPU alike).
-      createImageBitmap(canvas, { resizeWidth: w, resizeHeight: h, resizeQuality: "low" })
+      const shot = createImageBitmap(canvas, { resizeWidth: w, resizeHeight: h, resizeQuality: "low" });
+      if (worker) {
+        shot.then((bmp) => worker!.postMessage({ bmp, t, w, h }, [bmp])).catch(() => {
+          state.errors++;
+          pending = false;
+        });
+        return result;
+      }
+      shot
         .then((bmp) => {
           c2d.clearRect(0, 0, w, h);
           c2d.drawImage(bmp, 0, 0);
@@ -376,7 +392,20 @@ export function installE2eHook(win: Window & typeof globalThis): void {
       if (flips.length > 5000) flips.splice(0, flips.length - 5000);
     });
     mo.observe(document.body, { subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ["hidden"] });
+    if (worker) {
+      worker.onmessage = (e: MessageEvent<{ t: number; v?: number; error?: string }>) => {
+        pending = false;
+        if (typeof e.data.v === "number") luma.push(e.data.t, e.data.v);
+        else state.errors++;
+      };
+      worker.onerror = () => {
+        pending = false;
+        state.errors++;
+      };
+    }
     state.stop = () => {
+      worker?.terminate();
+      if (workerUrl) URL.revokeObjectURL(workerUrl);
       mo.disconnect();
       if (own) ctx.render = original;
       else delete (ctx as { render?: unknown }).render;

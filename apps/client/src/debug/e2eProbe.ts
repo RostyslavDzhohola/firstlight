@@ -89,6 +89,29 @@ export function meanLuma(rgba: ArrayLike<number>): number {
   return n ? sum / n : 0;
 }
 
+/**
+ * Source of the blink probe's readback worker: it draws each small ImageBitmap of the canvas onto
+ * an OffscreenCanvas and answers `{ t, v }` (mean luma) or `{ t, error }`. Reading pixels back
+ * waits for the GPU to finish the frame; on the page's main thread that wait landed in the game's
+ * own frames (WebGL, a busy GPU: 100–200 ms frames that the journeys then counted as stalls).
+ */
+export function lumaWorkerSource(): string {
+  return `const luma = (${meanLuma.toString()});
+let c = null;
+self.onmessage = (e) => {
+  const { bmp, t, w, h } = e.data;
+  try {
+    if (!c || c.canvas.width !== w || c.canvas.height !== h) c = new OffscreenCanvas(w, h).getContext("2d", { willReadFrequently: true });
+    c.clearRect(0, 0, w, h);
+    c.drawImage(bmp, 0, 0);
+    bmp.close();
+    self.postMessage({ t, v: luma(c.getImageData(0, 0, w, h).data) });
+  } catch (err) {
+    self.postMessage({ t, error: String(err) });
+  }
+};`;
+}
+
 export interface Flash {
   /** Time of the odd sample. */
   t: number;
