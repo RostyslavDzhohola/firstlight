@@ -7,7 +7,7 @@ import type { BodyId } from "@firstlight/shared";
 import { HORSE_WHISTLE } from "@firstlight/shared/content/horse";
 import { COSMETIC_BY_ID, COSMETIC_SLOTS, RARITY_STYLE, SHOP, SHOP_KEEPER, SHOP_NAME, isExtraCosmetic, itemName, sellValue, type ShopCategory } from "@firstlight/shared/content/items";
 import { MEDALS } from "@firstlight/shared/content/medals";
-import { GUIDES, MISSION_BY_ID, MISSIONS, missionsOn, type MissionDef } from "@firstlight/shared/content/missions";
+import { GUIDES, MISSION_BY_ID, MISSIONS, missionsOn, trackedMission, type MissionDef } from "@firstlight/shared/content/missions";
 import type { InvItem } from "@firstlight/shared/net/protocol";
 import type { Game } from "../game/Game.ts";
 import type { Hud, MissionLine, YouPlus } from "./hud.ts";
@@ -409,20 +409,23 @@ export class MissionTracker {
 
   constructor(private readonly hud: Pick<Hud, "setMissions"> | HTMLElement) {}
 
-  update(you: YouPlus | null) {
+  /** `body`: where the player is (the tracked mission is the first open one given out here). */
+  update(you: YouPlus | null, body: BodyId) {
     const all = you?.missions ?? [];
-    const key = JSON.stringify(all);
+    const key = JSON.stringify([all, body]);
     if (key === this.last || this.hud instanceof HTMLElement) return;
     this.last = key;
-    // Open missions first, then the ones done this life; at most three lines.
-    const rows = [...all.filter((m) => !m.done), ...all.filter((m) => m.done)].slice(0, 3);
+    // The tracked mission (the one the mission pointer follows: missions.ts trackedMission), the
+    // other open ones, then the ones done this life; at most three lines.
+    const tracked = trackedMission(all, body);
+    const rows = [...(tracked ? [tracked] : []), ...all.filter((m) => !m.done && m !== tracked), ...all.filter((m) => m.done)].slice(0, 3);
     const lines: MissionLine[] = [];
-    let body = "";
+    let planet = "";
     let guide = "";
     rows.forEach((m, i) => {
       const def = MISSION_BY_ID.get(m.id);
       if (!def) return;
-      body ||= def.body[0]!.toUpperCase() + def.body.slice(1);
+      planet ||= def.body[0]!.toUpperCase() + def.body.slice(1);
       guide ||= def.guide;
       lines.push({
         id: m.id,
@@ -432,7 +435,7 @@ export class MissionTracker {
         state: m.done ? "done" : i === 0 ? "tracked" : "open",
       });
     });
-    this.hud.setMissions(lines, [guide, body].filter(Boolean).join(" · "));
+    this.hud.setMissions(lines, [guide, planet].filter(Boolean).join(" · "));
   }
 
   dispose() {

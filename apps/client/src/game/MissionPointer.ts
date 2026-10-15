@@ -1,11 +1,11 @@
-// The tracked hunt mission's world callout (D-zones-2): on a planet, the first open mission given
-// out there (the HUD tracker's tracked one, unless an older planet's mission is still open) points
-// at the nearest creep in view that counts for it, or at its area. Pinned to the screen edge with
-// an arrow when the point is off screen (placeCallout).
+// The tracked hunt mission's world callout (D-zones-2): on a planet, the mission the HUD tracker
+// tracks (missions.ts trackedMission) points at the nearest creep in view whose kill would count
+// (the server's huntTargets), or at its area. Pinned to the screen edge with an arrow when the point
+// is off screen (placeCallout).
 
 import "../ui/missionPointer.css";
 import * as THREE from "three/webgpu";
-import { MISSION_BY_ID, missionGoal } from "@firstlight/shared/content/missions";
+import { MISSION_BY_ID, missionGoal, trackedMission } from "@firstlight/shared/content/missions";
 import { placeCallout } from "../ui/calloutPlace.ts";
 import { el } from "../ui/dom.ts";
 import type { Game } from "./Game.ts";
@@ -30,6 +30,8 @@ class MissionPointer implements ClientSystem {
   private pickedAt = -Infinity;
   private last = { text: "", key: "" };
   private boxSize: { w: number; h: number } | null = null;
+  /** The server's huntTargets (null until the first one: an older server never sends it). */
+  private hunt: { id: string; npcs: ReadonlySet<string> } | null = null;
 
   constructor(game: Game) {
     this.game = game;
@@ -43,6 +45,10 @@ class MissionPointer implements ClientSystem {
     this.box = el("div", "fl-callout__box fl-holo", this.callout);
     this.title = el("span", "", this.box);
     this.sub = el("small", "", this.box);
+    game.net.room?.onMessage("huntTargets", (m: { id: string; npcs: string[] }) => {
+      this.hunt = { id: m.id, npcs: new Set(m.npcs) };
+      this.pickedAt = -Infinity; // re-pick on the next frame
+    });
   }
 
   update(_dt: number, now: number) {
@@ -52,14 +58,15 @@ class MissionPointer implements ClientSystem {
     const p = g.player.pos;
     if (now - this.pickedAt >= PICK_MS) {
       this.pickedAt = now;
-      // The first open mission given out on this planet (missions from other planets can't point here).
-      const open = g.hud.you?.missions.find((m) => !m.done && MISSION_BY_ID.get(m.id)?.body === g.bodyId);
+      // The HUD tracker's mission; missions from other planets don't point here (missionTarget).
+      const open = trackedMission(g.hud.you?.missions ?? [], g.bodyId);
       const def = open ? MISSION_BY_ID.get(open.id) : undefined;
       this.mission = def ? `${def.name} · ${open!.progress}/${missionGoal(def)}` : "";
       const npcs: PointerNpc[] = [];
-      (room.state as any).npcs?.forEach((n: any) => npcs.push(n));
+      (room.state as any).npcs?.forEach((n: any, id: string) => npcs.push({ id, kind: n.kind, hp: n.hp, x: n.x, y: n.y, z: n.z }));
       const terrain = g.planet.terrain;
-      this.target = def ? missionTarget(def, g.bodyId, [p.x, p.y, p.z], npcs, (x, y, z) => terrain.groundHeight(x, y, z)) : null;
+      const eligible = this.hunt && open && this.hunt.id === open.id ? this.hunt.npcs : null;
+      this.target = def ? missionTarget(def, g.bodyId, [p.x, p.y, p.z], npcs, (x, y, z) => terrain.groundHeight(x, y, z), { eligible, counts: open!.counts }) : null;
     }
     const t = this.target;
     if (!t || g.photo?.active) return this.hide();

@@ -490,9 +490,13 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   150 m, full detail within 45 m), so Meridian showed nothing on arrival. Also: an attack the
   server refuses for "protected" (the 5 s after arriving), "swimming", "mounted", "overheated" or
   "safe zone" now shows a toast (one per reason per 1.5 s), and melee refusals are sent as
-  `denied` like ranged ones. The tracked hunt mission (the HUD tracker's first open one) gets a
-  world callout, pinned to the screen edge when off screen: the nearest creep in view that counts
-  for it (by kind, inside the mission's area when it has one), else the area (A1 points at the
+  `denied` like ranged ones. The tracked hunt mission (missions.ts `trackedMission`: the first open
+  mission given out on this planet, else the first open one; the HUD tracker and the pointer share
+  it) gets a world callout, pinned to the screen edge when off screen: the nearest creep in view
+  whose kill would count, else the area. Which creeps count is the server's answer: `huntTargets`
+  {id, npcs} lists the tracked hunt's NPCs within 110 m by the kill-credit rule itself
+  (`huntCredit`: kind, the NPC's spawn area for place-bound hunts, quotas from the per-target
+  `counts` now in `you.missions`), sent when the list changes (A1 points at the
   Clover Fields Hopbits 68 m from Dawnpad; H1 at a Cantor in view; M1 at Checkpoint Seven). H1
   and M1 still send players to their designed camps, not to the arrival packs; changing those
   missions is the owner's call. Why: "Where are all the creeps outside? Let's see the creeps."
