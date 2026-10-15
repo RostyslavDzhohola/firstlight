@@ -27,6 +27,9 @@
 .fl-home__tag { max-width: calc(29 * var(--u)); font-size: var(--t-md); text-wrap: pretty; }
 .fl-home__notice { display: flex; align-items: center; gap: .6em; padding: calc(.55 * var(--u)) calc(.9 * var(--u)); border: 1px solid rgba(255, 217, 155, .35); border-radius: var(--r-2); background: rgba(243, 174, 91, .1); font-size: var(--t-sm); color: var(--dawn-4); animation: fl-rise-in var(--dur-3) var(--ease-out) both; }
 .fl-home__notice .li { color: var(--dawn-3); }
+.fl-home__notice.is-error { border-color: rgba(255, 111, 94, .45); background: rgba(255, 111, 94, .1); color: #ffd2c9; }
+.fl-home__notice.is-error .li { color: var(--danger); }
+.fl-home__notice .fl-btn { margin-left: auto; }
 
 .fl-home__cta { display: flex; flex-wrap: wrap; align-items: center; gap: calc(.9 * var(--u)) calc(1.4 * var(--u)); margin: calc(.6 * var(--u)) 0 calc(.4 * var(--u)) 8px; }
 .fl-home__cta .fl-landing__play { min-width: calc(15 * var(--u)); }

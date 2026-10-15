@@ -5,11 +5,12 @@
 
 import type { HomeBoard, HomeData, HomeOnline, HomeVisits } from "@firstlight/shared/net/home";
 import { config } from "../config.ts";
-import { el, icon, sprite } from "../ui/dom.ts";
+import { button, el, icon, sprite } from "../ui/dom.ts";
 import { shareRow } from "../ui/share.ts";
 import { installSprites, portraitSprite } from "../ui/sprites.ts";
 import { fmtNum, hallRows, namesLine, progressView, visitsLine, worldCards, type MeInfo } from "./homeModel.ts";
 import { takeHomeNotice, type HomeNotice } from "./leave.ts";
+import { signOutSession } from "./signOut.ts";
 
 const POLL_MS = 20_000;
 type Tab = "levels" | "hall" | "medals";
@@ -139,10 +140,17 @@ export function renderVisits(visits: HomeVisits | null, ourOnline: number | null
 export interface MeState {
   me: MeInfo | null;
   notice: HomeNotice | null;
+  /** A failed sign-out: shown with a retry; the account stays on the page. */
+  error?: string | null;
+}
+
+export interface MeActions {
+  save(): void;
+  signOut(): void;
 }
 
 /** My progress, the account corner, the Play label and the guest's Save button. */
-export function renderMe({ me, notice }: MeState, actions?: { save(): void }): void {
+export function renderMe({ me, notice, error }: MeState, actions?: MeActions): void {
   const card = $("home-progress");
   const has = !!me && (!!me.character || me.medals.length > 0 || !!me.displayName);
   const v = has ? progressView(me!, Number(localStorage.getItem("fl.starter") ?? 0) || 0) : null;
@@ -180,12 +188,17 @@ export function renderMe({ me, notice }: MeState, actions?: { save(): void }): v
     if (actions) save.onclick = () => actions.save();
   }
 
-  // Logged-out notice.
+  // Notices: a failed sign-out (with a retry), else the logged-out line.
   const n = $("home-notice");
   if (n) {
-    n.hidden = !notice;
+    n.hidden = !error && !notice;
+    n.classList.toggle("is-error", !!error);
     n.replaceChildren();
-    if (notice === "logged-out") {
+    if (error) {
+      icon("alert", "", n);
+      el("span", "", n, error);
+      if (actions) button("Try again", "fl-btn fl-btn--sm", n, () => actions.signOut());
+    } else if (notice === "logged-out") {
       icon("check", "", n);
       n.append(saved || !v ? `Logged out. ${v ? v.name : "Your character"} is saved where you left it.` : "Logged out. Your guest character waits in this browser. Save it to play anywhere.");
     }
@@ -281,7 +294,7 @@ export async function initHome(): Promise<void> {
     if (data) renderBoard(data.board, tab);
     renderVisits(data?.visits ?? null, data ? data.online.total : null);
   };
-  const actions = { save: () => void saveProgress() };
+  const actions: MeActions = { save: () => void saveProgress(), signOut: () => void signOut() };
   const paintMe = () => renderMe(state, actions);
   const refreshMe = async () => {
     state.me = await fetchMe();
@@ -305,22 +318,34 @@ export async function initHome(): Promise<void> {
     }
   });
 
-  $("signout")?.addEventListener("click", async () => {
+  let signingOut = false;
+  async function signOut() {
+    if (signingOut) return;
+    signingOut = true;
     const b = $<HTMLButtonElement>("signout");
     if (b) b.disabled = true;
+    let ok = false;
     try {
       const auth = await import("../net/auth.ts");
-      await auth.authClient().signOut().catch(() => {});
-      auth.invalidatePlayToken();
+      const r = await signOutSession(auth.authClient());
+      auth.invalidatePlayToken(); // either way: the next token comes from whatever session is left
+      ok = r.ok;
+      state.error = r.ok ? null : r.message;
+    } catch {
+      state.error = "Couldn't load the sign-out. Check your connection and try again.";
     } finally {
+      signingOut = false;
       if (b) b.disabled = false;
     }
-    // The next player on this browser starts fresh (a signed-in account restores these from the server).
-    for (const k of ["fl.starter", "fl.palette", "fl.body"]) localStorage.removeItem(k);
-    state.notice = null;
-    state.me = null;
-    paintMe();
-  });
+    if (ok) {
+      // The next player on this browser starts fresh (a signed-in account restores these from the server).
+      for (const k of ["fl.starter", "fl.palette", "fl.body"]) localStorage.removeItem(k);
+      state.notice = null;
+      state.me = null;
+    }
+    paintMe(); // on failure the account stays, with the error and a retry
+  }
+  $("signout")?.addEventListener("click", () => void signOut());
 
   paintData();
   paintMe();
