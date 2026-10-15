@@ -14,8 +14,8 @@
 //   blades read as dense cover rather than stubble on a lawn.
 // - Rocks: a moss blend on up-facing rock surfaces.
 //
-// - Grade: AgX tone mapping (softer highlight roll-off, less neon greens) plus a little contrast
-//   and saturation after the per-body grade.
+// - Grade: ACES tone mapping (deeper sky, natural greens) plus a little contrast and saturation
+//   after the per-body grade.
 //
 // `?meadow=nograde,noclouds,nograss,noground,norocks` switches single pieces off for A/B.
 
@@ -52,8 +52,6 @@ export const meadowUniforms = {
 // ---------------------------------------------------------------------------------------------
 // Meadow grass
 
-/** Clumps per tier grass instance. */
-export const MEADOW_DENSITY = 1;
 /** Grass cells whose centre is nearer than this (m) use the full clump; farther ones the lite one. */
 export const MEADOW_NEAR = 14;
 

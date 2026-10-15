@@ -454,7 +454,7 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   ~290 draws against 250 (F10); triangles are cheap next to draws on Metal (#30560).
 - **D-gfx-1 (2026-10-15 06:10Z):** Graphics uplift (HANDOFF 6g) is studied, not rebuilt: keep three.js
   r186 WebGPU/TSL; the prototype of the top changes (meadow grass clumps with flower drifts, a
-  planet-fixed cloud layer, olive ground, rock moss, AgX + S-curve grade) lives behind `?meadow`, off
+  planet-fixed cloud layer, olive ground, rock moss, ACES + S-curve grade) lives behind `?meadow`, off
   by default and client only, until the owner picks what ships (`docs/research/graphics-uplift.md`).
   Grass clumps are geometry, not alpha cards, and keep one draw per cell (near cells full clumps,
   far cells lite clumps sharing the instance buffers). Why: the reference look is assets and art

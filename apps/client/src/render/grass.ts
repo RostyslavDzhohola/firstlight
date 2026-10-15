@@ -17,7 +17,7 @@ import { padGrassMask } from "../world/palette.ts";
 import { atmo } from "./atmosphere.ts";
 import type { BodyLook } from "./looks.ts";
 import type { ResolvedSettings } from "./quality.ts";
-import { MEADOW_DENSITY, MEADOW_NEAR, meadowClumpGeometry, meadowGrassMaterial, meadowMeta, meadowOn } from "./meadow.ts";
+import { MEADOW_NEAR, meadowClumpGeometry, meadowGrassMaterial, meadowMeta, meadowOn } from "./meadow.ts";
 
 export const grassUniforms = {
   radius: uniform(40).setGroup(renderGroup),
@@ -171,7 +171,7 @@ export class GrassSystem {
     this.group.visible = this.enabled;
     const radius = s.grass.radius;
     grassUniforms.radius.value = radius;
-    const density = (s.grass.count * (meadowOn.grass ? MEADOW_DENSITY : 1)) / (Math.PI * radius * radius);
+    const density = s.grass.count / (Math.PI * radius * radius);
     this.receiveShadow = s.on.shadows && s.shadows.mode === "map";
     // Largest quad (at a face centre, quads are 2R/n wide). Small quads (Portus ~2.3 m) or a large
     // radius → 8×8-quad cells, else 4×4: keeps grass at a few dozen draws.

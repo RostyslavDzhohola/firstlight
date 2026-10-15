@@ -101,8 +101,8 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
   } as ConstructorParameters<typeof THREE.WebGPURenderer>[0]);
   await renderer.init();
   const webgpu = !!(renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend;
-  // `?meadow` (graphics-uplift prototype, off by default) prefers AgX unless ?tonemap says otherwise.
-  const tm = flags.get("tonemap") ?? (meadowOn.grade ? "agx" : null);
+  // `?meadow` (graphics-uplift prototype, off by default) prefers ACES unless ?tonemap says otherwise.
+  const tm = flags.get("tonemap") ?? (meadowOn.grade ? "aces" : null);
   renderer.toneMapping = tm === "agx" ? THREE.AgXToneMapping : tm === "aces" ? THREE.ACESFilmicToneMapping : THREE.NeutralToneMapping;
   renderer.toneMappingExposure = 1.0;
   renderer.shadowMap.enabled = true;
