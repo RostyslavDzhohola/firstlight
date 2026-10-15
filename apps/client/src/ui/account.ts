@@ -422,8 +422,10 @@ export function openSaveProgress(opts: { name?: string; level?: number; starter?
     el("div", "fl-status", m.card, "One moment…");
     void (async () => {
       // The session first: asking for a play token without one would create a guest just to say "nothing to save".
-      const status = await within(saveStatus(), CHECK_TIMEOUT_MS, "guest" as SaveStatus);
+      const status = await within<SaveStatus | null>(saveStatus(), CHECK_TIMEOUT_MS, null);
       if (done) return;
+      // No answer: never guess "guest" (that would ask for a token, i.e. create a session); say it can't save now.
+      if (status === null) return run("unavailable", null);
       // Saved players never see a save prompt; dev guests and offline runs have nothing to save.
       if (status === "saved") return finish("saved");
       if (status === "none") return finish("dismissed");
