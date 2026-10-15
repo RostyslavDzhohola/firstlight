@@ -505,9 +505,12 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   solids movement uses) are the combat host's `walls`: they stop hitscan shots, pellets, chain
   bolts, projectiles (a rocket bursts on the near side), melee, line of sight and Patchkit/chain
   lines, shelter whoever stands behind them from blasts (breakable props keep their old rule), stop
-  NPC sight, NPC bolts and NPC strikes (from the strike's source to the player's chest), and NPCs
-  walk round the crates, trees and towers outside the walls. Combat tags: whoever is inside the
-  town walls is protected at once, tagged or not; the 10 s tag still holds on the pad rings (F12:
+  NPC sight, NPC bolts and NPC strikes (from the strike's source to the player's chest), and the
+  hammer's slam; NPCs walk round the crates, trees and towers outside the walls (blocked, they
+  keep turning to the side they last slid to, sideways and back if need be). Combat tags: whoever
+  is inside the town walls is protected at once, tagged or not, and the attack and damage gates
+  ask where the player stands now (`BodyRoom.safeNow`), not the flag the tick writes, so a move
+  into the town counts before the next tick (Codex round 2); the 10 s tag still holds on the pad rings (F12:
   no running onto a pad mid-fight) and still blocks an instant logout everywhere. Why: Codex showed
   a tagged player inside the walls taking carbine hits through 14 m of wall. The town is the one
   place a new player must be able to trust, its 8 m walls and two gates make "inside" obvious, and
