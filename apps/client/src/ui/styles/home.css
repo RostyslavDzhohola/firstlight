@@ -109,8 +109,9 @@
 .fl-home__world { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: calc(.35 * var(--u)); padding: calc(.85 * var(--u)) calc(.9 * var(--u)) calc(.8 * var(--u)); min-width: 0; overflow: hidden; }
 .fl-home__world::after { content: ""; position: absolute; inset: auto 0 0 0; height: 2px; background: linear-gradient(90deg, transparent, var(--c), transparent); opacity: .7; }
 .fl-home__wtop { display: flex; align-items: center; gap: calc(.7 * var(--u)); min-width: 0; }
+.fl-home__wtop > div { min-width: 0; } /* so the name and the subtitle can shrink (ellipsis) instead of overflowing the card */
 .fl-home__wtop h3 { margin: 0; font: 500 var(--t-lg)/1.05 var(--font-display); letter-spacing: .04em; color: var(--paper); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fl-home__wtop small { display: block; margin-top: .2em; font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: .1em; text-transform: uppercase; color: var(--c); white-space: nowrap; }
+.fl-home__wtop small { display: block; margin-top: .2em; font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: .1em; text-transform: uppercase; color: var(--c); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fl-home__blurb { margin: 0; font-size: var(--t-xs); line-height: 1.4; color: var(--fog-3); }
 .fl-home__wmeta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: calc(.3 * var(--u)) calc(.6 * var(--u)); font-size: var(--t-xs); color: var(--fog-4); }
 .fl-home__wmeta span { display: inline-flex; align-items: center; gap: .4em; white-space: nowrap; }
