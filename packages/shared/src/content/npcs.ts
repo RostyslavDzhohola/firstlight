@@ -578,8 +578,9 @@ export function weaponTierFor(level: number, roll: number): 1 | 2 | 3 {
   return roll < 0.4 ? 2 : 3;
 }
 
-/** The 15 weapon families that drop (everything but fists, radio and tonics). */
-export const DROP_WEAPONS = ["sunbrand", "riverstaff", "axe", "hammer", "hexquill", "emberglass", "stormcoil", "carbine", "scatterpipe", "longbow", "stillshot", "comet", "grenade", "patchkit", "bubble"] as const;
+/** The 16 weapon families that drop (everything but fists, radio, tonics, the whistle and hidden
+ *  specials). Appended: the Ember Kunai drops like every other starter weapon. */
+export const DROP_WEAPONS = ["sunbrand", "riverstaff", "axe", "hammer", "hexquill", "emberglass", "stormcoil", "carbine", "scatterpipe", "longbow", "stillshot", "comet", "grenade", "patchkit", "bubble", "kunai"] as const;
 
 export const PLANET_TONIC: Record<PlanetId, { id: string; chance: number }> = {
   arcadia: { id: "tonic_small", chance: 1 / 10 },

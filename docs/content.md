@@ -469,7 +469,7 @@ Sixers' black-and-grey "6" look, IOI branding and Sorrento-like leaders [12].
 | Roll | Rate |
 |---|---|
 | Coins | always (formula in 1.4) |
-| Weapon (any of 15 families, excluding fists and radio, uniform) | regular 1/40 · heavy 1/15 · elite 1/4 · camp chest 1 |
+| Weapon (any of 16 families, excluding fists and radio, uniform; the Ember Kunai is the 16th, never the hidden Ember Seal) | regular 1/40 · heavy 1/15 · elite 1/4 · camp chest 1 |
 | Weapon tier by enemy level | E ≤ 5: T1 · E 6–11: T1 30% / T2 70% · E ≥ 12: T2 40% / T3 60% |
 | Tonic | Arcadia Small Tonic 1/10; Hollowmere and Meridian Large Tonic 1/12 |
 | Scrapburst Grenade (tier as weapon) | 1/25 from listed enemies |
