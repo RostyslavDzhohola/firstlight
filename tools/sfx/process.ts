@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } 
 import { join } from "node:path";
 import { PRESETS, type PresetName } from "../../apps/client/src/audio/presets.ts";
 import { fallbackOf } from "../../apps/client/src/audio/sounds.ts";
-import { decode, encodeMp3, loudness, onsets, OUT, peakDb, RATE, spectrum, trim, wav } from "./lib.ts";
+import { CEILING, decode, encodeMp3, loudness, onsets, OUT, peakDb, playbackGain, RATE, spectrum, trim, wav } from "./lib.ts";
 import { SET, SOUNDS, type SoundSpec } from "./sounds.ts";
 
 const RAW = join(OUT, "raw");
@@ -23,8 +23,6 @@ const ZZ = join(OUT, "zzfx");
 /** The game's default master × SFX volume: what the preview's "in game" buttons apply. */
 const BUS = 0.8 * 0.8;
 const PEAK_DB = -1;
-/** Playback gain cap: a −1 dBFS file at this gain stays under full scale through the default bus. */
-const GAIN_MAX = 1.4;
 
 if (!/^[a-z0-9][a-z0-9-]*$/.test(SET)) throw new Error(`bad set name ${SET}`); // SETDIR is deleted below
 rmSync(SETDIR, { recursive: true, force: true });
@@ -106,7 +104,6 @@ for (const spec of SOUNDS) {
   const kept = takes.filter((t) => !t.dropped);
   const reach = Math.min(...(kept.length ? kept : takes).map((t) => loudness(t.y) + (PEAK_DB - peakDb(t.y))));
   const fileLoud = Math.min(target, reach);
-  const gain = Math.round(Math.min(GAIN_MAX, 10 ** ((target - fileLoud) / 20)) * 1000) / 1000;
   const out: TakeReport[] = [];
   for (const t of takes) {
     const g = 10 ** ((fileLoud - loudness(t.y)) / 20);
@@ -116,11 +113,22 @@ for (const spec of SOUNDS) {
     encodeMp3(y, file);
     const s = spectrum(y);
     execFileSync("ffmpeg", ["-v", "error", "-y", "-i", file, "-lavfi", "showspectrumpic=s=360x140:legend=0:scale=log:stop=16000", join(ANALYSIS, `${spec.name}-${t.n}.png`)]);
-    out.push({ take: t.n, file: t.dropped ? null : `${SET}/${name}`, dropped: t.dropped, rawMs: Math.round(t.rawMs), ms: Math.round((y.length / RATE) * 1000), bytes: statSync(file).size, peak: peakDb(y), loud: loudness(y), onsets: onsets(y), centroid: s.centroid, toneHz: s.toneHz, toneDb: s.toneDb, prompt: t.prompt });
+    // The peak as the game will see it: decoded from the MP3 (encoding can overshoot the PCM peak).
+    out.push({ take: t.n, file: t.dropped ? null : `${SET}/${name}`, dropped: t.dropped, rawMs: Math.round(t.rawMs), ms: Math.round((y.length / RATE) * 1000), bytes: statSync(file).size, peak: peakDb(decode(file)), loud: loudness(y), onsets: onsets(y), centroid: s.centroid, toneHz: s.toneHz, toneDb: s.toneDb, prompt: t.prompt });
   }
   const files = out.filter((t) => t.file).map((t) => `${spec.name}-${t.take}.mp3`);
+  // Capped by the loudest kept take at full volume (master and effects 100 %, jitter ×1).
+  const gain = playbackGain(target, fileLoud, out.filter((t) => t.file).map((t) => 10 ** (t.peak / 20)));
   if (files.length) manifest.sounds[spec.name] = { files, gain };
   reports.push({ spec, preset: fb.preset, refLoud, target, fileLoud, gain, takes: out });
+}
+
+// Regression check on the full gain chain: no kept take may pass −1 dBFS at full volume.
+for (const r of reports) {
+  for (const t of r.takes.filter((t) => t.file)) {
+    const out = 10 ** (t.peak / 20) * r.gain;
+    if (out > CEILING + 1e-9) throw new Error(`${r.spec.name}-${t.take} reaches ${(20 * Math.log10(out)).toFixed(2)} dBFS at full volume`);
+  }
 }
 
 writeFileSync(join(SETDIR, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");

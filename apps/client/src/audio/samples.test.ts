@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SAMPLE_NAMES } from "./sounds.ts";
-import { jitter, parseManifest, pickTake, resolveSound, SampleBank, sampleUrl, type SampleIo } from "./samples.ts";
+import { jitter, parseManifest, pickTake, resolveSound, SampleBank, sampleUrl, SFX_CEILING, type SampleIo } from "./samples.ts";
 
 const BASE = "https://assets.example.dev/v/sfx-1";
 
-/** A fake asset host: files map to a buffer id, a thrown Error, or nothing (404). */
-function host(manifest: unknown, files: Record<string, string | Error>) {
+/** A fake asset host: files map to a buffer id, a thrown Error, or nothing (404); `peaks` by buffer id (default 0.5). */
+function host(manifest: unknown, files: Record<string, string | Error | Promise<string>>, peaks: Record<string, number> = {}) {
   const requested: string[] = [];
   const io: SampleIo<string> = {
     json: async (url) => {
@@ -20,6 +20,7 @@ function host(manifest: unknown, files: Record<string, string | Error>) {
       if (f instanceof Error) throw f; // decodeAudioData rejecting a corrupt file
       return f;
     },
+    peak: (b) => peaks[b] ?? 0.5,
   };
   return { io, requested };
 }
@@ -127,5 +128,48 @@ describe("sample bank and the ZzFX fallback", () => {
     expect(bank.has("hitmark")).toBe(false);
     expect(resolveSound("carbine", bank)).toEqual({ kind: "zzfx", preset: "carbine", gain: 1, rate: 1 });
     expect(resolveSound("shatter", null)).toEqual({ kind: "zzfx", preset: "meleeHit", gain: 1, rate: 0.7 });
+  });
+
+  it("plays ZzFX while the files decode, then the samples", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    let decoded!: (b: string) => void;
+    const slow = new Promise<string>((r) => (decoded = r));
+    const { io } = host({ set: "sfx-1", sounds: { carbine: { files: ["carbine-1.mp3"], gain: 1 } } }, { "carbine-1.mp3": slow });
+    const bank = new SampleBank(io);
+    const loading = bank.load(BASE);
+    await Promise.resolve();
+    expect(resolveSound("carbine", bank)).toMatchObject({ kind: "zzfx", preset: "carbine" });
+    decoded("C1");
+    expect(await loading).toBe(1);
+    expect(resolveSound("carbine", bank)).toMatchObject({ kind: "sample", buffer: "C1" });
+  });
+});
+
+describe("the full gain chain stays under full scale", () => {
+  // Settings allow master and effects at 100 %; callers pass gains ≤ 1; the panner never boosts.
+  const MAX_MASTER = 1;
+  const MAX_SFX = 1;
+  const MAX_CALL_GAIN = 1;
+
+  it("caps a hot sound's manifest gain by its loudest decoded take", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const { io } = host(
+      { set: "sfx-1", sounds: { ui: { files: ["ui-1.mp3", "ui-2.mp3"], gain: 1.4 }, explosion: { files: ["explosion-1.mp3"], gain: 1.4 } } },
+      { "ui-1.mp3": "U1", "ui-2.mp3": "U2", "explosion-1.mp3": "E1" },
+      { U1: 0.6, U2: 10 ** (-1.1 / 20), E1: 0.3 }, // ui-5 in sfx-1 decoded at −1.10 dBFS
+    );
+    const bank = new SampleBank(io);
+    await bank.load(BASE);
+    for (const r of [0, 0.5, 0.999999]) {
+      for (const name of ["ui", "explosion"] as const) {
+        const s = resolveSound(name, bank, () => r);
+        if (s.kind !== "sample") throw new Error("expected a sample");
+        const loudest = name === "ui" ? 10 ** (-1.1 / 20) : 0.3;
+        expect(loudest * s.gain * MAX_CALL_GAIN * MAX_SFX * MAX_MASTER, `${name} at ${r}`).toBeLessThanOrEqual(SFX_CEILING + 1e-9);
+      }
+    }
+    // A quiet sound keeps the gain the manifest asked for.
+    const e = resolveSound("explosion", bank, () => 0.999999);
+    expect(e.gain).toBeCloseTo(1.4, 3);
   });
 });

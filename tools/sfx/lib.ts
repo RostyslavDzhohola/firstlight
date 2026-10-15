@@ -90,6 +90,19 @@ export function wav(x: Float32Array | number[], rate: number): Buffer {
 
 const db = (v: number) => 20 * Math.log10(Math.max(v, 1e-9));
 
+/** −1 dBFS: the most a sample may reach the output with master and effects at 100 %, the settings' maximum (the client's SFX_CEILING). */
+export const CEILING = 10 ** (-1 / 20);
+
+/**
+ * A sound's playback gain: what lifts its files from `fileLoud` to `target` (dB), capped so the
+ * loudest decoded take (linear `peaks`) times the gain stays under CEILING; rounded down.
+ */
+export function playbackGain(target: number, fileLoud: number, peaks: number[]): number {
+  const want = 10 ** ((target - fileLoud) / 20);
+  const peak = Math.max(0, ...peaks);
+  return Math.floor((peak > 0 ? Math.min(want, CEILING / peak) : want) * 1000) / 1000;
+}
+
 export function peakDb(x: Float32Array): number {
   let p = 0;
   for (let i = 0; i < x.length; i++) p = Math.max(p, Math.abs(x[i]!));

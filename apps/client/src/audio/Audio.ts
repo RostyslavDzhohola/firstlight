@@ -74,6 +74,11 @@ export class GameAudio {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return this.ctx.decodeAudioData(await r.arrayBuffer());
       },
+      peak: (b) => {
+        let p = 0;
+        for (let c = 0; c < b.numberOfChannels; c++) for (const v of b.getChannelData(c)) p = Math.max(p, Math.abs(v));
+        return p;
+      },
     });
     this.samples = bank;
     return bank.load(base);

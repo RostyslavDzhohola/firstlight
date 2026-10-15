@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { safeOutDir } from "./lib.ts";
+import { CEILING, playbackGain, safeOutDir } from "./lib.ts";
 
 const REPO = realpathSync(fileURLToPath(new URL("../..", import.meta.url)));
 const temps: string[] = [];
@@ -49,5 +49,19 @@ describe("SFX output directory", () => {
     const out = safeOutDir(join(t, "a", "b"));
     expect(out).toBe(join(realpathSync(t), "a", "b"));
     expect(existsSync(join(t, "a"))).toBe(false);
+  });
+});
+
+describe("SFX playback gain", () => {
+  it("never lets the loudest decoded take pass −1 dBFS at full volume", () => {
+    const peaks = [10 ** (-1.1 / 20), 0.5]; // ui-5 in sfx-1 decoded at −1.10 dBFS
+    const g = playbackGain(-10, -16, peaks); // wants +6 dB
+    expect(Math.max(...peaks) * g).toBeLessThanOrEqual(CEILING);
+    expect(g).toBeGreaterThan(0.99); // only the 0.1 dB of headroom is left
+  });
+
+  it("gives a quiet sound the gain it needs", () => {
+    expect(playbackGain(-20, -23, [0.3])).toBeCloseTo(10 ** (3 / 20), 2);
+    expect(playbackGain(-20, -20, [0.3])).toBe(1);
   });
 });

@@ -462,9 +462,11 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   hit marker, a 1.6 kHz triangle on every landed hit (tutorial dummies included); it and the 900 Hz
   UI blip also get soft low ZzFX stand-ins. Melee swings are per weapon (sword, staff, fists, axe and
   hammer), magic bolts land with a magic hit, and weak-point hits have their own sound. Each sound is
-  levelled to the ZzFX sound it replaces (loudest 400 ms, K-weighted), with playback gain capped at
-  1.4 so peaks stay under full scale through the default bus. Loud ZzFX sustains (portal, comet,
-  Emberglass) therefore play 6–11 dB quieter. The prompts and processing are in `tools/sfx`, which
+  levelled to the ZzFX sound it replaces (loudest 400 ms, K-weighted). Its playback gain is capped
+  so that the loudest decoded take stays under −1 dBFS with master and effects at 100 %. `process.ts`
+  applies the cap and checks it, and the client caps again from the decoded buffers. So sounds
+  whose ZzFX version was loud play quieter than before: the carbine and the hurt sound by about
+  5 dB, the sword swish by about 7 dB, and the portal, Emberglass and Comet by 9–14 dB. The prompts and processing are in `tools/sfx`, which
   writes to `/tmp/fl-go/sfx`. Why: the owner asked for a sword swish, a magic wand and better weapon
   and UI sounds. The boss-line rule (D18, ASSETS) keeps ElevenLabs output out of the CC BY repo, and
   the manifest keeps the client free of file lists: takes can be dropped or added before the upload

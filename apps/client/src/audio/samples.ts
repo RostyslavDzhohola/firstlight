@@ -46,6 +46,13 @@ export function pickTake(n: number, last: number, rnd: () => number = Math.rando
   return i >= last ? i + 1 : i;
 }
 
+/**
+ * The loudest a sample may reach the output: −1 dBFS with master and effects at 100 % (the settings'
+ * maximum), the jitter at its top (×1) and callers' gains (all ≤ 1). Each sound's gain is capped so
+ * its loudest decoded take stays under it, whatever the manifest says.
+ */
+export const SFX_CEILING = 10 ** (-1 / 20);
+
 /** Per-play variation for samples: pitch ±6 %, level −1.5 dB…0, so repeats don't sound copied. */
 export function jitter(rnd: () => number = Math.random): { rate: number; gain: number } {
   return { rate: 0.94 + rnd() * 0.12, gain: 0.84 + rnd() * 0.16 };
@@ -55,6 +62,8 @@ export interface SampleIo<B> {
   json(url: string): Promise<unknown>;
   /** Fetch and decode one file. */
   buffer(url: string): Promise<B>;
+  /** The largest absolute sample value of a decoded take. */
+  peak(buffer: B): number;
 }
 
 interface Loaded<B> {
@@ -87,7 +96,10 @@ export class SampleBank<B> {
         const results = await Promise.allSettled(entry.files.map((f) => this.io.buffer(sampleUrl(base, f))));
         const takes: B[] = [];
         results.forEach((r, i) => (r.status === "fulfilled" ? takes.push(r.value) : failed.push(entry.files[i]!)));
-        if (takes.length) this.loaded.set(name as SampleName, { takes, gain: entry.gain, last: -1 });
+        if (!takes.length) return;
+        const peak = Math.max(...takes.map((b) => this.io.peak(b)));
+        const gain = peak > 0 ? Math.min(entry.gain, SFX_CEILING / peak) : entry.gain;
+        this.loaded.set(name as SampleName, { takes, gain, last: -1 });
       }),
     );
     if (failed.length) console.warn(`[sfx] ${failed.length} sample file(s) failed, ZzFX stands in: ${failed.join(", ")}`);
