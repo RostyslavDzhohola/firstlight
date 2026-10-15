@@ -9,9 +9,13 @@ import "./ui/styles/landing.css";
 import "./ui/styles/home.css";
 import "./ui/styles/loading.css";
 import { config } from "./config.ts";
+import { maybeInstallE2e } from "./debug/e2eGate.ts";
 import { runBoot } from "./game/boot.ts";
 import { enterFullscreen } from "./game/fullscreen.ts";
 import { hideLoading, setLoading, showLoadingError } from "./ui/loading.ts";
+
+// Playwright journeys only (?e2e): window.__fl, a separate chunk that is never fetched otherwise.
+void maybeInstallE2e(location.search, window, () => import("./debug/e2eHook.ts"));
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T | null;
 const playBtn = $<HTMLButtonElement>("play");

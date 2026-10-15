@@ -17,3 +17,5 @@ data/
 .scratch/
 __pycache__/
 *.pyc
+# Playwright journeys (apps/client/e2e): build, logs, databases, reports
+apps/client/e2e/.out/
