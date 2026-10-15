@@ -1,12 +1,15 @@
 // Map terrain raster (pure: runs in world/mapAtlas.worker.ts, tested in node). Each body gets a
 // colour atlas on the six cube-sphere faces, baked once from the shared height function and the
 // game's terrain palette, hill-shaded from the north-west. Views are then drawn from it per pixel:
-// the globe for the map (M) and the north-up tile the minimap scrolls. On Portus the town plan
-// (paving, walls and towers, roofs, trees) comes from a 0.5 m raster in the town frame.
+// the globe for the map (M) and the north-up tile the minimap scrolls. A body's structure site has
+// its plan (paving, walls and towers, roofs, trees) drawn over that from a 0.5 m raster in the site's
+// frame: the Portus town round the pole, a planet's pad-0 outpost round its main pad (D42).
 
-import { faceOf, faceUV, FACES, type BodyId, type Face, type Terrain } from "@firstlight/shared";
-import { TOWN_LAYOUT, TOWN_PREFABS } from "@firstlight/shared/content/portusTown";
-import { townCoords } from "@firstlight/shared/planet/townFrame";
+import { BODIES, faceOf, faceUV, FACES, padDirs, type BodyId, type Face, type Terrain } from "@firstlight/shared";
+import { OUTPOSTS, type OutpostBody } from "@firstlight/shared/content/padOutposts";
+import { TOWN_LAYOUT, TOWN_PREFABS, type TownPrefab } from "@firstlight/shared/content/portusTown";
+import { OUTPOST_GROUND_HALF, outpostGroundDistance } from "@firstlight/shared/planet/outpostGround";
+import { POLE_ANCHOR, siteAnchor, siteCoords, type SiteAnchor } from "@firstlight/shared/planet/townFrame";
 import { townGroundDistance } from "@firstlight/shared/planet/townGround";
 import { LOOKS } from "../render/looks.ts";
 import { PALETTES, terrainColor } from "../world/palette.ts";
@@ -135,7 +138,7 @@ export function bakeAtlas(terrain: Terrain, n = atlasResolution(terrain.body.rad
   return { body: terrain.body.id, n, faces };
 }
 
-// ---------------------------------------------------------------- Portus town plan
+// ---------------------------------------------------------------- site plans (the Portus town, a pad outpost)
 
 /** Town plan classes: nothing, paving, walls and towers, roofs, tree crowns. */
 export const TOWN_CLASS = { none: 0, paving: 1, stone: 2, roof: 3, tree: 4 } as const;
@@ -146,10 +149,30 @@ export interface TownRaster {
   half: number;
   n: number;
   cls: Uint8Array;
+  /** The site's frame: the Portus pole, or a planet's main pad. */
+  anchor: SiteAnchor;
 }
 
 /** The Portus town plan in the town frame (east/north metres at the pole), 0.5 m cells. */
 export function townRaster(cell = 0.5, half = 96): TownRaster {
+  return planRaster(TOWN_LAYOUT, TOWN_PREFABS, townGroundDistance, POLE_ANCHOR, cell, half);
+}
+
+/** A planet's pad-0 outpost plan in its site frame (east/north metres from the main pad), 0.5 m cells. */
+export function outpostRaster(body: OutpostBody, cell = 0.5): TownRaster {
+  const site = OUTPOSTS[body];
+  return planRaster(site.layout, site.prefabs, (e, n) => outpostGroundDistance(body, e, n), siteAnchor(padDirs(BODIES[body])[0]!), cell, OUTPOST_GROUND_HALF);
+}
+
+/** The plan raster of `body`'s structure site, or null. */
+export function siteRaster(body: BodyId): TownRaster | null {
+  if (body === "portus") return townRaster();
+  return body in OUTPOSTS ? outpostRaster(body as OutpostBody) : null;
+}
+
+type PlanItem = readonly [prefab: number, east: number, north: number, yaw: number, scale: number, ...rest: number[]];
+
+function planRaster(layout: readonly PlanItem[], prefabs: readonly TownPrefab[], groundDistance: (e: number, n: number) => number, anchor: SiteAnchor, cell: number, half: number): TownRaster {
   const n = Math.round((2 * half) / cell);
   const cls = new Uint8Array(n * n);
   const cellOf = (m: number) => Math.floor((m + half) / cell);
@@ -160,11 +183,11 @@ export function townRaster(cell = 0.5, half = 96): TownRaster {
     for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (inside(centre(i), centre(j))) cls[j * n + i] = c;
   };
   // Paving: what the town ground raster calls paved (and isn't a structure, marked over it below).
-  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) if (townGroundDistance(centre(i), centre(j)) <= 0) cls[j * n + i] = TOWN_CLASS.paving;
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) if (groundDistance(centre(i), centre(j)) <= 0) cls[j * n + i] = TOWN_CLASS.paving;
   // Tree crowns first, then walls and roofs over them (footprints of solids that reach the ground).
   for (const pass of ["tree", "build"] as const) {
-    for (const [pi, ie, inn, yaw, s] of TOWN_LAYOUT) {
-      const pf = TOWN_PREFABS[pi]!;
+    for (const [pi, ie, inn, yaw, s] of layout) {
+      const pf = prefabs[pi]!;
       if (pass === "tree") {
         if (pf.cls !== "tree") continue;
         const r = pf.radius * s * 0.85;
@@ -195,7 +218,7 @@ export function townRaster(cell = 0.5, half = 96): TownRaster {
       }
     }
   }
-  return { cell, half, n, cls };
+  return { cell, half, n, cls, anchor };
 }
 
 // ---------------------------------------------------------------- sampling and views
@@ -239,9 +262,9 @@ export function sampleAtlasNearest(atlas: Atlas, x: number, y: number, z: number
 }
 
 export interface RenderOptions {
-  /** Portus: overlay the town plan. */
+  /** The body's site plan to overlay (the Portus town, a pad outpost). */
   town?: TownRaster | null;
-  /** Body radius (m), for the town frame. */
+  /** Body radius (m), for the site frame. */
   radius: number;
   /** Darken toward the globe's rim (the whole-planet view). */
   limb?: boolean;
@@ -274,8 +297,8 @@ export function renderView(atlas: Atlas, view: MapView, out: Uint32Array, opts: 
       const y = a * e[1] + b * n[1] + z * c[1];
       const zz = a * e[2] + b * n[2] + z * c[2];
       let col = sample(atlas, x, y, zz);
-      if (town && y > 0.75) {
-        townCoords(x, y, zz, opts.radius, townAt);
+      if (town && x * town.anchor.up[0] + y * town.anchor.up[1] + zz * town.anchor.up[2] > 0.75) {
+        siteCoords(town.anchor, x, y, zz, opts.radius, townAt);
         const i = Math.floor((townAt[0] + town.half) / town.cell), j = Math.floor((townAt[1] + town.half) / town.cell);
         if (i >= 0 && j >= 0 && i < tn && j < tn) {
           const t = town.cls[j * tn + i]!;

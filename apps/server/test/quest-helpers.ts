@@ -74,13 +74,20 @@ export function padAt(body: BodyId, i: number) {
   return ground(body, padDirs(BODIES[body])[i]!);
 }
 
-/** A point `metres` along the surface from pad `i` (outside its safe ring for metres > 12). */
+/**
+ * A point `metres` along the surface from pad `i` (outside its safe ring for metres > 12): north,
+ * except within 80 m of a planet's pad 0, where it is east-north-east (75° from north): due north
+ * there is the pad-0 outpost's barn, chapel or office (D42).
+ */
 export function offPad(body: BodyId, i: number, metres: number): [number, number, number] {
   const R = BODIES[body].radius;
   const d = padDirs(BODIES[body])[i]!;
   const ref = Math.abs(d[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
   const k = ref[0]! * d[0] + ref[1]! * d[1] + ref[2]! * d[2];
-  const t = [ref[0]! - k * d[0], ref[1]! - k * d[1], ref[2]! - k * d[2]];
+  const n = [ref[0]! - k * d[0], ref[1]! - k * d[1], ref[2]! - k * d[2]];
+  const a = i === 0 && metres <= 80 ? (75 * Math.PI) / 180 : 0;
+  const w = [d[1] * n[2]! - d[2] * n[1]!, d[2] * n[0]! - d[0] * n[2]!, d[0] * n[1]! - d[1] * n[0]!];
+  const t = n.map((v, j) => v * Math.cos(a) - w[j]! * Math.sin(a));
   const tl = Math.hypot(t[0]!, t[1]!, t[2]!);
   const v = [d[0] + (t[0]! / tl) * (metres / R), d[1] + (t[1]! / tl) * (metres / R), d[2] + (t[2]! / tl) * (metres / R)];
   const l = Math.hypot(v[0]!, v[1]!, v[2]!);

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { BODIES, createTerrain } from "@firstlight/shared";
+import { BODIES, createTerrain, padDirs } from "@firstlight/shared";
 import { placeDir } from "@firstlight/shared/content/places";
-import { townDir } from "@firstlight/shared/planet/townFrame";
-import { atlasResolution, bakeAtlas, renderView, rgba, sampleAtlas, TOWN_CLASS, townRaster } from "./mapRaster.ts";
-import { mapView } from "./mapView.ts";
+import { POLE_ANCHOR, siteDir, townDir } from "@firstlight/shared/planet/townFrame";
+import { atlasResolution, bakeAtlas, outpostRaster, renderView, rgba, sampleAtlas, siteRaster, TOWN_CLASS, townRaster } from "./mapRaster.ts";
+import { mapView, project } from "./mapView.ts";
 
 const arcadia = createTerrain("arcadia");
 // A coarse atlas keeps the test fast; the game bakes ~384 texels per face in a worker.
@@ -53,6 +53,28 @@ describe("map raster", () => {
     expect(at(10.6, 27.6)).toBe(TOWN_CLASS.roof);
     expect(at(0.4, -29.5)).toBe(TOWN_CLASS.tree);
     expect(at(0, -80)).toBe(TOWN_CLASS.none); // the fields south of the walls
+  });
+
+  it("lays out each planet's pad outpost plan round its main pad, and draws it on that body's views (D42)", () => {
+    const a = outpostRaster("arcadia");
+    const at = (t: typeof a, e: number, n: number) => t.cls[Math.floor((n + t.half) / t.cell) * t.n + Math.floor((e + t.half) / t.cell)];
+    expect(at(a, 2, 5)).toBe(TOWN_CLASS.paving); // the pad's apron
+    expect(at(a, -0.5, 42.5)).toBe(TOWN_CLASS.roof); // the barn
+    expect(at(a, 25.5, 7.5)).toBe(TOWN_CLASS.tree); // the east oak
+    expect(at(a, 40, -40)).toBe(TOWN_CLASS.none);
+    expect(siteRaster("hollowmere")!.anchor.up).toEqual(padDirs(BODIES.hollowmere)[0]);
+    expect(siteRaster("portus")!.anchor).toBe(POLE_ANCHOR);
+    // On an Arcadia view centred on the main pad, north up: the barn's roof 42.5 m up the image.
+    const small = bakeAtlas(arcadia, 16);
+    const R = BODIES.arcadia.radius;
+    const pad = padDirs(BODIES.arcadia)[0]!;
+    const v = mapView([pad[0], pad[1], pad[2]], 0, R, 160, 160);
+    const out = new Uint32Array(160 * 160);
+    renderView(small, v, out, { radius: R, town: a });
+    const barn = siteDir(a.anchor, -0.5, 42.5, R);
+    // The barn's pixel in the view's own frame (the view's north need not be the site's).
+    const q = project(v, barn);
+    expect(rgba(out[Math.floor(q.y) * 160 + Math.floor(q.x)]!)).toEqual([178, 84, 60, 255]); // roof
   });
 
   it("puts the town plan on Portus views in the town's own orientation (north up = the castle)", () => {

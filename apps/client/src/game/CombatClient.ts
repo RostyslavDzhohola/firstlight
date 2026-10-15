@@ -502,7 +502,7 @@ export class CombatClient {
       chest.set(p.x, p.y, p.z);
       if (chest.distanceTo(mine) > range + 0.5) return;
       chest.addScaledVector(_v.copy(chest).normalize(), 1.0);
-      // Not through the ground or a prop (the server checks the same line).
+      // Not through the ground, a prop or a structure (the server checks the same line: lineOfSight).
       const myChest = mine.clone().addScaledVector(mine.clone().normalize(), 1.0);
       const to = chest.clone().sub(myChest);
       const len = to.length();
@@ -510,6 +510,7 @@ export class CombatClient {
         to.divideScalar(len);
         if (this.rayTerrain(myChest, to, len) < len) return;
         if ((this.game.player.getColliders()?.raycast?.(myChest, to, len) ?? Infinity) < len) return;
+        if ((this.game.player.getStructures()?.raycast?.(myChest, to, len) ?? Infinity) < len) return;
       }
       chest.sub(o);
       const t = chest.dot(d);
@@ -529,7 +530,7 @@ export class CombatClient {
    */
   private rayProps(o: THREE.Vector3, d: THREE.Vector3, max: number): number {
     const props = this.game.player.getColliders();
-    const town = this.game.player.getStructures(); // the Portus town's walls stop tracers too (D38)
+    const town = this.game.player.getStructures(); // the sites' walls stop tracers too (D38, D43)
     if (!props?.raycast && !town?.raycast) return Infinity;
     const p = this.game.player.pos;
     const head = _head.copy(p).addScaledVector(_up.copy(p).normalize(), 1.6);

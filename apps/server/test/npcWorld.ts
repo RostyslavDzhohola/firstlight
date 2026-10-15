@@ -2,6 +2,7 @@
 // plain player records, a manual clock.
 
 import { BODIES, createTerrain, type BodyId } from "@firstlight/shared";
+import { structureCollider } from "@firstlight/shared/planet/sites";
 import { newCharacter } from "@firstlight/shared/content/character";
 import { maxHp } from "@firstlight/shared/content/progression";
 import { NpcState, PlayerState } from "@firstlight/shared/net/schema";
@@ -34,6 +35,7 @@ export function fakeWorld(body: BodyId, opts: { immortal?: boolean; start?: numb
   const fw = { immortal: !!opts.immortal } as FakeWorld;
   const host: CombatHost = {
     terrain,
+    walls: structureCollider(terrain),
     now: () => clock.t,
     players: () => players.values(),
     npcs: () => npcs.values(),

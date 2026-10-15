@@ -1,6 +1,8 @@
 // Fast-travel pads (with their 12 m safe rings), the portal home on each planet's main pad, and
 // Portus' three portals and the safe-zone line across its two gates. Walking into a portal travels
-// to its body.
+// to its body. On a planet whose outpost assets are drawn (SiteTown, D42) the landing platforms and
+// pad 0's portal gate replace the plain pad discs and the portal's base (setPadModels); the rings,
+// beams and portals stay.
 
 import * as THREE from "three/webgpu";
 import { materialColor } from "three/tsl";
@@ -43,6 +45,10 @@ export class Portals {
   private readonly spinners: THREE.Object3D[] = [];
   /** Objects culled by distance from the player (far side of the planet isn't streamed). */
   private readonly cullables: { obj: THREE.Object3D; at: THREE.Vector3 }[] = [];
+  /** The plain pad discs and portal bases a planet's outpost models replace. */
+  private readonly padDiscs = new Set<THREE.Object3D>();
+  private readonly portalBases: THREE.Object3D[] = [];
+  private padModels = false;
   private t = 0;
 
   constructor(scene: THREE.Scene, body: BodyId, terrain: Terrain) {
@@ -71,6 +77,7 @@ export class Portals {
       const base = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 3, 0.4, 32), padMat);
       base.position.y = 0.2;
       g.add(ring, disc, base);
+      if (def.terrain.kind !== "hub") this.portalBases.push(base);
       place(g, dir, h);
       // Turn the ring to face `faceDir` (tangent).
       const up = dir.clone();
@@ -125,6 +132,7 @@ export class Portals {
         bh.add(beam);
         place(bh, dir, h);
         this.group.add(pad, holder, bh);
+        this.padDiscs.add(pad);
         const at = dir.clone().multiplyScalar(R + h);
         for (const o of [pad, holder, bh]) this.cullables.push({ obj: o, at });
 
@@ -142,10 +150,19 @@ export class Portals {
     return portalAt(this.spots, pos.x, pos.y, pos.z)?.to ?? null;
   }
 
+  /** The planet's outpost models are drawn (landing platforms, pad 0's portal gate): hide the plain pad discs and portal base. */
+  setPadModels(on: boolean) {
+    this.padModels = on;
+    for (const b of this.portalBases) b.visible = !on;
+    if (on) for (const d of this.padDiscs) d.visible = false;
+  }
+
   update(dt: number, playerPos?: THREE.Vector3, maxDistance = 450) {
     this.t += dt;
     for (const s of this.spinners) s.rotation.z = this.t * 0.6;
-    if (playerPos) for (const c of this.cullables) c.obj.visible = c.at.distanceTo(playerPos) < maxDistance;
+    if (playerPos) {
+      for (const c of this.cullables) c.obj.visible = c.at.distanceTo(playerPos) < maxDistance && !(this.padModels && this.padDiscs.has(c.obj));
+    }
   }
 
   /** Leaving the body: every pad, ring, beam, portal and label here is this instance's own. */

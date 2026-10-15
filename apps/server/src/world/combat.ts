@@ -33,9 +33,10 @@ export interface CombatHost {
   /** Breakable props (set by destruction.ts): intact ones stop shots and take damage. */
   props?: BreakableHost;
   /**
-   * Indestructible structures (the Portus town's walls, houses and towers: planet/town.ts, set by
-   * BodyRoom; D-zones-3): they stop shots, projectiles, chain bolts, melee and line of sight, and
-   * shelter whoever stands behind them from blasts. Never damaged.
+   * Indestructible structures (planet/sites.ts: the Portus town's walls, houses and towers, a
+   * planet's pad outpost and waystones; set by BodyRoom; D-zones-3, D43): they stop shots,
+   * projectiles, chain bolts, melee and line of sight, and shelter whoever stands behind them from
+   * blasts. Never damaged.
    */
   walls?: WallHost;
   /**
@@ -69,7 +70,7 @@ export interface BreakableHost {
   arc(pos: V3, facing: V3, range: number, arcDeg: number, amount: number, cls: Destroys, weaponId: string, by: string | null): void;
 }
 
-/** Indestructible structures as seen by combat (planet/town.ts StructureCollider). */
+/** Indestructible structures as seen by combat (planet/sites.ts StructureCollider). */
 export interface WallHost {
   /** Distance along a ray (unit d) to the first structure within maxT, or Infinity. */
   raycast(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number): number;
@@ -481,7 +482,7 @@ function actorFacingFrom(from: V3, target: Actor): V3 {
   return [from[0] - t[0], from[1] - t[1], from[2] - t[2]];
 }
 
-/** Line of sight between two points: no terrain and no intact breakable in the way (shells aside). */
+/** Line of sight between two points: no terrain, intact breakable or structure in the way (shells aside). */
 export function lineOfSight(host: CombatHost, a: V3, b: V3): boolean {
   const v: V3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
   const l = Math.hypot(v[0], v[1], v[2]);
