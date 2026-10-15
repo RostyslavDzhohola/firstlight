@@ -140,6 +140,65 @@ export function forceProperty<T extends object, K extends keyof T>(obj: T, prop:
   };
 }
 
+/** Predicted new shadow-pass builds per warm-up frame in the batched phase (warmShadowCasters). */
+export const SHADOW_BATCH = 4;
+
+/**
+ * Whether a caster's shadow-pass variant will be a new node build: three keys a build by material,
+ * geometry layout and context, plus the object itself for instanced (and skinned: own bone count)
+ * meshes. `seen` collects the (material, layout) pairs already counted in this warm-up.
+ */
+export function shadowBuildCost(o: THREE.Object3D, seen: Set<string>): 0 | 1 {
+  const m = o as THREE.Mesh & { count?: number; isSkinnedMesh?: boolean };
+  if ((m as THREE.InstancedMesh).isInstancedMesh || (m.count ?? 1) > 1 || m.isSkinnedMesh) return 1;
+  const mats = Array.isArray(m.material) ? m.material : [m.material];
+  const attrs = m.geometry ? Object.keys(m.geometry.attributes).sort().map((k) => `${k}${m.geometry.attributes[k]!.itemSize}`).join(",") : "";
+  let cost: 0 | 1 = 0;
+  for (const mat of mats) {
+    const key = `${mat?.uuid ?? "-"}|${attrs}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      cost = 1;
+    }
+  }
+  return cost;
+}
+
+/**
+ * Turn the scene's shadow casters off, then back on in batches of about SHADOW_BATCH predicted new
+ * builds, rendering a frame after each batch, so their shadow-pass node builds and programs spread
+ * over frames instead of piling into one. Casters that share a build ride along for free. Every
+ * caster is back to its own `castShadow` when this returns, even if a frame throws.
+ */
+export async function warmShadowCasters(scene: THREE.Object3D, renderFrame: () => void, nextFrameFn: () => Promise<void> = nextFrame): Promise<number> {
+  const casters: THREE.Object3D[] = [];
+  scene.traverse((o) => {
+    if ((o as THREE.Mesh).isMesh && o.castShadow) casters.push(o);
+  });
+  const pending = casters.map((o) => forceProperty(o, "castShadow", false));
+  const seen = new Set<string>();
+  let frames = 0;
+  try {
+    let i = 0;
+    while (i < pending.length) {
+      let cost = 0;
+      while (i < pending.length && (cost < SHADOW_BATCH || cost === 0)) {
+        cost += shadowBuildCost(casters[i]!, seen);
+        pending[i]!();
+        pending[i] = () => {};
+        i++;
+        if (cost >= SHADOW_BATCH) break;
+      }
+      renderFrame();
+      frames++;
+      await nextFrameFn();
+    }
+  } finally {
+    for (const r of pending) r();
+  }
+  return frames;
+}
+
 /**
  * Run the protocol. `beforeFrame` lets the caller update systems between the real frames
  * (e.g. stream grass cells) so instance buffers are filled. Always restores the scene, even if a
@@ -176,6 +235,17 @@ export async function warmup(
       console.warn("[warmup] compileAsync failed (continuing with real frames)", e);
     }
     opts.onProgress?.(0.5);
+    // 3. Shadow-pass variants. compileAsync skips the shadow map, so the first real frame built every
+    //    caster's shadow material at once (WebGL links each synchronously: ~1 s with the loading
+    //    screen frozen on a travel). Casters join the shadow pass a few per frame instead.
+    if (ctx.settings?.on.shadows && ctx.settings.shadows.mode === "map") {
+      await warmShadowCasters(scene, () => {
+        opts.beforeFrame?.();
+        beginManualFrame(src);
+        ctx.render();
+        ctx.gpu.frame();
+      });
+    }
     const frames = opts.frames ?? 4;
     for (let i = 0; i < frames; i++) {
       opts.beforeFrame?.();
