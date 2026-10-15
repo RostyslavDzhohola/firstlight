@@ -9,6 +9,7 @@ import {
   clearStored, emptyStored, FEATURES, killSwitches, loadStored, resolveSettings, saveStored, TIERS, tierIndex,
   urlScale, urlTier, validAutoTier, type Feature, type ResolvedSettings, type StoredGfx, type Tier,
 } from "./quality.ts";
+import { startRenderer } from "./rendererStart.ts";
 import { GpuTimer, ResolutionLadder } from "./timing.ts";
 
 export { TIERS, FEATURES, type Tier, type Feature, type ResolvedSettings };
@@ -92,13 +93,18 @@ export function isSoftwareRenderer(name: string): boolean {
 }
 
 export async function createRenderer(container: HTMLElement): Promise<RenderCtx> {
-  const renderer = new THREE.WebGPURenderer({
-    antialias: false,
+  // WebGPU gets a deadline; past it (or on a rejected init) a fresh WebGL2 renderer starts instead.
+  const { renderer } = await startRenderer({
+    // A new options object per renderer: three writes its WebGL fallback hook into it.
+    create: (forceWebGL) =>
+      new THREE.WebGPURenderer({
+        antialias: false,
+        forceWebGL,
+        powerPreference: "high-performance",
+        trackTimestamp: !flags.has("notimer"),
+      } as ConstructorParameters<typeof THREE.WebGPURenderer>[0]),
     forceWebGL: flags.has("webgl"),
-    powerPreference: "high-performance",
-    trackTimestamp: !flags.has("notimer"),
-  } as ConstructorParameters<typeof THREE.WebGPURenderer>[0]);
-  await renderer.init();
+  });
   const webgpu = !!(renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend;
   const tm = flags.get("tonemap");
   renderer.toneMapping = tm === "agx" ? THREE.AgXToneMapping : tm === "aces" ? THREE.ACESFilmicToneMapping : THREE.NeutralToneMapping;
