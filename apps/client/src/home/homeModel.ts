@@ -28,7 +28,7 @@ export interface WorldCard {
   id: BodyId;
   name: string;
   blurb: string;
-  /** "Levels 1–7"; for Portus "Safe town · Lv 1–2 outside" (the creeps outside its walls). */
+  /** "Levels 1–7"; for Portus "Safe · Lv 1–2" (the creeps outside its walls; short enough to fit the header beside the planet). */
   levels: string;
   players: number;
   boss: { name: string; level: number } | null;
@@ -43,7 +43,7 @@ export function worldCards(online: HomeOnline | null): WorldCard[] {
       id,
       name: b.name,
       blurb: BLURB[id],
-      levels: b.levels[1] > 0 ? `Levels ${b.levels[0]}–${b.levels[1]}` : `Safe town · Lv ${PORTUS_LEVELS[0]}–${PORTUS_LEVELS[1]} outside`,
+      levels: b.levels[1] > 0 ? `Levels ${b.levels[0]}–${b.levels[1]}` : `Safe · Lv ${PORTUS_LEVELS[0]}–${PORTUS_LEVELS[1]}`,
       players: online?.bodies[id]?.players ?? 0,
       boss: boss ? { name: npcDef(boss.id).name, level: boss.level } : null,
       pads: PADS[b.padLayout] ?? 0,

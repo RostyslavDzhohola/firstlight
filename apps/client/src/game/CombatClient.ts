@@ -20,7 +20,7 @@ import { closeDeath, type DeathInfo } from "../ui/death.ts";
 import { DeathFlow } from "./deathFlow.ts";
 import { offerNudge, offersSave, SaveNudge, saveReady } from "../ui/saveOffer.ts";
 import { saveStatus } from "../net/auth.ts";
-import { attackDeniedText, holsteredText, NoticeGate } from "./notices.ts";
+import { attackDeniedText, holsteredText, immuneText, NoticeGate } from "./notices.ts";
 
 const NUDGED_KEY = "fl.saveNudged";
 const _v = new THREE.Vector3();
@@ -115,6 +115,11 @@ export class CombatClient {
         if (text && this.deniedGate.allow(text)) this.hud.toast(text, "warn");
       }
     });
+    // A hit that landed and did nothing (spawning, evading home, a shield) isn't a miss: say why.
+    room.onMessage("immune", (m: { reason: string }) => {
+      const text = immuneText(m.reason);
+      if (text && this.deniedGate.allow(text)) this.hud.toast(text, "warn");
+    });
     // Support items: Patchkit channel (server-timed; damage interrupts it) and Prism Bubbles.
     room.onMessage("channel", (m: { kind: string; ms: number; target: string }) => {
       const who = m.target === me ? "" : ` ${(room.state as any).players?.get(m.target)?.name ?? "an ally"}`;
@@ -202,7 +207,8 @@ export class CombatClient {
     });
     room.onMessage("reborn", () => {
       this.death.onReborn();
-      void this.game.travel("portus");
+      // The server keeps us dead until we reach Portus: never drop this (it may come mid-rejoin).
+      void this.game.travel("portus", { mustHappen: true });
     });
     room.onMessage("loggedOut", () => {
       void this.game.loggedOut();

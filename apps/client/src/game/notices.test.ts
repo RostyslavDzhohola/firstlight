@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attackDeniedText, NoticeGate } from "./notices.ts";
+import { attackDeniedText, immuneText, NoticeGate } from "./notices.ts";
 
 describe("attack refusal notices", () => {
   it("say why the server refused a shot or a swing", () => {
@@ -31,5 +31,10 @@ describe("attack refusal notices", () => {
     gate.press(); // a new press
     expect(gate.allow("Arrival protection")).toBe(true);
     expect(gate.allow("Arrival protection")).toBe(false);
+  });
+
+  it("say why a hit did nothing (the server's immune reasons)", () => {
+    for (const r of ["spawning", "evading", "invulnerable", "shield"]) expect(immuneText(r)).toBeTruthy();
+    expect(immuneText("other")).toBeNull();
   });
 });

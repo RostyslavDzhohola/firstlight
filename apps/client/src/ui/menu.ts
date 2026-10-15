@@ -9,7 +9,7 @@ import { PF } from "@firstlight/shared/net/schema";
 import { STARTERS } from "@firstlight/shared/content/weapons";
 import type { Game } from "../game/Game.ts";
 import { openSaveProgress } from "./account.ts";
-import { saveStatus } from "../net/auth.ts";
+import { onAccountChange, saveStatus } from "../net/auth.ts";
 import { offersSave, SAVE_MIN_LEVEL, saveReady } from "./saveOffer.ts";
 import { button, el, icon, isOverlayOpen, keycaps, onOverlayChange, sprite, uiRoot } from "./dom.ts";
 import { installSprites, portraitSprite } from "./sprites.ts";
@@ -123,6 +123,10 @@ export class Menu {
     installSprites();
     this.el = el("div", "fl-overlay fl-ui fl-menu", uiRoot());
     this.el.hidden = true;
+    // Another tab saved or signed in: redraw an open pause menu (its Save row asks the session again).
+    onAccountChange((_claims, { elsewhere }) => {
+      if (elsewhere && this.mode === "pause") this.showPause();
+    });
     this.hint = el("div", "fl-looktip fl-ui", uiRoot());
     this.hint.dataset.e2e = "click-to-look";
     this.hint.setAttribute("role", "status");
@@ -233,7 +237,7 @@ export class Menu {
       if (!offersSave(status) || this.mode !== "pause" || !saveSlot.isConnected) return;
       sub.textContent += " · Guest";
       // The server emails a new address only from level 2 (D34); a rebirth keeps it unlocked.
-      const ready = saveReady(Math.max(this.game.hud.you?.level ?? 1, this.game.combat?.saveNudge.best ?? 0));
+      const ready = saveReady(Math.max(this.game.hud.you?.level ?? 1, this.game.combat?.saveNudge?.best ?? 0));
       const save = item("save", "Save progress", ready ? "Progress lives in this browser until saved · email code, no password" : `Unlocks at level ${SAVE_MIN_LEVEL}: play a little first. Until then progress lives in this browser.`, "", saveSlot);
       save.b.dataset.e2e = "menu-save";
       el("span", "fl-menu__badge", save.right, "Not saved");
