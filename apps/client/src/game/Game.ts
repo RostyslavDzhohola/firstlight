@@ -7,6 +7,7 @@ import { BODIES, padDirs, type BodyId } from "@firstlight/shared";
 import { config, flags } from "../config.ts";
 import { Net, TravelRedirect, type Snapshot } from "../net/Net.ts";
 import { AvatarView, avatarWarmupHook, preloadAvatars } from "../render/Avatars.ts";
+import { setAvatarTextureLowRes } from "../render/avatars/assets.ts";
 import { HorseView, horseWarmupHook, preloadHorse } from "../render/Horses.ts";
 import "../render/avatars/system.ts";
 import { Bench, benchConfig } from "../render/bench.ts";
@@ -100,6 +101,7 @@ export class Game {
       throw new RendererUnavailable(e); // nothing was attached yet: a retry starts clean
     }
     installShaderMonitor(this.ctx);
+    setAvatarTextureLowRes(this.ctx.tier === "low"); // 512² character textures on Low
     void preloadAvatars(); // character GLBs stream in while we connect and build the world
     void preloadHorse(); // 147 KB: horses are in the warm-up, so they never compile mid-game
     console.info(`[gfx] backend ${this.ctx.webgpu ? "WebGPU" : "WebGL2"}, tier ${this.ctx.tier}${this.ctx.settings.auto ? " (auto)" : ""}, gpu "${this.ctx.gpuName}"`);

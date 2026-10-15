@@ -42,13 +42,17 @@ run_char() {
     --char "$1" --ual1 "$UAL1" --out "$WORK/raw" > "$WORK/build_$1.log" 2>&1
   grep -E "^CHAR3D (DONE|joined)" "$WORK/build_$1.log" || { tail -30 "$WORK/build_$1.log"; return 1; }
 }
+PIDS=()
 for c in $CHARS; do
   while [ "$(jobs -rp | wc -l | tr -d ' ')" -ge "$JOBS" ]; do sleep 5; done
   run_char "$c" &
+  PIDS+=("$!")
 done
 "$BLENDER" -b --disable-autoexec --factory-startup --python "$HERE/../characters/build_anims.py" -- \
   --ual1 "$UAL1" --ual2 "$UAL2" --out "$WORK/raw/starters_anims.glb" | grep -E "^ANIMS"
-wait
+FAILED=0
+for pid in "${PIDS[@]}"; do wait "$pid" || FAILED=1; done
+[ "$FAILED" = 0 ] || { echo "a character build failed (logs in $WORK)" >&2; exit 1; }
 
 # textures: WebP (python -I: our own PNGs only)
 python3 -I "$HERE/webp.py" "$WORK/raw" "$OUT_DEV" $CHARS

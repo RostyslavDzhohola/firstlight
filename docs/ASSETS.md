@@ -25,8 +25,8 @@ source, licence and where its notice lives. Our code is MIT (`LICENSE`); our own
 
 Not third-party: the music (generated at runtime per planet by `MusicGen` in
 `apps/client/src/audio/Audio.ts`, none of the candidate tracks in content.md §9 is used), all
-weapon, NPC, boss and terrain geometry, procedural prop fallbacks and Meridian spires (built in code), `favicon.svg`, and the character
-sculpted starter characters listed below as our own work.
+weapon, NPC, boss and terrain geometry, procedural prop fallbacks and Meridian spires (built in code), `favicon.svg`, and the
+sculpted starter characters listed below, which are our own work.
 
 Build tools that ship nothing themselves: Blender (headless, `tools/blender/chars3d/build.sh` with its bundled OpenVDB and numpy, `tools/blender/characters/build.sh`, `tools/blender/horse/build.sh`, `tools/blender/vegetation/build.sh`, `tools/blender/portus/build.sh`),
 `@gltf-transform/cli` 4.5.1 via `pnpm dlx`, Vite, Vitest, TypeScript, tsx, esbuild, wrangler.

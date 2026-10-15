@@ -8,6 +8,7 @@ import { ANIM } from "@firstlight/shared/net/schema";
 import { PALETTE_NAMES, STARTERS, WEAPONS } from "@firstlight/shared/content/weapons";
 import { createRenderer } from "../renderer.ts";
 import { AvatarView, preloadAvatars } from "../Avatars.ts";
+import { setAvatarTextureLowRes } from "./assets.ts";
 
 const R = 5000; // stand the stage on a "planet" big enough to be flat (AvatarView takes planet coords)
 const ORDER = [
@@ -24,6 +25,7 @@ export async function startAvatarDevPage() {
   const text = document.getElementById("loading-text");
   if (text) text.textContent = "Loading characters…";
   const ctx = await createRenderer(document.getElementById("game")!);
+  setAvatarTextureLowRes(ctx.tier === "low");
   const assets = await preloadAvatars((f) => {
     const bar = document.getElementById("loading-bar") as HTMLElement | null;
     if (bar) bar.style.width = `${Math.round(f * 100)}%`;

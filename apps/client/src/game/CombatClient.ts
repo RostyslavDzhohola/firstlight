@@ -39,6 +39,7 @@ export class CombatClient {
   private chargeStart = 0;
   /** Ember Seal: the local cooldown mirror and whether the current RMB hold is a seal. */
   private sealReadyAt = 0;
+  private sealPendingUntil = 0;
   private sealHeld = false;
   private wasRmb = false;
   /** Right mouse last frame while saddle-locked (the Patchkit's self-patch there). */
@@ -87,6 +88,12 @@ export class CombatClient {
       this.game.audio.play(m.kind === "xp" ? "levelUp" : m.kind === "coins" ? "coins" : "ui");
     });
     room.onMessage("denied", (m: { action: string; reason: string }) => {
+      // A seal the server refused (released too early after lag, safe zone…) didn't cast: give the
+      // local cooldown back. Its own "cooldown" refusal means the server's clock still runs.
+      if (m.action === "fire" && this.sealPendingUntil > performance.now()) {
+        this.sealPendingUntil = 0;
+        if (m.reason !== "cooldown") this.sealReadyAt = 0;
+      }
       if (m.reason === "level gate") this.hud.toast("Your level is too low to use that tier", "warn");
       else if (m.action === "logout") this.hud.toast("Can't log out in combat — wait 10 s", "warn");
       else if (m.action === "use" && USE_DENIED[m.reason]) this.hud.toast(USE_DENIED[m.reason]!, "warn");
@@ -481,6 +488,7 @@ export class CombatClient {
       room.send("fire", { slot: g.hud.you?.selected ?? 0, ox: origin.x, oy: origin.y, oz: origin.z, dx: dir.x, dy: dir.y, dz: dir.z, t: Date.now(), seal: true });
       g.self?.trigger("cast");
       this.sealReadyAt = now + (t.cooldown ?? 8) * 1000;
+      this.sealPendingUntil = now + 1500; // a refusal within this window undoes the cooldown
       this.lastFire = now;
     }
   }
