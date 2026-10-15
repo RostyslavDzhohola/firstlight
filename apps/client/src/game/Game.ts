@@ -194,6 +194,9 @@ export class Game {
   /** First arrival done: start the loop and give the player control. */
   private handOver() {
     this.running = true;
+    // The loop starts only now: presses made during the first load are dropped, not played on the
+    // first frame (a C pressed on the loading screen rolled at once; Codex review). Held keys stay.
+    this.input.endFrame();
     if (!this.bench) this.input.lock();
     this.ctx.renderer.setAnimationLoop(() => this.frame());
   }
