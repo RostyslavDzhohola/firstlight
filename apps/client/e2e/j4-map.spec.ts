@@ -12,11 +12,11 @@ const KEEP_CLEAR = ["playerCard", "hotbar", "tutorial", "saveCard", "compass", "
 type Rect = { x: number; y: number; w: number; h: number };
 const overlap = (a: Rect, b: Rect) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
 
-/** Turn the camera to face north (so north-up and player-up maps agree). */
-async function faceNorth(player: Player) {
+/** Turn the camera to a compass heading (degrees clockwise from north). */
+async function faceHeading(player: Player, deg: number) {
   await player.face((s) => {
-    const h = s.player?.heading ?? 0;
-    return h > 180 ? 360 - h : -h;
+    const d = (((deg - (s.player?.heading ?? 0)) % 360) + 540) % 360 - 180;
+    return d;
   }, 3);
 }
 
@@ -27,10 +27,13 @@ async function openWorldMap(player: Player): Promise<Locator> {
   return map;
 }
 
-/** The player's marker on the world map: `[data-e2e="map-player"]` when the map lane provides it, else the map's centre. */
+/**
+ * Where the player is on the world map: `[data-e2e="map-player"]` if the map ever gets one, else the
+ * centre of the map's canvas (ui/map.ts opens centred on you).
+ */
 async function playerOnMap(player: Player, map: Locator) {
   const marker = player.page.locator('[data-e2e="map-player"]').first();
-  const box = (await marker.isVisible().catch(() => false)) ? await marker.boundingBox() : await map.boundingBox();
+  const box = (await marker.isVisible().catch(() => false)) ? await marker.boundingBox() : await map.locator("canvas").first().boundingBox();
   expect(box, "a place for the player on the map").not.toBeNull();
   return { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 };
 }
@@ -63,7 +66,7 @@ test.describe("J4 map, waypoint and minimap", () => {
     await player.joinAsDevAdmin({ starter: "Hexwick", body: "arcadia" });
     await player.waitInWorld(90_000, "arcadia");
     await player.lock();
-    await faceNorth(player);
+    await faceHeading(player, 45); // E and a due-east waypoint both sit mid-right on the compass strip
     const map = await openWorldMap(player);
     await player.shot("map");
     const me = await playerOnMap(player, map);
@@ -91,13 +94,15 @@ test.describe("J4 map, waypoint and minimap", () => {
     await player.joinAsDevAdmin({ starter: "Hexwick", body: "arcadia" });
     await player.waitInWorld(90_000, "arcadia");
     await player.lock();
-    await faceNorth(player);
+    await faceHeading(player, 0);
     let map = await openWorldMap(player);
     let me = await playerOnMap(player, map);
     await page.mouse.click(me.x + 50, me.y - 30);
     const mapWp = page.locator('[data-e2e="map-waypoint"]');
     await expect(mapWp, "waypoint dropped").toBeVisible();
-    await mapWp.click({ button: "right" });
+    // The marker lets clicks through (pointer-events: none): right-click the map under it.
+    const wpBox = (await mapWp.boundingBox())!;
+    await page.mouse.click(wpBox.x + wpBox.width / 2, wpBox.y + wpBox.height / 2, { button: "right" });
     await expect(mapWp, "right-click clears the waypoint").toBeHidden();
     await player.tap("KeyM");
     await player.lock();
@@ -106,7 +111,7 @@ test.describe("J4 map, waypoint and minimap", () => {
     // A near waypoint, then walk to it following the compass tick: it clears on arrival.
     map = await openWorldMap(player);
     me = await playerOnMap(player, map);
-    await page.mouse.click(me.x + 12, me.y);
+    await page.mouse.click(me.x + 25, me.y); // ~20 m east: past the 8 m reach that clears it
     await expect(mapWp).toBeVisible();
     await player.tap("KeyM");
     await player.lock();

@@ -227,7 +227,11 @@ export class Player {
   async lock() {
     for (let i = 0; i < 4; i++) {
       const s = await this.snap();
-      if (s.input.pointerLocked) return;
+      if (s.input.pointerLocked) {
+        // A lock lost within 500 ms "didn't stick" (ui/pauseFlow.ts): let it settle like a player would.
+        if (i > 0) await this.page.waitForTimeout(600);
+        return;
+      }
       this.mouse = { x: 640, y: 360 };
       await this.page.mouse.click(this.mouse.x, this.mouse.y);
       await this.page.waitForTimeout(400);
@@ -364,7 +368,8 @@ export class Player {
 
   /**
    * Walk out of the pad's safe ring, keeping the portal home behind us (walking into it would travel
-   * back to Portus). Steers every step: the camera can be re-aimed by an arrival correction.
+   * back to Portus). Re-aims every step (an arrival correction can turn the camera) and steps round
+   * obstacles and water by turning further each time it gets stuck, never back toward the portal.
    */
   async walkOutOfRing(timeoutMs = 30_000) {
     const s0 = await this.snap();
@@ -373,17 +378,24 @@ export class Player {
     const until = Date.now() + timeoutMs;
     let lastPos = s0.player!.pos;
     let detour = 0;
+    let away: number | null = null;
     while (Date.now() < until) {
       const s = await this.snap();
       expect(s.body, "still on the same body (didn't walk into the portal)").toBe(body);
       if (s.zone?.local === "danger" && s.zone.padDist > s.zone.safeRadius + 4 && !s.player?.swimming) return s;
       const home = s.portals?.[0];
-      if (home && home.surface < 25 && Math.abs(home.bearing) < 100) await this.turn(home.bearing + 180 + detour);
-      await this.hold(["ShiftLeft", "KeyW"], 600);
+      if (home && home.surface < 20) {
+        // Straight away from the portal, plus the current detour (±45° steps, never past ±90°).
+        const want = wrap180(home.bearing + 180 + detour);
+        if (Math.abs(want) > 8) await this.turn(want);
+        away = null;
+      } else if (away === null) away = 0;
+      await this.hold(["ShiftLeft", "KeyW"], 500);
       const p = (await this.snap()).player!.pos;
-      if (Math.hypot(p[0]! - lastPos[0]!, p[1]! - lastPos[1]!, p[2]! - lastPos[2]!) < 1.5 || s.player?.swimming) {
-        detour = detour >= 0 ? -(detour + 40) : -detour; // try +40°, −40°, +80°… around obstacles and water
-        await this.turn(detour);
+      const moved = Math.hypot(p[0]! - lastPos[0]!, p[1]! - lastPos[1]!, p[2]! - lastPos[2]!);
+      if (moved < 0.8 || s.player?.swimming) {
+        detour = detour > 0 ? -detour : Math.min(90, -detour + 45);
+        if (away !== null) await this.turn(detour >= 0 ? 60 : -60); // clear of the portal: just turn
       }
       lastPos = p;
     }
@@ -454,6 +466,11 @@ export class Player {
   async note(type: string, description: unknown) {
     this.info.annotations.push({ type, description: typeof description === "string" ? description : JSON.stringify(description) });
   }
+}
+
+/** Degrees into −180…180. */
+export function wrap180(d: number): number {
+  return ((((d + 180) % 360) + 360) % 360) - 180;
 }
 
 export function newName(): string {
