@@ -26,6 +26,7 @@ const PEAK_DB = -1;
 /** Playback gain cap: a −1 dBFS file at this gain stays under full scale through the default bus. */
 const GAIN_MAX = 1.4;
 
+if (!/^[a-z0-9][a-z0-9-]*$/.test(SET)) throw new Error(`bad set name ${SET}`); // SETDIR is deleted below
 rmSync(SETDIR, { recursive: true, force: true });
 for (const d of [SETDIR, ANALYSIS, ZZ]) mkdirSync(d, { recursive: true });
 

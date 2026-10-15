@@ -2,13 +2,45 @@
 // Runs with Node 24's type stripping (erasable TypeScript only).
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 export const RATE = 48000;
-/** Where everything generated goes. Never inside the repo (AGENTS.md: ElevenLabs outputs never go in git). */
-export const OUT = process.env.FL_SFX_OUT ?? "/tmp/fl-go/sfx";
+
+const present = (p: string) => {
+  try {
+    lstatSync(p);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The real path of an output folder, refused if it is inside any git checkout (ElevenLabs outputs
+ * never go in git: AGENTS.md, D18). Symlinks are resolved first, including in parents of a path
+ * that doesn't exist yet; a dangling symlink is refused. Changes nothing on disk.
+ */
+export function safeOutDir(dir: string, cwd: string = process.cwd()): string {
+  let base = resolve(cwd, dir);
+  const rest: string[] = [];
+  while (!present(base)) {
+    const up = dirname(base);
+    if (up === base) break;
+    rest.unshift(basename(base));
+    base = up;
+  }
+  const real = join(realpathSync(base), ...rest); // throws on a dangling symlink
+  for (let d = real; ; d = dirname(d)) {
+    if (present(join(d, ".git"))) throw new Error(`refusing SFX output inside the git checkout ${d}: ElevenLabs outputs never go in git`);
+    if (dirname(d) === d) break;
+  }
+  return real;
+}
+
+/** Where everything generated goes (checked at load, before any script touches the disk or the API). */
+export const OUT = safeOutDir(process.env.FL_SFX_OUT ?? "/tmp/fl-go/sfx");
 
 /** The ElevenLabs key from the environment or `~/.config/firstlight/.env`. Never print it. */
 export function apiKey(): string {
