@@ -10,6 +10,8 @@ import { config } from "../config.ts";
 import { button, el, icon, overlayClosed, overlayOpened, sprite, uiRoot } from "./dom.ts";
 import { aliveParts, classifyKiller, deathPile, type KillerInfo } from "./hudFormat.ts";
 import { itemSprite, portraitSprite } from "./sprites.ts";
+import { cancelCharacterPick } from "./characterPick.ts";
+import { onAccountChange, saveStatus } from "../net/auth.ts";
 
 export interface DeathInfo {
   killerName: string;
@@ -38,7 +40,8 @@ interface DeathContext {
   name: string;
   starter: number;
   lastAlive: { hotbar: (InvItem | null)[]; backpack: (InvItem | null)[]; coins: number; level: number } | null;
-  pick: () => Promise<{ starter: number; palette: number }>;
+  /** The rebirth pick; null when it was cancelled (cancelCharacterPick). */
+  pick: () => Promise<{ starter: number; palette: number } | null>;
 }
 
 const BARKS = ["Asset non-compliant. Escalating.", "Your access has been revoked.", "Thank you for your cooperation.", "Incident closed. Next."];
@@ -84,7 +87,8 @@ let closeOpen: (() => void) | null = null;
 
 /**
  * Close the death screen without a pick (resolves it with null): the character turned out to be alive,
- * e.g. saving from this screen moved us to an account whose character lives (game/deathFlow.ts).
+ * e.g. saving from this screen moved us to an account whose character lives (game/deathFlow.ts). Works
+ * in both phases: the death screen, and the rebirth picker after "Rise again".
  */
 export function closeDeath(): void {
   closeOpen?.();
@@ -187,28 +191,48 @@ export function showDeath(info: DeathInfo, ctx: DeathContext): Promise<{ starter
       icon("save", "", b);
       b.append("Save progress");
       b.dataset.e2e = "death-save";
-      b.onclick = () =>
-        void openSave().then((r) => {
-          if (r !== "saved") return;
-          box.replaceChildren();
-          const ok = el("p", "is-ok", box);
-          icon("check", "", ok);
-          ok.append("Saved. Sign in on any browser to carry on.");
+      const saved = () => {
+        stopWatching();
+        box.replaceChildren();
+        const ok = el("p", "is-ok", box);
+        icon("check", "", ok);
+        ok.append("Saved. Sign in on any browser to carry on.");
+      };
+      b.onclick = () => void openSave().then((r) => r === "saved" && saved());
+      // Another tab saved (or signed out) while this screen is up: ask the session again.
+      const stopWatching = onAccountChange((_claims, { elsewhere }) => {
+        if (!elsewhere) return;
+        void saveStatus().then((s) => {
+          if (!box.isConnected || s === "guest") return;
+          if (s === "saved") saved();
+          else {
+            stopWatching();
+            box.remove();
+          }
         });
+      });
+      stopOnClose = stopWatching;
     });
+    let stopOnClose: (() => void) | null = null;
 
     const leave = () => {
       ov.remove();
       overlayClosed("death");
+    };
+    const settle = (r: { starter: number; palette: number } | null) => {
       open = closeOpen = null;
+      stopOnClose?.();
+      resolve(r);
     };
     closeOpen = () => {
       leave();
-      resolve(null);
+      settle(null);
     };
     rise.onclick = async () => {
       leave();
-      resolve(await ctx.pick());
+      // The picker phase stays cancellable: closeDeath() closes the picker, which then answers null.
+      closeOpen = () => cancelCharacterPick();
+      settle(await ctx.pick());
     };
     rise.focus();
   });

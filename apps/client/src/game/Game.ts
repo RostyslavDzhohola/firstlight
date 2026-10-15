@@ -39,6 +39,7 @@ import { PlayerController } from "./PlayerController.ts";
 import { CLIENT_SYSTEMS, type ClientSystem } from "./systems.ts";
 import { installSocial, partyRoomOn, removedFromWorld } from "../social/index.ts";
 import { goHome } from "../home/leave.ts";
+import { TravelQueue } from "./travelQueue.ts";
 
 
 /** ?bench runs without a server unless ?online is also given; ?offline forces it anywhere. */
@@ -72,6 +73,8 @@ export class Game {
   private last = performance.now();
   private running = false;
   private travelling = false;
+  /** A server-ordered move (rebirth in Portus) that arrived during another transition waits for it. */
+  private readonly travelQueue = new TravelQueue<BodyId>();
   private portalCooldownUntil = 0;
   private reconnecting = false;
   /** Rejoins after "saving failed" closes: bounded, and not reset by a successful join. */
@@ -168,7 +171,7 @@ export class Game {
     }
     if (!localStorage.getItem("fl.starter") && !automated) {
       hideLoading();
-      this.firstChoice = await this.hud.characterPick({ askName: needsName ? { suggested: info!.name } : undefined });
+      this.firstChoice = (await this.hud.characterPick({ askName: needsName ? { suggested: info!.name } : undefined })) ?? undefined;
     } else if (needsName) {
       hideLoading(); // the name card sits in #ui, under the loading screen
       await pickDisplayName({ suggested: info!.name, dismissible: true });
@@ -234,8 +237,12 @@ export class Game {
     return new THREE.Vector3(d[0], d[1], d[2]).multiplyScalar(body.radius + h);
   }
 
-  async travel(body: BodyId) {
-    if (this.travelling) return;
+  /**
+   * Go to another body. `mustHappen`: a move the server ordered (rebirth) that runs after the current
+   * transition instead of being dropped (a rejoin may still be arriving; Codex review round 2).
+   */
+  async travel(body: BodyId, opts: { mustHappen?: boolean } = {}) {
+    if (this.travelQueue.ask(body, this.travelling, !!opts.mustHappen) !== "go") return;
     this.travelling = true;
     this.audio.play("portal");
     let failure: unknown = null;
@@ -249,6 +256,13 @@ export class Game {
       this.portalCooldownUntil = performance.now() + 3000;
     }
     if (failure) this.arrivalFailed(failure);
+    this.afterTransition();
+  }
+
+  /** A transition ended: make the move that waited for it (if the game still runs). */
+  private afterTransition() {
+    const next = this.travelQueue.take(this.stopped);
+    if (next) void this.travel(next, { mustHappen: true });
   }
 
   /** Stop acting on the world (logged out, removed, connection given up): menus own the screen. */
@@ -309,6 +323,7 @@ export class Game {
     } finally {
       this.reconnecting = false;
       this.travelling = false;
+      this.afterTransition();
     }
   }
 
@@ -374,12 +389,14 @@ export class Game {
       console.warn("resume failed", e);
       this.travelling = false;
       this.running = true;
-      return void this.arrivalFailed(e);
+      this.arrivalFailed(e);
+      return this.afterTransition();
     }
     this.travelling = false;
     this.running = true;
     this.last = performance.now();
     this.input.lock();
+    this.afterTransition();
   }
 
   async enterBody(body: BodyId, choice?: { starter: number; palette: number }): Promise<void> {

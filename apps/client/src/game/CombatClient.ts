@@ -202,7 +202,8 @@ export class CombatClient {
     });
     room.onMessage("reborn", () => {
       this.death.onReborn();
-      void this.game.travel("portus");
+      // The server keeps us dead until we reach Portus: never drop this (it may come mid-rejoin).
+      void this.game.travel("portus", { mustHappen: true });
     });
     room.onMessage("loggedOut", () => {
       void this.game.loggedOut();

@@ -31,9 +31,19 @@ const STARTER_COPY = [
 const DEFAULT_PALETTE = [2, 1, 3, 0];
 const PAL_KEYS = ["ivory", "sand", "midnight", "moss", "ember", "dusk"];
 
-let open: Promise<{ starter: number; palette: number }> | null = null;
+let open: Promise<{ starter: number; palette: number } | null> | null = null;
+let cancelOpen: (() => void) | null = null;
 
-export function showCharacterPick(opts: CharacterPickOptions = {}): Promise<{ starter: number; palette: number }> {
+/**
+ * Close the open picker without a choice (it resolves with null). Only the death screen's rebirth
+ * pick is ever cancelled: the character turned out to be alive (ui/death.ts closeDeath).
+ */
+export function cancelCharacterPick(): void {
+  cancelOpen?.();
+}
+
+/** Starter + palette; null only when cancelCharacterPick() closed it. */
+export function showCharacterPick(opts: CharacterPickOptions = {}): Promise<{ starter: number; palette: number } | null> {
   if (open) return open;
   installSprites();
   open = new Promise((resolve) => {
@@ -46,6 +56,12 @@ export function showCharacterPick(opts: CharacterPickOptions = {}): Promise<{ st
     document.exitPointerLock?.();
     overlayOpened("charpick");
     const ov = el("div", "fl-overlay fl-ui fl-charpick", uiRoot());
+    cancelOpen = () => {
+      ov.remove();
+      overlayClosed("charpick");
+      open = cancelOpen = null;
+      resolve(null);
+    };
     ov.setAttribute("role", "dialog");
     ov.setAttribute("aria-label", rebirth ? "Rise again" : "Choose your starter");
     isolateKeys(ov);
@@ -241,7 +257,7 @@ export function showCharacterPick(opts: CharacterPickOptions = {}): Promise<{ st
       localStorage.setItem("fl.palette", String(palette));
       ov.remove();
       overlayClosed("charpick");
-      open = null;
+      open = cancelOpen = null;
       resolve({ starter, palette });
     }
     play.onclick = () => void go();
