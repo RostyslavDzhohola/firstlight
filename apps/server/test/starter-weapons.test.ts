@@ -6,12 +6,13 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Room } from "@colyseus/sdk";
-import { BODIES, isSafe, type BodyId } from "@firstlight/shared";
+import { BODIES, createTerrain, isSafe, type BodyId } from "@firstlight/shared";
 import { PF } from "@firstlight/shared/net/schema";
 import { STARTERS } from "@firstlight/shared/content/weapons";
 import type { Game } from "../src/app.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
-import { flat, me, nearPad, offset, place, spawnNpc, st, type V } from "./npc-bots.ts";
+import { flat, me, nearPad, offset, place, serverRoom, spawnNpc, st, type V } from "./npc-bots.ts";
+import { DestructionSystem } from "../src/world/destruction.ts";
 
 let game: Game;
 const rooms: Room[] = [];
@@ -45,7 +46,7 @@ async function shooter(body: BodyId, starter: number) {
   r.onMessage("denied", (m: { action: string; reason: string }) => denied.push(m));
   const hits: { target: string; amount: number }[] = [];
   r.onMessage("hit", (m: { attacker: string; target: string; amount: number }) => {
-    if (m.attacker === r.sessionId) hits.push(m);
+    if (m.attacker === r.sessionId) hits.push({ ...m });
   });
   for (const t of ["you", "toast", "shot", "projectile", "explode", "swing", "npcInfo"]) r.onMessage(t, () => {});
   return { r, denied, hits };
@@ -153,6 +154,97 @@ describe("starter weapons on the combat planets", () => {
     r.send("fire", { slot: 0, ...shot, ox: shot.ox + side[0] * 9, oy: shot.oy + side[1] * 9, oz: shot.oz + side[2] * 9, t: Date.now() });
     await waitFor(() => denied.length > 0);
     expect(denied[0]).toEqual({ action: "fire", reason: "origin" });
+  });
+
+  // The origin slides along the aim line to the head (D-combat-1): it must not shoot through cover
+  // in front of the head, nor reach further than the weapon does from the head.
+  it("a zoomed-out shot still stops at cover in front of the shooter", async () => {
+    const { r, hits } = await shooter("arcadia", 0); // Hexquill
+    const terrain = createTerrain(BODIES.arcadia);
+    const sys = serverRoom(r).systems.find((x) => x instanceof DestructionSystem) as DestructionSystem;
+    const R = BODIES.arcadia.radius;
+    // A tall, intact prop on dry, unsafe, gentle ground: stand 1.7 m on one side, the NPC 3 m beyond.
+    let stand: V | null = null;
+    let beyond: V | null = null;
+    let prop = -1;
+    for (const b of sys.list) {
+      if (b.h < 2.5 || sys.isBroken(b.index)) continue;
+      const c = norm([b.px, b.py, b.pz]);
+      for (let k = 0; k < 8 && !stand; k++) {
+        const ang = (k / 8) * Math.PI * 2;
+        const side = norm([b.rx * Math.cos(ang) + b.fx * Math.sin(ang), b.ry * Math.cos(ang) + b.fy * Math.sin(ang), b.rz * Math.cos(ang) + b.fz * Math.sin(ang)]);
+        const a = norm(add(c, side, (Math.max(b.hx, b.hz) + 1.2) / R));
+        const z = norm(add(c, side, -(Math.max(b.hx, b.hz) + 3) / R));
+        const ga = terrain.groundHeight(...a), gz = terrain.groundHeight(...z), gc = terrain.groundHeight(...c);
+        if (ga < BODIES.arcadia.waterLevel + 0.5 || gz < BODIES.arcadia.waterLevel + 0.5) continue;
+        if (Math.abs(ga - gc) > 0.3 || Math.abs(gz - gc) > 0.3 || isSafe(BODIES.arcadia, a[0] * R, a[1] * R, a[2] * R)) continue;
+        if (sys.list.some((o) => o !== b && Math.hypot(o.px - b.px, o.py - b.py, o.pz - b.pz) < 8)) continue;
+        stand = [a[0] * (R + ga), a[1] * (R + ga), a[2] * (R + ga)];
+        prop = b.index;
+        beyond = [z[0] * (R + gz), z[1] * (R + gz), z[2] * (R + gz)];
+      }
+      if (stand) break;
+    }
+    expect(stand, "a tall prop with room on both sides").not.toBeNull();
+    await standAt(r, stand!, beyond!);
+    const id = await spawnNpc(r, "woolback", beyond!, { instant: true, roam: 0 });
+    await waitFor(() => !!st(r).npcs?.get(id));
+    const shots: unknown[] = [];
+    r.onMessage("projectile", (m) => shots.push(m));
+    attack(r, true, st(r).npcs.get(id), 9); // camera 9 m back on the same line
+    await waitFor(() => shots.length > 0);
+    await new Promise((ok) => setTimeout(ok, 600)); // the bolt's flight
+    expect(hits.filter((h) => h.target === id)).toEqual([]);
+    // Control: with the prop broken, the same shot lands.
+    sys.damage(prop, 1e6, "heavy", "comet", [0, 0, 1], null);
+    await new Promise((ok) => setTimeout(ok, 450)); // the fire rate
+    attack(r, true, st(r).npcs.get(id), 9);
+    await waitFor(() => hits.some((h) => h.target === id));
+  });
+
+  it("a zoomed-out shot reaches no further than the weapon does from the head", async () => {
+    const { r, hits, denied } = await shooter("arcadia", 0); // Hexquill: 40 m, the bolt flies 48 m at most
+    const terrain = createTerrain(BODIES.arcadia);
+    const R = BODIES.arcadia.radius;
+    // A start outside a pad ring with open, dry ground for 56 m in some direction: nothing higher
+    // than the shooter's chest in between, so terrain can't be what stops the bolt.
+    let outside: V | null = null;
+    let far: ((m: number) => V) | null = null;
+    for (let pad = 0; pad < 12 && !far; pad++) {
+      for (const out of [20, 30]) {
+        const start = nearPad("arcadia", pad, out);
+        if (isSafe(BODIES.arcadia, ...start)) continue;
+        const g0 = terrain.groundHeight(...norm(start));
+        for (let k = 0; k < 16 && !far; k++) {
+          const line = (m: number) => offset(start, Math.cos((k / 16) * Math.PI * 2) * m, Math.sin((k / 16) * Math.PI * 2) * m, R);
+          let ok = g0 > BODIES.arcadia.waterLevel + 0.5;
+          for (let m = 2; m <= 56 && ok; m += 2) {
+            const p = line(m);
+            const g = terrain.groundHeight(...norm(p));
+            ok = g < g0 + 1 && g > g0 - 3 && g > BODIES.arcadia.waterLevel + 0.5 && !isSafe(BODIES.arcadia, ...p);
+          }
+          if (ok) {
+            outside = start;
+            far = line;
+          }
+        }
+        if (far) break;
+      }
+    }
+    expect(far, "open ground for 56 m").not.toBeNull();
+    const shoot = async (m: number) => {
+      const at = far!(m);
+      await standAt(r, outside!, at);
+      const id = await spawnNpc(r, "woolback", at, { instant: true, roam: 0 });
+      await waitFor(() => !!st(r).npcs?.get(id));
+      await new Promise((ok) => setTimeout(ok, 450)); // the Hexquill's fire rate
+      attack(r, true, st(r).npcs.get(id), 9);
+      await new Promise((ok) => setTimeout(ok, 1600)); // 54 m at 45 m/s
+      return hits.some((h) => h.target === id);
+    };
+    expect(await shoot(30)).toBe(true); // control: in range, from the same zoomed-out camera
+    expect(await shoot(54)).toBe(false);
+    expect(denied).toEqual([]);
   });
 
   it("right after arriving (spawn protection) an attack is refused with a reason", async () => {
