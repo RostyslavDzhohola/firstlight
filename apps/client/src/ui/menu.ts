@@ -148,6 +148,11 @@ export class Menu {
     });
   }
 
+  /** Something that keeps the menu away changed outside the overlay registry (death cleared on respawn). */
+  blockersChanged() {
+    this.flow.onOverlayChange();
+  }
+
   /** Draw a pause state: the menu, the click-to-look hint, or neither. */
   private render(s: PauseState) {
     this.hint.classList.toggle("is-on", s === "free");

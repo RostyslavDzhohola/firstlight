@@ -145,4 +145,27 @@ describe("the real Menu", () => {
     expect(shown.hint()).toBe(false);
     expect(locked).not.toBeNull();
   });
+
+  it("a respawn confirmed after the death screen closed brings the hint back (no stuck screen)", async () => {
+    // Died while playing: the death screen frees the pointer and owns the screen.
+    grant = true;
+    game.input.lock();
+    await settle();
+    grant = false;
+    game.combat.deadUntilRespawn = true;
+    dom.overlayOpened("death");
+    setLock(null);
+    vi.advanceTimersByTime(1000);
+    expect(shown.menu()).toBe(false);
+    // The character pick closes before the server confirms the respawn: still dead, nothing shows.
+    dom.overlayClosed("death");
+    vi.advanceTimersByTime(1000);
+    expect(shown.menu()).toBe(false);
+    expect(shown.hint()).toBe(false);
+    // The server's `you` says we're alive again (CombatClient clears the flag and tells the menu).
+    game.combat.deadUntilRespawn = false;
+    menu.blockersChanged();
+    expect(shown.hint()).toBe(true);
+    expect(shown.menu()).toBe(false);
+  });
 });
