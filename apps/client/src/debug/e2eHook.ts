@@ -88,7 +88,18 @@ interface GameLike {
     camera?: { matrixWorldInverse: { elements: ArrayLike<number> }; projectionMatrix: { elements: ArrayLike<number> }; position: Vec };
     renderer?: { domElement?: HTMLCanvasElement };
   };
-  player?: { pos: Vec; camForward: Vec; camPitch: number; anim: number; onGround: boolean; swimming: boolean; frozen: boolean; mounted: boolean };
+  player?: {
+    pos: Vec;
+    camForward: Vec;
+    camPitch: number;
+    anim: number;
+    onGround: boolean;
+    swimming: boolean;
+    frozen: boolean;
+    mounted: boolean;
+    getStructures?(): RayCollider | null;
+    getColliders?(): RayCollider | null;
+  };
   planet?: { terrain?: unknown; body?: { radius: number } };
   input?: { locked: boolean; enabled: boolean; sensitivity: number; invertY: boolean };
   net?: { room: RoomLike | null; rtt?: number };
@@ -98,6 +109,10 @@ interface GameLike {
   photo?: { active: boolean };
   self?: { currentName?: string };
   systems?: unknown[];
+}
+/** A collider the player's movement uses (structures: town, outposts, waystones; props: trees, rocks…). */
+interface RayCollider {
+  raycast?(o: Vec, d: Vec, maxT: number): number;
 }
 interface OnboardingLike {
   active: boolean;
@@ -705,6 +720,33 @@ export function installE2eHook(win: Window & typeof globalThis): void {
     probe: { start: startProbe, stop: stopProbe, running: () => !!probe },
     /** Distance, bearing and camera aim from the player to a world point (null before the game). */
     targetOf: (x: number, y: number, z: number) => targetFrom(game())?.(x, y, z) ?? null,
+    /**
+     * How far the player could walk straight along each bearing (degrees from the camera's heading,
+     * right = +) before a structure or prop the movement collides with, up to `max` metres: the same
+     * colliders movement uses, cast at knee and chest height. Journeys steer round buildings with it.
+     */
+    clearance: (bearings: number[], max = 12) => {
+      const p = game()?.player;
+      if (!p) return null;
+      const cols = [p.getStructures?.(), p.getColliders?.()].filter((c): c is RayCollider => !!c?.raycast);
+      const l = Math.hypot(p.pos.x, p.pos.y, p.pos.z) || 1;
+      const up = { x: p.pos.x / l, y: p.pos.y / l, z: p.pos.z / l };
+      const k = p.camForward.x * up.x + p.camForward.y * up.y + p.camForward.z * up.z;
+      const f0 = { x: p.camForward.x - k * up.x, y: p.camForward.y - k * up.y, z: p.camForward.z - k * up.z };
+      const fl = Math.hypot(f0.x, f0.y, f0.z) || 1;
+      const f = { x: f0.x / fl, y: f0.y / fl, z: f0.z / fl };
+      const r = { x: f.y * up.z - f.z * up.y, y: f.z * up.x - f.x * up.z, z: f.x * up.y - f.y * up.x }; // f × up: right
+      return bearings.map((deg) => {
+        const a = (deg * Math.PI) / 180;
+        const d = { x: f.x * Math.cos(a) + r.x * Math.sin(a), y: f.y * Math.cos(a) + r.y * Math.sin(a), z: f.z * Math.cos(a) + r.z * Math.sin(a) };
+        let clear = max;
+        for (const h of [0.5, 1.2]) {
+          const o = { x: p.pos.x + up.x * h, y: p.pos.y + up.y * h, z: p.pos.z + up.z * h };
+          for (const c of cols) clear = Math.min(clear, c.raycast!(o, d, max));
+        }
+        return { bearing: deg, clear: r1(clear) };
+      });
+    },
     hudRects,
     auth,
     act: {
