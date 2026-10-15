@@ -661,7 +661,7 @@ export class Hud {
   }
 
   /** Starter + palette picker (first play and rebirth). A string argument is the old title form. */
-  characterPick(opts: string | CharacterPickOptions = {}): Promise<{ starter: number; palette: number }> {
+  characterPick(opts: string | CharacterPickOptions = {}): Promise<{ starter: number; palette: number } | null> {
     return showCharacterPick(typeof opts === "string" ? { title: opts } : opts);
   }
 

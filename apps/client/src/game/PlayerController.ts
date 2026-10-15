@@ -173,7 +173,12 @@ export class PlayerController {
     return out.copy(this.pos).normalize();
   }
 
-  update(dt: number, input: Input, aiming: boolean) {
+  /**
+   * One frame. `dt` is the simulation step (Game clamps it to 50 ms, so a slow frame runs in slow
+   * motion); `realDt` is the wall-clock time since the last frame, which the dodge cooldown counts
+   * in, like the server's 1.2 s (D-combat-3).
+   */
+  update(dt: number, input: Input, aiming: boolean, realDt = dt) {
     const R = this.terrain.body.radius;
     const up = _up.copy(this.pos).normalize();
     // Parallel-transport camera and facing to the new tangent plane.
@@ -206,7 +211,7 @@ export class PlayerController {
     // A press up to MOVE.dodgeBuffer early is kept; one earlier in the cooldown is dropped, never
     // stored for a roll a second later. The body turns to the roll at once, so a back or side roll
     // reads as a roll (the clip tumbles forward).
-    this.dodgeCooldown = Math.max(0, this.dodgeCooldown - dt);
+    this.dodgeCooldown = Math.max(0, this.dodgeCooldown - realDt);
     if (input.pressed.has("KeyC")) this.dodgeWanted = MOVE.dodgeBuffer;
     const footing = this.onGround || (!this.jumped && this.airTime <= MOVE.dodgeGroundGrace);
     if (this.dodgeWanted > 0 && !this.frozen && !this.mounted && this.dodgeCooldown <= 0 && footing && !this.swimming) {

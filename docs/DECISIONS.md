@@ -710,6 +710,14 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   level-2 player could probe an address publicly and read "sent" vs `SAVING_BUSY` on their own send
   (Codex review). Supersedes D34's "saving keeps the rest" (it could use idle public slots). Why: no
   enumeration oracle across paths; easy to retune the share.
+- **D-combat-3 (2026-10-15):** shots aim at what the crosshair is on: the server's aim point is the
+  first thing along the camera ray including actors (rewound, as the player saw them), aimed at
+  through the actor's middle, for projectiles and hitscan alike; projectiles search as far as they
+  fly (range × 1.2). The dodge cooldown counts wall-clock time (the server's 1.2 s), not the 50 ms
+  clamped simulation step. Why: e2e J3.4 missed a Hopbit 40 times: projectiles aimed at the ground
+  or sky behind it, and with the camera over the right shoulder the head-to-there line passed
+  0.4–0.6 m from the creature's middle, its whole radius. And on a slow frame rate the clamped step
+  stretched the 1.2 s cooldown (2.4 s of real time at 10 fps), dropping presses timed by the clock.
 - **D-e2e-1 (overnight run, 2026-10-15):** Playwright 1.64.0 journeys are the repeatable browser suite
   (no longer only a fallback for Codex) and Codex is the exploratory beta tester. The journeys
   (`apps/client/e2e`, J1–J7 from HANDOFF 6i) play as a new player, headless and muted (both flags
