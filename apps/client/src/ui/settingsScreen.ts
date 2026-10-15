@@ -233,6 +233,15 @@ export function openSettings(game: Game, host: HTMLElement, back: () => void): (
   const dmg = toggle(mid, "fl-line", "Damage numbers", "Float above whatever you hit", ui.damageNumbers);
   dmg.onchange = () => setUi({ damageNumbers: dmg.checked });
 
+  el("hr", "", mid);
+  const mapH = el("h2", "", mid);
+  icon("compass", "", mapH);
+  mapH.append("Map");
+  const mm = toggle(mid, "fl-line", "Minimap", "Top right: the ground, creeps, pads and your waypoint", ui.minimap);
+  const mr = toggle(mid, "fl-line", "Turn the minimap with the camera", "Ahead is up. Off keeps north up.", ui.minimapRotate);
+  mm.onchange = () => setUi({ minimap: mm.checked });
+  mr.onchange = () => setUi({ minimapRotate: mr.checked });
+
   // ------------------------------------------------------------------------------------------ voice + colour
   // The voice lane owns the opt-in (16+), devices and radio (its "Voice & radio" panel); this column
   // shows the state, the strangers switch and opens that panel.

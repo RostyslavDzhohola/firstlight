@@ -6,7 +6,7 @@
 // Click to drop a waypoint (F over a point too); right-click clears it. Clicking a discovered pad
 // while standing on a pad fast-travels, as before.
 
-import { BODIES, safePadAt } from "@firstlight/shared";
+import { BODIES, safePadAt, type BodyId } from "@firstlight/shared";
 import type { Game } from "../game/Game.ts";
 import { headingOf, surfaceDistance, type V3 } from "../social/compassMath.ts";
 import { partyState } from "../social/store.ts";
@@ -15,6 +15,7 @@ import { Panel } from "./panels.ts";
 import { el } from "./dom.ts";
 import { layoutMapLabels, type MapLabel } from "./mapLabels.ts";
 import { mapAtlas, type ViewImage } from "./mapAtlas.ts";
+import { atlasResolution } from "./mapRaster.ts";
 import { missionTargets, staticMarkers, type MapMarker } from "./mapMarkers.ts";
 import { mapView, metresPerPixel, placeUnder, project, unproject, zoomView, type MapView, type Projected } from "./mapView.ts";
 import { arrow, diamond, star } from "./minimap.ts";
@@ -22,8 +23,9 @@ import { uiSettings } from "./uiSettings.ts";
 import { WAYPOINT_COLOUR, waypoints } from "./waypoint.ts";
 
 const DEG = Math.PI / 180;
-/** Closest zoom: ground metres per screen pixel. */
+/** Closest zoom: ground metres per screen pixel (a quarter atlas texel; the Portus town plan is finer). */
 const MIN_MPP = 0.12;
+const minMpp = (body: BodyId) => (body === "portus" ? MIN_MPP : Math.max(MIN_MPP, (BODIES[body].radius * Math.PI) / 2 / atlasResolution(BODIES[body].radius) / 4));
 /** Ground radius (m) shown when the map opens: the walled town on Portus, the surroundings elsewhere. */
 const OPEN_RANGE = { portus: 80, planet: 220 };
 
@@ -224,7 +226,7 @@ export class MapPanel extends Panel {
   private clampPpr(ppr: number): number {
     const R = BODIES[this.game.bodyId].radius;
     const fit = 0.46 * Math.min(this.w, this.h);
-    return Math.max(fit, Math.min(R / MIN_MPP, ppr));
+    return Math.max(fit, Math.min(R / minMpp(this.game.bodyId), ppr));
   }
 
   private setView(v: MapView) {

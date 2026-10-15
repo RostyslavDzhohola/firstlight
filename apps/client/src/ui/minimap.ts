@@ -79,7 +79,7 @@ export class Minimap {
         const r = e.getBoundingClientRect();
         return r.width > 0 && r.height > 0 ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom } : null;
       };
-      const avoid = [rect(".fl-onb__widget"), rect(".fl-me"), rect(".fl-hotbar-wrap"), rect(".fl-savecard")];
+      const avoid = [rect(".fl-onb__widget"), rect(".fl-me"), rect(".fl-hotbar-wrap"), rect(".fl-savecard, [data-e2e=\"save-card\"]")];
       size = col ? minimapSize({ right: col.right, top: col.top }, preferredMinimapSize(innerWidth), MIN_SIZE, avoid, innerWidth, innerHeight) : 0;
     }
     const dpr = Math.min(2, window.devicePixelRatio || 1);
