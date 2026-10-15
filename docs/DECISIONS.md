@@ -452,3 +452,19 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   colliders are drawn as stone boxes (2 draws) before the probe and the warm-up, and a later arrival
   of the asset is ignored until the next visit (review round 1, S1). Why: Medium was already at
   ~290 draws against 250 (F10); triangles are cheap next to draws on Metal (#30560).
+- **D-e2e-1 (overnight run, 2026-10-15):** Playwright 1.64.0 journeys are the repeatable browser suite
+  (no longer only a fallback for Codex) and Codex is the exploratory beta tester. The journeys
+  (`apps/client/e2e`, J1–J7 from HANDOFF 6i) play as a new player, headless and muted (both flags
+  checked through CDP before a page loads), on WebGL2 (Playwright Chromium, `?webgl`) and WebGPU
+  (installed Chrome, `--enable-unsafe-webgpu`; it works headless on the M1). They read state through
+  a test hook, `window.__fl`, that exists only with `?e2e` (a separate chunk; without it nothing loads)
+  and drive the game with real mouse and keys; two documented exceptions: Esc while the pointer is
+  locked (headless Chrome delivers the key instead of releasing the lock, so the hook does what
+  desktop Chrome does) and placement on a planet (local dev admin guests, `dev:<id>:<name>:admin`, plus
+  the admin `teleport`/`heal`/`npc list` commands). They're written against the selector contract and
+  the handoff's behaviour, so they fail until each lane lands; `apps/client/e2e/gates.json` lists the
+  ones that must pass before a deploy (`pnpm e2e:gate`). The local stack serves a production build
+  (`vite preview`), so load times and frame times aren't the dev server's. Codex plays 10–15 minutes
+  after each deploy against `docs/tests/player-expectations.md`. Why: the owner found the game had no
+  creeps outside the castle, a reversed-feeling safe zone and no minimap while every test passed;
+  the tests checked pieces against the spec and nothing played the game.
