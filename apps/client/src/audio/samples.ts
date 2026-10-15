@@ -11,7 +11,7 @@ export interface SampleManifest {
   sounds: Partial<Record<SampleName, { files: string[]; gain: number }>>;
 }
 
-const FILE = /^[a-z0-9][a-z0-9_-]*\.(mp3|ogg|m4a|wav)$/;
+const FILE = /^[A-Za-z0-9][A-Za-z0-9_-]*\.(mp3|ogg|m4a|wav)$/;
 
 /**
  * Validate a manifest. Unknown sound names are skipped (a newer set may carry sounds this client

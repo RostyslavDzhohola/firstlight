@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SAMPLE_NAMES } from "./sounds.ts";
 import { jitter, parseManifest, pickTake, resolveSound, SampleBank, sampleUrl, type SampleIo } from "./samples.ts";
 
 const BASE = "https://assets.example.dev/v/sfx-1";
@@ -46,6 +47,11 @@ describe("sample manifest", () => {
     expect(m.sounds.swing_sword).toEqual({ files: ["swing_sword-1.mp3"], gain: 1 }); // gain out of range -> 1
     expect(m.sounds).not.toHaveProperty("not_a_sound");
     expect(m.sounds).not.toHaveProperty("ui"); // no usable file left
+  });
+
+  it("accepts the file names the tools write for every sound (`<name>-<take>.mp3`, camelCase too)", () => {
+    const sounds = Object.fromEntries(SAMPLE_NAMES.map((n) => [n, { files: [`${n}-1.mp3`, `${n}-2.mp3`], gain: 1 }]));
+    expect(Object.keys(parseManifest({ set: "sfx-1", sounds }).sounds).sort()).toEqual([...SAMPLE_NAMES].sort());
   });
 
   it("treats junk as an empty set", () => {
