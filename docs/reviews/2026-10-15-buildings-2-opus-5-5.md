@@ -124,6 +124,25 @@ Codex notes J3's "creep in view" checks size on screen, not occlusion: from insi
 creeps beyond them may be hidden by the wall (J3.1's Arcadia shot ends with the player in the lake
 against the inside of the sea wall).
 
+## Codex review of the combined branch (f2ab8ba, approve after fixes; `/tmp/fl-f2ab8ba-review/report.md`)
+
+- **Should-fix, fixed: swimmers passed through sea walls on the server.** The movement validator
+  skipped the occupancy and crossing checks while swimming (60/60 steps through Arcadia's 280° and
+  Meridian's 95° sea walls accepted). Every solid now stops a swimmer as it stops a walker; swimming
+  only changes the ground rules. Real-path test on both sea walls (0 refusals without the fix).
+  The check is the validator's general path, so jetties, boardwalks, town walls and natural solids
+  over water are covered alike (the client controller already pushed swimmers out of all of them).
+- **Should-fix, fixed: `pnpm typecheck` failed** (TS2339 in `sites.test.ts`: paths have no name).
+  My earlier "clean" runs piped a silent typecheck through `tail` without checking its exit code;
+  it exits 0 now.
+- **Should-fix, fixed: the camera missed narrow spires.** The natural-solid camera ray kept solids
+  ≥ 1.2 m wide; it now stops at every boulder and spire, never trunks (`CAMERA_SOLID_KINDS`).
+  Regression from the reported Meridian spot (the lens sat 1.43 m inside a 1.12 m spire).
+
+Runs (aaae215): typecheck exit 0; affected suites 375/375 (shared planet, client game, server
+movement, outposts, solid props, wading, horses, trunks, zones); J2/J3/J5 on WebGL by Codex 16/16
+(`/tmp/fl-go/buildings2-e2e-2/report.md`).
+
 ## Deploy order
 
 `PROTOCOL_VERSION` 5 (shared with the other round-2 lanes; one deploy with lane/solid-props). Client (with
