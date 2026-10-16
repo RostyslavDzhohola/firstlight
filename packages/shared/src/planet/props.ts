@@ -51,7 +51,7 @@ export interface PropDef {
   collider: "capsule" | "sphere" | "none";
 }
 
-/** Collider sizes for the server (scale with PropInstance.scale). */
+/** Collider sizes (scale with PropInstance.scale): the solid ones block movement (propSolid). */
 export const PROP_DEFS: Record<PropKind, PropDef> = {
   oak: { radius: 0.35, height: 6.5, collider: "capsule" },
   pine: { radius: 0.3, height: 8.5, collider: "capsule" },
@@ -67,6 +67,32 @@ export const PROP_DEFS: Record<PropKind, PropDef> = {
   flower: { radius: 0.4, height: 0.65, collider: "none" },
   mushroom: { radius: 0.3, height: 0.45, collider: "none" },
 };
+
+/**
+ * Natural props that block movement (D-solid-1): tree trunks, boulders, spires and the bigger rocks,
+ * each an upright cylinder on its surface point. `fit` shrinks the round ones a little (a cylinder
+ * is wider than a rock's rounded base); rocks under `minScale` stay walk-through (no snagging on
+ * pebbles). Grass, flowers, bushes, ferns, reeds, scrub and mushrooms stay walk-through.
+ */
+export const SOLID_PROPS: Partial<Record<PropKind, { fit: number; minScale?: number }>> = {
+  oak: { fit: 1 },
+  pine: { fit: 1 },
+  deadtree: { fit: 1 },
+  blossom: { fit: 1 },
+  rock: { fit: 0.85, minScale: 0.85 },
+  boulder: { fit: 0.85 },
+  spire: { fit: 0.85 },
+};
+
+export const SOLID_KINDS: ReadonlySet<PropKind> = new Set(Object.keys(SOLID_PROPS) as PropKind[]);
+
+/** The collider cylinder of a natural prop (radius, height in metres), or null when it is walk-through. */
+export function propSolid(kind: PropKind, scale: number): { radius: number; height: number } | null {
+  const s = SOLID_PROPS[kind];
+  if (!s || scale < (s.minScale ?? 0)) return null;
+  const d = PROP_DEFS[kind];
+  return { radius: d.radius * scale * s.fit, height: d.height * scale };
+}
 
 export interface PropRule {
   kind: PropKind;
@@ -223,8 +249,11 @@ function maskFor(body: BodyDef, rule: number): Noise3 {
   return nz;
 }
 
-/** Props whose candidate lands inside chunk (face, cx, cy). Deterministic and order-stable. */
-export function naturalChunkProps(terrain: Terrain, face: Face, cx: number, cy: number): PropInstance[] {
+/**
+ * Props whose candidate lands inside chunk (face, cx, cy). Deterministic and order-stable. `only`:
+ * just these kinds (each rule is independent, so the result is exactly that subset).
+ */
+export function naturalChunkProps(terrain: Terrain, face: Face, cx: number, cy: number, only?: ReadonlySet<PropKind>): PropInstance[] {
   const body = terrain.body;
   const rules = PROP_STYLES[body.id];
   const out: PropInstance[] = [];
@@ -249,6 +278,7 @@ export function naturalChunkProps(terrain: Terrain, face: Face, cx: number, cy: 
 
   for (let r = 0; r < rules.length; r++) {
     const rule = rules[r]!;
+    if (only && !only.has(rule.kind)) continue;
     const kindIndex = PROP_KINDS.indexOf(rule.kind);
     const E = rule.every;
     const minFlat = Math.max(PROP_MIN_FLATNESS, rule.minFlat);
@@ -312,8 +342,21 @@ export function naturalChunkProps(terrain: Terrain, face: Face, cx: number, cy: 
  * elsewhere there are no separate path meshes. Portal approaches and quest interactions have
  * their own clearings. */
 export function chunkProps(terrain: Terrain, face: Face, cx: number, cy: number): PropInstance[] {
-  const props = naturalChunkProps(terrain, face, cx, cy);
+  return clearOfBreakables(terrain, naturalChunkProps(terrain, face, cx, cy));
+}
+
+/**
+ * The solid props of a chunk (D-solid-1): exactly the props chunkProps draws there whose propSolid
+ * is not null, computed without the walk-through rules (the server and the client's collider build
+ * them from this; the renderer draws chunkProps).
+ */
+export function solidChunkProps(terrain: Terrain, face: Face, cx: number, cy: number): PropInstance[] {
+  return clearOfBreakables(terrain, naturalChunkProps(terrain, face, cx, cy, SOLID_KINDS)).filter((p) => propSolid(p.kind, p.scale) !== null);
+}
+
+function clearOfBreakables(terrain: Terrain, props: PropInstance[]): PropInstance[] {
   const breakables = bodyBreakables(terrain);
+  if (breakables.length === 0) return props;
   return props.filter((p) => {
     const l = Math.hypot(p.x, p.y, p.z);
     const clearance = Math.max(1.5, PROP_DEFS[p.kind].radius * p.scale);

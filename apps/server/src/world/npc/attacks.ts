@@ -8,7 +8,7 @@ import { wallBetween } from "../combat.ts";
 import { PLAYER_RADIUS, rayTerrain, type V3 } from "../geometry.ts";
 import type { LivePlayer, NpcSystem } from "./NpcSystem.ts";
 import { MODE, type ActiveAttack, type Npc } from "./npc.ts";
-import { blockedByStructure, CHASE_MARGIN, feetHeight, nearSafeRing, npcBody, step } from "./steer.ts";
+import { blockedByStructure, CHASE_MARGIN, feetHeight, nearSafeRing, npcBody, standsClear, step } from "./steer.ts";
 import { add, cross, dist, dot, flatDist, len, normalize, rotateAboutUp, scale, sub, tangentDir, up } from "./vec.ts";
 
 export interface NpcProjectile {
@@ -184,10 +184,7 @@ export function startAttack(sys: NpcSystem, n: Npc, index: number, target: Playe
       }
     }
   }
-  if (a.shape === "leap" && tp) {
-    const d = Math.min(flatDist(n.pos, tp), a.range);
-    points.push(groundAt(sys, add(n.pos, dir, d)));
-  }
+  if (a.shape === "leap" && tp) points.push(leapLanding(sys, n, tp, a));
   if (a.shape === "pull" && tp) points.push(groundAt(sys, add(n.pos, dir, Math.min(10, flatDist(n.pos, tp) * 0.6))));
   if ((a.shape === "bolt" || a.shape === "burst" || a.shape === "zap" || a.shape === "tag") && target) tracked.push(target.id);
   const telegraphMs = a.telegraph * 1000;
@@ -249,6 +246,22 @@ export function telegraphMsg(n: Npc, at: ActiveAttack, ms: number): NpcAttackMsg
   if (at.points.length) m.pts = at.points.flatMap((p) => [p[0], p[1], p[2]]);
   if (at.tracked.length && !at.locked) m.tg = at.tracked;
   return m;
+}
+
+/** Where `n`'s leap `a` at a target standing at `tp` lands: toward it, at most the leap's range. */
+export function leapLanding(sys: NpcSystem, n: Npc, tp: V3, a: AttackDef): V3 {
+  let dir = tangentDir(n.pos, tp);
+  if (dot(dir, dir) < 0.5) dir = n.facing;
+  return groundAt(sys, add(n.pos, dir, Math.min(flatDist(n.pos, tp), a.range)));
+}
+
+/**
+ * Would a leap to `to` be stopped where it started (resolveAttack): a structure or, for the NPCs that
+ * walk round them, a tree trunk, boulder or spire on its way or at its landing.
+ */
+export function leapStopped(sys: NpcSystem, n: Npc, to: V3): boolean {
+  const body = npcBody(n.radius, n.height);
+  return blockedByStructure(sys.ground, n.pos, to, body) || !standsClear(sys.ground, to, body);
 }
 
 function groundAt(sys: NpcSystem, p: V3): V3 {
@@ -351,14 +364,14 @@ function resolve(sys: NpcSystem, n: Npc, at: ActiveAttack, now: number) {
       if (land) {
         const l = len(land);
         const ux = land[0] / l, uy = land[1] / l, uz = land[2] / l;
-        const fh = feetHeight(sys.ground, ux, uy, uz, n.def.locomotion, n.def.hover ?? 0);
+        const fh = feetHeight(sys.ground, ux, uy, uz, n.def.locomotion, n.def.hover ?? 0, true);
         // Lands anywhere outside the zones' least margin (D-evade-1): a player just outside a ring can be leapt at.
         if (fh !== null && !nearSafeRing(sys.ground, land[0], land[1], land[2], CHASE_MARGIN + n.radius)) {
           const r = sys.ground.R + fh;
           const to: V3 = [ux * r, uy * r, uz * r];
           // Never through or into a building (D44): the leap stops where it started.
           const body = npcBody(n.radius, n.height);
-          if (!blockedByStructure(sys.ground, n.pos, to, body) && (sys.ground.structures?.isClear({ x: to[0], y: to[1], z: to[2] }, body) ?? true)) n.pos = to;
+          if (!blockedByStructure(sys.ground, n.pos, to, body) && standsClear(sys.ground, to, body)) n.pos = to;
         }
       }
       hitAll(sys, n, playersInCircle(sys, n.pos, a.radius ?? 1.5), a, at);

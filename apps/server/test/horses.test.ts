@@ -3,7 +3,7 @@
 // horse leaves (death with the whistle in the pile, travel, logout, idle, lost whistle).
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { BODIES, portalSpots, type BodyId } from "@firstlight/shared";
+import { BODIES, portalSpots, type BodyId, natureSolids } from "@firstlight/shared";
 import { HORSE, HORSE_WHISTLE, tooDeepToRide } from "@firstlight/shared/content/horse";
 import { PF } from "@firstlight/shared/net/schema";
 import { env } from "../src/env.ts";
@@ -47,7 +47,7 @@ async function summonAndMount(b: Bot) {
   await until("mounted", () => mounted(b));
 }
 
-/** Unit tangent at `p` along which the ground stays dry (no horse-deep water) for `metres`. */
+/** Unit tangent at `p` along which the ground stays dry (no horse-deep water) and clear of natural solids for `metres`. */
 function dryBearing(p: V3, metres: number): V3 {
   const def = BODIES[BODY];
   const t = terrain(BODY);
@@ -61,9 +61,15 @@ function dryBearing(p: V3, metres: number): V3 {
     const ang = (i / 16) * Math.PI * 2;
     const d = norm([e1[0] * Math.cos(ang) + e2[0] * Math.sin(ang), e1[1] * Math.cos(ang) + e2[1] * Math.sin(ang), e1[2] * Math.cos(ang) + e2[2] * Math.sin(ang)]);
     let dry = true;
+    let prev: V3 = [p[0], p[1], p[2]];
     for (let s = 2; s <= metres && dry; s += 2) {
       const q = norm([up[0] * def.radius + d[0] * s, up[1] * def.radius + d[1] * s, up[2] * def.radius + d[2] * s]);
       dry = !tooDeepToRide(t.groundHeight(q[0], q[1], q[2]), def.waterLevel + 0.5);
+      // …and no tree trunk, boulder or rock on the line (D-solid-1): the bot rides straight.
+      const g = def.radius + t.groundHeight(q[0], q[1], q[2]);
+      const at: V3 = [q[0] * g, q[1] * g, q[2] * g];
+      if (dry && natureSolids(t).crosses(prev[0], prev[1], prev[2], at[0], at[1], at[2], { radius: 1, height: 2.4, step: 0.35 })) dry = false;
+      prev = at;
     }
     if (dry) return d;
   }

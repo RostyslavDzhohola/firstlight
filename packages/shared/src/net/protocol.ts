@@ -26,9 +26,11 @@ export const NET = {
 // older client neither has nor draws, so stale tabs must reload instead of being corrected forever.
 // 4: the planets' pad-0 outposts (D42-D46): the server blocks movement, shots, NPC sight and NPC
 // steering at their buildings, which an older client neither has nor draws.
-// 5: round 2 (2026-10-15): the planets' arrival outposts are walled safe zones (D-b2-1): new wall,
-// gate and building colliders the server blocks movement and shots at, and a wider zone the server
-// protects; the lanes of this round all share 5.
+// 5: round 2 (2026-10-15), every round-2 lane shares it: the planets' arrival outposts are walled
+// safe zones (D-b2-1: new wall, gate and building colliders the server blocks movement and shots at,
+// and a wider zone the server protects), and natural solids (D-solid-1): tree trunks, boulders,
+// spires and big rocks block movement on the server; an older client walks through them and would be
+// corrected at every tree.
 export const PROTOCOL_VERSION = 5;
 
 // ---- HTTP: entering the world -------------------------------------------------------------

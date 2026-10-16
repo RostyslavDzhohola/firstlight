@@ -99,6 +99,7 @@ interface GameLike {
     mounted: boolean;
     getStructures?(): RayCollider | null;
     getColliders?(): RayCollider | null;
+    getNature?(): RayCollider | null;
   };
   planet?: { terrain?: unknown; body?: { radius: number } };
   input?: { locked: boolean; enabled: boolean; sensitivity: number; invertY: boolean };
@@ -745,12 +746,16 @@ export function installE2eHook(win: Window & typeof globalThis): void {
     /**
      * How far the player could walk straight along each bearing (degrees from the camera's heading,
      * right = +) before a structure or prop the movement collides with, up to `max` metres: the same
-     * colliders movement uses, cast at knee and chest height. Journeys steer round buildings with it.
+     * colliders movement uses (structures, breakables, tree trunks and rocks: D-solid-1), cast at knee and
+     * chest height. Journeys steer round buildings and trees with it.
      */
     clearance: (bearings: number[], max = 12) => {
       const p = game()?.player;
       if (!p) return null;
       const cols = [p.getStructures?.(), p.getColliders?.()].filter((c): c is RayCollider => !!c?.raycast);
+      // Tree trunks are thin: they're cast for along the body's edges too (a ray down the middle misses
+      // a trunk the body still walks into). Walls are cast down the middle only, as before.
+      const nature = p.getNature?.();
       const l = Math.hypot(p.pos.x, p.pos.y, p.pos.z) || 1;
       const up = { x: p.pos.x / l, y: p.pos.y / l, z: p.pos.z / l };
       const k = p.camForward.x * up.x + p.camForward.y * up.y + p.camForward.z * up.z;
@@ -762,9 +767,14 @@ export function installE2eHook(win: Window & typeof globalThis): void {
         const a = (deg * Math.PI) / 180;
         const d = { x: f.x * Math.cos(a) + r.x * Math.sin(a), y: f.y * Math.cos(a) + r.y * Math.sin(a), z: f.z * Math.cos(a) + r.z * Math.sin(a) };
         let clear = max;
+        // The ray's sideways unit (d × up) for the body's half-width either side of its centre line.
+        const sx = d.y * up.z - d.z * up.y, sy = d.z * up.x - d.x * up.z, sz = d.x * up.y - d.y * up.x;
         for (const h of [0.5, 1.2]) {
           const o = { x: p.pos.x + up.x * h, y: p.pos.y + up.y * h, z: p.pos.z + up.z * h };
           for (const c of cols) clear = Math.min(clear, c.raycast!(o, d, max));
+          if (nature?.raycast) {
+            for (const w of [0, -0.4, 0.4]) clear = Math.min(clear, nature.raycast({ x: o.x + sx * w, y: o.y + sy * w, z: o.z + sz * w }, d, max));
+          }
         }
         return { bearing: deg, clear: r1(clear) };
       });

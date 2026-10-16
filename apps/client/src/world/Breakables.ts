@@ -16,7 +16,7 @@
 
 import * as THREE from "three/webgpu";
 import { attribute, uniform } from "three/tsl";
-import { BREAKABLE_ARCHETYPES, hash4, type BodyId, type Breakable, type Terrain } from "@firstlight/shared";
+import { BREAKABLE_ARCHETYPES, bodyBreakablesReady, hash4, seedBodyBreakables, type BodyId, type Breakable, type Terrain } from "@firstlight/shared";
 import { BreakableCollider, resetContact, type PropContact } from "@firstlight/shared/planet/collide";
 import type { Game } from "../game/Game.ts";
 import type { MoveColliders } from "../game/PlayerController.ts";
@@ -51,6 +51,18 @@ let workerBroken = false;
 let reqId = 0;
 const pending = new Map<number, (r: FractureResponse) => void>();
 const assetCache = new Map<string, Promise<BreakableAssets | null>>();
+/** Per body: the first request's answer (the layout comes with it, for seedBodyBreakables). */
+const layoutCache = new Map<BodyId, Promise<unknown>>();
+
+/**
+ * While the fracture worker is placing a body's breakables and this thread hasn't got the layout,
+ * the request's promise (settles either way); else null. The natural solids clear the breakables'
+ * spots (props.ts), so the loading screen waits for the worker's copy instead of placing them here.
+ */
+export function breakablesLayoutPending(body: BodyId): Promise<unknown> | null {
+  if (bodyBreakablesReady(body)) return null;
+  return layoutCache.get(body) ?? null;
+}
 
 /** Settle every waiting request with null and stop using the worker. */
 function workerFailed(why: string) {
@@ -88,6 +100,7 @@ function requestAssets(body: BodyId, quality: 0 | 1, fracture: boolean): Promise
   p = new Promise<BreakableAssets | null>((resolve) => {
     const id = ++reqId;
     pending.set(id, (r) => {
+      if (r.assets) seedBodyBreakables(body, r.assets.breakables);
       if (r.error) console.warn("[breakables] fracture failed", r.error);
       else if (r.assets) console.info(`[breakables] ${body}: ${r.assets.breakables.length} props, q${quality}, ${r.assets.ms.toFixed(0)} ms in the worker${r.assets.failures ? `, ${r.assets.failures} fracture fallbacks` : ""}`);
       resolve(r.assets);
@@ -96,7 +109,12 @@ function requestAssets(body: BodyId, quality: 0 | 1, fracture: boolean): Promise
     w.postMessage(req);
   });
   assetCache.set(key, p);
-  p.then((a) => a ?? assetCache.delete(key));
+  if (!layoutCache.has(body)) layoutCache.set(body, p);
+  p.then((a) => {
+    if (a) return;
+    assetCache.delete(key);
+    if (layoutCache.get(body) === p) layoutCache.delete(body);
+  });
   return p;
 }
 

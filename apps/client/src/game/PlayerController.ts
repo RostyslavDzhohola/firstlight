@@ -2,7 +2,8 @@
 // The server validates (SPEC §5.3); `correct` messages snap us back. Intact breakable props block
 // (the player slides along them) and can be stood on (MoveColliders, set by the destruction view),
 // and so do the body's structures: the Portus town's, a planet outpost's and its waystones (setStructures:
-// the shared solids the server checks, D38, D42).
+// the shared solids the server checks, D38, D42), and the natural solids: tree trunks, boulders, spires
+// and big rocks (setNature, D-solid-1).
 // Runs every frame: module scratch vectors, no allocations.
 
 import * as THREE from "three/webgpu";
@@ -19,6 +20,8 @@ export interface MoveColliders {
   resolve(pos: THREE.Vector3, out: PropContact): boolean;
   /** Distance along a ray (unit `d`) to the first solid prop within `maxT`, or Infinity (tracers). */
   raycast?(o: THREE.Vector3, d: THREE.Vector3, maxT: number): number;
+  /** The camera's ray, if it ignores some solids (natural ones: only boulders and spires); else `raycast`. */
+  cameraRay?(o: THREE.Vector3, d: THREE.Vector3, maxT: number): number;
 }
 
 export const MOVE = {
@@ -115,6 +118,8 @@ export class PlayerController {
   private structures: MoveColliders | null = null;
   private readonly contact = emptyContact();
   private readonly structureContact = emptyContact();
+  private readonly natureContact = emptyContact();
+  private nature: MoveColliders | null = null;
 
   constructor(private terrain: Terrain, private waterLevel: number) {}
 
@@ -139,6 +144,19 @@ export class PlayerController {
 
   getStructures(): MoveColliders | null {
     return this.structures;
+  }
+
+  /**
+   * Natural solids of this body (tree trunks, boulders, spires, big rocks: shared natureSolids,
+   * D-solid-1): the player slides round them like the server expects; `raycast` (boulders and
+   * spires only) keeps the camera out of the big ones.
+   */
+  setNature(c: MoveColliders | null) {
+    this.nature = c;
+  }
+
+  getNature(): MoveColliders | null {
+    return this.nature;
   }
 
   /**
@@ -279,7 +297,7 @@ export class PlayerController {
     // carry the body across a thin prop (a fence blocks 0.47 m either side of its middle), and a
     // fast fall can't skip a top's 0.4 m landing band.
     let floorR = 0;
-    if (!this.colliders && !this.structures) this.pos.addScaledVector(this.vel, dt);
+    if (!this.colliders && !this.structures && !this.nature) this.pos.addScaledVector(this.vel, dt);
     else {
       const c = this.contact;
       const sc = this.structureContact;
@@ -287,6 +305,10 @@ export class PlayerController {
       const h = dt / steps;
       for (let k = 0; k < steps; k++) {
         this.pos.addScaledVector(this.vel, h);
+        // Feet never below the ground mid-frame: uphill a step along the old tangent plane ends under
+        // it, where a solid on the slope (its base is the ground at its centre) is checked against
+        // feet lower than they will stand, and the snap below then lifted them into it (Codex review).
+        if (!this.swimming) this.liftToGround(R);
         if (this.colliders) this.colliders.resolve(this.pos, c);
         else resetContact(c);
         if (c.pushed) this.slide(c, vH);
@@ -294,6 +316,12 @@ export class PlayerController {
           this.structures.resolve(this.pos, sc);
           if (sc.pushed) this.slide(sc, vH);
           if (sc.floor > c.floor) c.floor = sc.floor;
+        }
+        if (this.nature) {
+          const nc = this.natureContact;
+          this.nature.resolve(this.pos, nc);
+          if (nc.pushed) this.slide(nc, vH);
+          if (nc.floor > c.floor) c.floor = nc.floor;
         }
         // A prop top only catches a player who isn't rising (a jump past an edge keeps going up).
         const su = _newUp.copy(this.pos).normalize();
@@ -342,6 +370,9 @@ export class PlayerController {
       if (!this.onGround) this.fallStartRadius = Math.max(this.fallStartRadius, r);
     }
 
+    // Where the snap put the feet: clear of the solids (the server refuses feet inside one).
+    if (this.structures || this.nature) this.clearAfterSnap(R, vH);
+
     if (this.onGround || this.swimming) {
       this.airTime = 0;
       this.jumped = false;
@@ -359,6 +390,48 @@ export class PlayerController {
       : hSpeed > 3.5 ? ANIM.RUN
       : hSpeed > 0.3 ? ANIM.WALK
       : ANIM.IDLE;
+  }
+
+  /** Lift feet that are under the terrain up onto it (radially). */
+  private liftToGround(R: number) {
+    const l = this.pos.length();
+    const g = R + this.terrain.groundHeight(this.pos.x / l, this.pos.y / l, this.pos.z / l);
+    if (l < g) this.pos.multiplyScalar(g / l);
+  }
+
+  /**
+   * After the frame's ground snap: push the feet out of any structure or natural solid they ended
+   * in (sliding along it), and if that moved them, onto the ground there.
+   */
+  private clearAfterSnap(R: number, vH: THREE.Vector3) {
+    let moved = false;
+    for (let pass = 0; pass < 2; pass++) {
+      let pushed = false;
+      if (this.structures) {
+        const sc = this.structureContact;
+        this.structures.resolve(this.pos, sc);
+        if (sc.pushed) {
+          this.slide(sc, vH);
+          pushed = true;
+        }
+      }
+      if (this.nature) {
+        const nc = this.natureContact;
+        this.nature.resolve(this.pos, nc);
+        if (nc.pushed) {
+          this.slide(nc, vH);
+          pushed = true;
+        }
+      }
+      if (!pushed) break;
+      moved = true;
+      if (this.onGround && !this.swimming) {
+        const l = this.pos.length();
+        const g = R + this.terrain.groundHeight(this.pos.x / l, this.pos.y / l, this.pos.z / l);
+        if (g > l || l - g < 0.35) this.pos.multiplyScalar(g / l);
+      }
+    }
+    if (moved && this.onGround) this.fallStartRadius = this.pos.length();
   }
 
   /** Over-the-shoulder camera. */
@@ -385,7 +458,7 @@ export class PlayerController {
     const dir = _camDir.copy(camPos).sub(head);
     const full = dir.length();
     dir.divideScalar(full);
-    const hit = this.structures?.raycast?.(head, dir, full + CAMERA_WALL_GAP) ?? Infinity;
+    const hit = Math.min(this.structures?.raycast?.(head, dir, full + CAMERA_WALL_GAP) ?? Infinity, this.nature?.cameraRay?.(head, dir, full + CAMERA_WALL_GAP) ?? Infinity);
     const want = hit < Infinity ? hit - Math.min(CAMERA_WALL_GAP, hit / 2) : full;
     this.camReach = want < this.camReach ? want : Math.min(want, this.camReach + CAMERA_EASE_OUT);
     if (this.camReach < full) camPos.copy(head).addScaledVector(dir, this.camReach);
