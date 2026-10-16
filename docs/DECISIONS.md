@@ -826,8 +826,10 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   colliders stop at 5 m, above any top a player can reach). They come from the same deterministic
   placement the client draws (`solidChunkProps` is exactly the solid subset of `chunkProps`), built
   lazily per terrain chunk and cached per body (`planet/natureSolids.ts`); queries round a point are
-  allocation-free once its chunks are built, the server builds one chunk round one player per tick
-  ahead and the client builds the arrival's chunks behind the loading screen, then one a frame. Counts:
+  allocation-free once its chunks are built, the server builds the chunks out to where creeps are
+  awake round each player (270 m) ahead, within 2 ms a tick (`world/natureWarm.ts`; lazy builds in
+  NPC steering had cost a p95 tick of 12.8 ms on Hollowmere's 40-player bench, 0.7 ms after), and the
+  client builds the arrival's chunks behind the loading screen, then one a frame. Counts:
   Portus 1,595 (1,363 blossom trees, 232 rocks), Arcadia 24,950 (18,430 oaks, 4,141 pines, 550
   boulders, 1,829 rocks), Hollowmere 34,794 (21,689 dead trees, 8,737 oaks, 792 boulders, 3,576
   rocks), Meridian 13,758 (2,040 spires, 4,011 boulders, 7,707 rocks). Walk-through on purpose:
