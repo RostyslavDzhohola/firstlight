@@ -20,8 +20,12 @@ const WEAPON_COLORS: Record<string, number> = {
   riverstaff: 0x9cff6b,
   axe: 0xff8866,
   hammer: 0xffdd88,
+  kunai: 0xffb27a,
+  ember_seal: 0xff6a1f,
   fists: 0xffffff,
 };
+/** Ember sparks: the Ember Seal's trail, burst and hand-seal glow (light particles, shared material). */
+const EMBER = 0xffa040;
 
 export function weaponColor(index: number): number {
   return WEAPON_COLORS[WEAPONS[index]?.id ?? "fists"] ?? 0xffffff;
@@ -76,6 +80,8 @@ export interface ProjectileSim {
   vel: THREE.Vector3;
   g: number;
   until: number;
+  /** Next ember-trail spark (performance.now ms), for fireballs. */
+  trailAt?: number;
 }
 
 /** Every effect look (material settings × geometry layout), for the shader warm-up (S8). */
@@ -182,11 +188,54 @@ export class Effects {
   spawnProjectile(id: number, weaponIndex: number, pos: THREE.Vector3, vel: THREE.Vector3, g: number) {
     const color = weaponColor(weaponIndex);
     const id_ = WEAPONS[weaponIndex]?.id;
-    const mesh = new THREE.Mesh(id_ === "longbow" ? arrowGeo : boltGeo, glow(color));
+    const mesh = new THREE.Mesh(id_ === "longbow" || id_ === "kunai" ? arrowGeo : boltGeo, glow(color));
     if (id_ === "comet" || id_ === "emberglass") mesh.scale.setScalar(1.6);
+    if (id_ === "kunai") mesh.scale.set(1.4, 1.4, 0.32); // a short, bright dart
+    if (id_ === "ember_seal") mesh.scale.setScalar(2.3);
     mesh.position.copy(pos);
     this.group.add(mesh);
-    this.projectiles.set(id, { id, mesh, pos: pos.clone(), vel: vel.clone(), g, until: performance.now() + 6000 });
+    const now = performance.now();
+    // Gone where the server drops it: at its range (specials exactly; other bolts with 20% grace).
+    const def = WEAPONS[weaponIndex];
+    const reach = def ? def.range * (def.hidden ? 1 : 1.2) : 0;
+    const life = reach > 0 ? Math.min(6000, (reach / Math.max(1, vel.length())) * 1000 + 100) : 6000;
+    this.projectiles.set(id, { id, mesh, pos: pos.clone(), vel: vel.clone(), g, until: now + life, trailAt: id_ === "ember_seal" ? now : undefined });
+  }
+
+  /** A spark that drifts and shrinks (`vel` m/s, `grav` m/s² along -up). */
+  private spark(at: THREE.Vector3, vel: THREE.Vector3, size: number, ms: number, grav = 0) {
+    const m = new THREE.Mesh(ballGeo, glow(EMBER, 0.85));
+    m.position.copy(at);
+    m.scale.setScalar(size);
+    const born = performance.now();
+    const v = vel.clone();
+    const up = at.clone().normalize();
+    this.add(m, ms, true, (t, dt) => {
+      v.addScaledVector(up, -grav * dt);
+      m.position.addScaledVector(v, dt);
+      m.scale.setScalar(size * Math.max(0.05, 1 - (t - born) / ms));
+    });
+  }
+
+  /** Ember Seal burst: the blast plus a shower of embers. */
+  emberBurst(at: THREE.Vector3, radius: number) {
+    const up = at.clone().normalize();
+    for (let i = 0; i < 16; i++) {
+      const dir = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize().addScaledVector(up, 0.6).normalize();
+      this.spark(at, dir.multiplyScalar(radius * (1.5 + Math.random() * 2)), 0.06 + Math.random() * 0.06, 500 + Math.random() * 400, 6);
+    }
+  }
+
+  /** The hand seal's glow while the Ember Seal winds up: a ring of light growing before the hands. */
+  sealCharge(at: THREE.Vector3, facing: THREE.Vector3, ms: number) {
+    const ring = new THREE.Mesh(ringGeo, glow(EMBER, 0.8));
+    ring.position.copy(at);
+    ring.lookAt(at.clone().add(facing));
+    const born = performance.now();
+    this.add(ring, ms, true, (t) => {
+      ring.scale.setScalar(0.05 + 0.2 * Math.min(1, (t - born) / ms));
+    });
+    this.spark(at, facing.clone().multiplyScalar(0.4), 0.05, ms);
   }
 
   endProjectile(id: number) {
@@ -221,6 +270,10 @@ export class Effects {
       p.pos.addScaledVector(p.vel, dt);
       p.mesh.position.copy(p.pos);
       p.mesh.lookAt(_ahead.copy(p.pos).add(p.vel));
+      if (p.trailAt !== undefined && now >= p.trailAt) {
+        p.trailAt = now + 35;
+        this.spark(p.pos, _ahead.copy(up).multiplyScalar(0.6), 0.09 + Math.random() * 0.05, 380);
+      }
       if (now > p.until) this.endProjectile(p.id);
     }
   }

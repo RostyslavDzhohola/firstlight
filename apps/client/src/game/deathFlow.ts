@@ -10,6 +10,8 @@
 export interface RebirthChoice {
   starter: number;
   palette: number;
+  /** STARTER_LOOKS index (older servers ignore it). */
+  look?: number;
 }
 
 export interface DeathIO<M> {

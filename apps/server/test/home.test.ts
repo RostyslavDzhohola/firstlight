@@ -14,10 +14,10 @@ import { HOME_LIMITS, mountHome, onlineSnapshot, readBoard } from "../src/ops/ho
 import { SqliteCharacterRepo } from "../src/world/sqliteStores.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 
-function seed(db: Db, userId: string, name: string | null, level: number, xp = 0, extra: { dead?: boolean; starter?: number } = {}) {
+function seed(db: Db, userId: string, name: string | null, level: number, xp = 0, extra: { dead?: boolean; starter?: number; look?: number } = {}) {
   ensureAccount(db, userId);
   if (name) expect(setDisplayName(db, userId, name)).toMatchObject({ ok: true });
-  const c = newCharacter(extra.starter ?? 0, 0);
+  const c = newCharacter(extra.starter ?? 0, 0, Date.now(), extra.look ?? 0);
   c.level = level;
   c.xp = xp;
   if (extra.dead) c.dead = true;
@@ -32,7 +32,7 @@ describe("leaderboard reads", () => {
   afterEach(() => db.close());
 
   it("ranks live, named, unbanned characters by level then XP", () => {
-    seed(db, "u1", "Wren_07", 7, 100, { starter: 3 });
+    seed(db, "u1", "Wren_07", 7, 100, { starter: 3, look: 1 });
     seed(db, "u2", "Mossback", 9, 0, { starter: 1 });
     seed(db, "u3", "Ashfall", 7, 400);
     seed(db, "u4", null, 20); // never picked a name: not listed
@@ -49,10 +49,10 @@ describe("leaderboard reads", () => {
     ]);
     expect(topLevels(db, 2)).toHaveLength(2);
     const board = readBoard(db);
-    expect(board.levels[0]).toEqual({ name: "Mossback", level: 9, starter: 1, title: null });
-    expect(board.levels[2]).toMatchObject({ name: "Wren_07", starter: 3 });
-    // Nothing but names, levels, starters and titles leaves the server.
-    expect(Object.keys(board.levels[0]!).sort()).toEqual(["level", "name", "starter", "title"]);
+    expect(board.levels[0]).toEqual({ name: "Mossback", level: 9, starter: 1, look: 0, title: null });
+    expect(board.levels[2]).toMatchObject({ name: "Wren_07", starter: 3, look: 1 }); // Unit 7's second look
+    // Nothing but names, levels, starters, looks and titles leaves the server.
+    expect(Object.keys(board.levels[0]!).sort()).toEqual(["level", "look", "name", "starter", "title"]);
   });
 
   it("counts medals per named account, shows the worn title, and lists the Hall of Firsts", () => {
@@ -260,7 +260,7 @@ describe("GET /api/home", () => {
     expect(r.body.online.bodies.portus).toEqual({ players: 1, names: ["pa"] });
     expect(r.body.online.bodies.arcadia).toEqual({ players: 1, names: ["pb"] });
     expect(r.body.online.bodies.meridian).toEqual({ players: 0, names: [] });
-    expect(r.body.board?.levels).toEqual([{ name: "Topper", level: 12, starter: 0, title: null }]);
+    expect(r.body.board?.levels).toEqual([{ name: "Topper", level: 12, starter: 0, look: 0, title: null }]);
     expect(r.body.visits).toBeNull();
   });
 

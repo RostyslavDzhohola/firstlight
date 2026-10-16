@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Room } from "@colyseus/sdk";
 import { BODIES, createTerrain, isSafe, type BodyId } from "@firstlight/shared";
 import { PF } from "@firstlight/shared/net/schema";
-import { STARTERS } from "@firstlight/shared/content/weapons";
+import { STARTERS, WEAPON_BY_ID } from "@firstlight/shared/content/weapons";
 import type { Game } from "../src/app.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 import { flat, me, nearPad, offset, openSpotOutside, place, serverRoom, spawnNpc, st, type V } from "./npc-bots.ts";
@@ -101,7 +101,7 @@ function spots(body: BodyId) {
 describe("starter weapons on the combat planets", () => {
   for (const body of COMBAT_PLANETS) {
     for (const [starter, s] of STARTERS.entries()) {
-      const ranged = s.weapon === "hexquill" || s.weapon === "carbine";
+      const ranged = WEAPON_BY_ID.get(s.weapon)!.delivery !== "melee"; // Hexquill, carbine, kunai
       it(`${body}: ${s.name} with the ${s.weapon} is refused inside a pad ring and lands outside`, async () => {
         const { r, denied, hits } = await shooter(body, starter);
         expect(me(r).weapon).toBeGreaterThan(0); // the starter weapon is in hand, not fists

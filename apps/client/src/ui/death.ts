@@ -10,7 +10,7 @@ import { config } from "../config.ts";
 import { button, el, icon, overlayClosed, overlayOpened, sprite, uiRoot } from "./dom.ts";
 import { aliveParts, classifyKiller, deathPile, type KillerInfo } from "./hudFormat.ts";
 import { itemSprite, portraitSprite } from "./sprites.ts";
-import { cancelCharacterPick } from "./characterPick.ts";
+import { cancelCharacterPick, type CharacterChoice } from "./characterPick.ts";
 import { onAccountChange, saveStatus } from "../net/auth.ts";
 
 export interface DeathInfo {
@@ -26,6 +26,7 @@ export interface DeathInfo {
   body?: string;
   /** For player killers, when the room state knows them. */
   killerStarter?: number;
+  killerLook?: number;
   killerLevel?: number;
   /** Social lane: is this session in our party? */
   isParty?: (id: string) => boolean;
@@ -39,9 +40,10 @@ export interface DeathInfo {
 interface DeathContext {
   name: string;
   starter: number;
+  look?: number;
   lastAlive: { hotbar: (InvItem | null)[]; backpack: (InvItem | null)[]; coins: number; level: number } | null;
   /** The rebirth pick; null when it was cancelled (cancelCharacterPick). */
-  pick: () => Promise<{ starter: number; palette: number } | null>;
+  pick: () => Promise<CharacterChoice | null>;
 }
 
 const BARKS = ["Asset non-compliant. Escalating.", "Your access has been revoked.", "Thank you for your cooperation.", "Incident closed. Next."];
@@ -65,7 +67,7 @@ function killerCard(parent: HTMLElement, k: KillerInfo, info: DeathInfo): void {
   const warm = k.kind === "player" || k.kind === "party" || k.kind === "self";
   const card = el("div", `fl-killer fl-killer--warm${k.kind === "party" ? " is-party" : ""}`, parent);
   const face = el("div", "fl-face fl-face--lg", card);
-  if (warm) sprite(portraitSprite(k.kind === "self" ? undefined : info.killerStarter), "", face);
+  if (warm) sprite(portraitSprite(k.kind === "self" ? undefined : info.killerStarter, k.kind === "self" ? undefined : info.killerLook), "", face);
   else sprite(k.kind === "world" ? "alert" : "crown", "", face);
   const t = el("div", "", card);
   const kicker = { player: "Killed by a player", party: "Killed by your party member", self: "Killed by", creature: "Killed by", world: "Killed by", oversight: "" }[k.kind];
@@ -82,7 +84,7 @@ function killerCard(parent: HTMLElement, k: KillerInfo, info: DeathInfo): void {
 }
 
 
-let open: Promise<{ starter: number; palette: number } | null> | null = null;
+let open: Promise<CharacterChoice | null> | null = null;
 let closeOpen: (() => void) | null = null;
 
 /**
@@ -95,7 +97,7 @@ export function closeDeath(): void {
 }
 
 /** The death screen; resolves with the rebirth pick, or null when closeDeath() closed it. */
-export function showDeath(info: DeathInfo, ctx: DeathContext): Promise<{ starter: number; palette: number } | null> {
+export function showDeath(info: DeathInfo, ctx: DeathContext): Promise<CharacterChoice | null> {
   if (open) return open;
   open = new Promise((resolve) => {
     document.exitPointerLock?.();
@@ -219,7 +221,7 @@ export function showDeath(info: DeathInfo, ctx: DeathContext): Promise<{ starter
       ov.remove();
       overlayClosed("death");
     };
-    const settle = (r: { starter: number; palette: number } | null) => {
+    const settle = (r: CharacterChoice | null) => {
       open = closeOpen = null;
       stopOnClose?.();
       resolve(r);

@@ -6,7 +6,7 @@
 //   POST /api/test/bot-token     x-loadtest-secret → a loadtest play token (only when LOADTEST_SECRET is set)
 
 import { randomUUID } from "node:crypto";
-import { STARTERS } from "@firstlight/shared/content/weapons";
+import { STARTERS, starterLook } from "@firstlight/shared/content/weapons";
 import { fromNodeHeaders } from "better-auth/node";
 import type { Express, NextFunction, Request, Response } from "express";
 import { claimAdmin, ensureAccount, getAccount, isBanned, isClaimBurnt, setDisplayName } from "../db/accounts.ts";
@@ -88,7 +88,7 @@ export function mountAccountRoutes(app: Express, a: Accounts, cfg: AccountsConfi
       titleMedal: acc?.titleMedal ?? null,
       // `starter` is the index the game uses everywhere (PlayerState.starter, fl.starter), not the stored
       // id: a second browser signing in stores it as fl.starter (HANDOFF 5b). Same mapping as the rooms.
-      character: c ? { level: c.level, xp: c.xp, coins: c.coins, starter: Math.max(0, STARTERS.findIndex((s) => s.id === c.starter)), palette: c.palette, body: c.body } : null,
+      character: c ? characterInfo(c) : null,
       // A guest the server will email a code for a new address (D34: from level 2), i.e. who can save now.
       saveReady: !id.loadtest && id.guest && a.maySave(id.userId),
       /** Online time in this life (the Old Timer clock), for the home page's progress card. */
@@ -171,4 +171,12 @@ export function mountAccountRoutes(app: Express, a: Accounts, cfg: AccountsConfi
     const { token } = await a.auth.api.signJWT({ body: { payload: { sub: userId, name, guest: true, loadtest: true } } });
     res.json({ ok: true, token, userId, name });
   });
+}
+
+/** The account's live character for /api/me: indexes the game uses everywhere (PlayerState.starter,
+ *  fl.starter), not the stored starter id; the look comes from the inventory record. */
+function characterInfo(c: { level: number; xp: number; coins: number; starter: string; palette: number; body: string; inventory: unknown }) {
+  const starter = Math.max(0, STARTERS.findIndex((s) => s.id === c.starter));
+  const look = starterLook(starter, (c.inventory as { look?: unknown } | null)?.look);
+  return { level: c.level, xp: c.xp, coins: c.coins, starter, palette: c.palette, look, body: c.body };
 }

@@ -1,9 +1,13 @@
-// Avatar material: one shared atlas, one MeshToonNodeMaterial per palette (6 at most, shared by every
-// avatar). Per-corner Role colour picks the palette slot: R = primary, G = secondary, B = accent
-// (emissive). Soft two-band toon ramp + a fresnel rim tinted by a global (sky) colour.
+// Avatar material: one MeshToonNodeMaterial per starter and palette (shared by every avatar wearing
+// it). Each starter has a painted albedo and a sculpted normal map. Per-corner Role colour picks the
+// palette slot: R = primary, G = secondary, B = accent (emissive); 1 - the albedo's alpha marks painted
+// accents (glyphs, lenses, emblems) that take the accent colour and glow. Soft two-band toon ramp +
+// a fresnel rim tinted by a global (sky) colour. Palette colours are shader constants, so there are
+// still six programs: textures are bindings, not code.
 
 import * as THREE from "three/webgpu";
-import { attribute, color, dot, float, mix, normalView, positionViewDirection, saturate, texture, uniform, uv, vec3 } from "three/tsl";
+import { attribute, color, dot, float, max, mix, normalMap, normalView, positionViewDirection, saturate, texture, uniform, uv, vec2, vec3 } from "three/tsl";
+import type { StarterTextures } from "./assets.ts";
 
 /** docs/content.md §8.3: primary, secondary, accent. */
 export const PALETTES: readonly (readonly [number, number, number])[] = [
@@ -46,14 +50,16 @@ export function toonRamp(): THREE.DataTexture {
 
 const cache = new Map<string, THREE.MeshToonNodeMaterial>();
 
-export function avatarMaterial(atlas: THREE.Texture, palette: number): THREE.MeshToonNodeMaterial {
+export function avatarMaterial(tex: StarterTextures, palette: number): THREE.MeshToonNodeMaterial {
   const p = ((palette % PALETTES.length) + PALETTES.length) % PALETTES.length;
-  const key = `${atlas.uuid}:${p}`;
+  const key = `${tex.albedo.uuid}:${p}`;
   let m = cache.get(key);
   if (m) return m;
   const [prim, sec, acc] = PALETTES[p]!;
   const role = attribute("color", "vec4");
-  const base = texture(atlas, uv()).rgb;
+  const albedo = texture(tex.albedo, uv());
+  const base = albedo.rgb;
+  const painted = float(1).sub(albedo.a); // painted accent mask (stored inverted: see chars3d/build.py)
   const cPrim = color(prim);
   const cSec = color(sec);
   const cAcc = color(acc);
@@ -61,11 +67,13 @@ export function avatarMaterial(atlas: THREE.Texture, palette: number): THREE.Mes
   const fres = float(1).sub(saturate(dot(normalView, positionViewDirection))).pow(3);
   m = new THREE.MeshToonNodeMaterial();
   m.gradientMap = toonRamp();
-  m.colorNode = base.mul(tint);
+  m.colorNode = mix(base.mul(tint), cAcc, painted);
+  // Blender bakes OpenGL-style normals against Blender UVs; glTF UVs flip V, hence Y = -1.
+  m.normalNode = normalMap(texture(tex.normal, uv()), vec2(1, -1));
   // NodeMaterial.setupLighting() honours emissiveNode on every node material; the toon typings omit it.
   (m as THREE.MeshToonNodeMaterial & { emissiveNode: THREE.Node | null }).emissiveNode =
-    cAcc.mul(role.z).mul(2.2).add(avatarRim.color.mul(fres).mul(avatarRim.strength));
-  m.side = THREE.DoubleSide; // open garments (robe hems, hood, sleeves) show their insides
+    cAcc.mul(max(role.z, painted)).mul(2.2).add(avatarRim.color.mul(fres).mul(avatarRim.strength));
+  m.side = THREE.DoubleSide; // cloth is single-sided: robe hems, hoods and sleeves show their insides
   m.name = `avatar-palette-${p}`;
   cache.set(key, m);
   return m;

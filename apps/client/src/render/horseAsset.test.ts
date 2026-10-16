@@ -64,4 +64,33 @@ describe("horse.glb", () => {
       }
     }
   });
+
+  it("seats the second looks too: pelvis on the saddle (short legs, so no stirrup check)", async () => {
+    const { makeRideClip } = await import("./avatars/ride.ts");
+    const { MODEL_FILES, MODEL_SCALE, STARTER_FILES, legClips, pelvisHeight } = await import("./avatars/assets.ts");
+    const horse = await glb("animals/horse.glb");
+    const anims = await glb("characters/starters_anims.glb");
+    const idle = anims.animations.find((a) => a.name === "idle")!;
+    const ride = makeRideClip(idle, (await glb("characters/hexwick.glb")).scene); // as assets.ts builds it
+    horse.scene.updateMatrixWorld(true);
+    const seat = new THREE.Vector3().setFromMatrixPosition(horse.scene.getObjectByName("saddle")!.matrixWorld);
+    for (const [i, file] of MODEL_FILES.entries()) {
+      if (i < STARTER_FILES.length) continue;
+      const rider = (await glb(`characters/${file}.glb`)).scene;
+      const h = pelvisHeight(rider);
+      expect(h, file).toBeGreaterThan(0.5);
+      expect(h, file).toBeLessThan(0.75);
+      const clip = legClips(new Map([["ride", ride]]), h).get("ride")!;
+      const s = MODEL_SCALE[i]!;
+      rider.scale.setScalar(s);
+      rider.position.set(seat.x, seat.y - (h * s - 0.1), seat.z); // AvatarView.seatDrop() without the foot sink
+      const mixer = new THREE.AnimationMixer(rider);
+      mixer.clipAction(clip).play();
+      mixer.update(0);
+      rider.updateMatrixWorld(true);
+      const pelvis = new THREE.Vector3().setFromMatrixPosition(rider.getObjectByName("pelvis")!.matrixWorld);
+      expect(pelvis.y - seat.y, file).toBeGreaterThan(0);
+      expect(pelvis.y - seat.y, file).toBeLessThan(0.15);
+    }
+  });
 });

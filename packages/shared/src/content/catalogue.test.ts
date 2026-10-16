@@ -55,4 +55,20 @@ describe("item catalogue", () => {
     expect(unitSellValue({ id: "hollow_crown", tier: 1 })).toBe(500);
     expect(unitSellValue({ id: "riverstaff", tier: 2 })).toBe(75);
   });
+
+  it("the Ember Seal is the Ember Kunai's alt attack, never an item of its own", () => {
+    const kunai = WEAPON_BY_ID.get("kunai")!;
+    const seal = WEAPON_BY_ID.get(kunai.special!)!;
+    expect(seal.hidden).toBe(true);
+    expect(seal.destroys).toBe("heavy");
+    expect(SHOP.some((e) => e.itemId === seal.id)).toBe(false);
+    expect(unitSellValue({ id: seal.id, tier: 3 })).toBe(0);
+    expect(STARTERS.find((s) => s.id === "ninja")?.weapon).toBe("kunai");
+    // Cooldown and the 0.4 s hand seal live on every kunai tier; the seal def has a tier for each.
+    for (let t = 0; t < 3; t++) {
+      expect(kunai.tiers[t]!.heavyTime).toBe(0.4);
+      expect(kunai.tiers[t]!.cooldown).toBeGreaterThan(0);
+      expect(seal.tiers[t]!.splash).toBeGreaterThan(0);
+    }
+  });
 });

@@ -66,7 +66,7 @@ const TIER_LABEL = ["", "I", "II", "III"] as const;
 const FAMILIES: readonly { id: string; title: string; items: readonly string[] }[] = [
   { id: "melee", title: "Melee weapons", items: ["sunbrand", "riverstaff", "axe", "hammer"] },
   { id: "magic", title: "Magic", items: ["hexquill", "emberglass", "stormcoil"] },
-  { id: "ranged", title: "Ranged weapons", items: ["carbine", "scatterpipe", "longbow", "stillshot", "comet"] },
+  { id: "ranged", title: "Ranged weapons", items: ["carbine", "kunai", "scatterpipe", "longbow", "stillshot", "comet"] },
   { id: "support", title: "Support", items: ["grenade", "patchkit", "bubble"] },
   { id: "tonics", title: "Tonics", items: ["tonic_small", "tonic_large"] },
   { id: "gear", title: "Gear", items: [HORSE_WHISTLE, "radio"] },

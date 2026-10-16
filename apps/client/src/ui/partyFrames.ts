@@ -12,6 +12,7 @@ interface RoomPlayer {
   name?: string;
   level?: number;
   starter?: number;
+  look?: number;
   hp?: number;
   maxHp?: number;
   x: number;
@@ -42,6 +43,7 @@ export function partyFrames(
       name: m.name,
       level: here?.level ?? m.level,
       starter: here?.starter ?? 0,
+      look: here?.look ?? 0,
       hp: here?.hp ?? (m.online ? 1 : 0),
       maxHp: here?.maxHp ?? 1,
       speaking: !!v?.speaking,

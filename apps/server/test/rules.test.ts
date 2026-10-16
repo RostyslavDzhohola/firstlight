@@ -120,6 +120,8 @@ describe("server-timed bow draw (D26)", () => {
     a.send("admin", { cmd: "give", args: { id: "longbow" } });
     await waitFor(() => !(me(a).flags & 2)); // not SAFE
     await sleep(200);
+    // Bow in hand before the draw, like the client (a draw belongs to the item it started with).
+    a.send("equip", { slot: 1 });
     if (drawMs !== null) {
       a.send("charge", { on: true });
       await sleep(drawMs);
