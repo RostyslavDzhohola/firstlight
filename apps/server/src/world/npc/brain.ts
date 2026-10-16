@@ -8,10 +8,10 @@ import { NF, NPC_ANIM, NPC_INDEX, NPC_RULES } from "@firstlight/shared/content/n
 import { PF } from "@firstlight/shared/net/schema";
 import { actorPos, type PlayerActor } from "../actors.ts";
 import type { V3 } from "../geometry.ts";
-import { cancelAttack, canSee, chest, groundOnly, isMelee, meleeHeightTol, startAttack, updateAttack } from "./attacks.ts";
+import { cancelAttack, canSee, chest, groundOnly, isMelee, leapLanding, leapStopped, meleeHeightTol, startAttack, updateAttack } from "./attacks.ts";
 import type { NpcSystem } from "./NpcSystem.ts";
 import { MODE, type Npc } from "./npc.ts";
-import { feetHeight, nearSafeRing, npcBody, slideAngle, step, type SafeAvoid } from "./steer.ts";
+import { feetHeight, natureBlocks, natureNear, nearSafeRing, npcBody, slideAngle, step, type SafeAvoid } from "./steer.ts";
 import { NPC_TUNING, emitNpcEvent } from "./tuning.ts";
 import { add, cross, dist, dot, flatDist, len, normalize, rotateAboutUp, stableTangentAt, sub, tangentDir, tangentize, up } from "./vec.ts";
 
@@ -322,13 +322,19 @@ function outOfReach(sys: NpcSystem, n: Npc, tp: V3, d: number): boolean {
 
 /**
  * A target in melee reach (+0.5 m) with a structure on the strike's line (the NPC's chest to the
- * target's chest, the line attacks.ts hitAll checks): a swing would only hit the structure.
+ * target's chest, the line attacks.ts hitAll checks): a swing would only hit the structure. For the
+ * NPCs that walk round them, a tree trunk, boulder or spire on that line blocks it too, and so does
+ * one a leap would run into (the leap stops where it started; Codex review of D-solid-1: a Hopbit
+ * leapt at a trunk 16 times in 20 s). The NPC steps round instead.
  */
 function strikeBlocked(sys: NpcSystem, n: Npc, tp: V3, d: number): boolean {
-  const s = sys.ground.structures;
-  if (!s || d > meleeReach(n) + 0.5) return false;
+  if (d > meleeReach(n) + 0.5) return false;
   const a = chest(n.pos, Math.min(n.height * 0.8, 2)), b = chest(tp, 1.1);
-  return s.blocks(a[0], a[1], a[2], b[0], b[1], b[2]);
+  const s = sys.ground.structures;
+  if (s && s.blocks(a[0], a[1], a[2], b[0], b[1], b[2])) return true;
+  if (natureBlocks(sys.ground, n.radius, a, b)) return true;
+  for (const x of n.def.attacks) if (x.shape === "leap" && d <= x.range + 0.5 && leapStopped(sys, n, leapLanding(sys, n, tp, x))) return true;
+  return false;
 }
 
 /**
@@ -336,17 +342,19 @@ function strikeBlocked(sys: NpcSystem, n: Npc, tp: V3, d: number): boolean {
  * over the step band; within melee reach, the strike's line), or the NPC is wedged against one (its
  * last step was refused every way, say between a hangar and a pad's no-go ring), and it hasn't got
  * 1 m closer than its best since: after unreachableMs it gives up. Open ground, or a target in reach
- * with a clear strike, clears the clock, so this never acts away from structures.
+ * with a clear strike, clears the clock, so this never acts away from structures and natural solids.
  */
 function walledOff(sys: NpcSystem, n: Npc, tp: V3, d: number, now: number, blockedStrike: boolean): boolean {
-  const s = sys.ground.structures;
-  if (!s || (d <= meleeReach(n) + 0.5 && !blockedStrike)) {
+  if (d <= meleeReach(n) + 0.5 && !blockedStrike) {
     n.walled = undefined;
     return false;
   }
+  const s = sys.ground.structures;
   const a = chest(n.pos, 0.6), b = chest(tp, 0.6);
-  const wedged = n.blockedMove === true && s.near(n.pos[0], n.pos[1], n.pos[2], n.radius + 3);
-  if (!blockedStrike && !wedged && !s.blocks(a[0], a[1], a[2], b[0], b[1], b[2])) {
+  // Natural solids (D-solid-1) wall off through a blocked strike (above) or by wedging it; a trunk
+  // on the long line doesn't (shots and sight pass between trunks, and a chase goes round them).
+  const wedged = n.blockedMove === true && (!!s?.near(n.pos[0], n.pos[1], n.pos[2], n.radius + 3) || natureNear(sys.ground, n.radius, n.pos, n.radius + 3));
+  if (!blockedStrike && !wedged && !s?.blocks(a[0], a[1], a[2], b[0], b[1], b[2])) {
     n.walled = undefined;
     return false;
   }

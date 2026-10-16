@@ -60,6 +60,22 @@ export function blockedByStructure(g: Ground, a: V3, b: V3, body: ColliderBody):
   return !!wild && wild.crosses(a[0], a[1], a[2], b[0], b[1], b[2], body);
 }
 
+/** Does a natural solid stand on the segment a → b (for an NPC of this radius; bigger ones ignore them)? */
+export function natureBlocks(g: Ground, radius: number, a: V3, b: V3): boolean {
+  const wild = natureFor(g, radius);
+  if (!wild) return false;
+  const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+  const l = Math.hypot(dx, dy, dz);
+  if (l < 1e-6) return false;
+  return wild.raycast(a[0], a[1], a[2], dx / l, dy / l, dz / l, l) < l;
+}
+
+/** Is there a natural solid within `r` m of `p` (for an NPC of this radius)? */
+export function natureNear(g: Ground, radius: number, p: V3, r: number): boolean {
+  const wild = natureFor(g, radius);
+  return !!wild && wild.near(p[0], p[1], p[2], r);
+}
+
 /** Can this body stand at `p`: clear of structures and (if it is small enough) natural solids? */
 export function standsClear(g: Ground, p: V3, body: ColliderBody): boolean {
   const q = { x: p[0], y: p[1], z: p[2] };
