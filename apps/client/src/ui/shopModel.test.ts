@@ -11,7 +11,8 @@ describe("shop catalogue", () => {
   it("lists every item in the game once (eggs only as a count)", () => {
     const ids = rows(ctx()).map((r) => r.itemId).filter(Boolean);
     expect(new Set(ids).size).toBe(ids.length);
-    const expected = [...WEAPONS.map((w) => w.id).filter((id) => id !== "fists"), ...COSMETICS.filter((c) => !isEggItem({ id: c.id })).map((c) => c.id), ...TROPHIES.map((t) => t.id)];
+    // every weapon but fists and the hidden defs (the Ember Seal is the kunai's technique, never an item)
+    const expected = [...WEAPONS.filter((w) => w.id !== "fists" && !w.hidden).map((w) => w.id), ...COSMETICS.filter((c) => !isEggItem({ id: c.id })).map((c) => c.id), ...TROPHIES.map((t) => t.id)];
     expect(ids.sort()).toEqual(expected.sort());
     const secrets = rows(ctx()).find((r) => r.key === "secrets")!;
     expect(secrets.name).toBe("12 secret rewards");
