@@ -16,6 +16,6 @@ describe("admin badge", () => {
 
   it("has a toast for each sandbox refusal /api/play can give", async () => {
     const { SANDBOX_REFUSALS } = await import("./AdminModeClient.ts");
-    for (const reason of ["forbidden", "respawn first", "in combat", "no character"]) expect(SANDBOX_REFUSALS[reason]).toBeTruthy();
+    for (const reason of ["forbidden", "respawn first", "in combat", "no character", "sandboxes full"]) expect(SANDBOX_REFUSALS[reason]).toBeTruthy();
   });
 });

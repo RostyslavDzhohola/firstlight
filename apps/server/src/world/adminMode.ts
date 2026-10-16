@@ -26,7 +26,7 @@ import { WEAPONS, WEAPON_BY_ID, type WeaponDef } from "@firstlight/shared/conten
 import type { InvItem, YouState } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
 import type { Identity } from "../auth/identity.ts";
-import { closeSandbox, runIn } from "../sandbox.ts";
+import { closeSandbox, runIn, sandboxActive, sandboxOf } from "../sandbox.ts";
 import { adminSwitch, type PlayerActor } from "./actors.ts";
 import type { BodyRoom } from "./BodyRoom.ts";
 import { CLOSE, hub } from "./hub.ts";
@@ -89,6 +89,13 @@ export function endSandboxOf(userId: string, code: number = CLOSE.ELSEWHERE, rea
   console.log(`[admin] ${userId.slice(0, 8)} sandbox closed`);
 }
 
+/** The user's body in their open sandbox, if any (sandboxes have no social presence; moderation asks here). */
+export function sandboxBodyOf(userId: string): { room: BodyRoom; actor: PlayerActor } | null {
+  const sb = sandboxOf(userId);
+  const e = sb ? runIn(sb, () => hub.get(userId)) : undefined;
+  return e ? { room: e.room as BodyRoom, actor: e.actor } : null;
+}
+
 function log(a: PlayerActor, what: string) {
   console.log(`[admin] ${a.identity.userId.slice(0, 8)} ${what}`);
 }
@@ -109,6 +116,15 @@ export class AdminModeSystem implements RoomSystem {
   tick(_dtMs: number, now: number) {
     const check = now >= this.nextCheck;
     if (check) this.nextCheck = now + ADMIN_RECHECK_MS;
+    // A closed sandbox keeps nobody (endSandboxOf retires its bodies; this catches any left over).
+    const sb = this.room.sandbox;
+    if (sb && !sandboxActive(sb)) {
+      for (const a of [...this.room.actors.values()]) {
+        hub.release(a.identity.userId, a);
+        this.room.retire(a, CLOSE.SANDBOX_OVER, "sandbox closed");
+      }
+      return;
+    }
     for (const a of [...this.room.actors.values()]) {
       if (!a.identity.admin) continue;
       // Admin taken away (account table): the switches go with it (and the sandbox, stillAdmin).
@@ -135,7 +151,7 @@ export class AdminModeSystem implements RoomSystem {
       else a.client.send("denied", { action: "admin", reason: "sandbox only" }); // the real world never has test switches
       return true;
     }
-    if (a.sandbox !== sb) return true;
+    if (a.sandbox !== sb || !sandboxActive(sb)) return true;
     for (const k of ["fly", "god", "speed"] as const) {
       if (typeof args[k] !== "boolean" || sb.switches[k] === args[k]) continue;
       sb.switches[k] = args[k];

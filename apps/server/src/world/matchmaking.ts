@@ -59,7 +59,7 @@ export async function onlineCount(includeLoadtest = false): Promise<number> {
   let n = 0;
   for (const r of rooms) {
     const md = r.metadata as BodyRoomMetadata | undefined;
-    if (!includeLoadtest && md?.loadtest) continue;
+    if ((!includeLoadtest && md?.loadtest) || md?.sandbox) continue; // admin sandboxes aren't the public world (D-admin-3)
     n += r.clients;
   }
   return n;
@@ -79,12 +79,12 @@ export function enterSandbox(identity: Identity, now: number): string | null {
   if (!ch) return "no character";
   if (ch.dead || live?.actor.dead) return "respawn first";
   if (live && now < live.actor.combatUntil) return "in combat";
+  if (!sandboxOf(owner) && !openSandbox(owner, ch.body, now)) return "sandboxes full";
   if (live) {
     live.room.saveActor(live.actor);
     hub.release(owner, live.actor);
     live.room.retire(live.actor, CLOSE.ELSEWHERE, "playing in another window");
   }
-  openSandbox(owner, ch.body, now);
   return null;
 }
 
@@ -92,13 +92,15 @@ export function enterSandbox(identity: Identity, now: number): string | null {
 async function playSandbox(identity: Identity, input: PlayInput): Promise<PlayResponse> {
   const owner = identity.userId;
   return withLock(`sb:${owner}`, async () => {
-    if (!sandboxOf(owner)) return { ok: false, error: "forbidden" };
+    const sb = sandboxOf(owner);
+    if (!sb) return { ok: false, error: "forbidden" };
+    // Only a room of this generation: an older sandbox's room may still be open, never reused.
     const rooms = await matchMaker.query({ name: "body" });
     let target = rooms.find((r) => {
       const md = r.metadata as BodyRoomMetadata | undefined;
-      return md?.sandbox === owner && md.body === input.body && !r.locked;
+      return md?.sandbox === owner && md.sandboxGen === sb.id && md.body === input.body && !r.locked;
     });
-    target ??= await matchMaker.createRoom("body", { body: input.body, copy: 0, loadtest: false, sandbox: owner });
+    target ??= await matchMaker.createRoom("body", { body: input.body, copy: 0, loadtest: false, sandbox: owner, sandboxGen: sb.id });
     const reservation = await matchMaker.reserveSeatFor(target, { body: input.body }, identity);
     return { ok: true, reservation: reservation as unknown as import("@firstlight/shared/net/protocol").SeatReservation };
   });
@@ -119,7 +121,11 @@ export async function play(identity: Identity, input: PlayInput, limits: Matchma
     });
 
     if (!loadtest) {
-      const total = all.reduce((s, r) => s + ((r.metadata as BodyRoomMetadata | undefined)?.loadtest ? 0 : r.clients), 0);
+      // Public capacity: admin sandboxes have their own limit (sandbox.ts) and take none of it.
+      const total = all.reduce((s, r) => {
+        const md = r.metadata as BodyRoomMetadata | undefined;
+        return s + (md?.loadtest || md?.sandbox ? 0 : r.clients);
+      }, 0);
       if (total + partySize > limits.globalCap) return enqueue(identity.userId, total - limits.globalCap);
     }
 

@@ -21,7 +21,9 @@ const VOICE_MESSAGES: readonly (keyof VoiceClientMessages)[] = ["voice:enable", 
  * tab from an older build may still try; requests are refused with reason "off", signals ignored.
  */
 export const createVoiceSystem: SystemFactory = (room) => {
-  if (env.voice) return new VoiceSystem(room);
+  // An admin sandbox (D-admin-3) has no voice: nobody else is there, and voice moderation, mutes and
+  // TURN credentials are process-wide state a sandbox must not touch. Its messages are refused as "off".
+  if (env.voice && !room.sandbox) return new VoiceSystem(room);
   for (const type of VOICE_MESSAGES) {
     room.onMessage(type, (c) => {
       if (type !== "voice:signal" && type !== "voice:disable") c.send("voice:denied", { action: type, reason: "off" });

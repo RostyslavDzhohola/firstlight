@@ -21,8 +21,12 @@ export interface AdminSwitches {
   speed: boolean;
 }
 
+let generations = 0;
+
 /** One admin's sandbox, shared by their sandbox rooms (travel between bodies stays inside it). */
 export class Sandbox {
+  /** Generation: a sandbox room and its seats belong to exactly one; a closed one never reopens. */
+  readonly id: number;
   readonly owner: string;
   /** Where the real character is ("Back to normal" goes there). */
   readonly home: BodyId;
@@ -37,6 +41,7 @@ export class Sandbox {
   closed = false;
 
   constructor(owner: string, home: BodyId, now: number) {
+    this.id = ++generations;
     this.owner = owner;
     this.home = home;
     this.idleSince = now;
@@ -97,17 +102,35 @@ export function refuseWrite(sql: string): boolean {
 
 // ---- the registry -------------------------------------------------------------------------------
 
-/** A sandbox nobody has been in for this long is forgotten. */
-export const SANDBOX = { IDLE_MS: 10 * 60_000 };
+/**
+ * A sandbox nobody has been in for IDLE_MS is forgotten. At most MAX_OPEN are open at once: they
+ * have their own limit and never use the public world's capacity (matchmaking.ts).
+ */
+export const SANDBOX = { IDLE_MS: 10 * 60_000, MAX_OPEN: 8 };
 
 const open = new Map<string, Sandbox>();
 
-/** The owner's sandbox, opened now if there is none (home = where the real character is). */
-export function openSandbox(owner: string, home: BodyId, now = Date.now()): Sandbox {
-  for (const [k, sb] of open) if (sb.rooms === 0 && now - sb.idleSince > SANDBOX.IDLE_MS) open.delete(k);
+/**
+ * The owner's sandbox, opened now if there is none (home = where the real character is); null when
+ * MAX_OPEN sandboxes are open already.
+ */
+export function openSandbox(owner: string, home: BodyId, now = Date.now()): Sandbox | null {
+  for (const [k, sb] of open) {
+    if (sb.rooms === 0 && now - sb.idleSince > SANDBOX.IDLE_MS) {
+      open.delete(k);
+      sb.closed = true;
+    }
+  }
   let sb = open.get(owner);
-  if (!sb) open.set(owner, (sb = new Sandbox(owner, home, now)));
+  if (sb) return sb;
+  if (open.size >= SANDBOX.MAX_OPEN) return null;
+  open.set(owner, (sb = new Sandbox(owner, home, now)));
   return sb;
+}
+
+/** Is `sb` its owner's current sandbox (not closed, not replaced by a newer generation)? */
+export function sandboxActive(sb: Sandbox): boolean {
+  return !sb.closed && open.get(sb.owner) === sb;
 }
 
 export function sandboxOf(owner: string): Sandbox | undefined {

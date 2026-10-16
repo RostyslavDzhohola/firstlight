@@ -28,6 +28,7 @@ export const SANDBOX_REFUSALS: Readonly<Record<string, string>> = {
   "respawn first": "No sandbox while you're dead: respawn first",
   "in combat": "No sandbox in a fight: get clear first",
   "no character": "No sandbox yet: play once first",
+  "sandboxes full": "No sandbox free right now: try again in a few minutes",
 };
 
 /** The room's refusals of an admin-mode command, as the toast says them. */

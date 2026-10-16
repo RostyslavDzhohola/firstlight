@@ -110,7 +110,7 @@ function adminBody(db: Db, reportsPage = 1): string {
   const now = Date.now();
   // ---- players online per room
   const rooms = [...liveRooms].sort((a, b) => a.bodyDef.id.localeCompare(b.bodyDef.id) || a.state.copy - b.state.copy);
-  const total = rooms.reduce((n, r) => n + (r.metadata?.loadtest ? 0 : r.actors.size), 0);
+  const total = rooms.reduce((n, r) => n + (r.metadata?.loadtest || r.metadata?.sandbox ? 0 : r.actors.size), 0);
   const roomRows = rooms
     .map((r) => {
       const players = [...r.actors.values()]

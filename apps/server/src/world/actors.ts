@@ -104,7 +104,7 @@ export interface PlayerActor {
  * the identity is an admin: never in the real world, whatever an actor holds.
  */
 export function adminSwitch(a: PlayerActor, k: "fly" | "god" | "speed"): boolean {
-  return !!a.identity?.admin && !!a.sandbox?.switches[k];
+  return !!a.identity?.admin && !!a.sandbox && !a.sandbox.closed && a.sandbox.switches[k];
 }
 
 /** Why a hit on an NPC dealt nothing (ServerMessages `immune`); unset = an unspecified cause. */

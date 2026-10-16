@@ -31,7 +31,13 @@ import { QuestSystem } from "../src/world/quests/QuestSystem.ts";
 import { EGG_TIMERS } from "../src/world/quests/eggs.ts";
 import { hub } from "../src/world/hub.ts";
 import { pendingSeats } from "../src/world/reservations.ts";
-import { refusedWrites, runIn, sandboxOf, type Sandbox } from "../src/sandbox.ts";
+import { refusedWrites, runIn, SANDBOX, sandboxOf, type Sandbox } from "../src/sandbox.ts";
+import { env } from "../src/env.ts";
+import { banAccount, isVoiceMuted, kickUser, resetModeration, setVoiceMuted } from "../src/social/moderation.ts";
+import { blockedBy, resetMemoryStore, setBlocked, storedVoiceMute, storeReport, memoryReports } from "../src/social/store.ts";
+import { onlineCount, play } from "../src/world/matchmaking.ts";
+import { onlineSnapshot } from "../src/ops/home.ts";
+import { liveRooms } from "../src/social/presence.ts";
 import { joinAs, playRequest, safeLeave, startServer, waitFor } from "./helpers.ts";
 import { bot, ground, harness, me, offPad, padAt, serverRoom, sleep, tpAndWait, until, type Bot } from "./quest-helpers.ts";
 
@@ -269,6 +275,28 @@ describe("the sandbox (D-admin-3)", () => {
     expect(sandboxOf("two_windows")).toBeUndefined();
     expect(other.you.adminMode.sandbox).toBe(false);
   });
+
+  it("Codex r3-4: a sandbox isn't the public world (online count, home page, public capacity) and has its own limit", async () => {
+    const a = await bot("private_one", "arcadia");
+    const s = await intoSandbox(a, "private_one");
+    await waitFor(() => !hub.get("private_one"));
+    expect(serverRoom(s).actors.size).toBe(1);
+    expect(await onlineCount(false)).toBe(0);
+    expect(onlineSnapshot(liveRooms as never).total).toBe(0);
+    // A global cap of 1 with the sandbox open: a real player still gets in.
+    const limits = { maxClients: 40, soloFillLimit: 36, maxCopiesPerBody: 2, globalCap: 1 };
+    expect((await play({ userId: "public_one", name: "public_one", admin: false } as never, { body: "portus" }, limits)).ok).toBe(true);
+    // Sandboxes have their own limit instead.
+    const other = await bot("second_admin", "portus");
+    await safeLeave(other.room);
+    const max = SANDBOX.MAX_OPEN;
+    SANDBOX.MAX_OPEN = 1;
+    try {
+      expect(await playRequest(harness.game!, "dev:second_admin:second_admin:admin", { body: "portus", sandbox: true })).toEqual({ ok: false, error: "sandboxes full" });
+    } finally {
+      SANDBOX.MAX_OPEN = max;
+    }
+  });
 });
 
 describe("nothing in a sandbox is saved (D-admin-3, real path: SQLite)", () => {
@@ -500,6 +528,74 @@ describe("nothing in a sandbox is saved (D-admin-3, real path: SQLite)", () => {
     expect(sandboxOf("demoted_too")).toBeUndefined();
   });
 
+  it("Codex r3-1: a seat reserved before the sandbox closed is refused; a new sandbox is a new generation", async () => {
+    const a = await bot("late_seat", "arcadia");
+    const s = await intoSandbox(a, "late_seat");
+    mode(s, { god: true, action: "maxlevel" });
+    await until("kit", () => me(s).level === LEVEL_CAP && s.you.adminMode?.god === true);
+    const oldRoom = serverRoom(s);
+    const oldGen = oldRoom.sandbox!.id;
+    const spare = await playRequest(harness.game!, "dev:late_seat:late_seat:admin", { body: "arcadia", sandbox: true });
+    expect(spare.ok).toBe(true);
+    // The real world (another window): the sandbox closes; then the old seat is tried within its timeout.
+    const n = await enter("late_seat", "arcadia");
+    expect(sandboxOf("late_seat")).toBeUndefined();
+    if (!spare.ok) return;
+    await expect(new Client(`http://127.0.0.1:${harness.game!.port}`).consumeSeatReservation(spare.reservation as never)).rejects.toThrow(/sandbox closed/);
+    expect(oldRoom.actors.size).toBe(0);
+    expect(hub.get("late_seat")?.actor).toBe(actorOf(n));
+    // The next sandbox: a newer generation, from the real character, switches off.
+    const s2 = await intoSandbox(n, "late_seat");
+    expect(serverRoom(s2).sandbox!.id).toBeGreaterThan(oldGen);
+    expect(serverRoom(s2)).not.toBe(oldRoom);
+    expect(s2.you.adminMode.god).toBe(false);
+    expect(me(s2).level).toBe(1);
+  });
+
+  it("Codex r3-2: voice moderation and the caches beside the store can't change from a sandbox", async () => {
+    env.voice = true;
+    try {
+      const a = await bot("muted_by_sb", "arcadia");
+      const s = await intoSandbox(a, "muted_by_sb");
+      s.send("voice:mute", { target: s.id, on: true });
+      await until("refused", () => (s.msgs.get("voice:denied") ?? []).some((m: { action: string }) => m.action === "voice:mute"));
+      expect(me(s).flags & PF.VOICE_MUTED).toBe(0);
+      // Code inside the sandbox that calls moderation or the social store itself changes nothing either.
+      const sb = sandboxOfBot(s);
+      runIn(sb, () => {
+        setVoiceMuted("muted_by_sb", true);
+        expect(kickUser("bystander_r3")).toBe(false);
+        expect(setBlocked("muted_by_sb", "bystander_r3", true)).toBe(false);
+      });
+      expect(isVoiceMuted("muted_by_sb")).toBe(false);
+      expect(storedVoiceMute("muted_by_sb")).toBe(false);
+      expect(blockedBy("muted_by_sb")).toEqual([]);
+      expect(await playRequest(harness.game!, "dev:bystander_r3:bystander_r3", { body: "portus" })).toMatchObject({ ok: true }); // not kicked
+      const n = await backToNormal(s, "muted_by_sb");
+      expect(me(n).flags & PF.VOICE_MUTED).toBe(0);
+    } finally {
+      env.voice = false;
+      resetModeration();
+    }
+  });
+
+  it("Codex r3-3: a kick or a ban reaches a sandbox body at once, closes the sandbox and keeps it out", async () => {
+    for (const [uid, action, code] of [["kicked_sb", "kick", CLOSE.KICKED], ["banned_sb", "ban", CLOSE.BANNED]] as const) {
+      const a = await bot(uid, "arcadia");
+      const s = await intoSandbox(a, uid);
+      const room = serverRoom(s);
+      let closed = 0;
+      s.room.onLeave((c: number) => (closed = c));
+      if (action === "kick") expect(kickUser(uid)).toBe(true);
+      else expect(banAccount(uid, "test", null)).toBeGreaterThan(0);
+      await until(`${action}: removed`, () => closed === code);
+      expect(room.actors.size).toBe(0);
+      expect(sandboxOf(uid)).toBeUndefined();
+      expect(await playRequest(harness.game!, `dev:${uid}:${uid}:admin`, { body: "arcadia", sandbox: true })).toEqual({ ok: false, error: action === "kick" ? "kicked" : "banned" });
+    }
+    resetModeration();
+  });
+
   it("a restart drops the sandbox; the real character is as it was and the next sandbox starts from it", async () => {
     const { s, real } = await owner("restarter");
     mode(s, { fly: true, action: "maxlevel" });
@@ -537,6 +633,19 @@ describe("the sandbox's write guard (game.db stmt)", () => {
     expect(refusedWrites.count).toBe(n + 1);
     expect(addAccountStat(db, "u1", "x", 2)).toBe(2);
     db.close();
+  });
+
+  it("the social store's memory fallback (no game.db) refuses a sandbox's writes too", () => {
+    resetMemoryStore();
+    const sb = { owner: "u2", stores: new Map() } as unknown as Sandbox;
+    runIn(sb, () => {
+      expect(setBlocked("u2", "u3", true)).toBe(false);
+      expect(storeReport({ reporter: "u2", target: "u3", body: null, pos: null, reason: "spam" })).toBe(0);
+    });
+    expect(blockedBy("u2")).toEqual([]);
+    expect(memoryReports()).toHaveLength(0);
+    expect(setBlocked("u2", "u3", true)).toBe(true); // outside, as before
+    resetMemoryStore();
   });
 
   it("game.db is only reached through stmt(): no raw prepare, exec or pragma elsewhere in the server", async () => {

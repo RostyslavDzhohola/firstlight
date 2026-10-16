@@ -864,6 +864,14 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   D-admin-2's test sessions (its claim hardening stays). Why: one boundary that every writer goes
   through, instead of a guard in each system; other players can't be in the room, so PvP, heals and
   projectiles can't leak, and tests compare the whole of game.db before and after a sandbox.
+  Codex round 3: each sandbox is a generation (`Sandbox.id`); rooms, seats and reconnects belong to
+  one and are refused once it closes or is replaced, and matchmaking only reuses the open
+  generation's rooms. Caches beside the store don't change from inside a sandbox either: there is no
+  voice system there (no mutes, relays or TURN credentials), and the moderation module and the
+  social store refuse a sandbox's writes before touching their maps. Kicks and bans reach a sandbox
+  body through the sandbox registry (it has no presence) and close the sandbox. Sandboxes aren't the
+  public world: not in the online count, the home page or /stats, and they take none of the public
+  capacity; at most 8 are open at once ("sandboxes full").
 - **D-chars-1 (run, 2026-10-15 07:10 CDT):** a fifth starter, the fire ninja "Hinoko" (owner, HANDOFF
   6h), is appended to `STARTERS` (id `ninja`, starter index 4, default palette Ember) with the Ember
   Kunai (ranged, 3 tiers) and its alt, the Ember Seal: hold RMB 0.4 s (server-timed `charge`), release

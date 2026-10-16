@@ -6,6 +6,7 @@
 // are skipped.
 
 import { gameDb, stmt, type Db } from "../db/game-db.ts";
+import { currentSandbox } from "../sandbox.ts";
 import {
   banUser,
   blockUser,
@@ -31,6 +32,9 @@ export function currentDb(): Db | null {
   }
 }
 
+// Inside an admin sandbox (D-admin-3) nothing here is written: game.db would refuse it at stmt(), and
+// the memory fallback below is process-wide too, so each writer refuses before touching either.
+
 // ---- memory fallback ---------------------------------------------------------------------------
 
 const memBlocks = new Map<string, Set<string>>(); // userId → blocked userIds
@@ -49,7 +53,7 @@ export function resetMemoryStore(): void {
 // ---- blocks --------------------------------------------------------------------------------------
 
 export function setBlocked(userId: string, target: string, on: boolean, now = Date.now()): boolean {
-  if (userId === target) return false;
+  if (userId === target || currentSandbox()) return false;
   const db = currentDb();
   if (db) return on ? blockUser(db, userId, target, now) : unblockUser(db, userId, target);
   let set = memBlocks.get(userId);
@@ -77,6 +81,7 @@ export function blockedEitherWay(a: string, b: string): boolean {
 // ---- admin voice mutes (F12 S12: they survive restarts) ---------------------------------------------
 
 export function storeVoiceMute(userId: string, on: boolean, now = Date.now()): void {
+  if (currentSandbox()) return;
   const db = currentDb();
   if (db) {
     if (on) stmt(db, "INSERT OR REPLACE INTO voice_mute (user_id, muted_at) VALUES (?, ?)").run(userId, now);
@@ -95,6 +100,7 @@ export function storedVoiceMute(userId: string): boolean {
 
 /** A guest saved: the in-memory fallback follows the account (game.db rows move in linkAccounts). */
 export function rekeyStoredVoiceMute(from: string, to: string): void {
+  if (currentSandbox()) return;
   if (memMutes.delete(from)) memMutes.add(to);
 }
 
@@ -110,6 +116,7 @@ export interface ReportFiling {
 }
 
 export function storeReport(r: ReportFiling): number {
+  if (currentSandbox()) return 0;
   const db = currentDb();
   const now = r.now ?? Date.now();
   if (db) return fileReport(db, { reporter: r.reporter, target: r.target, body: r.body, pos: r.pos, reason: r.reason, now });
@@ -125,6 +132,7 @@ export function memoryReports(): readonly (typeof memReports)[number][] {
 
 /** Ban an account and (by default) the IP hash it last played from. Returns the ban id (0 in memory mode). */
 export function storeBan(input: { userId: string; reason: string; createdBy: string | null; until?: number | null }): number {
+  if (currentSandbox()) return 0;
   const db = currentDb();
   if (db) return banUser(db, { userId: input.userId, reason: input.reason, createdBy: input.createdBy, until: input.until ?? null });
   memBans.add(input.userId);

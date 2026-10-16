@@ -16,7 +16,7 @@ function onlineNow(): { total: number; perBody: Record<string, number> } {
   const perBody: Record<string, number> = {};
   let total = 0;
   for (const r of liveRooms) {
-    if (r.metadata?.loadtest) continue;
+    if (r.metadata?.loadtest || r.metadata?.sandbox) continue; // admin sandboxes aren't play (D-admin-3)
     let n = 0;
     for (const a of r.actors.values()) if (!a.identity.loadtest) n++;
     perBody[r.bodyDef.id] = (perBody[r.bodyDef.id] ?? 0) + n;

@@ -32,16 +32,16 @@ export interface HomeDeps {
 
 interface RoomLike {
   bodyDef: { id: string };
-  metadata?: { loadtest?: boolean } | null;
+  metadata?: { loadtest?: boolean; sandbox?: string } | null;
   actors: Map<string, { identity: { loadtest?: boolean }; superseded?: boolean; state: { name: string } }>;
 }
 
-/** Players per body, and up to `namesPerBody` names each (sorted). Load-test bots never count. */
+/** Players per body, and up to `namesPerBody` names each (sorted). Load-test bots and admin sandboxes never count. */
 export function onlineSnapshot(rooms: Iterable<RoomLike>, namesPerBody = HOME_LIMITS.namesPerBody): HomeOnline {
   const bodies = Object.fromEntries(BODY_IDS.map((b) => [b, { players: 0, names: [] as string[] }])) as HomeOnline["bodies"];
   let total = 0;
   for (const r of rooms) {
-    if (r.metadata?.loadtest) continue;
+    if (r.metadata?.loadtest || r.metadata?.sandbox) continue; // a sandbox is private (D-admin-3)
     const slot = bodies[r.bodyDef.id as BodyId];
     if (!slot) continue;
     for (const a of r.actors.values()) {

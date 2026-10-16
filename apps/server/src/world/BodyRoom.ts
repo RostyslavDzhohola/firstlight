@@ -28,7 +28,7 @@ import { emitPileEvent, onPileEvent, pileStore, type PileData, type PileKind } f
 import { SYSTEM_FACTORIES, type RoomSystem } from "./systems.ts";
 import { voiceItemHidden } from "./voice/index.ts";
 import { endSandboxOf, identityIsAdmin, stillAdmin } from "./adminMode.ts";
-import { currentSandbox, runIn, sandboxOf, sandboxRoomClosed, sandboxRoomOpened, type Sandbox } from "../sandbox.ts";
+import { currentSandbox, runIn, sandboxActive, sandboxOf, sandboxRoomClosed, sandboxRoomOpened, type Sandbox } from "../sandbox.ts";
 import { supportOf } from "./support.ts";
 import { identityCheck, storageRecovery, ticketFor, travelRedirect } from "./admission.ts";
 import { pendingSeats } from "./reservations.ts";
@@ -42,16 +42,19 @@ export interface BodyRoomOptions {
   body: BodyId;
   copy: number;
   loadtest?: boolean;
-  /** An admin sandbox room (D-admin-3): the owner's user id; their sandbox must be open. */
+  /** An admin sandbox room (D-admin-3): the owner's user id; their sandbox must be open… */
   sandbox?: string;
+  /** …and still this generation (sandbox.ts Sandbox.id). */
+  sandboxGen?: number;
 }
 
 export interface BodyRoomMetadata {
   body: BodyId;
   copy: number;
   loadtest: boolean;
-  /** The owner of an admin sandbox room; public matchmaking never picks one. */
+  /** The owner of an admin sandbox room, and its generation; public matchmaking never picks one. */
   sandbox?: string;
+  sandboxGen?: number;
 }
 
 /** Join options forwarded from /api/play for brand-new characters. */
@@ -252,7 +255,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (options.sandbox) {
       // /api/play opened the sandbox; from here on everything this room does runs inside it.
       const sb = sandboxOf(options.sandbox);
-      if (!sb) throw new ServerError(403, "no sandbox");
+      if (!sb || sb.id !== options.sandboxGen || !sandboxActive(sb)) throw new ServerError(403, "no sandbox");
       this.sandbox = sb;
       sandboxRoomOpened(sb);
       scopeTo(this, sb);
@@ -289,7 +292,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     };
     this.state.body = options.body;
     this.state.copy = options.copy;
-    void this.setMetadata({ body: options.body, copy: options.copy, loadtest: !!options.loadtest, ...(options.sandbox ? { sandbox: options.sandbox } : {}) });
+    void this.setMetadata({ body: options.body, copy: options.copy, loadtest: !!options.loadtest, ...(this.sandbox ? { sandbox: this.sandbox.owner, sandboxGen: this.sandbox.id } : {}) });
 
     const room = this;
     this.host = {
@@ -443,9 +446,11 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     // A reservation is checked again when it is used (F12 B5): before any takeover happens.
     const refusal = this.seatRefusal(client.sessionId, auth, now);
     if (refusal) throw new ServerError(403, refusal);
-    // A sandbox is its owner's alone, and only while they are an admin (D-admin-3). Joining the real
-    // world closes the owner's sandbox (a sandbox body still in it, in another window, goes).
+    // A sandbox is its owner's alone, only while they are an admin, and only while it is open: a seat
+    // reserved before it closed (Back to normal, another window, a kick) is refused (D-admin-3).
+    // Joining the real world closes the owner's sandbox (a sandbox body still in it goes).
     if (this.sandbox && (auth.userId !== this.sandbox.owner || !identityIsAdmin(auth))) throw new ServerError(403, "private sandbox");
+    if (this.sandbox && !sandboxActive(this.sandbox)) throw new ServerError(CLOSE.SANDBOX_OVER, "sandbox closed");
     if (!this.sandbox) endSandboxOf(auth.userId);
     // One authoritative character per user: take over a live, dropped or lingering actor anywhere.
     let char: CharacterData | null = null;
@@ -576,6 +581,10 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     // Reconnects skip /api/play, so bans are checked here too (SPEC §5.2).
     if (this.systems.some((s) => s.canReconnect?.(client.sessionId) === false)) throw new ServerError(CLOSE.BANNED, "not allowed back");
     const a = this.actors.get(client.sessionId);
+    if (this.sandbox && !sandboxActive(this.sandbox)) {
+      client.leave(CLOSE.SANDBOX_OVER, "sandbox closed");
+      return;
+    }
     if (!a || a.superseded || hub.get(a.identity.userId)?.actor !== a || this.isBanned(a.identity.userId)) {
       client.leave(CLOSE.ELSEWHERE, "session replaced");
       return;
