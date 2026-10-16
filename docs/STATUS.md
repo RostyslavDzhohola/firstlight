@@ -4,6 +4,14 @@
 **Resume protocol:** SPEC §0. Read this file, check running tasks, continue at the first unchecked item.
 **Paused 2026-10-14 20:10 CDT by the owner:** their open requests (blinking, weapons, creeps, dodge delay, email-first sign-in, voice/radio removal, 3D characters, ElevenLabs SFX, pad outposts) are in the workspace handoff `../HANDOFF.md` (outside the repo). Start there.
 
+**Round 2 (2026-10-16), live at main 9a0ee38, protocol 5:** the owner's picks are in — sculpted A characters
+(Kappa and Unit 7 with A/B looks, the ninja Hinoko), shops in every safe zone, admin mode (claim form + a
+private sandbox where nothing is saved, D-admin-1..3), a leaderboard of real people only (test accounts
+flagged, D-home-6), walled arrival outposts with house A, portal gates A and B, Waystation Nine and the
+stilt shelter (D-b2-1..5), and solid trees and rocks (D-solid-1/2). Open: whether creeps beyond the outpost
+walls are visible enough from inside; a WebGL dip to ~52 fps on Hollowmere; close trunks can hide the
+avatar; the `?meadow` look waits for the owner's OK; the "turbo granny" boss is parked as issue #2.
+
 **Resumed 2026-10-15 ("go"); live at main 28e6683, protocol 4.** Merged and deployed today, each after
 Codex gpt-6.1-sol review (and CodeRabbit for small fixes):
 - **Owner's play-test bugs:** the pause-menu flicker ("blinking") and fullscreen swaps (D-controls-1..4);
