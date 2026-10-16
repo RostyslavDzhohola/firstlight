@@ -81,9 +81,9 @@ cam = bpy.data.cameras.new("cam")
 cam.lens = 30
 co = bpy.data.objects.new("cam", cam)
 sc.collection.objects.link(co)
-cx = x / 2
-co.location = (cx - 6, -max(28.0, x * 0.55), 12)
-d = Vector((cx, 0, 4)) - co.location
+cx = (x - 3.0) / 2
+co.location = (cx, -max(24.0, x * 0.95), max(9.0, x * 0.3))
+d = Vector((cx, 0, 3)) - co.location
 co.rotation_euler = d.to_track_quat("-Z", "Y").to_euler()
 sc.camera = co
 sc.render.engine = "CYCLES"
