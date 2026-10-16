@@ -1068,3 +1068,4 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   Evidence: docs/research/2026-10-16-hollowmere-webgl-dip.md. Frame-time gates should read
   runs of long frames with that in mind (a control page, or a rerun). Why: cutting bloom mips or
   shadow updates would cost visible quality for stalls the evidence doesn't tie to the game.
+- **D-home-7 (2026-10-16):** DataFast is live with the standard script exactly as DataFast issued it (site id `dfid_NA56rn0p8nPJYi59xnBYW`, `script.js`, so the home page's note says DataFast sets cookies). An inline guard placed before it sets DataFast's own opt-out flag (`localStorage.datafast_ignore`) for automated browsers (`navigator.webdriver`) and test URLs (`?e2e`, `?bench`, `?offline`), and the Playwright fixtures set the same flag, so journeys and smoke runs never count as visits. Why: Grok Bot set up the site for the owner, and test traffic shouldn't pollute the analytics.

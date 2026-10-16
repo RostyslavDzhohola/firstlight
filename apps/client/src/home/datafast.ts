@@ -29,6 +29,14 @@ export function dataFastScript(env: DataFastEnv): DataFastScript | null {
   return { src: `https://datafa.st/js/script${cookieless ? ".cookieless" : ""}.js`, websiteId, domain, cookieless };
 }
 
+/**
+ * Inline script placed before DataFast's tag: automated browsers (navigator.webdriver: Playwright,
+ * CDP, our journeys and smoke runs) and test URLs (?e2e, ?bench, ?offline) set DataFast's own opt-out
+ * flag (https://datafa.st/docs/excluding-analytics), so test runs don't count as visits.
+ */
+export const DATAFAST_GUARD =
+  'try{if(navigator.webdriver||/[?&](?:e2e|bench|offline)(?:[=&]|$)/.test(location.search))localStorage.setItem("datafast_ignore","true")}catch(e){}';
+
 /** The page's one-line analytics note: only claim "cookieless" when the cookieless script is the one in the page. */
 export function dataFastNote(s: DataFastScript | null): string | null {
   if (!s) return null;

@@ -35,6 +35,12 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
   // Every guest a journey creates is flagged as one of our test accounts (D-home-6, stack.ts).
   context: async ({ context }, use) => {
     await markToolRequests(context);
+    // Test runs never count as DataFast visits (its documented opt-out flag; the page's guard also catches webdriver).
+    await context.addInitScript(() => {
+      try {
+        localStorage.setItem("datafast_ignore", "true");
+      } catch {}
+    });
     await use(context);
   },
   gfx: async ({}, use, info) => {

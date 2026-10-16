@@ -1,5 +1,5 @@
 import { defineConfig, loadEnv, type Plugin } from "vite";
-import { dataFastScript } from "./src/home/datafast.ts";
+import { DATAFAST_GUARD, dataFastScript } from "./src/home/datafast.ts";
 
 // In production Vercel proxies /api/auth/* (and /admin/*, /stats) to the game server; in dev Vite does, so the
 // Better Auth session cookie stays first-party on the client origin.
@@ -14,7 +14,10 @@ function dataFast(env: Record<string, string>): Plugin {
       order: "post",
       handler: (_html, ctx) =>
         s && ctx.path === "/index.html"
-          ? [{ tag: "script", attrs: { defer: true, "data-website-id": s.websiteId, "data-domain": s.domain, src: s.src }, injectTo: "head" }]
+          ? [
+              { tag: "script", children: DATAFAST_GUARD, injectTo: "head" },
+              { tag: "script", attrs: { defer: true, "data-website-id": s.websiteId, "data-domain": s.domain, src: s.src }, injectTo: "head" },
+            ]
           : [],
     },
   };

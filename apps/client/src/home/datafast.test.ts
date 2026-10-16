@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dataFastNote, dataFastScript } from "./datafast.ts";
+import { DATAFAST_GUARD, dataFastNote, dataFastScript } from "./datafast.ts";
 
 describe("DataFast script", () => {
   it("is absent unless both the website id and the domain are set", () => {
@@ -28,5 +28,23 @@ describe("DataFast script", () => {
     expect(dataFastNote(dataFastScript({}))).toBeNull();
     expect(dataFastNote(dataFastScript(env))).toBe("Cookieless analytics by DataFast");
     expect(dataFastNote(dataFastScript({ ...env, VITE_DATAFAST_COOKIELESS: "false" }))).toBe("Analytics by DataFast, which sets cookies");
+  });
+});
+
+describe("DataFast guard", () => {
+  function run(webdriver: boolean, search: string): string | null {
+    const store = new Map<string, string>();
+    const g = { navigator: { webdriver }, location: { search }, localStorage: { setItem: (k: string, v: string) => store.set(k, v) } };
+    new Function("navigator", "location", "localStorage", DATAFAST_GUARD)(g.navigator, g.location, g.localStorage);
+    return store.get("datafast_ignore") ?? null;
+  }
+  it("opts automated browsers and test URLs out, and leaves players alone", () => {
+    expect(run(true, "")).toBe("true");
+    expect(run(false, "?e2e")).toBe("true");
+    expect(run(false, "?autoplay&bench=g1")).toBe("true");
+    expect(run(false, "?offline=1")).toBe("true");
+    expect(run(false, "")).toBeNull();
+    expect(run(false, "?autoplay")).toBeNull();
+    expect(run(false, "?benchmark")).toBeNull();
   });
 });
