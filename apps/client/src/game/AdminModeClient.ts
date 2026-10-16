@@ -10,6 +10,7 @@ import { ADMIN_MODE, SANDBOX_BADGE } from "@firstlight/shared/content/admin";
 import type { BodyId } from "@firstlight/shared";
 import type { YouState } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
+import "../ui/admin.css";
 import { AdminPanel, adminMode } from "../ui/adminPanel.ts";
 import { pauseExtras, type PauseExtra } from "../ui/menu.ts";
 import type { Game } from "./Game.ts";
@@ -89,12 +90,13 @@ export class AdminModeClient implements ClientSystem {
       return;
     }
     if (!this.badge) {
-      // On the player card, next to the safe / danger chip.
-      const row = this.game.hud.root.querySelector(".fl-me__zone")?.parentElement ?? this.game.hud.root;
-      this.badge = document.createElement("span");
-      this.badge.className = "fl-chip admin";
+      // A line of its own on the player card, under the name (the notice is long).
+      const row = this.game.hud.root.querySelector(".fl-me__id");
+      this.badge = document.createElement("div");
+      this.badge.className = "fl-chip admin fl-me__sandbox";
       this.badge.dataset.e2e = "admin-badge";
-      row.appendChild(this.badge);
+      if (row) row.after(this.badge);
+      else this.game.hud.root.appendChild(this.badge);
     }
     this.badge.textContent = text;
   }

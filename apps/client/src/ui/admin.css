@@ -1,0 +1,6 @@
+/* Admin sandbox badge (D-admin-3): its own line on the player card, so the whole notice fits. */
+.fl-chip.admin.fl-me__sandbox {
+  display: flex; justify-content: center; height: auto; min-height: calc(1.6 * var(--u));
+  margin: calc(.35 * var(--u)) 0 calc(.15 * var(--u)); padding: calc(.2 * var(--u)) calc(.55 * var(--u));
+  white-space: normal; text-align: center; line-height: 1.25;
+}
