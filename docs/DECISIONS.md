@@ -820,3 +820,28 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   get within reach (it kept 3 m off the ring), gave up after 5 s, healed to full, and from then on
   every shot woke it into giving up again — "my hits don't work". Tested on Arcadia, Meridian and a
   Hollowmere pad, on the real server path, and against the pad shooter.
+- **D-shops-1 (run, 2026-10-15 21:40Z):** a shop in every safe zone (owner, round 2): the Portus
+  Exchange plus a trader inside each planet's arrival outpost (Dawnpad Trading Post, Lanternfall
+  Stall, Waystation Supply). `packages/shared/src/content/shops.ts` `SHOP_SPOTS` holds each spot's
+  world position and till radius (6 m along the ground, 4 m up or down); the keepers in
+  `content/world.ts` stand at those positions (Juno Vale included, still within 1 cm of the town's
+  market spot), so whoever edits a spot moves its keeper. The planet spots are placeholders beside
+  pad 0 (east −4.5 m, north −3 m, the guide's mirror image, inside the 12 m safe ring and clear of the
+  outpost's solids); the outposts lane places the stalls and edits those numbers. The server trades
+  only inside a spot's radius on that body; tests check every till is safe all the way round.
+  Why: one list of shops both sides read, easy to move.
+- **D-shops-2 (run, 2026-10-15 21:40Z):** the shop lists every item in the game, and what you can't
+  use or afford yet is shown locked with the reason (owner: "I want people to see exactly what is
+  accessible there"). Buying now needs the item's level as well as the coins: the server refuses
+  `level` like `coins` (shared `buyBlock`), replacing the old "anyone can buy anything, whether you
+  can use it is your business". Loot no shop sells (drop-only cosmetics, trophies) shows where it
+  comes from and what the shop pays for it; Easter-egg rewards show only as a count ("12 secret
+  rewards"), never by name; items switched off in a build (the radio with voice off, the whistle
+  with horses off, the M11 extras with their flag off) stay out. Why: the owner's request, and a
+  locked row the till would sell anyway would be a lie.
+- **D-shops-3 (run, 2026-10-15 22:30Z, Codex review):** trading needs the player protected right
+  now (`BodyRoom.safeNow`), not just standing at a till: a pad ring protects only once out of combat,
+  so a combat-tagged player who ran into an outpost can't buy or sell while still damageable. The
+  till refuses with reason `combat` and "Catch your breath first: no trading for a few seconds after
+  a fight". The Portus town protects everyone inside at once (D-zones-3), so Juno is unaffected.
+  Why: no shopping for tonics mid-fight from inside a ring that doesn't protect you yet.

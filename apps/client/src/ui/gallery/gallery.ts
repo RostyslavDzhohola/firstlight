@@ -26,7 +26,9 @@ import { InviteCards } from "../../social/invites.ts";
 import { showRemoved } from "../../social/screens.ts";
 import { addInvite, setParty } from "../../social/store.ts";
 import { PhraseWheel } from "../phraseWheel.ts";
-import { JournalPanel, ShopPanel } from "../panels.ts";
+import { JournalPanel } from "../panels.ts";
+import { ShopPanel } from "../shop.ts";
+import { SHOP_SPOTS } from "@firstlight/shared/content/shops";
 import { InventoryPanel } from "../inventory.ts";
 import { OnboardingHud } from "../onboarding.ts";
 import { OnboardingSteps } from "../../game/onboardingSteps.ts";
@@ -325,7 +327,7 @@ async function run() {
       const hud = hudScene("monster");
       hud.you = you({ coins: 214, missions: [{ id: "A1", progress: 8, goal: 8, done: true }, { id: "A2", progress: 0, goal: 1, done: false }] });
       const g = { hud, input: { enabled: true, keys: new Set(), lock() {} }, net: { room: null }, bodyId: "arcadia" } as unknown as Game;
-      if (screen === "shop") new ShopPanel(g).open();
+      if (screen === "shop") new ShopPanel(g).openAt(SHOP_SPOTS.find((s) => s.body === "arcadia")!);
       else new JournalPanel(g).show("missions");
       break;
     }

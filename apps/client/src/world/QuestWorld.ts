@@ -3,12 +3,14 @@
 // Easter-egg parts. Placeholder geometry until the art lane replaces it; positions come from the
 // shared world-object table so they match the server's triggers exactly.
 
+import { SHOP_SPOT_BY_ID } from "@firstlight/shared/content/shops";
 import * as THREE from "three/webgpu";
 import { materialColor, materialEmissive, texture } from "three/tsl";
 import { atmo } from "../render/atmosphere.ts";
 import type { BodyId, Terrain } from "@firstlight/shared";
 import { EGG_BY_ID, PLAQUES, type HallLine } from "@firstlight/shared/content/secrets";
 import { objectPos, objectsOn, type WorldObjectDef } from "@firstlight/shared/content/world";
+import { placeDir } from "@firstlight/shared/content/places";
 import { HALL_BOARD } from "@firstlight/shared/planet/town";
 import { ANIM } from "@firstlight/shared/net/schema";
 import { AvatarView } from "../render/Avatars.ts";
@@ -145,6 +147,12 @@ interface Prop {
   facing?: THREE.Vector3;
 }
 
+
+const DEFAULT_FACING = new THREE.Vector3();
+
+/** Keeper avatars: AvatarView's [palette, starter] (Juno Vale's is the one she always had). */
+const KEEPER_LOOK: Record<string, [number, number]> = { juno_vale: [1, 2], shop_arcadia: [3, 1], shop_hollowmere: [5, 0], shop_meridian: [4, 3] };
+
 export class QuestWorld {
   readonly group = new THREE.Group();
   readonly props: Prop[] = [];
@@ -179,22 +187,23 @@ export class QuestWorld {
     this.faceInward();
   }
 
-  /** Turn NPCs and the hall wall to face the plaza / pad centre. */
+  /**
+   * Turn NPCs and the hall wall to face the plaza centre (Portus) or their place's anchor (a planet's
+   * pad centre for guides and outpost traders: keepers at a fixed spot have no east/north offset to
+   * go by). Every NPC gets a facing, so update() always stands its avatar at its spot.
+   */
   private faceInward() {
     for (const p of this.props) {
       if (p.def.look !== "keeper" && p.def.look !== "guide" && p.def.look !== "hall") continue;
       const up = p.pos.clone().normalize();
-      const centreDir = this.body === "portus" ? new THREE.Vector3(0, 1, 0) : p.pos.clone().normalize();
-      let toward = centreDir.clone().multiplyScalar(p.pos.length()).sub(p.pos);
-      if (this.body !== "portus") {
-        // Guides face the pad centre (the place anchor): approximate with the opposite of their offset.
-        const ref = Math.abs(up.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
-        const north = ref.addScaledVector(up, -ref.dot(up)).normalize();
-        const east = new THREE.Vector3().crossVectors(north, up).normalize();
-        toward = east.multiplyScalar(-(p.def.east ?? 0)).addScaledVector(north, -(p.def.north ?? 0));
-      }
+      const anchor = this.body === "portus" ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(...placeDir(p.def.place));
+      const toward = anchor.multiplyScalar(p.pos.length()).sub(p.pos);
       toward.addScaledVector(up, -toward.dot(up));
-      if (toward.lengthSq() < 1e-6) continue;
+      if (toward.lengthSq() < 1e-6) {
+        // Standing on the anchor itself: keep the local north the root was built with.
+        toward.set(0, 0, 1).applyQuaternion(p.root.quaternion);
+        toward.addScaledVector(up, -toward.dot(up));
+      }
       toward.normalize();
       const right = new THREE.Vector3().crossVectors(up, toward).normalize();
       p.root.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, toward));
@@ -207,7 +216,9 @@ export class QuestWorld {
     const d = p.def;
     switch (d.look) {
       case "keeper": {
-        p.npc = new AvatarView(1, 2);
+        // Juno keeps her look; each outpost's trader wears another palette and starter.
+        const look = KEEPER_LOOK[d.id] ?? [1, 2];
+        p.npc = new AvatarView(look[0], look[1]);
         this.group.add(p.npc.root);
         const counter = mesh(new THREE.BoxGeometry(2.6, 1.0, 0.8), std(0x7a5a3a, { rough: 0.8 }), 0, 0.5, 1.1);
         const top = mesh(new THREE.BoxGeometry(2.8, 0.08, 1.0), std(0xd8b98a), 0, 1.04, 1.1);
@@ -219,7 +230,8 @@ export class QuestWorld {
         const orb = mesh(new THREE.IcosahedronGeometry(0.18, 1), glow(0xffd166, 2.5), 0.8, 1.3, 1.1);
         r.add(counter, top, awning, postL, postR, crate, orb);
         p.bob = orb;
-        const l = label("Juno Vale", "Portus Exchange · E to trade");
+        const spot = SHOP_SPOT_BY_ID.get(d.id);
+        const l = label(spot?.keeper ?? d.name, `${spot?.name ?? "Shop"} · E to trade`);
         l.position.set(0, 3.4, 0.6);
         r.add(l);
         break;
@@ -491,7 +503,10 @@ export class QuestWorld {
     this.t += dt;
     const now = performance.now();
     for (const p of this.props) {
-      if (p.npc && p.facing) p.npc.set(p.pos.x, p.pos.y, p.pos.z, p.facing.x, p.facing.y, p.facing.z, ANIM.IDLE, dt);
+      if (p.npc) {
+        const f = p.facing ?? DEFAULT_FACING.set(0, 0, 1).applyQuaternion(p.root.quaternion);
+        p.npc.set(p.pos.x, p.pos.y, p.pos.z, f.x, f.y, f.z, ANIM.IDLE, dt);
+      }
       if (p.def.egg && EGG_BY_ID.get(p.def.egg)?.extra) p.root.visible = !!st.cosmeticsExtras;
       if (p.def.mission) p.root.visible = st.activeMissions.has(p.def.mission);
       if (p.bob) p.bob.position.y = (p.def.look === "ferry" ? 0.3 : p.def.look === "altar" ? 2.4 : p.def.look === "bowl" ? 1.0 : p.def.look === "keeper" ? 1.3 : 0.6) + Math.sin(this.t * 2 + p.pos.x) * 0.06;
