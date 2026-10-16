@@ -26,6 +26,7 @@ import { pickDisplayName } from "../ui/account.ts";
 import { hideLoading, setLoading, setLoadingBadge } from "../ui/loading.ts";
 import { getAccountInfo, invalidatePlayToken, isDevGuest } from "../net/auth.ts";
 import { PilesView } from "../world/PilesView.ts";
+import { breakablesLayoutPending } from "../world/Breakables.ts";
 import { Planet } from "../world/Planet.ts";
 import { Portals } from "../world/Portals.ts";
 import { ArrivalWatch, closeAction, ConnectionLost, StorageBackoff, waitFor } from "./arrival.ts";
@@ -473,8 +474,11 @@ export class Game {
       alive("building the world");
     }
     // The natural solids round the arrival, built behind the loading screen (play builds the rest
-    // ahead of the player, one chunk a frame at most).
-    // One chunk per macrotask, so the loading screen keeps drawing.
+    // ahead of the player, one chunk a frame at most), one chunk per macrotask so the loading
+    // screen keeps drawing. They clear the breakables' spots: wait (bounded) for the fracture
+    // worker's copy of that layout rather than place it here in one 50–90 ms task (Codex review).
+    const layout = breakablesLayoutPending(this.bodyId);
+    if (layout) await Promise.race([layout, new Promise((r) => setTimeout(r, 10_000))]);
     for (let i = 0; i < 12 && this.nature.warm(this.player.pos.x, this.player.pos.y, this.player.pos.z, 120, 1) > 0; i++) await new Promise((r) => setTimeout(r, 0));
     setLoading("Loading characters…", 0.8);
     await Promise.all([preloadAvatars(), preloadHorse(), this.planet.props.ready]); // resolve null on failure: capsules / box horses
