@@ -6,12 +6,23 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BODIES } from "@firstlight/shared";
 import { ADMIN_MODE } from "@firstlight/shared/content/admin";
-import { LEVEL_CAP, maxHp } from "@firstlight/shared/content/progression";
+import { LEVEL_CAP } from "@firstlight/shared/content/progression";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { motionFields, moveLimits } from "../src/world/movement.ts";
 import type { PlayerActor } from "../src/world/actors.ts";
-import { adminItems } from "../src/world/adminMode.ts";
+import { ADMIN_RECHECK_MS, adminCheck, adminItems } from "../src/world/adminMode.ts";
+import { openGameDb, loadCharacter, type Db } from "../src/db/index.ts";
+import { ensureAccount, setDisplayName } from "../src/db/accounts.ts";
+import { topLevels } from "../src/db/leaderboard.ts";
+import { characterRepo } from "../src/world/characters.ts";
+import { pileStore } from "../src/world/piles.ts";
+import { SqliteCharacterRepo, SqlitePileStore } from "../src/world/sqliteStores.ts";
+import { QuestSystem } from "../src/world/quests/QuestSystem.ts";
+import { hub } from "../src/world/hub.ts";
 import { safeLeave, startServer, waitFor } from "./helpers.ts";
-import { bot, harness, me, offPad, serverRoom, sleep, tpAndWait, until, type Bot } from "./quest-helpers.ts";
+import { bot, harness, me, objAt, offPad, serverRoom, sleep, tpAndWait, until, type Bot } from "./quest-helpers.ts";
 
 beforeEach(async () => {
   harness.game = await startServer();
@@ -97,7 +108,7 @@ describe("admin mode switches", () => {
     expect(p.you.adminMode).toBeUndefined();
     expect(serverRoom(p).actors.get(p.id)!.adminMode).toBeUndefined();
     const a = await bot("admin_am", "arcadia");
-    expect(a.you.adminMode).toEqual({ fly: false, god: false, speed: false, backup: false });
+    expect(a.you.adminMode).toEqual({ fly: false, god: false, speed: false, session: false });
     mode(a, { fly: true });
     await until("fly on", () => a.you.adminMode?.fly === true);
   });
@@ -205,35 +216,166 @@ describe("god mode", () => {
   });
 });
 
-describe("max level, every item, back to normal", () => {
-  it("round-trips the character, and the saved character survives a rejoin", async () => {
+describe("test sessions: test state is never canonical (D-admin-2)", () => {
+  let dir = "";
+  let db: Db;
+  beforeEach(() => {
+    // The real path: SQLite characters and piles (startServer gave memory stores).
+    dir = mkdtempSync(join(tmpdir(), "fl-admin-"));
+    db = openGameDb(join(dir, "game.db"));
+    characterRepo.current = new SqliteCharacterRepo(db);
+    pileStore.current = new SqlitePileStore(db);
+  });
+  afterEach(() => {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+    adminCheck.current = () => null;
+  });
+
+  const items = (you: { hotbar: unknown[]; backpack: unknown[] }) => JSON.stringify([you.hotbar, you.backpack]);
+  const actorOf = (b: Bot) => serverRoom(b).actors.get(b.id)!;
+
+  it("max level and every item stay out of the database and the board; Back to normal restores", async () => {
     const a = await bot("tester", "portus", "admin", { starter: 0 });
-    const before = { level: a.you.level, hotbar: JSON.stringify(a.you.hotbar), backpack: JSON.stringify(a.you.backpack) };
+    setDisplayName(db, "tester", "Tester_A");
+    const before = { level: a.you.level, inv: items(a.you) };
     mode(a, { action: "maxlevel" });
-    await until("max level", () => me(a).level === LEVEL_CAP && me(a).hp === maxHp(LEVEL_CAP));
     mode(a, { action: "giveall" });
     const all = adminItems().map((w) => w.id);
-    await until("every item", () => [...a.you.hotbar, ...a.you.backpack].filter(Boolean).length === Math.min(all.length, 20));
-    const have = [...a.you.hotbar, ...a.you.backpack].filter(Boolean).map((x: { id: string; tier: number }) => x);
+    await until("every item", () => me(a).level === LEVEL_CAP && [...a.you.hotbar, ...a.you.backpack].filter(Boolean).length === Math.min(all.length, 20));
+    expect(a.you.adminMode.session).toBe(true);
+    const have = [...a.you.hotbar, ...a.you.backpack].filter(Boolean) as { id: string; tier: number }[];
     expect(have.map((x) => x.id)).toEqual(all.slice(0, 20));
     expect(have.find((x) => x.id === "carbine")?.tier).toBe(3); // max level: the top tier
-    // Any item at any tier into the hand; a cosmetic is worn.
     mode(a, { action: "hand", id: "stillshot", tier: 2 });
     await until("in hand", () => a.you.hotbar[a.you.selected]?.id === "stillshot");
-    expect(a.you.hotbar[a.you.selected].tier).toBe(2);
     mode(a, { action: "hand", id: "fox_mask" });
     await until("worn", () => a.you.worn?.mask === "fox_mask");
-    expect(a.you.adminMode.backup).toBe(true);
-    // Rejoin: the backup is kept with the character.
-    await safeLeave(a.room);
-    harness.rooms.splice(harness.rooms.indexOf(a.room), 1);
-    const b = await bot("tester", "portus");
-    expect(b.you.adminMode.backup).toBe(true);
-    mode(b, { action: "normal", fly: true }); // "normal" wins: everything off
-    await until("normal", () => b.you.adminMode?.backup === false && me(b).level === before.level);
-    expect(b.you.adminMode).toEqual({ fly: false, god: false, speed: false, backup: false });
-    expect(JSON.stringify(b.you.hotbar)).toBe(before.hotbar);
-    expect(JSON.stringify(b.you.backpack)).toBe(before.backpack);
-    expect(b.you.worn ?? {}).toEqual({});
+    // Saves during the session write the real character: the database and the public board say level 1.
+    serverRoom(a).saveActor(actorOf(a));
+    hub.flush("tester"); // what an account merge does first
+    const row = loadCharacter<{ hotbar: unknown[]; backpack: unknown[] }>(db, "tester")!;
+    expect(row.level).toBe(before.level);
+    expect(JSON.stringify([row.inventory.hotbar, row.inventory.backpack])).toBe(before.inv);
+    expect(topLevels(db).find((r) => r.name === "Tester_A")?.level).toBe(before.level);
+    mode(a, { action: "normal", fly: true }); // "normal" wins: everything off
+    await until("normal", () => a.you.adminMode?.session === false && me(a).level === before.level);
+    expect(a.you.adminMode).toEqual({ fly: false, god: false, speed: false, session: false });
+    expect(items(a.you)).toBe(before.inv);
+    expect(a.you.worn ?? {}).toEqual({});
+  });
+
+  it("leaving (or another window taking over) ends the session: the next join is the real character", async () => {
+    const a = await bot("leaver", "portus", "admin", { starter: 0 });
+    const before = { level: a.you.level, inv: items(a.you) };
+    mode(a, { action: "maxlevel" });
+    mode(a, { action: "giveall" });
+    await until("boosted", () => me(a).level === LEVEL_CAP);
+    const b = await bot("leaver", "portus"); // a second window takes over
+    expect(b.you.level).toBe(before.level);
+    expect(items(b.you)).toBe(before.inv);
+    expect(b.you.adminMode).toEqual({ fly: false, god: false, speed: false, session: false });
+  });
+
+  it("nothing leaves a session: no drop, no pickup, no pile, and a sale's coins go at Back to normal", async () => {
+    ensureAccount(db, "pile_owner"); // SQLite saves need the account row (the travel ticket for a player)
+    const owner = await bot("pile_owner", "arcadia", "");
+    const a = await bot("trader", "arcadia", "admin", { starter: 3 });
+    const at = await outside(a);
+    mode(a, { action: "hand", id: "comet", tier: 3 });
+    await until("in hand", () => a.you.hotbar[a.you.selected]?.id === "comet");
+    a.send("drop", { slot: a.you.selected });
+    await until("drop refused", () => (a.msgs.get("denied") ?? []).some((m: { action: string; reason: string }) => m.action === "drop" && m.reason === "test session"));
+    expect(pileStore.current.list("arcadia")).toEqual([]);
+    expect(serverRoom(a).createPile(actorOf(a), [{ id: "carbine", tier: 3, qty: 1 }], 0, at)).toBeNull(); // a tester leaves no pile
+    // Someone else's pile at the tester's feet stays put.
+    const pile = serverRoom(a).createPile(serverRoom(owner).actors.get(owner.id)!, [{ id: "tonic_small", tier: 1, qty: 1 }], 7, at)!;
+    a.send("pickup", { pileId: pile.id });
+    await until("pickup refused", () => (a.msgs.get("denied") ?? []).some((m: { action: string; reason: string }) => m.action === "pickup" && m.reason === "test session"));
+    expect(pileStore.current.get(pile.id)).toBeTruthy();
+  });
+
+  it("a test weapon sold at the Exchange: the coins don't outlive the session", async () => {
+    const a = await bot("seller", "portus", "admin", { starter: 0 });
+    await tpAndWait(a, objAt("juno_vale"));
+    const coins = a.you.coins;
+    mode(a, { action: "hand", id: "carbine", tier: 3 });
+    await until("in hand", () => a.you.hotbar[a.you.selected]?.id === "carbine");
+    a.send("sell", { slot: a.you.selected });
+    await until("sold", () => a.you.coins > coins);
+    serverRoom(a).saveActor(actorOf(a));
+    expect(loadCharacter(db, "seller")!.coins).toBe(coins);
+    mode(a, { action: "normal" });
+    await until("normal", () => a.you.adminMode?.session === false);
+    expect(a.you.coins).toBe(coins);
+    expect(a.you.hotbar[0]?.id).toBe("hexquill");
+  });
+
+  it("dying in a session isn't a death: no pile, alive at full health, the real character back", async () => {
+    const a = await bot("faller", "arcadia", "admin", { starter: 0 });
+    await outside(a);
+    const before = { level: a.you.level, inv: items(a.you) };
+    mode(a, { action: "giveall" });
+    await until("kit", () => [...a.you.hotbar, ...a.you.backpack].filter(Boolean).length > 10);
+    a.send("admin", { cmd: "damage", args: { target: a.id, amount: 100_000 } });
+    await until("over", () => a.you.adminMode?.session === false);
+    expect(a.count("death")).toBe(0);
+    expect(me(a).hp).toBe(me(a).maxHp);
+    expect(me(a).flags & 32).toBe(0); // PF.DEAD
+    expect(items(a.you)).toBe(before.inv);
+    expect(pileStore.current.list("arcadia")).toEqual([]);
+    expect(loadCharacter(db, "faller")!.level).toBe(before.level);
+  });
+
+  it("a tester can't hurt other players and earns no medals; after Back to normal the same shots land", async () => {
+    const a = await bot("pvp_tester", "arcadia", "admin", { starter: 3 });
+    ensureAccount(db, "bystander");
+    const p = await bot("bystander", "arcadia", "");
+    const at = await outside(a);
+    // A player can't teleport: put the bystander 3 m from the tester by hand, out of protection.
+    const pa = serverRoom(p).actors.get(p.id)!;
+    pa.state.x = pa.lastX = at[0] + 3;
+    pa.state.y = pa.lastY = at[1];
+    pa.state.z = pa.lastZ = at[2];
+    pa.protectedUntil = 0;
+    mode(a, { god: true });
+    await until("session", () => a.you.adminMode?.session === true);
+    await waitFor(() => (me(p).flags & 3) === 0); // outside the ring, unprotected
+    const hp = me(p).hp;
+    const o = add([me(a).x, me(a).y, me(a).z], up([me(a).x, me(a).y, me(a).z]), 1.6);
+    const t = add([me(p).x, me(p).y, me(p).z], up([me(p).x, me(p).y, me(p).z]), 1);
+    const d = [t[0] - o[0], t[1] - o[1], t[2] - o[2]];
+    const l = Math.hypot(d[0]!, d[1]!, d[2]!);
+    for (let i = 0; i < 3; i++) {
+      a.send("fire", { slot: 0, ox: o[0], oy: o[1], oz: o[2], dx: d[0]! / l, dy: d[1]! / l, dz: d[2]! / l, t: Date.now() });
+      await sleep(300);
+    }
+    expect(me(p).hp).toBe(hp);
+    const quests = serverRoom(a).systems.find((s): s is QuestSystem => s instanceof QuestSystem)!;
+    expect(quests.award(actorOf(a), "spark")).toBe(false);
+    // Control: once the session is over, the same shots land (PvP outside safe zones is normal).
+    mode(a, { action: "normal" });
+    await until("normal", () => a.you.adminMode?.session === false);
+    for (let i = 0; i < 3 && me(p).hp === hp; i++) {
+      a.send("fire", { slot: 0, ox: o[0], oy: o[1], oz: o[2], dx: d[0]! / l, dy: d[1]! / l, dz: d[2]! / l, t: Date.now() });
+      await sleep(300);
+    }
+    expect(me(p).hp).toBeLessThan(hp);
+  });
+
+  it("losing admin while playing takes the switches and the session away within a couple of seconds", async () => {
+    const a = await bot("demoted", "arcadia", "admin", { starter: 0 });
+    await outside(a);
+    actorOf(a).identity.account = true; // an account identity: checked against the account table
+    const before = { level: a.you.level };
+    mode(a, { action: "maxlevel", fly: true, god: true, speed: true });
+    await until("on", () => a.you.adminMode?.fly === true && me(a).level === LEVEL_CAP);
+    adminCheck.current = (id) => id !== "demoted";
+    await until("revoked", () => a.you.adminMode === undefined && me(a).level === before.level, ADMIN_RECHECK_MS + 3000);
+    expect(me(a).flags & 128).toBe(0); // PF.ADMIN
+    expect(actorOf(a).adminMode).toEqual({ fly: false, god: false, speed: false });
+    mode(a, { fly: true });
+    await sleep(400);
+    expect(actorOf(a).adminMode?.fly).toBe(false);
   });
 });

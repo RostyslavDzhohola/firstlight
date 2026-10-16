@@ -34,18 +34,6 @@ export interface CharacterData {
   worn?: Partial<Record<CosmeticSlot, string>>;
   /** Per-life progress for life-scoped medals and once-per-life eggs (quests lane). */
   life?: LifeProgress;
-  /** Admin mode: the character as it was before Max level / every item, for "Back to normal". */
-  adminBackup?: AdminBackup;
-}
-
-/** What admin mode changes and "Back to normal" puts back. */
-export interface AdminBackup {
-  level: number;
-  xp: number;
-  hotbar: (InvItem | null)[];
-  backpack: (InvItem | null)[];
-  selected: number;
-  worn?: Partial<Record<CosmeticSlot, string>>;
 }
 
 export interface LifeProgress {

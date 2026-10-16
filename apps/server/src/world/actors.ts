@@ -90,6 +90,13 @@ export interface PlayerActor {
   npcFx?: NpcMoveFx;
   /** Admin mode switches (adminMode.ts); they only count while `identity.admin` (adminSwitch). */
   adminMode?: { fly: boolean; god: boolean; speed: boolean };
+  /** Admin test session (adminMode.ts, D-admin-2): the saved character; `char` is the live test one. */
+  adminTest?: { canonical: CharacterData };
+}
+
+/** The character that counts for `a`: the saved one during an admin test session, else the live one (D-admin-2). */
+export function canonicalChar(a: PlayerActor): CharacterData {
+  return a.adminTest?.canonical ?? a.char;
 }
 
 /** Is this admin-mode switch on for `a`? Never for a non-admin, whatever the actor holds. */

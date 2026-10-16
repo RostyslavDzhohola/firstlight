@@ -128,6 +128,8 @@ export class QuestSystem implements RoomSystem {
   private lastLevelCheck = 0;
   /** Boss encounters (NPC id → account id → hurt by the boss since their first hit), for Untouchable. */
   private readonly bossHits = new Map<string, Map<string, { hurt: boolean }>>();
+  /** Bosses an admin in a test session has hit this fight (D-admin-2): their kill counts as assisted. */
+  private readonly testersOnBoss = new Set<string>();
   private restoreBroadcast: (() => void) | null = null;
   /** This copy's key for record restrictions (staged scenes, assisted boss fights; restrictions.ts). */
   private readonly copyKey: string;
@@ -454,7 +456,10 @@ export class QuestSystem implements RoomSystem {
     this.eggs.tickRoom(now);
     // A boss fight that reset or despawned is over: forget its hitters, or a later unrelated admin
     // command would mark the next fight assisted (and Untouchable would span encounters).
-    if (this.bossHits.size && !npcSystemOf(this.room)?.boss?.engaged) this.bossHits.clear();
+    if ((this.bossHits.size || this.testersOnBoss.size) && !npcSystemOf(this.room)?.boss?.engaged) {
+      this.bossHits.clear();
+      this.testersOnBoss.clear();
+    }
     if (now - this.lastSweep >= QUEST_RULES.PILE_SWEEP_MS) {
       this.lastSweep = now;
       for (const [id, list] of this.ops) if (!list.length || now - list[list.length - 1]! >= 1000) this.ops.delete(id);
@@ -756,7 +761,7 @@ export class QuestSystem implements RoomSystem {
    */
   award(a: PlayerActor, medalId: string, deferred?: (() => void)[]): boolean {
     const def = MEDAL_BY_ID.get(medalId);
-    if (!def || a.identity.loadtest) return false;
+    if (!def || a.identity.loadtest || a.adminTest) return false; // nothing permanent from a test session (D-admin-2)
     const q = this.qp(a);
     if (q.medals.has(medalId)) return false; // before official(), which reads the copy state
     if (!STAGE_PROOF.has(medalId) && !this.official()) return false;
@@ -826,7 +831,7 @@ export class QuestSystem implements RoomSystem {
     }
     const assistKey = `${a.identity.userId}|${eggId}`;
     const helped = this.assistedEggs.has(assistKey);
-    const eligible = !opts.assisted && !helped && this.official({ boss: !!egg.extra });
+    const eligible = !opts.assisted && !helped && !a.adminTest && this.official({ boss: !!egg.extra });
     const events: (() => void)[] = [];
     let first = false;
     // Item, offering, life flag, medal and first-finder reservation share the reward transaction.
@@ -927,8 +932,10 @@ export class QuestSystem implements RoomSystem {
     if (!e.bossId) return;
     const medal = e.bossId === "tidewrath" ? "tide_turner" : e.bossId === "hollow_king" ? "regicide" : "decommissioned";
     const eligible = (e.creditIds ?? (e.killerId ? [e.killerId] : [])).map((id) => this.actor(id)).filter((a): a is PlayerActor => !!a);
-    if (!this.official({ boss: true })) {
+    // An admin test session in the fight (D-admin-2) makes it assisted too.
+    if (!this.official({ boss: true }) || eligible.some((a) => a.adminTest) || this.testersOnBoss.has(e.npcKind)) {
       // Staged scene or admin-assisted fight: loot as usual, but nothing permanent.
+      this.testersOnBoss.delete(e.npcKind);
       this.bossHits.delete(e.npcKind);
       for (const a of eligible) {
         this.life(a).unofficial = true; // the boss's XP and loot came with admin help
@@ -974,6 +981,7 @@ export class QuestSystem implements RoomSystem {
         let enc = this.bossHits.get(key);
         if (!enc) this.bossHits.set(key, (enc = new Map()));
         if (!enc.has(a.identity.userId)) enc.set(a.identity.userId, { hurt: false });
+        if (a.adminTest) this.testersOnBoss.add(key);
       }
       // Long Shot on an NPC: this hit killed it, from a Stillshot that just fired, 120 m or more away.
       const npc = this.room.npcActors.get(e.targetId);

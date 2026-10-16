@@ -15,8 +15,8 @@ export interface AdminModeState {
   fly: boolean;
   god: boolean;
   speed: boolean;
-  /** Max level / items were applied: "Back to normal" restores the saved character. */
-  backup: boolean;
+  /** In a test session (D-admin-2): nothing earned is kept; "Back to normal" ends it. */
+  session: boolean;
 }
 
 export type AdminToggle = "fly" | "god" | "speed";

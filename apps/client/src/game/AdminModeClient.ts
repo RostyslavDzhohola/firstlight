@@ -11,11 +11,10 @@ import { pauseExtras, type PauseExtra } from "../ui/menu.ts";
 import type { Game } from "./Game.ts";
 import type { ClientSystem } from "./systems.ts";
 
-/** The badge text for a mode: "ADMIN · FLY · GOD · ×2", or null when nothing is on or changed. */
+/** The badge text: "ADMIN TEST · FLY · GOD · ×2" during a test session, else null. */
 export function adminBadge(m: AdminModeState | undefined): string | null {
-  if (!m) return null;
-  const parts = [m.fly && "FLY", m.god && "GOD", m.speed && `×${ADMIN_MODE.speedMult}`, m.backup && "TEST KIT"].filter(Boolean);
-  return parts.length ? ["ADMIN", ...parts].join(" · ") : null;
+  if (!m || (!m.session && !m.fly && !m.god && !m.speed)) return null;
+  return ["ADMIN TEST", m.fly && "FLY", m.god && "GOD", m.speed && `×${ADMIN_MODE.speedMult}`].filter(Boolean).join(" · ");
 }
 
 export class AdminModeClient implements ClientSystem {

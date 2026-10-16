@@ -833,3 +833,16 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   what's on. The one-time claim (`/admin/claim`, a form posting `ADMIN_CLAIM_TOKEN`) now accepts a
   guest account too (admins are never pruned as guests). Non-admin movement rules are unchanged, so
   no protocol bump. Why: the owner wants to inspect the game fast and can't sign in by email yet.
+- **D-admin-2 (2026-10-15):** test state is never canonical (Codex security review of D-admin-1).
+  Any admin-mode command starts a test session that keeps the character as it was; saves, account
+  merges, the leaderboard and analytics only ever see that one (`canonicalChar`), never the boosted
+  live one, and nothing is persisted for a later "back to normal". Nothing leaves a session: no
+  drops, pickups or piles, no damage to other players, no medals, egg credit or Hall of Firsts, and
+  a boss fight a tester hit counts as assisted. It ends with Back to normal, leaving the world
+  (travel, closing the game, another window, a merge, a kick), dying (no death and no pile: the real
+  character comes back at full health) or losing admin, which the server checks against the account
+  on every admin command and every 2 s. The claim is POST only, from the game's origin (through the
+  proxy when an origin secret is set), limited to 5 tries per client IP per 10 minutes and 30 an
+  hour overall before any comparison, and a token under 32 random bytes switches it off. Why: admin
+  powers must not leak into the economy, the boards or other players, and a revoked admin must lose
+  them while connected.

@@ -30,7 +30,7 @@ export class AdminPanel extends Panel {
   }
 
   private state(): AdminModeState {
-    return this.you()?.adminMode ?? { fly: false, god: false, speed: false, backup: false };
+    return this.you()?.adminMode ?? { fly: false, god: false, speed: false, session: false };
   }
 
   render() {
@@ -38,7 +38,9 @@ export class AdminPanel extends Panel {
     const b = this.box;
     b.innerHTML = "";
     el("h2", "", b, "ADMIN MODE");
-    el("p", "sub", b, "Only for admins; the server checks every switch. Back to normal puts your character back as it was.");
+    el("p", "sub", b, m.session
+      ? "Test session: nothing you earn is kept, and nothing leaves it (no drops, pickups, PvP or medals). Back to normal ends it, and so do travelling, closing the game or dying."
+      : "Only for admins; the server checks every switch. Any switch starts a test session: your real character is kept safe and comes back with Back to normal.");
     const body = el("div", "body", b);
 
     for (const [k, name, text] of TOGGLES) {
@@ -63,7 +65,7 @@ export class AdminPanel extends Panel {
     };
     action("Max level", "The level cap and full health: every tier unlocks.", "maxlevel", "Apply");
     action("Every item", "One of every item in your hotbar and backpack (best tier for your level).", "giveall", "Fill");
-    action("Back to normal", m.backup ? "Switches off, and your level and items as they were." : "Switches off.", "normal", "Restore");
+    action("Back to normal", "Ends the test session: switches off, your character as it was.", "normal", "Restore");
 
     // The armoury: any item at any tier into your hand; a cosmetic goes on.
     el("h3", "", body, "Armoury").style.margin = "1em 0 .3em";

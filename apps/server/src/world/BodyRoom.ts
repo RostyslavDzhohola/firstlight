@@ -27,6 +27,7 @@ import { emitGameEvent, npcKindOf } from "./events.ts";
 import { emitPileEvent, onPileEvent, pileStore, type PileData, type PileKind } from "./piles.ts";
 import { SYSTEM_FACTORIES, type RoomSystem } from "./systems.ts";
 import { voiceItemHidden } from "./voice/index.ts";
+import { endTestSession, inTestSession, stillAdmin } from "./adminMode.ts";
 import { supportOf } from "./support.ts";
 import { identityCheck, storageRecovery, ticketFor, travelRedirect } from "./admission.ts";
 import { pendingSeats } from "./reservations.ts";
@@ -386,7 +387,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     const prev = hub.get(auth.userId);
     const old = prev?.actor ?? null;
     if (prev) {
-      char = prev.actor.char;
+      // The saved character, not a test session's live one (D-admin-2): a takeover ends the session.
+      char = prev.actor.adminTest ? structuredClone(prev.actor.adminTest.canonical) : prev.actor.char;
       inheritedCombat = prev.actor.combatUntil > now && !prev.actor.dead;
       if (prev.actor.state && !prev.actor.dead) inheritedPos = [prev.actor.state.x, prev.actor.state.y, prev.actor.state.z];
       prev.room.saveActor(prev.actor);
@@ -554,6 +556,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     this.msgWindows.delete(a.id);
     this.badMessages.delete(a.id);
     liveSessions.unregister(a.identity.userId, a.id);
+    // Leaving this world (travel, closing the game, another window, a merge, a kick) ends an admin
+    // test session: whatever stays behind (a lingering body, the last save) is the real character.
+    if (a.adminTest) endTestSession(this, a, "left");
     for (const s of this.systems) {
       try {
         s.onPlayerLeave?.(a.id);
@@ -793,6 +798,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
   pickup(a: PlayerActor | undefined, pileId: string, itemIndex?: number) {
     if (!a || a.dead || a.identity.loadtest || this.metadata?.loadtest) return;
+    // A test session takes nothing from the world (it would vanish at Back to normal; D-admin-2).
+    if (inTestSession(a)) return void a.client.send("denied", { action: "pickup", reason: "test session" });
     const pile = pileStore.current.get(pileId);
     if (!pile || pile.body !== this.bodyDef.id) return;
     if (dist3([pile.x, pile.y, pile.z], actorPos(a)) > RULES.PICKUP_RANGE) return;
@@ -840,6 +847,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (!item) return;
     // The radio is hidden while voice is off: it never lands on the ground (D-controls-1).
     if (voiceItemHidden(item.id)) return void a.client.send("denied", { action: "drop", reason: "off" });
+    // Nothing from a test session reaches the world (D-admin-2).
+    if (inTestSession(a)) return void a.client.send("denied", { action: "drop", reason: "test session" });
     const pos = actorPos(a);
     const f: V3 = [a.state.fx, a.state.fy, a.state.fz];
     const events: (() => void)[] = [];
@@ -890,7 +899,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
    * count toward the body's cap (F12 final Opus SF4).
    */
   createPile(owner: PlayerActor, items: InvItem[], coins: number, at: V3, deferred?: (() => void)[], opts: { kind?: PileKind; ttlMs?: number } = {}): PileData | null {
-    if (owner.identity.loadtest || this.metadata?.loadtest) return null;
+    if (owner.identity.loadtest || this.metadata?.loadtest || inTestSession(owner)) return null;
     const g = this.snapToGround(at);
     const { pile, evicted } = pileStore.current.add({
       body: this.bodyDef.id,
@@ -959,6 +968,15 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   }
 
   kill(victim: PlayerActor, killer: PlayerActor | NpcActor | null) {
+    // Dying in a test session isn't a death: no pile, no lost life; the saved character comes back
+    // at full health where it stands (D-admin-2).
+    if (inTestSession(victim)) {
+      endTestSession(this, victim, "died");
+      victim.state.hp = victim.state.maxHp;
+      victim.client.send("toast", { text: "Test session over: you'd have died. Back to normal, nothing lost.", kind: "warn" });
+      this.saveActor(victim);
+      return;
+    }
     const now = Date.now();
     victim.dead = true;
     victim.diedAt = now;
@@ -1099,7 +1117,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
   admin(client: Client, cmd: string, args: Record<string, unknown>) {
     const a = this.actors.get(client.sessionId);
-    if (!a || !a.identity.admin) return;
+    // Asked of the account each time (adminMode.ts): a revoked admin's commands stop at once.
+    if (!a || !stillAdmin(this, a)) return;
     emitGameEvent(this, { type: "admin", playerId: a.id, cmd, ...(typeof args.target === "string" ? { targetId: args.target } : {}) });
     // Numbers must be finite, integers where counts are meant, and in range (F12 S14). A bad
     // argument refuses the whole command; a missing one takes the default.
@@ -1311,6 +1330,14 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
   saveActor(a: PlayerActor) {
     if (a.superseded || a.identity.loadtest) return;
+    // A test session saves the character it started from, standing on the ground where the tester
+    // is (never the live, boosted one; D-admin-2).
+    if (a.adminTest) {
+      const c = a.adminTest.canonical;
+      if (!a.dead) c.pos = this.snapToGround([a.state.x, a.state.y, a.state.z]);
+      characterRepo.current.save(a.identity.userId, c);
+      return;
+    }
     if (!a.dead) a.char.pos = [a.state.x, a.state.y, a.state.z];
     // Inside a reward transaction the character may be levels ahead of the synced state, whose HP
     // rises only after the commit (showLevel). Save the HP it will show, so a crash in between
