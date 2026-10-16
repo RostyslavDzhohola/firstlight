@@ -126,7 +126,7 @@ function onboardingFrame(toggle: () => void) {
     hasLast: false,
     portals: [],
     phrased: false,
-    doneUntil: 0,
+    doneTimer: { running: false, start() {}, stop() {}, tick: () => false },
   });
   (fake as { update(dt: number, now: number): void }).update(1 / 60, performance.now());
   game.input.endFrame();
