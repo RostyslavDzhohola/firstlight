@@ -11,6 +11,7 @@ import {
   type StructureSolid,
 } from "./sites.ts";
 import { createTerrain, type Terrain } from "./terrain.ts";
+import { deepWater, SWIM_FLOAT } from "./water.ts";
 import { townDir, townFrame, type TownPlacement } from "./townFrame.ts";
 
 const PLANETS: OutpostBody[] = ["arcadia", "hollowmere", "meridian"];
@@ -159,7 +160,7 @@ describe("structure sites: frames", () => {
         // The boats float on the water; the docks' land end is on the shore. The outpost wall's pieces
         // (round 2) stand on the highest ground under them, their foundations 4 m deep (design.py WALL_SKIRT).
         if (pre.name.endsWith("_skiff") || pre.name.endsWith("_rowboat")) continue;
-        const ring = /_ring(wall|post|gate)$/.test(pre.name);
+        const ring = /_ring(wall|post|gate|sea)$/.test(pre.name);
         expect(Math.abs(base - g), `${b} ${pre.name}`).toBeLessThan(ring ? 3.9 : pre.name.endsWith("_jetty") || pre.name.endsWith("_boardwalk") ? 1.6 : 1.2);
         if (ring) for (const sol of pre.solids) expect(sol[5], `${b} ${pre.name} foundation`).toBeLessThanOrEqual(-4);
       }
@@ -326,6 +327,51 @@ describe("structure sites: the outposts keep clear of everything authoritative",
       const hit = structureCollider(t).raycast(ox, oy, oz, dx / l, dy / l, dz / l, l);
       expect(hit, name).toBeLessThan(l);
       expect(structureCollider(t).blocks(ox, oy, oz, tx, ty, tz)).toBe(true);
+    }
+  });
+});
+
+describe("the walled outposts' wall rings (D-b2-1)", () => {
+  it("are closed: walking, wading or swimming, only the gates cross a ring", () => {
+    for (const b of PLANETS) {
+      const t = terrains.get(b)!;
+      const R = t.body.radius;
+      const water = t.body.waterLevel;
+      const a = outpostAnchor(t);
+      const c = structureCollider(t);
+      const wall = OUTPOSTS[b].wall;
+      // Feet where a player stands at (east, north): on the ground (wading in the shallows), or
+      // floating SWIM_FLOAT under the surface in deep water.
+      const feet = (e: number, n: number): [number, number, number] => {
+        const d = siteDir(a, e, n, R);
+        const g = t.groundHeight(d[0], d[1], d[2]);
+        const r = R + (deepWater(g, water) ? water - SWIM_FLOAT : g) + 0.02;
+        return [d[0] * r, d[1] * r, d[2] * r];
+      };
+      // A gate's opening is 4.2 m: its middle (less the player's radius each side) is the way in; a
+      // crossing whose line runs over a tower (2.1 m and more off the gate's centre) is shut.
+      const lateral = (bearing: number) => Math.min(...wall.gates.map((g) => (Math.abs(((bearing - g + 540) % 360) - 180) * Math.PI) / 180)) * wall.radius;
+      let through = 0, wet = 0;
+      for (let k = 0; k < 360 * 4; k++) {
+        const bearing = k / 4;
+        const rad = (bearing * Math.PI) / 180;
+        const at = (m: number) => feet(Math.sin(rad) * m, Math.cos(rad) * m);
+        const out = at(wall.radius + 1.6), inn = at(wall.radius - 1.6);
+        const mid = siteDir(a, Math.sin(rad) * wall.radius, Math.cos(rad) * wall.radius, R);
+        if (t.groundHeight(mid[0], mid[1], mid[2]) < water + 0.2) wet++;
+        const off = lateral(bearing);
+        if (off > 2.1 - PLAYER_BODY.radius - 0.1 && off < 2.2) continue; // the opening's edge
+        const inGate = off <= 2.1 - PLAYER_BODY.radius - 0.1;
+        const crosses = c.crosses(...out, ...inn);
+        if (inGate) {
+          expect(crosses, `${b} gate ${bearing}°: the passage is open`).toBe(false);
+          through++;
+        } else {
+          expect(crosses, `${b} ${bearing}°: the ring is closed (${t.groundHeight(mid[0], mid[1], mid[2]).toFixed(2)} m ground)`).toBe(true);
+        }
+      }
+      expect(through, b).toBeGreaterThan(0);
+      expect(wet, `${b}: the ring crosses water or shallows somewhere`).toBeGreaterThan(0);
     }
   });
 });

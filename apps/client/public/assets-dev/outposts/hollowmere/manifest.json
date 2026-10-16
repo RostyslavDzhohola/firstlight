@@ -1,11 +1,11 @@
 {
- "version": "65c55d58c2eb6e8e",
+ "version": "acbc360e23a32058",
  "body": "hollowmere",
  "files": {
   "glb": {
    "name": "hollowmere.glb",
-   "bytes": 351540,
-   "sha256": "0b6a1b57221ec05b7a65e922cd235b51402e2ed17e1d8cbb5b37ceb3be750de5"
+   "bytes": 353644,
+   "sha256": "48a41cbe74ed2b8311c7fbc6084201c70158cca34862db9e78e04619a482c7a2"
   },
   "color": {
    "name": "../../portus/portus_color.webp",
@@ -771,7 +771,7 @@
  "look": {
   "albedoFloor": 0.045
  },
- "prefabs": 20,
- "items": 133,
- "trianglesLod0": 21731
+ "prefabs": 21,
+ "items": 147,
+ "trianglesLod0": 21871
 }

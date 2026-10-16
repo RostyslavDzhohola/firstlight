@@ -1,11 +1,11 @@
 {
- "version": "84fca54863ac09f8",
+ "version": "f12bc3ff6fc02884",
  "body": "arcadia",
  "files": {
   "glb": {
    "name": "arcadia.glb",
-   "bytes": 669964,
-   "sha256": "49270287dd3db40136d6865c688a68684ee23a550efddbf8fe8810933d36153d"
+   "bytes": 672076,
+   "sha256": "b1353a848af2ff5289a4258e229d2b69486928493cb7493303bff0b88da66f7c"
   },
   "color": {
    "name": "../../portus/portus_color.webp",
@@ -771,7 +771,7 @@
  "look": {
   "albedoFloor": 0.0
  },
- "prefabs": 25,
- "items": 71,
- "trianglesLod0": 30014
+ "prefabs": 26,
+ "items": 98,
+ "trianglesLod0": 30322
 }

@@ -970,6 +970,8 @@ def resolve_bases():
             it["base_h"] = PADH
         elif it["base"] == "max":
             it["base_h"] = max(hs) - 0.05
+        elif it["base"] == "maxwater":   # round 2 ring pieces: on the highest ground, never under water
+            it["base_h"] = max(max(hs) - 0.05, WATER)
         elif it["base"] == "min":
             it["base_h"] = min(hs)
         else:
@@ -2194,6 +2196,8 @@ WALL_T = 0.8            # thickness
 GATE_W = 7.0            # the gate prefab's length along the ring (opening 4.2 m)
 GATE_OPEN = 4.2
 WALL_SKIRT = 4.0        # the wall goes this far below its base (it stands on the highest ground under it)
+SEA_H = 2.4             # a wall stretch over water: its top this far over its base (the water or the shore)
+SEA_SKIRT = 5.0         # ...and down to the lake bed (the rings' water is at most 3.4 m deep)
 
 def keep_r2_colors(p, cls, note):
     return finish(p, cls, note, keep_colors=True)
@@ -2265,15 +2269,25 @@ def build_walls():
     p = P.Prefab(name, lod="wall segment")
     mb = p.mb
     if BODY == "meridian":
-        # (Low tier budget: the glow is the cap's top, a teal line along the wall at night.)
-        box(mb, -L / 2, -t, -WALL_SKIRT, L / 2, t, H, "MI_Trim_01", skip=("-z",))
-        box(mb, -L / 2 - 0.02, -t - 0.08, H, L / 2 + 0.02, t + 0.08, H + 0.18, "MI_Trim_03", skip=("-z",), top=("M_GlowTeal", "planar", None))
+        # (Low tier budget: one box; its top glows, a teal line along the wall at night.)
+        box(mb, -L / 2, -t, -WALL_SKIRT, L / 2, t, H + 0.18, "MI_Trim_01", skip=("-z",), top=("M_GlowTeal", "planar", None))
     else:
         mat = "MI_RockTrim" if BODY == "arcadia" else "MI_UnevenBrick"
         box(mb, -L / 2, -t, -WALL_SKIRT, L / 2, t, H, mat, mode="band" if mat == "MI_RockTrim" else "planar", band="field" if mat == "MI_RockTrim" else None, skip=("-z",))
         box(mb, -L / 2 - 0.02, -t - 0.1, H, L / 2 + 0.02, t + 0.1, H + 0.22, "MI_RockTrim", mode="band", band="slab", skip=("-z",))
     sbox(name, -L / 2, -t, L / 2, t, -WALL_SKIRT, H + 0.2)   # down to the skirt: no gap under it on a slope
     finish(p, "static", "outpost wall segment (round 2)")
+    # ---- over water and shallows: a lower sea wall from the lake bed, the ring stays closed (only the
+    # gates cross it: a wader or a swimmer meets it too)
+    name = f"{B}_ringsea"
+    p = P.Prefab(name, lod="sea wall segment")
+    mb = p.mb
+    if BODY == "meridian":
+        box(mb, -L / 2, -t, -SEA_SKIRT, L / 2, t, SEA_H, "MI_Trim_01", skip=("-z",), top=("M_GlowTeal", "planar", None))
+    else:
+        box(mb, -L / 2, -t, -SEA_SKIRT, L / 2, t, SEA_H, "MI_RockTrim", mode="band", band="field", skip=("-z",), top=("MI_RockTrim", "band", "slab"))
+    sbox(name, -L / 2, -t, L / 2, t, -SEA_SKIRT, SEA_H)
+    finish(p, "static", "outpost sea wall segment (round 2): over water and shallows")
     # ---- post (at the joints: hides height steps between segments)
     name = f"{B}_ringpost"
     p = P.Prefab(name, lod="wall post")
@@ -2355,43 +2369,47 @@ def build_shop():
     finish(p, "prop", "shop stall (round 2): the vendor stands behind the counter, the buyer at its front")
 
 def wall_ring():
-    """The wall round the outpost: each arc between two gates split into equal runs of segments (their
-    ends tucked 0.3 m into the gate towers, neighbours overlapping a little), segments over water left
-    out (the lake shore closes the ring there), posts on the joints, the gates on their bearings."""
+    """The wall round the outpost, closed but for its gates: each arc between two gates split into
+    equal runs of segments (their ends tucked 0.3 m into the gate towers, neighbours overlapping a
+    little); over water and shallows a lower sea wall from the lake bed instead, so nobody wades or
+    swims in round a gate. Posts on the joints of the land walls; the gates on their bearings. Every
+    ring piece stands on the highest ground under it, never under the water."""
     R_, gates = WALL["radius"], sorted(WALL["gates"])
     def at(b, r=R_):
         a = math.radians(b)
         return math.sin(a) * r, math.cos(a) * r
     def wet(b0, b1):
-        for t in (0.0, 0.5, 1.0):
-            for dr in (-WALL_T / 2 - 0.3, WALL_T / 2 + 0.3):
+        for t in (0.0, 0.25, 0.5, 0.75, 1.0):
+            for dr in (-WALL_T / 2 - 0.3, 0.0, WALL_T / 2 + 0.3):
                 e, n_ = at(b0 + (b1 - b0) * t, R_ + dr)
                 if ground(e, n_) < WATER + 0.2:
                     return True
         return False
     tuck = math.degrees((GATE_W / 2 - 0.3) / R_)
-    joints = []
     for i, g in enumerate(gates):
         g1 = gates[(i + 1) % len(gates)] + (360.0 if i == len(gates) - 1 else 0.0)
         b0, b1 = g + tuck, g1 - tuck
         arc = math.radians(b1 - b0) * R_
         n = max(1, math.ceil(arc / (WALL_SEG - 0.05)))
         step = (b1 - b0) / n
+        kinds = [wet(b0 + k * step, b0 + (k + 1) * step) for k in range(n)]
         for k in range(n):
-            s0, s1 = b0 + k * step, b0 + (k + 1) * step
-            if wet(s0, s1):
+            mid = b0 + (k + 0.5) * step
+            e, n_ = at(mid)
+            if kinds[k]:
+                put(f"{B}_ringsea", e, n_, (-mid) % 360.0, base="maxwater", water=True, label="sea wall")
+            else:
+                put(f"{B}_ringwall", e, n_, (-mid) % 360.0, base="maxwater", label="wall")
+        # Posts between two neighbours unless both are sea wall (it runs on unbroken over the water).
+        for k in range(n - 1):
+            if kinds[k] and kinds[k + 1]:
                 continue
-            e, n_ = at((s0 + s1) / 2)
-            put(f"{B}_ringwall", e, n_, (-(s0 + s1) / 2) % 360.0, base="max", label="wall")
-            for jb, inner in ((s0, k == 0), (s1, k == n - 1)):
-                if not inner:
-                    joints.append(jb % 360.0)
-    for jb in sorted(set(round(j, 4) for j in joints)):
-        e, n_ = at(jb)
-        put(f"{B}_ringpost", e, n_, (-jb) % 360.0, base="max", label="wall post")
+            jb = (b0 + (k + 1) * step) % 360.0
+            e, n_ = at(jb)
+            put(f"{B}_ringpost", e, n_, (-jb) % 360.0, base="maxwater", water=kinds[k] or kinds[k + 1], label="wall post")
     for g in gates:
         e, n_ = at(g)
-        put(f"{B}_ringgate", e, n_, (-g) % 360.0, base="max", label="wall gate")
+        put(f"{B}_ringgate", e, n_, (-g) % 360.0, base="maxwater", label="wall gate")
 
 def gate_path(g, inner_pts, width=2.4, mat="MI_RockTrim"):
     """A path from just outside a wall gate in to `inner_pts` (site east/north)."""
@@ -2442,6 +2460,9 @@ def layout_round2():
         gate_path(75.0, [(29.0, 5.0), (19.0, 3.2), (10.5, 2.5)], 1.8, mat="MI_UnevenBrick")
         gate_path(195.0, [(-8.0, -24.0), (-7.2, -6.6)], 1.8, mat="MI_UnevenBrick")
     else:
+        # A signpost out in the fields by the south gate's path (the way back in), the one slim post
+        # outside the walls (server tests: a creep with its target just behind a post).
+        put("a_signpost", 3.2, -38.5, face_pad(3.2, -38.5), label="gate signpost")
         gate_path(359.0, [(-1.6, 29.0)], 2.2)
         gate_path(110.0, [(16.0, -11.0), (8.2, -12.2)], 2.0)
         gate_path(180.0, [(-0.6, -22.0), (-1.6, -12.0)], 2.0)

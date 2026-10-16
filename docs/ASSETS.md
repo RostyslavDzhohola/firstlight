@@ -129,21 +129,21 @@ Our own work in these files (CC BY 4.0, "FIRSTLIGHT contributors"): the three la
 platforms and aprons, the windmill, sheepfold, shrines, jetty, boardwalk, skiff, bell frame,
 graveyard stones, lantern posts, relay mast, condenser, fuel island, solar canopy, kiosk, pylons,
 billboard, the waystones, the hex glyph and stencil lettering, the glow materials and the path
-decals (built on the client from the shared path data); round 2 (below): the outpost walls, wall
-gates and shop stalls, the portal gates, Waystation Nine and the stilt shelter. The build scripts are MIT.
+decals (built on the client from the shared path data); round 2 (below): the outpost walls, sea
+walls, wall gates, the gate signpost and shop stalls, the portal gates, Waystation Nine and the stilt shelter. The build scripts are MIT.
 
 Shipped output (2026-10-15 round-2 build; Arcadia and Hollowmere add nothing to the Portus strips they share):
 
 | File | Bytes | SHA-256 | Contents |
 |---|---:|---|---|
-| `outposts/arcadia/arcadia.glb` | 669,964 | `49270287dd3db40136d6865c688a68684ee23a550efddbf8fe8810933d36153d` | 25 prefabs, 2 materials; 30,014 triangles as laid out at LOD0 |
-| `outposts/arcadia/manifest.json` | 8,831 | `ec75989f154389d5d57406c115f95b16b5944d14a19279ff247089557472fc62` | files (strips: `../../portus/`), slots, look, layout version |
-| `outposts/hollowmere/hollowmere.glb` | 351,540 | `0b6a1b57221ec05b7a65e922cd235b51402e2ed17e1d8cbb5b37ceb3be750de5` | 20 prefabs, 2 materials; 21,731 triangles at LOD0 |
-| `outposts/hollowmere/manifest.json` | 8,856 | `ac226e7115b51727b5aad21842b8c7a563d243c1e6b4ea5a155921c961fa34e9` | as above, albedo floor 0.045 |
-| `outposts/meridian/meridian.glb` | 263,676 | `533615e01acf68ab23af336e168fd680519250fac97087f772feffe2e4a14701` | 17 prefabs, opaque only; 21,663 triangles at LOD0 |
+| `outposts/arcadia/arcadia.glb` | 672,076 | `b1353a848af2ff5289a4258e229d2b69486928493cb7493303bff0b88da66f7c` | 26 prefabs, 2 materials; 30,322 triangles as laid out at LOD0 |
+| `outposts/arcadia/manifest.json` | 8,831 | `40f0e37407a3c469c4d69c83791fc590b2dd69770e9258d23f9a9f4176e6f184` | files (strips: `../../portus/`), slots, look, layout version |
+| `outposts/hollowmere/hollowmere.glb` | 353,644 | `48a41cbe74ed2b8311c7fbc6084201c70158cca34862db9e78e04619a482c7a2` | 21 prefabs, 2 materials; 21,871 triangles at LOD0 |
+| `outposts/hollowmere/manifest.json` | 8,856 | `a50f3b486bef397f3d6805ca385be7cb4112a6cc7dfd710518c964db56a3fcfd` | as above, albedo floor 0.045 |
+| `outposts/meridian/meridian.glb` | 264,164 | `9b87dc02be626a7994ec834a0e91270ab358215b237e0257d8c81ab5437cc50a` | 18 prefabs, opaque only; 21,333 triangles at LOD0 |
 | `outposts/meridian/meridian_color.webp` | 80,498 | `027578b27bf9067bd4cc20ed252408a7efd8827527334a809b4e7a2f403e355b` | 9 colour layers of 512² |
 | `outposts/meridian/meridian_normal.webp` | 144,758 | `528c7e8e4b90396513bce17a9afd1c38dac89a60b5635c8791a82b86c530d32c` | the same 9 layers' normals |
-| `outposts/meridian/manifest.json` | 6,116 | `f6b74b0e6bcffffda968e0296e920b02678364c1e3eca5a28c7c5a17acf09196` | files, slots (with the `OK_*` slots), look, layout version |
+| `outposts/meridian/manifest.json` | 6,116 | `d72155d7ff262158e6ac8a08a75495552582678c7a69aeeb54fa72e23ff76248` | files, slots (with the `OK_*` slots), look, layout version |
 
 The layouts, paths and collider solids ship as code from the same build:
 `packages/shared/src/content/padOutposts.ts`.

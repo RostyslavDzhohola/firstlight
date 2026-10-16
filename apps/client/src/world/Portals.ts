@@ -11,10 +11,10 @@ import { atan, float, length, materialColor, mix, positionLocal, sin, smoothstep
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { BODIES, padDirs, PAD_SAFE_RADIUS, portalSpots, TOWN_SAFE, type BodyId, type PortalSpot, type Terrain } from "@firstlight/shared";
 import { OUTPOSTS, type OutpostBody } from "@firstlight/shared/content/padOutposts";
-import { placeSiteItem, siteAnchor, siteDir } from "@firstlight/shared/planet/sites";
 import { townDir, townFrame, type TownPlacement } from "@firstlight/shared/planet/townFrame";
 import { atmo } from "../render/atmosphere.ts";
 import { disposeTree } from "../render/dispose.ts";
+import { outpostGateStrips } from "./gateStrips.ts";
 import { portalAt } from "./portalEntry.ts";
 
 export const PORTAL_COLORS: Record<BodyId, number> = {
@@ -176,20 +176,11 @@ export class Portals {
       // its own; the border is drawn across the gate passages instead, like Portus'.
       const wall = OUTPOSTS[body as OutpostBody]?.wall;
       if (wall) {
-        const a = siteAnchor(pads[0]!);
-        const strips: THREE.BufferGeometry[] = [];
-        const f: TownPlacement = { item: -1, prefab: -1, scale: 1, px: 0, py: 0, pz: 0, rx: 0, ry: 0, rz: 0, ux: 0, uy: 0, uz: 0, fx: 0, fy: 0, fz: 0 };
-        for (const bearing of wall.gates) {
-          const b = (bearing * Math.PI) / 180;
-          const east = Math.sin(b) * wall.radius, north = Math.cos(b) * wall.radius;
-          const d = siteDir(a, east, north, R);
-          placeSiteItem(a, east, north, -bearing, R, R + terrain.groundHeight(d[0], d[1], d[2]) + 0.03, f); // right = along the wall
-          const m = new THREE.Matrix4().makeBasis(new THREE.Vector3(f.rx, f.ry, f.rz), new THREE.Vector3(f.ux, f.uy, f.uz), new THREE.Vector3(f.fx, f.fy, f.fz));
-          m.setPosition(f.px, f.py, f.pz);
-          strips.push(new THREE.BoxGeometry(3.9, 0.05, 0.22).applyMatrix4(m));
-        }
-        const border = new THREE.Mesh(mergeGeometries(strips, false)!, ringMat);
-        for (const g of strips) g.dispose();
+        // Draped on the terrain across each gate passage, over the gate's path (gateStrips.ts).
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.BufferAttribute(outpostGateStrips(body as OutpostBody, terrain), 3));
+        const border = new THREE.Mesh(geo, ringMat);
+        border.name = "outpost_gate_border";
         this.group.add(border);
         this.cullables.push({ obj: border, at: new THREE.Vector3(...pads[0]!).multiplyScalar(R) });
       }

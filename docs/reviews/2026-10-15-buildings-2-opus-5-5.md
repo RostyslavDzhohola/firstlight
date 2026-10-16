@@ -20,20 +20,20 @@ checks); the check list is at the end. Renders for the owner: `/tmp/fl-go/shots/
 ## Numbers
 
 Shipped bytes (≤ 6 MB Portus, ≤ 2 MB per planet): Portus 2,272,812 (was 2,797,910 in ASSETS; the
-round-1 build had 2,369,240 for the GLB alone); Arcadia 678,795 own files, Hollowmere 360,396,
-Meridian 495,048.
+round-1 build had 2,369,240 for the GLB alone); Arcadia 680,907 own files, Hollowmere 362,500,
+Meridian 495,536.
 
 LOD0 triangles as laid out: Portus 186,890 (houses 4,710–5,010 each, LOD1 3,664–3,964; gates 3,304);
-Arcadia 30,014, Hollowmere 21,731, Meridian 21,663.
+Arcadia 30,322, Hollowmere 21,871, Meridian 21,333.
 
 Draws and triangles at the arrival views (tests `world/portusTown.test.ts`, `world/outpostTown.test.ts`):
 
 | Site | Medium / High / Ultra | Low (≤ 25k on the planets) |
 |---|---|---|
 | Portus spawn views | 2 draws, 190.8k; shadow 2 draws, 157.5k | 2 draws, 141.0k |
-| Arcadia | 2 draws, 32.3k; shadow 2 draws, 25.0k | 2 draws, 22.7k |
-| Hollowmere | 2 draws, 24.6k; shadow 2 draws, 21.3k | 2 draws, 24.6k |
-| Meridian | 1 draw, 24.6k; shadow 1 draw, 21.6k | 1 draw, 24.6k |
+| Arcadia | 2 draws, 32.6k; shadow 2 draws, 25.3k | 2 draws, 23.0k |
+| Hollowmere | 2 draws, 24.7k; shadow 2 draws, 21.4k | 2 draws, 24.7k |
+| Meridian | 1 draw, 24.3k; shadow 1 draw, 21.2k | 1 draw, 24.3k |
 
 Low on Hollowmere and Meridian is close to the 25k cap: the wall posts lost their lanterns and
 Meridian's wall its mid glow strip (the cap tops glow instead) to get there. The gate A membrane is
@@ -64,6 +64,30 @@ Shop keepers (`SHOP_SPOTS`, world metres): Arcadia `[271.0583, 420.186, -17.8155
   textures loaded) gate B and the shelter sampled a kit texture; it now reads only the imported
   GLB's own materials. The outposts were rebuilt (Arcadia's gate is pale stone again, the shelter
   violet), shipped files and ASSETS hashes updated, outpost tests 150/150.
+
+## Codex review round 1 (gpt-6.1-sol, approve after fixes)
+
+- **Should-fix, fixed: the rings were open over water and shallows.** Segments over water were
+  dropped, so Meridian's shallows at 49–62° (≤ 0.1 m deep) were walked across with no corrections,
+  and back in while tagged. Now every stretch of the ring over water or shallows is a sea wall from
+  the lake bed (`{b}_ringsea`: top 2.4 m over the water or the shore, 5 m deep; the rings' water is
+  at most 3.4 m deep), and every ring piece stands on the highest ground under it, never under the
+  water. New test (`sites.test.ts`): at every quarter degree round each ring, feet walking, wading
+  or swimming (SWIM_FLOAT under the surface) cross only in a gate's opening; without the sea walls
+  it finds 738 / 295 / 347 open crossings on Arcadia / Hollowmere / Meridian.
+- **Should-fix, fixed: gate border strips floated or sank** (a flat box at the centre's ground:
+  −1.32 to +1.54 m on Meridian's 250° gate). Now `world/gateStrips.ts` drapes each strip on the
+  terrain like the path decals (a row every 0.25 m, lift over the highest path decal plus the
+  terrain's crease). Test (`gateStrips.test.ts`): all nine passages, every vertex, edge midpoint and
+  triangle centre within the lift band over the ground, facing up, centred on its gate.
+- **Should-fix, fixed: the haystack case didn't guard the blocked-strike rule.** A slim post outside
+  the walls now: a signpost by Arcadia's south gate path (`a_signpost`), and the case with a
+  Bonewalker 2 m from its target, in melee reach, the post on the strike's line. With the
+  blocked-strike handling switched off it fails (the Bonewalker stands swinging at the post, 0 m
+  moved); with it, it goes round or gives up in time. The haystack case stays.
+
+Budgets after the fixes: Low 23.0k / 24.7k / 24.3k (cap 25k); Meridian's land walls are one box
+with a glowing top, posts only where a land wall meets another piece.
 
 ## Deploy order
 

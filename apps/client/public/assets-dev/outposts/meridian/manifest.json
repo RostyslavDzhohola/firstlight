@@ -1,11 +1,11 @@
 {
- "version": "da64fae0dce8175c",
+ "version": "0ef0b7c34797256b",
  "body": "meridian",
  "files": {
   "glb": {
    "name": "meridian.glb",
-   "bytes": 263676,
-   "sha256": "533615e01acf68ab23af336e168fd680519250fac97087f772feffe2e4a14701"
+   "bytes": 264164,
+   "sha256": "9b87dc02be626a7994ec834a0e91270ab358215b237e0257d8c81ab5437cc50a"
   },
   "color": {
    "name": "meridian_color.webp",
@@ -530,7 +530,7 @@
  "look": {
   "albedoFloor": 0.0
  },
- "prefabs": 17,
- "items": 125,
- "trianglesLod0": 21663
+ "prefabs": 18,
+ "items": 143,
+ "trianglesLod0": 21333
 }

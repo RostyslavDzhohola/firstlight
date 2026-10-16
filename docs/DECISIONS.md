@@ -884,7 +884,9 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   Why: no shopping for tonics mid-fight from inside a ring that doesn't protect you yet.
 - **D-b2-1 (buildings-2, 2026-10-15):** every planet's arrival outpost is walled: a ring of wall
   round pad 0 (Arcadia 32 m, Hollowmere 42 m, Meridian 48 m to the wall's centre line) with three
-  gates each (`OUTPOSTS[body].wall`); stretches over water are left out, the shore closes the ring.
+  gates each (`OUTPOSTS[body].wall`), closed but for the gates: over water and shallows the ring
+  runs on as a lower sea wall from the lake bed (top 2.4 m over the water or the shore), so nobody
+  walks, wades or swims in round a gate (Codex review: Meridian's shallows at 49–62° were open).
   Inside the ring is a safe zone that protects at once, like the Portus town (D-zones-3): no combat
   tag, no damage in or out; outside is wild. Pad 0's 12 m ring folds into it (no ring drawn; the
   zone still reports the ring index, so pad discovery and fast travel keep their rule); the other
