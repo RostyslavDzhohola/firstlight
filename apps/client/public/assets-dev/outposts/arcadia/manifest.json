@@ -4,8 +4,8 @@
  "files": {
   "glb": {
    "name": "arcadia.glb",
-   "bytes": 672300,
-   "sha256": "7af6dc43b4b453e4864c55f0d092f847125c1f7b5687e8b812a3e51ae8ea83e9"
+   "bytes": 669964,
+   "sha256": "49270287dd3db40136d6865c688a68684ee23a550efddbf8fe8810933d36153d"
   },
   "color": {
    "name": "../../portus/portus_color.webp",

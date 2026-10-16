@@ -20,8 +20,8 @@ checks); the check list is at the end. Renders for the owner: `/tmp/fl-go/shots/
 ## Numbers
 
 Shipped bytes (≤ 6 MB Portus, ≤ 2 MB per planet): Portus 2,272,812 (was 2,797,910 in ASSETS; the
-round-1 build had 2,369,240 for the GLB alone); Arcadia 681,131 own files, Hollowmere 369,356,
-Meridian 495,052.
+round-1 build had 2,369,240 for the GLB alone); Arcadia 678,795 own files, Hollowmere 360,396,
+Meridian 495,048.
 
 LOD0 triangles as laid out: Portus 186,890 (houses 4,710–5,010 each, LOD1 3,664–3,964; gates 3,304);
 Arcadia 30,014, Hollowmere 21,731, Meridian 21,663.
@@ -55,7 +55,14 @@ Shop keepers (`SHOP_SPOTS`, world metres): Arcadia `[271.0583, 420.186, -17.8155
   haystack case), `zones.test.ts` (weapons outside through the south gate), fights moved outside
   the walls in `starter-weapons`, `hunt-pointer`, `rules`, `movement`, `shops`; pad-ring rules at
   pad 1 in `evade-reset`, `npc-review`; the horse rides in through Arcadia's south gate.
-- `pnpm typecheck` clean. Full `pnpm test`: see the lane report (run at the end, after the merge).
+- `pnpm typecheck` clean. Full `pnpm test` after the merge of main: 1,674 of 1,674 passed, 187
+  files (the first full run, before the test moves above, had 27 failures in 7 server files: fights
+  15–30 m off pad 0, now inside the walls).
+- CodeRabbit (`coderabbit review --agent --base main`): one minor finding, fixed and it mattered: the
+  Astra palette lookup scanned every material in the scene, so inside the pads design build (kit
+  textures loaded) gate B and the shelter sampled a kit texture; it now reads only the imported
+  GLB's own materials. The outposts were rebuilt (Arcadia's gate is pale stone again, the shelter
+  violet), shipped files and ASSETS hashes updated, outpost tests 150/150.
 
 ## Deploy order
 

@@ -136,14 +136,14 @@ Shipped output (2026-10-15 round-2 build; Arcadia and Hollowmere add nothing to 
 
 | File | Bytes | SHA-256 | Contents |
 |---|---:|---|---|
-| `outposts/arcadia/arcadia.glb` | 672,300 | `7af6dc43b4b453e4864c55f0d092f847125c1f7b5687e8b812a3e51ae8ea83e9` | 25 prefabs, 2 materials; 30,014 triangles as laid out at LOD0 |
-| `outposts/arcadia/manifest.json` | 8,831 | `497d8934f3d441081ce61cd61a092d14d050575823fef105cb01773c072d8916` | files (strips: `../../portus/`), slots, look, layout version |
-| `outposts/hollowmere/hollowmere.glb` | 360,500 | `259567ed0f95c20733c71009c51896a74f7c25f57c3fd5e8a4e6ba0fa3abb8d4` | 20 prefabs, 2 materials; 21,731 triangles at LOD0 |
-| `outposts/hollowmere/manifest.json` | 8,856 | `92f97e35d9eeb44f4d1a1bc48e50e6a1d808f61bdd1c03097cb374614f6a1f7e` | as above, albedo floor 0.045 |
-| `outposts/meridian/meridian.glb` | 263,680 | `4afec2e1455886484ec046b0593a84b64cec6a79ddc4946558db8e2627f9522d` | 17 prefabs, opaque only; 21,663 triangles at LOD0 |
+| `outposts/arcadia/arcadia.glb` | 669,964 | `49270287dd3db40136d6865c688a68684ee23a550efddbf8fe8810933d36153d` | 25 prefabs, 2 materials; 30,014 triangles as laid out at LOD0 |
+| `outposts/arcadia/manifest.json` | 8,831 | `ec75989f154389d5d57406c115f95b16b5944d14a19279ff247089557472fc62` | files (strips: `../../portus/`), slots, look, layout version |
+| `outposts/hollowmere/hollowmere.glb` | 351,540 | `0b6a1b57221ec05b7a65e922cd235b51402e2ed17e1d8cbb5b37ceb3be750de5` | 20 prefabs, 2 materials; 21,731 triangles at LOD0 |
+| `outposts/hollowmere/manifest.json` | 8,856 | `ac226e7115b51727b5aad21842b8c7a563d243c1e6b4ea5a155921c961fa34e9` | as above, albedo floor 0.045 |
+| `outposts/meridian/meridian.glb` | 263,676 | `533615e01acf68ab23af336e168fd680519250fac97087f772feffe2e4a14701` | 17 prefabs, opaque only; 21,663 triangles at LOD0 |
 | `outposts/meridian/meridian_color.webp` | 80,498 | `027578b27bf9067bd4cc20ed252408a7efd8827527334a809b4e7a2f403e355b` | 9 colour layers of 512² |
 | `outposts/meridian/meridian_normal.webp` | 144,758 | `528c7e8e4b90396513bce17a9afd1c38dac89a60b5635c8791a82b86c530d32c` | the same 9 layers' normals |
-| `outposts/meridian/manifest.json` | 6,116 | `00c0fed06072cb1dacb8be38b01816ece9a5af10d70c446eac1d52fde5118d34` | files, slots (with the `OK_*` slots), look, layout version |
+| `outposts/meridian/manifest.json` | 6,116 | `f6b74b0e6bcffffda968e0296e920b02678364c1e3eca5a28c7c5a17acf09196` | files, slots (with the `OK_*` slots), look, layout version |
 
 The layouts, paths and collider solids ship as code from the same build:
 `packages/shared/src/content/padOutposts.ts`.

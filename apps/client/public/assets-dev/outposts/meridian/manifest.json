@@ -4,8 +4,8 @@
  "files": {
   "glb": {
    "name": "meridian.glb",
-   "bytes": 263680,
-   "sha256": "4afec2e1455886484ec046b0593a84b64cec6a79ddc4946558db8e2627f9522d"
+   "bytes": 263676,
+   "sha256": "533615e01acf68ab23af336e168fd680519250fac97087f772feffe2e4a14701"
   },
   "color": {
    "name": "meridian_color.webp",

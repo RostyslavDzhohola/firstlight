@@ -4,8 +4,8 @@
  "files": {
   "glb": {
    "name": "hollowmere.glb",
-   "bytes": 360500,
-   "sha256": "259567ed0f95c20733c71009c51896a74f7c25f57c3fd5e8a4e6ba0fa3abb8d4"
+   "bytes": 351540,
+   "sha256": "0b6a1b57221ec05b7a65e922cd235b51402e2ed17e1d8cbb5b37ceb3be750de5"
   },
   "color": {
    "name": "../../portus/portus_color.webp",

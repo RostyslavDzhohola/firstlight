@@ -137,12 +137,17 @@ def astra_to_mesh(path, name, drop=()):
     bpy.ops.import_scene.gltf(filepath=path)
     new = [o for o in bpy.data.objects if o not in before]
     meshes = [o for o in new if o.type == "MESH" and not any(d in o.name for d in drop)]
+    # The palette from this GLB's own materials only (a host scene has textured kit materials too).
     img = None
-    for m in bpy.data.materials:
-        if m.use_nodes:
-            for n in m.node_tree.nodes:
-                if n.type == "TEX_IMAGE" and n.image is not None:
-                    img = n.image
+    for o in meshes:
+        for m in o.data.materials:
+            if m is None or not m.use_nodes:
+                continue
+            img = next((n.image for n in m.node_tree.nodes if n.type == "TEX_IMAGE" and n.image is not None), None)
+            if img is not None:
+                break
+        if img is not None:
+            break
     if img is None:
         raise RuntimeError(f"{path}: no palette image")
     w, h = img.size
