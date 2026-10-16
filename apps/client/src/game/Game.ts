@@ -20,7 +20,7 @@ import { MENU_GRADE } from "../render/post.ts";
 import { runProbe } from "../render/probe.ts";
 import { createRenderer, type RenderCtx } from "../render/renderer.ts";
 import { installShaderMonitor, shaderMonitorFrame, warmup } from "../render/warmup.ts";
-import { updateOccluderFade } from "../render/occluderFade.ts";
+import { avatarChest, updateOccluderFade } from "../render/occluderFade.ts";
 import type { Hud } from "../ui/hud.ts";
 import { Menu } from "../ui/menu.ts";
 import { bindUi } from "../ui/bind.ts";
@@ -89,6 +89,8 @@ export class Game {
   /** A server-ordered move (rebirth in Portus) that arrived during another transition waits for it. */
   private readonly travelQueue = new TravelQueue<BodyId>();
   private portalCooldownUntil = 0;
+  /** Scratch: the player's chest for the occluder fade. */
+  private readonly fadeChest = new THREE.Vector3();
   private reconnecting = false;
   /** Rejoins after "saving failed" closes: bounded, and not reset by a successful join. */
   private readonly storageBackoff = new StorageBackoff();
@@ -726,7 +728,9 @@ export class Game {
     if (this.photo.active) this.photo.update(dt, this.ctx.camera);
     else if (!this.bench) this.player.placeCamera(this.ctx.camera);
     // Trees, rocks and props between the camera and the player dissolve (not in photo mode or the bench).
-    updateOccluderFade(this.ctx.camera, this.player.pos, !this.photo.active && !this.bench && !NO_FADE);
+    // The cone aims at the drawn avatar's chest bone: in the saddle that's ~0.8 m higher than on foot.
+    const chest = this.self ? avatarChest(this.self.root, this.self.socket("back")?.parent ?? null, this.fadeChest) : null;
+    updateOccluderFade(this.ctx.camera, chest, !this.photo.active && !this.bench && !NO_FADE);
     this.audio.updateListener(this.ctx.camera);
     if (FX_DEMO && now >= this.nextFxDemo) this.fxDemo(now, focus);
     this.env.afterCamera(this.ctx.camera, dt);

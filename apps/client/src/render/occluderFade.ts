@@ -12,7 +12,7 @@
 import * as THREE from "three/webgpu";
 import { bool, cameraPosition, dot, float, interleavedGradientNoise, length, max, normalize, positionWorld, renderGroup, screenCoordinate, smoothstep, uniform } from "three/tsl";
 
-/** The chest point the cone aims at: this far above the feet (m). */
+/** Without a skeleton (the capsule stand-in): the chest is this far above the rendered feet (m). */
 export const FADE_CHEST = 1.0;
 /** Half-size of the cleared area round the chest at the player's distance (m): head to feet. */
 export const FADE_RADIUS = 1.05;
@@ -61,6 +61,27 @@ export function fadeParams(depth: number, out: FadeParams = { depth: 0, cosOuter
   return out;
 }
 
+const smooth = (e0: number, e1: number, x: number) => {
+  const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+};
+
+/**
+ * The fade (0 solid … 1 gone) of a fragment at `p`, for a camera at `cam` aiming along unit `aim` at
+ * `chest`: the same formula occluderKeep() builds in TSL, for tests and tools. Keep the two in step.
+ */
+export function fadeAmount(cam: THREE.Vector3, aim: THREE.Vector3, chest: THREE.Vector3, p: THREE.Vector3): number {
+  const prm = fadeParams(chest.distanceTo(cam));
+  const v = p.clone().sub(cam);
+  const dist = v.length();
+  const dir = v.divideScalar(Math.max(dist, 0.0001));
+  const toTarget = chest.clone().sub(cam).normalize();
+  const inPlayer = smooth(prm.cosOuter, prm.cosInner, dir.dot(toTarget));
+  const inAim = smooth(prm.cosAimOuter, prm.cosAimInner, dir.dot(aim));
+  const front = smooth(FADE_DEPTH_MARGIN, FADE_DEPTH_MARGIN + 0.5, prm.depth - dist);
+  return Math.max(inPlayer, inAim) * front;
+}
+
 let maskNode: THREE.Node | null = null;
 /** Keep (true) or dissolve (false) this fragment. One node shared by every material that fades. */
 export function occluderKeep(): THREE.Node {
@@ -72,8 +93,11 @@ export function occluderKeep(): THREE.Node {
   const toTarget = normalize(u.target.sub(cameraPosition));
   const inPlayer = smoothstep(u.cosOuter, u.cosInner, dot(dir, toTarget));
   const inAim = smoothstep(u.cosAimOuter, u.cosAimInner, dot(dir, u.aim));
-  // Only what is nearer than the player (with a margin) is in the way.
-  const front = smoothstep(float(FADE_DEPTH_MARGIN), float(FADE_DEPTH_MARGIN + 0.5), u.depth.sub(dot(v, toTarget)));
+  // Only what is nearer to the camera than the chest (with a margin) is in the way. Distance from the
+  // camera, not depth along the chest direction: with the camera pulled in close by a wall the aim
+  // and the chest point different ways, and depth along the chest would let the aim cone reach far
+  // past the player (Codex review).
+  const front = smoothstep(float(FADE_DEPTH_MARGIN), float(FADE_DEPTH_MARGIN + 0.5), u.depth.sub(dist));
   const fade = max(inPlayer, inAim).mul(front).mul(u.strength);
   // Stable screen-door threshold (no time term: a still view doesn't shimmer).
   const noise = interleavedGradientNoise(screenCoordinate.xy);
@@ -100,16 +124,30 @@ const _aim = new THREE.Vector3();
 const _p = fadeParams(5);
 
 /**
- * Per frame, after the camera is placed: the cone from `camera` to the player's chest (`feet` + up ×
- * FADE_CHEST). `active` false (photo mode, the bench, a dead or absent player) switches it off.
+ * The rendered avatar's chest (planet space) into `out`: its chest bone when the skinned model is in,
+ * else the root (the drawn feet: on a horse, the saddle drop) + FADE_CHEST along local up.
  */
-export function updateOccluderFade(camera: THREE.Camera, feet: THREE.Vector3 | null, active: boolean) {
+export function avatarChest(root: THREE.Object3D, chestBone: THREE.Object3D | null, out: THREE.Vector3): THREE.Vector3 {
+  if (chestBone) {
+    chestBone.updateWorldMatrix(true, false);
+    return chestBone.getWorldPosition(out);
+  }
+  root.updateWorldMatrix(true, false);
+  root.getWorldPosition(out);
+  return out.addScaledVector(_t.copy(out).normalize(), FADE_CHEST);
+}
+
+/**
+ * Per frame, after the camera is placed: the cone from `camera` to the player's `chest` (avatarChest).
+ * `active` false (photo mode, the bench, no player) switches it off.
+ */
+export function updateOccluderFade(camera: THREE.Camera, chest: THREE.Vector3 | null, active: boolean) {
   const u = occluderUniforms;
-  if (!active || !feet) {
+  if (!active || !chest) {
     u.strength.value = 0;
     return;
   }
-  _t.copy(feet).normalize().multiplyScalar(FADE_CHEST).add(feet);
+  _t.copy(chest);
   u.target.value.copy(_t);
   const depth = _t.distanceTo(camera.position);
   fadeParams(depth, _p);
