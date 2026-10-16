@@ -115,19 +115,23 @@ describe("test accounts (D-home-6)", () => {
     const g = await guest(s, "LateFlag", 2, "198.51.100.60");
     rooms.push(await joinWithToken(s, g.token));
     await waitFor(() => publicOnlineCount() === 1);
+    expect(((await api(s, "/api/home", null)).json as HomeData).online.total).toBe(1);
     await api(s, "/api/account/me", g.token, { headers: { "x-loadtest-secret": SECRET } });
     expect(isTestAccount(s.accounts.db, g.id)).toBe(true);
     expect(publicOnlineCount()).toBe(0);
+    // /api/home's caches (online 3 s, board 60 s) don't keep the flagged player either.
+    expect(((await api(s, "/api/home", null)).json as HomeData).online.total).toBe(0);
   });
 
   it("a tools' guest signing into an existing account doesn't flag it, and its sessions stay its own", async () => {
     const s = await start();
     const db = s.accounts.db;
-    // A real player saved an account a while ago (created more than a minute before the link).
+    // A real player saved an account earlier, and it has no game rows yet (as if it never played on):
+    // "no progress" must not read as "new" (CodeRabbit).
     const owner = await guest(s, "Wayfarer", 2, "198.51.100.70");
     await owner.b.saveWithEmail("wayfarer@example.test", "Wayfarer");
     const ownerId = userIdOf((await owner.b.client.token()).data!.token);
-    s.accounts.authDb.prepare(`UPDATE "user" SET "createdAt" = ? WHERE id = ?`).run(new Date(Date.now() - 3_600_000).toISOString(), ownerId);
+    for (const t of ["character", "account"]) db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(ownerId);
     // A test guest plays, then signs in with that email on its browser.
     const tool = await guest(s, "ProbeTwo", 2, "198.51.100.71", SECRET);
     rooms.push(await joinWithToken(s, tool.token));
