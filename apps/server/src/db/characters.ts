@@ -5,6 +5,7 @@
 // discovered pads live in other tables and are kept. Rebirth = `saveCharacter` with a fresh level-1 record.
 
 import { parseJson, stmt, tx, type Db } from "./game-db.ts";
+import { IS_TEST } from "./testAccounts.ts";
 
 export interface CharacterData<Inv = unknown, Missions = unknown> {
   starter: string;
@@ -187,9 +188,15 @@ export interface HallEntry {
 /** First finder wins. `won` is true only for the call that engraved the entry. */
 export function claimFirst(db: Db, secretId: string, userId: string, displayName: string, now = Date.now()): { won: boolean; entry: HallEntry } {
   return tx(db, () => {
+    // A plaque held only by one of our test accounts is still free for a real player (D-home-6): the
+    // wall doesn't show test claims, so a real find must engrave it.
     const won =
-      stmt(db, "INSERT OR IGNORE INTO hall_of_firsts (secret_id, user_id, display_name, found_at) VALUES (?, ?, ?, ?)").run(secretId, userId, displayName, now)
-        .changes === 1;
+      stmt(
+        db,
+        `INSERT INTO hall_of_firsts (secret_id, user_id, display_name, found_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(secret_id) DO UPDATE SET user_id = excluded.user_id, display_name = excluded.display_name, found_at = excluded.found_at
+         WHERE ${IS_TEST("hall_of_firsts.user_id")} AND NOT ${IS_TEST("excluded.user_id")}`,
+      ).run(secretId, userId, displayName, now).changes === 1;
     const r = stmt(db, "SELECT * FROM hall_of_firsts WHERE secret_id = ?").get(secretId) as {
       secret_id: string;
       user_id: string;
@@ -200,8 +207,9 @@ export function claimFirst(db: Db, secretId: string, userId: string, displayName
   });
 }
 
+/** The engraved plaques, oldest first. Test accounts' claims aren't shown (D-home-6). */
 export function listHallOfFirsts(db: Db): HallEntry[] {
-  return (stmt(db, "SELECT * FROM hall_of_firsts ORDER BY found_at").all() as { secret_id: string; user_id: string; display_name: string; found_at: number }[]).map(
+  return (stmt(db, `SELECT * FROM hall_of_firsts h WHERE NOT ${IS_TEST("h.user_id")} ORDER BY found_at`).all() as { secret_id: string; user_id: string; display_name: string; found_at: number }[]).map(
     (r) => ({ secretId: r.secret_id, userId: r.user_id, displayName: r.display_name, foundAt: r.found_at }),
   );
 }

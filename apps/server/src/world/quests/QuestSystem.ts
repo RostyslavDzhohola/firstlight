@@ -857,7 +857,7 @@ export class QuestSystem implements RoomSystem {
       life.eggs.push(eggId);
       if (eligible) {
         this.award(a, egg.medal, events);
-        if (!a.identity.loadtest) first = engrave(eggId, a.identity.userId, a.identity.name, events);
+        if (!a.identity.loadtest && !a.identity.test) first = engrave(eggId, a.identity.userId, a.identity.name, events); // our automation never engraves (D-home-6)
       }
     });
     if (!paid) return;
@@ -966,7 +966,7 @@ export class QuestSystem implements RoomSystem {
       if (hits && !hits.hurt) this.award(a, "untouchable");
     }
     this.bossHits.delete(e.npcKind);
-    const people = eligible.filter((a) => !a.identity.loadtest);
+    const people = eligible.filter((a) => !a.identity.loadtest && !a.identity.test); // real players only (D-home-6)
     if (people.length) engrave(BOSS_FIRSTS[e.bossId], people[0]!.identity.userId, people.map((a) => a.identity.name).join(", ").slice(0, 200));
   }
 

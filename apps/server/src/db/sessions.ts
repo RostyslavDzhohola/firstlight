@@ -2,6 +2,7 @@
 // deaths, levels, backend/tier split, D1/D7 return. Analytics older than 90 days are pruned.
 
 import { parseJson, stmt, type Db } from "./game-db.ts";
+import { IS_TEST } from "./testAccounts.ts";
 
 const DAY = 86_400_000;
 
@@ -73,13 +74,14 @@ export interface Retention {
   d7Rate: number | null;
 }
 
-/** D1/D7 return by first-session cohort over the last `days` days. */
+/** D1/D7 return by first-session cohort over the last `days` days (real players only, D-home-6). */
 export function retention(db: Db, now = Date.now(), days = 30): Retention {
   const today = Math.floor(now / DAY);
   const rows = stmt(
     db,
-    `WITH first AS (SELECT user_id, MIN(started_at) / ${DAY} AS d0 FROM session_log GROUP BY user_id),
-          days AS (SELECT DISTINCT user_id, started_at / ${DAY} AS d FROM session_log)
+    `WITH real AS (SELECT user_id, started_at FROM session_log s WHERE NOT ${IS_TEST("s.user_id")}),
+          first AS (SELECT user_id, MIN(started_at) / ${DAY} AS d0 FROM real GROUP BY user_id),
+          days AS (SELECT DISTINCT user_id, started_at / ${DAY} AS d FROM real)
      SELECT f.d0 AS d0, COUNT(*) AS cohort,
        SUM(EXISTS (SELECT 1 FROM days x WHERE x.user_id = f.user_id AND x.d = f.d0 + 1)) AS d1,
        SUM(EXISTS (SELECT 1 FROM days x WHERE x.user_id = f.user_id AND x.d = f.d0 + 7)) AS d7
@@ -117,11 +119,16 @@ export interface SessionStats {
   bodyTimeMs: Record<string, number>;
 }
 
-/** Aggregates over sessions started since `since`. */
+/** Our test accounts' sessions since `since` (shown apart on /stats, never in the figures above it). */
+export function testSessionCount(db: Db, since = 0): { sessions: number; players: number } {
+  return stmt(db, `SELECT COUNT(*) AS sessions, COUNT(DISTINCT user_id) AS players FROM session_log s WHERE started_at >= ? AND ${IS_TEST("s.user_id")}`).get(since) as { sessions: number; players: number };
+}
+
+/** Aggregates over real players' sessions started since `since` (test accounts excluded, D-home-6). */
 export function sessionStats(db: Db, since = 0): SessionStats {
   const rows = stmt(
     db,
-    "SELECT user_id, started_at, ended_at, body_time_json, deaths, max_level, backend, tier FROM session_log WHERE started_at >= ?",
+    `SELECT user_id, started_at, ended_at, body_time_json, deaths, max_level, backend, tier FROM session_log s WHERE started_at >= ? AND NOT ${IS_TEST("s.user_id")}`,
   ).all(since) as {
     user_id: string;
     started_at: number;

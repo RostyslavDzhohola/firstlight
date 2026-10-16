@@ -33,10 +33,10 @@ export interface HomeDeps {
 interface RoomLike {
   bodyDef: { id: string };
   metadata?: { loadtest?: boolean } | null;
-  actors: Map<string, { identity: { loadtest?: boolean }; superseded?: boolean; state: { name: string } }>;
+  actors: Map<string, { identity: { loadtest?: boolean; test?: boolean }; superseded?: boolean; state: { name: string } }>;
 }
 
-/** Players per body, and up to `namesPerBody` names each (sorted). Load-test bots never count. */
+/** Players per body, and up to `namesPerBody` names each (sorted). Load-test bots and test accounts (D-home-6) never count. */
 export function onlineSnapshot(rooms: Iterable<RoomLike>, namesPerBody = HOME_LIMITS.namesPerBody): HomeOnline {
   const bodies = Object.fromEntries(BODY_IDS.map((b) => [b, { players: 0, names: [] as string[] }])) as HomeOnline["bodies"];
   let total = 0;
@@ -45,7 +45,7 @@ export function onlineSnapshot(rooms: Iterable<RoomLike>, namesPerBody = HOME_LI
     const slot = bodies[r.bodyDef.id as BodyId];
     if (!slot) continue;
     for (const a of r.actors.values()) {
-      if (a.identity.loadtest || a.superseded) continue;
+      if (a.identity.loadtest || a.identity.test || a.superseded) continue;
       slot.players++;
       total++;
       if (a.state.name) slot.names.push(a.state.name);
@@ -107,4 +107,9 @@ export function mountHome(app: Express, deps: HomeDeps): void {
     res.setHeader("Cache-Control", "public, max-age=5");
     res.json(body);
   });
+}
+
+/** Real players online right now (no bots, no test accounts): /api/online's number. */
+export function publicOnlineCount(): number {
+  return onlineSnapshot(liveRooms as Iterable<RoomLike>).total;
 }

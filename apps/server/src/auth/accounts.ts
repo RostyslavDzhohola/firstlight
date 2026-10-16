@@ -12,6 +12,7 @@ import { getMigrations } from "better-auth/db/migration";
 import { toNodeHandler } from "better-auth/node";
 import type { Express, NextFunction, Request, Response } from "express";
 import { ensureAccount, isBanned, isIpBanned } from "../db/accounts.ts";
+import { backfillTestAccounts, isTestAccount, markTestAccount } from "../db/testAccounts.ts";
 import { openGameDb, setGameDb, type Db } from "../db/game-db.ts";
 import { linkAccounts } from "../db/link.ts";
 import { setDisplayName } from "../db/accounts.ts";
@@ -191,6 +192,10 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
   const authCtx = await auth.$context;
   await authCtx.checkSchema?.();
   closeDanglingSessions(db);
+  // One-off (D-home-6): flag the automation guests that predate the tools' marker. Logs what it changed.
+  const anonStmt = authDb.prepare(`SELECT "isAnonymous" AS anon FROM "user" WHERE id = ?`);
+  const backfilled = backfillTestAccounts(db, (id) => (anonStmt.get(id) as { anon: number | null } | undefined)?.anon === 1);
+  if (backfilled !== null) console.log(`test accounts backfill: flagged ${backfilled} automation guest account(s)`);
   // Daily housekeeping (and once at boot): old analytics rows, abandoned guests (F12, see prune.ts).
   const housekeeping = () => {
     pruneSessionLog(db);
@@ -230,6 +235,9 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
     const ipHash = ip ? hashIp(ip) : null;
     if (ipHash && isIpBanned(db, ipHash, now)) return null;
     const acc = ensureAccount(db, sub, now, ipHash);
+    // Our test tools send LOADTEST_SECRET with their guests' requests: flag those guests (D-home-6).
+    // Only guests, and only with the right secret: a player can't set it, a saved account never gets it.
+    if (user.anon === 1 && vctx?.toolSecret && cfg.loadtestSecret && safeEqual(vctx.toolSecret, cfg.loadtestSecret)) markTestAccount(db, sub, "tool", now);
     // Only validated display names are shown; otherwise a generated guest-style name (review:
     // Better Auth's free-form user.name must never become the in-game name).
     const generated = /^Wanderer-\d{4}$/.test(user.name) ? user.name : `Wanderer-${(parseInt(sub.replace(/[^0-9a-f]/gi, "").slice(-6) || "0", 16) % 9000) + 1000}`;
@@ -239,7 +247,7 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
       const r = setDisplayName(db, sub, user.name, now);
       if (r.ok) display = r.name;
     }
-    return { userId: sub, name: display ?? generated, guest: user.anon === 1, admin: acc.isAdmin, loadtest: false, account: true };
+    return { userId: sub, name: display ?? generated, guest: user.anon === 1, admin: acc.isAdmin, loadtest: false, account: true, test: isTestAccount(db, sub) };
   };
 
   const sessionStmt = authDb.prepare(`SELECT 1 FROM "session" WHERE "userId" = ? LIMIT 1`);

@@ -7,6 +7,7 @@
 import { getAccount } from "./accounts.ts";
 import { loadCharacter } from "./characters.ts";
 import { stmt, tx, type Db } from "./game-db.ts";
+import { isTestAccount, markTestAccount } from "./testAccounts.ts";
 
 export interface LinkResult {
   /** Whose live character survived: the guest's, the account's, or none existed. */
@@ -28,6 +29,9 @@ export function linkAccounts(db: Db, fromUserId: string, toUserId: string, now =
     const fromChar = loadCharacter(db, fromUserId);
     const toChar = loadCharacter(db, toUserId);
     const merged = !!(to || toChar);
+    // A test guest saved into a brand-new account stays a test account; an existing account never
+    // becomes one by a merge (D-home-6).
+    if (!merged && isTestAccount(db, fromUserId)) markTestAccount(db, toUserId, "link", now);
 
     // account: delete the guest row first so its display name is free for the target.
     let displayName = to?.displayName ?? null;
