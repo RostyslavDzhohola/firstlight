@@ -1,8 +1,11 @@
-// The Portus castle town's shipped asset (D38, tools/blender/portus): one meshopt GLB with a node per
-// prefab and LOD (two primitives: "town_opaque", "town_cutout"; COLOR_0 = linear tint + material
-// slot), two WebP layer strips (512 px layers stacked vertically: base colour with the cutout mask
-// in alpha, and the tangent-space normal) and a manifest (files, slots, data version). Loaded only
-// on Portus, before its warm-up; cached for the session.
+// The shipped structure sites (D38, D42): the Portus castle town (tools/blender/portus) and each
+// planet's pad outpost (tools/blender/pads). Each is one meshopt GLB with a node per prefab and LOD
+// (two primitives: "town_opaque", "town_cutout"; COLOR_0 = linear tint + material slot), two WebP
+// layer strips (512 px layers stacked vertically: base colour with the cutout mask in alpha, and the
+// tangent-space normal) and a manifest (files, slots, data version, look). Arcadia's and Hollowmere's
+// outposts use the Portus kit, so their manifests point at the Portus strips ("../portus/…"): a strip
+// is downloaded and decoded once per session whichever site asks first, and the sites share it (and
+// so their materials). Loaded on arrival, before the warm-up; cached for the session.
 //
 // The strips become two DataArrayTextures (one layer per kit texture), so the whole town draws with
 // two shared materials and tiles every kit texture with plain repeat wrapping. They are decoded
@@ -12,7 +15,8 @@
 import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
-import { PORTUS_TOWN_VERSION, TOWN_PREFABS } from "@firstlight/shared/content/portusTown";
+import { PORTUS_TOWN_VERSION, TOWN_PREFABS, type TownPrefab } from "@firstlight/shared/content/portusTown";
+import { OUTPOSTS, type OutpostBody } from "@firstlight/shared/content/padOutposts";
 import { config } from "../config.ts";
 
 /** A material slot of the packed town (pack.py SLOTS): which layer, tint and surface it uses. */
@@ -29,17 +33,29 @@ export interface TownSlot {
   /** Night glow colour + strength (window glass). */
   night: [number, number, number, number];
   cutout: boolean;
+  /** Glows in its own tint above the bloom threshold, day and night (the outposts' lamps; Hollowmere's windows). */
+  glow?: number;
+}
+
+/** A site's look adjustments (outposts): a lighter albedo floor for the dusk body's town materials. */
+export interface TownLook {
+  albedoFloor: number;
 }
 
 export interface TownManifest {
   version: string;
+  /** Strip file names are relative to the site's folder ("../portus/…" for a shared strip). */
   files: Record<"glb" | "color" | "normal", { name: string; bytes: number; sha256: string }>;
   layerSize: number;
   layers: string[];
   slots: TownSlot[];
   items: number;
   trianglesLod0: number;
+  look?: TownLook;
 }
+
+/** A structure site with shipped assets: Portus' town or a planet's pad outpost. */
+export type SiteId = "portus" | OutpostBody;
 
 /** One prefab LOD's geometry per material kind: plain arrays in the prefab frame (x right, y up, z front). */
 export interface TownPart {
@@ -57,6 +73,7 @@ export interface TownMesh {
 }
 
 export interface TownAssets {
+  site?: SiteId;
   manifest: TownManifest;
   /** Node name ("house_a", "house_a__L1") → geometry. */
   meshes: Map<string, TownMesh>;
@@ -64,7 +81,39 @@ export interface TownAssets {
   normal: THREE.Texture;
 }
 
-let pending: Promise<TownAssets | null> | null = null;
+const pending = new Map<SiteId, Promise<TownAssets | null>>();
+/** Decoded strips by resolved URL: Portus and the Portus-kit outposts share theirs. A failed decode is dropped. */
+const strips = new Map<string, Promise<THREE.DataArrayTexture>>();
+
+/** The site folder under the asset base. */
+export function siteFolder(site: SiteId): string {
+  return site === "portus" ? "portus/" : `outposts/${site}/`;
+}
+
+/** The layout version a site's manifest must carry. */
+export function siteVersion(site: SiteId): string {
+  return site === "portus" ? PORTUS_TOWN_VERSION : OUTPOSTS[site].version;
+}
+
+/** The prefab table a site's GLB must hold. */
+export function sitePrefabTable(site: SiteId): readonly TownPrefab[] {
+  return site === "portus" ? TOWN_PREFABS : OUTPOSTS[site].prefabs;
+}
+
+/** `name` relative to folder URL `base` ("a/b/" + "../c/x" → "a/c/x"); absolute names pass through. */
+export function resolveAsset(base: string, name: string): string {
+  if (/^[a-z]+:|^\//i.test(name)) return name;
+  const m = /^([a-z]+:\/\/[^/]*)?(.*)$/i.exec(base)!;
+  const origin = m[1] ?? "";
+  const parts = (m[2]! + name).split("/");
+  const out: string[] = [];
+  parts.forEach((p, i) => {
+    if (p === "..") {
+      if (out.length > 1 || (out.length === 1 && out[0] !== "")) out.pop();
+    } else if (p !== "." && (p !== "" || i === 0 || i === parts.length - 1)) out.push(p);
+  });
+  return origin + out.join("/");
+}
 
 /**
  * The whole download (manifest, GLB, both strips) is aborted after this many milliseconds, so a hung
@@ -73,19 +122,34 @@ let pending: Promise<TownAssets | null> | null = null;
  */
 export const TOWN_FETCH_TIMEOUT_MS = 15_000;
 
-/** Start (or reuse) the download. Resolves null if anything fails or times out (the town then draws its colliders as plain stone). */
+/** Start (or reuse) a site's download. Resolves null if anything fails or times out (the site then draws its colliders as plain stone). */
+export function preloadSite(site: SiteId): Promise<TownAssets | null> {
+  let p = pending.get(site);
+  if (!p) {
+    p = loadSite(site).catch((e: unknown) => {
+      console.warn(`[town] ${site} structure assets failed to load; drawing plain colliders`, e);
+      pending.delete(site); // try again on the next arrival
+      return null;
+    });
+    pending.set(site, p);
+  }
+  return p;
+}
+
+/** The Portus town's download (preloadSite("portus")). */
 export function preloadTown(): Promise<TownAssets | null> {
-  return (pending ??= loadTown().catch((e: unknown) => {
-    console.warn("[town] Portus town assets failed to load; drawing plain colliders", e);
-    pending = null; // try again on the next arrival
-    return null;
-  }));
+  return preloadSite("portus");
 }
 
 type Fetch = (url: string, init: { signal: AbortSignal }) => Promise<Response>;
 
-/** Download, decode and validate the town; rejects on any failure, or when `timeoutMs` runs out (every request is aborted). */
-export async function loadTown(fetchImpl: Fetch = (u, i) => fetch(u, i), timeoutMs = TOWN_FETCH_TIMEOUT_MS): Promise<TownAssets> {
+/** Download, decode and validate the Portus town (loadSite("portus")). */
+export function loadTown(fetchImpl: Fetch = (u, i) => fetch(u, i), timeoutMs = TOWN_FETCH_TIMEOUT_MS): Promise<TownAssets> {
+  return loadSite("portus", fetchImpl, timeoutMs);
+}
+
+/** Download, decode and validate a site; rejects on any failure, or when `timeoutMs` runs out (every request is aborted). */
+export async function loadSite(site: SiteId, fetchImpl: Fetch = (u, i) => fetch(u, i), timeoutMs = TOWN_FETCH_TIMEOUT_MS): Promise<TownAssets> {
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(new Error(`town assets: no answer in ${timeoutMs} ms`)), timeoutMs);
   const { signal } = abort;
@@ -102,20 +166,33 @@ export async function loadTown(fetchImpl: Fetch = (u, i) => fetch(u, i), timeout
     return r;
   };
   try {
-    const base = `${config.assetBase}/portus/`;
+    const base = `${config.assetBase}/${siteFolder(site)}`;
     const manifest = (await bounded((await get(`${base}manifest.json`)).json())) as TownManifest;
-    if (manifest.version !== PORTUS_TOWN_VERSION) {
+    const want = siteVersion(site);
+    if (manifest.version !== want) {
       // A stale cache or a half-finished deploy: the geometry may not match the layout.
-      throw new Error(`asset version ${manifest.version} does not match the layout ${PORTUS_TOWN_VERSION}`);
+      throw new Error(`asset version ${manifest.version} does not match the layout ${want}`);
     }
+    // A strip shared with another site is fetched and decoded once (its first download's signal).
+    const strip = (name: string, srgb: boolean) => {
+      const url = resolveAsset(base, name);
+      const key = `${url}|${srgb ? 1 : 0}`;
+      let p = strips.get(key);
+      if (!p) {
+        p = get(url).then((r) => bounded(r.blob())).then((b) => bounded(decodeStrip(b, manifest.layerSize, srgb)));
+        strips.set(key, p);
+        p.catch(() => strips.delete(key));
+      }
+      return bounded(p);
+    };
     const [gltfBytes, color, normal] = await Promise.all([
-      get(base + manifest.files.glb.name).then((r) => bounded(r.arrayBuffer())),
-      get(base + manifest.files.color.name).then((r) => bounded(r.blob())).then((b) => bounded(decodeStrip(b, manifest.layerSize, true))),
-      get(base + manifest.files.normal.name).then((r) => bounded(r.blob())).then((b) => bounded(decodeStrip(b, manifest.layerSize, false))),
+      get(resolveAsset(base, manifest.files.glb.name)).then((r) => bounded(r.arrayBuffer())),
+      strip(manifest.files.color.name, true),
+      strip(manifest.files.normal.name, false),
     ]);
     const meshes = await bounded(parseTownGlb(gltfBytes));
-    validateTown(meshes, manifest);
-    return { manifest, meshes, color, normal };
+    validateTown(meshes, manifest, sitePrefabTable(site));
+    return { site, manifest, meshes, color, normal };
   } finally {
     clearTimeout(timer);
   }
@@ -203,8 +280,8 @@ export async function parseTownGlb(bytes: ArrayBuffer): Promise<Map<string, Town
 }
 
 /** Every prefab of the layout (and its LOD1 where it has one) must be in the GLB with sane data. */
-export function validateTown(meshes: Map<string, TownMesh>, manifest: Pick<TownManifest, "slots">): void {
-  for (const p of TOWN_PREFABS) {
+export function validateTown(meshes: Map<string, TownMesh>, manifest: Pick<TownManifest, "slots">, prefabs: readonly TownPrefab[] = TOWN_PREFABS): void {
+  for (const p of prefabs) {
     for (const name of p.tris[1] > 0 ? [p.name, `${p.name}__L1`] : [p.name]) {
       const m = meshes.get(name);
       if (!m || (!m.opaque && !m.cutout)) throw new Error(`town GLB has no node ${name}`);

@@ -7,7 +7,7 @@ import { WEAPONS, WEAPON_BY_ID, WEAPON_INDEX, type Destroys, type TierStats, typ
 import type { Terrain } from "@firstlight/shared";
 import { NET } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
-import { actorPos, mountedAt, positionAgo, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
+import { actorPos, mountedAt, positionAgo, type Actor, type ImmuneWhy, type NpcActor, type PlayerActor } from "./actors.ts";
 import { noteKnockback } from "./movement.ts";
 import { dist3, HEAD_FROM, inMeleeArc, PLAYER_HEIGHT, PLAYER_RADIUS, rayCapsule, rayTerrain, type V3 } from "./geometry.ts";
 import { splashShield, type BubbleHost } from "./support.ts";
@@ -33,9 +33,10 @@ export interface CombatHost {
   /** Breakable props (set by destruction.ts): intact ones stop shots and take damage. */
   props?: BreakableHost;
   /**
-   * Indestructible structures (the Portus town's walls, houses and towers: planet/town.ts, set by
-   * BodyRoom; D-zones-3): they stop shots, projectiles, chain bolts, melee and line of sight, and
-   * shelter whoever stands behind them from blasts. Never damaged.
+   * Indestructible structures (planet/sites.ts: the Portus town's walls, houses and towers, a
+   * planet's pad outpost and waystones; set by BodyRoom; D-zones-3, D43): they stop shots,
+   * projectiles, chain bolts, melee and line of sight, and shelter whoever stands behind them from
+   * blasts. Never damaged.
    */
   walls?: WallHost;
   /**
@@ -69,7 +70,7 @@ export interface BreakableHost {
   arc(pos: V3, facing: V3, range: number, arcDeg: number, amount: number, cls: Destroys, weaponId: string, by: string | null): void;
 }
 
-/** Indestructible structures as seen by combat (planet/town.ts StructureCollider). */
+/** Indestructible structures as seen by combat (planet/sites.ts StructureCollider). */
 export interface WallHost {
   /** Distance along a ray (unit d) to the first structure within maxT, or Infinity. */
   raycast(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number): number;
@@ -208,6 +209,8 @@ interface RayTargetHit {
   actor: Actor;
   t: number;
   weak: boolean;
+  /** Distance along the ray to the middle of the actor (its point nearest the capsule axis). */
+  deep: number;
 }
 
 /** Weak-point multiplier: the NPC's own (bosses) or the weapon's headshot multiplier. */
@@ -217,17 +220,28 @@ function weakMult(hit: RayTargetHit, tier: TierStats): number {
   return tier.headMult ?? 1.5;
 }
 
+/** How far an actor can be from where it was REWIND_MS ago (a gallop or a knockback, with margin). */
+const REWIND_REACH_M = 8;
+
 /** Nearest actor hit by a ray, using rewound positions, ignoring `ignore`. */
 function raycastActors(host: CombatHost, o: V3, d: V3, maxT: number, ignore: Set<string>, rewindMs: number): RayTargetHit | null {
   let best: RayTargetHit | null = null;
   const now = host.now();
+  // Cheap pre-check before the rewind and the exact capsule test: only actors whose current
+  // position lies within the segment's bounding sphere (grown by their size and by how far anyone
+  // moves in the rewind window) can be hit. Every shot, aim and projectile step scans all actors.
+  const half = Math.min(maxT, 1e4) / 2;
+  const mx = o[0] + d[0] * half, my = o[1] + d[1] * half, mz = o[2] + d[2] * half;
   const test = (a: Actor, r: number, h: number) => {
+    const reach = half + r + h + REWIND_REACH_M;
+    const dx = a.state.x - mx, dy = a.state.y - my, dz = a.state.z - mz;
+    if (dx * dx + dy * dy + dz * dz > reach * reach) return;
     if (ignore.has(a.id) || !canHurt(null, a, now, host)) return;
     const hit = rayCapsule(o, d, maxT, capsuleFeet(a, now, rewindMs), r, h);
     if (hit && (!best || hit.t < best.t)) {
       // NPCs with weak-point volumes (bosses) decide for themselves where the weak spot is.
       const weak = a.kind === "player" ? hit.heightAboveFeet >= HEAD_FROM : a.weakPoint ? a.weakPoint(o, d, hit.t) : hit.heightAboveFeet >= h * 0.8;
-      best = { actor: a, t: hit.t, weak };
+      best = { actor: a, t: hit.t, weak, deep: hit.deep };
     }
   };
   for (const p of host.players()) if (!p.dead) test(p, PLAYER_RADIUS, PLAYER_HEIGHT);
@@ -336,8 +350,7 @@ export function fire(host: CombatHost, p: PlayerActor, msg: FireInput): FireResu
       // The camera ray only chooses the aim point; damage is traced from the authoritative muzzle,
       // so a camera behind cover can't shoot through it.
       const maxR = def.falloffTo ?? def.range;
-      const aimT = Math.min(maxR, rayTerrain(host.terrain, o, d, maxR, 1.5), aimActorT(host, p, o, d, maxR), propOnRay(host, o, d, maxR, behind(o, d, head))?.t ?? Infinity);
-      const aim: V3 = [o[0] + d[0] * aimT, o[1] + d[1] * aimT, o[2] + d[2] * aimT];
+      const aim = aimPoint(host, p, o, d, maxR, head, 1.5);
       const muzzle = head;
       let base: V3 = [aim[0] - muzzle[0], aim[1] - muzzle[1], aim[2] - muzzle[2]];
       const bl = Math.hypot(base[0], base[1], base[2]) || 1;
@@ -378,8 +391,10 @@ export function fire(host: CombatHost, p: PlayerActor, msg: FireInput): FireResu
 
 /** Spawn a projectile from the shooter's hand, aimed at where the camera ray points, and tell the room. */
 function launch(host: CombatHost, p: PlayerActor, def: WeaponDef, tier: TierStats, o: V3, d: V3, head: V3, dmg: number, speed: number, now: number) {
-  const aimT = Math.min(def.range, rayTerrain(host.terrain, o, d, def.range, 2), propOnRay(host, o, d, def.range, behind(o, d, head))?.t ?? Infinity);
-  const aim: V3 = [o[0] + d[0] * aimT, o[1] + d[1] * aimT, o[2] + d[2] * aimT];
+  // Specials (the Ember Seal) reach exactly their stated range; other bolts keep the 20% grace.
+  const reach = def.hidden ? def.range : def.range * 1.2;
+  // Spawn from the shooter's hand, aimed at what the camera ray points at (as far as it flies).
+  const aim = aimPoint(host, p, o, d, reach, head, 2);
   const hand: V3 = [head[0], head[1], head[2]];
   let dir: V3 = [aim[0] - hand[0], aim[1] - hand[1], aim[2] - hand[2]];
   const l = Math.hypot(dir[0], dir[1], dir[2]) || 1;
@@ -400,8 +415,7 @@ function launch(host: CombatHost, p: PlayerActor, def: WeaponDef, tier: TierStat
     vel: [dir[0] * speed, dir[1] * speed, dir[2] * speed],
     gravity: def.gravity ?? 0,
     travelled: 0,
-    // Specials (the Ember Seal) reach exactly their stated range; other bolts keep the 20% grace.
-    maxDist: def.hidden ? def.range : def.range * 1.2,
+    maxDist: reach,
     pierceLeft: tier.pierce ?? 0,
     hit: new Set([p.id]),
     fuseAt: def.delivery === "thrown" ? now + (tier.fuse ?? def.fuse ?? 1.6) * 1000 : null,
@@ -459,10 +473,19 @@ function jitter(d: V3, deg: number, rand: () => number): V3 {
   return [d[0] * c + ux * cp + vx * sp, d[1] * c + uy * cp + vy * sp, d[2] * c + uz * cp + vz * sp];
 }
 
-/** Distance along the camera ray to the first actor (aim assist for choosing the aim point). */
-function aimActorT(host: CombatHost, p: PlayerActor, o: V3, d: V3, maxT: number): number {
-  const hit = raycastActors(host, o, d, maxT, new Set([p.id]), REWIND_MS);
-  return hit ? hit.t : Infinity;
+/**
+ * What the crosshair is on: the first thing along the camera ray (from `o`, already slid to the head,
+ * aimOrigin) within `maxT`: terrain, an intact prop, or an actor as the player saw it (rewound),
+ * which is aimed at through its middle. Shots then leave the head toward this point. Projectiles used
+ * to ignore actors and aim at the ground or sky behind them: with the camera over the right
+ * shoulder, the head-to-there line passed 0.4–0.6 m from the creature under the crosshair, a Hopbit's
+ * whole radius (e2e J3.4: 40 bolts at a Hopbit, no hit). Hitscan aimed at an actor's near surface.
+ */
+function aimPoint(host: CombatHost, p: PlayerActor, o: V3, d: V3, maxT: number, head: V3, terrainStep: number): V3 {
+  let t = Math.min(maxT, rayTerrain(host.terrain, o, d, maxT, terrainStep), propOnRay(host, o, d, maxT, behind(o, d, head))?.t ?? Infinity);
+  const actor = raycastActors(host, o, d, t, new Set([p.id]), REWIND_MS);
+  if (actor) t = actor.deep;
+  return [o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t];
 }
 
 /**
@@ -508,7 +531,7 @@ function actorFacingFrom(from: V3, target: Actor): V3 {
   return [from[0] - t[0], from[1] - t[1], from[2] - t[2]];
 }
 
-/** Line of sight between two points: no terrain and no intact breakable in the way (shells aside). */
+/** Line of sight between two points: no terrain, intact breakable or structure in the way (shells aside). */
 export function lineOfSight(host: CombatHost, a: V3, b: V3): boolean {
   const v: V3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
   const l = Math.hypot(v[0], v[1], v[2]);
@@ -705,8 +728,14 @@ export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | 
     target.logoutEndsAt = null; // damage cancels logout
     if (attacker) target.lastDamagedBy = attacker.id;
   } else {
-    dmg = target.mitigate ? target.mitigate(dmg, weak, fromDir, attacker) : dmg * (target.armour ?? 1);
-    if (dmg <= 0) return false;
+    immuneWhy.reason = null;
+    dmg = target.mitigate ? target.mitigate(dmg, weak, fromDir, attacker, immuneWhy) : dmg * (target.armour ?? 1);
+    if (dmg <= 0) {
+      // Landed but did nothing (spawning, evading home, a shield, a boss out of reach): say so to the
+      // attacker, or the shot looks like a miss ("weapons don't work"). The NPC names the cause.
+      if (attacker?.kind === "player") attacker.client?.send("immune", { target: target.id, reason: immuneWhy.reason ?? "invulnerable" });
+      return false;
+    }
   }
   dmg = Math.max(1, Math.round(dmg));
   const hpBefore = target.state.hp;
@@ -728,6 +757,9 @@ export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | 
   host.onDamage(target, dmg, attacker, weak);
   return true;
 }
+
+/** Filled by an NPC's mitigate when a hit deals nothing (reused: dealDamage is synchronous). */
+const immuneWhy: ImmuneWhy = { reason: null };
 
 /** Splash damage around a point (friendly fire on; the owner takes half). */
 export function explode(host: CombatHost, owner: PlayerActor | NpcActor, at: V3, radius: number, damage: number, weaponIndex: number, exclude?: string, excludeProp?: number) {

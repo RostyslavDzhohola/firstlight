@@ -12,6 +12,8 @@ export const HEAD_FROM = 1.45; // hits above this (metres above feet) count as w
 export interface CapsuleHit {
   t: number; // distance along the ray
   heightAboveFeet: number;
+  /** Distance along the ray to its point nearest the capsule's axis: the middle of what it crosses. */
+  deep: number;
 }
 
 /**
@@ -65,7 +67,7 @@ export function rayCapsule(o: V3, d: V3, maxT: number, feet: V3, r: number, h: n
   tHit = Math.min(tHit, maxT);
   const hit: V3 = [o[0] + d[0] * tHit, o[1] + d[1] * tHit, o[2] + d[2] * tHit];
   const heightAboveFeet = (hit[0] - feet[0]) * up[0] + (hit[1] - feet[1]) * up[1] + (hit[2] - feet[2]) * up[2];
-  return { t: tHit, heightAboveFeet };
+  return { t: tHit, heightAboveFeet, deep: Math.max(tHit, S) };
 }
 
 /** Distance along the ray to the first terrain intersection, or Infinity. Marches in `step` metres. */

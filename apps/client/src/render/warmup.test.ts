@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
-import { forceProperty, installShaderMonitor, keptSamples, shaderStats, warmup } from "./warmup.ts";
+import { forceProperty, installShaderMonitor, keptSamples, shadowBuildCost, shaderStats, warmShadowCasters, warmup } from "./warmup.ts";
 import type { RenderCtx } from "./renderer.ts";
 import { watchDisposals } from "./disposeWatch.testutil.ts";
 
@@ -102,5 +102,57 @@ describe("post-warm-up shader window", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("warmShadowCasters", () => {
+  const mat = new THREE.MeshStandardNodeMaterial();
+  const geo = new THREE.BoxGeometry();
+  function sceneWith(parts: THREE.Mesh[], others = 2) {
+    const scene = new THREE.Scene();
+    for (const m of parts) {
+      m.castShadow = true;
+      scene.add(m);
+    }
+    for (let i = 0; i < others; i++) scene.add(new THREE.Mesh(geo, mat));
+    return scene;
+  }
+  const casting = (ms: THREE.Mesh[]) => ms.filter((m) => m.castShadow).length;
+
+  it("adds casters a batch of predicted new builds per frame; casters sharing a build ride along", async () => {
+    // 10 instanced meshes (a build each), then 20 plain meshes that share one material and layout.
+    const inst = Array.from({ length: 10 }, () => new THREE.InstancedMesh(geo, mat, 4));
+    const plain = Array.from({ length: 20 }, () => new THREE.Mesh(geo, mat));
+    const all = [...inst, ...plain];
+    const scene = sceneWith(all);
+    const seen: number[] = [];
+    const frames = await warmShadowCasters(scene, () => seen.push(casting(all)), async () => {});
+    // 4 + 4 + (2 instanced + the first plain: a new build; then the other 19 plain cost nothing)
+    expect(seen).toEqual([4, 8, 30]);
+    expect(frames).toBe(3);
+    expect(casting(all)).toBe(30);
+  });
+
+  it("predicts builds: instanced and skinned always, plain meshes once per material and layout", () => {
+    const seen = new Set<string>();
+    expect(shadowBuildCost(new THREE.InstancedMesh(geo, mat, 2), seen)).toBe(1);
+    expect(shadowBuildCost(new THREE.Mesh(geo, mat), seen)).toBe(1);
+    expect(shadowBuildCost(new THREE.Mesh(geo, mat), seen)).toBe(0);
+    expect(shadowBuildCost(new THREE.Mesh(new THREE.PlaneGeometry(), mat), seen)).toBe(0); // same attributes
+    const other = new THREE.BufferGeometry();
+    other.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0], 3));
+    expect(shadowBuildCost(new THREE.Mesh(other, mat), seen)).toBe(1); // no normals/uvs: another layout
+    expect(shadowBuildCost(new THREE.Mesh(geo, new THREE.MeshStandardNodeMaterial()), seen)).toBe(1);
+  });
+
+  it("puts every caster back, keeps non-casters off, even when a frame throws", async () => {
+    const parts = Array.from({ length: 10 }, () => new THREE.InstancedMesh(geo, mat, 2));
+    const scene = sceneWith(parts, 3);
+    await expect(warmShadowCasters(scene, () => {
+      throw new Error("frame failed");
+    }, async () => {})).rejects.toThrow("frame failed");
+    expect(casting(parts)).toBe(10);
+    const others = scene.children.filter((o) => !(parts as THREE.Object3D[]).includes(o));
+    expect(others.every((o) => !o.castShadow)).toBe(true);
   });
 });

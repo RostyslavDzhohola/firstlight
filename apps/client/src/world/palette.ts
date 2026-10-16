@@ -2,6 +2,7 @@
 // Film rule 1: each planet is saturated around one key hue plus one accent.
 
 import { chordMetres, type BodyId, type Dir } from "@firstlight/shared";
+import { PAD_APRON_RADIUS } from "@firstlight/shared/planet/outpostGround";
 
 type RGB = [number, number, number];
 
@@ -94,9 +95,10 @@ export function grassWeight(p: TerrainPalette, height: number, water: number, fl
   return Math.max(0, Math.min(1, w * p.grassDensity * (0.75 + 0.25 * n)));
 }
 
-/** Landing pads' stone discs have an 8.6 m base radius: no grass on them, back to full just past the rim. */
+/** The landing platforms' paved aprons reach PAD_APRON_RADIUS (10.4 m, D42): no grass on them, back to full 2 m past the edge. */
+export const PAD_GRASS_RADIUS = PAD_APRON_RADIUS + 0.2;
 export function padGrassMask(pads: readonly Dir[], x: number, y: number, z: number, radius: number): number {
   let m = 1;
-  for (const pad of pads) m *= Math.max(0, Math.min(1, (chordMetres(pad, x, y, z, radius) - 9.2) / 2));
+  for (const pad of pads) m *= Math.max(0, Math.min(1, (chordMetres(pad, x, y, z, radius) - PAD_GRASS_RADIUS) / 2));
   return m;
 }

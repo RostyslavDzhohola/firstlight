@@ -1,0 +1,647 @@
+{
+ "version": "6fec809202027bb3",
+ "body": "hollowmere",
+ "files": {
+  "glb": {
+   "name": "hollowmere.glb",
+   "bytes": 230080,
+   "sha256": "09254a72cf231cff1ed404b3b3c6ee41a782c801356aa055f8c759ee7945967e"
+  },
+  "color": {
+   "name": "../../portus/portus_color.webp",
+   "bytes": 167220,
+   "sha256": "02997d204f4e42e14bbe7192e88af48797683f424ef8e4734cb1d3a816eafda6"
+  },
+  "normal": {
+   "name": "../../portus/portus_normal.webp",
+   "bytes": 255836,
+   "sha256": "9658a29258d9c3112b8299510ff572c432116824aec6916ade7bcbb5bbf8d735"
+  }
+ },
+ "layerSize": 512,
+ "layers": [
+  "brick",
+  "plaster",
+  "rocktrim",
+  "roundtiles",
+  "unevenbrick",
+  "woodtrim",
+  "metal",
+  "cloth",
+  "bark",
+  "white",
+  "vine",
+  "leaves",
+  "pine",
+  "flowers",
+  "impostor_broad",
+  "impostor_pine"
+ ],
+ "slots": [
+  {
+   "name": "MI_Brick",
+   "layer": 0,
+   "tint": [
+    0.62,
+    0.58,
+    0.7
+   ],
+   "rough": 0.86,
+   "metal": 0.0,
+   "normal": 1.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "MI_Plaster",
+   "layer": 1,
+   "tint": [
+    0.62,
+    0.588,
+    0.684
+   ],
+   "rough": 0.92,
+   "metal": 0.0,
+   "normal": 0.8,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "MI_RockTrim",
+   "layer": 2,
+   "tint": [
+    0.62,
+    0.6,
+    0.74
+   ],
+   "rough": 0.86,
+   "metal": 0.0,
+   "normal": 1.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "MI_RoundTiles",
+   "layer": 3,
+   "tint": [
+    0.42,
+    0.4,
+    0.52
+   ],
+   "rough": 0.72,
+   "metal": 0.0,
+   "normal": 1.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "MI_UnevenBrick",
+   "layer": 4,
+   "tint": [
+    0.7,
+    0.66,
+    0.82
+   ],
+   "rough": 0.88,
+   "metal": 0.0,
+   "normal": 1.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "MI_WoodTrim",
+   "layer": 5,
+   "tint": [
+    0.52,
+    0.46,
+    0.5
+   ],
+   "rough": 0.78,
+   "metal": 0.0,
+   "normal": 0.8,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "MI_WoodTrim_Wear",
+   "layer": 5,
+   "tint": [
+    0.465,
+    0.405,
+    0.43
+   ],
+   "rough": 0.82,
+   "metal": 0.0,
+   "normal": 0.8,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "MI_MetalOrnaments",
+   "layer": 6,
+   "tint": [
+    0.4675,
+    0.4675,
+    0.527
+   ],
+   "rough": 0.45,
+   "metal": 0.35,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "M_Cloth",
+   "layer": 7,
+   "tint": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rough": 0.9,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "Bark_NormalTree",
+   "layer": 8,
+   "tint": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rough": 0.9,
+   "metal": 0.0,
+   "normal": 1.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "MI_WindowGlass",
+   "layer": 9,
+   "tint": [
+    0.4342,
+    0.1441,
+    0.0296
+   ],
+   "rough": 0.2,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 1.0
+  },
+  {
+   "name": "M_Glow",
+   "layer": 9,
+   "tint": [
+    0.3,
+    0.09,
+    0.012
+   ],
+   "rough": 0.6,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    1.0,
+    0.36,
+    0.06,
+    0.85
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "MI_Vine",
+   "layer": 10,
+   "tint": [
+    0.13,
+    0.4,
+    0.04
+   ],
+   "rough": 0.75,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": true,
+   "glow": 0.0
+  },
+  {
+   "name": "Leaves_NormalTree",
+   "layer": 11,
+   "tint": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rough": 0.8,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": true,
+   "glow": 0.0
+  },
+  {
+   "name": "Leaves_Pine",
+   "layer": 12,
+   "tint": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rough": 0.8,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": true,
+   "glow": 0.0
+  },
+  {
+   "name": "Flowers",
+   "layer": 13,
+   "tint": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rough": 0.8,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": true,
+   "glow": 0.0
+  },
+  {
+   "name": "Impostor_Broad",
+   "layer": 14,
+   "tint": [
+    0.92,
+    0.92,
+    0.92
+   ],
+   "rough": 0.85,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": true,
+   "glow": 0.0
+  },
+  {
+   "name": "Impostor_Pine",
+   "layer": 15,
+   "tint": [
+    0.92,
+    0.92,
+    0.92
+   ],
+   "rough": 0.85,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": true,
+   "glow": 0.0
+  },
+  {
+   "name": "M_Brass",
+   "layer": 9,
+   "tint": [
+    0.5776,
+    0.2789,
+    0.0273
+   ],
+   "rough": 0.45,
+   "metal": 0.3,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "M_Bone",
+   "layer": 9,
+   "tint": [
+    0.6867,
+    0.6308,
+    0.5271
+   ],
+   "rough": 0.7,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "M_GlowWarm",
+   "layer": 9,
+   "tint": [
+    0.3,
+    0.09,
+    0.012
+   ],
+   "rough": 0.6,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    1.0,
+    0.36,
+    0.06,
+    0.85
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "M_GlowTeal",
+   "layer": 9,
+   "tint": [
+    0.1119,
+    1.0,
+    0.6308
+   ],
+   "rough": 0.5,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 1.0
+  },
+  {
+   "name": "M_GlowAmber",
+   "layer": 9,
+   "tint": [
+    1.0,
+    0.4508,
+    0.063
+   ],
+   "rough": 0.5,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 1.0
+  }
+ ],
+ "sharedStrips": "portus",
+ "look": {
+  "albedoFloor": 0.045
+ },
+ "prefabs": 16,
+ "items": 36,
+ "trianglesLod0": 11365
+}

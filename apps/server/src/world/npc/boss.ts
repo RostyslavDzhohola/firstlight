@@ -18,7 +18,7 @@ import {
   type AttackDef, type BossDef, type BossEventMsg, type NpcAttackMsg, type NpcDef,
 } from "@firstlight/shared/content/npcs";
 import { partyOf } from "../../social/parties.ts";
-import { actorPos, type NpcActor, type PlayerActor } from "../actors.ts";
+import { actorPos, type ImmuneWhy, type NpcActor, type PlayerActor } from "../actors.ts";
 import { dealDamage, type BreakableHost } from "../combat.ts";
 import type { V3 } from "../geometry.ts";
 import { cancelAttack, chest, playersInCircle, playersInLine, startAttack, updateAttack } from "./attacks.ts";
@@ -514,11 +514,17 @@ export class BossController {
    * Players outside the arena deal nothing beyond its edge + OUTSIDE_REACH (F12: a sniper 75 m
    * out), and nothing at all while nobody is inside (Codex B1: no chipping from the edge).
    */
-  mitigate(n: Npc, amount: number, _weak: boolean, attacker?: PlayerActor | NpcActor | null): number {
-    if (n.dead || n.state.flags & NF.INVULN) return 0;
+  mitigate(n: Npc, amount: number, _weak: boolean, attacker?: PlayerActor | NpcActor | null, why?: ImmuneWhy): number {
+    if (n.dead || n.state.flags & NF.INVULN) {
+      if (why) why.reason = "invulnerable";
+      return 0;
+    }
     if (attacker?.kind === "player") {
       const d = flatDist(this.arena.centre, actorPos(attacker));
-      if (d > this.arena.radius + OUTSIDE_REACH || (d > this.arena.radius && !this.occupied())) return 0;
+      if (d > this.arena.radius + OUTSIDE_REACH || (d > this.arena.radius && !this.occupied())) {
+        if (why) why.reason = "arena"; // from too far out, or from outside an empty arena
+        return 0;
+      }
     }
     const open = this.sys.world.now() < this.windowUntil;
     return amount * (open ? 1 : (this.npcDef.armour ?? 1));

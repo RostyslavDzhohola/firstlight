@@ -150,6 +150,14 @@ What "no guard" means:
 - [#34681](https://github.com/mrdoob/three.js/issues/34681): `PassNode.compileAsync()` has been broken since r183 and still is on `dev`.
   - A reporter measured 294 synchronous node builds, ~1.7 s of main thread, on the first `RenderPipeline.render()` with `fxaa()` (M4 Max).
   - A community fix (#34717) was closed unmerged on 2026-09-30.
+  - Mechanism (read in r186, 2026-10-15): a node build's cache key includes `renderContext.id`
+    (`RenderObject.getMaterialCacheKey`), and a context is keyed by (target attachments, MRT, call
+    depth) (`RenderContexts.get`). A scene pass renders nested in the pipeline's quad (call depth 2 when
+    `fxaa()` wraps the chain), but `compileAsync` asks for depth 0 on the canvas target, so it compiles
+    variants no frame uses. Our workaround: `render/compilePass.ts` learns the pass's call depth from one
+    render with the scene hidden, then runs `compileAsync` with the pass's target, MRT and that depth.
+  - Shadow-pass variants still build in real frames (`compileAsync` skips shadows); the warm-up adds
+    casters to the shadow pass a few predicted builds per frame (`warmShadowCasters` in `render/warmup.ts`).
 - [#33821](https://github.com/mrdoob/three.js/issues/33821): material init is 16–36× slower than WebGLRenderer in a 10k-mesh microbenchmark.
   - Cause: a unique `uniform()` node per material produces a unique builder state.
   - Workaround: the `webgpu_instance_uniform` pattern.

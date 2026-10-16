@@ -11,7 +11,7 @@ import { testTownAssets } from "../render/townAssets.testutil.ts";
 import { SHADOW_ONLY_LAYER, sunRigFor } from "../render/atmosphere.ts";
 import { LOOKS } from "../render/looks.ts";
 import { skyDir } from "../render/sunFrame.ts";
-import { PortusTown, TOWN_LOD_DISTANCE } from "./PortusTown.ts";
+import { SiteTown as PortusTown, TOWN_LOD_DISTANCE } from "./SiteTown.ts";
 
 const terrain = createTerrain("portus");
 const R = terrain.body.radius;

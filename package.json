@@ -8,7 +8,10 @@
     "dev": "pnpm --parallel --filter @firstlight/server --filter @firstlight/client dev",
     "build": "pnpm --filter @firstlight/client build",
     "test": "vitest run",
-    "typecheck": "pnpm -r --parallel typecheck"
+    "typecheck": "pnpm -r --parallel typecheck",
+    "e2e": "pnpm --filter @firstlight/client e2e",
+    "e2e:prod": "E2E_TARGET=prod pnpm --filter @firstlight/client e2e",
+    "e2e:gate": "pnpm --filter @firstlight/client exec node e2e/gate.mjs"
   },
   "devDependencies": {
     "typescript": "7.0.2",

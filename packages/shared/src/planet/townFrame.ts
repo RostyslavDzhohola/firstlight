@@ -89,3 +89,54 @@ export function townFrame(east: number, north: number, yawDeg: number, radius: n
   out.fx = fx; out.fy = fy; out.fz = fz;
   return out;
 }
+
+// ------------------------------------------------------------------------------------ site frames
+
+/**
+ * A site anchor's frame: up, east, north (planet space). The pole-frame vector (x, y, z) maps to
+ * east·(-x) + up·y + north·z (the pole frame has east = -X, up = +Y, north = +Z).
+ */
+export interface SiteAnchor {
+  up: readonly [number, number, number];
+  east: readonly [number, number, number];
+  north: readonly [number, number, number];
+}
+
+/** content/places.ts tangentFrame at `up`, as a site anchor. */
+export function siteAnchor(up: readonly [number, number, number]): SiteAnchor {
+  const ref = Math.abs(up[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
+  const k = ref[0]! * up[0] + ref[1]! * up[1] + ref[2]! * up[2];
+  let nx = ref[0]! - k * up[0], ny = ref[1]! - k * up[1], nz = ref[2]! - k * up[2];
+  const l = Math.sqrt(nx * nx + ny * ny + nz * nz);
+  nx /= l; ny /= l; nz /= l;
+  // east = north × up
+  const east: V3 = [ny * up[2] - nz * up[1], nz * up[0] - nx * up[2], nx * up[1] - ny * up[0]];
+  return { up: [up[0], up[1], up[2]], east, north: [nx, ny, nz] };
+}
+
+/** The Portus pole: the identity rotation of the town frame. */
+export const POLE_ANCHOR: SiteAnchor = { up: [0, 1, 0], east: [-1, 0, 0], north: [0, 0, 1] };
+
+function rotate(a: SiteAnchor, x: number, y: number, z: number, out: V3): V3 {
+  out[0] = -a.east[0] * x + a.up[0] * y + a.north[0] * z;
+  out[1] = -a.east[1] * x + a.up[1] * y + a.north[1] * z;
+  out[2] = -a.east[2] * x + a.up[2] * y + a.north[2] * z;
+  return out;
+}
+
+const _r: V3 = [0, 0, 0];
+
+/** Unit direction of site point (east, north) (geodesic metres from the anchor) on a body of `radius`. */
+export function siteDir(a: SiteAnchor, east: number, north: number, radius: number, out: V3 = [0, 0, 0]): V3 {
+  townDir(east, north, radius, _r);
+  return rotate(a, _r[0], _r[1], _r[2], out);
+}
+
+/** Site coordinates (east, north geodesic metres) of a planet-space point (any length). */
+export function siteCoords(a: SiteAnchor, x: number, y: number, z: number, radius: number, out: [number, number] = [0, 0]): [number, number] {
+  // Into the pole frame (the inverse rotation: the transpose).
+  const px = -(a.east[0] * x + a.east[1] * y + a.east[2] * z);
+  const py = a.up[0] * x + a.up[1] * y + a.up[2] * z;
+  const pz = a.north[0] * x + a.north[1] * y + a.north[2] * z;
+  return townCoords(px, py, pz, radius, out);
+}

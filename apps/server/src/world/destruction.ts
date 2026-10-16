@@ -14,7 +14,7 @@ import { actorPos, type Actor } from "./actors.ts";
 import type { BodyRoom } from "./BodyRoom.ts";
 import { loadCopy, roomCopyKey, saveCopy } from "./copyState.ts";
 import { emitGameEvent } from "./events.ts";
-import { dealDamage, type BreakableHost } from "./combat.ts";
+import { dealDamage, wallBetween, type BreakableHost } from "./combat.ts";
 import { splashShield } from "./support.ts";
 import type { V3 } from "./geometry.ts";
 import type { RoomSystem } from "./systems.ts";
@@ -288,13 +288,15 @@ export class DestructionSystem implements RoomSystem, BreakableHost {
       const d = Math.min(Math.hypot(chest[0] - at[0], chest[1] - at[1], chest[2] - at[2]), Math.hypot(p[0] - at[0], p[1] - at[1], p[2] - at[2]));
       if (d > R || a.state.hp <= 0) continue;
       if (shield.blocks(chest)) continue;
+      // A structure between the drum and the victim shelters it (D43).
+      if (wallBetween(host, at, chest)) continue;
       hits.push({ a, d, p });
     }
     for (const { a, d, p } of hits) {
       const share = FUEL_DRUM_BLAST.centre + (FUEL_DRUM_BLAST.edge - FUEL_DRUM_BLAST.centre) * (d / R);
       dealDamage(host, attacker, a, share * a.state.maxHp, false, [at[0] - p[0], at[1] - p[1], at[2] - p[2]], 2);
     }
-    this.splash(at, R, FUEL_DRUM_BLAST.props, "heavy", "fueldrum", by, b.index, (c) => shield.blocks(c));
+    this.splash(at, R, FUEL_DRUM_BLAST.props, "heavy", "fueldrum", by, b.index, (c) => shield.blocks(c) || wallBetween(host, at, c));
     shield.charge((s) => FUEL_DRUM_BLAST.props * splashFalloff(Math.max(0, Math.hypot(s.c[0] - at[0], s.c[1] - at[1], s.c[2] - at[2]) - s.r), R));
     this.room.broadcastNear("explode", { id: 0, x: at[0], y: at[1], z: at[2], radius: R, weapon: WEAPON_INDEX.get("grenade") ?? 0 }, at, 200);
   }

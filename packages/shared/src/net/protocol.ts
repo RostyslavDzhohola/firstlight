@@ -24,7 +24,9 @@ export const NET = {
 // 2: F12 core message changes + the sky lane's lightning schedule. 3: the Portus town (D40): the
 // server validates movement against the new town floor and the town's walls and houses, which an
 // older client neither has nor draws, so stale tabs must reload instead of being corrected forever.
-export const PROTOCOL_VERSION = 3;
+// 4: the planets' pad-0 outposts (D42-D46): the server blocks movement, shots, NPC sight and NPC
+// steering at their buildings, which an older client neither has nor draws.
+export const PROTOCOL_VERSION = 4;
 
 // ---- HTTP: entering the world -------------------------------------------------------------
 
@@ -143,6 +145,8 @@ export type ServerMessages = {
   swing: { by: string; weapon: number; heavy: boolean; hits: number };
   /** The server refused an action (`reason` is short and human-readable). */
   denied: { action: string; reason: string };
+  /** To the attacker only: a hit landed on an NPC that took no damage (spawning, evading, a shield). */
+  immune: { target: string; reason: "spawning" | "evading" | "invulnerable" | "shield" | "arena" };
   /** Movement snap-back: the authoritative position for input `seq`. */
   correct: { x: number; y: number; z: number; seq: number };
   /** A portal travel ticket was issued: leave and join `to` through /api/play. */

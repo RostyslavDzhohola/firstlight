@@ -757,10 +757,15 @@ issues". The builder reviews the diff before merging.
   Codex computer use (D23: now T3 Code's built-in browser): T1 landing→play < 30 s, T2 fight PvE/PvP, T3 death + own pile, T4 voice + radio,
   T5 email sign-in + second browser, T6 2-player boss kill (two windows; an admin `stage` command may
   pre-place the players), T7 screenshot share, T8 photo mode.
-- **When Codex control breaks:** retry up to 3 times ~10 min apart (keep building meanwhile); then run
-  the Playwright fallback spec for repeatable flows (T1, T3, T5, T7 and a two-context voice
-  signalling check); look-and-feel checks wait for Codex. Codex may use its AppleScript fallback,
-  Chrome only.
+- **Playwright journeys (D-e2e-1), the repeatable suite:** `apps/client/e2e`, J1–J7 from the owner's
+  reports (HANDOFF 6i): the game played as a new player, headless and muted, on WebGL2 and WebGPU,
+  reading state through the `?e2e` test hook (`window.__fl`, `src/debug/e2eHook.ts`). `pnpm e2e`
+  (local stack), `pnpm e2e:prod` (read-only smoke after each deploy), `pnpm e2e:gate` (the journeys in
+  `e2e/gates.json`; a failure blocks the deploy). Every owner report becomes a journey or a line in
+  `docs/tests/player-expectations.md`; its fix is done only when that passes.
+- **Codex, the exploratory beta tester:** after each deploy it plays 10–15 minutes as a first-time
+  player against `docs/tests/player-expectations.md` and reports what's missing or confusing, with
+  screenshots and a short clip. The cards above stay for one-off milestone checks.
 - **Load:** `tools/bots` (§7.4, F2).
 
 ### 9.4 Review

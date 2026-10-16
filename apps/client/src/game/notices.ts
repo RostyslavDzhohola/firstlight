@@ -21,6 +21,19 @@ export function holsteredText(body: BodyId | null | undefined): string {
   return ATTACK_DENIED["safe zone"]!;
 }
 
+const IMMUNE: Record<string, string> = {
+  spawning: "It's still arriving: no damage for a moment",
+  evading: "It's running home: no damage until it gets there",
+  invulnerable: "It can't be hurt right now",
+  shield: "Its shield took that: hit it from the side or back",
+  arena: "Step into its arena to hurt it",
+};
+
+/** The notice for a hit that landed on an NPC and did nothing (server `immune`), or null. */
+export function immuneText(reason: string): string | null {
+  return IMMUNE[reason] ?? null;
+}
+
 /** The notice for a refused attack, or null (not an attack, or a reason players needn't see, like the rate limit). */
 export function attackDeniedText(action: string, reason: string, body?: BodyId): string | null {
   if (action !== "fire" && action !== "melee") return null;

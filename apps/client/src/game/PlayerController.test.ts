@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import * as THREE from "three/webgpu";
 import { BODIES, createTerrain, type Breakable, type Terrain } from "@firstlight/shared";
 import { structureCollider, townCoords, townDir } from "@firstlight/shared/planet/town";
 import { BreakableCollider, PLAYER_BODY } from "@firstlight/shared/planet/collide";
@@ -221,6 +222,41 @@ describe("PlayerController", () => {
       expect(rolledAt).toBeLessThan(0.1);
     });
 
+    it("the cooldown is a wall-clock deadline: at 10 fps (frames clamped to 50 ms) C 1.25 s after a roll rolls", () => {
+      // A slow machine: 100 ms frames, simulated as 50 ms steps (Game's clamp). In game time only
+      // 0.62 s have passed, which used to drop the press until 2.4 s of real time had gone by.
+      const pc = spawn();
+      const input = fakeInput();
+      let now = 10_000;
+      input.pressed.add("KeyC");
+      pc.update(0.05, input, false, now);
+      input.pressed.clear();
+      for (let i = 0; i < 12; i++) pc.update(0.05, input, false, (now += 100)); // 1.2 s of real time
+      input.pressed.add("KeyC");
+      pc.update(0.05, input, false, (now += 100));
+      expect(pc.anim).toBe(ANIM.DODGE);
+    });
+
+    it("a stall longer than the cooldown counts in full: C on the first frame back rolls (Codex review)", () => {
+      // The roll, then the tab or the machine stalls 1.5 s (one frame, its step clamped to 50 ms):
+      // the server is ready again, and so is the client, however long the stall.
+      for (const [stallTo, rolls] of [[1100, false], [1250, true], [1500, true], [5000, true]] as const) {
+        const pc = spawn();
+        const input = fakeInput();
+        const t0 = 10_000;
+        let now = t0;
+        input.pressed.add("KeyC");
+        pc.update(1 / 60, input, false, now);
+        input.pressed.clear();
+        for (let i = 0; i < 25; i++) pc.update(1 / 60, input, false, (now += 1000 / 60)); // the roll ends
+        expect(pc.anim).not.toBe(ANIM.DODGE);
+        pc.update(0.05, input, false, (now = t0 + stallTo)); // one stalled frame, clamped to 50 ms
+        input.pressed.add("KeyC");
+        pc.update(1 / 60, input, false, (now += 1000 / 60));
+        expect(pc.anim === ANIM.DODGE, `C after a stall to ${stallTo} ms`).toBe(rolls);
+      }
+    });
+
     it("a press earlier in the cooldown is dropped, not stored for a late roll", () => {
       const pc = spawn();
       const input = fakeInput();
@@ -342,5 +378,43 @@ describe("PlayerController", () => {
       expect(pc.camForward.distanceTo(ref.camForward)).toBeLessThan(1e-9);
       expect(pc.facing.distanceTo(ref.facing)).toBeLessThan(1e-9);
     });
+  });
+});
+
+describe("third-person camera and structures (D42)", () => {
+  it("comes in short of a house wall behind the player and eases back out once clear", () => {
+    const portus = createTerrain("portus");
+    const town = structureCollider(portus)!;
+    const R = BODIES.portus.radius;
+    const pc = new PlayerController(portus, BODIES.portus.waterLevel);
+    pc.setStructures({ resolve: (p, out) => town.resolve(p, out), raycast: (o, d, maxT) => town.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT) });
+    // On the east street just south of the house at (26.2, 6.1), looking south: the house is behind.
+    const d = townDir(26.2, 2.2, R);
+    pc.teleport(d[0] * R, d[1] * R, d[2] * R);
+    run(pc, fakeInput(), 0.2);
+    const toward = (e: number, n: number) => {
+      const q = townDir(e, n, R);
+      const up = pc.pos.clone().normalize();
+      const v = new THREE.Vector3(q[0] * R - pc.pos.x, q[1] * R - pc.pos.y, q[2] * R - pc.pos.z);
+      return v.addScaledVector(up, -v.dot(up)).normalize();
+    };
+    (pc as unknown as { camForward: THREE.Vector3 }).camForward.copy(toward(26.2, -20));
+    const cam = new THREE.PerspectiveCamera();
+    const head = pc.pos.clone().addScaledVector(pc.pos.clone().normalize(), 1.65);
+    const clear = () => {
+      const v = cam.position.clone().sub(head);
+      const l = v.length();
+      return town.raycast(head.x, head.y, head.z, v.x / l, v.y / l, v.z / l, l + 0.1) === Infinity;
+    };
+    pc.placeCamera(cam);
+    expect(clear()).toBe(true);
+    expect(cam.position.distanceTo(head)).toBeLessThan(4.6);
+    // Turned round (the house now in front), the camera eases back out to its full distance.
+    (pc as unknown as { camForward: THREE.Vector3 }).camForward.copy(toward(26.2, 30));
+    pc.placeCamera(cam);
+    const first = cam.position.distanceTo(head);
+    for (let i = 0; i < 40; i++) pc.placeCamera(cam);
+    expect(cam.position.distanceTo(head)).toBeGreaterThan(first);
+    expect(cam.position.distanceTo(head)).toBeGreaterThan(4.5);
   });
 });

@@ -8,7 +8,7 @@ import { wallBetween } from "../combat.ts";
 import { PLAYER_RADIUS, rayTerrain, type V3 } from "../geometry.ts";
 import type { LivePlayer, NpcSystem } from "./NpcSystem.ts";
 import { MODE, type ActiveAttack, type Npc } from "./npc.ts";
-import { feetHeight, nearSafeRing, step } from "./steer.ts";
+import { blockedByStructure, CHASE_MARGIN, feetHeight, nearSafeRing, npcBody, step } from "./steer.ts";
 import { add, cross, dist, dot, flatDist, len, normalize, rotateAboutUp, scale, sub, tangentDir, up } from "./vec.ts";
 
 export interface NpcProjectile {
@@ -74,7 +74,7 @@ export function chest(p: V3, h = 0.9): V3 {
   return [p[0] + u[0] * h, p[1] + u[1] * h, p[2] + u[2] * h];
 }
 
-/** Line of sight from one point to another: terrain, intact breakable props, arena cover and the town's structures block it. */
+/** Line of sight from one point to another: terrain, intact breakable props, arena cover and the sites' structures block it. */
 export function canSee(sys: NpcSystem, from: V3, to: V3): boolean {
   const d = sub(to, from);
   const l = len(d);
@@ -82,7 +82,7 @@ export function canSee(sys: NpcSystem, from: V3, to: V3): boolean {
   const dir: V3 = [d[0] / l, d[1] / l, d[2] / l];
   if (rayTerrain(sys.world.terrain, from, dir, l, 2.5) < l - 0.75) return false;
   // Cover works both ways (F12): the walls that stop players' shots hide them from NPCs too, and so
-  // do the Portus town's walls and buildings (D-zones-3).
+  // do the structures: the Portus town's walls, an outpost's buildings (D-zones-3, D43).
   const walls = sys.world.host.walls;
   if (walls && walls.raycast(from[0], from[1], from[2], dir[0], dir[1], dir[2], l - 0.75) < l - 0.75) return false;
   return !sys.world.host.props?.raycast(from, dir, l - 0.75);
@@ -305,8 +305,9 @@ function fromDirOf(n: Npc, p: V3): V3 {
 
 /**
  * `src`: where splash comes from (lobbed circles), so a Prism Bubble between it and a player stops it.
- * A town structure between the strike's source (the splash, else the NPC's chest) and the player's
- * chest stops it too (D-zones-3); breakable props keep their old rule (they don't).
+ * A structure (the town's, an outpost's) between the strike's source (the splash, else the NPC's
+ * chest) and the player's chest stops it too (D-zones-3, D43); breakable props keep their old rule
+ * (they don't).
  */
 function hitAll(sys: NpcSystem, n: Npc, list: LivePlayer[], a: AttackDef, at: ActiveAttack, from?: V3, src?: V3) {
   const o = sys.world.host.walls ? (src ?? chest(n.pos, Math.min(n.height * 0.8, 2))) : null;
@@ -351,9 +352,13 @@ function resolve(sys: NpcSystem, n: Npc, at: ActiveAttack, now: number) {
         const l = len(land);
         const ux = land[0] / l, uy = land[1] / l, uz = land[2] / l;
         const fh = feetHeight(sys.ground, ux, uy, uz, n.def.locomotion, n.def.hover ?? 0);
-        if (fh !== null && !nearSafeRing(sys.ground, land[0], land[1], land[2], 3 + n.radius)) {
+        // Lands anywhere outside the zones' least margin (D-evade-1): a player just outside a ring can be leapt at.
+        if (fh !== null && !nearSafeRing(sys.ground, land[0], land[1], land[2], CHASE_MARGIN + n.radius)) {
           const r = sys.ground.R + fh;
-          n.pos = [ux * r, uy * r, uz * r];
+          const to: V3 = [ux * r, uy * r, uz * r];
+          // Never through or into a building (D44): the leap stops where it started.
+          const body = npcBody(n.radius, n.height);
+          if (!blockedByStructure(sys.ground, n.pos, to, body) && (sys.ground.structures?.isClear({ x: to[0], y: to[1], z: to[2] }, body) ?? true)) n.pos = to;
         }
       }
       hitAll(sys, n, playersInCircle(sys, n.pos, a.radius ?? 1.5), a, at);
@@ -421,7 +426,7 @@ function runActive(sys: NpcSystem, n: Npc, at: ActiveAttack, now: number, dt: nu
       const speed = a.speed ?? 10;
       const out: V3 = [0, 0, 0];
       const d = Math.min(speed * dt, (a.length ?? 8) - at.travelled);
-      const used = d > 0 ? step(sys.ground, n.pos, at.dir, d, n.def.locomotion, n.def.hover ?? 0, n.radius, out) : -1;
+      const used = d > 0 ? step(sys.ground, n.pos, at.dir, d, n.def.locomotion, n.def.hover ?? 0, n.radius, out, "close", 1, n.height) : -1;
       if (used !== 0) {
         // Hit an obstacle (cliff, water, safe ring): the Pixel Lancer is stunned (punish window).
         at.activeUntil = now;
@@ -543,7 +548,7 @@ export function stepNpcProjectiles(sys: NpcSystem, now: number, dt: number) {
     const sl = len(step0);
     const dir0 = sl > 0 ? scale(step0, 1 / sl) : step0;
     const propT = sl > 0 ? (sys.world.host.props?.raycast(pr.pos, dir0, sl)?.t ?? Infinity) : Infinity;
-    // …and so does a town structure (D-zones-3).
+    // …and so does a structure (D-zones-3, D43).
     const walls = sys.world.host.walls;
     const wallT = sl > 0 && walls ? walls.raycast(pr.pos[0], pr.pos[1], pr.pos[2], dir0[0], dir0[1], dir0[2], Math.min(sl, propT)) : Infinity;
     const wall = Math.min(propT, wallT) < Infinity ? { t: Math.min(propT, wallT) } : null;

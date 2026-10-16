@@ -102,7 +102,8 @@ describe("Portus town placement (D38)", () => {
     const other = createTerrain("portus");
     expect(townSolids(other)).toEqual(townSolids(terrain));
     expect(townSolids(terrain).length).toBeGreaterThan(250);
-    expect(structureCollider(createTerrain("arcadia"))).toBeNull();
+    // Off Portus the town has nothing; the planet's own sites (its pad outpost) are planet/sites.ts'.
+    expect(townSolids(createTerrain("arcadia"))).toEqual([]);
   });
 
   it("lines the portal courts and the market up with the game's portals, Juno, the Hall wall and the dummies", () => {

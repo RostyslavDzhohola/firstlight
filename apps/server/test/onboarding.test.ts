@@ -42,6 +42,15 @@ function inFront(i: number, metres: number): [number, number, number] {
   return ground("portus", dir);
 }
 
+/** A spot on the line from dummy `a` to dummy `b` (fraction `k`, 0 = at `a`), `forward` m toward the plaza. */
+function between(a: number, b: number, k: number, forward: number): [number, number, number] {
+  const da = TRAINING_DUMMIES[a]!, db = TRAINING_DUMMIES[b]!;
+  const e = da.east + (db.east - da.east) * k, n = da.north + (db.north - da.north) * k;
+  const l = Math.hypot(e, n);
+  return ground("portus", offsetDir(placeDir("portus_plaza"), e - (e / l) * forward, n - (n / l) * forward, BODIES.portus.radius));
+}
+const dist = (p: { x: number; y: number; z: number }, q: readonly number[]) => Math.hypot(p.x - q[0]!, p.y - q[1]!, p.z - q[2]!);
+
 /** Camera-style ray from 1.6 m above our feet toward the dummy's chest (or `away` from it). */
 function aim(b: Bot, i: number, away = false) {
   const p = me(b);
@@ -60,6 +69,8 @@ function aim(b: Bot, i: number, away = false) {
 async function knockDown(b: Bot, i: number, weaponId: string) {
   const gap = WEAPON_BY_ID.get(weaponId)!.tiers[0].rate * 1000 + 60;
   for (let n = 0; n < HITS; n++) {
+    // Already down (an earlier hit counted): stop, or the extra swing would go to the next dummy.
+    if ((b.you.onboarding?.hits[i] ?? HITS) >= HITS) break;
     b.send("train", aim(b, i));
     await until(`hit ${n + 1} on dummy ${i}`, () => b.you.onboarding === undefined || b.you.onboarding.hits[i] >= n + 1, 3000);
     await sleep(gap);
@@ -107,6 +118,40 @@ describe("onboarding", () => {
     b.send("train", aim(b, 1));
     await until("hit", () => b.you.onboarding.hits[1] === 1);
     expect(me(b).hp).toBe(me(b).maxHp); // nobody got hurt: it's a safe zone
+  });
+
+  // e2e: Kappa's Riverstaff hits didn't count on a standing dummy with a knocked-down one next to
+  // the player (the nearest dummy in reach took them, down or not). Dummies stand 2.5 m apart; the
+  // melee reaches (plus the training slack) are 2.4–3.8 m, so both are in reach here.
+  for (const [who, starter, slot, weapon] of [["Kappa", 2, 0, "riverstaff"], ["Brother Ash", 1, 0, "sunbrand"], ["fists", 3, 1, "fists"]] as const) {
+    it(`${who} (${weapon}): with dummy 0 down and nearer, a swing at dummy 1 counts on dummy 1`, async () => {
+      const b = await bot(`melee_${weapon}`, "portus", "admin", { starter });
+      if (slot !== 0) {
+        b.send("equip", { slot });
+        await until("fists in hand", () => b.you.selected === slot);
+      }
+      await tpAndWait(b, inFront(0, 1.3));
+      await knockDown(b, 0, weapon);
+      await until("dummy 0 down", () => b.you.onboarding.hits[0] === HITS);
+      await tpAndWait(b, between(0, 1, 0.25, 1.4)); // in front of the row: both ahead, both in reach
+      expect(dist(me(b), feet(0))).toBeLessThan(dist(me(b), feet(1))); // the down one is nearer
+      await sleep(WEAPON_BY_ID.get(weapon)!.tiers[0].rate * 1000 + 60);
+      b.send("train", aim(b, 1));
+      await until("a hit on dummy 1", () => b.you.onboarding.hits[1] === 1);
+      expect(b.you.onboarding.hits[0]).toBe(HITS);
+    });
+  }
+
+  it("a shot at a standing dummy through a knocked-down one counts on the standing one", async () => {
+    const b = await bot("gunner_row", "portus", "admin", { starter: 3 }); // Unit 7: Pocket Carbine
+    await tpAndWait(b, inFront(0, 6));
+    await knockDown(b, 0, "carbine");
+    await until("dummy 0 down", () => b.you.onboarding.hits[0] === HITS);
+    // On the row's line, 2 m beyond dummy 0: the ray to dummy 1 passes through dummy 0's spot.
+    await tpAndWait(b, between(0, 1, -0.8, 0));
+    await sleep(400);
+    b.send("train", aim(b, 1));
+    await until("a hit on dummy 1", () => b.you.onboarding.hits[1] === 1);
   });
 
   it("finishing pays 50 XP in all, level 2 and the Spark medal, once per account", async () => {

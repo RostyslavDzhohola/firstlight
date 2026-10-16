@@ -3,7 +3,9 @@
 // fixed singles (beasts, sentinels, egg NPCs). Same body → same points in every room copy.
 
 import { CHUNK_QUADS, gridDir, hash01, hash4, nearSafeZone, padDirs, tangentFrame, type Face, type Terrain } from "@firstlight/shared";
-import { townDir } from "@firstlight/shared/planet/townFrame";
+import { siteCoords, siteDir, townDir } from "@firstlight/shared/planet/townFrame";
+import { outpostAnchor } from "@firstlight/shared/planet/sites";
+import { OUTPOST_GROUND_HALF, outpostGroundDistance } from "@firstlight/shared/planet/outpostGround";
 import { resolveAreaDir, stableTangent, walk, type ArenaLayout } from "@firstlight/shared/content/arenas";
 import {
   ARRIVAL_GROUPS, NPC_AREAS, NPC_DEFS, NPC_INDEX, NPC_RULES, PLANET_WILDS, PORTUS_WILDS, defLevels, npcDef,
@@ -43,6 +45,11 @@ const MIN_HOSTILE_PAD_DIST = 45;
 const MIN_POINT_DIST = 28;
 /** Fixed groups (Portus, arrival groups): members stand this far from the home at most. */
 const FIXED_SPREAD = 4;
+/**
+ * A group starts on open ground beside a pad outpost, not in its barn (D44): every member stands at
+ * least this far (m, plus its radius) from the outpost's paving, paths and buildings.
+ */
+const SITE_CLEAR = 1.5;
 /** Named areas get one group per this many square metres × density. */
 const AREA_M2_PER_GROUP = 6000;
 
@@ -183,7 +190,33 @@ export function buildSpawnPoints(terrain: Terrain, arena: ArenaLayout | null): S
     if (defs.some((d) => d.respawn === "egg")) return 600;
     return NPC_RULES.respawnPack;
   };
+  // A group on or beside pad 0's outpost moves to the nearest dry home (rings of 1 m round it) where
+  // every member stands SITE_CLEAR off the outpost.
+  const anchor = outpostAnchor(terrain);
+  const siteAt: [number, number] = [0, 0];
+  const membersClear = (d: V3, members: readonly SpawnMember[]) => {
+    const t1 = stableTangent(d);
+    const t2 = cross(d, t1);
+    return members.every((m) => {
+      const q = walk(d, t1, m.a, t2, m.b, R);
+      const [e, n] = siteCoords(anchor, q[0], q[1], q[2], R, siteAt);
+      return outpostGroundDistance(body.id, e, n) >= SITE_CLEAR + NPC_DEFS[m.def]!.radius;
+    });
+  };
+  const clearOfSite = (d: V3, members: readonly SpawnMember[]): V3 => {
+    if (chord(main, d) > OUTPOST_GROUND_HALF * 2 || membersClear(d, members)) return d;
+    const [e0, n0] = siteCoords(anchor, d[0], d[1], d[2], R, [0, 0]);
+    for (let ring = 1; ring <= 30; ring++) {
+      for (let k = 0; k < 24; k++) {
+        const a = (k / 24) * Math.PI * 2;
+        const c = siteDir(anchor, e0 + Math.cos(a) * ring, n0 + Math.sin(a) * ring, R) as V3;
+        if (membersClear(c, members) && classify(terrain, c).land) return c;
+      }
+    }
+    return d;
+  };
   const add = (p: Omit<SpawnPoint, "id" | "t1" | "t2" | "pos" | "respawnSec"> & { respawnSec?: number }) => {
+    p = { ...p, dir: clearOfSite(p.dir, p.members) };
     const t1 = stableTangent(p.dir);
     const t2 = cross(p.dir, t1);
     for (const m of p.members) {

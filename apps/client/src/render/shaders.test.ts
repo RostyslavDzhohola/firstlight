@@ -214,6 +214,35 @@ for (const backendName of ["webgpu", "webgl2"] as const) {
       }
     });
 
+    it("pad outposts: the albedo floor and glow mode, as cell meshes and as the instanced pad models", () => {
+      const layers = 9;
+      const color = stripTexture(new Uint8Array(4 * layers).fill(200), 1, layers, true);
+      const normal = stripTexture(new Uint8Array(4 * layers).fill(128), 1, layers, false);
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(new Float32Array([0, 150, 0, 1, 150, 0, 0, 150, 1]), 3));
+      g.setAttribute("normal", new THREE.BufferAttribute(new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]), 3));
+      g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array([0, 0, 2, 0, 0, 2]), 2));
+      g.setAttribute("color", new THREE.BufferAttribute(new Uint8Array([30, 255, 160, 255, 30, 255, 160, 255, 30, 255, 160, 255]), 4, true));
+      // Emissive mode 3 (glow) on layer 8.
+      g.setAttribute("townMat", new THREE.BufferAttribute(new Uint8Array([8, 128, 0, 3, 8, 128, 0, 3, 8, 128, 0, 3]), 4, true));
+      g.setIndex([0, 1, 2]);
+      for (const kind of ["opaque", "cutout"] as const) {
+        for (const floor of [0, 0.045]) {
+          for (const instanced of [false, true]) {
+            const scene = sceneWithLights();
+            const mat = townMaterial(kind, true, color, normal, floor);
+            const mesh = instanced ? new THREE.InstancedMesh(g, mat, 3) : new THREE.Mesh(g, mat);
+            mesh.receiveShadow = true;
+            mesh.castShadow = true;
+            scene.add(mesh);
+            expectClean(build(renderer, scene, camera, mesh));
+          }
+        }
+      }
+      expect(townMaterial("opaque", true, color, normal, 0.045).name).toBe("town:opaque:floor");
+      expect(townMaterial("opaque", true, color, normal, 0.045)).not.toBe(townMaterial("opaque", true, color, normal, 0));
+    });
+
     it("particles and blob shadows", () => {
       const scene = sceneWithLights();
       const p = new ParticleSystem(scene);
