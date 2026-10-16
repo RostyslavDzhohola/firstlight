@@ -29,7 +29,9 @@ AUTH_DB_PATH=/tmp/fl-e2e/auth.db GAME_DB_PATH=/tmp/fl-e2e/game.db pnpm dev
   form and press Claim ("Done. <name> is now an admin."); reload the game. A token works once; for a
   second admin restart with a new token, or set `is_admin = 1` for that account in game.db's
   `account` table and rejoin. Admins get Esc → Admin (fly, god mode, speed ×2, max level, every
-  item, back to normal; D-admin-1).
+  item; D-admin-1). The first of those moves the admin into a private sandbox copy of the body
+  (badge "SANDBOX — nothing here is saved"); Back to normal leaves it for the real character
+  (D-admin-3).
 - Automation: the pointer lock can't be requested by automation, so force it on; combat, the hotbar
   and E only act while it is locked. `window.__game` exposes the game (`.hud`, `.net.room.state`).
 - Do not use `?devguest` for T5 (it hides Save).

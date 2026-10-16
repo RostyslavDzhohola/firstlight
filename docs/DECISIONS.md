@@ -846,3 +846,21 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   hour overall before any comparison, and a token under 32 random bytes switches it off. Why: admin
   powers must not leak into the economy, the boards or other players, and a revoked admin must lose
   them while connected.
+- **D-admin-3 (2026-10-15):** the test switches work only in a private sandbox (Codex round 2 on
+  D-admin-2: per-system guards kept missing paths). The first switch or test action moves the admin
+  into a sandbox: its own BodyRoom copy of the body (same planet, its own NPCs), joinable only by
+  that admin while an admin, flagged `sandbox`. Entering needs the real character alive and out of
+  a fight; it is saved and leaves the world (a handoff, no linger). Inside, nothing is saved, and
+  that is enforced in one place: everything a sandbox room runs (hooks, messages, tick, its timers,
+  any method another room calls on it) runs in an AsyncLocalStorage scope; there every process-wide
+  store and bus (characters, piles, account progress, copy state, the one-actor hub, pile/NPC/Hall
+  events, account timers) resolves to the sandbox's own memory copy, and game.db's single entry
+  point `stmt()` turns every write into a no-op. The sandbox is socially offline (no presence,
+  parties, blocks, reports, moderation, announcements, analytics). Back to normal is leaving it and
+  joining the real world as the real character from the database, on its own body; travel between
+  bodies stays in the sandbox; joining the real world anywhere, a merge, a restart or losing admin
+  closes it (rights are asked of the account before every privileged message, the 2 s recheck is
+  only for the passive switches). The HUD says "SANDBOX — nothing here is saved". Supersedes
+  D-admin-2's test sessions (its claim hardening stays). Why: one boundary that every writer goes
+  through, instead of a guard in each system; other players can't be in the room, so PvP, heals and
+  projectiles can't leak, and tests compare the whole of game.db before and after a sandbox.
