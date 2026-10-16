@@ -20,6 +20,8 @@ afterEach(async () => {
 });
 
 const NINJA = STARTERS.findIndex((s) => s.id === "ninja");
+/** Metres from Arcadia's pad 0 to the duel spot: out of the walled arrival outpost, on open land. */
+const BASE = 70;
 const SEAL = WEAPON_BY_ID.get("ember_seal")!;
 const hold = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** waitFor with a label in the failure message. */
@@ -55,7 +57,8 @@ async function join(name: string, body: string, starter: number) {
 
 async function stand(r: Room, at: V) {
   place(r, at);
-  await until(`standing at ${at.map((x) => x.toFixed(1))}`, () => flat(pos(r), at) < 1.5 && ready(r));
+  // A teleport onto a structure lands beside it; tests aim at actual positions.
+  await until(`standing at ${at.map((x) => x.toFixed(1))}`, () => flat(pos(r), at) < 4 && ready(r));
 }
 
 /** A ninja and `targets` players `metres` (and `sideways`) down a fixed tangent from Arcadia pad 0. */
@@ -64,7 +67,7 @@ async function duel(metres = 12, extra: [number, number][] = []) {
   const b = await join("target", "arcadia", 1);
   const others = [];
   for (let i = 0; i < extra.length; i++) others.push(await join(`t${i}`, "arcadia", 1));
-  const base = nearPad("arcadia", 0, 40);
+  const base = nearPad("arcadia", 0, BASE);
   const R = BODIES.arcadia.radius;
   await stand(a, base);
   await stand(b, offset(base, metres, 0, R));
@@ -123,7 +126,7 @@ describe("ninja starter: Ember Kunai and Ember Seal", () => {
 
   it("the fireball reaches 30 m and no further", async () => {
     const R = BODIES.arcadia.radius;
-    const base = nearPad("arcadia", 0, 40);
+    const base = nearPad("arcadia", 0, BASE);
     // Two ninjas side by side, each with a target down its own line: 28 m (inside) and 32.5 m (outside).
     const near = await join("ninja_n", "arcadia", NINJA);
     const far = await join("ninja_f", "arcadia", NINJA);
@@ -195,7 +198,7 @@ describe("ninja starter: Ember Kunai and Ember Seal", () => {
 
   it("burns an NPC after the blast", async () => {
     const a = await join("ninja", "arcadia", NINJA);
-    const base = nearPad("arcadia", 0, 40);
+    const base = nearPad("arcadia", 0, BASE);
     await stand(a, base);
     const at = offset(base, 10, 0, BODIES.arcadia.radius);
     const id = await spawnNpc(a, "bramblehorn", at, { instant: true, roam: 0 });
