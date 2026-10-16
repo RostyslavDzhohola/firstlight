@@ -973,6 +973,10 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (inTestSession(victim)) {
       endTestSession(this, victim, "died");
       victim.state.hp = victim.state.maxHp;
+      // Whatever was killing it (a burn) stops, and the usual moment of protection follows.
+      victim.burn = null;
+      victim.protectedUntil = Date.now() + RULES.PROTECT_MS;
+      victim.state.flags |= PF.PROTECTED;
       victim.client.send("toast", { text: "Test session over: you'd have died. Back to normal, nothing lost.", kind: "warn" });
       this.saveActor(victim);
       return;

@@ -77,6 +77,7 @@ export class AdminPanel extends Panel {
       const tiers = el("span", "", row);
       for (let t = 1; t <= w.tiers.length; t++) {
         const btn = el("button", "btn ghost", tiers, TIER[t]!);
+        btn.setAttribute("aria-label", `${w.name} ${TIER[t]}`);
         btn.style.marginLeft = ".3em";
         btn.onclick = () => adminMode(this.game, { action: "hand", id: w.id, tier: t });
       }
