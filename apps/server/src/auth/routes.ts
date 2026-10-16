@@ -2,13 +2,14 @@
 //   GET  /api/account/me         Bearer JWT → account summary (display name, guest, admin, character, medals, pads)
 //   POST /api/account/name       Bearer JWT, {name} → set the display name (unique, filtered)
 //   GET  /api/account/save-status  public → {saving: "ok" | "busy" | "unavailable"}: can sign-in codes go out?
-//   GET  /admin/claim?token=…    session cookie or Bearer → make this account admin, burn the token
+//   GET  /admin/claim            a form → POST /admin/claim {token}: this browser's account (guest or
+//                                saved) becomes admin, the token burns (GET ?token=… still works)
 //   POST /api/test/bot-token     x-loadtest-secret → a loadtest play token (only when LOADTEST_SECRET is set)
 
 import { randomUUID } from "node:crypto";
 import { STARTERS } from "@firstlight/shared/content/weapons";
 import { fromNodeHeaders } from "better-auth/node";
-import type { Express, NextFunction, Request, Response } from "express";
+import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import { claimAdmin, ensureAccount, getAccount, isBanned, isClaimBurnt, setDisplayName } from "../db/accounts.ts";
 import { listDiscoveredPads, listMedals, loadCharacter } from "../db/characters.ts";
 import { NAME_MESSAGES } from "../db/names.ts";
@@ -121,37 +122,59 @@ export function mountAccountRoutes(app: Express, a: Accounts, cfg: AccountsConfi
     res.json({ ok: true, name: r.name });
   });
 
-  app.get("/admin/claim", noStore, async (req, res) => {
+  // One-time admin claim with the server's ADMIN_CLAIM_TOKEN, for the account playing in this browser
+  // (its session cookie), guest or saved: the owner can't save with an email until mail works, and
+  // admins are never pruned as guests (prune.ts). The form posts the token in the body, so it stays
+  // out of URLs, history and proxy logs; the old `?token=` link still works.
+  const claim = async (req: Request, res: Response, token: string) => {
     res.type("text/plain");
     if (!cfg.adminClaimToken) {
       res.status(404).send("Not found.");
       return;
     }
-    const token = typeof req.query.token === "string" ? req.query.token : "";
     if (!token || !safeEqual(token, cfg.adminClaimToken)) {
-      res.status(403).send("That claim link isn't valid.");
+      res.status(403).send("That claim code isn't valid.");
       return;
     }
     const tokenHash = sha256Hex(token);
     if (isClaimBurnt(a.db, tokenHash)) {
-      res.status(410).send("This claim link was already used.");
+      res.status(410).send("This claim code was already used.");
       return;
     }
     const id = await identifyRequest(a, req);
     if (!id || id.loadtest) {
-      res.status(401).send("Play once in this browser (so you're signed in), then open this link again.");
-      return;
-    }
-    if (id.guest) {
-      res.status(403).send("Save your character with an email first (Esc → Save), then open this link again.");
+      res.status(401).send("Play once in this browser (so you're signed in), then open this page again.");
       return;
     }
     if (claimAdmin(a.db, tokenHash, id.userId) === "burnt") {
-      res.status(410).send("This claim link was already used.");
+      res.status(410).send("This claim code was already used.");
       return;
     }
-    console.log("admin claimed");
-    res.send(`Done. ${id.name} is now an admin.`);
+    console.log(`admin claimed${id.guest ? " (guest account)" : ""}`);
+    res.send(
+      `Done. ${id.name} is now an admin. Back in the game, rejoin (reload the page) and open the Esc menu: the Admin section is there.` +
+        (id.guest ? " This is a guest character: it lives in this browser. Save it with an email when you can to keep it anywhere." : ""),
+    );
+  };
+
+  app.get("/admin/claim", noStore, async (req, res) => {
+    const token = typeof req.query.token === "string" ? req.query.token : "";
+    if (token) return void (await claim(req, res, token));
+    if (!cfg.adminClaimToken) {
+      res.status(404).type("text/plain").send("Not found.");
+      return;
+    }
+    res.type("html").send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>FIRSTLIGHT admin claim</title><body style="font:16px system-ui;max-width:32em;margin:3em auto;padding:0 1em">
+<h1 style="font-size:1.3em">Make this account an admin</h1>
+<p>Open this page in the browser you play in (the account playing there becomes the admin), paste the claim code and press Claim. The code works once.</p>
+<form method="post" action="/admin/claim"><input name="token" type="password" autocomplete="off" required style="font:inherit;width:100%;padding:.4em" placeholder="claim code">
+<p><button style="font:inherit;padding:.4em 1.2em">Claim</button></p></form></body>`);
+  });
+
+  app.post("/admin/claim", noStore, express.urlencoded({ extended: false, limit: "2kb" }), async (req, res) => {
+    const token = typeof req.body?.token === "string" ? req.body.token.trim() : "";
+    await claim(req, res, token);
   });
 
   app.post("/api/test/bot-token", noStore, async (req, res) => {

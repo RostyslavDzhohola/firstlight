@@ -330,6 +330,35 @@ describe("display names", () => {
 });
 
 describe("admin claim", () => {
+  it("a guest (the owner before email sign-in works) claims through the form; the code works once", async () => {
+    server = await startAuthServer({
+      adminClaimToken: "claim-me-once",
+      extraRoutes: (app, a) => app.get("/admin/ping", a.requireAdmin, (_req, res) => void res.json({ ok: true })),
+    });
+    const owner = new Browser(server);
+    const guestToken = await owner.playToken();
+    expect((await api(server, "/api/account/me", guestToken)).json.guest).toBe(true);
+    const form = await owner.fetch("/admin/claim");
+    expect(form.status).toBe(200);
+    const html = await form.text();
+    expect(html).toContain('method="post"');
+    expect(html).not.toContain("claim-me-once"); // the page never carries the code
+    const post = (token: string, b = owner) =>
+      b.fetch("/admin/claim", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ token }).toString() });
+    expect((await post("wrong")).status).toBe(403);
+    expect((await api(server, "/admin/ping", guestToken)).status).toBe(403);
+    const ok = await post("claim-me-once");
+    expect(ok.status).toBe(200);
+    expect(await ok.text()).toMatch(/now an admin.*guest character/s);
+    expect((await api(server, "/admin/ping", guestToken)).status).toBe(200);
+    expect((await api(server, "/api/account/me", guestToken)).json.admin).toBe(true);
+    // Burnt: nobody else, and not the same code again.
+    const other = new Browser(server);
+    await other.playToken();
+    expect((await post("claim-me-once", other)).status).toBe(410);
+  });
+
+
   it("works once, while signed in, and the burnt state survives a restart", async () => {
     server = await startAuthServer({
       adminClaimToken: "claim-me-once",
@@ -337,7 +366,6 @@ describe("admin claim", () => {
     });
     const owner = new Browser(server);
     await owner.playToken();
-    expect((await owner.fetch("/admin/claim?token=claim-me-once")).status).toBe(403); // guests can't claim
     await owner.saveWithEmail("owner@example.test");
     const ownerToken = (await owner.client.token()).data!.token;
     expect((await api(server, "/admin/ping", ownerToken)).status).toBe(403);
