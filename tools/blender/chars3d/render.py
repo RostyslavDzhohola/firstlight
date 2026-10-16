@@ -32,9 +32,16 @@ PALETTES = [  # primary, secondary, accent (docs/content.md §8.3)
     ("#2E2A2B", "#A3402B", "#FF8A3D"),
     ("#4A3260", "#3E5568", "#F09A7A"),
 ]
-DEFAULT_PAL = {"hexwick": 2, "ash": 1, "kappa": 3, "unit7": 0, "ninja": 4}
-SCALE = {"hexwick": 0.95, "ash": 1.04, "kappa": 0.9, "unit7": 0.98, "ninja": 0.96}
-NAMES = {"hexwick": "Hexwick", "ash": "Brother Ash", "kappa": "Kappa", "unit7": "Unit 7", "ninja": "Ninja"}
+DEFAULT_PAL = {"hexwick": 2, "ash": 1, "kappa": 3, "unit7": 0, "ninja": 4, "kappa_b": 3, "unit7_b": 0}
+SCALE = {"hexwick": 0.95, "ash": 1.04, "kappa": 0.9, "unit7": 0.98, "ninja": 0.96, "kappa_b": 1.0, "unit7_b": 1.06}
+NAMES = {"hexwick": "Hexwick", "ash": "Brother Ash", "kappa": "Kappa", "unit7": "Unit 7", "ninja": "Ninja",
+         "kappa_b": "Kappa", "unit7_b": "Unit 7"}
+# Second looks (rig_astra.py) bind in an A-pose with their own proportions: they follow the clips through
+# armature-space rotation copies from a hidden clip rig, and a pelvis track scaled to their leg length
+# (what the client does with the same clips, see apps/client/src/render/avatars/assets.ts).
+RETARGET = {"kappa_b", "unit7_b"}
+ANIM_RIG = {}
+RETARGETED = []
 
 # Portus (looks.ts): sun 0xfff1d6 x 3.2 at elevation 0.85 rad, hemisphere sky 0x9fb8ff / ground 0x6a5644 x 1.4
 SUN_COL = bl.hex_lin("#fff1d6")
@@ -224,7 +231,43 @@ def load_anims(path):
     for o in set(bpy.data.objects) - before:
         o.hide_render = True
         o.hide_viewport = True
+        if o.type == "ARMATURE":
+            ANIM_RIG["rig"] = o
     return {a.name: a for a in bpy.data.actions}
+
+
+def retarget(arm, action):
+    """Drive a second-look armature from its own hidden copy of the clip rig."""
+    drv = ANIM_RIG["rig"].copy()
+    bpy.context.scene.collection.objects.link(drv)
+    drv.hide_render = True
+    drv.animation_data_create()
+    drv.animation_data.action = action
+    if action.slots:
+        drv.animation_data.action_slot = action.slots[0]
+    for pb in arm.pose.bones:
+        if pb.name not in drv.pose.bones:
+            continue
+        c = pb.constraints.new("COPY_ROTATION")
+        c.target = drv
+        c.subtarget = pb.name
+        c.target_space = "POSE"
+        c.owner_space = "POSE"
+    ratio = arm.data.bones["pelvis"].head_local.z / drv.data.bones["pelvis"].head_local.z
+    RETARGETED.append((arm, drv, ratio))
+
+
+def goto(frame):
+    """frame_set, then the second looks' pelvis: rest + ratio x the clip's pelvis offset."""
+    sc = bpy.context.scene
+    sc.frame_set(frame)
+    for arm, drv, ratio in RETARGETED:
+        want = arm.data.bones["pelvis"].head_local + (drv.pose.bones["pelvis"].head - drv.data.bones["pelvis"].head_local) * ratio
+        pb = arm.pose.bones["pelvis"]
+        par = arm.pose.bones["root"]
+        base = par.matrix @ arm.data.bones["root"].matrix_local.inverted() @ arm.data.bones["pelvis"].matrix_local
+        pb.location = base.inverted() @ want
+    bpy.context.view_layer.update()
 
 
 def add_character(dir_, name, pal, look, x=0.0, rot_z=0.0, action=None, frame=0, y=0.0):
@@ -249,7 +292,9 @@ def add_character(dir_, name, pal, look, x=0.0, rot_z=0.0, action=None, frame=0,
     root.scale = (s, s, s)
     root.location = (x, y, 0)
     root.rotation_euler = (0, 0, math.radians(rot_z))
-    if arm and action:
+    if arm and action and name in RETARGET:
+        retarget(arm, action)
+    elif arm and action:
         arm.animation_data_create()
         arm.animation_data.action = action
         if action.slots:
@@ -353,21 +398,21 @@ def main():
         sp = 0.95
         for i, ang in enumerate(angles):
             add_character(a.dir, n, pals[0], a.look, x=(i - 1.5) * sp, rot_z=ang, action=act)
-        sc.frame_set(a.frame)
+        goto(a.frame)
         sc.render.resolution_x = a.res
         sc.render.resolution_y = int(a.res * 0.62)
         cam = bl.camera("cam", (0, 0, 0.92), (0, -1, 0.04), 7.2, lens=50)
     elif a.mode == "hero":
         n = names[0]
         add_character(a.dir, n, pals[0], a.look, rot_z=-28, action=act)
-        sc.frame_set(a.frame)
+        goto(a.frame)
         sc.render.resolution_x = int(a.res * 0.75)
         sc.render.resolution_y = a.res
         cam = bl.camera("cam", (0, 0, 1.0), (0.12, -1, 0.1), 4.6, lens=55)
     elif a.mode == "portrait":
         n = names[0]
         add_character(a.dir, n, pals[0], a.look, rot_z=-25, action=act)
-        sc.frame_set(a.frame)
+        goto(a.frame)
         sc.render.resolution_x = a.res
         sc.render.resolution_y = a.res
         cam = bl.camera("cam", (0, 0, 1.58), (0.1, -1, 0.05), 1.9, lens=70)
@@ -375,7 +420,7 @@ def main():
         sp = 1.05
         for i, (n, p) in enumerate(zip(names, pals)):
             add_character(a.dir, n, p, a.look, x=(i - (len(names) - 1) / 2) * sp, rot_z=-15, action=act)
-        sc.frame_set(a.frame)
+        goto(a.frame)
         sc.render.resolution_x = a.res
         sc.render.resolution_y = int(a.res * 0.5)
         cam = bl.camera("cam", (0, 0, 0.95), (0.1, -1, 0.08), 3.0 + 1.3 * len(names), lens=50)
@@ -383,7 +428,7 @@ def main():
         n = names[0]
         for i in range(6):
             add_character(a.dir, n, i, a.look, x=(i - 2.5) * 0.9, rot_z=-20, action=act)
-        sc.frame_set(a.frame)
+        goto(a.frame)
         sc.render.resolution_x = a.res
         sc.render.resolution_y = int(a.res * 0.42)
         cam = bl.camera("cam", (0, 0, 0.95), (0.05, -1, 0.06), 8.6, lens=50)
@@ -395,7 +440,7 @@ def main():
             if o.type == "MESH" and o.name.startswith("Plane"):
                 bpy.data.objects.remove(o, do_unlink=True)
         root, arm = add_character(a.dir, n, pals[0], a.look, rot_z=-18, action=act)
-        sc.frame_set(a.frame)
+        goto(a.frame)
         mesh = next(o for o in sc.objects if o.type == "MESH" and o.parent is arm)
         s = SCALE.get(n, 1.0)
         if a.mode == "heroes":
@@ -424,7 +469,7 @@ def main():
         end = int(act.frame_range[1]) if act else 30
         for k in range(8):
             f = int(round(k * end / 8))
-            sc.frame_set(f)
+            goto(f)
             bl.render(f"{a.out}_{a.clip}_{k}.png")
         return
     else:

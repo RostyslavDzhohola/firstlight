@@ -3,13 +3,16 @@
 #
 #   tools/blender/chars3d/build.sh                     # fetch the CC0 rig + clips, build all five, install
 #   SRC=/tmp/fl-src tools/blender/chars3d/build.sh     # reuse downloaded archives (hashes are re-checked)
-#   CHARS="hexwick ninja" tools/blender/chars3d/build.sh   # only some starters
+#   CHARS="hexwick ninja" LOOKS="" tools/blender/chars3d/build.sh   # only some starters
+#   CHARS="" LOOKS="kappa_b" tools/blender/chars3d/build.sh           # only a second look
 #   JOBS=1 tools/blender/chars3d/build.sh              # parallel Blender processes (default 1)
 #
 # 1. Downloads the Quaternius Universal Animation Library 1 + 2 (CC0; rig and clips only, read as glTF
 #    by Blender with autoexec off) into new empty folders, checks the archive hashes (docs/ASSETS.md),
 #    and extracts each verified archive into a fresh folder (a reused extraction is never trusted).
 # 2. build.py per starter: SDF sculpt -> game mesh -> skin -> UVs -> textures (see build.py).
+#    rig_astra.py per second look (Kappa B, Unit 7 B): the Astra design-round meshes in astra/ (our own
+#    CC BY 4.0 art, hashes pinned in rig_astra.py) rigged onto the same skeleton.
 # 3. build_anims.py (tools/blender/characters) for the shared clips.
 # 4. Hero renders (every palette) and portraits for the UI (render.py).
 # 5. Textures and renders to WebP, GLBs through @gltf-transform/cli 4.5.1 (meshopt + quantisation),
@@ -24,7 +27,9 @@ BLENDER="${BLENDER:-/opt/homebrew/bin/blender}"
 GLTF="pnpm dlx @gltf-transform/cli@4.5.1"
 OUT_DEV="$ROOT/apps/client/public/assets-dev/characters"
 WORK="${WORK:-$(mktemp -d /tmp/fl-chars3d.XXXXXX)}"
-CHARS="${CHARS:-hexwick ash kappa unit7 ninja}"
+CHARS="${CHARS-hexwick ash kappa unit7 ninja}"
+LOOKS="${LOOKS-kappa_b unit7_b}"
+ALL="$CHARS $LOOKS"
 JOBS="${JOBS:-1}"
 BL=("$BLENDER" -b --disable-autoexec --factory-startup --python-exit-code 1)
 
@@ -51,14 +56,25 @@ UAL2="$(find "$X2" -name 'UAL2_Standard.glb' | head -1)"
 [ -n "$UAL1" ] && [ -n "$UAL2" ] || { echo "UAL archives lack the expected GLBs" >&2; exit 1; }
 
 mkdir -p "$WORK/raw" "$WORK/ui" "$WORK/stage"
+astra_src() {
+  case "$1" in
+    kappa_b) echo "$HERE/astra/kappa.glb" ;;
+    unit7_b) echo "$HERE/astra/unit-7.glb" ;;
+    *) return 1 ;;
+  esac
+}
 run_char() {
-  "${BL[@]}" --python "$HERE/build.py" -- --char "$1" --ual1 "$UAL1" --out "$WORK/raw" > "$WORK/build_$1.log" 2>&1 \
+  local args=(--python "$HERE/build.py" -- --char "$1" --ual1 "$UAL1" --out "$WORK/raw") src
+  if src="$(astra_src "$1")"; then
+    args=(--python "$HERE/rig_astra.py" -- --look "$1" --src "$src" --ual1 "$UAL1" --out "$WORK/raw")
+  fi
+  "${BL[@]}" "${args[@]}" > "$WORK/build_$1.log" 2>&1 \
     || { tail -30 "$WORK/build_$1.log" >&2; return 1; }
   # build.py prints DONE only after the textures and the GLB are written
   grep -E "^CHAR3D DONE $1:" "$WORK/build_$1.log" || { echo "no DONE marker for $1" >&2; return 1; }
 }
 PIDS=()
-for c in $CHARS; do
+for c in $ALL; do
   while [ "$(jobs -rp | wc -l | tr -d ' ')" -ge "$JOBS" ]; do sleep 5; done
   run_char "$c" &
   PIDS+=("$!")
@@ -70,7 +86,7 @@ for pid in "${PIDS[@]}"; do wait "$pid" || FAILED=1; done
   --ual1 "$UAL1" --ual2 "$UAL2" --out "$WORK/raw/starters_anims.glb" | grep -E "^ANIMS"
 
 # UI art: hero renders (every palette) and portraits, studio-lit for the spotlit pick screen
-for c in $CHARS; do
+for c in $ALL; do
   "${BL[@]}" --python "$HERE/render.py" -- --dir "$WORK/raw" --anims "$WORK/raw/starters_anims.glb" \
     --mode heroes --chars "$c" --look studio --out "$WORK/ui/hero" >/dev/null
   "${BL[@]}" --python "$HERE/render.py" -- --dir "$WORK/raw" --anims "$WORK/raw/starters_anims.glb" \
@@ -78,9 +94,9 @@ for c in $CHARS; do
 done
 
 # stage: WebP textures and renders, compressed GLBs
-python3 -I "$HERE/webp.py" "$WORK/raw" "$WORK/stage" $CHARS
+python3 -I "$HERE/webp.py" "$WORK/raw" "$WORK/stage" $ALL
 python3 -I "$HERE/webp.py" --ui "$WORK/ui" "$WORK/stage"
-for f in $CHARS starters_anims; do
+for f in $ALL starters_anims; do
   $GLTF optimize "$WORK/raw/$f.glb" "$WORK/stage/$f.glb" --compress meshopt --simplify false --flatten false \
     --join false --instance false --palette false --texture-compress false --prune-attributes false \
     --resample true --weld false >/dev/null
@@ -90,7 +106,7 @@ done
 MISSING=0
 need() { [ -s "$WORK/stage/$1" ] || { echo "missing or empty: $1" >&2; MISSING=1; }; }
 need starters_anims.glb
-for c in $CHARS; do
+for c in $ALL; do
   need "$c.glb"
   for k in albedo normal; do need "${c}_$k.webp"; need "${c}_${k}_512.webp"; done
   need "portrait_$c.webp"
