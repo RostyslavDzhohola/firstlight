@@ -7,7 +7,7 @@
 // like content/places.ts offsetDir; yaw in degrees, counter-clockwise seen from above, 0 = the
 // prefab's front faces south. Prefab-local solids: x right, z front, y up from the base.
 
-export const PORTUS_TOWN_VERSION = "2cbf9dbc300e8d84";
+export const PORTUS_TOWN_VERSION = "241e2d04ae415fa4";
 
 /** building: LOD1 roof shells; tree: LOD1 crossed cards; prop/static: one LOD. */
 export type TownPrefabClass = "building" | "tree" | "prop" | "static";
@@ -39,9 +39,9 @@ export const TOWN_PREFABS: readonly TownPrefab[] = [
   { name: "keep", cls: "static", tris: [7114, 0], height: 39.97, radius: 9.17, solids: [[0, 0, 0, 5.45, 5.45, 0, 31, 0], [0, 0, 6.3, 2.2, 1.3, 0, 0.45, 0], [0, 0, 7.95, 2.2, 0.35, 0, 0.22, 0]] },
   { name: "market_hall", cls: "building", tris: [12120, 9468], height: 18.24, radius: 7.85, solids: [[0, 0, 0, 4.417, 5.2, 0, 18.24, 0]] },
   { name: "hall_of_firsts", cls: "building", tris: [5216, 2856], height: 11.13, radius: 7.24, solids: [[0, 0, 0, 3.65, 5.35, 0, 10.7, 0], [0, 0, 5.7, 2, 0.7, 0, 0.32, 0], [1, -2.6, 6.3, 0.42, 0.42, 0, 2.1, 0], [1, 2.6, 6.3, 0.42, 0.42, 0, 2.1, 0]] },
-  { name: "portal_court_arcadia", cls: "static", tris: [3304, 0], height: 9.95, radius: 4.9, solids: [[0, -2.35, 0, 0.75, 0.85, 0, 5.1, 0], [0, 2.35, 0, 0.75, 0.85, 0, 5.1, 0], [1, 0, 0, 4.9, 4.9, 0, 0.21, 0], [1, 0, 0, 4.25, 4.25, 0, 0.41, 0], [1, -3.05, 2.3, 0.3, 0.3, 0, 2.6, 0], [1, 3.05, 2.3, 0.3, 0.3, 0, 2.6, 0]] },
-  { name: "portal_court_hollowmere", cls: "static", tris: [3304, 0], height: 9.95, radius: 4.9, solids: [[0, -2.35, 0, 0.75, 0.85, 0, 5.1, 0], [0, 2.35, 0, 0.75, 0.85, 0, 5.1, 0], [1, 0, 0, 4.9, 4.9, 0, 0.21, 0], [1, 0, 0, 4.25, 4.25, 0, 0.41, 0], [1, -3.05, 2.3, 0.3, 0.3, 0, 2.6, 0], [1, 3.05, 2.3, 0.3, 0.3, 0, 2.6, 0]] },
-  { name: "portal_court_meridian", cls: "static", tris: [3304, 0], height: 9.95, radius: 4.9, solids: [[0, -2.35, 0, 0.75, 0.85, 0, 5.1, 0], [0, 2.35, 0, 0.75, 0.85, 0, 5.1, 0], [1, 0, 0, 4.9, 4.9, 0, 0.21, 0], [1, 0, 0, 4.25, 4.25, 0, 0.41, 0], [1, -3.05, 2.3, 0.3, 0.3, 0, 2.6, 0], [1, 3.05, 2.3, 0.3, 0.3, 0, 2.6, 0]] },
+  { name: "portal_court_arcadia", cls: "static", tris: [3304, 0], height: 9.95, radius: 5.93, solids: [[0, -2.35, 0, 0.75, 0.85, 0, 5.1, 0], [0, 2.35, 0, 0.75, 0.85, 0, 5.1, 0], [1, 0, 0, 4.9, 4.9, 0, 0.21, 0], [1, 0, 0, 4.25, 4.25, 0, 0.41, 0], [1, -3.9, 3.9, 0.31, 0.31, 0, 2.15, 0], [1, 3.9, 3.9, 0.31, 0.31, 0, 2.15, 0]] },
+  { name: "portal_court_hollowmere", cls: "static", tris: [3304, 0], height: 9.95, radius: 5.93, solids: [[0, -2.35, 0, 0.75, 0.85, 0, 5.1, 0], [0, 2.35, 0, 0.75, 0.85, 0, 5.1, 0], [1, 0, 0, 4.9, 4.9, 0, 0.21, 0], [1, 0, 0, 4.25, 4.25, 0, 0.41, 0], [1, -3.9, 3.9, 0.31, 0.31, 0, 2.15, 0], [1, 3.9, 3.9, 0.31, 0.31, 0, 2.15, 0]] },
+  { name: "portal_court_meridian", cls: "static", tris: [3304, 0], height: 9.95, radius: 5.93, solids: [[0, -2.35, 0, 0.75, 0.85, 0, 5.1, 0], [0, 2.35, 0, 0.75, 0.85, 0, 5.1, 0], [1, 0, 0, 4.9, 4.9, 0, 0.21, 0], [1, 0, 0, 4.25, 4.25, 0, 0.41, 0], [1, -3.9, 3.9, 0.31, 0.31, 0, 2.15, 0], [1, 3.9, 3.9, 0.31, 0.31, 0, 2.15, 0]] },
   { name: "house_a", cls: "building", tris: [4710, 3664], height: 11.47, radius: 4.54, solids: [[0, 0, 0.108, 2.417, 2.308, 0, 9.974, 0]] },
   { name: "house_b", cls: "building", tris: [4710, 3664], height: 11.47, radius: 5.45, solids: [[0, 0, 0.108, 2.417, 3.308, 0, 13.56, 0]] },
   { name: "house_d", cls: "building", tris: [5010, 3964], height: 12.75, radius: 5.91, solids: [[0, 0, 0.108, 3.417, 3.308, 0, 11.13, 0]] },

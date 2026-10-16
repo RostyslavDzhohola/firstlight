@@ -158,8 +158,10 @@ def place(B, P, world='arcadia', fx=True):
     put(P['globe'], (0, -0.1, ZS + RA + 1.72), rot=(0.3, 0.2, 0.5), tint=g)
     put(P['membrane'], (0, 0.05, 0), tint=g)
     for sx in (-1, 1):
-        put(P['obelisk'], (sx * 3.05, -2.3, ZD))
-        put(P['crystal'], (sx * 3.05, -2.3, ZD + 2.45), rot=(0, 0, 0.4), tint=ac)
+        # FIRSTLIGHT: the obelisks stand on the paving just off the dais (5.5 m out), so the portal's
+        # 4 m surround stays clear (Portus town test); the design round had them on the dais at 3.8 m.
+        put(P['obelisk'], (sx * 3.9, -3.9, 0.0))
+        put(P['crystal'], (sx * 3.9, -3.9, 2.45), rot=(0, 0, 0.4), tint=ac)
     if fx:
         for k in range(26):
             a = vr.uniform(0.1, math.pi - 0.1)

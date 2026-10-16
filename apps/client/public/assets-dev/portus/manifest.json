@@ -1,10 +1,10 @@
 {
- "version": "2cbf9dbc300e8d84",
+ "version": "241e2d04ae415fa4",
  "files": {
   "glb": {
    "name": "portus.glb",
-   "bytes": 1842256,
-   "sha256": "b43bfe742e9ac928692954bef6feed496b16d9aa92066713cbe4f09cd94a9ce4"
+   "bytes": 1842812,
+   "sha256": "549e39c7d8c666146537e844d34350c54d85d4cb5b5dba89bb7a143495a0b83b"
   },
   "color": {
    "name": "portus_color.webp",
