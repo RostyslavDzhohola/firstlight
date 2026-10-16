@@ -67,7 +67,7 @@ describe("Portus Exchange", () => {
     expect(b.count("shop")).toBe(5);
   });
 
-  it("buys and sells with coin checks, only at Juno Vale", async () => {
+  it("buys and sells with coin and level checks, only at Juno Vale", async () => {
     const b = await bot("shopper", "portus");
     await tpAndWait(b, objAt("juno_vale"));
     b.send("buy", { itemId: "carbine", tier: 1 });
@@ -84,7 +84,13 @@ describe("Portus Exchange", () => {
     await waitFor(() => b.you.coins === 310);
     expect([...b.you.hotbar, ...b.you.backpack].find((i: any) => i?.id === "tonic_small")?.qty).toBe(3);
 
-    // Level gates are shown, not enforced: a level-1 player may buy a tier-2 weapon.
+    // Locked until you can use it (round 2): a level-1 player can't buy a tier-2 weapon (level 6).
+    b.send("buy", { itemId: "axe", tier: 2 });
+    await waitFor(() => b.last("shop")?.reason === "level");
+    expect(b.you.coins).toBe(310);
+    await sleep(1000); // quest actions are limited to 5 per second
+    b.send("admin", { cmd: "level", args: { level: 6 } });
+    await waitFor(() => b.you.level === 6);
     b.send("buy", { itemId: "axe", tier: 2 });
     await waitFor(() => b.you.coins === 10);
     expect([...b.you.hotbar, ...b.you.backpack].some((i: any) => i?.id === "axe" && i.tier === 2)).toBe(true);
