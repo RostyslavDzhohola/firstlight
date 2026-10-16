@@ -82,7 +82,8 @@ export function backfillTestAccounts(db: Db, isGuest: (userId: string) => boolea
       if (stmt(db, "SELECT 1 FROM data_migration WHERE id = ?").get(b.id)) continue;
       ran = true;
       const marks = `(${b.names.map(() => "?").join(", ")})`;
-      const rows = db.prepare(`SELECT user_id AS id FROM account WHERE display_name COLLATE BINARY IN ${marks}`).all(...b.names) as { id: string }[];
+      // Through stmt() like every game.db query (the sandbox write guard's single entry point, D-admin-3).
+      const rows = stmt(db, `SELECT user_id AS id FROM account WHERE display_name COLLATE BINARY IN ${marks}`).all(...b.names) as { id: string }[];
       let n = 0;
       for (const r of rows) if (isGuest(r.id) && markTestAccount(db, r.id, b.id, now)) n++;
       stmt(db, "INSERT INTO data_migration (id, ran_at, changed) VALUES (?, ?, ?)").run(b.id, now, n);
