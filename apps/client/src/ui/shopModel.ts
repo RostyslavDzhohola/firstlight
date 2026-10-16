@@ -169,6 +169,12 @@ export function shopCatalogue(ctx: ShopContext, qty: (itemId: string) => number 
 
 const RARITY_ORDER: Record<Rarity, number> = { common: 0, uncommon: 1, rare: 2, legendary: 3 };
 
+/** Only weapons and support items come in tiers: no "Woolly Beanie I" or "Small Tonic I" in the Sell list. */
+export function tiered(it: { id: string; tier: number; skin?: string }): boolean {
+  const w = WEAPON_BY_ID.get(it.id);
+  return !it.skin && !!w && w.cls !== "item" && it.tier >= 1 && it.tier <= 3;
+}
+
 /** Buyable now vs everything priced: "You can buy 23 of 61 offers here". */
 export function offerCounts(groups: readonly ShopGroup[]): { open: number; total: number } {
   let open = 0;

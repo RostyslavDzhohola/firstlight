@@ -14,7 +14,7 @@ import { HIDDEN_ITEMS, shownItem } from "./hudFormat.ts";
 import { el, icon, sprite } from "./dom.ts";
 import { Panel } from "./panels.ts";
 import { installSprites, itemSprite } from "./sprites.ts";
-import { offerCounts, shopCatalogue, type Lock, type Offer, type ShopContext, type ShopRow } from "./shopModel.ts";
+import { offerCounts, shopCatalogue, tiered, type Lock, type Offer, type ShopContext, type ShopRow } from "./shopModel.ts";
 
 const TIER = ["", "I", "II", "III"];
 
@@ -186,7 +186,7 @@ export class ShopPanel extends Panel {
       const li = el("li", "fl-shop__row", list);
       sprite(itemSprite(it.id), "", el("span", "fl-shop__icon", li));
       const txt = el("div", "fl-shop__name", li);
-      el("b", "", txt, `${itemName(it)}${it.skin || !TIER[it.tier] ? "" : ` ${TIER[it.tier]}`}${it.qty > 1 ? ` ×${it.qty}` : ""}`);
+      el("b", "", txt, `${itemName(it)}${tiered(it) ? ` ${TIER[it.tier]}` : ""}${it.qty > 1 ? ` ×${it.qty}` : ""}`);
       el("span", "", txt, slot < 4 ? `Hotbar ${slot + 1}` : "Backpack");
       const right = el("div", "fl-shop__offers", li);
       const value = sellValue(it);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { COSMETICS, isEggItem, TROPHIES } from "@firstlight/shared/content/items";
 import { WEAPONS } from "@firstlight/shared/content/weapons";
-import { offerCounts, shopCatalogue, sourceText, type ShopContext } from "./shopModel.ts";
+import { offerCounts, shopCatalogue, sourceText, tiered, type ShopContext } from "./shopModel.ts";
 
 const ctx = (o: Partial<ShopContext> = {}): ShopContext => ({ level: 1, coins: 100, horses: true, extras: true, hidden: new Set(), ...o });
 const rows = (c: ShopContext, qty?: (id: string) => number) => shopCatalogue(c, qty).flatMap((g) => g.rows);
@@ -64,5 +64,15 @@ describe("shop catalogue", () => {
     expect(poor.total).toBe(rich.total);
     expect(sourceText("any Arcadia enemy 1/150")).toBe("Not sold · any Arcadia enemy (1 in 150)");
     expect(sourceText("Site Visit mission M3")).toBe("Not sold · Site Visit mission M3");
+  });
+
+  it("names tiers only for tiered items (the Sell list)", () => {
+    expect(tiered({ id: "sunbrand", tier: 2 })).toBe(true);
+    expect(tiered({ id: "grenade", tier: 1 })).toBe(true);
+    expect(tiered({ id: "woolly_beanie", tier: 1 })).toBe(false);
+    expect(tiered({ id: "tonic_small", tier: 1 })).toBe(false);
+    expect(tiered({ id: "horse_whistle", tier: 1 })).toBe(false);
+    expect(tiered({ id: "wolf_pelt", tier: 1 })).toBe(false);
+    expect(tiered({ id: "riverstaff", tier: 2, skin: "ferrymans_oar" })).toBe(false);
   });
 });
