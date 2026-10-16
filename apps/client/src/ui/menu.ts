@@ -20,6 +20,7 @@ import { features } from "../config.ts";
 import { HOTKEYS } from "../game/keys.ts";
 import { fullscreenAvailable, isFullscreen, toggleFullscreen } from "../game/fullscreen.ts";
 import { bindPointerLock, PauseFlow, pauseKey, type PauseState } from "./pauseFlow.ts";
+import { LookSwitch } from "./lookSwitch.ts";
 
 type Ctl = [keys: readonly string[] | "mouse-l" | "mouse-r" | "mouse-move", label: string];
 type CtlGroup = { title: string; rows: Ctl[] };
@@ -117,6 +118,8 @@ export class Menu {
   private logoutRight: HTMLElement | null = null;
   private logoutBar: HTMLElement | null = null;
   private last = { safe: null as boolean | null, secs: -2 };
+  private readonly lookSwitch = new LookSwitch();
+  private lookUi: { row: HTMLElement; buttons: HTMLButtonElement[]; face: HTMLElement } | null = null;
   private logoutRequestedAt = 0;
 
   constructor(private readonly game: Game) {
@@ -209,28 +212,26 @@ export class Menu {
     const who = el("div", "", id);
     el("b", "", who, me?.name || "You");
     const sub = el("span", "", who, [STARTERS[me?.starter ?? 0]?.name, me ? `Level ${me.level}` : null].filter(Boolean).join(" · "));
-    // Kappa and Unit 7 have two looks: switch any time (cosmetic; the server checks it).
+    // Kappa and Unit 7 have two looks: switch any time (cosmetic). What the menu shows follows the
+    // server's PlayerState.look (lookSwitch.ts); the tick below repaints it.
     const looks = me ? (STARTER_LOOKS[me.starter] ?? []) : [];
+    this.lookUi = null;
     if (me && looks.length > 1) {
       const row = el("div", "fl-menu__looks", who);
       row.setAttribute("role", "radiogroup");
       row.setAttribute("aria-label", "Look");
-      const mark = (cur: number) => row.querySelectorAll("button").forEach((b, k) => {
-        b.classList.toggle("is-on", k === cur);
-        b.setAttribute("aria-checked", String(k === cur));
-      });
-      looks.forEach((l, k) => {
+      const buttons = looks.map((l, k) => {
         const b = button(l.name, "fl-menu__look", row);
         b.setAttribute("role", "radio");
         b.onclick = () => {
-          this.game.net.room?.send("look", { look: k });
-          localStorage.setItem("fl.look", String(k));
-          const px = face.querySelector(".px");
-          if (px) px.className = `px px-${portraitSprite(me.starter, k)}`;
-          mark(k);
+          const now = this.me();
+          if (now && this.lookSwitch.request(k, now.look ?? 0, performance.now())) this.game.net.room?.send("look", { look: k });
+          this.paintLooks();
         };
+        return b;
       });
-      mark(me.look ?? 0);
+      this.lookUi = { row, buttons, face };
+      this.paintLooks();
     }
 
     this.zone = el("div", "fl-menu__zone", left);
@@ -349,8 +350,28 @@ export class Menu {
     room?.send("logout", { start: true });
   }
 
-  /** 4 Hz while the pause menu is open: zone status and the logout countdown. DOM writes only on change. */
+  /** The look switch from the server's look: selection, pending state, portrait, stored preference. */
+  private paintLooks() {
+    const ui = this.lookUi;
+    const me = this.me();
+    if (!ui || !me) return;
+    const server = me.look ?? 0;
+    const v = this.lookSwitch.view(server, performance.now());
+    ui.row.setAttribute("aria-busy", String(v.busy));
+    ui.buttons.forEach((b, k) => {
+      b.classList.toggle("is-on", k === v.look);
+      b.setAttribute("aria-checked", String(k === v.look));
+      b.disabled = v.busy;
+    });
+    const px = ui.face.querySelector(".px");
+    const cls = `px px-${portraitSprite(me.starter, server)}`;
+    if (px && px.className !== cls) px.className = cls;
+    if (localStorage.getItem("fl.look") !== String(server)) localStorage.setItem("fl.look", String(server));
+  }
+
+  /** 4 Hz while the pause menu is open: zone status, the look switch and the logout countdown. DOM writes only on change. */
   private tick() {
+    if (this.mode === "pause") this.paintLooks();
     if (this.mode !== "pause" || !this.zone || !this.lede || !this.logoutItem) return;
     const me = this.me();
     const safe = !!me && !!(me.flags & PF.SAFE);

@@ -851,6 +851,12 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   rescales only the pelvis track to their leg length and quickens their steps
   (`tools/blender/chars3d/rig_astra.py`, `render/avatars/assets.ts`). Why: the owner wants both looks
   for these two; retargeting by shared frames keeps one clip set and costs one track per clip.
+  Codex round 2: the pause-menu switch shows the server's look (a request is pending, controls off,
+  spaced to the 2/s cap, given up after 1.5 s), and the second looks still load up front with the
+  others: each look's materials are their own shader builds (a look fetched on first sight compiled
+  14 in play), so the warm-up stands all 42 look × palette pairs (with the kunai now among the held
+  items, and Sunbrand's flame drawn in one pass); `?avatars&warmcheck` measured 0 builds after the
+  warm-up on WebGPU and WebGL2. They share one flat 4×4 normal map instead of two 1024² files.
 - **D-shops-1 (run, 2026-10-15 21:40Z):** a shop in every safe zone (owner, round 2): the Portus
   Exchange plus a trader inside each planet's arrival outpost (Dawnpad Trading Post, Lanternfall
   Stall, Waystation Supply). `packages/shared/src/content/shops.ts` `SHOP_SPOTS` holds each spot's

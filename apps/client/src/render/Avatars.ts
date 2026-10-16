@@ -622,10 +622,11 @@ function clamp(v: number, a: number, b: number) {
 
 export { PALETTES };
 
-const WARMUP_ITEMS = ["sunbrand", "hexquill", "carbine", "riverstaff", "emberglass", "stillshot"] as const;
+const WARMUP_ITEMS = ["sunbrand", "hexquill", "carbine", "riverstaff", "emberglass", "stillshot", "kunai"] as const;
 
 /** What the avatar warm-up stands: every starter's every look in every palette (each pair is its own
- *  material, with that look's textures), cycling the held items. */
+ *  material with that look's textures, so its own shader build), cycling the held items. Checked in a
+ *  real renderer with ?avatars&warmcheck: no build after the warm-up. */
 export function avatarWarmupLooks(): { palette: number; starter: number; look: number; item: string }[] {
   const looks: { palette: number; starter: number; look: number; item: string }[] = [];
   for (let starter = 0; starter < STARTERS.length; starter++) {

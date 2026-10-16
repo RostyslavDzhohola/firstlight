@@ -139,7 +139,12 @@ design-round meshes (static, unrigged, one palette atlas, the weapon modelled in
 - **Textures:** a fresh smart-projected atlas; each texel samples the design's palette atlas through the
   original UVs, plus baked occlusion (an OpenVDB level set of the whole mesh). Palette roles: Kappa's
   vest primary and shell rim secondary; Unit 7's ivory shell primary, grey joints secondary, the optic,
-  chest light and antenna tip painted accents. Normal maps are flat (the design has no sculpt detail).
+  chest light and antenna tip painted accents. No normal map file: the design has no sculpt detail, so
+  both share one flat 4×4 texture made in the client (saves ~10.7 MiB of GPU memory on Medium).
+- **Loading:** with the other looks, behind the loading screen. Each look's materials are their own
+  shader builds (measured: a look fetched on first sight compiled 12 toon and 2 shadow builds in
+  play), so the warm-up stands every look × palette; `?avatars&warmcheck` counts the builds after it
+  (0 on WebGPU and WebGL2, Low/Medium/High).
 - **Budgets:** 10,425 and 11,759 tris, 65 joints, 1 skinned mesh, 1024² + 512² sets.
 - **Sockets:** per model (crown, face, back and belt points; hats and masks drawn 2.2–2.4× for the big
   heads). Kappa B's back socket sits on the shell, Unit 7 B's behind the radio pack.

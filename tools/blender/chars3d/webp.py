@@ -2,6 +2,8 @@
 #
 #   python3 -I webp.py <raw dir> <out dir> hexwick ash ...     textures (1024² + a 512² Low set);
 #                                                               albedo keeps its alpha (accent mask)
+#   python3 -I webp.py --albedo <raw dir> <out dir> kappa_b ... albedo only (the second looks share the
+#                                                               client's flat normal map)
 #   python3 -I webp.py --ui <render dir> <out dir>              hero_*.png / portrait_*.png renders
 
 import os
@@ -24,10 +26,15 @@ def ui(src, out):
 def main():
     if sys.argv[1] == "--ui":
         return ui(sys.argv[2], sys.argv[3])
-    src, out, names = sys.argv[1], sys.argv[2], sys.argv[3:]
+    args = sys.argv[1:]
+    kinds = (("albedo", 90), ("normal", 95))
+    if args[0] == "--albedo":
+        args = args[1:]
+        kinds = kinds[:1]
+    src, out, names = args[0], args[1], args[2:]
     os.makedirs(out, exist_ok=True)
     for n in names:
-        for kind, q in (("albedo", 90), ("normal", 95)):
+        for kind, q in kinds:
             im = Image.open(os.path.join(src, f"{n}_{kind}.png"))
             im = im.convert("RGBA" if kind == "albedo" else "RGB")
             for size, suffix in ((im.width, ""), (im.width // 2, "_512")):

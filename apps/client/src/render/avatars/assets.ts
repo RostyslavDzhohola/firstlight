@@ -1,7 +1,10 @@
 // Starter character assets: one skinned GLB per look (the five sculpted starters, plus the second looks
 // of Kappa and Unit 7), all on one shared skeleton, one GLB of clips, and per look an albedo (alpha =
-// painted accent mask) and a tangent-space normal map. Loaded once (meshopt-compressed) behind the
-// loading screen; every AvatarView clones from here.
+// painted accent mask) and a tangent-space normal map (the second looks share one flat 4x4 map: their
+// design has no sculpt detail). Loaded once (meshopt-compressed) behind the loading screen, every look
+// up front: each look's materials are their own shader builds, so a look downloaded on first sight
+// would compile in play; the warm-up builds them all behind the loading screen instead (D-chars-3).
+// Every AvatarView clones from here.
 // Built by tools/blender/chars3d/build.sh (the clips by tools/blender/characters/build_anims.py, the
 // second looks by chars3d/rig_astra.py).
 
@@ -79,29 +82,67 @@ export function preloadAvatars(onProgress?: (frac: number) => void): Promise<Ava
   return promise;
 }
 
-async function load(onProgress?: (frac: number) => void): Promise<AvatarAssets> {
-  const base = `${config.assetBase}/characters/`;
+const base = () => `${config.assetBase}/characters/`;
+
+function gltfLoader(): GLTFLoader {
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
+  return loader;
+}
+
+function loadTexture(name: string, srgb: boolean): Promise<THREE.Texture> {
+  return new THREE.TextureLoader().loadAsync(`${base()}${name}${lowRes ? "_512" : ""}.webp`).then((t) => {
+    t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+    t.flipY = false; // glTF UV convention
+    t.anisotropy = 4;
+    t.needsUpdate = true;
+    return t;
+  });
+}
+
+let flat: THREE.DataTexture | null = null;
+/** The second looks' normal map: flat (0.5, 0.5, 1), 4x4, sampled like the real ones. */
+export function flatNormalMap(): THREE.DataTexture {
+  if (flat) return flat;
+  const px = new Uint8Array(4 * 4 * 4);
+  for (let i = 0; i < 16; i++) px.set([128, 128, 255, 255], i * 4);
+  flat = new THREE.DataTexture(px, 4, 4, THREE.RGBAFormat);
+  flat.colorSpace = THREE.NoColorSpace;
+  flat.magFilter = THREE.LinearFilter;
+  flat.minFilter = THREE.LinearMipmapLinearFilter;
+  flat.generateMipmaps = true;
+  flat.anisotropy = 4;
+  flat.needsUpdate = true;
+  return flat;
+}
+
+/** A model template ready to clone: skinned meshes never frustum-culled (the LOD pass culls). */
+function template(g: { scene: THREE.Object3D }): THREE.Object3D {
+  g.scene.traverse((o) => {
+    const m = o as THREE.SkinnedMesh;
+    if (m.isSkinnedMesh) {
+      m.frustumCulled = false; // skinned bounds don't follow the pose; the LOD pass culls by distance
+      m.geometry.computeBoundingSphere();
+    }
+  });
+  return g.scene;
+}
+
+async function load(onProgress?: (frac: number) => void): Promise<AvatarAssets> {
+  const loader = gltfLoader();
   let done = 0;
-  const total = MODEL_FILES.length * 3 + 1;
+  const own = (i: number) => i < STARTER_FILES.length; // a sculpted original with its own normal map
+  const total = MODEL_FILES.length * 2 + STARTER_FILES.length + 1;
   const tick = <T>(p: Promise<T>) => p.then((v) => { onProgress?.(++done / total); return v; });
-  const texLoader = new THREE.TextureLoader();
-  const suffix = lowRes ? "_512" : "";
-  const tex = (name: string, srgb: boolean) =>
-    tick(texLoader.loadAsync(`${base}${name}${suffix}.webp`)).then((t) => {
-      t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-      t.flipY = false; // glTF UV convention
-      t.anisotropy = 4;
-      t.needsUpdate = true;
-      return t;
-    });
 
   const [anims, chars, textures] = await Promise.all([
-    tick(loader.loadAsync(`${base}starters_anims.glb`)),
-    Promise.all(MODEL_FILES.map((f) => tick(loader.loadAsync(`${base}${f}.glb`)))),
-    Promise.all(MODEL_FILES.map(async (f) => {
-      const [albedo, normal] = await Promise.all([tex(`${f}_albedo`, true), tex(`${f}_normal`, false)]);
+    tick(loader.loadAsync(`${base()}starters_anims.glb`)),
+    Promise.all(MODEL_FILES.map((f) => tick(loader.loadAsync(`${base()}${f}.glb`)))),
+    Promise.all(MODEL_FILES.map(async (f, i) => {
+      const [albedo, normal] = await Promise.all([
+        tick(loadTexture(`${f}_albedo`, true)),
+        own(i) ? tick(loadTexture(`${f}_normal`, false)) : Promise.resolve(flatNormalMap()),
+      ]);
       return { albedo, normal };
     })),
   ]);
@@ -110,16 +151,7 @@ async function load(onProgress?: (frac: number) => void): Promise<AvatarAssets> 
   for (const c of anims.animations) clips.set(c.name, slim(c));
   addSubclips(clips);
 
-  const models = chars.map((g) => {
-    g.scene.traverse((o) => {
-      const m = o as THREE.SkinnedMesh;
-      if (m.isSkinnedMesh) {
-        m.frustumCulled = false; // skinned bounds don't follow the pose; the LOD pass culls by distance
-        m.geometry.computeBoundingSphere();
-      }
-    });
-    return g.scene;
-  });
+  const models = chars.map(template);
   const idle = clips.get("idle");
   if (idle && models[0]) clips.set("ride", makeRideClip(idle, models[0])); // horses: no CC0 riding clip
   const pelvis = models.map(pelvisHeight);

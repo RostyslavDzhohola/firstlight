@@ -94,7 +94,8 @@ for c in $ALL; do
 done
 
 # stage: WebP textures and renders, compressed GLBs
-python3 -I "$HERE/webp.py" "$WORK/raw" "$WORK/stage" $ALL
+[ -z "${CHARS// }" ] || python3 -I "$HERE/webp.py" "$WORK/raw" "$WORK/stage" $CHARS
+[ -z "${LOOKS// }" ] || python3 -I "$HERE/webp.py" --albedo "$WORK/raw" "$WORK/stage" $LOOKS # flat normals: the client's
 python3 -I "$HERE/webp.py" --ui "$WORK/ui" "$WORK/stage"
 for f in $ALL starters_anims; do
   $GLTF optimize "$WORK/raw/$f.glb" "$WORK/stage/$f.glb" --compress meshopt --simplify false --flatten false \
@@ -108,7 +109,9 @@ need() { [ -s "$WORK/stage/$1" ] || { echo "missing or empty: $1" >&2; MISSING=1
 need starters_anims.glb
 for c in $ALL; do
   need "$c.glb"
-  for k in albedo normal; do need "${c}_$k.webp"; need "${c}_${k}_512.webp"; done
+  kinds="albedo normal"
+  if astra_src "$c" >/dev/null; then kinds="albedo"; fi # second looks: the client's shared flat normal map
+  for k in $kinds; do need "${c}_$k.webp"; need "${c}_${k}_512.webp"; done
   need "portrait_$c.webp"
   for p in 0 1 2 3 4 5; do need "hero_${c}_$p.webp"; done
 done

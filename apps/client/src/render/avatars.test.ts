@@ -110,6 +110,8 @@ describe("avatar warm-up hook", () => {
     expect(n).toBe(7);
     expect(looks).toHaveLength(n * mod.PALETTES.length);
     expect(new Set(looks.map((l) => `${l.starter}:${l.look}:${l.palette}`)).size).toBe(n * mod.PALETTES.length);
+    // every starter weapon is held by some sample (the line-up's kunai compiled in play before)
+    for (const s of STARTERS) expect(looks.some((l) => l.item === s.weapon), s.weapon).toBe(true);
   });
 
   it("keeps its samples for the session: in the scene (hidden) while warming, out of it after, never disposed", () => {
