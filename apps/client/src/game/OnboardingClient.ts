@@ -19,11 +19,15 @@ import { Panel } from "../ui/panels.ts";
 import { voice } from "../voice/index.ts";
 import { portalAt } from "../world/portalEntry.ts";
 import { TrainingDummies } from "../world/TrainingDummies.ts";
+import { DoneCardTimer } from "./doneCardTimer.ts";
 import type { Game } from "./Game.ts";
 import { OnboardingProgress } from "./onboardingProgress.ts";
 import type { ClientSystem } from "./systems.ts";
 
+/** Time the end card stays up, counted only while the game is on screen and playable (doneCardTimer.ts). */
 const DONE_CARD_MS = 8000;
+/** How often the card's time is checked after this system is gone (the portal travel). */
+const LINGER_POLL_MS = 100;
 const NO_KEYS: ReadonlySet<string> = new Set();
 /** Frames that move further than this are teleports or corrections, not walking. */
 const MAX_STEP_M = 3;
@@ -42,7 +46,8 @@ export class OnboardingClient implements ClientSystem {
   private active = false;
   /** Skipped or finished in this session: never restart from a stale `you`. */
   private ended = false;
-  private doneUntil = 0;
+  /** The end card's countdown: it waits behind loading screens and menus. */
+  private readonly doneTimer: DoneCardTimer;
   /** The server paid the dummies (and the completion): the rest is client-side tips. */
   private paid = false;
   private xpPaid = 0;
@@ -54,6 +59,11 @@ export class OnboardingClient implements ClientSystem {
   private lastTrainAt = 0;
   /** CombatClient hook: the tutorial's tips or its last card are up (the "Progress not saved" toast waits). */
   private readonly busy = () => this.active || !!this.hud;
+  /** The world is on screen and the player can act: no loading screen, pause menu, panel, photo mode or hidden tab. */
+  private readonly playable = () => {
+    const g = this.game;
+    return g.input.inPlay && !g.photo?.active && !Panel.current && !(typeof document !== "undefined" && document.hidden);
+  };
   private readonly pauseRow = (): PauseExtra | null =>
     this.active
       ? { icon: "arrow-r", title: "Skip tutorial", sub: this.paid ? "Hide the rest of the tips." : "No more XP and no Spark medal. It won't come back.", onClick: () => this.skip() }
@@ -61,6 +71,7 @@ export class OnboardingClient implements ClientSystem {
 
   constructor(game: Game) {
     this.game = game;
+    this.doneTimer = new DoneCardTimer({ durationMs: DONE_CARD_MS, now: () => performance.now(), visible: this.playable });
     this.dummies = new TrainingDummies(game.ctx.scene, game.planet.terrain);
     this.portals = portalSpots(BODIES[ONBOARDING.BODY], game.planet.terrain);
     const room = game.net.room!;
@@ -107,14 +118,14 @@ export class OnboardingClient implements ClientSystem {
     this.active = false;
     this.ended = true;
     this.hasLast = false;
-    if (!this.doneUntil) this.closeHud();
+    if (!this.doneTimer.running) this.closeHud();
   }
 
   /** Hide the HUD and stand the dummies back up for the next newcomer. */
   private closeHud() {
     this.hud?.dispose();
     this.hud = null;
-    this.doneUntil = 0;
+    this.doneTimer.stop();
     for (let i = 0; i < this.dummies.dummies.length; i++) this.dummies.setDown(i, false);
   }
 
@@ -190,7 +201,7 @@ export class OnboardingClient implements ClientSystem {
   update(dt: number, now: number) {
     this.dummies.update(dt);
     const g = this.game;
-    if (this.hud && this.doneUntil && now > this.doneUntil) this.closeHud();
+    if (this.hud && this.doneTimer.running && this.doneTimer.tick()) this.closeHud();
     if (!this.receivedYou) return;
     const steps = this.progress.steps;
     const ob = this.onboarding;
@@ -225,7 +236,7 @@ export class OnboardingClient implements ClientSystem {
     if (completed.length && completed[0] !== "attack") g.audio.play("ui");
     if (steps.allDone) {
       this.hud.showDone(this.xpPaid || ONBOARDING.DONE_XP + down * ONBOARDING.DUMMY_XP, !steps.movedOn("portal"));
-      this.doneUntil = now + DONE_CARD_MS;
+      this.doneTimer.start();
       this.finish();
       return;
     }
@@ -255,15 +266,18 @@ export class OnboardingClient implements ClientSystem {
     pauseExtras.delete(this.pauseRow);
     if (this.game.combat.training) this.game.combat.training = null;
     this.dummies.dispose();
-    // Left through the portal (the last step): the "Tutorial complete" card stays up for the rest of
-    // its time, over the travel, and the "Progress not saved" toast keeps waiting for it.
+    // Left through the portal (the last step): the "Tutorial complete" card stays up over the travel,
+    // and the "Progress not saved" toast keeps waiting for it. Its time only runs once the new world
+    // is on screen (the loading screen is gone and the player can act), so it is not used up behind it.
     const hud = this.hud;
-    const left = this.doneUntil - performance.now();
-    if (hud && this.doneUntil && left > 0) {
-      setTimeout(() => {
+    if (hud && this.doneTimer.running) {
+      const timer = this.doneTimer;
+      const poll = setInterval(() => {
+        if (!timer.tick()) return;
+        clearInterval(poll);
         hud.dispose();
         if (this.hud === hud) this.hud = null;
-      }, left);
+      }, LINGER_POLL_MS);
       return;
     }
     if (this.game.combat.tutorialBusy === this.busy) this.game.combat.tutorialBusy = null;
