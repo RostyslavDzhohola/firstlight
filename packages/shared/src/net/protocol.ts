@@ -39,6 +39,10 @@ export interface PlayRequest {
   partyLeaderRoomId?: string;
   /** Load-test rooms only (requires the load-test secret server-side). */
   loadtest?: boolean;
+  /** A brand-new character's starter (STARTERS index), palette and look (STARTER_LOOKS index). */
+  starter?: number;
+  palette?: number;
+  look?: number;
   /** Admins only: the admin's private sandbox copy of `body`, where nothing is saved (D-admin-3). */
   sandbox?: boolean;
 }
@@ -89,6 +93,9 @@ export interface FireMsg {
   t: number;
   /** 0..1 draw/charge for bows and charged melee. */
   charge?: number;
+  /** Release of a held RMB on a weapon with a `special` (Ember Kunai: the Ember Seal fireball). The
+   *  server times the hold from the `charge` message and enforces the cooldown. */
+  seal?: boolean;
 }
 
 export type ClientMessages = {
@@ -123,7 +130,9 @@ export type ClientMessages = {
   /** Ask for a travel ticket while standing in a portal. `viaPad` is unused (reserved): the server finds the portal from the position. */
   travel: { to: BodyId; viaPad?: number };
   fastTravel: { pad: number };
-  respawn: { starter: number; palette: number };
+  respawn: { starter: number; palette: number; look?: number };
+  /** Switch the living character's look (one of its starter's STARTER_LOOKS; cosmetic). */
+  look: { look: number };
   party: { action: "invite" | "accept" | "decline" | "leave" | "kick"; target?: string };
   mission: { action: "accept" | "abandon"; id: string };
   title: { medalId: string | null };

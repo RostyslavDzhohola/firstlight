@@ -1,5 +1,5 @@
 // Quests and economy for one room (one copy of one body): fast-travel pads (discover by touch,
-// travel pad-to-pad), the Portus Exchange shop, guide missions, medals and titles, Easter eggs and
+// travel pad-to-pad), the shops (Portus and every arrival outpost, content/shops.ts), guide missions, medals and titles, Easter eggs and
 // the Hall of Firsts, cosmetics, and the admin `stage <n>` command. Plugs into the room through
 // RoomSystem hooks, room messages and the game event bus (../events.ts).
 
@@ -12,6 +12,7 @@ import { MEDAL_BY_ID, MEDAL_RULES } from "@firstlight/shared/content/medals";
 import { huntCredit, huntTargetIndex, MISSION_BY_ID, MISSIONS, missionGoal, trackedMission, type MissionDef } from "@firstlight/shared/content/missions";
 import { offsetDir, padName, placeDir } from "@firstlight/shared/content/places";
 import { BOSS_FIRSTS, EGG_BY_ID, type EggId } from "@firstlight/shared/content/secrets";
+import { buyBlock, SHOP_SPOTS, shopSpotAt, type ShopSpot } from "@firstlight/shared/content/shops";
 import { inReach, objectPos, objectsOn, surfaceDistance, WORLD_OBJECT_BY_ID, type WorldObjectDef } from "@firstlight/shared/content/world";
 import { WEAPON_BY_ID, WEAPONS } from "@firstlight/shared/content/weapons";
 import { NPC_DEFS, NPC_INDEX, defLevels, type PlanetId } from "@firstlight/shared/content/npcs";
@@ -36,6 +37,9 @@ import { roomCopyKey } from "../copyState.ts";
 import { runStage, STAGE_LIMITS } from "./stage.ts";
 import { progressStore } from "./store.ts";
 import { emitPileEvent, pileStore } from "../piles.ts";
+
+/** Shops refuse a combat-tagged player in a pad ring (D-shops-3). */
+export const CATCH_BREATH = "Catch your breath first: no trading for a few seconds after a fight";
 
 export const QUEST_RULES = {
   /** Touching a pad = feet within this many metres of its centre (D2). */
@@ -538,9 +542,19 @@ export class QuestSystem implements RoomSystem {
 
   // ---------------------------------------------------------------- shop
 
-  private atShop(a: PlayerActor): boolean {
-    const keeper = WORLD_OBJECT_BY_ID.get("juno_vale")!;
-    return this.body === "portus" && this.near(a, keeper, 2.5);
+  /**
+   * The till the player stands at (a shop spot's radius on this body, content/shops.ts), if any.
+   * Trading also needs the player protected right now (D-shops-3): a pad ring protects only once out
+   * of combat, so a fighter who ran in can't shop while still damageable.
+   */
+  private shopAt(a: PlayerActor): ShopSpot | null {
+    return shopSpotAt(this.body, actorPos(a));
+  }
+
+  /** "Find Juno Vale at the Portus Exchange": this body's shop, for the refusal when you're away from it. */
+  private shopHint(verb: "buy" | "sell"): string {
+    const s = SHOP_SPOTS.find((x) => x.body === this.body);
+    return s ? `Find ${s.keeper} at the ${s.name} to ${verb}` : `Find a shop in a safe zone to ${verb}`;
   }
 
   buy(c: Client, itemId: string, tier: 1 | 2 | 3, qty: number) {
@@ -550,19 +564,24 @@ export class QuestSystem implements RoomSystem {
       c.send("shop", { ok: false, action: "buy", reason });
       this.toast(a, text, "warn");
     };
-    if (!this.atShop(a)) return fail("too far", "Talk to Juno Vale at the Portus Exchange to buy");
+    const shop = this.shopAt(a);
+    if (!shop) return fail("too far", this.shopHint("buy"));
+    if (!this.room.safeNow(a, Date.now())) return fail("combat", CATCH_BREATH);
     const disabled = (itemId === HORSE_WHISTLE && !env.horses) || (isExtraCosmetic(itemId) && !env.cosmeticsExtras) || voiceItemHidden(itemId);
     const entry = disabled ? undefined : shopEntry(itemId, tier);
-    if (!entry) return fail("not sold", "The Exchange doesn't sell that");
+    if (!entry) return fail("not sold", `The ${shop.name} doesn't sell that`);
     const n = entry.stack > 1 ? Math.max(1, Math.min(entry.stack, qty)) : 1;
+    const label = `${entry.name}${tier > 1 ? ` ${"I".repeat(tier)}` : ""}`;
+    // Locked items are shown but not sold (round 2): be the level to use it, and able to pay.
+    const block = buyBlock(entry, { level: a.char.level, coins: a.char.coins }, n);
+    if (block?.reason === "level") return fail("level", `${label} unlocks at level ${block.level}`);
+    if (block) return fail("coins", `Not enough coins (${block.need} ◎ needed)`);
     const cost = entry.price * n;
-    if (a.char.coins < cost) return fail("coins", `Not enough coins (${cost} ◎ needed)`);
     const item: InvItem = { id: itemId, tier, qty: n };
     if (!this.canStore(a, item)) return fail("full", "Your bags are full — sell or drop something first");
     if (!this.grant(a, [item], () => (a.char.coins -= cost))) return fail("try again", "Couldn't complete that just now. Try again");
     c.send("shop", { ok: true, action: "buy" });
-    const gate = entry.level > a.char.level ? ` (equip at level ${entry.level})` : "";
-    this.toast(a, `Bought ${n > 1 ? `${n} × ` : ""}${entry.name}${tier > 1 ? ` ${"I".repeat(tier)}` : ""} for ${cost} ◎${gate}`, "coins");
+    this.toast(a, `Bought ${n > 1 ? `${n} × ` : ""}${label} for ${cost} ◎`, "coins");
   }
 
   sell(c: Client, slot: number, qty?: number) {
@@ -572,14 +591,16 @@ export class QuestSystem implements RoomSystem {
       c.send("shop", { ok: false, action: "sell", reason });
       this.toast(a, text, "warn");
     };
-    if (!this.atShop(a)) return fail("too far", "Talk to Juno Vale at the Portus Exchange to sell");
+    const shop = this.shopAt(a);
+    if (!shop) return fail("too far", this.shopHint("sell"));
+    if (!this.room.safeNow(a, Date.now())) return fail("combat", CATCH_BREATH);
     const list = slot < HOTBAR_SLOTS ? a.char.hotbar : a.char.backpack;
     const i = slot < HOTBAR_SLOTS ? slot : slot - HOTBAR_SLOTS;
     const item = list[i];
     if (!item) return fail("empty", "Nothing in that slot");
     const n = Math.max(1, Math.min(item.qty, qty ?? item.qty));
     const value = sellValue(item, n);
-    if (value <= 0) return fail("worthless", isEggItem(item) ? "Juno turns it over: “One of a kind. Keep it — nobody would believe where you found it.”" : "Juno shakes her head: “I can't sell that on.”");
+    if (value <= 0) return fail("worthless", isEggItem(item) ? `${shop.keeper} turns it over: “One of a kind. Keep it — nobody would believe where you found it.”` : `${shop.keeper} shakes their head: “I can't sell that on.”`);
     const name = itemName(item);
     try {
       // The sale and the save together; a failed save puts the item and coins back (F12 B6).

@@ -42,6 +42,10 @@ export class CombatClient {
   readonly hud: Hud;
   private lastFire = 0;
   private chargeStart = 0;
+  /** Ember Seal: the local cooldown mirror and whether the current RMB hold is a seal. */
+  private sealReadyAt = 0;
+  private sealPendingUntil = 0;
+  private sealHeld = false;
   private wasRmb = false;
   /** Right mouse last frame while saddle-locked (the Patchkit's self-patch there). */
   private saddleRmb = false;
@@ -106,6 +110,12 @@ export class CombatClient {
       this.game.audio.play(m.kind === "xp" ? "levelUp" : m.kind === "coins" ? "coins" : "ui");
     });
     room.onMessage("denied", (m: { action: string; reason: string }) => {
+      // A seal the server refused (released too early after lag, safe zone…) didn't cast: give the
+      // local cooldown back. Its own "cooldown" refusal means the server's clock still runs.
+      if (m.action === "fire" && this.sealPendingUntil > performance.now()) {
+        this.sealPendingUntil = 0;
+        if (m.reason !== "cooldown") this.sealReadyAt = 0;
+      }
       if (m.reason === "level gate") this.hud.toast("Your level is too low to use that tier", "warn");
       else if (m.action === "logout") this.hud.toast("Can't log out in combat — wait 10 s", "warn");
       else if (m.action === "use" && USE_DENIED[m.reason]) this.hud.toast(USE_DENIED[m.reason]!, "warn");
@@ -170,6 +180,7 @@ export class CombatClient {
       const at = new THREE.Vector3(m.x, m.y, m.z);
       if (m.radius > 0) {
         this.effects.explosion(at, m.radius, weaponColor(m.weapon));
+        if (WEAPONS[m.weapon]?.id === "ember_seal") this.effects.emberBurst(at, m.radius);
         this.game.audio.play("explosion", at);
       } else {
         this.effects.impact(at, weaponColor(m.weapon));
@@ -203,7 +214,7 @@ export class CombatClient {
       }
       const k = m.killer ? (room.state as any).players?.get(m.killer) : null;
       // A rejoined room re-sends this for a dead character: DeathFlow keeps the screen and re-sends the pick.
-      void this.death.onDeath({ ...m, body: this.game.bodyId, killerStarter: k?.starter, killerLevel: k?.level });
+      void this.death.onDeath({ ...m, body: this.game.bodyId, killerStarter: k?.starter, killerLook: k?.look, killerLevel: k?.level });
     });
     room.onMessage("reborn", () => {
       this.death.onReborn();
@@ -311,7 +322,7 @@ export class CombatClient {
     const meState = (room.state as any).players?.get(room.sessionId);
     if (meState) {
       g.hud.setHp(meState.hp, meState.maxHp);
-      g.hud.setIdentity(meState.name, meState.starter, meState.palette);
+      g.hud.setIdentity(meState.name, meState.starter, meState.palette, meState.look ?? 0);
       // The label shows what the server enforces (its flag); the shared zone function says where.
       const p = g.player.pos;
       g.hud.setZone(zoneInfo(g.bodyId, zoneAt(BODIES[g.bodyId], p.x, p.y, p.z), !!(meState.flags & PF.SAFE)));
@@ -415,6 +426,7 @@ export class CombatClient {
         this.chargeStart = now;
         room.send("charge", { on: true }); // the server times the draw
       }
+      if (def.special) this.handSeal(def, t, rmb, now);
       // Patchkit: right mouse patches yourself (left mouse: the ally in the crosshair).
       if (def.id === "patchkit" && rmb && !this.wasRmb) room.send("use", { slot: g.hud.you?.selected ?? 0 });
     }
@@ -483,6 +495,50 @@ export class CombatClient {
       this.effects.tracer(muzzle, to, color, def.delivery === "chain" ? 1.6 : 1);
       g.audio.play(g.audio.weaponSound(WEAPONS.indexOf(def)));
       this.effects.flash(muzzle, color, 0.3);
+    }
+  }
+
+  /**
+   * A weapon's special on the right mouse button (the Ember Kunai's Ember Seal): hold for the tier's
+   * hand-seal time (the server times it from `charge`), release to cast. Released early, or still
+   * cooling down, nothing is cast.
+   */
+  private handSeal(def: WeaponDef, t: TierStats, rmb: boolean, now: number) {
+    const g = this.game;
+    const room = g.net.room!;
+    const meState = (room.state as any).players?.get(room.sessionId);
+    if (rmb && !this.wasRmb) {
+      if (now < this.sealReadyAt) {
+        g.hud.toast(`${WEAPON_BY_ID.get(def.special!)?.name ?? "Seal"} recharging`, "warn");
+        this.sealHeld = false;
+        return;
+      }
+      if (meState && meState.flags & PF.SAFE) {
+        g.hud.toast("Weapons are holstered in safe zones", "warn");
+        this.sealHeld = false;
+        return;
+      }
+      this.sealHeld = true;
+      this.chargeStart = now;
+      room.send("charge", { on: true });
+      g.self?.trigger("cast");
+      const up = g.player.up();
+      this.effects.sealCharge(g.player.pos.clone().addScaledVector(up, 1.25).addScaledVector(g.player.facing, 0.35), g.player.facing, (t.heavyTime ?? 0.4) * 1000);
+    }
+    if (!rmb && this.wasRmb && this.sealHeld) {
+      this.sealHeld = false;
+      if (now - this.chargeStart < (t.heavyTime ?? 0.4) * 1000) {
+        room.send("charge", { on: false });
+        return;
+      }
+      const cam = g.ctx.camera;
+      const origin = cam.getWorldPosition(new THREE.Vector3());
+      const dir = cam.getWorldDirection(new THREE.Vector3());
+      room.send("fire", { slot: g.hud.you?.selected ?? 0, ox: origin.x, oy: origin.y, oz: origin.z, dx: dir.x, dy: dir.y, dz: dir.z, t: Date.now(), seal: true });
+      g.self?.trigger("cast");
+      this.sealReadyAt = now + (t.cooldown ?? 8) * 1000;
+      this.sealPendingUntil = now + 1500; // a refusal within this window undoes the cooldown
+      this.lastFire = now;
     }
   }
 

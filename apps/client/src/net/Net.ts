@@ -108,7 +108,7 @@ export class Net {
 
   constructor(private readonly joiner: SeatJoiner = new SeatClient(config.apiUrl)) {}
 
-  async join(body: BodyId, opts: { partyLeaderRoomId?: string; starter?: number; palette?: number; sandbox?: boolean } = {}): Promise<Room> {
+  async join(body: BodyId, opts: { partyLeaderRoomId?: string; starter?: number; palette?: number; look?: number; sandbox?: boolean } = {}): Promise<Room> {
     let retried401 = false;
     for (;;) {
       // Per attempt: queues can outlast the 15-minute JWT (getPlayToken caches and refreshes it).

@@ -3,7 +3,7 @@
 // blocking, burn, healing. The room calls these from message handlers and the tick.
 
 import { damageMult, falloff, maxHp, splashFalloff } from "@firstlight/shared/content/progression";
-import { WEAPONS, WEAPON_INDEX, type Destroys, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
+import { WEAPONS, WEAPON_BY_ID, WEAPON_INDEX, type Destroys, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
 import type { Terrain } from "@firstlight/shared";
 import { NET } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
@@ -257,17 +257,38 @@ export interface FireInput {
   dy: number;
   dz: number;
   charge?: number;
+  /** Release of a held RMB on a weapon with a `special` (the Ember Kunai's Ember Seal). */
+  seal?: boolean;
 }
 
 export type FireResult = { ok: true } | { ok: false; reason: string };
 
-/** Rate limit, gates, magazine/heat. Mutates actor state when the attack is allowed. */
-export function consumeAttack(p: PlayerActor, def: WeaponDef, tier: TierStats, now: number, rateScale = 1, host?: CombatHost): FireResult {
+/** Who may attack at all right now (dead, safe zone as of now, not the last tick's flag; protection,
+ *  swimming, the tier's level gate). */
+function attackGate(p: PlayerActor, tier: TierStats, now: number, host?: CombatHost): FireResult | null {
   if (p.dead || p.superseded) return { ok: false, reason: "dead" };
   if (safeNow(host, p, now)) return { ok: false, reason: "safe zone" };
   if (p.protectedUntil > now) return { ok: false, reason: "protected" };
   if (p.state.flags & PF.SWIMMING) return { ok: false, reason: "swimming" };
   if (tier.level > p.char.level) return { ok: false, reason: "level gate" };
+  return null;
+}
+
+/** An attack happened: combat tag, logout cancelled, guard dropped. */
+function markAttack(p: PlayerActor, now: number) {
+  p.lastAttackAt = now;
+  p.combatUntil = now + COMBAT_TAG_MS;
+  p.logoutEndsAt = null; // attacking cancels a logout countdown
+  if (p.blocking) {
+    p.blocking = false; // no blocking while attacking
+    p.state.flags &= ~PF.BLOCKING;
+  }
+}
+
+/** Rate limit, gates, magazine/heat. Mutates actor state when the attack is allowed. */
+export function consumeAttack(p: PlayerActor, def: WeaponDef, tier: TierStats, now: number, rateScale = 1, host?: CombatHost): FireResult {
+  const gate = attackGate(p, tier, now, host);
+  if (gate) return gate;
   if (now - p.lastAttackAt < tier.rate * 1000 * 0.85 * rateScale) return { ok: false, reason: "rate" };
   if (now < p.reloadEndsAt) return { ok: false, reason: "reloading" };
   if (now < p.overheatUntil) return { ok: false, reason: "overheated" };
@@ -296,19 +317,14 @@ export function consumeAttack(p: PlayerActor, def: WeaponDef, tier: TierStats, n
       p.heat = 0;
     }
   }
-  p.lastAttackAt = now;
-  p.combatUntil = now + COMBAT_TAG_MS;
-  p.logoutEndsAt = null; // attacking cancels a logout countdown
-  if (p.blocking) {
-    p.blocking = false; // no blocking while attacking
-    p.state.flags &= ~PF.BLOCKING;
-  }
+  markAttack(p, now);
   return { ok: true };
 }
 
 export function fire(host: CombatHost, p: PlayerActor, msg: FireInput): FireResult {
   const now = host.now();
-  const { def, tier } = selectedWeapon(p);
+  const { def, tier, tierIndex } = selectedWeapon(p);
+  if (def.hidden) return { ok: false, reason: "not a weapon" };
   if (def.delivery === "melee" || def.delivery === "none" || def.delivery === "heal" || def.delivery === "bubble") return { ok: false, reason: "not a ranged weapon" };
   const head = headPos(p);
   const dl = Math.hypot(msg.dx, msg.dy, msg.dz);
@@ -316,6 +332,7 @@ export function fire(host: CombatHost, p: PlayerActor, msg: FireInput): FireResu
   const d: V3 = [msg.dx / dl, msg.dy / dl, msg.dz / dl];
   const o = aimOrigin([msg.ox, msg.oy, msg.oz], d, head);
   if (!(dist3(o, head) <= ORIGIN_SLACK)) return { ok: false, reason: "origin" };
+  if (msg.seal) return castSpecial(host, p, def, tier, tierIndex, o, d, head, now);
   // Bow draw is timed on the server from the `charge` start message; the client value is ignored.
   let charge = 1;
   if (def.delivery === "arrow") {
@@ -363,42 +380,74 @@ export function fire(host: CombatHost, p: PlayerActor, msg: FireInput): FireResu
     case "thrown": {
       const speed = def.delivery === "arrow" ? 25 + 30 * charge : (def.speed ?? 30);
       const dmg = def.delivery === "arrow" ? ((tier.tap ?? tier.damage) + (tier.damage - (tier.tap ?? tier.damage)) * charge) * lvl : tier.damage * lvl;
-      // Spawn from the shooter's hand, aimed at what the camera ray points at (as far as it flies).
-      const aim = aimPoint(host, p, o, d, def.range * 1.2, head, 2);
-      const hand: V3 = [head[0], head[1], head[2]];
-      let dir: V3 = [aim[0] - hand[0], aim[1] - hand[1], aim[2] - hand[2]];
-      const l = Math.hypot(dir[0], dir[1], dir[2]) || 1;
-      dir = [dir[0] / l, dir[1] / l, dir[2] / l];
-      if (def.delivery === "thrown") {
-        const up = upOf(head);
-        dir = [dir[0] + up[0] * 0.35, dir[1] + up[1] * 0.35, dir[2] + up[2] * 0.35];
-        const l2 = Math.hypot(dir[0], dir[1], dir[2]);
-        dir = [dir[0] / l2, dir[1] / l2, dir[2] / l2];
-      }
-      const pr: Projectile = {
-        id: projectileSeq++,
-        owner: p,
-        weapon: def,
-        tier,
-        damage: dmg,
-        pos: hand,
-        vel: [dir[0] * speed, dir[1] * speed, dir[2] * speed],
-        gravity: def.gravity ?? 0,
-        travelled: 0,
-        maxDist: def.range * 1.2,
-        pierceLeft: tier.pierce ?? 0,
-        hit: new Set([p.id]),
-        fuseAt: def.delivery === "thrown" ? now + (tier.fuse ?? def.fuse ?? 1.6) * 1000 : null,
-        stuck: false,
-      };
-      projectiles(host).push(pr);
-      host.broadcastNear("projectile", { id: pr.id, by: p.id, weapon: WEAPON_INDEX.get(def.id), x: hand[0], y: hand[1], z: hand[2], vx: pr.vel[0], vy: pr.vel[1], vz: pr.vel[2], g: pr.gravity }, hand, 200);
+      launch(host, p, def, tier, o, d, head, dmg, speed, now);
       if (def.delivery === "thrown") consumeStack(p);
       return { ok: true };
     }
     default:
       return { ok: false, reason: "unsupported" };
   }
+}
+
+/** Spawn a projectile from the shooter's hand, aimed at where the camera ray points, and tell the room. */
+function launch(host: CombatHost, p: PlayerActor, def: WeaponDef, tier: TierStats, o: V3, d: V3, head: V3, dmg: number, speed: number, now: number) {
+  // Specials (the Ember Seal) reach exactly their stated range; other bolts keep the 20% grace.
+  const reach = def.hidden ? def.range : def.range * 1.2;
+  // Spawn from the shooter's hand, aimed at what the camera ray points at (as far as it flies).
+  const aim = aimPoint(host, p, o, d, reach, head, 2);
+  const hand: V3 = [head[0], head[1], head[2]];
+  let dir: V3 = [aim[0] - hand[0], aim[1] - hand[1], aim[2] - hand[2]];
+  const l = Math.hypot(dir[0], dir[1], dir[2]) || 1;
+  dir = [dir[0] / l, dir[1] / l, dir[2] / l];
+  if (def.delivery === "thrown") {
+    const up = upOf(head);
+    dir = [dir[0] + up[0] * 0.35, dir[1] + up[1] * 0.35, dir[2] + up[2] * 0.35];
+    const l2 = Math.hypot(dir[0], dir[1], dir[2]);
+    dir = [dir[0] / l2, dir[1] / l2, dir[2] / l2];
+  }
+  const pr: Projectile = {
+    id: projectileSeq++,
+    owner: p,
+    weapon: def,
+    tier,
+    damage: dmg,
+    pos: hand,
+    vel: [dir[0] * speed, dir[1] * speed, dir[2] * speed],
+    gravity: def.gravity ?? 0,
+    travelled: 0,
+    maxDist: reach,
+    pierceLeft: tier.pierce ?? 0,
+    hit: new Set([p.id]),
+    fuseAt: def.delivery === "thrown" ? now + (tier.fuse ?? def.fuse ?? 1.6) * 1000 : null,
+    stuck: false,
+  };
+  projectiles(host).push(pr);
+  host.broadcastNear("projectile", { id: pr.id, by: p.id, weapon: WEAPON_INDEX.get(def.id), x: hand[0], y: hand[1], z: hand[2], vx: pr.vel[0], vy: pr.vel[1], vz: pr.vel[2], g: pr.gravity }, hand, 200);
+}
+
+/**
+ * A weapon's special (the Ember Kunai's Ember Seal): the server times the hand seal from the `charge`
+ * start (at least 90% of the tier's heavyTime), enforces the tier's cooldown, then launches the hidden
+ * special def at the same tier: a fireball whose hit bursts with splash and burn (heavy destruction).
+ * It spends no kunai and ignores the throw rate and the reload.
+ */
+function castSpecial(host: CombatHost, p: PlayerActor, def: WeaponDef, tier: TierStats, tierIndex: number, o: V3, d: V3, head: V3, now: number): FireResult {
+  const sp = def.special ? WEAPON_BY_ID.get(def.special) : undefined;
+  // The seal must have been held with this very item in hand (not fists, not another slot).
+  const sameItem = !!p.chargeItem && p.chargeItem === p.char.hotbar[p.char.selected];
+  const held = p.chargeStartedAt > 0 && sameItem ? now - p.chargeStartedAt : 0;
+  p.chargeStartedAt = 0;
+  p.chargeItem = null;
+  if (!sp || !tier.cooldown) return { ok: false, reason: "no special" };
+  const spTier = sp.tiers[tierIndex]!;
+  const gate = attackGate(p, tier, now, host);
+  if (gate) return gate;
+  if (held < (tier.heavyTime ?? 0.4) * 1000 * 0.9) return { ok: false, reason: "not charged" };
+  if (now < p.specialReadyAt) return { ok: false, reason: "cooldown" };
+  p.specialReadyAt = now + tier.cooldown * 1000;
+  markAttack(p, now);
+  launch(host, p, sp, spTier, o, d, head, spTier.damage * damageMult(p.char.level), sp.speed ?? 24, now);
+  return { ok: true };
 }
 
 function consumeStack(p: PlayerActor) {
@@ -767,10 +816,16 @@ export function stepProjectiles(host: CombatHost, dt: number) {
     p.vel[0] -= up[0] * p.gravity * dt;
     p.vel[1] -= up[1] * p.gravity * dt;
     p.vel[2] -= up[2] * p.gravity * dt;
-    const step = Math.hypot(p.vel[0], p.vel[1], p.vel[2]) * dt;
-    const d: V3 = [p.vel[0] * dt / step, p.vel[1] * dt / step, p.vel[2] * dt / step];
+    const full = Math.hypot(p.vel[0], p.vel[1], p.vel[2]) * dt;
+    const d: V3 = [p.vel[0] * dt / full, p.vel[1] * dt / full, p.vel[2] * dt / full];
+    // A tick's segment never reaches past the projectile's range: nothing is hit beyond it.
+    const step = p.fuseAt === null ? Math.min(full, p.maxDist - p.travelled) : full;
+    if (step <= 1e-6) {
+      list.splice(i, 1);
+      continue;
+    }
     if (!advance(host, p, d, step, now)) list.splice(i, 1);
-    else if (!p.stuck && p.travelled > p.maxDist) list.splice(i, 1);
+    else if (!p.stuck && p.travelled >= p.maxDist - 1e-6) list.splice(i, 1);
   }
 }
 

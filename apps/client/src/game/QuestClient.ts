@@ -1,8 +1,9 @@
-// Client side of quests and economy, created per body: world props and prompts (E), the shop,
+// Client side of quests and economy, created per body: world props and prompts (E), the shop (one per safe zone),
 // guide, journal (J), map (M) and keypad panels, the mission tracker, cosmetics on avatars, name
 // and title plates, the Hall of Firsts wall, billboard lamps, and the admin console (`) with
 // staged scenes (`stage <n>`, or `?stage=<n>` in the URL for an admin window).
 
+import { SHOP_SPOT_BY_ID } from "@firstlight/shared/content/shops";
 import { EGG_BY_ID } from "@firstlight/shared/content/secrets";
 import * as THREE from "three/webgpu";
 import { PLANET_IDS, type BodyId } from "@firstlight/shared";
@@ -13,7 +14,8 @@ import { flags } from "../config.ts";
 import type { AvatarView } from "../render/Avatars.ts";
 import { CosmeticRig, Nameplates } from "../render/Cosmetics.ts";
 import { MapPanel } from "../ui/map.ts";
-import { AdminConsole, GuidePanel, JournalPanel, KeypadPanel, MissionTracker, Panel, ShopPanel } from "../ui/panels.ts";
+import { AdminConsole, GuidePanel, JournalPanel, KeypadPanel, MissionTracker, Panel } from "../ui/panels.ts";
+import { ShopPanel } from "../ui/shop.ts";
 import { QuestWorld } from "../world/QuestWorld.ts";
 import type { Game } from "./Game.ts";
 import { HOTKEYS, hits } from "./keys.ts";
@@ -144,13 +146,16 @@ export class QuestClient implements ClientSystem {
   }
 
   private promptFor(o: WorldObjectDef): string {
-    if (o.look === "keeper") return "E — Trade with Juno Vale";
+    if (o.look === "keeper") return `E — Trade with ${SHOP_SPOT_BY_ID.get(o.id)?.keeper ?? o.name}`;
     if (o.look === "guide") return `E — Talk to ${o.name}`;
     return `E — ${o.name}`;
   }
 
   private use(o: WorldObjectDef) {
-    if (o.look === "keeper") return this.shop.open();
+    if (o.look === "keeper") {
+      const spot = SHOP_SPOT_BY_ID.get(o.id);
+      return spot ? this.shop.openAt(spot) : this.shop.open();
+    }
     if (o.look === "guide") return this.guide?.open();
     if (o.look === "lantern" && o.egg === "E4") this.world.lightLantern(o.id);
     this.game.net.room?.send("interact", { target: o.id });

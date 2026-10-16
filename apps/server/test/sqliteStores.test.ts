@@ -13,7 +13,7 @@ function db() {
 describe("SQLite stores", () => {
   it("round-trips a character, including inventory, position and death state", () => {
     const repo = new SqliteCharacterRepo(db());
-    const c = newCharacter(3, 4, 1000);
+    const c = newCharacter(3, 4, 1000, 1);
     c.coins = 77;
     c.level = 5;
     c.xp = 900;
@@ -26,6 +26,7 @@ describe("SQLite stores", () => {
     const back = repo.load("u1")!;
     expect(back.starter).toBe(3);
     expect(back.palette).toBe(4);
+    expect(back.look).toBe(1); // Unit 7's second look, kept in the inventory record
     expect(back.coins).toBe(77);
     expect(back.pos).toEqual([1, 2, 503]);
     expect(back.hotbar[0]).toEqual({ id: "carbine", tier: 1, qty: 1 });

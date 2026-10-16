@@ -8,7 +8,7 @@ import { BODIES, createTerrain, isSafe, padDirs, portalNear, portalSpots, type B
 import { BACKPACK_SLOTS, HOTBAR_SLOTS, newCharacter, type CharacterData } from "@firstlight/shared/content/character";
 import { INV_SLOTS, moveSlot, storeItem } from "@firstlight/shared/content/inventory";
 import { fallDamageFraction, levelForXp, maxHp, pvpKillXp, xpAtLevel, xpToNext } from "@firstlight/shared/content/progression";
-import { WEAPON_BY_ID, WEAPON_INDEX } from "@firstlight/shared/content/weapons";
+import { STARTERS, starterLook, WEAPON_BY_ID, WEAPON_INDEX } from "@firstlight/shared/content/weapons";
 import { NET, PHRASES, type InvItem, type YouState } from "@firstlight/shared/net/protocol";
 import { ANIM, BodyState, NpcState, PF, PileState, PlayerState } from "@firstlight/shared/net/schema";
 import { z } from "zod";
@@ -59,6 +59,7 @@ export interface JoinOptions {
   body: BodyId;
   starter?: number;
   palette?: number;
+  look?: number;
 }
 
 export { MOVE } from "./movement.ts";
@@ -84,11 +85,11 @@ const CARRIED_ON_TAKEOVER = ["protectedUntil", "heals", "healAcc", "burn", "heal
 
 const vec = z.number().finite();
 const inputSchema = z.object({ seq: z.number().int().nonnegative(), x: vec, y: vec, z: vec, fx: z.number().min(-1).max(1), fy: z.number().min(-1).max(1), fz: z.number().min(-1).max(1), anim: z.number().int().min(0).max(31), t: vec });
-const fireSchema = z.object({ slot: z.number().int().min(0).max(3), ox: vec, oy: vec, oz: vec, dx: vec, dy: vec, dz: vec, t: vec, charge: z.number().min(0).max(1).optional() });
+const fireSchema = z.object({ slot: z.number().int().min(0).max(3), ox: vec, oy: vec, oz: vec, dx: vec, dy: vec, dz: vec, t: vec, charge: z.number().min(0).max(1).optional(), seal: z.boolean().optional() });
 const meleeSchema = z.object({ slot: z.number().int().min(0).max(3), t: vec, heavy: z.boolean().optional() });
 const slotSchema = z.object({ slot: z.number().int().min(0).max(HOTBAR_SLOTS + BACKPACK_SLOTS - 1) });
 const pickupSchema = z.object({ pileId: z.string().max(64), itemIndex: z.number().int().min(0).max(64).optional() });
-const respawnSchema = z.object({ starter: z.number().int().min(0).max(3), palette: z.number().int().min(0).max(5) });
+const respawnSchema = z.object({ starter: z.number().int().min(0).max(STARTERS.length - 1), palette: z.number().int().min(0).max(5), look: z.number().int().min(0).max(15).optional() });
 const adminSchema = z.object({ cmd: z.string().max(32), args: z.record(z.string(), z.unknown()).optional() });
 
 
@@ -132,7 +133,7 @@ const YOU_LAZY_MS = 400;
  * and respawn write SQLite; ping, questSync and client:info answer with messages). Colyseus's 60/s
  * per client still bounds everything else.
  */
-export const MESSAGE_RATES: Record<string, number> = { ping: 20, travel: 2, respawn: 1, logout: 4, questSync: 2, "client:info": 2, skySync: 2, npcSync: 2 };
+export const MESSAGE_RATES: Record<string, number> = { ping: 20, travel: 2, respawn: 1, look: 2, logout: 4, questSync: 2, "client:info": 2, skySync: 2, npcSync: 2 };
 /** Malformed messages are dropped (no kick for a harmless drift); this many within 10 s disconnects. */
 const BAD_MESSAGE_LIMIT = 20;
 
@@ -349,7 +350,10 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     });
     this.onMessage("charge", z.object({ on: z.boolean() }), (c, m) => {
       const a = this.actor(c);
-      if (a && !a.dead) a.chargeStartedAt = m.on && !inSaddle(a, Date.now()) ? Date.now() : 0;
+      if (!a || a.dead) return;
+      const on = m.on && !inSaddle(a, Date.now());
+      a.chargeStartedAt = on ? Date.now() : 0;
+      a.chargeItem = on ? (a.char.hotbar[a.char.selected] ?? null) : null;
     });
     this.onMessage("travel", z.object({ to: z.enum(["portus", "arcadia", "hollowmere", "meridian"]) }), (c, m) => this.travelRequest(c, m.to));
     this.onMessage("scope", z.object({ on: z.boolean() }), (c, m) => {
@@ -379,7 +383,15 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       if (this.invAllowed(a)) this.moveItem(a, m.from, m.to);
     });
     this.onMessage("logout", z.object({ start: z.boolean() }), (c, m) => this.logout(c, m.start));
-    this.onMessage("respawn", respawnSchema, (c, m) => this.respawn(c, m.starter, m.palette));
+    this.onMessage("respawn", respawnSchema, (c, m) => this.respawn(c, m.starter, m.palette, m.look ?? 0));
+    // A living character can switch between its starter's looks (cosmetic; content.md §2.4).
+    this.onMessage("look", z.object({ look: z.number().int().min(0).max(15) }), (c, m) => {
+      const a = this.actor(c);
+      if (!a || a.dead) return;
+      if (starterLook(a.char.starter, m.look) !== m.look) return c.send("denied", { action: "look", reason: "unknown look" });
+      a.char.look = m.look;
+      a.state.look = m.look;
+    });
     this.onMessage("phrase", z.object({ id: z.number().int().min(0).max(PHRASES.length - 1) }), (c, m) => {
       const a = this.actor(c);
       const now = Date.now();
@@ -453,7 +465,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     void legacy;
     characterRepo.current.ensure?.(auth.userId);
     char ??= characterRepo.current.load(auth.userId);
-    if (!char) char = newCharacter(options?.starter ?? 0, options?.palette ?? 0, now);
+    if (!char) char = newCharacter(options?.starter ?? 0, options?.palette ?? 0, now, options?.look ?? 0);
     if (inheritedPos && char.body === this.bodyDef.id) char.pos = inheritedPos;
     const p = new PlayerState();
     let pos: V3;
@@ -477,6 +489,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     p.userId = auth.userId; // random opaque id (not a credential): clients need it for blocks, mutes, parties (D27)
     p.starter = char.starter;
     p.palette = char.palette;
+    p.look = starterLook(char.starter, char.look);
     p.flags = (auth.admin ? PF.ADMIN : 0) | (auth.loadtest ? PF.LOADTEST : 0) | (char.dead ? PF.DEAD : 0);
     const a: PlayerActor = {
       kind: "player",
@@ -511,6 +524,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       youDirty: true,
       ...motionFields(Math.hypot(p.x, p.y, p.z), now),
       chargeStartedAt: 0,
+      chargeItem: null,
       specialReadyAt: 0,
       lastPhraseAt: 0,
       healAcc: 0,
@@ -778,6 +792,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
   equip(a: PlayerActor, slot: number) {
     a.char.selected = Math.max(0, Math.min(HOTBAR_SLOTS - 1, slot));
+    // A charge (draw, heavy, hand seal) belongs to the item it started with: switching ends it.
+    a.chargeStartedAt = 0;
+    a.chargeItem = null;
     const item = a.char.hotbar[a.char.selected];
     a.state.weapon = item ? (WEAPON_INDEX.get(item.id) ?? 0) : 0;
     a.blocking = false;
@@ -1058,10 +1075,10 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     }
   }
 
-  respawn(client: Client, starter: number, palette: number) {
+  respawn(client: Client, starter: number, palette: number, look = 0) {
     const a = this.actors.get(client.sessionId);
     if (!a || !a.dead) return;
-    const fresh = newCharacter(starter, palette);
+    const fresh = newCharacter(starter, palette, Date.now(), look);
     fresh.deaths = a.char.deaths;
     fresh.travelTo = "portus";
     a.char = fresh;

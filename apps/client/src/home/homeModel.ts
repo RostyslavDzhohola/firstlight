@@ -6,7 +6,7 @@ import { BOSS_BY_BODY, npcDef, PORTUS_WILDS } from "@firstlight/shared/content/n
 import { MEDAL_BY_ID, MEDALS } from "@firstlight/shared/content/medals";
 import { LEVEL_CAP, xpAtLevel, xpToNext } from "@firstlight/shared/content/progression";
 import { PLAQUES, type HallLine } from "@firstlight/shared/content/secrets";
-import { STARTERS } from "@firstlight/shared/content/weapons";
+import { STARTERS, starterLook } from "@firstlight/shared/content/weapons";
 import type { HomeOnline, HomeVisits } from "@firstlight/shared/net/home";
 
 // ------------------------------------------------------------------------------------------- worlds
@@ -59,7 +59,7 @@ export interface MeInfo {
   displayName: string | null;
   guest: boolean;
   titleMedal: string | null;
-  character: { level: number; xp: number; coins: number; starter: number | string; palette: number; body: string } | null;
+  character: { level: number; xp: number; coins: number; starter: number | string; palette: number; look?: number; body: string } | null;
   medals: string[];
   pads: { body: string; padId: string }[];
   playMs?: number;
@@ -71,6 +71,8 @@ export interface ProgressView {
   name: string;
   guest: boolean;
   starter: number;
+  /** STARTER_LOOKS index (the portrait). */
+  look: number;
   starterName: string;
   level: number;
   /** 0–1 through the current level (1 at the cap). */
@@ -97,7 +99,7 @@ export function starterIndex(s: number | string | null | undefined): number {
 const nf = new Intl.NumberFormat("en-US");
 export const fmtNum = (n: number) => nf.format(Math.round(n));
 
-export function progressView(me: MeInfo, fallbackStarter = 0): ProgressView {
+export function progressView(me: MeInfo, fallbackStarter = 0, fallbackLook = 0): ProgressView {
   const c = me.character;
   const level = Math.max(1, c?.level ?? 1);
   const into = Math.max(0, (c?.xp ?? 0) - xpAtLevel(level));
@@ -108,6 +110,7 @@ export function progressView(me: MeInfo, fallbackStarter = 0): ProgressView {
     name: me.displayName || me.name || "You",
     guest: me.guest,
     starter,
+    look: c ? starterLook(starter, c.look) : starterLook(starter, fallbackLook),
     starterName: STARTERS[starter]!.name,
     level,
     xpFrac: need > 0 ? Math.min(1, into / need) : 1,
