@@ -423,7 +423,8 @@ export class Game {
     const nature = (this.nature = natureSolids(this.planet.terrain));
     this.player.setNature({
       resolve: (pos, out) => nature.resolve(pos, out),
-      raycast: (o, d, maxT) => nature.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT, CAMERA_SOLID_RADIUS),
+      raycast: (o, d, maxT) => nature.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT),
+      cameraRay: (o, d, maxT) => nature.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT, CAMERA_SOLID_RADIUS),
     });
     this.portals = new Portals(this.ctx.scene, body, this.planet.terrain);
     this.audio.setMusic(body);

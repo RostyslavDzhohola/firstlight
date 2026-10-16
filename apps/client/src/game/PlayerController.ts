@@ -20,6 +20,8 @@ export interface MoveColliders {
   resolve(pos: THREE.Vector3, out: PropContact): boolean;
   /** Distance along a ray (unit `d`) to the first solid prop within `maxT`, or Infinity (tracers). */
   raycast?(o: THREE.Vector3, d: THREE.Vector3, maxT: number): number;
+  /** The camera's ray, if it ignores some solids (natural ones: only boulders and spires); else `raycast`. */
+  cameraRay?(o: THREE.Vector3, d: THREE.Vector3, maxT: number): number;
 }
 
 export const MOVE = {
@@ -149,6 +151,10 @@ export class PlayerController {
    */
   setNature(c: MoveColliders | null) {
     this.nature = c;
+  }
+
+  getNature(): MoveColliders | null {
+    return this.nature;
   }
 
   /**
@@ -401,7 +407,7 @@ export class PlayerController {
     const dir = _camDir.copy(camPos).sub(head);
     const full = dir.length();
     dir.divideScalar(full);
-    const hit = Math.min(this.structures?.raycast?.(head, dir, full + CAMERA_WALL_GAP) ?? Infinity, this.nature?.raycast?.(head, dir, full + CAMERA_WALL_GAP) ?? Infinity);
+    const hit = Math.min(this.structures?.raycast?.(head, dir, full + CAMERA_WALL_GAP) ?? Infinity, this.nature?.cameraRay?.(head, dir, full + CAMERA_WALL_GAP) ?? Infinity);
     const want = hit < Infinity ? Math.max(CAMERA_MIN_REACH, hit - CAMERA_WALL_GAP) : full;
     this.camReach = want < this.camReach ? want : Math.min(want, this.camReach + CAMERA_EASE_OUT);
     if (this.camReach < full) camPos.copy(head).addScaledVector(dir, this.camReach);
