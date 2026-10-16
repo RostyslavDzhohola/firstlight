@@ -1044,13 +1044,17 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
 - **D-view-1 (2026-10-16):** trees, rocks, procedural props and breakables between the camera and the
   player dissolve with a screen-door dither (render/occluderFade.ts): one shared maskNode in their
   materials, driven by render-group uniforms written each frame (a soft cone from the camera to the
-  player's chest plus a narrow one along the aim, only nearer than the player); shadows keep the full
+  drawn avatar's chest bone, in the saddle too, plus a narrow one along the aim, only fragments
+  nearer to the camera than the chest; Codex review: a depth along the chest direction let the aim
+  cone reach far past a camera pulled in by a wall); shadows keep the full
   shape (maskShadowNode). No transparency, so no sorting, and no extra shader variant. Off in photo
   mode and the bench; `?nofade` for A/B. Why: the camera doesn't stop at trunks (D-solid-1), and
   Codex's check found trunks hiding the avatar and the crosshair.
 - **D-view-2 (2026-10-16):** no render change for the "Hollowmere WebGL dip" (Codex: 52.1 fps, p95 50
-  ms): uncapped, that view renders in 3.9 ms; the dips are ~0.4 s runs of 33/50 ms frames that a
-  page clearing an empty WebGL canvas shows at the same wall-clock moments (machine-wide GPU /
-  compositor stalls in headless Chrome on the M1). Frame-time gates should read runs of long frames
-  with that in mind (a control page, or a rerun). Why: cutting bloom mips or shadow updates would
-  cost visible quality for frames the game doesn't cause.
+  ms): uncapped, that view renders in 3.9 ms; the dips are ~0.4 s runs of 33/50 ms frames, and a
+  page clearing an empty WebGL canvas in another browser stalled at the same wall-clock moments
+  (within 4–37 ms, 3 of 3). That strongly suggests Chrome/GPU present stalls on the machine rather
+  than the game's own work, though it doesn't fully rule out the game adding to the contention.
+  Evidence: /tmp/fl-go/shots/view-polish/hollowmere-dip-evidence.txt. Frame-time gates should read
+  runs of long frames with that in mind (a control page, or a rerun). Why: cutting bloom mips or
+  shadow updates would cost visible quality for stalls the evidence doesn't tie to the game.
