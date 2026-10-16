@@ -3,6 +3,7 @@
 // Easter-egg parts. Placeholder geometry until the art lane replaces it; positions come from the
 // shared world-object table so they match the server's triggers exactly.
 
+import { SHOP_SPOT_BY_ID } from "@firstlight/shared/content/shops";
 import * as THREE from "three/webgpu";
 import { materialColor, materialEmissive, texture } from "three/tsl";
 import { atmo } from "../render/atmosphere.ts";
@@ -145,6 +146,10 @@ interface Prop {
   facing?: THREE.Vector3;
 }
 
+
+/** Keeper avatars: AvatarView's [palette, starter] (Juno Vale's is the one she always had). */
+const KEEPER_LOOK: Record<string, [number, number]> = { juno_vale: [1, 2], shop_arcadia: [3, 1], shop_hollowmere: [5, 0], shop_meridian: [4, 3] };
+
 export class QuestWorld {
   readonly group = new THREE.Group();
   readonly props: Prop[] = [];
@@ -207,7 +212,9 @@ export class QuestWorld {
     const d = p.def;
     switch (d.look) {
       case "keeper": {
-        p.npc = new AvatarView(1, 2);
+        // Juno keeps her look; each outpost's trader wears another palette and starter.
+        const look = KEEPER_LOOK[d.id] ?? [1, 2];
+        p.npc = new AvatarView(look[0], look[1]);
         this.group.add(p.npc.root);
         const counter = mesh(new THREE.BoxGeometry(2.6, 1.0, 0.8), std(0x7a5a3a, { rough: 0.8 }), 0, 0.5, 1.1);
         const top = mesh(new THREE.BoxGeometry(2.8, 0.08, 1.0), std(0xd8b98a), 0, 1.04, 1.1);
@@ -219,7 +226,8 @@ export class QuestWorld {
         const orb = mesh(new THREE.IcosahedronGeometry(0.18, 1), glow(0xffd166, 2.5), 0.8, 1.3, 1.1);
         r.add(counter, top, awning, postL, postR, crate, orb);
         p.bob = orb;
-        const l = label("Juno Vale", "Portus Exchange · E to trade");
+        const spot = SHOP_SPOT_BY_ID.get(d.id);
+        const l = label(spot?.keeper ?? d.name, `${spot?.name ?? "Shop"} · E to trade`);
         l.position.set(0, 3.4, 0.6);
         r.add(l);
         break;
