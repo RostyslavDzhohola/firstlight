@@ -2,7 +2,8 @@
 // The server validates (SPEC §5.3); `correct` messages snap us back. Intact breakable props block
 // (the player slides along them) and can be stood on (MoveColliders, set by the destruction view),
 // and so do the body's structures: the Portus town's, a planet outpost's and its waystones (setStructures:
-// the shared solids the server checks, D38, D42).
+// the shared solids the server checks, D38, D42), and the natural solids: tree trunks, boulders, spires
+// and big rocks (setNature, D-solid-1).
 // Runs every frame: module scratch vectors, no allocations.
 
 import * as THREE from "three/webgpu";
@@ -113,6 +114,8 @@ export class PlayerController {
   private structures: MoveColliders | null = null;
   private readonly contact = emptyContact();
   private readonly structureContact = emptyContact();
+  private readonly natureContact = emptyContact();
+  private nature: MoveColliders | null = null;
 
   constructor(private terrain: Terrain, private waterLevel: number) {}
 
@@ -137,6 +140,15 @@ export class PlayerController {
 
   getStructures(): MoveColliders | null {
     return this.structures;
+  }
+
+  /**
+   * Natural solids of this body (tree trunks, boulders, spires, big rocks: shared natureSolids,
+   * D-solid-1): the player slides round them like the server expects; `raycast` (boulders and
+   * spires only) keeps the camera out of the big ones.
+   */
+  setNature(c: MoveColliders | null) {
+    this.nature = c;
   }
 
   /**
@@ -277,7 +289,7 @@ export class PlayerController {
     // carry the body across a thin prop (a fence blocks 0.47 m either side of its middle), and a
     // fast fall can't skip a top's 0.4 m landing band.
     let floorR = 0;
-    if (!this.colliders && !this.structures) this.pos.addScaledVector(this.vel, dt);
+    if (!this.colliders && !this.structures && !this.nature) this.pos.addScaledVector(this.vel, dt);
     else {
       const c = this.contact;
       const sc = this.structureContact;
@@ -292,6 +304,12 @@ export class PlayerController {
           this.structures.resolve(this.pos, sc);
           if (sc.pushed) this.slide(sc, vH);
           if (sc.floor > c.floor) c.floor = sc.floor;
+        }
+        if (this.nature) {
+          const nc = this.natureContact;
+          this.nature.resolve(this.pos, nc);
+          if (nc.pushed) this.slide(nc, vH);
+          if (nc.floor > c.floor) c.floor = nc.floor;
         }
         // A prop top only catches a player who isn't rising (a jump past an edge keeps going up).
         const su = _newUp.copy(this.pos).normalize();
@@ -383,7 +401,7 @@ export class PlayerController {
     const dir = _camDir.copy(camPos).sub(head);
     const full = dir.length();
     dir.divideScalar(full);
-    const hit = this.structures?.raycast?.(head, dir, full + CAMERA_WALL_GAP) ?? Infinity;
+    const hit = Math.min(this.structures?.raycast?.(head, dir, full + CAMERA_WALL_GAP) ?? Infinity, this.nature?.raycast?.(head, dir, full + CAMERA_WALL_GAP) ?? Infinity);
     const want = hit < Infinity ? Math.max(CAMERA_MIN_REACH, hit - CAMERA_WALL_GAP) : full;
     this.camReach = want < this.camReach ? want : Math.min(want, this.camReach + CAMERA_EASE_OUT);
     if (this.camReach < full) camPos.copy(head).addScaledVector(dir, this.camReach);

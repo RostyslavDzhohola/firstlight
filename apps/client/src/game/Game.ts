@@ -4,7 +4,7 @@ import { listenHuntTargets } from "./huntTargets.ts";
 // portals, piles, HUD and the main loop.
 
 import * as THREE from "three/webgpu";
-import { BODIES, padDirs, type BodyId } from "@firstlight/shared";
+import { BODIES, CAMERA_SOLID_RADIUS, natureSolids, padDirs, type BodyId, type NatureSolids } from "@firstlight/shared";
 import { config, flags } from "../config.ts";
 import { Net, TravelRedirect, type Snapshot } from "../net/Net.ts";
 import { AvatarView, avatarWarmupHook, preloadAvatars } from "../render/Avatars.ts";
@@ -67,6 +67,8 @@ export class Game {
   hud!: Hud;
   menu!: Menu;
   portals: Portals | null = null;
+  /** The body's natural solids (D-solid-1): the player's collider, warmed ahead of the player. */
+  nature: NatureSolids | null = null;
   piles: PilesView | null = null;
   bodyId: BodyId = "portus";
   systems: ClientSystem[] = [];
@@ -415,8 +417,14 @@ export class Game {
     this.particles.setMoteColor(this.planet.look.mote);
     this.player ??= new PlayerController(this.planet.terrain, this.planet.body.waterLevel);
     this.player.setTerrain(this.planet.terrain, this.planet.body.waterLevel);
-    // The body's structures (Portus' town, a planet's outpost and waystones) block like the server's.
+    // The body's structures (Portus' town, a planet's outpost and waystones) block like the server's,
+    // and so do its natural solids (trunks, boulders, spires, big rocks: D-solid-1).
     this.player.setStructures(this.planet.town?.moveColliders ?? null);
+    const nature = (this.nature = natureSolids(this.planet.terrain));
+    this.player.setNature({
+      resolve: (pos, out) => nature.resolve(pos, out),
+      raycast: (o, d, maxT) => nature.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT, CAMERA_SOLID_RADIUS),
+    });
     this.portals = new Portals(this.ctx.scene, body, this.planet.terrain);
     this.audio.setMusic(body);
     this.piles = new PilesView(this.ctx.scene);
@@ -463,6 +471,9 @@ export class Game {
       await new Promise((r) => setTimeout(r, 50));
       alive("building the world");
     }
+    // The natural solids round the arrival, built behind the loading screen (play builds the rest
+    // ahead of the player, one chunk a frame at most).
+    for (let i = 0; i < 12 && this.nature.warm(this.player.pos.x, this.player.pos.y, this.player.pos.z, 120, 1) > 0; i++) await Promise.resolve();
     setLoading("Loading characters…", 0.8);
     await Promise.all([preloadAvatars(), preloadHorse(), this.planet.props.ready]); // resolve null on failure: capsules / box horses
     alive("loading characters");
@@ -618,6 +629,7 @@ export class Game {
       // Photo mode (Shift+P): the body stays put (and can still be hurt) while the camera flies.
       if (this.input.hit(HOTKEYS.photo)) this.photo.toggle(this.ctx.camera);
       if (!this.photo.active) this.player.update(dt, this.input, this.combat.aiming(), now);
+      this.nature?.warm(this.player.pos.x, this.player.pos.y, this.player.pos.z, 120, 1);
       const p = this.player.pos;
       const f = this.player.facing;
       const m = this.inputMsg;
