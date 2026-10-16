@@ -2,9 +2,9 @@
 // outpost. The server lets a player buy and sell within a spot's radius on that body; the keepers
 // (content/world.ts) stand at these positions, so moving a spot moves its keeper too.
 //
-// `pos` is a world position on the ground (metres, the body's frame). The planet spots are
-// placeholders beside pad 0 (east −4.5 m, north −3 m in the pad's frame, the guide's mirror image);
-// the outposts lane places the shop stalls and edits these numbers. Append only: never reorder.
+// `pos` is a world position on the ground (metres, the body's frame). The planet spots are the
+// keepers' places behind the counters of the outposts' shop stalls (D-b2-3: padOutposts.ts
+// `shop.at`, on the ground; shops.test.ts holds them together). Append only: never reorder.
 //
 // Buying follows one rule on both sides (buyBlock): you can afford it and you're the level to use it.
 
@@ -24,9 +24,9 @@ export interface ShopSpot {
 
 export const SHOP_SPOTS: readonly ShopSpot[] = [
   { id: "juno_vale", body: "portus", pos: [0, 149.613, 10.9913], radius: 6, name: "Portus Exchange", keeper: "Juno Vale" },
-  { id: "shop_arcadia", body: "arcadia", pos: [267.4874, 424.2184, -3.009], radius: 6, name: "Dawnpad Trading Post", keeper: "Pell Hayward" },
-  { id: "shop_hollowmere", body: "hollowmere", pos: [398.922, 636.8925, -3.006], radius: 6, name: "Lanternfall Stall", keeper: "Nell Ashgrove" },
-  { id: "shop_meridian", body: "meridian", pos: [361.5688, 933.9691, -3.0045], radius: 6, name: "Waystation Supply", keeper: "Clerk Ostrow" },
+  { id: "shop_arcadia", body: "arcadia", pos: [271.0583, 420.186, -17.8155], radius: 6, name: "Dawnpad Trading Post", keeper: "Pell Hayward" },
+  { id: "shop_hollowmere", body: "hollowmere", pos: [395.6749, 638.2762, -19.3793], radius: 6, name: "Lanternfall Stall", keeper: "Nell Ashgrove" },
+  { id: "shop_meridian", body: "meridian", pos: [368.7293, 930.8119, 6.6748], radius: 6, name: "Waystation Supply", keeper: "Clerk Ostrow" },
 ];
 
 export const SHOP_SPOT_BY_ID: ReadonlyMap<string, ShopSpot> = new Map(SHOP_SPOTS.map((s) => [s.id, s]));

@@ -3,7 +3,7 @@
 // horse leaves (death with the whistle in the pile, travel, logout, idle, lost whistle).
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { BODIES, isSafe, portalSpots, type BodyId } from "@firstlight/shared";
+import { BODIES, portalSpots, type BodyId, natureSolids } from "@firstlight/shared";
 import { HORSE, HORSE_WHISTLE, tooDeepToRide } from "@firstlight/shared/content/horse";
 import { PF } from "@firstlight/shared/net/schema";
 import { env } from "../src/env.ts";
@@ -11,6 +11,7 @@ import { HorseSystem } from "../src/world/horses/HorseSystem.ts";
 import { applyMoveEffect } from "../src/world/npc/effects.ts";
 import { pileStore } from "../src/world/piles.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
+import { siteAt } from "./npc-bots.ts";
 import { bot, harness, invIds, me, objAt, offPad, padAt, serverRoom, sleep, terrain, tpAndWait, until, type Bot } from "./quest-helpers.ts";
 
 beforeEach(async () => {
@@ -46,7 +47,7 @@ async function summonAndMount(b: Bot) {
   await until("mounted", () => mounted(b));
 }
 
-/** Unit tangent at `p` along which the ground stays dry (no horse-deep water) for `metres`. */
+/** Unit tangent at `p` along which the ground stays dry (no horse-deep water) and clear of natural solids for `metres`. */
 function dryBearing(p: V3, metres: number): V3 {
   const def = BODIES[BODY];
   const t = terrain(BODY);
@@ -60,9 +61,15 @@ function dryBearing(p: V3, metres: number): V3 {
     const ang = (i / 16) * Math.PI * 2;
     const d = norm([e1[0] * Math.cos(ang) + e2[0] * Math.sin(ang), e1[1] * Math.cos(ang) + e2[1] * Math.sin(ang), e1[2] * Math.cos(ang) + e2[2] * Math.sin(ang)]);
     let dry = true;
+    let prev: V3 = [p[0], p[1], p[2]];
     for (let s = 2; s <= metres && dry; s += 2) {
       const q = norm([up[0] * def.radius + d[0] * s, up[1] * def.radius + d[1] * s, up[2] * def.radius + d[2] * s]);
       dry = !tooDeepToRide(t.groundHeight(q[0], q[1], q[2]), def.waterLevel + 0.5);
+      // …and no tree trunk, boulder or rock on the line (D-solid-1): the bot rides straight.
+      const g = def.radius + t.groundHeight(q[0], q[1], q[2]);
+      const at: V3 = [q[0] * g, q[1] * g, q[2] * g];
+      if (dry && natureSolids(t).crosses(prev[0], prev[1], prev[2], at[0], at[1], at[2], { radius: 1, height: 2.4, step: 0.35 })) dry = false;
+      prev = at;
     }
     if (dry) return d;
   }
@@ -72,30 +79,6 @@ function dryBearing(p: V3, metres: number): V3 {
 function norm(v: V3): V3 {
   const l = Math.hypot(...v);
   return [v[0] / l, v[1] / l, v[2] / l];
-}
-
-/** The nearest dry ground point outside every safe ring from `p` (2 m past the ring's edge). */
-function outsideSafe(p: V3): V3 {
-  const def = BODIES[BODY];
-  const t = terrain(BODY);
-  const up = norm(p);
-  const a: V3 = Math.abs(up[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
-  const k = a[0] * up[0] + a[1] * up[1] + a[2] * up[2];
-  const e1 = norm([a[0] - k * up[0], a[1] - k * up[1], a[2] - k * up[2]]);
-  const e2 = norm([up[1] * e1[2] - up[2] * e1[1], up[2] * e1[0] - up[0] * e1[2], up[0] * e1[1] - up[1] * e1[0]]);
-  const at = (ang: number, m: number): V3 => {
-    const d = norm([up[0] * def.radius + (e1[0] * Math.cos(ang) + e2[0] * Math.sin(ang)) * m, up[1] * def.radius + (e1[1] * Math.cos(ang) + e2[1] * Math.sin(ang)) * m, up[2] * def.radius + (e1[2] * Math.cos(ang) + e2[2] * Math.sin(ang)) * m]);
-    const r = def.radius + t.groundHeight(d[0], d[1], d[2]);
-    return [d[0] * r, d[1] * r, d[2] * r];
-  };
-  for (let m = 4; m <= 40; m++) {
-    for (let i = 0; i < 16; i++) {
-      const q = at((i / 16) * Math.PI * 2, m);
-      const g = Math.hypot(...q) - def.radius;
-      if (!isSafe(def, ...q) && !tooDeepToRide(g, def.waterLevel + 0.5)) return at((i / 16) * Math.PI * 2, m + 2);
-    }
-  }
-  throw new Error("no unsafe ground near the portal");
 }
 
 /** Ride along the ground toward `target` at `speed` m/s (20 Hz inputs) until within `stop` metres. */
@@ -411,14 +394,16 @@ describe("the horse leaves with its owner", () => {
 
   it("on travel through a portal and on logout", async () => {
     const watcher = await bot("watcher", BODY);
-    // Portals stand in a pad's safe ring: mount just outside it, ride to the portal, travel.
+    // The portal home stands in the walled outpost (D-b2-1): mount outside its south gate, ride in
+    // through the gate, past the bench on the path, over the pad to the portal, travel.
     const spot = portalSpots(BODIES[BODY], terrain(BODY))[0]!;
     const R = BODIES[BODY].radius + spot.h;
     const portal: V3 = [spot.dir[0] * R, spot.dir[1] * R, spot.dir[2] * R];
-    const t = await rider("tourist", true, outsideSafe(portal));
+    const t = await rider("tourist", true, siteAt("arcadia", 0, -40) as V3);
     expect(t.room.roomId).toBe(watcher.room.roomId);
     await summonAndMount(t);
     await until("watcher sees the horse", () => horses(watcher).has(t.id));
+    for (const [e, n] of [[0, -28], [2.6, -19], [2.6, -12]] as const) await rideToward(t, siteAt("arcadia", e, n) as V3, 8, 1);
     await rideToward(t, portal, 8, 1);
     expect(mounted(t)).toBe(true);
     t.send("travel", { to: spot.to });
@@ -431,11 +416,11 @@ describe("the horse leaves with its owner", () => {
     await waitFor(() => (there.state as any).players?.get(there.sessionId) !== undefined);
     expect((there.state as any).horses.size).toBe(0);
 
-    // Logout: mount just outside the pad's safe ring, ride in (instant logout there), log out.
-    const l = await rider("homebody", true, offPad(BODY, 0, 15));
+    // Logout: mount outside the outpost, ride in through the gate (instant logout there), log out.
+    const l = await rider("homebody", true, siteAt("arcadia", 0, -40) as V3);
     await summonAndMount(l);
     await until("watcher sees it", () => horses(watcher).has(l.id));
-    await rideToward(l, padAt(BODY, 0) as V3, 8, 6);
+    await rideToward(l, siteAt("arcadia", 0, -26) as V3, 8, 1);
     await until("safe", () => !!(me(l).flags & PF.SAFE));
     expect(mounted(l)).toBe(true);
     const lid = l.id;

@@ -70,8 +70,8 @@ describe("huntTargets and per-target counts (A1, Clover Fields Hopbits)", () => 
     r.send("mission", { action: "accept", id: "A1" });
     await waitFor(() => !!you?.missions?.some((m: any) => m.id === "A1"));
     expect(you.missions.find((m: any) => m.id === "A1").counts).toEqual([0]);
-    // Out of the pad ring (and its protection), toward the Clover Fields pack.
-    const out = ahead(25);
+    // Out of the walled outpost (D-b2-1: its north gate, by the farmstead) toward the Clover Fields pack.
+    const out = ahead(35);
     r.send("admin", { cmd: "teleport", args: { x: out[0], y: out[1], z: out[2] } });
     r.send("admin", { cmd: "unprotect" });
     await waitFor(() => hunt.id === "A1" && hunt.npcs.length > 0, 10_000);

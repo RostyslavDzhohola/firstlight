@@ -9,6 +9,7 @@ import { NpcState, PlayerState } from "@firstlight/shared/net/schema";
 import { pushHistory, type NpcActor, type PlayerActor } from "../src/world/actors.ts";
 import type { CombatHost } from "../src/world/combat.ts";
 import type { V3 } from "../src/world/geometry.ts";
+import { NatureWarmer } from "../src/world/natureWarm.ts";
 import { NpcSystem } from "../src/world/npc/NpcSystem.ts";
 import type { NpcWorld } from "../src/world/npc/world.ts";
 
@@ -89,6 +90,8 @@ export function fakeWorld(body: BodyId, opts: { immortal?: boolean; start?: numb
     stillAdmin: (p) => !!p.identity.admin,
   };
   const sys = new NpcSystem(world);
+  // As the body room does each tick: natural solids built ahead round the players (D-solid-1).
+  const warmer = new NatureWarmer<PlayerActor>(sys.ground.nature);
   Object.assign(fw, {
     world,
     sys,
@@ -145,13 +148,14 @@ export function fakeWorld(body: BodyId, opts: { immortal?: boolean; start?: numb
       p.state.y = pos[1];
       p.state.z = pos[2];
     },
-    /** Advance the clock one tick and run the system; returns the tick's wall time (ms). */
+    /** Advance the clock one tick and run the system (and the natural solids' warm-up); returns the tick's wall time (ms). */
     step(ms = 50): number {
       clock.t += ms;
       for (const p of players.values()) pushHistory(p, clock.t);
       for (const n of npcs.values()) pushHistory(n, clock.t);
       const t0 = performance.now();
       sys.tick(ms, clock.t);
+      warmer.tick(players.values());
       return performance.now() - t0;
     },
   });

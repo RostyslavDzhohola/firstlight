@@ -11,7 +11,8 @@ import { PF } from "@firstlight/shared/net/schema";
 import { STARTERS, WEAPON_BY_ID } from "@firstlight/shared/content/weapons";
 import type { Game } from "../src/app.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
-import { flat, me, nearPad, offset, place, serverRoom, spawnNpc, st, type V } from "./npc-bots.ts";
+import { flat, me, nearPad, offset, openSpotOutside, place, serverRoom, spawnNpc, st, type V } from "./npc-bots.ts";
+import type { OutpostBody } from "@firstlight/shared/content/padOutposts";
 import { DestructionSystem } from "../src/world/destruction.ts";
 
 let game: Game;
@@ -88,11 +89,11 @@ function attack(r: Room, ranged: boolean, npc: { x: number; y: number; z: number
   else r.send("melee", { slot: 0, t: Date.now(), heavy: false });
 }
 
-/** The pad-0 safe ring and a dry, open spot `metres` outside it. */
+/** Inside pad 0's walled outpost (D-b2-1) and a dry, open spot outside its walls (10 m clear ahead). */
 function spots(body: BodyId) {
   const inside = nearPad(body, 0, 4);
   expect(isSafe(BODIES[body], ...inside)).toBe(true);
-  const outside = nearPad(body, 0, 26);
+  const outside = openSpotOutside(body as OutpostBody, 10);
   expect(isSafe(BODIES[body], ...outside)).toBe(false);
   return { inside, outside };
 }

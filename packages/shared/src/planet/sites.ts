@@ -200,13 +200,27 @@ export const HALL_STAND_SOLIDS: readonly TownSolid[] = (() => {
   ];
 })();
 
+/**
+ * Juno Vale's counter at the Portus Exchange (D-solid-1), in her frame (QuestWorld "keeper": she
+ * faces the plaza centre and the counter stands 1.1 m in front of her). Juno herself, like every
+ * NPC, stays walk-through.
+ */
+export const JUNO_COUNTER_SOLIDS: readonly TownSolid[] = [[0, 0, 1.1, 1.3, 0.4, 0, 1.06, 0]];
+/** Its solids' `item` (the Hall board's stand is -1). */
+export const JUNO_COUNTER_ITEM = -2;
+
 /** The board's frame on `terrain` (where QuestWorld puts it): at `hall_wall`, facing the plaza centre. */
 export function hallBoardPlacement(terrain: Terrain): TownPlacement | null {
-  const o = WORLD_OBJECT_BY_ID.get("hall_wall");
+  return plazaFacingPlacement("hall_wall", terrain);
+}
+
+/** A Portus world object's frame (as QuestWorld turns the hall board and the keeper): facing the plaza centre. */
+export function plazaFacingPlacement(id: string, terrain: Terrain, item = -1): TownPlacement | null {
+  const o = WORLD_OBJECT_BY_ID.get(id);
   if (!o || o.body !== terrain.body.id) return null;
   const d = objectDir(o);
   const up = [d[0], d[1], d[2]];
-  // Toward the plaza centre (+Y): the tangent part of +Y at the board.
+  // Toward the plaza centre (+Y): the tangent part of +Y at the object.
   let fx = -up[1]! * up[0]!, fy = 1 - up[1]! * up[1]!, fz = -up[1]! * up[2]!;
   const fl = Math.hypot(fx, fy, fz);
   fx /= fl; fy /= fl; fz /= fl;
@@ -214,7 +228,7 @@ export function hallBoardPlacement(terrain: Terrain): TownPlacement | null {
   const rx = up[1]! * fz - up[2]! * fy, ry = up[2]! * fx - up[0]! * fz, rz = up[0]! * fy - up[1]! * fx;
   const base = terrain.body.radius + terrain.groundHeight(d[0], d[1], d[2]);
   return {
-    item: -1, prefab: -1, scale: 1,
+    item, prefab: -1, scale: 1,
     px: up[0]! * base, py: up[1]! * base, pz: up[2]! * base,
     rx, ry, rz, ux: up[0]!, uy: up[1]!, uz: up[2]!, fx, fy, fz,
   };
@@ -224,7 +238,7 @@ const solidCache = new WeakMap<Terrain, readonly StructureSolid[]>();
 
 /**
  * Every structure solid on `terrain`: the site items' solids in placement order, then (Portus) the
- * Hall of Firsts board's stand (item and prefab -1). Deterministic; cached per terrain.
+ * Hall of Firsts board's stand (item -1) and Juno's counter (item -2; prefab -1). Deterministic; cached per terrain.
  */
 export function siteSolids(terrain: Terrain): readonly StructureSolid[] {
   let list = solidCache.get(terrain);
@@ -234,6 +248,8 @@ export function siteSolids(terrain: Terrain): readonly StructureSolid[] {
     for (const p of sitePlacements(terrain)) placeSolids(p, prefabs[p.prefab]!.solids, out);
     const board = hallBoardPlacement(terrain);
     if (board) placeSolids(board, HALL_STAND_SOLIDS, out);
+    const juno = plazaFacingPlacement("juno_vale", terrain, JUNO_COUNTER_ITEM);
+    if (juno) placeSolids(juno, JUNO_COUNTER_SOLIDS, out);
     list = out;
     solidCache.set(terrain, list);
   }

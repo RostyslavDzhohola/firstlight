@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BODIES, isSafe, padDirs, type Breakable } from "@firstlight/shared";
 import { walk } from "@firstlight/shared/content/arenas";
+import { siteAnchor, siteDir } from "@firstlight/shared/planet/townFrame";
 import { NF, NPC_INDEX } from "@firstlight/shared/content/npcs";
 import { BodyState, PF } from "@firstlight/shared/net/schema";
 import type { BodyRoom } from "../src/world/BodyRoom.ts";
@@ -28,6 +29,14 @@ beforeEach(() => {
 afterEach(() => resetTuning());
 
 /** Ground point `metres` from Arcadia's main pad along a fixed tangent (+ `side`). */
+/** Arcadia's pad 1 (a plain pad ring: pad 0's ring sits inside the walled outpost since round 2,
+ * D-b2-1), `metres` out on bearing 20 (dry, open ground there). */
+function ringPoint(w: FakeWorld, metres: number): V3 {
+  const R = BODIES.arcadia.radius;
+  const b = (20 * Math.PI) / 180;
+  return w.world.snapToGround(siteDir(siteAnchor(padDirs(BODIES.arcadia)[1]!), Math.sin(b) * metres, Math.cos(b) * metres, R) as V3);
+}
+
 function arcadiaPoint(w: FakeWorld, metres: number, side = 0): V3 {
   const R = BODIES.arcadia.radius;
   const d = padDirs(BODIES.arcadia)[0]!;
@@ -53,8 +62,8 @@ describe("unreachable targets (F12 should-fix 6)", () => {
   it("a melee NPC that can't reach a target on a pad's safe ring evades home and heals after ~5 s", () => {
     const w = fakeWorld("arcadia", { immortal: true });
     // On the pad but combat-tagged: not SAFE, so it can keep shooting (BodyRoom keeps SAFE off).
-    const p = w.addPlayer("tagged", arcadiaPoint(w, 6), 5);
-    const wolf = w.sys.createNpc(NPC_INDEX.get("dusk_wolf")!, 5, arcadiaPoint(w, 32), w.clock.t, { instant: true }) as Npc;
+    const p = w.addPlayer("tagged", ringPoint(w, 6), 5);
+    const wolf = w.sys.createNpc(NPC_INDEX.get("dusk_wolf")!, 5, ringPoint(w, 32), w.clock.t, { instant: true }) as Npc;
     const home = [...wolf.home];
     dealDamage(w.world.host, p, wolf, 10, false);
     expect(wolf.state.hp).toBeLessThan(wolf.state.maxHp);
@@ -72,8 +81,8 @@ describe("unreachable targets (F12 should-fix 6)", () => {
 
   it("re-aggroed by the same pad shooter after its heal, it gives up again at once: no kill inside a fresh window (F12 final Opus SF9)", () => {
     const w = fakeWorld("arcadia", { immortal: true });
-    const p = w.addPlayer("camper", arcadiaPoint(w, 6), 6);
-    const wolf = w.sys.createNpc(NPC_INDEX.get("dusk_wolf")!, 4, arcadiaPoint(w, 32), w.clock.t, { instant: true }) as Npc;
+    const p = w.addPlayer("camper", ringPoint(w, 6), 6);
+    const wolf = w.sys.createNpc(NPC_INDEX.get("dusk_wolf")!, 4, ringPoint(w, 32), w.clock.t, { instant: true }) as Npc;
     dealDamage(w.world.host, p, wolf, 10, false);
     expect(run(w, 8000, () => wolf.mode === MODE.EVADE)).toBeGreaterThan(0);
     expect(run(w, 20_000, () => wolf.mode === MODE.IDLE)).toBeGreaterThan(0);
@@ -95,8 +104,8 @@ describe("unreachable targets (F12 should-fix 6)", () => {
   it("a target just outside the ring but inside the NPC's steering margin is bitten, not evaded (Codex S4)", () => {
     const w = fakeWorld("arcadia", { immortal: true });
     // 14.5 m from the pad centre: outside the 12 m safe ring, inside the wolf's 12 + 3 + 0.5 m no-go zone.
-    const p = w.addPlayer("margin", arcadiaPoint(w, 14.5), 5);
-    const wolf = w.sys.createNpc(NPC_INDEX.get("dusk_wolf")!, 5, arcadiaPoint(w, 32), w.clock.t, { instant: true }) as Npc;
+    const p = w.addPlayer("margin", ringPoint(w, 14.5), 5);
+    const wolf = w.sys.createNpc(NPC_INDEX.get("dusk_wolf")!, 5, ringPoint(w, 32), w.clock.t, { instant: true }) as Npc;
     dealDamage(w.world.host, p, wolf, 10, false);
     let bites = 0;
     let last = p.state.hp;

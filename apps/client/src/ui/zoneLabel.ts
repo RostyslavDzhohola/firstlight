@@ -18,7 +18,8 @@ export interface ZoneInfo {
 
 export function zoneInfo(body: BodyId, here: Zone, serverSafe: boolean): ZoneInfo {
   if (serverSafe) {
-    const place = body === "portus" ? "Portus town" : here.kind === "pad" ? `${padName(body, here.pad)} pad ring` : "Safe zone";
+    const place =
+      body === "portus" ? "Portus town" : here.kind === "outpost" ? `${padName(body, 0)} outpost` : here.kind === "pad" ? `${padName(body, here.pad)} pad ring` : "Safe zone";
     return { zone: "safe", label: "Safe", place, title: "Safe zone", sub: `${place} · no damage in or out` };
   }
   if (here.safe) {
@@ -26,5 +27,6 @@ export function zoneInfo(body: BodyId, here: Zone, serverSafe: boolean): ZoneInf
     return { zone: "danger", label: "Danger", place: "In combat", title: "Still in combat", sub: "Safe 10 s after your last attack" };
   }
   const place = body === "portus" ? "Outside the walls" : "The wilds";
+  // (Leaving a planet's outpost through its gates reads the same as leaving a pad ring: the wilds.)
   return { zone: "danger", label: "Danger", place, title: "Leaving the safe zone", sub: "Creeps and other players can hurt you" };
 }

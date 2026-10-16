@@ -1,11 +1,11 @@
 {
- "version": "f44b1e943680dc64",
+ "version": "e21b8268c98e1fbb",
  "body": "meridian",
  "files": {
   "glb": {
    "name": "meridian.glb",
-   "bytes": 237236,
-   "sha256": "c8efbcf37003861baffafdd8576e0c8e6ae7b9ed98834ff25c6bae9a4fa53c96"
+   "bytes": 264244,
+   "sha256": "65acb8a9e6ac856f76ecad4b7bfff3767b5f5b1cf8ce7858d53733136a54c630"
   },
   "color": {
    "name": "meridian_color.webp",
@@ -394,13 +394,143 @@
    ],
    "cutout": false,
    "glow": 1.0
+  },
+  {
+   "name": "OK_Matte",
+   "layer": 8,
+   "tint": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rough": 0.85,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "OK_Gloss",
+   "layer": 8,
+   "tint": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rough": 0.42,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "OK_Metal",
+   "layer": 8,
+   "tint": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rough": 0.35,
+   "metal": 0.1,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "OK_Glass",
+   "layer": 8,
+   "tint": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rough": 0.15,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    1.0,
+    0.72,
+    0.38,
+    0.85
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "OK_Glow",
+   "layer": 8,
+   "tint": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rough": 0.5,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 1.0
   }
  ],
  "sharedStrips": null,
  "look": {
   "albedoFloor": 0.0
  },
- "prefabs": 13,
- "items": 21,
- "trianglesLod0": 15159
+ "prefabs": 18,
+ "items": 143,
+ "trianglesLod0": 21333
 }

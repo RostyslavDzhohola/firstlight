@@ -874,6 +874,44 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   capacity; at most 8 are open at once ("sandboxes full"). Only inbound server notices cross the other
   way: announcements (and "updating" before a restart) still reach a sandbox, so the admin sees
   them; nothing a sandbox does reaches the real world.
+- **D-solid-1 (run, 2026-10-15):** the natural props are solid. Tree trunks (oak, pine, dead tree,
+  blossom), boulders, spires and rocks at scale ≥ 0.85 block movement on the client and the server
+  as upright cylinders (radius from PROP_DEFS × scale, a little narrower for the round ones;
+  colliders stop at 5 m, above any top a player can reach). They come from the same deterministic
+  placement the client draws (`solidChunkProps` is exactly the solid subset of `chunkProps`), built
+  lazily per terrain chunk and cached per body (`planet/natureSolids.ts`); queries round a point are
+  allocation-free once its chunks are built, the server builds the chunks out to where creeps are
+  awake round each player (270 m) ahead, within 2 ms a tick (`world/natureWarm.ts`; lazy builds in
+  NPC steering had cost a p95 tick of 12.8 ms on Hollowmere's 40-player bench, 0.7 ms after), and the
+  client builds the arrival's chunks behind the loading screen, then one a frame. Counts:
+  Portus 1,595 (1,363 blossom trees, 232 rocks), Arcadia 24,950 (18,430 oaks, 4,141 pines, 550
+  boulders, 1,829 rocks), Hollowmere 34,794 (21,689 dead trees, 8,737 oaks, 792 boulders, 3,576
+  rocks), Meridian 13,758 (2,040 spires, 4,011 boulders, 7,707 rocks). Walk-through on purpose:
+  bushes, ferns, flowers, mushrooms, reeds, scrub and small rocks (no snagging), NPCs and other
+  players (no body-blocking), the mission guides (people, with a staff; no stand), and the Easter-egg
+  props (a solid shape could wall off an egg's trigger: E6's well has to be entered). Already solid
+  before: the Portus town's 307 structure solids (stalls, wells, lamp posts, signposts, crates,
+  barrels, benches, fences, trees, the wagon), the outposts and waystones (46 / 50 / 62 solids) and
+  the breakables while intact (220 / 166 / 256: fences, crates, barrels, camp walls, pillars,
+  statues, cover); new: Juno's counter at the Portus Exchange (a structure solid like the Hall
+  board's stand). The server's movement checks (footing, crossing), placement (`placeBody`: saves,
+  teleports, the spawn ring) and NPC steering (NPCs up to 1.2 m wide follow round them, leaps land
+  clear, a strike or leap a trunk would stop isn't made: they step round, and a trunk that wedges
+  them counts as walling them off) use them; combat doesn't (shots and sight pass between trunks as
+  before). On a slope a solid reaches down to the lowest ground round it (no gap under its downhill
+  edge), and the client keeps the feet on the ground through each frame's substeps and clears them
+  of the solids after its ground snap (Codex review). The camera stops
+  short of boulders and spires (not trunks). Walking dead-centre into a trunk stops you, as anywhere;
+  off-centre you slide round it. `PROTOCOL_VERSION` 5 (an older client walks through trees and
+  would be corrected at each one): deploy the client first, then the server. Why: the owner, "a lot
+  of elements walk through … if you run into them they have to be physical elements".
+- **D-solid-2 (run, 2026-10-15):** chasing, ground creeps wade as deep as a player can stand
+  (`SWIM_DEPTH`, 1.2 m) instead of 0.6 m; calm (wandering, going home) they keep to 0.6 m, and one
+  already deeper may move about and out. A player knee-deep in a lake was out of every ground creep's
+  reach: it gave up, ran home healed, and each later shot made it give up again at once (the
+  pad-shooter rule), so it could never be killed (e2e J3.4 after a back-off into a lake: 70 hits, no
+  kill). Only a swimmer (who can't shoot) is out of reach now. The Arcadia jetty's end (over
+  knee-deep water) can be reached from the water beside it.
 - **D-chars-1 (run, 2026-10-15 07:10 CDT):** a fifth starter, the fire ninja "Hinoko" (owner, HANDOFF
   6h), is appended to `STARTERS` (id `ninja`, starter index 4, default palette Ember) with the Ember
   Kunai (ranged, 3 tiers) and its alt, the Ember Seal: hold RMB 0.4 s (server-timed `charge`), release
@@ -957,3 +995,49 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   ChromeTester, SmokeGuest42, SmokeTest, TownSmoke, TutorialRun, TutorialRun2–4, BugScout_5817,
   BlinkProbe14, Smoke2Guest, Smoke2Retry, SmokeThree. Never "ros" (the owner's character). Nothing is
   deleted. Why: the owner's request, with a flag only our tools can set.
+- **D-b2-1 (buildings-2, 2026-10-15):** every planet's arrival outpost is walled: a ring of wall
+  round pad 0 (Arcadia 32 m, Hollowmere 42 m, Meridian 48 m to the wall's centre line) with three
+  gates each (`OUTPOSTS[body].wall`), closed but for the gates: over water and shallows the ring
+  runs on as a lower sea wall from the lake bed (top 2.4 m over the water or the shore), so nobody
+  walks, wades or swims in round a gate (Codex review: Meridian's shallows at 49–62° were open).
+  Inside the ring is a safe zone that protects at once, like the Portus town (D-zones-3): no combat
+  tag, no damage in or out; outside is wild. Pad 0's 12 m ring folds into it (no ring drawn; the
+  zone still reports the ring index, so pad discovery and fast travel keep their rule); the other
+  pads keep their rings. The border is drawn across the gate passages; the compass and the zone
+  label ("Dawnpad outpost") use the gates. NPC groups start outside with the NPC margin (plus a
+  hostile's wander room) to spare; the arrival herds and packs move out past the wall. Arcadia's
+  farmstead (barn, windmill, haystacks) stays outside, in the fields, so the outposts' chase and
+  sight tests still have a barn out in the open. Pad 0's cover breakables now stand inside a zone
+  where nobody fires: they stay in the pinned list and just don't get broken there. Perches inside
+  the walls are tolerated (nobody fights there); the wall itself is no perch. `PROTOCOL_VERSION` 5
+  (new colliders and a wider protected zone the server enforces). Why: the owner wants the arrival
+  outposts "walled in, so there's clear separation" like the Portus castle.
+- **D-b2-2 (buildings-2, 2026-10-15):** both portal gates, on different planets: the Opus gate A
+  (floating arch, destination globe) stands in Portus' three portal courts and on Meridian's pad;
+  Astra's pale stone arch (gate B) on Arcadia's and Hollowmere's, scaled ×1.49 so the game's 2.2 m
+  ring clears its piers. The game fills gate A's opening with a swirling arched membrane (TSL) instead
+  of the ring and disc (the ring comes back on Meridian if the outpost models aren't drawn); gate B
+  keeps the ring. Portal positions and the entry test are unchanged. Gate A's dais is a low
+  threshold (0.06 m, then 0.14 m) with no collider: the shared collider steps feet onto a top only
+  with the centre already over it, so the design round's 0.21/0.41 m steps stopped players walking in
+  (browser check). Why: the owner picked both "on
+  different planets"; gate A's sci-fi arch suits Portus' hub and Meridian, gate B's stone the farm and
+  the fen.
+- **D-b2-3 (buildings-2, 2026-10-15):** a shop stall inside every outpost's walls, facing the pad
+  (Arcadia south-west by the shrine path, Hollowmere south, Meridian west in front of Waystation
+  Nine); `OUTPOSTS[body].shop.at` is the keeper's spot behind the counter, and `SHOP_SPOTS`
+  (content/shops.ts, D-shops-1) hold the keepers' world positions there. Portus keeps Juno's stall.
+  The walls protect at once (D-b2-1), so a fighter who runs in to a planet's till trades at once, as
+  at Juno's (D-shops-3's refusal now only matters where a zone protects out of combat only). Why: the
+  owner wants a shop in every safe zone.
+- **D-b2-4 (buildings-2, 2026-10-15):** Waystation Nine (Opus) replaces Meridian's courier depot, on
+  the flattest ground west of the pad (0.55 m across its 17 × 13 m plinth); the stilt shelter
+  (Astra) replaces Hollowmere's ferry shed by the pond; the Opus market house replaces Portus' four
+  houses on the same plots with the same colliders (a 0.4 m smaller footprint so the counters and
+  steps stay inside), LOD1 without the small parts. Why: the owner's picks, without moving anything
+  the server or the tests rely on.
+- **D-b2-5 (buildings-2, 2026-10-15):** round-2 pieces ship as vertex colour over five `OK_*` slots
+  (white layer) with ambient occlusion, a little grime and noise baked into the colours; glow slots
+  use the town material's glow mode, glass lights up at night. Why: the town material has no
+  environment map, so unbaked flat colours read flat in the browser; baking keeps the pieces in the
+  existing two-draw town and outpost meshes.

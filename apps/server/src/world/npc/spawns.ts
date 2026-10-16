@@ -5,6 +5,7 @@
 import { CHUNK_QUADS, gridDir, hash01, hash4, nearSafeZone, padDirs, tangentFrame, type Face, type Terrain } from "@firstlight/shared";
 import { siteCoords, siteDir, townDir } from "@firstlight/shared/planet/townFrame";
 import { outpostAnchor } from "@firstlight/shared/planet/sites";
+import { OUTPOSTS, type OutpostBody } from "@firstlight/shared/content/padOutposts";
 import { OUTPOST_GROUND_HALF, outpostGroundDistance } from "@firstlight/shared/planet/outpostGround";
 import { resolveAreaDir, stableTangent, walk, type ArenaLayout } from "@firstlight/shared/content/arenas";
 import {
@@ -183,6 +184,12 @@ export function buildSpawnPoints(terrain: Terrain, arena: ArenaLayout | null): S
     const r = R + terrain.groundHeight(d[0], d[1], d[2]);
     return [d[0] * r, d[1] * r, d[2] * r];
   };
+  /** The outpost wall's radius round pad 0 (0 without one) and how far a group keeps off its zone. */
+  const wallRadius = OUTPOSTS[planet as OutpostBody]?.wall?.radius ?? 0;
+  const zoneKeep = (members: readonly SpawnMember[], roam: number) => {
+    const hostile = members.some((m) => NPC_DEFS[m.def]!.temper === "hostile");
+    return NPC_RULES.safeMargin + (hostile ? roam : 0) + Math.max(...members.map((m) => NPC_DEFS[m.def]!.radius));
+  };
   const respawnFor = (kind: SpawnPoint["kind"], defIds: number[]) => {
     if (kind === "camp") return NPC_RULES.respawnCamp;
     const defs = defIds.map((i) => npcDef(npcIdOf(i)));
@@ -223,6 +230,14 @@ export function buildSpawnPoints(terrain: Terrain, arena: ArenaLayout | null): S
       if (NPC_DEFS[m.def]!.temper !== "hostile") continue;
       if (!farFromPads(p.dir, MIN_HOSTILE_PAD_DIST) || !farFromPads(walk(p.dir, t1, m.a, t2, m.b, R), MIN_HOSTILE_PAD_DIST + p.roam)) return false;
     }
+    // The walled outpost round pad 0 is a safe zone (D-b2-1): every member starts outside it with the
+    // NPC margin (plus a hostile's wander room) to spare, like the Portus wilds.
+    const keep = zoneKeep(p.members, p.roam);
+    for (const m of p.members) {
+      const q = walk(p.dir, t1, m.a, t2, m.b, R);
+      const r = R + terrain.groundHeight(q[0], q[1], q[2]);
+      if (nearSafeZone(body, q[0] * r, q[1] * r, q[2] * r, keep)) return false;
+    }
     points.push({ ...p, id: points.length, pos: groundPos(p.dir), t1, t2, respawnSec: p.respawnSec ?? respawnFor(p.kind, p.members.map((m) => m.def)) });
     return true;
   };
@@ -242,7 +257,8 @@ export function buildSpawnPoints(terrain: Terrain, arena: ArenaLayout | null): S
   };
 
   // 0. Arrival groups (D-zones-2): in front of the arrival camera at the main pad, on dry ground
-  // with room to graze (no water within 8 m), the hostile pack just outside the 45 m rule.
+  // with room to graze (no water within 8 m), the hostile pack just outside the 45 m rule, and both
+  // outside the outpost's walls (D-b2-1): the search starts past the wall with the group's keep.
   {
     const { fwd, right } = tangentFrame([main[0], main[1], main[2]]);
     const dryAround = (d: V3) => {
@@ -263,7 +279,8 @@ export function buildSpawnPoints(terrain: Terrain, arena: ArenaLayout | null): S
       for (let k = 0; k <= 36 && !placed; k++) {
         const off = (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 10; // 0, +10, -10, +20, …
         const a = ((g.bearing + off) * Math.PI) / 180;
-        for (const m of [g.metres, g.metres + 8, g.metres + 16]) {
+        const m0 = Math.max(g.metres, wallRadius + zoneKeep(members, roam) + FIXED_SPREAD);
+        for (const m of [m0, m0 + 8, m0 + 16]) {
           const d = walk(main, fwd, Math.cos(a) * m, right, Math.sin(a) * m, R);
           if (!dryAround(d) || !farFromArena(d, 25) || !farFromPoints(d)) continue;
           if (add({ kind: "pack", area: g.area ?? null, dir: d, members, roam })) {

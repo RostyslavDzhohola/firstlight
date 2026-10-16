@@ -48,13 +48,23 @@ describe("shops in every safe zone (round 2)", () => {
     }
   });
 
-  it("can walk from a planet's main pad to its shop without going through a building", () => {
+  it("can walk from a planet's main pad up to its shop's counter without going through a building", () => {
     for (const s of SHOP_SPOTS.filter((x) => x.body !== "portus")) {
       const t = createTerrain(s.body);
+      const R = BODIES[s.body].radius;
       const pad = padDirs(BODIES[s.body])[0]!;
       const g = t.groundHeight(pad[0], pad[1], pad[2]);
-      const from = scale(pad, BODIES[s.body].radius + g + 0.1);
-      const to = scale(s.pos, len(s.pos) + 0.1);
+      const from = scale(pad, R + g + 0.1);
+      // The keeper stands behind the stall's counter (D-b2-3), which faces the pad: walk up to 2.5 m
+      // in front of the keeper, well inside the till's radius.
+      const u = scale(s.pos, 1);
+      const toPad = [pad[0] - u[0], pad[1] - u[1], pad[2] - u[2]];
+      const k = 2.5 / (len(toPad) * R);
+      const v = [u[0] + toPad[0] * k, u[1] + toPad[1] * k, u[2] + toPad[2] * k];
+      const lv = len(v);
+      const front = [v[0] / lv, v[1] / lv, v[2] / lv] as const;
+      const to = scale(front, R + t.groundHeight(front[0], front[1], front[2]) + 0.1);
+      expect(Math.hypot(to[0] - s.pos[0], to[1] - s.pos[1], to[2] - s.pos[2]), s.id).toBeLessThan(s.radius - 2);
       expect(structureCollider(t).crosses(...from, ...to), s.id).toBe(false);
     }
   });

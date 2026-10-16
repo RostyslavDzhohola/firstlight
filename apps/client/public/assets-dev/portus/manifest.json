@@ -1,10 +1,10 @@
 {
- "version": "87ffea24f75d57e7",
+ "version": "d9a7185204a1c907",
  "files": {
   "glb": {
    "name": "portus.glb",
-   "bytes": 2369240,
-   "sha256": "145edc386d1949c6d3f1cc044867c641d042f35b1091e7950c4f72b541c4165d"
+   "bytes": 1862008,
+   "sha256": "6694d652e11b1af9548fcf134695daee89774c26fca3e902806bb1695ce3b6c5"
   },
   "color": {
    "name": "portus_color.webp",
@@ -486,9 +486,135 @@
     0
    ],
    "cutout": true
+  },
+  {
+   "name": "OK_Matte",
+   "layer": 9,
+   "tint": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rough": 0.85,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false
+  },
+  {
+   "name": "OK_Gloss",
+   "layer": 9,
+   "tint": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rough": 0.42,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false
+  },
+  {
+   "name": "OK_Metal",
+   "layer": 9,
+   "tint": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rough": 0.35,
+   "metal": 0.1,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false
+  },
+  {
+   "name": "OK_Glass",
+   "layer": 9,
+   "tint": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rough": 0.15,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    1.0,
+    0.72,
+    0.38,
+    0.85
+   ],
+   "cutout": false
+  },
+  {
+   "name": "OK_Glow",
+   "layer": 9,
+   "tint": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rough": 0.5,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 1.0
   }
  ],
  "prefabs": 46,
  "items": 215,
- "trianglesLod0": 198168
+ "trianglesLod0": 186890
 }

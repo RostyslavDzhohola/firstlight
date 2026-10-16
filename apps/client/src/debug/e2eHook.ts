@@ -99,6 +99,7 @@ interface GameLike {
     mounted: boolean;
     getStructures?(): RayCollider | null;
     getColliders?(): RayCollider | null;
+    getNature?(): RayCollider | null;
   };
   planet?: { terrain?: unknown; body?: { radius: number } };
   input?: { locked: boolean; enabled: boolean; sensitivity: number; invertY: boolean };
@@ -131,6 +132,7 @@ interface SharedMods {
   zoneAt(body: unknown, x: number, y: number, z: number): { safe: boolean; kind: string; pad: number };
   nearestSafeEntry(body: unknown, x: number, y: number, z: number): { dir: readonly [number, number, number]; edge: number };
   TOWN_GATES: readonly (readonly [number, number, number])[];
+  safeGates(body: unknown): readonly (readonly [number, number, number])[];
   portalSpots(body: unknown, terrain: any): { to: string; center: [number, number, number] }[];
   NPC_DEFS: readonly { id: string; name: string; temper: string; tier: string; height: number }[];
   NF: { DEAD: number };
@@ -185,7 +187,7 @@ export function installE2eHook(win: Window & typeof globalThis): void {
     sharedLoading = true;
     void Promise.all([import("@firstlight/shared"), import("@firstlight/shared/content/npcs"), import("@firstlight/shared/net/schema"), import("@firstlight/shared/content/weapons")])
       .then(([s, n, sc, w]) => {
-        shared = { BODIES: s.BODIES, padDirs: s.padDirs, isSafe: s.isSafe, PAD_SAFE_RADIUS: s.PAD_SAFE_RADIUS, zoneAt: s.zoneAt, nearestSafeEntry: s.nearestSafeEntry, TOWN_GATES: s.TOWN_GATES, portalSpots: s.portalSpots, NPC_DEFS: n.NPC_DEFS, NF: n.NF, PF: sc.PF, WEAPONS: w.WEAPONS, WEAPON_BY_ID: w.WEAPON_BY_ID } as unknown as SharedMods;
+        shared = { BODIES: s.BODIES, padDirs: s.padDirs, isSafe: s.isSafe, PAD_SAFE_RADIUS: s.PAD_SAFE_RADIUS, zoneAt: s.zoneAt, nearestSafeEntry: s.nearestSafeEntry, TOWN_GATES: s.TOWN_GATES, safeGates: s.safeGates, portalSpots: s.portalSpots, NPC_DEFS: n.NPC_DEFS, NF: n.NF, PF: sc.PF, WEAPONS: w.WEAPONS, WEAPON_BY_ID: w.WEAPON_BY_ID } as unknown as SharedMods;
       })
       .catch((e: unknown) => console.warn("[e2e] shared modules", e))
       .finally(() => (sharedLoading = false));
@@ -592,11 +594,12 @@ export function installE2eHook(win: Window & typeof globalThis): void {
       portals = [];
     }
     /** A unit direction (pushed `out` metres away from the +Y pole along the ground) as a world point on the terrain. */
-    const onGround = (d: readonly [number, number, number], out: number): [number, number, number] => {
+    const onGround = (d: readonly [number, number, number], out: number, from: readonly [number, number, number] = [0, 1, 0]): [number, number, number] => {
       let u: [number, number, number] = [d[0], d[1], d[2]];
       if (out) {
-        const k = u[1];
-        const t: [number, number, number] = [k * u[0], k * u[1] - 1, k * u[2]]; // away from the pole, in the tangent plane
+        // Away from `from` (Portus: the pole; a planet: pad 0), in the tangent plane.
+        const k = u[0] * from[0] + u[1] * from[1] + u[2] * from[2];
+        const t: [number, number, number] = [k * u[0] - from[0], k * u[1] - from[1], k * u[2] - from[2]];
         const tl = Math.hypot(...t) || 1;
         u = [u[0] + (t[0] / tl) * (out / R), u[1] + (t[1] / tl) * (out / R), u[2] + (t[2] / tl) * (out / R)];
         const ul = Math.hypot(...u);
@@ -651,8 +654,14 @@ export function installE2eHook(win: Window & typeof globalThis): void {
       },
       // The nearest pad's centre (Portus: the plaza, the town's open middle).
       pad: bodyDef && padIndex >= 0 && terrain ? target(...onGround(pads[padIndex]!, 0)) : null,
-      // Portus town gates (the safe border runs through them) and a point 25 m outside each.
-      gates: body === "portus" && terrain ? S.TOWN_GATES.map((d) => ({ ...target(...onGround(d, 0)), out: target(...onGround(d, 25)) })) : [],
+      // The walled zone's gates (the safe border runs through them: Portus' two town gates, a planet's
+      // outpost gates, D-b2-1) and a point 25 m outside each (away from the town's pole / pad 0).
+      gates:
+        body === "portus" && terrain
+          ? S.TOWN_GATES.map((d) => ({ ...target(...onGround(d, 0)), out: target(...onGround(d, 25)) }))
+          : bodyDef && terrain && pads[0]
+            ? S.safeGates(bodyDef).map((d) => ({ ...target(...onGround(d, 0)), out: target(...onGround(d, 25, pads[0]!)) }))
+            : [],
       // The planet's mission guide by the main pad (QuestClient's interactables).
       guide: (() => {
         const q = (g.systems ?? []).find((x) => !!x && typeof x === "object" && Array.isArray((x as { interactables?: unknown }).interactables)) as
@@ -737,12 +746,16 @@ export function installE2eHook(win: Window & typeof globalThis): void {
     /**
      * How far the player could walk straight along each bearing (degrees from the camera's heading,
      * right = +) before a structure or prop the movement collides with, up to `max` metres: the same
-     * colliders movement uses, cast at knee and chest height. Journeys steer round buildings with it.
+     * colliders movement uses (structures, breakables, tree trunks and rocks: D-solid-1), cast at knee and
+     * chest height. Journeys steer round buildings and trees with it.
      */
     clearance: (bearings: number[], max = 12) => {
       const p = game()?.player;
       if (!p) return null;
       const cols = [p.getStructures?.(), p.getColliders?.()].filter((c): c is RayCollider => !!c?.raycast);
+      // Tree trunks are thin: they're cast for along the body's edges too (a ray down the middle misses
+      // a trunk the body still walks into). Walls are cast down the middle only, as before.
+      const nature = p.getNature?.();
       const l = Math.hypot(p.pos.x, p.pos.y, p.pos.z) || 1;
       const up = { x: p.pos.x / l, y: p.pos.y / l, z: p.pos.z / l };
       const k = p.camForward.x * up.x + p.camForward.y * up.y + p.camForward.z * up.z;
@@ -754,9 +767,14 @@ export function installE2eHook(win: Window & typeof globalThis): void {
         const a = (deg * Math.PI) / 180;
         const d = { x: f.x * Math.cos(a) + r.x * Math.sin(a), y: f.y * Math.cos(a) + r.y * Math.sin(a), z: f.z * Math.cos(a) + r.z * Math.sin(a) };
         let clear = max;
+        // The ray's sideways unit (d × up) for the body's half-width either side of its centre line.
+        const sx = d.y * up.z - d.z * up.y, sy = d.z * up.x - d.x * up.z, sz = d.x * up.y - d.y * up.x;
         for (const h of [0.5, 1.2]) {
           const o = { x: p.pos.x + up.x * h, y: p.pos.y + up.y * h, z: p.pos.z + up.z * h };
           for (const c of cols) clear = Math.min(clear, c.raycast!(o, d, max));
+          if (nature?.raycast) {
+            for (const w of [0, -0.4, 0.4]) clear = Math.min(clear, nature.raycast({ x: o.x + sx * w, y: o.y + sy * w, z: o.z + sz * w }, d, max));
+          }
         }
         return { bearing: deg, clear: r1(clear) };
       });

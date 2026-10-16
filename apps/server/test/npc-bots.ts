@@ -3,7 +3,10 @@
 
 import type { Room } from "@colyseus/sdk";
 import { matchMaker } from "@colyseus/core";
-import { BODIES, isSafe, padDirs, type BodyId } from "@firstlight/shared";
+import { BODIES, createTerrain, isSafe, natureSolids, nearSafeZone, padDirs, type BodyId } from "@firstlight/shared";
+import { OUTPOSTS, type OutpostBody } from "@firstlight/shared/content/padOutposts";
+import { bodyBreakables } from "@firstlight/shared/planet/breakables";
+import { outpostAnchor, siteDir, structureCollider } from "@firstlight/shared/planet/sites";
 import { PF } from "@firstlight/shared/net/schema";
 import type { Game } from "../src/app.ts";
 import type { BodyRoom } from "../src/world/BodyRoom.ts";
@@ -33,6 +36,67 @@ export function offset(p: readonly number[], metres: number, sideways: number, R
   const v = [d[0]! + (t[0]! * metres + s[0]! * sideways) / R, d[1]! + (t[1]! * metres + s[1]! * sideways) / R, d[2]! + (t[2]! * metres + s[2]! * sideways) / R];
   const vl = Math.hypot(v[0]!, v[1]!, v[2]!);
   return [(v[0]! / vl) * R, (v[1]! / vl) * R, (v[2]! / vl) * R];
+}
+
+/** Site point (east, north) of a planet's pad-0 outpost frame (D42), on the ground. */
+export function siteAt(body: OutpostBody, east: number, north: number): V {
+  const t = createTerrain(body);
+  const R = BODIES[body].radius;
+  const d = siteDir(outpostAnchor(t), east, north, R);
+  const r = R + t.groundHeight(d[0], d[1], d[2]);
+  return [d[0] * r, d[1] * r, d[2] * r];
+}
+
+const openSpots = new Map<string, V>();
+
+/**
+ * A dry, gentle spot outside the planet's walled arrival outpost (D-b2-1) with `ahead` metres of open
+ * ground along the fixed tangent (`offset`): not in or near a safe zone, no breakable within 3 m of
+ * the line, no structure across it and no natural solid (a trunk, a boulder: D-solid-1) on it or
+ * within a big creature's reach of it. Round 2 walled the ground the tests used to fight on (26 m off
+ * pad 0); this is the nearest such spot beyond the wall, the same on every run.
+ */
+export function openSpotOutside(body: OutpostBody, ahead = 10): V {
+  const key = `${body}:${ahead}`;
+  const hit = openSpots.get(key);
+  if (hit) return hit;
+  const def = BODIES[body];
+  const t = createTerrain(body);
+  const R = def.radius;
+  const walls = structureCollider(t);
+  const nature = natureSolids(t);
+  const roomy = { radius: 1.2, height: 1.8, step: 0.35 }; // room for a big creature anywhere on the line
+  const brk = bodyBreakables(t);
+  const wall = OUTPOSTS[body].wall.radius;
+  const ground = (p: readonly number[]) => {
+    const l = Math.hypot(p[0]!, p[1]!, p[2]!);
+    return t.groundHeight(p[0]! / l, p[1]! / l, p[2]! / l);
+  };
+  for (let m = wall + 12; m <= wall + 40; m += 4) {
+    for (let b = 0; b < 360; b += 10) {
+      const a = (b * Math.PI) / 180;
+      const start = siteAt(body, Math.sin(a) * m, Math.cos(a) * m);
+      const g0 = ground(start);
+      let ok = g0 > def.waterLevel + 0.5;
+      const line: V[] = [];
+      for (let k = 0; k <= ahead && ok; k += 1) {
+        const q = offset(start, k, 0, R);
+        const g = ground(q);
+        const at: V = [q[0] / R * (R + g), q[1] / R * (R + g), q[2] / R * (R + g)];
+        ok = g > def.waterLevel + 0.5 && Math.abs(g - g0) < 1.5 && !nearSafeZone(def, ...at, 6) && !brk.some((x) => Math.hypot(x.px - at[0], x.py - at[1], x.pz - at[2]) < 3 + Math.max(x.hx, x.hz));
+        line.push(at);
+      }
+      if (!ok) continue;
+      const a0 = line[0]!, a1 = line[line.length - 1]!;
+      const lift = (p: V, h: number): V => { const l = Math.hypot(...p); return [p[0] / l * (l + h), p[1] / l * (l + h), p[2] / l * (l + h)]; };
+      if (walls.blocks(...lift(a0, 1.2), ...lift(a1, 1.2))) continue;
+      if (nature.crosses(...a0, ...a1) || line.some((q) => !nature.isClear({ x: q[0], y: q[1], z: q[2] }, roomy))) continue;
+      const out: V = [start[0], start[1], start[2]];
+      openSpots.set(key, out);
+      return out;
+    }
+  }
+  throw new Error(`no open spot outside the ${body} outpost`);
 }
 
 /** A point `metres` from a pad centre along a fixed tangent. */

@@ -1,15 +1,20 @@
 // The planets' pad-0 outposts on the server (D42-D44). Real path: a client walking into the Arcadia
-// barn is corrected and never stands inside it; the jetty is walkable to its end; a save inside the
-// Meridian hangar and a teleport into the Hollowmere chapel are placed clear, so the real client
-// controller starts where the server does; a carbine shot through the barn hits nobody behind it.
-// Unit level (the real NpcSystem and combat on the real terrain, a manual clock): NPCs don't see
+// barn is corrected and never stands inside it; the jetty is walkable to its end; a save inside
+// Meridian's Waystation Nine and a teleport into the Hollowmere chapel are placed clear, so the real
+// client controller starts where the server does; a carbine shot through the barn hits nobody behind
+// it. Unit level (the real NpcSystem and combat on the real terrain, a manual clock): NPCs don't see
 // through buildings, their bolts and strikes stop at walls, a blast doesn't reach round a corner, a
-// melee NPC chasing round the barn or the hangar reaches its target or evades (never stuck at a
-// wall), one whose target stands at the end of the jetty evades instead of waiting at the shore, and
-// the creep groups near pad 0 start beside the outpost, not inside it.
+// melee NPC chasing round the barn reaches its target or evades (never stuck at a wall), one whose
+// target stands at the end of the jetty wades in beside it and fights (D-solid-2: creeps chase into
+// water a player can stand in) or evades, never waiting at the shore, and the creep groups near pad 0
+// start beside the outpost, not inside it. Round 2 (D-b2-1): the outposts are walled safe zones; the
+// barn, haystacks and windmill stand outside Arcadia's wall, in the fields, so the fights here
+// happen there.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { BODIES, type BodyId } from "@firstlight/shared";
+import { BODIES, isSafe, type BodyId } from "@firstlight/shared";
+import { ANIM, PF } from "@firstlight/shared/net/schema";
+import { deepWater, SWIM_FLOAT } from "@firstlight/shared/planet/water";
 import { bossArena, walk } from "@firstlight/shared/content/arenas";
 import { NPC_DEFS, NPC_INDEX } from "@firstlight/shared/content/npcs";
 import { OUTPOSTS, type OutpostBody } from "@firstlight/shared/content/padOutposts";
@@ -176,12 +181,51 @@ describe("pad outposts in the real movement path (D44)", () => {
     expect(l - R("arcadia") - Q.terrain("arcadia").groundHeight(p.x / l, p.y / l, p.z / l)).toBeGreaterThan(0.8);
   });
 
-  it("a save at the Meridian hangar's centre joins outside it, and the real controller gets no correction loop", async () => {
-    const hangar = footprint("meridian", "m_hangar");
-    const userId = "outpost_saved_hangar";
+  it("a swimmer can't pass through a sea wall (Arcadia 280°, Meridian 95°): every step into it is refused, the swimmer stays outside", async () => {
+    for (const [body, bearing] of [["arcadia", 280], ["meridian", 95]] as const) {
+      const b = await Q.bot(`outpost_swimmer_${body}`, body, "admin");
+      b.send("admin", { cmd: "unprotect" });
+      const wall = OUTPOSTS[body].wall;
+      const water = BODIES[body].waterLevel;
+      const r = (bearing * Math.PI) / 180;
+      // Feet where a swimmer floats, `m` metres from pad 0 on the bearing (the water is deep there).
+      const swimAt = (m: number): V3 => {
+        const d = siteDir(anchor(body), Math.sin(r) * m, Math.cos(r) * m, R(body));
+        expect(deepWater(Q.terrain(body).groundHeight(d[0], d[1], d[2]), water), `${body} deep at ${m.toFixed(1)} m`).toBe(true);
+        const l = R(body) + water - SWIM_FLOAT;
+        return [d[0] * l, d[1] * l, d[2] * l];
+      };
+      await Q.tpAndWait(b, swimAt(wall.radius + 4));
+      let corrections = 0;
+      const off = b.room.onMessage("correct", () => corrections++);
+      let seq = (Q.me(b).seq ?? 0) + 100;
+      const fd = swimAt(wall.radius - 4);
+      // 0.1 m every 50 ms (2 m/s, swim pace) straight in through the wall to 4 m inside.
+      for (let k = 1; k <= 80; k++) {
+        const p = swimAt(wall.radius + 4 - k * 0.1);
+        const f = [fd[0] - p[0], fd[1] - p[1], fd[2] - p[2]], fl = Math.hypot(f[0]!, f[1]!, f[2]!);
+        b.send("input", { seq: ++seq, x: p[0], y: p[1], z: p[2], fx: f[0]! / fl, fy: f[1]! / fl, fz: f[2]! / fl, anim: ANIM.SWIM, t: Date.now() });
+        await Q.sleep(50);
+      }
+      await Q.until(`${body}: the last input handled`, () => (Q.me(b).seq ?? 0) >= seq - 1); // the last one is refused
+      await Q.sleep(200);
+      off();
+      const me = Q.me(b);
+      expect(me.flags & PF.SWIMMING, `${body}: swimming`).toBeTruthy();
+      const [e, n] = coords(body, me);
+      expect(corrections, `${body}: refused`).toBeGreaterThan(0);
+      expect(Math.hypot(e, n), `${body}: still outside the wall`).toBeGreaterThan(wall.radius + 0.4);
+      expect(isSafe(BODIES[body], me.x, me.y, me.z), `${body}: not in the safe zone`).toBe(false);
+      expect(walls(body).footing(me.x, me.y, me.z, PLAYER_BODY.step).inside, `${body}: not inside the wall`).toBe(false);
+    }
+  });
+
+  it("a save at the centre of Meridian's Waystation Nine joins outside it, and the real controller gets no correction loop", async () => {
+    const station = footprint("meridian", "m_waystation");
+    const userId = "outpost_saved_waystation";
     const c = newCharacter(0, 0);
     c.body = "meridian";
-    c.pos = at("meridian", ...hangar.local(0, 0));
+    c.pos = at("meridian", ...station.local(0, 0));
     expect(inside("meridian", { x: c.pos[0]!, y: c.pos[1]!, z: c.pos[2]! })).toBe(true);
     characterRepo.current.save(userId, c);
     const room = await joinAs(Q.harness.game!, userId, "meridian");
@@ -399,7 +443,8 @@ describe("pad outposts against NPCs and blasts (D43, D44)", () => {
     return { reached, evaded, wasInside, n, w };
   }
 
-  for (const [body, building, kind] of [["arcadia", "a_barn", "bonewalker"], ["arcadia", "a_barn", "gnawer"], ["meridian", "m_hangar", "enforcer"]] as const) {
+  // (Round 2: Meridian's buildings all stand inside its walled outpost now, so its enforcer runs round the barn.)
+  for (const [body, building, kind] of [["arcadia", "a_barn", "bonewalker"], ["arcadia", "a_barn", "gnawer"], ["arcadia", "a_barn", "enforcer"]] as const) {
     for (const side of ["front", "back", "left", "right"] as const) {
       it(`a ${kind} chasing a player round the ${building} (from its ${side}) reaches them or evades; never stuck, never inside`, () => {
         const r = chaseRound(body, building, kind, side);
@@ -409,19 +454,23 @@ describe("pad outposts against NPCs and blasts (D43, D44)", () => {
     }
   }
 
-  it("a melee NPC with its target 2 m away behind a lantern post goes round it or gives up; it never swings at the post forever", () => {
-    const w = fakeWorld("hollowmere", { immortal: true });
-    const site = OUTPOSTS.hollowmere;
-    const index = site.layout.map((it, i) => [it, i] as const).filter(([it]) => site.prefabs[it[0]]!.name === "h_lantern").at(-1)![1];
-    const post = siteSolids(Q.terrain("hollowmere")).find((x) => x.item === index)!;
-    const [ce, cn] = siteCoords(anchor("hollowmere"), post.px, post.py, post.pz, R("hollowmere"));
-    // Either side of the post along a line through it, 1 m from its centre each.
-    const along = (k: number) => spot(w, "hollowmere", ce + k, cn);
-    const p = w.addPlayer("hider", along(-1));
-    const n = npc(w, "bonewalker", 6, along(1));
-    expect(npcInside("hollowmere", n)).toBe(false);
+  it("a melee NPC with its target just behind a haystack goes round it or gives up; it never swings at the stack forever", () => {
+    // (Round 2: the lantern posts this used stand inside the walled outposts now; the haystack north of
+    // Arcadia's wall is the nearest slim obstacle out in the fields.)
+    const w = fakeWorld("arcadia", { immortal: true });
+    const site = OUTPOSTS.arcadia;
+    const index = site.layout.map((it, i) => [it, i] as const).filter(([it]) => site.prefabs[it[0]]!.name === "a_hay").at(0)![1];
+    const stack = siteSolids(Q.terrain("arcadia")).find((x) => x.item === index)!;
+    const [ce, cn] = siteCoords(anchor("arcadia"), stack.px, stack.py, stack.pz, R("arcadia"));
+    expect(Math.hypot(ce, cn)).toBeGreaterThan(OUTPOSTS.arcadia.wall.radius + 3);
+    // Either side of the stack along a line through it, 1 m off its side each.
+    const k0 = stack.hx + 1;
+    const along = (k: number) => spot(w, "arcadia", ce + k, cn);
+    const p = w.addPlayer("hider", along(-k0));
+    const n = npc(w, "bonewalker", 6, along(k0));
+    expect(npcInside("arcadia", n)).toBe(false);
     const a = chest(n.pos, Math.min(n.height * 0.8, 2)), b = chest([p.state.x, p.state.y, p.state.z], 1.1);
-    expect(walls("hollowmere").blocks(...a, ...b)).toBe(true); // the post is in the way
+    expect(walls("arcadia").blocks(...a, ...b)).toBe(true); // the stack is in the way
     const start = [...n.pos] as V3;
     dealDamage(w.world.host, p, n, 1, false);
     let reached = false, evaded = false;
@@ -432,21 +481,58 @@ describe("pad outposts against NPCs and blasts (D43, D44)", () => {
     });
     expect(reached || evaded, `mode ${n.mode}, moved ${Math.hypot(n.pos[0] - start[0], n.pos[1] - start[1], n.pos[2] - start[2]).toFixed(2)} m`).toBe(true);
     expect(t).toBeLessThan(NPC_TUNING.unreachableMs + 3000);
-    expect(npcInside("hollowmere", n)).toBe(false);
+    expect(npcInside("arcadia", n)).toBe(false);
   });
 
-  it("a melee-only NPC whose target stands at the end of the jetty evades instead of waiting at the shore", () => {
+  it("a melee NPC with its target 2 m away behind a slim post, in melee reach, doesn't swing at the post: it goes round or gives up", () => {
+    // The signpost by Arcadia's south gate, out in the fields (the lantern posts stand inside the
+    // walled outposts since round 2): the strike line runs through it while the target is in reach.
+    const w = fakeWorld("arcadia", { immortal: true });
+    const site = OUTPOSTS.arcadia;
+    const solids = siteSolids(Q.terrain("arcadia"));
+    const post = site.layout
+      .map((it, i) => [it, i] as const)
+      .filter(([it]) => site.prefabs[it[0]]!.name === "a_signpost")
+      .map(([, i]) => solids.find((x) => x.item === i)!)
+      .find((x) => Math.hypot(...siteCoords(anchor("arcadia"), x.px, x.py, x.pz, R("arcadia"))) > site.wall.radius + 4)!;
+    expect(post, "a signpost outside the walls").toBeDefined();
+    const [ce, cn] = siteCoords(anchor("arcadia"), post.px, post.py, post.pz, R("arcadia"));
+    const along = (k: number) => spot(w, "arcadia", ce + k, cn);
+    const p = w.addPlayer("hider", along(-1), 1);
+    const n = npc(w, "bonewalker", 6, along(1));
+    expect(npcInside("arcadia", n)).toBe(false);
+    const a = chest(n.pos, Math.min(n.height * 0.8, 2)), b = chest([p.state.x, p.state.y, p.state.z], 1.1);
+    expect(walls("arcadia").blocks(...a, ...b)).toBe(true); // the post is on the strike's line
+    expect(Math.hypot(n.pos[0] - p.state.x, n.pos[1] - p.state.y, n.pos[2] - p.state.z)).toBeLessThan(2.2); // in melee reach
+    const start = [...n.pos] as V3;
+    dealDamage(w.world.host, p, n, 1, false);
+    let reached = false, evaded = false;
+    const t = run(w, 15_000, () => {
+      if (p.state.hp < p.state.maxHp) reached = true;
+      if (n.mode === MODE.EVADE) evaded = true;
+      return reached || evaded;
+    });
+    expect(reached || evaded, `mode ${n.mode}, moved ${Math.hypot(n.pos[0] - start[0], n.pos[1] - start[1], n.pos[2] - start[2]).toFixed(2)} m`).toBe(true);
+    expect(t).toBeLessThan(NPC_TUNING.unreachableMs + 3000);
+    expect(npcInside("arcadia", n)).toBe(false);
+  });
+
+  it("a melee-only NPC whose target stands at the end of the jetty wades in beside it and fights, or evades; never waits at the shore", () => {
     const w = fakeWorld("arcadia", { immortal: true });
     const jetty = footprint("arcadia", "a_jetty");
     const end = at("arcadia", ...jetty.local(0, -jetty.hz + 0.6));
     const p = w.addPlayer("angler", end);
     const n = npc(w, "bonewalker", 5, spot(w, "arcadia", ...jetty.local(0, jetty.hz + 4)));
     dealDamage(w.world.host, p, n, 1, false);
-    const t = run(w, 15_000, () => n.mode === MODE.EVADE);
+    // The lake there is under SWIM_DEPTH: a player can stand in it, so a chasing creep wades (D-solid-2).
+    let reached = false;
+    const t = run(w, 15_000, () => {
+      if (p.state.hp < p.state.maxHp) reached = true;
+      return reached || n.mode === MODE.EVADE;
+    });
     expect(t).toBeGreaterThan(0);
     expect(t).toBeLessThan(NPC_TUNING.unreachableMs + 4000);
-    expect(p.state.hp).toBe(p.state.maxHp);
-    // And it never walked onto the jetty or into the lake.
+    // Never onto the jetty.
     expect(npcInside("arcadia", n)).toBe(false);
   });
 

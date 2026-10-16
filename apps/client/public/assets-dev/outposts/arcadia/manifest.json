@@ -1,11 +1,11 @@
 {
- "version": "a075f862034a7f81",
+ "version": "f12bc3ff6fc02884",
  "body": "arcadia",
  "files": {
   "glb": {
    "name": "arcadia.glb",
-   "bytes": 616636,
-   "sha256": "5ba9d15b4f61ef27852ee85b710025ccf62fbbc416e45b881e48eb54459f28c6"
+   "bytes": 672076,
+   "sha256": "b1353a848af2ff5289a4258e229d2b69486928493cb7493303bff0b88da66f7c"
   },
   "color": {
    "name": "../../portus/portus_color.webp",
@@ -507,6 +507,136 @@
    "glow": 0.0
   },
   {
+   "name": "OK_Matte",
+   "layer": 9,
+   "tint": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rough": 0.85,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "OK_Gloss",
+   "layer": 9,
+   "tint": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rough": 0.42,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "OK_Metal",
+   "layer": 9,
+   "tint": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rough": 0.35,
+   "metal": 0.1,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "OK_Glass",
+   "layer": 9,
+   "tint": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rough": 0.15,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    1.0,
+    0.72,
+    0.38,
+    0.85
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "OK_Glow",
+   "layer": 9,
+   "tint": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rough": 0.5,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 1.0
+  },
+  {
    "name": "M_Brass",
    "layer": 9,
    "tint": [
@@ -641,7 +771,7 @@
  "look": {
   "albedoFloor": 0.0
  },
- "prefabs": 21,
- "items": 31,
- "trianglesLod0": 25210
+ "prefabs": 26,
+ "items": 98,
+ "trianglesLod0": 30322
 }

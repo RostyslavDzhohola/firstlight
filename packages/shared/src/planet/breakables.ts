@@ -614,6 +614,20 @@ export function bodyBreakables(terrain: Terrain): readonly Breakable[] {
   return list;
 }
 
+/**
+ * Seed a body's list with a copy placed elsewhere (the client's fracture worker places them off the
+ * main thread and sends the list back): the same deterministic list, so a later bodyBreakables()
+ * on this thread doesn't place them again (50–90 ms in one go). Ignored once the body is cached.
+ */
+export function seedBodyBreakables(body: BodyId, list: readonly Breakable[]): void {
+  if (!cache.has(body)) cache.set(body, list);
+}
+
+/** Has this thread got a body's list already (placed or seeded)? */
+export function bodyBreakablesReady(body: BodyId): boolean {
+  return cache.has(body);
+}
+
 /** Uncached placement (tests): recomputes from scratch every call. */
 export function placeBreakables(terrain: Terrain): Breakable[] {
   return terrain.body.terrain.kind === "hub" ? [] : place(terrain);
