@@ -28,6 +28,8 @@ import { getAccountInfo, invalidatePlayToken, isDevGuest } from "../net/auth.ts"
 import { PilesView } from "../world/PilesView.ts";
 import { Planet } from "../world/Planet.ts";
 import { Portals } from "../world/Portals.ts";
+import { CLOSE } from "@firstlight/shared/net/social";
+import { SANDBOX_REFUSALS } from "./AdminModeClient.ts";
 import { ArrivalWatch, closeAction, ConnectionLost, StorageBackoff, waitFor } from "./arrival.ts";
 import { BootGate, RendererUnavailable, shouldKeepReconnecting } from "./boot.ts";
 import { CombatClient } from "./CombatClient.ts";
@@ -69,6 +71,10 @@ export class Game {
   portals: Portals | null = null;
   piles: PilesView | null = null;
   bodyId: BodyId = "portus";
+  /** In the admin's sandbox (D-admin-3): every join asks for it until Back to normal. */
+  sandbox: { home: BodyId } | null = null;
+  /** An admin-mode command to send once the sandbox is entered (AdminModeClient). */
+  sandboxPending: Record<string, unknown> | null = null;
   systems: ClientSystem[] = [];
   private last = performance.now();
   private running = false;
@@ -259,6 +265,20 @@ export class Game {
     this.afterTransition();
   }
 
+  /** Into the admin's sandbox copy of this body (the server said yes and saved the real character). */
+  enterSandbox(home: BodyId) {
+    this.sandbox = { home };
+    void this.travel(this.bodyId);
+  }
+
+  /** Back to normal: out of the sandbox, into the real world as the real character, where it was. */
+  leaveSandbox() {
+    const home = this.sandbox?.home ?? this.bodyId;
+    this.sandbox = null;
+    this.sandboxPending = null;
+    void this.travel(home);
+  }
+
   /** A transition ended: make the move that waited for it (if the game still runs). */
   private afterTransition() {
     const next = this.travelQueue.take(this.stopped);
@@ -337,6 +357,8 @@ export class Game {
       this.pendingClose = code; // acted on when the re-warm finishes (never warm into no connection)
       return;
     }
+    // The sandbox ended under us (admin rights gone): back to the real character.
+    if (code === CLOSE.SANDBOX_OVER && this.sandbox) return this.leaveSandbox();
     const action = closeAction(code);
     if (action === "ignore") return; // logged out: that screen is up
     // Kicked, banned or playing elsewhere: the social screens say so; never auto-rejoin.
@@ -435,11 +457,19 @@ export class Game {
       setLoading("Connecting…", 0.3);
       let room;
       try {
-        // Party members land in the copy a member is already in (D12 headroom).
-        room = await this.net.join(body, { ...(choice ?? stored), partyLeaderRoomId: partyRoomOn(body) });
+        // Party members land in the copy a member is already in (D12 headroom); an admin's sandbox is private.
+        room = await this.net.join(body, { ...(choice ?? stored), ...(this.sandbox ? { sandbox: true } : { partyLeaderRoomId: partyRoomOn(body) }) });
       } catch (e) {
         // No travel ticket for this body: the character is elsewhere (e.g. logged out on a planet).
         if (e instanceof TravelRedirect && e.body !== body) return this.enterBody(e.body, choice);
+        // The sandbox was refused (no longer an admin, the real character dead or fighting): the real world.
+        if (this.sandbox && e instanceof Error && SANDBOX_REFUSALS[e.message]) {
+          const home = this.sandbox.home;
+          this.sandbox = null;
+          this.sandboxPending = null;
+          this.hud.toast(SANDBOX_REFUSALS[e.message]!, "warn");
+          return this.enterBody(home, choice);
+        }
         throw e;
       }
       const w = (watch = new ArrivalWatch());

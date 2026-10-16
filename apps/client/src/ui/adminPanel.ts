@@ -1,9 +1,11 @@
-// Admin mode panel (D-admin-1): the owner's test switches, opened from the Esc menu's Admin row
-// (admins only). Every button sends `admin {cmd: "adminmode", args}`; the server decides and answers
-// with `you.adminMode` (server/world/adminMode.ts), and the panel re-renders from that.
+// Admin mode panel (D-admin-1, D-admin-3): the owner's test switches, opened from the Esc menu's
+// Admin row (admins only). In the sandbox every button sends `admin {cmd: "adminmode", args}`; the
+// server decides and answers with `you.adminMode` (server/world/adminMode.ts), and the panel
+// re-renders from that. In the real world the first button asks for the sandbox instead and the
+// command waits for the arrival (AdminModeClient); Back to normal leaves the sandbox.
 
 import "./quests.css";
-import type { AdminModeState, AdminToggle } from "@firstlight/shared/content/admin";
+import { SANDBOX_BADGE, type AdminModeState, type AdminToggle } from "@firstlight/shared/content/admin";
 import { COSMETICS } from "@firstlight/shared/content/items";
 import { WEAPONS } from "@firstlight/shared/content/weapons";
 import type { Game } from "../game/Game.ts";
@@ -30,17 +32,25 @@ export class AdminPanel extends Panel {
   }
 
   private state(): AdminModeState {
-    return this.you()?.adminMode ?? { fly: false, god: false, speed: false, session: false };
+    return this.you()?.adminMode ?? { fly: false, god: false, speed: false, sandbox: false };
+  }
+
+  /** In the sandbox: send it. In the real world: into the sandbox first; it goes on arrival. */
+  private send(args: Record<string, unknown>) {
+    if (this.state().sandbox) return adminMode(this.game, args);
+    this.game.sandboxPending = args;
+    adminMode(this.game, { action: "sandbox" });
+    this.close();
   }
 
   render() {
     const m = this.state();
     const b = this.box;
     b.innerHTML = "";
-    el("h2", "", b, "ADMIN MODE");
-    el("p", "sub", b, m.session
-      ? "Test session: nothing you earn is kept, and nothing leaves it (no drops, pickups, PvP or medals). Back to normal ends it, and so do travelling, closing the game or dying."
-      : "Only for admins; the server checks every switch. Any switch starts a test session: your real character is kept safe and comes back with Back to normal.");
+    el("h2", "", b, m.sandbox ? SANDBOX_BADGE.toUpperCase() : "ADMIN MODE");
+    el("p", "sub", b, m.sandbox
+      ? "Your sandbox: a private copy of this body. Nobody else is here and nothing you do or earn is kept. Travel stays in the sandbox. Back to normal returns to your real character, as and where you left it."
+      : "Only for admins; the server checks every switch. The first one moves you into your sandbox, a private copy of this body where nothing is saved. Your real character stays as it is.");
     const body = el("div", "body", b);
 
     for (const [k, name, text] of TOGGLES) {
@@ -51,9 +61,9 @@ export class AdminPanel extends Panel {
       el("span", "meta", row, m[k] ? "ON" : "off");
       const btn = el("button", m[k] ? "btn" : "btn ghost", row, m[k] ? "Turn off" : "Turn on");
       btn.dataset.e2e = `admin-${k}`;
-      btn.onclick = () => adminMode(this.game, { [k]: !m[k] });
+      btn.onclick = () => this.send({ [k]: !m[k] });
     }
-    const action = (name: string, text: string, act: string, label: string) => {
+    const action = (name: string, text: string, act: string, label: string, run = () => this.send({ action: act })) => {
       const row = el("div", "row", body);
       const t = el("div", "", row);
       el("div", "nm", t, name);
@@ -61,11 +71,16 @@ export class AdminPanel extends Panel {
       el("span", "meta", row, "");
       const btn = el("button", "btn ghost", row, label);
       btn.dataset.e2e = `admin-${act}`;
-      btn.onclick = () => adminMode(this.game, { action: act });
+      btn.onclick = run;
     };
     action("Max level", "The level cap and full health: every tier unlocks.", "maxlevel", "Apply");
     action("Every item", "One of every item in your hotbar and backpack (best tier for your level).", "giveall", "Fill");
-    action("Back to normal", "Ends the test session: switches off, your character as it was.", "normal", "Restore");
+    if (m.sandbox) {
+      action("Back to normal", "Leave the sandbox: your real character, as and where you left it.", "normal", "Leave", () => {
+        this.close();
+        this.game.leaveSandbox();
+      });
+    }
 
     // The armoury: any item at any tier into your hand; a cosmetic goes on.
     el("h3", "", body, "Armoury").style.margin = "1em 0 .3em";
@@ -79,13 +94,13 @@ export class AdminPanel extends Panel {
         const btn = el("button", "btn ghost", tiers, TIER[t]!);
         btn.setAttribute("aria-label", `${w.name} ${TIER[t]}`);
         btn.style.marginLeft = ".3em";
-        btn.onclick = () => adminMode(this.game, { action: "hand", id: w.id, tier: t });
+        btn.onclick = () => this.send({ action: "hand", id: w.id, tier: t });
       }
       el("span", "", row);
     }
     const cos = el("div", "", body);
     cos.style.cssText = "display:flex;flex-wrap:wrap;gap:.3em;padding:.4em .6em";
-    for (const c of COSMETICS) el("button", "btn ghost", cos, c.name).onclick = () => adminMode(this.game, { action: "hand", id: c.id });
+    for (const c of COSMETICS) el("button", "btn ghost", cos, c.name).onclick = () => this.send({ action: "hand", id: c.id });
 
     const foot = el("div", "foot", b);
     el("span", "", foot, "Admin actions are logged on the server.");
