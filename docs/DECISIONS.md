@@ -842,7 +842,11 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   statues, cover); new: Juno's counter at the Portus Exchange (a structure solid like the Hall
   board's stand). The server's movement checks (footing, crossing), placement (`placeBody`: saves,
   teleports, the spawn ring) and NPC steering (NPCs up to 1.2 m wide follow round them, leaps land
-  clear) use them; combat doesn't (shots and sight pass between trunks as before). The camera stops
+  clear, a strike or leap a trunk would stop isn't made: they step round, and a trunk that wedges
+  them counts as walling them off) use them; combat doesn't (shots and sight pass between trunks as
+  before). On a slope a solid reaches down to the lowest ground round it (no gap under its downhill
+  edge), and the client keeps the feet on the ground through each frame's substeps and clears them
+  of the solids after its ground snap (Codex review). The camera stops
   short of boulders and spires (not trunks). Walking dead-centre into a trunk stops you, as anywhere;
   off-centre you slide round it. `PROTOCOL_VERSION` 5 (an older client walks through trees and
   would be corrected at each one): deploy the client first, then the server. Why: the owner, "a lot
