@@ -114,6 +114,36 @@ the bigger heads and scale hats and masks per starter (`render/Avatars.ts`).
   seal spends no kunai. Never a one-shot at equal level (30 + 12 burn of 100 HP at L1).
 - **Smoke-step dodge:** proposed, not built (the dodge lane owns the roll).
 
+## Second looks: Kappa · Wayfarer and Unit 7 · Scout (round 2, `rig_astra.py`)
+
+The owner kept both looks for Kappa and Unit 7 (content.md §2.4). The B models are the Astra
+design-round meshes (static, unrigged, one palette atlas, the weapon modelled in the hand), rigged here:
+
+- **Clean-up:** seam-split vertices welded; the held Riverstaff (pole and 12 reed rings) and carbine
+  (6 parts) removed, matched by their boxes and checked by count; the thumb that gripped the weapon is
+  replaced by a mirror of the free one; faces buried 6 mm inside another closed part of the same group,
+  or 2 cm inside another body part that never swings out (torso, shell, head, chest, pack), are culled
+  (2.5k and 2.0k faces). Limbs keep everything they could swing out of the body.
+- **Skeleton:** every UAL bone keeps its name and T-pose frame; joints move to each body (spine heights
+  mapped between pelvis and neck; arms, legs and hands from the parts' axes). The arm, hand and finger
+  frames are turned (minimal rotation) onto the hanging arms for the bind. The GLB's joint nodes rest
+  in the UAL frames (the exporter writes a pose with every bone back in its UAL frame) while the inverse
+  bind matrices hold the A-pose, so every clip rotation means the same as on the other starters and
+  sockets compute as before.
+- **Weights:** per island group: rigid for hat, head parts, shell, hands, feet and every Unit 7 robot
+  segment; heat weights restricted to the group's bones for Kappa's body, arms and legs and Unit 7's
+  torso.
+- **Clips:** shared. Their legs are short (pelvis 0.57 / 0.65 m vs 0.917 m), so the client scales only
+  the pelvis position track by that ratio (feet stay on the ground, bobs and crouches shrink) and
+  plays the locomotion clips faster by the same ratio.
+- **Textures:** a fresh smart-projected atlas; each texel samples the design's palette atlas through the
+  original UVs, plus baked occlusion (an OpenVDB level set of the whole mesh). Palette roles: Kappa's
+  vest primary and shell rim secondary; Unit 7's ivory shell primary, grey joints secondary, the optic,
+  chest light and antenna tip painted accents. Normal maps are flat (the design has no sculpt detail).
+- **Budgets:** 10,425 and 11,759 tris, 65 joints, 1 skinned mesh, 1024² + 512² sets.
+- **Sockets:** per model (crown, face, back and belt points; hats and masks drawn 2.2–2.4× for the big
+  heads). Kappa B's back socket sits on the shell, Unit 7 B's behind the radio pack.
+
 ## Approval renders (Phase A, 2026-10-15) and what is still rough
 
 Renders: `/tmp/fl-go/chars/` (turnarounds in a neutral studio light; "game" renders emulate the

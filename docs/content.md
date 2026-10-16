@@ -317,6 +317,16 @@ Heat = shots until a 1.5 s overheat lockout. Explosions fall off linearly from t
 
 On rebirth: level 1, the chosen starter's T1 weapon, 0 coins (D).
 
+**Looks (new, owner round 2):** Kappa and Unit 7 each have two looks; the others have one. A look is
+cosmetic only (same weapon, numbers and hitbox). It is picked with the starter on first play and on
+rebirth, and a living character can switch it any time from the pause menu. Ids are append-only per
+starter (`STARTER_LOOKS`; `PlayerState.look` and the saved character store the index).
+
+| Character | Look 0 (default) | Look 1 |
+|---|---|---|
+| Kappa | River ninja (sculpted kasa, bob, wraps, river-stone shell) | Wayfarer (the Astra design-round Kappa: round-headed, vest, plated shell, big kasa) |
+| Unit 7 | Trooper (ivory plates over a quilted grey suit) | Scout (the Astra design-round Unit 7: short and round, ceramic shell, radio pack) |
+
 ### 2.5 PvP time-to-kill target and check
 
 **Target (new):** at equal level with the gated tier and 100% accuracy:
@@ -707,6 +717,8 @@ since the last rebirth; "account" means cumulative.
 ### 8.1 Shared avatar contract
 
 - **Rig:** one humanoid skeleton for all five starters, which differ only in looks and starter weapon (D).
+  The second looks (2.4) keep their own proportions on it (short legs, big heads): their joints move,
+  the clips are shared, and only the pelvis track is rescaled to their legs (`chars3d/rig_astra.py`).
 - **Base mesh:** sculpted in code on the shared Quaternius UAL rig (`tools/blender/chars3d`, docs/design/characters-3d.md);
   the Universal Base Characters body (CC0) [08] was the first restyle and is no longer used.
 - **Budget [r2-15]:** 10–15k triangles, 1 skinned mesh, ≤ 2 materials, ≤ 75 bones, one 1024² atlas
@@ -724,6 +736,8 @@ since the last rebirth; "account" means cumulative.
 | **Brother Ash**: hooded desert monk-knight, Sunbrand | Tall; the hood is deep and asymmetric, with layered sand cloth wrapped over one shoulder; a brass face-guard under the hood; brass prayer beads. Sunbrand: a lantern-cage brass hilt and an amber-white blade with a flame ribbon and forge-crackle sound [r2-04]; stowed on the back. Pattern mask: woven sun-and-ash stripes | layered linen, worn leather, hammered brass, emissive blade | Sand palette: sand cloth, umber wraps, amber accents | a brown robe over a cream tunic with a belted sash; a plain cylinder hilt with an emitter; the hum sound; **blade colour coding (the Sunbrand blade is always amber-white whatever the palette; the palette only tints the hilt inlays)**; the words "Jedi" and "lightsaber" |
 | **Kappa**: folklore turtle-shell ninja, bo staff | ONE character. Squat and wide, with a domed tortoise shell patterned like river stones; a beaked face; webbed hands; the kappa's water dish on the crown, covered by a wide straw hat (kasa); a wooden Riverstaff lashed with reed cord. Pattern mask: shell-plate lines | matte green skin, shell keratin, straw, cord, wood | Moss palette: natural moss-green skin, straw hat, bark-brown wraps | coloured bandana masks; initial-letter belt buckles; elbow and knee pads; four brothers; Renaissance-artist names; pizza; a rat master; sewers; the words "Ninja Turtle". Also no yellow skin with a spiky green-and-white-rimmed shell and sneakers (a famous platformer's turtles) |
 | **Unit 7**: white-armour trooper, Pocket Carbine | Compact and solid. Ivory ceramic plates over a **grey** padded undersuit (never black); a rounded helmet with **ONE round lens visor** [r3]; a "07" stencil on the shoulder; a small radio pack. Pocket Carbine: a boxy compact carbine with a top-mounted battery cell. Pattern mask: panel seams | glazed ceramic, rubberised grey suit, gunmetal | Ivory palette: ivory plates, grey suit, amber lens and bolt tracers | a T-shaped visor; a frowning mouth grille; a black undersuit showing between white plates; bucket helmets with ear caps; DL-44 / E-11 blaster silhouettes; red "pew" bolts [r2-04]. Also keep Unit 7 visibly different from Meridian's slate-grey slit-visor Associates |
+| **Kappa · Wayfarer** (second look) | Short, round and big-headed: a wide cheerful face with a short beak, a teal vest with a pale belly plate, a domed shell with raised plates and a straw rim, three-fingered webbed mitts, big three-toed feet, a high conical kasa on chin cords over the crown dish | matte green skin, shell keratin, straw, cloth | Moss palette: vest and shell rim recolour; skin, shell and kasa stay | as Kappa |
+| **Unit 7 · Scout** (second look) | Short and round: a big ivory dome helmet with ONE round amber optic in a slate bezel, an ivory chest shell with a vent and a status light, ball-jointed grey limbs, ivory forearm and shin shells, a radio pack with an antenna, a small "07" on the right shoulder | glazed ceramic, grey rubber, slate metal | Ivory palette: ivory shell, grey joints, amber optic | as Unit 7 |
 | **Hinoko**: fire ninja, Ember Kunai (5th starter, HANDOFF 6h) | Lean and quick: a charcoal hooded cowl draping onto the shoulders, a cloth face mask, sharp amber eyes and a few dark bangs; a long rust scarf with two tattered tails trailing behind; a short wrap-front jacket with side slits, a wide belt with a knotted rope, baggy trousers into shin wraps, forearm bandages, fingerless gloves, split-toe tabi, a kunai pouch on the right thigh. Ember Seal: a 0.4 s hand seal, then a fireball. Pattern mask: an original ember-in-a-ring emblem on the back | matte cotton, wraps, leather, steel | Ember palette: charcoal cloth, rust scarf and lapel, orange emblem and fire | an orange jumpsuit; a forehead plate or headband with a symbol; leaf or spiral symbols; whisker marks; spiky blond hair; copied technique names ("Rasengan", "Shadow Clone", "Hidden Leaf", "Sharingan", any "jutsu" name from the show) |
 
 ### 8.3 The 6 palettes (new); any starter can wear any palette
@@ -871,6 +885,7 @@ not a trademark search.
 | Group | Names | Result |
 |---|---|---|
 | Decided (D) | FIRSTLIGHT, Portus, Arcadia, Hollowmere, Meridian, Hall of Firsts, Hexwick, Brother Ash, Unit 7, Hexquill, Sunbrand, Pocket Carbine, Woolback, Dusk Wolf, Tidewrath, The Receiver, Meridian Oversight, Hollow Court | OK, with flags: **Hollow King** is one word from *Hollow Knight* (Team Cherry); keep, with fallback "the Barrow King". **Kappa** is folklore (fine), but also an apparel trademark and a Twitch emote; low risk in games. **Tidewrath** is flagged Y in [r2-04] because of the kaiju archetype; mitigated by the design rules in 4.2 |
+| Starter looks (new, round 2) | River ninja, Wayfarer (Kappa); Trooper, Scout (Unit 7) | OK (generic words) |
 | Ninja starter (new, 6h) | Hinoko, Ember Kunai, Ember Seal | OK. "Hinoko" is the Japanese common noun for flying sparks (火の粉); no franchise character of that name known to us. "Ember Seal" and "Ember Kunai" are generic words (a kunai is a real tool). Rejected: "Kage", "Rin", "Hotaru", "Homura", "Hibana", "Kitsune"/fox motifs (all close to famous anime characters or the nine-tailed fox), "Wren" (already the example player name in UI copy and tests). Reasoned check only |
 | Weapons (new / [05]) | Riverstaff, Bearded Axe, Quarry Hammer, Emberglass Staff [05], Stormcoil, Scatterpipe [05], Yew Longbow, Stillshot Rifle, Comet Launcher, Scrapburst Grenade [05], Patchkit [05], Prism Bubble, Radio, Small/Large Tonic, Ferryman's Oar | OK. I rejected "Skyhammer" (Warhammer), "Boomtube" (DC's "Boom Tube"), "Farsight" (Warhammer 40k) and "Stonemaul" (WoW) |
 | Arcadia creatures (new) | Brightbits (faction), Hopbit, Golden Hopbit, Sparkfly, Linewyrm, Bomblet, Pixel Lancer, Cabinet Golem | OK, except "Hopbit": one letter from a franchise word, which this section's own rule bans; owner decision before going public (docs/pre-public.md §6; display name only, the id can stay). Silhouettes must follow the avoid list in 3.2 |

@@ -212,7 +212,7 @@ export interface StarterLook {
 export const STARTER_LOOKS: readonly (readonly StarterLook[])[] = [
   [{ id: "hexwick", name: "Hexwick" }],
   [{ id: "ash", name: "Brother Ash" }],
-  [{ id: "kappa", name: "River ninja" }, { id: "kappa_b", name: "Traveller" }],
+  [{ id: "kappa", name: "River ninja" }, { id: "kappa_b", name: "Wayfarer" }],
   [{ id: "unit7", name: "Trooper" }, { id: "unit7_b", name: "Scout" }],
   [{ id: "ninja", name: "Hinoko" }],
 ];

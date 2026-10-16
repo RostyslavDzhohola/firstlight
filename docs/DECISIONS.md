@@ -837,3 +837,17 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   glTF UVs). Head and face sockets move per starter and scale hats and masks. The 2D portraits and the
   SVG hero figures are replaced by renders of these models. Why: the owner found the 2D art
   "hilarious" and expected real 3D characters at the littleprince.dev level; one rig keeps every clip.
+- **D-chars-3 (run, 2026-10-15 22:35 CDT):** Kappa and Unit 7 each get a second look, the Astra
+  design-round models (owner round 2: "let's add them both"), as `STARTER_LOOKS` in shared content
+  (append-only per starter; look 0 is the original). The look is chosen with the starter on the pick
+  screen (first play and rebirth: `/api/play` and `respawn` take an optional `look`) and a living
+  character can switch it from the pause menu (`look` message, 2/s, refused for a look the starter
+  doesn't have). It is cosmetic only. It is stored in the character's inventory record (no
+  migration; older rows read as 0), sent as an appended `PlayerState.look` (older clients ignore it and
+  draw the original), and shown on /api/me and the leaderboard. No protocol bump: nothing about
+  movement or collision changes. The B models keep their designed proportions on the shared skeleton:
+  joints are fitted to each body, the arm bones bind rotated onto the hanging arms while the joint
+  nodes rest in the UAL T-pose frames (so every clip's rotations mean the same), and the client
+  rescales only the pelvis track to their leg length and quickens their steps
+  (`tools/blender/chars3d/rig_astra.py`, `render/avatars/assets.ts`). Why: the owner wants both looks
+  for these two; retargeting by shared frames keeps one clip set and costs one track per clip.

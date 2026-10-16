@@ -182,6 +182,18 @@ and normal maps (`*_albedo.webp`, `*_normal.webp`, 1024² and `_512` sets), the 
 (`hero_*.webp`, `portrait_*.webp`), and the authored emotes `emote_wave`, `emote_point` and
 `emote_cheer`. Weapon models are generated in code (`apps/client/src/render/avatars/weapons.ts`, MIT).
 
+**Second looks (Kappa · Wayfarer, Unit 7 · Scout; 2026-10-15 round 2):** the meshes come from the
+in-house design round (GPT-6 "Astra", our own art, CC BY 4.0 "FIRSTLIGHT / Astra design round"; no
+third-party sources), committed as `tools/blender/chars3d/astra/kappa.glb`
+(`8417520d9403cda3a5f466cfd56e01cd6b98056a662c1cd7169b7a9742d06099`) and `astra/unit-7.glb`
+(`a052d6003f98bdd8f845342f69fd6cdb5271b3b66989768d306baf0dcbb91400`; `rig_astra.py` checks both
+hashes). Changes: the held Riverstaff and carbine removed, the gripping thumb replaced by a mirror of
+the free one, faces buried inside other parts culled, rigged onto the UAL skeleton with our weights,
+re-unwrapped, and a new albedo (the design's colours with baked occlusion and palette roles) and flat
+normal map. Shipped as `kappa_b.glb` (10,425 tris, 142,696 B), `unit7_b.glb` (11,759 tris,
+136,880 B), `*_b_albedo.webp` (~130 KB; `_512` ~71 KB), `*_b_normal.webp`, `hero_*_b_*.webp`,
+`portrait_*_b.webp`.
+
 Shipped outputs (2026-10-15 build):
 
 | File | Bytes | Contents |
