@@ -8,7 +8,7 @@ import express, { type Express, type NextFunction, type Request, type Response }
 import type { TokenVerifier } from "./auth/identity.ts";
 import { directRequestIp } from "./auth/ip.ts";
 import { BodyRoom } from "./world/BodyRoom.ts";
-import { isBodyId, onlineCount, play, type MatchmakingLimits } from "./world/matchmaking.ts";
+import { enterSandbox, isBodyId, onlineCount, play, type MatchmakingLimits } from "./world/matchmaking.ts";
 import { identityCheck, storageRecovery, travelRedirect } from "./world/admission.ts";
 import { pendingSeats } from "./world/reservations.ts";
 import { PROTOCOL_VERSION } from "@firstlight/shared/net/protocol";
@@ -171,6 +171,16 @@ export async function createGame(opts: GameOptions): Promise<Game> {
       res.json({ ok: false, error: "forbidden" });
       return;
     }
+    // An admin's sandbox (D-admin-3): admins only, the real character alive and out of a fight; it
+    // is saved now and leaves the real world, and the sandbox opens (or goes on, after travel).
+    const sandbox = req.body.sandbox === true;
+    if (sandbox) {
+      const why = enterSandbox(identity, now);
+      if (why) {
+        res.status(403).json({ ok: false, error: why });
+        return;
+      }
+    }
     // Travel tickets: a character may only rejoin its current body or the one an unexpired ticket
     // names (portal, out of combat); brand-new characters start home. Admins and bots are exempt.
     const redirect = travelRedirect(identity, body, Date.now());
@@ -180,7 +190,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     }
     // Party headroom (D12) only for real party members: the copy another member is in on this body
     // (a client hint is honoured only if it names such a room).
-    const partyRoom = partyRoomFor(identity.userId, body, typeof req.body.partyLeaderRoomId === "string" ? req.body.partyLeaderRoomId : undefined);
+    const partyRoom = sandbox ? undefined : partyRoomFor(identity.userId, body, typeof req.body.partyLeaderRoomId === "string" ? req.body.partyLeaderRoomId : undefined);
     // Unused-seat caps: checked and claimed together, before any await (F12 re-review S4); the claim
     // becomes the reservation or is released.
     const seatIp = perAddress ? (ip ?? "unknown") : null;
@@ -199,6 +209,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
           starter: Number.isInteger(req.body.starter) ? Math.max(0, Math.min(3, req.body.starter)) : undefined,
           palette: Number.isInteger(req.body.palette) ? Math.max(0, Math.min(5, req.body.palette)) : undefined,
           loadtest: req.body.loadtest === true,
+          sandbox,
         },
         opts.limits,
       );

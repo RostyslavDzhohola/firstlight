@@ -1,5 +1,8 @@
 // Admin mode (the owner's test switches, D-admin-1): fly, god mode and double speed for admin
-// accounts only. The server's movement validation reads the same numbers as the client controller.
+// accounts only, and only in the admin's private sandbox (D-admin-3), where nothing is saved. The
+// server's movement validation reads the same numbers as the client controller.
+
+import type { BodyId } from "../planet/bodies.ts";
 
 export const ADMIN_MODE = {
   /** Flying: top speed in any direction (m/s), before Speed ×2. */
@@ -15,8 +18,13 @@ export interface AdminModeState {
   fly: boolean;
   god: boolean;
   speed: boolean;
-  /** In a test session (D-admin-2): nothing earned is kept; "Back to normal" ends it. */
-  session: boolean;
+  /** In the admin's sandbox (D-admin-3): a private copy of the body where nothing is saved. */
+  sandbox: boolean;
+  /** In a sandbox: the body the real character is on ("Back to normal" goes there). */
+  home?: BodyId;
 }
+
+/** What the HUD badge says in a sandbox. */
+export const SANDBOX_BADGE = "SANDBOX — nothing here is saved";
 
 export type AdminToggle = "fly" | "god" | "speed";

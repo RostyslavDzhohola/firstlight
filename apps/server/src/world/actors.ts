@@ -4,6 +4,7 @@ import type { Client } from "@colyseus/core";
 import type { CharacterData } from "@firstlight/shared/content/character";
 import type { NpcState, PlayerState } from "@firstlight/shared/net/schema";
 import type { Identity } from "../auth/identity.ts";
+import type { Sandbox } from "../sandbox.ts";
 import type { V3 } from "./geometry.ts";
 
 export interface PosSample {
@@ -88,20 +89,18 @@ export interface PlayerActor {
   mountChangedAt?: number;
   /** NPC status effects enforced by movement validation (see npc/effects.ts). */
   npcFx?: NpcMoveFx;
-  /** Admin mode switches (adminMode.ts); they only count while `identity.admin` (adminSwitch). */
-  adminMode?: { fly: boolean; god: boolean; speed: boolean };
-  /** Admin test session (adminMode.ts, D-admin-2): the saved character; `char` is the live test one. */
-  adminTest?: { canonical: CharacterData };
+  /** In an admin sandbox (sandbox.ts, D-admin-3): a copy of the character in a private room; never saved. */
+  sandbox?: Sandbox;
+  /** Moving into a sandbox (adminMode.ts): leaving out of a fight before then is a handoff, not a linger. */
+  toSandboxUntil?: number;
 }
 
-/** The character that counts for `a`: the saved one during an admin test session, else the live one (D-admin-2). */
-export function canonicalChar(a: PlayerActor): CharacterData {
-  return a.adminTest?.canonical ?? a.char;
-}
-
-/** Is this admin-mode switch on for `a`? Never for a non-admin, whatever the actor holds. */
+/**
+ * Is this admin-mode switch on for `a`? Only in a sandbox (the switches live there) and only while
+ * the identity is an admin: never in the real world, whatever an actor holds.
+ */
 export function adminSwitch(a: PlayerActor, k: "fly" | "god" | "speed"): boolean {
-  return !!a.identity?.admin && !!a.adminMode?.[k];
+  return !!a.identity?.admin && !!a.sandbox?.switches[k];
 }
 
 /** Why a hit on an NPC dealt nothing (ServerMessages `immune`); unset = an unspecified cause. */

@@ -119,6 +119,7 @@ function adminBody(db: Db, reportsPage = 1): string {
           const u = esc(encodeURIComponent(a.identity.userId));
           const chips = [
             a.identity.admin ? `<span class="chip admin">admin</span>` : "",
+            a.sandbox ? `<span class="chip">sandbox</span>` : "", // D-admin-3: a private copy, nothing saved
             a.identity.guest ? `<span class="chip">guest</span>` : "",
             a.identity.loadtest ? `<span class="chip">bot</span>` : "",
             a.state.flags & PF.VOICE_MUTED ? `<span class="chip bad">voice-muted</span>` : "",

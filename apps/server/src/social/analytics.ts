@@ -3,7 +3,7 @@
 // have been gone for a short grace period (travel and reconnects don't split it). Load-test players
 // are never recorded.
 
-import { canonicalChar, type PlayerActor } from "../world/actors.ts";
+import type { PlayerActor } from "../world/actors.ts";
 import { sessionClient, sessionEnd, sessionStart, sessionUpdate } from "./store.ts";
 
 export const ANALYTICS = {
@@ -34,7 +34,7 @@ const trackers = new Map<string, Tracker>();
 
 export function trackJoin(actor: PlayerActor, body: string, now = Date.now()): void {
   const userId = actor.identity.userId;
-  if (actor.identity.loadtest) return;
+  if (actor.identity.loadtest || actor.sandbox) return; // bots and admin sandboxes aren't play (D-admin-3)
   let t = trackers.get(userId);
   if (t?.endTimer) {
     clearTimeout(t.endTimer);
@@ -42,12 +42,12 @@ export function trackJoin(actor: PlayerActor, body: string, now = Date.now()): v
   }
   if (t?.current) closeCurrent(t, now);
   if (!t) {
-    t = { key: userId, logId: sessionStart(userId, now), bodyTime: {}, deaths: 0, maxLevel: canonicalChar(actor).level, lastFlush: now, lastLeftAt: null, current: null, endTimer: null };
+    t = { key: userId, logId: sessionStart(userId, now), bodyTime: {}, deaths: 0, maxLevel: actor.char.level, lastFlush: now, lastLeftAt: null, current: null, endTimer: null };
     trackers.set(userId, t);
   }
   t.lastLeftAt = null;
-  t.current = { sessionId: actor.id, body, since: now, actor, baseDeaths: canonicalChar(actor).deaths };
-  t.maxLevel = Math.max(t.maxLevel, canonicalChar(actor).level);
+  t.current = { sessionId: actor.id, body, since: now, actor, baseDeaths: actor.char.deaths };
+  t.maxLevel = Math.max(t.maxLevel, actor.char.level);
 }
 
 export function trackLeave(userId: string, sessionId: string, now = Date.now()): void {
@@ -67,7 +67,7 @@ export function trackLeave(userId: string, sessionId: string, now = Date.now()):
 export function trackTick(userId: string, now = Date.now()): void {
   const t = trackers.get(userId);
   if (!t?.current) return;
-  t.maxLevel = Math.max(t.maxLevel, canonicalChar(t.current.actor).level);
+  t.maxLevel = Math.max(t.maxLevel, t.current.actor.char.level);
   if (now - t.lastFlush >= ANALYTICS.FLUSH_MS) {
     t.lastFlush = now;
     sessionUpdate(t.logId, progress(t, now));
@@ -122,8 +122,8 @@ export function openTrackers(): number {
 function closeCurrent(t: Tracker, now: number): void {
   const c = t.current!;
   t.bodyTime[c.body] = (t.bodyTime[c.body] ?? 0) + Math.max(0, now - c.since);
-  t.deaths += Math.max(0, canonicalChar(c.actor).deaths - c.baseDeaths);
-  t.maxLevel = Math.max(t.maxLevel, canonicalChar(c.actor).level);
+  t.deaths += Math.max(0, c.actor.char.deaths - c.baseDeaths);
+  t.maxLevel = Math.max(t.maxLevel, c.actor.char.level);
   t.current = null;
 }
 
@@ -133,7 +133,7 @@ function progress(t: Tracker, now: number) {
   if (t.current) {
     const c = t.current;
     bodyTime[c.body] = (bodyTime[c.body] ?? 0) + Math.max(0, now - c.since);
-    deaths += Math.max(0, canonicalChar(c.actor).deaths - c.baseDeaths);
+    deaths += Math.max(0, c.actor.char.deaths - c.baseDeaths);
   }
   return { bodyTime, deaths, maxLevel: t.maxLevel };
 }

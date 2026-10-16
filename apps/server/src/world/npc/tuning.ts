@@ -2,6 +2,7 @@
 // production keeps the defaults from docs/content.md via NPC_RULES.
 
 import { NPC_RULES } from "@firstlight/shared/content/npcs";
+import { sandboxed } from "../../sandbox.ts";
 
 export const NPC_TUNING = {
   /** Ambient spawns (camps, packs, wildlife, beasts). Tests turn this off to work with admin spawns only. */
@@ -50,13 +51,15 @@ export type NpcEvent =
   | { kind: "bossKill"; body: string; boss: string; sessionIds: string[]; userIds: string[]; names: string[] };
 
 type Listener = (e: NpcEvent) => void;
-const listeners = new Set<Listener>();
+/** Process-wide, except that an admin sandbox's rooms only hear each other (D-admin-3). */
+const listeners = sandboxed(new Set<Listener>(), () => new Set<Listener>());
 export function onNpcEvent(l: Listener): () => void {
-  listeners.add(l);
-  return () => listeners.delete(l);
+  const set = listeners.current;
+  set.add(l);
+  return () => set.delete(l);
 }
 export function emitNpcEvent(e: NpcEvent) {
-  for (const l of listeners) {
+  for (const l of listeners.current) {
     try {
       l(e);
     } catch (err) {

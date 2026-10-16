@@ -3,6 +3,7 @@
 // lingering; whichever room holds it is recorded here. Joining anywhere takes the actor over.
 
 import type { PlayerActor } from "./actors.ts";
+import { sandboxed } from "../sandbox.ts";
 
 export interface HubRoom {
   readonly roomId: string;
@@ -17,37 +18,38 @@ interface Entry {
   actor: PlayerActor;
 }
 
-const entries = new Map<string, Entry>();
+/** An admin sandbox has its own (D-admin-3): its actors are never the real ones, nor reachable from outside. */
+const live = sandboxed(new Map<string, Entry>(), () => new Map<string, Entry>());
 
 export const hub = {
   get(userId: string): Entry | undefined {
-    return entries.get(userId);
+    return live.current.get(userId);
   },
   set(userId: string, room: HubRoom, actor: PlayerActor) {
-    entries.set(userId, { room, actor });
+    live.current.set(userId, { room, actor });
   },
   /** Forget the user only if `actor` is still the authoritative one. */
   release(userId: string, actor: PlayerActor) {
-    if (entries.get(userId)?.actor === actor) entries.delete(userId);
+    if (live.current.get(userId)?.actor === actor) live.current.delete(userId);
   },
   /** Save the live actor of each user (before an account merge). */
   flush(...userIds: string[]) {
     for (const u of userIds) {
-      const e = entries.get(u);
+      const e = live.current.get(u);
       if (e && !e.actor.superseded) e.room.saveActor(e.actor);
     }
   },
   /** Retire (no save) the live actor of each user, kicking with `code`. */
   retireAll(code: number, reason: string, ...userIds: string[]) {
     for (const u of userIds) {
-      const e = entries.get(u);
+      const e = live.current.get(u);
       if (!e) continue;
-      entries.delete(u);
+      live.current.delete(u);
       e.room.retire(e.actor, code, reason);
     }
   },
   clear() {
-    entries.clear();
+    live.current.clear();
   },
 };
 

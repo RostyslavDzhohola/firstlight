@@ -39,6 +39,8 @@ export interface PlayRequest {
   partyLeaderRoomId?: string;
   /** Load-test rooms only (requires the load-test secret server-side). */
   loadtest?: boolean;
+  /** Admins only: the admin's private sandbox copy of `body`, where nothing is saved (D-admin-3). */
+  sandbox?: boolean;
 }
 
 export type PlayResponse =
@@ -143,6 +145,8 @@ export type ServerMessages = {
   swing: { by: string; weapon: number; heavy: boolean; hits: number };
   /** The server refused an action (`reason` is short and human-readable). */
   denied: { action: string; reason: string };
+  /** Admins: the real character is saved and may move into the sandbox now (join it through /api/play with `sandbox`). */
+  sandbox: { home: BodyId };
   /** To the attacker only: a hit landed on an NPC that took no damage (spawning, evading, a shield). */
   immune: { target: string; reason: "spawning" | "evading" | "invulnerable" | "shield" | "arena" };
   /** Movement snap-back: the authoritative position for input `seq`. */

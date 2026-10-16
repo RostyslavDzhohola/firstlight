@@ -173,8 +173,6 @@ export function canHurt(a: Actor | null, b: Actor, now: number, host?: CombatHos
     if (a.dead) return false;
     if (safeNow(host, a, now)) return false;
     if (a.protectedUntil > now) return false;
-    // An admin test session (D-admin-2) tests on creatures, never on other players.
-    if (a.adminTest && b.kind === "player" && b.id !== a.id) return false;
   }
   return true;
 }

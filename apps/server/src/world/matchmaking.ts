@@ -5,7 +5,11 @@ import { matchMaker } from "@colyseus/core";
 import { BODY_IDS, type BodyId } from "@firstlight/shared";
 import type { PlayResponse } from "@firstlight/shared/net/protocol";
 import type { Identity } from "../auth/identity.ts";
+import { openSandbox, sandboxOf } from "../sandbox.ts";
+import { identityIsAdmin } from "./adminMode.ts";
 import type { BodyRoomMetadata } from "./BodyRoom.ts";
+import { characterRepo } from "./characters.ts";
+import { CLOSE, hub } from "./hub.ts";
 
 export interface MatchmakingLimits {
   maxClients: number;
@@ -21,6 +25,8 @@ export interface PlayInput {
   partyLeaderRoomId?: string;
   partySize?: number;
   loadtest?: boolean;
+  /** The admin's sandbox copy of the body (D-admin-3; enterSandbox first). */
+  sandbox?: boolean;
 }
 
 const locks = new Map<string, Promise<unknown>>();
@@ -58,7 +64,47 @@ export async function onlineCount(includeLoadtest = false): Promise<number> {
   return n;
 }
 
+/**
+ * The real world's half of entering an admin sandbox (D-admin-3), or why not: admins only (asked of
+ * the account), with a character that is alive and out of a fight. A real body still in the world
+ * (another window, a handoff the server hasn't seen yet) is saved and leaves it, then the sandbox
+ * opens; already open (travel between sandbox bodies), it goes on.
+ */
+export function enterSandbox(identity: Identity, now: number): string | null {
+  if (identity.loadtest || !identityIsAdmin(identity)) return "forbidden";
+  const owner = identity.userId;
+  const live = hub.get(owner);
+  const ch = live?.actor.char ?? characterRepo.current.load(owner);
+  if (!ch) return "no character";
+  if (ch.dead || live?.actor.dead) return "respawn first";
+  if (live && now < live.actor.combatUntil) return "in combat";
+  if (live) {
+    live.room.saveActor(live.actor);
+    hub.release(owner, live.actor);
+    live.room.retire(live.actor, CLOSE.ELSEWHERE, "playing in another window");
+  }
+  openSandbox(owner, ch.body, now);
+  return null;
+}
+
+/** A seat in the admin's sandbox room for the body: one per admin and body, never a public copy. */
+async function playSandbox(identity: Identity, input: PlayInput): Promise<PlayResponse> {
+  const owner = identity.userId;
+  return withLock(`sb:${owner}`, async () => {
+    if (!sandboxOf(owner)) return { ok: false, error: "forbidden" };
+    const rooms = await matchMaker.query({ name: "body" });
+    let target = rooms.find((r) => {
+      const md = r.metadata as BodyRoomMetadata | undefined;
+      return md?.sandbox === owner && md.body === input.body && !r.locked;
+    });
+    target ??= await matchMaker.createRoom("body", { body: input.body, copy: 0, loadtest: false, sandbox: owner });
+    const reservation = await matchMaker.reserveSeatFor(target, { body: input.body }, identity);
+    return { ok: true, reservation: reservation as unknown as import("@firstlight/shared/net/protocol").SeatReservation };
+  });
+}
+
 export async function play(identity: Identity, input: PlayInput, limits: MatchmakingLimits): Promise<PlayResponse> {
+  if (input.sandbox) return playSandbox(identity, input);
   const loadtest = !!input.loadtest;
   // Bots only in load-test rooms, players only in public rooms ("no fake players, ever").
   if (loadtest !== !!identity.loadtest) return { ok: false, error: "forbidden" };
@@ -68,7 +114,7 @@ export async function play(identity: Identity, input: PlayInput, limits: Matchma
     const all = await matchMaker.query({ name: "body" });
     const mine = all.filter((r) => {
       const md = r.metadata as BodyRoomMetadata | undefined;
-      return md?.body === input.body && !!md?.loadtest === loadtest;
+      return md?.body === input.body && !!md?.loadtest === loadtest && !md?.sandbox; // sandboxes are private (D-admin-3)
     });
 
     if (!loadtest) {

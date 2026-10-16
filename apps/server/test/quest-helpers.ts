@@ -22,8 +22,8 @@ export interface Bot {
   count(type: string): number;
 }
 
-export async function bot(userId: string, body: BodyId, role = "admin", extra: Record<string, unknown> = {}): Promise<Bot> {
-  const room = await joinAs(harness.game!, userId, body, extra, role);
+export async function bot(userId: string, body: BodyId, role = "admin", extra: Record<string, unknown> = {}, ticket = true): Promise<Bot> {
+  const room = await joinAs(harness.game!, userId, body, extra, role, ticket);
   harness.rooms.push(room);
   const b: Bot = {
     room,

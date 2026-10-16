@@ -86,6 +86,7 @@ export function fakeWorld(body: BodyId, opts: { immortal?: boolean; start?: numb
     onMessage: () => {},
     playerById: (id) => players.get(id),
     save: () => {},
+    stillAdmin: (p) => !!p.identity.admin,
   };
   const sys = new NpcSystem(world);
   Object.assign(fw, {

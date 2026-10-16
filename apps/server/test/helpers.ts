@@ -15,6 +15,7 @@ import { EGG_TIMERS } from "../src/world/quests/eggs.ts";
 import { SUPPORT_TIMERS } from "../src/world/support.ts";
 import { copyStateStore, MemoryCopyStateStore } from "../src/world/copyState.ts";
 import { hub } from "../src/world/hub.ts";
+import { resetSandboxes } from "../src/sandbox.ts";
 import type { BodyId } from "@firstlight/shared";
 import { newCharacter } from "@firstlight/shared/content/character";
 
@@ -23,6 +24,7 @@ export async function startServer(
   opts: Pick<GameOptions, "mountAfterJson"> = {},
 ): Promise<Game> {
   characterRepo.current = new MemoryCharacterRepo();
+  resetSandboxes(); // admin sandboxes (D-admin-3) are process memory: a new server has none
   storageRecovery.clear();
   pileStore.current = new MemoryPileStore();
   progressStore.current = new MemoryProgressStore();

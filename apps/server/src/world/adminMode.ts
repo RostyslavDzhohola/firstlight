@@ -1,23 +1,22 @@
-// Admin mode (D-admin-1, D-admin-2): the owner's test switches, for admin accounts only. BodyRoom.admin
-// drops the `admin` message for everyone else, the switches only count while the identity is an
-// admin (actors.ts adminSwitch), and admin rights are checked again against the account on every
-// command and every couple of seconds (adminCheck), so a revoked admin loses them while connected.
-// One command, `admin {cmd: "adminmode", args}`:
-//   {fly?, god?, speed?: boolean}   the switches (movement.ts and combat.ts read them)
+// Admin mode (D-admin-1, D-admin-3): the owner's test switches, for admin accounts only, and only in
+// the admin's sandbox: a private copy of the body (its own BodyRoom, its own NPCs) that nobody else
+// can join and where nothing is saved (sandbox.ts). The real character's row is never touched.
+//
+// Entering: in the real world the client asks `admin {cmd: "adminmode", args: {action: "sandbox"}}`;
+// the room checks the admin is alive and out of a fight, saves the real character and answers
+// `sandbox {home}`; the client leaves (a handoff, no linger) and joins its sandbox through /api/play
+// with `sandbox: true` (admins only; refused while the real character is dead or fighting). Every
+// other admin-mode command works only in the sandbox:
+//   {fly?, god?, speed?: boolean}   the switches (movement.ts and combat.ts read them via adminSwitch)
 //   {action: "maxlevel"}            the level cap and full HP
 //   {action: "giveall"}             one of every usable item, best tier for the level, full stacks
 //   {action: "hand", id, tier}      that item (any tier) into the selected hotbar slot; a cosmetic is worn
-//   {action: "normal"}              the end of the test session: everything as it was
+// "Back to normal" is the client leaving the sandbox and joining the real world, where it gets the
+// real character from the database. Travel between bodies in a sandbox stays in it.
 //
-// Test sessions (D-admin-2): test state is never canonical. The first admin-mode command starts a
-// session that keeps a copy of the character as it was (`adminTest.canonical`); from then on saves
-// write that copy (BodyRoom.saveActor), never the live, boosted one, so the database, the
-// leaderboard and an account merge only ever see the real character. Nothing leaves a session: no
-// drops, pickups or piles, no PvP, no medals, Hall of Firsts or egg credit, and a boss fight with a
-// tester in it counts as assisted. It ends with Back to normal, leaving the world (travel, closing
-// the game, another window), dying (no death: back to normal at full health) or losing admin; each
-// puts the live character back to the saved one. Actions are logged with the account id's first 8
-// characters (no names, no positions).
+// Admin rights are asked of the account on every privileged message (stillAdmin) and every couple of
+// seconds for the passive switches; losing them in a sandbox sends the admin back to the real world.
+// Actions are logged with the account id's first 8 characters (no names, no positions).
 
 import { COSMETIC_BY_ID } from "@firstlight/shared/content/items";
 import { HORSE_WHISTLE } from "@firstlight/shared/content/horse";
@@ -26,8 +25,11 @@ import { LEVEL_CAP, maxHp, xpAtLevel } from "@firstlight/shared/content/progress
 import { WEAPONS, WEAPON_BY_ID, type WeaponDef } from "@firstlight/shared/content/weapons";
 import type { InvItem, YouState } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
-import type { PlayerActor } from "./actors.ts";
+import type { Identity } from "../auth/identity.ts";
+import { closeSandbox, runIn } from "../sandbox.ts";
+import { adminSwitch, type PlayerActor } from "./actors.ts";
 import type { BodyRoom } from "./BodyRoom.ts";
+import { CLOSE, hub } from "./hub.ts";
 import { env } from "../env.ts";
 import type { RoomSystem, SystemFactory } from "./systems.ts";
 import { voiceItemHidden } from "./voice/index.ts";
@@ -38,7 +40,7 @@ import { voiceItemHidden } from "./voice/index.ts";
  */
 export const adminCheck: { current: (userId: string) => boolean | null } = { current: () => null };
 
-/** How often live admins are checked against the account (ms). */
+/** How often live admins are checked against the account for the passive switches (ms). */
 export const ADMIN_RECHECK_MS = 2000;
 
 /** Every item an admin can be handed: the catalogue less fists and what this server has switched off. */
@@ -46,47 +48,45 @@ export function adminItems(): WeaponDef[] {
   return WEAPONS.filter((w) => w.id !== "fists" && !voiceItemHidden(w.id) && !(w.id === HORSE_WHISTLE && !env.horses));
 }
 
-/** Is `a` in an admin test session (its live character isn't the saved one)? */
-export function inTestSession(a: PlayerActor): boolean {
-  return !!a.adminTest;
+/** An admin identity, asked of the account now (for accounts; dev tokens keep their word). */
+export function identityIsAdmin(identity: Identity): boolean {
+  if (!identity.admin) return false;
+  return !identity.account || adminCheck.current(identity.userId) !== false;
 }
 
 /**
- * Still an admin, asked of the account now (for accounts; dev tokens keep their word). Losing it
- * takes the switches and the test session away on the spot.
+ * Still an admin? Asked before every privileged message (and every couple of seconds). Losing it
+ * takes the admin flag away on the spot, and in a sandbox sends the player back to the real world.
  */
 export function stillAdmin(room: BodyRoom, a: PlayerActor): boolean {
+  if (identityIsAdmin(a.identity)) return true;
   if (!a.identity.admin) return false;
-  if (!a.identity.account) return true;
-  if (adminCheck.current(a.identity.userId) !== false) return true;
   a.identity.admin = false;
   a.state.flags &= ~PF.ADMIN;
-  a.adminMode = { fly: false, god: false, speed: false };
-  endTestSession(room, a, "admin revoked");
   a.youDirty = true;
+  log(a, "admin rights gone");
+  if (room.sandbox) {
+    closeSandbox(a.identity.userId);
+    hub.release(a.identity.userId, a);
+    room.retire(a, CLOSE.SANDBOX_OVER, "admin rights revoked");
+  }
   return false;
 }
 
 /**
- * The end of a test session: the live character becomes the saved one again (it keeps standing where
- * it is), switches off. No-op outside a session. Safe to call from any exit (normal, leave, death,
- * revocation).
+ * The owner is joining the real world (BodyRoom.onJoin): their sandbox closes, and a sandbox body
+ * still in it (another window) is removed. The next sandbox starts again from the database.
  */
-export function endTestSession(room: BodyRoom, a: PlayerActor, why: string) {
-  a.adminMode = { fly: false, god: false, speed: false };
-  const t = a.adminTest;
-  if (!t) return;
-  delete a.adminTest;
-  const c = structuredClone(t.canonical);
-  c.pos = [a.state.x, a.state.y, a.state.z];
-  a.char = c;
-  a.state.level = c.level;
-  a.state.maxHp = maxHp(c.level);
-  a.state.hp = Math.max(1, Math.min(a.state.maxHp, a.state.hp));
-  room.equip(a, c.selected);
-  syncCosmetics(room, a);
-  a.youDirty = true;
-  log(a, `test session over (${why})`);
+export function endSandboxOf(userId: string, code: number = CLOSE.ELSEWHERE, reason = "playing in another window"): void {
+  const sb = closeSandbox(userId);
+  if (!sb) return;
+  runIn(sb, () => {
+    const e = hub.get(userId);
+    if (!e) return;
+    hub.release(userId, e.actor);
+    e.room.retire(e.actor, code, reason);
+  });
+  console.log(`[admin] ${userId.slice(0, 8)} sandbox closed`);
 }
 
 function log(a: PlayerActor, what: string) {
@@ -109,38 +109,37 @@ export class AdminModeSystem implements RoomSystem {
   tick(_dtMs: number, now: number) {
     const check = now >= this.nextCheck;
     if (check) this.nextCheck = now + ADMIN_RECHECK_MS;
-    for (const a of this.room.actors.values()) {
+    for (const a of [...this.room.actors.values()]) {
       if (!a.identity.admin) continue;
-      // Admin taken away (account table): switches and test session go at once.
+      // Admin taken away (account table): the switches go with it (and the sandbox, stillAdmin).
       if (check && !stillAdmin(this.room, a)) continue;
       // God mode: health stays full (combat already refuses damage; burns and heals can't dent it).
-      if (a.adminMode?.god && !a.dead && a.state.hp !== a.state.maxHp) a.state.hp = a.state.maxHp;
+      if (adminSwitch(a, "god") && !a.dead && a.state.hp !== a.state.maxHp) a.state.hp = a.state.maxHp;
     }
   }
 
   decorateYou(a: PlayerActor, you: YouState) {
     if (!a.identity.admin) return;
-    const m = a.adminMode;
-    you.adminMode = { fly: !!m?.fly, god: !!m?.god, speed: !!m?.speed, session: !!a.adminTest };
+    const sb = a.sandbox;
+    you.adminMode = sb
+      ? { fly: sb.switches.fly, god: sb.switches.god, speed: sb.switches.speed, sandbox: true, home: sb.home }
+      : { fly: false, god: false, speed: false, sandbox: false };
   }
 
   onAdmin(a: PlayerActor, cmd: string, args: Record<string, unknown>): boolean {
     if (cmd !== "adminmode") return false;
-    if (!stillAdmin(this.room, a)) return true;
-    if (args.action === "normal") {
-      endTestSession(this.room, a, "back to normal");
-      this.room.saveActor(a);
-      log(a, "back to normal");
-      a.youDirty = true;
+    // BodyRoom.admin asked stillAdmin just now.
+    const sb = this.room.sandbox;
+    if (!sb) {
+      if (args.action === "sandbox") this.toSandbox(a);
+      else a.client.send("denied", { action: "admin", reason: "sandbox only" }); // the real world never has test switches
       return true;
     }
-    // Any other admin-mode command starts (or continues) a test session.
-    a.adminTest ??= { canonical: structuredClone(a.char) };
-    const m = (a.adminMode ??= { fly: false, god: false, speed: false });
+    if (a.sandbox !== sb) return true;
     for (const k of ["fly", "god", "speed"] as const) {
-      if (typeof args[k] !== "boolean" || m[k] === args[k]) continue;
-      m[k] = args[k];
-      log(a, `${k} ${m[k] ? "on" : "off"}`);
+      if (typeof args[k] !== "boolean" || sb.switches[k] === args[k]) continue;
+      sb.switches[k] = args[k];
+      log(a, `sandbox: ${k} ${sb.switches[k] ? "on" : "off"}`);
     }
     if (args.action === "maxlevel") this.maxLevel(a);
     else if (args.action === "giveall") this.giveAll(a);
@@ -149,7 +148,22 @@ export class AdminModeSystem implements RoomSystem {
     return true;
   }
 
-  // The test kit changes the live character only: saves keep writing the canonical one.
+  /**
+   * The real world's half of entering a sandbox: alive and out of a fight (a sandbox is no way out of
+   * one), saved now, and leaving next is a handoff (no lingering body).
+   */
+  private toSandbox(a: PlayerActor) {
+    const now = Date.now();
+    const deny = (reason: string) => a.client.send("denied", { action: "sandbox", reason });
+    if (a.dead) return deny("respawn first");
+    if (now < a.combatUntil) return deny("in combat");
+    a.toSandboxUntil = now + 30_000;
+    this.room.saveActor(a);
+    a.client.send("sandbox", { home: this.room.bodyDef.id });
+    log(a, "to the sandbox");
+  }
+
+  // The test kit changes the sandbox's copy of the character only.
 
   private maxLevel(a: PlayerActor) {
     a.char.level = LEVEL_CAP;
@@ -157,7 +171,7 @@ export class AdminModeSystem implements RoomSystem {
     a.state.level = LEVEL_CAP;
     a.state.maxHp = maxHp(LEVEL_CAP);
     a.state.hp = a.state.maxHp;
-    log(a, "max level");
+    log(a, "sandbox: max level");
   }
 
   /** Fill the hotbar and backpack with one of every usable item; the rest stay one click away (hand). */
@@ -173,7 +187,7 @@ export class AdminModeSystem implements RoomSystem {
     c.worn = {};
     this.room.equip(a, Math.min(c.selected, HOTBAR_SLOTS - 1));
     syncCosmetics(this.room, a);
-    log(a, `every item (${Math.min(items.length, slots)} of ${items.length})`);
+    log(a, `sandbox: every item (${Math.min(items.length, slots)} of ${items.length})`);
   }
 
   private hand(a: PlayerActor, id: string, tierIn: number) {
@@ -192,7 +206,7 @@ export class AdminModeSystem implements RoomSystem {
       this.room.equip(a, c.selected);
     }
     syncCosmetics(this.room, a);
-    log(a, `hand ${id}${cosmetic ? "" : ` ${tierIn}`}`);
+    log(a, `sandbox: hand ${id}${cosmetic ? "" : ` ${tierIn}`}`);
   }
 }
 

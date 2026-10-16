@@ -22,14 +22,19 @@ import type { BodyRoom } from "./BodyRoom.ts";
 import { onGameEvent } from "./events.ts";
 import type { V3 } from "./geometry.ts";
 import type { RoomSystem } from "./systems.ts";
+import { sandboxed } from "../sandbox.ts";
 
 /**
  * Account timers at process level, so a copy switch, a body hop or a recreated room doesn't reset
  * them (F12 review S2). A server restart does (they are short).
  */
+const bubbleReady = sandboxed(new Map<string, number>(), () => new Map<string, number>());
+/** Account timers; an admin sandbox has its own (D-admin-3). */
 export const SUPPORT_TIMERS = {
   /** Account id → when the Prism Bubble can be deployed again. */
-  bubbleReady: new Map<string, number>(),
+  get bubbleReady(): Map<string, number> {
+    return bubbleReady.current;
+  },
 };
 
 export const SUPPORT = {

@@ -27,7 +27,8 @@ import { emitGameEvent, npcKindOf } from "./events.ts";
 import { emitPileEvent, onPileEvent, pileStore, type PileData, type PileKind } from "./piles.ts";
 import { SYSTEM_FACTORIES, type RoomSystem } from "./systems.ts";
 import { voiceItemHidden } from "./voice/index.ts";
-import { endTestSession, inTestSession, stillAdmin } from "./adminMode.ts";
+import { endSandboxOf, identityIsAdmin, stillAdmin } from "./adminMode.ts";
+import { currentSandbox, runIn, sandboxOf, sandboxRoomClosed, sandboxRoomOpened, type Sandbox } from "../sandbox.ts";
 import { supportOf } from "./support.ts";
 import { identityCheck, storageRecovery, ticketFor, travelRedirect } from "./admission.ts";
 import { pendingSeats } from "./reservations.ts";
@@ -41,12 +42,16 @@ export interface BodyRoomOptions {
   body: BodyId;
   copy: number;
   loadtest?: boolean;
+  /** An admin sandbox room (D-admin-3): the owner's user id; their sandbox must be open. */
+  sandbox?: string;
 }
 
 export interface BodyRoomMetadata {
   body: BodyId;
   copy: number;
   loadtest: boolean;
+  /** The owner of an admin sandbox room; public matchmaking never picks one. */
+  sandbox?: string;
 }
 
 /** Join options forwarded from /api/play for brand-new characters. */
@@ -94,6 +99,9 @@ accountLinks.on((ev) => {
   pendingSeats.invalidate(ev.fromUserId); // seats reserved as the guest are void
   hub.retireAll(CLOSE.MERGED, "account merged, rejoin", ev.fromUserId);
   hub.retireAll(CLOSE.ELSEWHERE, "signed in elsewhere", ev.toUserId);
+  // Sandboxes (D-admin-3) hold copies under the old ids: they close too (nothing in them is saved).
+  endSandboxOf(ev.fromUserId, CLOSE.MERGED, "account merged, rejoin");
+  endSandboxOf(ev.toUserId, CLOSE.ELSEWHERE, "signed in elsewhere");
 });
 
 /** Last PvP kill time per killer>victim account pair (repeat kills within 10 min give 10% XP). */
@@ -130,6 +138,28 @@ const BAD_MESSAGE_LIMIT = 20;
 
 type MessageSchema = { safeParse(v: unknown): { success: boolean; data?: unknown } };
 
+/**
+ * Every method of a sandbox room runs inside its sandbox (D-admin-3, sandbox.ts), whoever calls it:
+ * Colyseus (onJoin, onLeave, onDispose…), the room itself, or another room (a takeover, moderation).
+ * Message handlers and the tick get the same through guardMessages and the timers create() starts.
+ */
+function scopeTo(room: BodyRoom, sb: Sandbox) {
+  const self = room as unknown as Record<string, unknown>;
+  const names = new Set<string>();
+  for (let proto = Object.getPrototypeOf(room) as object | null; proto && proto !== Room.prototype; proto = Object.getPrototypeOf(proto) as object | null) {
+    for (const name of Object.getOwnPropertyNames(proto)) {
+      if (name !== "constructor" && typeof Object.getOwnPropertyDescriptor(proto, name)?.value === "function") names.add(name);
+    }
+  }
+  // What the instance calls now: Colyseus has already wrapped onJoin, onLeave… on the instance itself.
+  for (const name of names) {
+    const fn = self[name] as (...args: unknown[]) => unknown;
+    self[name] = function (this: unknown, ...args: unknown[]) {
+      return runIn(sb, () => fn.apply(this, args));
+    };
+  }
+}
+
 const CLIENT_ANIMS: ReadonlySet<number> = new Set([ANIM.IDLE, ANIM.WALK, ANIM.RUN, ANIM.SPRINT, ANIM.JUMP, ANIM.FALL, ANIM.SWIM, ANIM.DODGE, ANIM.ATTACK, ANIM.HEAVY, ANIM.BLOCK, ANIM.AIM, ANIM.CAST, ANIM.EMOTE]);
 
 export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadata }> implements HubRoom {
@@ -155,6 +185,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   private structures: StructureCollider | null = null;
   systems: RoomSystem[] = [];
   portals: PortalSpot[] = [];
+  /** An admin sandbox room (D-admin-3): only its owner gets in, and nothing in it is saved. */
+  sandbox: Sandbox | null = null;
 
   static async onAuth(): Promise<unknown> {
     throw new ServerError(403, "join through /api/play");
@@ -171,16 +203,22 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   private guardMessages() {
     const register = this.onMessage.bind(this) as unknown as (type: string, ...rest: unknown[]) => () => void;
     const guarded = (type: string, a: unknown, b?: unknown): (() => void) => {
-      if (type === "*") return b === undefined ? register(type, a) : register(type, a, b);
+      if (type === "*") {
+        const h = (b ?? a) as (...args: unknown[]) => unknown;
+        const scoped = (...args: unknown[]) => (this.sandbox ? runIn(this.sandbox, () => h(...args)) : h(...args));
+        return b === undefined ? register(type, scoped) : register(type, a, scoped);
+      }
       const schema = typeof b === "function" ? (a as MessageSchema) : undefined;
       const handler = (typeof b === "function" ? b : a) as (c: Client, m: unknown, ...rest: unknown[]) => unknown;
-      return register(type, (c: Client, raw: unknown, ...rest: unknown[]) => {
+      const handle = (c: Client, raw: unknown, rest: unknown[]) => {
         if (!this.withinRate(c.sessionId, type)) return;
         if (!schema) return handler(c, raw, ...rest);
         const r = schema.safeParse(raw);
         if (!r.success) return this.badMessage(c);
         return handler(c, r.data, ...rest);
-      });
+      };
+      // A sandbox room's messages run inside its sandbox (D-admin-3).
+      return register(type, (c: Client, raw: unknown, ...rest: unknown[]) => (this.sandbox ? runIn(this.sandbox, () => handle(c, raw, rest)) : handle(c, raw, rest)));
     };
     (this as unknown as { onMessage: typeof guarded }).onMessage = guarded;
   }
@@ -210,6 +248,18 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   }
 
   onCreate(options: BodyRoomOptions) {
+    if (options.sandbox) {
+      // /api/play opened the sandbox; from here on everything this room does runs inside it.
+      const sb = sandboxOf(options.sandbox);
+      if (!sb) throw new ServerError(403, "no sandbox");
+      this.sandbox = sb;
+      sandboxRoomOpened(sb);
+      scopeTo(this, sb);
+    }
+    this.create(options);
+  }
+
+  private create(options: BodyRoomOptions) {
     this.guardMessages();
     // The client consumes its seat right after /api/play; short reservations stop seat hoarding.
     this.seatReservationTimeout = 8;
@@ -238,7 +288,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     };
     this.state.body = options.body;
     this.state.copy = options.copy;
-    void this.setMetadata({ body: options.body, copy: options.copy, loadtest: !!options.loadtest });
+    void this.setMetadata({ body: options.body, copy: options.copy, loadtest: !!options.loadtest, ...(options.sandbox ? { sandbox: options.sandbox } : {}) });
 
     const room = this;
     this.host = {
@@ -345,6 +395,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
   /** Each system and each player on its own: one failure doesn't stop the rest (F12 final Opus nit). */
   onDispose() {
+    if (this.sandbox) sandboxRoomClosed(this.sandbox);
     this.unsubscribePiles?.();
     for (const s of this.systems) this.guarded("dispose", () => s.dispose?.());
     for (const a of this.actors.values()) this.guarded("final leave", () => this.finalLeave(a));
@@ -380,6 +431,10 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     // A reservation is checked again when it is used (F12 B5): before any takeover happens.
     const refusal = this.seatRefusal(client.sessionId, auth, now);
     if (refusal) throw new ServerError(403, refusal);
+    // A sandbox is its owner's alone, and only while they are an admin (D-admin-3). Joining the real
+    // world closes the owner's sandbox (a sandbox body still in it, in another window, goes).
+    if (this.sandbox && (auth.userId !== this.sandbox.owner || !identityIsAdmin(auth))) throw new ServerError(403, "private sandbox");
+    if (!this.sandbox) endSandboxOf(auth.userId);
     // One authoritative character per user: take over a live, dropped or lingering actor anywhere.
     let char: CharacterData | null = null;
     let inheritedCombat = false;
@@ -387,8 +442,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     const prev = hub.get(auth.userId);
     const old = prev?.actor ?? null;
     if (prev) {
-      // The saved character, not a test session's live one (D-admin-2): a takeover ends the session.
-      char = prev.actor.adminTest ? structuredClone(prev.actor.adminTest.canonical) : prev.actor.char;
+      char = prev.actor.char;
       inheritedCombat = prev.actor.combatUntil > now && !prev.actor.dead;
       if (prev.actor.state && !prev.actor.dead) inheritedPos = [prev.actor.state.x, prev.actor.state.y, prev.actor.state.z];
       prev.room.saveActor(prev.actor);
@@ -460,6 +514,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       specialReadyAt: 0,
       lastPhraseAt: 0,
       healAcc: 0,
+      ...(this.sandbox ? { sandbox: this.sandbox } : {}),
     };
     if (old) {
       const carried = a as unknown as Record<string, unknown>, from = old as unknown as Record<string, unknown>;
@@ -530,9 +585,10 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     // Safe zones and portal handoffs only skip the linger out of combat (F12 B3, SPEC §5.6).
     const calm = now >= a.combatUntil;
     const safe = isSafe(this.bodyDef, a.state.x, a.state.y, a.state.z);
-    const handoff = !!a.char.travelTo && ticketFor(a.char, a.char.travelTo, now) && portalNear(this.portals, a.state.x, a.state.y, a.state.z)?.to === a.char.travelTo;
+    const handoff = (a.toSandboxUntil ?? 0) > now || (!!a.char.travelTo && ticketFor(a.char, a.char.travelTo, now) && portalNear(this.portals, a.state.x, a.state.y, a.state.z)?.to === a.char.travelTo);
     const dropped = code !== CloseCode.CONSENTED; // the 30 s reconnection window already elapsed
-    if (a.dead || a.loggedOut || dropped || this.shuttingDown || (calm && (safe || handoff))) {
+    // Nothing can catch a sandbox body (and nothing about it is saved): it goes at once.
+    if (a.dead || a.loggedOut || dropped || this.shuttingDown || this.sandbox || (calm && (safe || handoff))) {
       this.finalLeave(a);
       this.state.players.delete(client.sessionId);
       return;
@@ -556,9 +612,6 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     this.msgWindows.delete(a.id);
     this.badMessages.delete(a.id);
     liveSessions.unregister(a.identity.userId, a.id);
-    // Leaving this world (travel, closing the game, another window, a merge, a kick) ends an admin
-    // test session: whatever stays behind (a lingering body, the last save) is the real character.
-    if (a.adminTest) endTestSession(this, a, "left");
     for (const s of this.systems) {
       try {
         s.onPlayerLeave?.(a.id);
@@ -798,8 +851,6 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
   pickup(a: PlayerActor | undefined, pileId: string, itemIndex?: number) {
     if (!a || a.dead || a.identity.loadtest || this.metadata?.loadtest) return;
-    // A test session takes nothing from the world (it would vanish at Back to normal; D-admin-2).
-    if (inTestSession(a)) return void a.client.send("denied", { action: "pickup", reason: "test session" });
     const pile = pileStore.current.get(pileId);
     if (!pile || pile.body !== this.bodyDef.id) return;
     if (dist3([pile.x, pile.y, pile.z], actorPos(a)) > RULES.PICKUP_RANGE) return;
@@ -847,8 +898,6 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (!item) return;
     // The radio is hidden while voice is off: it never lands on the ground (D-controls-1).
     if (voiceItemHidden(item.id)) return void a.client.send("denied", { action: "drop", reason: "off" });
-    // Nothing from a test session reaches the world (D-admin-2).
-    if (inTestSession(a)) return void a.client.send("denied", { action: "drop", reason: "test session" });
     const pos = actorPos(a);
     const f: V3 = [a.state.fx, a.state.fy, a.state.fz];
     const events: (() => void)[] = [];
@@ -899,7 +948,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
    * count toward the body's cap (F12 final Opus SF4).
    */
   createPile(owner: PlayerActor, items: InvItem[], coins: number, at: V3, deferred?: (() => void)[], opts: { kind?: PileKind; ttlMs?: number } = {}): PileData | null {
-    if (owner.identity.loadtest || this.metadata?.loadtest || inTestSession(owner)) return null;
+    if (owner.identity.loadtest || this.metadata?.loadtest) return null;
     const g = this.snapToGround(at);
     const { pile, evicted } = pileStore.current.add({
       body: this.bodyDef.id,
@@ -968,19 +1017,6 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   }
 
   kill(victim: PlayerActor, killer: PlayerActor | NpcActor | null) {
-    // Dying in a test session isn't a death: no pile, no lost life; the saved character comes back
-    // at full health where it stands (D-admin-2).
-    if (inTestSession(victim)) {
-      endTestSession(this, victim, "died");
-      victim.state.hp = victim.state.maxHp;
-      // Whatever was killing it (a burn) stops, and the usual moment of protection follows.
-      victim.burn = null;
-      victim.protectedUntil = Date.now() + RULES.PROTECT_MS;
-      victim.state.flags |= PF.PROTECTED;
-      victim.client.send("toast", { text: "Test session over: you'd have died. Back to normal, nothing lost.", kind: "warn" });
-      this.saveActor(victim);
-      return;
-    }
     const now = Date.now();
     victim.dead = true;
     victim.diedAt = now;
@@ -1198,6 +1234,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
         break;
       }
       case "announce":
+        // To every room: not from a sandbox, which only reaches itself (D-admin-3).
+        if (this.sandbox) return void client.send("denied", { action: "admin", reason: "not from a sandbox" });
         this.presence.publish("announce", String(args.text ?? "").slice(0, 200));
         this.broadcast("announce", { text: String(args.text ?? "").slice(0, 200) });
         break;
@@ -1334,14 +1372,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
   saveActor(a: PlayerActor) {
     if (a.superseded || a.identity.loadtest) return;
-    // A test session saves the character it started from, standing on the ground where the tester
-    // is (never the live, boosted one; D-admin-2).
-    if (a.adminTest) {
-      const c = a.adminTest.canonical;
-      if (!a.dead) c.pos = this.snapToGround([a.state.x, a.state.y, a.state.z]);
-      characterRepo.current.save(a.identity.userId, c);
-      return;
-    }
+    // Defence in depth (D-admin-3): a sandbox's character is saved into its sandbox only. Calls into a
+    // sandbox room run inside it (scopeTo), so this never trips unless something bypasses that.
+    if (a.sandbox && currentSandbox() !== a.sandbox) return void console.error(`[sandbox] refused to save ${a.identity.userId.slice(0, 8)} outside its sandbox`);
     if (!a.dead) a.char.pos = [a.state.x, a.state.y, a.state.z];
     // Inside a reward transaction the character may be levels ahead of the synced state, whose HP
     // rises only after the commit (showLevel). Save the HP it will show, so a crash in between
