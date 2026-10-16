@@ -5,7 +5,7 @@
 // D-zones-3, D44); refused steps slide sideways, and among structures the NPC follows the obstacle
 // round. An NPC that still can't get at its target falls back to D36 (evade after 5 s: brain.ts).
 
-import { nearSafeZone, padDirs, type BodyDef, type Dir, type Terrain } from "@firstlight/shared";
+import { natureSolids, nearSafeZone, padDirs, type BodyDef, type Dir, type NatureSolids, type Terrain } from "@firstlight/shared";
 import { structureCollider, type ColliderBody, type StructureCollider } from "@firstlight/shared/planet/sites";
 import type { Locomotion } from "@firstlight/shared/content/npcs";
 import { NPC_RULES } from "@firstlight/shared/content/npcs";
@@ -23,6 +23,11 @@ export interface Ground {
    * crates, trees and towers outside the walls and round a planet outpost's buildings.
    */
   structures: StructureCollider | null;
+  /**
+   * Tree trunks, boulders, spires and big rocks (D-solid-1): NPCs up to NATURE_NPC_RADIUS wide walk
+   * round them; bigger beasts and bosses push through the undergrowth as before.
+   */
+  nature: NatureSolids;
   /** Follow obstacles everywhere (Portus: its wild land rings the town), not only near a structure. */
   followAll: boolean;
 }
@@ -31,7 +36,15 @@ export function makeGround(terrain: Terrain): Ground {
   const body = terrain.body;
   const c = structureCollider(terrain);
   const hub = body.terrain.kind === "hub";
-  return { terrain, body, R: body.radius, water: body.waterLevel, pads: hub ? [] : padDirs(body), structures: c.solids.length > 0 ? c : null, followAll: hub };
+  return { terrain, body, R: body.radius, water: body.waterLevel, pads: hub ? [] : padDirs(body), structures: c.solids.length > 0 ? c : null, nature: natureSolids(terrain), followAll: hub };
+}
+
+/** NPCs at most this wide (m) are blocked by natural solids; bigger ones (beasts, bosses) aren't. */
+export const NATURE_NPC_RADIUS = 1.2;
+
+/** The natural solids an NPC of this radius walks round, or null. */
+function natureFor(g: Ground, radius: number): NatureSolids | null {
+  return radius <= NATURE_NPC_RADIUS ? g.nature : null;
 }
 
 /** An NPC's body for the structure queries (its own radius and height, the player's step band). */
@@ -39,9 +52,19 @@ export function npcBody(radius: number, height = 1.8): ColliderBody {
   return { radius, height, step: 0.35 };
 }
 
-/** Would moving straight from `a` to `b` walk this body into a structure? */
+/** Would moving straight from `a` to `b` walk this body into a structure (or, if it is small enough, a natural solid)? */
 export function blockedByStructure(g: Ground, a: V3, b: V3, body: ColliderBody): boolean {
-  return !!g.structures && g.structures.crosses(a[0], a[1], a[2], b[0], b[1], b[2], body);
+  if (g.structures && g.structures.crosses(a[0], a[1], a[2], b[0], b[1], b[2], body)) return true;
+  const wild = natureFor(g, body.radius);
+  return !!wild && wild.crosses(a[0], a[1], a[2], b[0], b[1], b[2], body);
+}
+
+/** Can this body stand at `p`: clear of structures and (if it is small enough) natural solids? */
+export function standsClear(g: Ground, p: V3, body: ColliderBody): boolean {
+  const q = { x: p[0], y: p[1], z: p[2] };
+  if (g.structures && !g.structures.isClear(q, body)) return false;
+  const wild = natureFor(g, body.radius);
+  return !wild || wild.isClear(q, body);
 }
 
 /**
@@ -49,11 +72,14 @@ export function blockedByStructure(g: Ground, a: V3, b: V3, body: ColliderBody):
  * clear spot on its medium, or `p` unchanged when nothing is there (or nowhere clear was found).
  */
 export function clearOfStructures(g: Ground, p: V3, loco: Locomotion, hover: number, body: ColliderBody): V3 {
-  if (!g.structures) return p;
+  const wild = natureFor(g, body.radius);
   const q = { x: p[0], y: p[1], z: p[2] };
-  if (g.structures.isClear(q, body)) return p;
+  if ((!g.structures || g.structures.isClear(q, body)) && (!wild || wild.isClear(q, body))) return p;
   const ground = (x: number, y: number, z: number) => g.R + (feetHeight(g, x, y, z, loco, hover) ?? g.terrain.groundHeight(x, y, z));
-  return g.structures.clearSpot(q, ground, body) ? [q.x, q.y, q.z] : p;
+  // Structures first, then the natural solids (D-solid-1), which stand ≥ 3 m off the structures.
+  if (g.structures && !g.structures.isClear(q, body) && !g.structures.clearSpot(q, ground, body)) return p;
+  if (wild && !wild.isClear(q, body) && !wild.clearSpot(q, ground, body)) return p;
+  return [q.x, q.y, q.z];
 }
 
 /** Max rise per metre walked (≈ 48°). */
@@ -104,7 +130,7 @@ let followed = false;
 /** The angle (degrees, + = the preferred side's turn) the last step() moved at for its return value `i`. */
 export function slideAngle(g: Ground, i: number, side = 1): number {
   if (i < 0) return 0;
-  return followed && g.structures ? FOLLOW[i]! * side : SLIDES[i]!;
+  return followed ? FOLLOW[i]! * side : SLIDES[i]!;
 }
 
 /**
@@ -131,8 +157,9 @@ export function step(g: Ground, pos: V3, t: V3, d: number, loco: Locomotion, hov
   // Already within the full margin (a chase brought it there): it may move about in it and out of it.
   const inMargin = avoidSafe === true && nearSafeRing(g, pos[0], pos[1], pos[2], margin);
   const walls = g.structures;
-  const body = walls ? npcBody(radius, height) : null;
-  followed = !!walls && (g.followAll || walls.near(pos[0], pos[1], pos[2], FOLLOW_NEAR + radius));
+  const wild = natureFor(g, radius);
+  const body = walls || wild ? npcBody(radius, height) : null;
+  followed = (!!walls && (g.followAll || walls.near(pos[0], pos[1], pos[2], FOLLOW_NEAR + radius))) || (!!wild && wild.near(pos[0], pos[1], pos[2], FOLLOW_NEAR + radius));
   const angles = followed ? FOLLOW : SLIDES;
   for (let i = 0; i < angles.length; i++) {
     const ang = followed ? angles[i]! * side : angles[i]!;
@@ -147,6 +174,8 @@ export function step(g: Ground, pos: V3, t: V3, d: number, loco: Locomotion, hov
     const r = g.R + fh;
     // Not through a structure (a step whose start is already inside one may leave it).
     if (walls && walls.crosses(pos[0], pos[1], pos[2], ux * r, uy * r, uz * r, body!)) continue;
+    // …nor through a tree trunk, a boulder or a spire (D-solid-1).
+    if (wild && wild.crosses(pos[0], pos[1], pos[2], ux * r, uy * r, uz * r, body!)) continue;
     out[0] = ux * r;
     out[1] = uy * r;
     out[2] = uz * r;

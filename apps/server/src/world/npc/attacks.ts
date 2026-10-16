@@ -8,7 +8,7 @@ import { wallBetween } from "../combat.ts";
 import { PLAYER_RADIUS, rayTerrain, type V3 } from "../geometry.ts";
 import type { LivePlayer, NpcSystem } from "./NpcSystem.ts";
 import { MODE, type ActiveAttack, type Npc } from "./npc.ts";
-import { blockedByStructure, CHASE_MARGIN, feetHeight, nearSafeRing, npcBody, step } from "./steer.ts";
+import { blockedByStructure, CHASE_MARGIN, feetHeight, nearSafeRing, npcBody, standsClear, step } from "./steer.ts";
 import { add, cross, dist, dot, flatDist, len, normalize, rotateAboutUp, scale, sub, tangentDir, up } from "./vec.ts";
 
 export interface NpcProjectile {
@@ -358,7 +358,7 @@ function resolve(sys: NpcSystem, n: Npc, at: ActiveAttack, now: number) {
           const to: V3 = [ux * r, uy * r, uz * r];
           // Never through or into a building (D44): the leap stops where it started.
           const body = npcBody(n.radius, n.height);
-          if (!blockedByStructure(sys.ground, n.pos, to, body) && (sys.ground.structures?.isClear({ x: to[0], y: to[1], z: to[2] }, body) ?? true)) n.pos = to;
+          if (!blockedByStructure(sys.ground, n.pos, to, body) && standsClear(sys.ground, to, body)) n.pos = to;
         }
       }
       hitAll(sys, n, playersInCircle(sys, n.pos, a.radius ?? 1.5), a, at);

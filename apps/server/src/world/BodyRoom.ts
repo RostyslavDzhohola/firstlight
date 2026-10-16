@@ -4,7 +4,7 @@
 
 import { CloseCode, Room, ServerError, type Client } from "@colyseus/core";
 import { StateView } from "@colyseus/schema";
-import { BODIES, createTerrain, isSafe, padDirs, portalNear, portalSpots, type BodyDef, type BodyId, type PortalSpot, type Terrain } from "@firstlight/shared";
+import { BODIES, createTerrain, isSafe, natureSolids, padDirs, portalNear, portalSpots, type BodyDef, type BodyId, type NatureSolids, type PortalSpot, type Terrain } from "@firstlight/shared";
 import { BACKPACK_SLOTS, HOTBAR_SLOTS, newCharacter, type CharacterData } from "@firstlight/shared/content/character";
 import { INV_SLOTS, moveSlot, storeItem } from "@firstlight/shared/content/inventory";
 import { fallDamageFraction, levelForXp, maxHp, pvpKillXp, xpAtLevel, xpToNext } from "@firstlight/shared/content/progression";
@@ -152,6 +152,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   moveWorld!: MoveWorld;
   /** The body's structure sites (Portus' town, a planet's pad outpost): block movement and placement (placeBody). */
   private structures: StructureCollider | null = null;
+  /** Natural solids (tree trunks, boulders, spires, big rocks; D-solid-1): movement and placement, not combat. */
+  private nature!: NatureSolids;
   systems: RoomSystem[] = [];
   portals: PortalSpot[] = [];
 
@@ -219,6 +221,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     // houses and towers, the same shared solids the client controller collides with; they count like
     // intact props (tops hold feet, insides refuse), stop shots and sight (host.walls, D43) and NPCs (D44).
     const structures = (this.structures = structureCollider(terrain));
+    const nature = (this.nature = natureSolids(terrain));
     const footing = { top: 0, inside: false };
     this.moveWorld = {
       radius: this.bodyDef.radius,
@@ -226,14 +229,22 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       groundAt: (x, y, z) => terrain.groundHeightAt(x, y, z),
       footing: (x, y, z, step) => {
         const props = this.host.props?.footing?.(x, y, z, step) ?? NO_FOOTING;
-        if (!structures) return props;
-        const town = structures.footing(x, y, z, step);
-        footing.top = Math.max(props.top, town.top);
-        footing.inside = props.inside || town.inside;
+        footing.top = props.top;
+        footing.inside = props.inside;
+        if (structures) {
+          const town = structures.footing(x, y, z, step);
+          footing.top = Math.max(footing.top, town.top);
+          footing.inside = footing.inside || town.inside;
+        }
+        // Tree trunks, boulders and spires (D-solid-1): solid like the structures.
+        const wild = nature.footing(x, y, z, step);
+        footing.top = Math.max(footing.top, wild.top);
+        footing.inside = footing.inside || wild.inside;
         return footing;
       },
       crosses: (ax, ay, az, bx, by, bz) =>
-        (this.host.props?.crosses?.(ax, ay, az, bx, by, bz) ?? false) || (structures?.crosses(ax, ay, az, bx, by, bz) ?? false),
+        (this.host.props?.crosses?.(ax, ay, az, bx, by, bz) ?? false) || (structures?.crosses(ax, ay, az, bx, by, bz) ?? false) ||
+        nature.crosses(ax, ay, az, bx, by, bz),
     };
     this.state.body = options.body;
     this.state.copy = options.copy;
@@ -1231,6 +1242,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       this.lastAoi = now;
       this.updateViews(false);
     }
+    this.warmNature();
     for (const a of this.actors.values()) if (a.youDirty || (a.youLazy && now - (a.lastYouAt ?? 0) >= YOU_LAZY_MS)) this.sendYou(a);
     if (now - this.lastSave > RULES.SAVE_EVERY_MS) {
       this.lastSave = now;
@@ -1261,6 +1273,24 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     a.peakRadius = len;
     groundMotion(a, len, now);
     if (frac > 0) dealDamage(this.host, null, a, frac * maxHp(a.char.level), false);
+  }
+
+  private warmTurn = 0;
+  /**
+   * Natural solids (D-solid-1) are built per terrain chunk on first use (1–2 ms each): build the ones
+   * round one player per tick ahead of time, at most one chunk, so a player running into new land
+   * doesn't make a tick pay for several at once.
+   */
+  private warmNature() {
+    const n = this.actors.size;
+    if (n === 0) return;
+    const turn = this.warmTurn++ % n;
+    let k = 0;
+    for (const a of this.actors.values()) {
+      if (k++ !== turn) continue;
+      this.nature.warm(a.state.x, a.state.y, a.state.z, 120, 1);
+      return;
+    }
   }
 
   /** Distance-based views for NPCs and piles (players are not view-filtered). */
@@ -1341,11 +1371,19 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
   /** `g` (on the ground) pushed out of the body's structures, or null if it stays inside one. */
   private clearOfStructures(g: V3): V3 | null {
-    if (!this.structures) return g;
     const q = { x: g[0], y: g[1], z: g[2] };
     const R = this.bodyDef.radius;
     const feetR = (x: number, y: number, z: number) => R + Math.max(this.terrain.groundHeight(x, y, z), this.bodyDef.waterLevel - SWIM_FLOAT) + 0.02;
-    return this.structures.clearSpot(q, feetR) ? [q.x, q.y, q.z] : null;
+    // Out of the structures and the natural solids (trees, boulders: D-solid-1), each pass clearing
+    // one and then the other until both agree (natural props stand ≥ 3 m off structures, so one or
+    // two passes do).
+    for (let pass = 0; pass < 3; pass++) {
+      if (this.structures && !this.structures.isClear(q) && !this.structures.clearSpot(q, feetR)) return null;
+      if (this.nature.isClear(q)) return [q.x, q.y, q.z];
+      if (!this.nature.clearSpot(q, feetR)) return null;
+      if (!this.structures || this.structures.isClear(q)) return [q.x, q.y, q.z];
+    }
+    return null;
   }
 
   /** A saved position worth restoring: finite, and not metres under the ground (F12 final Opus N-B1). */

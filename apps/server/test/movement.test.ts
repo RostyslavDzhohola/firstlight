@@ -3,7 +3,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Room } from "@colyseus/sdk";
-import { BODIES, createTerrain, padDirs } from "@firstlight/shared";
+import { BODIES, createTerrain, natureSolids, padDirs } from "@firstlight/shared";
 import type { Game } from "../src/app.ts";
 import { matchMaker } from "@colyseus/core";
 import type { BodyRoom } from "../src/world/BodyRoom.ts";
@@ -69,9 +69,16 @@ async function joinOutside(name: string, at?: V3): Promise<{ r: Room; dir: V3; t
   // 40 m east-north-east of the main pad: open, gently sloping ground (40 m due north is the Dawnpad
   // outpost's barn since D42, and the server puts teleports down clear of buildings).
   const n0 = tangent(pad), e0 = norm([n0[1] * pad[2] - n0[2] * pad[1], n0[2] * pad[0] - n0[0] * pad[2], n0[0] * pad[1] - n0[1] * pad[0]]);
-  const a = (75 * Math.PI) / 180;
-  const t0 = norm([n0[0] * Math.cos(a) + e0[0] * Math.sin(a), n0[1] * Math.cos(a) + e0[1] * Math.sin(a), n0[2] * Math.cos(a) + e0[2] * Math.sin(a)]);
-  const dir = at ?? walk(pad, t0, 40);
+  // 40 m out at the first bearing from 75° whose next 50 m north are dry and clear of tree trunks,
+  // rocks (D-solid-1) and the outpost: the tests walk straight lines from there along `tangent`.
+  let dir = at ?? null;
+  for (let k = 0; !dir && k < 24; k++) {
+    const a = ((75 + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 15) * Math.PI) / 180;
+    const t0 = norm([n0[0] * Math.cos(a) + e0[0] * Math.sin(a), n0[1] * Math.cos(a) + e0[1] * Math.sin(a), n0[2] * Math.cos(a) + e0[2] * Math.sin(a)]);
+    const start = walk(pad, t0, 40);
+    if (clearWalk(start, tangent(start), 50)) dir = start;
+  }
+  if (!dir) throw new Error("no clear spot to walk from");
   const h = Math.max(groundR(dir), R + BODY.waterLevel - 1.03); // swimmers float
   const p = [dir[0] * h, dir[1] * h, dir[2] * h];
   r.send("admin", { cmd: "teleport", args: { x: p[0], y: p[1], z: p[2] } });
@@ -81,6 +88,22 @@ async function joinOutside(name: string, at?: V3): Promise<{ r: Room; dir: V3; t
   await sleep(100);
   corrections.n = 0;
   return { r, dir: norm([me(r).x, me(r).y, me(r).z]), t: tangent(norm([me(r).x, me(r).y, me(r).z])), seq: { n: 10 }, corrections };
+}
+
+/** Is the straight walk of `metres` from `start` along `t` dry and clear of natural solids and structures? */
+function clearWalk(start: V3, t: V3, metres: number): boolean {
+  const tr = createTerrain(BODY);
+  const solids = natureSolids(tr), sites = structureCollider(tr);
+  let prev: V3 = [start[0] * groundR(start), start[1] * groundR(start), start[2] * groundR(start)];
+  for (let m = 1; m <= metres; m++) {
+    const d = walk(start, t, m);
+    if (tr.groundHeight(d[0], d[1], d[2]) < BODY.waterLevel + 0.5) return false;
+    const p: V3 = [d[0] * groundR(d), d[1] * groundR(d), d[2] * groundR(d)];
+    if (solids.crosses(prev[0], prev[1], prev[2], p[0], p[1], p[2]) || sites.crosses(prev[0], prev[1], prev[2], p[0], p[1], p[2])) return false;
+    if (!solids.isClear({ x: p[0], y: p[1], z: p[2] })) return false;
+    prev = p;
+  }
+  return true;
 }
 
 function send(r: Room, seq: { n: number }, dir: V3, radius: number, anim = 1, face: V3 = [0, 0, 1]) {
@@ -697,6 +720,7 @@ describe("sprinting over real terrain like the client (F12 Codex re-review S1)",
         if (g < def.waterLevel + 0.5) ok = false;
         const p: V3 = [d[0] * gR(d), d[1] * gR(d), d[2] * gR(d)];
         if (sys.list.some((b) => Math.hypot(b.px - p[0], b.py - p[1], b.pz - p[2]) < b.foot + 1.5)) ok = false;
+        if (ok && !natureSolids(tr).isClear({ x: p[0], y: p[1], z: p[2] })) ok = false; // trunks and rocks (D-solid-1)
         // ... and clear of the pad outpost's buildings (D42).
         if (!structureCollider(tr).isClear({ x: p[0], y: p[1], z: p[2] }, { radius: 1.5, height: 1.8, step: 0.35 })) ok = false;
         climb += Math.max(0, gR(d) - prev);
