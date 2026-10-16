@@ -17,7 +17,7 @@ import { TOWN_PREFABS } from "../content/portusTown.ts";
 
 export { townCoords, townDir, townFrame, TOWN_EAST, TOWN_NORTH, TOWN_UP, type TownPlacement } from "./townFrame.ts";
 export {
-  hallBoardPlacement, HALL_BOARD, HALL_STAND_SOLIDS, placeTownItem, StructureCollider, structureCollider, TOWN_BODY,
+  hallBoardPlacement, HALL_BOARD, HALL_STAND_SOLIDS, JUNO_COUNTER_ITEM, JUNO_COUNTER_SOLIDS, placeTownItem, StructureCollider, structureCollider, TOWN_BODY,
   type StructureSolid,
 } from "./sites.ts";
 
@@ -33,7 +33,7 @@ export function itemSolids(p: TownPlacement, out: StructureSolid[]): void {
 
 /**
  * Every structure solid of the town on `terrain` (empty off Portus): the layout's prefabs, then the
- * Hall of Firsts board's stand (item and prefab -1). Deterministic; cached per terrain.
+ * Hall of Firsts board's stand (item -1) and Juno's counter (item -2). Deterministic; cached per terrain.
  */
 export function townSolids(terrain: Terrain): readonly StructureSolid[] {
   return terrain.body.id === TOWN_BODY ? siteSolids(terrain) : [];

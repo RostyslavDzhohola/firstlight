@@ -7,7 +7,7 @@ import { bodyBreakables } from "./breakables.ts";
 import { emptyContact, PLAYER_BODY, type XYZ } from "./collide.ts";
 import { portalSpots } from "./portals.ts";
 import { createTerrain } from "./terrain.ts";
-import { hallBoardPlacement, HALL_STAND_SOLIDS, placeTownItem, structureCollider, townCoords, townDir, townPlacements, townSolids, TOWN_EAST, TOWN_NORTH, type StructureSolid } from "./town.ts";
+import { hallBoardPlacement, HALL_STAND_SOLIDS, JUNO_COUNTER_ITEM, placeTownItem, structureCollider, townCoords, townDir, townPlacements, townSolids, TOWN_EAST, TOWN_NORTH, type StructureSolid } from "./town.ts";
 
 const terrain = createTerrain("portus");
 const R = BODIES.portus.radius;
@@ -156,7 +156,12 @@ describe("Portus town structures (D38)", () => {
 
   it("keeps Juno's counter, the Hall wall and the dummies reachable from the spawn", () => {
     expect(walk([0, 0], [0, TOWN_FIXED.juno[1] - 1.6])).toBeNull();
-    expect(clearance(0, TOWN_FIXED.juno[1])).toBeGreaterThan(1);
+    // Room round Juno besides her own counter (D-solid-1), and the counter's front reachable.
+    expect(clearance(0, TOWN_FIXED.juno[1], (x) => x.item !== JUNO_COUNTER_ITEM)).toBeGreaterThan(1);
+    const counter = townSolids(terrain).filter((x) => x.item === JUNO_COUNTER_ITEM);
+    expect(counter).toHaveLength(1);
+    expect(walk([0, 0], [0, TOWN_FIXED.juno[1] - 2.0])).toBeNull();
+    expect(walk([0, TOWN_FIXED.juno[1] - 2.2], [0, TOWN_FIXED.juno[1]])).not.toBeNull(); // no walking through the counter
     // The Hall board stands clear of the hall and its steps (its own stand aside), and its front
     // can be walked up to from the spawn.
     const plaque = TOWN_FIXED.plaque;
