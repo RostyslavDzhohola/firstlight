@@ -9,6 +9,7 @@ import { z } from "zod";
 import type { BodyRoom } from "../world/BodyRoom.ts";
 import type { PlayerActor } from "../world/actors.ts";
 import type { RoomSystem } from "../world/systems.ts";
+import { sandboxBodyOf, stillAdmin } from "../world/adminMode.ts";
 import { trackClientInfo, trackJoin, trackLeave, trackTick } from "./analytics.ts";
 import { announceAll, applyVoiceMute, banAccount, kickUser, refusesReconnect, removePlayer, seatRefusal, setVoiceMuted } from "./moderation.ts";
 import { parties, type Party } from "./parties.ts";
@@ -225,6 +226,7 @@ export function createSocialSystem(room: BodyRoom): RoomSystem {
   room.onMessage("party", partySchema, (c, m) => {
     const me = actorOf(c);
     if (!me || me.identity.loadtest) return;
+    if (room.sandbox) return deny(c, "party", "not in a sandbox");
     const uid = me.identity.userId;
     switch (m.action) {
       case "invite": {
@@ -283,6 +285,7 @@ export function createSocialSystem(room: BodyRoom): RoomSystem {
   room.onMessage("social:block", blockSchema, (c, m) => {
     const me = actorOf(c);
     if (!me || me.identity.loadtest) return;
+    if (room.sandbox) return deny(c, "block", "not in a sandbox");
     const uid = me.identity.userId;
     const on = m.on ?? true;
     // Block someone who is playing (this copy or anywhere); unblock anyone on your list.
@@ -298,6 +301,7 @@ export function createSocialSystem(room: BodyRoom): RoomSystem {
   room.onMessage("report", reportSchema, (c, m) => {
     const me = actorOf(c);
     if (!me || me.identity.loadtest) return;
+    if (room.sandbox) return deny(c, "report", "not in a sandbox");
     const found = anywhere(m.target);
     // Only players you could have seen or heard: in this copy, or in one you shared in the last 10 minutes.
     if (!found || (found.room !== room && !sharedCopyRecently(me.identity.userId, found.actor.identity.userId))) return deny(c, "report", "player not found");
@@ -321,7 +325,7 @@ export function createSocialSystem(room: BodyRoom): RoomSystem {
   room.onMessage("client:info", infoSchema, (c, m) => {
     const me = actorOf(c);
     if (!me) return;
-    trackClientInfo(me.identity.userId, m.backend.toLowerCase(), m.tier.toLowerCase());
+    if (!room.sandbox) trackClientInfo(me.identity.userId, m.backend.toLowerCase(), m.tier.toLowerCase());
     // The client's social snapshot (its handlers are attached by now).
     c.send("party:state", partyState(parties.of(me.identity.userId)));
     c.send("social:blocked", { userIds: blockedBy(me.identity.userId) });
@@ -331,12 +335,18 @@ export function createSocialSystem(room: BodyRoom): RoomSystem {
   room.onMessage("mod", modSchema, (c, m) => {
     const me = actorOf(c);
     if (!me) return;
-    if (!me.identity.admin) return deny(c, "mod", "admins only");
+    // Asked of the account each time (fix 7): a revoked admin's next command is refused.
+    if (!stillAdmin(room, me)) return deny(c, "mod", "admins only");
+    // Moderation acts on the real world: not from a sandbox, where nothing is saved (D-admin-3).
+    if (room.sandbox) return deny(c, "mod", "not from a sandbox");
     if (m.action === "announce") {
       announceAll(m.text ?? "");
       return;
     }
-    const t = m.target ? anywhere(m.target) : null;
+    // An admin in their sandbox has no presence (D-admin-3): kicks and bans find them by account id
+    // through the sandbox registry, and moderation removes the body and closes the sandbox.
+    const sandboxed = m.action === "kick" || m.action === "ban" ? (target: string) => sandboxBodyOf(target) : () => null;
+    const t = m.target ? (anywhere(m.target) ?? sandboxed(m.target)) : null;
     if (!t) return deny(c, "mod", "player not found");
     const uid = t.actor.identity.userId;
     switch (m.action) {
@@ -378,6 +388,9 @@ export function createSocialSystem(room: BodyRoom): RoomSystem {
         removePlayer(room, a, refusal === "kicked" ? CLOSE.KICKED : CLOSE.BANNED, refusal === "kicked" ? "Removed by an admin" : "Banned by an admin");
         return;
       }
+      // An admin sandbox is private (D-admin-3): nobody else is there to see, party with or report, so
+      // the admin is offline to the real world meanwhile (no presence, party or play-session log).
+      if (room.sandbox) return void applyVoiceMute(a);
       sessionUser.set(sessionId, uid);
       stintStart(uid, room.roomId, sessionId);
       setPresence({ userId: uid, name: a.identity.name, room, sessionId, body: room.bodyDef.id });
@@ -416,6 +429,7 @@ export function createSocialSystem(room: BodyRoom): RoomSystem {
       sweep(now);
       for (const inv of parties.expire(now)) sendTo(inv.from, "party:invite-closed", { from: inv.from, to: inv.to, reason: "expired" });
       for (const a of room.actors.values()) {
+        if (room.sandbox) break;
         trackTick(a.identity.userId, now);
         // Members in other copies/bodies move: refresh positions for compass markers.
         const p = parties.of(a.identity.userId);

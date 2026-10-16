@@ -8,6 +8,7 @@ import type { BodyRoom } from "../BodyRoom.ts";
 import type { NpcActor, PlayerActor } from "../actors.ts";
 import type { CombatHost } from "../combat.ts";
 import { emitGameEvent } from "../events.ts";
+import { stillAdmin } from "../adminMode.ts";
 import { roomCopyKey } from "../copyState.ts";
 import type { V3 } from "../geometry.ts";
 
@@ -45,6 +46,8 @@ export interface NpcWorld {
   onMessage(type: string, handler: (sessionId: string, msg: unknown) => void): void;
   playerById(sessionId: string): PlayerActor | undefined;
   save(p: PlayerActor): void;
+  /** Still an admin, asked of the account now (adminMode.ts stillAdmin): before every admin NPC tool. */
+  stillAdmin(p: PlayerActor): boolean;
 }
 
 export function roomWorld(room: BodyRoom): NpcWorld {
@@ -80,12 +83,14 @@ export function roomWorld(room: BodyRoom): NpcWorld {
     // Lingering bodies too: NPC zaps, bursts and tags must be able to hit them (F12).
     playerById: (id) => room.playerById(id) ?? room.lingering.get(id)?.actor,
     save: (p) => room.saveActor(p),
+    stillAdmin: (p) => stillAdmin(room, p),
   };
 }
 
 /** Admin NPC tools (spawn, hurt, boss spawn/reset…) go on the room's event bus as `admin` actions. */
 function noteAdmin(room: BodyRoom, sessionId: string, msg: unknown) {
-  if (!room.actors.get(sessionId)?.identity.admin) return;
+  const a = room.actors.get(sessionId);
+  if (!a || !stillAdmin(room, a)) return;
   const m = (msg ?? {}) as Record<string, unknown>;
   emitGameEvent(room, {
     type: "admin", playerId: sessionId, cmd: `npc:${typeof m.cmd === "string" ? m.cmd : ""}`,

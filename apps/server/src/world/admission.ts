@@ -6,6 +6,7 @@ import type { CharacterData } from "@firstlight/shared/content/character";
 import type { Identity } from "../auth/identity.ts";
 import { characterRepo, withTx } from "./characters.ts";
 import { hub } from "./hub.ts";
+import { currentSandbox } from "../sandbox.ts";
 
 /** Where brand-new characters (and rebirths) start. */
 export const HOME_BODY: BodyId = "portus";
@@ -81,12 +82,15 @@ function healthCheck(userId: string): { ok: boolean; wrote: boolean } {
 
 export const storageRecovery = {
   mark(userId: string, now = Date.now()): void {
+    if (currentSandbox()) return; // a sandbox saves nothing, so it can't fail to (D-admin-3)
     recovering.delete(userId); // a new failure moves the account to the newest end
     recovering.set(userId, now);
     sweep(now);
   },
   /** May the account play? True unless it (or a forgotten mark) needs a health check that fails. */
   ok(userId: string, now = Date.now()): boolean {
+    // A sandbox seat is checked in /api/play (outside); a health write from inside proves nothing.
+    if (currentSandbox()) return true;
     if (!recovering.size && !unverified) return true;
     sweep(now);
     if (!recovering.has(userId) && !unverified) return true;

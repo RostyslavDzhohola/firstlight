@@ -12,6 +12,7 @@ import { accountLinks } from "../../auth/links.ts";
 import { env } from "../../env.ts";
 import { actorPos, type PlayerActor } from "../actors.ts";
 import type { BodyRoom } from "../BodyRoom.ts";
+import { stillAdmin } from "../adminMode.ts";
 import { dist3 } from "../geometry.ts";
 import type { RoomSystem } from "../systems.ts";
 import { allowReport } from "../../social/limits.ts";
@@ -525,7 +526,7 @@ export class VoiceSystem implements RoomSystem {
   /** Admin: server-side voice mute for the account, stored in game.db (voice_mute): it survives restarts and deploys. */
   private adminMute(c: Client, m: unknown): void {
     const { a } = this.who(c);
-    if (!a || !a.identity.admin) return;
+    if (!a || !stillAdmin(this.room, a)) return;
     const r = voiceSchemas.mute.safeParse(m);
     if (!r.success) return;
     const t = this.room.actors.get(r.data.target);

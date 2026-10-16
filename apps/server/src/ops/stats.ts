@@ -19,7 +19,7 @@ function onlineNow(): { total: number; perBody: Record<string, number>; test: nu
   let total = 0;
   let test = 0;
   for (const r of liveRooms) {
-    if (r.metadata?.loadtest) continue;
+    if (r.metadata?.loadtest || r.metadata?.sandbox) continue; // admin sandboxes aren't play (D-admin-3)
     let n = 0;
     for (const a of r.actors.values()) {
       if (a.identity.loadtest) continue;

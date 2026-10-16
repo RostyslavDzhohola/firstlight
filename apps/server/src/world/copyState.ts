@@ -7,6 +7,7 @@
 
 import { loadCopyState, saveCopyState, type Db } from "../db/index.ts";
 import type { BodyRoom } from "./BodyRoom.ts";
+import { sandboxed } from "../sandbox.ts";
 
 export interface CopyStateStore {
   load<T>(copyKey: string, system: string): T | null;
@@ -42,8 +43,8 @@ export class SqliteCopyStateStore implements CopyStateStore {
   }
 }
 
-/** Process-wide store; main.ts installs the SQLite one at boot. */
-export const copyStateStore: { current: CopyStateStore } = { current: new MemoryCopyStateStore() };
+/** Process-wide store; main.ts installs the SQLite one at boot. A sandbox's copies start fresh, in memory. */
+export const copyStateStore = sandboxed<CopyStateStore>(new MemoryCopyStateStore(), () => new MemoryCopyStateStore());
 
 /** `body:copy`; load-test copies are numbered separately, so they get their own prefix. */
 export function copyKey(body: string, copy: number, loadtest = false): string {
@@ -51,7 +52,8 @@ export function copyKey(body: string, copy: number, loadtest = false): string {
 }
 
 export function roomCopyKey(room: BodyRoom): string {
-  return copyKey(room.bodyDef.id, room.state.copy, !!room.metadata?.loadtest);
+  const key = copyKey(room.bodyDef.id, room.state.copy, !!room.metadata?.loadtest);
+  return room.sandbox ? `sb:${key}` : key; // its own store anyway (D-admin-3); the prefix keeps logs plain
 }
 
 /**
@@ -74,16 +76,21 @@ interface PendingWrite {
  * succeeds this is the copy's state (loadCopy reads it), so restrictions keep holding and a new
  * room on the copy restores what the old one had. Dropped if another store is installed.
  */
-const pending = new Map<string, PendingWrite>();
-let pendingStore: CopyStateStore | null = null;
+interface Pending {
+  writes: Map<string, PendingWrite>;
+  store: CopyStateStore | null;
+}
+/** Per scope, like the store it retries for: a sandbox never sees (or drops) the real store's retries. */
+const pendingState = sandboxed<Pending>({ writes: new Map(), store: null }, () => ({ writes: new Map(), store: null }));
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
 function pendingWrites(): Map<string, PendingWrite> {
-  if (pendingStore !== copyStateStore.current) {
-    pending.clear();
-    pendingStore = copyStateStore.current;
+  const p = pendingState.current;
+  if (p.store !== copyStateStore.current) {
+    p.writes.clear();
+    p.store = copyStateStore.current;
   }
-  return pending;
+  return p.writes;
 }
 
 /** Load without letting a broken row stop a room from opening. A write still being retried wins. */
@@ -136,6 +143,7 @@ export function retryCopySaves(): void {
 function scheduleRetry() {
   if (retryTimer) clearTimeout(retryTimer);
   retryTimer = null;
+  const pending = pendingWrites();
   if (!pending.size) return;
   let next = Infinity;
   for (const p of pending.values()) next = Math.min(next, p.retryAt);

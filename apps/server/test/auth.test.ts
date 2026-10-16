@@ -1,6 +1,7 @@
 // Seam 1: accounts over HTTP + SDK against the real server (Better Auth, game.db, /api/play).
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { randomBytes } from "node:crypto";
 import type { Room } from "@colyseus/sdk";
 import { awardMedal, discoverPad, getAccount, loadCharacter, saveCharacter, type CharacterData } from "../src/db/index.ts";
 import { otpSendsToday } from "../src/db/otp-budget.ts";
@@ -330,57 +331,114 @@ describe("display names", () => {
 });
 
 describe("admin claim", () => {
-  it("works once, while signed in, and the burnt state survives a restart", async () => {
+  // Strong enough to be honoured (D-admin-2: at least 32 random bytes); each test gets its own.
+  const strong = () => randomBytes(32).toString("base64");
+  /** The claim form's POST, as the browser sends it from the game's page. */
+  const post = (b: Browser, token: string, headers: Record<string, string> = {}) =>
+    b.fetch("/admin/claim", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", ...headers }, body: new URLSearchParams({ token }).toString() });
+
+  it("a guest (the owner before email sign-in works) claims through the form; the code works once", async () => {
+    const TOKEN = strong();
     server = await startAuthServer({
-      adminClaimToken: "claim-me-once",
+      adminClaimToken: TOKEN,
+      extraRoutes: (app, a) => app.get("/admin/ping", a.requireAdmin, (_req, res) => void res.json({ ok: true })),
+    });
+    const owner = new Browser(server);
+    const guestToken = await owner.playToken();
+    expect((await api(server, "/api/account/me", guestToken)).json.guest).toBe(true);
+    const form = await owner.fetch("/admin/claim");
+    expect(form.status).toBe(200);
+    expect(form.headers.get("referrer-policy")).toBe("same-origin");
+    const html = await form.text();
+    expect(html).toContain('method="post"');
+    expect(html).not.toContain(TOKEN); // the page never carries the code
+    expect((await post(owner, "wrong")).status).toBe(403);
+    expect((await api(server, "/admin/ping", guestToken)).status).toBe(403);
+    const ok = await post(owner, TOKEN);
+    expect(ok.status).toBe(200);
+    expect(await ok.text()).toMatch(/now an admin.*guest character/s);
+    expect((await api(server, "/admin/ping", guestToken)).status).toBe(200);
+    expect((await api(server, "/api/account/me", guestToken)).json.admin).toBe(true);
+    // Burnt: nobody else, and not the same code again.
+    const other = new Browser(server);
+    await other.playToken();
+    expect((await post(other, TOKEN)).status).toBe(410);
+  });
+
+  it("works for a saved account too, and the burnt state survives a restart", async () => {
+    const TOKEN = strong();
+    server = await startAuthServer({
+      adminClaimToken: TOKEN,
       extraRoutes: (app, a) => app.get("/admin/ping", a.requireAdmin, (_req, res) => void res.json({ ok: true })),
     });
     const owner = new Browser(server);
     await owner.playToken();
-    expect((await owner.fetch("/admin/claim?token=claim-me-once")).status).toBe(403); // guests can't claim
     await owner.saveWithEmail("owner@example.test");
     const ownerToken = (await owner.client.token()).data!.token;
     expect((await api(server, "/admin/ping", ownerToken)).status).toBe(403);
-
-    expect((await api(server, "/admin/claim?token=claim-me-once", null)).status).toBe(401);
-    expect((await owner.fetch("/admin/claim?token=wrong")).status).toBe(403);
-    const claim = await owner.fetch("/admin/claim?token=claim-me-once");
-    expect(claim.status).toBe(200);
-    expect(await claim.text()).toContain("now an admin");
-
+    expect((await post(owner, TOKEN)).status).toBe(200);
     expect((await api(server, "/admin/ping", ownerToken)).status).toBe(200);
     expect((await owner.fetch("/admin/ping")).status).toBe(200); // session cookie works too
-    expect((await api(server, "/api/account/me", ownerToken)).json.admin).toBe(true);
-
-    const other = new Browser(server);
-    await other.playToken();
-    await other.saveWithEmail("other@example.test");
-    const otherToken = (await other.client.token()).data!.token;
-    expect((await other.fetch("/admin/claim?token=claim-me-once")).status).toBe(410);
-    expect((await api(server, "/admin/ping", otherToken)).status).toBe(403);
-    expect((await api(server, "/admin/ping", null)).status).toBe(401);
-
-    // restart on the same files: still burnt, admin kept
     const dir = server.dir;
     await server.close(true);
-    server = await startAuthServer({ dir, adminClaimToken: "claim-me-once" });
+    server = await startAuthServer({ dir, adminClaimToken: TOKEN });
     const third = new Browser(server);
     await third.playToken();
-    expect((await third.fetch("/admin/claim?token=claim-me-once")).status).toBe(410);
+    expect((await post(third, TOKEN)).status).toBe(410);
     expect((await api(server, "/api/account/me", ownerToken)).json.admin).toBe(true);
   });
 
-  it("an admin keeps admin after a fresh sign-in on another browser", async () => {
-    server = await startAuthServer({ adminClaimToken: "tok" });
+  it("only the POST claims: a ?token= link shows the form and claims nothing", async () => {
+    const TOKEN = strong();
+    server = await startAuthServer({ adminClaimToken: TOKEN });
     const b = new Browser(server);
-    await b.playToken();
-    await b.saveWithEmail("owner@example.test");
-    expect((await b.fetch("/admin/claim?token=tok")).status).toBe(200);
-    const c = new Browser(server);
-    await c.playToken();
-    await c.saveWithEmail("owner@example.test");
-    const t = (await c.client.token()).data!.token;
-    expect((await api(server, "/api/account/me", t)).json).toMatchObject({ admin: true, guest: false });
+    const t = await b.playToken();
+    const res = await b.fetch(`/admin/claim?token=${encodeURIComponent(TOKEN)}`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("<form");
+    expect((await api(server, "/api/account/me", t)).json.admin).toBe(false);
+  });
+
+  it("refuses a POST from another site, and without the proxy's origin secret when one is set", async () => {
+    const TOKEN = strong();
+    server = await startAuthServer({ adminClaimToken: TOKEN, originSecret: "proxy-secret-for-tests" });
+    const b = new Browser(server);
+    const t = await b.playToken();
+    // Another site's page posting with this browser's cookie (Browser.fetch would set our origin).
+    const cookie = [...(b as unknown as { cookies: Map<string, string> }).cookies].map(([k, v]) => `${k}=${v}`).join("; ");
+    const evil = await fetch(new URL("/admin/claim", server.base), {
+      method: "POST",
+      headers: { cookie, origin: "https://evil.example", "x-origin-secret": "proxy-secret-for-tests", "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ token: TOKEN }).toString(),
+    });
+    expect(evil.status).toBe(403);
+    expect((await post(b, TOKEN)).status).toBe(403); // no x-origin-secret: not through the proxy
+    expect((await api(server, "/api/account/me", t)).json.admin).toBe(false);
+    expect((await post(b, TOKEN, { "x-origin-secret": "proxy-secret-for-tests" })).status).toBe(200);
+  });
+
+  it("limits attempts per client before comparing: the 6th try from one address is refused, even with the right code", async () => {
+    const TOKEN = strong();
+    server = await startAuthServer({ adminClaimToken: TOKEN });
+    const b = new Browser(server);
+    const t = await b.playToken();
+    for (let i = 0; i < 5; i++) expect((await post(b, "guess-" + i)).status).toBe(403);
+    expect((await post(b, TOKEN)).status).toBe(429);
+    expect((await api(server, "/api/account/me", t)).json.admin).toBe(false);
+  });
+
+  it("a short ADMIN_CLAIM_TOKEN switches the claim off", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      server = await startAuthServer({ adminClaimToken: "claim-me-once" });
+      expect(warn.mock.calls.some((c) => String(c[0]).includes("too short"))).toBe(true);
+      const b = new Browser(server);
+      await b.playToken();
+      expect((await b.fetch("/admin/claim")).status).toBe(404);
+      expect((await post(b, "claim-me-once")).status).toBe(404);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

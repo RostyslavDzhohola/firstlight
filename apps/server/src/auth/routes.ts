@@ -2,20 +2,21 @@
 //   GET  /api/account/me         Bearer JWT → account summary (display name, guest, admin, character, medals, pads)
 //   POST /api/account/name       Bearer JWT, {name} → set the display name (unique, filtered)
 //   GET  /api/account/save-status  public → {saving: "ok" | "busy" | "unavailable"}: can sign-in codes go out?
-//   GET  /admin/claim?token=…    session cookie or Bearer → make this account admin, burn the token
+//   GET  /admin/claim            a form → POST /admin/claim {token}: this browser's account (guest or
+//                                saved) becomes admin, the token burns (POST only, rate-limited; D-admin-2)
 //   POST /api/test/bot-token     x-loadtest-secret → a loadtest play token (only when LOADTEST_SECRET is set)
 
 import { randomUUID } from "node:crypto";
 import { STARTERS, starterLook } from "@firstlight/shared/content/weapons";
 import { fromNodeHeaders } from "better-auth/node";
-import type { Express, NextFunction, Request, Response } from "express";
+import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import { claimAdmin, ensureAccount, getAccount, isBanned, isClaimBurnt, setDisplayName } from "../db/accounts.ts";
 import { listDiscoveredPads, listMedals, loadCharacter } from "../db/characters.ts";
 import { NAME_MESSAGES } from "../db/names.ts";
 import type { Accounts, AccountsConfig } from "./accounts.ts";
 import { safeEqual, sha256Hex } from "./crypto.ts";
 import type { Identity } from "./identity.ts";
-import { directRequestIp } from "./ip.ts";
+import { directRequestIp, firstForwardedFor } from "./ip.ts";
 
 /** mission_state_json → `life.playMs` (0 for older rows without per-life progress). */
 function lifePlayMs(ms: unknown): number {
@@ -122,37 +123,86 @@ export function mountAccountRoutes(app: Express, a: Accounts, cfg: AccountsConfi
     res.json({ ok: true, name: r.name });
   });
 
-  app.get("/admin/claim", noStore, async (req, res) => {
+  // One-time admin claim with the server's ADMIN_CLAIM_TOKEN, for the account playing in this browser
+  // (its session cookie, so it runs on the game origin through the proxy), guest or saved: the owner
+  // can't save with an email until mail works, and admins are never pruned as guests (prune.ts).
+  // POST only (D-admin-2): the code never rides in a URL; the request must come from the game's
+  // origin (and through the proxy, when an origin secret is set); attempts are limited per client IP
+  // and overall before any comparison; and a short token switches the claim off.
+  const claimToken = claimTokenStrong(cfg.adminClaimToken) ? cfg.adminClaimToken : "";
+  if (cfg.adminClaimToken && !claimToken) console.warn("[admin] ADMIN_CLAIM_TOKEN is too short (use 32 random bytes, e.g. `openssl rand -base64 32`): the admin claim is off");
+  const attempts = new ClaimLimiter();
+  const claimHeaders = (res: Response) => {
+    res.setHeader("Cache-Control", "no-store");
+    // No Referer leaves the site (the code never rides in a URL). Not "no-referrer": with it the
+    // browser sends `Origin: null` on the form's own POST, and the origin check below needs the origin.
+    res.setHeader("Referrer-Policy", "same-origin");
+    res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'");
+  };
+
+  app.get("/admin/claim", (_req, res) => {
+    claimHeaders(res);
+    if (!claimToken) {
+      res.status(404).type("text/plain").send("Not found.");
+      return;
+    }
+    res.type("html").send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>FIRSTLIGHT admin claim</title><body style="font:16px system-ui;max-width:32em;margin:3em auto;padding:0 1em">
+<h1 style="font-size:1.3em">Make this account an admin</h1>
+<p>Open this page in the browser you play in (the account playing there becomes the admin), paste the claim code and press Claim. The code works once.</p>
+<form method="post" action="/admin/claim"><input name="token" type="password" autocomplete="off" required style="font:inherit;width:100%;padding:.4em" placeholder="claim code">
+<p><button style="font:inherit;padding:.4em 1.2em">Claim</button></p></form></body>`);
+  });
+
+  app.post("/admin/claim", express.urlencoded({ extended: false, limit: "2kb" }), async (req, res) => {
+    claimHeaders(res);
     res.type("text/plain");
-    if (!cfg.adminClaimToken) {
+    if (!claimToken) {
       res.status(404).send("Not found.");
       return;
     }
-    const token = typeof req.query.token === "string" ? req.query.token : "";
-    if (!token || !safeEqual(token, cfg.adminClaimToken)) {
-      res.status(403).send("That claim link isn't valid.");
+    // Through the game origin's proxy (it adds the origin secret), from the game's own page.
+    if (cfg.originSecret) {
+      const got = req.headers["x-origin-secret"];
+      if (typeof got !== "string" || !safeEqual(got, cfg.originSecret)) {
+        res.status(403).send("Open this page on the game's site.");
+        return;
+      }
+    }
+    const origin = req.headers.origin;
+    if (typeof origin !== "string" || !cfg.trustedOrigins.includes(origin)) {
+      res.status(403).send("Open this page on the game's site.");
+      return;
+    }
+    const ip = (cfg.originSecret ? firstForwardedFor(req) : directRequestIp(req)) ?? "unknown";
+    if (!attempts.take(ip, Date.now())) {
+      res.status(429).send("Too many attempts. Try again later.");
+      return;
+    }
+    const token = typeof req.body?.token === "string" ? req.body.token.trim() : "";
+    if (!token || !safeEqual(token, claimToken)) {
+      res.status(403).send("That claim code isn't valid.");
       return;
     }
     const tokenHash = sha256Hex(token);
     if (isClaimBurnt(a.db, tokenHash)) {
-      res.status(410).send("This claim link was already used.");
+      res.status(410).send("This claim code was already used.");
       return;
     }
     const id = await identifyRequest(a, req);
     if (!id || id.loadtest) {
-      res.status(401).send("Play once in this browser (so you're signed in), then open this link again.");
-      return;
-    }
-    if (id.guest) {
-      res.status(403).send("Save your character with an email first (Esc → Save), then open this link again.");
+      res.status(401).send("Play once in this browser (so you're signed in), then open this page again.");
       return;
     }
     if (claimAdmin(a.db, tokenHash, id.userId) === "burnt") {
-      res.status(410).send("This claim link was already used.");
+      res.status(410).send("This claim code was already used.");
       return;
     }
-    console.log("admin claimed");
-    res.send(`Done. ${id.name} is now an admin.`);
+    console.log(`admin claimed${id.guest ? " (guest account)" : ""}`);
+    res.send(
+      `Done. ${id.name} is now an admin. Back in the game, rejoin (reload the page) and open the Esc menu: the Admin section is there.` +
+        (id.guest ? " This is a guest character: it lives in this browser. Save it with an email when you can to keep it anywhere." : ""),
+    );
   });
 
   app.post("/api/test/bot-token", noStore, async (req, res) => {
@@ -172,6 +222,35 @@ export function mountAccountRoutes(app: Express, a: Accounts, cfg: AccountsConfi
     const { token } = await a.auth.api.signJWT({ body: { payload: { sub: userId, name, guest: true, loadtest: true } } });
     res.json({ ok: true, token, userId, name });
   });
+}
+
+/** A claim token worth honouring: at least 32 random bytes' worth (43 base64 / 64 hex characters, ~256 bits). */
+export function claimTokenStrong(token: string): boolean {
+  return token.length >= 43 && new Set(token).size >= 12;
+}
+
+/** Admin-claim attempts: per client IP and overall, counted before any comparison (D-admin-2). */
+export class ClaimLimiter {
+  static readonly PER_IP = 5;
+  static readonly PER_IP_WINDOW_MS = 10 * 60_000;
+  static readonly GLOBAL = 30;
+  static readonly GLOBAL_WINDOW_MS = 60 * 60_000;
+  private readonly byIp = new Map<string, number[]>();
+  private all: number[] = [];
+
+  take(ip: string, now: number): boolean {
+    this.all = this.all.filter((t) => now - t < ClaimLimiter.GLOBAL_WINDOW_MS);
+    const mine = (this.byIp.get(ip) ?? []).filter((t) => now - t < ClaimLimiter.PER_IP_WINDOW_MS);
+    if (this.all.length >= ClaimLimiter.GLOBAL || mine.length >= ClaimLimiter.PER_IP) {
+      this.byIp.set(ip, mine);
+      return false;
+    }
+    mine.push(now);
+    this.all.push(now);
+    this.byIp.set(ip, mine);
+    if (this.byIp.size > 10_000) this.byIp.clear(); // a flood of addresses: the global cap still holds
+    return true;
+  }
 }
 
 /** The account's live character for /api/me: indexes the game uses everywhere (PlayerState.starter,

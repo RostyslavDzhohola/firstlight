@@ -5,6 +5,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import Database from "better-sqlite3";
 import { migrate } from "./schema.ts";
+import { refuseWrite } from "../sandbox.ts";
 
 export type Db = Database.Database;
 type Stmt = Database.Statement;
@@ -33,7 +34,11 @@ export function gameDb(): Db {
 
 const cache = new WeakMap<Db, Map<string, Stmt>>();
 
-/** Prepared-statement cache per database handle. */
+/**
+ * Prepared-statement cache per database handle. Every game.db query goes through here, so this is
+ * where an admin sandbox's writes stop (D-admin-3, sandbox.ts): inside a sandbox a statement that
+ * writes comes back as a no-op (nothing changed, no rows), whoever asked for it.
+ */
 export function stmt(db: Db, sql: string): Stmt {
   let m = cache.get(db);
   if (!m) {
@@ -45,8 +50,27 @@ export function stmt(db: Db, sql: string): Stmt {
     s = db.prepare(sql);
     m.set(sql, s);
   }
+  if (!s.readonly && refuseWrite(sql)) return REFUSED;
   return s;
 }
+
+/** What a sandbox gets for a write: it runs, changes nothing and returns no rows. */
+const REFUSED = (() => {
+  const r = {
+    readonly: false,
+    reader: false,
+    run: () => ({ changes: 0, lastInsertRowid: 0 }),
+    get: () => undefined,
+    all: () => [],
+    iterate: () => [][Symbol.iterator](),
+    pluck: () => r,
+    expand: () => r,
+    raw: () => r,
+    safeIntegers: () => r,
+    bind: () => r,
+  };
+  return r as unknown as Stmt;
+})();
 
 /** Run `fn` in an IMMEDIATE transaction (takes the write lock up front). Nested calls become savepoints. */
 export function tx<T>(db: Db, fn: () => T): T {

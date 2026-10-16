@@ -34,7 +34,7 @@ const trackers = new Map<string, Tracker>();
 
 export function trackJoin(actor: PlayerActor, body: string, now = Date.now()): void {
   const userId = actor.identity.userId;
-  if (actor.identity.loadtest) return;
+  if (actor.identity.loadtest || actor.sandbox) return; // bots and admin sandboxes aren't play (D-admin-3)
   let t = trackers.get(userId);
   if (t?.endTimer) {
     clearTimeout(t.endTimer);

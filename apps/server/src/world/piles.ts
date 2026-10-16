@@ -10,6 +10,7 @@
 
 import type { BodyId } from "@firstlight/shared";
 import type { InvItem } from "@firstlight/shared/net/protocol";
+import { sandboxed } from "../sandbox.ts";
 
 export interface PileData {
   id: string;
@@ -136,16 +137,19 @@ export class MemoryPileStore implements PileStore {
   }
 }
 
-export const pileStore: { current: PileStore } = { current: new MemoryPileStore() };
+/** Process-wide store; main.ts installs the SQLite one. A sandbox starts with no piles and keeps its own in memory. */
+export const pileStore = sandboxed<PileStore>(new MemoryPileStore(), () => new MemoryPileStore());
 
 type Listener = (e: PileEvent) => void;
-const listeners = new Set<Listener>();
+/** Rooms hear each other's pile changes, a sandbox only its own. */
+const listeners = sandboxed(new Set<Listener>(), () => new Set<Listener>());
 export function onPileEvent(l: Listener): () => void {
-  listeners.add(l);
-  return () => listeners.delete(l);
+  const set = listeners.current;
+  set.add(l);
+  return () => set.delete(l);
 }
 export function emitPileEvent(e: PileEvent) {
-  for (const l of listeners) {
+  for (const l of listeners.current) {
     try {
       l(e);
     } catch (err) {

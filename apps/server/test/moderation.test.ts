@@ -14,6 +14,11 @@ import { ANALYTICS, blockedEitherWay, partyOf, partyRoomFor, SOCIAL_RULES } from
 import { api, Browser, decodeJwt, ORIGIN, play, startAuthServer, ticketFor, type AuthServer } from "./auth-helpers.ts";
 import { safeLeave, waitFor } from "./helpers.ts";
 
+/** A claim token strong enough to be honoured (D-admin-2), and the claim form's POST. */
+const CLAIM_TOKEN = "Kq3vX9pLw2TzR8mN5bYc7HfJ1sDgA4eU6iOoVxWyZtQ=";
+const claimAdmin = (b: Browser) =>
+  b.fetch("/admin/claim", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ token: CLAIM_TOKEN }).toString() });
+
 let server: AuthServer | null = null;
 const rooms: Room[] = [];
 
@@ -25,7 +30,7 @@ afterEach(async () => {
 
 async function start(over: Parameters<typeof startAuthServer>[0] = {}) {
   server = await startAuthServer({
-    adminClaimToken: "claim-token-for-tests",
+    adminClaimToken: CLAIM_TOKEN,
     ...over,
     extraRoutes: (app, a) => mountOps(app, { db: a.db, requireAdmin: a.requireAdmin, allowedOrigins: [ORIGIN] }),
   });
@@ -462,7 +467,7 @@ describe("/admin and /stats", () => {
     const owner = new Browser(s, "198.51.100.31");
     await owner.playToken();
     await owner.saveWithEmail("owner31@example.test"); // admin claim needs a saved account (D26)
-    expect((await owner.fetch("/admin/claim?token=claim-token-for-tests")).status).toBe(200);
+    expect((await claimAdmin(owner)).status).toBe(200);
     recordError("test", new Error("boom with a@b.example and Bearer abc.def"));
     const adminPage = await owner.fetch("/admin");
     expect(adminPage.status).toBe(200);
@@ -486,7 +491,7 @@ describe("/admin and /stats", () => {
     const owner = new Browser(s, "198.51.100.41");
     await owner.playToken();
     await owner.saveWithEmail("owner41@example.test");
-    await owner.fetch("/admin/claim?token=claim-token-for-tests");
+    await claimAdmin(owner);
     const a = await enter(s, "dev:frm_a:Ann", "portus");
     const b = await enter(s, "dev:frm_b:Bob", "portus");
     await waitFor(() => st(a).players?.size === 2);
@@ -529,7 +534,7 @@ describe("/admin and /stats", () => {
     const owner = new Browser(s, "198.51.100.42");
     await owner.playToken();
     await owner.saveWithEmail("owner42@example.test");
-    await owner.fetch("/admin/claim?token=claim-token-for-tests");
+    await claimAdmin(owner);
     const db = s.accounts.db;
     fileReport(db, { reporter: "real_rep", target: "real_bad", reason: "the real one", now: 1_000 });
     for (let i = 0; i < 120; i++) fileReport(db, { reporter: "flooder", target: `t${i}`, reason: `spam ${i}`, now: 2_000 + i });

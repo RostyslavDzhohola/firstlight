@@ -17,6 +17,7 @@ import {
   type Db,
   type HallEntry,
 } from "../../db/index.ts";
+import { sandboxed } from "../../sandbox.ts";
 
 export type { HallEntry };
 
@@ -140,5 +141,53 @@ export class SqliteProgressStore implements ProgressStore {
   }
 }
 
-/** Process-wide store; main.ts installs the SQLite one at boot. */
-export const progressStore: { current: ProgressStore } = { current: new MemoryProgressStore() };
+/**
+ * An admin sandbox's account progress (D-admin-3): the real account's pads, medals, title, counters
+ * and Hall of Firsts read through; what the sandbox adds stays here and is gone with it.
+ */
+export class SandboxProgressStore implements ProgressStore {
+  private readonly real: () => ProgressStore;
+  private readonly mine = new MemoryProgressStore();
+  private readonly titles = new Map<string, string | null>();
+  constructor(real: () => ProgressStore) {
+    this.real = real;
+  }
+  discoverPad(userId: string, body: string, pad: number): boolean {
+    return !this.real().pads(userId, body).includes(pad) && this.mine.discoverPad(userId, body, pad);
+  }
+  pads(userId: string, body: string): number[] {
+    return [...new Set([...this.real().pads(userId, body), ...this.mine.pads(userId, body)])];
+  }
+  awardMedal(userId: string, medalId: string): boolean {
+    return !this.real().medals(userId).includes(medalId) && this.mine.awardMedal(userId, medalId);
+  }
+  medals(userId: string): string[] {
+    return [...new Set([...this.real().medals(userId), ...this.mine.medals(userId)])];
+  }
+  setTitle(userId: string, medalId: string | null): boolean {
+    if (medalId !== null && !this.medals(userId).includes(medalId)) return false;
+    this.titles.set(userId, medalId);
+    return true;
+  }
+  title(userId: string): string | null {
+    return this.titles.has(userId) ? this.titles.get(userId)! : this.real().title(userId);
+  }
+  addStat(userId: string, stat: string, delta: number): number {
+    return this.real().stat(userId, stat) + this.mine.addStat(userId, stat, delta);
+  }
+  stat(userId: string, stat: string): number {
+    return this.real().stat(userId, stat) + this.mine.stat(userId, stat);
+  }
+  claimFirst(secretId: string, userId: string, name: string): { won: boolean; entry: HallEntry } {
+    const had = this.real().hall().find((e) => e.secretId === secretId);
+    return had ? { won: false, entry: had } : this.mine.claimFirst(secretId, userId, name);
+  }
+  hall(): HallEntry[] {
+    const real = this.real().hall();
+    const taken = new Set(real.map((e) => e.secretId));
+    return [...real, ...this.mine.hall().filter((e) => !taken.has(e.secretId))].sort((a, b) => a.foundAt - b.foundAt);
+  }
+}
+
+/** Process-wide store; main.ts installs the SQLite one at boot. Sandboxes get their own (sandbox.ts). */
+export const progressStore = sandboxed<ProgressStore>(new MemoryProgressStore(), (real) => new SandboxProgressStore(() => real()));

@@ -16,6 +16,7 @@ import { WEAPONS } from "@firstlight/shared/content/weapons";
 import { actorPos, type PlayerActor } from "../actors.ts";
 import { emitGameEvent } from "../events.ts";
 import { dist3, type V3 } from "../geometry.ts";
+import { sandboxed } from "../../sandbox.ts";
 import type { QuestPlayer, QuestSystem, ShotMsg } from "./QuestSystem.ts";
 
 /**
@@ -42,11 +43,18 @@ export const EGG_LIMITS = {
  * Account timers at process level, not per room, so switching copies or bodies and recreating a room
  * don't reset them (F12 review S2). A server restart does reset them: they are short anti-abuse timers.
  */
+const puzzleLocks = sandboxed(new Map<string, number>(), () => new Map<string, number>());
+const keypadLocks = sandboxed(new Map<string, { fails: number; until: number; last: number }>(), () => new Map());
+/** An admin sandbox has its own (D-admin-3): its wrong answers don't lock the real account. */
 export const EGG_TIMERS = {
   /** `${userId}|${egg}` → when that puzzle unlocks again after a wrong answer. */
-  puzzles: new Map<string, number>(),
+  get puzzles(): Map<string, number> {
+    return puzzleLocks.current;
+  },
   /** Account/keypad key → failed attempts, lockout end (0 = none) and last attempt. */
-  keypads: new Map<string, { fails: number; until: number; last: number }>(),
+  get keypads(): Map<string, { fails: number; until: number; last: number }> {
+    return keypadLocks.current;
+  },
 };
 
 const RIDDLES: Partial<Record<EggId, string>> = {

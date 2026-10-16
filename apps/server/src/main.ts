@@ -6,6 +6,8 @@ import { devVerifier } from "./auth/identity.ts";
 import { env, productionConfigProblems } from "./env.ts";
 import { isBanned } from "./db/index.ts";
 import { bannedCheck } from "./world/BodyRoom.ts";
+import { adminCheck } from "./world/adminMode.ts";
+import { isAdmin } from "./db/accounts.ts";
 import { gameDb } from "./db/index.ts";
 import { characterRepo } from "./world/characters.ts";
 import { pileStore } from "./world/piles.ts";
@@ -41,6 +43,8 @@ progressStore.current = new SqliteProgressStore(gameDb());
 // and on dispose (graceful shutdown included, SPEC §5.1), and restore them when the copy reopens.
 copyStateStore.current = new SqliteCopyStateStore(gameDb());
 bannedCheck.current = (userId) => isBanned(gameDb(), userId);
+// Admin rights are asked of the account table again while playing (D-admin-2): revoking one sticks.
+adminCheck.current = (userId) => isAdmin(gameDb(), userId);
 
 const game = await createGame({
   port: env.port,

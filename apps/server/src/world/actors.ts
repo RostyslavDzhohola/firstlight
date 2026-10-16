@@ -5,6 +5,7 @@ import type { CharacterData } from "@firstlight/shared/content/character";
 import type { InvItem } from "@firstlight/shared/net/protocol";
 import type { NpcState, PlayerState } from "@firstlight/shared/net/schema";
 import type { Identity } from "../auth/identity.ts";
+import type { Sandbox } from "../sandbox.ts";
 import type { V3 } from "./geometry.ts";
 
 export interface PosSample {
@@ -92,6 +93,18 @@ export interface PlayerActor {
   mountChangedAt?: number;
   /** NPC status effects enforced by movement validation (see npc/effects.ts). */
   npcFx?: NpcMoveFx;
+  /** In an admin sandbox (sandbox.ts, D-admin-3): a copy of the character in a private room; never saved. */
+  sandbox?: Sandbox;
+  /** Moving into a sandbox (adminMode.ts): leaving out of a fight before then is a handoff, not a linger. */
+  toSandboxUntil?: number;
+}
+
+/**
+ * Is this admin-mode switch on for `a`? Only in a sandbox (the switches live there) and only while
+ * the identity is an admin: never in the real world, whatever an actor holds.
+ */
+export function adminSwitch(a: PlayerActor, k: "fly" | "god" | "speed"): boolean {
+  return !!a.identity?.admin && !!a.sandbox && !a.sandbox.closed && a.sandbox.switches[k];
 }
 
 /** Why a hit on an NPC dealt nothing (ServerMessages `immune`); unset = an unspecified cause. */

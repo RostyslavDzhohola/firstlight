@@ -110,7 +110,7 @@ function adminBody(db: Db, reportsPage = 1): string {
   const now = Date.now();
   // ---- players online per room
   const rooms = [...liveRooms].sort((a, b) => a.bodyDef.id.localeCompare(b.bodyDef.id) || a.state.copy - b.state.copy);
-  const total = rooms.reduce((n, r) => n + (r.metadata?.loadtest ? 0 : r.actors.size), 0);
+  const total = rooms.reduce((n, r) => n + (r.metadata?.loadtest || r.metadata?.sandbox ? 0 : r.actors.size), 0);
   const roomRows = rooms
     .map((r) => {
       const players = [...r.actors.values()]
@@ -119,6 +119,7 @@ function adminBody(db: Db, reportsPage = 1): string {
           const u = esc(encodeURIComponent(a.identity.userId));
           const chips = [
             a.identity.admin ? `<span class="chip admin">admin</span>` : "",
+            a.sandbox ? `<span class="chip">sandbox</span>` : "", // D-admin-3: a private copy, nothing saved
             a.identity.guest ? `<span class="chip">guest</span>` : "",
             a.identity.loadtest ? `<span class="chip">bot</span>` : "",
             a.state.flags & PF.VOICE_MUTED ? `<span class="chip bad">voice-muted</span>` : "",
@@ -171,7 +172,7 @@ ${players ? `<table><tr><th>Player</th><th class="num">Level</th><th class="num"
   const errorRows = errors.map((e) => `<tr><td class="num">${fmtTime(e.at)}</td><td>${esc(e.source)}${e.count > 1 ? ` ×${e.count}` : ""}</td><td><pre>${esc(e.message)}</pre></td></tr>`).join("");
 
   const perBody = new Map<string, number>();
-  for (const r of rooms) if (!r.metadata?.loadtest) perBody.set(r.bodyDef.name, (perBody.get(r.bodyDef.name) ?? 0) + r.actors.size);
+  for (const r of rooms) if (!r.metadata?.loadtest && !r.metadata?.sandbox) perBody.set(r.bodyDef.name, (perBody.get(r.bodyDef.name) ?? 0) + r.actors.size);
 
   return `
 <div class="kpis"><div class="kpi"><b>${total}</b><span>players online</span></div><div class="kpi"><b>${reportTotal}</b><span>open reports</span></div><div class="kpi"><b>${bans.length}</b><span>active bans</span></div><div class="kpi"><b>${errors.length}</b><span>recent errors</span></div></div>

@@ -7,6 +7,8 @@ import { CLOSE, SOCIAL } from "@firstlight/shared/net/social";
 import type { BodyRoom } from "../world/BodyRoom.ts";
 import type { PlayerActor } from "../world/actors.ts";
 import { turnCredentials } from "../world/voice/turn.ts";
+import { endSandboxOf, sandboxBodyOf } from "../world/adminMode.ts";
+import { currentSandbox } from "../sandbox.ts";
 import { liveActor, liveRooms } from "./presence.ts";
 import { banIpHash, lastIpHashOf, networkBanned, rekeyStoredVoiceMute, storeBan, storedVoiceMute, storeVoiceMute, userBanned } from "./store.ts";
 
@@ -50,20 +52,33 @@ export function removePlayer(room: BodyRoom, actor: PlayerActor, code: number, r
   room.kickClient(actor.id, code, reason);
 }
 
+/**
+ * An admin's sandbox body (D-admin-3) has no social presence: moderation reaches it through the
+ * sandbox registry, removes it inside its sandbox and closes the sandbox (its seats die with it).
+ */
+function removeFromSandbox(userId: string, code: number, reason: string): boolean {
+  const body = sandboxBodyOf(userId);
+  if (body) removePlayer(body.room, body.actor, code, reason);
+  endSandboxOf(userId, code, reason);
+  return !!body;
+}
+
 export function kickUser(userId: string, reason = "Removed by an admin", now = Date.now()): boolean {
+  if (currentSandbox()) return false; // moderation acts on the real world: never from inside a sandbox
   kickedUntil.set(userId, now + SOCIAL.KICK_COOLDOWN_MS);
   const live = liveActor(userId);
-  if (!live) return false;
-  removePlayer(live.room, live.actor, CLOSE.KICKED, reason);
-  return true;
+  if (live) removePlayer(live.room, live.actor, CLOSE.KICKED, reason);
+  return removeFromSandbox(userId, CLOSE.KICKED, reason) || !!live;
 }
 
 /** Ban the account and the IP hash it last played from; disconnect it if online. Returns the ban id. */
 export function banAccount(userId: string, reason: string, createdBy: string | null): number {
+  if (currentSandbox()) return 0; // moderation acts on the real world: never from inside a sandbox
   const id = storeBan({ userId, reason: reason.slice(0, 200), createdBy });
   void turnCredentials.revokeUser(userId); // voice relay credentials end with the ban
   const live = liveActor(userId);
   if (live) removePlayer(live.room, live.actor, CLOSE.BANNED, "Banned by an admin");
+  removeFromSandbox(userId, CLOSE.BANNED, "Banned by an admin");
   // The network ban also removes other accounts playing from that network right now (not admins).
   const hash = banIpHash(id);
   if (hash) {
@@ -78,6 +93,8 @@ export function banAccount(userId: string, reason: string, createdBy: string | n
 }
 
 export function setVoiceMuted(userId: string, on: boolean): void {
+  // The cache sits beside the store: inside a sandbox neither may change (D-admin-3).
+  if (currentSandbox()) return;
   storeVoiceMute(userId, on);
   muteCache.set(userId, on);
   const live = liveActor(userId);

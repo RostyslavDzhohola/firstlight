@@ -1,6 +1,7 @@
 // Message contract between client and server. Server validates every client message with zod;
 // these types are the shape both sides agree on.
 
+import type { AdminModeState } from "../content/admin.ts";
 import type { BodyId } from "../planet/bodies.ts";
 import type { CosmeticSlot } from "../content/items.ts";
 import type { HallLine } from "../content/secrets.ts";
@@ -42,6 +43,8 @@ export interface PlayRequest {
   starter?: number;
   palette?: number;
   look?: number;
+  /** Admins only: the admin's private sandbox copy of `body`, where nothing is saved (D-admin-3). */
+  sandbox?: boolean;
 }
 
 export type PlayResponse =
@@ -151,6 +154,8 @@ export type ServerMessages = {
   swing: { by: string; weapon: number; heavy: boolean; hits: number };
   /** The server refused an action (`reason` is short and human-readable). */
   denied: { action: string; reason: string };
+  /** Admins: the real character is saved and may move into the sandbox now (join it through /api/play with `sandbox`). */
+  sandbox: { home: BodyId };
   /** To the attacker only: a hit landed on an NPC that took no damage (spawning, evading, a shield). */
   immune: { target: string; reason: "spawning" | "evading" | "invulnerable" | "shield" | "arena" };
   /** Movement snap-back: the authoritative position for input `seq`. */
@@ -222,6 +227,8 @@ export interface YouState {
   cosmeticsExtras?: boolean;
   /** Onboarding in progress (Portus only): hits on each training dummy. Absent once done or skipped. */
   onboarding?: { hits: number[] };
+  /** Admin accounts only: the admin-mode switches (content/admin.ts). */
+  adminMode?: AdminModeState;
 }
 
 export interface InvItem {

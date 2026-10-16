@@ -2,6 +2,7 @@
 // Rooms subscribe to re-key live clients. Listeners run synchronously right after the game.db rows
 // moved (before any other autosave can run), each isolated in try/catch.
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { LinkResult } from "../db/link.ts";
 import type { LiveSession } from "./sessions.ts";
 
@@ -43,10 +44,14 @@ export class LinkEvents {
     }
   }
 
-  /** Subscribe; returns an unsubscribe function (call it in the room's onDispose). */
+  /**
+   * Subscribe; returns an unsubscribe function (call it in the room's onDispose). A listener runs in
+   * the context it subscribed from: an admin sandbox room's listeners stay in its sandbox (D-admin-3).
+   */
   on(fn: AccountLinkedListener): () => void {
-    this.listeners.add(fn);
-    return () => this.listeners.delete(fn);
+    const bound = AsyncLocalStorage.bind(fn);
+    this.listeners.add(bound);
+    return () => this.listeners.delete(bound);
   }
 
   emit(ev: AccountLinkedEvent): void {

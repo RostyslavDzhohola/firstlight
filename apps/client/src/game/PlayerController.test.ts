@@ -6,6 +6,7 @@ import { BreakableCollider, PLAYER_BODY } from "@firstlight/shared/planet/collid
 import type { Input } from "./input.ts";
 import { ANIM } from "@firstlight/shared/net/schema";
 import { MOVE, PlayerController, type MoveColliders } from "./PlayerController.ts";
+import { ADMIN_MODE } from "@firstlight/shared/content/admin";
 
 const R = 500;
 /** A flat, dry sphere. */
@@ -350,6 +351,57 @@ describe("PlayerController", () => {
         pressC(pc, fakeInput());
         expect(pc.anim).not.toBe(ANIM.DODGE);
       }
+    });
+  });
+
+  describe("admin mode (D-admin-1)", () => {
+    const height = (pc: PlayerController) => pc.pos.length() - R;
+
+    it("flying: Space climbs at the climb speed, the body hovers without gravity, C comes down (no dodge)", () => {
+      const pc = spawn();
+      pc.adminFly = true;
+      run(pc, fakeInput(["Space"]), 1);
+      expect(height(pc)).toBeCloseTo(ADMIN_MODE.climbSpeed, 0);
+      const hover = height(pc);
+      run(pc, fakeInput(), 1);
+      expect(height(pc)).toBeCloseTo(hover, 3);
+      expect(pc.anim).toBe(ANIM.IDLE); // floating, not falling
+      const input = fakeInput(["KeyC"]);
+      input.pressed.add("KeyC");
+      pc.update(1 / 60, input, false);
+      expect(pc.anim).not.toBe(ANIM.DODGE);
+      run(pc, input, 2);
+      expect(pc.onGround).toBe(true);
+      expect(pc.pendingFallDamage).toBe(0);
+    });
+
+    it("flying stays within the server's flying allowance in any direction", () => {
+      for (const adminSpeed of [1, 2]) {
+        const pc = spawn();
+        pc.adminFly = true;
+        pc.adminSpeed = adminSpeed;
+        let max = 0;
+        run(pc, fakeInput(["Space", "KeyW", "ShiftLeft"]), 2, 60, () => (max = Math.max(max, pc.vel.length())));
+        expect(max).toBeLessThanOrEqual(ADMIN_MODE.flySpeed * adminSpeed + 1e-6);
+        expect(max).toBeGreaterThan(ADMIN_MODE.flySpeed * adminSpeed * 0.9);
+      }
+    });
+
+    it("flying switched off mid-air: the body falls, and the landing counts the fall from there", () => {
+      const pc = spawn();
+      pc.adminFly = true;
+      run(pc, fakeInput(["Space"]), 2); // 16 m up
+      pc.adminFly = false;
+      run(pc, fakeInput(), 3);
+      expect(pc.onGround).toBe(true);
+      expect(pc.pendingFallDamage).toBeGreaterThan(0);
+    });
+
+    it("Speed ×2 doubles running and sprinting", () => {
+      const pc = spawn();
+      pc.adminSpeed = ADMIN_MODE.speedMult;
+      run(pc, fakeInput(["KeyW", "ShiftLeft"]), 1.5);
+      expect(pc.vel.length()).toBeCloseTo(MOVE.sprint * ADMIN_MODE.speedMult, 0);
     });
   });
 

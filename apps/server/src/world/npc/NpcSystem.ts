@@ -778,7 +778,8 @@ export class NpcSystem implements RoomSystem {
 
   private admin(sid: string, raw: unknown) {
     const p = this.world.playerById(sid);
-    if (!p || !p.identity.admin) return;
+    // Asked of the account for every command (fix 7), not the identity the session started with.
+    if (!p || !this.world.stillAdmin(p)) return;
     const msg = (raw ?? {}) as Record<string, unknown>;
     const num = (k: string, d = 0) => (typeof msg[k] === "number" ? (msg[k] as number) : d);
     const str = (k: string) => (typeof msg[k] === "string" ? (msg[k] as string) : "");

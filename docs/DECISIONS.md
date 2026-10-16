@@ -820,6 +820,60 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   get within reach (it kept 3 m off the ring), gave up after 5 s, healed to full, and from then on
   every shot woke it into giving up again — "my hits don't work". Tested on Arcadia, Meridian and a
   Hollowmere pad, on the real server path, and against the pad shooter.
+- **D-admin-1 (2026-10-15):** admin mode for the owner's testing, admin accounts only. Esc → Admin
+  opens a panel: Fly (Space up, C down; no gravity, no fall damage; C doesn't dodge while flying;
+  not Ctrl, since Ctrl+W closes the tab, D1), God mode (no damage, full health; who the admin can
+  hurt is unchanged, so safe zones still protect others), Speed ×2 (run, sprint, swim, fly), Max
+  level, Every item (one of each usable item at the best tier for the level, in the 20 slots), an
+  armoury (any item at any tier into the hand; cosmetics into the backpack and worn), and Back to
+  normal (switches off; level, items and worn cosmetics as before, kept with the character across
+  reconnects). The server decides: the `admin` message is dropped for non-admins and the switches
+  only count for admin identities (`adminSwitch`); flying is paid from a 12 m/s 3D allowance with no
+  ballistic envelope, Speed ×2 doubles the refill and the bank. A badge on the player card says
+  what's on. The one-time claim (`/admin/claim`, a form posting `ADMIN_CLAIM_TOKEN`) now accepts a
+  guest account too (admins are never pruned as guests). Non-admin movement rules are unchanged, so
+  no protocol bump. Why: the owner wants to inspect the game fast and can't sign in by email yet.
+- **D-admin-2 (2026-10-15):** test state is never canonical (Codex security review of D-admin-1).
+  Any admin-mode command starts a test session that keeps the character as it was; saves, account
+  merges, the leaderboard and analytics only ever see that one (`canonicalChar`), never the boosted
+  live one, and nothing is persisted for a later "back to normal". Nothing leaves a session: no
+  drops, pickups or piles, no damage to other players, no medals, egg credit or Hall of Firsts, and
+  a boss fight a tester hit counts as assisted. It ends with Back to normal, leaving the world
+  (travel, closing the game, another window, a merge, a kick), dying (no death and no pile: the real
+  character comes back at full health) or losing admin, which the server checks against the account
+  on every admin command and every 2 s. The claim is POST only, from the game's origin (through the
+  proxy when an origin secret is set), limited to 5 tries per client IP per 10 minutes and 30 an
+  hour overall before any comparison, and a token under 32 random bytes switches it off. Why: admin
+  powers must not leak into the economy, the boards or other players, and a revoked admin must lose
+  them while connected.
+- **D-admin-3 (2026-10-15):** the test switches work only in a private sandbox (Codex round 2 on
+  D-admin-2: per-system guards kept missing paths). The first switch or test action moves the admin
+  into a sandbox: its own BodyRoom copy of the body (same planet, its own NPCs), joinable only by
+  that admin while an admin, flagged `sandbox`. Entering needs the real character alive and out of
+  a fight; it is saved and leaves the world (a handoff, no linger). Inside, nothing is saved, and
+  that is enforced in one place: everything a sandbox room runs (hooks, messages, tick, its timers,
+  any method another room calls on it) runs in an AsyncLocalStorage scope; there every process-wide
+  store and bus (characters, piles, account progress, copy state, the one-actor hub, pile/NPC/Hall
+  events, account timers) resolves to the sandbox's own memory copy, and game.db's single entry
+  point `stmt()` turns every write into a no-op. The sandbox is socially offline (no presence,
+  parties, blocks, reports, moderation, announcements, analytics). Back to normal is leaving it and
+  joining the real world as the real character from the database, on its own body; travel between
+  bodies stays in the sandbox; joining the real world anywhere, a merge, a restart or losing admin
+  closes it (rights are asked of the account before every privileged message, the 2 s recheck is
+  only for the passive switches). The HUD says "SANDBOX — nothing here is saved". Supersedes
+  D-admin-2's test sessions (its claim hardening stays). Why: one boundary that every writer goes
+  through, instead of a guard in each system; other players can't be in the room, so PvP, heals and
+  projectiles can't leak, and tests compare the whole of game.db before and after a sandbox.
+  Codex round 3: each sandbox is a generation (`Sandbox.id`); rooms, seats and reconnects belong to
+  one and are refused once it closes or is replaced, and matchmaking only reuses the open
+  generation's rooms. Caches beside the store don't change from inside a sandbox either: there is no
+  voice system there (no mutes, relays or TURN credentials), and the moderation module and the
+  social store refuse a sandbox's writes before touching their maps. Kicks and bans reach a sandbox
+  body through the sandbox registry (it has no presence) and close the sandbox. Sandboxes aren't the
+  public world: not in the online count, the home page or /stats, and they take none of the public
+  capacity; at most 8 are open at once ("sandboxes full"). Only inbound server notices cross the other
+  way: announcements (and "updating" before a restart) still reach a sandbox, so the admin sees
+  them; nothing a sandbox does reaches the real world.
 - **D-chars-1 (run, 2026-10-15 07:10 CDT):** a fifth starter, the fire ninja "Hinoko" (owner, HANDOFF
   6h), is appended to `STARTERS` (id `ninja`, starter index 4, default palette Ember) with the Ember
   Kunai (ranged, 3 tiers) and its alt, the Ember Seal: hold RMB 0.4 s (server-timed `charge`), release

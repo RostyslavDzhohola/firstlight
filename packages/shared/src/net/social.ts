@@ -19,6 +19,8 @@ export const CLOSE = {
   KICKED: 4104,
   /** Saving failed (e.g. a death couldn't be recorded): rejoin later, from the last good save. */
   STORAGE: 4105,
+  /** An admin sandbox ended (admin rights gone): rejoin the real world as the real character. */
+  SANDBOX_OVER: 4106,
 } as const;
 
 export const SOCIAL = {
