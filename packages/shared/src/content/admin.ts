@@ -4,7 +4,7 @@
 export const ADMIN_MODE = {
   /** Flying: top speed in any direction (m/s), before Speed ×2. */
   flySpeed: 12,
-  /** Flying: climb and descent speed (m/s; Space up, C or Ctrl down), before Speed ×2. */
+  /** Flying: climb and descent speed (m/s; Space up, C down), before Speed ×2. */
   climbSpeed: 8,
   /** Speed ×2: multiplies running, sprinting, swimming and flying. */
   speedMult: 2,
