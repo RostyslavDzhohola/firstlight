@@ -473,7 +473,8 @@ export class Game {
     }
     // The natural solids round the arrival, built behind the loading screen (play builds the rest
     // ahead of the player, one chunk a frame at most).
-    for (let i = 0; i < 12 && this.nature.warm(this.player.pos.x, this.player.pos.y, this.player.pos.z, 120, 1) > 0; i++) await Promise.resolve();
+    // One chunk per macrotask, so the loading screen keeps drawing.
+    for (let i = 0; i < 12 && this.nature.warm(this.player.pos.x, this.player.pos.y, this.player.pos.z, 120, 1) > 0; i++) await new Promise((r) => setTimeout(r, 0));
     setLoading("Loading characters…", 0.8);
     await Promise.all([preloadAvatars(), preloadHorse(), this.planet.props.ready]); // resolve null on failure: capsules / box horses
     alive("loading characters");
