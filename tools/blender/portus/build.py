@@ -527,8 +527,9 @@ class Prefab:
         for me in kit(module):
             self.parts.append((me, M))
 
-    def finish(self, bend_x=False, interior=None):
-        """interior: list of (x0, y0, x1, y1, z0, z1) boxes whose hidden inward faces are removed."""
+    def finish(self, bend_x=False, interior=None, keep_colors=False):
+        """interior: list of (x0, y0, x1, y1, z0, z1) boxes whose hidden inward faces are removed.
+        keep_colors: keep the "Col" corner colours (round-2 vertex-colour pieces, COLOR_0)."""
         objs = []
         if self.mb.F:
             me = self.mb.mesh(self.name + "_custom")
@@ -568,7 +569,10 @@ class Prefab:
         for p, i in zip(me.polygons, mi):
             p.material_index = i
         for a in list(me.color_attributes):
-            me.color_attributes.remove(a)
+            if not (keep_colors and a.name == "Col"):
+                me.color_attributes.remove(a)
+        if keep_colors:
+            me.color_attributes.active_color_name = "Col"
         if interior:
             strip_interior(me, interior)
         if bend_x:
@@ -866,6 +870,44 @@ def house(name, w, d, floors, ridge="y", chimney=None, extras=None, lod="", gabl
     m = 0.16
     across = w if ridge == "y" else d
     return p.finish(interior=[(-w / 2 + m, -d / 2 + m, w / 2 - m, d / 2 - m, 0.05, top + roof_height(across) - 0.9)])
+
+# Round 2 (the owner's pick, 2026-10-15): the market houses are the Opus design A (half-timbered,
+# teal shop front, string lights; tools/blender/round2), built to each house plot so the layout and
+# the colliders stay: plot = the old house's collider (pack.py HAND), centred 0.108 m toward the
+# front; the house's footprint (counter and step included) fits inside it. Variant = roof and plaster tints (0 coral, 1 slate, 2 moss, 3 plum). LOD1 drops the small
+# parts (goods, flower boxes, lights, sign, lantern, finial, hoist): a "<name>__L1" prefab.
+ROUND2 = os.path.abspath(os.path.join(HERE, "..", "round2"))
+OPUS_HOUSES = {"house_a": (2.417, 2.308, 0), "house_b": (2.417, 3.308, 1), "house_c": (3.417, 2.308, 2), "house_d": (3.417, 3.308, 3)}
+
+def build_round2_houses():
+    if ROUND2 not in sys.path:
+        sys.path.insert(0, ROUND2)
+    import pieces
+    for name, (hx, hz, variant) in OPUS_HOUSES.items():
+        for lod1, pname in ((False, name), (True, name + "__L1")):
+            old = PREFABS.pop(pname, None)
+            if old is not None:
+                bpy.data.objects.remove(old)
+            # The counter, crates and door step stand up to 0.63 m in front of the ground-floor wall,
+            # the plinth 0.15 m behind and beside it: all of it inside the old collider.
+            me = pieces.house(2 * hx - 0.4, 2 * hz - 0.78, variant, pname + "_r2", lod1=lod1)
+            me.transform(T(0, -0.108 + 0.24, 0))
+            p = Prefab(pname, lod="round 2 Opus house A; LOD1 without the small parts")
+            p.parts.append((me, Matrix.Identity(4)))
+            p.finish(keep_colors=True)
+
+def build_round2_gates():
+    """The portal courts become the Opus gate A ("Waygate", floating arch, destination globe),
+    tinted to their world; the portal itself (membrane, trigger) is the game's (Portals.ts)."""
+    if ROUND2 not in sys.path:
+        sys.path.insert(0, ROUND2)
+    import pieces
+    for world in PORTAL_COLORS:
+        name = "portal_court_" + world
+        me = pieces.gate_a(world, name + "_r2")
+        p = Prefab(name, lod="round 2 Opus gate A")
+        p.parts.append((me, Matrix.Identity(4)))
+        p.finish(keep_colors=True)
 
 def build_houses():
     # A: compact 4x4 corner house, stone below, timber above, side chimney + ivy.
@@ -2688,8 +2730,10 @@ def export_prefabs():
         if f.endswith(".glb"):
             os.remove(os.path.join(pdir, f))
     used = set()
+    placed = {it["prefab"] for it in LAYOUT}
     for name, obj in PREFABS.items():
-        if name not in {it["prefab"] for it in LAYOUT}:
+        # A placed prefab, or an explicit LOD1 ("<name>__L1") of one.
+        if name not in placed and not (name.endswith("__L1") and name[:-4] in placed):
             continue
         obj.hide_set(False)
         bpy.ops.object.select_all(action="DESELECT")
@@ -2751,9 +2795,9 @@ def write_budget():
 # ============================================================================================
 def build_all_prefabs():
     build_houses()
+    build_round2_houses()          # replaces house_a..house_d (round 2)
     build_wall_seg(); build_wall_extras(); build_towers(); build_gatehouse(); build_keep(); build_castle_gate()
-    for k, c in PORTAL_COLORS.items():
-        build_portal_court(k, c)
+    build_round2_gates()           # the portal courts (round 2)
     build_market_hall(); build_hall_of_firsts(); build_stalls(); build_props(); build_nature()
 
 def main():

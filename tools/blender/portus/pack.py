@@ -104,7 +104,18 @@ SLOTS = [
     ("Flowers",           "flowers",     (1.0, 1.0, 1.0),    0.8, 0.0, 0.0, (0, 0, 0, 0), (0, 0, 0, 0), True),
     ("Impostor_Broad",    "impostor_broad", (0.92, 0.92, 0.92), 0.85, 0.0, 0.0, (0, 0, 0, 0), (0, 0, 0, 0), True),
     ("Impostor_Pine",     "impostor_pine",  (0.92, 0.92, 0.92), 0.85, 0.0, 0.0, (0, 0, 0, 0), (0, 0, 0, 0), True),
+] + [
+    # Round 2 vertex-colour pieces (tools/blender/round2): the colour is the vertex colour (white
+    # layer), shading baked into it. Glass lights up at night like the kit's windows; glow uses its
+    # own colour above the bloom threshold (townMaterial glow mode).
+    ("OK_Matte",          "white",       (1.0, 1.0, 1.0),    0.85, 0.0, 0.0, (0, 0, 0, 0), (0, 0, 0, 0), False),
+    ("OK_Gloss",          "white",       (1.0, 1.0, 1.0),    0.42, 0.0, 0.0, (0, 0, 0, 0), (0, 0, 0, 0), False),
+    ("OK_Metal",          "white",       (1.0, 1.0, 1.0),    0.35, 0.1, 0.0, (0, 0, 0, 0), (0, 0, 0, 0), False),
+    ("OK_Glass",          "white",       (1.0, 1.0, 1.0),    0.15, 0.0, 0.0, (0, 0, 0, 0), (1.0, 0.72, 0.38, 0.85), False),
+    ("OK_Glow",           "white",       (1.0, 1.0, 1.0),    0.5, 0.0, 0.0, (0, 0, 0, 0), (0, 0, 0, 0), False),
 ]
+# Slots that glow in their own (vertex) colour (manifest "glow").
+GLOW_SLOTS = {"OK_Glow"}
 SLOT_INDEX = {s[0]: i for i, s in enumerate(SLOTS)}
 GLASS_SLOT = SLOT_INDEX["MI_WindowGlass"]
 
@@ -601,6 +612,15 @@ def C(x, y, r, z0, z1):
     return [1, x, -y, r, r, z0, z1, 0.0]
 
 
+def gate_a_solids(dais=True):
+    """Opus gate A (round 2): the two pylons, the dais' two steps (each under the 0.35 m step) and the
+    obelisks; the opening stays clear for the portal."""
+    s = [B(-2.35, 0, 0.75, 0.85, 0, 5.1), B(2.35, 0, 0.75, 0.85, 0, 5.1)]
+    if dais:
+        s += [C(0, 0, 4.9, 0, 0.21), C(0, 0, 4.25, 0, 0.41), C(-3.05, -2.3, 0.3, 0, 2.6), C(3.05, -2.3, 0.3, 0, 2.6)]
+    return s
+
+
 def portal_court_solids():
     s = []
     n, r_in, r_out = 14, 5.65, 6.6
@@ -635,9 +655,14 @@ HAND = {
     "keep": [B(0, 0, 5.45, 5.45, 0, 31.0), B(0, -6.3, 2.2, 1.3, 0, 0.45), B(0, -7.95, 2.2, 0.35, 0, 0.22)],
     "hall_of_firsts": [B(0, 0, 3.65, 5.35, 0, 10.7), B(0, -5.7, 2.0, 0.7, 0, 0.32), C(-2.6, -6.3, 0.42, 0, 2.1), C(2.6, -6.3, 0.42, 0, 2.1)],
     "wall_stair": [B(0.7, -0.7, 4.48, 0.7, 0, 6.2)],
-    "portal_court_arcadia": portal_court_solids(),
-    "portal_court_hollowmere": portal_court_solids(),
-    "portal_court_meridian": portal_court_solids(),
+    "portal_court_arcadia": gate_a_solids(),
+    "portal_court_hollowmere": gate_a_solids(),
+    "portal_court_meridian": gate_a_solids(),
+    # Round 2 houses keep the old houses' colliders (the plots).
+    "house_a": [B(0, -0.108, 2.417, 2.308, 0, 9.974)],
+    "house_b": [B(0, -0.108, 2.417, 3.308, 0, 13.56)],
+    "house_c": [B(0, -0.108, 3.417, 2.308, 0, 9.958)],
+    "house_d": [B(0, -0.108, 3.417, 3.308, 0, 11.13)],
     "stall_a": [B(0, 0, 1.46, 0.96, 0, 2.3), C(1.85, 0.2, 0.36, 0, 0.95), B(-1.9, 0.3, 0.32, 0.32, 0, 1.1)],
     "stall_b": [B(0, 0, 1.46, 0.96, 0, 2.3), C(1.85, 0.2, 0.36, 0, 0.95), B(-1.9, 0.3, 0.32, 0.32, 0, 1.1)],
     "stall_c": [B(0, 0, 1.46, 0.96, 0, 2.3), C(1.85, 0.2, 0.36, 0, 0.95), B(-1.9, 0.3, 0.32, 0.32, 0, 1.1)],
@@ -780,7 +805,11 @@ def main():
         cls = CLASS[name]
         lod1 = None
         if cls == "building":
-            lod1 = roof_lod(lod0)
+            # An explicit LOD1 prefab (round-2 houses: without the small parts), else the roof shell.
+            if os.path.exists(os.path.join(PREFAB_DIR, name + "__L1.glb")):
+                lod1 = parts_of(load_prefab(name + "__L1"))
+            else:
+                lod1 = roof_lod(lod0)
         elif cls == "tree":
             hw, top, u0, u1 = cards[name]
             key, _half = IMPOSTOR_LAYER[name]
@@ -804,7 +833,7 @@ def main():
     for s in SLOTS:
         name, layer, tint, rough, metal, nscale, emis, night, cut = s
         slot_table.append(dict(name=name, layer=LAYER_INDEX[layer], tint=list(tint), rough=rough, metal=metal, normal=nscale,
-                               emissive=list(emis), night=list(night), cutout=cut))
+                               emissive=list(emis), night=list(night), cutout=cut, **({"glow": 1.0} if name in GLOW_SLOTS else {})))
     extras = {"portusTown": {"version": 1, "layerSize": LAYER, "layers": [l[0] for l in LAYERS], "slots": slot_table,
                              "glassSlot": GLASS_SLOT}}
     glb.write(os.path.join(OUT, "portus_raw.glb"), extras)
