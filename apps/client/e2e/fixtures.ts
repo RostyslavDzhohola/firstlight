@@ -3,6 +3,7 @@
 
 import { test as base, expect } from "@playwright/test";
 import { Player, type Gfx } from "./player.ts";
+import { markToolRequests } from "./stack.ts";
 
 export { expect };
 
@@ -31,6 +32,11 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
     },
     { scope: "worker", auto: true },
   ],
+  // Every guest a journey creates is flagged as one of our test accounts (D-home-6, stack.ts).
+  context: async ({ context }, use) => {
+    await markToolRequests(context);
+    await use(context);
+  },
   gfx: async ({}, use, info) => {
     await use((info.project.metadata as { gfx?: Gfx }).gfx ?? "webgl");
   },

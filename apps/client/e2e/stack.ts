@@ -1,7 +1,9 @@
 // Where the journeys run: a local stack on its own ports (server + production client build served by
 // `vite preview`) or production (read-only smoke subset). All paths are absolute.
 
+import type { BrowserContext } from "@playwright/test";
 import { readFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -30,6 +32,39 @@ export const PROD_ORIGIN = "https://firstlight.one4all.dev";
 
 export const BASE_URL = TARGET === "prod" ? PROD_ORIGIN : LOCAL_ORIGIN;
 
+/** The game server the client bundle calls directly (/api/play, /api/account/*). */
+export const PROD_API = "https://api.firstlight.one4all.dev";
+export const API_ORIGIN = TARGET === "prod" ? PROD_API : LOCAL_API;
+
+/**
+ * Every guest these journeys create is one of our test accounts (D-home-6): its requests to the game
+ * server carry LOADTEST_SECRET in `x-loadtest-secret`, and the server keeps it off the leaderboard,
+ * "online now" and /stats. The local stack gets a throwaway secret; production runs read the real
+ * one from the environment or ~/.config/firstlight/.env (never printed) and refuse to run without it.
+ */
+export const LOCAL_TOOL_SECRET = "e2e-local-tool-secret";
+
+export function toolSecret(): string {
+  if (TARGET !== "prod") return LOCAL_TOOL_SECRET;
+  const fromEnv = process.env.LOADTEST_SECRET?.trim();
+  if (fromEnv) return fromEnv;
+  const file = process.env.FIRSTLIGHT_ENV_FILE ?? path.join(os.homedir(), ".config/firstlight/.env");
+  let text = "";
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {}
+  const m = /^\s*(?:export\s+)?LOADTEST_SECRET\s*=\s*(.*)$/m.exec(text);
+  const v = (m?.[1] ?? "").trim().replace(/^(['"])(.*)\1$/, "$2");
+  if (!v) throw new Error("pnpm e2e:prod needs LOADTEST_SECRET (in the environment or ~/.config/firstlight/.env) so its guests are flagged as test accounts (D-home-6); refusing to create unflagged guests on production");
+  return v;
+}
+
+/** Add our tools' header to this context's requests to the game server (and nowhere else). */
+export async function markToolRequests(context: BrowserContext): Promise<void> {
+  const secret = toolSecret();
+  await context.route(`${API_ORIGIN}/api/**`, (route) => route.continue({ headers: { ...route.request().headers(), "x-loadtest-secret": secret } }));
+}
+
 /** Server env: dev guests (admin placement), the dev mail log (email codes on stdout), fresh databases. */
 export const SERVER_ENV: Record<string, string> = {
   PORT: String(PORT),
@@ -39,6 +74,8 @@ export const SERVER_ENV: Record<string, string> = {
   GAME_DB_PATH: path.join(DB_DIR, "game.db"),
   DEV_MAIL_LOG: "1",
   ALLOW_DEV_GUESTS: "1",
+  // Our tools' guests are flagged as test accounts (D-home-6): the journeys send this with every guest.
+  LOADTEST_SECRET: LOCAL_TOOL_SECRET,
   // No Resend locally: codes go to the log. Never inherit a real key into a test stack.
   RESEND_API_KEY: "",
   NODE_ENV: "development",
