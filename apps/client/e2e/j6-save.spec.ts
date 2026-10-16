@@ -6,6 +6,7 @@
 import { expect, test } from "./fixtures.ts";
 import { emailCodeFlow, hitTrainingDummies, newEmail, saveWithEmail } from "./flows.ts";
 import { Player } from "./player.ts";
+import { markToolRequests } from "./stack.ts";
 
 test.describe("J6 save progress", () => {
   test("J6.1 · item 5c · after the first level-up a guest gets the non-blocking save toast, never a card while the pointer is locked", { tag: ["@J6", "@J6.1", "@item-5c"] }, async ({ player, page }) => {
@@ -55,6 +56,7 @@ test.describe("J6 save progress", () => {
 
     // Second browser (fresh profile): Sign in → same character, no starter pick.
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+    await markToolRequests(ctx); // a second browser's guest is a test account too (D-home-6)
     try {
       // The second browser renders with WebGL2 on both projects: headless Chrome can stall creating a
       // WebGPU device while other WebGPU pages run (seen with two J6.2s in parallel: "Starting the

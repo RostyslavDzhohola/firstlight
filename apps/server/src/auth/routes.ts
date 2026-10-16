@@ -30,7 +30,8 @@ function bearerToken(req: Request): string {
 
 export async function bearerIdentity(a: Accounts, req: Request): Promise<Identity | null> {
   const token = bearerToken(req);
-  return token ? a.verify(token, { ip: directRequestIp(req) }) : null;
+  const tool = req.headers["x-loadtest-secret"];
+  return token ? a.verify(token, { ip: directRequestIp(req), toolSecret: typeof tool === "string" ? tool : null }) : null;
 }
 
 /** Identity from the Better Auth session cookie (requests that come through the client origin). */

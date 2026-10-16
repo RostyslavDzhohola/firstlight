@@ -1,8 +1,9 @@
 // Public leaderboard reads for the home page (6a): display names only, no ids, emails or positions.
-// Only accounts that picked a display name are listed, never banned ones; the levels board also
+// Only accounts that picked a display name are listed, never banned or test accounts (D-home-6); the levels board also
 // leaves out dead characters (medals survive death, so that board doesn't).
 
 import { stmt, type Db } from "./game-db.ts";
+import { IS_TEST } from "./testAccounts.ts";
 
 export interface LevelRow {
   name: string;
@@ -22,20 +23,22 @@ export interface MedalRow {
 }
 
 const NOT_BANNED = "NOT EXISTS (SELECT 1 FROM ban b WHERE b.user_id = a.user_id AND (b.until IS NULL OR b.until > ?))";
+/** Our own automation never ranks (D-home-6). */
+const NOT_TEST = `NOT ${IS_TEST("a.user_id")}`;
 
 /** Highest live characters (level, XP, then first there), walking `character_rank` (migration 6). */
 const TOP_LEVELS_SQL = `SELECT a.display_name AS name, c.level, c.xp, c.starter, json_extract(c.inventory_json, '$.look') AS look, a.title_medal AS titleMedal
    FROM character c CROSS JOIN account a ON a.user_id = c.user_id
   WHERE a.display_name IS NOT NULL
     AND COALESCE(json_extract(c.inventory_json, '$.dead'), 0) = 0
-    AND ${NOT_BANNED}
+    AND ${NOT_BANNED} AND ${NOT_TEST}
   ORDER BY c.level DESC, c.xp DESC, c.updated_at ASC
   LIMIT ?`;
 
 /** Most medals (ties: first to that count), walking `medal_count_rank` (migration 6). */
 const MEDAL_LEADERS_SQL = `SELECT a.display_name AS name, m.n AS medals, a.title_medal AS titleMedal
    FROM medal_count m CROSS JOIN account a ON a.user_id = m.user_id
-  WHERE m.n > 0 AND a.display_name IS NOT NULL AND ${NOT_BANNED}
+  WHERE m.n > 0 AND a.display_name IS NOT NULL AND ${NOT_BANNED} AND ${NOT_TEST}
   ORDER BY m.n DESC, m.last_at ASC
   LIMIT ?`;
 

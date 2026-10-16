@@ -86,6 +86,8 @@ interface AuthRequestState {
   otpQueued?: boolean;
   /** The client IP the queued send was asked from (its per-IP cap). */
   otpIp?: string | null;
+  /** Users this request created (a sign-in that made a new account; test-account flag, D-home-6). */
+  createdUsers?: Set<string>;
 }
 
 export const authRequestState = new AsyncLocalStorage<AuthRequestState>();
@@ -163,6 +165,18 @@ export function authOptions(d: AuthDeps) {
       },
     },
     advanced: { ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] }, ...(d.strictOrigin ? { disableOriginCheck: false, disableCSRFCheck: false } : {}) },
+    // Remember which users this request created: a test guest saved into a brand-new account keeps
+    // its test flag, an existing account never takes it (auth/accounts.ts onLink, D-home-6).
+    databaseHooks: {
+      user: {
+        create: {
+          after: async (user) => {
+            const st = authRequestState.getStore();
+            if (st) (st.createdUsers ??= new Set()).add(user.id);
+          },
+        },
+      },
+    },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
         if (!IP_CHECKED_PATHS.has(ctx.path ?? "")) return;
