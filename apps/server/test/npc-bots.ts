@@ -3,7 +3,7 @@
 
 import type { Room } from "@colyseus/sdk";
 import { matchMaker } from "@colyseus/core";
-import { BODIES, createTerrain, isSafe, nearSafeZone, padDirs, type BodyId } from "@firstlight/shared";
+import { BODIES, createTerrain, isSafe, natureSolids, nearSafeZone, padDirs, type BodyId } from "@firstlight/shared";
 import { OUTPOSTS, type OutpostBody } from "@firstlight/shared/content/padOutposts";
 import { bodyBreakables } from "@firstlight/shared/planet/breakables";
 import { outpostAnchor, siteDir, structureCollider } from "@firstlight/shared/planet/sites";
@@ -52,8 +52,9 @@ const openSpots = new Map<string, V>();
 /**
  * A dry, gentle spot outside the planet's walled arrival outpost (D-b2-1) with `ahead` metres of open
  * ground along the fixed tangent (`offset`): not in or near a safe zone, no breakable within 3 m of
- * the line and no structure across it. Round 2 walled the ground the tests used to fight on (26 m
- * off pad 0); this is the nearest such spot beyond the wall, the same on every run.
+ * the line, no structure across it and no natural solid (a trunk, a boulder: D-solid-1) on it or
+ * within a big creature's reach of it. Round 2 walled the ground the tests used to fight on (26 m off
+ * pad 0); this is the nearest such spot beyond the wall, the same on every run.
  */
 export function openSpotOutside(body: OutpostBody, ahead = 10): V {
   const key = `${body}:${ahead}`;
@@ -63,6 +64,8 @@ export function openSpotOutside(body: OutpostBody, ahead = 10): V {
   const t = createTerrain(body);
   const R = def.radius;
   const walls = structureCollider(t);
+  const nature = natureSolids(t);
+  const roomy = { radius: 1.2, height: 1.8, step: 0.35 }; // room for a big creature anywhere on the line
   const brk = bodyBreakables(t);
   const wall = OUTPOSTS[body].wall.radius;
   const ground = (p: readonly number[]) => {
@@ -87,6 +90,7 @@ export function openSpotOutside(body: OutpostBody, ahead = 10): V {
       const a0 = line[0]!, a1 = line[line.length - 1]!;
       const lift = (p: V, h: number): V => { const l = Math.hypot(...p); return [p[0] / l * (l + h), p[1] / l * (l + h), p[2] / l * (l + h)]; };
       if (walls.blocks(...lift(a0, 1.2), ...lift(a1, 1.2))) continue;
+      if (nature.crosses(...a0, ...a1) || line.some((q) => !nature.isClear({ x: q[0], y: q[1], z: q[2] }, roomy))) continue;
       const out: V = [start[0], start[1], start[2]];
       openSpots.set(key, out);
       return out;

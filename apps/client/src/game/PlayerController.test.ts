@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three/webgpu";
-import { BODIES, createTerrain, portalSpots, type Breakable, type Terrain } from "@firstlight/shared";
+import { BODIES, createTerrain, natureSolids, padDirs, portalSpots, type Breakable, type Terrain } from "@firstlight/shared";
+import { OUTPOSTS } from "@firstlight/shared/content/padOutposts";
+import { outpostAnchor, siteDir } from "@firstlight/shared/planet/sites";
 import { structureCollider, townCoords, townDir } from "@firstlight/shared/planet/town";
 import { BreakableCollider, PLAYER_BODY } from "@firstlight/shared/planet/collide";
 import type { Input } from "./input.ts";
@@ -479,5 +481,56 @@ describe("walking into the Portus portals (round 2: gate A's courts)", () => {
       });
       expect(best, `into the ${spot.to} portal`).toBeLessThan(1);
     }
+  });
+});
+
+describe("the walled outposts' rings and the controller (D-b2-1 with D-solid-1)", () => {
+  /** Into the ring from 5 m outside at `bearing` (site frame of pad 0), W held for 4 s, as the game wires it. */
+  function intoRing(body: "arcadia" | "hollowmere" | "meridian", bearing: number) {
+    const t = createTerrain(body);
+    const R = BODIES[body].radius;
+    const town = structureCollider(t)!;
+    const nature = natureSolids(t);
+    const wall = OUTPOSTS[body].wall;
+    const a = outpostAnchor(t);
+    const pc = new PlayerController(t, BODIES[body].waterLevel);
+    pc.setStructures({ resolve: (q, out) => town.resolve(q, out), raycast: (o, d, maxT) => town.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT) });
+    pc.setNature({ resolve: (q, out) => nature.resolve(q, out), raycast: (o, d, maxT) => nature.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT) });
+    const b = (bearing * Math.PI) / 180;
+    const site = (m: number) => siteDir(a, Math.sin(b) * m, Math.cos(b) * m, R);
+    const d0 = site(wall.radius + 5);
+    const g0 = t.groundHeight(d0[0], d0[1], d0[2]);
+    pc.teleport(d0[0] * (R + g0), d0[1] * (R + g0), d0[2] * (R + g0));
+    run(pc, fakeInput(), 0.5);
+    const cf = (pc as unknown as { camForward: THREE.Vector3 }).camForward;
+    const target = new THREE.Vector3(...site(wall.radius - 6)).multiplyScalar(R);
+    const aim = () => {
+      const u = pc.pos.clone().normalize();
+      const v = target.clone().sub(pc.pos);
+      cf.copy(v.addScaledVector(u, -v.dot(u)).normalize());
+    };
+    let inside = 0, crossed = false, swam = false;
+    const pad0 = new THREE.Vector3(...padDirs(BODIES[body])[0]!);
+    run(pc, fakeInput(["KeyW"]), 4, 60, () => {
+      aim();
+      if (pc.swimming) swam = true;
+      if (town.footing(pc.pos.x, pc.pos.y, pc.pos.z, PLAYER_BODY.step).inside) inside++;
+      if (pc.pos.clone().normalize().distanceTo(pad0) * R < wall.radius - 0.4) crossed = true;
+    });
+    return { inside, crossed, swam };
+  }
+
+  it.each([
+    ["arcadia", 100, false], // a land wall on the slope east of the pad
+    ["arcadia", 280, true], // the sea wall across the lake, swimming
+    ["hollowmere", 300, false],
+    ["hollowmere", 285, false], // the sea wall over the west pond's shallows, wading
+    ["meridian", 30, false],
+    ["meridian", 95, true], // the sea wall across the brine lake, swimming
+  ] as const)("%s at %d°: walking or swimming in, the feet never end a frame inside the wall nor cross it", (body, bearing, deep) => {
+    const r = intoRing(body, bearing);
+    expect(r.crossed, "crossed the ring").toBe(false);
+    expect(r.inside, "frames ending inside a wall").toBe(0);
+    if (deep) expect(r.swam, "swam up to the sea wall").toBe(true);
   });
 });

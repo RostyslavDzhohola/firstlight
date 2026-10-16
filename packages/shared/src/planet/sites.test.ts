@@ -12,6 +12,8 @@ import {
 } from "./sites.ts";
 import { createTerrain, type Terrain } from "./terrain.ts";
 import { deepWater, SWIM_FLOAT } from "./water.ts";
+import { natureSolids } from "./natureSolids.ts";
+import { SHOP_SPOTS } from "../content/shops.ts";
 import { townDir, townFrame, type TownPlacement } from "./townFrame.ts";
 
 const PLANETS: OutpostBody[] = ["arcadia", "hollowmere", "meridian"];
@@ -372,6 +374,66 @@ describe("the walled outposts' wall rings (D-b2-1)", () => {
       }
       expect(through, b).toBeGreaterThan(0);
       expect(wet, `${b}: the ring crosses water or shallows somewhere`).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("the walled outposts and the natural solids (D-b2-1 with D-solid-1)", () => {
+  it("no trunk, boulder or rock stands in a gate's passage, on the rings, a path, at a shop's counter or the walk into the portal", () => {
+    for (const b of PLANETS) {
+      const t = terrains.get(b)!;
+      const R = t.body.radius;
+      const water = t.body.waterLevel;
+      const a = outpostAnchor(t);
+      const nature = natureSolids(t);
+      const site = OUTPOSTS[b];
+      const wall = site.wall;
+      // Feet on the ground, or floating in deep water.
+      const feet = (e: number, n: number): [number, number, number] => {
+        const d = siteDir(a, e, n, R);
+        const g = t.groundHeight(d[0], d[1], d[2]);
+        const r = R + (deepWater(g, water) ? water - SWIM_FLOAT : g) + 0.02;
+        return [d[0] * r, d[1] * r, d[2] * r];
+      };
+      const clear = (e: number, n: number, what: string) => {
+        const [x, y, z] = feet(e, n);
+        expect(nature.isClear({ x, y, z }), `${b} ${what} at (${e.toFixed(1)}, ${n.toFixed(1)})`).toBe(true);
+      };
+      const walk = (e0: number, n0: number, e1: number, n1: number, what: string) =>
+        expect(nature.crosses(...feet(e0, n0), ...feet(e1, n1)), `${b} ${what}`).toBe(false);
+      // Each gate: through its passage, 6 m out to 6 m in, down the middle and 1 m either side.
+      for (const g of wall.gates) {
+        const r = (g * Math.PI) / 180;
+        const s = Math.sin(r), c = Math.cos(r);
+        for (const side of [-1, 0, 1]) {
+          const at = (m: number) => [s * m + c * side, c * m - s * side] as const;
+          walk(...at(wall.radius + 6), ...at(wall.radius - 6), `gate ${g}° passage (${side} m)`);
+        }
+      }
+      // Along the ring, 1.4 m either side of the wall's line (its outer and inner faces stay free):
+      // land walls and the sea walls over water and shallows alike.
+      const steps = Math.ceil((2 * Math.PI * wall.radius) / 0.5);
+      for (let k = 0; k < steps; k++) {
+        const r = (k / steps) * 2 * Math.PI;
+        for (const m of [wall.radius - 1.4, wall.radius + 1.4]) clear(Math.sin(r) * m, Math.cos(r) * m, `beside the ring at ${((r * 180) / Math.PI).toFixed(1)}°`);
+      }
+      // Every path's centre line.
+      for (const pa of site.paths) {
+        for (let i = 0; i + 1 < pa.pts.length; i++) {
+          const [e0, n0] = pa.pts[i]!, [e1, n1] = pa.pts[i + 1]!;
+          const n = Math.max(1, Math.ceil(Math.hypot(e1 - e0, n1 - n0) / 0.5));
+          for (let j = 0; j <= n; j++) clear(e0 + ((e1 - e0) * j) / n, n0 + ((n1 - n0) * j) / n, `path ${pa.name}`);
+        }
+      }
+      // The shop: from the pad up to 2.5 m in front of the keeper, and round the keeper's spot.
+      const [ke, kn] = site.shop.at;
+      const kl = Math.hypot(ke, kn);
+      walk(0, 0, ke - (ke / kl) * 2.5, kn - (kn / kl) * 2.5, "the walk up to the shop's counter");
+      for (let i = 0; i < 8; i++) clear(ke + Math.cos(i) * 2.5, kn + Math.sin(i) * 2.5, "round the shop");
+      expect(SHOP_SPOTS.some((x) => x.body === b), b).toBe(true);
+      // The portal: from the spawn ring into the ring's disc (8.5 m north), and the disc's surround.
+      for (const e of [-1.5, 0, 1.5]) walk(e, -4, e, 8.4, `the walk into the portal (${e} m)`);
+      for (let i = 0; i < 12; i++) clear(Math.cos(i) * 3, 8.5 + Math.sin(i) * 3, "round the portal");
     }
   });
 });
