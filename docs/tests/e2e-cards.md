@@ -23,10 +23,12 @@ AUTH_DB_PATH=/tmp/fl-e2e/auth.db GAME_DB_PATH=/tmp/fl-e2e/game.db pnpm dev
 - Sign-in codes: with no `RESEND_API_KEY` outside production, `DEV_MAIL_LOG=1` prints
   `[dev-mail] FIRSTLIGHT code for <email>: <code>` on the server's stdout. Each address gets 3 codes
   an hour, so use a new address per run.
-- **Admins** (T6): start the server with `ADMIN_CLAIM_TOKEN=<any string>`, save the character with an
-  email (T5 steps 2–5), then open `http://127.0.0.1:5611/admin/claim?token=<string>` in that
-  browser ("Done. <name> is now an admin."). A token works once; for a second admin restart with a
-  new token, or set `is_admin = 1` for that account in game.db's `account` table and rejoin.
+- **Admins** (T6): start the server with `ADMIN_CLAIM_TOKEN=<any string>`, play once in the browser
+  (guest or saved), then open `http://127.0.0.1:5611/admin/claim` there, paste the string into the
+  form and press Claim ("Done. <name> is now an admin."); reload the game. A token works once; for a
+  second admin restart with a new token, or set `is_admin = 1` for that account in game.db's
+  `account` table and rejoin. Admins get Esc → Admin (fly, god mode, speed ×2, max level, every
+  item, back to normal; D-admin-1).
 - Automation: the pointer lock can't be requested by automation, so force it on; combat, the hotbar
   and E only act while it is locked. `window.__game` exposes the game (`.hud`, `.net.room.state`).
 - Do not use `?devguest` for T5 (it hides Save).

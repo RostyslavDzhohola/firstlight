@@ -12,6 +12,7 @@ import { ANIM } from "@firstlight/shared/net/schema";
 import { deepWater, SWIM_FLOAT } from "@firstlight/shared/planet/water";
 import type { Input } from "./input.ts";
 import { mountedSpeed, rideCamera } from "./mount.ts";
+import { ADMIN_MODE } from "@firstlight/shared/content/admin";
 
 /** Solid things the player can't walk through (intact breakable props). */
 export interface MoveColliders {
@@ -109,6 +110,12 @@ export class PlayerController {
   rideBlend = 0;
   /** Riding or just off the horse (HorseClient): weapons stay lowered (CombatClient), as on the server. */
   saddleLocked = false;
+  /**
+   * Admin mode (AdminModeClient sets them from the server's `you.adminMode`; the server checks the
+   * moves): flying (Space up, C down, no gravity, no fall damage, no dodge) and the speed multiplier.
+   */
+  adminFly = false;
+  adminSpeed = 1;
   private colliders: MoveColliders | null = null;
   private structures: MoveColliders | null = null;
   private readonly contact = emptyContact();
@@ -220,13 +227,13 @@ export class PlayerController {
     const wish = _wish.set(0, 0, 0).addScaledVector(this.camForward, mz).addScaledVector(right, mx);
     if (wish.lengthSq() > 0) wish.normalize();
     const sprint = input.down("ShiftLeft") || input.down("ShiftRight");
-    const speed = this.swimming ? MOVE.swim : this.mounted ? mountedSpeed(sprint, MOVE.slow, MOVE.noSprint) : sprint && mz > 0 && !aiming ? MOVE.sprint : MOVE.run;
+    const speed = (this.swimming ? MOVE.swim : this.mounted ? mountedSpeed(sprint, MOVE.slow, MOVE.noSprint) : sprint && mz > 0 && !aiming ? MOVE.sprint : MOVE.run) * this.adminSpeed;
 
     // Dodge-roll: starts this frame (no wind-up, no server round trip; the server checks the move).
     // A press up to MOVE.dodgeBuffer early is kept; one earlier in the cooldown is dropped, never
     // stored for a roll a second later. The body turns to the roll at once, so a back or side roll
     // reads as a roll (the clip tumbles forward).
-    if (input.pressed.has("KeyC")) this.dodgeWanted = MOVE.dodgeBuffer;
+    if (input.pressed.has("KeyC") && !this.adminFly) this.dodgeWanted = MOVE.dodgeBuffer; // flying: C goes down
     const footing = this.onGround || (!this.jumped && this.airTime <= MOVE.dodgeGroundGrace);
     if (this.dodgeWanted > 0 && !this.frozen && !this.mounted && now >= this.dodgeReadyAt && footing && !this.swimming) {
       this.dodgeWanted = 0;
@@ -246,7 +253,7 @@ export class PlayerController {
       if (this.dodgeT <= 0) this.rollTail = true;
     } else {
       const target = wish.multiplyScalar(speed);
-      const a = this.onGround || this.swimming ? (this.mounted ? MOVE.mountAccel : MOVE.accel) : MOVE.airAccel;
+      const a = this.onGround || this.swimming || this.adminFly ? (this.mounted ? MOVE.mountAccel : MOVE.accel) : MOVE.airAccel;
       vH.lerp(target, Math.min(1, a * dt));
       // A roll's extra speed bleeds off at the ground rate even in the air (off an edge, or rolled
       // over one): the server's dodge reserve assumes that slowdown, and air control alone kept a
@@ -259,7 +266,12 @@ export class PlayerController {
     }
 
     let vUpNew = vUp;
-    if (this.swimming) {
+    if (this.adminFly && !this.frozen) {
+      // Flying: no gravity; Space climbs, C descends.
+      const climb = ADMIN_MODE.climbSpeed * this.adminSpeed;
+      vUpNew = (input.down("Space") ? climb : 0) - (input.down("KeyC") ? climb : 0);
+      if (vUpNew > 0) this.onGround = false;
+    } else if (this.swimming) {
       vUpNew = 0;
     } else {
       vUpNew -= MOVE.gravity * dt;
@@ -271,6 +283,12 @@ export class PlayerController {
       }
     }
     this.vel.copy(vH).addScaledVector(up, vUpNew);
+    if (this.adminFly) {
+      // The server's flying allowance counts every metre of a step, up and down included.
+      const max = ADMIN_MODE.flySpeed * this.adminSpeed;
+      const v = this.vel.length();
+      if (v > max) this.vel.multiplyScalar(max / v);
+    }
 
     // Props: shoved out sideways (and the motion into them dropped, so we slide along), or a floor.
     // The move is split into substeps short enough that a dodge, a gallop or a low frame rate can't
@@ -322,7 +340,7 @@ export class PlayerController {
       this.pos.copy(newUp).multiplyScalar(groundR);
       if (!wasOnGround) {
         const drop = this.fallStartRadius - groundR;
-        if (drop > MOVE.fallSafe && !this.swimming) this.pendingFallDamage += Math.min(1, ((drop - MOVE.fallSafe) * 0.08));
+        if (drop > MOVE.fallSafe && !this.swimming && !this.adminFly) this.pendingFallDamage += Math.min(1, ((drop - MOVE.fallSafe) * 0.08));
       }
       this.onGround = true;
       this.swimming = false;
@@ -344,6 +362,8 @@ export class PlayerController {
       this.airTime = 0;
       this.jumped = false;
     } else this.airTime += dt;
+    // Flying: a fall only counts from where flying stops (like the server).
+    if (this.adminFly) this.fallStartRadius = this.pos.length();
 
     // Face movement (or the camera when aiming; a roll keeps facing where it goes).
     const hSpeed = vH.length();
@@ -352,7 +372,7 @@ export class PlayerController {
 
     this.anim = this.dodgeT > 0 ? ANIM.DODGE
       : this.swimming ? ANIM.SWIM
-      : !this.onGround ? (this.vel.dot(newUp) > 0 ? ANIM.JUMP : ANIM.FALL)
+      : !this.onGround && !this.adminFly ? (this.vel.dot(newUp) > 0 ? ANIM.JUMP : ANIM.FALL)
       : hSpeed > 7 ? ANIM.SPRINT
       : hSpeed > 3.5 ? ANIM.RUN
       : hSpeed > 0.3 ? ANIM.WALK

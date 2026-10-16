@@ -820,3 +820,16 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   get within reach (it kept 3 m off the ring), gave up after 5 s, healed to full, and from then on
   every shot woke it into giving up again — "my hits don't work". Tested on Arcadia, Meridian and a
   Hollowmere pad, on the real server path, and against the pad shooter.
+- **D-admin-1 (2026-10-15):** admin mode for the owner's testing, admin accounts only. Esc → Admin
+  opens a panel: Fly (Space up, C down; no gravity, no fall damage; C doesn't dodge while flying;
+  not Ctrl, since Ctrl+W closes the tab, D1), God mode (no damage, full health; who the admin can
+  hurt is unchanged, so safe zones still protect others), Speed ×2 (run, sprint, swim, fly), Max
+  level, Every item (one of each usable item at the best tier for the level, in the 20 slots), an
+  armoury (any item at any tier into the hand; cosmetics into the backpack and worn), and Back to
+  normal (switches off; level, items and worn cosmetics as before, kept with the character across
+  reconnects). The server decides: the `admin` message is dropped for non-admins and the switches
+  only count for admin identities (`adminSwitch`); flying is paid from a 12 m/s 3D allowance with no
+  ballistic envelope, Speed ×2 doubles the refill and the bank. A badge on the player card says
+  what's on. The one-time claim (`/admin/claim`, a form posting `ADMIN_CLAIM_TOKEN`) now accepts a
+  guest account too (admins are never pruned as guests). Non-admin movement rules are unchanged, so
+  no protocol bump. Why: the owner wants to inspect the game fast and can't sign in by email yet.
