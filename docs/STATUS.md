@@ -11,6 +11,10 @@ flagged, D-home-6), walled arrival outposts with house A, portal gates A and B, 
 stilt shelter (D-b2-1..5), and solid trees and rocks (D-solid-1/2). Open: whether creeps beyond the outpost
 walls are visible enough from inside; a WebGL dip to ~52 fps on Hollowmere; close trunks can hide the
 avatar; the `?meadow` look waits for the owner's OK; the "turbo granny" boss is parked as issue #2.
+**Since (main 05b956b):** Resend verified (email sign-in/saving works), Follow on 𝕏 → @dzhohola, DataFast
+placeholder until the site id arrives; occluders fade between camera and player (D-view-1); the Hollowmere
+WebGL dip documented as Chrome/GPU present stalls (D-view-2); Kappa B hands and B-look stirrups (D-chars-4);
+the tutorial end card counts only while the world is on screen.
 
 **Resumed 2026-10-15 ("go"); live at main 28e6683, protocol 4.** Merged and deployed today, each after
 Codex gpt-6.1-sol review (and CodeRabbit for small fixes):
