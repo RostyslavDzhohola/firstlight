@@ -182,7 +182,7 @@ export class NatureSolids {
     const al = Math.hypot(ax, ay, az);
     ax /= al; ay /= al; az /= al;
     const bx = uy * az - uz * ay, by = uz * ax - ux * az, bz = ux * ay - uy * ax;
-    for (const f of [0.5, 1]) {
+    for (let f = 0.5; f <= 1; f += 0.5) {
       for (let i = 0; i < 8; i++) {
         const c = COS8[i]! * r * f, s = SIN8[i]! * r * f;
         this.addKey(x + ax * c + bx * s, y + ay * c + by * s, z + az * c + bz * s);
