@@ -4,7 +4,8 @@
 // giving up again at once (the pad-shooter rule), so 19–24 carbine hits never killed a 22 HP Hopbit
 // (e2e, Arcadia). Now a chase may come right up to a ring's edge after a target outside it, so that
 // target is fought; a target inside the ring is still out of reach (no pad cheese), and creeps that
-// aren't chasing keep the full margin.
+// aren't chasing keep the full margin. Round 2 (D-b2-1) walled pad 0's outpost, its ring inside the
+// walls, so these run at the planets' other pads.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Room } from "@colyseus/sdk";
@@ -54,7 +55,7 @@ describe("creeps and the pad rings, unit (D-evade-1)", () => {
     return -1;
   }
 
-  for (const [body, pad, bearing] of [["arcadia", 0, 120], ["meridian", 0, 150], ["hollowmere", 3, 40]] as const) {
+  for (const [body, pad, bearing] of [["arcadia", 1, 120], ["meridian", 1, 150], ["hollowmere", 3, 40]] as const) {
     it(`${body} pad ${pad}: a Hopbit chasing a player 1.8 m outside the ring reaches them and keeps fighting, never giving up`, () => {
       const w = fakeWorld(body, { immortal: true });
       const p = w.addPlayer("hexwick", fromPad(w, body, pad, PAD_SAFE_RADIUS + 1.8, bearing), 1);
@@ -78,8 +79,8 @@ describe("creeps and the pad rings, unit (D-evade-1)", () => {
 
   it("a combat-tagged player shooting from inside the ring is still out of reach: the creep gives up, and at once when woken again", () => {
     const w = fakeWorld("arcadia", { immortal: true });
-    const p = w.addPlayer("padshooter", fromPad(w, "arcadia", 0, 8, 120), 1);
-    const n = w.sys.createNpc(NPC_INDEX.get("bonewalker")!, 3, fromPad(w, "arcadia", 0, 20, 120), w.clock.t, { instant: true }) as Npc;
+    const p = w.addPlayer("padshooter", fromPad(w, "arcadia", 1, 8, 120), 1);
+    const n = w.sys.createNpc(NPC_INDEX.get("bonewalker")!, 3, fromPad(w, "arcadia", 1, 20, 120), w.clock.t, { instant: true }) as Npc;
     dealDamage(w.world.host, p, n, 1, false);
     const first = run(w, 12_000, () => n.mode === MODE.EVADE);
     expect(first).toBeGreaterThan(NPC_TUNING.unreachableMs - 100);
@@ -94,15 +95,15 @@ describe("creeps and the pad rings, unit (D-evade-1)", () => {
   it("creeps that aren't chasing keep the full 3 m off the ring; one a chase left inside it walks out", () => {
     const w = fakeWorld("arcadia", { immortal: true });
     // Left 0.9 m from the ring by a chase that just ended: it goes home through the band.
-    const n = w.sys.createNpc(NPC_INDEX.get("woolback")!, 1, fromPad(w, "arcadia", 0, 25, 120), w.clock.t, { instant: true }) as Npc;
-    n.pos = fromPad(w, "arcadia", 0, PAD_SAFE_RADIUS + 0.9, 120);
+    const n = w.sys.createNpc(NPC_INDEX.get("woolback")!, 1, fromPad(w, "arcadia", 1, 25, 120), w.clock.t, { instant: true }) as Npc;
+    n.pos = fromPad(w, "arcadia", 1, PAD_SAFE_RADIUS + 0.9, 120);
     w.sys.setMode(n, MODE.RETURN, w.clock.t);
     const home = run(w, 15_000, () => n.mode !== MODE.RETURN);
     expect(home).toBeGreaterThan(0);
     // Wandering (it roams round its home 25 m out) it never steps back into the band.
     let closest = Infinity;
     run(w, 30_000, () => {
-      closest = Math.min(closest, padDistance("arcadia", 0, n.pos));
+      closest = Math.min(closest, padDistance("arcadia", 1, n.pos));
     });
     expect(closest).toBeGreaterThan(PAD_SAFE_RADIUS + NPC_RULES.safeMargin + n.radius - 0.05);
   });
@@ -119,10 +120,10 @@ describe("creeps and the pad rings, real server path (D-evade-1)", () => {
     await game.close();
   });
 
-  it("a new player just outside Dawnpad's ring kills a Hopbit that has been trying to reach them, in a few shots", async () => {
-    const at = fromPad(null, "arcadia", 0, PAD_SAFE_RADIUS + 1.8, 120);
+  it("a new player just outside a pad's ring kills a Hopbit that has been trying to reach them, in a few shots", async () => {
+    const at = fromPad(null, "arcadia", 1, PAD_SAFE_RADIUS + 1.8, 120);
     const r = await adminBot(game, rooms, "hexquill", "arcadia", at, 1);
-    const id = await spawnNpc(r, "hopbit", fromPad(null, "arcadia", 0, PAD_SAFE_RADIUS + 9, 120), { level: 1, instant: true });
+    const id = await spawnNpc(r, "hopbit", fromPad(null, "arcadia", 1, PAD_SAFE_RADIUS + 9, 120), { level: 1, instant: true });
     const npc = () => st(r).npcs?.get(id);
     // It notices and keeps trying to reach the player for longer than the 5 s give-up clock.
     await waitFor(() => !!npc() && (npc().flags & NF.AGGRO) !== 0, 6000);

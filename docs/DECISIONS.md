@@ -820,3 +820,42 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   get within reach (it kept 3 m off the ring), gave up after 5 s, healed to full, and from then on
   every shot woke it into giving up again — "my hits don't work". Tested on Arcadia, Meridian and a
   Hollowmere pad, on the real server path, and against the pad shooter.
+- **D-b2-1 (buildings-2, 2026-10-15):** every planet's arrival outpost is walled: a ring of wall
+  round pad 0 (Arcadia 32 m, Hollowmere 42 m, Meridian 48 m to the wall's centre line) with three
+  gates each (`OUTPOSTS[body].wall`); stretches over water are left out, the shore closes the ring.
+  Inside the ring is a safe zone that protects at once, like the Portus town (D-zones-3): no combat
+  tag, no damage in or out; outside is wild. Pad 0's 12 m ring folds into it (no ring drawn; the
+  zone still reports the ring index, so pad discovery and fast travel keep their rule); the other
+  pads keep their rings. The border is drawn across the gate passages; the compass and the zone
+  label ("Dawnpad outpost") use the gates. NPC groups start outside with the NPC margin (plus a
+  hostile's wander room) to spare; the arrival herds and packs move out past the wall. Arcadia's
+  farmstead (barn, windmill, haystacks) stays outside, in the fields, so the outposts' chase and
+  sight tests still have a barn out in the open. Pad 0's cover breakables now stand inside a zone
+  where nobody fires: they stay in the pinned list and just don't get broken there. Perches inside
+  the walls are tolerated (nobody fights there); the wall itself is no perch. `PROTOCOL_VERSION` 5
+  (new colliders and a wider protected zone the server enforces). Why: the owner wants the arrival
+  outposts "walled in, so there's clear separation" like the Portus castle.
+- **D-b2-2 (buildings-2, 2026-10-15):** both portal gates, on different planets: the Opus gate A
+  (floating arch, destination globe) stands in Portus' three portal courts and on Meridian's pad;
+  Astra's pale stone arch (gate B) on Arcadia's and Hollowmere's, scaled ×1.49 so the game's 2.2 m
+  ring clears its piers. The game fills gate A's opening with a swirling arched membrane (TSL) instead
+  of the ring and disc (the ring comes back on Meridian if the outpost models aren't drawn); gate B
+  keeps the ring. Portal positions and the entry test are unchanged. Why: the owner picked both "on
+  different planets"; gate A's sci-fi arch suits Portus' hub and Meridian, gate B's stone the farm and
+  the fen.
+- **D-b2-3 (buildings-2, 2026-10-15):** a shop stall inside every outpost's walls, facing the pad
+  (Arcadia south-west by the shrine path, Hollowmere south, Meridian west in front of Waystation
+  Nine); `OUTPOSTS[body].shop.at` is the keeper's spot behind the counter. Portus keeps Juno's stall.
+  The shops lane's `SHOP_SPOTS` (content/shops.ts, not on main yet) take the keepers' world positions
+  from it. Why: the owner wants a shop in every safe zone.
+- **D-b2-4 (buildings-2, 2026-10-15):** Waystation Nine (Opus) replaces Meridian's courier depot, on
+  the flattest ground west of the pad (0.55 m across its 17 × 13 m plinth); the stilt shelter
+  (Astra) replaces Hollowmere's ferry shed by the pond; the Opus market house replaces Portus' four
+  houses on the same plots with the same colliders (a 0.4 m smaller footprint so the counters and
+  steps stay inside), LOD1 without the small parts. Why: the owner's picks, without moving anything
+  the server or the tests rely on.
+- **D-b2-5 (buildings-2, 2026-10-15):** round-2 pieces ship as vertex colour over five `OK_*` slots
+  (white layer) with ambient occlusion, a little grime and noise baked into the colours; glow slots
+  use the town material's glow mode, glass lights up at night. Why: the town material has no
+  environment map, so unbaked flat colours read flat in the browser; baking keeps the pieces in the
+  existing two-draw town and outpost meshes.

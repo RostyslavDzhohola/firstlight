@@ -4,7 +4,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Room } from "@colyseus/sdk";
 import { BODIES, createTerrain, portalSpots } from "@firstlight/shared";
 import type { Game } from "../src/app.ts";
+import { PLAYER_BODY } from "@firstlight/shared/planet/collide";
+import { structureCollider } from "@firstlight/shared/planet/sites";
 import { joinAs, playRequest, safeLeave, startServer, waitFor } from "./helpers.ts";
+import { openSpotOutside } from "./npc-bots.ts";
 
 let game: Game;
 const rooms: Room[] = [];
@@ -24,6 +27,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Walk along the ground to `target` at `speed` m/s, sending 20 Hz inputs like the real client. */
 async function walkTo(r: Room, target: [number, number, number], speed = 6) {
   const terrain = createTerrain(BODIES.portus);
+  const walls = structureCollider(terrain);
   const R = BODIES.portus.radius;
   let corrected = false;
   r.onMessage("correct", () => (corrected = true));
@@ -33,12 +37,17 @@ async function walkTo(r: Room, target: [number, number, number], speed = 6) {
   for (let i = 0; i < 400; i++) {
     const d = [target[0] - pos[0]!, target[1] - pos[1]!, target[2] - pos[2]!];
     const dist = Math.hypot(d[0]!, d[1]!, d[2]!);
-    if (dist < 0.4) break;
+    // Along the ground (the feet may stand on a step over the target's ground height).
+    const lp = Math.hypot(pos[0]!, pos[1]!, pos[2]!), lt = Math.hypot(...target);
+    if (Math.hypot(pos[0]! / lp - target[0] / lt, pos[1]! / lp - target[1] / lt, pos[2]! / lp - target[2] / lt) * R < 0.4) break;
     const step = Math.min(dist, speed * 0.05);
     const n = [pos[0]! + (d[0]! / dist) * step, pos[1]! + (d[1]! / dist) * step, pos[2]! + (d[2]! / dist) * step];
     const l = Math.hypot(n[0]!, n[1]!, n[2]!);
     const u = [n[0]! / l, n[1]! / l, n[2]! / l];
-    const h = R + terrain.groundHeight(u[0]!, u[1]!, u[2]!);
+    // Feet on the ground, or on a walkable top in the way (round 2: the portal courts' dais steps).
+    const g = R + terrain.groundHeight(u[0]!, u[1]!, u[2]!);
+    const top = walls.footing(u[0]! * (g + 1.5), u[1]! * (g + 1.5), u[2]! * (g + 1.5), PLAYER_BODY.step).top;
+    const h = Math.max(g, top + 0.02);
     pos = [u[0]! * h, u[1]! * h, u[2]! * h];
     r.send("input", { seq: ++seq, x: pos[0], y: pos[1], z: pos[2], fx: d[0]! / dist, fy: d[1]! / dist, fz: d[2]! / dist, anim: 1, t: Date.now() });
     await sleep(50);
@@ -105,7 +114,9 @@ describe("server-timed bow draw (D26)", () => {
     const k = side[0]! * up[0]! + side[1]! * up[1]! + side[2]! * up[2]!;
     const t = [side[0]! - k * up[0]!, side[1]! - k * up[1]!, side[2]! - k * up[2]!];
     const tl = Math.hypot(t[0]!, t[1]!, t[2]!);
-    a.send("admin", { cmd: "teleport", args: { x: p.x + (t[0]! / tl) * 30, y: p.y + (t[1]! / tl) * 30, z: p.z + (t[2]! / tl) * 30 } });
+    // Out through the walled outpost (D-b2-1) to open ground.
+    const out = openSpotOutside("arcadia");
+    a.send("admin", { cmd: "teleport", args: { x: out[0], y: out[1], z: out[2] } });
     a.send("admin", { cmd: "give", args: { id: "longbow" } });
     await waitFor(() => !(me(a).flags & 2)); // not SAFE
     await sleep(200);

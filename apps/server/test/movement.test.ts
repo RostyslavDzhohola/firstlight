@@ -1,6 +1,7 @@
 // Seam 1: server movement validation (review F12 B1 flight, S3 swimming, uncharged tolerance).
 // Bots send positions like the real client (PlayerController physics: gravity 18, jump 6.6 m/s).
 
+import { OUTPOSTS, type OutpostBody } from "@firstlight/shared/content/padOutposts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Room } from "@colyseus/sdk";
 import { BODIES, createTerrain, padDirs } from "@firstlight/shared";
@@ -681,7 +682,8 @@ describe("sprinting over real terrain like the client (F12 Codex re-review S1)",
     rooms.push(r);
     await waitFor(() => !!me(r));
     const sys = (matchMaker.getLocalRoomById(r.roomId) as unknown as BodyRoom).systems.find((x) => x instanceof DestructionSystem) as DestructionSystem;
-    // A dry, prop-free 80 m line from 20 m off the main pad, picking the bearing with the most climb.
+    // A dry, prop-free 80 m line from just outside the walled outpost round the main pad (D-b2-1),
+    // picking the bearing with the most climb.
     const pad = padDirs(def)[0]! as V3;
     let best: { start: V3; t: V3; climb: number } | null = null;
     for (let k = 0; k < 24; k++) {
@@ -689,7 +691,7 @@ describe("sprinting over real terrain like the client (F12 Codex re-review S1)",
       const t0 = tangent(pad);
       const s0 = norm([pad[1] * t0[2] - pad[2] * t0[1], pad[2] * t0[0] - pad[0] * t0[2], pad[0] * t0[1] - pad[1] * t0[0]]);
       const t: V3 = norm([t0[0] * Math.cos(a) + s0[0] * Math.sin(a), t0[1] * Math.cos(a) + s0[1] * Math.sin(a), t0[2] * Math.cos(a) + s0[2] * Math.sin(a)]);
-      const start = walk(pad, t, 20);
+      const start = walk(pad, t, OUTPOSTS[body as OutpostBody].wall.radius + 6);
       let ok = true, climb = 0, prev = gR(start);
       for (let m = 0; m <= 80 && ok; m += 1) {
         const d = walk(start, t, m);
