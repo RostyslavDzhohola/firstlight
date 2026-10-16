@@ -1,6 +1,7 @@
 // Message contract between client and server. Server validates every client message with zod;
 // these types are the shape both sides agree on.
 
+import type { AdminModeState } from "../content/admin.ts";
 import type { BodyId } from "../planet/bodies.ts";
 import type { CosmeticSlot } from "../content/items.ts";
 import type { HallLine } from "../content/secrets.ts";
@@ -213,6 +214,8 @@ export interface YouState {
   cosmeticsExtras?: boolean;
   /** Onboarding in progress (Portus only): hits on each training dummy. Absent once done or skipped. */
   onboarding?: { hits: number[] };
+  /** Admin accounts only: the admin-mode switches (content/admin.ts). */
+  adminMode?: AdminModeState;
 }
 
 export interface InvItem {

@@ -7,7 +7,7 @@ import { WEAPONS, WEAPON_INDEX, type Destroys, type TierStats, type WeaponDef } 
 import type { Terrain } from "@firstlight/shared";
 import { NET } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
-import { actorPos, mountedAt, positionAgo, type Actor, type ImmuneWhy, type NpcActor, type PlayerActor } from "./actors.ts";
+import { actorPos, adminSwitch, mountedAt, positionAgo, type Actor, type ImmuneWhy, type NpcActor, type PlayerActor } from "./actors.ts";
 import { noteKnockback } from "./movement.ts";
 import { dist3, HEAD_FROM, inMeleeArc, PLAYER_HEIGHT, PLAYER_RADIUS, rayCapsule, rayTerrain, type V3 } from "./geometry.ts";
 import { splashShield, type BubbleHost } from "./support.ts";
@@ -664,6 +664,8 @@ export function melee(host: CombatHost, p: PlayerActor, heavy: boolean): FireRes
 export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | null, target: Actor, amount: number, weak: boolean, fromDir?: V3, knockback?: number): boolean {
   const now = host.now();
   if (!canHurt(attacker, target, now, host)) return false;
+  // Admin god mode (D-admin-1): the admin takes nothing. It changes nothing about who the admin can hurt.
+  if (target.kind === "player" && adminSwitch(target, "god")) return false;
   let dmg = amount;
   if (target.kind === "player") {
     if (target.blocking && fromDir) {

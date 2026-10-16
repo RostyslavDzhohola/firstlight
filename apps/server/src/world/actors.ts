@@ -88,6 +88,13 @@ export interface PlayerActor {
   mountChangedAt?: number;
   /** NPC status effects enforced by movement validation (see npc/effects.ts). */
   npcFx?: NpcMoveFx;
+  /** Admin mode switches (adminMode.ts); they only count while `identity.admin` (adminSwitch). */
+  adminMode?: { fly: boolean; god: boolean; speed: boolean };
+}
+
+/** Is this admin-mode switch on for `a`? Never for a non-admin, whatever the actor holds. */
+export function adminSwitch(a: PlayerActor, k: "fly" | "god" | "speed"): boolean {
+  return !!a.identity?.admin && !!a.adminMode?.[k];
 }
 
 /** Why a hit on an NPC dealt nothing (ServerMessages `immune`); unset = an unspecified cause. */

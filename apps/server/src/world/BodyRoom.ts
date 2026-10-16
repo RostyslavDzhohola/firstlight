@@ -13,7 +13,7 @@ import { NET, PHRASES, type InvItem, type YouState } from "@firstlight/shared/ne
 import { ANIM, BodyState, NpcState, PF, PileState, PlayerState } from "@firstlight/shared/net/schema";
 import { z } from "zod";
 import type { Identity } from "../auth/identity.ts";
-import { actorPos, inSaddle, pushHistory, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
+import { actorPos, adminSwitch, inSaddle, pushHistory, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
 import { characterRepo, withTx } from "./characters.ts";
 import { SWIM_FLOAT } from "@firstlight/shared/planet/water";
 import { structureCollider, type StructureCollider } from "@firstlight/shared/planet/town";
@@ -651,10 +651,12 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     a.lastInputAt = now;
     // NPC slows / Cease-and-Desist (npc/effects.ts) and riding (horses) set the refill; see movement.ts.
     const r = validateMove(a, msg, this.moveWorld, moveLimits(a, now), now);
+    const flying = adminSwitch(a, "fly");
     if (!r.ok) {
       a.violations++;
-      // Refused while airborne: the server applies gravity instead of holding the body up there.
-      const at = settle(a, this.moveWorld, now) ?? [a.lastX, a.lastY, a.lastZ];
+      // Refused while airborne: the server applies gravity instead of holding the body up there
+      // (an admin flying stays where it was).
+      const at = (flying ? null : settle(a, this.moveWorld, now)) ?? [a.lastX, a.lastY, a.lastZ];
       client.send("correct", { x: at[0], y: at[1], z: at[2], seq: msg.seq });
       p.seq = msg.seq;
       return;
@@ -664,9 +666,10 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     // Server-side fall damage from the validated trajectory.
     if (!grounded) {
       a.airborne = true;
-      a.peakRadius = Math.max(a.peakRadius, len);
+      // Flying (admin mode): a fall only counts from where flying stopped.
+      a.peakRadius = flying ? len : Math.max(a.peakRadius, len);
     } else {
-      if (a.airborne && !swimmingOk) {
+      if (a.airborne && !swimmingOk && !flying) {
         const drop = a.peakRadius - (R + ground);
         const frac = fallDamageFraction(drop);
         if (frac > 0) dealDamage(this.host, null, a, frac * maxHp(a.char.level), false);
@@ -1246,7 +1249,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
    * resolved here, fall damage included (F12 re-review S3). The client hears where it ended up.
    */
   private idleGravity(a: PlayerActor, now: number, connected: boolean) {
-    if (a.dead) return;
+    if (a.dead || adminSwitch(a, "fly")) return; // an admin flying hovers
     if (!a.airborne) {
       if (heightAboveSupport(a, this.moveWorld) <= MOVE.groundedAbove) return;
       startFall(a, now);

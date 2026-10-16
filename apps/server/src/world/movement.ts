@@ -15,7 +15,8 @@
 import { HORSE, rideSpeed } from "@firstlight/shared/content/horse";
 import { ANIM } from "@firstlight/shared/net/schema";
 import { deepWater, SWIM_FLOAT } from "@firstlight/shared/planet/water";
-import { inSaddle, type PlayerActor } from "./actors.ts";
+import { ADMIN_MODE } from "@firstlight/shared/content/admin";
+import { adminSwitch, inSaddle, type PlayerActor } from "./actors.ts";
 import type { V3 } from "./geometry.ts";
 import { activeMoveFx, movementLimits } from "./npc/effects.ts";
 
@@ -76,6 +77,13 @@ export interface MoveLimits {
    * HORSE.budgetCap and there is no dodge. Set while mounted and during the dismount grace.
    */
   ride?: number;
+  /** Admin Speed ×2 (D-admin-1): multiplies the refill and the bank. Admins with the switch on only. */
+  boost?: number;
+  /**
+   * Admin flying (D-admin-1): no ballistic envelope, and every metre of the step, up and down
+   * included, is paid from a flying allowance (ADMIN_MODE.flySpeed). Admins with the switch on only.
+   */
+  fly?: boolean;
 }
 
 /**
@@ -84,10 +92,13 @@ export interface MoveLimits {
  * the client is a round trip behind).
  */
 export function moveLimits(a: PlayerActor, now: number): MoveLimits {
-  const limits = movementLimits(a, now);
-  if (!inSaddle(a, now)) return limits;
-  const fx = activeMoveFx(a, now);
-  return { speed: limits.speed, dodge: 0, ride: rideSpeed(true, fx.slow, fx.noSprint) };
+  const base = movementLimits(a, now);
+  const fx = inSaddle(a, now) ? activeMoveFx(a, now) : null;
+  const limits: MoveLimits = fx ? { speed: base.speed, dodge: 0, ride: rideSpeed(true, fx.slow, fx.noSprint) } : base;
+  // Admin mode: only for admin identities with the switch on (adminSwitch); everyone else as before.
+  if (adminSwitch(a, "speed")) limits.boost = ADMIN_MODE.speedMult;
+  if (adminSwitch(a, "fly")) limits.fly = true;
+  return limits;
 }
 
 export type MoveResult =
@@ -158,8 +169,10 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
   // horse speed and a bigger bank while riding.
   const inWater = swimming && a.swimming;
   const riding = limits.ride !== undefined;
-  const speed = (riding ? limits.ride! : (inWater ? MOVE.swimSpeed : MOVE.maxSpeed) * limits.speed) * MOVE.speedSlack;
-  const cap = riding ? HORSE.budgetCap : inWater ? MOVE.swimBudgetCap : MOVE.budgetCap;
+  const fly = !!limits.fly;
+  const boost = limits.boost ?? 1;
+  const speed = (riding ? limits.ride! : fly ? ADMIN_MODE.flySpeed : (inWater ? MOVE.swimSpeed : MOVE.maxSpeed) * limits.speed) * boost * MOVE.speedSlack;
+  const cap = (riding ? HORSE.budgetCap : fly ? (MOVE.budgetCap * ADMIN_MODE.flySpeed) / MOVE.maxSpeed : inWater ? MOVE.swimBudgetCap : MOVE.budgetCap) * boost;
   const refilled = a.moveBudget + speed * elapsed;
   a.moveBudget = Math.min(cap, refilled);
   // The dodge reserve refills over one dodge cooldown, whatever the bank does: an honest player
@@ -183,8 +196,8 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
   // ...and so is a step whose path goes through one with both ends outside (a thin fence; F12 final S2).
   if (!swimming && w.crosses?.(a.lastX, a.lastY, a.lastZ, m.x, m.y, m.z)) return { ok: false, reason: "prop" };
   const grounded = swimming || above <= MOVE.groundedAbove;
-  if (!grounded && !(len <= airCeiling(a, now))) return { ok: false, reason: "height" };
-  if (grounded && onPropTop && !reachesTop(a, w, ground, len, now)) return { ok: false, reason: "height" };
+  if (!fly && !grounded && !(len <= airCeiling(a, now))) return { ok: false, reason: "height" };
+  if (!fly && grounded && onPropTop && !reachesTop(a, w, ground, len, now)) return { ok: false, reason: "height" };
 
   const dx = m.x - a.lastX, dy = m.y - a.lastY, dz = m.z - a.lastZ;
   const dist = Math.hypot(dx, dy, dz);
@@ -192,7 +205,7 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
   // its tangent plane and then snaps onto the terrain or a prop top at any slope. Height is the
   // envelope's business: supported climbing follows the ground, airborne lift is bounded above.
   const radial = len - Math.hypot(a.lastX, a.lastY, a.lastZ);
-  const charged = Math.sqrt(Math.max(0, dist * dist - radial * radial));
+  const charged = fly ? dist : Math.sqrt(Math.max(0, dist * dist - radial * radial));
   if (!(charged <= a.moveBudget + a.moveBonus + MOVE.stepTolerance)) return { ok: false, reason: "speed" };
 
   // Allowed: spend the expiring bonus first, then the budget (which may dip by the tolerance).
@@ -200,7 +213,8 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
   a.moveBonus -= fromBonus;
   a.moveBudget -= charged - fromBonus;
   a.swimming = swimming;
-  if (grounded) groundMotion(a, len, now);
+  // Flying keeps the envelope where the body is: switched off mid-air, it falls from there.
+  if (grounded || fly) groundMotion(a, len, now);
   return { ok: true, swimming, grounded, len, ground };
 }
 
