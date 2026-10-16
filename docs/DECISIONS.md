@@ -820,3 +820,28 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   get within reach (it kept 3 m off the ring), gave up after 5 s, healed to full, and from then on
   every shot woke it into giving up again — "my hits don't work". Tested on Arcadia, Meridian and a
   Hollowmere pad, on the real server path, and against the pad shooter.
+- **D-solid-1 (run, 2026-10-15):** the natural props are solid. Tree trunks (oak, pine, dead tree,
+  blossom), boulders, spires and rocks at scale ≥ 0.85 block movement on the client and the server
+  as upright cylinders (radius from PROP_DEFS × scale, a little narrower for the round ones;
+  colliders stop at 5 m, above any top a player can reach). They come from the same deterministic
+  placement the client draws (`solidChunkProps` is exactly the solid subset of `chunkProps`), built
+  lazily per terrain chunk and cached per body (`planet/natureSolids.ts`); queries round a point are
+  allocation-free once its chunks are built, the server builds one chunk round one player per tick
+  ahead and the client builds the arrival's chunks behind the loading screen, then one a frame. Counts:
+  Portus 1,595 (1,363 blossom trees, 232 rocks), Arcadia 24,950 (18,430 oaks, 4,141 pines, 550
+  boulders, 1,829 rocks), Hollowmere 34,794 (21,689 dead trees, 8,737 oaks, 792 boulders, 3,576
+  rocks), Meridian 13,758 (2,040 spires, 4,011 boulders, 7,707 rocks). Walk-through on purpose:
+  bushes, ferns, flowers, mushrooms, reeds, scrub and small rocks (no snagging), NPCs and other
+  players (no body-blocking), the mission guides (people, with a staff; no stand), and the Easter-egg
+  props (a solid shape could wall off an egg's trigger: E6's well has to be entered). Already solid
+  before: the Portus town's 307 structure solids (stalls, wells, lamp posts, signposts, crates,
+  barrels, benches, fences, trees, the wagon), the outposts and waystones (46 / 50 / 62 solids) and
+  the breakables while intact (220 / 166 / 256: fences, crates, barrels, camp walls, pillars,
+  statues, cover); new: Juno's counter at the Portus Exchange (a structure solid like the Hall
+  board's stand). The server's movement checks (footing, crossing), placement (`placeBody`: saves,
+  teleports, the spawn ring) and NPC steering (NPCs up to 1.2 m wide follow round them, leaps land
+  clear) use them; combat doesn't (shots and sight pass between trunks as before). The camera stops
+  short of boulders and spires (not trunks). Walking dead-centre into a trunk stops you, as anywhere;
+  off-centre you slide round it. `PROTOCOL_VERSION` 5 (an older client walks through trees and
+  would be corrected at each one): deploy the client first, then the server. Why: the owner, "a lot
+  of elements walk through … if you run into them they have to be physical elements".
