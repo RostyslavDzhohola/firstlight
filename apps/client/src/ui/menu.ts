@@ -6,7 +6,7 @@
 
 import "./menu.css";
 import { PF } from "@firstlight/shared/net/schema";
-import { STARTERS } from "@firstlight/shared/content/weapons";
+import { STARTER_LOOKS, STARTERS } from "@firstlight/shared/content/weapons";
 import type { Game } from "../game/Game.ts";
 import { openSaveProgress } from "./account.ts";
 import { onAccountChange, saveStatus } from "../net/auth.ts";
@@ -209,6 +209,29 @@ export class Menu {
     const who = el("div", "", id);
     el("b", "", who, me?.name || "You");
     const sub = el("span", "", who, [STARTERS[me?.starter ?? 0]?.name, me ? `Level ${me.level}` : null].filter(Boolean).join(" · "));
+    // Kappa and Unit 7 have two looks: switch any time (cosmetic; the server checks it).
+    const looks = me ? (STARTER_LOOKS[me.starter] ?? []) : [];
+    if (me && looks.length > 1) {
+      const row = el("div", "fl-menu__looks", who);
+      row.setAttribute("role", "radiogroup");
+      row.setAttribute("aria-label", "Look");
+      const mark = (cur: number) => row.querySelectorAll("button").forEach((b, k) => {
+        b.classList.toggle("is-on", k === cur);
+        b.setAttribute("aria-checked", String(k === cur));
+      });
+      looks.forEach((l, k) => {
+        const b = button(l.name, "fl-menu__look", row);
+        b.setAttribute("role", "radio");
+        b.onclick = () => {
+          this.game.net.room?.send("look", { look: k });
+          localStorage.setItem("fl.look", String(k));
+          const px = face.querySelector(".px");
+          if (px) px.className = `px px-${portraitSprite(me.starter, k)}`;
+          mark(k);
+        };
+      });
+      mark(me.look ?? 0);
+    }
 
     this.zone = el("div", "fl-menu__zone", left);
     el("h1", "", left, "The world doesn't pause.");
