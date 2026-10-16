@@ -303,6 +303,10 @@ export class PlayerController {
       const h = dt / steps;
       for (let k = 0; k < steps; k++) {
         this.pos.addScaledVector(this.vel, h);
+        // Feet never below the ground mid-frame: uphill a step along the old tangent plane ends under
+        // it, where a solid on the slope (its base is the ground at its centre) is checked against
+        // feet lower than they will stand, and the snap below then lifted them into it (Codex review).
+        if (!this.swimming) this.liftToGround(R);
         if (this.colliders) this.colliders.resolve(this.pos, c);
         else resetContact(c);
         if (c.pushed) this.slide(c, vH);
@@ -364,6 +368,9 @@ export class PlayerController {
       if (!this.onGround) this.fallStartRadius = Math.max(this.fallStartRadius, r);
     }
 
+    // Where the snap put the feet: clear of the solids (the server refuses feet inside one).
+    if (this.structures || this.nature) this.clearAfterSnap(R, vH);
+
     if (this.onGround || this.swimming) {
       this.airTime = 0;
       this.jumped = false;
@@ -381,6 +388,48 @@ export class PlayerController {
       : hSpeed > 3.5 ? ANIM.RUN
       : hSpeed > 0.3 ? ANIM.WALK
       : ANIM.IDLE;
+  }
+
+  /** Lift feet that are under the terrain up onto it (radially). */
+  private liftToGround(R: number) {
+    const l = this.pos.length();
+    const g = R + this.terrain.groundHeight(this.pos.x / l, this.pos.y / l, this.pos.z / l);
+    if (l < g) this.pos.multiplyScalar(g / l);
+  }
+
+  /**
+   * After the frame's ground snap: push the feet out of any structure or natural solid they ended
+   * in (sliding along it), and if that moved them, onto the ground there.
+   */
+  private clearAfterSnap(R: number, vH: THREE.Vector3) {
+    let moved = false;
+    for (let pass = 0; pass < 2; pass++) {
+      let pushed = false;
+      if (this.structures) {
+        const sc = this.structureContact;
+        this.structures.resolve(this.pos, sc);
+        if (sc.pushed) {
+          this.slide(sc, vH);
+          pushed = true;
+        }
+      }
+      if (this.nature) {
+        const nc = this.natureContact;
+        this.nature.resolve(this.pos, nc);
+        if (nc.pushed) {
+          this.slide(nc, vH);
+          pushed = true;
+        }
+      }
+      if (!pushed) break;
+      moved = true;
+      if (this.onGround && !this.swimming) {
+        const l = this.pos.length();
+        const g = R + this.terrain.groundHeight(this.pos.x / l, this.pos.y / l, this.pos.z / l);
+        if (g > l || l - g < 0.35) this.pos.multiplyScalar(g / l);
+      }
+    }
+    if (moved && this.onGround) this.fallStartRadius = this.pos.length();
   }
 
   /** Over-the-shoulder camera. */

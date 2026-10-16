@@ -35,6 +35,9 @@ const CLEAR_MARGIN = 0.02;
  * above it would only widen every query's broadphase (their bounding spheres).
  */
 export const SOLID_MAX_HEIGHT = 5;
+/** A solid reaches at most this far (m) below its base (chunkSolids), and this much below the lowest ground round it. */
+const SOLID_MAX_SINK = 4;
+const SINK_SLACK = 0.15;
 /** Natural solids at least this wide stop the camera (boulders, spires); trunks don't. */
 export const CAMERA_SOLID_RADIUS = 1.2;
 
@@ -55,14 +58,28 @@ function chunkSolids(terrain: Terrain, face: Face, cx: number, cy: number): Natu
     const fl = Math.hypot(fx, fy, fz);
     fx /= fl; fy /= fl; fz /= fl;
     const rx = uy * fz - uz * fy, ry = uz * fx - ux * fz, rz = ux * fy - uy * fx;
-    const height = Math.min(s.height, SOLID_MAX_HEIGHT);
+    // On a slope the ground falls away below the base (the ground at the centre) on the downhill
+    // side: the cylinder reaches down to the lowest ground round it, a body's radius out, so a body
+    // there can't walk under its edge (Codex review: a Meridian boulder 2 m wide on a 36° slope left
+    // a 1.8 m gap, as tall as a body).
+    const ring = (s.radius + PLAYER_BODY.radius) / l;
+    let low = Infinity;
+    for (let i = 0; i < 8; i++) {
+      const a = COS8[i]! * ring, b = SIN8[i]! * ring;
+      const dx = ux + fx * a + rx * b, dy = uy + fy * a + ry * b, dz = uz + fz * a + rz * b;
+      const dl = Math.hypot(dx, dy, dz);
+      low = Math.min(low, terrain.groundHeight(dx / dl, dy / dl, dz / dl));
+    }
+    const sink = Math.min(SOLID_MAX_SINK, Math.max(0, l - terrain.body.radius - low + SINK_SLACK));
+    const height = Math.min(s.height, SOLID_MAX_HEIGHT) + sink;
     const half = height / 2;
+    const bx = p.x - ux * sink, by = p.y - uy * sink, bz = p.z - uz * sink;
     out.push({
       index: out.length, kind: p.kind,
-      px: p.x, py: p.y, pz: p.z,
+      px: bx, py: by, pz: bz,
       rx, ry, rz, ux, uy, uz, fx, fy, fz,
       shape: 1, hx: s.radius, hz: s.radius, h: height,
-      cx: p.x + ux * half, cy: p.y + uy * half, cz: p.z + uz * half,
+      cx: bx + ux * half, cy: by + uy * half, cz: bz + uz * half,
       bound: Math.hypot(s.radius, half),
     });
   }
