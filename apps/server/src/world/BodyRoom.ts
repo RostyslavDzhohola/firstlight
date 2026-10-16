@@ -32,6 +32,7 @@ import { identityCheck, storageRecovery, ticketFor, travelRedirect } from "./adm
 import { pendingSeats } from "./reservations.ts";
 import { seatRefusal } from "../social/moderation.ts";
 import { groundMotion, heightAboveSupport, motionFields, moveLimits, settle, startFall, validateMove, MOVE, type MoveWorld } from "./movement.ts";
+import { NatureWarmer } from "./natureWarm.ts";
 import { matchMaker } from "@colyseus/core";
 import { liveSessions } from "../auth/sessions.ts";
 import { accountLinks } from "../auth/links.ts";
@@ -154,6 +155,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   private structures: StructureCollider | null = null;
   /** Natural solids (tree trunks, boulders, spires, big rocks; D-solid-1): movement and placement, not combat. */
   private nature!: NatureSolids;
+  private natureWarmer!: NatureWarmer<PlayerActor>;
   systems: RoomSystem[] = [];
   portals: PortalSpot[] = [];
 
@@ -222,6 +224,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     // intact props (tops hold feet, insides refuse), stop shots and sight (host.walls, D43) and NPCs (D44).
     const structures = (this.structures = structureCollider(terrain));
     const nature = (this.nature = natureSolids(terrain));
+    this.natureWarmer = new NatureWarmer(nature);
     const footing = { top: 0, inside: false };
     this.moveWorld = {
       radius: this.bodyDef.radius,
@@ -1242,7 +1245,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       this.lastAoi = now;
       this.updateViews(false);
     }
-    this.warmNature();
+    this.natureWarmer.tick(this.actors.values());
     for (const a of this.actors.values()) if (a.youDirty || (a.youLazy && now - (a.lastYouAt ?? 0) >= YOU_LAZY_MS)) this.sendYou(a);
     if (now - this.lastSave > RULES.SAVE_EVERY_MS) {
       this.lastSave = now;
@@ -1273,24 +1276,6 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     a.peakRadius = len;
     groundMotion(a, len, now);
     if (frac > 0) dealDamage(this.host, null, a, frac * maxHp(a.char.level), false);
-  }
-
-  private warmTurn = 0;
-  /**
-   * Natural solids (D-solid-1) are built per terrain chunk on first use (1–2 ms each): build the ones
-   * round one player per tick ahead of time, at most one chunk, so a player running into new land
-   * doesn't make a tick pay for several at once.
-   */
-  private warmNature() {
-    const n = this.actors.size;
-    if (n === 0) return;
-    const turn = this.warmTurn++ % n;
-    let k = 0;
-    for (const a of this.actors.values()) {
-      if (k++ !== turn) continue;
-      this.nature.warm(a.state.x, a.state.y, a.state.z, 120, 1);
-      return;
-    }
   }
 
   /** Distance-based views for NPCs and piles (players are not view-filtered). */

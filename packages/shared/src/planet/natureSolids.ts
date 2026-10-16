@@ -92,10 +92,15 @@ export class NatureSolids {
   /** Solids built so far (all chunks), and chunks built. */
   solidCount = 0;
   builtChunks = 0;
+  /** Chunks within the radius of the last warm() still unbuilt after it. */
+  pending = 0;
+  /** warm()'s sample spacing (m): well under the narrowest chunk (~0.7 of a face-centre one). */
+  private readonly warmStep: number;
 
   constructor(terrain: Terrain) {
     this.terrain = terrain;
     this.cpf = terrain.body.chunksPerFace;
+    this.warmStep = (((Math.PI / 2) * terrain.body.radius) / this.cpf) * 0.35;
   }
 
   private key(face: number, cx: number, cy: number): number {
@@ -168,12 +173,13 @@ export class NatureSolids {
   }
 
   /**
-   * Build up to `budget` not-yet-built chunks within `r` metres of (x, y, z) (warm-up ahead of the
-   * player; a query would otherwise build them on the spot). Returns how many it built.
+   * Build the not-yet-built chunks within `r` metres of (x, y, z), nearest first: at most `budget`
+   * of them, and after the first only while `ms` milliseconds haven't passed (warm-up ahead of the
+   * queries, which would otherwise build them on the spot). Returns how many it built; `pending` is
+   * how many in that radius are still unbuilt.
    */
-  warm(x: number, y: number, z: number, r: number, budget = 1): number {
+  warm(x: number, y: number, z: number, r: number, budget = 1, ms = Infinity): number {
     this.keys.length = 0;
-    this.addKey(x, y, z);
     const l = Math.hypot(x, y, z);
     const ux = x / l, uy = y / l, uz = z / l;
     const big = Math.abs(uz) < 0.9;
@@ -182,19 +188,36 @@ export class NatureSolids {
     const al = Math.hypot(ax, ay, az);
     ax /= al; ay /= al; az /= al;
     const bx = uy * az - uz * ay, by = uz * ax - ux * az, bz = ux * ay - uy * ax;
-    for (let f = 0.5; f <= 1; f += 0.5) {
-      for (let i = 0; i < 8; i++) {
-        const c = COS8[i]! * r * f, s = SIN8[i]! * r * f;
-        this.addKey(x + ax * c + bx * s, y + ay * c + by * s, z + az * c + bz * s);
+    // Rings warmStep apart along the ground, samples warmStep apart along each: every chunk in the
+    // radius is hit. (A ring `a` metres away along the ground is l·tan(a / l) off in the tangent plane.)
+    const step = this.warmStep;
+    // A radius over most of the body (Portus is 150 m round): all of it.
+    if (r > l * 1.2) {
+      for (let f = 0; f < 6; f++) for (let cy = 0; cy < this.cpf; cy++) for (let cx = 0; cx < this.cpf; cx++) this.keys.push(this.key(f, cx, cy));
+    } else {
+      for (let k = 0; (k - 1) * step < r; k++) {
+        const a = Math.min(k * step, r);
+        const n = k === 0 ? 1 : Math.ceil((2 * Math.PI * a) / step);
+        const rr = l * Math.tan(a / l);
+        for (let i = 0; i < n; i++) {
+          const t = (i / n) * Math.PI * 2;
+          const c = Math.cos(t) * rr, s = Math.sin(t) * rr;
+          this.addKey(x + ax * c + bx * s, y + ay * c + by * s, z + az * c + bz * s);
+        }
       }
     }
-    let built = 0;
+    const end = ms === Infinity ? Infinity : performance.now() + ms;
+    let built = 0, pending = 0;
     for (const k of this.keys) {
-      if (built >= budget) break;
       if (this.chunks.has(k)) continue;
+      if (built >= budget || (built > 0 && end !== Infinity && performance.now() >= end)) {
+        pending++;
+        continue;
+      }
       this.chunk(Math.floor(k / 65536) as Face, k % 256, Math.floor((k % 65536) / 256));
       built++;
     }
+    this.pending = pending;
     return built;
   }
 

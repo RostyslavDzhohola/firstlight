@@ -119,6 +119,34 @@ describe("natural solids (D-solid-1)", () => {
     // warm() builds ahead within its budget.
     const l = Math.hypot(p.x, p.y, p.z);
     expect(solids.warm(p.x, p.y, p.z, 200, 2)).toBeLessThanOrEqual(2);
+    expect(solids.pending).toBeGreaterThan(0);
     expect(faceOf(p.x / l, p.y / l, p.z / l)).toBeGreaterThanOrEqual(0);
+  });
+
+  it.each(BODY_IDS)("%s: warm() over a radius builds every chunk a query inside it touches", (id) => {
+    const t = createTerrain(id);
+    const solids = new NatureSolids(t);
+    const R = BODIES[id].radius;
+    const d = padDirs(BODIES[id])[0]!;
+    solids.warm(d[0] * R, d[1] * R, d[2] * R, 270, Infinity);
+    expect(solids.pending).toBe(0);
+    const built = solids.builtChunks;
+    // Queries all over the 250 m round it build nothing more.
+    let seed = 11;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (let i = 0; i < 400; i++) {
+      const a = rnd() * Math.PI * 2, m = Math.sqrt(rnd()) * 250;
+      const ref = Math.abs(d[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
+      const k = ref[0]! * d[0] + ref[1]! * d[1] + ref[2]! * d[2];
+      const e = [ref[0]! - k * d[0], ref[1]! - k * d[1], ref[2]! - k * d[2]];
+      const el = Math.hypot(e[0]!, e[1]!, e[2]!);
+      const f = [d[1] * e[2]! - d[2] * e[1]!, d[2] * e[0]! - d[0] * e[2]!, d[0] * e[1]! - d[1] * e[0]!].map((v) => v / el);
+      const v = [0, 1, 2].map((j) => d[j]! + (((e[j]! / el) * Math.cos(a) + f[j]! * Math.sin(a)) * Math.tan(m / R)));
+      const vl = Math.hypot(v[0]!, v[1]!, v[2]!);
+      solids.footing((v[0]! / vl) * R, (v[1]! / vl) * R, (v[2]! / vl) * R, PLAYER_BODY.step);
+    }
+    expect(solids.builtChunks).toBe(built);
+    // And a second warm there builds nothing.
+    expect(solids.warm(d[0] * R, d[1] * R, d[2] * R, 270, Infinity)).toBe(0);
   });
 });
