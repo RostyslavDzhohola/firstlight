@@ -892,9 +892,10 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   only by a test account is free for a real player's find (the claim takes it over); test accounts
   never engrave. **Flagging:** the server flags a guest whose request carries our `LOADTEST_SECRET`
   in `x-loadtest-secret` (`/api/play`, `/api/account/*`): only guests (never a saved account), only
-  with the right secret (timing-safe), nothing without `LOADTEST_SECRET` on the server; a flagged
-  guest that saves into a brand-new account stays flagged, an existing account never becomes one by
-  a merge. `pnpm e2e:prod` sends it for every guest (read from `~/.config/firstlight/.env`, never
+  with the right secret (timing-safe), nothing without `LOADTEST_SECRET` on the server; a player
+  already in the world drops out of public counts at once. A flagged guest that saves into an
+  account created by that same sign-in stays flagged; an existing account never becomes one, and
+  then the guest's play sessions and Hall claims stay with the guest's id instead of moving over. `pnpm e2e:prod` sends it for every guest (read from `~/.config/firstlight/.env`, never
   printed, refused without it), and production test runs must use it or send the header themselves
   (`docs/tests/player-expectations.md`, `apps/client/e2e/README.md`). **Backfill:** one-off at boot
   (recorded in `data_migration`, so it runs once, logging how many it flagged): exactly the 13

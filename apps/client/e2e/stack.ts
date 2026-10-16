@@ -53,10 +53,17 @@ export function toolSecret(): string {
   try {
     text = readFileSync(file, "utf8");
   } catch {}
-  const m = /^\s*(?:export\s+)?LOADTEST_SECRET\s*=\s*(.*)$/m.exec(text);
-  const v = (m?.[1] ?? "").trim().replace(/^(['"])(.*)\1$/, "$2");
+  const v = dotenvValue(text, "LOADTEST_SECRET");
   if (!v) throw new Error("pnpm e2e:prod needs LOADTEST_SECRET (in the environment or ~/.config/firstlight/.env) so its guests are flagged as test accounts (D-home-6); refusing to create unflagged guests on production");
   return v;
+}
+
+/** A key's value in a .env text, dotenv-style: quoted values verbatim (a # inside stays), unquoted ones end at " #". */
+export function dotenvValue(text: string, key: string): string {
+  const m = new RegExp(`^\\s*(?:export\\s+)?${key}\\s*=\\s*(.*)$`, "m").exec(text);
+  const raw = (m?.[1] ?? "").trim();
+  const q = /^(['"])(.*?)\1/.exec(raw);
+  return q ? q[2]! : raw.replace(/\s+#.*$/, "").trim();
 }
 
 /** Add our tools' header to this context's requests to the game server (and nowhere else). */

@@ -16,8 +16,9 @@ list is for what a person notices: what's missing, confusing or ugly, not only w
   `pnpm e2e:prod` does this for every guest it creates (`apps/client/e2e/stack.ts`
   `markToolRequests`); a Playwright or CDP script does it with a route or extra headers scoped to that
   host. The secret comes from `~/.config/firstlight/.env`; never print it. A plain browser session
-  without the header counts as a real player: if a run can't send it, don't pick a display name, keep
-  the session short, and say so in the report.
+  without the header would count as a real player, so **don't create one on production**: if a run
+  can't send the header, stop before pressing Play and report the run as blocked (or run it against a
+  local stack instead).
 - Play as a newcomer: don't read the code or the docs first. Pick **Hexwick** (the owner's starter)
   for the first run; rotate the other starters on later runs.
 - Report in the thread: one line per checklist row (pass / fail / unsure, plus what you saw), then

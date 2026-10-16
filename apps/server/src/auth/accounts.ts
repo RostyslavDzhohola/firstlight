@@ -122,6 +122,15 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
     return !!savedEmailStmt.get(email);
   };
   const hashEmail = (email: string) => hmacHex(`${cfg.secret}:email`, email.toLowerCase());
+  // Was this saved account created by the sign-in that's linking a guest into it (D-home-6)? Better
+  // Auth creates the user moments before onLinkAccount; an older one is an existing account.
+  let createdStmt: Database.Statement | null = null;
+  const createdJustNow = (userId: string) => {
+    createdStmt ??= authDb.prepare(`SELECT "createdAt" AS at FROM "user" WHERE id = ?`);
+    const at = (createdStmt.get(userId) as { at: string | number | null } | undefined)?.at;
+    const t = typeof at === "number" ? at : Date.parse(String(at ?? ""));
+    return Number.isFinite(t) && Date.now() - t < 60_000;
+  };
 
   const options = authOptions({
     authDb,
@@ -175,7 +184,7 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
     mailState: () => mailHealth.state(),
     onLink: (guest, account) => {
       links.emitBefore(guest.id, account.id); // rooms flush live characters first
-      const r = linkAccounts(db, guest.id, account.id);
+      const r = linkAccounts(db, guest.id, account.id, Date.now(), { targetIsNew: createdJustNow(account.id) });
       const { moved, displaced } = sessions.rekey(guest.id, account.id);
       const name = r.displayName ?? (account.name || guest.name);
       links.emit({ fromUserId: guest.id, toUserId: account.id, name, character: r.character, merged: r.merged, moved, displaced });

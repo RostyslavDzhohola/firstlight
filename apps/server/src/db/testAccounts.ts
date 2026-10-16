@@ -13,9 +13,28 @@ export function isTestAccount(db: Db, userId: string): boolean {
   return !!stmt(db, "SELECT 1 FROM test_account WHERE user_id = ?").get(userId);
 }
 
+type MarkListener = (userId: string) => void;
+const markListeners = new Set<MarkListener>();
+
+/** Called when an account becomes a test account (the rooms drop a live player from public counts at once). */
+export function onTestMarked(fn: MarkListener): () => void {
+  markListeners.add(fn);
+  return () => markListeners.delete(fn);
+}
+
 /** Flag an account as a test account. True if it wasn't already. */
 export function markTestAccount(db: Db, userId: string, source: string, now = Date.now()): boolean {
-  return stmt(db, "INSERT OR IGNORE INTO test_account (user_id, source, marked_at) VALUES (?, ?, ?)").run(userId, source, now).changes === 1;
+  const added = stmt(db, "INSERT OR IGNORE INTO test_account (user_id, source, marked_at) VALUES (?, ?, ?)").run(userId, source, now).changes === 1;
+  if (added) {
+    for (const fn of [...markListeners]) {
+      try {
+        fn(userId);
+      } catch (err) {
+        console.error("test-account listener failed", err);
+      }
+    }
+  }
+  return added;
 }
 
 /**

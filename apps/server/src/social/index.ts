@@ -13,10 +13,19 @@ import { rekeyAnalytics } from "./analytics.ts";
 import { rekeyModeration } from "./moderation.ts";
 import { rekeyLimits } from "./limits.ts";
 import { parties } from "./parties.ts";
-import { rekeyPresence, sendTo } from "./presence.ts";
+import { presenceOf, rekeyPresence, sendTo } from "./presence.ts";
+import { onTestMarked } from "../db/testAccounts.ts";
 import { createSocialSystem, enforceBlocksAfterMerge, rekeyOfflineTimer, rekeySessions, syncParty } from "./system.ts";
 
 SYSTEM_FACTORIES.push(createSocialSystem);
+
+// One of our tools flagged a player who's already in the world (D-home-6): out of public counts now,
+// not only from their next join.
+onTestMarked((userId) => {
+  const p = presenceOf(userId);
+  const a = p?.room.actors.get(p.sessionId);
+  if (a) a.identity.test = true;
+});
 
 // A guest saved their character and got a new account id: party, presence, sessions follow.
 accountLinks.on((ev) => {

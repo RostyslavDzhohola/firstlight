@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HomeData } from "@firstlight/shared/net/home";
 import { awardMedal, BACKFILL_ID, claimFirst, isTestAccount, listHallOfFirsts, sessionStats, testSessionCount } from "../src/db/index.ts";
-import { mountHome } from "../src/ops/home.ts";
+import { mountHome, publicOnlineCount } from "../src/ops/home.ts";
 import { characterRepo, MemoryCharacterRepo } from "../src/world/characters.ts";
 import { SqliteCharacterRepo } from "../src/world/sqliteStores.ts";
 import { api, Browser, joinWithToken, startAuthServer, userIdOf, type AuthServer } from "./auth-helpers.ts";
@@ -108,6 +108,35 @@ describe("test accounts (D-home-6)", () => {
     await tool.b.saveWithEmail("probe@example.test", "SaveProbe");
     const savedToken = (await tool.b.client.token()).data!.token;
     expect(isTestAccount(s.accounts.db, userIdOf(savedToken))).toBe(true);
+  });
+
+  it("a player already in the world drops out of public counts the moment a tool flags them", async () => {
+    const s = await start();
+    const g = await guest(s, "LateFlag", 2, "198.51.100.60");
+    rooms.push(await joinWithToken(s, g.token));
+    await waitFor(() => publicOnlineCount() === 1);
+    await api(s, "/api/account/me", g.token, { headers: { "x-loadtest-secret": SECRET } });
+    expect(isTestAccount(s.accounts.db, g.id)).toBe(true);
+    expect(publicOnlineCount()).toBe(0);
+  });
+
+  it("a tools' guest signing into an existing account doesn't flag it, and its sessions stay its own", async () => {
+    const s = await start();
+    const db = s.accounts.db;
+    // A real player saved an account a while ago (created more than a minute before the link).
+    const owner = await guest(s, "Wayfarer", 2, "198.51.100.70");
+    await owner.b.saveWithEmail("wayfarer@example.test", "Wayfarer");
+    const ownerId = userIdOf((await owner.b.client.token()).data!.token);
+    s.accounts.authDb.prepare(`UPDATE "user" SET "createdAt" = ? WHERE id = ?`).run(new Date(Date.now() - 3_600_000).toISOString(), ownerId);
+    // A test guest plays, then signs in with that email on its browser.
+    const tool = await guest(s, "ProbeTwo", 2, "198.51.100.71", SECRET);
+    rooms.push(await joinWithToken(s, tool.token));
+    await waitFor(() => (db.prepare("SELECT COUNT(*) AS n FROM session_log WHERE user_id = ?").get(tool.id) as { n: number }).n === 1);
+    await tool.b.saveWithEmail("wayfarer@example.test");
+    expect(userIdOf((await tool.b.client.token()).data!.token)).toBe(ownerId);
+    expect(isTestAccount(db, ownerId)).toBe(false);
+    expect((db.prepare("SELECT COUNT(*) AS n FROM session_log WHERE user_id = ?").get(tool.id) as { n: number }).n).toBe(1);
+    expect((db.prepare("SELECT COUNT(*) AS n FROM session_log WHERE user_id = ?").get(ownerId) as { n: number }).n).toBe(0);
   });
 
   it("the backfill flags exactly the listed automation guests, once, and logs how many", async () => {
