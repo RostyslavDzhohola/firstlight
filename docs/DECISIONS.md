@@ -839,3 +839,9 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   rewards"), never by name; items switched off in a build (the radio with voice off, the whistle
   with horses off, the M11 extras with their flag off) stay out. Why: the owner's request, and a
   locked row the till would sell anyway would be a lie.
+- **D-shops-3 (run, 2026-10-15 22:30Z, Codex review):** trading needs the player protected right
+  now (`BodyRoom.safeNow`), not just standing at a till: a pad ring protects only once out of combat,
+  so a combat-tagged player who ran into an outpost can't buy or sell while still damageable. The
+  till refuses with reason `combat` and "Catch your breath first: no trading for a few seconds after
+  a fight". The Portus town protects everyone inside at once (D-zones-3), so Juno is unaffected.
+  Why: no shopping for tonics mid-fight from inside a ring that doesn't protect you yet.

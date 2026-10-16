@@ -38,6 +38,9 @@ import { runStage, STAGE_LIMITS } from "./stage.ts";
 import { progressStore } from "./store.ts";
 import { emitPileEvent, pileStore } from "../piles.ts";
 
+/** Shops refuse a combat-tagged player in a pad ring (D-shops-3). */
+export const CATCH_BREATH = "Catch your breath first: no trading for a few seconds after a fight";
+
 export const QUEST_RULES = {
   /** Touching a pad = feet within this many metres of its centre (D2). */
   PAD_TOUCH_M: 6,
@@ -539,7 +542,11 @@ export class QuestSystem implements RoomSystem {
 
   // ---------------------------------------------------------------- shop
 
-  /** The till the player stands at (a shop spot's radius on this body, content/shops.ts), if any. */
+  /**
+   * The till the player stands at (a shop spot's radius on this body, content/shops.ts), if any.
+   * Trading also needs the player protected right now (D-shops-3): a pad ring protects only once out
+   * of combat, so a fighter who ran in can't shop while still damageable.
+   */
   private shopAt(a: PlayerActor): ShopSpot | null {
     return shopSpotAt(this.body, actorPos(a));
   }
@@ -559,6 +566,7 @@ export class QuestSystem implements RoomSystem {
     };
     const shop = this.shopAt(a);
     if (!shop) return fail("too far", this.shopHint("buy"));
+    if (!this.room.safeNow(a, Date.now())) return fail("combat", CATCH_BREATH);
     const disabled = (itemId === HORSE_WHISTLE && !env.horses) || (isExtraCosmetic(itemId) && !env.cosmeticsExtras) || voiceItemHidden(itemId);
     const entry = disabled ? undefined : shopEntry(itemId, tier);
     if (!entry) return fail("not sold", `The ${shop.name} doesn't sell that`);
@@ -585,6 +593,7 @@ export class QuestSystem implements RoomSystem {
     };
     const shop = this.shopAt(a);
     if (!shop) return fail("too far", this.shopHint("sell"));
+    if (!this.room.safeNow(a, Date.now())) return fail("combat", CATCH_BREATH);
     const list = slot < HOTBAR_SLOTS ? a.char.hotbar : a.char.backpack;
     const i = slot < HOTBAR_SLOTS ? slot : slot - HOTBAR_SLOTS;
     const item = list[i];

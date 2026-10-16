@@ -5,7 +5,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SHOP_SPOTS } from "@firstlight/shared/content/shops";
 import { safeLeave, startServer, waitFor } from "./helpers.ts";
-import { bot, harness, invIds, objAt, padAt, sleep, tpAndWait } from "./quest-helpers.ts";
+import { CATCH_BREATH } from "../src/world/quests/QuestSystem.ts";
+import { bot, harness, invIds, me, objAt, offPad, padAt, serverRoom, sleep, tpAndWait } from "./quest-helpers.ts";
 
 beforeEach(async () => {
   harness.game = await startServer();
@@ -60,6 +61,32 @@ describe("shops in every safe zone", () => {
       expect(invIds(b)).not.toContain("bubble");
     });
   }
+
+  it("won't trade with a fighter who ran into the pad ring until the combat tag lapses (D-shops-3)", async () => {
+    const spot = SHOP_SPOTS.find((s) => s.body === "arcadia")!;
+    const b = await bot("hothead", "arcadia");
+    b.send("admin", { cmd: "coins", args: { amount: 100 } });
+    b.send("admin", { cmd: "unprotect" });
+    await waitFor(() => b.you.coins === 100);
+    // Hurt out in the wild (a real hit: combat tags the player), then straight to the keeper.
+    await tpAndWait(b, offPad("arcadia", 0, 30));
+    const hp = me(b).hp;
+    b.send("admin", { cmd: "damage", args: { amount: 10 } });
+    await waitFor(() => me(b).hp < hp);
+    await tpAndWait(b, objAt(spot.id));
+    b.send("buy", { itemId: "tonic_small" });
+    await waitFor(() => b.last("shop")?.reason === "combat");
+    expect(b.toasts.at(-1)).toBe(CATCH_BREATH);
+    b.send("sell", { slot: 0 });
+    await waitFor(() => b.count("shop") === 2);
+    expect(b.last("shop")).toMatchObject({ ok: false, action: "sell", reason: "combat" });
+    expect(b.you.coins).toBe(100);
+    // The tag lapses (10 s of calm; skipped here): the same till trades.
+    serverRoom(b).actors.get(b.id)!.combatUntil = Date.now() - 1;
+    await sleep(1000); // quest actions: 5 per second
+    b.send("buy", { itemId: "tonic_small" });
+    await waitFor(() => b.you.coins === 90);
+  });
 });
 
 /** A point `metres` from `p` along the ground (roughly: a tangent step, then back to the same height). */
