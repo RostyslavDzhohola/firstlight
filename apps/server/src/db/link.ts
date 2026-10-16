@@ -7,6 +7,7 @@
 import { getAccount } from "./accounts.ts";
 import { loadCharacter } from "./characters.ts";
 import { stmt, tx, type Db } from "./game-db.ts";
+import { isTestAccount, markTestAccount } from "./testAccounts.ts";
 
 export interface LinkResult {
   /** Whose live character survived: the guest's, the account's, or none existed. */
@@ -17,7 +18,12 @@ export interface LinkResult {
   merged: boolean;
 }
 
-export function linkAccounts(db: Db, fromUserId: string, toUserId: string, now = Date.now()): LinkResult {
+/**
+ * `targetIsNew`: the saved account was created by this very sign-in (auth/accounts.ts knows it). A test
+ * guest that saves into a new account keeps the test flag; an existing account never takes it, and
+ * then the test guest's analytics and Hall claims stay with the guest id (D-home-6).
+ */
+export function linkAccounts(db: Db, fromUserId: string, toUserId: string, now = Date.now(), opts: { targetIsNew?: boolean } = {}): LinkResult {
   if (fromUserId === toUserId) {
     const acc = getAccount(db, toUserId);
     return { character: loadCharacter(db, toUserId) ? "account" : "none", displayName: acc?.displayName ?? null, merged: false };
@@ -28,6 +34,9 @@ export function linkAccounts(db: Db, fromUserId: string, toUserId: string, now =
     const fromChar = loadCharacter(db, fromUserId);
     const toChar = loadCharacter(db, toUserId);
     const merged = !!(to || toChar);
+    const fromTest = isTestAccount(db, fromUserId);
+    const keepTest = fromTest && opts.targetIsNew === true;
+    if (keepTest) markTestAccount(db, toUserId, "link", now);
 
     // account: delete the guest row first so its display name is free for the target.
     let displayName = to?.displayName ?? null;
@@ -90,12 +99,13 @@ export function linkAccounts(db: Db, fromUserId: string, toUserId: string, now =
     stmt(db, "DELETE FROM block WHERE user_id = blocked_user_id").run();
 
     // things that simply follow the player
-    stmt(db, "UPDATE hall_of_firsts SET user_id = ? WHERE user_id = ?").run(toUserId, fromUserId);
+    // A test guest's claims and play sessions don't become a real account's (D-home-6).
+    if (!fromTest || keepTest) stmt(db, "UPDATE hall_of_firsts SET user_id = ? WHERE user_id = ?").run(toUserId, fromUserId);
     stmt(db, "UPDATE pile SET owner_id = ? WHERE owner_id = ?").run(toUserId, fromUserId);
     stmt(db, "UPDATE report SET reporter = ? WHERE reporter = ?").run(toUserId, fromUserId);
     stmt(db, "UPDATE report SET target = ? WHERE target = ?").run(toUserId, fromUserId);
     stmt(db, "UPDATE ban SET user_id = ? WHERE user_id = ?").run(toUserId, fromUserId);
-    stmt(db, "UPDATE session_log SET user_id = ? WHERE user_id = ?").run(toUserId, fromUserId);
+    if (!fromTest || keepTest) stmt(db, "UPDATE session_log SET user_id = ? WHERE user_id = ?").run(toUserId, fromUserId);
     stmt(db, "UPDATE admin_claim SET user_id = ? WHERE user_id = ?").run(toUserId, fromUserId);
     stmt(db, "INSERT OR IGNORE INTO voice_mute (user_id, muted_at) SELECT ?, muted_at FROM voice_mute WHERE user_id = ?").run(toUserId, fromUserId);
     stmt(db, "DELETE FROM voice_mute WHERE user_id = ?").run(fromUserId);

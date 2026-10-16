@@ -9,7 +9,7 @@ import { MEDAL_BY_ID } from "@firstlight/shared/content/medals";
 import { STARTERS, starterLook } from "@firstlight/shared/content/weapons";
 import type { HomeBoard, HomeData, HomeOnline } from "@firstlight/shared/net/home";
 import { banKey, directRequestIp } from "../auth/ip.ts";
-import { listHallOfFirsts, medalLeaders, topLevels, type Db } from "../db/index.ts";
+import { listHallOfFirsts, medalLeaders, onTestMarked, topLevels, type Db } from "../db/index.ts";
 import { liveRooms } from "../social/index.ts";
 import type { VisitSource } from "./datafast.ts";
 
@@ -33,10 +33,10 @@ export interface HomeDeps {
 interface RoomLike {
   bodyDef: { id: string };
   metadata?: { loadtest?: boolean; sandbox?: string } | null;
-  actors: Map<string, { identity: { loadtest?: boolean }; superseded?: boolean; state: { name: string } }>;
+  actors: Map<string, { identity: { loadtest?: boolean; test?: boolean }; superseded?: boolean; state: { name: string } }>;
 }
 
-/** Players per body, and up to `namesPerBody` names each (sorted). Load-test bots and admin sandboxes never count. */
+/** Players per body, and up to `namesPerBody` names each (sorted). Load-test bots, test accounts (D-home-6) and admin sandboxes never count. */
 export function onlineSnapshot(rooms: Iterable<RoomLike>, namesPerBody = HOME_LIMITS.namesPerBody): HomeOnline {
   const bodies = Object.fromEntries(BODY_IDS.map((b) => [b, { players: 0, names: [] as string[] }])) as HomeOnline["bodies"];
   let total = 0;
@@ -45,7 +45,7 @@ export function onlineSnapshot(rooms: Iterable<RoomLike>, namesPerBody = HOME_LI
     const slot = bodies[r.bodyDef.id as BodyId];
     if (!slot) continue;
     for (const a of r.actors.values()) {
-      if (a.identity.loadtest || a.superseded) continue;
+      if (a.identity.loadtest || a.identity.test || a.superseded) continue;
       slot.players++;
       total++;
       if (a.state.name) slot.names.push(a.state.name);
@@ -68,11 +68,17 @@ export function readBoard(db: Db, now = Date.now(), rows = HOME_LIMITS.boardRows
   };
 }
 
+/** Bumped when an account becomes a test account: /api/home rebuilds its cached online list and board (D-home-6). */
+let homeGeneration = 0;
+onTestMarked(() => {
+  homeGeneration++;
+});
+
 export function mountHome(app: Express, deps: HomeDeps): void {
   const now = deps.now ?? Date.now;
   const calls = new Map<string, { start: number; n: number }>();
-  let board: { at: number; value: HomeBoard | null } = { at: -Infinity, value: null };
-  let online: { at: number; value: HomeOnline } | null = null;
+  let board: { at: number; gen: number; value: HomeBoard | null } = { at: -Infinity, gen: -1, value: null };
+  let online: { at: number; gen: number; value: HomeOnline } | null = null;
 
   const allowed = (key: string, t: number): boolean => {
     let c = calls.get(key);
@@ -93,13 +99,14 @@ export function mountHome(app: Express, deps: HomeDeps): void {
       res.status(429).json({ error: "slow down" });
       return;
     }
-    if (!online || t - online.at >= HOME_LIMITS.onlineTtlMs) online = { at: t, value: onlineSnapshot(liveRooms as Iterable<RoomLike>) };
-    if (deps.db && t - board.at >= HOME_LIMITS.boardTtlMs) {
+    const gen = homeGeneration;
+    if (!online || online.gen !== gen || t - online.at >= HOME_LIMITS.onlineTtlMs) online = { at: t, gen, value: onlineSnapshot(liveRooms as Iterable<RoomLike>) };
+    if (deps.db && (board.gen !== gen || t - board.at >= HOME_LIMITS.boardTtlMs)) {
       try {
-        board = { at: t, value: readBoard(deps.db, t) };
+        board = { at: t, gen, value: readBoard(deps.db, t) };
       } catch (err) {
         console.error("home: leaderboard read failed", err);
-        board = { at: t, value: board.value }; // keep the last one; try again next minute
+        board = { at: t, gen, value: board.value }; // keep the last one; try again next minute
       }
     }
     const visits = deps.visits ? await deps.visits.get().catch(() => null) : null;
@@ -107,4 +114,9 @@ export function mountHome(app: Express, deps: HomeDeps): void {
     res.setHeader("Cache-Control", "public, max-age=5");
     res.json(body);
   });
+}
+
+/** Real players online right now (no bots, no test accounts): /api/online's number. */
+export function publicOnlineCount(): number {
+  return onlineSnapshot(liveRooms as Iterable<RoomLike>).total;
 }

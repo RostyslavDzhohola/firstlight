@@ -15,6 +15,7 @@ import { STARTERS } from "@firstlight/shared/content/weapons";
 import { PROTOCOL_VERSION } from "@firstlight/shared/net/protocol";
 import { timingSafeEqual } from "node:crypto";
 import { partyOf, partyRoomFor, playRefusal } from "./social/index.ts";
+import { publicOnlineCount } from "./ops/home.ts";
 
 export interface GameOptions {
   port: number;
@@ -51,6 +52,12 @@ export interface Game {
   close(): Promise<void>;
 }
 
+/** Our test tools mark their guests with this header (LOADTEST_SECRET; D-home-6). */
+export function toolHeader(req: Request): string | null {
+  const v = req.headers["x-loadtest-secret"];
+  return typeof v === "string" && v ? v : null;
+}
+
 function secretMatches(given: unknown, expected: string): boolean {
   if (typeof given !== "string" || !expected) return false;
   const a = Buffer.from(given), b = Buffer.from(expected);
@@ -78,7 +85,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     "Access-Control-Allow-Origin": corsFor(headers.get("origin")),
     "Access-Control-Allow-Credentials": "true",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Authorization, Content-Type",
+    "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Loadtest-Secret",
     Vary: "Origin",
   });
   // No client-side joinOrCreate/joinById/create; reconnect only.
@@ -88,7 +95,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     if (req.path.startsWith("/api/") && !req.path.startsWith("/api/auth/")) {
       res.setHeader("Access-Control-Allow-Origin", corsFor(req.headers.origin));
       res.setHeader("Access-Control-Allow-Credentials", "true");
-      res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+      res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Loadtest-Secret");
       res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
       res.setHeader("Vary", "Origin");
       if (req.method === "OPTIONS") {
@@ -108,7 +115,8 @@ export async function createGame(opts: GameOptions): Promise<Game> {
 
   let onlineCache = { at: 0, value: 0 };
   app.get("/api/online", async (_req, res) => {
-    if (Date.now() - onlineCache.at > 1000) onlineCache = { at: Date.now(), value: await onlineCount(false) };
+    // Real players only: load-test bots and our test accounts don't count (D-home-6).
+    if (Date.now() - onlineCache.at > 1000) onlineCache = { at: Date.now(), value: publicOnlineCount() };
     res.setHeader("Cache-Control", "public, max-age=2");
     res.json({ online: onlineCache.value });
   });
@@ -116,7 +124,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
   app.post("/api/play", async (req, res) => {
     const auth = req.headers.authorization ?? "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-    const identity = token ? await opts.verify(token, { ip: directRequestIp(req) }) : null;
+    const identity = token ? await opts.verify(token, { ip: directRequestIp(req), toolSecret: toolHeader(req) }) : null;
     if (!identity) {
       const why = token && opts.explainRefusal ? await opts.explainRefusal(token, directRequestIp(req)).catch(() => null) : null;
       if (why) res.status(403).json({ ok: false, error: why });

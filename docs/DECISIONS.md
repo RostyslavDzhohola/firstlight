@@ -936,3 +936,24 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   till refuses with reason `combat` and "Catch your breath first: no trading for a few seconds after
   a fight". The Portus town protects everyone inside at once (D-zones-3), so Juno is unaffected.
   Why: no shopping for tonics mid-fight from inside a ring that doesn't protect you yet.
+- **D-home-6 (run, 2026-10-16):** the public boards show only real people (owner: "don't add fake
+  people … make sure the leaderboard actually represents actual people"). Accounts our own automation
+  made are **test accounts**: a row in `test_account` (migration 7; a side table rather than an
+  `is_test` column so the migration stays idempotent) is the flag, with its source (`tool`, `link`,
+  or the backfill's id). They play like anyone, but the leaderboard (levels, medals), the Hall of
+  Firsts (in Portus and on the home page), "online now" and the worlds' player counts, `/api/home`,
+  `/api/online` and every `/stats` figure leave them out; `/stats` counts them apart. A plaque held
+  only by a test account is free for a real player's find (the claim takes it over); test accounts
+  never engrave. **Flagging:** the server flags a guest whose request carries our `LOADTEST_SECRET`
+  in `x-loadtest-secret` (`/api/play`, `/api/account/*`): only guests (never a saved account), only
+  with the right secret (timing-safe), nothing without `LOADTEST_SECRET` on the server; a player
+  already in the world drops out of public counts at once. A flagged guest that saves into an
+  account created by that same sign-in stays flagged; an existing account never becomes one, and
+  then the guest's play sessions and Hall claims stay with the guest's id instead of moving over. `pnpm e2e:prod` sends it for every guest (read from `~/.config/firstlight/.env`, never
+  printed, refused without it), and production test runs must use it or send the header themselves
+  (`docs/tests/player-expectations.md`, `apps/client/e2e/README.md`). **Backfill:** one-off at boot
+  (recorded in `data_migration`, so it runs once, logging how many it flagged): exactly the 13
+  automation display names the lead found in production's game.db (case-sensitive, guests only):
+  ChromeTester, SmokeGuest42, SmokeTest, TownSmoke, TutorialRun, TutorialRun2–4, BugScout_5817,
+  BlinkProbe14, Smoke2Guest, Smoke2Retry, SmokeThree. Never "ros" (the owner's character). Nothing is
+  deleted. Why: the owner's request, with a flag only our tools can set.

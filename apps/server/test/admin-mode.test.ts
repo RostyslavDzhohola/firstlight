@@ -388,6 +388,7 @@ describe("nothing in a sandbox is saved (D-admin-3, real path: SQLite)", () => {
     await safeLeave(t.room);
     await onlyRooms(() => false);
     expect(snapshot()).toBe(before);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM test_account").get()).toEqual({ n: 0 }); // never flagged from a sandbox (D-home-6)
     expect(EGG_TIMERS.puzzles.size).toBe(0);
     // Back to normal: the real character, as it was, on its own body.
     const n = await enter("auditor", "arcadia");

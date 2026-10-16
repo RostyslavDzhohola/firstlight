@@ -200,6 +200,23 @@ export const MIGRATIONS: readonly string[] = [
       ON CONFLICT(user_id) DO UPDATE SET n = n + 1, last_at = MAX(last_at, excluded.last_at);
   END;
   `,
+  // 7 (lane real-board): accounts our own automation made (tests, smoke runs) are flagged so no
+  // public surface shows them (D-home-6): a row here is the account's is_test flag. A side table, not
+  // a column, so the migration stays idempotent (SQLite has no ADD COLUMN IF NOT EXISTS) and can be
+  // renumbered. data_migration records one-off data steps (the backfill in testAccounts.ts) and what
+  // they changed, so each runs once.
+  `
+  CREATE TABLE IF NOT EXISTS test_account (
+    user_id    TEXT PRIMARY KEY,
+    source     TEXT NOT NULL,
+    marked_at  INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS data_migration (
+    id       TEXT PRIMARY KEY,
+    ran_at   INTEGER NOT NULL,
+    changed  INTEGER NOT NULL
+  );
+  `,
 ];
 
 /** Apply every migration newer than the database's user_version, each in its own transaction. */

@@ -9,11 +9,15 @@ export interface Identity {
   loadtest: boolean;
   /** Verified from a Better Auth account JWT (revalidated when a seat is used; dev tokens aren't). */
   account?: boolean;
+  /** One of our own automation accounts (D-home-6): plays normally, never on a public surface. */
+  test?: boolean;
 }
 
-/** Request facts a verifier may use (IP bans). */
+/** Request facts a verifier may use (IP bans; our test tools' marker). */
 export interface VerifyContext {
   ip?: string | null;
+  /** The request's x-loadtest-secret header: with the right secret, a guest is flagged as a test account. */
+  toolSecret?: string | null;
 }
 
 export type TokenVerifier = (token: string, ctx?: VerifyContext) => Promise<Identity | null>;
