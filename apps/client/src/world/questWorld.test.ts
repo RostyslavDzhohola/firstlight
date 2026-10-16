@@ -2,8 +2,7 @@
 // (content/shops.ts) and the guides beside each pad, facing the plaza or the pad, after update().
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
-import { BODY_IDS, createTerrain } from "@firstlight/shared";
-import { placeDir } from "@firstlight/shared/content/places";
+import { BODIES, BODY_IDS, createTerrain, padDirs } from "@firstlight/shared";
 import { SHOP_SPOT_BY_ID } from "@firstlight/shared/content/shops";
 import { stubCanvasDocument } from "../render/disposeWatch.testutil.ts";
 
@@ -31,12 +30,21 @@ describe("QuestWorld NPCs", () => {
           const s = SHOP_SPOT_BY_ID.get(p.def.id)!;
           expect(at.distanceTo(new THREE.Vector3(...s.pos)), `${p.def.id} at its shop spot`).toBeLessThan(0.5);
         }
-        // Facing: along the ground, toward the plaza centre (Portus) or the place's anchor (a pad).
+        // Facing: along the ground, toward the plaza centre (Portus: the town's pole) or pad 0 (every
+        // planet keeper and guide works the main pad). The anchor comes from the pads, not from the
+        // place the implementation reads, so the check is independent of it.
         const up = p.pos.clone().normalize();
-        expect(Math.abs(p.facing!.dot(up)), p.def.id).toBeLessThan(1e-6);
-        const anchor = body === "portus" ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(...placeDir(p.def.place));
-        const toAnchor = anchor.multiplyScalar(p.pos.length()).sub(p.pos);
-        expect(p.facing!.dot(toAnchor.normalize()), `${p.def.id} faces in`).toBeGreaterThan(0.99);
+        const anchor = body === "portus" ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(...padDirs(BODIES[body])[0]!);
+        const want = anchor.multiplyScalar(p.pos.length()).sub(p.pos);
+        want.addScaledVector(up, -want.dot(up)).normalize();
+        expect(p.facing, `${p.def.id} has a facing`).toBeDefined();
+        expect(Math.abs(p.facing!.dot(up)), `${p.def.id} faces along the ground`).toBeLessThan(1e-6);
+        expect(p.facing!.dot(want), `${p.def.id} faces its anchor`).toBeGreaterThan(0.99);
+        // What's drawn faces the same way: the avatar's forward (+Z after AvatarView.set) and the prop's (stall, counter).
+        const drawn = new THREE.Vector3(0, 0, 1).applyQuaternion(p.npc!.root.getWorldQuaternion(new THREE.Quaternion()));
+        expect(drawn.dot(want), `${p.def.id} avatar faces its anchor`).toBeGreaterThan(0.99);
+        const stall = new THREE.Vector3(0, 0, 1).applyQuaternion(p.root.getWorldQuaternion(new THREE.Quaternion()));
+        expect(stall.dot(want), `${p.def.id} prop faces its anchor`).toBeGreaterThan(0.99);
       }
       world.dispose();
     });
