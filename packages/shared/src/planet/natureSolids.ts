@@ -23,12 +23,18 @@ export interface SolidBody {
   step: number;
 }
 
-/** The widest natural solid (a big spire: 1.8 × 1.6 × 0.85 m) plus slack: how far round a point to look. */
+/** The widest natural solid (a big spire: 1.8 × 1.6 × 0.85 m) plus slack: how far round a point to look for chunks. */
 const MAX_SOLID_RADIUS = 2.6;
 /** Feet pushed out further than their radius plus this are "inside" a solid (the server refuses the move). */
 const INSIDE_MARGIN = 0.1;
 /** A body 2 cm wider for clearSpot, like the structures' (no push of its own after float rounding). */
 const CLEAR_MARGIN = 0.02;
+/**
+ * Colliders stop this high (m): a body is 1.8 m and a jump 1.2 m, and the tallest top anyone can
+ * stand on (a big boulder, 3.5 m) is still more than a jump below it. Tree and spire collider tops
+ * above it would only widen every query's broadphase (their bounding spheres).
+ */
+export const SOLID_MAX_HEIGHT = 5;
 /** Natural solids at least this wide stop the camera (boulders, spires); trunks don't. */
 export const CAMERA_SOLID_RADIUS = 1.2;
 
@@ -49,12 +55,13 @@ function chunkSolids(terrain: Terrain, face: Face, cx: number, cy: number): Natu
     const fl = Math.hypot(fx, fy, fz);
     fx /= fl; fy /= fl; fz /= fl;
     const rx = uy * fz - uz * fy, ry = uz * fx - ux * fz, rz = ux * fy - uy * fx;
-    const half = s.height / 2;
+    const height = Math.min(s.height, SOLID_MAX_HEIGHT);
+    const half = height / 2;
     out.push({
       index: out.length, kind: p.kind,
       px: p.x, py: p.y, pz: p.z,
       rx, ry, rz, ux, uy, uz, fx, fy, fz,
-      shape: 1, hx: s.radius, hz: s.radius, h: s.height,
+      shape: 1, hx: s.radius, hz: s.radius, h: height,
       cx: p.x + ux * half, cy: p.y + uy * half, cz: p.z + uz * half,
       bound: Math.hypot(s.radius, half),
     });
@@ -126,11 +133,17 @@ export class NatureSolids {
     this.keys.push(k);
   }
 
-  /** Fill `near` with the (built) colliders of the chunks within `r` metres of (x, y, z); returns how many. */
+  /** Fill `cols` with the (built) colliders of the chunks within `r` metres of (x, y, z); returns how many. */
   private gather(x: number, y: number, z: number, r: number, build = true): number {
     this.keys.length = 0;
     this.addKey(x, y, z);
-    if (r > 0) {
+    // Deep inside its chunk (the usual case: chunks are ~60–100 m wide), that chunk is all there is.
+    // Face-plane coordinates stretch away from the face centre (du ≥ dθ), so r / R in angle is at
+    // most r / R in u and v; twice that keeps clear of rounding.
+    const n = this.cpf;
+    const u = ((this.uv[0] + 1) / 2) * n, v = ((this.uv[1] + 1) / 2) * n;
+    const edge = Math.min(u - Math.floor(u), Math.ceil(u) - u, v - Math.floor(v), Math.ceil(v) - v) * (2 / n);
+    if (r > 0 && edge <= (2 * r) / this.terrain.body.radius) {
       const l = Math.hypot(x, y, z);
       const ux = x / l, uy = y / l, uz = z / l;
       const big = Math.abs(uz) < 0.9;
