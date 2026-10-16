@@ -8,6 +8,7 @@ import { vegetationModels } from "./vegetationModels.ts";
 import { config } from "../config.ts";
 import { atmo } from "./atmosphere.ts";
 import { PROP_PALETTES } from "./propGeometry.ts";
+import { applyOccluderFade } from "./occluderFade.ts";
 
 export interface VegetationAssets {
   geometry: Map<string, THREE.BufferGeometry>;
@@ -203,6 +204,8 @@ export function vegetationMaterial(kind: PropKind, atlas: THREE.Texture, imposto
     const tangent = normalize(cross(ref, up));
     m.positionNode = positionLocal.add(tangent.mul(sway));
   }
+  // Trunks, crowns and rocks between the camera and the player dissolve (occluderFade.ts).
+  applyOccluderFade(m);
   materials.set(key, m);
   return m;
 }

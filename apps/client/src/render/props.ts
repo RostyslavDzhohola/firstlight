@@ -8,6 +8,7 @@ import * as THREE from "three/webgpu";
 import { hash01, PROP_KINDS, PROP_STRIDE, PROP_STYLES, type BodyId, type PropKind } from "@firstlight/shared";
 import { float, materialColor, mix } from "three/tsl";
 import { atmo } from "./atmosphere.ts";
+import { applyOccluderFade } from "./occluderFade.ts";
 import { propGeometry, PROP_PALETTES } from "./propGeometry.ts";
 import { applyVegetationPalette, preloadVegetation, validateVegetationAssets, vegetationMaterial, type VegetationAssets } from "./vegetationAssets.ts";
 import { vegetationModels, vegetationVariant } from "./vegetationModels.ts";
@@ -44,6 +45,7 @@ function propMaterial(): THREE.MeshStandardNodeMaterial {
     // Rain: bark, leaves and rocks darken and get a sheen (vertex/instance colours still multiply in).
     sharedMaterial.colorNode = materialColor.mul(mix(float(1), float(0.78), atmo.wet));
     sharedMaterial.roughnessNode = mix(float(0.86), float(0.4), atmo.wet);
+    applyOccluderFade(sharedMaterial); // procedural trees and rocks fade like the modelled ones
   }
   return sharedMaterial;
 }
