@@ -382,10 +382,10 @@ export const OUTPOSTS: Readonly<Record<OutpostBody, OutpostSite>> = {
   },
   meridian: {
     body: "meridian",
-    version: "0ef0b7c34797256b",
+    version: "e21b8268c98e1fbb",
     prefabs: [
       { name: "m_pad", cls: "static", tris: [1472, 0], height: 0.02, radius: 10.35, solids: [] },
-      { name: "m_gate", cls: "static", tris: [2904, 0], height: 9.55, radius: 3.71, solids: [[0, -2.35, 0, 0.75, 0.85, -1.5, 4.7, 0], [0, 2.35, 0, 0.75, 0.85, -1.5, 4.7, 0]] },
+      { name: "m_gate", cls: "static", tris: [2904, 0], height: 9.81, radius: 3.71, solids: [[0, -2.35, 0, 0.75, 0.85, -1.5, 4.7, 0], [0, 2.35, 0, 0.75, 0.85, -1.5, 4.7, 0]] },
       { name: "m_mast", cls: "static", tris: [1448, 0], height: 29.25, radius: 3.39, solids: [[1, -1.5, 1.5, 0.28, 0.28, -1.5, 8, 0], [1, -1.5, -1.5, 0.28, 0.28, -1.5, 8, 0], [1, 1.5, 1.5, 0.28, 0.28, -1.5, 8, 0], [1, 1.5, -1.5, 0.28, 0.28, -1.5, 8, 0], [0, 2.15, 0, 0.45, 0.9, -1.5, 2.2, 0]] },
       { name: "m_office", cls: "building", tris: [4525, 0], height: 8.7, radius: 6.77, solids: [[0, 0, 0, 4.6, 4.6, -1.5, 5.6, 0], [0, 0, 5.4, 2.6, 0.8, 3.4, 3.65, 0], [0, -2.4, 5.975, 0.15, 0.175, -1.5, 3.4, 0], [0, 2.4, 5.975, 0.15, 0.175, -1.5, 3.4, 0]] },
       { name: "m_hab", cls: "building", tris: [2236, 0], height: 4.3, radius: 5.01, solids: [[0, 0, 0, 4.4, 2.4, -1.5, 3.55, 0]] },

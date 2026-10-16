@@ -904,7 +904,10 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   Astra's pale stone arch (gate B) on Arcadia's and Hollowmere's, scaled ×1.49 so the game's 2.2 m
   ring clears its piers. The game fills gate A's opening with a swirling arched membrane (TSL) instead
   of the ring and disc (the ring comes back on Meridian if the outpost models aren't drawn); gate B
-  keeps the ring. Portal positions and the entry test are unchanged. Why: the owner picked both "on
+  keeps the ring. Portal positions and the entry test are unchanged. Gate A's dais is a low
+  threshold (0.06 m, then 0.14 m) with no collider: the shared collider steps feet onto a top only
+  with the centre already over it, so the design round's 0.21/0.41 m steps stopped players walking in
+  (browser check). Why: the owner picked both "on
   different planets"; gate A's sci-fi arch suits Portus' hub and Meridian, gate B's stone the farm and
   the fen.
 - **D-b2-3 (buildings-2, 2026-10-15):** a shop stall inside every outpost's walls, facing the pad

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three/webgpu";
-import { BODIES, createTerrain, type Breakable, type Terrain } from "@firstlight/shared";
+import { BODIES, createTerrain, portalSpots, type Breakable, type Terrain } from "@firstlight/shared";
 import { structureCollider, townCoords, townDir } from "@firstlight/shared/planet/town";
 import { BreakableCollider, PLAYER_BODY } from "@firstlight/shared/planet/collide";
 import type { Input } from "./input.ts";
@@ -416,5 +416,68 @@ describe("third-person camera and structures (D42)", () => {
     for (let i = 0; i < 40; i++) pc.placeCamera(cam);
     expect(cam.position.distanceTo(head)).toBeGreaterThan(first);
     expect(cam.position.distanceTo(head)).toBeGreaterThan(4.5);
+  });
+
+  it("pressed against a wall and turned away from it, the lens stays out of the wall (round 2 browser check)", () => {
+    const portus = createTerrain("portus");
+    const town = structureCollider(portus)!;
+    const R = BODIES.portus.radius;
+    const pc = new PlayerController(portus, BODIES.portus.waterLevel);
+    pc.setStructures({ resolve: (p, out) => town.resolve(p, out), raycast: (o, d, maxT) => town.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT) });
+    const d = townDir(26.2, 2.2, R);
+    pc.teleport(d[0] * R, d[1] * R, d[2] * R);
+    run(pc, fakeInput(), 0.2);
+    const toward = (e: number, n: number) => {
+      const q = townDir(e, n, R);
+      const up = pc.pos.clone().normalize();
+      const v = new THREE.Vector3(q[0] * R - pc.pos.x, q[1] * R - pc.pos.y, q[2] * R - pc.pos.z);
+      return v.addScaledVector(up, -v.dot(up)).normalize();
+    };
+    // Walk north into the house's wall and keep pushing, then turn round: the wall is right behind.
+    const cf = (pc as unknown as { camForward: THREE.Vector3 }).camForward;
+    cf.copy(toward(26.2, 30));
+    run(pc, fakeInput(["KeyW"]), 3);
+    cf.copy(toward(26.2, -30));
+    const cam = new THREE.PerspectiveCamera();
+    for (let i = 0; i < 10; i++) pc.placeCamera(cam);
+    const head = pc.pos.clone().addScaledVector(pc.pos.clone().normalize(), 1.65);
+    const v = cam.position.clone().sub(head);
+    const l = v.length();
+    const wall = town.raycast(head.x, head.y, head.z, v.x / l, v.y / l, v.z / l, 5);
+    expect(wall, "the wall is close behind the head").toBeLessThan(1.2);
+    // The lens sits short of the wall along its line from the head, with room to spare.
+    expect(wall - l).toBeGreaterThan(0.15);
+    expect(town.footing(cam.position.x, cam.position.y, cam.position.z, 0, { radius: 0.01, height: 0.01, step: 0 }).inside).toBe(false);
+  });
+});
+
+describe("walking into the Portus portals (round 2: gate A's courts)", () => {
+  it("walks straight from the plaza into each portal with W alone: nothing at its foot stops the feet", () => {
+    const portus = createTerrain("portus");
+    const town = structureCollider(portus)!;
+    const R = BODIES.portus.radius;
+    for (const spot of portalSpots(BODIES.portus, portus)) {
+      const pc = new PlayerController(portus, BODIES.portus.waterLevel);
+      pc.setStructures({ resolve: (p, out) => town.resolve(p, out), raycast: (o, d, maxT) => town.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT) });
+      // 9 m out in front of the portal (the way players come from the plaza), facing it.
+      const up = new THREE.Vector3(...spot.dir);
+      const f = new THREE.Vector3(...spot.facing);
+      const start = up.clone().multiplyScalar(R).addScaledVector(f, 9).normalize().multiplyScalar(R);
+      pc.teleport(start.x, start.y, start.z);
+      run(pc, fakeInput(), 0.2);
+      const cf = (pc as unknown as { camForward: THREE.Vector3 }).camForward;
+      const aim = () => {
+        const u = pc.pos.clone().normalize();
+        const v = up.clone().multiplyScalar(R).sub(pc.pos);
+        cf.copy(v.addScaledVector(u, -v.dot(u)).normalize());
+      };
+      aim();
+      let best = Infinity;
+      run(pc, fakeInput(["KeyW"]), 4, 60, () => {
+        aim();
+        best = Math.min(best, pc.pos.clone().normalize().distanceTo(up) * R);
+      });
+      expect(best, `into the ${spot.to} portal`).toBeLessThan(1);
+    }
   });
 });

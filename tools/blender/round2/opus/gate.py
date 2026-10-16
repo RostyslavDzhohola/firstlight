@@ -18,7 +18,9 @@ WORLDS = {
     # Round 2: the planets' home gate back to Portus (warm, the portal's own colour).
     'portus':     dict(glow=0xFFD8A8, accent=0xFFE6B0, banner=0x8A5A2E, name="PORTUS"),
 }
-PX, ZD = 2.35, 0.40          # pylon centre x, dais top
+# FIRSTLIGHT: the dais is a low two-step threshold (0.06 m, then 0.14 m) the game walks over without a
+# collider (players' feet can't step up a solid edge; the design round's 0.21/0.41 m steps stopped them).
+PX, ZD = 2.35, 0.14          # pylon centre x, dais top
 ZS = 5.0                     # arch springing height
 RA = PX                      # arch centre-line radius
 OPEN = PX - 0.5              # half opening width
@@ -27,14 +29,14 @@ def kit():
     P = {}
     # ---- dais: 12-sided, two tiers
     p = K.Piece("G_dais")
-    p.lathe([(0.0, 0.0), (4.9, 0.0), (4.9, 0.17), (4.75, 0.21), (4.25, 0.21), (4.25, 0.37), (4.1, 0.41), (0.0, 0.41)],
+    p.lathe([(0.0, 0.0), (4.9, 0.0), (4.9, 0.045), (4.8, 0.06), (4.25, 0.06), (4.25, 0.115), (4.15, ZD), (0.0, ZD)],
             seg=12, col=PAL['stone2'], kind='stone')
     P['dais'] = p.mesh(sharp_deg=35)
     # glowing inlay ring + approach lines (tinted)
     p = K.Piece("G_inlay")
-    p.lathe([(3.35, 0.415), (3.55, 0.415)], seg=24, col=PAL['white'], kind='glow', glow=0.55, cap0=False, cap1=False)
+    p.lathe([(3.35, ZD + 0.005), (3.55, ZD + 0.005)], seg=24, col=PAL['white'], kind='glow', glow=0.55, cap0=False, cap1=False)
     for x in (-0.9, 0.9):
-        p.box((0.10, 2.9, 0.02), (x, -1.95, 0.41), col=PAL['white'], kind='glow', glow=0.55)
+        p.box((0.10, 2.9, 0.02), (x, -1.95, ZD), col=PAL['white'], kind='glow', glow=0.55)
     P['inlay'] = p.mesh()
     # ---- pylon pieces
     p = K.Piece("G_pylon_base"); p.box((1.5, 1.7, 0.62), (0, 0, 0.31), col=PAL['stone2'], kind='stone', bevel=0.05, taper=(0.9, 0.92)); P['pbase'] = p.mesh()

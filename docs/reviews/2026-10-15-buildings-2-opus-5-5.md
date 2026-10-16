@@ -19,9 +19,9 @@ checks); the check list is at the end. Renders for the owner: `/tmp/fl-go/shots/
 
 ## Numbers
 
-Shipped bytes (≤ 6 MB Portus, ≤ 2 MB per planet): Portus 2,272,812 (was 2,797,910 in ASSETS; the
+Shipped bytes (≤ 6 MB Portus, ≤ 2 MB per planet): Portus 2,292,008 (was 2,797,910 in ASSETS; the
 round-1 build had 2,369,240 for the GLB alone); Arcadia 680,907 own files, Hollowmere 362,500,
-Meridian 495,536.
+Meridian 495,616.
 
 LOD0 triangles as laid out: Portus 186,890 (houses 4,710–5,010 each, LOD1 3,664–3,964; gates 3,304);
 Arcadia 30,322, Hollowmere 21,871, Meridian 21,333.
@@ -88,6 +88,22 @@ Shop keepers (`SHOP_SPOTS`, world metres): Arcadia `[271.0583, 420.186, -17.8155
 
 Budgets after the fixes: Low 23.0k / 24.7k / 24.3k (cap 25k); Meridian's land walls are one box
 with a glowing top, posts only where a land wall meets another piece.
+
+## Browser check round 1 (Codex, `/tmp/fl-go/buildings2-check/report.md`)
+
+Passed: J2/J3 12/12, 0 post-warm-up shader builds and ~60 fps on every planet, tier and backend,
+the shops open with E on all three planets, Safe → Danger at every gate. Two defects, fixed:
+
+- **Walking into a Portus portal stopped at the dais** (5.3 m out; only a jump got players up). The
+  shared collider pushes feet off a solid's edge unless the body's centre is already over it, so
+  the 0.21/0.41 m dais steps acted as a curb. Gate A's dais is now a 0.06/0.14 m threshold with no
+  collider (Portus and the Meridian gate rebuilt; the membrane's base follows). Test
+  (`game/PlayerController.test.ts`): the real controller walks from 9 m out into each Portus portal
+  with W alone; it stopped at 5.28 m before the fix.
+- **The camera went into a wall the player was pressed against** (lens 0.2 m inside: the camera
+  never came closer than 0.6 m to the head). Now it stops short of the wall by 0.3 m, or by half
+  the way when the wall is closer than 0.6 m. Test: pressed against a Portus house and turned away,
+  the lens stays ≥ 0.15 m short of the wall (−0.18 m with the old rule).
 
 ## Deploy order
 

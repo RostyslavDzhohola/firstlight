@@ -1,11 +1,11 @@
 {
- "version": "0ef0b7c34797256b",
+ "version": "e21b8268c98e1fbb",
  "body": "meridian",
  "files": {
   "glb": {
    "name": "meridian.glb",
-   "bytes": 264164,
-   "sha256": "9b87dc02be626a7994ec834a0e91270ab358215b237e0257d8c81ab5437cc50a"
+   "bytes": 264244,
+   "sha256": "65acb8a9e6ac856f76ecad4b7bfff3767b5f5b1cf8ce7858d53733136a54c630"
   },
   "color": {
    "name": "meridian_color.webp",

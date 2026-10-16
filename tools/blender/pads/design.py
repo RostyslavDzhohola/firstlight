@@ -2217,8 +2217,7 @@ def build_round2_gate():
     import pieces
     name = f"{B}_gate"
     if BODY == "meridian":
-        me = pieces.gate_a("portus", name + "_r2", dais=False)
-        me.transform(T(0, 0, -0.40))           # the pylons stand on the platform (no dais)
+        me = pieces.gate_a("portus", name + "_r2", dais=False)   # the pylons stand on the platform
         sol = [("box", sx * 2.35 - 0.75, -0.85, sx * 2.35 + 0.75, 0.85, 0, 4.7) for sx in (-1, 1)]
         return r2_mesh_prefab(name, me, "static", "round 2 gate A (Opus) on the pad edge; the game draws the membrane", sol)
     me = pieces.gate_b(name + "_r2")

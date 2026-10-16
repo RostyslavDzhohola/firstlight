@@ -61,10 +61,12 @@ const _head = new THREE.Vector3();
 const _cam = new THREE.Vector3();
 const _camUp = new THREE.Vector3();
 const _camDir = new THREE.Vector3();
-/** The camera stops this far (m) short of a structure between the head and where it would be. */
+/**
+ * The camera stops this far (m) short of a structure between the head and where it would be; with
+ * the player pressed against a wall (the wall under CAMERA_WALL_GAP × 2 behind the head) it keeps half
+ * the way to the wall instead, so the lens never ends up inside the wall (browser check, round 2).
+ */
 export const CAMERA_WALL_GAP = 0.3;
-/** ...and never comes closer to the head than this (m). */
-export const CAMERA_MIN_REACH = 0.6;
 /** How fast (m per placement) the camera eases back out once the structure is out of the way. */
 const CAMERA_EASE_OUT = 0.25;
 const AXIS_X = new THREE.Vector3(1, 0, 0);
@@ -384,7 +386,7 @@ export class PlayerController {
     const full = dir.length();
     dir.divideScalar(full);
     const hit = this.structures?.raycast?.(head, dir, full + CAMERA_WALL_GAP) ?? Infinity;
-    const want = hit < Infinity ? Math.max(CAMERA_MIN_REACH, hit - CAMERA_WALL_GAP) : full;
+    const want = hit < Infinity ? hit - Math.min(CAMERA_WALL_GAP, hit / 2) : full;
     this.camReach = want < this.camReach ? want : Math.min(want, this.camReach + CAMERA_EASE_OUT);
     if (this.camReach < full) camPos.copy(head).addScaledVector(dir, this.camReach);
     // Keep the camera above ground.

@@ -35,8 +35,8 @@ export const PORTUS_RING_GLOW = 2.2;
  * ring and disc (Astra's gate B is built round them).
  */
 export const PORTAL_GATES: Record<BodyId, { style: "arch" | "ring"; base: number; spring: number; half: number }> = {
-  portus: { style: "arch", base: 0.41, spring: 5.0, half: 1.93 },
-  meridian: { style: "arch", base: 0.2, spring: 4.8, half: 1.93 },
+  portus: { style: "arch", base: 0.14, spring: 5.0, half: 1.93 },
+  meridian: { style: "arch", base: 0.2, spring: 5.06, half: 1.93 },
   arcadia: { style: "ring", base: 0, spring: 0, half: 0 },
   hollowmere: { style: "ring", base: 0, spring: 0, half: 0 },
 };

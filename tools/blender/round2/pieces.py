@@ -79,7 +79,8 @@ def house(w, d, variant, name, lod1=False):
 # ------------------------------------------------------------------------------------------------
 def gate_a(world, name, dais=True):
     """The floating-arch gate tinted for `world` (its destination). dais=False leaves out the
-    two-step dais, inlay and obelisks (a gate standing on a landing platform's edge)."""
+    two-step dais, inlay and obelisks and stands the pylons on the ground (a gate on a landing
+    platform's edge)."""
     import gate as G
     P = G.kit()
     mats = [K.mat_kit(), K.mat_holo(strength=1.3), G.mat_portal()]
@@ -92,6 +93,8 @@ def gate_a(world, name, dais=True):
     for ob in list(B.objs):
         bpy.data.objects.remove(ob)
     _drop_source_materials(mats)
+    if not dais:
+        me.transform(Matrix.Translation((0, 0, -G.ZD)))  # the pylons stand on the ground (no dais)
     return _baked(me, seed=3)
 
 

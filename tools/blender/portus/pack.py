@@ -613,11 +613,12 @@ def C(x, y, r, z0, z1):
 
 
 def gate_a_solids(dais=True):
-    """Opus gate A (round 2): the two pylons, the dais' two steps (each under the 0.35 m step) and the
-    obelisks; the opening stays clear for the portal."""
-    s = [B(-2.35, 0, 0.75, 0.85, 0, 5.1), B(2.35, 0, 0.75, 0.85, 0, 5.1)]
+    """Opus gate A (round 2): the two pylons and the obelisks; the opening stays clear for the portal.
+    The dais (a 0.14 m threshold) has no collider: a solid edge stops walking feet (collide.ts steps
+    onto a top only with the centre over it), so players walk over it, their feet a little in it."""
+    s = [B(-2.35, 0, 0.75, 0.85, 0, 4.9), B(2.35, 0, 0.75, 0.85, 0, 4.9)]
     if dais:
-        s += [C(0, 0, 4.9, 0, 0.21), C(0, 0, 4.25, 0, 0.41), C(-3.9, -3.9, 0.31, 0, 2.15), C(3.9, -3.9, 0.31, 0, 2.15)]
+        s += [C(-3.9, -3.9, 0.31, 0, 2.15), C(3.9, -3.9, 0.31, 0, 2.15)]
     return s
 
 
