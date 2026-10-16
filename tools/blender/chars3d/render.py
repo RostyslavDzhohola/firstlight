@@ -40,6 +40,9 @@ NAMES = {"hexwick": "Hexwick", "ash": "Brother Ash", "kappa": "Kappa", "unit7": 
 # armature-space rotation copies from a hidden clip rig, and a pelvis track scaled to their leg length
 # (what the client does with the same clips, see apps/client/src/render/avatars/assets.ts).
 RETARGET = {"kappa_b", "unit7_b"}
+# UI cameras (unscaled model heights): hero framing centre, portrait eye line and distance. The second
+# looks are built low with big heads.
+UI_CAM = {"kappa_b": (0.9, 1.33, 1.9), "unit7_b": (0.84, 1.4, 1.8)}
 ANIM_RIG = {}
 RETARGETED = []
 
@@ -443,13 +446,14 @@ def main():
         goto(a.frame)
         mesh = next(o for o in sc.objects if o.type == "MESH" and o.parent is arm)
         s = SCALE.get(n, 1.0)
+        hero_z, eye_z, eye_d = UI_CAM.get(n, (0.98, 1.66, 1.75))
         if a.mode == "heroes":
             sc.render.resolution_x, sc.render.resolution_y = 480, 720
-            cam = bl.camera("cam", (0, 0, 0.98 * s), (0.0, -1, 0.05), 3.55, lens=55)
+            cam = bl.camera("cam", (0, 0, hero_z * s), (0.0, -1, 0.05), 3.55, lens=55)
             todo = [(i, f"{a.out}_{n}_{i}.png") for i in range(6)]
         else:
             sc.render.resolution_x = sc.render.resolution_y = 256
-            cam = bl.camera("cam", (0, 0, 1.66 * s), (0.12, -1, 0.02), 1.75, lens=70)
+            cam = bl.camera("cam", (0, 0, eye_z * s), (0.12, -1, 0.02), eye_d, lens=70)
             todo = [(pals[0], f"{a.out}_{n}.png")]
         sc.camera = cam
         for pal, path in todo:
