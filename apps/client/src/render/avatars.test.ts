@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
-import { WEAPONS } from "@firstlight/shared/content/weapons";
+import { STARTER_LOOKS, STARTERS, WEAPONS } from "@firstlight/shared/content/weapons";
 import { ANIM } from "@firstlight/shared/net/schema";
 import { watchDisposals } from "./disposeWatch.testutil.ts";
 
@@ -104,10 +104,12 @@ describe("held items", () => {
 });
 
 describe("avatar warm-up hook", () => {
-  it("stands every starter in every palette (T9: each material in play compiles behind the loading screen)", () => {
+  it("stands every starter's every look in every palette (T9: each material in play compiles behind the loading screen)", () => {
     const looks = mod.avatarWarmupLooks();
-    expect(looks).toHaveLength(5 * mod.PALETTES.length);
-    expect(new Set(looks.map((l) => `${l.starter}:${l.palette}`)).size).toBe(5 * mod.PALETTES.length);
+    const n = STARTER_LOOKS.flat().length; // 5 starters + the second looks of Kappa and Unit 7
+    expect(n).toBe(7);
+    expect(looks).toHaveLength(n * mod.PALETTES.length);
+    expect(new Set(looks.map((l) => `${l.starter}:${l.look}:${l.palette}`)).size).toBe(n * mod.PALETTES.length);
   });
 
   it("keeps its samples for the session: in the scene (hidden) while warming, out of it after, never disposed", () => {
@@ -133,5 +135,29 @@ describe("avatar warm-up hook", () => {
     expect(kept.children).toHaveLength(mod.avatarWarmupLooks().length + mod.PALETTES.length);
     for (const c of kept.children) expect(c.position.distanceTo(at(50))).toBeLessThan(1e-6);
     expect(w.disposed.size).toBe(0);
+  });
+});
+
+describe("looks → models", () => {
+  it("draws every look with its own model; the originals come first, in starter order", async () => {
+    const { MODEL_FILES, MODEL_SCALE, modelIndex } = await import("./avatars/assets.ts");
+    STARTER_LOOKS.forEach((ls, s) => ls.forEach((l, k) => expect(MODEL_FILES[modelIndex(s, k)]).toBe(l.id)));
+    STARTERS.forEach((st, s) => expect(MODEL_FILES[s]).toBe(st.id));
+    expect(MODEL_FILES).toHaveLength(STARTER_LOOKS.flat().length);
+    expect(MODEL_SCALE).toHaveLength(MODEL_FILES.length);
+    expect(modelIndex(2, 1)).toBe(MODEL_FILES.indexOf("kappa_b"));
+    expect(modelIndex(0, 1)).toBe(0); // Hexwick has no second look: the original
+    expect(modelIndex(3, 7)).toBe(3);
+  });
+
+  it("rescales only the pelvis track for shorter legs", async () => {
+    const { legClips, UAL_PELVIS } = await import("./avatars/assets.ts");
+    const pos = new THREE.VectorKeyframeTrack("pelvis.position", [0, 1], [0, UAL_PELVIS, -0.05, 0, UAL_PELVIS - 0.1, -0.05]);
+    const rot = new THREE.QuaternionKeyframeTrack("spine_01.quaternion", [0, 1], [0, 0, 0, 1, 0, 0, 0, 1]);
+    const src = new Map([["walk", new THREE.AnimationClip("walk", 1, [pos, rot])]]);
+    const out = legClips(src, UAL_PELVIS / 2).get("walk")!;
+    expect(Array.from(out.tracks[0]!.values)).toEqual([0, UAL_PELVIS / 2, -0.025, 0, (UAL_PELVIS - 0.1) / 2, -0.025].map((v) => Math.fround(v)));
+    expect(out.tracks[1]).toBe(rot); // rotations are shared, not copied
+    expect(src.get("walk")!.tracks[0]!.values[1]).toBeCloseTo(UAL_PELVIS); // the shared clip is untouched
   });
 });

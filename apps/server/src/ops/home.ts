@@ -6,7 +6,7 @@
 import type { Express } from "express";
 import { BODY_IDS, type BodyId } from "@firstlight/shared";
 import { MEDAL_BY_ID } from "@firstlight/shared/content/medals";
-import { STARTERS } from "@firstlight/shared/content/weapons";
+import { STARTERS, starterLook } from "@firstlight/shared/content/weapons";
 import type { HomeBoard, HomeData, HomeOnline } from "@firstlight/shared/net/home";
 import { banKey, directRequestIp } from "../auth/ip.ts";
 import { listHallOfFirsts, medalLeaders, topLevels, type Db } from "../db/index.ts";
@@ -59,7 +59,10 @@ const titleOf = (medal: string | null) => (medal ? (MEDAL_BY_ID.get(medal)?.titl
 
 export function readBoard(db: Db, now = Date.now(), rows = HOME_LIMITS.boardRows): HomeBoard {
   return {
-    levels: topLevels(db, rows, now).map((r) => ({ name: r.name, level: r.level, starter: Math.max(0, STARTERS.findIndex((s) => s.id === r.starter)), title: titleOf(r.titleMedal) })),
+    levels: topLevels(db, rows, now).map((r) => {
+      const starter = Math.max(0, STARTERS.findIndex((s) => s.id === r.starter));
+      return { name: r.name, level: r.level, starter, look: starterLook(starter, r.look), title: titleOf(r.titleMedal) };
+    }),
     medals: medalLeaders(db, rows, now).map((r) => ({ name: r.name, medals: r.medals, title: titleOf(r.titleMedal) })),
     hall: listHallOfFirsts(db).map((e) => ({ id: e.secretId, name: e.displayName, foundAt: e.foundAt })),
   };

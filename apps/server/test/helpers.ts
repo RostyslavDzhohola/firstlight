@@ -59,7 +59,7 @@ export async function playRequest(game: Game, token: string, body: Record<string
  * Give a user a travel ticket to `body` (tests hop bodies without walking to a portal). A user with
  * no character yet gets one (with `starter`/`palette`), since new characters start in Portus.
  */
-export function grantTravel(userId: string, body: string, choice: { starter?: unknown; palette?: unknown } = {}): void {
+export function grantTravel(userId: string, body: string, choice: { starter?: unknown; palette?: unknown; look?: unknown } = {}): void {
   const until = Date.now() + 60_000;
   const live = hub.get(userId)?.actor.char;
   if (live) {
@@ -68,7 +68,7 @@ export function grantTravel(userId: string, body: string, choice: { starter?: un
     return;
   }
   let c = characterRepo.current.load(userId);
-  if (!c && body !== "portus") c = newCharacter(Number(choice.starter ?? 0), Number(choice.palette ?? 0));
+  if (!c && body !== "portus") c = newCharacter(Number(choice.starter ?? 0), Number(choice.palette ?? 0), Date.now(), Number(choice.look ?? 0));
   if (c && c.body !== body) {
     c.travelTo = body as BodyId;
     c.travelUntil = until;

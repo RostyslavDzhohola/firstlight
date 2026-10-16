@@ -191,7 +191,7 @@ export class Menu {
 
   private me() {
     const room = this.game.net.room;
-    return (room?.state as any)?.players?.get(room?.sessionId ?? "") as { name: string; starter: number; level: number; flags: number } | undefined;
+    return (room?.state as any)?.players?.get(room?.sessionId ?? "") as { name: string; starter: number; look?: number; level: number; flags: number } | undefined;
   }
 
   showPause() {
@@ -205,7 +205,7 @@ export class Menu {
 
     const id = el("div", "fl-menu__me", left);
     const face = el("div", "fl-face", id);
-    sprite(portraitSprite(me?.starter ?? Number(localStorage.getItem("fl.starter") ?? 0)), "", face);
+    sprite(portraitSprite(me?.starter ?? Number(localStorage.getItem("fl.starter") ?? 0), me ? me.look : Number(localStorage.getItem("fl.look") ?? 0)), "", face);
     const who = el("div", "", id);
     el("b", "", who, me?.name || "You");
     const sub = el("span", "", who, [STARTERS[me?.starter ?? 0]?.name, me ? `Level ${me.level}` : null].filter(Boolean).join(" · "));
@@ -243,7 +243,7 @@ export class Menu {
       el("span", "fl-menu__badge", save.right, "Not saved");
       save.b.disabled = !ready;
       save.b.onclick = () =>
-        void openSaveProgress({ name: me?.name, level: me?.level, starter: me?.starter, later: "Esc → Save progress" }).then((r) => {
+        void openSaveProgress({ name: me?.name, level: me?.level, starter: me?.starter, look: me?.look, later: "Esc → Save progress" }).then((r) => {
           if (r === "saved" && this.mode === "pause") this.showPause();
         });
       saveSlot.hidden = false;

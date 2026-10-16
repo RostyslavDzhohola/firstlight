@@ -87,7 +87,7 @@ export class Game {
   private pendingClose: number | null = null;
   /** Renderer + UI exist: a retried first boot (S6) only enters the world again. */
   private uiReady = false;
-  private firstChoice: { starter: number; palette: number } | undefined;
+  private firstChoice: { starter: number; palette: number; look?: number } | undefined;
   private probed = false;
   private nextFxDemo = 0;
   /** Per-frame scratch (the loop allocates nothing in steady state). */
@@ -170,6 +170,7 @@ export class Game {
     if (info?.character && !localStorage.getItem("fl.starter")) {
       localStorage.setItem("fl.starter", String(info.character.starter));
       localStorage.setItem("fl.palette", String(info.character.palette));
+      localStorage.setItem("fl.look", String(info.character.look ?? 0));
     }
     if (!localStorage.getItem("fl.starter") && !automated) {
       hideLoading();
@@ -401,7 +402,7 @@ export class Game {
     this.afterTransition();
   }
 
-  async enterBody(body: BodyId, choice?: { starter: number; palette: number }): Promise<void> {
+  async enterBody(body: BodyId, choice?: { starter: number; palette: number; look?: number }): Promise<void> {
     setLoading(`Travelling to ${body[0]!.toUpperCase()}${body.slice(1)}…`, 0.15);
     await this.net.leave();
     for (const s of this.systems) s.dispose();
@@ -423,7 +424,7 @@ export class Game {
     this.audio.setMusic(body);
     this.piles = new PilesView(this.ctx.scene);
 
-    const stored = { starter: Number(localStorage.getItem("fl.starter") ?? 0), palette: Number(localStorage.getItem("fl.palette") ?? 0) };
+    const stored = { starter: Number(localStorage.getItem("fl.starter") ?? 0), palette: Number(localStorage.getItem("fl.palette") ?? 0), look: Number(localStorage.getItem("fl.look") ?? 0) || 0 };
     // S5: from the join until control is handed over, a close of the new room aborts the arrival
     // (ConnectionLost at the next check) instead of hanging or warming into no connection.
     let watch: ArrivalWatch | null = null;
@@ -479,7 +480,7 @@ export class Game {
       this.portals?.setPadModels(this.planet.town.drawsModels);
     }
     if (!this.self) {
-      this.self = new AvatarView(choice?.palette ?? stored.palette, choice?.starter ?? stored.starter);
+      this.self = new AvatarView(choice?.palette ?? stored.palette, choice?.starter ?? stored.starter, choice?.look ?? stored.look);
       this.self.root.name = "selfAvatar";
     }
     this.ctx.scene.add(this.self.root);
@@ -639,7 +640,7 @@ export class Game {
       let a = this.avatars.get(id);
       if (!a) {
         const st = state?.players?.get(id);
-        a = new AvatarView(st?.palette ?? (id.charCodeAt(0) % 6), st?.starter ?? 0);
+        a = new AvatarView(st?.palette ?? (id.charCodeAt(0) % 6), st?.starter ?? 0, st?.look ?? 0);
         a.root.visible = this.ctx.settings.on.chars;
         this.avatars.set(id, a);
         this.ctx.scene.add(a.root);

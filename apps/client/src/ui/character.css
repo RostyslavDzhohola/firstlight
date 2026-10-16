@@ -94,3 +94,13 @@
 @media (max-width: 1360px) {
   .fl-charpick__cols { grid-template-columns: calc(19 * var(--u)) minmax(0, 1fr) calc(20 * var(--u)); padding-left: var(--sp-6); padding-right: var(--sp-6); }
 }
+
+/* Look (starters with a second look: Kappa, Unit 7) → portrait buttons above the palette. */
+.fl-charpick__lookrow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: calc(.45 * var(--u)); }
+.fl-lookbtn { display: flex; align-items: center; gap: calc(.5 * var(--u)); min-width: 0; padding: calc(.3 * var(--u)) calc(.55 * var(--u)) calc(.3 * var(--u)) calc(.3 * var(--u)); border: 1px solid var(--line-2); border-radius: var(--r-1); background: rgba(0, 0, 0, .2); font: 500 var(--t-xs)/1.1 var(--font-display); letter-spacing: .02em; color: var(--fog-3); text-align: left; }
+.fl-lookbtn > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-lookbtn:hover { border-color: var(--line-3); color: var(--paper); }
+.fl-lookbtn.is-on { border-color: rgba(255, 217, 155, .65); background: rgba(243, 174, 91, .1); color: var(--dawn-3); }
+.fl-lookbtn__face { flex: none; width: calc(2.2 * var(--u)); height: calc(2.2 * var(--u)); border-radius: var(--r-1); overflow: hidden; background: rgba(0, 0, 0, .35); }
+.fl-lookbtn__face .px { width: 100%; height: 100%; }
+.fl-charpick__looks[hidden] { display: none; }

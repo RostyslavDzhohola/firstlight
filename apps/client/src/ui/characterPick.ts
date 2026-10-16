@@ -1,10 +1,10 @@
 // Character pick (verdict: Entry B): starter list with rendered portraits, a spotlit hero figure (a
-// render of the real 3D model in the chosen palette), weapon stats, palette swatches and, on first
-// play, the display-name field. Renders come from tools/blender/chars3d (render.py, the game look).
+// render of the real 3D model in the chosen look and palette), weapon stats, the look choice (starters
+// with more than one: Kappa, Unit 7), palette swatches and, on first play, the display-name field. Renders come from tools/blender/chars3d (render.py, the game look).
 // Used for the first play and for rebirth (no life counter: the server doesn't send one).
 
 import "./character.css";
-import { STARTERS, PALETTE_NAMES, WEAPON_BY_ID } from "@firstlight/shared/content/weapons";
+import { lookId, STARTER_LOOKS, STARTERS, PALETTE_NAMES, starterLook, WEAPON_BY_ID } from "@firstlight/shared/content/weapons";
 import { NAME_PATTERN, setDisplayName } from "../net/auth.ts";
 import { nameProblem, validSuggestion } from "./account.ts";
 import { button, el, icon, isolateKeys, overlayClosed, overlayOpened, sprite, uiRoot } from "./dom.ts";
@@ -21,6 +21,14 @@ export interface CharacterPickOptions {
   askName?: { suggested?: string };
 }
 
+/** What the picker resolves with (and what /api/play and `respawn` send). */
+export interface CharacterChoice {
+  starter: number;
+  palette: number;
+  /** STARTER_LOOKS index for the starter. */
+  look: number;
+}
+
 const STARTER_COPY = [
   { role: "Young wizard", line: "Writes glowing glyphs in the air.", weapon: "Quill wand · writes light", pal: "Robe, scarf and the glyphs he writes." },
   { role: "Hooded desert monk-knight", line: "Blocks bolts with a blade of sunlight.", weapon: "Energy blade · stowed on the back", pal: "Robe, wraps and the hilt inlays. The Sunbrand blade always burns the same colour." },
@@ -29,14 +37,20 @@ const STARTER_COPY = [
   { role: "Fire ninja", line: "Throws kunai; a hand seal looses a fireball.", weapon: "Thrown kunai · hold RMB: Ember Seal", pal: "Hood, jacket and scarf, and the ember emblem on the back." },
 ] as const;
 
+/** A second look's own lines (by look id), over the starter's. */
+const LOOK_COPY: Record<string, { role: string; pal: string }> = {
+  kappa_b: { role: "Riverfolk traveller under a straw kasa", pal: "Vest and shell rim. Kappa's skin stays river-green." },
+  unit7_b: { role: "Round ceramic scout with a radio pack", pal: "Ceramic shell, joints and the lens." },
+};
+
 /** content.md §8.2: each starter's default palette (Midnight, Sand, Moss, Ivory, Ember). */
 const DEFAULT_PALETTE = [2, 1, 3, 0, 4];
 
-/** The hero render of a starter in a palette (480×720 WebP). */
-const heroUrl = (starter: number, palette: number) => `${config.assetBase}/characters/hero_${STARTERS[starter]!.id}_${palette}.webp`;
+/** The hero render of a starter's look in a palette (480×720 WebP). */
+const heroUrl = (starter: number, look: number, palette: number) => `${config.assetBase}/characters/hero_${lookId(starter, look)}_${palette}.webp`;
 const PAL_KEYS = ["ivory", "sand", "midnight", "moss", "ember", "dusk"];
 
-let open: Promise<{ starter: number; palette: number } | null> | null = null;
+let open: Promise<CharacterChoice | null> | null = null;
 let cancelOpen: (() => void) | null = null;
 const preloaded = new Set<string>();
 
@@ -48,8 +62,8 @@ export function cancelCharacterPick(): void {
   cancelOpen?.();
 }
 
-/** Starter + palette; null only when cancelCharacterPick() closed it. */
-export function showCharacterPick(opts: CharacterPickOptions = {}): Promise<{ starter: number; palette: number } | null> {
+/** Starter + look + palette; null only when cancelCharacterPick() closed it. */
+export function showCharacterPick(opts: CharacterPickOptions = {}): Promise<CharacterChoice | null> {
   if (open) return open;
   installSprites();
   open = new Promise((resolve) => {
@@ -58,6 +72,8 @@ export function showCharacterPick(opts: CharacterPickOptions = {}): Promise<{ st
     let starter = Math.max(0, Math.min(STARTERS.length - 1, Number(storedStarter ?? 0) || 0));
     let palette = Math.max(0, Math.min(5, Number(localStorage.getItem("fl.palette") ?? DEFAULT_PALETTE[starter]) || 0));
     let paletteTouched = storedStarter !== null;
+    // each starter keeps its own look while browsing; the stored one comes back for the stored starter
+    const looks = STARTERS.map((_, i) => (i === starter ? starterLook(i, Number(localStorage.getItem("fl.look") ?? 0)) : 0));
 
     document.exitPointerLock?.();
     overlayOpened("charpick");
@@ -92,7 +108,7 @@ export function showCharacterPick(opts: CharacterPickOptions = {}): Promise<{ st
     const cards = STARTERS.map((s, i) => {
       const b = button("", "fl-starter", list);
       const portrait = el("span", "fl-starter__portrait", b);
-      sprite(portraitSprite(i), "", portrait);
+      sprite(portraitSprite(i, looks[i]), "", portrait);
       const txt = el("span", "", b);
       el("span", "fl-starter__name", txt, s.name);
       el("span", "fl-starter__line", txt, STARTER_COPY[i]!.line);
@@ -128,8 +144,14 @@ export function showCharacterPick(opts: CharacterPickOptions = {}): Promise<{ st
     const wLine = el("span", "", wText);
     const chips = el("div", "fl-charpick__stats", wcard);
 
-    // ---- palette, name, play
+    // ---- look, palette, name, play
     const cfg = el("aside", "fl-charpick__config fl-panel", cols);
+    const lookBlock = el("div", "fl-charpick__looks", cfg);
+    const lookHead = el("h4", "fl-label fl-charpick__h", lookBlock, "Look ");
+    const lookName = el("em", "", lookHead);
+    const lookRow = el("div", "fl-charpick__lookrow", lookBlock);
+    lookRow.setAttribute("role", "radiogroup");
+    lookRow.setAttribute("aria-label", "Look");
     const palBlock = el("div", "", cfg);
     const palHead = el("h4", "fl-label fl-charpick__h", palBlock, "Palette ");
     const palName = el("em", "", palHead);
@@ -204,26 +226,52 @@ export function showCharacterPick(opts: CharacterPickOptions = {}): Promise<{ st
       return ok;
     }
 
+    function renderLooks() {
+      const ls = STARTER_LOOKS[starter] ?? [];
+      lookBlock.hidden = ls.length < 2;
+      lookName.textContent = ls[looks[starter]!]?.name ?? "";
+      lookRow.replaceChildren(...ls.map((l, k) => {
+        const b = button("", `fl-lookbtn${k === looks[starter] ? " is-on" : ""}`);
+        b.setAttribute("role", "radio");
+        b.setAttribute("aria-checked", String(k === looks[starter]));
+        const face = el("span", "fl-lookbtn__face", b);
+        sprite(portraitSprite(starter, k), "", face);
+        el("span", "", b, l.name);
+        b.onclick = () => {
+          looks[starter] = k;
+          render();
+        };
+        return b;
+      }));
+    }
+
     function render() {
       cards.forEach((c, i) => {
         c.classList.toggle("is-on", i === starter);
         c.setAttribute("aria-pressed", String(i === starter));
+        const face = c.querySelector(".fl-starter__portrait > .px");
+        if (face) face.className = `px px-${portraitSprite(i, looks[i])}`;
       });
+      renderLooks();
+      const copy = LOOK_COPY[lookId(starter, looks[starter]!)];
       sw.forEach((b, i) => {
         b.classList.toggle("is-on", i === palette);
         b.setAttribute("aria-checked", String(i === palette));
       });
       palName.textContent = PALETTE_NAMES[palette]!;
-      palHint.textContent = STARTER_COPY[starter]!.pal;
+      palHint.textContent = copy?.pal ?? STARTER_COPY[starter]!.pal;
       fig.className = `fl-charpick__figure fl-pal--${PAL_KEYS[palette]}`;
-      img.src = heroUrl(starter, palette);
-      img.alt = `${STARTERS[starter]!.name} in the ${PALETTE_NAMES[palette]} palette`;
-      // The other palettes of this starter load in the background so swatches swap instantly.
-      for (let p = 0; p < PALETTE_NAMES.length; p++) {
-        const url = heroUrl(starter, p);
-        if (preloaded.has(url)) continue;
-        preloaded.add(url);
-        new Image().src = url;
+      img.src = heroUrl(starter, looks[starter]!, palette);
+      const lookLabel = (STARTER_LOOKS[starter]?.length ?? 1) > 1 ? ` (${STARTER_LOOKS[starter]![looks[starter]!]!.name})` : "";
+      img.alt = `${STARTERS[starter]!.name}${lookLabel} in the ${PALETTE_NAMES[palette]} palette`;
+      // This starter's other palettes and looks load in the background so swatches swap instantly.
+      for (let k = 0; k < (STARTER_LOOKS[starter]?.length ?? 1); k++) {
+        for (let p = 0; p < PALETTE_NAMES.length; p++) {
+          const url = heroUrl(starter, k, p);
+          if (preloaded.has(url)) continue;
+          preloaded.add(url);
+          new Image().src = url;
+        }
       }
       // Re-run the projector flicker on change.
       fig.getAnimations().forEach((a) => {
@@ -231,7 +279,7 @@ export function showCharacterPick(opts: CharacterPickOptions = {}): Promise<{ st
         a.play();
       });
       heroName.textContent = STARTERS[starter]!.name;
-      heroRole.textContent = STARTER_COPY[starter]!.role;
+      heroRole.textContent = copy?.role ?? STARTER_COPY[starter]!.role;
       const def = WEAPON_BY_ID.get(STARTERS[starter]!.weapon)!;
       wSprite.className = `px px-${itemSprite(def.id)}`;
       wName.textContent = `${def.name} I`;
@@ -259,12 +307,14 @@ export function showCharacterPick(opts: CharacterPickOptions = {}): Promise<{ st
           return;
         }
       }
+      const look = looks[starter]!;
       localStorage.setItem("fl.starter", String(starter));
       localStorage.setItem("fl.palette", String(palette));
+      localStorage.setItem("fl.look", String(look));
       ov.remove();
       overlayClosed("charpick");
       open = cancelOpen = null;
-      resolve({ starter, palette });
+      resolve({ starter, palette, look });
     }
     play.onclick = () => void go();
     render();

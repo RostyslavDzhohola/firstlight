@@ -201,4 +201,32 @@ export const STARTERS = [
   { id: "ninja", name: "Hinoko", weapon: "kunai" },
 ] as const;
 
+/** A starter's look: `id` names the client's model and art (assets-dev/characters/<id>.glb). */
+export interface StarterLook {
+  readonly id: string;
+  readonly name: string;
+}
+
+/** Looks per starter (content.md §2.4), by STARTERS index. Look 0 is the original; the pick screen offers
+ *  the others. CharacterData.look and PlayerState.look store the index, so each list is append-only. */
+export const STARTER_LOOKS: readonly (readonly StarterLook[])[] = [
+  [{ id: "hexwick", name: "Hexwick" }],
+  [{ id: "ash", name: "Brother Ash" }],
+  [{ id: "kappa", name: "River ninja" }, { id: "kappa_b", name: "Traveller" }],
+  [{ id: "unit7", name: "Trooper" }, { id: "unit7_b", name: "Scout" }],
+  [{ id: "ninja", name: "Hinoko" }],
+];
+
+/** A requested or stored look for this starter; anything it doesn't have is the original (0). */
+export function starterLook(starter: number, look: unknown): number {
+  const n = STARTER_LOOKS[starter]?.length ?? 1;
+  return typeof look === "number" && Number.isInteger(look) && look >= 0 && look < n ? look : 0;
+}
+
+/** The look's id (model/art file name); the starter's original when the look is unknown. */
+export function lookId(starter: number, look: number): string {
+  const ls = STARTER_LOOKS[starter] ?? STARTER_LOOKS[0]!;
+  return (ls[starterLook(starter, look)] ?? ls[0]!).id;
+}
+
 export const PALETTE_NAMES = ["Ivory", "Sand", "Midnight", "Moss", "Ember", "Dusk"] as const;

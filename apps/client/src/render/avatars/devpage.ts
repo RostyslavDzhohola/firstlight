@@ -5,7 +5,7 @@
 import * as THREE from "three/webgpu";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { ANIM } from "@firstlight/shared/net/schema";
-import { PALETTE_NAMES, STARTERS, WEAPONS } from "@firstlight/shared/content/weapons";
+import { PALETTE_NAMES, STARTER_LOOKS, STARTERS, WEAPONS } from "@firstlight/shared/content/weapons";
 import { createRenderer } from "../renderer.ts";
 import { AvatarView, preloadAvatars } from "../Avatars.ts";
 import { setAvatarTextureLowRes } from "./assets.ts";
@@ -54,15 +54,17 @@ export async function startAvatarDevPage() {
 
   const avatars: { a: AvatarView; x: number; z: number }[] = [];
   const dx = 1.25, dz = 2.0;
-  for (let s = 0; s < STARTERS.length; s++) {
+  // one row per look: the starters, then the second looks
+  const rows = STARTER_LOOKS.flatMap((ls, s) => ls.map((_, look) => ({ s, look }))).sort((a, b) => a.look - b.look || a.s - b.s);
+  rows.forEach(({ s, look }, r) => {
     for (let p = 0; p < 6; p++) {
-      const a = new AvatarView(p, s);
+      const a = new AvatarView(p, s, look);
       const x = (p - 2.5) * dx;
-      const z = ((STARTERS.length - 1) / 2 - s) * dz;
+      const z = ((rows.length - 1) / 2 - r) * dz;
       scene.add(a.root);
       avatars.push({ a, x, z });
     }
-  }
+  });
 
   camera.position.set(4.5, R + 3.2, 10.5);
   const controls = new OrbitControls(camera, ctx.renderer.domElement);

@@ -199,6 +199,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
           partySize: partyRoom ? partyOf(identity.userId).length : undefined,
           starter: Number.isInteger(req.body.starter) ? Math.max(0, Math.min(STARTERS.length - 1, req.body.starter)) : undefined,
           palette: Number.isInteger(req.body.palette) ? Math.max(0, Math.min(5, req.body.palette)) : undefined,
+          look: Number.isInteger(req.body.look) ? Math.max(0, Math.min(15, req.body.look)) : undefined,
           loadtest: req.body.loadtest === true,
         },
         opts.limits,

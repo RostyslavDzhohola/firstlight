@@ -8,7 +8,7 @@ import { BODIES, createTerrain, isSafe, padDirs, portalNear, portalSpots, type B
 import { BACKPACK_SLOTS, HOTBAR_SLOTS, newCharacter, type CharacterData } from "@firstlight/shared/content/character";
 import { INV_SLOTS, moveSlot, storeItem } from "@firstlight/shared/content/inventory";
 import { fallDamageFraction, levelForXp, maxHp, pvpKillXp, xpAtLevel, xpToNext } from "@firstlight/shared/content/progression";
-import { STARTERS, WEAPON_BY_ID, WEAPON_INDEX } from "@firstlight/shared/content/weapons";
+import { STARTERS, starterLook, WEAPON_BY_ID, WEAPON_INDEX } from "@firstlight/shared/content/weapons";
 import { NET, PHRASES, type InvItem, type YouState } from "@firstlight/shared/net/protocol";
 import { ANIM, BodyState, NpcState, PF, PileState, PlayerState } from "@firstlight/shared/net/schema";
 import { z } from "zod";
@@ -53,6 +53,7 @@ export interface JoinOptions {
   body: BodyId;
   starter?: number;
   palette?: number;
+  look?: number;
 }
 
 export { MOVE } from "./movement.ts";
@@ -82,7 +83,7 @@ const fireSchema = z.object({ slot: z.number().int().min(0).max(3), ox: vec, oy:
 const meleeSchema = z.object({ slot: z.number().int().min(0).max(3), t: vec, heavy: z.boolean().optional() });
 const slotSchema = z.object({ slot: z.number().int().min(0).max(HOTBAR_SLOTS + BACKPACK_SLOTS - 1) });
 const pickupSchema = z.object({ pileId: z.string().max(64), itemIndex: z.number().int().min(0).max(64).optional() });
-const respawnSchema = z.object({ starter: z.number().int().min(0).max(STARTERS.length - 1), palette: z.number().int().min(0).max(5) });
+const respawnSchema = z.object({ starter: z.number().int().min(0).max(STARTERS.length - 1), palette: z.number().int().min(0).max(5), look: z.number().int().min(0).max(15).optional() });
 const adminSchema = z.object({ cmd: z.string().max(32), args: z.record(z.string(), z.unknown()).optional() });
 
 
@@ -123,7 +124,7 @@ const YOU_LAZY_MS = 400;
  * and respawn write SQLite; ping, questSync and client:info answer with messages). Colyseus's 60/s
  * per client still bounds everything else.
  */
-export const MESSAGE_RATES: Record<string, number> = { ping: 20, travel: 2, respawn: 1, logout: 4, questSync: 2, "client:info": 2, skySync: 2, npcSync: 2 };
+export const MESSAGE_RATES: Record<string, number> = { ping: 20, travel: 2, respawn: 1, look: 2, logout: 4, questSync: 2, "client:info": 2, skySync: 2, npcSync: 2 };
 /** Malformed messages are dropped (no kick for a harmless drift); this many within 10 s disconnects. */
 const BAD_MESSAGE_LIMIT = 20;
 
@@ -331,7 +332,15 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       if (this.invAllowed(a)) this.moveItem(a, m.from, m.to);
     });
     this.onMessage("logout", z.object({ start: z.boolean() }), (c, m) => this.logout(c, m.start));
-    this.onMessage("respawn", respawnSchema, (c, m) => this.respawn(c, m.starter, m.palette));
+    this.onMessage("respawn", respawnSchema, (c, m) => this.respawn(c, m.starter, m.palette, m.look ?? 0));
+    // A living character can switch between its starter's looks (cosmetic; content.md §2.4).
+    this.onMessage("look", z.object({ look: z.number().int().min(0).max(15) }), (c, m) => {
+      const a = this.actor(c);
+      if (!a || a.dead) return;
+      if (starterLook(a.char.starter, m.look) !== m.look) return c.send("denied", { action: "look", reason: "unknown look" });
+      a.char.look = m.look;
+      a.state.look = m.look;
+    });
     this.onMessage("phrase", z.object({ id: z.number().int().min(0).max(PHRASES.length - 1) }), (c, m) => {
       const a = this.actor(c);
       const now = Date.now();
@@ -400,7 +409,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     void legacy;
     characterRepo.current.ensure?.(auth.userId);
     char ??= characterRepo.current.load(auth.userId);
-    if (!char) char = newCharacter(options?.starter ?? 0, options?.palette ?? 0, now);
+    if (!char) char = newCharacter(options?.starter ?? 0, options?.palette ?? 0, now, options?.look ?? 0);
     if (inheritedPos && char.body === this.bodyDef.id) char.pos = inheritedPos;
     const p = new PlayerState();
     let pos: V3;
@@ -424,6 +433,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     p.userId = auth.userId; // random opaque id (not a credential): clients need it for blocks, mutes, parties (D27)
     p.starter = char.starter;
     p.palette = char.palette;
+    p.look = starterLook(char.starter, char.look);
     p.flags = (auth.admin ? PF.ADMIN : 0) | (auth.loadtest ? PF.LOADTEST : 0) | (char.dead ? PF.DEAD : 0);
     const a: PlayerActor = {
       kind: "player",
@@ -1004,10 +1014,10 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     }
   }
 
-  respawn(client: Client, starter: number, palette: number) {
+  respawn(client: Client, starter: number, palette: number, look = 0) {
     const a = this.actors.get(client.sessionId);
     if (!a || !a.dead) return;
-    const fresh = newCharacter(starter, palette);
+    const fresh = newCharacter(starter, palette, Date.now(), look);
     fresh.deaths = a.char.deaths;
     fresh.travelTo = "portus";
     a.char = fresh;

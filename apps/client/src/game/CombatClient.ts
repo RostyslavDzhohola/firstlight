@@ -214,7 +214,7 @@ export class CombatClient {
       }
       const k = m.killer ? (room.state as any).players?.get(m.killer) : null;
       // A rejoined room re-sends this for a dead character: DeathFlow keeps the screen and re-sends the pick.
-      void this.death.onDeath({ ...m, body: this.game.bodyId, killerStarter: k?.starter, killerLevel: k?.level });
+      void this.death.onDeath({ ...m, body: this.game.bodyId, killerStarter: k?.starter, killerLook: k?.look, killerLevel: k?.level });
     });
     room.onMessage("reborn", () => {
       this.death.onReborn();
@@ -322,7 +322,7 @@ export class CombatClient {
     const meState = (room.state as any).players?.get(room.sessionId);
     if (meState) {
       g.hud.setHp(meState.hp, meState.maxHp);
-      g.hud.setIdentity(meState.name, meState.starter, meState.palette);
+      g.hud.setIdentity(meState.name, meState.starter, meState.palette, meState.look ?? 0);
       // The label shows what the server enforces (its flag); the shared zone function says where.
       const p = g.player.pos;
       g.hud.setZone(zoneInfo(g.bodyId, zoneAt(BODIES[g.bodyId], p.x, p.y, p.z), !!(meState.flags & PF.SAFE)));
