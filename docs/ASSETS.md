@@ -215,8 +215,9 @@ third-party sources), committed as `tools/blender/chars3d/astra/kappa.glb`
 hashes). Changes: the held Riverstaff and carbine removed, the gripping thumb replaced by a mirror of
 the free one, faces buried inside other parts culled, rigged onto the UAL skeleton with our weights,
 re-unwrapped, and a new albedo (the design's colours with baked occlusion and palette roles) and flat
-normal map (one shared 4×4 texture made in the client, not a file). Shipped as `kappa_b.glb`
-(10,425 tris, 142,696 B), `unit7_b.glb` (11,759 tris, 136,880 B), `*_b_albedo.webp` (~130 KB;
+normal map (one shared 4×4 texture made in the client, not a file). Kappa B's hands: the flat card
+over the fingers replaced by our own webbing between fanned fingers (2026-10-16). Shipped as
+`kappa_b.glb` (10,763 tris, 150,616 B), `unit7_b.glb` (11,759 tris, 136,880 B), `*_b_albedo.webp` (~130 KB;
 `_512` ~71 KB), `hero_*_b_*.webp`, `portrait_*_b.webp`.
 
 Shipped outputs (2026-10-15 build):
@@ -255,15 +256,17 @@ the `.blend` files were never opened):
 
 Our own work in this file (CC BY 4.0, "FIRSTLIGHT contributors"): the saddle seat with pommel and cantle,
 the blanket, straps and stirrups (428 triangles, skinned to the Torso bone and fitted to the barrel by
-ray casts), the blanket's role in the mask, and the `saddle` rider socket. The riding pose is generated in
+ray casts), the blanket's role in the mask, the `saddle` rider socket, and (2026-10-16) two
+`Stirrup.L`/`Stirrup.R` bones under the Torso carrying the treads and the straps' lower ends, so the
+client moves the stirrups to a rider's legs (the clips' sampled stirrup tracks are dropped on load). The riding pose is generated in
 code from the UAL idle clip (`apps/client/src/render/avatars/ride.ts`, MIT); the box horse fallback is in
 code too (`apps/client/src/render/Horses.ts`, MIT).
 
-Shipped output (2026-10-11 build):
+Shipped output (2026-10-16 build; archive re-downloaded and hash-checked):
 
 | File | Bytes | SHA-256 (first 16) | Contents |
 |---|---|---|---|
-| `horse.glb` | 147,072 | `615314bc14b2af1a` | 1,118 tris, 39 joints, 1 skinned mesh, `saddle` node, 4 clips |
+| `horse.glb` | 151,572 | `7fbe9f5b5793eec9` | 1,118 tris, 41 joints (39 + 2 stirrups), 1 skinned mesh, `saddle` node, 4 clips |
 
 IP line: a generic farm horse with a plain saddle; no franchise names, brands or look-alike tack.
 

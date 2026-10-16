@@ -8,6 +8,8 @@
 #   * one vertex-colour "role" mask instead of materials: R = coat, G = mane/tail/hooves,
 #     B = blanket (rider accent), black = saddle leather. The client tints per coat;
 #   * a `saddle` node parented to the Torso bone at the top of the seat (the rider socket);
+#   * two `Stirrup.L` / `Stirrup.R` bones (children of Torso) carrying the treads and the bottom of the
+#     straps, so the client can raise or move the stirrups to fit a rider's legs (HorseView.setStirrupFit);
 #   * four clips renamed idle / walk / run / jump (the pack's Death and WalkSlow are dropped).
 import argparse
 import math
@@ -138,10 +140,12 @@ def add_shell(rows, cols, y0, y1, th0, th1, off_out, off_in, rgba):
     return outer
 
 
-def add_box(center, size, rgba):
+def add_box(center, size, rgba, weight=None):
+    """weight(co) -> {group index: weight} per vertex (default: rigid on the Torso)."""
     r = bmesh.ops.create_cube(bm, size=1.0, matrix=Matrix.Translation(center) @ Matrix.Diagonal((*size, 1.0)))
     for v in r["verts"]:
-        v[deform][torso] = 1.0
+        for g, w in (weight(v.co) if weight else {torso: 1.0}).items():
+            v[deform][g] = w
     faces = {f for v in r["verts"] for f in v.link_faces}
     for f in faces:
         for loop in f.loops:
@@ -172,17 +176,25 @@ def seat_out(ty, tt):
 
 seat = add_shell(6, 6, Y_FRONT, Y_BACK, math.radians(-48), math.radians(48), seat_out, lambda ty, tt: 0.07, LEATHER)
 
-# Straps and stirrups on both flanks, hanging from the seat's middle.
+# Straps and stirrups on both flanks, hanging from the seat's middle. Each tread (with its side loops)
+# rides its own Stirrup bone; a strap's top stays on the Torso and its bottom follows the stirrup, so
+# moving the bone shortens or swings the strap.
 y_mid = (Y_FRONT + Y_BACK) / 2 - 0.1
+STIRRUP_NAME = {1: "Stirrup.L", -1: "Stirrup.R"}  # head towards -Y: +X is the horse's left
+stirrup_group = {sd: obj.vertex_groups.new(name=n).index for sd, n in STIRRUP_NAME.items()}
+stirrup_head = {}
 for side in (-1, 1):
     top, d = surface(y_mid, side * math.radians(55))
     top = top + d * 0.1
     foot = Vector((side * 1.18, y_mid, 3.0))
     mid = (top + foot) / 2
-    add_box(Vector((mid.x, y_mid, mid.z)), (0.06, 0.14, (top.z - foot.z)), LEATHER)
-    add_box(Vector((foot.x, y_mid, foot.z - 0.06)), (0.26, 0.34, 0.06), LEATHER)  # tread
+    stir = {stirrup_group[side]: 1.0}
+    add_box(Vector((mid.x, y_mid, mid.z)), (0.06, 0.14, (top.z - foot.z)), LEATHER,
+            weight=lambda co, m=mid.z, st=stir: st if co.z < m else {torso: 1.0})
+    add_box(Vector((foot.x, y_mid, foot.z - 0.06)), (0.26, 0.34, 0.06), LEATHER, weight=lambda co, st=stir: st)  # tread
     for k in (-1, 1):
-        add_box(Vector((foot.x, y_mid + k * 0.16, foot.z + 0.06)), (0.06, 0.04, 0.26), LEATHER)
+        add_box(Vector((foot.x, y_mid + k * 0.16, foot.z + 0.06)), (0.06, 0.04, 0.26), LEATHER, weight=lambda co, st=stir: st)
+    stirrup_head[side] = Vector((foot.x, y_mid, foot.z - 0.03))
 
 # The rider socket: top of the seat at its lowest point along the spine line.
 seat_row = min((r[len(r) // 2] for r in seat), key=lambda v: v.co.z)
@@ -199,6 +211,17 @@ me.update()
 
 # No materials: the client supplies one per coat and reads the role mask.
 me.materials.clear()
+
+# The stirrup bones (armature space = the mesh's units here; the armature is scaled below).
+bpy.context.view_layer.objects.active = arm
+bpy.ops.object.mode_set(mode="EDIT")
+for side, name in STIRRUP_NAME.items():
+    eb = arm.data.edit_bones.new(name)
+    eb.head = stirrup_head[side]
+    eb.tail = stirrup_head[side] + Vector((0.0, 0.0, 0.4))
+    eb.parent = arm.data.edit_bones["Torso"]
+    eb.use_deform = True
+bpy.ops.object.mode_set(mode="OBJECT")
 
 # ---------------------------------------------------------------- scale, socket, export
 arm.scale = (scale, scale, scale)

@@ -155,6 +155,19 @@ const FOOT_SINK = [0.035, 0.035, 0.015, 0.035, 0.03, 0.02, 0.03] as const;
 const PELVIS_HEIGHT = 0.917;
 const SEAT_CLEARANCE = 0.1;
 
+/**
+ * Where a rider's sole meets a stirrup (AvatarAssets.rideFoot: ride pose, model space) relative to the
+ * saddle socket once seatDrop() has put it in the saddle, metres: x outwards, y up, z forwards.
+ */
+export function stirrupPoint(foot: THREE.Vector3, pelvis: number, scale: number, out = new THREE.Vector3()): THREE.Vector3 {
+  return out.set(Math.abs(foot.x) * scale, foot.y * scale + SEAT_CLEARANCE - pelvis * scale, foot.z * scale);
+}
+
+function modelStirrupPoint(a: AvatarAssets, m: number, out: THREE.Vector3): THREE.Vector3 {
+  const f = a.rideFoot[m];
+  return f ? stirrupPoint(f, a.pelvis[m] ?? PELVIS_HEIGHT, MODEL_SCALE[m] ?? 1, out) : out.set(0, 0, 0);
+}
+
 export class AvatarView {
   /** Every live avatar (for the LOD pass). */
   static readonly all = new Set<AvatarView>();
@@ -168,6 +181,8 @@ export class AvatarView {
   private modelIdx: number;
   /** Leg length vs the clips' skeleton: locomotion clips cover less ground on shorter legs. */
   private stride = 1;
+  /** stirrupFit() for the built model. */
+  private fit: THREE.Vector3 | null = null;
 
   private readonly holder = new THREE.Group(); // GLB model or capsule lives here
   private model: THREE.Object3D | null = null;
@@ -248,6 +263,15 @@ export class AvatarView {
       this.weaponObj = obj;
       this.applyShadow();
     }
+  }
+
+  /**
+   * How the horse's stirrups should move for this rider (HorseView.setStirrupFit): the difference
+   * between where this look's feet rest in the ride pose and where its starter's original look's do
+   * (the stirrups were made for those). null for an original look or without the models.
+   */
+  stirrupFit(): THREE.Vector3 | null {
+    return this.model ? this.fit : null;
   }
 
   /** Metres from the saddle's seat down to where this avatar's root (feet) must go so it sits on it. */
@@ -434,6 +458,8 @@ export class AvatarView {
     });
     this.holder.position.y = -(FOOT_SINK[m] ?? 0.03);
     this.stride = (a.pelvis[m] ?? UAL_PELVIS) / UAL_PELVIS;
+    const orig = modelIndex(this.starter, 0);
+    this.fit = m === orig ? null : modelStirrupPoint(a, m, new THREE.Vector3()).sub(modelStirrupPoint(a, orig, _d));
     this.model = model;
     this.mesh = mesh;
     this.makeSockets(model);

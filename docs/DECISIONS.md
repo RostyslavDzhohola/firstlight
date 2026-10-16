@@ -1041,3 +1041,13 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   use the town material's glow mode, glass lights up at night. Why: the town material has no
   environment map, so unbaked flat colours read flat in the browser; baking keeps the pieces in the
   existing two-draw town and outpost meshes.
+- **D-chars-4 (run, 2026-10-16 04:00 CDT):** the horse's stirrups fit each rider's legs. horse.glb gains
+  two stirrup bones (the treads and the straps' lower ends ride them, the straps' tops stay on the
+  Torso); the client measures where each look's soles rest in the ride pose (between ankle and ball, at
+  the ball's sole height) and moves a horse's stirrups by the difference between its rider's look and
+  that starter's original look (`AvatarView.stirrupFit`, `HorseView.setStirrupFit`). The originals keep
+  the stirrups where they were made; Kappa · Wayfarer's rise 19 cm and Unit 7 · Scout's 16 cm (and
+  5 cm out). Kappa · Wayfarer's hands get webbing between fanned fingers instead of the flat card that
+  read as a dark plate. Why: the owner's polish list; moving two bones costs nothing per frame and no
+  shader build (`?horses&looks&warmcheck` and `?avatars&warmcheck`: 0 builds after warm-up on WebGPU
+  and WebGL2).

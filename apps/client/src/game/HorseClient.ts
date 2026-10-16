@@ -123,11 +123,13 @@ export class HorseClient {
       }
       s.view.set(s.pos.x, s.pos.y, s.pos.z, s.fwd.x, s.fwd.y, s.fwd.z, speed, airborne, dt);
       if (ridden && rider) {
-        // Into the saddle: the rider's feet go seatDrop() below the socket, along local up.
+        // Into the saddle: the rider's feet go seatDrop() below the socket, along local up; the
+        // stirrups move to a second look's shorter legs.
+        s.view.setStirrupFit(rider.stirrupFit());
         s.view.seat(_seat);
         _up.copy(_seat).normalize();
         rider.root.position.copy(_seat).addScaledVector(_up, -rider.seatDrop());
-      }
+      } else s.view.setStirrupFit(null);
     });
     for (const [owner, s] of this.shown) {
       if (seen.has(owner)) continue;

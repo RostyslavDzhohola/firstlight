@@ -65,32 +65,51 @@ describe("horse.glb", () => {
     }
   });
 
-  it("seats the second looks too: pelvis on the saddle (short legs, so no stirrup check)", async () => {
+  it("puts every look's feet on the stirrups: the second looks' stirrups rise to their shorter legs", async () => {
     const { makeRideClip } = await import("./avatars/ride.ts");
-    const { MODEL_FILES, MODEL_SCALE, STARTER_FILES, legClips, pelvisHeight } = await import("./avatars/assets.ts");
+    const { MODEL_FILES, MODEL_SCALE, STARTER_FILES, legClips, pelvisHeight, rideFootOf } = await import("./avatars/assets.ts");
+    const { stirrupPoint } = await import("./Avatars.ts");
     const horse = await glb("animals/horse.glb");
     const anims = await glb("characters/starters_anims.glb");
+    // the client's clips: rotations and the pelvis track only (assets.ts slim)
     const idle = anims.animations.find((a) => a.name === "idle")!;
+    idle.tracks = idle.tracks.filter((t) => !t.name.endsWith(".scale") && (!t.name.endsWith(".position") || t.name.startsWith("pelvis.")));
     const ride = makeRideClip(idle, (await glb("characters/hexwick.glb")).scene); // as assets.ts builds it
-    horse.scene.updateMatrixWorld(true);
-    const seat = new THREE.Vector3().setFromMatrixPosition(horse.scene.getObjectByName("saddle")!.matrixWorld);
+    const point: THREE.Vector3[] = [];
     for (const [i, file] of MODEL_FILES.entries()) {
-      if (i < STARTER_FILES.length) continue;
       const rider = (await glb(`characters/${file}.glb`)).scene;
       const h = pelvisHeight(rider);
-      expect(h, file).toBeGreaterThan(0.5);
-      expect(h, file).toBeLessThan(0.75);
-      const clip = legClips(new Map([["ride", ride]]), h).get("ride")!;
-      const s = MODEL_SCALE[i]!;
-      rider.scale.setScalar(s);
-      rider.position.set(seat.x, seat.y - (h * s - 0.1), seat.z); // AvatarView.seatDrop() without the foot sink
-      const mixer = new THREE.AnimationMixer(rider);
-      mixer.clipAction(clip).play();
-      mixer.update(0);
-      rider.updateMatrixWorld(true);
-      const pelvis = new THREE.Vector3().setFromMatrixPosition(rider.getObjectByName("pelvis")!.matrixWorld);
-      expect(pelvis.y - seat.y, file).toBeGreaterThan(0);
-      expect(pelvis.y - seat.y, file).toBeLessThan(0.15);
+      const clip = Math.abs(h - 0.917) < 0.02 ? ride : legClips(new Map([["ride", ride]]), h).get("ride")!;
+      point[i] = stirrupPoint(rideFootOf(rider, clip), h, MODEL_SCALE[i]!);
+    }
+    const seat = new THREE.Vector3();
+    const tread = new THREE.Vector3();
+    const rel: THREE.Vector3[] = [];
+    for (const [i, file] of MODEL_FILES.entries()) {
+      // the fit AvatarView.stirrupFit() gives HorseView.setStirrupFit(): this look minus its original
+      const orig = i < STARTER_FILES.length ? i : STARTER_FILES.indexOf(file.replace(/_b$/, "") as (typeof STARTER_FILES)[number]);
+      expect(orig, file).toBeGreaterThanOrEqual(0);
+      const fit = point[i]!.clone().sub(point[orig]!);
+      if (i < STARTER_FILES.length) expect(fit.length()).toBe(0);
+      const model = horse.scene.clone(true);
+      model.updateMatrixWorld(true);
+      const bone = model.getObjectByName("StirrupL")!;
+      expect(bone, "horse.glb has the stirrup bones").toBeTruthy();
+      const toParent = new THREE.Matrix3().setFromMatrix4(bone.parent!.matrixWorld.clone().invert());
+      bone.position.add(fit.clone().applyMatrix3(toParent)); // +X is the horse's left: no mirroring on this side
+      model.updateMatrixWorld(true);
+      seat.setFromMatrixPosition(model.getObjectByName("saddle")!.matrixWorld);
+      tread.setFromMatrixPosition(bone.matrixWorld).sub(seat);
+      const r = (rel[i] = point[i]!.clone().sub(tread)); // the sole vs the tread's centre
+      // on the tread: within 10 cm up/down (Brother Ash's long legs reach lowest), the ball of the foot a
+      // little ahead of the tread's middle, and over it sideways
+      expect(Math.abs(r.y), `${file} sole height vs the tread`).toBeLessThan(0.1);
+      expect(Math.abs(r.z), `${file} along the horse`).toBeLessThan(0.12);
+      expect(Math.abs(r.x), `${file} sideways`).toBeLessThan(0.05);
+      if (i >= STARTER_FILES.length) {
+        expect(fit.y, `${file}: the stirrups come up for the short legs`).toBeGreaterThan(0.1);
+        expect(r.distanceTo(rel[orig]!), `${file} stands in its stirrup as its original look does`).toBeLessThan(0.01);
+      }
     }
   });
 });

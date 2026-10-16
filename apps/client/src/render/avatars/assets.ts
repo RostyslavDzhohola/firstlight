@@ -13,6 +13,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import { lookId } from "@firstlight/shared/content/weapons";
 import { config } from "../../config.ts";
+import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
 import { makeRideClip } from "./ride.ts";
 
 /** Every look's model file (STARTER_LOOKS ids): first the five starters' original looks, in
@@ -49,6 +50,9 @@ export interface AvatarAssets {
   modelClips: Map<string, THREE.AnimationClip>[];
   /** Rest pelvis height per model (model space, unscaled, m). */
   pelvis: number[];
+  /** Where each model's left sole meets a stirrup in the ride pose: between the ankle and the ball,
+   *  at the ball's sole height (model space, unscaled; x on the +X side). */
+  rideFoot: THREE.Vector3[];
 }
 
 /** Rest pelvis height of the shared skeleton (UAL), what the clips' pelvis tracks are made for. */
@@ -156,8 +160,32 @@ async function load(onProgress?: (frac: number) => void): Promise<AvatarAssets> 
   if (idle && models[0]) clips.set("ride", makeRideClip(idle, models[0])); // horses: no CC0 riding clip
   const pelvis = models.map(pelvisHeight);
   const modelClips = pelvis.map((h) => (Math.abs(h - UAL_PELVIS) < 0.02 ? clips : legClips(clips, h)));
-  loaded = { models, textures, clips, modelClips, pelvis };
+  const rideFoot = models.map((m, i) => rideFootOf(m, modelClips[i]!.get("ride")));
+  loaded = { models, textures, clips, modelClips, pelvis, rideFoot };
   return loaded;
+}
+
+/** The ride pose's stirrup point of a model (see AvatarAssets.rideFoot); its rest sole if no clip. */
+export function rideFootOf(template: THREE.Object3D, ride: THREE.AnimationClip | undefined): THREE.Vector3 {
+  const at = (root: THREE.Object3D, n: string) => {
+    const o = root.getObjectByName(n);
+    return o ? new THREE.Vector3().setFromMatrixPosition(o.matrixWorld) : new THREE.Vector3();
+  };
+  template.updateMatrixWorld(true);
+  const ballRest = at(template, "ball_l").y; // the ball joint's height above its own sole
+  const model = cloneSkinned(template);
+  model.position.set(0, 0, 0);
+  model.quaternion.identity();
+  model.scale.setScalar(1);
+  const mixer = new THREE.AnimationMixer(model);
+  if (ride) mixer.clipAction(ride).play();
+  mixer.update(0);
+  model.updateMatrixWorld(true);
+  const ankle = at(model, "foot_l");
+  const ball = at(model, "ball_l");
+  mixer.stopAllAction();
+  mixer.uncacheRoot(model);
+  return new THREE.Vector3((ankle.x + ball.x) / 2, ball.y - ballRest, (ankle.z + ball.z) / 2);
 }
 
 /** Rest pelvis height of a template (model space, unscaled). */
