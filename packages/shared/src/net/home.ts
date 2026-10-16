@@ -20,6 +20,8 @@ export interface HomeLevelRow {
   level: number;
   /** Index into STARTERS. */
   starter: number;
+  /** Index into STARTER_LOOKS[starter] (absent from older servers: the original look). */
+  look?: number;
   /** The worn title's text, if any. */
   title: string | null;
 }

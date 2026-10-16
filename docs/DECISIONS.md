@@ -854,6 +854,43 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   pad-shooter rule), so it could never be killed (e2e J3.4 after a back-off into a lake: 70 hits, no
   kill). Only a swimmer (who can't shoot) is out of reach now. The Arcadia jetty's end (over
   knee-deep water) can be reached from the water beside it.
+- **D-chars-1 (run, 2026-10-15 07:10 CDT):** a fifth starter, the fire ninja "Hinoko" (owner, HANDOFF
+  6h), is appended to `STARTERS` (id `ninja`, starter index 4, default palette Ember) with the Ember
+  Kunai (ranged, 3 tiers) and its alt, the Ember Seal: hold RMB 0.4 s (server-timed `charge`), release
+  to cast a fireball (direct + splash + burn, heavy destruction, 8/7.5/7 s cooldown by tier). The seal
+  is a hidden weapon def (`ember_seal`, `hidden: true`): never sold, never fired directly, reached only
+  through the kunai's `special`. Starter clamps follow `STARTERS.length`. The kunai joins the weapon
+  drop table like the other starter weapons (16 families). Why: the owner asked for a
+  ninja with a fireball technique; a hidden def reuses the projectile, splash, burn and VFX paths
+  instead of a new delivery type, and old clients only see an unknown starter or weapon index.
+- **D-chars-2 (run, 2026-10-15 07:10 CDT):** the starters are rebuilt as sculpted 3D characters by
+  `tools/blender/chars3d` (signed-distance sculpts meshed with OpenVDB, decimated per part, heat-
+  weighted on the unchanged UAL rig, textured from the sculpt in numpy). Heads are 1.1–1.15× life size;
+  each starter ships a 1024² albedo (alpha = 1 − painted accent mask) and a 1024² tangent normal map as
+  WebP, with a 512² set on Low; the avatar toon material gains the normal map (normalScale (1, −1) for
+  glTF UVs). Head and face sockets move per starter and scale hats and masks. The 2D portraits and the
+  SVG hero figures are replaced by renders of these models. Why: the owner found the 2D art
+  "hilarious" and expected real 3D characters at the littleprince.dev level; one rig keeps every clip.
+- **D-chars-3 (run, 2026-10-15 22:35 CDT):** Kappa and Unit 7 each get a second look, the Astra
+  design-round models (owner round 2: "let's add them both"), as `STARTER_LOOKS` in shared content
+  (append-only per starter; look 0 is the original). The look is chosen with the starter on the pick
+  screen (first play and rebirth: `/api/play` and `respawn` take an optional `look`) and a living
+  character can switch it from the pause menu (`look` message, 2/s, refused for a look the starter
+  doesn't have). It is cosmetic only. It is stored in the character's inventory record (no
+  migration; older rows read as 0), sent as an appended `PlayerState.look` (older clients ignore it and
+  draw the original), and shown on /api/me and the leaderboard. No protocol bump: nothing about
+  movement or collision changes. The B models keep their designed proportions on the shared skeleton:
+  joints are fitted to each body, the arm bones bind rotated onto the hanging arms while the joint
+  nodes rest in the UAL T-pose frames (so every clip's rotations mean the same), and the client
+  rescales only the pelvis track to their leg length and quickens their steps
+  (`tools/blender/chars3d/rig_astra.py`, `render/avatars/assets.ts`). Why: the owner wants both looks
+  for these two; retargeting by shared frames keeps one clip set and costs one track per clip.
+  Codex round 2: the pause-menu switch shows the server's look (a request is pending, controls off,
+  spaced to the 2/s cap, given up after 1.5 s), and the second looks still load up front with the
+  others: each look's materials are their own shader builds (a look fetched on first sight compiled
+  14 in play), so the warm-up stands all 42 look × palette pairs (with the kunai now among the held
+  items, and Sunbrand's flame drawn in one pass); `?avatars&warmcheck` measured 0 builds after the
+  warm-up on WebGPU and WebGL2. They share one flat 4×4 normal map instead of two 1024² files.
 - **D-shops-1 (run, 2026-10-15 21:40Z):** a shop in every safe zone (owner, round 2): the Portus
   Exchange plus a trader inside each planet's arrival outpost (Dawnpad Trading Post, Lanternfall
   Stall, Waystation Supply). `packages/shared/src/content/shops.ts` `SHOP_SPOTS` holds each spot's

@@ -7,6 +7,7 @@ import { HORSE, HORSE_COATS } from "@firstlight/shared/content/horse";
 import { ANIM, PF } from "@firstlight/shared/net/schema";
 import { createRenderer } from "../renderer.ts";
 import { AvatarView, preloadAvatars } from "../Avatars.ts";
+import { setAvatarTextureLowRes } from "../avatars/assets.ts";
 import { HorseView, preloadHorse } from "../Horses.ts";
 
 const R = 5000;
@@ -21,6 +22,7 @@ const GAITS: { name: string; speed: number; airborne: boolean; anim: number }[] 
 export async function startHorseDevPage() {
   document.getElementById("landing")?.style.setProperty("display", "none");
   const ctx = await createRenderer(document.getElementById("game")!);
+  setAvatarTextureLowRes(ctx.tier === "low");
   await Promise.all([preloadAvatars(), preloadHorse()]);
   const { scene, camera } = ctx;
   scene.background = new THREE.Color(0x7d8fa6);

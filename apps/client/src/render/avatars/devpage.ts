@@ -1,13 +1,17 @@
-// Dev lineup (?avatars): the 4 starters × 6 palettes on a lit stage, cycling through every clip.
+// Dev lineup (?avatars): every starter look (5 starters + 2 second looks) × 6 palettes on a lit stage, cycling through every clip.
 // Keys: ← / → previous/next clip · Space pause/resume cycling · W next weapon · S toggle sockets
 // · G toggle the sun's shadow. Drag to orbit, wheel to zoom. Add ?tier=low|medium|high|ultra as usual.
+// &warmcheck: run the game's warm-up (the avatar hook) first, then stand the line-up (every look ×
+// palette with its starter weapon) and count node builds after it: window.__warmcheck when done.
 
 import * as THREE from "three/webgpu";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { ANIM } from "@firstlight/shared/net/schema";
-import { PALETTE_NAMES, STARTERS, WEAPONS } from "@firstlight/shared/content/weapons";
+import { PALETTE_NAMES, STARTER_LOOKS, STARTERS, WEAPONS } from "@firstlight/shared/content/weapons";
 import { createRenderer } from "../renderer.ts";
-import { AvatarView, preloadAvatars } from "../Avatars.ts";
+import { AvatarView, avatarWarmupHook, preloadAvatars } from "../Avatars.ts";
+import { installShaderMonitor, shaderMonitorFrame, shaderStats, warmup } from "../warmup.ts";
+import { setAvatarTextureLowRes } from "./assets.ts";
 
 const R = 5000; // stand the stage on a "planet" big enough to be flat (AvatarView takes planet coords)
 const ORDER = [
@@ -24,6 +28,9 @@ export async function startAvatarDevPage() {
   const text = document.getElementById("loading-text");
   if (text) text.textContent = "Loading characters…";
   const ctx = await createRenderer(document.getElementById("game")!);
+  const warmcheck = new URLSearchParams(location.search).has("warmcheck");
+  if (warmcheck) installShaderMonitor(ctx);
+  setAvatarTextureLowRes(ctx.tier === "low");
   const assets = await preloadAvatars((f) => {
     const bar = document.getElementById("loading-bar") as HTMLElement | null;
     if (bar) bar.style.width = `${Math.round(f * 100)}%`;
@@ -50,17 +57,28 @@ export async function startAvatarDevPage() {
   ground.receiveShadow = true;
   scene.add(ground);
 
+  camera.position.set(4.5, R + 3.2, 10.5);
+  camera.lookAt(0, R + 0.9, 0);
+  let baseline = 0;
+  if (warmcheck) {
+    // what Game.firstArrival does: the avatar hook stands every loaded look × palette hidden
+    await warmup(ctx, { frames: 4, hooks: [avatarWarmupHook(scene, () => new THREE.Vector3(0, R, 0))] });
+    baseline = shaderStats().total;
+  }
+
   const avatars: { a: AvatarView; x: number; z: number }[] = [];
   const dx = 1.25, dz = 2.0;
-  for (let s = 0; s < 4; s++) {
+  // one row per look: the starters, then the second looks
+  const rows = STARTER_LOOKS.flatMap((ls, s) => ls.map((_, look) => ({ s, look }))).sort((a, b) => a.look - b.look || a.s - b.s);
+  rows.forEach(({ s, look }, r) => {
     for (let p = 0; p < 6; p++) {
-      const a = new AvatarView(p, s);
+      const a = new AvatarView(p, s, look);
       const x = (p - 2.5) * dx;
-      const z = (1.5 - s) * dz;
+      const z = ((rows.length - 1) / 2 - r) * dz;
       scene.add(a.root);
       avatars.push({ a, x, z });
     }
-  }
+  });
 
   camera.position.set(4.5, R + 3.2, 10.5);
   const controls = new OrbitControls(camera, ctx.renderer.domElement);
@@ -101,7 +119,18 @@ export async function startAvatarDevPage() {
   let last = performance.now();
   let started = false;
   const tmp = new THREE.Vector3();
+  let checkFrames = 0;
   ctx.renderer.setAnimationLoop(() => {
+    if (warmcheck) {
+      shaderMonitorFrame();
+      // ~10 s: every clip pose has rendered a few times
+      if (++checkFrames === 600) {
+        const st = shaderStats();
+        const check = { afterWarmup: st.afterWarmup, newBuilds: st.total - baseline, recent: st.recent, looks: avatars.length, backend: ctx.webgpu ? "webgpu" : "webgl2", tier: ctx.tier };
+        (window as unknown as { __warmcheck: typeof check }).__warmcheck = check;
+        console.info("[warmcheck]", JSON.stringify(check));
+      }
+    }
     const now = performance.now();
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
@@ -128,8 +157,11 @@ export async function startAvatarDevPage() {
       if (tmp.z > 1) return;
       html += `<div style="position:absolute;left:${((tmp.x + 1) / 2) * innerWidth}px;top:${((1 - tmp.y) / 2) * innerHeight}px;transform:translate(-50%,-50%)">${s}</div>`;
     };
-    for (let s = 0; s < 4; s++) put(new THREE.Vector3(-3.4 * dx, R + 1, (1.5 - s) * dz), STARTERS[s]!.name);
-    for (let p = 0; p < 6; p++) put(new THREE.Vector3((p - 2.5) * dx, R + 2.15, 1.5 * dz), PALETTE_NAMES[p]!);
+    rows.forEach(({ s, look }, r) => {
+      const name = look ? `${STARTERS[s]!.name} · ${STARTER_LOOKS[s]![look]!.name}` : STARTERS[s]!.name;
+      put(new THREE.Vector3(-3.4 * dx, R + 1, ((rows.length - 1) / 2 - r) * dz), name);
+    });
+    for (let p = 0; p < 6; p++) put(new THREE.Vector3((p - 2.5) * dx, R + 2.15, ((rows.length - 1) / 2) * dz), PALETTE_NAMES[p]!);
     labels.innerHTML = html;
   });
 }

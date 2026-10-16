@@ -108,7 +108,7 @@ export function renderBoard(board: HomeBoard | null, tab: Tab): void {
   }
   const list = el("ol", "fl-home__rows", body);
   if (tab === "levels") {
-    board.levels.forEach((r, i) => boardRow(list, { rank: i + 1, sprite: portraitSprite(r.starter), name: r.name, tag: r.title, val: `Lv ${r.level}` }));
+    board.levels.forEach((r, i) => boardRow(list, { rank: i + 1, sprite: portraitSprite(r.starter, r.look), name: r.name, tag: r.title, val: `Lv ${r.level}` }));
     if (!board.levels.length) el("p", "fl-home__empty", body, "No one has made the board yet. Pick a name, play a little, and it's yours.");
   } else if (tab === "medals") {
     board.medals.forEach((r, i) => boardRow(list, { rank: i + 1, sprite: "medal", name: r.name, tag: r.title, val: fmtNum(r.medals), unit: r.medals === 1 ? " medal" : " medals" }));
@@ -155,7 +155,7 @@ export interface MeActions {
 export function renderMe({ me, notice, error }: MeState, actions?: MeActions): void {
   const card = $("home-progress");
   const has = !!me && (!!me.character || me.medals.length > 0 || !!me.displayName);
-  const v = has ? progressView(me!, Number(localStorage.getItem("fl.starter") ?? 0) || 0) : null;
+  const v = has ? progressView(me!, Number(localStorage.getItem("fl.starter") ?? 0) || 0, Number(localStorage.getItem("fl.look") ?? 0) || 0) : null;
   const saved = !!me && !me.guest;
 
   // Account corner.
@@ -215,7 +215,7 @@ export function renderMe({ me, notice, error }: MeState, actions?: MeActions): v
   el("span", `fl-chip ${saved ? "fl-chip--ok" : "fl-chip--dawn"}`, head, saved ? "Saved" : "Guest");
   const meRow = el("div", "fl-home__me", card);
   const face = el("div", "fl-face", meRow);
-  sprite(portraitSprite(v.starter), "", face);
+  sprite(portraitSprite(v.starter, v.look), "", face);
   el("span", "fl-lvl num", face, String(v.level));
   const t = el("div", "", meRow);
   const nm = el("b", "", t, v.name);
@@ -311,7 +311,7 @@ export async function initHome(): Promise<void> {
     // temporarily unavailable" or "Play a little first" instead of an email field that leads nowhere.
     const { openSaveProgress } = await import("../ui/account.ts");
     const v = state.me ? progressView(state.me) : null;
-    const r = await openSaveProgress({ name: v?.name, level: v?.level, starter: v?.starter });
+    const r = await openSaveProgress({ name: v?.name, level: v?.level, starter: v?.starter, look: v?.look });
     if (r === "saved") await refreshMe();
   }
 
@@ -345,7 +345,7 @@ export async function initHome(): Promise<void> {
     }
     if (ok) {
       // The next player on this browser starts fresh (a signed-in account restores these from the server).
-      for (const k of ["fl.starter", "fl.palette", "fl.body"]) localStorage.removeItem(k);
+      for (const k of ["fl.starter", "fl.palette", "fl.look", "fl.body"]) localStorage.removeItem(k);
       state.notice = null;
       meSeq++; // a lookup still in flight must not bring the signed-out account back
       state.me = null;

@@ -4,7 +4,7 @@ import type { BodyId } from "../planet/bodies.ts";
 import type { InvItem } from "../net/protocol.ts";
 import type { CosmeticSlot } from "./items.ts";
 import { maxHp } from "./progression.ts";
-import { STARTERS } from "./weapons.ts";
+import { STARTERS, starterLook } from "./weapons.ts";
 
 export const HOTBAR_SLOTS = 4;
 export const BACKPACK_SLOTS = 16;
@@ -12,6 +12,8 @@ export const BACKPACK_SLOTS = 16;
 export interface CharacterData {
   starter: number;
   palette: number;
+  /** Which of the starter's looks (STARTER_LOOKS index); absent on older saves = the original. */
+  look?: number;
   level: number;
   xp: number;
   coins: number;
@@ -56,11 +58,13 @@ export function emptyLife(): LifeProgress {
 }
 
 /** A fresh life: level 1, starter weapon, no coins, in Portus. */
-export function newCharacter(starter: number, palette: number, now = Date.now()): CharacterData {
+export function newCharacter(starter: number, palette: number, now = Date.now(), look = 0): CharacterData {
   const s = STARTERS[starter] ?? STARTERS[0];
+  const index = STARTERS.indexOf(s);
   return {
-    starter: STARTERS.indexOf(s),
+    starter: index,
     palette: Math.max(0, Math.min(5, palette | 0)),
+    look: starterLook(index, look),
     level: 1,
     xp: 0,
     coins: 0,

@@ -10,6 +10,8 @@ export interface LevelRow {
   xp: number;
   /** Starter id as stored ("hexwick", "ash", …). */
   starter: string;
+  /** The look index from the inventory record (null on older rows). */
+  look: number | null;
   titleMedal: string | null;
 }
 
@@ -22,7 +24,7 @@ export interface MedalRow {
 const NOT_BANNED = "NOT EXISTS (SELECT 1 FROM ban b WHERE b.user_id = a.user_id AND (b.until IS NULL OR b.until > ?))";
 
 /** Highest live characters (level, XP, then first there), walking `character_rank` (migration 6). */
-const TOP_LEVELS_SQL = `SELECT a.display_name AS name, c.level, c.xp, c.starter, a.title_medal AS titleMedal
+const TOP_LEVELS_SQL = `SELECT a.display_name AS name, c.level, c.xp, c.starter, json_extract(c.inventory_json, '$.look') AS look, a.title_medal AS titleMedal
    FROM character c CROSS JOIN account a ON a.user_id = c.user_id
   WHERE a.display_name IS NOT NULL
     AND COALESCE(json_extract(c.inventory_json, '$.dead'), 0) = 0
