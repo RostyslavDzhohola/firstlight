@@ -60,19 +60,34 @@ export const AUTOMATION_NAMES_2026_10_15: readonly string[] = [
 
 export const BACKFILL_ID = "test-accounts-2026-10-15";
 
+/** A later find (2026-10-16): one more automation guest from an earlier E2E run, cut off the first list. */
+export const AUTOMATION_NAMES_2026_10_16: readonly string[] = ["Tester441"];
+
+/** The backfills in order; each runs once per database under its own id. */
+export const BACKFILLS: readonly { id: string; names: readonly string[] }[] = [
+  { id: BACKFILL_ID, names: AUTOMATION_NAMES_2026_10_15 },
+  { id: "test-accounts-2026-10-16", names: AUTOMATION_NAMES_2026_10_16 },
+];
+
 /**
- * The one-off backfill: flag the guest accounts (no saved email: `isGuest`) whose display name is
- * exactly one of AUTOMATION_NAMES_2026_10_15. Runs once per database (data_migration); returns how
- * many accounts it flagged, or null when it already ran.
+ * The one-off backfills: flag the guest accounts (no saved email: `isGuest`) whose display name is
+ * exactly one of a backfill's names. Each runs once per database (data_migration); returns how many
+ * accounts the ones that ran flagged, or null when all of them already ran.
  */
 export function backfillTestAccounts(db: Db, isGuest: (userId: string) => boolean, now = Date.now()): number | null {
   return tx(db, () => {
-    if (stmt(db, "SELECT 1 FROM data_migration WHERE id = ?").get(BACKFILL_ID)) return null;
-    const marks = `(${AUTOMATION_NAMES_2026_10_15.map(() => "?").join(", ")})`;
-    const rows = db.prepare(`SELECT user_id AS id FROM account WHERE display_name COLLATE BINARY IN ${marks}`).all(...AUTOMATION_NAMES_2026_10_15) as { id: string }[];
+    let ran = false;
     let changed = 0;
-    for (const r of rows) if (isGuest(r.id) && markTestAccount(db, r.id, BACKFILL_ID, now)) changed++;
-    stmt(db, "INSERT INTO data_migration (id, ran_at, changed) VALUES (?, ?, ?)").run(BACKFILL_ID, now, changed);
-    return changed;
+    for (const b of BACKFILLS) {
+      if (stmt(db, "SELECT 1 FROM data_migration WHERE id = ?").get(b.id)) continue;
+      ran = true;
+      const marks = `(${b.names.map(() => "?").join(", ")})`;
+      const rows = db.prepare(`SELECT user_id AS id FROM account WHERE display_name COLLATE BINARY IN ${marks}`).all(...b.names) as { id: string }[];
+      let n = 0;
+      for (const r of rows) if (isGuest(r.id) && markTestAccount(db, r.id, b.id, now)) n++;
+      stmt(db, "INSERT INTO data_migration (id, ran_at, changed) VALUES (?, ?, ?)").run(b.id, now, n);
+      changed += n;
+    }
+    return ran ? changed : null;
   });
 }

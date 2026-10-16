@@ -148,25 +148,25 @@ describe("test accounts (D-home-6)", () => {
     const dir = s.dir;
     const db = s.accounts.db;
     const ids: Record<string, string> = {};
-    for (const [i, name] of ["SmokeTest", "TutorialRun3", "BugScout_5817", "ros", "smokethree", "Meadowlark"].entries()) ids[name] = (await guest(s, name, 2, `198.51.100.${40 + i}`)).id;
+    for (const [i, name] of ["SmokeTest", "TutorialRun3", "BugScout_5817", "Tester441", "ros", "smokethree", "Meadowlark"].entries()) ids[name] = (await guest(s, name, 2, `198.51.100.${40 + i}`)).id;
     // Saved (email linked) with an automation name: not a guest, left alone.
     const saved = await guest(s, "ChromeTester", 2, "198.51.100.50");
     await saved.b.saveWithEmail("chrome@example.test", "ChromeTester");
     ids.ChromeTester = userIdOf((await saved.b.client.token()).data!.token);
     // As if these accounts predate the backfill: forget that it ran, then boot again.
-    db.prepare("DELETE FROM data_migration WHERE id = ?").run(BACKFILL_ID);
+    db.prepare("DELETE FROM data_migration").run();
     await s.close(true);
     server = null;
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
       const again = await start({ dir });
       const db2 = again.accounts.db;
-      expect(log.mock.calls.map((c) => String(c[0]))).toContain("test accounts backfill: flagged 3 automation guest account(s)");
+      expect(log.mock.calls.map((c) => String(c[0]))).toContain("test accounts backfill: flagged 4 automation guest account(s)");
       const flagged = Object.entries(ids).filter(([, id]) => isTestAccount(db2, id)).map(([n]) => n).sort();
-      expect(flagged).toEqual(["BugScout_5817", "SmokeTest", "TutorialRun3"]);
+      expect(flagged).toEqual(["BugScout_5817", "SmokeTest", "Tester441", "TutorialRun3"]);
       expect(db2.prepare("SELECT changed FROM data_migration WHERE id = ?").get(BACKFILL_ID)).toEqual({ changed: 3 });
       // Nothing deleted: every account is still there.
-      expect((db2.prepare("SELECT COUNT(*) AS n FROM account").get() as { n: number }).n).toBe(7);
+      expect((db2.prepare("SELECT COUNT(*) AS n FROM account").get() as { n: number }).n).toBe(8);
       await again.close(true);
       // A later boot doesn't run it again.
       server = null;
@@ -178,7 +178,7 @@ describe("test accounts (D-home-6)", () => {
       log.mockRestore();
     }
     const raw = new Database(join(dir, "game.db"), { readonly: true });
-    expect((raw.prepare("SELECT COUNT(*) AS n FROM test_account").get() as { n: number }).n).toBe(3);
+    expect((raw.prepare("SELECT COUNT(*) AS n FROM test_account").get() as { n: number }).n).toBe(4);
     raw.close();
   });
 });
