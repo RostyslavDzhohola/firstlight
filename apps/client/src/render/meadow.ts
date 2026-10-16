@@ -238,14 +238,16 @@ export function meadowGrassMaterial(u: MeadowGrassInputs): THREE.MeshLambertNode
     const bladeW = u.width.mul(0.55).mul(select(isFlower, float(0.5), float(1)));
     const bladeP = stemTop.add(side.mul(positionGeometry.x.mul(bladeW).mul(fade.mul(0.5).add(0.5))));
     // Head: a flat disc for daisies, buttercups and clover; an upright spike for lavender.
-    const headR = select(species.lessThan(0.5), float(0.075), select(species.lessThan(1.5), float(0.05), float(0.045))).mul(keep).mul(fade);
+    // Heads right in front of the lens would fill the frame as flat discs: they open from ~1.5 m out.
+    const nearHead = smoothstep(1.2, 3.5, dist);
+    const headR = select(species.lessThan(0.5), float(0.075), select(species.lessThan(1.5), float(0.05), float(0.045))).mul(keep).mul(fade).mul(nearHead);
     // Heads tilt halfway toward the camera so they read as flowers, not slivers.
     const toCam = normalize(cameraPosition.sub(root));
     const tc = normalize(toCam.sub(up.mul(dot(toCam, up))).add(t0.mul(0.001)));
     const a1 = cross(up, tc);
     const a2 = normalize(mix(tc, up, 0.5));
     const disc = a1.mul(positionGeometry.x).add(a2.mul(positionGeometry.z)).mul(headR);
-    const spike = side.mul(positionGeometry.x.mul(0.026)).add(up.mul(positionGeometry.z.mul(0.5).add(0.5).mul(0.17))).mul(keep).mul(fade);
+    const spike = side.mul(positionGeometry.x.mul(0.026)).add(up.mul(positionGeometry.z.mul(0.5).add(0.5).mul(0.17))).mul(keep).mul(fade).mul(nearHead);
     const headP = stemTop.add(select(lavender, spike, disc));
     const p = select(isHead, headP, bladeP);
     if (builder?.needsPreviousData?.()) positionPrevious.assign(p);
