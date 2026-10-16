@@ -20,6 +20,7 @@ import { MENU_GRADE } from "../render/post.ts";
 import { runProbe } from "../render/probe.ts";
 import { createRenderer, type RenderCtx } from "../render/renderer.ts";
 import { installShaderMonitor, shaderMonitorFrame, warmup } from "../render/warmup.ts";
+import { updateOccluderFade } from "../render/occluderFade.ts";
 import type { Hud } from "../ui/hud.ts";
 import { Menu } from "../ui/menu.ts";
 import { bindUi } from "../ui/bind.ts";
@@ -48,6 +49,8 @@ import { TravelQueue } from "./travelQueue.ts";
 
 /** ?bench runs without a server unless ?online is also given; ?offline forces it anywhere. */
 const OFFLINE = flags.has("offline") || (flags.has("bench") && !flags.has("online"));
+/** `?nofade`: trees and props between the camera and the player stay solid (A/B, kill switch). */
+const NO_FADE = flags.has("nofade");
 const FX_DEMO = flags.has("fxdemo");
 const CPU_SLOW = Math.max(1, Math.min(8, Number(flags.get("cpuslow")) || 1));
 
@@ -722,6 +725,8 @@ export class Game {
     }
     if (this.photo.active) this.photo.update(dt, this.ctx.camera);
     else if (!this.bench) this.player.placeCamera(this.ctx.camera);
+    // Trees, rocks and props between the camera and the player dissolve (not in photo mode or the bench).
+    updateOccluderFade(this.ctx.camera, this.player.pos, !this.photo.active && !this.bench && !NO_FADE);
     this.audio.updateListener(this.ctx.camera);
     if (FX_DEMO && now >= this.nextFxDemo) this.fxDemo(now, focus);
     this.env.afterCamera(this.ctx.camera, dt);

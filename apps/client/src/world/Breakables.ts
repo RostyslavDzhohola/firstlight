@@ -23,6 +23,7 @@ import type { MoveColliders } from "../game/PlayerController.ts";
 import type { ClientSystem } from "../game/systems.ts";
 import { Debris, type DebrisPiece } from "../render/debris.ts";
 import type { ResolvedSettings } from "../render/quality.ts";
+import { applyOccluderFade } from "../render/occluderFade.ts";
 import { buildIntactAssets, type BreakableAssets, type MeshArrays } from "./breakableIntact.ts";
 import type { FractureRequest, FractureResponse } from "./fracture.worker.ts";
 
@@ -39,6 +40,7 @@ export function breakableMaterial(): THREE.MeshStandardNodeMaterial {
     material = new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.84, metalness: 0 });
     material.name = "breakables";
     material.emissiveNode = accent.mul(attribute("inner", "float").mul(0.07));
+    applyOccluderFade(material); // a statue, pillar or crate stack in front of the player dissolves
   }
   return material;
 }
