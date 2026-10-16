@@ -1,7 +1,7 @@
 # Round 2 buildings — lane/buildings-2 (Opus 5.5)
 
 Brief: the coordinator's round-2 message (`/tmp/fl-go/round2.md`, the owner's picks of 2026-10-15).
-Branch `lane/buildings-2` from `origin/main`, main merged in once (the shops lane). Pushed to the
+Branch `lane/buildings-2` from `origin/main`, main merged in twice (the shops lane, then chars-3d). Pushed to the
 lane branch only; nothing merged into main or deployed. No browser was driven (Codex does the
 checks); the check list is at the end. Renders for the owner: `/tmp/fl-go/shots/buildings-2/`.
 
@@ -55,8 +55,9 @@ Shop keepers (`SHOP_SPOTS`, world metres): Arcadia `[271.0583, 420.186, -17.8155
   haystack case), `zones.test.ts` (weapons outside through the south gate), fights moved outside
   the walls in `starter-weapons`, `hunt-pointer`, `rules`, `movement`, `shops`; pad-ring rules at
   pad 1 in `evade-reset`, `npc-review`; the horse rides in through Arcadia's south gate.
-- `pnpm typecheck` clean. Full `pnpm test` after the merge of main: 1,674 of 1,674 passed, 187
-  files (the first full run, before the test moves above, had 27 failures in 7 server files: fights
+- `pnpm typecheck` clean. Full `pnpm test` after the shops merge: 1,674 of 1,674 passed, 187 files;
+  after the chars-3d merge: 1,698 of 1,699, the one a new Ember Seal case at pad 0's ring, moved to
+  pad 1 (8/8) (the first full run, before the test moves above, had 27 failures in 7 server files: fights
   15–30 m off pad 0, now inside the walls).
 - CodeRabbit (`coderabbit review --agent --base main`): one minor finding, fixed and it mattered: the
   Astra palette lookup scanned every material in the scene, so inside the pads design build (kit
