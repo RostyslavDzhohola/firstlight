@@ -841,89 +841,6 @@ def build_waystone():
         scyl(name, 0, 0, 0.4, 0, 2.75)
     return finish(p, "prop", "marker beside pads 1..n")
 
-def portal_dais(mb, top_mat, rim_mat, rim_band, inlay=None):
-    """Replaces the game's portal base (cylinder r 2.6-3.0, top 0.2 above the pad): same top height."""
-    radii = [0, 2.2, 2.45, 2.85, 3.15]
-    def cell(ri, si, am):
-        if ri == 0: return None   # under the ring: the game's glowing disc stands here; keep the stone below it
-        if ri == 2 and inlay: return (inlay, "planar", None)
-        return (top_mat, "planar", None) if ri < 3 else (rim_mat, "band", rim_band)
-    ring_cells(mb, [0, 2.2], 32, 0.2, lambda ri, si, am: (top_mat, "planar", None))
-    ring_cells(mb, radii[1:], 32, 0.2, lambda ri, si, am: cell(ri + 1, si, am))
-    tmp = MB(); frustum(tmp, 3.45, 3.15, -0.35, 0.2, 32, rim_mat, mode="band", band=rim_band); mb.extend(tmp)
-
-def build_gate():
-    """Pad-0 portal gate, placed on the portal's base (portal frame: front -Y faces the pad)."""
-    name = f"{B}_gate"
-    p = P.Prefab(name, lod="gate")
-    mb = p.mb
-    if BODY == "arcadia":
-        # The Dawn Gate: two dressed-stone posts, an oak lintel with a brass sun, green/gold banners.
-        portal_dais(mb, "MI_RockTrim", "MI_RockTrim", "ashlar", inlay="M_Brass")
-        for sx in (-1, 1):
-            x = sx * 3.75
-            box(mb, x - 0.55, -0.55, -0.4, x + 0.55, 0.55, 0.6, "MI_RockTrim", mode="band", band="ashlar", top=("MI_RockTrim", "band", "slab"))
-            box(mb, x - 0.4, -0.4, 0.6, x + 0.4, 0.4, 5.5, "MI_UnevenBrick")
-            box(mb, x - 0.5, -0.5, 5.5, x + 0.5, 0.5, 5.75, "MI_RockTrim", mode="band", band="slab")
-            box(mb, x - 0.43, -0.43, 2.4, x + 0.43, 0.43, 2.6, "MI_RockTrim", mode="band", band="slab")
-            sbox(name, x - 0.55, -0.55, x + 0.55, 0.55, 0, 5.75)
-            hanging_lantern(mb, T(x, -0.62, 4.9), "M_GlowWarm")
-            box(mb, x - 0.05, -0.62, 4.85, x + 0.05, -0.4, 4.95, "MI_MetalOrnaments")
-        box(mb, -4.6, -0.42, 5.75, 4.6, 0.42, 6.35, "MI_WoodTrim", mode="band", band="dark")
-        box(mb, -4.75, -0.48, 6.35, 4.75, 0.48, 6.5, "MI_WoodTrim", mode="band", band="plank")
-        for sx in (-1, 1):
-            oriented_box(mb, T(sx * 3.1, 0, 5.2) @ Ry(sx * 40), 0.18, 0.3, 0.9, "MI_WoodTrim", mode="band", band="dark")
-        sun_disc(mb, T(0, -0.5, 7.35), r=0.62)
-        box(mb, -0.12, -0.2, 6.5, 0.12, 0.2, 6.75, "MI_WoodTrim", mode="band", band="dark")
-        for sx in (-1, 1):
-            P.banner(mb, T(sx * 2.85, -0.45, 5.72), 0.62, 2.1, ("green", "gold"))
-    elif BODY == "hollowmere":
-        # The bell gate: paired dark timber posts on stone feet, a heavy carved beam, a narrow slate
-        # hood over the tolling bell above the ring, grave-light lanterns on iron arms.
-        portal_dais(mb, "MI_UnevenBrick", "MI_RockTrim", "ashlar", inlay="M_Bone")
-        for sx in (-1, 1):
-            for sy in (-1, 1):
-                x, y = sx * 3.6, sy * 0.55
-                box(mb, x - 0.3, y - 0.3, -0.4, x + 0.3, y + 0.3, 0.55, "MI_RockTrim", mode="band", band="ashlar", top=("MI_RockTrim", "band", "slab"))
-                box(mb, x - 0.15, y - 0.15, 0.55, x + 0.15, y + 0.15, 5.6, "MI_WoodTrim", mode="band", band="dark")
-            scyl(name, sx * 3.6, 0, 0.45, 0, 5.6)
-            oriented_box(mb, T(sx * 3.6, 0, 2.6), 0.22, 1.3, 0.16, "MI_WoodTrim", mode="band", band="dark")
-            oriented_box(mb, T(sx * 3.6, 0, 4.6), 0.22, 1.3, 0.16, "MI_WoodTrim", mode="band", band="dark")
-            oriented_box(mb, T(sx * 2.85, 0, 4.9) @ Ry(sx * 45), 0.16, 0.2, 1.1, "MI_WoodTrim", mode="band", band="dark")
-            # lantern on an iron arm, hanging toward the pad
-            box(mb, sx * 3.6 - 0.04, -1.3, 4.3, sx * 3.6 + 0.04, -0.15, 4.38, "MI_MetalOrnaments")
-            hanging_lantern(mb, T(sx * 3.6, -1.22, 4.3), "M_GlowTeal")
-        box(mb, -4.25, -0.32, 5.6, 4.25, 0.32, 6.15, "MI_WoodTrim", mode="band", band="dark")
-        box(mb, -4.4, -0.38, 6.15, 4.4, 0.38, 6.3, "MI_WoodTrim", mode="band", band="plank")
-        for sx in (-1, 1):
-            oriented_box(mb, T(sx * 4.4, 0, 5.75), 0.3, 0.5, 0.3, "MI_RockTrim", mode="band", band="slab")
-        # bell hood (1.8 m wide) over the beam, the bell hanging in front of it (rim 6.4 m, well above the ring)
-        tmp = MB(); slate_roof(tmp, 1.7, 1.4, 7.3, 0.9, over=0.2, ridge="y", courses=3, gables=False); mb.extend(tmp, Rz(90))
-        for sx in (-1, 1):
-            box(mb, sx * 0.8 - 0.09, -0.09, 6.3, sx * 0.8 + 0.09, 0.09, 7.35, "MI_WoodTrim", mode="band", band="dark")
-        box(mb, -0.9, -0.1, 7.15, 0.9, 0.1, 7.3, "MI_WoodTrim", mode="band", band="dark")
-        cyl(mb, T(0, 0, 7.15), 0.04, -0.35, 0.0, 6, "MI_MetalOrnaments")
-        tmp = MB(); frustum(tmp, 0.55, 0.28, 0.0, 0.62, 12, "M_Brass", cap=True); frustum(tmp, 0.6, 0.55, -0.1, 0.0, 12, "M_Brass")
-        mb.extend(tmp, T(0, -0.55, 6.5))
-        box(mb, -0.08, -0.6, 7.1, 0.08, 0.05, 7.2, "MI_MetalOrnaments")
-    else:
-        # The checkpoint scanner: two white composite columns with amber strips, a beam with the
-        # scanner bar and the hex-glyph sign of Meridian Oversight.
-        portal_dais(mb, "MI_Trim_03", "MI_Trim_01", "slab", inlay="M_GlowAmber")
-        for sx in (-1, 1):
-            x = sx * 3.75
-            box(mb, x - 0.65, -0.75, -0.4, x + 0.65, 0.75, 0.35, "MI_Trim_01", mode="planar")
-            box(mb, x - 0.45, -0.6, 0.35, x + 0.45, 0.6, 6.2, "MI_Trim_03", mode="planar")
-            box(mb, x - sx * 0.47 - 0.02, -0.25, 0.8, x - sx * 0.47 + 0.02, 0.25, 5.6, "M_GlowAmber")
-            for z in (1.6, 3.2, 4.8):
-                box(mb, x - 0.48, -0.63, z, x + 0.48, 0.63, z + 0.12, "MI_Trim_01")
-            sbox(name, x - 0.65, -0.75, x + 0.65, 0.75, 0, 6.2)
-        box(mb, -4.5, -0.6, 6.2, 4.5, 0.6, 7.0, "MI_Trim_01")
-        box(mb, -2.6, -0.08, 6.05, 2.6, 0.08, 6.2, "M_GlowAmber")
-        box(mb, -1.6, -0.2, 7.0, 1.6, 0.2, 8.6, "MI_Trim_03")
-        hex_glyph(mb, T(0, -0.22, 7.8), 0.62)
-    return finish(p, "static", "pad-0 portal gate; replaces the game's portal base (same top height)")
-
 def hex_glyph(mb, M, r, mat="M_GlowAmber", back="MI_Trim_01"):
     """Meridian Oversight's hexagonal glyph (our own): a hex ring with a horizontal bar, front -Y."""
     outer = [(r * math.cos(math.pi / 6 + k * math.pi / 3), r * math.sin(math.pi / 6 + k * math.pi / 3)) for k in range(6)]
@@ -2531,7 +2448,7 @@ def layout_round2():
     wall_ring()
     place_shop()
 
-def build_prefabs_round2():
+def build_prefabs():
     build_pad_platform()
     build_round2_gate()
     build_waystone()
@@ -2539,12 +2456,6 @@ def build_prefabs_round2():
     build_round2_buildings()
     build_walls()
     build_shop()
-
-def build_prefabs():
-    build_pad_platform()
-    build_gate()
-    build_waystone()
-    dict(arcadia=build_arcadia, hollowmere=lambda: build_hollowmere(), meridian=lambda: build_meridian())[BODY]()
 
 def write_outputs(problems, warns, stats):
     lay = []
@@ -2639,7 +2550,7 @@ def main():
     setup_materials()
     if BODY == "meridian":
         setup_scifi_materials()
-    build_prefabs_round2()
+    build_prefabs()
     log("prefabs:", len(CLASS))
     place_game_objects()
     dict(arcadia=layout_arcadia, hollowmere=lambda: layout_hollowmere(), meridian=lambda: layout_meridian())[BODY]()
