@@ -1055,6 +1055,6 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   page clearing an empty WebGL canvas in another browser stalled at the same wall-clock moments
   (within 4–37 ms, 3 of 3). That strongly suggests Chrome/GPU present stalls on the machine rather
   than the game's own work, though it doesn't fully rule out the game adding to the contention.
-  Evidence: /tmp/fl-go/shots/view-polish/hollowmere-dip-evidence.txt. Frame-time gates should read
+  Evidence: docs/research/2026-10-16-hollowmere-webgl-dip.md. Frame-time gates should read
   runs of long frames with that in mind (a control page, or a rerun). Why: cutting bloom mips or
   shadow updates would cost visible quality for stalls the evidence doesn't tie to the game.

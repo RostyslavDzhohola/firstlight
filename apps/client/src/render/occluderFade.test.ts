@@ -38,6 +38,19 @@ describe("updateOccluderFade", () => {
   });
 });
 
+describe("updateOccluderFade with a parented camera", () => {
+  it("measures the chest distance from the camera's world position", () => {
+    const rig = new THREE.Group();
+    rig.position.set(0, 500, 0);
+    const camera = new THREE.PerspectiveCamera();
+    camera.position.set(0, 1.9, -4.6); // local to the rig
+    rig.add(camera);
+    rig.updateMatrixWorld(true);
+    updateOccluderFade(camera, new THREE.Vector3(0, 501, 0), true);
+    expect(occluderUniforms.depth.value).toBeCloseTo(Math.hypot(0.9, 4.6), 6);
+  });
+});
+
 describe("avatarChest", () => {
   it("is the chest bone when the skinned model is in (in the saddle too: wherever the bone is drawn)", () => {
     const root = new THREE.Group();

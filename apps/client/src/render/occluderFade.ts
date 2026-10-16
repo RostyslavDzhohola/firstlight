@@ -121,6 +121,7 @@ export function applyOccluderFade<M extends THREE.NodeMaterial>(m: M): M {
 
 const _t = new THREE.Vector3();
 const _aim = new THREE.Vector3();
+const _c = new THREE.Vector3();
 const _p = fadeParams(5);
 
 /**
@@ -149,7 +150,7 @@ export function updateOccluderFade(camera: THREE.Camera, chest: THREE.Vector3 | 
   }
   _t.copy(chest);
   u.target.value.copy(_t);
-  const depth = _t.distanceTo(camera.position);
+  const depth = _t.distanceTo(camera.getWorldPosition(_c));
   fadeParams(depth, _p);
   u.depth.value = _p.depth;
   u.cosOuter.value = _p.cosOuter;
