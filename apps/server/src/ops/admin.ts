@@ -172,7 +172,7 @@ ${players ? `<table><tr><th>Player</th><th class="num">Level</th><th class="num"
   const errorRows = errors.map((e) => `<tr><td class="num">${fmtTime(e.at)}</td><td>${esc(e.source)}${e.count > 1 ? ` ×${e.count}` : ""}</td><td><pre>${esc(e.message)}</pre></td></tr>`).join("");
 
   const perBody = new Map<string, number>();
-  for (const r of rooms) if (!r.metadata?.loadtest) perBody.set(r.bodyDef.name, (perBody.get(r.bodyDef.name) ?? 0) + r.actors.size);
+  for (const r of rooms) if (!r.metadata?.loadtest && !r.metadata?.sandbox) perBody.set(r.bodyDef.name, (perBody.get(r.bodyDef.name) ?? 0) + r.actors.size);
 
   return `
 <div class="kpis"><div class="kpi"><b>${total}</b><span>players online</span></div><div class="kpi"><b>${reportTotal}</b><span>open reports</span></div><div class="kpi"><b>${bans.length}</b><span>active bans</span></div><div class="kpi"><b>${errors.length}</b><span>recent errors</span></div></div>
