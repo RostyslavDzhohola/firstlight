@@ -148,8 +148,9 @@ describe("ninja starter: Ember Kunai and Ember Seal", () => {
 
   it("the seal is refused the moment its caster steps into a pad's safe ring", async () => {
     const a = await join("ninja", "arcadia", NINJA);
-    const out = nearPad("arcadia", 0, 13);
-    const inside = nearPad("arcadia", 0, 11);
+    // Pad 1: a plain pad ring (pad 0's sits inside the walled outpost since round 2, D-b2-1).
+    const out = nearPad("arcadia", 1, 13);
+    const inside = nearPad("arcadia", 1, 11);
     expect(isSafe(BODIES.arcadia, ...out)).toBe(false);
     expect(isSafe(BODIES.arcadia, ...inside)).toBe(true);
     await stand(a, out);
@@ -159,7 +160,7 @@ describe("ninja starter: Ember Kunai and Ember Seal", () => {
     await hold(450);
     // Teleport in and release at once, before the tick refreshes the SAFE flag.
     a.send("admin", { cmd: "teleport", args: { x: inside[0], y: inside[1], z: inside[2] } });
-    a.send("fire", { slot: 0, ...aimAtPoint(a, nearPad("arcadia", 0, 30)), t: Date.now(), seal: true });
+    a.send("fire", { slot: 0, ...aimAtPoint(a, nearPad("arcadia", 1, 30)), t: Date.now(), seal: true });
     await waitFor(() => denied.length > 0);
     expect(denied[0]).toBe("safe zone");
   });
