@@ -106,10 +106,28 @@ the shops open with E on all three planets, Safe → Danger at every gate. Two d
   the way when the wall is closer than 0.6 m. Test: pressed against a Portus house and turned away,
   the lens stays ≥ 0.15 m short of the wall (−0.18 m with the old rule).
 
+## Combined with lane/solid-props (natural solids, D-solid-1)
+
+`origin/lane/solid-props` (4b1bda9) merged in: conflicts in `BodyRoom.ts` (both `inWalledZone` and
+`natureSolids`), `PlayerController.ts` (the natural solids' camera ray with the new close-wall
+reach), `horses.test.ts`, `outposts.test.ts` (header), `protocol.ts` (one comment for both: 5 stays);
+`PROPS_VERSION` stays 6. Added: `openSpotOutside` keeps natural solids off its line (room for a big
+creature); a test over all three outposts that no trunk, boulder or rock stands in a gate's passage,
+beside the rings (land and sea walls), on a path, at a shop's counter or on the walk into the
+portal; and the real controller, wired as the game wires it, walking and swimming into the rings
+(land walls, a wading sea wall at Hollowmere, swimming at Arcadia's and Meridian's lakes): no frame
+ends inside a wall or across it (the solid-props lane's final clearance pass covers the walls).
+
+Runs on the combined branch (46d597a): `pnpm typecheck` clean; `pnpm test` 1,751 of 1,751, 197
+files; J2/J3/J5 on the WebGL project by Codex gpt-6.1-sol: 16 of 16 (`/tmp/fl-go/buildings2-e2e/report.md`).
+Codex notes J3's "creep in view" checks size on screen, not occlusion: from inside the walls the
+creeps beyond them may be hidden by the wall (J3.1's Arcadia shot ends with the player in the lake
+against the inside of the sea wall).
+
 ## Deploy order
 
-`PROTOCOL_VERSION` 5 (shared with the other round-2 lanes). Client (with `assets-dev/portus` and
-`assets-dev/outposts`) first, server right after. Old client on the new server: invisible walls round
+`PROTOCOL_VERSION` 5 (shared with the other round-2 lanes; one deploy with lane/solid-props). Client (with
+`assets-dev/portus` and `assets-dev/outposts`) first, server right after. Old client on the new server: invisible walls round
 pad 0 and a wider protected zone than it draws; new client on the old server: walls the server
 doesn't know and creeps spawning inside the walls. Stale tabs get 409 and reload.
 
