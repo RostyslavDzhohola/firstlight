@@ -6,7 +6,8 @@
 
 import { BODIES, type BodyId } from "../planet/bodies.ts";
 import type { Dir } from "../planet/pads.ts";
-import { offsetDir, place, placeDir } from "./places.ts";
+import { MAIN_PAD, offsetDir, place, placeDir } from "./places.ts";
+import { SHOP_SPOT_BY_ID, SHOP_SPOTS, type ShopSpot } from "./shops.ts";
 import type { EggId } from "./secrets.ts";
 import type { MissionId } from "./missions.ts";
 
@@ -25,6 +26,8 @@ export interface WorldObjectDef {
   place: string;
   east?: number;
   north?: number;
+  /** A fixed spot instead of place + offsets: a world position whose direction is used (shop keepers, shops.ts). */
+  at?: readonly [number, number, number];
   /** Metres above the ground (lamps on the billboard). */
   lift?: number;
   /** "place": stand on the ground height at the place centre (parts of one prop share a base). */
@@ -43,6 +46,9 @@ export interface WorldObjectDef {
 
 const O = (o: WorldObjectDef) => o;
 
+/** A shop's keeper stands at its spot (content/shops.ts); `place` names the area it belongs to. */
+const keeper = (s: ShopSpot, area: string): WorldObjectDef => ({ id: s.id, body: s.body, place: area, at: s.pos, look: "keeper", name: `${s.keeper} · ${s.name}`, trigger: "interact", range: 3 });
+
 function ring(count: number, radius: number, phase = 0): { east: number; north: number }[] {
   const out: { east: number; north: number }[] = [];
   for (let i = 0; i < count; i++) {
@@ -54,7 +60,7 @@ function ring(count: number, radius: number, phase = 0): { east: number; north: 
 
 export const WORLD_OBJECTS: readonly WorldObjectDef[] = [
   // Portus
-  O({ id: "juno_vale", body: "portus", place: "portus_plaza", north: 11, look: "keeper", name: "Juno Vale · Portus Exchange", trigger: "interact", range: 3 }),
+  keeper(SHOP_SPOT_BY_ID.get("juno_vale")!, "portus_plaza"),
   O({ id: "hall_wall", body: "portus", place: "portus_plaza", east: -20.8, north: -12, look: "hall", name: "Hall of Firsts", trigger: "none", range: 0 }),
 
   // Guides on each main pad
@@ -117,6 +123,9 @@ export const WORLD_OBJECTS: readonly WorldObjectDef[] = [
   O({ id: "e11_chest", body: "hollowmere", place: "thornwood", east: -24, north: 16, look: "chest", name: "Open the reed coffer", trigger: "interact", range: 2, egg: "E11", part: "chest" }),
   O({ id: "e12_plaque", body: "meridian", place: "cinder_canyons", east: 20, north: -18, look: "plaque", name: "Read the discarded work slip", trigger: "interact", range: 2, egg: "E12", part: "plaque" }),
   O({ id: "e12_safe", body: "meridian", place: "cinder_canyons", east: 20, north: -22, look: "safe", name: "Use the timebox keypad", trigger: "interact", range: 2, egg: "E12", part: "safe" }),
+
+  // Shop keepers inside each arrival outpost (round 2), where SHOP_SPOTS puts them.
+  ...SHOP_SPOTS.filter((s) => s.body !== "portus").map((s) => keeper(s, MAIN_PAD[s.body as Exclude<BodyId, "portus">])),
 ];
 
 export const WORLD_OBJECT_BY_ID: ReadonlyMap<string, WorldObjectDef> = new Map(WORLD_OBJECTS.map((o) => [o.id, o]));
@@ -127,6 +136,10 @@ export function objectsOn(body: BodyId): WorldObjectDef[] {
 
 /** Unit direction of an object (before ground snapping). */
 export function objectDir(o: WorldObjectDef): Dir {
+  if (o.at) {
+    const l = Math.hypot(o.at[0], o.at[1], o.at[2]);
+    return [o.at[0] / l, o.at[1] / l, o.at[2] / l];
+  }
   const p = place(o.place);
   return offsetDir(placeDir(p), o.east ?? 0, o.north ?? 0, BODIES[o.body].radius);
 }

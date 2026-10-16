@@ -1,0 +1,68 @@
+/* Shop panel (round 2, ui/shop.ts): every item, grouped; buyable offers are warm price buttons, locked
+   ones are greyed cells with a lock and the reason. Built on the quests panel (.fl-q) and the UI kit. */
+
+.fl-q.fl-shop { width: min(calc(66 * var(--u)), 96vw); max-height: 90vh; }
+.fl-shop__head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-4); }
+.fl-shop__head h2 { margin: 0; }
+.fl-shop__head .sub { margin-bottom: calc(.6 * var(--u)); }
+.fl-shop__purse { display: flex; align-items: center; gap: calc(.6 * var(--u)); flex: none; padding-top: calc(.3 * var(--u)); }
+.fl-shop__coins { display: inline-flex; align-items: center; gap: .4em; font: 700 var(--t-lg)/1 var(--font-mono); color: var(--coin); }
+.fl-shop__coins .px { width: calc(1.3 * var(--u)); height: calc(1.3 * var(--u)); }
+
+.fl-shop__bar { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-3) var(--sp-5); flex-wrap: wrap; border-bottom: 1px solid var(--line-2); margin-bottom: calc(.3 * var(--u)); }
+.fl-shop__bar .tabs { margin: 0; border-bottom: 0; }
+.fl-shop__tools { display: flex; align-items: center; gap: var(--sp-4); padding-bottom: calc(.45 * var(--u)); font-size: var(--t-xs); color: var(--fog-3); }
+.fl-shop__count { color: var(--fog-4); }
+.fl-shop__only { display: inline-flex; align-items: center; gap: .5em; cursor: pointer; color: var(--paper-2); }
+
+.fl-shop__body .cat { margin-top: var(--sp-4); }
+.fl-shop__rows { display: grid; margin: 0; padding: 0; list-style: none; }
+.fl-shop__row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: calc(.8 * var(--u)); padding: calc(.45 * var(--u)) calc(.4 * var(--u)); border-bottom: 1px solid var(--line-1); }
+.fl-shop__row:hover { background: rgba(255, 255, 255, .025); }
+.fl-shop__icon { display: grid; place-items: center; width: calc(2.4 * var(--u)); height: calc(2.4 * var(--u)); border: 1px solid rgba(255, 243, 220, .3); border-radius: 3px; background: rgba(0, 0, 0, .4); }
+.fl-shop__icon .px { width: 82%; height: 82%; }
+.fl-shop__name { min-width: 0; }
+.fl-shop__name b { display: block; font: 600 var(--t-sm)/1.2 var(--font-display); letter-spacing: .03em; color: var(--paper); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-shop__name b.is-uncommon { color: var(--rar-uncommon); }
+.fl-shop__name b.is-rare { color: var(--rar-rare); }
+.fl-shop__name b.is-legendary { color: var(--rar-legendary); }
+.fl-shop__name span { display: block; font-size: var(--t-xs); color: var(--fog-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-shop__row.is-locked .fl-shop__icon, .fl-shop__row.is-unsold .fl-shop__icon { opacity: .55; filter: grayscale(.6); }
+.fl-shop__row.is-unsold .fl-shop__name b { opacity: .75; }
+
+.fl-shop__offers { display: flex; align-items: stretch; justify-content: flex-end; gap: calc(.4 * var(--u)); flex-wrap: wrap; }
+.fl-shop__qty { align-self: center; height: calc(2.1 * var(--u)); padding: 0 calc(.4 * var(--u)); border: 1px solid var(--line-3); border-radius: var(--r-2); background: rgba(0, 0, 0, .35); color: var(--paper); font: 600 var(--t-xs)/1 var(--font-mono); }
+
+/* One priced offer: tier + headline stat on top, price and the action below. */
+.fl-shop__offer {
+  display: grid; grid-template-columns: auto auto; grid-template-areas: "t t" "p c"; align-items: center; justify-content: space-between; gap: calc(.15 * var(--u)) calc(.7 * var(--u));
+  min-width: calc(7.4 * var(--u)); padding: calc(.35 * var(--u)) calc(.6 * var(--u)); text-align: left;
+  border: 1px solid rgba(255, 217, 155, .45); border-radius: var(--r-2); background: linear-gradient(180deg, rgba(255, 226, 174, .12), rgba(243, 174, 91, .05)); color: var(--paper);
+  font: inherit; cursor: pointer; transition: border-color var(--dur-2), box-shadow var(--dur-2), background var(--dur-2);
+}
+.fl-shop__offer:hover { border-color: rgba(255, 230, 184, .9); box-shadow: 0 0 22px -8px rgba(243, 174, 91, .8); background: linear-gradient(180deg, rgba(255, 226, 174, .2), rgba(243, 174, 91, .08)); }
+.fl-shop__offer:active { transform: translateY(1px); }
+.fl-shop__offer .t { grid-area: t; font-size: var(--t-xs); color: var(--fog-4); white-space: nowrap; }
+.fl-shop__offer .t b { margin-right: .45em; font: 700 var(--t-xs)/1 var(--font-mono); color: var(--hero-gold); }
+.fl-shop__offer .p { grid-area: p; font: 700 var(--t-sm)/1 var(--font-mono); color: var(--coin); white-space: nowrap; }
+.fl-shop__offer .c { grid-area: c; justify-self: end; font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: .14em; text-transform: uppercase; color: var(--dawn-3); }
+.fl-shop__offer.is-sell { grid-template-areas: "p c"; }
+
+/* Locked: greyed, the lock and the reason where the price was; the price stays (smaller). */
+.fl-shop__offer.is-locked { cursor: default; border-color: var(--line-2); background: rgba(0, 0, 0, .28); box-shadow: none; transform: none; }
+.fl-shop__offer.is-locked .t { color: var(--fog-2); }
+.fl-shop__offer.is-locked .t b { color: var(--fog-3); }
+.fl-shop__offer.is-locked .p { display: inline-flex; align-items: center; gap: .35em; font: 600 var(--t-xs)/1 var(--font-body); color: var(--fog-4); }
+.fl-shop__offer.is-locked.is-coins .p { color: #ffcfa0; }
+.fl-shop__offer.is-locked.is-level .p { color: #b9c8ff; }
+.fl-shop__offer.is-locked .p .li { width: 1em; height: 1em; }
+.fl-shop__offer.is-locked .c { font: 600 var(--t-xs)/1 var(--font-mono); letter-spacing: 0; text-transform: none; color: var(--fog-2); }
+
+.fl-shop__why { display: inline-flex; align-items: center; gap: .4em; max-width: calc(24 * var(--u)); font-size: var(--t-xs); color: var(--fog-3); text-align: right; }
+.fl-shop__why .li { flex: none; width: 1em; height: 1em; color: var(--fog-2); }
+.fl-shop__sells { align-self: center; font: 600 var(--t-xs)/1 var(--font-mono); color: var(--fog-4); white-space: nowrap; }
+
+@media (max-width: 820px) {
+  .fl-shop__row { grid-template-columns: auto minmax(0, 1fr); }
+  .fl-shop__offers { grid-column: 1 / -1; justify-content: flex-start; }
+}
