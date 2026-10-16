@@ -2,6 +2,7 @@
 // portals, boss lairs, the mission guide, the Portus town's landmarks, and active mission targets.
 // Positions come from the same shared content the server uses, so markers sit where things are.
 
+import { SHOP_SPOTS } from "@firstlight/shared/content/shops";
 import { BODIES, padDirs, portalSpots, type BodyId, type Terrain } from "@firstlight/shared";
 import { GUIDES, MISSION_BY_ID } from "@firstlight/shared/content/missions";
 import { anchorDir } from "@firstlight/shared/planet/pads";
@@ -64,6 +65,10 @@ export function staticMarkers(body: BodyId, terrain: Terrain): MapMarker[] {
     const guide = GUIDES[body as Exclude<BodyId, "portus">];
     const g = guide && WORLD_OBJECT_BY_ID.get(guide.id);
     if (g) out.push({ id: `guide:${guide.id}`, kind: "guide", dir: objectDir(g), label: `${guide.name} · missions`, priority: 2 });
+    for (const s of SHOP_SPOTS) {
+      const k = s.body === body ? WORLD_OBJECT_BY_ID.get(s.id) : undefined;
+      if (k) out.push({ id: `shop:${s.id}`, kind: "shop", dir: objectDir(k), label: s.name, priority: 2 });
+    }
   } else {
     const juno = WORLD_OBJECT_BY_ID.get("juno_vale");
     const hall = WORLD_OBJECT_BY_ID.get("hall_wall");

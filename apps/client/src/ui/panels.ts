@@ -1,18 +1,16 @@
-// Quests lane panels (plain DOM, D25): the Portus Exchange, the planet guide's missions, the journal
+// Quests lane panels (plain DOM, D25): the base Panel (the shop is ui/shop.ts), the planet guide's missions, the journal
 // (missions, medals and titles, wardrobe), the E7 keypad, the HUD mission tracker and the admin
 // console. Panels free the mouse while open and give it back on close.
 
 import "./quests.css";
 import type { BodyId } from "@firstlight/shared";
-import { HORSE_WHISTLE } from "@firstlight/shared/content/horse";
-import { COSMETIC_BY_ID, COSMETIC_SLOTS, RARITY_STYLE, SHOP, SHOP_KEEPER, SHOP_NAME, isExtraCosmetic, itemName, sellValue, type ShopCategory } from "@firstlight/shared/content/items";
+import { COSMETIC_BY_ID, COSMETIC_SLOTS, RARITY_STYLE, isExtraCosmetic, itemName } from "@firstlight/shared/content/items";
 import { MEDALS } from "@firstlight/shared/content/medals";
 import { GUIDES, MISSION_BY_ID, MISSIONS, missionsOn, trackedMission, type MissionDef } from "@firstlight/shared/content/missions";
 import type { InvItem } from "@firstlight/shared/net/protocol";
 import type { Game } from "../game/Game.ts";
 import type { Hud, MissionLine, YouPlus } from "./hud.ts";
 import { overlayClosed, overlayOpened } from "./dom.ts";
-import { HIDDEN_ITEMS, shownItem } from "./hudFormat.ts";
 import { parseSkyArgs, SKY_HELP } from "./skyCommand.ts";
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", parent?: HTMLElement, text?: string): HTMLElementTagNameMap[K] {
@@ -23,7 +21,6 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", parent?: HT
   return e;
 }
 
-const TIER = ["", "I", "II", "III"];
 const send = (game: Game, type: string, msg: unknown) => game.net.room?.send(type, msg as never);
 
 /** A modal panel. Only one is open at a time. */
@@ -93,106 +90,7 @@ export class Panel {
   }
 }
 
-// ---------------------------------------------------------------- Portus Exchange
-
-const CATEGORY_NAMES: Record<ShopCategory, string> = { consumables: "Tonics", weapons: "Weapons", support: "Support", gear: "Gear", cosmetics: "Cosmetics" };
-
-export class ShopPanel extends Panel {
-  private tab: "buy" | "sell" = "buy";
-  private qty = new Map<string, number>();
-
-  render() {
-    const you = this.you();
-    const b = this.box;
-    b.innerHTML = "";
-    const head = el("div", "head", b);
-    el("h2", "", head, SHOP_NAME.toUpperCase());
-    el("div", "coins", head, `${you?.coins ?? 0} ◎`);
-    el("p", "sub", b, `${SHOP_KEEPER}: “Anyone can buy anything. Whether you can use it is your business.” Sells back at 25%.`);
-    const tabs = el("div", "tabs", b);
-    for (const t of ["buy", "sell"] as const) {
-      const x = el("button", `tab${this.tab === t ? " on" : ""}`, tabs, t === "buy" ? "Buy" : "Sell");
-      x.onclick = () => {
-        this.tab = t;
-        this.render();
-      };
-    }
-    const body = el("div", "body", b);
-    if (this.tab === "buy") this.renderBuy(body, you);
-    else this.renderSell(body, you);
-    const foot = el("div", "foot", b);
-    el("span", "", foot, "Tier II needs level 6 to equip, tier III level 12. Esc to close.");
-    el("button", "btn ghost", foot, "Close").onclick = () => this.close();
-  }
-
-  private renderBuy(body: HTMLElement, you: YouPlus | null) {
-    const coins = you?.coins ?? 0;
-    const level = you?.level ?? 1;
-    let cat: ShopCategory | null = null;
-    const order: ShopCategory[] = ["consumables", "weapons", "support", "gear", "cosmetics"];
-    // Horses behind their server flag (you.horses): no whistle for sale when they are off. The radio
-    // is hidden with voice (HIDDEN_ITEMS, D-controls-1).
-    const entries = SHOP.filter((e) => (e.itemId !== HORSE_WHISTLE || !!you?.horses) && (!isExtraCosmetic(e.itemId) || !!you?.cosmeticsExtras) && !HIDDEN_ITEMS.has(e.itemId)).sort((a, c) => order.indexOf(a.category) - order.indexOf(c.category) || a.name.localeCompare(c.name) || a.tier - c.tier);
-    for (const e of entries) {
-      if (e.category !== cat) {
-        cat = e.category;
-        el("div", "cat", body, CATEGORY_NAMES[cat]);
-      }
-      const key = `${e.itemId}:${e.tier}`;
-      const q = e.stack > 1 ? (this.qty.get(key) ?? 1) : 1;
-      const row = el("div", "row", body);
-      const left = el("div", "", row);
-      const cos = COSMETIC_BY_ID.get(e.itemId);
-      const nm = el("div", "nm", left, `${e.name}${e.category === "weapons" || e.category === "support" ? ` ${TIER[e.tier]}` : ""}`);
-      if (cos) {
-        const r = RARITY_STYLE[cos.rarity];
-        const tag = el("span", "rar", nm, `  ${r.icon} ${r.label}`);
-        tag.style.color = r.color;
-      }
-      const meta = el("div", "meta", left);
-      if (e.level > level) el("span", "gate", meta, `needs LV ${e.level} to equip`);
-      else if (cos) meta.textContent = `${cos.slot}`;
-      else if (e.stack > 1) meta.textContent = `stacks to ${e.stack}`;
-      el("div", "price", row, `${e.price * q} ◎`);
-      const act = el("div", "", row);
-      if (e.stack > 1) {
-        const sel = el("select", "tab", act);
-        for (const n of [1, 3, 5, 10].filter((n) => n <= e.stack)) {
-          const o = el("option", "", sel, `×${n}`);
-          o.value = String(n);
-          o.selected = n === q;
-        }
-        sel.onchange = () => {
-          this.qty.set(key, Number(sel.value));
-          this.render();
-        };
-        sel.style.marginRight = "6px";
-      }
-      const buy = el("button", "btn", act, "Buy");
-      buy.disabled = coins < e.price * q;
-      buy.onclick = () => send(this.game, "buy", { itemId: e.itemId, tier: e.tier, qty: q });
-    }
-  }
-
-  private renderSell(body: HTMLElement, you: YouPlus | null) {
-    if (!you) return;
-    const items: { slot: number; it: InvItem }[] = [];
-    you.hotbar.forEach((it, i) => shownItem(it) && items.push({ slot: i, it: it! }));
-    you.backpack.forEach((it, i) => shownItem(it) && items.push({ slot: i + 4, it: it! }));
-    if (!items.length) el("p", "sub", body, "Your bags are empty.");
-    for (const { slot, it } of items) {
-      const row = el("div", "row", body);
-      const left = el("div", "", row);
-      el("div", "nm", left, `${itemName(it)}${it.skin || COSMETIC_BY_ID.has(it.id) ? "" : ` ${TIER[it.tier] ?? ""}`}${it.qty > 1 ? ` ×${it.qty}` : ""}`);
-      el("div", "meta", left, slot < 4 ? `hotbar ${slot + 1}` : "backpack");
-      const value = sellValue(it);
-      el("div", "price", row, value > 0 ? `${value} ◎` : "—");
-      const btn = el("button", "btn ghost", row, "Sell");
-      btn.disabled = value <= 0;
-      btn.onclick = () => send(this.game, "sell", { slot });
-    }
-  }
-}
+// The shop panel lives in ui/shop.ts (every safe zone has one, round 2).
 
 // ---------------------------------------------------------------- guide missions
 
