@@ -121,7 +121,9 @@ design-round meshes (static, unrigged, one palette atlas, the weapon modelled in
 
 - **Clean-up:** seam-split vertices welded; the held Riverstaff (pole and 12 reed rings) and carbine
   (6 parts) removed, matched by their boxes and checked by count; the thumb that gripped the weapon is
-  replaced by a mirror of the free one; faces buried 6 mm inside another closed part of the same group,
+  replaced by a mirror of the free one; Kappa B's flat card over the fingers (it read as a dark plate)
+  is replaced by webbing: the outer fingers fan out 24°, and a thin closed membrane in light skin joins
+  each neighbouring pair from the knuckles to a scalloped edge (about 600 tris for both hands); faces buried 6 mm inside another closed part of the same group,
   or 2 cm inside another body part that never swings out (torso, shell, head, chest, pack), are culled
   (2.5k and 2.0k faces). Limbs keep everything they could swing out of the body.
 - **Skeleton:** every UAL bone keeps its name and T-pose frame; joints move to each body (spine heights

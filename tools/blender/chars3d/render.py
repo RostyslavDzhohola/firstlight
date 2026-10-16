@@ -383,6 +383,9 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--res", type=int, default=1600)
     ap.add_argument("--samples", type=int, default=64)
+    ap.add_argument("--target", default="0,0,1", help="closeup: point to frame (model space, unscaled)")
+    ap.add_argument("--view", default="0.35,-1,0.12", help="closeup: direction from the target to the camera")
+    ap.add_argument("--dist", type=float, default=1.0, help="closeup: camera distance")
     a = ap.parse_args(argv)
     bl.reset()
     sc = bpy.context.scene
@@ -412,6 +415,15 @@ def main():
         sc.render.resolution_x = int(a.res * 0.75)
         sc.render.resolution_y = a.res
         cam = bl.camera("cam", (0, 0, 1.0), (0.12, -1, 0.1), 4.6, lens=55)
+    elif a.mode == "closeup":
+        # a detail (hands, feet) of one character, unrotated, square
+        n = names[0]
+        add_character(a.dir, n, pals[0], a.look, rot_z=0, action=act)
+        goto(a.frame)
+        s = SCALE.get(n, 1.0)
+        t = [float(x) * s for x in a.target.split(",")]
+        sc.render.resolution_x = sc.render.resolution_y = a.res
+        cam = bl.camera("cam", tuple(t), tuple(float(x) for x in a.view.split(",")), a.dist, lens=85)
     elif a.mode == "portrait":
         n = names[0]
         add_character(a.dir, n, pals[0], a.look, rot_z=-25, action=act)

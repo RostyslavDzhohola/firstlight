@@ -215,8 +215,9 @@ third-party sources), committed as `tools/blender/chars3d/astra/kappa.glb`
 hashes). Changes: the held Riverstaff and carbine removed, the gripping thumb replaced by a mirror of
 the free one, faces buried inside other parts culled, rigged onto the UAL skeleton with our weights,
 re-unwrapped, and a new albedo (the design's colours with baked occlusion and palette roles) and flat
-normal map (one shared 4×4 texture made in the client, not a file). Shipped as `kappa_b.glb`
-(10,425 tris, 142,696 B), `unit7_b.glb` (11,759 tris, 136,880 B), `*_b_albedo.webp` (~130 KB;
+normal map (one shared 4×4 texture made in the client, not a file). Kappa B's hands: the flat card
+over the fingers replaced by our own webbing between fanned fingers (2026-10-16). Shipped as
+`kappa_b.glb` (10,763 tris, 150,616 B), `unit7_b.glb` (11,759 tris, 136,880 B), `*_b_albedo.webp` (~130 KB;
 `_512` ~71 KB), `hero_*_b_*.webp`, `portrait_*_b.webp`.
 
 Shipped outputs (2026-10-15 build):

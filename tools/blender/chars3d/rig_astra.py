@@ -132,6 +132,9 @@ LOOKS = {
         strip=kappa_strip, n_strip=13,
         # (source thumb centre, gripping thumb centre): the left thumb curled round the staff
         mirror=[((-0.525, -0.155, 0.58), (0.395, -0.155, 0.58))],
+        # right-hand island centres (left = mirrored): the card over the fingers, the three fingers
+        webbed=dict(card=(-0.46, -0.166, 0.49), fingers=[(-0.503, -0.141, 0.5075), (-0.46, -0.141, 0.4985), (-0.417, -0.141, 0.5075)],
+                    splay=24.0, grow=(1.05, 1.15), thick=0.006, depth=(0.92, 0.74), tone=(0.646, 0.718, 0.516)),
         joints=dict(pelvis=(0, 0.02, 0.573), neck=(0, 0.0, 1.04), head=(0, -0.01, 1.11), head_len=0.2,
                     clav=(0.05, -0.01, 0.975), shoulder=(0.319, 0.009, 0.98), elbow=(0.395, -0.04, 0.825),
                     wrist=(0.47, -0.09, 0.67), knuckle=(0.46, -0.135, 0.55),
@@ -226,6 +229,14 @@ def mesh_arrays(ob):
     me.polygons.foreach_get("loop_start", ls)
     me.polygons.foreach_get("loop_total", lt)
     return co.reshape(-1, 3), vi, ls, lt
+
+
+def island_uv(ob, face):
+    """The SRC (design atlas) UV at a face's centre: new geometry samples that colour."""
+    me = ob.data
+    p = me.polygons[int(face)]
+    uv = np.array([me.uv_layers["SRC"].data[li].uv[:] for li in p.loop_indices]).mean(0)
+    return Vector((float(uv[0]), float(uv[1])))
 
 
 def islands(ob):
@@ -395,6 +406,100 @@ def unwrap(ob, angle, texel):
     a2 = 0.5 * np.abs(d1[:, 0] * d2[:, 1] - d2[:, 0] * d1[:, 1]).sum()
     uv *= math.sqrt(a3 / max(a2, 1e-12)) * texel
     me.uv_layers.active.data.foreach_set("uv", uv.ravel())
+
+
+def island_axis(co, vi, ls, lt, faces):
+    """Principal axis of an island's vertices: (top end, bottom end) along it, ends at the extremes."""
+    vs = np.unique(np.concatenate([vi[ls[f]:ls[f] + lt[f]] for f in faces]))
+    P = co[vs].astype(np.float64)
+    c = P.mean(0)
+    ax = np.linalg.svd(P - c, full_matrices=False)[2][0]
+    ax = ax if ax[2] > 0 else -ax
+    t = (P - c) @ ax
+    return c + ax * t.max(), c + ax * t.min()
+
+
+def webbed_hands(ob, info, atlas_info, spec):
+    """Kappa B's hands: the flat card held over each hand's three fingers becomes webbing between them.
+    The fingers fan out a little and grow, and a thin closed membrane joins each neighbouring pair from
+    the knuckles to a scalloped edge two thirds of the way down (light skin, like the toes)."""
+    co, vi, ls, lt = mesh_arrays(ob)
+    bm = bmesh.new()
+    bm.from_mesh(ob.data)
+    bm.faces.ensure_lookup_table()
+    bm.verts.ensure_lookup_table()
+    uvl = bm.loops.layers.uv["SRC"]
+    ref_uv = atlas_info
+    kill = []
+    for side in (1, -1):
+        bm.faces.ensure_lookup_table()  # new membranes go at the end: old indices hold
+        card = find_island(info, (side * spec["card"][0], spec["card"][1], spec["card"][2]))
+        kill += [bm.faces[int(f)] for f in info[card]["faces"]]
+        fingers = []
+        for fc in spec["fingers"]:
+            i = find_island(info, (side * fc[0], fc[1], fc[2]))
+            top, tip = island_axis(co, vi, ls, lt, info[i]["faces"])
+            fingers.append((i, top, tip))
+        fingers.sort(key=lambda f: abs(f[1][0]))  # inner (towards the body) to outer
+        x_mid = fingers[1][1][0]
+        moved = []
+        for k, (i, top, tip) in enumerate(fingers):
+            # fan: the inner and outer fingers turn away from the middle one, about the knuckle
+            phi = 0.0 if k == 1 else -np.sign(top[0] - x_mid) * math.radians(spec["splay"])
+            R = np.array(Matrix.Rotation(phi, 3, "Y"), dtype=np.float64)
+            ax = (tip - top) / np.linalg.norm(tip - top)
+            vs = {v for f in info[i]["faces"] for v in bm.faces[int(f)].verts}
+            for v in vs:
+                d = np.array(v.co, dtype=np.float64) - top
+                along = d @ ax
+                radial = d - along * ax
+                d = ax * along * spec["grow"][1] + radial * spec["grow"][0]
+                v.co = Vector(top + R @ d)
+            new_tip = top + R @ (ax * np.linalg.norm(tip - top) * spec["grow"][1])
+            moved.append((top, new_tip))
+        for (ta, pa), (tb, pb) in zip(moved, moved[1:]):
+            membrane(bm, uvl, ref_uv, ta, pa, tb, pb, spec)
+    bmesh.ops.delete(bm, geom=kill, context="FACES")
+    loose = [v for v in bm.verts if not v.link_faces]
+    bmesh.ops.delete(bm, geom=loose, context="VERTS")
+    bm.to_mesh(ob.data)
+    bm.free()
+
+
+def membrane(bm, uvl, uv, ta, pa, tb, pb, spec, nu=6, nv=3):
+    """A thin closed slab between two finger axes (top -> tip), down to a scalloped free edge."""
+    half = spec["thick"] / 2
+    e_side, e_mid = spec["depth"]
+    A = lambda v: ta + (pa - ta) * v  # noqa: E731
+    B = lambda v: tb + (pb - tb) * v  # noqa: E731
+    n = np.cross(tb - ta, (pa + pb) / 2 - (ta + tb) / 2)
+    n /= np.linalg.norm(n)
+    grid = []
+    for i in range(nu + 1):
+        u = i / nu
+        e = e_side - (e_side - e_mid) * math.sin(math.pi * u)
+        col = []
+        for j in range(nv + 1):
+            v = e * j / nv
+            col.append(A(v) * (1 - u) + B(v) * u)
+        grid.append(col)
+    lay = [[[bm.verts.new(Vector(p + n * sgn * half)) for p in col] for col in grid] for sgn in (1, -1)]
+    faces = []
+    for i in range(nu):
+        for j in range(nv):
+            f0 = (lay[0][i][j], lay[0][i + 1][j], lay[0][i + 1][j + 1], lay[0][i][j + 1])
+            f1 = (lay[1][i][j + 1], lay[1][i + 1][j + 1], lay[1][i + 1][j], lay[1][i][j])
+            faces += [f0, f1]
+    ring = [(i, 0) for i in range(nu)] + [(nu, j) for j in range(nv)] + [(i, nv) for i in range(nu, 0, -1)] + [(0, j) for j in range(nv, 0, -1)]
+    for (i0, j0), (i1, j1) in zip(ring, ring[1:] + ring[:1]):
+        faces.append((lay[0][i1][j1], lay[0][i0][j0], lay[1][i0][j0], lay[1][i1][j1]))
+    for q in faces:
+        for tri in ((q[0], q[1], q[2]), (q[0], q[2], q[3])):
+            f = bm.faces.new(tri)
+            f.smooth = False
+            for loop in f.loops:
+                loop[uvl].uv = uv
+    bm.normal_update()
 
 
 def find_island(info, centre, tol=0.01):
@@ -606,6 +711,14 @@ def rig_look(name, src, ual1, out_dir, tex=1024):
     fis = islands(ob)
     info = island_info(ob, fis, atlas)
     log(f"{name}: stripped {len(strip)} weapon islands; {len(info)} islands, {len(ob.data.polygons)} tris")
+    if L.get("webbed"):
+        W = L["webbed"]
+        tone = np.array(W["tone"], F)
+        ref = min(range(len(info)), key=lambda i: float(np.abs(info[i]["col"] - tone).sum()))
+        webbed_hands(ob, info, island_uv(ob, info[ref]["faces"][0]), W)
+        fis = islands(ob)
+        info = island_info(ob, fis, atlas)
+        log(f"{name}: webbed hands; {len(info)} islands, {len(ob.data.polygons)} tris")
     me = ob.data
 
     # per-face island id (the texture pass reads it back as part_id) and the island table
