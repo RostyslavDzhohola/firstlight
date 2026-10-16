@@ -150,6 +150,9 @@ design-round meshes (static, unrigged, one palette atlas, the weapon modelled in
 - **Budgets:** 10,425 and 11,759 tris, 65 joints, 1 skinned mesh, 1024² + 512² sets.
 - **Sockets:** per model (crown, face, back and belt points; hats and masks drawn 2.2–2.4× for the big
   heads). Kappa B's back socket sits on the shell, Unit 7 B's behind the radio pack.
+- **Riding:** their legs are too short for the stirrups, so the horse's stirrup bones move to them: by
+  the difference between where their soles rest in the ride pose and where their original look's do
+  (D-chars-4); `?horses&looks` shows Kappa and Unit 7 in both looks on horseback.
 
 ## Approval renders (Phase A, 2026-10-15) and what is still rough
 

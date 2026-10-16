@@ -256,15 +256,17 @@ the `.blend` files were never opened):
 
 Our own work in this file (CC BY 4.0, "FIRSTLIGHT contributors"): the saddle seat with pommel and cantle,
 the blanket, straps and stirrups (428 triangles, skinned to the Torso bone and fitted to the barrel by
-ray casts), the blanket's role in the mask, and the `saddle` rider socket. The riding pose is generated in
+ray casts), the blanket's role in the mask, the `saddle` rider socket, and (2026-10-16) two
+`Stirrup.L`/`Stirrup.R` bones under the Torso carrying the treads and the straps' lower ends, so the
+client moves the stirrups to a rider's legs (the clips' sampled stirrup tracks are dropped on load). The riding pose is generated in
 code from the UAL idle clip (`apps/client/src/render/avatars/ride.ts`, MIT); the box horse fallback is in
 code too (`apps/client/src/render/Horses.ts`, MIT).
 
-Shipped output (2026-10-11 build):
+Shipped output (2026-10-16 build; archive re-downloaded and hash-checked):
 
 | File | Bytes | SHA-256 (first 16) | Contents |
 |---|---|---|---|
-| `horse.glb` | 147,072 | `615314bc14b2af1a` | 1,118 tris, 39 joints, 1 skinned mesh, `saddle` node, 4 clips |
+| `horse.glb` | 151,572 | `7fbe9f5b5793eec9` | 1,118 tris, 41 joints (39 + 2 stirrups), 1 skinned mesh, `saddle` node, 4 clips |
 
 IP line: a generic farm horse with a plain saddle; no franchise names, brands or look-alike tack.
 

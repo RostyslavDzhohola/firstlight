@@ -49,7 +49,8 @@ async function load(): Promise<HorseAssets> {
   });
   const clips = new Map<string, THREE.AnimationClip>();
   for (const c of gltf.animations) {
-    c.tracks = c.tracks.filter((t) => !t.name.endsWith(".scale")); // constant 1 in the source
+    // scale: constant 1 in the source; the stirrups: sampled rest, and the rider's fit moves them
+    c.tracks = c.tracks.filter((t) => !t.name.endsWith(".scale") && !t.name.startsWith("Stirrup"));
     clips.set(c.name, c);
   }
   loaded = { scene: gltf.scene, clips };
@@ -127,6 +128,8 @@ const _fwd = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 const _cam = new THREE.Vector3();
+const _off = new THREE.Vector3();
+const _zero = new THREE.Vector3();
 
 type Lod = "full" | "mid" | "far";
 
@@ -154,6 +157,9 @@ export class HorseView {
   private pendingDt = 0;
   private midTimer = 0;
   private disposed = false;
+  /** The stirrup bones (horse.glb ≥ 2026-10-16), their rest, and model-space axes in parent space. */
+  private stirrups: { bone: THREE.Object3D; rest: THREE.Vector3; toParent: THREE.Matrix3; side: number }[] = [];
+  private stirrupFit = new THREE.Vector3();
 
   constructor(coat: number) {
     this.coat = coatIndex(coat);
@@ -211,6 +217,20 @@ export class HorseView {
     return out.copy(this.root.position).addScaledVector(_up.copy(this.root.position).normalize(), HORSE.seatHeight);
   }
 
+  /**
+   * Fit the stirrups to a rider: `fit` moves both treads (and the straps' lower ends) in the horse's
+   * frame, metres: x outwards (mirrored per side), y up, z forwards. null puts them back.
+   */
+  setStirrupFit(fit: THREE.Vector3 | null) {
+    const f = fit ?? _zero;
+    if (f.equals(this.stirrupFit)) return;
+    this.stirrupFit.copy(f);
+    for (const s of this.stirrups) {
+      _off.set(f.x * s.side, f.y, f.z).applyMatrix3(s.toParent);
+      s.bone.position.copy(s.rest).add(_off);
+    }
+  }
+
   /** Explicit detail (warm-up): true = every-frame animation with shadows. */
   setDetail(full: boolean) {
     this.manualDetail = true;
@@ -259,6 +279,19 @@ export class HorseView {
       if (o.name === "saddle") this.saddle = o;
     });
     this.model = model;
+    // stirrups: model-space offsets -> each bone's parent space, measured at rest (before any clip)
+    model.updateMatrixWorld(true);
+    const toModel = new THREE.Matrix4().copy(model.matrixWorld).invert();
+    this.stirrups = [];
+    for (const [name, side] of [["StirrupL", 1], ["StirrupR", -1]] as const) {
+      const bone = model.getObjectByName(name);
+      if (!bone?.parent) continue;
+      const parentInModel = new THREE.Matrix4().multiplyMatrices(toModel, bone.parent.matrixWorld);
+      this.stirrups.push({ bone, rest: bone.position.clone(), toParent: new THREE.Matrix3().setFromMatrix4(parentInModel.invert()), side });
+    }
+    const fit = this.stirrupFit.clone();
+    this.stirrupFit.set(0, 0, 0);
+    this.setStirrupFit(fit);
     this.root.add(model);
     this.mixer = new THREE.AnimationMixer(model);
     for (const [name, clip] of a.clips) {
