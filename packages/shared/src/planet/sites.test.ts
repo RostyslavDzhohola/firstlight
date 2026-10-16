@@ -418,11 +418,11 @@ describe("the walled outposts and the natural solids (D-b2-1 with D-solid-1)", (
         for (const m of [wall.radius - 1.4, wall.radius + 1.4]) clear(Math.sin(r) * m, Math.cos(r) * m, `beside the ring at ${((r * 180) / Math.PI).toFixed(1)}°`);
       }
       // Every path's centre line.
-      for (const pa of site.paths) {
+      for (const [k, pa] of site.paths.entries()) {
         for (let i = 0; i + 1 < pa.pts.length; i++) {
           const [e0, n0] = pa.pts[i]!, [e1, n1] = pa.pts[i + 1]!;
           const n = Math.max(1, Math.ceil(Math.hypot(e1 - e0, n1 - n0) / 0.5));
-          for (let j = 0; j <= n; j++) clear(e0 + ((e1 - e0) * j) / n, n0 + ((n1 - n0) * j) / n, `path ${pa.name}`);
+          for (let j = 0; j <= n; j++) clear(e0 + ((e1 - e0) * j) / n, n0 + ((n1 - n0) * j) / n, `path ${k}`);
         }
       }
       // The shop: from the pad up to 2.5 m in front of the keeper, and round the keeper's spot.

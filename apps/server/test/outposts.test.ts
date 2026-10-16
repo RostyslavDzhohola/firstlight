@@ -12,7 +12,9 @@
 // happen there.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { BODIES, type BodyId } from "@firstlight/shared";
+import { BODIES, isSafe, type BodyId } from "@firstlight/shared";
+import { ANIM, PF } from "@firstlight/shared/net/schema";
+import { deepWater, SWIM_FLOAT } from "@firstlight/shared/planet/water";
 import { bossArena, walk } from "@firstlight/shared/content/arenas";
 import { NPC_DEFS, NPC_INDEX } from "@firstlight/shared/content/npcs";
 import { OUTPOSTS, type OutpostBody } from "@firstlight/shared/content/padOutposts";
@@ -177,6 +179,45 @@ describe("pad outposts in the real movement path (D44)", () => {
     const p = Q.me(b);
     const l = Math.hypot(p.x, p.y, p.z);
     expect(l - R("arcadia") - Q.terrain("arcadia").groundHeight(p.x / l, p.y / l, p.z / l)).toBeGreaterThan(0.8);
+  });
+
+  it("a swimmer can't pass through a sea wall (Arcadia 280°, Meridian 95°): every step into it is refused, the swimmer stays outside", async () => {
+    for (const [body, bearing] of [["arcadia", 280], ["meridian", 95]] as const) {
+      const b = await Q.bot(`outpost_swimmer_${body}`, body, "admin");
+      b.send("admin", { cmd: "unprotect" });
+      const wall = OUTPOSTS[body].wall;
+      const water = BODIES[body].waterLevel;
+      const r = (bearing * Math.PI) / 180;
+      // Feet where a swimmer floats, `m` metres from pad 0 on the bearing (the water is deep there).
+      const swimAt = (m: number): V3 => {
+        const d = siteDir(anchor(body), Math.sin(r) * m, Math.cos(r) * m, R(body));
+        expect(deepWater(Q.terrain(body).groundHeight(d[0], d[1], d[2]), water), `${body} deep at ${m.toFixed(1)} m`).toBe(true);
+        const l = R(body) + water - SWIM_FLOAT;
+        return [d[0] * l, d[1] * l, d[2] * l];
+      };
+      await Q.tpAndWait(b, swimAt(wall.radius + 4));
+      let corrections = 0;
+      const off = b.room.onMessage("correct", () => corrections++);
+      let seq = (Q.me(b).seq ?? 0) + 100;
+      const fd = swimAt(wall.radius - 4);
+      // 0.1 m every 50 ms (2 m/s, swim pace) straight in through the wall to 4 m inside.
+      for (let k = 1; k <= 80; k++) {
+        const p = swimAt(wall.radius + 4 - k * 0.1);
+        const f = [fd[0] - p[0], fd[1] - p[1], fd[2] - p[2]], fl = Math.hypot(f[0]!, f[1]!, f[2]!);
+        b.send("input", { seq: ++seq, x: p[0], y: p[1], z: p[2], fx: f[0]! / fl, fy: f[1]! / fl, fz: f[2]! / fl, anim: ANIM.SWIM, t: Date.now() });
+        await Q.sleep(50);
+      }
+      await Q.until(`${body}: the last input handled`, () => (Q.me(b).seq ?? 0) >= seq - 1); // the last one is refused
+      await Q.sleep(200);
+      off();
+      const me = Q.me(b);
+      expect(me.flags & PF.SWIMMING, `${body}: swimming`).toBeTruthy();
+      const [e, n] = coords(body, me);
+      expect(corrections, `${body}: refused`).toBeGreaterThan(0);
+      expect(Math.hypot(e, n), `${body}: still outside the wall`).toBeGreaterThan(wall.radius + 0.4);
+      expect(isSafe(BODIES[body], me.x, me.y, me.z), `${body}: not in the safe zone`).toBe(false);
+      expect(walls(body).footing(me.x, me.y, me.z, PLAYER_BODY.step).inside, `${body}: not inside the wall`).toBe(false);
+    }
   });
 
   it("a save at the centre of Meridian's Waystation Nine joins outside it, and the real controller gets no correction loop", async () => {

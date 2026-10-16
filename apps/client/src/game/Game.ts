@@ -4,7 +4,7 @@ import { listenHuntTargets } from "./huntTargets.ts";
 // portals, piles, HUD and the main loop.
 
 import * as THREE from "three/webgpu";
-import { BODIES, CAMERA_SOLID_RADIUS, natureSolids, padDirs, type BodyId, type NatureSolids } from "@firstlight/shared";
+import { BODIES, CAMERA_SOLID_KINDS, natureSolids, padDirs, type BodyId, type NatureSolids } from "@firstlight/shared";
 import { config, flags } from "../config.ts";
 import { Net, TravelRedirect, type Snapshot } from "../net/Net.ts";
 import { AvatarView, avatarWarmupHook, preloadAvatars } from "../render/Avatars.ts";
@@ -428,7 +428,7 @@ export class Game {
     this.player.setNature({
       resolve: (pos, out) => nature.resolve(pos, out),
       raycast: (o, d, maxT) => nature.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT),
-      cameraRay: (o, d, maxT) => nature.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT, CAMERA_SOLID_RADIUS),
+      cameraRay: (o, d, maxT) => nature.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT, CAMERA_SOLID_KINDS),
     });
     this.portals = new Portals(this.ctx.scene, body, this.planet.terrain);
     this.audio.setMusic(body);

@@ -148,8 +148,12 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
   // final Opus N-B1). Every check below is written so that NaN fails it.
   if (!(len >= w.radius * 0.5) || !Number.isFinite(len) || !Number.isFinite(terrain)) return { ok: false, reason: "ground" };
   const swimming = swimmingAt(w, len, terrain);
-  // Intact props are solid and standable (F12): their tops count as ground; their insides don't.
-  const foot = swimming ? null : (w.footing?.(m.x, m.y, m.z, MOVE.groundedAbove) ?? null);
+  // Intact props, structures and natural solids are solid (F12, D38, D-solid-1); out of the water
+  // their tops count as ground too. A swimmer is solid-checked the same (a sea wall stops a swimmer
+  // as a land wall stops a walker, D-b2-1, Codex review): swimming only changes the ground rules.
+  const touch = w.footing?.(m.x, m.y, m.z, MOVE.groundedAbove) ?? null;
+  const inside = touch?.inside ?? false;
+  const foot = swimming ? null : touch;
   const ground = foot && foot.top > 0 ? Math.max(terrain, foot.top - w.radius) : terrain;
   const above = len - w.radius - ground;
   // Held up by a prop top that the terrain alone wouldn't hold (read now: `foot` is a reused object).
@@ -178,10 +182,12 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
 
   // Below the ground, deeper in a lake than swimmers float, or inside a solid prop.
   if (!swimming && (!(above >= -MOVE.groundTolerance) || (deepWater(terrain, w.waterLevel) && len - w.radius < w.waterLevel - MOVE.swimDepthSlack))) return { ok: false, reason: "ground" };
-  // Walking into a prop is refused; a body that was put inside one (teleport, a rebuild) may walk out.
-  if (foot?.inside && !w.footing!(a.lastX, a.lastY, a.lastZ, MOVE.groundedAbove).inside) return { ok: false, reason: "prop" };
-  // ...and so is a step whose path goes through one with both ends outside (a thin fence; F12 final S2).
-  if (!swimming && w.crosses?.(a.lastX, a.lastY, a.lastZ, m.x, m.y, m.z)) return { ok: false, reason: "prop" };
+  // Walking (or swimming) into a solid is refused; a body that was put inside one (teleport, a
+  // rebuild) may walk out.
+  if (inside && !w.footing!(a.lastX, a.lastY, a.lastZ, MOVE.groundedAbove).inside) return { ok: false, reason: "prop" };
+  // ...and so is a step whose path goes through one with both ends outside (a thin fence, F12 final
+  // S2; a sea wall at swimming depth).
+  if (w.crosses?.(a.lastX, a.lastY, a.lastZ, m.x, m.y, m.z)) return { ok: false, reason: "prop" };
   const grounded = swimming || above <= MOVE.groundedAbove;
   if (!grounded && !(len <= airCeiling(a, now))) return { ok: false, reason: "height" };
   if (grounded && onPropTop && !reachesTop(a, w, ground, len, now)) return { ok: false, reason: "height" };

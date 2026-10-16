@@ -38,8 +38,12 @@ export const SOLID_MAX_HEIGHT = 5;
 /** A solid reaches at most this far (m) below its base (chunkSolids), and this much below the lowest ground round it. */
 const SOLID_MAX_SINK = 4;
 const SINK_SLACK = 0.15;
-/** Natural solids at least this wide stop the camera (boulders, spires); trunks don't. */
-export const CAMERA_SOLID_RADIUS = 1.2;
+/**
+ * Natural solids of these kinds stop the camera, whatever their size: boulders and spires (a lens
+ * inside one shows its inside); tree trunks don't, nor the small rocks (Codex review: a 1.2 m width
+ * cut let a 1.12 m Meridian spire swallow the lens).
+ */
+export const CAMERA_SOLID_KINDS: ReadonlySet<PropKind> = new Set<PropKind>(["boulder", "spire"]);
 
 const always = () => true;
 type Collider = BreakableCollider<NatureSolid>;
@@ -104,8 +108,8 @@ export class NatureSolids {
   private readonly supportBody = { radius: 0, step: 0 };
   /** raycast()'s size filter (no closure per call). */
   private rayList: readonly NatureSolid[] = [];
-  private rayMin = 0;
-  private readonly wideEnough = (j: number) => this.rayList[j]!.hx >= this.rayMin;
+  private rayKinds: ReadonlySet<PropKind> | null = null;
+  private readonly ofKind = (j: number) => this.rayKinds!.has(this.rayList[j]!.kind);
   /** Solids built so far (all chunks), and chunks built. */
   solidCount = 0;
   builtChunks = 0;
@@ -264,17 +268,17 @@ export class NatureSolids {
   }
 
   /**
-   * Distance along a ray (unit d) to the first solid at least `minRadius` wide within `maxT`, or
-   * Infinity (the camera: CAMERA_SOLID_RADIUS keeps it off boulders and spires, not trunks).
+   * Distance along a ray (unit d) to the first solid within `maxT` (of one of `kinds`, if given), or
+   * Infinity (the camera: CAMERA_SOLID_KINDS keeps it off boulders and spires, not trunks).
    */
-  raycast(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number, minRadius = 0): number {
+  raycast(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number, kinds: ReadonlySet<PropKind> | null = null): number {
     const n = this.gather(ox + dx * maxT * 0.5, oy + dy * maxT * 0.5, oz + dz * maxT * 0.5, maxT * 0.5 + MAX_SOLID_RADIUS);
     let best = Infinity;
     for (let i = 0; i < n; i++) {
       const c = this.cols[i]!;
       this.rayList = c.list;
-      this.rayMin = minRadius;
-      const t = c.raycast(ox, oy, oz, dx, dy, dz, Math.min(maxT, best), minRadius > 0 ? this.wideEnough : always);
+      this.rayKinds = kinds;
+      const t = c.raycast(ox, oy, oz, dx, dy, dz, Math.min(maxT, best), kinds ? this.ofKind : always);
       if (t < best) best = t;
     }
     return best;

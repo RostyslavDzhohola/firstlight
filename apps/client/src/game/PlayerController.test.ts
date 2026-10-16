@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three/webgpu";
-import { BODIES, createTerrain, natureSolids, padDirs, portalSpots, type Breakable, type Terrain } from "@firstlight/shared";
+import { BODIES, CAMERA_SOLID_KINDS, createTerrain, natureSolids, padDirs, portalSpots, type Breakable, type Terrain } from "@firstlight/shared";
 import { OUTPOSTS } from "@firstlight/shared/content/padOutposts";
 import { outpostAnchor, siteDir } from "@firstlight/shared/planet/sites";
 import { structureCollider, townCoords, townDir } from "@firstlight/shared/planet/town";
@@ -532,5 +532,40 @@ describe("the walled outposts' rings and the controller (D-b2-1 with D-solid-1)"
     expect(r.crossed, "crossed the ring").toBe(false);
     expect(r.inside, "frames ending inside a wall").toBe(0);
     if (deep) expect(r.swam, "swam up to the sea wall").toBe(true);
+  });
+});
+
+describe("the camera and the natural solids (D-solid-1)", () => {
+  it("keeps the lens out of a narrow spire behind the player (Meridian, Codex review: a 1.12 m spire)", () => {
+    const t = createTerrain("meridian");
+    const R = BODIES.meridian.radius;
+    const nature = natureSolids(t);
+    const town = structureCollider(t)!;
+    const pc = new PlayerController(t, BODIES.meridian.waterLevel);
+    // As Game.ts wires it.
+    pc.setStructures({ resolve: (q, out) => town.resolve(q, out), raycast: (o, d, maxT) => town.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT) });
+    pc.setNature({
+      resolve: (q, out) => nature.resolve(q, out),
+      raycast: (o, d, maxT) => nature.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT),
+      cameraRay: (o, d, maxT) => nature.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT, CAMERA_SOLID_KINDS),
+    });
+    const spire = new THREE.Vector3(712.159807, -306.296582, -641.746933);
+    const at = new THREE.Vector3(714.443786, -307.27891, -638.354083);
+    pc.teleport(at.x, at.y, at.z);
+    run(pc, fakeInput(), 0.3);
+    // Facing away from the spire: it stands behind, where the camera goes.
+    const up = pc.pos.clone().normalize();
+    const away = pc.pos.clone().sub(spire);
+    (pc as unknown as { camForward: THREE.Vector3 }).camForward.copy(away.addScaledVector(up, -away.dot(up)).normalize());
+    const cam = new THREE.PerspectiveCamera();
+    for (let i = 0; i < 10; i++) pc.placeCamera(cam);
+    const head = pc.pos.clone().addScaledVector(up, 1.65);
+    const v = cam.position.clone().sub(head);
+    const l = v.length();
+    v.divideScalar(l);
+    // The spire is on the camera's line, further out than where the lens now sits.
+    const hit = nature.raycast(head.x, head.y, head.z, v.x, v.y, v.z, 8, CAMERA_SOLID_KINDS);
+    expect(hit, "the spire is behind the head").toBeLessThan(5);
+    expect(hit - l, "the lens stays short of the spire").toBeGreaterThan(0.15);
   });
 });
