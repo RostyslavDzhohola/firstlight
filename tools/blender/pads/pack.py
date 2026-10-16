@@ -77,7 +77,7 @@ if BODY in ("arcadia", "hollowmere"):
             # Hollowmere's windows carry the dusk: candle-warm, always lit (the glow mode), not just at night.
             SLOTS.append(slot(name, LAYER_INDEX["white"], lin(0xb06a30), 0.2, 0.0, 0.0, glow=1.0))
             continue
-        SLOTS.append(slot(name, LAYER_INDEX[layer], tint, rough, metal, nscale, emis, night, cut))
+        SLOTS.append(slot(name, LAYER_INDEX[layer], tint, rough, metal, nscale, emis, night, cut, glow=1.0 if name in PP.GLOW_SLOTS else 0.0))
     W = LAYER_INDEX["white"]
     SLOTS += [
         slot("M_Brass", W, lin(0xc8902e), 0.45, 0.3, 0.0),
@@ -121,6 +121,11 @@ else:
         slot("M_GlowTeal", L["white"], GLOW["M_GlowTeal"], 0.5, 0.0, 0.0, glow=1.0),
         slot("M_GlowAmber", L["white"], GLOW["M_GlowAmber"], 0.5, 0.0, 0.0, glow=1.0),
     ]
+    # Round 2 vertex-colour pieces (Waystation Nine, the Opus gate): the Portus pack's OK_* slots.
+    for s_ in PP.SLOTS:
+        if s_[0].startswith("OK_"):
+            name, _layer, tint, rough, metal, nscale, emis, night, cut = s_
+            SLOTS.append(slot(name, L["white"], tint, rough, metal, nscale, emis, night, cut, glow=1.0 if name in PP.GLOW_SLOTS else 0.0))
 
 SLOT_INDEX = {s["name"]: i for i, s in enumerate(SLOTS)}
 # The Portus pack's helpers read these module globals: Part.cutout, parts_of, roof_lod, layer_images.
@@ -193,7 +198,7 @@ def main():
     layout = [dict(prefab=it["prefab"], east=it["east"], north=it["north"], yaw=it["yaw"], scale=it["scale"], base=it["base"],
                    label=it["label"]) for it in LAYOUT["layout"]]
     site = dict(body=BODY, prefabs=prefabs, layout=layout, paths=[dict(name=p["name"], width=p["width"], mat=p["mat"], pts=p["pts"]) for p in LAYOUT["paths"]],
-                pad=index[f"{b}_pad"], waystone=index[f"{b}_waystone"])
+                pad=index[f"{b}_pad"], waystone=index[f"{b}_waystone"], wall=LAYOUT["wall"], shop=LAYOUT["shop"])
     with open(os.path.join(PP.OUT, "site.json"), "w") as f:
         json.dump(site, f, indent=1)
     report["layers"] = [l[0] for l in LAYERS]

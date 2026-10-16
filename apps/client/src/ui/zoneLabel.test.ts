@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { BODIES, padDirs, zoneAt } from "@firstlight/shared";
 import { townDir } from "@firstlight/shared/planet/townFrame";
+import { padName } from "@firstlight/shared/content/places";
 import { zoneInfo } from "./zoneLabel.ts";
 
 const portus = (east: number, north: number) => {
@@ -20,10 +21,13 @@ describe("zone label (D-zones-1)", () => {
     expect(zoneInfo("portus", portus(5, 5), false)).toMatchObject({ zone: "danger", place: "In combat" });
   });
 
-  it("planets: a pad's ring by name, the wilds outside", () => {
-    const d = padDirs(BODIES.arcadia)[0]!;
-    const ring = zoneAt(BODIES.arcadia, d[0] * 501, d[1] * 501, d[2] * 501);
-    expect(zoneInfo("arcadia", ring, true)).toMatchObject({ zone: "safe", place: "Dawnpad pad ring" });
+  it("planets: the walled arrival outpost by its pad's name, other pads' rings by name, the wilds outside", () => {
+    const pads = padDirs(BODIES.arcadia);
+    const r = BODIES.arcadia.radius + 1;
+    const home = zoneAt(BODIES.arcadia, pads[0]![0] * r, pads[0]![1] * r, pads[0]![2] * r);
+    expect(zoneInfo("arcadia", home, true)).toMatchObject({ zone: "safe", place: "Dawnpad outpost" });
+    const ring = zoneAt(BODIES.arcadia, pads[1]![0] * r, pads[1]![1] * r, pads[1]![2] * r);
+    expect(zoneInfo("arcadia", ring, true)).toMatchObject({ zone: "safe", place: `${padName("arcadia", 1)} pad ring` });
     expect(zoneInfo("arcadia", { safe: false, kind: "wild", pad: -1 }, false)).toMatchObject({ zone: "danger", place: "The wilds" });
   });
 });

@@ -156,9 +156,12 @@ describe("structure sites: frames", () => {
         const g = t.groundHeight(p.ux, p.uy, p.uz);
         const base = Math.hypot(p.px, p.py, p.pz) - R;
         const pre = OUTPOSTS[b].prefabs[p.prefab]!;
-        // The boats float on the water; the docks' land end is on the shore.
+        // The boats float on the water; the docks' land end is on the shore. The outpost wall's pieces
+        // (round 2) stand on the highest ground under them, their foundations 4 m deep (design.py WALL_SKIRT).
         if (pre.name.endsWith("_skiff") || pre.name.endsWith("_rowboat")) continue;
-        expect(Math.abs(base - g), `${b} ${pre.name}`).toBeLessThan(pre.name.endsWith("_jetty") || pre.name.endsWith("_boardwalk") ? 1.6 : 1.2);
+        const ring = /_ring(wall|post|gate)$/.test(pre.name);
+        expect(Math.abs(base - g), `${b} ${pre.name}`).toBeLessThan(ring ? 3.9 : pre.name.endsWith("_jetty") || pre.name.endsWith("_boardwalk") ? 1.6 : 1.2);
+        if (ring) for (const sol of pre.solids) expect(sol[5], `${b} ${pre.name} foundation`).toBeLessThanOrEqual(-4);
       }
     }
   });
@@ -201,7 +204,13 @@ describe("structure sites: the outposts keep clear of everything authoritative",
       }
       for (let k = 0; k < 24; k++) {
         const ang = (k / 24) * Math.PI * 2;
-        for (const r of [2, 3.5, 6, 8]) expect(c.isClear(feet(Math.cos(ang) * r, Math.sin(ang) * r)), `${b} r ${r}`).toBe(true);
+        for (const r of [2, 3.5, 6, 8]) {
+          // The gate stands on the platform's north edge round the portal (8.5 m north): Meridian's
+          // gate A (round 2) has its pylons 2.35 m either side of it, reaching in to 7.65 m.
+          const e = Math.cos(ang) * r, n = Math.sin(ang) * r;
+          if (r === 8 && Math.hypot(e, n - 8.5) < 4.2) continue;
+          expect(c.isClear(feet(e, n)), `${b} r ${r}`).toBe(true);
+        }
       }
       expect(c.isClear(feet(4.5, -3))).toBe(true);
       // Walk from the spawn into the ring's disc (8.5 m north): no structure crossed.
@@ -282,7 +291,10 @@ describe("structure sites: the outposts keep clear of everything authoritative",
           }
         });
       }
-      const perches = tops.filter((u, i) => reach[i] && u.structure && u.top - u.ground > 1.6).map((u) => `${u.label} ${(u.top - u.ground).toFixed(2)} m`);
+      // Inside the outpost wall (D-b2-1) nobody fights, so a perch there can't keep a player out of an
+      // NPC's reach (design.py validate notes them); the wall itself, on the zone's edge, still counts.
+      const inWall = (u: Top) => Math.hypot(u.poly.reduce((a, q) => a + q[0], 0) / u.poly.length, u.poly.reduce((a, q) => a + q[1], 0) / u.poly.length) < OUTPOSTS[b].wall.radius - 1.5;
+      const perches = tops.filter((u, i) => reach[i] && u.structure && u.top - u.ground > 1.6 && !inWall(u)).map((u) => `${u.label} ${(u.top - u.ground).toFixed(2)} m`);
       expect(perches, b).toEqual([]);
     }
   });
@@ -301,8 +313,8 @@ describe("structure sites: the outposts keep clear of everything authoritative",
     }
   });
 
-  it("stops rays at walls: a shot through the barn, the chapel and the hangar hits them", () => {
-    const cases: [OutpostBody, string][] = [["arcadia", "a_barn"], ["hollowmere", "h_chapel"], ["meridian", "m_hangar"]];
+  it("stops rays at walls: a shot through the barn, the chapel and Waystation Nine hits them", () => {
+    const cases: [OutpostBody, string][] = [["arcadia", "a_barn"], ["hollowmere", "h_chapel"], ["meridian", "m_waystation"]];
     for (const [b, name] of cases) {
       const t = terrains.get(b)!;
       const pi = OUTPOSTS[b].prefabs.findIndex((p) => p.name === name);

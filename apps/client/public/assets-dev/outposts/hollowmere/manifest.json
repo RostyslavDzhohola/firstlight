@@ -1,11 +1,11 @@
 {
- "version": "6fec809202027bb3",
+ "version": "65c55d58c2eb6e8e",
  "body": "hollowmere",
  "files": {
   "glb": {
    "name": "hollowmere.glb",
-   "bytes": 230080,
-   "sha256": "09254a72cf231cff1ed404b3b3c6ee41a782c801356aa055f8c759ee7945967e"
+   "bytes": 360500,
+   "sha256": "259567ed0f95c20733c71009c51896a74f7c25f57c3fd5e8a4e6ba0fa3abb8d4"
   },
   "color": {
    "name": "../../portus/portus_color.webp",
@@ -507,6 +507,136 @@
    "glow": 0.0
   },
   {
+   "name": "OK_Matte",
+   "layer": 9,
+   "tint": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rough": 0.85,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "OK_Gloss",
+   "layer": 9,
+   "tint": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rough": 0.42,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "OK_Metal",
+   "layer": 9,
+   "tint": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rough": 0.35,
+   "metal": 0.1,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "OK_Glass",
+   "layer": 9,
+   "tint": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rough": 0.15,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    1.0,
+    0.72,
+    0.38,
+    0.85
+   ],
+   "cutout": false,
+   "glow": 0.0
+  },
+  {
+   "name": "OK_Glow",
+   "layer": 9,
+   "tint": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rough": 0.5,
+   "metal": 0.0,
+   "normal": 0.0,
+   "emissive": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "night": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "cutout": false,
+   "glow": 1.0
+  },
+  {
    "name": "M_Brass",
    "layer": 9,
    "tint": [
@@ -641,7 +771,7 @@
  "look": {
   "albedoFloor": 0.045
  },
- "prefabs": 16,
- "items": 36,
- "trianglesLod0": 11365
+ "prefabs": 20,
+ "items": 133,
+ "trianglesLod0": 21731
 }

@@ -33,8 +33,9 @@ const outpostAt: [number, number] = [0, 0];
  * paving, structures and trees kept clear (townGround.ts).
  * v5: the planets' pad-0 outposts (D42): their apron, paths, structures and trees kept clear
  * (outpostGround.ts).
+ * v6: round 2: the outposts' walls, gates, gate paths and new buildings kept clear too (D-b2-1).
  */
-export const PROPS_VERSION = 5;
+export const PROPS_VERSION = 6;
 
 /** Jitter range inside a candidate cell (fraction of the cell), and the face-edge margin. */
 export const PROP_JITTER_MIN = 0.15;

@@ -43,6 +43,16 @@ def _baked(me, **kw):
     return CV.bake_shading(me, **kw)
 
 
+def _drop_source_materials(mats):
+    """The Opus kit's own materials are only read for colours: remove them (or move their names out of
+    the way) so a host scene's material of the same name ("M_Portal") is never shadowed."""
+    for m in mats:
+        if m.users == 0:
+            bpy.data.materials.remove(m)
+        else:
+            m.name = "R2SRC_" + m.name
+
+
 # ------------------------------------------------------------------------------------------------
 # Portus market house (Opus A)
 # ------------------------------------------------------------------------------------------------
@@ -60,6 +70,7 @@ def house(w, d, variant, name, lod1=False):
     me = CV.flkit_to_mesh(B, name, skip=skip)
     for ob in list(B.objs):
         bpy.data.objects.remove(ob)
+    _drop_source_materials(mats)
     return _baked(me, seed=variant)
 
 
@@ -80,6 +91,7 @@ def gate_a(world, name, dais=True):
     me = CV.flkit_to_mesh(B, name, skip=skip)
     for ob in list(B.objs):
         bpy.data.objects.remove(ob)
+    _drop_source_materials(mats)
     return _baked(me, seed=3)
 
 
@@ -95,6 +107,7 @@ def waystation(name):
     me = CV.flkit_to_mesh(B, name)
     for ob in list(B.objs):
         bpy.data.objects.remove(ob)
+    _drop_source_materials(mats)
     return _baked(me, seed=9)
 
 

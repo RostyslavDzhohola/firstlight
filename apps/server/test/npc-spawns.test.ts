@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { OUTPOSTS } from "@firstlight/shared/content/padOutposts";
 import { BODIES, createTerrain, nearSafeZone, padDirs, tangentFrame, TOWN_GATES, type Dir } from "@firstlight/shared";
 import { bossArena, walk } from "@firstlight/shared/content/arenas";
 import { ARRIVAL_GROUPS, NPC_DEFS, NPC_RULES, PORTUS_WILDS } from "@firstlight/shared/content/npcs";
@@ -71,7 +72,7 @@ describe("Portus outside the town walls (D-zones-1)", () => {
 });
 
 describe("creeps near each planet's arrival pad (D-zones-2)", () => {
-  it.each(["arcadia", "hollowmere", "meridian"] as const)("%s: a herd within 50 m and a weakest-level hostile pack within 72 m, ahead of the arrival camera", (body) => {
+  it.each(["arcadia", "hollowmere", "meridian"] as const)("%s: a herd within 50 m (20 m past the outpost wall) and a weakest-level hostile pack within 72 m (32 m past it), ahead of the arrival camera", (body) => {
     const terrain = createTerrain(body);
     const def = BODIES[body];
     const R = def.radius;
@@ -84,11 +85,33 @@ describe("creeps near each planet's arrival pad (D-zones-2)", () => {
     const points = buildSpawnPoints(terrain, bossArena(terrain));
     const hostile = (p: (typeof points)[number]) => p.members.some((m) => NPC_DEFS[m.def]!.temper === "hostile");
     const ahead = (p: (typeof points)[number]) => Math.abs(bearing(p.dir)) <= 70;
-    const herd = points.filter((p) => !hostile(p) && ahead(p) && distance(p.dir, pad, R) < 50);
-    const pack = points.filter((p) => hostile(p) && ahead(p) && distance(p.dir, pad, R) < 72);
+    // Outside the walled outpost (D-b2-1): the herd just past the wall, the pack a little further.
+    const wall = OUTPOSTS[body].wall.radius;
+    const herd = points.filter((p) => !hostile(p) && ahead(p) && distance(p.dir, pad, R) < Math.max(50, wall + 20));
+    const pack = points.filter((p) => hostile(p) && ahead(p) && distance(p.dir, pad, R) < Math.max(72, wall + 32));
     expect(herd.length, "herd").toBeGreaterThan(0);
     expect(pack.length, "pack").toBeGreaterThan(0);
     expect(Math.min(...pack.flatMap((p) => p.members.map((m) => m.level)))).toBe(def.levels[0]);
     for (const g of ARRIVAL_GROUPS[body]) expect(g.members.every((m) => m.level <= def.levels[0])).toBe(true);
+  });
+});
+
+describe("the walled arrival outposts (D-b2-1)", () => {
+  it.each(["arcadia", "hollowmere", "meridian"] as const)("%s: every group starts outside the outpost's walls with the NPC margin to spare", (body) => {
+    const terrain = createTerrain(body);
+    const def = BODIES[body];
+    const R = def.radius;
+    const pad = padDirs(def)[0]!;
+    let near = 0;
+    for (const p of buildSpawnPoints(terrain, bossArena(terrain))) {
+      for (const m of p.members) {
+        const q = walk(p.dir, p.t1, m.a, p.t2, m.b, R);
+        const r = R + terrain.groundHeight(q[0], q[1], q[2]);
+        expect(nearSafeZone(def, q[0] * r, q[1] * r, q[2] * r, NPC_RULES.safeMargin + NPC_DEFS[m.def]!.radius), `${body} group ${p.id}`).toBe(false);
+        if (distance(q, pad, R) < OUTPOSTS[body].wall.radius + 40) near++;
+      }
+    }
+    // ...and there are still creeps within a short walk of the gates.
+    expect(near, body).toBeGreaterThan(0);
   });
 });

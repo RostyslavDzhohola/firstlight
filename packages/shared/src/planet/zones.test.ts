@@ -7,7 +7,9 @@ import { padDirs, PAD_SAFE_RADIUS } from "./pads.ts";
 import { portalSpots } from "./portals.ts";
 import { createTerrain } from "./terrain.ts";
 import { townCoords, townDir } from "./townFrame.ts";
-import { inTownSafe, isSafe, nearestSafeEntry, nearSafeZone, safePadAt, TOWN_GATES, TOWN_SAFE, zoneAt } from "./zones.ts";
+import { inTownSafe, inWalledZone, isSafe, nearestSafeEntry, nearSafeZone, protectsAtOnce, safeGates, safePadAt, TOWN_GATES, TOWN_SAFE, zoneAt } from "./zones.ts";
+import { OUTPOSTS, type OutpostBody } from "../content/padOutposts.ts";
+import { siteAnchor, siteDir } from "./townFrame.ts";
 
 const P = BODIES.portus;
 const R = P.radius;
@@ -109,28 +111,61 @@ describe("Portus: the castle town is safe, outside the walls is wild (D-zones-1)
   });
 });
 
-describe("planets: 12 m pad rings (D15), unchanged", () => {
-  it.each(["arcadia", "hollowmere", "meridian"] as const)("%s", (id) => {
+describe("planets: 12 m pad rings (D15) and the walled arrival outpost round pad 0 (D-b2-1)", () => {
+  /** A point `m` metres from pad 0 at `bearing` degrees (north toward east) in the outpost's frame. */
+  const fromPad0 = (id: OutpostBody, bearing: number, m: number, lift = 0): [number, number, number] => {
+    const body = BODIES[id];
+    const a = siteAnchor(padDirs(body)[0]!);
+    const b = (bearing * Math.PI) / 180;
+    const d = siteDir(a, Math.sin(b) * m, Math.cos(b) * m, body.radius);
+    const r = body.radius + lift;
+    return [d[0] * r, d[1] * r, d[2] * r];
+  };
+
+  it.each(["arcadia", "hollowmere", "meridian"] as const)("%s: the other pads keep their 12 m rings", (id) => {
     const body = BODIES[id];
     const pads = padDirs(body);
     pads.forEach((d, i) => {
+      if (i === 0) return;
       const r = body.radius + 3;
       expect(zoneAt(body, d[0] * r, d[1] * r, d[2] * r)).toEqual({ safe: true, kind: "pad", pad: i });
     });
-    // 12.5 m from pad 0 along any tangent is outside its ring (and no other pad is that close).
-    const d = pads[0]!;
-    const t = Math.abs(d[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
-    const k = t[0]! * d[0] + t[1]! * d[1] + t[2]! * d[2];
-    const tx = t[0]! - k * d[0], ty = t[1]! - k * d[1], tz = t[2]! - k * d[2];
-    const tl = Math.hypot(tx, ty, tz);
-    const p = (m: number) => {
-      const v = [d[0] + (tx / tl) * (m / body.radius), d[1] + (ty / tl) * (m / body.radius), d[2] + (tz / tl) * (m / body.radius)];
-      const l = Math.hypot(v[0]!, v[1]!, v[2]!);
-      return [(v[0]! / l) * body.radius, (v[1]! / l) * body.radius, (v[2]! / l) * body.radius] as [number, number, number];
-    };
-    expect(isSafe(body, ...p(PAD_SAFE_RADIUS - 0.5))).toBe(true);
-    expect(zoneAt(body, ...p(PAD_SAFE_RADIUS + 0.5))).toEqual({ safe: false, kind: "wild", pad: -1 });
-    expect(nearSafeZone(body, ...p(PAD_SAFE_RADIUS + 2), 3)).toBe(true);
-    expect(nearestSafeEntry(body, ...p(40)).edge).toBe(PAD_SAFE_RADIUS);
+  });
+
+  it.each(["arcadia", "hollowmere", "meridian"] as const)("%s: inside the wall ring is safe at once, outside is wild; the gates are the way in", (id) => {
+    const body = BODIES[id];
+    const wall = OUTPOSTS[id].wall;
+    expect(wall.radius).toBeGreaterThan(PAD_SAFE_RADIUS + 15);
+    expect(wall.gates.length).toBeGreaterThanOrEqual(2);
+    const d0 = padDirs(body)[0]!;
+    const r = body.radius + 3;
+    // Pad 0's ring is inside: the outpost's zone (its `pad` still names the ring you stand in).
+    expect(zoneAt(body, d0[0] * r, d0[1] * r, d0[2] * r)).toEqual({ safe: true, kind: "outpost", pad: 0 });
+    for (let b = 0; b < 360; b += 15) {
+      expect(zoneAt(body, ...fromPad0(id, b, PAD_SAFE_RADIUS + 3))).toEqual({ safe: true, kind: "outpost", pad: -1 });
+      expect(isSafe(body, ...fromPad0(id, b, wall.radius - 0.5))).toBe(true);
+      expect(inWalledZone(body, ...fromPad0(id, b, wall.radius - 0.5))).toBe(true);
+      expect(zoneAt(body, ...fromPad0(id, b, wall.radius + 0.5))).toEqual({ safe: false, kind: "wild", pad: -1 });
+      expect(nearSafeZone(body, ...fromPad0(id, b, wall.radius + 2), 3)).toBe(true);
+      expect(nearSafeZone(body, ...fromPad0(id, b, wall.radius + 4), 3)).toBe(false);
+    }
+    expect(protectsAtOnce("outpost")).toBe(true);
+    expect(protectsAtOnce("pad")).toBe(false);
+    // The portal home, the guide and the shop's keeper stand inside.
+    const terrain = createTerrain(id);
+    for (const s of portalSpots(body, terrain)) expect(zoneAt(body, ...s.center).kind).toBe("outpost");
+    const [se, sn] = OUTPOSTS[id].shop.at;
+    expect(Math.hypot(se, sn)).toBeLessThan(wall.radius - 3);
+    // Outside, the compass points at the nearest gate (edge 0: the border runs through it).
+    for (const g of wall.gates) {
+      const entry = nearestSafeEntry(body, ...fromPad0(id, g, wall.radius + 20));
+      const want = safeGates(body)[wall.gates.indexOf(g)]!;
+      expect(entry.edge).toBe(0);
+      expect(Math.hypot(entry.dir[0] - want[0], entry.dir[1] - want[1], entry.dir[2] - want[2])).toBeLessThan(1e-9);
+    }
+  });
+
+  it("Portus' gates are its safe gates", () => {
+    expect(safeGates(P)).toBe(TOWN_GATES);
   });
 });

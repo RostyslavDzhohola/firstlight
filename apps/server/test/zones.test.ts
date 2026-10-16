@@ -5,7 +5,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Room } from "@colyseus/sdk";
 import { BODIES, nearSafeZone, padDirs, tangentFrame, zoneAt, type BodyId } from "@firstlight/shared";
-import { townDir } from "@firstlight/shared/planet/townFrame";
+import { siteAnchor, siteDir, townDir } from "@firstlight/shared/planet/townFrame";
+import { OUTPOSTS, type OutpostBody } from "@firstlight/shared/content/padOutposts";
 import { NF, NPC_DEFS, NPC_RULES } from "@firstlight/shared/content/npcs";
 import { STARTERS, WEAPON_BY_ID, WEAPON_INDEX } from "@firstlight/shared/content/weapons";
 import { PF } from "@firstlight/shared/net/schema";
@@ -287,11 +288,19 @@ describe("Portus after the deploy (D-zones-1)", () => {
 });
 
 describe("every starter's weapon on every body: refused in a safe zone, fired outside (item 2)", () => {
+  /** 8 m out through the planet's south gate (round 2: the outposts are walled, D-b2-1). */
+  const outGate = (body: OutpostBody): V => {
+    const wall = OUTPOSTS[body].wall;
+    const g = (wall.gates[2]! * Math.PI) / 180;
+    const R = BODIES[body].radius;
+    const d = siteDir(siteAnchor(padDirs(BODIES[body])[0]!), Math.sin(g) * (wall.radius + 8), Math.cos(g) * (wall.radius + 8), R);
+    return [d[0] * R, d[1] * R, d[2] * R];
+  };
   const OUTSIDE: Record<BodyId, () => V> = {
     portus: () => town(56, -4),
-    arcadia: () => ahead("arcadia", 30),
-    hollowmere: () => ahead("hollowmere", 30),
-    meridian: () => ahead("meridian", 30),
+    arcadia: () => outGate("arcadia"),
+    hollowmere: () => outGate("hollowmere"),
+    meridian: () => outGate("meridian"),
   };
   for (const body of ["portus", "arcadia", "hollowmere", "meridian"] as const) {
     it(`${body}: Hexwick, Brother Ash, Kappa and Unit 7`, async () => {

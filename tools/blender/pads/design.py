@@ -1209,7 +1209,14 @@ def validate():
                     break
     perches = [t for i, t in enumerate(tops) if reach[i] and t["kind"] == "structure" and t["top"] - t["g"] > 1.6]
     for t in perches:
-        problems.append(f"PERCH: {t['label']} top {t['top'] - t['g']:.2f} m above the ground is reachable by jumping")
+        # Inside the outpost wall (round 2) nobody fights: a perch there can't keep a player out of an
+        # NPC's reach, so it is only noted. The wall itself (on the zone's edge) still counts.
+        ce = sum(q[0] for q in t["poly"]) / len(t["poly"]); cn = sum(q[1] for q in t["poly"]) / len(t["poly"])
+        msg = f"PERCH: {t['label']} top {t['top'] - t['g']:.2f} m above the ground is reachable by jumping"
+        if math.hypot(ce, cn) < WALL["radius"] - 1.5:
+            warns.append(msg + " (inside the outpost wall)")
+        else:
+            problems.append(msg)
     stats["low_tops_reachable"] = sorted({t["label"] for i, t in enumerate(tops) if reach[i] and t["kind"] == "structure"})
     for p_ in problems:
         log("PROBLEM", p_)
@@ -2249,8 +2256,290 @@ def layout_meridian():
     path("fuel", [(5.6, -8.6), (8.0, -12.4)], 2.0, mat="MI_RockTrim")
 
 # ============================================================================================
-# MAIN
+# Round 2 (2026-10-15, the owner's picks): walls round the outposts, the new gates, Waystation
+# Nine (Meridian), the stilt shelter (Hollowmere) and a shop stall in every outpost
 # ============================================================================================
+ROUND2 = os.path.abspath(os.path.join(HERE, "..", "round2"))
+if ROUND2 not in sys.path:
+    sys.path.insert(0, ROUND2)
+
+# The wall ring round pad 0 (radius to the wall's centre line) and its gates (bearings, degrees from
+# north toward east). Inside is the outpost's safe zone (packages/shared/src/planet/zones.ts).
+# Arcadia's farmstead across the pond (barn, windmill, haystacks) stays outside: its fields are wild.
+WALL = dict(
+    arcadia=dict(radius=32.0, gates=[359.0, 110.0, 180.0]),
+    hollowmere=dict(radius=42.0, gates=[330.0, 75.0, 195.0]),
+    meridian=dict(radius=48.0, gates=[5.0, 250.0, 185.0]),
+)[BODY]
+WALL_SEG = 4.2          # segment length along the ring
+WALL_H = 3.4            # wall top above its base
+WALL_T = 0.8            # thickness
+GATE_W = 7.0            # the gate prefab's length along the ring (opening 4.2 m)
+GATE_OPEN = 4.2
+WALL_SKIRT = 4.0        # the wall goes this far below its base (it stands on the highest ground under it)
+
+def keep_r2_colors(p, cls, note):
+    return finish(p, cls, note, keep_colors=True)
+
+def r2_mesh_prefab(name, me, cls, note, solids):
+    """A prefab from a round-2 vertex-colour mesh (pieces.py) with hand-authored solids."""
+    p = P.Prefab(name, lod=note)
+    p.parts.append((me, Matrix.Identity(4)))
+    for sol in solids:
+        (sbox if sol[0] == "box" else scyl)(name, *sol[1:])
+    return keep_r2_colors(p, cls, note)
+
+def build_round2_gate():
+    """Pad-0 portal gate (round 2): Arcadia and Hollowmere get Astra's pale stone arch (gate B, scaled
+    so the game's 2.2 m portal ring clears its piers), Meridian the Opus floating-arch gate (gate A,
+    without its dais: it stands on the platform's edge, toward Portus). Front -Y faces the pad."""
+    import pieces
+    name = f"{B}_gate"
+    if BODY == "meridian":
+        me = pieces.gate_a("portus", name + "_r2", dais=False)
+        me.transform(T(0, 0, -0.40))           # the pylons stand on the platform (no dais)
+        sol = [("box", sx * 2.35 - 0.75, -0.85, sx * 2.35 + 0.75, 0.85, 0, 4.7) for sx in (-1, 1)]
+        return r2_mesh_prefab(name, me, "static", "round 2 gate A (Opus) on the pad edge; the game draws the membrane", sol)
+    me = pieces.gate_b(name + "_r2")
+    # Piers: vertices between 0.6 and 3.0 m up, left and right of the centre line.
+    xs = [v.co.x for v in me.vertices if 0.6 < v.co.z < 3.0]
+    inner = min(abs(x) for x in xs if abs(x) > 0.5) if xs else 2.2
+    k = max(1.0, (2.2 + 0.16 + 0.25) / inner)
+    me.transform(Matrix.Diagonal((k, k, k, 1.0)))
+    piers = [v.co for v in me.vertices if 0.6 * k < v.co.z < 3.0 * k]
+    sol = []
+    for sx in (-1, 1):
+        side = [c for c in piers if c.x * sx > inner * k * 0.98]
+        if side:
+            sol.append(("box", min(c.x for c in side), min(c.y for c in side), max(c.x for c in side), max(c.y for c in side), 0, 5.0 * k))
+    # The plinth has no solid: it stands on the portal's base (0.2 m under the platform), its top a
+    # few centimetres over the deck, like the old gates' daises.
+    log(f"gate B: pier inner face {inner:.2f} m -> scale {k:.2f}")
+    return r2_mesh_prefab(name, me, "static", f"round 2 gate B (Astra), scale {k:.2f}; the game draws the ring", sol)
+
+def build_round2_buildings():
+    import pieces
+    if BODY == "meridian":
+        me = pieces.waystation("m_waystation_r2")
+        # outpost.py: the two-tier plinth (half 8.6 x 6.4 and 8.0 x 5.8 round y 0.4, steps in front), the
+        # drum (r 4.2 round (0, 0.6)), the canopy strut's foot, the spire, the sign, the tanks, the
+        # annex, bollards, planters and the holo post. The saucer and canopy are overhead.
+        ZP = 0.5
+        sol = [("box", -8.6, -6.0, 8.6, 6.8, 0, 0.26), ("box", -8.0, -5.4, 8.0, 6.2, 0, ZP),
+               ("cyl", 0, 0.6, 4.3, 0, 3.9), ("cyl", 0, -8.4, 0.5, 0, 2.4), ("cyl", -6.7, 2.6, 0.9, 0, 5.0),
+               ("box", 5.0, -5.2, 6.8, -4.0, 0, 6.9), ("box", -5.4, 3.7, -1.2, 6.7, 0, 2.6),
+               ("box", 2.9, 2.3, 7.1, 5.7, 0, 4.2), ("cyl", -5.6, -2.9, 0.8, 0, ZP + 0.55), ("cyl", 2.9, -3.6, 0.68, 0, ZP + 0.47),
+               ("cyl", -2.9, -4.2, 0.15, 0, ZP + 1.5)]
+        sol += [("cyl", x, y, 0.2, 0, ZP + 0.9) for (x, y) in ((-7.2, -4.4), (-3.0, -5.0), (3.0, -5.0), (7.2, -4.4), (-7.6, 0.4), (7.6, 0.4))]
+        r2_mesh_prefab("m_waystation", me, "building", "round 2 Waystation Nine (Opus outpost A)", sol)
+    if BODY == "hollowmere":
+        me = pieces.shelter("h_shelter_r2")
+        xs = [v.co.x for v in me.vertices]; ys = [v.co.y for v in me.vertices]; zs = [v.co.z for v in me.vertices]
+        # One block over the deck and stilts (the stairs are a hop up the front, drawn only).
+        sol = [("box", min(xs) + 0.2, min(ys) + 0.2, max(xs) - 0.2, max(ys) - 0.2, 0, max(zs))]
+        r2_mesh_prefab("h_shelter", me, "building", "round 2 stilt shelter (Astra outpost B)", sol)
+
+def build_walls():
+    """The outpost wall: a segment (WALL_SEG along X, outside = -Y), a post for the joints and a gate
+    (opening GATE_OPEN across the ring; the game's border line runs through it)."""
+    L, H, t = WALL_SEG, WALL_H, WALL_T / 2
+    # ---- segment
+    name = f"{B}_ringwall"
+    p = P.Prefab(name, lod="wall segment")
+    mb = p.mb
+    if BODY == "meridian":
+        # (Low tier budget: the glow is the cap's top, a teal line along the wall at night.)
+        box(mb, -L / 2, -t, -WALL_SKIRT, L / 2, t, H, "MI_Trim_01", skip=("-z",))
+        box(mb, -L / 2 - 0.02, -t - 0.08, H, L / 2 + 0.02, t + 0.08, H + 0.18, "MI_Trim_03", skip=("-z",), top=("M_GlowTeal", "planar", None))
+    else:
+        mat = "MI_RockTrim" if BODY == "arcadia" else "MI_UnevenBrick"
+        box(mb, -L / 2, -t, -WALL_SKIRT, L / 2, t, H, mat, mode="band" if mat == "MI_RockTrim" else "planar", band="field" if mat == "MI_RockTrim" else None, skip=("-z",))
+        box(mb, -L / 2 - 0.02, -t - 0.1, H, L / 2 + 0.02, t + 0.1, H + 0.22, "MI_RockTrim", mode="band", band="slab", skip=("-z",))
+    sbox(name, -L / 2, -t, L / 2, t, -WALL_SKIRT, H + 0.2)   # down to the skirt: no gap under it on a slope
+    finish(p, "static", "outpost wall segment (round 2)")
+    # ---- post (at the joints: hides height steps between segments)
+    name = f"{B}_ringpost"
+    p = P.Prefab(name, lod="wall post")
+    mb = p.mb
+    if BODY == "meridian":
+        box(mb, -0.55, -0.6, -WALL_SKIRT, 0.55, 0.6, H + 0.6, "MI_Trim_03", skip=("-z",), top=("M_GlowAmber", "planar", None))
+    else:
+        box(mb, -0.6, -0.6, -WALL_SKIRT, 0.6, 0.6, H + 0.5, "MI_RockTrim", mode="band", band="ashlar", skip=("-z",))
+        box(mb, -0.72, -0.72, H + 0.5, 0.72, 0.72, H + 0.72, "MI_RockTrim", mode="band", band="slab", skip=("-z",))
+    scyl(name, 0, 0, 0.75, -WALL_SKIRT, H + 0.8)
+    finish(p, "static", "outpost wall post (round 2)")
+    # ---- gate: two towers and a lintel; the opening runs along Y (through the ring)
+    name = f"{B}_ringgate"
+    p = P.Prefab(name, lod="wall gate")
+    mb = p.mb
+    o, tw = GATE_OPEN / 2, (GATE_W - GATE_OPEN) / 2
+    for sx in (-1, 1):
+        x0, x1 = sorted((sx * o, sx * (o + tw)))
+        if BODY == "meridian":
+            box(mb, x0, -0.9, -WALL_SKIRT, x1, 0.9, 5.6, "MI_Trim_03", skip=("-z",))
+            box(mb, x0 - 0.02, -0.92, 4.9, x1 + 0.02, 0.92, 5.05, "M_GlowTeal", skip=("-z", "+z"))
+        else:
+            box(mb, x0, -0.9, -WALL_SKIRT, x1, 0.9, 5.4, "MI_RockTrim", mode="band", band="ashlar", skip=("-z",))
+            box(mb, x0 - 0.1, -1.0, 5.4, x1 + 0.1, 1.0, 5.65, "MI_RockTrim", mode="band", band="slab", skip=("-z",))
+            hanging_lantern(mb, T(sx * (o + tw / 2), -1.05, 4.6), "M_GlowTeal" if BODY == "hollowmere" else "M_GlowWarm")
+        sbox(name, x0, -0.9, x1, 0.9, -WALL_SKIRT, 5.6)
+    if BODY == "meridian":
+        box(mb, -o - tw, -0.7, 5.6, o + tw, 0.7, 6.4, "MI_Trim_01")
+        box(mb, -o, -0.72, 5.5, o, 0.72, 5.62, "M_GlowAmber", skip=("-z",))
+    elif BODY == "arcadia":
+        box(mb, -o - tw, -0.55, 5.0, o + tw, 0.55, 5.6, "MI_WoodTrim", mode="band", band="dark")
+        sun_disc(mb, T(0, -0.6, 6.1), r=0.5)
+        for sx in (-1, 1):
+            P.banner(mb, T(sx * (o + tw / 2), -0.95, 5.3), 0.7, 2.2, ("green", "gold"))
+    else:
+        box(mb, -o - tw, -0.5, 5.0, o + tw, 0.5, 5.5, "MI_WoodTrim", mode="band", band="dark")
+        tmp = MB(); slate_roof(tmp, GATE_W + 0.6, 2.2, 5.5, 1.1, over=0.25, ridge="x", courses=4, gables=False); mb.extend(tmp)
+    finish(p, "static", "outpost wall gate (round 2)")
+
+def build_shop():
+    """The shop stall (round 2: a shop in every safe zone): a counter under an awning with goods and a
+    hanging coin sign; the vendor spot is 1.6 m in front of the counter (front -Y)."""
+    name = f"{B}_shop"
+    p = P.Prefab(name, lod="shop stall")
+    mb = p.mb
+    W, D = 3.6, 2.0
+    if BODY == "meridian":
+        box(mb, -W / 2, -D / 2, -0.4, W / 2, D / 2, 0.15, "MI_Trim_03", skip=("-z",))
+        box(mb, -W / 2 + 0.1, -D / 2 + 0.1, 0.15, W / 2 - 0.1, -D / 2 + 0.75, 1.05, "MI_Trim_01")
+        box(mb, -W / 2 + 0.08, -D / 2 + 0.08, 1.05, W / 2 - 0.08, -D / 2 + 0.8, 1.12, "MI_Trim_03")
+        box(mb, -W / 2 + 0.1, -D / 2 + 0.06, 0.6, W / 2 - 0.1, -D / 2 + 0.09, 0.66, "M_GlowTeal")
+        for sx in (-1, 1):
+            box(mb, sx * W / 2 - 0.12, D / 2 - 0.3, 0.15, sx * W / 2 + 0.12, D / 2, 2.9, "MI_Trim_03")
+        box(mb, -W / 2 - 0.2, -D / 2 - 0.4, 2.9, W / 2 + 0.2, D / 2 + 0.1, 3.1, "MI_Trim_01")
+        box(mb, -W / 2 - 0.2, -D / 2 - 0.42, 2.94, W / 2 + 0.2, -D / 2 - 0.38, 3.06, "M_GlowAmber")
+        box(mb, -0.9, D / 2 - 0.25, 1.4, 0.9, D / 2 - 0.15, 2.6, "MI_Trim_02")
+        hex_glyph(mb, T(0, D / 2 - 0.27, 2.0), 0.42, mat="M_GlowTeal")
+    else:
+        P.goods(mb, T(0, -D / 2 + 0.45, 0.92), ("red", "gold", "green", "linen"))
+        box(mb, -W / 2 + 0.05, -D / 2 + 0.05, 0, W / 2 - 0.05, -D / 2 + 0.85, 0.92, "MI_WoodTrim", mode="band", band="dark", top=("MI_WoodTrim", "band", "plank"))
+        for sx in (-1, 1):
+            box(mb, sx * W / 2 - 0.07, -D / 2 - 0.07, -0.3, sx * W / 2 + 0.07, -D / 2 + 0.07, 2.4, "MI_WoodTrim", mode="band", band="plank")
+            box(mb, sx * W / 2 - 0.07, D / 2 - 0.07, -0.3, sx * W / 2 + 0.07, D / 2 + 0.07, 2.9, "MI_WoodTrim", mode="band", band="plank")
+        cols = ("teal", "cream") if BODY == "hollowmere" else ("green", "gold")
+        n = 10
+        for i in range(n):
+            a = -W / 2 - 0.15 + (W + 0.3) * i / n
+            b = -W / 2 - 0.15 + (W + 0.3) * (i + 1) / n
+            c = cols[i % 2]
+            pts = [(a, -D / 2 - 0.5, 2.25), (b, -D / 2 - 0.5, 2.25), (b, D / 2 + 0.1, 3.0), (a, D / 2 + 0.1, 3.0)]
+            mb.face(pts, "M_Cloth", [pal_uv(c)] * 4); mb.face(list(reversed(pts)), "M_Cloth", [pal_uv(c)] * 4)
+            v = [(a, -D / 2 - 0.5, 1.98), (b, -D / 2 - 0.5, 1.98), (b, -D / 2 - 0.5, 2.25), (a, -D / 2 - 0.5, 2.25)]
+            mb.face(v, "M_Cloth", [pal_uv(c)] * 4); mb.face(list(reversed(v)), "M_Cloth", [pal_uv(c)] * 4)
+        box(mb, -W / 2 - 0.05, D / 2 - 0.12, 0.9, W / 2 + 0.05, D / 2, 2.9, "MI_WoodTrim", mode="band", band="plank")
+        # hanging coin sign on an iron arm at the right front post
+        box(mb, W / 2 - 0.04, -D / 2 - 0.9, 2.55, W / 2 + 0.04, -D / 2, 2.62, "MI_MetalOrnaments")
+        sun_disc(mb, T(W / 2, -D / 2 - 0.75, 2.15), r=0.32)
+    sbox(name, -W / 2, -D / 2, W / 2, D / 2, 0, 2.9)
+    finish(p, "prop", "shop stall (round 2): the vendor stands behind the counter, the buyer at its front")
+
+def wall_ring():
+    """The wall round the outpost: each arc between two gates split into equal runs of segments (their
+    ends tucked 0.3 m into the gate towers, neighbours overlapping a little), segments over water left
+    out (the lake shore closes the ring there), posts on the joints, the gates on their bearings."""
+    R_, gates = WALL["radius"], sorted(WALL["gates"])
+    def at(b, r=R_):
+        a = math.radians(b)
+        return math.sin(a) * r, math.cos(a) * r
+    def wet(b0, b1):
+        for t in (0.0, 0.5, 1.0):
+            for dr in (-WALL_T / 2 - 0.3, WALL_T / 2 + 0.3):
+                e, n_ = at(b0 + (b1 - b0) * t, R_ + dr)
+                if ground(e, n_) < WATER + 0.2:
+                    return True
+        return False
+    tuck = math.degrees((GATE_W / 2 - 0.3) / R_)
+    joints = []
+    for i, g in enumerate(gates):
+        g1 = gates[(i + 1) % len(gates)] + (360.0 if i == len(gates) - 1 else 0.0)
+        b0, b1 = g + tuck, g1 - tuck
+        arc = math.radians(b1 - b0) * R_
+        n = max(1, math.ceil(arc / (WALL_SEG - 0.05)))
+        step = (b1 - b0) / n
+        for k in range(n):
+            s0, s1 = b0 + k * step, b0 + (k + 1) * step
+            if wet(s0, s1):
+                continue
+            e, n_ = at((s0 + s1) / 2)
+            put(f"{B}_ringwall", e, n_, (-(s0 + s1) / 2) % 360.0, base="max", label="wall")
+            for jb, inner in ((s0, k == 0), (s1, k == n - 1)):
+                if not inner:
+                    joints.append(jb % 360.0)
+    for jb in sorted(set(round(j, 4) for j in joints)):
+        e, n_ = at(jb)
+        put(f"{B}_ringpost", e, n_, (-jb) % 360.0, base="max", label="wall post")
+    for g in gates:
+        e, n_ = at(g)
+        put(f"{B}_ringgate", e, n_, (-g) % 360.0, base="max", label="wall gate")
+
+def gate_path(g, inner_pts, width=2.4, mat="MI_RockTrim"):
+    """A path from just outside a wall gate in to `inner_pts` (site east/north)."""
+    a = math.radians(g)
+    out = [(math.sin(a) * (WALL["radius"] + 4.0), math.cos(a) * (WALL["radius"] + 4.0)),
+           (math.sin(a) * (WALL["radius"] - 3.0), math.cos(a) * (WALL["radius"] - 3.0))]
+    path(f"gate {g:.0f}", out + list(inner_pts), width, mat=mat)
+
+# The shop stall (round 2): the keeper stands behind the counter (SHOP_SPOTS pos), buyers in front.
+SHOP_AT = dict(arcadia=(-9.5, -17.5), hollowmere=(-1.0, -19.0), meridian=(-12.0, 6.5))[BODY]
+SHOP_KEEPER_Y = 0.35   # prefab-local y (back of the counter; front is -Y)
+SHOP = {}
+
+def place_shop():
+    e, n_ = SHOP_AT
+    yaw = face_pad(e, n_)
+    put(f"{B}_shop", e, n_, yaw, label="shop stall")
+    ke, kn = local_to_geo(e, n_, yaw, 0.0, SHOP_KEEPER_Y)
+    SHOP.update(at=[round(ke, 3), round(kn, 3)], item=len(LAYOUT) - 1)
+
+def layout_round2():
+    """Round 2 over the Phase B layout: the new gate on the portal, Waystation Nine (Meridian, in place
+    of the courier depot) and the stilt shelter (Hollowmere, in place of the ferry shed), the wall ring
+    with its gates and paths, the shop stall."""
+    drop = dict(arcadia=(), hollowmere=("h_shed",), meridian=("m_hangar",))[BODY]
+    # Small lights standing where the wall now runs go (Arcadia's lamp by the north causeway).
+    lights = {f"{B}_lamp", f"{B}_lantern", f"{B}_pylon"}
+    near_wall = lambda it: it["prefab"] in lights and abs(math.hypot(it["east"], it["north"]) - WALL["radius"]) < 3.0
+    LAYOUT[:] = [it for it in LAYOUT if it["prefab"] not in drop and not near_wall(it)]
+    PATHS[:] = [pa for pa in PATHS if not (BODY == "meridian" and pa["name"] == "depot")]
+    for it in LAYOUT:
+        if it["prefab"] == f"{B}_gate":
+            it["h"] = PADH - 0.2 if BODY != "meridian" else PADH
+    for it in LAYOUT:
+        # The wider gate B leaves this lantern too close to its pier: a step out.
+        if BODY == "hollowmere" and it["prefab"] == "h_lantern" and (it["east"], it["north"]) == (-6.0, 11.0):
+            it["east"], it["north"] = -7.4, 12.4
+    if BODY == "meridian":
+        # On the flattest ground west of the pad (0.55 m across its plinth), facing the pad.
+        put("m_waystation", -26.0, -1.0, face_pad(-26.0, -1.0), label="Waystation Nine")
+        path("waystation", [(-8.9, -2.4), (-16.0, -2.8)], 2.4, mat="MI_RockTrim")
+        gate_path(5.0, [(-0.6, 37.0), (-1.4, 33.0)], 2.2)
+        gate_path(250.0, [(-28.0, -14.0), (-17.0, -12.0), (-9.5, -6.0)], 2.2)
+        gate_path(185.0, [(2.0, -34.0), (6.4, -24.5), (5.2, -15.5), (2.8, -10.0)], 2.2)
+    elif BODY == "hollowmere":
+        put("h_shelter", -17.5, 9.0, face_pad(-17.5, 9.0), label="stilt shelter")
+        gate_path(330.0, [(-13.5, 27.0), (-11.0, 17.0), (-13.0, 11.0)], 1.8, mat="MI_UnevenBrick")
+        gate_path(75.0, [(29.0, 5.0), (19.0, 3.2), (10.5, 2.5)], 1.8, mat="MI_UnevenBrick")
+        gate_path(195.0, [(-8.0, -24.0), (-7.2, -6.6)], 1.8, mat="MI_UnevenBrick")
+    else:
+        gate_path(359.0, [(-1.6, 29.0)], 2.2)
+        gate_path(110.0, [(16.0, -11.0), (8.2, -12.2)], 2.0)
+        gate_path(180.0, [(-0.6, -22.0), (-1.6, -12.0)], 2.0)
+    wall_ring()
+    place_shop()
+
+def build_prefabs_round2():
+    build_pad_platform()
+    build_round2_gate()
+    build_waystone()
+    dict(arcadia=build_arcadia, hollowmere=lambda: build_hollowmere(), meridian=lambda: build_meridian())[BODY]()
+    build_round2_buildings()
+    build_walls()
+    build_shop()
+
 def build_prefabs():
     build_pad_platform()
     build_gate()
@@ -2275,7 +2564,7 @@ def write_outputs(problems, warns, stats):
     out = dict(body=BODY, R=R, padH=PADH, frame="pad 0: east/north geodesic metres (content/places.ts tangentFrame), yaw deg CCW, 0 = front faces south; solids [shape, cx, cz(front), hx, hz, y0, y1, yaw] prefab frame",
                layout=lay, paths=PATHS, prefabs=prefabs, validation=dict(problems=problems, warnings=warns, stats=stats), budget=BUDGET,
                slot_tints={k: list(v) for k, v in TINTS.items()}, new_slots=NEW_SLOTS,
-               props_cleared=sorted(PROP_DROPS))
+               props_cleared=sorted(PROP_DROPS), wall=dict(radius=WALL["radius"], gates=WALL["gates"]), shop=SHOP)
     with open(os.path.join(OUT, f"{BODY}_layout.json"), "w") as f:
         json.dump(out, f, indent=1)
     plan = dict(items=[dict(prefab=it["prefab"], label=it["label"], east=it["east"], north=it["north"],
@@ -2350,10 +2639,11 @@ def main():
     setup_materials()
     if BODY == "meridian":
         setup_scifi_materials()
-    build_prefabs()
+    build_prefabs_round2()
     log("prefabs:", len(CLASS))
     place_game_objects()
     dict(arcadia=layout_arcadia, hollowmere=lambda: layout_hollowmere(), meridian=lambda: layout_meridian())[BODY]()
+    layout_round2()
     resolve_bases()
     problems, warns, stats = validate()
     total, lines = budget()

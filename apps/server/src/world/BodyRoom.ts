@@ -4,7 +4,7 @@
 
 import { CloseCode, Room, ServerError, type Client } from "@colyseus/core";
 import { StateView } from "@colyseus/schema";
-import { BODIES, createTerrain, isSafe, padDirs, portalNear, portalSpots, type BodyDef, type BodyId, type PortalSpot, type Terrain } from "@firstlight/shared";
+import { BODIES, createTerrain, inWalledZone, isSafe, padDirs, portalNear, portalSpots, type BodyDef, type BodyId, type PortalSpot, type Terrain } from "@firstlight/shared";
 import { BACKPACK_SLOTS, HOTBAR_SLOTS, newCharacter, type CharacterData } from "@firstlight/shared/content/character";
 import { INV_SLOTS, moveSlot, storeItem } from "@firstlight/shared/content/inventory";
 import { fallDamageFraction, levelForXp, maxHp, pvpKillXp, xpAtLevel, xpToNext } from "@firstlight/shared/content/progression";
@@ -1359,13 +1359,14 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
   /**
    * Is `a` in a safe zone right now, where it stands? Pad rings protect only once out of combat (no
-   * running onto a pad mid-fight, F12); the Portus town protects whoever is inside its walls at once,
-   * combat tag or not (D-zones-3). The tick writes it into the SAFE flag; combat's attack and damage
-   * gates call it directly, so a move into the town counts before the next tick (Codex round 2).
+   * running onto a pad mid-fight, F12); the walled zones, the Portus town (D-zones-3) and the planets'
+   * arrival outposts (D-b2-1), protect whoever is inside their walls at once, combat tag or not. The
+   * tick writes it into the SAFE flag; combat's attack and damage gates call it directly, so a move
+   * into the town counts before the next tick (Codex round 2).
    */
   safeNow(a: PlayerActor, now: number): boolean {
     const p = a.state;
-    return isSafe(this.bodyDef, p.x, p.y, p.z) && (this.bodyDef.terrain.kind === "hub" || now >= a.combatUntil);
+    return isSafe(this.bodyDef, p.x, p.y, p.z) && (now >= a.combatUntil || inWalledZone(this.bodyDef, p.x, p.y, p.z));
   }
 
   spawnPoint(seed: string): V3 {
