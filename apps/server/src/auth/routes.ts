@@ -133,7 +133,9 @@ export function mountAccountRoutes(app: Express, a: Accounts, cfg: AccountsConfi
   const attempts = new ClaimLimiter();
   const claimHeaders = (res: Response) => {
     res.setHeader("Cache-Control", "no-store");
-    res.setHeader("Referrer-Policy", "no-referrer");
+    // No Referer leaves the site (the code never rides in a URL). Not "no-referrer": with it the
+    // browser sends `Origin: null` on the form's own POST, and the origin check below needs the origin.
+    res.setHeader("Referrer-Policy", "same-origin");
     res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'");
   };
 

@@ -348,7 +348,7 @@ describe("admin claim", () => {
     expect((await api(server, "/api/account/me", guestToken)).json.guest).toBe(true);
     const form = await owner.fetch("/admin/claim");
     expect(form.status).toBe(200);
-    expect(form.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(form.headers.get("referrer-policy")).toBe("same-origin");
     const html = await form.text();
     expect(html).toContain('method="post"');
     expect(html).not.toContain(TOKEN); // the page never carries the code
