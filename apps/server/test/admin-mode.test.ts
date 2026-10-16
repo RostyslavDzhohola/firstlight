@@ -596,6 +596,26 @@ describe("nothing in a sandbox is saved (D-admin-3, real path: SQLite)", () => {
     resetModeration();
   });
 
+  it("Codex r4: another admin's in-game mod kick and ban (by account id) reach a sandbox body", async () => {
+    const mod = await bot("moderator_r4", "portus");
+    for (const [uid, action, code] of [["kick_me_r4", "kick", CLOSE.KICKED], ["ban_me_r4", "ban", CLOSE.BANNED]] as const) {
+      const a = await bot(uid, "arcadia");
+      const s = await intoSandbox(a, uid);
+      const room = serverRoom(s);
+      let closed = 0;
+      s.room.onLeave((c: number) => (closed = c));
+      const toasts = mod.toasts.length;
+      mod.send("mod", { action, target: uid, reason: "r4" });
+      await until(`${action}: removed`, () => closed === code);
+      expect(denied(mod, "mod", "player not found")).toBe(false);
+      expect(mod.toasts.length).toBeGreaterThan(toasts);
+      expect(room.actors.size).toBe(0);
+      expect(sandboxOf(uid)).toBeUndefined();
+      expect(await playRequest(harness.game!, `dev:${uid}:${uid}:admin`, { body: "arcadia" })).toEqual({ ok: false, error: action === "kick" ? "kicked" : "banned" });
+    }
+    resetModeration();
+  });
+
   it("a restart drops the sandbox; the real character is as it was and the next sandbox starts from it", async () => {
     const { s, real } = await owner("restarter");
     mode(s, { fly: true, action: "maxlevel" });

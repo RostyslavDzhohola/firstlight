@@ -871,7 +871,9 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   social store refuse a sandbox's writes before touching their maps. Kicks and bans reach a sandbox
   body through the sandbox registry (it has no presence) and close the sandbox. Sandboxes aren't the
   public world: not in the online count, the home page or /stats, and they take none of the public
-  capacity; at most 8 are open at once ("sandboxes full").
+  capacity; at most 8 are open at once ("sandboxes full"). Only inbound server notices cross the other
+  way: announcements (and "updating" before a restart) still reach a sandbox, so the admin sees
+  them; nothing a sandbox does reaches the real world.
 - **D-chars-1 (run, 2026-10-15 07:10 CDT):** a fifth starter, the fire ninja "Hinoko" (owner, HANDOFF
   6h), is appended to `STARTERS` (id `ninja`, starter index 4, default palette Ember) with the Ember
   Kunai (ranged, 3 tiers) and its alt, the Ember Seal: hold RMB 0.4 s (server-timed `charge`), release

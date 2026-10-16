@@ -9,7 +9,7 @@ import { z } from "zod";
 import type { BodyRoom } from "../world/BodyRoom.ts";
 import type { PlayerActor } from "../world/actors.ts";
 import type { RoomSystem } from "../world/systems.ts";
-import { stillAdmin } from "../world/adminMode.ts";
+import { sandboxBodyOf, stillAdmin } from "../world/adminMode.ts";
 import { trackClientInfo, trackJoin, trackLeave, trackTick } from "./analytics.ts";
 import { announceAll, applyVoiceMute, banAccount, kickUser, refusesReconnect, removePlayer, seatRefusal, setVoiceMuted } from "./moderation.ts";
 import { parties, type Party } from "./parties.ts";
@@ -343,7 +343,10 @@ export function createSocialSystem(room: BodyRoom): RoomSystem {
       announceAll(m.text ?? "");
       return;
     }
-    const t = m.target ? anywhere(m.target) : null;
+    // An admin in their sandbox has no presence (D-admin-3): kicks and bans find them by account id
+    // through the sandbox registry, and moderation removes the body and closes the sandbox.
+    const sandboxed = m.action === "kick" || m.action === "ban" ? (target: string) => sandboxBodyOf(target) : () => null;
+    const t = m.target ? (anywhere(m.target) ?? sandboxed(m.target)) : null;
     if (!t) return deny(c, "mod", "player not found");
     const uid = t.actor.identity.userId;
     switch (m.action) {
