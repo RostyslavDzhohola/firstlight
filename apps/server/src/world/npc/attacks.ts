@@ -351,7 +351,7 @@ function resolve(sys: NpcSystem, n: Npc, at: ActiveAttack, now: number) {
       if (land) {
         const l = len(land);
         const ux = land[0] / l, uy = land[1] / l, uz = land[2] / l;
-        const fh = feetHeight(sys.ground, ux, uy, uz, n.def.locomotion, n.def.hover ?? 0);
+        const fh = feetHeight(sys.ground, ux, uy, uz, n.def.locomotion, n.def.hover ?? 0, true);
         // Lands anywhere outside the zones' least margin (D-evade-1): a player just outside a ring can be leapt at.
         if (fh !== null && !nearSafeRing(sys.ground, land[0], land[1], land[2], CHASE_MARGIN + n.radius)) {
           const r = sys.ground.R + fh;

@@ -304,7 +304,8 @@ function chase(sys: NpcSystem, n: Npc, now: number, dt: number) {
 function outOfReach(sys: NpcSystem, n: Npc, tp: V3, d: number): boolean {
   const l = len(tp);
   const tol = meleeHeightTol(n);
-  const under = feetHeight(sys.ground, tp[0] / l, tp[1] / l, tp[2] / l, n.def.locomotion, n.def.hover ?? 0);
+  // Chasing, a ground walker wades as deep as a player stands (D-solid-2): only a swimmer is out of it.
+  const under = feetHeight(sys.ground, tp[0] / l, tp[1] / l, tp[2] / l, n.def.locomotion, n.def.hover ?? 0, true);
   const perch = under === null ? 0 : l - (sys.ground.R + under);
   for (const a of n.def.attacks) {
     if (d > a.range || a.shape === "charge" || a.shape === "leap") continue;

@@ -7,6 +7,7 @@
 
 import { natureSolids, nearSafeZone, padDirs, type BodyDef, type Dir, type NatureSolids, type Terrain } from "@firstlight/shared";
 import { structureCollider, type ColliderBody, type StructureCollider } from "@firstlight/shared/planet/sites";
+import { SWIM_DEPTH } from "@firstlight/shared/planet/water";
 import type { Locomotion } from "@firstlight/shared/content/npcs";
 import { NPC_RULES } from "@firstlight/shared/content/npcs";
 import type { V3 } from "../geometry.ts";
@@ -85,12 +86,19 @@ export function clearOfStructures(g: Ground, p: V3, loco: Locomotion, hover: num
 /** Max rise per metre walked (≈ 48°). */
 export const MAX_SLOPE = 1.1;
 
-/** Feet height above the radius for a direction, or null if this locomotion can't stand there. */
-export function feetHeight(g: Ground, x: number, y: number, z: number, loco: Locomotion, hover = 0): number | null {
+/** Ground walkers keep out of water deeper than this (m) unless `wading` (feetHeight). */
+const GROUND_DEPTH = 0.6;
+
+/**
+ * Feet height above the radius for a direction, or null if this locomotion can't stand there.
+ * `wading` (a chase, D-solid-2): a ground walker goes as deep as a player can stand and shoot
+ * (SWIM_DEPTH), so a player knee-deep in a lake can be fought; calm, it keeps to GROUND_DEPTH.
+ */
+export function feetHeight(g: Ground, x: number, y: number, z: number, loco: Locomotion, hover = 0, wading = false): number | null {
   const h = g.terrain.groundHeight(x, y, z);
   switch (loco) {
     case "ground":
-      return h < g.water - 0.6 ? null : h;
+      return h < g.water - (wading ? SWIM_DEPTH : GROUND_DEPTH) ? null : h;
     case "wade":
       return h < g.water - 2.4 ? null : h;
     case "swim":
@@ -137,7 +145,8 @@ export function slideAngle(g: Ground, i: number, side = 1): number {
  * How an NPC keeps off the safe zones (pad rings, the Portus town; D-evade-1): `true` keeps the full
  * NPC_RULES.safeMargin (wandering, going home: creeps stay visibly off the pads), `"close"` only
  * CHASE_MARGIN (chasing a target who stands outside every zone: it may come right up to the zone's
- * edge, so a player just outside a ring can be fought), `false` not at all. Never closer than
+ * edge, so a player just outside a ring can be fought, and a ground walker wades in after a player
+ * standing in a lake: feetHeight `wading`), `false` not at all. Never closer than
  * CHASE_MARGIN; an NPC already inside the full margin (after a chase) may move about and out of it.
  */
 export type SafeAvoid = boolean | "close";
@@ -156,6 +165,8 @@ export function step(g: Ground, pos: V3, t: V3, d: number, loco: Locomotion, hov
   const margin = avoidSafe === "close" ? tight : NPC_RULES.safeMargin + radius;
   // Already within the full margin (a chase brought it there): it may move about in it and out of it.
   const inMargin = avoidSafe === true && nearSafeRing(g, pos[0], pos[1], pos[2], margin);
+  // Chasing it wades as deep as a player stands (D-solid-2); one already that deep may move about and out.
+  const wading = avoidSafe === "close" || curH < g.water - GROUND_DEPTH;
   const walls = g.structures;
   const wild = natureFor(g, radius);
   const body = walls || wild ? npcBody(radius, height) : null;
@@ -167,7 +178,7 @@ export function step(g: Ground, pos: V3, t: V3, d: number, loco: Locomotion, hov
     const qx = pos[0] + dir[0] * d, qy = pos[1] + dir[1] * d, qz = pos[2] + dir[2] * d;
     const l = Math.hypot(qx, qy, qz);
     const ux = qx / l, uy = qy / l, uz = qz / l;
-    const fh = feetHeight(g, ux, uy, uz, loco, hover);
+    const fh = feetHeight(g, ux, uy, uz, loco, hover, wading);
     if (fh === null) continue;
     if ((loco === "ground" || loco === "wade") && fh - curH > d * MAX_SLOPE + 0.25) continue;
     if (avoidSafe && (nearSafeRing(g, qx, qy, qz, tight) || (!inMargin && margin > tight && nearSafeRing(g, qx, qy, qz, margin)))) continue;

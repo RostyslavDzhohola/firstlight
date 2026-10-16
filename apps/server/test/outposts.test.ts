@@ -5,7 +5,8 @@
 // Unit level (the real NpcSystem and combat on the real terrain, a manual clock): NPCs don't see
 // through buildings, their bolts and strikes stop at walls, a blast doesn't reach round a corner, a
 // melee NPC chasing round the barn or the hangar reaches its target or evades (never stuck at a
-// wall), one whose target stands at the end of the jetty evades instead of waiting at the shore, and
+// wall), one whose target stands at the end of the jetty wades in beside it and fights (D-solid-2:
+// creeps chase into water a player can stand in) or evades, never waiting at the shore, and
 // the creep groups near pad 0 start beside the outpost, not inside it.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -435,18 +436,22 @@ describe("pad outposts against NPCs and blasts (D43, D44)", () => {
     expect(npcInside("hollowmere", n)).toBe(false);
   });
 
-  it("a melee-only NPC whose target stands at the end of the jetty evades instead of waiting at the shore", () => {
+  it("a melee-only NPC whose target stands at the end of the jetty wades in beside it and fights, or evades; never waits at the shore", () => {
     const w = fakeWorld("arcadia", { immortal: true });
     const jetty = footprint("arcadia", "a_jetty");
     const end = at("arcadia", ...jetty.local(0, -jetty.hz + 0.6));
     const p = w.addPlayer("angler", end);
     const n = npc(w, "bonewalker", 5, spot(w, "arcadia", ...jetty.local(0, jetty.hz + 4)));
     dealDamage(w.world.host, p, n, 1, false);
-    const t = run(w, 15_000, () => n.mode === MODE.EVADE);
+    // The lake there is under SWIM_DEPTH: a player can stand in it, so a chasing creep wades (D-solid-2).
+    let reached = false;
+    const t = run(w, 15_000, () => {
+      if (p.state.hp < p.state.maxHp) reached = true;
+      return reached || n.mode === MODE.EVADE;
+    });
     expect(t).toBeGreaterThan(0);
     expect(t).toBeLessThan(NPC_TUNING.unreachableMs + 4000);
-    expect(p.state.hp).toBe(p.state.maxHp);
-    // And it never walked onto the jetty or into the lake.
+    // Never onto the jetty.
     expect(npcInside("arcadia", n)).toBe(false);
   });
 

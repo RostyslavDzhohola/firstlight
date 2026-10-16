@@ -845,3 +845,10 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   off-centre you slide round it. `PROTOCOL_VERSION` 5 (an older client walks through trees and
   would be corrected at each one): deploy the client first, then the server. Why: the owner, "a lot
   of elements walk through … if you run into them they have to be physical elements".
+- **D-solid-2 (run, 2026-10-15):** chasing, ground creeps wade as deep as a player can stand
+  (`SWIM_DEPTH`, 1.2 m) instead of 0.6 m; calm (wandering, going home) they keep to 0.6 m, and one
+  already deeper may move about and out. A player knee-deep in a lake was out of every ground creep's
+  reach: it gave up, ran home healed, and each later shot made it give up again at once (the
+  pad-shooter rule), so it could never be killed (e2e J3.4 after a back-off into a lake: 70 hits, no
+  kill). Only a swimmer (who can't shoot) is out of reach now. The Arcadia jetty's end (over
+  knee-deep water) can be reached from the water beside it.
