@@ -57,7 +57,8 @@ Shop keepers (`SHOP_SPOTS`, world metres): Arcadia `[271.0583, 420.186, -17.8155
   pad 1 in `evade-reset`, `npc-review`; the horse rides in through Arcadia's south gate.
 - `pnpm typecheck` clean. Full `pnpm test` after the shops merge: 1,674 of 1,674 passed, 187 files;
   after the chars-3d merge: 1,698 of 1,699, the one a new Ember Seal case at pad 0's ring, moved to
-  pad 1 (8/8) (the first full run, before the test moves above, had 27 failures in 7 server files: fights
+  pad 1 (8/8); after the Codex and browser-check fixes: 1,704 of 1,706, the two (an egg-medal retry
+  and a falling-crate case, both load timeouts) pass alone (54/54) (the first full run, before the test moves above, had 27 failures in 7 server files: fights
   15–30 m off pad 0, now inside the walls).
 - CodeRabbit (`coderabbit review --agent --base main`): one minor finding, fixed and it mattered: the
   Astra palette lookup scanned every material in the scene, so inside the pads design build (kit
