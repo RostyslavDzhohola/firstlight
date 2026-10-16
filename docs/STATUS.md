@@ -33,7 +33,7 @@ Codex gpt-6.1-sol review (and CodeRabbit for small fixes):
   D-e2e-1) and `docs/tests/player-expectations.md`.
 - **Waiting on the owner:** the 3D characters + ninja starter (`lane/chars-3d`, merge-ready) and the
   `?meadow` graphics prototype (`lane/graphics-study`) need the owner's pick; Resend domain verification
-  (saving shows "temporarily unavailable" until then); DataFast setup; the 𝕏 handle.
+  (done 2026-10-16); DataFast setup; the 𝕏 handle.
 - **Open:** WebGL frame stalls in the first seconds after arrival (`lane/arrival-stalls`, in progress);
   the egg-persistence and movement hill-sprint tests are timing-flaky under load (also on 8b02ce4).
 
@@ -45,7 +45,7 @@ Codex gpt-6.1-sol review (and CodeRabbit for small fixes):
 | Railway | project `firstlight`, service `game-server`, volume `/data` 5 GB, US East, 2 vCPU/2 GB, Hobby; live at https://api.firstlight.one4all.dev (dev guest tokens off: `main.ts` refuses to boot production with `ALLOW_DEV_GUESTS` set) |
 | Vercel | project `playfirstlight`, https://firstlight.one4all.dev live (A record added), /api/auth + /admin + /stats proxied with origin secret |
 | Cloudflare | account `rosty-build` workers.dev; Workers token saved; TURN key pending owner |
-| Resend | paid plan; domain firstlight.one4all.dev added, DNS added, send-only key set on Railway; **verification pending the owner** |
+| Resend | paid plan; domain firstlight.one4all.dev **verified** (us-east-1, checked through the API 2026-10-16), send-only key set on Railway, sender `login@firstlight.one4all.dev`; live `/api/account/save-status` reports `ok` |
 
 ## Milestones
 
@@ -59,7 +59,7 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
   - [x] Vercel project + domain + DNS
   - [x] Railway domain + DNS + env
   - [ ] Cloudflare: account, workers.dev and Workers token done (D24); **TURN key pending the owner**
-  - [ ] Resend: domain, DNS and send-only key done; **domain verification pending the owner**
+  - [x] Resend: domain, DNS and send-only key done; domain verified (2026-10-16)
   - [x] hello-world deploys: client, server `/healthz`, WebSocket round trip (F1); the asset Worker
     (`apps/assets-worker`) deploy isn't recorded here
 - [x] M1 Renderer gate G1: WebGPU kept; `?bench=g1` 59.9 fps p50, p95 17.6 ms on the M1 (Measured
@@ -67,8 +67,9 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 - [x] M2 Walking multiplayer world (two-browser E2E on a local stack; T1 on production). Player state
   is not view-filtered (D30).
 - [x] M3 Combat core (E2E T2 PvE + PvP, T3 death + own pile)
-- [ ] M4 Accounts and persistence: merged 61aa332; E2E T5 passes locally. Open: a real OTP email on
-  production needs Resend's domain verified (owner).
+- [ ] M4 Accounts and persistence: merged 61aa332; E2E T5 passes locally. Resend's domain is verified
+  and a test send from the production sender is accepted (2026-10-16). Open: a real sign-in code
+  received in a real inbox on production.
 - [ ] M5 Voice: merged d40d058, tested with bots. Open: E2E T4 needs the owner's TURN key and two
   real browsers with microphones.
 - [x] M6 Content: all content lanes merged; E2E T2 and T6 pass. The F12 content fixes (egg-spawn
@@ -100,7 +101,7 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 | F4 fighting | ✅ | browser E2E T2 PvE + PvP (docs/e2e-2026-10-12.md) |
 | F5 death + own pile | ✅ | browser E2E T3 |
 | F6 voice | ⛔ | built + tested with bots; needs owner's TURN key; mic E2E needs two real browsers |
-| F7 email sign-in | 🟡 | browser E2E T5 passes locally (dev outbox); production waits for Resend domain verification (owner) |
+| F7 email sign-in | 🟡 | browser E2E T5 passes locally (dev outbox); production: Resend domain verified, test send accepted, `save-status` ok (2026-10-16); a real code in a real inbox isn't recorded yet |
 | F8 2-player boss | ✅ | browser E2E T6: Tidewrath killed by two players (admin heals) |
 | F9 screenshot share | ✅ | browser E2E T7 |
 | F10 M1 ≥ 60 fps Medium | ✅* | re-run on 668ec82 (weather, NPCs, horses, collision): ?bench=g1 59.9 fps p50, p95 18.6 ms; night storm 59.9 fps p50, p95 18.5 ms; 0 shader builds (T3 Chromium, not plugged-in Chrome) |
@@ -190,4 +191,4 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 - Concept art not generated yet (Codex task cancelled for safety). Retry only without computer use.
 - Character floats slightly above terrain (Codex first look) — investigate.
 - Cloudflare: Workers token OK (D24). TURN key pending the owner: the saved API token has no Calls permission (06:45Z check), so create the key in the dashboard (Realtime → TURN) and run save-turn-key.sh.
-- Resend: DNS records are live on Vercel DNS (checked against ns1.vercel-dns.com and 8.8.8.8), but Resend still says the domain is unverified (02:45Z). The send-only key is set on Railway, so mail turns on as soon as the domain verifies. **Owner: press "Verify" on resend.com/domains** (the builder's key is send-only, so it can't trigger verification).
+- Resend: resolved 2026-10-16. The domain is verified and the production send-only key and sender work. A temporary full-access key used to confirm this was deleted the same day.
