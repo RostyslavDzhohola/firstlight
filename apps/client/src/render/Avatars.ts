@@ -1,8 +1,8 @@
-// Player avatars: the four starters (Hexwick, Brother Ash, Kappa, Unit 7) as skinned GLBs on one
-// shared skeleton, animated by an AnimationMixer with crossfades driven by the ANIM state, tinted by
+// Player avatars: the five starters (Hexwick, Brother Ash, Kappa, Unit 7, Hinoko), each in one of its
+// looks (STARTER_LOOKS: Kappa and Unit 7 have two), as skinned GLBs on one shared skeleton, animated by an AnimationMixer with crossfades driven by the ANIM state, tinted by
 // palette, with sockets for weapons (right hand) and cosmetics (head, face, back, belt).
 // Until the GLBs are loaded (or if they fail) the old capsule stands in, so the public API
-// (constructor(palette, starter), root, set(...), dispose()) never changes behaviour for callers.
+// (constructor(palette, starter, look), root, set(...), dispose()) never changes behaviour for callers.
 //
 // Cost control: geometry, materials and clips are shared; AvatarView.updateLod() ranks avatars by
 // distance each frame: the nearest N (tier setting 8/16/24/40) animate every frame and cast shadows,
@@ -11,9 +11,9 @@
 import * as THREE from "three/webgpu";
 import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
 import { ANIM, PF } from "@firstlight/shared/net/schema";
-import { STARTERS, WEAPONS } from "@firstlight/shared/content/weapons";
+import { STARTER_LOOKS, STARTERS, WEAPONS } from "@firstlight/shared/content/weapons";
 import { flags } from "../config.ts";
-import { avatarAssets, preloadAvatars, ROLL_SPEED, STARTER_FILES, STARTER_SCALE, type AvatarAssets } from "./avatars/assets.ts";
+import { avatarAssets, MODEL_SCALE, modelIndex, preloadAvatars, ROLL_SPEED, UAL_PELVIS, type AvatarAssets } from "./avatars/assets.ts";
 import { avatarMaterial, PALETTES, proxyMaterial } from "./avatars/material.ts";
 import { weaponModel } from "./avatars/weapons.ts";
 import { keptSamples } from "./warmup.ts";
@@ -69,7 +69,7 @@ type WeaponKind = "fists" | "melee" | "ranged" | "magic" | "thrown" | "support";
 function weaponKind(index: number): WeaponKind {
   const w = WEAPONS[index];
   if (!w || w.id === "fists") return "fists";
-  if (w.delivery === "thrown") return "thrown";
+  if (w.delivery === "thrown" || w.id === "kunai") return "thrown"; // kunai are thrown overhand
   if (w.cls === "melee") return "melee";
   if (w.cls === "magic") return "magic";
   if (w.cls === "ranged") return "ranged";
@@ -97,15 +97,28 @@ function oneShotClip(kind: OneShot, w: WeaponKind): string {
 
 // ---- sockets ---------------------------------------------------------------------------------
 export type SocketName = "hand_r" | "hand_l" | "head" | "face" | "back" | "belt";
-const SOCKETS: Record<SocketName, { bone: string; at: (b: (n: string) => THREE.Vector3) => THREE.Vector3 }> = {
+/** Socket points; `m` is the model (MODEL_FILES index). */
+const SOCKETS: Record<SocketName, { bone: string; at: (b: (n: string) => THREE.Vector3, m: number) => THREE.Vector3 }> = {
   // grip centre: in the palm, between the wrist and the middle knuckle, a little below
   hand_r: { bone: "hand_r", at: (b) => b("hand_r").lerp(b("middle_01_r"), 0.75).add(new THREE.Vector3(0, -0.025, 0)) },
   hand_l: { bone: "hand_l", at: (b) => b("hand_l").lerp(b("middle_01_l"), 0.75).add(new THREE.Vector3(0, -0.025, 0)) },
-  head: { bone: "Head", at: () => new THREE.Vector3(0, 1.84, 0) },
-  face: { bone: "Head", at: () => new THREE.Vector3(0, 1.69, 0.115) },
-  back: { bone: "spine_03", at: () => new THREE.Vector3(0, 1.3, -0.2) },
-  belt: { bone: "pelvis", at: () => new THREE.Vector3(0, 1.0, 0.16) },
+  head: { bone: "Head", at: (_b, s) => new THREE.Vector3(0, HEAD_SOCKET[s]![0], 0) },
+  face: { bone: "Head", at: (_b, s) => new THREE.Vector3(0, FACE_SOCKET[s]![0], FACE_SOCKET[s]![1]) },
+  back: { bone: "spine_03", at: (_b, m) => new THREE.Vector3(0, BODY_SOCKET[m]![0], BODY_SOCKET[m]![1]) },
+  belt: { bone: "pelvis", at: (_b, m) => new THREE.Vector3(0, BODY_SOCKET[m]![2], BODY_SOCKET[m]![3]) },
 };
+/** Per model (MODEL_FILES order). The sculpted heads are ~1.1-1.15x life size (tools/blender/chars3d
+ *  recipes), the second looks' heads 2-3x: where hats sit (crown height, model space) and how much
+ *  bigger hats and masks are drawn. */
+const HEAD_SOCKET: readonly (readonly [number, number])[] = [[1.915, 1.15], [1.93, 1.2], [1.9, 1.22], [1.905, 1.2], [1.93, 1.18], [1.56, 2.4], [1.645, 2.2]];
+/** Face socket per model: eye-line height and how far forward the face (mask, visor, beak) reaches. */
+const FACE_SOCKET: readonly (readonly [number, number])[] = [[1.742, 0.138], [1.74, 0.136], [1.735, 0.15], [1.745, 0.17], [1.742, 0.146], [1.375, 0.37], [1.41, 0.29]];
+/** Back socket (height, depth) and belt socket (height, depth) per model: the second looks are built
+ *  low and round (Kappa B's back is its shell, Unit 7 B's its radio pack). */
+const BODY_SOCKET: readonly (readonly [number, number, number, number])[] = [
+  [1.3, -0.2, 1.0, 0.16], [1.3, -0.2, 1.0, 0.16], [1.3, -0.2, 1.0, 0.16], [1.3, -0.2, 1.0, 0.16], [1.3, -0.2, 1.0, 0.16],
+  [0.9, -0.55, 0.62, 0.27], [1.0, -0.36, 0.7, 0.24],
+];
 
 // weapon +Z (muzzle) → model -X (right hand's knuckles at rest), weapon +Y (top) → model +Z (thumb)
 export const GUN_GRIP = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(
@@ -136,7 +149,7 @@ type Lod = "full" | "mid" | "far";
 /** The avatar stands on the analytic ground height, but the rendered terrain is a triangulated mesh
  *  and feet are spread on slopes: sink the model a few cm so feet read as planted (Kappa's bare feet
  *  already sit 2 cm low). */
-const FOOT_SINK = [0.035, 0.035, 0.015, 0.035] as const;
+const FOOT_SINK = [0.035, 0.035, 0.015, 0.035, 0.03, 0.02, 0.03] as const;
 /** Rest pelvis joint height on the shared skeleton (m, unscaled), and how far the seat of the
  *  trousers sits below it: together they put a rider on a horse's saddle socket. */
 const PELVIS_HEIGHT = 0.917;
@@ -149,6 +162,12 @@ export class AvatarView {
   readonly root = new THREE.Group();
   palette: number;
   starter: number;
+  /** STARTER_LOOKS index of the starter. */
+  look: number;
+  /** The model drawn: MODEL_FILES index for (starter, look). */
+  private modelIdx: number;
+  /** Leg length vs the clips' skeleton: locomotion clips cover less ground on shorter legs. */
+  private stride = 1;
 
   private readonly holder = new THREE.Group(); // GLB model or capsule lives here
   private model: THREE.Object3D | null = null;
@@ -178,9 +197,11 @@ export class AvatarView {
   private manualDetail = false;
   private localFlags: number | null = null;
 
-  constructor(palette = 0, starter = 0) {
+  constructor(palette = 0, starter = 0, look = 0) {
     this.palette = palette;
     this.starter = starter;
+    this.look = look;
+    this.modelIdx = modelIndex(starter, look);
     this.root.add(this.holder);
     this.proxy = capsule(palette, starter);
     this.holder.add(this.proxy);
@@ -192,11 +213,13 @@ export class AvatarView {
     }
   }
 
-  /** Swap starter/palette (e.g. once the server confirms the local player's choice). */
-  setLook(palette: number, starter: number) {
-    if (palette === this.palette && starter === this.starter) return;
+  /** Swap starter/palette/look (e.g. once the server confirms the local player's choice). */
+  setLook(palette: number, starter: number, look = 0) {
+    if (palette === this.palette && starter === this.starter && look === this.look) return;
     this.palette = palette;
     this.starter = starter;
+    this.look = look;
+    this.modelIdx = modelIndex(starter, look);
     this.proxy.removeFromParent();
     releaseAvatarObjects(this.proxy);
     this.proxy = capsule(palette, starter);
@@ -230,8 +253,9 @@ export class AvatarView {
   /** Metres from the saddle's seat down to where this avatar's root (feet) must go so it sits on it. */
   seatDrop(): number {
     if (!this.model) return 0.55; // capsule
-    const scale = STARTER_SCALE[this.starter % STARTER_SCALE.length] ?? 1;
-    return PELVIS_HEIGHT * scale - (FOOT_SINK[this.starter % FOOT_SINK.length] ?? 0.03) - SEAT_CLEARANCE;
+    const m = this.modelIdx;
+    const pelvis = avatarAssets()?.pelvis[m] ?? PELVIS_HEIGHT;
+    return pelvis * (MODEL_SCALE[m] ?? 1) - (FOOT_SINK[m] ?? 0.03) - SEAT_CLEARANCE;
   }
 
   /** Smoothed ground speed (m/s) from this avatar's own successive positions. */
@@ -390,11 +414,13 @@ export class AvatarView {
 
   // ---- internals ---------------------------------------------------------------------------
   private buildModel(a: AvatarAssets) {
-    const tpl = a.starters[this.starter % a.starters.length] ?? a.starters[0];
+    const m = this.modelIdx;
+    const tpl = a.models[m] ?? a.models[0];
     if (!tpl) return;
     const model = cloneSkinned(tpl);
-    model.scale.setScalar(STARTER_SCALE[this.starter % STARTER_SCALE.length] ?? 1);
-    const mat = avatarMaterial(a.atlas, this.palette);
+    model.scale.setScalar(MODEL_SCALE[m] ?? 1);
+    const tex = a.textures[m] ?? a.textures[0]!;
+    const mat = avatarMaterial(tex, this.palette);
     let mesh: THREE.SkinnedMesh | null = null;
     model.traverse((o) => {
       const m = o as THREE.SkinnedMesh;
@@ -406,7 +432,8 @@ export class AvatarView {
         mesh = m;
       }
     });
-    this.holder.position.y = -(FOOT_SINK[this.starter % FOOT_SINK.length] ?? 0.03);
+    this.holder.position.y = -(FOOT_SINK[m] ?? 0.03);
+    this.stride = (a.pelvis[m] ?? UAL_PELVIS) / UAL_PELVIS;
     this.model = model;
     this.mesh = mesh;
     this.makeSockets(model);
@@ -417,7 +444,7 @@ export class AvatarView {
       this.holder.add(this.proxy);
     }
     this.mixer = new THREE.AnimationMixer(model);
-    for (const [name, clip] of a.clips) {
+    for (const [name, clip] of a.modelClips[m] ?? a.clips) {
       const act = this.mixer.clipAction(clip);
       if (!LOOPING.has(name)) {
         act.setLoop(THREE.LoopOnce, 1);
@@ -452,11 +479,13 @@ export class AvatarView {
     for (const [name, def] of Object.entries(SOCKETS) as [SocketName, (typeof SOCKETS)[SocketName]][]) {
       const bone = bones.get(def.bone);
       if (!bone) continue;
-      const target = new THREE.Matrix4().makeTranslation(def.at(pos));
+      const st = this.modelIdx;
+      const target = new THREE.Matrix4().makeTranslation(def.at(pos, st));
       const local = bone.matrixWorld.clone().invert().multiply(target);
       const sock = new THREE.Object3D();
       sock.name = `socket:${name}`;
       local.decompose(sock.position, sock.quaternion, sock.scale);
+      if (name === "head" || name === "face") sock.scale.multiplyScalar(HEAD_SOCKET[st]![1]); // hats and masks fit the bigger heads
       bone.add(sock);
       this.sockets.set(name, sock);
     }
@@ -542,9 +571,10 @@ export class AvatarView {
       case ANIM.WALK:
       case ANIM.RUN:
       case ANIM.SPRINT:
-        if (sp < 2.2) { name = "walk"; ts = clamp(sp / CLIP_SPEED.walk!, 0.8, 2.0); }
-        else if (sp < 7.4) { name = "run"; ts = clamp(sp / CLIP_SPEED.run!, 0.7, 1.35); }
-        else { name = "sprint"; ts = clamp(sp / CLIP_SPEED.sprint!, 0.85, 1.3); }
+        // shorter legs (the second looks) step faster for the same ground speed
+        if (sp < 2.2) { name = "walk"; ts = clamp(sp / (CLIP_SPEED.walk! * this.stride), 0.8, 2.0 / this.stride); }
+        else if (sp < 7.4) { name = "run"; ts = clamp(sp / (CLIP_SPEED.run! * this.stride), 0.7, 1.35 / this.stride); }
+        else { name = "sprint"; ts = clamp(sp / (CLIP_SPEED.sprint! * this.stride), 0.85, 1.3 / this.stride); }
         break;
       case ANIM.JUMP: name = "jump_air"; break;
       case ANIM.FALL: name = "fall"; break;
@@ -592,18 +622,28 @@ function clamp(v: number, a: number, b: number) {
 
 export { PALETTES };
 
-const WARMUP_ITEMS = ["sunbrand", "hexquill", "carbine", "riverstaff", "emberglass", "stillshot"] as const;
+const WARMUP_ITEMS = ["sunbrand", "hexquill", "carbine", "riverstaff", "emberglass", "stillshot", "kunai"] as const;
 
-/** What the avatar warm-up stands: one avatar per palette, cycling the starters and held items. */
-export function avatarWarmupLooks(): { palette: number; starter: number; item: string }[] {
-  return PALETTES.map((_, i) => ({ palette: i, starter: i % STARTER_FILES.length, item: WARMUP_ITEMS[i % WARMUP_ITEMS.length]! }));
+/** What the avatar warm-up stands: every starter's every look in every palette (each pair is its own
+ *  material with that look's textures, so its own shader build), cycling the held items. Checked in a
+ *  real renderer with ?avatars&warmcheck: no build after the warm-up. */
+export function avatarWarmupLooks(): { palette: number; starter: number; look: number; item: string }[] {
+  const looks: { palette: number; starter: number; look: number; item: string }[] = [];
+  for (let starter = 0; starter < STARTERS.length; starter++) {
+    for (let look = 0; look < (STARTER_LOOKS[starter]?.length ?? 1); look++) {
+      for (let palette = 0; palette < PALETTES.length; palette++) {
+        looks.push({ palette, starter, look, item: WARMUP_ITEMS[looks.length % WARMUP_ITEMS.length]! });
+      }
+    }
+  }
+  return looks;
 }
 
 let warmupViews: AvatarView[] = [];
 
 /**
- * Shader warm-up hook (render/warmup.ts WarmupHooks): while forced on, stands one avatar per palette
- * (avatarWarmupLooks, each holding an item plus a palette-accent item in the left hand) and the six
+ * Shader warm-up hook (render/warmup.ts WarmupHooks): while forced on, stands every starter in every
+ * palette (avatarWarmupLooks, each holding an item plus a palette-accent item in the left hand) and the six
  * far-LOD capsules at `at()`. Every skinned toon variant, its shadow pass, and every weapon/proxy
  * material then compiles behind the loading screen instead of on first sight of another player or an
  * NPC. Forced off, the samples leave the scene but are kept for the session (keptSamples): disposing
@@ -613,8 +653,8 @@ export function avatarWarmupHook(scene: THREE.Object3D, at: () => THREE.Vector3)
   const samples = () =>
     keptSamples("avatarWarmup", () => {
       const parts: THREE.Object3D[] = [];
-      warmupViews = avatarWarmupLooks().map(({ palette, starter, item }) => {
-        const v = new AvatarView(palette, starter);
+      warmupViews = avatarWarmupLooks().map(({ palette, starter, look, item }) => {
+        const v = new AvatarView(palette, starter, look);
         AvatarView.all.delete(v);
         v.setDetail(true);
         v.setWeapon(Math.max(0, WEAPONS.findIndex((w) => w.id === item)));

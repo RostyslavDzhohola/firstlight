@@ -234,7 +234,7 @@ export interface AccountInfo {
   guest: boolean;
   admin: boolean;
   titleMedal: string | null;
-  character: { level: number; xp: number; coins: number; starter: number; palette: number; body: string } | null;
+  character: { level: number; xp: number; coins: number; starter: number; palette: number; look?: number; body: string } | null;
   /** A guest the server will email a code for (level 2+): saving works now. Older servers omit it. */
   saveReady?: boolean;
   medals: string[];

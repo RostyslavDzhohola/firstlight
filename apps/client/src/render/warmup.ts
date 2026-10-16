@@ -40,7 +40,8 @@ export function installShaderMonitor(ctx: RenderCtx) {
     if (stats.watching <= 0) return;
     const r = ro as { object?: THREE.Object3D; material?: THREE.Material } | null;
     const obj = r?.object ?? (ro as THREE.Object3D | null);
-    const name = (obj && (obj.name || obj.type)) || "?";
+    const own = (obj && (obj.name || obj.type)) || "?";
+    const name = obj?.parent?.name ? `${own} in ${obj.parent.name}` : own; // e.g. "Mesh in weapon:sunbrand"
     const material = r?.material ? `${r.material.type}${r.material.name ? ":" + r.material.name : ""}` : "compute";
     stats.afterWarmup++;
     stats.recent.push({ name, material, frame });

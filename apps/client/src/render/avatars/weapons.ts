@@ -42,6 +42,7 @@ function mat(key: MatKey, palette: number): THREE.Material {
     case "blade": {
       // Sunbrand core: amber-white whatever the palette (content.md §8.2)
       const b = new THREE.MeshBasicNodeMaterial();
+      b.name = "sunbrand-blade";
       b.colorNode = color(0xffe2a8).mul(3.2);
       m = b;
       break;
@@ -56,6 +57,7 @@ let flameMat: THREE.MeshBasicNodeMaterial | null = null;
 function flameMaterial(): THREE.MeshBasicNodeMaterial {
   if (flameMat) return flameMat;
   const m = new THREE.MeshBasicNodeMaterial();
+  m.name = "sunbrand-flame";
   const p = uv();
   const across = p.x.sub(0.5).abs().mul(2); // 0 centre → 1 edge
   const n = mx_noise_float(vec2(p.x.mul(3), p.y.mul(7).sub(time.mul(2.6)))).mul(0.5).add(0.5);
@@ -67,6 +69,9 @@ function flameMaterial(): THREE.MeshBasicNodeMaterial {
   m.blending = THREE.AdditiveBlending;
   m.depthWrite = false;
   m.side = THREE.DoubleSide;
+  // Additive without depth writes looks the same in one pass; the back-then-front split of a
+  // double-sided transparent material was a second build the warm-up didn't keep (?avatars&warmcheck).
+  m.forceSinglePass = true;
   flameMat = m;
   return m;
 }
@@ -109,6 +114,16 @@ function design(id: string): Piece[] {
         ps.push(P(cylZ(0.004, 0.004, 0.1, 4), "brass", [Math.cos(a) * 0.026, Math.sin(a) * 0.026, 0.14]));
       }
       return ps;
+    }
+    case "kunai": {
+      // Ember Kunai: a leaf blade, a cord-wrapped grip and a ring pommel with an ember bead
+      return [
+        P(new THREE.ConeGeometry(0.022, 0.15, 4).rotateX(H), "metalLight", [0, 0, 0.16], [0, 0, Math.PI / 4], [1, 0.32, 1]),
+        P(cylZ(0.012, 0.012, 0.012, 8), "metal", [0, 0, 0.08]),
+        P(cylZ(0.009, 0.009, 0.1, 8), "cord", [0, 0, 0.02]),
+        P(torus(0.016, 0.004, 10), "metal", [0, 0, -0.045], [H, 0, 0]),
+        P(sph(0.006, 8, 6), "accent", [0, 0, 0.08]),
+      ];
     }
     case "riverstaff": {
       const ps: Piece[] = [P(cylZ(0.022, 0.02, 1.75, 8), "wood", [0, 0, 0.25])];

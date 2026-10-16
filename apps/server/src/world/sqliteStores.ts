@@ -3,7 +3,7 @@
 
 import type { BodyId } from "@firstlight/shared";
 import { BACKPACK_SLOTS, type CharacterData, type LifeProgress } from "@firstlight/shared/content/character";
-import { STARTERS } from "@firstlight/shared/content/weapons";
+import { STARTERS, starterLook } from "@firstlight/shared/content/weapons";
 import type { InvItem } from "@firstlight/shared/net/protocol";
 import { dropPile, ensureAccount, getPile, listPiles, loadCharacter, PILE_CAP_PER_BODY, saveCharacter, sweepPiles, takeAll, takeItem, type Db } from "../db/index.ts";
 import { tx } from "../db/game-db.ts";
@@ -18,6 +18,8 @@ interface StoredInventory {
   deaths: number;
   dead: boolean;
   worn?: CharacterData["worn"];
+  /** STARTER_LOOKS index (absent on older rows: the original look). */
+  look?: number;
   travelTo?: string;
   travelUntil?: number;
 }
@@ -46,6 +48,7 @@ export class SqliteCharacterRepo implements CharacterRepo {
     return {
       starter: starterIndex,
       palette: c.palette,
+      look: starterLook(starterIndex, inv.look),
       level: c.level,
       xp: c.xp,
       coins: c.coins,
@@ -89,7 +92,7 @@ export class SqliteCharacterRepo implements CharacterRepo {
       y: d.pos?.[1] ?? 0,
       z: d.pos?.[2] ?? 0,
       heading: 0,
-      inventory: { hotbar: d.hotbar, backpack: d.backpack, selected: d.selected, deaths: d.deaths, dead: !!d.dead, worn: d.worn ?? {}, travelTo: d.travelTo, travelUntil: d.travelUntil } satisfies StoredInventory,
+      inventory: { hotbar: d.hotbar, backpack: d.backpack, selected: d.selected, deaths: d.deaths, dead: !!d.dead, worn: d.worn ?? {}, look: d.look ?? 0, travelTo: d.travelTo, travelUntil: d.travelUntil } satisfies StoredInventory,
       missionState: { list: d.missions, life: d.life ?? null } satisfies StoredMissions,
       lifeStartedAt: d.lifeStartedAt,
       protectedUntil: 0,

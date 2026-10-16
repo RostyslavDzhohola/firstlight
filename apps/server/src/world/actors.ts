@@ -2,6 +2,7 @@
 
 import type { Client } from "@colyseus/core";
 import type { CharacterData } from "@firstlight/shared/content/character";
+import type { InvItem } from "@firstlight/shared/net/protocol";
 import type { NpcState, PlayerState } from "@firstlight/shared/net/schema";
 import type { Identity } from "../auth/identity.ts";
 import type { V3 } from "./geometry.ts";
@@ -75,8 +76,11 @@ export interface PlayerActor {
   airStartAt: number;
   airStartLen: number;
   airLiftV: number;
-  /** Server-side charge tracking (bow draw, heavy melee). */
+  /** Server-side charge tracking (bow draw, heavy melee, hand seals). */
   chargeStartedAt: number;
+  /** The held item (by identity) the current charge was started with; equipping or moving items
+   *  ends the charge, and a seal released with anything else is refused. */
+  chargeItem: InvItem | null;
   specialReadyAt: number;
   lastPhraseAt: number;
   healAcc: number;

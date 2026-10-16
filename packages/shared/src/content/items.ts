@@ -147,7 +147,7 @@ const NOT_SOLD = new Set(["fists"]);
 function buildShop(): ShopEntry[] {
   const out: ShopEntry[] = [];
   for (const w of WEAPONS) {
-    if (NOT_SOLD.has(w.id)) continue;
+    if (NOT_SOLD.has(w.id) || w.hidden) continue;
     const gear = w.id === "radio" || w.id === "horse_whistle";
     const category: ShopCategory = w.id.startsWith("tonic") ? "consumables" : gear ? "gear" : w.cls === "support" ? "support" : "weapons";
     const tiers: (1 | 2 | 3)[] = w.id.startsWith("tonic") || gear ? [1] : [1, 2, 3];
@@ -204,7 +204,7 @@ export function unitSellValue(item: Pick<InvItem, "id" | "tier"> & { skin?: stri
   const cos = COSMETIC_BY_ID.get(item.id);
   if (cos) return RARITY_SELL[cos.rarity];
   const w = WEAPON_BY_ID.get(item.id);
-  if (!w || NOT_SOLD.has(w.id)) return 0;
+  if (!w || NOT_SOLD.has(w.id) || w.hidden) return 0;
   const price = w.tiers[Math.max(0, Math.min(2, item.tier - 1))]!.price;
   return price > 0 ? Math.max(1, Math.floor(price * SELL_RATE)) : 0;
 }

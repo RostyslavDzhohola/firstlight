@@ -68,6 +68,7 @@ export const PlayerState = schema(
     cosmetics: t.string(), // comma-separated cosmetic ids
     radioCh: t.uint8(),
     userId: t.string(),
+    look: t.uint8(), // STARTER_LOOKS index (appended: older clients ignore it and draw look 0)
   },
   "Player",
 );

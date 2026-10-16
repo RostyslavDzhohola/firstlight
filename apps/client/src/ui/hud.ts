@@ -14,14 +14,14 @@ import { formatDamage, isLowHp, parsePrompt, shownItem, slotView, type DamageKin
 import { installSprites, portraitSprite } from "./sprites.ts";
 import { uiSettings, type UiSettings } from "./uiSettings.ts";
 import { showSubtitle } from "./subtitle.ts";
-import { showCharacterPick, type CharacterPickOptions } from "./characterPick.ts";
+import { showCharacterPick, type CharacterChoice, type CharacterPickOptions } from "./characterPick.ts";
 import { showDeath, type DeathInfo } from "./death.ts";
 import type { ZoneInfo } from "./zoneLabel.ts";
 
 export type YouPlus = YouState & { selected: number; level: number; dead: boolean };
 export type { DamageKind } from "./hudFormat.ts";
 export type { DeathInfo } from "./death.ts";
-export type { CharacterPickOptions } from "./characterPick.ts";
+export type { CharacterChoice, CharacterPickOptions } from "./characterPick.ts";
 
 /** Boss bar (NPC lane): red hatched for monsters, slate + amber monospaced for Meridian Oversight. */
 export interface BossBarState {
@@ -44,6 +44,8 @@ export interface PartyMember {
   name: string;
   level: number;
   starter: number;
+  /** STARTER_LOOKS index (the portrait). */
+  look?: number;
   hp: number;
   maxHp: number;
   speaking?: boolean;
@@ -165,6 +167,7 @@ export class Hud {
   private name = "";
   private starter = 0;
   private palette = 0;
+  private look = 0;
   private settings: UiSettings = uiSettings.get();
   private liveDamage = 0;
   you: YouPlus | null = null;
@@ -187,6 +190,7 @@ export class Hud {
     this.toasts.setAttribute("aria-live", "polite");
     this.starter = Number(localStorage.getItem("fl.starter") ?? 0) || 0;
     this.palette = Number(localStorage.getItem("fl.palette") ?? 0) || 0;
+    this.look = Number(localStorage.getItem("fl.look") ?? 0) || 0;
     this.applySettings(this.settings);
     uiSettings.onChange((s) => this.applySettings(s));
   }
@@ -373,15 +377,16 @@ export class Hud {
   }
 
   /** Name and look shown on the player card (from the room state; cheap to call every frame). */
-  setIdentity(name: string, starter: number, palette: number) {
-    const key = `${name}|${starter}|${palette}`;
+  setIdentity(name: string, starter: number, palette: number, look = 0) {
+    const key = `${name}|${starter}|${palette}|${look}`;
     if (key === this.c.identity) return;
     this.c.identity = key;
     this.name = name;
     this.starter = starter;
     this.palette = palette;
+    this.look = look;
     this.nameEl.textContent = name || "You";
-    this.faceSprite.className = `px px-${portraitSprite(starter)}`;
+    this.faceSprite.className = `px px-${portraitSprite(starter, look)}`;
     this.subEl.textContent = `${STARTERS[starter]?.name ?? ""} · ${PALETTE_NAMES[palette] ?? ""}`;
   }
 
@@ -603,7 +608,7 @@ export class Hud {
       const row = el("div", `fl-mate fl-holo${m.speaking ? " is-speaking" : ""}${m.muted ? " is-muted" : ""}`, this.party);
       row.dataset.slot = String(m.slot);
       const av = el("div", "fl-mate__avatar", row);
-      sprite(portraitSprite(m.starter), "", av);
+      sprite(portraitSprite(m.starter, m.look), "", av);
       el("span", "fl-pip", av, String(m.slot));
       const body = el("div", "", row);
       const top = el("div", "fl-mate__top", body);
@@ -650,18 +655,19 @@ export class Hud {
 
   // ---------------------------------------------------------------------------------------------- full-screen flows
 
-  /** Death screen; resolves with the chosen starter and palette for rebirth. */
-  death(info: DeathInfo): Promise<{ starter: number; palette: number } | null> {
+  /** Death screen; resolves with the chosen starter, palette and look for rebirth. */
+  death(info: DeathInfo): Promise<CharacterChoice | null> {
     return showDeath(info, {
       name: this.name,
       starter: this.starter,
+      look: this.look,
       lastAlive: this.lastAlive,
       pick: () => this.characterPick({ rebirth: true }),
     });
   }
 
-  /** Starter + palette picker (first play and rebirth). A string argument is the old title form. */
-  characterPick(opts: string | CharacterPickOptions = {}): Promise<{ starter: number; palette: number } | null> {
+  /** Starter + look + palette picker (first play and rebirth). A string argument is the old title form. */
+  characterPick(opts: string | CharacterPickOptions = {}): Promise<CharacterChoice | null> {
     return showCharacterPick(typeof opts === "string" ? { title: opts } : opts);
   }
 

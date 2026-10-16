@@ -43,6 +43,8 @@ export const SAMPLE_FALLBACKS = {
   longbow: { preset: "longbow" },
   comet: { preset: "comet" },
   grenade: { preset: "grenade" },
+  kunai: { preset: "swing", gain: 0.8, rate: 1.6 }, // a thrown kunai's whip
+  ember_seal: { preset: "emberglass", gain: 1.2, rate: 0.8 }, // the Ember Seal fireball
   explosion: { preset: "explosion" },
 } as const satisfies Record<string, Fallback>;
 

@@ -119,7 +119,7 @@ function within<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
 interface FlowOpts {
   kind: "save" | "signin";
   /** Save card header: portrait, level and name. */
-  who?: { name?: string; level?: number; starter: number };
+  who?: { name?: string; level?: number; starter: number; look?: number };
   name?: string;
   /** Where to try again later, e.g. "Esc → Save progress". */
   later?: string;
@@ -147,7 +147,7 @@ function emailFlow(container: HTMLElement, o: FlowOpts): void {
     }
     const who = el("div", "fl-acct__who", container);
     const face = el("div", "fl-face", who);
-    sprite(portraitSprite(o.who.starter), "", face);
+    sprite(portraitSprite(o.who.starter, o.who.look), "", face);
     if (o.who.level) el("span", "fl-lvl num", face, String(o.who.level));
     const t = el("div", "", who);
     el("h2", "", t, title);
@@ -436,7 +436,7 @@ let saveOpen: Promise<SaveResult> | null = null;
  * the account is the server's guest→account merge; the game rejoins as the account by itself (4101).
  * `later`: where to try again, for the busy/unavailable notes (e.g. "Esc → Save progress").
  */
-export function openSaveProgress(opts: { name?: string; level?: number; starter?: number; later?: string; /** Dev gallery only: open on this step, no server. */ preview?: FlowStep } = {}): Promise<SaveResult> {
+export function openSaveProgress(opts: { name?: string; level?: number; starter?: number; look?: number; later?: string; /** Dev gallery only: open on this step, no server. */ preview?: FlowStep } = {}): Promise<SaveResult> {
   if (saveOpen) return saveOpen;
   if (!mayOpenSaveCard({ pointerLocked: !!document.pointerLockElement })) return Promise.resolve("dismissed");
   installSprites();
@@ -462,7 +462,12 @@ export function openSaveProgress(opts: { name?: string; level?: number; starter?
     const run = (start: FlowStep, info: AccountInfo | null) =>
       emailFlow(m.card, {
         kind: "save",
-        who: { name: opts.name ?? info?.displayName ?? info?.name, level: opts.level ?? info?.character?.level, starter: opts.starter ?? info?.character?.starter ?? starter() },
+        who: {
+          name: opts.name ?? info?.displayName ?? info?.name,
+          level: opts.level ?? info?.character?.level,
+          starter: opts.starter ?? info?.character?.starter ?? starter(),
+          look: opts.look ?? info?.character?.look ?? (Number(localStorage.getItem("fl.look") ?? 0) || 0),
+        },
         later: opts.later,
         finish: (ok) => finish(ok ? "saved" : "dismissed"),
         start,
