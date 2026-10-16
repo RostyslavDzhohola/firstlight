@@ -131,6 +131,7 @@ interface SharedMods {
   zoneAt(body: unknown, x: number, y: number, z: number): { safe: boolean; kind: string; pad: number };
   nearestSafeEntry(body: unknown, x: number, y: number, z: number): { dir: readonly [number, number, number]; edge: number };
   TOWN_GATES: readonly (readonly [number, number, number])[];
+  safeGates(body: unknown): readonly (readonly [number, number, number])[];
   portalSpots(body: unknown, terrain: any): { to: string; center: [number, number, number] }[];
   NPC_DEFS: readonly { id: string; name: string; temper: string; tier: string; height: number }[];
   NF: { DEAD: number };
@@ -185,7 +186,7 @@ export function installE2eHook(win: Window & typeof globalThis): void {
     sharedLoading = true;
     void Promise.all([import("@firstlight/shared"), import("@firstlight/shared/content/npcs"), import("@firstlight/shared/net/schema"), import("@firstlight/shared/content/weapons")])
       .then(([s, n, sc, w]) => {
-        shared = { BODIES: s.BODIES, padDirs: s.padDirs, isSafe: s.isSafe, PAD_SAFE_RADIUS: s.PAD_SAFE_RADIUS, zoneAt: s.zoneAt, nearestSafeEntry: s.nearestSafeEntry, TOWN_GATES: s.TOWN_GATES, portalSpots: s.portalSpots, NPC_DEFS: n.NPC_DEFS, NF: n.NF, PF: sc.PF, WEAPONS: w.WEAPONS, WEAPON_BY_ID: w.WEAPON_BY_ID } as unknown as SharedMods;
+        shared = { BODIES: s.BODIES, padDirs: s.padDirs, isSafe: s.isSafe, PAD_SAFE_RADIUS: s.PAD_SAFE_RADIUS, zoneAt: s.zoneAt, nearestSafeEntry: s.nearestSafeEntry, TOWN_GATES: s.TOWN_GATES, safeGates: s.safeGates, portalSpots: s.portalSpots, NPC_DEFS: n.NPC_DEFS, NF: n.NF, PF: sc.PF, WEAPONS: w.WEAPONS, WEAPON_BY_ID: w.WEAPON_BY_ID } as unknown as SharedMods;
       })
       .catch((e: unknown) => console.warn("[e2e] shared modules", e))
       .finally(() => (sharedLoading = false));
@@ -592,11 +593,12 @@ export function installE2eHook(win: Window & typeof globalThis): void {
       portals = [];
     }
     /** A unit direction (pushed `out` metres away from the +Y pole along the ground) as a world point on the terrain. */
-    const onGround = (d: readonly [number, number, number], out: number): [number, number, number] => {
+    const onGround = (d: readonly [number, number, number], out: number, from: readonly [number, number, number] = [0, 1, 0]): [number, number, number] => {
       let u: [number, number, number] = [d[0], d[1], d[2]];
       if (out) {
-        const k = u[1];
-        const t: [number, number, number] = [k * u[0], k * u[1] - 1, k * u[2]]; // away from the pole, in the tangent plane
+        // Away from `from` (Portus: the pole; a planet: pad 0), in the tangent plane.
+        const k = u[0] * from[0] + u[1] * from[1] + u[2] * from[2];
+        const t: [number, number, number] = [k * u[0] - from[0], k * u[1] - from[1], k * u[2] - from[2]];
         const tl = Math.hypot(...t) || 1;
         u = [u[0] + (t[0] / tl) * (out / R), u[1] + (t[1] / tl) * (out / R), u[2] + (t[2] / tl) * (out / R)];
         const ul = Math.hypot(...u);
@@ -651,8 +653,14 @@ export function installE2eHook(win: Window & typeof globalThis): void {
       },
       // The nearest pad's centre (Portus: the plaza, the town's open middle).
       pad: bodyDef && padIndex >= 0 && terrain ? target(...onGround(pads[padIndex]!, 0)) : null,
-      // Portus town gates (the safe border runs through them) and a point 25 m outside each.
-      gates: body === "portus" && terrain ? S.TOWN_GATES.map((d) => ({ ...target(...onGround(d, 0)), out: target(...onGround(d, 25)) })) : [],
+      // The walled zone's gates (the safe border runs through them: Portus' two town gates, a planet's
+      // outpost gates, D-b2-1) and a point 25 m outside each (away from the town's pole / pad 0).
+      gates:
+        body === "portus" && terrain
+          ? S.TOWN_GATES.map((d) => ({ ...target(...onGround(d, 0)), out: target(...onGround(d, 25)) }))
+          : bodyDef && terrain && pads[0]
+            ? S.safeGates(bodyDef).map((d) => ({ ...target(...onGround(d, 0)), out: target(...onGround(d, 25, pads[0]!)) }))
+            : [],
       // The planet's mission guide by the main pad (QuestClient's interactables).
       guide: (() => {
         const q = (g.systems ?? []).find((x) => !!x && typeof x === "object" && Array.isArray((x as { interactables?: unknown }).interactables)) as

@@ -49,7 +49,7 @@ export interface Snap {
   lastDenied: { action: string; reason: string; t: number } | null;
   net?: { roomId: string; sessionId: string } | null;
   player?: { pos: number[]; heading: number; pitch: number; anim: number; clip: string | null; onGround: boolean; swimming: boolean; name: string | null; starter: number | null; hp: number | null; level: number | null; flags: number; protected: boolean; inCombat: boolean; dead: boolean };
-  zone?: { server: "safe" | "danger" | null; label: string | null; labelText: string | null; chip: boolean; local: "safe" | "danger" | null; kind: "town" | "pad" | "wild" | null; padIndex: number; padDist: number; safeRadius: number; toSafe: number | null };
+  zone?: { server: "safe" | "danger" | null; label: string | null; labelText: string | null; chip: boolean; local: "safe" | "danger" | null; kind: "town" | "outpost" | "pad" | "wild" | null; padIndex: number; padDist: number; safeRadius: number; toSafe: number | null };
   /** The nearest pad's centre (Portus: the plaza). */
   pad?: Target | null;
   /** Portus town gates and a point 25 m outside each. */
@@ -456,6 +456,8 @@ export class Player {
   async walkOutOfRing(timeoutMs = 30_000) {
     const s0 = await this.snap();
     const body = s0.body;
+    // A walled arrival outpost (D-b2-1): out through its nearest gate, like leaving the Portus town.
+    if ((s0.gates?.length ?? 0) > 0 && s0.zone?.kind === "outpost") return this.walkOutOfTown(Math.max(timeoutMs, 75_000));
     await this.page.waitForTimeout(800); // let the arrival settle (first corrections re-aim the camera)
     const until = Date.now() + timeoutMs;
     let lastPos = s0.player!.pos;
@@ -485,7 +487,8 @@ export class Player {
   }
 
   /**
-   * Walk out of the Portus town through the nearest gate, into the wild (D-zones-1). From the plaza
+   * Walk out of the Portus town (or a planet's walled outpost, D-b2-1) through the nearest gate, into
+   * the wild (D-zones-1). From the plaza
    * (the town's open middle) to the gate and on outside; when the streets turn us round, back to the
    * plaza and try again (a player who got lost does the same).
    */
@@ -506,8 +509,8 @@ export class Player {
       if (await this.walkTo((x) => x.gates?.[g]?.out ?? null, outside, { timeoutMs: Math.min(20_000, until - Date.now()) })) break;
     }
     const s = await this.snap();
-    expect(outside(s), "walked out of a town gate into the wild").toBe(true);
-    expect(s.body, "still in Portus (no portal on the way)").toBe("portus");
+    expect(outside(s), "walked out of a gate into the wild").toBe(true);
+    expect(s.body, "still on the same body (no portal on the way)").toBe(s0.body);
     return s;
   }
 
