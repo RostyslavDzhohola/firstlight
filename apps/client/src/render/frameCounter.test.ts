@@ -30,5 +30,14 @@ describe("?framecount overlay (#23)", () => {
     const b = m.withFrameCounter(vec4(1, 1, 1, 1) as unknown as THREE.Node);
     expect(b).not.toBe(a);
     expect(m.frameCounterState()?.count).toBe(0); // nothing drawn yet
+    // One tick per drawn frame (RenderCtx.render calls it before drawing).
+    for (let i = 0; i < 3; i++) m.frameCounterTick();
+    expect(m.frameCounterState()?.count).toBe(3);
+  });
+
+  it("without the flag a tick does nothing", async () => {
+    const m = await load("");
+    m.frameCounterTick();
+    expect(m.frameCounterState()).toBeNull();
   });
 });

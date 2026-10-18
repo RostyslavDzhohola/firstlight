@@ -12,7 +12,7 @@ import {
 import { startRenderer } from "./rendererStart.ts";
 import { GpuTimer, ResolutionLadder } from "./timing.ts";
 import { compileForPass, passCallDepth, saveRenderState, type GuardedRenderer, type PassCompileRenderer } from "./compilePass.ts";
-import { withFrameCounter } from "./frameCounter.ts";
+import { frameCounterTick, withFrameCounter } from "./frameCounter.ts";
 
 export { TIERS, FEATURES, type Tier, type Feature, type ResolvedSettings };
 
@@ -279,6 +279,7 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
       camera.updateProjectionMatrix();
     },
     render() {
+      frameCounterTick(); // ?framecount (#23): this frame's number, for both counters; a no-op without the flag
       pipeline.render();
     },
     compileScene() {

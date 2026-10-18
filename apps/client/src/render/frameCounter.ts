@@ -1,13 +1,14 @@
 // `?framecount` (#23, D-e2e-2): the frame counters drawn into the presented frame and into the top-most
 // DOM layer (render/frameCount.ts has the logic and the layout). The WebGL counter is the last step of
 // the post pipeline's output (after FXAA), so it is in exactly the pixels the canvas presents, untouched
-// by bloom, grading or the vignette. Its count moves on when that output is drawn (a uniform updated
-// per render), and the DOM counter is written in the same step, so both show one frame's number.
+// by bloom, grading or the vignette. Its count moves on just before each frame is drawn
+// (frameCounterTick in RenderCtx.render), which writes the DOM counter too, so both show one frame's
+// number.
 //
 // Without the flag nothing here is created: withFrameCounter() hands the output node back as it is.
 
 import * as THREE from "three/webgpu";
-import { exp2, float, floor, mod, screenCoordinate, screenSize, select, uniform, vec3, vec4 } from "three/tsl";
+import { exp2, float, floor, mod, renderGroup, screenCoordinate, screenSize, select, uniform, vec3, vec4 } from "three/tsl";
 import { flags } from "../config.ts";
 import { FRAME_BITS, FrameCount, frameBits, STRIP_CELLS, STRIP_ROWS } from "./frameCount.ts";
 
@@ -34,13 +35,19 @@ export function withFrameCounter(out: THREE.Node): THREE.Node {
 function makeCounter() {
   const count = new FrameCount();
   const dom = typeof document !== "undefined" ? new FrameCountDom() : null;
-  // Once per render that draws the output: one per presented frame (warm-up and probe frames too).
-  const value = uniform(0, "float").onRenderUpdate(() => {
-    const n = count.drawn();
-    dom?.show(n);
-    return n % 2 ** FRAME_BITS;
-  });
+  // A render-group uniform written before each drawn frame (frameCounterTick), like the occluder
+  // fade's: counted inside the output's own node update instead, every other frame's pixels showed
+  // the number from two frames before (the e2e journey read 103, 102, 105, 104…).
+  const value = uniform(0).setGroup(renderGroup);
   return { count, value, dom };
+}
+
+/** One more frame is about to be drawn (RenderCtx.render): both counters take its number. No-op without the flag. */
+export function frameCounterTick(): void {
+  if (!counter) return;
+  const n = counter.count.drawn();
+  counter.value.value = n % 2 ** FRAME_BITS;
+  counter.dom?.show(n);
 }
 
 /** The strip (stripLayout) over `out`: plate black, the marker red, a 1 bit white, a 0 bit dark grey. */
