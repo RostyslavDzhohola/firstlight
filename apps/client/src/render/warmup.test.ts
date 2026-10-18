@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
 import { forceProperty, installShaderMonitor, keptSamples, lastWarmup, predictShadowBuilds, shadowBuildCost, shaderStats, warmShadowCasters, warmup } from "./warmup.ts";
+import { FIRST_DRAWS_START } from "./parallelCompile.ts";
 import type { RenderCtx } from "./renderer.ts";
 import { watchDisposals } from "./disposeWatch.testutil.ts";
 
@@ -157,9 +158,50 @@ describe("warmShadowCasters", () => {
   });
 });
 
+/** three's Pipelines: a program compiles in parallel (a promise in the list) only when given a list. */
+class FakePipelines {
+  calls: { ro: string; parallel: boolean }[] = [];
+  unfinished = 0;
+  compiled = new Set<string>();
+  private readonly started = new Set<string>();
+  private readonly pipelines = new Map<string, object>();
+  getForRender(ro: unknown, promises: Promise<unknown>[] | null = null) {
+    const k = String(ro);
+    this.calls.push({ ro: k, parallel: !!promises });
+    if (this.started.has(k)) return ro;
+    this.started.add(k);
+    if (promises) {
+      this.unfinished++;
+      promises.push(new Promise<void>((r) => setTimeout(() => {
+        this.unfinished--;
+        this.compiled.add(k);
+        r();
+      }, 2)));
+    } else {
+      this.compiled.add(k);
+    }
+    return ro;
+  }
+}
+
+/** …with three's draw check: a render object draws once its pipeline is compiled. */
+class FakeDrawPipelines extends FakePipelines {
+  private readonly byKey = new Map<string, object>();
+  get(ro: unknown) {
+    const k = String(ro);
+    if (!this.byKey.has(k)) this.byKey.set(k, { k });
+    return { pipeline: this.byKey.get(k) };
+  }
+  isReady(ro: unknown) {
+    return this.compiled.has(String(ro));
+  }
+}
+
 describe("warm-up report (per-phase times and shader counts) and progress", () => {
   /** A fake renderer on a hand-moved clock: compile items cost 10 ms and one build each, frames 5 ms. */
-  function fakeCtx(opts: { items: number; webgpu: boolean; shadows: boolean; frameBuilds?: number }) {
+  let draws: string[][] = [];
+  function fakeCtx(opts: { items: number; webgpu: boolean; shadows: boolean; frameBuilds?: number; pipelines?: FakePipelines; objects?: number }) {
+    draws = [];
     let clock = 1000;
     vi.spyOn(performance, "now").mockImplementation(() => clock);
     vi.stubGlobal("window", {});
@@ -184,16 +226,30 @@ describe("warm-up report (per-phase times and shader counts) and progress", () =
       renderer: {
         debug,
         info: { frame: 0, reset() {} },
+        _pipelines: opts.pipelines,
         compileAsync: async (_s: unknown, _c: unknown, _t: unknown, onProgress?: (e: { loaded: number; total: number }) => void) => {
           for (let i = 1; i <= opts.items; i++) {
             await Promise.resolve();
             clock += 10;
             build();
+            // three: a per-object list, awaited before the next object
+            const list: Promise<unknown>[] = [];
+            opts.pipelines?.getForRender(`object ${i}`, list);
+            await Promise.all(list);
             onProgress?.({ loaded: i, total: opts.items });
           }
         },
       },
       render() {
+        if (opts.objects) {
+          const p = opts.pipelines as FakeDrawPipelines;
+          const drew: string[] = [];
+          for (let i = 0; i < opts.objects; i++) {
+            p.getForRender(`mesh ${i}`);
+            if (p.isReady(`mesh ${i}`)) drew.push(`mesh ${i}`);
+          }
+          draws.push(drew);
+        } else opts.pipelines?.getForRender("frame");
         clock += 5;
         if (frameBuilds > 0) {
           frameBuilds--;
@@ -206,6 +262,60 @@ describe("warm-up report (per-phase times and shader counts) and progress", () =
     return ctx;
   }
 
+  it("compiles new programs side by side during the warm-up; the settle frame renders the way play does", async () => {
+    const pipelines = new FakePipelines();
+    const own = pipelines.getForRender;
+    try {
+      const ctx = fakeCtx({ items: 3, webgpu: false, shadows: true, pipelines });
+      await warmup(ctx, { frames: 2 });
+      const calls = pipelines.calls;
+      expect(calls.filter((c) => c.ro.startsWith("object")).every((c) => c.parallel)).toBe(true);
+      expect(calls.filter((c) => c.ro === "frame").slice(0, -1).every((c) => c.parallel)).toBe(true); // shadow + real frames
+      expect(calls.at(-1)).toEqual({ ro: "frame", parallel: false }); // the settle frame: three's own path
+      expect(pipelines.unfinished).toBe(0); // everything compiled before the loader goes
+      expect(pipelines.getForRender).toBe(own); // three's method is back
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("WebGL2: spreads first draws over frames, and keeps drawing until every program has compiled and drawn once", async () => {
+    const pipelines = new FakeDrawPipelines();
+    const own = pipelines.isReady;
+    try {
+      const ctx = fakeCtx({ items: 0, webgpu: false, shadows: false, pipelines, objects: 12 });
+      const r = await warmup(ctx, { frames: 1 });
+      const settleFrame = draws.at(-1)!;
+      const before = draws.slice(0, -1);
+      const firstDraws = before.map((d, i) => d.filter((m) => !before.slice(0, i).some((p) => p.includes(m))).length);
+      expect(Math.max(...firstDraws)).toBeLessThanOrEqual(8); // never all twelve in one frame
+      expect(firstDraws.find((n) => n > 0)).toBeLessThanOrEqual(FIRST_DRAWS_START);
+      expect(new Set(before.flat()).size).toBe(12); // every object drew once before the loader goes
+      expect(settleFrame).toHaveLength(12);
+      expect(r.phases.frames.drain).toBeGreaterThan(0);
+      expect(pipelines.isReady).toBe(own);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("WebGPU: no first-draw budget (its pipelines are whole when compiled); waits for them without drawing", async () => {
+    const pipelines = new FakeDrawPipelines();
+    try {
+      const ctx = fakeCtx({ items: 0, webgpu: true, shadows: false, pipelines, objects: 12 });
+      const r = await warmup(ctx, { frames: 1 });
+      expect(r.phases.frames.drain).toBe(0);
+      expect(r.phases.frames.frames).toBe(2);
+      expect(pipelines.unfinished).toBe(0);
+      expect(draws.at(-1)).toHaveLength(12);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
   it("times the scene-pass compile, compute compile, shadow frames and real frames, with the shaders built in each", async () => {
     try {
       const ctx = fakeCtx({ items: 5, webgpu: false, shadows: true, frameBuilds: 1 });
@@ -215,11 +325,11 @@ describe("warm-up report (per-phase times and shader counts) and progress", () =
       expect(r.label).toBe("arrival");
       expect(r.backend).toBe("webgl2");
       expect(r.tier).toBe("medium");
-      expect(r.phases.compile).toEqual({ ms: 50, builds: 5, items: 5 });
+      expect(r.phases.compile).toEqual({ ms: 50, builds: 5, items: 5, wait: 0 }); // no three internals: nothing deferred
       expect(r.phases.compute).toEqual({ ms: 0, builds: 0, nodes: 0 }); // no compute nodes yet
       // 6 predicted shadow builds in batches of 4: two frames (the first frame's own build lands here)
-      expect(r.phases.shadows).toEqual({ ms: 10, builds: 1, frames: 2, predicted: 6 });
-      expect(r.phases.frames).toEqual({ ms: 15, builds: 0, frames: 3 }); // 2 + the settle frame
+      expect(r.phases.shadows).toEqual({ ms: 10, builds: 1, frames: 2, predicted: 6, wait: 0 });
+      expect(r.phases.frames).toEqual({ ms: 15, builds: 0, frames: 3, wait: 0, drain: 0 }); // 2 + the settle frame
       expect(r.ms).toBe(75);
       expect(r.end - r.start).toBe(75);
       expect(r.builds).toBe(6);
@@ -257,7 +367,7 @@ describe("warm-up report (per-phase times and shader counts) and progress", () =
       const events: [number, number][] = [];
       await warmup(ctx, { frames: 1, onProgress: (done, total) => events.push([done, total]) });
       expect(events).toEqual([[1, 2], [2, 2]]);
-      expect(lastWarmup()!.phases.shadows).toEqual({ ms: 0, builds: 0, frames: 0, predicted: 0 });
+      expect(lastWarmup()!.phases.shadows).toEqual({ ms: 0, builds: 0, frames: 0, predicted: 0, wait: 0 });
     } finally {
       vi.unstubAllGlobals();
       vi.restoreAllMocks();
