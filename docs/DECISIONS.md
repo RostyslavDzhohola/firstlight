@@ -1069,3 +1069,18 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   runs of long frames with that in mind (a control page, or a rerun). Why: cutting bloom mips or
   shadow updates would cost visible quality for stalls the evidence doesn't tie to the game.
 - **D-home-7 (2026-10-16):** DataFast is live with the standard script exactly as DataFast issued it (site id `dfid_NA56rn0p8nPJYi59xnBYW`, `script.js`, so the home page's note says DataFast sets cookies). An inline guard placed before it sets DataFast's own opt-out flag (`localStorage.datafast_ignore`) for automated browsers (`navigator.webdriver`) and test URLs (`?e2e`, `?bench`, `?offline`), and the Playwright fixtures set the same flag, so journeys and smoke runs never count as visits. Why: Grok Bot set up the site for the owner, and test traffic shouldn't pollute the analytics.
+- **D-ui-1 (2026-10-18):** no live backdrop blur in the UI by default (#20, spec #17). Every surface that
+  blurred what was behind it (pause scrim, How to play and the menu's panels, the share row, HUD holo
+  panels, home cards, the loader's tip, legacy `.fl-overlay` backdrops) now uses a flat translucent fill:
+  the Low tier's tokens (`--hud-scrim`, `--panel-bg`, the .88 scrim), which become the defaults in
+  `ui/styles/tokens.css`, so the two looks can't drift; `*-blur` tokens default to `none`. `?blur=1`
+  (`fl-blur` on `<html>`, `ui/look.ts`) restores the old blurred values exactly for A/B recordings; Low
+  stays flat either way. The low-health vignette and the death drain keep their full-screen grayscale
+  backdrop filters (revisit only if drops show up there). `styles/flatLook.test.ts` fails on any new
+  backdrop blur outside the `?blur=1` block. The HUD (every `.fl-hud` / `data-hud` root, the tutorial
+  panel included) is hidden (`visibility: hidden`, `body.fl-paused`) while the pause menu or its Settings
+  is open, also with `?blur=1`, so an A/B recording differs only in the blur. Why: in the owner's
+  recording every layer drop had the same shape: the presented frame stopped at the first blurred
+  see-through panel and every layer drawn after it was missing for 1–4 frames (menu 72.2–79.3 s, loader
+  3.9–5.1 s, the idle home page at 0.8 s and 1.9 s), most likely Chrome's macOS compositor; removing every
+  backdrop pass removes that boundary. Related: D-view-1, D-view-2, D-controls-1..4 (the pause flow).

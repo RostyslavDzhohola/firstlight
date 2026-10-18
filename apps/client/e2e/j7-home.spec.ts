@@ -3,7 +3,7 @@
 // "LOGGED OUT" card over the blurred game, no voice pill.
 
 import { expect, test } from "./fixtures.ts";
-import { logOut, newEmail, saveWithEmail } from "./flows.ts";
+import { blurredBackdrops, logOut, newEmail, saveWithEmail } from "./flows.ts";
 
 test.describe("J7 home", () => {
   test("J7.1 · item 6a · a guest logs out → the home page with leaderboard, online players, worlds, Play and Sign in", { tag: ["@J7", "@J7.1", "@item-6a"] }, async ({ player, page }) => {
@@ -37,5 +37,18 @@ test.describe("J7 home", () => {
     await expect(progress).toContainText(s.player!.name!);
     await expect(progress).toContainText(/level|lv/i);
     await player.shot("home-progress");
+  });
+
+  test("J7.3 · D-ui-1 · the home page draws no live backdrop blur; ?blur=1 brings the old look back", { tag: ["@J7", "@J7.3", "@D-ui-1"] }, async ({ player, page }) => {
+    await player.open();
+    const board = page.locator('[data-e2e="home-leaderboard"]');
+    await expect(board).toBeVisible();
+    expect(await blurredBackdrops(page), "no blurring backdrop filter on the home page").toEqual([]);
+    await player.shot("home-flat");
+    await player.open({ blur: 1 });
+    await expect(board).toBeVisible();
+    expect(await board.evaluate((e) => getComputedStyle(e).backdropFilter), "a home card with ?blur=1").toMatch(/blur\(22px\)/);
+    expect((await blurredBackdrops(page)).length, "the cards and the share row blur again").toBeGreaterThanOrEqual(3);
+    await player.shot("home-blur1");
   });
 });

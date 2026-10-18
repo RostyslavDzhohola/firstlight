@@ -99,6 +99,8 @@ export function buildHowTo(parent: HTMLElement): HTMLElement {
   return panel;
 }
 
+type MenuMode = "hidden" | "pause" | "settings" | "notice";
+
 export class Menu {
   private readonly el: HTMLDivElement;
   /** "Click to look around": back in the game with the pointer free (after Esc, or a refused lock). */
@@ -106,7 +108,7 @@ export class Menu {
   private readonly flow: PauseFlow;
   /** The pause state changed (the game mutes its colours while a menu or panel is up). */
   onState: ((s: PauseState) => void) | null = null;
-  private mode: "hidden" | "pause" | "settings" | "notice" = "hidden";
+  private mode: MenuMode = "hidden";
   private ticker = 0;
   private closeSettings: (() => void) | null = null;
   // live pause-menu refs
@@ -172,11 +174,19 @@ export class Menu {
     this.onState?.(s);
   }
 
+  private setMode(mode: MenuMode) {
+    this.mode = mode;
+    // No HUD under the pause menu or its Settings (D-ui-1): menu.css hides every HUD root while
+    // <body> carries fl-paused (as photo mode's fl-photo does), so the screen under the menu is calm.
+    // Notices leave it as it is.
+    document.body.classList.toggle("fl-paused", mode === "pause" || mode === "settings");
+  }
+
   hideAll() {
     this.closeSettings?.();
     this.closeSettings = null;
     this.el.hidden = true;
-    this.mode = "hidden";
+    this.setMode("hidden");
     clearInterval(this.ticker);
   }
 
@@ -200,7 +210,7 @@ export class Menu {
   showPause() {
     if (this.game.combat?.deadUntilRespawn) return;
     this.reset("");
-    this.mode = "pause";
+    this.setMode("pause");
     const screen = el("main", "fl-menu__screen", this.el);
     screen.dataset.e2e = "pause-menu";
     const left = el("section", "fl-menu__left", screen);
@@ -420,7 +430,7 @@ export class Menu {
 
   showSettings() {
     this.reset("");
-    this.mode = "settings";
+    this.setMode("settings");
     // The Menu button goes back to the pause menu; Esc goes back into the game, as on the menu.
     this.closeSettings = openSettings(this.game, this.el, () => this.showPause(), () => this.flow.resume());
   }
@@ -438,7 +448,7 @@ export class Menu {
 
   private showNoticeCard(title: string, text: string, action: string | null, fn: (() => void) | null) {
     this.reset("fl-menu--notice");
-    this.mode = "notice";
+    this.setMode("notice");
     const card = el("section", "fl-notice fl-panel", this.el);
     card.setAttribute("role", "alertdialog");
     const mark = el("div", "fl-wordmark fl-wordmark--sm", card, "First");

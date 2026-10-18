@@ -2,6 +2,7 @@
 // no action needs an F-key; the dodge starts within ~100 ms of C; voice is hidden ("coming soon").
 
 import { expect, test } from "./fixtures.ts";
+import { blurredBackdrops, hudParts } from "./flows.ts";
 import type { Player } from "./player.ts";
 
 /** shared/net/schema.ts ANIM, for the notes. */
@@ -34,11 +35,16 @@ async function arrive(player: Player, body = "arcadia") {
 test.describe("J5 controls", () => {
   test("J5.1 · item 6d · Esc opens the menu, Esc again goes back to the game, a click looks around again", { tag: ["@J5", "@J5.1", "@item-6d"] }, async ({ player, page }) => {
     await arrive(player);
+    expect(await hudParts(player), "the HUD while playing").toEqual(expect.arrayContaining(["playerCard", "hotbar"]));
     await player.escape(); // the browser releases the pointer
     await expect(pauseMenu(player), "Esc opens the pause menu").toBeVisible();
     await player.shot("pause-menu");
+    // D-ui-1: no HUD under the menu, and no live backdrop blur anywhere on it.
+    expect.soft(await hudParts(player), "no HUD part under the pause menu").toEqual([]);
+    expect.soft(await blurredBackdrops(page), "no blurring backdrop filter under the pause menu").toEqual([]);
     await page.keyboard.press("Escape");
     await expect(pauseMenu(player), "Esc in the menu closes it").toBeHidden();
+    expect(await hudParts(player), "the HUD comes back with the game").toEqual(expect.arrayContaining(["playerCard", "hotbar"]));
     // Back in the game: either the pointer came straight back (allowed where the browser lets the page
     // re-lock without a click) or the "Click to look around" hint shows and one click looks around.
     const hint = page.locator('[data-e2e="click-to-look"]');
