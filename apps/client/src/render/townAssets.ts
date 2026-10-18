@@ -116,11 +116,20 @@ export function resolveAsset(base: string, name: string): string {
 }
 
 /**
- * The whole download (manifest, GLB, both strips) is aborted after this many milliseconds, so a hung
- * request can't stay in the session cache: the next arrival tries again. PortusTown's own deadline
- * (a little longer) shows the plain fallback before the probe and the warm-up either way.
+ * A download (manifest, GLB, both strips) that gets no byte for this many milliseconds is aborted,
+ * so a hung request can't stay in the session cache: the next arrival tries again. One that keeps
+ * receiving goes on however slow the network (D-load-6; it was 15 s for the whole download): what
+ * lands after the arrival's deadline (SiteTown TOWN_LOAD_DEADLINE_MS) goes in at the next loading
+ * screen, and the next arrival uses it from the cache. A byte of any town download counts for all
+ * of them (they share the Portus strips).
  */
-export const TOWN_FETCH_TIMEOUT_MS = 15_000;
+export const TOWN_FETCH_TIMEOUT_MS = 45_000;
+
+/** The idle timers of the town downloads in flight: each restarts on any download's progress. */
+const inFlight = new Set<() => void>();
+function progressed() {
+  for (const restart of inFlight) restart();
+}
 
 /** Start (or reuse) a site's download. Resolves null if anything fails or times out (the site then draws its colliders as plain stone). */
 export function preloadSite(site: SiteId): Promise<TownAssets | null> {
@@ -148,10 +157,19 @@ export function loadTown(fetchImpl: Fetch = (u, i) => fetch(u, i), timeoutMs = T
   return loadSite("portus", fetchImpl, timeoutMs);
 }
 
-/** Download, decode and validate a site; rejects on any failure, or when `timeoutMs` runs out (every request is aborted). */
+/**
+ * Download, decode and validate a site; rejects on any failure, or when no byte came for `timeoutMs`
+ * (every request is aborted).
+ */
 export async function loadSite(site: SiteId, fetchImpl: Fetch = (u, i) => fetch(u, i), timeoutMs = TOWN_FETCH_TIMEOUT_MS): Promise<TownAssets> {
   const abort = new AbortController();
-  const timer = setTimeout(() => abort.abort(new Error(`town assets: no answer in ${timeoutMs} ms`)), timeoutMs);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const restart = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => abort.abort(new Error(`town assets: no answer in ${timeoutMs} ms`)), timeoutMs);
+  };
+  restart();
+  inFlight.add(restart);
   const { signal } = abort;
   // Every await below also settles when the signal fires (a body stream that stalls, a decode).
   const bounded = <T>(p: Promise<T>): Promise<T> =>
@@ -162,12 +180,39 @@ export async function loadSite(site: SiteId, fetchImpl: Fetch = (u, i) => fetch(
     });
   const get = async (url: string) => {
     const r = await bounded(fetchImpl(url, { signal }));
+    progressed();
     if (!r.ok) throw new Error(`${url} ${r.status}`);
     return r;
   };
+  /** The whole body, read part by part: every part is progress (the idle timer restarts). */
+  const body = async (r: Response): Promise<Uint8Array<ArrayBuffer>> => {
+    if (!r.body) return new Uint8Array(await bounded(r.arrayBuffer()));
+    const reader = r.body.getReader();
+    const parts: Uint8Array[] = [];
+    let n = 0;
+    try {
+      for (;;) {
+        const { done, value } = await bounded(reader.read());
+        if (done) break;
+        parts.push(value);
+        n += value.byteLength;
+        progressed();
+      }
+    } catch (e) {
+      void reader.cancel(e).catch(() => undefined);
+      throw e;
+    }
+    const out = new Uint8Array(n);
+    let o = 0;
+    for (const p of parts) {
+      out.set(p, o);
+      o += p.byteLength;
+    }
+    return out;
+  };
   try {
     const base = `${config.assetBase}/${siteFolder(site)}`;
-    const manifest = (await bounded((await get(`${base}manifest.json`)).json())) as TownManifest;
+    const manifest = JSON.parse(new TextDecoder().decode(await body(await get(`${base}manifest.json`)))) as TownManifest;
     const want = siteVersion(site);
     if (manifest.version !== want) {
       // A stale cache or a half-finished deploy: the geometry may not match the layout.
@@ -179,14 +224,14 @@ export async function loadSite(site: SiteId, fetchImpl: Fetch = (u, i) => fetch(
       const key = `${url}|${srgb ? 1 : 0}`;
       let p = strips.get(key);
       if (!p) {
-        p = get(url).then((r) => bounded(r.blob())).then((b) => bounded(decodeStrip(b, manifest.layerSize, srgb)));
+        p = get(url).then(body).then((b) => bounded(decodeStrip(new Blob([b]), manifest.layerSize, srgb)));
         strips.set(key, p);
         p.catch(() => strips.delete(key));
       }
       return bounded(p);
     };
     const [gltfBytes, color, normal] = await Promise.all([
-      get(resolveAsset(base, manifest.files.glb.name)).then((r) => bounded(r.arrayBuffer())),
+      get(resolveAsset(base, manifest.files.glb.name)).then(body).then((b) => b.buffer),
       strip(manifest.files.color.name, true),
       strip(manifest.files.normal.name, false),
     ]);
@@ -195,6 +240,7 @@ export async function loadSite(site: SiteId, fetchImpl: Fetch = (u, i) => fetch(
     return { site, manifest, meshes, color, normal };
   } finally {
     clearTimeout(timer);
+    inFlight.delete(restart);
   }
 }
 

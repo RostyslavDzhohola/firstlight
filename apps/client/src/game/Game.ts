@@ -525,9 +525,10 @@ export class Game {
     alive("loading characters");
     if (this.planet.town) {
       // The castle town (Portus) or the pad outpost (a planet) is in the scene before the probe and
-      // the warm-up (falls back to plain colliders). Bounded: the download aborts after 15 s and the
-      // site shows its stone fallback by 18 s, so the probe and the warm-up always see what will be
-      // drawn (no late meshes, no live builds). With the outpost's models the plain pad discs go.
+      // the warm-up (falls back to plain colliders). Bounded: a download with no byte for 45 s aborts
+      // and the site shows its stone fallback by 50 s, so the probe and the warm-up always see what
+      // will be drawn (no late meshes, no live builds); a later asset waits for the next loading
+      // screen (D-load-6). With the outpost's models the plain pad discs go.
       setLoading(this.planet.body.terrain.kind === "hub" ? "Raising the town…" : "Raising the outpost…", 0.81);
       await this.planet.town.ready;
       alive("raising the town");
@@ -657,6 +658,7 @@ export class Game {
     this.running = false;
     this.rewarming = true;
     setLoading("Applying graphics settings…", 0.5);
+    this.swapInLateSite();
     const shaders = warmupProgress(0.5);
     try {
       await warmup(this.ctx, {
@@ -677,6 +679,11 @@ export class Game {
     }
   }
 
+  /** A loading screen on this body: a site asset that came after the arrival's deadline goes in now, before the warm-up (D-load-6). */
+  private swapInLateSite() {
+    if (this.planet.town?.swapInLate()) this.portals?.setPadModels(this.planet.town.drawsModels);
+  }
+
   private updateWorldForWarmup() {
     const f = this.bench ? this.bench.focus : this.player.pos;
     this.env.update(1 / 60);
@@ -692,6 +699,7 @@ export class Game {
     this.rewarming = true;
     const tuningLine = "Tuning graphics for this computer…";
     setLoading(tuningLine, 0.5);
+    this.swapInLateSite();
     const tuning = stepProgress(0.5, 0.75);
     const shaders = warmupProgress(0.75);
     try {

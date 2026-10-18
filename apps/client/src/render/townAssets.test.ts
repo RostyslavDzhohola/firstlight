@@ -6,7 +6,7 @@ import { readdirSync, statSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { PORTUS_TOWN_VERSION, TOWN_LAYOUT, TOWN_PREFABS } from "@firstlight/shared/content/portusTown";
 import { OUTPOSTS } from "@firstlight/shared/content/padOutposts";
-import { loadSite, loadTown, resolveAsset, validateTown } from "./townAssets.ts";
+import { loadSite, loadTown, resolveAsset, TOWN_FETCH_TIMEOUT_MS, validateTown } from "./townAssets.ts";
 import { siteBytes, siteDir, siteManifest, testSiteAssets, testTownAssets, townBytes as bytes, townDir as dir, townManifest as manifest } from "./townAssets.testutil.ts";
 
 /** Width and height of a WebP file (VP8, VP8L or VP8X header). */
@@ -31,6 +31,47 @@ describe("town asset download", () => {
     const t0 = Date.now();
     await expect(loadTown(hang, 40)).rejects.toThrow(/no answer in 40 ms/);
     expect(Date.now() - t0).toBeLessThan(2000);
+    expect(aborted).toEqual([expect.stringMatching(/manifest\.json$/)]);
+  });
+
+  it("gives a slow network 45 s without a byte before it gives up (was 15 s for the whole download; D-load-6)", () => {
+    expect(TOWN_FETCH_TIMEOUT_MS).toBe(45_000);
+  });
+
+  /** A response whose body arrives in `parts`, `gapMs` apart (then stalls for good when `stall`). */
+  function trickle(text: string, parts: number, gapMs: number, init: { signal: AbortSignal }, stall = false): Response {
+    const bytes = new TextEncoder().encode(text);
+    const size = Math.ceil(bytes.length / parts);
+    let i = 0;
+    const body = new ReadableStream<Uint8Array>({
+      async pull(c) {
+        await new Promise((r) => setTimeout(r, gapMs));
+        if (init.signal.aborted) return c.error(init.signal.reason);
+        if (stall && i > 0) return new Promise<void>(() => {}); // nothing more, ever
+        if (i * size >= bytes.length) return c.close();
+        c.enqueue(bytes.slice(i * size, ++i * size));
+      },
+    });
+    return new Response(body);
+  }
+
+  it("keeps a slow download going as long as bytes keep coming, past the no-answer time", async () => {
+    // The manifest trickles in over ~5× the timeout, 25 ms a part; the next file then fails (404),
+    // which shows the manifest was read whole instead of aborted.
+    const slow = async (url: string, init: { signal: AbortSignal }) =>
+      url.endsWith("manifest.json") ? trickle(JSON.stringify(manifest), 10, 25, init) : new Response("", { status: 404 });
+    const t0 = Date.now();
+    await expect(loadTown(slow, 60)).rejects.toThrow(/404/);
+    expect(Date.now() - t0).toBeGreaterThan(200);
+  });
+
+  it("aborts a download whose bytes stop coming", async () => {
+    const aborted: string[] = [];
+    const stalls = async (url: string, init: { signal: AbortSignal }) => {
+      init.signal.addEventListener("abort", () => aborted.push(url));
+      return trickle(JSON.stringify(manifest), 10, 5, init, true);
+    };
+    await expect(loadTown(stalls, 40)).rejects.toThrow(/no answer in 40 ms/);
     expect(aborted).toEqual([expect.stringMatching(/manifest\.json$/)]);
   });
 

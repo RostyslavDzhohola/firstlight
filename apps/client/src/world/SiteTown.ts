@@ -17,8 +17,9 @@
 // Fallback: if the asset can't load, or hasn't arrived by TOWN_LOAD_DEADLINE_MS, the collider solids
 // are drawn as plain stone boxes and cylinders (two instanced draws) before the quality probe and
 // the warm-up, so nothing blocks the player invisibly and nothing compiles in play (on a planet the
-// old pad discs stay: Portals.setPadModels). A later completion is ignored for this arrival (the
-// next arrival uses the cached asset).
+// old pad discs stay: Portals.setPadModels). A later completion is kept, not ignored (D-load-6): the
+// next loading screen on this body swaps it in before its warm-up (swapInLate), and the next
+// arrival uses the cached asset.
 
 import * as THREE from "three/webgpu";
 import { padDirs, type Terrain } from "@firstlight/shared";
@@ -58,11 +59,11 @@ const GRID_N = Math.round((2 * GRID_HALF) / TOWN_CELL);
 const DECAL_RADIUS = 30;
 
 /**
- * How long an arrival waits for the site asset (ms) before it shows the fallback instead. A little
- * longer than the download's own abort (townAssets.ts TOWN_FETCH_TIMEOUT_MS), so it only matters if
- * decoding stalls or a test hands in a source that never settles.
+ * How long an arrival waits for the site asset (ms) before it shows the fallback instead (D-load-6;
+ * was 18 s). A hung download is aborted before it (townAssets.ts TOWN_FETCH_TIMEOUT_MS: no byte for
+ * 45 s); a slow one that is still receiving goes on, and swapInLate puts it in at the next loading screen.
  */
-export const TOWN_LOAD_DEADLINE_MS = 18_000;
+export const TOWN_LOAD_DEADLINE_MS = 50_000;
 
 /**
  * Shadows (Medium+ shadow map). The drawn opaque site casts nothing; a shadow-only copy of it casts
@@ -182,6 +183,8 @@ export class SiteTown {
   private fallback: THREE.InstancedMesh[] = [];
   private settings: ResolvedSettings;
   private assets: TownAssets | null = null;
+  /** The asset that came after the deadline, waiting for the next loading screen (swapInLate). */
+  private late: TownAssets | null = null;
   private lodDistance = 60;
   private disposed = false;
   /** Warm-up: show both variants of every cell (so both compile and upload). */
@@ -221,11 +224,24 @@ export class SiteTown {
     clearTimeout(timer);
     if (this.disposed) return;
     if (assets === "late") {
-      // Show the fallback now (before the probe and warm-up); whatever arrives later is ignored here.
-      console.warn(`[town] ${this.site} structure assets not ready after ${deadlineMs} ms; drawing plain colliders`);
+      // Show the fallback now (before the probe and warm-up). What arrives later waits for the next
+      // loading screen on this body (swapInLate): never a new mesh, or a shader build, in play.
+      console.warn(`[town] ${this.site} structure assets not ready after ${deadlineMs} ms; drawing plain colliders until the next loading screen`);
+      void source.then(
+        (a) => {
+          if (a && !this.disposed) this.late = a;
+        },
+        () => undefined,
+      );
       return this.buildFallback();
     }
     if (!assets) return this.buildFallback();
+    this.buildSite(assets);
+  }
+
+  /** The real site from its asset (the fallback on a failure). False when it fell back. */
+  private buildSite(assets: TownAssets): boolean {
+    let ok = true;
     try {
       this.assets = assets;
       this.buildCells(assets);
@@ -236,8 +252,30 @@ export class SiteTown {
       this.group.clear();
       this.assets = null;
       this.buildFallback();
+      ok = false;
     }
     this.applySettings(this.settings);
+    return ok;
+  }
+
+  /**
+   * A loading screen on this body (a graphics re-warm, a re-probe): if the real site came after the
+   * arrival's deadline, it replaces the stone fallback now, so the warm-up that follows compiles it
+   * (D-load-6). True when it did (on a planet the caller then drops the old pad discs).
+   */
+  swapInLate(): boolean {
+    const assets = this.late;
+    this.late = null;
+    if (!assets || this.disposed || this.assets) return false;
+    for (const m of this.fallback) {
+      this.group.remove(m);
+      m.geometry.dispose();
+      m.dispose();
+    }
+    this.fallback.length = 0;
+    const ok = this.buildSite(assets);
+    if (ok) console.info(`[town] ${this.site} structure assets arrived after the arrival's deadline; drawn from this loading screen on`);
+    return ok;
   }
 
   // ------------------------------------------------------------------ building
