@@ -293,16 +293,20 @@ export class ResolutionLadder {
       this.slow = 0;
       if (++this.fast >= 4 && this.index > 0 && now >= this.noUpUntil) {
         this.fast = 0;
-        this.index--;
-        this.lastUpAt = now;
-        this.cooldownUntil = now + 4000;
-        this.onChange?.();
+        this.stepUp(now);
       }
     } else {
       this.slow = Math.max(0, this.slow - 1);
       this.fast = 0;
       if (this.gpuUntrusted) this.trialUp(now, steady);
     }
+  }
+
+  private stepUp(now: number) {
+    this.index--;
+    this.lastUpAt = now;
+    this.cooldownUntil = now + 4000;
+    this.onChange?.();
   }
 
   /** `failedTrial`: a trial up-step's probation failed (however long a menu paused it). */
@@ -321,12 +325,9 @@ export class ResolutionLadder {
     this.steady = steady ? this.steady + 1 : 0;
     if (this.steady < TRIAL_STEADY_WINDOWS || this.index === 0 || now < this.noUpUntil) return;
     this.steady = 0;
-    this.index--;
-    this.lastUpAt = now;
-    this.cooldownUntil = now + 4000;
     this.probation = TRIAL_PROBATION_WINDOWS;
     this.trials.taken++;
-    this.onChange?.();
+    this.stepUp(now);
   }
 }
 
