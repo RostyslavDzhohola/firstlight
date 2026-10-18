@@ -1313,13 +1313,39 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   and 8.3/11.4 s at load 207/172; cold 38.1/26.9 s at load 170/262, 7 and 5 frames over 250 ms, all
   but 3 of them the early compile stall and the terrain (below). Slower on a warm cache by ~3 s, by
   the owner's call: smoothness over a short wait.
-  Left (why this is `Refs #39`, not `Fixes`): (1) cold runs whose warm-up starts within ~6 s of page
-  load (7 of 7 untraced, R0 and A+B alike) get one 1.5–5.7 s main-thread task 0.2–0.3 s into the
-  compile, with 1–17 links pending; runs starting later mostly don't, `?linkcap=4` doesn't stop it,
-  and tracing made it vanish; it reads as a synchronous GL call waiting on a GPU process still busy
-  with cold-cache work from earlier in the page (the trace shows that pattern at renderer start).
-  (2) Some programs take over 250 ms alone and no batching splits them: terrain (41k characters)
-  295–405 ms, water 446 ms, now and then an avatar main pipeline under load. Per-object palette
-  uniforms (#39 step D, its own lane) are to cut the 48 avatar and horse main pipelines to 8.
-  Why: #39 (spec #18), and the owner's call (2026-10-18) to keep graphics quality and accept a little
-  more wait for a smooth loader.
+  Phase 2 (Fable's diagnosis of the early compile stall, the lead's follow-ups): the stall is a
+  synchronous WebGL query (a round trip that first drains the GPU process) issued while the GPU process
+  is busy with cold-cache work. `?gltrace` logs such calls: with three's own path they blocked 244–386 ms
+  in the compile (getExtension, bufferData); the predicted 1.5–5 s COMPLETION_STATUS_KHR wait was never
+  caught, since none of the six traced cold runs started its warm-up early (8.7–25 s). Fix 1 waits, a
+  frame at a time, for the GPU process to drain before the compile (up to 982 ms measured); Fix 2
+  (`render/syncPoll.ts`) answers link polls locally until each link's fence has signalled and no batch is
+  in flight (`?syncpoll` turns both off). The longest main-thread task in a warm-up went from 1.5–5.7 s
+  to 85–256 ms in every run since (43 runs, load 22–306). Item 5: each program is judged by its own link:
+  done within 30 ms of its fence, and that fence within 250 ms of the link call, means cached ("warm"),
+  priced at the warm rate in cold-priced units (batches hold one class, each class learns its own rate,
+  the ceiling and growth stay on cold-priced units). Lone cold programs (≥ 30 000 units) get a frame to
+  themselves. The bench gained a returning visit (`BENCH_PROFILE_DIR`: one profile, so Chrome's own
+  program cache is warm too) and a realistic first visit (`BENCH_HOME_MS=8000`). Not kept: drawing no
+  frame while a batch is in flight (A/B: 22.8/22.6 s and 3/2 frames over 250 ms with it, 19.7–29 s and
+  1–4 without; Chrome's compositor waits on the same GPU thread).
+  Revised acceptance (the lead, 2026-10-18): in realistic-cold and cold runs no main-thread task over
+  250 ms in the warm-up and no frame gap over 250 ms other than a single GPU-process pipeline build of
+  a program that can't be split, named; returning visits no slower than R0 with no gap over 250 ms. Why:
+  splitting those programs means simplifying their shaders, which the owner's quality call rules out.
+  Measured (load 36–306; the owner's apps kept it over 150 for most runs): the main-thread rule holds
+  but in three runs at 254–256 ms, all at load 169–267 (otherwise ≤ 202). Named single builds over 250 ms: terrain-L4N
+  (41k characters) 283–407 ms in every cold run, water-L2 (26k) 457 ms, grass (24k) 498 ms, an avatar
+  toon pipeline (22k) 357–873 ms, skyPlanets (17k) 330 ms, RTT (6k) 583 ms, all at load ≥ 170. Not
+  allowed by the rule, so the cold runs fail: compile-phase gaps of 250–450 ms with no batch in flight
+  and the main thread idle (the GPU process busy), and in every cold run the last batch of 2–4 small
+  non-skinned shadow programs (town, stall, props, weapon; ~2.5k characters each) taking 500–740 ms,
+  their links done 8–18 s after their fences, their first draws far dearer than their size. Returning
+  visits before the 250 ms fence rule: 3.7/4.1/4.2 s at load 36–100, 102–108 of 118 programs warm,
+  11–18 batches, one 272 ms compile gap in three runs (R0 4.1–4.3 s); but cold runs then called 11–21
+  programs warm, once a batch of 7 that took 1.3 s. With the rule cold runs call none warm, but at load
+  200–230 a returning visit's fences are as slow as a cold one's (p50 0.5–0.6 s) and it ran 8.8/13.1 s.
+  WebGPU warm 2.7–2.9 s, no gap over 250 ms. So `Refs #39`: left are the compile-phase GPU-process gaps,
+  the late batch of small shadow programs, and a warm/cold test that holds under load (the fence rule's
+  250 ms is the knob; no low-load run with it yet). Why: #39 (spec #18) and the owner's call
+  (2026-10-18): graphics quality over load time.
