@@ -6,7 +6,7 @@ tall, slim, hooded elder. Opus did all the work; Blender ran headless; nothing u
 other paid generation.
 
 **Verdict:** the method works and is worth keeping, with changes. The two steps that paid off most were
-**the per-part preview loop** (it caught four bad parts in about 9 minutes) and **the clip check**
+**the per-part preview loop** (it caught seven problems in five parts in about 9 minutes) and **the clip check**
 (it found real faults in the swing bake that looked fine in T-pose: 195 flags in round 1, 41 at the end,
 after the Codex review added upper-arm capsules that catch contacts the earlier rounds missed). The weakest step is **T-pose-only previews of cloth**: the capelet and sleeves looked right in
 T-pose and wrong once the arms came down. Fixing that means previewing in a pose, not only in T-pose.
@@ -42,7 +42,7 @@ about 1 min 50 s. One clip check over all 29 clips: about 13 s.
    grey-robe-grey-hat, no orb staff, nothing from Hexwick's or Ash's lists, §8.2) shaped the hood and
    braid. **She must not be called "Vesper":** content.md §10 already rejects it.
 2. **Build part by part with a preview after each** (`preview_parts.py`, front, 3/4 and side in one
-   image). *Worked best of all.* Four parts were wrong on the first try and fixed before the slow build:
+   image). *Worked best of all.* Seven problems in five parts showed up on the first try and were fixed before the slow build:
    a goatee-like chin, a bodysuit-tight robe top, ring-like cuffs, hair poking out of the hood like a
    white brim, a thin twisted braid, spiky capelet scallops and ribbed sash tails. Each fix took one
    edit and a 30–60 s preview. *Didn't work:* every preview is in T-pose, so it can't show cloth that
