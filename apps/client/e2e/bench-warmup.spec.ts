@@ -10,7 +10,7 @@
 // same browser compiles from a warm cache. Run each measurement as its own Playwright invocation (a
 // fresh browser and profile), against one stack started once (E2E_REUSE=1), alternating the modes:
 //   for run in 1 2; do for mode in serial parallel; do
-//     BENCH_MODE=$mode BENCH_RUN=$run E2E_REUSE=1 npx playwright test -c e2e/playwright.config.ts --project webgl --grep @bench
+//     BENCH_MODE=$mode BENCH_RUN=$run E2E_REUSE=1 pnpm exec playwright test -c e2e/playwright.config.ts --project webgl --grep @bench
 //   done; done
 // macOS also keeps each app's compiled Metal shaders outside the profile (a warm cache across
 // browsers). For cold-cache numbers on the webgl project, delete Playwright Chromium's own caches

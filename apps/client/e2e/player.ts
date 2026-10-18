@@ -5,6 +5,7 @@
 import { expect, type Page, type TestInfo } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
+import type { WarmupReport } from "../src/render/warmupReport.ts";
 import { OUT } from "./stack.ts";
 
 export type Gfx = "webgl" | "webgpu";
@@ -84,32 +85,10 @@ export interface ServerNpc {
   boss: boolean;
   area: string | null;
 }
-/** A shader warm-up as the hook reports it (src/render/warmup.ts WarmupReport, D-load-1). */
-export interface WarmupPhase {
-  ms: number;
-  builds: number;
-}
-export interface Warmup {
-  label: string;
-  backend: "webgpu" | "webgl2";
-  tier: string | null;
-  start: number;
-  end: number;
-  ms: number;
-  builds: number;
-  shaders: number;
-  stages?: number;
-  /** The warm-up's own frames over 100 ms: ms, main-thread draw ms, builds and first draws in each. */
-  slow?: { phase: string; ms: number; cpu: number; builds: number; firstDraws: number; budget: number }[];
-  phases: {
-    compile: WarmupPhase & { items: number };
-    compute: WarmupPhase & { nodes: number };
-    shadows: WarmupPhase & { frames: number; predicted: number };
-    frames: WarmupPhase & { frames: number };
-  };
-}
+/** A shader warm-up as the hook reports it (D-load-1). */
+export type Warmup = WarmupReport;
 /** A warm-up with the page's frame times during it (a long frame = the main thread was blocked). */
-export interface WarmupNote extends Warmup {
+export interface WarmupNote extends WarmupReport {
   framesDuring: { frames: number; p50: number; p95: number; max: number; over100: number; over250: number; worst: { t: number; ms: number }[] };
 }
 
