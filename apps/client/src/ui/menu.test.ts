@@ -4,12 +4,10 @@
 // and a respawn the server confirms after the death screen closed brings the hint back (D-controls-3).
 // The HUD is hidden under the pause menu (D-ui-1), checked through the real stylesheet.
 
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Menu as MenuT } from "./menu.ts";
 import { setupMenuDom, type MenuDom } from "./menu.testutil.ts";
+import { withStylesheet } from "./stylesheet.testutil.ts";
 
 let r: MenuDom;
 beforeAll(async () => {
@@ -90,9 +88,6 @@ describe("the real Menu", () => {
   });
 
   it("the HUD hides while the pause menu or its Settings is open and comes back with the game (D-ui-1)", async () => {
-    const style = document.createElement("style");
-    style.textContent = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "menu.css"), "utf8");
-    document.head.append(style);
     // Every HUD root carries .fl-hud or data-hud (the HUD itself, the tutorial panel, nameplates…).
     const hud = document.createElement("div");
     hud.className = "fl-hud";
@@ -102,7 +97,7 @@ describe("the real Menu", () => {
     tutorial.dataset.hud = "";
     document.body.append(hud, tutorial);
     const seen = () => [card, tutorial].map((e) => getComputedStyle(e).visibility !== "hidden");
-    try {
+    await withStylesheet("ui/menu.css", async () => {
       expect(r.shown.menu()).toBe(true);
       expect(seen(), "under the pause menu").toEqual([false, false]);
       openSettings();
@@ -120,11 +115,10 @@ describe("the real Menu", () => {
       await r.settle();
       expect(r.locked()).not.toBeNull();
       expect(seen(), "playing").toEqual([true, true]);
-    } finally {
-      style.remove();
+    }).finally(() => {
       hud.remove();
       tutorial.remove();
-    }
+    });
   });
 
   it("a respawn confirmed after the death screen closed brings the hint back (no stuck screen)", async () => {

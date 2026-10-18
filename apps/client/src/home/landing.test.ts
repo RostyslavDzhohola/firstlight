@@ -3,10 +3,8 @@
 // frame, the landing is taken out of the page (not displayed, inert) and the home page stops polling;
 // the way back (a failed load's "Back to the home page") brings it back working, with fresh data.
 
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { withStylesheet } from "../ui/stylesheet.testutil.ts";
 
 vi.mock("../net/auth.ts", async (importOriginal) => {
   const real = await importOriginal<typeof import("../net/auth.ts")>();
@@ -71,23 +69,17 @@ describe("the landing under the loading screen", () => {
 
   it("back on the home page, the half-started game's UI layer (HUD) stays hidden until Play again", async () => {
     // .fl-home sits at z 0, so #ui (the HUD a failed boot already built) would paint over the page.
-    const style = document.createElement("style");
-    style.textContent = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../ui/styles/home.css"), "utf8");
-    document.head.append(style);
     const { hideLandingUnderLoader, showLanding } = await import("./landing.ts");
     const card = document.querySelector("#ui .fl-me")!;
     const seen = () => getComputedStyle(card).visibility !== "hidden";
-    try {
+    await withStylesheet("ui/styles/home.css", () => {
       hideLandingUnderLoader(landing(), (fn) => fn());
       expect(seen(), "in the game").toBe(true);
       showLanding(landing());
       expect(seen(), "over the home page").toBe(false);
       hideLandingUnderLoader(landing(), (fn) => fn());
       expect(seen(), "Play again").toBe(true);
-    } finally {
-      style.remove();
-      showLanding(landing());
-    }
+    }).finally(() => showLanding(landing()));
   });
 
   it("the home page polls nothing while it is hidden, and polls at once when it comes back", async () => {
@@ -101,9 +93,10 @@ describe("the landing under the loading screen", () => {
 
     hideLandingUnderLoader(landing(), (fn) => fn());
     expect(displayed()).toBe(false);
-    vi.advanceTimersByTime(120_000);
-    document.dispatchEvent(new Event("visibilitychange")); // a tab switch back would poll too
-    await new Promise((r) => setTimeout(r, 20));
+    // A poll decides synchronously: it calls fetch before its first await. So every tick of six poll
+    // periods and a tab switch back (which polls at once) have had their say when these return.
+    await vi.advanceTimersByTimeAsync(120_000);
+    document.dispatchEvent(new Event("visibilitychange"));
     expect(homeCalls, "no polling under the loader").toBe(2);
 
     showLanding(landing());
