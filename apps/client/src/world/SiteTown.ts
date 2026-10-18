@@ -37,6 +37,7 @@ import { preloadSite, type SiteId, type TownAssets, type TownPart, type TownSlot
 import { TOWN_EMISSIVE, townFallbackMaterial, townMaterial, type TownMaterialKind } from "../render/townMaterial.ts";
 import { conformDecal } from "./townDecal.ts";
 import { outpostPaths } from "./outpostPaths.ts";
+import { cameraBoxRay, stallCameraBoxes } from "./stallCamera.ts";
 
 /**
  * Ground cell size (m) and the half extent of the cell grid around the site's centre. Measured at
@@ -194,9 +195,12 @@ export class SiteTown {
     this.site = terrain.body.id as SiteId;
     this.group.name = this.site === TOWN_BODY ? "portusTown" : `outpost:${this.site}`;
     const collider = (this.collider = structureCollider(terrain));
+    const stalls = stallCameraBoxes(terrain);
     this.moveColliders = {
       resolve: (pos, out) => collider.resolve(pos, out),
       raycast: (o, d, maxT) => collider.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT),
+      // The camera also stops at the shop stall's awning and what else hangs off it (#22, D-view-5).
+      cameraRay: (o, d, maxT) => Math.min(collider.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT), cameraBoxRay(stalls, o.x, o.y, o.z, d.x, d.y, d.z, maxT)),
     };
     this.settings = settings;
     this.group.visible = !flags.has("notown");
