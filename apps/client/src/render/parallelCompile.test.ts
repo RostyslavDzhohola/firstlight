@@ -313,21 +313,54 @@ describe("FirstDrawPacer (one batch of first draws in flight, sized by the GPU's
     expect(p.allowance()).toBeLessThanOrEqual(FIRST_DRAWS_CAP);
   });
 
-  it("caps batches at FIRST_DRAWS_CAP units until full batches come back quick; a slow batch puts the cap back", () => {
+  it("FIRST_DRAWS_CAP is a ceiling: quick shared-stage batches never lift it, and new stages after them get no more", () => {
+    // three's shared stages: one vertex and one fragment source drawn once, then reused by many pipelines
+    const vs = { code: "v".repeat(2000) };
+    const fs = { code: "f".repeat(2000) };
+    const shared = (i: number) => ({ k: `s${i}`, vertexProgram: vs, fragmentProgram: fs }); // overhead only
+    const fresh = (i: number) => ({ k: `n${i}`, vertexProgram: { code: `v${i}`.repeat(4000) }, fragmentProgram: { code: `f${i}`.repeat(6000) } });
+    const terrain = { k: "terrain", vertexProgram: { code: "t".repeat(4000) }, fragmentProgram: { code: "T".repeat(38_000) } };
+    const pipes = new Map<string, object>([["seed", { k: "seed", vertexProgram: vs, fragmentProgram: fs }]]);
+    for (let i = 0; i < 60; i++) pipes.set(`s${i}`, shared(i));
+    for (let i = 0; i < 8; i++) pipes.set(`n${i}`, fresh(i));
+    pipes.set("terrain", terrain);
+    const renderer = { _pipelines: { isReady: () => true, get: (ro: unknown) => ({ pipeline: pipes.get(String(ro)) }) } } as GateRenderer;
+    const gate = gateFirstDraws(renderer, undefined, newStageCost);
     const p = new FirstDrawPacer();
-    batch(p, 36_000, 100); // not slow (under the target), not quick: the cap holds
-    expect(p.allowance()).toBe(FIRST_DRAWS_CAP);
-    const sizes: number[] = [];
-    for (let i = 0; i < 4; i++) {
-      // a warm cache: a full batch takes ~2 frames
-      const a = p.allowance();
-      batch(p, a, 30);
-      sizes.push(p.allowance());
+    let now = 0;
+    /** One frame offering `ros` (each not yet drawn tries a first draw), its batch fenced and back after `ms`. */
+    const frame = (ros: string[], ms: number) => {
+      const before = gate.cost();
+      gate.frame(p.allowance());
+      const drew = ros.filter((ro) => renderer._pipelines!.isReady(ro));
+      const used = gate.cost() - before;
+      p.sent(used, now, () => true);
+      now += ms;
+      p.tick(now);
+      return { drew, used };
+    };
+    frame(["seed"], 30);
+    const allowances: number[] = [];
+    let s = 0;
+    for (let i = 0; i < 6; i++) {
+      // quick full batches of pipelines whose stages are all drawn (a warm cache, or shared stages)
+      const ros = Array.from({ length: 12 }, () => `s${s++}`);
+      const { used } = frame(ros, 30);
+      expect(used).toBeLessThanOrEqual(FIRST_DRAWS_CAP);
+      allowances.push(p.allowance());
     }
-    // each quick full batch lifts the cap 1.5x, and the next batch grows at most 1.5x
-    expect(sizes).toEqual([60_000, 90_000, 135_000, 202_500]);
-    batch(p, p.allowance(), BATCH_TARGET_MS + 20); // over the target: back to the proven cap
-    expect(p.allowance()).toBeLessThanOrEqual(FIRST_DRAWS_CAP);
+    expect(Math.max(...allowances)).toBeLessThanOrEqual(FIRST_DRAWS_CAP); // never lifted
+    // then new stages turn up: a batch still holds at most the ceiling's worth
+    const fresh8 = Array.from({ length: 8 }, (_, i) => `n${i}`);
+    const { drew, used } = frame(fresh8, 30);
+    expect(used).toBeLessThanOrEqual(FIRST_DRAWS_CAP);
+    expect(drew.length).toBeLessThan(fresh8.length);
+    // a single program over the ceiling still goes, alone
+    const big = frame(["terrain", ...fresh8], 30);
+    expect(big.drew.filter((ro) => ro === "terrain" || !drew.includes(ro))[0]).toBe("terrain");
+    expect(big.used).toBe(newStageCost(terrain, new WeakSet()));
+    expect(big.used).toBeGreaterThan(FIRST_DRAWS_CAP);
+    gate.release();
   });
 
   it("learns only from fenced batches", () => {

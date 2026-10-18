@@ -145,8 +145,9 @@ export const BATCH_TARGET_MS = 160;
 /** The first batch's budget, in GLSL characters: ~5 ms per 1000 on a cold M1 cache, so ~120 ms. */
 export const FIRST_DRAWS_START = 24_000;
 /**
- * The most a batch may cost (units: GLSL characters of new stages) until full batches have come back
- * quick (a warm cache); a batch over the target puts it back. ~5 ms per 1000 on a cold M1: ~200 ms.
+ * The most a batch may cost (units: GLSL characters of new stages plus PIPELINE_OVERHEAD each), always:
+ * quick batches don't lift it, since stages that were cached or shared say nothing about the next new
+ * ones. Only a single program over it goes (alone). ~5–7 ms per 1000 units on a cold M1: ~200–290 ms.
  */
 export const FIRST_DRAWS_CAP = 40_000;
 /**
@@ -191,11 +192,9 @@ export function newStageCost(pipeline: object, drawn: DrawnStages): number {
 
 /** How FirstDrawPacer learns and sizes batches. */
 export interface PacerTuning {
-  /** The first batch's budget, and the ceiling until full batches come back quick (cost units). */
+  /** The first batch's budget, and the ceiling on every batch (cost units). */
   start: number;
   cap: number;
-  /** Raise the ceiling by `growth` after a batch that used most of it within half the target. */
-  liftCap: boolean;
   /** A batch's budget is at most `growth` × the last batch's units (or the start budget). */
   growth: number;
   /** ms of each batch's time that is the fence's latency, not GPU work. */
@@ -207,13 +206,13 @@ export interface PacerTuning {
   unfenced: boolean;
 }
 
-/** #39: rate up at once and down slowly, growth ≤ 1.5× per batch, a ceiling lifted only by quick full batches. */
+/** #39: rate up at once and down slowly, growth ≤ 1.5× per batch, a fixed ceiling. */
 export const PACER: Readonly<PacerTuning> = {
-  start: FIRST_DRAWS_START, cap: FIRST_DRAWS_CAP, liftCap: true, growth: 1.5, latency: FENCE_LATENCY_MS, rise: 1, fall: 0.25, unfenced: false,
+  start: FIRST_DRAWS_START, cap: FIRST_DRAWS_CAP, growth: 1.5, latency: FENCE_LATENCY_MS, rise: 1, fall: 0.25, unfenced: false,
 };
 /** D-load-2's pacer (`?oldpacer`): the mean of the last rate and the new one, no growth limit, no ceiling. */
 export const OLD_PACER: Readonly<PacerTuning> = {
-  start: FIRST_DRAWS_START, cap: BUDGET_MAX, liftCap: false, growth: Infinity, latency: 0, rise: 0.5, fall: 0.5, unfenced: true,
+  start: FIRST_DRAWS_START, cap: BUDGET_MAX, growth: Infinity, latency: 0, rise: 0.5, fall: 0.5, unfenced: true,
 };
 
 /**
@@ -222,7 +221,7 @@ export const OLD_PACER: Readonly<PacerTuning> = {
  * frame that drew something new, one batch is in flight at a time: no new first draws until the GPU
  * has finished it. Budgets are in cost units (newStageCost): each finished batch measures the GPU's
  * ms per unit (rising at once, falling slowly), and the next batch gets what should take
- * BATCH_TARGET_MS, at most 1.5× the last batch and at most the ceiling.
+ * BATCH_TARGET_MS, at most 1.5× the last batch and never more than FIRST_DRAWS_CAP.
  */
 export class FirstDrawPacer {
   private readonly onBatch?: (ms: number, used: number, tag: unknown) => void;
@@ -232,12 +231,9 @@ export class FirstDrawPacer {
     this.onBatch = onBatch;
     this.tune = tuning;
     this.budget = tuning.start;
-    this.cap = tuning.cap;
   }
 
   private budget: number;
-  /** The current ceiling on a batch's budget. */
-  private cap: number;
   private batch: { done: () => boolean; at: number; used: number; tag: unknown } | null = null;
   private lastUsed = 0;
   /** ms of GPU time per cost unit, smoothed over batches (null: nothing measured yet). */
@@ -279,15 +275,10 @@ export class FirstDrawPacer {
     const r = Math.max(0, ms - t.latency) / used;
     if (this.rate === null) this.rate = r;
     else this.rate += (r - this.rate) * (r > this.rate ? t.rise : t.fall);
-    if (t.liftCap) {
-      // a warm cache: a batch that used most of the ceiling came back within half the target
-      if (ms <= BATCH_TARGET_MS / 2 && used >= 0.75 * this.cap) this.cap = Math.min(BUDGET_MAX, this.cap * t.growth);
-      else if (ms > BATCH_TARGET_MS) this.cap = t.cap;
-    }
     const work = BATCH_TARGET_MS - t.latency;
     const byRate = this.rate > 0 ? work / this.rate : Infinity;
     const byGrowth = t.growth * Math.max(used, t.start);
-    this.budget = Math.round(Math.max(1, Math.min(this.cap, byRate, byGrowth)));
+    this.budget = Math.round(Math.max(1, Math.min(t.cap, byRate, byGrowth)));
   }
 
   /** Fenced batches so far and how long the GPU took over them (ms, rounded). */
