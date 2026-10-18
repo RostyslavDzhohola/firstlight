@@ -38,19 +38,34 @@ export interface DeferredPipelines {
   release(): void;
 }
 
+/**
+ * Put `fn` in place of `obj[key]` and return an idempotent restore that puts back what was there:
+ * the instance's own method, or (by deleting the override) the prototype's.
+ */
+function overrideMethod<T extends object, K extends keyof T>(obj: T, key: K, fn: T[K]): () => void {
+  const own = Object.prototype.hasOwnProperty.call(obj, key);
+  const original = obj[key];
+  obj[key] = fn;
+  let restored = false;
+  return () => {
+    if (restored) return;
+    restored = true;
+    if (own) obj[key] = original;
+    else delete obj[key];
+  };
+}
+
 export function deferPipelines(renderer: DeferRenderer): DeferredPipelines {
   const pipelines = renderer._pipelines;
   if (!pipelines || typeof pipelines.getForRender !== "function") {
     return { active: false, pending: () => 0, started: () => 0, finished: () => 0, settle: async () => {}, release() {} };
   }
-  const own = Object.prototype.hasOwnProperty.call(pipelines, "getForRender");
   const original = pipelines.getForRender;
   let list: Promise<unknown>[] = [];
-  let released = false;
   let started = 0;
   let finished = 0;
   const done = () => void finished++;
-  pipelines.getForRender = function (this: unknown, renderObject: unknown) {
+  const release = overrideMethod(pipelines, "getForRender", function (this: unknown, renderObject: unknown) {
     const before = list.length;
     const out = original.call(this, renderObject, list);
     for (let i = before; i < list.length; i++) {
@@ -58,7 +73,7 @@ export function deferPipelines(renderer: DeferRenderer): DeferredPipelines {
       list[i] = list[i]!.then(done, done); // three's never reject; count either way
     }
     return out;
-  };
+  });
   return {
     active: true,
     pending: () => started - finished,
@@ -71,12 +86,7 @@ export function deferPipelines(renderer: DeferRenderer): DeferredPipelines {
         await Promise.all(batch);
       }
     },
-    release() {
-      if (released) return;
-      released = true;
-      if (own) pipelines.getForRender = original;
-      else delete (pipelines as { getForRender?: unknown }).getForRender;
-    },
+    release,
   };
 }
 
@@ -202,13 +212,11 @@ export function gateFirstDraws(renderer: GateRenderer): FirstDrawGate {
   let drawn = drawnBy.get(pipelines);
   if (!drawn) drawnBy.set(pipelines, (drawn = new WeakSet()));
   const seen = drawn;
-  const own = Object.prototype.hasOwnProperty.call(pipelines, "isReady");
   const original = pipelines.isReady;
   let budget = 0;
   let granted = 0;
   let waiting = new Set<object>();
-  let released = false;
-  pipelines.isReady = function (this: NonNullable<GateRenderer["_pipelines"]>, renderObject: unknown) {
+  const release = overrideMethod(pipelines, "isReady", function (this: NonNullable<GateRenderer["_pipelines"]>, renderObject: unknown) {
     if (!original.call(this, renderObject)) return false;
     const p = this.get(renderObject).pipeline;
     if (!p || seen.has(p)) return true;
@@ -220,7 +228,7 @@ export function gateFirstDraws(renderer: GateRenderer): FirstDrawGate {
     }
     waiting.add(p);
     return false;
-  };
+  });
   return {
     active: true,
     frame(b) {
@@ -229,11 +237,6 @@ export function gateFirstDraws(renderer: GateRenderer): FirstDrawGate {
     },
     waiting: () => waiting.size,
     granted: () => granted,
-    release() {
-      if (released) return;
-      released = true;
-      if (own) pipelines.isReady = original;
-      else delete (pipelines as { isReady?: unknown }).isReady;
-    },
+    release,
   };
 }
