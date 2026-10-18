@@ -1,0 +1,23 @@
+/* ?framecount (#23, D-e2e-2): the DOM frame counter beside the canvas one (render/frameCounter.ts).
+   Loaded only with the flag. Cells are 1/96 of the viewport's height, like the canvas strip's
+   (frameCount.ts stripLayout); it sits right of that strip (STRIP_CELLS + 2 = 25 cells in), on the
+   bottom edge, above every game layer (they top out at 999). */
+.fl-framecount {
+  --cell: calc(100vh / 96);
+  position: fixed;
+  left: calc(25 * var(--cell));
+  bottom: 0;
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  height: calc(3 * var(--cell));
+  padding: 0 var(--cell);
+  background: #000;
+  color: #fff;
+  pointer-events: none;
+  font: 700 max(13px, calc(2 * var(--cell)))/1 var(--font-mono, ui-monospace, monospace);
+}
+.fl-framecount__cell { display: block; flex: none; width: var(--cell); height: var(--cell); background: #404040; }
+.fl-framecount__cell--mark { background: #f00; }
+.fl-framecount__cell.is-on { background: #fff; }
+.fl-framecount__num { flex: none; margin-left: var(--cell); }

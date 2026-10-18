@@ -13,7 +13,7 @@
 
 import type * as THREE from "three/webgpu";
 import { flags } from "../config.ts";
-import { FRAME_BITS, FrameCount, frameBits, STRIP_CELLS, STRIP_ROWS, stripLayout } from "./frameCount.ts";
+import { FRAME_BITS, FrameCount, frameBits, stripLayout } from "./frameCount.ts";
 
 interface Counter {
   count: FrameCount;
@@ -177,41 +177,25 @@ class FrameCountDom {
     r.className = "fl-framecount";
     r.dataset.e2e = "framecount";
     r.setAttribute("aria-hidden", "true");
-    // Inline: no stylesheet to load, and a z-index no game layer comes near (they top out at 999).
-    const cellCss = "calc(100vh / 96)";
-    r.style.cssText = [
-      "position:fixed",
-      `left:calc(${STRIP_CELLS + 2} * ${cellCss})`,
-      "bottom:0",
-      "z-index:2147483647",
-      "display:flex",
-      "align-items:center",
-      `height:calc(${STRIP_ROWS} * ${cellCss})`,
-      `padding:0 ${cellCss}`,
-      "background:#000",
-      "pointer-events:none",
-      `font:700 calc(2 * ${cellCss})/1 ui-monospace,monospace`,
-      "color:#fff",
-    ].join(";");
-    const cell = (bg: string) => {
+    // Its stylesheet comes with the flag only; shown once it's in.
+    r.hidden = true;
+    void import("./frameCounter.css").then(() => (r.hidden = false));
+    const cell = (cls: string) => {
       const s = document.createElement("span");
-      s.style.cssText = `display:block;flex:none;width:${cellCss};height:${cellCss};background:${bg}`;
+      s.className = cls;
       r.appendChild(s);
       return s;
     };
-    cell("#f00");
-    for (let i = 0; i < FRAME_BITS; i++) this.bits.push(cell("#404040"));
-    this.num.style.cssText = `margin-left:${cellCss};flex:none`;
+    cell("fl-framecount__cell fl-framecount__cell--mark");
+    for (let i = 0; i < FRAME_BITS; i++) this.bits.push(cell("fl-framecount__cell"));
+    this.num.className = "fl-framecount__num";
     r.appendChild(this.num);
     (document.body ?? document.documentElement).appendChild(r);
   }
 
   show(n: number) {
     const b = frameBits(n);
-    for (let i = 0; i < b.length; i++) {
-      if (b[i] === this.last[i]) continue;
-      this.bits[i]!.style.background = b[i] ? "#fff" : "#404040";
-    }
+    for (let i = 0; i < b.length; i++) if (b[i] !== this.last[i]) this.bits[i]!.classList.toggle("is-on", b[i]);
     this.last = b;
     this.num.textContent = String(n);
   }

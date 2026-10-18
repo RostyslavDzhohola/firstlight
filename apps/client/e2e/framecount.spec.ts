@@ -2,7 +2,8 @@
 // layer. Read back from 40 consecutive drawn frames (readPixels in the same task as each render): both
 // show the same number in every frame and advance by one per drawn frame; and in composited
 // screenshots (what a recording sees) both decode to the same number. The DOM counter stays on top of
-// the pause menu, the performance overlay and the loader. Without the flag there is no counter.
+// the loader (during the real first load), the pause menu and the performance overlay, and its number
+// keeps the 13 px floor on a short window. Without the flag there is no counter.
 
 import { mkdirSync } from "node:fs";
 import path from "node:path";
@@ -13,13 +14,19 @@ import { cellCentre, FRAME_BITS, fromBits } from "../src/render/frameCount.ts";
 
 const SHOTS = process.env.STALL_SHOTS ?? path.join(OUT, "framecount");
 
+type Pt = readonly [number, number];
+const canvasHeight = (page: Page) =>
+  page.evaluate(() => (window as unknown as { __game: { ctx: { renderer: { domElement: HTMLCanvasElement } } } }).__game.ctx.renderer.domElement.height);
+/** The canvas strip's cell centres in a drawing buffer `h` px high (frameCount.ts): the marker, then the bits. */
+const centres = (h: number): Pt[] => [cellCentre(h, "marker"), ...Array.from({ length: FRAME_BITS }, (_, i) => cellCentre(h, i))];
+
 /**
- * Decode both counters from one screenshot (PNG, CSS pixels): the WebGL strip where stripLayout puts
- * it (scaled from the drawing buffer to the page) and the DOM counter's cells where the page lays them out.
+ * Decode both counters from one screenshot (PNG, CSS pixels): the canvas strip at `pts` (drawing-buffer
+ * px, scaled to the screenshot) and the DOM counter's cells where the page lays them out.
  */
-async function readShot(page: Page, b64: string): Promise<{ gl: number; dom: number }> {
+async function readShot(page: Page, b64: string, pts: Pt[]): Promise<{ gl: number; dom: number }> {
   return page.evaluate(
-    async ([b64, bits]) => {
+    async ([b64, pts]) => {
       const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
       const img = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
       const c = new OffscreenCanvas(img.width, img.height).getContext("2d", { willReadFrequently: true })!;
@@ -30,11 +37,9 @@ async function readShot(page: Page, b64: string): Promise<{ gl: number; dom: num
       };
       const canvas = (window as unknown as { __game: { ctx: { renderer: { domElement: HTMLCanvasElement } } } }).__game.ctx.renderer.domElement;
       const k = img.height / canvas.height; // drawing-buffer px → screenshot px
-      const cell = Math.max(3, Math.floor(canvas.height / 96));
-      const top = canvas.height - 3 * cell; // stripLayout: on the bottom edge
       let gl = 0;
-      for (let i = 0; i < bits; i++) gl = gl * 2 + (lit((cell + (i + 2.5) * cell) * k, (top + 1.5 * cell) * k) ? 1 : 0);
-      const spans = [...document.querySelectorAll<HTMLElement>('[data-e2e="framecount"] span')].slice(1, 1 + bits);
+      for (const [x, y] of pts.slice(1)) gl = gl * 2 + (lit(x! * k, y! * k) ? 1 : 0);
+      const spans = [...document.querySelectorAll<HTMLElement>('[data-e2e="framecount"] .fl-framecount__cell')].slice(1);
       const sx = img.width / innerWidth;
       let dom = 0;
       for (const s of spans) {
@@ -43,9 +48,32 @@ async function readShot(page: Page, b64: string): Promise<{ gl: number; dom: num
       }
       return { gl, dom };
     },
-    [b64, FRAME_BITS] as const,
+    [b64, pts] as const,
   );
 }
+
+/**
+ * Puts `__flCounterOnTop()` in the page: is the DOM counter the top-most element where it is drawn?
+ * Hit-testing finds the top-most element at a point; the counter ignores the mouse, so it is made
+ * hit-testable for the moment of the check, and put back however that goes.
+ */
+async function installTopmost(page: Page) {
+  await page.evaluate(() => {
+    (window as unknown as { __flCounterOnTop: () => boolean }).__flCounterOnTop = () => {
+      const e = document.querySelector<HTMLElement>('[data-e2e="framecount"]');
+      if (!e) return false;
+      e.style.pointerEvents = "auto";
+      try {
+        const r = e.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width * 0.75, r.top + r.height / 2);
+        return !!hit && e.contains(hit);
+      } finally {
+        e.style.pointerEvents = "";
+      }
+    };
+  });
+}
+const counterOnTop = (page: Page) => page.evaluate(() => (window as unknown as { __flCounterOnTop: () => boolean }).__flCounterOnTop());
 
 interface Read {
   dom: number | null;
@@ -58,15 +86,36 @@ test.describe("?framecount", () => {
   test("framecount · #23 · both counters show each drawn frame's number, the DOM one above every overlay", { tag: ["@framecount"] }, async ({ player, page }) => {
     mkdirSync(SHOTS, { recursive: true });
     await player.joinAsDevAdmin({ starter: "Hexwick", body: "arcadia", extra: { framecount: true } });
-    await player.waitInWorld(180_000, "arcadia");
+    // The first load, for real: the counter appears with the first frame the warm-up draws behind the
+    // loading screen; while that screen is up, the counter is the top-most thing where it sits.
+    await installTopmost(page);
+    const [duringLoad] = await Promise.all([
+      page
+        .waitForFunction(
+          () => {
+            const ld = document.getElementById("loading");
+            const e = document.querySelector<HTMLElement>('[data-e2e="framecount"]');
+            if (!e || e.hidden) return null;
+            if (!ld || ld.hidden) return { missed: true }; // the loader went before the counter showed
+            return { onTop: (window as unknown as { __flCounterOnTop: () => boolean }).__flCounterOnTop() };
+          },
+          null,
+          { polling: 50, timeout: 200_000 },
+        )
+        .then((h) => h.jsonValue() as Promise<{ onTop?: boolean; missed?: boolean }>),
+      player.waitInWorld(180_000, "arcadia"),
+    ]);
+    await player.note("framecount-loading", duringLoad);
+    expect.soft(duringLoad.missed, "the counter showed while the loading screen was up").toBeUndefined();
+    expect.soft(duringLoad.onTop, "the DOM counter over the loading screen").toBe(true);
     await player.lock();
     await expect(page.locator('[data-e2e="framecount"]'), "the DOM counter").toBeVisible();
 
     // WebGL2: 40 consecutive drawn frames, the canvas cells read back with readPixels in each render's
     // task (the drawing buffer as drawn) and the DOM number at that moment. (WebGPU: screenshots only.)
     if (player.gfx === "webgl") {
-      const h0 = await page.evaluate(() => (window as unknown as { __game: { ctx: { renderer: { domElement: HTMLCanvasElement } } } }).__game.ctx.renderer.domElement.height);
-      const pts = [cellCentre(h0, "marker"), ...Array.from({ length: FRAME_BITS }, (_, i) => cellCentre(h0, i))];
+      const h0 = await canvasHeight(page);
+      const pts = centres(h0);
       const reads: Read[] = await page.evaluate(
         ([pts, n]) =>
           new Promise<Read[]>((resolve) => {
@@ -110,56 +159,37 @@ test.describe("?framecount", () => {
     }
 
     // What a recording sees: composited screenshots, both counters decoded from the same image.
+    const pts = centres(await canvasHeight(page));
     const shots: { gl: number; dom: number }[] = [];
     for (let k = 0; k < 8; k++) {
       const png = await page.screenshot({ path: k === 0 ? path.join(SHOTS, "framecount-play.png") : undefined });
-      shots.push(await readShot(page, png.toString("base64")));
+      shots.push(await readShot(page, png.toString("base64"), pts));
     }
     await player.note("framecount-shots", shots);
     for (const [k, x] of shots.entries()) expect.soft(x.gl, `screenshot ${k}: both counters show one frame's number`).toBe(x.dom);
     for (let k = 1; k < shots.length; k++) expect.soft(shots[k]!.gl, `screenshot ${k}: a later frame than the one before`).toBeGreaterThan(shots[k - 1]!.gl);
 
-    // Above every overlay: the performance overlay and the pause menu open, then the loader shown.
+    // Above the performance overlay and the pause menu, opened with their keys.
     await player.tap("Backquote");
     await player.escape();
-    await expect(page.locator('[data-e2e="pause-menu"]'), "the pause menu").toBeVisible();
-    // Hit-testing finds the top-most element at a point; the counter ignores the mouse, so it is made
-    // hit-testable for the moment of the check.
-    const topmost = () =>
-      page.evaluate(() => {
-        const e = document.querySelector<HTMLElement>('[data-e2e="framecount"]')!;
-        e.style.pointerEvents = "auto";
-        const r = e.getBoundingClientRect();
-        const hit = document.elementFromPoint(r.left + r.width * 0.75, r.top + r.height / 2);
-        e.style.pointerEvents = "none";
-        return !!hit && e.contains(hit);
-      });
-    expect.soft(await topmost(), "the DOM counter over the pause menu and the performance overlay").toBe(true);
-    await page.waitForTimeout(400);
+    const menu = page.locator('[data-e2e="pause-menu"]');
+    await expect(menu, "the pause menu").toBeVisible();
+    expect.soft(await counterOnTop(page), "the DOM counter over the pause menu and the performance overlay").toBe(true);
+    // The menu's opening transitions done (the screenshot shows it settled).
+    await expect.poll(() => menu.evaluate((m) => m.getAnimations({ subtree: true }).filter((a) => a.playState === "running").length), { message: "the pause menu has settled" }).toBe(0);
     await page.screenshot({ path: path.join(SHOTS, "framecount-pause-menu-perf.png") });
-    const loaderOnTop = await page.evaluate(() => {
-      const ld = document.getElementById("loading")!;
-      const was = ld.hidden;
-      ld.hidden = false;
-      const e = document.querySelector<HTMLElement>('[data-e2e="framecount"]')!;
-      e.style.pointerEvents = "auto";
-      const r = e.getBoundingClientRect();
-      const hit = document.elementFromPoint(r.left + r.width * 0.75, r.top + r.height / 2);
-      const ok = !!hit && e.contains(hit);
-      e.style.pointerEvents = "none";
-      ld.hidden = was;
-      return ok;
-    });
-    expect.soft(loaderOnTop, "the DOM counter over the loader").toBe(true);
-    await page.evaluate(() => (document.getElementById("loading")!.hidden = false));
-    await page.screenshot({ path: path.join(SHOTS, "framecount-over-loader.png") });
-    await page.evaluate(() => (document.getElementById("loading")!.hidden = true));
+
+    // On a window shorter than 624 px the number keeps the UI's 13 px floor (ui/README.md).
+    await page.setViewportSize({ width: 1000, height: 560 });
+    await expect.poll(() => page.locator(".fl-framecount__num").evaluate((e) => parseFloat(getComputedStyle(e).fontSize)), { message: "the number's font size (px)" }).toBeGreaterThanOrEqual(13);
   });
 
   test("framecount · #23 · without the flag there is no counter", { tag: ["@framecount"] }, async ({ player, page }) => {
     await player.joinAsDevAdmin({ starter: "Hexwick", body: "arcadia" });
     await player.waitInWorld(180_000, "arcadia");
-    await page.waitForTimeout(1000);
+    // A second of play drawn (60 frames), then: no counter anywhere.
+    const t0 = await player.now();
+    await expect.poll(() => page.evaluate((t) => (window as unknown as { __fl: { frames: { stats(t: number): { frames: number } } } }).__fl.frames.stats(t).frames, t0), { message: "60 frames drawn" }).toBeGreaterThanOrEqual(60);
     await expect(page.locator('[data-e2e="framecount"]')).toHaveCount(0);
   });
 });
