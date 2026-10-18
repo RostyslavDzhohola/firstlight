@@ -2,7 +2,7 @@
 // tutorial's training dummies. Written against the selector contract (/tmp/fl-go/e2e-contract.md) and
 // HANDOFF items 5c and 6a, not today's DOM.
 
-import { expect, type Locator } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import type { Player } from "./player.ts";
 import { mailCode, mailCount } from "./stack.ts";
 
@@ -52,6 +52,27 @@ export async function saveWithEmail(player: Player, email: string) {
   await card.getByRole("button", { name: /^done$/i }).click({ timeout: 8000 }).catch(() => {});
   await expect(card, "the save card closes").toBeHidden({ timeout: 15_000 });
   await player.waitInWorld();
+}
+
+/**
+ * Every drawn element whose backdrop filter blurs (D-ui-1: none by default except the death drain;
+ * `?blur=1` brings the old look back). Returns "class :: filter" lines.
+ */
+export function blurredBackdrops(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>("body *")].flatMap((e) => {
+      const s = getComputedStyle(e);
+      const f = s.backdropFilter || s.getPropertyValue("-webkit-backdrop-filter") || "none";
+      if (!/blur\(/.test(f) || s.visibility === "hidden" || !e.getClientRects().length) return [];
+      return [`${String(e.className).slice(0, 60)} :: ${f}`];
+    }),
+  );
+}
+
+/** HUD parts on screen (the hook's hudRects, without the [data-e2e] entries). */
+export async function hudParts(player: Player): Promise<string[]> {
+  const rects = (await player.page.evaluate(() => (window as any).__fl.hudRects())) as Record<string, unknown>;
+  return Object.keys(rects).filter((k) => !k.startsWith("e2e:"));
 }
 
 /** Pause menu → Log out (instant in a safe zone). */

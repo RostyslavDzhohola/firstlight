@@ -27,6 +27,8 @@
     { "id": "J6.2", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Save with an email code, sign in from a second browser, same character (5c)" },
     { "id": "J7.1", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Guest logout → home with leaderboard, online, worlds, Play, Sign in (6a)" },
     { "id": "J7.2", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Saved player logs out → home shows my progress (6a)" },
+    { "id": "J7.3", "projects": ["webgl", "webgpu"], "since": "2026-10-18", "note": "Home page draws no live backdrop blur; ?blur=1 brings it back (D-ui-1, #20)" },
+    { "id": "J7.4", "projects": ["webgl", "webgpu"], "since": "2026-10-18", "note": "Home page out of the page under the loader, no polling; back after a failed load, fresh data, no HUD over it (D-home-8, #21)" },
     { "id": "smoke", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Guest joins, sees the world, no blinking, no console errors. Frame-time journey: run the gate on a quiet machine" }
   ]
 }

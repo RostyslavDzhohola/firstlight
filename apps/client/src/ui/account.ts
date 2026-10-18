@@ -24,8 +24,9 @@ function modal(name: string, onEscape: (() => void) | null): { overlay: HTMLDivE
   const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   document.exitPointerLock?.();
   overlayOpened(name);
-  // On <body>, not in #ui: #ui is its own stacking context under the landing page (z 20), so a card
-  // in it opened from the landing ("Sign in", the home page's "Save your progress") was invisible.
+  // On <body>, not in #ui: #ui is its own stacking context, so nothing in it can rise above the loading
+  // screen ("Saved." must, account.css), and the modal below makes every other child of <body> inert.
+  // (#ui paints over the home page, not under it: .fl-home is z 0 and #ui comes after it.)
   const overlay = el("div", "fl-overlay fl-overlay--modal fl-ui", document.body);
   const card = el("section", "fl-modal fl-panel fl-acct", overlay);
   card.setAttribute("role", "dialog");

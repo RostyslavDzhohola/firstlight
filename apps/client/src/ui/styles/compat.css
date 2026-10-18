@@ -5,12 +5,11 @@
 
 :where(.fl-overlay:not(.fl-ui)) {
   display: grid; place-items: center; padding: var(--sp-5);
-  background: rgba(5, 7, 10, .62);
-  -webkit-backdrop-filter: blur(10px) saturate(.5); backdrop-filter: blur(10px) saturate(.5);
+  background: var(--overlay-bg);
+  -webkit-backdrop-filter: var(--overlay-blur); backdrop-filter: var(--overlay-blur);
   font: 400 var(--t-sm)/var(--lh-body) var(--font-body); color: var(--paper);
   -webkit-font-smoothing: antialiased;
 }
-:where(.fl-lowfx) :where(.fl-overlay:not(.fl-ui)) { background: rgba(5, 7, 10, .88); }
 :where(.fl-overlay:not(.fl-ui)) :where(*, *::before, *::after) { box-sizing: border-box; }
 :where(.fl-overlay:not(.fl-ui)) :where(button, input, select, textarea) { font: inherit; color: inherit; }
 :where(.fl-overlay:not(.fl-ui)) > :where(.fl-panel) {

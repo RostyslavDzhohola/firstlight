@@ -88,9 +88,9 @@ file alone before calling it a failure.
 
 ## Tests
 
-- Vitest projects `shared`, `server` (20 s timeout, forks), `client` (node environment, 30 s; no
-  DOM, so test pure logic). Tests sit next to the source as `*.test.ts`; server integration tests
-  are in `apps/server/test`.
+- Vitest projects `shared`, `server` (20 s timeout, forks), `client` (node environment by default,
+  30 s; DOM tests opt in per file with `// @vitest-environment happy-dom`). Tests sit next to the
+  source as `*.test.ts`; server integration tests are in `apps/server/test`.
 - `apps/server/test/helpers.ts`: `startServer()` runs the game in-process with memory stores;
   `joinAs(game, userId, body)` joins with a dev token `dev:<userId>:<name>[:admin|:loadtest]` and
   grants the travel ticket; `waitFor(cond)` polls. `auth-helpers.ts` drives the real Better Auth

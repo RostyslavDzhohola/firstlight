@@ -12,7 +12,12 @@ import { config } from "./config.ts";
 import { maybeInstallE2e } from "./debug/e2eGate.ts";
 import { runBoot } from "./game/boot.ts";
 import { enterFullscreen } from "./game/fullscreen.ts";
+import { hideLandingUnderLoader, showLanding } from "./home/landing.ts";
 import { hideLoading, setLoading, showLoadingError } from "./ui/loading.ts";
+import { applyUiLook } from "./ui/look.ts";
+
+// Flat surfaces, or the old blurred look with ?blur=1 (D-ui-1): before anything else draws.
+applyUiLook(document.documentElement, location.search);
 
 // Playwright journeys only (?e2e): window.__fl, a separate chunk that is never fetched otherwise.
 void maybeInstallE2e(location.search, window, () => import("./debug/e2eHook.ts"));
@@ -42,9 +47,8 @@ function startHome(): Promise<void> {
 }
 
 function backToLanding() {
+  showLanding($("landing")); // fresh data, polling again (home.ts); then the loader goes
   hideLoading();
-  const landing = $("landing");
-  if (landing) landing.style.display = "";
   if (playBtn) playBtn.disabled = false;
   void startHome(); // ?autoplay never started it: a failed boot comes back to a live page
 }
@@ -55,6 +59,7 @@ function backToLanding() {
  */
 async function boot() {
   setLoading("Loading the game…", 0.02);
+  hideLandingUnderLoader($("landing")); // out of the page once the loader is drawn over it (D-home-8)
   await runBoot(
     async () => {
       const { startGame } = await import("./game/Game.ts");
