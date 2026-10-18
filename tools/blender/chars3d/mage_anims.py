@@ -3,7 +3,7 @@
 # with attitude), then bakes follow-through for the mage's extra bones (swing.py) into every clip and
 # exports one GLB with the mage skeleton (65 shared joints + the extras) and all clips.
 #
-#   blender -b --disable-autoexec --factory-startup --python mage_anims.py -- \
+#   blender -b --disable-autoexec --factory-startup --python-exit-code 1 --python mage_anims.py -- \
 #       --mage <raw>/mage.glb --anims <raw>/starters_anims.glb --out <raw>/mage_anims.glb
 #
 # Authored clips and the baked swing tracks are our own work (CC BY 4.0); the shared clips stay CC0.
@@ -29,7 +29,7 @@ CHAINS = [
      "colliders": [("Head", 0.15, 0.24), ("neck_01", 0.1), ("spine_03", 0.14)]},
     {"bones": ["braid_01", "braid_02", "braid_03"], "stiff": 40, "damp": 6.5, "gravity": 0.45, "drag": 0.8,
      "max_deg": 40, "colliders": [("spine_03", 0.12), ("spine_02", 0.13), ("spine_01", 0.15), ("pelvis", 0.17),
-                                   ("thigh_l", 0.12), ("lowerarm_l", 0.07)]},
+                                   ("thigh_l", 0.12), ("upperarm_l", 0.08), ("lowerarm_l", 0.07)]},
     {"bones": ["panel_f_01", "panel_f_02"], "stiff": 55, "damp": 8, "gravity": 0.2, "drag": 1.2, "max_deg": 45,
      "colliders": [("thigh_l", 0.115), ("thigh_r", 0.115), ("calf_l", 0.085), ("calf_r", 0.085)]},
     {"bones": ["panel_b_01", "panel_b_02"], "stiff": 55, "damp": 8, "gravity": 0.2, "drag": 1.4, "max_deg": 45,
@@ -185,7 +185,15 @@ def main():
     clips.update(new)
 
     todo = [clips[n] for n in sorted(clips)] if not a.only else [clips[n] for n in a.only.split(",")]
-    swing.bake(rig, todo, CHAINS)
+    # spring lengths from the recipe: the glTF importer guesses bone lengths (glTF has no bone tails)
+    import importlib
+    import numpy as np
+    spec = importlib.import_module("recipes.mage").EXTRA_BONES
+    lengths = {n: float(np.linalg.norm(np.subtract(t, h))) for n, (_, h, t) in spec.items()}
+    stats = swing.bake(rig, todo, CHAINS, lengths=lengths)
+    with open(os.path.splitext(a.out)[0] + "_swing.json", "w") as fh:
+        import json
+        json.dump(stats, fh, indent=1)
     for act in bpy.data.actions:
         if act not in todo:
             bpy.data.actions.remove(act)

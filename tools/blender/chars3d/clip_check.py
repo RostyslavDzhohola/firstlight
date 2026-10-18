@@ -1,7 +1,7 @@
 # FIRSTLIGHT sculpted characters: clip check. Plays every clip on a built character and flags hands and
 # hanging props that pass into the body.
 #
-#   blender -b --disable-autoexec --factory-startup --python clip_check.py -- \
+#   blender -b --disable-autoexec --factory-startup --python-exit-code 1 --python clip_check.py -- \
 #       --char <raw>/mage.glb --anims <raw>/mage_anims.glb --recipe mage --out <dir>/clipcheck.json
 #
 # 1. Rest pose first: the character's bind pose must match the shared skeleton's real rest pose
@@ -41,10 +41,12 @@ BODY = [
     ("thigh_r", "thigh_r", "calf_r", 0.07),
     ("calf_l", "calf_l", "foot_l", 0.05),
     ("calf_r", "calf_r", "foot_r", 0.05),
+    ("upperarm_l", "upperarm_l", "lowerarm_l", 0.05),
+    ("upperarm_r", "upperarm_r", "lowerarm_r", 0.05),
     ("forearm_l", "lowerarm_l", "hand_l", 0.04),
     ("forearm_r", "lowerarm_r", "hand_r", 0.04),
 ]
-SKIP = {("hand_l", "forearm_l"), ("hand_r", "forearm_r")}
+SKIP = {("hand_l", "forearm_l"), ("hand_r", "forearm_r"), ("hand_l", "upperarm_l"), ("hand_r", "upperarm_r")}
 FINGERS = [f"{f}_0{i}_{s}" for f in ("index", "middle", "ring", "pinky", "thumb") for i in (1, 2, 3) for s in "lr"]
 SETS_DEFAULT = {
     "hand_l": (["hand_l"] + [b for b in FINGERS if b.endswith("_l")], 0.02),
