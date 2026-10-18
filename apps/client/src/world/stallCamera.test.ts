@@ -13,7 +13,7 @@ import { emptyStored, resolveSettings } from "../render/quality.ts";
 import { testSiteAssets } from "../render/townAssets.testutil.ts";
 import type { Input } from "../game/input.ts";
 import { PlayerController } from "../game/PlayerController.ts";
-import { cameraBoxRay, CAMERA_PAD, inCameraBox, KEEPER_STALL_CAMERA, placeStallBoxes, stallCameraBoxes, stallCameraLocal, type CameraBox } from "./stallCamera.ts";
+import { cameraBoxRay, CAMERA_PAD, inCameraBox, KEEPER_STALL_CAMERA, placeStallBoxes, stallCameraBoxes, stallCameraLocal, type CameraBox, type StallBox } from "./stallCamera.ts";
 
 // config.ts reads the URL at import time; ?nochars keeps AvatarView on capsules (no asset fetches).
 vi.stubGlobal("location", { search: "?nochars", hostname: "localhost" });
@@ -89,6 +89,13 @@ describe("stall camera volumes", () => {
 // ---------------------------------------------------------------------------------------------------
 
 const settings = resolveSettings("medium", false, true, emptyStored(), new Set());
+/** Each stall's body in its frame: Juno's from the back of her spot to the counter's front and up to the awning; an outpost stall's solid. */
+const STALL_BODY: Record<string, StallBox> = {
+  portus: { x: 0, y: 1.45, z: 0.575, w: 3.2, h: 2.9, d: 1.85 },
+  arcadia: { x: 0, y: 1.45, z: 0, w: 3.6, h: 2.9, d: 2 },
+  hollowmere: { x: 0, y: 1.45, z: 0, w: 3.6, h: 2.9, d: 2 },
+  meridian: { x: 0, y: 1.45, z: 0, w: 3.6, h: 2.9, d: 2 },
+};
 const still = { locked: true, mouseDX: 0, mouseDY: 0, wheel: 0, sensitivity: 0.002, invertY: false, pressed: new Set<string>(), down: () => false } as unknown as Input;
 
 /** Feet on the ground at stall-frame (x, z) of `body`. */
@@ -116,6 +123,8 @@ describe("the third-person camera and the shop stalls (#22)", () => {
       const solids = town.collider;
       // The pieces themselves (no padding).
       const awnings: readonly CameraBox[] = stallCameraBoxes(t).map((b) => ({ ...b, h: [b.h[0] - b.pad, b.h[1] - b.pad, b.h[2] - b.pad] as const, pad: 0 }));
+      // The stall's whole body: the counter to the awning, side to side (its frame, unpadded).
+      const whole = placeStallBoxes(stallFrame(body), [STALL_BODY[body]!], 0);
       const spot = SHOP_SPOTS.find((s) => s.body === body)!;
       const pc = new PlayerController(t, t.body.waterLevel);
       pc.setStructures(town.moveColliders);
@@ -151,6 +160,9 @@ describe("the third-person camera and the shop stalls (#22)", () => {
             if (inCameraBox(awnings, c.x, c.y, c.z)) failures.push(`${where}: lens inside an awning or counter`);
             else if (solids.footing(c.x, c.y, c.z, 0, { radius: 0.01, height: 0.01, step: 0 }).inside) failures.push(`${where}: lens inside a structure`);
             else if (cameraBoxRay(awnings, head.x, head.y, head.z, v.x, v.y, v.z, l) < l) failures.push(`${where}: an awning between the head and the lens`);
+            // Nor looking back through the stall: the lens on its far side, the stall between it and the
+            // player (the e2e caught Portus' open middle, under the awning and over the counter, round 1).
+            else if (!inCameraBox(whole, head.x, head.y, head.z) && cameraBoxRay(whole, head.x, head.y, head.z, v.x, v.y, v.z, l) < l) failures.push(`${where}: the lens beyond the stall`);
           }
         }
       }

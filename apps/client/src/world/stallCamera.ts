@@ -1,8 +1,8 @@
 // Shop stalls keep the third-person camera out (#22, D-view-5). The counters stand on the shared
 // structure solids already (Juno's JUNO_COUNTER_SOLIDS, an outpost stall's whole-stall box), which
-// the camera ray stops at like a wall; what sticks out of those is camera-only here: Juno's awning,
-// counter top and crate, and an outpost stall's awning overhang, its valance and its hanging coin
-// sign. Camera-only because the server never sees them: a jump under an awning is not refused, and
+// the camera ray stops at like a wall; the rest is camera-only here: Juno's whole stall (its open
+// middle let the camera through to look back across the awning) with her awning, counter top and
+// crate, and an outpost stall's awning overhang, its valance and its hanging coin sign. Camera-only because the server never sees them: a jump under an awning is not refused, and
 // movement, shots and NPC sight stay exactly as they are (no shared change).
 //
 // The volumes are oriented boxes (an awning is tilted) padded by CAMERA_PAD, so a camera stopped short
@@ -44,13 +44,19 @@ export const KEEPER_STALL = {
   orb: { x: 0.8, y: 1.3, z: 1.1, r: 0.18 },
   /** The keeper's name and "… · E to trade" sprite. */
   label: { x: 0, y: 3.4, z: 0.6 },
+  /** The whole stall: the awning's back edge to the counter's front, side to side, the ground to the awning's top. */
+  body: { x: 0, y: 1.45, z: 0.6, w: 3.2, h: 2.9, d: 1.8 },
 } as const satisfies Record<string, object>;
 
 /** Padding (m) round every camera-only volume. */
 export const CAMERA_PAD = 0.25;
 
-/** Juno's camera-only volumes (her frame): the awning, the counter top and the crate on it. */
-export const KEEPER_STALL_CAMERA: readonly StallBox[] = [KEEPER_STALL.awning, KEEPER_STALL.top, KEEPER_STALL.crate];
+/**
+ * Juno's camera-only volumes (her frame): the whole stall, so the camera can't pass through its open
+ * middle (under the awning, over the counter) and look back through it; and the awning, counter top
+ * and crate on their own, for a player standing in there behind the counter.
+ */
+export const KEEPER_STALL_CAMERA: readonly StallBox[] = [KEEPER_STALL.body, KEEPER_STALL.awning, KEEPER_STALL.top, KEEPER_STALL.crate];
 
 /**
  * An outpost stall's camera-only volumes in its prefab frame (x right, y up from the base, z front:
