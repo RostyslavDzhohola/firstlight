@@ -1362,3 +1362,18 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   only 1–78 scattered pixels per image, at most 10/255 (rounding: a uniform instead of a constant).
   Why: #39 (spec #18): 40 fewer main-pass builds and pipelines on both backends and the same colours,
   for three colour uniforms in each avatar draw's own buffer in play.
+- **D-load-5 (owner, 2026-10-18):** graphics quality over load time: a longer first load is
+  acceptable if the game looks better; the loader keeps it fun with rotating quips (owner: "If we
+  can have better quality of graphics and sacrifice it with just a little bit more wait time, it's
+  fine. I would rather do that trade-off. Even if the wait time to load the game first is longer,
+  you can just put funny comments at the bottom while it's loading, like, 'Hey, putting better
+  graphics in,' 'Looking for the meaning of life,' or 'Contemplating the universe.'"). The full
+  loading screen (first load and travel between bodies) shows one line from `ui/loadingQuips.ts`
+  above the pointer-lock note at the bottom right: the owner's three and 27 more in the world's
+  voice, at most 45 characters, never mean, nothing that reads like an error, no Easter-egg hints.
+  A new line every 3 s from a shuffled deck (every line once before any comes back, a reshuffle
+  never opens with the line just shown, the deck carries on across loads), a 320 ms crossfade and
+  none under reduced motion. Not on the compact mid-game card, the error state or a full-screen
+  line that reports a problem (the server couldn't save, reconnecting, a lost connection; the next
+  normal line brings it back), and aria-hidden so the polite live region doesn't read it out every 3 s. Why: the owner's call; a trade-off
+  between load time and looks now leans to looks.
