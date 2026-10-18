@@ -201,8 +201,10 @@ export function deviceBackendMemory(env: DeviceMemoryEnv = {}): BackendMemory {
     rememberWebgpuSkipped(reason, lateMs) {
       try {
         if (!storage()) return;
-        // A failure on the try a second chance granted: this record gets no second chance of its own.
-        const retried = read()?.second === "granted";
+        // A failure on the try a second chance granted here (the grant still applies: same browser
+        // version and GPU, not expired): this record gets no second chance of its own.
+        const prev = read();
+        const retried = !!prev && prev.second === "granted" && current(prev);
         const r: WebgpuFailureRecord = { v: 1, reason, at: now(), browser: browser(), gpu: gpu() };
         if (lateMs !== undefined) r.lateMs = lateMs;
         if (retried) r.second = "used";

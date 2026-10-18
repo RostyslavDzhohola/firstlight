@@ -1272,10 +1272,14 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   a session on WebGL2 because WebGPU didn't start (now or recently) asks for a WebGPU adapter and
   device once, 5 s later at an idle moment (`requestIdleCallback`), renders nothing and destroys the
   device at once. If both answer within the start deadline, the record is marked `second:
-  "granted"` and the next visit tries WebGPU again; if that try fails too, the new record is marked
-  `second: "used"` and gets no further second chance, so a device whose WebGPU only hangs at page
-  load pays one extra 8 s wait per 7-day record, never one per visit (the #24 problem). Answers
-  after the deadline, no adapter, or a failed request keep the record. The 8 s deadline is
+  "granted"` and the next visit tries WebGPU again; if that try fails too while the grant still
+  applies (same browser version and GPU, under 7 days old), the new record is marked `second:
+  "used"` and gets no further second chance, so a device whose WebGPU only hangs at page load pays
+  one extra 8 s wait per 7-day record, never one per visit (the #24 problem); a failure after a
+  browser update, on another GPU or past the expiry is a first failure with its own second chance.
+  Answers after the deadline, no adapter, or a failed request keep the record; an adapter that
+  answers after the deadline gets no device request (no GPU work once the check has failed), and
+  a device requested in time that answers late is destroyed. The 8 s deadline is
   unchanged (an owner question; the noted lateness is the data for it). Why: the owner's call
   (2026-10-18), "If we can have better quality of graphics and sacrifice it with just a little bit
   more wait time, it's fine. I would rather do that trade-off": one slow start used to cost the

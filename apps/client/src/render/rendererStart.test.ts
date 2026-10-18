@@ -601,6 +601,29 @@ describe("WebGPU's second chance after a WebGL2 fallback (D-renderer-2)", () => 
     expect((await load(later, { webgpu: "ready" })).triedWebgpu).toBe(true);
   });
 
+  it("only a grant that still applies here is spent by a failure: an expired one, or another browser's or GPU's, is not", async () => {
+    const granted = (over: Record<string, unknown> = {}) => fresh({ second: "granted", ...over });
+    const cases = [
+      ["expired", device({ record: granted({ at: 100 * DAY - WEBGPU_RETRY_MS }) })],
+      ["browser update", device({ record: granted({ browser: "Chrome/140" }) })],
+      ["other GPU", device({ record: granted({ gpu: "ANGLE (AMD, ANGLE Metal Renderer: AMD Radeon Pro 5500M, Unspecified Version)" }) })],
+    ] as const;
+    for (const [why, d] of cases) {
+      const r = await load(d, { webgpu: "hang" });
+      expect(r.fallback, why).toBe("timeout");
+      // A first failure in this environment: a fresh record that still has its second chance.
+      expect(d.record(), why).toEqual({ v: 1, reason: "timeout", at: 100 * DAY, browser: CHROME, gpu: M1 });
+      const i = idle();
+      const done = webgpuSecondChance(fellBack("timeout"), { memory: d.memory, gpu: fakeGpu("ok").gpu, schedule: i.schedule, log: () => {} });
+      await i.run();
+      expect(await done, why).toBe("cleared");
+    }
+    // The grant that applies here is spent by the failure, as before.
+    const d = device({ record: granted() });
+    await load(d, { webgpu: "hang" });
+    expect(d.record()).toMatchObject({ second: "used" });
+  });
+
   it("a WebGPU that fails inside init (three's own fallback) on the second try also spends the chance", async () => {
     const d = device({ record: fresh({ reason: "error" }) });
     const i = idle();
