@@ -16,7 +16,7 @@ import { flags } from "../config.ts";
 import { beginManualFrame, type TimestampSource } from "./timing.ts";
 import { castsLeanShadow, leanShadowsOn } from "./leanShadow.ts";
 import { glSlowCalls, setGlPhase } from "./glTrace.ts";
-import { gpuIdle, guardStatusPolls, warmLink, type PollGL } from "./syncPoll.ts";
+import { FENCE_PROMPT_MS, gpuIdle, guardStatusPolls, warmLink, type PollGL } from "./syncPoll.ts";
 import type { FirstDrawBatch, FirstDrawCensus, FirstDrawItem, SlowFrame, WarmupPhase, WarmupReport } from "./warmupReport.ts";
 import {
   deferPipelines, FirstDrawPacer, gateFirstDraws, glFence, LONE_COST, newStageCost, OLD_PACER, PACER, pipelineCost,
@@ -36,7 +36,7 @@ export function fnv1a(s: string): number {
 }
 
 /** `?warmdiag`: what a first draw was (material, object, GLSL sizes and hashes, its price, its link), for the batch log. */
-function describeFirstDraw(renderObject: unknown, pipeline: object, grant: Grant, link: { link: number | null; fence: number | null }): FirstDrawItem {
+function describeFirstDraw(renderObject: unknown, pipeline: object, grant: Grant, link: { link: number | null; fence: number | null }, fencePrompt: number): FirstDrawItem {
   const r = renderObject as {
     material?: { type?: string; name?: string; isShadowPassMaterial?: boolean };
     object?: { name?: string; type?: string; parent?: { name?: string } | null };
@@ -59,7 +59,7 @@ function describeFirstDraw(renderObject: unknown, pipeline: object, grant: Grant
     shadow: r.material?.isShadowPassMaterial === true,
     link: link.link === null ? null : Math.round(link.link),
     fence: link.fence === null ? null : Math.round(link.fence),
-    warm: warmLink(link.link, link.fence),
+    warm: warmLink(link.link, link.fence, fencePrompt),
   };
 }
 
@@ -428,14 +428,16 @@ export async function warmup(
     const prog = syncGuard?.active ? backendData?.get?.(p)?.programGPU : undefined;
     return prog ? { link: syncGuard!.linkMs(prog), fence: syncGuard!.fenceMs(prog) } : { link: null, fence: null };
   };
+  // `?warmfence=N`: a fast link counts only after a fence within N ms (syncPoll.ts; off by default)
+  const fencePrompt = flags.has("warmfence") ? Number(flags.get("warmfence")) || FENCE_PROMPT_MS : Infinity;
   const classOf = (p: object): Warmth => {
     const l = linkOf(p);
-    return warmLink(l.link, l.fence) ? "warm" : "cold";
+    return warmLink(l.link, l.fence, fencePrompt) ? "warm" : "cold";
   };
   const gated = deferred?.active && !ctx.webgpu
     ? gateFirstDraws(
       renderer as unknown as GateRenderer,
-      diag ? (ro, p, g) => frameGrants.push(describeFirstDraw(ro, p, g, linkOf(p))) : undefined,
+      diag ? (ro, p, g) => frameGrants.push(describeFirstDraw(ro, p, g, linkOf(p), fencePrompt)) : undefined,
       oldPacer ? pipelineCost : newStageCost,
       oldPacer ? {} : { classOf, price: (u, c) => pacer.price(u, c), loneCost: LONE_COST },
     )

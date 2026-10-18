@@ -68,12 +68,18 @@ describe("guardStatusPolls (never ask the GPU process a synchronous question whi
     expect(f.gl.getProgramParameter(prog, COMPLETION_STATUS_KHR)).toBe(true);
     expect(g.linkMs(prog)).toBe(0);
     expect(g.fenceMs(prog)).toBe(3000);
-    // done at once, but only because the GPU process was backlogged for 3 s: no evidence of a cache
-    expect(warmLink(g.linkMs(prog), g.fenceMs(prog))).toBe(false);
-    expect(warmLink(0, FENCE_PROMPT_MS)).toBe(true); // a prompt fence, done at once: cached
+    // by default a program done at its first poll after its fence is cached, however late the fence
+    expect(warmLink(g.linkMs(prog), g.fenceMs(prog))).toBe(true);
     expect(warmLink(FAST_LINK_MS + 1, 16)).toBe(false);
     expect(warmLink(null, 16)).toBe(false);
     g.release();
+  });
+
+  it("?warmfence=N (opt-in): a fast link counts as cached only when its fence signalled within N ms of the link", () => {
+    expect(warmLink(0, 3000, FENCE_PROMPT_MS)).toBe(false); // done at once only because the GPU process was backlogged
+    expect(warmLink(0, FENCE_PROMPT_MS, FENCE_PROMPT_MS)).toBe(true); // a prompt fence, done at once: cached
+    expect(warmLink(0, null, FENCE_PROMPT_MS)).toBe(false);
+    expect(warmLink(FAST_LINK_MS + 1, 16, FENCE_PROMPT_MS)).toBe(false);
   });
 
   it("holds every poll while a first-draw batch is in flight; other parameters always pass through", () => {

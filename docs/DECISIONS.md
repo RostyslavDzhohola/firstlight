@@ -1322,8 +1322,8 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   (`render/syncPoll.ts`) answers link polls locally until each link's fence has signalled and no batch is
   in flight (`?syncpoll` turns both off). The longest main-thread task in a warm-up went from 1.5–5.7 s
   to 85–256 ms in every run since (43 runs, load 22–306). Item 5: each program is judged by its own link:
-  done within 30 ms of its fence, and that fence within 250 ms of the link call, means cached ("warm"),
-  priced at the warm rate in cold-priced units (batches hold one class, each class learns its own rate,
+  done within 30 ms of its fence means cached ("warm"; `?warmfence=250` also asks for the fence within
+  250 ms of the link call, opt-in, below), priced at the warm rate in cold-priced units (batches hold one class, each class learns its own rate,
   the ceiling and growth stay on cold-priced units). Lone cold programs (≥ 30 000 units) get a frame to
   themselves. The bench gained a returning visit (`BENCH_PROFILE_DIR`: one profile, so Chrome's own
   program cache is warm too) and a realistic first visit (`BENCH_HOME_MS=8000`). Not kept: drawing no
@@ -1345,7 +1345,11 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   11–18 batches, one 272 ms compile gap in three runs (R0 4.1–4.3 s); but cold runs then called 11–21
   programs warm, once a batch of 7 that took 1.3 s. With the rule cold runs call none warm, but at load
   200–230 a returning visit's fences are as slow as a cold one's (p50 0.5–0.6 s) and it ran 8.8/13.1 s.
-  WebGPU warm 2.7–2.9 s, no gap over 250 ms. So `Refs #39`: left are the compile-phase GPU-process gaps,
-  the late batch of small shadow programs, and a warm/cold test that holds under load (the fence rule's
-  250 ms is the knob; no low-load run with it yet). Why: #39 (spec #18) and the owner's call
+  WebGPU warm 2.7–2.9 s, no gap over 250 ms. The fence rule is therefore opt-in (`?warmfence=N`), and by
+  default a program done at its first poll after its fence is warm, as in 65607a7: load-dependent fences
+  misclassified returning visits, the owner's machine runs at that load all day and he'd feel the +5–9 s
+  on every visit, while cold visits are rare and were already worse in R0 (the lead's call). So
+  `Refs #39`: left are the compile-phase GPU-process gaps, the late batch of small shadow programs, and a
+  load-independent warm/cold test (follow-up: a record of program-source hashes drawn on this browser
+  and GPU; small shadow-pass programs priced or sent lone; a CPU-sampling profile of the compile gaps). Why: #39 (spec #18) and the owner's call
   (2026-10-18): graphics quality over load time.

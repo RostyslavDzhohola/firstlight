@@ -29,15 +29,21 @@ export const COMPLETION_STATUS_KHR = 0x91b1;
  */
 export const FAST_LINK_MS = 30;
 /**
- * …and only when its fence signalled within this of the linkProgram call: when the GPU process is
- * backlogged a cold program's link can finish on a worker before its fence is seen, and then look done
- * at once (cold runs classed 11–21 of 118 programs warm that way, one batch of 7 took 1.3 s).
+ * `?warmfence=N` (opt-in, default N = this): count a fast link as cached only when its fence signalled
+ * within N ms of the linkProgram call. When the GPU process is backlogged a cold program's link can
+ * finish on a worker before its fence is seen and look done at once (cold runs classed 11–21 of 118
+ * programs warm that way, one batch of 7 took 1.3 s); but under the owner's everyday load a returning
+ * visit's fences are as slow as a cold one's, and the rule made those visits 5–9 s slower. Off by default.
  */
 export const FENCE_PROMPT_MS = 250;
 
-/** Whether a link says the program was cached: done at once after a prompt fence (null: never seen: cold). */
-export function warmLink(linkMs: number | null, fenceMs: number | null): boolean {
-  return linkMs !== null && linkMs <= FAST_LINK_MS && fenceMs !== null && fenceMs <= FENCE_PROMPT_MS;
+/**
+ * Whether a link says the program was cached: done within FAST_LINK_MS of its fence (null: never seen:
+ * cold), and with `fencePromptMs` (?warmfence) only after a fence that came within it.
+ */
+export function warmLink(linkMs: number | null, fenceMs: number | null, fencePromptMs = Infinity): boolean {
+  if (linkMs === null || linkMs > FAST_LINK_MS) return false;
+  return fencePromptMs === Infinity || (fenceMs !== null && fenceMs <= fencePromptMs);
 }
 
 /** The WebGL2 calls the guard wraps. */
