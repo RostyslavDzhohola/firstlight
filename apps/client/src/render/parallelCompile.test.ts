@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  BATCH_TARGET_MS, deferPipelines, FIRST_DRAWS_START, FirstDrawPacer, gateFirstDraws, glFence, pipelineCost,
-  type DeferRenderer, type GateRenderer,
+  BATCH_TARGET_MS, deferPipelines, FENCE_LATENCY_MS, FIRST_DRAWS_CAP, FIRST_DRAWS_START, FirstDrawPacer, gateFirstDraws, glFence,
+  newStageCost, OLD_PACER, PACER, PIPELINE_OVERHEAD, pipelineCost, type DeferRenderer, type GateRenderer,
 } from "./parallelCompile.ts";
 
 /** three's Pipelines as the backend sees it: a new pipeline compiles in parallel only when given a list. */
@@ -225,9 +225,109 @@ describe("gateFirstDraws (WebGL2: a program's first draw compiles its Metal pipe
   });
 });
 
+describe("newStageCost (a first draw priced by the stages new to the GPU)", () => {
+  it("charges the characters of stages not drawn yet plus a per-pipeline overhead; no floor for skinned shadow programs", () => {
+    const vs = { code: "in vec4 skinIndex;" + "x".repeat(3000) };
+    const fs = { code: "y".repeat(1900) };
+    const p = { vertexProgram: vs, fragmentProgram: fs };
+    const none = new WeakSet<object>();
+    expect(PIPELINE_OVERHEAD).toBeGreaterThan(0);
+    expect(newStageCost(p, none)).toBe(PIPELINE_OVERHEAD + 3018 + 1900); // a skinned shadow program: its size
+    expect(newStageCost(p, new WeakSet([vs]))).toBe(PIPELINE_OVERHEAD + 1900);
+    // both stages drawn already (three shares a stage per source): it still builds a pipeline state
+    expect(newStageCost(p, new WeakSet([vs, fs]))).toBe(PIPELINE_OVERHEAD);
+    expect(newStageCost({}, none)).toBe(PIPELINE_OVERHEAD);
+  });
+});
+
 describe("FirstDrawPacer (one batch of first draws in flight, sized by the GPU's measured cost)", () => {
+  /** A fenced batch of `used` units that the GPU took `ms` over (the fence's own latency included). */
+  const batch = (p: FirstDrawPacer, used: number, ms: number, at = 0) => {
+    p.sent(used, at, () => true);
+    p.tick(at + ms);
+  };
+  const L = FENCE_LATENCY_MS;
+  const work = BATCH_TARGET_MS - L; // what a batch may cost beyond the fence's latency
+
   it("sends no new first draws until the GPU has finished the last batch", () => {
     const p = new FirstDrawPacer();
+    let done = false;
+    expect(p.allowance()).toBe(FIRST_DRAWS_START);
+    p.sent(FIRST_DRAWS_START, 0, () => done);
+    p.tick(16);
+    expect(p.allowance()).toBe(0);
+    done = true;
+    p.tick(50);
+    expect(p.allowance()).toBeGreaterThan(0);
+    expect(p.inFlight()).toBe(false);
+  });
+
+  it("sizes the next batch to the target at the measured rate, the fence's latency aside", () => {
+    const p = new FirstDrawPacer();
+    batch(p, 20_000, L + 100); // 5 ms per 1000 units
+    expect(p.allowance()).toBe(Math.round(work / 0.005));
+  });
+
+  it("the rate rises at once and falls slowly", () => {
+    const p = new FirstDrawPacer();
+    batch(p, 20_000, L + 100); // 0.005 ms per unit
+    batch(p, 20_000, L + 200); // 0.01: up at once
+    expect(p.allowance()).toBe(Math.round(work / 0.01));
+    batch(p, 20_000, L + 100); // 0.005 again: only a quarter of the way back down
+    expect(p.allowance()).toBe(Math.round(work / (0.01 + (0.005 - 0.01) * PACER.fall)));
+  });
+
+  it("a quick batch doesn't make the next one bigger than 1.5x its own units (or the start budget)", () => {
+    const p = new FirstDrawPacer();
+    batch(p, 4000, L); // nothing to learn from beyond the fence: no rate limit
+    expect(p.allowance()).toBe(1.5 * FIRST_DRAWS_START); // grows from the start budget, not from 4000
+    expect(p.allowance()).toBeLessThanOrEqual(FIRST_DRAWS_CAP);
+  });
+
+  it("caps batches at FIRST_DRAWS_CAP units until full batches come back quick; a slow batch puts the cap back", () => {
+    const p = new FirstDrawPacer();
+    batch(p, 36_000, 100); // not slow (under the target), not quick: the cap holds
+    expect(p.allowance()).toBe(FIRST_DRAWS_CAP);
+    const sizes: number[] = [];
+    for (let i = 0; i < 4; i++) {
+      // a warm cache: a full batch takes ~2 frames
+      const a = p.allowance();
+      batch(p, a, 30);
+      sizes.push(p.allowance());
+    }
+    // each quick full batch lifts the cap 1.5x, and the next batch grows at most 1.5x
+    expect(sizes).toEqual([60_000, 90_000, 135_000, 202_500]);
+    batch(p, p.allowance(), BATCH_TARGET_MS + 20); // over the target: back to the proven cap
+    expect(p.allowance()).toBeLessThanOrEqual(FIRST_DRAWS_CAP);
+  });
+
+  it("learns only from fenced batches", () => {
+    const p = new FirstDrawPacer();
+    p.sent(30_000, 0, null);
+    expect(p.inFlight()).toBe(false);
+    p.tick(300, 300); // a slow frame without a fence says nothing about the batch
+    expect(p.allowance()).toBe(FIRST_DRAWS_START);
+  });
+
+  it("a frame with no first draws leaves nothing in flight", () => {
+    const p = new FirstDrawPacer();
+    p.sent(0, 0, () => false);
+    expect(p.inFlight()).toBe(false);
+    expect(p.allowance()).toBe(FIRST_DRAWS_START);
+  });
+
+  it("tells a listener how long each batch took, with what it was sent with (diagnostics)", () => {
+    const heard: [number, number, unknown][] = [];
+    const p = new FirstDrawPacer((ms, used, tag) => heard.push([ms, used, tag]));
+    p.sent(3, 10, () => true, ["terrain"]);
+    p.tick(130);
+    expect(heard).toEqual([[120, 3, ["terrain"]]]);
+  });
+});
+
+describe("FirstDrawPacer with ?oldpacer (D-load-2: whole programs, a mean rate, no growth limit)", () => {
+  it("sends no new first draws until the GPU has finished the last batch", () => {
+    const p = new FirstDrawPacer(undefined, OLD_PACER);
     let done = false;
     expect(p.allowance()).toBe(FIRST_DRAWS_START);
     p.sent(FIRST_DRAWS_START, 0, () => done);
@@ -242,14 +342,14 @@ describe("FirstDrawPacer (one batch of first draws in flight, sized by the GPU's
   });
 
   it("sizes the next batch to take about BATCH_TARGET_MS at the cost rate it measured", () => {
-    const p = new FirstDrawPacer();
+    const p = new FirstDrawPacer(undefined, OLD_PACER);
     p.sent(40_000, 0, () => true); // 40k characters of GLSL took 200 ms: 5 ms per 1000
     p.tick(200);
     expect(p.allowance()).toBe(Math.round((BATCH_TARGET_MS / 200) * 40_000));
   });
 
   it("smooths the rate over batches, so one quick or slow batch doesn't swing it", () => {
-    const p = new FirstDrawPacer();
+    const p = new FirstDrawPacer(undefined, OLD_PACER);
     p.sent(20_000, 0, () => true);
     p.tick(100); // 5 ms per 1000
     p.sent(20_000, 100, () => true);
@@ -258,7 +358,7 @@ describe("FirstDrawPacer (one batch of first draws in flight, sized by the GPU's
   });
 
   it("a warm cache (quick batches) grows the budget, up to a cap", () => {
-    const p = new FirstDrawPacer();
+    const p = new FirstDrawPacer(undefined, OLD_PACER);
     for (let i = 0; i < 10; i++) {
       p.sent(p.allowance(), i * 20, () => true);
       p.tick(i * 20 + 20);
@@ -268,14 +368,14 @@ describe("FirstDrawPacer (one batch of first draws in flight, sized by the GPU's
   });
 
   it("a frame with no first draws leaves nothing in flight", () => {
-    const p = new FirstDrawPacer();
+    const p = new FirstDrawPacer(undefined, OLD_PACER);
     p.sent(0, 0, () => false);
     expect(p.inFlight()).toBe(false);
     expect(p.allowance()).toBe(FIRST_DRAWS_START);
   });
 
   it("without fences, takes the frame time as the batch's time", () => {
-    const p = new FirstDrawPacer();
+    const p = new FirstDrawPacer(undefined, OLD_PACER);
     p.sent(30_000, 0, null);
     expect(p.inFlight()).toBe(false);
     p.tick(300, 300); // 10 ms per 1000
@@ -284,7 +384,7 @@ describe("FirstDrawPacer (one batch of first draws in flight, sized by the GPU's
 
   it("tells a listener how long each batch took, with what it was sent with (diagnostics)", () => {
     const heard: [number, number, unknown][] = [];
-    const p = new FirstDrawPacer((ms, used, tag) => heard.push([ms, used, tag]));
+    const p = new FirstDrawPacer((ms, used, tag) => heard.push([ms, used, tag]), OLD_PACER);
     p.sent(3, 10, () => true, ["terrain"]);
     p.tick(130);
     expect(heard).toEqual([[120, 3, ["terrain"]]]);

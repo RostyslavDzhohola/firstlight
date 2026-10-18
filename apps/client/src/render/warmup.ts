@@ -15,7 +15,10 @@ import type { RenderCtx } from "./renderer.ts";
 import { flags } from "../config.ts";
 import { beginManualFrame, type TimestampSource } from "./timing.ts";
 import type { FirstDrawBatch, FirstDrawCensus, FirstDrawItem, SlowFrame, WarmupPhase, WarmupReport } from "./warmupReport.ts";
-import { deferPipelines, FirstDrawPacer, gateFirstDraws, glFence, pipelineCost, type DeferRenderer, type FenceGL, type GateRenderer, type Grant } from "./parallelCompile.ts";
+import {
+  deferPipelines, FirstDrawPacer, gateFirstDraws, glFence, newStageCost, OLD_PACER, PACER, pipelineCost,
+  type DeferRenderer, type FenceGL, type GateRenderer, type Grant,
+} from "./parallelCompile.ts";
 
 export type { FirstDrawBatch, FirstDrawCensus, FirstDrawItem, SlowFrame, WarmupPhase, WarmupReport } from "./warmupReport.ts";
 
@@ -357,18 +360,20 @@ export async function warmup(
   // `?serialcompile` keeps three's own one-by-one compiles for A/B runs.
   const deferred = flags.has("serialcompile") ? null : deferPipelines(renderer as unknown as DeferRenderer);
   // WebGL2: a program's first draw builds its Metal pipeline in the GPU process, so first draws go
-  // out in batches, one in flight at a time (a fence), sized by GLSL size at the GPU's measured rate.
+  // out in batches, one in flight at a time (a fence), priced by the GLSL of stages the GPU hasn't
+  // drawn yet at its measured rate (#39); `?oldpacer` prices and paces as D-load-2 did.
   // `?warmdiag` logs every batch in the order sent; `?warmsolo` (diagnostics) sends one pipeline per batch.
+  const oldPacer = flags.has("oldpacer");
   const diag = flags.has("warmdiag");
   const solo = flags.has("warmsolo");
   let frameGrants: FirstDrawItem[] = [];
   const batchLog: FirstDrawBatch[] = [];
   let sentBatches = 0;
   const gated = deferred?.active && !ctx.webgpu
-    ? gateFirstDraws(renderer as unknown as GateRenderer, diag ? (ro, p, g) => frameGrants.push(describeFirstDraw(ro, p, g)) : undefined, pipelineCost)
+    ? gateFirstDraws(renderer as unknown as GateRenderer, diag ? (ro, p, g) => frameGrants.push(describeFirstDraw(ro, p, g)) : undefined, oldPacer ? pipelineCost : newStageCost)
     : null;
   const gate = gated?.active ? gated : null;
-  const pacer = new FirstDrawPacer(diag ? (ms, _used, tag) => void ((tag as FirstDrawBatch).ms = Math.round(ms)) : undefined);
+  const pacer = new FirstDrawPacer(diag ? (ms, _used, tag) => void ((tag as FirstDrawBatch).ms = Math.round(ms)) : undefined, oldPacer ? OLD_PACER : PACER);
   const gl = (renderer as unknown as { backend?: { gl?: FenceGL } }).backend?.gl ?? null;
   let frameAt = 0;
   // Progress. The label counts GPU programs that have compiled, of those known so far (without the

@@ -4,7 +4,7 @@ import {
   fnv1a, forceProperty, installShaderMonitor, keptSamples, lastWarmup, MovingProgress, predictShadowBuilds, shadowBuildCost, shaderStats,
   warmShadowCasters, warmup, type WarmupProgress,
 } from "./warmup.ts";
-import { FIRST_DRAWS_START } from "./parallelCompile.ts";
+import { FIRST_DRAWS_START, PIPELINE_OVERHEAD } from "./parallelCompile.ts";
 import { flags } from "../config.ts";
 import type { RenderCtx } from "./renderer.ts";
 import { watchDisposals } from "./disposeWatch.testutil.ts";
@@ -453,6 +453,22 @@ describe("warm-up report (per-phase times and shader counts) and progress", () =
     } finally {
       vi.unstubAllGlobals();
       vi.restoreAllMocks();
+    }
+  });
+
+  it("prices a first draw by its stages new to the GPU plus an overhead; ?oldpacer by its whole program", async () => {
+    for (const old of [false, true]) {
+      vi.spyOn(flags, "has").mockImplementation((n) => n === "warmdiag" || (old && n === "oldpacer"));
+      const pipelines = new FakeDrawPipelines({ code: "v".repeat(4000) }); // one vertex stage for all
+      try {
+        const ctx = fakeCtx({ items: 0, webgpu: false, shadows: false, pipelines, objects: 4, gl: fakeFenceGl() });
+        const r = await warmup(ctx, { frames: 1 });
+        const costs = r.batches!.flatMap((b) => b.items.map((i) => i.cost));
+        expect(costs).toEqual(old ? [12_000, 12_000, 12_000, 12_000] : [PIPELINE_OVERHEAD + 12_000, ...Array(3).fill(PIPELINE_OVERHEAD + 8000)]);
+      } finally {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+      }
     }
   });
 

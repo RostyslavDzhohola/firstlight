@@ -16,9 +16,11 @@
 // On WebGL2 a compiled program still costs on its first draw: ANGLE's Metal backend builds the Metal
 // pipeline for it there, in the GPU process, which also draws the page. The first real warm-up frame
 // drew every object at once and froze the loader for ~5 s on a cold shader cache (M1, D-load-2).
-// gateFirstDraws() lets only a budget of never-drawn pipelines draw per frame, priced by GLSL size;
+// gateFirstDraws() lets only a budget of never-drawn pipelines draw per frame, priced by the GLSL of
+// their stages the GPU hasn't drawn yet plus a per-pipeline overhead (newStageCost, #39);
 // FirstDrawPacer sizes the budget from the GPU's measured rate, one fenced batch in flight at a time.
-// The warm-up renders frames until every program is compiled and drawn once.
+// The warm-up renders frames until every program is compiled and drawn once. `?oldpacer` keeps
+// D-load-2's pricing (whole programs, a floor for skinned shadow programs) and pacing (OLD_PACER).
 
 /** The private part of three's Renderer this touches (three is pinned, SPEC §3). */
 export interface DeferRenderer {
@@ -117,15 +119,30 @@ export const BATCH_TARGET_MS = 160;
 /** The first batch's budget, in GLSL characters: ~5 ms per 1000 on a cold M1 cache, so ~120 ms. */
 export const FIRST_DRAWS_START = 24_000;
 /**
+ * The most a batch may cost (units: GLSL characters of new stages) until full batches have come back
+ * quick (a warm cache); a batch over the target puts it back. ~5 ms per 1000 on a cold M1: ~200 ms.
+ */
+export const FIRST_DRAWS_CAP = 40_000;
+/**
+ * What a first draw costs on top of its new stages' characters: a pipeline whose stages were all
+ * drawn before still builds its own pipeline state.
+ */
+export const PIPELINE_OVERHEAD = 3_000;
+/**
+ * The part of a batch's measured time that isn't the GPU's work on it: the fence is read once a
+ * frame, so even an empty batch takes a frame or two.
+ */
+export const FENCE_LATENCY_MS = 33;
+/**
  * Skinned shadow-pass programs (characters, horses: ~5k characters) took ~270 ms each to build on a
- * cold M1, far over their size: price them so they always go alone.
+ * cold M1, far over their size: price them so they always go alone (`?oldpacer` only).
  */
 const SKINNED_SHADOW_COST = 60_000;
 const BUDGET_MAX = 2_000_000;
 
 /**
- * A pipeline's first-draw cost estimate: its GLSL size (vertex + fragment characters). On a cold
- * M1 cache the Metal build took about 5–6 ms per 1000 characters (D-load-2).
+ * A pipeline's first-draw cost estimate under `?oldpacer`: its GLSL size (vertex + fragment
+ * characters). On a cold M1 cache the Metal build took about 5–6 ms per 1000 characters (D-load-2).
  */
 export function pipelineCost(pipeline: object): number {
   const p = pipeline as { vertexProgram?: { code?: string }; fragmentProgram?: { code?: string } };
@@ -137,20 +154,63 @@ export function pipelineCost(pipeline: object): number {
 }
 
 /**
+ * A first draw's price (#39): the characters of its vertex and fragment stages that this renderer
+ * hasn't drawn yet (three shares a stage between pipelines with the same source), plus
+ * PIPELINE_OVERHEAD. No floor: skinned shadow programs cost their size like everything else.
+ */
+export function newStageCost(pipeline: object, drawn: DrawnStages): number {
+  return PIPELINE_OVERHEAD + newStageChars(pipeline, drawn);
+}
+
+/** How FirstDrawPacer learns and sizes batches. */
+export interface PacerTuning {
+  /** The first batch's budget, and the ceiling until full batches come back quick (cost units). */
+  start: number;
+  cap: number;
+  /** Raise the ceiling by `growth` after a batch that used most of it within half the target. */
+  liftCap: boolean;
+  /** A batch's budget is at most `growth` × the last batch's units (or the start budget). */
+  growth: number;
+  /** ms of each batch's time that is the fence's latency, not GPU work. */
+  latency: number;
+  /** How far a higher / lower measured rate moves the smoothed one (1: all the way). */
+  rise: number;
+  fall: number;
+  /** Learn from frame times when there are no fences. */
+  unfenced: boolean;
+}
+
+/** #39: rate up at once and down slowly, growth ≤ 1.5× per batch, a ceiling lifted only by quick full batches. */
+export const PACER: Readonly<PacerTuning> = {
+  start: FIRST_DRAWS_START, cap: FIRST_DRAWS_CAP, liftCap: true, growth: 1.5, latency: FENCE_LATENCY_MS, rise: 1, fall: 0.25, unfenced: false,
+};
+/** D-load-2's pacer (`?oldpacer`): the mean of the last rate and the new one, no growth limit, no ceiling. */
+export const OLD_PACER: Readonly<PacerTuning> = {
+  start: FIRST_DRAWS_START, cap: BUDGET_MAX, liftCap: false, growth: Infinity, latency: 0, rise: 0.5, fall: 0.5, unfenced: true,
+};
+
+/**
  * Paces WebGL2 first draws. A frame's GPU work shows up in later frames' times, not its own, so
  * pacing by frame times doubled the budget just before the cost arrived. With a fence after each
  * frame that drew something new, one batch is in flight at a time: no new first draws until the GPU
- * has finished it. Budgets are in cost units (pipelineCost): each finished batch measures the GPU's
- * ms per unit (smoothed), and the next batch gets what should take BATCH_TARGET_MS.
+ * has finished it. Budgets are in cost units (newStageCost): each finished batch measures the GPU's
+ * ms per unit (rising at once, falling slowly), and the next batch gets what should take
+ * BATCH_TARGET_MS, at most 1.5× the last batch and at most the ceiling.
  */
 export class FirstDrawPacer {
   private readonly onBatch?: (ms: number, used: number, tag: unknown) => void;
+  private readonly tune: Readonly<PacerTuning>;
   /** `onBatch` (diagnostics) hears each finished batch: the GPU's ms for it and the tag it was sent with. */
-  constructor(onBatch?: (ms: number, used: number, tag: unknown) => void) {
+  constructor(onBatch?: (ms: number, used: number, tag: unknown) => void, tuning: Readonly<PacerTuning> = PACER) {
     this.onBatch = onBatch;
+    this.tune = tuning;
+    this.budget = tuning.start;
+    this.cap = tuning.cap;
   }
 
-  private budget = FIRST_DRAWS_START;
+  private budget: number;
+  /** The current ceiling on a batch's budget. */
+  private cap: number;
   private batch: { done: () => boolean; at: number; used: number; tag: unknown } | null = null;
   private lastUsed = 0;
   /** ms of GPU time per cost unit, smoothed over batches (null: nothing measured yet). */
@@ -181,16 +241,26 @@ export class FirstDrawPacer {
       this.onBatch?.(ms, this.batch.used, this.batch.tag);
       this.learn(ms, this.batch.used);
       this.batch = null;
-    } else if (frameMs !== undefined && this.lastUsed > 0) {
+    } else if (this.tune.unfenced && frameMs !== undefined && this.lastUsed > 0) {
       this.learn(frameMs, this.lastUsed);
       this.lastUsed = 0;
     }
   }
 
   private learn(ms: number, used: number): void {
-    const r = ms / used;
-    this.rate = this.rate === null ? r : (this.rate + r) / 2;
-    this.budget = Math.round(Math.min(BUDGET_MAX, Math.max(1, BATCH_TARGET_MS / this.rate)));
+    const t = this.tune;
+    const r = Math.max(0, ms - t.latency) / used;
+    if (this.rate === null) this.rate = r;
+    else this.rate += (r - this.rate) * (r > this.rate ? t.rise : t.fall);
+    if (t.liftCap) {
+      // a warm cache: a batch that used most of the ceiling came back within half the target
+      if (ms <= BATCH_TARGET_MS / 2 && used >= 0.75 * this.cap) this.cap = Math.min(BUDGET_MAX, this.cap * t.growth);
+      else if (ms > BATCH_TARGET_MS) this.cap = t.cap;
+    }
+    const work = BATCH_TARGET_MS - t.latency;
+    const byRate = this.rate > 0 ? work / this.rate : Infinity;
+    const byGrowth = t.growth * Math.max(used, t.start);
+    this.budget = Math.round(Math.max(1, Math.min(this.cap, byRate, byGrowth)));
   }
 
   /** Fenced batches so far and how long the GPU took over them (ms, rounded). */
