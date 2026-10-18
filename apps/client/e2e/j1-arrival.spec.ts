@@ -186,8 +186,14 @@ test.describe("J1 arrival", () => {
     const shaders = await player.shaderWatchClosed();
     await player.note("warmup", warm);
     expect(warm, "the arrival's warm-up is reported").not.toBeNull();
+    // A frozen loader is a gap between animation frames; it can be the main thread (a long task) or the
+    // GPU process with the main thread idle, so the two are reported apart (#39).
+    await player.note("warmup-freezes", {
+      rafGapMax: warm!.framesDuring.max, rafGapsOver250: warm!.framesDuring.over250,
+      longTaskMax: warm!.longtasks.max, longTasksOver250: warm!.longtasks.over250,
+    });
     expect.soft(warm!.tier, "on the owner's tier").toBe("high");
-    expect.soft(warm!.framesDuring.max, `no main-thread block over 250 ms during the warm-up (worst: ${JSON.stringify(warm!.framesDuring.worst)})`).toBeLessThan(250);
+    expect.soft(warm!.framesDuring.max, `no gap between frames over 250 ms during the warm-up (worst: ${JSON.stringify(warm!.framesDuring.worst)}; longest main-thread task ${warm!.longtasks.max} ms)`).toBeLessThan(250);
     expect.soft(shaders.afterWarmup, `no shader builds after the warm-up (${JSON.stringify(shaders.recent)})`).toBe(0);
   });
 });

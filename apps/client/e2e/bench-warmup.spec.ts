@@ -6,6 +6,8 @@
 //   BENCH_MODE=parallel  the default: the warm-up's programs compile side by side
 //   BENCH_TIER=high      (default; the owner's M1 tier)   BENCH_RUN=1   BENCH_OUT=/tmp/…
 //   BENCH_TRACE=1        (Chromium) a browser-wide performance trace of the join and warm-up, next to the JSON
+//   BENCH_HOME_MS=8000   a realistic first visit: the home page shown this long before Play (Chrome compiles
+//                        its own raster pipelines for the page then, as in a real visit; #39)
 //   BENCH_FLAGS=warmdiag (extra URL flags: warmdiag logs every WebGL2 first-draw batch in send order with
 //   stage hashes and a census; warmsolo sends one pipeline per batch; oldpacer, fullshadow: the kill flags)
 //
@@ -31,6 +33,7 @@ const TIER = process.env.BENCH_TIER ?? "high";
 const RUN = process.env.BENCH_RUN ?? "1";
 const BENCH_OUT = process.env.BENCH_OUT ?? path.join(OUT, "bench");
 const TRACE = process.env.BENCH_TRACE === "1";
+const HOME_MS = Number(process.env.BENCH_HOME_MS ?? 0);
 /** Main-thread tasks, V8 and the GPU process's command buffer: enough to see what a long task waited on. */
 const TRACE_CATEGORIES = ["devtools.timeline", "disabled-by-default-devtools.timeline", "toplevel", "v8.execute", "gpu", "disabled-by-default-v8.cpu_profiler"];
 
@@ -42,6 +45,10 @@ test(`bench · shader warm-up · ${MODE || "off"} · ${TIER}`, { tag: ["@bench"]
   mkdirSync(BENCH_OUT, { recursive: true });
   const browser = TRACE ? page.context().browser() : null;
   if (browser) await browser.startTracing(page, { path: path.join(BENCH_OUT, `${info.project.name}-${MODE}-${TIER}-${RUN}.trace.json`), categories: TRACE_CATEGORIES });
+  if (HOME_MS > 0) {
+    await player.open();
+    await page.waitForTimeout(HOME_MS);
+  }
   await player.joinAsDevAdmin({ starter: "Hexwick", body: "portus", extra });
   await player.waitInWorld(240_000, "portus");
   const warm = await player.warmup("arrival");
