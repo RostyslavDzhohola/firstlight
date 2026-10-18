@@ -1332,10 +1332,13 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   (D-load-3) stay registered on both. The avatar warm-up stands each look once (7 views, was 42), each
   holding another item, the palettes cycling; held items keep their per-palette accent materials, which
   share one build. The shadow phase's prediction counts a skinned caster once per material and rig, as
-  three keys it (`?fullshadow`: 8, not 48). Headless tests through three's own `_renderObjectDirect`
-  (GPU calls stubbed), both backends: two avatars of one look in two palettes drawn alternately share
-  one material and build and each draw's own buffer holds its own palette, with no palette colour left
-  in the shader; horses likewise; after the warm-up no look × palette, held item or coat builds.
+  three keys it (`?fullshadow`: 8, not 48). Tests run three's real WebGL2 and WebGPU backends on a
+  recording fake GPU, real frames on one scene and camera: bodies of one look in four palettes (and
+  horses of four coats) drawn in turn share one material and build, and each draw reads the buffer
+  three made for its own per-object uniforms (bound for it; WebGPU through its bind group), holding its
+  own palette as uploaded (WebGPU as at submit), the glow reading the accent's uniform, no palette
+  colour left in the shader; a palette change in play builds nothing; after the warm-up no look ×
+  palette, held item or coat builds, shadows included.
   Measured (`e2e/bench-warmup.spec.ts` as in D-load-3, D and A+B (69ff92d) built from one checkout
   and alternated back to back on one stack, load 35–55): census A+B → D: skinned main pipelines
   48 → 8, skinned shadow 2 → 2, skinned vertex stages 50 → 10, first-drawn pipelines 118 → 78, node
@@ -1346,7 +1349,12 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   (D's first WebGPU run, its avatar shaders new to Chrome's cache, 4.1 s). Frames over 250 ms: cold
   6/3 → 2/3, warm 1 → 1, WebGPU 0 → 0; none is a character pipeline: each is a big pipeline drawn
   alone (terrain 41k characters 288–289 ms, blossom 272–520 ms, water 248–290 ms) or the early compile
-  stall D-load-3 left (5.1 s in one D run, 4.8 s in one A+B run). Screenshots (`?avatars` every look ×
+  stall D-load-3 left (5.1 s in one D run, 4.8 s in one A+B run). So D alone does not meet the plan's
+  frame gate (no warm-up frame over 250 ms); it stays open for #39 and is judged on the merged build
+  against #39's acceptance as the lead revised it with D-load-3: no main-thread long task over 250 ms;
+  no rAF gap over 250 ms other than single GPU-process pipeline builds that can't be split, each named;
+  warm returning visits no slower than R0. The lean-shadows lane's second phase (no synchronous GL
+  polls while the GPU process is busy) is aimed at it. Screenshots (`?avatars` every look ×
   palette with starter weapons and a close-up, `?horses` six coats with riders, without, close up;
   WebGL2 and WebGPU; a fake clock paused at a fixed time, `Math.random` seeded, grain and TRAA off,
   which jitter per run): coats pixel-identical; avatars differ in 0.01–2.0 % of pixels, as much as two
