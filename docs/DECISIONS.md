@@ -1095,7 +1095,14 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   under 3 % and the awning under 27 % (an outpost's roof seen from 2.6 m above or from under its
   overhang), turned away the whole stall under 29 %; no frame with the lens inside a stall volume (17
   on Arcadia before); no label drawn nearer than 1.6 m (0.01 m before); E opens the shop from the
-  front, both front corners and both sides on all four bodies. Why: the owner's recording
+  front, both front corners and both sides on all four bodies. Because stalls and walls pin the
+  camera to the head, the local player's own avatar (with what it holds and wears) dissolves as a
+  whole when the camera comes within 1.2 m of its chest-to-head line, fully within 0.5 m: the gated
+  mask's second case (`userData.ownAvatar`, which Game sets; a render-group uniform), the same dither,
+  no new shader; other players never fade, and photo mode and the bench keep it off as before. With
+  the camera pinned (at the counter turned away, walked into it, backed against a Portus house wall)
+  the own avatar covered the bottom of the view or the face filled it; now 0 % of the screen, and
+  6.5–7.5 % in the normal views. Why: the owner's recording
   (40.1–40.3 s) had the camera inside the Portus Exchange stall: the awning across the view, the
   label over the top, the keeper's hat over the bottom.
 - **D-e2e-2 (2026-10-18):** `?framecount` (#23) shows two frame counters on the bottom edge at the
