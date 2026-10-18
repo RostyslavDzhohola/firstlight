@@ -89,14 +89,32 @@ export function meanLuma(rgba: ArrayLike<number>): number {
   return n ? sum / n : 0;
 }
 
+/** Mean alpha (0–255) of RGBA pixels. */
+export function meanAlpha(rgba: ArrayLike<number>): number {
+  let sum = 0;
+  const n = Math.floor(rgba.length / 4);
+  for (let i = 0; i < n; i++) sum += rgba[i * 4 + 3]!;
+  return n ? sum / n : 0;
+}
+
+/**
+ * A blank world frame (D-view-3): the drawing buffer was cleared after the frame was drawn (a resize
+ * assigns the canvas size, which clears it). With `alpha: true` the copy is transparent and the page
+ * background shows through; an opaque canvas would be pure black. A dark scene is neither.
+ */
+export function isBlankWorld(luma: number, alpha: number): boolean {
+  return alpha < 16 || luma < 1;
+}
+
 /**
  * Source of the blink probe's readback worker: it draws each small ImageBitmap of the canvas onto
- * an OffscreenCanvas and answers `{ t, v }` (mean luma) or `{ t, error }`. Reading pixels back
+ * an OffscreenCanvas and answers `{ t, v, a }` (mean luma and alpha) or `{ t, error }`. Reading pixels back
  * waits for the GPU to finish the frame; on the page's main thread that wait landed in the game's
  * own frames (WebGL, a busy GPU: 100–200 ms frames that the journeys then counted as stalls).
  */
 export function lumaWorkerSource(): string {
   return `const luma = (${meanLuma.toString()});
+const alpha = (${meanAlpha.toString()});
 let c = null;
 self.onmessage = (e) => {
   const { bmp, t, w, h } = e.data;
@@ -105,7 +123,8 @@ self.onmessage = (e) => {
     c.clearRect(0, 0, w, h);
     c.drawImage(bmp, 0, 0);
     bmp.close();
-    self.postMessage({ t, v: luma(c.getImageData(0, 0, w, h).data) });
+    const px = c.getImageData(0, 0, w, h).data;
+    self.postMessage({ t, v: luma(px), a: alpha(px) });
   } catch (err) {
     self.postMessage({ t, error: String(err) });
   }

@@ -1096,3 +1096,43 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   renderer was up, and in the owner's recording it flashed through the loader 3 times (3.9, 4.6 and
   5.1 s; 4, 4 and 1 frames) when a presented frame lost the loader's layer. This hides the symptom (a
   dropped loader frame now shows the dark page), not the compositor cause (D-ui-1).
+- **D-view-3 (2026-10-18):** the 3D canvas is resized only right before a frame is drawn
+  (render/frameSize.ts, the render context's one owner of the drawing-buffer size). Every size
+  request (resolution-ladder steps from afterFrame, the window's resize event and fullscreen changes,
+  settings, tier and render-scale changes, a ladder floor's tier drop) only marks the size pending;
+  every draw (the frame's render, warm-up and probe frames, the warm-up's scene-pass probe render)
+  applies it first, in one `setDrawingBufferSize` call, skipped when the physical size is unchanged,
+  with the camera aspect updated in the same step. The e2e blink probe reads the canvas at the end of
+  the frame's task (a microtask after the frame's render) and always reads a frame whose task changed
+  the size; `__fl.act.ladderStep` forces a ladder step through afterFrame. J1.4 forces 6 steps and
+  2 viewport resizes: 6 blank world frames (alpha 0) before, 0 after on WebGL2 and WebGPU. Not
+  chosen: `preserveDrawingBuffer` (a copy per frame for what ordering fixes for free). Builds on
+  D-view-1 and D-view-2. Why: assigning a canvas's size clears it, and the ladder resized after the
+  frame's draw in the same animation frame, so Chrome presented a blank world under the HUD once per
+  step (owner's recording 2026-10-16: 40.8 s, 48.9 s, 69.0 s; spec #17).
+- **D-view-4 (2026-10-18):** menus don't move the resolution. The resolution ladder
+  (render/timing.ts) has a suspended state: while the pause menu or a full-screen overlay covers the
+  world (pause states "menu" and "away": a panel, the death screen, a sign-in card or a notice;
+  `coversWorld` in ui/pauseFlow.ts, wired in Game's `menu.onState`), samples are ignored. Suspending
+  and resuming drop the current window and slow/fast streaks; resuming goes back to the rung held
+  when the suspension began (a tier change or an e2e forced step under the menu is that rung) and
+  ignores the first 1 s of samples. Cooldowns and hold-offs keep running in wall time. J5.5 (10
+  menus over `?cpuslow=8&notimer` frames, p50 50 ms): the ladder walked 0 → 3 before, stays at 0
+  after. With an untrusted GPU timer (the M1: its readings sum overlapping passes above the frame
+  interval) the ladder also steps back up: after the up-step hold-off (30 s after a down-step,
+  forced ones included) and 4 windows at vsync it makes a trial up-step, kept if the 2 windows
+  after its 4 s cooldown stay at vsync; otherwise it steps back down at once and the hold-off
+  doubles (up to 480 s), also when a menu paused the trial past the hold-off. "At vsync" is
+  measured, not assumed: a window median within 5% + 0.3 ms of the display's frame interval, the
+  lowest window median seen (50, 60 and 120 Hz alike; 60 fps on a 120 Hz display is not at vsync).
+  Never while suspended; a trusted timer and no timer keep their rules (no timer: never up). A simulated 10-minute capped 60 Hz run: 2 trials, both
+  kept, from rung 2 when every rung holds vsync; 4 trials, each reverted within 4 s (gaps 64, 124,
+  245 s), when full resolution misses vsync. J1.7, real WebGL2 on the M1 (headless, rAF capped at
+  60 Hz, timer marked untrusted, the ladder's clock at 10× for 60 s = 10 ladder-minutes): 2 trials,
+  both kept, frames p50 16.7 ms, no blank frame. One real-clock 10-minute run of the same journey
+  (E2E_LADDER_CLOCK=1, E2E_LADDER_SECONDS=600, 2026-10-18): 2 trials, 2 kept, 0 reverted (rung
+  2 → 1 at 30.3 s, → 0 at 44.7 s, then no trial for the rest), p50 16.7 ms over the last 4096
+  frames, no blank frame. Builds on D-view-3 and D-controls-3. Why: the
+  ladder counted the blurred menu's slow frames and reached its floor ~3.5 s after the owner opened
+  the menu (0.93 → 0.75, ~41 fps), and with the M1's untrusted timer it could never climb back, so
+  the rest of the session stayed blurry (spec #17).

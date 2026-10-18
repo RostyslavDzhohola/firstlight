@@ -51,4 +51,90 @@ test.describe("J1 arrival", () => {
     expect.soft(frames.max, `no frozen frame from the portal to Arcadia (worst: ${JSON.stringify(frames.worst)})`).toBeLessThan(500);
     expect.soft(shaders.afterWarmup, `no shader builds after the warm-up (${JSON.stringify(shaders.recent)})`).toBe(0);
   });
+
+  test("J1.4 · item 1 · resolution steps and a window resize never show a blank world (D-view-3)", { tag: ["@J1", "@J1.4", "@item-1"] }, async ({ player, page }) => {
+    // ?noladder: only the forced steps below change the resolution (they are taken all the same).
+    await player.joinAsDevAdmin({ starter: "Hexwick", body: "portus", extra: { noladder: true } });
+    await player.waitInWorld(180_000, "portus");
+    const frames = (n: number) =>
+      page.evaluate((n) => new Promise<void>((done) => {
+        let left = n;
+        const tick = () => (--left <= 0 ? done() : requestAnimationFrame(tick));
+        requestAnimationFrame(tick);
+      }), n);
+    const started = await page.evaluate(() => (window as any).__fl.probe.start({ every: 2 }));
+    expect(started.ok, `blink probe started (${started.reason ?? ""})`).toBe(true);
+    const steps: { dir: number; ladder: number; canvas: unknown }[] = [];
+    // Three steps down to the floor and three back up: each one resizes the drawing buffer from the
+    // frame's afterFrame, the way the ladder does on a slow machine.
+    for (const dir of [1, 1, 1, -1, -1, -1] as const) {
+      const before = (await player.snap()).gfx?.ladder ?? 0;
+      expect(await page.evaluate((d) => (window as any).__fl.act.ladderStep(d), dir), "the hook can force a ladder step").toBe(true);
+      const s = await player.until((x) => x.gfx?.ladder === before + dir, `ladder rung ${before + dir}`, 10_000);
+      steps.push({ dir, ladder: s.gfx!.ladder!, canvas: s.gfx!.canvas });
+      await frames(20);
+    }
+    // A window resize (a fullscreen change resizes the same way).
+    for (const size of [{ width: 1100, height: 640 }, { width: 1280, height: 720 }]) {
+      const before = JSON.stringify((await player.snap()).gfx?.canvas);
+      await page.setViewportSize(size);
+      await player.until((x) => JSON.stringify(x.gfx?.canvas) !== before, `drawing buffer resized for ${size.width}×${size.height}`, 10_000);
+      await frames(20);
+    }
+    const probe = await page.evaluate(() => (window as any).__fl.probe.stop());
+    await player.note("frame-sizing", { steps, resizes: probe.resizes, blanks: probe.blanks, samples: probe.samples, skipped: probe.skipped, errors: probe.errors });
+    expect(probe.samples, "luma samples taken").toBeGreaterThan(50);
+    expect(probe.resizes, "every ladder step and window resize was a drawing-buffer change the probe read").toBeGreaterThanOrEqual(8);
+    expect(probe.blanks, "no presented frame shows a blank world").toEqual([]);
+  });
+
+  test("J1.7 · item 1 · a steady capped WebGL2 run with an untrusted GPU timer: few trial up-steps, kept, no blank frame (D-view-4)", { tag: ["@J1", "@J1.7", "@item-1"] }, async ({ player, page }) => {
+    test.skip(player.gfx !== "webgl", "the owner's M1 case: WebGL2 through ANGLE Metal");
+    // Ten minutes of ladder decisions in one: the ladder's clock runs 10× (windows, cooldowns, the
+    // 30 s up-step hold-off and its back-off), the frames stay real (rAF capped at 60 Hz headless).
+    // The one-off real-clock measurement: E2E_LADDER_CLOCK=1 E2E_LADDER_SECONDS=600.
+    const CLOCK = Number(process.env.E2E_LADDER_CLOCK ?? 10);
+    const REAL_S = Number(process.env.E2E_LADDER_SECONDS ?? 60);
+    test.setTimeout(REAL_S * 1000 + 300_000);
+    await player.joinAsDevAdmin({ starter: "Hexwick", body: "portus" });
+    await player.waitInWorld(180_000, "portus");
+    const act = (name: string, arg?: unknown) => page.evaluate(([n, a]) => (window as any).__fl.act[n as string](a), [name, arg] as const);
+    const natural = (await player.snap()).gfx?.gpuUntrusted ?? null;
+    expect(await act("ladderUntrusted"), "the timer is marked untrusted, as on the owner's M1").toBe(true);
+    if (CLOCK !== 1) expect(await act("ladderClock", CLOCK)).toBe(true);
+    const started = await page.evaluate(() => (window as any).__fl.probe.start({ every: 2 }));
+    expect(started.ok, `blink probe started (${started.reason ?? ""})`).toBe(true);
+    // Two rungs down, the way a slow moment leaves it (each starts the up-step hold-off).
+    for (const target of [1, 2]) {
+      await act("ladderStep", 1);
+      await player.until((x) => x.gfx?.ladder === target, `ladder rung ${target}`, 10_000);
+    }
+    const t0 = await player.now();
+    const rungs: { s: number; rung: number }[] = [];
+    let rung = 2;
+    const end = Date.now() + REAL_S * 1000;
+    while (Date.now() < end) {
+      const s = await player.snap();
+      if (s.gfx?.ladder !== undefined && s.gfx.ladder !== null && s.gfx.ladder !== rung) {
+        rung = s.gfx.ladder;
+        rungs.push({ s: Math.round(((s.t - t0) * CLOCK) / 100) / 10, rung });
+      }
+      await page.waitForTimeout(500);
+    }
+    const last = await player.snap();
+    const frames = await page.evaluate((t) => (window as any).__fl.frames.stats(t), t0);
+    const probe = await page.evaluate(() => (window as any).__fl.probe.stop());
+    const trials = last.gfx?.ladderTrials ?? null;
+    await player.note("trials", {
+      naturallyUntrusted: natural, clock: CLOCK, ladderMinutes: (REAL_S * CLOCK) / 60, trials, rungs, finalRung: last.gfx?.ladder,
+      suspended: last.gfx?.ladderSuspended, frames: { p50: frames.p50, p95: frames.p95, max: frames.max, frames: frames.frames },
+      resizes: probe.resizes, blanks: probe.blanks,
+    });
+    expect(frames.p50, "a capped, steady run: frames at vsync").toBeLessThanOrEqual(17.5);
+    expect(trials, "trial counters").not.toBeNull();
+    expect(trials!.kept, "steady frames keep the trial up-steps").toBeGreaterThanOrEqual(1);
+    // Bounded: two rungs to climb, and the doubling hold-off allows at most four failed trials in 10 min.
+    expect(trials!.taken, "few trial up-steps in 10 ladder-minutes").toBeLessThanOrEqual(6);
+    expect(probe.blanks, "no trial resize shows a blank world").toEqual([]);
+  });
 });

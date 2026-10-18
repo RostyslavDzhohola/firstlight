@@ -22,6 +22,15 @@ export type PauseState =
   /** A panel, the death screen, a sign-in card or a notice owns the screen (and its own Esc). */
   | "away";
 
+/**
+ * The pause menu or a full-screen overlay (panel, death screen, sign-in card, notice) covers the world.
+ * Its frames are UI time, often slowed by the overlay itself: the resolution ladder is suspended
+ * (D-view-4), and the game mutes its colours.
+ */
+export function coversWorld(s: PauseState): boolean {
+  return s === "menu" || s === "away";
+}
+
 export const PAUSE_TIMING = {
   /** An unlock must last this long before the menu shows: a lock that flickers off and on shows nothing. */
   menuDelayMs: 150,

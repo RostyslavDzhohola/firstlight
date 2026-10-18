@@ -4,7 +4,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Input } from "../game/input.ts";
-import { bindPointerLock, PAUSE_TIMING, PauseFlow, pauseKey, type PauseClock, type PauseHost, type PauseState } from "./pauseFlow.ts";
+import { ResolutionLadder } from "../render/timing.ts";
+import { bindPointerLock, coversWorld, PAUSE_TIMING, PauseFlow, pauseKey, type PauseClock, type PauseHost, type PauseState } from "./pauseFlow.ts";
 
 /** A hand-driven clock: `advance(ms)` runs the timers that come due. */
 function manualClock() {
@@ -196,6 +197,77 @@ describe("PauseFlow", () => {
     expect(r.flow.state).toBe("away");
     r.flow.onLockError();
     expect(r.flow.state).toBe("free");
+  });
+});
+
+// ------------------------------------------------------------------------------------------------ the resolution ladder
+
+describe("PauseFlow and the resolution ladder (D-view-4)", () => {
+  it("the pause menu and full-screen overlays cover the world; play, the free pointer and the menu's delay don't", () => {
+    const all: PauseState[] = ["playing", "pending", "menu", "free", "away"];
+    expect(all.filter(coversWorld)).toEqual(["menu", "away"]);
+  });
+
+  /**
+   * The flow drawing its states with the ladder suspended while they cover the world (Game wires
+   * menu.onState the same way), and the game's frames fed to the ladder at `frameMs` on the flow's clock.
+   */
+  function withLadder(frameMs: number, wired = true) {
+    const { clock, advance } = manualClock();
+    const ladder = new ResolutionLadder();
+    let overlays = 0;
+    const flow = new PauseFlow(
+      {
+        render: (s) => wired && ladder.setSuspended(coversWorld(s)),
+        requestLock: () => {},
+        exitLock: () => {},
+        overlayOpen: () => overlays > 0,
+      },
+      clock,
+    );
+    const play = (ms: number) => {
+      for (let left = ms; left > 0; left -= frameMs) {
+        advance(frameMs);
+        ladder.sample(clock.now(), frameMs, null, 12);
+      }
+    };
+    return { flow, ladder, play, setOverlays: (n: number) => (overlays = n) };
+  }
+
+  it("opening and closing the menu 10 times over slow frames leaves the ladder at its rung", () => {
+    for (const wired of [true, false]) {
+      const r = withLadder(40, wired); // 25 fps under the menu and in the short stretches of play
+      r.flow.onLocked();
+      r.play(1500);
+      const start = r.ladder.index;
+      for (let i = 0; i < 10; i++) {
+        r.flow.onUnlocked(); // Esc: the browser frees the pointer, the menu shows after its delay
+        r.play(2500);
+        expect(r.flow.state).toBe("menu");
+        r.flow.resume();
+        r.flow.onLocked();
+        r.play(800);
+      }
+      if (wired) expect(r.ladder.index, "suspended under the menu").toBe(start);
+      else expect(r.ladder.index, "the same frames step the ladder down when nothing suspends it").toBeGreaterThan(start);
+    }
+  });
+
+  it("a panel or the death screen suspends it too, and play after it samples again", () => {
+    const r = withLadder(40);
+    r.flow.onLocked();
+    r.play(1000);
+    r.setOverlays(1);
+    r.flow.onUnlocked(); // a panel frees the pointer
+    expect(r.flow.state).toBe("away");
+    expect(r.ladder.suspended).toBe(true);
+    r.play(20_000);
+    expect(r.ladder.index).toBe(0);
+    r.setOverlays(0);
+    r.flow.onOverlayChange();
+    expect(r.ladder.suspended).toBe(false);
+    r.play(10_000); // slow play outside the overlay still steps down
+    expect(r.ladder.index).toBeGreaterThan(0);
   });
 });
 

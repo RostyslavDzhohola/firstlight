@@ -12,21 +12,27 @@
 //                         changes, toasts, body/lock/loading/graphics changes
 //   frames.stats(since?)  requestAnimationFrame deltas (always recorded: a 4096-entry ring, cheap)
 //   probe.start(opts)     blink probe, only while a journey runs it: canvas luma from a 32×18 copy every
-//                         `every` frames (createImageBitmap right after the game's render, so no readback
-//                         of the full frame and no stall) plus `hidden` flips in the DOM. probe.stop() →
-//                         { luma, flashes, flaps }
+//                         `every` frames (createImageBitmap at the end of the frame's task, after all of the
+//                         frame's work, so no readback of the full frame and no stall; every frame whose
+//                         task changed the drawing-buffer size is read too) plus `hidden` flips in the DOM.
+//                         probe.stop() → { luma, flashes, flaps, resizes, blanks }
 //   hudRects()            visible HUD boxes (player card, hotbar, tutorial, minimap, save card…) for overlap checks
 //   auth()                async: guest / saved / dev guest, from the auth session (never signs in)
 //   act                   helpers for what Playwright can't drive through real input:
 //     browserEscape()     what desktop Chrome does on Esc while the pointer is locked (releases the lock;
 //                         the page gets no key event). Headless Chrome delivers the key and keeps the lock.
 //     admin(cmd, args)    an admin console command (dev admin guests on local stacks; the server refuses others)
+//     ladderStep(dir)     one resolution-ladder step (+1 down, −1 up), taken in the next frame's afterFrame
+//                         like a natural step (D-view-3 blank-frame gate)
+//     ladderClock(k)      the ladder's clock runs k× faster from now on (windows, cooldowns, hold-offs),
+//                         frame times stay real: minutes of ladder decisions in seconds (D-view-4)
+//     ladderUntrusted()   mark the GPU timer untrusted, as it is on the owner's M1 (D-view-4)
 //
 // Game internals are read through narrow structural types with optional chaining, so a refactor
 // elsewhere shows up as a null field, not a crashed hook.
 
 import { bearingTo, headingOf, surfaceDistance, type V3 } from "../social/compassMath.ts";
-import { detectFlaps, detectFlashes, frameStats, lumaWorkerSource, meanLuma, Ring, screenAim, type Flash } from "./e2eProbe.ts";
+import { detectFlaps, detectFlashes, frameStats, isBlankWorld, lumaWorkerSource, meanAlpha, meanLuma, Ring, screenAim, type Flash } from "./e2eProbe.ts";
 
 // ---------------------------------------------------------------------------------------------- structural views
 
@@ -85,6 +91,15 @@ interface GameLike {
     tier?: string;
     pixelRatio?(): number;
     render?: () => void;
+    afterFrame?: (now: number, frameMs: number) => void;
+    ladder?: {
+      index: number;
+      scale: number;
+      suspended?: boolean;
+      gpuUntrusted?: boolean;
+      trials?: { taken: number; kept: number; reverted: number };
+      forceStep?(dir: 1 | -1): void;
+    };
     camera?: { matrixWorldInverse: { elements: ArrayLike<number> }; projectionMatrix: { elements: ArrayLike<number> }; position: Vec };
     renderer?: { domElement?: HTMLCanvasElement };
   };
@@ -331,7 +346,9 @@ export function installE2eHook(win: Window & typeof globalThis): void {
   /** Degrees the camera rotated since the previous luma sample, keyed like `luma` (by sample time). */
   const turns = new Ring(4096);
   const flips: { t: number; key: string }[] = [];
-  let probe: { stop(): void; startedAt: number; every: number; skipped: number; errors: number } | null = null;
+  /** Samples that showed a blank world (isBlankWorld), with the drawing-buffer size they were read at. */
+  const blanks: { t: number; size: string; luma: number; alpha: number }[] = [];
+  let probe: { stop(): void; startedAt: number; every: number; skipped: number; errors: number; resizes: number } | null = null;
   const elementKeys = new WeakMap<Element, string>();
   let nextKey = 0;
   const keyOf = (e: Element) => {
@@ -366,6 +383,14 @@ export function installE2eHook(win: Window & typeof globalThis): void {
     const c2d = small.getContext("2d", { willReadFrequently: true })!;
     luma.clear();
     turns.clear();
+    blanks.length = 0;
+    /** Drawing-buffer size of each sample in flight, by sample time. */
+    const sizeAt = new Map<number, string>();
+    const record = (t: number, v: number, a: number) => {
+      luma.push(t, v);
+      if (isBlankWorld(v, a) && blanks.length < 200) blanks.push({ t: Math.round(t), size: sizeAt.get(t) ?? "?", luma: Math.round(v * 10) / 10, alpha: Math.round(a) });
+      sizeAt.delete(t);
+    };
     const camera = ctx.camera as { quaternion?: { x: number; y: number; z: number; w: number } } | undefined;
     let lastQ: [number, number, number, number] | null = null;
     flips.length = 0;
@@ -373,42 +398,61 @@ export function installE2eHook(win: Window & typeof globalThis): void {
     const original = ctx.render;
     let n = 0;
     let pending = false;
-    const state = { startedAt: performance.now(), every, skipped: 0, errors: 0, stop: () => {} };
-    ctx.render = function (this: unknown, ...args: unknown[]) {
-      const result = (original as (...a: unknown[]) => unknown).apply(ctx, args);
-      if (++n % every !== 0) return result;
-      if (pending) {
-        state.skipped++;
-        return result;
-      }
-      pending = true;
-      const t = performance.now();
-      // The rendered frame's camera: how far it turned since the last sample (a look-step changes
-      // the picture without anything blinking).
-      const q = camera?.quaternion;
-      if (q) {
-        const d = lastQ ? Math.min(1, Math.abs(q.x * lastQ[0] + q.y * lastQ[1] + q.z * lastQ[2] + q.w * lastQ[3])) : 1;
-        turns.push(t, (2 * Math.acos(d) * 180) / Math.PI);
-        lastQ = [q.x, q.y, q.z, q.w];
-      }
-      // Same task as the render: the drawing buffer still holds this frame (WebGL and WebGPU alike).
+    /** Drawing-buffer size at the end of the last frame's task ("" before the first). */
+    let lastSize = "";
+    const state = { startedAt: performance.now(), every, skipped: 0, errors: 0, resizes: 0, stop: () => {} };
+    const take = (t: number) => {
+      // The end of the frame's task (D-view-3): the drawing buffer holds what this task leaves for
+      // the compositor, after all of the frame's work (the ladder's afterFrame step included).
+      sizeAt.set(t, lastSize);
       const shot = createImageBitmap(canvas, { resizeWidth: w, resizeHeight: h, resizeQuality: "low" });
       if (worker) {
         shot.then((bmp) => worker!.postMessage({ bmp, t, w, h }, [bmp])).catch(() => {
           state.errors++;
           pending = false;
         });
-        return result;
+        return;
       }
       shot
         .then((bmp) => {
           c2d.clearRect(0, 0, w, h);
           c2d.drawImage(bmp, 0, 0);
           bmp.close();
-          luma.push(t, meanLuma(c2d.getImageData(0, 0, w, h).data));
+          const px = c2d.getImageData(0, 0, w, h).data;
+          record(t, meanLuma(px), meanAlpha(px));
         })
         .catch(() => state.errors++)
         .finally(() => (pending = false));
+    };
+    ctx.render = function (this: unknown, ...args: unknown[]) {
+      const result = (original as (...a: unknown[]) => unknown).apply(ctx, args);
+      const periodic = ++n % every === 0;
+      const t = performance.now();
+      // The rendered frame's camera: how far it turned since the last sample (a look-step changes
+      // the picture without anything blinking).
+      const q = camera?.quaternion;
+      const turn = (): void => {
+        if (!q) return;
+        const d = lastQ ? Math.min(1, Math.abs(q.x * lastQ[0] + q.y * lastQ[1] + q.z * lastQ[2] + q.w * lastQ[3])) : 1;
+        turns.push(t, (2 * Math.acos(d) * 180) / Math.PI);
+        lastQ = [q.x, q.y, q.z, q.w];
+      };
+      queueMicrotask(() => {
+        if (probe !== state) return;
+        // A frame whose task changed the drawing-buffer size is always read: that is where a resize
+        // after the draw would leave a blank world.
+        const size = `${canvas.width}x${canvas.height}`;
+        const resized = lastSize !== "" && size !== lastSize;
+        lastSize = size;
+        if (resized) state.resizes++;
+        if (!resized && (!periodic || pending)) {
+          if (periodic) state.skipped++;
+          return;
+        }
+        pending = true;
+        turn();
+        take(t);
+      });
       return result;
     };
     // Only real show/hide changes count: code that re-sets `hidden = true` every frame queues a record
@@ -427,9 +471,9 @@ export function installE2eHook(win: Window & typeof globalThis): void {
     });
     mo.observe(document.body, { subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ["hidden"] });
     if (worker) {
-      worker.onmessage = (e: MessageEvent<{ t: number; v?: number; error?: string }>) => {
+      worker.onmessage = (e: MessageEvent<{ t: number; v?: number; a?: number; error?: string }>) => {
         pending = false;
-        if (typeof e.data.v === "number") luma.push(e.data.t, e.data.v);
+        if (typeof e.data.v === "number") record(e.data.t, e.data.v, e.data.a ?? 255);
         else state.errors++;
       };
       worker.onerror = () => {
@@ -463,6 +507,10 @@ export function installE2eHook(win: Window & typeof globalThis): void {
       samples: series.length,
       skipped: p.skipped,
       errors: p.errors,
+      /** Frames whose task changed the drawing-buffer size (each one is sampled). */
+      resizes: p.resizes,
+      /** Sampled frames that showed a blank world: a resize cleared the drawing buffer after the draw. */
+      blanks: [...blanks],
       lumaMin: series.length ? Math.min(...series.map((s) => s.v)) : null,
       lumaMax: series.length ? Math.max(...series.map((s) => s.v)) : null,
       flashes,
@@ -616,7 +664,16 @@ export function installE2eHook(win: Window & typeof globalThis): void {
     return {
       ...base,
       body,
-      gfx: { webgpu: !!g.ctx?.webgpu, tier: g.ctx?.tier ?? null, pixelRatio: g.ctx?.pixelRatio?.() ?? null },
+      gfx: {
+        webgpu: !!g.ctx?.webgpu,
+        tier: g.ctx?.tier ?? null,
+        pixelRatio: g.ctx?.pixelRatio?.() ?? null,
+        ladder: g.ctx?.ladder?.index ?? null,
+        ladderSuspended: g.ctx?.ladder?.suspended ?? null,
+        ladderTrials: g.ctx?.ladder?.trials ? { ...g.ctx.ladder.trials } : null,
+        gpuUntrusted: g.ctx?.ladder?.gpuUntrusted ?? null,
+        canvas: g.ctx?.renderer?.domElement ? [g.ctx.renderer.domElement.width, g.ctx.renderer.domElement.height] : null,
+      },
       net: room ? { roomId: room.roomId, sessionId: room.sessionId, rtt: g.net?.rtt ?? null } : null,
       player: {
         pos: pos.map(r1),
@@ -790,6 +847,26 @@ export function installE2eHook(win: Window & typeof globalThis): void {
         const room = game()?.net?.room;
         if (!room) return false;
         room.send("admin", { cmd, args });
+        return true;
+      },
+      ladderStep: (dir: 1 | -1 = 1) => {
+        const ladder = game()?.ctx?.ladder;
+        if (!ladder?.forceStep) return false;
+        ladder.forceStep(dir);
+        return true;
+      },
+      ladderClock: (k: number) => {
+        const ctx = game()?.ctx;
+        const original = ctx?.afterFrame;
+        if (!ctx || !original || !(k >= 1)) return false;
+        const t0 = performance.now();
+        ctx.afterFrame = (now: number, frameMs: number) => original.call(ctx, t0 + (now - t0) * k, frameMs);
+        return true;
+      },
+      ladderUntrusted: () => {
+        const ladder = game()?.ctx?.ladder;
+        if (!ladder) return false;
+        ladder.gpuUntrusted = true;
         return true;
       },
       /**
