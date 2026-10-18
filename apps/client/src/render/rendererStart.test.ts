@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   browserMajor, deviceBackendMemory, initWithin, startRenderer, WEBGPU_FAILED_KEY, WEBGPU_INIT_TIMEOUT_MS, WEBGPU_RETRY_MS,
-  webgpuSecondChance, type BackendMemory, type BackendStatus, type DeviceMemoryEnv, type GpuLike, type Startable, type StorageLike,
+  webgpuSecondChance, type BackendMemory, type BackendStatus, type DeviceMemoryEnv, type GpuAdapterLike, type GpuLike, type Startable, type StorageLike,
 } from "./rendererStart.ts";
 
 /** A renderer whose init() the test settles by hand. */
@@ -510,7 +510,7 @@ describe("an abandoned WebGPU start that answers late (D-renderer-2)", () => {
 });
 
 /** A navigator.gpu stand-in: how it answers the adapter and device requests, and what was asked. */
-function fakeGpu(mode: "ok" | "no-adapter" | "hang" | "adapter-fails" | "device-fails") {
+function fakeGpu(mode: "ok" | "no-adapter" | "hang" | "adapter-fails" | "device-fails" | "adapter-late") {
   const calls = { adapter: 0, device: 0, destroyed: 0, options: [] as unknown[] };
   let answer: (() => void) | null = null;
   const gpu: GpuLike = {
@@ -519,7 +519,7 @@ function fakeGpu(mode: "ok" | "no-adapter" | "hang" | "adapter-fails" | "device-
       calls.options.push(o);
       if (mode === "no-adapter") return Promise.resolve(null);
       if (mode === "adapter-fails") return Promise.reject(new Error("adapter failed"));
-      return Promise.resolve({
+      const adapter: GpuAdapterLike = {
         requestDevice() {
           calls.device++;
           if (mode === "device-fails") return Promise.reject(new Error("device lost"));
@@ -527,7 +527,10 @@ function fakeGpu(mode: "ok" | "no-adapter" | "hang" | "adapter-fails" | "device-
           if (mode === "hang") return new Promise((r) => (answer = () => r(dev)));
           return Promise.resolve(dev);
         },
-      });
+      };
+      // The adapter itself answers only when the test says so.
+      if (mode === "adapter-late") return new Promise((r) => (answer = () => r(adapter)));
+      return Promise.resolve(adapter);
     },
   };
   return { gpu, calls, answerLate: () => answer?.() };
@@ -639,6 +642,20 @@ describe("WebGPU's second chance after a WebGL2 fallback (D-renderer-2)", () => 
     const done = webgpuSecondChance(fellBack("error"), { memory: d.memory, gpu: null, schedule: i.schedule, log: () => {} });
     await i.run();
     expect(await done).toBe("unavailable");
+    expect(d.record()).toEqual(fresh());
+  });
+
+  it("an adapter that answers after the deadline gets no device request: no GPU work once the check has failed", async () => {
+    const d = device({ record: fresh() });
+    const g = fakeGpu("adapter-late");
+    const i = idle();
+    const done = webgpuSecondChance(fellBack("timeout"), { memory: d.memory, gpu: g.gpu, schedule: i.schedule, log: () => {} });
+    await i.run();
+    await vi.advanceTimersByTimeAsync(WEBGPU_INIT_TIMEOUT_MS);
+    expect(await done).toBe("timeout");
+    g.answerLate(); // the adapter, too late
+    await flush();
+    expect(g.calls).toMatchObject({ adapter: 1, device: 0, destroyed: 0 });
     expect(d.record()).toEqual(fresh());
   });
 

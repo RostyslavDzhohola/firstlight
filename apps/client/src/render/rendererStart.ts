@@ -445,9 +445,11 @@ export function webgpuSecondChance(status: BackendStatus, opts: SecondChanceOpti
       const t0 = Date.now();
       void (async () => {
         const adapter = await gpu.requestAdapter({ powerPreference: "high-performance" });
+        if (settled) return; // past the deadline: no device request, no GPU work for a check that failed
         if (!adapter) return finish("unavailable", "[gfx] second chance: no WebGPU adapter; WebGL2 stays on this device for now");
         const device = await adapter.requestDevice();
-        // Only asked to see that it answers: release it at once (also when it came too late).
+        // Only asked to see that it answers: release it at once (also when a request made in time
+        // answers too late).
         try {
           device.destroy();
         } catch {
