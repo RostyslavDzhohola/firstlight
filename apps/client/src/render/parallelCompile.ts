@@ -130,11 +130,24 @@ export interface FirstDrawGate {
   frame(budget: number): void;
   /** Compiled pipelines refused a first draw in the current frame (waiting their turn). */
   waiting(): number;
-  /** First draws allowed so far, and their summed cost. */
+  /** First draws allowed so far, their summed cost (priced) and their summed units (as costOf gave them). */
   granted(): number;
   cost(): number;
+  units(): number;
+  /** The class of the current frame's first draws (null: none yet). */
+  batchClass(): Warmth | null;
   /** Back to three's own isReady (idempotent). */
   release(): void;
+}
+
+/** How the gate tells programs apart (#39): without these, every program is cold at its own units. */
+export interface GateOptions {
+  /** Warm (its link completed quickly: cached) or cold. A frame's first draws are all one class. */
+  classOf?: (pipeline: object) => Warmth;
+  /** Units of a class in budget units (FirstDrawPacer.price). */
+  price?: (units: number, cls: Warmth) => number;
+  /** A cold program costing this much or more gets the next frame to itself, ahead of the rest. */
+  loneCost?: number;
 }
 
 /**
@@ -156,6 +169,19 @@ export const FIRST_DRAWS_CAP = 40_000;
  * draw took about 75 ms + 6.5 ms per 1000 new characters, the fence's latency included.
  */
 export const PIPELINE_OVERHEAD = 6_000;
+/**
+ * A cold first draw's rate (ms per unit) before any cold batch is measured: the #39 fits found
+ * 5.8–7.3 ms per 1000 units on a cold M1.
+ */
+const COLD_RATE_GUESS = 0.0065;
+/**
+ * A cold program this big (units) gets a frame to itself, ahead of the others waiting: it would go
+ * alone anyway (terrain, water, the town's kits), and the GPU is otherwise idle for it.
+ */
+export const LONE_COST = 30_000;
+/** Whether a program's link says it was cached ("warm": it completed quickly) or not. */
+export type Warmth = "warm" | "cold";
+
 /**
  * The part of a batch's measured time that isn't the GPU's work on it: the fence is read once a
  * frame, so even an empty batch takes a frame or two.
@@ -234,11 +260,22 @@ export class FirstDrawPacer {
   }
 
   private budget: number;
-  private batch: { done: () => boolean; at: number; used: number; tag: unknown } | null = null;
+  private batch: { done: () => boolean; at: number; used: number; raw: number; cls: Warmth; tag: unknown } | null = null;
   private lastUsed = 0;
-  /** ms of GPU time per cost unit, smoothed over batches (null: nothing measured yet). */
-  private rate: number | null = null;
+  /**
+   * ms of GPU time per unit for each class of program, smoothed over that class's batches (null:
+   * nothing measured yet). Budgets are in cold-priced units: a warm program costs its units at the warm
+   * rate expressed at the cold rate (price()), so the ceiling and growth hold whatever the mix.
+   */
+  private readonly rates: Record<Warmth, number | null> = { cold: null, warm: null };
   private readonly latencies: number[] = [];
+
+  /** `units` of a `cls` program in cold-priced units: a warm one at the warm rate once measured. */
+  price(units: number, cls: Warmth): number {
+    const warm = this.rates.warm;
+    if (cls === "cold" || warm === null) return units;
+    return Math.max(1, Math.round((units * warm) / (this.rates.cold ?? COLD_RATE_GUESS)));
+  }
 
   /** The cost the frame about to be drawn may spend on first draws. */
   allowance(): number {
@@ -249,10 +286,13 @@ export class FirstDrawPacer {
     return this.batch !== null;
   }
 
-  /** After a frame: it spent `used` on first draws; `fence` says when the GPU finished them (null: no fences). */
-  sent(used: number, now: number, fence: (() => boolean) | null, tag?: unknown): void {
+  /**
+   * After a frame: it spent `used` (cold-priced) on first draws of class `cls`, `raw` units at their own
+   * rate; `fence` says when the GPU finished them (null: no fences).
+   */
+  sent(used: number, now: number, fence: (() => boolean) | null, tag?: unknown, cls: Warmth = "cold", raw = used): void {
     this.lastUsed = used;
-    if (used > 0 && fence) this.batch = { done: fence, at: now, used, tag };
+    if (used > 0 && fence) this.batch = { done: fence, at: now, used, raw, cls, tag };
   }
 
   /** Each new frame: settle the batch in flight, or (without fences) pace by `frameMs`. */
@@ -262,21 +302,23 @@ export class FirstDrawPacer {
       const ms = now - this.batch.at;
       this.latencies.push(ms);
       this.onBatch?.(ms, this.batch.used, this.batch.tag);
-      this.learn(ms, this.batch.used);
+      this.learn(ms, this.batch.used, this.batch.raw, this.batch.cls);
       this.batch = null;
     } else if (this.tune.unfenced && frameMs !== undefined && this.lastUsed > 0) {
-      this.learn(frameMs, this.lastUsed);
+      this.learn(frameMs, this.lastUsed, this.lastUsed, "cold");
       this.lastUsed = 0;
     }
   }
 
-  private learn(ms: number, used: number): void {
+  private learn(ms: number, used: number, raw: number, cls: Warmth): void {
     const t = this.tune;
-    const r = Math.max(0, ms - t.latency) / used;
-    if (this.rate === null) this.rate = r;
-    else this.rate += (r - this.rate) * (r > this.rate ? t.rise : t.fall);
+    const r = Math.max(0, ms - t.latency) / Math.max(1, raw);
+    const was = this.rates[cls];
+    this.rates[cls] = was === null ? r : was + (r - was) * (r > was ? t.rise : t.fall);
+    // budgets are cold-priced, so the cold rate sizes them (a guess until a cold batch is measured)
+    const cold = this.rates.cold ?? (cls === "warm" ? COLD_RATE_GUESS : r);
     const work = BATCH_TARGET_MS - t.latency;
-    const byRate = this.rate > 0 ? work / this.rate : Infinity;
+    const byRate = cold > 0 ? work / cold : Infinity;
     // relative to what the GPU just finished, not the start budget (that's only for the first batch)
     const byGrowth = t.growth * used;
     this.budget = Math.round(Math.max(1, Math.min(t.cap, byRate, byGrowth)));
@@ -356,11 +398,15 @@ export function gateFirstDraws(
   renderer: GateRenderer,
   onGrant?: (renderObject: unknown, pipeline: object, grant: Grant) => void,
   costOf: (pipeline: object, drawn: DrawnStages) => number = () => 1,
+  opts: GateOptions = {},
 ): FirstDrawGate {
   const pipelines = renderer._pipelines;
   if (!pipelines || typeof pipelines.isReady !== "function" || typeof pipelines.get !== "function") {
-    return { active: false, frame() {}, waiting: () => 0, granted: () => 0, cost: () => 0, release() {} };
+    return { active: false, frame() {}, waiting: () => 0, granted: () => 0, cost: () => 0, units: () => 0, batchClass: () => null, release() {} };
   }
+  const classOf = opts.classOf ?? (() => "cold" as const);
+  const price = opts.price ?? ((u: number) => u);
+  const loneCost = opts.loneCost ?? Infinity;
   let drawn = drawnBy.get(pipelines);
   if (!drawn) drawnBy.set(pipelines, (drawn = new WeakSet()));
   const seen = drawn;
@@ -373,17 +419,33 @@ export function gateFirstDraws(
   let inFrame = 0;
   let granted = 0;
   let cost = 0;
+  let units = 0;
   let waiting = new Set<object>();
+  let frameClass: Warmth | null = null;
+  /** No other first draw this frame (a lone program went). */
+  let closed = false;
+  /** Lone cold programs turned away last frame: this frame is theirs (the first one that comes up). */
+  let reserved: Set<object> | null = null;
+  let lonely = new Set<object>();
   const release = overrideMethod(pipelines, "isReady", function (this: NonNullable<GateRenderer["_pipelines"]>, renderObject: unknown) {
     if (!original.call(this, renderObject)) return false;
     const p = this.get(renderObject).pipeline;
     if (!p || seen.has(p)) return true;
-    const c = costOf(p, stages);
-    if (budget > 0 && (inFrame === 0 || spent + c <= budget)) {
+    const u = costOf(p, stages);
+    const cls = classOf(p);
+    const c = price(u, cls);
+    const lone = cls === "cold" && c >= loneCost;
+    const ok = budget > 0 && !closed && (!reserved || reserved.has(p)) && (inFrame === 0 || (cls === frameClass && spent + c <= budget));
+    if (ok) {
+      if (inFrame === 0) {
+        frameClass = cls;
+        closed = lone || reserved !== null; // a lone program goes alone
+      }
       spent += c;
       inFrame++;
       granted++;
       cost += c;
+      units += u;
       seen.add(p);
       if (onGrant) onGrant(renderObject, p, { cost: c, newChars: newStageChars(p, stages) });
       const st = p as Staged;
@@ -392,6 +454,7 @@ export function gateFirstDraws(
       return true;
     }
     waiting.add(p);
+    if (lone) lonely.add(p);
     return false;
   });
   return {
@@ -400,11 +463,17 @@ export function gateFirstDraws(
       budget = b;
       spent = 0;
       inFrame = 0;
+      frameClass = null;
+      closed = false;
       waiting = new Set();
+      reserved = lonely.size > 0 ? lonely : null;
+      lonely = new Set();
     },
     waiting: () => waiting.size,
     granted: () => granted,
     cost: () => cost,
+    units: () => units,
+    batchClass: () => (inFrame > 0 ? frameClass : null),
     release,
   };
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BATCH_TARGET_MS, deferPipelines, FENCE_LATENCY_MS, FIRST_DRAWS_CAP, FIRST_DRAWS_START, FirstDrawPacer, gateFirstDraws, glFence,
-  newStageCost, OLD_PACER, PACER, PIPELINE_OVERHEAD, pipelineCost, type DeferRenderer, type GateRenderer,
+  LONE_COST, newStageCost, OLD_PACER, PACER, PIPELINE_OVERHEAD, pipelineCost, type DeferRenderer, type GateRenderer, type Warmth,
 } from "./parallelCompile.ts";
 
 /** three's Pipelines as the backend sees it: a new pipeline compiles in parallel only when given a list. */
@@ -420,6 +420,79 @@ describe("FirstDrawPacer (one batch of first draws in flight, sized by the GPU's
     p.sent(3, 10, () => true, ["terrain"]);
     p.tick(130);
     expect(heard).toEqual([[120, 3, ["terrain"]]]);
+  });
+});
+
+describe("each program judged by its own evidence of being cached (warm or cold, #39 item 5)", () => {
+  /** Pipelines of `units` each (all stages new), warm or cold as the test says; gate and pacer as the warm-up wires them. */
+  function world(spec: Record<string, { units: number; warm: boolean }>) {
+    const pipes = new Map<string, object>();
+    for (const [k, v] of Object.entries(spec)) pipes.set(k, { k, vertexProgram: { code: k.padEnd(v.units - PIPELINE_OVERHEAD, "v") }, fragmentProgram: { code: "" } });
+    const renderer = { _pipelines: { isReady: () => true, get: (ro: unknown) => ({ pipeline: pipes.get(String(ro)) }) } } as GateRenderer;
+    const classOf = (p: object): Warmth => (spec[(p as { k: string }).k]!.warm ? "warm" : "cold");
+    const p = new FirstDrawPacer();
+    const gate = gateFirstDraws(renderer, undefined, newStageCost, { classOf, price: (u, c) => p.price(u, c), loneCost: LONE_COST });
+    let now = 0;
+    /** One frame; its batch takes `ms` (or what `ms` says for the batch's class) to come back. */
+    const frame = (ros: string[], ms: number | ((cls: Warmth | null) => number)) => {
+      const c0 = gate.cost();
+      const u0 = gate.units();
+      const g0 = gate.granted();
+      gate.frame(p.allowance());
+      const drew = ros.filter((ro) => renderer._pipelines!.isReady(ro));
+      const used = gate.cost() - c0;
+      const raw = gate.units() - u0;
+      p.sent(used, now, used > 0 ? () => true : null, undefined, gate.batchClass() ?? "cold", raw);
+      now += typeof ms === "function" ? ms(gate.batchClass()) : ms;
+      p.tick(now);
+      return { used, raw, n: gate.granted() - g0, cls: gate.batchClass(), drew };
+    };
+    return { gate, p, frame };
+  }
+
+  it("warm programs, priced at the warm rate, share batches far past the ceiling's raw units; a cold one goes at the cold price", () => {
+    const spec: Record<string, { units: number; warm: boolean }> = { cold: { units: 30_000, warm: false } };
+    for (let i = 0; i < 60; i++) spec[`w${i}`] = { units: 22_000, warm: true };
+    const w = world(spec);
+    const all = ["cold", ...Array.from({ length: 60 }, (_, i) => `w${i}`)];
+    // a cold first draw takes the GPU ~250 ms, a cached one a couple of frames
+    const batches = Array.from({ length: 7 }, () => w.frame(all, (cls) => (cls === "cold" ? 250 : 40)));
+    for (const b of batches) expect(b.used).toBeLessThanOrEqual(Math.max(FIRST_DRAWS_CAP, 30_000)); // priced: the ceiling holds
+    const cold = batches.find((b) => b.drew.includes("cold") && b.cls === "cold")!;
+    expect([cold.n, cold.used, cold.raw]).toEqual([1, 30_000, 30_000]); // full cold price, alone (over LONE_COST)
+    expect(Math.max(...batches.map((b) => b.raw))).toBeGreaterThan(3 * FIRST_DRAWS_CAP); // warm: many programs a batch
+    w.gate.release();
+  });
+
+  it("a batch holds one class: warm and cold programs go in separate batches", () => {
+    const w = world({ w0: { units: 9000, warm: true }, c0: { units: 9000, warm: false }, w1: { units: 9000, warm: true }, c1: { units: 9000, warm: false } });
+    const a = w.frame(["w0", "c0", "w1", "c1"], 40);
+    expect([a.cls, a.n]).toEqual(["warm", 2]);
+    const b = w.frame(["w0", "c0", "w1", "c1"], 40);
+    expect([b.cls, b.n]).toEqual(["cold", 2]);
+    w.gate.release();
+  });
+
+  it("a warm program that then takes long to draw raises the warm price at once; the cold rate learns nothing from it", () => {
+    const spec: Record<string, { units: number; warm: boolean }> = {};
+    for (let i = 0; i < 20; i++) spec[`w${i}`] = { units: 12_000, warm: true };
+    const w = world(spec);
+    w.frame(["w0", "w1"], 40);
+    const before = w.p.price(12_000, "warm");
+    expect(before).toBeLessThan(12_000);
+    w.frame(["w2"], 600); // slow: it wasn't cached after all
+    expect(w.p.price(12_000, "warm")).toBeGreaterThan(before * 3);
+    expect(w.p.price(12_000, "cold")).toBe(12_000);
+    w.gate.release();
+  });
+
+  it("a lone cold program (over LONE_COST) waiting from the last frame gets the next frame to itself, ahead of the rest", () => {
+    const w = world({ a: { units: 8000, warm: false }, terrain: { units: 47_000, warm: false }, b: { units: 8000, warm: false }, c: { units: 8000, warm: false } });
+    const first = w.frame(["a", "terrain", "b", "c"], 40);
+    expect(first.n).toBe(3); // a, b, c fit the start budget; terrain doesn't
+    const second = w.frame(["a", "b", "c", "terrain"], 40);
+    expect([second.n, second.used]).toEqual([1, 47_000]); // terrain first, alone
+    w.gate.release();
   });
 });
 
