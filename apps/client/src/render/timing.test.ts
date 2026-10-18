@@ -316,6 +316,118 @@ describe("resolution ladder under full-screen overlays (D-view-4)", () => {
   });
 });
 
+describe("trial up-steps with an untrusted GPU timer (D-view-4)", () => {
+  /**
+   * The M1 case: a GPU timer whose readings (48 ms at 60 fps) get it marked untrusted, then slow frames
+   * walk the ladder down to `rung`. `clock.t` is the time of the frame being sampled; `ups` and `downs`
+   * record when the rung changed from then on, `downAt` when the last down-step to `rung` happened.
+   */
+  function untrustedAt(rung: number) {
+    const l = new ResolutionLadder();
+    l.hasGpuTimer = true;
+    const clock = { t: 1000 };
+    let downAt = 0;
+    l.onChange = () => (downAt = clock.t);
+    run(l, clock, 4, () => 16.7);
+    expect(l.gpuUntrusted).toBe(true);
+    while (l.index < rung) run(l, clock, 0.05, () => 28);
+    const ups: number[] = [];
+    const downs: number[] = [];
+    let last = l.index;
+    l.onChange = () => {
+      (l.index < last ? ups : downs).push(clock.t);
+      last = l.index;
+    };
+    return { l, clock, downAt, ups, downs };
+  }
+
+  /** `seconds` of frames whose interval depends on the rung (a capped 60 Hz display: 16.7 ms when it holds vsync). */
+  function run(l: ResolutionLadder, clock: { t: number }, seconds: number, frameAt: (rung: number) => number) {
+    const end = clock.t + seconds * 1000;
+    while (clock.t < end) {
+      const ms = frameAt(l.index);
+      clock.t += ms;
+      l.sample(clock.t, ms, [48], 12);
+    }
+  }
+
+  it("trial-steps up after the hold when frames stay at vsync", () => {
+    const { l, clock, downAt, ups } = untrustedAt(1);
+    run(l, clock, 25, () => 16.7);
+    expect(l.index, "held at the lowered rung for the up-step hold-off").toBe(1);
+    run(l, clock, 30, () => 16.7);
+    expect(l.index).toBe(0);
+    expect(ups).toHaveLength(1);
+    expect(ups[0]! - downAt).toBeGreaterThanOrEqual(30_000);
+    expect(ups[0]! - downAt).toBeLessThan(33_000);
+    expect(l.trials.taken).toBe(1);
+  });
+
+  it("keeps the step when the following windows stay fast, and climbs on", () => {
+    const { l, clock, ups, downs } = untrustedAt(2);
+    run(l, clock, 600, () => 16.7);
+    expect(l.index).toBe(0);
+    expect(ups).toHaveLength(2);
+    expect(downs).toEqual([]);
+    expect(l.trials).toEqual({ taken: 2, kept: 2, reverted: 0 });
+  });
+
+  it("steps back down when the next windows miss vsync, and backs off exponentially", () => {
+    // A capped 60 Hz display for 10 minutes where rung 1 holds vsync and full resolution doesn't (45 fps).
+    const { l, clock, ups, downs } = untrustedAt(1);
+    run(l, clock, 600, (rung) => (rung === 0 ? 22 : 16.7));
+    expect(l.index).toBe(1);
+    // Each trial is reverted by the first window after its cooldown.
+    expect(downs).toHaveLength(ups.length);
+    for (let i = 0; i < ups.length; i++) expect(downs[i]! - ups[i]!).toBeLessThan(6500);
+    // Few and bounded: the hold doubles after each failed trial (30 s, 60 s, 120 s, 240 s…).
+    expect(ups.length).toBeGreaterThanOrEqual(3);
+    expect(ups.length).toBeLessThanOrEqual(5);
+    const gaps = ups.slice(1).map((u, i) => u - ups[i]!);
+    for (let i = 1; i < gaps.length; i++) expect(gaps[i]!).toBeGreaterThan(gaps[i - 1]! * 1.7);
+    expect(l.trials).toEqual({ taken: ups.length, kept: 0, reverted: ups.length });
+  });
+
+  it("never trial-steps while suspended, and counts steady windows afresh after the menu", () => {
+    const { l, clock, ups } = untrustedAt(1);
+    run(l, clock, 25, () => 16.7); // steady, inside the hold-off
+    l.setSuspended(true);
+    run(l, clock, 300, () => 16.7); // the hold-off passes under the menu
+    expect(ups).toEqual([]);
+    l.setSuspended(false);
+    const resumedAt = clock.t;
+    run(l, clock, 8.5, () => 16.7); // the 1 s grace and three steady windows: not yet
+    expect(ups).toEqual([]);
+    run(l, clock, 4, () => 16.7);
+    expect(ups).toHaveLength(1);
+    expect(ups[0]! - resumedAt).toBeGreaterThanOrEqual(9000);
+  });
+
+  it("holds after a forced down-step (the e2e hook's) like after a natural one", () => {
+    const { l, clock, ups } = untrustedAt(0);
+    l.forceStep(1);
+    run(l, clock, 0.02, () => 16.7);
+    const forcedAt = clock.t;
+    expect(l.index).toBe(1);
+    run(l, clock, 60, () => 16.7);
+    expect(ups).toHaveLength(1);
+    expect(ups[0]! - forcedAt).toBeGreaterThanOrEqual(30_000);
+  });
+
+  it("with a trusted timer, vsync-steady frames alone never step up", () => {
+    const l = new ResolutionLadder();
+    l.hasGpuTimer = true;
+    let t = feed(l, 1000, 8, 30, 20); // GPU over budget: steps down
+    const after = l.index;
+    expect(after).toBeGreaterThan(0);
+    // 60 fps, the GPU at 9 ms: inside the budget but no clear headroom (not under 0.6× of 12 ms).
+    t = feed(l, t, 600, 16.7, 9);
+    expect(l.gpuUntrusted).toBe(false);
+    expect(l.index).toBe(after);
+    expect(l.trials.taken).toBe(0);
+  });
+});
+
 describe("probe decision", () => {
   const frames = (n: number, ms: number) => Array.from({ length: n }, () => ms);
 

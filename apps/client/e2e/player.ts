@@ -50,6 +50,8 @@ export interface Snap {
     pixelRatio?: number | null;
     ladder?: number | null;
     ladderSuspended?: boolean | null;
+    ladderTrials?: { taken: number; kept: number; reverted: number } | null;
+    gpuUntrusted?: boolean | null;
     canvas?: [number, number] | null;
   } | null;
   input: { pointerLocked: boolean; anyPointerLock: boolean; gameLocked: boolean | null; sensitivity: number | null; invertY: boolean | null };

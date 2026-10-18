@@ -112,6 +112,11 @@ const MIN_FRAMES_PER_WINDOW = 5;
 export const LADDER_RESUME_GRACE_MS = 1000;
 const UP_HOLD_INITIAL = 30_000;
 const UP_HOLD_MAX = 480_000;
+/** A window whose frame-time median meets 60 Hz: at vsync, nothing to see beyond it (D-view-4). */
+const STEADY_MS = 17.5;
+/** Untrusted timer: steady windows in a row before a trial up-step, and steady windows that keep it. */
+const TRIAL_STEADY_WINDOWS = 4;
+const TRIAL_PROBATION_WINDOWS = 2;
 
 /**
  * Runtime resolution ladder over ≥ 2 s windows (a window stays open until it has at least
@@ -120,6 +125,10 @@ const UP_HOLD_MAX = 480_000;
  *   fast = GPU p50 under 0.6× the budget. Steps up after 4 fast windows.
  * - Without one, rAF time is vsync-limited and can't show headroom: it only steps down
  *   (p50 over 20 ms); it never steps up.
+ * - With an untrusted one (gpuPlausible failed: the M1), it steps down the same way, and makes a
+ *   trial up-step after the hold-off and 4 windows at vsync (p50 ≤ 17.5 ms). The trial is kept if
+ *   the 2 windows after its cooldown stay at vsync; otherwise it steps back down at once and the
+ *   hold-off doubles, so trials stay few (D-view-4).
  * Up-steps are held off after any down-step; the hold-off doubles each time an up-step is
  * followed by a quick down-step, so it can't oscillate. Windows are cleared on every change, so
  * decisions never use samples from the previous resolution. At the floor it calls `onFloor`.
@@ -151,6 +160,11 @@ export class ResolutionLadder {
   /** Resumed: the grace starts at the next sample (the ladder has no clock of its own). */
   private graceFromNext = false;
   private graceUntil = 0;
+  /** Steady windows in a row (untrusted timer), and windows a trial up-step still has to pass. */
+  private steady = 0;
+  private probation = 0;
+  /** Trial up-steps this session (untrusted timer): taken, kept after probation, reverted. */
+  readonly trials = { taken: 0, kept: 0, reverted: 0 };
   onChange: (() => void) | null = null;
   onFloor: (() => void) | null = null;
 
@@ -169,7 +183,7 @@ export class ResolutionLadder {
   setSuspended(on: boolean) {
     if (on === this.isSuspended) return;
     this.isSuspended = on;
-    this.slow = this.fast = 0;
+    this.slow = this.fast = this.steady = 0;
     this.clearWindow(0);
     if (on) {
       this.heldIndex = this.index;
@@ -188,7 +202,7 @@ export class ResolutionLadder {
     this.noUpUntil = 0;
     this.upHold = UP_HOLD_INITIAL;
     this.lastUpAt = -Infinity;
-    this.slow = this.fast = 0;
+    this.slow = this.fast = this.steady = this.probation = 0;
     this.clearWindow(0);
   }
 
@@ -200,7 +214,8 @@ export class ResolutionLadder {
 
   /**
    * Test hook (e2e): take one step (+1 down, −1 up) at the next sample, inside the frame's bookkeeping
-   * where a natural step happens. Clamped to the ladder; no hold-off or back-off bookkeeping.
+   * where a natural step happens. Clamped to the ladder. A step down starts the up-step hold-off like a
+   * natural one; neither changes the back-off.
    */
   forceStep(dir: 1 | -1) {
     this.forced = dir;
@@ -212,9 +227,10 @@ export class ResolutionLadder {
       const next = Math.min(LADDER.length - 1, Math.max(0, this.index + this.forced));
       this.forced = 0;
       if (next === this.index) return;
+      if (next > this.index) this.noUpUntil = Math.max(this.noUpUntil, now + this.upHold);
       this.index = next;
       this.heldIndex = next; // an explicit step under the menu is the rung to come back to
-      this.slow = this.fast = 0;
+      this.slow = this.fast = this.steady = this.probation = 0;
       this.cooldownUntil = now + 3000;
       this.clearWindow(now);
       this.onChange?.();
@@ -242,6 +258,17 @@ export class ResolutionLadder {
     }
     if (this.gpuUntrusted) gpuP50 = null;
     this.clearWindow(now);
+    const steady = rafP50 <= STEADY_MS;
+    if (this.probation > 0) {
+      // After a trial up-step: kept only while the windows stay at vsync.
+      this.slow = this.steady = 0;
+      if (!steady) {
+        this.probation = 0;
+        this.trials.reverted++;
+        this.stepDown(now);
+      } else if (--this.probation === 0) this.trials.kept++;
+      return;
+    }
     let isSlow: boolean;
     let isFast: boolean;
     if (gpuP50 !== null) {
@@ -252,16 +279,11 @@ export class ResolutionLadder {
       isFast = false;
     }
     if (isSlow) {
-      this.fast = 0;
+      this.fast = this.steady = 0;
       if (++this.slow >= 2) {
         this.slow = 0;
         if (this.index < LADDER.length - 1) {
-          this.index++;
-          this.cooldownUntil = now + 3000;
-          // An up-step that didn't hold: back off twice as long next time.
-          if (now - this.lastUpAt < this.upHold) this.upHold = Math.min(UP_HOLD_MAX, this.upHold * 2);
-          this.noUpUntil = now + this.upHold;
-          this.onChange?.();
+          this.stepDown(now);
         } else {
           this.cooldownUntil = now + 6000;
           this.onFloor?.();
@@ -279,7 +301,31 @@ export class ResolutionLadder {
     } else {
       this.slow = Math.max(0, this.slow - 1);
       this.fast = 0;
+      if (this.gpuUntrusted) this.trialUp(now, steady);
     }
+  }
+
+  private stepDown(now: number) {
+    this.index++;
+    this.cooldownUntil = now + 3000;
+    // An up-step that didn't hold: back off twice as long next time.
+    if (now - this.lastUpAt < this.upHold) this.upHold = Math.min(UP_HOLD_MAX, this.upHold * 2);
+    this.noUpUntil = now + this.upHold;
+    this.steady = 0;
+    this.onChange?.();
+  }
+
+  /** Untrusted timer: frame time can't show headroom at vsync, so try the rung above after a steady hold. */
+  private trialUp(now: number, steady: boolean) {
+    this.steady = steady ? this.steady + 1 : 0;
+    if (this.steady < TRIAL_STEADY_WINDOWS || this.index === 0 || now < this.noUpUntil) return;
+    this.steady = 0;
+    this.index--;
+    this.lastUpAt = now;
+    this.cooldownUntil = now + 4000;
+    this.probation = TRIAL_PROBATION_WINDOWS;
+    this.trials.taken++;
+    this.onChange?.();
   }
 }
 

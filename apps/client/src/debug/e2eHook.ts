@@ -24,6 +24,9 @@
 //     admin(cmd, args)    an admin console command (dev admin guests on local stacks; the server refuses others)
 //     ladderStep(dir)     one resolution-ladder step (+1 down, −1 up), taken in the next frame's afterFrame
 //                         like a natural step (D-view-3 blank-frame gate)
+//     ladderClock(k)      the ladder's clock runs k× faster from now on (windows, cooldowns, hold-offs),
+//                         frame times stay real: minutes of ladder decisions in seconds (D-view-4)
+//     ladderUntrusted()   mark the GPU timer untrusted, as it is on the owner's M1 (D-view-4)
 //
 // Game internals are read through narrow structural types with optional chaining, so a refactor
 // elsewhere shows up as a null field, not a crashed hook.
@@ -88,7 +91,15 @@ interface GameLike {
     tier?: string;
     pixelRatio?(): number;
     render?: () => void;
-    ladder?: { index: number; scale: number; suspended?: boolean; forceStep?(dir: 1 | -1): void };
+    afterFrame?: (now: number, frameMs: number) => void;
+    ladder?: {
+      index: number;
+      scale: number;
+      suspended?: boolean;
+      gpuUntrusted?: boolean;
+      trials?: { taken: number; kept: number; reverted: number };
+      forceStep?(dir: 1 | -1): void;
+    };
     camera?: { matrixWorldInverse: { elements: ArrayLike<number> }; projectionMatrix: { elements: ArrayLike<number> }; position: Vec };
     renderer?: { domElement?: HTMLCanvasElement };
   };
@@ -659,6 +670,8 @@ export function installE2eHook(win: Window & typeof globalThis): void {
         pixelRatio: g.ctx?.pixelRatio?.() ?? null,
         ladder: g.ctx?.ladder?.index ?? null,
         ladderSuspended: g.ctx?.ladder?.suspended ?? null,
+        ladderTrials: g.ctx?.ladder?.trials ? { ...g.ctx.ladder.trials } : null,
+        gpuUntrusted: g.ctx?.ladder?.gpuUntrusted ?? null,
         canvas: g.ctx?.renderer?.domElement ? [g.ctx.renderer.domElement.width, g.ctx.renderer.domElement.height] : null,
       },
       net: room ? { roomId: room.roomId, sessionId: room.sessionId, rtt: g.net?.rtt ?? null } : null,
@@ -840,6 +853,20 @@ export function installE2eHook(win: Window & typeof globalThis): void {
         const ladder = game()?.ctx?.ladder;
         if (!ladder?.forceStep) return false;
         ladder.forceStep(dir);
+        return true;
+      },
+      ladderClock: (k: number) => {
+        const ctx = game()?.ctx;
+        const original = ctx?.afterFrame;
+        if (!ctx || !original || !(k >= 1)) return false;
+        const t0 = performance.now();
+        ctx.afterFrame = (now: number, frameMs: number) => original.call(ctx, t0 + (now - t0) * k, frameMs);
+        return true;
+      },
+      ladderUntrusted: () => {
+        const ladder = game()?.ctx?.ladder;
+        if (!ladder) return false;
+        ladder.gpuUntrusted = true;
         return true;
       },
       /**
