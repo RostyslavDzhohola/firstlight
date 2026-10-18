@@ -1145,3 +1145,6 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   dropping shadow-map shadows for the existing blob shadows (a visual call for the owner; a small
   change plus a look check). Final pairs (back to back, cold): 30.4/32.5 s → 14.2/14.4 s, frames over
   250 ms 17/17 → 1/2; warm WebGL2 14.2/11.9 s → 2.7/2.8 s; warm WebGPU 3.3/2.9 s → 2.3/2.1 s.
+  Pricing by size costs time on the first-visit path: J1.2 on WebGL2 (Medium after the probe) went
+  from 31 batches and 7.5 s of warm-up with count-based batches to 50 batches and 9.8 s (Play → world
+  13.4 s → 16.9 s, still under 30 s); `BATCH_TARGET_MS` is the one knob between the two.
