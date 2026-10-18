@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
-import { vec4 } from "three/tsl";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -12,28 +11,20 @@ async function load(search: string) {
   return import("./frameCounter.ts");
 }
 
-describe("?framecount overlay (#23)", () => {
-  it("without the flag creates nothing: the output node is handed back as it is", async () => {
+describe("?framecount canvas counter (#23)", () => {
+  it("without the flag creates nothing: a tick and a draw return at once", async () => {
     const m = await load("");
-    const out = vec4(0.2, 0.3, 0.4, 1) as unknown as THREE.Node;
     expect(m.frameCounterOn()).toBe(false);
-    expect(m.withFrameCounter(out, true)).toBe(out);
+    m.frameCounterTick();
+    m.frameCounterDraw({ backend: {} } as unknown as THREE.WebGPURenderer);
     expect(m.frameCounterState()).toBeNull();
   });
 
-  it("with the flag draws over the output, with one counter for every rebuild of the pipeline", async () => {
+  it("with the flag counts one per drawn frame, from the first tick", async () => {
     const m = await load("?framecount");
-    const out = vec4(0.2, 0.3, 0.4, 1) as unknown as THREE.Node;
-    const a = m.withFrameCounter(out, true);
-    expect(a).not.toBe(out); // WebGPU: drawn as the output's last step
-    expect(m.withFrameCounter(out, false)).toBe(out); // WebGL2: frameCounterDraw clears it into the canvas
-    expect(m.frameCounterState()).toEqual({ count: 0, dom: false }); // no document in this test
-    const b = m.withFrameCounter(vec4(1, 1, 1, 1) as unknown as THREE.Node, true);
-    expect(b).not.toBe(a);
-    expect(m.frameCounterState()?.count).toBe(0); // nothing drawn yet
-    // One tick per drawn frame (RenderCtx.render calls it before drawing).
+    expect(m.frameCounterState()).toBeNull(); // nothing until a frame is drawn
     for (let i = 0; i < 3; i++) m.frameCounterTick();
-    expect(m.frameCounterState()?.count).toBe(3);
+    expect(m.frameCounterState()).toEqual({ count: 3, dom: false }); // no document in this test
   });
 
   it("on WebGL2 clears this frame's number into the canvas after the frame, and leaves the GL state as it was", async () => {
@@ -56,7 +47,6 @@ describe("?framecount overlay (#23)", () => {
       clear: () => void fills.push({ x: scissor[0]!, y: scissor[1]!, w: scissor[2]!, h: scissor[3]!, c: [...color] }),
     };
     const renderer = { backend: { gl } } as unknown as THREE.WebGPURenderer;
-    m.withFrameCounter(vec4(0, 0, 0, 1) as unknown as THREE.Node, false);
     for (const n of [1, 2, 3]) {
       fills.length = 0;
       m.frameCounterTick();
@@ -73,11 +63,5 @@ describe("?framecount overlay (#23)", () => {
     expect(scissor).toEqual([0, 0, 1280, 720]);
     expect(color).toEqual([0.5, 0.25, 0.125, 1]);
     expect(on).toBe(false);
-  });
-
-  it("without the flag a tick does nothing", async () => {
-    const m = await load("");
-    m.frameCounterTick();
-    expect(m.frameCounterState()).toBeNull();
   });
 });
