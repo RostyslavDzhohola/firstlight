@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
 import {
-  forceProperty, installShaderMonitor, keptSamples, lastWarmup, MovingProgress, predictShadowBuilds, shadowBuildCost, shaderStats,
+  fnv1a, forceProperty, installShaderMonitor, keptSamples, lastWarmup, MovingProgress, predictShadowBuilds, shadowBuildCost, shaderStats,
   warmShadowCasters, warmup, type WarmupProgress,
 } from "./warmup.ts";
 import { FIRST_DRAWS_START } from "./parallelCompile.ts";
+import { flags } from "../config.ts";
 import type { RenderCtx } from "./renderer.ts";
 import { watchDisposals } from "./disposeWatch.testutil.ts";
 
@@ -195,10 +196,14 @@ class FakePipelines {
 /** …with three's draw check: a render object draws once its pipeline is compiled. */
 class FakeDrawPipelines extends FakePipelines {
   private readonly byKey = new Map<string, object>();
+  /** One vertex stage for every pipeline (three shares a stage per distinct source); null: each its own. */
+  constructor(private readonly sharedVertex: { code: string } | null = null) {
+    super();
+  }
   get(ro: unknown) {
     const k = String(ro);
     // 12k characters of GLSL each: two fit the first batch's budget
-    if (!this.byKey.has(k)) this.byKey.set(k, { k, vertexProgram: { code: "v".repeat(4000) }, fragmentProgram: { code: "f".repeat(8000) } });
+    if (!this.byKey.has(k)) this.byKey.set(k, { k, vertexProgram: this.sharedVertex ?? { code: "v".repeat(4000) }, fragmentProgram: { code: "f".repeat(8000) } });
     return { pipeline: this.byKey.get(k) };
   }
   isReady(ro: unknown) {
@@ -206,15 +211,35 @@ class FakeDrawPipelines extends FakePipelines {
   }
 }
 
+/** WebGL2 fences that the GPU signals on their second poll. */
+function fakeFenceGl() {
+  return {
+    SYNC_GPU_COMMANDS_COMPLETE: 1, SYNC_STATUS: 2, SIGNALED: 3,
+    fenceSync: () => ({ polls: 0 }),
+    getSyncParameter: (s: { polls: number }) => (++s.polls >= 2 ? 3 : 0),
+    deleteSync() {},
+    flush() {},
+  };
+}
+
 describe("warm-up report (per-phase times and shader counts) and progress", () => {
   /** A fake renderer on a hand-moved clock: compile items cost 10 ms and one build each, frames 5 ms. */
   let draws: string[][] = [];
-  function fakeCtx(opts: { items: number; webgpu: boolean; shadows: boolean; frameBuilds?: number; pipelines?: FakePipelines; objects?: number }) {
+  function fakeCtx(opts: {
+    items: number; webgpu: boolean; shadows: boolean; frameBuilds?: number; pipelines?: FakePipelines; objects?: number;
+    /** WebGL2 fences (fakeFenceGl); none by default. */
+    gl?: ReturnType<typeof fakeFenceGl>;
+    /** Each animation frame moves the clock this much (ms) before its callback. */
+    frameMs?: number;
+  }) {
     draws = [];
     let clock = 1000;
     vi.spyOn(performance, "now").mockImplementation(() => clock);
     vi.stubGlobal("window", {});
-    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => setTimeout(cb, 0));
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => setTimeout(() => {
+      clock += opts.frameMs ?? 0;
+      cb();
+    }, 0));
     const debug: { onNodeBuilderCreated?: (builder: unknown, ro: unknown) => void } = {};
     const build = () => debug.onNodeBuilderCreated?.({}, { object: new THREE.Mesh(), material: new THREE.MeshBasicNodeMaterial() });
     const scene = new THREE.Scene();
@@ -236,6 +261,7 @@ describe("warm-up report (per-phase times and shader counts) and progress", () =
         debug,
         info: { frame: 0, reset() {} },
         _pipelines: opts.pipelines,
+        ...(opts.gl ? { backend: { gl: opts.gl } } : {}),
         compileAsync: async (_s: unknown, _c: unknown, _t: unknown, onProgress?: (e: { loaded: number; total: number }) => void) => {
           for (let i = 1; i <= opts.items; i++) {
             await Promise.resolve();
@@ -396,6 +422,88 @@ describe("warm-up report (per-phase times and shader counts) and progress", () =
     }
   });
 
+  it("?warmdiag logs every fenced first-draw batch in send order: when, GPU ms, charged units, characters, links pending, stage hashes", async () => {
+    vi.spyOn(flags, "has").mockImplementation((n) => n === "warmdiag");
+    const shared = { code: "v".repeat(4000) };
+    const pipelines = new FakeDrawPipelines(shared);
+    try {
+      const ctx = fakeCtx({ items: 0, webgpu: false, shadows: false, pipelines, objects: 12, gl: fakeFenceGl() });
+      const r = await warmup(ctx, { frames: 1 });
+      const b = r.batches!;
+      expect(b.length).toBe(r.firstDraws.batches); // every batch, not the slowest 20
+      expect(b.length).toBeGreaterThan(1);
+      const ts = b.map((x) => x.t);
+      expect(ts).toEqual([...ts].sort((x, y) => x - y)); // in the order they were sent
+      expect(b.reduce((n, x) => n + x.items.length, 0)).toBe(r.firstDraws.granted);
+      for (const x of b) {
+        expect(x.n).toBe(x.items.length);
+        expect(x.chars).toBe(x.items.reduce((n, i) => n + i.vs + i.fs, 0));
+        expect(x.newChars).toBe(x.items.reduce((n, i) => n + i.newChars, 0));
+        expect(x.used).toBe(x.items.reduce((n, i) => n + i.cost, 0));
+        expect(x.ms).toBeGreaterThanOrEqual(0);
+        expect(x.pending).toBeGreaterThanOrEqual(0);
+        expect(x.skinnedShadow).toBe(0);
+      }
+      const items = b.flatMap((x) => x.items);
+      expect(items[0]!.vh).toBe(fnv1a(shared.code));
+      expect(items[0]!.fh).toBe(fnv1a("f".repeat(8000)));
+      // the shared vertex stage is new only for the first pipeline drawn
+      expect(items.map((i) => i.newChars)).toEqual([12_000, ...Array(11).fill(8000)]);
+      expect(r.census).toEqual({ pipelines: 12, skinnedShadow: 0, skinnedMain: 0, vertexStages: 1, fragmentStages: 1, skinnedVertexStages: 0 });
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("?warmsolo (diagnostics): one first draw per fenced batch", async () => {
+    vi.spyOn(flags, "has").mockImplementation((n) => n === "warmdiag" || n === "warmsolo");
+    const pipelines = new FakeDrawPipelines();
+    try {
+      const ctx = fakeCtx({ items: 0, webgpu: false, shadows: false, pipelines, objects: 6, gl: fakeFenceGl() });
+      const r = await warmup(ctx, { frames: 1 });
+      expect(r.batches!.map((x) => x.items.length)).toEqual([1, 1, 1, 1, 1, 1]);
+      expect(r.firstDraws.granted).toBe(6);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("records slow frames in every phase, the compile included, with when, the batch in flight and links pending", async () => {
+    for (const diag of [false, true]) {
+      vi.spyOn(flags, "has").mockImplementation((n) => diag && n === "warmdiag");
+      const pipelines = new FakeDrawPipelines();
+      try {
+        // every animation frame takes 120 ms: all of them are slow
+        const ctx = fakeCtx({ items: 4, webgpu: false, shadows: false, pipelines, objects: 12, gl: fakeFenceGl(), frameMs: 120 });
+        const r = await warmup(ctx, { frames: 1 });
+        const phases = new Set(r.slow.map((s) => s.phase));
+        expect(phases.has("compile")).toBe(true); // waiting for the links
+        expect(phases.has("drain")).toBe(true);
+        for (const s of r.slow) {
+          expect(s.ms).toBeGreaterThan(100);
+          expect(s.t).toBeGreaterThan(r.start);
+          expect(s.t).toBeLessThanOrEqual(r.end);
+          expect(s.pending).toBeGreaterThanOrEqual(0);
+          expect(typeof s.inFlight).toBe("boolean");
+        }
+        expect(r.slow.some((s) => s.phase === "compile" && s.pending > 0)).toBe(true);
+        expect(r.slow.some((s) => s.phase === "drain" && s.inFlight && s.batch !== null)).toBe(true);
+        if (diag) {
+          expect(r.slow.length).toBeGreaterThan(12); // all of them, in time order
+          const ts = r.slow.map((s) => s.t);
+          expect(ts).toEqual([...ts].sort((x, y) => x - y));
+        } else {
+          expect(r.slow.length).toBeLessThanOrEqual(12); // the longest dozen
+        }
+      } finally {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+      }
+    }
+  });
+
   it("predicts the shadow phase's builds the way the batching counts them", () => {
     const scene = new THREE.Scene();
     const geo = new THREE.BoxGeometry();
@@ -412,6 +520,14 @@ describe("warm-up report (per-phase times and shader counts) and progress", () =
     }
     scene.add(new THREE.Mesh(geo, new THREE.MeshStandardNodeMaterial())); // not a caster
     expect(predictShadowBuilds(scene)).toBe(4);
+  });
+});
+
+describe("fnv1a (the diagnostics' 32-bit hash of a shader stage's source)", () => {
+  it("matches the reference FNV-1a values", () => {
+    expect(fnv1a("")).toBe(0x811c9dc5);
+    expect(fnv1a("a")).toBe(0xe40c292c);
+    expect(fnv1a("foobar")).toBe(0xbf9cf968);
   });
 });
 

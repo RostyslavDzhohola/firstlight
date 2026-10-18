@@ -229,15 +229,44 @@ export function glFence(gl: FenceGL | null | undefined): (() => boolean) | null 
 
 /** Pipelines each renderer has drawn at least once (kept across warm-ups). */
 const drawnBy = new WeakMap<object, WeakSet<object>>();
+/**
+ * The shader stages each renderer has drawn at least once: three's ProgrammableStage objects, one per
+ * distinct vertex or fragment source, shared by every pipeline built from that source.
+ */
+const stagesDrawnBy = new WeakMap<object, WeakSet<object>>();
+
+/** What a pipeline is made of: its vertex and fragment stages (three's ProgrammableStage). */
+interface Staged {
+  vertexProgram?: { code?: string };
+  fragmentProgram?: { code?: string };
+}
+
+/** Which stages a renderer has drawn already (read-only view for pricing). */
+export type DrawnStages = Pick<WeakSet<object>, "has">;
+
+/** Characters of `pipeline`'s stages that `drawn` doesn't hold yet. */
+export function newStageChars(pipeline: object, drawn: DrawnStages): number {
+  const p = pipeline as Staged;
+  const v = p.vertexProgram && !drawn.has(p.vertexProgram) ? (p.vertexProgram.code?.length ?? 0) : 0;
+  const f = p.fragmentProgram && !drawn.has(p.fragmentProgram) ? (p.fragmentProgram.code?.length ?? 0) : 0;
+  return v + f;
+}
+
+/** A first draw the gate allowed: what it was charged and the characters of its stages new to the GPU. */
+export interface Grant {
+  cost: number;
+  newChars: number;
+}
 
 /**
- * `onGrant` (diagnostics) hears each first draw allowed, with the render object and its pipeline;
- * `costOf` prices a pipeline (pipelineCost in the warm-up; 1 each by default).
+ * `onGrant` (diagnostics) hears each first draw allowed, with the render object, its pipeline and
+ * the grant; `costOf` prices a pipeline, given the stages drawn so far (pipelineCost in the warm-up;
+ * 1 each by default). A first draw marks its stages drawn; one turned away doesn't.
  */
 export function gateFirstDraws(
   renderer: GateRenderer,
-  onGrant?: (renderObject: unknown, pipeline: object) => void,
-  costOf: (pipeline: object) => number = () => 1,
+  onGrant?: (renderObject: unknown, pipeline: object, grant: Grant) => void,
+  costOf: (pipeline: object, drawn: DrawnStages) => number = () => 1,
 ): FirstDrawGate {
   const pipelines = renderer._pipelines;
   if (!pipelines || typeof pipelines.isReady !== "function" || typeof pipelines.get !== "function") {
@@ -246,6 +275,9 @@ export function gateFirstDraws(
   let drawn = drawnBy.get(pipelines);
   if (!drawn) drawnBy.set(pipelines, (drawn = new WeakSet()));
   const seen = drawn;
+  let stageSet = stagesDrawnBy.get(pipelines);
+  if (!stageSet) stagesDrawnBy.set(pipelines, (stageSet = new WeakSet()));
+  const stages = stageSet;
   const original = pipelines.isReady;
   let budget = 0;
   let spent = 0;
@@ -257,14 +289,17 @@ export function gateFirstDraws(
     if (!original.call(this, renderObject)) return false;
     const p = this.get(renderObject).pipeline;
     if (!p || seen.has(p)) return true;
-    const c = costOf(p);
+    const c = costOf(p, stages);
     if (budget > 0 && (inFrame === 0 || spent + c <= budget)) {
       spent += c;
       inFrame++;
       granted++;
       cost += c;
       seen.add(p);
-      onGrant?.(renderObject, p);
+      if (onGrant) onGrant(renderObject, p, { cost: c, newChars: newStageChars(p, stages) });
+      const st = p as Staged;
+      if (st.vertexProgram) stages.add(st.vertexProgram);
+      if (st.fragmentProgram) stages.add(st.fragmentProgram);
       return true;
     }
     waiting.add(p);

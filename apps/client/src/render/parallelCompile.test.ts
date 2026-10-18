@@ -192,6 +192,30 @@ describe("gateFirstDraws (WebGL2: a program's first draw compiles its Metal pipe
     gate.release();
   });
 
+  it("tracks the shader stages drawn: a first draw marks its stages, a refused one doesn't (diagnostics hear cost and new characters)", () => {
+    // three shares a vertex or fragment stage between pipelines with the same source
+    const vs = { code: "v".repeat(100) };
+    const fsA = { code: "a".repeat(50) };
+    const fsB = { code: "b".repeat(70) };
+    const of: Record<string, object> = { a: { vertexProgram: vs, fragmentProgram: fsA }, b: { vertexProgram: vs, fragmentProgram: fsB }, c: { vertexProgram: vs, fragmentProgram: fsA } };
+    const renderer = { _pipelines: { isReady: () => true, get: (ro: unknown) => ({ pipeline: of[String(ro)] }) } } as GateRenderer;
+    const heard: [string, number, number][] = [];
+    const seenByCost: boolean[][] = [];
+    const gate = gateFirstDraws(renderer, (ro, _p, g) => heard.push([String(ro), g.cost, g.newChars]), (p, drawn) => {
+      const q = p as { vertexProgram: object; fragmentProgram: object };
+      seenByCost.push([drawn.has(q.vertexProgram), drawn.has(q.fragmentProgram)]);
+      return 10;
+    });
+    const draw = (ro: string) => renderer._pipelines!.isReady(ro);
+    gate.frame(10);
+    expect([draw("a"), draw("b")]).toEqual([true, false]); // b refused: its fragment stage stays new
+    gate.frame(30);
+    expect([draw("b"), draw("c")]).toEqual([true, true]);
+    expect(heard).toEqual([["a", 10, 150], ["b", 10, 70], ["c", 10, 0]]); // c's stages were both drawn already
+    expect(seenByCost).toEqual([[false, false], [true, false], [true, false], [true, true]]);
+    gate.release();
+  });
+
   it("does nothing without three's internals", () => {
     const gate = gateFirstDraws({} as GateRenderer);
     expect(gate.active).toBe(false);

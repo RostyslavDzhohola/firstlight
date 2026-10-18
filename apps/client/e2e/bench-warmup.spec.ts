@@ -5,7 +5,8 @@
 //   BENCH_MODE=serial    ?serialcompile: three's own one-program-at-a-time compiles (before D-load-2)
 //   BENCH_MODE=parallel  the default: the warm-up's programs compile side by side
 //   BENCH_TIER=high      (default; the owner's M1 tier)   BENCH_RUN=1   BENCH_OUT=/tmp/…
-//   BENCH_FLAGS=warmdiag (extra URL flags: warmdiag logs the slowest WebGL2 first-draw batches)
+//   BENCH_FLAGS=warmdiag (extra URL flags: warmdiag logs every WebGL2 first-draw batch in send order with
+//   stage hashes and a census; warmsolo sends one pipeline per batch; oldpacer, fullshadow: the kill flags)
 //
 // Chrome shares its GPU program cache between the contexts of one browser, so a second arrival in the
 // same browser compiles from a warm cache. Run each measurement as its own Playwright invocation (a

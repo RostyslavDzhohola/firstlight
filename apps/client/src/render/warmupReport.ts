@@ -21,10 +21,15 @@ export interface WarmupReport {
   shaders: number;
   /** New GPU shader stages (vertex + fragment programs; three shares one per distinct source). */
   stages: number;
-  /** The warm-up's own frames over 100 ms, longest first (at most 12): what each was made of. */
+  /**
+   * The warm-up's frames over 100 ms, in every phase: the longest 12, longest first; with `?warmdiag`
+   * all of them, in time order.
+   */
   slow: SlowFrame[];
-  /** `?warmdiag`: the slowest fenced first-draw batches (GPU ms) and the pipelines in each. */
+  /** `?warmdiag`: every fenced first-draw batch in the order it was sent, and the pipelines in each. */
   batches?: FirstDrawBatch[];
+  /** `?warmdiag`: the pipelines drawn for the first time, counted (from `batches`). */
+  census?: FirstDrawCensus;
   /** WebGL2's paced first draws: how many, in how many fenced batches, and the GPU's time per batch. */
   firstDraws: { granted: number; batches: number; p50: number; max: number };
   phases: {
@@ -40,15 +45,24 @@ export interface WarmupReport {
   };
 }
 
-/** One long warm-up frame: `ms` from the previous frame, `cpu` the draw itself on the main thread. */
+/**
+ * One long warm-up frame: `ms` from the previous frame, `cpu` the draw itself on the main thread (0 in
+ * the compile phase, where the warm-up draws nothing), `t` when it ended (performance.now()).
+ */
 export interface SlowFrame {
-  phase: "shadows" | "frames" | "drain";
+  phase: "compile" | "shadows" | "frames" | "drain";
+  t: number;
   ms: number;
   cpu: number;
   builds: number;
-  /** Pipelines drawn for the first time in it, and its first-draw budget (GLSL characters, WebGL2). */
+  /** Pipelines drawn for the first time in it, and its first-draw budget (cost units, WebGL2). */
   firstDraws: number;
   budget: number;
+  /** A fenced first-draw batch was in flight (WebGL2), and which one (1 = the first sent; null: none). */
+  inFlight: boolean;
+  batch: number | null;
+  /** Programs still compiling (links pending) at the time. */
+  pending: number;
 }
 
 /** One pipeline drawn for the first time: its material, object and GLSL source sizes (characters). */
@@ -57,9 +71,41 @@ export interface FirstDrawItem {
   object: string;
   vs: number;
   fs: number;
+  /** 32-bit FNV-1a hashes of the vertex and fragment sources (equal hash: the same stage). */
+  vh: number;
+  fh: number;
+  /** What the pacer charged for it, and the characters of its stages not drawn before. */
+  cost: number;
+  newChars: number;
+  /** A skinned vertex stage (characters, horses), and drawn in a shadow pass. */
+  skinned: boolean;
+  shadow: boolean;
 }
 
+/** One fenced batch of first draws (`?warmdiag`), sent at `t`; `ms` the GPU's time for it (null: never finished). */
 export interface FirstDrawBatch {
-  ms: number;
+  /** 1 = the first batch sent. */
+  seq: number;
+  t: number;
+  ms: number | null;
+  /** Charged cost units, GLSL characters (all, and of stages not drawn before), pipelines. */
+  used: number;
+  chars: number;
+  newChars: number;
+  n: number;
+  /** Skinned shadow-pass pipelines in it. */
+  skinnedShadow: number;
+  /** Programs still compiling (links pending) when it was sent. */
+  pending: number;
   items: FirstDrawItem[];
+}
+
+/** First-drawn pipelines by kind, and the distinct stage sources among them (by hash). */
+export interface FirstDrawCensus {
+  pipelines: number;
+  skinnedShadow: number;
+  skinnedMain: number;
+  vertexStages: number;
+  fragmentStages: number;
+  skinnedVertexStages: number;
 }
