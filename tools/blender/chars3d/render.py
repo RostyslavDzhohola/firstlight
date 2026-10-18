@@ -32,10 +32,10 @@ PALETTES = [  # primary, secondary, accent (docs/content.md §8.3)
     ("#2E2A2B", "#A3402B", "#FF8A3D"),
     ("#4A3260", "#3E5568", "#F09A7A"),
 ]
-DEFAULT_PAL = {"hexwick": 2, "ash": 1, "kappa": 3, "unit7": 0, "ninja": 4, "kappa_b": 3, "unit7_b": 0}
-SCALE = {"hexwick": 0.95, "ash": 1.04, "kappa": 0.9, "unit7": 0.98, "ninja": 0.96, "kappa_b": 1.0, "unit7_b": 1.06}
+DEFAULT_PAL = {"hexwick": 2, "ash": 1, "kappa": 3, "unit7": 0, "ninja": 4, "kappa_b": 3, "unit7_b": 0, "mage": 5}
+SCALE = {"hexwick": 0.95, "ash": 1.04, "kappa": 0.9, "unit7": 0.98, "ninja": 0.96, "kappa_b": 1.0, "unit7_b": 1.06, "mage": 1.06}
 NAMES = {"hexwick": "Hexwick", "ash": "Brother Ash", "kappa": "Kappa", "unit7": "Unit 7", "ninja": "Ninja",
-         "kappa_b": "Kappa", "unit7_b": "Unit 7"}
+         "kappa_b": "Kappa", "unit7_b": "Unit 7", "mage": "Orla"}
 # Second looks (rig_astra.py) bind in an A-pose with their own proportions: they follow the clips through
 # armature-space rotation copies from a hidden clip rig, and a pelvis track scaled to their leg length
 # (what the client does with the same clips, see apps/client/src/render/avatars/assets.ts).
