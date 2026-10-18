@@ -109,6 +109,7 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
       } as ConstructorParameters<typeof THREE.WebGPURenderer>[0]),
     forceWebGL: flags.has("webgl"),
     forceWebGPU: flags.has("webgpu"),
+    isWebGPU: (r) => !!(r.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend,
   });
   const webgpu = !!(renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend;
   const tm = flags.get("tonemap");

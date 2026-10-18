@@ -207,6 +207,12 @@ export interface StartOptions<R extends Startable> {
   forceWebGL: boolean;
   /** `?webgpu`: try WebGPU even if it failed here before, and forget that failure. */
   forceWebGPU?: boolean;
+  /**
+   * Whether an initialised renderer really runs on WebGPU. three r186 catches a failed WebGPU init
+   * itself, switches to its WebGL2 backend and resolves init(), so "ready" alone isn't a success.
+   * Default: yes.
+   */
+  isWebGPU?: (renderer: R) => boolean;
   timeoutMs?: number;
   memory?: BackendMemory;
   /** One info line per decision (console.info by default). */
@@ -239,8 +245,14 @@ export async function startRenderer<R extends Startable>(opts: StartOptions<R>):
     const renderer = opts.create(false);
     const outcome = await initWithin(renderer, timeoutMs);
     if (outcome.status === "ready") {
-      memory.forgetWebgpuSkipped();
-      return { renderer, fallback: null };
+      if (opts.isWebGPU?.(renderer) ?? true) {
+        memory.forgetWebgpuSkipped();
+        return { renderer, fallback: null };
+      }
+      // three's own fallback: WebGPU failed inside init(), which carried on with WebGL2.
+      log("[gfx] WebGPU failed to start (three fell back to WebGL2 inside init()); using WebGL2 on this device for a while");
+      memory.rememberWebgpuSkipped("error");
+      return { renderer, fallback: "error" };
     }
     if (outcome.status === "timeout") {
       fallback = "timeout";

@@ -1074,7 +1074,9 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   (reason timeout/error, `Date.now()`, the browser's major version parsed from the user agent such
   as `Chrome/141`, and the GPU name), nothing else, never sent anywhere. Later visits skip WebGPU
   while the record is under 7 days old and the browser version and GPU still match; otherwise
-  WebGPU is tried again with the same 8 s deadline. A WebGPU start that works clears the record;
+  WebGPU is tried again with the same 8 s deadline. A WebGPU start that works clears the record
+  (checked on the backend in use: three r186 catches a failed WebGPU init itself and resolves on
+  WebGL2, which counts as an error and is recorded);
   `?webgpu` clears it and tries (a new failure writes a fresh record); `?webgl` still forces WebGL2
   and leaves it alone; storage that is missing or throws means no memory. The GPU name is the
   unmasked WebGL2 renderer string, the same one `renderer.ts` reports on WebGL2: WebGPU can't name

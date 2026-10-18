@@ -266,14 +266,16 @@ function device(opts: { record?: unknown; browser?: string; gpu?: string; now?: 
 }
 
 /** Start like a page load does; returns which backend was tried first and how it ended. */
-async function load(d: ReturnType<typeof device>, opts: { forceWebGPU?: boolean; forceWebGL?: boolean; webgpu: "ready" | "hang" | "reject" | "untried" }) {
+async function load(d: ReturnType<typeof device>, opts: { forceWebGPU?: boolean; forceWebGL?: boolean; webgpu: "ready" | "hang" | "reject" | "untried" | "internal-fallback" }) {
   const h = harness();
-  const started = startRenderer({ create: h.create, forceWebGL: !!opts.forceWebGL, forceWebGPU: opts.forceWebGPU, memory: d.memory, log: h.log });
+  // three r186 catches a failed WebGPU init itself, switches to its WebGL2 backend and resolves init().
+  const isWebGPU = (r: FakeRenderer) => !r.forceWebGL && opts.webgpu !== "internal-fallback";
+  const started = startRenderer({ create: h.create, forceWebGL: !!opts.forceWebGL, forceWebGPU: opts.forceWebGPU, memory: d.memory, log: h.log, isWebGPU });
   await flush();
   const first = h.made[0]!;
   const triedWebgpu = !first.forceWebGL;
   if (triedWebgpu) {
-    if (opts.webgpu === "ready") first.resolve();
+    if (opts.webgpu === "ready" || opts.webgpu === "internal-fallback") first.resolve();
     else if (opts.webgpu === "reject") first.reject(new Error("Unable to create WebGPU adapter"));
     else await vi.advanceTimersByTimeAsync(WEBGPU_INIT_TIMEOUT_MS);
     await flush();
@@ -372,6 +374,18 @@ describe("startRenderer with the device memory (WebGPU that didn't start, across
     const r = await load(d, { webgpu: "reject" });
     expect(r.fallback).toBe("error");
     expect(d.record()).toMatchObject({ reason: "error", at: 100 * DAY });
+  });
+
+  it("init() that resolves on three's own WebGL2 fallback is a failed start: recorded as an error, not cleared", async () => {
+    const d = device({ record: fresh({ browser: "Chrome/139" }) }); // stale: WebGPU is tried
+    const r = await load(d, { webgpu: "internal-fallback" });
+    expect(r.triedWebgpu).toBe(true);
+    expect(r.made).toHaveLength(1); // three's WebGL2 backend is already up: no second renderer
+    expect(r.fallback).toBe("error");
+    expect(d.record()).toEqual({ v: 1, reason: "error", at: 100 * DAY, browser: CHROME, gpu: M1 });
+    expect(r.logs.join("\n")).toMatch(/WebGPU failed to start/);
+    // the next visit skips WebGPU
+    expect((await load(device({ storage: d.storage }), { webgpu: "untried" })).fallback).toBe("remembered");
   });
 
   it("a successful WebGPU start clears an old record", async () => {
