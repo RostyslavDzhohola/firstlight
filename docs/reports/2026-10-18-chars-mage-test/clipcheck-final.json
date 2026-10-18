@@ -54,12 +54,19 @@
  "clips": {
   "aim": {
    "frames": 6,
-   "flags": [],
+   "flags": [
+    {
+     "set": "braid",
+     "body": "upperarm_l",
+     "depth_m": 0.019,
+     "frame": 2
+    }
+   ],
    "worst": {
-    "set": "hand_l",
-    "body": "forearm_r",
-    "depth_m": 0.004,
-    "frame": 0
+    "set": "braid",
+    "body": "upperarm_l",
+    "depth_m": 0.019,
+    "frame": 2
    }
   },
   "block": {
@@ -68,7 +75,7 @@
    "worst": {
     "set": "lantern",
     "body": "forearm_r",
-    "depth_m": 0.002,
+    "depth_m": 0.005,
     "frame": 28
    }
   },
@@ -77,9 +84,9 @@
    "flags": [],
    "worst": {
     "set": "braid",
-    "body": "upper_chest",
-    "depth_m": -0.007,
-    "frame": 12
+    "body": "upperarm_l",
+    "depth_m": -0.001,
+    "frame": 2
    }
   },
   "cast_mage": {
@@ -105,7 +112,7 @@
      "set": "tabard_f",
      "body": "calf_r",
      "depth_m": 0.041,
-     "frame": 56
+     "frame": 54
     }
    ],
    "worst": {
@@ -127,11 +134,18 @@
   },
   "emote_dance": {
    "frames": 31,
-   "flags": [],
+   "flags": [
+    {
+     "set": "tabard_f",
+     "body": "calf_l",
+     "depth_m": 0.03,
+     "frame": 24
+    }
+   ],
    "worst": {
     "set": "tabard_f",
     "body": "calf_l",
-    "depth_m": 0.01,
+    "depth_m": 0.03,
     "frame": 24
    }
   },
@@ -140,8 +154,8 @@
    "flags": [],
    "worst": {
     "set": "lantern",
-    "body": "thigh_r",
-    "depth_m": -0.009,
+    "body": "forearm_r",
+    "depth_m": 0.001,
     "frame": 58
    }
   },
@@ -181,14 +195,14 @@
     {
      "set": "tabard_f",
      "body": "calf_r",
-     "depth_m": 0.034,
+     "depth_m": 0.033,
      "frame": 16
     }
    ],
    "worst": {
     "set": "tabard_f",
     "body": "calf_r",
-    "depth_m": 0.034,
+    "depth_m": 0.033,
     "frame": 16
    }
   },
@@ -209,7 +223,7 @@
     "set": "braid",
     "body": "forearm_l",
     "depth_m": 0.002,
-    "frame": 10
+    "frame": 12
    }
   },
   "jump": {
@@ -218,15 +232,21 @@
     {
      "set": "tabard_f",
      "body": "calf_r",
-     "depth_m": 0.039,
-     "frame": 10
+     "depth_m": 0.038,
+     "frame": 8
+    },
+    {
+     "set": "braid",
+     "body": "thigh_l",
+     "depth_m": 0.018,
+     "frame": 38
     }
    ],
    "worst": {
     "set": "tabard_f",
     "body": "calf_r",
-    "depth_m": 0.039,
-    "frame": 10
+    "depth_m": 0.038,
+    "frame": 8
    }
   },
   "land": {
@@ -235,14 +255,14 @@
     {
      "set": "sash",
      "body": "forearm_l",
-     "depth_m": 0.023,
+     "depth_m": 0.027,
      "frame": 6
     }
    ],
    "worst": {
     "set": "sash",
     "body": "forearm_l",
-    "depth_m": 0.023,
+    "depth_m": 0.027,
     "frame": 6
    }
   },
@@ -250,68 +270,86 @@
    "frames": 61,
    "flags": [
     {
+     "set": "braid",
+     "body": "upperarm_r",
+     "depth_m": 0.049,
+     "frame": 24
+    },
+    {
+     "set": "tabard_b",
+     "body": "thigh_r",
+     "depth_m": 0.045,
+     "frame": 30
+    },
+    {
      "set": "tabard_b",
      "body": "calf_r",
-     "depth_m": 0.047,
-     "frame": 30
+     "depth_m": 0.038,
+     "frame": 32
+    },
+    {
+     "set": "tabard_f",
+     "body": "thigh_r",
+     "depth_m": 0.026,
+     "frame": 6
     },
     {
      "set": "braid",
      "body": "forearm_r",
-     "depth_m": 0.038,
-     "frame": 38
+     "depth_m": 0.026,
+     "frame": 36
     },
     {
      "set": "tabard_f",
      "body": "calf_r",
-     "depth_m": 0.036,
+     "depth_m": 0.022,
      "frame": 40
     },
     {
-     "set": "tabard_b",
-     "body": "thigh_r",
-     "depth_m": 0.033,
-     "frame": 28
-    },
-    {
-     "set": "tabard_f",
-     "body": "thigh_r",
-     "depth_m": 0.027,
-     "frame": 6
+     "set": "sash",
+     "body": "thigh_l",
+     "depth_m": 0.021,
+     "frame": 14
     }
    ],
    "worst": {
-    "set": "tabard_b",
-    "body": "calf_r",
-    "depth_m": 0.047,
-    "frame": 30
+    "set": "braid",
+    "body": "upperarm_r",
+    "depth_m": 0.049,
+    "frame": 24
    }
   },
   "melee_light": {
    "frames": 14,
    "flags": [
     {
+     "set": "braid",
+     "body": "upperarm_r",
+     "depth_m": 0.047,
+     "frame": 10
+    },
+    {
      "set": "tabard_b",
      "body": "calf_l",
-     "depth_m": 0.03,
+     "depth_m": 0.028,
      "frame": 4
     }
    ],
    "worst": {
-    "set": "tabard_b",
-    "body": "calf_l",
-    "depth_m": 0.03,
-    "frame": 4
+    "set": "braid",
+    "body": "upperarm_r",
+    "depth_m": 0.047,
+    "frame": 10
    }
   },
   "punch": {
    "frames": 27,
    "flags": [],
    "worst": {
-    "set": "hood_tip",
-    "body": "head",
-    "depth_m": 0.014,
-    "frame": 14
+    "set": "braid",
+    "body": "upper_chest",
+    "depth_m": 0.003,
+    "frame": 6
    }
   },
   "punch_heavy": {
@@ -319,9 +357,9 @@
    "flags": [],
    "worst": {
     "set": "braid",
-    "body": "upper_chest",
-    "depth_m": -0.003,
-    "frame": 6
+    "body": "thigh_l",
+    "depth_m": 0.003,
+    "frame": 24
    }
   },
   "roll": {
@@ -337,43 +375,31 @@
      "set": "tabard_f",
      "body": "calf_r",
      "depth_m": 0.048,
-     "frame": 42
-    },
-    {
-     "set": "tabard_b",
-     "body": "thigh_l",
-     "depth_m": 0.046,
-     "frame": 10
+     "frame": 44
     },
     {
      "set": "tabard_b",
      "body": "thigh_r",
-     "depth_m": 0.043,
+     "depth_m": 0.046,
      "frame": 8
     },
     {
      "set": "tabard_b",
-     "body": "calf_r",
-     "depth_m": 0.036,
-     "frame": 12
+     "body": "thigh_l",
+     "depth_m": 0.044,
+     "frame": 10
     },
     {
-     "set": "lantern",
-     "body": "forearm_r",
-     "depth_m": 0.027,
-     "frame": 0
+     "set": "tabard_b",
+     "body": "calf_r",
+     "depth_m": 0.037,
+     "frame": 12
     },
     {
      "set": "tabard_b",
      "body": "calf_l",
-     "depth_m": 0.024,
-     "frame": 10
-    },
-    {
-     "set": "sash",
-     "body": "calf_l",
      "depth_m": 0.023,
-     "frame": 26
+     "frame": 10
     },
     {
      "set": "hand_r",
@@ -386,6 +412,12 @@
      "body": "thigh_r",
      "depth_m": 0.017,
      "frame": 24
+    },
+    {
+     "set": "braid",
+     "body": "chest",
+     "depth_m": 0.016,
+     "frame": 14
     }
    ],
    "worst": {
@@ -401,8 +433,8 @@
     {
      "set": "tabard_b",
      "body": "calf_r",
-     "depth_m": 0.048,
-     "frame": 28
+     "depth_m": 0.047,
+     "frame": 0
     },
     {
      "set": "tabard_b",
@@ -413,31 +445,38 @@
     {
      "set": "tabard_f",
      "body": "thigh_r",
-     "depth_m": 0.038,
+     "depth_m": 0.036,
      "frame": 2
     },
     {
-     "set": "tabard_f",
-     "body": "calf_r",
-     "depth_m": 0.02,
-     "frame": 2
+     "set": "braid",
+     "body": "thigh_l",
+     "depth_m": 0.031,
+     "frame": 24
     }
    ],
    "worst": {
     "set": "tabard_b",
     "body": "calf_r",
-    "depth_m": 0.048,
-    "frame": 28
+    "depth_m": 0.047,
+    "frame": 0
    }
   },
   "shoot": {
    "frames": 20,
-   "flags": [],
+   "flags": [
+    {
+     "set": "braid",
+     "body": "upperarm_l",
+     "depth_m": 0.018,
+     "frame": 14
+    }
+   ],
    "worst": {
-    "set": "hand_l",
-    "body": "forearm_r",
-    "depth_m": 0.007,
-    "frame": 2
+    "set": "braid",
+    "body": "upperarm_l",
+    "depth_m": 0.018,
+    "frame": 14
    }
   },
   "sprint": {
@@ -446,32 +485,26 @@
     {
      "set": "tabard_f",
      "body": "calf_r",
-     "depth_m": 0.04,
+     "depth_m": 0.041,
      "frame": 16
     },
     {
      "set": "tabard_f",
      "body": "thigh_l",
-     "depth_m": 0.034,
+     "depth_m": 0.033,
      "frame": 8
     },
     {
      "set": "tabard_f",
-     "body": "thigh_r",
-     "depth_m": 0.034,
-     "frame": 18
-    },
-    {
-     "set": "tabard_f",
      "body": "calf_l",
-     "depth_m": 0.027,
+     "depth_m": 0.028,
      "frame": 8
     }
    ],
    "worst": {
     "set": "tabard_f",
     "body": "calf_r",
-    "depth_m": 0.04,
+    "depth_m": 0.041,
     "frame": 16
    }
   },
@@ -481,27 +514,33 @@
     {
      "set": "sash",
      "body": "thigh_l",
-     "depth_m": 0.053,
-     "frame": 28
+     "depth_m": 0.04,
+     "frame": 26
+    },
+    {
+     "set": "tabard_b",
+     "body": "calf_l",
+     "depth_m": 0.023,
+     "frame": 8
+    },
+    {
+     "set": "tabard_b",
+     "body": "calf_r",
+     "depth_m": 0.023,
+     "frame": 8
     },
     {
      "set": "sash",
      "body": "calf_l",
-     "depth_m": 0.033,
-     "frame": 28
-    },
-    {
-     "set": "hood_tip",
-     "body": "upper_chest",
-     "depth_m": 0.016,
+     "depth_m": 0.02,
      "frame": 26
     }
    ],
    "worst": {
     "set": "sash",
     "body": "thigh_l",
-    "depth_m": 0.053,
-    "frame": 28
+    "depth_m": 0.04,
+    "frame": 26
    }
   },
   "swim_idle": {
@@ -527,15 +566,15 @@
     {
      "set": "tabard_b",
      "body": "calf_r",
-     "depth_m": 0.047,
-     "frame": 30
+     "depth_m": 0.048,
+     "frame": 34
     }
    ],
    "worst": {
     "set": "tabard_b",
     "body": "calf_r",
-    "depth_m": 0.047,
-    "frame": 30
+    "depth_m": 0.048,
+    "frame": 34
    }
   },
   "walk": {
@@ -554,19 +593,26 @@
     {
      "set": "braid",
      "body": "forearm_l",
-     "depth_m": 0.018,
+     "depth_m": 0.017,
      "frame": 0
     }
    ],
    "worst": {
     "set": "braid",
     "body": "forearm_l",
-    "depth_m": 0.018,
+    "depth_m": 0.017,
     "frame": 0
    }
   }
  },
  "flags": [
+  {
+   "set": "braid",
+   "body": "upperarm_l",
+   "depth_m": 0.019,
+   "frame": 2,
+   "clip": "aim"
+  },
   {
    "set": "hand_l",
    "body": "thigh_l",
@@ -578,69 +624,104 @@
    "set": "tabard_f",
    "body": "calf_r",
    "depth_m": 0.041,
-   "frame": 56,
+   "frame": 54,
    "clip": "death"
   },
   {
    "set": "tabard_f",
+   "body": "calf_l",
+   "depth_m": 0.03,
+   "frame": 24,
+   "clip": "emote_dance"
+  },
+  {
+   "set": "tabard_f",
    "body": "calf_r",
-   "depth_m": 0.034,
+   "depth_m": 0.033,
    "frame": 16,
    "clip": "hit_heavy"
   },
   {
    "set": "tabard_f",
    "body": "calf_r",
-   "depth_m": 0.039,
-   "frame": 10,
+   "depth_m": 0.038,
+   "frame": 8,
+   "clip": "jump"
+  },
+  {
+   "set": "braid",
+   "body": "thigh_l",
+   "depth_m": 0.018,
+   "frame": 38,
    "clip": "jump"
   },
   {
    "set": "sash",
    "body": "forearm_l",
-   "depth_m": 0.023,
+   "depth_m": 0.027,
    "frame": 6,
    "clip": "land"
   },
   {
+   "set": "braid",
+   "body": "upperarm_r",
+   "depth_m": 0.049,
+   "frame": 24,
+   "clip": "melee_heavy"
+  },
+  {
+   "set": "tabard_b",
+   "body": "thigh_r",
+   "depth_m": 0.045,
+   "frame": 30,
+   "clip": "melee_heavy"
+  },
+  {
    "set": "tabard_b",
    "body": "calf_r",
-   "depth_m": 0.047,
-   "frame": 30,
+   "depth_m": 0.038,
+   "frame": 32,
+   "clip": "melee_heavy"
+  },
+  {
+   "set": "tabard_f",
+   "body": "thigh_r",
+   "depth_m": 0.026,
+   "frame": 6,
    "clip": "melee_heavy"
   },
   {
    "set": "braid",
    "body": "forearm_r",
-   "depth_m": 0.038,
-   "frame": 38,
+   "depth_m": 0.026,
+   "frame": 36,
    "clip": "melee_heavy"
   },
   {
    "set": "tabard_f",
    "body": "calf_r",
-   "depth_m": 0.036,
+   "depth_m": 0.022,
    "frame": 40,
    "clip": "melee_heavy"
   },
   {
-   "set": "tabard_b",
-   "body": "thigh_r",
-   "depth_m": 0.033,
-   "frame": 28,
+   "set": "sash",
+   "body": "thigh_l",
+   "depth_m": 0.021,
+   "frame": 14,
    "clip": "melee_heavy"
   },
   {
-   "set": "tabard_f",
-   "body": "thigh_r",
-   "depth_m": 0.027,
-   "frame": 6,
-   "clip": "melee_heavy"
+   "set": "braid",
+   "body": "upperarm_r",
+   "depth_m": 0.047,
+   "frame": 10,
+   "clip": "melee_light"
   },
   {
    "set": "tabard_b",
    "body": "calf_l",
-   "depth_m": 0.03,
+   "depth_m": 0.028,
    "frame": 4,
    "clip": "melee_light"
   },
@@ -655,49 +736,35 @@
    "set": "tabard_f",
    "body": "calf_r",
    "depth_m": 0.048,
-   "frame": 42,
-   "clip": "roll"
-  },
-  {
-   "set": "tabard_b",
-   "body": "thigh_l",
-   "depth_m": 0.046,
-   "frame": 10,
+   "frame": 44,
    "clip": "roll"
   },
   {
    "set": "tabard_b",
    "body": "thigh_r",
-   "depth_m": 0.043,
+   "depth_m": 0.046,
    "frame": 8,
    "clip": "roll"
   },
   {
    "set": "tabard_b",
-   "body": "calf_r",
-   "depth_m": 0.036,
-   "frame": 12,
+   "body": "thigh_l",
+   "depth_m": 0.044,
+   "frame": 10,
    "clip": "roll"
   },
   {
-   "set": "lantern",
-   "body": "forearm_r",
-   "depth_m": 0.027,
-   "frame": 0,
+   "set": "tabard_b",
+   "body": "calf_r",
+   "depth_m": 0.037,
+   "frame": 12,
    "clip": "roll"
   },
   {
    "set": "tabard_b",
    "body": "calf_l",
-   "depth_m": 0.024,
-   "frame": 10,
-   "clip": "roll"
-  },
-  {
-   "set": "sash",
-   "body": "calf_l",
    "depth_m": 0.023,
-   "frame": 26,
+   "frame": 10,
    "clip": "roll"
   },
   {
@@ -715,10 +782,17 @@
    "clip": "roll"
   },
   {
+   "set": "braid",
+   "body": "chest",
+   "depth_m": 0.016,
+   "frame": 14,
+   "clip": "roll"
+  },
+  {
    "set": "tabard_b",
    "body": "calf_r",
-   "depth_m": 0.048,
-   "frame": 28,
+   "depth_m": 0.047,
+   "frame": 0,
    "clip": "run"
   },
   {
@@ -731,63 +805,70 @@
   {
    "set": "tabard_f",
    "body": "thigh_r",
-   "depth_m": 0.038,
+   "depth_m": 0.036,
    "frame": 2,
    "clip": "run"
   },
   {
-   "set": "tabard_f",
-   "body": "calf_r",
-   "depth_m": 0.02,
-   "frame": 2,
+   "set": "braid",
+   "body": "thigh_l",
+   "depth_m": 0.031,
+   "frame": 24,
    "clip": "run"
+  },
+  {
+   "set": "braid",
+   "body": "upperarm_l",
+   "depth_m": 0.018,
+   "frame": 14,
+   "clip": "shoot"
   },
   {
    "set": "tabard_f",
    "body": "calf_r",
-   "depth_m": 0.04,
+   "depth_m": 0.041,
    "frame": 16,
    "clip": "sprint"
   },
   {
    "set": "tabard_f",
    "body": "thigh_l",
-   "depth_m": 0.034,
+   "depth_m": 0.033,
    "frame": 8,
    "clip": "sprint"
   },
   {
    "set": "tabard_f",
-   "body": "thigh_r",
-   "depth_m": 0.034,
-   "frame": 18,
-   "clip": "sprint"
-  },
-  {
-   "set": "tabard_f",
    "body": "calf_l",
-   "depth_m": 0.027,
+   "depth_m": 0.028,
    "frame": 8,
    "clip": "sprint"
   },
   {
    "set": "sash",
    "body": "thigh_l",
-   "depth_m": 0.053,
-   "frame": 28,
+   "depth_m": 0.04,
+   "frame": 26,
+   "clip": "swim"
+  },
+  {
+   "set": "tabard_b",
+   "body": "calf_l",
+   "depth_m": 0.023,
+   "frame": 8,
+   "clip": "swim"
+  },
+  {
+   "set": "tabard_b",
+   "body": "calf_r",
+   "depth_m": 0.023,
+   "frame": 8,
    "clip": "swim"
   },
   {
    "set": "sash",
    "body": "calf_l",
-   "depth_m": 0.033,
-   "frame": 28,
-   "clip": "swim"
-  },
-  {
-   "set": "hood_tip",
-   "body": "upper_chest",
-   "depth_m": 0.016,
+   "depth_m": 0.02,
    "frame": 26,
    "clip": "swim"
   },
@@ -801,14 +882,14 @@
   {
    "set": "tabard_b",
    "body": "calf_r",
-   "depth_m": 0.047,
-   "frame": 30,
+   "depth_m": 0.048,
+   "frame": 34,
    "clip": "throw"
   },
   {
    "set": "braid",
    "body": "forearm_l",
-   "depth_m": 0.018,
+   "depth_m": 0.017,
    "frame": 0,
    "clip": "walk_mage"
   }

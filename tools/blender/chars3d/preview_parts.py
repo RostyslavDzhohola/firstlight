@@ -2,7 +2,7 @@
 # coarse voxel size (no culling, skinning, UVs or bakes), colours each part flat, and renders it from the
 # front and three-quarters in one image, so each part can be checked before the next one is built.
 #
-#   blender -b --disable-autoexec --factory-startup --python preview_parts.py -- \
+#   blender -b --disable-autoexec --factory-startup --python-exit-code 1 --python preview_parts.py -- \
 #       --char mage --upto 3 --out /tmp/mage_step3.png [--vox 0.005] [--skeleton]
 #
 # Our own code: MIT.
