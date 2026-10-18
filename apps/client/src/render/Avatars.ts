@@ -15,6 +15,7 @@ import { STARTER_LOOKS, STARTERS, WEAPONS } from "@firstlight/shared/content/wea
 import { flags } from "../config.ts";
 import { avatarAssets, MODEL_SCALE, modelIndex, preloadAvatars, ROLL_SPEED, UAL_PELVIS, type AvatarAssets } from "./avatars/assets.ts";
 import { avatarMaterial, PALETTES, proxyMaterial } from "./avatars/material.ts";
+import { applyOccluderFadeGated } from "./occluderFade.ts";
 import { weaponModel } from "./avatars/weapons.ts";
 import { keptSamples } from "./warmup.ts";
 
@@ -37,7 +38,7 @@ function trimMat(hex: number): THREE.Material {
     const sm = new THREE.MeshStandardNodeMaterial({ color: hex, roughness: 0.4, metalness: 0.05 });
     sm.emissive = new THREE.Color(hex);
     sm.emissiveIntensity = 2.2;
-    m = sm;
+    m = applyOccluderFadeGated(sm); // quest NPCs dissolve between the camera and the player (D-view-5)
     capMats.set(k, m);
   }
   return m;

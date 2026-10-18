@@ -21,7 +21,10 @@ export interface MoveColliders {
   resolve(pos: THREE.Vector3, out: PropContact): boolean;
   /** Distance along a ray (unit `d`) to the first solid prop within `maxT`, or Infinity (tracers). */
   raycast?(o: THREE.Vector3, d: THREE.Vector3, maxT: number): number;
-  /** The camera's ray, if it ignores some solids (natural ones: only boulders and spires); else `raycast`. */
+  /**
+   * The camera's ray, if it sees other solids than `raycast`: fewer (natural ones: only boulders and
+   * spires) or more (structures: the shop stalls' awnings too, D-view-5); else `raycast`.
+   */
   cameraRay?(o: THREE.Vector3, d: THREE.Vector3, maxT: number): number;
 }
 
@@ -466,6 +469,13 @@ export class PlayerController {
     if (this.dodgeT > 0 && intoDodge < 0) this.dodgeDir.addScaledVector(n, -intoDodge);
   }
 
+  /** Lift `p` (planet space) to at least 0.4 m above the ground under it. */
+  private aboveGround(p: THREE.Vector3) {
+    const cu = _camUp.copy(p).normalize();
+    const g = this.terrain.groundHeight(cu.x, cu.y, cu.z) + this.terrain.body.radius + 0.4;
+    if (p.length() < g) p.copy(cu).multiplyScalar(g);
+  }
+
   placeCamera(camera: THREE.PerspectiveCamera) {
     const up = _up.copy(this.pos).normalize();
     const right = _right.crossVectors(this.camForward, up).normalize();
@@ -473,19 +483,20 @@ export class PlayerController {
     const ride = rideCamera(this.rideBlend); // in the saddle: eyes higher, camera further back
     const head = _head.copy(this.pos).addScaledVector(up, 1.65 + ride.lift);
     const camPos = _cam.copy(head).addScaledVector(look, -(this.camDistance + ride.back)).addScaledVector(right, 0.55).addScaledVector(up, 0.25);
-    // Not through a structure (a house, a tower, an awning): the camera comes in to just short of it
+    // Above the ground first, so the structure check below sees the lens where it will be: lifted
+    // after it, a low look (aiming up) put the lens into a counter or a planter beside the line (#22).
+    this.aboveGround(camPos);
+    // Not through a structure (a house, a tower, a stall's awning): the camera comes in to just short of it
     // along the line from the head, and eases back out once it's clear (no popping in and out).
     const dir = _camDir.copy(camPos).sub(head);
     const full = dir.length();
     dir.divideScalar(full);
-    const hit = Math.min(this.structures?.raycast?.(head, dir, full + CAMERA_WALL_GAP) ?? Infinity, this.nature?.cameraRay?.(head, dir, full + CAMERA_WALL_GAP) ?? Infinity);
+    const s = this.structures;
+    const hit = Math.min((s?.cameraRay ?? s?.raycast)?.(head, dir, full + CAMERA_WALL_GAP) ?? Infinity, this.nature?.cameraRay?.(head, dir, full + CAMERA_WALL_GAP) ?? Infinity);
     const want = hit < Infinity ? hit - Math.min(CAMERA_WALL_GAP, hit / 2) : full;
     this.camReach = want < this.camReach ? want : Math.min(want, this.camReach + CAMERA_EASE_OUT);
     if (this.camReach < full) camPos.copy(head).addScaledVector(dir, this.camReach);
-    // Keep the camera above ground.
-    const cu = _camUp.copy(camPos).normalize();
-    const g = this.terrain.groundHeight(cu.x, cu.y, cu.z) + this.terrain.body.radius + 0.4;
-    if (camPos.length() < g) camPos.copy(cu).multiplyScalar(g);
+    this.aboveGround(camPos); // pulled in along the line from the head: a bump of ground on the way can still need it
     camera.position.copy(camPos);
     camera.up.copy(up);
     camera.lookAt(head.addScaledVector(look, 6).addScaledVector(right, 0.55));

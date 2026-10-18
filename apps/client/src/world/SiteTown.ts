@@ -37,6 +37,7 @@ import { preloadSite, type SiteId, type TownAssets, type TownPart, type TownSlot
 import { TOWN_EMISSIVE, townFallbackMaterial, townMaterial, type TownMaterialKind } from "../render/townMaterial.ts";
 import { conformDecal } from "./townDecal.ts";
 import { outpostPaths } from "./outpostPaths.ts";
+import { cameraBoxRay, stallCameraBoxes } from "./stallCamera.ts";
 
 /**
  * Ground cell size (m) and the half extent of the cell grid around the site's centre. Measured at
@@ -101,6 +102,8 @@ interface CellMesh {
   mesh: THREE.Mesh;
   kind: TownMaterialKind;
   triangles: number;
+  /** The outpost's shop stall: its own mesh in the faded town material (D-view-5). */
+  fade?: boolean;
 }
 
 interface Cell {
@@ -194,9 +197,12 @@ export class SiteTown {
     this.site = terrain.body.id as SiteId;
     this.group.name = this.site === TOWN_BODY ? "portusTown" : `outpost:${this.site}`;
     const collider = (this.collider = structureCollider(terrain));
+    const stalls = stallCameraBoxes(terrain);
     this.moveColliders = {
       resolve: (pos, out) => collider.resolve(pos, out),
       raycast: (o, d, maxT) => collider.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT),
+      // The camera also stops at the shop stall's awning and what else hangs off it (#22, D-view-5).
+      cameraRay: (o, d, maxT) => Math.min(collider.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT), cameraBoxRay(stalls, o.x, o.y, o.z, d.x, d.y, d.z, maxT)),
     };
     this.settings = settings;
     this.group.visible = !flags.has("notown");
@@ -241,14 +247,14 @@ export class SiteTown {
     const prefabs = sitePrefabs(this.terrain.body.id);
     const portus = this.site === TOWN_BODY;
     const buckets = new Map<string, Bucket>();
-    const bucket = (cell: number, variant: 0 | 1, kind: TownMaterialKind) => {
-      const k = `${cell}:${variant}:${kind}`;
+    const bucket = (cell: number, variant: 0 | 1, kind: TownMaterialKind, fade: boolean) => {
+      const k = `${cell}:${variant}:${kind}:${fade ? 1 : 0}`;
       let b = buckets.get(k);
       if (!b) buckets.set(k, (b = { parts: [], verts: 0, indices: 0 }));
       return b;
     };
-    const add = (cell: number, variant: 0 | 1, kind: TownMaterialKind, part: TownPart, p: TownPlacement, tris: Uint32Array | null) => {
-      const b = bucket(cell, variant, kind);
+    const add = (cell: number, variant: 0 | 1, kind: TownMaterialKind, part: TownPart, p: TownPlacement, tris: Uint32Array | null, fade = false) => {
+      const b = bucket(cell, variant, kind, fade);
       b.parts.push({ part, p, tris });
       b.verts += part.position.length / 3;
       b.indices += tris ? tris.length * 3 : part.index.length;
@@ -259,9 +265,13 @@ export class SiteTown {
       const it = portus ? TOWN_LAYOUT[i]! : OUTPOSTS[this.site as OutpostBody].layout[i]!;
       return [it[1], it[2]];
     };
+    // An outpost's shop stall stands where the camera may pass close by, so it is baked on its own,
+    // in the faded material: between the camera and the player it dissolves, the buildings never do.
+    const stallItem = portus ? -1 : OUTPOSTS[this.site as OutpostBody].shop.item;
     placements.forEach((p, i) => {
       if (p.item < 0) return;
       const pre = prefabs[p.prefab]!;
+      const fade = i === stallItem;
       const l0 = assets.meshes.get(pre.name)!;
       const l1 = pre.tris[1] > 0 ? assets.meshes.get(`${pre.name}__L1`)! : l0;
       const decal = portus && pre.radius > DECAL_RADIUS;
@@ -293,7 +303,7 @@ export class SiteTown {
             for (const [c, l] of byCell) add(c, variant, kind, part, p, Uint32Array.from(l));
           } else {
             const c = cellOf(e0, n0);
-            if (c >= 0) add(c, variant, kind, part, p, null);
+            if (c >= 0) add(c, variant, kind, part, p, null, fade);
           }
         }
       }
@@ -307,12 +317,12 @@ export class SiteTown {
     const floor = assets.manifest.look?.albedoFloor ?? 0;
     const byCell = new Map<number, Cell>();
     for (const [key, b] of buckets) {
-      const [cs, vs, kind] = key.split(":") as [string, string, TownMaterialKind];
-      const ci = Number(cs), variant = Number(vs) as 0 | 1;
+      const [cs, vs, kind, fs] = key.split(":") as [string, string, TownMaterialKind, string];
+      const ci = Number(cs), variant = Number(vs) as 0 | 1, fade = fs === "1";
       const geo = this.merge(b, slots);
-      const mat = townMaterial(kind, true, assets.color, assets.normal, floor);
+      const mat = townMaterial(kind, true, assets.color, assets.normal, floor, fade);
       const mesh = new THREE.Mesh(geo, mat);
-      mesh.name = `town:${ci}:L${variant}:${kind}`;
+      mesh.name = `town:${ci}:L${variant}:${kind}${fade ? ":stall" : ""}`;
       mesh.matrixAutoUpdate = false;
       (mesh as unknown as { static: boolean }).static = true;
       mesh.receiveShadow = true;
@@ -321,7 +331,7 @@ export class SiteTown {
         cell = { index: ci, variants: [[], []], shown: 0, centre: new THREE.Vector3(), radius: 0, dir: new THREE.Vector3(), angle: 0, topR: 0, aboveHorizon: true };
         byCell.set(ci, cell);
       }
-      cell.variants[variant].push({ mesh, kind, triangles: b.indices / 3 });
+      cell.variants[variant].push({ mesh, kind, triangles: b.indices / 3, fade });
       this.group.add(mesh);
     }
     for (const cell of byCell.values()) {
@@ -553,7 +563,7 @@ export class SiteTown {
       for (const v of c.variants) {
         for (const m of v) {
           m.mesh.castShadow = cast && (m.kind === "cutout" || !copy);
-          if (this.assets) m.mesh.material = townMaterial(m.kind, normals, this.assets.color, this.assets.normal, floor);
+          if (this.assets) m.mesh.material = townMaterial(m.kind, normals, this.assets.color, this.assets.normal, floor, m.fade);
         }
       }
     }

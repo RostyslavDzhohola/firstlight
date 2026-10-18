@@ -13,6 +13,7 @@ import { createFramePath } from "./frameSize.ts";
 import { startRenderer } from "./rendererStart.ts";
 import { GpuTimer, ResolutionLadder } from "./timing.ts";
 import { compileForPass, passCallDepth, saveRenderState, type GuardedRenderer, type PassCompileRenderer } from "./compilePass.ts";
+import { frameCounterDraw, frameCounterTick } from "./frameCounter.ts";
 
 export { TIERS, FEATURES, type Tier, type Feature, type ResolvedSettings };
 
@@ -276,7 +277,9 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
       drawPath.resize();
     },
     render() {
+      frameCounterTick(); // ?framecount (#23): this frame's number, for both counters; a no-op without the flag
       drawPath.render();
+      frameCounterDraw(renderer); // ?framecount: the canvas counter, after everything else; a no-op without the flag
     },
     compileScene() {
       if (passCompileOff) return renderer.compileAsync(scene, camera);

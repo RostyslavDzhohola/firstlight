@@ -18,6 +18,7 @@
 //                         probe.stop() → { luma, flashes, flaps, resizes, blanks }
 //   hudRects()            visible HUD boxes (player card, hotbar, tutorial, minimap, save card…) for overlap checks
 //   auth()                async: guest / saved / dev guest, from the auth session (never signs in)
+//   stalls                the shop stall camera checks (debug/e2eStalls.ts): info, camera, coverage, watch
 //   act                   helpers for what Playwright can't drive through real input:
 //     browserEscape()     what desktop Chrome does on Esc while the pointer is locked (releases the lock;
 //                         the page gets no key event). Headless Chrome delivers the key and keeps the lock.
@@ -33,6 +34,7 @@
 
 import { bearingTo, headingOf, surfaceDistance, type V3 } from "../social/compassMath.ts";
 import { detectFlaps, detectFlashes, frameStats, isBlankWorld, lumaWorkerSource, meanAlpha, meanLuma, Ring, screenAim, type Flash } from "./e2eProbe.ts";
+import { stallTools } from "./e2eStalls.ts";
 
 // ---------------------------------------------------------------------------------------------- structural views
 
@@ -838,6 +840,8 @@ export function installE2eHook(win: Window & typeof globalThis): void {
     },
     hudRects,
     auth,
+    /** The shop stall checks (#22): debug/e2eStalls.ts. */
+    stalls: stallTools(game as never),
     act: {
       browserEscape: () => {
         if (document.pointerLockElement) document.exitPointerLock();

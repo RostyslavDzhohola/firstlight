@@ -537,6 +537,7 @@ export class Game {
     if (!this.self) {
       this.self = new AvatarView(choice?.palette ?? stored.palette, choice?.starter ?? stored.starter, choice?.look ?? stored.look);
       this.self.root.name = "selfAvatar";
+      this.self.root.userData.ownAvatar = true; // dissolves with the camera close to it (D-view-5)
     }
     this.ctx.scene.add(this.self.root);
     {

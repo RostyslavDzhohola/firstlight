@@ -1136,3 +1136,52 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   ladder counted the blurred menu's slow frames and reached its floor ~3.5 s after the owner opened
   the menu (0.93 → 0.75, ~41 fps), and with the M1's untrusted timer it could never climb back, so
   the rest of the session stayed blurry (spec #17).
+- **D-view-5 (2026-10-18):** shop stalls keep the camera out, and what is still in the way fades (#22,
+  with D-view-1). Camera-only volumes (`world/stallCamera.ts`, oriented boxes the structures'
+  `cameraRay` stops at like a wall; movement, shots and the server never see them, so nothing shared
+  changes): Juno's whole stall, from the awning's back edge to the counter's front (its open middle let
+  the camera through to look back across the awning), plus her awning, counter top and crate for a
+  player standing behind the counter; an outpost stall's awning overhang, valance and coin sign
+  (its shared solid already covers the rest). Every volume is padded 0.25 m, so a lens stopped along a
+  grazing ray keeps its 0.3 m near plane off the cloth (5 cm at the stall body's sides let a camera
+  looking down from behind skim over the awning: 20 % of the view in the e2e). The camera is lifted
+  above the ground before the structure check rather than after it (lifted afterwards, a low look put
+  the lens into Juno's counter or a planter). Juno's stall, each outpost's stall (baked into its own
+  mesh in a faded copy of the town material: one more opaque draw where it's in view, compiled with
+  the site behind the loading screen; the buildings never fade) and every quest NPC (keepers,
+  guides) take the occluder fade;
+  the avatars share their materials with the players, so those take a gated copy (one per-object
+  uniform: objects marked `userData.occluderFade` dissolve, players never; the same shaders to warm).
+  World labels fade by their depth in front of the camera (`render/labelFade.ts`, in the sprite's
+  shader, so for whichever camera draws): gone within 1.5 m, whole beyond 2.5 m; depth rather than
+  distance, so a 4.2 m label off to one side counts like one ahead (the round-2 reviews). An outpost
+  keeper no longer gets Juno's placeholder stall inside the outpost's own (D-b2-3): its red awning
+  poked through the striped one. e2e (`stalls.spec.ts`, WebGL2, 120 poses round and under each stall
+  plus a walk; shares in drawn pixels without bloom and weather): turned away from Juno's stall the
+  stall covered up to 40 % of the view, 2 % after; in every view on all four bodies the label stays
+  under 3 % and the awning under 27 % (an outpost's roof seen from 2.6 m above or from under its
+  overhang), turned away the whole stall under 29 %; no frame with the lens inside a stall volume (17
+  on Arcadia before); no label drawn nearer than 1.6 m (0.01 m before); E opens the shop from the
+  front, both front corners and both sides on all four bodies. Because stalls and walls pin the
+  camera to the head, the local player's own avatar (with what it holds and wears) dissolves as a
+  whole when the camera comes within 1.2 m of its chest-to-head line, fully within 0.5 m: the gated
+  mask's second case (`userData.ownAvatar`, which Game sets; a render-group uniform), the same dither,
+  no new shader; other players never fade, and photo mode and the bench keep it off as before. With
+  the camera pinned (at the counter turned away, walked into it, backed against a Portus house wall)
+  the own avatar covered the bottom of the view or the face filled it; now 0 % of the screen, and
+  6.5–7.5 % in the normal views. Why: the owner's recording
+  (40.1–40.3 s) had the camera inside the Portus Exchange stall: the awning across the view, the
+  label over the top, the keeper's hat over the bottom.
+- **D-e2e-2 (2026-10-18):** `?framecount` (#23) shows two frame counters on the bottom edge at the
+  left, for recordings: one in the canvas (a red marker and 20 bit cells, most significant first, each
+  1/96 of the drawing buffer's height) and the same cells plus the number in a DOM element at z-index
+  2147483647 beside it, above the pause menu, the perf overlay and the loader. `RenderCtx.render` takes
+  the frame's number just before drawing (which writes the DOM counter) and, right after the post
+  pipeline, puts it into the canvas outside three's node system: on WebGL2 a dozen scissored clears
+  into the default framebuffer (GL state put back), on WebGPU one scissored draw into the canvas
+  texture. Drawn instead as the post output's last step from a uniform, every other frame's pixels
+  showed the number from two frames before (readPixels on WebGL2, screenshots on WebGPU), whether the
+  uniform was written in its node update or before the render: unexplained, and worth a look for any
+  post uniform that changes every frame. Without the flag nothing is created (the DOM counter's
+  stylesheet loads with the flag), and smoke frame times on WebGL2 match main's back to back (3 runs
+  each: p50 16.7, p95 16.7–16.8, max 16.8 ms; vsync-bound). Why: a re-recording can then tell, frame by frame, a fresh frame (both counters moved on) from a stale or dropped layer (#17).

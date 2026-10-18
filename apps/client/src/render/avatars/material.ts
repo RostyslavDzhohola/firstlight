@@ -8,6 +8,7 @@
 import * as THREE from "three/webgpu";
 import { attribute, color, dot, float, max, mix, normalMap, normalView, positionViewDirection, saturate, texture, uniform, uv, vec2, vec3 } from "three/tsl";
 import type { StarterTextures } from "./assets.ts";
+import { applyOccluderFadeGated } from "../occluderFade.ts";
 
 /** docs/content.md §8.3: primary, secondary, accent. */
 export const PALETTES: readonly (readonly [number, number, number])[] = [
@@ -75,6 +76,8 @@ export function avatarMaterial(tex: StarterTextures, palette: number): THREE.Mes
     cAcc.mul(max(role.z, painted)).mul(2.2).add(avatarRim.color.mul(fres).mul(avatarRim.strength));
   m.side = THREE.DoubleSide; // cloth is single-sided: robe hems, hoods and sleeves show their insides
   m.name = `avatar-palette-${p}`;
+  // Quest NPCs (keepers, guides) dissolve between the camera and the player; players never (D-view-5).
+  applyOccluderFadeGated(m);
   cache.set(key, m);
   return m;
 }
@@ -85,7 +88,7 @@ export function proxyMaterial(palette: number): THREE.MeshStandardNodeMaterial {
   const p = ((palette % PALETTES.length) + PALETTES.length) % PALETTES.length;
   let m = proxyCache.get(p);
   if (!m) {
-    m = new THREE.MeshStandardNodeMaterial({ color: PALETTES[p]![0], roughness: 0.7, metalness: 0.05 });
+    m = applyOccluderFadeGated(new THREE.MeshStandardNodeMaterial({ color: PALETTES[p]![0], roughness: 0.7, metalness: 0.05 }));
     proxyCache.set(p, m);
   }
   return m;
