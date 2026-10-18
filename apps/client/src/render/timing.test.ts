@@ -322,13 +322,13 @@ describe("trial up-steps with an untrusted GPU timer (D-view-4)", () => {
    * walk the ladder down to `rung`. `clock.t` is the time of the frame being sampled; `ups` and `downs`
    * record when the rung changed from then on, `downAt` when the last down-step to `rung` happened.
    */
-  function untrustedAt(rung: number) {
+  function untrustedAt(rung: number, vsyncMs = 16.7) {
     const l = new ResolutionLadder();
     l.hasGpuTimer = true;
     const clock = { t: 1000 };
     let downAt = 0;
     l.onChange = () => (downAt = clock.t);
-    run(l, clock, 4, () => 16.7);
+    run(l, clock, 4, () => vsyncMs);
     expect(l.gpuUntrusted).toBe(true);
     while (l.index < rung) run(l, clock, 0.05, () => 28);
     const ups: number[] = [];
@@ -412,6 +412,26 @@ describe("trial up-steps with an untrusted GPU timer (D-view-4)", () => {
     run(l, clock, 60, () => 16.7);
     expect(ups).toHaveLength(1);
     expect(ups[0]! - forcedAt).toBeGreaterThanOrEqual(30_000);
+  });
+
+  it("judges vsync by the display's own frame interval: 50, 60 and 120 Hz", () => {
+    for (const hz of [50, 60, 120]) {
+      const vsync = 1000 / hz;
+      const { l, clock, ups } = untrustedAt(1, vsync);
+      // A steady display at its own rate: trial, kept.
+      run(l, clock, 60, () => vsync);
+      expect(ups, `${hz} Hz: a trial after the hold`).toHaveLength(1);
+      expect(l.index, `${hz} Hz: kept`).toBe(0);
+      expect(l.trials.kept, `${hz} Hz`).toBe(1);
+    }
+  });
+
+  it("on a 120 Hz display, 60 fps isn't vsync-limited: no trial", () => {
+    const { l, clock, ups } = untrustedAt(1, 1000 / 120);
+    run(l, clock, 120, () => 16.7);
+    expect(ups).toEqual([]);
+    run(l, clock, 60, () => 1000 / 120);
+    expect(ups).toHaveLength(1);
   });
 
   it("doubles the hold-off when a trial fails after a long pause under the menu", () => {

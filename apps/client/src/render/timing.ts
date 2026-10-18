@@ -112,8 +112,12 @@ const MIN_FRAMES_PER_WINDOW = 5;
 export const LADDER_RESUME_GRACE_MS = 1000;
 const UP_HOLD_INITIAL = 30_000;
 const UP_HOLD_MAX = 480_000;
-/** A window whose frame-time median meets 60 Hz: at vsync, nothing to see beyond it (D-view-4). */
-const STEADY_MS = 17.5;
+/**
+ * "At vsync" (D-view-4): a window's frame-time median within 5% + 0.3 ms of the display's frame
+ * interval, measured as the lowest window median seen (rAF can't run faster than the display).
+ */
+const VSYNC_TOLERANCE = 0.05;
+const VSYNC_SLACK_MS = 0.3;
 /** Untrusted timer: steady windows in a row before a trial up-step, and steady windows that keep it. */
 const TRIAL_STEADY_WINDOWS = 4;
 const TRIAL_PROBATION_WINDOWS = 2;
@@ -126,7 +130,8 @@ const TRIAL_PROBATION_WINDOWS = 2;
  * - Without one, rAF time is vsync-limited and can't show headroom: it only steps down
  *   (p50 over 20 ms); it never steps up.
  * - With an untrusted one (gpuPlausible failed: the M1), it steps down the same way, and makes a
- *   trial up-step after the hold-off and 4 windows at vsync (p50 ≤ 17.5 ms). The trial is kept if
+ *   trial up-step after the hold-off and 4 windows at vsync (median within 5% + 0.3 ms of the
+ *   display's frame interval, the lowest window median seen: 50, 60, 120 Hz alike). The trial is kept if
  *   the 2 windows after its cooldown stay at vsync; otherwise it steps back down at once and the
  *   hold-off doubles, so trials stay few (D-view-4).
  * Up-steps are held off after any down-step; the hold-off doubles each time an up-step is
@@ -163,6 +168,8 @@ export class ResolutionLadder {
   /** Steady windows in a row (untrusted timer), and windows a trial up-step still has to pass. */
   private steady = 0;
   private probation = 0;
+  /** The display's frame interval as measured: the lowest window median so far. */
+  private vsyncMs = Infinity;
   /** Trial up-steps this session (untrusted timer): taken, kept after probation, reverted. */
   readonly trials = { taken: 0, kept: 0, reverted: 0 };
   onChange: (() => void) | null = null;
@@ -258,7 +265,8 @@ export class ResolutionLadder {
     }
     if (this.gpuUntrusted) gpuP50 = null;
     this.clearWindow(now);
-    const steady = rafP50 <= STEADY_MS;
+    this.vsyncMs = Math.min(this.vsyncMs, rafP50);
+    const steady = rafP50 <= this.vsyncMs * (1 + VSYNC_TOLERANCE) + VSYNC_SLACK_MS;
     if (this.probation > 0) {
       // After a trial up-step: kept only while the windows stay at vsync.
       this.slow = this.steady = 0;
