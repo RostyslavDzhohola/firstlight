@@ -1093,14 +1093,19 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   menus over `?cpuslow=8&notimer` frames, p50 50 ms): the ladder walked 0 → 3 before, stays at 0
   after. With an untrusted GPU timer (the M1: its readings sum overlapping passes above the frame
   interval) the ladder also steps back up: after the up-step hold-off (30 s after a down-step,
-  forced ones included) and 4 windows at vsync (frame-time median ≤ 17.5 ms) it makes a trial
-  up-step, kept if the 2 windows after its 4 s cooldown stay at vsync; otherwise it steps back down
-  at once and the hold-off doubles (up to 480 s). Never while suspended; a trusted timer and no
-  timer keep their rules (no timer: never up). A simulated 10-minute capped 60 Hz run: 2 trials, both
+  forced ones included) and 4 windows at vsync it makes a trial up-step, kept if the 2 windows
+  after its 4 s cooldown stay at vsync; otherwise it steps back down at once and the hold-off
+  doubles (up to 480 s), also when a menu paused the trial past the hold-off. "At vsync" is
+  measured, not assumed: a window median within 5% + 0.3 ms of the display's frame interval, the
+  lowest window median seen (50, 60 and 120 Hz alike; 60 fps on a 120 Hz display is not at vsync).
+  Never while suspended; a trusted timer and no timer keep their rules (no timer: never up). A simulated 10-minute capped 60 Hz run: 2 trials, both
   kept, from rung 2 when every rung holds vsync; 4 trials, each reverted within 4 s (gaps 64, 124,
   245 s), when full resolution misses vsync. J1.7, real WebGL2 on the M1 (headless, rAF capped at
   60 Hz, timer marked untrusted, the ladder's clock at 10× for 60 s = 10 ladder-minutes): 2 trials,
-  both kept, frames p50 16.7 ms, no blank frame. Builds on D-view-3 and D-controls-3. Why: the
+  both kept, frames p50 16.7 ms, no blank frame. One real-clock 10-minute run of the same journey
+  (E2E_LADDER_CLOCK=1, E2E_LADDER_SECONDS=600, 2026-10-18): 2 trials, 2 kept, 0 reverted (rung
+  2 → 1 at 30.3 s, → 0 at 44.7 s, then no trial for the rest), p50 16.7 ms over the last 4096
+  frames, no blank frame. Builds on D-view-3 and D-controls-3. Why: the
   ladder counted the blurred menu's slow frames and reached its floor ~3.5 s after the owner opened
   the menu (0.93 → 0.75, ~41 fps), and with the M1's untrusted timer it could never climb back, so
   the rest of the session stayed blurry (spec #17).
