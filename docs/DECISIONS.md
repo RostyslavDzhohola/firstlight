@@ -1081,3 +1081,5 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   the GPU when its adapter never answers, so a throwaway WebGL2 context (lost straight after) reads
   it, only when there is a record to check or one to write. Replaces the tab-session memory. Why:
   every new tab or visit on the owner's M1 waited the full 8 s before falling back (#24, spec #18).
+  J1.4 (headless Chromium on the M1, an adapter that never answers): navigation to renderer up
+  9.2 s on the first visit, 0.55 s on the second, 8.4 s with `?webgpu`.
