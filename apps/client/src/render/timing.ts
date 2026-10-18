@@ -265,7 +265,7 @@ export class ResolutionLadder {
       if (!steady) {
         this.probation = 0;
         this.trials.reverted++;
-        this.stepDown(now);
+        this.stepDown(now, true);
       } else if (--this.probation === 0) this.trials.kept++;
       return;
     }
@@ -305,11 +305,12 @@ export class ResolutionLadder {
     }
   }
 
-  private stepDown(now: number) {
+  /** `failedTrial`: a trial up-step's probation failed (however long a menu paused it). */
+  private stepDown(now: number, failedTrial = false) {
     this.index++;
     this.cooldownUntil = now + 3000;
     // An up-step that didn't hold: back off twice as long next time.
-    if (now - this.lastUpAt < this.upHold) this.upHold = Math.min(UP_HOLD_MAX, this.upHold * 2);
+    if (failedTrial || now - this.lastUpAt < this.upHold) this.upHold = Math.min(UP_HOLD_MAX, this.upHold * 2);
     this.noUpUntil = now + this.upHold;
     this.steady = 0;
     this.onChange?.();

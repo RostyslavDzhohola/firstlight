@@ -414,6 +414,23 @@ describe("trial up-steps with an untrusted GPU timer (D-view-4)", () => {
     expect(ups[0]! - forcedAt).toBeGreaterThanOrEqual(30_000);
   });
 
+  it("doubles the hold-off when a trial fails after a long pause under the menu", () => {
+    // Trial up, the menu opens for longer than the hold-off, then slow windows after it.
+    const { l, clock, ups, downs } = untrustedAt(1);
+    while (ups.length === 0 && clock.t < 120_000) run(l, clock, 0.05, () => 16.7);
+    expect(ups).toHaveLength(1);
+    expect(l.trials.kept, "still on probation when the menu opens").toBe(0);
+    l.setSuspended(true);
+    run(l, clock, 45, () => 16.7);
+    l.setSuspended(false);
+    while (downs.length === 0 && clock.t < ups[0]! + 120_000) run(l, clock, 0.05, (rung) => (rung === 0 ? 22 : 16.7));
+    expect(l.trials.reverted).toBe(1);
+    // The next trial waits twice the first hold-off (60 s), not 30 s again.
+    run(l, clock, 300, (rung) => (rung === 0 ? 22 : 16.7));
+    expect(ups.length).toBeGreaterThanOrEqual(2);
+    expect(ups[1]! - downs[0]!).toBeGreaterThanOrEqual(60_000);
+  });
+
   it("with a trusted timer, vsync-steady frames alone never step up", () => {
     const l = new ResolutionLadder();
     l.hasGpuTimer = true;
