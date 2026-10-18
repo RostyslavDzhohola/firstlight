@@ -11,8 +11,8 @@
 // then three's own query runs on an idle queue, and so do the uniform lookups that follow a completed
 // link. Fences are read without blocking (Chrome answers getSyncParameter from shared memory; the
 // first-draw pacer relies on that too). It also notes how long each program took from its link to the
-// first poll that found it complete: a quick link means a cached program, the warm-up's pricing uses
-// it. gpuIdle() waits for everything queued so far the same way, polling once a frame.
+// first poll that found it complete, counted from its fence: a quick link means a cached program,
+// the warm-up's pricing uses it. gpuIdle() waits for everything queued so far the same way, polling once a frame.
 // Installed for the warm-up only; `?syncpoll` keeps three's own polls.
 
 import { glFence, type FenceGL } from "./parallelCompile.ts";
@@ -21,11 +21,13 @@ import { glFence, type FenceGL } from "./parallelCompile.ts";
 export const COMPLETION_STATUS_KHR = 0x91b1;
 
 /**
- * A link that completed within this (ms, to the first poll that found it done) found its program
- * cached, and so very likely its Metal pipeline too: the warm-up prices its first draw at the warm
- * rate (#39). Polls run once a frame, so this is a few frames.
+ * A link that completed within this (ms from when the GPU process reached it, its fence, to the first
+ * poll that found it done) found its program cached, and so very likely its Metal pipeline too: the
+ * warm-up prices its first draw at the warm rate (#39). A cached program is done at its first poll;
+ * a cold one compiles for 100 ms or more. Measured from the fence, not the linkProgram call, so the
+ * queue of other work ahead of it in the GPU process doesn't count.
  */
-export const FAST_LINK_MS = 60;
+export const FAST_LINK_MS = 30;
 
 /** Whether a link time says the program was cached (null: never seen: cold). */
 export function warmLink(ms: number | null): boolean {
@@ -41,7 +43,7 @@ export interface PollGL extends FenceGL {
 export interface StatusPollGuard {
   /** False without a WebGL2 context (WebGPU): nothing wrapped. */
   readonly active: boolean;
-  /** ms from `program`'s linkProgram to the first poll that found it complete (null: not yet, or linked before the guard). */
+  /** ms from when the GPU process reached `program`'s link (its fence) to the first poll that found it complete (null: not yet, or linked before the guard). */
   linkMs(program: object): number | null;
   /** Polls answered locally so far (round trips saved). */
   answered(): number;
@@ -52,6 +54,8 @@ export interface StatusPollGuard {
 interface Link {
   at: number;
   fence: (() => boolean) | null;
+  /** When a poll first found the fence signalled (the GPU process had reached the link). */
+  fenceAt: number | null;
   doneAt: number | null;
 }
 
@@ -70,12 +74,14 @@ export function guardStatusPolls(gl: PollGL | null | undefined, busy: () => bool
   const poll = gl.getProgramParameter;
   gl.linkProgram = function (this: PollGL, program: WebGLProgram) {
     link.call(this, program);
-    links.set(program as object, { at: now(), fence: glFence(gl), doneAt: null });
+    links.set(program as object, { at: now(), fence: glFence(gl), fenceAt: null, doneAt: null });
   };
   gl.getProgramParameter = function (this: PollGL, program: WebGLProgram, pname: number) {
     if (pname !== COMPLETION_STATUS_KHR) return poll.call(this, program, pname);
     const l = links.get(program as object);
-    if ((l?.fence && !l.fence()) || busy()) {
+    const reached = !l?.fence || l.fence();
+    if (l && reached && l.fenceAt === null) l.fenceAt = now();
+    if (!reached || busy()) {
       answered++;
       return false; // the GPU process still has work queued: asking would wait for all of it
     }
@@ -88,7 +94,7 @@ export function guardStatusPolls(gl: PollGL | null | undefined, busy: () => bool
     active: true,
     linkMs(program) {
       const l = links.get(program);
-      return l?.doneAt != null ? l.doneAt - l.at : null;
+      return l?.doneAt != null ? l.doneAt - (l.fenceAt ?? l.at) : null;
     },
     answered: () => answered,
     release() {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { COMPLETION_STATUS_KHR, gpuIdle, guardStatusPolls, type PollGL } from "./syncPoll.ts";
+import { COMPLETION_STATUS_KHR, FAST_LINK_MS, gpuIdle, guardStatusPolls, warmLink, type PollGL } from "./syncPoll.ts";
 
 /**
  * A WebGL2 context stand-in: programs link in the GPU process (complete when `linked` says so), and
@@ -49,8 +49,27 @@ describe("guardStatusPolls (never ask the GPU process a synchronous question whi
     clock = 90;
     expect(f.gl.getProgramParameter(prog, COMPLETION_STATUS_KHR)).toBe(true);
     expect(f.calls.filter((c) => c.startsWith("getProgramParameter"))).toHaveLength(2);
-    expect(g.linkMs(prog)).toBe(90); // link to the first poll that found it complete
+    // from when the GPU process reached the link (its fence) to the first poll that found it complete:
+    // the queue ahead of it in the GPU process doesn't count
+    expect(g.linkMs(prog)).toBe(50);
     expect(g.answered()).toBe(1);
+    g.release();
+  });
+
+  it("a cached program is complete at its first poll after the fence: 0 ms, however long the queue before it", () => {
+    const f = fakeGl();
+    let clock = 0;
+    const g = guardStatusPolls(f.gl, () => false, () => clock);
+    const prog = {};
+    f.gl.linkProgram(prog);
+    clock = 3000; // a long queue in the GPU process ahead of this link
+    f.fences[0]!.signalled = true;
+    f.linked.add(prog); // the program binary came from the cache
+    expect(f.gl.getProgramParameter(prog, COMPLETION_STATUS_KHR)).toBe(true);
+    expect(g.linkMs(prog)).toBe(0);
+    expect(warmLink(g.linkMs(prog))).toBe(true);
+    expect(warmLink(FAST_LINK_MS + 1)).toBe(false);
+    expect(warmLink(null)).toBe(false);
     g.release();
   });
 
