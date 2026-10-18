@@ -60,13 +60,13 @@ const stalls = <T>(player: Player, fn: (s: Stalls) => T | Promise<T>): Promise<T
 
 /**
  * "A small share of the screen" for the awning, in any view sampled (round and under the stall,
- * looking every way): from 2.6 m, or under its overhang at the counter, an outpost's 3.9 × 2.6 m
- * awning legitimately covers up to a quarter of a view (24 % at Arcadia's counter, review round);
- * the camera inside Juno's stall had the stall over 40 %.
+ * looking every way): at most a third. Looking down over an outpost stall's roof from 2.6 m, or up
+ * under its overhang at the counter, its 4 × 2.5 m awning or roof legitimately covers up to 25–30 %
+ * of a view (review round); the camera inside Juno's stall had the stall over 40 %.
  */
-const AWNING_MAX = 0.3;
-/** The whole stall (awning and the rest) with the player turned from it: under the overhang, looking up, 22 % (review round). */
-const TURNED_AWAY_MAX = 0.25;
+const AWNING_MAX = 1 / 3;
+/** The whole stall (awning and the rest) with the player turned from it: the camera looking down over its roof, 29 % (review round). */
+const TURNED_AWAY_MAX = 0.3;
 
 const SHOPS: Record<string, string> = { portus: "Portus Exchange", arcadia: "Dawnpad Trading Post", hollowmere: "Lanternfall Stall", meridian: "Waystation Supply" };
 
@@ -101,7 +101,9 @@ for (const body of ["portus", "arcadia", "hollowmere", "meridian"] as const) {
     test.setTimeout(900_000);
     mkdirSync(SHOTS, { recursive: true });
     mkdirSync(NUMBERS, { recursive: true });
-    await player.joinAsDevAdmin({ starter: "Hexwick", body });
+    // Shares are measured without bloom (a glowing strip's halo isn't the awning) and without weather
+    // (a lightning flash between two frames of a measure reads as cover); the camera is the same.
+    await player.joinAsDevAdmin({ starter: "Hexwick", body, extra: { nobloom: true, noweather: true } });
     await player.waitInWorld(180_000, body);
     // The stall's faded material (an outpost's own, D-view-5) compiled behind the loading screen.
     const shaders = await player.shaderWatchClosed();
