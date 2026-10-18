@@ -560,18 +560,9 @@ export async function warmup(
     if (frameAt) pacer.tick(now, now - frameAt);
     frameAt = now;
   };
-  // WebGL2: while a first-draw batch is in flight the warm-up draws nothing and only polls its fence
-  // (#39): a frame drawn then waits in the GPU process behind the Metal pipeline build, while with
-  // none the compositor keeps presenting the loader. `?busydraw` draws on.
-  const holdWhileBusy = !!gate && !flags.has("busydraw");
   const next = async () => {
     await nextFrame();
     observe(performance.now(), (gate?.granted() ?? 0) - grantedAt, cpu, allowed);
-    while (holdWhileBusy && pacer.inFlight()) {
-      await nextFrame();
-      buildsAt = stats.total;
-      observe(performance.now(), 0, 0, 0);
-    }
   };
   const programs = () => (renderer.info as unknown as { memory?: { programs?: number } }).memory?.programs ?? 0;
   const stages0 = programs();
