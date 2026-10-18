@@ -6,6 +6,7 @@ import * as THREE from "three/webgpu";
 import { color, float, mix, mx_noise_float, smoothstep, time, uv, vec2 } from "three/tsl";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { PALETTES } from "./material.ts";
+import { applyOccluderFadeGated } from "../occluderFade.ts";
 
 type MatKey = "metal" | "metalLight" | "brass" | "wood" | "leather" | "cord" | "ivory" | "feather" | "glass" | "accent" | "blade";
 
@@ -48,6 +49,8 @@ function mat(key: MatKey, palette: number): THREE.Material {
       break;
     }
   }
+  // The own avatar's held item dissolves with it near the camera (D-view-5); others' never do.
+  applyOccluderFadeGated(m as THREE.NodeMaterial);
   mats.set(k, m!);
   return m!;
 }
@@ -72,6 +75,7 @@ function flameMaterial(): THREE.MeshBasicNodeMaterial {
   // Additive without depth writes looks the same in one pass; the back-then-front split of a
   // double-sided transparent material was a second build the warm-up didn't keep (?avatars&warmcheck).
   m.forceSinglePass = true;
+  applyOccluderFadeGated(m);
   flameMat = m;
   return m;
 }

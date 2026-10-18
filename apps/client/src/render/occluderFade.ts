@@ -11,7 +11,7 @@
 // avatars' shared materials take a gated copy: one per-object uniform lets only the quest NPCs fade.
 
 import * as THREE from "three/webgpu";
-import { bool, cameraPosition, dot, float, interleavedGradientNoise, length, max, normalize, positionWorld, renderGroup, screenCoordinate, smoothstep, uniform } from "three/tsl";
+import { bool, cameraPosition, dot, float, interleavedGradientNoise, length, max, normalize, positionWorld, renderGroup, screenCoordinate, select, smoothstep, uniform } from "three/tsl";
 
 /** Without a skeleton (the capsule stand-in): the chest is this far above the rendered feet (m). */
 export const FADE_CHEST = 1.0;
@@ -23,6 +23,15 @@ export const FADE_AIM_RADIUS = 0.45;
 export const FADE_DEPTH_MARGIN = 0.3;
 /** Fraction of the cone (from its centre) that is fully cleared; the rest is a soft dither ramp. */
 export const FADE_CORE = 0.6;
+/**
+ * The local player's own avatar (#22, D-view-5): fully there with the camera beyond OWN_FADE_FAR (m)
+ * of its chest and head, fully dissolved within OWN_FADE_NEAR. A wall or a stall behind the player
+ * pins the camera to the head, where the own clothes, hands or face filled the view.
+ */
+export const OWN_FADE_NEAR = 0.5;
+export const OWN_FADE_FAR = 1.2;
+/** The head, for the own-avatar fade: this far above the chest along local up (m). */
+export const OWN_HEAD_ABOVE_CHEST = 0.5;
 
 export const occluderUniforms = {
   /** World position of the player's chest. */
@@ -39,6 +48,8 @@ export const occluderUniforms = {
   cosAimInner: uniform(0.998).setGroup(renderGroup),
   /** 0 = off (photo mode, bench, ?nofade), 1 = on. */
   strength: uniform(0).setGroup(renderGroup),
+  /** How far the local player's own avatar is dissolved (ownFade of the camera's distance), 0 … 1. */
+  own: uniform(0).setGroup(renderGroup),
 };
 
 export interface FadeParams {
@@ -67,6 +78,20 @@ const smooth = (e0: number, e1: number, x: number) => {
   return t * t * (3 - 2 * t);
 };
 
+/** How far the own avatar dissolves with the camera `d` m from its chest and head (0 whole … 1 gone). */
+export function ownFade(d: number): number {
+  return 1 - smooth(OWN_FADE_NEAR, OWN_FADE_FAR, d);
+}
+
+const _seg = new THREE.Vector3();
+/** ownFade for a camera at `cam`: its distance to the segment from the chest up to the head. */
+export function ownFadeFor(cam: THREE.Vector3, chest: THREE.Vector3): number {
+  const up = _seg.copy(chest).normalize();
+  const along = Math.min(OWN_HEAD_ABOVE_CHEST, Math.max(0, (cam.x - chest.x) * up.x + (cam.y - chest.y) * up.y + (cam.z - chest.z) * up.z));
+  const d = Math.hypot(cam.x - chest.x - up.x * along, cam.y - chest.y - up.y * along, cam.z - chest.z - up.z * along);
+  return ownFade(d);
+}
+
 /**
  * The fade (0 solid … 1 gone) of a fragment at `p`, for a camera at `cam` aiming along unit `aim` at
  * `chest`: the same formula occluderKeep() builds in TSL, for tests and tools. Keep the two in step.
@@ -84,16 +109,25 @@ export function fadeAmount(cam: THREE.Vector3, aim: THREE.Vector3, chest: THREE.
 }
 
 /**
- * Does `o` fade under a gated material (applyOccluderFadeGated)? It does when it or a parent has
- * `userData.occluderFade` set: the quest NPCs (keepers, guides) do, players never (#22, D-view-5).
+ * How `o` fades under a gated material (applyOccluderFadeGated), from it or a parent: 2 for the local
+ * player's own avatar and what it holds and wears (`userData.ownAvatar`: near the camera, ownFade),
+ * 1 for the quest NPCs (`userData.occluderFade`: in the cone, like props), 0 for other players (never).
  */
-export function fadesAsOccluder(o: THREE.Object3D | null): boolean {
-  for (let p = o; p; p = p.parent) if (p.userData.occluderFade) return true;
-  return false;
+export function fadeGate(o: THREE.Object3D | null): 0 | 1 | 2 {
+  for (let p = o; p; p = p.parent) {
+    if (p.userData.ownAvatar) return 2;
+    if (p.userData.occluderFade) return 1;
+  }
+  return 0;
 }
 
-/** 1 for an object that fades (fadesAsOccluder), else 0: set per drawn object. */
-const gate = uniform(0).onObjectUpdate(({ object }) => (fadesAsOccluder(object as THREE.Object3D) ? 1 : 0));
+/** Does `o` fade like an occluder (fadeGate 1)? */
+export function fadesAsOccluder(o: THREE.Object3D | null): boolean {
+  return fadeGate(o) === 1;
+}
+
+/** fadeGate of the drawn object: set per object. */
+const gate = uniform(0).onObjectUpdate(({ object }) => fadeGate(object as THREE.Object3D));
 
 let maskNode: THREE.Node | null = null;
 let gatedNode: THREE.Node | null = null;
@@ -120,7 +154,9 @@ function keepNode(gated: boolean): THREE.Node {
   // and the chest point different ways, and depth along the chest would let the aim cone reach far
   // past the player (Codex review).
   const front = smoothstep(float(FADE_DEPTH_MARGIN), float(FADE_DEPTH_MARGIN + 0.5), u.depth.sub(dist));
-  const fade = max(inPlayer, inAim).mul(front).mul(gated ? u.strength.mul(gate) : u.strength);
+  const cone = max(inPlayer, inAim).mul(front);
+  // Gated: 0 never, 1 the cone (quest NPCs), 2 the own avatar's near-camera fade (all of it at once).
+  const fade = (gated ? select(gate.greaterThan(1.5), u.own, cone.mul(gate)) : cone).mul(u.strength);
   // Stable screen-door threshold (no time term: a still view doesn't shimmer).
   const noise = interleavedGradientNoise(screenCoordinate.xy);
   return noise.greaterThanEqual(fade) as unknown as THREE.Node;
@@ -166,8 +202,10 @@ export function occluderFadeOf(o: THREE.Object3D, cam: THREE.Vector3, aim: THREE
   const mats = (o as THREE.Mesh).material;
   const m = Array.isArray(mats) ? mats[0] : mats;
   const how = m ? fading.get(m) : undefined;
-  if (!how || (how === "gated" && !fadesAsOccluder(o))) return 0;
-  return fadeAmount(cam, aim, chest, p);
+  if (!how) return 0;
+  const g = how === "gated" ? fadeGate(o) : 1;
+  if (g === 2) return ownFadeFor(cam, chest);
+  return g === 1 ? fadeAmount(cam, aim, chest, p) : 0;
 }
 
 const _t = new THREE.Vector3();
@@ -197,6 +235,7 @@ export function updateOccluderFade(camera: THREE.Camera, chest: THREE.Vector3 | 
   const u = occluderUniforms;
   if (!active || !chest) {
     u.strength.value = 0;
+    u.own.value = 0;
     return;
   }
   _t.copy(chest);
@@ -210,5 +249,6 @@ export function updateOccluderFade(camera: THREE.Camera, chest: THREE.Vector3 | 
   u.cosAimInner.value = _p.cosAimInner;
   camera.getWorldDirection(_aim);
   u.aim.value.copy(_aim);
+  u.own.value = ownFadeFor(_c, _t);
   u.strength.value = 1;
 }

@@ -6,6 +6,7 @@
 // backpack share the back socket, so each socket gets one group holding everything worn there.
 
 import * as THREE from "three/webgpu";
+import { applyOccluderFadeGated } from "./occluderFade.ts";
 import { COSMETIC_BY_ID, COSMETICS, COSMETIC_SOCKET, type CosmeticSlot, type Socket } from "@firstlight/shared/content/items";
 import { keptSamples } from "./warmup.ts";
 import { disposeTree } from "./dispose.ts";
@@ -36,7 +37,7 @@ function m(color: number, emissive = 0, opacity = 1, metal = 0.1, double = false
       s.emissive = new THREE.Color(color);
       s.emissiveIntensity = emissive;
     }
-    x = s;
+    x = applyOccluderFadeGated(s); // worn by the own avatar, dissolves with it near the camera (D-view-5)
     mats.set(key, x);
     sharedMats.add(x);
   }
@@ -175,7 +176,7 @@ export function buildCosmetic(id: string, anims: Anim[]): THREE.Object3D | null 
       break;
     case "static_cloak": {
       const tex = staticTexture();
-      const mat = new THREE.MeshBasicNodeMaterial({ map: tex, side: THREE.DoubleSide });
+      const mat = applyOccluderFadeGated(new THREE.MeshBasicNodeMaterial({ map: tex, side: THREE.DoubleSide }));
       const c = cape(0, 0, mat);
       anims.push({ obj: c, kind: "static", tex });
       break;
