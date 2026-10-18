@@ -1069,3 +1069,15 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   runs of long frames with that in mind (a control page, or a rerun). Why: cutting bloom mips or
   shadow updates would cost visible quality for stalls the evidence doesn't tie to the game.
 - **D-home-7 (2026-10-16):** DataFast is live with the standard script exactly as DataFast issued it (site id `dfid_NA56rn0p8nPJYi59xnBYW`, `script.js`, so the home page's note says DataFast sets cookies). An inline guard placed before it sets DataFast's own opt-out flag (`localStorage.datafast_ignore`) for automated browsers (`navigator.webdriver`) and test URLs (`?e2e`, `?bench`, `?offline`), and the Playwright fixtures set the same flag, so journeys and smoke runs never count as visits. Why: Grok Bot set up the site for the owner, and test traffic shouldn't pollute the analytics.
+- **D-renderer-1 (2026-10-18):** a WebGPU start that times out or fails is remembered on the device,
+  not just for the tab: `localStorage["fl.gfx.webgpu-failed"]` holds `{v, reason, at, browser, gpu}`
+  (reason timeout/error, `Date.now()`, the browser's major version parsed from the user agent such
+  as `Chrome/141`, and the GPU name), nothing else, never sent anywhere. Later visits skip WebGPU
+  while the record is under 7 days old and the browser version and GPU still match; otherwise
+  WebGPU is tried again with the same 8 s deadline. A WebGPU start that works clears the record;
+  `?webgpu` clears it and tries (a new failure writes a fresh record); `?webgl` still forces WebGL2
+  and leaves it alone; storage that is missing or throws means no memory. The GPU name is the
+  unmasked WebGL2 renderer string, the same one `renderer.ts` reports on WebGL2: WebGPU can't name
+  the GPU when its adapter never answers, so a throwaway WebGL2 context (lost straight after) reads
+  it, only when there is a record to check or one to write. Replaces the tab-session memory. Why:
+  every new tab or visit on the owner's M1 waited the full 8 s before falling back (#24, spec #18).

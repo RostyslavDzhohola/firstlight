@@ -96,7 +96,8 @@ export function isSoftwareRenderer(name: string): boolean {
 }
 
 export async function createRenderer(container: HTMLElement): Promise<RenderCtx> {
-  // WebGPU gets a deadline; past it (or on a rejected init) a fresh WebGL2 renderer starts instead.
+  // WebGPU gets a deadline; past it (or on a rejected init) a fresh WebGL2 renderer starts instead,
+  // and later visits on this device skip WebGPU for a while (rendererStart.ts, D-renderer-1).
   const { renderer } = await startRenderer({
     // A new options object per renderer: three writes its WebGL fallback hook into it.
     create: (forceWebGL) =>
@@ -107,6 +108,7 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
         trackTimestamp: !flags.has("notimer"),
       } as ConstructorParameters<typeof THREE.WebGPURenderer>[0]),
     forceWebGL: flags.has("webgl"),
+    forceWebGPU: flags.has("webgpu"),
   });
   const webgpu = !!(renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend;
   const tm = flags.get("tonemap");
