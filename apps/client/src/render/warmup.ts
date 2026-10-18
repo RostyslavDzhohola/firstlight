@@ -16,10 +16,11 @@ import { flags } from "../config.ts";
 import { beginManualFrame, type TimestampSource } from "./timing.ts";
 import { castsLeanShadow, leanShadowsOn } from "./leanShadow.ts";
 import { glSlowCalls, setGlPhase } from "./glTrace.ts";
+import { gpuIdle, guardStatusPolls, warmLink, type PollGL } from "./syncPoll.ts";
 import type { FirstDrawBatch, FirstDrawCensus, FirstDrawItem, SlowFrame, WarmupPhase, WarmupReport } from "./warmupReport.ts";
 import {
-  deferPipelines, FirstDrawPacer, gateFirstDraws, glFence, newStageCost, OLD_PACER, PACER, pipelineCost,
-  type DeferRenderer, type FenceGL, type GateRenderer, type Grant,
+  deferPipelines, FirstDrawPacer, gateFirstDraws, glFence, LONE_COST, newStageCost, OLD_PACER, PACER, pipelineCost,
+  type DeferRenderer, type FenceGL, type GateRenderer, type Grant, type Warmth,
 } from "./parallelCompile.ts";
 
 export type { FirstDrawBatch, FirstDrawCensus, FirstDrawItem, SlowFrame, WarmupPhase, WarmupReport } from "./warmupReport.ts";
@@ -34,8 +35,8 @@ export function fnv1a(s: string): number {
   return h >>> 0;
 }
 
-/** `?warmdiag`: what a first draw was (material, object, GLSL sizes and hashes, its price), for the batch log. */
-function describeFirstDraw(renderObject: unknown, pipeline: object, grant: Grant): FirstDrawItem {
+/** `?warmdiag`: what a first draw was (material, object, GLSL sizes and hashes, its price, its link), for the batch log. */
+function describeFirstDraw(renderObject: unknown, pipeline: object, grant: Grant, link: number | null): FirstDrawItem {
   const r = renderObject as {
     material?: { type?: string; name?: string; isShadowPassMaterial?: boolean };
     object?: { name?: string; type?: string; parent?: { name?: string } | null };
@@ -56,6 +57,36 @@ function describeFirstDraw(renderObject: unknown, pipeline: object, grant: Grant
     newChars: grant.newChars,
     skinned: vs.includes("skinIndex"),
     shadow: r.material?.isShadowPassMaterial === true,
+    link: link === null ? null : Math.round(link),
+    warm: warmLink(link),
+  };
+}
+
+/** Main-thread long tasks from now until the returned stop (null there: the browser can't observe them). */
+function observeLongTasks(): () => { count: number; max: number; over250: number } | null {
+  type Entry = { duration: number };
+  type Observer = { observe(o: object): void; disconnect(): void; takeRecords?(): Entry[] };
+  const PO = (globalThis as { PerformanceObserver?: { new (cb: (l: { getEntries(): Entry[] }) => void): Observer; supportedEntryTypes?: readonly string[] } }).PerformanceObserver;
+  if (!PO?.supportedEntryTypes?.includes("longtask")) return () => null;
+  const s = { count: 0, max: 0, over250: 0 };
+  const add = (es: Entry[]) => {
+    for (const e of es) {
+      s.count++;
+      s.max = Math.max(s.max, Math.round(e.duration));
+      if (e.duration > 250) s.over250++;
+    }
+  };
+  let obs: Observer;
+  try {
+    obs = new PO((l) => add(l.getEntries()));
+    obs.observe({ type: "longtask" });
+  } catch {
+    return () => null;
+  }
+  return () => {
+    add(obs.takeRecords?.() ?? []);
+    obs.disconnect();
+    return s;
   };
 }
 
@@ -370,7 +401,7 @@ export async function warmup(
   let framesDone = 0;
   const bar = new MovingProgress();
   let lastShown = "";
-  let compile: WarmupReport["phases"]["compile"] = { ms: 0, builds: 0, items: 0, wait: 0 };
+  let compile: WarmupReport["phases"]["compile"] = { ms: 0, builds: 0, items: 0, wait: 0, idle: 0 };
   let compute: WarmupReport["phases"]["compute"] = { ms: 0, builds: 0, nodes: 0 };
   let shadows: WarmupReport["phases"]["shadows"] = { ms: 0, builds: 0, frames: 0, predicted: 0, wait: 0 };
   let realFrames = 0;
@@ -389,12 +420,29 @@ export async function warmup(
   let frameGrants: FirstDrawItem[] = [];
   const batchLog: FirstDrawBatch[] = [];
   let sentBatches = 0;
+  // Each program judged by its own link (#39): one that linked quickly was cached, and its first draw is
+  // priced at the warm rate; batches hold one class, the ceiling holds cold-priced units.
+  const backendData = (renderer as unknown as { backend?: { get?(o: object): { programGPU?: object } | undefined } }).backend;
+  const linkMsOf = (p: object): number | null => {
+    const prog = syncGuard?.active ? backendData?.get?.(p)?.programGPU : undefined;
+    return prog ? syncGuard!.linkMs(prog) : null;
+  };
+  const classOf = (p: object): Warmth => (warmLink(linkMsOf(p)) ? "warm" : "cold");
   const gated = deferred?.active && !ctx.webgpu
-    ? gateFirstDraws(renderer as unknown as GateRenderer, diag ? (ro, p, g) => frameGrants.push(describeFirstDraw(ro, p, g)) : undefined, oldPacer ? pipelineCost : newStageCost)
+    ? gateFirstDraws(
+      renderer as unknown as GateRenderer,
+      diag ? (ro, p, g) => frameGrants.push(describeFirstDraw(ro, p, g, linkMsOf(p))) : undefined,
+      oldPacer ? pipelineCost : newStageCost,
+      oldPacer ? {} : { classOf, price: (u, c) => pacer.price(u, c), loneCost: LONE_COST },
+    )
     : null;
   const gate = gated?.active ? gated : null;
   const pacer = new FirstDrawPacer(diag ? (ms, _used, tag) => void ((tag as FirstDrawBatch).ms = Math.round(ms)) : undefined, oldPacer ? OLD_PACER : PACER);
   const gl = (renderer as unknown as { backend?: { gl?: FenceGL } }).backend?.gl ?? null;
+  // WebGL2: never ask the GPU process a synchronous question while it is busy (#39): link polls are
+  // answered locally until the link's fence has signalled and no first-draw batch is in flight, and the
+  // compile starts once what is already queued has run. `?syncpoll` keeps three's own polls.
+  const syncGuard = deferred?.active && !ctx.webgpu && !flags.has("syncpoll") ? guardStatusPolls(gl as PollGL | null, () => pacer.inFlight()) : null;
   let frameAt = 0;
   // Progress. The label counts GPU programs that have compiled, of those known so far (without the
   // deferral every build compiles before the next, so builds are programs). The bar blends all the
@@ -426,6 +474,7 @@ export async function warmup(
   };
   let grantedAt = 0;
   let costAt = 0;
+  let unitsAt = 0;
   let buildsAt = 0;
   let cpu = 0;
   let allowed = 0;
@@ -433,6 +482,13 @@ export async function warmup(
   const slow: SlowFrame[] = [];
   const r1 = (x: number) => Math.round(x * 10) / 10;
   const pendingLinks = () => deferred?.pending() ?? 0;
+  /** The longest gap between animation frames in the warm-up (every phase) and those over 250 ms. */
+  const gaps = { max: 0, over250: 0 };
+  const noteGap = (ms: number) => {
+    gaps.max = Math.max(gaps.max, r1(ms));
+    if (ms > 250) gaps.over250++;
+  };
+  const stopLongTasks = observeLongTasks();
   /**
    * The compile phase draws nothing itself, so its frames are sampled: each animation frame over
    * 100 ms is recorded until the returned stop is called.
@@ -444,6 +500,7 @@ export async function warmup(
     const sample = () => {
       if (!on) return;
       const now = performance.now();
+      noteGap(now - last);
       if (now - last > 100) {
         slow.push({ phase: "compile", t: r1(now), ms: r1(now - last), cpu: 0, builds: stats.total - builds, firstDraws: 0, budget: 0, inFlight: false, batch: null, pending: pendingLinks() });
       }
@@ -458,6 +515,7 @@ export async function warmup(
   const draw = () => {
     grantedAt = gate?.granted() ?? 0;
     costAt = gate?.cost() ?? 0;
+    unitsAt = gate?.units() ?? 0;
     buildsAt = stats.total;
     const t = performance.now();
     allowed = solo ? Math.min(1, pacer.allowance()) : pacer.allowance(); // budget 1: the first item alone
@@ -480,27 +538,40 @@ export async function warmup(
           const sum = (f: (i: FirstDrawItem) => number) => frameGrants.reduce((n, i) => n + f(i), 0);
           tag = {
             seq: sentBatches, t: r1(end), ms: null, used, chars: sum((i) => i.vs + i.fs), newChars: sum((i) => i.newChars),
-            n: frameGrants.length, skinnedShadow: sum((i) => (i.skinned && i.shadow ? 1 : 0)), pending: pendingLinks(), items: frameGrants,
+            n: frameGrants.length, skinnedShadow: sum((i) => (i.skinned && i.shadow ? 1 : 0)), cls: gate.batchClass() ?? "cold",
+            pending: pendingLinks(), items: frameGrants,
           };
           batchLog.push(tag);
         }
       }
-      pacer.sent(used, end, fence, tag);
+      pacer.sent(used, end, fence, tag, gate.batchClass() ?? "cold", gate.units() - unitsAt);
     }
   };
-  const next = async () => {
-    await nextFrame();
-    const now = performance.now();
-    const firstDraws = (gate?.granted() ?? 0) - grantedAt;
+  /** After a frame: note its gap (and what it was made of, when slow), and settle the batch in flight. */
+  const observe = (now: number, firstDraws: number, cpuMs: number, budget: number) => {
+    if (frameAt) noteGap(now - frameAt);
     if (frameAt && now - frameAt > 100) {
       const inFlight = pacer.inFlight(); // the batch whose GPU work this frame waited on
       slow.push({
-        phase, t: r1(now), ms: r1(now - frameAt), cpu: r1(cpu), builds: stats.total - buildsAt, firstDraws, budget: allowed,
+        phase, t: r1(now), ms: r1(now - frameAt), cpu: r1(cpuMs), builds: stats.total - buildsAt, firstDraws, budget,
         inFlight, batch: inFlight ? sentBatches : null, pending: pendingLinks(),
       });
     }
     if (frameAt) pacer.tick(now, now - frameAt);
     frameAt = now;
+  };
+  // WebGL2: while a first-draw batch is in flight the warm-up draws nothing and only polls its fence
+  // (#39): a frame drawn then waits in the GPU process behind the Metal pipeline build, while with
+  // none the compositor keeps presenting the loader. `?busydraw` draws on.
+  const holdWhileBusy = !!gate && !flags.has("busydraw");
+  const next = async () => {
+    await nextFrame();
+    observe(performance.now(), (gate?.granted() ?? 0) - grantedAt, cpu, allowed);
+    while (holdWhileBusy && pacer.inFlight()) {
+      await nextFrame();
+      buildsAt = stats.total;
+      observe(performance.now(), 0, 0, 0);
+    }
   };
   const programs = () => (renderer.info as unknown as { memory?: { programs?: number } }).memory?.programs ?? 0;
   const stages0 = programs();
@@ -525,6 +596,7 @@ export async function warmup(
     setGlPhase("compile");
     lap();
     stopSampling = sampleFrames();
+    const idle = syncGuard?.active ? await gpuIdle(gl, nextFrame) : 0;
     const onCompile = (e: { loaded: number; total: number }) => {
       items = e.total;
       loaded = e.loaded;
@@ -537,7 +609,7 @@ export async function warmup(
     }
     const compileWait = await compiled();
     stopSampling();
-    compile = { ...lap(), items, wait: compileWait };
+    compile = { ...lap(), items, wait: compileWait, idle: Math.round(idle * 10) / 10 };
     loaded = items;
     // 3. Compute nodes (WebGPU): none yet, so the phase is empty.
     compute = { ...lap(), nodes: 0 };
@@ -590,6 +662,7 @@ export async function warmup(
   } finally {
     stopSampling();
     setGlPhase("play");
+    syncGuard?.release();
     // The settle frame below renders the way play does: every program it needs is ready and drawn.
     gate?.release();
     deferred?.release();
@@ -629,6 +702,8 @@ export async function warmup(
     shaders: stats.total,
     stages: programs() - stages0,
     slow: diag ? slow : [...slow].sort((a, b) => b.ms - a.ms).slice(0, 12),
+    gaps,
+    longTasks: stopLongTasks(),
     firstDraws: { granted: gate?.granted() ?? 0, ...pacer.batches() },
     ...(diag ? { batches: batchLog, census: firstDrawCensus(batchLog) } : {}),
     ...(flags.has("gltrace") ? { gl: [...glSlowCalls()] } : {}),

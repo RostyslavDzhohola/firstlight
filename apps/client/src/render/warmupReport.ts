@@ -32,11 +32,18 @@ export interface WarmupReport {
   census?: FirstDrawCensus;
   /** `?gltrace`: synchronous WebGL calls that blocked over 50 ms this session (render/glTrace.ts). */
   gl?: GlCall[];
+  /** The warm-up's longest gap between animation frames (what the loader shows as a freeze), and how many went over 250 ms. */
+  gaps: { max: number; over250: number };
+  /** Main-thread tasks over 50 ms during it (null: the browser can't observe them). A gap can be the GPU process's, with no long task. */
+  longTasks: { count: number; max: number; over250: number } | null;
   /** WebGL2's paced first draws: how many, in how many fenced batches, and the GPU's time per batch. */
   firstDraws: { granted: number; batches: number; p50: number; max: number };
   phases: {
-    /** compileAsync for the scene pass's context; `items`: the render objects it prepared. */
-    compile: WarmupPhase & { items: number; wait: number };
+    /**
+     * compileAsync for the scene pass's context; `items`: the render objects it prepared; `idle`: ms spent
+     * first waiting (a frame at a time) for the GPU process to finish what was queued (WebGL2, #39).
+     */
+    compile: WarmupPhase & { items: number; wait: number; idle: number };
     /** compileComputeAsync (WebGPU): no compute nodes yet. */
     compute: WarmupPhase & { nodes: number };
     /** Shadow casters joining a few per frame; `predicted`: the builds expected (predictShadowBuilds). */
@@ -91,6 +98,9 @@ export interface FirstDrawItem {
   /** A skinned vertex stage (characters, horses), and drawn in a shadow pass. */
   skinned: boolean;
   shadow: boolean;
+  /** ms from its program's link to the first poll that found it complete (null: not seen), and whether that counts as cached. */
+  link: number | null;
+  warm: boolean;
 }
 
 /** One fenced batch of first draws (`?warmdiag`), sent at `t`; `ms` the GPU's time for it (null: never finished). */
@@ -106,6 +116,8 @@ export interface FirstDrawBatch {
   n: number;
   /** Skinned shadow-pass pipelines in it. */
   skinnedShadow: number;
+  /** Its programs' class: warm (their links said cached) or cold; a batch holds one. */
+  cls: "warm" | "cold";
   /** Programs still compiling (links pending) when it was sent. */
   pending: number;
   items: FirstDrawItem[];

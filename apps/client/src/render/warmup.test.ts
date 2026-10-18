@@ -245,11 +245,17 @@ class FakeDrawPipelines extends FakePipelines {
   }
 }
 
-/** WebGL2 fences that the GPU signals on their second poll. */
+/** WebGL2 fences that the GPU signals on their second poll (`fences`: every one made, for checks). */
 function fakeFenceGl() {
+  const fences: { polls: number }[] = [];
   return {
+    fences,
     SYNC_GPU_COMMANDS_COMPLETE: 1, SYNC_STATUS: 2, SIGNALED: 3,
-    fenceSync: () => ({ polls: 0 }),
+    fenceSync: () => {
+      const f = { polls: 0 };
+      fences.push(f);
+      return f;
+    },
     getSyncParameter: (s: { polls: number }) => (++s.polls >= 2 ? 3 : 0),
     deleteSync() {},
     flush() {},
@@ -405,7 +411,7 @@ describe("warm-up report (per-phase times and shader counts) and progress", () =
       expect(r.label).toBe("arrival");
       expect(r.backend).toBe("webgl2");
       expect(r.tier).toBe("medium");
-      expect(r.phases.compile).toEqual({ ms: 50, builds: 5, items: 5, wait: 0 }); // no three internals: nothing deferred
+      expect(r.phases.compile).toEqual({ ms: 50, builds: 5, items: 5, wait: 0, idle: 0 }); // no three internals: nothing deferred
       expect(r.phases.compute).toEqual({ ms: 0, builds: 0, nodes: 0 }); // no compute nodes yet
       // 6 predicted shadow builds in batches of 4 (nothing deferred here): two frames, the first's build lands here
       expect(r.phases.shadows).toEqual({ ms: 10, builds: 1, frames: 2, predicted: 6, wait: 0 });
@@ -554,6 +560,99 @@ describe("warm-up report (per-phase times and shader counts) and progress", () =
       const r = await warmup(ctx, { frames: 1 });
       release();
       expect(r.gl).toEqual([expect.objectContaining({ name: "getProgramParameter", ms: 1800, phase: "compile" })]);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("WebGL2: waits for the GPU process to go idle before the compile, and answers link polls locally meanwhile (?syncpoll: three's own)", async () => {
+    for (const syncpoll of [false, true]) {
+      vi.spyOn(flags, "has").mockImplementation((n) => syncpoll && n === "syncpoll");
+      const pipelines = new FakeDrawPipelines();
+      const gl = { ...fakeFenceGl(), linkProgram(_p: object) {}, getProgramParameter: vi.fn((_p: object, _pname: number) => true) };
+      try {
+        const ctx = fakeCtx({ items: 2, webgpu: false, shadows: false, pipelines, objects: 2, gl, frameMs: 10 });
+        let polledBeforeCompile: unknown = null;
+        const compile = ctx.renderer.compileAsync.bind(ctx.renderer);
+        (ctx.renderer as { compileAsync: unknown }).compileAsync = (...a: Parameters<typeof compile>) => {
+          // three links a program and polls COMPLETION_STATUS_KHR at once, in the same task
+          const prog = {};
+          gl.linkProgram(prog);
+          polledBeforeCompile = gl.getProgramParameter(prog, 0x91b1);
+          return compile(...a);
+        };
+        const r = await warmup(ctx, { frames: 1 });
+        expect(r.phases.compile.idle).toBe(syncpoll ? 0 : 20); // the drain fence signals on its second poll
+        // ?syncpoll: three's own round trip (true); else answered locally: the link's fence hadn't signalled
+        expect(polledBeforeCompile).toBe(syncpoll);
+      } finally {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+      }
+    }
+  });
+
+  it("WebGL2: draws no frame while a first-draw batch is in flight, only polls its fence (?busydraw: draws on)", async () => {
+    for (const busydraw of [false, true]) {
+      vi.spyOn(flags, "has").mockImplementation((n) => busydraw && n === "busydraw");
+      const pipelines = new FakeDrawPipelines();
+      const gl = fakeFenceGl();
+      try {
+        const ctx = fakeCtx({ items: 0, webgpu: false, shadows: false, pipelines, objects: 12, gl });
+        const render = ctx.render.bind(ctx);
+        let drawnInFlight = 0;
+        ctx.render = () => {
+          if (gl.fences.some((f) => f.polls < 2)) drawnInFlight++; // a batch sent and not yet finished
+          render();
+        };
+        await warmup(ctx, { frames: 1 });
+        if (busydraw) expect(drawnInFlight).toBeGreaterThan(0);
+        else expect(drawnInFlight).toBe(0);
+        expect(new Set(draws.slice(0, -1).flat()).size).toBe(12); // every program still drew before the loader goes
+      } finally {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+      }
+    }
+  });
+
+  it("reports the warm-up's longest rAF gap and its longest main-thread task separately", async () => {
+    const entries: ((list: { getEntries(): { duration: number }[] }) => void)[] = [];
+    class FakeObserver {
+      static supportedEntryTypes = ["longtask"];
+      constructor(cb: (list: { getEntries(): { duration: number }[] }) => void) {
+        entries.push(cb);
+      }
+      observe() {}
+      disconnect() {}
+    }
+    try {
+      const ctx = fakeCtx({ items: 2, webgpu: false, shadows: false, frameMs: 120 });
+      vi.stubGlobal("PerformanceObserver", FakeObserver);
+      const compile = ctx.renderer.compileAsync.bind(ctx.renderer);
+      (ctx.renderer as { compileAsync: unknown }).compileAsync = (...a: Parameters<typeof compile>) => {
+        for (const cb of entries) cb({ getEntries: () => [{ duration: 310 }, { duration: 90 }] });
+        return compile(...a);
+      };
+      const r = await warmup(ctx, { frames: 2 });
+      expect(r.gaps.max).toBeGreaterThanOrEqual(120);
+      expect(r.gaps.over250).toBe(0);
+      expect(r.longTasks).toEqual({ count: 2, max: 310, over250: 1 });
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("?warmdiag: each first draw says whether its program looked cached (warm) and its link time", async () => {
+    vi.spyOn(flags, "has").mockImplementation((n) => n === "warmdiag");
+    const pipelines = new FakeDrawPipelines();
+    try {
+      const ctx = fakeCtx({ items: 0, webgpu: false, shadows: false, pipelines, objects: 3, gl: fakeFenceGl() });
+      const r = await warmup(ctx, { frames: 1 });
+      const items = r.batches!.flatMap((b) => b.items);
+      expect(items.map((i) => [i.warm, i.link])).toEqual([[false, null], [false, null], [false, null]]); // no links seen: cold
     } finally {
       vi.unstubAllGlobals();
       vi.restoreAllMocks();
