@@ -1,16 +1,22 @@
 // `?framecount` (#23, D-e2e-2): the frame counters drawn into the presented frame and into the top-most
-// DOM layer (render/frameCount.ts has the logic and the layout). The WebGL counter is the last step of
-// the post pipeline's output (after FXAA), so it is in exactly the pixels the canvas presents, untouched
-// by bloom, grading or the vignette. Its count moves on just before each frame is drawn
-// (frameCounterTick in RenderCtx.render), which writes the DOM counter too, so both show one frame's
-// number.
+// DOM layer (render/frameCount.ts has the logic and the layout). Each frame's number is taken just
+// before the frame is drawn (frameCounterTick in RenderCtx.render), which writes the DOM counter.
 //
-// Without the flag nothing here is created: withFrameCounter() hands the output node back as it is.
+// On WebGL2 the canvas counter is a dozen scissored clears straight into the canvas right after the
+// post pipeline has drawn (frameCounterDraw): in exactly the pixels the canvas presents, untouched by
+// bloom, grading or the vignette, and with no shader or uniform in the way. Drawn as the last step
+// of the post output instead (a TSL overlay reading a uniform), every other frame's pixels showed the
+// number from two frames before, on readPixels and in screenshots alike (the e2e journey read 103,
+// 102, 105, 104… against the DOM's 103, 104, 105, 106), whether the uniform was written in its own
+// node update or before the render. On WebGPU the overlay is what draws it.
+//
+// Without the flag nothing here is created: withFrameCounter() hands the output node back as it is,
+// and the tick and the draw return at once.
 
 import * as THREE from "three/webgpu";
 import { exp2, float, floor, mod, renderGroup, screenCoordinate, screenSize, select, uniform, vec3, vec4 } from "three/tsl";
 import { flags } from "../config.ts";
-import { FRAME_BITS, FrameCount, frameBits, STRIP_CELLS, STRIP_ROWS } from "./frameCount.ts";
+import { FRAME_BITS, FrameCount, frameBits, STRIP_CELLS, STRIP_ROWS, stripLayout } from "./frameCount.ts";
 
 type Counter = ReturnType<typeof makeCounter>;
 let counter: Counter | null = null;
@@ -25,29 +31,89 @@ export function frameCounterState(): { count: number; dom: boolean } | null {
   return counter ? { count: counter.count.value, dom: !!counter.dom } : null;
 }
 
-/** `out` (the post pipeline's output) with the WebGL counter on top: only with `?framecount`. */
-export function withFrameCounter(out: THREE.Node): THREE.Node {
+/**
+ * `out` (the post pipeline's output) as the pipeline should draw it: with `?framecount` on WebGPU,
+ * the counter on top; otherwise as it is (on WebGL2 frameCounterDraw draws it).
+ */
+export function withFrameCounter(out: THREE.Node, webgpu: boolean): THREE.Node {
   if (!frameCounterOn()) return out;
   const c = (counter ??= makeCounter());
-  return overlay(out, c.value);
+  return webgpu ? overlay(out, c.value) : out;
 }
 
 function makeCounter() {
   const count = new FrameCount();
   const dom = typeof document !== "undefined" ? new FrameCountDom() : null;
-  // A render-group uniform written before each drawn frame (frameCounterTick), like the occluder
-  // fade's: counted inside the output's own node update instead, every other frame's pixels showed
-  // the number from two frames before (the e2e journey read 103, 102, 105, 104…).
   const value = uniform(0).setGroup(renderGroup);
-  return { count, value, dom };
+  return { count, value, dom, last: 0 };
 }
 
-/** One more frame is about to be drawn (RenderCtx.render): both counters take its number. No-op without the flag. */
+/** A frame is about to be drawn (RenderCtx.render): its number, for both counters. No-op without the flag. */
 export function frameCounterTick(): void {
   if (!counter) return;
-  const n = counter.count.drawn();
+  const n = (counter.last = counter.count.drawn());
   counter.value.value = n % 2 ** FRAME_BITS;
   counter.dom?.show(n);
+}
+
+/** WebGL2 state the counter's clears touch, put back after them. */
+interface GlLike {
+  readonly SCISSOR_TEST: number;
+  readonly SCISSOR_BOX: number;
+  readonly COLOR_CLEAR_VALUE: number;
+  readonly COLOR_WRITEMASK: number;
+  readonly DRAW_FRAMEBUFFER: number;
+  readonly DRAW_FRAMEBUFFER_BINDING: number;
+  readonly COLOR_BUFFER_BIT: number;
+  readonly drawingBufferHeight: number;
+  isEnabled(cap: number): boolean;
+  enable(cap: number): void;
+  disable(cap: number): void;
+  getParameter(p: number): unknown;
+  bindFramebuffer(target: number, fb: unknown): void;
+  scissor(x: number, y: number, w: number, h: number): void;
+  colorMask(r: boolean, g: boolean, b: boolean, a: boolean): void;
+  clearColor(r: number, g: number, b: number, a: number): void;
+  clear(mask: number): void;
+}
+
+/**
+ * Right after the frame is drawn (RenderCtx.render), on WebGL2: the strip into the canvas with
+ * scissored clears (stripLayout: plate black, marker red, a 1 bit white, a 0 bit dark grey). The GL
+ * state it changes is put back, so three's own state cache stays true.
+ */
+export function frameCounterDraw(renderer: THREE.WebGPURenderer): void {
+  if (!counter) return;
+  const gl = (renderer.backend as unknown as { gl?: GlLike }).gl;
+  if (!gl) return;
+  const scissorOn = gl.isEnabled(gl.SCISSOR_TEST);
+  const box = gl.getParameter(gl.SCISSOR_BOX) as Int32Array;
+  const clear = gl.getParameter(gl.COLOR_CLEAR_VALUE) as Float32Array;
+  const mask = gl.getParameter(gl.COLOR_WRITEMASK) as boolean[];
+  const fb = gl.getParameter(gl.DRAW_FRAMEBUFFER_BINDING);
+  gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+  gl.enable(gl.SCISSOR_TEST);
+  gl.colorMask(true, true, true, true);
+  const h = gl.drawingBufferHeight;
+  const L = stripLayout(h);
+  const fill = (x: number, yTop: number, w: number, hh: number, r: number, g: number, b: number) => {
+    gl.scissor(x, h - yTop - hh, w, hh); // GL counts y from the bottom
+    gl.clearColor(r, g, b, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+  };
+  fill(L.left, L.top, L.width, L.height, 0, 0, 0);
+  const row = L.top + L.cell;
+  fill(L.left + L.cell, row, L.cell, L.cell, 1, 0, 0);
+  const bits = frameBits(counter.last);
+  for (let i = 0; i < FRAME_BITS; i++) {
+    const v = bits[i] ? 1 : 0.25;
+    fill(L.left + (i + 2) * L.cell, row, L.cell, L.cell, v, v, v);
+  }
+  gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, fb);
+  gl.scissor(box[0]!, box[1]!, box[2]!, box[3]!);
+  if (!scissorOn) gl.disable(gl.SCISSOR_TEST);
+  gl.clearColor(clear[0]!, clear[1]!, clear[2]!, clear[3]!);
+  gl.colorMask(mask[0]!, mask[1]!, mask[2]!, mask[3]!);
 }
 
 /** The strip (stripLayout) over `out`: plate black, the marker red, a 1 bit white, a 0 bit dark grey. */

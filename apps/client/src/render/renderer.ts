@@ -12,7 +12,7 @@ import {
 import { startRenderer } from "./rendererStart.ts";
 import { GpuTimer, ResolutionLadder } from "./timing.ts";
 import { compileForPass, passCallDepth, saveRenderState, type GuardedRenderer, type PassCompileRenderer } from "./compilePass.ts";
-import { frameCounterTick, withFrameCounter } from "./frameCounter.ts";
+import { frameCounterDraw, frameCounterTick, withFrameCounter } from "./frameCounter.ts";
 
 export { TIERS, FEATURES, type Tier, type Feature, type ResolvedSettings };
 
@@ -158,7 +158,7 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
     post = buildPost(scene, camera, settings, photo);
     passDepth = null;
     postKey = key;
-    pipeline.outputNode = withFrameCounter(post.outputNode); // ?framecount: the counter on top (#23); else as is
+    pipeline.outputNode = withFrameCounter(post.outputNode, webgpu); // ?framecount on WebGPU: the counter on top (#23); else as is
     pipeline.needsUpdate = true;
   }
 
@@ -281,6 +281,7 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
     render() {
       frameCounterTick(); // ?framecount (#23): this frame's number, for both counters; a no-op without the flag
       pipeline.render();
+      frameCounterDraw(renderer); // ?framecount on WebGL2: the canvas counter, after everything else
     },
     compileScene() {
       if (passCompileOff) return renderer.compileAsync(scene, camera);
