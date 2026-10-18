@@ -242,6 +242,60 @@ describe("character textures follow the tier up (D-load-6)", () => {
     }
   });
 
+  it("is bounded: a stalled image gives up at the deadline (20 s by default) and keeps the 512² set", async () => {
+    const { AVATAR_TEXTURE_RAISE_TIMEOUT_MS, MODEL_FILES, raiseTextures } = await import("./avatars/assets.ts");
+    const { avatarMaterial } = await import("./avatars/material.ts");
+    expect(AVATAR_TEXTURE_RAISE_TIMEOUT_MS).toBe(20_000);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const textures = MODEL_FILES.map((f) => ({ albedo: tex(`${f}_albedo_512`, 512), normal: tex(`${f}_normal_512`, 512) }));
+      const before = textures.map((t) => ({ ...t }));
+      const mats = textures.map((t) => avatarMaterial(t, 0));
+      const t0 = Date.now();
+      const ok = await raiseTextures({ textures } as never, (name) => (name === "ash_normal" ? new Promise<THREE.Texture>(() => {}) : Promise.resolve(tex(name, 1024))), 40);
+      expect(ok).toBe(false);
+      expect(Date.now() - t0).toBeLessThan(2000); // the loader comes down; play resumes on 512²
+      textures.forEach((t, i) => {
+        expect(t).toEqual(before[i]);
+        expect(textureNodes(mats[i]!).map((n) => n.value)).toContain(before[i]!.albedo);
+      });
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("drops a full-size set that lands after the deadline: never rebound or uploaded in play, released", async () => {
+    const { MODEL_FILES, raiseTextures } = await import("./avatars/assets.ts");
+    const { avatarMaterial } = await import("./avatars/material.ts");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const textures = MODEL_FILES.map((f) => ({ albedo: tex(`${f}_albedo_512`, 512), normal: tex(`${f}_normal_512`, 512) }));
+      const before = textures.map((t) => ({ ...t }));
+      const mats = textures.map((t) => avatarMaterial(t, 1));
+      const late: THREE.Texture[] = [];
+      const released = new Set<THREE.Texture>();
+      const ok = await raiseTextures({ textures } as never, (name) => new Promise<THREE.Texture>((r) => setTimeout(() => {
+        const t = tex(name, 1024);
+        t.addEventListener("dispose", () => released.add(t));
+        late.push(t);
+        r(t);
+      }, 80)), 20);
+      expect(ok).toBe(false);
+      await new Promise((r) => setTimeout(r, 200)); // the set lands, mid-play
+      expect(late.length).toBeGreaterThan(0);
+      textures.forEach((t, i) => {
+        expect(t, "still the 512² set").toEqual(before[i]);
+        const bound = textureNodes(mats[i]!).map((n) => n.value);
+        expect(bound).toContain(before[i]!.albedo);
+        for (const x of late) expect(bound).not.toContain(x);
+      });
+      expect(released.size, "every late texture is released").toBe(late.length);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("only a session whose textures are 512² reloads, and only for a tier above Low", async () => {
     const { avatarTexturesFollowTier } = await import("./avatars/assets.ts");
     let loads = 0;

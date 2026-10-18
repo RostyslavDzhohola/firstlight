@@ -181,24 +181,50 @@ export function avatarTexturesLowRes(): boolean {
 }
 
 /**
+ * How long a tier rise waits for the 1024² set behind its loading screen (ms). Past it the 512² set
+ * stays for the session's play, and whatever lands later is dropped (a later tier change tries again).
+ */
+export const AVATAR_TEXTURE_RAISE_TIMEOUT_MS = 20_000;
+
+type TextureLoad = (name: string, srgb: boolean) => Promise<THREE.Texture>;
+
+/**
  * Load every look's 1024² textures and swap them into the existing materials and texture sets
  * (rebindAvatarTextures: no new programs), releasing the 512² ones. False, with the 512² set kept,
- * when a download fails. `load` is the texture loader (tests pass a fake).
+ * when a download fails or the set isn't in within `timeoutMs`; a set that lands after that is
+ * released, never rebound (play has resumed: nothing new may upload). `load` is the texture loader
+ * (tests pass a fake).
  */
 export async function raiseTextures(
   assets: Pick<AvatarAssets, "textures">,
-  load: (name: string, srgb: boolean) => Promise<THREE.Texture> = (name, srgb) => loadTexture(name, srgb, false),
+  load: TextureLoad = (name, srgb) => loadTexture(name, srgb, false),
+  timeoutMs = AVATAR_TEXTURE_RAISE_TIMEOUT_MS,
 ): Promise<boolean> {
+  const all = Promise.all(assets.textures.map(async (t, i) => {
+    const f = MODEL_FILES[i]!;
+    const [albedo, normal] = await Promise.all([load(`${f}_albedo`, true), ownNormal(i) ? load(`${f}_normal`, false) : Promise.resolve(t.normal)]);
+    return { albedo, normal };
+  }));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<"late">((resolve) => (timer = setTimeout(() => resolve("late"), timeoutMs)));
   let next: StarterTextures[];
   try {
-    next = await Promise.all(assets.textures.map(async (t, i) => {
-      const f = MODEL_FILES[i]!;
-      const [albedo, normal] = await Promise.all([load(`${f}_albedo`, true), ownNormal(i) ? load(`${f}_normal`, false) : Promise.resolve(t.normal)]);
-      return { albedo, normal };
-    }));
+    const r = await Promise.race([all, deadline]);
+    if (r === "late") {
+      console.warn(`[avatars] the full-size character textures didn't arrive within ${timeoutMs / 1000} s; keeping the 512² ones`);
+      void all.then((late) => late.forEach((n, i) => {
+        const t = assets.textures[i]!;
+        if (n.albedo !== t.albedo) n.albedo.dispose();
+        if (n.normal !== t.normal) n.normal.dispose();
+      }), () => undefined);
+      return false;
+    }
+    next = r;
   } catch (e) {
     console.warn("[avatars] the full-size character textures failed to load; keeping the 512² ones", e);
     return false;
+  } finally {
+    clearTimeout(timer);
   }
   assets.textures.forEach((t, i) => {
     const old = { albedo: t.albedo, normal: t.normal };
@@ -211,18 +237,24 @@ export async function raiseTextures(
 
 let raising: Promise<boolean> | null = null;
 
-/** The loaded 512² textures → 1024² (once; joins a reload in progress). False when there was nothing to do or it failed. */
+/**
+ * The loaded 512² textures → 1024² (once it works; joins a reload in progress). False when there was
+ * nothing to do, it failed or it ran out of time (raiseTextures is bounded, so `raising` always clears).
+ */
 export function raiseAvatarTextures(): Promise<boolean> {
   if (!loaded || !loadedLowRes) return Promise.resolve(false);
-  raising ??= raiseTextures(loaded).then((ok) => {
-    raising = null;
-    if (ok) {
-      loadedLowRes = false;
-      lowRes = false;
-      console.info("[avatars] the tier rose above Low: character textures reloaded at 1024²");
-    }
-    return ok;
-  });
+  raising ??= raiseTextures(loaded)
+    .then((ok) => {
+      if (ok) {
+        loadedLowRes = false;
+        lowRes = false;
+        console.info("[avatars] the tier rose above Low: character textures reloaded at 1024²");
+      }
+      return ok;
+    })
+    .finally(() => {
+      raising = null;
+    });
   return raising;
 }
 
