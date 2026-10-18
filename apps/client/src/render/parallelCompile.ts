@@ -16,8 +16,9 @@
 // On WebGL2 a compiled program still costs on its first draw: ANGLE's Metal backend builds the Metal
 // pipeline for it there, in the GPU process, which also draws the page. The first real warm-up frame
 // drew every object at once and froze the loader for ~5 s on a cold shader cache (M1, D-load-2).
-// gateFirstDraws() lets only a budget of never-drawn pipelines draw per frame (nextDrawBudget adapts
-// it to the frame times); the warm-up renders frames until every program is compiled and drawn once.
+// gateFirstDraws() lets only a budget of never-drawn pipelines draw per frame, priced by GLSL size;
+// FirstDrawPacer sizes the budget from the GPU's measured rate, one fenced batch in flight at a time.
+// The warm-up renders frames until every program is compiled and drawn once.
 
 /** The private part of three's Renderer this touches (three is pinned, SPEC §3). */
 export interface DeferRenderer {
@@ -97,41 +98,50 @@ export interface GateRenderer {
 
 export interface FirstDrawGate {
   readonly active: boolean;
-  /** A new frame: up to `budget` never-drawn pipelines may draw in it. */
+  /** A new frame: never-drawn pipelines may draw in it up to `budget` cost (always at least one). */
   frame(budget: number): void;
   /** Compiled pipelines refused a first draw in the current frame (waiting their turn). */
   waiting(): number;
-  /** First draws allowed so far. */
+  /** First draws allowed so far, and their summed cost. */
   granted(): number;
+  cost(): number;
   /** Back to three's own isReady (idempotent). */
   release(): void;
 }
 
-/** First warm-up frame's budget, the cap, and the frame times that move it (ms). */
-export const FIRST_DRAWS_START = 4;
-export const FIRST_DRAWS_MAX = 64;
-const QUICK_FRAME_MS = 60;
-const LONG_FRAME_MS = 150;
-/** A fenced batch's time includes a few frames before Chrome reports the fence: looser bounds. */
-const QUICK_BATCH_MS = 120;
-const LONG_BATCH_MS = 250;
+/**
+ * Target GPU time for one fenced batch of first draws (ms). The fence reports a few frames late,
+ * so the frames themselves stay well under 250 ms.
+ */
+export const BATCH_TARGET_MS = 160;
+/** The first batch's budget, in GLSL characters: ~5 ms per 1000 on a cold M1 cache, so ~120 ms. */
+export const FIRST_DRAWS_START = 24_000;
+/**
+ * Skinned shadow-pass programs (characters, horses: ~5k characters) took ~270 ms each to build on a
+ * cold M1, far over their size: price them so they always go alone.
+ */
+const SKINNED_SHADOW_COST = 60_000;
+const BUDGET_MAX = 2_000_000;
 
 /**
- * The next first-draw budget from how long a batch of `used` first draws took (or a frame, without
- * fences): halve after a long one (from what was actually sent); double after a quick one that used
- * the whole budget.
+ * A pipeline's first-draw cost estimate: its GLSL size (vertex + fragment characters). On a cold
+ * M1 cache the Metal build took about 5–6 ms per 1000 characters (D-load-2).
  */
-export function nextDrawBudget(budget: number, ms: number, used = budget, quick = QUICK_FRAME_MS, long = LONG_FRAME_MS): number {
-  if (ms > long) return Math.max(1, Math.floor((used > 0 ? Math.min(used, budget) : budget) / 2));
-  if (ms < quick && used >= budget) return Math.min(FIRST_DRAWS_MAX, budget * 2);
-  return budget;
+export function pipelineCost(pipeline: object): number {
+  const p = pipeline as { vertexProgram?: { code?: string }; fragmentProgram?: { code?: string } };
+  const vs = p.vertexProgram?.code ?? "";
+  const fs = p.fragmentProgram?.code ?? "";
+  const size = Math.max(1, vs.length + fs.length);
+  // a shadow pass's fragment is a few lines; a skinned vertex stage reads skinIndex
+  return fs.length > 0 && fs.length < 4000 && vs.includes("skinIndex") ? Math.max(size, SKINNED_SHADOW_COST) : size;
 }
 
 /**
  * Paces WebGL2 first draws. A frame's GPU work shows up in later frames' times, not its own, so
  * pacing by frame times doubled the budget just before the cost arrived. With a fence after each
  * frame that drew something new, one batch is in flight at a time: no new first draws until the GPU
- * has finished it, and the next batch's size follows how long that took.
+ * has finished it. Budgets are in cost units (pipelineCost): each finished batch measures the GPU's
+ * ms per unit (smoothed), and the next batch gets what should take BATCH_TARGET_MS.
  */
 export class FirstDrawPacer {
   private readonly onBatch?: (ms: number, used: number, tag: unknown) => void;
@@ -143,9 +153,11 @@ export class FirstDrawPacer {
   private budget = FIRST_DRAWS_START;
   private batch: { done: () => boolean; at: number; used: number; tag: unknown } | null = null;
   private lastUsed = 0;
+  /** ms of GPU time per cost unit, smoothed over batches (null: nothing measured yet). */
+  private rate: number | null = null;
   private readonly latencies: number[] = [];
 
-  /** First draws the frame about to be drawn may make. */
+  /** The cost the frame about to be drawn may spend on first draws. */
   allowance(): number {
     return this.batch ? 0 : this.budget;
   }
@@ -154,7 +166,7 @@ export class FirstDrawPacer {
     return this.batch !== null;
   }
 
-  /** After a frame: it made `used` first draws; `fence` says when the GPU finished them (null: no fences). */
+  /** After a frame: it spent `used` on first draws; `fence` says when the GPU finished them (null: no fences). */
   sent(used: number, now: number, fence: (() => boolean) | null, tag?: unknown): void {
     this.lastUsed = used;
     if (used > 0 && fence) this.batch = { done: fence, at: now, used, tag };
@@ -167,11 +179,18 @@ export class FirstDrawPacer {
       const ms = now - this.batch.at;
       this.latencies.push(ms);
       this.onBatch?.(ms, this.batch.used, this.batch.tag);
-      this.budget = nextDrawBudget(this.budget, ms, this.batch.used, QUICK_BATCH_MS, LONG_BATCH_MS);
+      this.learn(ms, this.batch.used);
       this.batch = null;
-    } else if (frameMs !== undefined) {
-      this.budget = nextDrawBudget(this.budget, frameMs, this.lastUsed);
+    } else if (frameMs !== undefined && this.lastUsed > 0) {
+      this.learn(frameMs, this.lastUsed);
+      this.lastUsed = 0;
     }
+  }
+
+  private learn(ms: number, used: number): void {
+    const r = ms / used;
+    this.rate = this.rate === null ? r : (this.rate + r) / 2;
+    this.budget = Math.round(Math.min(BUDGET_MAX, Math.max(1, BATCH_TARGET_MS / this.rate)));
   }
 
   /** Fenced batches so far and how long the GPU took over them (ms, rounded). */
@@ -211,26 +230,39 @@ export function glFence(gl: FenceGL | null | undefined): (() => boolean) | null 
 /** Pipelines each renderer has drawn at least once (kept across warm-ups). */
 const drawnBy = new WeakMap<object, WeakSet<object>>();
 
-/** `onGrant` (diagnostics) hears each first draw allowed, with the render object and its pipeline. */
-export function gateFirstDraws(renderer: GateRenderer, onGrant?: (renderObject: unknown, pipeline: object) => void): FirstDrawGate {
+/**
+ * `onGrant` (diagnostics) hears each first draw allowed, with the render object and its pipeline;
+ * `costOf` prices a pipeline (pipelineCost in the warm-up; 1 each by default).
+ */
+export function gateFirstDraws(
+  renderer: GateRenderer,
+  onGrant?: (renderObject: unknown, pipeline: object) => void,
+  costOf: (pipeline: object) => number = () => 1,
+): FirstDrawGate {
   const pipelines = renderer._pipelines;
   if (!pipelines || typeof pipelines.isReady !== "function" || typeof pipelines.get !== "function") {
-    return { active: false, frame() {}, waiting: () => 0, granted: () => 0, release() {} };
+    return { active: false, frame() {}, waiting: () => 0, granted: () => 0, cost: () => 0, release() {} };
   }
   let drawn = drawnBy.get(pipelines);
   if (!drawn) drawnBy.set(pipelines, (drawn = new WeakSet()));
   const seen = drawn;
   const original = pipelines.isReady;
   let budget = 0;
+  let spent = 0;
+  let inFrame = 0;
   let granted = 0;
+  let cost = 0;
   let waiting = new Set<object>();
   const release = overrideMethod(pipelines, "isReady", function (this: NonNullable<GateRenderer["_pipelines"]>, renderObject: unknown) {
     if (!original.call(this, renderObject)) return false;
     const p = this.get(renderObject).pipeline;
     if (!p || seen.has(p)) return true;
-    if (budget > 0) {
-      budget--;
+    const c = costOf(p);
+    if (budget > 0 && (inFrame === 0 || spent + c <= budget)) {
+      spent += c;
+      inFrame++;
       granted++;
+      cost += c;
       seen.add(p);
       onGrant?.(renderObject, p);
       return true;
@@ -242,10 +274,13 @@ export function gateFirstDraws(renderer: GateRenderer, onGrant?: (renderObject: 
     active: true,
     frame(b) {
       budget = b;
+      spent = 0;
+      inFrame = 0;
       waiting = new Set();
     },
     waiting: () => waiting.size,
     granted: () => granted,
+    cost: () => cost,
     release,
   };
 }

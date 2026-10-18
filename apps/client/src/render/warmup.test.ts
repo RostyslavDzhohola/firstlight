@@ -197,7 +197,8 @@ class FakeDrawPipelines extends FakePipelines {
   private readonly byKey = new Map<string, object>();
   get(ro: unknown) {
     const k = String(ro);
-    if (!this.byKey.has(k)) this.byKey.set(k, { k });
+    // 12k characters of GLSL each: two fit the first batch's budget
+    if (!this.byKey.has(k)) this.byKey.set(k, { k, vertexProgram: { code: "v".repeat(4000) }, fragmentProgram: { code: "f".repeat(8000) } });
     return { pipeline: this.byKey.get(k) };
   }
   isReady(ro: unknown) {
@@ -297,8 +298,8 @@ describe("warm-up report (per-phase times and shader counts) and progress", () =
       const settleFrame = draws.at(-1)!;
       const before = draws.slice(0, -1);
       const firstDraws = before.map((d, i) => d.filter((m) => !before.slice(0, i).some((p) => p.includes(m))).length);
-      expect(Math.max(...firstDraws)).toBeLessThanOrEqual(8); // never all twelve in one frame
-      expect(firstDraws.find((n) => n > 0)).toBeLessThanOrEqual(FIRST_DRAWS_START);
+      // at most one budget's worth (fewer if only some programs had compiled yet), not all twelve
+      expect(firstDraws.find((n) => n > 0)).toBeLessThanOrEqual(FIRST_DRAWS_START / 12_000);
       expect(new Set(before.flat()).size).toBe(12); // every object drew once before the loader goes
       expect(settleFrame).toHaveLength(12);
       expect(r.phases.frames.drain).toBeGreaterThan(0);

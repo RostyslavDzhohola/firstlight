@@ -1118,7 +1118,9 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   pipeline in the GPU process (the first real frame froze for ~5 s on a cold cache). So first draws go
   out in batches, one in flight at a time behind a WebGL2 fence, sized by how long the GPU took over
   the last one (doubled under 120 ms when full, halved over 250 ms), and the warm-up keeps drawing
-  until every program has compiled and drawn once. WebGPU only waits for its async pipelines. The
+  until every program has compiled and drawn once. Batches are priced by GLSL size (vertex + fragment
+  characters) at the GPU's measured rate, aiming at 160 ms each; skinned shadow-pass programs get a
+  floor so they always go alone. WebGPU only waits for its async pipelines. The
   post-warm-up watch stays at 0 builds. `?serialcompile` keeps three's own compiles for A/B runs.
   Fewer variants was not taken: three keys each instanced mesh's node build by the mesh, but the 242
   builds make only 226–228 vertex and fragment stages (three shares a stage per distinct source),
@@ -1132,3 +1134,14 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   ~20): J1.2 Play → world 13.4 s on WebGL2 (6.0 s WebGPU), J1.6 High warm-up 2.0 s (1.9 s), worst
   frame inside it 117 ms (133 ms), 0 builds after. Why: #30 (spec #18), the owner's ~20 s on
   "Warming up shaders".
+  Cold-cache analysis (`?warmdiag` and the hook's long tasks, review of #30): the main thread never
+  blocks long now (longest task in the warm-up 50–157 ms; before, 16 tasks over 250 ms, up to 2.9 s,
+  the synchronous links). The remaining long frames are ANGLE building a Metal pipeline at a
+  program's first draw, in the GPU process. Most programs take about 5–6 ms per 1000 GLSL characters,
+  and the large ones 170–200 ms each (terrain 41k characters 203 ms, water 26k 189 ms, vegetation
+  ~29k 175–185 ms, grass 24k 183 ms). Skinned shadow-pass programs (characters and horses, ~5k
+  characters, about 9 distinct) take ~270 ms each, over 250 ms on their own: a platform cost per
+  program that batching can't split. The cheapest way to remove them would be characters and horses
+  dropping shadow-map shadows for the existing blob shadows (a visual call for the owner; a small
+  change plus a look check). Final pairs (back to back, cold): 30.4/32.5 s → 14.2/14.4 s, frames over
+  250 ms 17/17 → 1/2; warm WebGL2 14.2/11.9 s → 2.7/2.8 s; warm WebGPU 3.3/2.9 s → 2.3/2.1 s.

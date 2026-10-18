@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  deferPipelines, FIRST_DRAWS_MAX, FIRST_DRAWS_START, FirstDrawPacer, gateFirstDraws, glFence, nextDrawBudget,
+  BATCH_TARGET_MS, deferPipelines, FIRST_DRAWS_START, FirstDrawPacer, gateFirstDraws, glFence, pipelineCost,
   type DeferRenderer, type GateRenderer,
 } from "./parallelCompile.ts";
 
@@ -124,6 +124,28 @@ function gateRenderer() {
 }
 
 describe("gateFirstDraws (WebGL2: a program's first draw compiles its Metal pipeline in the GPU process)", () => {
+  it("spends a cost budget per frame (always one first draw), with a pipeline's cost from its GLSL size", () => {
+    const g = gateRenderer();
+    const cost: Record<string, number> = { a: 10, b: 30, c: 5, d: 50 };
+    const gate = gateFirstDraws(g.renderer, undefined, (p) => cost[(p as { k: string }).k]!);
+    for (const k of ["a", "b", "c", "d"]) g.compiled.add(k);
+    gate.frame(40);
+    expect(g.frame(["a", "b", "c", "d"])).toEqual(["a", "b"]); // 10 + 30 = 40; c would go over
+    gate.frame(40);
+    expect(g.frame(["a", "b", "c", "d"])).toEqual(["a", "b", "c"]); // 5; then d (50) won't fit
+    gate.frame(40);
+    expect(g.frame(["a", "b", "c", "d"])).toEqual(["a", "b", "c", "d"]); // over budget alone: still one per frame
+    expect(gate.granted()).toBe(4);
+    gate.release();
+    expect(pipelineCost({ vertexProgram: { code: "x".repeat(300) }, fragmentProgram: { code: "y".repeat(700) } })).toBe(1000);
+    expect(pipelineCost({})).toBe(1);
+    // skinned shadow-pass programs (characters, horses) cost far more than their size: always alone
+    const skinnedShadow = { vertexProgram: { code: "in vec4 skinIndex;" + "x".repeat(3000) }, fragmentProgram: { code: "y".repeat(1900) } };
+    expect(pipelineCost(skinnedShadow)).toBeGreaterThan(FIRST_DRAWS_START);
+    const skinnedToon = { vertexProgram: { code: "in vec4 skinIndex;" + "x".repeat(4600) }, fragmentProgram: { code: "y".repeat(16000) } };
+    expect(pipelineCost(skinnedToon)).toBe(4618 + 16000); // the main-pass skinned toon follows its size
+  });
+
   it("lets a budget of never-drawn pipelines draw per frame; drawn ones always draw, uncompiled ones never", () => {
     const g = gateRenderer();
     const gate = gateFirstDraws(g.renderer);
@@ -179,58 +201,46 @@ describe("gateFirstDraws (WebGL2: a program's first draw compiles its Metal pipe
   });
 });
 
-describe("nextDrawBudget", () => {
-  it("doubles while frames are quick, halves when one is long, stays between 1 and the cap", () => {
-    expect(nextDrawBudget(FIRST_DRAWS_START, 20)).toBe(FIRST_DRAWS_START * 2);
-    expect(nextDrawBudget(8, 100)).toBe(8);
-    expect(nextDrawBudget(8, 200)).toBe(4);
-    expect(nextDrawBudget(1, 900)).toBe(1);
-    expect(nextDrawBudget(FIRST_DRAWS_MAX, 10)).toBe(FIRST_DRAWS_MAX);
-  });
-
-  it("grows only after a frame that used its whole budget (quick frames that drew nothing new prove nothing)", () => {
-    expect(nextDrawBudget(4, 10, 0)).toBe(4);
-    expect(nextDrawBudget(4, 10, 3)).toBe(4);
-    expect(nextDrawBudget(4, 10, 4)).toBe(8);
-    expect(nextDrawBudget(4, 400, 0)).toBe(2); // a long frame still halves it
-  });
-});
-
-describe("FirstDrawPacer (one batch of first draws in flight; its size follows the GPU's time for the last)", () => {
+describe("FirstDrawPacer (one batch of first draws in flight, sized by the GPU's measured cost)", () => {
   it("sends no new first draws until the GPU has finished the last batch", () => {
     const p = new FirstDrawPacer();
     let done = false;
     expect(p.allowance()).toBe(FIRST_DRAWS_START);
     p.sent(FIRST_DRAWS_START, 0, () => done);
     p.tick(16);
-    expect(p.allowance()).toBe(0); // still compiling Metal pipelines in the GPU process
+    expect(p.allowance()).toBe(0); // the GPU process is still building Metal pipelines
     p.tick(33);
     expect(p.allowance()).toBe(0);
     done = true;
-    p.tick(50); // finished in 50 ms: quick, and the batch was full
-    expect(p.allowance()).toBe(FIRST_DRAWS_START * 2);
-  });
-
-  it("allows a fenced batch the few frames Chrome takes to report its fence", () => {
-    const p = new FirstDrawPacer();
-    p.sent(FIRST_DRAWS_START, 0, () => true);
-    p.tick(100); // 100 ms: still quick for a fenced batch
-    expect(p.allowance()).toBe(FIRST_DRAWS_START * 2);
-    p.sent(FIRST_DRAWS_START * 2, 100, () => true);
-    p.tick(300); // 200 ms: hold
-    expect(p.allowance()).toBe(FIRST_DRAWS_START * 2);
-  });
-
-  it("halves after a batch the GPU took long over, never below one", () => {
-    const p = new FirstDrawPacer();
-    p.sent(2, 0, () => true);
-    p.tick(400);
-    expect(p.allowance()).toBe(1);
-    p.sent(1, 400, () => true);
-    p.tick(900);
-    expect(p.allowance()).toBe(1);
+    p.tick(50);
+    expect(p.allowance()).toBeGreaterThan(0);
     expect(p.inFlight()).toBe(false);
-    expect(p.batches()).toEqual({ batches: 2, p50: 500, max: 500 });
+  });
+
+  it("sizes the next batch to take about BATCH_TARGET_MS at the cost rate it measured", () => {
+    const p = new FirstDrawPacer();
+    p.sent(40_000, 0, () => true); // 40k characters of GLSL took 200 ms: 5 ms per 1000
+    p.tick(200);
+    expect(p.allowance()).toBe(Math.round((BATCH_TARGET_MS / 200) * 40_000));
+  });
+
+  it("smooths the rate over batches, so one quick or slow batch doesn't swing it", () => {
+    const p = new FirstDrawPacer();
+    p.sent(20_000, 0, () => true);
+    p.tick(100); // 5 ms per 1000
+    p.sent(20_000, 100, () => true);
+    p.tick(300); // 10 ms per 1000: the rate becomes 7.5
+    expect(p.allowance()).toBe(Math.round(BATCH_TARGET_MS / 0.0075));
+  });
+
+  it("a warm cache (quick batches) grows the budget, up to a cap", () => {
+    const p = new FirstDrawPacer();
+    for (let i = 0; i < 10; i++) {
+      p.sent(p.allowance(), i * 20, () => true);
+      p.tick(i * 20 + 20);
+    }
+    expect(p.allowance()).toBeGreaterThan(FIRST_DRAWS_START * 4);
+    expect(p.allowance()).toBeLessThanOrEqual(2_000_000);
   });
 
   it("a frame with no first draws leaves nothing in flight", () => {
@@ -240,23 +250,20 @@ describe("FirstDrawPacer (one batch of first draws in flight; its size follows t
     expect(p.allowance()).toBe(FIRST_DRAWS_START);
   });
 
+  it("without fences, takes the frame time as the batch's time", () => {
+    const p = new FirstDrawPacer();
+    p.sent(30_000, 0, null);
+    expect(p.inFlight()).toBe(false);
+    p.tick(300, 300); // 10 ms per 1000
+    expect(p.allowance()).toBe(Math.round(BATCH_TARGET_MS / 0.01));
+  });
+
   it("tells a listener how long each batch took, with what it was sent with (diagnostics)", () => {
     const heard: [number, number, unknown][] = [];
     const p = new FirstDrawPacer((ms, used, tag) => heard.push([ms, used, tag]));
     p.sent(3, 10, () => true, ["terrain"]);
     p.tick(130);
     expect(heard).toEqual([[120, 3, ["terrain"]]]);
-  });
-
-  it("without fences, paces by the frame times instead", () => {
-    const p = new FirstDrawPacer();
-    p.sent(FIRST_DRAWS_START, 0, null);
-    expect(p.inFlight()).toBe(false);
-    p.tick(20, 20);
-    expect(p.allowance()).toBe(FIRST_DRAWS_START * 2);
-    p.sent(FIRST_DRAWS_START * 2, 20, null);
-    p.tick(400, 380);
-    expect(p.allowance()).toBe(FIRST_DRAWS_START);
   });
 });
 

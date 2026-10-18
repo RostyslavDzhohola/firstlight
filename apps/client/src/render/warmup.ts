@@ -15,7 +15,7 @@ import type { RenderCtx } from "./renderer.ts";
 import { flags } from "../config.ts";
 import { beginManualFrame, type TimestampSource } from "./timing.ts";
 import type { FirstDrawBatch, FirstDrawItem, SlowFrame, WarmupPhase, WarmupReport } from "./warmupReport.ts";
-import { deferPipelines, FirstDrawPacer, gateFirstDraws, glFence, type DeferRenderer, type FenceGL, type GateRenderer } from "./parallelCompile.ts";
+import { deferPipelines, FirstDrawPacer, gateFirstDraws, glFence, pipelineCost, type DeferRenderer, type FenceGL, type GateRenderer } from "./parallelCompile.ts";
 
 export type { FirstDrawBatch, FirstDrawItem, SlowFrame, WarmupPhase, WarmupReport } from "./warmupReport.ts";
 
@@ -321,12 +321,12 @@ export async function warmup(
   // `?serialcompile` keeps three's own one-by-one compiles for A/B runs.
   const deferred = flags.has("serialcompile") ? null : deferPipelines(renderer as unknown as DeferRenderer);
   // WebGL2: a program's first draw builds its Metal pipeline in the GPU process, so first draws go
-  // out in batches, one in flight at a time, sized by how long the GPU took over the last (a fence).
+  // out in batches, one in flight at a time (a fence), sized by GLSL size at the GPU's measured rate.
   const diag = flags.has("warmdiag");
   let frameGrants: FirstDrawItem[] = [];
   const batchLog: FirstDrawBatch[] = [];
   const gated = deferred?.active && !ctx.webgpu
-    ? gateFirstDraws(renderer as unknown as GateRenderer, diag ? (ro, p) => frameGrants.push(describeFirstDraw(ro, p)) : undefined)
+    ? gateFirstDraws(renderer as unknown as GateRenderer, diag ? (ro, p) => frameGrants.push(describeFirstDraw(ro, p)) : undefined, pipelineCost)
     : null;
   const gate = gated?.active ? gated : null;
   const pacer = new FirstDrawPacer(diag ? (ms, _used, tag) => batchLog.push({ ms: Math.round(ms), items: tag as FirstDrawItem[] }) : undefined);
@@ -361,6 +361,7 @@ export async function warmup(
     return ms(t);
   };
   let grantedAt = 0;
+  let costAt = 0;
   let buildsAt = 0;
   let cpu = 0;
   let allowed = 0;
@@ -368,6 +369,7 @@ export async function warmup(
   const slow: SlowFrame[] = [];
   const draw = () => {
     grantedAt = gate?.granted() ?? 0;
+    costAt = gate?.cost() ?? 0;
     buildsAt = stats.total;
     const t = performance.now();
     allowed = pacer.allowance();
@@ -380,7 +382,7 @@ export async function warmup(
     const end = performance.now();
     cpu = end - t;
     if (gate) {
-      const used = gate.granted() - grantedAt;
+      const used = gate.cost() - costAt;
       pacer.sent(used, end, used > 0 ? glFence(gl) : null, diag ? frameGrants : undefined);
     }
   };

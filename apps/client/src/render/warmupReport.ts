@@ -46,7 +46,7 @@ export interface SlowFrame {
   ms: number;
   cpu: number;
   builds: number;
-  /** Pipelines drawn for the first time in it (WebGL2's first-draw budget), and that budget. */
+  /** Pipelines drawn for the first time in it, and its first-draw budget (GLSL characters, WebGL2). */
   firstDraws: number;
   budget: number;
 }
