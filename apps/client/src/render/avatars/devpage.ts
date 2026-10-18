@@ -3,6 +3,8 @@
 // · G toggle the sun's shadow. Drag to orbit, wheel to zoom. Add ?tier=low|medium|high|ultra as usual.
 // &warmcheck: run the game's warm-up (the avatar hook) first, then stand the line-up (every look ×
 // palette with its starter weapon) and count node builds after it: window.__warmcheck when done.
+// &fade: every avatar is a quest NPC (the camera fade's occluder gate) and the fade cone aims at the
+// middle row, so the avatars in front of it dissolve while their shadows stay whole (#39 look checks).
 
 import * as THREE from "three/webgpu";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
@@ -12,6 +14,7 @@ import { createRenderer } from "../renderer.ts";
 import { AvatarView, avatarWarmupHook, preloadAvatars } from "../Avatars.ts";
 import { installShaderMonitor, shaderMonitorFrame, shaderStats, warmup } from "../warmup.ts";
 import { setAvatarTextureLowRes } from "./assets.ts";
+import { avatarChest, updateOccluderFade } from "../occluderFade.ts";
 
 const R = 5000; // stand the stage on a "planet" big enough to be flat (AvatarView takes planet coords)
 const ORDER = [
@@ -29,6 +32,7 @@ export async function startAvatarDevPage() {
   if (text) text.textContent = "Loading characters…";
   const ctx = await createRenderer(document.getElementById("game")!);
   const warmcheck = new URLSearchParams(location.search).has("warmcheck");
+  const fade = new URLSearchParams(location.search).has("fade");
   if (warmcheck) installShaderMonitor(ctx);
   setAvatarTextureLowRes(ctx.tier === "low");
   const assets = await preloadAvatars((f) => {
@@ -75,10 +79,13 @@ export async function startAvatarDevPage() {
       const a = new AvatarView(p, s, look);
       const x = (p - 2.5) * dx;
       const z = ((rows.length - 1) / 2 - r) * dz;
+      if (fade) a.root.userData.occluderFade = true;
       scene.add(a.root);
       avatars.push({ a, x, z });
     }
   });
+  const fadeTarget = avatars[Math.floor(rows.length / 2) * 6 + 2]!.a.root; // the middle row, third palette
+  const chest = new THREE.Vector3();
 
   camera.position.set(4.5, R + 3.2, 10.5);
   const controls = new OrbitControls(camera, ctx.renderer.domElement);
@@ -142,6 +149,7 @@ export async function startAvatarDevPage() {
     for (const { a, x, z } of avatars) a.set(x, R, z, 0, 0, 1, ANIM.IDLE, dt);
     AvatarView.updateLod(camera, ctx.settings.fullAvatars * 2);
     controls.update();
+    if (fade) updateOccluderFade(camera, avatarChest(fadeTarget, null, chest), true);
     ctx.render();
     const info = ctx.renderer.info.render;
     const w = weaponStep === 0 ? "starter weapons" : weaponIds[weaponStep];

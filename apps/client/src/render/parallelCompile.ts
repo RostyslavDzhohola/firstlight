@@ -125,9 +125,10 @@ export const FIRST_DRAWS_START = 24_000;
 export const FIRST_DRAWS_CAP = 40_000;
 /**
  * What a first draw costs on top of its new stages' characters: a pipeline whose stages were all
- * drawn before still builds its own pipeline state.
+ * drawn before still builds its own pipeline state. Fitted on a cold M1 (#39, D-load-3): a lone first
+ * draw took about 75 ms + 6.5 ms per 1000 new characters, the fence's latency included.
  */
-export const PIPELINE_OVERHEAD = 3_000;
+export const PIPELINE_OVERHEAD = 6_000;
 /**
  * The part of a batch's measured time that isn't the GPU's work on it: the fence is read once a
  * frame, so even an empty batch takes a frame or two.
