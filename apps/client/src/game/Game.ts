@@ -170,7 +170,7 @@ export class Game {
     // Look rule 1: muted grade while a menu or panel is up, the body's grade in play (also with the
     // pointer free after Esc → back to the game).
     this.menu.onState = (s) => {
-      if (this.running && !this.photo.active) this.setMenuMode(s === "menu" || s === "away");
+      if (this.running && !this.photo.active) this.setMenuMode(coversWorld(s));
       // Frames under the menu or a full-screen overlay don't move the resolution (D-view-4).
       this.ctx.ladder.setSuspended(coversWorld(s));
     };
