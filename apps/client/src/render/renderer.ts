@@ -12,6 +12,7 @@ import {
 import { startRenderer } from "./rendererStart.ts";
 import { GpuTimer, ResolutionLadder } from "./timing.ts";
 import { compileForPass, passCallDepth, saveRenderState, type GuardedRenderer, type PassCompileRenderer } from "./compilePass.ts";
+import { withFrameCounter } from "./frameCounter.ts";
 
 export { TIERS, FEATURES, type Tier, type Feature, type ResolvedSettings };
 
@@ -157,7 +158,7 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
     post = buildPost(scene, camera, settings, photo);
     passDepth = null;
     postKey = key;
-    pipeline.outputNode = post.outputNode;
+    pipeline.outputNode = withFrameCounter(post.outputNode); // ?framecount: the counter on top (#23); else as is
     pipeline.needsUpdate = true;
   }
 
