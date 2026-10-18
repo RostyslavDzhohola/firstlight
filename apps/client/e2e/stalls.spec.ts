@@ -12,6 +12,8 @@ import path from "node:path";
 import { expect, test } from "./fixtures.ts";
 import { OUT } from "./stack.ts";
 import type { Player } from "./player.ts";
+import { BODIES } from "@firstlight/shared";
+import { townDir } from "@firstlight/shared/planet/town";
 
 const PHASE = process.env.STALL_PHASE ?? "after";
 const SHOTS = path.join(process.env.STALL_SHOTS ?? path.join(OUT, "stalls"), PHASE);
@@ -41,6 +43,8 @@ interface Coverage {
   /** The rest of the stall: counter, posts, goods, sign, an outpost stall's walls. */
   stall: number;
   keeper: number;
+  /** The player's own avatar, with what it holds and wears. */
+  self: number;
   total: number;
   noise: number;
   /** How many meshes were hidden for the awning and the rest (0: nothing of the stall measured). */
@@ -67,6 +71,17 @@ const stalls = <T>(player: Player, fn: (s: Stalls) => T | Promise<T>): Promise<T
 const AWNING_MAX = 1 / 3;
 /** The whole stall (awning and the rest) with the player turned from it: the camera looking down over its roof, 29 % (review round). */
 const TURNED_AWAY_MAX = 0.3;
+
+/** Poses where the camera is pinned to the head: at the counter turned from it, walked into it, backed against a wall. */
+const pinned = (r: { spot: string; look: string }) => (r.spot === "counter" && r.look.startsWith("away")) || r.spot === "walked-into-counter" || r.spot === "backed-against-a-wall";
+
+/** A large share can be a lightning flash or a gust between the frames of one measure: measure again, keep the smaller part by part. */
+async function measureAgain(player: Player, c: Coverage): Promise<Coverage> {
+  const again = await stalls(player, (x) => x.coverage());
+  if (!again) return c;
+  const min = (k: "label" | "awning" | "stall" | "keeper" | "self" | "total") => Math.min(c[k], again[k]);
+  return { ...c, label: min("label"), awning: min("awning"), stall: min("stall"), keeper: min("keeper"), self: min("self"), total: min("total") };
+}
 
 const SHOPS: Record<string, string> = { portus: "Portus Exchange", arcadia: "Dawnpad Trading Post", hollowmere: "Lanternfall Stall", meridian: "Waystation Supply" };
 
@@ -132,10 +147,7 @@ for (const body of ["portus", "arcadia", "hollowmere", "meridian"] as const) {
         if (!c) continue;
         // A lightning flash or a gust between the frames of one measure shows up as cover: anything
         // large is measured again and the smaller of the two kept, part by part.
-        if (c.label > 0.02 || c.awning > 0.1 || c.stall + c.keeper > 0.15) {
-          const again = await stalls(player, (x) => x.coverage());
-          if (again) c = { ...c, label: Math.min(c.label, again.label), awning: Math.min(c.awning, again.awning), stall: Math.min(c.stall, again.stall), keeper: Math.min(c.keeper, again.keeper), total: Math.min(c.total, again.total) };
-        }
+        if (c.label > 0.02 || c.awning > 0.1 || c.stall + c.keeper + c.self > 0.15) c = await measureAgain(player, c);
         rows.push({ ...c, spot: spot.name, look: l.name });
         // The view the owner recorded: at the counter, turned away from it, looking down; and every
         // pose where something covers a lot.
@@ -154,7 +166,22 @@ for (const body of ["portus", "arcadia", "hollowmere", "meridian"] as const) {
     await look(player, s.centre, 0, -0.2);
     await player.hold(["KeyW"], 1400);
     await look(player, s.centre, 180, -0.6);
+    const walked = await measureAgain(player, (await stalls(player, (x) => x.coverage()))!);
+    rows.push({ ...walked, spot: "walked-into-counter", look: "away-down" });
     await page.screenshot({ path: path.join(SHOTS, `${body}-walked-into-counter-turned-away.png`) }).catch(() => {});
+    // Backed against a building's wall in the town, turned away from it: the camera is pinned to the
+    // head there too (a house on the east street, the controller's own wall test, D42).
+    if (body === "portus") {
+      const R = BODIES.portus.radius;
+      const spot = townDir(26.2, 2.2, R), north = townDir(26.2, 30, R), south = townDir(26.2, -30, R);
+      await teleport(player, [spot[0] * R, spot[1] * R, spot[2] * R]);
+      await look(player, [north[0] * R, north[1] * R, north[2] * R], 0, -0.1);
+      await player.hold(["KeyW"], 1200);
+      await look(player, [south[0] * R, south[1] * R, south[2] * R], 0, -0.1);
+      const wall = await measureAgain(player, (await stalls(player, (x) => x.coverage()))!);
+      rows.push({ ...wall, spot: "backed-against-a-wall", look: "away-level" });
+      await page.screenshot({ path: path.join(SHOTS, `${body}-backed-against-a-wall.png`) }).catch(() => {});
+    }
     const watched = await stalls(player, (x) => x.watch.stop());
 
     // E at the counter from the front, both front corners and both sides (the sides the keeper
@@ -206,6 +233,9 @@ for (const body of ["portus", "arcadia", "hollowmere", "meridian"] as const) {
       maxStallBeside: worst((r) => r.awning + r.stall, (r) => r.look.startsWith("left") || r.look.startsWith("right")),
       maxStallFacing: worst((r) => r.awning + r.stall, (r) => r.look.startsWith("at")),
       maxKeeper: worst((r) => r.keeper),
+      // The camera pinned to the head (at the counter turned from it, walked into it, backed against a wall).
+      maxSelfPinned: worst((r) => r.self, pinned),
+      maxSelfElsewhere: worst((r) => r.self, (r) => !pinned(r)),
       maxTotal: worst((r) => r.total),
       maxNoise: rows.reduce((m, r) => Math.max(m, r.noise), 0),
       watched,
@@ -228,5 +258,8 @@ for (const body of ["portus", "arcadia", "hollowmere", "meridian"] as const) {
     expect.soft(summary.maxLabel.v, `the label's share of the screen, any view (worst: ${summary.maxLabel.at})`).toBeLessThan(0.06);
     expect.soft(summary.maxAwning.v, `the awning's share of the screen, any view (worst: ${summary.maxAwning.at})`).toBeLessThan(AWNING_MAX);
     expect.soft(summary.maxStallTurnedAway.v, `the whole stall's share with the player turned from it (worst: ${summary.maxStallTurnedAway.at})`).toBeLessThan(TURNED_AWAY_MAX);
+    // With the camera pinned to the head the player's own avatar has dissolved: a small share at most.
+    expect.soft(rows.filter(pinned).length, "pinned-camera poses measured").toBeGreaterThanOrEqual(body === "portus" ? 5 : 4);
+    expect.soft(summary.maxSelfPinned.v, `the own avatar's share with the camera pinned to the head (worst: ${summary.maxSelfPinned.at})`).toBeLessThanOrEqual(0.1);
   });
 }

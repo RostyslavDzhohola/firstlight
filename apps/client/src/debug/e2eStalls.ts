@@ -10,8 +10,8 @@
 //                   0.25 m a frame), with the frames it took
 //   standable(p)    can a player stand at world point p (no structure solid there)? For approaches a
 //                   wall may close off
-//   coverage()      async: the share of the screen the label, the awning, the rest of the stall and
-//                   the keeper each cover in the frames drawn now, by drawing them with and without
+//   coverage()      async: the share of the screen the label, the awning, the rest of the stall, the
+//                   keeper and the player's own avatar each cover in the frames drawn now, by drawing them with and without
 //                   each (pixel differences). Juno's stall is QuestWorld's; an outpost's is the site
 //                   mesh baked on its own (SiteTown ":stall"), its awning the triangles above 1.95 m.
 //   watch.start()   every drawn frame from now: is the camera inside a stall volume, how close is the label;
@@ -53,6 +53,8 @@ interface StallGame {
   };
   planet?: { terrain?: unknown; town?: { group: Obj3 } | null };
   systems?: unknown[];
+  /** The local player's avatar. */
+  self?: { root: Obj3 } | null;
 }
 
 /** An outpost stall's awning: its triangles wholly above this height (m, prefab frame; the valance hangs to 1.98). */
@@ -218,6 +220,8 @@ export function stallTools(game: () => StallGame | null) {
     const rest = [...quest.filter((m) => m.name !== "stall:awning"), ...outpost];
     const keeperMeshes: Obj3[] = [];
     k.npc?.root.traverse((o) => { if (o.isMesh) keeperMeshes.push(o); });
+    const selfMeshes: Obj3[] = [];
+    g.self?.root.traverse((o) => { if (o.isMesh) selfMeshes.push(o); });
     const masks = new Map<Obj3, number>();
     const indices = new Map<Obj3, unknown>();
     const hide = (ms: Obj3[]) => { for (const m of ms) if (!masks.has(m)) masks.set(m, m.layers.mask), m.layers.set(SHADOW_ONLY_LAYER); };
@@ -238,6 +242,8 @@ export function stallTools(game: () => StallGame | null) {
       hide(rest);
       const noStall = await capture(w, h);
       hide(keeperMeshes);
+      const noKeeper = await capture(w, h);
+      hide(selfMeshes);
       const none = await capture(w, h);
       const again = await capture(w, h);
       return {
@@ -245,7 +251,9 @@ export function stallTools(game: () => StallGame | null) {
         awning: differ(noLabel, noAwning, th),
         /** The rest of the stall: counter, posts, goods, sign, the outpost stall's walls. */
         stall: differ(noAwning, noStall, th),
-        keeper: differ(noStall, none, th),
+        keeper: differ(noStall, noKeeper, th),
+        /** The player's own avatar, with what it holds and wears. */
+        self: differ(noKeeper, none, th),
         total: differ(all, none, th),
         noise: differ(none, again, th),
         parts: { awning: awningMeshes.length + outpost.length, stall: rest.length },
