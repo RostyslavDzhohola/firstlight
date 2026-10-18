@@ -15,6 +15,7 @@ import type { RenderCtx } from "./renderer.ts";
 import { flags } from "../config.ts";
 import { beginManualFrame, type TimestampSource } from "./timing.ts";
 import { castsLeanShadow, leanShadowsOn } from "./leanShadow.ts";
+import { glSlowCalls, setGlPhase } from "./glTrace.ts";
 import type { FirstDrawBatch, FirstDrawCensus, FirstDrawItem, SlowFrame, WarmupPhase, WarmupReport } from "./warmupReport.ts";
 import {
   deferPipelines, FirstDrawPacer, gateFirstDraws, glFence, newStageCost, OLD_PACER, PACER, pipelineCost,
@@ -521,6 +522,7 @@ export async function warmup(
     opts.beforeFrame?.();
     if (shadowsOn) predicted = predictShadowBuilds(scene, lean);
     // 2. The scene pass's compile: one render object at a time, yielding between them.
+    setGlPhase("compile");
     lap();
     stopSampling = sampleFrames();
     const onCompile = (e: { loaded: number; total: number }) => {
@@ -543,6 +545,7 @@ export async function warmup(
     //    caster's shadow material at once (WebGL links each synchronously: ~1 s with the loading
     //    screen frozen on a travel). Casters join the shadow pass a few per frame instead.
     frameAt = performance.now();
+    setGlPhase("shadows");
     if (shadowsOn) {
       // Deferred programs link off the main thread, so a frame takes twice the new shadow builds.
       const n = await warmShadowCasters(scene, draw, next, (cost) => {
@@ -555,6 +558,7 @@ export async function warmup(
     }
     shadowDone = Math.max(shadowDone, predicted);
     phase = "frames";
+    setGlPhase("frames");
     for (let i = 0; i < frames; i++) {
       draw();
       realFrames++;
@@ -566,6 +570,7 @@ export async function warmup(
     //    began with nothing compiling and turned no first draw away.
     const drainAt = performance.now();
     phase = "drain";
+    setGlPhase("drain");
     if (gate) {
       while (performance.now() - drainAt < DRAIN_MAX_MS) {
         const compiling = deferred!.pending();
@@ -584,6 +589,7 @@ export async function warmup(
     }
   } finally {
     stopSampling();
+    setGlPhase("play");
     // The settle frame below renders the way play does: every program it needs is ready and drawn.
     gate?.release();
     deferred?.release();
@@ -625,6 +631,7 @@ export async function warmup(
     slow: diag ? slow : [...slow].sort((a, b) => b.ms - a.ms).slice(0, 12),
     firstDraws: { granted: gate?.granted() ?? 0, ...pacer.batches() },
     ...(diag ? { batches: batchLog, census: firstDrawCensus(batchLog) } : {}),
+    ...(flags.has("gltrace") ? { gl: [...glSlowCalls()] } : {}),
     phases: { compile, compute, shadows, frames: framesPhase },
   };
   stats.warmups.push(report);

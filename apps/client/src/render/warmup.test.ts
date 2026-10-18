@@ -7,6 +7,7 @@ import {
 import { FIRST_DRAWS_START, PIPELINE_OVERHEAD } from "./parallelCompile.ts";
 import { flags } from "../config.ts";
 import { installLeanShadows, leanShadow } from "./leanShadow.ts";
+import { resetGlTrace, traceGlCalls } from "./glTrace.ts";
 import type { RenderCtx } from "./renderer.ts";
 import { watchDisposals } from "./disposeWatch.testutil.ts";
 
@@ -528,6 +529,31 @@ describe("warm-up report (per-phase times and shader counts) and progress", () =
       expect(new Set(before.flat()).size).toBe(12); // every object drew once before the settle frame
       expect(draws.at(-1)).toHaveLength(12);
       expect(pipelines.unfinished).toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("?gltrace: the report carries the synchronous GL calls that waited, with the phase they fell in", async () => {
+    vi.spyOn(flags, "has").mockImplementation((n) => n === "warmdiag" || n === "gltrace");
+    resetGlTrace();
+    const gl = { getProgramParameter: () => true };
+    try {
+      const ctx = fakeCtx({ items: 2, webgpu: false, shadows: false });
+      const now = performance.now as unknown as () => number;
+      const release = traceGlCalls(gl, { now });
+      const compileAsync = (ctx.renderer as unknown as { compileAsync: (...a: unknown[]) => Promise<void> }).compileAsync;
+      (ctx.renderer as unknown as { compileAsync: (...a: unknown[]) => Promise<void> }).compileAsync = async (...a: unknown[]) => {
+        const spy = vi.mocked(performance.now);
+        const t = spy();
+        spy.mockImplementationOnce(() => t).mockImplementationOnce(() => t + 1800);
+        gl.getProgramParameter(); // three polling COMPLETION_STATUS_KHR while the GPU process is busy: 1.8 s
+        await compileAsync(...a);
+      };
+      const r = await warmup(ctx, { frames: 1 });
+      release();
+      expect(r.gl).toEqual([expect.objectContaining({ name: "getProgramParameter", ms: 1800, phase: "compile" })]);
     } finally {
       vi.unstubAllGlobals();
       vi.restoreAllMocks();

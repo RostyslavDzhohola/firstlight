@@ -30,6 +30,8 @@ export interface WarmupReport {
   batches?: FirstDrawBatch[];
   /** `?warmdiag`: the pipelines drawn for the first time, counted (from `batches`). */
   census?: FirstDrawCensus;
+  /** `?gltrace`: synchronous WebGL calls that blocked over 50 ms this session (render/glTrace.ts). */
+  gl?: GlCall[];
   /** WebGL2's paced first draws: how many, in how many fenced batches, and the GPU's time per batch. */
   firstDraws: { granted: number; batches: number; p50: number; max: number };
   phases: {
@@ -63,6 +65,15 @@ export interface SlowFrame {
   batch: number | null;
   /** Programs still compiling (links pending) at the time. */
   pending: number;
+}
+
+/** One slow synchronous WebGL call: what it was, how long it blocked, when (performance.now()) and in which phase. */
+export interface GlCall {
+  name: string;
+  pname: string;
+  ms: number;
+  t: number;
+  phase: string;
 }
 
 /** One pipeline drawn for the first time: its material, object and GLSL source sizes (characters). */
