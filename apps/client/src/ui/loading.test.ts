@@ -177,6 +177,28 @@ describe("the loader's rotating quips (D-load-5)", () => {
     expect(QUIPS).toContain(shown());
   });
 
+  it("hide on full-screen lines that report a problem, and come back on the next normal line", () => {
+    setLoading("Building the world…", 0.5);
+    expect(QUIPS).toContain(shown());
+    setLoading("The server couldn't save just now. Rejoining shortly…", 0.1);
+    expect(document.querySelector(".fl-loading")!.classList.contains("fl-loading--compact")).toBe(false); // still the full screen
+    expect(shown()).toBeNull();
+    const line = quipEl()!.querySelector(".is-on")?.textContent;
+    vi.advanceTimersByTime(QUIP_MS * 3);
+    expect(quipEl()!.querySelector(".is-on")?.textContent).toBe(line);
+    setLoading("Connecting…", 0.3);
+    const back = shown();
+    expect(QUIPS).toContain(back);
+    vi.advanceTimersByTime(QUIP_MS);
+    expect(shown()).not.toBe(back);
+    // straight from play, whatever the wording
+    for (const t of ["The server couldn't save just now. Rejoining shortly…", "Connection lost. Rejoining…", "Disconnected from the server…", "Reconnecting… (try 2)"]) {
+      hideLoading();
+      setLoading(t, 0.1);
+      expect(shown(), t).toBeNull();
+    }
+  });
+
   it("are not on the error state, which keeps the focus on Retry; Retry brings them back", () => {
     setLoading("Starting the renderer…", 0.05);
     const retry = vi.fn();

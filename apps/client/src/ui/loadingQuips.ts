@@ -40,6 +40,14 @@ export const QUIPS: readonly string[] = [
 export const QUIP_MS = 3000;
 
 /**
+ * A loader line that reports a problem ("The server couldn't save just now. Rejoining shortly…",
+ * reconnecting, a lost connection): no joke under it. The next normal line brings the quips back.
+ */
+export function reportsTrouble(text: string): boolean {
+  return /\b(?:couldn['’]t|could not|can['’]t|cannot|reconnect\w*|rejoin\w*|disconnect\w*|lost|trouble|fail\w*|error)\b/i.test(text);
+}
+
+/**
  * A shuffled deck: every line once (the first one random), then a fresh shuffle that never starts
  * with the line just shown. `random` (0 ≤ r < 1) is injectable for tests.
  */

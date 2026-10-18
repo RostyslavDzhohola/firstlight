@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { QUIPS, quipDeck } from "./loadingQuips.ts";
+import { QUIPS, quipDeck, reportsTrouble } from "./loadingQuips.ts";
 
 /** A small seeded PRNG (mulberry32) so every case is repeatable. */
 function seeded(seed: number): () => number {
@@ -58,6 +58,20 @@ describe("QUIPS (the loader's funny lines)", () => {
     for (const q of QUIPS) {
       expect(q.length, q).toBeLessThanOrEqual(45);
       expect(q, "nothing that reads like an error").not.toMatch(/error|fail|crash|broke|wrong|stuck|retry/i);
+    }
+  });
+});
+
+describe("reportsTrouble (loader lines that get no quip under them)", () => {
+  it("is true for lines that report a problem", () => {
+    for (const t of ["The server couldn't save just now. Rejoining shortly…", "Reconnecting…", "Reconnecting… (try 3)", "Connection lost. Rejoining…", "Disconnected from the server…", "Lost the connection…", "Saving trouble: rejoining…", "Couldn't reach the server. Trying again…", "Something failed"]) {
+      expect(reportsTrouble(t), t).toBe(true);
+    }
+  });
+
+  it("is false for every normal loading line", () => {
+    for (const t of ["Loading the game…", "Starting the renderer…", "Travelling to Arcadia…", "Connecting…", "Building the world…", "Loading characters…", "Raising the town…", "Raising the outpost…", "Tuning graphics for this computer…", "Preparing shaders…", "Preparing shaders 120/242", "Warming up shaders…", "Applying graphics settings…"]) {
+      expect(reportsTrouble(t), t).toBe(false);
     }
   });
 });

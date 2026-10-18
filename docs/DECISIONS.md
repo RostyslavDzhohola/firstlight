@@ -1275,6 +1275,7 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   voice, at most 45 characters, never mean, nothing that reads like an error, no Easter-egg hints.
   A new line every 3 s from a shuffled deck (every line once before any comes back, a reshuffle
   never opens with the line just shown, the deck carries on across loads), a 320 ms crossfade and
-  none under reduced motion. Not on the compact mid-game card or the error state, and aria-hidden
-  so the polite live region doesn't read it out every 3 s. Why: the owner's call; a trade-off
+  none under reduced motion. Not on the compact mid-game card, the error state or a full-screen
+  line that reports a problem (the server couldn't save, reconnecting, a lost connection; the next
+  normal line brings it back), and aria-hidden so the polite live region doesn't read it out every 3 s. Why: the owner's call; a trade-off
   between load time and looks now leans to looks.

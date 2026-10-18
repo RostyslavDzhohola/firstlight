@@ -5,7 +5,7 @@
 // a Retry button (showLoadingError); the next setLoading() goes back to progress. While the full
 // screen loads, a funny line at the bottom changes every few seconds (loadingQuips.ts, D-load-5).
 
-import { QUIP_MS, QUIPS, quipDeck } from "./loadingQuips.ts";
+import { QUIP_MS, QUIPS, quipDeck, reportsTrouble } from "./loadingQuips.ts";
 
 export type BodyKey = "portus" | "arcadia" | "hollowmere" | "meridian";
 
@@ -193,7 +193,7 @@ function showTip() {
   refs.dots.forEach((d, i) => d.classList.toggle("is-on", i === tipIndex));
 }
 
-/** The quips run only on the full screen while it loads: not on the compact card, an error or hidden. */
+/** The quips run only on the full screen while it loads: not on the compact card, a problem line, an error or hidden. */
 function runQuips(on: boolean) {
   const q = refs.quip;
   if (!q || on === !q.hidden) return;
@@ -237,7 +237,7 @@ export function setLoading(text: string, frac: number): void {
     r.classList.toggle("fl-loading--compact", phase.compact);
     last.compact = phase.compact;
   }
-  runQuips(!phase.compact);
+  runQuips(!phase.compact && !reportsTrouble(text));
   if (text !== last.text) refs.status!.textContent = last.text = text;
   const pct = Math.max(0, Math.min(100, Math.round(frac * 100)));
   if (pct !== last.pct) {
