@@ -1083,3 +1083,14 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   D-view-1 and D-view-2. Why: assigning a canvas's size clears it, and the ladder resized after the
   frame's draw in the same animation frame, so Chrome presented a blank world under the HUD once per
   step (owner's recording 2026-10-16: 40.8 s, 48.9 s, 69.0 s; spec #17).
+- **D-view-4 (2026-10-18):** menus don't move the resolution. The resolution ladder
+  (render/timing.ts) has a suspended state: while the pause menu or a full-screen overlay covers the
+  world (pause states "menu" and "away": a panel, the death screen, a sign-in card or a notice;
+  `coversWorld` in ui/pauseFlow.ts, wired in Game's `menu.onState`), samples are ignored. Suspending
+  and resuming drop the current window and slow/fast streaks; resuming goes back to the rung held
+  when the suspension began (a tier change or an e2e forced step under the menu is that rung) and
+  ignores the first 1 s of samples. Cooldowns and hold-offs keep running in wall time. J5.5 (10
+  menus over `?cpuslow=8&notimer` frames, p50 50 ms): the ladder walked 0 → 3 before, stays at 0
+  after. Builds on D-view-3 and D-controls-3. Why: the ladder counted the blurred menu's slow frames
+  and reached its floor ~3.5 s after the owner opened the menu (0.93 → 0.75, ~41 fps), for the rest
+  of the session (spec #17).

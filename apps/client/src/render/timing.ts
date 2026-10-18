@@ -108,6 +108,8 @@ export function gpuPlausible(gpuP50: number, rafP50: number): boolean {
 export const LADDER = [1, 0.79, 0.62, 0.5] as const;
 
 const MIN_FRAMES_PER_WINDOW = 5;
+/** After a suspension (a full-screen overlay closed), samples from this long are ignored (D-view-4). */
+export const LADDER_RESUME_GRACE_MS = 1000;
 const UP_HOLD_INITIAL = 30_000;
 const UP_HOLD_MAX = 480_000;
 
@@ -121,6 +123,9 @@ const UP_HOLD_MAX = 480_000;
  * Up-steps are held off after any down-step; the hold-off doubles each time an up-step is
  * followed by a quick down-step, so it can't oscillate. Windows are cleared on every change, so
  * decisions never use samples from the previous resolution. At the floor it calls `onFloor`.
+ * While suspended (a full-screen overlay is up, D-view-4) samples are ignored; resuming goes back to
+ * the rung held when the suspension began and ignores the first LADDER_RESUME_GRACE_MS of samples.
+ * Cooldowns and hold-offs keep running in wall time.
  */
 export class ResolutionLadder {
   index = 0;
@@ -140,6 +145,12 @@ export class ResolutionLadder {
   private lastUpAt = -Infinity;
   /** A step the e2e hook asked for (+1 down, −1 up), taken at the next sample. */
   private forced: 1 | -1 | 0 = 0;
+  private isSuspended = false;
+  /** The rung to come back to when the suspension ends. */
+  private heldIndex = 0;
+  /** Resumed: the grace starts at the next sample (the ladder has no clock of its own). */
+  private graceFromNext = false;
+  private graceUntil = 0;
   onChange: (() => void) | null = null;
   onFloor: (() => void) | null = null;
 
@@ -147,8 +158,33 @@ export class ResolutionLadder {
     return LADDER[this.index]!;
   }
 
+  get suspended(): boolean {
+    return this.isSuspended;
+  }
+
+  /**
+   * Suspend while a full-screen overlay slows frames (the pause menu, a panel, the death screen…), and
+   * resume when it closes. Either way the current window and streaks are dropped.
+   */
+  setSuspended(on: boolean) {
+    if (on === this.isSuspended) return;
+    this.isSuspended = on;
+    this.slow = this.fast = 0;
+    this.clearWindow(0);
+    if (on) {
+      this.heldIndex = this.index;
+      return;
+    }
+    this.graceFromNext = true;
+    if (this.index !== this.heldIndex) {
+      this.index = this.heldIndex;
+      this.onChange?.();
+    }
+  }
+
   reset() {
     this.index = 0;
+    this.heldIndex = 0; // a tier change under the menu: full resolution after it too
     this.noUpUntil = 0;
     this.upHold = UP_HOLD_INITIAL;
     this.lastUpAt = -Infinity;
@@ -177,13 +213,19 @@ export class ResolutionLadder {
       this.forced = 0;
       if (next === this.index) return;
       this.index = next;
+      this.heldIndex = next; // an explicit step under the menu is the rung to come back to
       this.slow = this.fast = 0;
       this.cooldownUntil = now + 3000;
       this.clearWindow(now);
       this.onChange?.();
       return;
     }
-    if (!this.enabled) return;
+    if (!this.enabled || this.isSuspended) return;
+    if (this.graceFromNext) {
+      this.graceFromNext = false;
+      this.graceUntil = now + LADDER_RESUME_GRACE_MS;
+    }
+    if (now < this.graceUntil) return;
     // Frames over 2 s are tab switches or loading stalls, not rendering cost.
     if (frameMs > 0 && frameMs < 2000) this.frames.push(frameMs);
     if (gpuSamples) for (const g of gpuSamples) this.gpu.push(g);

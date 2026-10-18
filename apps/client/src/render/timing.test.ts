@@ -196,6 +196,126 @@ describe("resolution ladder", () => {
   });
 });
 
+describe("resolution ladder under full-screen overlays (D-view-4)", () => {
+  /** A ladder walked down to rung `rung` by slow frames; returns it and the time. */
+  function stepped(rung: number) {
+    const l = new ResolutionLadder();
+    let t = 1000;
+    while (l.index < rung) t = feed(l, t, 0.5, 28, null);
+    return { l, t };
+  }
+
+  it("takes no step while suspended, however slow the frames", () => {
+    const l = new ResolutionLadder();
+    let changes = 0;
+    let floors = 0;
+    l.onChange = () => changes++;
+    l.onFloor = () => floors++;
+    let t = feed(l, 1000, 1.5, 28, null); // a slow partial window before the menu opens
+    l.setSuspended(true);
+    expect(l.suspended).toBe(true);
+    t = feed(l, t, 60, 300, null); // ~3 fps
+    t = feed(l, t, 60, 40, null);
+    feed(l, t, 60, 28, 48);
+    expect(l.index).toBe(0);
+    expect(changes).toBe(0);
+    expect(floors).toBe(0);
+  });
+
+  it("resumes at the rung held when the suspension began", () => {
+    const { l, t: t0 } = stepped(2);
+    let t = t0;
+    l.setSuspended(true);
+    t = feed(l, t, 30, 120, null);
+    l.forceStep(1); // e2e hook: an explicit step under the menu is the new rung to come back to
+    t = feed(l, t, 0.1, 120, null);
+    expect(l.index).toBe(3);
+    l.setSuspended(false);
+    expect(l.index).toBe(3);
+    l.setSuspended(true);
+    l.reset(); // a tier change from the menu's settings: full resolution, also after the menu
+    l.setSuspended(false);
+    expect(l.index).toBe(0);
+    feed(l, t, 30, 16.7, null);
+    expect(l.index).toBe(0);
+  });
+
+  it("puts a rung changed under the menu back when the menu closes", () => {
+    const { l } = stepped(1);
+    const seen: number[] = [];
+    l.onChange = () => seen.push(l.index);
+    l.setSuspended(true);
+    l.index = 3; // whatever moved it while suspended (nothing in the game does today)
+    l.setSuspended(false);
+    expect(l.index).toBe(1);
+    expect(seen).toEqual([1]); // the size follows
+  });
+
+  it("ignores samples from the first second after resuming", () => {
+    const { l, t: t0 } = stepped(1);
+    // Let the step's cooldown and windows settle at the vsync rate, then open and close the menu.
+    let t = feed(l, t0, 10, 16.7, null);
+    l.setSuspended(true);
+    t = feed(l, t, 5, 40, null);
+    l.setSuspended(false);
+    const resumedAt = t;
+    // Slow from the moment the menu closes. Counting from the resume, two ≥ 2 s windows would end at
+    // +4 s; with the first second ignored they end at +3 s and +5 s.
+    t = feed(l, t, 4.5, 28, null);
+    expect(l.index, "only one slow window 4.5 s after resuming").toBe(1);
+    while (l.index === 1 && t < resumedAt + 8000) t = feed(l, t, 0.05, 28, null);
+    expect(l.index).toBe(2);
+    expect(t - resumedAt).toBeGreaterThanOrEqual(5000);
+    expect(t - resumedAt).toBeLessThan(5200);
+  });
+
+  it("starts fresh after resuming: a slow window from before the menu doesn't count", () => {
+    const l = new ResolutionLadder();
+    let t = feed(l, 1000, 2.1, 28, null); // one slow window: one more would step
+    l.setSuspended(true);
+    l.setSuspended(false);
+    t = feed(l, t, 0.05, 16.7, null);
+    const resumedAt = t;
+    t = feed(l, t, 3.1, 28, null); // grace + one slow window
+    expect(l.index).toBe(0);
+    while (l.index === 0 && t < resumedAt + 8000) t = feed(l, t, 0.05, 28, null);
+    expect(t - resumedAt).toBeGreaterThanOrEqual(4500); // carried over, it would step ~3 s after resuming
+  });
+
+  it("keeps the floor's cooldown when a short menu overlaps it", () => {
+    const { l, t: t0 } = stepped(3);
+    const floors: number[] = [];
+    let t = t0;
+    l.onFloor = () => floors.push(t);
+    while (floors.length === 0 && t < t0 + 30_000) t = feed(l, t, 0.05, 28, null);
+    const floorAt = floors[0]!;
+    t = feed(l, t, 0.2, 28, null);
+    l.setSuspended(true);
+    t = feed(l, t, 0.2, 28, null);
+    l.setSuspended(false); // the grace ends ~1.5 s after the floor call, inside its 6 s cooldown
+    while (floors.length === 1 && t < floorAt + 30_000) t = feed(l, t, 0.05, 28, null);
+    // Windows that end inside the cooldown don't count; two slow ones after it call the floor again
+    // (a suspension that dropped the cooldown would call it ~5.5 s after the first).
+    expect(floors[1]! - floorAt).toBeGreaterThanOrEqual(8000);
+  });
+
+  it("starts over after a menu that outlasts a step's cooldown", () => {
+    const { l, t: stepAt } = stepped(1);
+    const steps: number[] = [];
+    let t = stepAt;
+    l.onChange = () => steps.push(t);
+    t = feed(l, t, 0.5, 28, null);
+    l.setSuspended(true);
+    t = feed(l, t, 10, 28, null);
+    l.setSuspended(false);
+    const resumedAt = t;
+    while (steps.length === 0 && t < resumedAt + 20_000) t = feed(l, t, 0.05, 28, null);
+    // Grace (1 s) and two fresh ≥ 2 s windows: the old cooldown neither blocks nor shortens it.
+    expect(steps[0]! - resumedAt).toBeGreaterThanOrEqual(4900);
+    expect(steps[0]! - resumedAt).toBeLessThan(5200);
+  });
+});
+
 describe("probe decision", () => {
   const frames = (n: number, ms: number) => Array.from({ length: n }, () => ms);
 

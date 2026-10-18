@@ -158,4 +158,32 @@ test.describe("J5 controls", () => {
     await expect(pauseMenu(player).getByText(/Voice & radio/), "no Voice & radio row").toHaveCount(0);
     await player.shot("menu-voice-coming-soon");
   });
+
+  test("J5.5 · item 1 · the pause menu doesn't lower the resolution: 10 openings over slow frames leave the ladder's rung (D-view-4)", { tag: ["@J5", "@J5.5", "@item-1"] }, async ({ player, page }) => {
+    // ?cpuslow=8 (the weak-laptop profile): every frame's CPU time ×8, so frames are slow under the menu
+    // too, the way the blurred menu slowed the owner's M1. ?notimer: frame times only, like the M1's
+    // untrusted GPU timer (a trusted one would see GPU headroom and keep the resolution). Medium is
+    // pinned: no tier drop at the floor.
+    await player.joinAsDevAdmin({ starter: "Hexwick", body: "arcadia", extra: { cpuslow: 8, notimer: true } });
+    await player.waitInWorld(180_000, "arcadia");
+    const t0 = await player.now();
+    const rungs: (number | null)[] = [];
+    let start: number | null = null;
+    for (let i = 0; i < 10; i++) {
+      await player.escape();
+      await expect(pauseMenu(player), `menu ${i + 1} opens`).toBeVisible();
+      // The rung the first suspension began with: anything before it is ordinary play.
+      if (i === 0) start = (await player.snap()).gfx?.ladder ?? null;
+      await page.waitForTimeout(2500); // two ladder windows' worth of slow frames under the menu
+      await page.keyboard.press("Escape");
+      await expect(pauseMenu(player), `menu ${i + 1} closes`).toBeHidden();
+      await page.waitForTimeout(800); // back in the game, inside the ladder's 1 s grace
+      rungs.push((await player.snap()).gfx?.ladder ?? null);
+    }
+    const frames = await page.evaluate((t) => (window as any).__fl.frames.stats(t), t0);
+    await player.note("ladder", { start, rungs, frames: { p50: frames.p50, p95: frames.p95, frames: frames.frames } });
+    expect(frames.p50, "the run's frames are slow (over the ladder's 20 ms line)").toBeGreaterThan(20);
+    expect(start, "the ladder's rung is known").not.toBeNull();
+    expect(rungs, "the ladder stays at its starting rung through 10 menus").toEqual(rungs.map(() => start));
+  });
 });

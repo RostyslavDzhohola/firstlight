@@ -88,7 +88,7 @@ interface GameLike {
     tier?: string;
     pixelRatio?(): number;
     render?: () => void;
-    ladder?: { index: number; scale: number; forceStep?(dir: 1 | -1): void };
+    ladder?: { index: number; scale: number; suspended?: boolean; forceStep?(dir: 1 | -1): void };
     camera?: { matrixWorldInverse: { elements: ArrayLike<number> }; projectionMatrix: { elements: ArrayLike<number> }; position: Vec };
     renderer?: { domElement?: HTMLCanvasElement };
   };
@@ -658,6 +658,7 @@ export function installE2eHook(win: Window & typeof globalThis): void {
         tier: g.ctx?.tier ?? null,
         pixelRatio: g.ctx?.pixelRatio?.() ?? null,
         ladder: g.ctx?.ladder?.index ?? null,
+        ladderSuspended: g.ctx?.ladder?.suspended ?? null,
         canvas: g.ctx?.renderer?.domElement ? [g.ctx.renderer.domElement.width, g.ctx.renderer.domElement.height] : null,
       },
       net: room ? { roomId: room.roomId, sessionId: room.sessionId, rtt: g.net?.rtt ?? null } : null,
