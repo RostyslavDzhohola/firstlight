@@ -27,7 +27,6 @@ interface Obj3 {
   layers: { mask: number; set(n: number): void };
   matrixWorld: { elements: ArrayLike<number> };
   traverse(cb: (o: Obj3) => void): void;
-  getWorldPosition(v: V): V;
 }
 interface PropLike {
   def: { id: string; look?: string };
@@ -152,7 +151,8 @@ export function stallTools(game: () => StallGame | null) {
     let labelDepth: number | null = null;
     let labelOpacity: number | null = null;
     if (label) {
-      const w = label.getWorldPosition({ x: 0, y: 0, z: 0 });
+      const e = label.matrixWorld.elements;
+      const w = { x: e[12]!, y: e[13]!, z: e[14]! };
       const m = cam.matrixWorldInverse.elements;
       labelDepth = -(m[2]! * w.x + m[6]! * w.y + m[10]! * w.z + m[14]!);
       // What it is drawn with: the near-camera fade where its material has it (#22), else whole.
