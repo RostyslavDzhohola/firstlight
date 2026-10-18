@@ -37,22 +37,29 @@ interface CameraState {
 }
 interface Coverage {
   label: number;
+  awning: number;
+  /** The rest of the stall: counter, posts, goods, sign, an outpost stall's walls. */
   stall: number;
   keeper: number;
   total: number;
   noise: number;
-  /** The stall's volume across the view, by rays from the lens (null: not measured). */
-  geo: number | null;
+  /** How many meshes were hidden for the awning and the rest (0: nothing of the stall measured). */
+  parts: { awning: number; stall: number };
   camera: CameraState | null;
 }
 interface Stalls {
   info(): StallInfo | null;
   camera(): Promise<CameraState | null>;
+  settle(): Promise<{ frames: number; settled: boolean }>;
+  standable(x: number, y: number, z: number): Promise<boolean | null>;
   coverage(o?: object): Promise<Coverage | null>;
   watch: { start(): Promise<boolean>; stop(): { frames: number; inside: number; minLabelDepth: number | null; minVisibleLabelDepth: number | null; worst: unknown[] } | null };
 }
 const stalls = <T>(player: Player, fn: (s: Stalls) => T | Promise<T>): Promise<T> =>
   player.page.evaluate(`(${fn.toString()})(window.__fl.stalls)`) as Promise<T>;
+
+/** "A small share of the screen" for the awning, in any view sampled (round and under the stall, looking every way). */
+const AWNING_MAX = 0.15;
 
 const SHOPS: Record<string, string> = { portus: "Portus Exchange", arcadia: "Dawnpad Trading Post", hollowmere: "Lanternfall Stall", meridian: "Waystation Supply" };
 
@@ -61,10 +68,11 @@ function at(s: StallInfo, x: number, z: number): V {
   return [0, 1, 2].map((i) => s.centre[i]! + s.right[i]! * x + s.front[i]! * z) as V;
 }
 
+/** Admin-teleport to `p` (the server puts the feet on the nearest clear ground) and let the camera settle. */
 async function teleport(player: Player, p: V) {
   await player.admin("teleport", { x: p[0], y: p[1], z: p[2] });
   await player.until((x) => !!x.player && Math.hypot(x.player.pos[0]! - p[0], x.player.pos[1]! - p[1], x.player.pos[2]! - p[2]) < 1.6, "teleported beside the stall", 10_000);
-  await player.page.waitForTimeout(250);
+  await stalls(player, (x) => x.settle());
 }
 
 /** Face world point `p` (heading), offset by `off` degrees, at camera pitch `pitch` (rad, + up). */
@@ -78,7 +86,7 @@ async function look(player: Player, p: V, off: number, pitch: number) {
   }
   const s = await player.snap();
   await player.lookUp(pitch - (s.player?.pitch ?? 0));
-  await player.page.waitForTimeout(450); // the camera eases back out from a wall at 0.25 m a frame
+  await stalls(player, (x) => x.settle()); // the camera eases back out from a wall at 0.25 m a frame
 }
 
 for (const body of ["portus", "arcadia", "hollowmere", "meridian"] as const) {
@@ -88,6 +96,9 @@ for (const body of ["portus", "arcadia", "hollowmere", "meridian"] as const) {
     mkdirSync(NUMBERS, { recursive: true });
     await player.joinAsDevAdmin({ starter: "Hexwick", body });
     await player.waitInWorld(180_000, body);
+    // The stall's faded material (an outpost's own, D-view-5) compiled behind the loading screen.
+    const shaders = await player.shaderWatchClosed();
+    expect.soft(shaders.afterWarmup, `no shader built after the warm-up (${JSON.stringify(shaders.recent)})`).toBe(0);
     await player.lock();
     const s = (await stalls(player, (x) => x.info()))!;
     expect(s, "the shop's keeper is in the world").toBeTruthy();
@@ -113,7 +124,7 @@ for (const body of ["portus", "arcadia", "hollowmere", "meridian"] as const) {
         rows.push({ ...c, spot: spot.name, look: l.name });
         // The view the owner recorded: at the counter, turned away from it, looking down; and every
         // pose where something covers a lot.
-        if ((spot.name === "counter" && l.name.startsWith("away")) || c.label > 0.03 || (Math.max(c.stall, c.geo ?? 0) > 0.25 && !l.name.startsWith("at")) || c.camera?.inside) {
+        if ((spot.name === "counter" && l.name.startsWith("away")) || c.label > 0.03 || c.awning > 0.1 || (c.awning + c.stall > 0.15 && l.name.startsWith("away")) || c.camera?.inside) {
           await page.screenshot({ path: path.join(SHOTS, `${body}-${spot.name}-${l.name}.png`) }).catch(() => {});
         }
       }
@@ -131,10 +142,18 @@ for (const body of ["portus", "arcadia", "hollowmere", "meridian"] as const) {
     await page.screenshot({ path: path.join(SHOTS, `${body}-walked-into-counter-turned-away.png`) }).catch(() => {});
     const watched = await stalls(player, (x) => x.watch.stop());
 
-    // E at the counter from the front and from both front corners (the sides the keeper faces).
-    const trades: { side: string; prompt: string; opened: boolean }[] = [];
-    for (const [side, x, z] of [["front", 0, 1.8], ["front-left", -1.6, 1.6], ["front-right", 1.6, 1.6]] as const) {
-      await teleport(player, at(s, x, z));
+    // E at the counter from the front, both front corners and both sides (the sides the keeper
+    // faces, and beside the stall: within reach of the keeper everywhere a player can stand there).
+    const trades: { side: string; prompt: string; opened: boolean; blocked?: boolean }[] = [];
+    for (const [side, x, z] of [["front", 0, 1.8], ["front-left", -1.6, 1.6], ["front-right", 1.6, 1.6], ["left", -2.3, 0.3], ["right", 2.3, 0.3]] as const) {
+      const p = at(s, x, z);
+      // A side a wall closes off isn't a way to the keeper: say so instead of trading there.
+      const standable = await page.evaluate(([x, y, z]) => (window as unknown as { __fl: { stalls: Stalls } }).__fl.stalls.standable(x, y, z), p);
+      if (!standable) {
+        trades.push({ side, prompt: "", opened: false, blocked: true });
+        continue;
+      }
+      await teleport(player, p);
       await look(player, s.keeper, 0, -0.15);
       const prompt = await page
         .locator(".fl-prompt")
@@ -155,24 +174,24 @@ for (const body of ["portus", "arcadia", "hollowmere", "meridian"] as const) {
       await player.lock();
     }
 
-    const worst = (k: "label" | "stall" | "keeper" | "total" | "geo", filter: (r: (typeof rows)[number]) => boolean = () => true) =>
-      rows.filter(filter).reduce((m, r) => ((r[k] ?? 0) > m.v ? { v: r[k] ?? 0, at: `${r.spot} ${r.look}` } : m), { v: 0, at: "" });
+    const worst = (k: (r: (typeof rows)[number]) => number, filter: (r: (typeof rows)[number]) => boolean = () => true) =>
+      rows.filter(filter).reduce((m, r) => (k(r) > m.v ? { v: k(r), at: `${r.spot} ${r.look}` } : m), { v: 0, at: "" });
     const summary = {
       phase: PHASE,
       body,
       poses: rows.length,
       insidePoses: rows.filter((r) => r.camera?.inside).map((r) => `${r.spot} ${r.look}`),
-      maxLabel: worst("label"),
+      stallParts: rows[0]?.parts ?? null,
+      maxLabel: worst((r) => r.label),
+      maxAwning: worst((r) => r.awning),
       // Turned away from the stall (the camera behind the player, toward the stall): it was 40 % of the
       // view at Portus with the camera inside or beyond it. Beside it (left, right) a stall at your
       // shoulder fills that side of the view like a wall does, and facing it, it's what you look at.
-      maxStallTurnedAway: worst("stall", (r) => r.look.startsWith("away")),
-      maxStallBeside: worst("stall", (r) => r.look.startsWith("left") || r.look.startsWith("right")),
-      maxStallFacing: worst("stall", (r) => r.look.startsWith("at")),
-      /** The stall's volume by rays (an outpost stall is in the town mesh): includes what other things hide. */
-      maxGeoTurnedAway: worst("geo", (r) => r.look.startsWith("away")),
-      maxKeeper: worst("keeper"),
-      maxTotal: worst("total"),
+      maxStallTurnedAway: worst((r) => r.awning + r.stall, (r) => r.look.startsWith("away")),
+      maxStallBeside: worst((r) => r.awning + r.stall, (r) => r.look.startsWith("left") || r.look.startsWith("right")),
+      maxStallFacing: worst((r) => r.awning + r.stall, (r) => r.look.startsWith("at")),
+      maxKeeper: worst((r) => r.keeper),
+      maxTotal: worst((r) => r.total),
       maxNoise: rows.reduce((m, r) => Math.max(m, r.noise), 0),
       watched,
       trades,
@@ -180,14 +199,19 @@ for (const body of ["portus", "arcadia", "hollowmere", "meridian"] as const) {
     writeFileSync(path.join(NUMBERS, `${PHASE}-${body}.json`), JSON.stringify({ summary, rows }, null, 1));
     await player.note("stalls", summary);
 
+    expect(summary.stallParts?.awning ?? 0, "the stall's awning is measured (Juno's mesh, the outpost's own)").toBeGreaterThan(0);
     for (const t of trades) {
+      if (t.blocked) continue; // reported: a wall there (standable() false)
       expect.soft(t.prompt, `${t.side}: the trade prompt`).toMatch(/Trade with/);
       expect.soft(t.opened, `${t.side}: E opens the shop`).toBe(true);
     }
+    expect.soft(trades.filter((t) => !t.blocked).length, "the front and its corners at least").toBeGreaterThanOrEqual(3);
     expect.soft(summary.insidePoses, "the camera never inside a counter or an awning (measured poses)").toEqual([]);
     expect.soft(watched?.inside ?? 1, "…nor in any frame of the walk and the poses").toBe(0);
     expect.soft(watched?.minVisibleLabelDepth ?? 99, "no label drawn closer than 1.5 m to the camera").toBeGreaterThanOrEqual(1.5);
-    expect.soft(summary.maxLabel.v, `the label's share of the screen (worst: ${summary.maxLabel.at})`).toBeLessThan(0.06);
-    expect.soft(summary.maxStallTurnedAway.v, `the stall's share of the screen with the player turned from it (worst: ${summary.maxStallTurnedAway.at})`).toBeLessThan(0.2);
+    // In every view sampled: the label and the awning cover a small share of the screen.
+    expect.soft(summary.maxLabel.v, `the label's share of the screen, any view (worst: ${summary.maxLabel.at})`).toBeLessThan(0.06);
+    expect.soft(summary.maxAwning.v, `the awning's share of the screen, any view (worst: ${summary.maxAwning.at})`).toBeLessThan(AWNING_MAX);
+    expect.soft(summary.maxStallTurnedAway.v, `the whole stall's share with the player turned from it (worst: ${summary.maxStallTurnedAway.at})`).toBeLessThan(0.2);
   });
 }

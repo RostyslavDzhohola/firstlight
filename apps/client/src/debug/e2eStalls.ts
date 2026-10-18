@@ -1,15 +1,19 @@
 // Test-only: the shop stall checks for the e2e hook (#22, `__fl.stalls`; debug/e2eHook.ts). Reads the
-// game through narrow structural types, like the hook, and changes nothing in it except for the two
-// frames a coverage measurement hides the stall in (then puts everything back).
+// game through narrow structural types, like the hook, and changes nothing in it except for the few
+// frames a coverage measurement hides parts of the stall in (then puts everything back).
 //
 //   info()          the body's shop: the keeper, its frame (x right, y up, z toward the customers) and
 //                   the stall's centre, for placing the player round it
 //   camera()        the camera now: inside a stall volume (its counter or awning: the shared solid or a
 //                   camera-only one), and the label's depth in front of it with its fade
-//   coverage()      async: the share of the screen the stall, its keeper and its label cover in the
-//                   frames drawn now, by drawing them with and without each (pixel differences), and
-//                   the stall's volume across the view by rays (`geo`: an outpost's stall is part of the
-//                   town mesh, so it can't be hidden for the pixel measure)
+//   settle()        async: resolves once the camera has stopped moving (it eases out from a wall at
+//                   0.25 m a frame), with the frames it took
+//   standable(p)    can a player stand at world point p (no structure solid there)? For approaches a
+//                   wall may close off
+//   coverage()      async: the share of the screen the label, the awning, the rest of the stall and
+//                   the keeper each cover in the frames drawn now, by drawing them with and without
+//                   each (pixel differences). Juno's stall is QuestWorld's; an outpost's is the site
+//                   mesh baked on its own (SiteTown ":stall"), its awning the triangles above 1.95 m.
 //   watch.start()   every drawn frame from now: is the camera inside a stall volume, how close is the label;
 //   watch.stop()    → { frames, inside, minLabelDepth, minVisibleLabelDepth (drawn at > 2 % opacity) }
 
@@ -18,9 +22,14 @@ interface V {
   y: number;
   z: number;
 }
+interface IndexLike {
+  count: number;
+  array: ArrayLike<number>;
+}
 interface Obj3 {
   name: string;
   visible: boolean;
+  geometry?: { index: IndexLike | null; attributes: { position: { array: ArrayLike<number> } }; setIndex(i: unknown): void };
   isMesh?: boolean;
   isSprite?: boolean;
   children: Obj3[];
@@ -39,12 +48,15 @@ interface StallGame {
   bodyId?: string;
   ctx?: {
     render?: () => void;
-    camera?: { position: V; matrixWorld: { elements: ArrayLike<number> }; matrixWorldInverse: { elements: ArrayLike<number> }; projectionMatrixInverse: { elements: ArrayLike<number> } };
+    camera?: { position: V; matrixWorldInverse: { elements: ArrayLike<number> } };
     renderer?: { domElement?: HTMLCanvasElement };
   };
-  planet?: { terrain?: unknown };
+  planet?: { terrain?: unknown; town?: { group: Obj3 } | null };
   systems?: unknown[];
 }
+
+/** An outpost stall's awning: its triangles wholly above this height (m, prefab frame; the valance hangs to 1.98). */
+const AWNING_FROM = 1.95;
 
 /** Layer only the sun's shadow camera draws (render/atmosphere.ts SHADOW_ONLY_LAYER): hidden, shadow kept. */
 const SHADOW_ONLY_LAYER = 5;
@@ -72,46 +84,6 @@ export function stallTools(game: () => StallGame | null) {
       label: await import("../render/labelFade.ts"),
     });
   type Terrain = Parameters<typeof import("../world/stallCamera.ts").stallCameraBoxes>[0];
-
-  /**
-   * The stall's whole drawn volume as boxes (no padding): its camera-only pieces and its shared
-   * solids (Juno's counter; an outpost stall's whole-stall box).
-   */
-  const stallVolumes = (body: string, terrain: Terrain) => {
-    const m = mods!;
-    const pieces = m.stall.stallCameraBoxes(terrain).map(m.stall.unpadded);
-    const site = m.outposts.OUTPOSTS[body as keyof typeof m.outposts.OUTPOSTS];
-    const frame = body === "portus" ? m.sites.plazaFacingPlacement("juno_vale", terrain as never) : site ? m.sites.sitePlacements(terrain as never)[site.shop.item] : null;
-    const solids = body === "portus" ? m.sites.JUNO_COUNTER_SOLIDS : frame && site ? site.prefabs[frame.prefab]!.solids : [];
-    const boxes = frame ? m.stall.placeStallBoxes(frame, solids.map(([, cx, cz, hx, hz, y0, y1]) => ({ x: cx, y: (y0 + y1) / 2, z: cz, w: 2 * hx, h: y1 - y0, d: 2 * hz })), 0) : [];
-    return [...pieces, ...boxes];
-  };
-
-  /** Share of the view (a 48 × 27 grid of rays from the lens) that meets the stall's volume, ignoring what hides it. */
-  const geometricShare = (g: StallGame) => {
-    const cam = g.ctx?.camera;
-    const terrain = g.planet?.terrain as Terrain | undefined;
-    if (!cam || !terrain || !mods) return null;
-    const vols = stallVolumes(g.bodyId ?? "", terrain);
-    const o = cam.position;
-    if (mods.stall.inCameraBox(vols, o.x, o.y, o.z)) return 1;
-    const pi = cam.projectionMatrixInverse.elements, mw = cam.matrixWorld.elements;
-    let hit = 0, n = 0;
-    for (let j = 0; j < 27; j++) {
-      for (let i = 0; i < 48; i++) {
-        const u = ((i + 0.5) / 48) * 2 - 1, v = 1 - ((j + 0.5) / 27) * 2;
-        // NDC (u, v, 0.5) → view space → world direction.
-        const x = pi[0]! * u + pi[4]! * v + pi[8]! * 0.5 + pi[12]!;
-        const y = pi[1]! * u + pi[5]! * v + pi[9]! * 0.5 + pi[13]!;
-        const z = pi[2]! * u + pi[6]! * v + pi[10]! * 0.5 + pi[14]!;
-        const dx = mw[0]! * x + mw[4]! * y + mw[8]! * z, dy = mw[1]! * x + mw[5]! * y + mw[9]! * z, dz = mw[2]! * x + mw[6]! * y + mw[10]! * z;
-        const l = Math.hypot(dx, dy, dz);
-        n++;
-        if (mods.stall.cameraBoxRay(vols, o.x, o.y, o.z, dx / l, dy / l, dz / l, 60) < Infinity) hit++;
-      }
-    }
-    return hit / n;
-  };
 
   /** The keeper's frame axes in planet space (QuestWorld's root: columns of its world matrix). */
   const frameOf = (k: PropLike) => {
@@ -201,6 +173,36 @@ export function stallTools(game: () => StallGame | null) {
     return n / (a.length / 4);
   };
 
+  /** The outpost stall's meshes (both LOD variants), or none (Portus: Juno's stall is QuestWorld's). */
+  const outpostStall = (g: StallGame): Obj3[] => {
+    const out: Obj3[] = [];
+    g.planet?.town?.group.traverse((o) => { if (o.isMesh && o.name.endsWith(":stall")) out.push(o); });
+    return out;
+  };
+
+  /** Per stall mesh: its index without the awning's triangles (cached; the geometry never changes). */
+  const withoutAwning = new WeakMap<Obj3, Uint32Array>();
+  const noAwningIndex = (g: StallGame, m: Obj3): Uint32Array | null => {
+    let idx = withoutAwning.get(m);
+    if (idx) return idx;
+    const m0 = mods!;
+    const site = m0.outposts.OUTPOSTS[g.bodyId as keyof typeof m0.outposts.OUTPOSTS];
+    const p = site && m0.sites.sitePlacements(g.planet!.terrain as never)[site.shop.item];
+    const index = m.geometry?.index;
+    if (!p || !index) return null;
+    const pos = m.geometry!.attributes.position.array;
+    const lift = (v: number) => ((pos[v * 3]! - p.px) * p.ux + (pos[v * 3 + 1]! - p.py) * p.uy + (pos[v * 3 + 2]! - p.pz) * p.uz) / p.scale;
+    const keep: number[] = [];
+    for (let t = 0; t < index.count; t += 3) {
+      const a = index.array[t]!, b = index.array[t + 1]!, c = index.array[t + 2]!;
+      if (lift(a) >= AWNING_FROM && lift(b) >= AWNING_FROM && lift(c) >= AWNING_FROM) continue;
+      keep.push(a, b, c);
+    }
+    idx = Uint32Array.from(keep);
+    withoutAwning.set(m, idx);
+    return idx;
+  };
+
   const coverage = async (opts: { width?: number; height?: number; threshold?: number } = {}) => {
     await load();
     const g = game();
@@ -208,37 +210,80 @@ export function stallTools(game: () => StallGame | null) {
     if (!g || !k) return null;
     const w = opts.width ?? 192, h = opts.height ?? 108, th = opts.threshold ?? 24;
     const label = labelOf(k);
-    const stallMeshes: Obj3[] = [];
-    k.root.traverse((o) => { if (o.isMesh) stallMeshes.push(o); });
+    // Juno's stall: QuestWorld's meshes under her root (the awning its own); an outpost's: the site's stall mesh.
+    const quest: Obj3[] = [];
+    k.root.traverse((o) => { if (o.isMesh) quest.push(o); });
+    const outpost = outpostStall(g);
+    const awningMeshes = quest.filter((m) => m.name === "stall:awning");
+    const rest = [...quest.filter((m) => m.name !== "stall:awning"), ...outpost];
     const keeperMeshes: Obj3[] = [];
     k.npc?.root.traverse((o) => { if (o.isMesh) keeperMeshes.push(o); });
     const masks = new Map<Obj3, number>();
+    const indices = new Map<Obj3, unknown>();
+    const hide = (ms: Obj3[]) => { for (const m of ms) if (!masks.has(m)) masks.set(m, m.layers.mask), m.layers.set(SHADOW_ONLY_LAYER); };
     const labelWasVisible = label?.visible ?? false;
     const state = cameraNow();
-    const geo = geometricShare(g);
     try {
       const all = await capture(w, h);
       if (label) label.visible = false;
       const noLabel = await capture(w, h);
-      for (const m of stallMeshes) masks.set(m, m.layers.mask), m.layers.set(SHADOW_ONLY_LAYER);
+      hide(awningMeshes);
+      for (const m of outpost) {
+        const idx = noAwningIndex(g, m);
+        if (!idx || !m.geometry) continue;
+        indices.set(m, m.geometry.index);
+        m.geometry.setIndex(Array.from(idx));
+      }
+      const noAwning = await capture(w, h);
+      hide(rest);
       const noStall = await capture(w, h);
-      for (const m of keeperMeshes) masks.set(m, m.layers.mask), m.layers.set(SHADOW_ONLY_LAYER);
+      hide(keeperMeshes);
       const none = await capture(w, h);
       const again = await capture(w, h);
       return {
         label: differ(all, noLabel, th),
-        stall: differ(noLabel, noStall, th),
+        awning: differ(noLabel, noAwning, th),
+        /** The rest of the stall: counter, posts, goods, sign, the outpost stall's walls. */
+        stall: differ(noAwning, noStall, th),
         keeper: differ(noStall, none, th),
         total: differ(all, none, th),
         noise: differ(none, again, th),
-        /** The stall's volume across the view (rays; covers the outposts' stalls, drawn in the town mesh). */
-        geo,
+        parts: { awning: awningMeshes.length + outpost.length, stall: rest.length },
         camera: state,
       };
     } finally {
       if (label) label.visible = labelWasVisible;
       for (const [m, mask] of masks) m.layers.mask = mask;
+      for (const [m, index] of indices) m.geometry?.setIndex(index);
     }
+  };
+
+  /** Resolves when the camera has moved under 1 mm for 3 drawn frames in a row (at most `max` frames). */
+  const settle = (max = 120) =>
+    new Promise<{ frames: number; settled: boolean }>((resolve) => {
+      const cam = game()?.ctx?.camera;
+      if (!cam) return resolve({ frames: 0, settled: false });
+      let last = { x: cam.position.x, y: cam.position.y, z: cam.position.z };
+      let still = 0, frames = 0;
+      const tick = () => {
+        frames++;
+        const p = cam.position;
+        still = len(sub(p, last)) < 0.001 ? still + 1 : 0;
+        last = { x: p.x, y: p.y, z: p.z };
+        if (still >= 3 || frames >= max) resolve({ frames, settled: still >= 3 });
+        else requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+
+  /** Can a player stand at world point (x, y, z) (feet, any height: snapped to the ground there)? */
+  const standable = async (x: number, y: number, z: number) => {
+    await load();
+    const terrain = game()?.planet?.terrain as { body: { radius: number }; groundHeight(x: number, y: number, z: number): number } | undefined;
+    if (!terrain) return null;
+    const l = Math.hypot(x, y, z);
+    const r = terrain.body.radius + terrain.groundHeight(x / l, y / l, z / l);
+    return mods!.sites.structureCollider(terrain as never).isClear({ x: (x / l) * r, y: (y / l) * r, z: (z / l) * r });
   };
 
   // ---- watch: every frame
@@ -281,5 +326,5 @@ export function stallTools(game: () => StallGame | null) {
     },
   };
 
-  return { info, camera: async () => (await load(), cameraNow()), coverage, watch };
+  return { info, camera: async () => (await load(), cameraNow()), settle, standable, coverage, watch };
 }
