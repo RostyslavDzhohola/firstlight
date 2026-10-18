@@ -1081,5 +1081,23 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   the GPU when its adapter never answers, so a throwaway WebGL2 context (lost straight after) reads
   it, only when there is a record to check or one to write. Replaces the tab-session memory. Why:
   every new tab or visit on the owner's M1 waited the full 8 s before falling back (#24, spec #18).
-  J1.4 (headless Chromium on the M1, an adapter that never answers): navigation to renderer up
+  J1.5 (headless Chromium on the M1, an adapter that never answers): navigation to renderer up
   9.2 s on the first visit, 0.55 s on the second, 8.4 s with `?webgpu`.
+- **D-load-1 (2026-10-18):** every shader warm-up is timed per phase and the loader shows its real
+  progress. `warmup()` returns a report kept in `window.__shaders.warmups` (the e2e hook's
+  `warmups()`): label (`arrival:<body>`, `probe`, `graphics`, `reprobe`), backend, tier, total ms,
+  node builds and the session's shader count, and per phase ms + builds: the scene-pass compile
+  (with the render objects it prepared), compute (none yet), the shadow frames (with the predicted
+  builds) and the real frames. J1.2 and J1.3 note it with the frame times inside its window; one
+  `[warmup]` console line sums it up. The loader's warm-up step reads "Preparing shaders done/total":
+  the compile's render objects, the predicted shadow builds and the real frames as work units, the
+  bar monotonic from 85% to 100% (`ui/loading.ts` `warmupProgress`). Baseline (three's own
+  compiles, `?serialcompile`; `e2e/bench-warmup.spec.ts`, M1 headless with `--use-angle=metal`, the
+  owner's High tier, no probe, a fresh browser per run, load average 17–120 from other apps): 242
+  builds, the owner's overlay count. WebGL2 with a cold Metal shader cache: 30.3–48.9 s (4 runs),
+  compile 17.0–29.9 s (696 objects, 157 builds), shadows 12.1–19.3 s (44 frames, 85 builds), worst
+  frame 2.9–6.1 s with 18–21 frames over 250 ms; with a warm cache 5.1–5.6 s (2 runs), worst frame
+  217 ms. WebGPU, warm cache: 3.6–3.9 s (2 runs). macOS keeps each app's compiled Metal shaders in
+  its own cache outside the browser profile, so the first visit after shaders change pays the cold
+  cost; the owner's ~20 s fits a cold or partly cold cache. Why: the owner's loader sat on "Warming
+  up shaders… 92%" for ~20 s (#25, spec #18), and #30 needs to know where the time goes.

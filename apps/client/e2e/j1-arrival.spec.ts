@@ -58,7 +58,7 @@ test.describe("J1 arrival", () => {
     expect.soft(frames.max, `no frozen frame from the portal to Arcadia (worst: ${JSON.stringify(frames.worst)})`).toBeLessThan(500);
     expect.soft(shaders.afterWarmup, `no shader builds after the warm-up (${JSON.stringify(shaders.recent)})`).toBe(0);
   });
-  test("J1.4 · a WebGPU that never answers costs this device one 8 s wait, not one per visit", { tag: ["@J1", "@J1.4"] }, async ({ player, page }) => {
+  test("J1.5 · a WebGPU that never answers costs this device one 8 s wait, not one per visit", { tag: ["@J1", "@J1.5"] }, async ({ player, page }) => {
     test.skip(player.gfx !== "webgl", "the hang is simulated, so one renderer project covers it");
     // The owner's M1: Chrome's WebGPU adapter never answers. Same for every visit in this browser profile.
     await page.addInitScript(() => {
@@ -90,5 +90,17 @@ test.describe("J1 arrival", () => {
     expect.soft(second.lines.join("\n"), "the second visit skips WebGPU").toMatch(/WebGPU skipped/);
     expect.soft(second.ms, "the second visit doesn't wait for WebGPU").toBeLessThan(first.ms - 6000);
     expect.soft(forced.lines.join("\n"), "?webgpu tries again").toMatch(/\?webgpu: trying WebGPU[\s\S]*WebGPU did not start within 8 s/);
+  });
+  test("J1.6 · the owner's High tier, no probe: shader warm-up per phase, the loader never blocks 250 ms, nothing compiles after", { tag: ["@J1", "@J1.6"] }, async ({ player }) => {
+    // The owner's M1 case (#18): a returning device on High, so no first-visit probe warms anything first.
+    await player.joinAsDevAdmin({ starter: "Hexwick", body: "portus", extra: { tier: "high" } });
+    await player.waitInWorld(180_000, "portus");
+    const warm = await player.warmup("arrival");
+    const shaders = await player.shaderWatchClosed();
+    await player.note("warmup", warm);
+    expect(warm, "the arrival's warm-up is reported").not.toBeNull();
+    expect.soft(warm!.tier, "on the owner's tier").toBe("high");
+    expect.soft(warm!.framesDuring.max, `no main-thread block over 250 ms during the warm-up (worst: ${JSON.stringify(warm!.framesDuring.worst)})`).toBeLessThan(250);
+    expect.soft(shaders.afterWarmup, `no shader builds after the warm-up (${JSON.stringify(shaders.recent)})`).toBe(0);
   });
 });
