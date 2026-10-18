@@ -1280,3 +1280,36 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   (2026-10-18), "If we can have better quality of graphics and sacrifice it with just a little bit
   more wait time, it's fine. I would rather do that trade-off": one slow start used to cost the
   device WebGPU, and with it High's GTAO and TRAA (`render/quality.ts`), for a week.
+- **D-load-6 (2026-10-18):** graphics quality over load time: the loader waits for a fuller world,
+  and quality the first load missed comes back at the next loading screen instead of never. (1) The
+  arrival waits for every terrain chunk the streaming wants (`Planet.loadRadius`, up to 520 m, past
+  every tier's tree distance of 110–260 m) and then for the grass round the camera to fill (the
+  camera is placed before the build, so the grass fills where the player looks; `GrassSystem.backlog`),
+  streaming without the 200 ms pause and with an 8 ms grass budget behind the loader; the cap is
+  30 s (was 15 s at 160 m, grass in play), and after the warm-up the grass gets up to 5 s more for a
+  tier the first-visit probe raised. The "Building the world" step reads "Building the world 42/96"
+  (chunks in/wanted), then "Building the world: grass…" (`game/worldReady.ts`, the pure predicate).
+  (2) A town or outpost download is aborted only after 45 s without a byte (was 15 s for the whole
+  download; any town download's bytes count for all, they share the Portus strips), the arrival
+  waits up to 50 s for it (was 18 s, D41), and an asset that lands after that is kept: the next
+  loading screen on that body (graphics re-warm, re-probe) swaps it in for the stone fallback before
+  its warm-up (`SiteTown.swapInLate`), and the next arrival takes it from the session cache.
+  (3) A session that started on Low (512² character textures) reloads every look's 1024² textures
+  when the tier rises above Low, behind that loading screen (graphics change, re-probe, an arrival
+  after a probe), rebinding them in the same materials, so nothing compiles again; a failed download
+  keeps the 512² set. Measured (M1 headless, other lanes' load 18–20, warm Metal cache, `E2E_WORKERS=1`,
+  main f299354 vs this lane; J1.2 = Play → in the world in Portus, J1.3 = portal to Arcadia):
+  J1.2 WebGL2 6.4 s → 7.8/8.2 s, WebGPU 7.0/6.9 s → 7.7/8.5 s (one run each way off: a probe that
+  picked Low and warmed 11 s, and 7 s spent connecting); J1.3 WebGL2 4.6 s → 6.5/7.3/7.7 s, WebGPU
+  5.0/4.3 s → 7.2/6.1/6.5 s. So about +1–2 s in Portus and +2–3 s to a planet: the build itself
+  takes 0.2–1.0 s in Portus (32 chunks, as before) and 0.7–1.2 s on Arcadia (95–97 chunks instead
+  of ~12 within 160 m), and Arcadia's warm-up compiles ~195 more render objects (763 → 958 items,
+  +0.5–1.3 s). Waiting only to the tier's tree distance plus a margin (~20 chunks on Medium) would
+  save most of the planet cost but let the far hills stream in during play. No new shader builds
+  after any warm-up (J1.3, and a Low → High switch on both backends: 12 full-size texture files,
+  0 builds after). Why: the owner's call (2026-10-18), "If we can have better quality of graphics
+  and sacrifice it with just a little bit more wait time, it's fine. I would rather do that
+  trade-off. Even if the wait time to load the game first is longer..."; the audit found the loader
+  hiding at 160 m with grass, far terrain and trees still streaming in, the town giving up after
+  15–18 s on a slow network for the whole visit, and Low's 512² character textures kept after a
+  tier rise.
