@@ -306,11 +306,47 @@ describe("FirstDrawPacer (one batch of first draws in flight, sized by the GPU's
     expect(p.allowance()).toBe(Math.round(work / (0.01 + (0.005 - 0.01) * PACER.fall)));
   });
 
-  it("a quick batch doesn't make the next one bigger than 1.5x its own units (or the start budget)", () => {
+  it("after a completed batch the next is at most 1.5x its units; the start budget only before the first", () => {
     const p = new FirstDrawPacer();
-    batch(p, 4000, L); // nothing to learn from beyond the fence: no rate limit
-    expect(p.allowance()).toBe(1.5 * FIRST_DRAWS_START); // grows from the start budget, not from 4000
-    expect(p.allowance()).toBeLessThanOrEqual(FIRST_DRAWS_CAP);
+    expect(p.allowance()).toBe(FIRST_DRAWS_START); // nothing completed yet
+    batch(p, 4000, L); // quick and small: nothing to learn about the rate beyond the fence
+    expect(p.allowance()).toBe(6000); // 1.5 × 4000, not 1.5 × the start budget
+    batch(p, 6000, L);
+    expect(p.allowance()).toBe(9000);
+  });
+
+  it("a small completed batch, then large new-stage candidates: they go one at a time, growing 1.5x per batch", () => {
+    const vs = { code: "v".repeat(1500) };
+    const fs = { code: "f".repeat(1500) };
+    const pipes = new Map<string, object>([["seed", { vertexProgram: vs, fragmentProgram: fs }], ["shared", { vertexProgram: vs, fragmentProgram: fs }]]);
+    for (let i = 0; i < 4; i++) pipes.set(`big${i}`, { vertexProgram: { code: `v${i}`.repeat(3000) }, fragmentProgram: { code: `f${i}`.repeat(8000) } });
+    const renderer = { _pipelines: { isReady: () => true, get: (ro: unknown) => ({ pipeline: pipes.get(String(ro)) }) } } as GateRenderer;
+    const gate = gateFirstDraws(renderer, undefined, newStageCost);
+    const p = new FirstDrawPacer();
+    let now = 0;
+    const frame = (ros: string[]) => {
+      const before = gate.cost();
+      const granted = gate.granted();
+      gate.frame(p.allowance());
+      for (const ro of ros) renderer._pipelines!.isReady(ro);
+      const used = gate.cost() - before;
+      p.sent(used, now, () => true);
+      now += L; // quick: the rate never limits here, only growth does
+      p.tick(now);
+      return { used, n: gate.granted() - granted };
+    };
+    frame(["seed"]);
+    const small = frame(["shared"]); // its stages were drawn: the overhead only
+    expect(small.used).toBe(PIPELINE_OVERHEAD);
+    expect(p.allowance()).toBe(1.5 * PIPELINE_OVERHEAD);
+    const bigs = ["big0", "big1", "big2", "big3"];
+    const cost = PIPELINE_OVERHEAD + 2 * 3000 + 2 * 8000; // 28 000 each, all new
+    const first = frame(bigs);
+    expect([first.n, first.used]).toEqual([1, cost]); // over the budget: the first goes alone
+    expect(p.allowance()).toBe(Math.min(FIRST_DRAWS_CAP, 1.5 * cost));
+    const second = frame(bigs);
+    expect([second.n, second.used]).toEqual([1, cost]); // 1.5 × 28 000, capped at the 40 000 ceiling: one fits, not two
+    gate.release();
   });
 
   it("FIRST_DRAWS_CAP is a ceiling: quick shared-stage batches never lift it, and new stages after them get no more", () => {

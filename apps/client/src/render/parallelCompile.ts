@@ -195,7 +195,7 @@ export interface PacerTuning {
   /** The first batch's budget, and the ceiling on every batch (cost units). */
   start: number;
   cap: number;
-  /** A batch's budget is at most `growth` × the last batch's units (or the start budget). */
+  /** A batch's budget is at most `growth` × the last completed batch's units (`start` before any). */
   growth: number;
   /** ms of each batch's time that is the fence's latency, not GPU work. */
   latency: number;
@@ -277,7 +277,8 @@ export class FirstDrawPacer {
     else this.rate += (r - this.rate) * (r > this.rate ? t.rise : t.fall);
     const work = BATCH_TARGET_MS - t.latency;
     const byRate = this.rate > 0 ? work / this.rate : Infinity;
-    const byGrowth = t.growth * Math.max(used, t.start);
+    // relative to what the GPU just finished, not the start budget (that's only for the first batch)
+    const byGrowth = t.growth * used;
     this.budget = Math.round(Math.max(1, Math.min(t.cap, byRate, byGrowth)));
   }
 
