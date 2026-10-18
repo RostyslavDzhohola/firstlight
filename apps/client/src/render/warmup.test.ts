@@ -201,8 +201,10 @@ describe("warmShadowCasters", () => {
 class FakePipelines {
   calls: { ro: string; parallel: boolean }[] = [];
   unfinished = 0;
+  /** The most programs compiling at once. */
+  maxUnfinished = 0;
   compiled = new Set<string>();
-  private readonly started = new Set<string>();
+  protected readonly started = new Set<string>();
   private readonly pipelines = new Map<string, object>();
   getForRender(ro: unknown, promises: Promise<unknown>[] | null = null) {
     const k = String(ro);
@@ -211,6 +213,7 @@ class FakePipelines {
     this.started.add(k);
     if (promises) {
       this.unfinished++;
+      this.maxUnfinished = Math.max(this.maxUnfinished, this.unfinished);
       promises.push(new Promise<void>((r) => setTimeout(() => {
         this.unfinished--;
         this.compiled.add(k);
@@ -234,7 +237,7 @@ class FakeDrawPipelines extends FakePipelines {
     const k = String(ro);
     // 12k characters of GLSL each: two fit the first batch's budget
     if (!this.byKey.has(k)) this.byKey.set(k, { k, vertexProgram: this.sharedVertex ?? { code: "v".repeat(4000) }, fragmentProgram: { code: "f".repeat(8000) } });
-    return { pipeline: this.byKey.get(k) };
+    return { pipeline: this.started.has(k) ? this.byKey.get(k) : undefined }; // none until getForRender made it
   }
   isReady(ro: unknown) {
     return this.compiled.has(String(ro));
@@ -510,6 +513,24 @@ describe("warm-up report (per-phase times and shader counts) and progress", () =
         vi.unstubAllGlobals();
         vi.restoreAllMocks();
       }
+    }
+  });
+
+  it("?linkcap=N (WebGL2): at most N programs link at once, and every one still compiles and draws before the loader goes", async () => {
+    vi.spyOn(flags, "has").mockImplementation((n) => n === "linkcap");
+    vi.spyOn(flags, "get").mockImplementation((n) => (n === "linkcap" ? "2" : null));
+    const pipelines = new FakeDrawPipelines();
+    try {
+      const ctx = fakeCtx({ items: 6, webgpu: false, shadows: false, pipelines, objects: 12, gl: fakeFenceGl() });
+      await warmup(ctx, { frames: 1 });
+      expect(pipelines.maxUnfinished).toBe(2);
+      const before = draws.slice(0, -1);
+      expect(new Set(before.flat()).size).toBe(12); // every object drew once before the settle frame
+      expect(draws.at(-1)).toHaveLength(12);
+      expect(pipelines.unfinished).toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
     }
   });
 

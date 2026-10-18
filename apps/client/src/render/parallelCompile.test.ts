@@ -8,6 +8,10 @@ import {
 function fakeRenderer() {
   const made: { ro: string; parallel: boolean; finish: () => void }[] = [];
   const pipelines = {
+    /** A render object has a pipeline once getForRender has made one. */
+    get(ro: unknown) {
+      return { pipeline: made.some((m) => m.ro === String(ro)) ? { ro } : undefined };
+    },
     getForRender(ro: unknown, promises: Promise<unknown>[] | null = null) {
       if (promises) {
         let finish!: () => void;
@@ -93,6 +97,31 @@ describe("deferPipelines", () => {
     expect(Object.prototype.hasOwnProperty.call(p, "getForRender")).toBe(true);
     d.release();
     expect(Object.prototype.hasOwnProperty.call(p, "getForRender")).toBe(false);
+  });
+
+  it("with a cap on links in flight, a render object without a pipeline waits its turn; one with a pipeline always goes", async () => {
+    const f = fakeRenderer();
+    const d = deferPipelines(f.renderer, { maxPending: 2 });
+    for (const ro of ["a", "b", "c", "d"]) f.pipelines.getForRender(ro);
+    expect(f.made.map((m) => m.ro)).toEqual(["a", "b"]); // c and d are held: no link started, nothing to draw
+    expect([d.pending(), d.held()]).toEqual([2, 2]);
+    f.pipelines.getForRender("a"); // has its pipeline: three's own path (an update), never held
+    expect(f.made).toHaveLength(3);
+    d.frame(); // a new frame: what it holds is counted afresh
+    expect(d.held()).toBe(0);
+    f.made[0]!.finish();
+    f.made[2]!.finish();
+    await tick();
+    for (const ro of ["c", "d"]) f.pipelines.getForRender(ro); // retried by the next frame: b still links
+    expect(f.made.slice(3).map((m) => m.ro)).toEqual(["c"]);
+    expect(d.held()).toBe(1);
+    d.frame();
+    f.made[1]!.finish();
+    await tick();
+    f.pipelines.getForRender("d");
+    expect(f.made.slice(3).map((m) => m.ro)).toEqual(["c", "d"]);
+    expect(d.held()).toBe(0);
+    d.release();
   });
 
   it("does nothing on a renderer without three's internals (another three version, a test fake)", async () => {

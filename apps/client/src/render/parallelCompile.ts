@@ -24,7 +24,10 @@
 
 /** The private part of three's Renderer this touches (three is pinned, SPEC §3). */
 export interface DeferRenderer {
-  _pipelines?: { getForRender(renderObject: unknown, promises?: Promise<unknown>[] | null): unknown };
+  _pipelines?: {
+    getForRender(renderObject: unknown, promises?: Promise<unknown>[] | null): unknown;
+    get?(renderObject: unknown): { pipeline?: unknown } | undefined;
+  };
 }
 
 export interface DeferredPipelines {
@@ -37,8 +40,20 @@ export interface DeferredPipelines {
   finished(): number;
   /** Wait until every pipeline started so far, and any started meanwhile, is ready. */
   settle(): Promise<void>;
+  /** With a link cap: render objects turned away since the last frame() (no pipeline started for them). */
+  held(): number;
+  /** A new frame: count held render objects afresh. */
+  frame(): void;
   /** Back to three's own behaviour (idempotent). Call settle() first. */
   release(): void;
+}
+
+export interface DeferOptions {
+  /**
+   * `?linkcap=N` (#39 A/B): at most this many programs compiling at once. A render object that has
+   * no pipeline yet waits (nothing drawn) while that many are linking; frames ask again. 0: no cap.
+   */
+  maxPending?: number;
 }
 
 /**
@@ -58,17 +73,24 @@ function overrideMethod<T extends object, K extends keyof T>(obj: T, key: K, fn:
   };
 }
 
-export function deferPipelines(renderer: DeferRenderer): DeferredPipelines {
+export function deferPipelines(renderer: DeferRenderer, opts: DeferOptions = {}): DeferredPipelines {
   const pipelines = renderer._pipelines;
   if (!pipelines || typeof pipelines.getForRender !== "function") {
-    return { active: false, pending: () => 0, started: () => 0, finished: () => 0, settle: async () => {}, release() {} };
+    return { active: false, pending: () => 0, started: () => 0, finished: () => 0, settle: async () => {}, held: () => 0, frame() {}, release() {} };
   }
   const original = pipelines.getForRender;
+  const cap = opts.maxPending ?? 0;
+  const canHold = cap > 0 && typeof pipelines.get === "function";
   let list: Promise<unknown>[] = [];
   let started = 0;
   let finished = 0;
+  let held = 0;
   const done = () => void finished++;
-  const release = overrideMethod(pipelines, "getForRender", function (this: unknown, renderObject: unknown) {
+  const release = overrideMethod(pipelines, "getForRender", function (this: NonNullable<DeferRenderer["_pipelines"]>, renderObject: unknown) {
+    if (canHold && started - finished >= cap && this.get!(renderObject)?.pipeline === undefined) {
+      held++; // no pipeline, so nothing drawn: a later frame asks again
+      return undefined;
+    }
     const before = list.length;
     const out = original.call(this, renderObject, list);
     for (let i = before; i < list.length; i++) {
@@ -88,6 +110,10 @@ export function deferPipelines(renderer: DeferRenderer): DeferredPipelines {
         list = [];
         await Promise.all(batch);
       }
+    },
+    held: () => held,
+    frame() {
+      held = 0;
     },
     release,
   };

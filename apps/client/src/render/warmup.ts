@@ -375,7 +375,9 @@ export async function warmup(
   let realFrames = 0;
   // New programs compile side by side behind the loader instead of one at a time (D-load-2);
   // `?serialcompile` keeps three's own one-by-one compiles for A/B runs.
-  const deferred = flags.has("serialcompile") ? null : deferPipelines(renderer as unknown as DeferRenderer);
+  // `?linkcap=N` (WebGL2, #39 A/B): at most N programs linking at once; the rest wait for later frames.
+  const linkCap = !ctx.webgpu && flags.has("linkcap") ? Math.max(1, Number(flags.get("linkcap")) || 8) : 0;
+  const deferred = flags.has("serialcompile") ? null : deferPipelines(renderer as unknown as DeferRenderer, { maxPending: linkCap });
   // WebGL2: a program's first draw builds its Metal pipeline in the GPU process, so first draws go
   // out in batches, one in flight at a time (a fence), priced by the GLSL of stages the GPU hasn't
   // drawn yet at its measured rate (#39); `?oldpacer` prices and paces as D-load-2 did.
@@ -459,6 +461,7 @@ export async function warmup(
     const t = performance.now();
     allowed = solo ? Math.min(1, pacer.allowance()) : pacer.allowance(); // budget 1: the first item alone
     gate?.frame(allowed);
+    deferred?.frame();
     frameGrants = [];
     opts.beforeFrame?.();
     beginManualFrame(src);
@@ -571,7 +574,8 @@ export async function warmup(
         drain++;
         await next();
         emit();
-        if (compiling === 0 && gate.waiting() === 0 && !pacer.inFlight()) break;
+        // (with a link cap, also none held back from linking)
+        if (compiling === 0 && gate.waiting() === 0 && deferred!.held() === 0 && !pacer.inFlight()) break;
       }
       await deferred!.settle();
       framesWait = ms(drainAt);
