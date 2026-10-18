@@ -88,7 +88,7 @@ about 1 min 50 s. One clip check over all 29 clips: about 13 s.
 
    The 41 left: 24 are the tabards (each is one wide panel on one bone chain, so its side edges cut a
    shin whenever the legs split: run, sprint, roll, jumps, heavy melee, swim), 9 the braid (4 of them the
-   right upper arm swinging across the chest into it in melee; 1.8–4.9 cm), 4 the sash, 3 hands in shared
+   right upper arm swinging across the chest into it in melee; 1.6–4.9 cm), 4 the sash, 3 hands in shared
    clips that really do touch the thighs (death, roll), 1 the lantern. Clean: idle, walk, cast, block,
    fall, hit, both punches, cheer, point, wave, and the new `idle_mage` and `cast_mage`. The bake itself
    reports 37 bone-frames it couldn't push out of a collider (`swing-stats.json`), mostly swim (13) and
