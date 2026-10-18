@@ -23,6 +23,8 @@ export interface WarmupReport {
   stages: number;
   /** The warm-up's own frames over 100 ms, longest first (at most 12): what each was made of. */
   slow: SlowFrame[];
+  /** `?warmdiag`: the slowest fenced first-draw batches (GPU ms) and the pipelines in each. */
+  batches?: FirstDrawBatch[];
   /** WebGL2's paced first draws: how many, in how many fenced batches, and the GPU's time per batch. */
   firstDraws: { granted: number; batches: number; p50: number; max: number };
   phases: {
@@ -47,4 +49,17 @@ export interface SlowFrame {
   /** Pipelines drawn for the first time in it (WebGL2's first-draw budget), and that budget. */
   firstDraws: number;
   budget: number;
+}
+
+/** One pipeline drawn for the first time: its material, object and GLSL source sizes (characters). */
+export interface FirstDrawItem {
+  material: string;
+  object: string;
+  vs: number;
+  fs: number;
+}
+
+export interface FirstDrawBatch {
+  ms: number;
+  items: FirstDrawItem[];
 }

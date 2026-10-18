@@ -14,10 +14,24 @@ import * as THREE from "three/webgpu";
 import type { RenderCtx } from "./renderer.ts";
 import { flags } from "../config.ts";
 import { beginManualFrame, type TimestampSource } from "./timing.ts";
-import type { SlowFrame, WarmupPhase, WarmupReport } from "./warmupReport.ts";
+import type { FirstDrawBatch, FirstDrawItem, SlowFrame, WarmupPhase, WarmupReport } from "./warmupReport.ts";
 import { deferPipelines, FirstDrawPacer, gateFirstDraws, glFence, type DeferRenderer, type FenceGL, type GateRenderer } from "./parallelCompile.ts";
 
-export type { SlowFrame, WarmupPhase, WarmupReport } from "./warmupReport.ts";
+export type { FirstDrawBatch, FirstDrawItem, SlowFrame, WarmupPhase, WarmupReport } from "./warmupReport.ts";
+
+/** `?warmdiag`: what a first draw was (material, object, GLSL sizes), for the batch log. */
+function describeFirstDraw(renderObject: unknown, pipeline: object): FirstDrawItem {
+  const r = renderObject as { material?: { type?: string; name?: string }; object?: { name?: string; type?: string; parent?: { name?: string } | null } };
+  const p = pipeline as { vertexProgram?: { code?: string }; fragmentProgram?: { code?: string } };
+  const o = r.object;
+  const own = o?.name || o?.type || "?";
+  return {
+    material: `${r.material?.type ?? "?"}${r.material?.name ? `:${r.material.name}` : ""}`,
+    object: o?.parent?.name ? `${own} in ${o.parent.name}` : own,
+    vs: p.vertexProgram?.code?.length ?? 0,
+    fs: p.fragmentProgram?.code?.length ?? 0,
+  };
+}
 
 export interface ShaderStats {
   total: number;
@@ -308,9 +322,14 @@ export async function warmup(
   const deferred = flags.has("serialcompile") ? null : deferPipelines(renderer as unknown as DeferRenderer);
   // WebGL2: a program's first draw builds its Metal pipeline in the GPU process, so first draws go
   // out in batches, one in flight at a time, sized by how long the GPU took over the last (a fence).
-  const gated = deferred?.active && !ctx.webgpu ? gateFirstDraws(renderer as unknown as GateRenderer) : null;
+  const diag = flags.has("warmdiag");
+  let frameGrants: FirstDrawItem[] = [];
+  const batchLog: FirstDrawBatch[] = [];
+  const gated = deferred?.active && !ctx.webgpu
+    ? gateFirstDraws(renderer as unknown as GateRenderer, diag ? (ro, p) => frameGrants.push(describeFirstDraw(ro, p)) : undefined)
+    : null;
   const gate = gated?.active ? gated : null;
-  const pacer = new FirstDrawPacer();
+  const pacer = new FirstDrawPacer(diag ? (ms, _used, tag) => batchLog.push({ ms: Math.round(ms), items: tag as FirstDrawItem[] }) : undefined);
   const gl = (renderer as unknown as { backend?: { gl?: FenceGL } }).backend?.gl ?? null;
   let frameAt = 0;
   // Progress. The label counts GPU programs that have compiled, of those known so far (without the
@@ -353,6 +372,7 @@ export async function warmup(
     const t = performance.now();
     allowed = pacer.allowance();
     gate?.frame(allowed);
+    frameGrants = [];
     opts.beforeFrame?.();
     beginManualFrame(src);
     ctx.render();
@@ -361,7 +381,7 @@ export async function warmup(
     cpu = end - t;
     if (gate) {
       const used = gate.granted() - grantedAt;
-      pacer.sent(used, end, used > 0 ? glFence(gl) : null);
+      pacer.sent(used, end, used > 0 ? glFence(gl) : null, diag ? frameGrants : undefined);
     }
   };
   const next = async () => {
@@ -494,6 +514,7 @@ export async function warmup(
     stages: programs() - stages0,
     slow: slow.sort((a, b) => b.ms - a.ms).slice(0, 12),
     firstDraws: { granted: gate?.granted() ?? 0, ...pacer.batches() },
+    ...(diag ? { batches: batchLog.sort((a, b) => b.ms - a.ms).slice(0, 20) } : {}),
     phases: { compile, compute, shadows, frames: framesPhase },
   };
   stats.warmups.push(report);

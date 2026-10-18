@@ -5,6 +5,7 @@
 //   BENCH_MODE=serial    ?serialcompile: three's own one-program-at-a-time compiles (before D-load-2)
 //   BENCH_MODE=parallel  the default: the warm-up's programs compile side by side
 //   BENCH_TIER=high      (default; the owner's M1 tier)   BENCH_RUN=1   BENCH_OUT=/tmp/…
+//   BENCH_FLAGS=warmdiag (extra URL flags: warmdiag logs the slowest WebGL2 first-draw batches)
 //
 // Chrome shares its GPU program cache between the contexts of one browser, so a second arrival in the
 // same browser compiles from a warm cache. Run each measurement as its own Playwright invocation (a
@@ -32,6 +33,7 @@ test(`bench · shader warm-up · ${MODE || "off"} · ${TIER}`, { tag: ["@bench"]
   test.skip(!MODE, "set BENCH_MODE=serial|parallel to run the warm-up bench");
   const extra: Record<string, true | string> = { tier: TIER };
   if (MODE === "serial") extra.serialcompile = true;
+  for (const f of (process.env.BENCH_FLAGS ?? "").split(",").filter(Boolean)) extra[f] = true; // e.g. warmdiag
   await player.joinAsDevAdmin({ starter: "Hexwick", body: "portus", extra });
   await player.waitInWorld(240_000, "portus");
   const warm = await player.warmup("arrival");

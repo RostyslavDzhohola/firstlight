@@ -134,8 +134,14 @@ export function nextDrawBudget(budget: number, ms: number, used = budget, quick 
  * has finished it, and the next batch's size follows how long that took.
  */
 export class FirstDrawPacer {
+  private readonly onBatch?: (ms: number, used: number, tag: unknown) => void;
+  /** `onBatch` (diagnostics) hears each finished batch: the GPU's ms for it and the tag it was sent with. */
+  constructor(onBatch?: (ms: number, used: number, tag: unknown) => void) {
+    this.onBatch = onBatch;
+  }
+
   private budget = FIRST_DRAWS_START;
-  private batch: { done: () => boolean; at: number; used: number } | null = null;
+  private batch: { done: () => boolean; at: number; used: number; tag: unknown } | null = null;
   private lastUsed = 0;
   private readonly latencies: number[] = [];
 
@@ -149,9 +155,9 @@ export class FirstDrawPacer {
   }
 
   /** After a frame: it made `used` first draws; `fence` says when the GPU finished them (null: no fences). */
-  sent(used: number, now: number, fence: (() => boolean) | null): void {
+  sent(used: number, now: number, fence: (() => boolean) | null, tag?: unknown): void {
     this.lastUsed = used;
-    if (used > 0 && fence) this.batch = { done: fence, at: now, used };
+    if (used > 0 && fence) this.batch = { done: fence, at: now, used, tag };
   }
 
   /** Each new frame: settle the batch in flight, or (without fences) pace by `frameMs`. */
@@ -160,6 +166,7 @@ export class FirstDrawPacer {
       if (!this.batch.done()) return;
       const ms = now - this.batch.at;
       this.latencies.push(ms);
+      this.onBatch?.(ms, this.batch.used, this.batch.tag);
       this.budget = nextDrawBudget(this.budget, ms, this.batch.used, QUICK_BATCH_MS, LONG_BATCH_MS);
       this.batch = null;
     } else if (frameMs !== undefined) {
@@ -204,7 +211,8 @@ export function glFence(gl: FenceGL | null | undefined): (() => boolean) | null 
 /** Pipelines each renderer has drawn at least once (kept across warm-ups). */
 const drawnBy = new WeakMap<object, WeakSet<object>>();
 
-export function gateFirstDraws(renderer: GateRenderer): FirstDrawGate {
+/** `onGrant` (diagnostics) hears each first draw allowed, with the render object and its pipeline. */
+export function gateFirstDraws(renderer: GateRenderer, onGrant?: (renderObject: unknown, pipeline: object) => void): FirstDrawGate {
   const pipelines = renderer._pipelines;
   if (!pipelines || typeof pipelines.isReady !== "function" || typeof pipelines.get !== "function") {
     return { active: false, frame() {}, waiting: () => 0, granted: () => 0, release() {} };
@@ -224,6 +232,7 @@ export function gateFirstDraws(renderer: GateRenderer): FirstDrawGate {
       budget--;
       granted++;
       seen.add(p);
+      onGrant?.(renderObject, p);
       return true;
     }
     waiting.add(p);

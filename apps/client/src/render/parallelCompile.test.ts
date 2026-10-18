@@ -157,6 +157,19 @@ describe("gateFirstDraws (WebGL2: a program's first draw compiles its Metal pipe
     again.release();
   });
 
+  it("tells a listener about each first draw it allows (diagnostics)", () => {
+    const g = gateRenderer();
+    const heard: string[] = [];
+    const gate = gateFirstDraws(g.renderer, (ro, p) => heard.push(`${String(ro)}:${(p as { k: string }).k}`));
+    for (const k of ["a", "b"]) g.compiled.add(k);
+    gate.frame(5);
+    g.frame(["a", "a#2", "b"]);
+    gate.frame(5);
+    g.frame(["a", "b"]);
+    expect(heard).toEqual(["a:a", "b:b"]);
+    gate.release();
+  });
+
   it("does nothing without three's internals", () => {
     const gate = gateFirstDraws({} as GateRenderer);
     expect(gate.active).toBe(false);
@@ -225,6 +238,14 @@ describe("FirstDrawPacer (one batch of first draws in flight; its size follows t
     p.sent(0, 0, () => false);
     expect(p.inFlight()).toBe(false);
     expect(p.allowance()).toBe(FIRST_DRAWS_START);
+  });
+
+  it("tells a listener how long each batch took, with what it was sent with (diagnostics)", () => {
+    const heard: [number, number, unknown][] = [];
+    const p = new FirstDrawPacer((ms, used, tag) => heard.push([ms, used, tag]));
+    p.sent(3, 10, () => true, ["terrain"]);
+    p.tick(130);
+    expect(heard).toEqual([[120, 3, ["terrain"]]]);
   });
 
   it("without fences, paces by the frame times instead", () => {

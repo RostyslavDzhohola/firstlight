@@ -90,6 +90,8 @@ export type Warmup = WarmupReport;
 /** A warm-up with the page's frame times during it (a long frame = the main thread was blocked). */
 export interface WarmupNote extends WarmupReport {
   framesDuring: { frames: number; p50: number; p95: number; max: number; over100: number; over250: number; worst: { t: number; ms: number }[] };
+  /** Main-thread long tasks inside the warm-up (PerformanceObserver "longtask"), apart from the frames. */
+  longtasks: { count: number; max: number; over250: number; worst: { start: number; ms: number }[] };
 }
 
 export interface FlEvent {
@@ -543,12 +545,21 @@ export class Player {
   /** The latest warm-up whose label starts with `label`, with the frame times during it. */
   warmup(label = "arrival"): Promise<WarmupNote | null> {
     return this.page.evaluate((label) => {
-      type Fl = { warmups(): Warmup[]; frames: { stats(since: number, until: number): WarmupNote["framesDuring"] & Record<string, unknown> } };
+      type Fl = {
+        warmups(): Warmup[];
+        frames: { stats(since: number, until: number): WarmupNote["framesDuring"] & Record<string, unknown> };
+        longtasks(since: number, until: number): { start: number; ms: number }[];
+      };
       const fl = (window as unknown as { __fl: Fl }).__fl;
       const w = [...fl.warmups()].reverse().find((x) => x.label.startsWith(label));
       if (!w) return null;
       const f = fl.frames.stats(w.start, w.end);
-      return { ...w, framesDuring: { frames: f.frames, p50: f.p50, p95: f.p95, max: f.max, over100: f.over100, over250: f.over250, worst: f.worst } };
+      const lt = fl.longtasks(w.start, w.end).sort((a, b) => b.ms - a.ms);
+      return {
+        ...w,
+        framesDuring: { frames: f.frames, p50: f.p50, p95: f.p95, max: f.max, over100: f.over100, over250: f.over250, worst: f.worst },
+        longtasks: { count: lt.length, max: lt[0]?.ms ?? 0, over250: lt.filter((x) => x.ms > 250).length, worst: lt.slice(0, 5) },
+      };
     }, label);
   }
 
