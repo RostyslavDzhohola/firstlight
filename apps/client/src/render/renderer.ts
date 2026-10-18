@@ -9,7 +9,7 @@ import {
   clearStored, emptyStored, FEATURES, killSwitches, loadStored, resolveSettings, saveStored, TIERS, tierIndex,
   urlScale, urlTier, validAutoTier, type Feature, type ResolvedSettings, type StoredGfx, type Tier,
 } from "./quality.ts";
-import { FrameSize } from "./frameSize.ts";
+import { createFramePath } from "./frameSize.ts";
 import { startRenderer } from "./rendererStart.ts";
 import { GpuTimer, ResolutionLadder } from "./timing.ts";
 import { compileForPass, passCallDepth, saveRenderState, type GuardedRenderer, type PassCompileRenderer } from "./compilePass.ts";
@@ -273,10 +273,10 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
       return Math.min(dpr, Math.min(dpr, settings.dprCap) * scale * ladder.scale);
     },
     resize() {
-      size.request();
+      drawPath.resize();
     },
     render() {
-      size.draw(() => pipeline.render());
+      drawPath.render();
     },
     compileScene() {
       if (passCompileOff) return renderer.compileAsync(scene, camera);
@@ -291,7 +291,7 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
         let failed = false;
         try {
           passDepth = passCallDepth(r, sp.renderTarget, () =>
-            size.draw(() => {
+            drawPath.drawWith(() => {
               scene.visible = false;
               pipeline.render();
             }),
@@ -311,8 +311,7 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
       return compileForPass(r, scene, camera, sp, passDepth);
     },
     afterFrame(now, frameMs) {
-      gpu.frame();
-      ladder.sample(now, frameMs, gpu.takeSamples(), settings.gpuTargetMs);
+      drawPath.afterFrame(now, frameMs);
     },
     stored() {
       return stored;
@@ -321,8 +320,19 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
 
   // The one owner of the drawing-buffer size (D-view-3): ladder steps (from afterFrame, after the
   // frame's draw), the window's resize event and settings changes only ask; draws apply it first.
-  const size = new FrameSize(renderer, camera, () => ({ width: innerWidth, height: innerHeight, pixelRatio: ctx.pixelRatio() }));
-  ladder.onChange = () => ctx.resize();
+  // Sizes the canvas now (nothing drawn yet), and sets ladder.onChange and the resize listener.
+  renderer.domElement.style.width = "100%";
+  renderer.domElement.style.height = "100%";
+  const drawPath = createFramePath({
+    target: renderer,
+    camera,
+    viewport: () => ({ width: innerWidth, height: innerHeight, pixelRatio: ctx.pixelRatio() }),
+    draw: () => pipeline.render(),
+    ladder,
+    gpu,
+    targetMs: () => settings.gpuTargetMs,
+    events: window,
+  });
   ladder.onFloor = () => {
     // At the ladder floor drop a tier, but only when the tier is automatic. The drop is saved
     // as the automatic tier, so the next session starts there instead of walking down again.
@@ -353,10 +363,6 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
   setGrade(MENU_GRADE);
   rebuildPost();
   renderer.shadowMap.enabled = settings.on.shadows && settings.shadows.mode === "map";
-  renderer.domElement.style.width = "100%";
-  renderer.domElement.style.height = "100%";
-  size.apply(); // nothing drawn yet: the warm-up compiles at the real size
-  addEventListener("resize", () => ctx.resize());
   return ctx;
 }
 

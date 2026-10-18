@@ -70,3 +70,52 @@ export class FrameSize {
     this.applied = { w, h };
   }
 }
+
+/** What the frame path needs (createRenderer passes three's renderer, the camera, window, its ladder and GPU timer). */
+export interface FramePathDeps {
+  target: SizeTarget;
+  camera: AspectCamera;
+  /** The size wanted now: the window's CSS size at the effective pixel ratio (ctx.pixelRatio()). */
+  viewport: () => Viewport;
+  /** Draw a frame (the post pipeline). */
+  draw: () => void;
+  ladder: { onChange: (() => void) | null; sample(now: number, frameMs: number, gpuSamples: readonly number[] | null, targetMs: number): void };
+  gpu: { frame(): void; takeSamples(): number[] };
+  /** The tier's GPU frame budget, for the ladder. */
+  targetMs: () => number;
+  /** Where the window's resize events come from (fullscreen changes resize the window too). */
+  events: { addEventListener(type: "resize", fn: () => void): void };
+}
+
+export interface FramePath {
+  /** Ask for the size to follow the window and pixel ratio (applied right before the next draw). */
+  resize(): void;
+  /** Draw a frame: the pending size first. */
+  render(): void;
+  /** A manual draw (the warm-up's scene-pass probe): the pending size first. */
+  drawWith<T>(fn: () => T): T;
+  /** Per-frame bookkeeping after the draw: GPU timer and ladder (a ladder step only asks). */
+  afterFrame(now: number, frameMs: number): void;
+}
+
+/**
+ * The render context's drawing path (renderer.ts createRenderer uses it as is): sizes the canvas once
+ * now (nothing is drawn yet), then ladder steps and window resizes only ask for a size and every
+ * draw applies it first.
+ */
+export function createFramePath(d: FramePathDeps): FramePath {
+  const size = new FrameSize(d.target, d.camera, d.viewport);
+  const path: FramePath = {
+    resize: () => size.request(),
+    render: () => size.draw(d.draw),
+    drawWith: (fn) => size.draw(fn),
+    afterFrame(now, frameMs) {
+      d.gpu.frame();
+      d.ladder.sample(now, frameMs, d.gpu.takeSamples(), d.targetMs());
+    },
+  };
+  d.ladder.onChange = () => path.resize();
+  d.events.addEventListener("resize", () => path.resize());
+  size.apply();
+  return path;
+}
