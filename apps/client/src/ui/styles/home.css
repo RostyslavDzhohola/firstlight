@@ -5,6 +5,9 @@
    in place of Play. */
 
 .fl-home { z-index: 0; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; }
+/* Back on the home page after a failed load (home/landing.ts, D-home-8): #ui comes after the page and
+   would paint the half-started game's HUD over it. Hidden until Play takes the page away again. */
+body.fl-home-up #ui { visibility: hidden; }
 .fl-home .fl-fly { position: fixed; }
 /* The backdrop's small planets sit where the home page leaves sky: above the cards, low on the left. */
 .fl-home .fl-fly__planet--meridian { left: 47%; top: 2.2%; }

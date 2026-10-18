@@ -1084,3 +1084,15 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   see-through panel and every layer drawn after it was missing for 1–4 frames (menu 72.2–79.3 s, loader
   3.9–5.1 s, the idle home page at 0.8 s and 1.9 s), most likely Chrome's macOS compositor; removing every
   backdrop pass removes that boundary. Related: D-view-1, D-view-2, D-controls-1..4 (the pause flow).
+- **D-home-8 (2026-10-18):** the home page leaves the page while the loading screen is up (#21, spec
+  #17). Play shows the loader, and two frames later (so the loader has been drawn over it first, no
+  frame shows neither) `home/landing.ts` sets `#landing` to `display: none` and `inert`; `home.ts`
+  stops its 20 s poll. The way back from a failed load ("Back to the home page", `main.ts`
+  `backToLanding`) shows it again first, then hides the loader; `home.ts` fetches `/api/home` and the
+  account at once and resumes polling; while it is up, `body.fl-home-up` hides `#ui`, which comes after
+  the page (`.fl-home` is z 0) and would otherwise paint the half-started game's HUD over it. A logout
+  reloads the page (`home/leave.ts`), so it starts fresh.
+  Why: the landing stayed live under the opaque loader for ~10 s (cards, animations, polling) until the
+  renderer was up, and in the owner's recording it flashed through the loader 3 times (3.9, 4.6 and
+  5.1 s; 4, 4 and 1 frames) when a presented frame lost the loader's layer. This hides the symptom (a
+  dropped loader frame now shows the dark page), not the compositor cause (D-ui-1).

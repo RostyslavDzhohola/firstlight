@@ -9,6 +9,7 @@ import { button, el, icon, sprite } from "../ui/dom.ts";
 import { shareRow } from "../ui/share.ts";
 import { installSprites, portraitSprite } from "../ui/sprites.ts";
 import { fmtNum, hallRows, namesLine, progressView, visitsLine, worldCards, type MeInfo } from "./homeModel.ts";
+import { onLandingShown } from "./landing.ts";
 import { takeHomeNotice, type HomeNotice } from "./leave.ts";
 import { signOutSession } from "./signOut.ts";
 import { dataFastNote } from "./datafast.ts";
@@ -365,9 +366,18 @@ export async function initHome(): Promise<void> {
     } else if (!data) renderBoard(null, tab); // the server is unreachable: say so instead of an empty card
   };
   void poll();
-  window.setInterval(() => void poll(), POLL_MS);
+  let pollTimer = window.setInterval(() => void poll(), POLL_MS);
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) void poll();
+  });
+  // Under the loading screen the page is out (landing.ts, D-home-8): no polling. Back on the home page
+  // (a failed load): fresh data at once, then the usual rhythm.
+  onLandingShown((shown) => {
+    clearInterval(pollTimer);
+    if (!shown) return;
+    void poll();
+    void refreshMe();
+    pollTimer = window.setInterval(() => void poll(), POLL_MS);
   });
   // Another tab saved, signed in or renamed: repaint my progress and the guest's Save button from a
   // fresh session lookup (fetchMe asks the session; the broadcast already dropped the cached token).

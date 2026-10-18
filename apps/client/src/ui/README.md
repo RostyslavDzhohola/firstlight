@@ -51,7 +51,7 @@ onboarding-attack, onboarding-portal, onboarding-done, kit-inventory, kit-onboar
 | `account.ts` | Save card, sign-in and name picker (API below) |
 | `saveOffer.ts` | When saving is offered: the pure rules (unit-tested) |
 | `share.ts` | `shareRow(parent, { onHideUi? })`: the share bar (Share / Email / Follow on 𝕏 when `VITE_X_HANDLE` is set / hide-UI eye), on the home page and in the Esc menu (6e) |
-| `styles/home.css`, `../home/` | The home page (6a): `home.ts` fills the cards in `index.html` from `/api/home` and `/api/account/me`; `homeModel.ts` is the pure part; `leave.ts` goes home after a logout |
+| `styles/home.css`, `../home/` | The home page (6a): `home.ts` fills the cards in `index.html` from `/api/home` and `/api/account/me`; `homeModel.ts` is the pure part; `leave.ts` goes home after a logout; `landing.ts` takes the page out under the loader and brings it back (D-home-8) |
 | `map.ts`, `mapView.ts`, `mapMarkers.ts`, `mapRaster.ts`, `mapAtlas.ts` | The map (M): projection (north = the compass's, `social/compassMath.ts`), markers, the per-body ground atlas (baked and drawn in `world/mapAtlas.worker.ts`) |
 | `minimap.ts`, `minimapLayout.ts` | The HUD minimap and its size/avoid rules |
 | `waypoint.ts` | The player's waypoint (one per body, localStorage; `WAYPOINT_COLOUR` / `--waypoint`) |
