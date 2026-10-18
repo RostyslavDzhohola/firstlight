@@ -1264,3 +1264,17 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   Pricing by size costs time on the first-visit path: J1.2 on WebGL2 (Medium after the probe) went
   from 31 batches and 7.5 s of warm-up with count-based batches to 50 batches and 9.8 s (Play → world
   13.4 s → 16.9 s, still under 30 s); `BATCH_TARGET_MS` is the one knob between the two.
+- **D-load-5 (owner, 2026-10-18):** graphics quality over load time: a longer first load is
+  acceptable if the game looks better; the loader keeps it fun with rotating quips (owner: "If we
+  can have better quality of graphics and sacrifice it with just a little bit more wait time, it's
+  fine. I would rather do that trade-off. Even if the wait time to load the game first is longer,
+  you can just put funny comments at the bottom while it's loading, like, 'Hey, putting better
+  graphics in,' 'Looking for the meaning of life,' or 'Contemplating the universe.'"). The full
+  loading screen (first load and travel between bodies) shows one line from `ui/loadingQuips.ts`
+  above the pointer-lock note at the bottom right: the owner's three and 27 more in the world's
+  voice, at most 45 characters, never mean, nothing that reads like an error, no Easter-egg hints.
+  A new line every 3 s from a shuffled deck (every line once before any comes back, a reshuffle
+  never opens with the line just shown, the deck carries on across loads), a 320 ms crossfade and
+  none under reduced motion. Not on the compact mid-game card or the error state, and aria-hidden
+  so the polite live region doesn't read it out every 3 s. Why: the owner's call; a trade-off
+  between load time and looks now leans to looks.
