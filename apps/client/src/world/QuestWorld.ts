@@ -15,12 +15,16 @@ import { HALL_BOARD } from "@firstlight/shared/planet/town";
 import { ANIM } from "@firstlight/shared/net/schema";
 import { AvatarView } from "../render/Avatars.ts";
 import { disposeTree } from "../render/dispose.ts";
+import { applyLabelFade } from "../render/labelFade.ts";
+import { applyOccluderFade } from "../render/occluderFade.ts";
+import { TOWN_BODY } from "@firstlight/shared/planet/sites";
+import { KEEPER_STALL, type StallBox } from "./stallCamera.ts";
 
 /** Materials shared by every body's props (never freed); everything else a QuestWorld builds is its own. */
 const mats = new Map<string, THREE.Material>();
 const shared = new WeakSet<object>();
-function std(color: number, opts: { emissive?: number; metal?: number; rough?: number; opacity?: number } = {}): THREE.Material {
-  const key = `s${color}:${opts.emissive ?? 0}:${opts.metal ?? 0}:${opts.rough ?? 0.6}:${opts.opacity ?? 1}`;
+function std(color: number, opts: { emissive?: number; metal?: number; rough?: number; opacity?: number; fade?: boolean } = {}): THREE.Material {
+  const key = `s${color}:${opts.emissive ?? 0}:${opts.metal ?? 0}:${opts.rough ?? 0.6}:${opts.opacity ?? 1}${opts.fade ? ":fade" : ""}`;
   let m = mats.get(key);
   if (!m) {
     const s = new THREE.MeshStandardNodeMaterial({ color, roughness: opts.rough ?? 0.6, metalness: opts.metal ?? 0.05, transparent: (opts.opacity ?? 1) < 1, opacity: opts.opacity ?? 1 });
@@ -29,18 +33,20 @@ function std(color: number, opts: { emissive?: number; metal?: number; rough?: n
       s.emissiveIntensity = opts.emissive;
       s.emissiveNode = materialEmissive.mul(atmo.glowBoost); // brighter at night
     }
+    if (opts.fade) applyOccluderFade(s); // between the camera and the player it dissolves (D-view-5)
     m = s;
     mats.set(key, m);
     shared.add(m);
   }
   return m;
 }
-function glow(color: number, k = 2, opacity = 1): THREE.Material {
-  const key = `g${color}:${k}:${opacity}`;
+function glow(color: number, k = 2, opacity = 1, fade = false): THREE.Material {
+  const key = `g${color}:${k}:${opacity}${fade ? ":fade" : ""}`;
   let m = mats.get(key);
   if (!m) {
     const b = new THREE.MeshBasicNodeMaterial({ color: new THREE.Color(color).multiplyScalar(k), transparent: opacity < 1, opacity, depthWrite: opacity >= 1 });
     b.colorNode = materialColor.mul(atmo.glowBoost); // brighter at night
+    if (fade) applyOccluderFade(b);
     m = b;
     mats.set(key, m);
     shared.add(m);
@@ -52,6 +58,14 @@ function mesh(geo: THREE.BufferGeometry, mat: THREE.Material, x = 0, y = 0, z = 
   const m = new THREE.Mesh(geo, mat);
   m.position.set(x, y, z);
   m.castShadow = true;
+  return m;
+}
+
+/** A box of KEEPER_STALL's (frame metres, named `stall:<name>`). */
+function stallBox(name: string, b: StallBox, mat: THREE.Material): THREE.Mesh {
+  const m = mesh(new THREE.BoxGeometry(b.w, b.h, b.d), mat, b.x, b.y, b.z);
+  m.rotation.x = b.tilt ?? 0;
+  m.name = `stall:${name}`;
   return m;
 }
 
@@ -93,8 +107,10 @@ function label(text: string, sub: string, color = "#ffd8a8"): THREE.Sprite {
   );
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
-  const s = new THREE.Sprite(new THREE.SpriteNodeMaterial({ map: tex, transparent: true, depthWrite: false }));
+  // Fades out as the camera comes within ~2 m: 4.2 m wide, it filled the screen otherwise (D-view-5).
+  const s = new THREE.Sprite(applyLabelFade(new THREE.SpriteNodeMaterial({ map: tex, transparent: true, depthWrite: false })));
   s.scale.set(4.2, sub ? 1 : 0.63, 1);
+  s.name = "label";
   return s;
 }
 
@@ -219,25 +235,37 @@ export class QuestWorld {
         // Juno keeps her look; each outpost's trader wears another palette and starter.
         const look = KEEPER_LOOK[d.id] ?? [1, 2];
         p.npc = new AvatarView(look[0], look[1]);
+        p.npc.root.userData.occluderFade = true; // dissolves between the camera and the player (D-view-5)
         this.group.add(p.npc.root);
-        const counter = mesh(new THREE.BoxGeometry(2.6, 1.0, 0.8), std(0x7a5a3a, { rough: 0.8 }), 0, 0.5, 1.1);
-        const top = mesh(new THREE.BoxGeometry(2.8, 0.08, 1.0), std(0xd8b98a), 0, 1.04, 1.1);
-        const awning = mesh(new THREE.BoxGeometry(3.2, 0.06, 1.8), std(0xc0482e), 0, 2.7, 0.6);
-        awning.rotation.x = -0.18;
-        const postL = mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.7, 8), std(0x5a4030), -1.5, 1.35, 1.4);
-        const postR = mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.7, 8), std(0x5a4030), 1.5, 1.35, 1.4);
-        const crate = mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), std(0x9a7a4a), -1.0, 1.33, 1.1);
-        const orb = mesh(new THREE.IcosahedronGeometry(0.18, 1), glow(0xffd166, 2.5), 0.8, 1.3, 1.1);
-        r.add(counter, top, awning, postL, postR, crate, orb);
-        p.bob = orb;
+        const K = KEEPER_STALL;
+        // Juno's stall (Portus). An outpost's keeper stands in the outpost's own stall (D-b2-3), so it
+        // gets no second one here. The camera stays out of these (world/stallCamera.ts) and they
+        // dissolve between the camera and the player.
+        if (this.body === TOWN_BODY) {
+          const orb = mesh(new THREE.IcosahedronGeometry(K.orb.r, 1), glow(0xffd166, 2.5, 1, true), K.orb.x, K.orb.y, K.orb.z);
+          r.add(
+            stallBox("counter", K.counter, std(0x7a5a3a, { rough: 0.8, fade: true })),
+            stallBox("top", K.top, std(0xd8b98a, { fade: true })),
+            stallBox("awning", K.awning, std(0xc0482e, { fade: true })),
+            ...([-1, 1] as const).map((sx) => {
+              const post = mesh(new THREE.CylinderGeometry(K.post.r, K.post.r, K.post.h, 8), std(0x5a4030, { fade: true }), sx * K.post.x, K.post.h / 2, K.post.z);
+              post.name = sx < 0 ? "stall:postL" : "stall:postR";
+              return post;
+            }),
+            stallBox("crate", K.crate, std(0x9a7a4a, { fade: true })),
+            orb,
+          );
+          p.bob = orb;
+        }
         const spot = SHOP_SPOT_BY_ID.get(d.id);
         const l = label(spot?.keeper ?? d.name, `${spot?.name ?? "Shop"} · E to trade`);
-        l.position.set(0, 3.4, 0.6);
+        l.position.set(K.label.x, K.label.y, K.label.z);
         r.add(l);
         break;
       }
       case "guide": {
         p.npc = new AvatarView(d.body === "arcadia" ? 3 : d.body === "hollowmere" ? 5 : 4, d.body === "meridian" ? 3 : 1);
+        p.npc.root.userData.occluderFade = true;
         this.group.add(p.npc.root);
         const staff = mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.9, 6), std(0x6b4a32), 0.45, 0.95, 0.1);
         const lamp = mesh(new THREE.SphereGeometry(0.1, 10, 8), glow(0xffd8a8, 2.5), 0.45, 1.95, 0.1);

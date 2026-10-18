@@ -1,13 +1,14 @@
-// Occluder fade: trees, rocks and breakable props between the camera and the player dissolve with a
-// screen-door dither, so a trunk or a statue never hides the avatar or the crosshair (the camera
-// doesn't stop at trunks, D-solid-1). No transparency (no sorting, no blending): fragments inside a
+// Occluder fade: trees, rocks, breakable props, Juno's stall and the quest NPCs (keepers, guides:
+// D-view-5) between the camera and the player dissolve with a screen-door dither, so a trunk or a
+// statue never hides the avatar or the crosshair (the camera doesn't stop at trunks, D-solid-1). No transparency (no sorting, no blending): fragments inside a
 // soft cone from the camera to the player (plus a narrow one along the aim) and nearer than the
 // player are discarded with a stable per-pixel dither threshold. The cone moves with the camera, so
 // an occluder fades as it slides into it and comes back as it leaves; nothing behind or beside the
 // player is touched. Shadows keep the full shape (maskShadowNode).
 //
 // All inputs are shared render-group uniforms written once a frame (updateOccluderFade): the fade is
-// part of each material's one shader, so there is no extra variant to warm and no rebuild ever.
+// part of each material's one shader, so there is no extra variant to warm and no rebuild ever. The
+// avatars' shared materials take a gated copy: one per-object uniform lets only the quest NPCs fade.
 
 import * as THREE from "three/webgpu";
 import { bool, cameraPosition, dot, float, interleavedGradientNoise, length, max, normalize, positionWorld, renderGroup, screenCoordinate, smoothstep, uniform } from "three/tsl";
@@ -82,10 +83,31 @@ export function fadeAmount(cam: THREE.Vector3, aim: THREE.Vector3, chest: THREE.
   return Math.max(inPlayer, inAim) * front;
 }
 
+/**
+ * Does `o` fade under a gated material (applyOccluderFadeGated)? It does when it or a parent has
+ * `userData.occluderFade` set: the quest NPCs (keepers, guides) do, players never (#22, D-view-5).
+ */
+export function fadesAsOccluder(o: THREE.Object3D | null): boolean {
+  for (let p = o; p; p = p.parent) if (p.userData.occluderFade) return true;
+  return false;
+}
+
+/** 1 for an object that fades (fadesAsOccluder), else 0: set per drawn object. */
+const gate = uniform(0).onObjectUpdate(({ object }) => (fadesAsOccluder(object as THREE.Object3D) ? 1 : 0));
+
 let maskNode: THREE.Node | null = null;
+let gatedNode: THREE.Node | null = null;
 /** Keep (true) or dissolve (false) this fragment. One node shared by every material that fades. */
 export function occluderKeep(): THREE.Node {
-  if (maskNode) return maskNode;
+  return (maskNode ??= keepNode(false));
+}
+
+/** The same, for materials shared with objects that never fade: only objects that opt in dissolve. */
+export function occluderKeepGated(): THREE.Node {
+  return (gatedNode ??= keepNode(true));
+}
+
+function keepNode(gated: boolean): THREE.Node {
   const u = occluderUniforms;
   const v = positionWorld.sub(cameraPosition);
   const dist = length(v);
@@ -98,11 +120,10 @@ export function occluderKeep(): THREE.Node {
   // and the chest point different ways, and depth along the chest would let the aim cone reach far
   // past the player (Codex review).
   const front = smoothstep(float(FADE_DEPTH_MARGIN), float(FADE_DEPTH_MARGIN + 0.5), u.depth.sub(dist));
-  const fade = max(inPlayer, inAim).mul(front).mul(u.strength);
+  const fade = max(inPlayer, inAim).mul(front).mul(gated ? u.strength.mul(gate) : u.strength);
   // Stable screen-door threshold (no time term: a still view doesn't shimmer).
   const noise = interleavedGradientNoise(screenCoordinate.xy);
-  maskNode = noise.greaterThanEqual(fade) as unknown as THREE.Node;
-  return maskNode;
+  return noise.greaterThanEqual(fade) as unknown as THREE.Node;
 }
 
 const ALWAYS = bool(true) as unknown as THREE.Node;
@@ -112,11 +133,41 @@ const ALWAYS = bool(true) as unknown as THREE.Node;
  * mask (or none): the shadow pass would otherwise take `maskNode` and punch the cone into shadows.
  */
 export function applyOccluderFade<M extends THREE.NodeMaterial>(m: M): M {
+  return withMask(m, occluderKeep(), "always");
+}
+
+/**
+ * Like applyOccluderFade, for a material shared between objects that fade and objects that never do
+ * (the avatars: quest NPCs and players). Only objects marked for it (fadesAsOccluder) dissolve; one
+ * shader either way, so nothing new to warm.
+ */
+export function applyOccluderFadeGated<M extends THREE.NodeMaterial>(m: M): M {
+  return withMask(m, occluderKeepGated(), "gated");
+}
+
+const fading = new WeakMap<THREE.Material, "always" | "gated">();
+
+function withMask<M extends THREE.NodeMaterial>(m: M, keep: THREE.Node, how: "always" | "gated"): M {
+  if (fading.has(m)) return m;
   const own = m.maskNode;
   const shadow = m.maskShadowNode ?? own ?? ALWAYS;
-  m.maskNode = own ? ((own as unknown as { and(b: THREE.Node): THREE.Node }).and(occluderKeep()) as THREE.Node) : occluderKeep();
+  m.maskNode = own ? ((own as unknown as { and(b: THREE.Node): THREE.Node }).and(keep) as THREE.Node) : keep;
   m.maskShadowNode = shadow;
+  fading.set(m, how);
   return m;
+}
+
+/**
+ * How much (0 solid … 1 gone) mesh `o` dissolves at world point `p`, for a camera at `cam` aiming
+ * along `aim` at `chest`: fadeAmount where its material fades (and, for a gated one, `o` opts in),
+ * else 0. What the shader does, for tests and tools.
+ */
+export function occluderFadeOf(o: THREE.Object3D, cam: THREE.Vector3, aim: THREE.Vector3, chest: THREE.Vector3, p: THREE.Vector3): number {
+  const mats = (o as THREE.Mesh).material;
+  const m = Array.isArray(mats) ? mats[0] : mats;
+  const how = m ? fading.get(m) : undefined;
+  if (!how || (how === "gated" && !fadesAsOccluder(o))) return 0;
+  return fadeAmount(cam, aim, chest, p);
 }
 
 const _t = new THREE.Vector3();
