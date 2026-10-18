@@ -113,17 +113,21 @@ export function fadeAmount(cam: THREE.Vector3, aim: THREE.Vector3, chest: THREE.
  * player's own avatar and what it holds and wears (`userData.ownAvatar`: near the camera, ownFade),
  * 1 for the quest NPCs (`userData.occluderFade`: in the cone, like props), 0 for other players (never).
  */
-export function fadeGate(o: THREE.Object3D | null): 0 | 1 | 2 {
+export function fadeGate(o: THREE.Object3D | null): FadeGate {
   for (let p = o; p; p = p.parent) {
-    if (p.userData.ownAvatar) return 2;
-    if (p.userData.occluderFade) return 1;
+    if (p.userData.ownAvatar) return FADE_GATE.ownAvatar;
+    if (p.userData.occluderFade) return FADE_GATE.occluder;
   }
-  return 0;
+  return FADE_GATE.never;
 }
+
+/** fadeGate's values. The shader reads them as numbers: the cone times the gate for 0 and 1, the own fade above 1.5. */
+export const FADE_GATE = { never: 0, occluder: 1, ownAvatar: 2 } as const;
+export type FadeGate = (typeof FADE_GATE)[keyof typeof FADE_GATE];
 
 /** Does `o` fade like an occluder (fadeGate 1)? */
 export function fadesAsOccluder(o: THREE.Object3D | null): boolean {
-  return fadeGate(o) === 1;
+  return fadeGate(o) === FADE_GATE.occluder;
 }
 
 /** fadeGate of the drawn object: set per object. */
@@ -203,9 +207,9 @@ export function occluderFadeOf(o: THREE.Object3D, cam: THREE.Vector3, aim: THREE
   const m = Array.isArray(mats) ? mats[0] : mats;
   const how = m ? fading.get(m) : undefined;
   if (!how) return 0;
-  const g = how === "gated" ? fadeGate(o) : 1;
-  if (g === 2) return ownFadeFor(cam, chest);
-  return g === 1 ? fadeAmount(cam, aim, chest, p) : 0;
+  const g = how === "gated" ? fadeGate(o) : FADE_GATE.occluder;
+  if (g === FADE_GATE.ownAvatar) return ownFadeFor(cam, chest);
+  return g === FADE_GATE.occluder ? fadeAmount(cam, aim, chest, p) : 0;
 }
 
 const _t = new THREE.Vector3();
