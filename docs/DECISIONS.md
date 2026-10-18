@@ -1091,9 +1091,13 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   node builds and the session's shader count, and per phase ms + builds: the scene-pass compile
   (with the render objects it prepared), compute (none yet), the shadow frames (with the predicted
   builds) and the real frames. J1.2 and J1.3 note it with the frame times inside its window; one
-  `[warmup]` console line sums it up. The loader's warm-up step reads "Preparing shaders done/total":
-  the compile's render objects, the predicted shadow builds and the real frames as work units, the
-  bar monotonic from 85% to 100% (`ui/loading.ts` `warmupProgress`). Baseline (three's own
+  `[warmup]` console line sums it up. The loader's warm-up step reads "Preparing shaders ready/total":
+  GPU programs compiled of those known so far. The bar blends all the work (objects prepared,
+  programs compiled, shadow builds, first draws, frames) as weighted units through `MovingProgress`:
+  each bit of work covers its share of what is left, so it keeps moving while the total is still
+  growing, never goes back, and equals done/total when the total is fixed. The first-visit probe
+  ("Tuning graphics…", 82–90%) forwards its warm-ups and measurements, the arrival warm-up starts
+  from wherever the bar is, and the mid-game re-warms (graphics change, re-probe) fill from 50%. Baseline (three's own
   compiles, `?serialcompile`; `e2e/bench-warmup.spec.ts`, M1 headless with `--use-angle=metal`, the
   owner's High tier, no probe, a fresh browser per run, load average 17–120 from other apps): 242
   builds, the owner's overlay count. WebGL2 with a cold Metal shader cache: 30.3–48.9 s (4 runs),

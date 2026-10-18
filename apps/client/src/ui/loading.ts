@@ -64,20 +64,33 @@ export interface WarmupLine {
 }
 
 /**
- * The warm-up step's line and bar: "Preparing shaders 120/242" from warmup()'s done/total work
- * units, the bar from WARMUP_FROM to 100%. Never goes backwards (a total that grows holds the bar)
- * and never shows more done than total.
+ * A boot step's share of the bar: at(f) maps the step's own 0–1 into from…to, never going back
+ * (the first-visit probe: "Tuning graphics…" from 82% to 90%).
  */
-export function warmupProgress(from = WARMUP_FROM) {
+export function stepProgress(from: number, to: number) {
   let frac = from;
   return {
-    start(): WarmupLine {
-      return { text: "Preparing shaders…", frac };
+    at(f: number): number {
+      frac = Math.max(frac, from + (to - from) * Math.max(0, Math.min(1, f)));
+      return frac;
     },
-    update(done: number, total: number): WarmupLine {
-      const d = Math.max(0, Math.min(done, total));
-      frac = Math.max(frac, total > 0 ? from + ((1 - from) * d) / total : 1);
-      return { text: `Preparing shaders ${d}/${total}`, frac };
+  };
+}
+
+/**
+ * The warm-up step's line and bar: "Preparing shaders 120/242" (GPU programs ready of those known so
+ * far, from warmup()'s progress) and its blended work as the bar from `from` to `to`. Never goes back
+ * and never shows more ready than known.
+ */
+export function warmupProgress(from = WARMUP_FROM, to = 1) {
+  const step = stepProgress(from, to);
+  return {
+    start(): WarmupLine {
+      return { text: "Preparing shaders…", frac: step.at(0) };
+    },
+    update(p: { ready: number; programs: number; frac: number }): WarmupLine {
+      const text = p.programs > 0 ? `Preparing shaders ${Math.max(0, Math.min(p.ready, p.programs))}/${p.programs}` : "Preparing shaders…";
+      return { text, frac: step.at(p.frac) };
     },
   };
 }
@@ -262,6 +275,11 @@ export function hideLoading(): void {
   clearInterval(tipTimer);
   // Next show starts fresh at the right step; a compact card must not stick to a full load.
   phase = { step: 0, body: phase.body, compact: false };
+}
+
+/** Where the bar stands now (0–1): the next step starts from here, never behind it. */
+export function loadingFrac(): number {
+  return Math.max(0, last.pct) / 100;
 }
 
 /** Small top-right badge, e.g. "WebGPU · Medium (auto)". */

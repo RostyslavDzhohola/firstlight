@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
-import { forceProperty, installShaderMonitor, keptSamples, lastWarmup, predictShadowBuilds, shadowBuildCost, shaderStats, warmShadowCasters, warmup } from "./warmup.ts";
+import {
+  forceProperty, installShaderMonitor, keptSamples, lastWarmup, MovingProgress, predictShadowBuilds, shadowBuildCost, shaderStats,
+  warmShadowCasters, warmup, type WarmupProgress,
+} from "./warmup.ts";
 import { FIRST_DRAWS_START } from "./parallelCompile.ts";
 import type { RenderCtx } from "./renderer.ts";
 import { watchDisposals } from "./disposeWatch.testutil.ts";
@@ -346,32 +349,45 @@ describe("warm-up report (per-phase times and shader counts) and progress", () =
     }
   });
 
-  it("reports progress as done/total work units, monotonic, ending at total/total", async () => {
+  it("reports progress: the bar moves forward with every bit of work and ends at 100%", async () => {
     try {
       const ctx = fakeCtx({ items: 5, webgpu: true, shadows: true });
-      const events: [number, number][] = [];
-      await warmup(ctx, { frames: 2, onProgress: (done, total) => events.push([done, total]) });
-      // 5 compile items + 6 predicted shadow builds + 2 frames + the settle frame
-      expect(events[0]).toEqual([1, 14]);
-      expect(events.at(-1)).toEqual([14, 14]);
+      const events: WarmupProgress[] = [];
+      await warmup(ctx, { frames: 2, onProgress: (p) => events.push({ ...p }) });
+      expect(events.length).toBeGreaterThanOrEqual(10); // 5 objects, 2 shadow batches, 2 frames, the end
       for (let i = 1; i < events.length; i++) {
-        expect(events[i]![0]).toBeGreaterThanOrEqual(events[i - 1]![0]);
-        expect(events[i]![0]).toBeLessThanOrEqual(events[i]![1]);
+        expect(events[i]!.frac).toBeGreaterThan(events[i - 1]!.frac); // every event is work done: it moves
+        expect(events[i]!.ready).toBeLessThanOrEqual(events[i]!.programs);
       }
-      expect(events.map((e) => e[0])).toEqual([1, 2, 3, 4, 5, 9, 11, 12, 13, 14]);
-      expect(lastWarmup()!.backend).toBe("webgpu");
+      expect(events.at(-1)).toEqual({ ready: 5, programs: 5, frac: 1 }); // nothing deferred: builds are programs
     } finally {
       vi.unstubAllGlobals();
       vi.restoreAllMocks();
     }
   });
 
-  it("still ends at total/total without shadows or compile items", async () => {
+  it("labels GPU programs that have compiled, not objects prepared", async () => {
+    const pipelines = new FakePipelines();
+    try {
+      const ctx = fakeCtx({ items: 4, webgpu: false, shadows: false, pipelines });
+      const events: WarmupProgress[] = [];
+      await warmup(ctx, { frames: 1, onProgress: (p) => events.push({ ...p }) });
+      const duringCompile = events.filter((e) => e.programs > 0 && e.frac < 0.5);
+      expect(duringCompile.some((e) => e.ready < e.programs)).toBe(true); // prepared, still compiling on the GPU
+      expect(events.at(-1)).toEqual({ ready: 5, programs: 5, frac: 1 }); // 4 objects + the frames' pipeline
+      for (let i = 1; i < events.length; i++) expect(events[i]!.frac).toBeGreaterThanOrEqual(events[i - 1]!.frac);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("still ends at 100% without shadows or compile items", async () => {
     try {
       const ctx = fakeCtx({ items: 0, webgpu: false, shadows: false });
-      const events: [number, number][] = [];
-      await warmup(ctx, { frames: 1, onProgress: (done, total) => events.push([done, total]) });
-      expect(events).toEqual([[1, 2], [2, 2]]);
+      const events: WarmupProgress[] = [];
+      await warmup(ctx, { frames: 1, onProgress: (p) => events.push({ ...p }) });
+      expect(events.at(-1)!.frac).toBe(1);
       expect(lastWarmup()!.phases.shadows).toEqual({ ms: 0, builds: 0, frames: 0, predicted: 0, wait: 0 });
     } finally {
       vi.unstubAllGlobals();
@@ -395,5 +411,28 @@ describe("warm-up report (per-phase times and shader counts) and progress", () =
     }
     scene.add(new THREE.Mesh(geo, new THREE.MeshStandardNodeMaterial())); // not a caster
     expect(predictShadowBuilds(scene)).toBe(4);
+  });
+});
+
+describe("MovingProgress (the bar toward a total that is still being discovered)", () => {
+  it("is exactly done/total when the total is known from the start", () => {
+    const p = new MovingProgress();
+    expect(p.update(25, 100)).toBeCloseTo(0.25);
+    expect(p.update(50, 100)).toBeCloseTo(0.5);
+    expect(p.update(100, 100)).toBeCloseTo(1);
+  });
+
+  it("keeps moving on every bit of work while the total grows, never backwards, never past 100%", () => {
+    const p = new MovingProgress();
+    let prev = 0;
+    for (let done = 1; done <= 200; done++) {
+      const f = p.update(done, 50 + done * 2); // more work keeps turning up
+      expect(f).toBeGreaterThan(prev);
+      expect(f).toBeLessThan(1);
+      prev = f;
+    }
+    expect(p.update(200, 150)).toBe(prev); // a smaller total later changes nothing by itself
+    expect(p.update(200, 200)).toBe(prev); // no new work: the bar holds
+    expect(p.update(260, 260)).toBeCloseTo(1); // all done
   });
 });

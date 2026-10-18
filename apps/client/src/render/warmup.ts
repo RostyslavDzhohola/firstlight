@@ -233,6 +233,31 @@ export async function warmShadowCasters(
   return frames;
 }
 
+/** What the loader shows: GPU programs ready of those known so far, and the bar's position (0–1). */
+export interface WarmupProgress {
+  ready: number;
+  programs: number;
+  frac: number;
+}
+
+/**
+ * A bar toward a total that is still being discovered (programs turn up as the compile goes). Each
+ * step of work covers its share of what is left: exactly done/total when the total is fixed, and
+ * when the total grows the steps get smaller instead of the bar freezing or going back.
+ */
+export class MovingProgress {
+  private frac = 0;
+  private done = 0;
+
+  update(done: number, total: number): number {
+    const d = done - this.done;
+    if (d <= 0) return this.frac;
+    this.frac = Math.min(1, this.frac + (1 - this.frac) * (d / Math.max(total - this.done, d)));
+    this.done = done;
+    return this.frac;
+  }
+}
+
 /** The longest the warm-up keeps rendering for programs still compiling (a safety valve). */
 const DRAIN_MAX_MS = 60_000;
 
@@ -244,7 +269,7 @@ const DRAIN_MAX_MS = 60_000;
  */
 export async function warmup(
   ctx: RenderCtx,
-  opts: { frames?: number; hooks?: WarmupHooks[]; beforeFrame?: () => void; onProgress?: (done: number, total: number) => void; label?: string } = {},
+  opts: { frames?: number; hooks?: WarmupHooks[]; beforeFrame?: () => void; onProgress?: (p: WarmupProgress) => void; label?: string } = {},
 ): Promise<WarmupReport> {
   const { scene, camera, renderer } = ctx;
   const restore: (() => void)[] = [];
@@ -272,7 +297,7 @@ export async function warmup(
   let loaded = 0;
   let shadowDone = 0;
   let framesDone = 0;
-  let shown = 0;
+  const bar = new MovingProgress();
   let lastShown = "";
   let compile: WarmupReport["phases"]["compile"] = { ms: 0, builds: 0, items: 0, wait: 0 };
   let compute: WarmupReport["phases"]["compute"] = { ms: 0, builds: 0, nodes: 0 };
@@ -288,17 +313,22 @@ export async function warmup(
   const pacer = new FirstDrawPacer();
   const gl = (renderer as unknown as { backend?: { gl?: FenceGL } }).backend?.gl ?? null;
   let frameAt = 0;
-  // Progress: work units known so far (compile objects, predicted shadow builds, frames, and the
-  // pipelines and first draws as they appear); never backwards, total/total at the end.
-  const total = () => items + predicted + frames + 1 + (deferred?.started() ?? 0) + (gate ? gate.granted() + gate.waiting() : 0);
+  // Progress. The label counts GPU programs that have compiled, of those known so far (without the
+  // deferral every build compiles before the next, so builds are programs). The bar blends all the
+  // work as weighted units (objects prepared, programs compiled, shadow builds, first draws, frames)
+  // through MovingProgress, so it moves with every bit of work and never goes back.
   const emit = (final = false) => {
-    const t = total();
-    const d = final ? t : loaded + shadowDone + framesDone + (deferred?.finished() ?? 0) + (gate?.granted() ?? 0);
-    shown = Math.max(shown, Math.min(d, t));
-    const key = `${shown}/${t}`;
+    const started = deferred?.started() ?? 0;
+    const finished = deferred?.finished() ?? 0;
+    const programs = deferred?.active ? started : stats.total - builds0;
+    const ready = final || !deferred?.active ? programs : finished;
+    const total = items + 2 * started + predicted + (gate ? started : 0) + 2 * (frames + 1);
+    const done = loaded + 2 * finished + shadowDone + (gate?.granted() ?? 0) + 2 * framesDone;
+    const frac = final ? 1 : bar.update(done, total);
+    const key = `${ready}/${programs}/${frac}`;
     if (key === lastShown) return;
     lastShown = key;
-    opts.onProgress?.(shown, t);
+    opts.onProgress?.({ ready, programs, frac });
   };
   const ms = (since: number) => Math.round((performance.now() - since) * 10) / 10;
   /** Wait (polling each frame, nothing drawn) until the deferred programs have compiled. */
@@ -395,7 +425,7 @@ export async function warmup(
       const shadowWait = gate ? 0 : await compiled();
       shadows = { ...lap(), frames: n, predicted, wait: shadowWait };
     }
-    shadowDone = predicted;
+    shadowDone = Math.max(shadowDone, predicted);
     phase = "frames";
     for (let i = 0; i < frames; i++) {
       draw();
