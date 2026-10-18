@@ -7,11 +7,31 @@
 //   4. render a few real frames of the full RenderPipeline (shadows + post) behind the loading screen;
 //   5. restore, then watch renderer.debug.onNodeBuilderCreated: any shader built during the next
 //      120 frames is logged (and counted in window.__shaders) — the target is zero.
+// Each run is timed per phase (compile, compute, shadows, frames) with the shaders built in it, kept in
+// window.__shaders.warmups for the e2e hook (D-load-1), and reports done/total work units to the loader.
 
 import * as THREE from "three/webgpu";
 import type { RenderCtx } from "./renderer.ts";
 import { flags } from "../config.ts";
 import { beginManualFrame, type TimestampSource } from "./timing.ts";
+import type { FirstDrawBatch, FirstDrawItem, SlowFrame, WarmupPhase, WarmupReport } from "./warmupReport.ts";
+import { deferPipelines, FirstDrawPacer, gateFirstDraws, glFence, pipelineCost, type DeferRenderer, type FenceGL, type GateRenderer } from "./parallelCompile.ts";
+
+export type { FirstDrawBatch, FirstDrawItem, SlowFrame, WarmupPhase, WarmupReport } from "./warmupReport.ts";
+
+/** `?warmdiag`: what a first draw was (material, object, GLSL sizes), for the batch log. */
+function describeFirstDraw(renderObject: unknown, pipeline: object): FirstDrawItem {
+  const r = renderObject as { material?: { type?: string; name?: string }; object?: { name?: string; type?: string; parent?: { name?: string } | null } };
+  const p = pipeline as { vertexProgram?: { code?: string }; fragmentProgram?: { code?: string } };
+  const o = r.object;
+  const own = o?.name || o?.type || "?";
+  return {
+    material: `${r.material?.type ?? "?"}${r.material?.name ? `:${r.material.name}` : ""}`,
+    object: o?.parent?.name ? `${own} in ${o.parent.name}` : own,
+    vs: p.vertexProgram?.code?.length ?? 0,
+    fs: p.fragmentProgram?.code?.length ?? 0,
+  };
+}
 
 export interface ShaderStats {
   total: number;
@@ -20,20 +40,27 @@ export interface ShaderStats {
   /** Frames left in the current watch window. */
   watching: number;
   recent: { name: string; material: string; frame: number }[];
+  /** The last few warm-ups, oldest first (D-load-1). */
+  warmups: WarmupReport[];
 }
 
-const stats: ShaderStats = { total: 0, afterWarmup: 0, watching: 0, recent: [] };
-let installed = false;
+const stats: ShaderStats = { total: 0, afterWarmup: 0, watching: 0, recent: [], warmups: [] };
+const installed = new WeakSet<object>();
 let frame = 0;
 
 export function shaderStats(): ShaderStats {
   return stats;
 }
 
-/** Hook the renderer once; counts every node build and reports the ones after warm-up. */
+/** The most recent warm-up's report, or null before the first. */
+export function lastWarmup(): WarmupReport | null {
+  return stats.warmups.at(-1) ?? null;
+}
+
+/** Hook each renderer once; counts every node build and reports the ones after warm-up. */
 export function installShaderMonitor(ctx: RenderCtx) {
-  if (installed) return;
-  installed = true;
+  if (installed.has(ctx.renderer)) return;
+  installed.add(ctx.renderer);
   (window as unknown as { __shaders: ShaderStats }).__shaders = stats;
   ctx.renderer.debug.onNodeBuilderCreated = (_builder: unknown, ro: unknown) => {
     stats.total++;
@@ -165,17 +192,36 @@ export function shadowBuildCost(o: THREE.Object3D, seen: Set<string>): 0 | 1 {
   return cost;
 }
 
+function shadowCasters(scene: THREE.Object3D): THREE.Object3D[] {
+  const casters: THREE.Object3D[] = [];
+  scene.traverse((o) => {
+    if ((o as THREE.Mesh).isMesh && o.castShadow) casters.push(o);
+  });
+  return casters;
+}
+
+/** The new shadow-pass builds warmShadowCasters expects for this scene (the loader's progress total). */
+export function predictShadowBuilds(scene: THREE.Object3D): number {
+  const seen = new Set<string>();
+  let n = 0;
+  for (const o of shadowCasters(scene)) n += shadowBuildCost(o, seen);
+  return n;
+}
+
 /**
  * Turn the scene's shadow casters off, then back on in batches of about SHADOW_BATCH predicted new
  * builds, rendering a frame after each batch, so their shadow-pass node builds and programs spread
  * over frames instead of piling into one. Casters that share a build ride along for free. Every
  * caster is back to its own `castShadow` when this returns, even if a frame throws.
  */
-export async function warmShadowCasters(scene: THREE.Object3D, renderFrame: () => void, nextFrameFn: () => Promise<void> = nextFrame): Promise<number> {
-  const casters: THREE.Object3D[] = [];
-  scene.traverse((o) => {
-    if ((o as THREE.Mesh).isMesh && o.castShadow) casters.push(o);
-  });
+export async function warmShadowCasters(
+  scene: THREE.Object3D,
+  renderFrame: () => void,
+  nextFrameFn: () => Promise<void> = nextFrame,
+  onBatch?: (predictedBuilds: number) => void,
+  batch = SHADOW_BATCH,
+): Promise<number> {
+  const casters = shadowCasters(scene);
   const pending = casters.map((o) => forceProperty(o, "castShadow", false));
   const seen = new Set<string>();
   let frames = 0;
@@ -183,15 +229,16 @@ export async function warmShadowCasters(scene: THREE.Object3D, renderFrame: () =
     let i = 0;
     while (i < pending.length) {
       let cost = 0;
-      while (i < pending.length && (cost < SHADOW_BATCH || cost === 0)) {
+      while (i < pending.length && (cost < batch || cost === 0)) {
         cost += shadowBuildCost(casters[i]!, seen);
         pending[i]!();
         pending[i] = () => {};
         i++;
-        if (cost >= SHADOW_BATCH) break;
+        if (cost >= batch) break;
       }
       renderFrame();
       frames++;
+      onBatch?.(cost);
       await nextFrameFn();
     }
   } finally {
@@ -200,22 +247,160 @@ export async function warmShadowCasters(scene: THREE.Object3D, renderFrame: () =
   return frames;
 }
 
+/** What the loader shows: GPU programs ready of those known so far, and the bar's position (0–1). */
+export interface WarmupProgress {
+  ready: number;
+  programs: number;
+  frac: number;
+}
+
+/**
+ * A bar toward a total that is still being discovered (programs turn up as the compile goes). Each
+ * step of work covers its share of what is left: exactly done/total when the total is fixed, and
+ * when the total grows the steps get smaller instead of the bar freezing or going back.
+ */
+export class MovingProgress {
+  private frac = 0;
+  private done = 0;
+
+  update(done: number, total: number): number {
+    const d = done - this.done;
+    if (d <= 0) return this.frac;
+    this.frac = Math.min(1, this.frac + (1 - this.frac) * (d / Math.max(total - this.done, d)));
+    this.done = done;
+    return this.frac;
+  }
+}
+
+/** The longest the warm-up keeps rendering for programs still compiling (a safety valve). */
+const DRAIN_MAX_MS = 60_000;
+
 /**
  * Run the protocol. `beforeFrame` lets the caller update systems between the real frames
  * (e.g. stream grass cells) so instance buffers are filled. Always restores the scene, even if a
- * frame throws.
+ * frame throws. `onProgress(done, total)` counts work units: the compile's render objects, the
+ * predicted shadow builds and the real frames; it never goes backwards and ends at total/total.
  */
 export async function warmup(
   ctx: RenderCtx,
-  opts: { frames?: number; hooks?: WarmupHooks[]; beforeFrame?: () => void; onProgress?: (f: number) => void } = {},
-) {
+  opts: { frames?: number; hooks?: WarmupHooks[]; beforeFrame?: () => void; onProgress?: (p: WarmupProgress) => void; label?: string } = {},
+): Promise<WarmupReport> {
   const { scene, camera, renderer } = ctx;
   const restore: (() => void)[] = [];
   const t0 = performance.now();
+  const builds0 = stats.total;
   // Builds during a warm-up are the point of it, not post-warm-up hitches: e.g. the first-visit
   // probe's warm-up opens a window and the full warm-up right after compiles what it didn't draw.
   stats.watching = 0;
   const src = renderer as unknown as TimestampSource;
+
+  // Per-phase clock: each lap() closes the running phase.
+  let mark = t0;
+  let markBuilds = builds0;
+  const lap = (): WarmupPhase => {
+    const now = performance.now();
+    const p = { ms: Math.round((now - mark) * 10) / 10, builds: stats.total - markBuilds };
+    mark = now;
+    markBuilds = stats.total;
+    return p;
+  };
+  const frames = opts.frames ?? 4;
+  const shadowsOn = !!(ctx.settings?.on.shadows && ctx.settings.shadows.mode === "map");
+  let items = 0;
+  let predicted = 0;
+  let loaded = 0;
+  let shadowDone = 0;
+  let framesDone = 0;
+  const bar = new MovingProgress();
+  let lastShown = "";
+  let compile: WarmupReport["phases"]["compile"] = { ms: 0, builds: 0, items: 0, wait: 0 };
+  let compute: WarmupReport["phases"]["compute"] = { ms: 0, builds: 0, nodes: 0 };
+  let shadows: WarmupReport["phases"]["shadows"] = { ms: 0, builds: 0, frames: 0, predicted: 0, wait: 0 };
+  let realFrames = 0;
+  // New programs compile side by side behind the loader instead of one at a time (D-load-2);
+  // `?serialcompile` keeps three's own one-by-one compiles for A/B runs.
+  const deferred = flags.has("serialcompile") ? null : deferPipelines(renderer as unknown as DeferRenderer);
+  // WebGL2: a program's first draw builds its Metal pipeline in the GPU process, so first draws go
+  // out in batches, one in flight at a time (a fence), sized by GLSL size at the GPU's measured rate.
+  const diag = flags.has("warmdiag");
+  let frameGrants: FirstDrawItem[] = [];
+  const batchLog: FirstDrawBatch[] = [];
+  const gated = deferred?.active && !ctx.webgpu
+    ? gateFirstDraws(renderer as unknown as GateRenderer, diag ? (ro, p) => frameGrants.push(describeFirstDraw(ro, p)) : undefined, pipelineCost)
+    : null;
+  const gate = gated?.active ? gated : null;
+  const pacer = new FirstDrawPacer(diag ? (ms, _used, tag) => batchLog.push({ ms: Math.round(ms), items: tag as FirstDrawItem[] }) : undefined);
+  const gl = (renderer as unknown as { backend?: { gl?: FenceGL } }).backend?.gl ?? null;
+  let frameAt = 0;
+  // Progress. The label counts GPU programs that have compiled, of those known so far (without the
+  // deferral every build compiles before the next, so builds are programs). The bar blends all the
+  // work as weighted units (objects prepared, programs compiled, shadow builds, first draws, frames)
+  // through MovingProgress, so it moves with every bit of work and never goes back.
+  const emit = (final = false) => {
+    const started = deferred?.started() ?? 0;
+    const finished = deferred?.finished() ?? 0;
+    const programs = deferred?.active ? started : stats.total - builds0;
+    const ready = final || !deferred?.active ? programs : finished;
+    const total = items + 2 * started + predicted + (gate ? started : 0) + 2 * (frames + 1);
+    const done = loaded + 2 * finished + shadowDone + (gate?.granted() ?? 0) + 2 * framesDone;
+    const frac = final ? 1 : bar.update(done, total);
+    const key = `${ready}/${programs}/${frac}`;
+    if (key === lastShown) return;
+    lastShown = key;
+    opts.onProgress?.({ ready, programs, frac });
+  };
+  const ms = (since: number) => Math.round((performance.now() - since) * 10) / 10;
+  /** Wait (polling each frame, nothing drawn) until the deferred programs have compiled. */
+  const compiled = async () => {
+    const t = performance.now();
+    while (deferred && deferred.pending() > 0) {
+      await nextFrame();
+      emit();
+    }
+    await deferred?.settle();
+    return ms(t);
+  };
+  let grantedAt = 0;
+  let costAt = 0;
+  let buildsAt = 0;
+  let cpu = 0;
+  let allowed = 0;
+  let phase: SlowFrame["phase"] = "shadows";
+  const slow: SlowFrame[] = [];
+  const draw = () => {
+    grantedAt = gate?.granted() ?? 0;
+    costAt = gate?.cost() ?? 0;
+    buildsAt = stats.total;
+    const t = performance.now();
+    allowed = pacer.allowance();
+    gate?.frame(allowed);
+    frameGrants = [];
+    opts.beforeFrame?.();
+    beginManualFrame(src);
+    ctx.render();
+    ctx.gpu.frame(); // keeps three's timestamp query pool drained
+    const end = performance.now();
+    cpu = end - t;
+    if (gate) {
+      const used = gate.cost() - costAt;
+      pacer.sent(used, end, used > 0 ? glFence(gl) : null, diag ? frameGrants : undefined);
+    }
+  };
+  const next = async () => {
+    await nextFrame();
+    const now = performance.now();
+    const firstDraws = (gate?.granted() ?? 0) - grantedAt;
+    if (frameAt && now - frameAt > 100) {
+      const r1 = (x: number) => Math.round(x * 10) / 10;
+      slow.push({ phase, ms: r1(now - frameAt), cpu: r1(cpu), builds: stats.total - buildsAt, firstDraws, budget: allowed });
+    }
+    if (frameAt) pacer.tick(now, now - frameAt);
+    frameAt = now;
+  };
+  const programs = () => (renderer.info as unknown as { memory?: { programs?: number } }).memory?.programs ?? 0;
+  const stages0 = programs();
+  let framesWait = 0;
+  let drain = 0;
   try {
     for (const h of opts.hooks ?? []) h.forceAll(true);
     scene.traverse((o) => {
@@ -230,33 +415,70 @@ export async function warmup(
       }
     });
     opts.beforeFrame?.();
+    if (shadowsOn) predicted = predictShadowBuilds(scene);
+    // 2. The scene pass's compile: one render object at a time, yielding between them.
+    lap();
+    const onCompile = (e: { loaded: number; total: number }) => {
+      items = e.total;
+      loaded = e.loaded;
+      emit();
+    };
     try {
-      await (ctx.compileScene ? ctx.compileScene() : renderer.compileAsync(scene, camera));
+      await (ctx.compileScene ? ctx.compileScene(onCompile) : renderer.compileAsync(scene, camera, null, onCompile as (e: ProgressEvent) => void));
     } catch (e) {
       console.warn("[warmup] compileAsync failed (continuing with real frames)", e);
     }
-    opts.onProgress?.(0.5);
-    // 3. Shadow-pass variants. compileAsync skips the shadow map, so the first real frame built every
+    const compileWait = await compiled();
+    compile = { ...lap(), items, wait: compileWait };
+    loaded = items;
+    // 3. Compute nodes (WebGPU): none yet, so the phase is empty.
+    compute = { ...lap(), nodes: 0 };
+    // 4. Shadow-pass variants. compileAsync skips the shadow map, so the first real frame built every
     //    caster's shadow material at once (WebGL links each synchronously: ~1 s with the loading
     //    screen frozen on a travel). Casters join the shadow pass a few per frame instead.
-    if (ctx.settings?.on.shadows && ctx.settings.shadows.mode === "map") {
-      await warmShadowCasters(scene, () => {
-        opts.beforeFrame?.();
-        beginManualFrame(src);
-        ctx.render();
-        ctx.gpu.frame();
-      });
+    frameAt = performance.now();
+    if (shadowsOn) {
+      // Deferred programs link off the main thread, so a frame takes twice the new shadow builds.
+      const n = await warmShadowCasters(scene, draw, next, (cost) => {
+        shadowDone += cost;
+        emit();
+      }, deferred?.active ? SHADOW_BATCH * 2 : SHADOW_BATCH);
+      // WebGL2 keeps drawing while its shadow programs compile (the drain below); WebGPU waits here.
+      const shadowWait = gate ? 0 : await compiled();
+      shadows = { ...lap(), frames: n, predicted, wait: shadowWait };
     }
-    const frames = opts.frames ?? 4;
+    shadowDone = Math.max(shadowDone, predicted);
+    phase = "frames";
     for (let i = 0; i < frames; i++) {
-      opts.beforeFrame?.();
-      beginManualFrame(src);
-      ctx.render();
-      ctx.gpu.frame(); // keeps three's timestamp query pool drained
-      await nextFrame();
-      opts.onProgress?.(0.5 + (0.5 * (i + 1)) / frames);
+      draw();
+      realFrames++;
+      await next();
+      framesDone++;
+      emit();
+    }
+    // 5. Until every program has compiled and, on WebGL2, been drawn once: stop after a frame that
+    //    began with nothing compiling and turned no first draw away.
+    const drainAt = performance.now();
+    phase = "drain";
+    if (gate) {
+      while (performance.now() - drainAt < DRAIN_MAX_MS) {
+        const compiling = deferred!.pending();
+        draw();
+        realFrames++;
+        drain++;
+        await next();
+        emit();
+        if (compiling === 0 && gate.waiting() === 0 && !pacer.inFlight()) break;
+      }
+      await deferred!.settle();
+      framesWait = ms(drainAt);
+    } else {
+      framesWait = await compiled();
     }
   } finally {
+    // The settle frame below renders the way play does: every program it needs is ready and drawn.
+    gate?.release();
+    deferred?.release();
     for (const r of restore.reverse()) {
       try {
         r();
@@ -277,10 +499,37 @@ export async function warmup(
   beginManualFrame(src);
   ctx.render();
   ctx.gpu.frame();
+  realFrames++;
   await nextFrame();
   ctx.gpu.drain();
+  const framesPhase = { ...lap(), frames: realFrames, wait: framesWait, drain };
+  const end = mark;
+  const report: WarmupReport = {
+    label: opts.label ?? "",
+    backend: ctx.webgpu ? "webgpu" : "webgl2",
+    tier: ctx.tier ?? null,
+    start: t0,
+    end,
+    ms: Math.round((end - t0) * 10) / 10,
+    builds: stats.total - builds0,
+    shaders: stats.total,
+    stages: programs() - stages0,
+    slow: slow.sort((a, b) => b.ms - a.ms).slice(0, 12),
+    firstDraws: { granted: gate?.granted() ?? 0, ...pacer.batches() },
+    ...(diag ? { batches: batchLog.sort((a, b) => b.ms - a.ms).slice(0, 20) } : {}),
+    phases: { compile, compute, shadows, frames: framesPhase },
+  };
+  stats.warmups.push(report);
+  if (stats.warmups.length > 8) stats.warmups.shift();
+  emit(true);
   stats.watching = 120;
   stats.afterWarmup = 0;
   stats.recent = [];
-  if (flags.has("shadercheck")) console.info(`[warmup] done in ${(performance.now() - t0).toFixed(0)} ms, ${stats.total} node builds so far`);
+  const p = report.phases;
+  console.info(
+    `[warmup] ${report.label || "warm-up"} ${report.backend} ${report.ms.toFixed(0)} ms, ${report.builds} builds (${report.shaders} total), ${report.stages} new shader stages: ` +
+      `compile ${p.compile.ms.toFixed(0)} ms/${p.compile.items} items/${p.compile.builds} builds, shadows ${p.shadows.ms.toFixed(0)} ms/${p.shadows.frames} frames/${p.shadows.builds} builds, ` +
+      `frames ${p.frames.ms.toFixed(0)} ms/${p.frames.frames} (${p.frames.drain} until compiled and drawn)/${p.frames.builds} builds`,
+  );
+  return report;
 }

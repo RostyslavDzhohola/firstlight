@@ -10,7 +10,9 @@
 //   events(since?)        recent observations, oldest first: server combat messages ("in"), attack
 //                         messages we sent ("out"), key and mouse presses, player animation and avatar clip
 //                         changes, toasts, body/lock/loading/graphics changes
-//   frames.stats(since?)  requestAnimationFrame deltas (always recorded: a 4096-entry ring, cheap)
+//   frames.stats(since?, until?)  requestAnimationFrame deltas (always recorded: a 4096-entry ring, cheap)
+//   warmups()             the last few shader warm-ups: label, backend, per-phase ms and builds, shader count
+//   longtasks(since?, until?)  main-thread long tasks (PerformanceObserver "longtask"): { start, ms }
 //   probe.start(opts)     blink probe, only while a journey runs it: canvas luma from a 32×18 copy every
 //                         `every` frames (createImageBitmap at the end of the frame's task, after all of the
 //                         frame's work, so no readback of the full frame and no stall; every frame whose
@@ -299,6 +301,16 @@ export function installE2eHook(win: Window & typeof globalThis): void {
 
   // ---- per-frame watch: frame times, room, animation, body, loading, graphics changes
   const frames = new Ring(4096);
+  // Main-thread long tasks (> 50 ms), kept apart from frame intervals: a long frame with no long task
+  // was the GPU process (D-load-2).
+  const longtasks = new Ring(2048);
+  try {
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) longtasks.push(e.startTime, e.duration);
+    }).observe({ type: "longtask", buffered: true });
+  } catch {
+    /* no longtask entries in this browser */
+  }
   let last = performance.now();
   const seen = { anim: -1, clip: "", body: "", loading: "", gfx: "" };
   const watch = (now: number) => {
@@ -796,10 +808,16 @@ export function installE2eHook(win: Window & typeof globalThis): void {
     events: (since = -Infinity) => log.filter((e) => e.t >= since),
     clearEvents: () => void (log.length = 0),
     frames: {
-      stats: (since = -Infinity) => frameStats(frames.since(since)),
+      /** Frames that ended at or after `since` and started by `until` (a window such as a warm-up). */
+      stats: (since = -Infinity, until = Infinity) => frameStats(frames.since(since).filter((f) => f.t - f.v <= until)),
       raw: (since = -Infinity) => frames.since(since).map((f) => Math.round(f.v * 10) / 10),
     },
     probe: { start: startProbe, stop: stopProbe, running: () => !!probe },
+    /** The last few shader warm-ups, per phase (render/warmup.ts WarmupReport, D-load-1). */
+    warmups: () => (window as unknown as { __shaders?: { warmups?: unknown[] } }).__shaders?.warmups ?? [],
+    /** Main-thread long tasks that started in [since, until]: { start, ms }. */
+    longtasks: (since = -Infinity, until = Infinity) =>
+      longtasks.since(since).filter((e) => e.t <= until).map((e) => ({ start: Math.round(e.t), ms: Math.round(e.v) })),
     /** Distance, bearing and camera aim from the player to a world point (null before the game). */
     targetOf: (x: number, y: number, z: number) => targetFrom(game())?.(x, y, z) ?? null,
     /**

@@ -51,8 +51,48 @@ export function loadingPhase(text: string, prev: LoadingPhase = { step: 0, body:
   if (/^Connecting/i.test(t)) return { ...prev, step: 1 };
   if (/^(Building the world|Loading characters)/i.test(t)) return { ...prev, step: 2 };
   if (/^Applying graphics/i.test(t)) return { ...prev, step: 3, compact: true };
-  if (/^(Tuning graphics|Warming up shaders)/i.test(t)) return { ...prev, step: 3 };
+  if (/^(Tuning graphics|Warming up shaders|Preparing shaders)/i.test(t)) return { ...prev, step: 3 };
   return prev;
+}
+
+/** Where the bar stands when the shader warm-up starts; it fills the rest (D-load-1). */
+export const WARMUP_FROM = 0.85;
+
+export interface WarmupLine {
+  text: string;
+  frac: number;
+}
+
+/**
+ * A boot step's share of the bar: at(f) maps the step's own 0–1 into from…to, never going back
+ * (the first-visit probe: "Tuning graphics…" from 82% to 90%).
+ */
+export function stepProgress(from: number, to: number) {
+  let frac = from;
+  return {
+    at(f: number): number {
+      frac = Math.max(frac, from + (to - from) * Math.max(0, Math.min(1, f)));
+      return frac;
+    },
+  };
+}
+
+/**
+ * The warm-up step's line and bar: "Preparing shaders 120/242" (GPU programs ready of those known so
+ * far, from warmup()'s progress) and its blended work as the bar from `from` to `to`. Never goes back
+ * and never shows more ready than known.
+ */
+export function warmupProgress(from = WARMUP_FROM, to = 1) {
+  const step = stepProgress(from, to);
+  return {
+    start(): WarmupLine {
+      return { text: "Preparing shaders…", frac: step.at(0) };
+    },
+    update(p: { ready: number; programs: number; frac: number }): WarmupLine {
+      const text = p.programs > 0 ? `Preparing shaders ${Math.max(0, Math.min(p.ready, p.programs))}/${p.programs}` : "Preparing shaders…";
+      return { text, frac: step.at(p.frac) };
+    },
+  };
 }
 
 // ------------------------------------------------------------------------------------------------ DOM
@@ -235,6 +275,11 @@ export function hideLoading(): void {
   clearInterval(tipTimer);
   // Next show starts fresh at the right step; a compact card must not stick to a full load.
   phase = { step: 0, body: phase.body, compact: false };
+}
+
+/** Where the bar stands now (0–1): the next step starts from here, never behind it. */
+export function loadingFrac(): number {
+  return Math.max(0, last.pct) / 100;
 }
 
 /** Small top-right badge, e.g. "WebGPU · Medium (auto)". */

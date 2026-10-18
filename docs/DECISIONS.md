@@ -1185,3 +1185,82 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   post uniform that changes every frame. Without the flag nothing is created (the DOM counter's
   stylesheet loads with the flag), and smoke frame times on WebGL2 match main's back to back (3 runs
   each: p50 16.7, p95 16.7–16.8, max 16.8 ms; vsync-bound). Why: a re-recording can then tell, frame by frame, a fresh frame (both counters moved on) from a stale or dropped layer (#17).
+- **D-renderer-1 (2026-10-18):** a WebGPU start that times out or fails is remembered on the device,
+  not just for the tab: `localStorage["fl.gfx.webgpu-failed"]` holds `{v, reason, at, browser, gpu}`
+  (reason timeout/error, `Date.now()`, the browser's major version parsed from the user agent such
+  as `Chrome/141`, and the GPU name), nothing else, never sent anywhere. Later visits skip WebGPU
+  while the record is under 7 days old and the browser version and GPU still match; otherwise
+  WebGPU is tried again with the same 8 s deadline. A WebGPU start that works clears the record
+  (checked on the backend in use: three r186 catches a failed WebGPU init itself and resolves on
+  WebGL2, which counts as an error and is recorded);
+  `?webgpu` clears it and tries (a new failure writes a fresh record); `?webgl` still forces WebGL2
+  and leaves it alone; storage that is missing or throws means no memory. The GPU name is the
+  unmasked WebGL2 renderer string, the same one `renderer.ts` reports on WebGL2: WebGPU can't name
+  the GPU when its adapter never answers, so a throwaway WebGL2 context (lost straight after) reads
+  it, only when there is a record to check or one to write. Replaces the tab-session memory. Why:
+  every new tab or visit on the owner's M1 waited the full 8 s before falling back (#24, spec #18).
+  J1.5 (headless Chromium on the M1, an adapter that never answers): navigation to renderer up
+  9.2 s on the first visit, 0.55 s on the second, 8.4 s with `?webgpu`.
+- **D-load-1 (2026-10-18):** every shader warm-up is timed per phase and the loader shows its real
+  progress. `warmup()` returns a report kept in `window.__shaders.warmups` (the e2e hook's
+  `warmups()`): label (`arrival:<body>`, `probe`, `graphics`, `reprobe`), backend, tier, total ms,
+  node builds and the session's shader count, and per phase ms + builds: the scene-pass compile
+  (with the render objects it prepared), compute (none yet), the shadow frames (with the predicted
+  builds) and the real frames. J1.2 and J1.3 note it with the frame times inside its window; one
+  `[warmup]` console line sums it up. The loader's warm-up step reads "Preparing shaders ready/total":
+  GPU programs compiled of those known so far. The bar blends all the work (objects prepared,
+  programs compiled, shadow builds, first draws, frames) as weighted units through `MovingProgress`:
+  each bit of work covers its share of what is left, so it keeps moving while the total is still
+  growing, never goes back, and equals done/total when the total is fixed. The first-visit probe
+  ("Tuning graphics…", 82–90%) forwards its warm-ups and measurements, the arrival warm-up starts
+  from wherever the bar is, and the mid-game re-warms (graphics change, re-probe) fill from 50%. Baseline (three's own
+  compiles, `?serialcompile`; `e2e/bench-warmup.spec.ts`, M1 headless with `--use-angle=metal`, the
+  owner's High tier, no probe, a fresh browser per run, load average 17–120 from other apps): 242
+  builds, the owner's overlay count. WebGL2 with a cold Metal shader cache: 30.3–48.9 s (4 runs),
+  compile 17.0–29.9 s (696 objects, 157 builds), shadows 12.1–19.3 s (44 frames, 85 builds), worst
+  frame 2.9–6.1 s with 18–21 frames over 250 ms; with a warm cache 5.1–5.6 s (2 runs), worst frame
+  217 ms. WebGPU, warm cache: 3.6–3.9 s (2 runs). macOS keeps each app's compiled Metal shaders in
+  its own cache outside the browser profile, so the first visit after shaders change pays the cold
+  cost; the owner's ~20 s fits a cold or partly cold cache. Why: the owner's loader sat on "Warming
+  up shaders… 92%" for ~20 s (#25, spec #18), and #30 needs to know where the time goes.
+- **D-load-2 (2026-10-18):** the shader warm-up compiles programs side by side and paces WebGL2's
+  first draws (`render/parallelCompile.ts`). three r186 compiles a pipeline in parallel
+  (KHR_parallel_shader_compile on WebGL2, createRenderPipelineAsync on WebGPU) only when handed a
+  promise list; compileAsync awaited each object's list before the next, and a real frame handed
+  none, so WebGL2 linked every shadow variant synchronously. During a warm-up every new pipeline now
+  goes into one shared list: node builds continue while the GPU compiles, a frame skips an object
+  until its program is ready, and the shadow frames take 8 new builds instead of 4. On WebGL2 a
+  compiled program still costs on its first draw, where ANGLE's Metal backend builds the Metal
+  pipeline in the GPU process (the first real frame froze for ~5 s on a cold cache). So first draws go
+  out in batches, one in flight at a time behind a WebGL2 fence, sized by how long the GPU took over
+  the last one (doubled under 120 ms when full, halved over 250 ms), and the warm-up keeps drawing
+  until every program has compiled and drawn once. Batches are priced by GLSL size (vertex + fragment
+  characters) at the GPU's measured rate, aiming at 160 ms each; skinned shadow-pass programs get a
+  floor so they always go alone. WebGPU only waits for its async pipelines. The
+  post-warm-up watch stays at 0 builds. `?serialcompile` keeps three's own compiles for A/B runs.
+  Fewer variants was not taken: three keys each instanced mesh's node build by the mesh, but the 242
+  builds make only 226–228 vertex and fragment stages (three shares a stage per distinct source),
+  so duplicates already share GPU programs; what they still cost is node building on the CPU, which
+  only a scene change (fewer instanced meshes per material) would cut.
+  Numbers (`e2e/bench-warmup.spec.ts`, M1 headless, the owner's High tier, a fresh browser per run,
+  each pair back to back, before = `?serialcompile`): WebGL2 cold Metal cache 33.3/28.9 s → 14.5/14.7 s,
+  worst frame 3.1/2.9 s → 0.45/0.53 s, frames over 250 ms 18/17 → 6/5 (single pipelines that take
+  the GPU 0.5 s on their own); WebGL2 warm 16.7/6.3 s → 2.6/2.9 s, worst 1.6 s/217 ms → 133/150 ms;
+  WebGPU warm 3.2/3.5 s → 2.7/2.4 s, worst 167/200 ms → 217/183 ms. J1 on the final build (load
+  ~20): J1.2 Play → world 13.4 s on WebGL2 (6.0 s WebGPU), J1.6 High warm-up 2.0 s (1.9 s), worst
+  frame inside it 117 ms (133 ms), 0 builds after. Why: #30 (spec #18), the owner's ~20 s on
+  "Warming up shaders".
+  Cold-cache analysis (`?warmdiag` and the hook's long tasks, review of #30): the main thread never
+  blocks long now (longest task in the warm-up 50–157 ms; before, 16 tasks over 250 ms, up to 2.9 s,
+  the synchronous links). The remaining long frames are ANGLE building a Metal pipeline at a
+  program's first draw, in the GPU process. Most programs take about 5–6 ms per 1000 GLSL characters,
+  and the large ones 170–200 ms each (terrain 41k characters 203 ms, water 26k 189 ms, vegetation
+  ~29k 175–185 ms, grass 24k 183 ms). Skinned shadow-pass programs (characters and horses, ~5k
+  characters, about 9 distinct) take ~270 ms each, over 250 ms on their own: a platform cost per
+  program that batching can't split. The cheapest way to remove them would be characters and horses
+  dropping shadow-map shadows for the existing blob shadows (a visual call for the owner; a small
+  change plus a look check). Final pairs (back to back, cold): 30.4/32.5 s → 14.2/14.4 s, frames over
+  250 ms 17/17 → 1/2; warm WebGL2 14.2/11.9 s → 2.7/2.8 s; warm WebGPU 3.3/2.9 s → 2.3/2.1 s.
+  Pricing by size costs time on the first-visit path: J1.2 on WebGL2 (Medium after the probe) went
+  from 31 batches and 7.5 s of warm-up with count-based batches to 50 batches and 9.8 s (Play → world
+  13.4 s → 16.9 s, still under 30 s); `BATCH_TARGET_MS` is the one knob between the two.

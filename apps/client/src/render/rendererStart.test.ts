@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  initWithin, sessionBackendMemory, startRenderer, WEBGPU_INIT_TIMEOUT_MS, WEBGPU_SKIPPED_KEY,
-  type BackendMemory, type Startable,
+  browserMajor, deviceBackendMemory, initWithin, startRenderer, WEBGPU_FAILED_KEY, WEBGPU_INIT_TIMEOUT_MS, WEBGPU_RETRY_MS,
+  type BackendMemory, type DeviceMemoryEnv, type Startable, type StorageLike,
 } from "./rendererStart.ts";
 
 /** A renderer whose init() the test settles by hand. */
@@ -36,6 +36,9 @@ function harness(memoryStart = false) {
     webgpuSkipped: () => skipped,
     rememberWebgpuSkipped: () => {
       skipped = true;
+    },
+    forgetWebgpuSkipped: () => {
+      skipped = false;
     },
   };
   const create = (forceWebGL: boolean) => {
@@ -225,34 +228,227 @@ describe("initWithin", () => {
   });
 });
 
-describe("sessionBackendMemory", () => {
-  function fakeStorage(init: Record<string, string> = {}) {
-    const m = new Map(Object.entries(init));
-    return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) };
-  }
+// ---------------------------------------------------------------------------------- device memory
 
-  it("round-trips through sessionStorage", () => {
-    vi.stubGlobal("sessionStorage", fakeStorage());
-    const mem = sessionBackendMemory();
-    expect(mem.webgpuSkipped()).toBe(false);
-    mem.rememberWebgpuSkipped();
-    expect(sessionStorage.getItem(WEBGPU_SKIPPED_KEY)).toBe("1");
-    expect(sessionBackendMemory().webgpuSkipped()).toBe(true);
+const DAY = 24 * 60 * 60 * 1000;
+const CHROME = "Chrome/141";
+const M1 = "ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version)";
+
+function fakeStorage(init: Record<string, string> = {}) {
+  const m = new Map(Object.entries(init));
+  const s: StorageLike & { map: Map<string, string> } = {
+    map: m,
+    getItem: (k) => m.get(k) ?? null,
+    setItem: (k, v) => void m.set(k, v),
+    removeItem: (k) => void m.delete(k),
+  };
+  return s;
+}
+
+/** A device: its local storage, a hand-moved clock, the browser's major version and the GPU name. */
+function device(opts: { record?: unknown; browser?: string; gpu?: string; now?: number; storage?: StorageLike | null } = {}) {
+  const storage = opts.storage !== undefined ? opts.storage : fakeStorage(opts.record === undefined ? {} : { [WEBGPU_FAILED_KEY]: JSON.stringify(opts.record) });
+  const env = { now: opts.now ?? 100 * DAY, browser: opts.browser ?? CHROME, gpu: opts.gpu ?? M1, gpuProbes: 0 };
+  const memEnv: DeviceMemoryEnv = {
+    storage,
+    now: () => env.now,
+    browser: () => env.browser,
+    gpu: () => {
+      env.gpuProbes++;
+      return env.gpu;
+    },
+  };
+  const record = () => {
+    const raw = (storage as ReturnType<typeof fakeStorage> | null)?.map.get(WEBGPU_FAILED_KEY);
+    return raw === undefined ? null : (JSON.parse(raw) as Record<string, unknown>);
+  };
+  return { env, memory: deviceBackendMemory(memEnv), storage, record };
+}
+
+/** Start like a page load does; returns which backend was tried first and how it ended. */
+async function load(d: ReturnType<typeof device>, opts: { forceWebGPU?: boolean; forceWebGL?: boolean; webgpu: "ready" | "hang" | "reject" | "untried" | "internal-fallback" }) {
+  const h = harness();
+  // three r186 catches a failed WebGPU init itself, switches to its WebGL2 backend and resolves init().
+  const isWebGPU = (r: FakeRenderer) => !r.forceWebGL && opts.webgpu !== "internal-fallback";
+  const started = startRenderer({ create: h.create, forceWebGL: !!opts.forceWebGL, forceWebGPU: opts.forceWebGPU, memory: d.memory, log: h.log, isWebGPU });
+  await flush();
+  const first = h.made[0]!;
+  const triedWebgpu = !first.forceWebGL;
+  if (triedWebgpu) {
+    if (opts.webgpu === "ready" || opts.webgpu === "internal-fallback") first.resolve();
+    else if (opts.webgpu === "reject") first.reject(new Error("Unable to create WebGPU adapter"));
+    else await vi.advanceTimersByTimeAsync(WEBGPU_INIT_TIMEOUT_MS);
+    await flush();
+  }
+  const webgl = h.made.find((r) => r.forceWebGL);
+  webgl?.resolve();
+  const out = await started;
+  return { triedWebgpu, fallback: out.fallback, logs: h.logs, made: h.made };
+}
+
+const fresh = (over: Record<string, unknown> = {}) => ({ v: 1, reason: "timeout", at: 100 * DAY - DAY, browser: CHROME, gpu: M1, ...over });
+
+describe("startRenderer with the device memory (WebGPU that didn't start, across visits)", () => {
+  it("a fresh record for this browser and GPU skips WebGPU: no 8 s wait", async () => {
+    const d = device({ record: fresh() });
+    const r = await load(d, { webgpu: "untried" });
+    expect(r.triedWebgpu).toBe(false);
+    expect(r.fallback).toBe("remembered");
+    expect(r.logs[0]).toMatch(/WebGPU skipped/);
+    expect(r.logs[0]).toMatch(/\?webgpu/); // says how to try again
+    expect(d.record()).toEqual(fresh()); // still remembered for the next visit
   });
 
-  it("tolerates storage that throws or is missing (private mode, node)", () => {
-    vi.stubGlobal("sessionStorage", {
+  it("skips until the record is ~7 days old, then tries WebGPU again", async () => {
+    const at = 100 * DAY;
+    const almost = device({ record: fresh({ at }), now: at + WEBGPU_RETRY_MS - 1 });
+    expect((await load(almost, { webgpu: "untried" })).triedWebgpu).toBe(false);
+    const expired = device({ record: fresh({ at }), now: at + WEBGPU_RETRY_MS });
+    const r = await load(expired, { webgpu: "ready" });
+    expect(r.triedWebgpu).toBe(true);
+    expect(r.fallback).toBeNull();
+    expect(WEBGPU_RETRY_MS).toBe(7 * DAY);
+  });
+
+  it("tries WebGPU again after a browser update", async () => {
+    const d = device({ record: fresh({ browser: "Chrome/140" }), browser: "Chrome/141" });
+    expect((await load(d, { webgpu: "ready" })).triedWebgpu).toBe(true);
+  });
+
+  it("tries WebGPU again on a different GPU (new machine, eGPU, other adapter)", async () => {
+    const d = device({ record: fresh(), gpu: "ANGLE (AMD, ANGLE Metal Renderer: AMD Radeon Pro 5500M, Unspecified Version)" });
+    expect((await load(d, { webgpu: "ready" })).triedWebgpu).toBe(true);
+  });
+
+  it("tries WebGPU when the record is from the future (a clock set back) or unreadable", async () => {
+    expect((await load(device({ record: fresh({ at: 200 * DAY }) }), { webgpu: "ready" })).triedWebgpu).toBe(true);
+    const junk = device({ storage: fakeStorage({ [WEBGPU_FAILED_KEY]: "{not json" }) });
+    expect((await load(junk, { webgpu: "ready" })).triedWebgpu).toBe(true);
+    const wrong = device({ record: { reason: "timeout", at: "yesterday" } });
+    expect((await load(wrong, { webgpu: "ready" })).triedWebgpu).toBe(true);
+  });
+
+  it("?webgpu tries WebGPU despite a fresh record, and clears the record", async () => {
+    const d = device({ record: fresh() });
+    const h = harness();
+    const started = startRenderer({ create: h.create, forceWebGL: false, forceWebGPU: true, memory: d.memory, log: h.log });
+    await flush();
+    expect(h.made[0]!.forceWebGL).toBe(false);
+    expect(d.record()).toBeNull(); // cleared before the attempt, so a closed tab doesn't keep it
+    h.made[0]!.resolve();
+    expect((await started).fallback).toBeNull();
+    expect(d.record()).toBeNull();
+  });
+
+  it("?webgpu that fails again writes a new record (the next plain visit skips)", async () => {
+    const d = device({ record: fresh({ at: 1 }) });
+    const r = await load(d, { forceWebGPU: true, webgpu: "hang" });
+    expect(r.fallback).toBe("timeout");
+    expect(d.record()).toEqual({ v: 1, reason: "timeout", at: 100 * DAY, browser: CHROME, gpu: M1 });
+  });
+
+  it("?webgl forces WebGL2 and leaves the record alone", async () => {
+    const d = device({ record: fresh() });
+    const r = await load(d, { forceWebGL: true, webgpu: "untried" });
+    expect(r.made).toHaveLength(1);
+    expect(r.fallback).toBeNull();
+    expect(d.record()).toEqual(fresh());
+    const none = device();
+    await load(none, { forceWebGL: true, webgpu: "untried" });
+    expect(none.record()).toBeNull();
+  });
+
+  it("a timeout writes the record: reason, time, browser major version and GPU name, nothing else", async () => {
+    const d = device();
+    const r = await load(d, { webgpu: "hang" });
+    expect(r.fallback).toBe("timeout");
+    expect(d.record()).toEqual({ v: 1, reason: "timeout", at: 100 * DAY, browser: CHROME, gpu: M1 });
+    // the next visit goes straight to WebGL2
+    const again = await load(device({ storage: d.storage }), { webgpu: "untried" });
+    expect(again.triedWebgpu).toBe(false);
+    expect(again.fallback).toBe("remembered");
+  });
+
+  it("an error writes the record with reason error", async () => {
+    const d = device();
+    const r = await load(d, { webgpu: "reject" });
+    expect(r.fallback).toBe("error");
+    expect(d.record()).toMatchObject({ reason: "error", at: 100 * DAY });
+  });
+
+  it("init() that resolves on three's own WebGL2 fallback is a failed start: recorded as an error, not cleared", async () => {
+    const d = device({ record: fresh({ browser: "Chrome/139" }) }); // stale: WebGPU is tried
+    const r = await load(d, { webgpu: "internal-fallback" });
+    expect(r.triedWebgpu).toBe(true);
+    expect(r.made).toHaveLength(1); // three's WebGL2 backend is already up: no second renderer
+    expect(r.fallback).toBe("error");
+    expect(d.record()).toEqual({ v: 1, reason: "error", at: 100 * DAY, browser: CHROME, gpu: M1 });
+    expect(r.logs.join("\n")).toMatch(/WebGPU failed to start/);
+    // the next visit skips WebGPU
+    expect((await load(device({ storage: d.storage }), { webgpu: "untried" })).fallback).toBe("remembered");
+  });
+
+  it("a successful WebGPU start clears an old record", async () => {
+    const d = device({ record: fresh({ browser: "Chrome/139" }) });
+    const r = await load(d, { webgpu: "ready" });
+    expect(r.fallback).toBeNull();
+    expect(d.record()).toBeNull();
+  });
+
+  it("probes the GPU name only when there is a record to check or one to write", async () => {
+    const clean = device();
+    await load(clean, { webgpu: "ready" });
+    expect(clean.env.gpuProbes).toBe(0); // a working WebGPU device pays nothing
+    const failing = device();
+    await load(failing, { webgpu: "hang" });
+    expect(failing.env.gpuProbes).toBe(1);
+  });
+
+  it("storage that is missing, disabled or full means no memory, never a failed boot", async () => {
+    const none = device({ storage: null });
+    expect((await load(none, { webgpu: "hang" })).fallback).toBe("timeout");
+    expect((await load(none, { webgpu: "ready" })).triedWebgpu).toBe(true);
+    const throwing: StorageLike = {
       getItem() {
         throw new Error("denied");
       },
       setItem() {
+        throw new Error("QuotaExceededError");
+      },
+      removeItem() {
         throw new Error("denied");
       },
-    });
-    const mem = sessionBackendMemory();
-    expect(mem.webgpuSkipped()).toBe(false);
-    expect(() => mem.rememberWebgpuSkipped()).not.toThrow();
+    };
+    const d = device({ storage: throwing });
+    expect((await load(d, { webgpu: "hang" })).fallback).toBe("timeout");
+    expect((await load(d, { webgpu: "ready" })).fallback).toBeNull();
+    expect((await load(d, { forceWebGPU: true, webgpu: "ready" })).fallback).toBeNull();
+  });
+
+  it("defaults to localStorage, and tolerates a page with none (node, blocked cookies)", async () => {
+    const ls = fakeStorage();
+    vi.stubGlobal("localStorage", ls);
+    const mem = deviceBackendMemory({ now: () => 5, browser: () => CHROME, gpu: () => M1 });
+    mem.rememberWebgpuSkipped("error");
+    expect(JSON.parse(ls.map.get(WEBGPU_FAILED_KEY)!)).toMatchObject({ reason: "error", at: 5 });
+    expect(mem.webgpuSkipped()).toBe(true);
+    mem.forgetWebgpuSkipped();
+    expect(ls.map.has(WEBGPU_FAILED_KEY)).toBe(false);
     vi.unstubAllGlobals();
-    expect(sessionBackendMemory().webgpuSkipped()).toBe(false); // no sessionStorage at all
+    const bare = deviceBackendMemory({ now: () => 5, browser: () => CHROME, gpu: () => M1 });
+    expect(bare.webgpuSkipped()).toBe(false);
+    expect(() => bare.rememberWebgpuSkipped("timeout")).not.toThrow();
+    expect(() => bare.forgetWebgpuSkipped()).not.toThrow();
+  });
+});
+
+describe("browserMajor", () => {
+  it("reads the browser and its major version from the user agent", () => {
+    expect(browserMajor("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36")).toBe("Chrome/141");
+    expect(browserMajor("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/141.0.7390.37 Safari/537.36")).toBe("Chrome/141");
+    expect(browserMajor("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.3537.71")).toBe("Edg/141");
+    expect(browserMajor("Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:144.0) Gecko/20100101 Firefox/144.0")).toBe("Firefox/144");
+    expect(browserMajor("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15")).toBe("Safari/26");
+    expect(browserMajor("")).toBe("");
   });
 });

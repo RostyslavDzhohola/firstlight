@@ -21,6 +21,12 @@ test.describe("J1 arrival", () => {
     await player.note("timing", { playToPickMs: t.pickShownAt - t.clickedAt, playAsToWorldMs: inWorldAt - t.playAsAt, loadingMs, gfx: s.gfx });
     expect.soft(s.gfx?.webgpu, "renderer under test").toBe(player.gfx === "webgpu");
     expect.soft(loadingMs, "Play → in the world (minus the time spent choosing) under 30 s").toBeLessThan(30_000);
+    // Where the warm-up's time goes, per phase, with the shader count (D-load-1, #25).
+    const warm = await player.warmup("arrival");
+    await player.note("warmup", warm);
+    await player.note("warmups", (await player.warmups()).map((w) => ({ label: w.label, backend: w.backend, tier: w.tier, ms: w.ms, builds: w.builds, shaders: w.shaders, phases: w.phases })));
+    expect.soft(warm, "the arrival's warm-up is reported").not.toBeNull();
+    expect.soft(warm?.backend, "the report names the renderer under test").toBe(player.gfx === "webgpu" ? "webgpu" : "webgl2");
 
     // The tutorial greets a new player in Portus.
     const tut = await player.until((x) => !!x.onboarding?.active, "the first-minute tutorial is running", 10_000);
@@ -46,6 +52,7 @@ test.describe("J1 arrival", () => {
     // Every build in the warm-up's watch window (the 120 rendered frames after the hand-over) counts.
     const shaders = await player.shaderWatchClosed();
     await player.note("travel", { ms: arrived - t0, frames, afterWarmup: shaders.afterWarmup, recent: shaders.recent });
+    await player.note("warmup", await player.warmup("arrival:arcadia"));
     await player.shot("arcadia");
     // The warm-up used to compile everything again in its first real frame (WebGL: 0.7-3.3 s frozen).
     expect.soft(frames.max, `no frozen frame from the portal to Arcadia (worst: ${JSON.stringify(frames.worst)})`).toBeLessThan(500);
@@ -136,5 +143,51 @@ test.describe("J1 arrival", () => {
     // Bounded: two rungs to climb, and the doubling hold-off allows at most four failed trials in 10 min.
     expect(trials!.taken, "few trial up-steps in 10 ladder-minutes").toBeLessThanOrEqual(6);
     expect(probe.blanks, "no trial resize shows a blank world").toEqual([]);
+  });
+
+  test("J1.5 · a WebGPU that never answers costs this device one 8 s wait, not one per visit", { tag: ["@J1", "@J1.5"] }, async ({ player, page }) => {
+    test.skip(player.gfx !== "webgl", "the hang is simulated, so one renderer project covers it");
+    // The owner's M1: Chrome's WebGPU adapter never answers. Same for every visit in this browser profile.
+    await page.addInitScript(() => {
+      const hang = { requestAdapter: () => new Promise(() => {}), getPreferredCanvasFormat: () => "bgra8unorm", wgslLanguageFeatures: new Set() };
+      Object.defineProperty(Navigator.prototype, "gpu", { configurable: true, get: () => hang });
+    });
+    /** One visit without ?webgl: ms from navigation to the renderer being up, and its start log. */
+    const visit = async (extra = "") => {
+      const lines: string[] = [];
+      const onLine = (m: { text(): string }) => void (m.text().startsWith("[gfx]") && lines.push(m.text()));
+      page.on("console", onLine);
+      const t0 = Date.now();
+      const up = page.waitForEvent("console", { predicate: (m) => m.text().startsWith("[gfx] backend"), timeout: 60_000 });
+      await page.goto(`/?e2e&offline&autoplay${extra}`);
+      await up;
+      const ms = Date.now() - t0;
+      page.off("console", onLine);
+      const record = await page.evaluate(() => localStorage.getItem("fl.gfx.webgpu-failed"));
+      return { ms, lines, record: record ? (JSON.parse(record) as Record<string, unknown>) : null };
+    };
+    const first = await visit();
+    const second = await visit();
+    const forced = await visit("&webgpu");
+    await player.note("webgpu-memory", { firstMs: first.ms, secondMs: second.ms, forcedMs: forced.ms, record: second.record, lines: [first.lines, second.lines, forced.lines] });
+    expect.soft(first.lines.join("\n"), "the first visit waits out the deadline").toMatch(/WebGPU did not start within 8 s/);
+    expect.soft(first.ms, "the first visit pays the 8 s deadline").toBeGreaterThanOrEqual(8000);
+    expect.soft(second.record, "the device keeps a small record: reason, time, browser, GPU").toMatchObject({ reason: "timeout", browser: expect.stringMatching(/^Chrome\/\d+$/) });
+    expect.soft(Object.keys(second.record ?? {}).sort(), "and nothing else").toEqual(["at", "browser", "gpu", "reason", "v"]);
+    expect.soft(second.lines.join("\n"), "the second visit skips WebGPU").toMatch(/WebGPU skipped/);
+    expect.soft(second.ms, "the second visit doesn't wait for WebGPU").toBeLessThan(first.ms - 6000);
+    expect.soft(forced.lines.join("\n"), "?webgpu tries again").toMatch(/\?webgpu: trying WebGPU[\s\S]*WebGPU did not start within 8 s/);
+  });
+  test("J1.6 · the owner's High tier, no probe: shader warm-up per phase, the loader never blocks 250 ms, nothing compiles after", { tag: ["@J1", "@J1.6"] }, async ({ player }) => {
+    // The owner's M1 case (#18): a returning device on High, so no first-visit probe warms anything first.
+    await player.joinAsDevAdmin({ starter: "Hexwick", body: "portus", extra: { tier: "high" } });
+    await player.waitInWorld(180_000, "portus");
+    const warm = await player.warmup("arrival");
+    const shaders = await player.shaderWatchClosed();
+    await player.note("warmup", warm);
+    expect(warm, "the arrival's warm-up is reported").not.toBeNull();
+    expect.soft(warm!.tier, "on the owner's tier").toBe("high");
+    expect.soft(warm!.framesDuring.max, `no main-thread block over 250 ms during the warm-up (worst: ${JSON.stringify(warm!.framesDuring.worst)})`).toBeLessThan(250);
+    expect.soft(shaders.afterWarmup, `no shader builds after the warm-up (${JSON.stringify(shaders.recent)})`).toBe(0);
   });
 });

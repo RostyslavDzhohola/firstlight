@@ -26,7 +26,7 @@ import { Menu } from "../ui/menu.ts";
 import { coversWorld } from "../ui/pauseFlow.ts";
 import { bindUi } from "../ui/bind.ts";
 import { pickDisplayName } from "../ui/account.ts";
-import { hideLoading, setLoading, setLoadingBadge } from "../ui/loading.ts";
+import { hideLoading, loadingFrac, setLoading, setLoadingBadge, stepProgress, WARMUP_FROM, warmupProgress } from "../ui/loading.ts";
 import { getAccountInfo, invalidatePlayToken, isDevGuest } from "../net/auth.ts";
 import { PilesView } from "../world/PilesView.ts";
 import { breakablesLayoutPending } from "../world/Breakables.ts";
@@ -553,9 +553,11 @@ export class Game {
       (flags.has("reprobe") || (this.ctx.needsProbe() && !flags.has("bench")));
     if (wantProbe) {
       this.probed = true;
-      setLoading("Tuning graphics for this computer…", 0.82);
+      const tuningLine = "Tuning graphics for this computer…";
+      setLoading(tuningLine, 0.82);
+      const tuning = stepProgress(0.82, 0.9); // its warm-ups and measurements move the bar (D-load-1)
       try {
-        const r = await runProbe(this.ctx, updateWorld);
+        const r = await runProbe(this.ctx, updateWorld, (f) => setLoading(tuningLine, tuning.at(f)));
         console.info(`[gfx] probe → ${r.tier}${r.valid ? "" : " (not saved)"}`, r);
         this.ctx.setProbedTier(r.tier, { persist: r.valid });
       } catch (e) {
@@ -581,8 +583,21 @@ export class Game {
       this.env.setBenchMode(this.bodyId, this.planet.look);
       this.bench.update(0, performance.now(), this.ctx.camera);
     }
-    setLoading("Warming up shaders…", 0.92);
-    await warmup(this.ctx, { frames: 4, hooks: [this.warmupHook()], beforeFrame: updateWorld });
+    // The loader counts the warm-up's work ("Preparing shaders 120/242") up to 100% (D-load-1).
+    // After a probe the bar is further on: start from there, never behind it.
+    const shaders = warmupProgress(Math.max(WARMUP_FROM, loadingFrac()));
+    const first = shaders.start();
+    setLoading(first.text, first.frac);
+    await warmup(this.ctx, {
+      frames: 4,
+      hooks: [this.warmupHook()],
+      beforeFrame: updateWorld,
+      label: `arrival:${this.bodyId}`,
+      onProgress: (p) => {
+        const line = shaders.update(p);
+        setLoading(line.text, line.frac);
+      },
+    });
     alive("warming up shaders");
     // Hand-over: from here a close is a mid-game disconnect (no await until the caller resumes play).
     if (watch) this.net.onLeaveRoom = (code) => this.onRoomClosed(code);
@@ -612,8 +627,18 @@ export class Game {
     this.running = false;
     this.rewarming = true;
     setLoading("Applying graphics settings…", 0.5);
+    const shaders = warmupProgress(0.5);
     try {
-      await warmup(this.ctx, { frames: 3, hooks: [this.warmupHook()], beforeFrame: () => this.updateWorldForWarmup() });
+      await warmup(this.ctx, {
+        frames: 3,
+        hooks: [this.warmupHook()],
+        beforeFrame: () => this.updateWorldForWarmup(),
+        label: "graphics",
+        onProgress: (p) => {
+          const line = shaders.update(p);
+          setLoading(line.text, line.frac);
+        },
+      });
     } finally {
       hideLoading();
       this.running = true;
@@ -635,12 +660,23 @@ export class Game {
     if (!this.running || this.travelling) return;
     this.running = false;
     this.rewarming = true;
-    setLoading("Tuning graphics for this computer…", 0.5);
+    const tuningLine = "Tuning graphics for this computer…";
+    setLoading(tuningLine, 0.5);
+    const tuning = stepProgress(0.5, 0.75);
+    const shaders = warmupProgress(0.75);
     try {
-      const r = await runProbe(this.ctx);
+      const r = await runProbe(this.ctx, undefined, (f) => setLoading(tuningLine, tuning.at(f)));
       console.info(`[gfx] probe → ${r.tier}${r.valid ? "" : " (not saved)"}`, r);
       this.ctx.setProbedTier(r.tier, { persist: r.valid, clearPinned: true });
-      await warmup(this.ctx, { frames: 3, hooks: [this.warmupHook()] });
+      await warmup(this.ctx, {
+        frames: 3,
+        hooks: [this.warmupHook()],
+        label: "reprobe",
+        onProgress: (p) => {
+          const line = shaders.update(p);
+          setLoading(line.text, line.frac);
+        },
+      });
     } finally {
       hideLoading();
       this.running = true;

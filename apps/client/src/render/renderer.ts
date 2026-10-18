@@ -12,7 +12,7 @@ import {
 import { createFramePath } from "./frameSize.ts";
 import { startRenderer } from "./rendererStart.ts";
 import { GpuTimer, ResolutionLadder } from "./timing.ts";
-import { compileForPass, passCallDepth, saveRenderState, type GuardedRenderer, type PassCompileRenderer } from "./compilePass.ts";
+import { compileForPass, passCallDepth, saveRenderState, type CompileProgress, type GuardedRenderer, type PassCompileRenderer } from "./compilePass.ts";
 import { frameCounterDraw, frameCounterTick } from "./frameCounter.ts";
 
 export { TIERS, FEATURES, type Tier, type Feature, type ResolvedSettings };
@@ -68,7 +68,7 @@ export interface RenderCtx {
   /** Draw a frame: a pending size first, then the post pipeline. */
   render(): void;
   /** Compile the scene for the context its frames use (the post pipeline's scene pass): warm-up. */
-  compileScene(): Promise<unknown>;
+  compileScene(onProgress?: CompileProgress): Promise<unknown>;
   /** Per-frame bookkeeping after render (GPU timer, ladder). */
   afterFrame(now: number, frameMs: number): void;
   stored(): StoredGfx;
@@ -100,7 +100,8 @@ export function isSoftwareRenderer(name: string): boolean {
 }
 
 export async function createRenderer(container: HTMLElement): Promise<RenderCtx> {
-  // WebGPU gets a deadline; past it (or on a rejected init) a fresh WebGL2 renderer starts instead.
+  // WebGPU gets a deadline; past it (or on a rejected init) a fresh WebGL2 renderer starts instead,
+  // and later visits on this device skip WebGPU for a while (rendererStart.ts, D-renderer-1).
   const { renderer } = await startRenderer({
     // A new options object per renderer: three writes its WebGL fallback hook into it.
     create: (forceWebGL) =>
@@ -111,6 +112,8 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
         trackTimestamp: !flags.has("notimer"),
       } as ConstructorParameters<typeof THREE.WebGPURenderer>[0]),
     forceWebGL: flags.has("webgl"),
+    forceWebGPU: flags.has("webgpu"),
+    isWebGPU: (r) => !!(r.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend,
   });
   const webgpu = !!(renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend;
   const tm = flags.get("tonemap");
@@ -281,9 +284,9 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
       drawPath.render();
       frameCounterDraw(renderer); // ?framecount: the canvas counter, after everything else; a no-op without the flag
     },
-    compileScene() {
-      if (passCompileOff) return renderer.compileAsync(scene, camera);
+    compileScene(onProgress) {
       const r = renderer as unknown as PassCompileRenderer;
+      if (passCompileOff) return r.compileAsync(scene, camera, null, onProgress);
       const sp = post?.scenePass ?? null;
       if (sp && passDepth === null) {
         // Learn the scene pass's call depth from one render with the scene hidden (background and
@@ -308,10 +311,10 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
         if (failed) {
           passCompileOff = true;
           rebuildPost(true);
-          return renderer.compileAsync(scene, camera);
+          return r.compileAsync(scene, camera, null, onProgress);
         }
       }
-      return compileForPass(r, scene, camera, sp, passDepth);
+      return compileForPass(r, scene, camera, sp, passDepth, onProgress);
     },
     afterFrame(now, frameMs) {
       drawPath.afterFrame(now, frameMs);

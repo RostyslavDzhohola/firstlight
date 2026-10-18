@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
-import { forceProperty, installShaderMonitor, keptSamples, shadowBuildCost, shaderStats, warmShadowCasters, warmup } from "./warmup.ts";
+import {
+  forceProperty, installShaderMonitor, keptSamples, lastWarmup, MovingProgress, predictShadowBuilds, shadowBuildCost, shaderStats,
+  warmShadowCasters, warmup, type WarmupProgress,
+} from "./warmup.ts";
+import { FIRST_DRAWS_START } from "./parallelCompile.ts";
 import type { RenderCtx } from "./renderer.ts";
 import { watchDisposals } from "./disposeWatch.testutil.ts";
 
@@ -131,6 +135,11 @@ describe("warmShadowCasters", () => {
     expect(seen).toEqual([4, 8, 30]);
     expect(frames).toBe(3);
     expect(casting(all)).toBe(30);
+    // a bigger batch when the programs link off the main thread
+    const again = sceneWith(all.map((m) => { m.castShadow = false; return m; }));
+    const wide: number[] = [];
+    expect(await warmShadowCasters(again, () => wide.push(casting(all)), async () => {}, undefined, 8)).toBe(2);
+    expect(wide).toEqual([8, 30]);
   });
 
   it("predicts builds: instanced and skinned always, plain meshes once per material and layout", () => {
@@ -154,5 +163,277 @@ describe("warmShadowCasters", () => {
     expect(casting(parts)).toBe(10);
     const others = scene.children.filter((o) => !(parts as THREE.Object3D[]).includes(o));
     expect(others.every((o) => !o.castShadow)).toBe(true);
+  });
+});
+
+/** three's Pipelines: a program compiles in parallel (a promise in the list) only when given a list. */
+class FakePipelines {
+  calls: { ro: string; parallel: boolean }[] = [];
+  unfinished = 0;
+  compiled = new Set<string>();
+  private readonly started = new Set<string>();
+  private readonly pipelines = new Map<string, object>();
+  getForRender(ro: unknown, promises: Promise<unknown>[] | null = null) {
+    const k = String(ro);
+    this.calls.push({ ro: k, parallel: !!promises });
+    if (this.started.has(k)) return ro;
+    this.started.add(k);
+    if (promises) {
+      this.unfinished++;
+      promises.push(new Promise<void>((r) => setTimeout(() => {
+        this.unfinished--;
+        this.compiled.add(k);
+        r();
+      }, 2)));
+    } else {
+      this.compiled.add(k);
+    }
+    return ro;
+  }
+}
+
+/** …with three's draw check: a render object draws once its pipeline is compiled. */
+class FakeDrawPipelines extends FakePipelines {
+  private readonly byKey = new Map<string, object>();
+  get(ro: unknown) {
+    const k = String(ro);
+    // 12k characters of GLSL each: two fit the first batch's budget
+    if (!this.byKey.has(k)) this.byKey.set(k, { k, vertexProgram: { code: "v".repeat(4000) }, fragmentProgram: { code: "f".repeat(8000) } });
+    return { pipeline: this.byKey.get(k) };
+  }
+  isReady(ro: unknown) {
+    return this.compiled.has(String(ro));
+  }
+}
+
+describe("warm-up report (per-phase times and shader counts) and progress", () => {
+  /** A fake renderer on a hand-moved clock: compile items cost 10 ms and one build each, frames 5 ms. */
+  let draws: string[][] = [];
+  function fakeCtx(opts: { items: number; webgpu: boolean; shadows: boolean; frameBuilds?: number; pipelines?: FakePipelines; objects?: number }) {
+    draws = [];
+    let clock = 1000;
+    vi.spyOn(performance, "now").mockImplementation(() => clock);
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => setTimeout(cb, 0));
+    const debug: { onNodeBuilderCreated?: (builder: unknown, ro: unknown) => void } = {};
+    const build = () => debug.onNodeBuilderCreated?.({}, { object: new THREE.Mesh(), material: new THREE.MeshBasicNodeMaterial() });
+    const scene = new THREE.Scene();
+    const geo = new THREE.BoxGeometry();
+    const mat = new THREE.MeshStandardNodeMaterial();
+    for (let i = 0; i < 6; i++) {
+      const m = new THREE.InstancedMesh(geo, mat, 2); // a shadow build each
+      m.castShadow = true;
+      scene.add(m);
+    }
+    let frameBuilds = opts.frameBuilds ?? 0;
+    const ctx = {
+      scene,
+      camera: new THREE.PerspectiveCamera(),
+      webgpu: opts.webgpu,
+      tier: "medium",
+      settings: { on: { shadows: opts.shadows }, shadows: { mode: "map" } },
+      renderer: {
+        debug,
+        info: { frame: 0, reset() {} },
+        _pipelines: opts.pipelines,
+        compileAsync: async (_s: unknown, _c: unknown, _t: unknown, onProgress?: (e: { loaded: number; total: number }) => void) => {
+          for (let i = 1; i <= opts.items; i++) {
+            await Promise.resolve();
+            clock += 10;
+            build();
+            // three: a per-object list, awaited before the next object
+            const list: Promise<unknown>[] = [];
+            opts.pipelines?.getForRender(`object ${i}`, list);
+            await Promise.all(list);
+            onProgress?.({ loaded: i, total: opts.items });
+          }
+        },
+      },
+      render() {
+        if (opts.objects) {
+          const p = opts.pipelines as FakeDrawPipelines;
+          const drew: string[] = [];
+          for (let i = 0; i < opts.objects; i++) {
+            p.getForRender(`mesh ${i}`);
+            if (p.isReady(`mesh ${i}`)) drew.push(`mesh ${i}`);
+          }
+          draws.push(drew);
+        } else opts.pipelines?.getForRender("frame");
+        clock += 5;
+        if (frameBuilds > 0) {
+          frameBuilds--;
+          build();
+        }
+      },
+      gpu: { frame() {}, drain: () => [] },
+    } as unknown as RenderCtx;
+    installShaderMonitor(ctx);
+    return ctx;
+  }
+
+  it("compiles new programs side by side during the warm-up; the settle frame renders the way play does", async () => {
+    const pipelines = new FakePipelines();
+    const own = pipelines.getForRender;
+    try {
+      const ctx = fakeCtx({ items: 3, webgpu: false, shadows: true, pipelines });
+      await warmup(ctx, { frames: 2 });
+      const calls = pipelines.calls;
+      expect(calls.filter((c) => c.ro.startsWith("object")).every((c) => c.parallel)).toBe(true);
+      expect(calls.filter((c) => c.ro === "frame").slice(0, -1).every((c) => c.parallel)).toBe(true); // shadow + real frames
+      expect(calls.at(-1)).toEqual({ ro: "frame", parallel: false }); // the settle frame: three's own path
+      expect(pipelines.unfinished).toBe(0); // everything compiled before the loader goes
+      expect(pipelines.getForRender).toBe(own); // three's method is back
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("WebGL2: spreads first draws over frames, and keeps drawing until every program has compiled and drawn once", async () => {
+    const pipelines = new FakeDrawPipelines();
+    const own = pipelines.isReady;
+    try {
+      const ctx = fakeCtx({ items: 0, webgpu: false, shadows: false, pipelines, objects: 12 });
+      const r = await warmup(ctx, { frames: 1 });
+      const settleFrame = draws.at(-1)!;
+      const before = draws.slice(0, -1);
+      const firstDraws = before.map((d, i) => d.filter((m) => !before.slice(0, i).some((p) => p.includes(m))).length);
+      // at most one budget's worth (fewer if only some programs had compiled yet), not all twelve
+      expect(firstDraws.find((n) => n > 0)).toBeLessThanOrEqual(FIRST_DRAWS_START / 12_000);
+      expect(new Set(before.flat()).size).toBe(12); // every object drew once before the loader goes
+      expect(settleFrame).toHaveLength(12);
+      expect(r.phases.frames.drain).toBeGreaterThan(0);
+      expect(pipelines.isReady).toBe(own);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("WebGPU: no first-draw budget (its pipelines are whole when compiled); waits for them without drawing", async () => {
+    const pipelines = new FakeDrawPipelines();
+    try {
+      const ctx = fakeCtx({ items: 0, webgpu: true, shadows: false, pipelines, objects: 12 });
+      const r = await warmup(ctx, { frames: 1 });
+      expect(r.phases.frames.drain).toBe(0);
+      expect(r.phases.frames.frames).toBe(2);
+      expect(pipelines.unfinished).toBe(0);
+      expect(draws.at(-1)).toHaveLength(12);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("times the scene-pass compile, compute compile, shadow frames and real frames, with the shaders built in each", async () => {
+    try {
+      const ctx = fakeCtx({ items: 5, webgpu: false, shadows: true, frameBuilds: 1 });
+      const before = shaderStats().total;
+      await warmup(ctx, { frames: 2, label: "arrival" });
+      const r = lastWarmup()!;
+      expect(r.label).toBe("arrival");
+      expect(r.backend).toBe("webgl2");
+      expect(r.tier).toBe("medium");
+      expect(r.phases.compile).toEqual({ ms: 50, builds: 5, items: 5, wait: 0 }); // no three internals: nothing deferred
+      expect(r.phases.compute).toEqual({ ms: 0, builds: 0, nodes: 0 }); // no compute nodes yet
+      // 6 predicted shadow builds in batches of 4 (nothing deferred here): two frames, the first's build lands here
+      expect(r.phases.shadows).toEqual({ ms: 10, builds: 1, frames: 2, predicted: 6, wait: 0 });
+      expect(r.phases.frames).toEqual({ ms: 15, builds: 0, frames: 3, wait: 0, drain: 0 }); // 2 + the settle frame
+      expect(r.ms).toBe(75);
+      expect(r.end - r.start).toBe(75);
+      expect(r.builds).toBe(6);
+      expect(r.shaders).toBe(before + 6);
+      expect(shaderStats().warmups.at(-1)).toBe(r); // what the e2e hook reads
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("reports progress: the bar moves forward with every bit of work and ends at 100%", async () => {
+    try {
+      const ctx = fakeCtx({ items: 5, webgpu: true, shadows: true });
+      const events: WarmupProgress[] = [];
+      await warmup(ctx, { frames: 2, onProgress: (p) => events.push({ ...p }) });
+      expect(events.length).toBeGreaterThanOrEqual(10); // 5 objects, 2 shadow batches, 2 frames, the end
+      for (let i = 1; i < events.length; i++) {
+        expect(events[i]!.frac).toBeGreaterThan(events[i - 1]!.frac); // every event is work done: it moves
+        expect(events[i]!.ready).toBeLessThanOrEqual(events[i]!.programs);
+      }
+      expect(events.at(-1)).toEqual({ ready: 5, programs: 5, frac: 1 }); // nothing deferred: builds are programs
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("labels GPU programs that have compiled, not objects prepared", async () => {
+    const pipelines = new FakePipelines();
+    try {
+      const ctx = fakeCtx({ items: 4, webgpu: false, shadows: false, pipelines });
+      const events: WarmupProgress[] = [];
+      await warmup(ctx, { frames: 1, onProgress: (p) => events.push({ ...p }) });
+      const duringCompile = events.filter((e) => e.programs > 0 && e.frac < 0.5);
+      expect(duringCompile.some((e) => e.ready < e.programs)).toBe(true); // prepared, still compiling on the GPU
+      expect(events.at(-1)).toEqual({ ready: 5, programs: 5, frac: 1 }); // 4 objects + the frames' pipeline
+      for (let i = 1; i < events.length; i++) expect(events[i]!.frac).toBeGreaterThanOrEqual(events[i - 1]!.frac);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("still ends at 100% without shadows or compile items", async () => {
+    try {
+      const ctx = fakeCtx({ items: 0, webgpu: false, shadows: false });
+      const events: WarmupProgress[] = [];
+      await warmup(ctx, { frames: 1, onProgress: (p) => events.push({ ...p }) });
+      expect(events.at(-1)!.frac).toBe(1);
+      expect(lastWarmup()!.phases.shadows).toEqual({ ms: 0, builds: 0, frames: 0, predicted: 0, wait: 0 });
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("predicts the shadow phase's builds the way the batching counts them", () => {
+    const scene = new THREE.Scene();
+    const geo = new THREE.BoxGeometry();
+    const mat = new THREE.MeshStandardNodeMaterial();
+    for (let i = 0; i < 3; i++) {
+      const m = new THREE.InstancedMesh(geo, mat, 2);
+      m.castShadow = true;
+      scene.add(m);
+    }
+    for (let i = 0; i < 4; i++) {
+      const m = new THREE.Mesh(geo, mat);
+      m.castShadow = true;
+      scene.add(m);
+    }
+    scene.add(new THREE.Mesh(geo, new THREE.MeshStandardNodeMaterial())); // not a caster
+    expect(predictShadowBuilds(scene)).toBe(4);
+  });
+});
+
+describe("MovingProgress (the bar toward a total that is still being discovered)", () => {
+  it("is exactly done/total when the total is known from the start", () => {
+    const p = new MovingProgress();
+    expect(p.update(25, 100)).toBeCloseTo(0.25);
+    expect(p.update(50, 100)).toBeCloseTo(0.5);
+    expect(p.update(100, 100)).toBeCloseTo(1);
+  });
+
+  it("keeps moving on every bit of work while the total grows, never backwards, never past 100%", () => {
+    const p = new MovingProgress();
+    let prev = 0;
+    for (let done = 1; done <= 200; done++) {
+      const f = p.update(done, 50 + done * 2); // more work keeps turning up
+      expect(f).toBeGreaterThan(prev);
+      expect(f).toBeLessThan(1);
+      prev = f;
+    }
+    expect(p.update(200, 150)).toBe(prev); // a smaller total later changes nothing by itself
+    expect(p.update(200, 200)).toBe(prev); // no new work: the bar holds
+    expect(p.update(260, 260)).toBeCloseTo(1); // all done
   });
 });
