@@ -242,10 +242,10 @@
 
 /* ---------------------------------------------------------------- 11. overlay, modal and scrims */
 /* Full-screen overlay that owns the pointer (menus, death, character pick). Put .fl-ui on it. */
-/* No opacity animation on the overlay itself: that would make it a backdrop root and cut the blur off from the world. */
+/* No opacity animation on the overlay itself: that would make it a backdrop root and cut the blur (?blur=1) off from the world. */
 .fl-overlay { position: fixed; inset: 0; z-index: var(--z-menu); pointer-events: auto; }
 .fl-overlay--modal { z-index: var(--z-modal); display: grid; place-items: center; padding: var(--sp-5); background: var(--menu-scrim); }
-.fl-scrim { position: absolute; inset: 0; animation: fl-fade-in var(--dur-2) var(--ease-out) both; background: linear-gradient(90deg, rgba(5, 7, 10, .9) 0%, rgba(5, 7, 10, .66) 45%, rgba(5, 7, 10, .55) 100%); -webkit-backdrop-filter: blur(14px) saturate(.35) brightness(.7); backdrop-filter: blur(14px) saturate(.35) brightness(.7); }
+.fl-scrim { position: absolute; inset: 0; animation: fl-fade-in var(--dur-2) var(--ease-out) both; background: var(--scrim-bg); -webkit-backdrop-filter: var(--scrim-blur); backdrop-filter: var(--scrim-blur); }
 .fl-modal { width: min(calc(26 * var(--u)), calc(100vw - 32px)); padding: calc(1.4 * var(--u)); display: grid; gap: calc(.9 * var(--u)); animation: fl-rise-in var(--dur-3) var(--ease-out) both; }
 .fl-modal h2 { margin: 0; font: 500 var(--t-xl)/1.1 var(--font-display); letter-spacing: .03em; }
 .fl-modal p { margin: 0; font-size: var(--t-sm); line-height: 1.5; color: var(--paper-2); }

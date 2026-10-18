@@ -1,6 +1,6 @@
 /* Share row (6e): a compact pill bar of quiet buttons (home page foot, Esc menu). */
 
-.fl-share { position: relative; display: inline-flex; align-items: center; gap: 2px; max-width: 100%; padding: 3px; border: 1px solid var(--line-2); border-radius: var(--r-pill); background: rgba(5, 7, 10, .55); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); pointer-events: auto; }
+.fl-share { position: relative; display: inline-flex; align-items: center; gap: 2px; max-width: 100%; padding: 3px; border: 1px solid var(--line-2); border-radius: var(--r-pill); background: rgba(5, 7, 10, .55); -webkit-backdrop-filter: var(--share-blur); backdrop-filter: var(--share-blur); pointer-events: auto; }
 .fl-share__btn {
   display: inline-flex; align-items: center; justify-content: center; gap: .45em; height: calc(2.05 * var(--u)); padding: 0 calc(.8 * var(--u));
   border: 0; border-radius: var(--r-pill); background: none; color: var(--fog-4);

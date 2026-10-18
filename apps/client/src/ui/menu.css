@@ -1,8 +1,10 @@
-/* Esc menu, Settings and full-screen notices (verdict: Entry B). The world keeps running, drained
-   and blurred behind the scrim (no blur on the Low tier). */
+/* Esc menu, Settings and full-screen notices (verdict: Entry B). The world keeps running behind a
+   flat dark scrim (D-ui-1; blurred and drained with ?blur=1). */
 
 .fl-menu { z-index: var(--z-menu); overflow: hidden; }
-.fl-lowfx .fl-menu .fl-scrim { background: rgba(5, 7, 10, .88); }
+/* The HUD stays out from under the pause menu and its Settings (D-ui-1): menu.ts puts fl-paused on
+   <body> while they're open. Every HUD root carries .fl-hud or data-hud (ui/README.md). */
+body.fl-paused .fl-hud, body.fl-paused [data-hud] { visibility: hidden; }
 
 /* ---------------------------------------------------------------- pause menu */
 .fl-menu__screen { position: relative; z-index: 1; height: 100%; display: grid; grid-template-columns: calc(27 * var(--u)) minmax(0, 1fr); gap: calc(3.5 * var(--u)); padding: calc(2.6 * var(--u)) calc(3 * var(--u)) calc(2.2 * var(--u)) calc(3.6 * var(--u)); }

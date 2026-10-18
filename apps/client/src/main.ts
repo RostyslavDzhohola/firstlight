@@ -13,6 +13,10 @@ import { maybeInstallE2e } from "./debug/e2eGate.ts";
 import { runBoot } from "./game/boot.ts";
 import { enterFullscreen } from "./game/fullscreen.ts";
 import { hideLoading, setLoading, showLoadingError } from "./ui/loading.ts";
+import { applyUiLook } from "./ui/look.ts";
+
+// Flat surfaces, or the old blurred look with ?blur=1 (D-ui-1): before anything else draws.
+applyUiLook(document.documentElement, location.search);
 
 // Playwright journeys only (?e2e): window.__fl, a separate chunk that is never fetched otherwise.
 void maybeInstallE2e(location.search, window, () => import("./debug/e2eHook.ts"));

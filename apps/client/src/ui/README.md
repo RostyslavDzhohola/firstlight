@@ -8,7 +8,7 @@ See every screen and state with mock data, no server needed: run the client dev 
 `/ui-gallery.html?screen=hud&nav` (screens: landing (the home page with mock data), home-guest, loading, charpick, hud, hud-oversight, death,
 menu, settings, save-code, players, compass, wheel, shop, inventory, inventory-drag, onboarding,
 onboarding-attack, onboarding-portal, onboarding-done, kit-inventory, kit-onboarding, …). Add
-`&live` to keep animations running and `&low` for the Low-tier look (no blur).
+`&live` to keep animations running, `&low` for the Low-tier look and `&blur=1` for the old blurred look.
 
 ## Rules
 
@@ -20,9 +20,12 @@ onboarding-attack, onboarding-portal, onboarding-done, kit-inventory, kit-onboar
   prompts) · **red hatch = hostile** · **cold mono = Oversight**. Don't mix inside one component.
 - **Per-frame updates touch the DOM only when a value changes** (cache the last value). Fills use
   `transform: scaleX(var(--fill))`, never `width`. No layout reads in the frame loop.
-- **No glow filters on things that update every frame.** Backdrop blur is off on the Low tier
-  automatically (`fl-lowfx` on `<html>`), so don't fake it with images.
-- **HUD roots** carry `.fl-hud` or `data-hud` so photo mode (Shift+P) hides them. Menus and overlays don't.
+- **No glow filters on things that update every frame.** **No live backdrop blur** (D-ui-1): surfaces
+  use the flat tokens (`--panel-bg`, `--hud-scrim`, `--scrim-bg`; their `*-blur` partners are `none`).
+  `?blur=1` (`fl-blur` on `<html>`, `look.ts`) brings the old blurred look back for A/B recordings;
+  `styles/flatLook.test.ts` fails on a new blur anywhere else. The Low tier (`fl-lowfx`) also drops the
+  vignette's and death screen's grayscale backdrop filters.
+- **HUD roots** carry `.fl-hud` or `data-hud` so photo mode (Shift+P) and the pause menu hide them. Menus and overlays don't.
 - **Full-screen overlays that free the mouse** call `overlayOpened(name)` / `overlayClosed(name)`
   (`ui/dom.ts`) so the Esc menu doesn't pop over them. When the last one closes without taking the
   pointer back, the game shows the "Click to look around" hint (`ui/pauseFlow.ts`, D-controls-3).

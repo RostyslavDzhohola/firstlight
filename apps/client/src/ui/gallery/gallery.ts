@@ -19,6 +19,7 @@ import { setLoading, setLoadingBadge } from "../loading.ts";
 import { Menu } from "../menu.ts";
 import { openSaveProgress, showSignIn, pickDisplayName } from "../account.ts";
 import { installSprites } from "../sprites.ts";
+import { applyUiLook } from "../look.ts";
 import { el } from "../dom.ts";
 import { Compass } from "../../social/compass.ts";
 import { PlayerList } from "../../social/playerList.ts";
@@ -48,6 +49,7 @@ const q = new URLSearchParams(location.search);
 const screen = ((window as unknown as { __GALLERY?: string }).__GALLERY ?? q.get("screen") ?? "hud") as Screen;
 if (!q.has("live")) document.documentElement.classList.add("fl-gallery-freeze");
 if (q.has("low")) document.documentElement.classList.add("fl-lowfx");
+applyUiLook(document.documentElement, location.search); // &blur=1: the old blurred look (D-ui-1)
 installSprites();
 
 const gameEl = document.getElementById("game")!;

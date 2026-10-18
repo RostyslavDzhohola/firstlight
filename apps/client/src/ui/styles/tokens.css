@@ -91,8 +91,9 @@
   --photon: #c4f1ff;
   --photon-2: #7ad8ff;
   --photon-line: rgba(196, 241, 255, .2);
-  --hud-scrim: linear-gradient(180deg, rgba(5, 10, 15, .64), rgba(5, 10, 15, .44));
-  --hud-blur: blur(10px) saturate(125%);
+  /* Flat by default (D-ui-1): the Low tier's darker scrim, no live backdrop blur. ?blur=1 below. */
+  --hud-scrim: linear-gradient(180deg, rgba(5, 10, 15, .8), rgba(5, 10, 15, .72));
+  --hud-blur: none;
   --hud-text-shadow: 0 1px 2px rgba(0, 0, 0, .7), 0 0 14px rgba(0, 0, 0, .35);
 
   /* ---- Heroes: warm 80s arcade ---- */
@@ -164,10 +165,17 @@
   --pal-dusk-p: #4a3260;     --pal-dusk-s: #3e5568;     --pal-dusk-a: #f09a7a;
 
   /* Surfaces */
-  --panel-bg: linear-gradient(180deg, rgba(25, 30, 39, .86), rgba(12, 15, 20, .92));
-  --panel-blur: blur(22px) saturate(115%);
+  /* Flat by default (D-ui-1): the Low tier's surfaces, which never had a backdrop blur. ?blur=1 below. */
+  --panel-bg: linear-gradient(180deg, rgba(25, 30, 39, .97), rgba(12, 15, 20, .98));
+  --panel-blur: none;
   --panel-shadow: 0 30px 80px -30px rgba(0, 0, 0, .8), 0 0 0 1px rgba(0, 0, 0, .35);
   --menu-scrim: rgba(5, 7, 10, .58);
+  /* The pause menu's full-screen scrim, legacy `.fl-overlay` backdrops (compat.css), the share row. */
+  --scrim-bg: rgba(5, 7, 10, .88);
+  --scrim-blur: none;
+  --overlay-bg: rgba(5, 7, 10, .88);
+  --overlay-blur: none;
+  --share-blur: none;
   --glow-dawn: 0 0 0 1px rgba(255, 217, 155, .55), 0 10px 40px -10px rgba(243, 174, 91, .75);
 
   /* Motion */
@@ -202,15 +210,25 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Low graphics tier: no backdrop blur anywhere in the UI; scrims get darker instead (verdict fix 6). */
-:root.fl-lowfx,
-.fl-lowfx .fl-ui {
-  --hud-scrim: linear-gradient(180deg, rgba(5, 10, 15, .8), rgba(5, 10, 15, .72));
-  --hud-blur: none;
-  --panel-blur: none;
-  --panel-bg: linear-gradient(180deg, rgba(25, 30, 39, .97), rgba(12, 15, 20, .98));
+/* No live backdrop blur by default (D-ui-1): in Chrome on macOS a blurred see-through panel was the
+   point where a presented frame stopped, and every layer drawn after it went missing for 1–4 frames.
+   The surface tokens above hold the flat look, the one the Low tier (verdict fix 6) already used, so
+   the two can't drift apart. `?blur=1` (`fl-blur` on <html>, ui/look.ts) brings back the old blurred
+   look exactly, for A/B recordings; the Low tier stays flat either way. */
+:root.fl-blur:not(.fl-lowfx),
+.fl-blur:not(.fl-lowfx) .fl-ui {
+  --hud-scrim: linear-gradient(180deg, rgba(5, 10, 15, .64), rgba(5, 10, 15, .44));
+  --hud-blur: blur(10px) saturate(125%);
+  --panel-bg: linear-gradient(180deg, rgba(25, 30, 39, .86), rgba(12, 15, 20, .92));
+  --panel-blur: blur(22px) saturate(115%);
+  --scrim-bg: linear-gradient(90deg, rgba(5, 7, 10, .9) 0%, rgba(5, 7, 10, .66) 45%, rgba(5, 7, 10, .55) 100%);
+  --scrim-blur: blur(14px) saturate(.35) brightness(.7);
+  --overlay-bg: rgba(5, 7, 10, .62);
+  --overlay-blur: blur(10px) saturate(.5);
+  --share-blur: blur(10px);
 }
-/* Every lane's UI, not just ours: on Low nothing on the page uses a backdrop filter. */
+/* Low graphics tier: also no backdrop filter at all, so the low-health vignette and the death drain
+   (full-screen grayscale passes that stay in the default look) go too. Every lane's UI, not just ours. */
 .fl-lowfx *,
 .fl-lowfx *::before,
 .fl-lowfx *::after {
