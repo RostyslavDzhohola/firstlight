@@ -16,6 +16,22 @@ placeholder until the site id arrives; occluders fade between camera and player 
 WebGL dip documented as Chrome/GPU present stalls (D-view-2); Kappa B hands and B-look stirrups (D-chars-4);
 the tutorial end card counts only while the world is on screen.
 
+**Glitch and first-load fixes (2026-10-18, client only, protocol 5):** from the owner's screen recording
+(specs #17, #18; issues #19–#27, #30). The 3D canvas is resized only right before a frame is drawn, so no
+blank-world frames (D-view-3). Menus no longer lower the resolution, and an untrusted GPU timer (the M1)
+can trial-step back up (D-view-4). No live backdrop blur by default, with `?blur=1` for A/B; the HUD is
+hidden under the pause menu (D-ui-1). The home page leaves the page under the loader (D-home-8). Shop
+stalls keep the camera out; stalls, keepers, labels and the player's own avatar fade near the camera
+(D-view-5). `?framecount` adds frame counters for recordings (D-e2e-2). A failed WebGPU start is
+remembered for a week on the device (D-renderer-1). Warm-up progress is real, and the WebGL2 shader
+warm-up dropped from ~30 s to ~14 s cold and from 6–17 s to ~3 s warm (D-load-1/2).
+Open:
+- the owner's A/B re-recording (#28) and the Chromium report (#29);
+- 1–2 cold-cache warm-up frames over 250 ms (skinned shadow programs, ~270 ms each in ANGLE; blob shadows
+  for characters is the owner's visual call);
+- a post-uniform 2-frame lag seen only by a diagnostic (follow-up issue);
+- `weatherDrops` built after warm-up once in ~40 bench runs.
+
 **Resumed 2026-10-15 ("go"); live at main 28e6683, protocol 4.** Merged and deployed today, each after
 Codex gpt-6.1-sol review (and CodeRabbit for small fixes):
 - **Owner's play-test bugs:** the pause-menu flicker ("blinking") and fullscreen swaps (D-controls-1..4);
