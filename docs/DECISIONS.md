@@ -1069,3 +1069,17 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   runs of long frames with that in mind (a control page, or a rerun). Why: cutting bloom mips or
   shadow updates would cost visible quality for stalls the evidence doesn't tie to the game.
 - **D-home-7 (2026-10-16):** DataFast is live with the standard script exactly as DataFast issued it (site id `dfid_NA56rn0p8nPJYi59xnBYW`, `script.js`, so the home page's note says DataFast sets cookies). An inline guard placed before it sets DataFast's own opt-out flag (`localStorage.datafast_ignore`) for automated browsers (`navigator.webdriver`) and test URLs (`?e2e`, `?bench`, `?offline`), and the Playwright fixtures set the same flag, so journeys and smoke runs never count as visits. Why: Grok Bot set up the site for the owner, and test traffic shouldn't pollute the analytics.
+- **D-view-3 (2026-10-18):** the 3D canvas is resized only right before a frame is drawn
+  (render/frameSize.ts, the render context's one owner of the drawing-buffer size). Every size
+  request (resolution-ladder steps from afterFrame, the window's resize event and fullscreen changes,
+  settings, tier and render-scale changes, a ladder floor's tier drop) only marks the size pending;
+  every draw (the frame's render, warm-up and probe frames, the warm-up's scene-pass probe render)
+  applies it first, in one `setDrawingBufferSize` call, skipped when the physical size is unchanged,
+  with the camera aspect updated in the same step. The e2e blink probe reads the canvas at the end of
+  the frame's task (a microtask after the frame's render) and always reads a frame whose task changed
+  the size; `__fl.act.ladderStep` forces a ladder step through afterFrame. J1.4 forces 6 steps and
+  2 viewport resizes: 6 blank world frames (alpha 0) before, 0 after on WebGL2 and WebGPU. Not
+  chosen: `preserveDrawingBuffer` (a copy per frame for what ordering fixes for free). Builds on
+  D-view-1 and D-view-2. Why: assigning a canvas's size clears it, and the ladder resized after the
+  frame's draw in the same animation frame, so Chrome presented a blank world under the HUD once per
+  step (owner's recording 2026-10-16: 40.8 s, 48.9 s, 69.0 s; spec #17).

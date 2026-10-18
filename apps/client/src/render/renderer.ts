@@ -9,6 +9,7 @@ import {
   clearStored, emptyStored, FEATURES, killSwitches, loadStored, resolveSettings, saveStored, TIERS, tierIndex,
   urlScale, urlTier, validAutoTier, type Feature, type ResolvedSettings, type StoredGfx, type Tier,
 } from "./quality.ts";
+import { FrameSize } from "./frameSize.ts";
 import { startRenderer } from "./rendererStart.ts";
 import { GpuTimer, ResolutionLadder } from "./timing.ts";
 import { compileForPass, passCallDepth, saveRenderState, type GuardedRenderer, type PassCompileRenderer } from "./compilePass.ts";
@@ -61,7 +62,9 @@ export interface RenderCtx {
   onChange(cb: SettingsListener): () => void;
   /** Effective pixel ratio after DPR cap × render scale × ladder, never above devicePixelRatio. */
   pixelRatio(): number;
+  /** Ask for the drawing-buffer size to follow the window and pixel ratio: applied right before the next draw (D-view-3). */
   resize(): void;
+  /** Draw a frame: a pending size first, then the post pipeline. */
   render(): void;
   /** Compile the scene for the context its frames use (the post pipeline's scene pass): warm-up. */
   compileScene(): Promise<unknown>;
@@ -270,15 +273,10 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
       return Math.min(dpr, Math.min(dpr, settings.dprCap) * scale * ladder.scale);
     },
     resize() {
-      renderer.setPixelRatio(ctx.pixelRatio());
-      renderer.setSize(innerWidth, innerHeight, false);
-      renderer.domElement.style.width = "100%";
-      renderer.domElement.style.height = "100%";
-      camera.aspect = innerWidth / innerHeight;
-      camera.updateProjectionMatrix();
+      size.request();
     },
     render() {
-      pipeline.render();
+      size.draw(() => pipeline.render());
     },
     compileScene() {
       if (passCompileOff) return renderer.compileAsync(scene, camera);
@@ -292,10 +290,12 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
         const state = saveRenderState(renderer as unknown as GuardedRenderer, scene, camera);
         let failed = false;
         try {
-          passDepth = passCallDepth(r, sp.renderTarget, () => {
-            scene.visible = false;
-            pipeline.render();
-          });
+          passDepth = passCallDepth(r, sp.renderTarget, () =>
+            size.draw(() => {
+              scene.visible = false;
+              pipeline.render();
+            }),
+          );
         } catch (e) {
           failed = true;
           console.warn("[warmup] the scene-pass probe render failed; compiling without the pass context this session", e);
@@ -319,6 +319,9 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
     },
   };
 
+  // The one owner of the drawing-buffer size (D-view-3): ladder steps (from afterFrame, after the
+  // frame's draw), the window's resize event and settings changes only ask; draws apply it first.
+  const size = new FrameSize(renderer, camera, () => ({ width: innerWidth, height: innerHeight, pixelRatio: ctx.pixelRatio() }));
   ladder.onChange = () => ctx.resize();
   ladder.onFloor = () => {
     // At the ladder floor drop a tier, but only when the tier is automatic. The drop is saved
@@ -350,7 +353,9 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
   setGrade(MENU_GRADE);
   rebuildPost();
   renderer.shadowMap.enabled = settings.on.shadows && settings.shadows.mode === "map";
-  ctx.resize();
+  renderer.domElement.style.width = "100%";
+  renderer.domElement.style.height = "100%";
+  size.apply(); // nothing drawn yet: the warm-up compiles at the real size
   addEventListener("resize", () => ctx.resize());
   return ctx;
 }
