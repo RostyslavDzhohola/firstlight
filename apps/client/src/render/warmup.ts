@@ -14,6 +14,7 @@ import * as THREE from "three/webgpu";
 import type { RenderCtx } from "./renderer.ts";
 import { flags } from "../config.ts";
 import { beginManualFrame, type TimestampSource } from "./timing.ts";
+import { castsLeanShadow, leanShadowsOn } from "./leanShadow.ts";
 import type { FirstDrawBatch, FirstDrawCensus, FirstDrawItem, SlowFrame, WarmupPhase, WarmupReport } from "./warmupReport.ts";
 import {
   deferPipelines, FirstDrawPacer, gateFirstDraws, glFence, newStageCost, OLD_PACER, PACER, pipelineCost,
@@ -210,16 +211,30 @@ export function forceProperty<T extends object, K extends keyof T>(obj: T, prop:
 /** Predicted new shadow-pass builds per warm-up frame in the batched phase (warmShadowCasters). */
 export const SHADOW_BATCH = 4;
 
+/** Seen once per warm-up: a key per counted build. */
+function once(seen: Set<string>, key: string): 0 | 1 {
+  if (seen.has(key)) return 0;
+  seen.add(key);
+  return 1;
+}
+
 /**
  * Whether a caster's shadow-pass variant will be a new node build: three keys a build by material,
  * geometry layout and context, plus the object itself for instanced (and skinned: own bone count)
- * meshes. `seen` collects the (material, layout) pairs already counted in this warm-up.
+ * meshes. `seen` collects the (material, layout) pairs already counted in this warm-up. With lean
+ * shadows (`lean`, leanShadow.ts) the skinned casters whose materials cast lean shadows share one
+ * build per rig (bone count), side and layout.
  */
-export function shadowBuildCost(o: THREE.Object3D, seen: Set<string>): 0 | 1 {
-  const m = o as THREE.Mesh & { count?: number; isSkinnedMesh?: boolean };
-  if ((m as THREE.InstancedMesh).isInstancedMesh || (m.count ?? 1) > 1 || m.isSkinnedMesh) return 1;
+export function shadowBuildCost(o: THREE.Object3D, seen: Set<string>, lean = false): 0 | 1 {
+  const m = o as THREE.Mesh & { count?: number; isSkinnedMesh?: boolean; skeleton?: THREE.Skeleton };
   const mats = Array.isArray(m.material) ? m.material : [m.material];
   const attrs = m.geometry ? Object.keys(m.geometry.attributes).sort().map((k) => `${k}${m.geometry.attributes[k]!.itemSize}`).join(",") : "";
+  const instanced = (m as THREE.InstancedMesh).isInstancedMesh || (m.count ?? 1) > 1;
+  if (lean && m.isSkinnedMesh && !instanced && mats.every((x) => x && castsLeanShadow(x))) {
+    const sides = mats.map((x) => x.shadowSide ?? x.side).join("/");
+    return once(seen, `lean|${m.skeleton?.bones.length ?? 0}|${sides}|${attrs}|${m.receiveShadow}`);
+  }
+  if (instanced || m.isSkinnedMesh) return 1;
   let cost: 0 | 1 = 0;
   for (const mat of mats) {
     const key = `${mat?.uuid ?? "-"}|${attrs}`;
@@ -240,10 +255,10 @@ function shadowCasters(scene: THREE.Object3D): THREE.Object3D[] {
 }
 
 /** The new shadow-pass builds warmShadowCasters expects for this scene (the loader's progress total). */
-export function predictShadowBuilds(scene: THREE.Object3D): number {
+export function predictShadowBuilds(scene: THREE.Object3D, lean = false): number {
   const seen = new Set<string>();
   let n = 0;
-  for (const o of shadowCasters(scene)) n += shadowBuildCost(o, seen);
+  for (const o of shadowCasters(scene)) n += shadowBuildCost(o, seen, lean);
   return n;
 }
 
@@ -259,6 +274,7 @@ export async function warmShadowCasters(
   nextFrameFn: () => Promise<void> = nextFrame,
   onBatch?: (predictedBuilds: number) => void,
   batch = SHADOW_BATCH,
+  lean = false,
 ): Promise<number> {
   const casters = shadowCasters(scene);
   const pending = casters.map((o) => forceProperty(o, "castShadow", false));
@@ -269,7 +285,7 @@ export async function warmShadowCasters(
     while (i < pending.length) {
       let cost = 0;
       while (i < pending.length && (cost < batch || cost === 0)) {
-        cost += shadowBuildCost(casters[i]!, seen);
+        cost += shadowBuildCost(casters[i]!, seen, lean);
         pending[i]!();
         pending[i] = () => {};
         i++;
@@ -345,6 +361,7 @@ export async function warmup(
   };
   const frames = opts.frames ?? 4;
   const shadowsOn = !!(ctx.settings?.on.shadows && ctx.settings.shadows.mode === "map");
+  const lean = leanShadowsOn(renderer); // characters and horses share a shadow build per rig (#39)
   let items = 0;
   let predicted = 0;
   let loaded = 0;
@@ -499,7 +516,7 @@ export async function warmup(
       }
     });
     opts.beforeFrame?.();
-    if (shadowsOn) predicted = predictShadowBuilds(scene);
+    if (shadowsOn) predicted = predictShadowBuilds(scene, lean);
     // 2. The scene pass's compile: one render object at a time, yielding between them.
     lap();
     stopSampling = sampleFrames();
@@ -528,7 +545,7 @@ export async function warmup(
       const n = await warmShadowCasters(scene, draw, next, (cost) => {
         shadowDone += cost;
         emit();
-      }, deferred?.active ? SHADOW_BATCH * 2 : SHADOW_BATCH);
+      }, deferred?.active ? SHADOW_BATCH * 2 : SHADOW_BATCH, lean);
       // WebGL2 keeps drawing while its shadow programs compile (the drain below); WebGPU waits here.
       const shadowWait = gate ? 0 : await compiled();
       shadows = { ...lap(), frames: n, predicted, wait: shadowWait };

@@ -6,6 +6,7 @@ import {
 } from "./warmup.ts";
 import { FIRST_DRAWS_START, PIPELINE_OVERHEAD } from "./parallelCompile.ts";
 import { flags } from "../config.ts";
+import { installLeanShadows, leanShadow } from "./leanShadow.ts";
 import type { RenderCtx } from "./renderer.ts";
 import { watchDisposals } from "./disposeWatch.testutil.ts";
 
@@ -155,6 +156,35 @@ describe("warmShadowCasters", () => {
     expect(shadowBuildCost(new THREE.Mesh(geo, new THREE.MeshStandardNodeMaterial()), seen)).toBe(1);
   });
 
+  it("with lean shadows, registered skinned casters cost one build per rig and side, then nothing (#39)", () => {
+    const skinned = (m: THREE.Material, bones: number) => {
+      const list = Array.from({ length: bones }, () => new THREE.Bone());
+      const mesh = new THREE.SkinnedMesh(geo, m);
+      mesh.bind(new THREE.Skeleton(list));
+      return mesh;
+    };
+    const palette = () => leanShadow(new THREE.MeshToonNodeMaterial({ side: THREE.DoubleSide }));
+    const coat = leanShadow(new THREE.MeshToonNodeMaterial());
+    const unregistered = new THREE.MeshStandardNodeMaterial();
+    const seen = new Set<string>();
+    expect(shadowBuildCost(skinned(palette(), 65), seen, true)).toBe(1);
+    expect(shadowBuildCost(skinned(palette(), 65), seen, true)).toBe(0); // another look or palette: the same build
+    expect(shadowBuildCost(skinned(coat, 41), seen, true)).toBe(1); // the horse rig
+    expect(shadowBuildCost(skinned(coat, 41), seen, true)).toBe(0);
+    expect(shadowBuildCost(skinned(coat, 65), seen, true)).toBe(1); // another side
+    expect(shadowBuildCost(skinned(unregistered, 65), seen, true)).toBe(1); // not lean: a build each, as before
+    expect(shadowBuildCost(skinned(unregistered, 65), seen, true)).toBe(1);
+    const full = new Set<string>(); // ?fullshadow: every skinned caster is its own build
+    expect([shadowBuildCost(skinned(coat, 41), full), shadowBuildCost(skinned(coat, 41), full)]).toEqual([1, 1]);
+    const scene = new THREE.Scene();
+    for (let i = 0; i < 6; i++) {
+      const m = skinned(palette(), 65);
+      m.castShadow = true;
+      scene.add(m);
+    }
+    expect([predictShadowBuilds(scene, true), predictShadowBuilds(scene)]).toEqual([1, 6]);
+  });
+
   it("puts every caster back, keeps non-casters off, even when a frame throws", async () => {
     const parts = Array.from({ length: 10 }, () => new THREE.InstancedMesh(geo, mat, 2));
     const scene = sceneWith(parts, 3);
@@ -231,6 +261,9 @@ describe("warm-up report (per-phase times and shader counts) and progress", () =
     gl?: ReturnType<typeof fakeFenceGl>;
     /** Each animation frame moves the clock this much (ms) before its callback. */
     frameMs?: number;
+    /** Skinned casters with lean-shadow materials, and whether the renderer has lean shadows. */
+    leanCasters?: number;
+    lean?: boolean;
   }) {
     draws = [];
     let clock = 1000;
@@ -250,6 +283,12 @@ describe("warm-up report (per-phase times and shader counts) and progress", () =
       m.castShadow = true;
       scene.add(m);
     }
+    for (let i = 0; i < (opts.leanCasters ?? 0); i++) {
+      const m = new THREE.SkinnedMesh(geo, leanShadow(new THREE.MeshToonNodeMaterial()));
+      m.bind(new THREE.Skeleton([new THREE.Bone()]));
+      m.castShadow = true;
+      scene.add(m);
+    }
     let frameBuilds = opts.frameBuilds ?? 0;
     const ctx = {
       scene,
@@ -261,6 +300,7 @@ describe("warm-up report (per-phase times and shader counts) and progress", () =
         debug,
         info: { frame: 0, reset() {} },
         _pipelines: opts.pipelines,
+        _getShadowNodes: () => ({ colorNode: null, depthNode: null, positionNode: null }),
         ...(opts.gl ? { backend: { gl: opts.gl } } : {}),
         compileAsync: async (_s: unknown, _c: unknown, _t: unknown, onProgress?: (e: { loaded: number; total: number }) => void) => {
           for (let i = 1; i <= opts.items; i++) {
@@ -294,6 +334,7 @@ describe("warm-up report (per-phase times and shader counts) and progress", () =
       gpu: { frame() {}, drain: () => [] },
     } as unknown as RenderCtx;
     installShaderMonitor(ctx);
+    if (opts.lean) installLeanShadows(ctx.renderer as never);
     return ctx;
   }
 
@@ -513,6 +554,19 @@ describe("warm-up report (per-phase times and shader counts) and progress", () =
         } else {
           expect(r.slow.length).toBeLessThanOrEqual(12); // the longest dozen
         }
+      } finally {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+      }
+    }
+  });
+
+  it("predicts the shadow phase's builds with the renderer's lean shadows: one for all of a rig's casters", async () => {
+    for (const lean of [false, true]) {
+      try {
+        const ctx = fakeCtx({ items: 0, webgpu: true, shadows: true, leanCasters: 5, lean });
+        const r = await warmup(ctx, { frames: 1 });
+        expect(r.phases.shadows.predicted).toBe(lean ? 6 + 1 : 6 + 5);
       } finally {
         vi.unstubAllGlobals();
         vi.restoreAllMocks();

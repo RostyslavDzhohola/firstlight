@@ -168,6 +168,11 @@ function keepNode(gated: boolean): THREE.Node {
 
 const ALWAYS = bool(true) as unknown as THREE.Node;
 
+/** Whether `node` is the shadow mask applyOccluderFade gives a material: it keeps every fragment. */
+export function keepsWholeShadow(node: unknown): boolean {
+  return node === ALWAYS;
+}
+
 /**
  * Make `m` fade when it stands between the camera and the player. Shadows keep the material's own
  * mask (or none): the shadow pass would otherwise take `maskNode` and punch the cone into shadows.

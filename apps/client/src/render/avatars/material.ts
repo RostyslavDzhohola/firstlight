@@ -9,6 +9,7 @@ import * as THREE from "three/webgpu";
 import { attribute, color, dot, float, max, mix, normalMap, normalView, positionViewDirection, saturate, texture, uniform, uv, vec2, vec3 } from "three/tsl";
 import type { StarterTextures } from "./assets.ts";
 import { applyOccluderFadeGated } from "../occluderFade.ts";
+import { leanShadow } from "../leanShadow.ts";
 
 /** docs/content.md §8.3: primary, secondary, accent. */
 export const PALETTES: readonly (readonly [number, number, number])[] = [
@@ -78,6 +79,8 @@ export function avatarMaterial(tex: StarterTextures, palette: number): THREE.Mes
   m.name = `avatar-palette-${p}`;
   // Quest NPCs (keepers, guides) dissolve between the camera and the player; players never (D-view-5).
   applyOccluderFadeGated(m);
+  // Shadows need no colour: one shadow build for every look and palette (#39, D-load-3).
+  leanShadow(m);
   cache.set(key, m);
   return m;
 }

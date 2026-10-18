@@ -13,6 +13,7 @@ import { HORSE, HORSE_COATS } from "@firstlight/shared/content/horse";
 import { config, flags } from "../config.ts";
 import { releaseAvatarObjects } from "./Avatars.ts";
 import { avatarRim, toonRamp } from "./avatars/material.ts";
+import { leanShadow } from "./leanShadow.ts";
 import { keptSamples } from "./warmup.ts";
 
 // ---- assets ----------------------------------------------------------------------------------
@@ -83,6 +84,7 @@ export function horseMaterial(coat: number): THREE.MeshToonNodeMaterial {
   // NodeMaterial.setupLighting() honours emissiveNode; the toon typings omit it (as for avatars).
   (m as THREE.MeshToonNodeMaterial & { emissiveNode: THREE.Node | null }).emissiveNode = avatarRim.color.mul(fres).mul(avatarRim.strength);
   m.name = `horse-coat-${i}`;
+  leanShadow(m); // shadows need no colour: one shadow build for every coat (#39, D-load-3)
   coatMats.set(i, m);
   return m;
 }
