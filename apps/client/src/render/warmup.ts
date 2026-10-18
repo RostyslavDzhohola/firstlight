@@ -36,7 +36,7 @@ export function fnv1a(s: string): number {
 }
 
 /** `?warmdiag`: what a first draw was (material, object, GLSL sizes and hashes, its price, its link), for the batch log. */
-function describeFirstDraw(renderObject: unknown, pipeline: object, grant: Grant, link: number | null): FirstDrawItem {
+function describeFirstDraw(renderObject: unknown, pipeline: object, grant: Grant, link: { link: number | null; fence: number | null }): FirstDrawItem {
   const r = renderObject as {
     material?: { type?: string; name?: string; isShadowPassMaterial?: boolean };
     object?: { name?: string; type?: string; parent?: { name?: string } | null };
@@ -57,8 +57,9 @@ function describeFirstDraw(renderObject: unknown, pipeline: object, grant: Grant
     newChars: grant.newChars,
     skinned: vs.includes("skinIndex"),
     shadow: r.material?.isShadowPassMaterial === true,
-    link: link === null ? null : Math.round(link),
-    warm: warmLink(link),
+    link: link.link === null ? null : Math.round(link.link),
+    fence: link.fence === null ? null : Math.round(link.fence),
+    warm: warmLink(link.link, link.fence),
   };
 }
 
@@ -423,15 +424,18 @@ export async function warmup(
   // Each program judged by its own link (#39): one that linked quickly was cached, and its first draw is
   // priced at the warm rate; batches hold one class, the ceiling holds cold-priced units.
   const backendData = (renderer as unknown as { backend?: { get?(o: object): { programGPU?: object } | undefined } }).backend;
-  const linkMsOf = (p: object): number | null => {
+  const linkOf = (p: object): { link: number | null; fence: number | null } => {
     const prog = syncGuard?.active ? backendData?.get?.(p)?.programGPU : undefined;
-    return prog ? syncGuard!.linkMs(prog) : null;
+    return prog ? { link: syncGuard!.linkMs(prog), fence: syncGuard!.fenceMs(prog) } : { link: null, fence: null };
   };
-  const classOf = (p: object): Warmth => (warmLink(linkMsOf(p)) ? "warm" : "cold");
+  const classOf = (p: object): Warmth => {
+    const l = linkOf(p);
+    return warmLink(l.link, l.fence) ? "warm" : "cold";
+  };
   const gated = deferred?.active && !ctx.webgpu
     ? gateFirstDraws(
       renderer as unknown as GateRenderer,
-      diag ? (ro, p, g) => frameGrants.push(describeFirstDraw(ro, p, g, linkMsOf(p))) : undefined,
+      diag ? (ro, p, g) => frameGrants.push(describeFirstDraw(ro, p, g, linkOf(p))) : undefined,
       oldPacer ? pipelineCost : newStageCost,
       oldPacer ? {} : { classOf, price: (u, c) => pacer.price(u, c), loneCost: LONE_COST },
     )

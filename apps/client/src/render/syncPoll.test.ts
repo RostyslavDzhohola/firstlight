@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { COMPLETION_STATUS_KHR, FAST_LINK_MS, gpuIdle, guardStatusPolls, warmLink, type PollGL } from "./syncPoll.ts";
+import { COMPLETION_STATUS_KHR, FAST_LINK_MS, FENCE_PROMPT_MS, gpuIdle, guardStatusPolls, warmLink, type PollGL } from "./syncPoll.ts";
 
 /**
  * A WebGL2 context stand-in: programs link in the GPU process (complete when `linked` says so), and
@@ -67,9 +67,12 @@ describe("guardStatusPolls (never ask the GPU process a synchronous question whi
     f.linked.add(prog); // the program binary came from the cache
     expect(f.gl.getProgramParameter(prog, COMPLETION_STATUS_KHR)).toBe(true);
     expect(g.linkMs(prog)).toBe(0);
-    expect(warmLink(g.linkMs(prog))).toBe(true);
-    expect(warmLink(FAST_LINK_MS + 1)).toBe(false);
-    expect(warmLink(null)).toBe(false);
+    expect(g.fenceMs(prog)).toBe(3000);
+    // done at once, but only because the GPU process was backlogged for 3 s: no evidence of a cache
+    expect(warmLink(g.linkMs(prog), g.fenceMs(prog))).toBe(false);
+    expect(warmLink(0, FENCE_PROMPT_MS)).toBe(true); // a prompt fence, done at once: cached
+    expect(warmLink(FAST_LINK_MS + 1, 16)).toBe(false);
+    expect(warmLink(null, 16)).toBe(false);
     g.release();
   });
 

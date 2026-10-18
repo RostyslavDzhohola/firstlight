@@ -28,10 +28,16 @@ export const COMPLETION_STATUS_KHR = 0x91b1;
  * queue of other work ahead of it in the GPU process doesn't count.
  */
 export const FAST_LINK_MS = 30;
+/**
+ * …and only when its fence signalled within this of the linkProgram call: when the GPU process is
+ * backlogged a cold program's link can finish on a worker before its fence is seen, and then look done
+ * at once (cold runs classed 11–21 of 118 programs warm that way, one batch of 7 took 1.3 s).
+ */
+export const FENCE_PROMPT_MS = 250;
 
-/** Whether a link time says the program was cached (null: never seen: cold). */
-export function warmLink(ms: number | null): boolean {
-  return ms !== null && ms <= FAST_LINK_MS;
+/** Whether a link says the program was cached: done at once after a prompt fence (null: never seen: cold). */
+export function warmLink(linkMs: number | null, fenceMs: number | null): boolean {
+  return linkMs !== null && linkMs <= FAST_LINK_MS && fenceMs !== null && fenceMs <= FENCE_PROMPT_MS;
 }
 
 /** The WebGL2 calls the guard wraps. */
@@ -45,6 +51,8 @@ export interface StatusPollGuard {
   readonly active: boolean;
   /** ms from when the GPU process reached `program`'s link (its fence) to the first poll that found it complete (null: not yet, or linked before the guard). */
   linkMs(program: object): number | null;
+  /** ms from `program`'s linkProgram call to the first poll that found its fence signalled (null: not yet). */
+  fenceMs(program: object): number | null;
   /** Polls answered locally so far (round trips saved). */
   answered(): number;
   /** Back to three's own calls (idempotent). */
@@ -64,7 +72,7 @@ const links = new WeakMap<object, Link>();
 
 export function guardStatusPolls(gl: PollGL | null | undefined, busy: () => boolean, now: () => number = () => performance.now()): StatusPollGuard {
   if (!gl || typeof gl.linkProgram !== "function" || typeof gl.getProgramParameter !== "function") {
-    return { active: false, linkMs: () => null, answered: () => 0, release() {} };
+    return { active: false, linkMs: () => null, fenceMs: () => null, answered: () => 0, release() {} };
   }
   let answered = 0;
   const target = gl as unknown as Record<string, unknown>;
@@ -95,6 +103,10 @@ export function guardStatusPolls(gl: PollGL | null | undefined, busy: () => bool
     linkMs(program) {
       const l = links.get(program);
       return l?.doneAt != null ? l.doneAt - (l.fenceAt ?? l.at) : null;
+    },
+    fenceMs(program) {
+      const l = links.get(program);
+      return l?.fenceAt != null ? l.fenceAt - l.at : null;
     },
     answered: () => answered,
     release() {

@@ -628,7 +628,7 @@ describe("warm-up report (per-phase times and shader counts) and progress", () =
       const ctx = fakeCtx({ items: 0, webgpu: false, shadows: false, pipelines, objects: 3, gl: fakeFenceGl() });
       const r = await warmup(ctx, { frames: 1 });
       const items = r.batches!.flatMap((b) => b.items);
-      expect(items.map((i) => [i.warm, i.link])).toEqual([[false, null], [false, null], [false, null]]); // no links seen: cold
+      expect(items.map((i) => [i.warm, i.link, i.fence])).toEqual([[false, null, null], [false, null, null], [false, null, null]]); // no links seen: cold
     } finally {
       vi.unstubAllGlobals();
       vi.restoreAllMocks();
