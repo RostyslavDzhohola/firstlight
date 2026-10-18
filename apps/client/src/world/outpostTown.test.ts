@@ -16,6 +16,7 @@ import { LOOKS } from "../render/looks.ts";
 import { skyDir } from "../render/sunFrame.ts";
 import { PAD_MODEL_RANGE, SiteTown } from "./SiteTown.ts";
 import { outpostPaths, PATH_ACROSS, PATH_STEP } from "./outpostPaths.ts";
+import { occluderFadeOf } from "../render/occluderFade.ts";
 
 const BODIES_ = ["arcadia", "hollowmere", "meridian"] as const;
 const terrains = new Map(BODIES_.map((b) => [b, createTerrain(b)] as const));
@@ -68,7 +69,7 @@ describe.each(BODIES_)("%s pad outpost view (D42)", (body) => {
   const terrain = terrains.get(body)!;
   const site = OUTPOSTS[body];
 
-  it("bakes the outpost into one cell with two shared materials per tier, glow slots marked", async () => {
+  it("bakes the outpost into one cell with two shared materials per tier (and the shop stall's faded opaque), glow slots marked", async () => {
     for (const t of ["low", "medium"] as const) {
       const town = await outpostFor(body, t);
       expect(town.drawsModels).toBe(true);
@@ -76,8 +77,9 @@ describe.each(BODIES_)("%s pad outpost view (D42)", (body) => {
       const materials = new Set<THREE.Material>();
       for (const v of town.cells[0]!.variants) for (const m of v) materials.add(m.mesh.material as THREE.Material);
       for (const m of town.pads!.meshes) materials.add(m.mesh.material as THREE.Material);
-      expect(materials.size).toBeLessThanOrEqual(2);
+      expect(materials.size).toBeLessThanOrEqual(3);
       const names = [...materials].map((m) => m.name);
+      expect(names.filter((n) => n.endsWith(":fade")), "the shop stall's own (D-view-5)").toHaveLength(1);
       expect(names.every((n) => n.startsWith("town:"))).toBe(true);
       expect(names.every((n) => n.includes(":floor") === (body === "hollowmere"))).toBe(true);
       if (t === "low") expect(names.every((n) => n.includes(":flat"))).toBe(true);
@@ -94,6 +96,25 @@ describe.each(BODIES_)("%s pad outpost view (D42)", (body) => {
       if (body !== "arcadia") expect(glowing).toBeGreaterThan(0);
       town.dispose();
     }
+  });
+
+  it("draws its shop stall on its own and dissolves it between the camera and the player; nothing else of the outpost does (#22)", async () => {
+    const town = await outpostFor(body, "medium");
+    const meshes = town.cells.flatMap((c) => [...c.variants[0], ...c.variants[1]]).map((m) => m.mesh);
+    const stall = meshes.filter((m) => m.name.endsWith(":stall"));
+    expect(stall.length, "the stall in both LOD variants").toBe(2);
+    const shop = sitePlacements(terrain)[site.shop.item]!;
+    const pre = site.prefabs[shop.prefab]!;
+    for (const m of stall) expect(m.geometry.index!.count / 3, "exactly the stall prefab's triangles").toBe(pre.tris[0]);
+    // A camera 2 m from the stall's middle on its back side, the player 3 m out in front of it.
+    const up = new THREE.Vector3(shop.ux, shop.uy, shop.uz);
+    const front = new THREE.Vector3(shop.fx, shop.fy, shop.fz);
+    const middle = new THREE.Vector3(shop.px, shop.py, shop.pz).addScaledVector(up, 1.5);
+    const cam = middle.clone().addScaledVector(front, -2), chest = middle.clone().addScaledVector(front, 3);
+    const aim = front.clone();
+    for (const m of stall) expect(occluderFadeOf(m, cam, aim, chest, middle), m.name).toBe(1);
+    for (const m of meshes.filter((x) => !x.name.endsWith(":stall"))) expect(occluderFadeOf(m, cam, aim, chest, middle), m.name).toBe(0);
+    town.dispose();
   });
 
   it("lays every path on the ground as a decal a few centimetres up, the ground never poking through", async () => {
@@ -195,8 +216,8 @@ describe.each(BODIES_)("%s pad outpost view (D42)", (body) => {
         const st = town.stats(cam, shadow);
         report[`${t} ${name}`] = `${st.draws} draws ${(st.triangles / 1000).toFixed(1)}k tris + shadow ${st.shadowDraws} draws ${(st.shadowTriangles / 1000).toFixed(1)}k tris`;
         expect(st.shadowDraws, `${t} ${name}`).toBeLessThanOrEqual(t === "low" ? 0 : 2);
-        // Opaque + cutout (Meridian has no cutout), the other pads out of range.
-        expect(st.draws, `${t} ${name}`).toBeLessThanOrEqual(2);
+        // Opaque + cutout (Meridian has no cutout) + the shop stall (D-view-5), the other pads out of range.
+        expect(st.draws, `${t} ${name}`).toBeLessThanOrEqual(3);
         expect(st.draws).toBeLessThanOrEqual(Math.round(TIER_TABLE[t].drawBudget * 0.02));
         expect(st.triangles, `${t} ${name}`).toBeLessThanOrEqual(t === "low" ? 25_000 : 40_000);
         // Shadow casters on Medium+: the depth-only copy (+ cutout); none on Low.

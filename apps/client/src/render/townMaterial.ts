@@ -10,6 +10,7 @@
 
 import * as THREE from "three/webgpu";
 import { attribute, float, max, mix, normalMap, select, texture, uv, vec2, vec3 } from "three/tsl";
+import { applyOccluderFade } from "./occluderFade.ts";
 import { atmo } from "./atmosphere.ts";
 
 export type TownMaterialKind = "opaque" | "cutout";
@@ -32,16 +33,18 @@ const cache = new Map<string, THREE.MeshStandardNodeMaterial>();
 
 /**
  * The shared town material for `kind`, with or without normal maps (Low drops them). `albedoFloor`
- * (linear) lifts the darkest base colours (Hollowmere's dusk: silhouettes still read). One instance
- * per (kind, normals, texture pair, floor) for the app's lifetime.
+ * (linear) lifts the darkest base colours (Hollowmere's dusk: silhouettes still read). `fade`: the
+ * same with the occluder fade, for what may stand between the camera and the player without
+ * stopping it (an outpost's shop stall, D-view-5); the buildings never fade. One instance per
+ * (kind, normals, texture pair, floor, fade) for the app's lifetime.
  */
-export function townMaterial(kind: TownMaterialKind, normals: boolean, color: THREE.Texture, normal: THREE.Texture, albedoFloor = 0): THREE.MeshStandardNodeMaterial {
-  const key = `${kind}:${normals ? 1 : 0}:${color.uuid}:${normal.uuid}:${albedoFloor}`;
+export function townMaterial(kind: TownMaterialKind, normals: boolean, color: THREE.Texture, normal: THREE.Texture, albedoFloor = 0, fade = false): THREE.MeshStandardNodeMaterial {
+  const key = `${kind}:${normals ? 1 : 0}:${color.uuid}:${normal.uuid}:${albedoFloor}:${fade ? 1 : 0}`;
   let m = cache.get(key);
   if (m) return m;
   const cutout = kind === "cutout";
   m = new THREE.MeshStandardNodeMaterial({ side: THREE.DoubleSide, roughness: 0.85, metalness: 0 });
-  m.name = `town:${kind}${normals ? "" : ":flat"}${albedoFloor > 0 ? ":floor" : ""}`;
+  m.name = `town:${kind}${normals ? "" : ":flat"}${albedoFloor > 0 ? ":floor" : ""}${fade ? ":fade" : ""}`;
   const tm = attribute("townMat", "vec4");
   const tint = attribute("color", "vec4");
   const layer = tm.x.mul(255).round();
@@ -70,6 +73,7 @@ export function townMaterial(kind: TownMaterialKind, normals: boolean, color: TH
     mode.equal(TOWN_EMISSIVE.flame), flame,
     select(mode.equal(TOWN_EMISSIVE.window), lit, select(mode.equal(TOWN_EMISSIVE.glow), glow, vec3(0, 0, 0))),
   );
+  if (fade) applyOccluderFade(m);
   cache.set(key, m);
   return m;
 }
