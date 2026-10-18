@@ -14,7 +14,7 @@ import { ANIM, PF } from "@firstlight/shared/net/schema";
 import { STARTER_LOOKS, STARTERS, WEAPONS } from "@firstlight/shared/content/weapons";
 import { flags } from "../config.ts";
 import { avatarAssets, MODEL_SCALE, modelIndex, preloadAvatars, ROLL_SPEED, UAL_PELVIS, type AvatarAssets } from "./avatars/assets.ts";
-import { avatarMaterial, PALETTES, proxyMaterial } from "./avatars/material.ts";
+import { avatarMaterial, PALETTES, proxyMaterial, setAvatarPalette } from "./avatars/material.ts";
 import { applyOccluderFadeGated } from "./occluderFade.ts";
 import { weaponModel } from "./avatars/weapons.ts";
 import { keptSamples } from "./warmup.ts";
@@ -445,12 +445,13 @@ export class AvatarView {
     const model = cloneSkinned(tpl);
     model.scale.setScalar(MODEL_SCALE[m] ?? 1);
     const tex = a.textures[m] ?? a.textures[0]!;
-    const mat = avatarMaterial(tex, this.palette);
+    const mat = avatarMaterial(tex); // the look's; the palette is the mesh's own (per-object uniforms)
     let mesh: THREE.SkinnedMesh | null = null;
     model.traverse((o) => {
       const m = o as THREE.SkinnedMesh;
       if (m.isSkinnedMesh) {
         m.material = mat;
+        setAvatarPalette(m, this.palette);
         m.castShadow = true;
         m.receiveShadow = true;
         m.frustumCulled = false;
@@ -651,16 +652,16 @@ export { PALETTES };
 
 const WARMUP_ITEMS = ["sunbrand", "hexquill", "carbine", "riverstaff", "emberglass", "stillshot", "kunai"] as const;
 
-/** What the avatar warm-up stands: every starter's every look in every palette (each pair is its own
- *  material with that look's textures, so its own shader build), cycling the held items. Checked in a
- *  real renderer with ?avatars&warmcheck: no build after the warm-up. */
+/** What the avatar warm-up stands: every starter's every look once (each look is its own material
+ *  with that look's textures, so its own shader build; the palette is a per-object uniform, #39,
+ *  D-load-4), each holding another item, the palettes cycling so every palette's held-item accent
+ *  is drawn. Checked in a real renderer with ?avatars&warmcheck: no build after the warm-up. */
 export function avatarWarmupLooks(): { palette: number; starter: number; look: number; item: string }[] {
   const looks: { palette: number; starter: number; look: number; item: string }[] = [];
   for (let starter = 0; starter < STARTERS.length; starter++) {
     for (let look = 0; look < (STARTER_LOOKS[starter]?.length ?? 1); look++) {
-      for (let palette = 0; palette < PALETTES.length; palette++) {
-        looks.push({ palette, starter, look, item: WARMUP_ITEMS[looks.length % WARMUP_ITEMS.length]! });
-      }
+      const i = looks.length;
+      looks.push({ palette: i % PALETTES.length, starter, look, item: WARMUP_ITEMS[i % WARMUP_ITEMS.length]! });
     }
   }
   return looks;
@@ -669,12 +670,13 @@ export function avatarWarmupLooks(): { palette: number; starter: number; look: n
 let warmupViews: AvatarView[] = [];
 
 /**
- * Shader warm-up hook (render/warmup.ts WarmupHooks): while forced on, stands every starter in every
- * palette (avatarWarmupLooks, each holding an item plus a palette-accent item in the left hand) and the six
- * far-LOD capsules at `at()`. Every skinned toon variant, its shadow pass, and every weapon/proxy
- * material then compiles behind the loading screen instead of on first sight of another player or an
- * NPC. Forced off, the samples leave the scene but are kept for the session (keptSamples): disposing
- * them freed those builds again (T9). They are not in AvatarView.all, so the LOD pass never ranks them.
+ * Shader warm-up hook (render/warmup.ts WarmupHooks): while forced on, stands every starter's every
+ * look (avatarWarmupLooks, each holding an item plus a palette-accent item in the left hand) and the
+ * six far-LOD capsules at `at()`. Every look's skinned toon material, its shadow pass, and every
+ * weapon/proxy material then compiles behind the loading screen instead of on first sight of another
+ * player or an NPC (in any palette: the palettes share their look's build). Forced off, the samples
+ * leave the scene but are kept for the session (keptSamples): disposing them freed those builds again
+ * (T9). They are not in AvatarView.all, so the LOD pass never ranks them.
  */
 export function avatarWarmupHook(scene: THREE.Object3D, at: () => THREE.Vector3): { forceAll(on: boolean): void } {
   const samples = () =>

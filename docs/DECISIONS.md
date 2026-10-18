@@ -1323,3 +1323,42 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   uniforms (#39 step D, its own lane) are to cut the 48 avatar and horse main pipelines to 8.
   Why: #39 (spec #18), and the owner's call (2026-10-18) to keep graphics quality and accept a little
   more wait for a smooth loader.
+- **D-load-4 (2026-10-18):** the avatars' palette colours (the glowing accent included) and the horses'
+  coat colours are per-object uniforms: one toon material per look (7) and one horse material, not one
+  per look × palette (42) and per coat (6) (#39 step D). Each skinned body carries its palette
+  (`setAvatarPalette` in `AvatarView.buildModel`, so `setLook` and the warm-up views too) or its coat
+  (`setHorseCoat` in `HorseView.build`), and three sets the uniforms from the drawn mesh right before it
+  writes that draw's own uniform buffer: the camera fade gate's pattern (D-view-5). Lean shadows
+  (D-load-3) stay registered on both. The avatar warm-up stands each look once (7 views, was 42), each
+  holding another item, the palettes cycling; held items keep their per-palette accent materials, which
+  share one build. The shadow phase's prediction counts a skinned caster once per material and rig, as
+  three keys it (`?fullshadow`: 8, not 48). Tests run three's real WebGL2 and WebGPU backends on a
+  recording fake GPU, real frames on one scene and camera: bodies of one look in four palettes (and
+  horses of four coats) drawn in turn share one material and build, and each draw reads the buffer
+  three made for its own per-object uniforms (bound for it; WebGPU through its bind group), holding its
+  own palette as uploaded (WebGPU as at submit), the glow reading the accent's uniform, no palette
+  colour left in the shader; a palette change in play builds nothing; after the warm-up no look ×
+  palette, held item or coat builds, shadows included.
+  Measured (`e2e/bench-warmup.spec.ts` as in D-load-3, D and A+B (69ff92d) built from one checkout
+  and alternated back to back on one stack, load 35–55): census A+B → D: skinned main pipelines
+  48 → 8, skinned shadow 2 → 2, skinned vertex stages 50 → 10, first-drawn pipelines 118 → 78, node
+  builds 282 → 242 (WebGPU 284 → 244), `afterWarmup` 0 in every run, and the dev pages' `&warmcheck`
+  (all 42 looks × palettes with their starter weapons; six coats with riders) 0 builds after the
+  warm-up on WebGL2 and WebGPU. WebGL2 cold 31.4/27.8 s → 17.1/17.6 s (drain 17.7/16.8 → 8.6/7.7 s,
+  compile 12.6/9.8 → 7.5/9.1 s); warm 7.2 → 4.5 s; WebGPU warm 3.2 → 2.3 s, worst frame 233 → 183 ms
+  (D's first WebGPU run, its avatar shaders new to Chrome's cache, 4.1 s). Frames over 250 ms: cold
+  6/3 → 2/3, warm 1 → 1, WebGPU 0 → 0; none is a character pipeline: each is a big pipeline drawn
+  alone (terrain 41k characters 288–289 ms, blossom 272–520 ms, water 248–290 ms) or the early compile
+  stall D-load-3 left (5.1 s in one D run, 4.8 s in one A+B run). So D alone does not meet the plan's
+  frame gate (no warm-up frame over 250 ms); it stays open for #39 and is judged on the merged build
+  against #39's acceptance as the lead revised it with D-load-3: no main-thread long task over 250 ms;
+  no rAF gap over 250 ms other than single GPU-process pipeline builds that can't be split, each named;
+  warm returning visits no slower than R0. The lean-shadows lane's second phase (no synchronous GL
+  polls while the GPU process is busy) is aimed at it. Screenshots (`?avatars` every look ×
+  palette with starter weapons and a close-up, `?horses` six coats with riders, without, close up;
+  WebGL2 and WebGPU; a fake clock paused at a fixed time, `Math.random` seeded, grain and TRAA off,
+  which jitter per run): coats pixel-identical; avatars differ in 0.01–2.0 % of pixels, as much as two
+  shots of one A+B build (0.3–2.4 %, the Sunbrand's time-animated flame and its bloom); outside that
+  only 1–78 scattered pixels per image, at most 10/255 (rounding: a uniform instead of a constant).
+  Why: #39 (spec #18): 40 fewer main-pass builds and pipelines on both backends and the same colours,
+  for three colour uniforms in each avatar draw's own buffer in play.

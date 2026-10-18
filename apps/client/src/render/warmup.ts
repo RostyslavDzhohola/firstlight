@@ -252,24 +252,25 @@ function once(seen: Set<string>, key: string): 0 | 1 {
 
 /**
  * Whether a caster's shadow-pass variant will be a new node build: three keys a build by material,
- * geometry layout and context, plus the object itself for instanced (and skinned: own bone count)
- * meshes. `seen` collects the (material, layout) pairs already counted in this warm-up. With lean
- * shadows (`lean`, leanShadow.ts) the skinned casters whose materials cast lean shadows share one
- * build per rig (bone count), side and layout.
+ * geometry layout and context, plus the object itself for instanced meshes and the bone count for
+ * skinned ones. `seen` collects the (material, layout) pairs already counted in this warm-up. With
+ * lean shadows (`lean`, leanShadow.ts) the skinned casters whose materials cast lean shadows share
+ * one build per rig (bone count), side and layout.
  */
 export function shadowBuildCost(o: THREE.Object3D, seen: Set<string>, lean = false): 0 | 1 {
   const m = o as THREE.Mesh & { count?: number; isSkinnedMesh?: boolean; skeleton?: THREE.Skeleton };
   const mats = Array.isArray(m.material) ? m.material : [m.material];
   const attrs = m.geometry ? Object.keys(m.geometry.attributes).sort().map((k) => `${k}${m.geometry.attributes[k]!.itemSize}`).join(",") : "";
   const instanced = (m as THREE.InstancedMesh).isInstancedMesh || (m.count ?? 1) > 1;
+  const rig = m.isSkinnedMesh ? `|${m.skeleton?.bones.length ?? 0}|${m.receiveShadow}` : "";
   if (lean && m.isSkinnedMesh && !instanced && mats.every((x) => x && castsLeanShadow(x))) {
     const sides = mats.map((x) => x.shadowSide ?? x.side).join("/");
     return once(seen, `lean|${m.skeleton?.bones.length ?? 0}|${sides}|${attrs}|${m.receiveShadow}`);
   }
-  if (instanced || m.isSkinnedMesh) return 1;
+  if (instanced) return 1;
   let cost: 0 | 1 = 0;
   for (const mat of mats) {
-    const key = `${mat?.uuid ?? "-"}|${attrs}`;
+    const key = `${mat?.uuid ?? "-"}|${attrs}${rig}`;
     if (!seen.has(key)) {
       seen.add(key);
       cost = 1;
