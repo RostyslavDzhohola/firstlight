@@ -41,7 +41,10 @@ BODY = [
     ("thigh_r", "thigh_r", "calf_r", 0.07),
     ("calf_l", "calf_l", "foot_l", 0.05),
     ("calf_r", "calf_r", "foot_r", 0.05),
+    ("forearm_l", "lowerarm_l", "hand_l", 0.04),
+    ("forearm_r", "lowerarm_r", "hand_r", 0.04),
 ]
+SKIP = {("hand_l", "forearm_l"), ("hand_r", "forearm_r")}
 FINGERS = [f"{f}_0{i}_{s}" for f in ("index", "middle", "ring", "pinky", "thumb") for i in (1, 2, 3) for s in "lr"]
 SETS_DEFAULT = {
     "hand_l": (["hand_l"] + [b for b in FINGERS if b.endswith("_l")], 0.02),
@@ -167,7 +170,7 @@ def main():
         res = {}
         for name, pa, pb, r in body_caps():
             for k, ids in idx.items():
-                if not len(ids):
+                if not len(ids) or (k, name) in SKIP:
                     continue
                 d = r - seg_dist(co[ids], pa, pb)
                 res[(k, name)] = float(d.max())

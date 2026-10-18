@@ -4,8 +4,10 @@
 #
 # Each chain is a damped spring per bone, simulated on the bone's tail in world space and written back
 # as keyed rotations:
-#   target  = the direction the bone would point if it followed its parent rigidly, bent towards gravity
-#             and pushed back by the "air" of the clip's locomotion speed (clips play in place),
+#   target  = the direction the bone would point if it followed its parent rigidly, bent back towards
+#             world down by as much as the parent has turned away from its rest pose (the rest pose
+#             already hangs), and pushed back by the "air" of the clip's locomotion speed (clips play
+#             in place),
 #   spring  = stiffness towards the target, damping on the tail velocity, fixed bone length,
 #   limits  = a maximum angle from the rigid-follow direction, and capsule colliders on the body's bones
 #             (thighs, calves, chest) the tail can't enter.
@@ -29,10 +31,14 @@ CLIP_AIR = {
 }
 
 
-def _pose_seg(rig, name):
+def _pose_seg(rig, name, length=None):
+    """World segment of a posed bone; `length` overrides the (importer-guessed) bone length."""
     pb = rig.pose.bones[name]
     mw = rig.matrix_world
-    return mw @ pb.head, mw @ pb.tail
+    h = mw @ pb.head
+    if length is None:
+        return h, mw @ pb.tail
+    return h, h + (mw.to_3x3() @ pb.matrix.col[1].xyz).normalized() * length
 
 
 def _closest_on_seg(p, a, b):
@@ -52,16 +58,19 @@ def _aim_world(rig, pb, direction):
     pb.matrix = nm
 
 
-def _follow_dir(rig, pb):
-    """World direction of the bone if its local rotation were the identity (rigidly following its parent)."""
+def _follow(rig, pb):
+    """(world direction of the bone if it followed its parent rigidly, world rotation of the parent
+    from its rest pose to now). The second one says where the rest pose's "down" has gone."""
     par = pb.parent
     m = par.matrix @ (par.bone.matrix_local.inverted() @ pb.bone.matrix_local)
-    return (rig.matrix_world.to_3x3() @ m.col[1].xyz).normalized()
+    mw3 = rig.matrix_world.to_3x3()
+    delta = mw3 @ (par.matrix.to_3x3() @ par.bone.matrix_local.to_3x3().inverted()) @ mw3.inverted()
+    return (mw3 @ m.col[1].xyz).normalized(), delta
 
 
 def bake(rig, actions, chains, log=print):
     """chains: [{"bones": [...], "stiff": k, "damp": c, "gravity": g, "drag": d, "max_deg": a,
-    "colliders": [(bone, radius), ...]}]. Keys rotation_quaternion on every frame of every action."""
+    "colliders": [(bone, radius) or (bone, radius, length), ...]}]. Keys rotation_quaternion on every frame of every action."""
     sc = bpy.context.scene
     sc.render.fps = FPS
     down = Vector((0, 0, -1))
@@ -95,13 +104,16 @@ def bake(rig, actions, chains, log=print):
                     rig.pose.bones[pb_name].rotation_quaternion = (1, 0, 0, 0)
                 bpy.context.view_layer.update()
                 for ch in chains:
-                    cols = [(_pose_seg(rig, b), r) for b, r in ch.get("colliders", [])]
+                    cols = [(_pose_seg(rig, c[0], c[2] if len(c) > 2 else None), c[1]) for c in ch.get("colliders", [])]
                     for bname in ch["bones"]:
                         pb = rig.pose.bones[bname]
                         H = rig.matrix_world @ pb.head
                         L = pb.bone.length * rig.matrix_world.to_scale()[1]
-                        fd = _follow_dir(rig, pb)
-                        tdir = (fd + down * ch.get("gravity", 0.3) + air * ch.get("drag", 0.0) * 0.1).normalized()
+                        fd, delta = _follow(rig, pb)
+                        # the rest pose already hangs: gravity only pulls back towards world down by as much
+                        # as the parent has turned "down" away since the rest pose
+                        g_bias = down - delta @ down
+                        tdir = (fd + g_bias * ch.get("gravity", 0.3) + air * ch.get("drag", 0.0) * 0.1).normalized()
                         T = H + tdir * L
                         p, v = state.get(bname, (T.copy(), Vector((0, 0, 0))))
                         for _ in range(SUBSTEPS):
@@ -121,15 +133,19 @@ def bake(rig, actions, chains, log=print):
                                     d = Quaternion(axis.normalized(), lim) @ fd
                                     p = H + d * L
                                     v = v * 0.5
-                            # colliders: push the tail out of each capsule
-                            for (a0, b0), r in cols:
-                                q = _closest_on_seg(p, a0, b0)
-                                off = p - q
-                                if off.length < r:
-                                    n = off.normalized() if off.length > 1e-6 else (H - q).normalized()
-                                    p = q + n * r
-                                    p = H + (p - H).normalized() * L
-                                    v = v - n * min(0.0, v.dot(n))
+                            # colliders: push the bone's middle and tail out of each capsule (a long panel can
+                            # cross a shin with its middle while its tail is clear)
+                            for _ in range(2):
+                                for (a0, b0), r in cols:
+                                    for t in (0.5, 1.0):
+                                        x = H + (p - H) * t
+                                        q = _closest_on_seg(x, a0, b0)
+                                        off = x - q
+                                        if off.length < r:
+                                            n = off.normalized() if off.length > 1e-6 else (H - q).normalized()
+                                            x = q + n * r
+                                            p = H + (x - H).normalized() * L
+                                            v = v - n * min(0.0, v.dot(n))
                         state[bname] = (p, v)
                         _aim_world(rig, pb, p - H)
                         bpy.context.view_layer.update()

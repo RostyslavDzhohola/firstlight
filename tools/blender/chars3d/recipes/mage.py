@@ -65,9 +65,10 @@ CLIP_CHECK_SETS = {
 }
 
 
-def chain_w(pts, bones, base, blend=0.25):
+def chain_w(pts, bones, base, blend=0.25, reach=(0.06, 0.1)):
     """Weights along a bone chain: pts has len(bones)+1 points (bone i spans pts[i]..pts[i+1]); points
-    near the start of the chain blend into `base` (the bone the chain hangs from)."""
+    near the start of the chain, or farther than reach (metres, soft) from it, belong to `base` (the bone
+    the chain hangs from)."""
     pts = [np.asarray(p, F) for p in pts]
 
     def f(P):
@@ -82,13 +83,16 @@ def chain_w(pts, bones, base, blend=0.25):
             m = d < best
             best[m] = d[m]
             s[m] = i + t[m]
-        out = {base: 1 - S.smoothstep(0.0, blend, s)}
+        on = S.smoothstep(0.0, blend, s) * (1 - S.smoothstep(reach[0], reach[1], best))
+        out = {base: 1 - on}
         for i, b in enumerate(bones):
             # each bone owns its span, blending into the next across the joint
             w = np.clip(1 - np.abs(s - (i + 0.5)) / 0.75, 0, 1)
             if i == len(bones) - 1:
                 w = np.maximum(w, (s > i + 0.5).astype(F))
-            out[b] = w * S.smoothstep(0.0, blend, s)
+            if i == 0:
+                w = np.maximum(w, (s < 0.5).astype(F))
+            out[b] = w * on
         return out
     return f
 
@@ -177,7 +181,7 @@ def parts():
         return S.smin(d, shoulders(P), 0.07)
     collar = S.round_cone(vec((0, 0.012, 1.44)), vec((0, 0.008, 1.6)), 0.078, 0.07)
     collar_hole = S.round_cone(vec((0, 0.014, 1.4)), vec((0, 0.01, 1.66)), 0.05, 0.052)
-    sleeve_r = (0.058, 0.052, 0.066, 0.1)
+    sleeve_r = (0.058, 0.052, 0.062, 0.086)
     sleeves = S.union(K.sleeve(sk, 1, radii=sleeve_r, ext=0.13, open_depth=0.17, droop=0.07, folds=0.003),
                       K.sleeve(sk, -1, radii=sleeve_r, ext=0.13, open_depth=0.17, droop=0.07, folds=0.003))
 
@@ -198,8 +202,9 @@ def parts():
         return PT.shade(rgb, ctx.P, ctx.N, ctx.ao, ctx.cav, ao_tint="#5a4a6a", ao_amt=0.6, top_light=0.14,
                         cav_amt=0.4, edge_amt=0.16, z_range=(0.05, 1.6))
 
+    # no hand bones: the wide sleeves follow the forearms (a cuff turning with the wrist looks broken)
     upper_bones = ["spine_01", "spine_02", "spine_03", "neck_01", "clavicle_l", "clavicle_r", "upperarm_l",
-                   "upperarm_r", "lowerarm_l", "lowerarm_r", "hand_l", "hand_r", "pelvis"]
+                   "upperarm_r", "lowerarm_l", "lowerarm_r", "pelvis"]
 
     # --- under-robe: long, open at the front (the legs step through under the front tabard) ---------
     skirt = K.skirt(1.0, 0.07, rx=(0.16, 0.29), ry=(0.128, 0.25), cy=0.02, thick=0.012, gap=(12, 26), folds=8,
@@ -249,14 +254,15 @@ def parts():
         loz = (np.abs(np.sin(ctx.P[:, 2] * 70)) + np.abs(np.sin(th * 0.6))) < 0.5
         return PT.mix(rgb, PT.fill(ctx.n, (1, 1, 1)), (loz & border) * 0.5)
 
-    # --- capelet: a short scalloped shoulder cape over the robe ---------------------------------------
+    # --- capelet: a short scalloped shoulder cape over the robe; it rides on the shoulders only (following
+    #     the upper arms turned it into square pads once the arms come down from the T-pose) ---------------------------------------
     def capelet(P):
         base = robe_up(P)
         d = S.smax(base - 0.02, -(base - 0.007), 0.004)
         x, y = P[:, 0], P[:, 1] - 0.02
         th = np.arctan2(x, -y)
         r = np.sqrt(x * x + y * y)
-        reach = 0.3 + 0.014 * np.cos(th * 8)  # scalloped edge out along the arms
+        reach = 0.255 + 0.012 * np.cos(th * 8)  # scalloped edge out along the arms
         d = S.smax(d, r - reach, 0.006)
         low = 1.3 + 0.014 * np.cos(th * 8)
         d = S.smax(d, low - P[:, 2], 0.006)
@@ -267,7 +273,7 @@ def parts():
         x, y = ctx.P[:, 0], ctx.P[:, 1] - 0.02
         th = np.arctan2(x, -y)
         r = np.sqrt(x * x + y * y)
-        edge = (r > 0.3 + 0.014 * np.cos(th * 8) - 0.018) | (ctx.P[:, 2] < 1.3 + 0.014 * np.cos(th * 8) + 0.018)
+        edge = (r > 0.255 + 0.012 * np.cos(th * 8) - 0.018) | (ctx.P[:, 2] < 1.3 + 0.014 * np.cos(th * 8) + 0.018)
         rgb[edge] = rgb[edge] * 0.75
         return rgb
 
@@ -290,7 +296,8 @@ def parts():
         return d + 0.0025 * np.sin(np.arctan2(P[:, 0], P[:, 1]) * 6 + S.vnoise(P, 8, 5)) * S.smoothstep(1.7, 1.5, P[:, 2])
 
     hood_w_chain = chain_w([vec((0.0, 0.1, 1.885)), vec((0.0, 0.215, 1.8)), vec((0.0, 0.25, 1.62))],
-                           ["hood_01", "hood_02"], "Head", blend=0.35)
+                           ["hood_01", "hood_02"], "Head", blend=0.35,
+                           reach=(0.06, 0.1))
 
     def hood_w(P):
         w = hood_w_chain(P)
@@ -357,7 +364,8 @@ def parts():
 
     braid_w_chain = chain_w([vec((0.085, 0.0, 1.64)), vec((0.115, -0.085, 1.44)), vec((0.115, -0.12, 1.24)),
                              vec((0.11, -0.13, 0.96))],
-                            ["braid_01", "braid_02", "braid_03"], "Head", blend=0.3)
+                            ["braid_01", "braid_02", "braid_03"], "Head", blend=0.3,
+                            reach=(0.05, 0.08))
 
     def hair_w(P):
         w = braid_w_chain(P)
@@ -390,7 +398,8 @@ def parts():
         return d
 
     sash_chain = chain_w([vec((0.158, -0.1, 0.96)), vec((0.18, -0.115, 0.74)), vec((0.19, -0.13, 0.5))],
-                         ["sash_01", "sash_02"], "pelvis", blend=0.2)
+                         ["sash_01", "sash_02"], "pelvis", blend=0.2,
+                         reach=(0.05, 0.08))
 
     def sash_w(P):
         on_band = S.smoothstep(0.93, 0.96, P[:, 2])
@@ -454,7 +463,7 @@ def parts():
         Part("head", head.field, "fixed", vox=0.0011, tris=1900, weights=("auto", ["neck_01", "Head"], "Head"),
              paint=paint_head, texel=2.6, uv_angle=70),
         Part("capelet", capelet, "secondary", vox=0.002, tris=1100,
-             weights=("auto", ["spine_03", "neck_01", "clavicle_l", "clavicle_r", "upperarm_l", "upperarm_r"], "spine_03"),
+             weights=("auto", ["spine_03", "neck_01", "clavicle_l", "clavicle_r"], "spine_03"),
              paint=paint_capelet, texel=0.9, single_side=True),
         Part("hood", hood, "primary", vox=0.0018, tris=1800, weights=("fn", hood_w), paint=paint_hood, texel=1.0),
         Part("bell", bell, "fixed", vox=0.001, tris=160, weights=("rigid", "hood_02"), paint=paint_copper,

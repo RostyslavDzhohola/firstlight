@@ -25,9 +25,11 @@ import swing  # noqa: E402
 V = Vector
 
 CHAINS = [
-    {"bones": ["hood_01", "hood_02"], "stiff": 45, "damp": 7, "gravity": 0.5, "drag": 1.2, "max_deg": 55},
+    {"bones": ["hood_01", "hood_02"], "stiff": 45, "damp": 7, "gravity": 0.5, "drag": 1.2, "max_deg": 45,
+     "colliders": [("Head", 0.15, 0.24), ("neck_01", 0.1), ("spine_03", 0.14)]},
     {"bones": ["braid_01", "braid_02", "braid_03"], "stiff": 40, "damp": 6.5, "gravity": 0.45, "drag": 0.8,
-     "max_deg": 40, "colliders": [("spine_03", 0.11), ("spine_02", 0.12)]},
+     "max_deg": 40, "colliders": [("spine_03", 0.12), ("spine_02", 0.13), ("spine_01", 0.15), ("pelvis", 0.17),
+                                   ("thigh_l", 0.12), ("lowerarm_l", 0.07)]},
     {"bones": ["panel_f_01", "panel_f_02"], "stiff": 55, "damp": 8, "gravity": 0.2, "drag": 1.2, "max_deg": 45,
      "colliders": [("thigh_l", 0.115), ("thigh_r", 0.115), ("calf_l", 0.085), ("calf_r", 0.085)]},
     {"bones": ["panel_b_01", "panel_b_02"], "stiff": 55, "damp": 8, "gravity": 0.2, "drag": 1.4, "max_deg": 45,
@@ -35,7 +37,7 @@ CHAINS = [
     {"bones": ["sash_01", "sash_02"], "stiff": 32, "damp": 5, "gravity": 0.35, "drag": 1.5, "max_deg": 55,
      "colliders": [("thigh_l", 0.12), ("calf_l", 0.09)]},
     {"bones": ["lantern_01"], "stiff": 28, "damp": 3.5, "gravity": 0.6, "drag": 0.8, "max_deg": 50,
-     "colliders": [("thigh_r", 0.13)]},
+     "colliders": [("thigh_r", 0.13), ("lowerarm_r", 0.1), ("hand_r", 0.09, 0.15)]},
 ]
 
 
@@ -92,8 +94,8 @@ def author(rig, base, name, order, keys, end=None):
             rig.pose.bones[b].keyframe_insert("rotation_quaternion", frame=f)
     if end is not None:
         for fc in channelbag(act).fcurves:
-            for kp in [k for k in fc.keyframe_points if k.co.x > end + 1e-3]:
-                fc.keyframe_points.remove(kp, fast=True)
+            while len(fc.keyframe_points) and fc.keyframe_points[-1].co.x > end + 1e-3:
+                fc.keyframe_points.remove(fc.keyframe_points[-1])
             fc.update()
         act.frame_range = (0, end)
     # smooth, slightly eased motion between our keys
@@ -116,10 +118,10 @@ def folded(breath=0.0, tilt=0.0):
     return {
         "spine_02": V((0, -0.1 - b * 0.03, 1)), "spine_03": V((0, -0.16 + b * 0.04, 1)),
         "neck_01": V((tilt * 0.3, -0.28, 1)), "Head": V((tilt, -0.06, 1)),
-        "upperarm_l": V((0.24, -0.28, -0.93)), "lowerarm_l": V((-0.68, -0.64, 0.2 + b * 0.03)),
-        "hand_l": V((-0.85, -0.42, 0.12)),
-        "upperarm_r": V((-0.24, -0.3, -0.93)), "lowerarm_r": V((0.7, -0.68, 0.06 + b * 0.03)),
-        "hand_r": V((0.85, -0.48, -0.04)),
+        "upperarm_l": V((0.26, -0.26, -0.93)), "lowerarm_l": V((-0.6, -0.62, 0.36 + b * 0.03)),
+        "hand_l": V((-0.7, -0.5, 0.2)),
+        "upperarm_r": V((-0.24, -0.32, -0.92)), "lowerarm_r": V((0.62, -0.74, -0.06 + b * 0.03)),
+        "hand_r": V((0.7, -0.6, -0.1)),
     }
 
 
