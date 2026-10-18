@@ -28,8 +28,8 @@ export interface StallBox {
   d: number;
   /** Rotation about the frame's x axis (three's rotation.x): positive tips +z down. */
   tilt?: number;
-  /** Its own padding (m) instead of the default CAMERA_PAD (a solid body needs less than thin cloth). */
-  pad?: number;
+  /** Its own padding (m) along x, y and z instead of CAMERA_PAD (a stall's body needs less at its sides than cloth). */
+  pad?: readonly [number, number, number];
 }
 
 /**
@@ -48,10 +48,11 @@ export const KEEPER_STALL = {
   label: { x: 0, y: 3.4, z: 0.6 },
   /**
    * The whole stall: the awning's back edge to the counter's front, side to side, the ground to the
-   * awning's top. Padded less than the cloth: its faces are upright and its inside open, and every
-   * centimetre of padding pins the camera of a player beside it closer to their head.
+   * awning's top. Padded like cloth above (a lens skimming the awning stays off it), but only 5 cm at
+   * its upright sides: its inside is open, and every centimetre there pins the camera of a player
+   * standing beside the stall closer to their head.
    */
-  body: { x: 0, y: 1.45, z: 0.6, w: 3.2, h: 2.9, d: 1.8, pad: 0.05 },
+  body: { x: 0, y: 1.45, z: 0.6, w: 3.2, h: 2.9, d: 1.8, pad: [0.05, 0.25, 0.05] },
 } as const satisfies Record<string, object>;
 
 /** Padding (m) round every camera-only volume. */
@@ -79,19 +80,24 @@ const OUTPOST_STALL_CAMERA: readonly StallBox[] = [
 ];
 const MERIDIAN_STALL_CAMERA: readonly StallBox[] = [{ x: 0, y: 3.0, z: 0.17, w: 4.0, h: 0.2, d: 2.56 }]; // roof slab and its amber strip
 
-/** A camera-only volume in planet space: centre, unit axes and half extents (padded by `pad`). */
+/** A camera-only volume in planet space: centre, unit axes and half extents (padded by `pad` along each axis). */
 export interface CameraBox {
   c: readonly [number, number, number];
   a: readonly (readonly [number, number, number])[];
   h: readonly [number, number, number];
-  pad: number;
+  pad: readonly [number, number, number];
+}
+
+/** The piece itself: `b` without its padding. */
+export function unpadded(b: CameraBox): CameraBox {
+  return { ...b, h: [b.h[0] - b.pad[0], b.h[1] - b.pad[1], b.h[2] - b.pad[2]], pad: [0, 0, 0] };
 }
 
 /** `boxes` (frame-local) placed by `p`, padded by `pad`. */
 export function placeStallBoxes(p: TownPlacement, boxes: readonly StallBox[], padding = CAMERA_PAD): CameraBox[] {
   const s = p.scale;
   return boxes.map((b) => {
-    const pad = Math.min(padding, b.pad ?? CAMERA_PAD);
+    const pad = [0, 1, 2].map((k) => Math.min(padding, b.pad?.[k] ?? CAMERA_PAD)) as [number, number, number];
     const t = b.tilt ?? 0;
     const ct = Math.cos(t), st = Math.sin(t);
     // Local axes after the tilt about x (three's convention), then into the planet through the frame.
@@ -102,7 +108,7 @@ export function placeStallBoxes(p: TownPlacement, boxes: readonly StallBox[], pa
       p.py + (p.ry * b.x + p.uy * b.y + p.fy * b.z) * s,
       p.pz + (p.rz * b.x + p.uz * b.y + p.fz * b.z) * s,
     ] as const;
-    return { c, a, h: [(b.w / 2) * s + pad, (b.h / 2) * s + pad, (b.d / 2) * s + pad] as const, pad };
+    return { c, a, h: [(b.w / 2) * s + pad[0], (b.h / 2) * s + pad[1], (b.d / 2) * s + pad[2]] as const, pad };
   });
 }
 
@@ -137,10 +143,10 @@ export function stallCameraBoxes(terrain: Terrain): readonly CameraBox[] {
 }
 
 /**
- * Entry distance of the ray into box `b` shrunk by `shrink` on every side: -1 when the start is inside,
+ * Entry distance of the ray into box `b` shrunk by `shrink` (per axis): -1 when the start is inside,
  * Infinity when the ray misses it (or meets it only behind the start).
  */
-function entry(b: CameraBox, shrink: number, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number): number {
+function entry(b: CameraBox, shrink: readonly [number, number, number] | null, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number): number {
   const qx = ox - b.c[0], qy = oy - b.c[1], qz = oz - b.c[2];
   let t0 = -Infinity, t1 = Infinity;
   let inside = true;
@@ -148,7 +154,7 @@ function entry(b: CameraBox, shrink: number, ox: number, oy: number, oz: number,
     const a = b.a[k]!;
     const o = qx * a[0] + qy * a[1] + qz * a[2];
     const d = dx * a[0] + dy * a[1] + dz * a[2];
-    const h = b.h[k]! - shrink;
+    const h = b.h[k]! - (shrink ? shrink[k]! : 0);
     if (o < -h || o > h) inside = false;
     if (Math.abs(d) < 1e-9) {
       if (o < -h || o > h) return Infinity;
@@ -171,7 +177,7 @@ function entry(b: CameraBox, shrink: number, ox: number, oy: number, oz: number,
 export function cameraBoxRay(boxes: readonly CameraBox[], ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number): number {
   let best = Infinity;
   for (const b of boxes) {
-    let t = entry(b, 0, ox, oy, oz, dx, dy, dz);
+    let t = entry(b, null, ox, oy, oz, dx, dy, dz);
     if (t < 0) t = entry(b, b.pad, ox, oy, oz, dx, dy, dz);
     if (t >= 0 && t <= maxT && t < best) best = t;
   }

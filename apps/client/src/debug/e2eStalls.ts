@@ -79,7 +79,7 @@ export function stallTools(game: () => StallGame | null) {
    */
   const stallVolumes = (body: string, terrain: Terrain) => {
     const m = mods!;
-    const pieces = m.stall.stallCameraBoxes(terrain).map((b) => ({ ...b, h: [b.h[0] - b.pad, b.h[1] - b.pad, b.h[2] - b.pad] as const, pad: 0 }));
+    const pieces = m.stall.stallCameraBoxes(terrain).map(m.stall.unpadded);
     const site = m.outposts.OUTPOSTS[body as keyof typeof m.outposts.OUTPOSTS];
     const frame = body === "portus" ? m.sites.plazaFacingPlacement("juno_vale", terrain as never) : site ? m.sites.sitePlacements(terrain as never)[site.shop.item] : null;
     const solids = body === "portus" ? m.sites.JUNO_COUNTER_SOLIDS : frame && site ? site.prefabs[frame.prefab]!.solids : [];
@@ -144,7 +144,7 @@ export function stallTools(game: () => StallGame | null) {
     const terrain = g?.planet?.terrain as Parameters<typeof import("../world/stallCamera.ts").stallCameraBoxes>[0] | undefined;
     if (!g || !cam || !k || !terrain || !mods) return null;
     const p = cam.position;
-    const boxes = mods.stall.stallCameraBoxes(terrain).map((b) => ({ ...b, h: [b.h[0] - b.pad, b.h[1] - b.pad, b.h[2] - b.pad] as const, pad: 0 }));
+    const boxes = mods.stall.stallCameraBoxes(terrain).map(mods.stall.unpadded);
     const inAwning = mods.stall.inCameraBox(boxes, p.x, p.y, p.z);
     const solid = mods.sites.structureCollider(terrain as never).footing(p.x, p.y, p.z, 0, { radius: 0.01, height: 0.01, step: 0 }).inside;
     const label = labelOf(k);

@@ -13,7 +13,7 @@ import { emptyStored, resolveSettings } from "../render/quality.ts";
 import { testSiteAssets } from "../render/townAssets.testutil.ts";
 import type { Input } from "../game/input.ts";
 import { PlayerController } from "../game/PlayerController.ts";
-import { cameraBoxRay, CAMERA_PAD, inCameraBox, KEEPER_STALL_CAMERA, placeStallBoxes, stallCameraBoxes, stallCameraLocal, type CameraBox, type StallBox } from "./stallCamera.ts";
+import { cameraBoxRay, CAMERA_PAD, inCameraBox, KEEPER_STALL_CAMERA, placeStallBoxes, stallCameraBoxes, stallCameraLocal, unpadded, type CameraBox, type StallBox } from "./stallCamera.ts";
 
 // config.ts reads the URL at import time; ?nochars keeps AvatarView on capsules (no asset fetches).
 vi.stubGlobal("location", { search: "?nochars", hostname: "localhost" });
@@ -122,7 +122,7 @@ describe("the third-person camera and the shop stalls (#22)", () => {
       const town = new SiteTown(t, settings, Promise.resolve(null));
       const solids = town.collider;
       // The pieces themselves (no padding).
-      const awnings: readonly CameraBox[] = stallCameraBoxes(t).map((b) => ({ ...b, h: [b.h[0] - b.pad, b.h[1] - b.pad, b.h[2] - b.pad] as const, pad: 0 }));
+      const awnings: readonly CameraBox[] = stallCameraBoxes(t).map(unpadded);
       // The stall's whole body: the counter to the awning, side to side (its frame, unpadded).
       const whole = placeStallBoxes(stallFrame(body), [STALL_BODY[body]!], 0);
       const spot = SHOP_SPOTS.find((s) => s.body === body)!;
