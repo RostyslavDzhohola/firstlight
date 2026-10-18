@@ -708,6 +708,7 @@ export async function warmup(
     firstDraws: { granted: gate?.granted() ?? 0, ...pacer.batches() },
     ...(diag ? { batches: batchLog, census: firstDrawCensus(batchLog) } : {}),
     ...(flags.has("gltrace") ? { gl: [...glSlowCalls()] } : {}),
+    ...(ctx.start?.fallback ? { webgpuFallback: { reason: ctx.start.fallback, lateMs: ctx.start.lateMs, secondChance: ctx.start.secondChance } } : {}),
     phases: { compile, compute, shadows, frames: framesPhase },
   };
   stats.warmups.push(report);

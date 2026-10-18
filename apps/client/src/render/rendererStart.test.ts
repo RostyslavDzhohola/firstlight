@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   browserMajor, deviceBackendMemory, initWithin, startRenderer, WEBGPU_FAILED_KEY, WEBGPU_INIT_TIMEOUT_MS, WEBGPU_RETRY_MS,
-  type BackendMemory, type DeviceMemoryEnv, type Startable, type StorageLike,
+  webgpuSecondChance, type BackendMemory, type BackendStatus, type DeviceMemoryEnv, type GpuAdapterLike, type GpuLike, type Startable, type StorageLike,
 } from "./rendererStart.ts";
 
 /** A renderer whose init() the test settles by hand. */
@@ -40,6 +40,8 @@ function harness(memoryStart = false) {
     forgetWebgpuSkipped: () => {
       skipped = false;
     },
+    noteLateStart: () => {},
+    grantSecondChance: () => false,
   };
   const create = (forceWebGL: boolean) => {
     const r = new FakeRenderer(forceWebGL);
@@ -439,6 +441,285 @@ describe("startRenderer with the device memory (WebGPU that didn't start, across
     expect(bare.webgpuSkipped()).toBe(false);
     expect(() => bare.rememberWebgpuSkipped("timeout")).not.toThrow();
     expect(() => bare.forgetWebgpuSkipped()).not.toThrow();
+  });
+});
+
+// ------------------------------------------------------------------- D-renderer-2: a second chance
+
+describe("an abandoned WebGPU start that answers late (D-renderer-2)", () => {
+  /** A page load whose WebGPU init hangs past the deadline; the test settles it later by hand. */
+  async function hangingStart(d: ReturnType<typeof device>, opts: { internalFallback?: boolean } = {}) {
+    const h = harness();
+    const isWebGPU = (r: FakeRenderer) => !r.forceWebGL && !opts.internalFallback;
+    const started = startRenderer({ create: h.create, forceWebGL: false, memory: d.memory, log: h.log, isWebGPU, now: () => Date.now() });
+    await vi.advanceTimersByTimeAsync(WEBGPU_INIT_TIMEOUT_MS);
+    return { h, started, webgpu: h.made[0]!, webgl: () => h.made[1]! };
+  }
+
+  it("notes how late it answered, in the device record and in the session's status", async () => {
+    const d = device();
+    const s = await hangingStart(d);
+    s.webgl().resolve();
+    const { status } = await s.started;
+    expect(status).toEqual({ fallback: "timeout", lateMs: null, secondChance: null });
+    expect(d.record()).toEqual({ v: 1, reason: "timeout", at: 100 * DAY, browser: CHROME, gpu: M1 });
+    await vi.advanceTimersByTimeAsync(3000);
+    s.webgpu.resolve(); // the adapter finally answered, 11 s after the start
+    await flush();
+    expect(status.lateMs).toBe(WEBGPU_INIT_TIMEOUT_MS + 3000);
+    expect(d.record()).toEqual({ v: 1, reason: "timeout", at: 100 * DAY, browser: CHROME, gpu: M1, lateMs: WEBGPU_INIT_TIMEOUT_MS + 3000 });
+    expect(s.webgpu.disposed).toBe(1); // still torn down: the session stays on WebGL2
+    expect(s.h.logs.join("\n")).toMatch(/answered 11\.0 s after it began/);
+  });
+
+  it("an answer that comes while WebGL2 is still starting lands in the record all the same", async () => {
+    const d = device();
+    const s = await hangingStart(d);
+    await vi.advanceTimersByTimeAsync(500);
+    s.webgpu.resolve();
+    await flush();
+    s.webgl().resolve();
+    const { status } = await s.started;
+    expect(status.lateMs).toBe(WEBGPU_INIT_TIMEOUT_MS + 500);
+    expect(d.record()).toMatchObject({ reason: "timeout", lateMs: WEBGPU_INIT_TIMEOUT_MS + 500 });
+  });
+
+  it("a late finish on three's own WebGL2 fallback, or a late failure, is not a WebGPU answer", async () => {
+    for (const late of ["internal-fallback", "reject"] as const) {
+      const d = device();
+      const s = await hangingStart(d, { internalFallback: late === "internal-fallback" });
+      s.webgl().resolve();
+      const { status } = await s.started;
+      if (late === "reject") s.webgpu.reject(new Error("device lost"));
+      else s.webgpu.resolve();
+      await flush();
+      expect(status.lateMs, late).toBeNull();
+      expect(d.record(), late).toEqual({ v: 1, reason: "timeout", at: 100 * DAY, browser: CHROME, gpu: M1 });
+    }
+  });
+
+  it("a WebGPU start in time, a remembered skip and ?webgl report no fallback lateness", async () => {
+    const ok = harness();
+    const p = startRenderer({ create: ok.create, forceWebGL: false, memory: ok.memory, log: ok.log });
+    await flush();
+    ok.made[0]!.resolve();
+    expect((await p).status).toEqual({ fallback: null, lateMs: null, secondChance: null });
+    const remembered = await load(device({ record: fresh() }), { webgpu: "untried" });
+    expect(remembered.fallback).toBe("remembered");
+  });
+});
+
+/** A navigator.gpu stand-in: how it answers the adapter and device requests, and what was asked. */
+function fakeGpu(mode: "ok" | "no-adapter" | "hang" | "adapter-fails" | "device-fails" | "adapter-late") {
+  const calls = { adapter: 0, device: 0, destroyed: 0, options: [] as unknown[] };
+  let answer: (() => void) | null = null;
+  const gpu: GpuLike = {
+    requestAdapter(o) {
+      calls.adapter++;
+      calls.options.push(o);
+      if (mode === "no-adapter") return Promise.resolve(null);
+      if (mode === "adapter-fails") return Promise.reject(new Error("adapter failed"));
+      const adapter: GpuAdapterLike = {
+        requestDevice() {
+          calls.device++;
+          if (mode === "device-fails") return Promise.reject(new Error("device lost"));
+          const dev = { destroy: () => void calls.destroyed++ };
+          if (mode === "hang") return new Promise((r) => (answer = () => r(dev)));
+          return Promise.resolve(dev);
+        },
+      };
+      // The adapter itself answers only when the test says so.
+      if (mode === "adapter-late") return new Promise((r) => (answer = () => r(adapter)));
+      return Promise.resolve(adapter);
+    },
+  };
+  return { gpu, calls, answerLate: () => answer?.() };
+}
+
+/** The session's start status after a WebGL2 fallback (or none). */
+const fellBack = (fallback: BackendStatus["fallback"]): BackendStatus => ({ fallback, lateMs: null, secondChance: null });
+
+/** A hand-scheduled idle callback: the test decides when the page is idle. */
+function idle() {
+  let queued: (() => void) | null = null;
+  return {
+    schedule: (run: () => void) => void (queued = run),
+    run: async () => {
+      queued?.();
+      queued = null;
+      await flush();
+    },
+    pending: () => queued !== null,
+  };
+}
+
+describe("WebGPU's second chance after a WebGL2 fallback (D-renderer-2)", () => {
+  it("checks WebGPU quietly once the page is idle (adapter + device, no rendering) and, if it answers in time, lets the next visit try it", async () => {
+    const d = device({ record: fresh() });
+    const g = fakeGpu("ok");
+    const i = idle();
+    const logs: string[] = [];
+    const status = fellBack("remembered");
+    const done = webgpuSecondChance(status, { memory: d.memory, gpu: g.gpu, schedule: i.schedule, log: (m) => logs.push(m) });
+    await flush();
+    expect(g.calls.adapter).toBe(0); // nothing until the page is idle
+    expect(status.secondChance).toBe("pending");
+    await i.run();
+    expect(await done).toBe("cleared");
+    expect(status.secondChance).toBe("cleared");
+    expect(g.calls).toMatchObject({ adapter: 1, device: 1, destroyed: 1 }); // the test device is released at once
+    expect(g.calls.options).toEqual([{ powerPreference: "high-performance" }]);
+    expect(logs.join("\n")).toMatch(/WebGPU answered .* the next visit tries it again/);
+    // The next visit tries WebGPU; when it works, the record goes.
+    const next = await load(device({ storage: d.storage }), { webgpu: "ready" });
+    expect(next.triedWebgpu).toBe(true);
+    expect(next.fallback).toBeNull();
+    expect(d.record()).toBeNull();
+  });
+
+  it("gives a record one second chance: when the next try fails too, WebGPU stays off for the rest of the week", async () => {
+    const d = device({ record: fresh() });
+    const i = idle();
+    void webgpuSecondChance(fellBack("remembered"), { memory: d.memory, gpu: fakeGpu("ok").gpu, schedule: i.schedule, log: () => {} });
+    await i.run();
+    expect(d.record()).toMatchObject({ second: "granted" });
+    // The next visit tries WebGPU and it hangs again: a new record that has had its second chance.
+    const again = await load(device({ storage: d.storage }), { webgpu: "hang" });
+    expect(again.triedWebgpu).toBe(true);
+    expect(again.fallback).toBe("timeout");
+    expect(d.record()).toEqual({ v: 1, reason: "timeout", at: 100 * DAY, browser: CHROME, gpu: M1, second: "used" });
+    // That session's second chance answers, but the record keeps WebGPU off: no 8 s wait every visit.
+    const i2 = idle();
+    const status = fellBack("timeout");
+    const done = webgpuSecondChance(status, { memory: d.memory, gpu: fakeGpu("ok").gpu, schedule: i2.schedule, log: () => {} });
+    await i2.run();
+    expect(await done).toBe("spent");
+    expect(d.record()).toMatchObject({ second: "used" });
+    expect((await load(device({ storage: d.storage }), { webgpu: "untried" })).fallback).toBe("remembered");
+    // A week on, the record has expired: WebGPU is tried again as before.
+    const later = device({ storage: d.storage, now: 100 * DAY + WEBGPU_RETRY_MS });
+    expect((await load(later, { webgpu: "ready" })).triedWebgpu).toBe(true);
+  });
+
+  it("only a grant that still applies here is spent by a failure: an expired one, or another browser's or GPU's, is not", async () => {
+    const granted = (over: Record<string, unknown> = {}) => fresh({ second: "granted", ...over });
+    const cases = [
+      ["expired", device({ record: granted({ at: 100 * DAY - WEBGPU_RETRY_MS }) })],
+      ["browser update", device({ record: granted({ browser: "Chrome/140" }) })],
+      ["other GPU", device({ record: granted({ gpu: "ANGLE (AMD, ANGLE Metal Renderer: AMD Radeon Pro 5500M, Unspecified Version)" }) })],
+    ] as const;
+    for (const [why, d] of cases) {
+      const r = await load(d, { webgpu: "hang" });
+      expect(r.fallback, why).toBe("timeout");
+      // A first failure in this environment: a fresh record that still has its second chance.
+      expect(d.record(), why).toEqual({ v: 1, reason: "timeout", at: 100 * DAY, browser: CHROME, gpu: M1 });
+      const i = idle();
+      const done = webgpuSecondChance(fellBack("timeout"), { memory: d.memory, gpu: fakeGpu("ok").gpu, schedule: i.schedule, log: () => {} });
+      await i.run();
+      expect(await done, why).toBe("cleared");
+    }
+    // The grant that applies here is spent by the failure, as before.
+    const d = device({ record: granted() });
+    await load(d, { webgpu: "hang" });
+    expect(d.record()).toMatchObject({ second: "used" });
+  });
+
+  it("a WebGPU that fails inside init (three's own fallback) on the second try also spends the chance", async () => {
+    const d = device({ record: fresh({ reason: "error" }) });
+    const i = idle();
+    void webgpuSecondChance(fellBack("remembered"), { memory: d.memory, gpu: fakeGpu("ok").gpu, schedule: i.schedule, log: () => {} });
+    await i.run();
+    await load(device({ storage: d.storage }), { webgpu: "internal-fallback" });
+    expect(d.record()).toMatchObject({ reason: "error", second: "used" });
+  });
+
+  it("keeps the record when WebGPU answers too late, has no adapter, or a request fails; a late device is released", async () => {
+    const cases = [
+      ["hang", "timeout"],
+      ["no-adapter", "unavailable"],
+      ["adapter-fails", "error"],
+      ["device-fails", "error"],
+    ] as const;
+    for (const [mode, outcome] of cases) {
+      const d = device({ record: fresh() });
+      const g = fakeGpu(mode);
+      const i = idle();
+      const done = webgpuSecondChance(fellBack("timeout"), { memory: d.memory, gpu: g.gpu, schedule: i.schedule, log: () => {} });
+      await i.run();
+      if (mode === "hang") {
+        await vi.advanceTimersByTimeAsync(WEBGPU_INIT_TIMEOUT_MS - 1);
+        expect(g.calls.destroyed).toBe(0);
+        await vi.advanceTimersByTimeAsync(1);
+      }
+      expect(await done, mode).toBe(outcome);
+      expect(d.record(), mode).toEqual(fresh());
+      if (mode === "hang") {
+        g.answerLate();
+        await flush();
+        expect(g.calls.destroyed, "a device that comes after the deadline is destroyed").toBe(1);
+      }
+    }
+    // No WebGPU in this browser at all.
+    const d = device({ record: fresh() });
+    const i = idle();
+    const done = webgpuSecondChance(fellBack("error"), { memory: d.memory, gpu: null, schedule: i.schedule, log: () => {} });
+    await i.run();
+    expect(await done).toBe("unavailable");
+    expect(d.record()).toEqual(fresh());
+  });
+
+  it("an adapter that answers after the deadline gets no device request: no GPU work once the check has failed", async () => {
+    const d = device({ record: fresh() });
+    const g = fakeGpu("adapter-late");
+    const i = idle();
+    const done = webgpuSecondChance(fellBack("timeout"), { memory: d.memory, gpu: g.gpu, schedule: i.schedule, log: () => {} });
+    await i.run();
+    await vi.advanceTimersByTimeAsync(WEBGPU_INIT_TIMEOUT_MS);
+    expect(await done).toBe("timeout");
+    g.answerLate(); // the adapter, too late
+    await flush();
+    expect(g.calls).toMatchObject({ adapter: 1, device: 0, destroyed: 0 });
+    expect(d.record()).toEqual(fresh());
+  });
+
+  it("runs once per session, and never when the session is on WebGPU or asked for WebGL2", async () => {
+    const g = fakeGpu("ok");
+    const i = idle();
+    const d = device({ record: fresh() });
+    expect(await webgpuSecondChance(fellBack(null), { memory: d.memory, gpu: g.gpu, schedule: i.schedule })).toBeNull();
+    expect(i.pending()).toBe(false);
+    const status = fellBack("timeout");
+    const first = webgpuSecondChance(status, { memory: d.memory, gpu: g.gpu, schedule: i.schedule, log: () => {} });
+    expect(await webgpuSecondChance(status, { memory: d.memory, gpu: g.gpu, schedule: i.schedule, log: () => {} })).toBeNull();
+    await i.run();
+    expect(await first).toBe("cleared");
+    expect(await webgpuSecondChance(status, { memory: d.memory, gpu: g.gpu, schedule: i.schedule, log: () => {} })).toBeNull();
+    expect(g.calls.adapter).toBe(1);
+  });
+
+  it("by default waits a few seconds after the hand-over, then for an idle moment", async () => {
+    const g = fakeGpu("ok");
+    const d = device({ record: fresh() });
+    const idleCalls: unknown[] = [];
+    vi.stubGlobal("requestIdleCallback", (cb: () => void, o: unknown) => {
+      idleCalls.push(o);
+      queueMicrotask(cb); // the page is idle at once
+      return 1;
+    });
+    const done = webgpuSecondChance(fellBack("remembered"), { memory: d.memory, gpu: g.gpu, log: () => {} });
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(idleCalls).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(idleCalls).toEqual([{ timeout: 10_000 }]);
+    await flush();
+    expect(await done).toBe("cleared");
+    vi.unstubAllGlobals();
+    // A browser without requestIdleCallback just runs it after the delay.
+    const d2 = device({ record: fresh() });
+    const g2 = fakeGpu("ok");
+    const done2 = webgpuSecondChance(fellBack("remembered"), { memory: d2.memory, gpu: g2.gpu, log: () => {} });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(await done2).toBe("cleared");
   });
 });
 

@@ -143,6 +143,8 @@ export class GrassSystem {
   private lastUpdate = 0;
   private readonly lastPos = new THREE.Vector3(1e9, 0, 0);
   private wanted: { key: string; chunk: GrassChunk; ca: number; cb: number; d: number }[] = [];
+  /** A chunk arrived or left since the last scan: scan at the next update (D-load-6). */
+  private rescan = false;
   blades = 0;
 
   /** @param pads landing pads: no blade roots on their stone discs (the per-vertex weight alone
@@ -231,7 +233,8 @@ export class GrassSystem {
   update(cam: THREE.Vector3, chunks: Iterable<GrassChunk>, now: number, budgetMs = 2) {
     if (!this.enabled || !this.blade) return;
     const radius = grassUniforms.radius.value;
-    if (now - this.lastUpdate > 250 || cam.distanceToSquared(this.lastPos) > 4) {
+    if (this.rescan || now - this.lastUpdate > 250 || cam.distanceToSquared(this.lastPos) > 4) {
+      this.rescan = false;
       this.lastUpdate = now;
       this.lastPos.copy(cam);
       const keep = new Set<string>();
@@ -284,6 +287,20 @@ export class GrassSystem {
     let n = 0;
     for (const c of this.cells.values()) n += c.geo.instanceCount;
     this.blades = n;
+  }
+
+  /** The streamed chunks changed (one arrived): the next update scans for its cells at once. */
+  chunksChanged() {
+    this.rescan = true;
+  }
+
+  /**
+   * Cells round the camera still to fill (D-load-6: the arrival waits for 0 before the loader goes).
+   * An unscanned chunk change counts as one: its cells aren't known yet.
+   */
+  backlog(): number {
+    if (!this.enabled || !this.blade) return 0;
+    return this.wanted.length + (this.rescan ? 1 : 0);
   }
 
   /** Forget cells that belong to a chunk that was unloaded. */

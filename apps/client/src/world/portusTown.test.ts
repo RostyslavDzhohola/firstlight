@@ -11,7 +11,8 @@ import { testTownAssets } from "../render/townAssets.testutil.ts";
 import { SHADOW_ONLY_LAYER, sunRigFor } from "../render/atmosphere.ts";
 import { LOOKS } from "../render/looks.ts";
 import { skyDir } from "../render/sunFrame.ts";
-import { SiteTown as PortusTown, TOWN_LOD_DISTANCE } from "./SiteTown.ts";
+import { SiteTown as PortusTown, TOWN_LOAD_DEADLINE_MS, TOWN_LOD_DISTANCE } from "./SiteTown.ts";
+import { TOWN_FETCH_TIMEOUT_MS } from "../render/townAssets.ts";
 
 const terrain = createTerrain("portus");
 const R = terrain.body.radius;
@@ -228,25 +229,64 @@ describe("Portus town view", () => {
     }
   });
 
-  it("shows the fallback by its deadline when the asset never arrives, and ignores a late one (review S1)", async () => {
+  it("shows the fallback by its deadline when the asset never arrives (review S1)", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const never = new PortusTown(terrain, settingsFor("medium"), new Promise(() => {}), 30);
       await never.ready; // settles at the deadline
       expect(never.cells).toHaveLength(0);
       expect(never.group.children).toHaveLength(2);
+      expect(never.swapInLate(), "nothing came: nothing to swap").toBe(false);
       never.dispose();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("waits up to 50 s for the town, and swaps a later one in at the next loading screen, never mid-play (D-load-6)", async () => {
+    expect(TOWN_LOAD_DEADLINE_MS).toBe(50_000);
+    expect(TOWN_LOAD_DEADLINE_MS).toBeGreaterThan(TOWN_FETCH_TIMEOUT_MS); // the download's own idle abort comes first
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
       const assets = await testTownAssets();
       const late = new PortusTown(terrain, settingsFor("medium"), new Promise((r) => setTimeout(() => r(assets), 120)), 30);
       await late.ready;
+      expect(late.group.children).toHaveLength(2); // the fallback, before the probe and the warm-up
+      const fallback = [...late.group.children] as THREE.InstancedMesh[];
+      let released = 0;
+      for (const m of fallback) m.geometry.addEventListener("dispose", () => void released++);
+      await new Promise((r) => setTimeout(r, 200)); // the asset lands after the deadline, mid-play
+      expect(late.cells, "nothing changes in play: no meshes after the warm-up").toHaveLength(0);
       expect(late.group.children).toHaveLength(2);
-      await new Promise((r) => setTimeout(r, 200)); // the asset lands after the deadline
-      expect(late.cells).toHaveLength(0);
-      expect(late.group.children).toHaveLength(2); // still the fallback: no meshes after the warm-up
-      expect(warn).toHaveBeenCalled();
+      expect(late.drawsModels).toBe(false);
+      // The next loading screen on this body (a graphics re-warm): the real town goes in before its warm-up.
+      expect(late.swapInLate()).toBe(true);
+      expect(late.drawsModels).toBe(true);
+      expect(late.cells.length).toBeGreaterThan(0);
+      expect(late.group.children.some((o) => o.name === "town:fallback"), "the stone stand-ins are gone").toBe(false);
+      expect(released, "and released").toBe(fallback.length);
+      const usual = await townFor("medium");
+      expect(late.stats(), "the town as it is when it arrives in time").toEqual(usual.stats());
+      usual.dispose();
+      expect(late.swapInLate(), "once").toBe(false);
       late.dispose();
+      // A town disposed before its asset came (the player left) ignores it.
+      const gone = new PortusTown(terrain, settingsFor("medium"), new Promise((r) => setTimeout(() => r(assets), 60)), 20);
+      await gone.ready;
+      gone.dispose();
+      await new Promise((r) => setTimeout(r, 100));
+      expect(gone.swapInLate()).toBe(false);
+      // A failed late download (null) leaves the fallback.
+      const failed = new PortusTown(terrain, settingsFor("medium"), new Promise((r) => setTimeout(() => r(null), 60)), 20);
+      await failed.ready;
+      await new Promise((r) => setTimeout(r, 100));
+      expect(failed.swapInLate()).toBe(false);
+      expect(failed.group.children).toHaveLength(2);
+      failed.dispose();
     } finally {
       warn.mockRestore();
+      info.mockRestore();
     }
   });
 });

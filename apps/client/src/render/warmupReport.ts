@@ -38,6 +38,12 @@ export interface WarmupReport {
   longTasks: { count: number; max: number; over250: number } | null;
   /** WebGL2's paced first draws: how many, in how many fenced batches, and the GPU's time per batch. */
   firstDraws: { granted: number; batches: number; p50: number; max: number };
+  /**
+   * On WebGL2 because WebGPU didn't start (D-renderer-2): why, how late an abandoned WebGPU start
+   * answered (null: not, or not yet) and the background second chance's state. Absent on WebGPU and
+   * with `?webgl`.
+   */
+  webgpuFallback?: { reason: "timeout" | "error" | "remembered"; lateMs: number | null; secondChance: string | null };
   phases: {
     /**
      * compileAsync for the scene pass's context; `items`: the render objects it prepared; `idle`: ms spent

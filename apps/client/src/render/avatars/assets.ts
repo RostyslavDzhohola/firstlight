@@ -14,6 +14,7 @@ import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import { lookId } from "@firstlight/shared/content/weapons";
 import { config } from "../../config.ts";
 import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
+import { rebindAvatarTextures } from "./material.ts";
 import { makeRideClip } from "./ride.ts";
 
 /** Every look's model file (STARTER_LOOKS ids): first the five starters' original looks, in
@@ -66,6 +67,8 @@ export function setAvatarTextureLowRes(low: boolean) {
 
 let promise: Promise<AvatarAssets | null> | null = null;
 let loaded: AvatarAssets | null = null;
+/** The loaded textures are the 512² set (the session started on Low). */
+let loadedLowRes = false;
 let failed = false;
 
 export function avatarAssets(): AvatarAssets | null {
@@ -94,8 +97,8 @@ function gltfLoader(): GLTFLoader {
   return loader;
 }
 
-function loadTexture(name: string, srgb: boolean): Promise<THREE.Texture> {
-  return new THREE.TextureLoader().loadAsync(`${base()}${name}${lowRes ? "_512" : ""}.webp`).then((t) => {
+function loadTexture(name: string, srgb: boolean, low = lowRes): Promise<THREE.Texture> {
+  return new THREE.TextureLoader().loadAsync(`${base()}${name}${low ? "_512" : ""}.webp`).then((t) => {
     t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
     t.flipY = false; // glTF UV convention
     t.anisotropy = 4;
@@ -132,10 +135,14 @@ function template(g: { scene: THREE.Object3D }): THREE.Object3D {
   return g.scene;
 }
 
+/** A sculpted original with its own normal map (the second looks share the flat one). */
+const ownNormal = (i: number) => i < STARTER_FILES.length;
+
 async function load(onProgress?: (frac: number) => void): Promise<AvatarAssets> {
   const loader = gltfLoader();
   let done = 0;
-  const own = (i: number) => i < STARTER_FILES.length; // a sculpted original with its own normal map
+  const low = lowRes;
+  const own = ownNormal;
   const total = MODEL_FILES.length * 2 + STARTER_FILES.length + 1;
   const tick = <T>(p: Promise<T>) => p.then((v) => { onProgress?.(++done / total); return v; });
 
@@ -144,8 +151,8 @@ async function load(onProgress?: (frac: number) => void): Promise<AvatarAssets> 
     Promise.all(MODEL_FILES.map((f) => tick(loader.loadAsync(`${base()}${f}.glb`)))),
     Promise.all(MODEL_FILES.map(async (f, i) => {
       const [albedo, normal] = await Promise.all([
-        tick(loadTexture(`${f}_albedo`, true)),
-        own(i) ? tick(loadTexture(`${f}_normal`, false)) : Promise.resolve(flatNormalMap()),
+        tick(loadTexture(`${f}_albedo`, true, low)),
+        own(i) ? tick(loadTexture(`${f}_normal`, false, low)) : Promise.resolve(flatNormalMap()),
       ]);
       return { albedo, normal };
     })),
@@ -162,7 +169,120 @@ async function load(onProgress?: (frac: number) => void): Promise<AvatarAssets> 
   const modelClips = pelvis.map((h) => (Math.abs(h - UAL_PELVIS) < 0.02 ? clips : legClips(clips, h)));
   const rideFoot = models.map((m, i) => rideFootOf(m, modelClips[i]!.get("ride")));
   loaded = { models, textures, clips, modelClips, pelvis, rideFoot };
+  loadedLowRes = low;
   return loaded;
+}
+
+// ------------------------------------------------------- D-load-6: the textures follow the tier up
+
+/** The loaded character textures are the 512² set (a session that started on Low). */
+export function avatarTexturesLowRes(): boolean {
+  return !!loaded && loadedLowRes;
+}
+
+/**
+ * How long a tier rise waits for the 1024² set behind its loading screen (ms). Past it the 512² set
+ * stays for the session's play, and whatever lands later is dropped (a later tier change tries again).
+ */
+export const AVATAR_TEXTURE_RAISE_TIMEOUT_MS = 20_000;
+
+type TextureLoad = (name: string, srgb: boolean) => Promise<THREE.Texture>;
+
+/**
+ * Load every look's 1024² textures and swap them into the existing materials and texture sets
+ * (rebindAvatarTextures: no new programs), releasing the 512² ones. False, with the 512² set kept,
+ * when a download fails or the set isn't in within `timeoutMs`. Then every new texture is released:
+ * those already in at once, each later one as it lands (play has resumed: nothing new is rebound or
+ * uploaded). The borrowed flat normal and the live 512² set are never touched. `load` is the
+ * texture loader (tests pass a fake).
+ */
+export async function raiseTextures(
+  assets: Pick<AvatarAssets, "textures">,
+  load: TextureLoad = (name, srgb) => loadTexture(name, srgb, false),
+  timeoutMs = AVATAR_TEXTURE_RAISE_TIMEOUT_MS,
+): Promise<boolean> {
+  /** New textures that have arrived (only those: never the flat normal or the live set). */
+  const acquired: THREE.Texture[] = [];
+  /** Gave up (deadline or a failed file): each texture still to come is released as it lands. */
+  let abandoned = false;
+  const take = (name: string, srgb: boolean) =>
+    Promise.resolve()
+      .then(() => load(name, srgb))
+      .then((t) => {
+        if (abandoned) t.dispose();
+        else acquired.push(t);
+        return t;
+      });
+  const all = Promise.all(assets.textures.map(async (t, i) => {
+    const f = MODEL_FILES[i]!;
+    const [albedo, normal] = await Promise.all([take(`${f}_albedo`, true), ownNormal(i) ? take(`${f}_normal`, false) : Promise.resolve(t.normal)]);
+    return { albedo, normal };
+  }));
+  all.catch(() => undefined); // a failure after giving up has nothing left to do
+  const giveUp = () => {
+    abandoned = true;
+    for (const t of acquired.splice(0)) t.dispose();
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<"late">((resolve) => (timer = setTimeout(() => resolve("late"), timeoutMs)));
+  let next: StarterTextures[];
+  try {
+    const r = await Promise.race([all, deadline]);
+    if (r === "late") {
+      console.warn(`[avatars] the full-size character textures didn't arrive within ${timeoutMs / 1000} s; keeping the 512² ones`);
+      giveUp();
+      return false;
+    }
+    next = r;
+  } catch (e) {
+    console.warn("[avatars] the full-size character textures failed to load; keeping the 512² ones", e);
+    giveUp();
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+  assets.textures.forEach((t, i) => {
+    const old = { albedo: t.albedo, normal: t.normal };
+    rebindAvatarTextures(t, next[i]!);
+    if (old.albedo !== t.albedo) old.albedo.dispose();
+    if (old.normal !== t.normal) old.normal.dispose();
+  });
+  return true;
+}
+
+let raising: Promise<boolean> | null = null;
+
+/**
+ * The loaded 512² textures → 1024² (once it works; joins a reload in progress). False when there was
+ * nothing to do, it failed or it ran out of time (raiseTextures is bounded, so `raising` always clears).
+ */
+export function raiseAvatarTextures(): Promise<boolean> {
+  if (!loaded || !loadedLowRes) return Promise.resolve(false);
+  raising ??= raiseTextures(loaded)
+    .then((ok) => {
+      if (ok) {
+        loadedLowRes = false;
+        lowRes = false;
+        console.info("[avatars] the tier rose above Low: character textures reloaded at 1024²");
+      }
+      return ok;
+    })
+    .finally(() => {
+      raising = null;
+    });
+  return raising;
+}
+
+/**
+ * Character textures follow the tier up (D-load-6): with the 512² set loaded and a tier above Low,
+ * reload them at 1024². Callers run it behind a loading screen, before its warm-up uploads them.
+ */
+export async function avatarTexturesFollowTier(
+  tier: string,
+  env: { lowRes: boolean; raise: () => Promise<boolean> } = { lowRes: avatarTexturesLowRes(), raise: raiseAvatarTextures },
+): Promise<boolean> {
+  if (tier === "low" || !env.lowRes) return false;
+  return env.raise();
 }
 
 /** The ride pose's stirrup point of a model (see AvatarAssets.rideFoot); its rest sole if no clip. */

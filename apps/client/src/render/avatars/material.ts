@@ -76,35 +76,57 @@ function slot(i: number) {
 }
 const [cPrim, cSec, cAcc] = [slot(0), slot(1), slot(2)];
 
-const cache = new Map<string, THREE.MeshToonNodeMaterial>();
+type TextureNode = ReturnType<typeof texture>;
+
+/**
+ * Per look's texture set: its material and two texture nodes (rebindAvatarTextures). Keyed by the
+ * set itself, not its albedo's uuid, so a rebind to the 1024² textures keeps the same material.
+ */
+const cache = new WeakMap<StarterTextures, { material: THREE.MeshToonNodeMaterial; albedo: TextureNode; normal: TextureNode }>();
+let looks = 0;
 
 /** The toon material of the look with textures `tex`: every palette (setAvatarPalette on each mesh). */
 export function avatarMaterial(tex: StarterTextures): THREE.MeshToonNodeMaterial {
-  const key = tex.albedo.uuid;
-  let m = cache.get(key);
-  if (m) return m;
+  const hit = cache.get(tex);
+  if (hit) return hit.material;
   const role = attribute("color", "vec4");
   const albedo = texture(tex.albedo, uv());
   const base = albedo.rgb;
   const painted = float(1).sub(albedo.a); // painted accent mask (stored inverted: see chars3d/build.py)
   const tint = mix(mix(mix(vec3(1, 1, 1), cPrim, role.x), cSec, role.y), cAcc, role.z);
   const fres = float(1).sub(saturate(dot(normalView, positionViewDirection))).pow(3);
-  m = new THREE.MeshToonNodeMaterial();
+  const m = new THREE.MeshToonNodeMaterial();
   m.gradientMap = toonRamp();
   m.colorNode = mix(base.mul(tint), cAcc, painted);
   // Blender bakes OpenGL-style normals against Blender UVs; glTF UVs flip V, hence Y = -1.
-  m.normalNode = normalMap(texture(tex.normal, uv()), vec2(1, -1));
+  const normal = texture(tex.normal, uv());
+  m.normalNode = normalMap(normal, vec2(1, -1));
   // NodeMaterial.setupLighting() honours emissiveNode on every node material; the toon typings omit it.
   (m as THREE.MeshToonNodeMaterial & { emissiveNode: THREE.Node | null }).emissiveNode =
     cAcc.mul(max(role.z, painted)).mul(2.2).add(avatarRim.color.mul(fres).mul(avatarRim.strength));
   m.side = THREE.DoubleSide; // cloth is single-sided: robe hems, hoods and sleeves show their insides
-  m.name = `avatar-look-${cache.size}`;
+  m.name = `avatar-look-${looks++}`;
   // Quest NPCs (keepers, guides) dissolve between the camera and the player; players never (D-view-5).
   applyOccluderFadeGated(m);
   // Shadows need no colour: one shadow build for every look and palette (#39, D-load-3).
   leanShadow(m);
-  cache.set(key, m);
+  cache.set(tex, { material: m, albedo, normal });
   return m;
+}
+
+/**
+ * Point a look's material at other textures of the same kind (the 1024² set after a session that
+ * started on Low moves up a tier, D-load-6) and update `tex` to them. Textures are bindings, not
+ * code: the material keeps its program, so nothing compiles again.
+ */
+export function rebindAvatarTextures(tex: StarterTextures, next: StarterTextures) {
+  const e = cache.get(tex);
+  if (e) {
+    e.albedo.value = next.albedo;
+    e.normal.value = next.normal;
+  }
+  tex.albedo = next.albedo;
+  tex.normal = next.normal;
 }
 
 /** Cheap far-LOD / fallback capsule material in the palette's primary colour (shared). */
