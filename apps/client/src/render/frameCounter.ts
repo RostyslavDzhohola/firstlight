@@ -122,9 +122,9 @@ function overlay(out: THREE.Node, value: Counter["value"]): THREE.Node {
   const h = screenSize.y;
   const cell = floor(h.div(96)).max(3);
   const px = screenCoordinate.xy;
-  // Cell column from the strip's left edge, cell row from its bottom edge (one cell in from each).
+  // Cell column from the strip's left edge (one cell in), cell row up from the bottom edge.
   const cx = floor(px.x.sub(cell).div(cell));
-  const cy = floor(h.sub(cell).sub(px.y).div(cell));
+  const cy = floor(h.sub(px.y).div(cell));
   const inPlate = cx.greaterThanEqual(0).and(cx.lessThan(STRIP_CELLS)).and(cy.greaterThanEqual(0)).and(cy.lessThan(STRIP_ROWS));
   const inRow = cy.equal(1).and(cx.greaterThanEqual(1)).and(cx.lessThanEqual(FRAME_BITS + 1));
   const bit = mod(floor(value.div(exp2(float(FRAME_BITS + 1).sub(cx)))), 2); // cx 2 → the top bit
@@ -150,7 +150,7 @@ class FrameCountDom {
     r.style.cssText = [
       "position:fixed",
       `left:calc(${STRIP_CELLS + 2} * ${cellCss})`,
-      `bottom:${cellCss}`,
+      "bottom:0",
       "z-index:2147483647",
       "display:flex",
       "align-items:center",

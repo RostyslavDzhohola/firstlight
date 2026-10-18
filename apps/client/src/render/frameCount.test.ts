@@ -30,12 +30,12 @@ describe("?framecount counter (#23)", () => {
     }
   });
 
-  it("sits in the bottom-left corner, cells about 1/96 of the height, every cell inside the buffer", () => {
+  it("sits on the bottom edge at the left, cells about 1/96 of the height, every cell inside the buffer", () => {
     for (const h of [180, 720, 1080, 2078]) {
       const L = stripLayout(h);
       expect(L.cell).toBe(Math.max(3, Math.floor(h / 96)));
       expect(L.left).toBe(L.cell);
-      expect(L.top + L.height).toBe(h - L.cell);
+      expect(L.top + L.height).toBe(h);
       expect(L.width).toBe(STRIP_CELLS * L.cell);
       const [mx, my] = cellCentre(h, "marker");
       const [lx] = cellCentre(h, FRAME_BITS - 1);

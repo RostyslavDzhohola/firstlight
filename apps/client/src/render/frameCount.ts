@@ -37,11 +37,12 @@ export function fromBits(bits: readonly boolean[]): number {
 
 /**
  * Where the WebGL strip sits in a drawing buffer `h` px high (origin top-left, y down): the cell size
- * scales with the height (about 1/96 of it, at least 3 px), one cell in from the left and the bottom.
+ * scales with the height (about 1/96 of it, at least 3 px), one cell in from the left, on the bottom
+ * edge (below the HUD's player card).
  */
 export function stripLayout(h: number): { cell: number; left: number; top: number; width: number; height: number } {
   const cell = Math.max(3, Math.floor(h / 96));
-  return { cell, left: cell, top: h - cell - STRIP_ROWS * cell, width: STRIP_CELLS * cell, height: STRIP_ROWS * cell };
+  return { cell, left: cell, top: h - STRIP_ROWS * cell, width: STRIP_CELLS * cell, height: STRIP_ROWS * cell };
 }
 
 /** Centre (buffer px) of bit `i` (0 = most significant) or of the marker, for reading a frame back. */
