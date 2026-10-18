@@ -1069,3 +1069,38 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   runs of long frames with that in mind (a control page, or a rerun). Why: cutting bloom mips or
   shadow updates would cost visible quality for stalls the evidence doesn't tie to the game.
 - **D-home-7 (2026-10-16):** DataFast is live with the standard script exactly as DataFast issued it (site id `dfid_NA56rn0p8nPJYi59xnBYW`, `script.js`, so the home page's note says DataFast sets cookies). An inline guard placed before it sets DataFast's own opt-out flag (`localStorage.datafast_ignore`) for automated browsers (`navigator.webdriver`) and test URLs (`?e2e`, `?bench`, `?offline`), and the Playwright fixtures set the same flag, so journeys and smoke runs never count as visits. Why: Grok Bot set up the site for the owner, and test traffic shouldn't pollute the analytics.
+- **D-view-5 (2026-10-18):** shop stalls keep the camera out, and what is still in the way fades (#22,
+  with D-view-1). Camera-only volumes (`world/stallCamera.ts`, oriented boxes the structures'
+  `cameraRay` stops at like a wall; movement, shots and the server never see them, so nothing shared
+  changes): Juno's whole stall, from the awning's back edge to the counter's front (its open middle let
+  the camera through to look back across the awning), plus her awning, counter top and crate for a
+  player standing behind the counter; an outpost stall's awning overhang, valance and coin sign
+  (its shared solid already covers the rest). Every volume is padded 0.25 m, so a lens stopped along a
+  grazing ray keeps its 0.3 m near plane off the cloth (5 cm at the stall body's sides let a camera
+  looking down from behind skim over the awning: 20 % of the view in the e2e). The camera is lifted
+  above the ground before the structure check rather than after it (lifted afterwards, a low look put
+  the lens into Juno's counter or a planter). Juno's stall and every quest NPC (keepers, guides) take the occluder fade;
+  the avatars share their materials with the players, so those take a gated copy (one per-object
+  uniform: objects marked `userData.occluderFade` dissolve, players never; the same shaders to warm).
+  World labels fade by their depth in front of the camera (`render/labelFade.ts`, in the sprite's
+  shader, so for whichever camera draws): gone within 1.5 m, whole beyond 2.5 m; depth rather than
+  distance, so a 4.2 m label off to one side counts like one ahead (the round-2 reviews). An outpost
+  keeper no longer gets Juno's placeholder stall inside the outpost's own (D-b2-3): its red awning
+  poked through the striped one. e2e (`stalls.spec.ts`, WebGL2, 120 poses round and under each stall
+  plus a walk): turned away from Juno's stall the stall covered up to 40 % of the view, 0.7 % after;
+  no frame with the lens inside a stall volume on any body (17 on Arcadia before); no label drawn
+  nearer than 1.6 m (0.01–0.02 m before); E opens the shop from the front and both front corners on
+  all four bodies. Why: the owner's recording (40.1–40.3 s) had the camera inside the Portus Exchange
+  stall: the awning across the view, the label over the top, the keeper's hat over the bottom.
+- **D-e2e-2 (2026-10-18):** `?framecount` (#23) shows two frame counters on the bottom edge at the
+  left, for recordings: one in the canvas (a red marker and 20 bit cells, most significant first, each
+  1/96 of the drawing buffer's height) and the same cells plus the number in a DOM element at z-index
+  2147483647 beside it, above the pause menu, the perf overlay and the loader. `RenderCtx.render` takes
+  the frame's number just before drawing (which writes the DOM counter) and, right after the post
+  pipeline, puts it into the canvas outside three's node system: on WebGL2 a dozen scissored clears
+  into the default framebuffer (GL state put back), on WebGPU one scissored draw into the canvas
+  texture. Drawn instead as the post output's last step from a uniform, every other frame's pixels
+  showed the number from two frames before (readPixels on WebGL2, screenshots on WebGPU), whether the
+  uniform was written in its node update or before the render: unexplained, and worth a look for any
+  post uniform that changes every frame. Without the flag nothing is created. Why: a re-recording can
+  then tell, frame by frame, a fresh frame (both counters moved on) from a stale or dropped layer (#17).
