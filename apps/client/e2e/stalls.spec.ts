@@ -163,9 +163,14 @@ for (const body of ["portus", "arcadia", "hollowmere", "meridian"] as const) {
       poses: rows.length,
       insidePoses: rows.filter((r) => r.camera?.inside).map((r) => `${r.spot} ${r.look}`),
       maxLabel: worst("label"),
-      maxStallTurnedAway: worst("stall", (r) => !r.look.startsWith("at")),
+      // Turned away from the stall (the camera behind the player, toward the stall): it was 40 % of the
+      // view at Portus with the camera inside or beyond it. Beside it (left, right) a stall at your
+      // shoulder fills that side of the view like a wall does, and facing it, it's what you look at.
+      maxStallTurnedAway: worst("stall", (r) => r.look.startsWith("away")),
+      maxStallBeside: worst("stall", (r) => r.look.startsWith("left") || r.look.startsWith("right")),
       maxStallFacing: worst("stall", (r) => r.look.startsWith("at")),
-      maxGeoTurnedAway: worst("geo", (r) => !r.look.startsWith("at")),
+      /** The stall's volume by rays (an outpost stall is in the town mesh): includes what other things hide. */
+      maxGeoTurnedAway: worst("geo", (r) => r.look.startsWith("away")),
       maxKeeper: worst("keeper"),
       maxTotal: worst("total"),
       maxNoise: rows.reduce((m, r) => Math.max(m, r.noise), 0),
