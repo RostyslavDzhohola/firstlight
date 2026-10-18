@@ -1,16 +1,15 @@
-// Test helper (imported only by *.test.ts): a WebGPURenderer with three's own managers, render
-// objects and node-builder cache but a backend that never touches a GPU, and the two passes the
-// character tests draw through it: the shadow pass (three's shadow-material override) and the main
-// pass (three's own Renderer._renderObjectDirect, its GPU calls stubbed, recording what each draw's
-// per-object uniform buffer holds when three updates it).
+// Test helper (imported only by *.test.ts): a WebGPURenderer whose real WebGL2 or WebGPU backend runs
+// on a recording stand-in for the GPU (fakeGpu.testutil.ts), so three's own managers and backend code
+// (node builds, bindings, uniform uploads, bind groups, pipelines, draws) run unchanged in node. Frames
+// are real renderer.render() calls; a spy on the backend's draw only tags each recorded draw with the
+// render object it draws. Also the shadow pass as three's shadow node draws a caster (the
+// shadow-material override), stopped where the backend would draw, for the lean-shadow tests.
 
 import { vi } from "vitest";
 import * as THREE from "three/webgpu";
 import { vec4 } from "three/tsl";
+import { fakeWebGL2, fakeWebGPU, WEBGPU_GLOBALS, type FakeGpu, type GpuBuffer, type GpuDraw } from "./fakeGpu.testutil.ts";
 import { installLeanShadows, type ShadowNodesRenderer } from "./leanShadow.ts";
-
-const fakeCanvas = () =>
-  ({ style: {}, width: 800, height: 600, addEventListener() {}, removeEventListener() {}, getContext() { return null; } }) as unknown as HTMLCanvasElement;
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export type Internals = THREE.WebGPURenderer & ShadowNodesRenderer & {
@@ -18,31 +17,48 @@ export type Internals = THREE.WebGPURenderer & ShadowNodesRenderer & {
   _nodes: { getForRender(ro: unknown): any; updateForRender(ro: unknown): void };
   _renderContexts: { get(): unknown };
   _handleObjectFunction: (...a: any[]) => void;
-  _currentRenderContext: unknown;
-  _geometries: { updateForRender(ro: unknown): void };
-  _pipelines: { updateForRender(ro: unknown): void; isReady(ro: unknown): boolean };
-  _bindings: { updateForRender(ro: unknown): void };
   lighting: { getNode(scene: THREE.Scene, camera: THREE.Camera): unknown };
+  /** The recording GPU under the backend. */
+  gpu: FakeGpu;
 };
 
 /**
- * A WebGPURenderer with three's managers but a backend that never touches a GPU. Call
- * `vi.unstubAllGlobals()` after each test (three's animation loop needs a stubbed `self`).
+ * A WebGPURenderer with three's real `backend` ("webgl2": WebGLBackend, "webgpu": WebGPUBackend) on a
+ * recording fake GPU, initialised as three does it. Call `vi.unstubAllGlobals()` after each test
+ * (three's animation loop needs a stubbed `self`; WebGPU its usage flags and canvas format).
  */
 export async function headless(backend: "webgpu" | "webgl2", lean: boolean): Promise<Internals> {
-  const r = new THREE.WebGPURenderer({ canvas: fakeCanvas(), forceWebGL: backend === "webgl2" }) as Internals;
-  r.shadowMap.enabled = true;
-  const be = r.backend as any;
-  be.init = async (renderer: unknown) => void (be.renderer = renderer);
-  if (backend === "webgpu") {
-    be.device = { features: new Set<string>(["float32-filterable"]), limits: { maxUniformBufferBindingSize: 65536 } };
-  } else {
-    be.extensions = { has: () => false, get: () => null };
-    be.capabilities = { getUniformBufferLimit: () => 16384, getMaxAnisotropy: () => 8 };
-  }
   vi.stubGlobal("self", { requestAnimationFrame: () => 0, cancelAnimationFrame() {} }); // three's animation loop
   if (typeof ImageBitmap === "undefined") vi.stubGlobal("ImageBitmap", class {}); // three's texture node update asks
+  vi.stubGlobal("requestAnimationFrame", (cb: (t: number) => void) => setTimeout(() => cb(performance.now()), 0)); // compileAsync yields
+  const canvas = (context: unknown) =>
+    ({ style: {}, width: 800, height: 600, addEventListener() {}, removeEventListener() {}, getContext: () => context }) as unknown as HTMLCanvasElement;
+  let r: Internals;
+  let gpu: FakeGpu;
+  if (backend === "webgpu") {
+    for (const [k, v] of Object.entries(WEBGPU_GLOBALS)) vi.stubGlobal(k, v);
+    const fake = fakeWebGPU();
+    r = new THREE.WebGPURenderer({ canvas: canvas(fake.context), device: fake.device } as never) as Internals;
+    gpu = fake.gpu;
+  } else {
+    const fake = fakeWebGL2();
+    r = new THREE.WebGPURenderer({ canvas: canvas(fake.gl), forceWebGL: true }) as Internals;
+    gpu = fake.gpu;
+  }
+  r.gpu = gpu;
+  r.shadowMap.enabled = true;
   await r.init();
+  // Observe, don't replace: tag the GPU's draws with the render object three's backend is drawing.
+  const be = r.backend as unknown as { draw(ro: unknown, info: unknown): unknown };
+  const draw = be.draw;
+  be.draw = function (this: unknown, ro: unknown, info: unknown) {
+    gpu.tag = ro;
+    try {
+      return draw.call(this, ro, info);
+    } finally {
+      gpu.tag = null;
+    }
+  };
   if (lean) installLeanShadows(r);
   return r;
 }
@@ -124,61 +140,70 @@ export function shadowPass(r: Internals, meshes: THREE.Object3D[]): Drawn[] {
   return out;
 }
 
-/** A per-object uniform buffer of a draw (three's NodeUniformsGroup of a group that isn't shared). */
-interface ObjectBuffer {
-  buffer: Float32Array;
-  uniforms: { isColorUniform?: boolean; offset: number }[];
-  update(): boolean;
-}
-
-export interface MainDrawn extends Drawn {
-  /** The draw's per-object uniform buffers. */
-  buffers: ObjectBuffer[];
-  /** The colours (linear r, g, b) in them as three wrote them for this draw. */
-  colours: [number, number, number][];
-}
-
-/** The colour uniforms of per-object buffers, as they hold now. */
-export function coloursIn(buffers: readonly ObjectBuffer[]): [number, number, number][] {
-  const out: [number, number, number][] = [];
-  for (const b of buffers) {
-    for (const u of b.uniforms) if (u.isColorUniform) out.push([b.buffer[u.offset]!, b.buffer[u.offset + 1]!, b.buffer[u.offset + 2]!]);
+/**
+ * Render `n` frames of `scene` from `camera` (the same scene and camera throughout: three keeps its
+ * render objects across them), after compiling it as the warm-up does. Returns the GPU's draws of
+ * those frames.
+ */
+export async function frames(r: Internals, scene: THREE.Scene, camera: THREE.Camera, n: number): Promise<GpuDraw[]> {
+  await r.compileAsync(scene, camera);
+  const from = r.gpu.draws.length;
+  for (let i = 0; i < n; i++) {
+    r.gpu.frame++;
+    r.render(scene, camera);
   }
-  return out;
+  return r.gpu.draws.slice(from);
+}
+
+/** What one draw of an object read from its own per-object uniform buffer. */
+export interface ObjectDraw {
+  object: THREE.Object3D;
+  /** three's render object for it. */
+  ro: any;
+  frame: number;
+  /** The GPU buffer three made for the render object's per-object uniform group. */
+  buffer: GpuBuffer;
+  /** WebGPU: the bind group three made for that group (null on WebGL2). */
+  group: object | null;
+  /** The draw read that buffer (WebGL2: bound to a uniform-block index; WebGPU: through that bind group). */
+  selected: boolean;
+  /** The colour uniforms in that buffer (linear r, g, b) as the draw read them. */
+  colours: [number, number, number][];
+  /** The same with each uniform's name in the shaders. */
+  named: { name: string; rgb: [number, number, number] }[];
 }
 
 /**
- * Draw `meshes` in `scene`'s main pass through three's own Renderer._renderObjectDirect: its node
- * updates run as in a frame; geometry upload, pipelines and the draw itself are stubbed, and the
- * bindings update writes each per-object uniform buffer (as three's would) and records what it holds.
+ * The draws of `objects` among `draws`, each with its per-object uniform buffer (three's non-shared
+ * "object" NodeUniformsGroup of the render object, and the backend's GPU buffer and bind group for it),
+ * whether the draw used it, and the colours in it as the GPU read them.
  */
-export function mainPass(r: Internals, scene: THREE.Scene, meshes: THREE.Object3D[]): MainDrawn[] {
-  const camera = new THREE.PerspectiveCamera();
-  const lightsNode = r.lighting.getNode(scene, camera);
-  const out: MainDrawn[] = [];
-  const own = { geo: r._geometries.updateForRender, pipe: r._pipelines.updateForRender, ready: r._pipelines.isReady, bind: r._bindings.updateForRender, ctx: r._currentRenderContext };
-  r._currentRenderContext = r._renderContexts.get();
-  r._geometries.updateForRender = () => {};
-  r._pipelines.updateForRender = () => {};
-  r._pipelines.isReady = () => false; // nothing reaches the backend's draw
-  r._bindings.updateForRender = (ro: any) => {
-    const buffers: ObjectBuffer[] = [];
-    for (const group of ro.getBindings()) {
-      for (const b of group.bindings) if (b.isNodeUniformsGroup && b.groupNode?.shared !== true) buffers.push(b);
+export function objectDraws(r: Internals, draws: readonly GpuDraw[], objects: readonly THREE.Object3D[]): ObjectDraw[] {
+  const be = r.backend as unknown as { get(o: object): any; isWebGPUBackend?: boolean };
+  const out: ObjectDraw[] = [];
+  for (const d of draws) {
+    const ro = d.tag as any;
+    if (!ro || !objects.includes(ro.object)) continue;
+    let binding: any = null;
+    let bindGroup: any = null;
+    for (const g of ro.getBindings()) {
+      for (const b of g.bindings) {
+        if (b.isNodeUniformsGroup && b.groupNode?.shared !== true && b.groupNode?.name === "object") [binding, bindGroup] = [b, g];
+      }
     }
-    for (const b of buffers) b.update();
-    out.push({ object: ro.object, ro, state: r._nodes.getForRender(ro), buffers, colours: coloursIn(buffers) });
-  };
-  try {
-    for (const m of meshes) {
-      const mesh = m as THREE.Mesh;
-      r.renderObject(mesh, scene, camera, mesh.geometry, mesh.material as THREE.Material, null, lightsNode as never, null, null);
+    if (!binding) throw new Error("no per-object uniform group");
+    const buffer: GpuBuffer = be.isWebGPUBackend ? be.get(binding).buffer : be.get(binding).bufferGPU;
+    const group: object | null = be.isWebGPUBackend ? be.get(bindGroup).group : null;
+    const selected = group
+      ? [...d.bound.values()].includes(group) && r.gpu.entriesOf(group).some((e) => e.resource?.buffer === buffer)
+      : [...d.bound.values()].includes(buffer);
+    const bytes = d.bytes.get(buffer);
+    const floats = bytes ? new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength >> 2) : new Float32Array(0);
+    const named: ObjectDraw["named"] = [];
+    for (const u of binding.uniforms as { isColorUniform?: boolean; offset: number; name: string }[]) {
+      if (u.isColorUniform) named.push({ name: u.name, rgb: [floats[u.offset] ?? NaN, floats[u.offset + 1] ?? NaN, floats[u.offset + 2] ?? NaN] });
     }
-  } finally {
-    Object.assign(r._geometries, { updateForRender: own.geo });
-    Object.assign(r._pipelines, { updateForRender: own.pipe, isReady: own.ready });
-    Object.assign(r._bindings, { updateForRender: own.bind });
-    r._currentRenderContext = own.ctx;
+    out.push({ object: ro.object, ro, frame: d.frame, buffer, group, selected, colours: named.map((n) => n.rgb), named });
   }
   return out;
 }
