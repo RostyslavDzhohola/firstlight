@@ -1301,9 +1301,10 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   (3) A session that started on Low (512² character textures) reloads every look's 1024² textures
   when the tier rises above Low, behind that loading screen (graphics change, re-probe, an arrival
   after a probe), rebinding them in the same materials, so nothing compiles again. The wait is
-  bounded at 20 s (`AVATAR_TEXTURE_RAISE_TIMEOUT_MS`): a failed or late download keeps the 512² set,
-  a set that lands after the deadline is released, never rebound or uploaded once play resumes,
-  and a later tier change tries again. Measured (M1 headless, other lanes' load 18–20, warm Metal cache, `E2E_WORKERS=1`,
+  bounded at 20 s (`AVATAR_TEXTURE_RAISE_TIMEOUT_MS`): a failed or late download keeps the 512² set;
+  every new texture is then released, those already in at once and each later one as it lands
+  (a later failure has nothing to release), never rebound or uploaded once play resumes; the
+  borrowed flat normal map and the live 512² set are never touched; a later tier change tries again. Measured (M1 headless, other lanes' load 18–20, warm Metal cache, `E2E_WORKERS=1`,
   main f299354 vs this lane; J1.2 = Play → in the world in Portus, J1.3 = portal to Arcadia):
   J1.2 WebGL2 6.4 s → 7.8/8.2 s, WebGPU 7.0/6.9 s → 7.7/8.5 s (one run each way off: a probe that
   picked Low and warmed 11 s, and 7 s spent connecting); J1.3 WebGL2 4.6 s → 6.5/7.3/7.7 s, WebGPU

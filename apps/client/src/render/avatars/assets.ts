@@ -191,20 +191,38 @@ type TextureLoad = (name: string, srgb: boolean) => Promise<THREE.Texture>;
 /**
  * Load every look's 1024² textures and swap them into the existing materials and texture sets
  * (rebindAvatarTextures: no new programs), releasing the 512² ones. False, with the 512² set kept,
- * when a download fails or the set isn't in within `timeoutMs`; a set that lands after that is
- * released, never rebound (play has resumed: nothing new may upload). `load` is the texture loader
- * (tests pass a fake).
+ * when a download fails or the set isn't in within `timeoutMs`. Then every new texture is released:
+ * those already in at once, each later one as it lands (play has resumed: nothing new is rebound or
+ * uploaded). The borrowed flat normal and the live 512² set are never touched. `load` is the
+ * texture loader (tests pass a fake).
  */
 export async function raiseTextures(
   assets: Pick<AvatarAssets, "textures">,
   load: TextureLoad = (name, srgb) => loadTexture(name, srgb, false),
   timeoutMs = AVATAR_TEXTURE_RAISE_TIMEOUT_MS,
 ): Promise<boolean> {
+  /** New textures that have arrived (only those: never the flat normal or the live set). */
+  const acquired: THREE.Texture[] = [];
+  /** Gave up (deadline or a failed file): each texture still to come is released as it lands. */
+  let abandoned = false;
+  const take = (name: string, srgb: boolean) =>
+    Promise.resolve()
+      .then(() => load(name, srgb))
+      .then((t) => {
+        if (abandoned) t.dispose();
+        else acquired.push(t);
+        return t;
+      });
   const all = Promise.all(assets.textures.map(async (t, i) => {
     const f = MODEL_FILES[i]!;
-    const [albedo, normal] = await Promise.all([load(`${f}_albedo`, true), ownNormal(i) ? load(`${f}_normal`, false) : Promise.resolve(t.normal)]);
+    const [albedo, normal] = await Promise.all([take(`${f}_albedo`, true), ownNormal(i) ? take(`${f}_normal`, false) : Promise.resolve(t.normal)]);
     return { albedo, normal };
   }));
+  all.catch(() => undefined); // a failure after giving up has nothing left to do
+  const giveUp = () => {
+    abandoned = true;
+    for (const t of acquired.splice(0)) t.dispose();
+  };
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<"late">((resolve) => (timer = setTimeout(() => resolve("late"), timeoutMs)));
   let next: StarterTextures[];
@@ -212,16 +230,13 @@ export async function raiseTextures(
     const r = await Promise.race([all, deadline]);
     if (r === "late") {
       console.warn(`[avatars] the full-size character textures didn't arrive within ${timeoutMs / 1000} s; keeping the 512² ones`);
-      void all.then((late) => late.forEach((n, i) => {
-        const t = assets.textures[i]!;
-        if (n.albedo !== t.albedo) n.albedo.dispose();
-        if (n.normal !== t.normal) n.normal.dispose();
-      }), () => undefined);
+      giveUp();
       return false;
     }
     next = r;
   } catch (e) {
     console.warn("[avatars] the full-size character textures failed to load; keeping the 512² ones", e);
+    giveUp();
     return false;
   } finally {
     clearTimeout(timer);
