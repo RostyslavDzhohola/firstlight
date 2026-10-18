@@ -14,6 +14,8 @@ import { startRenderer } from "./rendererStart.ts";
 import { GpuTimer, ResolutionLadder } from "./timing.ts";
 import { compileForPass, passCallDepth, saveRenderState, type CompileProgress, type GuardedRenderer, type PassCompileRenderer } from "./compilePass.ts";
 import { frameCounterDraw, frameCounterTick } from "./frameCounter.ts";
+import { installLeanShadows, type ShadowNodesRenderer } from "./leanShadow.ts";
+import { traceGlCalls } from "./glTrace.ts";
 
 export { TIERS, FEATURES, type Tier, type Feature, type ResolvedSettings };
 
@@ -116,6 +118,13 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
     isWebGPU: (r) => !!(r.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend,
   });
   const webgpu = !!(renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend;
+  // Characters and horses cast shadows through one shadow build per rig, not one per look, palette
+  // and coat; for the renderer's whole life, before its first shadow render (#39, D-load-3).
+  // `?fullshadow` keeps three's own shadow nodes for every material (A/B runs).
+  if (!flags.has("fullshadow")) installLeanShadows(renderer as unknown as ShadowNodesRenderer);
+  // `?gltrace` (#39 diagnostics): log the WebGL calls that block on the GPU process.
+  const traceGl = (renderer.backend as { gl?: object }).gl;
+  if (flags.has("gltrace") && !webgpu && traceGl) traceGlCalls(traceGl);
   const tm = flags.get("tonemap");
   renderer.toneMapping = tm === "agx" ? THREE.AgXToneMapping : tm === "aces" ? THREE.ACESFilmicToneMapping : THREE.NeutralToneMapping;
   renderer.toneMappingExposure = 1.0;

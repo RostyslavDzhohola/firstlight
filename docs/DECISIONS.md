@@ -1264,3 +1264,62 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   Pricing by size costs time on the first-visit path: J1.2 on WebGL2 (Medium after the probe) went
   from 31 batches and 7.5 s of warm-up with count-based batches to 50 batches and 9.8 s (Play → world
   13.4 s → 16.9 s, still under 30 s); `BATCH_TARGET_MS` is the one knob between the two.
+- **D-load-3 (2026-10-18):** characters and horses keep their shaped, animated shadow-map shadows (no
+  blob shadows); they share one shadow build per rig, and WebGL2 first draws are priced by the shader
+  stages the GPU hasn't drawn yet (#39). A council (Opus 5.5, Sonnet 5.5, GPT-6-Astra, GPT-6.1-Sol,
+  Fable 5.1; three rounds, agreed 5/5) found that #39's premise, "~9 skinned shadow programs at
+  ~270 ms each", came from the slowest-first top-20 batch log: there were 96 skinned pipelines (48
+  shadow, 48 main), because three's shadow pass builds each caster's colour node (the avatars'
+  albedo texture and palette constants, the horses' coats) into the shadow fragment for an alpha that
+  was a constant 1, and each skinned build names its bone buffer by node id, so no two shared a GPU
+  program. Three changes, each with a kill flag for A/B runs:
+  (0) `?warmdiag` logs every first-draw batch in send order with stage hashes and a census, and slow
+  frames in every phase (the compile included, with links pending); `?warmsolo` sends one pipeline per
+  batch. (A) The pacer (`render/parallelCompile.ts`) prices a first draw as the characters of its
+  stages not drawn before plus 6000 per pipeline (no skinned-shadow floor), learns only from fenced
+  batches less the fence's 33 ms, lets the rate rise at once and fall slowly, grows a batch at most
+  1.5× the last completed batch's units (the 24 000 start only before the first) and never past
+  40 000 (a single bigger program goes alone); `?oldpacer` is D-load-2's. (B) `render/leanShadow.ts` wraps `Renderer._getShadowNodes` for the
+  renderer's life: materials registered by `avatarMaterial()` and `horseMaterial()` take three's
+  default opaque shadow path (same depth); one with a map, alpha test or map, transparency, a
+  depth/position/cast-shadow node or a mask other than the camera fade's keep-all goes through three's
+  own path, as weapons and cosmetics always do; `?fullshadow` turns it off. `?linkcap=N` (links in
+  flight) stays as an A/B flag only: it didn't help.
+  Measured (`e2e/bench-warmup.spec.ts`, M1 headless, High, WebGL2 cold = Chrome for Testing's Metal
+  caches deleted, a fresh browser per run, variants alternated; the owner's apps kept the 1-minute
+  load at 14–217 before the runs, logged per run). Census R0 (`?oldpacer&fullshadow`) → A+B: skinned
+  shadow pipelines 48 → 2, skinned vertex stages 96 → 50, first-drawn pipelines 164 → 118, node
+  builds 328 → 282, `afterWarmup` 0 in every run. Alone (`?warmsolo` and R0's lone batches) a skinned
+  shadow pipeline takes 42–166 ms (once 562 ms, right behind a 443 ms batch), a lean one 62–68 ms: no
+  ~270 ms platform cost, so neither blob shadows nor a bone texture is needed. Over 400 lone batches
+  fit 61–85 ms + 5.8–7.3 ms per 1000 new-stage characters (r² 0.50–0.70; whole-program size
+  0.21–0.47). Cold warm-up: R0 36.7/37.9/34.9/29.2 s (load 104/200/14/99) → A+B 33.2/32.7/28.5/
+  33.2/24.8/21.5 s (load 217/93/69/53/52/28), drain 14–23 s → 9–18 s; a traced pair at load ~22:
+  23.5 → 19.0 s, both with no frame over 250 ms (worst 217/233 ms). Warm WebGL2 4.0/3.9 s (worst
+  233/300 ms) → 2.7/2.7 s (worst 167/150 ms; a third A+B warm run, right after a cold one, took
+  12.9 s); warm WebGPU 3.5 → 3.5 s (worst 250 → 267 ms, builds 330 → 284). Shadow screenshots (`?avatars` every look
+  × palette in two poses, `&fade` with the camera fade dissolving the front rows, `?horses` with
+  riders at canter, jump and close up, WebGL2 and WebGPU, one pose on a paused clock) match: two of six
+  WebGL2 pairs are identical, the rest differ in 0.06–0.74 % of pixels, as much as two runs of the same
+  variant do (0.13–0.74 %), in the sky as much as in the shadows (film grain, horses' random idle
+  phase). J1.6 on a cold cache passed 2 of 3 (load 8–19; warm-up 17.8–18.8 s; the failing run had one
+  350 ms frame in the drain, its worst otherwise 183 ms); J1.2 WebGL2 Play → world 12.4 s, its
+  warm-up 5.9 s, worst frame 217 ms.
+  After review (Codex Sol): the pacer first lifted its 40 000 ceiling 1.5× after each quick full batch
+  and counted growth from at least the start budget; quick cached or shared stages say nothing about
+  the next new ones, so the ceiling is now fixed and growth counts from the last batch's units. The
+  numbers above (cold, warm 2.7 s) are from before that. After (104183a), warm WebGL2 6.1/5.9/6.3 s at
+  load 21–24 (worst 217/217/183 ms, no frame over 250 ms, 54 batches of ~35 000 instead of 10–11)
+  and 8.3/11.4 s at load 207/172; cold 38.1/26.9 s at load 170/262, 7 and 5 frames over 250 ms, all
+  but 3 of them the early compile stall and the terrain (below). Slower on a warm cache by ~3 s, by
+  the owner's call: smoothness over a short wait.
+  Left (why this is `Refs #39`, not `Fixes`): (1) cold runs whose warm-up starts within ~6 s of page
+  load (7 of 7 untraced, R0 and A+B alike) get one 1.5–5.7 s main-thread task 0.2–0.3 s into the
+  compile, with 1–17 links pending; runs starting later mostly don't, `?linkcap=4` doesn't stop it,
+  and tracing made it vanish; it reads as a synchronous GL call waiting on a GPU process still busy
+  with cold-cache work from earlier in the page (the trace shows that pattern at renderer start).
+  (2) Some programs take over 250 ms alone and no batching splits them: terrain (41k characters)
+  295–405 ms, water 446 ms, now and then an avatar main pipeline under load. Per-object palette
+  uniforms (#39 step D, its own lane) are to cut the 48 avatar and horse main pipelines to 8.
+  Why: #39 (spec #18), and the owner's call (2026-10-18) to keep graphics quality and accept a little
+  more wait for a smooth loader.

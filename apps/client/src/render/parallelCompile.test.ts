@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
-  BATCH_TARGET_MS, deferPipelines, FIRST_DRAWS_START, FirstDrawPacer, gateFirstDraws, glFence, pipelineCost,
-  type DeferRenderer, type GateRenderer,
+  BATCH_TARGET_MS, deferPipelines, FENCE_LATENCY_MS, FIRST_DRAWS_CAP, FIRST_DRAWS_START, FirstDrawPacer, gateFirstDraws, glFence,
+  LONE_COST, newStageCost, OLD_PACER, PACER, PIPELINE_OVERHEAD, pipelineCost, type DeferRenderer, type GateRenderer, type Warmth,
 } from "./parallelCompile.ts";
 
 /** three's Pipelines as the backend sees it: a new pipeline compiles in parallel only when given a list. */
 function fakeRenderer() {
   const made: { ro: string; parallel: boolean; finish: () => void }[] = [];
   const pipelines = {
+    /** A render object has a pipeline once getForRender has made one. */
+    get(ro: unknown) {
+      return { pipeline: made.some((m) => m.ro === String(ro)) ? { ro } : undefined };
+    },
     getForRender(ro: unknown, promises: Promise<unknown>[] | null = null) {
       if (promises) {
         let finish!: () => void;
@@ -93,6 +97,31 @@ describe("deferPipelines", () => {
     expect(Object.prototype.hasOwnProperty.call(p, "getForRender")).toBe(true);
     d.release();
     expect(Object.prototype.hasOwnProperty.call(p, "getForRender")).toBe(false);
+  });
+
+  it("with a cap on links in flight, a render object without a pipeline waits its turn; one with a pipeline always goes", async () => {
+    const f = fakeRenderer();
+    const d = deferPipelines(f.renderer, { maxPending: 2 });
+    for (const ro of ["a", "b", "c", "d"]) f.pipelines.getForRender(ro);
+    expect(f.made.map((m) => m.ro)).toEqual(["a", "b"]); // c and d are held: no link started, nothing to draw
+    expect([d.pending(), d.held()]).toEqual([2, 2]);
+    f.pipelines.getForRender("a"); // has its pipeline: three's own path (an update), never held
+    expect(f.made).toHaveLength(3);
+    d.frame(); // a new frame: what it holds is counted afresh
+    expect(d.held()).toBe(0);
+    f.made[0]!.finish();
+    f.made[2]!.finish();
+    await tick();
+    for (const ro of ["c", "d"]) f.pipelines.getForRender(ro); // retried by the next frame: b still links
+    expect(f.made.slice(3).map((m) => m.ro)).toEqual(["c"]);
+    expect(d.held()).toBe(1);
+    d.frame();
+    f.made[1]!.finish();
+    await tick();
+    f.pipelines.getForRender("d");
+    expect(f.made.slice(3).map((m) => m.ro)).toEqual(["c", "d"]);
+    expect(d.held()).toBe(0);
+    d.release();
   });
 
   it("does nothing on a renderer without three's internals (another three version, a test fake)", async () => {
@@ -192,6 +221,30 @@ describe("gateFirstDraws (WebGL2: a program's first draw compiles its Metal pipe
     gate.release();
   });
 
+  it("tracks the shader stages drawn: a first draw marks its stages, a refused one doesn't (diagnostics hear cost and new characters)", () => {
+    // three shares a vertex or fragment stage between pipelines with the same source
+    const vs = { code: "v".repeat(100) };
+    const fsA = { code: "a".repeat(50) };
+    const fsB = { code: "b".repeat(70) };
+    const of: Record<string, object> = { a: { vertexProgram: vs, fragmentProgram: fsA }, b: { vertexProgram: vs, fragmentProgram: fsB }, c: { vertexProgram: vs, fragmentProgram: fsA } };
+    const renderer = { _pipelines: { isReady: () => true, get: (ro: unknown) => ({ pipeline: of[String(ro)] }) } } as GateRenderer;
+    const heard: [string, number, number][] = [];
+    const seenByCost: boolean[][] = [];
+    const gate = gateFirstDraws(renderer, (ro, _p, g) => heard.push([String(ro), g.cost, g.newChars]), (p, drawn) => {
+      const q = p as { vertexProgram: object; fragmentProgram: object };
+      seenByCost.push([drawn.has(q.vertexProgram), drawn.has(q.fragmentProgram)]);
+      return 10;
+    });
+    const draw = (ro: string) => renderer._pipelines!.isReady(ro);
+    gate.frame(10);
+    expect([draw("a"), draw("b")]).toEqual([true, false]); // b refused: its fragment stage stays new
+    gate.frame(30);
+    expect([draw("b"), draw("c")]).toEqual([true, true]);
+    expect(heard).toEqual([["a", 10, 150], ["b", 10, 70], ["c", 10, 0]]); // c's stages were both drawn already
+    expect(seenByCost).toEqual([[false, false], [true, false], [true, false], [true, true]]);
+    gate.release();
+  });
+
   it("does nothing without three's internals", () => {
     const gate = gateFirstDraws({} as GateRenderer);
     expect(gate.active).toBe(false);
@@ -201,9 +254,251 @@ describe("gateFirstDraws (WebGL2: a program's first draw compiles its Metal pipe
   });
 });
 
+describe("newStageCost (a first draw priced by the stages new to the GPU)", () => {
+  it("charges the characters of stages not drawn yet plus a per-pipeline overhead; no floor for skinned shadow programs", () => {
+    const vs = { code: "in vec4 skinIndex;" + "x".repeat(3000) };
+    const fs = { code: "y".repeat(1900) };
+    const p = { vertexProgram: vs, fragmentProgram: fs };
+    const none = new WeakSet<object>();
+    expect(PIPELINE_OVERHEAD).toBeGreaterThan(0);
+    expect(newStageCost(p, none)).toBe(PIPELINE_OVERHEAD + 3018 + 1900); // a skinned shadow program: its size
+    expect(newStageCost(p, new WeakSet([vs]))).toBe(PIPELINE_OVERHEAD + 1900);
+    // both stages drawn already (three shares a stage per source): it still builds a pipeline state
+    expect(newStageCost(p, new WeakSet([vs, fs]))).toBe(PIPELINE_OVERHEAD);
+    expect(newStageCost({}, none)).toBe(PIPELINE_OVERHEAD);
+  });
+});
+
 describe("FirstDrawPacer (one batch of first draws in flight, sized by the GPU's measured cost)", () => {
+  /** A fenced batch of `used` units that the GPU took `ms` over (the fence's own latency included). */
+  const batch = (p: FirstDrawPacer, used: number, ms: number, at = 0) => {
+    p.sent(used, at, () => true);
+    p.tick(at + ms);
+  };
+  const L = FENCE_LATENCY_MS;
+  const work = BATCH_TARGET_MS - L; // what a batch may cost beyond the fence's latency
+
   it("sends no new first draws until the GPU has finished the last batch", () => {
     const p = new FirstDrawPacer();
+    let done = false;
+    expect(p.allowance()).toBe(FIRST_DRAWS_START);
+    p.sent(FIRST_DRAWS_START, 0, () => done);
+    p.tick(16);
+    expect(p.allowance()).toBe(0);
+    done = true;
+    p.tick(50);
+    expect(p.allowance()).toBeGreaterThan(0);
+    expect(p.inFlight()).toBe(false);
+  });
+
+  it("sizes the next batch to the target at the measured rate, the fence's latency aside", () => {
+    const p = new FirstDrawPacer();
+    batch(p, 20_000, L + 100); // 5 ms per 1000 units
+    expect(p.allowance()).toBe(Math.round(work / 0.005));
+  });
+
+  it("the rate rises at once and falls slowly", () => {
+    const p = new FirstDrawPacer();
+    batch(p, 20_000, L + 100); // 0.005 ms per unit
+    batch(p, 20_000, L + 200); // 0.01: up at once
+    expect(p.allowance()).toBe(Math.round(work / 0.01));
+    batch(p, 20_000, L + 100); // 0.005 again: only a quarter of the way back down
+    expect(p.allowance()).toBe(Math.round(work / (0.01 + (0.005 - 0.01) * PACER.fall)));
+  });
+
+  it("after a completed batch the next is at most 1.5x its units; the start budget only before the first", () => {
+    const p = new FirstDrawPacer();
+    expect(p.allowance()).toBe(FIRST_DRAWS_START); // nothing completed yet
+    batch(p, 4000, L); // quick and small: nothing to learn about the rate beyond the fence
+    expect(p.allowance()).toBe(6000); // 1.5 × 4000, not 1.5 × the start budget
+    batch(p, 6000, L);
+    expect(p.allowance()).toBe(9000);
+  });
+
+  it("a small completed batch, then large new-stage candidates: they go one at a time, growing 1.5x per batch", () => {
+    const vs = { code: "v".repeat(1500) };
+    const fs = { code: "f".repeat(1500) };
+    const pipes = new Map<string, object>([["seed", { vertexProgram: vs, fragmentProgram: fs }], ["shared", { vertexProgram: vs, fragmentProgram: fs }]]);
+    for (let i = 0; i < 4; i++) pipes.set(`big${i}`, { vertexProgram: { code: `v${i}`.repeat(3000) }, fragmentProgram: { code: `f${i}`.repeat(8000) } });
+    const renderer = { _pipelines: { isReady: () => true, get: (ro: unknown) => ({ pipeline: pipes.get(String(ro)) }) } } as GateRenderer;
+    const gate = gateFirstDraws(renderer, undefined, newStageCost);
+    const p = new FirstDrawPacer();
+    let now = 0;
+    const frame = (ros: string[]) => {
+      const before = gate.cost();
+      const granted = gate.granted();
+      gate.frame(p.allowance());
+      for (const ro of ros) renderer._pipelines!.isReady(ro);
+      const used = gate.cost() - before;
+      p.sent(used, now, () => true);
+      now += L; // quick: the rate never limits here, only growth does
+      p.tick(now);
+      return { used, n: gate.granted() - granted };
+    };
+    frame(["seed"]);
+    const small = frame(["shared"]); // its stages were drawn: the overhead only
+    expect(small.used).toBe(PIPELINE_OVERHEAD);
+    expect(p.allowance()).toBe(1.5 * PIPELINE_OVERHEAD);
+    const bigs = ["big0", "big1", "big2", "big3"];
+    const cost = PIPELINE_OVERHEAD + 2 * 3000 + 2 * 8000; // 28 000 each, all new
+    const first = frame(bigs);
+    expect([first.n, first.used]).toEqual([1, cost]); // over the budget: the first goes alone
+    expect(p.allowance()).toBe(Math.min(FIRST_DRAWS_CAP, 1.5 * cost));
+    const second = frame(bigs);
+    expect([second.n, second.used]).toEqual([1, cost]); // 1.5 × 28 000, capped at the 40 000 ceiling: one fits, not two
+    gate.release();
+  });
+
+  it("FIRST_DRAWS_CAP is a ceiling: quick shared-stage batches never lift it, and new stages after them get no more", () => {
+    // three's shared stages: one vertex and one fragment source drawn once, then reused by many pipelines
+    const vs = { code: "v".repeat(2000) };
+    const fs = { code: "f".repeat(2000) };
+    const shared = (i: number) => ({ k: `s${i}`, vertexProgram: vs, fragmentProgram: fs }); // overhead only
+    const fresh = (i: number) => ({ k: `n${i}`, vertexProgram: { code: `v${i}`.repeat(4000) }, fragmentProgram: { code: `f${i}`.repeat(6000) } });
+    const terrain = { k: "terrain", vertexProgram: { code: "t".repeat(4000) }, fragmentProgram: { code: "T".repeat(38_000) } };
+    const pipes = new Map<string, object>([["seed", { k: "seed", vertexProgram: vs, fragmentProgram: fs }]]);
+    for (let i = 0; i < 60; i++) pipes.set(`s${i}`, shared(i));
+    for (let i = 0; i < 8; i++) pipes.set(`n${i}`, fresh(i));
+    pipes.set("terrain", terrain);
+    const renderer = { _pipelines: { isReady: () => true, get: (ro: unknown) => ({ pipeline: pipes.get(String(ro)) }) } } as GateRenderer;
+    const gate = gateFirstDraws(renderer, undefined, newStageCost);
+    const p = new FirstDrawPacer();
+    let now = 0;
+    /** One frame offering `ros` (each not yet drawn tries a first draw), its batch fenced and back after `ms`. */
+    const frame = (ros: string[], ms: number) => {
+      const before = gate.cost();
+      gate.frame(p.allowance());
+      const drew = ros.filter((ro) => renderer._pipelines!.isReady(ro));
+      const used = gate.cost() - before;
+      p.sent(used, now, () => true);
+      now += ms;
+      p.tick(now);
+      return { drew, used };
+    };
+    frame(["seed"], 30);
+    const allowances: number[] = [];
+    let s = 0;
+    for (let i = 0; i < 6; i++) {
+      // quick full batches of pipelines whose stages are all drawn (a warm cache, or shared stages)
+      const ros = Array.from({ length: 12 }, () => `s${s++}`);
+      const { used } = frame(ros, 30);
+      expect(used).toBeLessThanOrEqual(FIRST_DRAWS_CAP);
+      allowances.push(p.allowance());
+    }
+    expect(Math.max(...allowances)).toBeLessThanOrEqual(FIRST_DRAWS_CAP); // never lifted
+    // then new stages turn up: a batch still holds at most the ceiling's worth
+    const fresh8 = Array.from({ length: 8 }, (_, i) => `n${i}`);
+    const { drew, used } = frame(fresh8, 30);
+    expect(used).toBeLessThanOrEqual(FIRST_DRAWS_CAP);
+    expect(drew.length).toBeLessThan(fresh8.length);
+    // a single program over the ceiling still goes, alone
+    const big = frame(["terrain", ...fresh8], 30);
+    expect(big.drew.filter((ro) => ro === "terrain" || !drew.includes(ro))[0]).toBe("terrain");
+    expect(big.used).toBe(newStageCost(terrain, new WeakSet()));
+    expect(big.used).toBeGreaterThan(FIRST_DRAWS_CAP);
+    gate.release();
+  });
+
+  it("learns only from fenced batches", () => {
+    const p = new FirstDrawPacer();
+    p.sent(30_000, 0, null);
+    expect(p.inFlight()).toBe(false);
+    p.tick(300, 300); // a slow frame without a fence says nothing about the batch
+    expect(p.allowance()).toBe(FIRST_DRAWS_START);
+  });
+
+  it("a frame with no first draws leaves nothing in flight", () => {
+    const p = new FirstDrawPacer();
+    p.sent(0, 0, () => false);
+    expect(p.inFlight()).toBe(false);
+    expect(p.allowance()).toBe(FIRST_DRAWS_START);
+  });
+
+  it("tells a listener how long each batch took, with what it was sent with (diagnostics)", () => {
+    const heard: [number, number, unknown][] = [];
+    const p = new FirstDrawPacer((ms, used, tag) => heard.push([ms, used, tag]));
+    p.sent(3, 10, () => true, ["terrain"]);
+    p.tick(130);
+    expect(heard).toEqual([[120, 3, ["terrain"]]]);
+  });
+});
+
+describe("each program judged by its own evidence of being cached (warm or cold, #39 item 5)", () => {
+  /** Pipelines of `units` each (all stages new), warm or cold as the test says; gate and pacer as the warm-up wires them. */
+  function world(spec: Record<string, { units: number; warm: boolean }>) {
+    const pipes = new Map<string, object>();
+    for (const [k, v] of Object.entries(spec)) pipes.set(k, { k, vertexProgram: { code: k.padEnd(v.units - PIPELINE_OVERHEAD, "v") }, fragmentProgram: { code: "" } });
+    const renderer = { _pipelines: { isReady: () => true, get: (ro: unknown) => ({ pipeline: pipes.get(String(ro)) }) } } as GateRenderer;
+    const classOf = (p: object): Warmth => (spec[(p as { k: string }).k]!.warm ? "warm" : "cold");
+    const p = new FirstDrawPacer();
+    const gate = gateFirstDraws(renderer, undefined, newStageCost, { classOf, price: (u, c) => p.price(u, c), loneCost: LONE_COST });
+    let now = 0;
+    /** One frame; its batch takes `ms` (or what `ms` says for the batch's class) to come back. */
+    const frame = (ros: string[], ms: number | ((cls: Warmth | null) => number)) => {
+      const c0 = gate.cost();
+      const u0 = gate.units();
+      const g0 = gate.granted();
+      gate.frame(p.allowance());
+      const drew = ros.filter((ro) => renderer._pipelines!.isReady(ro));
+      const used = gate.cost() - c0;
+      const raw = gate.units() - u0;
+      p.sent(used, now, used > 0 ? () => true : null, undefined, gate.batchClass() ?? "cold", raw);
+      now += typeof ms === "function" ? ms(gate.batchClass()) : ms;
+      p.tick(now);
+      return { used, raw, n: gate.granted() - g0, cls: gate.batchClass(), drew };
+    };
+    return { gate, p, frame };
+  }
+
+  it("warm programs, priced at the warm rate, share batches far past the ceiling's raw units; a cold one goes at the cold price", () => {
+    const spec: Record<string, { units: number; warm: boolean }> = { cold: { units: 30_000, warm: false } };
+    for (let i = 0; i < 60; i++) spec[`w${i}`] = { units: 22_000, warm: true };
+    const w = world(spec);
+    const all = ["cold", ...Array.from({ length: 60 }, (_, i) => `w${i}`)];
+    // a cold first draw takes the GPU ~250 ms, a cached one a couple of frames
+    const batches = Array.from({ length: 7 }, () => w.frame(all, (cls) => (cls === "cold" ? 250 : 40)));
+    for (const b of batches) expect(b.used).toBeLessThanOrEqual(Math.max(FIRST_DRAWS_CAP, 30_000)); // priced: the ceiling holds
+    const cold = batches.find((b) => b.drew.includes("cold") && b.cls === "cold")!;
+    expect([cold.n, cold.used, cold.raw]).toEqual([1, 30_000, 30_000]); // full cold price, alone (over LONE_COST)
+    expect(Math.max(...batches.map((b) => b.raw))).toBeGreaterThan(3 * FIRST_DRAWS_CAP); // warm: many programs a batch
+    w.gate.release();
+  });
+
+  it("a batch holds one class: warm and cold programs go in separate batches", () => {
+    const w = world({ w0: { units: 9000, warm: true }, c0: { units: 9000, warm: false }, w1: { units: 9000, warm: true }, c1: { units: 9000, warm: false } });
+    const a = w.frame(["w0", "c0", "w1", "c1"], 40);
+    expect([a.cls, a.n]).toEqual(["warm", 2]);
+    const b = w.frame(["w0", "c0", "w1", "c1"], 40);
+    expect([b.cls, b.n]).toEqual(["cold", 2]);
+    w.gate.release();
+  });
+
+  it("a warm program that then takes long to draw raises the warm price at once; the cold rate learns nothing from it", () => {
+    const spec: Record<string, { units: number; warm: boolean }> = {};
+    for (let i = 0; i < 20; i++) spec[`w${i}`] = { units: 12_000, warm: true };
+    const w = world(spec);
+    w.frame(["w0", "w1"], 40);
+    const before = w.p.price(12_000, "warm");
+    expect(before).toBeLessThan(12_000);
+    w.frame(["w2"], 600); // slow: it wasn't cached after all
+    expect(w.p.price(12_000, "warm")).toBeGreaterThan(before * 3);
+    expect(w.p.price(12_000, "cold")).toBe(12_000);
+    w.gate.release();
+  });
+
+  it("a lone cold program (over LONE_COST) waiting from the last frame gets the next frame to itself, ahead of the rest", () => {
+    const w = world({ a: { units: 8000, warm: false }, terrain: { units: 47_000, warm: false }, b: { units: 8000, warm: false }, c: { units: 8000, warm: false } });
+    const first = w.frame(["a", "terrain", "b", "c"], 40);
+    expect(first.n).toBe(3); // a, b, c fit the start budget; terrain doesn't
+    const second = w.frame(["a", "b", "c", "terrain"], 40);
+    expect([second.n, second.used]).toEqual([1, 47_000]); // terrain first, alone
+    w.gate.release();
+  });
+});
+
+describe("FirstDrawPacer with ?oldpacer (D-load-2: whole programs, a mean rate, no growth limit)", () => {
+  it("sends no new first draws until the GPU has finished the last batch", () => {
+    const p = new FirstDrawPacer(undefined, OLD_PACER);
     let done = false;
     expect(p.allowance()).toBe(FIRST_DRAWS_START);
     p.sent(FIRST_DRAWS_START, 0, () => done);
@@ -218,14 +513,14 @@ describe("FirstDrawPacer (one batch of first draws in flight, sized by the GPU's
   });
 
   it("sizes the next batch to take about BATCH_TARGET_MS at the cost rate it measured", () => {
-    const p = new FirstDrawPacer();
+    const p = new FirstDrawPacer(undefined, OLD_PACER);
     p.sent(40_000, 0, () => true); // 40k characters of GLSL took 200 ms: 5 ms per 1000
     p.tick(200);
     expect(p.allowance()).toBe(Math.round((BATCH_TARGET_MS / 200) * 40_000));
   });
 
   it("smooths the rate over batches, so one quick or slow batch doesn't swing it", () => {
-    const p = new FirstDrawPacer();
+    const p = new FirstDrawPacer(undefined, OLD_PACER);
     p.sent(20_000, 0, () => true);
     p.tick(100); // 5 ms per 1000
     p.sent(20_000, 100, () => true);
@@ -234,7 +529,7 @@ describe("FirstDrawPacer (one batch of first draws in flight, sized by the GPU's
   });
 
   it("a warm cache (quick batches) grows the budget, up to a cap", () => {
-    const p = new FirstDrawPacer();
+    const p = new FirstDrawPacer(undefined, OLD_PACER);
     for (let i = 0; i < 10; i++) {
       p.sent(p.allowance(), i * 20, () => true);
       p.tick(i * 20 + 20);
@@ -244,14 +539,14 @@ describe("FirstDrawPacer (one batch of first draws in flight, sized by the GPU's
   });
 
   it("a frame with no first draws leaves nothing in flight", () => {
-    const p = new FirstDrawPacer();
+    const p = new FirstDrawPacer(undefined, OLD_PACER);
     p.sent(0, 0, () => false);
     expect(p.inFlight()).toBe(false);
     expect(p.allowance()).toBe(FIRST_DRAWS_START);
   });
 
   it("without fences, takes the frame time as the batch's time", () => {
-    const p = new FirstDrawPacer();
+    const p = new FirstDrawPacer(undefined, OLD_PACER);
     p.sent(30_000, 0, null);
     expect(p.inFlight()).toBe(false);
     p.tick(300, 300); // 10 ms per 1000
@@ -260,7 +555,7 @@ describe("FirstDrawPacer (one batch of first draws in flight, sized by the GPU's
 
   it("tells a listener how long each batch took, with what it was sent with (diagnostics)", () => {
     const heard: [number, number, unknown][] = [];
-    const p = new FirstDrawPacer((ms, used, tag) => heard.push([ms, used, tag]));
+    const p = new FirstDrawPacer((ms, used, tag) => heard.push([ms, used, tag]), OLD_PACER);
     p.sent(3, 10, () => true, ["terrain"]);
     p.tick(130);
     expect(heard).toEqual([[120, 3, ["terrain"]]]);
