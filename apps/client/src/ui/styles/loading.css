@@ -50,6 +50,19 @@
 .fl-loading__dots i { width: 14px; height: 2px; background: rgba(255, 255, 255, .14); }
 .fl-loading__dots i.is-on { background: var(--dawn-2); }
 .fl-loading__meta { font: 500 var(--t-xs)/1.5 var(--font-mono); color: var(--fog-2); text-align: right; }
+/* The rotating quip (D-load-5): a footnote above the pointer-lock line. Two stacked lines crossfade. */
+.fl-loading__side { flex: 0 1 auto; min-width: 0; display: grid; justify-items: end; gap: calc(.3 * var(--u)); }
+.fl-loading__quip { display: grid; justify-items: end; margin: 0; font: 400 var(--t-sm)/1.4 var(--font-body); color: var(--fog-3); text-align: right; }
+.fl-loading__quip > span { grid-area: 1 / 1; opacity: 0; transition: opacity var(--dur-3) var(--ease-in-out); }
+.fl-loading__quip > span.is-on { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .fl-loading__quip > span { transition: none; } }
+/* Phone widths: the tip on top, the quip and the pointer-lock line under it, left-aligned. */
+@media (max-width: 640px) {
+  .fl-loading__foot { flex-direction: column; align-items: stretch; gap: var(--sp-3); }
+  .fl-loading__tip { width: auto; }
+  .fl-loading__side, .fl-loading__quip { justify-items: start; text-align: left; }
+  .fl-loading__meta { text-align: left; }
+}
 
 /* Compact: mid-game re-warm or reconnect. A small card over the (frozen) world. */
 .fl-loading--compact { background: rgba(5, 7, 10, .55); }

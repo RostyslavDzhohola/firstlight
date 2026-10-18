@@ -2,7 +2,10 @@
 // loadingPhase() maps each line to one of the four named boot steps, so Game.ts keeps plain text.
 // Re-entrant: mid-game status lines ("Applying graphics settings…", "Reconnecting…") use a compact
 // card over the world instead of the full screen. A failed boot swaps the progress for an error with
-// a Retry button (showLoadingError); the next setLoading() goes back to progress.
+// a Retry button (showLoadingError); the next setLoading() goes back to progress. While the full
+// screen loads, a funny line at the bottom changes every few seconds (loadingQuips.ts, D-load-5).
+
+import { QUIP_MS, QUIPS, quipDeck } from "./loadingQuips.ts";
 
 export type BodyKey = "portus" | "arcadia" | "hollowmere" | "meridian";
 
@@ -101,10 +104,12 @@ let root: HTMLElement | null = null;
 let phase: LoadingPhase = { step: 0, body: null, compact: false };
 let tipIndex = Math.floor(Math.random() * TIPS.length);
 let tipTimer = 0;
+const quips = quipDeck(QUIPS);
+let quipTimer = 0;
 const refs: {
   title?: HTMLElement; blurb?: HTMLElement; status?: HTMLElement; pct?: HTMLElement; fill?: HTMLElement;
   steps?: HTMLElement[]; tip?: HTMLElement; dots?: HTMLElement[]; badge?: HTMLElement; bar?: HTMLElement;
-  card?: HTMLElement; error?: HTMLElement | null;
+  card?: HTMLElement; error?: HTMLElement | null; quip?: HTMLElement; quipLines?: HTMLElement[];
 } = {};
 let last = { text: "", pct: -1, step: -1, body: "" as string, compact: false };
 
@@ -171,7 +176,13 @@ function build(): HTMLElement {
   refs.tip = el("p", "", tipBody);
   const dots = el("div", "fl-loading__dots", tipBody);
   refs.dots = TIPS.map(() => el("i", "", dots));
-  el("span", "fl-loading__meta", foot, "Pointer lock comes back when the world is ready");
+  const side = el("div", "fl-loading__side", foot);
+  // A new line every few seconds: kept out of the polite live region so it isn't read out each time.
+  refs.quip = el("p", "fl-loading__quip", side);
+  refs.quip.setAttribute("aria-hidden", "true");
+  refs.quip.hidden = true;
+  refs.quipLines = [el("span", "", refs.quip), el("span", "", refs.quip)];
+  el("span", "fl-loading__meta", side, "Pointer lock comes back when the world is ready");
   showTip();
   return root;
 }
@@ -180,6 +191,26 @@ function showTip() {
   if (!refs.tip || !refs.dots) return;
   refs.tip.textContent = TIPS[tipIndex]!;
   refs.dots.forEach((d, i) => d.classList.toggle("is-on", i === tipIndex));
+}
+
+/** The quips run only on the full screen while it loads: not on the compact card, an error or hidden. */
+function runQuips(on: boolean) {
+  const q = refs.quip;
+  if (!q || on === !q.hidden) return;
+  q.hidden = !on;
+  clearInterval(quipTimer);
+  if (!on) return;
+  nextQuip();
+  quipTimer = window.setInterval(nextQuip, QUIP_MS);
+}
+
+function nextQuip() {
+  // Two stacked lines: the new one fades in over the old one (CSS; instant under reduced motion).
+  const [a, b] = refs.quipLines!;
+  const [out, next] = a!.classList.contains("is-on") ? [a!, b!] : [b!, a!];
+  next.textContent = quips.next();
+  out.classList.remove("is-on");
+  next.classList.add("is-on");
 }
 
 function clearError(r: HTMLElement) {
@@ -206,6 +237,7 @@ export function setLoading(text: string, frac: number): void {
     r.classList.toggle("fl-loading--compact", phase.compact);
     last.compact = phase.compact;
   }
+  runQuips(!phase.compact);
   if (text !== last.text) refs.status!.textContent = last.text = text;
   const pct = Math.max(0, Math.min(100, Math.round(frac * 100)));
   if (pct !== last.pct) {
@@ -250,6 +282,7 @@ export function showLoadingError(e: LoadingError): void {
   r.classList.remove("fl-loading--compact");
   last.compact = false;
   phase = { ...phase, compact: false };
+  runQuips(false);
   r.classList.add("fl-loading--error");
   const box = el("div", "fl-loading__error", refs.card);
   box.setAttribute("role", "alert");
@@ -273,6 +306,7 @@ export function hideLoading(): void {
   clearError(root);
   root.hidden = true;
   clearInterval(tipTimer);
+  runQuips(false);
   // Next show starts fresh at the right step; a compact card must not stick to a full load.
   phase = { step: 0, body: phase.body, compact: false };
 }

@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment happy-dom
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadingPhase, stepProgress, WARMUP_FROM, warmupProgress, type LoadingPhase } from "./loading.ts";
+import type * as LoadingT from "./loading.ts";
+import { QUIP_MS, QUIPS } from "./loadingQuips.ts";
 
 describe("loadingPhase", () => {
   it("maps Game.ts status lines to the four boot steps in order", () => {
@@ -80,5 +83,114 @@ describe("stepProgress (a boot step's share of the bar, e.g. the first-visit pro
     expect(p.at(0.5)).toBeCloseTo(0.86);
     expect(p.at(0.25)).toBeCloseTo(0.86); // never back
     expect(p.at(2)).toBeCloseTo(0.9);
+  });
+});
+
+describe("the loader's rotating quips (D-load-5)", () => {
+  // Each case is a fresh page: a new loader module over an empty document.
+  let hideLoading: typeof LoadingT.hideLoading;
+  let setLoading: typeof LoadingT.setLoading;
+  let showLoadingError: typeof LoadingT.showLoadingError;
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    vi.resetModules();
+    document.body.replaceChildren();
+    ({ hideLoading, setLoading, showLoadingError } = await import("./loading.ts"));
+  });
+  afterEach(() => {
+    hideLoading();
+    vi.useRealTimers();
+  });
+
+  const quipEl = () => document.querySelector<HTMLElement>(".fl-loading__quip");
+  /** The line on screen, or null when there is none (no quip element, or it is hidden). */
+  const shown = () => {
+    const q = quipEl();
+    if (!q || q.hidden || q.closest("[hidden]")) return null;
+    return q.querySelector(".is-on")?.textContent ?? null;
+  };
+
+  it("start with the full screen: one of the lines, kept out of the polite live region, never focusable", () => {
+    setLoading("Loading the game…", 0);
+    expect(QUIPS).toContain(shown());
+    const root = document.querySelector(".fl-loading")!;
+    expect(root.getAttribute("aria-live")).toBe("polite");
+    expect(root.contains(quipEl())).toBe(true);
+    expect(quipEl()!.closest('[aria-hidden="true"], [aria-live="off"]')).not.toBeNull();
+    expect(quipEl()!.querySelector("[tabindex], button, a")).toBeNull();
+    expect(quipEl()!.contains(document.activeElement)).toBe(false);
+  });
+
+  it("change every few seconds, whatever the progress does, and show every line once before any comes back", () => {
+    setLoading("Loading the game…", 0);
+    const seen = [shown()];
+    vi.advanceTimersByTime(QUIP_MS / 2);
+    setLoading("Connecting…", 0.3); // progress updates don't restart the clock or skip a line
+    setLoading("Building the world…", 0.5);
+    expect(shown()).toBe(seen[0]);
+    vi.advanceTimersByTime(QUIP_MS / 2);
+    seen.push(shown());
+    vi.advanceTimersByTime(QUIP_MS);
+    seen.push(shown());
+    // in the world for a while, then a trip to another body: the deck carries on, no repeats
+    hideLoading();
+    vi.advanceTimersByTime(60_000);
+    setLoading("Travelling to Meridian…", 0.1);
+    seen.push(shown());
+    for (let i = 4; i < QUIPS.length; i++) {
+      vi.advanceTimersByTime(QUIP_MS);
+      seen.push(shown());
+    }
+    expect([...seen].sort()).toEqual([...QUIPS].sort());
+    vi.advanceTimersByTime(QUIP_MS);
+    expect(shown()).not.toBe(seen.at(-1)); // the next shuffle doesn't open with the last line
+    expect(QUIPS).toContain(shown());
+  });
+
+  it("stop when the screen hides, and come back with the next full load (travel between bodies)", () => {
+    setLoading("Warming up shaders…", 0.9);
+    hideLoading();
+    expect(shown()).toBeNull();
+    const line = quipEl()!.querySelector(".is-on")?.textContent;
+    vi.advanceTimersByTime(QUIP_MS * 5);
+    expect(quipEl()!.querySelector(".is-on")?.textContent).toBe(line);
+    setLoading("Travelling to Hollowmere…", 0.1);
+    const first = shown();
+    expect(QUIPS).toContain(first);
+    vi.advanceTimersByTime(QUIP_MS);
+    expect(shown()).not.toBe(first);
+  });
+
+  it("are not on the compact mid-game card", () => {
+    setLoading("Applying graphics settings…", 0.5);
+    expect(shown()).toBeNull();
+    hideLoading();
+    // a full load that turns into a reconnect drops the line, and a travel brings it back
+    setLoading("Building the world…", 0.6);
+    expect(shown()).not.toBeNull();
+    setLoading("Reconnecting… (try 1)", 0.6);
+    expect(shown()).toBeNull();
+    const line = quipEl()!.querySelector(".is-on")?.textContent;
+    vi.advanceTimersByTime(QUIP_MS * 3);
+    expect(quipEl()!.querySelector(".is-on")?.textContent).toBe(line);
+    setLoading("Travelling to Arcadia…", 0.1);
+    expect(QUIPS).toContain(shown());
+  });
+
+  it("are not on the error state, which keeps the focus on Retry; Retry brings them back", () => {
+    setLoading("Starting the renderer…", 0.05);
+    const retry = vi.fn();
+    showLoadingError({ title: "The renderer didn't start", text: "Try again.", action: "Retry", onAction: retry });
+    expect(shown()).toBeNull();
+    expect(document.activeElement?.textContent).toBe("Retry");
+    const line = quipEl()!.querySelector(".is-on")?.textContent;
+    vi.advanceTimersByTime(QUIP_MS * 3);
+    expect(quipEl()!.querySelector(".is-on")?.textContent).toBe(line);
+    expect(document.activeElement?.textContent).toBe("Retry");
+    setLoading("Loading the game…", 0);
+    const first = shown();
+    expect(QUIPS).toContain(first);
+    vi.advanceTimersByTime(QUIP_MS);
+    expect(shown()).not.toBe(first);
   });
 });
