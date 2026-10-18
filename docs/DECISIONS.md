@@ -1101,3 +1101,28 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   its own cache outside the browser profile, so the first visit after shaders change pays the cold
   cost; the owner's ~20 s fits a cold or partly cold cache. Why: the owner's loader sat on "Warming
   up shaders… 92%" for ~20 s (#25, spec #18), and #30 needs to know where the time goes.
+- **D-load-2 (2026-10-18):** the shader warm-up compiles programs side by side and paces WebGL2's
+  first draws (`render/parallelCompile.ts`). three r186 compiles a pipeline in parallel
+  (KHR_parallel_shader_compile on WebGL2, createRenderPipelineAsync on WebGPU) only when handed a
+  promise list; compileAsync awaited each object's list before the next, and a real frame handed
+  none, so WebGL2 linked every shadow variant synchronously. During a warm-up every new pipeline now
+  goes into one shared list: node builds continue while the GPU compiles, a frame skips an object
+  until its program is ready, and the shadow frames take 8 new builds instead of 4. On WebGL2 a
+  compiled program still costs on its first draw, where ANGLE's Metal backend builds the Metal
+  pipeline in the GPU process (the first real frame froze for ~5 s on a cold cache). So first draws go
+  out in batches, one in flight at a time behind a WebGL2 fence, sized by how long the GPU took over
+  the last one (doubled under 120 ms when full, halved over 250 ms), and the warm-up keeps drawing
+  until every program has compiled and drawn once. WebGPU only waits for its async pipelines. The
+  post-warm-up watch stays at 0 builds. `?serialcompile` keeps three's own compiles for A/B runs.
+  Fewer variants was not taken: three keys each instanced mesh's node build by the mesh, but the 242
+  builds make only 226–228 vertex and fragment stages (three shares a stage per distinct source),
+  so duplicates already share GPU programs; what they still cost is node building on the CPU, which
+  only a scene change (fewer instanced meshes per material) would cut.
+  Numbers (`e2e/bench-warmup.spec.ts`, M1 headless, the owner's High tier, a fresh browser per run,
+  each pair back to back, before = `?serialcompile`): WebGL2 cold Metal cache 33.3/28.9 s → 14.5/14.7 s,
+  worst frame 3.1/2.9 s → 0.45/0.53 s, frames over 250 ms 18/17 → 6/5 (single pipelines that take
+  the GPU 0.5 s on their own); WebGL2 warm 16.7/6.3 s → 2.6/2.9 s, worst 1.6 s/217 ms → 133/150 ms;
+  WebGPU warm 3.2/3.5 s → 2.7/2.4 s, worst 167/200 ms → 217/183 ms. J1 on the final build (load
+  ~20): J1.2 Play → world 13.4 s on WebGL2 (6.0 s WebGPU), J1.6 High warm-up 2.0 s (1.9 s), worst
+  frame inside it 117 ms (133 ms), 0 builds after. Why: #30 (spec #18), the owner's ~20 s on
+  "Warming up shaders".

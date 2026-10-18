@@ -12,6 +12,11 @@
 //   for run in 1 2; do for mode in serial parallel; do
 //     BENCH_MODE=$mode BENCH_RUN=$run E2E_REUSE=1 npx playwright test -c e2e/playwright.config.ts --project webgl --grep @bench
 //   done; done
+// macOS also keeps each app's compiled Metal shaders outside the profile (a warm cache across
+// browsers). For cold-cache numbers on the webgl project, delete Playwright Chromium's own caches
+// before each run: $(getconf DARWIN_USER_CACHE_DIR)com.google.chrome.for.testing{,.helper}/
+// {com.apple.metal,com.apple.metalfe,com.apple.gpuarchiver}. Never the installed Chrome's (the
+// webgpu project and the owner's own browser share it), so WebGPU numbers are warm-cache only.
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
