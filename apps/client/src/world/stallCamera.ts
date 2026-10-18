@@ -28,6 +28,8 @@ export interface StallBox {
   d: number;
   /** Rotation about the frame's x axis (three's rotation.x): positive tips +z down. */
   tilt?: number;
+  /** Its own padding (m) instead of the default CAMERA_PAD (a solid body needs less than thin cloth). */
+  pad?: number;
 }
 
 /**
@@ -44,8 +46,12 @@ export const KEEPER_STALL = {
   orb: { x: 0.8, y: 1.3, z: 1.1, r: 0.18 },
   /** The keeper's name and "… · E to trade" sprite. */
   label: { x: 0, y: 3.4, z: 0.6 },
-  /** The whole stall: the awning's back edge to the counter's front, side to side, the ground to the awning's top. */
-  body: { x: 0, y: 1.45, z: 0.6, w: 3.2, h: 2.9, d: 1.8 },
+  /**
+   * The whole stall: the awning's back edge to the counter's front, side to side, the ground to the
+   * awning's top. Padded less than the cloth: its faces are upright and its inside open, and every
+   * centimetre of padding pins the camera of a player beside it closer to their head.
+   */
+  body: { x: 0, y: 1.45, z: 0.6, w: 3.2, h: 2.9, d: 1.8, pad: 0.05 },
 } as const satisfies Record<string, object>;
 
 /** Padding (m) round every camera-only volume. */
@@ -82,9 +88,10 @@ export interface CameraBox {
 }
 
 /** `boxes` (frame-local) placed by `p`, padded by `pad`. */
-export function placeStallBoxes(p: TownPlacement, boxes: readonly StallBox[], pad = CAMERA_PAD): CameraBox[] {
+export function placeStallBoxes(p: TownPlacement, boxes: readonly StallBox[], padding = CAMERA_PAD): CameraBox[] {
   const s = p.scale;
   return boxes.map((b) => {
+    const pad = Math.min(padding, b.pad ?? CAMERA_PAD);
     const t = b.tilt ?? 0;
     const ct = Math.cos(t), st = Math.sin(t);
     // Local axes after the tilt about x (three's convention), then into the planet through the frame.
