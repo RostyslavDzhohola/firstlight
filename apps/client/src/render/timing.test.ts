@@ -166,6 +166,28 @@ describe("resolution ladder", () => {
     expect(l.index).toBe(0);
   });
 
+  it("takes a forced step (the e2e hook's) at the next sample, the way a natural step happens", () => {
+    const l = new ResolutionLadder();
+    const seen: number[] = [];
+    l.onChange = () => seen.push(l.index);
+    l.forceStep(1);
+    expect(l.index).toBe(0); // nothing until the frame's bookkeeping samples
+    let t = feed(l, 1000, 0.02, 16.7, null);
+    expect(seen).toEqual([1]);
+    l.forceStep(1);
+    l.forceStep(1); // one step per request, not queued
+    t = feed(l, t, 0.02, 16.7, null);
+    expect(seen).toEqual([1, 2]);
+    l.forceStep(-1);
+    t = feed(l, t, 0.02, 16.7, null);
+    l.forceStep(-1);
+    t = feed(l, t, 0.02, 16.7, null);
+    l.forceStep(-1); // already at the top: no change, no callback
+    feed(l, t, 0.02, 16.7, null);
+    expect(seen).toEqual([1, 2, 1, 0]);
+    expect(l.index).toBe(0);
+  });
+
   it("disabled ladder never changes", () => {
     const l = new ResolutionLadder();
     l.enabled = false;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectFlaps, detectFlashes, frameStats, lumaWorkerSource, meanLuma, Ring, screenAim } from "./e2eProbe.ts";
+import { detectFlaps, detectFlashes, frameStats, isBlankWorld, lumaWorkerSource, meanAlpha, meanLuma, Ring, screenAim } from "./e2eProbe.ts";
 
 describe("Ring", () => {
   it("keeps the newest `size` entries, oldest first", () => {
@@ -39,6 +39,20 @@ describe("meanLuma", () => {
   });
 });
 
+describe("blank world frames (D-view-3)", () => {
+  it("averages the alpha channel", () => {
+    expect(meanAlpha([9, 9, 9, 255, 9, 9, 9, 0])).toBeCloseTo(127.5);
+    expect(meanAlpha([])).toBe(0);
+  });
+
+  it("calls a cleared canvas blank: transparent (alpha: true) or pure black, never a dark scene", () => {
+    expect(isBlankWorld(0, 0)).toBe(true); // a resize cleared the drawing buffer: the page shows through
+    expect(isBlankWorld(0.4, 255)).toBe(true); // an opaque canvas cleared to black
+    expect(isBlankWorld(12, 255)).toBe(false); // night, a dark cave
+    expect(isBlankWorld(110, 255)).toBe(false);
+  });
+});
+
 describe("lumaWorkerSource", () => {
   // Runs the worker's source against a stand-in OffscreenCanvas: the readback that used to stall the
   // page's main thread now happens there, and it must answer the same luma the page computed.
@@ -59,12 +73,12 @@ describe("lumaWorkerSource", () => {
     return { posted, drawn, bmp, closed };
   }
 
-  it("answers the mean luma of the bitmap with the sample's time and closes the bitmap", () => {
+  it("answers the mean luma and alpha of the bitmap with the sample's time and closes the bitmap", () => {
     const px = [0, 0, 0, 255, 255, 255, 255, 255, 0, 255, 0, 255];
     const r = runWorker(px, { t: 42, w: 3, h: 1 });
     expect(r.drawn).toBe(r.bmp);
     expect(r.closed).toBe(1);
-    expect(r.posted).toEqual([{ t: 42, v: meanLuma(px) }]);
+    expect(r.posted).toEqual([{ t: 42, v: meanLuma(px), a: meanAlpha(px) }]);
   });
 
   it("reports a failed draw as an error instead of throwing", () => {

@@ -51,4 +51,40 @@ test.describe("J1 arrival", () => {
     expect.soft(frames.max, `no frozen frame from the portal to Arcadia (worst: ${JSON.stringify(frames.worst)})`).toBeLessThan(500);
     expect.soft(shaders.afterWarmup, `no shader builds after the warm-up (${JSON.stringify(shaders.recent)})`).toBe(0);
   });
+
+  test("J1.4 · item 1 · resolution steps and a window resize never show a blank world (D-view-3)", { tag: ["@J1", "@J1.4", "@item-1"] }, async ({ player, page }) => {
+    // ?noladder: only the forced steps below change the resolution (they are taken all the same).
+    await player.joinAsDevAdmin({ starter: "Hexwick", body: "portus", extra: { noladder: true } });
+    await player.waitInWorld(180_000, "portus");
+    const frames = (n: number) =>
+      page.evaluate((n) => new Promise<void>((done) => {
+        let left = n;
+        const tick = () => (--left <= 0 ? done() : requestAnimationFrame(tick));
+        requestAnimationFrame(tick);
+      }), n);
+    const started = await page.evaluate(() => (window as any).__fl.probe.start({ every: 2 }));
+    expect(started.ok, `blink probe started (${started.reason ?? ""})`).toBe(true);
+    const steps: { dir: number; ladder: number; canvas: unknown }[] = [];
+    // Three steps down to the floor and three back up: each one resizes the drawing buffer from the
+    // frame's afterFrame, the way the ladder does on a slow machine.
+    for (const dir of [1, 1, 1, -1, -1, -1] as const) {
+      const before = (await player.snap()).gfx?.ladder ?? 0;
+      expect(await page.evaluate((d) => (window as any).__fl.act.ladderStep(d), dir), "the hook can force a ladder step").toBe(true);
+      const s = await player.until((x) => x.gfx?.ladder === before + dir, `ladder rung ${before + dir}`, 10_000);
+      steps.push({ dir, ladder: s.gfx!.ladder!, canvas: s.gfx!.canvas });
+      await frames(20);
+    }
+    // A window resize (a fullscreen change resizes the same way).
+    for (const size of [{ width: 1100, height: 640 }, { width: 1280, height: 720 }]) {
+      const before = JSON.stringify((await player.snap()).gfx?.canvas);
+      await page.setViewportSize(size);
+      await player.until((x) => JSON.stringify(x.gfx?.canvas) !== before, `drawing buffer resized for ${size.width}×${size.height}`, 10_000);
+      await frames(20);
+    }
+    const probe = await page.evaluate(() => (window as any).__fl.probe.stop());
+    await player.note("frame-sizing", { steps, resizes: probe.resizes, blanks: probe.blanks, samples: probe.samples, skipped: probe.skipped, errors: probe.errors });
+    expect(probe.samples, "luma samples taken").toBeGreaterThan(50);
+    expect(probe.resizes, "every ladder step and window resize was a drawing-buffer change the probe read").toBeGreaterThanOrEqual(8);
+    expect(probe.blanks, "no presented frame shows a blank world").toEqual([]);
+  });
 });

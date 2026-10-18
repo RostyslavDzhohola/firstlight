@@ -138,6 +138,8 @@ export class ResolutionLadder {
   private noUpUntil = 0;
   private upHold = UP_HOLD_INITIAL;
   private lastUpAt = -Infinity;
+  /** A step the e2e hook asked for (+1 down, −1 up), taken at the next sample. */
+  private forced: 1 | -1 | 0 = 0;
   onChange: (() => void) | null = null;
   onFloor: (() => void) | null = null;
 
@@ -160,8 +162,27 @@ export class ResolutionLadder {
     this.windowStart = now;
   }
 
+  /**
+   * Test hook (e2e): take one step (+1 down, −1 up) at the next sample, inside the frame's bookkeeping
+   * where a natural step happens. Clamped to the ladder; no hold-off or back-off bookkeeping.
+   */
+  forceStep(dir: 1 | -1) {
+    this.forced = dir;
+  }
+
   /** Per frame: the frame interval and any GPU samples that arrived since the last call. */
   sample(now: number, frameMs: number, gpuSamples: readonly number[] | null, targetMs: number) {
+    if (this.forced !== 0) {
+      const next = Math.min(LADDER.length - 1, Math.max(0, this.index + this.forced));
+      this.forced = 0;
+      if (next === this.index) return;
+      this.index = next;
+      this.slow = this.fast = 0;
+      this.cooldownUntil = now + 3000;
+      this.clearWindow(now);
+      this.onChange?.();
+      return;
+    }
     if (!this.enabled) return;
     // Frames over 2 s are tab switches or loading stalls, not rendering cost.
     if (frameMs > 0 && frameMs < 2000) this.frames.push(frameMs);
