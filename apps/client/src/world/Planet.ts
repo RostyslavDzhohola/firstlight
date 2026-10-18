@@ -17,6 +17,7 @@ import { skyPlanetsFor, type SkyPlanets } from "../render/skyPlanets.ts";
 import { localFrame, type V3 } from "../render/sunFrame.ts";
 import { applyTerrainSettings, terrainMaterialFor, terrainUniforms } from "../render/terrainMaterial.ts";
 import { applyWaterLook, createWaterMesh, waterMaterialFor } from "../render/water.ts";
+import type { WorldBuild } from "../game/worldReady.ts";
 import { SiteTown } from "./SiteTown.ts";
 import { siteGrassMask } from "./siteGrass.ts";
 
@@ -47,6 +48,9 @@ interface LoadedChunk {
   angle: number;
   topR: number;
 }
+
+/** Grass build budget per update behind the loading screen (ms; play keeps 2 ms a frame). */
+const EAGER_GRASS_MS = 8;
 
 // Scene-level nodes are built once and shared by every body (all inputs are shared uniforms),
 // so arriving on a new planet never invalidates material caches.
@@ -84,6 +88,11 @@ export class Planet {
   loadRadius: number;
   /** Chunks drawn after horizon culling (stats). */
   visibleChunks = 0;
+  /**
+   * Behind the arrival's loading screen (D-load-6): stream without the 200 ms pause between requests
+   * and give the grass a bigger time budget per update, so the full world builds sooner.
+   */
+  eager = false;
 
   constructor(private readonly ctx: RenderCtx, bodyId: BodyId) {
     this.scene = ctx.scene;
@@ -216,11 +225,11 @@ export class Planet {
     localFrame(ux, uy, uz, this.east, this.north);
     this.grass.setWind(this.wind.set(this.east[0] * 0.8 + this.north[0] * 0.6, this.east[1] * 0.8 + this.north[1] * 0.6, this.east[2] * 0.8 + this.north[2] * 0.6).normalize());
     this.cullHorizon(camera.position);
-    this.grass.update(camera.position, this.grassChunks(), now);
+    this.grass.update(camera.position, this.grassChunks(), now, this.eager ? EAGER_GRASS_MS : undefined);
     this.props.update(camera.position, now);
     this.town?.update(camera);
 
-    if (now - this.lastStream < 200) return this.pendingNear(ux, uy, uz);
+    if (!this.eager && now - this.lastStream < 200) return this.pendingNear(ux, uy, uz);
     this.lastStream = now;
     const R = this.body.radius;
     const cosLimit = Math.cos(Math.min(Math.PI, this.loadRadius / R));
@@ -283,6 +292,25 @@ export class Planet {
     this.grass.dropChunk(c.key);
     this.props.removeChunk(c.key);
     this.loaded.delete(c.key);
+  }
+
+  /**
+   * How far the world round the focus is built (D-load-6, the arrival's "Building the world"): the
+   * chunks the streaming wants (centres within loadRadius, the set update() requests) and how many
+   * are built, and the grass cells round the camera still to fill.
+   */
+  buildState(px: number, py: number, pz: number): WorldBuild {
+    const l = Math.hypot(px, py, pz);
+    const ux = px / l, uy = py / l, uz = pz / l;
+    const cos = Math.cos(Math.min(Math.PI, this.loadRadius / this.body.radius));
+    let chunks = 0, loaded = 0;
+    for (const info of this.chunkInfos) {
+      if (info.dir[0] * ux + info.dir[1] * uy + info.dir[2] * uz < cos) continue;
+      chunks++;
+      const c = this.loaded.get(info.key);
+      if (c && !c.pending) loaded++;
+    }
+    return { chunks, loaded, grass: this.grass.backlog() };
   }
 
   private pendingNear(ux: number, uy: number, uz: number): number {
@@ -375,6 +403,7 @@ export class Planet {
       entry.water = wm;
     }
     entry.grass = { key, face: r.face, cx: r.cx, cy: r.cy, positions: r.positions, grass: r.grass, center, radius: r.boundRadius };
+    this.grass.chunksChanged();
     this.props.addChunk(key, r.props, center, r.boundRadius);
   }
 

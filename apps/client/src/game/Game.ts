@@ -10,6 +10,7 @@ import { Net, TravelRedirect, type Snapshot } from "../net/Net.ts";
 import { AvatarView, avatarWarmupHook, preloadAvatars } from "../render/Avatars.ts";
 import { setAvatarTextureLowRes } from "../render/avatars/assets.ts";
 import { webgpuSecondChance } from "../render/rendererStart.ts";
+import { WORLD_READY_CAP_MS, WORLD_TOPUP_CAP_MS, worldReady, type WorldReadiness } from "./worldReady.ts";
 import { HorseView, horseWarmupHook, preloadHorse } from "../render/Horses.ts";
 import "../render/avatars/system.ts";
 import { Bench, benchConfig } from "../render/bench.ts";
@@ -507,16 +508,11 @@ export class Game {
       this.systems = CLIENT_SYSTEMS.map((f) => f(this)).filter((x): x is ClientSystem => !!x);
     }
 
-    // Stream terrain around the spawn before handing control over.
-    const t0 = performance.now();
-    for (;;) {
-      const p = this.player.pos;
-      const pending = this.planet.update(p.x, p.y, p.z, this.ctx.camera, performance.now());
-      setLoading("Building the world…", 0.4 + 0.4 * Math.max(0, 1 - pending / 40));
-      if (pending === 0 || performance.now() - t0 > 15000) break;
-      await new Promise((r) => setTimeout(r, 50));
-      alive("building the world");
-    }
+    // Build the world round the spawn before handing control over (D-load-6): every chunk the
+    // streaming wants, then the grass round the camera (placed now, so it fills where the player looks).
+    this.player.placeCamera(this.ctx.camera);
+    const world = stepProgress(0.4, 0.8);
+    await this.buildWorld(WORLD_READY_CAP_MS, (r) => setLoading(r.text, world.at(r.frac)), () => alive("building the world"));
     // The natural solids round the arrival, built behind the loading screen (play builds the rest
     // ahead of the player, one chunk a frame at most), one chunk per macrotask so the loading
     // screen keeps drawing. They clear the breakables' spots: wait (bounded) for the fracture
@@ -602,9 +598,40 @@ export class Game {
       },
     });
     alive("warming up shaders");
+    // The first-visit probe can change the tier (more grass, further): top it up first (D-load-6).
+    await this.buildWorld(WORLD_TOPUP_CAP_MS, null, () => alive("building the world"));
     // Hand-over: from here a close is a mid-game disconnect (no await until the caller resumes play).
     if (watch) this.net.onLeaveRoom = (code) => this.onRoomClosed(code);
     hideLoading();
+  }
+
+  /**
+   * Stream the world behind the loading screen until it is built (worldReady: every chunk the
+   * streaming wants, the grass round the camera) or `capMs` runs out (D-load-6). `show` gets the
+   * loader line; null keeps the current one.
+   */
+  private async buildWorld(capMs: number, show: ((r: WorldReadiness) => void) | null, alive: () => void) {
+    const t0 = performance.now();
+    this.planet.eager = true;
+    try {
+      for (let polls = 0; ; polls++) {
+        const p = this.player.pos;
+        this.planet.update(p.x, p.y, p.z, this.ctx.camera, performance.now());
+        const b = this.planet.buildState(p.x, p.y, p.z);
+        const r = worldReady(b, performance.now() - t0, capMs);
+        show?.(r);
+        if (r.done) {
+          const line = `[world] ${this.bodyId}: ${b.loaded}/${b.chunks} chunks, ${b.grass} grass cells left, ${((performance.now() - t0) / 1000).toFixed(1)} s`;
+          if (r.timedOut) console.warn(`${line}: handed over unfinished after ${capMs / 1000} s`);
+          else if (polls > 0) console.info(line);
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 25));
+        alive();
+      }
+    } finally {
+      this.planet.eager = false;
+    }
   }
 
   private warmupHook() {
