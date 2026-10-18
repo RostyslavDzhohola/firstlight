@@ -88,18 +88,20 @@ test.describe("J1 arrival", () => {
     expect(probe.blanks, "no presented frame shows a blank world").toEqual([]);
   });
 
-  test("J1.5 · item 1 · a steady capped WebGL2 run with an untrusted GPU timer: few trial up-steps, kept, no blank frame (D-view-4)", { tag: ["@J1", "@J1.5", "@item-1"] }, async ({ player, page }) => {
+  test("J1.7 · item 1 · a steady capped WebGL2 run with an untrusted GPU timer: few trial up-steps, kept, no blank frame (D-view-4)", { tag: ["@J1", "@J1.7", "@item-1"] }, async ({ player, page }) => {
     test.skip(player.gfx !== "webgl", "the owner's M1 case: WebGL2 through ANGLE Metal");
     // Ten minutes of ladder decisions in one: the ladder's clock runs 10× (windows, cooldowns, the
     // 30 s up-step hold-off and its back-off), the frames stay real (rAF capped at 60 Hz headless).
-    const CLOCK = 10;
-    const REAL_S = 60;
+    // The one-off real-clock measurement: E2E_LADDER_CLOCK=1 E2E_LADDER_SECONDS=600.
+    const CLOCK = Number(process.env.E2E_LADDER_CLOCK ?? 10);
+    const REAL_S = Number(process.env.E2E_LADDER_SECONDS ?? 60);
+    test.setTimeout(REAL_S * 1000 + 300_000);
     await player.joinAsDevAdmin({ starter: "Hexwick", body: "portus" });
     await player.waitInWorld(180_000, "portus");
     const act = (name: string, arg?: unknown) => page.evaluate(([n, a]) => (window as any).__fl.act[n as string](a), [name, arg] as const);
     const natural = (await player.snap()).gfx?.gpuUntrusted ?? null;
     expect(await act("ladderUntrusted"), "the timer is marked untrusted, as on the owner's M1").toBe(true);
-    expect(await act("ladderClock", CLOCK)).toBe(true);
+    if (CLOCK !== 1) expect(await act("ladderClock", CLOCK)).toBe(true);
     const started = await page.evaluate(() => (window as any).__fl.probe.start({ every: 2 }));
     expect(started.ok, `blink probe started (${started.reason ?? ""})`).toBe(true);
     // Two rungs down, the way a slow moment leaves it (each starts the up-step hold-off).

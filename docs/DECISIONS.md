@@ -1098,7 +1098,7 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   at once and the hold-off doubles (up to 480 s). Never while suspended; a trusted timer and no
   timer keep their rules (no timer: never up). A simulated 10-minute capped 60 Hz run: 2 trials, both
   kept, from rung 2 when every rung holds vsync; 4 trials, each reverted within 4 s (gaps 64, 124,
-  245 s), when full resolution misses vsync. J1.5, real WebGL2 on the M1 (headless, rAF capped at
+  245 s), when full resolution misses vsync. J1.7, real WebGL2 on the M1 (headless, rAF capped at
   60 Hz, timer marked untrusted, the ladder's clock at 10× for 60 s = 10 ladder-minutes): 2 trials,
   both kept, frames p50 16.7 ms, no blank frame. Builds on D-view-3 and D-controls-3. Why: the
   ladder counted the blurred menu's slow frames and reached its floor ~3.5 s after the owner opened
