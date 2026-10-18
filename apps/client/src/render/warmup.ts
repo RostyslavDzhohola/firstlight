@@ -16,7 +16,7 @@ import { flags } from "../config.ts";
 import { beginManualFrame, type TimestampSource } from "./timing.ts";
 import { castsLeanShadow, leanShadowsOn } from "./leanShadow.ts";
 import { glSlowCalls, setGlPhase } from "./glTrace.ts";
-import { gpuIdle, guardStatusPolls, warmLink, type PollGL } from "./syncPoll.ts";
+import { FENCE_PROMPT_MS, gpuIdle, guardStatusPolls, warmLink, type PollGL } from "./syncPoll.ts";
 import type { FirstDrawBatch, FirstDrawCensus, FirstDrawItem, SlowFrame, WarmupPhase, WarmupReport } from "./warmupReport.ts";
 import {
   deferPipelines, FirstDrawPacer, gateFirstDraws, glFence, LONE_COST, newStageCost, OLD_PACER, PACER, pipelineCost,
@@ -36,7 +36,7 @@ export function fnv1a(s: string): number {
 }
 
 /** `?warmdiag`: what a first draw was (material, object, GLSL sizes and hashes, its price, its link), for the batch log. */
-function describeFirstDraw(renderObject: unknown, pipeline: object, grant: Grant, link: number | null): FirstDrawItem {
+function describeFirstDraw(renderObject: unknown, pipeline: object, grant: Grant, link: { link: number | null; fence: number | null }, fencePrompt: number): FirstDrawItem {
   const r = renderObject as {
     material?: { type?: string; name?: string; isShadowPassMaterial?: boolean };
     object?: { name?: string; type?: string; parent?: { name?: string } | null };
@@ -57,8 +57,9 @@ function describeFirstDraw(renderObject: unknown, pipeline: object, grant: Grant
     newChars: grant.newChars,
     skinned: vs.includes("skinIndex"),
     shadow: r.material?.isShadowPassMaterial === true,
-    link: link === null ? null : Math.round(link),
-    warm: warmLink(link),
+    link: link.link === null ? null : Math.round(link.link),
+    fence: link.fence === null ? null : Math.round(link.fence),
+    warm: warmLink(link.link, link.fence, fencePrompt),
   };
 }
 
@@ -424,15 +425,20 @@ export async function warmup(
   // Each program judged by its own link (#39): one that linked quickly was cached, and its first draw is
   // priced at the warm rate; batches hold one class, the ceiling holds cold-priced units.
   const backendData = (renderer as unknown as { backend?: { get?(o: object): { programGPU?: object } | undefined } }).backend;
-  const linkMsOf = (p: object): number | null => {
+  const linkOf = (p: object): { link: number | null; fence: number | null } => {
     const prog = syncGuard?.active ? backendData?.get?.(p)?.programGPU : undefined;
-    return prog ? syncGuard!.linkMs(prog) : null;
+    return prog ? { link: syncGuard!.linkMs(prog), fence: syncGuard!.fenceMs(prog) } : { link: null, fence: null };
   };
-  const classOf = (p: object): Warmth => (warmLink(linkMsOf(p)) ? "warm" : "cold");
+  // `?warmfence=N`: a fast link counts only after a fence within N ms (syncPoll.ts; off by default)
+  const fencePrompt = flags.has("warmfence") ? Number(flags.get("warmfence")) || FENCE_PROMPT_MS : Infinity;
+  const classOf = (p: object): Warmth => {
+    const l = linkOf(p);
+    return warmLink(l.link, l.fence, fencePrompt) ? "warm" : "cold";
+  };
   const gated = deferred?.active && !ctx.webgpu
     ? gateFirstDraws(
       renderer as unknown as GateRenderer,
-      diag ? (ro, p, g) => frameGrants.push(describeFirstDraw(ro, p, g, linkMsOf(p))) : undefined,
+      diag ? (ro, p, g) => frameGrants.push(describeFirstDraw(ro, p, g, linkOf(p), fencePrompt)) : undefined,
       oldPacer ? pipelineCost : newStageCost,
       oldPacer ? {} : { classOf, price: (u, c) => pacer.price(u, c), loneCost: LONE_COST },
     )
@@ -561,18 +567,9 @@ export async function warmup(
     if (frameAt) pacer.tick(now, now - frameAt);
     frameAt = now;
   };
-  // WebGL2: while a first-draw batch is in flight the warm-up draws nothing and only polls its fence
-  // (#39): a frame drawn then waits in the GPU process behind the Metal pipeline build, while with
-  // none the compositor keeps presenting the loader. `?busydraw` draws on.
-  const holdWhileBusy = !!gate && !flags.has("busydraw");
   const next = async () => {
     await nextFrame();
     observe(performance.now(), (gate?.granted() ?? 0) - grantedAt, cpu, allowed);
-    while (holdWhileBusy && pacer.inFlight()) {
-      await nextFrame();
-      buildsAt = stats.total;
-      observe(performance.now(), 0, 0, 0);
-    }
   };
   const programs = () => (renderer.info as unknown as { memory?: { programs?: number } }).memory?.programs ?? 0;
   const stages0 = programs();

@@ -104,8 +104,12 @@ export interface FirstDrawItem {
   /** A skinned vertex stage (characters, horses), and drawn in a shadow pass. */
   skinned: boolean;
   shadow: boolean;
-  /** ms from its program's link to the first poll that found it complete (null: not seen), and whether that counts as cached. */
+  /**
+   * ms from when the GPU process reached its program's link (its fence) to the first poll that found it
+   * complete, ms from the linkProgram call to that fence (null: not seen), and whether that counts as cached.
+   */
   link: number | null;
+  fence: number | null;
   warm: boolean;
 }
 

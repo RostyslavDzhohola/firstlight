@@ -617,30 +617,6 @@ describe("warm-up report (per-phase times and shader counts) and progress", () =
     }
   });
 
-  it("WebGL2: draws no frame while a first-draw batch is in flight, only polls its fence (?busydraw: draws on)", async () => {
-    for (const busydraw of [false, true]) {
-      vi.spyOn(flags, "has").mockImplementation((n) => busydraw && n === "busydraw");
-      const pipelines = new FakeDrawPipelines();
-      const gl = fakeFenceGl();
-      try {
-        const ctx = fakeCtx({ items: 0, webgpu: false, shadows: false, pipelines, objects: 12, gl });
-        const render = ctx.render.bind(ctx);
-        let drawnInFlight = 0;
-        ctx.render = () => {
-          if (gl.fences.some((f) => f.polls < 2)) drawnInFlight++; // a batch sent and not yet finished
-          render();
-        };
-        await warmup(ctx, { frames: 1 });
-        if (busydraw) expect(drawnInFlight).toBeGreaterThan(0);
-        else expect(drawnInFlight).toBe(0);
-        expect(new Set(draws.slice(0, -1).flat()).size).toBe(12); // every program still drew before the loader goes
-      } finally {
-        vi.unstubAllGlobals();
-        vi.restoreAllMocks();
-      }
-    }
-  });
-
   it("reports the warm-up's longest rAF gap and its longest main-thread task separately", async () => {
     const entries: ((list: { getEntries(): { duration: number }[] }) => void)[] = [];
     class FakeObserver {
@@ -676,7 +652,7 @@ describe("warm-up report (per-phase times and shader counts) and progress", () =
       const ctx = fakeCtx({ items: 0, webgpu: false, shadows: false, pipelines, objects: 3, gl: fakeFenceGl() });
       const r = await warmup(ctx, { frames: 1 });
       const items = r.batches!.flatMap((b) => b.items);
-      expect(items.map((i) => [i.warm, i.link])).toEqual([[false, null], [false, null], [false, null]]); // no links seen: cold
+      expect(items.map((i) => [i.warm, i.link, i.fence])).toEqual([[false, null, null], [false, null, null], [false, null, null]]); // no links seen: cold
     } finally {
       vi.unstubAllGlobals();
       vi.restoreAllMocks();
