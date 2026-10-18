@@ -84,6 +84,32 @@ export interface ServerNpc {
   boss: boolean;
   area: string | null;
 }
+/** A shader warm-up as the hook reports it (src/render/warmup.ts WarmupReport, D-load-1). */
+export interface WarmupPhase {
+  ms: number;
+  builds: number;
+}
+export interface Warmup {
+  label: string;
+  backend: "webgpu" | "webgl2";
+  tier: string | null;
+  start: number;
+  end: number;
+  ms: number;
+  builds: number;
+  shaders: number;
+  phases: {
+    compile: WarmupPhase & { items: number };
+    compute: WarmupPhase & { nodes: number };
+    shadows: WarmupPhase & { frames: number; predicted: number };
+    frames: WarmupPhase & { frames: number };
+  };
+}
+/** A warm-up with the page's frame times during it (a long frame = the main thread was blocked). */
+export interface WarmupNote extends Warmup {
+  framesDuring: { frames: number; p50: number; p95: number; max: number; over100: number; over250: number; worst: { t: number; ms: number }[] };
+}
+
 export interface FlEvent {
   t: number;
   kind: string;
@@ -525,6 +551,23 @@ export class Player {
       .poll(async () => (await read())?.watching ?? -1, { timeout: timeoutMs, intervals: [250], message: "the post-warm-up shader watch window closes (120 rendered frames)" })
       .toBe(0);
     return (await read())!;
+  }
+
+  /** Every warm-up the hook still holds (the first-visit probe's included), oldest first. */
+  warmups(): Promise<Warmup[]> {
+    return this.page.evaluate(() => (window as unknown as { __fl: { warmups(): Warmup[] } }).__fl.warmups());
+  }
+
+  /** The latest warm-up whose label starts with `label`, with the frame times during it. */
+  warmup(label = "arrival"): Promise<WarmupNote | null> {
+    return this.page.evaluate((label) => {
+      type Fl = { warmups(): Warmup[]; frames: { stats(since: number, until: number): WarmupNote["framesDuring"] & Record<string, unknown> } };
+      const fl = (window as unknown as { __fl: Fl }).__fl;
+      const w = [...fl.warmups()].reverse().find((x) => x.label.startsWith(label));
+      if (!w) return null;
+      const f = fl.frames.stats(w.start, w.end);
+      return { ...w, framesDuring: { frames: f.frames, p50: f.p50, p95: f.p95, max: f.max, over100: f.over100, over250: f.over250, worst: f.worst } };
+    }, label);
   }
 
   /** Travel through a Portus plaza portal on foot. */

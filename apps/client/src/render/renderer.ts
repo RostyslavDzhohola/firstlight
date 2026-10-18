@@ -11,7 +11,7 @@ import {
 } from "./quality.ts";
 import { startRenderer } from "./rendererStart.ts";
 import { GpuTimer, ResolutionLadder } from "./timing.ts";
-import { compileForPass, passCallDepth, saveRenderState, type GuardedRenderer, type PassCompileRenderer } from "./compilePass.ts";
+import { compileForPass, passCallDepth, saveRenderState, type CompileProgress, type GuardedRenderer, type PassCompileRenderer } from "./compilePass.ts";
 
 export { TIERS, FEATURES, type Tier, type Feature, type ResolvedSettings };
 
@@ -64,7 +64,7 @@ export interface RenderCtx {
   resize(): void;
   render(): void;
   /** Compile the scene for the context its frames use (the post pipeline's scene pass): warm-up. */
-  compileScene(): Promise<unknown>;
+  compileScene(onProgress?: CompileProgress): Promise<unknown>;
   /** Per-frame bookkeeping after render (GPU timer, ladder). */
   afterFrame(now: number, frameMs: number): void;
   stored(): StoredGfx;
@@ -282,9 +282,9 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
     render() {
       pipeline.render();
     },
-    compileScene() {
-      if (passCompileOff) return renderer.compileAsync(scene, camera);
+    compileScene(onProgress) {
       const r = renderer as unknown as PassCompileRenderer;
+      if (passCompileOff) return r.compileAsync(scene, camera, null, onProgress);
       const sp = post?.scenePass ?? null;
       if (sp && passDepth === null) {
         // Learn the scene pass's call depth from one render with the scene hidden (background and
@@ -307,10 +307,10 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
         if (failed) {
           passCompileOff = true;
           rebuildPost(true);
-          return renderer.compileAsync(scene, camera);
+          return r.compileAsync(scene, camera, null, onProgress);
         }
       }
-      return compileForPass(r, scene, camera, sp, passDepth);
+      return compileForPass(r, scene, camera, sp, passDepth, onProgress);
     },
     afterFrame(now, frameMs) {
       gpu.frame();

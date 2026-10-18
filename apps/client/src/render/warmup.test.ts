@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
-import { forceProperty, installShaderMonitor, keptSamples, shadowBuildCost, shaderStats, warmShadowCasters, warmup } from "./warmup.ts";
+import { forceProperty, installShaderMonitor, keptSamples, lastWarmup, predictShadowBuilds, shadowBuildCost, shaderStats, warmShadowCasters, warmup } from "./warmup.ts";
 import type { RenderCtx } from "./renderer.ts";
 import { watchDisposals } from "./disposeWatch.testutil.ts";
 
@@ -154,5 +154,131 @@ describe("warmShadowCasters", () => {
     expect(casting(parts)).toBe(10);
     const others = scene.children.filter((o) => !(parts as THREE.Object3D[]).includes(o));
     expect(others.every((o) => !o.castShadow)).toBe(true);
+  });
+});
+
+describe("warm-up report (per-phase times and shader counts) and progress", () => {
+  /** A fake renderer on a hand-moved clock: compile items cost 10 ms and one build each, frames 5 ms. */
+  function fakeCtx(opts: { items: number; webgpu: boolean; shadows: boolean; frameBuilds?: number }) {
+    let clock = 1000;
+    vi.spyOn(performance, "now").mockImplementation(() => clock);
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => setTimeout(cb, 0));
+    const debug: { onNodeBuilderCreated?: (builder: unknown, ro: unknown) => void } = {};
+    const build = () => debug.onNodeBuilderCreated?.({}, { object: new THREE.Mesh(), material: new THREE.MeshBasicNodeMaterial() });
+    const scene = new THREE.Scene();
+    const geo = new THREE.BoxGeometry();
+    const mat = new THREE.MeshStandardNodeMaterial();
+    for (let i = 0; i < 6; i++) {
+      const m = new THREE.InstancedMesh(geo, mat, 2); // a shadow build each
+      m.castShadow = true;
+      scene.add(m);
+    }
+    let frameBuilds = opts.frameBuilds ?? 0;
+    const ctx = {
+      scene,
+      camera: new THREE.PerspectiveCamera(),
+      webgpu: opts.webgpu,
+      tier: "medium",
+      settings: { on: { shadows: opts.shadows }, shadows: { mode: "map" } },
+      renderer: {
+        debug,
+        info: { frame: 0, reset() {} },
+        compileAsync: async (_s: unknown, _c: unknown, _t: unknown, onProgress?: (e: { loaded: number; total: number }) => void) => {
+          for (let i = 1; i <= opts.items; i++) {
+            await Promise.resolve();
+            clock += 10;
+            build();
+            onProgress?.({ loaded: i, total: opts.items });
+          }
+        },
+      },
+      render() {
+        clock += 5;
+        if (frameBuilds > 0) {
+          frameBuilds--;
+          build();
+        }
+      },
+      gpu: { frame() {}, drain: () => [] },
+    } as unknown as RenderCtx;
+    installShaderMonitor(ctx);
+    return ctx;
+  }
+
+  it("times the scene-pass compile, compute compile, shadow frames and real frames, with the shaders built in each", async () => {
+    try {
+      const ctx = fakeCtx({ items: 5, webgpu: false, shadows: true, frameBuilds: 1 });
+      const before = shaderStats().total;
+      await warmup(ctx, { frames: 2, label: "arrival" });
+      const r = lastWarmup()!;
+      expect(r.label).toBe("arrival");
+      expect(r.backend).toBe("webgl2");
+      expect(r.tier).toBe("medium");
+      expect(r.phases.compile).toEqual({ ms: 50, builds: 5, items: 5 });
+      expect(r.phases.compute).toEqual({ ms: 0, builds: 0, nodes: 0 }); // no compute nodes yet
+      // 6 predicted shadow builds in batches of 4: two frames (the first frame's own build lands here)
+      expect(r.phases.shadows).toEqual({ ms: 10, builds: 1, frames: 2, predicted: 6 });
+      expect(r.phases.frames).toEqual({ ms: 15, builds: 0, frames: 3 }); // 2 + the settle frame
+      expect(r.ms).toBe(75);
+      expect(r.end - r.start).toBe(75);
+      expect(r.builds).toBe(6);
+      expect(r.shaders).toBe(before + 6);
+      expect(shaderStats().warmups.at(-1)).toBe(r); // what the e2e hook reads
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("reports progress as done/total work units, monotonic, ending at total/total", async () => {
+    try {
+      const ctx = fakeCtx({ items: 5, webgpu: true, shadows: true });
+      const events: [number, number][] = [];
+      await warmup(ctx, { frames: 2, onProgress: (done, total) => events.push([done, total]) });
+      // 5 compile items + 6 predicted shadow builds + 2 frames + the settle frame
+      expect(events[0]).toEqual([1, 14]);
+      expect(events.at(-1)).toEqual([14, 14]);
+      for (let i = 1; i < events.length; i++) {
+        expect(events[i]![0]).toBeGreaterThanOrEqual(events[i - 1]![0]);
+        expect(events[i]![0]).toBeLessThanOrEqual(events[i]![1]);
+      }
+      expect(events.map((e) => e[0])).toEqual([1, 2, 3, 4, 5, 9, 11, 12, 13, 14]);
+      expect(lastWarmup()!.backend).toBe("webgpu");
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("still ends at total/total without shadows or compile items", async () => {
+    try {
+      const ctx = fakeCtx({ items: 0, webgpu: false, shadows: false });
+      const events: [number, number][] = [];
+      await warmup(ctx, { frames: 1, onProgress: (done, total) => events.push([done, total]) });
+      expect(events).toEqual([[1, 2], [2, 2]]);
+      expect(lastWarmup()!.phases.shadows).toEqual({ ms: 0, builds: 0, frames: 0, predicted: 0 });
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("predicts the shadow phase's builds the way the batching counts them", () => {
+    const scene = new THREE.Scene();
+    const geo = new THREE.BoxGeometry();
+    const mat = new THREE.MeshStandardNodeMaterial();
+    for (let i = 0; i < 3; i++) {
+      const m = new THREE.InstancedMesh(geo, mat, 2);
+      m.castShadow = true;
+      scene.add(m);
+    }
+    for (let i = 0; i < 4; i++) {
+      const m = new THREE.Mesh(geo, mat);
+      m.castShadow = true;
+      scene.add(m);
+    }
+    scene.add(new THREE.Mesh(geo, new THREE.MeshStandardNodeMaterial())); // not a caster
+    expect(predictShadowBuilds(scene)).toBe(4);
   });
 });

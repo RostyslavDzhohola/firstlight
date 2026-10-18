@@ -51,8 +51,35 @@ export function loadingPhase(text: string, prev: LoadingPhase = { step: 0, body:
   if (/^Connecting/i.test(t)) return { ...prev, step: 1 };
   if (/^(Building the world|Loading characters)/i.test(t)) return { ...prev, step: 2 };
   if (/^Applying graphics/i.test(t)) return { ...prev, step: 3, compact: true };
-  if (/^(Tuning graphics|Warming up shaders)/i.test(t)) return { ...prev, step: 3 };
+  if (/^(Tuning graphics|Warming up shaders|Preparing shaders)/i.test(t)) return { ...prev, step: 3 };
   return prev;
+}
+
+/** Where the bar stands when the shader warm-up starts; it fills the rest (D-load-1). */
+export const WARMUP_FROM = 0.85;
+
+export interface WarmupLine {
+  text: string;
+  frac: number;
+}
+
+/**
+ * The warm-up step's line and bar: "Preparing shaders 120/242" from warmup()'s done/total work
+ * units, the bar from WARMUP_FROM to 100%. Never goes backwards (a total that grows holds the bar)
+ * and never shows more done than total.
+ */
+export function warmupProgress(from = WARMUP_FROM) {
+  let frac = from;
+  return {
+    start(): WarmupLine {
+      return { text: "Preparing shaders…", frac };
+    },
+    update(done: number, total: number): WarmupLine {
+      const d = Math.max(0, Math.min(done, total));
+      frac = Math.max(frac, total > 0 ? from + ((1 - from) * d) / total : 1);
+      return { text: `Preparing shaders ${d}/${total}`, frac };
+    },
+  };
 }
 
 // ------------------------------------------------------------------------------------------------ DOM

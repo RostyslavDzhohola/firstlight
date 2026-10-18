@@ -25,7 +25,7 @@ import type { Hud } from "../ui/hud.ts";
 import { Menu } from "../ui/menu.ts";
 import { bindUi } from "../ui/bind.ts";
 import { pickDisplayName } from "../ui/account.ts";
-import { hideLoading, setLoading, setLoadingBadge } from "../ui/loading.ts";
+import { hideLoading, setLoading, setLoadingBadge, warmupProgress } from "../ui/loading.ts";
 import { getAccountInfo, invalidatePlayToken, isDevGuest } from "../net/auth.ts";
 import { PilesView } from "../world/PilesView.ts";
 import { breakablesLayoutPending } from "../world/Breakables.ts";
@@ -577,8 +577,20 @@ export class Game {
       this.env.setBenchMode(this.bodyId, this.planet.look);
       this.bench.update(0, performance.now(), this.ctx.camera);
     }
-    setLoading("Warming up shaders…", 0.92);
-    await warmup(this.ctx, { frames: 4, hooks: [this.warmupHook()], beforeFrame: updateWorld });
+    // The loader counts the warm-up's work ("Preparing shaders 120/242") up to 100% (D-load-1).
+    const shaders = warmupProgress();
+    const first = shaders.start();
+    setLoading(first.text, first.frac);
+    await warmup(this.ctx, {
+      frames: 4,
+      hooks: [this.warmupHook()],
+      beforeFrame: updateWorld,
+      label: `arrival:${this.bodyId}`,
+      onProgress: (done, total) => {
+        const p = shaders.update(done, total);
+        setLoading(p.text, p.frac);
+      },
+    });
     alive("warming up shaders");
     // Hand-over: from here a close is a mid-game disconnect (no await until the caller resumes play).
     if (watch) this.net.onLeaveRoom = (code) => this.onRoomClosed(code);
@@ -609,7 +621,7 @@ export class Game {
     this.rewarming = true;
     setLoading("Applying graphics settings…", 0.5);
     try {
-      await warmup(this.ctx, { frames: 3, hooks: [this.warmupHook()], beforeFrame: () => this.updateWorldForWarmup() });
+      await warmup(this.ctx, { frames: 3, hooks: [this.warmupHook()], beforeFrame: () => this.updateWorldForWarmup(), label: "graphics" });
     } finally {
       hideLoading();
       this.running = true;
@@ -636,7 +648,7 @@ export class Game {
       const r = await runProbe(this.ctx);
       console.info(`[gfx] probe → ${r.tier}${r.valid ? "" : " (not saved)"}`, r);
       this.ctx.setProbedTier(r.tier, { persist: r.valid, clearPinned: true });
-      await warmup(this.ctx, { frames: 3, hooks: [this.warmupHook()] });
+      await warmup(this.ctx, { frames: 3, hooks: [this.warmupHook()], label: "reprobe" });
     } finally {
       hideLoading();
       this.running = true;

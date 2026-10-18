@@ -21,9 +21,12 @@ export interface PassCompileRenderer {
   setRenderTarget(target: unknown): void;
   getMRT(): unknown;
   setMRT(mrt: unknown): void;
-  compileAsync(scene: unknown, camera: unknown): Promise<unknown>;
+  compileAsync(scene: unknown, camera: unknown, targetScene?: null, onProgress?: CompileProgress | null): Promise<unknown>;
   _renderContexts?: { get(renderTarget?: unknown, mrt?: unknown, callDepth?: number): unknown };
 }
+
+/** compileAsync's progress: render objects prepared so far, of `total`. */
+export type CompileProgress = (e: { loaded: number; total: number }) => void;
 
 export interface PassLike {
   renderTarget: unknown;
@@ -70,9 +73,16 @@ export function passCallDepth(renderer: PassCompileRenderer, passTarget: unknown
  * call without a pass or a depth, or when three's internals aren't what this expects (a different
  * three version), so it never breaks a boot.
  */
-export function compileForPass(renderer: PassCompileRenderer, scene: unknown, camera: unknown, pass: PassLike | null, depth: number | null): Promise<unknown> {
+export function compileForPass(
+  renderer: PassCompileRenderer,
+  scene: unknown,
+  camera: unknown,
+  pass: PassLike | null,
+  depth: number | null,
+  onProgress: CompileProgress | null = null,
+): Promise<unknown> {
   const contexts = renderer._renderContexts;
-  if (!pass || depth === null || !contexts || typeof contexts.get !== "function") return renderer.compileAsync(scene, camera);
+  if (!pass || depth === null || !contexts || typeof contexts.get !== "function") return renderer.compileAsync(scene, camera, null, onProgress);
   const prevTarget = renderer.getRenderTarget();
   const prevMrt = renderer.getMRT();
   try {
@@ -85,7 +95,7 @@ export function compileForPass(renderer: PassCompileRenderer, scene: unknown, ca
         function (this: unknown, renderTarget?: unknown, mrt?: unknown, callDepth = 0) {
           return get.call(this, renderTarget, mrt, renderTarget === pass.renderTarget && callDepth === 0 ? depth : callDepth);
         },
-      () => renderer.compileAsync(scene, camera),
+      () => renderer.compileAsync(scene, camera, null, onProgress),
     );
   } finally {
     renderer.setRenderTarget(prevTarget);

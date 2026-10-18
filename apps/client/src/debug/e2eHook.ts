@@ -10,7 +10,8 @@
 //   events(since?)        recent observations, oldest first: server combat messages ("in"), attack
 //                         messages we sent ("out"), key and mouse presses, player animation and avatar clip
 //                         changes, toasts, body/lock/loading/graphics changes
-//   frames.stats(since?)  requestAnimationFrame deltas (always recorded: a 4096-entry ring, cheap)
+//   frames.stats(since?, until?)  requestAnimationFrame deltas (always recorded: a 4096-entry ring, cheap)
+//   warmups()             the last few shader warm-ups: label, backend, per-phase ms and builds, shader count
 //   probe.start(opts)     blink probe, only while a journey runs it: canvas luma from a 32×18 copy every
 //                         `every` frames (createImageBitmap right after the game's render, so no readback
 //                         of the full frame and no stall) plus `hidden` flips in the DOM. probe.stop() →
@@ -737,10 +738,13 @@ export function installE2eHook(win: Window & typeof globalThis): void {
     events: (since = -Infinity) => log.filter((e) => e.t >= since),
     clearEvents: () => void (log.length = 0),
     frames: {
-      stats: (since = -Infinity) => frameStats(frames.since(since)),
+      /** Frames that ended at or after `since` and started by `until` (a window such as a warm-up). */
+      stats: (since = -Infinity, until = Infinity) => frameStats(frames.since(since).filter((f) => f.t - f.v <= until)),
       raw: (since = -Infinity) => frames.since(since).map((f) => Math.round(f.v * 10) / 10),
     },
     probe: { start: startProbe, stop: stopProbe, running: () => !!probe },
+    /** The last few shader warm-ups, per phase (render/warmup.ts WarmupReport, D-load-1). */
+    warmups: () => (window as unknown as { __shaders?: { warmups?: unknown[] } }).__shaders?.warmups ?? [],
     /** Distance, bearing and camera aim from the player to a world point (null before the game). */
     targetOf: (x: number, y: number, z: number) => targetFrom(game())?.(x, y, z) ?? null,
     /**

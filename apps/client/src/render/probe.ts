@@ -55,7 +55,7 @@ export async function runProbe(ctx: RenderCtx, beforeFrame?: () => void): Promis
   }
   try {
     ctx.setTier("medium", { persist: false, auto: true });
-    await warmup(ctx, { frames: 3, beforeFrame });
+    await warmup(ctx, { frames: 3, beforeFrame, label: "probe" });
     const m = await measure(ctx, 2000, beforeFrame);
     // Drop the first few frames (pipeline creation tails).
     const d = decideProbe({ raf: m.raf.slice(3), gpu: m.gpu.slice(2), gpuAvailable: ctx.gpu.available, visible: m.visible });
@@ -63,7 +63,7 @@ export async function runProbe(ctx: RenderCtx, beforeFrame?: () => void): Promis
     let highGpuP50: number | null = null;
     if (d.valid && d.reprobeHigh) {
       ctx.setTier("high", { persist: false, auto: true });
-      await warmup(ctx, { frames: 3, beforeFrame });
+      await warmup(ctx, { frames: 3, beforeFrame, label: "probe" });
       const h = await measure(ctx, 1200, beforeFrame);
       const u = h.visible ? decideUltra(h.gpu.slice(2)) : { tier: "high" as Tier, gpuP50: null };
       tier = u.tier;
