@@ -163,3 +163,96 @@ describe("looks → models", () => {
     expect(src.get("walk")!.tracks[0]!.values[1]).toBeCloseTo(UAL_PELVIS); // the shared clip is untouched
   });
 });
+
+describe("character textures follow the tier up (D-load-6)", () => {
+  /** A stand-in texture of `size`² (named like the file it came from). */
+  const tex = (name: string, size: number) => {
+    const t = new THREE.Texture({ width: size, height: size } as unknown as HTMLImageElement);
+    t.name = name;
+    return t;
+  };
+  /** Every TextureNode in a material's node graph. */
+  function textureNodes(m: THREE.Material): { value: THREE.Texture }[] {
+    const seen = new Set<unknown>();
+    const found: { value: THREE.Texture }[] = [];
+    const visit = (n: unknown) => {
+      if (!n || typeof n !== "object" || seen.has(n)) return;
+      seen.add(n);
+      const node = n as { isNode?: boolean; isTextureNode?: boolean; getChildren?: () => Iterable<unknown> };
+      if (!node.isNode) return;
+      if (node.isTextureNode) found.push(n as { value: THREE.Texture });
+      for (const c of node.getChildren?.() ?? []) visit(c);
+    };
+    const nm = m as unknown as Record<string, unknown>;
+    for (const k of ["colorNode", "normalNode", "emissiveNode"]) visit(nm[k]);
+    return found;
+  }
+
+  it("a session that started on Low swaps its 512² textures for 1024² ones in the same materials (no new shader builds)", async () => {
+    const { MODEL_FILES, STARTER_FILES, flatNormalMap, raiseTextures } = await import("./avatars/assets.ts");
+    const { avatarMaterial } = await import("./avatars/material.ts");
+    const own = (i: number) => i < STARTER_FILES.length;
+    const textures = MODEL_FILES.map((f, i) => ({ albedo: tex(`${f}_albedo_512`, 512), normal: own(i) ? tex(`${f}_normal_512`, 512) : flatNormalMap() }));
+    const before = textures.map((t) => ({ ...t }));
+    const mats = textures.map((t, i) => avatarMaterial(t, i % 6));
+    const versions = mats.map((m) => m.version);
+    const released = new Set<THREE.Texture>();
+    for (const t of before) for (const x of [t.albedo, t.normal]) x.addEventListener("dispose", () => released.add(x));
+    const asked: string[] = [];
+    const ok = await raiseTextures({ textures } as never, async (name, srgb) => {
+      asked.push(name);
+      const t = tex(name, 1024);
+      t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+      return t;
+    });
+    expect(ok).toBe(true);
+    // The full-size files: every look's albedo, the sculpted originals' normal maps (the second looks keep the flat one).
+    expect(asked.sort()).toEqual([...MODEL_FILES.map((f) => `${f}_albedo`), ...STARTER_FILES.map((f) => `${f}_normal`)].sort());
+    textures.forEach((t, i) => {
+      expect((t.albedo.image as { width: number }).width, MODEL_FILES[i]).toBe(1024);
+      if (own(i)) expect((t.normal.image as { width: number }).width).toBe(1024);
+      else expect(t.normal).toBe(flatNormalMap());
+      // Same material, same program: only the bound textures changed.
+      expect(avatarMaterial(t, i % 6)).toBe(mats[i]);
+      expect(mats[i]!.version).toBe(versions[i]);
+      const bound = textureNodes(mats[i]!).map((n) => n.value);
+      expect(bound).toContain(t.albedo);
+      expect(bound).not.toContain(before[i]!.albedo);
+      if (own(i)) expect(bound).toContain(t.normal);
+    });
+    expect(released.size, "the 512² textures are released").toBe(MODEL_FILES.length + STARTER_FILES.length);
+    expect(released.has(flatNormalMap())).toBe(false);
+  });
+
+  it("keeps the 512² textures when the full-size download fails", async () => {
+    const { MODEL_FILES, raiseTextures } = await import("./avatars/assets.ts");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const textures = MODEL_FILES.map((f) => ({ albedo: tex(`${f}_albedo_512`, 512), normal: tex(`${f}_normal_512`, 512) }));
+      const before = textures.map((t) => ({ ...t }));
+      let n = 0;
+      const ok = await raiseTextures({ textures } as never, async (name) => {
+        if (++n === 3) throw new Error("offline");
+        return tex(name, 1024);
+      });
+      expect(ok).toBe(false);
+      textures.forEach((t, i) => expect(t).toEqual(before[i]));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("only a session whose textures are 512² reloads, and only for a tier above Low", async () => {
+    const { avatarTexturesFollowTier } = await import("./avatars/assets.ts");
+    let loads = 0;
+    const raise = async () => {
+      loads++;
+      return true;
+    };
+    expect(await avatarTexturesFollowTier("medium", { lowRes: false, raise })).toBe(false); // started at 1024²
+    expect(await avatarTexturesFollowTier("low", { lowRes: true, raise })).toBe(false); // still on Low
+    expect(loads).toBe(0);
+    expect(await avatarTexturesFollowTier("high", { lowRes: true, raise })).toBe(true);
+    expect(loads).toBe(1);
+  });
+});

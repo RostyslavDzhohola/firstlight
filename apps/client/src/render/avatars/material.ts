@@ -49,13 +49,17 @@ export function toonRamp(): THREE.DataTexture {
   return ramp;
 }
 
-const cache = new Map<string, THREE.MeshToonNodeMaterial>();
+type TextureNode = ReturnType<typeof texture>;
+
+/** Per look's texture set, per palette: the material and its two texture nodes (rebindAvatarTextures). */
+const cache = new WeakMap<StarterTextures, Map<number, { material: THREE.MeshToonNodeMaterial; albedo: TextureNode; normal: TextureNode }>>();
 
 export function avatarMaterial(tex: StarterTextures, palette: number): THREE.MeshToonNodeMaterial {
   const p = ((palette % PALETTES.length) + PALETTES.length) % PALETTES.length;
-  const key = `${tex.albedo.uuid}:${p}`;
-  let m = cache.get(key);
-  if (m) return m;
+  let byPalette = cache.get(tex);
+  if (!byPalette) cache.set(tex, (byPalette = new Map()));
+  const hit = byPalette.get(p);
+  if (hit) return hit.material;
   const [prim, sec, acc] = PALETTES[p]!;
   const role = attribute("color", "vec4");
   const albedo = texture(tex.albedo, uv());
@@ -66,11 +70,12 @@ export function avatarMaterial(tex: StarterTextures, palette: number): THREE.Mes
   const cAcc = color(acc);
   const tint = mix(mix(mix(vec3(1, 1, 1), cPrim, role.x), cSec, role.y), cAcc, role.z);
   const fres = float(1).sub(saturate(dot(normalView, positionViewDirection))).pow(3);
-  m = new THREE.MeshToonNodeMaterial();
+  const m = new THREE.MeshToonNodeMaterial();
   m.gradientMap = toonRamp();
   m.colorNode = mix(base.mul(tint), cAcc, painted);
   // Blender bakes OpenGL-style normals against Blender UVs; glTF UVs flip V, hence Y = -1.
-  m.normalNode = normalMap(texture(tex.normal, uv()), vec2(1, -1));
+  const normal = texture(tex.normal, uv());
+  m.normalNode = normalMap(normal, vec2(1, -1));
   // NodeMaterial.setupLighting() honours emissiveNode on every node material; the toon typings omit it.
   (m as THREE.MeshToonNodeMaterial & { emissiveNode: THREE.Node | null }).emissiveNode =
     cAcc.mul(max(role.z, painted)).mul(2.2).add(avatarRim.color.mul(fres).mul(avatarRim.strength));
@@ -78,8 +83,22 @@ export function avatarMaterial(tex: StarterTextures, palette: number): THREE.Mes
   m.name = `avatar-palette-${p}`;
   // Quest NPCs (keepers, guides) dissolve between the camera and the player; players never (D-view-5).
   applyOccluderFadeGated(m);
-  cache.set(key, m);
+  byPalette.set(p, { material: m, albedo, normal });
   return m;
+}
+
+/**
+ * Point a look's materials at other textures of the same kind (the 1024² set after a session that
+ * started on Low moves up a tier, D-load-6) and update `tex` to them. Textures are bindings, not
+ * code: the materials keep their programs, so nothing compiles again.
+ */
+export function rebindAvatarTextures(tex: StarterTextures, next: StarterTextures) {
+  for (const e of cache.get(tex)?.values() ?? []) {
+    e.albedo.value = next.albedo;
+    e.normal.value = next.normal;
+  }
+  tex.albedo = next.albedo;
+  tex.normal = next.normal;
 }
 
 /** Cheap far-LOD / fallback capsule material in the palette's primary colour (shared). */

@@ -8,7 +8,7 @@ import { BODIES, CAMERA_SOLID_KINDS, natureSolids, padDirs, type BodyId, type Na
 import { config, flags } from "../config.ts";
 import { Net, TravelRedirect, type Snapshot } from "../net/Net.ts";
 import { AvatarView, avatarWarmupHook, preloadAvatars } from "../render/Avatars.ts";
-import { setAvatarTextureLowRes } from "../render/avatars/assets.ts";
+import { avatarTexturesFollowTier, setAvatarTextureLowRes } from "../render/avatars/assets.ts";
 import { webgpuSecondChance } from "../render/rendererStart.ts";
 import { WORLD_READY_CAP_MS, WORLD_TOPUP_CAP_MS, worldReady, type WorldReadiness } from "./worldReady.ts";
 import { HorseView, horseWarmupHook, preloadHorse } from "../render/Horses.ts";
@@ -566,6 +566,8 @@ export class Game {
       }
       alive("tuning graphics");
     }
+    // The probe (or a tier change made while travelling) can lift a session that started on Low (D-load-6).
+    await avatarTexturesFollowTier(this.ctx.tier);
     // The bench crowd exists before warm-up so its shaders compile behind the loading screen.
     const benchCfg = benchConfig();
     if (benchCfg && !this.bench) {
@@ -661,6 +663,7 @@ export class Game {
     this.swapInLateSite();
     const shaders = warmupProgress(0.5);
     try {
+      await avatarTexturesFollowTier(this.ctx.tier); // a session that started on Low: 1024² now (D-load-6)
       await warmup(this.ctx, {
         frames: 3,
         hooks: [this.warmupHook()],
@@ -706,6 +709,7 @@ export class Game {
       const r = await runProbe(this.ctx, undefined, (f) => setLoading(tuningLine, tuning.at(f)));
       console.info(`[gfx] probe → ${r.tier}${r.valid ? "" : " (not saved)"}`, r);
       this.ctx.setProbedTier(r.tier, { persist: r.valid, clearPinned: true });
+      await avatarTexturesFollowTier(this.ctx.tier); // D-load-6
       await warmup(this.ctx, {
         frames: 3,
         hooks: [this.warmupHook()],
