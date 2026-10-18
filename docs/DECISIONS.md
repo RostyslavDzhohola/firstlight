@@ -1278,8 +1278,8 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   batch. (A) The pacer (`render/parallelCompile.ts`) prices a first draw as the characters of its
   stages not drawn before plus 6000 per pipeline (no skinned-shadow floor), learns only from fenced
   batches less the fence's 33 ms, lets the rate rise at once and fall slowly, grows a batch at most
-  1.5× and caps it at 40 000 until full batches come back within half the target (a warm cache);
-  `?oldpacer` is D-load-2's. (B) `render/leanShadow.ts` wraps `Renderer._getShadowNodes` for the
+  1.5× the last completed batch's units (the 24 000 start only before the first) and never past
+  40 000 (a single bigger program goes alone); `?oldpacer` is D-load-2's. (B) `render/leanShadow.ts` wraps `Renderer._getShadowNodes` for the
   renderer's life: materials registered by `avatarMaterial()` and `horseMaterial()` take three's
   default opaque shadow path (same depth); one with a map, alpha test or map, transparency, a
   depth/position/cast-shadow node or a mask other than the camera fade's keep-all goes through three's
@@ -1305,6 +1305,14 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   phase). J1.6 on a cold cache passed 2 of 3 (load 8–19; warm-up 17.8–18.8 s; the failing run had one
   350 ms frame in the drain, its worst otherwise 183 ms); J1.2 WebGL2 Play → world 12.4 s, its
   warm-up 5.9 s, worst frame 217 ms.
+  After review (Codex Sol): the pacer first lifted its 40 000 ceiling 1.5× after each quick full batch
+  and counted growth from at least the start budget; quick cached or shared stages say nothing about
+  the next new ones, so the ceiling is now fixed and growth counts from the last batch's units. The
+  numbers above (cold, warm 2.7 s) are from before that. After (104183a), warm WebGL2 6.1/5.9/6.3 s at
+  load 21–24 (worst 217/217/183 ms, no frame over 250 ms, 54 batches of ~35 000 instead of 10–11)
+  and 8.3/11.4 s at load 207/172; cold 38.1/26.9 s at load 170/262, 7 and 5 frames over 250 ms, all
+  but 3 of them the early compile stall and the terrain (below). Slower on a warm cache by ~3 s, by
+  the owner's call: smoothness over a short wait.
   Left (why this is `Refs #39`, not `Fixes`): (1) cold runs whose warm-up starts within ~6 s of page
   load (7 of 7 untraced, R0 and A+B alike) get one 1.5–5.7 s main-thread task 0.2–0.3 s into the
   compile, with 1–17 links pending; runs starting later mostly don't, `?linkcap=4` doesn't stop it,
