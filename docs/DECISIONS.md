@@ -1264,3 +1264,19 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   Pricing by size costs time on the first-visit path: J1.2 on WebGL2 (Medium after the probe) went
   from 31 batches and 7.5 s of warm-up with count-based batches to 50 batches and 9.8 s (Play → world
   13.4 s → 16.9 s, still under 30 s); `BATCH_TARGET_MS` is the one knob between the two.
+- **D-renderer-2 (2026-10-18):** WebGPU gets a second chance after a WebGL2 fallback, at no cost to
+  the wait. An abandoned WebGPU start that answers after the 8 s deadline (on WebGPU itself, not
+  three's own WebGL2 fallback) notes how late it was: `lateMs` in the device record, in the
+  session's start status (`ctx.start`) and in every later warm-up report (`webgpuFallback: {reason,
+  lateMs, secondChance}`, absent on WebGPU and `?webgl`), plus one `[gfx]` line. After the hand-over
+  a session on WebGL2 because WebGPU didn't start (now or recently) asks for a WebGPU adapter and
+  device once, 5 s later at an idle moment (`requestIdleCallback`), renders nothing and destroys the
+  device at once. If both answer within the start deadline, the record is marked `second:
+  "granted"` and the next visit tries WebGPU again; if that try fails too, the new record is marked
+  `second: "used"` and gets no further second chance, so a device whose WebGPU only hangs at page
+  load pays one extra 8 s wait per 7-day record, never one per visit (the #24 problem). Answers
+  after the deadline, no adapter, or a failed request keep the record. The 8 s deadline is
+  unchanged (an owner question; the noted lateness is the data for it). Why: the owner's call
+  (2026-10-18), "If we can have better quality of graphics and sacrifice it with just a little bit
+  more wait time, it's fine. I would rather do that trade-off": one slow start used to cost the
+  device WebGPU, and with it High's GTAO and TRAA (`render/quality.ts`), for a week.

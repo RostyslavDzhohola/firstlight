@@ -10,7 +10,7 @@ import {
   urlScale, urlTier, validAutoTier, type Feature, type ResolvedSettings, type StoredGfx, type Tier,
 } from "./quality.ts";
 import { createFramePath } from "./frameSize.ts";
-import { startRenderer } from "./rendererStart.ts";
+import { startRenderer, type BackendStatus } from "./rendererStart.ts";
 import { GpuTimer, ResolutionLadder } from "./timing.ts";
 import { compileForPass, passCallDepth, saveRenderState, type CompileProgress, type GuardedRenderer, type PassCompileRenderer } from "./compilePass.ts";
 import { frameCounterDraw, frameCounterTick } from "./frameCounter.ts";
@@ -27,6 +27,8 @@ export interface RenderCtx {
   webgpu: boolean;
   /** GPU adapter / WebGL renderer string (best effort, may be empty). */
   gpuName: string;
+  /** How the backend started: a WebGL2 fallback's reason, a late WebGPU answer, the second chance (D-renderer-2). */
+  readonly start?: BackendStatus;
   /** Current resolved settings. */
   readonly settings: ResolvedSettings;
   readonly tier: Tier;
@@ -102,7 +104,7 @@ export function isSoftwareRenderer(name: string): boolean {
 export async function createRenderer(container: HTMLElement): Promise<RenderCtx> {
   // WebGPU gets a deadline; past it (or on a rejected init) a fresh WebGL2 renderer starts instead,
   // and later visits on this device skip WebGPU for a while (rendererStart.ts, D-renderer-1).
-  const { renderer } = await startRenderer({
+  const { renderer, status: start } = await startRenderer({
     // A new options object per renderer: three writes its WebGL fallback hook into it.
     create: (forceWebGL) =>
       new THREE.WebGPURenderer({
@@ -190,6 +192,7 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
     pipeline,
     webgpu,
     gpuName,
+    start,
     get settings() {
       return settings;
     },

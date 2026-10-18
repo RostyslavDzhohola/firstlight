@@ -517,6 +517,7 @@ export async function warmup(
     slow: slow.sort((a, b) => b.ms - a.ms).slice(0, 12),
     firstDraws: { granted: gate?.granted() ?? 0, ...pacer.batches() },
     ...(diag ? { batches: batchLog.sort((a, b) => b.ms - a.ms).slice(0, 20) } : {}),
+    ...(ctx.start?.fallback ? { webgpuFallback: { reason: ctx.start.fallback, lateMs: ctx.start.lateMs, secondChance: ctx.start.secondChance } } : {}),
     phases: { compile, compute, shadows, frames: framesPhase },
   };
   stats.warmups.push(report);

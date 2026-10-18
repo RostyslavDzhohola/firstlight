@@ -9,6 +9,7 @@ import { config, flags } from "../config.ts";
 import { Net, TravelRedirect, type Snapshot } from "../net/Net.ts";
 import { AvatarView, avatarWarmupHook, preloadAvatars } from "../render/Avatars.ts";
 import { setAvatarTextureLowRes } from "../render/avatars/assets.ts";
+import { webgpuSecondChance } from "../render/rendererStart.ts";
 import { HorseView, horseWarmupHook, preloadHorse } from "../render/Horses.ts";
 import "../render/avatars/system.ts";
 import { Bench, benchConfig } from "../render/bench.ts";
@@ -225,6 +226,8 @@ export class Game {
     this.input.endFrame();
     if (!this.bench) this.input.lock();
     this.ctx.renderer.setAnimationLoop(() => this.frame());
+    // On WebGL2 because WebGPU didn't start: ask WebGPU once more at a quiet moment (D-renderer-2).
+    if (this.ctx.start) void webgpuSecondChance(this.ctx.start);
   }
 
   /** ?fxdemo: a burst every 0.8 s around the focus, cycling colours (particle look check). */

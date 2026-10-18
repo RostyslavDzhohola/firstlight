@@ -9,6 +9,13 @@
 // long as the browser version and GPU still match. `?webgpu` tries anyway and clears the record; a
 // WebGPU start that works clears it too. No network, no identifiers.
 //
+// A second chance (D-renderer-2): an abandoned start that answers after all notes how late it was
+// (`lateMs`, in the record and the session's status). After the hand-over, a WebGL2 session asks for a
+// WebGPU adapter and device once more, at an idle moment and without rendering; if they answer within
+// the start deadline, the next visit tries WebGPU again (`second: "granted"`). A record written when
+// that try fails too (`second: "used"`) gets no further second chance, so a device whose WebGPU only
+// hangs at page load pays one extra 8 s wait per record, not one per visit.
+//
 // Pure apart from the memory's defaults (localStorage, navigator.userAgent, one WebGL2 probe context
 // for the GPU name), so the seam is unit-tested with fakes.
 
@@ -36,15 +43,35 @@ export type FallbackReason = "timeout" | "error" | "remembered";
 export interface StartedRenderer<R> {
   renderer: R;
   fallback: FallbackReason | null;
+  /** Live: a late WebGPU answer and the second chance update it after the start resolved. */
+  status: BackendStatus;
 }
 
 /** The memory of a WebGPU that didn't start. */
 export interface BackendMemory {
   /** True: WebGPU didn't start here recently, go straight to WebGL2. */
   webgpuSkipped(): boolean;
-  rememberWebgpuSkipped(reason: "timeout" | "error"): void;
+  /** `lateMs`: the abandoned start already answered, this long after it began. */
+  rememberWebgpuSkipped(reason: "timeout" | "error", lateMs?: number): void;
   /** WebGPU started (or `?webgpu` asked for it): forget any failure. */
   forgetWebgpuSkipped(): void;
+  /** The abandoned start answered after all, `ms` after it began: noted in the record, if there is one. */
+  noteLateStart(ms: number): void;
+  /**
+   * The second chance answered in time: the next visit tries WebGPU. False (nothing changes) when
+   * there is no record, or it was written by a second try that failed.
+   */
+  grantSecondChance(): boolean;
+}
+
+/** What the session knows about its renderer start, filled in as it learns more (D-renderer-2). */
+export interface BackendStatus {
+  /** Why the session is on WebGL2 although the URL didn't ask for it; null: WebGPU, or `?webgl`. */
+  fallback: FallbackReason | null;
+  /** The abandoned WebGPU start answered after the deadline, this many ms after it began; null: not (yet). */
+  lateMs: number | null;
+  /** The background re-check after the hand-over (webgpuSecondChance); null: not run. */
+  secondChance: SecondChanceOutcome | "pending" | null;
 }
 
 /** The record kept on the device: the only things stored, never sent anywhere. */
@@ -57,6 +84,10 @@ export interface WebgpuFailureRecord {
   browser: string;
   /** The WebGL2 renderer string (webglGpuName()); "" when unknown. */
   gpu: string;
+  /** The abandoned start answered after all, this many ms after it began (D-renderer-2). */
+  lateMs?: number;
+  /** "granted": a later check answered, the next visit tries WebGPU; "used": that try failed too. */
+  second?: "granted" | "used";
 }
 
 export type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -113,7 +144,9 @@ export function webglGpuName(): string {
 function isRecord(x: unknown): x is WebgpuFailureRecord {
   const r = x as Partial<WebgpuFailureRecord> | null;
   return !!r && typeof r === "object" && r.v === 1 && (r.reason === "timeout" || r.reason === "error") &&
-    typeof r.at === "number" && Number.isFinite(r.at) && typeof r.browser === "string" && typeof r.gpu === "string";
+    typeof r.at === "number" && Number.isFinite(r.at) && typeof r.browser === "string" && typeof r.gpu === "string" &&
+    (r.lateMs === undefined || (typeof r.lateMs === "number" && Number.isFinite(r.lateMs))) &&
+    (r.second === undefined || r.second === "granted" || r.second === "used");
 }
 
 /**
@@ -133,27 +166,49 @@ export function deviceBackendMemory(env: DeviceMemoryEnv = {}): BackendMemory {
   const now = env.now ?? (() => Date.now());
   const browser = env.browser ?? (() => (typeof navigator === "undefined" ? "" : browserMajor(navigator.userAgent)));
   const gpu = env.gpu ?? webglGpuName;
+  /** The stored record, if it is one (any age, any browser); null when missing or unreadable. */
+  const read = (): WebgpuFailureRecord | null => {
+    try {
+      const raw = storage()?.getItem(WEBGPU_FAILED_KEY);
+      if (!raw) return null;
+      const r: unknown = JSON.parse(raw);
+      return isRecord(r) ? r : null;
+    } catch {
+      return null;
+    }
+  };
+  /** The record applies to this visit: under WEBGPU_RETRY_MS old, same browser version and GPU. */
+  const current = (r: WebgpuFailureRecord) => {
+    const age = now() - r.at;
+    return age >= 0 && age < WEBGPU_RETRY_MS && r.browser === browser() && r.gpu === gpu();
+  };
+  const write = (r: WebgpuFailureRecord) => {
+    try {
+      storage()?.setItem(WEBGPU_FAILED_KEY, JSON.stringify(r));
+    } catch {
+      /* private mode or full: the next visit waits again */
+    }
+  };
   return {
     webgpuSkipped() {
       try {
-        const raw = storage()?.getItem(WEBGPU_FAILED_KEY);
-        if (!raw) return false;
-        const r: unknown = JSON.parse(raw);
-        if (!isRecord(r)) return false;
-        const age = now() - r.at;
-        return age >= 0 && age < WEBGPU_RETRY_MS && r.browser === browser() && r.gpu === gpu();
+        const r = read();
+        return !!r && r.second !== "granted" && current(r);
       } catch {
         return false;
       }
     },
-    rememberWebgpuSkipped(reason) {
+    rememberWebgpuSkipped(reason, lateMs) {
       try {
-        const s = storage();
-        if (!s) return;
+        if (!storage()) return;
+        // A failure on the try a second chance granted: this record gets no second chance of its own.
+        const retried = read()?.second === "granted";
         const r: WebgpuFailureRecord = { v: 1, reason, at: now(), browser: browser(), gpu: gpu() };
-        s.setItem(WEBGPU_FAILED_KEY, JSON.stringify(r));
+        if (lateMs !== undefined) r.lateMs = lateMs;
+        if (retried) r.second = "used";
+        write(r);
       } catch {
-        /* private mode or full: the next visit waits again */
+        /* the next visit waits again */
       }
     },
     forgetWebgpuSkipped() {
@@ -163,10 +218,27 @@ export function deviceBackendMemory(env: DeviceMemoryEnv = {}): BackendMemory {
         /* nothing to forget */
       }
     },
+    noteLateStart(ms) {
+      const r = read();
+      if (r) write({ ...r, lateMs: ms });
+    },
+    grantSecondChance() {
+      const r = read();
+      if (!r || r.second === "used") return false;
+      if (r.second !== "granted") write({ ...r, second: "granted" });
+      return true;
+    },
   };
 }
 
 export type InitOutcome = { status: "ready" } | { status: "timeout" } | { status: "error"; error: unknown };
+
+export interface InitWithinOptions {
+  /** An abandoned init settled after all (`ready` or `error`), `ms` after it began; called before its dispose. */
+  onLate?: (outcome: InitOutcome, ms: number) => void;
+  /** Clock for `onLate`'s ms (default performance.now). */
+  now?: () => number;
+}
 
 /**
  * Wait up to `ms` for `r.init()`. On a timeout the renderer is abandoned: three's dispose() does
@@ -175,16 +247,28 @@ export type InitOutcome = { status: "ready" } | { status: "timeout" } | { status
  * answers. So the dispose is queued behind init: a late success is torn down at once, a late
  * failure has nothing to release.
  */
-export function initWithin(r: Startable, ms: number): Promise<InitOutcome> {
+export function initWithin(r: Startable, ms: number, opts: InitWithinOptions = {}): Promise<InitOutcome> {
+  const now = opts.now ?? (() => performance.now());
+  const t0 = now();
   return new Promise((resolve) => {
     const init = (async () => r.init())();
     let abandoned = false;
+    const late = (outcome: InitOutcome) => {
+      try {
+        opts.onLate?.(outcome, now() - t0);
+      } catch (e) {
+        console.warn("[gfx] noting the late WebGPU answer failed", e);
+      }
+    };
     const timer = setTimeout(() => {
       abandoned = true;
       resolve({ status: "timeout" });
       void init.then(
-        () => r.dispose(),
-        () => undefined,
+        () => {
+          late({ status: "ready" });
+          return r.dispose();
+        },
+        (error: unknown) => late({ status: "error", error }),
       ).catch((e: unknown) => console.warn("[gfx] disposing the abandoned WebGPU renderer failed", e));
     }, ms);
     init.then(
@@ -217,6 +301,8 @@ export interface StartOptions<R extends Startable> {
   memory?: BackendMemory;
   /** One info line per decision (console.info by default). */
   log?: (message: string) => void;
+  /** Clock for how late an abandoned start answered (default performance.now). */
+  now?: () => number;
 }
 
 const reason = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -226,11 +312,12 @@ export async function startRenderer<R extends Startable>(opts: StartOptions<R>):
   const timeoutMs = opts.timeoutMs ?? WEBGPU_INIT_TIMEOUT_MS;
   const memory = opts.memory ?? deviceBackendMemory();
   const log = opts.log ?? ((m: string) => console.info(m));
+  const status: BackendStatus = { fallback: null, lateMs: null, secondChance: null };
 
   if (opts.forceWebGL) {
     const renderer = opts.create(true);
     await renderer.init();
-    return { renderer, fallback: null };
+    return { renderer, fallback: null, status };
   }
 
   if (opts.forceWebGPU) {
@@ -238,21 +325,33 @@ export async function startRenderer<R extends Startable>(opts: StartOptions<R>):
     log("[gfx] ?webgpu: trying WebGPU; any remembered failure on this device is forgotten");
   }
   let fallback: FallbackReason;
+  /** The failure record of this visit is written: a late answer updates it instead. */
+  let recorded = false;
   if (!opts.forceWebGPU && memory.webgpuSkipped()) {
     fallback = "remembered";
     log("[gfx] WebGPU skipped: it did not start on this device recently; using WebGL2 (?webgpu tries again)");
   } else {
     const renderer = opts.create(false);
-    const outcome = await initWithin(renderer, timeoutMs);
+    const outcome = await initWithin(renderer, timeoutMs, {
+      now: opts.now,
+      // A late answer on WebGPU itself (not three's own WebGL2 fallback) is worth knowing: how late it was.
+      onLate: (late, ms) => {
+        if (late.status !== "ready" || !(opts.isWebGPU?.(renderer) ?? true)) return;
+        status.lateMs = Math.round(ms);
+        log(`[gfx] the abandoned WebGPU start answered ${(ms / 1000).toFixed(1)} s after it began (deadline ${timeoutMs / 1000} s); noted on this device`);
+        if (recorded) memory.noteLateStart(status.lateMs);
+      },
+    });
     if (outcome.status === "ready") {
       if (opts.isWebGPU?.(renderer) ?? true) {
         memory.forgetWebgpuSkipped();
-        return { renderer, fallback: null };
+        return { renderer, fallback: null, status };
       }
       // three's own fallback: WebGPU failed inside init(), which carried on with WebGL2.
       log("[gfx] WebGPU failed to start (three fell back to WebGL2 inside init()); using WebGL2 on this device for a while");
       memory.rememberWebgpuSkipped("error");
-      return { renderer, fallback: "error" };
+      status.fallback = "error";
+      return { renderer, fallback: "error", status };
     }
     if (outcome.status === "timeout") {
       fallback = "timeout";
@@ -266,6 +365,99 @@ export async function startRenderer<R extends Startable>(opts: StartOptions<R>):
 
   const renderer = opts.create(true);
   await renderer.init();
-  if (fallback !== "remembered") memory.rememberWebgpuSkipped(fallback);
-  return { renderer, fallback };
+  if (fallback !== "remembered") {
+    memory.rememberWebgpuSkipped(fallback, status.lateMs ?? undefined);
+    recorded = true;
+  }
+  status.fallback = fallback;
+  return { renderer, fallback, status };
+}
+
+// ------------------------------------------------------------------------------ the second chance
+
+/** How the background re-check went: "cleared" lets the next visit try WebGPU; "spent": it answered,
+ *  but this record already had its second chance; the rest keep the record. */
+export type SecondChanceOutcome = "cleared" | "spent" | "timeout" | "error" | "unavailable";
+
+/** The part of navigator.gpu the re-check uses. */
+export interface GpuLike {
+  requestAdapter(options?: { powerPreference?: "high-performance" | "low-power" }): Promise<GpuAdapterLike | null>;
+}
+export interface GpuAdapterLike {
+  requestDevice(): Promise<{ destroy(): void }>;
+}
+
+/** After the hand-over the re-check waits this long, then for an idle moment (requestIdleCallback). */
+export const SECOND_CHANCE_DELAY_MS = 5000;
+const SECOND_CHANCE_IDLE_TIMEOUT_MS = 10_000;
+
+export interface SecondChanceOptions {
+  memory?: BackendMemory;
+  /** Default navigator.gpu; null: no WebGPU in this browser. */
+  gpu?: GpuLike | null;
+  /** "In time": the start deadline (default WEBGPU_INIT_TIMEOUT_MS), so the next visit's start can make it. */
+  timeoutMs?: number;
+  /** Runs the check at a quiet moment (default: SECOND_CHANCE_DELAY_MS, then requestIdleCallback). */
+  schedule?: (run: () => void) => void;
+  log?: (message: string) => void;
+}
+
+function whenIdle(run: () => void) {
+  setTimeout(() => {
+    const ric = (globalThis as { requestIdleCallback?: (cb: () => void, o: { timeout: number }) => number }).requestIdleCallback;
+    if (ric) ric(run, { timeout: SECOND_CHANCE_IDLE_TIMEOUT_MS });
+    else run();
+  }, SECOND_CHANCE_DELAY_MS);
+}
+
+function navigatorGpu(): GpuLike | null {
+  return (typeof navigator === "undefined" ? null : (navigator as { gpu?: GpuLike }).gpu) ?? null;
+}
+
+/**
+ * WebGPU's second chance (D-renderer-2), once per session, for a session on WebGL2 because WebGPU
+ * didn't start (now or recently): at an idle moment after the hand-over, ask for an adapter and a
+ * device (nothing is rendered; the device is destroyed at once). If both answer within the start
+ * deadline, the next visit tries WebGPU again. Resolves with the outcome, or null when not run
+ * (WebGPU or `?webgl` session, or already run). Never rejects.
+ */
+export function webgpuSecondChance(status: BackendStatus, opts: SecondChanceOptions = {}): Promise<SecondChanceOutcome | null> {
+  if (!status.fallback || status.secondChance !== null) return Promise.resolve(null);
+  status.secondChance = "pending";
+  const memory = opts.memory ?? deviceBackendMemory();
+  const timeoutMs = opts.timeoutMs ?? WEBGPU_INIT_TIMEOUT_MS;
+  const log = opts.log ?? ((m: string) => console.info(m));
+  const schedule = opts.schedule ?? whenIdle;
+  return new Promise<SecondChanceOutcome>((resolve) => {
+    schedule(() => {
+      const gpu = opts.gpu !== undefined ? opts.gpu : navigatorGpu();
+      let settled = false;
+      const finish = (outcome: SecondChanceOutcome, line: string) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        status.secondChance = outcome;
+        log(line);
+        resolve(outcome);
+      };
+      const timer = setTimeout(() => finish("timeout", `[gfx] second chance: WebGPU did not answer within ${timeoutMs / 1000} s; WebGL2 stays on this device for now`), timeoutMs);
+      if (!gpu) return finish("unavailable", "[gfx] second chance: no WebGPU in this browser; WebGL2 stays");
+      const t0 = Date.now();
+      void (async () => {
+        const adapter = await gpu.requestAdapter({ powerPreference: "high-performance" });
+        if (!adapter) return finish("unavailable", "[gfx] second chance: no WebGPU adapter; WebGL2 stays on this device for now");
+        const device = await adapter.requestDevice();
+        // Only asked to see that it answers: release it at once (also when it came too late).
+        try {
+          device.destroy();
+        } catch {
+          /* already gone */
+        }
+        if (settled) return;
+        const s = ((Date.now() - t0) / 1000).toFixed(1);
+        if (memory.grantSecondChance()) finish("cleared", `[gfx] second chance: WebGPU answered in ${s} s; the next visit tries it again`);
+        else finish("spent", `[gfx] second chance: WebGPU answered in ${s} s, but it already failed on its second try here; WebGL2 stays until the record expires`);
+      })().catch((e: unknown) => finish("error", `[gfx] second chance: WebGPU failed (${reason(e)}); WebGL2 stays on this device for now`));
+    });
+  });
 }

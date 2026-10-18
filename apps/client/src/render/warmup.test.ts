@@ -6,6 +6,7 @@ import {
 } from "./warmup.ts";
 import { FIRST_DRAWS_START } from "./parallelCompile.ts";
 import type { RenderCtx } from "./renderer.ts";
+import type { BackendStatus } from "./rendererStart.ts";
 import { watchDisposals } from "./disposeWatch.testutil.ts";
 
 describe("warm-up forced properties", () => {
@@ -209,7 +210,7 @@ class FakeDrawPipelines extends FakePipelines {
 describe("warm-up report (per-phase times and shader counts) and progress", () => {
   /** A fake renderer on a hand-moved clock: compile items cost 10 ms and one build each, frames 5 ms. */
   let draws: string[][] = [];
-  function fakeCtx(opts: { items: number; webgpu: boolean; shadows: boolean; frameBuilds?: number; pipelines?: FakePipelines; objects?: number }) {
+  function fakeCtx(opts: { items: number; webgpu: boolean; shadows: boolean; frameBuilds?: number; pipelines?: FakePipelines; objects?: number; start?: BackendStatus }) {
     draws = [];
     let clock = 1000;
     vi.spyOn(performance, "now").mockImplementation(() => clock);
@@ -231,6 +232,7 @@ describe("warm-up report (per-phase times and shader counts) and progress", () =
       camera: new THREE.PerspectiveCamera(),
       webgpu: opts.webgpu,
       tier: "medium",
+      start: opts.start,
       settings: { on: { shadows: opts.shadows }, shadows: { mode: "map" } },
       renderer: {
         debug,
@@ -344,6 +346,20 @@ describe("warm-up report (per-phase times and shader counts) and progress", () =
       expect(r.builds).toBe(6);
       expect(r.shaders).toBe(before + 6);
       expect(shaderStats().warmups.at(-1)).toBe(r); // what the e2e hook reads
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("names a WebGL2 fallback: why, how late the abandoned WebGPU start answered, the second chance (D-renderer-2)", async () => {
+    try {
+      const start: BackendStatus = { fallback: "timeout", lateMs: 11_000, secondChance: "pending" };
+      const r = await warmup(fakeCtx({ items: 0, webgpu: false, shadows: false, start }), { frames: 1 });
+      expect(r.webgpuFallback).toEqual({ reason: "timeout", lateMs: 11_000, secondChance: "pending" });
+      const onWebgpu = await warmup(fakeCtx({ items: 0, webgpu: true, shadows: false, start: { fallback: null, lateMs: null, secondChance: null } }), { frames: 1 });
+      expect(onWebgpu.webgpuFallback).toBeUndefined();
+      expect((await warmup(fakeCtx({ items: 0, webgpu: false, shadows: false }), { frames: 1 })).webgpuFallback).toBeUndefined();
     } finally {
       vi.unstubAllGlobals();
       vi.restoreAllMocks();
