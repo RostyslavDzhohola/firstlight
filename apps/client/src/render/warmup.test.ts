@@ -144,7 +144,7 @@ describe("warmShadowCasters", () => {
     expect(wide).toEqual([8, 30]);
   });
 
-  it("predicts builds: instanced and skinned always, plain meshes once per material and layout", () => {
+  it("predicts builds: instanced always, plain meshes once per material and layout", () => {
     const seen = new Set<string>();
     expect(shadowBuildCost(new THREE.InstancedMesh(geo, mat, 2), seen)).toBe(1);
     expect(shadowBuildCost(new THREE.Mesh(geo, mat), seen)).toBe(1);
@@ -172,17 +172,23 @@ describe("warmShadowCasters", () => {
     expect(shadowBuildCost(skinned(coat, 41), seen, true)).toBe(1); // the horse rig
     expect(shadowBuildCost(skinned(coat, 41), seen, true)).toBe(0);
     expect(shadowBuildCost(skinned(coat, 65), seen, true)).toBe(1); // another side
-    expect(shadowBuildCost(skinned(unregistered, 65), seen, true)).toBe(1); // not lean: a build each, as before
-    expect(shadowBuildCost(skinned(unregistered, 65), seen, true)).toBe(1);
-    const full = new Set<string>(); // ?fullshadow: every skinned caster is its own build
-    expect([shadowBuildCost(skinned(coat, 41), full), shadowBuildCost(skinned(coat, 41), full)]).toEqual([1, 1]);
+    expect(shadowBuildCost(skinned(unregistered, 65), seen, true)).toBe(1); // not lean: a build per material and rig
+    expect(shadowBuildCost(skinned(unregistered, 65), seen, true)).toBe(0);
+    expect(shadowBuildCost(skinned(unregistered, 41), seen, true)).toBe(1);
+    // ?fullshadow: a build per material and rig (three keys a skinned build by its bone count, not the
+    // object), so every palette of a look and every coat share theirs (D-load-4)
+    const full = new Set<string>();
+    expect([shadowBuildCost(skinned(coat, 41), full), shadowBuildCost(skinned(coat, 41), full)]).toEqual([1, 0]);
+    expect(shadowBuildCost(skinned(palette(), 41), full)).toBe(1); // another material
     const scene = new THREE.Scene();
+    const look = palette();
     for (let i = 0; i < 6; i++) {
-      const m = skinned(palette(), 65);
-      m.castShadow = true;
-      scene.add(m);
+      for (const m of [skinned(palette(), 65), skinned(look, 65)]) {
+        m.castShadow = true;
+        scene.add(m);
+      }
     }
-    expect([predictShadowBuilds(scene, true), predictShadowBuilds(scene)]).toEqual([1, 6]);
+    expect([predictShadowBuilds(scene, true), predictShadowBuilds(scene)]).toEqual([1, 7]);
   });
 
   it("puts every caster back, keeps non-casters off, even when a frame throws", async () => {

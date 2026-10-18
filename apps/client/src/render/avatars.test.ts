@@ -104,14 +104,17 @@ describe("held items", () => {
 });
 
 describe("avatar warm-up hook", () => {
-  it("stands every starter's every look in every palette (T9: each material in play compiles behind the loading screen)", () => {
+  it("stands every starter's every look once (T9: each look's material in play compiles behind the loading screen)", () => {
     const looks = mod.avatarWarmupLooks();
     const n = STARTER_LOOKS.flat().length; // 5 starters + the second looks of Kappa and Unit 7
     expect(n).toBe(7);
-    expect(looks).toHaveLength(n * mod.PALETTES.length);
-    expect(new Set(looks.map((l) => `${l.starter}:${l.look}:${l.palette}`)).size).toBe(n * mod.PALETTES.length);
+    // One toon material per look; the palette is a per-object uniform (#39, D-load-4), not a build.
+    expect(looks).toHaveLength(n);
+    expect(new Set(looks.map((l) => `${l.starter}:${l.look}`)).size).toBe(n);
     // every starter weapon is held by some sample (the line-up's kunai compiled in play before)
     for (const s of STARTERS) expect(looks.some((l) => l.item === s.weapon), s.weapon).toBe(true);
+    // and every palette's accent material is drawn (held items keep a material per palette)
+    expect(new Set(looks.map((l) => l.palette)).size).toBe(mod.PALETTES.length);
   });
 
   it("keeps its samples for the session: in the scene (hidden) while warming, out of it after, never disposed", () => {
@@ -122,7 +125,7 @@ describe("avatar warm-up hook", () => {
     const kept = scene.getObjectByName("avatarWarmup")!;
     expect(kept).toBeTruthy();
     expect(kept.visible).toBe(false); // warmup() shows hidden objects while it runs
-    // One avatar per starter and palette, and one far-LOD capsule per palette.
+    // One avatar per look, and one far-LOD capsule per palette.
     expect(kept.children).toHaveLength(mod.avatarWarmupLooks().length + mod.PALETTES.length);
     expect(mod.AvatarView.all.size).toBe(before); // never ranked by the LOD pass
     const w = watchDisposals(kept);

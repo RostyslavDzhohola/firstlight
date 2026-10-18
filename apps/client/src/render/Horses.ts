@@ -1,11 +1,12 @@
 // Horses (SPEC §6.14 #2). The Quaternius CC0 low-poly horse with our saddle (tools/blender/horse;
-// docs/ASSETS.md): one skinned mesh, one toon material per coat (six, shared by every horse), an
-// AnimationMixer for idle / walk / run / jump, and a `saddle` node on the Torso bone that the rider
-// sits on. Until the GLB arrives (or if it fails, or ?nochars) a box horse with swinging legs
-// stands in, so callers never care which one they got.
+// docs/ASSETS.md): one skinned mesh, one toon material shared by every horse and coat (the coat's
+// colours are per-object uniforms: #39, D-load-4), an AnimationMixer for idle / walk / run / jump,
+// and a `saddle` node on the Torso bone that the rider sits on. Until the GLB arrives (or if it
+// fails, or ?nochars) a box horse with swinging legs stands in, so callers never care which one they
+// got.
 
 import * as THREE from "three/webgpu";
-import { attribute, color, dot, float, normalView, positionViewDirection, saturate } from "three/tsl";
+import { attribute, color, dot, float, normalView, positionViewDirection, saturate, uniform } from "three/tsl";
 import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
@@ -61,7 +62,6 @@ async function load(): Promise<HorseAssets> {
 // ---- materials -------------------------------------------------------------------------------
 
 const LEATHER = 0x4a2e1c;
-const coatMats = new Map<number, THREE.MeshToonNodeMaterial>();
 const boxMats = new Map<string, THREE.MeshStandardNodeMaterial>();
 
 function coatIndex(coat: number): number {
@@ -69,23 +69,42 @@ function coatIndex(coat: number): number {
   return ((coat % n) + n) % n;
 }
 
-/** Toon material for a coat. The GLB's vertex colour is a role mask: R coat, G mane, B blanket, none = leather. */
-export function horseMaterial(coat: number): THREE.MeshToonNodeMaterial {
-  const i = coatIndex(coat);
-  let m = coatMats.get(i);
-  if (m) return m;
-  const [hide, mane, blanket] = HORSE_COATS[i]!;
+const coatOf = new WeakMap<THREE.Object3D, number>();
+
+/** The coat `mesh` (a horse's skinned body) draws the horse material in. */
+export function setHorseCoat(mesh: THREE.Object3D, coat: number): void {
+  coatOf.set(mesh, coatIndex(coat));
+}
+
+/** The coats' colours (linear, as color(hex) made them), by coat then part (hide, mane, blanket). */
+const COAT_COLORS = HORSE_COATS.map((c) => c.map((hex) => new THREE.Color(hex)));
+
+/** One coat part as a per-object uniform, set from the drawn mesh (as the avatars' palette slots). */
+function coatPart(i: number) {
+  const u = uniform(new THREE.Color(HORSE_COATS[0]![i]!));
+  return u.onObjectUpdate(({ object }) => void u.value.copy(COAT_COLORS[coatOf.get(object as THREE.Object3D) ?? 0]![i]!));
+}
+
+let coatMat: THREE.MeshToonNodeMaterial | null = null;
+
+/**
+ * The horses' toon material, every coat (setHorseCoat on each mesh). The GLB's vertex colour is a
+ * role mask: R coat, G mane, B blanket, none = leather.
+ */
+export function horseMaterial(): THREE.MeshToonNodeMaterial {
+  if (coatMat) return coatMat;
+  const [hide, mane, blanket] = [coatPart(0), coatPart(1), coatPart(2)];
   const role = attribute("color", "vec4");
   const leather = saturate(float(1).sub(role.x).sub(role.y).sub(role.z));
   const fres = float(1).sub(saturate(dot(normalView, positionViewDirection))).pow(3);
-  m = new THREE.MeshToonNodeMaterial();
+  const m = new THREE.MeshToonNodeMaterial();
   m.gradientMap = toonRamp();
-  m.colorNode = color(hide).mul(role.x).add(color(mane).mul(role.y)).add(color(blanket).mul(role.z)).add(color(LEATHER).mul(leather));
+  m.colorNode = hide.mul(role.x).add(mane.mul(role.y)).add(blanket.mul(role.z)).add(color(LEATHER).mul(leather));
   // NodeMaterial.setupLighting() honours emissiveNode; the toon typings omit it (as for avatars).
   (m as THREE.MeshToonNodeMaterial & { emissiveNode: THREE.Node | null }).emissiveNode = avatarRim.color.mul(fres).mul(avatarRim.strength);
-  m.name = `horse-coat-${i}`;
+  m.name = "horse-coat";
   leanShadow(m); // shadows need no colour: one shadow build for every coat (#39, D-load-3)
-  coatMats.set(i, m);
+  coatMat = m;
   return m;
 }
 
@@ -269,11 +288,12 @@ export class HorseView {
       this.box = null;
     }
     const model = cloneSkinned(a.scene);
-    const mat = horseMaterial(this.coat);
+    const mat = horseMaterial();
     model.traverse((o) => {
       const m = o as THREE.SkinnedMesh;
       if (m.isSkinnedMesh) {
         m.material = mat;
+        setHorseCoat(m, this.coat);
         m.castShadow = this.lod === "full";
         m.receiveShadow = true;
         m.frustumCulled = false;
@@ -387,10 +407,10 @@ let warmupViews: HorseView[] = [];
 
 /**
  * Shader warm-up hook (render/warmup.ts): while forced on, stands one horse per coat at `at()` with
- * full detail (shadow pass included), so the six coat materials and their shadow variants compile
- * behind the loading screen. Forced off, the samples leave the scene but are kept for the session
- * (keptSamples): disposing them freed those builds, and the first horses after arrival compiled in
- * play (T9). They are not in HorseView.all, so the LOD and blob-shadow passes skip them. Without the
+ * full detail (shadow pass included), so the horse material (one build for every coat) and its
+ * shadow variant, or the box horses' coat materials without the GLB, compile behind the loading
+ * screen. Forced off, the samples leave the scene but are kept for the session (keptSamples):
+ * disposing them freed those builds, and the first horses after arrival compiled in play (T9). They are not in HorseView.all, so the LOD and blob-shadow passes skip them. Without the
  * GLB they are box horses, which is what the game shows then.
  */
 export function horseWarmupHook(scene: THREE.Object3D, at: () => THREE.Vector3): { forceAll(on: boolean): void } {

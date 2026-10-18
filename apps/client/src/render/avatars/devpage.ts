@@ -65,7 +65,7 @@ export async function startAvatarDevPage() {
   camera.lookAt(0, R + 0.9, 0);
   let baseline = 0;
   if (warmcheck) {
-    // what Game.firstArrival does: the avatar hook stands every loaded look × palette hidden
+    // what Game.firstArrival does: the avatar hook stands every loaded look hidden
     await warmup(ctx, { frames: 4, hooks: [avatarWarmupHook(scene, () => new THREE.Vector3(0, R, 0))] });
     baseline = shaderStats().total;
   }

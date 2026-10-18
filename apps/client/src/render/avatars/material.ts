@@ -1,12 +1,13 @@
-// Avatar material: one MeshToonNodeMaterial per starter and palette (shared by every avatar wearing
-// it). Each starter has a painted albedo and a sculpted normal map. Per-corner Role colour picks the
-// palette slot: R = primary, G = secondary, B = accent (emissive); 1 - the albedo's alpha marks painted
-// accents (glyphs, lenses, emblems) that take the accent colour and glow. Soft two-band toon ramp +
-// a fresnel rim tinted by a global (sky) colour. Palette colours are shader constants, so there are
-// still six programs: textures are bindings, not code.
+// Avatar material: one MeshToonNodeMaterial per look (its painted albedo and sculpted normal map),
+// shared by every avatar wearing that look in any palette. Per-corner Role colour picks the palette
+// slot: R = primary, G = secondary, B = accent (emissive); 1 - the albedo's alpha marks painted
+// accents (glyphs, lenses, emblems) that take the accent colour and glow. Soft two-band toon ramp + a
+// fresnel rim tinted by a global (sky) colour. The palette colours are per-object uniforms read from
+// the drawn skinned mesh (setAvatarPalette), the accent's glow included: one build and pipeline per
+// look instead of one per look and palette (#39, D-load-4), the same colours.
 
 import * as THREE from "three/webgpu";
-import { attribute, color, dot, float, max, mix, normalMap, normalView, positionViewDirection, saturate, texture, uniform, uv, vec2, vec3 } from "three/tsl";
+import { attribute, dot, float, max, mix, normalMap, normalView, positionViewDirection, saturate, texture, uniform, uv, vec2, vec3 } from "three/tsl";
 import type { StarterTextures } from "./assets.ts";
 import { applyOccluderFadeGated } from "../occluderFade.ts";
 import { leanShadow } from "../leanShadow.ts";
@@ -50,21 +51,42 @@ export function toonRamp(): THREE.DataTexture {
   return ramp;
 }
 
+/** A palette index in range (any integer wraps). */
+export function paletteIndex(palette: number): number {
+  return ((palette % PALETTES.length) + PALETTES.length) % PALETTES.length;
+}
+
+const paletteOf = new WeakMap<THREE.Object3D, number>();
+
+/** The palette `mesh` (a skinned avatar body) draws its look's material in. */
+export function setAvatarPalette(mesh: THREE.Object3D, palette: number): void {
+  paletteOf.set(mesh, paletteIndex(palette));
+}
+
+/** The palettes' colours (linear, as color(hex) made them), by palette then slot. */
+const PALETTE_COLORS = PALETTES.map((p) => p.map((hex) => new THREE.Color(hex)));
+
+/**
+ * One palette slot (0 primary, 1 secondary, 2 accent) as a per-object uniform: three sets it from
+ * the drawn mesh right before it writes that draw's own uniform buffer (as occluderFade's gate).
+ */
+function slot(i: number) {
+  const u = uniform(new THREE.Color(PALETTES[0]![i]!));
+  return u.onObjectUpdate(({ object }) => void u.value.copy(PALETTE_COLORS[paletteOf.get(object as THREE.Object3D) ?? 0]![i]!));
+}
+const [cPrim, cSec, cAcc] = [slot(0), slot(1), slot(2)];
+
 const cache = new Map<string, THREE.MeshToonNodeMaterial>();
 
-export function avatarMaterial(tex: StarterTextures, palette: number): THREE.MeshToonNodeMaterial {
-  const p = ((palette % PALETTES.length) + PALETTES.length) % PALETTES.length;
-  const key = `${tex.albedo.uuid}:${p}`;
+/** The toon material of the look with textures `tex`: every palette (setAvatarPalette on each mesh). */
+export function avatarMaterial(tex: StarterTextures): THREE.MeshToonNodeMaterial {
+  const key = tex.albedo.uuid;
   let m = cache.get(key);
   if (m) return m;
-  const [prim, sec, acc] = PALETTES[p]!;
   const role = attribute("color", "vec4");
   const albedo = texture(tex.albedo, uv());
   const base = albedo.rgb;
   const painted = float(1).sub(albedo.a); // painted accent mask (stored inverted: see chars3d/build.py)
-  const cPrim = color(prim);
-  const cSec = color(sec);
-  const cAcc = color(acc);
   const tint = mix(mix(mix(vec3(1, 1, 1), cPrim, role.x), cSec, role.y), cAcc, role.z);
   const fres = float(1).sub(saturate(dot(normalView, positionViewDirection))).pow(3);
   m = new THREE.MeshToonNodeMaterial();
@@ -76,7 +98,7 @@ export function avatarMaterial(tex: StarterTextures, palette: number): THREE.Mes
   (m as THREE.MeshToonNodeMaterial & { emissiveNode: THREE.Node | null }).emissiveNode =
     cAcc.mul(max(role.z, painted)).mul(2.2).add(avatarRim.color.mul(fres).mul(avatarRim.strength));
   m.side = THREE.DoubleSide; // cloth is single-sided: robe hems, hoods and sleeves show their insides
-  m.name = `avatar-palette-${p}`;
+  m.name = `avatar-look-${cache.size}`;
   // Quest NPCs (keepers, guides) dissolve between the camera and the player; players never (D-view-5).
   applyOccluderFadeGated(m);
   // Shadows need no colour: one shadow build for every look and palette (#39, D-load-3).
@@ -88,7 +110,7 @@ export function avatarMaterial(tex: StarterTextures, palette: number): THREE.Mes
 /** Cheap far-LOD / fallback capsule material in the palette's primary colour (shared). */
 const proxyCache = new Map<number, THREE.MeshStandardNodeMaterial>();
 export function proxyMaterial(palette: number): THREE.MeshStandardNodeMaterial {
-  const p = ((palette % PALETTES.length) + PALETTES.length) % PALETTES.length;
+  const p = paletteIndex(palette);
   let m = proxyCache.get(p);
   if (!m) {
     m = applyOccluderFadeGated(new THREE.MeshStandardNodeMaterial({ color: PALETTES[p]![0], roughness: 0.7, metalness: 0.05 }));
