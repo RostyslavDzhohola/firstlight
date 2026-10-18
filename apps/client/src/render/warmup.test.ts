@@ -132,6 +132,11 @@ describe("warmShadowCasters", () => {
     expect(seen).toEqual([4, 8, 30]);
     expect(frames).toBe(3);
     expect(casting(all)).toBe(30);
+    // a bigger batch when the programs link off the main thread
+    const again = sceneWith(all.map((m) => { m.castShadow = false; return m; }));
+    const wide: number[] = [];
+    expect(await warmShadowCasters(again, () => wide.push(casting(all)), async () => {}, undefined, 8)).toBe(2);
+    expect(wide).toEqual([8, 30]);
   });
 
   it("predicts builds: instanced and skinned always, plain meshes once per material and layout", () => {
@@ -327,7 +332,7 @@ describe("warm-up report (per-phase times and shader counts) and progress", () =
       expect(r.tier).toBe("medium");
       expect(r.phases.compile).toEqual({ ms: 50, builds: 5, items: 5, wait: 0 }); // no three internals: nothing deferred
       expect(r.phases.compute).toEqual({ ms: 0, builds: 0, nodes: 0 }); // no compute nodes yet
-      // 6 predicted shadow builds in batches of 4: two frames (the first frame's own build lands here)
+      // 6 predicted shadow builds in batches of 4 (nothing deferred here): two frames, the first's build lands here
       expect(r.phases.shadows).toEqual({ ms: 10, builds: 1, frames: 2, predicted: 6, wait: 0 });
       expect(r.phases.frames).toEqual({ ms: 15, builds: 0, frames: 3, wait: 0, drain: 0 }); // 2 + the settle frame
       expect(r.ms).toBe(75);

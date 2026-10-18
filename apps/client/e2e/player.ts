@@ -98,6 +98,9 @@ export interface Warmup {
   ms: number;
   builds: number;
   shaders: number;
+  stages?: number;
+  /** The warm-up's own frames over 100 ms: ms, main-thread draw ms, builds and first draws in each. */
+  slow?: { phase: string; ms: number; cpu: number; builds: number; firstDraws: number; budget: number }[];
   phases: {
     compile: WarmupPhase & { items: number };
     compute: WarmupPhase & { nodes: number };

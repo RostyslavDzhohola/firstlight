@@ -102,15 +102,93 @@ export const FIRST_DRAWS_START = 4;
 export const FIRST_DRAWS_MAX = 64;
 const QUICK_FRAME_MS = 60;
 const LONG_FRAME_MS = 150;
+/** A fenced batch's time includes a few frames before Chrome reports the fence: looser bounds. */
+const QUICK_BATCH_MS = 120;
+const LONG_BATCH_MS = 250;
 
 /**
- * Next frame's first-draw budget from the last frame's time and how many first draws it made:
- * halve after a long frame; double after a quick one that used the whole budget.
+ * The next first-draw budget from how long a batch of `used` first draws took (or a frame, without
+ * fences): halve after a long one (from what was actually sent); double after a quick one that used
+ * the whole budget.
  */
-export function nextDrawBudget(budget: number, frameMs: number, used = budget): number {
-  if (frameMs > LONG_FRAME_MS) return Math.max(1, Math.floor(budget / 2));
-  if (frameMs < QUICK_FRAME_MS && used >= budget) return Math.min(FIRST_DRAWS_MAX, budget * 2);
+export function nextDrawBudget(budget: number, ms: number, used = budget, quick = QUICK_FRAME_MS, long = LONG_FRAME_MS): number {
+  if (ms > long) return Math.max(1, Math.floor((used > 0 ? Math.min(used, budget) : budget) / 2));
+  if (ms < quick && used >= budget) return Math.min(FIRST_DRAWS_MAX, budget * 2);
   return budget;
+}
+
+/**
+ * Paces WebGL2 first draws. A frame's GPU work shows up in later frames' times, not its own, so
+ * pacing by frame times doubled the budget just before the cost arrived. With a fence after each
+ * frame that drew something new, one batch is in flight at a time: no new first draws until the GPU
+ * has finished it, and the next batch's size follows how long that took.
+ */
+export class FirstDrawPacer {
+  private budget = FIRST_DRAWS_START;
+  private batch: { done: () => boolean; at: number; used: number } | null = null;
+  private lastUsed = 0;
+  private readonly latencies: number[] = [];
+
+  /** First draws the frame about to be drawn may make. */
+  allowance(): number {
+    return this.batch ? 0 : this.budget;
+  }
+
+  inFlight(): boolean {
+    return this.batch !== null;
+  }
+
+  /** After a frame: it made `used` first draws; `fence` says when the GPU finished them (null: no fences). */
+  sent(used: number, now: number, fence: (() => boolean) | null): void {
+    this.lastUsed = used;
+    if (used > 0 && fence) this.batch = { done: fence, at: now, used };
+  }
+
+  /** Each new frame: settle the batch in flight, or (without fences) pace by `frameMs`. */
+  tick(now: number, frameMs?: number): void {
+    if (this.batch) {
+      if (!this.batch.done()) return;
+      const ms = now - this.batch.at;
+      this.latencies.push(ms);
+      this.budget = nextDrawBudget(this.budget, ms, this.batch.used, QUICK_BATCH_MS, LONG_BATCH_MS);
+      this.batch = null;
+    } else if (frameMs !== undefined) {
+      this.budget = nextDrawBudget(this.budget, frameMs, this.lastUsed);
+    }
+  }
+
+  /** Fenced batches so far and how long the GPU took over them (ms, rounded). */
+  batches(): { batches: number; p50: number; max: number } {
+    const l = [...this.latencies].sort((a, b) => a - b);
+    return { batches: l.length, p50: Math.round(l[Math.floor(l.length / 2)] ?? 0), max: Math.round(l.at(-1) ?? 0) };
+  }
+}
+
+/** The WebGL2 calls a fence needs. */
+export interface FenceGL {
+  SYNC_GPU_COMMANDS_COMPLETE: number;
+  SYNC_STATUS: number;
+  SIGNALED: number;
+  fenceSync(condition: number, flags: number): unknown;
+  getSyncParameter(sync: unknown, pname: number): unknown;
+  deleteSync(sync: unknown): void;
+  flush(): void;
+}
+
+/** A fence after the commands so far: done() polls it without waiting (null: no fences here). */
+export function glFence(gl: FenceGL | null | undefined): (() => boolean) | null {
+  if (!gl || typeof gl.fenceSync !== "function") return null;
+  const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+  if (!sync) return null;
+  gl.flush();
+  let done = false;
+  return () => {
+    if (!done && gl.getSyncParameter(sync, gl.SYNC_STATUS) === gl.SIGNALED) {
+      done = true;
+      gl.deleteSync(sync);
+    }
+    return done;
+  };
 }
 
 /** Pipelines each renderer has drawn at least once (kept across warm-ups). */

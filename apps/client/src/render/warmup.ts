@@ -14,7 +14,7 @@ import * as THREE from "three/webgpu";
 import type { RenderCtx } from "./renderer.ts";
 import { flags } from "../config.ts";
 import { beginManualFrame, type TimestampSource } from "./timing.ts";
-import { deferPipelines, FIRST_DRAWS_START, gateFirstDraws, nextDrawBudget, type DeferRenderer, type GateRenderer } from "./parallelCompile.ts";
+import { deferPipelines, FirstDrawPacer, gateFirstDraws, glFence, type DeferRenderer, type FenceGL, type GateRenderer } from "./parallelCompile.ts";
 
 /** One warm-up phase: how long it took and how many node builds (shaders) it made. */
 export interface WarmupPhase {
@@ -36,6 +36,10 @@ export interface WarmupReport {
   shaders: number;
   /** New GPU shader stages (vertex + fragment programs; three shares one per distinct source). */
   stages: number;
+  /** The warm-up's own frames over 100 ms, longest first (at most 12): what each was made of. */
+  slow: SlowFrame[];
+  /** WebGL2's paced first draws: how many, in how many fenced batches, and the GPU's time per batch. */
+  firstDraws: { granted: number; batches: number; p50: number; max: number };
   phases: {
     /** compileAsync for the scene pass's context; `items`: the render objects it prepared. */
     compile: WarmupPhase & { items: number; wait: number };
@@ -47,6 +51,17 @@ export interface WarmupReport {
      *  extra frames until every program was compiled and drawn once, `wait` their ms. */
     frames: WarmupPhase & { frames: number; wait: number; drain: number };
   };
+}
+
+/** One long warm-up frame: `ms` from the previous frame, `cpu` the draw itself on the main thread. */
+export interface SlowFrame {
+  phase: "shadows" | "frames" | "drain";
+  ms: number;
+  cpu: number;
+  builds: number;
+  /** Pipelines drawn for the first time in it (WebGL2's first-draw budget), and that budget. */
+  firstDraws: number;
+  budget: number;
 }
 
 export interface ShaderStats {
@@ -235,6 +250,7 @@ export async function warmShadowCasters(
   renderFrame: () => void,
   nextFrameFn: () => Promise<void> = nextFrame,
   onBatch?: (predictedBuilds: number) => void,
+  batch = SHADOW_BATCH,
 ): Promise<number> {
   const casters = shadowCasters(scene);
   const pending = casters.map((o) => forceProperty(o, "castShadow", false));
@@ -244,12 +260,12 @@ export async function warmShadowCasters(
     let i = 0;
     while (i < pending.length) {
       let cost = 0;
-      while (i < pending.length && (cost < SHADOW_BATCH || cost === 0)) {
+      while (i < pending.length && (cost < batch || cost === 0)) {
         cost += shadowBuildCost(casters[i]!, seen);
         pending[i]!();
         pending[i] = () => {};
         i++;
-        if (cost >= SHADOW_BATCH) break;
+        if (cost >= batch) break;
       }
       renderFrame();
       frames++;
@@ -310,11 +326,12 @@ export async function warmup(
   // New programs compile side by side behind the loader instead of one at a time (D-load-2);
   // `?serialcompile` keeps three's own one-by-one compiles for A/B runs.
   const deferred = flags.has("serialcompile") ? null : deferPipelines(renderer as unknown as DeferRenderer);
-  // WebGL2: a program's first draw builds its Metal pipeline in the GPU process, so first draws are
-  // spread over frames (a budget per frame that follows the frame times).
+  // WebGL2: a program's first draw builds its Metal pipeline in the GPU process, so first draws go
+  // out in batches, one in flight at a time, sized by how long the GPU took over the last (a fence).
   const gated = deferred?.active && !ctx.webgpu ? gateFirstDraws(renderer as unknown as GateRenderer) : null;
   const gate = gated?.active ? gated : null;
-  let budget = FIRST_DRAWS_START;
+  const pacer = new FirstDrawPacer();
+  const gl = (renderer as unknown as { backend?: { gl?: FenceGL } }).backend?.gl ?? null;
   let frameAt = 0;
   // Progress: work units known so far (compile objects, predicted shadow builds, frames, and the
   // pipelines and first draws as they appear); never backwards, total/total at the end.
@@ -340,18 +357,37 @@ export async function warmup(
     return ms(t);
   };
   let grantedAt = 0;
+  let buildsAt = 0;
+  let cpu = 0;
+  let allowed = 0;
+  let phase: SlowFrame["phase"] = "shadows";
+  const slow: SlowFrame[] = [];
   const draw = () => {
     grantedAt = gate?.granted() ?? 0;
-    gate?.frame(budget);
+    buildsAt = stats.total;
+    const t = performance.now();
+    allowed = pacer.allowance();
+    gate?.frame(allowed);
     opts.beforeFrame?.();
     beginManualFrame(src);
     ctx.render();
     ctx.gpu.frame(); // keeps three's timestamp query pool drained
+    const end = performance.now();
+    cpu = end - t;
+    if (gate) {
+      const used = gate.granted() - grantedAt;
+      pacer.sent(used, end, used > 0 ? glFence(gl) : null);
+    }
   };
   const next = async () => {
     await nextFrame();
     const now = performance.now();
-    if (frameAt) budget = nextDrawBudget(budget, now - frameAt, (gate?.granted() ?? 0) - grantedAt);
+    const firstDraws = (gate?.granted() ?? 0) - grantedAt;
+    if (frameAt && now - frameAt > 100) {
+      const r1 = (x: number) => Math.round(x * 10) / 10;
+      slow.push({ phase, ms: r1(now - frameAt), cpu: r1(cpu), builds: stats.total - buildsAt, firstDraws, budget: allowed });
+    }
+    if (frameAt) pacer.tick(now, now - frameAt);
     frameAt = now;
   };
   const programs = () => (renderer.info as unknown as { memory?: { programs?: number } }).memory?.programs ?? 0;
@@ -395,15 +431,17 @@ export async function warmup(
     //    screen frozen on a travel). Casters join the shadow pass a few per frame instead.
     frameAt = performance.now();
     if (shadowsOn) {
+      // Deferred programs link off the main thread, so a frame takes twice the new shadow builds.
       const n = await warmShadowCasters(scene, draw, next, (cost) => {
         shadowDone += cost;
         emit();
-      });
+      }, deferred?.active ? SHADOW_BATCH * 2 : SHADOW_BATCH);
       // WebGL2 keeps drawing while its shadow programs compile (the drain below); WebGPU waits here.
       const shadowWait = gate ? 0 : await compiled();
       shadows = { ...lap(), frames: n, predicted, wait: shadowWait };
     }
     shadowDone = predicted;
+    phase = "frames";
     for (let i = 0; i < frames; i++) {
       draw();
       realFrames++;
@@ -414,6 +452,7 @@ export async function warmup(
     // 5. Until every program has compiled and, on WebGL2, been drawn once: stop after a frame that
     //    began with nothing compiling and turned no first draw away.
     const drainAt = performance.now();
+    phase = "drain";
     if (gate) {
       while (performance.now() - drainAt < DRAIN_MAX_MS) {
         const compiling = deferred!.pending();
@@ -422,7 +461,7 @@ export async function warmup(
         drain++;
         await next();
         emit();
-        if (compiling === 0 && gate.waiting() === 0) break;
+        if (compiling === 0 && gate.waiting() === 0 && !pacer.inFlight()) break;
       }
       await deferred!.settle();
       framesWait = ms(drainAt);
@@ -468,6 +507,8 @@ export async function warmup(
     builds: stats.total - builds0,
     shaders: stats.total,
     stages: programs() - stages0,
+    slow: slow.sort((a, b) => b.ms - a.ms).slice(0, 12),
+    firstDraws: { granted: gate?.granted() ?? 0, ...pacer.batches() },
     phases: { compile, compute, shadows, frames: framesPhase },
   };
   stats.warmups.push(report);

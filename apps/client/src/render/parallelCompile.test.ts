@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  deferPipelines, FIRST_DRAWS_MAX, FIRST_DRAWS_START, gateFirstDraws, nextDrawBudget, type DeferRenderer, type GateRenderer,
+  deferPipelines, FIRST_DRAWS_MAX, FIRST_DRAWS_START, FirstDrawPacer, gateFirstDraws, glFence, nextDrawBudget,
+  type DeferRenderer, type GateRenderer,
 } from "./parallelCompile.ts";
 
 /** three's Pipelines as the backend sees it: a new pipeline compiles in parallel only when given a list. */
@@ -179,5 +180,83 @@ describe("nextDrawBudget", () => {
     expect(nextDrawBudget(4, 10, 3)).toBe(4);
     expect(nextDrawBudget(4, 10, 4)).toBe(8);
     expect(nextDrawBudget(4, 400, 0)).toBe(2); // a long frame still halves it
+  });
+});
+
+describe("FirstDrawPacer (one batch of first draws in flight; its size follows the GPU's time for the last)", () => {
+  it("sends no new first draws until the GPU has finished the last batch", () => {
+    const p = new FirstDrawPacer();
+    let done = false;
+    expect(p.allowance()).toBe(FIRST_DRAWS_START);
+    p.sent(FIRST_DRAWS_START, 0, () => done);
+    p.tick(16);
+    expect(p.allowance()).toBe(0); // still compiling Metal pipelines in the GPU process
+    p.tick(33);
+    expect(p.allowance()).toBe(0);
+    done = true;
+    p.tick(50); // finished in 50 ms: quick, and the batch was full
+    expect(p.allowance()).toBe(FIRST_DRAWS_START * 2);
+  });
+
+  it("allows a fenced batch the few frames Chrome takes to report its fence", () => {
+    const p = new FirstDrawPacer();
+    p.sent(FIRST_DRAWS_START, 0, () => true);
+    p.tick(100); // 100 ms: still quick for a fenced batch
+    expect(p.allowance()).toBe(FIRST_DRAWS_START * 2);
+    p.sent(FIRST_DRAWS_START * 2, 100, () => true);
+    p.tick(300); // 200 ms: hold
+    expect(p.allowance()).toBe(FIRST_DRAWS_START * 2);
+  });
+
+  it("halves after a batch the GPU took long over, never below one", () => {
+    const p = new FirstDrawPacer();
+    p.sent(2, 0, () => true);
+    p.tick(400);
+    expect(p.allowance()).toBe(1);
+    p.sent(1, 400, () => true);
+    p.tick(900);
+    expect(p.allowance()).toBe(1);
+    expect(p.inFlight()).toBe(false);
+    expect(p.batches()).toEqual({ batches: 2, p50: 500, max: 500 });
+  });
+
+  it("a frame with no first draws leaves nothing in flight", () => {
+    const p = new FirstDrawPacer();
+    p.sent(0, 0, () => false);
+    expect(p.inFlight()).toBe(false);
+    expect(p.allowance()).toBe(FIRST_DRAWS_START);
+  });
+
+  it("without fences, paces by the frame times instead", () => {
+    const p = new FirstDrawPacer();
+    p.sent(FIRST_DRAWS_START, 0, null);
+    expect(p.inFlight()).toBe(false);
+    p.tick(20, 20);
+    expect(p.allowance()).toBe(FIRST_DRAWS_START * 2);
+    p.sent(FIRST_DRAWS_START * 2, 20, null);
+    p.tick(400, 380);
+    expect(p.allowance()).toBe(FIRST_DRAWS_START);
+  });
+});
+
+describe("glFence", () => {
+  it("reads a WebGL2 fence without waiting, and deletes it once signalled", () => {
+    let status = 0;
+    const deleted: unknown[] = [];
+    const gl = {
+      SYNC_GPU_COMMANDS_COMPLETE: 1, SYNC_STATUS: 2, SIGNALED: 3,
+      fenceSync: () => ({ id: 1 }),
+      getSyncParameter: () => status,
+      deleteSync: (s: unknown) => void deleted.push(s),
+      flush() {},
+    };
+    const done = glFence(gl)!;
+    expect(done()).toBe(false);
+    status = 3;
+    expect(done()).toBe(true);
+    expect(done()).toBe(true);
+    expect(deleted).toHaveLength(1);
+    expect(glFence(null)).toBeNull();
+    expect(glFence({} as never)).toBeNull();
   });
 });
