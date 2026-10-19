@@ -20,8 +20,9 @@ export async function watchStills(page: Page): Promise<void> {
       const root = document.getElementById("loading");
       const fig = root && !root.hidden ? root.querySelector<HTMLElement>(".fl-loading__still.is-on") : null;
       const id = fig?.dataset.still;
-      if (!id || seen.at(-1)?.id === id) return;
-      seen.push({ id, caption: fig!.querySelector("figcaption")?.textContent ?? "", body: root!.dataset.body ?? "", t: performance.now() });
+      if (!fig || !id || fig.dataset.seen) return; // each picture once, also the same still on a later load
+      fig.dataset.seen = "1";
+      seen.push({ id, caption: fig.querySelector("figcaption")?.textContent ?? "", body: root!.dataset.body ?? "", t: performance.now() });
     }, 100);
   });
 }

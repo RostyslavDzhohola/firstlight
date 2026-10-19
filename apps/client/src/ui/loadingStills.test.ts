@@ -29,7 +29,14 @@ describe("StillDeck (which still comes next)", () => {
   it("no destination yet (the first load): Portus first, where most first loads land", () => {
     const d = new StillDeck(SET);
     d.plan(null);
-    expect(SET.find((s) => s.id === d.next()!.id)!.body).toBe("portus");
+    const first = d.next()!.id;
+    expect(SET.find((s) => s.id === first)!.body).toBe("portus");
+    d.next(); // the one ahead
+    // The pick screen, then the arrival in Portus: another of Portus' stills opens.
+    d.plan("portus");
+    const second = d.next()!.id;
+    expect(second).toMatch(/^p/);
+    expect(second).not.toBe(first);
   });
 
   it("turns over which of the destination's stills opens, load after load, and never repeats the one just shown", () => {

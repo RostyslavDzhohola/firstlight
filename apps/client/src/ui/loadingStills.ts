@@ -65,9 +65,11 @@ export class StillDeck {
 
   /** A new load (or a destination learnt mid-load) going to `body`; null: not known yet. */
   plan(body: BodyKey | null): void {
-    const turn = this.turns.get(body) ?? 0;
-    this.turns.set(body, turn + 1);
     const lead = body ?? BODY_ORDER.find((b) => this.stills.some((s) => s.body === b)) ?? null;
+    // Turns count per opening body: a first load (no destination yet: Portus) and the arrival in
+    // Portus after it open on different stills.
+    const turn = this.turns.get(lead) ?? 0;
+    this.turns.set(lead, turn + 1);
     const of = (b: BodyKey) => this.stills.filter((s) => s.body === b);
     const first = lead ? of(lead) : [];
     const k = first.length ? turn % first.length : 0;
