@@ -615,7 +615,8 @@ export class Game {
     // Hand-over: from here a close is a mid-game disconnect (no await until the caller resumes play).
     if (watch) this.net.onLeaveRoom = (code) => this.onRoomClosed(code);
     hideLoading();
-    this.packs.resume(); // HD art packs download in play, after a short delay (D-artpacks)
+    // HD art packs download in play: after a short delay and the site download, if it is still running (D-artpacks).
+    this.packs.resume({ after: this.planet.town?.settled });
   }
 
   /**
@@ -690,7 +691,7 @@ export class Game {
       hideLoading();
       this.running = true;
       this.last = performance.now();
-      this.packs.resume();
+      this.packs.resume({ after: this.planet.town?.settled });
       this.endRewarm();
     }
   }
@@ -738,7 +739,7 @@ export class Game {
       hideLoading();
       this.running = true;
       this.last = performance.now();
-      this.packs.resume();
+      this.packs.resume({ after: this.planet.town?.settled });
       this.endRewarm();
     }
   }

@@ -32,7 +32,7 @@ export const features = {
   voice: import.meta.env.VITE_FEATURE_VOICE === "1",
 };
 
-/** URL flags (also ?cpuslow=N for the F11 weak-laptop profile, ?zzfx for synthesised SFX only): ?nobloom ?nofog ?nosky ?nograss ?notrees ?nowater ?noshadows ?noao ?noparticles ?nopost ?nochars ?nodestruct ?nohorses ?webgl ?webgpu (try WebGPU even after it failed on this device) ?tier=… ?bench */
+/** URL flags (also ?cpuslow=N for the F11 weak-laptop profile, ?zzfx for synthesised SFX only): ?nobloom ?nofog ?nosky ?nograss ?notrees ?nowater ?noshadows ?noao ?noparticles ?nopost ?nochars ?nodestruct ?nohorses ?webgl ?webgpu (try WebGPU even after it failed on this device) ?tier=… ?bench; HD art packs: ?nopacks ?packs=off|on|town,chars,vegetation ?packsdelay=ms */
 export const flags = {
   has(name: string): boolean {
     return params.has(name);

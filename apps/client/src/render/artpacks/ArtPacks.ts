@@ -54,6 +54,7 @@ interface Group {
   bases: { slot: TextureSlot; base: THREE.Texture }[];
   made: THREE.Texture[];
   steps: (() => void)[];
+  stepCount: number;
   live: Live[];
   /** HD minus shipped GPU bytes once live (or while in flight). */
   gpuBytes: number;
@@ -62,7 +63,9 @@ interface Group {
 
 export interface SwapRecord {
   group: string;
-  /** ms since the controller's clock origin. */
+  /** When its first upload step ran (the env's clock, ms). */
+  uploadAt: number;
+  /** When it was swapped in. */
   at: number;
   steps: number;
   /** The longest single upload step on the main thread (ms). */
@@ -102,9 +105,13 @@ export class ArtPacks {
   private manifestP: Promise<PackManifest | null> | null = null;
   private readonly groups = new Map<string, Group>();
   private running = false;
+  private pumping = 0;
   private cancelStart: (() => void) | null = null;
+  /** The resume() waiting to start (cleared when it starts or is paused). */
+  private startToken: object | null = null;
   private current: Group | null = null;
   private stepMs = 0;
+  private uploadAt = 0;
   readonly swaps: SwapRecord[] = [];
   private readonly budget: number;
 
@@ -131,15 +138,31 @@ export class ArtPacks {
     }
   }
 
-  /** Play resumed after a loading screen: start (after the delay) on whatever the tier takes and isn't in yet. */
-  resume() {
+  /**
+   * Play resumed after a loading screen: start on whatever the tier takes and isn't in yet, after the
+   * delay and once `after` settles (the arrival's own downloads still running in play: a site asset
+   * past its deadline).
+   */
+  resume(opts: { delayMs?: number; after?: Promise<unknown> } = {}) {
     for (const g of this.groups.values()) g.cooling = false;
-    if (this.running || this.cancelStart || !this.packs.length) return;
-    this.cancelStart = this.env.later(() => {
-      this.cancelStart = null;
+    if (this.running || this.startToken || !this.packs.length) return;
+    const token = {};
+    this.startToken = token;
+    const go = () => {
+      if (this.startToken !== token) return; // paused meanwhile
+      this.startToken = null;
       this.running = true;
       void this.pump();
-    }, ArtPacks.START_DELAY_MS);
+    };
+    let cancel = this.env.later(() => {
+      if (!opts.after) return go();
+      cancel = () => undefined;
+      void opts.after.then(go, go);
+    }, opts.delayMs ?? ArtPacks.START_DELAY_MS);
+    this.cancelStart = () => {
+      cancel();
+      if (this.startToken === token) this.startToken = null;
+    };
   }
 
   /** A loading screen: stop downloading and uploading (the arrival's own downloads come first). */
@@ -158,6 +181,7 @@ export class ArtPacks {
     const step = g.steps.shift();
     if (step) {
       const t0 = this.env.now();
+      if (!this.uploadAt) this.uploadAt = t0;
       step();
       this.stepMs = Math.max(this.stepMs, this.env.now() - t0);
       return;
@@ -177,7 +201,7 @@ export class ArtPacks {
       skipped: of("skipped"),
       gpuBytes: this.liveBytes(),
       swaps: [...this.swaps],
-      busy: !!this.current || !!this.cancelStart,
+      busy: !!this.current || !!this.startToken || this.pumping > 0,
     };
   }
 
@@ -196,13 +220,26 @@ export class ArtPacks {
   /** Start the next group that can go, if nothing is in flight. */
   private async pump() {
     if (!this.running || this.current) return;
-    this.manifestP ??= this.env.manifest().catch(() => null);
-    const manifest = await this.manifestP;
-    if (!manifest || !this.running || this.current) return;
+    this.pumping++;
+    try {
+      this.manifestP ??= this.env.manifest().catch((e: unknown) => {
+        console.warn("[packs] no pack manifest; keeping the shipped textures", e);
+        return null;
+      });
+      const manifest = await this.manifestP;
+      if (!manifest) this.manifestP = null; // the next resume asks again
+      if (!manifest || !this.running || this.current) return;
+      this.next(manifest);
+    } finally {
+      this.pumping--;
+    }
+  }
+
+  private next(manifest: PackManifest) {
     for (const w of wantedGroups(manifest, this.packs)) {
       let g = this.groups.get(w.group);
       if (!g) {
-        g = { id: w.group, pack: w.pack, files: w.files, state: "pending", tries: 0, cooling: false, bases: [], made: [], steps: [], live: [], gpuBytes: 0, abort: null };
+        g = { id: w.group, pack: w.pack, files: w.files, state: "pending", tries: 0, cooling: false, bases: [], made: [], steps: [], stepCount: 0, live: [], gpuBytes: 0, abort: null };
         this.groups.set(g.id, g);
       }
       if (g.state !== "pending" || g.cooling || g.tries >= MAX_TRIES) continue;
@@ -232,6 +269,7 @@ export class ArtPacks {
     g.made = [];
     g.steps = [];
     this.stepMs = 0;
+    this.uploadAt = 0;
     const abort = (g.abort = new AbortController());
     const { signal } = abort;
     const files = g.files.map(async (f, i) => {
@@ -250,6 +288,7 @@ export class ArtPacks {
         if (g.abort !== abort || g.state !== "loading") return;
         g.state = "uploading";
         g.steps = made.flatMap((t) => this.env.uploadSteps(t));
+        g.stepCount = g.steps.length;
       },
       (e: unknown) => {
         if (g.abort !== abort) return; // dropped (pause / tier): already cleaned up
@@ -281,7 +320,7 @@ export class ArtPacks {
     g.abort = null;
     g.state = "live";
     const swapMs = this.env.now() - t0;
-    this.swaps.push({ group: g.id, at: t0, steps: g.files.length, maxStepMs: Math.round(this.stepMs * 100) / 100, swapMs: Math.round(swapMs * 100) / 100 });
+    this.swaps.push({ group: g.id, uploadAt: this.uploadAt, at: t0, steps: g.stepCount, maxStepMs: Math.round(this.stepMs * 100) / 100, swapMs: Math.round(swapMs * 100) / 100 });
     console.info(`[packs] ${g.id} in: ${(g.gpuBytes / 1048576).toFixed(0)} MB more on the GPU, longest upload step ${this.stepMs.toFixed(1)} ms`);
   }
 

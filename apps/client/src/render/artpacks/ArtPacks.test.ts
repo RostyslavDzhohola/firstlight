@@ -127,6 +127,34 @@ describe("ArtPacks", () => {
     expect(w.downloads.map((d) => d.entry)).toEqual(["portus/portus_color.webp", "portus/portus_normal.webp"]);
   });
 
+  it("waits for the arrival's own downloads still running in play (a site asset past its deadline)", async () => {
+    const w = world();
+    const packs = new ArtPacks(w.env, { mode: "auto" });
+    packs.setTier("medium");
+    let settle!: () => void;
+    packs.resume({ after: new Promise<void>((r) => (settle = r)) });
+    await w.tick(ArtPacks.START_DELAY_MS * 10);
+    expect(w.downloads).toEqual([]);
+    expect(packs.state().busy).toBe(true);
+    settle();
+    await w.tick();
+    expect(w.downloads.length).toBe(2);
+  });
+
+  it("a pause while waiting for them cancels the start", async () => {
+    const w = world();
+    const packs = new ArtPacks(w.env, { mode: "auto" });
+    packs.setTier("medium");
+    let settle!: () => void;
+    packs.resume({ after: new Promise<void>((r) => (settle = r)) });
+    await w.tick(ArtPacks.START_DELAY_MS);
+    packs.pause();
+    settle();
+    await w.tick(ArtPacks.START_DELAY_MS);
+    expect(w.downloads).toEqual([]);
+    expect(packs.state().busy).toBe(false);
+  });
+
   it("swaps a group into the same slots only when every file of it is uploaded, then releases the base on the GPU", async () => {
     const w = world();
     const packs = new ArtPacks(w.env, { mode: "auto" });

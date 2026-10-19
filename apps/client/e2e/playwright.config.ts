@@ -7,7 +7,9 @@
 //   pnpm e2e:gate                 only the journeys in e2e/gates.json; non-zero exit on any failure
 //
 // Env: E2E_OUT (artifacts, default e2e/.out), E2E_PORT / E2E_CLIENT_PORT, E2E_WORKERS (default 2),
-// E2E_REUSE=1 (reuse a stack you started yourself; its server log must be $E2E_OUT/server.log).
+// E2E_REUSE=1 (reuse a stack you started yourself; its server log must be $E2E_OUT/server.log),
+// E2E_FLAGS=a,b (extra URL flags on every page, e.g. `nopacks`). Evidence runs that `pnpm e2e` skips:
+// bench-warmup.spec.ts (BENCH_MODE) and artpacks.spec.ts (ARTPACKS).
 
 import { defineConfig } from "@playwright/test";
 import path from "node:path";

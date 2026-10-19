@@ -16,8 +16,12 @@ import type { StripJob, StripResult } from "./strip.worker.ts";
 /** The packs' folder under the asset base (built by tools/blender/artpacks). */
 export const PACK_FOLDER = "packs/hd";
 
-/** Array-texture layers uploaded per frame: 2 layers of 1024² RGBA are 8 MB. */
-export const LAYERS_PER_STEP = 2;
+/**
+ * Array-texture layers uploaded per frame: one 1024² RGBA layer is 4 MB. Two per frame measured up to
+ * 33 ms per step on WebGL2 on the M1 (texSubImage3D and the array's mip rebuild), over the ~25 ms a
+ * frame may take (D-artpacks-4).
+ */
+export const LAYERS_PER_STEP = 1;
 
 /** A pack file that takes longer than this is dropped (the shipped textures stay). */
 export const PACK_FILE_TIMEOUT_MS = 120_000;
@@ -163,5 +167,7 @@ export function artPacksEnv(renderer: THREE.WebGPURenderer): ArtPacksEnv {
 
 /** The session's packs, per the URL (`?packs`, `?packs=off`, `?nopacks`) and the tier table. */
 export function createArtPacks(renderer: THREE.WebGPURenderer): ArtPacks {
+  const delay = Number(flags.get("packsdelay")); // tests: hold the swap back for a "before" screenshot
+  if (Number.isFinite(delay) && delay >= 0 && flags.get("packsdelay") !== null) ArtPacks.START_DELAY_MS = delay;
   return new ArtPacks(artPacksEnv(renderer), parsePackFlag(flags.get("packs"), flags.has("nopacks")));
 }

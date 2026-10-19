@@ -145,7 +145,8 @@ export class Player {
 
   /** `/?e2e[&webgl]&…`: the hook, the renderer under test, and any extra flags. */
   url(extra: Record<string, string | number | true> = {}): string {
-    const parts = ["e2e", ...(this.gfx === "webgl" ? ["webgl"] : [])];
+    // E2E_FLAGS: extra URL flags for every page of a run (e.g. `nopacks` for a baseline without the HD art packs).
+    const parts = ["e2e", ...(this.gfx === "webgl" ? ["webgl"] : []), ...(process.env.E2E_FLAGS ?? "").split(",").filter(Boolean)];
     for (const [k, v] of Object.entries(extra)) parts.push(v === true ? k : `${k}=${encodeURIComponent(String(v))}`);
     return `/?${parts.join("&")}`;
   }

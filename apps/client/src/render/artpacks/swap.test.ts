@@ -87,7 +87,7 @@ for (const backend of ["webgl2", "webgpu"] as const) {
       const hdColor = likeShipped(stripTexture(new Uint8Array(8 * 8 * 4 * layers).fill(210), 8, layers, true), color);
       const hdNormal = likeShipped(stripTexture(new Uint8Array(8 * 8 * 4 * layers).fill(128), 8, layers, false), normal);
       const steps = (await upload(r, hdColor, () => frames(r, s, camera, 1))) + (await upload(r, hdNormal, () => frames(r, s, camera, 1)));
-      expect(steps, "two layers per step").toBe(4);
+      expect(steps, "one layer per step").toBe(6);
       expect(texData(r, hdColor)?.initialized).toBe(true);
       expect(boundInDraws(r, hdColor), "uploaded, not drawn yet").toBe(false);
       expect((hdColor.image as { data: unknown }).data, "the CPU copy is freed once on the GPU").toBeNull();
