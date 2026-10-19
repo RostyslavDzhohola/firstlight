@@ -31,6 +31,7 @@ function fakeCtx(gpuMs: number | null) {
         pending = [];
         return out;
       },
+      drainBusy: () => [],
     },
   } as unknown as RenderCtx;
   return { ctx, tiers };

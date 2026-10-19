@@ -1,7 +1,8 @@
 // Quality auto-pick (SPEC §7.3): software / blocklisted adapters → Low; otherwise a ~2 s probe at
-// Medium on the current view, decided by decideProbe() (timing.ts): GPU timestamps where available
-// (p50 < 6 ms → High, then a short re-probe at High for Ultra; > 14 ms → Low), else rAF time
-// (vsync-limited: only "too slow" or a very fast high-refresh display can be told apart).
+// Medium on the current view, decided by decideProbe() (timing.ts): GPU timestamps where available,
+// the GPU's busy time on WebGPU (D-framerate-2) (p50 < 6 ms → High, then a short re-probe at High for
+// Ultra; > 14 ms → Low), else rAF time (vsync-limited: only "too slow" or a very fast high-refresh
+// display can be told apart).
 // A probe with fewer than 30 frames or a hidden tab is invalid: Medium for this session, not saved.
 
 import { isSoftwareRenderer, type RenderCtx } from "./renderer.ts";
@@ -13,7 +14,7 @@ export interface ProbeResult {
   tier: Tier;
   /** False → apply for this session only (`ctx.setProbedTier(tier, { persist: false })`). */
   valid: boolean;
-  method: "software" | "gpu-timer" | "raf" | "invalid" | "error";
+  method: "software" | "gpu-busy" | "gpu-timer" | "raf" | "invalid" | "error";
   gpuP50: number | null;
   rafP50: number;
   highGpuP50: number | null;
@@ -23,11 +24,12 @@ export interface ProbeResult {
 const nextFrame = () => new Promise<number>((r) => requestAnimationFrame((t) => r(t)));
 const visible = () => typeof document === "undefined" || document.visibilityState === "visible";
 
-async function measure(ctx: RenderCtx, ms: number, beforeFrame?: () => void, onFrac?: (f: number) => void): Promise<{ gpu: number[]; raf: number[]; visible: boolean }> {
+async function measure(ctx: RenderCtx, ms: number, beforeFrame?: () => void, onFrac?: (f: number) => void): Promise<{ gpu: number[]; busy: number[]; raf: number[]; visible: boolean }> {
   const raf: number[] = [];
   let stayedVisible = visible();
   const src = ctx.renderer as unknown as TimestampSource;
   ctx.gpu.drain();
+  ctx.gpu.drainBusy();
   let last = await nextFrame();
   const begin = last;
   const end = last + ms;
@@ -46,7 +48,7 @@ async function measure(ctx: RenderCtx, ms: number, beforeFrame?: () => void, onF
   // Let the last timestamp resolves land.
   await nextFrame();
   await nextFrame();
-  return { gpu: ctx.gpu.drain(), raf, visible: stayedVisible };
+  return { gpu: ctx.gpu.drain(), busy: ctx.gpu.drainBusy(), raf, visible: stayedVisible };
 }
 
 /**
@@ -79,14 +81,14 @@ async function probeTier(ctx: RenderCtx, beforeFrame: (() => void) | undefined, 
     await warmup(ctx, { frames: 3, beforeFrame, label: "probe", onProgress: (p) => part(0, 0.45)(p.frac) });
     const m = await measure(ctx, 2000, beforeFrame, part(0.45, 0.7));
     // Drop the first few frames (pipeline creation tails).
-    const d = decideProbe({ raf: m.raf.slice(3), gpu: m.gpu.slice(2), gpuAvailable: ctx.gpu.available, visible: m.visible });
+    const d = decideProbe({ raf: m.raf.slice(3), gpu: m.gpu.slice(2), busy: m.busy.slice(2), gpuAvailable: ctx.gpu.available, visible: m.visible });
     let tier = d.tier;
     let highGpuP50: number | null = null;
     if (d.valid && d.reprobeHigh) {
       ctx.setTier("high", { persist: false, auto: true });
       await warmup(ctx, { frames: 3, beforeFrame, label: "probe", onProgress: (p) => part(0.7, 0.9)(p.frac) });
       const h = await measure(ctx, 1200, beforeFrame, part(0.9, 1));
-      const u = h.visible ? decideUltra(h.gpu.slice(2)) : { tier: "high" as Tier, gpuP50: null };
+      const u = h.visible ? decideUltra(h.gpu.slice(2), h.busy.slice(2)) : { tier: "high" as Tier, gpuP50: null };
       tier = u.tier;
       highGpuP50 = u.gpuP50;
     }

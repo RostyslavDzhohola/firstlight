@@ -537,6 +537,17 @@ describe("probe decision", () => {
     expect(decideUltra(frames(30, 5)).tier).toBe("high");
     expect(decideUltra(frames(5, 1)).tier).toBe("high");
   });
+
+  it("decides on the GPU's busy time where there is one (M1: three's sum 52 ms, busy 8.8 ms, D-framerate-2)", () => {
+    const base = { raf: frames(120, 16.7), gpu: frames(60, 52), gpuAvailable: true, visible: true };
+    expect(decideProbe({ ...base, busy: frames(60, 8.8) })).toMatchObject({ tier: "medium", valid: true, method: "gpu-busy", gpuP50: 8.8 });
+    expect(decideProbe({ ...base, busy: frames(60, 4.5) })).toMatchObject({ tier: "high", method: "gpu-busy", reprobeHigh: true });
+    expect(decideProbe({ ...base, busy: frames(60, 15) })).toMatchObject({ tier: "low", method: "gpu-busy" });
+    // too few busy samples: as before (three's sum, here implausible: frame time)
+    expect(decideProbe({ ...base, busy: frames(5, 4) })).toMatchObject({ tier: "medium", method: "raf" });
+    expect(decideUltra(frames(30, 9), frames(30, 3)).tier).toBe("ultra");
+    expect(decideUltra(frames(30, 3), frames(30, 6)).tier).toBe("high");
+  });
 });
 
 describe("stored graphics settings", () => {

@@ -383,8 +383,10 @@ export class ResolutionLadder {
 export interface ProbeSamples {
   /** Frame intervals (ms) at Medium. */
   raf: readonly number[];
-  /** GPU ms per frame at Medium. */
+  /** GPU ms per frame at Medium (three's figure: the passes summed). */
   gpu: readonly number[];
+  /** GPU busy ms per frame at Medium (WebGPU pass union, D-framerate-2), when the timer has it. */
+  busy?: readonly number[];
   gpuAvailable: boolean;
   /** document.visibilityState was "visible" for the whole measurement. */
   visible: boolean;
@@ -394,7 +396,7 @@ export interface ProbeDecision {
   tier: Tier;
   /** False → use Medium for this session and don't save anything. */
   valid: boolean;
-  method: "gpu-timer" | "raf" | "invalid";
+  method: "gpu-busy" | "gpu-timer" | "raf" | "invalid";
   gpuP50: number | null;
   rafP50: number;
   /** Ask for a short re-probe at High (GPU timer only) to decide Ultra. */
@@ -404,30 +406,47 @@ export interface ProbeDecision {
 export const PROBE_MIN_FRAMES = 30;
 export const PROBE_MIN_GPU = 20;
 
+/** The GPU p50 to decide on: busy time where there is enough of it, else three's sum if plausible. */
+function gpuEvidence(gpu: readonly number[], busy: readonly number[] | undefined, rafP50: number, min: number): { g: number; method: "gpu-busy" | "gpu-timer" } | null {
+  if (busy && busy.length >= min) {
+    const g = percentile(busy, 0.5);
+    if (gpuPlausible(g, rafP50)) return { g, method: "gpu-busy" };
+  }
+  if (gpu.length >= min) {
+    const g = percentile(gpu, 0.5);
+    if (gpuPlausible(g, rafP50)) return { g, method: "gpu-timer" };
+  }
+  return null;
+}
+
 /**
- * SPEC §7.3 thresholds. GPU timer: p50 > 14 ms → Low, < 6 ms → High (and re-probe at High),
- * else Medium. rAF only (vsync-limited): > 20 ms → Low, < 6 ms → High (very high refresh
- * displays), else Medium. Too few frames or a hidden tab → invalid (Medium, not saved).
+ * SPEC §7.3 thresholds. GPU timer (busy time where there is one): p50 > 14 ms → Low, < 6 ms → High
+ * (and re-probe at High), else Medium. rAF only (vsync-limited): > 20 ms → Low, < 6 ms → High
+ * (very high refresh displays), else Medium. Too few frames or a hidden tab → invalid (Medium, not saved).
  */
 export function decideProbe(s: ProbeSamples): ProbeDecision {
   const rafP50 = percentile(s.raf, 0.5);
   if (!s.visible || s.raf.length < PROBE_MIN_FRAMES) {
     return { tier: "medium", valid: false, method: "invalid", gpuP50: null, rafP50, reprobeHigh: false };
   }
-  const gTrusted = s.gpuAvailable && s.gpu.length >= PROBE_MIN_GPU && gpuPlausible(percentile(s.gpu, 0.5), rafP50);
-  if (gTrusted) {
-    const g = percentile(s.gpu, 0.5);
-    if (g > 14) return { tier: "low", valid: true, method: "gpu-timer", gpuP50: g, rafP50, reprobeHigh: false };
-    if (g >= 6) return { tier: "medium", valid: true, method: "gpu-timer", gpuP50: g, rafP50, reprobeHigh: false };
-    return { tier: "high", valid: true, method: "gpu-timer", gpuP50: g, rafP50, reprobeHigh: true };
+  const ev = s.gpuAvailable ? gpuEvidence(s.gpu, s.busy, rafP50, PROBE_MIN_GPU) : null;
+  if (ev) {
+    const { g, method } = ev;
+    if (g > 14) return { tier: "low", valid: true, method, gpuP50: g, rafP50, reprobeHigh: false };
+    if (g >= 6) return { tier: "medium", valid: true, method, gpuP50: g, rafP50, reprobeHigh: false };
+    return { tier: "high", valid: true, method, gpuP50: g, rafP50, reprobeHigh: true };
   }
   const tier: Tier = rafP50 > 20 ? "low" : rafP50 < 6 ? "high" : "medium";
   return { tier, valid: true, method: "raf", gpuP50: null, rafP50, reprobeHigh: false };
 }
 
-/** After a re-probe at High: Ultra only with clear headroom (p50 < 4 ms over ≥ 15 samples). */
-export function decideUltra(highGpu: readonly number[]): { tier: Tier; gpuP50: number | null } {
-  if (highGpu.length < 15) return { tier: "high", gpuP50: null };
-  const g = percentile(highGpu, 0.5);
+/**
+ * After a re-probe at High: Ultra only with clear headroom (p50 < 4 ms over ≥ 15 samples), on the
+ * busy time where there are enough samples of it.
+ */
+export function decideUltra(highGpu: readonly number[], highBusy?: readonly number[]): { tier: Tier; gpuP50: number | null } {
+  const s = highBusy && highBusy.length >= 15 ? highBusy : highGpu;
+  if (s.length < 15) return { tier: "high", gpuP50: null };
+  const g = percentile(s, 0.5);
   return { tier: g < 4 ? "ultra" : "high", gpuP50: g };
 }
