@@ -271,7 +271,7 @@ export class Bench {
     this.parts.push(this.host.particles.liveCount);
     const g = this.host.ctx.gpu.last;
     if (g !== null) this.gpu.push(g);
-    for (const b of this.host.ctx.gpu.drainBusy()) this.busy.push(b); // the timer keeps only its last 600
+    for (const b of this.host.ctx.gpu.takeBusySamples()) this.busy.push(b); // the timer keeps only its last 600
     const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
     if (mem && this.frames.length % 30 === 0) this.heap.push(mem.usedJSHeapSize / 1048576);
     const elapsed = (now - this.runStart) / 1000;
@@ -333,7 +333,7 @@ export class Bench {
 
   private finish() {
     this.phase = "done";
-    for (const b of this.host.ctx.gpu.drainBusy()) this.busy.push(b);
+    for (const b of this.host.ctx.gpu.takeBusySamples()) this.busy.push(b);
     const f = this.frames;
     const median = percentile(f, 0.5);
     const mean = f.reduce((a, b) => a + b, 0) / Math.max(1, f.length);

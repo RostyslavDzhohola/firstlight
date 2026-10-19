@@ -121,12 +121,17 @@ export class GpuTimer {
     return this.recentBusy.length ? percentile(this.recentBusy, 0.5) : null;
   }
 
-  /** Busy-time samples since the last call (clears the display window too). */
-  drainBusy(): number[] {
-    this.recentBusy.length = 0;
+  /** Busy-time samples that arrived since the last take or drain. */
+  takeBusySamples(): number[] {
     const s = this.freshBusy;
     this.freshBusy = [];
     return s;
+  }
+
+  /** Start a fresh busy-time measurement: the pending samples, and the display window cleared too. */
+  drainBusy(): number[] {
+    this.recentBusy.length = 0;
+    return this.takeBusySamples();
   }
 }
 

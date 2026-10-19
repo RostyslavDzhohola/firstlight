@@ -96,8 +96,10 @@ describe("GpuTimer", () => {
     await flush();
     expect(t.busyLast).toBeCloseTo(5, 6);
     expect(t.busyP50()).toBeCloseTo(5, 6);
-    expect(t.drainBusy()).toHaveLength(1);
+    expect(t.takeBusySamples()).toHaveLength(1);
+    expect(t.busyP50()).toBeCloseTo(5, 6); // taking keeps the display window
     expect(t.drainBusy()).toEqual([]);
+    expect(t.busyP50()).toBeNull(); // draining starts a fresh one
     expect(t.last).toBe(7); // three's sum is still recorded as before
   });
 
