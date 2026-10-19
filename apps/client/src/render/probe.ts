@@ -112,7 +112,7 @@ async function probeTier(ctx: RenderCtx, beforeFrame: (() => void) | undefined, 
       if (plan.extras.length) {
         ctx.setTier("medium", { persist: false, auto: true, extras: plan.extras });
         await warmup(ctx, { frames: 3, beforeFrame, label: "probe", onProgress: (p) => part(0.9, 0.95)(p.frac) });
-        const v = await measure(ctx, 1500, beforeFrame, part(0.95, 1));
+        const v = await measure(ctx, 1200, beforeFrame, part(0.95, 1)); // as long as the High re-probe
         const busy = v.busy.slice(2);
         if (v.visible && busy.length >= PROBE_MIN_GPU) {
           extrasGpuP50 = percentile(busy, 0.5);

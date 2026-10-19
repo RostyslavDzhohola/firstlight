@@ -4,7 +4,7 @@
 // The probe measures Medium (GPU busy time, WebGPU only; main-thread time per frame). planExtras()
 // adds extras in order of look per millisecond while the cost model (each extra's cost measured on
 // the M1 as a fraction of Medium's own, so it scales with the device) predicts the GPU time stays
-// within Medium's budget, and the main thread within 75% of the frame for extras that add draws. The
+// within the budget (extrasBudget), and for extras that add draws the main thread's predicted tail too. The
 // probe then measures again with the plan on; keepExtras() keeps the longest prefix of it that the
 // second measurement, scaled both ways (the whole frame, and only the extras), still fits.
 
@@ -40,8 +40,14 @@ export function extrasBudget(frameMs: number, tierBudgetMs: number): number {
   return Math.min(tierBudgetMs, (TAIL_SHARE * Math.max(frameMs, 1000 / 60)) / TAIL_FACTOR);
 }
 
-/** The main thread's share of the frame interval that CPU-costly extras may fill. */
-const CPU_SHARE = 0.75;
+/**
+ * The same for the main thread: the M1's busiest scene ran p99 14.3–14.9 ms of main-thread time per
+ * frame (after D-framerate-2's fixes, at load 50–165) where the probe's frames took p50 2.5–3.4 ms
+ * (no crowd, no game logic). Extras that add draws need the busiest scenes' p99, so predicted, inside
+ * 90% of the frame.
+ */
+export const CPU_TAIL_FACTOR = 5.0;
+const CPU_TAIL_SHARE = 0.9;
 
 /** Extras that bring others with them (terrain normals need the 4 detail layers, quality.ts). */
 const INCLUDES: Partial<Record<Extra, Extra[]>> = { normals: ["detail4"] };
@@ -79,7 +85,7 @@ export function planExtras(m: MediumMeasure, model: CostModel): ExtrasPlan {
     .filter(([, c]) => c.value > 0)
     .sort((a, b) => b[1].value / Math.max(1e-6, b[1].gpu) - a[1].value / Math.max(1e-6, a[1].gpu));
   const extras: Extra[] = [];
-  const cpuBudget = CPU_SHARE * m.frameMs;
+  const cpuBudget = (CPU_TAIL_SHARE * Math.max(m.frameMs, 1000 / 60)) / CPU_TAIL_FACTOR;
   for (const [e] of ranked) {
     if (extras.some((o) => INCLUDES[o]?.includes(e))) continue; // already in
     const next = costOf([...extras, e], model);
@@ -107,8 +113,20 @@ export function keepExtras(plan: ExtrasPlan, measuredMs: number, budgetMs: numbe
 }
 
 /**
- * Each extra's cost over Medium on the M1 (WebGPU busy time and main-thread time, `?bench=g1` path,
- * sustained; docs/DECISIONS.md D-framerate-3 has the measurements), as fractions of Medium's own.
- * Extras left out cost more than any Medium device's headroom, or showed nothing to buy.
+ * Each extra's cost over Medium, measured on the M1 (D-framerate-3 has the numbers): GPU as a
+ * fraction of Medium's busy time, CPU (more draws) as a fraction of its main-thread time, each in
+ * the busiest scene (`?bench=g1`, sustained, both backends) and with the GPU near its limit (3.6×
+ * Medium's pixels). Where an extra moved nothing beyond the measurements' ±2% resolution, its cost
+ * is that resolution, an upper bound. `value` is what it adds on screen (1 small … 3 large).
+ * `props` (trees full-detail to 40 m, drawn to 220 m) is left out: measured only in Portus, where it
+ * adds 5 draws; on a forest planet its distance draws far more trees, unmeasured.
  */
-export const EXTRA_COSTS: CostModel = {};
+export const EXTRA_COSTS: CostModel = {
+  normals: { value: 3, gpu: 0.02, cpu: 0 }, // terrain normal maps on all 4 detail layers
+  detail4: { value: 2, gpu: 0.02, cpu: 0 }, // 4 terrain detail layers instead of 2 (normals include them)
+  atmospheres: { value: 1, gpu: 0.02, cpu: 0 }, // halos round the sky planets
+  water2: { value: 1, gpu: 0.02, cpu: 0 }, // lake ripples
+  shadows: { value: 2, gpu: 0.02, cpu: 0.15 }, // the map twice as far: +94 draws (+30%) in Portus
+  grass: { value: 2, gpu: 0.12, cpu: 0.05 }, // 200k blades to 60 m
+  ao: { value: 3, gpu: 2.0, cpu: 0.2 }, // GTAO with its denoise: +18.6 ms busy on the M1
+};
