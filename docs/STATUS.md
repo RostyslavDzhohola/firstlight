@@ -16,6 +16,21 @@ placeholder until the site id arrives; occluders fade between camera and player 
 WebGL dip documented as Chrome/GPU present stalls (D-view-2); Kappa B hands and B-look stirrups (D-chars-4);
 the tutorial end card counts only while the world is on screen.
 
+**Shadows, quality-first loading and loader quips (2026-10-18 evening, client only, protocol 5):** #39 was
+decided by a model council (Opus 5.5, Sonnet 5.5, GPT-6-Astra, GPT-6.1-Sol, Fable 5.1; agreed 5/5): no
+blob shadows. Characters and horses share one lean shadow build per rig (48 → 2 shadow pipelines), first
+draws are priced by new shader stages, and synchronous GL polls wait for an idle GPU process (main-thread
+stalls in the warm-up 1.5–5.7 s → ≤ ~256 ms) (D-load-3). Palette and coat colours are per-object uniforms:
+7 avatar materials instead of 42 and 1 horse material instead of 6 (first-drawn pipelines 164 → 78, cold
+WebGL2 warm-up ~30 s → ~17 s, WebGPU warm 3.2 → 2.3 s; same colours) (D-load-4). The owner's call:
+graphics quality over load time, and the loader shows rotating funny lines (D-load-5). WebGPU gets a
+second chance after a slow start; the loader waits for the full world and grass (+1–2 s in Portus, +2–3 s
+on planets); town art waits up to 50 s and swaps in late; character textures follow the tier up
+(D-renderer-2, D-load-6). The #28 re-recording confirmed the glitch fixes (menu/overlay vanishing 5 → 0,
+blank world 3 → 0); #28 closed, #29 and #40 closed (no repro; no more recordings, the owner's call).
+Open: #42 (cold first visit: load-independent cache test, small shadow programs, compile-phase GPU gaps;
+#39 stays open until it lands); the sky/weather eases in for ~4 s after arrival (pre-existing).
+
 **Glitch and first-load fixes (2026-10-18, client only, protocol 5):** from the owner's screen recording
 (specs #17, #18; issues #19–#27, #30). The 3D canvas is resized only right before a frame is drawn, so no
 blank-world frames (D-view-3). Menus no longer lower the resolution, and an untrusted GPU timer (the M1)
@@ -26,9 +41,7 @@ stalls keep the camera out; stalls, keepers, labels and the player's own avatar 
 remembered for a week on the device (D-renderer-1). Warm-up progress is real, and the WebGL2 shader
 warm-up dropped from ~30 s to ~14 s cold and from 6–17 s to ~3 s warm (D-load-1/2).
 Open:
-- the owner's A/B re-recording (#28) and the Chromium report (#29);
-- 1–2 cold-cache warm-up frames over 250 ms (skinned shadow programs, ~270 ms each in ANGLE; blob shadows
-  for characters is the owner's visual call);
+- (since resolved: #28 done, #29 closed, #39 decided without blob shadows; see the evening entry above)
 - a post-uniform 2-frame lag seen only by a diagnostic (follow-up issue);
 - `weatherDrops` built after warm-up once in ~40 bench runs.
 
