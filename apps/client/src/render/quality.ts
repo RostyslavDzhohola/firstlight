@@ -152,7 +152,7 @@ export function withExtras(spec: TierSpec, extras: Iterable<Extra>): TierSpec {
       case "water2":
         s.water = Math.max(s.water, hi.water) as TierSpec["water"];
         break;
-      case "shadows": // a sharper, longer map; Low's blob shadows have none
+      case "shadows": // High's 2048² map over 40 m: Medium's sharpness twice as far; Low's blob shadows have none
         if (s.shadows.mode !== "map") break;
         s.shadows.mapSize = Math.max(s.shadows.mapSize, hi.shadows.mapSize);
         s.shadows.extent = Math.max(s.shadows.extent, hi.shadows.extent);
