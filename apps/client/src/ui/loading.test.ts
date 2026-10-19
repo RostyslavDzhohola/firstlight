@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BOOT_STEPS, loadingPhase, rendererNote, stepProgress, WARMUP_FROM, WEBGL2_FALLBACK_LINE, WEBGPU_SLOW_LINE, warmupProgress, type LoadingPhase } from "./loading.ts";
 import type * as LoadingT from "./loading.ts";
-import { QUIP_MS, QUIPS, reportsTrouble } from "./loadingQuips.ts";
+import { OPEN_SOURCE_QUIPS, QUIP_MS, QUIPS, reportsTrouble } from "./loadingQuips.ts";
 
 describe("loadingPhase", () => {
   it("maps Game.ts status lines to the four boot steps in order", () => {
@@ -248,5 +248,166 @@ describe("the loader's rotating quips (D-load-5)", () => {
     expect(QUIPS).toContain(first);
     vi.advanceTimersByTime(QUIP_MS);
     expect(shown()).not.toBe(first);
+  });
+});
+
+describe("the open-source lines and the repo link (D-showcase-3)", () => {
+  let hideLoading: typeof LoadingT.hideLoading;
+  let setLoading: typeof LoadingT.setLoading;
+  let showLoadingError: typeof LoadingT.showLoadingError;
+  /** A fresh page whose build says whether the repo is public (VITE_PUBLIC_REPO, config.publicRepo). */
+  async function page(publicRepo: boolean) {
+    vi.stubEnv("VITE_PUBLIC_REPO", publicRepo ? "true" : "");
+    vi.resetModules();
+    document.body.replaceChildren();
+    ({ hideLoading, setLoading, showLoadingError } = await import("./loading.ts"));
+    return (await import("../config.ts")).config;
+  }
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    hideLoading();
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+  });
+  const line = () => document.querySelector(".fl-loading__quip .is-on")?.textContent ?? null;
+  const link = () => document.querySelector<HTMLAnchorElement>("a.fl-loading__repo");
+  /** Every line the deck deals in `n` turns. */
+  const deal = (n: number) => {
+    const seen = new Set<string>();
+    for (let i = 0; i < n; i++) {
+      seen.add(line()!);
+      vi.advanceTimersByTime(QUIP_MS);
+    }
+    return seen;
+  };
+
+  it("with the repo public: the deck deals the open-source lines among the rest", async () => {
+    await page(true);
+    setLoading("Loading the game…", 0);
+    const seen = deal(QUIPS.length + OPEN_SOURCE_QUIPS.length);
+    expect([...seen].sort()).toEqual([...QUIPS, ...OPEN_SOURCE_QUIPS].sort());
+  });
+
+  it("with the repo public: a quiet link to it on the full screen, a new tab, reachable by keyboard, never focused for you", async () => {
+    const config = await page(true);
+    setLoading("Loading the game…", 0);
+    const a = link()!;
+    expect(a).not.toBeNull();
+    expect(a.href).toBe(config.repoUrl);
+    expect(a.target).toBe("_blank");
+    expect(a.rel).toContain("noopener");
+    expect(a.textContent).toMatch(/open source/i);
+    expect(a.tabIndex).toBe(0);
+    expect(a.closest('[aria-hidden="true"], [hidden]')).toBeNull();
+    expect(document.activeElement).not.toBe(a);
+    // The loader never moves the focus to it: progress, travel, the error state (focus on Retry).
+    setLoading("Travelling to Arcadia…", 0.15);
+    setLoading("Building the world…", 0.5);
+    expect(document.activeElement).not.toBe(a);
+    showLoadingError({ title: "The renderer didn't start", text: "Try again.", action: "Retry", onAction: () => {} });
+    expect(document.activeElement?.textContent).toBe("Retry");
+  });
+
+  it("a player who tabbed to the link doesn't keep the focus on it once the world is ready", async () => {
+    await page(true);
+    setLoading("Building the world…", 0.5);
+    link()!.focus();
+    expect(document.activeElement).toBe(link());
+    hideLoading();
+    expect(document.activeElement).not.toBe(link());
+  });
+
+  it("with the repo private: no link and none of the open-source lines", async () => {
+    const config = await page(false);
+    expect(config.publicRepo).toBe(false);
+    setLoading("Loading the game…", 0);
+    expect(link()).toBeNull();
+    const seen = deal(QUIPS.length * 2);
+    for (const q of OPEN_SOURCE_QUIPS) expect(seen.has(q), q).toBe(false);
+    expect(seen.size).toBe(QUIPS.length);
+  });
+});
+
+describe("stills of what awaits behind the full screen (D-showcase-2)", () => {
+  let hideLoading: typeof LoadingT.hideLoading;
+  let setLoading: typeof LoadingT.setLoading;
+  let showLoadingError: typeof LoadingT.showLoadingError;
+  const FAKE = ["portus-a", "portus-b", "arcadia-a", "meridian-a"].map((id) => ({ id, body: id.split("-")[0] as LoadingT.BodyKey, caption: `${id} place`, src: `/s/${id}.webp` }));
+  /** Every picture the page asked for: the request's priority, and settle it by hand. */
+  let asked: { img: HTMLImageElement; priority: string | null; ok: () => void }[] = [];
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    vi.resetModules();
+    asked = [];
+    vi.stubGlobal("Image", function FakeImage() {
+      const img = document.createElement("img");
+      let ok!: () => void;
+      const decoded = new Promise<void>((r) => (ok = r));
+      Object.assign(img, { decode: () => decoded });
+      queueMicrotask(() => asked.push({ img, priority: img.getAttribute("fetchpriority"), ok }));
+      return img;
+    });
+    vi.doMock("./loadingStills.ts", async (orig) => ({ ...(await orig<typeof import("./loadingStills.ts")>()), STILLS: FAKE }));
+    document.body.replaceChildren();
+    ({ hideLoading, setLoading, showLoadingError } = await import("./loading.ts"));
+  });
+  afterEach(() => {
+    hideLoading();
+    vi.doUnmock("./loadingStills.ts");
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+  const on = () => document.querySelector<HTMLElement>(".fl-loading__still.is-on");
+  const settle = async () => {
+    asked.at(-1)!.ok();
+    await vi.advanceTimersByTimeAsync(50);
+  };
+
+  it("first load: the first still is asked for as the loader appears, at low priority; shown decoratively behind it", async () => {
+    setLoading("Loading the game…", 0.02);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.priority).toBe("low");
+    expect(asked[0]!.img.src).toContain("/s/portus-");
+    await settle();
+    const fig = on()!;
+    expect(fig.dataset.still).toMatch(/^portus-/);
+    expect(fig.querySelector("img")!.getAttribute("alt")).toBe("");
+    expect(fig.closest('[aria-hidden="true"]')).toBe(document.querySelector(".fl-loading__bg"));
+    expect(fig.querySelector("figcaption")!.textContent).toMatch(/place$/);
+    expect(asked).toHaveLength(2); // the next one, one ahead
+  });
+
+  it("travel: the destination's stills first", async () => {
+    setLoading("Travelling to Meridian…", 0.15);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(asked[0]!.img.src).toContain("/s/meridian-a");
+    await settle();
+    expect(on()!.dataset.still).toBe("meridian-a");
+  });
+
+  it("not on the compact card or the error state, and gone when the world is ready", async () => {
+    setLoading("Building the world…", 0.5);
+    await vi.advanceTimersByTimeAsync(0);
+    await settle();
+    expect(on()).not.toBeNull();
+    setLoading("Applying graphics settings…", 0.5); // the compact mid-game card
+    expect(on()).toBeNull();
+    hideLoading();
+    setLoading("Travelling to Arcadia…", 0.15);
+    await vi.advanceTimersByTimeAsync(0);
+    await settle();
+    expect(on()!.dataset.still).toBe("arcadia-a");
+    showLoadingError({ title: "The world didn't load", text: "Try again.", action: "Retry", onAction: () => {} });
+    expect(on()).toBeNull();
+    const n = asked.length;
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(asked).toHaveLength(n); // nothing more downloads
+    setLoading("Loading the game…", 0); // Retry: back again
+    await vi.advanceTimersByTimeAsync(0);
+    await settle();
+    expect(on()).not.toBeNull();
+    hideLoading();
+    expect(document.querySelectorAll(".fl-loading__still")).toHaveLength(0);
   });
 });

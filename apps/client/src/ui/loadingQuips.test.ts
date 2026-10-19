@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { QUIPS, quipDeck, reportsTrouble } from "./loadingQuips.ts";
+import { loaderQuips, OPEN_SOURCE_QUIPS, QUIPS, quipDeck, reportsTrouble } from "./loadingQuips.ts";
 
 /** A small seeded PRNG (mulberry32) so every case is repeatable. */
 function seeded(seed: number): () => number {
@@ -59,6 +59,29 @@ describe("QUIPS (the loader's funny lines)", () => {
       expect(q.length, q).toBeLessThanOrEqual(45);
       expect(q, "nothing that reads like an error").not.toMatch(/error|fail|crash|broke|wrong|stuck|retry/i);
     }
+  });
+});
+
+describe("OPEN_SOURCE_QUIPS (with the repo public, D-showcase-3)", () => {
+  it("say it's open source: contribute, or clone it and build your own; same rules as the rest", () => {
+    expect(OPEN_SOURCE_QUIPS.length).toBeGreaterThanOrEqual(3);
+    expect(OPEN_SOURCE_QUIPS.length).toBeLessThanOrEqual(6); // a few among ~30, not a sales pitch
+    const all = OPEN_SOURCE_QUIPS.join(" ");
+    expect(all).toMatch(/open source/i);
+    expect(all).toMatch(/\bhelp\b|contribut/i);
+    expect(all).toMatch(/\b(clone|fork)\b/i);
+    expect(all).toMatch(/your own/i);
+    expect(new Set([...QUIPS, ...OPEN_SOURCE_QUIPS]).size).toBe(QUIPS.length + OPEN_SOURCE_QUIPS.length);
+    for (const q of OPEN_SOURCE_QUIPS) {
+      expect(q.length, q).toBeLessThanOrEqual(45);
+      expect(q, "nothing that reads like an error").not.toMatch(/error|fail|crash|broke|wrong|stuck|retry/i);
+      expect(reportsTrouble(q), q).toBe(false);
+    }
+  });
+
+  it("join the deck only when the repo is public", () => {
+    expect(loaderQuips(false)).toEqual(QUIPS);
+    expect(loaderQuips(true)).toEqual([...QUIPS, ...OPEN_SOURCE_QUIPS]);
   });
 });
 
