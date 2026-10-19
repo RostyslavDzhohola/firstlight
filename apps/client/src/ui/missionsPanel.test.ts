@@ -12,7 +12,7 @@ describe("missions panel (#3)", () => {
   let host: HTMLElement;
   let panel: MissionsPanel;
   const rows = () => panel.root.querySelectorAll(".fl-mission").length;
-  const header = () => panel.root.querySelector("header") as HTMLElement;
+  const header = () => panel.root.querySelector("header button") as HTMLButtonElement;
 
   beforeEach(() => {
     localStorage.clear();
@@ -51,6 +51,14 @@ describe("missions panel (#3)", () => {
     header().click();
     expect(rows()).toBe(2);
     expect(header().getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("the header is a real button that keeps the keyboard focus when it folds the panel", () => {
+    panel.set(LINES, "2 open");
+    header().focus();
+    header().click();
+    expect(header().tagName).toBe("BUTTON");
+    expect(document.activeElement).toBe(header());
   });
 
   it('"Show missions" off in Settings hides it at once, and on brings it back', () => {

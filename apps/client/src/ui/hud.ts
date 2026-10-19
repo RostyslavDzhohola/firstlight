@@ -656,6 +656,7 @@ export class Hud {
   }
 
   dispose() {
+    this.missions.dispose();
     this.root.remove();
   }
 }

@@ -37,18 +37,21 @@ export class MissionsPanel {
 
   private render() {
     const { missions, missionsCollapsed } = uiSettings.get();
+    // The header button is rebuilt below: keep the keyboard focus on it across a toggle.
+    const focused = !!this.root.querySelector("header button") && this.root.querySelector("header button") === document.activeElement;
     this.root.hidden = !missions || this.lines.length === 0;
     this.root.replaceChildren();
     if (this.root.hidden) return;
     this.root.classList.toggle("is-collapsed", missionsCollapsed);
-    const h = el("header", "hit-area", this.root);
-    h.setAttribute("role", "button");
-    h.tabIndex = 0;
-    h.setAttribute("aria-expanded", String(!missionsCollapsed));
-    h.title = missionsCollapsed ? "Show missions" : "Collapse missions";
-    h.onclick = () => uiSettings.set({ missionsCollapsed: !uiSettings.get().missionsCollapsed });
-    el("span", "fl-label", h, "Missions");
-    el("span", "", h, this.header);
+    const h = el("header", "", this.root);
+    const b = el("button", "hit-area", h);
+    b.type = "button";
+    b.setAttribute("aria-expanded", String(!missionsCollapsed));
+    b.title = missionsCollapsed ? "Show missions" : "Collapse missions";
+    b.onclick = () => uiSettings.set({ missionsCollapsed: !uiSettings.get().missionsCollapsed });
+    el("span", "fl-label", b, "Missions");
+    el("span", "", b, this.header);
+    if (focused) b.focus();
     if (missionsCollapsed) return;
     for (const m of this.lines) {
       const row = el("div", `fl-mission${m.state && m.state !== "open" ? ` is-${m.state}` : ""}`, this.root);
