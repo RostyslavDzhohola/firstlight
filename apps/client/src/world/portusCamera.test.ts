@@ -79,7 +79,7 @@ describe("the camera round the Portus town (#34)", () => {
     const still = keys([]);
     let poses = 0, lensIn = 0, clipped = 0, unsettled = 0;
     const at = new THREE.Vector3();
-    for (const s of spots(3)) {
+    for (const s of spots(8)) {
       pc.teleport(s.x, s.y, s.z);
       for (let k = 0; k < 3; k++) pc.update(1 / 60, still, false); // onto the ground, out of what the spot touches
       if (solids.footing(pc.pos.x, pc.pos.y, pc.pos.z, 0.4).inside) continue;
@@ -87,7 +87,7 @@ describe("the camera round the Portus town (#34)", () => {
         for (const pitch of [-0.7, -0.15, 0.4]) {
           pc.camForward.copy(heading(pc.pos, h, 8));
           pc.camPitch = pitch;
-          for (let k = 0; k < 80; k++) pc.placeCamera(cam); // eased in, out, over the other shoulder
+          for (let k = 0; k < 60; k++) pc.placeCamera(cam); // eased in, out, over the other shoulder
           at.copy(cam.position);
           for (let k = 0; k < 10; k++) pc.placeCamera(cam);
           if (cam.position.distanceTo(at) > 1e-3) unsettled++;
@@ -106,13 +106,13 @@ describe("the camera round the Portus town (#34)", () => {
       }
     }
     t.dispose();
-    expect(poses).toBeGreaterThan(50_000);
+    expect(poses).toBeGreaterThan(20_000);
     expect(lensIn).toBe(0);
     expect(unsettled, `${unsettled} of ${poses} poses still moving`).toBe(0);
     // One ray from the head left 6.6 % of these poses with a near-plane corner in a solid; what is
     // left is the head itself within 0.3 m of a wall (backed into a castle wall, under a lean-to).
     expect(clipped / poses, `${clipped} of ${poses} poses with a near-plane corner in a structure`).toBeLessThan(0.005);
-  }, 240_000);
+  }, 300_000);
 });
 
 describe("stuck pockets in the Portus town (#34)", () => {

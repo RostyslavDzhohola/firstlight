@@ -1500,7 +1500,7 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   the left (~0.4 s), back once the right line is clear; decided on the lines' own lengths and only
   once arrived (half way both are short, and it flapped). Right in at the head with a corner still in
   a wall beside it, the lens slides across the view off that wall when that clears it. Round every
-  Portus item (`world/portusCamera.test.ts`, 56k poses at three pitches): near-plane corners in a
+  Portus item (every spot measured, 178k poses at three pitches; `world/portusCamera.test.ts` keeps every eighth spot): near-plane corners in a
   structure 6.6 % → 0.2 % of poses, the lens itself never; what is left is the head within 0.3 m of
   a castle wall or under a lean-to roof. The own avatar already dissolves near the lens (D-view-5:
   gone within 0.5 m), so no new fade. Pockets: the sweep found one, the Hall of Firsts' column on its
