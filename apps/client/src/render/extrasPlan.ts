@@ -126,7 +126,7 @@ export const EXTRA_COSTS: CostModel = {
   detail4: { value: 2, gpu: 0.02, cpu: 0 }, // 4 terrain detail layers instead of 2 (normals include them)
   atmospheres: { value: 1, gpu: 0.02, cpu: 0 }, // halos round the sky planets
   water2: { value: 1, gpu: 0.02, cpu: 0 }, // lake ripples
-  shadows: { value: 2, gpu: 0.02, cpu: 0.15 }, // the map twice as far: +94 draws (+30%) in Portus
+  shadows: { value: 2, gpu: 0.03, cpu: 0.15 }, // the map twice as far: +94 draws (+30%) in Portus
   grass: { value: 2, gpu: 0.12, cpu: 0.05 }, // 200k blades to 60 m
   ao: { value: 3, gpu: 2.0, cpu: 0.2 }, // GTAO with its denoise: +18.6 ms busy on the M1
 };
