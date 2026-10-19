@@ -24,6 +24,21 @@ export type CostModel = Partial<Record<Extra, ExtraCost>>;
 /** The main thread's share of the frame interval that CPU-costly extras may fill. */
 const CPU_SHARE = 0.75;
 
+/** Extras that bring others with them (terrain normals need the 4 detail layers, quality.ts). */
+const INCLUDES: Partial<Record<Extra, Extra[]>> = { normals: ["detail4"] };
+
+/** GPU and CPU fractions of a set of extras: each counted once, an included one inside its includer. */
+function costOf(list: readonly Extra[], model: CostModel): { gpu: number; cpu: number } {
+  let gpu = 0;
+  let cpu = 0;
+  for (const e of list) {
+    if (list.some((o) => INCLUDES[o]?.includes(e))) continue; // inside another one's cost
+    gpu += model[e]?.gpu ?? 0;
+    cpu += model[e]?.cpu ?? 0;
+  }
+  return { gpu, cpu };
+}
+
 export interface ExtrasPlan {
   extras: Extra[];
   /** Medium's measured GPU busy time the plan started from. */
@@ -45,17 +60,15 @@ export function planExtras(m: MediumMeasure, model: CostModel): ExtrasPlan {
     .filter(([, c]) => c.value > 0)
     .sort((a, b) => b[1].value / Math.max(1e-6, b[1].gpu) - a[1].value / Math.max(1e-6, a[1].gpu));
   const extras: Extra[] = [];
-  let gpu = 0;
-  let cpu = 0;
   const cpuBudget = CPU_SHARE * m.frameMs;
-  for (const [e, c] of ranked) {
-    if (m.gpuMs * (1 + gpu + c.gpu) > m.budgetMs) continue;
-    if (c.cpu > 0 && (m.cpuMs === null || m.cpuMs * (1 + cpu + c.cpu) > cpuBudget)) continue;
+  for (const [e] of ranked) {
+    if (extras.some((o) => INCLUDES[o]?.includes(e))) continue; // already in
+    const next = costOf([...extras, e], model);
+    if (m.gpuMs * (1 + next.gpu) > m.budgetMs) continue;
+    if (next.cpu > costOf(extras, model).cpu && (m.cpuMs === null || m.cpuMs * (1 + next.cpu) > cpuBudget)) continue;
     extras.push(e);
-    gpu += c.gpu;
-    cpu += c.cpu;
   }
-  return { extras, baseMs: m.gpuMs, gpuMs: m.gpuMs * (1 + gpu) };
+  return { extras, baseMs: m.gpuMs, gpuMs: m.gpuMs * (1 + costOf(extras, model).gpu) };
 }
 
 /**
@@ -68,7 +81,7 @@ export function keepExtras(plan: ExtrasPlan, measuredMs: number, budgetMs: numbe
   const frame = measuredMs / Math.max(1e-6, plan.gpuMs);
   const extra = (measuredMs - plan.baseMs) / Math.max(1e-6, plan.gpuMs - plan.baseMs);
   for (let n = plan.extras.length - 1; n > 0; n--) {
-    const add = plan.extras.slice(0, n).reduce((s, e) => s + (model[e]?.gpu ?? 0), 0) * plan.baseMs;
+    const add = costOf(plan.extras.slice(0, n), model).gpu * plan.baseMs;
     if ((plan.baseMs + add) * frame <= budgetMs && plan.baseMs + add * extra <= budgetMs) return plan.extras.slice(0, n);
   }
   return [];

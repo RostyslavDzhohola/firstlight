@@ -34,6 +34,19 @@ describe("planExtras", () => {
   });
 });
 
+describe("planExtras with an extra that includes another", () => {
+  it("counts terrain normals (which bring the 4 detail layers) only for what they add over the layers", () => {
+    const m: CostModel = { detail4: { value: 2, gpu: 0.05, cpu: 0 }, normals: { value: 3, gpu: 0.12, cpu: 0 } };
+    const p = planExtras({ gpuMs: 10, cpuMs: 5, frameMs: 16.7, budgetMs: 12 }, m);
+    expect(p.extras).toEqual(["detail4", "normals"]); // 40, then 25 per unit
+    expect(p.gpuMs).toBeCloseTo(10 * 1.12, 6); // not 1.17
+    // normals first: the layers come with them
+    const q = planExtras({ gpuMs: 10, cpuMs: 5, frameMs: 16.7, budgetMs: 12 }, { detail4: { value: 1, gpu: 0.05, cpu: 0 }, normals: { value: 3, gpu: 0.12, cpu: 0 } });
+    expect(q.extras).toEqual(["normals"]);
+    expect(q.gpuMs).toBeCloseTo(11.2, 6);
+  });
+});
+
 describe("keepExtras", () => {
   const plan = planExtras({ gpuMs: 8, cpuMs: 6, frameMs: 16.7, budgetMs: 12 }, MODEL);
 
