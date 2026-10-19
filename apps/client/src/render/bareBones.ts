@@ -1,4 +1,4 @@
-// Bare bones out of three's scene walks (#49, D-framerate-1). Every render pass walks the whole scene
+// Bare bones out of three's scene walks (#49, D-framerate-2). Every render pass walks the whole scene
 // graph to find what to draw (Renderer._projectObject), and the main pass and the sun's shadow map
 // each walk it once a frame. In Portus with 40 players that graph was 3,500 objects, 2,700 of them
 // bones (65 per character): fingers, toes and legs that draw nothing and hold nothing. A bone with no

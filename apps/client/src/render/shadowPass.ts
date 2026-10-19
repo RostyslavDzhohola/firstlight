@@ -1,4 +1,4 @@
-// The sun shadow pass's main-thread costs (#49, D-framerate-1). Medium and up draw the sun's shadow map
+// The sun shadow pass's main-thread costs (#49, D-framerate-2). Medium and up draw the sun's shadow map
 // every frame, and in three r186 that pass took as much main-thread time as the main pass (M1,
 // `?bench=g1` on Medium, CPU profile on both backends: 46% of the frame against 42%). Two of its costs
 // were pure waste, and go here without changing a pixel:

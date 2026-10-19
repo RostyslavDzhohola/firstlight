@@ -1,4 +1,4 @@
-// Bones with nothing drawable below them are skipped by three's per-pass scene walk (#49, D-framerate-1).
+// Bones with nothing drawable below them are skipped by three's per-pass scene walk (#49, D-framerate-2).
 
 import { describe, expect, it } from "vitest";
 import * as THREE from "three/webgpu";

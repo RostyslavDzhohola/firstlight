@@ -1,4 +1,4 @@
-// The sun shadow pass's main-thread savings (#49, D-framerate-1), headless through three's real shadow
+// The sun shadow pass's main-thread savings (#49, D-framerate-2), headless through three's real shadow
 // node (headlessRender.testutil.ts: three's renderer and backend on a recording fake GPU): the shadow
 // map skips the second walk over the scene's matrices, frames after the first recompute no caster's
 // cache key with a cutout caster among opaque ones, a caster whose alpha test changes still gets its

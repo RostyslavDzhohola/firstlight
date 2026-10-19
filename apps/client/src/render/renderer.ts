@@ -130,7 +130,7 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
   // `?fullshadow` keeps three's own shadow nodes for every material (A/B runs).
   if (!flags.has("fullshadow")) installLeanShadows(renderer as unknown as ShadowNodesRenderer);
   // The sun shadow pass without its second matrix walk and its per-frame cache-key churn (#49,
-  // D-framerate-1). `?oldshadowpass` keeps three's own pass (A/B runs).
+  // D-framerate-2). `?oldshadowpass` keeps three's own pass (A/B runs).
   if (!flags.has("oldshadowpass")) installShadowPass();
   // `?gltrace` (#39 diagnostics): log the WebGL calls that block on the GPU process.
   const traceGl = (renderer.backend as { gl?: object }).gl;
