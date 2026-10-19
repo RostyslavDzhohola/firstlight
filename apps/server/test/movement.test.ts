@@ -909,20 +909,20 @@ describe("mounted limits go through the limits argument (F12 re-review nit)", ()
 });
 
 
-describe("a client at 4 fps (#33: slow frames advance in full, one packet per frame)", () => {
+describe("a client at 4 fps (#33: slow frames advance up to 200 ms, one packet per frame)", () => {
   const flat: MoveWorld = { radius: 1000, waterLevel: -100, groundAt: () => 0 };
-
-  it("sprinting 8 s at 9 m/s in 250 ms frames is never refused, with packets arriving 70 ms early or late", () => {
+  /** Refusals for 16 s of one input packet per `frameMs` frame, each moving `speed` × 200 ms, packets 70 ms early or late. */
+  function refusals(speed: number, mounted: boolean, frameMs: number): number {
     let now = 1_000_000;
-    const a = { ...motionFields(1000, now), lastX: 0, lastY: 0, lastZ: 1000, state: { x: 0, y: 0, z: 1000 } } as unknown as PlayerActor;
+    const a = { ...motionFields(1000, now), lastX: 0, lastY: 0, lastZ: 1000, state: { x: 0, y: 0, z: 1000 }, mounted, mountGraceUntil: 0 } as unknown as PlayerActor;
     const jitter = [0, -70, 70, 40, -40, 70, -70, 0];
     let x = 0;
     let refused = 0;
-    for (let i = 0; i < 32; i++) {
-      x += 9 * 0.25; // the client's frameClock caps one frame at 250 ms of game time
-      now += 250 + jitter[i % jitter.length]! - (i ? jitter[(i - 1) % jitter.length]! : 0);
+    for (let i = 0; i < 64; i++) {
+      x += speed * Math.min(0.2, frameMs / 1000); // the client's frameClock caps a frame at 200 ms
+      now += frameMs + jitter[i % jitter.length]! - (i ? jitter[(i - 1) % jitter.length]! : 0);
       const l = Math.hypot(x, 1000);
-      const m = { x: (x / l) * 1000, y: 0, z: (1000 / l) * 1000, anim: ANIM.SPRINT };
+      const m = { x: (x / l) * 1000, y: 0, z: (1000 / l) * 1000, anim: mounted ? ANIM.RUN : ANIM.SPRINT };
       const r = validateMove(a, m, flat, moveLimits(a, now), now);
       if (!r.ok) refused++;
       else {
@@ -931,6 +931,16 @@ describe("a client at 4 fps (#33: slow frames advance in full, one packet per fr
         a.lastZ = m.z;
       }
     }
-    expect(refused).toBe(0);
+    return refused;
+  }
+
+  it("sprinting at 9 m/s in 250 ms or 400 ms frames is never refused", () => {
+    expect(refusals(9, false, 250)).toBe(0);
+    expect(refusals(9, false, 400)).toBe(0);
+  });
+
+  it("galloping at 16 m/s in 250 ms or 400 ms frames is never refused (Codex review: a 250 ms cap was)", () => {
+    expect(refusals(HORSE.sprint, true, 250)).toBe(0);
+    expect(refusals(HORSE.sprint, true, 400)).toBe(0);
   });
 });

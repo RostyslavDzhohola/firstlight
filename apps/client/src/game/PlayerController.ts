@@ -12,7 +12,7 @@ import { emptyContact, resetContact, type PropContact } from "@firstlight/shared
 import { ANIM } from "@firstlight/shared/net/schema";
 import { deepWater, SWIM_FLOAT } from "@firstlight/shared/planet/water";
 import type { Input } from "./input.ts";
-import { FRAME_STEP_S } from "./frameClock.ts";
+import { stepsFor } from "./frameClock.ts";
 import { mountedSpeed, rideCamera } from "./mount.ts";
 import { ADMIN_MODE } from "@firstlight/shared/content/admin";
 
@@ -220,20 +220,21 @@ export class PlayerController {
   }
 
   /**
-   * One frame. `dt` is the frame's game time (Game's frameClock: up to 250 ms, #33); a frame longer
+   * One frame. `dt` is the frame's game time (Game's frameClock: up to 200 ms, #33); a frame longer
    * than 50 ms runs as equal steps of at most 50 ms, with the frame's mouse look and key presses
-   * applied on the first step only. `now` is the wall clock (ms) at the end of the frame, which the
-   * dodge cooldown is a deadline on, like the server's 1.2 s: a stall of any length counts in full
-   * (D-combat-3). Without `now` the clock is the sum of the steps.
+   * applied on the first step only. `now` is the wall clock (ms) of the frame, which the dodge
+   * cooldown is a deadline on, like the server's 1.2 s: a stall of any length counts in full
+   * (D-combat-3), and every step of a frame reads the same `now`, so a press is judged when it's
+   * read and a roll's deadline matches the server's. Without `now` the clock is the sum of the steps.
    */
   update(dt: number, input: Input, aiming: boolean, now = this.simMs + dt * 1000) {
-    const steps = Math.max(1, Math.ceil(dt / FRAME_STEP_S - 1e-9));
+    const steps = stepsFor(dt);
     if (steps === 1) return this.step(dt, input, aiming, now);
     const h = dt / steps;
     // Later steps see only the keys held down: no mouse movement, wheel or fresh presses.
     const held = Object.create(input) as Input;
     Object.assign(held, { mouseDX: 0, mouseDY: 0, wheel: 0, pressed: NO_PRESSES });
-    for (let k = 0; k < steps; k++) this.step(h, k === 0 ? input : held, aiming, now - (steps - 1 - k) * h * 1000);
+    for (let k = 0; k < steps; k++) this.step(h, k === 0 ? input : held, aiming, now);
   }
 
   /** One movement step of at most 50 ms. */

@@ -92,21 +92,35 @@ describe("PlayerController", () => {
       expect(slow.pos.z).toBeCloseTo(fast.pos.z, 0);
     });
 
-    it("a 250 ms frame is five 50 ms steps, with the frame's mouse look and key presses applied once", () => {
+    it("a 200 ms frame is four 50 ms steps, with the frame's mouse look and key presses applied once", () => {
       const one = spawn();
-      const five = spawn();
+      const four = spawn();
       const frame = () => {
         const i = fakeInput(["KeyW"]);
         i.mouseDX = 120;
         i.pressed.add("Space");
         return i;
       };
-      one.update(0.25, frame(), false, 1000);
-      five.update(0.05, frame(), false, 800);
-      for (let k = 1; k < 5; k++) five.update(0.05, fakeInput(["KeyW"]), false, 800 + k * 50);
-      expect(one.pos.distanceTo(five.pos)).toBeLessThan(1e-9);
-      expect(one.facing.distanceTo(five.facing)).toBeLessThan(1e-9);
-      expect(one.vel.distanceTo(five.vel)).toBeLessThan(1e-9);
+      one.update(0.2, frame(), false, 1000);
+      four.update(0.05, frame(), false, 1000);
+      for (let k = 1; k < 4; k++) four.update(0.05, fakeInput(["KeyW"]), false, 1000);
+      expect(one.pos.distanceTo(four.pos)).toBeLessThan(1e-9);
+      expect(one.facing.distanceTo(four.facing)).toBeLessThan(1e-9);
+      expect(one.vel.distanceTo(four.vel)).toBeLessThan(1e-9);
+    });
+
+    it("the dodge cooldown reads the frame's clock in every step of a long frame (Codex review)", () => {
+      const pc = spawn();
+      const press = (now: number) => {
+        const i = fakeInput();
+        i.pressed.add("KeyC");
+        pc.update(0.2, i, false, now);
+      };
+      press(10_000);
+      expect(pc.anim).toBe(ANIM.DODGE);
+      for (let t = 10_200; t < 11_250; t += 200) pc.update(0.2, fakeInput(), false, t);
+      press(11_250); // 1.25 s after the roll: past the 1.2 s cooldown, so it rolls
+      expect(pc.anim).toBe(ANIM.DODGE);
     });
   });
 
