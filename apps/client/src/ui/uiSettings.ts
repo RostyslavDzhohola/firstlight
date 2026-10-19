@@ -1,6 +1,6 @@
 // Player settings that are not graphics (graphics live in render/quality.ts, volumes in audio/Audio.ts,
-// the voice opt-in in voice/VoiceClient.ts): mouse, field of view, comfort, damage numbers and the
-// map (minimap on/off and turning, the map's north-up or player-up).
+// the voice opt-in in voice/VoiceClient.ts): mouse, field of view, comfort, damage numbers, the
+// map (minimap on/off and turning, the map's north-up or player-up) and the missions panel (#3).
 // Stored in localStorage as `fl.ui.v1`; every value is validated on load.
 
 export interface UiSettings {
@@ -20,6 +20,10 @@ export interface UiSettings {
   minimapRotate: boolean;
   /** The map (M) opens with your heading up instead of north. */
   mapPlayerUp: boolean;
+  /** HUD missions panel (top right, under the minimap). */
+  missions: boolean;
+  /** The missions panel shows only its header (a click on the header toggles it). */
+  missionsCollapsed: boolean;
 }
 
 export const UI_DEFAULTS: Readonly<UiSettings> = Object.freeze({
@@ -33,6 +37,8 @@ export const UI_DEFAULTS: Readonly<UiSettings> = Object.freeze({
   minimap: true,
   minimapRotate: true,
   mapPlayerUp: false,
+  missions: true,
+  missionsCollapsed: false,
 }) as UiSettings;
 
 export const SENSITIVITY_RANGE = [0.2, 3] as const;
@@ -60,6 +66,8 @@ export function normalizeUiSettings(raw: unknown): UiSettings {
     minimap: bool(r.minimap, d.minimap),
     minimapRotate: bool(r.minimapRotate, d.minimapRotate),
     mapPlayerUp: bool(r.mapPlayerUp, d.mapPlayerUp),
+    missions: bool(r.missions, d.missions),
+    missionsCollapsed: bool(r.missionsCollapsed, d.missionsCollapsed),
   };
 }
 

@@ -102,6 +102,8 @@
 .fl-missions { width: 100%; padding: calc(.75 * var(--u)) calc(.9 * var(--u)) calc(.8 * var(--u)); }
 .fl-missions header { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-2); margin-bottom: calc(.55 * var(--u)); }
 .fl-missions header .fl-label { color: var(--photon); }
+.fl-missions header[role="button"] { cursor: pointer; }
+.fl-missions.is-collapsed header { margin-bottom: 0; }
 .fl-missions header span:last-child { font-size: var(--t-xs); color: var(--fog-3); }
 .fl-mission { display: grid; grid-template-columns: calc(1.1 * var(--u)) minmax(0, 1fr) auto; gap: var(--sp-2); align-items: start; padding: calc(.38 * var(--u)) 0; border-top: 1px solid rgba(196, 241, 255, .1); }
 .fl-mission__st { margin-top: calc(.2 * var(--u)); width: calc(.8 * var(--u)); height: calc(.8 * var(--u)); transform: rotate(45deg); border: 1.5px solid var(--fog-3); }
