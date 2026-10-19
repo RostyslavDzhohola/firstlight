@@ -3,7 +3,7 @@
 // with them on stays within Medium's budget.
 
 import { describe, expect, it } from "vitest";
-import { keepExtras, planExtras, type CostModel } from "./extrasPlan.ts";
+import { extrasBudget, keepExtras, planExtras, TAIL_FACTOR, type CostModel } from "./extrasPlan.ts";
 
 /** A made-up model: GPU cost as a fraction of Medium's busy time, CPU as a fraction of its main-thread time. */
 const MODEL: CostModel = {
@@ -59,5 +59,15 @@ describe("keepExtras", () => {
     const kept = keepExtras(plan, 13.5, 12, MODEL);
     expect(kept).toEqual(["water2", "normals"]);
     expect(keepExtras(plan, 30, 12, MODEL)).toEqual([]);
+  });
+});
+
+describe("extrasBudget (the probe view's GPU time that keeps the busiest scenes' tail inside the frame)", () => {
+  it("is the tier's budget or the 60 Hz frame's tail share over the busiest-scene factor, whichever is lower", () => {
+    expect(TAIL_FACTOR).toBeGreaterThan(1);
+    expect(extrasBudget(16.7, 12)).toBeCloseTo(Math.min(12, (0.95 * 16.7) / TAIL_FACTOR), 6);
+    expect(extrasBudget(8.3, 12)).toBeCloseTo(Math.min(12, (0.95 * (1000 / 60)) / TAIL_FACTOR), 6); // 120 Hz: still the 60 Hz target
+    expect(extrasBudget(20, 12)).toBeCloseTo(Math.min(12, (0.95 * 20) / TAIL_FACTOR), 6); // a 50 Hz display
+    expect(extrasBudget(16.7, 5)).toBe(5);
   });
 });

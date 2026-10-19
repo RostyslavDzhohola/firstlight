@@ -85,16 +85,24 @@ describe("runProbe extras on Medium (D-framerate-3)", () => {
   const model: CostModel = { normals: { value: 3, gpu: 0.1, cpu: 0 }, water2: { value: 1, gpu: 0.05, cpu: 0 }, grass: { value: 1, gpu: 0.8, cpu: 0 } };
 
   it("measures plain Medium, plans from its busy time, and keeps what the second measurement fits", async () => {
-    // three's sum is implausible (52 ms at 60 fps, the M1); the busy time is 8 ms, 8.9 with extras on
-    const { ctx, calls } = fakeCtx(52, (on) => (on.length ? 8.9 : 8));
+    // three's sum is implausible (52 ms at 60 fps, the M1); the busy time is 6.5 ms, 7.2 with extras on
+    const { ctx, calls } = fakeCtx(52, (on) => (on.length ? 7.2 : 6.5));
     const r = await runProbe(ctx, undefined, undefined, model);
     expect(calls[0]).toEqual({ tier: "medium", extras: [] }); // never measures with saved extras
-    expect(calls[1]).toEqual({ tier: "medium", extras: ["normals", "water2"] }); // look per ms: 30, 20; grass would pass 12 ms
-    expect(r).toMatchObject({ tier: "medium", valid: true, method: "gpu-busy", gpuP50: 8, extras: ["normals", "water2"], extrasGpuP50: 8.9 });
+    // look per ms: 30, 20; grass would pass the busiest-scene tail budget (extrasBudget: 7.9 ms at 60 Hz)
+    expect(calls[1]).toEqual({ tier: "medium", extras: ["normals", "water2"] });
+    expect(r).toMatchObject({ tier: "medium", valid: true, method: "gpu-busy", gpuP50: 6.5, extras: ["normals", "water2"], extrasGpuP50: 7.2 });
+  });
+
+  it("plans nothing where the probe view's busy time already fills the tail budget (the M1: 7.1–7.7 ms)", async () => {
+    const { ctx, calls } = fakeCtx(52, () => 7.9);
+    const r = await runProbe(ctx, undefined, undefined, model);
+    expect(calls).toHaveLength(1);
+    expect(r).toMatchObject({ tier: "medium", extras: [] });
   });
 
   it("drops the extras the second measurement doesn't fit", async () => {
-    const { ctx } = fakeCtx(52, (on) => (on.length ? 13.5 : 8));
+    const { ctx } = fakeCtx(52, (on) => (on.length ? 9 : 6.5));
     const r = await runProbe(ctx, undefined, undefined, model);
     expect(r.extras).toEqual([]);
     expect(r.tier).toBe("medium");
@@ -121,6 +129,6 @@ describe("runProbe extras on Medium (D-framerate-3)", () => {
     };
     const r = await runProbe(ctx, undefined, undefined, model);
     expect(calls.map((c) => c.tier)).toEqual(["medium", "high", "medium"]);
-    expect(r).toMatchObject({ tier: "medium", highGpuP50: 12, gpuP50: 5, extras: ["normals", "water2", "grass"], extrasGpuP50: 5.6 });
+    expect(r).toMatchObject({ tier: "medium", highGpuP50: 12, gpuP50: 5, extras: ["normals", "water2"], extrasGpuP50: 5.6 });
   });
 });

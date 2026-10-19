@@ -21,6 +21,25 @@ export interface ExtraCost {
 
 export type CostModel = Partial<Record<Extra, ExtraCost>>;
 
+/**
+ * The busiest scenes' GPU tail over the probe's view (D-framerate-3): on the M1 (WebGPU, Medium)
+ * `?bench=g1` sustained ran p99 14.4–15.1 ms of busy time where the probe's arrival view measured
+ * p50 7.1–7.7 ms. The probe measures that view, so its reading times this factor is what the
+ * busiest moments will take.
+ */
+export const TAIL_FACTOR = 2.0;
+/** Share of the 60 Hz frame (or a slower display's) that the busiest scenes' tail may fill. */
+const TAIL_SHARE = 0.95;
+
+/**
+ * The GPU busy time the probe's view may take with extras on: the tier's own budget, or the time
+ * that keeps the busiest scenes' p99 inside 95% of the frame (at least the 60 Hz frame: SPEC's
+ * target), whichever is lower. Frame rate first.
+ */
+export function extrasBudget(frameMs: number, tierBudgetMs: number): number {
+  return Math.min(tierBudgetMs, (TAIL_SHARE * Math.max(frameMs, 1000 / 60)) / TAIL_FACTOR);
+}
+
 /** The main thread's share of the frame interval that CPU-costly extras may fill. */
 const CPU_SHARE = 0.75;
 

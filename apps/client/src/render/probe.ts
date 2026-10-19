@@ -10,7 +10,7 @@
 import { isSoftwareRenderer, type RenderCtx } from "./renderer.ts";
 import { beginManualFrame, decideProbe, decideUltra, percentile, PROBE_MIN_GPU, type TimestampSource } from "./timing.ts";
 import { warmup } from "./warmup.ts";
-import { EXTRA_COSTS, keepExtras, planExtras, type CostModel } from "./extrasPlan.ts";
+import { EXTRA_COSTS, extrasBudget, keepExtras, planExtras, type CostModel } from "./extrasPlan.ts";
 import { TIER_TABLE, type Extra, type Tier } from "./quality.ts";
 
 export interface ProbeResult {
@@ -107,7 +107,7 @@ async function probeTier(ctx: RenderCtx, beforeFrame: (() => void) | undefined, 
       highGpuP50 = u.gpuP50;
     }
     if (d.valid && tier === "medium" && d.method === "gpu-busy" && d.gpuP50 !== null) {
-      const budgetMs = TIER_TABLE.medium.gpuTargetMs;
+      const budgetMs = extrasBudget(d.rafP50, TIER_TABLE.medium.gpuTargetMs); // the busiest scenes' tail too
       const plan = planExtras({ gpuMs: d.gpuP50, cpuMs: cpuP50, frameMs: d.rafP50, budgetMs }, costs);
       if (plan.extras.length) {
         ctx.setTier("medium", { persist: false, auto: true, extras: plan.extras });
