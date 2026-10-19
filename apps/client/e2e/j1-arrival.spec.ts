@@ -4,6 +4,7 @@
 
 import { expectNoBlinking, measureBlinks, playAWhile } from "./blink.ts";
 import { expect, test } from "./fixtures.ts";
+import { stillsSeen, watchStills } from "./stills.ts";
 
 test.describe("J1 arrival", () => {
   test("J1.1 · item 6a · a new guest lands on the home page with a Play button", { tag: ["@J1", "@J1.1", "@item-6a"] }, async ({ player, page }) => {
@@ -14,11 +15,20 @@ test.describe("J1 arrival", () => {
   });
 
   test("J1.2 · items 1, 6i · Play → starter → tutorial → in the world in < 30 s, no blinking", { tag: ["@J1", "@J1.2", "@item-1"] }, async ({ player, page }) => {
+    await watchStills(page);
     const t = await player.playAsNewGuest({ starter: "Hexwick" });
     const s = await player.waitInWorld(90_000, "portus");
     const inWorldAt = Date.now();
     const loadingMs = t.pickShownAt - t.clickedAt + (inWorldAt - t.playAsAt);
     await player.note("timing", { playToPickMs: t.pickShownAt - t.clickedAt, playAsToWorldMs: inWorldAt - t.playAsAt, loadingMs, gfx: s.gfx });
+    // Stills of what awaits behind the loader (D-showcase-2): Portus' first, a new one every few
+    // seconds, and none left once the world is up.
+    const stills = await stillsSeen(page);
+    await player.note("stills", stills);
+    expect.soft(stills.seen.length, "the loader showed in-game stills").toBeGreaterThan(0);
+    expect.soft(stills.seen[0]?.id ?? "", "the first is of Portus, where a new player lands").toMatch(/^portus-/);
+    if (inWorldAt - t.playAsAt > 9000) expect.soft(new Set(stills.seen.map((x) => x.id)).size, "a long load rotates them").toBeGreaterThan(1);
+    expect.soft(stills.inDom, "the pictures go with the loader").toBe(0);
     expect.soft(s.gfx?.webgpu, "renderer under test").toBe(player.gfx === "webgpu");
     expect.soft(loadingMs, "Play → in the world (minus the time spent choosing) under 30 s").toBeLessThan(30_000);
     // Where the warm-up's time goes, per phase, with the shader count (D-load-1, #25).
@@ -42,12 +52,18 @@ test.describe("J1 arrival", () => {
   });
 
   test("J1.3 · item 1 · through a portal: the loading screen never freezes, nothing compiles after it", { tag: ["@J1", "@J1.3", "@item-1"] }, async ({ player, page }) => {
+    await watchStills(page);
     await player.joinAsDevAdmin({ starter: "Hexwick", body: "portus" });
     await player.waitInWorld(180_000, "portus");
     await player.lock();
     const t0 = await player.now();
     await player.walkThroughPortal("arcadia");
     const arrived = await player.now();
+    // The travel's loader opens on the destination's own stills (D-showcase-2).
+    const stills = await stillsSeen(page, t0);
+    await player.note("stills", stills);
+    expect.soft(stills.seen[0]?.id ?? "", "the travel shows Arcadia first").toMatch(/^arcadia-/);
+    expect.soft(stills.inDom, "the pictures go with the loader").toBe(0);
     const frames = await page.evaluate((t) => (window as any).__fl.frames.stats(t), t0);
     // Every build in the warm-up's watch window (the 120 rendered frames after the hand-over) counts.
     const shaders = await player.shaderWatchClosed();

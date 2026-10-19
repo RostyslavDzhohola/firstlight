@@ -1,7 +1,10 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BodyKey } from "./loading.ts";
-import { STILL_FADE_MS, STILL_HOLD_MS, StillDeck, stillsSlideshow, type Still } from "./loadingStills.ts";
+import { existsSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { STILL_FADE_MS, STILL_HOLD_MS, STILLS, StillDeck, stillsSlideshow, type Still } from "./loadingStills.ts";
 
 const mk = (id: string, body: BodyKey): Still => ({ id, body, caption: `${id} caption`, src: `/stills/${id}.webp` });
 const SET: Still[] = [
@@ -220,5 +223,29 @@ describe("the stills slideshow (DOM)", () => {
     await vi.advanceTimersByTimeAsync(STILL_HOLD_MS * 2);
     expect(box.children).toHaveLength(0);
     expect(show.shown()).toBeNull();
+  });
+});
+
+describe("STILLS (the pictures that ship)", () => {
+  it("are 6–10 in-game stills, at least one per body, each with a short caption naming the place", () => {
+    expect(STILLS.length).toBeGreaterThanOrEqual(6);
+    expect(STILLS.length).toBeLessThanOrEqual(10);
+    for (const b of ["portus", "arcadia", "hollowmere", "meridian"] as const) expect(STILLS.some((s) => s.body === b), b).toBe(true);
+    expect(new Set(STILLS.map((s) => s.id)).size).toBe(STILLS.length);
+    for (const s of STILLS) {
+      expect(s.id.startsWith(`${s.body}-`), s.id).toBe(true);
+      expect(s.caption.length, s.id).toBeLessThanOrEqual(30);
+      expect(s.caption, s.id).toMatch(/^[A-Z]/);
+    }
+  });
+
+  it("are small WebP files next to the code (≤ 120 KB each, so the first comes in fast at low priority)", () => {
+    const dir = join(dirname(fileURLToPath(import.meta.url)), "stills");
+    for (const s of STILLS) {
+      expect(s.src, s.id).toMatch(new RegExp(`/stills/${s.id}\\.webp$`)); // Vite hashes it in the build
+      const file = join(dir, `${s.id}.webp`);
+      expect(existsSync(file), file).toBe(true);
+      expect(statSync(file).size, s.id).toBeLessThanOrEqual(120 * 1024);
+    }
   });
 });

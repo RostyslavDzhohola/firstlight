@@ -20,8 +20,26 @@ export interface Still {
   focus?: string;
 }
 
-/** The stills, captured from the game at Ultra (tools/stills/capture.ts; CC BY 4.0, docs/ASSETS.md). */
-export const STILLS: readonly Still[] = [];
+const still = (id: string, body: BodyKey, caption: string, focus?: string): Still => ({
+  id, body, caption, src: new URL(`./stills/${id}.webp`, import.meta.url).href, ...(focus ? { focus } : {}),
+});
+
+/**
+ * The stills, captured from this build at Ultra on WebGPU (tools/stills/capture.ts, shots.ts; our own
+ * work, CC BY 4.0, docs/ASSETS.md): 1920×1080 WebP, 48–100 KB each. Within a body, listed in the
+ * order a load opens them.
+ */
+export const STILLS: readonly Still[] = [
+  still("portus-portal", "portus", "The portals of Portus"),
+  still("portus-plaza-dusk", "portus", "Portus, the castle town", "55% 50%"),
+  still("portus-above", "portus", "Portus from above"),
+  still("arcadia-lake", "arcadia", "Glasswater Lake, Arcadia"),
+  still("arcadia-pond", "arcadia", "Clover Fields, Arcadia", "48% 50%"),
+  still("hollowmere-fen", "hollowmere", "Whisper Fen, Hollowmere"),
+  still("hollowmere-planet", "hollowmere", "Hollowmere at dusk", "55% 50%"),
+  still("meridian-mesa", "meridian", "Cinder Canyons, Meridian", "55% 50%"),
+  still("meridian-waystation", "meridian", "Waystation Nine, Meridian", "40% 50%"),
+];
 
 /** How long a still stays up before the next fades in (ms), and the crossfade (matches loading.css). */
 export const STILL_HOLD_MS = 6000;

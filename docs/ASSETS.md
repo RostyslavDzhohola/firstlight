@@ -26,11 +26,14 @@ source, licence and where its notice lives. Our code is MIT (`LICENSE`); our own
 
 Not third-party: the music (generated at runtime per planet by `MusicGen` in
 `apps/client/src/audio/Audio.ts`, none of the candidate tracks in content.md §9 is used), all
-weapon, NPC, boss and terrain geometry, procedural prop fallbacks and Meridian spires (built in code), `favicon.svg`, and the
-sculpted starter characters listed below, which are our own work.
+weapon, NPC, boss and terrain geometry, procedural prop fallbacks and Meridian spires (built in code), `favicon.svg`, the
+sculpted starter characters listed below, and the loading screen's stills (`apps/client/src/ui/stills/*.webp`:
+screenshots of the game itself, captured from the build by `tools/stills/capture.ts`, D-showcase-2), which are
+our own work (CC BY 4.0, "FIRSTLIGHT contributors"; the CC0 models in them are credited above).
 
 Build tools that ship nothing themselves: Blender (headless, `tools/blender/chars3d/build.sh` with its bundled OpenVDB and numpy, `tools/blender/characters/build.sh`, `tools/blender/horse/build.sh`, `tools/blender/vegetation/build.sh`, `tools/blender/portus/build.sh`, `tools/blender/pads/build.sh`),
-`@gltf-transform/cli` 4.5.1 via `pnpm dlx`, Vite, Vitest, TypeScript, tsx, esbuild, wrangler.
+`@gltf-transform/cli` 4.5.1 via `pnpm dlx`, Vite, Vitest, TypeScript, tsx, esbuild, wrangler, and for the
+loading stills Playwright with Google Chrome and `cwebp` (libwebp, BSD-3-Clause).
 
 When you add a dependency that ends up in the client bundle, add it to
 `apps/client/public/THIRD-PARTY-NOTICES.md` (how the list was made is at the top of that file).
