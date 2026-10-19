@@ -72,6 +72,45 @@ describe("GpuTimer", () => {
     expect(t.takeSamples()).toEqual([]);
   });
 
+  it("on WebGPU also takes each frame's busy time from three's pass timestamps (D-framerate-2)", async () => {
+    const r = fakeRenderer();
+    const t = new GpuTimer(r);
+    expect(t.busyLast).toBeNull();
+    t.frame(); // no timestamp pool yet (three makes it on the first timed pass)
+    await flush();
+    // three's pool: two overlapping passes in frame 1 (sum 7 ms, busy 5 ms), resolved the way three does
+    const times = new BigUint64Array([0n, 4_000_000n, 2_000_000n, 5_000_000n]);
+    const pool = {
+      queryOffsets: new Map([["1:f1", 0], ["2:f1", 2]]),
+      resultBuffer: { getMappedRange: () => times.buffer as ArrayBuffer },
+      async _resolveQueries(this: { queryOffsets: Map<string, number>; resultBuffer: { getMappedRange(): ArrayBuffer } }) {
+        this.queryOffsets.clear();
+        this.resultBuffer.getMappedRange();
+        return 7;
+      },
+    };
+    (r.backend as { timestampQueryPool?: unknown }).timestampQueryPool = { render: pool };
+    r.push(7);
+    t.frame(); // finds the pool
+    await pool._resolveQueries();
+    await flush();
+    expect(t.busyLast).toBeCloseTo(5, 6);
+    expect(t.busyP50()).toBeCloseTo(5, 6);
+    expect(t.drainBusy()).toHaveLength(1);
+    expect(t.drainBusy()).toEqual([]);
+    expect(t.last).toBe(7); // three's sum is still recorded as before
+  });
+
+  it("has no busy time on WebGL2", async () => {
+    const r = fakeRenderer({ webgpu: false });
+    const t = new GpuTimer(r);
+    (r.backend as { timestampQueryPool?: unknown }).timestampQueryPool = { render: { queryOffsets: new Map(), resultBuffer: { getMappedRange: () => new ArrayBuffer(0) }, _resolveQueries: async () => 0 } };
+    t.frame();
+    await flush();
+    expect(t.busyLast).toBeNull();
+    expect(t.drainBusy()).toEqual([]);
+  });
+
   it("beginManualFrame advances the frame tag", () => {
     const r = fakeRenderer();
     beginManualFrame(r);

@@ -836,7 +836,7 @@ export class Game {
       cpuMs *= CPU_SLOW;
     }
     this.ctx.afterFrame(now, rawMs);
-    this.bench?.record(rawMs);
+    this.bench?.record(rawMs, cpuMs);
     shaderMonitorFrame();
     const x = this.perfExtras;
     x.cpuMs = cpuMs;

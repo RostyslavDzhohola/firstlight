@@ -3,6 +3,7 @@
 // resolution ladder (SPEC §7.3: [1, 0.79, 0.62, 0.5]; at the floor, drop a tier) and the probe's
 // tier decision.
 
+import { installPassUnion, type TimestampPool } from "./gpuUnion.ts";
 import type { Tier } from "./quality.ts";
 
 export function percentile(values: readonly number[], p: number): number {
@@ -32,6 +33,10 @@ export interface TimestampSource {
  * the value is recorded as is. Resolves are asynchronous, so a sample arrives every 1–3 frames.
  * Outside the animation loop `info.frame` doesn't advance: call `beginManualFrame()` before each
  * manually rendered frame so samples stay per-frame there too.
+ *
+ * That value sums the frame's passes (see gpuPlausible). On WebGPU the timer also records each
+ * frame's busy time, the union of the same passes' intervals (gpuUnion.ts, D-framerate-2): real GPU
+ * cost on tile-based GPUs too. The probe decides on it; the ladder keeps three's sum.
  */
 export class GpuTimer {
   /** Most recent GPU ms per frame, or null when the backend has no timer. */
@@ -42,15 +47,38 @@ export class GpuTimer {
   /** Samples not yet taken by the ladder/probe. */
   private fresh: number[] = [];
   readonly available: boolean;
+  /** Most recent GPU busy ms per frame (WebGPU pass union), or null. */
+  busyLast: number | null = null;
+  private readonly recentBusy: number[] = [];
+  private freshBusy: number[] = [];
+  /** WebGPU: waiting for three's timestamp pool (made on the first timed pass) to read its frames' busy time. */
+  private watchBusy: boolean;
 
   constructor(private readonly renderer: TimestampSource) {
     const b = renderer.backend as { trackTimestamp?: boolean; disjoint?: unknown; isWebGPUBackend?: boolean };
     // WebGPU: trackTimestamp is cleared at init when the feature is missing. WebGL2: needs the disjoint extension.
     this.available = !!b.trackTimestamp && (b.isWebGPUBackend ? true : !!b.disjoint);
+    this.watchBusy = this.available && !!b.isWebGPUBackend;
+  }
+
+  private busy(ms: number) {
+    if (!(ms > 0) || !Number.isFinite(ms)) return;
+    this.busyLast = ms;
+    this.recentBusy.push(ms);
+    if (this.recentBusy.length > 120) this.recentBusy.shift();
+    this.freshBusy.push(ms);
+    if (this.freshBusy.length > 600) this.freshBusy.shift();
   }
 
   /** Call once after each rendered frame. */
   frame() {
+    if (this.watchBusy) {
+      const pool = (this.renderer.backend as { timestampQueryPool?: { render?: unknown } }).timestampQueryPool?.render;
+      if (pool) {
+        this.watchBusy = false;
+        installPassUnion(pool as TimestampPool, (ms) => this.busy(ms));
+      }
+    }
     if (!this.available || this.pending) return;
     this.pending = true;
     this.renderer
@@ -86,6 +114,19 @@ export class GpuTimer {
   drain(): number[] {
     this.recent.length = 0;
     return this.takeSamples();
+  }
+
+  /** Median of the recent busy-time samples (display), or null. */
+  busyP50(): number | null {
+    return this.recentBusy.length ? percentile(this.recentBusy, 0.5) : null;
+  }
+
+  /** Busy-time samples since the last call (clears the display window too). */
+  drainBusy(): number[] {
+    this.recentBusy.length = 0;
+    const s = this.freshBusy;
+    this.freshBusy = [];
+    return s;
   }
 }
 

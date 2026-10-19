@@ -87,7 +87,7 @@ export class PerfOverlay {
     const p50 = percentile(this.frames, 0.5);
     const p95 = percentile(this.frames, 0.95);
     const cpu = this.cpu.length ? percentile(this.cpu, 0.5) : 0;
-    const gpu = this.ctx.gpu.p50();
+    const gpu = this.ctx.gpu.busyP50() ?? this.ctx.gpu.p50(); // WebGPU: busy time (D-framerate-2)
     const info = this.ctx.renderer.info;
     const s = this.ctx.settings;
     const c = this.ctx.renderer.domElement;
