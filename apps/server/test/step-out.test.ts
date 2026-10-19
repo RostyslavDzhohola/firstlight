@@ -3,7 +3,7 @@
 // walking step is undone) step out to a clear spot, and the server takes that step like any other.
 
 import { describe, expect, it } from "vitest";
-import { BODIES, createTerrain } from "@firstlight/shared";
+import { BODIES, createTerrain, natureSolids } from "@firstlight/shared";
 import { structureCollider } from "@firstlight/shared/planet/sites";
 import { motionFields, validateMove, type MoveWorld } from "../src/world/movement.ts";
 import type { PlayerActor } from "../src/world/actors.ts";
@@ -29,30 +29,43 @@ interface Controller {
   teleport(x: number, y: number, z: number): void;
   correct(x: number, y: number, z: number): void;
   setStructures(c: unknown): void;
+  setNature(c: unknown): void;
 }
 
-/** The client's PlayerController with the town wired as SiteTown wires it (loaded at runtime: the server typecheck stays server-only). */
+/** The client's PlayerController with the town and the natural solids wired as Game wires them (loaded at runtime: the server typecheck stays server-only). */
 async function controller(withStepOut = true): Promise<Controller> {
   const base = new URL("../../client/src/game/", import.meta.url).href;
   const { PlayerController } = (await import(/* @vite-ignore */ `${base}PlayerController.ts`)) as { PlayerController: new (t: unknown, water: number) => Controller };
-  const { stepOut } = (await import(/* @vite-ignore */ `${base}stepOut.ts`)) as { stepOut: (s: unknown, g: unknown, p: Vec) => boolean };
+  const { bothSolids, stepOut } = (await import(/* @vite-ignore */ `${base}stepOut.ts`)) as { bothSolids: (a: unknown, b: unknown) => unknown; stepOut: (s: unknown, g: unknown, p: Vec) => boolean };
   const terrain = createTerrain("portus");
   const pc = new PlayerController(terrain, BODIES.portus.waterLevel);
   const walls = structureCollider(terrain);
   const groundR = (x: number, y: number, z: number) => terrain.body.radius + terrain.groundHeight(x, y, z);
-  pc.setStructures({ resolve: (p: Vec, out: never) => walls.resolve(p, out), raycast: () => Infinity, stepOut: withStepOut ? (p: Vec) => stepOut(walls, groundR, p) : undefined });
+  // As Game.enterBody wires them: the step-out sees the structures and the natural solids together.
+  pc.setStructures({ resolve: (p: Vec, out: never) => walls.resolve(p, out), raycast: () => Infinity });
+  const nature = natureSolids(terrain);
+  const both = bothSolids(walls, nature);
+  pc.setNature({ resolve: (p: Vec, out: never) => nature.resolve(p, out), raycast: () => Infinity, stepOut: withStepOut ? (p: Vec) => stepOut(both, groundR, p) : undefined });
   return pc;
 }
 
+/** The server's MoveWorld as BodyRoom builds it: structures and natural solids together (Portus has no breakables). */
 function moveWorld(): MoveWorld {
   const terrain = createTerrain("portus");
   const walls = structureCollider(terrain);
+  const nature = natureSolids(terrain);
+  const f = { top: 0, inside: false };
   return {
     radius: BODIES.portus.radius,
     waterLevel: BODIES.portus.waterLevel,
     groundAt: (x, y, z) => terrain.groundHeightAt(x, y, z),
-    footing: (x, y, z, step) => walls.footing(x, y, z, step),
-    crosses: (ax, ay, az, bx, by, bz) => walls.crosses(ax, ay, az, bx, by, bz),
+    footing: (x, y, z, step) => {
+      const a = walls.footing(x, y, z, step), b = nature.footing(x, y, z, step);
+      f.top = Math.max(a.top, b.top);
+      f.inside = a.inside || b.inside;
+      return f;
+    },
+    crosses: (ax, ay, az, bx, by, bz) => walls.crosses(ax, ay, az, bx, by, bz) || nature.crosses(ax, ay, az, bx, by, bz),
   };
 }
 

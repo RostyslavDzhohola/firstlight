@@ -47,7 +47,7 @@ import { HOTKEYS } from "./keys.ts";
 import { PhotoMode } from "./PhotoMode.ts";
 import { PlayerController } from "./PlayerController.ts";
 import { FRAME_MAX_RIDE_S, FRAME_MAX_S, frameClock } from "./frameClock.ts";
-import { stepOut } from "./stepOut.ts";
+import { bothSolids, stepOut } from "./stepOut.ts";
 import { CLIENT_SYSTEMS, type ClientSystem } from "./systems.ts";
 import { installSocial, partyRoomOn, removedFromWorld } from "../social/index.ts";
 import { goHome } from "../home/leave.ts";
@@ -471,12 +471,14 @@ export class Game {
     this.player.setStructures(this.planet.town?.moveColliders ?? null);
     const nature = (this.nature = natureSolids(this.planet.terrain));
     const terrain = this.planet.terrain;
-    const natureGroundR = (x: number, y: number, z: number) => terrain.body.radius + terrain.groundHeight(x, y, z);
+    const groundR = (x: number, y: number, z: number) => terrain.body.radius + terrain.groundHeight(x, y, z);
+    const pocketSolids = this.planet.town ? bothSolids(this.planet.town.collider, nature) : nature;
     this.player.setNature({
       resolve: (pos, out) => nature.resolve(pos, out),
       raycast: (o, d, maxT) => nature.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT),
       cameraRay: (o, d, maxT) => nature.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT, CAMERA_SOLID_KINDS),
-      stepOut: (pos) => stepOut(nature, natureGroundR, pos),
+      // Out of a pocket of the structures and the natural solids together, as the server checks moves (#34).
+      stepOut: (pos) => stepOut(pocketSolids, groundR, pos),
     });
     this.portals = new Portals(this.ctx.scene, body, this.planet.terrain);
     this.audio.setMusic(body);

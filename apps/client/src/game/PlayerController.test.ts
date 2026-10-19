@@ -600,6 +600,24 @@ describe("the camera's near plane, the shoulders and pockets (#34)", () => {
     expect(town.footing(pc.pos.x, pc.pos.y, pc.pos.z, PLAYER_BODY.step).inside).toBe(false);
   });
 
+  it("a teleport starts the camera afresh: full reach over the right shoulder on the first frame", () => {
+    const { pc, toward } = againstHouse(25);
+    run(pc, fakeInput(["KeyW"]), 2);
+    pc.camForward.copy(toward(-10, 3)); // the wall on the right: over the left shoulder, pulled in
+    const cam = new THREE.PerspectiveCamera(75, 16 / 9, 0.3, 6000);
+    for (let i = 0; i < 80; i++) pc.placeCamera(cam);
+    // To the open plaza by the Hall board, nothing near.
+    const d = townDir(0, -20, R);
+    pc.teleport(d[0] * R, d[1] * R, d[2] * R);
+    pc.camPitch = -0.15;
+    pc.placeCamera(cam);
+    const up = pc.pos.clone().normalize();
+    const head = pc.pos.clone().addScaledVector(up, 1.65);
+    const right = new THREE.Vector3().crossVectors(pc.camForward, up).normalize();
+    expect(cam.position.distanceTo(head)).toBeGreaterThan(4.5);
+    expect(cam.position.clone().sub(head).dot(right)).toBeGreaterThan(0.5);
+  });
+
   it("walking along a wall at the player's side, the camera looks over the other shoulder with its near plane clear, and comes back once away", () => {
     // From 25 m east the house runs on behind the camera both ways: looking west, its wall is on the
     // right and cuts the right shoulder's line short; looking east, it is on the left.

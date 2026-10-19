@@ -1513,6 +1513,13 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   reached straight without crossing a solid, on a top if it stands on one, and not a pocket itself.
   The server takes it as an ordinary step (bank full after the pinned half second; the real
   validator in `apps/server/test/step-out.test.ts` refuses nothing at 20 and 60 fps); a player
-  pushing into a plain wall never moves. Client only: nothing shared or on the server changes.
+  pushing into a plain wall never moves. The step-out sees the structures and the natural solids as
+  one (the server checks moves against both), its probes stand on tops like the controller and
+  count only progress along the ground, and it checks at most 8 spots for being pockets per try.
+  Review round 1 (Codex): every lens candidate is checked where it would stand (lifted over the
+  ground), the search takes at most eight steps down a line, and a teleport starts the camera
+  afresh (full reach, right shoulder). Not done: zero near-plane clips (the head itself next to a
+  solid; only a smaller near plane would help, the renderer's call) and the issue's browser walk and
+  before/after screenshots. Client only: nothing shared or on the server changes.
   Why: the Oct 16 play-test (#34) saw the camera inside walls, buildings and the head in Portus and
   the player stuck between props; one ray let a lens beside a wall show it from inside.

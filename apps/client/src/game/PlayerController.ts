@@ -249,6 +249,11 @@ export class PlayerController {
     this.camForward.copy(ref).addScaledVector(up, -ref.dot(up)).normalize();
     this.facing.copy(this.camForward);
     this.fallStartRadius = this.pos.length();
+    // A new place: the camera starts out at full reach over the right shoulder, nothing pinned.
+    this.camReach = Infinity;
+    this.lensReach = Infinity;
+    this.shoulder = this.shoulderGoal = 1;
+    this.pinnedT = 0;
   }
 
   /** A shove (m/s) along `dir` (projected onto the ground plane), with a little lift. */
@@ -612,30 +617,32 @@ export class PlayerController {
     }
     reach = Math.min(reach, full);
     // The whole near plane clear, not just its centre: a ray grazing a wall or a crate stopped the
-    // lens beside it with half the view inside (#34). In a step at a time until no corner is in one,
-    // then the edge bisected. The search starts from the eased reach of the line, not the last lens
-    // position: a lens pulled in to the head by a wall there would otherwise never get out again.
-    if (this.lensBlocked(camera, _lens.copy(head).addScaledVector(dir, reach), target, up)) {
+    // lens beside it with half the view inside (#34). In a step at a time until no corner is in one
+    // (an eighth of the way at most, so a long line costs no more than a short one), then the edge
+    // bisected. Every candidate is checked where it would stand, lifted over the ground like the
+    // lens. The search starts from the eased reach of the line, not the last lens position: a lens
+    // pulled in to the head by a wall there would otherwise never get out again.
+    const step = Math.max(CAMERA_LENS_STEP, reach / 8);
+    if (this.lensBlocked(camera, this.lensAt(head, dir, reach), target, up)) {
       let blocked = reach;
-      reach = Math.max(0, reach - CAMERA_LENS_STEP);
-      while (reach > 0 && this.lensBlocked(camera, _lens.copy(head).addScaledVector(dir, reach), target, up)) {
+      reach = Math.max(0, reach - step);
+      while (reach > 0 && this.lensBlocked(camera, this.lensAt(head, dir, reach), target, up)) {
         blocked = reach;
-        reach = Math.max(0, reach - CAMERA_LENS_STEP);
+        reach = Math.max(0, reach - step);
       }
-      for (let k = 0; k < 4 && reach > 0; k++) {
+      for (let k = 0; k < 5 && reach > 0; k++) {
         const mid = (reach + blocked) / 2;
-        if (this.lensBlocked(camera, _lens.copy(head).addScaledVector(dir, mid), target, up)) blocked = mid;
+        if (this.lensBlocked(camera, this.lensAt(head, dir, mid), target, up)) blocked = mid;
         else reach = mid;
       }
     }
     if (eased) {
       // Out again at the easing pace too, while the way out is clear (through a blocked stretch, at once).
       const next = this.lensReach + CAMERA_EASE_OUT;
-      if (next < reach && !this.lensBlocked(camera, _lens.copy(head).addScaledVector(dir, next), target, up)) reach = next;
+      if (next < reach && !this.lensBlocked(camera, this.lensAt(head, dir, next), target, up)) reach = next;
       this.lensReach = reach;
     }
-    if (reach < full) out.copy(head).addScaledVector(dir, reach);
-    this.aboveGround(out); // pulled in along the line from the head: a bump of ground on the way can still need it
+    out.copy(this.lensAt(head, dir, Math.min(reach, full)));
     // Right in at the head and still in a wall beside it (the body is 0.38 m round, the near plane
     // twice that wide): off the wall, into the player's own (faded) space, if that clears it.
     if (reach <= 0 && this.lensBlocked(camera, out, target, up)) this.lensOffWall(camera, head, out, target, up);
@@ -663,12 +670,20 @@ export class PlayerController {
       }
       if (push.lengthSq() === 0) break;
       moved.add(push);
+      this.aboveGround(moved);
     }
     if (this.lensBlocked(camera, moved, target, up)) return;
     const d = _lensSide.copy(moved).sub(head);
     const l = d.length();
     if (l > 1e-6 && this.cameraHit(head, d.divideScalar(l), l + CAMERA_LENS_PAD) <= l + CAMERA_LENS_PAD) return;
     lens.copy(moved);
+  }
+
+  /** The lens `reach` m along unit `dir` from the head, lifted over the ground (`_lens`, scratch). */
+  private lensAt(head: THREE.Vector3, dir: THREE.Vector3, reach: number): THREE.Vector3 {
+    _lens.copy(head).addScaledVector(dir, reach);
+    this.aboveGround(_lens); // pulled in along the line from the head: a bump of ground on the way can still need it
+    return _lens;
   }
 
   /** Distance along the ray (unit `d`) to the first solid the camera stops at, within `maxT`, or Infinity. */

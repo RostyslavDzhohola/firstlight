@@ -3,13 +3,13 @@
 // the camera settles instead of flapping between shoulders, and nowhere does the player stay stuck.
 import { describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
-import { createTerrain } from "@firstlight/shared";
+import { CAMERA_SOLID_KINDS, createTerrain, natureSolids } from "@firstlight/shared";
 import { sitePlacements } from "@firstlight/shared/planet/sites";
 import { TOWN_PREFABS } from "@firstlight/shared/content/portusTown";
 import { emptyStored, resolveSettings } from "../render/quality.ts";
 import type { Input } from "../game/input.ts";
-import { PlayerController } from "../game/PlayerController.ts";
-import { STEP_OUT_MAX } from "../game/stepOut.ts";
+import { PlayerController, type MoveColliders } from "../game/PlayerController.ts";
+import { bothSolids, STEP_OUT_MAX, stepOut } from "../game/stepOut.ts";
 
 // config.ts reads the URL at import time; ?nochars keeps AvatarView on capsules (no asset fetches).
 vi.stubGlobal("location", { search: "?nochars", hostname: "localhost" });
@@ -57,7 +57,17 @@ async function town() {
   const t = new SiteTown(terrain, settings, Promise.resolve(null));
   const pc = new PlayerController(terrain, terrain.body.waterLevel);
   pc.setStructures(t.moveColliders);
-  return { t, pc, solids: t.collider };
+  // As Game.enterBody wires the natural solids, with the step-out over both.
+  const nature = natureSolids(terrain);
+  const both = bothSolids(t.collider, nature);
+  const groundR = (x: number, y: number, z: number) => R + terrain.groundHeight(x, y, z);
+  const natural: MoveColliders = {
+    resolve: (p, out) => nature.resolve(p, out),
+    cameraRay: (o, d, maxT) => nature.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT, CAMERA_SOLID_KINDS),
+    stepOut: (p) => stepOut(both, groundR, p),
+  };
+  pc.setNature(natural);
+  return { t, pc, solids: t.collider, both, natural };
 }
 
 describe("the camera round the Portus town (#34)", () => {
@@ -107,8 +117,8 @@ describe("the camera round the Portus town (#34)", () => {
 
 describe("stuck pockets in the Portus town (#34)", () => {
   it("from every spot round every town item, walking gets the player a metre away within 2 s, in some direction", async () => {
-    const { t, pc, solids } = await town();
-    const moves = t.moveColliders;
+    const { t, pc, both, natural: moves } = await town();
+    const solids = both;
     let steppedOut = 0;
     const stepOut = moves.stepOut!;
     moves.stepOut = (pos) => {
@@ -129,7 +139,7 @@ describe("stuck pockets in the Portus town (#34)", () => {
     for (const s of spots(1)) {
       pc.teleport(s.x, s.y, s.z);
       for (let k = 0; k < 3; k++) pc.update(1 / 60, still, false);
-      if (solids.footing(pc.pos.x, pc.pos.y, pc.pos.z, 0.4).inside) continue;
+      if (t.collider.footing(pc.pos.x, pc.pos.y, pc.pos.z, 0.4).inside) continue;
       const start = pc.pos.clone();
       tested++;
       let best = 0;
