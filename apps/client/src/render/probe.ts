@@ -1,8 +1,9 @@
 // Quality auto-pick (SPEC §7.3): software / blocklisted adapters → Low; otherwise a ~2 s probe at
 // Medium on the current view, decided by decideProbe() (timing.ts): GPU timestamps where available,
 // the GPU's busy time on WebGPU (D-framerate-2) (p50 < 6 ms → High, then a short re-probe at High for
-// Ultra; > 14 ms → Low), else rAF time (vsync-limited: only "too slow" or a very fast high-refresh
-// display can be told apart).
+// Ultra, or back to Medium if High misses its own 10 ms; > 14 ms while the frames also miss the
+// display → Low), else rAF time (vsync-limited: only "too slow" or a very fast high-refresh display
+// can be told apart).
 // A probe with fewer than 30 frames or a hidden tab is invalid: Medium for this session, not saved.
 // On Medium with a busy-time reading, the probe also plans the High extras this device's headroom
 // pays for and measures again with them on, keeping only what that measurement fits (D-framerate-3).
