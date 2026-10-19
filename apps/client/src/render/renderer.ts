@@ -10,7 +10,7 @@ import {
   urlScale, urlTier, validAutoTier, type Feature, type ResolvedSettings, type StoredGfx, type Tier,
 } from "./quality.ts";
 import { createFramePath } from "./frameSize.ts";
-import { startRenderer, type BackendStatus } from "./rendererStart.ts";
+import { startRenderer, type BackendStatus, type StartStage } from "./rendererStart.ts";
 import { GpuTimer, ResolutionLadder } from "./timing.ts";
 import { compileForPass, passCallDepth, saveRenderState, type CompileProgress, type GuardedRenderer, type PassCompileRenderer } from "./compilePass.ts";
 import { frameCounterDraw, frameCounterTick } from "./frameCounter.ts";
@@ -103,10 +103,12 @@ export function isSoftwareRenderer(name: string): boolean {
   return /swiftshader|llvmpipe|softpipe|software|basic render|microsoft basic|mesa offscreen|fallback-adapter|lavapipe/i.test(name);
 }
 
-export async function createRenderer(container: HTMLElement): Promise<RenderCtx> {
+/** `onStage`: the loader's cues while the backend starts (WebGPU still starting, WebGL2 taking over). */
+export async function createRenderer(container: HTMLElement, opts: { onStage?: (stage: StartStage) => void } = {}): Promise<RenderCtx> {
   // WebGPU gets a deadline; past it (or on a rejected init) a fresh WebGL2 renderer starts instead,
   // and later visits on this device skip WebGPU for a while (rendererStart.ts, D-renderer-1).
   const { renderer, status: start } = await startRenderer({
+    onStage: opts.onStage,
     // A new options object per renderer: three writes its WebGL fallback hook into it.
     create: (forceWebGL) =>
       new THREE.WebGPURenderer({

@@ -28,7 +28,7 @@ import { Menu } from "../ui/menu.ts";
 import { coversWorld } from "../ui/pauseFlow.ts";
 import { bindUi } from "../ui/bind.ts";
 import { pickDisplayName } from "../ui/account.ts";
-import { hideLoading, loadingFrac, setLoading, setLoadingBadge, stepProgress, WARMUP_FROM, warmupProgress } from "../ui/loading.ts";
+import { hideLoading, loadingFrac, setLoading, setLoadingBadge, stepProgress, WARMUP_FROM, WEBGL2_FALLBACK_LINE, WEBGPU_SLOW_LINE, warmupProgress } from "../ui/loading.ts";
 import { getAccountInfo, invalidatePlayToken, isDevGuest } from "../net/auth.ts";
 import { PilesView } from "../world/PilesView.ts";
 import { breakablesLayoutPending } from "../world/Breakables.ts";
@@ -117,7 +117,10 @@ export class Game {
     setLoading("Starting the renderer…", 0.05);
     const container = document.getElementById("game")!;
     try {
-      this.ctx = await createRenderer(container);
+      // A slow WebGPU start says so in plain words; it has 20 s before WebGL2 takes over (D-showcase-1).
+      this.ctx = await createRenderer(container, {
+        onStage: (s) => setLoading(s === "webgpu-slow" ? WEBGPU_SLOW_LINE : WEBGL2_FALLBACK_LINE, 0.05),
+      });
     } catch (e) {
       throw new RendererUnavailable(e); // nothing was attached yet: a retry starts clean
     }

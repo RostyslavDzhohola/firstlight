@@ -145,14 +145,22 @@ test.describe("J1 arrival", () => {
     expect(probe.blanks, "no trial resize shows a blank world").toEqual([]);
   });
 
-  test("J1.5 · a WebGPU that never answers costs this device one 8 s wait, not one per visit", { tag: ["@J1", "@J1.5"] }, async ({ player, page }) => {
+  test("J1.5 · a WebGPU that never answers costs this device one 20 s wait, not one per visit", { tag: ["@J1", "@J1.5"] }, async ({ player, page }) => {
     test.skip(player.gfx !== "webgl", "the hang is simulated, so one renderer project covers it");
     // The owner's M1: Chrome's WebGPU adapter never answers. Same for every visit in this browser profile.
     await page.addInitScript(() => {
       const hang = { requestAdapter: () => new Promise(() => {}), getPreferredCanvasFormat: () => "bgra8unorm", wgslLanguageFeatures: new Set() };
       Object.defineProperty(Navigator.prototype, "gpu", { configurable: true, get: () => hang });
+      // Every status line the loader shows while the renderer starts (D-showcase-1: the slow-start line).
+      const seen: string[] = ((window as unknown as { __statusLines: string[] }).__statusLines = []);
+      setInterval(() => {
+        const t = document.querySelector(".fl-loading__status")?.textContent ?? "";
+        const note = document.querySelector(".fl-loading__step small")?.textContent ?? "";
+        const line = `${t} | ${note}`;
+        if (t && seen.at(-1) !== line) seen.push(line);
+      }, 100);
     });
-    /** One visit without ?webgl: ms from navigation to the renderer being up, and its start log. */
+    /** One visit without ?webgl: ms from navigation to the renderer being up, its start log and loader lines. */
     const visit = async (extra = "") => {
       const lines: string[] = [];
       const onLine = (m: { text(): string }) => void (m.text().startsWith("[gfx]") && lines.push(m.text()));
@@ -164,19 +172,24 @@ test.describe("J1 arrival", () => {
       const ms = Date.now() - t0;
       page.off("console", onLine);
       const record = await page.evaluate(() => localStorage.getItem("fl.gfx.webgpu-failed"));
-      return { ms, lines, record: record ? (JSON.parse(record) as Record<string, unknown>) : null };
+      const status = await page.evaluate(() => (window as unknown as { __statusLines: string[] }).__statusLines);
+      return { ms, lines, status, record: record ? (JSON.parse(record) as Record<string, unknown>) : null };
     };
     const first = await visit();
     const second = await visit();
     const forced = await visit("&webgpu");
-    await player.note("webgpu-memory", { firstMs: first.ms, secondMs: second.ms, forcedMs: forced.ms, record: second.record, lines: [first.lines, second.lines, forced.lines] });
-    expect.soft(first.lines.join("\n"), "the first visit waits out the deadline").toMatch(/WebGPU did not start within 8 s/);
-    expect.soft(first.ms, "the first visit pays the 8 s deadline").toBeGreaterThanOrEqual(8000);
+    await player.note("webgpu-memory", { firstMs: first.ms, secondMs: second.ms, forcedMs: forced.ms, record: second.record, lines: [first.lines, second.lines, forced.lines], status: [first.status, second.status, forced.status] });
+    expect.soft(first.lines.join("\n"), "the first visit waits out the deadline").toMatch(/WebGPU did not start within 20 s/);
+    expect.soft(first.ms, "the first visit pays the 20 s deadline").toBeGreaterThanOrEqual(20_000);
+    // While it waits, the Renderer step says so in plain words, then names the backup (D-showcase-1).
+    expect.soft(first.status.join("\n"), "the loader says WebGPU is still starting").toMatch(/Still starting WebGPU… \| the faster path; WebGL2 is the backup/);
+    expect.soft(first.status.join("\n"), "and then that WebGL2 takes over").toMatch(/Starting WebGL2… \| WebGL2, the backup path/);
+    expect.soft(second.status.join("\n"), "a visit that skips WebGPU has nothing to wait for").not.toMatch(/Still starting WebGPU/);
     expect.soft(second.record, "the device keeps a small record: reason, time, browser, GPU").toMatchObject({ reason: "timeout", browser: expect.stringMatching(/^Chrome\/\d+$/) });
     expect.soft(Object.keys(second.record ?? {}).sort(), "and nothing else").toEqual(["at", "browser", "gpu", "reason", "v"]);
     expect.soft(second.lines.join("\n"), "the second visit skips WebGPU").toMatch(/WebGPU skipped/);
-    expect.soft(second.ms, "the second visit doesn't wait for WebGPU").toBeLessThan(first.ms - 6000);
-    expect.soft(forced.lines.join("\n"), "?webgpu tries again").toMatch(/\?webgpu: trying WebGPU[\s\S]*WebGPU did not start within 8 s/);
+    expect.soft(second.ms, "the second visit doesn't wait for WebGPU").toBeLessThan(first.ms - 18_000);
+    expect.soft(forced.lines.join("\n"), "?webgpu tries again").toMatch(/\?webgpu: trying WebGPU[\s\S]*WebGPU did not start within 20 s/);
   });
   test("J1.6 · the owner's High tier, no probe: shader warm-up per phase, the loader never blocks 250 ms, nothing compiles after", { tag: ["@J1", "@J1.6"] }, async ({ player }) => {
     // The owner's M1 case (#18): a returning device on High, so no first-visit probe warms anything first.

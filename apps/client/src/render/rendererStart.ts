@@ -14,16 +14,24 @@
 // WebGPU adapter and device once more, at an idle moment and without rendering; if they answer within
 // the start deadline, the next visit tries WebGPU again (`second: "granted"`). A record written when
 // that try fails too (`second: "used"`) gets no further second chance, so a device whose WebGPU only
-// hangs at page load pays one extra 8 s wait per record, not one per visit.
+// hangs at page load pays one extra 20 s wait per record, not one per visit.
+//
+// The deadline is 20 s (D-showcase-1, was 8 s): WebGPU wins more often on a slow start, and the
+// loader says in plain words that WebGPU is still starting (`onStage`) while it waits.
 //
 // Pure apart from the memory's defaults (localStorage, navigator.userAgent, one WebGL2 probe context
 // for the GPU name), so the seam is unit-tested with fakes.
 
 /**
  * Adapter + device + the renderer's own setup, all inside init(). Shader warm-up runs later
- * (warmup.ts), so this only has to cover a cold GPU process: seconds on a slow machine, not tens.
+ * (warmup.ts), so this only has to cover a cold GPU process. 20 s (D-showcase-1, the owner: "let's
+ * stay open"): a slow start still gets WebGPU (High's GTAO and TRAA), at up to 12 s more wait than
+ * the old 8 s when WebGPU doesn't come; the device record (D-renderer-1) keeps that to one wait.
  */
-export const WEBGPU_INIT_TIMEOUT_MS = 8000;
+export const WEBGPU_INIT_TIMEOUT_MS = 20_000;
+
+/** A WebGPU start still pending this long gets a plain-words line on the loader (`onStage`). */
+export const WEBGPU_SLOW_NOTICE_MS = 4000;
 
 /** localStorage key of the device's WebGPU failure record (WebgpuFailureRecord as JSON). */
 export const WEBGPU_FAILED_KEY = "fl.gfx.webgpu-failed";
@@ -39,6 +47,13 @@ export interface Startable {
 
 /** Why the renderer is on WebGL2 although the URL didn't ask for it; null: it was not a fallback. */
 export type FallbackReason = "timeout" | "error" | "remembered";
+
+/**
+ * Cues for the loading screen: "webgpu-slow" once WebGPU has been starting for WEBGPU_SLOW_NOTICE_MS
+ * (it is still within its deadline: not an error), "webgl2-fallback" when WebGL2 takes over from a
+ * WebGPU try that timed out or failed.
+ */
+export type StartStage = "webgpu-slow" | "webgl2-fallback";
 
 export interface StartedRenderer<R> {
   renderer: R;
@@ -305,6 +320,10 @@ export interface StartOptions<R extends Startable> {
   log?: (message: string) => void;
   /** Clock for how late an abandoned start answered (default performance.now). */
   now?: () => number;
+  /** The loader's cues (StartStage); a throwing callback is ignored. */
+  onStage?: (stage: StartStage) => void;
+  /** When "webgpu-slow" comes (default WEBGPU_SLOW_NOTICE_MS); never at or past the deadline. */
+  slowNoticeMs?: number;
 }
 
 const reason = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -315,6 +334,13 @@ export async function startRenderer<R extends Startable>(opts: StartOptions<R>):
   const memory = opts.memory ?? deviceBackendMemory();
   const log = opts.log ?? ((m: string) => console.info(m));
   const status: BackendStatus = { fallback: null, lateMs: null, secondChance: null };
+  const stage = (s: StartStage) => {
+    try {
+      opts.onStage?.(s);
+    } catch (e) {
+      console.warn("[gfx] the loader's start cue failed", e);
+    }
+  };
 
   if (opts.forceWebGL) {
     const renderer = opts.create(true);
@@ -334,6 +360,8 @@ export async function startRenderer<R extends Startable>(opts: StartOptions<R>):
     log("[gfx] WebGPU skipped: it did not start on this device recently; using WebGL2 (?webgpu tries again)");
   } else {
     const renderer = opts.create(false);
+    const slowMs = opts.slowNoticeMs ?? WEBGPU_SLOW_NOTICE_MS;
+    const slow = opts.onStage && slowMs < timeoutMs ? setTimeout(() => stage("webgpu-slow"), slowMs) : null;
     const outcome = await initWithin(renderer, timeoutMs, {
       now: opts.now,
       // A late answer on WebGPU itself (not three's own WebGL2 fallback) is worth knowing: how late it was.
@@ -344,6 +372,7 @@ export async function startRenderer<R extends Startable>(opts: StartOptions<R>):
         if (recorded) memory.noteLateStart(status.lateMs);
       },
     });
+    if (slow !== null) clearTimeout(slow);
     if (outcome.status === "ready") {
       if (opts.isWebGPU?.(renderer) ?? true) {
         memory.forgetWebgpuSkipped();
@@ -363,6 +392,7 @@ export async function startRenderer<R extends Startable>(opts: StartOptions<R>):
       log(`[gfx] WebGPU failed to start (${reason(outcome.error)}); using WebGL2 on this device for a while`);
       // init() rejected, so it holds nothing: three has already given up on it.
     }
+    stage("webgl2-fallback");
   }
 
   const renderer = opts.create(true);

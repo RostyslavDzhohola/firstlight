@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadingPhase, stepProgress, WARMUP_FROM, warmupProgress, type LoadingPhase } from "./loading.ts";
+import { BOOT_STEPS, loadingPhase, rendererNote, stepProgress, WARMUP_FROM, WEBGL2_FALLBACK_LINE, WEBGPU_SLOW_LINE, warmupProgress, type LoadingPhase } from "./loading.ts";
 import type * as LoadingT from "./loading.ts";
-import { QUIP_MS, QUIPS } from "./loadingQuips.ts";
+import { QUIP_MS, QUIPS, reportsTrouble } from "./loadingQuips.ts";
 
 describe("loadingPhase", () => {
   it("maps Game.ts status lines to the four boot steps in order", () => {
@@ -28,6 +28,25 @@ describe("loadingPhase", () => {
     const prev: LoadingPhase = { step: 2, body: "meridian", compact: false };
     expect(loadingPhase("Something else", prev)).toBe(prev);
     expect(loadingPhase("Travelling to Nowhere…", prev).body).toBe("meridian");
+  });
+});
+
+describe("the Renderer step while WebGPU starts (D-showcase-1)", () => {
+  it("keeps the slow-start and fallback lines on the Renderer step of the full screen", () => {
+    for (const line of [WEBGPU_SLOW_LINE, WEBGL2_FALLBACK_LINE]) {
+      expect(loadingPhase(line, { step: 0, body: null, compact: false }), line).toEqual({ step: 0, body: null, compact: false });
+    }
+  });
+
+  it("says in plain words that WebGPU is still starting and WebGL2 is the backup, never like an error", () => {
+    expect(rendererNote("Starting the renderer…")).toBe(BOOT_STEPS[0].note);
+    expect(WEBGPU_SLOW_LINE).toMatch(/still starting WebGPU/i);
+    expect(rendererNote(WEBGPU_SLOW_LINE)).toMatch(/faster.*WebGL2 is the backup/);
+    expect(rendererNote(WEBGL2_FALLBACK_LINE)).toMatch(/WebGL2.*backup/);
+    for (const t of [WEBGPU_SLOW_LINE, WEBGL2_FALLBACK_LINE, rendererNote(WEBGPU_SLOW_LINE), rendererNote(WEBGL2_FALLBACK_LINE)]) {
+      expect(t, t).not.toMatch(/error|fail|crash|broke|wrong|stuck|retry|timeout|timed out|slow/i);
+      expect(reportsTrouble(t), t).toBe(false); // the quips keep running under it
+    }
   });
 });
 
@@ -197,6 +216,21 @@ describe("the loader's rotating quips (D-load-5)", () => {
       setLoading(t, 0.1);
       expect(shown(), t).toBeNull();
     }
+  });
+
+  it("keep running while the Renderer step says WebGPU is still starting", () => {
+    setLoading("Starting the renderer…", 0.05);
+    const note = () => document.querySelectorAll(".fl-loading__step")[0]!.querySelector("small")!.textContent;
+    expect(note()).toBe(BOOT_STEPS[0].note);
+    setLoading(WEBGPU_SLOW_LINE, 0.05);
+    expect(document.querySelector(".fl-loading__status")!.textContent).toBe(WEBGPU_SLOW_LINE);
+    expect(note()).toBe(rendererNote(WEBGPU_SLOW_LINE));
+    expect(document.querySelectorAll(".fl-loading__step")[0]!.classList.contains("is-now")).toBe(true);
+    expect(QUIPS).toContain(shown());
+    setLoading(WEBGL2_FALLBACK_LINE, 0.05);
+    expect(note()).toBe(rendererNote(WEBGL2_FALLBACK_LINE));
+    setLoading("Travelling to Portus…", 0.15);
+    expect(note()).toBe(rendererNote(WEBGL2_FALLBACK_LINE)); // the Renderer step is done; its note says how
   });
 
   it("are not on the error state, which keeps the focus on Retry; Retry brings them back", () => {

@@ -33,6 +33,19 @@ export const TIPS = [
   "Hold the right mouse button to aim, block or charge, depending on your weapon.",
 ];
 
+/** A WebGPU start still pending after a few seconds (rendererStart's "webgpu-slow", D-showcase-1). */
+export const WEBGPU_SLOW_LINE = "Still starting WebGPU…";
+/** WebGL2 takes over from a WebGPU try that didn't start in time ("webgl2-fallback"). */
+export const WEBGL2_FALLBACK_LINE = "Starting WebGL2…";
+
+/** The Renderer step's note for a status line: in plain words while WebGPU takes its time. */
+export function rendererNote(text: string): string {
+  const t = text.trim();
+  if (t.startsWith(WEBGPU_SLOW_LINE.slice(0, -1))) return "the faster path; WebGL2 is the backup";
+  if (t.startsWith(WEBGL2_FALLBACK_LINE.slice(0, -1))) return "WebGL2, the backup path";
+  return BOOT_STEPS[0].note;
+}
+
 export interface LoadingPhase {
   step: number;
   /** Destination body when the line names one ("Travelling to Arcadia…"). */
@@ -49,7 +62,7 @@ export function loadingPhase(text: string, prev: LoadingPhase = { step: 0, body:
     const key = travel[1]!.toLowerCase();
     return { step: 1, body: key in BODY_INFO ? (key as BodyKey) : prev.body, compact: false };
   }
-  if (/^(Loading the game|Starting the renderer)/i.test(t)) return { ...prev, step: 0, compact: false };
+  if (/^(Loading the game|Starting the renderer|Still starting WebGPU|Starting WebGL2)/i.test(t)) return { ...prev, step: 0, compact: false };
   if (/^Reconnecting/i.test(t)) return { ...prev, step: 1, compact: true };
   if (/^Connecting/i.test(t)) return { ...prev, step: 1 };
   if (/^(Building the world|Loading characters)/i.test(t)) return { ...prev, step: 2 };
@@ -238,7 +251,11 @@ export function setLoading(text: string, frac: number): void {
     last.compact = phase.compact;
   }
   runQuips(!phase.compact && !reportsTrouble(text));
-  if (text !== last.text) refs.status!.textContent = last.text = text;
+  if (text !== last.text) {
+    refs.status!.textContent = last.text = text;
+    // The Renderer step's note follows its own lines (WebGPU still starting, WebGL2 the backup).
+    if (phase.step === 0 && !phase.compact) refs.steps![0]!.querySelector("small")!.textContent = rendererNote(text);
+  }
   const pct = Math.max(0, Math.min(100, Math.round(frac * 100)));
   if (pct !== last.pct) {
     last.pct = pct;
