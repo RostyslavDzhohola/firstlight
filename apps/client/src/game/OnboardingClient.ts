@@ -16,6 +16,7 @@ import { weaponColor } from "../render/effects.ts";
 import { pauseExtras, type PauseExtra } from "../ui/menu.ts";
 import { OnboardingHud } from "../ui/onboarding.ts";
 import { Panel } from "../ui/panels.ts";
+import { MapPanel } from "../ui/map.ts";
 import { voice } from "../voice/index.ts";
 import { portalAt } from "../world/portalEntry.ts";
 import { TrainingDummies } from "../world/TrainingDummies.ts";
@@ -234,8 +235,9 @@ export class OnboardingClient implements ClientSystem {
       lookRad: look,
       anim: g.player.anim,
       dummiesDown: down,
-      // Keys as the game saw them this frame (M and E open panels at once, so no panel check here).
+      // Keys as the game saw them this frame (E opens a panel at once, so no panel check here).
       pressed: g.photo?.active ? NO_KEYS : g.input.pressed,
+      mapOpen: Panel.current instanceof MapPanel,
       phrased: this.phrased,
       voiceOn: !!voice()?.optedIn,
       inPortal: !!portalAt(this.portals, p.x, p.y, p.z),
