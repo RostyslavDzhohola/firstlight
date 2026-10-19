@@ -15,7 +15,7 @@ import indexHtml from "../../../index.html?raw";
 import type { Game } from "../../game/Game.ts";
 import { loadStored, resolveSettings, type Feature, type Tier } from "../../render/quality.ts";
 import { Hud, type YouPlus } from "../hud.ts";
-import { setLoading, setLoadingBadge } from "../loading.ts";
+import { setLoading, setLoadingBadge, WEBGPU_SLOW_LINE } from "../loading.ts";
 import { Menu } from "../menu.ts";
 import { openSaveProgress, showSignIn, pickDisplayName } from "../account.ts";
 import { installSprites } from "../sprites.ts";
@@ -39,7 +39,7 @@ import { paintHomeMock } from "../../home/home.ts";
 import type { HomeData } from "@firstlight/shared/net/home";
 
 const SCREENS = [
-  "landing", "home-guest", "loading", "loading-compact", "charpick", "charpick-rebirth", "hud", "hud-oversight", "hud-states",
+  "landing", "home-guest", "loading", "loading-compact", "loading-webgpu", "charpick", "charpick-rebirth", "hud", "hud-oversight", "hud-states",
   "death", "death-player", "death-party", "death-world", "menu", "menu-logout", "settings",
   "players", "compass", "wheel", "shop", "journal", "invite", "removed", "kit-inventory", "kit-onboarding", "inventory", "inventory-drag", "onboarding", "onboarding-attack", "onboarding-loot", "onboarding-portal", "onboarding-done", "save", "save-code", "save-saved", "save-busy", "save-unavailable", "save-locked", "signin", "signin-unavailable", "name", "notice",
 ] as const;
@@ -225,6 +225,11 @@ async function run() {
       paintHomeMock(HOME_MOCK, guest ? { ...ME_MOCK, guest: true, displayName: null, name: "Wanderer-4410", titleMedal: null, character: { ...ME_MOCK.character!, level: 3, xp: 260 } } : ME_MOCK, guest ? "logged-out" : null);
       break;
     }
+    case "loading-webgpu":
+      // A slow WebGPU start on the first load (D-showcase-1).
+      setLoading("Loading the game…", 0.02);
+      setLoading(WEBGPU_SLOW_LINE, 0.05);
+      break;
     case "loading":
     case "loading-compact":
       gameEl.className = "fl-gallery-world";
