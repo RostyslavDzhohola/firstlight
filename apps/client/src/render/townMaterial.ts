@@ -12,6 +12,7 @@ import * as THREE from "three/webgpu";
 import { attribute, float, max, mix, normalMap, select, texture, uv, vec2, vec3 } from "three/tsl";
 import { applyOccluderFade } from "./occluderFade.ts";
 import { atmo } from "./atmosphere.ts";
+import type { TextureSlot } from "./artpacks/ArtPacks.ts";
 
 export type TownMaterialKind = "opaque" | "cutout";
 
@@ -31,6 +32,41 @@ export const TOWN_GLOW_LUMINANCE = 1.6;
 
 const cache = new Map<string, THREE.MeshStandardNodeMaterial>();
 
+/** What the strips' rebind needs of a texture node. */
+type TextureNode = { value: THREE.Texture };
+
+/**
+ * Per shipped layer strip: the texture the town materials draw for it now and their texture nodes.
+ * An HD art pack (render/artpacks, D-artpacks) rebinds a strip in every material made from it, and
+ * materials made later draw what it is bound to; the materials stay keyed by the shipped strip.
+ */
+const strips = new Map<THREE.Texture, { current: THREE.Texture; nodes: TextureNode[] }>();
+function strip(base: THREE.Texture) {
+  let b = strips.get(base);
+  if (!b) strips.set(base, (b = { current: base, nodes: [] }));
+  return b;
+}
+function stripNode(base: THREE.Texture) {
+  const b = strip(base);
+  const n = texture(b.current, uv());
+  b.nodes.push(n);
+  return n;
+}
+
+/** The slot of a shipped strip: rebinding it (same type, format and sampler) changes no program. */
+export function townStripSlot(base: THREE.Texture): TextureSlot {
+  const b = strip(base);
+  return {
+    get texture() {
+      return b.current;
+    },
+    set(t: THREE.Texture) {
+      b.current = t;
+      for (const n of b.nodes) n.value = t;
+    },
+  };
+}
+
 /**
  * The shared town material for `kind`, with or without normal maps (Low drops them). `albedoFloor`
  * (linear) lifts the darkest base colours (Hollowmere's dusk: silhouettes still read). `fade`: the
@@ -48,7 +84,7 @@ export function townMaterial(kind: TownMaterialKind, normals: boolean, color: TH
   const tm = attribute("townMat", "vec4");
   const tint = attribute("color", "vec4");
   const layer = tm.x.mul(255).round();
-  const s = texture(color, uv()).depth(layer);
+  const s = stripNode(color).depth(layer);
   // Cutout layers are premultiplied by the canvas decode (rgb = 0 where the mask is 0).
   const albedo = cutout ? s.rgb.div(max(s.a, float(1 / 255))) : s.rgb;
   const base = albedoFloor > 0 ? max(albedo.mul(tint.rgb), vec3(albedoFloor, albedoFloor, albedoFloor)) : albedo.mul(tint.rgb);
@@ -60,7 +96,7 @@ export function townMaterial(kind: TownMaterialKind, normals: boolean, color: TH
   // Rain: darker and shinier, like the terrain and props.
   m.roughnessNode = mix(tm.y, tm.y.min(0.4), atmo.wet);
   m.metalnessNode = tm.z;
-  if (normals) m.normalNode = normalMap(texture(normal, uv()).depth(layer), vec2(tint.a, tint.a));
+  if (normals) m.normalNode = normalMap(stripNode(normal).depth(layer), vec2(tint.a, tint.a));
   const mode = tm.w.mul(255).round();
   // Flames burn day and night (brighter at night); windows light up with the lamps: at night, and
   // in Portus' late-dusk evening, never by day or for rain clouds.

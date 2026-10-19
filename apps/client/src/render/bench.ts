@@ -20,6 +20,7 @@ import type { RenderCtx } from "./renderer.ts";
 import { localFrame, type V3 } from "./sunFrame.ts";
 import { maxOf, percentile } from "./timing.ts";
 import { shaderStats } from "./warmup.ts";
+import type { ArtPacksState } from "./artpacks/ArtPacks.ts";
 
 export interface BenchConfig {
   preset: "renderer" | "g1";
@@ -64,6 +65,8 @@ export interface BenchHost {
   spawn: THREE.Vector3;
   stats(): { chunks: number; visibleChunks: number; grassBlades: number; props: number };
   body: string;
+  /** The HD art packs' state (render/artpacks), reported at the run's start and end. */
+  packs?: () => ArtPacksState;
 }
 
 interface Dummy {
@@ -107,6 +110,8 @@ export interface BenchResult {
   grassBlades: number;
   props: number;
   shaderBuildsDuringRun: number;
+  /** HD art packs live at the run's start and end, with their GPU bytes and swaps. */
+  packs: { start: ArtPacksState; end: ArtPacksState } | null;
   flags: string;
   userAgent: string;
 }
@@ -129,6 +134,7 @@ export class Bench {
   private readonly crowd: Dummy[] = [];
   private nextBurst = 0;
   private shaderBuildsAtStart = 0;
+  private packsAtStart: ArtPacksState | null = null;
   private readonly up = new THREE.Vector3();
   private readonly east = new THREE.Vector3();
   private readonly north = new THREE.Vector3();
@@ -228,6 +234,7 @@ export class Bench {
         this.phase = "run";
         this.runStart = now;
         this.shaderBuildsAtStart = shaderStats().total;
+        this.packsAtStart = this.host.packs?.() ?? null;
         this.recording = false;
         this.pose(0, camera);
       }
@@ -353,6 +360,7 @@ export class Bench {
       grassBlades: st.grassBlades,
       props: st.props,
       shaderBuildsDuringRun: shaderStats().total - this.shaderBuildsAtStart,
+      packs: this.packsAtStart && this.host.packs ? { start: this.packsAtStart, end: this.host.packs() } : null,
       flags: location.search,
       userAgent: navigator.userAgent,
     };

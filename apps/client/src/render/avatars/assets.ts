@@ -16,6 +16,7 @@ import { config } from "../../config.ts";
 import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
 import { rebindAvatarTextures } from "./material.ts";
 import { makeRideClip } from "./ride.ts";
+import type { TextureSlot } from "../artpacks/ArtPacks.ts";
 
 /** Every look's model file (STARTER_LOOKS ids): first the five starters' original looks, in
  *  PlayerState.starter order, then the second looks. */
@@ -283,6 +284,29 @@ export async function avatarTexturesFollowTier(
 ): Promise<boolean> {
   if (tier === "low" || !env.lowRes) return false;
   return env.raise();
+}
+
+/**
+ * The slot of a look's shipped texture (`hexwick_albedo`, `ash_normal`) for the HD art pack
+ * (render/artpacks, D-artpacks): rebinding it keeps the look's material and program. Null before the
+ * assets land, while the 512² set is loaded (the D-load-6 raise owns those), and for a second look's
+ * normal map (the borrowed flat one).
+ */
+export function avatarTextureSlot(name: string): TextureSlot | null {
+  if (!loaded || loadedLowRes) return null;
+  const m = /^(.+)_(albedo|normal)$/.exec(name);
+  const i = m ? (MODEL_FILES as readonly string[]).indexOf(m[1]!) : -1;
+  if (!m || i < 0 || (m[2] === "normal" && !ownNormal(i))) return null;
+  const set = loaded.textures[i]!;
+  const kind = m[2] as "albedo" | "normal";
+  return {
+    get texture() {
+      return set[kind];
+    },
+    set(t: THREE.Texture) {
+      rebindAvatarTextures(set, { albedo: kind === "albedo" ? t : set.albedo, normal: kind === "normal" ? t : set.normal });
+    },
+  };
 }
 
 /** The ride pose's stirrup point of a model (see AvatarAssets.rideFoot); its rest sole if no clip. */

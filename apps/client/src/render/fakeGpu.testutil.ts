@@ -169,6 +169,8 @@ export function fakeWebGPU(): { device: any; context: any; gpu: FakeGpu } {
       depthOrArrayLayers: d?.size?.depthOrArrayLayers ?? d?.size?.[2] ?? 1,
       mipLevelCount: d?.mipLevelCount ?? 1,
       format: d?.format,
+      // core WebGPU leaves it undefined (compatibility mode sets it); three's mipmap passes read it
+      textureBindingViewDimension: undefined,
       createView: () => stub(),
       destroy() {},
     });
