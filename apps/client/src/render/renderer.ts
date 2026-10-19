@@ -6,7 +6,7 @@ import * as THREE from "three/webgpu";
 import { flags } from "../config.ts";
 import { buildPost, MENU_GRADE, postUniforms, setGrade, type GradeParams, type PostBuild } from "./post.ts";
 import {
-  clearStored, emptyStored, FEATURES, killSwitches, loadStored, resolveSettings, saveStored, TIERS, tierIndex,
+  clearStored, emptyStored, FEATURES, floorDrop, killSwitches, loadStored, resolveSettings, saveStored, TIERS,
   urlExtras, urlScale, urlTier, validAutoExtras, validAutoTier, type Extra, type Feature, type ResolvedSettings, type StoredGfx, type Tier,
 } from "./quality.ts";
 import { createFramePath } from "./frameSize.ts";
@@ -372,11 +372,11 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
     // At the ladder floor drop the probe's extras first (D-framerate-3), then a tier, but only when
     // the tier is automatic. The drop is saved as the automatic choice, so the next session starts
     // there instead of walking down again.
-    if (!auto) return;
-    const dropExtras = settings.extras.length > 0 && forcedExtras === null;
-    if (!dropExtras && tierIndex(tier) === 0) return;
+    const next = floorDrop(tier, auto, settings.extras, forcedExtras !== null);
+    if (!next) return;
     const from = tier;
-    const lower = dropExtras ? tier : TIERS[tierIndex(tier) - 1]!;
+    const lower = next.tier;
+    const dropExtras = next.dropExtras;
     let done = false;
     const change = () => {
       if (done || tier !== from || !auto) return;

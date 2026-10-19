@@ -2,7 +2,7 @@
 // applied on top of the automatic tier; stored with it for the same backend and GPU.
 
 import { describe, expect, it } from "vitest";
-import { EXTRAS, emptyStored, parseStored, resolveSettings, TIER_TABLE, validAutoExtras, withExtras, type StoredGfx } from "./quality.ts";
+import { EXTRAS, emptyStored, floorDrop, parseStored, resolveSettings, TIER_TABLE, validAutoExtras, withExtras, type StoredGfx } from "./quality.ts";
 
 const kills = new Set<never>();
 
@@ -72,5 +72,18 @@ describe("stored extras", () => {
     const s = parseStored(JSON.stringify({ v: 1, tier: null, autoTier: "medium", autoBackend: "webgpu", autoGpu: "x", features: {} }));
     expect(s.autoExtras).toBeNull();
     expect(validAutoExtras(s, "webgpu", "x")).toEqual([]);
+  });
+});
+
+describe("floorDrop (the resolution ladder at its floor)", () => {
+  it("gives up the extras first, then a tier, and only on the automatic tier", () => {
+    expect(floorDrop("medium", true, ["normals"], false)).toEqual({ tier: "medium", dropExtras: true });
+    expect(floorDrop("medium", true, [], false)).toEqual({ tier: "low", dropExtras: false });
+    expect(floorDrop("low", true, [], false)).toBeNull();
+    expect(floorDrop("high", false, [], false)).toBeNull(); // a tier the user pinned stays
+  });
+
+  it("never drops extras the URL forced (measurement runs): the tier goes instead", () => {
+    expect(floorDrop("medium", true, ["normals"], true)).toEqual({ tier: "low", dropExtras: false });
   });
 });

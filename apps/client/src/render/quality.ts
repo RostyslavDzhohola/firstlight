@@ -175,6 +175,18 @@ export function withExtras(spec: TierSpec, extras: Iterable<Extra>): TierSpec {
   return s;
 }
 
+/**
+ * What the resolution ladder's floor gives up next (renderer.ts onFloor): on the automatic tier, its
+ * extras first (D-framerate-3), then a tier; null when nothing is left to drop or the tier is pinned.
+ * URL-forced extras (`?extras=`, measurement runs) are never dropped.
+ */
+export function floorDrop(tier: Tier, auto: boolean, extras: readonly Extra[], forcedExtras: boolean): { tier: Tier; dropExtras: boolean } | null {
+  if (!auto) return null;
+  if (extras.length > 0 && !forcedExtras) return { tier, dropExtras: true };
+  const t = tierIndex(tier);
+  return t > 0 ? { tier: TIERS[t - 1]!, dropExtras: false } : null;
+}
+
 /** What the user chose (persisted). `tier: null` means automatic (probe result). */
 export interface StoredGfx {
   v: 1;
