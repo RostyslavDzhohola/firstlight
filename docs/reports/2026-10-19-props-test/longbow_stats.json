@@ -1,0 +1,15 @@
+{
+ "prop": "longbow",
+ "tris": 1729,
+ "verts": 1032,
+ "parts": {
+  "limbs": 900,
+  "grip": 219,
+  "nocks": 200,
+  "string": 90,
+  "serving": 80,
+  "tassel": 240
+ },
+ "tex": 512,
+ "seconds": 413.5
+}

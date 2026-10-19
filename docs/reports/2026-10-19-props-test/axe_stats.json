@@ -1,0 +1,14 @@
+{
+ "prop": "axe",
+ "tris": 2185,
+ "verts": 1246,
+ "parts": {
+  "haft": 360,
+  "head": 1200,
+  "langets": 170,
+  "wrap": 255,
+  "cord": 200
+ },
+ "tex": 512,
+ "seconds": 419.3
+}
