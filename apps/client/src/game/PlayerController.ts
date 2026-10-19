@@ -12,6 +12,7 @@ import { emptyContact, resetContact, type PropContact } from "@firstlight/shared
 import { ANIM } from "@firstlight/shared/net/schema";
 import { deepWater, SWIM_FLOAT } from "@firstlight/shared/planet/water";
 import type { Input } from "./input.ts";
+import { FRAME_STEP_S } from "./frameClock.ts";
 import { mountedSpeed, rideCamera } from "./mount.ts";
 import { ADMIN_MODE } from "@firstlight/shared/content/admin";
 
@@ -56,6 +57,8 @@ export const MOVE = {
 const SUBSTEP_H = 0.25;
 const SUBSTEP_V = 0.25;
 const MAX_SUBSTEPS = 16;
+
+const NO_PRESSES: ReadonlySet<string> = new Set();
 
 const _up = new THREE.Vector3();
 const _right = new THREE.Vector3();
@@ -217,12 +220,24 @@ export class PlayerController {
   }
 
   /**
-   * One frame. `dt` is the simulation step (Game clamps it to 50 ms, so a slow frame runs in slow
-   * motion); `now` is the wall clock (ms), which the dodge cooldown is a deadline on, like the
-   * server's 1.2 s: a stall of any length counts in full (D-combat-3). Without `now` the clock is
-   * the sum of the steps.
+   * One frame. `dt` is the frame's game time (Game's frameClock: up to 250 ms, #33); a frame longer
+   * than 50 ms runs as equal steps of at most 50 ms, with the frame's mouse look and key presses
+   * applied on the first step only. `now` is the wall clock (ms) at the end of the frame, which the
+   * dodge cooldown is a deadline on, like the server's 1.2 s: a stall of any length counts in full
+   * (D-combat-3). Without `now` the clock is the sum of the steps.
    */
   update(dt: number, input: Input, aiming: boolean, now = this.simMs + dt * 1000) {
+    const steps = Math.max(1, Math.ceil(dt / FRAME_STEP_S - 1e-9));
+    if (steps === 1) return this.step(dt, input, aiming, now);
+    const h = dt / steps;
+    // Later steps see only the keys held down: no mouse movement, wheel or fresh presses.
+    const held = Object.create(input) as Input;
+    Object.assign(held, { mouseDX: 0, mouseDY: 0, wheel: 0, pressed: NO_PRESSES });
+    for (let k = 0; k < steps; k++) this.step(h, k === 0 ? input : held, aiming, now - (steps - 1 - k) * h * 1000);
+  }
+
+  /** One movement step of at most 50 ms. */
+  private step(dt: number, input: Input, aiming: boolean, now: number) {
     this.simMs = now;
     const R = this.terrain.body.radius;
     const up = _up.copy(this.pos).normalize();

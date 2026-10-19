@@ -46,6 +46,7 @@ import { Input } from "./input.ts";
 import { HOTKEYS } from "./keys.ts";
 import { PhotoMode } from "./PhotoMode.ts";
 import { PlayerController } from "./PlayerController.ts";
+import { frameClock } from "./frameClock.ts";
 import { CLIENT_SYSTEMS, type ClientSystem } from "./systems.ts";
 import { installSocial, partyRoomOn, removedFromWorld } from "../social/index.ts";
 import { goHome } from "../home/leave.ts";
@@ -757,7 +758,8 @@ export class Game {
   private frame() {
     const now = performance.now();
     const rawMs = now - this.last;
-    const dt = Math.min(0.05, rawMs / 1000);
+    // A slow frame advances in full (up to 250 ms, in ≤ 50 ms movement steps), so low fps isn't slow motion (#33).
+    const { dt } = frameClock(rawMs);
     this.last = now;
     if (!this.running || this.travelling) {
       // Presses made behind a loading screen are dropped, not kept for the first frame back (a C

@@ -82,6 +82,34 @@ describe("PlayerController in the Portus town (D38)", () => {
 });
 
 describe("PlayerController", () => {
+  describe("long frames (#33)", () => {
+    it("at 4 fps, 8 s of sprint covers the same ground as at 60 fps", () => {
+      const fast = spawn();
+      const slow = spawn();
+      run(fast, fakeInput(["KeyW", "ShiftLeft"]), 8, 60);
+      run(slow, fakeInput(["KeyW", "ShiftLeft"]), 8, 4);
+      expect(fast.pos.z).toBeGreaterThan(65); // ~9 m/s after the first fraction of a second
+      expect(slow.pos.z).toBeCloseTo(fast.pos.z, 0);
+    });
+
+    it("a 250 ms frame is five 50 ms steps, with the frame's mouse look and key presses applied once", () => {
+      const one = spawn();
+      const five = spawn();
+      const frame = () => {
+        const i = fakeInput(["KeyW"]);
+        i.mouseDX = 120;
+        i.pressed.add("Space");
+        return i;
+      };
+      one.update(0.25, frame(), false, 1000);
+      five.update(0.05, frame(), false, 800);
+      for (let k = 1; k < 5; k++) five.update(0.05, fakeInput(["KeyW"]), false, 800 + k * 50);
+      expect(one.pos.distanceTo(five.pos)).toBeLessThan(1e-9);
+      expect(one.facing.distanceTo(five.facing)).toBeLessThan(1e-9);
+      expect(one.vel.distanceTo(five.vel)).toBeLessThan(1e-9);
+    });
+  });
+
   it("runs forward at run speed along the surface", () => {
     const pc = spawn();
     run(pc, fakeInput(["KeyW"]), 1);

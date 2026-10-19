@@ -908,3 +908,29 @@ describe("mounted limits go through the limits argument (F12 re-review nit)", ()
   });
 });
 
+
+describe("a client at 4 fps (#33: slow frames advance in full, one packet per frame)", () => {
+  const flat: MoveWorld = { radius: 1000, waterLevel: -100, groundAt: () => 0 };
+
+  it("sprinting 8 s at 9 m/s in 250 ms frames is never refused, with packets arriving 70 ms early or late", () => {
+    let now = 1_000_000;
+    const a = { ...motionFields(1000, now), lastX: 0, lastY: 0, lastZ: 1000, state: { x: 0, y: 0, z: 1000 } } as unknown as PlayerActor;
+    const jitter = [0, -70, 70, 40, -40, 70, -70, 0];
+    let x = 0;
+    let refused = 0;
+    for (let i = 0; i < 32; i++) {
+      x += 9 * 0.25; // the client's frameClock caps one frame at 250 ms of game time
+      now += 250 + jitter[i % jitter.length]! - (i ? jitter[(i - 1) % jitter.length]! : 0);
+      const l = Math.hypot(x, 1000);
+      const m = { x: (x / l) * 1000, y: 0, z: (1000 / l) * 1000, anim: ANIM.SPRINT };
+      const r = validateMove(a, m, flat, moveLimits(a, now), now);
+      if (!r.ok) refused++;
+      else {
+        a.lastX = m.x;
+        a.lastY = m.y;
+        a.lastZ = m.z;
+      }
+    }
+    expect(refused).toBe(0);
+  });
+});
