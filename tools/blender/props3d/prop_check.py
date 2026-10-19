@@ -32,6 +32,31 @@ F = np.float32
 HOLDING_ARM = {"upperarm_r", "forearm_r"}
 
 
+def surface_samples(o, step=0.015):
+    """Points over every triangle, no further apart than `step`. Vertices alone miss long faces:
+    today's procedural shafts are cylinders with vertices only at their two ends."""
+    me = o.data
+    me.calc_loop_triangles()
+    co = np.empty(len(me.vertices) * 3, F)
+    me.vertices.foreach_get("co", co)
+    co = co.reshape(-1, 3)
+    tri = np.empty(len(me.loop_triangles) * 3, np.int32)
+    me.loop_triangles.foreach_get("vertices", tri)
+    A, Bv, Cv = (co[tri.reshape(-1, 3)[:, k]] for k in range(3))
+    L = np.maximum(np.maximum(np.linalg.norm(Bv - A, axis=1), np.linalg.norm(Cv - Bv, axis=1)),
+                   np.linalg.norm(A - Cv, axis=1))
+    n = np.ceil(L / step).astype(int)
+    out = [co]
+    for k in np.unique(n[n > 1]):
+        sel = n == k
+        ij = np.array([(i, j) for i in range(k + 1) for j in range(k + 1 - i)], F) / F(k)
+        u, v = ij[:, 0], ij[:, 1]
+        P = (A[sel, None, :] * (1 - u - v)[None, :, None] + Bv[sel, None, :] * u[None, :, None]
+             + Cv[sel, None, :] * v[None, :, None])
+        out.append(P.reshape(-1, 3))
+    return np.concatenate(out)
+
+
 def main():
     argv = sys.argv[sys.argv.index("--") + 1:]
     ap = argparse.ArgumentParser()
@@ -61,11 +86,7 @@ def main():
         bpy.ops.import_scene.gltf(filepath=os.path.join(a.dir, f"{a.prop}.glb"))
         objs = [o for o in set(bpy.data.objects) - b0 if o.type == "MESH"]
     hold.hold(arm, objs, weapon_space_data=a.today)
-    local = []
-    for o in objs:
-        co = np.empty(len(o.data.vertices) * 3, F)
-        o.data.vertices.foreach_get("co", co)
-        local.append((o, co.reshape(-1, 3)))
+    local = [(o, surface_samples(o)) for o in objs]
     mw = arm.matrix_world
     s = SCALE.get(a.char, 1.0)
     report = {"char": a.char, "prop": a.prop, "model": "today" if a.today else "new", "tol_m": a.tol,

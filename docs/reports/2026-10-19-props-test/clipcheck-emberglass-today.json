@@ -1,0 +1,78 @@
+{
+ "char": "hexwick",
+ "prop": "emberglass",
+ "model": "today",
+ "tol_m": 0.02,
+ "model_scale": 0.95,
+ "clips": {
+  "idle": {
+   "frames": 76,
+   "flags": []
+  },
+  "walk": {
+   "frames": 41,
+   "flags": []
+  },
+  "run": {
+   "frames": 29,
+   "flags": [
+    {
+     "body": "head",
+     "depth_m": 0.089,
+     "frame": 0
+    }
+   ]
+  },
+  "sprint": {
+   "frames": 21,
+   "flags": [
+    {
+     "body": "head",
+     "depth_m": 0.088,
+     "frame": 0
+    }
+   ]
+  },
+  "jump": {
+   "frames": 41,
+   "flags": []
+  },
+  "fall": {
+   "frames": 76,
+   "flags": []
+  },
+  "land": {
+   "frames": 39,
+   "flags": []
+  },
+  "roll": {
+   "frames": 45,
+   "flags": [
+    {
+     "body": "head",
+     "depth_m": 0.087,
+     "frame": 10
+    },
+    {
+     "body": "thigh_r",
+     "depth_m": 0.046,
+     "frame": 24
+    },
+    {
+     "body": "calf_r",
+     "depth_m": 0.046,
+     "frame": 24
+    }
+   ]
+  },
+  "hit": {
+   "frames": 11,
+   "flags": []
+  },
+  "cast": {
+   "frames": 16,
+   "flags": []
+  }
+ },
+ "flags_total": 5
+}
