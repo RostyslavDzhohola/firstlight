@@ -32,6 +32,7 @@ import render as R  # noqa: E402
 from preview_prop import stitch  # noqa: E402
 
 TODAY_JSON = "/tmp/fl-props/ref/today_weapons.json"
+TODAY_VIEW = {"longbow": {"up": "y", "side": "z"}}  # today's bow runs its limbs along weapon +Y
 
 
 def prop_material(name, look, pal, albedo=None, normal=None, flat=None, glow=0.0):
@@ -146,7 +147,7 @@ def main():
         for n in names:
             pal = max(a.pal, 0)
             if a.mode == "compare":
-                items.append((load_today(n, a.look), True, view_of(n)))
+                items.append((load_today(n, a.look), True, TODAY_VIEW.get(n, view_of(n))))
             items.append((load_prop(a.dir, n, a.look, pal), False, view_of(n)))
         angles = (0, -45, -90, 180) if a.mode == "turnaround" else (-30,)
         x, lo_all, hi_all = 0.0, None, None
