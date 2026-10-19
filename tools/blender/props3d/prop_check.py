@@ -1,7 +1,9 @@
 # FIRSTLIGHT sculpted props: clip check for a held prop. Plays shipped clips on a shipped character with
 # the prop in the right-hand socket (as the client mounts it) and measures how deep the prop's vertices
 # go into capsules around the body under the clothes (chars3d/clip_check.py's BODY, minus the holding
-# arm). Run it on today's model too: a flag both share comes from the mount and the clip, not the model.
+# arm). Measured in model space, reported in game metres (x the client's model scale, chars3d/render.py
+# SCALE). Run it on today's model too: a flag both share is a shared symptom of the mount and the clip
+# (not proof of its cause); a flag only the new model has is the model's.
 #
 #   blender -b --disable-autoexec --factory-startup --python-exit-code 1 --python prop_check.py -- \
 #       --char hexwick --prop emberglass [--dir <build dir> | --today] --clips idle,walk,cast --out <json>
@@ -24,6 +26,7 @@ import bl  # noqa: E402
 import hold  # noqa: E402
 from clip_check import BODY, seg_dist  # noqa: E402
 from clips import Clips  # noqa: E402
+from render import SCALE  # noqa: E402
 
 F = np.float32
 HOLDING_ARM = {"upperarm_r", "forearm_r"}
@@ -64,7 +67,9 @@ def main():
         o.data.vertices.foreach_get("co", co)
         local.append((o, co.reshape(-1, 3)))
     mw = arm.matrix_world
-    report = {"char": a.char, "prop": a.prop, "model": "today" if a.today else "new", "tol_m": a.tol, "clips": {}}
+    s = SCALE.get(a.char, 1.0)
+    report = {"char": a.char, "prop": a.prop, "model": "today" if a.today else "new", "tol_m": a.tol,
+              "model_scale": s, "clips": {}}
     total = 0
     for clip in a.clips.split(","):
         f0, f1 = clips.frames(clip)
@@ -83,7 +88,7 @@ def main():
                     pb = pa + np.array(y, F) * F(b1[1])
                 else:
                     pb = np.array(mw @ arm.pose.bones[b1].head, F)
-                d = float((r - seg_dist(W, pa, pb)).max())
+                d = float((r - seg_dist(W, pa, pb)).max()) * s
                 if d > worst.get(name, (-9, 0))[0]:
                     worst[name] = (d, f)
         flags = sorted(({"body": n, "depth_m": round(d, 3), "frame": f} for n, (d, f) in worst.items() if d > a.tol),

@@ -3,8 +3,7 @@
 # Brief: a shipwright's bearded axe, a working tool. A hand-forged head whose long hooked beard drops
 # back towards the haft, a bright honed band along the edge, dark hammer-dimpled cheeks and a squared
 # poll; two riveted iron straps (langets) down the haft; a pale ash haft with a gentle curve and a
-# flared knob at the butt, the end grain and its wedge showing on top of the eye; a leather grip bound
-# with hemp cord at both ends.
+# flared knob at the butt; a leather grip bound with hemp cord at both ends.
 # Feel: a shipwright's adze worn smooth; a cast-iron kettle (chunky, dark, friendly); a felling axe
 # hung by a cabin door.
 # Tie-breakers: chunky and honest; the bright edge against the dark head is what reads at 10 m.
@@ -29,7 +28,7 @@ F = np.float32
 SCAN = ((-0.07, -0.09, -0.24), (0.07, 0.24, 0.68))
 VIEW = {"up": "z", "side": "y"}
 
-Z_BUTT, Z_TOP = -0.165, 0.593
+Z_BUTT, Z_TOP = -0.165, 0.572  # the haft ends inside the eye: poking out, it read as a loose cap
 EYE_Z0, EYE_Z1 = 0.442, 0.585
 IRON, IRON_HI, IRON_LO = "#41454b", "#b4bec9", "#16181b"
 EDGE = "#e3e9ef"
@@ -63,13 +62,6 @@ def paint_haft(ctx):
     rgb = PP.wood(P, (0, 0, 1), "#d2a46c", "#94663d", seed=5)
     grime = (1 - S.smoothstep(0.12, 0.2, np.abs(P[:, 2] + 0.02))) * 0.25
     rgb = PT.mix(rgb, PT.hexc("#5a3c24"), grime)
-    # end grain and the wedge on top of the eye
-    top = S.smoothstep(Z_TOP - 0.004, Z_TOP - 0.001, P[:, 2])
-    rings = 0.5 + 0.5 * np.sin(np.sqrt(P[:, 0] ** 2 + (P[:, 1] - haft_off(Z_TOP)) ** 2) * 900)
-    end = PT.mix(PT.fill(ctx.n, PT.hexc("#c79a63")), PT.hexc("#8e6239"), rings * 0.5)
-    wedge = (np.abs(P[:, 0]) < 0.0022) * top
-    end = PT.mix(end, PT.hexc("#3b2a1c"), wedge)
-    rgb = PT.mix(rgb, end, top)
     return PP.shade(ctx, rgb, ao_amt=0.55, cav_amt=0.45, edge_amt=0.12)
 
 
@@ -173,8 +165,8 @@ def paint_cord(ctx):
 
 def parts():
     return [
-        Part("haft", haft(), "fixed", vox=0.0011, tris=380, paint=paint_haft, texel=0.9, uv_angle=70),
-        Part("head", head(), "fixed", vox=0.0007, tris=720, paint=paint_head, texel=1.4),
+        Part("haft", haft(), "fixed", vox=0.0011, tris=360, paint=paint_haft, texel=0.9, uv_angle=70, cull_eps=0.005),
+        Part("head", head(), "fixed", vox=0.0007, tris=1200, paint=paint_head, texel=1.4),
         Part("langets", langets(), "fixed", vox=0.0006, tris=170, paint=paint_langets, texel=1.0),
         Part("wrap", wrap(), "secondary", vox=0.0007, tris=260, paint=paint_wrap, texel=1.1),
         Part("cord", cord(), "fixed", vox=0.0006, tris=200, paint=paint_cord, texel=0.9),
