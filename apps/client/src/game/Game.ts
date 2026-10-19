@@ -758,7 +758,7 @@ export class Game {
   private frame() {
     const now = performance.now();
     const rawMs = now - this.last;
-    // A slow frame advances in full (up to 250 ms, in ≤ 50 ms movement steps), so low fps isn't slow motion (#33).
+    // A slow frame advances up to 200 ms (in ≤ 50 ms movement steps), so low fps is barely slow motion (#33).
     const { dt } = frameClock(rawMs);
     this.last = now;
     if (!this.running || this.travelling) {
