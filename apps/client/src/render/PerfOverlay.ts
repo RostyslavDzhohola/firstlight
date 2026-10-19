@@ -95,7 +95,7 @@ export class PerfOverlay {
     const fmt = (v: number | undefined) => (v === undefined ? "–" : v >= 10000 ? `${(v / 1000).toFixed(0)}k` : String(v));
     this.statsEl.textContent =
       `${(1000 / Math.max(1, p50)).toFixed(0)} fps  p50 ${p50.toFixed(1)}  p95 ${p95.toFixed(1)} ms  cpu ${cpu.toFixed(1)}  gpu ${gpu === null ? "n/a" : gpu.toFixed(1)} ms\n` +
-      `${this.ctx.webgpu ? "WebGPU" : "WebGL2"}  tier ${s.tier}${s.auto ? " (auto)" : ""}  scale ${this.ctx.pixelRatio().toFixed(2)} (ladder ${this.ctx.ladder.scale})  ${c.width}×${c.height}\n` +
+      `${this.ctx.webgpu ? "WebGPU" : "WebGL2"}  tier ${s.tier}${s.auto ? " (auto)" : ""}${s.extras.length ? ` +${s.extras.join("+")}` : ""}  scale ${this.ctx.pixelRatio().toFixed(2)} (ladder ${this.ctx.ladder.scale})  ${c.width}×${c.height}\n` +
       `draws ${info.render.drawCalls}/${s.drawBudget}  tris ${(info.render.triangles / 1000).toFixed(0)}k  shaders ${sh.total}${sh.watching > 0 ? ` (+${sh.afterWarmup} since warm-up)` : ""}\n` +
       `chunks ${fmt(extras.visibleChunks)}/${fmt(extras.chunks)}  water ${fmt(extras.water)}  grass ${fmt(extras.grass)}  props ${fmt(extras.props)}  particles ${fmt(extras.particles)}\n` +
       `entities ${fmt(extras.entities)}  ping ${extras.ping ? extras.ping.toFixed(0) + " ms" : "–"}  ${extras.body ?? ""}  ${this.ctx.gpuName.slice(0, 48)}`;
