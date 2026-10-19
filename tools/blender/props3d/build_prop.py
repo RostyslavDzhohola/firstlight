@@ -41,6 +41,26 @@ def log(*a):
     print("PROP3D", *a, flush=True)
 
 
+def band_uvs(ob, axis, n):
+    """Cut a long part's UV islands into n bands along a weapon axis: one 1.5 m strip (a bow limb, a
+    staff, a string) sets the packer's scale for everything, and most of the texture stays empty.
+    Moving each band's loops apart disconnects them; pack_uvs() then places the pieces."""
+    me = ob.data
+    cen = B.face_centres(ob)[:, axis]
+    lo, hi = float(cen.min()), float(cen.max()) + 1e-6
+    band = np.minimum(((cen - lo) / (hi - lo) * n).astype(int), n - 1)
+    uv = np.empty(len(me.loops) * 2, F)
+    me.uv_layers.active.data.foreach_get("uv", uv)
+    uv = uv.reshape(-1, 2)
+    ls = np.empty(len(me.polygons), np.int32)
+    lt = np.empty(len(me.polygons), np.int32)
+    me.polygons.foreach_get("loop_start", ls)
+    me.polygons.foreach_get("loop_total", lt)
+    for f, (s, t) in enumerate(zip(ls, lt)):
+        uv[s:s + t, 0] += 10.0 * band[f]
+    me.uv_layers.active.data.foreach_set("uv", uv.ravel())
+
+
 def build(name, out_dir, tex=512):
     t0 = time.time()
     bl.reset()
@@ -79,6 +99,8 @@ def build(name, out_dir, tex=512):
             continue
         lo.data.shade_smooth()
         B.uv_unwrap(lo, p.uv_angle, p.texel)
+        if getattr(p, "uv_bands", None):
+            band_uvs(lo, *p.uv_bands)
         me = lo.data
         at = me.attributes.new("part_id", "INT", "FACE")
         at.data.foreach_set("value", np.full(len(me.polygons), pid, dtype=np.int32))
@@ -113,7 +135,9 @@ def build(name, out_dir, tex=512):
             continue
         Plo = pos[sel]
         Phi, Nhi = TB.project(p.field, Plo)
-        bad = np.linalg.norm(Phi - Plo, axis=1) > 0.008
+        # thin parts (a blade's last millimetres, a bow limb): the nearest sculpt surface can be the
+        # opposite face, whose normal points away; keep the low-poly surface there
+        bad = (np.linalg.norm(Phi - Plo, axis=1) > 0.008) | (np.einsum("ij,ij->i", Nhi, nrm_lo[sel]) < 0.2)
         Phi[bad] = Plo[bad]
         Nhi[bad] = nrm_lo[sel][bad]
         if p.bump is not None:

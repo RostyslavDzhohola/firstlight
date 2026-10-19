@@ -218,11 +218,14 @@ def paint_tassel(ctx):
 
 
 def parts():
+    limbs_p = Part("limbs", limbs(), "fixed", vox=0.0009, tris=900, paint=paint_limbs, texel=0.9, uv_angle=70)
+    string_p = Part("string", string(), "fixed", vox=0.0005, tris=90, paint=paint_string, texel=0.5, occlude=False)
+    limbs_p.uv_bands = string_p.uv_bands = (2, 6)  # build_prop.band_uvs: 1.5 m strips in six pieces
     return [
-        Part("limbs", limbs(), "fixed", vox=0.0009, tris=900, paint=paint_limbs, texel=0.9, uv_angle=70),
+        limbs_p,
         Part("grip", grip(), "fixed", vox=0.0007, tris=220, paint=paint_grip, texel=1.3),
         Part("nocks", nocks(), "fixed", vox=0.0005, tris=200, paint=paint_nocks, texel=1.3),
-        Part("string", string(), "fixed", vox=0.0005, tris=90, paint=paint_string, texel=0.5, occlude=False),
+        string_p,
         Part("serving", serving(), "fixed", vox=0.0005, tris=80, paint=paint_serving, texel=0.8),
         Part("tassel", tassel(), "secondary", vox=0.0005, tris=240, paint=paint_tassel, texel=1.4),
     ]

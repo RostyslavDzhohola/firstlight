@@ -35,8 +35,12 @@ TODAY_JSON = "/tmp/fl-props/ref/today_weapons.json"
 TODAY_VIEW = {"longbow": {"up": "y", "side": "z"}}  # today's bow runs its limbs along weapon +Y
 
 
-def prop_material(name, look, pal, albedo=None, normal=None, flat=None, glow=0.0):
-    """albedo/normal PNG paths (built props), or flat=(sRGB rgb) with an optional glow (today's)."""
+GLOW = {"studio": 1.0, "game": 2.2}  # the studio light (AgX) washes a 2.2x glow out to white
+
+
+def prop_material(name, look, pal, albedo=None, normal=None, flat=None, emission=None):
+    """albedo/normal PNG paths (built props), or flat = linear base RGB with emission = linear RGB x
+    strength (today's models, toon-shaded like the avatars in the game look)."""
     m = bpy.data.materials.new(name)
     m.use_nodes = True
     nt = m.node_tree
@@ -59,14 +63,15 @@ def prop_material(name, look, pal, albedo=None, normal=None, flat=None, glow=0.0
         painted.operation = "SUBTRACT"
         painted.inputs[0].default_value = 1.0
         nt.links.new(alb.outputs["Alpha"], painted.inputs[1])
-        own = R.scale_col(nt, R.scale_col(nt, alb.outputs["Color"], painted.outputs[0]), 2.2)
+        own = R.scale_col(nt, R.scale_col(nt, alb.outputs["Color"], painted.outputs[0]), GLOW[look])
         emis = R.add(nt, own, R.scale_col(nt, R.mul(nt, role_b, acc), 2.2))
         R.finish_material(nt, out, base, nmap.outputs["Normal"], emis, look)
     else:
         rgb = nt.nodes.new("ShaderNodeRGB")
-        rgb.outputs[0].default_value = (*bl.srgb_to_lin(flat), 1)
-        emis = R.scale_col(nt, rgb.outputs[0], glow)
-        R.finish_material(nt, out, rgb.outputs[0], None, emis, look)
+        rgb.outputs[0].default_value = (*flat, 1)
+        em = nt.nodes.new("ShaderNodeRGB")
+        em.outputs[0].default_value = (*(emission or (0, 0, 0)), 1)
+        R.finish_material(nt, out, rgb.outputs[0], None, em.outputs[0], look)
     return m
 
 
@@ -81,15 +86,19 @@ def load_prop(dir_, name, look, pal):
 
 
 def load_today(wid, look):
+    """Today's models keep their own materials (base, roughness, metalness, emission) in the studio look.
+    In the game look they get the avatars' toon shading like the new props (the client draws them with
+    a PBR material: the comparison is about shape and colour, not their shading), keeping their base
+    and emission colours apart."""
     objs = hold.today_meshes(TODAY_JSON, wid)
     if look == "game":
         for o in objs:
             b = o.data.materials[0].node_tree.nodes["Principled BSDF"]
-            lin = b.inputs["Base Color"].default_value[:3]
-            srgb = tuple(c ** (1 / 2.2) for c in lin)
-            glow = b.inputs["Emission Strength"].default_value if any(b.inputs["Emission Color"].default_value[:3]) else 0
+            base = tuple(b.inputs["Base Color"].default_value[:3])
+            k = b.inputs["Emission Strength"].default_value
+            emis = tuple(c * k for c in b.inputs["Emission Color"].default_value[:3])
             o.data.materials.clear()
-            o.data.materials.append(prop_material(o.name + "_game", look, 0, flat=srgb, glow=min(glow, 2.2)))
+            o.data.materials.append(prop_material(o.name + "_game", look, 0, flat=base, emission=emis))
     return objs
 
 

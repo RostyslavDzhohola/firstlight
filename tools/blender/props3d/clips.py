@@ -47,13 +47,15 @@ def rest_world(path):
 
 class Clips:
     def __init__(self, path):
+        sc = bpy.context.scene
+        sc.render.fps, sc.render.fps_base = 30, 1.0  # clip frames are 30 fps, like the characters' pipeline
         before, acts_before = set(bpy.data.objects), set(bpy.data.actions)
         bpy.ops.import_scene.gltf(filepath=path)
         self.empties = {o.name: o for o in set(bpy.data.objects) - before if o.type == "EMPTY"}
         self.actions = {a.name: a for a in set(bpy.data.actions) - acts_before}
         self.rest = rest_world(path)
-        # the empties sit under the file's own root nodes; their world = rest_world at rest only if
-        # those roots carry no transform, which holds for this file (checked in pose())
+        # rest_world() and the empties share the file's node tree (its root node has no transform), so
+        # node(t) and rest are in the same space
         self.clip = None
 
     def frames(self, clip):

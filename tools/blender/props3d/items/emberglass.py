@@ -48,7 +48,7 @@ def shaft():
     zs = np.linspace(Z_BUTT + 0.01, Z_TOP, 12)
     f = S.tube([shaft_axis(z) for z in zs], [shaft_r(z) for z in zs])
     # long, shallow grain: noise stretched ~30x along the shaft (short stretches read as bamboo nodes)
-    return S.displace(f, lambda P: 0.00035 * S.fbm(P * F((1, 1, 0.035)), 110.0, 2, 4), 1.05)
+    return S.displace(f, lambda P: 0.00035 * S.fbm(P * F((1, 1, 0.035)), 110.0, 2, 4), 1.25)
 
 
 def paint_shaft(ctx):
@@ -162,8 +162,10 @@ def tines():
 
 
 def parts():
+    shaft_p = Part("shaft", shaft(), "fixed", vox=0.0012, tris=420, paint=paint_shaft, texel=0.8, uv_angle=70)
+    shaft_p.uv_bands = (2, 5)  # build_prop.band_uvs: the 1.35 m shaft in five pieces
     return [
-        Part("shaft", shaft(), "fixed", vox=0.0012, tris=420, paint=paint_shaft, texel=0.8, uv_angle=70),
+        shaft_p,
         Part("wrap", wrap(), "secondary", vox=0.0007, tris=300, paint=paint_wrap, texel=1.2),
         Part("bands", bands(), "fixed", vox=0.0008, tris=320, paint=paint_copper, texel=1.0),
         Part("collar", collar(), "fixed", vox=0.0008, tris=220, paint=paint_collar, texel=1.3),
