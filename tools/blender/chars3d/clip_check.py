@@ -215,4 +215,5 @@ def main():
     print("CLIPCHECK DONE", len(report["flags"]), "flags over", len(report["clips"]), "clips", flush=True)
 
 
-main()
+if __name__ == "__main__":  # Blender runs --python scripts as __main__; props3d imports the helpers
+    main()

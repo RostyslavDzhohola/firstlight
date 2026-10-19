@@ -158,18 +158,27 @@ def make_material(name, albedo_path, normal_path, pal, look, sun_dir=None):
     am.inputs["B"].default_value = acc
     base = am.outputs["Result"]
     emis = scale_col(nt, mul(nt, amax.outputs[0], acc), 2.2)
+    finish_material(nt, out, base, nmap.outputs["Normal"], emis, look)
+    return m
+
+
+def finish_material(nt, out, base, normal, emis, look):
+    """Light base colour (+ emission) for a look: studio = Principled; game = the toon emulation.
+    normal: a normal socket or None (flat shading normals). Shared with props3d/render_prop.py."""
     if look == "studio":
         b = nt.nodes.new("ShaderNodeBsdfPrincipled")
         nt.links.new(base, b.inputs["Base Color"])
-        nt.links.new(nmap.outputs["Normal"], b.inputs["Normal"])
+        if normal is not None:
+            nt.links.new(normal, b.inputs["Normal"])
         b.inputs["Roughness"].default_value = 0.72
         nt.links.new(emis, b.inputs["Emission Color"])
         b.inputs["Emission Strength"].default_value = 1.0
         nt.links.new(b.outputs[0], out.inputs[0])
-        return m
+        return
     # game look: emulate the toon avatar material (see header)
     diff = nt.nodes.new("ShaderNodeBsdfDiffuse")
-    nt.links.new(nmap.outputs["Normal"], diff.inputs["Normal"])
+    if normal is not None:
+        nt.links.new(normal, diff.inputs["Normal"])
     s2r = nt.nodes.new("ShaderNodeShaderToRGB")
     nt.links.new(diff.outputs[0], s2r.inputs[0])
     bw = nt.nodes.new("ShaderNodeRGBToBW")
@@ -199,7 +208,10 @@ def make_material(name, albedo_path, normal_path, pal, look, sun_dir=None):
     sun_rgb = mul(nt, sun_term, tuple(c * SUN_I / math.pi for c in SUN_COL) + (1,))
     # hemisphere fill by world-space normal Z
     sepn = nt.nodes.new("ShaderNodeSeparateXYZ")
-    nt.links.new(nmap.outputs["Normal"], sepn.inputs[0])
+    if normal is not None:
+        nt.links.new(normal, sepn.inputs[0])
+    else:
+        nt.links.new(nt.nodes.new("ShaderNodeNewGeometry").outputs["Normal"], sepn.inputs[0])
     hz = nt.nodes.new("ShaderNodeMapRange")
     hz.inputs["From Min"].default_value = -1
     hz.inputs["From Max"].default_value = 1
@@ -214,7 +226,8 @@ def make_material(name, albedo_path, normal_path, pal, look, sun_dir=None):
     # fresnel rim: (1 - N.V)^3 * 0.32 * rim colour
     lw = nt.nodes.new("ShaderNodeLayerWeight")
     lw.inputs["Blend"].default_value = 0.5
-    nt.links.new(nmap.outputs["Normal"], lw.inputs["Normal"])
+    if normal is not None:
+        nt.links.new(normal, lw.inputs["Normal"])
     pw = nt.nodes.new("ShaderNodeMath")
     pw.operation = "POWER"
     nt.links.new(lw.outputs["Facing"], pw.inputs[0])
@@ -225,7 +238,6 @@ def make_material(name, albedo_path, normal_path, pal, look, sun_dir=None):
     nt.links.new(col, em.inputs["Color"])
     em.inputs["Strength"].default_value = 1.0
     nt.links.new(em.outputs[0], out.inputs[0])
-    return m
 
 
 def load_anims(path):
@@ -494,4 +506,5 @@ def main():
     bl.render(a.out)
 
 
-main()
+if __name__ == "__main__":  # Blender runs --python scripts as __main__; props3d imports the helpers
+    main()

@@ -123,4 +123,5 @@ def main():
     print("PREVIEW DONE", a.out, flush=True)
 
 
-main()
+if __name__ == "__main__":  # Blender runs --python scripts as __main__; props3d imports the helpers
+    main()
