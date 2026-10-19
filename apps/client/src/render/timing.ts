@@ -419,10 +419,15 @@ function gpuEvidence(gpu: readonly number[], busy: readonly number[] | undefined
   return null;
 }
 
+/** Frame interval (ms) above which Medium's frames miss a 60 Hz display (the ladder's "slow" too). */
+const MISSES_60HZ_MS = 17.5;
+
 /**
- * SPEC §7.3 thresholds. GPU timer (busy time where there is one): p50 > 14 ms → Low, < 6 ms → High
- * (and re-probe at High), else Medium. rAF only (vsync-limited): > 20 ms → Low, < 6 ms → High
- * (very high refresh displays), else Medium. Too few frames or a hidden tab → invalid (Medium, not saved).
+ * SPEC §7.3 thresholds. GPU timer (busy time where there is one): p50 > 14 ms → Low, only while
+ * Medium's frames also miss the display (frame rate first: a timer that reads high while frames
+ * hold 60 Hz, the M1 on WebGL2, keeps Medium; D-framerate-2); < 6 ms → High (and re-probe at High),
+ * else Medium. rAF only (vsync-limited): > 20 ms → Low, < 6 ms → High (very high refresh
+ * displays), else Medium. Too few frames or a hidden tab → invalid (Medium, not saved).
  */
 export function decideProbe(s: ProbeSamples): ProbeDecision {
   const rafP50 = percentile(s.raf, 0.5);
@@ -432,7 +437,7 @@ export function decideProbe(s: ProbeSamples): ProbeDecision {
   const ev = s.gpuAvailable ? gpuEvidence(s.gpu, s.busy, rafP50, PROBE_MIN_GPU) : null;
   if (ev) {
     const { g, method } = ev;
-    if (g > 14) return { tier: "low", valid: true, method, gpuP50: g, rafP50, reprobeHigh: false };
+    if (g > 14 && rafP50 > MISSES_60HZ_MS) return { tier: "low", valid: true, method, gpuP50: g, rafP50, reprobeHigh: false };
     if (g >= 6) return { tier: "medium", valid: true, method, gpuP50: g, rafP50, reprobeHigh: false };
     return { tier: "high", valid: true, method, gpuP50: g, rafP50, reprobeHigh: true };
   }
