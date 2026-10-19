@@ -15,6 +15,7 @@ import { partyState } from "../social/store.ts";
 import { el } from "./dom.ts";
 import { mapAtlas, type ViewImage } from "./mapAtlas.ts";
 import { missionTargets, staticMarkers, type MapMarker } from "./mapMarkers.ts";
+import { guideTargets } from "../game/onboardingTargets.ts";
 import { mapView, project, screenAngle, type MapView, type Projected } from "./mapView.ts";
 import { minimapRange, minimapSize, preferredMinimapSize } from "./minimapLayout.ts";
 import { arrow, diamond, drawMissionStars, drawPartyMarkers, drawWaypointMarker, minimapPlace } from "./minimapMarkers.ts";
@@ -144,7 +145,7 @@ export class Minimap {
       this.targetsFor = g.hud.you;
       this.targets = missionTargets(body, g.hud.you?.missions ?? []);
     }
-    drawMissionStars(ctx, v, me, this.targets, R, range, rim);
+    drawMissionStars(ctx, v, me, [...this.targets, ...guideTargets.current()], R, range, rim);
     this.drawNpcs(v, half, rim);
     drawPartyMarkers(ctx, v, me, this.partyMembers(), R, range, rim);
     ctx.restore();

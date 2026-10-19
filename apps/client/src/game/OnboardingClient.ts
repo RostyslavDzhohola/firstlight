@@ -22,6 +22,8 @@ import { TrainingDummies } from "../world/TrainingDummies.ts";
 import { DoneCardTimer } from "./doneCardTimer.ts";
 import type { Game } from "./Game.ts";
 import { OnboardingProgress } from "./onboardingProgress.ts";
+import { dummyTargets, guideTargets } from "./onboardingTargets.ts";
+import type { StepId } from "./onboardingSteps.ts";
 import type { ClientSystem } from "./systems.ts";
 
 /** Time the end card stays up, counted only while the game is on screen and playable (doneCardTimer.ts). */
@@ -59,6 +61,11 @@ export class OnboardingClient implements ClientSystem {
   private lastTrainAt = 0;
   /** CombatClient hook: the tutorial's tips or its last card are up (the "Progress not saved" toast waits). */
   private readonly busy = () => this.active || !!this.hud;
+  /** The card's current step (updated every frame while the tutorial runs). */
+  private step: StepId | undefined = undefined;
+  private readonly onDummyStep = () => this.active && this.step === "attack";
+  /** Map and minimap: the dummies still standing during the dummy step (#31). */
+  private readonly targets = () => (this.active ? dummyTargets(this.step, this.dummies.dummies.map((d) => d.down)) : []);
   /** The world is on screen and the player can act: no loading screen, pause menu, panel, photo mode or hidden tab. */
   private readonly playable = () => {
     const g = this.game;
@@ -96,6 +103,8 @@ export class OnboardingClient implements ClientSystem {
     game.combat.training = (def, tier, now) => this.attack(def, tier, now);
     // Level 2 is paid on the dummies: the "Progress not saved" toast waits until the HUD is gone.
     game.combat.tutorialBusy = this.busy;
+    game.combat.dummyStep = this.onDummyStep;
+    guideTargets.current = this.targets;
     pauseExtras.add(this.pauseRow);
   }
 
@@ -244,6 +253,7 @@ export class OnboardingClient implements ClientSystem {
 
     // Point at the dummies, then at the Arcadia portal, while that's the step on the card.
     const step = steps.current?.id;
+    this.step = step;
     let at: THREE.Vector3 | null = null;
     let title = "";
     let sub = "";
@@ -257,8 +267,9 @@ export class OnboardingClient implements ClientSystem {
       title = "Arcadia";
       sub = "Levels 1–7 · walk in";
     }
-    // Off screen or behind the camera it's pinned to the screen edge with an arrow (wayfinding).
-    this.hud.setCallout(at && at.distanceTo(p) < 80 ? at.project(g.ctx.camera) : null, title, sub);
+    // Off screen or behind the camera it's pinned to the screen edge with an arrow (wayfinding). The
+    // dummies are pointed at from any distance: a player who wandered off is pointed back (#31).
+    this.hud.setCallout(at && (step === "attack" || at.distanceTo(p) < 80) ? at.project(g.ctx.camera) : null, title, sub);
   }
 
   dispose() {
@@ -281,6 +292,8 @@ export class OnboardingClient implements ClientSystem {
       return;
     }
     if (this.game.combat.tutorialBusy === this.busy) this.game.combat.tutorialBusy = null;
+    if (this.game.combat.dummyStep === this.onDummyStep) this.game.combat.dummyStep = null;
+    if (guideTargets.current === this.targets) guideTargets.current = () => [];
     hud?.dispose();
     this.hud = null;
   }

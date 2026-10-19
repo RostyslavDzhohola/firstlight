@@ -78,6 +78,8 @@ export class CombatClient {
   training: ((def: WeaponDef, tier: TierStats, now: number) => boolean) | null = null;
   /** Onboarding hook: the tutorial is up (tips or its last card); the "Progress not saved" toast waits for it. */
   tutorialBusy: (() => boolean) | null = null;
+  /** OnboardingClient hook: the dummy step is on, so the holstered notice points at the dummies (#31). */
+  dummyStep: (() => boolean) | null = null;
   /** The "Progress not saved" toast (once per tab session) and the best level seen (Esc menu → Save progress). */
   readonly saveNudge = new SaveNudge(sessionStorage.getItem(NUDGED_KEY) === "1");
   /** Refusal notices: each reason once per press of an attack button. */
@@ -450,7 +452,7 @@ export class CombatClient {
     if (meState && meState.flags & PF.SAFE && !usableAnywhere(def)) {
       if (this.training?.(def, t, now)) return; // onboarding: the Portus training dummies take swings
       // The same text and gate as the server's "safe zone" refusal: one notice per press (notices.ts).
-      const text = holsteredText(g.bodyId);
+      const text = holsteredText(g.bodyId, !!this.dummyStep?.());
       if (input.lmbPressed && this.deniedGate.allow(text)) g.hud.toast(text, "warn");
       return;
     }

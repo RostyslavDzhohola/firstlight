@@ -17,6 +17,7 @@ import { layoutMapLabels, type MapLabel } from "./mapLabels.ts";
 import { mapAtlas, type ViewImage } from "./mapAtlas.ts";
 import { atlasResolution } from "./mapRaster.ts";
 import { missionTargets, staticMarkers, type MapMarker } from "./mapMarkers.ts";
+import { guideTargets } from "../game/onboardingTargets.ts";
 import { mapView, metresPerPixel, placeUnder, pointerToCanvas, project, resizeView, screenAngle, unproject, zoomView, type MapView, type Projected } from "./mapView.ts";
 import { arrow, diamond, star } from "./minimapMarkers.ts";
 import { uiSettings } from "./uiSettings.ts";
@@ -443,8 +444,8 @@ export class MapPanel extends Panel {
       }
     }
 
-    // Active mission targets.
-    for (const t of missionTargets(body, you?.missions ?? [])) {
+    // Active mission targets, and the tutorial's dummies during its dummy step (#31).
+    for (const t of [...missionTargets(body, you?.missions ?? []), ...guideTargets.current()]) {
       const s = project(v, t.dir, { x: 0, y: 0, z: 0 });
       if (!visible(s)) continue;
       star(ctx, s.x, s.y - 14, 8, "#ffd166");

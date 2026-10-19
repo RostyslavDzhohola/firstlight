@@ -14,8 +14,12 @@ const ATTACK_DENIED: Record<string, string> = {
   empty: "Reloading…",
 };
 
-/** The safe-zone refusal with the way out of this zone (D-zones-1): the town's gates, or the pad's ring. */
-export function holsteredText(body: BodyId | null | undefined): string {
+/**
+ * The safe-zone refusal with the way out of this zone (D-zones-1): the town's gates, or the pad's ring.
+ * During the tutorial's dummy step (`training`) it points at the dummies instead, which are in town (#31).
+ */
+export function holsteredText(body: BodyId | null | undefined, training = false): string {
+  if (training) return "Training: swing at a dummy (follow the marker)";
   if (body === "portus") return "Weapons are holstered in town: head out of the gates to fight";
   if (body) return "Weapons are holstered on the pad: step out of the ring to fight";
   return ATTACK_DENIED["safe zone"]!;
