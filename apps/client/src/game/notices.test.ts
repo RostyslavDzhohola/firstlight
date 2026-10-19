@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { attackDeniedText, holsteredText, immuneText, NoticeGate } from "./notices.ts";
-import { dummyTargets } from "./onboardingTargets.ts";
+import { dummyTargets, nextDummy } from "./onboardingTargets.ts";
 import { dummyDir } from "@firstlight/shared/content/onboarding";
 
 describe("attack refusal notices", () => {
@@ -55,5 +55,15 @@ describe("the dummy step's guidance (#31)", () => {
     expect(dummyTargets("attack", [true, true, true])).toEqual([]);
     expect(dummyTargets("sprint", [false, false, false])).toEqual([]);
     expect(dummyTargets(undefined, [false, false, false])).toEqual([]);
+  });
+});
+
+describe("the dummy step's world marker (#31, Codex review)", () => {
+  it("points at the nearest dummy still standing, and at nothing once all are down", () => {
+    const near = (i: number) => dummyDir(i) as unknown as [number, number, number];
+    expect(nextDummy([false, false, false], near(2))).toBe(2);
+    expect(nextDummy([false, false, true], near(2))).toBe(1);
+    expect(nextDummy([true, false, true], near(0))).toBe(1);
+    expect(nextDummy([true, true, true], near(1))).toBeNull();
   });
 });

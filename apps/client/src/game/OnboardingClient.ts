@@ -22,7 +22,7 @@ import { TrainingDummies } from "../world/TrainingDummies.ts";
 import { DoneCardTimer } from "./doneCardTimer.ts";
 import type { Game } from "./Game.ts";
 import { OnboardingProgress } from "./onboardingProgress.ts";
-import { dummyTargets, guideTargets } from "./onboardingTargets.ts";
+import { dummyTargets, guideTargets, nextDummy } from "./onboardingTargets.ts";
 import type { StepId } from "./onboardingSteps.ts";
 import type { ClientSystem } from "./systems.ts";
 
@@ -258,7 +258,9 @@ export class OnboardingClient implements ClientSystem {
     let title = "";
     let sub = "";
     if (step === "attack") {
-      at = this.dummies.chest(1, _a).addScaledVector(_b.copy(_a).normalize(), 0.9);
+      // The nearest dummy still standing; none left, no marker (Codex review: it always aimed at #1).
+      const next = nextDummy(this.dummies.dummies.map((d) => d.down), [p.x, p.y, p.z]);
+      at = next === null ? null : this.dummies.chest(next, _a).addScaledVector(_b.copy(_a).normalize(), 0.9);
       title = `Training dummies · ${down} / 3 down`;
       sub = "10 XP each. Three hits knock one down.";
     } else if (step === "portal") {

@@ -21,3 +21,20 @@ export function dummyTargets(step: StepId | undefined, down: readonly boolean[])
 
 /** What the map and minimap draw besides mission targets; the tutorial sets it while it runs. */
 export const guideTargets: { current: () => GuideTarget[] } = { current: () => [] };
+
+/** The standing dummy nearest `from` (any point; compared by direction from the planet's centre), or null when all are down. */
+export function nextDummy(down: readonly boolean[], from: readonly [number, number, number]): number | null {
+  const l = Math.hypot(from[0], from[1], from[2]) || 1;
+  let best: number | null = null;
+  let bestDot = -Infinity;
+  for (let i = 0; i < TRAINING_DUMMIES.length; i++) {
+    if (down[i]) continue;
+    const d = dummyDir(i);
+    const dot = (d[0] * from[0] + d[1] * from[1] + d[2] * from[2]) / l;
+    if (dot > bestDot) {
+      bestDot = dot;
+      best = i;
+    }
+  }
+  return best;
+}
