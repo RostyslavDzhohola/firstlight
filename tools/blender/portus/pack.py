@@ -38,7 +38,11 @@ def opt(name, default=None):
 # Set by configure() (the pad outposts' pack, tools/blender/pads/pack.py, imports this module and
 # reuses its readers, LOD builders, texture packing and GLB writer).
 DESIGN = OUT = PREFAB_DIR = TEX_DIR = None
-LAYER = 512
+# Layer size: 512 for the shipped strips; the HD art pack (tools/blender/artpacks) builds the same
+# layers at 1024 (`--layer 1024`) from the same kit maps.
+LAYER = int(opt("--layer", "512"))
+# WebP's largest side is 16383 px: a strip taller than that is laid out in columns (save_strip).
+WEBP_MAX = 16383
 
 
 def configure(design, out):
@@ -506,7 +510,8 @@ def area_weights(n_src, n_dst):
     return W
 
 
-def resample(px, size=LAYER):
+def resample(px, size=None):
+    size = size or LAYER
     h, w, c = px.shape
     Wy, Wx = area_weights(h, size), area_weights(w, size)
     out = np.einsum("yh,hwc->ywc", Wy, px)
@@ -583,6 +588,27 @@ def layer_images(impostors):
         mask.append(a)
         normal.append(np.clip(n, 0, 1))
     return color, mask, normal
+
+
+def strip_columns(n_layers, size=None):
+    """Columns of a strip of n layers: one (the shipped 512 strips) unless that would pass WebP's limit."""
+    size = size or LAYER
+    return max(1, math.ceil(n_layers * size / WEBP_MAX))
+
+
+def save_strip(layers, path, quality):
+    """Layers (each size x size x ch, top-down) as one WebP: layer i at column i % cols, row i // cols.
+    One column is the plain vertical strip; empty grid cells (n not a multiple of cols) stay black."""
+    n = len(layers)
+    size, ch = layers[0].shape[0], layers[0].shape[2]
+    cols = strip_columns(n, size)
+    rows = math.ceil(n / cols)
+    grid = np.zeros((rows * size, cols * size, ch), np.float32)
+    for i, px in enumerate(layers):
+        r, c = divmod(i, cols)
+        grid[r * size:(r + 1) * size, c * size:(c + 1) * size] = px
+    save_webp(grid, path, quality)
+    return cols
 
 
 def save_webp(top_down, path, quality):
@@ -840,10 +866,8 @@ def main():
     glb.write(os.path.join(OUT, "portus_raw.glb"), extras)
 
     color, mask, normal = layer_images(impostor_px)
-    strip_c = np.concatenate([np.concatenate([c, a[..., None]], axis=2) for c, a in zip(color, mask)]).astype(np.float32)
-    strip_n = np.concatenate(normal).astype(np.float32)
-    save_webp(strip_c, os.path.join(OUT, "portus_color.webp"), 82)
-    save_webp(strip_n, os.path.join(OUT, "portus_normal.webp"), 90)
+    save_strip([np.concatenate([c, a[..., None]], axis=2) for c, a in zip(color, mask)], os.path.join(OUT, "portus_color.webp"), 82)
+    save_strip(normal, os.path.join(OUT, "portus_normal.webp"), 90)
 
     town = dict(prefabs=prefabs, layout=layout, streets=extra["streets"], areas=extra["areas"], plaza=extra["plaza"],
                 portal_floor=extra["portal_floor"], portals=extra["portals"], juno=extra["juno"], plaque=extra["plaque"],
