@@ -559,7 +559,7 @@ export class Game {
       try {
         const r = await runProbe(this.ctx, updateWorld, (f) => setLoading(tuningLine, tuning.at(f)));
         console.info(`[gfx] probe → ${r.tier}${r.valid ? "" : " (not saved)"}`, r);
-        this.ctx.setProbedTier(r.tier, { persist: r.valid });
+        this.ctx.setProbedTier(r.tier, { persist: r.valid, extras: r.extras });
       } catch (e) {
         console.warn("[gfx] probe failed, staying on medium", e);
         this.ctx.setProbedTier("medium", { persist: false });
@@ -708,7 +708,7 @@ export class Game {
     try {
       const r = await runProbe(this.ctx, undefined, (f) => setLoading(tuningLine, tuning.at(f)));
       console.info(`[gfx] probe → ${r.tier}${r.valid ? "" : " (not saved)"}`, r);
-      this.ctx.setProbedTier(r.tier, { persist: r.valid, clearPinned: true });
+      this.ctx.setProbedTier(r.tier, { persist: r.valid, clearPinned: true, extras: r.extras });
       await avatarTexturesFollowTier(this.ctx.tier); // D-load-6
       await warmup(this.ctx, {
         frames: 3,
