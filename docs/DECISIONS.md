@@ -333,7 +333,8 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   (history scrub of `docs/reviews/firstlook-1.png`, Easter-egg solutions out of the public source,
   no local paths or personal emails, licences, a secret scan of the whole history, third-party IP
   wording). Why: making the repo public is an owner-only step (Process, R4 Q2), and some items rewrite
-  history or change live puzzles, which needs the owner's go-ahead.
+  history or change live puzzles, which needs the owner's go-ahead. Done 2026-10-18 (STATUS M9): the
+  repo is public and the checklist file is removed; the Easter-egg answers stay public (#41).
 - **D32 (run, 11:55Z):** server movement and session rules after the F12 rounds. A takeover keeps
   the old session's protection expiry, cooldowns and effects; fresh spawn protection only without a
   live, dropped or lingering body. Safe zones and portal handoffs skip the 30 s body linger only out

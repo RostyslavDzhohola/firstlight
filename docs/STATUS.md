@@ -114,7 +114,10 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
   - [ ] Security pass (auth flows, rate limits, admin routes, input validation, no secrets in the bundle)
   - [ ] Voice launch items from docs/risk-assessment.md §5: a public complaints/appeals contact and
     a terms page (voice rules, 16+). Admin voice-mutes are persisted in game.db (migration 5, 668ec82).
-  - [ ] Before the repo goes public: docs/pre-public.md (owner)
+  - [x] Repo public (2026-10-18): history rewritten once (the old screenshot, Python caches, local
+    paths and the personal commit email are gone; every commit hash changed, so older short hashes
+    in these docs no longer resolve), gitleaks clean, secret scanning and push protection on. The
+    Easter-egg answers stay public by the owner's choice (#41 tracks hiding them).
 - [ ] M10 Video-ready: photo mode, `stage <n>` and docs/staged-scenes.md done (F13). Open: the landing
   flythrough video, the final report to the owner (SPEC §12).
 - [ ] M11 Extras: photo mode (#1) done; weather + day/night (#3–4) merged 743d651; horses (#2)
