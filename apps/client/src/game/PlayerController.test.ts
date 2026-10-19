@@ -8,6 +8,7 @@ import { BreakableCollider, PLAYER_BODY } from "@firstlight/shared/planet/collid
 import type { Input } from "./input.ts";
 import { ANIM } from "@firstlight/shared/net/schema";
 import { MOVE, PlayerController, type MoveColliders } from "./PlayerController.ts";
+import { stepOut } from "./stepOut.ts";
 import { ADMIN_MODE } from "@firstlight/shared/content/admin";
 
 const R = 500;
@@ -544,6 +545,89 @@ describe("third-person camera and structures (D42)", () => {
     // The lens sits short of the wall along its line from the head, with room to spare.
     expect(wall - l).toBeGreaterThan(0.15);
     expect(town.footing(cam.position.x, cam.position.y, cam.position.z, 0, { radius: 0.01, height: 0.01, step: 0 }).inside).toBe(false);
+  });
+});
+
+describe("the camera's near plane, the shoulders and pockets (#34)", () => {
+  const portus = createTerrain("portus");
+  const town = structureCollider(portus)!;
+  const R = BODIES.portus.radius;
+  const groundR = (x: number, y: number, z: number) => R + portus.groundHeight(x, y, z);
+  const POINT = { radius: 0.01, height: 0.01, step: 0 };
+
+  /** A player south of the house at (26.2, 6.1), `e` m east, the town wired as SiteTown wires it, facing the house. */
+  function againstHouse(e = 26.2) {
+    const pc = new PlayerController(portus, BODIES.portus.waterLevel);
+    pc.setStructures({
+      resolve: (p, out) => town.resolve(p, out),
+      raycast: (o, d, maxT) => town.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT),
+      stepOut: (p) => stepOut(town, groundR, p),
+    });
+    const d = townDir(e, 2.2, R);
+    pc.teleport(d[0] * R, d[1] * R, d[2] * R);
+    run(pc, fakeInput(), 0.2);
+    const toward = (te: number, tn: number) => {
+      const q = townDir(te, tn, R);
+      const up = pc.pos.clone().normalize();
+      const v = new THREE.Vector3(q[0] * R - pc.pos.x, q[1] * R - pc.pos.y, q[2] * R - pc.pos.z);
+      return v.addScaledVector(up, -v.dot(up)).normalize();
+    };
+    pc.camForward.copy(toward(e, 30));
+    return { pc, toward };
+  }
+
+  /** Is a corner of `cam`'s near plane inside a structure? */
+  function nearPlaneIn(cam: THREE.PerspectiveCamera): boolean {
+    cam.updateMatrixWorld(true);
+    const half = Math.tan(THREE.MathUtils.degToRad(cam.fov / 2)) * cam.near;
+    const c = new THREE.Vector3();
+    for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+      c.set(sx * half * cam.aspect, sy * half, -cam.near).applyMatrix4(cam.matrixWorld);
+      if (town.footing(c.x, c.y, c.z, 0, POINT).inside) return true;
+    }
+    return false;
+  }
+
+  it("pushing into a plain wall for 3 s never steps the feet out: they only slide", () => {
+    const { pc } = againstHouse();
+    let jump = 0;
+    const last = pc.pos.clone();
+    run(pc, fakeInput(["KeyW"]), 3, 60, () => {
+      jump = Math.max(jump, pc.pos.distanceTo(last));
+      last.copy(pc.pos);
+    });
+    expect(jump).toBeLessThan(MOVE.run / 60 + 0.01);
+    expect(town.footing(pc.pos.x, pc.pos.y, pc.pos.z, PLAYER_BODY.step).inside).toBe(false);
+  });
+
+  it("walking along a wall at the player's side, the camera looks over the other shoulder with its near plane clear, and comes back once away", () => {
+    // From 25 m east the house runs on behind the camera both ways: looking west, its wall is on the
+    // right and cuts the right shoulder's line short; looking east, it is on the left.
+    for (const [east, wallSide] of [[-10, "right"], [60, "left"]] as const) {
+      const { pc, toward } = againstHouse(25);
+      run(pc, fakeInput(["KeyW"]), 2); // into the wall: it is now right beside the body
+      pc.camForward.copy(toward(east, 3)); // along the wall
+      pc.camPitch = -0.15;
+      const cam = new THREE.PerspectiveCamera(75, 16 / 9, 0.3, 6000);
+      for (let i = 0; i < 80; i++) pc.placeCamera(cam);
+      const up = pc.pos.clone().normalize();
+      const head = pc.pos.clone().addScaledVector(up, 1.65);
+      const right = new THREE.Vector3().crossVectors(pc.camForward, up).normalize();
+      const wallRight = town.raycast(head.x, head.y, head.z, right.x, right.y, right.z, 1) < 1;
+      expect(wallRight).toBe(wallSide === "right");
+      expect(nearPlaneIn(cam), `heading east ${east}`).toBe(false);
+      expect(cam.position.distanceTo(head), `heading east ${east}: the camera stays out behind`).toBeGreaterThan(2);
+      // Over the shoulder away from the wall.
+      expect(Math.sign(cam.position.clone().sub(head).dot(right)), `heading east ${east}`).toBe(wallRight ? -1 : 1);
+      // Two metres off the wall, it is back over the right shoulder.
+      pc.camForward.copy(toward(26.2, -30));
+      run(pc, fakeInput(["KeyW"]), 0.4);
+      pc.camForward.copy(toward(east, 1));
+      for (let i = 0; i < 80; i++) pc.placeCamera(cam);
+      const head2 = pc.pos.clone().addScaledVector(pc.pos.clone().normalize(), 1.65);
+      const right2 = new THREE.Vector3().crossVectors(pc.camForward, pc.pos.clone().normalize()).normalize();
+      expect(cam.position.clone().sub(head2).dot(right2), `heading east ${east}, off the wall`).toBeGreaterThan(0.4);
+    }
   });
 });
 

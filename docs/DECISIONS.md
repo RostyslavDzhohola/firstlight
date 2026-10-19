@@ -1489,3 +1489,30 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   unchanged. Why: one input packet per frame has to fit the server's bank (3.5 m on foot, 5 m on a
   horse) with 70 ms of network jitter; a 250 ms sprint (2.25 m) does, a 250 ms gallop (4 m)
   doesn't, so riding keeps the 200 ms cap rather than loosening the anti-cheat limits.
+- **D-view-6 (2026-10-18):** the third-person camera keeps its whole near plane out of the solids,
+  swaps shoulders against a wall, and a player pinned in a pocket steps out (#34, with D-view-5).
+  The lens's line from the head is still cut by one ray, now against the structures, the natural
+  solids and the intact breakables too; then each corner of the near plane (padded 5 cm) must be
+  clear from the lens, or the lens comes in 0.1 m at a time, the edge bisected. The eased reach of
+  the line and where the lens ends up are kept apart (a lens pulled in to the head by a wall there
+  otherwise never got out again) and the lens eases back out only through clear positions. A line
+  over the right shoulder cut under 1 m while the left one's is 0.5 m longer moves the camera over
+  the left (~0.4 s), back once the right line is clear; decided on the lines' own lengths and only
+  once arrived (half way both are short, and it flapped). Right in at the head with a corner still in
+  a wall beside it, the lens slides across the view off that wall when that clears it. Round every
+  Portus item (`world/portusCamera.test.ts`, 56k poses at three pitches): near-plane corners in a
+  structure 6.6 % → 0.2 % of poses, the lens itself never; what is left is the head within 0.3 m of
+  a castle wall or under a lean-to roof. The own avatar already dissolves near the lens (D-view-5:
+  gone within 0.5 m), so no new fade. Pockets: the sweep found one, the Hall of Firsts' column on its
+  0.32 m plinth: the column pushes the body into the plinth's side and the plinth pushes it back
+  (tops are stepped onto only from within half a body radius of the edge, which no walking step
+  reaches: low tops are climbed with a jump, at any frame rate), so a player who dropped in could
+  walk nowhere. Walking but held in place 0.5 s, the controller asks the solids for a step-out
+  (`game/stepOut.ts`): only where no walking probe (16 ways, the controller's 0.1 m steps with the
+  push-out after each) gets 0.25 m, the nearest spot on rings 0.25 m apart out to 1.5 m that is clear,
+  reached straight without crossing a solid, on a top if it stands on one, and not a pocket itself.
+  The server takes it as an ordinary step (bank full after the pinned half second; the real
+  validator in `apps/server/test/step-out.test.ts` refuses nothing at 20 and 60 fps); a player
+  pushing into a plain wall never moves. Client only: nothing shared or on the server changes.
+  Why: the Oct 16 play-test (#34) saw the camera inside walls, buildings and the head in Portus and
+  the player stuck between props; one ray let a lens beside a wall show it from inside.
