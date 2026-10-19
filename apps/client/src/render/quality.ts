@@ -121,6 +121,60 @@ export const TIER_TABLE: Record<Tier, TierSpec> = {
   },
 };
 
+/**
+ * High features that the automatic tier can take on top of its own (D-framerate-3): the probe adds the
+ * ones this device's measured GPU headroom pays for (probe.ts). Each takes High's value for its
+ * settings and never lowers a tier that has more. The tier's resolution and GPU budget stay its own.
+ */
+export const EXTRAS = ["detail4", "normals", "atmospheres", "water2", "shadows", "grass", "props", "ao"] as const;
+export type Extra = (typeof EXTRAS)[number];
+
+export function isExtra(v: unknown): v is Extra {
+  return typeof v === "string" && (EXTRAS as readonly string[]).includes(v);
+}
+
+/** `spec` with `extras` applied (a new object; the tier table is never touched). */
+export function withExtras(spec: TierSpec, extras: Iterable<Extra>): TierSpec {
+  const hi = TIER_TABLE.high;
+  const s: TierSpec = { ...spec, sky: { ...spec.sky }, terrain: { ...spec.terrain }, shadows: { ...spec.shadows }, grass: { ...spec.grass }, props: { ...spec.props }, post: { ...spec.post } };
+  for (const e of extras) {
+    switch (e) {
+      case "detail4":
+        s.terrain.detailLayers = 4;
+        break;
+      case "normals": // terrain normals need the 4 detail layers (terrainMaterial.ts)
+        s.terrain.detailLayers = 4;
+        s.terrain.normals = true;
+        break;
+      case "atmospheres":
+        s.sky.planetAtmospheres = true;
+        break;
+      case "water2":
+        s.water = Math.max(s.water, hi.water) as TierSpec["water"];
+        break;
+      case "shadows": // a sharper, longer map; Low's blob shadows have none
+        if (s.shadows.mode !== "map") break;
+        s.shadows.mapSize = Math.max(s.shadows.mapSize, hi.shadows.mapSize);
+        s.shadows.extent = Math.max(s.shadows.extent, hi.shadows.extent);
+        s.shadows.far = Math.max(s.shadows.far, hi.shadows.far);
+        break;
+      case "grass":
+        s.grass.count = Math.max(s.grass.count, hi.grass.count);
+        s.grass.radius = Math.max(s.grass.radius, hi.grass.radius);
+        s.grass.segments = Math.max(s.grass.segments, hi.grass.segments) as TierSpec["grass"]["segments"];
+        break;
+      case "props":
+        s.props.fullTo = Math.max(s.props.fullTo, hi.props.fullTo);
+        s.props.lodTo = Math.max(s.props.lodTo, hi.props.lodTo);
+        break;
+      case "ao": // GTAO at half resolution (WebGPU only, resolveSettings)
+        if (s.post.ao === "off") s.post.ao = hi.post.ao;
+        break;
+    }
+  }
+  return s;
+}
+
 /** What the user chose (persisted). `tier: null` means automatic (probe result). */
 export interface StoredGfx {
   v: 1;
@@ -129,6 +183,8 @@ export interface StoredGfx {
   autoTier: Tier | null;
   autoBackend: string | null;
   autoGpu: string | null;
+  /** Extras the probe measured headroom for (D-framerate-3), valid with autoTier. Null: none recorded. */
+  autoExtras: Extra[] | null;
   renderScale: number | null;
   features: Partial<Record<Feature, boolean>>;
 }
@@ -136,7 +192,7 @@ export interface StoredGfx {
 export const STORAGE_KEY = "fl.gfx.v1";
 
 export function emptyStored(): StoredGfx {
-  return { v: 1, tier: null, autoTier: null, autoBackend: null, autoGpu: null, renderScale: null, features: {} };
+  return { v: 1, tier: null, autoTier: null, autoBackend: null, autoGpu: null, autoExtras: null, renderScale: null, features: {} };
 }
 
 /** Parse stored settings (tolerates junk, older shapes and missing fields). */
@@ -154,6 +210,7 @@ export function parseStored(raw: string | null): StoredGfx {
       autoTier: isTier(s.autoTier) ? s.autoTier : null,
       autoBackend: typeof s.autoBackend === "string" ? s.autoBackend : null,
       autoGpu: typeof s.autoGpu === "string" ? s.autoGpu : null,
+      autoExtras: Array.isArray(s.autoExtras) ? [...new Set(s.autoExtras.filter(isExtra))] : null,
       renderScale: typeof s.renderScale === "number" && s.renderScale >= 0.25 && s.renderScale <= 2 ? s.renderScale : null,
       features,
     };
@@ -195,6 +252,11 @@ export function validAutoTier(s: StoredGfx, backend: string, gpu: string): Tier 
   return s.autoTier && s.autoBackend === backend && s.autoGpu === gpu ? s.autoTier : null;
 }
 
+/** The extras saved with that automatic tier (none when it doesn't apply here). */
+export function validAutoExtras(s: StoredGfx, backend: string, gpu: string): Extra[] {
+  return validAutoTier(s, backend, gpu) ? (s.autoExtras ?? []) : [];
+}
+
 /** Features forced off by `?no<feature>` URL flags (never persisted). */
 export function killSwitches(): Set<Feature> {
   const off = new Set<Feature>();
@@ -222,14 +284,17 @@ export interface ResolvedSettings extends TierSpec {
   on: Record<Feature, boolean>;
   /** User render-scale override (null = tier default). */
   userScale: number | null;
+  /** The extras applied on top of the tier (D-framerate-3). */
+  extras: Extra[];
 }
 
 /**
- * Resolve the effective settings. Order: tier table → backend gating (WebGPU-only extras) →
- * user toggles → URL kill switches.
+ * Resolve the effective settings. Order: tier table and its extras → backend gating (WebGPU-only
+ * effects) → user toggles → URL kill switches.
  */
-export function resolveSettings(tier: Tier, auto: boolean, webgpu: boolean, stored: StoredGfx, kills: Set<Feature>): ResolvedSettings {
-  const spec = TIER_TABLE[tier];
+export function resolveSettings(tier: Tier, auto: boolean, webgpu: boolean, stored: StoredGfx, kills: Set<Feature>, extras: readonly Extra[] = []): ResolvedSettings {
+  const list = EXTRAS.filter((e) => extras.includes(e));
+  const spec = list.length ? withExtras(TIER_TABLE[tier], list) : TIER_TABLE[tier];
   const t = tierIndex(tier);
   const forced = forcedOn();
   const on = {} as Record<Feature, boolean>;
@@ -247,7 +312,7 @@ export function resolveSettings(tier: Tier, auto: boolean, webgpu: boolean, stor
   on.vignette &&= spec.post.vignette;
   on.detail &&= spec.terrain.detailLayers > 0;
   // WebGPU-only extras on High/Ultra (SPEC §7.1, tech-facts §2).
-  on.ao &&= webgpu && t >= 2 && spec.post.ao !== "off";
+  on.ao &&= webgpu && (t >= 2 || list.includes("ao")) && spec.post.ao !== "off";
   on.traa &&= webgpu && t >= 2 && spec.post.traa;
   // Post is the parent switch of every screen-space effect.
   if (!on.post) on.bloom = on.ao = on.traa = on.fxaa = on.grade = on.grain = on.vignette = false;
@@ -257,13 +322,20 @@ export function resolveSettings(tier: Tier, auto: boolean, webgpu: boolean, stor
   if (!on.particles) on.motes = false;
   // Cascaded sun shadows only on High/Ultra with shadow maps.
   on.cascades &&= on.shadows && spec.shadows.mode === "map" && t >= 2;
-  return { ...spec, tier, auto, webgpu, on, userScale: stored.renderScale };
+  return { ...spec, tier, auto, webgpu, on, userScale: stored.renderScale, extras: list };
 }
 
 /** URL-forced tier (`?tier=low|medium|high|ultra`), if any. */
 export function urlTier(): Tier | null {
   const v = flags.get("tier");
   return isTier(v) ? v : null;
+}
+
+/** URL-forced extras (`?extras=normals,water2`, `?extras=none`), if any: measurement runs. */
+export function urlExtras(): Extra[] | null {
+  const v = flags.get("extras");
+  if (v === null) return null;
+  return v.split(",").filter(isExtra);
 }
 
 /** URL-forced render scale (`?scale=0.75`), if any. */
