@@ -7,6 +7,7 @@ import "./onboarding.css";
 import { STEPS, type OnboardingSteps, type StepDef } from "../game/onboardingSteps.ts";
 import { button, el, icon } from "./dom.ts";
 import { placeCallout, type Rect } from "./calloutPlace.ts";
+import { CONFIRM_MS, ConfirmClick } from "./saveOffer.ts";
 
 function keys(parent: HTMLElement, list: readonly string[], cls = "fl-keys"): HTMLElement {
   const wrap = el("span", cls, parent);
@@ -93,8 +94,14 @@ export class OnboardingHud {
       this.rows.push(row);
     }
     const skip = el("div", "fl-onb__skip", this.list);
-    const b = button("Skip tutorial", "fl-btn fl-btn--sm", skip, onSkip);
-    b.title = "No more XP and no Spark medal";
+    // Before the dummies pay out, skipping costs XP and puts off saving: a second click confirms (#32).
+    const confirm = new ConfirmClick();
+    const b = button("Skip tutorial", "fl-btn fl-btn--sm", skip, () => {
+      if (this.last.paid || confirm.click(performance.now())) return onSkip();
+      b.textContent = "Click again to skip";
+      setTimeout(() => (b.textContent = "Skip tutorial"), CONFIRM_MS);
+    });
+    b.title = "No more XP and no Spark medal; saving waits until level 2";
     this.skipNote = el("small", "", skip, "Esc → Skip tutorial. Skipping pays nothing more.");
 
     const rail = el("div", "fl-onb__rail", widget);

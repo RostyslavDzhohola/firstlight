@@ -17,6 +17,7 @@ import { pauseExtras, type PauseExtra } from "../ui/menu.ts";
 import { OnboardingHud } from "../ui/onboarding.ts";
 import { Panel } from "../ui/panels.ts";
 import { MapPanel } from "../ui/map.ts";
+import { saveReady, skipTutorialSub } from "../ui/saveOffer.ts";
 import { voice } from "../voice/index.ts";
 import { portalAt } from "../world/portalEntry.ts";
 import { TrainingDummies } from "../world/TrainingDummies.ts";
@@ -74,7 +75,13 @@ export class OnboardingClient implements ClientSystem {
   };
   private readonly pauseRow = (): PauseExtra | null =>
     this.active
-      ? { icon: "arrow-r", title: "Skip tutorial", sub: this.paid ? "Hide the rest of the tips." : "No more XP and no Spark medal. It won't come back.", onClick: () => this.skip() }
+      ? {
+          icon: "arrow-r",
+          title: "Skip tutorial",
+          sub: skipTutorialSub({ paid: this.paid, saveReady: this.saveReady() }),
+          confirm: this.paid ? undefined : "Click again to skip the tutorial.",
+          onClick: () => this.skip(),
+        }
       : null;
 
   constructor(game: Game) {
@@ -116,6 +123,11 @@ export class OnboardingClient implements ClientSystem {
     this.hud = new OnboardingHud(layer, () => this.skip(), config.publicRepo ? config.repoUrl : null, {
       expanded: this.progress.expanded, onExpanded: (expanded) => this.progress.setExpanded(expanded),
     });
+  }
+
+  /** Saving is unlocked (D34: level 2, the best this session counts after a rebirth). */
+  private saveReady(): boolean {
+    return saveReady(Math.max(this.game.hud.you?.level ?? 1, this.game.combat?.saveNudge?.best ?? 0));
   }
 
   private skip() {

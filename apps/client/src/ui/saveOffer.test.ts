@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { codeFromText, firstSaveStep, mayOpenSaveCard, NUDGE_DELAY_MS, offerNudge, offersSave, saveReady, saveStatusOf, SaveNudge, sendCodeFailure } from "./saveOffer.ts";
+import { codeFromText, firstSaveStep, mayOpenSaveCard, NUDGE_DELAY_MS, offerNudge, offersSave, saveReady, saveStatusOf, SaveNudge, sendCodeFailure, ConfirmClick, saveLockLine, skipTutorialSub } from "./saveOffer.ts";
 
 describe("the 'Progress not saved' toast", () => {
   /** Poll frames at 16 ms from `t` until the toast is due (or `max` frames). */
@@ -159,5 +159,29 @@ describe("when a code can't be sent", () => {
     expect(sendCodeFailure({ status: 503 })).toBe("unavailable");
     expect(sendCodeFailure({ status: 500 })).toBe("retry");
     expect(sendCodeFailure({})).toBe("retry");
+  });
+});
+
+describe("telling a guest how to unlock saving (#32)", () => {
+  it("the locked save row says how far the guest is from level 2 and how to get there", () => {
+    expect(saveLockLine({ xp: 0, tutorial: true })).toBe("Unlocks at level 2: 50 XP to go. Knock down the training dummies, or fight outside the gates. Until then progress lives in this browser.");
+    expect(saveLockLine({ xp: 35, tutorial: false })).toBe("Unlocks at level 2: 15 XP to go. Fight creeps outside the gates or finish a mission. Until then progress lives in this browser.");
+  });
+
+  it("skipping the tutorial warns that saving waits for level 2, unless it's unlocked already", () => {
+    expect(skipTutorialSub({ paid: false, saveReady: false })).toBe("No more XP and no Spark medal, and saving waits until level 2. It won't come back.");
+    expect(skipTutorialSub({ paid: false, saveReady: true })).toBe("No more XP and no Spark medal. It won't come back.");
+    expect(skipTutorialSub({ paid: true, saveReady: true })).toBe("Hide the rest of the tips.");
+  });
+
+  it("a confirm click goes through only as the second click within 4 s", () => {
+    const c = new ConfirmClick(4000);
+    expect(c.click(1000)).toBe(false);
+    expect(c.armed(1000)).toBe(true);
+    expect(c.click(2000)).toBe(true);
+    expect(c.armed(2000)).toBe(false);
+    expect(c.click(10_000)).toBe(false);
+    expect(c.armed(14_001)).toBe(false);
+    expect(c.click(14_001)).toBe(false); // too late: armed again, not confirmed
   });
 });
