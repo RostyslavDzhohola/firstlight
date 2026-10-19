@@ -9,6 +9,9 @@ import { button, el, icon } from "./dom.ts";
 import { placeCallout, type Rect } from "./calloutPlace.ts";
 import { CONFIRM_MS, ConfirmClick } from "./saveOffer.ts";
 
+/** Under the Skip button before the dummies pay: what skipping costs, the save lock included (#32). */
+const SKIP_NOTE = "Esc → Skip tutorial. Skipping pays nothing more; saving unlocks at level 2.";
+
 function keys(parent: HTMLElement, list: readonly string[], cls = "fl-keys"): HTMLElement {
   const wrap = el("span", cls, parent);
   for (const k of list) {
@@ -99,10 +102,14 @@ export class OnboardingHud {
     const b = button("Skip tutorial", "fl-btn fl-btn--sm", skip, () => {
       if (this.last.paid || confirm.click(performance.now())) return onSkip();
       b.textContent = "Click again to skip";
-      setTimeout(() => (b.textContent = "Skip tutorial"), CONFIRM_MS);
+      this.skipNote.textContent = "Skipping pays nothing more, and saving waits until level 2. Click again to skip.";
+      setTimeout(() => {
+        b.textContent = "Skip tutorial";
+        if (!this.last.paid) this.skipNote.textContent = SKIP_NOTE;
+      }, CONFIRM_MS);
     });
     b.title = "No more XP and no Spark medal; saving waits until level 2";
-    this.skipNote = el("small", "", skip, "Esc → Skip tutorial. Skipping pays nothing more.");
+    this.skipNote = el("small", "", skip, SKIP_NOTE);
 
     const rail = el("div", "fl-onb__rail", widget);
     rail.setAttribute("role", "progressbar");
@@ -131,7 +138,7 @@ export class OnboardingHud {
   render(steps: OnboardingSteps, paid = false) {
     if (paid !== this.last.paid) {
       this.last.paid = paid;
-      this.skipNote.textContent = paid ? "XP and the Spark medal are yours; the rest is tips." : "Esc → Skip tutorial. Skipping pays nothing more.";
+      this.skipNote.textContent = paid ? "XP and the Spark medal are yours; the rest is tips." : SKIP_NOTE;
     }
     let reveal = false;
     const cur = steps.current;
