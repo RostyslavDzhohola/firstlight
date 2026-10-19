@@ -32,12 +32,14 @@ describe("DataFast script", () => {
 });
 
 describe("DataFast guard", () => {
-  function run(webdriver: boolean, search: string): string | null {
-    const store = new Map<string, string>();
-    const g = { navigator: { webdriver }, location: { search }, localStorage: { setItem: (k: string, v: string) => store.set(k, v) } };
-    new Function("navigator", "location", "localStorage", DATAFAST_GUARD)(g.navigator, g.location, g.localStorage);
+  /** One page load in a browser whose localStorage is `store`. */
+  function visit(store: Map<string, string>, webdriver: boolean, search: string): string | null {
+    const localStorage = { setItem: (k: string, v: string) => store.set(k, v), removeItem: (k: string) => store.delete(k) };
+    new Function("navigator", "location", "localStorage", DATAFAST_GUARD)({ webdriver }, { search }, localStorage);
     return store.get("datafast_ignore") ?? null;
   }
+  const run = (webdriver: boolean, search: string) => visit(new Map(), webdriver, search);
+
   it("opts automated browsers and test URLs out, and leaves players alone", () => {
     expect(run(true, "")).toBe("true");
     expect(run(false, "?e2e")).toBe("true");
@@ -46,5 +48,19 @@ describe("DataFast guard", () => {
     expect(run(false, "")).toBeNull();
     expect(run(false, "?autoplay")).toBeNull();
     expect(run(false, "?benchmark")).toBeNull();
+  });
+
+  it("counts the browser again on the next normal visit after a test visit (#44)", () => {
+    const store = new Map<string, string>();
+    expect(visit(store, false, "?e2e")).toBe("true");
+    expect(visit(store, false, "")).toBeNull();
+    expect(visit(store, false, "?bench=g1")).toBe("true");
+    expect(visit(store, false, "?autoplay")).toBeNull();
+  });
+
+  it("keeps automated browsers out on every visit, whatever the URL", () => {
+    const store = new Map<string, string>();
+    expect(visit(store, true, "")).toBe("true");
+    expect(visit(store, true, "?autoplay")).toBe("true");
   });
 });

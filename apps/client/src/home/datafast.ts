@@ -32,10 +32,13 @@ export function dataFastScript(env: DataFastEnv): DataFastScript | null {
 /**
  * Inline script placed before DataFast's tag: automated browsers (navigator.webdriver: Playwright,
  * CDP, our journeys and smoke runs) and test URLs (?e2e, ?bench, ?offline) set DataFast's own opt-out
- * flag (https://datafa.st/docs/excluding-analytics), so test runs don't count as visits.
+ * flag (https://datafa.st/docs/excluding-analytics), so test runs don't count as visits. Any other
+ * visit removes the flag, so one test visit doesn't hide that browser from DataFast forever (#44).
+ * Trade-off: someone who set `datafast_ignore` by hand to hide their own visits loses it on their
+ * next normal visit; the owner wants to be counted, so that's fine.
  */
 export const DATAFAST_GUARD =
-  'try{if(navigator.webdriver||/[?&](?:e2e|bench|offline)(?:[=&]|$)/.test(location.search))localStorage.setItem("datafast_ignore","true")}catch(e){}';
+  'try{if(navigator.webdriver||/[?&](?:e2e|bench|offline)(?:[=&]|$)/.test(location.search))localStorage.setItem("datafast_ignore","true");else localStorage.removeItem("datafast_ignore")}catch(e){}';
 
 /** The page's one-line analytics note: only claim "cookieless" when the cookieless script is the one in the page. */
 export function dataFastNote(s: DataFastScript | null): string | null {
