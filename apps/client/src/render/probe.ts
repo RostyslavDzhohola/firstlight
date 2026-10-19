@@ -98,27 +98,27 @@ async function probeTier(ctx: RenderCtx, beforeFrame: (() => void) | undefined, 
     let highGpuP50: number | null = null;
     let extras: Extra[] = [];
     let extrasGpuP50: number | null = null;
-    if (d.valid && d.tier === "medium" && d.method === "gpu-busy" && d.gpuP50 !== null) {
+    if (d.valid && d.reprobeHigh) {
+      ctx.setTier("high", { persist: false, auto: true, extras: [] });
+      await warmup(ctx, { frames: 3, beforeFrame, label: "probe", onProgress: (p) => part(0.7, 0.85)(p.frac) });
+      const h = await measure(ctx, 1200, beforeFrame, part(0.85, 0.9));
+      const u = h.visible ? decideUltra(h.gpu.slice(2), h.busy.slice(2)) : { tier: "high" as Tier, gpuP50: null };
+      tier = u.tier; // Medium again when High missed its own budget (frame rate first)
+      highGpuP50 = u.gpuP50;
+    }
+    if (d.valid && tier === "medium" && d.method === "gpu-busy" && d.gpuP50 !== null) {
       const budgetMs = TIER_TABLE.medium.gpuTargetMs;
       const plan = planExtras({ gpuMs: d.gpuP50, cpuMs: cpuP50, frameMs: d.rafP50, budgetMs }, costs);
       if (plan.extras.length) {
         ctx.setTier("medium", { persist: false, auto: true, extras: plan.extras });
-        await warmup(ctx, { frames: 3, beforeFrame, label: "probe", onProgress: (p) => part(0.7, 0.9)(p.frac) });
-        const v = await measure(ctx, 1500, beforeFrame, part(0.9, 1));
+        await warmup(ctx, { frames: 3, beforeFrame, label: "probe", onProgress: (p) => part(0.9, 0.95)(p.frac) });
+        const v = await measure(ctx, 1500, beforeFrame, part(0.95, 1));
         const busy = v.busy.slice(2);
         if (v.visible && busy.length >= PROBE_MIN_GPU) {
           extrasGpuP50 = percentile(busy, 0.5);
           extras = keepExtras(plan, extrasGpuP50, budgetMs, costs);
         }
       }
-    }
-    if (d.valid && d.reprobeHigh) {
-      ctx.setTier("high", { persist: false, auto: true, extras: [] });
-      await warmup(ctx, { frames: 3, beforeFrame, label: "probe", onProgress: (p) => part(0.7, 0.9)(p.frac) });
-      const h = await measure(ctx, 1200, beforeFrame, part(0.9, 1));
-      const u = h.visible ? decideUltra(h.gpu.slice(2), h.busy.slice(2)) : { tier: "high" as Tier, gpuP50: null };
-      tier = u.tier;
-      highGpuP50 = u.gpuP50;
     }
     return { tier, valid: d.valid, method: d.method, gpuP50: d.gpuP50, rafP50: d.rafP50, highGpuP50, cpuP50, extras, extrasGpuP50, ms: performance.now() - t0 };
   } catch (e) {

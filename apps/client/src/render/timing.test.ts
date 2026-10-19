@@ -548,6 +548,12 @@ describe("probe decision", () => {
     expect(decideUltra(frames(30, 9), frames(30, 3)).tier).toBe("ultra");
     expect(decideUltra(frames(30, 3), frames(30, 6)).tier).toBe("high");
   });
+
+  it("goes back to Medium when High itself misses High's GPU budget at the re-probe (frame rate first, D-framerate-1)", () => {
+    // a cheap arrival view put Medium under 6 ms, but High's own pixels and features cost 12 ms here
+    expect(decideUltra(frames(30, 52), frames(30, 12))).toEqual({ tier: "medium", gpuP50: 12 });
+    expect(decideUltra(frames(30, 10)).tier).toBe("high"); // exactly at the budget still fits
+  });
 });
 
 describe("stored graphics settings", () => {

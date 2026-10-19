@@ -109,4 +109,18 @@ describe("runProbe extras on Medium (D-framerate-3)", () => {
     expect(high.extras).toEqual([]);
     expect(fast.calls.every((c) => c.extras?.length === 0)).toBe(true);
   });
+
+  it("falls back from a High that misses its own budget to Medium, with the extras Medium's measurement allows", async () => {
+    // Medium 5 ms (→ re-probe at High), High 12 ms (over its 10 ms), Medium with extras 5.6 ms
+    let tier = "medium";
+    const { ctx, calls } = fakeCtx(52, (on) => (tier === "high" ? 12 : on.length ? 5.6 : 5));
+    const setTier = ctx.setTier.bind(ctx);
+    (ctx as { setTier: typeof ctx.setTier }).setTier = (t, o) => {
+      tier = t;
+      setTier(t, o);
+    };
+    const r = await runProbe(ctx, undefined, undefined, model);
+    expect(calls.map((c) => c.tier)).toEqual(["medium", "high", "medium"]);
+    expect(r).toMatchObject({ tier: "medium", highGpuP50: 12, gpuP50: 5, extras: ["normals", "water2", "grass"], extrasGpuP50: 5.6 });
+  });
 });

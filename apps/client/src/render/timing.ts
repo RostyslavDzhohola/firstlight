@@ -4,7 +4,7 @@
 // tier decision.
 
 import { installPassUnion, type TimestampPool } from "./gpuUnion.ts";
-import type { Tier } from "./quality.ts";
+import { TIER_TABLE, type Tier } from "./quality.ts";
 
 export function percentile(values: readonly number[], p: number): number {
   if (values.length === 0) return 0;
@@ -441,12 +441,13 @@ export function decideProbe(s: ProbeSamples): ProbeDecision {
 }
 
 /**
- * After a re-probe at High: Ultra only with clear headroom (p50 < 4 ms over ≥ 15 samples), on the
- * busy time where there are enough samples of it.
+ * After a re-probe at High: Ultra only with clear headroom (p50 < 4 ms over ≥ 15 samples), and back
+ * to Medium when High itself takes more than High's budget (frame rate first, D-framerate-1), on
+ * the busy time where there are enough samples of it.
  */
 export function decideUltra(highGpu: readonly number[], highBusy?: readonly number[]): { tier: Tier; gpuP50: number | null } {
   const s = highBusy && highBusy.length >= 15 ? highBusy : highGpu;
   if (s.length < 15) return { tier: "high", gpuP50: null };
   const g = percentile(s, 0.5);
-  return { tier: g < 4 ? "ultra" : "high", gpuP50: g };
+  return { tier: g < 4 ? "ultra" : g > TIER_TABLE.high.gpuTargetMs ? "medium" : "high", gpuP50: g };
 }
