@@ -35,6 +35,10 @@ apps/client/e2e/live/fl.mjs quit       # ends it; so do 20 idle minutes (FL_LIVE
 - Take a `shot` only when the question is about looks (art, HUD overlap, a menu's layout, something
   the state can't say), then open the PNG it prints. Each image costs far more than a state read.
 - `screen` gives the page text and every visible button. `click <text>` presses a button by its label.
+- Anything about timing under a second (the dodge roll, a flash) is measured inside the page:
+  `dodge`, `blink`, `perf`. A CLI round trip takes too long to judge 100 ms.
+- Headless Chrome lets the game take the pointer back without a click, so after Esc closes the menu
+  the "Click to look around" hint doesn't show. `esc` says when that happened.
 - Movement commands lock the pointer first and say so. `key` doesn't, because some checks need the
   pointer free; it warns instead.
 - Long commands wait for the game. `start`, `portal` and a cold `world` can take up to 3 minutes,

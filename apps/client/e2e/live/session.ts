@@ -53,7 +53,7 @@ test("live session", async ({ player, page, consoleErrors }) => {
   commands.help = {
     usage: "help",
     help: "this list",
-    run: async () => Object.values(commands).map((c) => `${c.usage.padEnd(28)} ${c.help}`).join("\n"),
+    run: async () => `evidence: ${DIR} (transcript.log, shots/)\n${Object.values(commands).map((c) => `${c.usage.padEnd(28)} ${c.help}`).join("\n")}`,
   };
 
   let idle = setTimeout(quit, IDLE_MS);
@@ -238,6 +238,7 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
       help: "the raw __fl.snapshot() JSON, or one field of it (npcs, zone, ui, onboarding…)",
       async run([field]) {
         const s = (await player.snap()) as unknown as Record<string, unknown>;
+        if (field && !(field in s)) throw new Error(`no field "${field}": ${Object.keys(s).join(", ")}`);
         return JSON.stringify(field ? s[field] : s).slice(0, 6000);
       },
     },
@@ -293,9 +294,13 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
       usage: "esc",
       help: "Esc the way desktop Chrome does it (releases the lock / opens or closes the menu)",
       async run() {
+        const menuWasOpen = (await player.snap()).ui.visibleE2e.includes("pause-menu");
         await player.escape();
         await page.waitForTimeout(300);
-        return brief(await player.snap());
+        const s = await player.snap();
+        // J5.1: a desktop browser shows "Click to look around" here; headless Chrome lets the page re-lock at once.
+        const note = menuWasOpen && s.input.pointerLocked ? "\n(the game took the pointer back by itself: headless Chrome allows that without a click, so the \"Click to look around\" hint never shows here)" : "";
+        return brief(s) + note;
       },
     },
     key: {
@@ -372,7 +377,8 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
           await page.waitForTimeout(450);
         }
         const r = await player.attackResult(since, 1200);
-        return `${pre}sent ${r.sent.join(",") || "nothing"} · server ${r.accepted ? "accepted" : "did not echo"} the attack · denied ${r.denied.join(",") || "none"}${r.toasts.length ? ` · toasts ${r.toasts.map((t) => `"${t}"`).join(" ")}` : ""}\n${brief(await player.snap())}`;
+        const training = r.sent.length > 0 && r.sent.every((m) => m === "train") ? " (a training swing: weapons are holstered here and only a training dummy answers it)" : "";
+        return `${pre}sent ${r.sent.join(",") || "nothing"}${training} · server ${r.accepted ? "accepted" : "did not echo"} the attack · denied ${r.denied.join(",") || "none"}${r.toasts.length ? ` · toasts ${r.toasts.map((t) => `"${t}"`).join(" ")}` : ""}\n${brief(await player.snap())}`;
       },
     },
     fight: {
@@ -428,6 +434,36 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
         const gained = (s.you?.xp ?? 0) - xp0;
         const verdict = s.player?.dead ? "you died" : (s.you?.level ?? 1) > level0 ? `level up to ${s.you?.level}` : gained > 0 ? `killed it: +${gained} XP` : "no kill in time";
         return `${pre}${verdict} · ${shots} attacks · fought ${[...foes].join(", ") || "nothing (no hostile found)"}\n${await state()}`;
+      },
+    },
+    dodge: {
+      usage: "dodge [run]",
+      help: "press C (standing, or `run`: while sprinting) and time key → roll from the page's own event log",
+      async run([how]) {
+        const pre = await ensureLock();
+        const running = how === "run";
+        if (running) {
+          await page.keyboard.down("ShiftLeft");
+          await page.keyboard.down("KeyW");
+          await page.waitForTimeout(700);
+        }
+        const since = await player.now();
+        await player.hold(["KeyC"], 60);
+        await page.waitForTimeout(900);
+        if (running) {
+          await page.keyboard.up("KeyW");
+          await page.keyboard.up("ShiftLeft");
+        }
+        // As J5.3 measures it: the C keydown, then the controller's dodge state (anim 7) and the avatar's roll clip.
+        const ev = await player.events(since);
+        const key = ev.find((e) => e.kind === "key" && e.code === "KeyC");
+        if (!key) return `${pre}the page never saw C`;
+        const anim = ev.find((e) => e.kind === "anim" && e.to === 7 && e.t >= key.t);
+        const clip = ev.find((e) => e.kind === "clip" && /dodge|roll/i.test(String(e.name)) && e.t >= key.t);
+        const corrected = ev.some((e) => e.kind === "in" && e.type === "correct" && e.t - key.t < 800);
+        const ms = clip ? clip.t - key.t : anim ? anim.t - key.t : null;
+        const verdict = ms === null ? "FAIL: no roll started" : ms < 100 ? `pass: the roll started ${Math.round(ms)} ms after C` : `FAIL: the roll started ${Math.round(ms)} ms after C (over 100 ms)`;
+        return `${pre}${verdict}${running ? " (sprinting)" : " (standing)"}${corrected ? " · the server snapped it back" : ""} · wait 1.2 s before the next dodge (cooldown)\n${brief(await player.snap())}`;
       },
     },
     train: { usage: "train", help: "hit the tutorial's three training dummies until they pay level 2", run: async () => `${await ensureLock()}level ${await hitTrainingDummies(player)} after the dummies\n${await state()}` },
