@@ -49,7 +49,7 @@ jobs:
       group: playtest-${{ github.event.deployment.sha || github.sha }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30   # up to 10 min waiting for a GPU, then up to 15 min of play and polling
     env:
       PLAYTESTER_BASE: https://rostyslavdzhohola--grok-playtester.modal.run
       BASE_URL: ${{ github.event.inputs.url || github.event.deployment_status.environment_url }}
@@ -112,8 +112,21 @@ jobs:
             '{url:$url, profile:$p, seconds:$s, goal:$g}')
           gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" -f state=pending -f context=grok-playtester \
             -f description="Playing the preview on a cloud GPU" >/dev/null || true
-          curl -sS --fail-with-body -X POST "$PLAYTESTER_BASE/v1/playtests" \
-            -H "Content-Type: application/json" -d "$body" | tee start.json
+          # The service runs 2 play-tests at a time for everyone; when busy it answers 429 with retry_after_seconds.
+          # Wait for a free GPU for up to 10 minutes before giving up.
+          while true; do
+            code=$(curl -sS -o start.json -w '%{http_code}' -X POST "$PLAYTESTER_BASE/v1/playtests" \
+              -H "Content-Type: application/json" -d "$body") || code=000
+            cat start.json; echo
+            [[ "$code" == 2* ]] && break
+            [ "$code" = 429 ] && [ "$SECONDS" -lt 600 ] || { echo "Could not start the play-test (HTTP $code)"; exit 1; }
+            delay=$(jq -r '.retry_after_seconds // 60 | floor' start.json 2>/dev/null || echo 60)
+            delay=$(( delay < 15 ? 15 : delay > 180 ? 180 : delay ))
+            echo "GPUs busy; retrying in ${delay}s"
+            gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" -f state=pending -f context=grok-playtester \
+              -f description="Waiting for a free cloud GPU" >/dev/null || true
+            sleep "$delay"
+          done
           run_id=$(jq -r '.run_id // empty' start.json)
           [ -n "$run_id" ] || { echo "No run_id in the response"; exit 1; }
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
