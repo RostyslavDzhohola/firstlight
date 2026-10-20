@@ -4,12 +4,12 @@
 // command lands in $E2E_OUT/live/transcript.log with its time.
 
 import { appendFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { createServer, type IncomingMessage } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
 import { measureBlinks, playAWhile } from "../blink.ts";
 import { test } from "../fixtures.ts";
 import { hitTrainingDummies, newEmail, saveWithEmail } from "../flows.ts";
-import { STARTERS, type FlEvent, type Npc, type Player, type Snap, type StarterName, type Target } from "../player.ts";
+import { STARTERS, wrap180, type FlEvent, type Npc, type Player, type Snap, type StarterName, type Target } from "../player.ts";
 import { OUT, TARGET } from "../stack.ts";
 
 const PORT = Number(process.env.FL_LIVE_PORT ?? 7357);
@@ -47,56 +47,96 @@ test("live session", async ({ player, page, consoleErrors }) => {
     },
   };
 
+  // `quit` and the idle timer only mark the session closing; it ends once the running command has
+  // answered, and anything queued behind it is turned away.
+  let closing = false;
   let quit: () => void = () => {};
   const done = new Promise<void>((resolve) => (quit = resolve));
-  commands.quit = { usage: "quit", help: "end the session (closes the browser and the stack)", run: async () => (setTimeout(quit, 100), "bye") };
+  commands.quit = {
+    usage: "quit",
+    help: "end the session (closes the browser and the stack)",
+    async run() {
+      closing = true;
+      return "bye";
+    },
+  };
   commands.help = {
     usage: "help",
     help: "this list",
     run: async () => `evidence: ${DIR} (transcript.log, shots/)\n${Object.values(commands).map((c) => `${c.usage.padEnd(28)} ${c.help}`).join("\n")}`,
   };
 
-  let idle = setTimeout(quit, IDLE_MS);
+  // The idle clock runs only between commands: a slow `start` never times itself out.
+  let idle: ReturnType<typeof setTimeout> | undefined;
+  const armIdle = () => {
+    clearTimeout(idle);
+    idle = setTimeout(() => {
+      closing = true;
+      quit();
+    }, IDLE_MS);
+  };
+
+  const handle = async (raw: string, res: ServerResponse) => {
+    const reply = (status: number, text: string) => {
+      res.writeHead(status, { "content-type": "text/plain; charset=utf-8" });
+      res.end(text);
+    };
+    if (closing) return reply(503, "the session is closing");
+    let msg: { cmd?: unknown; args?: unknown } = {};
+    try {
+      msg = JSON.parse(raw) as typeof msg;
+    } catch {}
+    const cmd = msg.cmd;
+    const args = msg.args ?? [];
+    if (typeof cmd !== "string" || !Array.isArray(args) || !args.every((a) => typeof a === "string")) return reply(400, 'bad request: send {"cmd": string, "args": string[]}');
+    clearTimeout(idle);
+    const t0 = Date.now();
+    let ok = true;
+    let out: string;
+    const c = commands[cmd];
+    try {
+      out = c ? await c.run(args) : `unknown command "${cmd}": try \`fl help\``;
+      if (!c) ok = false;
+    } catch (e) {
+      ok = false;
+      out = `error: ${String((e as Error)?.message ?? e).split("\n").filter(Boolean).slice(0, 3).join(" | ")}`;
+    }
+    const ms = Date.now() - t0;
+    appendFileSync(TRANSCRIPT, `${new Date(t0).toISOString()} ${String(ms).padStart(6)} ms ${ok ? "ok " : "ERR"} ${[cmd, ...args].join(" ")} → ${out.split("\n")[0]!.slice(0, 160)}\n`);
+    reply(ok ? 200 : 400, out);
+    if (closing) quit();
+    else armIdle();
+  };
+
+  // One command at a time, in arrival order; a failed one never stalls the rest.
   let queue = Promise.resolve();
   const server = createServer((req, res) => {
     if (req.method !== "POST") {
-      res.end(JSON.stringify({ ok: true, target: TARGET, gfx: player.gfx }));
+      res.end(JSON.stringify({ ok: !closing, target: TARGET, gfx: player.gfx }));
       return;
     }
     void readBody(req).then((raw) => {
-      queue = queue.then(async () => {
-        clearTimeout(idle);
-        idle = setTimeout(quit, IDLE_MS);
-        let cmd = "?";
-        let args: string[] = [];
-        try {
-          ({ cmd, args } = JSON.parse(raw) as { cmd: string; args: string[] });
-        } catch {}
-        const t0 = Date.now();
-        let ok = true;
-        let out: string;
-        const c = commands[cmd];
-        try {
-          out = c ? await c.run(args) : `unknown command "${cmd}": try \`fl help\``;
-          if (!c) ok = false;
-        } catch (e) {
-          ok = false;
-          out = `error: ${String((e as Error)?.message ?? e).split("\n").filter(Boolean).slice(0, 3).join(" | ")}`;
-        }
-        const ms = Date.now() - t0;
-        appendFileSync(TRANSCRIPT, `${new Date(t0).toISOString()} ${String(ms).padStart(6)} ms ${ok ? "ok " : "ERR"} ${[cmd, ...args].join(" ")} → ${out.split("\n")[0]!.slice(0, 160)}\n`);
-        res.writeHead(ok ? 200 : 400, { "content-type": "text/plain; charset=utf-8" });
-        res.end(out);
+      queue = queue.then(() => handle(raw, res)).catch((e: unknown) => {
+        if (!res.headersSent) res.writeHead(500).end(String(e));
       });
     });
   });
-  await new Promise<void>((resolve, reject) => server.once("error", reject).listen(PORT, "127.0.0.1", resolve));
-  writeFileSync(SESSION_FILE, JSON.stringify({ port: PORT, target: TARGET, gfx: player.gfx, baseURL: test.info().project.use.baseURL, out: DIR }, null, 2));
-  console.log(`[live] session ready on 127.0.0.1:${PORT} (${TARGET}, ${player.gfx}); commands: e2e/live/fl.mjs help`);
-  await done;
-  clearTimeout(idle);
-  server.close();
-  rmSync(SESSION_FILE, { force: true });
+  try {
+    await new Promise<void>((resolve, reject) => server.once("error", reject).listen(PORT, "127.0.0.1", resolve));
+    writeFileSync(SESSION_FILE, JSON.stringify({ port: PORT, target: TARGET, gfx: player.gfx, baseURL: test.info().project.use.baseURL, out: DIR }, null, 2));
+    console.log(`[live] session ready on 127.0.0.1:${PORT} (${TARGET}, ${player.gfx}); commands: e2e/live/fl.mjs help`);
+    armIdle();
+    await done;
+  } finally {
+    closing = true;
+    clearTimeout(idle);
+    await queue;
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      server.closeIdleConnections();
+    });
+    rmSync(SESSION_FILE, { force: true });
+  }
 });
 
 function readBody(req: IncomingMessage): Promise<string> {
@@ -127,16 +167,23 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
 
   const state = async () => describe(await player.snap(), await player.events(-Infinity));
 
+  /** A target that is there now (an unavailable one is refused before anything moves). */
   const goal = (spec: string | undefined, s: Snap): Goal => {
+    const g = anyGoal(spec, s);
+    if (!g.pick(s)) throw new Error(`${g.label} isn't in view here`);
+    return g;
+  };
+  const anyGoal = (spec: string | undefined, s: Snap): Goal => {
     const [kind = "", arg = ""] = (spec ?? "").split(":");
     const reach = (x: Snap) => (x.weapon?.delivery === "melee" ? 1.8 : Math.min((x.weapon?.range ?? 20) * 0.7, 18));
     const near = (surface: number) => (x: Target | null) => !!x && x.surface < surface;
     const byNpc = (id: string): Goal => ({
       label: `npc ${id}`,
       pick: (x) => x.npcs?.find((n) => n.id === id && !n.dead) ?? null,
+      // Gone from the list (dead, or beyond the hook's nearest 40) is "lost", never "arrived".
       arrived: (x) => {
-        const n = x.npcs?.find((m) => m.id === id);
-        return !n || n.dead || n.dist <= reach(x);
+        const n = x.npcs?.find((m) => m.id === id && !m.dead);
+        return !!n && n.dist <= reach(x);
       },
     });
     const nearest = <T extends Target>(list: T[] | undefined, ok: (t: T) => boolean = () => true) =>
@@ -150,7 +197,7 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
         return {
           label: `the mission marker (${s.mission?.title ?? "none"})`,
           pick: (x) => (x.mission && typeof x.mission.surface === "number" ? (x.mission as Target) : null),
-          arrived: (x) => !x.mission || (x.mission.surface ?? 99) < 3,
+          arrived: (x) => typeof x.mission?.surface === "number" && x.mission.surface < 3,
         };
       case "gate": {
         const g = nearest(s.gates);
@@ -342,7 +389,8 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
         const pre = await ensureLock();
         const g = goal(spec, await player.snap());
         const ok = await player.walkTo(g.pick, g.arrived, { timeoutMs: Number(sec) * 1000 });
-        return `${pre}${ok ? "arrived at" : "did not reach"} ${g.label}\n${await state()}`;
+        const lost = !ok && !g.pick(await player.snap());
+        return `${pre}${ok ? "arrived at" : lost ? "lost sight of" : `did not reach (${sec} s)`} ${g.label}\n${await state()}`;
       },
     },
     out: { usage: "out", help: "walk out of the town or the pad's safe ring through the nearest gate, into the wild", run: async () => `${await ensureLock()}${await walkOut()}\n${await state()}` },
@@ -425,6 +473,25 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
             await player.walkTo(g.pick, g.arrived, { timeoutMs: 5000 });
             continue;
           }
+          // As J3.4: never through another player (outside safe zones a hit is PvP, and on production
+          // they are real people), and with a melee weapon never with one beside the foe: side-step.
+          const melee = s.weapon?.delivery === "melee";
+          const inLine = s.players?.find((o) => {
+            if (o.dead) return false;
+            const off = wrap180(o.bearing - foe.bearing);
+            if (melee) return o.surface < foe.surface + 2.5 && Math.abs(off) < 60;
+            return o.surface < foe.surface + 1 && Math.abs(off) < 90 && Math.abs(o.surface * Math.sin((off * Math.PI) / 180)) < 2;
+          });
+          if (inLine) {
+            await player.hold([wrap180(inLine.bearing - foe.bearing) > 0 ? "KeyA" : "KeyD"], 600);
+            continue;
+          }
+          // Point blank a bolt leaves from the hand and flies past a creature at our feet: back off first.
+          if (!melee && foe.dist < 5) {
+            await player.turn(foe.bearing);
+            await player.hold(["KeyS"], 500);
+            continue;
+          }
           await player.aim(g.pick);
           await player.attack();
           shots++;
@@ -462,8 +529,9 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
         const clip = ev.find((e) => e.kind === "clip" && /dodge|roll/i.test(String(e.name)) && e.t >= key.t);
         const corrected = ev.some((e) => e.kind === "in" && e.type === "correct" && e.t - key.t < 800);
         const ms = clip ? clip.t - key.t : anim ? anim.t - key.t : null;
-        const verdict = ms === null ? "FAIL: no roll started" : ms < 100 ? `pass: the roll started ${Math.round(ms)} ms after C` : `FAIL: the roll started ${Math.round(ms)} ms after C (over 100 ms)`;
-        return `${pre}${verdict}${running ? " (sprinting)" : " (standing)"}${corrected ? " · the server snapped it back" : ""} · wait 1.2 s before the next dodge (cooldown)\n${brief(await player.snap())}`;
+        const verdict =
+          ms === null ? "FAIL: no roll started" : corrected ? `FAIL: the roll started ${Math.round(ms)} ms after C, then the server snapped it back` : ms < 100 ? `pass: the roll started ${Math.round(ms)} ms after C` : `FAIL: the roll started ${Math.round(ms)} ms after C (over 100 ms)`;
+        return `${pre}${verdict}${running ? " (sprinting)" : " (standing)"} · wait 1.2 s before the next dodge (cooldown)\n${brief(await player.snap())}`;
       },
     },
     train: { usage: "train", help: "hit the tutorial's three training dummies until they pay level 2", run: async () => `${await ensureLock()}level ${await hitTrainingDummies(player)} after the dummies\n${await state()}` },
@@ -484,7 +552,9 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
         const r = await measureBlinks(player, () => playAWhile(player));
         const f = r.frames;
         const bad = [r.probe.flashes.length && `${r.probe.flashes.length} flash(es)`, r.probe.flaps.length && `${r.probe.flaps.length} HUD flicker(s)`, f.over250 && `${f.over250} frame(s) over 250 ms`, f.over100 > 2 && `${f.over100} frames over 100 ms`].filter(Boolean);
-        return `${bad.length ? `FAIL: ${bad.join(", ")}` : "pass: no blinking"} · ${f.frames} frames p50 ${f.p50.toFixed(1)} ms p95 ${f.p95.toFixed(1)} ms max ${f.max.toFixed(0)} ms · luma samples ${r.probe.samples}`;
+        const blind = r.probe.samples <= 50 || r.probe.errors > 0;
+        const verdict = bad.length ? `FAIL: ${bad.join(", ")}` : blind ? `inconclusive: the probe read ${r.probe.samples} picture samples with ${r.probe.errors} errors (needs over 50, none failed)` : "pass: no blinking";
+        return `${verdict} · ${f.frames} frames p50 ${f.p50.toFixed(1)} ms p95 ${f.p95.toFixed(1)} ms max ${f.max.toFixed(0)} ms · luma samples ${r.probe.samples}`;
       },
     },
     perf: {
