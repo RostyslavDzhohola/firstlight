@@ -3,6 +3,7 @@
 // fixtures and Player as the journeys; every answer is short text a small model can read, and each
 // command lands in $E2E_OUT/live/transcript.log with its time.
 
+import type { Locator } from "@playwright/test";
 import { appendFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
@@ -18,6 +19,9 @@ const DIR = path.join(OUT, "live");
 const SHOTS = path.join(DIR, "shots");
 const SESSION_FILE = path.join(DIR, "session.json");
 const TRANSCRIPT = path.join(DIR, "transcript.log");
+
+/** Commands that work before a game page is open. */
+const OPENERS = new Set(["help", "home", "start", "dev", "quit", "errors", "eval", "shot", "wait"]);
 
 interface Command {
   usage: string;
@@ -95,11 +99,14 @@ test("live session", async ({ player, page, consoleErrors }) => {
     let out: string;
     const c = commands[cmd];
     try {
+      const needsGame = c && !OPENERS.has(cmd) && !(await page.evaluate(() => !!(window as { __fl?: unknown }).__fl).catch(() => false));
+      if (needsGame) throw new Error("no game page is open yet: run `fl home` or `fl start <starter>` first");
       out = c ? await c.run(args) : `unknown command "${cmd}": try \`fl help\``;
       if (!c) ok = false;
     } catch (e) {
       ok = false;
-      out = `error: ${String((e as Error)?.message ?? e).split("\n").filter(Boolean).slice(0, 3).join(" | ")}`;
+      // Playwright colours its messages: strip the escapes, keep the first lines.
+      out = `error: ${String((e as Error)?.message ?? e).replace(/\u001b\[[0-9;]*m/g, "").split("\n").filter(Boolean).slice(0, 3).join(" | ")}`;
     }
     const ms = Date.now() - t0;
     appendFileSync(TRANSCRIPT, `${new Date(t0).toISOString()} ${String(ms).padStart(6)} ms ${ok ? "ok " : "ERR"} ${[cmd, ...args].join(" ")} → ${out.split("\n")[0]!.slice(0, 160)}\n`);
@@ -195,7 +202,7 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
         return { label: `the guide ${s.guide?.name ?? ""}`.trim(), pick: (x) => x.guide ?? null, arrived: (x) => near(2.5)(x.guide ?? null) };
       case "mission":
         return {
-          label: `the mission marker (${s.mission?.title ?? "none"})`,
+          label: s.mission?.title ? `the mission marker (${s.mission.title})` : "a mission marker",
           pick: (x) => (x.mission && typeof x.mission.surface === "number" ? (x.mission as Target) : null),
           arrived: (x) => typeof x.mission?.surface === "number" && x.mission.surface < 3,
         };
@@ -299,6 +306,8 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
           const hit = l.filter({ visible: true }).first();
           if (!(await hit.count())) continue;
           const label = ((await hit.innerText().catch(() => "")) || re.source).trim().replace(/\s+/g, " ").slice(0, 60);
+          const cover = await coveredBy(hit);
+          if (cover) throw new Error(`"${label}" is under ${cover}: deal with that first (\`fl screen\` marks covered controls)`);
           await hit.click({ timeout: 5000 });
           await page.waitForTimeout(400);
           return `clicked "${label}"\n${brief(await player.snap())}`;
@@ -333,7 +342,12 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
       usage: "lock",
       help: "click into the world until the pointer is locked (mouse look, keys and attacks need it)",
       async run() {
-        await player.lock();
+        try {
+          await player.lock();
+        } catch {
+          const s = await player.snap();
+          throw new Error(`couldn't lock the pointer: clicking the world didn't take it${s.player?.dead ? " (you're dead: rise first)" : ""} · ${brief(s)}`);
+        }
         return brief(await player.snap());
       },
     },
@@ -341,10 +355,12 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
       usage: "esc",
       help: "Esc the way desktop Chrome does it (releases the lock / opens or closes the menu)",
       async run() {
-        const menuWasOpen = (await player.snap()).ui.visibleE2e.includes("pause-menu");
+        const before = await player.snap();
+        const menuWasOpen = before.ui.visibleE2e.includes("pause-menu");
         await player.escape();
         await page.waitForTimeout(300);
         const s = await player.snap();
+        if (brief(s) === brief(before)) return `${brief(s)}\n(Esc changed nothing here: \`fl screen\` shows what is in front)`;
         // J5.1: a desktop browser shows "Click to look around" here; headless Chrome lets the page re-lock at once.
         const note = menuWasOpen && s.input.pointerLocked ? "\n(the game took the pointer back by itself: headless Chrome allows that without a click, so the \"Click to look around\" hint never shows here)" : "";
         return brief(s) + note;
@@ -596,7 +612,7 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
       help: "let the game run (up to 60 s)",
       async run([ms = "1000"]) {
         await page.waitForTimeout(Math.min(Number(ms), 60_000));
-        return brief(await player.snap());
+        return (await page.evaluate(() => !!(window as { __fl?: unknown }).__fl)) ? brief(await player.snap()) : "waited";
       },
     },
   };
@@ -634,7 +650,7 @@ function brief(s: Snap): string {
   const p = s.player;
   const ui = [s.ui.pauseMenuMode && s.ui.pauseMenuMode !== "hidden" && `menu ${s.ui.pauseMenuMode}`, s.ui.photo && "photo mode", ...s.ui.overlays.map((o) => o.replace(/^fl-overlay\s*/, "").split(" ")[0])].filter(Boolean);
   return [
-    s.stage + (s.loading ? ` (${s.loading})` : ""),
+    s.stage + (s.loading ? ` (${s.loading.replace(/\s+/g, " ").slice(0, 40)}…)` : ""),
     s.body ?? "no body",
     s.zone ? `zone ${s.zone.server ?? "?"}${s.zone.kind ? `/${s.zone.kind}` : ""}` : null,
     p ? `HP ${n0(p.hp)}${p.dead ? " DEAD" : ""}` : null,
@@ -691,6 +707,17 @@ function eventLine(e: FlEvent): string {
   }
 }
 
+/** What sits on top of a control's middle, when something does ("a div.fl-death \"You died…\""). */
+async function coveredBy(l: Locator): Promise<string | null> {
+  return l.evaluate((e) => {
+    const b = e.getBoundingClientRect();
+    const top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+    if (!top || top === e || e.contains(top) || top.contains(e)) return null;
+    const card = top.closest<HTMLElement>(".fl-overlay, [data-e2e], section, dialog") ?? (top as HTMLElement);
+    return `${card.tagName.toLowerCase()}.${String(card.className).split(" ")[0]} "${(card.innerText ?? "").trim().replace(/\s+/g, " ").slice(0, 40)}"`;
+  });
+}
+
 /** The text a player can read and what they can click, from the DOM. */
 async function screen(page: Player["page"]): Promise<string> {
   const r = await page.evaluate(() => {
@@ -702,7 +729,10 @@ async function screen(page: Player["page"]): Promise<string> {
     const text = document.body.innerText.replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim();
     const controls = [...document.querySelectorAll<HTMLElement>("button, a[href], [role=button], [role=menuitem], input, select, textarea")].filter(visible).map((e) => {
       const label = (e.getAttribute("aria-label") || e.innerText || (e as HTMLInputElement).placeholder || (e as HTMLInputElement).name || "").trim().replace(/\s+/g, " ").slice(0, 50);
-      return `${e.tagName.toLowerCase()}${e.dataset.e2e ? `[${e.dataset.e2e}]` : ""} "${label}"`;
+      const b = e.getBoundingClientRect();
+      const top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+      const covered = !!top && top !== e && !e.contains(top) && !top.contains(e);
+      return `${e.tagName.toLowerCase()}${e.dataset.e2e ? `[${e.dataset.e2e}]` : ""} "${label}"${covered ? " (covered)" : ""}`;
     });
     return { text, controls };
   });
