@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       url:
-        description: Preview URL to play-test (?offline&autoplay&webgl is appended)
+        description: Preview URL to play-test (offline, autoplay and webgl are always added)
         required: true
       seconds:
         description: Seconds of play (60 max without a key)
@@ -29,18 +29,14 @@ permissions:
   statuses: write        # the grok-playtester commit status
   deployments: read
 
-concurrency:
-  group: playtest-${{ github.event.deployment.sha || github.sha }}
-  cancel-in-progress: true
-
 defaults:
   run:
     shell: bash   # explicit, so every step runs with -eo pipefail
 
 jobs:
   playtest:
-    # Only successful Preview deployments that Vercel made for the firstlight-previews project (never Production,
-    # never another Vercel project), or a manual run. Vercel's unique deployment URL starts with the project name.
+    # Only successful Preview deployments that Vercel made (never Production), or a manual run. The first step also
+    # checks the full deployment hostname, so only the firstlight-previews project in this Vercel account gets through.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.deployment_status.state == 'success' &&
@@ -48,6 +44,10 @@ jobs:
        startsWith(github.event.deployment.environment, 'Preview') &&
        github.event.deployment.creator.login == 'vercel[bot]' &&
        startsWith(github.event.deployment_status.environment_url, 'https://firstlight-previews-'))
+    # Job-level, so events the filter above rejects (other statuses, other deployments) never cancel a real run.
+    concurrency:
+      group: playtest-${{ github.event.deployment.sha || github.sha }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -60,36 +60,51 @@ jobs:
       SECONDS_TO_PLAY: ${{ github.event.inputs.seconds || '57' }}
       GOAL: "Play-test of this commit's FIRSTLIGHT preview in offline mode: does it load, render and respond to input?"
       MARKER: "<!-- grok-playtester -->"
+      BOT: github-actions[bot]
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Build the game URL (offline, autoplay, WebGL)
+      - name: Check the deployment and build the game URL (offline, autoplay, WebGL)
+        id: url
         run: |
-          case "$BASE_URL" in
-            *offline*) url="$BASE_URL" ;;
-            *\?*) url="$BASE_URL&offline&autoplay&webgl" ;;
-            *) url="${BASE_URL%/}/?offline&autoplay&webgl" ;;
-          esac
+          # Vercel's unique deployment URL is <project>-<hash>-<account>.vercel.app.
+          if [ "$GITHUB_EVENT_NAME" = deployment_status ] &&
+             ! [[ "$BASE_URL" =~ ^https://firstlight-previews-[a-z0-9]+-rostyslav-dzhoholas-projects\.vercel\.app/?$ ]]; then
+            echo "Not a firstlight-previews deployment: $BASE_URL"; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # The client checks only that each flag is present (params.has), so add any that are missing.
+          url="${BASE_URL%%#*}"
+          [[ "$url" =~ ^https?://[^/?]+$ ]] && url="$url/"
+          for flag in offline autoplay webgl; do
+            query=""; [[ "$url" == *\?* ]] && query="${url#*\?}"
+            re="(^|&)$flag(=[^&]*)?(&|$)"
+            [[ "$query" =~ $re ]] && continue
+            if [[ "$url" == *\?* ]]; then url="$url&$flag"; else url="$url?$flag"; fi
+          done
           echo "GAME_URL=$url" >> "$GITHUB_ENV"
           echo "Play-testing $url"
 
       - name: Find the pull request (or branch) for this commit
+        if: steps.url.outputs.skip != 'true'
         id: pr
         run: |
-          pr=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" --jq '[.[] | select(.state=="open")][0] // empty' 2>/dev/null || true)
-          if [ -z "$pr" ] && [ -n "$DISPATCH_REF" ]; then
-            pr=$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=open&head=${GITHUB_REPOSITORY_OWNER}:${DISPATCH_REF}" --jq '.[0] // empty' 2>/dev/null || true)
+          # Fails the job (and marks the status errored) if the lookup fails, rather than guessing "no PR".
+          gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" \
+            --jq '.[] | select(.state=="open") | {number, repo: .head.repo.full_name}' > prs.jsonl
+          if [ ! -s prs.jsonl ] && [ -n "$DISPATCH_REF" ]; then
+            gh api --paginate "repos/$GITHUB_REPOSITORY/pulls?state=open&head=${GITHUB_REPOSITORY_OWNER}:${DISPATCH_REF}" \
+              --jq '.[] | {number, repo: .head.repo.full_name}' > prs.jsonl
           fi
-          if [ -n "$pr" ] && [ "$(echo "$pr" | jq -r .head.repo.full_name)" != "$GITHUB_REPOSITORY" ]; then
-            echo "PR is from a fork; not play-testing."; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+          number=$(jq -rs --arg r "$GITHUB_REPOSITORY" '[.[] | select(.repo == $r)][0].number // empty' prs.jsonl)
+          if [ -z "$number" ] && [ -s prs.jsonl ]; then
+            echo "Only fork PRs contain this commit; not play-testing."; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          number=$(echo "${pr:-null}" | jq -r '.number // empty')
           echo "number=$number" >> "$GITHUB_OUTPUT"
           branch=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/branches-where-head" --jq '.[0].name // empty' 2>/dev/null || true)
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
           echo "PR: ${number:-none (commit comment)} · branch: ${branch:-unknown}"
 
       - name: Start play-test
-        if: steps.pr.outputs.skip != 'true'
+        if: steps.url.outputs.skip != 'true' && steps.pr.outputs.skip != 'true'
         id: start
         run: |
           body=$(jq -n --arg url "$GAME_URL" --arg p "$PROFILE" --argjson s "$SECONDS_TO_PLAY" --arg g "$GOAL" \
@@ -103,14 +118,14 @@ jobs:
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
 
       - name: Mark the status as errored if the play-test could not start
-        if: failure() && steps.pr.outputs.skip != 'true' && steps.start.outputs.run_id == ''
+        if: failure() && steps.url.outputs.skip != 'true' && steps.pr.outputs.skip != 'true' && steps.start.outputs.run_id == ''
         run: |
           gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" -f state=error -f context=grok-playtester \
             -f description="Could not start the play-test (see the workflow log)" \
-            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null || true
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
 
       - name: Wait for the result (poll every 15 s, up to 15 min)
-        if: steps.pr.outputs.skip != 'true'
+        if: steps.url.outputs.skip != 'true' && steps.pr.outputs.skip != 'true'
         env:
           RUN_ID: ${{ steps.start.outputs.run_id }}
         run: |
@@ -123,11 +138,11 @@ jobs:
           done
           echo "Timed out waiting for $RUN_ID"; exit 1
 
-      - name: Post the play-test (PR comment, else commit comment) and set the commit status
-        # Not on cancel: a newer deployment of the same commit took over and will post instead.
-        if: (success() || failure()) && steps.pr.outputs.skip != 'true' && steps.start.outputs.run_id != ''
+      - name: Write the report and pick the commit status
+        # Not on cancel: a newer deployment of the same commit took over and will report instead.
+        if: (success() || failure()) && steps.start.outputs.run_id != ''
+        id: report
         env:
-          PR: ${{ steps.pr.outputs.number }}
           BRANCH: ${{ steps.pr.outputs.branch }}
           RUN_ID: ${{ steps.start.outputs.run_id }}
         run: |
@@ -136,6 +151,15 @@ jobs:
           verdict=$(jq -r '.review.verdict // empty' result.json)
           video=$(jq -r '.video_url // empty' result.json)
           thumb=$(jq -r '(.keyframes // [])[0].url // empty' result.json)
+          case "$status:$verdict" in
+            done:FAIL) state=failure; desc="Grok review: FAIL" ;;
+            done:WARN) state=success; desc="Grok review: WARN (playable, see comment)" ;;
+            done:PASS) state=success; desc="Grok review: PASS" ;;
+            done:*) if [ "$(jq -r '.metrics.page_errors // 0' result.json)" -gt 0 ]; then state=failure; desc="Uncaught page errors during play"; else state=success; desc="Played without page errors"; fi ;;
+            failed:*|error:*) state=error; desc="Play-test failed to run" ;;
+            *) state=error; desc="Play-test did not finish ($status)" ;;
+          esac
+          { echo "state=$state"; echo "desc=$desc"; echo "video=$video"; } >> "$GITHUB_OUTPUT"
           {
             echo "$MARKER"
             echo "## 🎮 Grok Playtester: ${verdict:-$status}"
@@ -189,25 +213,37 @@ jobs:
             echo "<sub>Run \`$RUN_ID\` by [Grok Playtester](https://github.com/RostyslavDzhohola/grok-playtester) · updated $(date -u +%Y-%m-%dT%H:%MZ)</sub>"
           } > comment.md
           cat comment.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post the report (PR comment, else commit comment)
+        if: (success() || failure()) && steps.report.outcome == 'success'
+        env:
+          PR: ${{ steps.pr.outputs.number }}
+        run: |
           payload=$(jq -n --rawfile b comment.md '{body:$b}')
+          # Only the workflow's own comment carries the marker that counts, so nobody can redirect the update.
+          mine=".[] | select(.user.login == \"$BOT\" and (.body | contains(\"$MARKER\"))) | .id"
           if [ -n "$PR" ]; then
-            id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate --jq ".[] | select(.body | contains(\"$MARKER\")) | .id" | tail -1)
+            # A newer commit on the PR has its own run; don't let this older one overwrite its report.
+            head=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .head.sha)
+            if [ "$head" != "$SHA" ]; then echo "PR #$PR has moved on to ${head:0:7}; not updating its comment."; exit 0; fi
+            id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate --jq "$mine" | tail -1)
             if [ -n "$id" ]; then echo "$payload" | gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" --input - >/dev/null
             else echo "$payload" | gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --input - >/dev/null; fi
             echo "Posted on PR #$PR"
           else
-            id=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/comments" --paginate --jq ".[] | select(.body | contains(\"$MARKER\")) | .id" | tail -1)
+            id=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/comments" --paginate --jq "$mine" | tail -1)
             if [ -n "$id" ]; then echo "$payload" | gh api -X PATCH "repos/$GITHUB_REPOSITORY/comments/$id" --input - >/dev/null
             else echo "$payload" | gh api -X POST "repos/$GITHUB_REPOSITORY/commits/$SHA/comments" --input - >/dev/null; fi
             echo "Posted on commit $SHA"
           fi
-          case "$status:$verdict" in
-            done:FAIL) state=failure; desc="Grok review: FAIL" ;;
-            done:WARN) state=success; desc="Grok review: WARN (playable, see comment)" ;;
-            done:PASS) state=success; desc="Grok review: PASS" ;;
-            done:*) if [ "$(jq -r '.metrics.page_errors // 0' result.json)" -gt 0 ]; then state=failure; desc="Uncaught page errors during play"; else state=success; desc="Played without page errors"; fi ;;
-            failed:*|error:*) state=error; desc="Play-test failed to run" ;;
-            *) state=error; desc="Play-test did not finish ($status)" ;;
-          esac
-          gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" -f state=$state -f context=grok-playtester -f description="$desc" \
-            ${video:+-f target_url="$video"} >/dev/null || true
+
+      - name: Set the commit status
+        # Runs even if posting the comment failed, so the status never stays pending.
+        if: (success() || failure()) && steps.start.outputs.run_id != ''
+        env:
+          STATE: ${{ steps.report.outputs.state || 'error' }}
+          DESC: ${{ steps.report.outputs.desc || 'Could not write the play-test report' }}
+          VIDEO: ${{ steps.report.outputs.video }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" -f state="$STATE" -f context=grok-playtester \
+            -f description="$DESC" -f target_url="${VIDEO:-$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID}" >/dev/null
