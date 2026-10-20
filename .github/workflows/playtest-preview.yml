@@ -89,12 +89,14 @@ jobs:
         run: |
           # Fails the job (and marks the status errored) if the lookup fails, rather than guessing "no PR".
           gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" \
-            --jq '.[] | select(.state=="open") | {number, repo: .head.repo.full_name}' > prs.jsonl
+            --jq '.[] | select(.state=="open") | {number, repo: .head.repo.full_name, head: .head.sha}' > prs.jsonl
           if [ ! -s prs.jsonl ] && [ -n "$DISPATCH_REF" ]; then
             gh api --paginate "repos/$GITHUB_REPOSITORY/pulls?state=open&head=${GITHUB_REPOSITORY_OWNER}:${DISPATCH_REF}" \
-              --jq '.[] | {number, repo: .head.repo.full_name}' > prs.jsonl
+              --jq '.[] | {number, repo: .head.repo.full_name, head: .head.sha}' > prs.jsonl
           fi
-          number=$(jq -rs --arg r "$GITHUB_REPOSITORY" '[.[] | select(.repo == $r)][0].number // empty' prs.jsonl)
+          # Same-repo PRs only; prefer the one whose head is this commit.
+          number=$(jq -rs --arg r "$GITHUB_REPOSITORY" --arg s "$SHA" \
+            '[.[] | select(.repo == $r)] | sort_by(.head != $s) | .[0].number // empty' prs.jsonl)
           if [ -z "$number" ] && [ -s prs.jsonl ]; then
             echo "Only fork PRs contain this commit; not play-testing."; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
@@ -241,8 +243,9 @@ jobs:
         # Runs even if posting the comment failed, so the status never stays pending.
         if: (success() || failure()) && steps.start.outputs.run_id != ''
         env:
-          STATE: ${{ steps.report.outputs.state || 'error' }}
-          DESC: ${{ steps.report.outputs.desc || 'Could not write the play-test report' }}
+          # Trust the report's verdict only if the whole report step finished.
+          STATE: ${{ steps.report.outcome == 'success' && steps.report.outputs.state || 'error' }}
+          DESC: ${{ steps.report.outcome == 'success' && steps.report.outputs.desc || 'Could not write the play-test report' }}
           VIDEO: ${{ steps.report.outputs.video }}
         run: |
           gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" -f state="$STATE" -f context=grok-playtester \
