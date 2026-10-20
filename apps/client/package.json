@@ -9,7 +9,8 @@
     "typecheck": "tsc -p tsconfig.json && tsc -p e2e/tsconfig.json",
     "test": "vitest run",
     "deploy": "vite build && cp -R .vercel dist/.vercel && vercel deploy dist --prod --yes",
-    "e2e": "playwright test -c e2e/playwright.config.ts"
+    "e2e": "playwright test -c e2e/playwright.config.ts",
+    "e2e:live": "E2E_PORT=${E2E_PORT:-2602} E2E_CLIENT_PORT=${E2E_CLIENT_PORT:-5202} E2E_OUT=${E2E_OUT:-e2e/.out/session} playwright test -c e2e/live.config.ts"
   },
   "dependencies": {
     "@colyseus/schema": "5.0.36",
