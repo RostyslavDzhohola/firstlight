@@ -669,7 +669,7 @@ function describe(s: Snap, events: FlEvent[]): string {
   if (s.zone) lines.push(`zone label "${s.zone.labelText ?? s.zone.label ?? "-"}" · server ${s.zone.server ?? "?"} · local ${s.zone.local ?? "?"} · ${s.zone.toSafe !== null && s.zone.toSafe !== undefined ? `${n0(Math.abs(s.zone.toSafe))} m ${s.zone.local === "safe" ? "to the edge" : "back to safety"}` : ""}`);
   if (p) {
     const starter = p.starter !== null && p.starter !== undefined ? STARTERS[p.starter] ?? `starter ${p.starter}` : "?";
-    lines.push(`me ${p.name ?? "?"} (${starter}) Lv ${s.you?.level ?? p.level ?? "?"} · HP ${n0(p.hp)} · XP ${s.you?.xp ?? "?"}/${s.you?.xpToNext ?? "?"} · coins ${s.you?.coins ?? "?"} · ${p.protected ? "spawn-protected" : "unprotected"}${p.inCombat ? " · in combat" : ""}${p.swimming ? " · swimming" : ""} · anim ${p.clip ?? p.anim}`);
+    lines.push(`me ${p.name ?? "?"} (${starter}) Lv ${s.you?.level ?? p.level ?? "?"} · HP ${n0(p.hp)} · XP ${s.you?.xp ?? "?"}/${s.you?.xpToNext ?? "?"} · coins ${s.you?.coins ?? "?"}${p.protected ? " · spawn protection on (just arrived: nothing can hurt you yet)" : ""}${p.inCombat ? " · in combat" : ""}${p.swimming ? " · swimming" : ""} · anim ${p.clip ?? p.anim}`);
   }
   if (s.weapon) lines.push(`weapon ${s.weapon.name} (${s.weapon.delivery}, range ${s.weapon.range} m) · hotbar ${(s.hotbar ?? []).map((h) => (h ? h.id : "-")).join(" ")}`);
   if (s.onboarding?.active) lines.push(`tutorial step ${s.onboarding.step ?? "?"} (${s.onboarding.done} done${s.onboarding.allDone ? ", all done" : ""})`);
