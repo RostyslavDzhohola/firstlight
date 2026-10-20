@@ -163,6 +163,7 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
     if (identity) throw new Error(`this session already plays as ${identity}: a session is one player (\`fl quit\`, then start a new session)`);
     identity = who;
   };
+  /** Production play stays read-only, like `pnpm e2e:prod`: no attacks (other players there are real people), no saves, no dev guests. */
   const localOnly = (what: string) => {
     if (TARGET === "prod") throw new Error(`${what} works only on the local stack`);
   };
@@ -434,8 +435,9 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
     },
     attack: {
       usage: "attack [n]",
-      help: "left-click n times (default 1) and report what the server said",
+      help: "local only: left-click n times (default 1) and report what the server said",
       async run([n = "1"]) {
+        localOnly("attack");
         const pre = await ensureLock();
         const since = await player.now();
         for (let i = 0; i < Number(n); i++) {
@@ -449,8 +451,9 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
     },
     fight: {
       usage: "fight [sec]",
-      help: "find the nearest hostile, close in, aim and attack until it pays XP, you die, or sec pass (default 60)",
+      help: "local only: find the nearest hostile, close in, aim and attack until it pays XP, you die, or sec pass (default 60)",
       async run([sec = "60"]) {
+        localOnly("fight");
         const pre = await ensureLock();
         const until = Date.now() + Number(sec) * 1000;
         const s0 = await player.snap();
@@ -503,11 +506,15 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
             await player.hold(["KeyS"], 500);
             continue;
           }
-          if (!(await player.aim(g.pick))) continue;
-          // Aiming turned us: look again before the click.
+          await player.aim(g.pick);
+          // Aiming turned us: look again, and click only when it will land: a shot needs the crosshair on
+          // the foe (Player.aim's tolerances); a swing sweeps an arc, so facing it within 20° is enough.
           const aimed = await player.snap();
           const still = aimed.npcs?.find((n) => n.id === foe.id && !n.dead);
-          if (!still || playerInHarmsWay(aimed, still)) continue;
+          const melee = aimed.weapon?.delivery === "melee";
+          const onTarget =
+            !!still && still.aimYaw !== null && still.aimPitch !== null && (melee ? Math.abs(still.aimYaw) < 0.35 : Math.abs(still.aimYaw) < 0.015 && Math.abs(still.aimPitch) < 0.02);
+          if (!still || !onTarget || playerInHarmsWay(aimed, still)) continue;
           await player.attack();
           shots++;
           await page.waitForTimeout(450);
@@ -619,10 +626,10 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
 }
 
 /**
- * Another live player who could take a hit meant for `foe`: anyone in the front half toward it within
- * the weapon's reach (sweeps, piercing and point-blank hits; Kappa's staff covers ±75°), or anyone
- * within 10 m of the foe (chains and splash). Wider than any one weapon on purpose: `fight` holds
- * fire rather than risk PvP, which J3.4's narrower line test allows.
+ * Another live player near the line of fire: in the front half toward `foe` within the weapon's reach
+ * (sweeps, piercing, point-blank), or within 10 m of the foe (chains, splash). A courtesy to other
+ * local sessions, not a full damage model: projectiles travel past their range and chains jump
+ * further, which is why `fight` and `attack` are refused on production.
  */
 function playerInHarmsWay(s: Snap, foe: Target) {
   const reach = Math.max(s.weapon?.range ?? 20, foe.dist) + 3;

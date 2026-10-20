@@ -16,10 +16,9 @@ apps/client/e2e/live/fl.mjs quit       # ends it; so do 20 idle minutes (FL_LIVE
 ```
 
 - `E2E_GFX=webgpu` runs installed Chrome on WebGPU. `E2E_TARGET=prod` plays https://firstlight.one4all.dev
-  with a flagged test guest, like `pnpm e2e:prod`; it needs `LOADTEST_SECRET`, and `dev` and `save`
-  are refused there.
-- On production every other player is a real person. `fight` never shoots through or swings next to
-  one, but `attack` does what it's told, so don't aim it at players there.
+  with a flagged test guest, like `pnpm e2e:prod`; it needs `LOADTEST_SECRET`.
+- Production play is read-only like `pnpm e2e:prod`: `attack`, `fight`, `dev` and `save` are refused
+  there, because every other player is a real person and a stray bolt or chain is PvP.
 - Ports: `E2E_PORT` / `E2E_CLIENT_PORT` (default 2602/5202, so a session can run next to `pnpm e2e`)
   and `FL_LIVE_PORT` (the command port, default 7357).
 - Evidence goes to `$E2E_OUT/live/` (default `apps/client/e2e/.out/session/live/`): `transcript.log`

@@ -25,3 +25,13 @@ Verdict: request changes. Round 1's items 2, 3, 5 and 6 confirmed fixed; 1 and 4
 | 2 | Should-fix | A dummy that disappears still counts as arrival (`?? 0`). | Fixed: only a standing dummy can be arrived at. |
 | 3 | Should-fix | `esc` says "nothing changed" from the one-line status alone (Esc can drop a held inventory item). | Fixed: it says the one-line status is unchanged. |
 | 4 | Nit | A JSON `null` body gives 500, not 400. | Fixed: only a non-array object is read. |
+
+## Round 3 (on 78282fc6)
+
+Verdict: request changes. Round 2's items 2–4 confirmed fixed.
+
+| # | Severity | Finding | Builder's decision |
+|---|---|---|---|
+| 1 | Blocker | Projectiles travel range × 1.2 (combat.ts), past the guard's range + 3 m. | Fixed by scope, not by a bigger envelope: `attack` and `fight` are refused on production (read-only like `pnpm e2e:prod`, whose smoke never attacks). Locally the only other players are other test sessions; the guard stays as a courtesy and says it isn't a full damage model. |
+| 2 | Blocker | Stormcoil's chain jumps reach past the 10 m radius. | Same decision as 1. |
+| 3 | Should-fix | `Player.aim` returns true after exhausted retries; `fight` trusted it. | Fixed in `fight`: a shot needs the crosshair within Player.aim's tolerances on a fresh snapshot; a melee swing needs the foe within 20° (a strict crosshair made Brother Ash never swing). `Player.aim` itself is unchanged (the journeys rely on it). Verified live: Hexwick and Brother Ash both kill. |
