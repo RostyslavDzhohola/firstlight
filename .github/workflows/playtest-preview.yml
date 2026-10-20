@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       url:
-        description: Preview URL to play-test (offline, autoplay and webgl are always added)
+        description: A firstlight-previews deployment URL, https://firstlight-previews-<hash>-rostyslav-dzhoholas-projects.vercel.app (offline, autoplay and webgl are always added)
         required: true
       seconds:
         description: Seconds of play (60 max without a key)
@@ -66,9 +66,8 @@ jobs:
       - name: Check the deployment and build the game URL (offline, autoplay, WebGL)
         id: url
         run: |
-          # Vercel's unique deployment URL is <project>-<hash>-<account>.vercel.app.
-          if [ "$GITHUB_EVENT_NAME" = deployment_status ] &&
-             ! [[ "$BASE_URL" =~ ^https://firstlight-previews-[a-z0-9]+-rostyslav-dzhoholas-projects\.vercel\.app/?$ ]]; then
+          # Vercel's unique deployment URL is <project>-<hash>-<account>.vercel.app. Manual runs are held to it too.
+          if ! [[ "$BASE_URL" =~ ^https://firstlight-previews-[a-z0-9]+-rostyslav-dzhoholas-projects\.vercel\.app([/?#].*)?$ ]]; then
             echo "Not a firstlight-previews deployment: $BASE_URL"; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
           # The client checks only that each flag is present (params.has), so add any that are missing.
