@@ -88,7 +88,8 @@ test("live session", async ({ player, page, consoleErrors }) => {
     if (closing) return reply(503, "the session is closing");
     let msg: { cmd?: unknown; args?: unknown } = {};
     try {
-      msg = JSON.parse(raw) as typeof msg;
+      const parsed: unknown = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) msg = parsed;
     } catch {}
     const cmd = msg.cmd;
     const args = msg.args ?? [];
@@ -214,7 +215,8 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
       case "dummy": {
         const d = nearest(s.dummies, (x) => !x.down);
         if (!d) throw new Error("no standing training dummy in view");
-        return { label: `dummy ${d.i}`, pick: (x) => x.dummies?.[d.i] ?? null, arrived: (x) => (x.dummies?.[d.i]?.dist ?? 0) <= reach(x) };
+        const standing = (x: Snap) => (x.dummies?.[d.i] && !x.dummies[d.i]!.down ? x.dummies[d.i]! : null);
+        return { label: `dummy ${d.i}`, pick: standing, arrived: (x) => (standing(x)?.dist ?? Infinity) <= reach(x) };
       }
       case "hostile": {
         const n = nearest(s.npcs, (x: Npc) => x.hostile && !x.dead);
@@ -360,7 +362,7 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
         await player.escape();
         await page.waitForTimeout(300);
         const s = await player.snap();
-        if (brief(s) === brief(before)) return `${brief(s)}\n(Esc changed nothing here: \`fl screen\` shows what is in front)`;
+        if (brief(s) === brief(before)) return `${brief(s)}\n(the one-line status is the same as before Esc: \`fl screen\` shows what is in front)`;
         // J5.1: a desktop browser shows "Click to look around" here; headless Chrome lets the page re-lock at once.
         const note = menuWasOpen && s.input.pointerLocked ? "\n(the game took the pointer back by itself: headless Chrome allows that without a click, so the \"Click to look around\" hint never shows here)" : "";
         return brief(s) + note;
@@ -489,26 +491,23 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
             await player.walkTo(g.pick, g.arrived, { timeoutMs: 5000 });
             continue;
           }
-          // As J3.4: never through another player (outside safe zones a hit is PvP, and on production
-          // they are real people), and with a melee weapon never with one beside the foe: side-step.
-          const melee = s.weapon?.delivery === "melee";
-          const inLine = s.players?.find((o) => {
-            if (o.dead) return false;
-            const off = wrap180(o.bearing - foe.bearing);
-            if (melee) return o.surface < foe.surface + 2.5 && Math.abs(off) < 60;
-            return o.surface < foe.surface + 1 && Math.abs(off) < 90 && Math.abs(o.surface * Math.sin((off * Math.PI) / 180)) < 2;
-          });
-          if (inLine) {
-            await player.hold([wrap180(inLine.bearing - foe.bearing) > 0 ? "KeyA" : "KeyD"], 600);
+          // Outside safe zones a hit on a player is PvP, and on production they are real people.
+          const near = playerInHarmsWay(s, foe);
+          if (near) {
+            await player.hold([wrap180(near.bearing - foe.bearing) > 0 ? "KeyA" : "KeyD"], 600);
             continue;
           }
           // Point blank a bolt leaves from the hand and flies past a creature at our feet: back off first.
-          if (!melee && foe.dist < 5) {
+          if (s.weapon?.delivery !== "melee" && foe.dist < 5) {
             await player.turn(foe.bearing);
             await player.hold(["KeyS"], 500);
             continue;
           }
-          await player.aim(g.pick);
+          if (!(await player.aim(g.pick))) continue;
+          // Aiming turned us: look again before the click.
+          const aimed = await player.snap();
+          const still = aimed.npcs?.find((n) => n.id === foe.id && !n.dead);
+          if (!still || playerInHarmsWay(aimed, still)) continue;
           await player.attack();
           shots++;
           await page.waitForTimeout(450);
@@ -617,6 +616,23 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
     },
   };
   return commands;
+}
+
+/**
+ * Another live player who could take a hit meant for `foe`: anyone in the front half toward it within
+ * the weapon's reach (sweeps, piercing and point-blank hits; Kappa's staff covers ±75°), or anyone
+ * within 10 m of the foe (chains and splash). Wider than any one weapon on purpose: `fight` holds
+ * fire rather than risk PvP, which J3.4's narrower line test allows.
+ */
+function playerInHarmsWay(s: Snap, foe: Target) {
+  const reach = Math.max(s.weapon?.range ?? 20, foe.dist) + 3;
+  return s.players?.find((o) => {
+    if (o.dead) return false;
+    const off = wrap180(o.bearing - foe.bearing);
+    if (o.dist <= reach && Math.abs(off) <= 90) return true;
+    const apart = Math.sqrt(o.dist ** 2 + foe.dist ** 2 - 2 * o.dist * foe.dist * Math.cos((off * Math.PI) / 180));
+    return apart <= 10;
+  });
 }
 
 function pickStarter(who: string | undefined): StarterName {
