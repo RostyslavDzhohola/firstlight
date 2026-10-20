@@ -1,0 +1,213 @@
+# Play-tests every successful FIRSTLIGHT preview deployment from the Vercel project "firstlight-previews" on a cloud
+# GPU with Grok Playtester, and reports back with the gameplay video, a thumbnail, the written review, a collapsible
+# fix list and the metrics:
+#   - on a PR: ONE comment on the PR, updated in place on later runs;
+#   - on a push with no open PR (e.g. the long-lived `preflight` branch): a comment on that commit.
+# Either way it sets a "grok-playtester" commit status.
+# The game runs with ?offline&autoplay&webgl, so no production server or leaderboard is touched.
+# No key or secret needed. Adapted from https://grok-playtester.vercel.app/playtest-on-preview.yml
+name: Play-test preview
+
+on:
+  deployment_status:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: Preview URL to play-test (?offline&autoplay&webgl is appended)
+        required: true
+      seconds:
+        description: Seconds of play (60 max without a key)
+        default: "57"
+      profile:
+        description: Input script, walk or drive
+        default: walk
+
+permissions:
+  contents: write        # commit comments when there is no PR
+  pull-requests: write   # the PR comment
+  issues: write          # PR comments use the issues API
+  statuses: write        # the grok-playtester commit status
+  deployments: read
+
+concurrency:
+  group: playtest-${{ github.event.deployment.sha || github.sha }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash   # explicit, so every step runs with -eo pipefail
+
+jobs:
+  playtest:
+    # Only successful Preview deployments that Vercel made for the firstlight-previews project (never Production,
+    # never another Vercel project), or a manual run. Vercel's unique deployment URL starts with the project name.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.deployment_status.state == 'success' &&
+       github.event.deployment.production_environment != true &&
+       startsWith(github.event.deployment.environment, 'Preview') &&
+       github.event.deployment.creator.login == 'vercel[bot]' &&
+       startsWith(github.event.deployment_status.environment_url, 'https://firstlight-previews-'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PLAYTESTER_BASE: https://rostyslavdzhohola--grok-playtester.modal.run
+      BASE_URL: ${{ github.event.inputs.url || github.event.deployment_status.environment_url }}
+      SHA: ${{ github.event.deployment.sha || github.sha }}
+      # Vercel sends the commit SHA as the deployment ref, so only a manual run has a branch name to search by.
+      DISPATCH_REF: ${{ github.event_name == 'workflow_dispatch' && github.ref_name || '' }}
+      PROFILE: ${{ github.event.inputs.profile || 'walk' }}
+      SECONDS_TO_PLAY: ${{ github.event.inputs.seconds || '57' }}
+      GOAL: "Play-test of this commit's FIRSTLIGHT preview in offline mode: does it load, render and respond to input?"
+      MARKER: "<!-- grok-playtester -->"
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Build the game URL (offline, autoplay, WebGL)
+        run: |
+          case "$BASE_URL" in
+            *offline*) url="$BASE_URL" ;;
+            *\?*) url="$BASE_URL&offline&autoplay&webgl" ;;
+            *) url="${BASE_URL%/}/?offline&autoplay&webgl" ;;
+          esac
+          echo "GAME_URL=$url" >> "$GITHUB_ENV"
+          echo "Play-testing $url"
+
+      - name: Find the pull request (or branch) for this commit
+        id: pr
+        run: |
+          pr=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" --jq '[.[] | select(.state=="open")][0] // empty' 2>/dev/null || true)
+          if [ -z "$pr" ] && [ -n "$DISPATCH_REF" ]; then
+            pr=$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=open&head=${GITHUB_REPOSITORY_OWNER}:${DISPATCH_REF}" --jq '.[0] // empty' 2>/dev/null || true)
+          fi
+          if [ -n "$pr" ] && [ "$(echo "$pr" | jq -r .head.repo.full_name)" != "$GITHUB_REPOSITORY" ]; then
+            echo "PR is from a fork; not play-testing."; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          number=$(echo "${pr:-null}" | jq -r '.number // empty')
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+          branch=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/branches-where-head" --jq '.[0].name // empty' 2>/dev/null || true)
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "PR: ${number:-none (commit comment)} · branch: ${branch:-unknown}"
+
+      - name: Start play-test
+        if: steps.pr.outputs.skip != 'true'
+        id: start
+        run: |
+          body=$(jq -n --arg url "$GAME_URL" --arg p "$PROFILE" --argjson s "$SECONDS_TO_PLAY" --arg g "$GOAL" \
+            '{url:$url, profile:$p, seconds:$s, goal:$g}')
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" -f state=pending -f context=grok-playtester \
+            -f description="Playing the preview on a cloud GPU" >/dev/null || true
+          curl -sS --fail-with-body -X POST "$PLAYTESTER_BASE/v1/playtests" \
+            -H "Content-Type: application/json" -d "$body" | tee start.json
+          run_id=$(jq -r '.run_id // empty' start.json)
+          [ -n "$run_id" ] || { echo "No run_id in the response"; exit 1; }
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Mark the status as errored if the play-test could not start
+        if: failure() && steps.pr.outputs.skip != 'true' && steps.start.outputs.run_id == ''
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" -f state=error -f context=grok-playtester \
+            -f description="Could not start the play-test (see the workflow log)" \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null || true
+
+      - name: Wait for the result (poll every 15 s, up to 15 min)
+        if: steps.pr.outputs.skip != 'true'
+        env:
+          RUN_ID: ${{ steps.start.outputs.run_id }}
+        run: |
+          for i in $(seq 1 60); do
+            curl -sS "$PLAYTESTER_BASE/v1/playtests/$RUN_ID" > result.json || true
+            status=$(jq -r '.status // "unknown"' result.json 2>/dev/null || echo unknown)
+            echo "[$i] status=$status"
+            case "$status" in done|failed|error) exit 0 ;; esac
+            sleep 15
+          done
+          echo "Timed out waiting for $RUN_ID"; exit 1
+
+      - name: Post the play-test (PR comment, else commit comment) and set the commit status
+        # Not on cancel: a newer deployment of the same commit took over and will post instead.
+        if: (success() || failure()) && steps.pr.outputs.skip != 'true' && steps.start.outputs.run_id != ''
+        env:
+          PR: ${{ steps.pr.outputs.number }}
+          BRANCH: ${{ steps.pr.outputs.branch }}
+          RUN_ID: ${{ steps.start.outputs.run_id }}
+        run: |
+          jq -e . result.json >/dev/null 2>&1 || echo '{"status":"unknown","error":"no result"}' > result.json
+          status=$(jq -r '.status // "unknown"' result.json)
+          verdict=$(jq -r '.review.verdict // empty' result.json)
+          video=$(jq -r '.video_url // empty' result.json)
+          thumb=$(jq -r '(.keyframes // [])[0].url // empty' result.json)
+          {
+            echo "$MARKER"
+            echo "## 🎮 Grok Playtester: ${verdict:-$status}"
+            echo
+            echo "Commit \`${SHA:0:7}\`${BRANCH:+ on \`$BRANCH\`} · [preview]($GAME_URL) · $(jq -r '.gpu // "GPU"' result.json) · renderer \`$(jq -r '.renderer // "?"' result.json)\` · ${SECONDS_TO_PLAY}s, profile \`$PROFILE\`, offline mode"
+            echo
+            if [ "$status" = "failed" ] || [ "$status" = "error" ]; then
+              echo "**The play-test failed:** $(jq -r '.error // "unknown error"' result.json)"
+            elif [ "$status" != "done" ]; then
+              echo "**The play-test did not finish** (last status \`$status\`). [Workflow log]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)"
+            else
+              if [ -n "$video" ]; then
+                echo "**▶ [Watch the gameplay video]($video)**"
+                echo
+                [ -n "$thumb" ] && echo "<a href=\"$video\"><img src=\"$thumb\" width=\"480\" alt=\"First keyframe of the play-test\"></a>" && echo
+              fi
+              m=.metrics
+              echo "| FPS (median / min) | Load | Ready | Page errors | Console errors | Failed requests |"
+              echo "|---|---|---|---|---|---|"
+              echo "| $(jq -r "$m.fps_median // \"?\"" result.json) / $(jq -r "$m.fps_min // \"?\"" result.json) | $(jq -r "$m.load_ms // \"?\"" result.json) ms | $(jq -r "$m.ready_ms // \"?\"" result.json) ms | $(jq -r "$m.page_errors // 0" result.json) | $(jq -r "$m.console_errors // 0" result.json) | $(jq -r "$m.failed_requests // 0" result.json) |"
+              echo
+              if jq -e '.review_markdown' result.json >/dev/null; then
+                echo "### Review"; echo
+                jq -r '.review_markdown' result.json
+                echo
+              elif jq -e '.review' result.json >/dev/null; then
+                echo "### Review"; echo
+                jq -r '.review | "**Verdict: \(.verdict)**" + (if .summary then " — \(.summary)" else "" end)' result.json
+                echo
+              fi
+              n=$(jq -r '.review.fix_list // [] | length' result.json)
+              if [ "$n" -gt 0 ]; then
+                echo "<details><summary>🛠 Fix list ($n items, for your coding agent)</summary>"; echo
+                jq -r '.review.fix_list // [] | .[] | "- **\(.id) [\(.severity)] \(.symptom)**\n  - evidence: \(.evidence)\n  - repro: \(.repro_steps)\n  - suspected area: \(.suspected_area)\n  - done when: \(.acceptance_check)"' result.json
+                echo; echo "</details>"
+              else
+                echo "<details><summary>🛠 Fix list (deterministic findings)</summary>"; echo
+                jq -r '.verdict_hints // [] | .[] | "- \(.)"' result.json
+                echo; echo "</details>"
+              fi
+              echo
+              echo "<details><summary>Keyframes</summary>"; echo
+              jq -r '(.keyframes // [])[:8] | .[] | "<img src=\"\(.url)\" width=\"220\" title=\"t=\(.t_seconds)s \(.label // "")\">"' result.json
+              echo; echo "</details>"
+              echo
+              echo "<details><summary>Raw evidence for a bot (errors, timeline)</summary>"; echo
+              echo '```json'; jq '{run_id, metrics, errors, timeline, verdict_hints}' result.json; echo '```'
+              echo "</details>"
+            fi
+            echo
+            echo "<sub>Run \`$RUN_ID\` by [Grok Playtester](https://github.com/RostyslavDzhohola/grok-playtester) · updated $(date -u +%Y-%m-%dT%H:%MZ)</sub>"
+          } > comment.md
+          cat comment.md >> "$GITHUB_STEP_SUMMARY"
+          payload=$(jq -n --rawfile b comment.md '{body:$b}')
+          if [ -n "$PR" ]; then
+            id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate --jq ".[] | select(.body | contains(\"$MARKER\")) | .id" | tail -1)
+            if [ -n "$id" ]; then echo "$payload" | gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" --input - >/dev/null
+            else echo "$payload" | gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --input - >/dev/null; fi
+            echo "Posted on PR #$PR"
+          else
+            id=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/comments" --paginate --jq ".[] | select(.body | contains(\"$MARKER\")) | .id" | tail -1)
+            if [ -n "$id" ]; then echo "$payload" | gh api -X PATCH "repos/$GITHUB_REPOSITORY/comments/$id" --input - >/dev/null
+            else echo "$payload" | gh api -X POST "repos/$GITHUB_REPOSITORY/commits/$SHA/comments" --input - >/dev/null; fi
+            echo "Posted on commit $SHA"
+          fi
+          case "$status:$verdict" in
+            done:FAIL) state=failure; desc="Grok review: FAIL" ;;
+            done:WARN) state=success; desc="Grok review: WARN (playable, see comment)" ;;
+            done:PASS) state=success; desc="Grok review: PASS" ;;
+            done:*) if [ "$(jq -r '.metrics.page_errors // 0' result.json)" -gt 0 ]; then state=failure; desc="Uncaught page errors during play"; else state=success; desc="Played without page errors"; fi ;;
+            failed:*|error:*) state=error; desc="Play-test failed to run" ;;
+            *) state=error; desc="Play-test did not finish ($status)" ;;
+          esac
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" -f state=$state -f context=grok-playtester -f description="$desc" \
+            ${video:+-f target_url="$video"} >/dev/null || true
