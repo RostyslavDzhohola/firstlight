@@ -22,16 +22,30 @@ import { AvatarView } from "./Avatars.ts";
 import type { ParticleSystem } from "./particles.ts";
 import type { RenderCtx } from "./renderer.ts";
 import { localFrame, type V3 } from "./sunFrame.ts";
-import { measurePassCosts, type PassConfig, type PassCostReport } from "./passCost.ts";
+import type { PassConfig, PassCostReport } from "./passCost.ts";
 import { FEATURES, type Feature } from "./quality.ts";
-import { beginManualFrame, maxOf, percentile, type TimestampSource } from "./timing.ts";
+import { maxOf, percentile } from "./timing.ts";
 import { shaderStats } from "./warmup.ts";
 
-/** Features `?bench=passes` measures by default (each must have a kill switch). */
+/**
+ * Features `?bench=passes` measures by default (each must have a kill switch). Not weather: bench
+ * mode forces clear weather (Environment.setBenchMode), so its toggle would measure nothing.
+ */
 export const PASS_FEATURES: readonly Feature[] = [
   "grass", "trees", "detail", "shadows", "water", "sky", "skyplanets", "fog", "ao", "traa", "bloom", "fxaa", "grade", "grain",
-  "vignette", "particles", "weather",
+  "vignette", "particles",
 ];
+
+/** Rejects after `ms`: no wait in the passes bench may hang the run (hidden tab, stalled queue). */
+function deadline<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer = 0;
+  return Promise.race([
+    p.finally(() => clearTimeout(timer)),
+    new Promise<never>((_, reject) => {
+      timer = window.setTimeout(() => reject(new Error(`${what} took over ${ms / 1000} s`)), ms);
+    }),
+  ]);
+}
 
 /** The passes preset's fixed view: a point on the rising orbit looking at the spawn (terrain, town, sky). */
 const PASS_VIEW = 0.42;
@@ -370,11 +384,17 @@ export class Bench {
       this.finish(null, "per-pass timing is WebGPU only (needs the GPU queue's submitted-work-done)");
       return;
     }
-    const src = ctx.renderer as unknown as TimestampSource;
-    const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
+    const { measurePassCosts } = await import("./passCost.ts");
+    // three runs a pass (scene pass, GTAO, bloom, …) once per node frame, and only its animation
+    // loop advances the node frame: each measured frame must advance it, or later frames in a batch
+    // reuse the first one's pass textures and draw almost nothing.
+    const nodeFrame = (ctx.renderer as unknown as { _nodes: { nodeFrame: { update(): void; frameId: number } } })._nodes.nodeFrame;
+    const info = ctx.renderer.info;
+    const nextFrame = () => deadline(new Promise<void>((r) => requestAnimationFrame(() => r())), 5000, "a frame (is the tab hidden?)");
+    const idle = () => deadline(device.queue.onSubmittedWorkDone(), 20_000, "the GPU queue");
     let baseline = true;
     let batches = 0;
-    const total = p.rounds * (p.features.length + 9);
+    const total = p.rounds * (2 * p.features.length + 15);
     let report: PassCostReport | null = null;
     try {
       report = await measurePassCosts(
@@ -398,23 +418,29 @@ export class Bench {
             this.holding = true;
           },
           renderBatch: async (frames) => {
-            await device.queue.onSubmittedWorkDone();
+            await idle();
+            let min = Infinity, max = 0;
             const t0 = performance.now();
             for (let i = 0; i < frames; i++) {
-              beginManualFrame(src);
+              info.reset();
+              nodeFrame.update();
+              (info as { frame: number }).frame = nodeFrame.frameId;
               ctx.render();
               ctx.gpu.frame(); // keeps three's timestamp query pool drained
+              const d = info.render.drawCalls;
+              min = Math.min(min, d);
+              max = Math.max(max, d);
               if (baseline && i === frames - 1) {
-                this.draws.push(ctx.renderer.info.render.drawCalls);
-                this.tris.push(ctx.renderer.info.render.triangles);
+                this.draws.push(d);
+                this.tris.push(info.render.triangles);
               }
             }
             const cpuMs = performance.now() - t0;
-            await device.queue.onSubmittedWorkDone();
+            await idle();
             const wallMs = performance.now() - t0;
             batches++;
             this.el.textContent = `BENCH passes ${batches} / ~${total} batches`;
-            return { wallMs, cpuMs };
+            return { wallMs, cpuMs, draws: { min, max } };
           },
           shaderBuilds: () => shaderStats().total,
           visible: () => document.visibilityState === "visible",

@@ -17,6 +17,10 @@ function fakeHost(opts: {
   hideOnBatch?: number;
   throwOnBatch?: number;
   cpuMs?: number;
+  /** Batch N (0-based) reports one frame that skipped its passes. */
+  skipOnBatch?: number;
+  /** Extra ms per frame added per batch (thermal drift). */
+  drift?: number;
 }) {
   const base = opts.base ?? 10;
   const jitter = opts.jitter ?? 0.05;
@@ -50,9 +54,10 @@ function fakeHost(opts: {
         ms += def * ((config.ao.samples / 16) * (config.ao.scale / 0.5) ** 2) - def;
       }
       const j = (((i * 7919) % 11) / 10 - 0.5) * 2 * jitter;
-      const wall = (ms + j) * frames;
+      const wall = (ms + j + (opts.drift ?? 0) * i) * frames;
       now += wall;
-      return { wallMs: wall, cpuMs: (opts.cpuMs ?? 2) * frames };
+      const draws = { min: opts.skipOnBatch === i ? 2 : 100, max: 100 };
+      return { wallMs: wall, cpuMs: (opts.cpuMs ?? 2) * frames, draws };
     },
     shaderBuilds: () => builds,
     visible: () => !hidden,
@@ -100,7 +105,7 @@ describe("measurePassCosts", () => {
   it("warms every configuration before its measured batch", async () => {
     const host = fakeHost({ costs: { grass: 3, bloom: 1 } });
     const r = await measurePassCosts(host, { rounds: 3 });
-    // Each measured batch follows a configure + warm: baseline twice a round, then each feature.
+    // Each measured batch follows a configure + warm: B grass B bloom B per round.
     expect(host.warms()).toBe(host.configs.length - 1); // the last configure is the restore
     expect(r.valid).toBe(true);
   });
@@ -110,6 +115,17 @@ describe("measurePassCosts", () => {
     expect(r.valid).toBe(false);
     expect(r.invalidReason).toMatch(/shader/);
     expect(r.shaderBuildsDuringMeasure).toBe(2);
+  });
+
+  it("is invalid when a frame in a batch skipped its passes", async () => {
+    const r = await measurePassCosts(fakeHost({ costs: { grass: 3 }, skipOnBatch: 1 }), { rounds: 2 });
+    expect(r.valid).toBe(false);
+    expect(r.invalidReason).toMatch(/skipped passes/);
+  });
+
+  it("cancels steady thermal drift: late passes cost the same as early ones", async () => {
+    const r = await measurePassCosts(fakeHost({ costs: { grass: 1, bloom: 1, fxaa: 1, grain: 1 }, drift: 0.2, jitter: 0 }), { rounds: 3 });
+    for (const p of r.passes) expect(p.deltaMs.p50).toBeCloseTo(1, 1);
   });
 
   it("is invalid when the tab is hidden during the run", async () => {

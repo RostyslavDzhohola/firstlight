@@ -5,9 +5,11 @@
 // baseline minus the same view with that pass switched off. The method is vgpu's `gpuFrameTime`
 // wall-clock fallback (https://vgpu.sh, #36), written here because three owns its command encoders.
 //
-// Each round measures the baseline, every feature off in turn, the optional GTAO sweep, then the
-// baseline again; a delta is taken against that round's mean baseline, so slow thermal drift hits
-// every pass alike. Pure: no three or DOM, the host does the rendering (fake in tests).
+// Each round alternates the baseline with every other configuration (B X1 B X2 B … B): a delta is
+// the mean of the two baselines next to it minus the configuration, so slow thermal drift cancels
+// locally. Each batch also reports the draw calls of its frames: a frame far below the batch's
+// maximum skipped its passes (three schedules passes per node frame), and the run is invalid.
+// Pure: no three or DOM, the host does the rendering (fake in tests).
 
 import { percentile } from "./timing.ts";
 
@@ -27,7 +29,7 @@ export interface PassCostHost {
   /** Let the configuration settle: pipeline rebuilds, shader builds, streaming. Not measured. */
   warm(): Promise<void>;
   /** Render `frames` frames back to back and wait for the GPU: wall time, and the CPU time of the loop. */
-  renderBatch(frames: number): Promise<{ wallMs: number; cpuMs: number }>;
+  renderBatch(frames: number): Promise<{ wallMs: number; cpuMs: number; draws?: { min: number; max: number } }>;
   /** Running count of shader (node) builds. */
   shaderBuilds(): number;
   visible(): boolean;
@@ -75,7 +77,7 @@ export interface PassCostReport {
   baseline: Stat & { cpuMs: number };
   /** The CPU loop takes ≥ 90% of the wall time: deltas may be CPU cost, not GPU. */
   cpuBound: boolean;
-  /** Spread of the baseline batches (p95 of |batch − median|), ms per frame. */
+  /** p95 of |difference| between consecutive baseline batches, ms per frame. */
   noiseMs: number;
   /** Ranked by delta p50, largest first. */
   passes: PassCost[];
@@ -105,8 +107,8 @@ export async function measurePassCosts(host: PassCostHost, opts: PassCostOptions
 
   const baseWall: number[] = [];
   const baseCpu: number[] = [];
+  const baseDiffs: number[] = [];
   const deltas = new Map<string, number[]>(measured.map((f) => [f, []]));
-  const aoOff: number[] = [];
   const gtaoRaw = GTAO_SWEEP.map(() => [] as number[]);
   let builds = 0;
   let invalidReason: string | null = null;
@@ -116,35 +118,43 @@ export async function measurePassCosts(host: PassCostHost, opts: PassCostOptions
     await host.configure(config);
     await host.warm();
     const b0 = host.shaderBuilds();
-    const { wallMs, cpuMs } = await host.renderBatch(frames);
+    const { wallMs, cpuMs, draws } = await host.renderBatch(frames);
     const b = host.shaderBuilds() - b0;
     if (b > 0) {
       builds += b;
       fail(`${builds} shader build(s) during a measured batch`);
     }
+    if (draws && draws.max > 0 && draws.min < draws.max * 0.5) fail(`frames in a batch skipped passes (draws ${draws.min}–${draws.max})`);
     if (!host.visible()) fail("the tab was hidden during the run");
     return { wall: wallMs / frames, cpu: cpuMs / frames };
   };
 
   try {
     for (let r = 0; r < rounds; r++) {
-      const first = await sample({ off: NONE });
-      const off = new Map<string, number>();
-      for (const f of measured) off.set(f, (await sample({ off: new Set([f]) })).wall);
-      const sweepMs: number[] = [];
-      let aoOffMs = off.get("ao");
-      if (sweep) {
-        aoOffMs ??= (await sample({ off: new Set(["ao"]) })).wall;
-        for (const ao of GTAO_SWEEP) sweepMs.push((await sample({ off: NONE, ao })).wall);
+      let prev = await sample({ off: NONE });
+      baseWall.push(prev.wall);
+      baseCpu.push(prev.cpu);
+      /** Measure a configuration between two baselines: baseline − configuration, drift-corrected. */
+      const bracketed = async (config: PassConfig): Promise<number> => {
+        const x = await sample(config);
+        const next = await sample({ off: NONE });
+        baseWall.push(next.wall);
+        baseCpu.push(next.cpu);
+        baseDiffs.push(Math.abs(next.wall - prev.wall));
+        const base = (prev.wall + next.wall) / 2;
+        prev = next;
+        return base - x.wall;
+      };
+      const roundDelta = new Map<string, number>();
+      for (const f of measured) {
+        const d = await bracketed({ off: new Set([f]) });
+        deltas.get(f)!.push(d);
+        roundDelta.set(f, d);
       }
-      const last = await sample({ off: NONE });
-      baseWall.push(first.wall, last.wall);
-      baseCpu.push(first.cpu, last.cpu);
-      const base = (first.wall + last.wall) / 2;
-      for (const [f, ms] of off) deltas.get(f)!.push(base - ms);
-      if (sweep && aoOffMs !== undefined) {
-        aoOff.push(aoOffMs);
-        sweepMs.forEach((ms, i) => gtaoRaw[i]!.push(ms - aoOffMs!));
+      if (sweep) {
+        // GTAO cost against AO off = (base − AO off) − (base − override).
+        const aoDelta = roundDelta.get("ao") ?? (await bracketed({ off: new Set(["ao"]) }));
+        for (let i = 0; i < GTAO_SWEEP.length; i++) gtaoRaw[i]!.push(aoDelta - (await bracketed({ off: NONE, ao: GTAO_SWEEP[i]! })));
       }
     }
   } catch (e) {
@@ -153,8 +163,7 @@ export async function measurePassCosts(host: PassCostHost, opts: PassCostOptions
     await host.configure({ off: NONE, ao: null });
   }
 
-  const med = percentile(baseWall, 0.5);
-  const noise = r3(percentile(baseWall.map((v) => Math.abs(v - med)), 0.95));
+  const noise = r3(percentile(baseDiffs, 0.95));
   const passes: PassCost[] = measured
     .filter((f) => deltas.get(f)!.length > 0)
     .map((f) => {
