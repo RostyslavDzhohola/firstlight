@@ -4,7 +4,7 @@
 
 import * as THREE from "three/webgpu";
 import { flags } from "../config.ts";
-import { buildPost, MENU_GRADE, postUniforms, setGrade, type GradeParams, type PostBuild } from "./post.ts";
+import { buildPost, MENU_GRADE, postUniforms, setGrade, type AoOverride, type GradeParams, type PostBuild } from "./post.ts";
 import {
   clearStored, emptyStored, FEATURES, killSwitches, loadStored, resolveSettings, saveStored, TIERS, tierIndex,
   urlScale, urlTier, validAutoTier, type Feature, type ResolvedSettings, type StoredGfx, type Tier,
@@ -58,6 +58,11 @@ export interface RenderCtx {
   /** Forget all saved graphics settings (tolerates disabled storage). Caller reloads. */
   resetSettings(): void;
   setFeature(f: Feature, on: boolean | null): void;
+  /**
+   * Bench-only (`?bench=passes`, #52): features forced off and a GTAO override, for this session
+   * only; never saved. An empty set and null restore the normal settings.
+   */
+  setBenchOverrides(o: { off: ReadonlySet<Feature>; ao: AoOverride | null }): void;
   /** User render scale on top of the tier (null = tier default). */
   setRenderScale(s: number | null): void;
   setGrade(g: GradeParams): void;
@@ -163,16 +168,20 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
   let passCompileOff = false;
   let postKey = "";
   let photo = false;
+  /** Session-only bench overrides (setBenchOverrides): never persisted. */
+  let benchOff: ReadonlySet<Feature> = new Set();
+  let aoOverride: AoOverride | null = null;
+  const killsNow = (): Set<Feature> => (benchOff.size ? new Set([...kills, ...benchOff]) : kills);
 
   const postKeyOf = (s: ResolvedSettings) =>
-    [s.on.bloom, s.on.ao, s.on.traa, s.on.fxaa, s.on.grade, s.on.grain, s.on.vignette, s.post.ao, s.post.bloomScale, photo].join(",");
+    [s.on.bloom, s.on.ao, s.on.traa, s.on.fxaa, s.on.grade, s.on.grain, s.on.vignette, s.post.ao, s.post.bloomScale, photo, aoOverride ? `${aoOverride.samples}@${aoOverride.scale}` : ""].join(",");
 
   /** Build the post pipeline for the current settings (`force`: also when they haven't changed). */
   function rebuildPost(force = false) {
     const key = postKeyOf(settings);
     if (post && key === postKey && !force) return;
     post?.dispose();
-    post = buildPost(scene, camera, settings, photo);
+    post = buildPost(scene, camera, settings, photo, aoOverride);
     passDepth = null;
     postKey = key;
     pipeline.outputNode = post.outputNode;
@@ -181,7 +190,7 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
 
   function apply() {
     const prev = settings;
-    settings = resolveSettings(tier, auto, webgpu, stored, kills);
+    settings = resolveSettings(tier, auto, webgpu, stored, killsNow());
     renderer.shadowMap.enabled = settings.on.shadows && settings.shadows.mode === "map";
     rebuildPost();
     ctx.resize();
@@ -260,6 +269,11 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
       else features[f] = on;
       stored = { ...stored, features };
       saveStored(stored);
+      apply();
+    },
+    setBenchOverrides(o) {
+      benchOff = new Set(o.off);
+      aoOverride = o.ao;
       apply();
     },
     setRenderScale(s) {

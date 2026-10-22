@@ -63,8 +63,14 @@ export interface PostBuild {
   dispose(): void;
 }
 
+/** Bench-only GTAO override (`?bench=passes`, #52): sample count and resolution scale. */
+export interface AoOverride {
+  samples: number;
+  scale: number;
+}
+
 /** Build the pipeline's output node for the given settings. */
-export function buildPost(scene: THREE.Scene, camera: THREE.Camera, s: ResolvedSettings, photo = false): PostBuild {
+export function buildPost(scene: THREE.Scene, camera: THREE.Camera, s: ResolvedSettings, photo = false, aoOverride: AoOverride | null = null): PostBuild {
   const disposables: { dispose(): void }[] = [];
   const scenePass = pass(scene, camera);
   disposables.push(scenePass);
@@ -78,7 +84,8 @@ export function buildPost(scene: THREE.Scene, camera: THREE.Camera, s: ResolvedS
     // with TRAA it filters temporally, otherwise a DenoiseNode pass cleans it (three's guidance).
     const depth = scenePass.getTextureNode("depth");
     const aoNode = ao(depth, null as unknown as THREE.Node, camera);
-    aoNode.resolutionScale = s.post.ao === "full" ? 1 : 0.5;
+    aoNode.resolutionScale = aoOverride?.scale ?? (s.post.ao === "full" ? 1 : 0.5);
+    if (aoOverride) aoNode.samples.value = aoOverride.samples;
     aoNode.radius.value = 0.6;
     aoNode.useTemporalFiltering = s.on.traa;
     disposables.push(aoNode);
