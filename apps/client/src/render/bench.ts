@@ -384,11 +384,6 @@ export class Bench {
       this.finish(null, "per-pass timing is WebGPU only (needs the GPU queue's submitted-work-done)");
       return;
     }
-    const { measurePassCosts } = await import("./passCost.ts");
-    // three runs a pass (scene pass, GTAO, bloom, …) once per node frame, and only its animation
-    // loop advances the node frame: each measured frame must advance it, or later frames in a batch
-    // reuse the first one's pass textures and draw almost nothing.
-    const nodeFrame = (ctx.renderer as unknown as { _nodes: { nodeFrame: { update(): void; frameId: number } } })._nodes.nodeFrame;
     const info = ctx.renderer.info;
     const nextFrame = () => deadline(new Promise<void>((r) => requestAnimationFrame(() => r())), 5000, "a frame (is the tab hidden?)");
     const idle = () => deadline(device.queue.onSubmittedWorkDone(), 20_000, "the GPU queue");
@@ -397,6 +392,12 @@ export class Bench {
     const total = p.rounds * (2 * p.features.length + 15);
     let report: PassCostReport | null = null;
     try {
+      // Inside the try: a failed chunk load or a changed three internal ends the run with passes null.
+      const { measurePassCosts } = await import("./passCost.ts");
+      // three runs a pass (scene pass, GTAO, bloom, …) once per node frame, and only its animation
+      // loop advances the node frame: each measured frame must advance it, or later frames in a batch
+      // reuse the first one's pass textures and draw almost nothing.
+      const nodeFrame = (ctx.renderer as unknown as { _nodes: { nodeFrame: { update(): void; frameId: number } } })._nodes.nodeFrame;
       report = await measurePassCosts(
         {
           features: p.features,
