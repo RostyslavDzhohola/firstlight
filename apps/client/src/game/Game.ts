@@ -745,6 +745,11 @@ export class Game {
       this.input.endFrame();
       return this.env.silence();
     }
+    // `?bench=passes` draws its own measured frames: no game frame may render in between (#52).
+    if (this.bench?.holding) {
+      this.input.endFrame();
+      return;
+    }
     const cpu0 = performance.now();
 
     let focus: THREE.Vector3;

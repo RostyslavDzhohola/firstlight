@@ -62,7 +62,7 @@ async function returningVisit(info: Parameters<Parameters<typeof test>[2]>[1], g
 const TRACE_CATEGORIES = ["devtools.timeline", "disabled-by-default-devtools.timeline", "toplevel", "v8.execute", "gpu", "disabled-by-default-v8.cpu_profiler"];
 
 test(`bench · shader warm-up · ${MODE || "off"} · ${TIER}`, { tag: ["@bench"] }, async ({ player: fixturePlayer, page: fixturePage }, info) => {
-  test.skip(!MODE, "set BENCH_MODE=serial|parallel to run the warm-up bench");
+  test.skip(MODE !== "serial" && MODE !== "parallel", "set BENCH_MODE=serial|parallel to run the warm-up bench");
   const extra: Record<string, true | string> = { tier: TIER };
   if (MODE === "serial") extra.serialcompile = true;
   for (const f of (process.env.BENCH_FLAGS ?? "").split(",").filter(Boolean)) extra[f] = true; // e.g. warmdiag

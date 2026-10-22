@@ -8,6 +8,10 @@
 //                 ?benchcrowd=N (then with bursts).
 //   ?bench=g1     the G1 gate workload (SPEC §7.1/§7.4): Portus (unless ?body=…), 40 local dummy
 //                 avatars + particle bursts, 180 s warm-up (the Air throttles), 60 s run.
+//   ?bench=passes per-pass GPU cost (#52, passCost.ts): Portus (unless ?body=…), 120 s warm-up on
+//                 the path, then a fixed view rendered in uncapped batches with each feature off in
+//                 turn, plus a GTAO samples × resolution sweep. WebGPU only (WebGL2: passes null).
+//                 ?benchpasses=ao,bloom,… limits the features; ?benchrounds=N, ?benchbatch=N.
 // Overrides: ?benchcrowd=N, ?benchwarm=S, ?benchtime=S.
 
 import * as THREE from "three/webgpu";
@@ -18,17 +22,44 @@ import { AvatarView } from "./Avatars.ts";
 import type { ParticleSystem } from "./particles.ts";
 import type { RenderCtx } from "./renderer.ts";
 import { localFrame, type V3 } from "./sunFrame.ts";
+import type { PassConfig, PassCostReport } from "./passCost.ts";
+import { FEATURES, type Feature } from "./quality.ts";
 import { maxOf, percentile } from "./timing.ts";
 import { shaderStats } from "./warmup.ts";
 
+/**
+ * Features `?bench=passes` measures by default (each must have a kill switch). Not weather: bench
+ * mode forces clear weather (Environment.setBenchMode), so its toggle would measure nothing.
+ */
+export const PASS_FEATURES: readonly Feature[] = [
+  "grass", "trees", "detail", "shadows", "water", "sky", "skyplanets", "fog", "ao", "traa", "bloom", "fxaa", "grade", "grain",
+  "vignette", "particles",
+];
+
+/** Rejects after `ms`: no wait in the passes bench may hang the run (hidden tab, stalled queue). */
+function deadline<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer = 0;
+  return Promise.race([
+    p.finally(() => clearTimeout(timer)),
+    new Promise<never>((_, reject) => {
+      timer = window.setTimeout(() => reject(new Error(`${what} took over ${ms / 1000} s`)), ms);
+    }),
+  ]);
+}
+
+/** The passes preset's fixed view: a point on the rising orbit looking at the spawn (terrain, town, sky). */
+const PASS_VIEW = 0.42;
+
 export interface BenchConfig {
-  preset: "renderer" | "g1";
+  preset: "renderer" | "g1" | "passes";
   crowd: number;
   bursts: boolean;
   warmSeconds: number;
   runSeconds: number;
   /** Body to load for the bench (null = whatever the game would load). */
   body: BodyId | null;
+  /** `passes` only: the features to measure, rounds and frames per batch. */
+  passes: { features: Feature[]; rounds: number; framesPerBatch: number } | null;
 }
 
 const num = (name: string): number | null => {
@@ -43,16 +74,26 @@ export function benchConfig(): BenchConfig | null {
   const v = flags.get("bench");
   if (v === null) return null;
   const g1 = v.toLowerCase() === "g1";
+  const passes = v.toLowerCase() === "passes";
   const want = flags.get("body");
   const urlBody = want && (BODY_IDS as readonly string[]).includes(want) ? (want as BodyId) : null;
   const crowd = Math.max(0, Math.min(200, num("benchcrowd") ?? (g1 ? 40 : 0)));
+  const listed = (flags.get("benchpasses") ?? "").split(",").map((f) => f.trim()).filter(Boolean);
+  const features = listed.length ? (listed.filter((f) => (FEATURES as readonly string[]).includes(f)) as Feature[]) : [...PASS_FEATURES];
   return {
-    preset: g1 ? "g1" : "renderer",
+    preset: g1 ? "g1" : passes ? "passes" : "renderer",
     crowd,
     bursts: g1 || crowd > 0,
-    warmSeconds: Math.max(0, num("benchwarm") ?? (g1 ? 180 : 5)),
+    warmSeconds: Math.max(0, num("benchwarm") ?? (g1 ? 180 : passes ? 120 : 5)),
     runSeconds: Math.max(5, num("benchtime") ?? 60),
-    body: urlBody ?? (g1 ? "portus" : null),
+    body: urlBody ?? (g1 || passes ? "portus" : null),
+    passes: passes
+      ? {
+          features,
+          rounds: Math.max(1, Math.min(50, Math.round(num("benchrounds") ?? 8))),
+          framesPerBatch: Math.max(1, Math.min(240, Math.round(num("benchbatch") ?? 16))),
+        }
+      : null,
   };
 }
 
@@ -79,7 +120,7 @@ const PALETTE_BURST = [0x36f9f6, 0xffb86b, 0xff7edb, 0x9cff6b, 0xffd166, 0xb48cf
 
 export interface BenchResult {
   v: 1;
-  preset: "renderer" | "g1";
+  preset: "renderer" | "g1" | "passes";
   when: string;
   body: string;
   backend: "webgpu" | "webgl2";
@@ -107,6 +148,9 @@ export interface BenchResult {
   grassBlades: number;
   props: number;
   shaderBuildsDuringRun: number;
+  /** `?bench=passes` only: per-pass GPU cost, or null with `passesNote` on WebGL2. */
+  passes?: PassCostReport | null;
+  passesNote?: string;
   flags: string;
   userAgent: string;
 }
@@ -119,7 +163,12 @@ export class Bench {
   private readonly startWall = performance.now();
   private runStart = 0;
   private runEnd = 0;
-  private phase: "warm" | "run" | "done" = "warm";
+  private phase: "warm" | "run" | "measure" | "done" = "warm";
+  /**
+   * True while the passes bench draws its own frames: the game loop must not render or update
+   * (Game.frame returns early), so only the measured batches reach the GPU.
+   */
+  holding = false;
   private readonly frames: number[] = [];
   private readonly gpu: number[] = [];
   private readonly draws: number[] = [];
@@ -224,13 +273,21 @@ export class Bench {
       // Warm-up flies the same path so the GPU reaches its steady (throttled) state on the load.
       this.pose((warmed / runMs) % 1, camera);
       this.el.textContent = `BENCH ${this.config.preset} warming up ${(warmed / 1000).toFixed(0)} / ${this.warm} s`;
-      if (warmed >= this.warm * 1000) {
+      if (warmed >= this.warm * 1000 && this.config.passes) {
+        this.phase = "measure";
+        this.runStart = now;
+        this.shaderBuildsAtStart = shaderStats().total;
+        this.pose(PASS_VIEW, camera);
+        void this.measurePasses(camera);
+      } else if (warmed >= this.warm * 1000) {
         this.phase = "run";
         this.runStart = now;
         this.shaderBuildsAtStart = shaderStats().total;
         this.recording = false;
         this.pose(0, camera);
       }
+    } else if (this.phase === "measure") {
+      this.pose(PASS_VIEW, camera);
     } else {
       this.pose(Math.min(0.9999, (now - this.runStart) / runMs), camera);
     }
@@ -317,7 +374,90 @@ export class Bench {
     return this.views;
   }
 
-  private finish() {
+  /** `?bench=passes`: per-pass costs at the fixed view, then the usual result with `passes`. */
+  private async measurePasses(camera: THREE.PerspectiveCamera) {
+    const ctx = this.host.ctx;
+    const p = this.config.passes!;
+    const device = (ctx.renderer.backend as { device?: GPUDevice }).device;
+    if (!ctx.webgpu || !device) {
+      this.runEnd = performance.now();
+      this.finish(null, "per-pass timing is WebGPU only (needs the GPU queue's submitted-work-done)");
+      return;
+    }
+    const info = ctx.renderer.info;
+    const nextFrame = () => deadline(new Promise<void>((r) => requestAnimationFrame(() => r())), 5000, "a frame (is the tab hidden?)");
+    const idle = () => deadline(device.queue.onSubmittedWorkDone(), 20_000, "the GPU queue");
+    let baseline = true;
+    let batches = 0;
+    const total = p.rounds * (2 * p.features.length + 15);
+    let report: PassCostReport | null = null;
+    try {
+      // Inside the try: a failed chunk load or a changed three internal ends the run with passes null.
+      const { measurePassCosts } = await import("./passCost.ts");
+      // three runs a pass (scene pass, GTAO, bloom, …) once per node frame, and only its animation
+      // loop advances the node frame: each measured frame must advance it, or later frames in a batch
+      // reuse the first one's pass textures and draw almost nothing.
+      const nodeFrame = (ctx.renderer as unknown as { _nodes: { nodeFrame: { update(): void; frameId: number } } })._nodes.nodeFrame;
+      report = await measurePassCosts(
+        {
+          features: p.features,
+          isOn: (f) => !!ctx.settings.on[f as Feature],
+          configure: async (c: PassConfig) => {
+            baseline = c.off.size === 0 && !c.ao;
+            ctx.setBenchOverrides({ off: c.off as ReadonlySet<Feature>, ao: c.ao ?? null });
+          },
+          warm: async () => {
+            // Real game frames (world updates, streaming, pipeline rebuilds) until shader builds stop.
+            this.holding = false;
+            let quiet = 0;
+            for (let i = 0; i < 240 && quiet < 6; i++) {
+              const b = shaderStats().total;
+              await nextFrame();
+              quiet = shaderStats().total === b ? quiet + 1 : 0;
+            }
+            this.pose(PASS_VIEW, camera);
+            this.holding = true;
+          },
+          renderBatch: async (frames) => {
+            await idle();
+            let min = Infinity, max = 0;
+            const t0 = performance.now();
+            for (let i = 0; i < frames; i++) {
+              info.reset();
+              nodeFrame.update();
+              (info as { frame: number }).frame = nodeFrame.frameId;
+              ctx.render();
+              ctx.gpu.frame(); // keeps three's timestamp query pool drained
+              const d = info.render.drawCalls;
+              min = Math.min(min, d);
+              max = Math.max(max, d);
+              if (baseline && i === frames - 1) {
+                this.draws.push(d);
+                this.tris.push(info.render.triangles);
+              }
+            }
+            const cpuMs = performance.now() - t0;
+            await idle();
+            const wallMs = performance.now() - t0;
+            batches++;
+            this.el.textContent = `BENCH passes ${batches} / ~${total} batches`;
+            return { wallMs, cpuMs, draws: { min, max } };
+          },
+          shaderBuilds: () => shaderStats().total,
+          visible: () => document.visibilityState === "visible",
+        },
+        { rounds: p.rounds, framesPerBatch: p.framesPerBatch, gtao: true },
+      );
+    } catch (e) {
+      console.error("[bench] passes failed", e);
+    } finally {
+      this.holding = false;
+    }
+    this.runEnd = performance.now();
+    this.finish(report);
+  }
+
+  private finish(passes?: PassCostReport | null, passesNote?: string) {
     this.phase = "done";
     const f = this.frames;
     const mean = f.reduce((a, b) => a + b, 0) / Math.max(1, f.length);
@@ -353,6 +493,7 @@ export class Bench {
       grassBlades: st.grassBlades,
       props: st.props,
       shaderBuildsDuringRun: shaderStats().total - this.shaderBuildsAtStart,
+      ...(this.config.passes ? { passes: passes ?? null, ...(passesNote ? { passesNote } : {}) } : {}),
       flags: location.search,
       userAgent: navigator.userAgent,
     };
