@@ -32,6 +32,8 @@ Code is MIT (`LICENSE`), our own art CC BY 4.0 (`LICENSE-ART`).
 - `apps/assets-worker`: Cloudflare Worker serving large assets under `/v/<buildId>/…`.
 - `tools/bots` load-test bots; `tools/blender/characters` headless Blender build of the starter GLBs;
   `tools/sfx` ElevenLabs sound-effect generation and processing (writes to `/tmp`, never the repo).
+- `tools/blender/chars3d` (characters) and `tools/blender/props3d` (weapons, held props): models
+  sculpted in code. To make or change one, follow `.claude/skills/models-as-code/SKILL.md`.
 
 ## Commands
 
