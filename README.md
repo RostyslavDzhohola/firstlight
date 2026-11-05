@@ -5,6 +5,8 @@ life. Die, and everything you carried drops into a glowing pile for anyone to ta
 
 Play: https://firstlight.one4all.dev (desktop browser, keyboard and mouse, WebGPU or WebGL2).
 
+Every pull request's preview is play-tested on a cloud GPU by [Grok Playtester](https://github.com/RostyslavDzhohola/grok-playtester), which comments the gameplay video and a fix list on the PR.
+
 ## What's in it
 
 - Planets you can walk around (they are real spheres), portals between them, and a safe hub, Portus.
