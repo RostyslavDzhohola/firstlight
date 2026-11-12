@@ -2,7 +2,10 @@
 // characters join flagged as agents, walk the real way in (Portus, the portal, the outpost gate),
 // one farms a creature, nobody is corrected by the server, and they leave when told to.
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import type { Room } from "@colyseus/sdk";
+import { BODIES } from "@firstlight/shared";
+import { PF } from "@firstlight/shared/net/schema";
 import { CAST, plan, residentId, runResidents } from "@firstlight/agent-tools/residents";
 import { bodyWorld } from "@firstlight/agent-kit";
 import { nearArena, roundArena, stopsOn } from "@firstlight/agent-tools/resident-roles";
@@ -15,7 +18,8 @@ import type { Game } from "../src/app.ts";
 import { AGENT_RULES, agentsOnline, resetAgentSlots } from "../src/world/agents.ts";
 import { NPC_TUNING } from "../src/world/npc/index.ts";
 import { liveRooms } from "../src/social/index.ts";
-import { startServer, waitFor } from "./helpers.ts";
+import { safeLeave, startServer, waitFor } from "./helpers.ts";
+import { adminBot, me, offset, spawnNpc } from "./npc-bots.ts";
 
 let game: Game;
 let url: string;
@@ -27,6 +31,11 @@ beforeAll(async () => {
   game = await startServer();
   NPC_TUNING.ambient = true; // the hunter farms the world's own creatures
   url = `http://127.0.0.1:${game.port}`;
+});
+
+const rooms: Room[] = [];
+afterEach(async () => {
+  for (const r of rooms.splice(0)) await safeLeave(r);
 });
 
 afterAll(async () => {
@@ -119,6 +128,52 @@ describe("residents", () => {
     expect(lines.some((l) => l.includes("Tamsin_Hollis") && l.includes("walks to "))).toBe(true);
     // Stopped cleanly: nobody is left in the world.
     await waitFor(() => agentsOnline() === 0, 20_000);
+  }, 300_000);
+
+  it("no kill stealing: a resident hunter stands back when a person joins its fight", async () => {
+    AGENT_RULES.enabled = true;
+    const lines: string[] = [];
+    const run = runResidents({ url, count: 1, bodies: ["arcadia"], roles: ["hunter"], cpu: 4, dev: true, budgetMs: 240_000, log: (l) => lines.push(l) });
+    const resident = () => [...liveRooms].filter((r) => r.bodyDef.id === "arcadia").flatMap((r) => [...r.actors.values()]).find((a) => a.identity.name === "Brindle_Oake");
+    try {
+      // Out of the outpost (the same character as the test above: it comes back where it left).
+      await waitFor(() => !!resident() && (resident()!.state.flags & (PF.SAFE | PF.PROTECTED)) === 0, 120_000);
+      const R = BODIES.arcadia.radius;
+      const at = (): [number, number, number] => [resident()!.state.x, resident()!.state.y, resident()!.state.z];
+      const person = await adminBot(game, rooms, "personZ", "arcadia", offset(at(), 6, 6, R), 8);
+      // A creature tough enough for a fight worth joining: the hunter is put at level 7 so that it is fair game for it.
+      person.send("admin", { cmd: "level", args: { level: 7, target: resident()!.id } });
+      await waitFor(() => resident()!.char.level === 7);
+      const npc = await spawnNpc(person, "hopbit", offset(at(), 7, 0, R), { level: 8, instant: true });
+      const creature = () => (person.state as any).npcs?.get(npc);
+      await waitFor(() => !!creature());
+      const full: number = creature().maxHp;
+      await waitFor(() => !creature() || creature().hp < full, 60_000); // the resident's first hit
+      expect(creature(), lines.join("\n")).toBeTruthy();
+      // The person joins in, and keeps shooting until it is dead.
+      const iv = setInterval(() => {
+        const n = creature();
+        const p = me(person);
+        if (!n || !p) return;
+        const l = Math.hypot(p.x, p.y, p.z);
+        const o = [p.x + (p.x / l) * 1.6, p.y + (p.y / l) * 1.6, p.z + (p.z / l) * 1.6];
+        const t = [n.x + (p.x / l) * 0.4, n.y + (p.y / l) * 0.4, n.z + (p.z / l) * 0.4];
+        const d = Math.hypot(t[0]! - o[0]!, t[1]! - o[1]!, t[2]! - o[2]!);
+        person.send("fire", { slot: 0, ox: o[0], oy: o[1], oz: o[2], dx: (t[0]! - o[0]!) / d, dy: (t[1]! - o[1]!) / d, dz: (t[2]! - o[2]!) / d, t: Date.now() });
+      }, 350);
+      try {
+        await waitFor(() => run.report().residents[0]!.yields >= 1, 30_000);
+        expect(lines.some((l) => l.includes("Brindle_Oake") && l.includes("leaves the Hopbit to personZ")), lines.join("\n")).toBe(true);
+        // It stood back: a few seconds on, it is well clear of the creature it left.
+        await waitFor(() => !creature() || Math.hypot(creature().x - resident()!.state.x, creature().y - resident()!.state.y, creature().z - resident()!.state.z) > 6, 15_000);
+      } finally {
+        clearInterval(iv);
+      }
+      expect(run.report().residents[0]!.corrections).toBe(0);
+    } finally {
+      run.stop();
+      await run.done;
+    }
   }, 300_000);
 
   it("stops at once and says why when the server has agents off", async () => {

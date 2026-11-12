@@ -253,7 +253,7 @@ describe("the real processes (Node runs the .ts sources directly)", () => {
     expect(JSON.parse(trial.out)).toMatchObject({ ok: false, reason: "not accepted" });
     const tools = (await cli("tools")).out;
     expect(tools).toContain("move  --target --bearing --distance");
-    expect(tools).toContain("cast  --spell <skipstep|frostbloom|wishfall|glasswing> --target --bearing --distance --pos");
+    expect(tools).toContain("cast  --spell <skipstep|frostbloom|wishfall|glasswing> --target --bearing --distance --pos --pvp");
     expect(tools).toContain("trial  --mission <A4|H4|T1|T2|T3>");
     expect(JSON.parse((await cli("quit")).out)).toEqual({ ok: true, left: true });
     await new Promise<void>((ok) => (bridgeProc.exitCode !== null ? ok() : bridgeProc.once("exit", () => ok())));

@@ -166,7 +166,7 @@ usually `hint` (what to do instead). One action runs at a time; `stop` interrupt
 | `travel` | `portal` (a body) **or** `pad` (a number) | Step through the portal you stand at, or fast travel between discovered pads. |
 | `say` | `phrase` | One of the game's fixed phrases (there is no free chat). |
 | `respawn` | `starter?` | After death: a new life in Portus. |
-| `cast` | `spell` (`skipstep`, `frostbloom`, `wishfall`, `glasswing`); one of `target`, `bearing` (+ `distance`), `pos` | Cast a spell (see [Spells](#spells)). |
+| `cast` | `spell` (`skipstep`, `frostbloom`, `wishfall`, `glasswing`); one of `target`, `bearing` (+ `distance`), `pos`; `pvp?` | Cast a spell (see [Spells](#spells)). |
 | `leave` | `logout?` | Leave the game. |
 
 Move targets: an id from the observation (a creature, a player, a loot pile, a ring or beacon), or
@@ -266,7 +266,7 @@ throws for a game reason.
 | `phrase(n \| text)` | `phrase("Thanks")` | `Truce?`, `Help!`, `Follow me`, `Boss here`, `Thanks`, `GG`. |
 | `respawn({ starter? })` | `respawn({ starter: "ash" })` | Only while dead. |
 | `skipTutorial()` | | Skips the Portus training dummies (which pay 50 XP when done). |
-| `cast(spell, { targetId?, bearing?, distance?, pos? })` | `cast("wishfall", { targetId: "n14" })` | A spell from the spellbook. Result: `aether` left, and per spell `moved`, `slowed`, `landsIn`, `shell`. Reasons: `locked`, `cooldown`, `aether`, `safe zone`, `protected`, `swimming`, `blocked`. |
+| `cast(spell, { targetId?, bearing?, distance?, pos?, pvp? })` | `cast("wishfall", { targetId: "n14" })` | A spell from the spellbook. Result: `aether` left, and per spell `moved`, `slowed`, `landsIn`, `shell`. Reasons: `locked`, `cooldown`, `aether`, `safe zone`, `protected`, `swimming`, `blocked`, `players in range`. |
 | `close({ logout? })` | `close({ logout: true })` | In a safe zone the body leaves at once; elsewhere it stays 30 s unless you log out (about 10 s standing still). |
 
 `agent.events` holds the last 60 events, `agent.corrections` counts movement the server refused
@@ -297,7 +297,7 @@ which are ready; `cast` sends the game's own `cast` message and the server decid
 | Spell | Level | Aether | Cooldown | What it does | Aim |
 | --- | --- | --- | --- | --- | --- |
 | `skipstep` | 1 | 20 | 6 s | Blink up to 10 m along the ground. Walls, deep water and ledges stop it; a wall right ahead refuses it (`blocked`, nothing spent). | `bearing`, `target`, or the way you face |
-| `frostbloom` | 3 | 30 | 10 s | Frost within 5 m of you: damage and a 3 s slow. It hurts players too. | none |
+| `frostbloom` | 3 | 30 | 10 s | Frost within 5 m of you: damage and a 3 s slow. It hurts players too (see below). | none |
 | `wishfall` | 6 | 45 | 14 s | A star on a ground point up to 30 m away; it lands 1.2 s later, 4 m across. You take half if you stand in it. | `target`, `bearing` + `distance`, or `pos` |
 | `glasswing` | 9 | 35 | 18 s | A shell that soaks up damage for 4 s. | none |
 
@@ -306,6 +306,10 @@ await agent.cast("skipstep", { bearing: 180 });          // { ok: true, moved: 1
 await agent.cast("wishfall", { targetId: "n14" });       // { ok: true, landsIn: 1.2, distance: 11.8 }
 await agent.cast("frostbloom");                          // { ok: false, reason: "locked", hint: "Frostbloom unlocks at level 3 (you are level 1)" }
 ```
+
+Frostbloom and Wishfall hurt everyone in their blast, players included. The kit doesn't cast them
+while a player stands in it: the cast is refused with `players in range` and nothing is spent. Pass
+`pvp: true` only to defend yourself against a player who attacked you first.
 
 Skipstep moves the body on the server. The server answers with the new position, the kit takes it,
 and the walk or fight in progress carries on from there; it is not counted in `corrections`.
@@ -382,7 +386,7 @@ Juniper_Fenn (hunt-chaser), then Garnet_Moss, Hesper_Dunn, Sable_Finch, Corbin_R
 
 | Role | What it does |
 | --- | --- |
-| hunter | Lives on a planet. Takes the guide's hunts, farms creatures of its own level within 190 m of the main pad, picks up its own loot, drinks and retreats when hurt. |
+| hunter | Lives on a planet. Takes the guide's hunts, farms hostile creatures of its own level within 190 m of the main pad (peaceful wildlife is left alone), picks up its own loot, drinks and retreats when hurt. |
 | wanderer | Walks between pads, portals and named landmarks, stops to look, and greets people who come within 12 m with the phrase wheel (once every few minutes each). |
 | trader | Idles at the shop and, in Portus, the plaza scoreboard: browses, buys a tonic when it has the coins, steps off the till so people can use it. |
 | hunt-chaser | Takes a trial of the Three Gleams from Sela Marchbank, travels to it, attempts it, comes back; opens the vault if it ever wins all three. |
@@ -390,8 +394,9 @@ Juniper_Fenn (hunt-chaser), then Garnet_Moss, Hesper_Dunn, Sable_Finch, Corbin_R
 House rules, the same for all: they never attack a player; a creature a person is fighting is that
 person's (they don't start on it, and break off and stand back when a person hits one they were
 fighting, so the person lands the last hits); they pick nothing inside a boss arena and walk round
-them; they take only their own loot. Ctrl-C stops them cleanly: each ends its step and leaves the
-world (at once in a safe zone, after the logout countdown elsewhere); a second Ctrl-C quits at once.
+them; they take only their own loot. Ctrl-C stops them cleanly: each ends its step, walks to the
+nearest safe zone and leaves there, so no body is left in the wild to be killed (up to a minute; one
+cut off from safety uses the logout countdown where it stands). A second Ctrl-C quits at once.
 The run ends with `RESULT {…}`: each resident's kills, deaths, yields, greetings, metres walked and
 `corrections`, and the CPU the process used.
 
@@ -418,10 +423,11 @@ so and stops. Production keeps agents off until the owner sets `AGENTS_ENABLED=1
 on the public game are the owner's decision, and so are how many (`AGENTS_PER_IP` on the machine
 that runs them, `AGENTS_PER_ROOM` for how much of a world they may fill).
 
-**Cost.** Eight residents in one process used about 0.18 of one M1 core on a busy machine (a
-five-minute run on portus and arcadia: 3 hunters fighting, the rest walking and idling), and about
-150 MB of memory. A standing resident costs almost nothing; a walking one a few probes of the shared
-solids per step.
+**Cost.** Measured on the M1 this was built on (2026-11-12, a machine busy with other work):
+eight residents in one process (2 hunters, 2 wanderers, 2 traders, 2 hunt-chasers on portus and
+arcadia, five minutes, 32 kills and two ring races between them) used 14.0 s of CPU over 319 s,
+0.044 of one core, and 135 MB of memory at the peak. A standing resident costs almost nothing; a
+walking one a few probes of the shared solids per step. `--cpu` is the ceiling, not the usual cost.
 
 ## Etiquette
 

@@ -16,7 +16,8 @@
 //
 // The server decides who gets in: agents must be on (AGENTS_ENABLED) and each address may run
 // AGENTS_PER_IP of them at once (default 4), each room copy AGENTS_PER_ROOM (default 8). Residents
-// the caps refuse are skipped with a line saying so. Ctrl-C stops them cleanly (a second one: now).
+// the caps refuse are skipped with a line saying so. Ctrl-C stops them cleanly: each walks to the
+// nearest safe zone and leaves there, so no body is left in the wild to be killed (a second Ctrl-C: now).
 
 import { homedir } from "node:os";
 import { join as join_ } from "node:path";
@@ -92,7 +93,7 @@ export interface ResidentsReport {
 export interface ResidentsRun {
   /** Resolves with the report when the run is over. */
   done: Promise<ResidentsReport>;
-  /** Stop cleanly: residents finish their step, leave the world (a logout countdown outside safe zones). */
+  /** Stop cleanly: residents end their step, walk to the nearest safe zone and leave the world there. */
   stop(): void;
   report(): ResidentsReport;
 }
@@ -270,22 +271,31 @@ export function runResidents(o: ResidentsOptions): ResidentsRun {
       else if (o.until?.(report())) (stopping = true), (ended = "stopped");
       else if (members.every((m) => m.state.status.startsWith("refused"))) (stopping = true), (ended = "nobody");
     }
-    // Stop cleanly: end what each is doing, then leave the world (in a safe zone the body goes at
-    // once; elsewhere the logout countdown takes about 10 s standing still).
+    // Stop cleanly. A body left in the wild lingers and can be killed, which costs the character
+    // its levels: so each resident ends what it is doing, lets its behaviour return, walks to the
+    // nearest safe zone (where a body leaves at once), and only then leaves. One too far from any
+    // safe zone (or cut off) uses the logout countdown where it stands, about 10 s.
+    for (const m of members) if (m.r.agent.status === "playing") await m.r.agent.stop();
+    await Promise.race([Promise.all(plays), sleep(4000)]);
     const final = report();
     await Promise.all(
       members.map(async (m) => {
         const a = m.r.agent;
-        if (a.status !== "playing" && a.status !== "reconnecting") return void a.close().catch(() => {});
-        await a.stop();
-        const safe = a.status === "playing" && a.observe({ peek: true }).self.zone === "safe";
-        await Promise.race([a.close({ logout: !safe }), sleep(16_000)]);
+        if (a.status !== "playing") return void a.close().catch(() => {});
+        let self = a.observe({ peek: true }).self;
+        if (!self.dead && self.zone !== "safe") {
+          m.r.log("walks to safety before leaving");
+          await Promise.race([a.moveTo("safe", { sprint: true, seconds: 45 }), sleep(46_000)]);
+          self = a.observe({ peek: true }).self;
+        }
+        await Promise.race([a.close({ logout: !self.dead && self.zone !== "safe" }), sleep(16_000)]);
       }),
     );
-    await Promise.race([Promise.all(plays), sleep(3000)]);
     const used = process.cpuUsage(cpu0);
+    for (const r of final.residents) if (r.status === "playing" || r.status === "away") r.status = "stopped";
     final.seconds = Math.round((Date.now() - t0) / 1000);
     final.cpu.seconds = Math.round((used.user + used.system) / 1e5) / 10;
+    final.cpu.cores = Math.round((final.cpu.seconds / Math.max(1, final.seconds)) * 1000) / 1000;
     final.ended = ended;
     return final;
   })();
@@ -338,7 +348,7 @@ async function main() {
   let asked = 0;
   const onSignal = () => {
     if (asked++) process.exit(130); // a second Ctrl-C: now
-    log("stopping: the residents are leaving (Ctrl-C again to quit at once)");
+    log("stopping: the residents walk to safety and leave, up to a minute (Ctrl-C again to quit at once)");
     run.stop();
   };
   process.on("SIGINT", onSignal);

@@ -193,7 +193,14 @@ export async function goTo(r: Resident, body: BodyId): Promise<boolean> {
   for (let hop = 0; hop < 2 && r.alive() && a.bodyId !== body; hop++) {
     const to: BodyId = a.bodyId === "portus" ? body : "portus";
     if (a.bodyId === "portus") await a.skipTutorial();
-    const walked = await walk(r, `portal:${to}`, { sprint: true, seconds: 90 });
+    // The portal can be most of a kilometre away (back from a trial): walk on while it gets nearer.
+    let walked = await walk(r, `portal:${to}`, { sprint: true, seconds: 60 });
+    for (let best = Infinity; !walked.ok && walked.reason === "timeout" && (walked.remaining as number) < best - 20 && r.alive(); ) {
+      best = walked.remaining as number;
+      const seen = look(r);
+      if (seen.self.dead || seen.self.hp < seen.self.maxHp * 0.35) return false; // the caller minds that first
+      walked = await walk(r, `portal:${to}`, { sprint: true, seconds: 60 });
+    }
     if (!walked.ok) {
       r.log(`can't reach the portal to ${to}: ${walked.reason}`);
       return false;
@@ -261,7 +268,8 @@ export async function hunter(r: Resident): Promise<void> {
       const n = st?.npcs?.get(c.id);
       return !!n && !nearArena(w, [n.x, n.y, n.z]) && groundDistance([n.x, n.y, n.z], pad) < 190;
     });
-    const target = fair.find((c) => c.onMe) ?? fair.find((c) => c.mission) ?? fair.find((c) => c.hostile) ?? fair[0];
+    // What is on it, then a mission creature, then something hostile. Peaceful wildlife (the shepherd's Woolbacks) is left alone.
+    const target = fair.find((c) => c.onMe) ?? fair.find((c) => c.mission) ?? fair.find((c) => c.hostile);
     if (target) {
       idle = 0;
       const close = o.creatures.filter((c) => c.dist <= 4.5 && (c.onMe || c.hostile) && !c.boss && !c.claimedBy).length;
@@ -308,7 +316,10 @@ export function stopsOn(w: BodyWorld): Stop[] {
     stops.push({ name: p.name, pos: w.onGround(placeDir(p)) });
   }
   if (w.id === "portus") {
-    for (const o of [w.curator, w.vault, w.things.get("hall_wall")]) if (o) stops.push({ name: o.def.name, pos: o.pos });
+    if (w.curator) stops.push({ name: w.curator.def.name, pos: w.curator.pos });
+    if (w.vault) stops.push({ name: "the Gleam Vault", pos: w.vault.pos }); // its own name is the E prompt
+    const hall = w.things.get("hall_wall");
+    if (hall) stops.push({ name: `the ${hall.def.name}`, pos: hall.pos });
     stops.push({ name: "the scoreboard", pos: scoreboardView(w) });
   }
   return stops.filter((s) => !w.deepAt(s.pos) && !nearArena(w, s.pos, 60));
@@ -326,6 +337,8 @@ function scoreboardAt(w: BodyWorld): V3 {
 export async function wanderer(r: Resident): Promise<void> {
   const a = r.agent;
   const greeted = new Map<string, number>();
+  /** Between the legs of a walk: say hello, and walk on. */
+  const hello = async (seen: Observation) => ((await greet(r, seen, greeted)), false);
   let last = "";
   while (r.alive()) {
     await r.pause(150); // a breath every round: no branch below can spin
@@ -348,7 +361,7 @@ export async function wanderer(r: Resident): Promise<void> {
       continue;
     }
     r.log(`walks to ${stop.name} (${Math.round(groundDistance(here, stop.pos))} m)`);
-    const there = await travelTo(r, stop.pos, { within: 5, seconds: 400, each: (seen) => greet(r, seen, greeted) });
+    const there = await travelTo(r, stop.pos, { within: 5, seconds: 400, each: hello });
     last = stop.name;
     if (!there) continue;
     // Arrived: look about for a while, and say hello to whoever turns up.
@@ -420,6 +433,7 @@ export async function trader(r: Resident): Promise<void> {
 export async function chaser(r: Resident): Promise<void> {
   const a = r.agent;
   const greeted = new Map<string, number>();
+  const hello = async (seen: Observation) => ((await greet(r, seen, greeted)), false);
   const fails = new Map<string, number>();
   while (r.alive()) {
     await r.pause(150); // a breath every round: no branch below can spin
@@ -441,7 +455,7 @@ export async function chaser(r: Resident): Promise<void> {
     const next = GLEAMS.trials.map((id) => MISSION_BY_ID.get(id)!).find((m) => !done(m.id) && r.bodies.includes(m.body) && level >= m.recLevel[0] - 3 && (fails.get(m.id) ?? 0) < 3);
     if (!next) {
       // Nothing it can try for now: wait by Sela with the others, and try again later.
-      if ((await goTo(r, "portus")) && world(r).curator) await travelTo(r, world(r).curator!.pos, { within: between(r, 4, 7), seconds: 90, each: (seen) => greet(r, seen, greeted) });
+      if ((await goTo(r, "portus")) && world(r).curator) await travelTo(r, world(r).curator!.pos, { within: between(r, 4, 7), seconds: 90, each: hello });
       for (let i = 0; i < 60 && r.alive(); i++) {
         await greet(r, look(r), greeted);
         await r.pause(1500);
@@ -490,7 +504,7 @@ export async function chaser(r: Resident): Promise<void> {
       fails.set(next.id, 3);
       continue;
     }
-    if (spot.dist > 45 && !(await travelTo(r, start, { sprint: true, within: 40, seconds: 420, each: (seen) => greet(r, seen, greeted) }))) {
+    if (spot.dist > 45 && !(await travelTo(r, start, { sprint: true, within: 40, seconds: 420, each: hello }))) {
       if (!look(r).self.dead) fails.set(next.id, (fails.get(next.id) ?? 0) + 1);
       continue;
     }

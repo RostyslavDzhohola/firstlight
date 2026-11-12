@@ -17,7 +17,7 @@ import { BODY_IDS, type BodyId } from "@firstlight/shared";
 import { SHOP, itemName } from "@firstlight/shared/content/items";
 import { GLEAMS, gleamsWon } from "@firstlight/shared/content/gleams";
 import { isTrialType as isTrial, MISSION_BY_ID, missionGoal, missionsFrom, type MissionDef } from "@firstlight/shared/content/missions";
-import { AETHER, aetherAt, castBlock, SPELL_BY_ID, SPELL_INDEX, SPELLS, WISHFALL } from "@firstlight/shared/content/spells";
+import { AETHER, aetherAt, castBlock, FROSTBLOOM, SPELL_BY_ID, SPELL_INDEX, SPELLS, WISHFALL } from "@firstlight/shared/content/spells";
 import { STARTER_STATS, starterMove } from "@firstlight/shared/content/starters";
 import { NF, NPC_DEFS } from "@firstlight/shared/content/npcs";
 import { towardDir } from "@firstlight/shared/content/places";
@@ -103,6 +103,11 @@ export interface CastAim {
   distance?: number;
   /** Wishfall: a ground point `[x, y, z]` in the body's frame. */
   pos?: readonly number[];
+  /**
+   * Frostbloom and Wishfall hurt everyone in their blast, players too. Off by default: the cast is
+   * refused ("players in range") while a player stands in it. Pass true only to defend yourself.
+   */
+  pvp?: boolean;
 }
 
 export interface TrialOptions {
@@ -1317,6 +1322,7 @@ export class FirstlightAgent {
     if (!def) return { ok: false, reason: "no such spell", hint: `spells: ${SPELLS.map((x) => x.id).join(", ")}` };
     const room = this.room!;
     const st = room.state as any;
+    const id0 = this.sessionId;
     const idx = SPELL_INDEX.get(def.id)!;
     const level: number = this.you?.level ?? this.me()?.level ?? 1;
     // What can be told from here saves a round trip; the server checks the same things again.
@@ -1342,6 +1348,19 @@ export class FirstlightAgent {
       if (!Number.isFinite(aim.bearing)) return { ok: false, reason: "bad target", hint: "bearing in compass degrees" };
       dir = dirOfBearing(up, aim.bearing);
       if (def.id === "wishfall") point = this.world.onGround(towardDir(up, norm(addScaled(up, dir, 1)), Math.max(1, Math.min(WISHFALL.rangeM, aim.distance ?? 12)), this.world.R));
+    }
+    // Agents don't start fights with people (D-agents-6): a blast that would catch a player is not
+    // cast unless asked for. Frostbloom: around you. Wishfall: around where it is aimed (without a
+    // point the server picks one along the facing, up to its range: anyone that near counts).
+    if (def.harmful && !aim.pvp) {
+      const centre = def.id === "wishfall" ? point : pos;
+      const reach = def.id === "frostbloom" ? FROSTBLOOM.radiusM + 1.5 : point ? WISHFALL.radiusM + 2 : WISHFALL.rangeM + WISHFALL.radiusM;
+      let caught: string | null = null;
+      st.players?.forEach((p: any, k: string) => {
+        if (k === id0 || caught || (p.flags & (PF.DEAD | PF.SAFE)) !== 0) return;
+        if (dist(centre ?? pos, [p.x, p.y, p.z]) <= reach) caught = p.name;
+      });
+      if (caught) return { ok: false, reason: "players in range", who: caught, hint: `${def.name} would hurt ${caught}: move away or aim elsewhere (pvp: true only to defend yourself)` };
     }
     const msg: CastMsg = { spell: def.id, dx: dir[0], dy: dir[1], dz: dir[2], ...(def.id === "wishfall" && point ? { tx: point[0], ty: point[1], tz: point[2] } : {}) };
     const id = this.sessionId;

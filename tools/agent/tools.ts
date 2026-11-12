@@ -348,6 +348,7 @@ export const TOOLS: readonly ToolDef[] = [
         bearing: { type: "number", description: "Compass bearing: the way skipstep blinks; with distance, where wishfall lands.", minimum: 0, maximum: 360 },
         distance: { type: "number", description: "wishfall with bearing: metres away (default 12).", minimum: 1, maximum: 30 },
         pos: { type: "array", description: "wishfall: a ground point [x, y, z] (as self.pos).", items: { type: "number" }, minItems: 3, maxItems: 3 },
+        pvp: { type: "boolean", description: "Cast frostbloom or wishfall although a player stands in the blast. Only to defend yourself." },
       },
     },
     async run(s, a) {
@@ -355,7 +356,7 @@ export const TOOLS: readonly ToolDef[] = [
       if (aims > 1) return { ok: false, reason: "bad arguments", hint: "aim with one of target, bearing or pos" };
       if (a.distance !== undefined && (a.bearing === undefined || a.spell !== "wishfall")) return { ok: false, reason: "bad arguments", hint: "distance goes with bearing, for wishfall" };
       if (a.pos !== undefined && a.spell !== "wishfall") return { ok: false, reason: "bad arguments", hint: "pos is for wishfall; aim the others with target or bearing" };
-      return act(s, s.agent!.cast(a.spell, { targetId: a.target, bearing: a.bearing, distance: a.distance, pos: a.pos }));
+      return act(s, s.agent!.cast(a.spell, { targetId: a.target, bearing: a.bearing, distance: a.distance, pos: a.pos, pvp: !!a.pvp }));
     },
   },
   {

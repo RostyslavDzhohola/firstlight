@@ -320,6 +320,24 @@ describe("agents: etiquette", () => {
     r.send("fire", { slot: 0, ox: o[0], oy: o[1], oz: o[2], dx: (t[0]! - o[0]!) / d, dy: (t[1]! - o[1]!) / d, dz: (t[2]! - o[2]!) / d, t: Date.now() });
   }
 
+  it("a blast that would catch a player isn't cast unless asked for", async () => {
+    const a = await agent("frosty");
+    const spot = openSpotOutside("arcadia");
+    const R = BODIES.arcadia.radius;
+    await put(a, spot, 6);
+    const person = await adminBot(game, rooms, "personF", "arcadia", offset(spot, 3, 0, R), 6);
+    await waitFor(() => a.observe({ peek: true }).players.some((p) => p.name === "personF" && p.dist < 5));
+    const hp = () => (person.state as any).players.get(person.sessionId).hp as number;
+    const full = hp();
+    expect(await a.cast("frostbloom")).toMatchObject({ ok: false, reason: "players in range", who: "personF" });
+    expect(await a.cast("wishfall", { targetId: person.sessionId })).toMatchObject({ ok: false, reason: "players in range", who: "personF" });
+    // A star on open ground 20 m the other way catches nobody: that one is cast.
+    expect(await a.cast("wishfall", { pos: offset(spot, -20, 0, R) })).toMatchObject({ ok: true, spell: "wishfall" });
+    await sleep(1600); // it has landed
+    expect(hp()).toBe(full);
+    expect(a.observe().self.spells.list[1]).toMatchObject({ id: "frostbloom", ready: true }); // the refused frost cost nothing
+  }, 60_000);
+
   it("no kill stealing: a fight is left to the person who joins it, and the creature is marked as theirs", async () => {
     const a = await agent("yielder");
     const spot = openSpotOutside("arcadia");
