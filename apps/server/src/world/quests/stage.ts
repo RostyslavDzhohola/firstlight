@@ -8,7 +8,7 @@
 import type { BodyId, Weather } from "@firstlight/shared";
 import { bossArena } from "@firstlight/shared/content/arenas";
 import { BOSS_LAIRS, placeDir, type BossId } from "@firstlight/shared/content/places";
-import { maxHp } from "@firstlight/shared/content/progression";
+import { starterMaxHp } from "@firstlight/shared/content/starters";
 import type { InvItem } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
 import { actorPos, type PlayerActor } from "../actors.ts";
@@ -144,7 +144,7 @@ export function runStage(sys: QuestSystem, admin: PlayerActor, n: number, all: b
     const [e, nn] = spots[i]!;
     const plate = plates.length >= 2 ? plates[i % 2]! : null;
     sys.teleport(a, plate ? sys.around(plate, 0, Math.floor(i / 2) * 2) : sys.around(centre, e, nn));
-    a.state.hp = a.state.maxHp = maxHp(a.char.level);
+    a.state.hp = a.state.maxHp = starterMaxHp(a.char.starter, a.char.level);
     if (def.unprotect) {
       a.protectedUntil = 0;
       a.state.flags &= ~PF.PROTECTED;

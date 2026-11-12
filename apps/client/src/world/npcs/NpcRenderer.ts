@@ -9,7 +9,7 @@ import { NF, NPC_ANIM, NPC_DEFS, SHAPE_CODE, type BossEventMsg, type NpcAttackMs
 import { NET } from "@firstlight/shared/net/protocol";
 import { flags } from "../../config.ts";
 import type { Game } from "../../game/Game.ts";
-import { MOVE } from "../../game/PlayerController.ts";
+import { MOVE, MOVE_BASE } from "../../game/PlayerController.ts";
 import type { ClientSystem } from "../../game/systems.ts";
 import { ArenaView } from "./arena.ts";
 import { HealthBars } from "./bars.ts";
@@ -145,7 +145,6 @@ export class NpcRenderer implements ClientSystem {
   private readonly shots: Shot[] = [];
   private readonly pulls: { c: THREE.Vector3; speed: number; until: number }[] = [];
   private readonly effects: { kind: StatusEffect["kind"]; until: number; amount: number }[] = [];
-  private readonly baseMove = { run: MOVE.run, sprint: MOVE.sprint, dodge: MOVE.dodgeDistance };
   private readonly offs: (() => void)[] = [];
   private readonly onState: (state: any) => void;
   private bossEngaged = 0;
@@ -601,9 +600,10 @@ export class NpcRenderer implements ClientSystem {
       if (e.kind === "nosprint") noSprint = true;
     }
     // Prediction of what the server enforces (npc/effects.ts): slower, no sprint, no dodge burst.
-    MOVE.run = this.baseMove.run * (1 - slow);
-    MOVE.sprint = noSprint ? MOVE.run : this.baseMove.sprint * (1 - slow);
-    MOVE.dodgeDistance = noSprint ? 0 : this.baseMove.dodge * (1 - slow);
+    // From the local starter's own pace (MOVE_BASE, set from the shared starter table).
+    MOVE.run = MOVE_BASE.run * (1 - slow);
+    MOVE.sprint = noSprint ? MOVE.run : MOVE_BASE.sprint * (1 - slow);
+    MOVE.dodgeDistance = noSprint ? 0 : MOVE_BASE.dodgeDistance * (1 - slow);
     MOVE.slow = slow; // riding (game/mount.ts mountedSpeed)
     MOVE.noSprint = noSprint;
   }
@@ -641,9 +641,9 @@ export class NpcRenderer implements ClientSystem {
   dispose() {
     this.game.net.room?.onStateChange.remove(this.onState);
     for (const off of this.offs) off();
-    MOVE.run = this.baseMove.run;
-    MOVE.sprint = this.baseMove.sprint;
-    MOVE.dodgeDistance = this.baseMove.dodge;
+    MOVE.run = MOVE_BASE.run;
+    MOVE.sprint = MOVE_BASE.sprint;
+    MOVE.dodgeDistance = MOVE_BASE.dodgeDistance;
     MOVE.slow = 0;
     MOVE.noSprint = false;
     this.batch.dispose();

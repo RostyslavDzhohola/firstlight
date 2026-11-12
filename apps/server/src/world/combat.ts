@@ -2,7 +2,8 @@
 // simulated projectiles with splash, damage rules (safe zones, protection, friendly fire on),
 // blocking, burn, healing. The room calls these from message handlers and the tick.
 
-import { damageMult, falloff, maxHp, splashFalloff } from "@firstlight/shared/content/progression";
+import { damageMult, falloff, splashFalloff } from "@firstlight/shared/content/progression";
+import { starterMaxHp } from "@firstlight/shared/content/starters";
 import { WEAPONS, WEAPON_BY_ID, WEAPON_INDEX, type Destroys, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
 import type { Terrain } from "@firstlight/shared";
 import { NET } from "@firstlight/shared/net/protocol";
@@ -977,7 +978,7 @@ export function stepEffects(host: CombatHost, dt: number) {
       }
     }
     if (p.heals.length) {
-      const mh = maxHp(p.char.level);
+      const mh = starterMaxHp(p.char.starter, p.char.level);
       let add = 0;
       p.heals = p.heals.filter((h) => {
         if (h.left === undefined) {

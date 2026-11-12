@@ -14,6 +14,7 @@ import { deepWater, SWIM_FLOAT } from "@firstlight/shared/planet/water";
 import type { Input } from "./input.ts";
 import { mountedSpeed, rideCamera } from "./mount.ts";
 import { ADMIN_MODE } from "@firstlight/shared/content/admin";
+import { BASE_MOVE, starterMove } from "@firstlight/shared/content/starters";
 
 /** Solid things the player can't walk through (intact breakable props). */
 export interface MoveColliders {
@@ -29,14 +30,15 @@ export interface MoveColliders {
 }
 
 export const MOVE = {
-  run: 6,
-  sprint: 9,
+  /** Run/sprint/dodge cooldown: the local starter's (setStarterMove), with NPC effects applied on top. */
+  run: BASE_MOVE.run,
+  sprint: BASE_MOVE.sprint,
   swim: 3,
   gravity: 18,
   jumpSpeed: 6.6,
   dodgeDistance: 4.5,
   dodgeTime: 0.3,
-  dodgeCooldown: 1.2,
+  dodgeCooldown: BASE_MOVE.dodgeCooldown,
   /** A press this early still rolls (the cooldown ending, landing): content §0's input buffer. */
   dodgeBuffer: 0.1,
   /** Stepping off an edge (or a low frame rate losing the ground on a slope) still rolls this long after. */
@@ -51,6 +53,24 @@ export const MOVE = {
   slow: 0,
   noSprint: false,
 };
+
+/**
+ * The local starter's own pace and roll before NPC effects (content/starters.ts, issue #9): the server
+ * validates movement from the same row (movement.ts moveLimits), so prediction never fights it.
+ * NpcRenderer scales these for chill, slow and Cease-and-Desist.
+ */
+export const MOVE_BASE = { run: MOVE.run, sprint: MOVE.sprint, dodgeDistance: MOVE.dodgeDistance, dodgeCooldown: MOVE.dodgeCooldown };
+let appliedStarter = -1;
+
+/** Use this starter's run, sprint and dodge cooldown (the server's `starter` for the local player). */
+export function setStarterMove(starter: number) {
+  if (starter === appliedStarter) return;
+  appliedStarter = starter;
+  const m = starterMove(starter);
+  MOVE_BASE.run = MOVE.run = m.run;
+  MOVE_BASE.sprint = MOVE.sprint = m.sprint;
+  MOVE_BASE.dodgeCooldown = MOVE.dodgeCooldown = m.dodgeCooldown;
+}
 
 /** Collision substep limits (m): sideways under half a fence's blocking depth, vertically under a top's landing band. */
 const SUBSTEP_H = 0.25;

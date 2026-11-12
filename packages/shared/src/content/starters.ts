@@ -60,11 +60,13 @@ export function starterMove(starter: number): { run: number; sprint: number; dod
 }
 
 /**
- * Pick-screen bars (0–5 pips) for Toughness, Speed and Dodge, relative to the base: 3 pips = base,
- * one pip per ~6%. Shown with the traits so the differences read at a glance.
+ * Pick-screen bars (1–5 pips) for Toughness, Speed and Dodge: 3 pips is the shared base, and the
+ * starter furthest from the base on that stat gets 1 or 5, so the differences read at a glance.
  */
 export function starterBars(starter: number): { toughness: number; speed: number; dodge: number } {
-  const s = starterStats(starter);
-  const pips = (ratio: number) => Math.max(1, Math.min(5, Math.round(3 + (ratio - 1) / 0.06)));
-  return { toughness: pips(s.hp), speed: pips(s.speed), dodge: pips(BASE_MOVE.dodgeCooldown / s.dodgeCooldown) };
+  const ratios = (s: StarterStats) => [s.hp, s.speed, BASE_MOVE.dodgeCooldown / s.dodgeCooldown] as const;
+  const mine = ratios(starterStats(starter));
+  const spread = [0, 1, 2].map((k) => Math.max(1e-9, ...STARTER_STATS.map((s) => Math.abs(ratios(s)[k]! - 1))));
+  const pips = (k: number) => Math.max(1, Math.min(5, 3 + Math.round((2 * (mine[k]! - 1)) / spread[k]!)));
+  return { toughness: pips(0), speed: pips(1), dodge: pips(2) };
 }
