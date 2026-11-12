@@ -8,6 +8,7 @@ import { BODIES, CAMERA_SOLID_KINDS, natureSolids, padDirs, type BodyId, type Na
 import { config, flags } from "../config.ts";
 import { Net, TravelRedirect, type Snapshot } from "../net/Net.ts";
 import { AvatarView, avatarWarmupHook, preloadAvatars } from "../render/Avatars.ts";
+import { rezSwitch } from "../render/rez.ts";
 import { avatarTexturesFollowTier, setAvatarTextureLowRes } from "../render/avatars/assets.ts";
 import type { ArtPacks } from "../render/artpacks/ArtPacks.ts";
 import { createArtPacks } from "../render/artpacks/env.ts";
@@ -66,6 +67,8 @@ export class Game {
   input!: Input;
   readonly net = new Net();
   readonly avatars = new Map<string, AvatarView>();
+  /** Players who left: their avatars de-rez (render/rez.ts) for a moment, then go. */
+  private readonly leaving = new Set<AvatarView>();
   self!: AvatarView;
   perf!: PerfOverlay;
   particles!: ParticleSystem;
@@ -171,6 +174,8 @@ export class Game {
       this.particles.applySettings(this.ctx.settings);
       this.blobs.applySettings(this.ctx.settings);
       this.applyCharsVisibility();
+      rezSwitch.on = this.ctx.settings.on.rez;
+      this.portals?.applySettings(this.ctx.settings);
     };
     applyFx();
     this.ctx.onChange(applyFx);
@@ -455,6 +460,8 @@ export class Game {
     this.systems = [];
     for (const a of this.avatars.values()) a.dispose();
     this.avatars.clear();
+    for (const a of this.leaving) a.dispose();
+    this.leaving.clear();
     this.portals?.dispose();
     this.piles?.dispose();
     this.planet?.dispose();
@@ -474,6 +481,7 @@ export class Game {
       cameraRay: (o, d, maxT) => nature.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT, CAMERA_SOLID_KINDS),
     });
     this.portals = new Portals(this.ctx.scene, body, this.planet.terrain);
+    this.portals.applySettings(this.ctx.settings);
     this.audio.setMusic(body);
     this.piles = new PilesView(this.ctx.scene);
 
@@ -618,6 +626,11 @@ export class Game {
     // Hand-over: from here a close is a mid-game disconnect (no await until the caller resumes play).
     if (watch) this.net.onLeaveRoom = (code) => this.onRoomClosed(code);
     hideLoading();
+    // The player materialises as the world appears (render/rez.ts); a portal they stand by answers.
+    if (!this.bench) {
+      this.self.rez("in");
+      this.portals?.pulseNear(this.player.pos);
+    }
     // HD art packs download in play: after a short delay and the site download, if it is still running (D-artpacks).
     this.packs.resume({ after: this.planet.town?.settled });
   }
@@ -804,13 +817,28 @@ export class Game {
         a.root.visible = this.ctx.settings.on.chars;
         this.avatars.set(id, a);
         this.ctx.scene.add(a.root);
+        // Someone arrived: they materialise, and the portal they came through (if any) pulses.
+        a.set(s.x, s.y, s.z, s.fx, s.fy, s.fz, s.anim, 0);
+        a.rez("in");
+        this.portals?.pulseNear(a.root.position);
       }
       a.set(s.x, s.y, s.z, s.fx, s.fy, s.fz, s.anim, dt);
     }
     for (const [id, a] of this.avatars) {
       if (!this.net.remotes.has(id)) {
-        a.dispose();
+        // Gone (left, or through a portal): the avatar de-rezzes where it stood, then is freed.
         this.avatars.delete(id);
+        this.portals?.pulseNear(a.root.position);
+        if (rezSwitch.on && a.root.visible) {
+          a.rez("out");
+          this.leaving.add(a);
+        } else a.dispose();
+      }
+    }
+    for (const a of this.leaving) {
+      if (a.stepRez(dt)) {
+        a.dispose();
+        this.leaving.delete(a);
       }
     }
 
