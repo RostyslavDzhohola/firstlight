@@ -210,6 +210,47 @@ describe("defend (T2, The Steadfast Gleam; H4, The Long Vigil)", () => {
     await until("running again", () => lastTrial(back, "T2")?.state === "running");
   });
 
+  it("waves belong to their runner: they come for the defender, never see, chase or hurt a bystander, and only the runner hurts them", async () => {
+    TRIAL_RULES.timeScale = 0.2; // 18 s hold, waves at 0.4 / 4.4 s
+    const a = await take("owner_holder", ["T2"], "hollowmere");
+    const c = await bot("bystander", "hollowmere");
+    a.send("npc", { cmd: "ambient", on: false }); // only the trial's creatures out here
+    const beacon = objAt("t2_beacon");
+    await tpAndWait(a, beacon);
+    // The bystander stands right beside the defender, nearer some of the waves than the defender is.
+    const side = offPad("hollowmere", 0, 40).map((v, i) => v - offPad("hollowmere", 0, 37)[i]!);
+    await tpAndWait(c, beacon.map((v, i) => v + side[i]!));
+    for (const b of [a, c]) b.send("admin", { cmd: "unprotect" });
+    await sleep(120);
+    a.send("interact", { target: "t2_beacon" });
+    await until("a wave", () => trialNpcs(a) > 0);
+    const npcs = npcSystemOf(serverRoom(a))!;
+    const owner = actor(a);
+    const other = actor(c);
+    const waves = () => [...npcs.npcs.values()].filter((n) => n.spawned?.reason === "trial" && !n.dead);
+    const hp0 = other.state.hp;
+    let sawBystander = false;
+    let allOnOwner = false;
+    const until4s = Date.now() + 4000;
+    while (Date.now() < until4s) {
+      a.send("admin", { cmd: "heal" }); // the defender soaks the hits; the test is about who takes them
+      if (waves().some((n) => n.target === other)) sawBystander = true;
+      if (waves().length > 0 && waves().every((n) => n.target === owner)) allOnOwner = true;
+      await sleep(100);
+    }
+    expect(sawBystander).toBe(false);
+    expect(allOnOwner).toBe(true); // nothing has to find them: they come for the runner
+    expect(other.state.hp).toBe(hp0);
+    // A bystander's hits do nothing to someone else's trial; the runner's land.
+    const w = waves()[0]!;
+    const hp = w.state.hp;
+    c.send("npc", { cmd: "hurt", id: w.id, as: c.id, amount: 30 });
+    await until("refused as immune", () => c.count("immune") > 0);
+    expect(w.state.hp).toBe(hp);
+    a.send("npc", { cmd: "hurt", id: w.id, as: a.id, amount: 30 });
+    await until("the runner's hit lands", () => w.state.hp < hp);
+  });
+
   it("dying on the beacon fails the attempt and its waves dissolve", async () => {
     TRIAL_RULES.timeScale = 0.2;
     const a = await take("fallen_holder", ["T2"], "hollowmere");

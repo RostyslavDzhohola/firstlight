@@ -744,7 +744,9 @@ Totals: 10,280 XP and 1,630 coins per life for the nine (Errand Runner still ask
 **Added 2026-11-12 (new objective types, D-hunt-3):** `race` (rings in order inside a clock that starts at the
 first ring), `defend` (E lights a beacon; hold its ring while waves arrive; outside it the clock pauses, past
 the grace the attempt fails) and `collect` (walk over every piece; optionally timed from the first). Failing
-(time, death, leaving the ring) ends the attempt; the mission stays accepted, so you try again. Waves pay nothing.
+(time, death, leaving the ring, a dropped connection) ends the attempt; the mission stays accepted, so you try again. Waves pay nothing
+and belong to their runner: they come straight for the defender (sensed through cover within 60 m), never target or hurt
+anyone else, and nobody else's hits land on them.
 
 | # | Planet / giver | Type | Name | Exact objective | Rec. Lv | Reward | Routes the player toward |
 |---|---|---|---|---|---|---|---|
