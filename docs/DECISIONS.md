@@ -1523,3 +1523,10 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   before/after screenshots. Client only: nothing shared or on the server changes.
   Why: the Oct 16 play-test (#34) saw the camera inside walls, buildings and the head in Portus and
   the player stuck between props; one ray let a lens beside a wall show it from inside.
+- **D-fixes-2 (2026-11-12):** A character who dies with the tutorial unfinished keeps it after the
+  rebirth in Portus: the steps done and the dummies already knocked down carry over. The first offer
+  still needs a level-1 character that never died; the account remembers that it was offered
+  (`onboarding_started` stat), and finishing or skipping still ends it for good. Why: the rebirth
+  rejoins Portus, where the "never died" check ended the tutorial without a word, and with it the
+  dummies' XP that takes a guest to level 2, where saving unlocks (D34, #31, #32). Found in this run's
+  play-through.

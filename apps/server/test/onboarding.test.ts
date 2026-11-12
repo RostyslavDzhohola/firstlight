@@ -20,7 +20,7 @@ import { copyRestrictions } from "../src/world/quests/restrictions.ts";
 import { roomCopyKey } from "../src/world/copyState.ts";
 import { SqliteCharacterRepo, SqlitePileStore } from "../src/world/sqliteStores.ts";
 import { safeLeave, startServer } from "./helpers.ts";
-import { bot, ground, harness, me, serverRoom, sleep, terrain, tpAndWait, until, type Bot } from "./quest-helpers.ts";
+import { bot, ground, offPad, harness, me, serverRoom, sleep, terrain, tpAndWait, until, type Bot } from "./quest-helpers.ts";
 
 beforeEach(async () => {
   harness.game = await startServer();
@@ -198,9 +198,10 @@ describe("onboarding", () => {
   });
 
   it("isn't offered to characters that have already lived (died before, or past level 1)", async () => {
-    const b = await bot("veteran", "portus");
+    // A character that died before the tutorial was ever offered to its account.
+    const b = await bot("donor", "portus");
     await safeLeave(b.room);
-    const c = characterRepo.current.load("veteran")!;
+    const c = characterRepo.current.load("donor")!;
     c.deaths = 1;
     characterRepo.current.save("veteran", c);
     const again = await bot("veteran", "portus");
@@ -211,6 +212,29 @@ describe("onboarding", () => {
     await safeLeave(d.room);
     const e = await bot("climber", "portus");
     expect(e.you.onboarding).toBeUndefined();
+  });
+});
+
+describe("dying mid-tutorial (D-fixes-2)", () => {
+  it("keeps the tutorial and its knocked-down dummies after the rebirth in Portus", async () => {
+    const b = await bot("faller", "portus", "admin", { starter: 3 });
+    await tpAndWait(b, inFront(2, 6));
+    await knockDown(b, 2, "carbine");
+    await until("paid", () => b.you.xp === ONBOARDING.DUMMY_XP);
+    // Out in the wild (Arcadia here), killed, reborn: the rebirth sends the client to Portus.
+    await safeLeave(b.room);
+    const out = await bot("faller", "arcadia");
+    await tpAndWait(out, offPad("arcadia", 0, 40));
+    out.send("admin", { cmd: "unprotect" });
+    await sleep(120);
+    out.send("admin", { cmd: "damage", args: { amount: 5000 } });
+    await until("dead", () => out.count("death") > 0);
+    out.send("respawn", { starter: 3, palette: 0 });
+    await until("reborn", () => out.count("reborn") > 0);
+    await safeLeave(out.room);
+    expect(characterRepo.current.load("faller")!.deaths).toBe(1);
+    const again = await bot("faller", "portus");
+    expect(again.you.onboarding).toEqual({ hits: [0, 0, HITS] });
   });
 });
 
