@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three/webgpu";
-import { LABEL_FADE_FAR, LABEL_FADE_NEAR, labelFade, labelFadeFor } from "./labelFade.ts";
+import { LABEL_FADE_FAR, LABEL_FADE_NEAR, LABEL_FULL_DEPTH, LABEL_MIN_SCALE, labelFade, labelFadeFor, labelScale } from "./labelFade.ts";
 
 describe("label near-camera fade (#22)", () => {
   it("is gone within 1.5 m of the camera, whole beyond 2.5 m, and rises smoothly between", () => {
@@ -34,5 +34,15 @@ describe("label near-camera fade (#22)", () => {
     expect(at(10, 503.4, 0)).toBe(1); // 3 m ahead
     expect(at(10, 501.9, -1)).toBeGreaterThan(0); // 2 m: on its way in
     expect(at(10, 501.9, -1)).toBeLessThan(1);
+  });
+});
+
+describe("label size clamp (D-polish-4)", () => {
+  it("a label is never larger on screen than it is at LABEL_FULL_DEPTH", () => {
+    expect(labelScale(LABEL_FULL_DEPTH)).toBe(1);
+    expect(labelScale(40)).toBe(1);
+    // On-screen size ∝ scale / depth: constant inside the clamp.
+    for (const d of [3, 5, 8]) expect(labelScale(d) / d).toBeCloseTo(1 / LABEL_FULL_DEPTH, 9);
+    expect(labelScale(0.5)).toBe(LABEL_MIN_SCALE);
   });
 });
