@@ -21,6 +21,11 @@ function installPad() {
     vibrationActuator: { type: "dual-rumble", playEffect: () => Promise.resolve("complete"), reset: () => Promise.resolve("complete") },
   };
   Object.defineProperty(navigator, "getGamepads", { value: () => [pad, null, null, null], configurable: true });
+  // A real browser refuses pointer lock without a mouse gesture (autoplay, a pad button); headless
+  // Chrome grants it. Refuse it here so the pad has to work with the pointer free.
+  HTMLElement.prototype.requestPointerLock = function () {
+    return Promise.reject(new DOMException("no user gesture", "NotAllowedError"));
+  } as typeof HTMLElement.prototype.requestPointerLock;
   (window as unknown as { __pad: unknown }).__pad = {
     set(b: number, on: boolean) {
       buttons[b] = { pressed: on, touched: on, value: on ? 1 : 0 };
@@ -90,12 +95,16 @@ test.describe("Gamepad and touch", () => {
     await player.note("pad attack", JSON.stringify(r));
     expect(r.sent.length > 0 || r.notice || r.accepted, "RT attacks (or is holstered in the safe zone with the notice)").toBe(true);
 
-    // Cast: D-pad left is the spellbar's first slot (Skipstep, Q).
+    // Cast: D-pad left is the spellbar's first slot (Skipstep, Q). On the pad's safe ring the client
+    // refuses it with a toast and a shake; outside, it casts and the slot cools down.
+    const tc = await player.now();
     const before = (await player.snap()).spells?.slots[0];
     await press(player, BTN.LEFT);
-    const cast = await player.until((s) => (s.spells?.slots[0]?.cooldown ?? 0) > 0 || !!s.lastDenied, "the first spell cast (or a refusal)", 5000).catch(() => null);
-    await player.note("pad cast", JSON.stringify({ before, after: cast?.spells?.slots[0], denied: cast?.lastDenied }));
-    expect((cast?.spells?.slots[0]?.cooldown ?? 0) > 0 || cast?.lastDenied?.action === "cast", "D-pad left casts").toBe(true);
+    await page.waitForTimeout(1200);
+    const after = (await player.snap()).spells?.slots[0];
+    const castEv = await player.attackResult(tc, 0);
+    await player.note("pad cast", JSON.stringify({ before, after, sent: castEv.sent, toasts: castEv.toasts }));
+    expect((after?.cooldown ?? 0) > 0 || castEv.sent.includes("cast") || castEv.toasts.some((t) => /Skipstep|safe|pad|ring/i.test(t)), "D-pad left casts (or is refused on the safe ring with the notice)").toBe(true);
 
     // Start opens the pause menu; the D-pad moves a visible focus ring; B goes back.
     await press(player, BTN.START);
@@ -117,27 +126,52 @@ test.describe("Gamepad and touch", () => {
       await player.waitInWorld(90_000, "arcadia");
       const overlay = page.locator('[data-e2e="touch-overlay"]');
       await expect(overlay, "the touch overlay shows in play").toBeVisible({ timeout: 20_000 });
-      const s0 = await player.until((s) => s.input.device === "touch" && s.input.captured === true, "touch is the device and the input is captured", 10_000);
+      await player.until((s) => s.input.device === "touch" && s.input.captured === true, "touch is the device and the input is captured", 10_000);
+      await page.waitForTimeout(2000); // the dev placement and the first frames settle
 
       const cdp: CDPSession = await page.context().newCDPSession(page);
       const touch = (type: "touchStart" | "touchMove" | "touchEnd", points: { x: number; y: number; id: number }[]) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: points.map((p) => ({ x: p.x, y: p.y, id: p.id })) });
-      // Left thumb pushes up (forward) while the right thumb drags to look.
-      await touch("touchStart", [{ x: 160, y: 260, id: 1 }]);
-      await touch("touchMove", [{ x: 160, y: 200, id: 1 }]);
-      await touch("touchStart", [{ x: 160, y: 200, id: 1 }, { x: 600, y: 200, id: 2 }]);
+      const active = () => overlay.getAttribute("data-active");
+      const turn = (a: number, b: number) => Math.abs(((b - a + 540) % 360) - 180);
+
+      // 1. Look: one finger dragged on the right half.
+      const s0 = await player.snap();
+      await touch("touchStart", [{ x: 620, y: 200, id: 2 }]);
+      expect(await active(), "the look finger is tracked").toBe("1");
+      for (let i = 1; i <= 8; i++) {
+        await touch("touchMove", [{ x: 620 + i * 20, y: 200, id: 2 }]);
+        await page.waitForTimeout(50);
+      }
+      await touch("touchEnd", []);
+      await page.waitForTimeout(300);
+      const s1 = await player.snap();
+      const looked = turn(s0.player!.heading, s1.player!.heading);
+
+      // 2. Move: the left thumb pushes up (forward) and holds.
+      await touch("touchStart", [{ x: 160, y: 300, id: 1 }]);
+      await touch("touchMove", [{ x: 160, y: 240, id: 1 }]);
+      await page.waitForTimeout(1500);
+      const s2 = await player.snap();
+      const moved = dist(s1.player!.pos, s2.player!.pos);
+
+      // 3. Both at once: the stick still held while a second finger looks.
+      await touch("touchStart", [{ x: 160, y: 240, id: 1 }, { x: 620, y: 200, id: 2 }]);
+      expect(await active(), "two fingers tracked").toBe("2");
       for (let i = 1; i <= 6; i++) {
-        await touch("touchMove", [{ x: 160, y: 200, id: 1 }, { x: 600 + i * 20, y: 200, id: 2 }]);
+        await touch("touchMove", [{ x: 160, y: 240, id: 1 }, { x: 620 - i * 20, y: 200, id: 2 }]);
         await page.waitForTimeout(60);
       }
-      await page.waitForTimeout(1200);
-      const mid = await player.snap();
+      await page.waitForTimeout(600);
+      const s3 = await player.snap();
       await player.shot("touch-landscape-play");
       await touch("touchEnd", []);
-      const moved = dist(s0.player!.pos, mid.player!.pos);
-      const turned = Math.abs(((mid.player!.heading - s0.player!.heading + 540) % 360) - 180);
-      await player.note("touch move", `${moved.toFixed(1)} m, turned ${turned.toFixed(0)}°`);
+      const moved2 = dist(s2.player!.pos, s3.player!.pos);
+      const looked2 = turn(s2.player!.heading, s3.player!.heading);
+      await player.note("touch move", `look ${looked.toFixed(0)}°, walk ${moved.toFixed(1)} m, together ${moved2.toFixed(1)} m and ${looked2.toFixed(0)}°`);
+      expect(looked, "a drag on the right half looks").toBeGreaterThan(5);
       expect(moved, "the touch stick walks").toBeGreaterThan(2);
-      expect(turned, "a drag on the right half looks").toBeGreaterThan(5);
+      expect(moved2, "walking continues while another finger looks").toBeGreaterThan(1);
+      expect(looked2, "looking works while the stick is held").toBeGreaterThan(5);
 
       // Fire held through the overlay's button reaches the game as attack.
       const t = await player.now();

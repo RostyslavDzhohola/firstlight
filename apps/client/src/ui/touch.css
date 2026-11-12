@@ -30,16 +30,30 @@
 .fl-touch__spell.is-locked, .fl-touch__spell.is-short { opacity: .45; }
 .fl-touch__spell.is-up { border-color: #cbb6ff; }
 
-.fl-touch__top { position: absolute; left: 50%; top: calc(8px + env(safe-area-inset-top)); transform: translateX(-50%); display: flex; gap: 10px; pointer-events: none; }
+/* Map and menu: the top-left corner (the compass owns the top centre, the minimap the top right). */
+.fl-touch__top { position: absolute; left: calc(12px + env(safe-area-inset-left)); top: calc(10px + env(safe-area-inset-top)); display: flex; gap: 10px; pointer-events: none; }
 .fl-touch__small { position: relative; width: 44px; height: 44px; border-radius: 10px; font-size: 12px; }
 
 .fl-touch__portrait { position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; background: rgba(4, 6, 9, .88); color: var(--paper); text-align: center; pointer-events: auto; z-index: 2; }
 .fl-touch__portrait b { font-size: 22px; }
 .fl-touch__portrait span { font: 400 14px/1.4 var(--font-body); opacity: .8; }
-@media (orientation: portrait) { .fl-touch__portrait { display: flex; } }
+/* Portrait: the cover goes over the HUD too (toasts stay under menus). */
+@media (orientation: portrait) { .fl-touch__portrait { display: flex; } .fl-touch { z-index: 35; } }
 
 /* The HUD in touch mode: hotbar slots take taps; the spell bar's own row gives way to the touch spells
    (they copy its state); the "Click to look around" tip doesn't apply. */
 html.fl-touchmode .fl-hotbar .fl-slot { pointer-events: auto; }
 html.fl-touchmode .fl-hud__spells { display: none; }
 html.fl-touchmode, html.fl-touchmode body { overscroll-behavior: none; touch-action: none; }
+
+/* Phones in landscape (short screens): the bottom-left belongs to the left thumb and the bottom-right to
+   the buttons, so the player card moves to the top-left (smaller), Map/Menu and the spells stack under it,
+   and the minimap column and the hotbar shrink. */
+@media (max-height: 520px) {
+  html.fl-touchmode .fl-me { left: calc(10px + env(safe-area-inset-left)); top: calc(8px + env(safe-area-inset-top)); bottom: auto; transform: scale(.62); transform-origin: top left; }
+  html.fl-touchmode .fl-hud__right { transform: scale(.66); transform-origin: top right; }
+  html.fl-touchmode .fl-hotbar-wrap { transform: translateX(-50%) scale(.82); transform-origin: bottom center; }
+  .fl-touch__top { top: calc(122px + env(safe-area-inset-top)); }
+  .fl-touch__spells { left: calc(12px + env(safe-area-inset-left)); right: auto; top: calc(174px + env(safe-area-inset-top)); bottom: auto; gap: 6px; }
+  .fl-touch__spell { width: 44px; height: 44px; }
+}

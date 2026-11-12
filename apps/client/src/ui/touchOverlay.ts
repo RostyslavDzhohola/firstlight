@@ -278,6 +278,7 @@ export class TouchOverlay {
   }
 
   private draw(): void {
+    this.root.dataset.active = String(this.sticks.active); // pointers held (journeys read it)
     const b = this.sticks.stickBase;
     const k = this.sticks.stickKnob;
     this.base.hidden = !b;
