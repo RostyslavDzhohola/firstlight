@@ -18,6 +18,7 @@ import { createSpellClient } from "./SpellClient.ts";
 import { createHoloBoard } from "../world/HoloBoard.ts";
 import { createLightPools } from "../world/lightPools.ts";
 import { createTownLights } from "../world/townLights.ts";
+import { createControlsClient } from "./controls.ts";
 
 export interface ClientSystem {
   update(dt: number, now: number): void;
@@ -56,3 +57,5 @@ CLIENT_SYSTEMS.push(createHoloBoard);
 CLIENT_SYSTEMS.push(createLightPools);
 // Hub graphics lane (D-gfx-hub-8): lantern halos, portal glow and lantern motes in Portus.
 CLIENT_SYSTEMS.push(createTownLights);
+// Controls lane (D-controls-5): gamepad rumble on damage and kills, and the aim slowdown's creep test.
+CLIENT_SYSTEMS.push(createControlsClient);

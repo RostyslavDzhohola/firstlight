@@ -1938,3 +1938,43 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   row's value first, cuts the name by `measureText()` between whole characters and clips it; names, titles
   and the hunt's lines lose control characters and the bidirectional marks, overrides and isolates. Why:
   review A3–A5.
+- **D-controls-5 (2026-11-12):** Gamepads, through one input layer. `Input` (`game/input.ts`) is the
+  only thing the controller, combat, spells and panels read: the gamepad (`game/gamepad.ts`) and the
+  touch overlay feed it buttons as the same keydown/keyup events the keyboard sends (`virtualKey`,
+  untrusted so they never flip the device), attack/alt as `lmb`/`rmb`, sticks as an analog move vector
+  (`moveX/moveY`, a light push walks) and look as radians (`lookYaw/lookPitch`). A new rule, "input
+  captured" (`capturedFrom`), replaces the pointer-lock checks for look and mouse combat: the pointer is
+  locked, or the player is back in the game with the pointer free (pause state "free") on a pad or touch;
+  never under a menu, panel or loading screen. The device is the last one used (a fresh pad press or
+  stick push, a touch, a trusted key or a mouse move over 4 px; emulated mouse events after a touch
+  don't count). Final layout (standard mapping; Xbox labels, PlayStation and Switch Pro shown in their
+  own): LS move (L3 sprints until the stick returns), RS look, A jump, B dodge-roll, X interact/pick
+  up/ride when a prompt is up and otherwise reload, Y whistle a horse, RT attack, LT alt (aim, block,
+  draw, charge), LB/RB previous/next hotbar slot, D-pad ←↑→↓ the spellbar's four slots left to right
+  (Q F X Z), Start pause menu, Select tap map / hold players, R3 inventory; the journal and the tutorial
+  checklist are pause-menu rows on a pad (Journal and Players on touch, two rows at most: the menu's
+  list has no room for more). Keyboard-only by
+  choice: photo mode, screenshot, the perf/admin overlays, the phrase wheel (G needs a pointer to pick),
+  invite Y/N (the Players panel has the buttons), voice. Stick tuning: radial dead zone with rescaling
+  (default 15 %), a response curve (exponent 1.8), look speed and invert Y separate from the mouse's.
+  Aim: a light look slowdown (×0.6) while the crosshair is on a creep, never on players and never any
+  pull or snap, so a pad gets no aim help against a person in PvP. Rumble on taking damage, on a kill
+  and on death where the browser has `vibrationActuator` (Chrome, Edge). Menus: no menu registers
+  anything; `ui/focusNav.ts` moves focus among the controls that are actually on top (a hit test at
+  each control's middle, so a modal's scrim hides what's under it), A clicks, B and Start send Esc,
+  left/right change sliders and selects, the right stick scrolls; a visible amber ring
+  (`fl-padfocus`). Keycaps in the HUD, the prompt and the tutorial switch to the device's glyphs
+  through `glyphFor` (`ui/glyphs.ts`); a MutationObserver runs only while a pad or touch is the device.
+  Why: anyone should be able to play; one layer keeps keyboard behaviour and tests as they were, and
+  sending keys reaches every existing panel and handler without per-panel code.
+- **D-controls-6 (2026-11-12):** Touch controls are experimental. A coarse pointer without hover, or
+  `?touch`, shows `ui/touchOverlay.ts`: a floating stick on the left half (pushed well past the rim
+  straight ahead it sprints), drag-to-look on the right half, Fire (hold keeps firing), Alt, Jump,
+  Roll, Reload, Use (only while a prompt is up), Map, Bag (inventory), Menu, the four spells (state and cooldown sweep copied from
+  the HUD spell bar, which hides in touch mode); the HUD hotbar's slots take taps. On short landscape
+  screens the player card moves to the top left, under it Map/Bag/Menu and the spells.
+  Multi-touch by pointer id; under the HUD layers (the HUD passes taps through); safe-area insets; no
+  scroll, zoom, selection or long-press menu; a "turn sideways" cover in portrait. The home page's
+  phone card keeps "Play on your computer" as the recommendation and adds "Try it on this device
+  (experimental)", which reloads with `?touch&tier=low&autoplay`. Why: the owner wants anyone to be
+  able to try the game; a playable basic on phones beats a "desktop only" wall, and Low keeps it running.

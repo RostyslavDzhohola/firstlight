@@ -18,7 +18,7 @@ const terrain = { body: { radius: R }, groundHeight: () => 0 } as unknown as Ter
 function fakeInput(keys: string[] = []) {
   const down = new Set(keys);
   return {
-    locked: true, mouseDX: 0, mouseDY: 0, wheel: 0, sensitivity: 0.002, invertY: false,
+    locked: true, captured: true, mouseDX: 0, mouseDY: 0, wheel: 0, sensitivity: 0.002, invertY: false,
     pressed: new Set<string>(),
     down: (k: string) => down.has(k),
     hold(k: string, on: boolean) {

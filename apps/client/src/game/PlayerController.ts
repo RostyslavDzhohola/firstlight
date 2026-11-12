@@ -312,7 +312,7 @@ export class PlayerController {
     const h = dt / steps;
     // Later steps see only the keys held down: no mouse movement, wheel or fresh presses.
     const held = Object.create(input) as Input;
-    Object.assign(held, { mouseDX: 0, mouseDY: 0, wheel: 0, pressed: NO_PRESSES });
+    Object.assign(held, { mouseDX: 0, mouseDY: 0, lookYaw: 0, lookPitch: 0, wheel: 0, pressed: NO_PRESSES });
     for (let k = 0; k < steps; k++) this.step(h, k === 0 ? input : held, aiming, now);
   }
 
@@ -326,10 +326,11 @@ export class PlayerController {
     this.camForward.addScaledVector(up, -this.camForward.dot(up)).normalize();
     this.facing.addScaledVector(up, -this.facing.dot(up)).normalize();
 
-    if (input.locked && !this.frozen) {
-      const yaw = -input.mouseDX * input.sensitivity;
+    // Look: the mouse (pointer locked) plus a stick or a touch drag (radians, already scaled), D-controls-5.
+    if (input.captured && !this.frozen) {
+      const yaw = -input.mouseDX * input.sensitivity - (input.lookYaw || 0);
       this.camForward.applyAxisAngle(up, yaw).normalize();
-      this.camPitch += (input.invertY ? 1 : -1) * input.mouseDY * input.sensitivity;
+      this.camPitch += (input.invertY ? 1 : -1) * input.mouseDY * input.sensitivity + (input.lookPitch || 0);
       this.camPitch = Math.max(-1.25, Math.min(0.9, this.camPitch));
       if (input.wheel) this.camDistance = Math.max(2.5, Math.min(9, this.camDistance + input.wheel * 0.5));
     }
@@ -337,17 +338,25 @@ export class PlayerController {
 
     // Desired move direction from WASD relative to the camera.
     let mx = 0, mz = 0;
+    // A stick's push (0..1) scales the pace: a light push walks (D-controls-5). Keys are always full.
+    let push = 1;
     if (!this.frozen) {
       if (input.down("KeyW")) mz += 1;
       if (input.down("KeyS")) mz -= 1;
       if (input.down("KeyD")) mx += 1;
       if (input.down("KeyA")) mx -= 1;
+      if (mx === 0 && mz === 0 && (input.moveX || input.moveY)) {
+        mx = input.moveX;
+        mz = input.moveY;
+        push = Math.min(1, Math.hypot(mx, mz));
+      }
     }
     const wish = _wish.set(0, 0, 0).addScaledVector(this.camForward, mz).addScaledVector(right, mx);
     if (wish.lengthSq() > 0) wish.normalize();
     const walking = wish.lengthSq() > 0;
     const sprint = input.down("ShiftLeft") || input.down("ShiftRight");
-    const speed = (this.swimming ? MOVE.swim : this.mounted ? mountedSpeed(sprint, MOVE.slow, MOVE.noSprint) : sprint && mz > 0 && !aiming ? MOVE.sprint : MOVE.run) * this.adminSpeed;
+    const forward = mz > 0 && mz >= Math.abs(mx) * 0.5; // a stick a little off straight ahead still sprints
+    const speed = push * (this.swimming ? MOVE.swim : this.mounted ? mountedSpeed(sprint, MOVE.slow, MOVE.noSprint) : sprint && forward && !aiming ? MOVE.sprint : MOVE.run) * this.adminSpeed;
 
     // Dodge-roll: starts this frame (no wind-up, no server round trip; the server checks the move).
     // A press up to MOVE.dodgeBuffer early is kept; one earlier in the cooldown is dropped, never

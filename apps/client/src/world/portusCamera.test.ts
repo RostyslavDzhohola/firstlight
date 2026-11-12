@@ -21,7 +21,7 @@ const POINT = { radius: 0.01, height: 0.01, step: 0 };
 
 function keys(down: string[]): Input {
   const held = new Set(down);
-  return { locked: true, mouseDX: 0, mouseDY: 0, wheel: 0, sensitivity: 0.002, invertY: false, pressed: new Set<string>(), down: (k: string) => held.has(k) } as unknown as Input;
+  return { locked: true, captured: true, mouseDX: 0, mouseDY: 0, wheel: 0, sensitivity: 0.002, invertY: false, pressed: new Set<string>(), down: (k: string) => held.has(k) } as unknown as Input;
 }
 
 /** Feet on the ground on three rings round every town item (inside its bound, just outside, a step further), every `every`th. */
