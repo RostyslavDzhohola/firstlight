@@ -1593,3 +1593,29 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   20–26 ms for the blades and 23–24 ms for 195,704 clumps, so a meadow field takes 0.93× the time
   of the single-blade field it replaces (the first pass measured 2.9× on a loaded machine). Why:
   the brief asked to bring the clumps' placement cost down; the pads were the cost of both.
+- **D-gfx-worlds-9 (2026-11-12):** what the second pass costs, as far as this run's machine could
+  say. `?bench=passes` (same process, each feature switched off in turn, WebGPU, 1280×720, six
+  rounds): on Medium everything was inside the noise: at dawn on Arcadia (3.7 ms frame, 0.6 ms
+  noise) terrainfx 0.35, meadow 0.01, landmarks 0.01, shafts 0.00, foliagefx −0.01, mist −0.15 ms;
+  at dawn on Hollowmere (4.2 ms, 1.1 ms noise) landmarks 0.41, mist 0.33, terrainfx 0.29, meadow
+  0.24, shafts 0.09, foliagefx −0.22 ms; at night on Arcadia (4.7 ms, 1.7 ms noise) foliagefx 0.54,
+  fireflies 0.21, meadow 0.05 ms. On High at dawn on Arcadia (16.7 ms frame, GPU-bound, 4.3 ms
+  noise) meadow 1.33, terrainfx 0.75, waterfx 0.52, shafts 0.40, landmarks 0.11, foliagefx 0.09,
+  mist −0.21 ms. Against the first pass's head, alternating three times over twelve framed views
+  (Medium, WebGPU, GPU busy p50, mean of the views): 8.4 ms before, 9.5 ms now, 8.3 ms now with
+  the four new switches off; but the same build swung between 4.5 and 16 ms from one round to the
+  next as other lanes loaded the machine (Meridian's views, whose scene barely changed, ran at
+  0.55× the first pass's time in two rounds and 2× in the third), so that bracket does not resolve
+  a difference of 1 ms. Every view held 16.7 ms frames both ways (p95 16.8), bar one 33 ms p95 in
+  Arcadia's deep grass in the round where the load peaked. Plain play at each planet's spawn, same
+  alternation: Arcadia 5.7/4.2/3.5 ms before and 5.6/4.1/7.9 now, Hollowmere 6.0/4.8/4.5 and
+  6.4/4.1/10.0, Meridian 4.7/3.7/3.1 and 3.7/3.4/3.5. Triangles drawn went up in grass-heavy views
+  (Arcadia's meadow 524k → 662k, Hollowmere's fen 348k → 500k on Medium; these counts include the
+  clumps the shader has shrunk to nothing in a far cell's kept list) and stayed level elsewhere.
+  High held 16.7 ms frames in eleven framed views (GPU busy 8.6–13.9 ms, 1.9 M triangles in the
+  meadow); its bracket against the first pass did not run (the measuring job hit its time limit).
+  No shader is built after the warm-up on either backend (0 in play on all three planets, WebGPU
+  and WebGL2). If the lead's quiet-machine run wants triangles back, `MEADOW_SHARE` (0.7 clumps per
+  blade) and `MEADOW_FAR_KEEP` (0.3 kept at the rim) in `render/meadow.ts` are the two numbers.
+  The hub keeps its own sky: `WORLD_LOOKS.portus.air` has shafts, mist and fireflies at 0. Why:
+  the brief asks for each change's cost; a loaded machine gives bounds, not a verdict.
