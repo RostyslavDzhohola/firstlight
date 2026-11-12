@@ -8,7 +8,7 @@ import type { TrialMsg } from "@firstlight/shared/net/protocol";
 
 export interface TrialSeen {
   msg: TrialMsg;
-  /** performance.now() when it arrived: the clock counts down from here. */
+  /** When it arrived, on the clock listenTrials was given (the game's synced server clock, trialNow()). */
   at: number;
 }
 
@@ -22,13 +22,15 @@ const listeners = new Set<(t: TrialSeen) => void>();
 /** Bumped by each listenTrials: a handler from an earlier room sees a stale number and does nothing. */
 let generation = 0;
 let unbind: (() => void) | null = null;
+let clock: () => number = () => Date.now();
 
 /**
  * Start listening on a freshly joined room: forgets the previous room's attempt and removes its
  * handler (a room we travelled away from, or a socket replaced on reconnect, can still deliver a
  * late frame; it is ignored).
  */
-export function listenTrials(room: MessageSource, now: () => number = () => performance.now()): void {
+export function listenTrials(room: MessageSource, now: () => number = () => Date.now()): void {
+  clock = now;
   unbind?.();
   unbind = null;
   const mine = ++generation;
@@ -39,6 +41,11 @@ export function listenTrials(room: MessageSource, now: () => number = () => perf
     for (const fn of listeners) fn(latest);
   });
   if (typeof off === "function") unbind = off as () => void;
+}
+
+/** Now on the clock the attempt messages are stamped with (the server clock in the game): pass it to trialHud / clockLeft. */
+export function trialNow(): number {
+  return clock();
 }
 
 /** The latest attempt message in this room, or null. */
@@ -58,11 +65,15 @@ export function formatClock(ms: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
-/** Clock left now: counts down while running, stands still while paused, 0 when over. */
+/**
+ * Clock left at `now` (trialNow()'s clock): runs to the server's `endsAt` while running (from the
+ * receipt for servers that don't send it), stands still while paused, 0 when over.
+ */
 export function clockLeft(t: TrialSeen, now: number): number {
   const { msg } = t;
   if (msg.state === "paused") return msg.leftMs;
   if (msg.state !== "running") return 0;
+  if (msg.endsAt) return Math.max(0, Math.min(msg.limitMs || Infinity, msg.endsAt - now));
   return Math.max(0, msg.leftMs - (now - t.at));
 }
 

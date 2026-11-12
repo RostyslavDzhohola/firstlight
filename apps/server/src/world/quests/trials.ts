@@ -98,7 +98,9 @@ export class TrialLogic {
       limitMs = this.scaled(def.collect.limitS);
       leftMs = run ? Math.max(0, run.deadline - now) : limitMs;
     }
-    const msg: TrialMsg = { id: def.id, kind, state, progress: m?.progress ?? 0, goal: missionGoal(def), leftMs, limitMs, next, ...(reason ? { reason } : {}) };
+    // The deadline on the server clock: the client counts down to it, so delivery delay doesn't stretch it.
+    const endsAt = state === "running" && run && limitMs > 0 ? now + leftMs : 0;
+    const msg: TrialMsg = { id: def.id, kind, state, progress: m?.progress ?? 0, goal: missionGoal(def), leftMs, limitMs, next, ...(reason ? { reason } : {}), ...(endsAt ? { endsAt } : {}) };
     a.client.send("trial", msg);
   }
 

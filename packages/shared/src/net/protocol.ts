@@ -276,8 +276,9 @@ export type ServerMessages = {
 
 /**
  * A timed-objective attempt (missions race / defend / collect). `leftMs` is the clock left when sent
- * (the client counts down from its receipt; it stands still while `paused`), `limitMs` the whole
- * clock (0 = untimed). `progress`/`goal` as in YouState.missions. `next` is the world object the
+ * (it stands still while `paused`), `endsAt` the server time (ms epoch) the running clock reaches 0,
+ * so the client counts down on its synced server clock whatever the delivery delay (older servers
+ * omit it: count from receipt), `limitMs` the whole clock (0 = untimed). `progress`/`goal` as in YouState.missions. `next` is the world object the
  * attempt leads to now (the next ring, the beacon, or null for collect: the nearest shard).
  */
 export interface TrialMsg {
@@ -291,6 +292,8 @@ export interface TrialMsg {
   next: string | null;
   /** Why it failed: "time", "died", "left", "abandoned" (or why it went idle: "dropped", a lost socket ended it). */
   reason?: string;
+  /** Running and timed only: server time (ms epoch) when the clock runs out if nothing changes. */
+  endsAt?: number;
 }
 
 /** Private per-player state sent only to its owner. */

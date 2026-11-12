@@ -108,6 +108,9 @@ describe("race (T1, The Swift Gleam)", () => {
     expect(lastTrial(a, "T1")).toMatchObject({ kind: "race", state: "running", progress: 3, goal: 8, next: "t1_ring_4" });
     expect(lastTrial(a, "T1").leftMs).toBeGreaterThan(0);
     expect(lastTrial(a, "T1").limitMs).toBe(15000);
+    // The deadline on the server clock, so a client counts to it whatever the delivery delay.
+    expect(lastTrial(a, "T1").endsAt).toBeGreaterThan(Date.now());
+    expect(lastTrial(a, "T1").endsAt).toBeLessThanOrEqual(Date.now() + 15000);
     await runRings(a, "T1", 3);
     await runRings(c, "T1", 2);
     await until("both done", () => mission(a, "T1").done && mission(c, "T1").done);
