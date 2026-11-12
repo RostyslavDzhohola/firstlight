@@ -33,7 +33,12 @@ export const NET = {
 // and a wider zone the server protects), and natural solids (D-solid-1): tree trunks, boulders,
 // spires and big rocks block movement on the server; an older client walks through them and would be
 // corrected at every tree.
-export const PROTOCOL_VERSION = 5;
+// 6: the 2026-11-12 run, shared by all of its lanes: per-starter move speed and dodge cooldown the
+// server validates against (D-balance-4: an older client predicts the base numbers and would be
+// corrected as Hinoko, Kappa or Brother Ash), the spellbook (`cast`, Skipstep moves the body on the
+// server), trials (`trial` messages, wave creatures), new world objects, the agent flag in the synced
+// player state, and play tokens bound to their session (D-security).
+export const PROTOCOL_VERSION = 6;
 
 // ---- HTTP: entering the world -------------------------------------------------------------
 
