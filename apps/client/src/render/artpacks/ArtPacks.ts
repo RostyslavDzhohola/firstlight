@@ -7,9 +7,10 @@
 // A loading screen (travel, a graphics change) pauses it: the download in flight is aborted, a group
 // half uploaded is dropped. A tier that doesn't take a pack puts the shipped textures back (they upload
 // again behind that loading screen's warm-up) and releases the HD ones. A failed download keeps the
-// shipped textures; each group gets two tries per session. No manifest (the packs aren't on this
-// server) is the session's answer, said once; a manifest that fails to arrive is tried a few times.
-// The env is injected (tests drive it by hand).
+// shipped textures, as does a failed decode, upload step or rebind (the whole group is dropped); each
+// group gets two tries per session. No manifest (the packs aren't on this server) is the session's
+// answer, said once; a manifest that fails to arrive is tried a few times. The env is injected (tests
+// drive it by hand).
 
 import type * as THREE from "three/webgpu";
 import type { Tier } from "../quality.ts";
@@ -218,11 +219,21 @@ export class ArtPacks {
     if (step) {
       const t0 = this.env.now();
       if (!this.uploadAt) this.uploadAt = t0;
-      step();
+      try {
+        step();
+      } catch (e) {
+        this.failTry(g, "didn't upload", e); // nothing of it is bound: the shipped textures stay
+        return;
+      }
       this.stepMs = Math.max(this.stepMs, this.env.now() - t0);
       return;
     }
-    this.swap(g);
+    try {
+      this.swap(g);
+    } catch (e) {
+      this.failTry(g, "didn't swap in", e);
+      return;
+    }
     this.current = null;
     void this.pump();
   }
@@ -350,22 +361,37 @@ export class ArtPacks {
     Promise.all(files).then(
       (made) => {
         if (g.abort !== abort || g.state !== "loading") return;
+        try {
+          g.steps = made.flatMap((t) => this.env.uploadSteps(t));
+        } catch (e) {
+          this.failTry(g, "didn't upload", e);
+          return;
+        }
         g.state = "uploading";
-        g.steps = made.flatMap((t) => this.env.uploadSteps(t));
         g.stepCount = g.steps.length;
       },
       (e: unknown) => {
         if (g.abort !== abort) return; // dropped (pause / tier): already cleaned up
-        g.tries++;
-        console.warn(`[packs] ${g.id} didn't load${g.tries >= MAX_TRIES ? "; keeping the shipped textures for this session" : "; trying again after the next loading screen"}`, e);
-        this.release(g);
-        g.state = g.tries >= MAX_TRIES ? "failed" : "pending";
-        g.cooling = true;
-        if (this.current === g) this.current = null;
-        abort.abort();
-        void this.pump();
+        this.failTry(g, "didn't load", e);
       },
     );
+  }
+
+  /**
+   * A try of `g` failed (download, decode, upload or rebind): abort what is still running, free all it
+   * made, keep the shipped textures bound. Two tries a session; the next one after the next resume.
+   */
+  private failTry(g: Group, what: string, e: unknown) {
+    g.tries++;
+    console.warn(`[packs] ${g.id} ${what}${g.tries >= MAX_TRIES ? "; keeping the shipped textures for this session" : "; trying again after the next loading screen"}`, e);
+    const a = g.abort;
+    g.abort = null; // a file still on its way is freed when it lands
+    a?.abort();
+    this.release(g);
+    g.state = g.tries >= MAX_TRIES ? "failed" : "pending";
+    g.cooling = true;
+    if (this.current === g) this.current = null;
+    void this.pump();
   }
 
   /** Bind the group's HD textures in its slots (one frame), release the shipped ones on the GPU. */
@@ -377,8 +403,18 @@ export class ArtPacks {
       return;
     }
     const t0 = this.env.now();
-    g.live = g.bases.map((b, i) => ({ slot: b.slot, base: b.base, hd: g.made[i]! }));
-    for (const l of g.live) l.slot.set(l.hd);
+    const live = g.bases.map((b, i) => ({ slot: b.slot, base: b.base, hd: g.made[i]! }));
+    const bound: Live[] = [];
+    try {
+      for (const l of live) {
+        l.slot.set(l.hd);
+        bound.push(l);
+      }
+    } catch (e) {
+      for (const l of bound) l.slot.set(l.base); // all or nothing: the shipped ones back where they were
+      throw e;
+    }
+    g.live = live;
     for (const l of g.live) l.base.dispose(); // its CPU copy stays: a tier change can bind it again
     g.made = [];
     g.abort = null;

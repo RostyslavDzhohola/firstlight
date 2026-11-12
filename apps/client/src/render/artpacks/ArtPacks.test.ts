@@ -484,4 +484,84 @@ describe("ArtPacks", () => {
     expect(b.closed).toEqual(["characters/ash_albedo.webp"]);
     expect(w.slots.get("characters/ash_albedo.webp")!.sets).toEqual([]);
   });
+
+  /** Two tries of the characters' group, each to the end of its upload and past it. */
+  async function twoTries(w: ReturnType<typeof world>, packs: ArtPacks) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      packs.resume();
+      await w.tick(ArtPacks.START_DELAY_MS);
+      await w.land();
+      expect(() => packs.frame()).not.toThrow();
+      await w.frames(packs, 8);
+      packs.pause();
+    }
+  }
+
+  it("an upload step that throws drops the whole group, keeps the shipped textures bound, and counts as a try", async () => {
+    const w = world(["characters/ash_albedo.webp", "characters/ash_normal.webp"]);
+    const b = withBitmaps(w);
+    w.env.uploadSteps = (t) => [
+      () => w.uploads.push(`${t.name} 1/2`),
+      () => {
+        if (t.name.includes("normal")) throw new Error("GPU out of memory"); // initTexture()
+        w.uploads.push(`${t.name} 2/2`);
+      },
+    ];
+    const packs = new ArtPacks(w.env, { mode: "on", only: ["chars"] });
+    packs.setTier("medium");
+    const albedo = w.slots.get("characters/ash_albedo.webp")!, normal = w.slots.get("characters/ash_normal.webp")!;
+    const bases = [albedo.texture, normal.texture];
+    packs.resume();
+    await w.tick(ArtPacks.START_DELAY_MS);
+    await w.land();
+    for (let i = 0; i < 8; i++) expect(() => packs.frame()).not.toThrow();
+    await w.tick();
+    expect(albedo.sets).toEqual([]); // never swapped in: not the albedo that did upload, not the normal
+    expect(normal.sets).toEqual([]);
+    for (const t of bases) expect(w.disposed.has(t)).toBe(false);
+    expect([...w.disposed].map((t) => t.name).sort()).toEqual(["hd characters/ash_albedo.webp", "hd characters/ash_normal.webp"]);
+    expect(b.closed.sort()).toEqual(["characters/ash_albedo.webp", "characters/ash_normal.webp"]);
+    expect(packs.state()).toMatchObject({ live: [], failed: [], gpuBytes: 0 });
+    expect(warn).toHaveBeenCalledTimes(1);
+    // the bounded policy: a second try after the next loading screen, then it stays shipped
+    packs.pause();
+    await twoTries(w, packs);
+    expect(packs.state().failed).toEqual(["chars:ash"]);
+    expect(albedo.texture).toBe(bases[0]);
+  });
+
+  it("setting the upload up (uploadSteps) that throws goes the same way", async () => {
+    const w = world(["characters/ash_albedo.webp", "characters/ash_normal.webp"]);
+    w.env.uploadSteps = () => {
+      throw new Error("no renderer");
+    };
+    const packs = new ArtPacks(w.env, { mode: "on", only: ["chars"] });
+    packs.setTier("medium");
+    await twoTries(w, packs);
+    expect(packs.state()).toMatchObject({ live: [], failed: ["chars:ash"], busy: false });
+    expect(w.slots.get("characters/ash_albedo.webp")!.sets).toEqual([]);
+  });
+
+  it("a rebind that throws part way puts the shipped textures back in every slot", async () => {
+    const w = world(["characters/ash_albedo.webp", "characters/ash_normal.webp"]);
+    const normal = w.slots.get("characters/ash_normal.webp")!;
+    const base = normal.texture;
+    const set = normal.set.bind(normal);
+    normal.set = (t) => {
+      if (t !== base) throw new Error("material gone");
+      set(t);
+    };
+    const packs = new ArtPacks(w.env, { mode: "on", only: ["chars"] });
+    packs.setTier("medium");
+    const albedo = w.slots.get("characters/ash_albedo.webp")!;
+    const albedoBase = albedo.texture;
+    packs.resume();
+    await w.tick(ArtPacks.START_DELAY_MS);
+    await w.land();
+    for (let i = 0; i < 8; i++) expect(() => packs.frame()).not.toThrow();
+    expect(albedo.texture).toBe(albedoBase);
+    expect(normal.texture).toBe(base);
+    expect(w.disposed.has(albedoBase)).toBe(false);
+    expect(packs.state().live).toEqual([]);
+  });
 });
