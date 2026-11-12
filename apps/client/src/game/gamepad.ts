@@ -73,6 +73,11 @@ export class GamepadSource {
   /** Per pad index: ownership of keys, sprint and Select (review #2: unplugging one pad releases only its own). */
   private readonly state = new Map<number, PadState>();
   private mode: "play" | "ui" | "idle" = "idle";
+  /**
+   * Pads that must come back to neutral (no button, sticks at rest) before they count again: every pad
+   * when the window lost focus or the page was hidden (review #1).
+   */
+  private readonly waitNeutral = new Set<number>();
   private raf = 0;
   private last = 0;
   private navDir: Dir | null = null;
@@ -132,7 +137,14 @@ export class GamepadSource {
     this.last = now;
     const input = this.host.input;
     const s = this.host.settings();
-    const pads = this.connected().filter((p) => p.mapping === "standard" || p.buttons.length >= 16);
+    const all = this.connected().filter((p) => p.mapping === "standard" || p.buttons.length >= 16);
+    if (!input.focused) {
+      // Unfocused or hidden: feed nothing (not the world, not the menus); every pad waits for neutral.
+      if (this.mode !== "idle") this.setMode("idle");
+      for (const p of all) this.waitNeutral.add(p.index);
+      return;
+    }
+    const pads = all.filter((p) => !this.waitNeutral.has(p.index) || this.neutral(p, s));
     let mx = 0, my = 0, lx = 0, ly = 0;
     const edges: Edge[] = [];
     let used: PadLike | null = null;
@@ -183,6 +195,15 @@ export class GamepadSource {
       }
       for (const p of pads) this.play(this.stateOf(p.index), edges, sticks.get(p.index)!, now);
     } else this.ui(edges, mx, my, ly, now, dt);
+  }
+
+  /** No button pressed and both sticks at rest: a waiting pad counts again, from a clean slate. */
+  private neutral(p: PadLike, s: StickTuning): boolean {
+    for (let b = 0; b < Math.min(17, p.buttons.length); b++) if (pressedOf(p, b)) return false;
+    if (shapeStick(p.axes[0] ?? 0, p.axes[1] ?? 0, s).mag > 0 || shapeStick(p.axes[2] ?? 0, p.axes[3] ?? 0, s).mag > 0) return false;
+    this.waitNeutral.delete(p.index);
+    this.stateOf(p.index).prev = [];
+    return true;
   }
 
   private setMode(m: "play" | "ui" | "idle"): void {

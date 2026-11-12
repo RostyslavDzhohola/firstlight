@@ -442,3 +442,63 @@ describe("GamepadSource: unplugged mid-charge (review #3)", () => {
     expect(input.altCancelled).toBe(false);
   });
 });
+
+describe("Focus and visibility (review #1)", () => {
+  it("blur clears every source at once and the game is no longer captured", () => {
+    const r = rig();
+    const p = pad();
+    r.pads.push(p);
+    p.press(BTN.LT);
+    p.press(BTN.A);
+    p.stick(0, 0, -1);
+    r.poll();
+    r.input.virtualKey("KeyW", true, "touch");
+    window.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyD" }));
+    expect(r.input.captured && r.input.rmb && r.input.down("Space")).toBe(true);
+    window.dispatchEvent(new Event("blur"));
+    expect(r.input.focused).toBe(false);
+    expect(r.input.captured).toBe(false);
+    expect(r.input.keys.size).toBe(0);
+    expect(r.input.rmb).toBe(false);
+    expect(r.input.altCancelled).toBe(true); // a charge is cancelled, not released
+    expect(r.input.moveY).toBe(0);
+    // Still unfocused: the pad feeds nothing, not even its held trigger.
+    r.frame();
+    r.poll();
+    expect(r.input.rmb).toBe(false);
+    expect(r.input.down("Space")).toBe(false);
+    window.dispatchEvent(new Event("focus"));
+    r.poll();
+    // Back: the controls still held don't count until they return to neutral.
+    expect(r.input.captured).toBe(true);
+    expect(r.input.rmb).toBe(false);
+    expect(r.input.down("Space")).toBe(false);
+    expect(r.input.moveY).toBe(0);
+    p.press(BTN.LT, false);
+    p.press(BTN.A, false);
+    p.stick(0, 0, 0);
+    r.poll();
+    p.press(BTN.A);
+    r.poll();
+    expect(r.input.down("Space")).toBe(true); // a fresh press counts again
+    // A keyboard key held through the focus loss: its auto-repeat doesn't press it again.
+    window.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyD", repeat: true }));
+    expect(r.input.down("KeyD")).toBe(false);
+    window.dispatchEvent(new KeyboardEvent("keyup", { code: "KeyD" }));
+    window.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyD" }));
+    expect(r.input.down("KeyD")).toBe(true);
+    r.dispose();
+  });
+
+  it("a hidden page counts as unfocused", () => {
+    const input = new Input(document.createElement("canvas"));
+    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(input.focused).toBe(false);
+    Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(input.focused).toBe(document.hasFocus());
+    window.dispatchEvent(new Event("focus"));
+    expect(input.focused).toBe(true);
+  });
+});

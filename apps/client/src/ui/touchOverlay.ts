@@ -212,6 +212,11 @@ export class TouchOverlay {
     parent.appendChild(this.root);
     document.documentElement.classList.add("fl-touchmode");
     window.addEventListener("blur", () => this.release());
+    // Focus lost or the page hidden (Input clears every source): let go of every pointer too, so a
+    // finger still down when the page comes back must lift before it moves or looks again.
+    host.input.onFocusChange((on) => {
+      if (!on) this.release();
+    });
     // Any touch anywhere (a menu button, the HUD) makes touch the device again, so the overlay can't be
     // stranded hidden after a key or a mouse took over.
     window.addEventListener("pointerdown", (e) => {

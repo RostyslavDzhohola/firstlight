@@ -36,10 +36,11 @@ const MOUSE_SWITCH_PX = 4;
 /**
  * The game may act on look and attack input (D-controls-5): the pointer is locked, or the player is
  * back in the game with the pointer free (the "free" pause state) on a gamepad or touch, where there
- * is no pointer to lock. Never while a menu, panel or loading screen is up.
+ * is no pointer to lock. Never while a menu, panel or loading screen is up, and never while the
+ * window is unfocused or the page hidden (review #1).
  */
-export function capturedFrom(s: { enabled: boolean; suspended: boolean; locked: boolean; free: boolean; device: Device }): boolean {
-  return s.enabled && !s.suspended && (s.locked || (s.free && s.device !== "kbm"));
+export function capturedFrom(s: { enabled: boolean; suspended: boolean; locked: boolean; free: boolean; device: Device; focused?: boolean }): boolean {
+  return s.enabled && !s.suspended && s.focused !== false && (s.locked || (s.free && s.device !== "kbm"));
 }
 
 /** The source of real keyboard events (virtual keys name theirs: "pad:0", "touch", "menu"). */
@@ -94,6 +95,15 @@ export class Input {
    * (the paused frame loop and the hand-over end the input frame).
    */
   suspendedWhile: (() => boolean) | null = null;
+  /**
+   * The window has focus and the page is visible. Losing either clears every source at once (keys,
+   * buttons, sticks, look); captured input waits for it, and the pad stops feeding the world until
+   * each held control returns to neutral (review #1).
+   */
+  focused = true;
+  private readonly focusListeners = new Set<(focused: boolean) => void>();
+  /** Keyboard keys held when focus went: their auto-repeat doesn't press them again until a keyup. */
+  private readonly staleKeys = new Set<string>();
   sensitivity = 0.0022;
   invertY = false;
   enabled = true;
@@ -108,14 +118,25 @@ export class Input {
       if (e.isTrusted) this.setDevice("kbm");
       if (!this.enabled) return;
       if (preventsDefault(e.code, this.locked)) e.preventDefault();
+      if (this.dispatching === null && this.staleKeys.has(e.code)) return; // held through a focus loss: wait for neutral
       if (!this.keys.has(e.code)) {
         this.pressed.add(e.code);
         if (e.shiftKey) this.pressedShift.add(e.code);
       }
       this.hold(this.dispatching ?? KEYBOARD, e.code, true);
     });
-    window.addEventListener("keyup", (e) => this.hold(this.dispatching ?? KEYBOARD, e.code, false));
-    window.addEventListener("blur", () => this.clearKeys(KEYBOARD));
+    window.addEventListener("keyup", (e) => {
+      if (this.dispatching === null) this.staleKeys.delete(e.code);
+      this.hold(this.dispatching ?? KEYBOARD, e.code, false);
+    });
+    window.addEventListener("blur", () => this.setFocused(false));
+    window.addEventListener("focus", () => this.setFocused(!(typeof document !== "undefined" && document.visibilityState === "hidden")));
+    if (typeof document !== "undefined" && document.addEventListener) {
+      document.addEventListener("visibilitychange", () => {
+        const visible = document.visibilityState !== "hidden";
+        this.setFocused(visible && (typeof document.hasFocus === "function" ? document.hasFocus() : true));
+      });
+    }
     el.addEventListener("mousedown", (e) => {
       if (this.emulatedMouse()) return; // a tap on a touch screen: the touch overlay owns it
       this.setDevice("kbm");
@@ -154,6 +175,31 @@ export class Input {
     document.addEventListener("pointerlockerror", () => {
       if (!this.requesting) this.onLockError?.();
     });
+  }
+
+  /**
+   * The window gained or lost focus (or the page was hidden or shown). Losing it clears every source
+   * at once: keys of every source, mouse buttons, pad and touch buttons (alt as a cancel), sticks and
+   * this frame's look.
+   */
+  setFocused(on: boolean): void {
+    if (on === this.focused) return;
+    this.focused = on;
+    if (!on) {
+      for (const code of this.heldFrom(KEYBOARD)) this.staleKeys.add(code);
+      this.clearKeys();
+      this.mouseL = this.mouseR = false;
+      for (const source of [...this.virtualButtons.keys()]) this.cancelButtons(source);
+      this.virtualMove.clear();
+      this.lookYaw = this.lookPitch = 0;
+    }
+    for (const l of this.focusListeners) l(on);
+  }
+
+  /** Focus or visibility changed (see setFocused): the touch overlay lets go of its pointers. */
+  onFocusChange(fn: (focused: boolean) => void): () => void {
+    this.focusListeners.add(fn);
+    return () => this.focusListeners.delete(fn);
   }
 
   /** `source` holds (or let go of) `code`; `keys` stays the union of every source. */
