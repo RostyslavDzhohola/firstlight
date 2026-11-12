@@ -17,3 +17,21 @@ Scope: `c5547f5b...6b1ae3b5`. Static review, reasoning effort high, Standard tie
 | 11 | nit | `gamepad.ts:119` | Per-frame allocations and repeated `getGamepads()` snapshots in the polling path. |
 
 Verdict: hold for the should-fix findings. Decisions and fixes are recorded below this line as they land.
+
+## Fixes (lane/controls, Claude Opus 5.5)
+
+Each test fails on the code before its fix and passes after (checked by putting the old source back), except where noted.
+
+| # | Fix | Commit | Test |
+|---|---|---|---|
+| 4 | Held keys tracked per source (keyboard, `pad:<index>`, touch, menu rows); `keys` is their union; a keyup releases only its sender's hold | `519321aa`, `6315966a` | `gamepad.test.ts` › "Input: held keys per source (review #4)" |
+| 2 | Per-pad ownership of keys, sprint latch, Select and Input sources; unplugging one pad releases only its own | `86bfdd1f` | `gamepad.test.ts` › "two pads, one unplugged (review #2)" |
+| 3 | Unplug cancels alt (`Input.cancelButtons` → `altCancelled`); `CombatClient` drops the charge, draw or guard on it instead of releasing | `cde4ae5e` | `gamepad.test.ts` › "unplugged mid-charge (review #3)" (no `CombatClient` unit test exists; the combat side is the one-line drop) |
+| 1 | `Input.focused` follows blur/focus and `visibilitychange`; losing it clears every source at once; `capturedFrom` needs it; the pad stops polling into the world and each pad must return to neutral; a key held through it doesn't auto-repeat back in; touch lets go of its pointers | `391018be` | `gamepad.test.ts` › "Focus and visibility (review #1)" |
+| 5 | Trigger hysteresis: press above 0.35, let go below 0.2 | `b65e2254` | `gamepad.test.ts` › "Trigger hysteresis (review #5)" |
+| 6 | The pad sets a look rate; `Game.frame` integrates it with `frameClock`'s dt (`Input.integrateLook`), so 200 ms frames turn twice as far as 100 ms ones | `fc1935e0` | `gamepad.test.ts` › "Pad look and the frame clock (review #6)" |
+| 8 | `fl-touchmode` follows the active device | `4fe7d4a3` | `touchOverlay.test.ts` › "fl-touchmode follows the active device (review #8)" |
+| 7 | `touch-action: none` only on the overlay, its buttons, the game canvas (`fl-game-canvas`) and hotbar slots; not on the document or body | `019ea8bd` | `touchOverlay.test.ts` › "touch.css: touch-action only on gameplay surfaces (review #7)" |
+| 9 | `SpellClient.crosshairPoint`'s query moves to `game/crosshairTarget.ts` and reports what it hit; the slowdown counts only an unobstructed nearest creature, and runs the query only while the right stick turns (once per poll) | `42b3eb60` | `crosshairTarget.test.ts` (new module, so it fails before by construction) |
+| 10 | Journey asserts pad focus reaches Settings, opens it unconditionally, scrolls it with the right stick and checks `scrollTop` grew | `711e96ce` | `e2e/jpad-touch.spec.ts` (typechecked, **not run**: the machine was loaded) |
+| 11 | One `getGamepads()` snapshot per poll; reused snapshot, edge pool and per-pad button buffers | `54c1a3ff`, `640368b6` | `gamepad.test.ts` › "Polling path allocations (review #11)" |
