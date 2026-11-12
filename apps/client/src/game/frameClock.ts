@@ -30,3 +30,14 @@ export function frameClock(rawMs: number, maxS = FRAME_MAX_S): { dt: number; ste
   const dt = Math.min(maxS, s);
   return { dt, steps: stepsFor(dt) };
 }
+
+/**
+ * The share of the way to a target that an eased value covers in `dt` seconds, for a factor that
+ * used to be `Math.min(1, rate * dt)` per frame: that same share at 60 fps, compounded over the frame,
+ * so 4 fps and 60 fps end up in the same place at the same time (review B2). The linear form covered
+ * more per second on long frames (`rate` 14 at 250 ms snapped; at 60 fps it takes ~0.3 s).
+ */
+export function easeShare(rate: number, dt: number): number {
+  const perFrame = Math.min(1, Math.max(0, rate) / 60);
+  return perFrame >= 1 ? 1 : 1 - Math.pow(1 - perFrame, Math.max(0, dt) * 60);
+}

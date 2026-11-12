@@ -8,14 +8,24 @@ import type { StepId } from "./onboardingSteps.ts";
 export interface GuideTarget {
   id: string;
   dir: V3;
+  /** Empty: a star with no label of its own (one of a cluster the first one names). */
   label: string;
 }
 
-/** The dummies still standing, while "attack" (knock down the dummies) is the current step. */
+/**
+ * The dummies still standing, while "attack" (knock down the dummies) is the current step. They
+ * stand 2.5 m apart, one cluster on the map: each gets a star, only the first a label (three
+ * identical labels stacked over each other, play-through).
+ */
 export function dummyTargets(step: StepId | undefined, down: readonly boolean[]): GuideTarget[] {
   if (step !== "attack") return [];
   const out: GuideTarget[] = [];
-  for (let i = 0; i < TRAINING_DUMMIES.length; i++) if (!down[i]) out.push({ id: `dummy:${i}`, dir: dummyDir(i) as V3, label: "Training dummy" });
+  const standing = TRAINING_DUMMIES.filter((_, i) => !down[i]).length;
+  for (let i = 0; i < TRAINING_DUMMIES.length; i++) {
+    if (down[i]) continue;
+    const label = out.length ? "" : standing > 1 ? `Training dummies (${standing})` : "Training dummy";
+    out.push({ id: `dummy:${i}`, dir: dummyDir(i) as V3, label });
+  }
   return out;
 }
 

@@ -2,7 +2,7 @@
 // account to a brand-new character (level 1, never died), and kept through a rebirth until it ends (D-fixes-2). The client teaches move, look, jump,
 // sprint and dodge on its own (nothing is paid for those); the server counts hits on the three
 // training dummies from `train` messages (Portus town is a safe zone, so real attacks are refused there),
-// pays 10 XP per dummy and, when all three are down, 20 XP and the Spark medal. Skipping ends it with
+// pays 10 XP per dummy and, when all three are down, 20 XP (a reborn trainee is topped up to the 50 total, D-fixes-4) and the Spark medal. Skipping ends it with
 // nothing more paid. Progress lives in account stats, so it survives reconnects and never repeats.
 // Every payout (the dummy's flag, the completion flag, the character's XP, the medal) commits in one
 // transaction (D26); the player hears about it only after the commit.
@@ -43,6 +43,19 @@ export const ONBOARDING_STARTED_STAT = "onboarding_started";
 
 const vec = z.number().finite();
 const trainSchema = z.object({ ox: vec, oy: vec, oz: vec, dx: vec, dy: vec, dz: vec });
+
+/** What the whole tutorial pays: 3 × 10 + 20 = 50 XP, exactly level 2 (where saving unlocks, D34). */
+export const TUTORIAL_TOTAL_XP = TRAINING_DUMMIES.length * ONBOARDING.DUMMY_XP + ONBOARDING.DONE_XP;
+
+/**
+ * The completion's XP (D-fixes-4): the usual 20, or for a level-1 character short of the tutorial's
+ * total (one reborn mid-tutorial: the dummies paid its earlier life, and the rebirth started it at
+ * 0 XP) enough to reach that total, so finishing always lands on level 2. The completion pays once per
+ * account (its flag), so dying on purpose earns nothing: a never-died trainee is never short.
+ */
+export function completionXp(level: number, xp: number): number {
+  return level === 1 ? Math.max(ONBOARDING.DONE_XP, TUTORIAL_TOTAL_XP - xp) : ONBOARDING.DONE_XP;
+}
 
 export interface Trainee {
   /** The session training now (a takeover from another window replaces it). */
@@ -184,7 +197,7 @@ export class OnboardingSystem implements RoomSystem {
         if (dummy !== null && store.addStat(uid, dummyStat(dummy), 1) === 1) dummyXp = ONBOARDING.DUMMY_XP;
         if (done && store.stat(uid, ONBOARDING.STAT) === 0) {
           store.addStat(uid, ONBOARDING.STAT, 1);
-          doneXp = ONBOARDING.DONE_XP;
+          doneXp = completionXp(a.char.level, a.char.xp + dummyXp);
           if (quests) quests.award(a, SPARK, notify);
           else store.awardMedal(uid, SPARK);
         }

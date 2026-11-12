@@ -5,6 +5,7 @@
 
 import { HORSE, rideSpeed, tooDeepToRide } from "@firstlight/shared/content/horse";
 import type { WeaponDef } from "@firstlight/shared/content/weapons";
+import { easeShare } from "./frameClock.ts";
 
 /**
  * Tonics, Patchkits and Prism Bubbles: the server takes `use` for them anywhere, from the saddle and
@@ -61,7 +62,7 @@ export class MountState {
   step(dt: number) {
     this.sinceOff = this.riding ? 0 : this.sinceOff + dt;
     const target = this.riding ? 1 : 0;
-    const k = Math.min(1, dt * 3);
+    const k = easeShare(3, dt);
     this.blend += (target - this.blend) * k;
     if (Math.abs(this.blend - target) < 1e-3) this.blend = target;
   }

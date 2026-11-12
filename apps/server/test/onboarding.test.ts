@@ -13,7 +13,8 @@ import { dummyStat } from "@firstlight/shared/content/onboarding";
 import type { CharacterData } from "@firstlight/shared/content/character";
 import { openGameDb } from "../src/db/index.ts";
 import { characterRepo } from "../src/world/characters.ts";
-import { OnboardingSystem } from "../src/world/onboarding.ts";
+import { completionXp, OnboardingSystem, TUTORIAL_TOTAL_XP } from "../src/world/onboarding.ts";
+import { OTP_MIN_LEVEL } from "../src/auth/better-auth.ts";
 import { pileStore } from "../src/world/piles.ts";
 import { progressStore, SqliteProgressStore } from "../src/world/quests/store.ts";
 import { copyRestrictions } from "../src/world/quests/restrictions.ts";
@@ -235,6 +236,45 @@ describe("dying mid-tutorial (D-fixes-2)", () => {
     expect(characterRepo.current.load("faller")!.deaths).toBe(1);
     const again = await bot("faller", "portus");
     expect(again.you.onboarding).toEqual({ hits: [0, 0, HITS] });
+    expect(again.you.level).toBe(1);
+    expect(again.you.xp).toBe(0);
+    // Finishing it tops the reborn character up to the tutorial's total (D-fixes-4): level 2, saving unlocked.
+    for (const i of [0, 1]) {
+      await tpAndWait(again, inFront(i, 6));
+      await knockDown(again, i, "carbine");
+    }
+    await until("done", () => again.count("onboarding") > 0);
+    await until("level 2", () => again.you.level === 2);
+    expect(again.last("onboarding")).toEqual({ state: "done", xp: TUTORIAL_TOTAL_XP });
+    const saved = characterRepo.current.load("faller")!;
+    expect(saved.xp).toBe(TUTORIAL_TOTAL_XP);
+    expect(saved.level).toBeGreaterThanOrEqual(OTP_MIN_LEVEL);
+    expect(progressStore.current.stat("faller", ONBOARDING.STAT)).toBe(1);
+    // Dying again pays nothing more and brings no tutorial back: nothing to farm.
+    await safeLeave(again.room);
+    const out2 = await bot("faller", "arcadia");
+    await tpAndWait(out2, offPad("arcadia", 0, 40));
+    out2.send("admin", { cmd: "unprotect" });
+    await sleep(120);
+    out2.send("admin", { cmd: "damage", args: { amount: 5000 } });
+    await until("dead again", () => out2.count("death") > 0);
+    out2.send("respawn", { starter: 3, palette: 0 });
+    await until("reborn again", () => out2.count("reborn") > 0);
+    await safeLeave(out2.room);
+    const third = await bot("faller", "portus");
+    expect(third.you.onboarding).toBeUndefined();
+    expect(characterRepo.current.load("faller")!.xp).toBe(0);
+  });
+});
+
+describe("completionXp (D-fixes-4)", () => {
+  it("pays the usual 20 to a never-died trainee and tops a reborn one up to the 50 XP total", () => {
+    expect(TUTORIAL_TOTAL_XP).toBe(50);
+    expect(completionXp(1, 3 * ONBOARDING.DUMMY_XP)).toBe(ONBOARDING.DONE_XP);
+    expect(completionXp(1, 3 * ONBOARDING.DUMMY_XP + 15)).toBe(ONBOARDING.DONE_XP);
+    expect(completionXp(1, 0)).toBe(50);
+    expect(completionXp(1, 20)).toBe(30);
+    expect(completionXp(2, 0)).toBe(ONBOARDING.DONE_XP);
   });
 });
 

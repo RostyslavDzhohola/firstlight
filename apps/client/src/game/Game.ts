@@ -884,7 +884,7 @@ export class Game {
       }
     }
     if (this.photo.active) this.photo.update(dt, this.ctx.camera);
-    else if (!this.bench) this.player.placeCamera(this.ctx.camera);
+    else if (!this.bench) this.player.placeCamera(this.ctx.camera, dt);
     // Trees, rocks and props between the camera and the player dissolve (not in photo mode or the bench).
     // The cone aims at the drawn avatar's chest bone: in the saddle that's ~0.8 m higher than on foot.
     const chest = this.self ? avatarChest(this.self.root, this.self.socket("back")?.parent ?? null, this.fadeChest) : null;

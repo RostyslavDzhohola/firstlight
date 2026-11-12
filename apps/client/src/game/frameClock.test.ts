@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as THREE from "three/webgpu";
 import type { Terrain } from "@firstlight/shared";
 import { ANIM } from "@firstlight/shared/net/schema";
-import { FRAME_MAX_RIDE_S, frameClock } from "./frameClock.ts";
+import { easeShare, FRAME_MAX_RIDE_S, frameClock } from "./frameClock.ts";
 import { OnboardingSteps } from "./onboardingSteps.ts";
 import { TrainingDummies } from "../world/TrainingDummies.ts";
 
@@ -68,5 +68,25 @@ describe("frame clock (#33: no slow motion below 20 fps)", () => {
     expect(angle(slow)).toBeCloseTo(angle(fast), 2);
     slow.dispose();
     fast.dispose();
+  });
+});
+
+describe("easeShare (review B2: smoothing that doesn't depend on the frame rate)", () => {
+  it("is the old linear factor at 60 fps and compounds it over a longer frame", () => {
+    expect(easeShare(14, 1 / 60)).toBeCloseTo(14 / 60, 9);
+    expect(1 - easeShare(14, 0.25)).toBeCloseTo((1 - 14 / 60) ** 15, 9);
+    expect(easeShare(0, 0.25)).toBe(0);
+    expect(easeShare(90, 1 / 60)).toBe(1);
+  });
+
+  it("gets an eased value (the scope zoom, the saddle camera) to the same place in a second at 4 and 60 fps", () => {
+    for (const rate of [3, 14]) {
+      const after = (fps: number) => {
+        let v = 0;
+        for (let i = 0; i < fps; i++) v += (1 - v) * easeShare(rate, 1 / fps);
+        return v;
+      };
+      expect(after(4)).toBeCloseTo(after(60), 9);
+    }
   });
 });

@@ -39,7 +39,7 @@ The models behind the tables were computed in this session. Section 1.1 gives th
 **Formula (new):** `XP_to_next(L) = round_to_5(50 × L^1.5)` for L = 1…19. Total to cap: **33,570 XP**.
 
 **Model assumptions (new):** 2.5 effective kills/min including travel; tier mix ×1.15; on-level kill
-XP `10 + 5E`; onboarding pays **50 XP** (3 dummies × 10 + 20 on completion), so **level 2 lands at
+XP `10 + 5E`; onboarding pays **50 XP** (3 dummies × 10 + 20 on completion; a character reborn mid-tutorial is topped up to 50 at completion, D-fixes-4), so **level 2 lands at
 the end of the ~60 s tutorial**. That is also the moment the game offers "save your character" (D).
 Mission XP is credited at the level it is usually done. Boss XP is excluded, so it only speeds things up.
 
