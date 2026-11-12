@@ -149,8 +149,9 @@ export function summarize(o: Omit<Observation, "summary">, maxBytes = 1500): str
   const places: string[] = [];
   if (o.guide) places.push(`guide ${o.guide.name} ${where(o.guide.dist, o.guide.bearing)}`);
   for (const sh of o.shops.slice(0, 1)) places.push(`shop ${sh.name} ${where(sh.dist, sh.bearing)}${sh.inReach ? " (in reach)" : ""}`);
-  for (const p of o.portals.slice(0, 3)) places.push(`portal to ${p.to} ${where(p.dist, p.bearing)}`);
-  for (const p of o.pads.slice(0, 2)) places.push(`pad ${p.id} ${p.name} ${where(p.dist, p.bearing)}${p.known ? "" : " (new)"}`);
+  // Places carry the id a move takes (portal:arcadia, pad:3).
+  for (const p of o.portals.slice(0, 3)) places.push(`${p.id} ${where(p.dist, p.bearing)}`);
+  for (const p of o.pads.slice(0, 2)) places.push(`${p.id} ${p.name} ${where(p.dist, p.bearing)}${p.known ? "" : " (new)"}`);
   if (o.safety && s.zone !== "safe") places.push(`safety: ${o.safety.name} ${where(o.safety.dist, o.safety.bearing)}`);
   if (places.length) lines.push(`Places: ${places.join("; ")}.`);
   const open = o.missions.filter((m) => !m.done);

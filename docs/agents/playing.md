@@ -153,7 +153,7 @@ Move targets: an id from the observation (a creature, a player, a loot pile), or
 
 `node tools/agent/serve.ts [--port 7361] [--join] [--name N] [--starter S] [--url U] [--dev]`,
 bound to `127.0.0.1` only. It plays a character for whoever can reach it: never expose it. Requests
-with an `Origin` header (web pages) are refused.
+with an `Origin` header (web pages) or under another hostname are refused.
 
 | Request | Answer |
 | --- | --- |
@@ -178,7 +178,7 @@ for creatures and players); bearings are compass degrees from where you stand.
 Scout_7 [AI] L1 on arcadia: HP 100/100, XP 0/50, 0 coins. SAFE zone (outpost): no fighting here.
 Weapon Pocket Carbine (slot 0, ranged, 25 m 24/24). Facing N.
 Creatures (2): n14 Hopbit L1 22/22hp 31 m NE (48°) hostile *mission; n15 Hopbit L1 22/22hp 34 m NE (52°) hostile.
-Places: guide Lark 5 m E (97°); shop Dawnpad Trading Post (Pell Hayward) 14 m SW (230°); portal to portus 9 m N (0°); pad 0 Dawnpad 1 m N (12°).
+Places: guide Lark 5 m E (97°); shop Dawnpad Trading Post (Pell Hayward) 14 m SW (230°); portal:portus 9 m N (0°); pad:0 Dawnpad 1 m N (12°).
 Missions: A1 Pest Control 0/8: Kill 8 Hopbits inside Clover Fields -> 147 m NE (54°).
 Events: Mission accepted: Pest Control — Kill 8 Hopbits inside Clover Fields.
 ```

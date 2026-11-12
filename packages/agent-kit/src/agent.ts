@@ -265,6 +265,8 @@ export class FirstlightAgent {
     while (!this.me() && Date.now() - t0 < 10_000 && this.room === room) await sleep(25);
     const me = this.me();
     if (!me) throw new AgentError("join", "joined, but the character never appeared in the room state");
+    // The private half (XP, coins, inventory) comes as a message right after: the first look has it.
+    while (!this.you && Date.now() - t0 < 10_000 && this.room === room) await sleep(25);
     this.walker.place(me.x, me.y, me.z);
     this.displayName = me.name;
     this.status = "playing";
@@ -848,14 +850,20 @@ export class FirstlightAgent {
         },
       };
     };
+    let ticks = 0;
     return this.run((now) => {
       walked += this.walker.lastMoved;
+      ticks++;
       const n = nav(now);
       if (n.gone) return report(false, "target gone");
       const at = t.at()!;
       if (groundDistance(this.walker.p, at) <= within) return report(true);
       if (o.stopWhenHit && this.lastHurtAt > hurt0) return report(false, "hurt", "something is attacking you: observe, then fight or move to safety");
-      if (now - t0 > limit) return report(false, "timeout", "still on the way: call moveTo again to keep going");
+      // `seconds` from the caller is wall-clock time. The default (what the distance needs) counts
+      // movement ticks, so a starved machine or a stalling server doesn't cut a walk short; the
+      // clock still bounds it at three times that.
+      const over = o.seconds !== undefined ? now - t0 > limit : ticks * TICK_MS > limit || now - t0 > limit * 3;
+      if (over) return report(false, "timeout", "still on the way: call moveTo again to keep going");
       if (n.blocked) return report(false, "blocked", "no way round found from here: try another bearing or a nearer target");
       return { wish: n.wish, speed };
     });

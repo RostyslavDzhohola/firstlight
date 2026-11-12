@@ -61,7 +61,7 @@ describe("a model plays over MCP", () => {
 
     const look = await call("firstlight_observe");
     expect(look.text).toContain("Weapon Ember Kunai");
-    expect(look.text).toContain("portal to arcadia");
+    expect(look.text).toContain("portal:arcadia");
     const full = await call("firstlight_observe", { detail: "full" });
     const obs = JSON.parse(full.text.slice(full.text.indexOf("\n{") + 1)) as { observation: { self: { pos: number[]; hotbar: unknown[] }; portals: unknown[] } };
     expect(obs.observation.portals).toHaveLength(3);
@@ -219,7 +219,7 @@ describe("the real processes (Node runs the .ts sources directly)", () => {
     expect(JSON.parse(moved.out)).toMatchObject({ ok: true, corrections: 0 });
     expect((await cli("move", "portal:arcadia", "--sprint")).code).toBe(0);
     const look = await cli("observe");
-    expect(look.out).toContain("portal to arcadia");
+    expect(look.out).toContain("portal:arcadia");
     const bad = await cli("attack", "n1", "--seconds", "500");
     expect(bad.code).toBe(1);
     expect(bad.out).toContain("must be at most 120");
