@@ -35,6 +35,10 @@ function installPad() {
       pad.axes.splice(0, 4, ...a);
       pad.timestamp++;
     },
+    /** Give pointer lock back (the harness's walking helpers turn with the mouse). */
+    allowLock() {
+      delete (HTMLElement.prototype as { requestPointerLock?: unknown }).requestPointerLock;
+    },
   };
 }
 
@@ -88,24 +92,6 @@ test.describe("Gamepad and touch", () => {
     expect(glyphs.length, "HUD keycaps carry pad glyphs").toBeGreaterThan(0);
     await player.shot("pad-hud-glyphs");
 
-    // Attack: RT. Arcadia's pad ring is a safe zone: either a swing goes out, or the holstered notice shows.
-    const t = await player.now();
-    await press(player, BTN.RT, 150);
-    const r = await player.attackResult(t, 1500);
-    await player.note("pad attack", JSON.stringify(r));
-    expect(r.sent.length > 0 || r.notice || r.accepted, "RT attacks (or is holstered in the safe zone with the notice)").toBe(true);
-
-    // Cast: D-pad left is the spellbar's first slot (Skipstep, Q). On the pad's safe ring the client
-    // refuses it with a toast and a shake; outside, it casts and the slot cools down.
-    const tc = await player.now();
-    const before = (await player.snap()).spells?.slots[0];
-    await press(player, BTN.LEFT);
-    await page.waitForTimeout(1200);
-    const after = (await player.snap()).spells?.slots[0];
-    const castEv = await player.attackResult(tc, 0);
-    await player.note("pad cast", JSON.stringify({ before, after, sent: castEv.sent, toasts: castEv.toasts }));
-    expect((after?.cooldown ?? 0) > 0 || castEv.sent.includes("cast") || castEv.toasts.some((t) => /Skipstep|safe|pad|ring/i.test(t)), "D-pad left casts (or is refused on the safe ring with the notice)").toBe(true);
-
     // Start opens the pause menu; the D-pad moves a visible focus ring; B goes back.
     await press(player, BTN.START);
     await expect(page.locator('[data-e2e="pause-menu"]')).toBeVisible();
@@ -115,6 +101,30 @@ test.describe("Gamepad and touch", () => {
     await press(player, BTN.B);
     await expect(page.locator('[data-e2e="pause-menu"]'), "B goes back to the game").toBeHidden();
     await player.until((s) => s.input.captured === true, "captured again", 5000);
+
+    // On the pad's safe ring RT and the D-pad reach the game, which holsters them with its notices.
+    const t0 = await player.now();
+    await press(player, BTN.RT, 150);
+    await press(player, BTN.LEFT);
+    const safe = await player.attackResult(t0, 1200);
+    await player.note("pad on the safe ring", JSON.stringify(safe.toasts));
+    expect(safe.notice, "RT on the ring: the holstered notice").toBe(true);
+    expect(safe.toasts.some((t) => /spells/i.test(t)), "D-pad left on the ring: the no-spells notice").toBe(true);
+
+    // Out in the wild (the harness walks out with keys and the mouse), the pad's RT attacks and D-pad left casts.
+    await page.evaluate(() => (window as any).__pad.allowLock());
+    await player.lock();
+    await player.walkOutOfRing();
+    await player.readyToFight();
+    const t = await player.now();
+    await press(player, BTN.RT, 150);
+    const r = await player.attackResult(t, 1500);
+    await player.note("pad attack", JSON.stringify(r));
+    expect(r.sent.length > 0 || r.accepted, "RT attacks").toBe(true);
+    expect(r.notice, "not holstered out here").toBe(false);
+    await press(player, BTN.LEFT);
+    const cast = await player.until((s) => (s.spells?.slots[0]?.cooldown ?? 0) > 0, "Skipstep cast from the D-pad (its slot cools down)", 5000);
+    await player.note("pad cast", JSON.stringify(cast.spells?.slots[0]));
   });
 
   test.describe("touch", () => {

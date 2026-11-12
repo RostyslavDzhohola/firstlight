@@ -27,7 +27,9 @@
 .fl-touch__spell .fl-touch__cd { --cd: 0; position: absolute; inset: 0; background: conic-gradient(rgba(6, 8, 14, .8) calc(var(--cd) * 360deg), transparent 0); pointer-events: none; }
 .fl-touch__spell .fl-touch__n { position: absolute; inset: 0; display: grid; place-items: center; font: 700 14px/1 var(--font-mono, monospace); }
 .fl-touch__spell .fl-touch__sname { position: absolute; left: 0; right: 0; bottom: 3px; text-align: center; font-size: 9px; opacity: .85; }
-.fl-touch__spell.is-locked, .fl-touch__spell.is-short { opacity: .45; }
+.fl-touch__spell > .fl-spell__icon { position: absolute; left: 50%; top: 45%; width: 26px; height: 26px; transform: translate(-50%, -50%); opacity: .9; }
+.fl-touch__spell.is-locked > .fl-spell__icon { filter: grayscale(1); opacity: .35; }
+.fl-touch__spell.is-locked, .fl-touch__spell.is-short { opacity: .6; }
 .fl-touch__spell.is-up { border-color: #cbb6ff; }
 
 /* Map and menu: the top-left corner (the compass owns the top centre, the minimap the top right). */
@@ -56,4 +58,5 @@ html.fl-touchmode, html.fl-touchmode body { overscroll-behavior: none; touch-act
   .fl-touch__top { top: calc(122px + env(safe-area-inset-top)); }
   .fl-touch__spells { left: calc(12px + env(safe-area-inset-left)); right: auto; top: calc(174px + env(safe-area-inset-top)); bottom: auto; gap: 6px; }
   .fl-touch__spell { width: 44px; height: 44px; }
+  .fl-touch__spell .fl-touch__sname { display: none; }
 }

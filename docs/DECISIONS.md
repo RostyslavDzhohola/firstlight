@@ -1791,8 +1791,9 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   own): LS move (L3 sprints until the stick returns), RS look, A jump, B dodge-roll, X interact/pick
   up/ride when a prompt is up and otherwise reload, Y whistle a horse, RT attack, LT alt (aim, block,
   draw, charge), LB/RB previous/next hotbar slot, D-pad ←↑→↓ the spellbar's four slots left to right
-  (Q F X Z), Start pause menu, Select tap map / hold players, R3 inventory; journal, map, players and the
-  tutorial checklist are also pause-menu rows while a pad or touch is the device. Keyboard-only by
+  (Q F X Z), Start pause menu, Select tap map / hold players, R3 inventory; the journal and the tutorial
+  checklist are pause-menu rows on a pad (Journal and Players on touch, two rows at most: the menu's
+  list has no room for more). Keyboard-only by
   choice: photo mode, screenshot, the perf/admin overlays, the phrase wheel (G needs a pointer to pick),
   invite Y/N (the Players panel has the buttons), voice. Stick tuning: radial dead zone with rescaling
   (default 15 %), a response curve (exponent 1.8), look speed and invert Y separate from the mouse's.
@@ -1809,8 +1810,9 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
 - **D-controls-6 (2026-11-12):** Touch controls are experimental. A coarse pointer without hover, or
   `?touch`, shows `ui/touchOverlay.ts`: a floating stick on the left half (pushed well past the rim
   straight ahead it sprints), drag-to-look on the right half, Fire (hold keeps firing), Alt, Jump,
-  Roll, Reload, Use (only while a prompt is up), the four spells (state and cooldown sweep copied from
-  the HUD spell bar, which hides in touch mode), Map and Menu; the HUD hotbar's slots take taps.
+  Roll, Reload, Use (only while a prompt is up), Map, Bag (inventory), Menu, the four spells (state and cooldown sweep copied from
+  the HUD spell bar, which hides in touch mode); the HUD hotbar's slots take taps. On short landscape
+  screens the player card moves to the top left, under it Map/Bag/Menu and the spells.
   Multi-touch by pointer id; under the HUD layers (the HUD passes taps through); safe-area insets; no
   scroll, zoom, selection or long-press menu; a "turn sideways" cover in portrait. The home page's
   phone card keeps "Play on your computer" as the recommendation and adds "Try it on this device

@@ -178,6 +178,7 @@ export class TouchOverlay {
     // Top: map and menu.
     const top = el("div", "fl-touch__top", this.root);
     this.button(top, { id: "map", label: "Map", cls: "fl-touch__small", press: (on) => on && this.tap("KeyM") });
+    this.button(top, { id: "bag", label: "Bag", cls: "fl-touch__small", press: (on) => on && this.tap("KeyI") });
     this.button(top, { id: "menu", label: "☰", cls: "fl-touch__small", press: (on) => on && this.tap("Escape") });
 
     // Right cluster: fire, alt, jump, roll, use, reload.
@@ -248,6 +249,11 @@ export class TouchOverlay {
     for (const s of this.spells) {
       const src = s.src();
       if (!src) continue;
+      // The spell's icon, copied once from the HUD bar (the same sprite).
+      if (!s.b.querySelector(".fl-spell__icon")) {
+        const icon = src.querySelector(".fl-spell__icon");
+        if (icon) s.b.insertBefore(icon.cloneNode(true), s.b.firstChild);
+      }
       const cls = ["is-ready", "is-cd", "is-locked", "is-short", "is-up"].find((c) => src.classList.contains(c)) ?? "";
       if (cls !== s.cls) {
         if (s.cls) s.b.classList.remove(s.cls);
@@ -255,9 +261,9 @@ export class TouchOverlay {
         s.cls = cls;
       }
       const cd = (src.querySelector(".fl-spell__cd") as HTMLElement | null)?.style.getPropertyValue("--cd") ?? "";
-      if (cd !== s.cd) (s.b.firstElementChild as HTMLElement).style.setProperty("--cd", (s.cd = cd) || "0");
+      if (cd !== s.cd) s.b.querySelector<HTMLElement>(".fl-touch__cd")!.style.setProperty("--cd", (s.cd = cd) || "0");
       const n = src.querySelector(".fl-spell__n")?.textContent ?? "";
-      if (n !== s.n) (s.b.children[1] as HTMLElement).textContent = s.n = n;
+      if (n !== s.n) s.b.querySelector(".fl-touch__n")!.textContent = s.n = n;
     }
     this.bindHotbar();
   }

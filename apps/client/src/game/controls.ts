@@ -72,17 +72,17 @@ export function installControls(game: Game): Controls {
 
   // What a pad or a touch screen has no button for comes from the pause menu (pauseExtras rows are
   // drawn each time the menu opens; each key goes out once the menu has handed back to the game).
-  const row = (icon: string, title: string, sub: string, code: string) => () =>
-    input.device === "kbm" ? null : { icon, title, sub, onClick: () => queueMicrotask(() => tapKey(code)) };
+  // Two rows per device at most (the menu's list has no room for more): a pad already has inventory
+  // (R3), map (Select) and players (Select held); touch has Map and Bag buttons on the overlay.
+  const row = (icon: string, title: string, sub: string, code: string, on: readonly string[]) => () =>
+    on.includes(input.device) ? { icon, title, sub, onClick: () => queueMicrotask(() => tapKey(code)) } : null;
   const tapKey = (code: string) => {
     input.virtualKey(code, true);
     input.virtualKey(code, false);
   };
-  pauseExtras.add(row("swap", "Inventory", "Your hotbar and backpack", "KeyI"));
-  pauseExtras.add(row("book", "Journal", "Missions, medals and the wardrobe", "KeyJ"));
-  pauseExtras.add(row("compass", "Map", "Waypoints and fast travel", "KeyM"));
-  pauseExtras.add(row("users", "Players", "Who is here, party invites", "Tab"));
-  pauseExtras.add(row("check", "Tutorial checklist", "Show or hide the first-steps list", "KeyT"));
+  pauseExtras.add(row("book", "Journal", "Missions, medals and the wardrobe", "KeyJ", ["pad", "touch"]));
+  pauseExtras.add(row("check", "Tutorial checklist", "Show or hide the first-steps list", "KeyT", ["pad"]));
+  pauseExtras.add(row("users", "Players", "Who is here, party invites", "Tab", ["touch"]));
   installed = c;
   return c;
 }
