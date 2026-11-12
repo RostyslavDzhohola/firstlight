@@ -81,8 +81,13 @@ describe("agent accounts (D-agents-1)", () => {
     expect(agentSessionCount(db)).toEqual({ sessions: 1, players: 1 });
 
     // The session file is the character: the next run is the same account, still an agent's.
+    // The body is really out of the world before the next run joins (asked of the server: the
+    // client's own copy of the state stops changing when it leaves).
+    const sid = room.sessionId;
+    const inWorld = () => [...liveRooms].some((r) => r.actors.has(sid) || [...r.lingering.values()].some((l) => l.actor.identity.userId === id));
+    expect(inWorld()).toBe(true);
     await first.a.close();
-    await waitFor(() => !(room.state as any).players?.has(room.sessionId) || true);
+    await waitFor(() => !inWorld());
     const again = await connect();
     expect(again.r).toMatchObject({ ok: true, name: "Scout_7" });
     expect((again.a.room!.state as any).players.get(again.a.room!.sessionId).userId).toBe(id);
