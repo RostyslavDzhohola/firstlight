@@ -73,7 +73,7 @@ file alone before calling it a failure.
   `onGameEvent(room, h)`, one bus per room, throwing handlers are isolated. New event: add an
   interface and a member of the `GameEvent` union. Missions, medals and eggs listen in `quests/QuestSystem.ts`.
 - **Admin commands:** built-ins are the switch in `BodyRoom` (teleport, give, level, coins, heal,
-  unprotect, damage, announce); anything else reaches each system's `onAdmin`. The client console
+  unprotect, damage, announce); anything else reaches each system's `onAdmin` (`spells`: full aether, no cooldowns). The client console
   and its help line are in `apps/client/src/ui/panels.ts`.
 - **Client systems** (`apps/client/src/game/systems.ts`): `CLIENT_SYSTEMS.push(factory)`; set
   `factory.offline = true` to also run without a server (`?offline`, `?bench`).
