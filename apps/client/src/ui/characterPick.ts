@@ -11,7 +11,7 @@ import { button, el, icon, isolateKeys, overlayClosed, overlayOpened, sprite, ui
 import { config } from "../config.ts";
 import { weaponChips } from "./hudFormat.ts";
 import { installSprites, itemSprite, portraitSprite } from "./sprites.ts";
-import { PIPS, starterPickStats } from "./starterStats.ts";
+import { PIPS, STARTER_BAR_LABELS, starterPickStats } from "./starterStats.ts";
 
 export interface CharacterPickOptions {
   /** Old call form: a custom heading. */
@@ -144,11 +144,11 @@ export function showCharacterPick(opts: CharacterPickOptions = {}): Promise<Char
     const wName = el("b", "", wText);
     const wLine = el("span", "", wText);
     const chips = el("div", "fl-charpick__stats", wcard);
-    // The starter's body (content/starters.ts): plain words and Toughness / Speed / Dodge pips.
+    // The starter's body (content/starters.ts): plain words and Toughness / Speed / Dodge / Magic pips.
     const body = el("div", "fl-charpick__body", ident);
     body.setAttribute("aria-label", "Starter stats");
     const traitRow = el("div", "fl-charpick__traits", body);
-    const barRows = ["Toughness", "Speed", "Dodge"].map((label) => {
+    const barRows = STARTER_BAR_LABELS.map((label) => {
       const row = el("div", "fl-charpick__bar", body);
       el("span", "fl-charpick__barlabel", row, label);
       const pips = el("span", "fl-charpick__pips", row);

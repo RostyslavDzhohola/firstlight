@@ -21,6 +21,8 @@ export const NPC_TUNING = {
   respawnScale: 1,
   leash: NPC_RULES.leash as number,
   lostSightMs: NPC_RULES.lostSightSeconds * 1000,
+  /** A trial creature (missions' defend waves) senses its runner this far, through cover (they come for you). */
+  ownedSenseM: 60,
   /** A target the NPC can't reach (pad safe ring, wrong medium) and can't shoot: evade after this (ms). */
   unreachableMs: 5000,
   /** Bosses: respawn delay, empty-arena reset, and attack control for tests. */

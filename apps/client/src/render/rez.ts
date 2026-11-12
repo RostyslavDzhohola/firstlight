@@ -1,6 +1,6 @@
 // Rez-in / de-rez (D-gfx-hub-1): an avatar materialises out of light when it appears (join, portal
 // arrival, fast travel, rebirth), dissolves top-down when it leaves, and breaks into drifting light
-// shards when it dies.
+// shards when it dies (once it has fallen: the shards rise from where it lies).
 //
 // Two parts, both driven by per-object uniforms (no material variant, no extra shadow build):
 //   1. the body: avatarMaterial() ANDs rezKeep() into its mask and adds rezGlow() to its emissive. A
@@ -9,25 +9,30 @@
 //      (death). Idle avatars carry values that keep every fragment. Shadows keep three's default
 //      opaque path (the material's shadow mask stays keep-all, D-load-3); the view just stops casting
 //      while most of the body is missing.
-//   2. the light: one small additive mesh per effect (rezFxMesh: a column, a ground ring, the scan
-//      ring and ~56 shards in one geometry, one shared material, one draw), parented to the avatar.
+//   2. the light: one small additive mesh per effect (rezFxMesh: a soft column with a core that
+//      flashes, a ground glyph that turns and fades, the scan disc, 56 shards and 30 rising motes in
+//      one geometry, one shared material, one draw), parented to the avatar.
 //
 // The timing is pure (rezPose) and unit-tested; AvatarView steps it and writes the uniforms.
 
 import * as THREE from "three/webgpu";
-import { attribute, dot, float, floor, fract, max, mix, normalize, positionLocal, positionWorld, select, sin, smoothstep, uniform, uv, vec3 } from "three/tsl";
+import { abs, atan, attribute, cos, dot, float, floor, fract, max, mix, normalize, normalView, positionLocal, positionViewDirection, positionWorld, select, sin, smoothstep, uniform, uv, vec3 } from "three/tsl";
 
 export type RezKind = "in" | "out" | "death";
 
 /** Seconds each effect lasts. */
-export const REZ_SECONDS: Record<RezKind, number> = { in: 1.25, out: 0.85, death: 1.7 };
+export const REZ_SECONDS: Record<RezKind, number> = { in: 1.25, out: 0.85, death: 2.4 };
 /** The scan plane's travel (m above the feet): from under the soles to over the tallest hat. */
 export const REZ_FLOOR = -0.25;
 export const REZ_TOP = 2.65;
 /** Height of the band of voxel cells above the scan plane that are still flickering in (m). */
 export const REZ_BAND = 0.3;
-/** Death: the body falls for this long before it starts to break up (s). */
-export const DEATH_HOLD = 0.4;
+/**
+ * Death: the body falls for this long before it starts to break up (s). The death clip (2.4 s) sags
+ * until 0.6 s, drops between 0.6 and 1.0 s and lies still from about 1.0 s (measured on the starter
+ * models), so the shards leave a body that is down, not one still on its feet.
+ */
+export const DEATH_HOLD = 1.05;
 /** Cut value that keeps every fragment (idle) / drops every fragment (gone). */
 export const CUT_IDLE = 1e9;
 export const CUT_GONE = -1e9;
@@ -74,6 +79,7 @@ export function rezPose(kind: RezKind, t: number, out: RezPose = { cut: CUT_IDLE
   } else {
     const hold = DEATH_HOLD / REZ_SECONDS.death;
     const d = clamp01((p - hold) / (1 - hold));
+    out.fx = out.done ? 1 : d; // the light starts when the body is down
     out.cut = out.done ? CUT_GONE : CUT_IDLE;
     out.dissolve = out.done ? 1 : d * d * 0.2 + d * 0.8;
     out.glow = p < hold ? p / hold : 1;
@@ -158,7 +164,20 @@ const uFxColor = uniform(FX_COLOR.clone());
 uFxColor.onObjectUpdate(({ object }) => void uFxColor.value.copy(fxOf.get(object as THREE.Object3D)?.color ?? FX_COLOR));
 
 export const REZ_SHARDS = 56;
-const KIND = { column: 0, ground: 1, scan: 2, shard: 3 } as const;
+/** Motes that rise through the column while someone arrives or leaves. */
+export const REZ_MOTES = 30;
+/** Half the side of the ground glyph's square (m). */
+export const REZ_GLYPH_M = 1.45;
+/**
+ * A death: where the fallen body lies, for the shards' starting points. The death clip drops the body
+ * onto its back behind where it stood (measured: pelvis 0.52 m back, head 1.13 m back, feet 0.2 m
+ * forward, all within 0.15 m of the ground): a point `h` m up the standing body ends
+ * `DEATH_LIE_FEET + h × DEATH_LIE` m along the avatar's forward axis, about `DEATH_LIE_HEIGHT` m up.
+ */
+export const DEATH_LIE = -0.98;
+export const DEATH_LIE_FEET = 0.26;
+export const DEATH_LIE_HEIGHT = 0.05;
+const KIND = { halo: 0, glyph: 1, scan: 2, shard: 3, core: 4, mote: 5 } as const;
 
 /** A small deterministic generator (the geometry is the same every session). */
 function lcg(seed: number) {
@@ -167,36 +186,51 @@ function lcg(seed: number) {
 }
 
 let fxGeo: THREE.BufferGeometry | null = null;
-/** Column, ground ring, scan ring and shards in one geometry (avatar space: y up from the feet). */
+/**
+ * The light of one effect in one geometry (avatar space: y up from the feet): a soft halo column and
+ * a thin core, the ground glyph, the scan disc, the shards and the rising motes.
+ */
 export function rezFxGeometry(): THREE.BufferGeometry {
   if (fxGeo) return fxGeo;
   const pos: number[] = [];
+  const nrm: number[] = [];
   const uvs: number[] = [];
   const fx: number[] = []; // kind, seed a, seed b, seed c
   const ctr: number[] = [];
   const idx: number[] = [];
-  const vert = (x: number, y: number, z: number, u: number, v: number, kind: number, a = 0, b = 0, c = 0, cx = 0, cy = 0, cz = 0) => {
+  const vert = (x: number, y: number, z: number, u: number, v: number, kind: number, a = 0, b = 0, c = 0, cx = 0, cy = 0, cz = 0, nx = 0, ny = 1, nz = 0) => {
     pos.push(x, y, z);
+    nrm.push(nx, ny, nz);
     uvs.push(u, v);
     fx.push(kind, a, b, c);
     ctr.push(cx, cy, cz);
     return pos.length / 3 - 1;
   };
+  // A tube (or, with y0 = y1, a flat annulus): uv.x round it, uv.y 0 at r0/y0 … 1 at r1/y1; radial normals.
   const tube = (kind: number, r0: number, r1: number, y0: number, y1: number, seg: number) => {
     const base = pos.length / 3;
     for (let i = 0; i <= seg; i++) {
-      const a = (i / seg) * Math.PI * 2;
-      vert(Math.cos(a) * r0, y0, Math.sin(a) * r0, i / seg, 0, kind);
-      vert(Math.cos(a) * r1, y1, Math.sin(a) * r1, i / seg, 1, kind);
+      const a = (i / seg) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
+      vert(c * r0, y0, s * r0, i / seg, 0, kind, 0, 0, 0, 0, 0, 0, c, 0, s);
+      vert(c * r1, y1, s * r1, i / seg, 1, kind, 0, 0, 0, 0, 0, 0, c, 0, s);
     }
     for (let i = 0; i < seg; i++) {
       const k = base + i * 2;
       idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2);
     }
   };
-  tube(KIND.column, 0.56, 0.3, 0, 5.2, 24); // the column of light
-  tube(KIND.ground, 0.35, 1.0, 0.04, 0.04, 32); // the ground ring (a flat annulus; uv.y 0 inner … 1 outer)
-  tube(KIND.scan, 0.58, 0.58, -0.05, 0.05, 28); // the scan ring (rides the cut)
+  tube(KIND.halo, 0.66, 0.46, 0, 4.8, 20); // the column: a wide, soft-edged shaft of light
+  tube(KIND.core, 0.15, 0.05, 0, 5.4, 10); // and its thin, briefly very bright core
+  {
+    // The ground glyph: one square, its pattern drawn in the shader (uv 0 … 1).
+    const g = REZ_GLYPH_M, y = 0.05, base = pos.length / 3;
+    vert(-g, y, -g, 0, 0, KIND.glyph);
+    vert(g, y, -g, 1, 0, KIND.glyph);
+    vert(g, y, g, 1, 1, KIND.glyph);
+    vert(-g, y, g, 0, 1, KIND.glyph);
+    idx.push(base, base + 2, base + 1, base, base + 3, base + 2);
+  }
+  tube(KIND.scan, 0.12, 0.74, 0, 0, 20); // the scan disc (rides the cut; uv.y 0 inner … 1 outer)
   const rnd = lcg(0x51f7);
   for (let i = 0; i < REZ_SHARDS; i++) {
     // A point in the body's volume, a drift direction (outwards and up) and a small random triangle.
@@ -215,22 +249,38 @@ export function rezFxGeometry(): THREE.BufferGeometry {
     }
     idx.push(base, base + 1, base + 2);
   }
+  for (let i = 0; i < REZ_MOTES; i++) {
+    // A small upright diamond; its centre holds (angle, radius, start height), its seeds a phase, a
+    // speed and a twinkle. The shader winds it up the column.
+    const ang = rnd() * Math.PI * 2, rad = 0.2 + rnd() * 0.5, y0 = rnd() * 0.6;
+    const seedA = rnd(), seedB = rnd(), seedC = rnd();
+    const size = 0.022 + rnd() * 0.03;
+    const base = pos.length / 3;
+    const corners: [number, number][] = [[0, 1.7], [1, 0], [0, -1.7], [-1, 0]];
+    for (const [ox, oy] of corners) vert(ox * size, oy * size, 0, ox, oy, KIND.mote, seedA, seedB, seedC, ang, rad, y0);
+    idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("normal", new THREE.Float32BufferAttribute(nrm, 3));
   g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   g.setAttribute("aFx", new THREE.Float32BufferAttribute(fx, 4));
   g.setAttribute("aCenter", new THREE.Float32BufferAttribute(ctr, 3));
   g.setIndex(idx);
-  g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 2.4, 0), 4.5);
+  g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 2.4, 0), 4.8);
   fxGeo = g;
   return g;
 }
 
 let fxMat: THREE.MeshBasicNodeMaterial | null = null;
-/** The one additive material of every rez light (per-object uniforms: progress, mode, cut, colour). */
+/**
+ * The one additive material of every rez light (per-object uniforms: progress, mode, cut, colour).
+ * Single pass: three draws a transparent double-sided mesh twice (back faces, then front) unless
+ * told otherwise, and for additive light one pass gives the same picture at half the draws and builds.
+ */
 export function rezFxMaterial(): THREE.MeshBasicNodeMaterial {
   if (fxMat) return fxMat;
-  const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false });
+  const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, forceSinglePass: true, fog: false });
   m.name = "rez_fx";
   const a = attribute("aFx", "vec4");
   const center = attribute("aCenter", "vec3");
@@ -240,38 +290,65 @@ export function rezFxMaterial(): THREE.MeshBasicNodeMaterial {
   const cut = uFx.z;
   const isIn = mode.lessThan(0.5);
   const isDeath = mode.greaterThan(1.5);
-  const isShard = kind.greaterThan(2.5);
-  const isScan = kind.greaterThan(1.5).and(kind.lessThan(2.5));
-  const isGround = kind.greaterThan(0.5).and(kind.lessThan(1.5));
+  const is = (k: number) => kind.greaterThan(k - 0.5).and(kind.lessThan(k + 0.5));
+  const isGlyph = is(KIND.glyph), isScan = is(KIND.scan), isShard = is(KIND.shard), isCore = is(KIND.core), isMote = is(KIND.mote);
 
   // Shards: each has its own short life inside the effect (delayed by seed a). Arriving, they fall in
-  // from outside onto the body; leaving and dying, they drift out and up.
+  // from outside onto the body; leaving, they drift out and up from where it stands; dying, from
+  // where it fell (the body lies behind its feet by then: DEATH_LIE).
   const life = p.mul(1.5).sub(a.y.mul(0.5)).clamp(0, 1);
   const travel = select(isIn, float(1).sub(life), life);
-  const reach = select(isDeath, float(1.9), float(1.1));
+  const reach = select(isDeath, float(1.5), float(1.1));
   const dir = vec3(uv().x, 0, uv().y);
   const drift = dir.mul(travel.mul(reach).mul(a.z.mul(0.7).add(0.5)))
     .add(vec3(0, 1, 0).mul(travel.mul(travel).mul(a.z.mul(1.6).add(0.5)).mul(select(isIn, float(1.4), float(1.0)))));
   const grow = sin(life.mul(Math.PI)).mul(select(isDeath, float(1.5), float(1.0)));
-  const shardPos = center.add(drift).add(positionLocal.sub(center).mul(grow));
-  // The ground ring spreads; the scan ring rides the cut and closes in at head height.
-  const spread = mix(float(0.5), float(1.7), p);
-  const groundPos = vec3(positionLocal.x.mul(spread), positionLocal.y, positionLocal.z.mul(spread));
+  const lying = vec3(center.x.mul(1.6), center.z.add(0.32).mul(0.45).add(DEATH_LIE_HEIGHT), center.y.mul(DEATH_LIE).add(DEATH_LIE_FEET));
+  const origin = select(isDeath, lying, center);
+  const shardPos = origin.add(drift).add(positionLocal.sub(center).mul(grow));
+  // Motes wind up the column, each on its own clock (several passes per effect).
+  const mLife = fract(p.mul(a.z.mul(0.9).add(1.3)).add(a.y));
+  const mAng = center.x.add(mLife.mul(a.w.sub(0.5).mul(5.0)));
+  const mRad = center.y.mul(mix(float(1.0), float(0.55), mLife));
+  const motePos = vec3(cos(mAng).mul(mRad), center.z.add(mLife.mul(a.z.mul(1.6).add(2.2))), sin(mAng).mul(mRad)).add(positionLocal);
+  // The glyph opens out as it appears; the scan disc rides the cut.
+  const open = mix(float(0.72), float(1.0), smoothstep(0.0, 0.3, p));
+  const glyphPos = vec3(positionLocal.x.mul(open), positionLocal.y, positionLocal.z.mul(open));
   const scanPos = positionLocal.add(vec3(0, cut.clamp(REZ_FLOOR, REZ_TOP), 0));
-  m.positionNode = select(isShard, shardPos, select(isScan, scanPos, select(isGround, groundPos, positionLocal)));
+  m.positionNode = select(isShard, shardPos, select(isMote, motePos, select(isScan, scanPos, select(isGlyph, glyphPos, positionLocal))));
 
-  // Brightness per part. The column: bright at the base, gone by the top, with slow vertical streaks;
-  // quick on, slow off.
+  // Brightness per part.
   const v = uv().y;
-  const env = smoothstep(0.0, 0.1, p).mul(float(1).sub(smoothstep(0.55, 1.0, p)));
-  const streak = sin(uv().x.mul(Math.PI * 2 * 9).add(v.mul(5)).sub(p.mul(14))).mul(0.45).add(0.55);
-  const column = float(1).sub(v).pow(2.2).mul(env).mul(streak).mul(select(isDeath, float(0.2), float(0.4)));
-  const ground = smoothstep(0.0, 0.35, v).mul(smoothstep(1.0, 0.55, v)).mul(float(1).sub(p).pow(1.5)).mul(1.6);
+  // The column is light, not glass: brightest where the view passes through its middle and gone at
+  // its silhouette (the opposite of a tube's bright rim), strongest at the ground, thinning upwards.
+  const facing = abs(dot(normalView, positionViewDirection)).clamp(0, 1);
+  const env = smoothstep(0.0, 0.1, p).mul(float(1).sub(smoothstep(0.5, 1.0, p)));
+  const shimmer = sin(v.mul(9).sub(p.mul(16)).add(uv().x.mul(Math.PI * 2 * 3))).mul(0.12).add(0.88);
+  const halo = facing.pow(1.7).mul(float(1).sub(v).pow(1.6)).mul(env).mul(shimmer).mul(select(isDeath, float(0.0), float(0.34)));
+  // The core flashes as the light arrives, well over the bloom threshold, and is gone a moment later.
+  const flash = smoothstep(0.0, 0.07, p).mul(float(1).sub(smoothstep(0.1, 0.42, p)));
+  const core = facing.pow(0.8).mul(float(1).sub(v).pow(1.2)).mul(flash.mul(3.2).add(env.mul(0.5))).mul(select(isDeath, float(0.0), float(1.0)));
+  // The glyph: an outer ring, a broken ring turning one way, ticks turning the other, a triangle.
+  const gx = uv().x.sub(0.5).mul(2), gy = uv().y.sub(0.5).mul(2);
+  const gr = gx.mul(gx).add(gy.mul(gy)).sqrt();
+  const ga = atan(gy, gx);
+  const turn = p.mul(2.4);
+  const band = (at: number, w: number) => smoothstep(w, w * 0.35, abs(gr.sub(at)));
+  /** `n` segments round the circle, each filling `fill` of its arc, turning at `speed` × the glyph's turn. */
+  const seg = (n: number, speed: number, fill: number) => smoothstep(fill, fill - 0.08, abs(fract(ga.add(turn.mul(speed)).mul(n / (Math.PI * 2))).sub(0.5)).mul(2));
+  const tri = cos(float(Math.PI / 3)).div(cos(fract(ga.sub(turn.mul(0.5)).mul(3 / (Math.PI * 2))).mul((Math.PI * 2) / 3).sub(Math.PI / 3)));
+  const pattern = band(0.9, 0.028)
+    .add(band(0.66, 0.03).mul(seg(6, 1, 0.7)))
+    .add(band(0.78, 0.05).mul(seg(36, -0.6, 0.3)).mul(0.6))
+    .add(smoothstep(0.035, 0.012, abs(gr.sub(tri.mul(0.44)))).mul(0.9))
+    .add(float(1).sub(gr).clamp(0, 1).pow(2).mul(0.3));
+  const glyph = pattern.mul(smoothstep(1.0, 0.94, gr)).mul(smoothstep(0.0, 0.08, p)).mul(float(1).sub(p).pow(1.4)).mul(select(isDeath, float(0.55), float(1.25)));
   const scanning = smoothstep(REZ_FLOOR, REZ_FLOOR + 0.2, cut).mul(smoothstep(REZ_TOP, REZ_TOP - 0.25, cut));
-  const scan = scanning.mul(select(isDeath, float(0), float(2.4)));
+  const scan = scanning.mul(float(1).sub(v).pow(1.5)).mul(select(isDeath, float(0), float(1.5)));
   const twinkle = sin(a.w.mul(40).add(p.mul(30))).mul(0.35).add(0.75);
   const shard = sin(life.mul(Math.PI)).mul(twinkle).mul(2.6);
-  const bright = select(isShard, shard, select(isScan, scan, select(isGround, ground, column)));
+  const mote = sin(mLife.mul(Math.PI)).mul(env).mul(twinkle).mul(select(isDeath, float(0), float(2.2)));
+  const bright = select(isShard, shard, select(isMote, mote, select(isScan, scan, select(isGlyph, glyph, select(isCore, core, halo)))));
   m.colorNode = uFxColor.mul(bright.mul(uFx.w));
   fxMat = m;
   return m;
@@ -288,8 +365,51 @@ export function rezFxMesh(): { mesh: THREE.Mesh; fx: RezFx } {
   return { mesh, fx };
 }
 
+/**
+ * The light meshes are pooled and never disposed. three keeps a material's built shader only while
+ * some drawn object still uses it: when the last light mesh of a departed avatar was disposed, the
+ * next arrival's light built the shader again, twice (a transparent double-sided mesh draws its back
+ * and front faces as two passes), in play (measured on WebGPU: +2 builds per join). An avatar
+ * borrows a light for the length of an effect and gives it back.
+ */
+const lightPool: { mesh: THREE.Mesh; fx: RezFx }[] = [];
+/** Light meshes made this session (the pool's size plus the ones in use). */
+export const rezLights = { made: 0 };
+
+/** A light for one effect: from the pool, or new while none is free. */
+export function takeRezLight(): { mesh: THREE.Mesh; fx: RezFx } {
+  const l = lightPool.pop();
+  if (l) return l;
+  rezLights.made++;
+  return rezFxMesh();
+}
+
+/** Give a light back: hidden, out of the scene, kept (with its render state) for the next effect. */
+export function returnRezLight(l: { mesh: THREE.Mesh; fx: RezFx }) {
+  l.mesh.visible = false;
+  l.mesh.removeFromParent();
+  l.fx.p.copy(FX_IDLE);
+  lightPool.push(l);
+}
+
 /** `?norez` / the Rez toggle: off, rez() calls do nothing (set from the resolved settings). */
 export const rezSwitch = { on: true };
+
+/** Rez effects that may run at once (each is one additive draw of ~200 triangles on top of its body). */
+export const REZ_MAX_ACTIVE = 6;
+/** Further than this from the camera an effect isn't worth its draw (m). */
+export const REZ_RANGE_M = 90;
+/** Effects running now, each with its light (AvatarView counts them in and out). */
+export const rezActive = { count: 0 };
+
+/**
+ * Whether one more effect may start: the player's own always does; anyone else's needs a free slot
+ * and to be within range of the camera (`dist` m; Infinity when unknown is refused, NaN never is).
+ */
+export function rezAdmits(active: number, dist: number, own = false): boolean {
+  if (own) return true;
+  return active < REZ_MAX_ACTIVE && !(dist > REZ_RANGE_M);
+}
 
 const MODE: Record<RezKind, number> = { in: 0, out: 1, death: 2 };
 export function rezMode(kind: RezKind): number {

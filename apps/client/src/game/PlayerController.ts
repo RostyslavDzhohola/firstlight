@@ -12,7 +12,7 @@ import { emptyContact, resetContact, type PropContact } from "@firstlight/shared
 import { ANIM } from "@firstlight/shared/net/schema";
 import { deepWater, SWIM_FLOAT } from "@firstlight/shared/planet/water";
 import type { Input } from "./input.ts";
-import { stepsFor } from "./frameClock.ts";
+import { easeShare, stepsFor } from "./frameClock.ts";
 import { mountedSpeed, rideCamera } from "./mount.ts";
 import { ADMIN_MODE } from "@firstlight/shared/content/admin";
 import { BASE_MOVE, starterMove } from "@firstlight/shared/content/starters";
@@ -114,8 +114,8 @@ const _probeTarget = new THREE.Vector3();
  * the way to the wall instead, so the lens never ends up inside the wall (browser check, round 2).
  */
 export const CAMERA_WALL_GAP = 0.3;
-/** How fast (m per placement) the camera eases back out once the structure is out of the way. */
-const CAMERA_EASE_OUT = 0.25;
+/** How fast (m/s) the camera eases back out once the structure is out of the way (0.25 m a frame at 60 fps). */
+export const CAMERA_EASE_OUT_MPS = 15;
 /**
  * The lens is a near plane, not a point (#34): its corners stay this far (m) clear of a solid too,
  * the camera coming in by CAMERA_LENS_STEP at a time until no corner is in or behind one.
@@ -127,13 +127,19 @@ const CAMERA_SHOULDER = 0.55;
 /** Its line over the shoulder cut shorter than this (m) and the other's this much longer: swap. */
 const CAMERA_SWAP_REACH = 1;
 const CAMERA_SWAP_GAIN = 0.5;
-/** How fast it moves over (shoulder units, 2 = right to left, per placement): ~0.4 s. */
-const CAMERA_SHOULDER_EASE = 0.08;
+/** How fast it moves over (shoulder units per second, 2 = right to left): ~0.42 s at any frame rate (review B2). */
+export const CAMERA_SHOULDER_PER_S = 4.8;
 /**
  * Walking but held in place this long (s): ask the solids for a step-out, which they give only in a
  * pocket walking can't leave (#34; the issue's bar is 2 s stuck).
  */
 export const PIN_STEP_OUT_S = 0.5;
+/**
+ * Feet this close (m) above a prop top after the frame's move land on it: a top is flat, so its
+ * radius grows off its centre (1e-5 m at 0.1 m), and a hair of drift after the mid-frame landing
+ * left a fall hovering over it for a frame (review B2: the eased drift changed by a hair).
+ */
+const TOP_LAND_SLACK = 1e-3;
 /** Pinned: covering less than this share of the wanted speed over a frame. */
 const PIN_PROGRESS = 0.2;
 const AXIS_X = new THREE.Vector3(1, 0, 0);
@@ -157,6 +163,8 @@ export class PlayerController {
   /** Which shoulder the camera looks over (1 right, -1 left) and where it is on the way there. */
   private shoulderGoal = 1;
   private shoulder = 1;
+  /** How far (m) the camera may ease back out in this placement (CAMERA_EASE_OUT_MPS × its dt). */
+  private camEaseOut = CAMERA_EASE_OUT_MPS / 60;
   /** The full length of the line cameraLine last placed a lens on. */
   private lineFull = 0;
   onGround = false;
@@ -304,7 +312,7 @@ export class PlayerController {
     const h = dt / steps;
     // Later steps see only the keys held down: no mouse movement, wheel or fresh presses.
     const held = Object.create(input) as Input;
-    Object.assign(held, { mouseDX: 0, mouseDY: 0, wheel: 0, pressed: NO_PRESSES });
+    Object.assign(held, { mouseDX: 0, mouseDY: 0, lookYaw: 0, lookPitch: 0, wheel: 0, pressed: NO_PRESSES });
     for (let k = 0; k < steps; k++) this.step(h, k === 0 ? input : held, aiming, now);
   }
 
@@ -318,10 +326,11 @@ export class PlayerController {
     this.camForward.addScaledVector(up, -this.camForward.dot(up)).normalize();
     this.facing.addScaledVector(up, -this.facing.dot(up)).normalize();
 
-    if (input.locked && !this.frozen) {
-      const yaw = -input.mouseDX * input.sensitivity;
+    // Look: the mouse (pointer locked) plus a stick or a touch drag (radians, already scaled), D-controls-5.
+    if (input.captured && !this.frozen) {
+      const yaw = -input.mouseDX * input.sensitivity - (input.lookYaw || 0);
       this.camForward.applyAxisAngle(up, yaw).normalize();
-      this.camPitch += (input.invertY ? 1 : -1) * input.mouseDY * input.sensitivity;
+      this.camPitch += (input.invertY ? 1 : -1) * input.mouseDY * input.sensitivity + (input.lookPitch || 0);
       this.camPitch = Math.max(-1.25, Math.min(0.9, this.camPitch));
       if (input.wheel) this.camDistance = Math.max(2.5, Math.min(9, this.camDistance + input.wheel * 0.5));
     }
@@ -329,17 +338,25 @@ export class PlayerController {
 
     // Desired move direction from WASD relative to the camera.
     let mx = 0, mz = 0;
+    // A stick's push (0..1) scales the pace: a light push walks (D-controls-5). Keys are always full.
+    let push = 1;
     if (!this.frozen) {
       if (input.down("KeyW")) mz += 1;
       if (input.down("KeyS")) mz -= 1;
       if (input.down("KeyD")) mx += 1;
       if (input.down("KeyA")) mx -= 1;
+      if (mx === 0 && mz === 0 && (input.moveX || input.moveY)) {
+        mx = input.moveX;
+        mz = input.moveY;
+        push = Math.min(1, Math.hypot(mx, mz));
+      }
     }
     const wish = _wish.set(0, 0, 0).addScaledVector(this.camForward, mz).addScaledVector(right, mx);
     if (wish.lengthSq() > 0) wish.normalize();
     const walking = wish.lengthSq() > 0;
     const sprint = input.down("ShiftLeft") || input.down("ShiftRight");
-    const speed = (this.swimming ? MOVE.swim : this.mounted ? mountedSpeed(sprint, MOVE.slow, MOVE.noSprint) : sprint && mz > 0 && !aiming ? MOVE.sprint : MOVE.run) * this.adminSpeed;
+    const forward = mz > 0 && mz >= Math.abs(mx) * 0.5; // a stick a little off straight ahead still sprints
+    const speed = push * (this.swimming ? MOVE.swim : this.mounted ? mountedSpeed(sprint, MOVE.slow, MOVE.noSprint) : sprint && forward && !aiming ? MOVE.sprint : MOVE.run) * this.adminSpeed;
 
     // Dodge-roll: starts this frame (no wind-up, no server round trip; the server checks the move).
     // A press up to MOVE.dodgeBuffer early is kept; one earlier in the cooldown is dropped, never
@@ -366,13 +383,13 @@ export class PlayerController {
     } else {
       const target = wish.multiplyScalar(speed);
       const a = this.onGround || this.swimming || this.adminFly ? (this.mounted ? MOVE.mountAccel : MOVE.accel) : MOVE.airAccel;
-      vH.lerp(target, Math.min(1, a * dt));
+      vH.lerp(target, easeShare(a, dt));
       // A roll's extra speed bleeds off at the ground rate even in the air (off an edge, or rolled
       // over one): the server's dodge reserve assumes that slowdown, and air control alone kept a
       // 15 m/s tail long enough to be refused (Codex review).
       if (this.rollTail) {
         const len = vH.length();
-        if (len > speed) vH.multiplyScalar((speed + (len - speed) * Math.max(0, 1 - MOVE.accel * dt)) / len);
+        if (len > speed) vH.multiplyScalar((speed + (len - speed) * (1 - easeShare(MOVE.accel, dt))) / len);
         else this.rollTail = false;
       }
     }
@@ -458,7 +475,7 @@ export class PlayerController {
       this.onGround = false;
       this.pos.copy(newUp).multiplyScalar(waterR - SWIM_FLOAT);
       this.fallStartRadius = this.pos.length();
-    } else if (r <= groundR) {
+    } else if (r <= groundR + (floorR > 0 ? TOP_LAND_SLACK : 0)) {
       this.pos.copy(newUp).multiplyScalar(groundR);
       if (!wasOnGround) {
         const drop = this.fallStartRadius - groundR;
@@ -493,8 +510,8 @@ export class PlayerController {
 
     // Face movement (or the camera when aiming; a roll keeps facing where it goes).
     const hSpeed = vH.length();
-    if (aiming && this.dodgeT <= 0) this.facing.lerp(this.camForward, Math.min(1, 18 * dt)).normalize();
-    else if (hSpeed > 0.5) this.facing.lerp(_dir.copy(vH).normalize(), Math.min(1, (this.mounted ? 6 : 10) * dt)).normalize();
+    if (aiming && this.dodgeT <= 0) this.facing.lerp(this.camForward, easeShare(18, dt)).normalize();
+    else if (hSpeed > 0.5) this.facing.lerp(_dir.copy(vH).normalize(), easeShare(this.mounted ? 6 : 10, dt)).normalize();
 
     this.anim = this.dodgeT > 0 ? ANIM.DODGE
       : this.swimming ? ANIM.SWIM
@@ -585,7 +602,10 @@ export class PlayerController {
     if (p.length() < g) p.copy(cu).multiplyScalar(g);
   }
 
-  placeCamera(camera: THREE.PerspectiveCamera) {
+  /** `dt`: the game time since the last placement (s); the eases move by it, not by a step per placement (review B2). */
+  placeCamera(camera: THREE.PerspectiveCamera, dt = 1 / 60) {
+    const t = Math.max(0, dt);
+    this.camEaseOut = CAMERA_EASE_OUT_MPS * t;
     const up = _up.copy(this.pos).normalize();
     const right = _right.crossVectors(this.camForward, up).normalize();
     const look = _look.copy(this.camForward).applyAxisAngle(right, this.camPitch);
@@ -593,7 +613,8 @@ export class PlayerController {
     const head = _head.copy(this.pos).addScaledVector(up, 1.65 + ride.lift);
     const back = this.camDistance + ride.back;
     const toGo = this.shoulderGoal - this.shoulder;
-    this.shoulder = Math.abs(toGo) <= CAMERA_SHOULDER_EASE ? this.shoulderGoal : this.shoulder + Math.sign(toGo) * CAMERA_SHOULDER_EASE;
+    const over = CAMERA_SHOULDER_PER_S * t;
+    this.shoulder = Math.abs(toGo) <= over ? this.shoulderGoal : this.shoulder + Math.sign(toGo) * over;
     const target = _target.copy(head).addScaledVector(look, 6).addScaledVector(right, CAMERA_SHOULDER * this.shoulder);
     const reach = this.cameraLine(camera, head, look, right, up, back, this.shoulder, true, _cam, target);
     // Over the other shoulder when this one's line is cut short (a wall at the player's side) and
@@ -632,7 +653,7 @@ export class PlayerController {
     const want = hit < Infinity ? hit - Math.min(CAMERA_WALL_GAP, hit / 2) : full;
     let reach = want;
     if (eased) {
-      this.camReach = want < this.camReach ? want : Math.min(want, this.camReach + CAMERA_EASE_OUT);
+      this.camReach = want < this.camReach ? want : Math.min(want, this.camReach + this.camEaseOut);
       reach = this.camReach;
     }
     reach = Math.min(reach, full);
@@ -658,7 +679,7 @@ export class PlayerController {
     }
     if (eased) {
       // Out again at the easing pace too, while the way out is clear (through a blocked stretch, at once).
-      const next = this.lensReach + CAMERA_EASE_OUT;
+      const next = this.lensReach + this.camEaseOut;
       if (next < reach && !this.lensBlocked(camera, this.lensAt(head, dir, next), target, up)) reach = next;
       this.lensReach = reach;
     }

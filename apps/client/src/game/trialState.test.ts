@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { MISSION_BY_ID } from "@firstlight/shared/content/missions";
 import type { TrialMsg } from "@firstlight/shared/net/protocol";
 import { missionTargets } from "../ui/mapMarkers.ts";
-import { clockLeft, formatClock, listenTrials, objectiveObject, trialHud, trialSeen } from "./trialState.ts";
+import { clockLeft, formatClock, listenTrials, objectiveObject, trialHud, trialNow, trialSeen } from "./trialState.ts";
 
 const msg = (o: Partial<TrialMsg>): TrialMsg => ({ id: "T1", kind: "race", state: "running", progress: 3, goal: 8, leftMs: 41_000, limitMs: 75_000, next: "t1_ring_4", ...o });
 
@@ -45,6 +45,39 @@ describe("trial clock and HUD line", () => {
     expect(trialSeen()).toBeNull();
     cb!(msg({}));
     expect(trialSeen()).toEqual({ msg: msg({}), at: 42 });
+  });
+
+  it("an old room delivering late can't overwrite the current room's attempt; its listener is removed", () => {
+    let oldCb: ((m: TrialMsg) => void) | null = null;
+    let oldUnbound = 0;
+    listenTrials({ onMessage: (_t, f) => ((oldCb = f), () => oldUnbound++) }, () => 1);
+    oldCb!(msg({ id: "T1" }));
+    let newCb: ((m: TrialMsg) => void) | null = null;
+    listenTrials({ onMessage: (_t, f) => ((newCb = f), () => {}) }, () => 2);
+    expect(oldUnbound).toBe(1);
+    expect(trialSeen()).toBeNull(); // forgot the old room's attempt
+    newCb!(msg({ id: "T3", kind: "collect" }));
+    oldCb!(msg({ id: "T1", state: "failed" })); // the old socket's last frame, late
+    expect(trialSeen()?.msg.id).toBe("T3");
+    expect(trialSeen()?.at).toBe(2);
+  });
+
+  it("the clock runs to the server's deadline on the synced clock, not from receipt (a late delivery shows less left)", () => {
+    // Sent at server time 50 s with 40 s left (ends at 90 s), delivered 2 s late.
+    const t = { msg: msg({ leftMs: 40_000, endsAt: 90_000 }), at: 52_000 };
+    expect(clockLeft(t, 52_000)).toBe(38_000);
+    expect(clockLeft(t, 60_000)).toBe(30_000);
+    expect(trialHud(t, 52_000)?.clock).toBe("0:38");
+    // Paused (a beacon's clock): what was left when sent, whatever the delay.
+    expect(clockLeft({ msg: msg({ kind: "defend", state: "paused", leftMs: 50_000 }), at: 52_000 }, 70_000)).toBe(50_000);
+    // An older server without endsAt: from receipt, as before.
+    expect(clockLeft({ msg: msg({ leftMs: 40_000 }), at: 52_000 }, 53_000)).toBe(39_000);
+    // listenTrials stamps receipt on the clock it's given (the game passes the synced server clock).
+    let cb: ((m: TrialMsg) => void) | null = null;
+    listenTrials({ onMessage: (_t, f) => (cb = f) }, () => 52_000);
+    cb!(msg({ leftMs: 40_000, endsAt: 90_000 }));
+    expect(trialNow()).toBe(52_000);
+    expect(clockLeft(trialSeen()!, trialNow())).toBe(38_000);
   });
 });
 

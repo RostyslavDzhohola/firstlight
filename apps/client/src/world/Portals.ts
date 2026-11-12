@@ -58,7 +58,7 @@ export function archOutline(gate: { base: number; spring: number; half: number }
 
 /** A slow spiral of the destination's colour, brighter at the rim (glows over the bloom threshold). */
 function membraneMaterial(color: number, gate: { base: number; spring: number }) {
-  const m = new THREE.MeshBasicNodeMaterial({ color: new THREE.Color(color).multiplyScalar(2.4), transparent: true, depthWrite: false, side: THREE.DoubleSide });
+  const m = new THREE.MeshBasicNodeMaterial({ color: new THREE.Color(color).multiplyScalar(2.4), transparent: true, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true });
   m.name = "portal_membrane";
   const p = positionLocal.xy.sub(vec2(0, (gate.base + gate.spring) / 2 + 0.6));
   const r = length(p.mul(vec2(1, 0.62)));

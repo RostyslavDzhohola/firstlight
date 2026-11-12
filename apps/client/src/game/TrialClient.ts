@@ -9,7 +9,7 @@ import { el } from "../ui/dom.ts";
 import { TrialMarkers } from "../world/TrialMarkers.ts";
 import type { Game } from "./Game.ts";
 import type { ClientSystem } from "./systems.ts";
-import { onTrial, trialHud, trialSeen, type TrialSeen } from "./trialState.ts";
+import { onTrial, trialHud, trialNow, trialSeen, type TrialSeen } from "./trialState.ts";
 
 class TrialClient implements ClientSystem {
   private readonly game: Game;
@@ -55,8 +55,9 @@ class TrialClient implements ClientSystem {
     else if (m.state === "running" && p && m.progress > p.progress) a.play("coins", null, 0.7, 1 + Math.min(0.6, m.progress / Math.max(1, m.goal) * 0.6)); // rising chime per ring / shard
   }
 
-  update(dt: number, now: number) {
+  update(dt: number) {
     const g = this.game;
+    const now = trialNow(); // the server clock the attempt's deadline is on
     const seen = trialSeen();
     this.markers.update(dt, { missions: g.hud.you?.missions ?? [], trial: seen?.msg ?? null });
     const line = seen && seen.msg.id && g.bodyId !== "portus" ? trialHud(seen, now) : null;

@@ -9,7 +9,7 @@
 // `townMat` (unorm8x4: layer / 255, roughness, metalness, emissive mode / 255: 1 flame, 2 window, 3 glow).
 
 import * as THREE from "three/webgpu";
-import { attribute, float, max, mix, normalMap, select, texture, uv, vec2, vec3 } from "three/tsl";
+import { attribute, float, max, mix, normalMap, select, texture, uniform, uv, vec2, vec3 } from "three/tsl";
 import { applyOccluderFade } from "./occluderFade.ts";
 import { atmo } from "./atmosphere.ts";
 import type { TextureSlot } from "./artpacks/ArtPacks.ts";
@@ -21,8 +21,15 @@ export const TOWN_EMISSIVE = { none: 0, flame: 1, window: 2, glow: 3 } as const;
 
 /** Flames and lanterns (kept under Portus' bloom threshold by day; the night boost lifts them). */
 const FLAME = new THREE.Color(1.0, 0.36, 0.06).multiplyScalar(0.55);
-/** Lit windows at night. */
-const WINDOW = new THREE.Color(1.0, 0.72, 0.38).multiplyScalar(0.7);
+/**
+ * Lit windows at night: warm, and at full lamplight over every body's bloom threshold (1.1–1.4,
+ * render/looks.ts), so a lit window glows into the evening instead of sitting flat on the wall
+ * (D-gfx-hub-10). Luminance at full lamplight is WINDOW_GLOW × 0.76.
+ */
+const WINDOW = new THREE.Color(1.0, 0.72, 0.38);
+export const WINDOW_GLOW = 1.85;
+/** WINDOW_GLOW as a uniform (one float shared by every town material: tuning needs no rebuild). */
+export const windowGlow = uniform(WINDOW_GLOW);
 /**
  * Glow slots (the outposts' teal and amber lamps, Hollowmere's windows): their own tint at this
  * luminance, day and night (brighter at night with the other glows): above every body's bloom
@@ -101,7 +108,7 @@ export function townMaterial(kind: TownMaterialKind, normals: boolean, color: TH
   // Flames burn day and night (brighter at night); windows light up with the lamps: at night, and
   // in Portus' late-dusk evening, never by day or for rain clouds.
   const flame = vec3(FLAME.r, FLAME.g, FLAME.b).mul(atmo.glowBoost);
-  const lit = vec3(WINDOW.r, WINDOW.g, WINDOW.b).mul(atmo.lamps);
+  const lit = vec3(WINDOW.r, WINDOW.g, WINDOW.b).mul(atmo.lamps.mul(windowGlow));
   // Glow: the slot's tint (baked into the vertex colour) scaled to TOWN_GLOW_LUMINANCE.
   const lum = tint.r.mul(0.2126).add(tint.g.mul(0.7152)).add(tint.b.mul(0.0722)).max(0.02);
   const glow = tint.rgb.div(lum).mul(TOWN_GLOW_LUMINANCE).mul(atmo.glowBoost);
@@ -110,6 +117,7 @@ export function townMaterial(kind: TownMaterialKind, normals: boolean, color: TH
     select(mode.equal(TOWN_EMISSIVE.window), lit, select(mode.equal(TOWN_EMISSIVE.glow), glow, vec3(0, 0, 0))),
   );
   if (fade) applyOccluderFade(m);
+  m.userData.windowGlow = windowGlow;
   cache.set(key, m);
   return m;
 }

@@ -3,12 +3,13 @@
 // `--json` prints everything as JSON.
 
 import { STARTERS } from "../../packages/shared/src/content/weapons.ts";
-import { STARTER_STATS, starterMaxHp, starterMove } from "../../packages/shared/src/content/starters.ts";
+import { STARTER_STATS, starterMaxHp, starterMove, starterSpellPower } from "../../packages/shared/src/content/starters.ts";
+import { maxHp } from "../../packages/shared/src/content/progression.ts";
 import { gatedTier } from "./model.ts";
 import { checks } from "./bands.ts";
 import {
-  affordability, bossRows, COMBAT_FAMILIES, creatureRows, duelWins, progression, pvpCell, PVP_LEVELS, roleLeaders,
-  starterRoles, weaponTable,
+  affordability, bossRows, COMBAT_FAMILIES, creatureRows, duelWins, frailHp, novaHeadshotLevels, progression, pvpCell, PVP_LEVELS, roleLeaders,
+  SPELL_LEVELS, spellPeaks, spellRows, starterRoles, weaponTable,
 } from "./model.ts";
 
 const args = new Set(process.argv.slice(2));
@@ -28,7 +29,7 @@ const all = checks();
 const failed = all.filter((c) => !c.ok);
 
 if (args.has("--json")) {
-  console.log(JSON.stringify({ weapons: weaponTable(), pvp: COMBAT_FAMILIES.flatMap((fam) => PVP_LEVELS.map((l) => pvpCell(fam, l))), creatures: creatureRows(), bosses: bossRows(), progression: progression(), shop: affordability(), starters: starterRoles(), checks: all }, null, 2));
+  console.log(JSON.stringify({ weapons: weaponTable(), pvp: COMBAT_FAMILIES.flatMap((fam) => PVP_LEVELS.map((l) => pvpCell(fam, l))), creatures: creatureRows(), bosses: bossRows(), progression: progression(), shop: affordability(), starters: starterRoles(), spells: spellRows(), spellPeaks: spellPeaks(), checks: all }, null, 2));
 } else if (!args.has("--failures")) {
   console.log("# FIRSTLIGHT balance report (tools/balance; D-balance-1)");
   table("Weapon DPS at the tier's gate level (sustained: 60 s with reloads, heat and cooldowns; burst: first 3 s with headshots)",
@@ -61,6 +62,15 @@ if (args.has("--json")) {
   table("Starters (issue #9): stats and what each is best at",
     ["Starter", "HP L1", "Run/Sprint", "Dodge cd", "Spell×", "Duel wins /16", "Pack clear s", "Traits"],
     STARTERS.map((s, i) => [s.name, starterMaxHp(i, 1), `${f(starterMove(i).run)}/${f(starterMove(i).sprint)}`, f(starterMove(i).dodgeCooldown), f(STARTER_STATS[i]!.spellPower ?? 1), wins[i]!, f(roles[i]!.packClear), STARTER_STATS[i]!.traits.join(", ")]));
+  const sp = spellRows();
+  const cell = (r: (typeof sp)[number]) => (r.frostbloom ? `${r.frostbloom} / ${r.wishfall || "–"} / ${r.ward || "–"}` : "–");
+  table("Spells per starter (content §2.7 × the starter's spell power, §8.5): Frostbloom / Wishfall centre / ward shell, as the server lands them",
+    ["Starter", "Spell×", ...SPELL_LEVELS.map((l) => `L${l} (HP ${maxHp(l)})`)],
+    STARTERS.map((s, i) => [s.name, f(starterSpellPower(i)), ...SPELL_LEVELS.map((l) => cell(sp.find((r) => r.starter === i && r.level === l)!))]));
+  const peaks = spellPeaks();
+  console.log(`\nSpell peaks (any caster, any level): Wishfall centre ${f(peaks.hitOfBase * 100, 0)}% of base HP, ${f(peaks.hitOfFrail * 100, 0)}% of the most fragile starter's; Frostbloom ${f(peaks.instantOfBase * 100, 0)}% of base HP; the opening pair ${f(peaks.pairOfFrail * 100, 0)}% of the most fragile starter's.`);
+  console.log("Known dip (D-spells-9, not a check): a Frostbloom and a Stillshot headshot landing together kill a full-HP equal-level target within 5 m at levels");
+  for (const [i, s] of STARTERS.entries()) console.log(`  ${s.name.padEnd(12)} × ${f(starterSpellPower(i))}: base HP [${novaHeadshotLevels(starterSpellPower(i)).join(", ") || "none"}] · most fragile starter [${novaHeadshotLevels(starterSpellPower(i), frailHp).join(", ") || "none"}]`);
   console.log("\nRole leaders:", Object.entries(roleLeaders()).map(([k, v]) => `${k}: ${v.join(", ")}`).join(" · "));
   console.log(`\n## Checks: ${all.length - failed.length}/${all.length} in band`);
 }

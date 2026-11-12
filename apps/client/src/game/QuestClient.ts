@@ -13,6 +13,7 @@ import { PF } from "@firstlight/shared/net/schema";
 import { flags } from "../config.ts";
 import type { AvatarView } from "../render/Avatars.ts";
 import { CosmeticRig, Nameplates } from "../render/Cosmetics.ts";
+import { PlateBars } from "../render/plates.ts";
 import { MapPanel } from "../ui/map.ts";
 import { AdminConsole, CuratorPanel, GuidePanel, JournalPanel, KeypadPanel, MissionTracker, Panel } from "../ui/panels.ts";
 import { gleamsWon } from "@firstlight/shared/content/gleams";
@@ -51,6 +52,8 @@ export class QuestClient implements ClientSystem {
   private readonly map: MapPanel;
   private readonly tracker: MissionTracker;
   private readonly plates = new Nameplates();
+  /** Health bars under the plates (render/plates.ts). */
+  private readonly plateBars = new PlateBars();
   private readonly console: AdminConsole;
   private readonly rigs = new Map<AvatarView, CosmeticRig>();
   private readonly interactables: { def: WorldObjectDef; pos: [number, number, number] }[];
@@ -231,6 +234,7 @@ export class QuestClient implements ClientSystem {
       }
     }
     this.plates.update(g.ctx.camera, plates, g.player.pos);
+    this.plateBars.sync(g.ctx.camera, g.avatars, players, g.player.pos);
   }
 
   dispose() {
@@ -240,6 +244,7 @@ export class QuestClient implements ClientSystem {
     this.world.dispose();
     this.tracker.dispose();
     this.plates.dispose();
+    this.plateBars.dispose();
     for (const r of this.rigs.values()) r.dispose();
     this.rigs.clear();
   }

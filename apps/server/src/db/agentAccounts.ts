@@ -1,6 +1,6 @@
 // Agent accounts (D-agents-1): guest accounts an AI agent plays (packages/agent-kit). They are real
 // players by the rules, but not people: the levels and medals boards, the Hall of Firsts and the
-// play statistics are the people's. A row in agent_account is the flag (migration 8); it's set when
+// play statistics are the people's. A row in agent_account is the flag (migration 9); it's set when
 // a guest asks /api/play for a seat as an agent (auth/accounts.ts) and it stays. Nothing is deleted.
 
 import { stmt, type Db } from "./game-db.ts";

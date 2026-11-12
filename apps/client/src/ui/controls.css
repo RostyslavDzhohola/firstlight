@@ -1,0 +1,21 @@
+/* Gamepad and touch glyphs and the gamepad focus ring (game/controls.ts, D-controls-5). */
+
+/* Keycaps that switch to the device in use (ui/glyphs.ts): the key's text gives way to data-glyph. */
+html.fl-glyphs [data-glyph] { font-size: 0 !important; letter-spacing: 0; }
+html.fl-glyphs [data-glyph]::after { content: attr(data-glyph); font: 700 max(11px, calc(.72 * var(--u))) / 1.2 var(--font-display); letter-spacing: .02em; text-transform: none; }
+html.fl-glyphs .fl-key[data-glyph] { min-width: 2.1em; padding-inline: .35em; }
+html.fl-glyphs [data-glyph=""] { display: none !important; }
+
+/* The "Click to look around" tip is for a mouse: a pad or touch player is already in the game. */
+html[data-device="pad"] .fl-looktip, html[data-device="touch"] .fl-looktip { display: none; }
+
+/* Gamepad focus: a ring that reads on every panel (the browser's own outline is too faint on dark glass). */
+.fl-padfocus { outline: 3px solid #ffb547 !important; outline-offset: 2px; box-shadow: 0 0 0 6px rgba(255, 181, 71, .25), 0 0 18px rgba(255, 181, 71, .45) !important; }
+
+/* The pad layout in How to play and Settings. */
+.fl-padkeys { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px 22px; margin-top: 10px; }
+.fl-padkeys h3 { margin: 0 0 4px; font: 700 var(--t-xs)/1.2 var(--font-display); text-transform: uppercase; letter-spacing: .08em; color: var(--fog-3, #9aa3b2); }
+.fl-padkeys dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 0; align-items: center; }
+.fl-padkeys dt { justify-self: start; }
+.fl-padkeys dd { margin: 0; font-size: var(--t-sm); }
+.fl-padglyph { display: inline-block; min-width: 2em; padding: 1px 6px; border-radius: 999px; border: 1px solid rgba(255, 229, 184, .45); background: rgba(12, 10, 8, .6); font: 700 var(--t-xs)/1.4 var(--font-display); text-align: center; color: var(--hero-cream, #ffe6b8); white-space: nowrap; }

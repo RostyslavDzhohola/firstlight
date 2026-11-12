@@ -66,6 +66,71 @@ describe("the spellbook the HUD draws", () => {
     expect(b.view(T + 300).aether).toBe(80);
   });
 
+  it("two casts in a row, both refused: each refusal takes back its own cast and nothing is left over (review 5)", () => {
+    const b = new SpellBook();
+    b.setYou(you(), 9);
+    // Q then F under arrival protection: the server will refuse both.
+    b.predict("skipstep", T);
+    b.predict("frostbloom", T + 50);
+    expect(b.view(T + 50).aether).toBe(50);
+    expect(slot(b, "skipstep", T + 50).cooldown).toBeGreaterThan(5);
+    expect(slot(b, "frostbloom", T + 50).cooldown).toBeGreaterThan(9);
+    // The first refusal answers the first cast: Skipstep is back, Frostbloom is still shown as cast.
+    b.refused(T + 120);
+    expect(b.view(T + 120).aether).toBe(70);
+    expect(slot(b, "skipstep", T + 120).ready).toBe(true);
+    expect(slot(b, "frostbloom", T + 120).cooldown).toBeGreaterThan(9);
+    // The second answers the second: the book is as the server last said, no phantom cost or cooldown.
+    b.refused(T + 140);
+    expect(b.view(T + 140).aether).toBe(100);
+    expect(b.view(T + 140).slots.every((s) => s.ready)).toBe(true);
+  });
+
+  it("two casts, the first lands and the second is refused: the server's state takes the first's place, the second comes off it", () => {
+    const b = new SpellBook();
+    b.setYou(you(), 9);
+    const q = b.predict("skipstep", T);
+    const f = b.predict("frostbloom", T + 50);
+    expect([q, f]).toEqual([1, 2]);
+    // The server's word after the first cast only (`req` says how far it has got): the second is still shown on top of it.
+    b.setYou(you({ aether: 80, t: T + 30, regenAt: T + 1530, ready: [T + 6030, 0, 0, 0], req: q }), 9);
+    expect(b.view(T + 60).aether).toBe(50);
+    expect(slot(b, "frostbloom", T + 60).cooldown).toBeGreaterThan(9);
+    // Its refusal names it.
+    expect(b.refused(T + 120, f)).toBe("frostbloom");
+    expect(b.view(T + 120).aether).toBe(80);
+    expect(slot(b, "frostbloom", T + 120).ready).toBe(true);
+    expect(slot(b, "skipstep", T + 120).cooldown).toBeGreaterThan(5); // the one that landed stays spent
+    // A refusal for a cast already answered changes nothing.
+    expect(b.refused(T + 130, f)).toBeNull();
+    expect(b.view(T + 130).aether).toBe(80);
+  });
+
+  it("refusals are matched by number, in any order; a state from before a cast leaves its prediction up", () => {
+    const b = new SpellBook();
+    b.setYou(you(), 9);
+    const q = b.predict("skipstep", T);
+    const z = b.predict("glasswing", T + 20);
+    // A `you` sent for another reason before the server saw either cast: both stay predicted.
+    b.setYou(you({ req: 0 }), 9);
+    expect(b.view(T + 40).aether).toBe(45);
+    expect(b.refused(T + 60, z)).toBe("glasswing");
+    expect(b.view(T + 60).aether).toBe(80);
+    expect(b.refused(T + 70, q)).toBe("skipstep");
+    expect(b.view(T + 70).aether).toBe(100);
+  });
+
+  it("a cast the server never answers (dropped by the rate limit) stops being shown after 2 s", () => {
+    const b = new SpellBook();
+    b.setYou(you(), 9);
+    b.predict("wishfall", T);
+    expect(b.view(T + 1400).aether).toBe(55);
+    expect(slot(b, "wishfall", T + 1400).ready).toBe(false);
+    expect(b.view(T + 2100).aether).toBe(100);
+    expect(slot(b, "wishfall", T + 2100).ready).toBe(true);
+    expect(b.block("wishfall", T + 2100)).toBeNull();
+  });
+
   it("shows the ward while it is up", () => {
     const b = new SpellBook();
     b.setYou(you({ ward: { hp: 30, max: 54, until: T + 2000 } }), 9);
@@ -83,6 +148,7 @@ describe("the spellbook the HUD draws", () => {
   it("puts the server's refusals into words", () => {
     expect(castDeniedText("safe zone", SPELLS[0])).toBe("No spells in safe zones");
     expect(castDeniedText("blocked", SPELLS[0])).toBe("No room to Skipstep that way");
+    expect(castDeniedText("blocked", SPELLS[2])).toBe("No clear ground there for Wishfall");
     expect(castDeniedText("aether", SPELLS[2])).toBe("Not enough aether for Wishfall");
     expect(castDeniedText("dir", SPELLS[0])).toBeNull();
   });

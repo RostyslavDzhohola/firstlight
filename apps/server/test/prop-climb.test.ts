@@ -53,7 +53,7 @@ function at(x: number, y: number, h: number) {
 function walker(w: MoveWorld, x: number, y: number, h: number, idleMs = 0) {
   let now = 1_000_000;
   const p = at(x, y, h);
-  const a = { ...motionFields(Math.hypot(p.x, p.y, p.z), now - idleMs), lastX: p.x, lastY: p.y, lastZ: p.z, state: { ...p }, mounted: false, mountGraceUntil: 0 } as unknown as PlayerActor;
+  const a = { ...motionFields(Math.hypot(p.x, p.y, p.z), now - idleMs), lastX: p.x, lastY: p.y, lastZ: p.z, state: { ...p }, mounted: false, mountGraceUntil: 0, char: { starter: 99 } } as unknown as PlayerActor; // no starter row: the base numbers
   a.lastBudgetAt = now;
   return {
     a,

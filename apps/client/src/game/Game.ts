@@ -48,6 +48,7 @@ import { BootGate, RendererUnavailable, shouldKeepReconnecting } from "./boot.ts
 import { CombatClient } from "./CombatClient.ts";
 import { GameAudio } from "../audio/Audio.ts";
 import { Input } from "./input.ts";
+import { installControls } from "./controls.ts";
 import { HOTKEYS } from "./keys.ts";
 import { PhotoMode } from "./PhotoMode.ts";
 import { PlayerController } from "./PlayerController.ts";
@@ -75,6 +76,8 @@ export class Game {
   readonly avatars = new Map<string, AvatarView>();
   /** Players who left: their avatars de-rez (render/rez.ts) for a moment, then go. */
   private readonly leaving = new Set<AvatarView>();
+  /** Scratch: the players who joined this frame (they rez in nearest first, AvatarView.rezArrivals). */
+  private readonly arrivals: AvatarView[] = [];
   /** Traffic between the sky planets, shooting stars, the aurora (render/skyLife.ts). */
   private skyLife: SkyLife | null = null;
   self!: AvatarView;
@@ -149,6 +152,7 @@ export class Game {
     this.input = new Input(this.ctx.renderer.domElement);
     // Behind a loading screen (first arrival, travel, rejoin, re-warm) panel and world keys wait.
     this.input.suspendedWhile = () => !this.running || this.travelling;
+    installControls(this); // gamepad, touch overlay, glyphs, menu focus navigation (D-controls-5, -6)
     this.photo = new PhotoMode({
       ctx: this.ctx,
       input: this.input,
@@ -182,9 +186,14 @@ export class Game {
       this.particles.applySettings(this.ctx.settings);
       this.blobs.applySettings(this.ctx.settings);
       this.applyCharsVisibility();
-      rezSwitch.on = this.ctx.settings.on.rez;
+      if (rezSwitch.on !== this.ctx.settings.on.rez) {
+        // Off: what is running ends now, not when its clock runs out (review A2).
+        rezSwitch.on = this.ctx.settings.on.rez;
+        AvatarView.settleRez(rezSwitch.on, this.leaving);
+      }
       this.portals?.applySettings(this.ctx.settings);
       this.skyLife?.applySettings(this.ctx.settings);
+      this.piles?.applySettings(this.ctx.settings);
     };
     applyFx();
     this.ctx.onChange(applyFx);
@@ -501,6 +510,7 @@ export class Game {
     this.skyLife.applySettings(this.ctx.settings);
     this.audio.setMusic(body);
     this.piles = new PilesView(this.ctx.scene);
+    this.piles.applySettings(this.ctx.settings);
 
     const stored = { starter: Number(localStorage.getItem("fl.starter") ?? 0), palette: Number(localStorage.getItem("fl.palette") ?? 0), look: Number(localStorage.getItem("fl.look") ?? 0) || 0 };
     // S5: from the join until control is handed over, a close of the new room aborts the arrival
@@ -536,7 +546,7 @@ export class Game {
       localStorage.setItem("fl.body", body);
       this.combat.attach();
       listenHuntTargets(room); // before anything else can arrive unheard (huntTargets.ts)
-      listenTrials(room); // the same for race / defend / collect attempts (trialState.ts)
+      listenTrials(room, () => Date.now() + this.net.serverOffset); // the same for race / defend / collect attempts, stamped on the server clock (trialState.ts)
       const me = await waitFor(() => (room.state as any).players?.get(room.sessionId), { stage: "waiting for our player", timeoutMs: 15_000, watch: w });
       this.player.teleport(me.x, me.y, me.z);
       this.net.onCorrect = (x, y, z) => this.player.correct(x, y, z);
@@ -840,22 +850,27 @@ export class Game {
         a.root.visible = this.ctx.settings.on.chars;
         this.avatars.set(id, a);
         this.ctx.scene.add(a.root);
-        // Someone arrived: they materialise, and the portal they came through (if any) pulses.
         a.set(s.x, s.y, s.z, s.fx, s.fy, s.fz, s.anim, 0);
-        a.rez("in");
-        this.portals?.pulseNear(a.root.position);
+        // Someone who arrives while we are here materialises, and the portal they came through (if
+        // any) pulses. Whoever was in the room when we joined or reconnected is simply there.
+        if (!view.seeded) {
+          this.arrivals.push(a);
+          this.portals?.pulseNear(a.root.position);
+        }
       }
       a.set(s.x, s.y, s.z, s.fx, s.fy, s.fz, s.anim, dt);
+    }
+    if (this.arrivals.length) {
+      AvatarView.rezArrivals(this.arrivals, this.ctx.camera);
+      this.arrivals.length = 0;
     }
     for (const [id, a] of this.avatars) {
       if (!this.net.remotes.has(id)) {
         // Gone (left, or through a portal): the avatar de-rezzes where it stood, then is freed.
         this.avatars.delete(id);
         this.portals?.pulseNear(a.root.position);
-        if (rezSwitch.on && a.root.visible) {
-          a.rez("out");
-          this.leaving.add(a);
-        } else a.dispose();
+        if (a.root.visible && a.rez("out")) this.leaving.add(a);
+        else a.dispose();
       }
     }
     for (const a of this.leaving) {
@@ -884,7 +899,7 @@ export class Game {
       }
     }
     if (this.photo.active) this.photo.update(dt, this.ctx.camera);
-    else if (!this.bench) this.player.placeCamera(this.ctx.camera);
+    else if (!this.bench) this.player.placeCamera(this.ctx.camera, dt);
     // Trees, rocks and props between the camera and the player dissolve (not in photo mode or the bench).
     // The cone aims at the drawn avatar's chest bone: in the saddle that's ~0.8 m higher than on foot.
     const chest = this.self ? avatarChest(this.self.root, this.self.socket("back")?.parent ?? null, this.fadeChest) : null;

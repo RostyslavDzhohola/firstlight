@@ -38,6 +38,10 @@ export const PASS_FEATURES: readonly Feature[] = [
   // The planets' graphics pass (D-gfx-worlds-1). Not `aerial`: its switch zeroes a uniform, the shader stays.
   "meadow", "clouds", "terrainfx", "waterfx", "landmarks",
   "portalfx", "holo", "skylife", "pools",
+  // The second pass (D-gfx-worlds-6): each sits behind a branch on a uniform, so switching it off takes its cost away.
+  // (shafts, mist and fireflies only cost when the sky has them: price them with ?time= at dawn or night.)
+  "foliagefx", "shafts", "mist", "fireflies",
+  "townlights", "pilebeacon",
 ];
 
 /** Rejects after `ms`: no wait in the passes bench may hang the run (hidden tab, stalled queue). */

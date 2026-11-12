@@ -1,8 +1,18 @@
-// Health bars over NPCs being fought: two camera-facing instanced quads (background + fill).
+// Health bars over NPCs being fought: two camera-facing instanced quads (background + fill). A bar
+// keeps its size on screen from BAR_NEAR_M out (it grows with distance, up to BAR_MAX_GROW), so a
+// creature fought at 50 m still shows how much it has left (D-gfx-hub-11).
 
 import * as THREE from "three/webgpu";
 
 const CAP = 96;
+/** From here out a bar grows with distance (m), and by how much at most. */
+export const BAR_NEAR_M = 16;
+export const BAR_MAX_GROW = 3;
+
+/** How much larger a bar is drawn `dist` m from the camera. */
+export function barGrow(dist: number): number {
+  return Math.min(BAR_MAX_GROW, Math.max(1, dist / BAR_NEAR_M));
+}
 
 export class HealthBars {
   readonly group = new THREE.Group();
@@ -45,8 +55,11 @@ export class HealthBars {
     const i = this.n++;
     const q = camera.quaternion;
     this.right.set(1, 0, 0).applyQuaternion(q);
-    const h = width * 0.11;
-    this.s.set(width + 0.06, h + 0.05, 1);
+    const grow = barGrow(pos.distanceTo(camera.position));
+    width *= grow;
+    const h = width * 0.12;
+    // A dark rim round the fill, the same thickness on screen at any range.
+    this.s.set(width + 0.08 * grow, h + 0.07 * grow, 1);
     this.m.compose(pos, q, this.s);
     this.m.toArray(this.bg.instanceMatrix.array as Float32Array, i * 16);
     this.c.setRGB(0.04, 0.04, 0.05);

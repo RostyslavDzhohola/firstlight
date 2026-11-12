@@ -21,6 +21,8 @@ export interface Snapshot {
 export interface RemotePlayerView {
   id: string;
   buf: Snapshot[];
+  /** Was already in the room when we joined (the join or reconnect snapshot): not a new arrival. */
+  seeded: boolean;
 }
 
 /** The server sent us to the body our character is actually on (no travel ticket for the one asked). */
@@ -189,6 +191,8 @@ export class Net {
     this.room = room;
     this.remotes.clear();
     this.seq = 0;
+    // Until the state has shown us ourselves, what it holds is the room as we found it.
+    let seeding = true;
     room.onStateChange((state: any) => {
       const now = performance.now();
       const seen = new Set<string>();
@@ -197,7 +201,7 @@ export class Net {
         if (id === room.sessionId) return;
         let v = this.remotes.get(id);
         if (!v) {
-          v = { id, buf: [] };
+          v = { id, buf: [], seeded: seeding };
           this.remotes.set(id, v);
         }
         const last = v.buf[v.buf.length - 1];
@@ -207,6 +211,7 @@ export class Net {
         }
       });
       for (const id of this.remotes.keys()) if (!seen.has(id)) this.remotes.delete(id);
+      if (seen.has(room.sessionId)) seeding = false;
     });
     room.onMessage("correct", (m: { x: number; y: number; z: number }) => this.onCorrect?.(m.x, m.y, m.z));
     room.onMessage("pong", (m: { t: number; serverTime: number }) => {

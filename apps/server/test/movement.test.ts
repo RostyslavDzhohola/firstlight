@@ -918,7 +918,7 @@ describe("a client at 4 fps (#33: slow frames advance up to 200 ms, one packet p
   /** Refusals for 16 s of one input packet per `frameMs` frame, each moving `speed` × 200 ms, packets 70 ms early or late. */
   function refusals(speed: number, mounted: boolean, frameMs: number): number {
     let now = 1_000_000;
-    const a = { ...motionFields(1000, now), lastX: 0, lastY: 0, lastZ: 1000, state: { x: 0, y: 0, z: 1000 }, mounted, mountGraceUntil: 0 } as unknown as PlayerActor;
+    const a = { ...motionFields(1000, now), lastX: 0, lastY: 0, lastZ: 1000, state: { x: 0, y: 0, z: 1000 }, mounted, mountGraceUntil: 0, char: { starter: 99 } } as unknown as PlayerActor; // no starter row: the base numbers
     const jitter = [0, -70, 70, 40, -40, 70, -70, 0];
     let x = 0;
     let refused = 0;
@@ -954,7 +954,7 @@ describe("a client at 4 fps, full real time on foot (#33, D-fixes-1: frames adva
   /** Refusals for 16 s of one packet per `frameMs` frame, each moving `speed` × min(frame, cap), packets 70 ms early or late. */
   function refusals(speed: number, mounted: boolean, frameMs: number, capS: number): number {
     let now = 1_000_000;
-    const a = { ...motionFields(1000, now), lastX: 0, lastY: 0, lastZ: 1000, state: { x: 0, y: 0, z: 1000 }, mounted, mountGraceUntil: 0 } as unknown as PlayerActor;
+    const a = { ...motionFields(1000, now), lastX: 0, lastY: 0, lastZ: 1000, state: { x: 0, y: 0, z: 1000 }, mounted, mountGraceUntil: 0, char: { starter: 99 } } as unknown as PlayerActor; // no starter row: the base numbers
     const jitter = [0, -70, 70, 40, -40, 70, -70, 0];
     let x = 0;
     let refused = 0;

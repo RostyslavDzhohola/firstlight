@@ -13,7 +13,8 @@ import { WEAPONS, STARTERS, type WeaponDef, type TierStats } from "../../package
 import { damageMult, killCoins, killXp, LEVEL_CAP, maxHp, ONBOARDING_XP, xpToNext } from "../../packages/shared/src/content/progression.ts";
 import { AI_CAPS, aiHitCap, attackDamage, BOSS_DEFS, NPC_AREAS, NPC_DEFS, npcCoins, npcDef, npcMaxHp, npcShieldHp, type AttackDef, type NpcDef } from "../../packages/shared/src/content/npcs.ts";
 import { MISSIONS } from "../../packages/shared/src/content/missions.ts";
-import { STARTER_STATS, starterMaxHp, starterMove } from "../../packages/shared/src/content/starters.ts";
+import { STARTER_STATS, starterMaxHp, starterMove, starterSpellPower } from "../../packages/shared/src/content/starters.ts";
+import { FROSTBLOOM, SPELL_BY_ID, spellDamage, wardShell, WISHFALL } from "../../packages/shared/src/content/spells.ts";
 
 // ------------------------------------------------------------------------------------ weapons
 
@@ -450,6 +451,89 @@ export function roleLeaders(roles = starterRoles()): Record<"duel" | "crowd" | "
     return roles.filter((r) => Math.abs(f(r) - best) < 1e-9).map((r) => r.name);
   };
   return { duel: top((r) => r.duelWins), crowd: top((r) => -r.packClear), toughness: top((r) => r.toughness), evasion: top((r) => r.evasion), mobility: top((r) => r.mobility), magic: top((r) => r.spellPower) };
+}
+
+// ------------------------------------------------------------------------------------ spells
+
+// The spellbook (content §2.7) per starter: spell damage and the ward's shell scale with the starter's
+// spell power (content §8.5), applied in apps/server/src/world/spells/SpellSystem.ts. The duels above
+// don't cast: putting spells into them would re-tune every duel band, so the spell checks stand apart.
+
+/** Levels the spell tables show: Frostbloom's, Wishfall's and the ward's unlocks, then the PvP levels. */
+export const SPELL_LEVELS = [3, 6, 9, 12, 20] as const;
+
+/** A hit as the server lands it (dealDamage rounds each one). */
+const landed = (x: number) => Math.max(1, Math.round(x));
+
+export interface SpellRow {
+  starter: number;
+  name: string;
+  power: number;
+  level: number;
+  /** Frostbloom's hit, Wishfall's centre (0 below their unlock levels) and the ward's shell. */
+  frostbloom: number;
+  wishfall: number;
+  ward: number;
+}
+
+export function spellRows(): SpellRow[] {
+  const at = (id: string, level: number, x: number) => (level >= SPELL_BY_ID.get(id)!.level ? x : 0);
+  return STARTERS.flatMap((s, i) => SPELL_LEVELS.map((level) => {
+    const power = starterSpellPower(i);
+    return {
+      starter: i, name: s.name, power, level,
+      frostbloom: at("frostbloom", level, landed(spellDamage(FROSTBLOOM.damage, level, power))),
+      wishfall: at("wishfall", level, landed(spellDamage(WISHFALL.damage, level, power))),
+      ward: at("glasswing", level, wardShell(starterMaxHp(i, level), power)),
+    };
+  }));
+}
+
+/** The most fragile starter's max HP at `level`. */
+export const frailHp = (level: number) => Math.min(...STARTERS.map((_, i) => starterMaxHp(i, level)));
+
+export interface SpellPeaks {
+  /** Largest single spell hit (Wishfall's centre) ÷ an equal-level target's HP: base body, most fragile starter. */
+  hitOfBase: number;
+  hitOfFrail: number;
+  /** Largest hit that lands with no warning (Frostbloom) ÷ base HP. */
+  instantOfBase: number;
+  /** The opening pair (Frostbloom + Wishfall's centre) ÷ the most fragile starter's HP. */
+  pairOfFrail: number;
+}
+
+/** The worst case over every starter as the caster and every level a spell is open at. */
+export function spellPeaks(): SpellPeaks {
+  const out: SpellPeaks = { hitOfBase: 0, hitOfFrail: 0, instantOfBase: 0, pairOfFrail: 0 };
+  for (let i = 0; i < STARTERS.length; i++) {
+    const power = starterSpellPower(i);
+    for (let level = SPELL_BY_ID.get("frostbloom")!.level; level <= LEVEL_CAP; level++) {
+      const f = landed(spellDamage(FROSTBLOOM.damage, level, power));
+      const w = level >= SPELL_BY_ID.get("wishfall")!.level ? landed(spellDamage(WISHFALL.damage, level, power)) : 0;
+      out.instantOfBase = Math.max(out.instantOfBase, f / maxHp(level));
+      out.hitOfBase = Math.max(out.hitOfBase, w / maxHp(level));
+      out.hitOfFrail = Math.max(out.hitOfFrail, w / frailHp(level));
+      out.pairOfFrail = Math.max(out.pairOfFrail, (f + w) / frailHp(level));
+    }
+  }
+  return out;
+}
+
+/**
+ * Levels at which a Frostbloom and one weapon hit landing together (nothing holds a weapon back
+ * after a cast) take a full-HP, equal-level target of `hp(level)` down: the weapon hit is the
+ * biggest there is, a Stillshot headshot at the gated tier. The target has to be within the
+ * nova's 5 m. A known dip under the 0.75 s floor (content §2.7, D-spells-9); reported, not a check.
+ */
+export function novaHeadshotLevels(power: number, hp: (level: number) => number = maxHp): number[] {
+  const still = WEAPONS.find((w) => w.id === "stillshot")!;
+  const out: number[] = [];
+  for (let level = SPELL_BY_ID.get("frostbloom")!.level; level <= LEVEL_CAP; level++) {
+    const t = still.tiers[gatedTier(level)]!;
+    const head = landed(t.damage * damageMult(level) * (t.headMult ?? 1.5));
+    if (landed(spellDamage(FROSTBLOOM.damage, level, power)) + head >= hp(level)) out.push(level);
+  }
+  return out;
 }
 
 // ------------------------------------------------------------------------------------ creatures

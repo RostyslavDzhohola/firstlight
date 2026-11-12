@@ -206,3 +206,19 @@ Full example: `ui/gallery/kitExamples.ts` (`ONBOARDING_HTML`).
 
 Built by their lanes (`ui/phraseWheel.ts`, `ui/panels.ts`, `ui/map.ts`) and restyled with the kit
 (`ui/phraseWheel.css`, `ui/quests.css`); keep their class names when changing markup.
+
+### Gamepad and touch (D-controls-5, D-controls-6)
+
+- **Keycaps follow the device.** Write keycaps as before (`.fl-key` with the keyboard key's text, the
+  spell bar's `.fl-spell__k`, the hotbar's `.fl-slot__k`). Inside `.fl-hud` and `.fl-onb`, `ui/glyphs.ts`
+  adds `data-glyph` with the pad button or the touch word (`glyphFor`), and `controls.css` draws that in
+  place of the text; `data-glyph=""` hides a cap (A/S/D next to the stick's W). Menus keep keyboard
+  caps; the pad layout shows in How to play and Settings (`ui/padLayout.ts`).
+- **Menus need nothing for the pad.** `ui/focusNav.ts` moves focus among the buttons, inputs and
+  `[tabindex]` controls that are visible and on top (a hit test), A clicks, B and Start send Esc. Make
+  new controls real buttons (or give them `tabindex="0"` and a click handler), and handle Esc to close.
+  `.is-resume`, `.fl-btn--primary` or `[autofocus]` marks the control focused first.
+- **Touch overlay** (`ui/touchOverlay.ts`, `ui/touch.css`) sits at z-index 9, under the HUD layers:
+  keep HUD panels `pointer-events: none` so taps reach it. In touch mode (`html.fl-touchmode`) the HUD
+  hotbar slots take taps and the HUD spell bar hides (the overlay's spell buttons copy its state).
+- `html[data-device]` is `kbm`, `pad` or `touch` once a pad or touch was used.

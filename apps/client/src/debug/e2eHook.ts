@@ -122,7 +122,7 @@ interface GameLike {
     getNature?(): RayCollider | null;
   };
   planet?: { terrain?: unknown; body?: { radius: number } };
-  input?: { locked: boolean; enabled: boolean; sensitivity: number; invertY: boolean };
+  input?: { locked: boolean; enabled: boolean; sensitivity: number; invertY: boolean; device?: string; captured?: boolean };
   net?: { room: RoomLike | null; rtt?: number; serverOffset?: number };
   hud?: {
     you: {
@@ -204,6 +204,7 @@ interface SharedMods {
   trialSeen(): { msg: Record<string, unknown> & { id: string; state: string; progress: number; goal: number; next: string | null }; at: number } | null;
   trialHud(t: unknown, now: number): { title: string; progress: string; clock: string; tone: string } | null;
   clockLeft(t: unknown, now: number): number;
+  trialNow(): number;
 }
 
 export type FlEvent = { t: number; kind: string; [k: string]: unknown };
@@ -254,7 +255,7 @@ export function installE2eHook(win: Window & typeof globalThis): void {
     sharedLoading = true;
     void Promise.all([import("@firstlight/shared"), import("@firstlight/shared/content/npcs"), import("@firstlight/shared/net/schema"), import("@firstlight/shared/content/weapons"), import("@firstlight/shared/content/missions"), import("@firstlight/shared/content/places"), import("../game/trialState.ts")])
       .then(([s, n, sc, w, m, pl, ts]) => {
-        shared = { BODIES: s.BODIES, padDirs: s.padDirs, isSafe: s.isSafe, PAD_SAFE_RADIUS: s.PAD_SAFE_RADIUS, zoneAt: s.zoneAt, nearestSafeEntry: s.nearestSafeEntry, TOWN_GATES: s.TOWN_GATES, safeGates: s.safeGates, portalSpots: s.portalSpots, NPC_DEFS: n.NPC_DEFS, NF: n.NF, PF: sc.PF, WEAPONS: w.WEAPONS, WEAPON_BY_ID: w.WEAPON_BY_ID, missionsOn: m.missionsOn, missionsFrom: m.missionsFrom, placeDir: pl.placeDir, trialSeen: ts.trialSeen, trialHud: ts.trialHud, clockLeft: ts.clockLeft } as unknown as SharedMods;
+        shared = { BODIES: s.BODIES, padDirs: s.padDirs, isSafe: s.isSafe, PAD_SAFE_RADIUS: s.PAD_SAFE_RADIUS, zoneAt: s.zoneAt, nearestSafeEntry: s.nearestSafeEntry, TOWN_GATES: s.TOWN_GATES, safeGates: s.safeGates, portalSpots: s.portalSpots, NPC_DEFS: n.NPC_DEFS, NF: n.NF, PF: sc.PF, WEAPONS: w.WEAPONS, WEAPON_BY_ID: w.WEAPON_BY_ID, missionsOn: m.missionsOn, missionsFrom: m.missionsFrom, placeDir: pl.placeDir, trialSeen: ts.trialSeen, trialHud: ts.trialHud, clockLeft: ts.clockLeft, trialNow: ts.trialNow } as unknown as SharedMods;
       })
       .catch((e: unknown) => console.warn("[e2e] shared modules", e))
       .finally(() => (sharedLoading = false));
@@ -644,6 +645,9 @@ export function installE2eHook(win: Window & typeof globalThis): void {
         enabled: g?.input?.enabled ?? null,
         sensitivity: g?.input?.sensitivity ?? null,
         invertY: g?.input?.invertY ?? null,
+        // Controls lane (D-controls-5): the device used last and the captured-input rule.
+        device: g?.input?.device ?? null,
+        captured: g?.input?.captured ?? null,
       },
       ui: {
         visibleE2e,
@@ -815,7 +819,7 @@ export function installE2eHook(win: Window & typeof globalThis): void {
       trial: (() => {
         const t = S.trialSeen?.();
         if (!t) return null;
-        const now = performance.now();
+        const now = S.trialNow();
         return { ...t.msg, clockLeftMs: Math.round(S.clockLeft(t, now)), hud: S.trialHud(t, now), hudShown: !!document.querySelector('[data-e2e="trial-hud"]:not([hidden])') };
       })(),
       // The guide's missions here and where each objective is (hunt: its area, find: the object,

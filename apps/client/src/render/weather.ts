@@ -7,9 +7,10 @@
 
 import * as THREE from "three/webgpu";
 import {
-  abs, attribute, cameraPosition, cross, distance, float, Fn, fract, length, max, mix, normalize, positionGeometry,
-  positionPrevious, renderGroup, smoothstep, uniform, vec2, vec3,
+  abs, attribute, cameraPosition, cos, cross, distance, float, Fn, fract, length, max, mix, normalize, positionGeometry,
+  positionPrevious, pow, renderGroup, sin, smoothstep, step, time, uniform, vec2, vec3,
 } from "three/tsl";
+import type { AirLook } from "./worldLooks.ts";
 import { hash01 } from "@firstlight/shared";
 import { localFrame, skyDir, type V3 } from "./sunFrame.ts";
 
@@ -82,6 +83,64 @@ function boltMaterial(): THREE.MeshBasicNodeMaterial {
   return m;
 }
 
+/**
+ * Fireflies and spores (D-gfx-worlds-6): points of light near the ground at night, in a flat box
+ * round the camera like the rain's. Each one wanders on its own slow loop, blinks (fireflies) or
+ * glows steadily and rises (spores), and stays put in the world as the camera moves. One additive
+ * instanced draw; the planet's colours, size and behaviour are uniforms.
+ */
+export const fireflyUniforms = {
+  center: uniform(new THREE.Vector3()).setGroup(renderGroup),
+  east: uniform(new THREE.Vector3(1, 0, 0)).setGroup(renderGroup),
+  north: uniform(new THREE.Vector3(0, 0, 1)).setGroup(renderGroup),
+  up: uniform(new THREE.Vector3(0, 1, 0)).setGroup(renderGroup),
+  /** World-anchored wrap offsets (fractions of the box) along east, north and up. */
+  off: uniform(new THREE.Vector3()).setGroup(renderGroup),
+  colorA: uniform(new THREE.Color(0xd8ff5a)).setGroup(renderGroup),
+  colorB: uniform(new THREE.Color(0xffd070)).setGroup(renderGroup),
+  size: uniform(0.055).setGroup(renderGroup),
+  blink: uniform(1).setGroup(renderGroup),
+  amount: uniform(0).setGroup(renderGroup),
+};
+/** Half width of the fireflies' box (m) and its height (m): from 1.75 m under the eye to 3.25 m over it. */
+const FLY_HALF = 16, FLY_HEIGHT = 5;
+
+function fireflyMaterial(): THREE.MeshBasicNodeMaterial {
+  const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, fog: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+  m.name = "fireflies";
+  const f = fireflyUniforms;
+  const s = attribute("seed", "vec4");
+  const lx = fract(s.x.add(f.off.x)).sub(0.5);
+  const lz = fract(s.y.add(f.off.z)).sub(0.5);
+  const ly = fract(s.z.add(f.off.y)).sub(0.35);
+  // A slow loop of its own round where it hangs.
+  const ph = s.w.mul(40.0);
+  const wander = f.east.mul(sin(time.mul(0.55).add(ph)).mul(0.7))
+    .add(f.north.mul(cos(time.mul(0.43).add(ph.mul(1.7))).mul(0.7)))
+    .add(f.up.mul(sin(time.mul(0.8).add(ph.mul(2.3))).mul(0.3)));
+  const base = f.center.add(f.east.mul(lx.mul(FLY_HALF * 2))).add(f.north.mul(lz.mul(FLY_HALF * 2))).add(f.up.mul(ly.mul(FLY_HEIGHT))).add(wander);
+  const view = normalize(base.sub(cameraPosition));
+  const side = normalize(cross(f.up, view));
+  const upv = cross(view, side);
+  // Lit ones pulse; between flashes a firefly is dark. Spores (blink near 0) glow steadily.
+  const flash = smoothstep(0.15, 0.9, sin(time.mul(s.w.mul(1.3).add(1.1)).add(s.z.mul(50.0))));
+  const lit = mix(float(1), flash, f.blink);
+  m.positionNode = Fn((builder: any) => {
+    const size = f.size.mul(s.x.mul(0.7).add(0.65));
+    const p = base.add(side.mul(positionGeometry.x.mul(size))).add(upv.mul(positionGeometry.y.mul(size)));
+    if (builder?.needsPreviousData?.()) positionPrevious.assign(p);
+    return p;
+  })();
+  const r = length(positionGeometry.xy).mul(2);
+  const core = smoothstep(1.0, 0.0, r);
+  const edge = smoothstep(1.0, 0.7, max(abs(lx), abs(lz)).mul(2));
+  const near = smoothstep(0.6, 2.5, distance(base, cameraPosition));
+  const tint = mix(f.colorA, f.colorB, step(0.72, s.w));
+  // A hot core in a soft halo, bright enough to bloom.
+  m.colorNode = tint.mul(pow(core, 4.0).mul(4.5).add(core.mul(core).mul(0.6))).mul(lit.mul(edge).mul(near).mul(f.amount));
+  return m;
+}
+
 const BOLT_SEGMENTS = 40;
 
 /** The instanced drop quad with `n` per-instance seeds (none for n = 0: nothing draws then). */
@@ -94,6 +153,22 @@ function dropGeometry(n: number): THREE.InstancedBufferGeometry {
   if (n > 0) {
     const seeds = new Float32Array(n * 4);
     for (let i = 0; i < n * 4; i++) seeds[i] = hash01(i, 0x7a1d, 0x5eed);
+    geo.setAttribute("seed", new THREE.InstancedBufferAttribute(seeds, 4));
+  }
+  geo.instanceCount = 0;
+  geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
+  return geo;
+}
+
+/** The fireflies' quad (centred, ±0.5) with `n` per-instance seeds (none for n = 0: nothing draws then). */
+function flyGeometry(n: number): THREE.InstancedBufferGeometry {
+  const quad = new THREE.PlaneGeometry(1, 1);
+  const geo = new THREE.InstancedBufferGeometry();
+  geo.index = quad.index;
+  geo.setAttribute("position", quad.getAttribute("position"));
+  if (n > 0) {
+    const seeds = new Float32Array(n * 4);
+    for (let i = 0; i < n * 4; i++) seeds[i] = hash01(i, 0x1f1e, 0xf17e);
     geo.setAttribute("seed", new THREE.InstancedBufferAttribute(seeds, 4));
   }
   geo.instanceCount = 0;
@@ -115,8 +190,24 @@ export class WeatherFx {
   private driftE = 0;
   private driftN = 0;
   private boltVisible = false;
+  /** Fireflies and spores (one draw; hidden by day and where a planet has none). */
+  readonly flies: THREE.Mesh;
+  private flyGeo: THREE.InstancedBufferGeometry;
+  private flyCapacity = 0;
+  private flyRise = 0;
+  private readonly flyEast: V3 = [1, 0, 0];
+  private readonly flyNorth: V3 = [0, 0, 1];
 
   constructor(private readonly scene: THREE.Scene) {
+    this.flyGeo = flyGeometry(0);
+    this.flies = new THREE.Mesh(this.flyGeo, fireflyMaterial());
+    this.flies.frustumCulled = false;
+    this.flies.renderOrder = 5;
+    this.flies.name = "fireflies";
+    this.flies.matrixAutoUpdate = false;
+    this.flies.visible = false;
+    scene.add(this.flies);
+
     this.geo = dropGeometry(0);
     this.drops = new THREE.Mesh(this.geo, precipitationMaterial());
     this.drops.frustumCulled = false;
@@ -156,6 +247,45 @@ export class WeatherFx {
     this.geo.instanceCount = Math.min(old.instanceCount, n);
     this.drops.geometry = this.geo;
     old.dispose();
+  }
+
+  /** Size the fireflies' seed buffer for the tier (rare; 0 = none). A whole new geometry, like the drops'. */
+  setFireflies(n: number) {
+    if (n === this.flyCapacity) return;
+    this.flyCapacity = n;
+    const old = this.flyGeo;
+    this.flyGeo = flyGeometry(n);
+    this.flies.geometry = this.flyGeo;
+    if (n === 0) this.flies.visible = false;
+    old.dispose();
+  }
+
+  /** Per frame, after the camera is placed: `amount` 0..1 (night × the planet's own share); no allocation. */
+  updateFireflies(camera: THREE.Camera, dt: number, amount: number, air: AirLook) {
+    const n = amount > 0.02 ? Math.round(this.flyCapacity * Math.min(1, air.fireflies)) : 0;
+    this.flyGeo.instanceCount = n;
+    this.flies.visible = n > 0;
+    if (n === 0) return;
+    const f = fireflyUniforms;
+    const c = camera.position;
+    const l = c.length() || 1;
+    const ux = c.x / l, uy = c.y / l, uz = c.z / l;
+    localFrame(ux, uy, uz, this.flyEast, this.flyNorth);
+    const e = this.flyEast, nn = this.flyNorth;
+    f.center.value.copy(c);
+    f.up.value.set(ux, uy, uz);
+    f.east.value.set(e[0], e[1], e[2]);
+    f.north.value.set(nn[0], nn[1], nn[2]);
+    // World anchoring: the box slides with the camera, the lights don't (they rise on their own).
+    this.flyRise = (this.flyRise + air.fireflyRise * dt) % (FLY_HEIGHT * 1000);
+    const camE = c.x * e[0] + c.y * e[1] + c.z * e[2];
+    const camN = c.x * nn[0] + c.y * nn[1] + c.z * nn[2];
+    f.off.value.set(-camE / (FLY_HALF * 2), (this.flyRise - l) / FLY_HEIGHT, -camN / (FLY_HALF * 2));
+    f.colorA.value.setHex(air.fireflyA);
+    f.colorB.value.setHex(air.fireflyB);
+    f.size.value = air.fireflySize;
+    f.blink.value = air.fireflyBlink;
+    f.amount.value = amount;
   }
 
   /**
@@ -248,7 +378,9 @@ export class WeatherFx {
   }
 
   dispose() {
-    this.scene.remove(this.drops, this.bolt);
+    this.scene.remove(this.drops, this.bolt, this.flies);
+    this.flyGeo.dispose();
+    (this.flies.material as THREE.Material).dispose();
     this.geo.dispose();
     this.boltGeo.dispose();
     (this.drops.material as THREE.Material).dispose();

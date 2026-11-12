@@ -290,7 +290,7 @@ describe("medals", () => {
       await tpAndWait(a, offPad("arcadia", 0, 40));
       a.send("admin", { cmd: "unprotect" });
       await until("ready", () => (actorOf(a).state.flags & (PF.SAFE | PF.PROTECTED)) === 0);
-      a.send("admin", { cmd: "damage", args: { amount: 96 } });
+      a.send("admin", { cmd: "damage", args: { amount: actorOf(a).state.maxHp - 4 } }); // the starter's max HP (per-starter stats)
       await until("4 hp", () => actorOf(a).state.hp === 4);
       await until("by a thread", () => a.you.medals.includes("by_a_thread"), 4000);
     } finally {

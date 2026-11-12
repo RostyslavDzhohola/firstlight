@@ -8,6 +8,7 @@
 import { AGENT_CHIP } from "@firstlight/shared/net/agents";
 import * as THREE from "three/webgpu";
 import { applyOccluderFadeGated } from "./occluderFade.ts";
+import { PLATE_LIFT_M, PLATE_RANGE_M, plateLook, type PlateLook } from "./plates.ts";
 import { COSMETIC_BY_ID, COSMETICS, COSMETIC_SOCKET, type CosmeticSlot, type Socket } from "@firstlight/shared/content/items";
 import { keptSamples } from "./warmup.ts";
 import { disposeTree } from "./dispose.ts";
@@ -384,6 +385,8 @@ export class CosmeticRig {
   }
 }
 
+const _plateLook: PlateLook = { opacity: 1, scale: 1 };
+
 /** DOM name + title plates over other players within range. */
 export class Nameplates {
   private readonly root = document.createElement("div");
@@ -401,8 +404,8 @@ export class Nameplates {
     const v = new THREE.Vector3();
     for (const e of entries) {
       const d = e.pos.distanceTo(me);
-      if (d > 45) continue;
-      v.copy(e.pos).addScaledVector(e.pos.clone().normalize(), 2.15).project(camera);
+      if (d >= PLATE_RANGE_M) continue;
+      v.copy(e.pos).multiplyScalar(1 + PLATE_LIFT_M / Math.max(1, e.pos.length())).project(camera);
       if (v.z > 1 || Math.abs(v.x) > 1.1 || Math.abs(v.y) > 1.1) continue;
       seen.add(e.id);
       let p = this.plates.get(e.id);
@@ -431,7 +434,10 @@ export class Nameplates {
       }
       p.el.style.left = `${(v.x * 0.5 + 0.5) * innerWidth}px`;
       p.el.style.top = `${(-v.y * 0.5 + 0.5) * innerHeight}px`;
-      p.el.style.opacity = String(Math.max(0.35, 1 - d / 50));
+      // Whole up close, thinner and a little smaller with range, fading out at its edge (render/plates.ts).
+      const look = plateLook(d, _plateLook);
+      p.el.style.opacity = look.opacity.toFixed(2);
+      p.el.style.transform = `translate(-50%, -100%) scale(${look.scale.toFixed(3)})`;
     }
     for (const [id, p] of this.plates) {
       if (seen.has(id)) continue;

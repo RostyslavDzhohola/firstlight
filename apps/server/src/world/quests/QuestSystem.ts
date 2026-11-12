@@ -122,6 +122,17 @@ export interface ShotMsg {
 
 const slotSchema = z.number().int().min(0).max(HOTBAR_SLOTS + BACKPACK_SLOTS - 1);
 
+/**
+ * A person's account: not a load-test bot, not our own test automation (D-home-6) and not an AI agent
+ * (D-agents-1). The one rule for everything that is the people's in this system (the Hall of Firsts,
+ * the Gleamkeepers): either agent flag, the session's `identity.agent` or the synced
+ * `PlayerState.agent`, marks an agent.
+ */
+export function isPerson(a: PlayerActor): boolean {
+  if (a.identity.loadtest || a.identity.test) return false;
+  return !a.identity.agent && !a.state.agent;
+}
+
 export class QuestSystem implements RoomSystem {
   readonly room: BodyRoom;
   readonly body: BodyId;
@@ -401,6 +412,14 @@ export class QuestSystem implements RoomSystem {
     this.trials.onLeave(sessionId);
   }
 
+  onPlayerDrop(a: PlayerActor) {
+    this.trials.onDrop(a);
+  }
+
+  onPlayerReconnect(a: PlayerActor) {
+    this.trials.onReconnect(a);
+  }
+
   /** (Re)load account-level progress for a player: medals, title, discovered pads on this body. */
   loadAccount(a: PlayerActor) {
     const q = this.qp(a);
@@ -442,6 +461,7 @@ export class QuestSystem implements RoomSystem {
       if (a.dead) continue;
       const life = this.life(a);
       life.playMs += dtMs;
+      this.trials.sample(a); // racers' path between quest ticks (a Skipstep blink is its own segment)
     }
     if (now - this.lastSlow < QUEST_RULES.SLOW_TICK_MS) return;
     this.lastSlow = now;
@@ -716,8 +736,9 @@ export class QuestSystem implements RoomSystem {
     return out;
   }
 
-  completeMission(a: PlayerActor, m: CharacterMission, def: MissionDef) {
-    if (m.done) return;
+  /** Pay a mission; true once its reward has committed (false: a failed save left it open, or already done). */
+  completeMission(a: PlayerActor, m: CharacterMission, def: MissionDef): boolean {
+    if (m.done) return false;
     const goal = missionGoal(def);
     // The done flag, XP and level, coins, items and any overflow pile commit together; a failed save
     // leaves the mission open (it completes on the next trigger). Level-up effects and the news
@@ -734,7 +755,7 @@ export class QuestSystem implements RoomSystem {
         showXp = this.room.addXp(a, def.reward.xp);
       },
     );
-    if (!paid) return;
+    if (!paid) return false;
     showXp();
     const extra = rewardItems.map((i) => `${i.qty} × ${itemName(i)}`).join(", ");
     this.toast(a, `Mission complete: ${def.name} · +${def.reward.xp} XP · +${def.reward.coins} ◎${extra ? ` · ${extra}` : ""}`, "xp");
@@ -745,6 +766,7 @@ export class QuestSystem implements RoomSystem {
       const n = gleamsWon(a.char.missions);
       this.toast(a, n >= GLEAMS.trials.length ? `All three gleams won — ${GLEAMS.curator.name}'s vault in Portus Plaza is waiting for you` : `Gleam won: ${n} of ${GLEAMS.trials.length} — ${GLEAMS.name}`, "medal");
     }
+    return true;
   }
 
   private onKillForMissions(e: KillEvent) {
@@ -879,8 +901,11 @@ export class QuestSystem implements RoomSystem {
       a.char.coins += GLEAMS.reward.coins;
       if (eligible) {
         this.award(a, "three_gleams", events); // GLEAMS.medal
-        // The Hall of Firsts is people's: our automation never engraves (D-home-6), nor do AI agents (D-agents-1).
-        if (!a.identity.loadtest && !a.identity.test && !a.identity.agent && !life.unofficial) first = engrave(GLEAMS.firsts, a.identity.userId, a.identity.name, events);
+        // The Hall line and the board's Gleamkeepers are people's: no automation, no AI agents.
+        if (isPerson(a) && !life.unofficial) {
+          first = engrave(GLEAMS.firsts, a.identity.userId, a.identity.name, events);
+          progressStore.current.addGleamkeeper(a.identity.userId, a.identity.name);
+        }
       }
     });
     if (!paid) return;
@@ -916,7 +941,7 @@ export class QuestSystem implements RoomSystem {
       life.eggs.push(eggId);
       if (eligible) {
         this.award(a, egg.medal, events);
-        if (!a.identity.loadtest && !a.identity.test && !a.identity.agent) first = engrave(eggId, a.identity.userId, a.identity.name, events); // our automation never engraves (D-home-6), nor do AI agents (D-agents-1)
+        if (isPerson(a)) first = engrave(eggId, a.identity.userId, a.identity.name, events); // our automation never engraves (D-home-6), nor do AI agents (D-agents-1)
       }
     });
     if (!paid) return;
@@ -1025,7 +1050,7 @@ export class QuestSystem implements RoomSystem {
       if (hits && !hits.hurt) this.award(a, "untouchable");
     }
     this.bossHits.delete(e.npcKind);
-    const people = eligible.filter((a) => !a.identity.loadtest && !a.identity.test && !a.identity.agent); // real players only (D-home-6, D-agents-1)
+    const people = eligible.filter(isPerson); // real players only (D-home-6, D-agents-1)
     if (people.length) engrave(BOSS_FIRSTS[e.bossId], people[0]!.identity.userId, people.map((a) => a.identity.name).join(", ").slice(0, 200));
   }
 

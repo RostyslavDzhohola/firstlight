@@ -15,3 +15,17 @@ effort high, Standard tier; no tests run. No blockers.
 | 7 | nit | `apps/client/src/world/TrialMarkers.ts:131`, `:178`, `:204` | Per-frame allocations: a map and mission wrappers, two quaternions per visible beacon, one per shard. |
 
 Verdict: changes requested. Decisions and fixes are recorded below this line as they land.
+
+## Fixes (2026-11-12, lane/missions round 2, Claude Opus 5.5)
+
+Each fix landed with a test that fails on the code before it.
+
+| # | Fix | Commit | Test |
+|---|---|---|---|
+| 1 | New optional `RoomSystem.onPlayerDrop` / `onPlayerReconnect` (called from `BodyRoom.onDrop` / `onReconnect`). A drop resets the attempt and dissolves its waves. Lingering bodies run no trial. The reconnect hears `idle` with reason `dropped`. | `95ed8a87` | `trials.test.ts` "a dropped socket ends the attempt at once…" (a real socket close with code 3000, then a token reconnect with a fresh client) |
+| 2 | `NpcSystem.ownerOf` / `mayEngage`, enforced in perception (the owner only, sensed within `NPC_TUNING.ownedSenseM` = 60 m through cover, so the wave comes for you), aggro, retaliation, pack sharing, `hitPlayer` and `mitigate` | `0fd89255` | "waves belong to their runner…" (a bystander beside the beacon: never targeted, never hurt, their hits refused) |
+| 3 | `completeMission` returns whether it paid. `trials.finish` pays first, then ends the attempt and sends `done`. A failed save marks the attempt complete (the clock stops) and the payout retries each tick. | `9abe5cd5` | "the last shard pays before it says done; a failed save keeps the completion pending…" |
+| 4 | `listenTrials` removes the previous room's handler and guards each handler by a generation number | `236a450b` | `trialState.test.ts` "an old room delivering late can't overwrite…" |
+| 5 | Optional `TrialMsg.endsAt` (additive): the server's deadline. The client stamps messages on the synced server clock (`trialNow()`) and counts down to it. | `8ca5fc82` | `trialState.test.ts` "the clock runs to the server's deadline…" (a 2 s late delivery) and the `endsAt` check in the first race test |
+| 6 | "Pay nothing" now kills a wave creature and checks XP, coins, piles, kill events and hunt counts, with an ordinary Bonewalker as the control. The rebirth test now opens the vault, dies and is reborn, checks the medal stays and the vault is locked, wins again, and checks exactly one more payout. | `fe12f359` | the two tests themselves (removing the `spawned` exclusion in `rewards.ts` fails the first) |
+| 7 | `TrialMarkers.update` reuses a pooled lookup map. The race order, facing and piece indices are precomputed. Scratch quaternions replace the per-frame ones. | `0e5d0711` | `TrialMarkers.test.ts` (behaviour, plus 30 frames with no quaternion clone and no `Map`; the old code clones 60) |

@@ -156,8 +156,13 @@ export type ClientMessages = {
   train: { ox: number; oy: number; oz: number; dx: number; dy: number; dz: number };
   /** Onboarding: skip it (no more XP, no Spark medal; it never comes back). */
   onboarding: { action: "skip" };
-  /** Cast a spell from the spellbook (content/spells.ts; at most 5 a second). Refusals answer `denied {action: "cast", reason}`. */
+  /** Cast a spell from the spellbook (content/spells.ts; at most 5 a second). Refusals answer `denied {action: "cast", reason, req?}`. */
   cast: CastMsg;
+  /**
+   * Ask for the spells already under way near you (sent once the client's handlers exist, like
+   * `supportSync`): each Glasswing Ward that is up comes back as a `spell` event with `late`.
+   */
+  spellSync: Record<string, never>;
 };
 
 /**
@@ -166,12 +171,13 @@ export type ClientMessages = {
  * - `skipstep`: blinks the caster up to 10 m along `dx,dy,dz` (projected onto the ground) and sends
  *   the caster a `correct` with the new position, like any server move.
  * - `frostbloom`, `glasswing`: around / on the caster; the aim is ignored.
- * - `wishfall`: lands on `tx,ty,tz` (snapped to the ground, pulled back to 30 m and to the first
- *   thing between the caster's head and it). Without a target point: where the ray from the
- *   caster's head along `dx,dy,dz` first meets the ground or something solid within 30 m.
+ * - `wishfall`: lands on `tx,ty,tz` (put on the ground, then searched back toward the caster until
+ *   the ground point is within 30 m of the caster's feet and nothing stands between the caster's
+ *   head and it). Without a target point: where the ray from the caster's head along `dx,dy,dz`
+ *   first meets the ground or something solid within 30 m.
  * Everyone nearby then gets `spell` events. Refusal reasons: "locked" (level gate), "cooldown", "aether",
  * "safe zone", "protected", "swimming", "mounted", "dead", "dir", "blocked" (Skipstep with a wall
- * right ahead; nothing is spent).
+ * right ahead, Wishfall with no clear ground in range; nothing is spent).
  */
 export interface CastMsg {
   spell: SpellId;
@@ -183,6 +189,12 @@ export interface CastMsg {
   tx?: number;
   ty?: number;
   tz?: number;
+  /**
+   * The client's own number for this cast (a non-negative integer that rises with every cast of the
+   * session). A refusal carries it back (`denied.req`) and `you.spells.req` is the last one dealt
+   * with, so a client with several casts in flight knows which answer is whose.
+   */
+  req?: number;
 }
 
 /**
@@ -211,6 +223,11 @@ export interface SpellEvent {
   amount?: number;
   from?: string;
   broke?: boolean;
+  /**
+   * A snapshot of something already under way when you arrived (the answer to `spellSync`): a
+   * ward's `cast` with the time and shell it has left. Draw it; it is not a new cast.
+   */
+  late?: boolean;
 }
 
 // ---- Server → client events (broadcast or direct) -------------------------------------------
@@ -221,7 +238,8 @@ export type ServerMessages = {
   /** A melee swing (animation and sound for everyone nearby). */
   swing: { by: string; weapon: number; heavy: boolean; hits: number };
   /** The server refused an action (`reason` is short and human-readable). */
-  denied: { action: string; reason: string };
+  /** A request was refused. `req`: the number a `cast` was sent with, when it had one. */
+  denied: { action: string; reason: string; req?: number };
   /** Admins: the real character is saved and may move into the sandbox now (join it through /api/play with `sandbox`). */
   sandbox: { home: BodyId };
   /** To the attacker only: a hit landed on an NPC that took no damage (spawning, evading, a shield). */
@@ -278,8 +296,9 @@ export type ServerMessages = {
 
 /**
  * A timed-objective attempt (missions race / defend / collect). `leftMs` is the clock left when sent
- * (the client counts down from its receipt; it stands still while `paused`), `limitMs` the whole
- * clock (0 = untimed). `progress`/`goal` as in YouState.missions. `next` is the world object the
+ * (it stands still while `paused`), `endsAt` the server time (ms epoch) the running clock reaches 0,
+ * so the client counts down on its synced server clock whatever the delivery delay (older servers
+ * omit it: count from receipt), `limitMs` the whole clock (0 = untimed). `progress`/`goal` as in YouState.missions. `next` is the world object the
  * attempt leads to now (the next ring, the beacon, or null for collect: the nearest shard).
  */
 export interface TrialMsg {
@@ -291,8 +310,10 @@ export interface TrialMsg {
   leftMs: number;
   limitMs: number;
   next: string | null;
-  /** Why it failed: "time", "died", "left", "abandoned" (or why it went idle). */
+  /** Why it failed: "time", "died", "left", "abandoned" (or why it went idle: "dropped", a lost socket ended it). */
   reason?: string;
+  /** Running and timed only: server time (ms epoch) when the clock runs out if nothing changes. */
+  endsAt?: number;
 }
 
 /** Private per-player state sent only to its owner. */

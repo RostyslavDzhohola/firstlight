@@ -131,9 +131,11 @@ describe("support items used from the backpack (the inventory's Use)", () => {
     const slot = await toBackpack(a, "bubble", 6);
     await op(a, "use", { slot }); // what the panel sends: the slot index, no target
     await until("bubble up", () => b.count("bubble") === 1 && supportOf(serverRoom(a))!.bubbles.list.length === 1);
-    expect(b.last("bubble")).toMatchObject({ by: a.id, hp: 150 });
+    // Shell HP is 150 per 100 of the owner's max HP (content §2.3), and max HP depends on the starter (§8.5).
+    const shell = Math.round(1.5 * me(a).maxHp);
+    expect(b.last("bubble")).toMatchObject({ by: a.id, hp: shell });
     b.send("fire", { slot: 1, ...aimAt(b, a), t: Date.now() });
-    await until("shell took the shot", () => (supportOf(serverRoom(a))!.bubbles.list[0]?.hp ?? 150) < 150);
+    await until("shell took the shot", () => (supportOf(serverRoom(a))!.bubbles.list[0]?.hp ?? shell) < shell);
     expect(me(a).hp).toBe(me(a).maxHp);
     expect(a.you.backpack[6]).toMatchObject({ id: "bubble", qty: 1 }); // kept (cooldown item)
   });
@@ -145,11 +147,12 @@ describe("support items used from the backpack (the inventory's Use)", () => {
     await until("given", () => a.you.hotbar.some((i: any) => i?.id === "patchkit"));
     const slot = await toBackpack(a, "patchkit", 3);
     a.send("admin", { cmd: "damage", args: { amount: 60 } });
-    await until("hurt", () => me(a).hp === 40);
+    await until("hurt", () => me(a).hp === me(a).maxHp - 60);
     await op(a, "use", { slot });
     await until("channel done", () => a.last("channelEnd")?.ok === true, 4000);
     expect(a.last("channel")).toMatchObject({ kind: "patchkit", target: a.id });
     await until("kit used", () => a.you.backpack[3]?.qty === 1);
-    await until("healed", () => actorOf(a).heals.length === 0 && me(a).hp === 70, 6000); // 30% of 100
+    const healed = me(a).maxHp - 60 + Math.round(0.3 * me(a).maxHp); // Patchkit I: 30% of max HP
+    await until("healed", () => actorOf(a).heals.length === 0 && me(a).hp === healed, 6000);
   });
 });

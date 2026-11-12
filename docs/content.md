@@ -39,7 +39,7 @@ The models behind the tables were computed in this session. Section 1.1 gives th
 **Formula (new):** `XP_to_next(L) = round_to_5(50 × L^1.5)` for L = 1…19. Total to cap: **33,570 XP**.
 
 **Model assumptions (new):** 2.5 effective kills/min including travel; tier mix ×1.15; on-level kill
-XP `10 + 5E`; onboarding pays **50 XP** (3 dummies × 10 + 20 on completion), so **level 2 lands at
+XP `10 + 5E`; onboarding pays **50 XP** (3 dummies × 10 + 20 on completion; a character reborn mid-tutorial is topped up to 50 at completion, D-fixes-4), so **level 2 lands at
 the end of the ~60 s tutorial**. That is also the moment the game offers "save your character" (D).
 Mission XP is credited at the level it is usually done. Boss XP is excluded, so it only speeds things up.
 
@@ -402,7 +402,7 @@ next pass with play data.
 | Comet Launcher III rate / reload | 1.6 | 1.65 | knock-on of the longbow: the L20 ranged median rose and the Comet sat at 0.59× it (class band 0.6–1.6) → 0.61× |
 | Bearded Axe rate (all tiers) | 0.80 | 0.90 | at the server's cadence chop + light killed an 88–90 HP starter at L1/6/12 in 0.68 s → 0.77 s; sustained DPS 44 / 68 / 99 → 40 / 61 / 89, PvP 2.4 → 2.7 s body, 1.6 → 1.8 s with the chop |
 
-### 2.7 Spells (new, 2026-11-12; code: `packages/shared/src/content/spells.ts`, D-spells-1…7)
+### 2.7 Spells (new, 2026-11-12; code: `packages/shared/src/content/spells.ts`, D-spells-1…10)
 
 Every character has a spellbook, apart from the weapon in hand: **aether** and four spells on their
 own keys. Nothing is bought or dropped; spells open by character level, so a rebirth (level 1) closes
@@ -416,12 +416,15 @@ doesn't refill them. The four spells cost 130 together, so a full book never pay
 | Spell | Key | Lv | Aether | Cooldown | What it does |
 |---|---|---|---:|---:|---|
 | **Skipstep** | Q | 1 | 20 | 6 s | Blink up to 10 m the way you look, along the ground. The server walks the path in 0.5 m steps and stops before a wall, an intact prop, a tree or boulder, deep water, or a ledge of more than 1 m per step. Under 1.5 m of room: refused, nothing spent. A fall under way still counts when you land |
-| **Frostbloom** | F | 3 | 30 | 10 s | Nova round the caster, radius 5 m: **24** damage (flat in the ring) and a **−40% move speed** slow for 3 s. Not through walls. Hits allies (friendly fire), never the caster. Bosses take the damage, not the slow. Light destruction (crates, barrels, fences) |
-| **Wishfall** | X | 6 | 45 | 14 s | A star called down on the ground point under the crosshair, up to 30 m away. Everyone within 160 m sees the ring for **1.2 s**, then it lands: **60** at the centre, falling linearly to 25% at the 4 m edge, knockback 4 m. The caster takes half (own-explosives rule). Heavy destruction. Prism Bubbles and walls shelter as from any blast |
-| **Glasswing Ward** | Z | 9 | 35 | 18 s | A shell on the caster for 4 s that absorbs **30 per 100 of the caster's max HP** dealt by players and creatures (burn ticks included). The rest of a bigger hit gets through. Falls and other damage with no attacker ignore it |
+| **Frostbloom** | F | 3 | 30 | 10 s | Nova round the caster, radius 5 m: **24** damage (flat in the ring) and a **−40% move speed** slow for 3 s. Not through walls or Prism Bubbles (a shell in the way shelters whoever and whatever is behind it and pays the nova's damage once). Hits allies (friendly fire), never the caster. Bosses take the damage, not the slow. A stronger slow already running stays (the slowed player is told the one the server holds). Light destruction (crates, barrels, fences) |
+| **Wishfall** | X | 6 | 45 | 14 s | A star called down on the ground point under the crosshair, up to 30 m from the caster's feet, measured to the ground point itself. The server searches back toward the caster for the farthest point in range with nothing between the caster's head and it; no clear ground in range refuses the cast (nothing spent). Everyone within 160 m sees the ring for **1.2 s**, then it lands: **60** at the centre, falling linearly to 25% at the 4 m edge, knockback 4 m. The caster takes half (own-explosives rule). Heavy destruction. Prism Bubbles and walls shelter as from any blast |
+| **Glasswing Ward** | Z | 9 | 35 | 18 s | A shell on the caster for 4 s that absorbs **30 per 100 of the caster's max HP** dealt by players and creatures (burn ticks included). The rest of a bigger hit gets through. Falls and other damage with no attacker ignore it. Someone who arrives while it is up sees it |
 
 **Shared rules:**
-- Damage = `base × (1 + 0.03(L−1))`, the weapons' level multiplier (§1.3). Weapon tier never counts.
+- Damage = `base × (1 + 0.03(L−1)) × spell power`: the weapons' level multiplier (§1.3) and the caster's
+  starter (§8.5: Hexwick 1.15, Hinoko 1.05, Kappa 1.00, Unit 7 0.95, Brother Ash 0.90). The ward's shell is
+  `30% of max HP × spell power`. Aether, costs, cooldowns, ranges, the slow and the warning are the same for
+  everyone. Weapon tier never counts. Applied in one place on the server (`SpellSystem.damage` / `power`).
 - Spells go through the weapons' damage pipeline: safe zones and arrival protection hold both ways,
   walls stop them (D-zones-3), blocks reduce them, kill credit, XP, threat and the game events are
   the same as for a weapon hit.
@@ -437,24 +440,53 @@ doesn't refill them. The four spells cost 130 together, so a full book never pay
 | L12 (T3) | 210 | 32 (15%) | 80 (38%) | 63 | +26% / +16% / +8% |
 | L20 (T3) | 290 | 38 (13%) | 94 (32%) | 87 | +26% / +16% / +8% |
 
-"Sustained weapon" is the mean of Hexquill, Sunbrand, Pocket Carbine and Bearded Axe at the gated
-tier (40 / 58 / 63 / 87 / 103 damage per second). "Long fights" is what aether allows: 75 aether for
-the pair every ~15.5 s. `spells.test.ts` in `packages/shared` checks these bands.
+The table above is the shared base (spell power 1.00: Kappa). "Sustained weapon" is the mean of
+Hexquill, Sunbrand, Pocket Carbine and Bearded Axe at the gated tier (40 / 58 / 63 / 87 / 103 damage
+per second). "Long fights" is what aether allows: 75 aether for the pair every ~15.5 s.
+`spells.test.ts` in `packages/shared` checks these bands.
 
-**Why these numbers (against §2.5):**
+**Per starter** (`pnpm balance`, "Spells per starter"): Frostbloom / Wishfall centre / ward shell as the
+server lands them (each hit rounded). The ward is 30% of the starter's own max HP, so the sturdy and
+the fragile end up close.
+
+| Starter | Spell × | L3 (HP 120) | L6 (HP 150) | L9 (HP 180) | L12 (HP 210) | L20 (HP 290) |
+|---|---:|---|---|---|---|---|
+| Hexwick | 1.15 | 29 / – / – | 32 / 79 / – | 34 / 86 / 56 | 37 / 92 / 65 | 43 / 108 / 90 |
+| Hinoko | 1.05 | 27 / – / – | 29 / 72 / – | 31 / 78 / 50 | 34 / 84 / 58 | 40 / 99 / 80 |
+| Kappa | 1.00 | 25 / – / – | 28 / 69 / – | 30 / 74 / 54 | 32 / 80 / 63 | 38 / 94 / 87 |
+| Unit 7 | 0.95 | 24 / – / – | 26 / 66 / – | 28 / 71 / 51 | 30 / 76 / 60 | 36 / 89 / 83 |
+| Brother Ash | 0.90 | 23 / – / – | 25 / 62 / – | 27 / 67 / 55 | 29 / 72 / 63 | 34 / 85 / 88 |
+
+**Why these numbers (against §2.5), re-checked with spell power (D-spells-9):**
 - **Level 1 is untouched.** Skipstep is the only level-1 spell and deals nothing, so every L1 figure
   in the §2.5 table stands.
-- **No one-shots.** The largest spell hit, Wishfall's centre, is 32–46% of an equal-level target's
-  HP, well under the Stillshot headshot's 73–86%. With the level-3 Frostbloom added it is 46–64%.
-- **Burst.** Wishfall always warns for 1.2 s (§0's telegraph floor for a hit of 40% HP or more) and a
+- **No one-shots.** The largest spell hit is Wishfall's centre: 32–46% of an equal-level target's HP
+  at the base, **37–53% from Hexwick** (53% at level 6, under half from level 8), and at most 60%
+  against the most fragile starter (Hinoko, 88% HP). All of it is under the Stillshot headshot's
+  73–86%. The opening pair, Frostbloom and Wishfall's centre together, is 46–64% at the base and at
+  most 84% from Hexwick on Hinoko: the pair alone never kills. `pnpm balance` holds these
+  (`spell.oneshot`, `spell.pair`).
+- **Warning.** Wishfall always warns for 1.2 s (§0's telegraph floor for a hit of 40% HP or more) and a
   walking target leaves the ring in under a second; Frostbloom's slow is what keeps someone in it.
-  The fastest equal-level kill that uses spells is a Stillshot headshot or a direct rocket timed on
-  the star's landing: **1.2 s after the ring appears**, against 1.4 s for the two shots alone. That
-  is the one place the spellbook dips under the §2.5 burst floor; it needs the target to stand
-  through the warning.
-- **The ward** lengthens a fight by at most 30% once every 18 s; it never refills HP.
+  Frostbloom lands unwarned and stays at 12–24% of base HP for every starter (`spell.instant`).
+- **Two known dips under the §2.5 floors.** Nothing holds a weapon back after a cast, so a spell and a
+  weapon hit can land together:
+  1. A Stillshot headshot or a direct rocket timed on the star's landing: **1.2 s after the ring
+     appears**, against 1.4 s for the two shots alone. It needs the target to stand through the warning.
+  2. A Frostbloom with a Stillshot headshot, both at once, target within the nova's 5 m: a full-HP
+     base body dies at **levels 6 and 12** (where the next rifle tier opens and leaves 24–30 HP) at
+     spell power 1.00, at 6, 7, 12 and 13 from Hexwick, at 6 only from Brother Ash. Against the most
+     fragile starter it works at most levels for every caster, because the headshot alone leaves
+     Hinoko 3–19% (§2.5's hard floor already rests on the rifle's 1.4 s between shots). This dip was
+     in the first numbers too; spell power adds two levels to it and no multiplier in the light layer
+     removes it (the base body alone would need Frostbloom at 20 or under, 17 with Hexwick's 1.15). Left for a decision
+     (D-spells-9): a short hold on the weapon after a damaging cast, or a smaller Frostbloom.
+     `pnpm balance` prints the levels per starter.
+- **The ward** lengthens a fight by at most 30% once every 18 s (34% for Hexwick's own HP, 27% for
+  Brother Ash's); it never refills HP.
 - **Extra damage.** An opening pair adds a quarter to a third to a 5 s fight and about a tenth to a
-  long one, because aether, not the cooldowns, is the limit.
+  long one, because aether, not the cooldowns, is the limit. Hexwick's is 15% more than that
+  (+38% / +30% over 5 s), Brother Ash's 10% less.
 
 ---
 
@@ -744,7 +776,9 @@ Totals: 10,280 XP and 1,630 coins per life for the nine (Errand Runner still ask
 **Added 2026-11-12 (new objective types, D-hunt-3):** `race` (rings in order inside a clock that starts at the
 first ring), `defend` (E lights a beacon; hold its ring while waves arrive; outside it the clock pauses, past
 the grace the attempt fails) and `collect` (walk over every piece; optionally timed from the first). Failing
-(time, death, leaving the ring) ends the attempt; the mission stays accepted, so you try again. Waves pay nothing.
+(time, death, leaving the ring, a dropped connection) ends the attempt; the mission stays accepted, so you try again. Waves pay nothing
+and belong to their runner: they come straight for the defender (sensed through cover within 60 m), never target or hurt
+anyone else, and nobody else's hits land on them.
 
 | # | Planet / giver | Type | Name | Exact objective | Rec. Lv | Reward | Routes the player toward |
 |---|---|---|---|---|---|---|---|
@@ -761,7 +795,16 @@ structures, ≥ 100 m beyond the boss arenas' engagement radius and ≥ 30 m fro
 
 **Sizing (new):** *T1:* 7 legs of ~57 m = ~400 m; a sprint (9 m/s) takes ~45 s and a run (6 m/s) ~67 s, so
 75 s leaves ~30 s at a sprint for hills, a dodge or a Hopbit in the way and is just doable at a run; a horse
-(16 m/s) takes ~25 s but costs 1,500 coins, about five times what a level-6 life has (§1.4). *T2 / H4:* waves
+(16 m/s) takes ~25 s but costs 1,500 coins, about five times what a level-6 life has (§1.4).
+*Re-checked with the per-starter pace (2026-11-12, D-hunt-6):* measured from the world data, ring 1 → ring 8 is
+406 m on the surface, 412 m over the ground (18 m of climb). Sprinting the whole way (sprint has no stamina):
+Brother Ash (8.28 m/s) ~50 s, **25 s of slack (a third of the clock)**; Hexwick and Unit 7 (9.0) ~46 s, 29 s;
+Kappa (9.36) ~44 s, 31 s; Hinoko (9.9) ~42 s, 33 s. The clock stays 75 s. At a run only Hinoko still
+finishes (Ash's 5.52 m/s needs ~75 s); nobody has to run, so that's fine. **Skipstep is allowed in the race**
+(D-hunt-5): a blink is 10 m of the route at once, every 6 s (20 aether, which refills faster than that), so up
+to ~11 blinks (~110 m, ~12 s at a sprint) in a race. Rings are judged along the blink's own straight path:
+a blink through a ring counts it, a blink past one (more than the 4.5 m ring radius to the side) doesn't, and
+rings still fall in order. *T2 / H4:* waves
 are L9 (×1.96 HP, ×1.64 damage): Bonewalker 108 HP (slash 13, overhead 33), Gnawer 74 HP (bite 15, leap 30),
 every hit under the 35% cap (63) of a level-9 player's 180 HP. A level-9 player (×1.24 damage) on a T2 weapon
 does 50–66 DPS on paper (Hexquill II after heat, Sunbrand II, Carbine II after reloads), call it ~35 with
@@ -977,12 +1020,15 @@ skin, if it is ever wanted.
 ### 8.5 Starter stats (issue #9, D-balance-4; code `packages/shared/src/content/starters.ts`)
 
 A light class layer: each starter changes up to four numbers the server already computes in one place, each within
-about ±12% of the base, one strength paid for by a weakness. The server applies them (max HP; the movement
-budget and the dodge cooldown in `movement.ts`), the client predicts movement from the same row
-(`PlayerController.setStarterMove`), and the pick screen shows the words and Toughness / Speed / Dodge pips.
-The roll itself (4.5 m over 0.3 s, i-frames), jump, swim, horse and fall damage stay shared.
+about ±12% of the base (spell power ±15%), one strength paid for by a weakness. The server applies them (max HP;
+the movement budget and the dodge cooldown in `movement.ts`; spell power in `world/spells/SpellSystem.ts`), the
+client predicts movement from the same row (`PlayerController.setStarterMove`), and the pick screen shows the
+words and Toughness / Speed / Dodge / Magic pips. The roll itself (4.5 m over 0.3 s, i-frames), jump, swim, horse
+and fall damage stay shared. **Spell power** multiplies the damage of the starter's spells (Frostbloom, Wishfall)
+and the Glasswing Ward's shell; aether, costs, cooldowns, ranges and Frostbloom's slow are shared (the per-starter
+spell numbers are in §2.7). Magic pips: Hexwick 5, Hinoko 4, Kappa 3, Unit 7 2, Brother Ash 2.
 
-| Starter | Max HP × (L1 / L20) | Run / sprint m/s | Dodge cooldown | Spell power × (lead wires it) | Shown as | Leads (model) |
+| Starter | Max HP × (L1 / L20) | Run / sprint m/s | Dodge cooldown | Spell power × | Shown as | Leads (model) |
 |---|---|---|---:|---:|---|---|
 | Base (all before) | 1.00 (100 / 290) | 6 / 9 | 1.2 s | 1.00 | | |
 | Hexwick | 0.90 (90 / 261) | 6 / 9 | 1.1 s | 1.15 | Fragile, Strong magic | magic |
@@ -996,6 +1042,21 @@ and dodge cooldown vary (no stamina exists; carry slots, jump and fall damage st
 not hard classes; (3) fixed multipliers, so they grow with the level curve; (4) yes, words plus pips; (5) every
 gain is paid for, and the model checks that no starter is at least as good as another on every stat, that each
 leads at least one role and none leads all, and that no starter duel is more lopsided than 0.6.
+
+### 8.6 Controls: gamepad and touch numbers (D-controls-5, D-controls-6; code `apps/client/src/game/padMapping.ts`, `ui/touchOverlay.ts`)
+
+| What | Value |
+| --- | --- |
+| Stick dead zone (radial, rescaled) | 15 % default, Settings 5–35 % |
+| Response curve exponent | 1.8 default, Settings 1 (linear) – 3 |
+| Look stick at full throw, look speed 1 | 3.5 rad/s yaw (~200°/s), 2.2 rad/s pitch; Settings 0.3–3× |
+| Aim slowdown over a creep (never players, no pull) | look rate × 0.6 within 1.1 m of the crosshair ray, 2–60 m |
+| Triggers count as pressed | past 0.35 |
+| Select held for the players list | 400 ms |
+| Menu focus repeat | first after 380 ms, then every 110 ms |
+| Rumble | hit taken 140 ms (strength 0.35 + damage/60), kill 120–180 ms, own death 450 ms full |
+| Touch stick throw | 56 px; 12 % dead zone; sprint pushed past 1.35× the throw straight ahead |
+| Touch look | 0.0058 rad per px at sensitivity 1 (the mouse sensitivity setting scales it) |
 
 ---
 

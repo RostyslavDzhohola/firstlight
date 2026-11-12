@@ -449,7 +449,7 @@ export class MapPanel extends Panel {
       const s = project(v, t.dir, { x: 0, y: 0, z: 0 });
       if (!visible(s)) continue;
       star(ctx, s.x, s.y - 14, 8, "#ffd166");
-      label(`mission:${t.id}`, `★ ${t.label}`, { x: s.x, y: s.y - 14 }, "#ffe2a0", 2, 9);
+      if (t.label) label(`mission:${t.id}`, `★ ${t.label}`, { x: s.x, y: s.y - 14 }, "#ffe2a0", 2, 9);
     }
 
     // Party members.

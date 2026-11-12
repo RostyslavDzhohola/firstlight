@@ -220,6 +220,51 @@ describe("day/night", () => {
   });
 });
 
+describe("the second pass's air (D-gfx-worlds-6)", () => {
+  const at = (body: "arcadia" | "meridian" | "hollowmere", time: number, kill: Feature[] = [], weather: "clear" | "rain" = "clear") => {
+    const { env } = setup(body, kill);
+    env.timeOverride = time;
+    env.weatherOverride = { weather, intensity: weather === "clear" ? 0 : 1 };
+    run(env, weather === "clear" ? 2 : 30);
+    const cam = new THREE.PerspectiveCamera();
+    cam.position.set(0, 502, 0);
+    env.afterCamera(cam, 1 / 60);
+    return { shafts: atmo.shafts.value, mist: atmo.mist.value, flies: env.fx.flies.visible };
+  };
+
+  it("sun shafts and mist belong to the low sun; noon has neither on Arcadia", () => {
+    const noon = at("arcadia", 0.5);
+    expect(noon.shafts).toBeLessThan(0.05);
+    expect(noon.mist).toBeLessThan(0.1);
+    const dawn = at("arcadia", 0.17); // the sun 8° up, rising
+    expect(dawn.shafts).toBeGreaterThan(0.3);
+    expect(dawn.mist).toBeGreaterThan(noon.mist + 0.2);
+    const dusk = at("arcadia", 0.83);
+    expect(dusk.shafts).toBeGreaterThan(0.3);
+    expect(dusk.mist, "the mist is the morning's").toBeLessThan(dawn.mist);
+    expect(at("arcadia", 0).shafts, "no sun, no shafts").toBe(0);
+  });
+
+  it("Hollowmere's mist never lifts", () => {
+    expect(at("hollowmere", 0.5).mist).toBeGreaterThan(0.4);
+    expect(at("hollowmere", 0).mist).toBeGreaterThan(0.4);
+  });
+
+  it("fireflies come out at night on Arcadia and Hollowmere, not by day, not in rain, never on Meridian", () => {
+    expect(at("arcadia", 0).flies).toBe(true);
+    expect(at("hollowmere", 0).flies).toBe(true);
+    expect(at("arcadia", 0.5).flies).toBe(false);
+    expect(at("meridian", 0).flies).toBe(false);
+    expect(at("arcadia", 0, [], "rain").flies).toBe(false);
+  });
+
+  it("each has a kill switch that zeroes it", () => {
+    expect(at("arcadia", 0.17, ["shafts"]).shafts).toBe(0);
+    expect(at("hollowmere", 0.5, ["mist"]).mist).toBe(0);
+    expect(at("arcadia", 0, ["fireflies"]).flies).toBe(false);
+  });
+});
+
 describe("weather", () => {
   it("rain fills the box, wets surfaces over time and ripples water", () => {
     const { env } = setup("arcadia");
