@@ -26,7 +26,7 @@ import { ParticleSystem, type BurstOptions } from "../render/particles.ts";
 import { PerfOverlay, type PerfExtras } from "../render/PerfOverlay.ts";
 import { Environment } from "../render/environment.ts";
 import { MENU_GRADE } from "../render/post.ts";
-import { runProbe } from "../render/probe.ts";
+import { reprobe, runProbe, type ProbeWorld } from "../render/probe.ts";
 import { createRenderer, type RenderCtx } from "../render/renderer.ts";
 import { installShaderMonitor, shaderMonitorFrame, warmup } from "../render/warmup.ts";
 import { avatarChest, updateOccluderFade } from "../render/occluderFade.ts";
@@ -593,7 +593,7 @@ export class Game {
       setLoading(tuningLine, 0.82);
       const tuning = stepProgress(0.82, 0.9); // its warm-ups and measurements move the bar (D-load-1)
       try {
-        const r = await runProbe(this.ctx, updateWorld, (f) => setLoading(tuningLine, tuning.at(f)));
+        const r = await runProbe(this.ctx, this.probeWorld(() => alive("tuning graphics")), (f) => setLoading(tuningLine, tuning.at(f)));
         console.info(`[gfx] probe → ${r.tier}${r.valid ? "" : " (not saved)"}`, r);
         this.ctx.setProbedTier(r.tier, { persist: r.valid, extras: r.extras });
       } catch (e) {
@@ -664,7 +664,7 @@ export class Game {
     this.planet.eager = true;
     try {
       for (let polls = 0; ; polls++) {
-        const p = this.player.pos;
+        const p = this.bench ? this.bench.focus : this.player.pos; // the warm-up's focus (updateWorldForWarmup)
         this.planet.update(p.x, p.y, p.z, this.ctx.camera, performance.now());
         const b = this.planet.buildState(p.x, p.y, p.z);
         const r = worldReady(b, performance.now() - t0, capMs);
@@ -714,6 +714,8 @@ export class Game {
     try {
       await avatarTexturesFollowTier(this.ctx.tier); // a session that started on Low: 1024² now (D-load-6)
       this.packs.setTier(this.ctx.tier); // a tier without a live pack: the shipped textures, before the warm-up
+      // A tier or grass change cleared the grass: back before the warm-up, so it draws what play will.
+      await this.buildWorld(WORLD_TOPUP_CAP_MS, null, () => {});
       await warmup(this.ctx, {
         frames: 3,
         hooks: [this.warmupHook()],
@@ -747,6 +749,17 @@ export class Game {
     this.particles.update(1 / 60, this.ctx.camera.position, performance.now());
   }
 
+  /**
+   * The world as the probe draws it: streamed before every frame, and after each tier switch the
+   * grass that tier sizes filled back in (up to WORLD_TOPUP_CAP_MS) before its warm-up and measurement.
+   */
+  private probeWorld(alive: () => void): ProbeWorld {
+    return {
+      update: () => this.updateWorldForWarmup(),
+      settle: () => this.buildWorld(WORLD_TOPUP_CAP_MS, null, alive),
+    };
+  }
+
   private async reprobe() {
     // Only from live play (performance panel): leave menus, logged-out and notice screens alone.
     if (!this.running || this.travelling) return;
@@ -759,16 +772,17 @@ export class Game {
     const tuning = stepProgress(0.5, 0.75);
     const shaders = warmupProgress(0.75);
     try {
-      const r = await runProbe(this.ctx, undefined, (f) => setLoading(tuningLine, tuning.at(f)));
-      console.info(`[gfx] probe → ${r.tier}${r.valid ? "" : " (not saved)"}`, r);
-      this.ctx.setProbedTier(r.tier, { persist: r.valid, clearPinned: true, extras: r.extras });
-      await avatarTexturesFollowTier(this.ctx.tier); // D-load-6
-      this.packs.setTier(this.ctx.tier);
-      await warmup(this.ctx, {
-        frames: 3,
+      // The probe and the warm-up draw the world as play does: each tier's grass back in before it
+      // is warmed and measured (it used to run on bare ground; review finding 1).
+      await reprobe(this.ctx, {
+        world: this.probeWorld(() => {}),
         hooks: [this.warmupHook()],
-        label: "reprobe",
-        onProgress: (p) => {
+        afterTier: async () => {
+          await avatarTexturesFollowTier(this.ctx.tier); // D-load-6
+          this.packs.setTier(this.ctx.tier);
+        },
+        onTuning: (f) => setLoading(tuningLine, tuning.at(f)),
+        onWarmup: (p) => {
           const line = shaders.update(p);
           setLoading(line.text, line.frac);
         },

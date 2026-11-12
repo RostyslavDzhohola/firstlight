@@ -12,7 +12,7 @@
 
 import { isSoftwareRenderer, type RenderCtx } from "./renderer.ts";
 import { beginManualFrame, decideProbe, decideUltra, percentile, PROBE_MIN_GPU, type TimestampSource } from "./timing.ts";
-import { warmup } from "./warmup.ts";
+import { warmup, type WarmupHooks, type WarmupProgress } from "./warmup.ts";
 import { EXTRA_COSTS, extrasBudget, extrasRegression, keepExtras, planExtras, type CostModel } from "./extrasPlan.ts";
 import { TIER_TABLE, type Extra, type Tier } from "./quality.ts";
 
@@ -33,6 +33,17 @@ export interface ProbeResult {
   extras: Extra[];
   extrasGpuP50: number | null;
   ms: number;
+}
+
+/**
+ * The world the probe draws. Each tier it tries rebuilds what the tier sizes (the grass clears every
+ * cell): `settle` waits, bounded, until that is back, so the stage's warm-up compiles it and its
+ * measurement draws it; `update` streams the world before every frame, as play does (planet
+ * graphics review, finding 1).
+ */
+export interface ProbeWorld {
+  update(): void;
+  settle?(): Promise<void>;
 }
 
 const nextFrame = () => new Promise<number>((r) => requestAnimationFrame((t) => r(t)));
@@ -92,7 +103,7 @@ async function measure(ctx: RenderCtx, ms: number, beforeFrame?: () => void, onF
  * Never throws: failures come back as an invalid Medium result. `onProgress(0–1)` moves through the
  * warm-up and the measurement (and the re-probe at High, when there is one), monotonic, ending at 1.
  */
-export async function runProbe(ctx: RenderCtx, beforeFrame?: () => void, onProgress?: (frac: number) => void, costs: CostModel = EXTRA_COSTS): Promise<ProbeResult> {
+export async function runProbe(ctx: RenderCtx, world?: ProbeWorld | (() => void), onProgress?: (frac: number) => void, costs: CostModel = EXTRA_COSTS): Promise<ProbeResult> {
   let shown = 0;
   const report = (f: number) => {
     const next = Math.max(shown, Math.min(1, f));
@@ -101,14 +112,14 @@ export async function runProbe(ctx: RenderCtx, beforeFrame?: () => void, onProgr
     onProgress?.(shown);
   };
   try {
-    return await probeTier(ctx, beforeFrame, (a, b) => (f) => report(a + (b - a) * f), costs);
+    return await probeTier(ctx, typeof world === "function" ? { update: world } : world, (a, b) => (f) => report(a + (b - a) * f), costs);
   } finally {
     report(1);
   }
 }
 
 /** The probe itself; `part(a, b)` reports a stage's own 0–1 as a…b of the probe's bar. */
-async function probeTier(ctx: RenderCtx, beforeFrame: (() => void) | undefined, part: (a: number, b: number) => (f: number) => void, costs: CostModel): Promise<ProbeResult> {
+async function probeTier(ctx: RenderCtx, world: ProbeWorld | undefined, part: (a: number, b: number) => (f: number) => void, costs: CostModel): Promise<ProbeResult> {
   const t0 = performance.now();
   if (isSoftwareRenderer(ctx.gpuName)) {
     return { tier: "low", valid: true, method: "software", gpuP50: null, rafP50: 0, highGpuP50: null, cpuP50: null, extrasCpuP50: null, extrasRafP50: null, extras: [], extrasGpuP50: null, ms: 0 };
@@ -117,10 +128,15 @@ async function probeTier(ctx: RenderCtx, beforeFrame: (() => void) | undefined, 
   const hidden = (): ProbeResult => ({ tier: "medium", valid: false, method: "invalid", gpuP50: null, rafP50: 0, highGpuP50: null, cpuP50: null, extrasCpuP50: null, extrasRafP50: null, extras: [], extrasGpuP50: null, ms: performance.now() - t0 });
   const frame = () => {
     watch.check();
-    beforeFrame?.();
+    world?.update();
+  };
+  /** Switch to a stage's tier and wait for the world it sizes before warming and measuring it. */
+  const stage = async (tier: Tier, extras: readonly Extra[]) => {
+    ctx.setTier(tier, { persist: false, auto: true, extras });
+    await world?.settle?.();
   };
   try {
-    ctx.setTier("medium", { persist: false, auto: true, extras: [] }); // plain Medium, whatever was saved
+    await stage("medium", []); // plain Medium, whatever was saved
     await warmup(ctx, { frames: 3, beforeFrame: frame, label: "probe", onProgress: (p) => part(0, 0.45)(p.frac) });
     const m = await measure(ctx, 2000, frame, part(0.45, 0.7));
     // Drop the first few frames (pipeline creation tails).
@@ -133,7 +149,7 @@ async function probeTier(ctx: RenderCtx, beforeFrame: (() => void) | undefined, 
     let extrasCpuP50: number | null = null;
     let extrasRafP50: number | null = null;
     if (d.valid && d.reprobeHigh) {
-      ctx.setTier("high", { persist: false, auto: true, extras: [] });
+      await stage("high", []);
       await warmup(ctx, { frames: 3, beforeFrame: frame, label: "probe", onProgress: (p) => part(0.7, 0.85)(p.frac) });
       const h = await measure(ctx, 1200, frame, part(0.85, 0.9));
       if (!h.visible || !watch.check()) return hidden(); // not a High that was never measured
@@ -145,7 +161,7 @@ async function probeTier(ctx: RenderCtx, beforeFrame: (() => void) | undefined, 
       const budgetMs = extrasBudget(d.rafP50, TIER_TABLE.medium.gpuTargetMs); // the busiest scenes' tail too
       const plan = planExtras({ gpuMs: d.gpuP50, cpuMs: cpuP50, frameMs: d.rafP50, budgetMs }, costs);
       if (plan.extras.length) {
-        ctx.setTier("medium", { persist: false, auto: true, extras: plan.extras });
+        await stage("medium", plan.extras);
         await warmup(ctx, { frames: 3, beforeFrame: frame, label: "probe", onProgress: (p) => part(0.9, 0.95)(p.frac) });
         const v = await measure(ctx, 1200, frame, part(0.95, 1)); // as long as the High re-probe
         if (!v.visible || !watch.check()) return hidden();
@@ -167,4 +183,28 @@ async function probeTier(ctx: RenderCtx, beforeFrame: (() => void) | undefined, 
   } finally {
     watch.stop();
   }
+}
+
+/**
+ * The live re-probe (the performance panel's "Re-run probe"), behind the loading screen: the probe
+ * on the world as play draws it, the tier it picked applied, then the full warm-up. Every tier the
+ * probe tries and the one it ends on clear what the tier sizes (the grass), so each warm-up and
+ * measurement waits for `world.settle` and streams with `world.update`: nothing the next frames of
+ * play draw is first compiled there (planet graphics review, finding 1).
+ */
+export async function reprobe(ctx: RenderCtx, o: {
+  world: ProbeWorld;
+  hooks?: WarmupHooks[];
+  /** After the probed tier is applied, before its warm-up (what follows the tier: textures, packs). */
+  afterTier?: () => Promise<void> | void;
+  onTuning?: (frac: number) => void;
+  onWarmup?: (p: WarmupProgress) => void;
+}): Promise<ProbeResult> {
+  const r = await runProbe(ctx, o.world, o.onTuning);
+  console.info(`[gfx] probe → ${r.tier}${r.valid ? "" : " (not saved)"}`, r);
+  ctx.setProbedTier(r.tier, { persist: r.valid, clearPinned: true, extras: r.extras });
+  await o.afterTier?.();
+  await o.world.settle?.();
+  await warmup(ctx, { frames: 3, hooks: o.hooks, beforeFrame: () => o.world.update(), label: "reprobe", onProgress: o.onWarmup });
+  return r;
 }
