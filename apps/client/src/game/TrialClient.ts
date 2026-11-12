@@ -4,6 +4,7 @@
 // a ring passed or a shard taken, the clock starting, the finish, a failure.
 
 import "../ui/trial.css";
+import { objectPos, objectsOn } from "@firstlight/shared/content/world";
 import { el } from "../ui/dom.ts";
 import { TrialMarkers } from "../world/TrialMarkers.ts";
 import type { Game } from "./Game.ts";
@@ -20,10 +21,14 @@ class TrialClient implements ClientSystem {
   private readonly off: () => void;
   private last = "";
   private prev: TrialSeen | null = null;
+  /** Walk-in objective spots on this body (rings, shards, kite panels), for the e2e hook's snapshot. */
+  readonly trialSpots = new Map<string, { pos: [number, number, number] }>();
 
   constructor(game: Game) {
     this.game = game;
     this.markers = new TrialMarkers(game.ctx.scene, game.bodyId, game.planet.terrain);
+    const terrain = game.planet.terrain;
+    for (const o of objectsOn(game.bodyId)) if (o.look === "ring" || o.look === "shard") this.trialSpots.set(o.id, { pos: objectPos(o, (x, y, z) => terrain.groundHeight(x, y, z)) });
     const top = game.hud.root.querySelector<HTMLElement>(".fl-hud__top") ?? game.hud.root;
     this.root = el("section", "fl-trial fl-holo fl-corners", top);
     this.root.dataset.e2e = "trial-hud";

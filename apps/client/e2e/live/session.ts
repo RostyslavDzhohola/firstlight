@@ -348,6 +348,10 @@ function makeCommands(player: Player, consoleErrors: string[]): { commands: Reco
         return { label: "the pad", pick: (x) => x.pad ?? null, arrived: (x) => near(3)(x.pad ?? null) };
       case "guide":
         return { label: `the guide ${s.guide?.name ?? ""}`.trim(), pick: (x) => x.guide ?? null, arrived: (x) => near(2.5)(x.guide ?? null) };
+      case "curator":
+        return { label: `${s.curator?.name ?? "Sela Marchbank"} (Portus Plaza)`, pick: (x) => x.curator ?? null, arrived: (x) => near(2.5)(x.curator ?? null) };
+      case "vault":
+        return { label: "the Gleam Vault", pick: (x) => x.curator?.vault ?? null, arrived: (x) => near(2)(x.curator?.vault ?? null) };
       case "mission":
         return {
           label: s.mission?.title ? `the mission marker (${s.mission.title})` : "a mission marker",
@@ -383,7 +387,7 @@ function makeCommands(player: Player, consoleErrors: string[]): { commands: Reco
         return { label: `player ${p.name}`, pick: (x) => x.players?.find((o) => o.id === p.id) ?? null, arrived: (x) => near(3)(x.players?.find((o) => o.id === p.id) ?? null) };
       }
       default:
-        throw new Error(`unknown target "${spec ?? ""}": pad, guide, mission, gate, dummy, hostile, npc:<id|kind|name>, player:<name>`);
+        throw new Error(`unknown target "${spec ?? ""}": pad, guide, curator, vault, mission, gate, dummy, hostile, npc:<id|kind|name>, player:<name>`);
     }
   };
 
@@ -1049,14 +1053,16 @@ function makeCommands(player: Player, consoleErrors: string[]): { commands: Reco
   const talk = async (): Promise<string> => {
     localOnly("talk (it takes missions)");
     const s0 = await player.snap();
-    if (!s0.guide) throw new Error("no guide here: each planet's guide stands by its main pad (Lark on Arcadia)");
+    // A planet's guide, or in Portus Sela Marchbank (the Three Gleams' trials).
+    const who = s0.guide ? "guide" : s0.curator ? "curator" : null;
+    if (!who) throw new Error("no guide here: each planet's guide stands by its main pad (Lark on Arcadia); Sela Marchbank in Portus Plaza gives the trials");
     const pre = await ensureLock();
-    const g = goal("guide", s0);
+    const g = goal(who, s0);
     if (!g.arrived(s0)) {
       const how = await cruise(g.pick, g.arrived, { timeoutMs: 45_000 });
-      if (how !== "arrived") throw new Error(`couldn't reach the guide: ${how}`);
+      if (how !== "arrived") throw new Error(`couldn't reach ${g.label}: ${how}`);
     }
-    await player.face((x) => x.guide?.bearing ?? null, 20);
+    await player.face((x) => (who === "guide" ? x.guide : x.curator)?.bearing ?? null, 20);
     const panel = page.locator(".fl-overlay").filter({ visible: true }).last();
     for (let i = 0; i < 3 && !(await panel.count()); i++) {
       await player.tap("KeyE");
@@ -1113,7 +1119,7 @@ function makeCommands(player: Player, consoleErrors: string[]): { commands: Reco
       const s = await player.snap();
       const q = mine(s);
       if (!q || q.done || s.player?.dead) break;
-      if (q.progress !== progress || (q.type !== "hunt" && (q.surface ?? Infinity) < closest - 10)) {
+      if (q.progress !== progress || (q.type !== "hunt" && q.type !== "defend" && (q.surface ?? Infinity) < closest - 10)) {
         progress = q.progress;
         closest = Math.min(closest, q.surface ?? Infinity);
         gainedAt = Date.now();
@@ -1134,6 +1140,29 @@ function makeCommands(player: Player, consoleErrors: string[]): { commands: Reco
       if (s.zone?.server === "safe" && q.type === "hunt" && (q.surface ?? 0) > 30) {
         // Out of the pad's ring first (attacks don't count inside).
         await walkOut();
+        continue;
+      }
+      // Defend: light the beacon (E), then hold its ring and fight what the waves bring.
+      if (q.type === "defend") {
+        const at = spot(s);
+        const live = s.trial && s.trial.id === q0.id && (s.trial.state === "running" || s.trial.state === "paused");
+        const foe = live ? threat(s) : undefined;
+        if (foe && (at?.surface ?? 0) < 12) {
+          fights++;
+          if (await fightBeat(s, foe)) attacks++;
+          continue;
+        }
+        if (at && at.surface > (live ? 6 : 2.2)) {
+          const how = await cruise(spot, (x) => (spot(x)?.surface ?? 99) <= (live ? 4 : 2), { timeoutMs: Math.min(60_000, until - Date.now()), stop: (x) => (hpShare(x) < 0.45 && tonicReady(x) ? "thirsty" : null) });
+          if (how !== "arrived" && how !== "thirsty") log.push(`walk: ${how}`);
+          continue;
+        }
+        if (!live) {
+          await player.tap("KeyE");
+          await page.waitForTimeout(900);
+          continue;
+        }
+        await page.waitForTimeout(500);
         continue;
       }
       const prey = q.type === "hunt" ? pointedAt(s) : undefined;
