@@ -5,7 +5,7 @@
 
 import type { Express, RequestHandler } from "express";
 import type { Identity } from "../auth/identity.ts";
-import { retention, sessionStats, testSessionCount } from "../db/index.ts";
+import { agentSessionCount, retention, sessionStats, testSessionCount } from "../db/index.ts";
 import { liveRooms } from "../social/index.ts";
 import { bars, esc, fmtDuration, page, PAGE_HEADERS, pct } from "./html.ts";
 import type { OpsDeps } from "./admin.ts";
@@ -14,22 +14,24 @@ const DAY = 86_400_000;
 const BODY_NAMES: Record<string, string> = { portus: "Portus", arcadia: "Arcadia", hollowmere: "Hollowmere", meridian: "Meridian" };
 
 /** Real players online now, per body; our test accounts are counted apart (D-home-6). */
-function onlineNow(): { total: number; perBody: Record<string, number>; test: number } {
+function onlineNow(): { total: number; perBody: Record<string, number>; test: number; agents: number } {
   const perBody: Record<string, number> = {};
   let total = 0;
   let test = 0;
+  let agents = 0;
   for (const r of liveRooms) {
     if (r.metadata?.loadtest || r.metadata?.sandbox) continue; // admin sandboxes aren't play (D-admin-3)
     let n = 0;
     for (const a of r.actors.values()) {
       if (a.identity.loadtest) continue;
       if (a.identity.test) test++;
+      else if (a.identity.agent) agents++; // AI agents (D-agents-1): counted apart from people
       else n++;
     }
     perBody[r.bodyDef.id] = (perBody[r.bodyDef.id] ?? 0) + n;
     total += n;
   }
-  return { total, perBody, test };
+  return { total, perBody, test, agents };
 }
 
 export function mountStats(app: Express, deps: OpsDeps): void {
@@ -41,8 +43,9 @@ export function mountStats(app: Express, deps: OpsDeps): void {
     const ret = retention(deps.db, now);
     const online = onlineNow();
     const tests = testSessionCount(deps.db, now - 7 * DAY);
+    const agentWeek = agentSessionCount(deps.db, now - 7 * DAY);
     if (req.query.format === "json") {
-      res.set("Cache-Control", "no-store").json({ online, today, week, retention: ret, testAccounts: { onlineNow: online.test, week: tests } });
+      res.set("Cache-Control", "no-store").json({ online, today, week, retention: ret, testAccounts: { onlineNow: online.test, week: tests }, agents: { onlineNow: online.agents, week: agentWeek } });
       return;
     }
     const who = (res.locals.identity as Identity).name;
@@ -74,7 +77,7 @@ export function mountStats(app: Express, deps: OpsDeps): void {
 <section><h2>Online now by body</h2>${bars(Object.entries(online.perBody).map(([k, v]) => [BODY_NAMES[k] ?? k, v]))}</section>
 </div>
 <section><h2>Return rate by first-play day</h2>${cohortRows ? `<table><tr><th>First played</th><th class="num">Players</th><th class="num">Back next day</th><th class="num">Back on day 7</th></tr>${cohortRows}</table>` : `<p class="muted">No sessions yet.</p>`}
-<p class="muted">Every figure here is real players only. Our test accounts (D-home-6): ${online.test} online now, ${tests.sessions} session(s) by ${tests.players} account(s) in 7 days.</p>
+<p class="muted">Every figure here is real players only. Our test accounts (D-home-6): ${online.test} online now, ${tests.sessions} session(s) by ${tests.players} account(s) in 7 days. AI agents (D-agents-1): ${online.agents} online now, ${agentWeek.sessions} session(s) by ${agentWeek.players} account(s) in 7 days.</p>
 <p class="muted">Days are UTC. Today: ${today.open} session(s) still open, ${fmtDuration(today.totalPlayMs)} played in ended sessions, ${today.deaths} death(s).</p></section>`;
     res.set(PAGE_HEADERS).send(page({ title: "Stats", active: "stats", who: `Signed in as ${who}`, body }));
   });

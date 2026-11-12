@@ -43,6 +43,12 @@ export const env = {
    *  no voice signalling, no TURN credentials, no radio in the shop or in piles. FEATURE_VOICE=1 turns
    *  it back on (with the client's VITE_FEATURE_VOICE=1). Mutable for tests. */
   voice: process.env.FEATURE_VOICE === "1",
+  /** AI agents may play (D-agents-2): on outside production; in production only with AGENTS_ENABLED=1.
+   *  AGENTS_ENABLED=0 turns them off anywhere. Mutable for tests (world/agents.ts reads it per request). */
+  agents: process.env.AGENTS_ENABLED === undefined || process.env.AGENTS_ENABLED === "" ? process.env.NODE_ENV !== "production" : process.env.AGENTS_ENABLED === "1",
+  /** Agents playing at once from one address, and in one room copy (D-agents-3). */
+  agentsPerIp: num("AGENTS_PER_IP", 4),
+  agentsPerRoom: num("AGENTS_PER_ROOM", 8),
 };
 
 /**

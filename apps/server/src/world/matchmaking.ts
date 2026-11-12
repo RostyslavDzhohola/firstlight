@@ -10,6 +10,7 @@ import { identityIsAdmin } from "./adminMode.ts";
 import type { BodyRoomMetadata } from "./BodyRoom.ts";
 import { characterRepo } from "./characters.ts";
 import { CLOSE, hub } from "./hub.ts";
+import { agentSeated, ROOM_FULL_OF_AGENTS, roomTakesAgent } from "./agents.ts";
 
 export interface MatchmakingLimits {
   maxClients: number;
@@ -28,6 +29,8 @@ export interface PlayInput {
   loadtest?: boolean;
   /** The admin's sandbox copy of the body (D-admin-3; enterSandbox first). */
   sandbox?: boolean;
+  /** An AI agent (D-agents-3): only into a copy that has room for one more agent. */
+  agent?: boolean;
 }
 
 const locks = new Map<string, Promise<unknown>>();
@@ -131,17 +134,22 @@ export async function play(identity: Identity, input: PlayInput, limits: Matchma
 
     mine.sort((a, b) => b.clients - a.clients);
     let target = undefined as (typeof mine)[number] | undefined;
+    // Agents only into a copy with room for one more agent (D-agents-3); people aren't asked.
+    const agent = !!input.agent && !loadtest;
+    const takes = (r: (typeof mine)[number]) => !agent || roomTakesAgent(r.roomId, identity.userId);
 
     if (input.partyLeaderRoomId) {
       const leader = mine.find((r) => r.roomId === input.partyLeaderRoomId);
-      if (leader && leader.clients + 1 <= limits.maxClients && !leader.locked) target = leader;
+      if (leader && leader.clients + 1 <= limits.maxClients && !leader.locked && takes(leader)) target = leader;
     }
     if (!target) {
       target = mine.find((r) =>
-        !r.locked && (partySize > 1 || loadtest ? r.clients + partySize <= limits.maxClients : r.clients < limits.soloFillLimit),
+        !r.locked && takes(r) && (partySize > 1 || loadtest ? r.clients + partySize <= limits.maxClients : r.clients < limits.soloFillLimit),
       );
     }
     if (!target) {
+      // No copy may take this agent and no new copy may open: a refusal, not the people's queue.
+      if (agent && mine.length >= limits.maxCopiesPerBody && mine.some((r) => !takes(r))) return { ok: false, ...ROOM_FULL_OF_AGENTS };
       if (mine.length >= limits.maxCopiesPerBody && !loadtest) return enqueue(identity.userId, 0);
       const used = new Set(mine.map((r) => (r.metadata as BodyRoomMetadata).copy));
       let copy = 0;
@@ -149,6 +157,7 @@ export async function play(identity: Identity, input: PlayInput, limits: Matchma
       target = await matchMaker.createRoom("body", { body: input.body, copy, loadtest });
     }
     queue.delete(identity.userId);
+    if (agent) agentSeated(identity.userId, target.roomId);
     const reservation = await matchMaker.reserveSeatFor(target, { body: input.body, starter: input.starter, palette: input.palette, look: input.look }, identity);
     return { ok: true, reservation: reservation as unknown as import("@firstlight/shared/net/protocol").SeatReservation };
   });

@@ -11,6 +11,10 @@ export interface Identity {
   account?: boolean;
   /** One of our own automation accounts (D-home-6): plays normally, never on a public surface. */
   test?: boolean;
+  /** An AI agent plays this character (D-agents-1): labelled for everyone, kept off the people's boards and counts. */
+  agent?: boolean;
+  /** The address an agent's seat was asked from (the per-address agent cap, world/agents.ts). */
+  agentIp?: string;
 }
 
 /** Request facts a verifier may use (IP bans; our test tools' marker). */
@@ -18,6 +22,8 @@ export interface VerifyContext {
   ip?: string | null;
   /** The request's x-loadtest-secret header: with the right secret, a guest is flagged as a test account. */
   toolSecret?: string | null;
+  /** The request says an AI agent is playing (/api/play only): a guest account is flagged for good. */
+  agent?: boolean;
 }
 
 export type TokenVerifier = (token: string, ctx?: VerifyContext) => Promise<Identity | null>;

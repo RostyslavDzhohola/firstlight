@@ -115,6 +115,9 @@ importers:
       '@colyseus/sdk':
         specifier: 0.18.5
         version: 0.18.5(@colyseus/core@0.18.18)(typescript@7.0.2)(zod@4.6.6)
+      '@firstlight/agent-kit':
+        specifier: workspace:*
+        version: link:../../packages/agent-kit
       '@types/better-sqlite3':
         specifier: 9.6.0
         version: 9.6.0
@@ -128,11 +131,29 @@ importers:
         specifier: 4.23.15
         version: 4.23.15
 
+  packages/agent-kit:
+    dependencies:
+      '@colyseus/sdk':
+        specifier: 0.18.5
+        version: 0.18.5(@colyseus/core@0.18.18)(typescript@7.0.2)(zod@4.6.6)
+      '@firstlight/shared':
+        specifier: workspace:*
+        version: link:../shared
+
   packages/shared:
     dependencies:
       '@colyseus/schema':
         specifier: 5.0.36
         version: 5.0.36(typescript@7.0.2)
+
+  tools/agent:
+    dependencies:
+      '@firstlight/agent-kit':
+        specifier: workspace:*
+        version: link:../../packages/agent-kit
+      '@firstlight/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
 
   tools/bots:
     dependencies:

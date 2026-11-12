@@ -18,6 +18,7 @@ import { characterRepo, withTx } from "./characters.ts";
 import { SWIM_FLOAT } from "@firstlight/shared/planet/water";
 import { structureCollider, type StructureCollider } from "@firstlight/shared/planet/town";
 import { CLOSE, hub, type HubRoom } from "./hub.ts";
+import { agentJoined } from "./agents.ts";
 
 /** Ban lookup for reconnects; set at boot when the database is available. */
 export const bannedCheck: { current: (userId: string) => boolean } = { current: () => false };
@@ -510,6 +511,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     p.palette = char.palette;
     p.look = starterLook(char.starter, char.look);
     p.flags = (auth.admin ? PF.ADMIN : 0) | (auth.loadtest ? PF.LOADTEST : 0) | (char.dead ? PF.DEAD : 0);
+    p.agent = !!auth.agent; // an AI agent plays this one: every client labels it (D-agents-1)
+    if (auth.agent) agentJoined(auth.userId);
     const a: PlayerActor = {
       kind: "player",
       id: client.sessionId,

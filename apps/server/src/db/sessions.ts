@@ -3,6 +3,7 @@
 
 import { parseJson, stmt, type Db } from "./game-db.ts";
 import { IS_TEST } from "./testAccounts.ts";
+import { IS_AGENT } from "./agentAccounts.ts";
 
 const DAY = 86_400_000;
 
@@ -79,7 +80,7 @@ export function retention(db: Db, now = Date.now(), days = 30): Retention {
   const today = Math.floor(now / DAY);
   const rows = stmt(
     db,
-    `WITH real AS (SELECT user_id, started_at FROM session_log s WHERE NOT ${IS_TEST("s.user_id")}),
+    `WITH real AS (SELECT user_id, started_at FROM session_log s WHERE NOT ${IS_TEST("s.user_id")} AND NOT ${IS_AGENT("s.user_id")}),
           first AS (SELECT user_id, MIN(started_at) / ${DAY} AS d0 FROM real GROUP BY user_id),
           days AS (SELECT DISTINCT user_id, started_at / ${DAY} AS d FROM real)
      SELECT f.d0 AS d0, COUNT(*) AS cohort,
@@ -128,7 +129,7 @@ export function testSessionCount(db: Db, since = 0): { sessions: number; players
 export function sessionStats(db: Db, since = 0): SessionStats {
   const rows = stmt(
     db,
-    `SELECT user_id, started_at, ended_at, body_time_json, deaths, max_level, backend, tier FROM session_log s WHERE started_at >= ? AND NOT ${IS_TEST("s.user_id")}`,
+    `SELECT user_id, started_at, ended_at, body_time_json, deaths, max_level, backend, tier FROM session_log s WHERE started_at >= ? AND NOT ${IS_TEST("s.user_id")} AND NOT ${IS_AGENT("s.user_id")}`,
   ).all(since) as {
     user_id: string;
     started_at: number;

@@ -217,6 +217,15 @@ export const MIGRATIONS: readonly string[] = [
     changed  INTEGER NOT NULL
   );
   `,
+  // 8 (lane agents): guest accounts an AI agent plays (D-agents-1): a row here is the account's
+  // is_agent flag, a side table like test_account (idempotent, renumberable).
+  `
+  CREATE TABLE IF NOT EXISTS agent_account (
+    user_id    TEXT PRIMARY KEY,
+    source     TEXT NOT NULL,
+    marked_at  INTEGER NOT NULL
+  );
+  `,
 ];
 
 /** Apply every migration newer than the database's user_version, each in its own transaction. */

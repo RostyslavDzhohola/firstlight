@@ -8,6 +8,7 @@ import { getAccount } from "./accounts.ts";
 import { loadCharacter } from "./characters.ts";
 import { stmt, tx, type Db } from "./game-db.ts";
 import { isTestAccount, markTestAccount } from "./testAccounts.ts";
+import { isAgentAccount, markAgentAccount } from "./agentAccounts.ts";
 
 export interface LinkResult {
   /** Whose live character survived: the guest's, the account's, or none existed. */
@@ -37,6 +38,9 @@ export function linkAccounts(db: Db, fromUserId: string, toUserId: string, now =
     const fromTest = isTestAccount(db, fromUserId);
     const keepTest = fromTest && opts.targetIsNew === true;
     if (keepTest) markTestAccount(db, toUserId, "link", now);
+    // An agent's guest saved to a new account stays an agent's (D-agents-1); merging into an older
+    // account doesn't flag that account.
+    if (opts.targetIsNew === true && isAgentAccount(db, fromUserId)) markAgentAccount(db, toUserId, "link", now);
 
     // account: delete the guest row first so its display name is free for the target.
     let displayName = to?.displayName ?? null;
