@@ -156,6 +156,11 @@ export type ClientMessages = {
   onboarding: { action: "skip" };
   /** Cast a spell from the spellbook (content/spells.ts; at most 5 a second). Refusals answer `denied {action: "cast", reason, req?}`. */
   cast: CastMsg;
+  /**
+   * Ask for the spells already under way near you (sent once the client's handlers exist, like
+   * `supportSync`): each Glasswing Ward that is up comes back as a `spell` event with `late`.
+   */
+  spellSync: Record<string, never>;
 };
 
 /**
@@ -216,6 +221,11 @@ export interface SpellEvent {
   amount?: number;
   from?: string;
   broke?: boolean;
+  /**
+   * A snapshot of something already under way when you arrived (the answer to `spellSync`): a
+   * ward's `cast` with the time and shell it has left. Draw it; it is not a new cast.
+   */
+  late?: boolean;
 }
 
 // ---- Server → client events (broadcast or direct) -------------------------------------------

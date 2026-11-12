@@ -3,7 +3,7 @@ import { WEAPONS } from "../../packages/shared/src/content/weapons.ts";
 import { npcDef } from "../../packages/shared/src/content/npcs.ts";
 import { STARTER_STATS, starterMaxHp } from "../../packages/shared/src/content/starters.ts";
 import { checks } from "./bands.ts";
-import { clampHits, closingTime, creatureTimeline, damageBy, dodgeFactor, gatedTier, hitTimeline, progression, pvpCell, SERVER_CHARGE_ALLOWANCE, SERVER_RATE_ALLOWANCE, timeToKill } from "./model.ts";
+import { clampHits, closingTime, creatureTimeline, damageBy, dodgeFactor, gatedTier, hitTimeline, novaHeadshotLevels, progression, pvpCell, SERVER_CHARGE_ALLOWANCE, SERVER_RATE_ALLOWANCE, spellPeaks, spellRows, timeToKill } from "./model.ts";
 
 const w = (id: string) => WEAPONS.find((x) => x.id === id)!;
 
@@ -200,6 +200,32 @@ describe("duels", () => {
 
   it("rolling: i-frames on half the cooldowns raise effective HP", () => {
     expect(dodgeFactor(1.25)).toBeCloseTo(1 / (1 - 0.1), 5);
+  });
+});
+
+describe("spells and the starters' spell power", () => {
+  it("each starter's spells are the base numbers times its spell power, rounded like a landed hit", () => {
+    const row = (name: string, level: number) => spellRows().find((r) => r.name === name && r.level === level)!;
+    // Level 9, base: Frostbloom 24 × 1.24 = 29.76, Wishfall 60 × 1.24 = 74.4, ward 30% of max HP.
+    expect(row("Kappa", 9)).toMatchObject({ power: 1, frostbloom: 30, wishfall: 74, ward: 54 });
+    expect(row("Hexwick", 9)).toMatchObject({ power: 1.15, frostbloom: 34, wishfall: 86, ward: 56 });
+    expect(row("Brother Ash", 9)).toMatchObject({ power: 0.9, frostbloom: 27, wishfall: 67, ward: 55 });
+    // Below a spell's level there is nothing to show.
+    expect(row("Hexwick", 3)).toMatchObject({ frostbloom: 29, wishfall: 0, ward: 0 });
+  });
+
+  it("no spell is a one-shot and the opening pair never kills, whoever casts at whomever", () => {
+    const p = spellPeaks();
+    expect(p.hitOfBase).toBeCloseTo(79 / 150, 6); // Hexwick's Wishfall at level 6
+    expect(p.hitOfFrail).toBeCloseTo(79 / 132, 6); // …on Hinoko
+    expect(p.pairOfFrail).toBeLessThan(1);
+    expect(p.instantOfBase).toBeLessThan(0.4);
+  });
+
+  it("the known dip: a Frostbloom with a Stillshot headshot, at the levels a new tier opens", () => {
+    expect(novaHeadshotLevels(1)).toEqual([6, 12]);
+    expect(novaHeadshotLevels(1.15)).toEqual([6, 7, 12, 13]);
+    expect(novaHeadshotLevels(0.9)).toEqual([6]);
   });
 });
 

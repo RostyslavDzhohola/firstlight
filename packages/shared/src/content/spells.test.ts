@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { damageMult, maxHp } from "./progression.ts";
-import { AETHER, aetherAt, castBlock, FROSTBLOOM, GLASSWING, SPELL_BY_ID, SPELL_INDEX, SPELLS, spellDamage, WISHFALL } from "./spells.ts";
-import { WEAPON_BY_ID } from "./weapons.ts";
+import { AETHER, aetherAt, castBlock, FROSTBLOOM, GLASSWING, SPELL_BY_ID, SPELL_INDEX, SPELLS, spellDamage, wardShell, WISHFALL } from "./spells.ts";
+import { STARTER_STATS, starterMaxHp, starterSpellPower } from "./starters.ts";
+import { STARTERS, WEAPON_BY_ID } from "./weapons.ts";
 
 describe("spell catalogue (content.md §2.7)", () => {
   it("lists the four spells in their append-only order, each on its own key", () => {
@@ -77,5 +78,34 @@ describe("spell catalogue (content.md §2.7)", () => {
   it("the ward is worth 30% of max HP", () => {
     expect(GLASSWING.absorbPer100MaxHp).toBe(30);
     expect(Math.round((GLASSWING.absorbPer100MaxHp / 100) * maxHp(9))).toBe(54);
+    expect(wardShell(maxHp(9))).toBe(54);
+  });
+
+  // Spell power (content §8.5): the starter's multiplier on spell damage and the ward's shell.
+  it("spell power multiplies damage and the ward's shell, and nothing else", () => {
+    expect(STARTERS.map((_, i) => starterSpellPower(i))).toEqual([1.15, 0.9, 1, 0.95, 1.05]);
+    expect(starterSpellPower(99)).toBe(1); // an unknown starter is the base
+    expect(spellDamage(60, 6, 1.15)).toBeCloseTo(60 * 1.15 * 1.15);
+    expect(spellDamage(60, 6)).toBeCloseTo(spellDamage(60, 6, 1));
+    expect(wardShell(180, 1.15)).toBe(62);
+    // Hexwick's own ward: 30% of its 162 HP at level 9, × 1.15.
+    expect(wardShell(starterMaxHp(0, 9), starterSpellPower(0))).toBe(56);
+  });
+
+  it("with spell power no spell is a one-shot either: Wishfall's centre is at most 53% of a base body, 60% of the most fragile starter, always under a Stillshot headshot", () => {
+    const top = Math.max(...STARTER_STATS.map((s) => s.spellPower ?? 1));
+    const frail = (l: number) => Math.min(...STARTERS.map((_, i) => starterMaxHp(i, l)));
+    const tierAt = (l: number) => (l >= 12 ? 2 : l >= 6 ? 1 : 0);
+    for (let l = SPELL_BY_ID.get("wishfall")!.level; l <= 20; l++) {
+      const star = spellDamage(WISHFALL.damage, l, top);
+      expect(star / maxHp(l), `level ${l}`).toBeLessThan(0.53);
+      expect(star / frail(l), `level ${l}`).toBeLessThan(0.61);
+      const still = WEAPON_BY_ID.get("stillshot")!.tiers[tierAt(l)]!;
+      expect(star, `level ${l}`).toBeLessThan(still.damage * damageMult(l) * (still.headMult ?? 1.5));
+      // The opening pair alone never kills, whoever casts at whomever.
+      expect(spellDamage(FROSTBLOOM.damage + WISHFALL.damage, l, top), `level ${l}`).toBeLessThan(frail(l) * 0.85);
+    }
+    // Frostbloom lands without warning, so it stays far under §0's 40% telegraph line for every caster.
+    for (let l = SPELL_BY_ID.get("frostbloom")!.level; l <= 20; l++) expect(spellDamage(FROSTBLOOM.damage, l, top) / maxHp(l)).toBeLessThan(0.25);
   });
 });

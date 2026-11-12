@@ -2,8 +2,9 @@
 // changes a handful of numbers the server already computes in one place, each within about ±12% of
 // the shared base, with one strength paid for by one weakness so no starter is strictly best
 // (tools/balance checks it). The server applies them (max HP in BodyRoom/combat, run budget and dodge
-// cooldown in movement.ts) and the client predicts movement from the same rows (PlayerController), so
-// movement validation never fights the client. Indexed like STARTERS (append-only).
+// cooldown in movement.ts, spell power in world/spells/SpellSystem.ts) and the client predicts
+// movement from the same rows (PlayerController), so movement validation never fights the client.
+// Indexed like STARTERS (append-only).
 
 import { maxHp } from "./progression.ts";
 import { STARTERS } from "./weapons.ts";
@@ -20,8 +21,9 @@ export interface StarterStats {
   /** Seconds between dodge rolls (base 1.2). The roll itself (4.5 m over 0.3 s) is shared. */
   dodgeCooldown: number;
   /**
-   * Optional spell-power / aether multiplier for the spells lane's aether pool and spells
-   * (lane/spells, content/spells.ts). Applied by the lead at integration; nothing reads it here.
+   * Spell power: a multiplier on the damage of the caster's spells (Frostbloom, Wishfall) and on
+   * the Glasswing Ward's shell (content §2.7, §8.5). Aether, costs, cooldowns, ranges and the
+   * slow are the same for everyone. Absent = 1. Read through `starterSpellPower`.
    */
   spellPower?: number;
   /** Two or three plain words for the pick screen. */
@@ -29,7 +31,7 @@ export interface StarterStats {
 }
 
 export const STARTER_STATS: readonly StarterStats[] = [
-  // Hexwick: fragile, strong magic (the spell multiplier is the lead's to wire), a quick roll.
+  // Hexwick: fragile, strong magic (spells hit 15% harder, the ward holds 15% more), a quick roll.
   { id: "hexwick", hp: 0.9, speed: 1.0, dodgeCooldown: 1.1, spellPower: 1.15, traits: ["Fragile", "Strong magic"] },
   // Brother Ash: the sturdy one; slower to run and to roll.
   { id: "ash", hp: 1.12, speed: 0.92, dodgeCooldown: 1.35, spellPower: 0.9, traits: ["Sturdy", "Slow"] },
@@ -54,6 +56,11 @@ export function starterMaxHp(starter: number, level: number): number {
   return Math.round(maxHp(level) * starterStats(starter).hp);
 }
 
+/** The starter's spell power (1 = the shared base): see `StarterStats.spellPower`. */
+export function starterSpellPower(starter: number): number {
+  return starterStats(starter).spellPower ?? 1;
+}
+
 /** The starter's movement: run / sprint (m/s) and the dodge cooldown (s). */
 export function starterMove(starter: number): { run: number; sprint: number; dodgeCooldown: number } {
   const s = starterStats(starter);
@@ -61,13 +68,13 @@ export function starterMove(starter: number): { run: number; sprint: number; dod
 }
 
 /**
- * Pick-screen bars (1–5 pips) for Toughness, Speed and Dodge: 3 pips is the shared base, and the
- * starter furthest from the base on that stat gets 1 or 5, so the differences read at a glance.
+ * Pick-screen bars (1–5 pips) for Toughness, Speed, Dodge and Magic: 3 pips is the shared base, and
+ * the starter furthest from the base on that stat gets 1 or 5, so the differences read at a glance.
  */
-export function starterBars(starter: number): { toughness: number; speed: number; dodge: number } {
-  const ratios = (s: StarterStats) => [s.hp, s.speed, BASE_MOVE.dodgeCooldown / s.dodgeCooldown] as const;
+export function starterBars(starter: number): { toughness: number; speed: number; dodge: number; magic: number } {
+  const ratios = (s: StarterStats) => [s.hp, s.speed, BASE_MOVE.dodgeCooldown / s.dodgeCooldown, s.spellPower ?? 1] as const;
   const mine = ratios(starterStats(starter));
-  const spread = [0, 1, 2].map((k) => Math.max(1e-9, ...STARTER_STATS.map((s) => Math.abs(ratios(s)[k]! - 1))));
+  const spread = [0, 1, 2, 3].map((k) => Math.max(1e-9, ...STARTER_STATS.map((s) => Math.abs(ratios(s)[k]! - 1))));
   const pips = (k: number) => Math.max(1, Math.min(5, 3 + Math.round((2 * (mine[k]! - 1)) / spread[k]!)));
-  return { toughness: pips(0), speed: pips(1), dodge: pips(2) };
+  return { toughness: pips(0), speed: pips(1), dodge: pips(2), magic: pips(3) };
 }

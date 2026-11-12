@@ -9,6 +9,7 @@
 // - Wishfall: a warning ring now, combat's explode() when it lands (heavy destruction, the caster
 //   takes half, Prism Bubbles and walls shelter as from any blast).
 // - Glasswing Ward: CombatHost.wards; dealDamage takes an attacker's damage from the shell first.
+// Spell damage and the ward's shell scale with the caster's starter (spell power, content §8.5).
 //
 // Aether and cooldowns are kept per account at process level, like the support timers: a body hop
 // or a new room copy doesn't refill or reset them. A server restart does (they are short).
@@ -16,9 +17,10 @@
 import type { Client } from "@colyseus/core";
 import { z } from "zod";
 import {
-  AETHER, aetherAt, FROSTBLOOM, GLASSWING, SKIPSTEP, SPELL_BY_ID, SPELL_IDS, SPELL_INDEX, SPELLS, spellDamage, WISHFALL,
+  AETHER, aetherAt, FROSTBLOOM, GLASSWING, SKIPSTEP, SPELL_BY_ID, SPELL_IDS, SPELL_INDEX, SPELLS, spellDamage, wardShell, WISHFALL,
   type SpellDef, type SpellId,
 } from "@firstlight/shared/content/spells";
+import { starterSpellPower } from "@firstlight/shared/content/starters";
 import type { CastMsg, SpellEvent, YouState } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
 import { sandboxed } from "../../sandbox.ts";
@@ -101,11 +103,14 @@ export class SpellSystem implements RoomSystem {
   readonly stars: Star[] = [];
   /** Session id → the last numbered cast (`cast.req`) dealt with, cast or refused (review 5). */
   private readonly handled = new Map<string, number>();
+  /** Session id → the last `spellSync` answered (one a second). */
+  private readonly synced = new Map<string, number>();
   private lastPrune = 0;
 
   constructor(room: BodyRoom) {
     this.room = room;
     room.onMessage("cast", castSchema, (c: Client, m: CastMsg) => this.cast(c, m));
+    room.onMessage("spellSync", z.object({}).passthrough().optional(), (c: Client) => this.snapshot(c));
     room.host.wards = { absorb: (target, amount, attacker) => this.absorb(target, amount, attacker) };
   }
 
@@ -216,6 +221,19 @@ export class SpellSystem implements RoomSystem {
     return true;
   }
 
+  /**
+   * The caster's spell power (content §8.5): the starter's multiplier on spell damage and on the
+   * ward's shell. Every spell number that depends on who casts goes through here and `damage`.
+   */
+  private power(a: PlayerActor): number {
+    return starterSpellPower(a.char.starter);
+  }
+
+  /** What a spell of `base` damage deals for this caster: the level curve and the starter's spell power. */
+  private damage(a: PlayerActor, base: number): number {
+    return spellDamage(base, a.char.level, this.power(a));
+  }
+
   private *actors(): Iterable<Actor> {
     yield* this.room.host.players();
     yield* this.room.host.npcs();
@@ -225,7 +243,7 @@ export class SpellSystem implements RoomSystem {
     const host = this.room.host;
     const at = actorPos(a);
     const chest = lift(at, 1.0);
-    const dmg = spellDamage(FROSTBLOOM.damage, a.char.level);
+    const dmg = this.damage(a, FROSTBLOOM.damage);
     const slowed: string[] = [];
     // Prism Bubble shells shelter as from any blast: who (and which props) they cover is decided
     // before any shell is charged, and each shell in the way pays once (review 1).
@@ -336,7 +354,7 @@ export class SpellSystem implements RoomSystem {
   private wishfall(a: PlayerActor, d: V3, m: CastMsg, now: number): true | string {
     const at = this.starTarget(a, d, m);
     if (!at) return "blocked"; // no clear ground in range: nothing is spent
-    const star: Star = { id: starSeq++, owner: a, at, landAt: now + WISHFALL.telegraphS * 1000, damage: spellDamage(WISHFALL.damage, a.char.level) };
+    const star: Star = { id: starSeq++, owner: a, at, landAt: now + WISHFALL.telegraphS * 1000, damage: this.damage(a, WISHFALL.damage) };
     this.stars.push(star);
     this.send({ spell: "wishfall", phase: "cast", by: a.id, x: at[0], y: at[1], z: at[2], r: WISHFALL.radiusM, ms: WISHFALL.telegraphS * 1000, id: star.id });
     return true;
@@ -351,7 +369,7 @@ export class SpellSystem implements RoomSystem {
   }
 
   private glasswing(a: PlayerActor, now: number) {
-    const max = Math.round((GLASSWING.absorbPer100MaxHp / 100) * a.state.maxHp);
+    const max = wardShell(a.state.maxHp, this.power(a));
     const ms = GLASSWING.durationS * 1000;
     this.wards.set(a.id, { hp: max, max, until: now + ms });
     const at = actorPos(a);
@@ -379,6 +397,26 @@ export class SpellSystem implements RoomSystem {
     a.youDirty = true;
     const at = actorPos(a);
     this.send({ spell: "glasswing", phase: "end", by: sessionId, x: at[0], y: at[1], z: at[2], broke });
+  }
+
+  /**
+   * `spellSync`: what was already under way when this client arrived. Every ward that is up within
+   * the spell events' reach comes as its `cast` again, with the time and shell it has left and
+   * `late` (draw it, don't announce it). Stars are not included: their whole life is 1.2 s.
+   */
+  private snapshot(c: Client) {
+    const me = this.room.actors.get(c.sessionId);
+    const now = Date.now();
+    if (!me || now - (this.synced.get(c.sessionId) ?? 0) < 1000) return;
+    this.synced.set(c.sessionId, now);
+    const from = actorPos(me);
+    for (const [id, w] of this.wards) {
+      const a = this.room.actors.get(id);
+      if (!a || a.dead || w.until <= now) continue;
+      const at = actorPos(a);
+      if (dist3(from, at) > SPELL_NET.radius) continue;
+      c.send("spell", { spell: "glasswing", phase: "cast", by: id, x: at[0], y: at[1], z: at[2], ms: w.until - now, hp: Math.round(w.hp), late: true });
+    }
   }
 
   // ------------------------------------------------------------------------------------ the room
@@ -414,12 +452,14 @@ export class SpellSystem implements RoomSystem {
   onPlayerLeave(sessionId: string) {
     this.wards.delete(sessionId);
     this.handled.delete(sessionId);
+    this.synced.delete(sessionId);
   }
 
   dispose() {
     this.stars.length = 0;
     this.wards.clear();
     this.handled.clear();
+    this.synced.clear();
     if (this.room.host) this.room.host.wards = undefined;
   }
 }

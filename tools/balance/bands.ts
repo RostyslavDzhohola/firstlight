@@ -7,8 +7,9 @@ import { maxHp } from "../../packages/shared/src/content/progression.ts";
 import { STARTER_STATS, starterMaxHp } from "../../packages/shared/src/content/starters.ts";
 import {
   affordability, BURST_FAMILIES, bossRows, COMBAT_FAMILIES, creatureRows, dominations, duelResults, median, progression,
-  pvpCell, PVP_LEVELS, roleLeaders, weaponTable, type Family,
+  pvpCell, PVP_LEVELS, roleLeaders, spellPeaks, weaponTable, type Family,
 } from "./model.ts";
+import { WISHFALL } from "../../packages/shared/src/content/spells.ts";
 
 export interface Check {
   id: string;
@@ -50,6 +51,11 @@ export const PACK_MARGIN: Record<string, number> = { regular: 1, heavy: 1, elite
 /** Tonics a solo player drinks in a beast fight, by planet (HP each): two of the planet's drop. */
 export const BEAST_TONICS_HP: Record<string, number> = { arcadia: 80, hollowmere: 240, meridian: 240 };
 export const BOSS_MIN: [number, number] = [3, 8];
+/** Starters' spell power (content §8.5): the same light layer as HP and speed. */
+export const SPELL_POWER_BAND: [number, number] = [0.85, 1.15];
+/** §0's telegraph floor, held for spells too: a hit of this share of base HP or more warns for at least 1.2 s. */
+export const TELEGRAPH_SHARE = 0.4;
+export const TELEGRAPH_S = 1.2;
 
 export function checks(): Check[] {
   const out: Check[] = [];
@@ -137,6 +143,14 @@ export function checks(): Check[] {
     for (const [k, v] of [["hp", s.hp], ["speed", s.speed]] as const) add({ id: `starter.${s.id}.${k}`, what: `${s.id} ${k} multiplier`, value: fmt(v), band: "0.85–1.15", ok: inBand(v, 0.85, 1.15), source: "issue #9, D-balance-4 (light layer)" });
     add({ id: `starter.${s.id}.dodge`, what: `${s.id} dodge cooldown (s)`, value: fmt(s.dodgeCooldown), band: "1.0–1.4", ok: inBand(s.dodgeCooldown, 1.0, 1.4), source: "issue #9, D-balance-4" });
   }
+  // --- spells (content §2.7) with the starters' spell power: the worst case over casters and levels
+  for (const s of STARTER_STATS) add({ id: `starter.${s.id}.spell`, what: `${s.id} spell power multiplier`, value: fmt(s.spellPower ?? 1), band: `${SPELL_POWER_BAND[0]}–${SPELL_POWER_BAND[1]}`, ok: inBand(s.spellPower ?? 1, ...SPELL_POWER_BAND), source: "content §8.5, D-balance-4 (light layer)" });
+  const peaks = spellPeaks();
+  add({ id: "spell.oneshot", what: "Largest spell hit ÷ the most fragile starter's HP (any caster, any level)", value: fmt(peaks.hitOfFrail), band: `≤ ${BIGGEST_HIT} (the largest weapon hit)`, ok: peaks.hitOfFrail <= BIGGEST_HIT + 1e-9, source: "content §2.7 (no one-shots), D-spells-9" });
+  add({ id: "spell.pair", what: "Opening Frostbloom + Wishfall centre ÷ the most fragile starter's HP", value: fmt(peaks.pairOfFrail), band: "< 1 (the pair alone never kills)", ok: peaks.pairOfFrail < 1, source: "content §2.7, D-spells-9" });
+  add({ id: "spell.instant", what: "Largest unwarned spell hit (Frostbloom) ÷ base HP", value: fmt(peaks.instantOfBase), band: `< ${TELEGRAPH_SHARE}`, ok: peaks.instantOfBase < TELEGRAPH_SHARE, source: "content §0 (telegraph floors)" });
+  add({ id: "spell.telegraph", what: "Wishfall's warning (s) for a hit of up to " + fmt(peaks.hitOfBase) + " of base HP", value: fmt(WISHFALL.telegraphS), band: peaks.hitOfBase >= TELEGRAPH_SHARE ? `≥ ${TELEGRAPH_S}` : "any", ok: peaks.hitOfBase < TELEGRAPH_SHARE || WISHFALL.telegraphS >= TELEGRAPH_S, source: "content §0 (≥ 40% HP warns ≥ 1.2 s), D-spells-6" });
+
   const dom = dominations();
   add({ id: "starter.dominance", what: "Starters at least as good as another on every stat", value: dom.length ? dom.map((d) => d.join(" > ")).join(", ") : "none", band: "none", ok: dom.length === 0, source: "issue #9" });
   const leaders = roleLeaders();

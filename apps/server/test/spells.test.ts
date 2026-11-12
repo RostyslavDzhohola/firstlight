@@ -6,8 +6,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Room } from "@colyseus/sdk";
 import { BODIES, nearSafeZone } from "@firstlight/shared";
-import { AETHER, aetherAt, FROSTBLOOM, GLASSWING, SKIPSTEP, SPELLS, spellDamage, WISHFALL, type SpellId, type SpellsYou } from "@firstlight/shared/content/spells";
+import { AETHER, aetherAt, FROSTBLOOM, GLASSWING, SKIPSTEP, SPELLS, spellDamage, wardShell, WISHFALL, type SpellId, type SpellsYou } from "@firstlight/shared/content/spells";
 import { maxHp } from "@firstlight/shared/content/progression";
+import { starterMaxHp, starterSpellPower } from "@firstlight/shared/content/starters";
 import type { SpellEvent } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
 import { townDir } from "@firstlight/shared/planet/townFrame";
@@ -20,7 +21,7 @@ import { moveLimits } from "../src/world/movement.ts";
 import { applyMoveEffect } from "../src/world/npc/effects.ts";
 import { SpellSystem } from "../src/world/spells/SpellSystem.ts";
 import { supportOf } from "../src/world/support.ts";
-import { safeLeave, startServer, waitFor } from "./helpers.ts";
+import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 import { adminBot, flat, me, nearPad, offset, openSpotOutside, serverRoom, spawnNpc, type V } from "./npc-bots.ts";
 
 let game: Game;
@@ -49,6 +50,9 @@ const hpOf = (r: Room): number => actor(r).state.hp;
 const until = (label: string, cond: () => boolean, ms?: number) => waitFor(cond, ms).catch(() => {
   throw new Error(`timed out waiting for: ${label}`);
 });
+
+/** The admin bots are Unit 7 (starter 3): its spell power (0.95) is in every number they deal. */
+const U7 = starterSpellPower(3);
 
 const spells = (r: Room): SpellSystem => serverRoom(r).systems.find((s) => s instanceof SpellSystem) as SpellSystem;
 /** These tests wait on the server's real timers (cooldowns, the star's fall); the machine is shared. */
@@ -350,8 +354,8 @@ describe("Frostbloom", () => {
       const tough = await spawnNpc(a, "linewyrm", offset(base, 2.5, 2, R), { level: 3, roam: 0, instant: true });
       const weak = await spawnNpc(a, "hopbit", offset(base, 2, -2, R), { level: 1, roam: 0, instant: true });
       const toughHp = npc(a, tough).state.hp;
-      const dmg = Math.round(spellDamage(FROSTBLOOM.damage, 3));
-      expect(dmg).toBe(25);
+      const dmg = Math.round(spellDamage(FROSTBLOOM.damage, 3, U7));
+      expect(dmg).toBe(24); // 24 × 1.06 × Unit 7's 0.95
       expect(npc(a, weak).state.hp).toBeLessThanOrEqual(dmg);
 
       cast(a, "frostbloom");
@@ -435,7 +439,7 @@ describe("Frostbloom", () => {
     const sheepHp = npc(a, sheep).state.hp;
     const field = supportOf(serverRoom(a))!.bubbles;
     const shell = field.add(inside.sessionId, pos(inside), 2, 150, Date.now() + 60_000);
-    const dmg = Math.round(spellDamage(FROSTBLOOM.damage, 3));
+    const dmg = Math.round(spellDamage(FROSTBLOOM.damage, 3, U7));
     cast(a, "frostbloom");
     await until("frostbloom cast", () => h.events.some((e) => e.spell === "frostbloom"));
     const e = h.events.find((x) => x.spell === "frostbloom")!;
@@ -450,7 +454,7 @@ describe("Frostbloom", () => {
     expect(maxHp(3) - hpOf(open)).toBe(dmg);
     expect(e.hit).toContain(open.sessionId);
     // The shell paid for what it stopped: the nova's flat damage, once.
-    expect(150 - shell.hp).toBeCloseTo(spellDamage(FROSTBLOOM.damage, 3), 5);
+    expect(150 - shell.hp).toBeCloseTo(spellDamage(FROSTBLOOM.damage, 3, U7), 5);
   }, SLOW);
 
   it("a crate inside a Prism Bubble is sheltered from the nova too; without the shell it cracks (review 1)", async () => {
@@ -486,7 +490,7 @@ describe("Frostbloom", () => {
     await until("frostbloom cast", () => h.events.some((e) => e.spell === "frostbloom"));
     expect(sys.hp[i]).toBe(hp0);
     expect(shell.hp).toBeLessThan(150);
-    expect(shell.hp).toBeGreaterThanOrEqual(150 - spellDamage(FROSTBLOOM.damage, 3)); // charged once
+    expect(shell.hp).toBeGreaterThanOrEqual(150 - spellDamage(FROSTBLOOM.damage, 3, U7) - 1e-6); // charged once
     // The control: the same cast with the shell gone cracks it.
     field.clear();
     await refill(a, h);
@@ -528,8 +532,8 @@ describe("Wishfall", () => {
     }
     await until("impact", () => h.events.some((e) => e.spell === "wishfall" && e.phase === "impact"), 8000);
     expect(Date.now() - t0).toBeGreaterThanOrEqual(WISHFALL.telegraphS * 1000 - 60);
-    // 60 × 1.15 at the centre, falling to 25% at the 4 m edge: both stood 1–2 m off it.
-    const full = spellDamage(WISHFALL.damage, 6);
+    // 60 × 1.15 × Unit 7's 0.95 at the centre, falling to 25% at the 4 m edge: both stood 1–2 m off it.
+    const full = spellDamage(WISHFALL.damage, 6, U7);
     const wyrmLost = wyrmHp - npc(a, wyrm).state.hp;
     const playerLost = maxHp(6) - hpOf(b);
     for (const lost of [wyrmLost, playerLost]) {
@@ -689,6 +693,62 @@ describe("Wishfall", () => {
   }, SLOW);
 });
 
+describe("starters' spell power (content §8.5)", () => {
+  /** An admin bot of a given starter, placed and levelled like `adminBot`. */
+  async function starterBot(name: string, starter: number, at: readonly number[], level: number): Promise<Room> {
+    const r = await joinAs(game, name, "arcadia", { starter }, "admin");
+    rooms.push(r);
+    await waitFor(() => !!me(r));
+    r.send("admin", { cmd: "level", args: { level } });
+    r.send("admin", { cmd: "teleport", args: { x: at[0], y: at[1], z: at[2] } });
+    r.send("admin", { cmd: "unprotect" });
+    await until(`${name} placed`, () => flat(pos(r), at) < 2 && me(r).level === level && !(me(r).flags & (PF.SAFE | PF.PROTECTED)));
+    return r;
+  }
+
+  // Hexwick (starter 0) casts 15% harder, Brother Ash (starter 1) 10% softer: damage and the ward's shell.
+  for (const [starter, name, power] of [[0, "Hexwick", 1.15], [1, "Brother Ash", 0.9]] as const) {
+    it(`${name}: Frostbloom, Wishfall and the ward's shell are × ${power}`, async () => {
+      expect(starterSpellPower(starter)).toBe(power);
+      const L = 9;
+      const base = openSpotOutside("arcadia", 14);
+      const a = await starterBot("caster", starter, base, L);
+      const b = await adminBot(game, rooms, "target", "arcadia", offset(base, 3, 0, R), L); // Unit 7: base HP
+      const h = listen(a);
+      expect(actor(a).state.maxHp).toBe(starterMaxHp(starter, L));
+
+      // Frostbloom: flat in the ring.
+      await refill(a, h);
+      cast(a, "frostbloom");
+      await until("frostbloom cast", () => h.events.some((e) => e.spell === "frostbloom"));
+      const frost = Math.round(spellDamage(FROSTBLOOM.damage, L, power));
+      expect(frost).toBe(starter === 0 ? 34 : 27); // 24 × 1.24 = 29.76 at the base
+      expect(maxHp(L) - hpOf(b)).toBe(frost);
+
+      // Wishfall on the target's own feet: the full centre damage.
+      const before = hpOf(b);
+      await refill(a, h);
+      cast(a, "wishfall", dirTo(pos(a), pos(b)), pos(b));
+      await until("ring", () => spells(a).stars.length === 1);
+      expect(spells(a).stars[0]!.damage).toBeCloseTo(spellDamage(WISHFALL.damage, L, power), 6);
+      await until("impact", () => h.events.some((e) => e.spell === "wishfall" && e.phase === "impact"), 8000);
+      const star = Math.round(spellDamage(WISHFALL.damage, L, power));
+      expect(star).toBe(starter === 0 ? 86 : 67); // 60 × 1.24 = 74.4 at the base
+      expect(before - hpOf(b)).toBe(star);
+
+      // The ward: 30% of the caster's own max HP, times the same power.
+      await refill(a, h);
+      cast(a, "glasswing");
+      const shell = wardShell(starterMaxHp(starter, L), power);
+      expect(shell).toBe(starter === 0 ? 56 : 55); // Hexwick: 30% of 162 × 1.15; Ash: 30% of 202 × 0.90
+      await until("ward up", () => h.you?.ward?.max === shell);
+      expect(h.events.find((e) => e.spell === "glasswing" && e.phase === "cast")).toMatchObject({ hp: shell });
+      // What isn't scaled: the cost, the slow.
+      expect(actor(b).npcFx!.slow).toBe(FROSTBLOOM.slow);
+    }, SLOW);
+  }
+});
+
 describe("Glasswing Ward", () => {
   it("soaks 30% of max HP from attackers, lets the rest through, breaks, and runs out by itself", async () => {
     // A long shell, so a slow machine can't let it run out mid-test (its 4 s are the next test's).
@@ -699,8 +759,8 @@ describe("Glasswing Ward", () => {
       const b = await adminBot(game, rooms, "gunner", "arcadia", offset(base, 6, 0, R), 9);
       const h = listen(a);
       await refill(a, h);
-      const shell = Math.round((GLASSWING.absorbPer100MaxHp / 100) * maxHp(9));
-      expect(shell).toBe(54);
+      const shell = wardShell(maxHp(9), U7);
+      expect(shell).toBe(51); // 30% of 180, × Unit 7's 0.95
       cast(a, "glasswing");
       await until("ward up", () => h.you?.ward?.hp === shell);
       expect(h.events.find((e) => e.spell === "glasswing" && e.phase === "cast")).toMatchObject({ by: a.sessionId, ms: GLASSWING.durationS * 1000, hp: shell });
@@ -730,6 +790,45 @@ describe("Glasswing Ward", () => {
       b.send("fire", { slot: 0, ox: o[0], oy: o[1], oz: o[2], dx: d[0], dy: d[1], dz: d[2], t: Date.now() });
       await until("hurt", () => hpOf(a) < hp);
       expect(h.you!.ready[index("glasswing")]).toBeGreaterThan(Date.now() + 10_000);
+    } finally {
+      restore();
+    }
+  }, SLOW);
+
+  it("someone who joins while a ward is up is told about it: who, how long it has left and its shell", async () => {
+    const restore = shorten(GLASSWING, "durationS", 60);
+    try {
+      const base = openSpotOutside("arcadia", 14);
+      const a = await adminBot(game, rooms, "warded", "arcadia", base, 9);
+      const b = await adminBot(game, rooms, "gunner", "arcadia", offset(base, 6, 0, R), 9);
+      const h = listen(a);
+      await refill(a, h);
+      cast(a, "glasswing");
+      await until("ward up", () => !!h.you?.ward);
+      // It has taken a hit by the time the newcomer arrives.
+      dealDamage(serverRoom(a).host, actor(b), actor(a), 11, false);
+      await until("shell hit", () => h.you?.ward?.hp === wardShell(maxHp(9), U7) - 11);
+
+      // The newcomer missed the cast. Its client asks once its handlers are up (as the game client does).
+      const late = await adminBot(game, rooms, "latecomer", "arcadia", offset(base, 9, 0, R), 9);
+      const seen: SpellEvent[] = [];
+      late.onMessage("spell", (m: SpellEvent) => seen.push(m));
+      late.send("spellSync", {});
+      await until("the ward's snapshot", () => seen.length > 0);
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).toMatchObject({ spell: "glasswing", phase: "cast", by: a.sessionId, hp: wardShell(maxHp(9), U7) - 11, late: true });
+      expect(seen[0]!.ms).toBeGreaterThan(30_000);
+      expect(seen[0]!.ms).toBeLessThan(60_000);
+      expect(d3([seen[0]!.x, seen[0]!.y, seen[0]!.z], pos(a))).toBeLessThan(0.5);
+      // Asking again at once is not answered (one a second), and a ward that has ended is not sent.
+      late.send("spellSync", {});
+      await sleep(300);
+      expect(seen).toHaveLength(1);
+      spells(a).wards.clear();
+      await sleep(900);
+      late.send("spellSync", {});
+      await sleep(400);
+      expect(seen).toHaveLength(1);
     } finally {
       restore();
     }
