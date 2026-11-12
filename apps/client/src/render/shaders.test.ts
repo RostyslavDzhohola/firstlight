@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
 import { mrt, output, velocity } from "three/tsl";
 import { emptyStored, TIER_TABLE, resolveSettings, type StoredGfx, type Tier } from "./quality.ts";
-import { radialFogNode, skyBackgroundNode } from "./atmosphere.ts";
+import { atmo, fogNodeFor, radialFogNode, skyBackgroundNode } from "./atmosphere.ts";
 import { terrainMaterialFor } from "./terrainMaterial.ts";
 import { waterMaterialFor } from "./water.ts";
 import { withClouds } from "./clouds.ts";
@@ -36,6 +36,8 @@ const settingsFor = (t: Tier, webgpu = true) => resolveSettings(t, false, webgpu
 interface Built {
   vertex: string;
   fragment: string;
+  /** The uniform nodes the fragment stage reads. */
+  uniforms: Set<unknown>;
 }
 
 function build(renderer: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE.Camera, mesh: THREE.Object3D): Built {
@@ -57,7 +59,7 @@ function build(renderer: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE
   b.fogNode = scene.fogNode ?? null;
   b.environmentNode = null;
   b.build();
-  return { vertex: b.vertexShader, fragment: b.fragmentShader };
+  return { vertex: b.vertexShader, fragment: b.fragmentShader, uniforms: new Set((b.uniforms.fragment as { node: unknown }[]).map((u) => u.node)) };
 }
 
 /**
@@ -156,6 +158,29 @@ for (const backendName of ["webgpu", "webgl2"] as const) {
       mesh.receiveShadow = true;
       scene.add(mesh);
       expectClean(build(renderer, scene, camera, mesh));
+    });
+
+    it("fog: with the far haze off, fogged shaders are built from the plain graph, without the aerial tint (review finding 3)", () => {
+      const fogged = (aerial: boolean) => {
+        const scene = sceneWithLights();
+        scene.fogNode = fogNodeFor(resolveSettings("medium", false, true, stored, new Set(aerial ? [] : (["aerial"] as const))).on);
+        const mesh = new THREE.Mesh(terrainGeometry(), terrainMaterialFor(settingsFor("medium")));
+        mesh.receiveShadow = true;
+        scene.add(mesh);
+        const b = build(renderer, scene, camera, mesh);
+        expectClean(b);
+        return b;
+      };
+      const tinted = fogged(true);
+      const plain = fogged(false);
+      expect(tinted.uniforms.has(atmo.aerialAmt)).toBe(true);
+      expect(tinted.uniforms.has(atmo.aerial)).toBe(true);
+      // `?noaerial` used to zero the amount and leave the tint's luminance, colour, distance ramp and mix in every fogged shader.
+      expect(plain.uniforms.has(atmo.aerialAmt)).toBe(false);
+      expect(plain.uniforms.has(atmo.aerial)).toBe(false);
+      expect(plain.fragment.length).toBeLessThan(tinted.fragment.length);
+      // The rest of the fog is all there: the height fog and the mist layer.
+      for (const u of [atmo.fogDensity, atmo.fogHeight, atmo.mist, atmo.mistTop]) expect(plain.uniforms.has(u)).toBe(true);
     });
 
     it("water: levels 0–3", () => {
