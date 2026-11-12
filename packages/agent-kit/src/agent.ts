@@ -265,8 +265,18 @@ export class FirstlightAgent {
     while (!this.me() && Date.now() - t0 < 10_000 && this.room === room) await sleep(25);
     const me = this.me();
     if (!me) throw new AgentError("join", "joined, but the character never appeared in the room state");
-    // The private half (XP, coins, inventory) comes as a message right after: the first look has it.
-    while (!this.you && Date.now() - t0 < 10_000 && this.room === room) await sleep(25);
+    // The private half (XP, coins, inventory) comes as a `you` message right after the join: the
+    // first look should have it. If it was sent before this handler existed, ask again: cancelling a
+    // logout that isn't running changes nothing and makes the server send `you`.
+    const t1 = Date.now();
+    let asked = false;
+    while (!this.you && Date.now() - t1 < 6000 && this.room === room) {
+      if (!asked && Date.now() - t1 > 500) {
+        asked = true;
+        room.send("logout", { start: false });
+      }
+      await sleep(25);
+    }
     this.walker.place(me.x, me.y, me.z);
     this.displayName = me.name;
     this.status = "playing";
