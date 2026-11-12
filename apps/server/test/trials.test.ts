@@ -13,6 +13,7 @@ import { TRIAL_RULES } from "../src/world/quests/trials.ts";
 import { npcSystemOf } from "../src/world/npc/index.ts";
 import { progressStore } from "../src/world/quests/store.ts";
 import { QuestSystem } from "../src/world/quests/QuestSystem.ts";
+import { characterRepo } from "../src/world/characters.ts";
 import { safeLeave, startServer, waitFor } from "./helpers.ts";
 import { bot, harness, invIds, me, objAt, offPad, serverRoom, sleep, tpAndWait, until, wrapRoom, type Bot } from "./quest-helpers.ts";
 
@@ -280,6 +281,40 @@ describe("collect (T3, The Patient Gleam; A4, Kite Season)", () => {
     await gather(a, "T3");
     await until("done", () => mission(a, "T3").done);
     expect(a.last("missionDone")).toEqual({ id: "T3", xp: 2400, coins: 350 });
+  });
+
+  it("the last shard pays before it says done; a failed save keeps the completion pending (past the clock) and pays once", async () => {
+    TRIAL_RULES.timeScale = 0.03; // 7.2 s clock
+    const a = await take("unlucky_gatherer", ["T3"], "meridian");
+    const repo = characterRepo.current;
+    const save = repo.save;
+    let failing = false;
+    repo.save = (userId, data) => {
+      if (failing && userId === "unlucky_gatherer") throw new Error("disk I/O error (test)");
+      save.call(repo, userId, data);
+    };
+    try {
+      await gather(a, "T3", 0, 7);
+      const clockEnds = Date.now() + 7200;
+      failing = true;
+      await tpAndWait(a, objAt(MISSION_BY_ID.get("T3")!.collect!.pieces[7]!));
+      await sleep(Math.max(600, clockEnds - Date.now() + 800)); // past the clock, the payout still failing
+      expect(trials(a).some((t) => t.id === "T3" && (t.state === "done" || t.state === "failed"))).toBe(false);
+      expect(a.count("missionDone")).toBe(0);
+      const m = actor(a).char.missions.find((x) => x.id === "T3")!;
+      expect(m.done).toBe(false);
+      expect(m.counts).toEqual([1, 1, 1, 1, 1, 1, 1, 1]);
+      const coins = actor(a).char.coins;
+      failing = false;
+      await until("paid on the retry", () => mission(a, "T3")?.done === true);
+      await until("done after the commit", () => lastTrial(a, "T3")?.state === "done");
+      await sleep(400);
+      expect(a.count("missionDone")).toBe(1);
+      expect(actor(a).char.coins).toBe(coins + 350);
+      expect(characterRepo.current.load("unlucky_gatherer")!.missions.find((x) => x.id === "T3")!.done).toBe(true);
+    } finally {
+      repo.save = save;
+    }
   });
 
   it("untimed pieces (A4) are kept across a reconnect; a race's attempt is not", async () => {

@@ -49,6 +49,8 @@ interface Run {
   npcIds: string[];
   lastAt: number;
   paused: boolean;
+  /** The objective is met but the reward's save failed: the payout retries each tick and the clock stops. */
+  complete: boolean;
 }
 
 type Mission = PlayerActor["char"]["missions"][number];
@@ -211,6 +213,7 @@ export class TrialLogic {
     const race = def.race!;
     let run = this.runs.get(a.id);
     if (run && run.id !== def.id) return; // one attempt at a time
+    if (run?.complete) return this.finish(a, m, def, run);
     if (run && now > run.deadline) {
       this.fail(a, "time");
       run = undefined;
@@ -238,12 +241,7 @@ export class TrialLogic {
     if (!moved) return;
     m.progress = run.next;
     a.youDirty = true;
-    if (run.next >= race.rings.length) {
-      this.end(a, run);
-      this.send(a, def, m, "done");
-      this.q.completeMission(a, m, def);
-      return;
-    }
+    if (run.next >= race.rings.length) return this.finish(a, m, def, run);
     this.send(a, def, m, "running");
   }
 
@@ -254,6 +252,8 @@ export class TrialLogic {
       if (c.limitS) return; // a timed collect waits for the other attempt to end
       run = undefined;
     }
+    // Every piece is in but the payout's save failed: retry it (the clock has stopped).
+    if (run?.complete || (m.counts && m.counts.length === c.pieces.length && m.counts.every((v) => v))) return this.finish(a, m, def, run);
     if (run && c.limitS && now > run.deadline) {
       this.fail(a, "time");
       return; // a shard underfoot starts the next attempt on a later tick
@@ -276,12 +276,7 @@ export class TrialLogic {
       this.runs.set(a.id, run);
       this.q.toast(a, `${def.name}: the clock is running — ${m.progress} of ${c.pieces.length} ${c.itemName}`, "info");
     }
-    if (m.progress >= c.pieces.length) {
-      if (run) this.end(a, run);
-      this.send(a, def, m, "done");
-      this.q.completeMission(a, m, def);
-      return;
-    }
+    if (m.progress >= c.pieces.length) return this.finish(a, m, def, run);
     if (!c.limitS) this.q.toast(a, `${def.name}: ${m.progress} of ${c.pieces.length} ${c.itemName}`, "info");
     this.send(a, def, m, "running");
   }
@@ -317,6 +312,7 @@ export class TrialLogic {
     const d = def.defend!;
     const run = this.runs.get(a.id);
     if (!run || run.id !== def.id) return;
+    if (run.complete) return this.finish(a, m, def, run);
     const dt = Math.max(0, now - run.lastAt);
     run.lastAt = now;
     const inside = inReach(this.q.pos(d.beacon), p, d.radius, 0);
@@ -345,9 +341,7 @@ export class TrialLogic {
     }
     if (run.heldMs >= this.scaled(d.holdS)) {
       m.progress = d.holdS;
-      this.end(a, run);
-      this.send(a, def, m, "done");
-      this.q.completeMission(a, m, def);
+      this.finish(a, m, def, run);
     }
   }
 
@@ -371,8 +365,22 @@ export class TrialLogic {
 
   // ---------------------------------------------------------------- endings
 
+  /**
+   * The objective is met: pay first, and only once the reward has committed end the attempt and say
+   * `done`. A failed save keeps the attempt, marked complete (no clock, no ring checks), and the next
+   * tick tries the payout again; the client hears nothing until it lands.
+   */
+  private finish(a: PlayerActor, m: Mission, def: MissionDef, run: Run | undefined) {
+    if (!this.q.completeMission(a, m, def)) {
+      if (run) run.complete = true;
+      return;
+    }
+    if (run) this.end(a, run);
+    this.send(a, def, m, "done");
+  }
+
   private newRun(def: MissionDef, kind: Kind, now: number): Run {
-    return { id: def.id, kind, startedAt: now, deadline: 0, next: 0, heldMs: 0, outsideSince: 0, waves: 0, npcIds: [], lastAt: now, paused: false };
+    return { id: def.id, kind, startedAt: now, deadline: 0, next: 0, heldMs: 0, outsideSince: 0, waves: 0, npcIds: [], lastAt: now, paused: false, complete: false };
   }
 
   private dissolveWaves(run: Run) {

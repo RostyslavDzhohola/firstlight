@@ -724,8 +724,9 @@ export class QuestSystem implements RoomSystem {
     return out;
   }
 
-  completeMission(a: PlayerActor, m: CharacterMission, def: MissionDef) {
-    if (m.done) return;
+  /** Pay a mission; true once its reward has committed (false: a failed save left it open, or already done). */
+  completeMission(a: PlayerActor, m: CharacterMission, def: MissionDef): boolean {
+    if (m.done) return false;
     const goal = missionGoal(def);
     // The done flag, XP and level, coins, items and any overflow pile commit together; a failed save
     // leaves the mission open (it completes on the next trigger). Level-up effects and the news
@@ -742,7 +743,7 @@ export class QuestSystem implements RoomSystem {
         showXp = this.room.addXp(a, def.reward.xp);
       },
     );
-    if (!paid) return;
+    if (!paid) return false;
     showXp();
     const extra = rewardItems.map((i) => `${i.qty} × ${itemName(i)}`).join(", ");
     this.toast(a, `Mission complete: ${def.name} · +${def.reward.xp} XP · +${def.reward.coins} ◎${extra ? ` · ${extra}` : ""}`, "xp");
@@ -753,6 +754,7 @@ export class QuestSystem implements RoomSystem {
       const n = gleamsWon(a.char.missions);
       this.toast(a, n >= GLEAMS.trials.length ? `All three gleams won — ${GLEAMS.curator.name}'s vault in Portus Plaza is waiting for you` : `Gleam won: ${n} of ${GLEAMS.trials.length} — ${GLEAMS.name}`, "medal");
     }
+    return true;
   }
 
   private onKillForMissions(e: KillEvent) {
