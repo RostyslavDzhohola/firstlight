@@ -1,12 +1,13 @@
 // World markers for race / defend / collect missions (2026-11-12): race rings, the beacon's ring and
-// column, and shards (also Lark's kite panels). Pooled: one InstancedMesh per kind per body, sized to
-// that body's objects, sharing module-level emissive node materials (MeshBasicNodeMaterial: works on
+// beam, and shards (also Lark's kite panels). Pooled: one InstancedMesh per kind per body, sized to
+// that body's objects, sharing two module-level emissive node materials (a solid one and a
+// see-through one) (MeshBasicNodeMaterial: works on
 // WebGPU and the WebGL2 fallback) that the shader warm-up compiles from kept samples
 // (trialWarmupHook, registered in Game.warmupHook). Positions come from the shared world-object table,
 // so they match the server's triggers (quests/trials.ts).
 
 import * as THREE from "three/webgpu";
-import { materialColor } from "three/tsl";
+import { abs, cameraPosition, dot, float, length, materialColor, mix, normalView, positionViewDirection, positionWorld, smoothstep } from "three/tsl";
 import type { BodyId, Terrain } from "@firstlight/shared";
 import { MISSION_BY_ID, type MissionDef } from "@firstlight/shared/content/missions";
 import { objectPos, objectsOn, type WorldObjectDef } from "@firstlight/shared/content/world";
@@ -18,7 +19,8 @@ import { keptSamples } from "../render/warmup.ts";
 export const RING_LIFT = 1.6;
 
 let mat: THREE.MeshBasicNodeMaterial | null = null;
-let geos: { ring: THREE.BufferGeometry; flat: THREE.BufferGeometry; column: THREE.BufferGeometry; shard: THREE.BufferGeometry } | null = null;
+let softMat: THREE.MeshBasicNodeMaterial | null = null;
+let geos: { ring: THREE.BufferGeometry; flat: THREE.BufferGeometry; fill: THREE.BufferGeometry; column: THREE.BufferGeometry; shard: THREE.BufferGeometry } | null = null;
 
 /** One emissive material for every marker; instance colours carry the state (white → bloom-ready). */
 function material(): THREE.MeshBasicNodeMaterial {
@@ -30,10 +32,30 @@ function material(): THREE.MeshBasicNodeMaterial {
   return mat;
 }
 
+/**
+ * The see-through light (D-polish-8): the beacon's beam and the faint fill of its ground ring. Added
+ * over the scene, never solid; soft at its silhouette and at grazing angles (so the ground fill seen
+ * from a distance is a hint, not a white sheet), and nearly gone within a few metres of the lens,
+ * the camera inside the beam included. Only a quarter of the night boost: Hollowmere is dark and the
+ * same value reads far hotter there.
+ */
+function softMaterial(): THREE.MeshBasicNodeMaterial {
+  if (!softMat) {
+    softMat = new THREE.MeshBasicNodeMaterial({ color: 0xffffff, toneMapped: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+    softMat.name = "trialMarkerSoft";
+    softMat.colorNode = materialColor.mul(atmo.glowBoost.mul(0.25).add(0.75));
+    const facing = abs(dot(normalView, positionViewDirection)).clamp(0, 1);
+    const nearDim = mix(float(0.12), float(1), smoothstep(3.0, 14.0, length(positionWorld.sub(cameraPosition))));
+    softMat.opacityNode = facing.mul(nearDim);
+  }
+  return softMat;
+}
+
 function geometries() {
   geos ??= {
     ring: new THREE.TorusGeometry(2.6, 0.16, 8, 40),
     flat: new THREE.TorusGeometry(1, 0.012, 4, 64), // scaled to the beacon radius on the ground
+    fill: new THREE.CircleGeometry(1, 48), // the faint fill inside it (soft material)
     column: new THREE.CylinderGeometry(0.22, 0.32, 7, 10, 1, true),
     shard: new THREE.OctahedronGeometry(0.42, 0),
   };
@@ -44,9 +66,11 @@ function geometries() {
 const C = {
   next: new THREE.Color(2.6, 1.9, 0.6), // gold
   later: new THREE.Color(0.55, 0.75, 1.1), // pale blue
-  idle: new THREE.Color(0.7, 1.4, 1.6), // cyan
-  lit: new THREE.Color(2.8, 2.2, 0.9),
-  paused: new THREE.Color(2.4, 0.7, 0.5),
+  // The beacon stays under the bloom threshold (1.25) at night too, where glowBoost reaches 2: a thin
+  // outline in these, and the beam and fill (soft material) in fractions of them.
+  beaconIdle: new THREE.Color(0.28, 0.55, 0.62),
+  beaconLit: new THREE.Color(0.62, 0.48, 0.18),
+  beaconPaused: new THREE.Color(0.62, 0.2, 0.15),
   shard: new THREE.Color(1.6, 2.3, 2.6),
   kite: new THREE.Color(2.4, 1.3, 1.6),
 };
@@ -75,7 +99,12 @@ const _spin = new THREE.Quaternion();
 const _yAxis = new THREE.Vector3(0, 1, 0);
 /** The torus (XY plane) laid flat on the tangent plane. */
 const LAY_FLAT = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
+const FACE_UP = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
 const _s = new THREE.Vector3();
+const _c = new THREE.Color();
+/** The beam's and the fill's share of the beacon colour (added light, so small). */
+const BEAM_K = 1.5;
+const FILL_K = 0.45;
 const _p = new THREE.Vector3();
 const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
@@ -96,6 +125,7 @@ export class TrialMarkers {
   private readonly shards: Spot[];
   private readonly ringMesh: THREE.InstancedMesh | null;
   private readonly flatMesh: THREE.InstancedMesh | null;
+  private readonly fillMesh: THREE.InstancedMesh | null;
   private readonly columnMesh: THREE.InstancedMesh | null;
   private readonly shardMesh: THREE.InstancedMesh | null;
   private t = 0;
@@ -130,9 +160,9 @@ export class TrialMarkers {
       if (c && k >= 0) s.piece = { mission: s.def.mission!, k };
     }
     const g = geometries();
-    const make = (geo: THREE.BufferGeometry, n: number, name: string) => {
+    const make = (geo: THREE.BufferGeometry, n: number, name: string, soft = false) => {
       if (!n) return null;
-      const m = new THREE.InstancedMesh(geo, material(), n);
+      const m = new THREE.InstancedMesh(geo, soft ? softMaterial() : material(), n);
       m.name = `trialMarkers:${name}`;
       m.frustumCulled = false; // spread over hundreds of metres; a handful of instances
       m.castShadow = false;
@@ -143,7 +173,8 @@ export class TrialMarkers {
     };
     this.ringMesh = make(g.ring, this.rings.length, "rings");
     this.flatMesh = make(g.flat, this.beacons.length, "beaconRing");
-    this.columnMesh = make(g.column, this.beacons.length, "beaconColumn");
+    this.fillMesh = make(g.fill, this.beacons.length, "beaconFill", true);
+    this.columnMesh = make(g.column, this.beacons.length, "beaconColumn", true);
     this.shardMesh = make(g.shard, this.shards.length, "shards");
     scene.add(this.group);
   }
@@ -200,33 +231,43 @@ export class TrialMarkers {
       if (ringMesh.instanceColor) ringMesh.instanceColor.needsUpdate = true;
     }
 
-    // Beacons: a ground ring at the hold radius and a column; lit while held, coral while paused.
+    // Beacons: a thin ground outline at the hold radius with a faint fill, and a soft beam; gold while
+    // held, coral while paused.
     const flatMesh = this.flatMesh;
+    const fillMesh = this.fillMesh;
     const columnMesh = this.columnMesh;
-    if (flatMesh && columnMesh) {
+    if (flatMesh && fillMesh && columnMesh) {
       for (let i = 0; i < this.beacons.length; i++) {
         const s = this.beacons[i]!;
         const d = s.def.mission ? open.get(s.def.mission)?.def.defend : undefined;
         if (!d) {
           flatMesh.setMatrixAt(i, HIDDEN);
+          fillMesh.setMatrixAt(i, HIDDEN);
           columnMesh.setMatrixAt(i, HIDDEN);
           continue;
         }
         any = true;
         const mine = !!trial && trial.id === s.def.mission;
-        const col = mine && trial!.state === "paused" ? C.paused : mine && trial!.state === "running" ? C.lit : C.idle;
+        const col = mine && trial!.state === "paused" ? C.beaconPaused : mine && trial!.state === "running" ? C.beaconLit : C.beaconIdle;
         const q = this.frame(s, null);
-        // The flat ring lies on the ground: rotate the torus (XY plane) to the tangent plane.
+        // The outline lies on the ground: rotate the torus (XY plane) to the tangent plane. A band
+        // about 10 cm high (it was a metre-high wall, which bloomed into a solid disc).
         const flatQ = _q2.copy(q).multiply(LAY_FLAT);
         _p.copy(s.pos).addScaledVector(s.up, 0.15);
-        flatMesh.setMatrixAt(i, _m.compose(_p, flatQ, _s.set(d.radius, d.radius, d.radius * 8)));
+        flatMesh.setMatrixAt(i, _m.compose(_p, flatQ, _s.set(d.radius, d.radius, 4)));
         flatMesh.setColorAt(i, col);
+        // The fill faces up (LAY_FLAT turns the circle's +Z down, so it is turned the other way).
+        _p.copy(s.pos).addScaledVector(s.up, 0.2);
+        fillMesh.setMatrixAt(i, _m.compose(_p, _q2.copy(q).multiply(FACE_UP), _s.set(d.radius, d.radius, 1)));
+        fillMesh.setColorAt(i, _c.copy(col).multiplyScalar(FILL_K));
         const breathe = mine && trial!.state === "running" ? 1 + Math.sin(this.t * 3) * 0.12 : 0.7;
         _p.copy(s.pos).addScaledVector(s.up, 3.5);
         columnMesh.setMatrixAt(i, _m.compose(_p, q, _s.set(breathe, 1, breathe)));
-        columnMesh.setColorAt(i, col);
+        columnMesh.setColorAt(i, _c.copy(col).multiplyScalar(BEAM_K));
       }
       flatMesh.instanceMatrix.needsUpdate = true;
+      fillMesh.instanceMatrix.needsUpdate = true;
+      if (fillMesh.instanceColor) fillMesh.instanceColor.needsUpdate = true;
       columnMesh.instanceMatrix.needsUpdate = true;
       if (flatMesh.instanceColor) flatMesh.instanceColor.needsUpdate = true;
       if (columnMesh.instanceColor) columnMesh.instanceColor.needsUpdate = true;
@@ -274,8 +315,9 @@ export function trialWarmupHook(scene: THREE.Object3D, at: () => THREE.Vector3):
       }
       const group = keptSamples("trialWarmup", () => {
         const g = geometries();
-        return [g.ring, g.flat, g.column, g.shard].map((geo, i) => {
-          const m = new THREE.InstancedMesh(geo, material(), 1);
+        // The soft material is compiled once per geometry it is drawn with (fill, column).
+        return ([[g.ring, false], [g.flat, false], [g.shard, false], [g.fill, true], [g.column, true]] as const).map(([geo, soft], i) => {
+          const m = new THREE.InstancedMesh(geo, soft ? softMaterial() : material(), 1);
           m.name = `trialWarmup:${i}`;
           m.frustumCulled = false;
           m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array([1, 1, 1]), 3);

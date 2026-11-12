@@ -52,6 +52,32 @@ describe("trial markers", () => {
     expect(hollow.m.group.visible).toBe(true);
   });
 
+  it("the beacon is a marker, not a floodlight: colours under the bloom threshold at night, a thin outline, see-through beam and fill", () => {
+    const { m, mesh } = markers("hollowmere");
+    const at = (m as any).beacons.findIndex((s: any) => s.def.mission === "T2");
+    const colour = (name: string) => new THREE.Color().fromBufferAttribute(mesh(name).instanceColor!, at);
+    const peak = (c: THREE.Color) => Math.max(c.r, c.g, c.b);
+    for (const state of ["running", "paused"] as const) {
+      m.update(0.016, { missions: [{ id: "T2", done: false }], trial: trial({ id: "T2", kind: "defend", state }) });
+      // The solid outline takes the full night boost (2×); the post pass blooms from 1.25.
+      expect(peak(colour("beaconRing")) * 2).toBeLessThanOrEqual(1.25);
+      // Beam and fill are added light with a quarter of the boost (1.25× at night).
+      expect(peak(colour("beaconColumn")) * 1.25).toBeLessThanOrEqual(1.25);
+      expect(peak(colour("beaconFill"))).toBeLessThan(0.35);
+    }
+    const mx = new THREE.Matrix4();
+    mesh("beaconRing").getMatrixAt(at, mx);
+    const scale = new THREE.Vector3().setFromMatrixScale(mx);
+    expect(scale.z * 0.012 * 2).toBeLessThan(0.15); // the band's height in metres (was over a metre)
+    for (const name of ["beaconColumn", "beaconFill"]) {
+      const mat = mesh(name).material as THREE.MeshBasicNodeMaterial;
+      expect(mat.transparent).toBe(true);
+      expect(mat.depthWrite).toBe(false);
+      expect(mat.opacityNode).toBeTruthy();
+    }
+    expect(mesh("beaconColumn").material).toBe(mesh("beaconFill").material); // pooled
+  });
+
   it("a frame allocates no lookup map and clones no quaternion (reused storage and scratch)", () => {
     const { m } = markers("hollowmere");
     const state = { missions: [{ id: "T2", done: false }, { id: "H4", done: false }], trial: trial({ id: "T2", kind: "defend" }) };
