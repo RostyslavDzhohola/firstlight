@@ -14,6 +14,15 @@ import { BANNER_OUT_MS, BannerQueue, type Moment } from "./moments.ts";
 
 const FEED_ICON: Record<FeedKind, string> = { join: "arrow-r", leave: "logout", kill: "close", death: "alert", hunt: "diamond", info: "check" };
 const ARRIVAL_OUT_MS = 700;
+/** Under reduced motion the wedge and the kill mark hold still this long, then go. */
+const STILL_MS = 360;
+
+let reduceQuery: MediaQueryList | null | undefined;
+/** The player's reduced-motion preference, read at the moment it matters (it can change in play). */
+export function prefersReducedMotion(): boolean {
+  if (reduceQuery === undefined) reduceQuery = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
+  return !!reduceQuery?.matches;
+}
 
 export interface MomentSlots {
   /** Top-centre column (under the zone banner, boss bar and trial strip): the banner. */
@@ -22,6 +31,11 @@ export interface MomentSlots {
   feed: HTMLElement;
   /** The HUD layer: the arrival card and the hit ring are centred on it. */
   layer: HTMLElement;
+}
+
+export interface MomentsOptions {
+  /** Whether to keep the hit ring and the kill mark still (default: the media query). */
+  reducedMotion?: () => boolean;
 }
 
 export class MomentsHud {
@@ -39,8 +53,10 @@ export class MomentsHud {
   private readonly ring: HTMLElement;
   private readonly wedges: { el: HTMLElement; angle: number; until: number }[] = [];
   private readonly killmark: HTMLElement;
+  private readonly still: () => boolean;
 
-  constructor(slots: MomentSlots) {
+  constructor(slots: MomentSlots, opts: MomentsOptions = {}) {
+    this.still = opts.reducedMotion ?? prefersReducedMotion;
     this.banner = el("div", "fl-moments", slots.top);
     this.banner.setAttribute("aria-live", "polite");
     this.feedBox = slots.feed;
@@ -211,12 +227,19 @@ export class MomentsHud {
     w.angle = angle;
     w.until = now + HIT_FROM_MS;
     w.el.style.setProperty("--a", `${Math.round(angle)}deg`);
-    w.el.animate([{ opacity: 0.95 }, { opacity: 0.85, offset: 0.35 }, { opacity: 0 }], { duration: HIT_FROM_MS, easing: "ease-out" });
+    // Reduced motion: the wedge holds still, briefly, and goes (no fade).
+    if (this.still()) w.el.animate([{ opacity: 0.9 }, { opacity: 0.9 }], { duration: STILL_MS });
+    else w.el.animate([{ opacity: 0.95 }, { opacity: 0.85, offset: 0.35 }, { opacity: 0 }], { duration: HIT_FROM_MS, easing: "ease-out" });
   }
 
   /** Our hit killed it: the kill mark opens round the crosshair (`boss`: larger and longer). */
   kill(boss = false): void {
     this.killmark.classList.toggle("is-boss", boss);
+    if (this.still()) {
+      // Reduced motion: the mark shows at its resting size and goes, no scale or burst.
+      this.killmark.animate([{ opacity: 1 }, { opacity: 1 }], { duration: boss ? STILL_MS * 2 : STILL_MS });
+      return;
+    }
     this.killmark.animate(
       [
         { opacity: 0, transform: "translate(-50%, -50%) rotate(45deg) scale(.55)" },

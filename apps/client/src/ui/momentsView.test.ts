@@ -5,7 +5,7 @@ import { feedText, FEED_MS } from "./eventFeed.ts";
 import { levelMoments, medalMoment, missionMoments } from "./moments.ts";
 import { MomentsHud } from "./momentsView.ts";
 
-function mount() {
+function mount(reduced = false) {
   document.body.replaceChildren();
   const mk = (cls: string) => {
     const e = document.createElement("div");
@@ -16,7 +16,7 @@ function mount() {
   const slots = { top: mk("top"), feed: mk("fl-feed"), layer: mk("layer") };
   // happy-dom has no Web Animations: the hit ring and kill mark only need the call to exist.
   (HTMLElement.prototype as unknown as { animate: unknown }).animate ??= () => ({});
-  return { hud: new MomentsHud(slots), ...slots };
+  return { hud: new MomentsHud(slots, { reducedMotion: () => reduced }), ...slots };
 }
 
 beforeEach(() => vi.useFakeTimers());
@@ -140,5 +140,47 @@ describe("the hit ring", () => {
     hud.kill();
     hud.kill(true);
     expect(layer.querySelector(".fl-killmark")!.classList.contains("is-boss")).toBe(true);
+  });
+});
+
+describe("reduced motion", () => {
+  type Call = { el: Element; frames: Keyframe[]; opts: KeyframeAnimationOptions };
+  function spy() {
+    const calls: Call[] = [];
+    const orig = HTMLElement.prototype.animate;
+    HTMLElement.prototype.animate = function (this: Element, frames: Keyframe[], opts: KeyframeAnimationOptions) {
+      calls.push({ el: this, frames, opts });
+      return {} as Animation;
+    } as typeof HTMLElement.prototype.animate;
+    return { calls, restore: () => (HTMLElement.prototype.animate = orig) };
+  }
+
+  it("keeps the hit wedge and the kill mark still and brief: no transform, no fade", () => {
+    const { hud } = mount(true);
+    const s = spy();
+    try {
+      hud.hitFrom(90, 0);
+      hud.kill();
+      hud.kill(true);
+    } finally {
+      s.restore();
+    }
+    expect(s.calls).toHaveLength(3);
+    for (const c of s.calls) {
+      expect(c.frames.some((f) => "transform" in f)).toBe(false);
+      expect(new Set(c.frames.map((f) => f.opacity)).size).toBe(1);
+      expect(c.opts.duration as number).toBeLessThan(1000);
+    }
+  });
+
+  it("animates the kill mark's burst otherwise", () => {
+    const { hud } = mount(false);
+    const s = spy();
+    try {
+      hud.kill();
+    } finally {
+      s.restore();
+    }
+    expect(s.calls[0]!.frames.some((f) => "transform" in f)).toBe(true);
   });
 });
