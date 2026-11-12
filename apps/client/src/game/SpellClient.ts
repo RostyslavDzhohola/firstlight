@@ -14,6 +14,7 @@ import { SpellBar } from "../ui/spellBar.ts";
 import type { Game } from "./Game.ts";
 import { blockText, castDeniedText, SpellBook } from "./spellBook.ts";
 import type { ClientSystem } from "./systems.ts";
+import { crosshairQueryOf, crosshairTarget } from "./crosshairTarget.ts";
 
 const _o = new THREE.Vector3();
 const _d = new THREE.Vector3();
@@ -142,54 +143,7 @@ export class SpellClient implements ClientSystem {
    * (the server puts it on the ground and checks the line from our head itself).
    */
   crosshairPoint(range: number): THREE.Vector3 {
-    const g = this.game;
-    const cam = g.ctx.camera;
-    const o = cam.getWorldPosition(_o);
-    const d = cam.getWorldDirection(_d);
-    const me = g.player.pos;
-    const head = _v.copy(me).addScaledVector(_w.copy(me).normalize(), 1.6);
-    // The camera sits behind the head: aiming starts there.
-    const skip = Math.max(0, head.sub(o).dot(d));
-    const max = skip + range;
-    let t = max;
-    const terrain = g.planet.terrain;
-    const R = terrain.body.radius;
-    for (let k = skip; k <= max; k += 1) {
-      _v.copy(o).addScaledVector(d, k);
-      const l = _v.length();
-      if (l < R + terrain.groundHeight(_v.x / l, _v.y / l, _v.z / l)) {
-        t = k;
-        break;
-      }
-    }
-    _v.copy(o).addScaledVector(d, skip);
-    for (const c of [g.player.getColliders(), g.player.getStructures()]) {
-      const hit = c?.raycast?.(_v, d, max - skip) ?? Infinity;
-      if (skip + hit < t) t = skip + hit;
-    }
-    // Someone under the crosshair: the star is called onto their feet.
-    const room = g.net.room;
-    const st = this.state();
-    let best: Posed | null = null;
-    let bestT = t;
-    const test = (p: Posed, h: number, r: number) => {
-      _v.set(p.x, p.y, p.z);
-      _v.addScaledVector(_w.copy(_v).normalize(), h).sub(o);
-      const along = _v.dot(d);
-      if (along < skip || along > bestT + r) return;
-      if (_v.addScaledVector(d, -along).length() > r) return;
-      best = p;
-      bestT = along;
-    };
-    st?.npcs?.forEach((n) => {
-      if ((n.hp ?? 1) > 0) test(n, 0.8, 1.3);
-    });
-    st?.players?.forEach((p, id) => {
-      if (id !== room?.sessionId && !((p.flags ?? 0) & PF.DEAD)) test(p, 1.0, 1.1);
-    });
-    const hit = best as Posed | null;
-    if (hit) return new THREE.Vector3(hit.x, hit.y, hit.z);
-    return new THREE.Vector3().copy(o).addScaledVector(d, t);
+    return crosshairTarget(crosshairQueryOf(this.game), range).point;
   }
 
   // ------------------------------------------------------------------------------------ events

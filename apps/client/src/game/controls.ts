@@ -13,6 +13,7 @@ import { TouchOverlay, wantsTouch } from "../ui/touchOverlay.ts";
 import { pauseExtras } from "../ui/menu.ts";
 import { uiSettings, type UiSettings } from "../ui/uiSettings.ts";
 import { AIM_SLOWDOWN } from "./padMapping.ts";
+import { crosshairQueryOf, crosshairTarget } from "./crosshairTarget.ts";
 
 /** Pad settings from the stored UI settings. */
 export function padSettingsFrom(s: UiSettings): PadSettings {
@@ -24,8 +25,8 @@ export interface Controls {
   nav: FocusNav;
   glyphs: GlyphSync;
   touch: TouchOverlay | null;
-  /** The crosshair was on a creep at the last frame (ControlsClient). */
-  onTarget: boolean;
+  /** The nearest unobstructed thing under the crosshair is a creature (ControlsClient sets the query). */
+  aimTarget: () => boolean;
 }
 
 let installed: Controls | null = null;
@@ -39,7 +40,7 @@ export function installControls(game: Game): Controls {
   const input = game.input;
   const nav = new FocusNav();
   const glyphs = new GlyphSync();
-  const c: Controls = { pad: null as unknown as GamepadSource, nav, glyphs, touch: null, onTarget: false };
+  const c: Controls = { pad: null as unknown as GamepadSource, nav, glyphs, touch: null, aimTarget: () => false };
   const prompt = () => !!game.hud?.promptShown;
   c.pad = new GamepadSource({
     input,
@@ -47,7 +48,7 @@ export function installControls(game: Game): Controls {
     settings: () => padSettingsFrom(uiSettings.get()),
     interactAvailable: prompt,
     selectedSlot: () => game.hud?.you?.selected ?? 0,
-    onTarget: () => c.onTarget,
+    onTarget: () => c.aimTarget(),
   });
   c.pad.onFamily = (f) => glyphs.set(input.device, f);
   input.onDeviceChange((d) => {
@@ -87,13 +88,9 @@ export function installControls(game: Game): Controls {
   return c;
 }
 
-const _o = new THREE.Vector3();
-const _d = new THREE.Vector3();
-const _v = new THREE.Vector3();
-
-/** Within this far of the camera ray (m) a creep counts as under the crosshair for the slowdown. */
-const SLOW_RADIUS = 1.1;
+/** How far the aim slowdown looks along the crosshair (m). */
 const SLOW_RANGE = 60;
+const _hit = new THREE.Vector3();
 
 /**
  * Per body: rumble on taking damage and on a kill (a creep or a player), and the aim slowdown's target
@@ -117,26 +114,14 @@ export function createControlsClient(game: Game): ClientSystem | null {
     if (m.killer === me && m.victim !== me) c.pad.rumble(0.4, 0.8, 180);
     else if (m.victim === me) c.pad.rumble(1, 1, 450);
   });
+  // The slowdown asks only while the right stick turns (GamepadSource), at most once per poll, with the
+  // crosshair's own query: a creature counts only as the nearest unobstructed thing (review #9).
+  c.aimTarget = () => game.input.captured && crosshairTarget(crosshairQueryOf(game), SLOW_RANGE, _hit).kind === "npc";
   return {
-    update() {
-      c.onTarget = false;
-      if (game.input.device !== "pad" || !uiSettings.get().padAimSlow || !game.input.captured) return;
-      const cam = game.ctx.camera;
-      const o = cam.getWorldPosition(_o);
-      const d = cam.getWorldDirection(_d);
-      const npcs = (room.state as { npcs?: { forEach(fn: (n: { x: number; y: number; z: number; hp?: number }) => void): void } }).npcs;
-      npcs?.forEach((n) => {
-        if (c.onTarget || (n.hp ?? 1) <= 0) return;
-        _v.set(n.x, n.y, n.z);
-        _v.addScaledVector(_v.clone().normalize(), 0.9).sub(o);
-        const along = _v.dot(d);
-        if (along < 2 || along > SLOW_RANGE) return;
-        if (_v.addScaledVector(d, -along).length() < SLOW_RADIUS) c.onTarget = true;
-      });
-    },
+    update() {},
     dispose() {
       for (const off of offs) off();
-      c.onTarget = false;
+      c.aimTarget = () => false;
     },
   };
 }
