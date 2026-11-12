@@ -207,6 +207,26 @@ export function claimFirst(db: Db, secretId: string, userId: string, displayName
   });
 }
 
+export interface Gleamkeepers {
+  /** Accounts that have opened the Gleam Vault (test accounts excluded). */
+  count: number;
+  /** The earliest few, oldest first. */
+  first: { name: string; at: number }[];
+}
+
+/** Note an account's first opening of the Gleam Vault; true if it is new. Callers pass real players only. */
+export function recordGleamkeeper(db: Db, userId: string, displayName: string, now = Date.now()): boolean {
+  return stmt(db, "INSERT OR IGNORE INTO gleam_vault (user_id, display_name, opened_at) VALUES (?, ?, ?)").run(userId, displayName, now).changes === 1;
+}
+
+/** How many have opened the vault and who came first (test accounts aren't shown, D-home-6). */
+export function listGleamkeepers(db: Db, limit = 5): Gleamkeepers {
+  const where = `WHERE NOT ${IS_TEST("g.user_id")}`;
+  const count = (stmt(db, `SELECT COUNT(*) AS n FROM gleam_vault g ${where}`).get() as { n: number }).n;
+  const first = (stmt(db, `SELECT display_name, opened_at FROM gleam_vault g ${where} ORDER BY opened_at, user_id LIMIT ?`).all(limit) as { display_name: string; opened_at: number }[]).map((r) => ({ name: r.display_name, at: r.opened_at }));
+  return { count, first };
+}
+
 /** The engraved plaques, oldest first. Test accounts' claims aren't shown (D-home-6). */
 export function listHallOfFirsts(db: Db): HallEntry[] {
   return (stmt(db, `SELECT * FROM hall_of_firsts h WHERE NOT ${IS_TEST("h.user_id")} ORDER BY found_at`).all() as { secret_id: string; user_id: string; display_name: string; found_at: number }[]).map(

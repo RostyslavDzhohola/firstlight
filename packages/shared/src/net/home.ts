@@ -37,6 +37,11 @@ export interface HomeBoard {
   medals: HomeMedalRow[];
   /** Claimed Hall of Firsts plaques, oldest first (ids are PLAQUES ids). */
   hall: HallLine[];
+  /**
+   * The Three Gleams (content §5.1): how many accounts have opened the Gleam Vault and the first few,
+   * oldest first (`at`: ms epoch). Real players only. Absent from older servers.
+   */
+  gleams?: { keepers: number; first: { name: string; at: number }[] };
 }
 
 export interface HomeVisits {

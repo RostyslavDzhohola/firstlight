@@ -442,6 +442,30 @@ describe("the Three Gleams", () => {
     expect(progressStore.current.hall().filter((e) => e.secretId === GLEAMS.firsts)).toHaveLength(1);
   });
 
+  it("only people engrave and count: AI agents (either flag) and test accounts open the vault but take no Hall line and aren't Gleamkeepers", async () => {
+    TRIAL_RULES.timeScale = 0.05;
+    /** A Portus visitor holding all three gleams (set on the server: the trials themselves are tested above). */
+    async function holder(uid: string, mark: (a: ReturnType<typeof actor>) => void): Promise<Bot> {
+      const b = await bot(uid, "portus");
+      const a = actor(b);
+      a.char.missions = GLEAMS.trials.map((id) => ({ id, progress: 1, done: true }));
+      mark(a);
+      await tpAndWait(b, objAt("gleam_vault"));
+      b.send("interact", { target: "gleam_vault" });
+      await until(`${uid}: the vault pays`, () => invIds(b).includes("gleamweave_cape"));
+      return b;
+    }
+    await holder("agent_by_identity", (a) => ((a.identity as any).agent = true)); // the agents lane's Identity.agent
+    await holder("agent_by_state", (a) => ((a.state as any).agent = true)); // ...or its PlayerState.agent
+    await holder("smoke_test_acct", (a) => (a.identity.test = true));
+    expect(progressStore.current.hall().filter((e) => e.secretId === GLEAMS.firsts)).toEqual([]);
+    expect(progressStore.current.gleamkeepers()).toEqual({ count: 0, first: [] });
+    const person = await holder("first_person", () => {});
+    await until("engraved", () => person.toasts.some((t) => t.includes("engraved")));
+    expect(progressStore.current.hall().find((e) => e.secretId === GLEAMS.firsts)?.displayName).toBe("first_person");
+    expect(progressStore.current.gleamkeepers()).toMatchObject({ count: 1, first: [{ name: "first_person" }] });
+  });
+
   it("hunt progress belongs to the life: a rebirth clears the gleams and the vault opens again; the medal stays", async () => {
     TRIAL_RULES.timeScale = 0.05;
     const capes = (b: Bot) => invIds(b).filter((id: string) => id === "gleamweave_cape").length;

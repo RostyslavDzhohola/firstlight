@@ -122,6 +122,18 @@ export interface ShotMsg {
 
 const slotSchema = z.number().int().min(0).max(HOTBAR_SLOTS + BACKPACK_SLOTS - 1);
 
+/**
+ * A person's account: not a load-test bot, not our own test automation (D-home-6) and not an AI agent
+ * (D-agents-1). The agent flag (`identity.agent`, synced as `PlayerState.agent`) comes with the agents
+ * lane, so it is read defensively: either field, if present and truthy, marks an agent.
+ */
+export function isPerson(a: PlayerActor): boolean {
+  if (a.identity.loadtest || a.identity.test) return false;
+  const id = a.identity as unknown as { agent?: unknown };
+  const st = a.state as unknown as { agent?: unknown };
+  return !id.agent && !st.agent;
+}
+
 export class QuestSystem implements RoomSystem {
   readonly room: BodyRoom;
   readonly body: BodyId;
@@ -890,7 +902,11 @@ export class QuestSystem implements RoomSystem {
       a.char.coins += GLEAMS.reward.coins;
       if (eligible) {
         this.award(a, "three_gleams", events); // GLEAMS.medal
-        if (!a.identity.loadtest && !a.identity.test && !life.unofficial) first = engrave(GLEAMS.firsts, a.identity.userId, a.identity.name, events);
+        // The Hall line and the board's Gleamkeepers are people's: no automation, no AI agents.
+        if (isPerson(a) && !life.unofficial) {
+          first = engrave(GLEAMS.firsts, a.identity.userId, a.identity.name, events);
+          progressStore.current.addGleamkeeper(a.identity.userId, a.identity.name);
+        }
       }
     });
     if (!paid) return;

@@ -7,6 +7,8 @@ import {
   awardMedal,
   claimFirst,
   ensureAccount,
+  listGleamkeepers,
+  recordGleamkeeper,
   getAccount,
   getAccountStat,
   listDiscoveredPads,
@@ -15,11 +17,12 @@ import {
   setTitleMedal,
   discoverPad,
   type Db,
+  type Gleamkeepers,
   type HallEntry,
 } from "../../db/index.ts";
 import { sandboxed } from "../../sandbox.ts";
 
-export type { HallEntry };
+export type { Gleamkeepers, HallEntry };
 
 export interface ProgressStore {
   /** True if newly discovered. */
@@ -36,6 +39,9 @@ export interface ProgressStore {
   /** First finder wins; `won` only for the call that engraved it. */
   claimFirst(secretId: string, userId: string, name: string): { won: boolean; entry: HallEntry };
   hall(): HallEntry[];
+  /** The Gleam Vault opened by a real player in an official life; true the account's first time (the board's count). */
+  addGleamkeeper(userId: string, name: string): boolean;
+  gleamkeepers(limit?: number): Gleamkeepers;
 }
 
 export class MemoryProgressStore implements ProgressStore {
@@ -98,6 +104,16 @@ export class MemoryProgressStore implements ProgressStore {
   hall(): HallEntry[] {
     return [...this.firsts.values()].sort((a, b) => a.foundAt - b.foundAt);
   }
+  private readonly keepers = new Map<string, { name: string; at: number }>();
+  addGleamkeeper(userId: string, name: string): boolean {
+    if (this.keepers.has(userId)) return false;
+    this.keepers.set(userId, { name, at: Date.now() });
+    return true;
+  }
+  gleamkeepers(limit = 5): Gleamkeepers {
+    const all = [...this.keepers.values()].sort((a, b) => a.at - b.at);
+    return { count: all.length, first: all.slice(0, limit) };
+  }
 }
 
 export class SqliteProgressStore implements ProgressStore {
@@ -138,6 +154,12 @@ export class SqliteProgressStore implements ProgressStore {
   }
   hall(): HallEntry[] {
     return listHallOfFirsts(this.db);
+  }
+  addGleamkeeper(userId: string, name: string): boolean {
+    return recordGleamkeeper(this.db, userId, name);
+  }
+  gleamkeepers(limit = 5): Gleamkeepers {
+    return listGleamkeepers(this.db, limit);
   }
 }
 
@@ -186,6 +208,13 @@ export class SandboxProgressStore implements ProgressStore {
     const real = this.real().hall();
     const taken = new Set(real.map((e) => e.secretId));
     return [...real, ...this.mine.hall().filter((e) => !taken.has(e.secretId))].sort((a, b) => a.foundAt - b.foundAt);
+  }
+  /** A sandbox's vault openings stay in the sandbox (nothing it does reaches the public board). */
+  addGleamkeeper(userId: string, name: string): boolean {
+    return this.mine.addGleamkeeper(userId, name);
+  }
+  gleamkeepers(limit = 5): Gleamkeepers {
+    return this.real().gleamkeepers(limit);
   }
 }
 
