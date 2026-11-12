@@ -1530,3 +1530,11 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   rejoins Portus, where the "never died" check ended the tutorial without a word, and with it the
   dummies' XP that takes a guest to level 2, where saving unlocks (D34, #31, #32). Found in this run's
   play-through.
+- **D-fixes-3 (2026-11-12):** The home page's visits line says only "● N online now" (#12, the
+  owner's 2026-10-18 call). Total visits sit apart in the footer as plain text until DataFast's
+  stats card replaces them (its embed code is in the DataFast dashboard, not public docs). A
+  "Privacy" link in the footer, shown only when DataFast is in the page, opens a short card: who
+  counts visits, whether that sets cookies, what for, and a "Don't count my visits" switch
+  (`fl.noAnalytics`, which the DataFast guard honours on every visit, unlike a hand-set
+  `datafast_ignore`, which a normal visit clears since #44). Why: the owner asked for the cookie
+  sentence to leave the line and the disclosure to move to a Privacy link.
