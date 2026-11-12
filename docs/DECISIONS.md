@@ -1807,7 +1807,7 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   walls behind it read as lit by it), the scoreboard's glow at its emitter, and 64 motes drifting up from
   the lamps and fires: camera-facing additive quads in one mesh and one draw, shader-animated, up with the
   lamplight (`townlights`, `?notownlights`, Medium and up). Lit windows cross the bloom threshold at full
-  lamplight (`townMaterial` `WINDOW_GLOW` 2.1, was 0.7; the outposts share the material, so their windows
+  lamplight (`townMaterial` `WINDOW_GLOW` 1.85, was 0.7; the outposts share the material, so their windows
   glow at night too). Why: the owner's "push the atmosphere within budget"; the town's evening had lit
   windows that sat flat on the walls and lanterns that lit nothing round them. Chimney smoke and banner
   colour are not done (they need per-building data the town's baked vertices don't carry).

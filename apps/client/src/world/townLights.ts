@@ -10,7 +10,7 @@
 // and skirt strength.
 
 import * as THREE from "three/webgpu";
-import { attribute, cameraWorldMatrix, exp, float, fract, mix, positionLocal, sin, smoothstep, time, uniform, uv, vec3, vec4 } from "three/tsl";
+import { attribute, cameraPosition, cameraWorldMatrix, exp, float, fract, mix, normalize, positionLocal, sin, smoothstep, time, uniform, uv, vec3, vec4 } from "three/tsl";
 import type { BodyId, Terrain } from "@firstlight/shared";
 import { TOWN_FIXED, TOWN_LAYOUT, TOWN_PREFABS } from "@firstlight/shared/content/portusTown";
 import { townDir } from "@firstlight/shared/planet/townFrame";
@@ -43,6 +43,12 @@ const EMBER = 0xff8a3c;
 /** Height of a lamp post's lantern and of a brazier's fire above the ground (m). */
 export const LANTERN_M = 2.92;
 export const BRAZIER_M = 1.55;
+/**
+ * A halo stands this much of its size nearer the camera than its light, up to HALO_PULL_MAX m: its
+ * centre would otherwise sit inside the lantern's own model, which hid the core from a level view.
+ */
+export const HALO_PULL = 0.3;
+export const HALO_PULL_MAX = 0.55;
 /** Motes per lamp post and per brazier. */
 export const MOTES_PER_LAMP = 5;
 export const MOTES_PER_BRAZIER = 6;
@@ -61,20 +67,20 @@ export function portusTownLights(): TownLight[] {
     return TOWN_LAYOUT.filter((l) => l[0] === i).map((l) => [l[1], l[2]] as const);
   };
   for (const [e, n] of of("lamp_post")) {
-    out.push({ at: [e, n, LANTERN_M], size: 1.5, color: LAMP, core: 2.3, skirt: 0.34, drift: 0, phase: 0, day: 0 });
+    out.push({ at: [e, n, LANTERN_M], size: 1.6, color: LAMP, core: 2.3, skirt: 0.46, drift: 0, phase: 0, day: 0 });
     for (let k = 0; k < MOTES_PER_LAMP; k++) {
       out.push({ at: [e + (rnd() - 0.5) * 3.2, n + (rnd() - 0.5) * 3.2, 0.6 + rnd() * 2.2], size: 0.045 + rnd() * 0.035, color: LAMP, core: 2.4, skirt: 0.5, drift: 2.4 + rnd() * 2.2, phase: rnd(), day: 0 });
     }
   }
   for (const [e, n] of of("brazier")) {
-    out.push({ at: [e, n, BRAZIER_M], size: 1.35, color: EMBER, core: 1.9, skirt: 0.36, drift: 0, phase: 0, day: 0.25 });
+    out.push({ at: [e, n, BRAZIER_M], size: 1.4, color: EMBER, core: 1.9, skirt: 0.44, drift: 0, phase: 0, day: 0.25 });
     for (let k = 0; k < MOTES_PER_BRAZIER; k++) {
       out.push({ at: [e + (rnd() - 0.5) * 0.7, n + (rnd() - 0.5) * 0.7, BRAZIER_M + rnd() * 0.5], size: 0.03 + rnd() * 0.03, color: EMBER, core: 2.6, skirt: 0.4, drift: 2.8 + rnd() * 2.6, phase: rnd(), day: 0.3 });
     }
   }
   for (const [to, [e, n]] of Object.entries(TOWN_FIXED.portals) as [BodyId, readonly [number, number]][]) {
     // The destination's colour in the air round the arch: wide, weak, no core (the vortex is the core).
-    out.push({ at: [e, n, 3.3], size: 8.5, color: PORTAL_COLORS[to], core: 0, skirt: 0.2, drift: 0, phase: 0, day: 0.12 });
+    out.push({ at: [e, n, 3.3], size: 8.5, color: PORTAL_COLORS[to], core: 0, skirt: 0.3, drift: 0, phase: 0, day: 0.12 });
   }
   out.push({ at: [HOLO_AT[0], HOLO_AT[1], 0.5], size: 2.4, color: 0x7fe9ff, core: 0.9, skirt: 0.3, drift: 0, phase: 0, day: 0.2 });
   return out;
@@ -134,7 +140,9 @@ export function townLightMaterial(frame: { up: THREE.Vector3; east: THREE.Vector
   // Face the camera: spread the corners along its right and up.
   const right = cameraWorldMatrix.mul(vec4(1, 0, 0, 0)).xyz;
   const camUp = cameraWorldMatrix.mul(vec4(0, 1, 0, 0)).xyz;
-  m.positionNode = positionLocal.add(moved).add(right.mul(uv().x.mul(size))).add(camUp.mul(uv().y.mul(size)));
+  const centre = positionLocal.add(moved);
+  const pull = normalize(cameraPosition.sub(centre)).mul(size.mul(HALO_PULL).min(HALO_PULL_MAX));
+  m.positionNode = centre.add(pull).add(right.mul(uv().x.mul(size))).add(camUp.mul(uv().y.mul(size)));
 
   const r2 = uv().x.mul(uv().x).add(uv().y.mul(uv().y));
   const edge = float(1).sub(r2).clamp(0, 1);

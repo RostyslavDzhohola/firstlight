@@ -43,7 +43,7 @@ const RINGS = 4, SPOKES = 18;
 export function portusLightPools(): LightPool[] {
   const pools: LightPool[] = [];
   const lamp = TOWN_PREFABS.findIndex((p) => p.name === "lamp_post");
-  for (const [prefab, e, n] of TOWN_LAYOUT) if (prefab === lamp) pools.push({ at: [e, n], radius: 5.8, color: LAMP, day: 0, strength: 0.34, tint: 22 });
+  for (const [prefab, e, n] of TOWN_LAYOUT) if (prefab === lamp) pools.push({ at: [e, n], radius: 5.8, color: LAMP, day: 0, strength: 0.4, tint: 16 });
   for (const [to, [e, n]] of Object.entries(TOWN_FIXED.portals) as [BodyId, readonly [number, number]][]) {
     // In front of the arch: 3.4 m towards the plaza's centre.
     const d = Math.hypot(e, n) || 1;

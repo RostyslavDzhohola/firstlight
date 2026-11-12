@@ -24,10 +24,10 @@ const FLAME = new THREE.Color(1.0, 0.36, 0.06).multiplyScalar(0.55);
 /**
  * Lit windows at night: warm, and at full lamplight over every body's bloom threshold (1.1–1.4,
  * render/looks.ts), so a lit window glows into the evening instead of sitting flat on the wall
- * (D-gfx-hub-9). Luminance at full lamplight is WINDOW_GLOW × 0.76.
+ * (D-gfx-hub-10). Luminance at full lamplight is WINDOW_GLOW × 0.76.
  */
 const WINDOW = new THREE.Color(1.0, 0.72, 0.38);
-export const WINDOW_GLOW = 2.1;
+export const WINDOW_GLOW = 1.85;
 /** WINDOW_GLOW as a uniform (one float shared by every town material: tuning needs no rebuild). */
 export const windowGlow = uniform(WINDOW_GLOW);
 /**

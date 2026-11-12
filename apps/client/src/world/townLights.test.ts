@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as THREE from "three/webgpu";
 import { createTerrain } from "@firstlight/shared";
 import { TOWN_LAYOUT, TOWN_PREFABS } from "@firstlight/shared/content/portusTown";
-import { LANTERN_M, MOTES_PER_BRAZIER, MOTES_PER_LAMP, portusTownLights, townLightGeometry, townLightMaterial } from "./townLights.ts";
+import { HALO_PULL, HALO_PULL_MAX, LANTERN_M, MOTES_PER_BRAZIER, MOTES_PER_LAMP, portusTownLights, townLightGeometry, townLightMaterial } from "./townLights.ts";
 
 describe("Portus' evening lights", () => {
   const lights = portusTownLights();
@@ -28,8 +28,10 @@ describe("Portus' evening lights", () => {
     expect(new Set(portal.map((l) => l.color)).size).toBe(3);
     for (const l of portal) {
       expect(l.core).toBe(0);
-      expect(l.skirt).toBeLessThan(0.35);
+      expect(l.skirt).toBeLessThanOrEqual(0.35);
     }
+    // A lantern's halo is pulled clear of the lantern's own model (about 0.25 m from its centre).
+    expect(Math.min(lantern[0]!.size * HALO_PULL, HALO_PULL_MAX)).toBeGreaterThan(0.3);
     // Motes are small.
     for (const m of motes) expect(m.size).toBeLessThan(0.1);
     expect(portusTownLights()).toEqual(lights); // the same every session
