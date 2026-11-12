@@ -66,6 +66,9 @@ function geometries() {
 const C = {
   next: new THREE.Color(2.6, 1.9, 0.6), // gold
   later: new THREE.Color(0.55, 0.75, 1.1), // pale blue
+  // Ring posts (soft material, added light): a gold beam over the ring to run now, a short dim one over the rest.
+  postNext: new THREE.Color(1.5, 1.05, 0.3),
+  postLater: new THREE.Color(0.22, 0.32, 0.5),
   // The beacon stays under the bloom threshold (1.25) at night too, where glowBoost reaches 2: a thin
   // outline in these, and the beam and fill (soft material) in fractions of them.
   beaconIdle: new THREE.Color(0.28, 0.55, 0.62),
@@ -102,6 +105,13 @@ const LAY_FLAT = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0,
 const FACE_UP = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
 const _s = new THREE.Vector3();
 const _c = new THREE.Color();
+/** The torus's outer radius: a ring's post starts at its top. */
+const RING_TOP = 2.76;
+/** Ring posts (D-polish-9), as scales of the 7 m column: the next ring's is 16 m tall and 1 m wide, a later ring's 4 m. */
+const POST_NEXT_H = 16 / 7;
+const POST_NEXT_W = 1.9;
+const POST_LATER_H = 4 / 7;
+const POST_LATER_W = 0.9;
 /** The beam's and the fill's share of the beacon colour (added light, so small). */
 const BEAM_K = 1.5;
 const FILL_K = 0.45;
@@ -124,6 +134,7 @@ export class TrialMarkers {
   private readonly beacons: Spot[];
   private readonly shards: Spot[];
   private readonly ringMesh: THREE.InstancedMesh | null;
+  private readonly postMesh: THREE.InstancedMesh | null;
   private readonly flatMesh: THREE.InstancedMesh | null;
   private readonly fillMesh: THREE.InstancedMesh | null;
   private readonly columnMesh: THREE.InstancedMesh | null;
@@ -172,6 +183,7 @@ export class TrialMarkers {
       return m;
     };
     this.ringMesh = make(g.ring, this.rings.length, "rings");
+    this.postMesh = make(g.column, this.rings.length, "ringPosts", true);
     this.flatMesh = make(g.flat, this.beacons.length, "beaconRing");
     this.fillMesh = make(g.fill, this.beacons.length, "beaconFill", true);
     this.columnMesh = make(g.column, this.beacons.length, "beaconColumn", true);
@@ -209,8 +221,11 @@ export class TrialMarkers {
     let any = false;
 
     // Race rings: upright, facing along the route; the next one gold, the rest pale; passed ones gone.
+    // A ring seen edge-on is a line in the grass, so each carries a post of light that reads from any
+    // side: a tall gold beam over the one to run now, a short dim one over the rest.
     const ringMesh = this.ringMesh;
-    if (ringMesh) {
+    const postMesh = this.postMesh;
+    if (ringMesh && postMesh) {
       for (let i = 0; i < this.rings.length; i++) {
         const s = this.rings[i]!;
         const r = s.race;
@@ -218,6 +233,7 @@ export class TrialMarkers {
         const next = running ? trial!.progress : 0;
         if (!r || !open.has(r.mission) || (running && r.k < next)) {
           ringMesh.setMatrixAt(i, HIDDEN);
+          postMesh.setMatrixAt(i, HIDDEN);
           continue;
         }
         any = true;
@@ -226,7 +242,14 @@ export class TrialMarkers {
         _p.copy(s.pos).addScaledVector(s.up, RING_LIFT);
         ringMesh.setMatrixAt(i, _m.compose(_p, q, _s.set(pulse, pulse, pulse)));
         ringMesh.setColorAt(i, r.k === next ? C.next : C.later);
+        const h = r.k === next ? POST_NEXT_H : POST_LATER_H;
+        const w = r.k === next ? POST_NEXT_W * pulse : POST_LATER_W;
+        _p.copy(s.pos).addScaledVector(s.up, RING_LIFT + RING_TOP + h * 3.5);
+        postMesh.setMatrixAt(i, _m.compose(_p, q, _s.set(w, h, w)));
+        postMesh.setColorAt(i, r.k === next ? C.postNext : C.postLater);
       }
+      postMesh.instanceMatrix.needsUpdate = true;
+      if (postMesh.instanceColor) postMesh.instanceColor.needsUpdate = true;
       ringMesh.instanceMatrix.needsUpdate = true;
       if (ringMesh.instanceColor) ringMesh.instanceColor.needsUpdate = true;
     }

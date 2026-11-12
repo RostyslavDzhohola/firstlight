@@ -39,6 +39,32 @@ describe("trial markers", () => {
     expect(m.group.visible).toBe(false);
   });
 
+  it("ring posts: a tall beam over the next ring, a short dim one over later rings, none over passed ones", () => {
+    const { m, mesh } = markers("arcadia");
+    const posts = mesh("ringPosts");
+    const order = MISSION_BY_ID.get("T1")!.race!.rings;
+    const index = (id: string): number => (m as any).rings.findIndex((s: any) => s.def.id === id);
+    const post = (k: number) => {
+      const i = index(order[k]!);
+      const mx = new THREE.Matrix4();
+      posts.getMatrixAt(i, mx);
+      const spot = (m as any).rings[i];
+      const height = new THREE.Vector3().setFromMatrixScale(mx).y * 7;
+      const centre = new THREE.Vector3().setFromMatrixPosition(mx).sub(spot.pos).dot(spot.up);
+      return { height, base: centre - height / 2, top: centre + height / 2, glow: new THREE.Color().fromBufferAttribute(posts.instanceColor!, i).g };
+    };
+    m.update(0.016, { missions: [{ id: "T1", done: false }], trial: trial({ progress: 3 }) });
+    expect(post(2).height).toBe(0); // passed
+    expect(post(3).top).toBeGreaterThan(18); // clears grass and trees' lower branches, reads at 60 m
+    expect(post(3).base).toBeGreaterThan(4); // starts above the ring, out of the runner's way
+    expect(post(5).height).toBeCloseTo(4);
+    expect(post(5).glow).toBeLessThan(post(3).glow / 2);
+    expect((posts.material as THREE.Material).name).toBe("trialMarkerSoft"); // the pooled see-through material
+    // Before the run starts the first ring carries the beam.
+    m.update(0.016, { missions: [{ id: "T1", done: false }], trial: null });
+    expect(post(0).height).toBeGreaterThan(15);
+  });
+
   it("shards: taken pieces gone; the beacon shows while its mission is open", () => {
     const meridian = markers("meridian");
     const shards = meridian.mesh("shards");
