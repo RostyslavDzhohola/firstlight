@@ -164,6 +164,8 @@ export class BannerQueue {
   private leaveAt = 0;
   private freeAt = 0;
   private leaving = false;
+  /** When the clock stopped (the HUD is hidden under a menu or photo mode), or null while it runs. */
+  private pausedAt: number | null = null;
 
   get showing(): Moment | null {
     return this.current;
@@ -192,7 +194,26 @@ export class BannerQueue {
     return was;
   }
 
+  get paused(): boolean {
+    return this.pausedAt !== null;
+  }
+
+  /** Stop the clock: nothing shows, holds or leaves until `resume`. */
+  pause(now: number): void {
+    if (this.pausedAt === null) this.pausedAt = now;
+  }
+
+  /** Start the clock again: the banner on screen and the gap after it keep the time they had left. */
+  resume(now: number): void {
+    if (this.pausedAt === null) return;
+    const d = Math.max(0, now - this.pausedAt);
+    this.pausedAt = null;
+    this.leaveAt += d;
+    this.freeAt += d;
+  }
+
   tick(now: number): QueueStep {
+    if (this.pausedAt !== null) return null;
     if (this.current) {
       if (!this.leaving && now >= this.leaveAt) {
         this.leaving = true;

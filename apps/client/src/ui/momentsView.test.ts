@@ -55,6 +55,23 @@ describe("banners on the HUD", () => {
     hud.tick(60_000);
     expect(top.querySelector(".fl-moment")).toBeNull();
   });
+
+  it("waits while the HUD is hidden: no banner goes up or is announced under a menu", () => {
+    const { hud, top } = mount();
+    const shown: string[] = [];
+    hud.onShow = (m) => shown.push(m.title);
+    hud.push(...missionMoments("A3", 180, 60));
+    hud.tick(0, true);
+    hud.tick(60_000, true);
+    expect(top.querySelector(".fl-moment")).toBeNull();
+    expect(shown).toEqual([]);
+    hud.tick(60_001); // the menu closes
+    expect(shown).toEqual(["The Big Lake"]);
+    hud.tick(60_100, true);
+    hud.tick(200_000, true); // photo mode over the banner: it stays up, unexpired
+    hud.tick(200_001);
+    expect(top.querySelector(".fl-moment:not(.is-out)")).not.toBeNull();
+  });
 });
 
 describe("the arrival card", () => {

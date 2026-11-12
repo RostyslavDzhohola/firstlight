@@ -228,7 +228,8 @@ export class MomentsClient implements ClientSystem {
       this.arrivalDue = false;
       if (!g.bench) m.arrival(arrivalCard(g.bodyId));
     }
-    m.tick(now);
+    // A menu (body.fl-paused) or photo mode hides every HUD root: the banners wait for it to come back.
+    m.tick(now, !!g.photo?.active || document.body.classList.contains("fl-paused"));
     if (now >= this.rosterAt) {
       this.rosterAt = now + ROSTER_MS;
       this.lookAtRoster(now);

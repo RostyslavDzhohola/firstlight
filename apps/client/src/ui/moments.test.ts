@@ -130,4 +130,21 @@ describe("the banner queue", () => {
     q.push(m("after"));
     expect(q.tick(2)).toEqual({ show: expect.objectContaining({ title: "after" }) });
   });
+
+  it("pauses while the HUD is hidden: nothing shows or leaves, and the hold resumes where it stopped", () => {
+    const q = new BannerQueue();
+    q.push(m("a"));
+    q.pause(0);
+    expect(q.tick(5000)).toBeNull(); // queued under a menu: not shown unseen
+    q.resume(5000);
+    expect(q.tick(5000)).toEqual({ show: expect.objectContaining({ title: "a" }) });
+    q.pause(5100);
+    expect(q.tick(99_000)).toBeNull(); // held under photo mode: not expired unseen
+    q.resume(20_000);
+    const leave = 20_000 + BANNER_IN_MS + 1000 - 100; // 100 ms of the hold had gone before the pause
+    expect(q.tick(leave - 1)).toBeNull();
+    expect(q.tick(leave)).toEqual({ hide: true });
+    q.resume(leave + 1); // not paused: a no-op
+    expect(q.paused).toBe(false);
+  });
 });

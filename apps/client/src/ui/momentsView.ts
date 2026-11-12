@@ -63,8 +63,13 @@ export class MomentsHud {
     this.queue.push(...moments.filter((m): m is Moment => !!m));
   }
 
-  /** Every frame: the banner queue and the feed's clock. */
-  tick(now: number): void {
+  /**
+   * Every frame: the banner queue and the feed's clock. `hidden` (a menu or photo mode hides the HUD)
+   * stops the banner clock, so nothing shows, sounds or expires unseen; the feed keeps its own time.
+   */
+  tick(now: number, hidden = false): void {
+    if (hidden) this.queue.pause(now);
+    else this.queue.resume(now);
     const step = this.queue.tick(now);
     if (step && "show" in step) this.showBanner(step.show);
     else if (step) this.hideBanner();
