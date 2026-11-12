@@ -361,6 +361,12 @@ export class Player {
     return true;
   }
 
+  /** A click at a page point (a map spot, an overlay), keeping `this.mouse` on the real cursor. */
+  async clickAt(x: number, y: number, button: "left" | "right" = "left") {
+    this.mouse = { x, y };
+    await this.page.mouse.click(x, y, { button });
+  }
+
   async hold(keys: string[], ms: number) {
     for (const k of keys) await this.page.keyboard.down(k);
     await this.page.waitForTimeout(ms);
