@@ -2,7 +2,8 @@
 // $BENCH_OUT/<project>-passes-<tier>-<run>.json. Skipped unless BENCH_MODE=passes, so `pnpm e2e`
 // never runs it. WebGPU only (the webgl project gets `passes: null` and skips the checks):
 //   BENCH_MODE=passes BENCH_TIER=high pnpm exec playwright test -c e2e/playwright.config.ts --project webgpu --grep @bench
-// Optional: BENCH_RUN=1, BENCH_OUT=/tmp/…, BENCH_FLAGS=benchwarm=30,benchrounds=4 (extra URL flags).
+// Optional: BENCH_RUN=1, BENCH_OUT=/tmp/…, BENCH_FLAGS=benchwarm=30,benchrounds=4 (extra URL flags; a `+`
+// inside a value stands for a comma: BENCH_FLAGS=body=arcadia,benchpasses=meadow+clouds,extras=meadow+clouds2).
 // Run it with the machine otherwise idle and plugged in: the numbers are wall-clock GPU time.
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -21,7 +22,7 @@ test(`bench · passes · ${TIER}`, { tag: ["@bench"] }, async ({ player, page },
   const extra: Record<string, true | string> = { offline: true, autoplay: true, bench: "passes", tier: TIER };
   for (const f of (process.env.BENCH_FLAGS ?? "").split(",").filter(Boolean)) {
     const [k, v] = f.split("=");
-    extra[k!] = v ?? true;
+    extra[k!] = v?.replaceAll("+", ",") ?? true;
   }
   mkdirSync(BENCH_OUT, { recursive: true });
   await page.goto(player.url(extra));

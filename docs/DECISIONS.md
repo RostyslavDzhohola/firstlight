@@ -1855,3 +1855,49 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   a frame's move land on it (a flat top's radius grows off its centre; a hair of drift left a fall
   hovering for a frame). Why: since D-fixes-1 a slow frame advances in full, so a fixed step per
   placement made the camera crawl at low frame rates and the linear factors snapped.
+- **D-gfx-worlds-10 (2026-11-12):** the planet graphics review's four findings are fixed
+  (`docs/reviews/2026-11-12-planet-graphics-pass1-gpt-6.1-sol.md` has the table), and with them
+  four rules. (1) A probe draws the world it measures: it takes a `ProbeWorld` (`render/probe.ts`),
+  streams before every frame and, after each tier switch, waits (up to `WORLD_TOPUP_CAP_MS`) for
+  the grass that tier sizes before that stage's warm-up and measurement; the first-visit probe, the
+  live re-probe (`reprobe()`) and a graphics change all do. What streams in after a warm-up must
+  already be compiled by it, so the grass keeps a hidden, empty cell of the tier's grass that only
+  the warm-up draws: the same material, attribute layout and shadow flag as the cells (three's
+  build key), whatever ground is near. (2) Water takes its ripple slope from a noise vector in world
+  space projected onto the surface (`render/waterRipple.ts`), never from a tangent frame built on a
+  reference axis: such a frame turns where the axis switches. (3) `aerial` is a shader variant, not
+  only a uniform: `fogNodeFor` keeps a plain fog graph and one with the far-haze tint and the
+  Aerial switch (`?noaerial`) picks between them, so `aerial` is in `?bench=passes`. This fits
+  D-gfx-worlds-7: the far haze is on at every tier, so no tier change and no ladder step switches
+  the variant; the switch itself rebuilds the fogged shaders behind its own warm-up, as the Fog
+  switch does. (4) What a planet's graphics build per body is freed with the body: the landmarks'
+  geometry goes with the body's last planet and their material with the last landmarks; the next
+  arrival builds them again before its warm-up. Why: the review (Codex gpt-6.1-sol) found that a
+  session starting on Low and re-probing upward compiled `grass-meadow` in play and measured bare
+  ground, that the ripples' normal jumped on two latitude circles which lakes cross on all three
+  planets, that `?noaerial` saved nothing, and that landmark buffers were never freed.
+- **D-gfx-worlds-11 (2026-11-12):** the planet features priced in the one calm stretch of the run
+  (load 5–20, 09:19–09:26), and the two extras still not in the cost model. `?bench=passes` on
+  Arcadia (M1, headless Chrome, WebGPU, each feature switched off in turn, six rounds of 16-frame
+  batches, noon, `e2e/bench-passes.spec.ts` with `BENCH_FLAGS=body=arcadia,benchwarm=20,benchrounds=6,
+  benchpasses=meadow+clouds+terrainfx+waterfx+landmarks+aerial+foliagefx+shafts+mist+fireflies`),
+  Medium and High alternated twice. Medium (1088×612, 2.86 and 2.74 ms a frame, 0.39 ms noise both
+  runs): all ten inside the noise; the largest were landmarks +0.18 then −0.11, terrainfx 0.09 and
+  0.17, shafts 0.06 and 0.14, foliagefx 0.09 and 0.08 ms; meadow −0.01 and 0.04, clouds 0.00 and
+  0.06, aerial −0.06 and 0.02 ms. High (1280×720, 7.75 and 7.74 ms, GPU-bound, 0.94 and 0.92 ms
+  noise): meadow 0.51 and 0.57 ms, terrainfx 0.14 and 0.15, landmarks 0.11 and 0.10, waterfx 0.07
+  and 0.07, foliagefx 0.04 and 0.03, aerial 0.03 and 0.00, mist 0.03 and 0.03, shafts and
+  fireflies 0.00, clouds −0.16 and −0.03 ms: the two runs agree to 0.06 ms on every feature but
+  clouds, so the meadow's 0.5–0.6 ms (7%) on High is real though under the bench's own noise line,
+  and nothing else of the planets' passes costs over 0.15 ms there. No shader was built during any
+  measurement. The extras: Medium with `extras=meadow,clouds2` against plain Medium, alternated
+  twice (twelve rounds), raised the GPU busy p50 over the bench's flight round the spawn from 2.84
+  to 3.11 ms and from 2.81 to 3.09 ms (+0.27 and +0.28 ms, 10% of Medium's). That is both extras
+  together, and the flight never comes within the 14 m where the `meadow` extra draws its full
+  clumps (triangles unchanged at 234k), so it is at most `clouds2`'s price and says nothing of
+  `meadow`'s. `EXTRA_COSTS` stays without both (D-gfx-worlds-4 stands): they need a quiet machine,
+  one extra a run, and for `meadow` a view at eye height in deep grass (the bench's fixed view and
+  flight are too high). The dawn and night runs for shafts, mist and fireflies (`time=0.17`,
+  `time=0`) ran as the load went back to 35–440: noise 1.0–6.3 ms, not usable. Why: the first two
+  passes measured at load 190–270 and could not resolve a millisecond; a cost goes into the model
+  only from a measurement that can (D-framerate-3).
