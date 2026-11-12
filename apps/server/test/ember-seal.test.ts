@@ -4,6 +4,7 @@ import { BODIES, isSafe, TOWN_GATES } from "@firstlight/shared";
 import { STARTERS, WEAPON_BY_ID } from "@firstlight/shared/content/weapons";
 import { PF } from "@firstlight/shared/net/schema";
 import type { Game } from "../src/app.ts";
+import { starterMaxHp } from "@firstlight/shared/content/starters";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 import { flat, me, nearPad, offset, place, spawnNpc, st, type V } from "./npc-bots.ts";
 
@@ -23,6 +24,8 @@ const NINJA = STARTERS.findIndex((s) => s.id === "ninja");
 /** Metres from Arcadia's pad 0 to the duel spot: out of the walled arrival outpost, on open land. */
 const BASE = 70;
 const SEAL = WEAPON_BY_ID.get("ember_seal")!;
+/** The targets are Brother Ash (starter 1): full HP at level 1 is his row's (content/starters.ts). */
+const ASH_HP = starterMaxHp(1, 1);
 const hold = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** waitFor with a label in the failure message. */
 const until = (label: string, cond: () => boolean, ms?: number) => waitFor(cond, ms).catch(() => {
@@ -102,8 +105,8 @@ describe("ninja starter: Ember Kunai and Ember Seal", () => {
     const before = hp();
     await seal(a, aimAt(a, b));
     await waitFor(() => hp() <= before - SEAL.tiers[0].damage);
-    await waitFor(() => hp(others[0]) < 100);
-    expect(100 - hp(others[0])).toBeLessThan(SEAL.tiers[0].splash!); // falloff, no direct hit
+    await waitFor(() => hp(others[0]) < ASH_HP);
+    expect(ASH_HP - hp(others[0])).toBeLessThan(SEAL.tiers[0].splash!); // falloff, no direct hit
     // The burn keeps ticking after the hit.
     const afterHit = hp();
     await waitFor(() => hp() < afterHit, 4000);
@@ -121,7 +124,7 @@ describe("ninja starter: Ember Kunai and Ember Seal", () => {
     a.send("fire", { slot: 0, ...aimAt(a, b), t: Date.now(), seal: true }); // auto-equips the kunai
     await waitFor(() => denied.includes("not charged"));
     await hold(800);
-    expect(hp()).toBe(100);
+    expect(hp()).toBe(ASH_HP); // untouched
   });
 
   it("the fireball reaches 30 m and no further", async () => {
@@ -141,9 +144,9 @@ describe("ninja starter: Ember Kunai and Ember Seal", () => {
     const hpOf = (r: Room) => st(near).players.get(r.sessionId).hp as number;
     await seal(far, aimAtPoint(far, pos(tf), 1.3));
     await seal(near, aimAtPoint(near, pos(tn), 1.3));
-    await until("the near target hit", () => hpOf(tn) < 100);
+    await until("the near target hit", () => hpOf(tn) < ASH_HP);
     await hold(1500); // the far bolt had time to fly 36 m and more
-    expect(hpOf(tf)).toBe(100);
+    expect(hpOf(tf)).toBe(ASH_HP);
   });
 
   it("the seal is refused the moment its caster steps into a pad's safe ring", async () => {

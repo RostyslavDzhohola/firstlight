@@ -9,7 +9,7 @@ import { maxHp } from "./progression.ts";
 import { STARTERS } from "./weapons.ts";
 
 /** Shared base values (content §0): every row multiplies or replaces these. */
-export const BASE_MOVE = { run: 6, sprint: 9, dodgeCooldown: 1.2 } as const;
+export const BASE_MOVE: { readonly run: number; readonly sprint: number; readonly dodgeCooldown: number } = { run: 6, sprint: 9, dodgeCooldown: 1.2 };
 
 export interface StarterStats {
   id: (typeof STARTERS)[number]["id"];
@@ -35,8 +35,9 @@ export const STARTER_STATS: readonly StarterStats[] = [
   { id: "ash", hp: 1.12, speed: 0.92, dodgeCooldown: 1.35, spellPower: 0.9, traits: ["Sturdy", "Slow"] },
   // Kappa: balanced body with the best dodge and a little extra pace.
   { id: "kappa", hp: 1.0, speed: 1.04, dodgeCooldown: 1.0, spellPower: 1.0, traits: ["Balanced", "Best dodge"] },
-  // Unit 7: the steady shot; pays with a little less HP, pace and a slower roll.
-  { id: "unit7", hp: 0.95, speed: 0.98, dodgeCooldown: 1.25, spellPower: 0.95, traits: ["Steady aim", "Slow roll"] },
+  // Unit 7: the steady reference: base HP and pace, the steady shot; pays with a slower roll, the weakest
+  // crowd clear (one target per shot) and the lowest spell power but Ash's.
+  { id: "unit7", hp: 1.0, speed: 1.0, dodgeCooldown: 1.25, spellPower: 0.95, traits: ["Steady aim", "Slow roll"] },
   // Hinoko: the fastest runner, the most fragile.
   { id: "ninja", hp: 0.88, speed: 1.1, dodgeCooldown: 1.1, spellPower: 1.05, traits: ["Fast", "Fragile"] },
 ];

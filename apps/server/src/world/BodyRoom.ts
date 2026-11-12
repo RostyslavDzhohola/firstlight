@@ -1421,7 +1421,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     // Inside a reward transaction the character may be levels ahead of the synced state, whose HP
     // rises only after the commit (showLevel). Save the HP it will show, so a crash in between
     // restarts with the level's HP (F12 confirm Codex N-S1). A failed save restores `char` (persist).
-    a.char.hp = a.dead ? a.state.hp : levelUpHp(a.state.hp, a.state.level, a.char.level);
+    a.char.hp = a.dead ? a.state.hp : levelUpHp(a.state.hp, a.state.level, a.char.level, a.char.starter);
     characterRepo.current.save(a.identity.userId, a.char);
   }
 

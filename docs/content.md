@@ -853,7 +853,7 @@ skin, if it is ever wanted.
 
 ### 8.5 Starter stats (issue #9, D-balance-4; code `packages/shared/src/content/starters.ts`)
 
-A light class layer: each starter changes four numbers the server already computes in one place, each within
+A light class layer: each starter changes up to four numbers the server already computes in one place, each within
 about ±12% of the base, one strength paid for by a weakness. The server applies them (max HP; the movement
 budget and the dodge cooldown in `movement.ts`), the client predicts movement from the same row
 (`PlayerController.setStarterMove`), and the pick screen shows the words and Toughness / Speed / Dodge pips.
@@ -865,7 +865,7 @@ The roll itself (4.5 m over 0.3 s, i-frames), jump, swim, horse and fall damage 
 | Hexwick | 0.90 (90 / 261) | 6 / 9 | 1.1 s | 1.15 | Fragile, Strong magic | magic |
 | Brother Ash | 1.12 (112 / 325) | 5.52 / 8.28 | 1.35 s | 0.90 | Sturdy, Slow | toughness |
 | Kappa | 1.00 (100 / 290) | 6.24 / 9.36 | 1.0 s | 1.00 | Balanced, Best dodge | crowd clear, evasion |
-| Unit 7 | 0.95 (95 / 276) | 5.88 / 8.82 | 1.25 s | 0.95 | Steady aim, Slow roll | duels |
+| Unit 7 | 1.00 (100 / 290) | 6 / 9 | 1.25 s | 0.95 | Steady aim, Slow roll | duels (the reference body; pays with the roll, crowd clear and spell power) |
 | Hinoko | 0.88 (88 / 255) | 6.6 / 9.9 | 1.1 s | 1.05 | Fast, Fragile | mobility |
 
 The calls made for issue #9's open questions (the owner hasn't answered; D-balance-4): (1) max HP, run/sprint

@@ -1503,7 +1503,7 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   first throw on top of the dart stream, Hinoko won all 16 starter duels (4 opponents × L1/6/12/20); 24/32/42
   is the smallest trim with which every starter leads a role and none leads all.
 - **D-balance-4 (2026-11-12):** Starters play differently through a light layer, made without the owner's
-  answers to issue #9: max HP ×0.88–1.12, run/sprint ×0.92–1.10 and the dodge cooldown 1.0–1.35 s, per starter
+  answers to issue #9: max HP ×0.88–1.12, run/sprint ×0.92–1.10 and the dodge cooldown 1.0–1.35 s, per starter (Unit 7 is the reference body: base HP and pace, a slower roll)
   in `content/starters.ts` (content §8.5), fixed multipliers on the level curve; no stamina, jump, carry or
   fall-damage changes. The server applies them (max HP; `movement.ts` takes the starter's sprint for the
   budget and bank, its cooldown for rolls, and a slower starter gets 0.5 m more roll reserve per m/s under the
