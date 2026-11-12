@@ -359,7 +359,7 @@ Format: seconds from the first hit / hits needed. PvE comparison: a regular L1 e
 the Pocket Carbine in 0.5–1.5 s, inside [05]'s 1.1–1.8 s band. Build a headless sim that fails the
 build if any weapon's TTK leaves 0.6–1.6× of its class median [04].
 
-### 2.6 Spells (new, 2026-11-12; code: `packages/shared/src/content/spells.ts`, D-spells-1…6)
+### 2.6 Spells (new, 2026-11-12; code: `packages/shared/src/content/spells.ts`, D-spells-1…7)
 
 Every character has a spellbook, apart from the weapon in hand: **aether** and four spells on their
 own keys. Nothing is bought or dropped; spells open by character level, so a rebirth (level 1) closes
