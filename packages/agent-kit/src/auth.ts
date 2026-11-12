@@ -14,8 +14,9 @@
 // Local servers started with ALLOW_DEV_GUESTS=1 (and the in-process test server) also take dev
 // tokens, `dev:<id>:<name>`: no auth round trip at all.
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { randomBytes } from "node:crypto";
+import { closeSync, constants, fchmodSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 
 export class AgentError extends Error {
   /** Short machine-readable cause ("unauthorized", "agent limit", "version", …). */
@@ -44,28 +45,81 @@ export function fixedToken(token: string): TokenSource {
   return { get: async () => token, name: dev };
 }
 
-interface SavedSession {
+export interface SavedSession {
   authUrl: string;
   cookie: string;
 }
 
-function readSession(file: string | undefined, authUrl: string): string | null {
-  if (!file) return null;
+/** Never through a symlink (0 where the platform has no O_NOFOLLOW; the lstat checks still apply). */
+const NOFOLLOW = constants.O_NOFOLLOW ?? 0;
+
+/** Is something other than a regular file at `file` (a symlink, a directory, a device)? Nothing there: false. */
+function notPlainFile(file: string): boolean {
   try {
-    const s = JSON.parse(readFileSync(file, "utf8")) as SavedSession;
-    return s.authUrl === authUrl && typeof s.cookie === "string" && s.cookie ? s.cookie : null;
+    return !lstatSync(file).isFile();
   } catch {
-    return null;
+    return false;
   }
 }
 
-function writeSession(file: string | undefined, s: SavedSession): void {
-  if (!file) return;
+/**
+ * The saved session's cookie, or null. The file is the character's key: it is read through a
+ * descriptor that doesn't follow a symlink, and a file left readable by others is made private
+ * (0600) on the way.
+ */
+export function readSession(file: string | undefined, authUrl: string): string | null {
+  if (!file || notPlainFile(file)) return null;
+  let fd: number | null = null;
   try {
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, JSON.stringify(s), { mode: 0o600 });
+    fd = openSync(file, constants.O_RDONLY | NOFOLLOW);
+    const st = fstatSync(fd);
+    if (!st.isFile()) return null;
+    if ((st.mode & 0o077) !== 0) fchmodSync(fd, 0o600);
+    const s = JSON.parse(readFileSync(fd, "utf8")) as SavedSession;
+    return s.authUrl === authUrl && typeof s.cookie === "string" && s.cookie ? s.cookie : null;
   } catch {
-    /* a session that can't be saved still plays; the next run is a new guest */
+    return null;
+  } finally {
+    if (fd !== null) closeSync(fd);
+  }
+}
+
+/**
+ * Save the session. Written to a new private file next to it (created exclusively, 0600 enforced on
+ * the descriptor whatever the umask) and renamed into place, so the cookie never lands in a file
+ * that was readable by others, a reader never sees half a file, and nothing is ever written through
+ * a symlink: a path that is anything but a regular file is refused. True when it was saved; a
+ * session that can't be saved still plays, and the next run is a new guest.
+ */
+export function writeSession(file: string | undefined, s: SavedSession): boolean {
+  if (!file) return false;
+  let tmp: string | null = null;
+  let fd: number | null = null;
+  try {
+    const dir = dirname(file);
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    if (notPlainFile(file)) return false;
+    tmp = join(dir, `.${basename(file)}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`);
+    fd = openSync(tmp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW, 0o600);
+    fchmodSync(fd, 0o600);
+    writeFileSync(fd, JSON.stringify(s));
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = null;
+    renameSync(tmp, file);
+    tmp = null;
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (fd !== null) closeSync(fd);
+    if (tmp) {
+      try {
+        unlinkSync(tmp);
+      } catch {
+        /* never created, or already gone */
+      }
+    }
   }
 }
 
