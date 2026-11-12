@@ -71,8 +71,16 @@
 
 /* World nameplates (players and NPCs) */
 .fl-plates { position: fixed; inset: 0; pointer-events: none; z-index: 19; }
-.fl-plate { position: absolute; transform: translate(-50%, -100%); text-align: center; white-space: nowrap; font: 600 var(--t-xs)/1.15 var(--font-display); letter-spacing: .06em; color: var(--paper); text-shadow: var(--hud-text-shadow); }
-.fl-plate i { display: block; font: 500 var(--t-xs)/1.2 var(--font-body); font-style: normal; letter-spacing: 0; color: var(--dawn-3); }
+/* The name line holds the name and, after it, any small chip (the "AI" chip, .fl-plate__ai): the plate
+   is centred as a whole, so a chip widens the line without pushing the name off its player. A dark
+   outline keeps it readable over sky, lit paving and portals alike; size and opacity follow the
+   distance (render/plates.ts). The health bar (.fl-platebar) hangs under the plate's anchor. */
+.fl-plate { position: absolute; transform: translate(-50%, -100%); transform-origin: 50% 100%; padding-bottom: 2px; text-align: center; white-space: nowrap; font: 700 var(--t-sm)/1.25 var(--font-display); letter-spacing: .05em; color: var(--paper); text-shadow: 0 0 2px #05070b, 0 0 2px #05070b, 0 1px 3px rgba(5, 7, 11, .95), 0 0 9px rgba(5, 7, 11, .6); -webkit-font-smoothing: antialiased; will-change: transform, opacity; }
+.fl-plate i { display: block; font: 500 var(--t-xs)/1.2 var(--font-body); font-style: normal; letter-spacing: .01em; color: var(--dawn-3); }
+.fl-platebars { position: fixed; inset: 0; pointer-events: none; z-index: 19; }
+.fl-platebar { position: absolute; width: calc(4.6 * var(--u)); height: max(4px, calc(.34 * var(--u))); transform: translate(-50%, 3px); transform-origin: 50% 0; border-radius: 2px; background: rgba(12, 6, 8, .78); box-shadow: 0 0 0 1px rgba(5, 7, 11, .9), 0 1px 4px rgba(5, 7, 11, .7); overflow: hidden; will-change: transform, opacity; }
+.fl-platebar i { position: absolute; inset: 0; transform-origin: left center; background: linear-gradient(180deg, #c9f7b0, #7fdc6a 55%, #4fae4a); }
+.fl-platebar.low i { background: linear-gradient(180deg, #ffb09e, #ff6f5e 50%, #e2483a); }
 
 /* Admin console (`) */
 .fl-console { position: fixed; left: 50%; top: 22%; transform: translateX(-50%); z-index: 45; width: min(calc(34 * var(--u)), 90vw); }
