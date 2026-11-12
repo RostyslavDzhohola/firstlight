@@ -5,12 +5,15 @@
 // and, under it, the hunt: `holoPages(data, hunt)` takes the hunt's lines from whoever has them (the
 // missions lane's three-trial hunt), and shows a "sealed" placeholder until then.
 
-import type { HomeData } from "@firstlight/shared/net/home";
+import type { HomeBoard, HomeData } from "@firstlight/shared/net/home";
+import { GLEAMS } from "@firstlight/shared/content/gleams";
 
 export const HOLO_TITLE = "FIRSTLIGHT";
 /** Rows a page's table shows. */
 export const HOLO_ROWS = 8;
 export const HOLO_MEDAL_ROWS = 4;
+/** The hunt's block sits under the medal table: three rows fit above the footer. */
+export const HOLO_HUNT_ROWS = 3;
 /** Seconds a page stays up before the board flips. */
 export const HOLO_PAGE_SECONDS = 11;
 /** How often the board asks the server again (ms). */
@@ -83,11 +86,51 @@ export function holoPages(data: HomeData | null, hunt: HoloHunt | null = null): 
       subtitle: "HALL OF FIRSTS",
       sections: [
         { heading: "MOST MEDALS", rows: medals, empty: data ? "No medals won yet." : "Waiting for the tally…" },
-        { heading: hunt?.heading ?? "THE HUNT", rows: hunt?.rows.slice(0, HOLO_MEDAL_ROWS) ?? [], empty: hunt?.empty ?? "Three trials. Sealed, for now." },
+        { heading: hunt?.heading ?? "THE HUNT", rows: hunt?.rows.slice(0, HOLO_HUNT_ROWS) ?? [], empty: hunt?.empty ?? "Three trials. Sealed, for now." },
       ],
       footer,
     },
   ];
+}
+
+const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+
+/** "NOV 12" (UTC: the same on every screen in the plaza). */
+export function holoDate(at: number): string {
+  const d = new Date(at);
+  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`;
+}
+
+/** Three marks, lit for each gleam won: "◆ ◆ ◇". */
+export function gleamMarks(won: number): string {
+  const n = GLEAMS.trials.length;
+  const k = Math.max(0, Math.min(n, Math.floor(won)));
+  return [..."◆".repeat(k), ..."◇".repeat(n - k)].join(" ");
+}
+
+/**
+ * The Three Gleams on page 1 (content §5.1): the first to open the Gleam Vault (or that it's still
+ * unclaimed), how many Gleamkeepers there are (both public, from /api/home's board) and the viewer's
+ * own gleams this life. `gleams` undefined: the server hasn't said (offline, older server); `you`
+ * null: no character here.
+ */
+export function holoHunt(gleams: HomeBoard["gleams"] | null | undefined, you: { won: number; opened: boolean } | null): HoloHunt {
+  const rows: HoloRow[] = [];
+  if (gleams) {
+    const first = gleams.first[0];
+    rows.push(
+      first
+        ? { rank: "1ST", name: clipName(first.name), value: holoDate(first.at), note: "FIRST TO OPEN THE VAULT" }
+        : { rank: "1ST", name: "Unclaimed", value: "", note: "Be the first to open the vault" },
+    );
+    rows.push({ rank: "", name: "Gleamkeepers", value: String(gleams.keepers), note: "" });
+  }
+  if (you) {
+    const n = GLEAMS.trials.length;
+    const note = you.opened ? "The vault opened for you this life" : you.won >= n ? "All three: the vault is listening" : `Ask ${GLEAMS.curator.name}, west of the pad`;
+    rows.push({ rank: "YOU", name: "Your gleams", value: gleamMarks(you.won), note });
+  }
+  return { heading: "THE THREE GLEAMS", rows, empty: "Three trials. Waiting for the tally…" };
 }
 
 /** Which page shows at `t` seconds, and how far into a flip it is (0 none … 1 mid-flip). */

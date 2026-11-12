@@ -17,7 +17,8 @@ import type { ClientSystem, ClientSystemFactory } from "../game/systems.ts";
 import { atmo } from "../render/atmosphere.ts";
 import { disposeTree } from "../render/dispose.ts";
 import type { ResolvedSettings } from "../render/quality.ts";
-import { HOLO_REFRESH_MS, holoPageAt, holoPages, type HoloHunt, type HoloPage } from "./holoBoardModel.ts";
+import { gleamsWon } from "@firstlight/shared/content/gleams";
+import { HOLO_REFRESH_MS, holoHunt, holoPageAt, holoPages, type HoloHunt, type HoloPage } from "./holoBoardModel.ts";
 
 /** Where the emitter stands (east, north of the plaza's centre, m) and what the panel faces. */
 export const HOLO_AT: readonly [number, number] = [7.2, -12.6];
@@ -131,6 +132,8 @@ export class HoloBoard implements ClientSystem {
   private t = 0;
   private nextFetch = 0;
   private disposed = false;
+  /** The viewer's gleams this life ("2|0": won, vault opened), redrawn on change; "" without a character. */
+  private youKey = "";
   private readonly off: () => void;
 
   constructor(private readonly game: Game) {
@@ -226,7 +229,11 @@ export class HoloBoard implements ClientSystem {
 
   /** Draw the pages again if what they say has changed (data or hunt lines). */
   redraw() {
-    const pages = holoPages(this.data, huntLines);
+    // The Three Gleams block (missions lane): the public tally from /api/home plus your own gleams,
+    // unless someone set lines of their own (setHoloHunt).
+    const [won, opened] = this.youKey ? this.youKey.split("|").map(Number) : [0, 0];
+    const hunt = huntLines ?? holoHunt(this.data?.board?.gleams, this.youKey ? { won: won!, opened: opened === 1 } : null);
+    const pages = holoPages(this.data, hunt);
     const key = JSON.stringify(pages);
     if (key === this.drawn) return;
     this.drawn = key;
@@ -247,6 +254,14 @@ export class HoloBoard implements ClientSystem {
   }
 
   update(dt: number, now: number) {
+    const you = this.game.hud.you;
+    const key = you ? `${gleamsWon(you.missions)}|${you.gleamVault ? 1 : 0}` : "";
+    if (key !== this.youKey) {
+      // You just opened the vault: ask again once the server's board cache (60 s) has your name.
+      if (key.endsWith("|1") && this.youKey.endsWith("|0")) this.nextFetch = Math.min(this.nextFetch, now + 61_000);
+      this.youKey = key;
+      this.redraw();
+    }
     if (now >= this.nextFetch) {
       this.nextFetch = now + HOLO_REFRESH_MS;
       void this.refresh();
