@@ -100,6 +100,17 @@ describe("runProbe progress (first visit: Tuning graphics…)", () => {
     expect(seen.at(-1)).toBe(1);
   });
 
+  it("runs the caller's frame hook (the world update) in every warm-up as well as the measurements", async () => {
+    const { ctx } = fakeCtx(3); // Medium, then the re-probe at High: two warm-ups
+    let bar = 0;
+    const hookAt: number[] = [];
+    await runProbe(ctx, () => hookAt.push(bar), (f) => (bar = f));
+    // The bar: Medium's warm-up to 0.45, its measurement to 0.7, High's warm-up to 0.85, its measurement on.
+    expect(hookAt.some((f) => f < 0.45), "Medium's warm-up").toBe(true);
+    expect(hookAt.some((f) => f >= 0.7 && f < 0.85), "High's warm-up").toBe(true);
+    expect(hookAt.some((f) => f >= 0.85), "High's measurement").toBe(true);
+  });
+
   it("covers the re-probe at High too, still monotonic", async () => {
     const { ctx, tiers } = fakeCtx(3); // fast GPU: re-probe at High for Ultra
     const seen: number[] = [];

@@ -121,7 +121,7 @@ async function probeTier(ctx: RenderCtx, beforeFrame: (() => void) | undefined, 
   };
   try {
     ctx.setTier("medium", { persist: false, auto: true, extras: [] }); // plain Medium, whatever was saved
-    await warmup(ctx, { frames: 3, frame, label: "probe", onProgress: (p) => part(0, 0.45)(p.frac) });
+    await warmup(ctx, { frames: 3, beforeFrame: frame, label: "probe", onProgress: (p) => part(0, 0.45)(p.frac) });
     const m = await measure(ctx, 2000, frame, part(0.45, 0.7));
     // Drop the first few frames (pipeline creation tails).
     const d = decideProbe({ raf: m.raf.slice(3), gpu: m.gpu.slice(2), busy: m.busy.slice(2), gpuAvailable: ctx.gpu.available, visible: m.visible && watch.check() });
@@ -134,7 +134,7 @@ async function probeTier(ctx: RenderCtx, beforeFrame: (() => void) | undefined, 
     let extrasRafP50: number | null = null;
     if (d.valid && d.reprobeHigh) {
       ctx.setTier("high", { persist: false, auto: true, extras: [] });
-      await warmup(ctx, { frames: 3, frame, label: "probe", onProgress: (p) => part(0.7, 0.85)(p.frac) });
+      await warmup(ctx, { frames: 3, beforeFrame: frame, label: "probe", onProgress: (p) => part(0.7, 0.85)(p.frac) });
       const h = await measure(ctx, 1200, frame, part(0.85, 0.9));
       if (!h.visible || !watch.check()) return hidden(); // not a High that was never measured
       const u = decideUltra(h.gpu.slice(2), h.busy.slice(2));
@@ -146,7 +146,7 @@ async function probeTier(ctx: RenderCtx, beforeFrame: (() => void) | undefined, 
       const plan = planExtras({ gpuMs: d.gpuP50, cpuMs: cpuP50, frameMs: d.rafP50, budgetMs }, costs);
       if (plan.extras.length) {
         ctx.setTier("medium", { persist: false, auto: true, extras: plan.extras });
-        await warmup(ctx, { frames: 3, frame, label: "probe", onProgress: (p) => part(0.9, 0.95)(p.frac) });
+        await warmup(ctx, { frames: 3, beforeFrame: frame, label: "probe", onProgress: (p) => part(0.9, 0.95)(p.frac) });
         const v = await measure(ctx, 1200, frame, part(0.95, 1)); // as long as the High re-probe
         if (!v.visible || !watch.check()) return hidden();
         const busy = v.busy.slice(2);
