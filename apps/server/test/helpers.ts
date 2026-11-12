@@ -21,7 +21,7 @@ import { newCharacter } from "@firstlight/shared/content/character";
 
 export async function startServer(
   limits: Partial<{ maxClients: number; soloFillLimit: number; maxCopiesPerBody: number; globalCap: number }> = {},
-  opts: Pick<GameOptions, "mountAfterJson"> = {},
+  opts: Pick<GameOptions, "mountAfterJson" | "production"> = {},
 ): Promise<Game> {
   characterRepo.current = new MemoryCharacterRepo();
   resetSandboxes(); // admin sandboxes (D-admin-3) are process memory: a new server has none

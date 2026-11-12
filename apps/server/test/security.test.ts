@@ -2,7 +2,10 @@
 // block drives the real server in-process and fails on the code before its fix.
 
 import type { Room } from "@colyseus/sdk";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { PROTOCOL_VERSION } from "@firstlight/shared/net/protocol";
+import { PLAY_GATE } from "../src/world/playGate.ts";
+import { banAccount } from "../src/social/moderation.ts";
 import type { Game } from "../src/app.ts";
 import { isTestAccount } from "../src/db/index.ts";
 import { BOT_BUDGET } from "../src/world/botBudget.ts";
@@ -18,6 +21,7 @@ let server: AuthServer | null = null;
 const rooms: Room[] = [];
 const budget = { ...BOT_BUDGET };
 const guesses = { ...TOOL_GUESSES };
+const gate = { ...PLAY_GATE };
 
 afterEach(async () => {
   for (const r of rooms.splice(0)) await safeLeave(r);
@@ -27,6 +31,8 @@ afterEach(async () => {
   server = null;
   Object.assign(BOT_BUDGET, budget);
   Object.assign(TOOL_GUESSES, guesses);
+  Object.assign(PLAY_GATE, gate);
+  vi.restoreAllMocks();
 });
 
 const bot = (id: string) => `dev:${id}:${id}:loadtest`;
@@ -153,5 +159,53 @@ describe("finding 2: the load-test secret is strong and can't be guessed at spee
       }
     });
     expect((await mint(server, STRONG_SECRET, "198.51.100.40")).status).toBe(429);
+  });
+});
+
+/** A raw /api/play request: any token, any JSON body, from a given client address. */
+async function rawPlay(port: number, token: string, body: unknown, ip?: string) {
+  const res = await fetch(`http://127.0.0.1:${port}/api/play`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...(ip ? { "x-real-ip": ip } : {}) },
+    body: JSON.stringify(body),
+  });
+  return { status: res.status, json: (await res.json()) as Record<string, unknown> };
+}
+
+describe("finding 3: /api/play spends a budget before verifying anything", () => {
+  const good = { body: "portus", v: PROTOCOL_VERSION };
+
+  it("checks the body and version before the token", async () => {
+    game = await startServer();
+    expect(await rawPlay(game.port, "not-a-token", { body: "nowhere", v: PROTOCOL_VERSION })).toEqual({ status: 400, json: { ok: false, error: "bad body" } });
+    expect((await rawPlay(game.port, "not-a-token", { body: "portus", v: -1 })).status).toBe(409);
+    expect((await rawPlay(game.port, "not-a-token", good)).status).toBe(401);
+  });
+
+  it("limits requests per address and overall, invalid tokens included", async () => {
+    PLAY_GATE.ipCalls = 3;
+    game = await startServer({}, { production: true });
+    for (let i = 0; i < 3; i++) expect((await rawPlay(game.port, "bad", good, "203.0.113.50")).status).toBe(401);
+    expect((await rawPlay(game.port, "bad", good, "203.0.113.50")).status).toBe(429);
+    // A valid token from that address waits too; another address doesn't.
+    expect((await rawPlay(game.port, "dev:gate1:gate1", good, "203.0.113.50")).status).toBe(429);
+    expect((await rawPlay(game.port, "dev:gate1:gate1", good, "203.0.113.51")).json.ok).toBe(true);
+    // IPv6 addresses share their /64.
+    for (let i = 0; i < 3; i++) await rawPlay(game.port, "bad", good, `2001:db8:1:2::${i + 1}`);
+    expect((await rawPlay(game.port, "bad", good, "2001:db8:1:2:ffff::9")).status).toBe(429);
+
+    PLAY_GATE.ipCalls = 100;
+    PLAY_GATE.globalCalls = 2; // already spent above
+    expect((await rawPlay(game.port, "bad", good, "203.0.113.60")).status).toBe(429);
+  });
+
+  it("verifies a refused token once, and the explainer still says banned", async () => {
+    server = await startAuthServer({ explain: true });
+    const token = await new Browser(server).playToken();
+    banAccount(userIdOf(token), "test", null);
+    const spy = vi.spyOn(server.accounts.auth.api, "verifyJWT");
+    const r = await play(server, token);
+    expect(r).toEqual({ status: 403, json: { ok: false, error: "banned" } });
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 });

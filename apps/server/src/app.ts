@@ -17,6 +17,8 @@ import { partyOf, partyRoomFor, playRefusal } from "./social/index.ts";
 import { publicOnlineCount } from "./ops/home.ts";
 import { BOT_BUDGET, BOT_SEAT_KEY, botBudget } from "./world/botBudget.ts";
 import { botSecretFromEnv, checkToolSecret, resetToolGuesses } from "./auth/loadtest.ts";
+import { createPlayGate, playBodyRefusal } from "./world/playGate.ts";
+import type { VerifyContext } from "./auth/identity.ts";
 
 export interface GameOptions {
   port: number;
@@ -29,9 +31,11 @@ export interface GameOptions {
   gracefulShutdown?: boolean;
   onShutdown?: () => Promise<void> | void;
   /** When verification fails: is this a validly signed token of a banned account/network? (403 "banned" instead of 401.) */
-  explainRefusal?: (token: string, ip: string | null) => Promise<string | null>;
+  explainRefusal?: (token: string, ip: string | null, ctx?: VerifyContext) => Promise<string | null>;
   /** Accounts: recheck a real account when its seat is used (merged/deleted, banned, signed out). */
   revalidate?: (userId: string) => string | null;
+  /** Production: no loopback exemptions from per-address limits (D-security-3, D-security-4). */
+  production?: boolean;
 }
 
 const LOOPBACK: ReadonlySet<string> = new Set(["127.0.0.1", "::1"]);
@@ -63,6 +67,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
   identityCheck.current = opts.revalidate ?? (() => null);
   botBudget.reset();
   resetToolGuesses();
+  const playGate = createPlayGate(!!opts.production);
   const playCalls = new Map<string, number[]>();
   const ipCalls = new Map<string, number[]>();
   const pruneCalls = setInterval(() => {
@@ -119,11 +124,23 @@ export async function createGame(opts: GameOptions): Promise<Game> {
   });
 
   app.post("/api/play", async (req, res) => {
+    // Before any verification (D-security-3): the request budgets, then the cheap field checks.
+    if (!playGate.admit(directRequestIp(req))) {
+      res.status(429).json({ ok: false, error: "slow down" });
+      return;
+    }
     const auth = req.headers.authorization ?? "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-    const identity = token ? await opts.verify(token, { ip: directRequestIp(req), toolSecret: toolHeader(req) }) : null;
+    const early = token ? playBodyRefusal(req.body) : { status: 401, json: { ok: false, error: "unauthorized" } };
+    if (early) {
+      res.status(early.status).json(early.json);
+      return;
+    }
+    const vctx: VerifyContext = { ip: directRequestIp(req), toolSecret: toolHeader(req) };
+    const identity = token ? await opts.verify(token, vctx) : null;
     if (!identity) {
-      const why = token && opts.explainRefusal ? await opts.explainRefusal(token, directRequestIp(req)).catch(() => null) : null;
+      // The explainer reuses the verification above (vctx.jwt) instead of verifying again.
+      const why = token && opts.explainRefusal ? await opts.explainRefusal(token, directRequestIp(req), vctx).catch(() => null) : null;
       if (why) res.status(403).json({ ok: false, error: why });
       else res.status(401).json({ ok: false, error: "unauthorized" });
       return;

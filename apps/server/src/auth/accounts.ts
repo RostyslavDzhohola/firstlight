@@ -227,8 +227,9 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
     try {
       payload = (await auth.api.verifyJWT({ body: { token } })).payload as Record<string, unknown> | null;
     } catch {
-      return null;
+      payload = null;
     }
+    if (vctx) vctx.jwt = { token, payload };
     const sub = payload?.sub;
     if (!payload || typeof sub !== "string" || !sub) return null;
     const tokenName = typeof payload.name === "string" ? payload.name : "";

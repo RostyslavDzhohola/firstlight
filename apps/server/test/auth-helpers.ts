@@ -17,6 +17,7 @@ import { ensureAccount, loadCharacter, saveCharacter } from "../src/db/index.ts"
 import { LinkEvents } from "../src/auth/links.ts";
 import { SessionRegistry } from "../src/auth/sessions.ts";
 import { grantTravel } from "./helpers.ts";
+import { banExplainer } from "../src/social/refusal.ts";
 
 export const ORIGIN = "http://localhost:5173";
 export const TEST_SECRET = "test-secret-0123456789-test-secret-0123456789";
@@ -35,8 +36,8 @@ export function tempDir(): string {
   return mkdtempSync(join(tmpdir(), "fl-auth-"));
 }
 
-export async function startAuthServer(over: Partial<AccountsConfig> & { dir?: string; extraRoutes?: (app: Express, a: Accounts) => void } = {}): Promise<AuthServer> {
-  const { dir: givenDir, extraRoutes, ...cfgOver } = over;
+export async function startAuthServer(over: Partial<AccountsConfig> & { dir?: string; extraRoutes?: (app: Express, a: Accounts) => void; explain?: boolean } = {}): Promise<AuthServer> {
+  const { dir: givenDir, extraRoutes, explain, ...cfgOver } = over;
   const dir = givenDir ?? tempDir();
   const accounts = await createAccounts({
     production: false,
@@ -63,6 +64,7 @@ export async function startAuthServer(over: Partial<AccountsConfig> & { dir?: st
     limits: { maxClients: 40, soloFillLimit: 36, maxCopiesPerBody: 2, globalCap: 320 },
     allowedOrigins: [ORIGIN],
     revalidate: accounts.revalidate,
+    ...(explain ? { explainRefusal: banExplainer(accounts) } : {}),
     mountBeforeJson: accounts.mountBeforeJson,
     mountAfterJson: (app) => {
       accounts.mountAfterJson(app);
