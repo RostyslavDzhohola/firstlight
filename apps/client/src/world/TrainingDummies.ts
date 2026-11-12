@@ -121,7 +121,7 @@ export class TrainingDummies {
   }
 
   update(dt: number) {
-    // The spring is stiff: a slow frame (up to 200 ms, #33) runs as steps of at most 50 ms.
+    // The spring is stiff: a slow frame (up to 250 ms, #33) runs as steps of at most 50 ms.
     const steps = stepsFor(dt);
     const h = dt / steps;
     for (const d of this.dummies) {

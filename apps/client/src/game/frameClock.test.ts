@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as THREE from "three/webgpu";
 import type { Terrain } from "@firstlight/shared";
 import { ANIM } from "@firstlight/shared/net/schema";
-import { frameClock } from "./frameClock.ts";
+import { FRAME_MAX_RIDE_S, frameClock } from "./frameClock.ts";
 import { OnboardingSteps } from "./onboardingSteps.ts";
 import { TrainingDummies } from "../world/TrainingDummies.ts";
 
@@ -20,9 +20,20 @@ describe("frame clock (#33: no slow motion below 20 fps)", () => {
     expect(frameClock(60).steps).toBe(2);
   });
 
-  it("caps a slower frame at 200 ms: one packet must fit the server's movement bank, galloping too", () => {
-    expect(frameClock(250).dt).toBeCloseTo(0.2, 6); // 4 fps runs at 80 % (it was 20 %)
-    expect(frameClock(400)).toEqual({ dt: 0.2, steps: 4 });
+  it("keeps real time at 4 fps, and caps a slower frame at 250 ms: one packet must fit the server's movement bank, galloping too", () => {
+    expect(frameClock(250)).toEqual({ dt: 0.25, steps: 5 }); // 4 fps runs at 100 % (it was 20 %)
+    expect(frameClock(400)).toEqual({ dt: 0.25, steps: 5 });
+  });
+
+  it("caps a frame in the saddle at 200 ms: a gallop step must fit the horse's 5 m bank", () => {
+    expect(frameClock(200, FRAME_MAX_RIDE_S)).toEqual({ dt: 0.2, steps: 4 });
+    expect(frameClock(250, FRAME_MAX_RIDE_S).dt).toBeCloseTo(0.2, 6);
+  });
+
+  it("8 s of real time at 4 fps is 8 s of game time (the issue's tester got 0.9 s)", () => {
+    let game = 0;
+    for (let i = 0; i < 32; i++) game += frameClock(250).dt;
+    expect(game).toBeCloseTo(8, 6);
   });
 
   it("doesn't catch up a big gap (hidden tab, debugger, travel): one 50 ms step, as before", () => {

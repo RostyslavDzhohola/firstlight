@@ -46,7 +46,7 @@ import { Input } from "./input.ts";
 import { HOTKEYS } from "./keys.ts";
 import { PhotoMode } from "./PhotoMode.ts";
 import { PlayerController } from "./PlayerController.ts";
-import { frameClock } from "./frameClock.ts";
+import { FRAME_MAX_RIDE_S, FRAME_MAX_S, frameClock } from "./frameClock.ts";
 import { CLIENT_SYSTEMS, type ClientSystem } from "./systems.ts";
 import { installSocial, partyRoomOn, removedFromWorld } from "../social/index.ts";
 import { goHome } from "../home/leave.ts";
@@ -758,8 +758,8 @@ export class Game {
   private frame() {
     const now = performance.now();
     const rawMs = now - this.last;
-    // A slow frame advances up to 200 ms (in ≤ 50 ms movement steps), so low fps is barely slow motion (#33).
-    const { dt } = frameClock(rawMs);
+    // A slow frame advances in full up to 250 ms (200 ms riding), in ≤ 50 ms movement steps: 4 fps keeps real time (#33).
+    const { dt } = frameClock(rawMs, this.player?.mounted ? FRAME_MAX_RIDE_S : FRAME_MAX_S);
     this.last = now;
     if (!this.running || this.travelling) {
       // Presses made behind a loading screen are dropped, not kept for the first frame back (a C

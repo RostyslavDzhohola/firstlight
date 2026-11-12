@@ -220,7 +220,7 @@ export class PlayerController {
   }
 
   /**
-   * One frame. `dt` is the frame's game time (Game's frameClock: up to 200 ms, #33); a frame longer
+   * One frame. `dt` is the frame's game time (Game's frameClock: up to 250 ms, 200 ms riding, #33); a frame longer
    * than 50 ms runs as equal steps of at most 50 ms, with the frame's mouse look and key presses
    * applied on the first step only. `now` is the wall clock (ms) of the frame, which the dodge
    * cooldown is a deadline on, like the server's 1.2 s: a stall of any length counts in full

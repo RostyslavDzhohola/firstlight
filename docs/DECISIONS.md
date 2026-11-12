@@ -1482,3 +1482,10 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   lines on the loader, and none of that on the visit that skips WebGPU. Why: the owner's call;
   High's GTAO and TRAA need WebGPU (`render/quality.ts`), and graphics quality comes before load
   time (D-load-5).
+- **D-fixes-1 (2026-11-12):** A slow frame advances the game in full up to 250 ms on foot and 200 ms
+  in the saddle (`game/frameClock.ts`), run as movement steps of at most 50 ms; a gap over 1 s counts
+  as one 50 ms step. So the game keeps real time down to 4 fps on foot and 5 fps riding (it used to
+  clamp every frame to 50 ms: slow motion below 20 fps, #33). The server's movement check is
+  unchanged. Why: one input packet per frame has to fit the server's bank (3.5 m on foot, 5 m on a
+  horse) with 70 ms of network jitter; a 250 ms sprint (2.25 m) does, a 250 ms gallop (4 m)
+  doesn't, so riding keeps the 200 ms cap rather than loosening the anti-cheat limits.

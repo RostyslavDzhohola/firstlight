@@ -944,3 +944,40 @@ describe("a client at 4 fps (#33: slow frames advance up to 200 ms, one packet p
     expect(refusals(HORSE.sprint, true, 400)).toBe(0);
   });
 });
+
+describe("a client at 4 fps, full real time on foot (#33, D-fixes-1: frames advance up to 250 ms on foot, 200 ms riding)", () => {
+  const flat: MoveWorld = { radius: 1000, waterLevel: -100, groundAt: () => 0 };
+  /** Refusals for 16 s of one packet per `frameMs` frame, each moving `speed` × min(frame, cap), packets 70 ms early or late. */
+  function refusals(speed: number, mounted: boolean, frameMs: number, capS: number): number {
+    let now = 1_000_000;
+    const a = { ...motionFields(1000, now), lastX: 0, lastY: 0, lastZ: 1000, state: { x: 0, y: 0, z: 1000 }, mounted, mountGraceUntil: 0 } as unknown as PlayerActor;
+    const jitter = [0, -70, 70, 40, -40, 70, -70, 0];
+    let x = 0;
+    let refused = 0;
+    for (let i = 0; i < 64; i++) {
+      x += speed * Math.min(capS, frameMs / 1000);
+      now += frameMs + jitter[i % jitter.length]! - (i ? jitter[(i - 1) % jitter.length]! : 0);
+      const l = Math.hypot(x, 1000);
+      const m = { x: (x / l) * 1000, y: 0, z: (1000 / l) * 1000, anim: mounted ? ANIM.RUN : ANIM.SPRINT };
+      const r = validateMove(a, m, flat, moveLimits(a, now), now);
+      if (!r.ok) refused++;
+      else {
+        a.lastX = m.x;
+        a.lastY = m.y;
+        a.lastZ = m.z;
+      }
+    }
+    return refused;
+  }
+
+  it("sprinting at 9 m/s in 250 ms frames advancing the full 250 ms is never refused (and 400 ms frames capped there)", () => {
+    expect(refusals(MOVE.maxSpeed, false, 250, 0.25)).toBe(0);
+    expect(refusals(MOVE.maxSpeed, false, 400, 0.25)).toBe(0);
+  });
+
+  it("galloping needs the 200 ms saddle cap: 250 ms gallop steps overrun the horse's bank under jitter", () => {
+    expect(refusals(HORSE.sprint, true, 250, 0.2)).toBe(0);
+    expect(refusals(HORSE.sprint, true, 400, 0.2)).toBe(0);
+    expect(refusals(HORSE.sprint, true, 250, 0.25)).toBeGreaterThan(0);
+  });
+});
