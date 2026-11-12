@@ -375,3 +375,30 @@ describe("Input: held keys per source (review #4)", () => {
     expect(input.keys.size).toBe(0);
   });
 });
+
+describe("GamepadSource: two pads, one unplugged (review #2)", () => {
+  it("unplugging pad A releases A's keys, sprint and Select while pad B keeps its own", () => {
+    const r = rig();
+    const a = pad(0);
+    const b = pad(1);
+    r.pads.push(a, b);
+    a.stick(0, 0, -1);
+    a.press(BTN.LS); // A sprints
+    a.press(BTN.SELECT); // A starts a Select hold
+    b.press(BTN.A); // B holds jump
+    r.poll();
+    expect(r.input.down("ShiftLeft") && r.input.down("Space")).toBe(true);
+    r.pads.splice(0, 1);
+    r.src.unplugged(0);
+    expect(r.input.down("ShiftLeft")).toBe(false); // A's sprint latch let go
+    expect(r.input.down("Space")).toBe(true); // B still holds its button
+    expect(r.input.moveY).toBe(0); // A's stick no longer moves
+    r.keys.length = 0;
+    r.poll(SELECT_HOLD_MS + 10);
+    expect(r.keys.some((k) => k.code === "Tab")).toBe(false); // A's Select hold died with it
+    b.press(BTN.A, false);
+    r.poll();
+    expect(r.input.down("Space")).toBe(false);
+    r.dispose();
+  });
+});
