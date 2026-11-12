@@ -101,6 +101,22 @@ export function liveTextureBytes(t: THREE.Texture): number {
 
 const MAX_TRIES = 2;
 
+/**
+ * Free an HD texture this controller made: its GPU side, and a decoded 2D image still held (an
+ * ImageBitmap, 16–64 MB outside the JS heap; uploaded ones have only their size left). Every path that
+ * gives an HD texture up comes through here. Never for a shipped texture: its CPU copy stays.
+ */
+export function freeTexture(t: THREE.Texture | undefined) {
+  if (!t) return;
+  const img = t.image as { close?: () => void } | null | undefined;
+  if (typeof img?.close === "function") {
+    img.close();
+    const { width, height } = t.image as { width?: number; height?: number };
+    t.image = { width, height };
+  }
+  t.dispose();
+}
+
 /** The manifest as far as this session knows it. */
 type ManifestState =
   | { kind: "unknown" }
@@ -325,7 +341,7 @@ export class ArtPacks {
       if (signal.aborted) throw signal.reason ?? new Error("aborted");
       const t = await this.env.make(f, bytes, g.bases[i]!.base, signal);
       if (signal.aborted || g.state !== "loading" || g.abort !== abort) {
-        t.dispose(); // given up meanwhile: nothing is uploaded or bound
+        freeTexture(t); // given up meanwhile: nothing is uploaded or bound
         throw signal.reason ?? new Error("aborted");
       }
       g.made[i] = t;
@@ -385,14 +401,14 @@ export class ArtPacks {
   /** Put the shipped textures back in a live group's slots and release the HD ones. */
   private rollback(g: Group) {
     for (const l of g.live) l.slot.set(l.base);
-    for (const l of g.live) l.hd.dispose();
+    for (const l of g.live) freeTexture(l.hd);
     g.live = [];
     g.gpuBytes = 0;
     g.state = "pending";
   }
 
   private release(g: Group) {
-    for (const t of g.made) t?.dispose();
+    for (const t of g.made) freeTexture(t);
     g.made = [];
     g.steps = [];
     g.gpuBytes = 0;

@@ -423,4 +423,65 @@ describe("ArtPacks", () => {
     expect(w.downloads).toEqual([]);
     expect(packs.state().busy).toBe(false);
   });
+
+  /** HD textures made from a decoded 2D image (an ImageBitmap, 16–64 MB outside the JS heap); `hold` keeps make() pending. */
+  function withBitmaps(w: ReturnType<typeof world>) {
+    const closed: string[] = [];
+    const held: (() => void)[] = [];
+    let hold = false;
+    w.env.make = (entry) => {
+      const t = w.watch(tex(`hd ${entry.base}`));
+      t.image = { width: 2048, height: 2048, close: () => closed.push(entry.base) } as never;
+      if (!hold) return Promise.resolve(t);
+      return new Promise((r) => held.push(() => r(t)));
+    };
+    return { closed, held, holdMakes: () => (hold = true) };
+  }
+
+  it("a pause frees a half-made group's bitmaps as well as its textures", async () => {
+    const w = world(["characters/ash_albedo.webp", "characters/ash_normal.webp"]);
+    const b = withBitmaps(w);
+    const packs = new ArtPacks(w.env, { mode: "on", only: ["chars"] });
+    packs.setTier("medium");
+    packs.resume();
+    await w.tick(ArtPacks.START_DELAY_MS);
+    w.downloads[0]!.resolve(new Uint8Array(4)); // the albedo is made; the normal is still downloading
+    await w.tick();
+    packs.pause();
+    expect(b.closed).toEqual(["characters/ash_albedo.webp"]);
+    expect([...w.disposed].map((t) => t.name)).toContain("hd characters/ash_albedo.webp");
+  });
+
+  it("a texture made after its group was given up (pause during the decode) is freed, bitmap and all", async () => {
+    const w = world(["characters/ash_albedo.webp", "characters/ash_normal.webp"]);
+    const b = withBitmaps(w);
+    b.holdMakes();
+    const packs = new ArtPacks(w.env, { mode: "on", only: ["chars"] });
+    packs.setTier("medium");
+    packs.resume();
+    await w.tick(ArtPacks.START_DELAY_MS);
+    w.downloads[0]!.resolve(new Uint8Array(4));
+    await w.tick();
+    expect(b.held).toHaveLength(1); // decoding
+    packs.pause();
+    b.held[0]!(); // the decode lands after the pause
+    await w.tick();
+    expect(b.closed).toEqual(["characters/ash_albedo.webp"]);
+    expect(w.slots.get("characters/ash_albedo.webp")!.sets).toEqual([]);
+  });
+
+  it("a group that fails part way (one file's download) frees the other file's bitmap", async () => {
+    const w = world(["characters/ash_albedo.webp", "characters/ash_normal.webp"]);
+    const b = withBitmaps(w);
+    const packs = new ArtPacks(w.env, { mode: "on", only: ["chars"] });
+    packs.setTier("medium");
+    packs.resume();
+    await w.tick(ArtPacks.START_DELAY_MS);
+    w.downloads[0]!.resolve(new Uint8Array(4));
+    await w.tick();
+    w.downloads[1]!.reject(new Error("offline"));
+    await w.tick();
+    expect(b.closed).toEqual(["characters/ash_albedo.webp"]);
+    expect(w.slots.get("characters/ash_albedo.webp")!.sets).toEqual([]);
+  });
 });
