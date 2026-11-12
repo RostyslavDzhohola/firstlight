@@ -564,6 +564,7 @@ export class Game {
       this.self.root.name = "selfAvatar";
       this.self.root.userData.ownAvatar = true; // dissolves with the camera close to it (D-view-5)
     }
+    if (rezSwitch.on) this.self.prepareRez(); // its rez light is drawn (dark) by the warm-up below
     this.ctx.scene.add(this.self.root);
     {
       const p = this.player.pos, f = this.player.facing;

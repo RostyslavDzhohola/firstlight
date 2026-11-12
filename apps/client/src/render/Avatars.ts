@@ -328,14 +328,22 @@ export class AvatarView {
     this.rezKind = kind;
     this.rezT = 0;
     this.rezGone = false;
-    if (!this.rezLight) {
-      this.rezLight = rezFxMesh();
-      this.root.add(this.rezLight.mesh);
-    }
+    this.prepareRez();
     const [, , accent] = PALETTES[((this.palette % PALETTES.length) + PALETTES.length) % PALETTES.length]!;
-    this.rezLight.fx.color.setHex(accent).lerp(_rezTint, kind === "death" ? 0.25 : 0.5);
-    this.rezLight.mesh.visible = true;
+    const light = this.rezLight!;
+    light.fx.color.setHex(accent).lerp(_rezTint, kind === "death" ? 0.25 : 0.5);
+    light.mesh.visible = true;
     this.applyRez(rezPose(kind, 0, this.rezNow));
+  }
+
+  /**
+   * Give the avatar its (hidden) rez light now, so a warm-up that follows draws it once: the player's
+   * own avatar gets it before the arrival's warm-up, and its first effect builds nothing in play.
+   */
+  prepareRez() {
+    if (this.rezLight) return;
+    this.rezLight = rezFxMesh();
+    this.root.add(this.rezLight.mesh);
   }
 
   /** Whether a rez effect is running. */
@@ -828,6 +836,7 @@ export function avatarWarmupHook(scene: THREE.Object3D, at: () => THREE.Vector3)
       // The rez light (render/rez.ts): one material, drawn dark here.
       const light = rezFxMesh().mesh;
       light.frustumCulled = false;
+      light.visible = true; // hidden with the group, like the other samples (its values draw it dark)
       parts.push(light);
       return parts;
     });
