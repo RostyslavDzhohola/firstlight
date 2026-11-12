@@ -34,7 +34,7 @@ import { summarize, type Observation, type ObservedCreature, type ObservedItem, 
 import { addScaled, bearingOfDir, bearingTo, dirOfBearing, dist, groundDistance, len, norm, scale, sub, tangent, turn, type V3 } from "./vec.ts";
 import { createNavigator, type Navigator } from "./nav.ts";
 import { WALK, Walker } from "./walker.ts";
-import { bodyWorld, giverOf, type BodyWorld, type WorldObject } from "./world.ts";
+import { bodyWorld, type BodyWorld, type WorldObject } from "./world.ts";
 
 export interface ConnectOptions {
   /** The game server (API) origin, e.g. `http://localhost:2567`. */
@@ -213,6 +213,7 @@ export class FirstlightAgent {
   async connect(opts: ConnectOptions): Promise<ActionResult> {
     if (this.status === "playing" || this.status === "joining") return { ok: false, reason: "already connected" };
     this.opts = opts;
+    this.newGuest = false;
     this.url = opts.url.replace(/\/+$/, "");
     const s = opts.starter;
     this.starter = typeof s === "string" ? Math.max(0, STARTERS.findIndex((x) => x.id === s || x.name.toLowerCase() === s.toLowerCase())) : Math.max(0, Math.min(STARTERS.length - 1, s ?? 0));
@@ -1144,8 +1145,11 @@ export class FirstlightAgent {
     const now = Date.now();
     if (!this.walker.dodge(dir, now)) return { ok: false, reason: this.walker.swimming ? "swimming" : now < this.walker.dodgeReadyAt ? "cooldown" : "slowed", readyIn: Math.max(0, this.walker.dodgeReadyAt - now) };
     const from = this.walker.p;
-    await sleep(WALK.dodgeTime * 1000 + TICK_MS * 2);
-    // The roll's cooldown is the starter's (Kappa 1.0 s … Brother Ash 1.35 s).
+    // Until the roll is over, not for a fixed time: while the server stalls the body stands and the
+    // roll waits with it (onTick), so it can take longer than its 0.3 s on a busy machine.
+    await sleep(WALK.dodgeTime * 1000);
+    await this.until(() => !this.walker.rolling, 3000);
+    await sleep(TICK_MS * 2);
     return { ok: true, moved: round1(dist(from, this.walker.p)) };
   }
 
@@ -1660,7 +1664,10 @@ export class FirstlightAgent {
       const refused = this.waitFor<{ action: string; reason: string }>("denied", (m) => m.action === "interact", 2000).then((m) => m?.reason ?? null);
       room.send("interact", { target: best.def.id });
       const r = await Promise.race([opened, refused]);
-      if (r === "opened") return { ok: true, opened: true, coins: this.you?.coins ?? 0, reward: `${GLEAMS.reward.coins} coins and the Gleamweave Cape` };
+      if (r === "opened") {
+        await this.until(() => !!this.you?.gleamVault, 1500); // the private state with the coins and the cape follows the message
+        return { ok: true, opened: true, coins: this.you?.coins ?? 0, reward: `${GLEAMS.reward.coins} coins and the Gleamweave Cape` };
+      }
       const won = gleamsWon(this.you?.missions ?? []);
       return { ok: false, reason: r ?? (Date.now() - t0 >= 2000 ? "no answer" : "refused"), gleams: won, of: GLEAMS.trials.length, hint: r === "vault opened" ? "once per life" : `the vault needs all three gleams (trials T1, T2, T3 from ${GLEAMS.curator.name})` };
     }

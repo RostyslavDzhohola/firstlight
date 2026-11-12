@@ -2,7 +2,7 @@
 // portals, zones and world objects the server validates against and the browser client draws.
 
 import { BODIES, bodyBreakables, createTerrain, natureSolids, padDirs, portalSpots, safeGates, zoneAt, inWalledZone, type BodyDef, type BodyId, type Breakable, type NatureSolids, type PortalSpot, type Terrain, type Zone } from "@firstlight/shared";
-import { GUIDES, MISSION_BY_ID, missionGiver, missionsFrom, missionsOn, type MissionDef } from "@firstlight/shared/content/missions";
+import { GUIDES, MISSION_BY_ID, missionsFrom, missionsOn, type MissionDef } from "@firstlight/shared/content/missions";
 import { GLEAMS } from "@firstlight/shared/content/gleams";
 import { NPC_AREAS } from "@firstlight/shared/content/npcs";
 import { padName, placeDir, towardDir } from "@firstlight/shared/content/places";
@@ -178,11 +178,6 @@ export class BodyWorld {
     }
     return null;
   }
-}
-
-/** The world object that gives a mission, when it stands on this body. */
-export function giverOf(w: BodyWorld, def: MissionDef): WorldObject | null {
-  return w.givers.find((g) => g.def.id === missionGiver(def)) ?? null;
 }
 
 function id2guide(id: BodyId) {

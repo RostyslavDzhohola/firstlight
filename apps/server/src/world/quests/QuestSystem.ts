@@ -879,7 +879,8 @@ export class QuestSystem implements RoomSystem {
       a.char.coins += GLEAMS.reward.coins;
       if (eligible) {
         this.award(a, "three_gleams", events); // GLEAMS.medal
-        if (!a.identity.loadtest && !a.identity.test && !life.unofficial) first = engrave(GLEAMS.firsts, a.identity.userId, a.identity.name, events);
+        // The Hall of Firsts is people's: our automation never engraves (D-home-6), nor do AI agents (D-agents-1).
+        if (!a.identity.loadtest && !a.identity.test && !a.identity.agent && !life.unofficial) first = engrave(GLEAMS.firsts, a.identity.userId, a.identity.name, events);
       }
     });
     if (!paid) return;

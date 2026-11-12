@@ -53,6 +53,8 @@ export interface Resident {
   rng(): number;
 }
 
+/** A hunter's range: how far from its home pad it fights and roams (metres). Arcadia's Clover Fields start about 150 m out. */
+const HUNT_RANGE = 190;
 /** How near a boss arena's edge a resident lets itself get (metres). */
 const ARENA_MARGIN = 30;
 /** The hologram scoreboard in Portus Plaza: metres east and north of the plaza centre (client world/HoloBoard.ts HOLO_AT), and where to stand to read it. */
@@ -221,7 +223,7 @@ export async function goTo(r: Resident, body: BodyId): Promise<boolean> {
 /** Farms creatures of its own size near its home pad; takes the guide's hunt missions on the way. */
 export async function hunter(r: Resident): Promise<void> {
   const a = r.agent;
-  const theirs = new Map<string, number>(); // creatures left to someone, and until when
+  const theirs = new Map<string, number>(); // creatures left to someone (and piles already tried), and until when
   let asked = false;
   let idle = 0;
   while (r.alive()) {
@@ -254,19 +256,20 @@ export async function hunter(r: Resident): Promise<void> {
       await travelTo(r, pad, { sprint: true, within: 40, seconds: 60 });
       continue;
     }
-    // Loot that is ours, close, with nobody standing on it.
-    const pile = o.piles.find((p) => p.yours && p.dist < 25);
+    // Loot that is ours and close. One try each: what didn't fit in the bags stays where it is.
+    const now = Date.now();
+    const pile = o.piles.find((p) => p.yours && p.dist < 25 && (theirs.get(p.id) ?? 0) < now);
     if (pile && !o.creatures.some((c) => c.onMe)) {
+      theirs.set(pile.id, now + 120_000);
       if ((await walk(r, pile.id, { sprint: true, seconds: 12, stopWhenHit: true })).ok) await a.interact(pile.id);
       continue;
     }
-    const now = Date.now();
     const st = a.room?.state as any;
     const fair = o.creatures.filter((c) => {
       if (c.boss || c.level > me.level + 1 || c.dist > 50) return false;
       if (c.claimedBy || (theirs.get(c.id) ?? 0) > now) return false; // someone's fight
       const n = st?.npcs?.get(c.id);
-      return !!n && !nearArena(w, [n.x, n.y, n.z]) && groundDistance([n.x, n.y, n.z], pad) < 190;
+      return !!n && !nearArena(w, [n.x, n.y, n.z]) && groundDistance([n.x, n.y, n.z], pad) < HUNT_RANGE;
     });
     // What is on it, then a mission creature, then something hostile. Peaceful wildlife (the shepherd's Woolbacks) is left alone.
     const target = fair.find((c) => c.onMe) ?? fair.find((c) => c.mission) ?? fair.find((c) => c.hostile);
@@ -285,11 +288,13 @@ export async function hunter(r: Resident): Promise<void> {
       else if (fight.killed) r.log(`killed ${target.name} L${target.level}: +${fight.xp} XP`);
       continue;
     }
-    // Nothing fair in sight: drift round the pad, never far from it.
+    // Nothing fair in sight: to the hunting ground of a hunt it holds (when that is within its
+    // range), else a drift round the pad; never out of range.
     idle++;
     const hunt = o.missions.find((m) => m.type === "hunt" && !m.done && m.where);
-    if (groundDistance(a.position, pad) > 140) await travelTo(r, pad, { within: 60, seconds: 60 });
-    else if (hunt && hunt.where!.dist > 25 && idle <= 3) await walk(r, `mission:${hunt.id}`, { sprint: me.zone === "safe", seconds: 25, stopWhenHit: true });
+    const ground = hunt ? w.missionSpot(hunt.id)?.pos : undefined;
+    if (groundDistance(a.position, pad) > HUNT_RANGE) await travelTo(r, pad, { within: HUNT_RANGE - 60, seconds: 60 });
+    else if (hunt && ground && hunt.where!.dist > 25 && groundDistance(ground, pad) < HUNT_RANGE - 20) await walk(r, `mission:${hunt.id}`, { sprint: me.zone === "safe", seconds: 25, stopWhenHit: true });
     else if (me.zone === "safe") {
       // Out through the gate, then on away from the pad.
       await walk(r, "gate", { seconds: 40 });

@@ -6,15 +6,19 @@
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { Room } from "@colyseus/sdk";
-import { FirstlightAgent, groundDistance } from "@firstlight/agent-kit";
+import { bodyWorld, FirstlightAgent, groundDistance } from "@firstlight/agent-kit";
 import { BODIES, type BodyId } from "@firstlight/shared";
+import { PF } from "@firstlight/shared/net/schema";
 import type { Game } from "../src/app.ts";
-import { resetAgentSlots } from "../src/world/agents.ts";
+import { AGENT_RULES, resetAgentSlots } from "../src/world/agents.ts";
+import { GLEAMS } from "@firstlight/shared/content/gleams";
+import { MISSION_BY_ID, missionGoal } from "@firstlight/shared/content/missions";
+import { hallLines } from "../src/world/quests/hall.ts";
 import { TRIAL_RULES } from "../src/world/quests/trials.ts";
 import { SPELL_BOOKS } from "../src/world/spells/SpellSystem.ts";
 import { liveRooms } from "../src/social/index.ts";
 import { grantTravel, joinAs, safeLeave, startServer, waitFor as poll } from "./helpers.ts";
-import { adminBot, ask, me, offset, openSpotOutside } from "./npc-bots.ts";
+import { adminBot, ask, offset, openSpotOutside } from "./npc-bots.ts";
 import { objAt } from "./quest-helpers.ts";
 
 let game: Game;
@@ -31,20 +35,57 @@ const waitFor = (cond: () => boolean, ms?: number, label = step) => poll(cond, m
 });
 const d3 = (a: readonly number[], b: readonly number[]) => Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!);
 
+const perIp = AGENT_RULES.perIp;
+
 beforeAll(async () => {
   game = await startServer();
   url = `http://127.0.0.1:${game.port}`;
+  AGENT_RULES.perIp = 12; // every agent here comes from loopback; the cap has its own tests (agents.test.ts)
 });
 
+/**
+ * Leave without a trace. A body left outside a safe zone lingers 30 s, where the next test would
+ * find it (in its blast, in its fight, under the per-address cap): it is put on the pad first, and
+ * a body in a safe zone leaves at once.
+ */
+async function leave(a: FirstlightAgent) {
+  try {
+    const pad = bodyWorld(a.bodyId).pads[0]?.pos;
+    if (a.status === "playing" && !a.dead && pad && a.observe({ peek: true }).self.zone !== "safe") {
+      a.room!.send("admin", { cmd: "teleport", args: { x: pad[0], y: pad[1], z: pad[2] } });
+      await poll(() => a.observe({ peek: true }).self.zone === "safe" && groundDistance(a.position, pad) < 6, 4000).catch(() => {});
+      await sleep(200);
+    }
+  } finally {
+    await a.close();
+  }
+}
+
+/** The same for the people of a test (admin bots): onto the pad, then gone at once. */
+async function leaveRoom(r: Room) {
+  try {
+    const host = [...liveRooms].find((x) => x.actors.has(r.sessionId));
+    const pad = host ? bodyWorld(host.bodyDef.id).pads[0]?.pos : undefined;
+    const p = () => (r.state as any)?.players?.get(r.sessionId);
+    if (host && pad && p() && (p().flags & PF.SAFE) === 0) {
+      r.send("admin", { cmd: "teleport", args: { x: pad[0], y: pad[1], z: pad[2] } });
+      await poll(() => !p() || (p().flags & PF.SAFE) !== 0, 4000).catch(() => {});
+    }
+  } finally {
+    await safeLeave(r);
+  }
+}
+
 afterEach(async () => {
-  for (const a of agents.splice(0)) await a.close();
-  for (const r of rooms.splice(0)) await safeLeave(r);
+  for (const a of agents.splice(0)) await leave(a);
+  for (const r of rooms.splice(0)) await leaveRoom(r);
   TRIAL_RULES.timeScale = SCALE;
   SPELL_BOOKS.byUser.clear();
   resetAgentSlots();
 });
 
 afterAll(async () => {
+  AGENT_RULES.perIp = perIp;
   await game.close();
 });
 
@@ -191,26 +232,41 @@ describe("agents: per-starter pace", () => {
     const [fast, slow] = await Promise.all([agent("paceNinja", "arcadia", "ninja"), agent("paceAsh", "arcadia", "ash")]);
     expect(fast.observe().self).toMatchObject({ starter: "ninja", speed: { run: 6.6, sprint: 9.9, dodgeCooldown: 1.1 } });
     expect(slow.observe().self).toMatchObject({ starter: "ash", speed: { run: 5.5, sprint: 8.3, dodgeCooldown: 1.35 } });
-    const spot = openSpotOutside("arcadia");
+    const spot = openSpotOutside("arcadia", 24); // a clear 24 m line
     await put(fast, spot);
     await put(slow, spot);
     const R = BODIES.arcadia.radius;
-    const there = offset(spot, 10, 0, R);
-    // The same legs for both, at a sprint, at the same time (so a busy machine slows them alike).
+    const there = offset(spot, 24, 0, R);
+    // Top speed over any stretch of about a second (the machine is shared: averages over a whole
+    // walk say more about its load than about the walker).
+    const top = (a: FirstlightAgent) => {
+      const seen: { at: number; p: number[] }[] = [];
+      let best = 0;
+      const iv = setInterval(() => {
+        const now = Date.now();
+        seen.push({ at: now, p: a.position });
+        while (seen.length > 1 && now - seen[1]!.at >= 1000) seen.shift();
+        const first = seen[0]!;
+        if (now - first.at >= 1000 && now - first.at < 1400) best = Math.max(best, groundDistance(first.p, a.position) / ((now - first.at) / 1000));
+      }, 25);
+      return () => (clearInterval(iv), best);
+    };
+    // The same legs for both, at a sprint, at the same time.
     const legs = async (a: FirstlightAgent) => {
-      let walked = 0, seconds = 0;
-      for (let i = 0; i < 4; i++) {
-        const r = await a.moveTo({ pos: i % 2 === 0 ? there : spot }, { sprint: true, within: 0.8, seconds: 20 });
-        expect(r).toMatchObject({ ok: true, corrections: 0 });
-        walked += r.walked as number;
-        seconds += r.seconds as number;
+      const stop = top(a);
+      try {
+        for (let i = 0; i < 4; i++) expect(await a.moveTo({ pos: i % 2 === 0 ? there : spot }, { sprint: true, within: 0.8, seconds: 30 })).toMatchObject({ ok: true, corrections: 0 });
+      } finally {
+        stop();
       }
-      return walked / seconds;
+      return stop();
     };
     const [vFast, vSlow] = await Promise.all([legs(fast), legs(slow)]);
-    expect(vFast / vSlow).toBeGreaterThan(1.08); // 9.9 against 8.28 m/s on paper
-    expect(vSlow).toBeLessThanOrEqual(8.3 + 0.2);
-    expect(vFast).toBeLessThanOrEqual(9.9 + 0.2);
+    // 9.9 against 8.28 m/s on paper; a sample lands within a step (0.05 s) of each end of its second.
+    expect(vFast, `Hinoko ${vFast}, Brother Ash ${vSlow}`).toBeGreaterThan(9.2); // faster than the shared base sprint (9)
+    expect(vFast).toBeLessThan(9.9 * 1.1);
+    expect(vSlow, `Hinoko ${vFast}, Brother Ash ${vSlow}`).toBeLessThan(8.9); // slower than the base (9)
+    expect(vSlow).toBeGreaterThan(7.2);
     // Two rolls each, the second as soon as the kit says the first's cooldown is over.
     for (const a of [fast, slow]) {
       const first = await a.dodge(0);
@@ -280,6 +336,41 @@ describe("agents: trials", () => {
     expect(actor(a).violations).toBe(0);
   }, 300_000);
 
+  it("an agent with all three gleams opens the vault, and the Hall of Firsts line stays a person's (D-agents-1)", async () => {
+    const a = await agent("vaulter", "portus");
+    await a.skipTutorial();
+    // Set-up, not play: this life has won the three trials (the runs themselves are tested above and in trials.test.ts).
+    const won = (act: ReturnType<typeof actor>) => {
+      act.char.missions = GLEAMS.trials.map((id) => ({ id, progress: missionGoal(MISSION_BY_ID.get(id)!), done: true }));
+      act.youDirty = true;
+    };
+    won(actor(a));
+    await waitFor(() => a.observe({ peek: true }).hunt.gleams === 3);
+    expect(a.observe().summary).toContain("(3/3 gleams)");
+    expect(await a.moveTo("vault")).toMatchObject({ ok: true });
+    const coins = a.observe().self.coins;
+    expect(await a.interact("vault")).toMatchObject({ ok: true, opened: true, coins: coins + GLEAMS.reward.coins });
+    await waitFor(() => a.observe({ peek: true }).hunt.vaultOpened);
+    const o = a.observe();
+    expect(o.self.hotbar.concat(o.self.backpack).some((i) => i.id === "gleamweave_cape")).toBe(true);
+    expect(o.summary).toContain("(opened)");
+    expect(a.events.some((e) => e.type === "mission" && e.text.startsWith("the Gleam Vault opened"))).toBe(true);
+    expect(await a.interact("vault")).toMatchObject({ ok: false, reason: "vault opened", hint: "once per life" });
+    // The agent got the reward like anyone, but not the line: the first person to open it does.
+    expect(hallLines().some((l) => l.id === GLEAMS.firsts)).toBe(false);
+    const person = await joinAs(game, "personV", "portus", { starter: 3 }, "admin");
+    rooms.push(person);
+    await waitFor(() => !!(person.state as any).players?.get(person.sessionId));
+    const pa = [...liveRooms].find((x) => x.actors.has(person.sessionId))!.actors.get(person.sessionId)!;
+    won(pa);
+    const vault = objAt(GLEAMS.vault);
+    person.send("admin", { cmd: "teleport", args: { x: vault[0], y: vault[1], z: vault[2] } });
+    await waitFor(() => groundDistance([pa.state.x, pa.state.y, pa.state.z], vault) < 2);
+    person.send("interact", { target: GLEAMS.vault });
+    await waitFor(() => hallLines().some((l) => l.id === GLEAMS.firsts));
+    expect(hallLines().find((l) => l.id === GLEAMS.firsts)!.name).toBe("personV");
+  }, 90_000);
+
   it("lights a beacon and holds its ring against the waves", async () => {
     TRIAL_RULES.timeScale = 0.25; // a 15 s hold; waves at 0.5, 6.25 and 11.25 s
     const a = await agent("vigil", "hollowmere", "unit7");
@@ -311,7 +402,8 @@ describe("agents: trials", () => {
 describe("agents: etiquette", () => {
   /** A person's shot at a point (from the head, like the client's). */
   function fireAt(r: Room, at: readonly number[]) {
-    const p = me(r);
+    const p = (r.state as any)?.players?.get(r.sessionId);
+    if (!p) return;
     const l = Math.hypot(p.x, p.y, p.z);
     const up = [p.x / l, p.y / l, p.z / l];
     const o = [p.x + up[0]! * 1.6, p.y + up[1]! * 1.6, p.z + up[2]! * 1.6];
@@ -343,7 +435,8 @@ describe("agents: etiquette", () => {
     const spot = openSpotOutside("arcadia");
     const R = BODIES.arcadia.radius;
     await put(a, spot);
-    const person = await adminBot(game, rooms, "personY", "arcadia", offset(spot, 5, 7, R), 4);
+    // The person stands well back at first (16 m to the side), so the creature goes for the agent beside it.
+    const person = await adminBot(game, rooms, "personY", "arcadia", offset(spot, 5, 16, R), 4);
     const at = offset(spot, 7, 0, R);
     const npc = await spawn(person, "hopbit", at, 7); // far too tough for a level 1 to finish quickly
     await waitFor(() => !!creature(a, npc));

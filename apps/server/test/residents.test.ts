@@ -18,11 +18,16 @@ import type { Game } from "../src/app.ts";
 import { AGENT_RULES, agentsOnline, resetAgentSlots } from "../src/world/agents.ts";
 import { NPC_TUNING } from "../src/world/npc/index.ts";
 import { liveRooms } from "../src/social/index.ts";
-import { safeLeave, startServer, waitFor } from "./helpers.ts";
-import { adminBot, me, offset, spawnNpc } from "./npc-bots.ts";
+import { safeLeave, startServer, waitFor as poll } from "./helpers.ts";
+import { adminBot, flat, me, nearPad, offset, place, spawnNpc } from "./npc-bots.ts";
 
 let game: Game;
 let url: string;
+/** waitFor that says which wait ran out, with the residents' log so far. */
+let story: string[] = [];
+const waitFor = (cond: () => boolean, ms?: number, label?: string) => poll(cond, ms).catch(() => {
+  throw new Error(`timed out waiting: ${label ?? cond.toString().slice(0, 140)}\n${story.slice(-40).join("\n")}`);
+});
 /** Name words already in the game (guides, keepers, the curator, starters, creatures), lower case, 4+ letters. */
 const WORLD_NAMES = [...new Set([...Object.values(GUIDES).map((g) => g.name), ...SHOP_SPOTS.map((s) => s.keeper), GLEAMS.curator.name, ...STARTERS.map((s) => s.name), ...NPC_DEFS.map((n) => n.name)].flatMap((n) => n.toLowerCase().split(/[^a-z]+/)).filter((w) => w.length >= 4))];
 const ambient = NPC_TUNING.ambient;
@@ -89,7 +94,7 @@ describe("residents", () => {
 
   it("two residents join as agents, walk in through the portal, one kills a creature, and the server corrects neither", async () => {
     AGENT_RULES.enabled = true;
-    const lines: string[] = [];
+    const lines: string[] = (story = []);
     let violations = 0;
     const run = runResidents({
       url,
@@ -98,7 +103,7 @@ describe("residents", () => {
       roles: ["hunter", "wanderer"],
       cpu: 4,
       dev: true,
-      budgetMs: 240_000,
+      budgetMs: 360_000, // generous: the machine is shared, and a starved server slows every walk
       log: (l) => lines.push(l),
       until: (rep) => {
         violations = Math.max(violations, ...[...liveRooms].flatMap((r) => [...r.actors.values()]).filter((a) => a.identity.agent).map((a) => a.violations), 0);
@@ -128,29 +133,35 @@ describe("residents", () => {
     expect(lines.some((l) => l.includes("Tamsin_Hollis") && l.includes("walks to "))).toBe(true);
     // Stopped cleanly: nobody is left in the world.
     await waitFor(() => agentsOnline() === 0, 20_000);
-  }, 300_000);
+  }, 480_000);
 
   it("no kill stealing: a resident hunter stands back when a person joins its fight", async () => {
     AGENT_RULES.enabled = true;
-    const lines: string[] = [];
-    const run = runResidents({ url, count: 1, bodies: ["arcadia"], roles: ["hunter"], cpu: 4, dev: true, budgetMs: 240_000, log: (l) => lines.push(l) });
+    const lines: string[] = (story = []);
+    const run = runResidents({ url, count: 1, bodies: ["arcadia"], roles: ["hunter"], cpu: 4, dev: true, budgetMs: 360_000, log: (l) => lines.push(l) });
     const resident = () => [...liveRooms].filter((r) => r.bodyDef.id === "arcadia").flatMap((r) => [...r.actors.values()]).find((a) => a.identity.name === "Brindle_Oake");
     try {
       // Out of the outpost (the same character as the test above: it comes back where it left).
-      await waitFor(() => !!resident() && (resident()!.state.flags & (PF.SAFE | PF.PROTECTED)) === 0, 120_000);
+      await waitFor(() => !!resident() && (resident()!.state.flags & (PF.SAFE | PF.PROTECTED)) === 0, 120_000, "the hunter is out of the outpost");
       const R = BODIES.arcadia.radius;
       const at = (): [number, number, number] => [resident()!.state.x, resident()!.state.y, resident()!.state.z];
-      const person = await adminBot(game, rooms, "personZ", "arcadia", offset(at(), 6, 6, R), 8);
-      // A creature tough enough for a fight worth joining: the hunter is put at level 7 so that it is fair game for it.
+      // The person waits on the pad for now: a creature that went for them first would be theirs
+      // from the start, and the hunter would rightly never touch it.
+      const person = await adminBot(game, rooms, "personZ", "arcadia", nearPad("arcadia", 0, 2), 8);
+      // A creature tough enough for a fight worth joining (a Cabinet Golem, 260 base HP): the hunter
+      // is put at level 7 so that it is fair game for it.
       person.send("admin", { cmd: "level", args: { level: 7, target: resident()!.id } });
-      await waitFor(() => resident()!.char.level === 7);
-      const npc = await spawnNpc(person, "hopbit", offset(at(), 7, 0, R), { level: 8, instant: true });
+      await waitFor(() => resident()!.char.level === 7, 6000, "the hunter is level 7");
+      const npc = await spawnNpc(person, "cabinet_golem", offset(at(), 7, 0, R), { level: 7, instant: true });
       const creature = () => (person.state as any).npcs?.get(npc);
-      await waitFor(() => !!creature());
+      await waitFor(() => !!creature(), 6000, "the creature is in the world");
       const full: number = creature().maxHp;
-      await waitFor(() => !creature() || creature().hp < full, 60_000); // the resident's first hit
+      await waitFor(() => !creature() || creature().hp < full, 60_000, "the hunter's first hit on it");
       expect(creature(), lines.join("\n")).toBeTruthy();
-      // The person joins in, and keeps shooting until it is dead.
+      // The person arrives, joins in, and keeps shooting until it is dead.
+      const beside = offset([creature().x, creature().y, creature().z], 5, 6, R);
+      place(person, beside);
+      await waitFor(() => flat([me(person).x, me(person).y, me(person).z], beside) < 3, 6000, "the person is beside the fight");
       const iv = setInterval(() => {
         const n = creature();
         const p = me(person);
@@ -162,10 +173,10 @@ describe("residents", () => {
         person.send("fire", { slot: 0, ox: o[0], oy: o[1], oz: o[2], dx: (t[0]! - o[0]!) / d, dy: (t[1]! - o[1]!) / d, dz: (t[2]! - o[2]!) / d, t: Date.now() });
       }, 350);
       try {
-        await waitFor(() => run.report().residents[0]!.yields >= 1, 30_000);
-        expect(lines.some((l) => l.includes("Brindle_Oake") && l.includes("leaves the Hopbit to personZ")), lines.join("\n")).toBe(true);
+        await waitFor(() => run.report().residents[0]!.yields >= 1, 30_000, "the hunter yields");
+        expect(lines.some((l) => l.includes("Brindle_Oake") && l.includes("leaves the Cabinet Golem to personZ")), lines.join("\n")).toBe(true);
         // It stood back: a few seconds on, it is well clear of the creature it left.
-        await waitFor(() => !creature() || Math.hypot(creature().x - resident()!.state.x, creature().y - resident()!.state.y, creature().z - resident()!.state.z) > 6, 15_000);
+        await waitFor(() => !creature() || Math.hypot(creature().x - resident()!.state.x, creature().y - resident()!.state.y, creature().z - resident()!.state.z) > 6, 15_000, "the hunter stands back");
       } finally {
         clearInterval(iv);
       }
@@ -174,7 +185,7 @@ describe("residents", () => {
       run.stop();
       await run.done;
     }
-  }, 300_000);
+  }, 480_000);
 
   it("stops at once and says why when the server has agents off", async () => {
     AGENT_RULES.enabled = false;
