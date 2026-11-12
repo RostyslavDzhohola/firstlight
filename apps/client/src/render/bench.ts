@@ -37,7 +37,7 @@ export const PASS_FEATURES: readonly Feature[] = [
   "vignette", "particles",
   // The planets' graphics pass (D-gfx-worlds-1). Not `aerial`: its switch zeroes a uniform, the shader stays.
   "meadow", "clouds", "terrainfx", "waterfx", "landmarks",
-  "portalfx", "holo", "skylife", "pools",
+  "portalfx", "holo", "skylife", "pools", "townlights", "pilebeacon",
 ];
 
 /** Rejects after `ms`: no wait in the passes bench may hang the run (hidden tab, stalled queue). */

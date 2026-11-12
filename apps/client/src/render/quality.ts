@@ -54,6 +54,10 @@ export const FEATURES = [
   "holo",
   "skylife",
   "pools",
+  // The hub lane's second pass (D-gfx-hub-8, -10): Portus' lantern halos, portal glow and motes;
+  // the beacon over a loot pile.
+  "townlights",
+  "pilebeacon",
 ] as const;
 export type Feature = (typeof FEATURES)[number];
 
@@ -369,6 +373,7 @@ export function resolveSettings(tier: Tier, auto: boolean, webgpu: boolean, stor
   on.portalfx &&= t >= 1;
   on.skylife &&= t >= 1 && on.sky;
   on.pools &&= t >= 1;
+  on.townlights &&= t >= 1;
   // Cascaded sun shadows only on High/Ultra with shadow maps.
   on.cascades &&= on.shadows && spec.shadows.mode === "map" && t >= 2;
   return { ...spec, tier, auto, webgpu, on, userScale: stored.renderScale, extras: list };
