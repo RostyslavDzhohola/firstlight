@@ -84,6 +84,8 @@ const castSchema = z.object({
 });
 
 let starSeq = 1;
+/** The star's blast goes off this far above its ground point (m). */
+const STAR_BLAST_LIFT = 0.4;
 
 function lift(p: V3, h: number): V3 {
   const l = Math.hypot(p[0], p[1], p[2]) || 1;
@@ -253,56 +255,46 @@ export class SpellSystem implements RoomSystem {
   }
 
   /**
-   * Where the star lands: the asked point (or what the ray from the head along the aim meets),
-   * pulled back to the first thing between the caster's head and it, on the ground, and no further
-   * than the range from the caster's feet. Null: there is no ground in range (a caster 30 m up).
+   * Where the star lands, or null when there is nowhere for it: the asked point (or what the ray
+   * from the head along the aim meets) is put on the ground, and from there the server searches
+   * back toward the caster for the farthest ground point that is
+   * - within the range of the caster's feet, measured to the ground point itself (review 2: from a
+   *   height or down a slope the ground under a point 30 m off is farther), and
+   * - in the clear (review 3): nothing between the caster's head and chest height over the point,
+   *   nor between there and where the blast goes off. The line is traced to each candidate itself,
+   *   so the star can't end up beneath a roof or inside a raised solid the first line met.
    */
   starTarget(a: PlayerActor, d: V3, m: { tx?: number; ty?: number; tz?: number }): V3 | null {
     const host = this.room.host;
     const feet = actorPos(a);
     const head = lift(feet, 1.6);
     const range = WISHFALL.rangeM;
-    const firstSolid = (o: V3, dir: V3, maxT: number): number =>
-      Math.min(
-        rayTerrain(host.terrain, o, dir, maxT, 1),
-        host.walls?.raycast(o[0], o[1], o[2], dir[0], dir[1], dir[2], maxT) ?? Infinity,
-        host.props?.raycast(o, dir, maxT)?.t ?? Infinity,
-      );
+    const solidOnRay = (o: V3, dir: V3, maxT: number): number =>
+      Math.min(host.walls?.raycast(o[0], o[1], o[2], dir[0], dir[1], dir[2], maxT) ?? Infinity, host.props?.raycast(o, dir, maxT)?.t ?? Infinity);
+    /** Is anything on the way from `from` to `to` (the ground too, with `ground`)? */
+    const blocked = (from: V3, to: V3, ground: boolean): boolean => {
+      const line: V3 = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+      const l = Math.hypot(line[0], line[1], line[2]);
+      if (l < 1e-3) return false;
+      const dir: V3 = [line[0] / l, line[1] / l, line[2] / l];
+      return Math.min(ground ? rayTerrain(host.terrain, from, dir, l, 1) : Infinity, solidOnRay(from, dir, l)) < l - 0.05;
+    };
+    const clear = (p: V3): boolean => {
+      const chest = lift(p, 1.0);
+      return !blocked(head, chest, true) && !blocked(chest, lift(p, STAR_BLAST_LIFT), false);
+    };
     let target: V3;
     if (m.tx !== undefined && m.ty !== undefined && m.tz !== undefined && Math.hypot(m.tx, m.ty, m.tz) > this.room.bodyDef.radius * 0.5) {
       target = [m.tx, m.ty, m.tz];
     } else {
-      const t = Math.min(range, firstSolid(head, d, range));
+      const t = Math.min(range, rayTerrain(host.terrain, head, d, range, 1), solidOnRay(head, d, range));
       target = [head[0] + d[0] * t, head[1] + d[1] * t, head[2] + d[2] * t];
     }
-    const v: V3 = [target[0] - feet[0], target[1] - feet[1], target[2] - feet[2]];
+    // The search starts no further out than the range in a straight line.
+    let v: V3 = [target[0] - feet[0], target[1] - feet[1], target[2] - feet[2]];
     const far = Math.hypot(v[0], v[1], v[2]);
-    if (far > range) target = [feet[0] + (v[0] * range) / far, feet[1] + (v[1] * range) / far, feet[2] + (v[2] * range) / far];
-    // Not over a wall or a hill the caster can't see past: the star lands in front of it.
-    const aim = lift(this.room.snapToGround(target), 1.0);
-    const line: V3 = [aim[0] - head[0], aim[1] - head[1], aim[2] - head[2]];
-    const l = Math.hypot(line[0], line[1], line[2]);
-    if (l > 1e-3) {
-      const dir: V3 = [line[0] / l, line[1] / l, line[2] / l];
-      const stop = firstSolid(head, dir, l);
-      if (stop < l - 0.05) {
-        const t = Math.max(0, stop - 0.5);
-        target = [head[0] + dir[0] * t, head[1] + dir[1] * t, head[2] + dir[2] * t];
-      }
-    }
-    // The range holds for the ground the star lands on, not for the point before it was put there
-    // (review 2): from a height or down a slope the ground under a point 30 m off is farther.
-    return this.groundWithin(feet, target, range);
-  }
-
-  /**
-   * The ground point on the way from `feet` to `target` that is farthest from the caster and still
-   * within `range` metres of the feet. Walks back from the target in 0.5 m steps and closes in on
-   * the range's edge between two steps. Null: not even the ground under the feet is in range.
-   */
-  private groundWithin(feet: V3, target: V3, range: number): V3 | null {
-    const v: V3 = [target[0] - feet[0], target[1] - feet[1], target[2] - feet[2]];
-    const steps = Math.max(1, Math.ceil(Math.hypot(v[0], v[1], v[2]) / SPELL_NET.starStepM));
+    if (far > range) v = [(v[0] * range) / far, (v[1] * range) / far, (v[2] * range) / far];
+    const steps = Math.max(1, Math.ceil(Math.min(far, range) / SPELL_NET.starStepM));
     const groundAt = (k: number): V3 => this.room.snapToGround([feet[0] + v[0] * k, feet[1] + v[1] * k, feet[2] + v[2] * k]);
     let over = false;
     for (let i = steps; i >= 0; i--) {
@@ -311,25 +303,28 @@ export class SpellSystem implements RoomSystem {
         over = true;
         continue;
       }
-      if (!over) return p;
-      // The edge of the range lies between this step and the one before: the farthest point inside it.
-      let lo = i / steps, hi = (i + 1) / steps, best = p;
-      for (let n = 0; n < 7; n++) {
-        const mid = (lo + hi) / 2;
-        const q = groundAt(mid);
-        if (dist3(feet, q) <= range) {
-          lo = mid;
-          best = q;
-        } else hi = mid;
+      if (over) {
+        // The edge of the range lies between this step and the one before: the farthest point inside it.
+        over = false;
+        let lo = i / steps, hi = (i + 1) / steps, edge: V3 | null = null;
+        for (let n = 0; n < 7; n++) {
+          const mid = (lo + hi) / 2;
+          const q = groundAt(mid);
+          if (dist3(feet, q) <= range) {
+            lo = mid;
+            edge = q;
+          } else hi = mid;
+        }
+        if (edge && clear(edge)) return edge;
       }
-      return best;
+      if (clear(p)) return p;
     }
     return null;
   }
 
   private wishfall(a: PlayerActor, d: V3, m: CastMsg, now: number): true | string {
     const at = this.starTarget(a, d, m);
-    if (!at) return "blocked"; // nowhere for it to land: nothing is spent
+    if (!at) return "blocked"; // no clear ground in range: nothing is spent
     const star: Star = { id: starSeq++, owner: a, at, landAt: now + WISHFALL.telegraphS * 1000, damage: spellDamage(WISHFALL.damage, a.char.level) };
     this.stars.push(star);
     this.send({ spell: "wishfall", phase: "cast", by: a.id, x: at[0], y: at[1], z: at[2], r: WISHFALL.radiusM, ms: WISHFALL.telegraphS * 1000, id: star.id });
@@ -340,7 +335,7 @@ export class SpellSystem implements RoomSystem {
     const a = s.owner;
     // The blast, through combat (safe zones, protection, walls, bubbles, self ×0.5, heavy destruction).
     // A caster who has left the world since deals none; the star still lands for everyone watching.
-    if (!a.removed && !a.superseded) explode(this.room.host, a, lift(s.at, 0.4), WISHFALL.radiusM, s.damage, -1, undefined, undefined, true);
+    if (!a.removed && !a.superseded) explode(this.room.host, a, lift(s.at, STAR_BLAST_LIFT), WISHFALL.radiusM, s.damage, -1, undefined, undefined, true);
     this.send({ spell: "wishfall", phase: "impact", by: a.id, x: s.at[0], y: s.at[1], z: s.at[2], r: WISHFALL.radiusM, id: s.id });
   }
 

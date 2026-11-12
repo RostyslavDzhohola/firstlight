@@ -269,16 +269,21 @@ describe("Skipstep", () => {
  * Put a bot's body `h` metres up, as on a tower top or a ledge (the server's own state: a bot can't
  * climb). The move is fresh, so idle gravity leaves it there for the cast. Returns the new feet.
  */
-function hoist(r: Room, h: number): V {
+function hoist(r: Room, h: number, from: V = pos(r)): V {
   const a = actor(r);
-  const p = pos(r);
-  const l = Math.hypot(...p);
-  const up: V = [p[0] + (p[0] / l) * h, p[1] + (p[1] / l) * h, p[2] + (p[2] / l) * h];
+  const l = Math.hypot(...from);
+  const up: V = [from[0] + (from[0] / l) * h, from[1] + (from[1] / l) * h, from[2] + (from[2] / l) * h];
   a.state.x = a.lastX = up[0];
   a.state.y = a.lastY = up[1];
   a.state.z = a.lastZ = up[2];
   a.lastMoveAt = Date.now();
   return up;
+}
+
+/** `h` metres above a point. */
+function hoistPoint(p: V, h: number): V {
+  const l = Math.hypot(...p);
+  return [p[0] + (p[0] / l) * h, p[1] + (p[1] / l) * h, p[2] + (p[2] / l) * h];
 }
 
 /** How far `p` is from the straight way over the ground from `a` to `b` (their great circle), in metres. */
@@ -569,6 +574,54 @@ describe("Wishfall", () => {
       expect(Math.hypot(...feet) - Math.hypot(...ring)).toBeGreaterThan(8);
       await sleep(250); // five casts a second
     }
+  }, SLOW);
+
+  it("never lands inside or under a raised solid: the line from the caster's head is traced to the final ground point (review 3)", async () => {
+    // Portus: the castle ward's east wall stands over east 13.8…16.4 at north 50, 8.3 m tall
+    // (town-walls.test.ts). The caster is above it, as on a tower: the line to a point beyond the
+    // wall meets the wall's top, not its face.
+    const RP = BODIES.portus.radius;
+    const town = (east: number, north: number): V => {
+      const d = townDir(east, north, RP);
+      return [d[0] * RP, d[1] * RP, d[2] * RP];
+    };
+    const a = await adminBot(game, rooms, "overlooker", "portus", town(19, 50), 6);
+    const room = serverRoom(a);
+    const h = listen(a);
+    const ground = (east: number, north: number) => room.snapToGround(town(east, north));
+    const headOf = (feet: V) => hoistPoint(feet, 1.6);
+    const inSolid = (p: V) => room.moveWorld.footing!(p[0], p[1], p[2], 0.35).inside;
+    expect(inSolid(ground(15, 50))).toBe(true);
+    expect(room.safeNow(actor(a), Date.now())).toBe(false);
+
+    await refill(a, h);
+    const high = hoist(a, 15);
+    const beyond = ground(12, 50);
+    cast(a, "wishfall", dirTo(high, beyond), beyond);
+    await until("ring", () => h.events.some((e) => e.spell === "wishfall" && e.phase === "cast"));
+    const e = h.events.find((x) => x.spell === "wishfall")!;
+    const ring: V = [e.x, e.y, e.z];
+    // Not in the wall and not behind it: on open ground at its foot, on the caster's side, with a
+    // clear line from the caster's head to where the blast goes off.
+    expect(inSolid(ring)).toBe(false);
+    expect(wallBetween(room.host, headOf(high), hoistPoint(ring, 0.4))).toBe(false);
+    expect(flat(ring, ground(12, 50))).toBeGreaterThan(4.3); // at the wall's outer face (east ≈ 16.4) or east of it
+    expect(flat(ring, ground(16.4, 50))).toBeLessThan(1.5); // pulled back no further than it had to be
+    await spent(h, "wishfall");
+
+    // Nowhere to land at all (31 m up: no ground within 30 m): refused, and nothing is spent.
+    await until("the first star has landed", () => spells(a).stars.length === 0, 8000);
+    await refill(a, h);
+    h.events.length = 0;
+    h.denied.length = 0;
+    const sky = hoist(a, 31, room.snapToGround(pos(a)));
+    cast(a, "wishfall", dirTo(sky, ground(24, 50)), ground(24, 50));
+    await until("refused", () => h.denied.includes("blocked"));
+    expect(h.events.filter((x) => x.spell === "wishfall")).toHaveLength(0);
+    expect(spells(a).stars).toHaveLength(0);
+    const book = spells(a).book(actor(a), Date.now());
+    expect(aetherAt(book, Date.now())).toBe(AETHER.max);
+    expect(book.ready[index("wishfall")]).toBe(0);
   }, SLOW);
 });
 
