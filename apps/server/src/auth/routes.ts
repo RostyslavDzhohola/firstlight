@@ -17,6 +17,8 @@ import type { Accounts, AccountsConfig } from "./accounts.ts";
 import { safeEqual, sha256Hex } from "./crypto.ts";
 import type { Identity } from "./identity.ts";
 import { directRequestIp, firstForwardedFor } from "./ip.ts";
+import { botSecret } from "./loadtest.ts";
+import { botBudget } from "../world/botBudget.ts";
 
 /** mission_state_json → `life.playMs` (0 for older rows without per-life progress). */
 function lifePlayMs(ms: unknown): number {
@@ -205,14 +207,20 @@ export function mountAccountRoutes(app: Express, a: Accounts, cfg: AccountsConfi
     );
   });
 
+  // Off unless load tests are on (production: LOADTEST_ENABLED=1 too; D-security-1).
+  const botKey = botSecret(cfg);
   app.post("/api/test/bot-token", noStore, async (req, res) => {
-    if (!cfg.loadtestSecret) {
+    if (!botKey) {
       res.status(404).json({ ok: false, error: "not found" });
       return;
     }
     const got = req.headers["x-loadtest-secret"];
-    if (typeof got !== "string" || !safeEqual(got, cfg.loadtestSecret)) {
+    if (typeof got !== "string" || !safeEqual(got, botKey)) {
       res.status(403).json({ ok: false, error: "forbidden" });
+      return;
+    }
+    if (!botBudget.takeToken()) {
+      res.status(429).json({ ok: false, error: "slow down" });
       return;
     }
     const raw = typeof req.body?.id === "string" ? req.body.id : "";

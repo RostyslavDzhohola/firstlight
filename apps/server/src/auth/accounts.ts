@@ -27,6 +27,7 @@ import { accountLinks, type LinkEvents } from "./links.ts";
 import { classifyMailFailure, DevOutbox, disabledMailer, MailHealth, resendMailer, type Mailer } from "./mailer.ts";
 import { identifyRequest, mountAccountRoutes, requireAdminFor } from "./routes.ts";
 import { pruneGuests } from "./prune.ts";
+import { botSecret, botSecretWarning } from "./loadtest.ts";
 import { liveSessions, type SessionRegistry } from "./sessions.ts";
 
 export const DEV_AUTH_SECRET = "dev-only-secret-change-me-dev-only-secret";
@@ -45,6 +46,8 @@ export interface AccountsConfig {
   resendKey: string;
   adminClaimToken: string;
   loadtestSecret: string;
+  /** LOADTEST_ENABLED=1: in production the load-test features need it as well as the secret (D-security-1). */
+  loadtestEnabled?: boolean;
   otpPerEmailPerHour: number;
   otpDailyBudget: number;
   /** Better Auth rate limiting (default: on in production only). */
@@ -214,6 +217,9 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
   const pruneTimer = setInterval(housekeeping, 24 * 3_600_000);
   pruneTimer.unref();
 
+  const botKey = botSecret(cfg);
+  const botWarning = botSecretWarning(cfg);
+  if (botWarning) console.warn(botWarning);
   const userStmt = authDb.prepare(`SELECT id, name, "isAnonymous" AS anon FROM "user" WHERE id = ?`);
 
   const betterAuthVerifier: TokenVerifier = async (token, vctx?: VerifyContext) => {
@@ -228,7 +234,7 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
     const tokenName = typeof payload.name === "string" ? payload.name : "";
     if (payload.loadtest === true) {
       // Bot identities are minted only by /api/test/bot-token and only honoured during load tests.
-      if (!cfg.loadtestSecret) return null;
+      if (!botKey) return null;
       return { userId: sub, name: tokenName || "Bot", guest: true, admin: false, loadtest: true };
     }
     const user = userStmt.get(sub) as { id: string; name: string; anon: number | null } | undefined;
@@ -348,6 +354,7 @@ export function accountsConfigFromEnv(env: {
   resendKey: string;
   adminClaimToken: string;
   loadtestSecret: string;
+  loadtestEnabled?: boolean;
   otpDailyBudget: number;
   otpPerEmailPerHour: number;
   devMailLog: boolean;
@@ -364,6 +371,7 @@ export function accountsConfigFromEnv(env: {
     resendKey: env.resendKey,
     adminClaimToken: env.adminClaimToken,
     loadtestSecret: env.loadtestSecret,
+    loadtestEnabled: env.loadtestEnabled,
     otpDailyBudget: env.otpDailyBudget,
     otpPerEmailPerHour: env.otpPerEmailPerHour,
     devMailLog: env.devMailLog,

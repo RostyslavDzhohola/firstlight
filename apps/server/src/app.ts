@@ -16,6 +16,8 @@ import { PROTOCOL_VERSION } from "@firstlight/shared/net/protocol";
 import { timingSafeEqual } from "node:crypto";
 import { partyOf, partyRoomFor, playRefusal } from "./social/index.ts";
 import { publicOnlineCount } from "./ops/home.ts";
+import { BOT_BUDGET, BOT_SEAT_KEY, botBudget } from "./world/botBudget.ts";
+import { botSecretFromEnv } from "./auth/loadtest.ts";
 
 export interface GameOptions {
   port: number;
@@ -66,6 +68,7 @@ function secretMatches(given: unknown, expected: string): boolean {
 
 export async function createGame(opts: GameOptions): Promise<Game> {
   identityCheck.current = opts.revalidate ?? (() => null);
+  botBudget.reset();
   const playCalls = new Map<string, number[]>();
   const ipCalls = new Map<string, number[]>();
   const pruneCalls = setInterval(() => {
@@ -164,6 +167,11 @@ export async function createGame(opts: GameOptions): Promise<Game> {
       fromIp.push(now);
       ipCalls.set(key, fromIp);
     }
+    // Bots: a call budget of their own instead (D-security-1).
+    if (identity.loadtest && !botBudget.takePlayCall(now)) {
+      res.status(429).json({ ok: false, error: "slow down" });
+      return;
+    }
     // A change of this account couldn't be saved: not back in until storage works (F12 re-review S5).
     if (!storageRecovery.ok(identity.userId)) {
       res.status(503).json({ ok: false, error: "storage" });
@@ -202,8 +210,12 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     const partyRoom = sandbox ? undefined : partyRoomFor(identity.userId, body, typeof req.body.partyLeaderRoomId === "string" ? req.body.partyLeaderRoomId : undefined);
     // Unused-seat caps: checked and claimed together, before any await (F12 re-review S4); the claim
     // becomes the reservation or is released.
-    const seatIp = perAddress ? (ip ?? "unknown") : null;
+    const seatIp = perAddress ? (ip ?? "unknown") : identity.loadtest ? BOT_SEAT_KEY : null;
     if (!identity.loadtest && (pendingSeats.forUser(identity.userId, now) >= PLAY_LIMITS.userSeats || (seatIp !== null && pendingSeats.forIp(seatIp, now) >= PLAY_LIMITS.ipSeats))) {
+      res.status(429).json({ ok: false, error: "slow down" });
+      return;
+    }
+    if (identity.loadtest && pendingSeats.forIp(BOT_SEAT_KEY, now) >= BOT_BUDGET.seats) {
       res.status(429).json({ ok: false, error: "slow down" });
       return;
     }
@@ -235,7 +247,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
 
   // Load-test and admin metrics: per-room tick time and process usage. Guarded by the load-test secret.
   app.get("/api/metrics", async (req, res) => {
-    const secret = process.env.LOADTEST_SECRET;
+    const secret = botSecretFromEnv(); // off in production unless LOADTEST_ENABLED=1 (D-security-1)
     if (!secret || !secretMatches(req.headers["x-loadtest-secret"], secret)) {
       res.status(403).json({ error: "forbidden" });
       return;
