@@ -97,9 +97,11 @@ export function artPacksEnv(renderer: THREE.WebGPURenderer): ArtPacksEnv {
   const folder = `${config.assetBase}/${PACK_FOLDER}`;
   return {
     async manifest() {
+      // A network error rejects (ArtPacks tries again); so does a server error.
       const r = await fetch(`${folder}/manifest.json`, { priority: "low" } as RequestInit);
-      if (!r.ok) throw new Error(`pack manifest ${r.status}`);
-      const m = (await r.json()) as PackManifest;
+      if (r.status >= 500) throw new Error(`pack manifest ${r.status}`);
+      if (!r.ok) return null; // 404: no packs on this server (the normal case while they aren't shipped)
+      const m = (await r.json().catch(() => null)) as PackManifest | null; // a fallback HTML page: none either
       return m?.version === 1 && m.files ? m : null;
     },
     async download(entry: PackEntry, signal: AbortSignal) {

@@ -108,9 +108,10 @@ function world(loaded: string[] = ["portus/portus_color.webp", "portus/portus_no
 
 describe("ArtPacks", () => {
   let warn: ReturnType<typeof vi.spyOn>;
+  let info: ReturnType<typeof vi.spyOn>;
   beforeEach(() => {
     warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.spyOn(console, "info").mockImplementation(() => {});
+    info = vi.spyOn(console, "info").mockImplementation(() => {});
   });
   afterEach(() => vi.restoreAllMocks());
 
@@ -353,5 +354,73 @@ describe("ArtPacks", () => {
     await w.tick(ArtPacks.START_DELAY_MS * 3);
     expect(w.downloads).toEqual([]);
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  /** Pause and resume like travel and rewarms do, each time past the start delay and any retry. */
+  const travels = async (w: ReturnType<typeof world>, packs: ArtPacks, n: number) => {
+    for (let i = 0; i < n; i++) {
+      packs.pause();
+      packs.resume();
+      await w.tick(ArtPacks.START_DELAY_MS + ArtPacks.MANIFEST_RETRY_MS * 4);
+    }
+  };
+
+  it("no manifest (the pack files aren't shipped): one quiet line, asked once a session, nothing more", async () => {
+    const w = world();
+    const manifest = vi.fn(async () => null);
+    w.env.manifest = manifest;
+    const packs = new ArtPacks(w.env, { mode: "auto" });
+    packs.setTier("high");
+    packs.resume();
+    await w.tick(ArtPacks.START_DELAY_MS);
+    await travels(w, packs, 6);
+    packs.setTier("ultra"); // a graphics change behind its loading screen
+    await travels(w, packs, 2);
+    expect(manifest).toHaveBeenCalledTimes(1);
+    expect(info.mock.calls.filter((c: unknown[]) => String(c[0]).startsWith("[packs]"))).toHaveLength(1);
+    expect(warn).not.toHaveBeenCalled();
+    expect(w.downloads).toEqual([]);
+    expect(packs.state().busy).toBe(false);
+  });
+
+  it("a transient manifest failure (network, 5xx) is tried again after a delay, a bounded number of times", async () => {
+    const w = world();
+    let fails = 2;
+    const manifest = vi.fn(async () => {
+      if (fails-- > 0) throw new Error("pack manifest 503");
+      return MANIFEST;
+    });
+    w.env.manifest = manifest;
+    const packs = new ArtPacks(w.env, { mode: "auto" });
+    packs.setTier("medium");
+    packs.resume();
+    await w.tick(ArtPacks.START_DELAY_MS);
+    expect(manifest).toHaveBeenCalledTimes(1);
+    expect(w.downloads).toEqual([]);
+    await w.tick(ArtPacks.MANIFEST_RETRY_MS);
+    expect(manifest).toHaveBeenCalledTimes(2);
+    await w.tick(ArtPacks.MANIFEST_RETRY_MS * 2); // the delay grows
+    expect(manifest).toHaveBeenCalledTimes(3);
+    expect(w.downloads.map((d) => d.entry)).toEqual(["portus/portus_color.webp", "portus/portus_normal.webp"]);
+  });
+
+  it("a manifest that keeps failing stops after its tries, across any number of resumes; a pause holds the retry", async () => {
+    const w = world();
+    const manifest = vi.fn(async () => {
+      throw new Error("offline");
+    });
+    w.env.manifest = manifest;
+    const packs = new ArtPacks(w.env, { mode: "auto" });
+    packs.setTier("medium");
+    packs.resume();
+    await w.tick(ArtPacks.START_DELAY_MS);
+    packs.pause(); // a loading screen while the retry waits: nothing is asked behind it
+    await w.tick(ArtPacks.MANIFEST_RETRY_MS * 10);
+    expect(manifest).toHaveBeenCalledTimes(1);
+    await travels(w, packs, 8);
+    expect(manifest).toHaveBeenCalledTimes(ArtPacks.MANIFEST_TRIES);
+    expect(warn).toHaveBeenCalledTimes(1); // once, when it gives up
+    expect(w.downloads).toEqual([]);
+    expect(packs.state().busy).toBe(false);
   });
 });
