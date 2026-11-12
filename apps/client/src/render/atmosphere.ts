@@ -72,6 +72,8 @@ export const atmo = {
    * dark as it gets). Not raised by clouds, so windows stay unlit on a rainy day.
    */
   lamps: uniform(0).setGroup(renderGroup),
+  /** Night 0..1 for the moonlit rim on avatars, horses and creatures (D-polish-1): they separate from dark ground. */
+  nightRim: uniform(0).setGroup(renderGroup),
   /** Surface wetness 0..1 (darker, shinier terrain/props/grass after rain). */
   wet: uniform(0).setGroup(renderGroup),
   /** Rain hitting water now 0..1 (ripples). */

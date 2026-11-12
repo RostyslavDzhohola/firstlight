@@ -4,6 +4,8 @@
 // whole NPC layer costs ≈ 10–14 draws plus their shadow pass.
 
 import * as THREE from "three/webgpu";
+import { dot, float, normalView, positionViewDirection, saturate, vec3 } from "three/tsl";
+import { atmo } from "../../render/atmosphere.ts";
 
 export type GeoKey = "box" | "sph" | "cyl" | "cone" | "tor" | "arc";
 export type MatKey = "std" | "metal" | "glow";
@@ -45,6 +47,10 @@ export class PartBatcher {
     const std = new THREE.MeshStandardNodeMaterial({ roughness: 0.62, metalness: 0.05 });
     const metal = new THREE.MeshStandardNodeMaterial({ roughness: 0.24, metalness: 0.85 });
     const glow = new THREE.MeshBasicNodeMaterial({ color: 0xffffff });
+    // A moonlit rim at night (D-polish-1): creatures read against dark ground; zero by day.
+    const rim = vec3(0.56, 0.68, 1.0).mul(float(1).sub(saturate(dot(normalView, positionViewDirection))).pow(2.5)).mul(atmo.nightRim.mul(0.55));
+    std.emissiveNode = rim;
+    metal.emissiveNode = rim;
     this.materials = { std, metal, glow };
     for (const g of GEO_KEYS) {
       for (const m of MAT_KEYS) {
