@@ -8,6 +8,7 @@ import { stripTypeScriptTypes } from "node:module";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { pickTarget } from "./examples/hunter.ts";
 import { handleRpc, MCP_PROTOCOL } from "./mcp.ts";
 import { bridge } from "./serve.ts";
 import { callTool, checkArgs, PLAYBOOK, Session, TOOLS, TOOL_BY_NAME } from "./tools.ts";
@@ -167,4 +168,28 @@ describe("the kit and the tools run as they are", () => {
       expect(() => stripTypeScriptTypes(readFileSync(file, "utf8"), { mode: "strip" })).not.toThrow();
     });
   }
+});
+
+// Review 2026-11-12 (agent kit) #4: the example hunter took creatures a person was fighting.
+describe("the example hunter leaves a person's fight alone", () => {
+  const c = (id: string, extra: Record<string, unknown> = {}) => ({ id, kind: "hopbit", name: "Hopbit", level: 1, hp: 30, maxHp: 30, dist: 10, bearing: 0, hostile: true, boss: false, onMe: false, mission: false, ...extra }) as never;
+  it("skips a creature claimed by a person, takes one claimed by another agent or by nobody", () => {
+    const person = c("n1", { mission: true, claimedBy: { name: "Mira", agent: false } });
+    const agents = c("n2", { claimedBy: { name: "Scout", agent: true } });
+    const free = c("n3", { dist: 30 });
+    expect(pickTarget([person, agents, free], 1, new Map(), 0)).toMatchObject({ id: "n2" });
+    expect(pickTarget([person, free], 1, new Map(), 0)).toMatchObject({ id: "n3" });
+    expect(pickTarget([person], 1, new Map(), 0)).toBeUndefined(); // nothing else: wait
+    expect(pickTarget([c("n4", { onMe: true, claimedBy: { name: "Mira", agent: false } })], 1, new Map(), 0)).toBeUndefined();
+  });
+  it("a creature it yielded stays the person's for a while, then is fair again", () => {
+    const theirs = new Map([["n1", 5000]]);
+    expect(pickTarget([c("n1"), c("n2", { dist: 40 })], 1, theirs, 1000)).toMatchObject({ id: "n2" });
+    expect(pickTarget([c("n1")], 1, theirs, 1000)).toBeUndefined();
+    expect(pickTarget([c("n1")], 1, theirs, 6000)).toMatchObject({ id: "n1" });
+  });
+  it("asks attack() to yield to people", () => {
+    const src = readFileSync(join(import.meta.dirname, "examples", "hunter.ts"), "utf8");
+    expect(src).toMatch(/agent\.attack\(target\.id, \{[^}]*yieldTo: "people"/);
+  });
 });

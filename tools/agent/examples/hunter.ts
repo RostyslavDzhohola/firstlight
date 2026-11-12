@@ -14,7 +14,7 @@
 // Flags: --url, --auth-url, --name, --starter, --dev (dev guest token), --seconds (default 300),
 // --mission (default A1), --collect (default A4; "none" to skip it), --quiet.
 
-import { FirstlightAgent, type ActionResult, type Observation } from "@firstlight/agent-kit";
+import { FirstlightAgent, type ActionResult, type Observation, type ObservedCreature } from "@firstlight/agent-kit";
 
 export interface HunterOptions {
   /** Stop after this long (ms). */
@@ -50,6 +50,19 @@ export interface HunterReport {
 }
 
 const sleep = (ms: number) => new Promise<void>((ok) => setTimeout(ok, ms));
+
+/** How long a creature we left to a person stays theirs. */
+const YIELD_MS = 40_000;
+
+/**
+ * What to fight next: whatever is on us, else a mission creature, else a hostile one of our size.
+ * Never a creature a person is fighting (`claimedBy` someone who isn't an agent) nor one we yielded
+ * lately (`theirs`: id → until when): no kill stealing (D-agents-10). Undefined: nothing to fight.
+ */
+export function pickTarget(creatures: readonly ObservedCreature[], level: number, theirs: ReadonlyMap<string, number>, now: number): ObservedCreature | undefined {
+  const fair = creatures.filter((c) => !c.boss && c.level <= level + 2 && c.dist < 60 && !(c.claimedBy && !c.claimedBy.agent) && !((theirs.get(c.id) ?? 0) > now));
+  return fair.find((c) => c.onMe) ?? fair.find((c) => c.mission) ?? fair.find((c) => c.hostile && c.kind === "hopbit") ?? fair.find((c) => c.hostile);
+}
 
 /** Play the hunter with a connected agent until the mission is done or the budget runs out. */
 export async function runHunter(agent: FirstlightAgent, o: HunterOptions): Promise<HunterReport> {
@@ -131,6 +144,7 @@ export async function runHunter(agent: FirstlightAgent, o: HunterOptions): Promi
 
   // 3. Hunt.
   let idle = 0;
+  const theirs = new Map<string, number>(); // creatures left to a person, until when
   while (left() > 0) {
     if (o.until?.(r)) return finish("stopped");
     if (agent.status === "offline" || agent.status === "closed") return finish("offline");
@@ -195,9 +209,8 @@ export async function runHunter(agent: FirstlightAgent, o: HunterOptions): Promi
       }
       continue;
     }
-    // A fight: whatever is on us, else a mission creature, else a hostile one of our size.
-    const fair = look.creatures.filter((c) => !c.boss && c.level <= me.level + 2 && c.dist < 60);
-    const target = fair.find((c) => c.onMe) ?? fair.find((c) => c.mission) ?? fair.find((c) => c.hostile && c.kind === "hopbit") ?? fair.find((c) => c.hostile);
+    // A fight: whatever is on us, else a mission creature, else a hostile one of our size; never a person's.
+    const target = pickTarget(look.creatures, me.level, theirs, Date.now());
     if (target) {
       idle = 0;
       // Spells where they pay: frost when two or more are within its ring, the ward when hurt and bitten.
@@ -205,9 +218,15 @@ export async function runHunter(agent: FirstlightAgent, o: HunterOptions): Promi
       if (me.zone !== "safe" && close >= 2) await cast("frostbloom", `${close} creatures within 5 m`);
       if (me.zone !== "safe" && hp < 0.5 && look.creatures.some((c) => c.onMe)) await cast("glasswing", `HP ${me.hp}/${me.maxHp} under attack`);
       // Short rounds, so the next look can answer a second creature joining in.
-      const fight = await agent.attack(target.id, { seconds: me.level >= 3 ? 10 : 25, retreatBelow: 0.35 });
+      const fight = await agent.attack(target.id, { seconds: me.level >= 3 ? 10 : 25, retreatBelow: 0.35, yieldTo: "people" });
       o.log(`fight ${target.name} L${target.level} (${Math.round(target.dist)} m): ${fight.killed ? `killed, +${fight.xp} XP` : (fight.reason ?? "ended")} · HP ${fight.hp}`);
       if (fight.reason === "safe zone") await agent.moveTo("mission", { sprint: true, seconds: 20 });
+      // A person is fighting it (or stands in our line): the kill is theirs. Leave it for a while and
+      // step back; the next look picks another creature, or there is nothing to do but wait.
+      if (fight.reason === "yielded" || fight.reason === "player in the way") {
+        theirs.set(target.id, Date.now() + YIELD_MS);
+        await agent.moveTo({ bearing: (target.bearing + 180) % 360, distance: 10 }, { seconds: 5 });
+      }
       continue;
     }
     // Nothing to fight here: to the hunting ground, then wander round it.

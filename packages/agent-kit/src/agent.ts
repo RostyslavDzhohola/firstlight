@@ -1532,7 +1532,12 @@ export class FirstlightAgent {
   }
 
   /** The nearest live creature that is after you or hostile, within `radius` of `centre` (not a boss). */
-  private threatNear(centre: readonly number[], radius: number): { id: string; dist: number; near: number } | null {
+  /**
+   * The nearest creature worth fighting within `radius` of `centre` (hostile, or after us). Never one
+   * a person is fighting (they hit it lately, `claimOf`) or one in `theirs` (we yielded it): no kill
+   * stealing while holding a place either (review 2026-11-12 agent kit #4).
+   */
+  private threatNear(centre: readonly number[], radius: number, theirs?: ReadonlyMap<string, number>): { id: string; dist: number; near: number } | null {
     const st = this.room?.state as any;
     const pos = this.walker.p;
     let best: { id: string; dist: number; near: number } | null = null;
@@ -1547,6 +1552,9 @@ export class FirstlightAgent {
       if (dist(centre, at) > radius) return;
       const d = dist(pos, at);
       if (d <= 5) near++;
+      if ((theirs?.get(id) ?? 0) > Date.now()) return;
+      const claim = this.claimOf(id);
+      if (claim && !claim.agent) return;
       if (!best || d < best.dist) best = { id, dist: d, near: 0 };
     });
     if (best) (best as { near: number }).near = near;
@@ -1576,6 +1584,7 @@ export class FirstlightAgent {
     // Hold: stay well inside the ring, fight what comes close, drink when hurt.
     const inner = Math.max(4, d.radius - 4);
     const retreat = o.retreatBelow ?? 0.25;
+    const theirs = new Map<string, number>(); // creatures left to a person, until when
     while (alive()) {
       const m = mine();
       if (!m) return { ok: false, done: false, reason: "not accepted" };
@@ -1590,7 +1599,7 @@ export class FirstlightAgent {
         continue;
       }
       const hurt = !!me && me.hp < me.maxHp * 0.55;
-      const foe = this.threatNear(beacon.pos, d.radius - 1);
+      const foe = this.threatNear(beacon.pos, d.radius - 1, theirs);
       if (hurt && Date.now() >= this.tonicUntil) {
         const tonic = this.findItem("tonic_large") ?? this.findItem("tonic_small");
         if (tonic) await this.useItem(tonic.slot);
@@ -1600,8 +1609,13 @@ export class FirstlightAgent {
       if (foe && hurt && sp[3]?.ready) await this.cast("glasswing");
       else if (foe && foe.near >= 2 && sp[1]?.ready) await this.cast("frostbloom");
       if (foe && me && me.hp >= me.maxHp * retreat) {
-        const r = await this.attack(foe.id, { seconds: 6, untilDead: false, leash: { pos: beacon.pos, radius: inner } });
+        const r = await this.attack(foe.id, { seconds: 6, untilDead: false, leash: { pos: beacon.pos, radius: inner }, yieldTo: "people" });
         if (r.reason === "cancelled") return { ...r, done: false };
+        // A person took it on (or stands in the way): theirs for a while; the next look picks another, or waits.
+        if (r.reason === "yielded" || r.reason === "player in the way") {
+          theirs.set(foe.id, Date.now() + 20_000);
+          await sleep(150);
+        }
         continue;
       }
       await sleep(150);

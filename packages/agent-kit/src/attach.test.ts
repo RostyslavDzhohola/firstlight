@@ -95,3 +95,38 @@ describe("attach and a connection that goes away meanwhile", () => {
     expect(timers(a)).toEqual([null, null]);
   });
 });
+
+// Review 2026-11-12 (agent kit) #4: holding a beacon, the kit fought whatever was near, a person's
+// fight included. threatNear() is what the defend helper picks its next creature with.
+describe("holding a place: a person's creature is left alone", () => {
+  it("skips a creature a person hit lately or that it yielded; takes an agent's or a free one", async () => {
+    const a = new FirstlightAgent();
+    const { room } = fakeRoom();
+    const world = bodyWorld("arcadia");
+    const self = room.state.players.get("s1")!;
+    const centre: [number, number, number] = [self.x, self.y, self.z];
+    const near = (east: number) => world.onGround([centre[0] + east, centre[1], centre[2]]);
+    const npc = (east: number) => ({ kind: "hopbit", hp: 30, flags: 0, target: "s1", x: near(east)[0], y: near(east)[1], z: near(east)[2] });
+    (room.state as any).npcs = new Map([["n1", npc(2)], ["n2", npc(4)], ["n3", npc(6)]]);
+    (room.state.players as Map<string, unknown>).set("h1", { name: "Mira", agent: false, x: 0, y: 0, z: 0, flags: 0 });
+    (room.state.players as Map<string, unknown>).set("a2", { name: "Scout", agent: true, x: 0, y: 0, z: 0, flags: 0 });
+    const joining = attach(a, room);
+    room.message("you", { level: 1, hotbar: [], backpack: [] });
+    await joining;
+    try {
+      const p = a as any;
+      const pick = (theirs?: Map<string, number>) => p.threatNear(centre, 30, theirs)?.id;
+      expect(pick()).toBe("n1");
+      p.claims.set("n1", { by: "h1", at: Date.now() }); // a person is fighting the nearest one
+      expect(pick()).toBe("n2");
+      p.claims.set("n2", { by: "a2", at: Date.now() }); // another agent's claim doesn't count ("people")
+      expect(pick()).toBe("n2");
+      expect(pick(new Map([["n2", Date.now() + 20_000]]))).toBe("n3"); // yielded a moment ago
+      expect(pick(new Map([["n2", Date.now() - 1]]))).toBe("n2"); // ...and fair again after
+      p.claims.set("n1", { by: "h1", at: Date.now() - 60_000 }); // the person left it long ago
+      expect(pick()).toBe("n1");
+    } finally {
+      await a.close();
+    }
+  });
+});
