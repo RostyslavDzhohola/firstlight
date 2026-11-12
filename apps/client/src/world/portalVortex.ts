@@ -35,7 +35,7 @@ export function vortexEdge(shape: VortexShape, x: number, y: number): number {
 }
 
 export function vortexMaterial(to: BodyId, color: number, shape: VortexShape): PortalVortex {
-  const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide });
+  const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true });
   m.name = "portal_vortex";
   const pulseAge = uniform(PULSE_SECONDS);
   const tint = vec3(...new THREE.Color(color).toArray());
@@ -114,7 +114,7 @@ export function vortexMaterial(to: BodyId, color: number, shape: VortexShape): P
  * its top, faint by day and strong from dusk (the lamplight uniform). Additive, one draw per pad.
  */
 export function beamMaterial(color: number): THREE.MeshBasicNodeMaterial {
-  const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false });
+  const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, forceSinglePass: true, fog: false });
   m.name = "pad_beam";
   const tint = vec3(...new THREE.Color(color).toArray());
   // The cylinder's own frame: y from -H/2 (the pad) to +H/2.

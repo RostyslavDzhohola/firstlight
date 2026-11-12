@@ -273,10 +273,14 @@ export function rezFxGeometry(): THREE.BufferGeometry {
 }
 
 let fxMat: THREE.MeshBasicNodeMaterial | null = null;
-/** The one additive material of every rez light (per-object uniforms: progress, mode, cut, colour). */
+/**
+ * The one additive material of every rez light (per-object uniforms: progress, mode, cut, colour).
+ * Single pass: three draws a transparent double-sided mesh twice (back faces, then front) unless
+ * told otherwise, and for additive light one pass gives the same picture at half the draws and builds.
+ */
 export function rezFxMaterial(): THREE.MeshBasicNodeMaterial {
   if (fxMat) return fxMat;
-  const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false });
+  const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, forceSinglePass: true, fog: false });
   m.name = "rez_fx";
   const a = attribute("aFx", "vec4");
   const center = attribute("aCenter", "vec3");
@@ -330,11 +334,12 @@ export function rezFxMaterial(): THREE.MeshBasicNodeMaterial {
   const ga = atan(gy, gx);
   const turn = p.mul(2.4);
   const band = (at: number, w: number) => smoothstep(w, w * 0.35, abs(gr.sub(at)));
-  const seg = (n: number, rot: THREE.Node, fill: number) => smoothstep(fill, fill - 0.08, abs(fract(ga.add(rot).mul(n / (Math.PI * 2))).sub(0.5)).mul(2));
+  /** `n` segments round the circle, each filling `fill` of its arc, turning at `speed` × the glyph's turn. */
+  const seg = (n: number, speed: number, fill: number) => smoothstep(fill, fill - 0.08, abs(fract(ga.add(turn.mul(speed)).mul(n / (Math.PI * 2))).sub(0.5)).mul(2));
   const tri = cos(float(Math.PI / 3)).div(cos(fract(ga.sub(turn.mul(0.5)).mul(3 / (Math.PI * 2))).mul((Math.PI * 2) / 3).sub(Math.PI / 3)));
   const pattern = band(0.9, 0.028)
-    .add(band(0.66, 0.03).mul(seg(6, turn as unknown as THREE.Node, 0.7)))
-    .add(band(0.78, 0.05).mul(seg(36, turn.mul(-0.6) as unknown as THREE.Node, 0.3)).mul(0.6))
+    .add(band(0.66, 0.03).mul(seg(6, 1, 0.7)))
+    .add(band(0.78, 0.05).mul(seg(36, -0.6, 0.3)).mul(0.6))
     .add(smoothstep(0.035, 0.012, abs(gr.sub(tri.mul(0.44)))).mul(0.9))
     .add(float(1).sub(gr).clamp(0, 1).pow(2).mul(0.3));
   const glyph = pattern.mul(smoothstep(1.0, 0.94, gr)).mul(smoothstep(0.0, 0.08, p)).mul(float(1).sub(p).pow(1.4)).mul(select(isDeath, float(0.55), float(1.25)));

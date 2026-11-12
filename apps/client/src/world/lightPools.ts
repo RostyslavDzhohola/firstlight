@@ -108,7 +108,7 @@ export const poolGain = { tint: uniform(1), glow: uniform(1) };
 export function lightPoolMaterial(layer: PoolLayer = "glow"): THREE.MeshBasicNodeMaterial {
   let m = mats.get(layer);
   if (m) return m;
-  m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false });
+  m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true, fog: false });
   m.name = `light_pools:${layer}`;
   if (layer === "tint") {
     m.blending = THREE.CustomBlending;

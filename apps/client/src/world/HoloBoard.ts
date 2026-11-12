@@ -83,7 +83,7 @@ export class HoloBoard implements ClientSystem {
     const { w, h, lift } = HOLO_PANEL;
 
     // The panel.
-    const panelMat = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false });
+    const panelMat = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true, fog: false });
     panelMat.name = "holo_panel";
     {
       const u = uv();
@@ -112,7 +112,7 @@ export class HoloBoard implements ClientSystem {
 
     // The cone of light from the emitter's lens up to the panel's lower edge (an elliptical fan).
     const coneH = lift - 0.42;
-    const coneMat = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false });
+    const coneMat = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, forceSinglePass: true, fog: false });
     coneMat.name = "holo_cone";
     {
       const v = positionLocal.y.div(coneH).add(0.5);
