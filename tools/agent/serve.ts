@@ -43,6 +43,9 @@ export function bridge(session: Session, onQuit: () => void = () => {}) {
     // Browsers must not drive this: a page on another origin can POST to localhost. Requests that
     // carry an Origin (any browser fetch does) are refused; curl and the CLI send none.
     if (req.headers.origin) return send(403, { ok: false, reason: "forbidden", hint: "this bridge takes local tools, not web pages" });
+    // ...and only under its own name: a hostname that was re-pointed at 127.0.0.1 (DNS rebinding) is refused.
+    const host = (req.headers.host ?? "").replace(/:\d+$/, "");
+    if (host !== "127.0.0.1" && host !== "localhost" && host !== "[::1]") return send(403, { ok: false, reason: "forbidden", hint: "call the bridge as 127.0.0.1 or localhost" });
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     const path = url.pathname.replace(/^\/+|\/+$/g, "");
     try {

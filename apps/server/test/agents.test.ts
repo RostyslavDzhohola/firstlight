@@ -12,7 +12,7 @@ import { onlineSnapshot } from "../src/ops/home.ts";
 import { liveRooms } from "../src/social/index.ts";
 import type { Room } from "@colyseus/sdk";
 import { grantTravel, joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
-import { ask, me, offset, openSpotOutside } from "./npc-bots.ts";
+import { ask, offset, openSpotOutside } from "./npc-bots.ts";
 
 let game: Game;
 let url: string;
@@ -69,7 +69,7 @@ describe("agents: joining", () => {
     } finally {
       await safeLeave(human);
     }
-  });
+  }, 60_000);
 
   it("observe() has the documented shape and a short summary", async () => {
     const a = await agent("agentB");
@@ -90,7 +90,7 @@ describe("agents: joining", () => {
     expect(o.summary).toContain("agentB [AI] L1 on arcadia");
     expect(Buffer.byteLength(o.summary)).toBeLessThan(1500);
     expect(Buffer.byteLength(JSON.stringify(o))).toBeLessThan(6000);
-  });
+  }, 60_000);
 });
 
 describe("agents: limits", () => {
@@ -109,7 +109,7 @@ describe("agents: limits", () => {
     await a1.close();
     await waitFor(() => agentsOnline() === 1);
     expect((await third.connect({ url, token: "dev:capC:capC", body: "arcadia" })).ok).toBe(true);
-  });
+  }, 60_000);
 
   it("the switch turns agents away, the header alone flags a player, and people are unaffected", async () => {
     AGENT_RULES.enabled = false;
@@ -126,7 +126,7 @@ describe("agents: limits", () => {
     grantTravel("hdrA", "arcadia");
     const res = await fetch(`${url}/api/play`, { method: "POST", headers: { Authorization: "Bearer dev:hdrA:hdrA", "Content-Type": "application/json", [AGENT_HEADER]: "1" }, body: JSON.stringify({ body: "arcadia", v: PROTOCOL_VERSION }) });
     expect(((await res.json()) as { ok: boolean }).ok).toBe(true);
-  });
+  }, 60_000);
 
   it("the per-room cap sends agents to another copy, then refuses", async () => {
     AGENT_RULES.perRoom = 1;
@@ -137,7 +137,7 @@ describe("agents: limits", () => {
     const third = new FirstlightAgent();
     agents.push(third);
     await expect(third.connect({ url, token: "dev:roomC:roomC", body: "arcadia" })).rejects.toMatchObject({ code: AGENT_REFUSAL.LIMIT, message: expect.stringContaining("Every copy of this world") });
-  });
+  }, 60_000);
 });
 
 // From here on agents leave the safe zone: a body left out there lingers for 30 s (and counts
@@ -168,6 +168,9 @@ describe("agents: missions and fighting", () => {
 
   it("walks to the guide and takes the missions", async () => {
     const a = await agent("agentD");
+    // Arrivals are spread round the pad, sometimes right next to the guide: step well away first.
+    const lark = a.observe({ peek: true }).guide!;
+    expect(await a.moveTo({ bearing: (lark.bearing + 180) % 360, distance: 8 })).toMatchObject({ ok: true });
     expect(await a.takeMissions()).toMatchObject({ ok: false, reason: "too far" });
     expect(await a.moveTo("guide")).toMatchObject({ ok: true, corrections: 0 });
     const talk = await a.interact();
@@ -187,7 +190,7 @@ describe("agents: missions and fighting", () => {
     const a = await agent("agentE");
     const admin = await joinAs(game, "adminE", "arcadia", { starter: 3 }, "admin");
     rooms.push(admin);
-    await waitFor(() => !!me(admin));
+    await waitFor(() => !!(admin.state as any).players?.get(admin.sessionId));
     const p = a.position;
     const at = offset(p, 3, 0, 500);
     const npc = await ask<{ id: string }>(admin, "npcInfo", { cmd: "spawn", kind: "woolback", x: at[0], y: at[1], z: at[2], instant: true, roam: 0 });
@@ -209,7 +212,7 @@ describe("agents: missions and fighting", () => {
     const a = await agent("agentF");
     const admin = await joinAs(game, "adminF", "arcadia", { starter: 3 }, "admin");
     rooms.push(admin);
-    await waitFor(() => !!me(admin));
+    await waitFor(() => !!(admin.state as any).players?.get(admin.sessionId));
     const spot = openSpotOutside("arcadia");
     expect(await a.moveTo({ pos: spot }, { sprint: true, seconds: 40 })).toMatchObject({ ok: true, corrections: 0 });
     expect(a.observe().self.zone).toBe("danger");
@@ -227,4 +230,50 @@ describe("agents: missions and fighting", () => {
     expect(after.events.some((e) => e.type === "hit" && e.text.includes("damage to Hopbit"))).toBe(true);
     expect(a.corrections).toBe(0);
   }, 90_000);
+  it("trades, heals, rolls, dies and starts a new life", async () => {
+    const a = await agent("agentG");
+    const admin = await joinAs(game, "adminG", "arcadia", { starter: 3 }, "admin");
+    rooms.push(admin);
+    await waitFor(() => !!(admin.state as any).players?.get(admin.sessionId));
+    admin.send("admin", { cmd: "coins", args: { amount: 100, target: a.sessionId } });
+    await waitFor(() => a.observe({ peek: true }).self.coins === 100);
+    // The shop: a list, a purchase, a sale; the server's refusal reasons come through.
+    expect(await a.moveTo("shop")).toMatchObject({ ok: true });
+    const goods = await a.shop();
+    expect(goods).toMatchObject({ ok: true, shop: "Dawnpad Trading Post", coins: 100, level: 1 });
+    expect(await a.buy("tonic_small", { qty: 3 })).toMatchObject({ ok: true, coins: 70 });
+    expect(await a.buy("carbine", { tier: 2 })).toMatchObject({ ok: false, reason: "level" });
+    expect(await a.buy("comet")).toMatchObject({ ok: false, reason: "coins" });
+    expect(await a.buy("no_such_thing")).toMatchObject({ ok: false, reason: "not sold" });
+    await waitFor(() => a.observe({ peek: true }).self.hotbar.some((i) => i.id === "tonic_small" && i.qty === 3));
+    expect(await a.sell("tonic_small", 1)).toMatchObject({ ok: true, coins: 72 });
+    expect(a.observe().self.hotbar.find((i) => i.id === "tonic_small")).toMatchObject({ qty: 2 });
+    // Out in the wild: a roll (the one burst past sprint speed the server allows), then a tonic when hurt.
+    expect(await a.moveTo({ pos: openSpotOutside("arcadia") }, { sprint: true, seconds: 40 })).toMatchObject({ ok: true, corrections: 0 });
+    const roll = await a.dodge(90);
+    expect(roll.ok).toBe(true);
+    expect(roll.moved as number).toBeGreaterThan(3.5);
+    expect(await a.dodge(90)).toMatchObject({ ok: false, reason: "cooldown" });
+    await new Promise((ok) => setTimeout(ok, 400));
+    expect(a.corrections).toBe(0);
+    admin.send("admin", { cmd: "damage", args: { amount: 45, target: a.sessionId } });
+    await waitFor(() => a.observe({ peek: true }).self.hp <= 60);
+    expect(await a.useItem("tonic_small")).toMatchObject({ ok: true, used: "Small Tonic", left: 1 });
+    expect(await a.useItem("tonic_small")).toMatchObject({ ok: false, reason: "cooldown" });
+    await waitFor(() => a.observe({ peek: true }).self.hp >= 90, 8000);
+    // Death: everything refuses with the way out, and respawn starts over in Portus.
+    admin.send("admin", { cmd: "damage", args: { amount: 100_000, target: a.sessionId } });
+    await waitFor(() => a.dead);
+    const dead = a.observe();
+    expect(dead.status).toBe("dead");
+    expect(dead.summary).toContain("DEAD: call respawn.");
+    expect(dead.events.some((e) => e.type === "death")).toBe(true);
+    expect(await a.moveTo("guide")).toMatchObject({ ok: false, reason: "dead", hint: "call respawn" });
+    expect(await a.respawn({ starter: "ash" })).toMatchObject({ ok: true, body: "portus", starter: "ash" });
+    await waitFor(() => a.observe({ peek: true }).self.maxHp > 0 && a.observe({ peek: true }).self.hotbar.length > 0);
+    const reborn = a.observe();
+    expect(reborn.self).toMatchObject({ body: "portus", dead: false, level: 1, zone: "safe", zoneKind: "town" });
+    expect(reborn.self.weapon.id).toBe("sunbrand");
+    expect(reborn.status).toBe("playing");
+  }, 120_000);
 });

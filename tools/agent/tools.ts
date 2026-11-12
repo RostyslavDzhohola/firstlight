@@ -127,7 +127,8 @@ export const TOOLS: readonly ToolDef[] = [
           name,
           starter: (a.starter ?? "unit7") as string,
           body: a.body as BodyId | undefined,
-          ...(dev ? { token: `dev:${(name ?? "agent").toLowerCase()}${process.env.FL_DEV_ID ?? ""}:${name ?? "Agent"}` } : { sessionFile: sessionFile(url, name ?? "agent") }),
+          // A dev identity is its id: the name's (so the same name is the same character), or a new one each run.
+          ...(dev ? { token: `dev:${name ? name.toLowerCase() : `agent${Math.random().toString(36).slice(2, 8)}`}:${name ?? "Agent"}` } : { sessionFile: sessionFile(url, name ?? "agent") }),
           log: s.log,
         });
         s.agent = agent;

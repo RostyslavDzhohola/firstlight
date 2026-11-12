@@ -1,8 +1,11 @@
 // The agent front ends (tools/agent) playing for real against the in-process server: a model's
 // session over MCP, a shell's session over the HTTP bridge, and the scripted hunter (the demo).
 
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { join } from "node:path";
+import { createInterface } from "node:readline";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { FirstlightAgent } from "@firstlight/agent-kit";
 import { runHunter } from "@firstlight/agent-tools/examples/hunter";
@@ -143,5 +146,86 @@ describe("the example hunter", () => {
     } finally {
       await agent.close();
     }
+  }, 180_000);
+});
+
+describe("the real processes (Node runs the .ts sources directly)", () => {
+  const TOOLS_DIR = join(import.meta.dirname, "../../../tools/agent");
+  const children: ChildProcess[] = [];
+  afterEach(() => {
+    for (const c of children.splice(0)) c.kill();
+  });
+
+  it("node tools/agent/mcp.ts speaks clean JSON-RPC on stdout and plays", async () => {
+    const child = spawn(process.execPath, [join(TOOLS_DIR, "mcp.ts")], { env: { ...process.env, FL_URL: url, FL_DEV: "1", FL_AGENT_NAME: "StdioScout", FL_AGENT_SESSION: "none" }, stdio: ["pipe", "pipe", "pipe"] });
+    children.push(child);
+    const lines: string[] = [];
+    const waiting = new Map<number, (m: any) => void>();
+    createInterface({ input: child.stdout! }).on("line", (line) => {
+      lines.push(line);
+      try {
+        const m = JSON.parse(line);
+        waiting.get(m.id)?.(m);
+      } catch {
+        /* the assertion below reports it */
+      }
+    });
+    let id = 0;
+    const rpc = (method: string, params?: unknown) =>
+      new Promise<any>((ok, fail) => {
+        const n = ++id;
+        const timer = setTimeout(() => fail(new Error(`no answer to ${method}`)), 60_000);
+        waiting.set(n, (m) => (clearTimeout(timer), ok(m)));
+        child.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", id: n, method, ...(params ? { params } : {}) })}\n`);
+      });
+    const init = await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } });
+    expect(init.result.serverInfo.name).toBe("firstlight-agent");
+    child.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
+    expect((await rpc("tools/list")).result.tools.length).toBeGreaterThanOrEqual(15);
+    const joined = await rpc("tools/call", { name: "firstlight_join", arguments: {} });
+    expect(joined.result.isError).toBe(false);
+    expect(joined.result.content[0].text).toContain("StdioScout [AI] L1 on portus");
+    const walked = await rpc("tools/call", { name: "firstlight_move", arguments: { bearing: 180, distance: 6 } });
+    expect(JSON.parse(walked.result.content[0].text)).toMatchObject({ ok: true, corrections: 0 });
+    expect((await rpc("tools/call", { name: "firstlight_leave", arguments: {} })).result.isError).toBe(false);
+    // Nothing but protocol on stdout (library chatter goes to stderr).
+    for (const line of lines) expect(() => JSON.parse(line), line).not.toThrow();
+    expect(lines.length).toBe(id);
+  }, 120_000);
+
+  it("node tools/agent/serve.ts and fl-agent.mjs: a shell session", async () => {
+    const probe = createServer();
+    await new Promise<void>((ok) => probe.listen(0, "127.0.0.1", ok));
+    const port = String((probe.address() as AddressInfo).port);
+    await new Promise<void>((ok) => probe.close(() => ok()));
+    const env = { ...process.env, FL_URL: url, FL_DEV: "1", FL_AGENT_PORT: port, FL_AGENT_SESSION: "none" };
+    const bridgeProc = spawn(process.execPath, [join(TOOLS_DIR, "serve.ts")], { env, stdio: ["ignore", "ignore", "pipe"] });
+    children.push(bridgeProc);
+    await new Promise<void>((ok, fail) => {
+      const timer = setTimeout(() => fail(new Error("the bridge didn't start")), 60_000);
+      createInterface({ input: bridgeProc.stderr! }).on("line", (l) => l.includes("agent bridge on") && (clearTimeout(timer), ok()));
+    });
+    const cli = (...args: string[]) =>
+      new Promise<{ code: number; out: string }>((ok) => execFile(process.execPath, [join(TOOLS_DIR, "fl-agent.mjs"), ...args], { env, timeout: 60_000 }, (err, stdout, stderr) => ok({ code: err ? ((err as { code?: number }).code ?? 1) : 0, out: `${stdout}${stderr}` })));
+    const before = await cli("observe");
+    expect(before.code).toBe(1);
+    expect(before.out).toContain("call firstlight_join first");
+    const joined = await cli("join", "--name", "CliScout", "--starter", "ash");
+    expect(joined.code, joined.out).toBe(0);
+    expect(joined.out).toContain("CliScout [AI] L1 on portus");
+    expect(joined.out).toContain("Weapon Sunbrand");
+    const moved = await cli("move", "--bearing", "20", "--distance", "5");
+    expect(moved.code, moved.out).toBe(0);
+    expect(JSON.parse(moved.out)).toMatchObject({ ok: true, corrections: 0 });
+    expect((await cli("move", "portal:arcadia", "--sprint")).code).toBe(0);
+    const look = await cli("observe");
+    expect(look.out).toContain("portal to arcadia");
+    const bad = await cli("attack", "n1", "--seconds", "500");
+    expect(bad.code).toBe(1);
+    expect(bad.out).toContain("must be at most 120");
+    expect((await cli("tools")).out).toContain("move  --target --bearing --distance");
+    expect(JSON.parse((await cli("quit")).out)).toEqual({ ok: true, left: true });
+    await new Promise<void>((ok) => (bridgeProc.exitCode !== null ? ok() : bridgeProc.once("exit", () => ok())));
+    expect((await cli("observe")).code).toBe(2); // no bridge any more
   }, 180_000);
 });

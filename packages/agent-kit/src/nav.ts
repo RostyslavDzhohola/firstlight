@@ -20,7 +20,10 @@ export interface NavStep {
   gone: boolean;
 }
 
-export type Navigator = (now: number) => NavStep;
+/** Call once per movement tick (the argument is unused: the navigator counts its own ticks). */
+export type Navigator = (now?: number) => NavStep;
+
+const TICK_MS = 50;
 
 /** How far either side of a gate's centre the route's waypoints sit (metres, along the line through the centre). */
 const GATE_APPROACH = 9;
@@ -63,7 +66,11 @@ export function createNavigator(walker: Walker, w: BodyWorld, dest: () => V3 | n
   let best = Infinity;
   let bestAt = 0;
   let flips = 0;
-  return (now) => {
+  let calls = 0;
+  return () => {
+    // Time is counted in movement ticks, not on the wall clock: a starved process (a busy machine)
+    // gets few ticks per second, and must not conclude it is stuck from the clock alone.
+    const now = ++calls * TICK_MS;
     const final = dest();
     if (!final) return { wish: null, remaining: 0, blocked: false, gone: true };
     const pos = walker.p;

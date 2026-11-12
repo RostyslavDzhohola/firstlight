@@ -2,8 +2,11 @@
 // before anything runs, and the two front ends (MCP over stdio, the local HTTP bridge) answering
 // sensibly without a game. Playing through them against a server: apps/server/test/agent-tools.test.ts.
 
+import { readdirSync, readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
+import { stripTypeScriptTypes } from "node:module";
 import type { AddressInfo } from "node:net";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { handleRpc, MCP_PROTOCOL } from "./mcp.ts";
 import { bridge } from "./serve.ts";
@@ -128,5 +131,22 @@ describe("HTTP bridge", () => {
     const fromPage = await fetch(`${base}/move`, { method: "POST", headers: { Origin: "https://example.org" }, body: "{}" });
     expect(fromPage.status).toBe(403);
     expect(await fromPage.json()).toMatchObject({ ok: false, reason: "forbidden" });
+    // ...and so is a foreign hostname pointed at this address (DNS rebinding).
+    expect((await fetch(`${base}/observe`, { headers: { Host: "evil.example:7361" } })).status).toBe(403);
   });
+});
+
+describe("the kit and the tools run as they are", () => {
+  // `node tools/agent/mcp.ts` runs the sources with Node's type stripping (no build): only erasable
+  // syntax, like the server (apps/server/test/strip-types.test.ts).
+  const dirs = [import.meta.dirname, join(import.meta.dirname, "examples"), join(import.meta.dirname, "../../packages/agent-kit/src")];
+  const files = dirs.flatMap((d) => readdirSync(d).filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts")).map((f) => join(d, f)));
+  it("finds the sources", () => {
+    expect(files.map((f) => f.split("/").pop())).toEqual(expect.arrayContaining(["mcp.ts", "serve.ts", "tools.ts", "hunter.ts", "agent.ts", "walker.ts", "nav.ts", "observe.ts", "auth.ts"]));
+  });
+  for (const file of files) {
+    it(`${file.split("/").slice(-2).join("/")} is erasable TypeScript`, () => {
+      expect(() => stripTypeScriptTypes(readFileSync(file, "utf8"), { mode: "strip" })).not.toThrow();
+    });
+  }
 });
