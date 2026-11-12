@@ -75,6 +75,8 @@ export class Game {
   readonly avatars = new Map<string, AvatarView>();
   /** Players who left: their avatars de-rez (render/rez.ts) for a moment, then go. */
   private readonly leaving = new Set<AvatarView>();
+  /** Scratch: the players who joined this frame (they rez in nearest first, AvatarView.rezArrivals). */
+  private readonly arrivals: AvatarView[] = [];
   /** Traffic between the sky planets, shooting stars, the aurora (render/skyLife.ts). */
   private skyLife: SkyLife | null = null;
   self!: AvatarView;
@@ -840,22 +842,27 @@ export class Game {
         a.root.visible = this.ctx.settings.on.chars;
         this.avatars.set(id, a);
         this.ctx.scene.add(a.root);
-        // Someone arrived: they materialise, and the portal they came through (if any) pulses.
         a.set(s.x, s.y, s.z, s.fx, s.fy, s.fz, s.anim, 0);
-        a.rez("in");
-        this.portals?.pulseNear(a.root.position);
+        // Someone who arrives while we are here materialises, and the portal they came through (if
+        // any) pulses. Whoever was in the room when we joined or reconnected is simply there.
+        if (!view.seeded) {
+          this.arrivals.push(a);
+          this.portals?.pulseNear(a.root.position);
+        }
       }
       a.set(s.x, s.y, s.z, s.fx, s.fy, s.fz, s.anim, dt);
+    }
+    if (this.arrivals.length) {
+      AvatarView.rezArrivals(this.arrivals, this.ctx.camera);
+      this.arrivals.length = 0;
     }
     for (const [id, a] of this.avatars) {
       if (!this.net.remotes.has(id)) {
         // Gone (left, or through a portal): the avatar de-rezzes where it stood, then is freed.
         this.avatars.delete(id);
         this.portals?.pulseNear(a.root.position);
-        if (rezSwitch.on && a.root.visible) {
-          a.rez("out");
-          this.leaving.add(a);
-        } else a.dispose();
+        if (a.root.visible && a.rez("out")) this.leaving.add(a);
+        else a.dispose();
       }
     }
     for (const a of this.leaving) {

@@ -105,3 +105,48 @@ describe("Net.join (WebSocket handshake deadline)", () => {
     await net.leave();
   });
 });
+
+describe("Net remotes: who was already there (review A1)", () => {
+  const player = (x: number) => ({ x, y: 1000, z: 0, fx: 1, fy: 0, fz: 0, anim: 0 });
+  async function joined() {
+    const { joiner, s } = stallingJoiner();
+    const net = new Net(joiner);
+    const p = net.join("portus");
+    await vi.advanceTimersByTimeAsync(100);
+    let onState: (state: unknown) => void = () => {};
+    const room = { ...fakeRoom(), onStateChange: (fn: (state: unknown) => void) => void (onState = fn) };
+    s.complete(room);
+    await p;
+    return { net, push: (players: Map<string, unknown>) => onState({ players }) };
+  }
+
+  it("marks everyone in the join snapshot as seeded, and only later joiners as new", async () => {
+    const { net, push } = await joined();
+    const players = new Map<string, unknown>([["s1", player(0)], ["a", player(1)], ["b", player(2)]]);
+    push(players);
+    expect(net.remotes.get("a")?.seeded).toBe(true);
+    expect(net.remotes.get("b")?.seeded).toBe(true);
+    expect(net.remotes.has("s1")).toBe(false);
+    players.set("c", player(3));
+    push(players);
+    expect(net.remotes.get("c")?.seeded).toBe(false);
+    expect(net.remotes.get("a")?.seeded).toBe(true);
+    await net.leave();
+  });
+
+  it("keeps seeding until the state shows our own player, and seeds again on a rejoin", async () => {
+    const { net, push } = await joined();
+    // A first patch without us (never seen from the server, but nobody in it is an arrival).
+    push(new Map<string, unknown>([["a", player(1)]]));
+    push(new Map<string, unknown>([["a", player(1)], ["b", player(2)], ["s1", player(0)]]));
+    expect(net.remotes.get("b")?.seeded).toBe(true);
+    push(new Map<string, unknown>([["a", player(1)], ["b", player(2)], ["s1", player(0)], ["c", player(3)]]));
+    expect(net.remotes.get("c")?.seeded).toBe(false);
+    await net.leave();
+    // The reconnect: a new room, and its snapshot (c included) is the room as we find it.
+    const again = await joined();
+    again.push(new Map<string, unknown>([["s1", player(0)], ["c", player(3)]]));
+    expect(again.net.remotes.get("c")?.seeded).toBe(true);
+    await again.net.leave();
+  });
+});

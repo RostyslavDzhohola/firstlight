@@ -291,6 +291,22 @@ export function rezFxMesh(): { mesh: THREE.Mesh; fx: RezFx } {
 /** `?norez` / the Rez toggle: off, rez() calls do nothing (set from the resolved settings). */
 export const rezSwitch = { on: true };
 
+/** Rez effects that may run at once (each is one additive draw of ~200 triangles on top of its body). */
+export const REZ_MAX_ACTIVE = 6;
+/** Further than this from the camera an effect isn't worth its draw (m). */
+export const REZ_RANGE_M = 90;
+/** Effects running now, each with its light (AvatarView counts them in and out). */
+export const rezActive = { count: 0 };
+
+/**
+ * Whether one more effect may start: the player's own always does; anyone else's needs a free slot
+ * and to be within range of the camera (`dist` m; Infinity when unknown is refused, NaN never is).
+ */
+export function rezAdmits(active: number, dist: number, own = false): boolean {
+  if (own) return true;
+  return active < REZ_MAX_ACTIVE && !(dist > REZ_RANGE_M);
+}
+
 const MODE: Record<RezKind, number> = { in: 0, out: 1, death: 2 };
 export function rezMode(kind: RezKind): number {
   return MODE[kind];
