@@ -5,6 +5,7 @@
 import { STARTERS } from "@firstlight/shared/content/weapons";
 import { features } from "../config.ts";
 import { PF } from "@firstlight/shared/net/schema";
+import { AGENT_CHIP } from "@firstlight/shared/net/agents";
 import { REPORT_REASONS, SOCIAL } from "@firstlight/shared/net/social";
 import { el, isolateKeys, sbtn } from "./dom.ts";
 import { PARTY_COLOURS } from "./compass.ts";
@@ -170,6 +171,7 @@ export class PlayerList {
       if (p.title) el("span", "ttl", name, p.title);
       if (me) el("span", "fl-chip", name, "YOU");
       if (p.flags & PF.ADMIN) el("span", "fl-chip admin", name, "ADMIN");
+      if (p.agent) el("span", "fl-chip ai", name, AGENT_CHIP).title = "Played by an AI agent"; // shared net/agents.ts (D-agents-1)
       if (p.party) el("span", `fl-chip ${p.party === myParty ? "party" : "other"}`, name, p.party === myParty ? "PARTY" : "IN A PARTY");
       if (p.flags & PF.DEAD) el("span", "fl-chip bad", name, "DEAD");
       if (isBlocked(sid)) el("span", "fl-chip bad", name, "BLOCKED");

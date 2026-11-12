@@ -5,6 +5,7 @@
 // item slots by items.ts COSMETIC_SOCKET). Each shape is built around its socket point; cape and
 // backpack share the back socket, so each socket gets one group holding everything worn there.
 
+import { AGENT_CHIP } from "@firstlight/shared/net/agents";
 import * as THREE from "three/webgpu";
 import { applyOccluderFadeGated } from "./occluderFade.ts";
 import { COSMETIC_BY_ID, COSMETICS, COSMETIC_SOCKET, type CosmeticSlot, type Socket } from "@firstlight/shared/content/items";
@@ -387,7 +388,8 @@ export class Nameplates {
     document.body.appendChild(this.root);
   }
 
-  update(camera: THREE.Camera, entries: { id: string; pos: THREE.Vector3; name: string; title: string }[], me: THREE.Vector3) {
+  /** `agent`: an AI agent plays this character (shared net/agents.ts): its name carries the "AI" chip. */
+  update(camera: THREE.Camera, entries: { id: string; pos: THREE.Vector3; name: string; title: string; agent?: boolean }[], me: THREE.Vector3) {
     const seen = new Set<string>();
     const v = new THREE.Vector3();
     for (const e of entries) {
@@ -403,10 +405,17 @@ export class Nameplates {
         this.root.appendChild(p.el);
         this.plates.set(e.id, p);
       }
-      const key = `${e.name}|${e.title}`;
+      const key = `${e.name}|${e.title}|${e.agent ? 1 : 0}`;
       if (p.key !== key) {
         p.key = key;
         p.el.textContent = e.name;
+        if (e.agent) {
+          const chip = document.createElement("b");
+          chip.className = "fl-plate__ai";
+          chip.textContent = AGENT_CHIP;
+          chip.title = "Played by an AI agent";
+          p.el.appendChild(chip);
+        }
         if (e.title) {
           const i = document.createElement("i");
           i.textContent = e.title;

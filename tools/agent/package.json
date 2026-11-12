@@ -12,5 +12,8 @@
   "dependencies": {
     "@firstlight/agent-kit": "workspace:*",
     "@firstlight/shared": "workspace:*"
+  },
+  "exports": {
+    "./*": "./*.ts"
   }
 }

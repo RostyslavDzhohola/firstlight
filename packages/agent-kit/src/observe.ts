@@ -163,5 +163,7 @@ export function summarize(o: Omit<Observation, "summary">, maxBytes = 1500): str
     lines.splice(lines.length - 2, 1);
     text = lines.join("\n");
   }
-  return Buffer.byteLength(text) > maxBytes ? `${text.slice(0, maxBytes - 1)}…` : text;
+  // Still too long (a tiny budget): cut by bytes, never through a character.
+  while (Buffer.byteLength(text) > maxBytes) text = `${text.slice(0, Math.max(0, Math.min(text.length - 2, maxBytes - 4)))}…`;
+  return text;
 }

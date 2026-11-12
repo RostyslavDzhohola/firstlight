@@ -118,14 +118,17 @@ export class Walker {
   /**
    * One step of `dt` seconds: walk along `wish` (unit tangent, or null to stand) at `speed` m/s.
    * `face` (unit tangent) overrides the facing (aiming at a target while moving or standing).
+   * `hold`: don't move sideways at all this step (a roll in progress is put on hold too).
    */
-  step(dt: number, wish: V3 | null, speed: number, face: V3 | null = null) {
+  step(dt: number, wish: V3 | null, speed: number, face: V3 | null = null, hold = false) {
     const w = this.world;
     const R = w.R;
     const start = this.p;
     const up = this.up();
     let vH: V3 = [0, 0, 0];
-    if (this.dodgeLeft > 0) {
+    if (hold) {
+      // Standing still on purpose (the server has stalled): a roll in progress waits too.
+    } else if (this.dodgeLeft > 0) {
       this.dodgeLeft -= dt;
       const d = tangent(up, this.dodgeDir) ?? this.facing;
       vH = [d[0] * WALK.dodgeSpeed, d[1] * WALK.dodgeSpeed, d[2] * WALK.dodgeSpeed];

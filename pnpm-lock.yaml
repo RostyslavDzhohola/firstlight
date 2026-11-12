@@ -118,6 +118,9 @@ importers:
       '@firstlight/agent-kit':
         specifier: workspace:*
         version: link:../../packages/agent-kit
+      '@firstlight/agent-tools':
+        specifier: workspace:*
+        version: link:../../tools/agent
       '@types/better-sqlite3':
         specifier: 9.6.0
         version: 9.6.0

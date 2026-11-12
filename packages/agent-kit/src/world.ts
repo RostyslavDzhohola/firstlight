@@ -4,14 +4,14 @@
 import { BODIES, bodyBreakables, createTerrain, natureSolids, padDirs, portalSpots, safeGates, zoneAt, inWalledZone, type BodyDef, type BodyId, type Breakable, type NatureSolids, type PortalSpot, type Terrain, type Zone } from "@firstlight/shared";
 import { GUIDES, MISSION_BY_ID, missionsOn, type MissionDef } from "@firstlight/shared/content/missions";
 import { NPC_AREAS } from "@firstlight/shared/content/npcs";
-import { padName, placeDir } from "@firstlight/shared/content/places";
+import { padName, placeDir, towardDir } from "@firstlight/shared/content/places";
 import { SHOP_SPOTS, type ShopSpot } from "@firstlight/shared/content/shops";
 import { objectPos, objectsOn, type WorldObjectDef } from "@firstlight/shared/content/world";
 import { resolveAreaDir } from "@firstlight/shared/content/arenas";
 import { BreakableCollider } from "@firstlight/shared/planet/collide";
 import { structureCollider, type StructureCollider } from "@firstlight/shared/planet/sites";
 import { deepWater } from "@firstlight/shared/planet/water";
-import { norm, scale, type V3 } from "./vec.ts";
+import { groundDistance, norm, scale, type V3 } from "./vec.ts";
 
 export interface WorldObject {
   def: WorldObjectDef;
@@ -98,6 +98,33 @@ export class BodyWorld {
 
   walled(p: readonly number[]): boolean {
     return inWalledZone(this.body, p[0]!, p[1]!, p[2]!);
+  }
+
+  /** Can a body stand at `p` (feet on the ground): no wall, trunk or intact prop there, no deep water? */
+  standable(p: readonly number[]): boolean {
+    const q = { x: p[0]!, y: p[1]!, z: p[2]! };
+    if (this.deepAt(p)) return false;
+    if (!this.structures.isClear(q) || !this.nature.isClear(q)) return false;
+    const c = { pushed: false, nx: 0, ny: 0, nz: 0, floor: 0 };
+    return !this.breakables.list.length || !this.breakables.resolve({ ...q }, () => true, c);
+  }
+
+  /** The nearest way into a safe zone from `pos`: a point just inside a gate of the walled zone, or a pad. */
+  safeSpot(pos: readonly number[]): { pos: V3; name: string } | null {
+    let best: { pos: V3; name: string } | null = null;
+    let bestD = Infinity;
+    const centre = this.walledCentre;
+    for (const g of this.gates) {
+      const inside = centre ? this.onGround(towardDir(norm(g), centre, 12, this.R)) : g;
+      const d = groundDistance(pos, inside);
+      if (d < bestD) (bestD = d), (best = { pos: inside, name: this.id === "portus" ? "the town gate" : "the outpost gate" });
+    }
+    for (const p of this.pads) {
+      if (centre && p.id === 0) continue; // the main pad is inside the walls: its gates stand for it
+      const d = groundDistance(pos, p.pos);
+      if (d < bestD) (bestD = d), (best = { pos: p.pos, name: `pad ${p.id} ${p.name}` });
+    }
+    return best;
   }
 
   /** The guide's name on this body (planets only). */

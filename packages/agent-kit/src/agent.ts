@@ -113,6 +113,8 @@ type Tick = (now: number, dt: number) => Control | { done: ActionResult };
 
 const IDLE: Control = { wish: null, speed: 0 };
 const TICK_MS = 1000 / NET.INPUT_HZ;
+/** No state patch for this long (the server sends one every 50 ms): the server or the line has stalled. */
+const STALL_MS = 170;
 const NO_REJOIN: ReadonlySet<number> = new Set([CLOSE.ELSEWHERE, CLOSE.MERGED, CLOSE.BANNED, CLOSE.LOGGED_OUT, CLOSE.KICKED]);
 const sleep = (ms: number) => new Promise<void>((ok) => setTimeout(ok, ms));
 const round1 = (n: number) => Math.round(n * 10) / 10;
@@ -156,6 +158,9 @@ export class FirstlightAgent {
   private tonicUntil = 0;
   private waiters: { type: string; test: (m: any) => boolean; resolve: (m: any) => void }[] = [];
   private joinGen = 0;
+  private lastPatchAt = 0;
+  /** Ticks spent standing because the server had gone quiet (see onTick). */
+  stalls = 0;
 
   // ------------------------------------------------------------------------------------ joining
 
@@ -250,6 +255,8 @@ export class FirstlightAgent {
     this.you = null;
     this.huntIds = new Set();
     room.onMessage("*", (type: string | number, m: any) => this.onMessage(String(type), m));
+    this.lastPatchAt = Date.now();
+    room.onStateChange(() => (this.lastPatchAt = Date.now())); // the server's clock is in the state: a patch every tick
     room.onLeave((code: number) => this.onRoomClosed(room, code));
     // The character appears in the synced state a patch after the join.
     const t0 = Date.now();
@@ -499,9 +506,6 @@ export class FirstlightAgent {
   private onTick() {
     const room = this.room;
     if (!room || this.status !== "playing") return;
-    const now = Date.now();
-    const dt = Math.min(0.1, Math.max(0, (now - this.lastTick) / 1000));
-    this.lastTick = now;
     const me = this.me();
     if (!me) return;
     if (this.dead) {
@@ -513,7 +517,7 @@ export class FirstlightAgent {
     if (d) {
       let r: Control | { done: ActionResult };
       try {
-        r = d.tick(now, dt);
+        r = d.tick(Date.now(), TICK_MS / 1000);
       } catch (e) {
         r = { done: { ok: false, reason: "error", hint: (e as Error).message } };
       }
@@ -522,8 +526,19 @@ export class FirstlightAgent {
         d.resolve(r.done);
       } else control = r;
     }
+    // The step covers the time since the last input went out, measured now (after the thinking
+    // above): the server pays for distance by the gaps between the inputs it receives, so a tick
+    // that thought for long must not be followed by one that moves as if it hadn't.
+    const now = Date.now();
+    const dt = Math.min(0.1, Math.max(0, (now - this.lastTick) / 1000));
+    this.lastTick = now;
     const w = this.walker;
-    w.step(dt, control.wish, control.speed, control.face ?? null);
+    // The server pays for at most 0.25 s of movement between two inputs it handles. When it stalls
+    // (no state patch for a few ticks) inputs queue up and are handled in one go, so a body that
+    // kept running would be snapped back: stand until patches flow again, as a careful player would.
+    const stalled = now - this.lastPatchAt > STALL_MS;
+    if (stalled) this.stalls++;
+    w.step(dt, stalled ? null : control.wish, stalled ? 0 : control.speed, control.face ?? null, stalled);
     room.send("input", { seq: ++this.seq, x: w.pos.x, y: w.pos.y, z: w.pos.z, fx: w.facing[0], fy: w.facing[1], fz: w.facing[2], anim: w.anim, t: now });
     this.inputs++;
     control.after?.();
@@ -693,23 +708,8 @@ export class FirstlightAgent {
     return { ...obs, summary: summarize(obs, o.maxSummaryBytes) };
   }
 
-  /** The nearest way into a safe zone: a gate of the walled zone (a point just inside it) or a pad. */
   private safeSpot(pos: V3): { pos: V3; name: string } | null {
-    const w = this.world;
-    let best: { pos: V3; name: string } | null = null;
-    let bestD = Infinity;
-    const centre = w.walledCentre;
-    for (const g of w.gates) {
-      const inside = centre ? w.onGround(towardDir(norm(g), centre, 10, w.R)) : g;
-      const d = groundDistance(pos, inside);
-      if (d < bestD) (bestD = d), (best = { pos: inside, name: w.id === "portus" ? "town gate" : "outpost gate" });
-    }
-    for (const p of w.pads) {
-      if (centre && p.id === 0) continue; // the main pad is inside the walls: its gates stand for it
-      const d = groundDistance(pos, p.pos);
-      if (d < bestD) (bestD = d), (best = { pos: p.pos, name: `pad ${p.id} ${p.name}` });
-    }
-    return best;
+    return this.world.safeSpot(pos);
   }
 
   // ------------------------------------------------------------------------------------ targets

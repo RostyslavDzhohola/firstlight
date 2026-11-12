@@ -37,9 +37,18 @@ export function routeVia(w: BodyWorld, from: V3, to: V3): V3[] {
     if (d < best) (best = d), (gate = g);
   }
   const gd = norm(gate);
-  const inner = w.onGround(towardDir(gd, centre, GATE_APPROACH, w.R));
-  const outer = w.onGround(towardDir(gd, centre, -GATE_APPROACH, w.R));
-  return a ? [inner, w.onGround(gd), outer] : [outer, w.onGround(gd), inner];
+  // A point on the line through the gate, the first of a few distances that nothing stands on
+  // (Arcadia has a rock right outside its north gate); none: the gate itself is waypoint enough.
+  const clearOf = (sign: number): V3 | null => {
+    for (const m of [GATE_APPROACH, GATE_APPROACH - 3, GATE_APPROACH + 4]) {
+      const p = w.onGround(towardDir(gd, centre, sign * m, w.R));
+      if (w.standable(p)) return p;
+    }
+    return null;
+  };
+  const inner = clearOf(1), outer = clearOf(-1);
+  const mid = w.onGround(gd);
+  return (a ? [inner, mid, outer] : [outer, mid, inner]).filter((p): p is V3 => !!p);
 }
 
 const ANGLES = [25, 50, 75, 100, 130, 160];
@@ -48,6 +57,7 @@ const ANGLES = [25, 50, 75, 100, 130, 160];
 export function createNavigator(walker: Walker, w: BodyWorld, dest: () => V3 | null): Navigator {
   let path: V3[] | null = null;
   let routedFor: V3 | null = null;
+  let routedAt = 0;
   let side = 0;
   let sideSince = 0;
   let best = Infinity;
@@ -60,14 +70,18 @@ export function createNavigator(walker: Walker, w: BodyWorld, dest: () => V3 | n
     if (!path || !routedFor || dist(routedFor, final) > 6) {
       path = routeVia(w, pos, final);
       routedFor = final;
+      routedAt = now;
       best = Infinity;
       bestAt = now;
       flips = 0;
     }
-    // A waypoint is done with when we stand on it, and the whole gate detour once we are on the
-    // target's side of the wall (a waypoint may sit in something: a statue outside the gate).
-    while (path.length && groundDistance(pos, path[0]!) < 1.6) path.shift();
-    if (path.length && w.walled(pos) === w.walled(final) && groundDistance(pos, path[path.length - 1]!) < GATE_APPROACH * 2 + 4) path.length = 0;
+    while (path.length && groundDistance(pos, path[0]!) < 1.2) path.shift();
+    // Through the waypoints and still on the wrong side of the wall (pushed back in the gateway):
+    // plan the gate again from here.
+    if (!path.length && now - routedAt > 2000 && w.walled(pos) !== w.walled(final)) {
+      path = routeVia(w, pos, final);
+      routedAt = now;
+    }
     const target = path[0] ?? final;
     let remaining = groundDistance(pos, target);
     for (let i = 0; i < path.length; i++) remaining += groundDistance(path[i]!, path[i + 1] ?? final);

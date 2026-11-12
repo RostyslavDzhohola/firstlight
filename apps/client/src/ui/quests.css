@@ -80,3 +80,6 @@
 .fl-console .h { margin-top: calc(.3 * var(--u)); font: 500 var(--t-xs)/1.4 var(--font-mono); color: var(--fog-4); text-shadow: var(--hud-text-shadow); }
 .fl-console-wrap { background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; pointer-events: none; }
 .fl-console-wrap .fl-console { pointer-events: auto; }
+
+/* Nameplate chip for characters an AI agent plays (D-agents-1; text from shared net/agents.ts). */
+.fl-plate__ai { display: inline-block; margin-left: .45em; padding: .08em .38em .02em; vertical-align: .08em; font: 700 .82em/1.1 var(--font-display); letter-spacing: .12em; color: var(--photon); border: 1px solid var(--photon-line); border-radius: var(--r-1); background: rgba(8, 14, 22, .55); text-shadow: none; }
