@@ -42,7 +42,7 @@ function installPad() {
   };
 }
 
-const BTN = { A: 0, B: 1, RT: 7, START: 9, LEFT: 14, DOWN: 13 };
+const BTN = { A: 0, B: 1, RT: 7, START: 9, UP: 12, LEFT: 14, DOWN: 13 };
 
 async function press(p: Player, b: number, ms = 120) {
   await p.page.evaluate((b) => (window as any).__pad.set(b, true), b);
@@ -101,7 +101,12 @@ test.describe("Gamepad and touch", () => {
     await press(player, BTN.DOWN);
     await expect(page.locator(".fl-padfocus"), "a focus ring on a menu item").toHaveCount(1);
     await player.shot("pad-pause-focus");
-    // A on Settings (the row under Resume) opens it: the Gamepad section with the layout.
+    // Settings is the row under Resume: step to it (from Resume down, from anything lower up), A opens it.
+    for (let i = 0; i < 6; i++) {
+      const txt = (await page.locator(".fl-padfocus").textContent()) ?? "";
+      if (/Settings/.test(txt)) break;
+      await press(player, /Resume/.test(txt) ? BTN.DOWN : BTN.UP);
+    }
     const focused = await page.locator(".fl-padfocus").textContent();
     if (/Settings/.test(focused ?? "")) {
       await press(player, BTN.A);
