@@ -555,3 +555,42 @@ describe("Pad look and the frame clock (review #6)", () => {
     r.dispose();
   });
 });
+
+describe("Polling path allocations (review #11)", () => {
+  it("one getGamepads() snapshot per poll, in play and in menus with a direction held", () => {
+    const canvas = document.createElement("canvas");
+    const input = new Input(canvas);
+    input.free = true;
+    const nav = { move: vi.fn(), accept: vi.fn(), scroll: vi.fn(), clearRing: vi.fn() } as unknown as FocusNav;
+    const p = pad();
+    let calls = 0;
+    const src = new GamepadSource(
+      { input, nav, settings: () => SETTINGS, interactAvailable: () => false, selectedSlot: () => 0, onTarget: () => false },
+      () => (calls++, [p, null]),
+    );
+    p.press(BTN.A);
+    src.poll(1000);
+    expect(calls).toBe(1);
+    input.free = false; // a menu: the D-pad navigates
+    p.press(BTN.A, false);
+    p.press(BTN.DOWN);
+    calls = 0;
+    src.poll(1016);
+    src.poll(1500);
+    expect(calls).toBe(2);
+    expect((nav.move as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThanOrEqual(2); // and it still navigates
+  });
+
+  it("button state buffers are reused between polls", () => {
+    const r = rig();
+    const p = pad();
+    r.pads.push(p);
+    p.press(BTN.A);
+    r.poll();
+    const st = (r.src as unknown as { state: Map<number, { prev: boolean[]; cur: boolean[] }> }).state.get(0)!;
+    const bufs = new Set([st.prev, st.cur]);
+    for (let i = 0; i < 5; i++) r.poll();
+    expect(new Set([st.prev, st.cur])).toEqual(bufs);
+    r.dispose();
+  });
+});

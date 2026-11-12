@@ -60,7 +60,13 @@ export function pressedOf(p: PadLike, b: number, was = false): boolean {
 interface PadState {
   /** Input's source name for this pad ("pad:<index>"). */
   source: string;
+  index: number;
+  /** Buttons as of the last poll, and the buffer the next poll fills (swapped: no allocation). */
   prev: boolean[];
+  cur: boolean[];
+  /** This pad's left stick this poll (x right, y forward). */
+  mx: number;
+  my: number;
   /** Key codes this pad holds down (sent keydown, owes keyup) and the button that holds each. */
   held: Map<string, number>;
   sprinting: boolean;
@@ -79,6 +85,11 @@ export class GamepadSource {
    * when the window lost focus or the page was hidden (review #1).
    */
   private readonly waitNeutral = new Set<number>();
+  /** Reused per poll (review #11): the pad snapshot, the pads that count, the button edges. */
+  private readonly snap: PadLike[] = [];
+  private readonly live: PadLike[] = [];
+  private readonly edges: Edge[] = [];
+  private edgeCount = 0;
   private raf = 0;
   private last = 0;
   private navDir: Dir | null = null;
@@ -108,7 +119,7 @@ export class GamepadSource {
     const loop = (t: number) => {
       this.raf = 0;
       this.poll(t);
-      if (this.connected().length) this.raf = requestAnimationFrame(loop);
+      if (this.snap.length) this.raf = requestAnimationFrame(loop);
       else this.releaseAll();
     };
     this.raf = requestAnimationFrame(loop);
@@ -120,7 +131,7 @@ export class GamepadSource {
 
   private stateOf(index: number): PadState {
     let st = this.state.get(index);
-    if (!st) this.state.set(index, (st = { source: `${SOURCE}:${index}`, prev: [], held: new Map(), sprinting: false, selectAt: 0, selectTab: false }));
+    if (!st) this.state.set(index, (st = { source: `${SOURCE}:${index}`, index, prev: new Array<boolean>(17).fill(false), cur: new Array<boolean>(17).fill(false), mx: 0, my: 0, held: new Map(), sprinting: false, selectAt: 0, selectTab: false }));
     return st;
   }
 
@@ -138,29 +149,34 @@ export class GamepadSource {
     this.last = now;
     const input = this.host.input;
     const s = this.host.settings();
-    const all = this.connected().filter((p) => p.mapping === "standard" || p.buttons.length >= 16);
+    // One getGamepads() snapshot per poll, into reused buffers (review #11).
+    const all = this.snapshot();
     if (!input.focused) {
       // Unfocused or hidden: feed nothing (not the world, not the menus); every pad waits for neutral.
       if (this.mode !== "idle") this.setMode("idle");
       for (const p of all) this.waitNeutral.add(p.index);
       return;
     }
-    const pads = all.filter((p) => !this.waitNeutral.has(p.index) || this.neutral(p, s));
+    const pads = this.live;
+    pads.length = 0;
+    for (const p of all) if (!this.waitNeutral.has(p.index) || this.neutral(p, s)) pads.push(p);
     let mx = 0, my = 0, lx = 0, ly = 0;
-    const edges: Edge[] = [];
+    this.edgeCount = 0;
     let used: PadLike | null = null;
-    const sticks = new Map<number, { mx: number; my: number; attack: boolean; alt: boolean }>();
     for (const p of pads) {
       const st = this.stateOf(p.index);
       const was = st.prev;
-      const now2: boolean[] = [];
-      for (let b = 0; b < Math.min(17, p.buttons.length); b++) {
-        const on = pressedOf(p, b, !!was[b]);
-        now2[b] = on;
-        if (on !== !!was[b]) edges.push({ pad: p, b: b as Btn, down: on });
+      const cur = st.cur;
+      const n = Math.min(17, p.buttons.length);
+      for (let b = 0; b < n; b++) {
+        const on = pressedOf(p, b, was[b]!);
+        cur[b] = on;
+        if (on !== was[b]) this.edge(p, b as Btn, on);
         if (on && !was[b]) used = p; // a fresh press: a trigger still held from before doesn't claim the device back
       }
-      st.prev = now2;
+      for (let b = n; b < 17; b++) cur[b] = false;
+      st.prev = cur;
+      st.cur = was;
       const L = shapeStick(p.axes[0] ?? 0, p.axes[1] ?? 0, s);
       const R = shapeStick(p.axes[2] ?? 0, p.axes[3] ?? 0, s);
       if (L.mag > ACTIVE_STICK || R.mag > ACTIVE_STICK) used = p;
@@ -168,7 +184,8 @@ export class GamepadSource {
       my += -L.y; // up on the stick is forward
       lx += R.x;
       ly += R.y;
-      sticks.set(p.index, { mx: L.x, my: -L.y, attack: now2[BTN.RT] ?? false, alt: now2[BTN.LT] ?? false });
+      st.mx = L.x;
+      st.my = -L.y;
     }
     if (used) {
       if (this.active !== used) {
@@ -195,8 +212,29 @@ export class GamepadSource {
         const l = lookFromStick(lx, ly, 1, s.sensitivity, s.invertY, slow);
         input.setLookRate(SOURCE, l.yaw, l.pitch);
       } else input.setLookRate(SOURCE, 0, 0);
-      for (const p of pads) this.play(this.stateOf(p.index), edges, sticks.get(p.index)!, now);
-    } else this.ui(edges, mx, my, ly, now, dt);
+      for (const p of pads) this.play(this.stateOf(p.index), now);
+    } else this.ui(mx, my, ly, now, dt);
+  }
+
+  /** The connected pads this source reads (standard mapping), from one getGamepads() call, into a reused array. */
+  private snapshot(): PadLike[] {
+    const out = this.snap;
+    out.length = 0;
+    const list = this.pads();
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i];
+      if (p && p.connected && (p.mapping === "standard" || p.buttons.length >= 16)) out.push(p);
+    }
+    return out;
+  }
+
+  /** Record a button edge in the reused edge pool. */
+  private edge(pad: PadLike, b: Btn, down: boolean): void {
+    const e = this.edges[this.edgeCount] ?? (this.edges[this.edgeCount] = { pad, b, down });
+    e.pad = pad;
+    e.b = b;
+    e.down = down;
+    this.edgeCount++;
   }
 
   /** No button pressed and both sticks at rest: a waiting pad counts again, from a clean slate. */
@@ -204,7 +242,7 @@ export class GamepadSource {
     for (let b = 0; b < Math.min(17, p.buttons.length); b++) if (pressedOf(p, b)) return false;
     if (shapeStick(p.axes[0] ?? 0, p.axes[1] ?? 0, s).mag > 0 || shapeStick(p.axes[2] ?? 0, p.axes[3] ?? 0, s).mag > 0) return false;
     this.waitNeutral.delete(p.index);
-    this.stateOf(p.index).prev = [];
+    this.stateOf(p.index).prev.fill(false);
     return true;
   }
 
@@ -215,14 +253,15 @@ export class GamepadSource {
     this.mode = m;
   }
 
-  private play(st: PadState, edges: Edge[], a: { mx: number; my: number; attack: boolean; alt: boolean }, now: number): void {
+  private play(st: PadState, now: number): void {
     const input = this.host.input;
-    input.setMove(st.source, a.mx, a.my);
-    input.setButtons(st.source, a.attack, a.alt);
+    input.setMove(st.source, st.mx, st.my);
+    input.setButtons(st.source, st.prev[BTN.RT]!, st.prev[BTN.LT]!);
     // Sprint lasts until this pad's stick comes back (as on most console games); a second click stops it.
-    if (st.sprinting && Math.hypot(a.mx, a.my) < 0.2) this.setSprint(st, false);
-    for (const e of edges) {
-      if (this.state.get(e.pad.index) !== st) continue;
+    if (st.sprinting && Math.hypot(st.mx, st.my) < 0.2) this.setSprint(st, false);
+    for (let i = 0; i < this.edgeCount; i++) {
+      const e = this.edges[i]!;
+      if (e.pad.index !== st.index) continue;
       const act = PAD_LAYOUT.get(e.b);
       if (act) this.act(st, act, e.b, e.down, now);
     }
@@ -315,9 +354,10 @@ export class GamepadSource {
     for (const index of this.state.keys()) this.releasePad(index);
   }
 
-  private ui(edges: Edge[], mx: number, my: number, ly: number, now: number, dt: number): void {
+  private ui(mx: number, my: number, ly: number, now: number, dt: number): void {
     const nav = this.host.nav;
-    for (const e of edges) {
+    for (let i = 0; i < this.edgeCount; i++) {
+      const e = this.edges[i]!;
       if (!e.down) continue;
       if (e.b === BTN.A) nav.accept();
       // B backs out (Esc: every panel, card and the menu handle it); Start toggles the menu the same way.
@@ -326,7 +366,10 @@ export class GamepadSource {
       else if (e.b === BTN.RS) this.tap(null, "KeyI"); // closes the inventory it opened
     }
     // Direction: the D-pad, or the left stick pushed well over.
-    const btn = (b: number) => this.connected().some((p) => pressedOf(p, b));
+    const btn = (b: number) => {
+      for (const p of this.live) if (this.state.get(p.index)?.prev[b]) return true;
+      return false;
+    };
     let dir: Dir | null = btn(BTN.UP) ? "up" : btn(BTN.DOWN) ? "down" : btn(BTN.LEFT) ? "left" : btn(BTN.RIGHT) ? "right" : null;
     if (!dir && Math.hypot(mx, my) > NAV_STICK) dir = Math.abs(mx) > Math.abs(my) ? (mx > 0 ? "right" : "left") : my > 0 ? "up" : "down";
     if (dir !== this.navDir) {
