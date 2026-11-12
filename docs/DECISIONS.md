@@ -1778,3 +1778,56 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   identity) and fires a full draw every 1.4 s, the Stillshot's head + body time; a smaller head bonus would
   have had to fall to ×1.05 at T3. The bow's slower T3 raised the L20 ranged median and left the Comet at 0.59×
   it (class band 0.6), hence 1.65. Each change is load-bearing: reverting any one fails the checks.
+- **D-gfx-hub-7 (2026-11-12):** who gets a rez effect, and what it costs. Only someone who arrives while
+  you are there materialises: `Net` marks the players of the join or reconnect snapshot `seeded` and they
+  are simply there. An effect needs one of 6 slots (`REZ_MAX_ACTIVE`) and to be within 90 m of the camera
+  (`rezAdmits`; the player's own always runs); a frame's arrivals take the slots nearest first. Without a
+  slot an arrival is whole at once, a departure is freed at once, and a death dissolves the body without
+  its light. Turning Rez off settles everything running at once (`AvatarView.settleRez`: bodies whole, the
+  dead lying where they fell, lights hidden, avatars mid de-rez freed). The light meshes are pooled and
+  never disposed, and every see-through material of the lane is single-pass (`forceSinglePass`). Why:
+  review A1/A2; and three keeps a material's built shader only while a drawn object uses it, so each
+  arrival after the last light was freed built `rez_fx` again, twice, in play (a transparent double-sided
+  mesh is drawn as two passes, back faces then front: also two draws where one gives the same picture).
+- **D-gfx-hub-8 (2026-11-12):** the rez light is light, and a death waits for the fall. The column fades
+  at its silhouette (brightest where the view passes through its middle: the opposite of a glass tube's
+  rim), a thin core flashes over the bloom threshold as the light arrives, the ground ring is a glyph that
+  turns and fades, and 30 motes wind up the column: still one geometry, one material, one draw. A death
+  holds 1.05 s before the body breaks up (2.4 s in all, was 0.4 / 1.7), the light starts then, and the
+  shards start where the body lies (`DEATH_LIE`: on its back, head 1.13 m behind the feet). Why: by day
+  the column read as a glass tube; and the death clip only lies still from about 1.0 s (measured on the
+  starter models), so the shards used to leave a standing shape while the body was still on its feet.
+- **D-gfx-hub-9 (2026-11-12):** Portus' light pools tint the paving. The pools' geometry is drawn twice:
+  first a tint whose blend multiplies what is under it (result = ground × (1 + tint × colour): the stones
+  and joints come up in the light's colour, as lit stone does), then a weak additive glow for the hue
+  where the ground is nearly black. The scoreboard's pool lies in front of the board. Supersedes
+  D-gfx-hub-6's single additive draw. Why: the additive pools laid a flat haze over the paving and hid it.
+- **D-gfx-hub-10 (2026-11-12):** Portus' evening air and windows. `world/townLights.ts`: a halo with a
+  blooming core at every lantern and brazier, each portal's colour hanging in the air round its arch (the
+  walls behind it read as lit by it), the scoreboard's glow at its emitter, and 64 motes drifting up from
+  the lamps and fires: camera-facing additive quads in one mesh and one draw, shader-animated, up with the
+  lamplight (`townlights`, `?notownlights`, Medium and up). Lit windows cross the bloom threshold at full
+  lamplight (`townMaterial` `WINDOW_GLOW` 2.1, was 0.7; the outposts share the material, so their windows
+  glow at night too). Why: the owner's "push the atmosphere within budget"; the town's evening had lit
+  windows that sat flat on the walls and lanterns that lit nothing round them. Chimney smoke and banner
+  colour are not done (they need per-building data the town's baked vertices don't carry).
+- **D-gfx-hub-11 (2026-11-12):** a loot pile has a beacon (`world/pileBeacon.ts`): a 34 m shaft of gold
+  light that widens with distance (3.2× at 64 m) and blooms at its foot, ripples on the ground and sparks
+  winding up round the pile, the last two fading out beyond about 45 m. One geometry, one additive
+  material, one draw per pile, on the shared clock; it replaces the pile's short faint beam
+  (`pilebeacon`, `?nopilebeacon`, on at every tier: it is a gameplay signal). Why: one life, and your pile
+  is anyone's: the pile is the moment the whole game turns on, and its 6 m beam was a few faint pixels at
+  60 m.
+- **D-gfx-hub-12 (2026-11-12):** nameplates and health bars. A player's plate is larger and outlined,
+  whole to 18 m, thinner to 46 m and fades to nothing at 60 m (was a pop at 45 m), a little smaller with
+  distance (`render/plates.ts`). Under it hangs a health bar: always when the player is hurt, within 22 m
+  at full health, red under 30%. The bar is its own element under the plate's anchor, so the name line
+  keeps room for a chip after the name (the agents lane's "AI"). Creature health bars keep their size on
+  screen from 16 m out (up to 3×). Why: plates were 11 px text with no backing and no health in a PvP
+  game; a creature's bar at 50 m was two pixels high.
+- **D-gfx-hub-13 (2026-11-12):** the hologram board asks only while it is on, and draws names inside
+  their own rectangle. `world/holoFeed.ts` follows the board's resolved state (off: no request, the one
+  under way aborted; on again: asks at once if its data is stale). `world/holoBoardDraw.ts` measures a
+  row's value first, cuts the name by `measureText()` between whole characters and clips it; names, titles
+  and the hunt's lines lose control characters and the bidirectional marks, overrides and isolates. Why:
+  review A3–A5.
