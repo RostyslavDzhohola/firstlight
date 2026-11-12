@@ -1,5 +1,8 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Input } from "../game/input.ts";
 import { STICK_RADIUS, TouchOverlay, TouchSticks, wantsTouch } from "./touchOverlay.ts";
 
@@ -187,5 +190,15 @@ describe("fl-touchmode follows the active device (review #8)", () => {
     i.setDevice("kbm");
     i.setDevice("touch");
     expect(on()).toBe(false); // stopped: no longer listening
+  });
+});
+
+describe("touch.css: touch-action only on gameplay surfaces (review #7)", () => {
+  it("never on the document or body (menus scroll by finger); on the overlay, its buttons, the canvas and hotbar", async () => {
+    const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "touch.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].map((m) => ({ sel: m[1]!.trim(), body: m[2]! }));
+    const none = rules.filter((r) => /touch-action:\s*none/.test(r.body)).flatMap((r) => r.sel.split(",").map((x) => x.trim()));
+    for (const sel of none) expect(sel, sel).not.toMatch(/^(html(\.[\w-]+)?|html(\.[\w-]+)? body|body)$/);
+    expect(none).toEqual(expect.arrayContaining([".fl-touch", ".fl-touch__btn", "html.fl-touchmode canvas.fl-game-canvas", "html.fl-touchmode .fl-hotbar .fl-slot"]));
   });
 });

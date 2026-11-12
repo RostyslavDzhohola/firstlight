@@ -149,6 +149,7 @@ export class Game {
     void preloadHorse(); // 147 KB: horses are in the warm-up, so they never compile mid-game
     console.info(`[gfx] backend ${this.ctx.webgpu ? "WebGPU" : "WebGL2"}, tier ${this.ctx.tier}${this.ctx.settings.auto ? " (auto)" : ""}, gpu "${this.ctx.gpuName}"`);
     setLoadingBadge(`${this.ctx.webgpu ? "WebGPU" : "WebGL2"} · ${this.ctx.tier}${this.ctx.settings.auto ? " (auto)" : ""}`);
+    this.ctx.renderer.domElement.classList.add("fl-game-canvas"); // touch.css: a gameplay surface (touch-action: none)
     this.input = new Input(this.ctx.renderer.domElement);
     // Behind a loading screen (first arrival, travel, rejoin, re-warm) panel and world keys wait.
     this.input.suspendedWhile = () => !this.running || this.travelling;

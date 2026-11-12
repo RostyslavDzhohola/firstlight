@@ -46,7 +46,11 @@
    (they copy its state); the "Click to look around" tip doesn't apply. */
 html.fl-touchmode .fl-hotbar .fl-slot { pointer-events: auto; }
 html.fl-touchmode .fl-hud__spells { display: none; }
-html.fl-touchmode, html.fl-touchmode body { overscroll-behavior: none; touch-action: none; }
+/* No pull-to-refresh or bounce; but no page-wide touch-action: menus, Settings and long panels scroll by
+   finger. Only gameplay surfaces take every gesture: the overlay (.fl-touch, its zone and buttons, above),
+   the game canvas and the hotbar slots (review #7). */
+html.fl-touchmode, html.fl-touchmode body { overscroll-behavior: none; }
+html.fl-touchmode canvas.fl-game-canvas, html.fl-touchmode .fl-hotbar .fl-slot { touch-action: none; }
 
 /* Phones in landscape (short screens): the bottom-left belongs to the left thumb and the bottom-right to
    the buttons, so the player card moves to the top-left (smaller), Map/Menu and the spells stack under it,
