@@ -1,0 +1,122 @@
+// The server's `trial` messages (quests/trials.ts: a race, defend or collect attempt changed state),
+// held from the moment we join a room like huntTargets.ts (the SDK drops a message nobody listens
+// to). Pure helpers turn the latest one into the HUD's clock line and the point the mission pointer
+// leads to, so both are tested without a scene.
+
+import { MISSION_BY_ID, type MissionDef } from "@firstlight/shared/content/missions";
+import type { TrialMsg } from "@firstlight/shared/net/protocol";
+
+export interface TrialSeen {
+  msg: TrialMsg;
+  /** performance.now() when it arrived: the clock counts down from here. */
+  at: number;
+}
+
+interface MessageSource {
+  onMessage(type: "trial", cb: (m: TrialMsg) => void): unknown;
+}
+
+let latest: TrialSeen | null = null;
+const listeners = new Set<(t: TrialSeen) => void>();
+
+/** Start listening on a freshly joined room (forgets the previous room's attempt). */
+export function listenTrials(room: MessageSource, now: () => number = () => performance.now()): void {
+  latest = null;
+  room.onMessage("trial", (m) => {
+    latest = { msg: m, at: now() };
+    for (const fn of listeners) fn(latest);
+  });
+}
+
+/** The latest attempt message in this room, or null. */
+export function trialSeen(): TrialSeen | null {
+  return latest;
+}
+
+/** Hear each new message (the trial client's sounds and toasts). */
+export function onTrial(fn: (t: TrialSeen) => void): () => void {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
+
+/** "1:05", "0:09", "0:00" (whole seconds, rounded up so 0:00 means it's over). */
+export function formatClock(ms: number): string {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/** Clock left now: counts down while running, stands still while paused, 0 when over. */
+export function clockLeft(t: TrialSeen, now: number): number {
+  const { msg } = t;
+  if (msg.state === "paused") return msg.leftMs;
+  if (msg.state !== "running") return 0;
+  return Math.max(0, msg.leftMs - (now - t.at));
+}
+
+export interface TrialHud {
+  /** "The Swift Gleam" */
+  title: string;
+  /** "Ring 4 of 8", "Held 37 of 90 s", "3 of 8 gleam shards" */
+  progress: string;
+  /** "0:41", "" for untimed collects. */
+  clock: string;
+  /** Colour cue: urgent under 10 s; paused while out of a beacon's ring. */
+  tone: "normal" | "urgent" | "paused" | "done" | "failed";
+}
+
+/**
+ * The HUD line for the current attempt, or null when there is none to show (idle, another body's
+ * mission, or a finished/failed attempt older than `linger` ms).
+ */
+export function trialHud(t: TrialSeen | null, now: number, linger = 4000): TrialHud | null {
+  if (!t) return null;
+  const { msg } = t;
+  const def = MISSION_BY_ID.get(msg.id);
+  if (!def || msg.state === "idle") return null;
+  if ((msg.state === "done" || msg.state === "failed") && now - t.at > linger) return null;
+  const left = clockLeft(t, now);
+  let progress: string;
+  let shown = msg.progress;
+  if (msg.kind === "race") progress = msg.state === "done" ? `All ${msg.goal} rings` : `Ring ${Math.min(msg.goal, msg.progress + 1)} of ${msg.goal}`;
+  else if (msg.kind === "defend") {
+    // Held seconds = the whole hold minus what's left (extrapolated while running).
+    shown = msg.state === "done" ? msg.goal : Math.min(msg.goal, Math.floor((msg.limitMs - left) / Math.max(1, msg.limitMs / msg.goal)));
+    progress = msg.state === "paused" ? `Back to the beacon! Held ${shown} of ${msg.goal} s` : `Held ${shown} of ${msg.goal} s`;
+  } else progress = `${msg.progress} of ${msg.goal} ${def.collect?.itemName ?? "pieces"}`;
+  if (msg.state === "failed") progress = msg.reason === "time" ? "Out of time" : msg.reason === "died" ? "You fell" : msg.reason === "left" ? "You left the ring" : "Failed";
+  if (msg.state === "done") progress = `${progress} · complete`;
+  const timed = msg.limitMs > 0 && msg.kind !== "defend";
+  const clock = msg.kind === "defend" ? formatClock(left) : timed ? formatClock(left) : "";
+  const tone: TrialHud["tone"] = msg.state === "done" ? "done" : msg.state === "failed" ? "failed" : msg.state === "paused" ? "paused" : msg.limitMs > 0 && left < 10_000 && msg.kind !== "defend" ? "urgent" : "normal";
+  return { title: def.name, progress, clock, tone };
+}
+
+type V3 = readonly [number, number, number];
+
+/**
+ * The world object a race / defend / collect mission leads to now: the next ring (ring 1 until an
+ * attempt runs), the beacon, or the nearest piece not yet taken (by `counts`). Null for other types.
+ */
+export function objectiveObject(def: MissionDef, counts: readonly number[] | undefined, trial: TrialMsg | null, me: V3, posOf: (id: string) => V3 | null): string | null {
+  if (def.race) {
+    const live = trial && trial.id === def.id && trial.state === "running";
+    return def.race.rings[live ? Math.min(trial!.progress, def.race.rings.length - 1) : 0] ?? null;
+  }
+  if (def.defend) return def.defend.beacon;
+  if (def.collect) {
+    let best: string | null = null;
+    let bestD = Infinity;
+    def.collect.pieces.forEach((id, i) => {
+      if (counts?.[i]) return;
+      const p = posOf(id);
+      if (!p) return;
+      const d = Math.hypot(p[0] - me[0], p[1] - me[1], p[2] - me[2]);
+      if (d < bestD) {
+        bestD = d;
+        best = id;
+      }
+    });
+    return best;
+  }
+  return null;
+}

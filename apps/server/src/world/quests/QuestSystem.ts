@@ -426,6 +426,7 @@ export class QuestSystem implements RoomSystem {
     you.pads = [...q.pads].sort((x, y) => x - y);
     you.title = q.title;
     you.cosmeticsExtras = env.cosmeticsExtras;
+    you.gleamVault = !!this.life(a).gleamVault;
     you.worn = { ...(a.char.worn ?? {}) };
   }
 

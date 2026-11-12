@@ -251,6 +251,8 @@ export interface YouState {
   horses?: boolean;
   /** M11 extra #5 sources and world triggers are enabled. */
   cosmeticsExtras?: boolean;
+  /** This life opened the Gleam Vault (content/gleams.ts; once per life). */
+  gleamVault?: boolean;
   /** Onboarding in progress (Portus only): hits on each training dummy. Absent once done or skipped. */
   onboarding?: { hits: number[] };
   /** Admin accounts only: the admin-mode switches (content/admin.ts). */

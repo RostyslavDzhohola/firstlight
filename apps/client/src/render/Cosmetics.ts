@@ -292,6 +292,13 @@ export function buildCosmetic(id: string, anims: Anim[]): THREE.Object3D | null 
         add(g, new THREE.OctahedronGeometry(0.028), m(0xf5a623, 3), -0.23 + i * 0.23, -0.3 - i * 0.18, -0.13);
       }
       break;
+    case "gleamweave_cape":
+      // The Gleam Vault's cape: deep dusk cloth with a woven gold hem and the three gleams (gold, cyan,
+      // rose) set down its back in a line.
+      cape(0x2b2545);
+      add(g, new THREE.BoxGeometry(0.62, 0.035, 0.025), m(0xc9a46a, 0.4, 1, 0.7), 0, -0.9, -0.1);
+      [0xffd166, 0x8fe8ff, 0xff9ec4].forEach((c, i) => add(g, new THREE.OctahedronGeometry(0.045), m(c, 3), 0, -0.25 - i * 0.2, -0.12));
+      break;
     case "quietshift_lens":
       add(g, new THREE.TorusGeometry(0.1, 0.025, 5, 8), m(0xa8774f, 0, 1, 0.65), 0.1, 0.02, 0.03);
       add(g, new THREE.CircleGeometry(0.084, 8), m(0x9bdde4, 0.8, 0.7), 0.1, 0.02, 0.035);

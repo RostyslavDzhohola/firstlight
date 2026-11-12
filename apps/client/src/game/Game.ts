@@ -1,5 +1,7 @@
 import { cosmeticWarmupHook } from "../render/Cosmetics.ts";
+import { trialWarmupHook } from "../world/TrialMarkers.ts";
 import { listenHuntTargets } from "./huntTargets.ts";
+import { listenTrials } from "./trialState.ts";
 // Game orchestration: renderer, current body, local player, network, remote avatars, combat,
 // portals, piles, HUD and the main loop.
 
@@ -502,6 +504,7 @@ export class Game {
       localStorage.setItem("fl.body", body);
       this.combat.attach();
       listenHuntTargets(room); // before anything else can arrive unheard (huntTargets.ts)
+      listenTrials(room); // the same for race / defend / collect attempts (trialState.ts)
       const me = await waitFor(() => (room.state as any).players?.get(room.sessionId), { stage: "waiting for our player", timeoutMs: 15_000, watch: w });
       this.player.teleport(me.x, me.y, me.z);
       this.net.onCorrect = (x, y, z) => this.player.correct(x, y, z);
@@ -642,6 +645,7 @@ export class Game {
     const cosmetics = cosmeticWarmupHook(this.ctx.scene, () => this.player.pos);
     const avatars = avatarWarmupHook(this.ctx.scene, () => this.player.pos);
     const horses = horseWarmupHook(this.ctx.scene, () => this.player.pos); // the six coat materials
+    const trials = trialWarmupHook(this.ctx.scene, () => this.player.pos); // race rings, beacons, shards
     return {
       forceAll: (on: boolean) => {
         this.planet.props.setForceAll(on);
@@ -649,6 +653,7 @@ export class Game {
         avatars.forceAll(on);
         cosmetics.forceAll(on);
         horses.forceAll(on);
+        trials.forceAll(on);
       },
     };
   }
