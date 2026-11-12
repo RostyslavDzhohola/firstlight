@@ -9,7 +9,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { FirstlightAgent } from "@firstlight/agent-kit";
 import type { HomeData } from "@firstlight/shared/net/home";
-import { agentSessionCount, awardMedal, isAgentAccount, isTestAccount, linkAccounts, sessionStats, setDisplayName } from "../src/db/index.ts";
+import { agentSessionCount, awardMedal, endSession, isAgentAccount, isTestAccount, linkAccounts, markAgentAccount, openGameDb, retention, sessionStats, setDisplayName, startSession } from "../src/db/index.ts";
+import { MIGRATIONS } from "../src/db/schema.ts";
 import { mountHome } from "../src/ops/home.ts";
 import { characterRepo, MemoryCharacterRepo } from "../src/world/characters.ts";
 import { SqliteCharacterRepo } from "../src/world/sqliteStores.ts";
@@ -159,4 +160,44 @@ describe("agent accounts (D-agents-1)", () => {
     linkAccounts(db, "agent-guest-2", other, Date.now(), { targetIsNew: false });
     expect(isAgentAccount(db, other)).toBe(false);
   }, 40_000);
+
+  // Review 2026-11-12 (agent kit) #5: sessions were classed by the account's flag as it stood when
+  // the statistics were read, so a saved account's agent session counted as a person's play and a
+  // link reclassified history. The row carries its own flag now (migration 10).
+  it("a session is an agent's or a person's by its own row, whatever its account is or becomes", () => {
+    const db = openGameDb(join(mkdtempSync(join(tmpdir(), "fl-agent-db-")), "game.db"));
+    try {
+      const DAY = 86_400_000;
+      const now = Date.now();
+      const day0 = (Math.floor(now / DAY) - 3) * DAY;
+      const session = (userId: string, startedAt: number, agent?: boolean) => endSession(db, startSession(db, { userId, startedAt, agent }), { endedAt: startedAt + 60_000 });
+      // A saved account, never flagged, plays by hand one day and through an agent the next.
+      session("saved", day0 + 1000);
+      session("saved", day0 + DAY + 1000, true);
+      expect(isAgentAccount(db, "saved")).toBe(false);
+      expect(sessionStats(db)).toMatchObject({ sessions: 1, players: 1 });
+      expect(agentSessionCount(db)).toEqual({ sessions: 1, players: 1 });
+      // The agent's session a day later isn't a person coming back.
+      expect(retention(db, now).cohorts).toEqual([{ day: new Date(day0).toISOString().slice(0, 10), cohort: 1, d1: 0, d7: null }]);
+      // An agent's guest is merged into that account: the account isn't flagged, and the guest's
+      // sessions are still agent sessions under their new owner.
+      markAgentAccount(db, "agent-guest", "play", now);
+      session("agent-guest", day0 + 2000, true);
+      linkAccounts(db, "agent-guest", "saved", now, { targetIsNew: false });
+      expect(isAgentAccount(db, "saved")).toBe(false);
+      expect(db.prepare("SELECT COUNT(*) AS n FROM session_log WHERE user_id = 'saved'").get()).toEqual({ n: 3 });
+      expect(sessionStats(db)).toMatchObject({ sessions: 1, players: 1 });
+      expect(agentSessionCount(db)).toEqual({ sessions: 2, players: 1 });
+      expect(retention(db, now).cohorts).toEqual([{ day: new Date(day0).toISOString().slice(0, 10), cohort: 1, d1: 0, d7: null }]);
+      // Rows from before the column: the migration classes them by the account's flag as it stood.
+      markAgentAccount(db, "old-agent", "play", now);
+      session("old-agent", day0 + 3000);
+      expect(agentSessionCount(db).sessions).toBe(2);
+      db.exec(MIGRATIONS[9]!.replace(/ALTER TABLE[^;]*;/, ""));
+      expect(agentSessionCount(db)).toEqual({ sessions: 3, players: 2 });
+      expect(sessionStats(db)).toMatchObject({ sessions: 1, players: 1 });
+    } finally {
+      db.close();
+    }
+  });
 });

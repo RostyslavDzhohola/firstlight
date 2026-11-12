@@ -16,8 +16,3 @@ export function isAgentAccount(db: Db, userId: string): boolean {
 export function markAgentAccount(db: Db, userId: string, source: string, now = Date.now()): boolean {
   return stmt(db, "INSERT OR IGNORE INTO agent_account (user_id, source, marked_at) VALUES (?, ?, ?)").run(userId, source, now).changes === 1;
 }
-
-/** Agent accounts and their sessions since `since` (shown apart on /stats). */
-export function agentSessionCount(db: Db, since = 0): { sessions: number; players: number } {
-  return stmt(db, `SELECT COUNT(*) AS sessions, COUNT(DISTINCT user_id) AS players FROM session_log s WHERE started_at >= ? AND ${IS_AGENT("s.user_id")}`).get(since) as { sessions: number; players: number };
-}
