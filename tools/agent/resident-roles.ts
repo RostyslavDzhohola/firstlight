@@ -218,6 +218,7 @@ export async function hunter(r: Resident): Promise<void> {
   let asked = false;
   let idle = 0;
   while (r.alive()) {
+    await r.pause(150); // a breath every round: no branch below can spin
     const o = look(r);
     if (await mind(r, o)) continue;
     if (a.bodyId !== r.home) {
@@ -327,6 +328,7 @@ export async function wanderer(r: Resident): Promise<void> {
   const greeted = new Map<string, number>();
   let last = "";
   while (r.alive()) {
+    await r.pause(150); // a breath every round: no branch below can spin
     const o = look(r);
     if (await mind(r, o)) continue;
     if (a.bodyId !== r.home) {
@@ -380,6 +382,7 @@ export async function trader(r: Resident): Promise<void> {
     }
   };
   while (r.alive()) {
+    await r.pause(150); // a breath every round: no branch below can spin
     const o = look(r);
     if (await mind(r, o)) continue;
     if (a.bodyId !== r.home) {
@@ -419,6 +422,7 @@ export async function chaser(r: Resident): Promise<void> {
   const greeted = new Map<string, number>();
   const fails = new Map<string, number>();
   while (r.alive()) {
+    await r.pause(150); // a breath every round: no branch below can spin
     const o = look(r);
     if (await mind(r, o)) continue;
     const level = o.self.level;
@@ -466,8 +470,9 @@ export async function chaser(r: Resident): Promise<void> {
     // On the trial's body. A warm-up on the way if the guide has a collect near the pad (Arcadia's Kite Season).
     const w = world(r);
     const warm = missionsOn(next.body).find((m) => m.type === "collect" && !m.collect?.limitS);
-    if (warm && !o.missions.some((m) => m.id === warm.id) && o.self.zone === "safe" && w.guide && (await walk(r, "guide", { sprint: true, seconds: 60 })).ok) {
-      await a.takeMissions([warm.id]);
+    if (warm && !o.missions.some((m) => m.id === warm.id) && (fails.get(warm.id) ?? 0) < 2 && o.self.zone === "safe" && w.guide && (await walk(r, "guide", { sprint: true, seconds: 60 })).ok) {
+      if (!(await a.takeMissions([warm.id])).ok) fails.set(warm.id, 2);
+      await walk(r, { bearing: r.rng() * 360, distance: 4 }, { seconds: 4 });
       continue;
     }
     const open = warm ? o.missions.find((m) => m.id === warm.id && !m.done) : undefined;

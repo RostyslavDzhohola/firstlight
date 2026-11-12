@@ -19,7 +19,7 @@
 // the caps refuse are skipped with a line saying so. Ctrl-C stops them cleanly (a second one: now).
 
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join as join_ } from "node:path";
 import { AgentError, FirstlightAgent } from "@firstlight/agent-kit";
 import { BODY_IDS, type BodyId } from "@firstlight/shared";
 import { BEHAVIOURS, ROLES, type Resident, type ResidentStats, type Role } from "./resident-roles.ts";
@@ -74,7 +74,7 @@ export interface ResidentReport extends ResidentStats {
   home: BodyId;
   body: BodyId;
   level: number;
-  /** "playing", "offline", or why it never got in ("agents off", "agent limit", …). */
+  /** "playing", "away" (lost the world, coming back), "stopped", or why it isn't in ("refused: agents off", "refused: agent limit", …). */
   status: string;
   /** Movement the server refused (should be 0). */
   corrections: number;
@@ -173,14 +173,17 @@ export function runResidents(o: ResidentsOptions): ResidentsRun {
         const self = playing ? m.r.agent.observe({ peek: true }).self : null;
         return { name: m.r.agent.name || m.name, role: m.role, home: m.home, body: m.r.agent.bodyId, level: self?.level ?? 0, status: m.state.status, corrections: m.r.agent.corrections, ...m.r.stats, walked: Math.round(m.r.stats.walked) };
       }),
-      joined: members.filter((m) => m.state.status !== "joining" && !m.state.status.startsWith("refused")).length,
+      joined: members.filter((m) => m.state.status === "playing" || m.state.status === "away" || m.state.status === "stopped").length,
       seconds: Math.round(seconds),
       cpu: { seconds: Math.round(cpuS * 10) / 10, cores: Math.round((cpuS / Math.max(0.001, seconds)) * 1000) / 1000, budget: o.cpu, throttled },
       ended,
     };
   };
 
-  async function play(m: (typeof members)[number]): Promise<void> {
+  /** Refusals that waiting won't change: the caps and the switch are the server owner's, a new protocol needs a new checkout. */
+  const FINAL: ReadonlySet<string> = new Set(["agents off", "agent limit", "version", "banned", "unauthorized"]);
+
+  async function join(m: (typeof members)[number]): Promise<string | null> {
     const { r } = m;
     try {
       const joined = await r.agent.connect({
@@ -189,28 +192,51 @@ export function runResidents(o: ResidentsOptions): ResidentsRun {
         authOrigin: o.authOrigin,
         name: m.name,
         starter: m.starter,
-        ...(o.dev ? { token: `dev:${residentId(m.name)}:${m.name}` } : { sessionFile: join(o.home ?? join(process.env.FL_AGENT_HOME ?? join(homedir(), ".firstlight", "agents"), "residents"), `${o.url.replace(/^https?:\/\//, "").replace(/[^A-Za-z0-9.-]+/g, "_")}-${m.name}.json`) }),
+        ...(o.dev ? { token: `dev:${residentId(m.name)}:${m.name}` } : { sessionFile: join_(o.home ?? join_(process.env.FL_AGENT_HOME ?? join_(homedir(), ".firstlight", "agents"), "residents"), `${o.url.replace(/^https?:\/\//, "").replace(/[^A-Za-z0-9.-]+/g, "_")}-${m.name}.json`) }),
       });
       m.state.status = "playing";
-      r.log(`joined ${r.agent.bodyId} as a ${m.role} (${joined.starter}), home ${m.home}`);
+      r.log(`joined ${r.agent.bodyId} as a ${m.role} (${joined.starter}), home ${m.home}${joined.newGuest ? " — a new guest character: the saved session had ended" : ""}`);
+      for (let i = 0; i < 60 && r.agent.observe({ peek: true }).self.maxHp === 0; i++) await sleep(50);
+      return null;
     } catch (e) {
-      const code = e instanceof AgentError ? e.code : "join failed";
-      m.state.status = `refused: ${code}`;
       r.log(`not let in: ${(e as Error).message}`);
-      return;
+      return e instanceof AgentError ? e.code : "join failed";
     }
-    for (let i = 0; i < 60 && r.agent.observe({ peek: true }).self.maxHp === 0; i++) await sleep(50);
-    // A behaviour that throws is a bug, not a reason to take the others down: say so, rest, go on.
-    while (r.alive()) {
-      try {
-        await BEHAVIOURS[m.role](r);
-      } catch (e) {
-        r.log(`stumbled: ${(e as Error).message}`);
-        await r.pause(5000);
+  }
+
+  async function play(m: (typeof members)[number]): Promise<void> {
+    const { r } = m;
+    const first = await join(m);
+    if (first) {
+      m.state.status = `refused: ${first}`;
+      if (FINAL.has(first)) return;
+    }
+    let wait = 15_000;
+    while (!stopping) {
+      if (m.state.status === "playing") {
+        // A behaviour that throws is a bug, not a reason to take the others down: say so, rest, go on.
+        try {
+          await BEHAVIOURS[m.role](r);
+        } catch (e) {
+          r.log(`stumbled: ${(e as Error).message}`);
+          await r.pause(5000);
+        }
+        if (stopping || r.alive()) continue;
+        // Gone for good from the kit's side (the server restarted, the session ended): come back later.
+        m.state.status = "away";
+        r.log("lost the world: will come back");
+        wait = 15_000;
       }
-      if (r.agent.status === "reconnecting") await r.pause(2000);
+      await r.pause(wait);
+      if (stopping) break;
+      const why = await join(m);
+      if (why && FINAL.has(why)) {
+        m.state.status = `refused: ${why}`;
+        return;
+      }
+      wait = Math.min(300_000, wait * 2);
     }
-    m.state.status = stopping ? "stopped" : r.agent.status;
+    m.state.status = "stopped";
   }
 
   const done = (async (): Promise<ResidentsReport> => {
@@ -242,7 +268,7 @@ export function runResidents(o: ResidentsOptions): ResidentsRun {
       } else rest = Math.max(0, rest * 0.8 - 0.05);
       if (o.budgetMs !== undefined && now - t0 >= o.budgetMs) stopping = true;
       else if (o.until?.(report())) (stopping = true), (ended = "stopped");
-      else if (members.every((m) => m.state.status !== "joining" && !m.r.alive())) (stopping = true), (ended = members.some((m) => m.state.status === "playing" || m.state.status === "offline") ? "stopped" : "nobody");
+      else if (members.every((m) => m.state.status.startsWith("refused"))) (stopping = true), (ended = "nobody");
     }
     // Stop cleanly: end what each is doing, then leave the world (in a safe zone the body goes at
     // once; elsewhere the logout countdown takes about 10 s standing still).

@@ -40,10 +40,12 @@ export function routeVia(w: BodyWorld, from: V3, to: V3): V3[] {
     if (d < best) (best = d), (gate = g);
   }
   const gd = norm(gate);
-  // A point on the line through the gate, the first of a few distances that nothing stands on
-  // (Arcadia has a rock right outside its north gate); none: the gate itself is waypoint enough.
+  // A point on the line through the gate, the first of a few distances that nothing stands on.
+  // Arcadia has a rock and a structure 6 to 12 m outside its north gate: there the nearest clear
+  // point is just past the wall (3 or 4 m), and it is still a waypoint on the far side, without
+  // which a walk to somewhere off the gate's axis turns back along the inside of the wall.
   const clearOf = (sign: number): V3 | null => {
-    for (const m of [GATE_APPROACH, GATE_APPROACH - 3, GATE_APPROACH + 4]) {
+    for (const m of [GATE_APPROACH, GATE_APPROACH - 3, GATE_APPROACH + 4, 4, 3]) {
       const p = w.onGround(towardDir(gd, centre, sign * m, w.R));
       if (w.standable(p)) return p;
     }

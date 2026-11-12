@@ -52,6 +52,25 @@ describe("steering", () => {
     }
   }, 120_000);
 
+  it("every gate's route has a waypoint beyond the wall, and Kite Season's panels are reached from the guide", () => {
+    // Arcadia's north gate has a structure 6 to 12 m outside it: the route once ended on the gate
+    // itself, and a walk to somewhere off the gate's axis (the kite panels, north-east) turned back
+    // along the inside of the wall until it gave up.
+    const w = bodyWorld("arcadia");
+    const guide = w.guide!.pos;
+    for (const gate of w.gates) {
+      const beyond = w.onGround(towardDir(norm(gate), w.walledCentre!, -40, w.R));
+      const via = routeVia(w, guide, beyond);
+      expect(via.length).toBeGreaterThanOrEqual(2);
+      expect(w.walled(via[via.length - 1]!)).toBe(false);
+    }
+    for (const id of ["a4_kite_1", "a4_kite_2", "a4_kite_3", "a4_kite_4", "a4_kite_5"]) {
+      const piece = w.things.get(id)!.pos;
+      const got = walk("arcadia", guide, piece, WALK.sprint, 60);
+      expect(got, id).toMatchObject({ arrived: true, inside: false });
+    }
+  }, 60_000);
+
   it("reaches the guide, the shop and the portal from the pad on each planet", () => {
     for (const id of ["arcadia", "hollowmere", "meridian"] as const) {
       const w = bodyWorld(id);

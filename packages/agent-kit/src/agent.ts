@@ -300,6 +300,8 @@ export class FirstlightAgent {
     this.seq = 0;
     this.you = null;
     this.huntIds = new Set();
+    this.trials.clear(); // an attempt doesn't outlive its room session (quests/trials.ts)
+    this.claims.clear();
     room.onMessage("*", (type: string | number, m: any) => this.onMessage(String(type), m));
     this.lastPatchAt = Date.now();
     room.onStateChange(() => (this.lastPatchAt = Date.now())); // the server's clock is in the state: a patch every tick
@@ -323,7 +325,6 @@ export class FirstlightAgent {
     }
     this.walker.setStarter(me.starter); // the character's own pace and roll (content/starters.ts)
     this.walker.place(me.x, me.y, me.z);
-    this.trials.clear(); // an attempt doesn't outlive its room session (quests/trials.ts)
     this.displayName = me.name;
     this.status = "playing";
     this.lastTick = Date.now();
@@ -737,6 +738,7 @@ export class FirstlightAgent {
       if (n.flags & NF.DEAD || n.hp <= 0) return;
       const def = NPC_DEFS[n.kind];
       const at = [n.x, n.y, n.z];
+      const claim = this.claimOf(id, 6000, true);
       creatures.push({
         id,
         kind: def?.id ?? String(n.kind),
@@ -750,7 +752,7 @@ export class FirstlightAgent {
         boss: def?.family === "boss",
         onMe: n.target === this.sessionId,
         mission: this.huntIds.has(id),
-        ...(this.claimOf(id, 6000, true) ? { claimedBy: (({ name, agent }) => ({ name, agent }))(this.claimOf(id, 6000, true)!) } : {}),
+        ...(claim ? { claimedBy: { name: claim.name, agent: claim.agent } } : {}),
       });
     });
     creatures.sort((a, b) => a.dist - b.dist);
@@ -1474,10 +1476,6 @@ export class FirstlightAgent {
     const gen = ++this.planGen;
     const alive = () => this.planGen === gen && this.status === "playing" && !!this.room && !this.dead;
     const limit = Math.max(5, Math.min(600, o.seconds ?? d.holdS + 240)) * 1000;
-    const lit = () => {
-      const t = this.trials.get(def.id);
-      return !!t && t.at >= t0 - 1 && (t.state === "running" || t.state === "paused");
-    };
     const alreadyLit = () => {
       const t = this.trials.get(def.id);
       return !!t && (t.state === "running" || t.state === "paused");
@@ -1488,7 +1486,7 @@ export class FirstlightAgent {
     }
     for (let i = 0; i < 3 && alive() && !alreadyLit(); i++) {
       this.room?.send("interact", { target: d.beacon });
-      await this.until(() => lit() || !alive(), 1200);
+      await this.until(() => alreadyLit() || !alive(), 1200);
     }
     if (!alreadyLit()) return { ok: false, done: false, reason: alive() ? "beacon not lit" : this.dead ? "dead" : "cancelled", hint: "stand within 3 m of the beacon, out of any other attempt" };
     // Hold: stay well inside the ring, fight what comes close, drink when hurt.
