@@ -1,6 +1,7 @@
 // The client's step-out (#34) against the server's real movement validator (no room): feet pinned
 // between the Hall of Firsts' column and its low plinth (each pushes them into the other, so every
 // walking step is undone) step out to a clear spot, and the server takes that step like any other.
+// The training pen's corner by the archery target is a dead end, not a pocket: no step-out there.
 
 import { describe, expect, it } from "vitest";
 import { BODIES, createTerrain, natureSolids } from "@firstlight/shared";
@@ -137,4 +138,57 @@ describe("stepping out of a pocket between structures (#34)", () => {
       expect(outAt).toBeLessThan(2);
     });
   }
+});
+
+describe("the training pen's corner by the archery target (Portus, town 12.62 E −9.32 N)", () => {
+  /** Where this run's play-through wedged against the pen's fences and the target's south-east corner. */
+  async function penSpot(): Promise<readonly [number, number, number]> {
+    const { townDir } = await import("@firstlight/shared/planet/town");
+    const tr = createTerrain("portus");
+    const R = BODIES.portus.radius;
+    const d = townDir(12.62, -9.32, R);
+    const g = R + tr.groundHeight(d[0], d[1], d[2]);
+    return [d[0] * g, d[1] * g, d[2] * g];
+  }
+
+  it("is a dead end, not a pocket: from wherever a walk into it stops, some walk gets 5 m out (20 fps)", async () => {
+    const P = await penSpot();
+    const pc = await controller(false);
+    const still = keys([]), walk = keys(["KeyW"]);
+    const fps = 20;
+    const walkFrom = (x: number, y: number, z: number, h: number) => {
+      pc.teleport(x, y, z);
+      for (let i = 0; i < 2; i++) pc.update(1 / fps, still, false);
+      const s0 = pc.pos.clone();
+      pc.camForward.set(...heading(s0, h, 16));
+      for (let k = 0; k < 1.5 * fps; k++) pc.update(1 / fps, walk, false);
+      return { end: pc.pos.clone(), moved: pc.pos.distanceTo(s0) };
+    };
+    let stuckHeadings = 0;
+    for (let h = 0; h < 16; h++) {
+      const { end, moved } = walkFrom(...P, h);
+      if (moved < 0.25) stuckHeadings++;
+      let best = 0;
+      for (let h2 = 0; h2 < 16 && best < 5; h2++) best = Math.max(best, walkFrom(end.x, end.y, end.z, h2).moved);
+      expect(best, `heading ${h}/16 stopped ${moved.toFixed(2)} m in`).toBeGreaterThan(5);
+    }
+    expect(stuckHeadings).toBeGreaterThan(0); // the corner is real: walking into it stops
+  }, 90_000);
+
+  it("pressing into the corner for 2 s at 60 fps, the step-out leaves the player where walking put them", async () => {
+    const P = await penSpot();
+    const pc = await controller(true);
+    pc.teleport(...P);
+    const still = keys([]), walk = keys(["KeyW"]);
+    for (let i = 0; i < 3; i++) pc.update(1 / 60, still, false);
+    pc.camForward.set(...heading(pc.pos.clone(), 0, 16));
+    let jump = 0;
+    let last = pc.pos.clone();
+    for (let k = 0; k < 120; k++) {
+      pc.update(1 / 60, walk, false);
+      jump = Math.max(jump, pc.pos.distanceTo(last));
+      last = pc.pos.clone();
+    }
+    expect(jump).toBeLessThan(0.2);
+  }, 60_000);
 });
