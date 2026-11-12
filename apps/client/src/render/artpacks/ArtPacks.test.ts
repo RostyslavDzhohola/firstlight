@@ -564,4 +564,26 @@ describe("ArtPacks", () => {
     expect(w.disposed.has(albedoBase)).toBe(false);
     expect(packs.state().live).toEqual([]);
   });
+
+  it("a decode that fails (the strip worker's error or deadline) frees the group and takes the normal two tries", async () => {
+    const w = world(["portus/portus_color.webp", "portus/portus_normal.webp"]);
+    const make = w.env.make;
+    w.env.make = (entry, bytes, like, signal) =>
+      entry.base.endsWith("normal.webp") ? Promise.reject(new Error("strip decode missed its 30000 ms deadline")) : make(entry, bytes, like, signal);
+    const packs = new ArtPacks(w.env, { mode: "on", only: ["town"] });
+    packs.setTier("medium");
+    const color = w.slots.get("portus/portus_color.webp")!;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      packs.resume();
+      await w.tick(ArtPacks.START_DELAY_MS);
+      await w.land();
+      await w.frames(packs, 8);
+      expect(packs.state().busy, "never stuck loading").toBe(false);
+      packs.pause();
+    }
+    expect(w.downloads.length, "two tries").toBe(4);
+    expect(color.sets).toEqual([]);
+    expect([...w.disposed].filter((t) => t.name === "hd portus/portus_color.webp")).toHaveLength(2);
+    expect(packs.state().failed).toEqual(["town:portus"]);
+  });
 });
