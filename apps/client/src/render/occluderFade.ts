@@ -11,7 +11,7 @@
 // avatars' shared materials take a gated copy: one per-object uniform lets only the quest NPCs fade.
 
 import * as THREE from "three/webgpu";
-import { bool, cameraPosition, dot, float, interleavedGradientNoise, length, max, normalize, positionWorld, renderGroup, screenCoordinate, select, smoothstep, uniform } from "three/tsl";
+import { bool, cameraPosition, clamp, dot, float, interleavedGradientNoise, length, max, min, mix, normalize, positionWorld, renderGroup, screenCoordinate, select, smoothstep, uniform } from "three/tsl";
 
 /** Without a skeleton (the capsule stand-in): the chest is this far above the rendered feet (m). */
 export const FADE_CHEST = 1.0;
@@ -32,6 +32,25 @@ export const OWN_FADE_NEAR = 0.5;
 export const OWN_FADE_FAR = 1.2;
 /** The head, for the own-avatar fade: this far above the chest along local up (m). */
 export const OWN_HEAD_ABOVE_CHEST = 0.5;
+
+/**
+ * At the lens (D-polish-2, play-test: "the camera sits inside the grass", and inside Meridian's scrub):
+ * a prop's fragments nearer the camera than LENS_SOLID fade out, gone within LENS_GONE (m).
+ */
+export const LENS_GONE = 0.45;
+export const LENS_SOLID = 1.3;
+/**
+ * Ground cover (grass blades, meadow clumps) never fills the frame: an instance rooted within
+ * COVER_NEAR m of the camera is COVER_MIN of its height and full size from COVER_FAR; one within
+ * SIGHT_NEAR m of the sight line from the camera to the player's chest shrinks the same way (full
+ * size from SIGHT_FAR). The line stops SIGHT_STOP of the way, so the grass at the player's feet stays.
+ */
+export const COVER_NEAR = 0.7;
+export const COVER_FAR = 2.0;
+export const COVER_MIN = 0.08;
+export const SIGHT_NEAR = 0.45;
+export const SIGHT_FAR = 1.25;
+export const SIGHT_STOP = 0.85;
 
 export const occluderUniforms = {
   /** World position of the player's chest. */
@@ -92,6 +111,27 @@ export function ownFadeFor(cam: THREE.Vector3, chest: THREE.Vector3): number {
   return ownFade(d);
 }
 
+/** Height factor (COVER_MIN … 1) of a ground-cover instance rooted at `base`; `on` = the fade is on (pure; tested). */
+export function coverScale(cam: THREE.Vector3, chest: THREE.Vector3, base: THREE.Vector3, on = true): number {
+  const bx = base.x - cam.x, by = base.y - cam.y, bz = base.z - cam.z;
+  const sx = chest.x - cam.x, sy = chest.y - cam.y, sz = chest.z - cam.z;
+  const near = smooth(COVER_NEAR, COVER_FAR, Math.hypot(bx, by, bz));
+  const t = Math.min(SIGHT_STOP, Math.max(0, (bx * sx + by * sy + bz * sz) / Math.max(sx * sx + sy * sy + sz * sz, 0.0001)));
+  const sight = on ? smooth(SIGHT_NEAR, SIGHT_FAR, Math.hypot(bx - sx * t, by - sy * t, bz - sz * t)) : 1;
+  return COVER_MIN + (1 - COVER_MIN) * Math.min(near, sight);
+}
+
+/** coverScale in TSL, for a ground-cover material's vertex stage: shared uniforms only, no extra pass. */
+export function coverScaleNode(base: any): any {
+  const u = occluderUniforms;
+  const toBase = base.sub(cameraPosition);
+  const seg = u.target.sub(cameraPosition);
+  const near = smoothstep(COVER_NEAR, COVER_FAR, length(toBase));
+  const t = clamp(dot(toBase, seg).div(max(dot(seg, seg), 0.0001)), 0.0, SIGHT_STOP);
+  const sight = mix(float(1), smoothstep(SIGHT_NEAR, SIGHT_FAR, length(toBase.sub(seg.mul(t)))), u.strength);
+  return mix(float(COVER_MIN), float(1), min(near, sight));
+}
+
 /**
  * The fade (0 solid … 1 gone) of a fragment at `p`, for a camera at `cam` aiming along unit `aim` at
  * `chest`: the same formula occluderKeep() builds in TSL, for tests and tools. Keep the two in step.
@@ -105,7 +145,7 @@ export function fadeAmount(cam: THREE.Vector3, aim: THREE.Vector3, chest: THREE.
   const inPlayer = smooth(prm.cosOuter, prm.cosInner, dir.dot(toTarget));
   const inAim = smooth(prm.cosAimOuter, prm.cosAimInner, dir.dot(aim));
   const front = smooth(FADE_DEPTH_MARGIN, FADE_DEPTH_MARGIN + 0.5, prm.depth - dist);
-  return Math.max(inPlayer, inAim) * front;
+  return Math.max(Math.max(inPlayer, inAim) * front, 1 - smooth(LENS_GONE, LENS_SOLID, dist));
 }
 
 /**
@@ -160,7 +200,9 @@ function keepNode(gated: boolean): THREE.Node {
   const front = smoothstep(float(FADE_DEPTH_MARGIN), float(FADE_DEPTH_MARGIN + 0.5), u.depth.sub(dist));
   const cone = max(inPlayer, inAim).mul(front);
   // Gated: 0 never, 1 the cone (quest NPCs), 2 the own avatar's near-camera fade (all of it at once).
-  const fade = (gated ? select(gate.greaterThan(1.5), u.own, cone.mul(gate)) : cone).mul(u.strength);
+  // Props also clear at the lens (the camera inside a bush or a canopy); avatars have their own rule.
+  const lens = float(1).sub(smoothstep(LENS_GONE, LENS_SOLID, dist));
+  const fade = (gated ? select(gate.greaterThan(1.5), u.own, cone.mul(gate)) : max(cone, lens)).mul(u.strength);
   // Stable screen-door threshold (no time term: a still view doesn't shimmer).
   const noise = interleavedGradientNoise(screenCoordinate.xy);
   return noise.greaterThanEqual(fade) as unknown as THREE.Node;

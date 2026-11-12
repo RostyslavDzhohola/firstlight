@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three/webgpu";
 import { bool } from "three/tsl";
-import { applyOccluderFade, avatarChest, FADE_AIM_RADIUS, FADE_CHEST, FADE_CORE, FADE_RADIUS, fadeAmount, fadeParams, occluderKeep, occluderUniforms, updateOccluderFade } from "./occluderFade.ts";
+import { applyOccluderFade, avatarChest, COVER_MIN, coverScale, FADE_AIM_RADIUS, FADE_CHEST, FADE_CORE, FADE_RADIUS, fadeAmount, fadeParams, occluderKeep, occluderUniforms, updateOccluderFade } from "./occluderFade.ts";
 
 describe("fadeParams", () => {
   it("clears a cone the player's size at the player's distance, softer at its rim", () => {
@@ -126,5 +126,31 @@ describe("applyOccluderFade", () => {
     const a = applyOccluderFade(new THREE.MeshStandardNodeMaterial());
     const b = applyOccluderFade(new THREE.MeshLambertNodeMaterial());
     expect(a.maskNode).toBe(b.maskNode);
+  });
+});
+
+describe("ground cover and the lens (D-polish-2)", () => {
+  const up = new THREE.Vector3(0, 1, 0);
+  const chest = up.clone().multiplyScalar(501);
+  const cam = chest.clone().add(new THREE.Vector3(0, 0.2, 5)); // a low camera 5 m behind
+  const at = (x: number, y: number, z: number) => chest.clone().add(new THREE.Vector3(x, y, z));
+
+  it("a blade at the lens is a stub, one 2 m out is whole", () => {
+    expect(coverScale(cam, chest, cam.clone().add(new THREE.Vector3(0.3, -0.4, -0.2)))).toBeCloseTo(COVER_MIN, 5);
+    expect(coverScale(cam, chest, at(3, -1, 5))).toBe(1);
+  });
+
+  it("the sight line to the player is clear, the grass at the feet and beside the line stays", () => {
+    expect(coverScale(cam, chest, at(0, -0.2, 2.5))).toBeLessThan(0.2); // on the line, half way
+    expect(coverScale(cam, chest, at(0, -1, 0))).toBe(1); // the player's feet
+    expect(coverScale(cam, chest, at(1.6, -1, 2.5))).toBe(1); // beside the line
+    expect(coverScale(cam, chest, at(0, -0.2, 2.5), false)).toBe(1); // photo mode: the fade is off
+  });
+
+  it("a prop dissolves at the lens whatever the cone says", () => {
+    const aim = chest.clone().sub(cam).normalize();
+    const beside = cam.clone().add(new THREE.Vector3(0.3, 0.1, 0.1)); // behind the aim, at the lens
+    expect(fadeAmount(cam, aim, chest, beside)).toBe(1);
+    expect(fadeAmount(cam, aim, chest, cam.clone().add(new THREE.Vector3(2, 0, 0)))).toBe(0);
   });
 });
