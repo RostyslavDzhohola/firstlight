@@ -98,11 +98,12 @@ for (const backendName of ["webgpu", "webgl2"] as const) {
     });
 
     it("the light pools read their colour, radius and strength per vertex", async () => {
-      const mesh = new THREE.Mesh(lightPoolGeometry(portusLightPools(), createTerrain("portus")), lightPoolMaterial());
-      const b = build(renderer, scene, camera, mesh);
-      clean(b);
-      reads(b, "aPool");
-      if (process.env.FL_DUMP_SHADER) (await import("node:fs")).writeFileSync(`/tmp/fl-oasis/gfx-hub/pools-${backendName}.txt`, `${b.fragment}\n----\n${b.vertex}`);
+      const geometry = lightPoolGeometry(portusLightPools(), createTerrain("portus"));
+      for (const layer of ["tint", "glow"] as const) {
+        const b = build(renderer, scene, camera, new THREE.Mesh(geometry, lightPoolMaterial(layer)));
+        clean(b);
+        reads(b, "aPool");
+      }
     });
   });
 }

@@ -1,11 +1,13 @@
-// Light pools on Portus' ground (D-gfx-hub-6): a warm pool under every lamp post, each portal's
-// colour spilling onto the paving in front of it, the scoreboard's glow under its emitter. Soft
-// additive discs draped on the ground, all in one mesh and one draw; they come up with the lamplight
-// (the portals' and the board's keep a little by day). No lights: nothing is lit or shadowed, so no
-// material in the town changes.
+// Light pools on Portus' ground (D-gfx-hub-6, -7): a warm pool under every lamp post, each portal's
+// colour spilling onto the paving in front of it, the scoreboard's glow under its emitter. Soft discs
+// draped on the ground in one geometry, drawn twice: first a tint that multiplies what is under it
+// (the paving's own stones and joints come up in the light's colour, as lit stone does), then a
+// faint additive glow that carries the hue where the ground is nearly black. They come up with the
+// lamplight (the portals' and the board's keep a little by day). No lights: nothing is lit or
+// shadowed, so no material in the town changes.
 
 import * as THREE from "three/webgpu";
-import { attribute, float, mix, uv } from "three/tsl";
+import { attribute, float, mix, uniform, uv } from "three/tsl";
 import type { BodyId, Terrain } from "@firstlight/shared";
 import { TOWN_FIXED, TOWN_LAYOUT, TOWN_PREFABS } from "@firstlight/shared/content/portusTown";
 import { townDir } from "@firstlight/shared/planet/townFrame";
@@ -21,11 +23,16 @@ export interface LightPool {
   at: readonly [number, number];
   radius: number;
   color: number;
-  /** Brightness kept by day, 0 … 1 (lamps: 0, they are out). */
+  /** Share of both layers kept by day, 0 … 1 (lamps: 0, they are out). */
   day: number;
-  /** Peak brightness at night. */
+  /** The additive glow's peak at night. */
   strength: number;
+  /** The tint's peak at night: the ground under the pool's centre is multiplied by 1 + tint × colour. */
+  tint: number;
 }
+
+/** The two draws of the pools: the multiplying tint, then the additive glow. */
+export type PoolLayer = "tint" | "glow";
 
 const LAMP = 0xffb463;
 /** Metres above the ground: over the paving decal (2–7.5 cm, townDecal.ts). */
@@ -36,17 +43,18 @@ const RINGS = 4, SPOKES = 18;
 export function portusLightPools(): LightPool[] {
   const pools: LightPool[] = [];
   const lamp = TOWN_PREFABS.findIndex((p) => p.name === "lamp_post");
-  for (const [prefab, e, n] of TOWN_LAYOUT) if (prefab === lamp) pools.push({ at: [e, n], radius: 5.4, color: LAMP, day: 0, strength: 1.5 });
+  for (const [prefab, e, n] of TOWN_LAYOUT) if (prefab === lamp) pools.push({ at: [e, n], radius: 5.8, color: LAMP, day: 0, strength: 0.34, tint: 22 });
   for (const [to, [e, n]] of Object.entries(TOWN_FIXED.portals) as [BodyId, readonly [number, number]][]) {
     // In front of the arch: 3.4 m towards the plaza's centre.
     const d = Math.hypot(e, n) || 1;
-    pools.push({ at: [e - (e / d) * 3.4, n - (n / d) * 3.4], radius: 6.0, color: PORTAL_COLORS[to], day: 0.22, strength: 0.9 });
+    pools.push({ at: [e - (e / d) * 3.4, n - (n / d) * 3.4], radius: 7.0, color: PORTAL_COLORS[to], day: 0.06, strength: 0.26, tint: 16 });
   }
-  pools.push({ at: HOLO_AT, radius: 3.6, color: 0x7fe9ff, day: 0.22, strength: 1.1 });
+  // The scoreboard's glow reaches the paving in front of it (towards the pad it faces).
+  pools.push({ at: [HOLO_AT[0] - 0.9, HOLO_AT[1] + 1.6], radius: 6.2, color: 0x7fe9ff, day: 0.06, strength: 0.3, tint: 14 });
   return pools;
 }
 
-/** Every pool as a fan of rings draped on `terrain` (planet space): position, uv.x = radius 0 … 1, colour, aPool = (day, strength). */
+/** Every pool as a fan of rings draped on `terrain` (planet space): position, uv.x = radius 0 … 1, colour, aPool = (day, glow strength, tint). */
 export function lightPoolGeometry(pools: readonly LightPool[], terrain: Terrain): THREE.BufferGeometry {
   const R = terrain.body.radius;
   const pos: number[] = [], uvs: number[] = [], col: number[] = [], par: number[] = [], idx: number[] = [];
@@ -61,7 +69,7 @@ export function lightPoolGeometry(pools: readonly LightPool[], terrain: Terrain)
       pos.push(d[0] * h, d[1] * h, d[2] * h);
       uvs.push(r, 0);
       col.push(c.r, c.g, c.b);
-      par.push(p.day, p.strength);
+      par.push(p.day, p.strength, p.tint);
     };
     put(p.at[0], p.at[1], 0);
     for (let k = 1; k <= RINGS; k++) {
@@ -82,32 +90,63 @@ export function lightPoolGeometry(pools: readonly LightPool[], terrain: Terrain)
   g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
-  g.setAttribute("aPool", new THREE.Float32BufferAttribute(par, 2));
+  g.setAttribute("aPool", new THREE.Float32BufferAttribute(par, 3));
   g.setIndex(idx);
   return g;
 }
 
-export function lightPoolMaterial(): THREE.MeshBasicNodeMaterial {
-  const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
-  m.name = "light_pools";
+const mats = new Map<PoolLayer, THREE.MeshBasicNodeMaterial>();
+/** Overall strength of each layer (1 = as designed): one float each, for tuning in a running game. */
+export const poolGain = { tint: uniform(1), glow: uniform(1) };
+
+/**
+ * A layer's material. "tint": result = ground × (1 + tint × colour): the blend multiplies the pool's
+ * colour by what is already drawn and adds that to it, so the paving's pattern survives and takes the
+ * light's colour. "glow": plain additive, weak. Neither writes depth; fog leaves them alone (light
+ * that isn't there must not add fog colour).
+ */
+export function lightPoolMaterial(layer: PoolLayer = "glow"): THREE.MeshBasicNodeMaterial {
+  let m = mats.get(layer);
+  if (m) return m;
+  m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false });
+  m.name = `light_pools:${layer}`;
+  if (layer === "tint") {
+    m.blending = THREE.CustomBlending;
+    m.blendEquation = THREE.AddEquation;
+    m.blendSrc = THREE.DstColorFactor;
+    m.blendDst = THREE.OneFactor;
+    // The target's alpha stays what it was.
+    m.blendSrcAlpha = THREE.ZeroFactor;
+    m.blendDstAlpha = THREE.OneFactor;
+  } else m.blending = THREE.AdditiveBlending;
   m.polygonOffset = true;
   m.polygonOffsetFactor = -2;
   m.polygonOffsetUnits = -2;
-  const a = attribute("aPool", "vec2");
+  const a = attribute("aPool", "vec3");
   const fall = float(1).sub(uv().x).clamp(0, 1);
-  // Bright under the lamp, a long soft skirt. (Additive light on dark paving needs a strength near
-  // 1 to read at all: at 0.4 the pools were invisible.)
-  const shape = fall.mul(fall.mul(0.55).add(0.45));
-  m.colorNode = attribute("color", "vec3").mul(shape.mul(a.y).mul(mix(a.x, float(1), atmo.lamps)));
+  // Bright under the lamp, a long soft skirt.
+  const shape = layer === "tint" ? fall.mul(fall).mul(fall.mul(0.6).add(0.4)) : fall.mul(fall.mul(0.55).add(0.45));
+  const level = mix(a.x, float(1), atmo.lamps);
+  const strength = layer === "tint" ? a.z.mul(poolGain.tint) : a.y.mul(poolGain.glow);
+  m.colorNode = attribute("color", "vec3").mul(shape.mul(strength).mul(level));
+  m.userData.gain = poolGain;
+  mats.set(layer, m);
   return m;
 }
 
 /** Client system: Portus' light pools (offline too). Medium and up, `?nopools`. */
 export const createLightPools: ClientSystemFactory = (game: Game): ClientSystem | null => {
   if (game.planet.body.terrain.kind !== "hub") return null;
-  const mesh = new THREE.Mesh(lightPoolGeometry(portusLightPools(), game.planet.terrain), lightPoolMaterial());
+  // One geometry, two draws: the tint first (it multiplies the paving alone), the glow over it.
+  const geometry = lightPoolGeometry(portusLightPools(), game.planet.terrain);
+  const mesh = new THREE.Group();
   mesh.name = "lightPools";
-  mesh.renderOrder = 2;
+  for (const [layer, order] of [["tint", 2], ["glow", 3]] as const) {
+    const m = new THREE.Mesh(geometry, lightPoolMaterial(layer));
+    m.name = `lightPools:${layer}`;
+    m.renderOrder = order;
+    mesh.add(m);
+  }
   game.ctx.scene.add(mesh);
   const apply = () => void (mesh.visible = game.ctx.settings.on.pools);
   apply();
