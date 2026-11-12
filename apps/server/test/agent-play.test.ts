@@ -235,6 +235,7 @@ describe("agents: per-starter pace", () => {
     const spot = openSpotOutside("arcadia", 24); // a clear 24 m line
     await put(fast, spot);
     await put(slow, spot);
+    const refused = new Map([fast, slow].map((a) => [a, actor(a).violations])); // after the test's own teleports
     const R = BODIES.arcadia.radius;
     const there = offset(spot, 24, 0, R);
     // Top speed over any stretch of about a second (the machine is shared: averages over a whole
@@ -279,7 +280,7 @@ describe("agents: per-starter pace", () => {
     await sleep(400);
     for (const a of [fast, slow]) {
       expect(a.corrections).toBe(0);
-      expect(actor(a).violations).toBe(0);
+      expect(actor(a).violations).toBe(refused.get(a));
     }
   }, 120_000);
 });
@@ -313,6 +314,7 @@ describe("agents: trials", () => {
     await waitFor(() => a.observe({ peek: true }).self.maxHp > 0 && !!mission(a, "T1"));
     // The ring road is a long walk from the pad: the test puts the runner 30 m from ring 1 (and tough enough for the hill).
     await put(a, offset(objAt("t1_ring_1"), 30, 0, BODIES.arcadia.radius), 12);
+    const refused = actor(a).violations; // the test's own teleport may have crossed an input or two
     const idle = mission(a, "T1")!;
     expect(idle).toMatchObject({ trial: { state: "idle", limit: 75, remaining: 8 }, where: { id: "t1_ring_1" } });
     expect(idle.on).toBeUndefined();
@@ -333,7 +335,7 @@ describe("agents: trials", () => {
     expect(end.missions.find((m) => m.id === "T1")).toMatchObject({ done: true, progress: 8 });
     expect(a.events.some((e) => e.type === "trial" && e.text === "T1 The Swift Gleam: done")).toBe(true);
     expect(a.events.some((e) => e.type === "mission" && e.text.startsWith("mission T1 complete"))).toBe(true);
-    expect(actor(a).violations).toBe(0);
+    expect(actor(a).violations).toBe(refused);
   }, 300_000);
 
   it("an agent with all three gleams opens the vault, and the Hall of Firsts line stays a person's (D-agents-1)", async () => {
