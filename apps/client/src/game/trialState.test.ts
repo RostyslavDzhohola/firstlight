@@ -46,6 +46,21 @@ describe("trial clock and HUD line", () => {
     cb!(msg({}));
     expect(trialSeen()).toEqual({ msg: msg({}), at: 42 });
   });
+
+  it("an old room delivering late can't overwrite the current room's attempt; its listener is removed", () => {
+    let oldCb: ((m: TrialMsg) => void) | null = null;
+    let oldUnbound = 0;
+    listenTrials({ onMessage: (_t, f) => ((oldCb = f), () => oldUnbound++) }, () => 1);
+    oldCb!(msg({ id: "T1" }));
+    let newCb: ((m: TrialMsg) => void) | null = null;
+    listenTrials({ onMessage: (_t, f) => ((newCb = f), () => {}) }, () => 2);
+    expect(oldUnbound).toBe(1);
+    expect(trialSeen()).toBeNull(); // forgot the old room's attempt
+    newCb!(msg({ id: "T3", kind: "collect" }));
+    oldCb!(msg({ id: "T1", state: "failed" })); // the old socket's last frame, late
+    expect(trialSeen()?.msg.id).toBe("T3");
+    expect(trialSeen()?.at).toBe(2);
+  });
 });
 
 describe("pointer and map targets for the new types", () => {

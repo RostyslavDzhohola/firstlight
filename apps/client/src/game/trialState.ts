@@ -13,19 +13,32 @@ export interface TrialSeen {
 }
 
 interface MessageSource {
+  /** Colyseus returns a function that removes the handler. */
   onMessage(type: "trial", cb: (m: TrialMsg) => void): unknown;
 }
 
 let latest: TrialSeen | null = null;
 const listeners = new Set<(t: TrialSeen) => void>();
+/** Bumped by each listenTrials: a handler from an earlier room sees a stale number and does nothing. */
+let generation = 0;
+let unbind: (() => void) | null = null;
 
-/** Start listening on a freshly joined room (forgets the previous room's attempt). */
+/**
+ * Start listening on a freshly joined room: forgets the previous room's attempt and removes its
+ * handler (a room we travelled away from, or a socket replaced on reconnect, can still deliver a
+ * late frame; it is ignored).
+ */
 export function listenTrials(room: MessageSource, now: () => number = () => performance.now()): void {
+  unbind?.();
+  unbind = null;
+  const mine = ++generation;
   latest = null;
-  room.onMessage("trial", (m) => {
+  const off = room.onMessage("trial", (m) => {
+    if (mine !== generation) return;
     latest = { msg: m, at: now() };
     for (const fn of listeners) fn(latest);
   });
+  if (typeof off === "function") unbind = off as () => void;
 }
 
 /** The latest attempt message in this room, or null. */
