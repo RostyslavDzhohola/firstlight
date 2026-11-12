@@ -49,11 +49,13 @@ describe("the dummy step's guidance (#31)", () => {
     expect(attackDeniedText("melee", "safe zone", "portus", true)).toBe("Training: swing at a dummy (follow the marker)");
   });
 
-  it("marks each dummy still standing on the map while the dummy step is on, and nothing otherwise", () => {
+  it("marks each dummy still standing on the map while the dummy step is on (one label for the cluster), and nothing otherwise", () => {
     expect(dummyTargets("attack", [false, true, false])).toEqual([
-      { id: "dummy:0", dir: dummyDir(0), label: "Training dummy" },
-      { id: "dummy:2", dir: dummyDir(2), label: "Training dummy" },
+      { id: "dummy:0", dir: dummyDir(0), label: "Training dummies (2)" },
+      { id: "dummy:2", dir: dummyDir(2), label: "" },
     ]);
+    expect(dummyTargets("attack", [false, false, false]).filter((t) => t.label).map((t) => t.label)).toEqual(["Training dummies (3)"]);
+    expect(dummyTargets("attack", [true, true, false])).toEqual([{ id: "dummy:2", dir: dummyDir(2), label: "Training dummy" }]);
     expect(dummyTargets("attack", [true, true, true])).toEqual([]);
     expect(dummyTargets("sprint", [false, false, false])).toEqual([]);
     expect(dummyTargets(undefined, [false, false, false])).toEqual([]);
