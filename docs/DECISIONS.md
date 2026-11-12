@@ -1544,3 +1544,34 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
 - **D-hunt-2 (2026-11-12):** Hunt progress belongs to the **life**, like missions: the trials are missions (T1–T3 in `char.missions`), so death and rebirth clear the gleams and the vault opens again in a later life (`life.gleamVault`, once per life, like an egg item). The medal and title are account-level (once per account, life-scoped so a staged or admin-assisted life doesn't earn it) and the Hall line is global. No migration: everything new is optional fields on the saved character JSON. Why: the game's rule is that progression is lost with the life and only medals, account and the Hall survive (D); a once-per-account vault would make its cape a one-off that the first death loses for good, and re-running the trials each life keeps the contest alive.
 - **D-hunt-3 (2026-11-12):** Three new mission objective types, run by the server in `apps/server/src/world/quests/trials.ts` for any mission that names them: `race` (rings in order inside a clock that starts at the first ring; time out fails, passing the first ring again restarts), `defend` (E lights a beacon; hold its ring for `holdS` while waves rise near you; outside the ring the clock pauses and after `graceS` the attempt fails) and `collect` (walk over every piece; with `limitS` the clock starts at the first and running out drops them). One attempt per player at a time; the attempt (clock, next ring, waves) lives only in the session, so a reconnect, a death or abandoning ends it and the mission stays accepted. Untimed collect pieces are saved in `counts`. Defend waves come from the NPC system's `createNpc` with `spawned: {reason: "trial"}`: they pay nothing (no XP, coins, drops or hunt credit), are capped at 18 per room, and dissolve when the attempt ends. Why: reusable types for later missions; the session-only attempt keeps a disconnect from pausing a clock; unpaid waves can't be farmed.
 - **D-hunt-4 (2026-11-12):** Errand Runner (medal 6) keeps asking for the original nine guide missions (`ERRAND_MISSIONS`), not the later ones (A4, H4, the trials). Why: a medal's condition shouldn't change under players who already earned or nearly earned it.
+- **D-balance-1 (2026-11-12):** Balance is computed and gated: `tools/balance` models the shipped
+  catalogues (weapon cadence with reloads, heat, draws, heavies and specials as `combat.ts` runs them;
+  creature attacks with the AI clamps; XP, coins and the shop along the intended route; starter duels and
+  roles) and `pnpm balance` exits non-zero when a number leaves its band; the Vitest project `balance` runs
+  it on every test run. Bands come from content §1–§4 (sustained PvP TTK 2.2–3.5 s, burst 1.4–3.5 s, a
+  1.4 s floor with heavies and specials, the largest hit ≤ 86% of an equal-level player; level 5 at
+  7–13 min, the cap at 60–150 min, no level twice its neighbours; T2 affordable by the gate) plus walls and
+  free kills per creature tier (solo TTK regular 0.2–3 s, heavy 1.5–8, elite 3–15, beast 20–45; a pack beaten
+  when half its telegraphed hits land; an idle player lasts ≥ 6 s against one creature). Why: the numbers were
+  starting values from before anyone played; a model makes every change checkable and explainable, and
+  gates future content changes.
+- **D-balance-2 (2026-11-12):** Tuned the outliers the model found with the smallest number changes
+  (content §2.6 has the before/after): axe chop 6 s cooldown and T2/T3 85/104; hammer T3 slam 86; Hexquill
+  T3 25; longbow rate = draw + 0.35 s (1.35/1.25/1.15); Comet headMult 1; Dunebreaker HP₁ 1,000. Why: an
+  uncooled chop doubled the axe's DPS and killed in 0.8 s, chop or slam plus one light killed at the gates,
+  a ×1.5 rocket headshot one-shot at every level, the code let bow draws chain at the draw time (the content
+  lists a 0.35 s recovery), and the Dunebreaker was a wall next to the other beasts.
+- **D-balance-3 (2026-11-12):** Ember Seal direct 30/40/52 → 24/32/42. Why: with the seal held before the
+  first throw on top of the dart stream, Hinoko won all 16 starter duels (4 opponents × L1/6/12/20); 24/32/42
+  is the smallest trim with which every starter leads a role and none leads all.
+- **D-balance-4 (2026-11-12):** Starters play differently through a light layer, made without the owner's
+  answers to issue #9: max HP ×0.88–1.12, run/sprint ×0.92–1.10 and the dodge cooldown 1.0–1.35 s, per starter (Unit 7 is the reference body: base HP and pace, a slower roll)
+  in `content/starters.ts` (content §8.5), fixed multipliers on the level curve; no stamina, jump, carry or
+  fall-damage changes. The server applies them (max HP; `movement.ts` takes the starter's sprint for the
+  budget and bank, its cooldown for rolls, and a slower starter gets 0.5 m more roll reserve per m/s under the
+  base because the 4.5 m roll is shared); the client predicts from the same row (`setStarterMove`); the pick
+  screen shows two words and Toughness/Speed/Dodge pips. An optional `spellPower` per starter is for the
+  spells lane, applied by the lead at integration. Bands vs per-starter HP: §2.5 bands hold against the base
+  HP; against the most fragile starter a kill still takes two hits and ≥ 0.75 s. Why: issue #9 asked for
+  starters that feel different; trade-offs (every strength paid for) keep any starter from being strictly
+  best, which the model checks (no stat dominance, each leads a role, no duel more lopsided than 0.6).

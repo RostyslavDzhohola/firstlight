@@ -32,6 +32,9 @@ Code is MIT (`LICENSE`), our own art CC BY 4.0 (`LICENSE-ART`).
 - `apps/assets-worker`: Cloudflare Worker serving large assets under `/v/<buildId>/…`.
 - `tools/bots` load-test bots; `tools/blender/characters` headless Blender build of the starter GLBs;
   `tools/sfx` ElevenLabs sound-effect generation and processing (writes to `/tmp`, never the repo).
+  `tools/balance` the balance model (D-balance-1): `pnpm balance` prints weapon DPS, PvP and PvE
+  time-to-kill, the XP/coin route and the starter checks from the real catalogues, and exits 1 when a
+  number leaves its band (Vitest project `balance` runs the same checks).
 
 ## Commands
 
@@ -41,6 +44,7 @@ Scripts live in the `package.json` files. The ones you need:
 - `pnpm typecheck`: TypeScript 7 (`tsc`) for shared, server and client. TS 7 only typechecks; it has no compiler API.
 - `pnpm test`: every Vitest project. One file: `pnpm vitest run apps/server/test/combat.test.ts`;
   one project: `pnpm vitest run --project server` (`shared`, `server`, `client`).
+- `pnpm balance`: the balance report and band checks; run it after changing any game number.
 - `pnpm --filter @firstlight/client build`: production client bundle (no source maps).
 - `pnpm --filter @firstlight/server start`: runs `src/main.ts` directly, like production (`apps/server/Dockerfile`).
 

@@ -59,6 +59,12 @@
 .fl-charpick__weapon > .px { width: calc(2.75 * var(--u)); height: calc(2.75 * var(--u)); }
 .fl-charpick__weapon b { display: block; font: 500 var(--t-lg)/1.1 var(--font-display); letter-spacing: .04em; }
 .fl-charpick__weapon span { font-size: var(--t-xs); color: var(--fog-3); }
+.fl-charpick__body { display: grid; gap: calc(.3 * var(--u)); margin-top: var(--sp-3); text-align: left; }
+.fl-charpick__traits { display: flex; flex-wrap: wrap; gap: calc(.3 * var(--u)); justify-content: center; margin-bottom: calc(.2 * var(--u)); }
+.fl-charpick__bar { display: grid; grid-template-columns: calc(6 * var(--u)) 1fr; align-items: center; gap: var(--sp-3); font-size: var(--t-xs); color: var(--fog-3); }
+.fl-charpick__pips { display: flex; gap: calc(.2 * var(--u)); }
+.fl-charpick__pips i { flex: 1; height: calc(.35 * var(--u)); border-radius: 2px; background: color-mix(in srgb, var(--fog-3) 25%, transparent); }
+.fl-charpick__pips i.is-on { background: var(--dawn-3); }
 .fl-charpick__stats { display: flex; gap: calc(.4 * var(--u)); flex-wrap: wrap; justify-content: flex-end; max-width: calc(15 * var(--u)); }
 
 /* ---- config column ---- */

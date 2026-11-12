@@ -260,15 +260,15 @@ Heat = shots until a 1.5 s overheat lockout. Explosions fall off linearly from t
 | **Riverstaff** bo staff (melee) | I | 1 | 13 | 0.40 | 3.0 m | melee arc 150°, ≤ 4 targets, windup 0.10 | none | every 3rd hit in a row knocks back 3.0 m; RMB block 50% | light | 60 |
 | | II | 6 | 18 | 0.40 | 3.0 m | same | none | knockback 3.5 m; block 55% | light | 300 |
 | | III | 12 | 23 | 0.40 | 3.0 m | same | none | knockback 4.0 m; block 60% | light | 900 |
-| **Bearded Axe** (melee) | I | 1 | 30 | 0.80 | 2.2 m | melee arc 90°, ≤ 2 targets, windup 0.25 | none | RMB charge 0.8 s heavy chop 66 (heavy destruction) | light / heavy on chop | 60 |
-| | II | 6 | 41 | 0.80 | 2.2 m | same | none | chop 0.75 s → 90 | same | 300 |
-| | III | 12 | 52 | 0.80 | 2.2 m | same | none | chop 0.70 s → 114 | same | 900 |
+| **Bearded Axe** (melee) | I | 1 | 30 | 0.80 | 2.2 m | melee arc 90°, ≤ 2 targets, windup 0.25 | none | RMB charge 0.8 s heavy chop 66 (heavy destruction), **6 s chop cooldown** (D-balance-2) | light / heavy on chop | 60 |
+| | II | 6 | 41 | 0.80 | 2.2 m | same | none | chop 0.75 s → **85** (was 90, D-balance-2) | same | 300 |
+| | III | 12 | 52 | 0.80 | 2.2 m | same | none | chop 0.70 s → **104** (was 114, D-balance-2) | same | 900 |
 | **Quarry Hammer** (melee) | I | 1 | 40 | 1.10 | 2.3 m | melee arc 100°, ≤ 3 targets, windup 0.35; move ×0.9 | none | RMB charge 1.0 s ground slam 55, radius 3.0 m (edge 50%), knock-up 1 m, 6 s cooldown | heavy | 60 |
 | | II | 6 | 54 | 1.10 | 2.3 m | same | none | slam 74, r 3.5 m | heavy | 300 |
-| | III | 12 | 70 | 1.10 | 2.3 m | same | none | slam 96, r 4.0 m | heavy | 900 |
+| | III | 12 | 70 | 1.10 | 2.3 m | same | none | slam **86** (was 96, D-balance-2), r 4.0 m | heavy | 900 |
 | **Hexquill** wand (magic) | I | 1 | 15 | 0.40 | 40 m | projectile 45 m/s, straight | heat 12 | RMB aim 1.3×; bolts pierce 0 | light | 60 |
 | | II | 6 | 20 | 0.40 | 40 m | same | heat 14 | pierce 1 | light | 300 |
-| | III | 12 | 26 | 0.40 | 40 m | same | heat 16 | pierce 2 | light | 900 |
+| | III | 12 | **25** (was 26, D-balance-2) | 0.40 | 40 m | same | heat 16 | pierce 2 | light | 900 |
 | **Emberglass Staff** fire staff (magic) | I | 1 | 24 direct; splash 12 in 2.0 m; burn 4/s × 3 s | 0.80 | 35 m | projectile 28 m/s, straight | heat 5 | burn refreshes, never stacks; RMB aim 1.3× | heavy | 60 |
 | | II | 6 | 32; splash 16 in 2.5 m; burn 5/s | 0.80 | 35 m | same | heat 6 | | heavy | 300 |
 | | III | 12 | 42; splash 21 in 3.0 m; burn 7/s | 0.80 | 35 m | same | heat 7 | | heavy | 900 |
@@ -281,13 +281,13 @@ Heat = shots until a 1.5 s overheat lockout. Explosions fall off linearly from t
 | **Scatterpipe** shotgun (ranged) | I | 1 | 7 pellets × 6 | 0.90 | full to 10 m, 30% at 22 m | hitscan pellets, 7° cone (ADS 5°) | mag 6, reload 2.0 s | | light | 60 |
 | | II | 6 | 7 × 8 | 0.90 | same | same | mag 7, 1.8 s | | light | 300 |
 | | III | 12 | 7 × 10 | 0.90 | same | same | mag 8, 1.6 s | | light | 900 |
-| **Yew Longbow** (ranged) | I | 1 | tap 15; full draw 45 | tap 0.5; draw 1.0 + 0.35 recovery | ~100 m arc | arcing projectile, 25 → 55 m/s by draw, gravity 9.8 | none | hold RMB to draw (zoom 1.8× at full), LMB to loose; head ×1.5 | light | 60 |
-| | II | 6 | 20; 61 | draw 0.9 | same | same | none | | light | 300 |
-| | III | 12 | 25; 75 | draw 0.8 | same | same | none | T3 full draw trimmed from 79 to 75 so two body hits never kill at the L12 gate | light | 900 |
+| **Yew Longbow** (ranged) | I | 1 | tap 15; full draw 45 | draw 1.0 + 0.35 recovery (code `rate` **1.35**, was 0.5, D-balance-2) | ~100 m arc | arcing projectile, 25 → 55 m/s by draw, gravity 9.8 | none | hold RMB to draw (zoom 1.8× at full), LMB to loose; head ×1.5 | light | 60 |
+| | II | 6 | 20; 61 | draw 0.9 (rate **1.25**) | same | same | none | | light | 300 |
+| | III | 12 | 25; 75 | draw 0.8 (rate **1.15**) | same | same | none | T3 full draw trimmed from 79 to 75 so two body hits never kill at the L12 gate | light | 900 |
 | **Stillshot Rifle** sniper (ranged) | I | 1 | 45 body; head ×1.8 = 81 | 1.40 | 150 m, no falloff | hitscan; unscoped spread 4°, scoped 0° | mag 4, reload 2.2 s | RMB scope 4×; lens glint visible to anyone ≥ 30 m away while scoped | light | 90 |
 | | II | 6 | 61 (head 110) | 1.40 | same | same | mag 5, 2.0 s | scope 5× | light | 450 |
 | | III | 12 | 75 (head 135) | 1.40 | same | same | mag 5, 1.8 s | scope 6× (75, not 79, to keep 3 body shots) | light | 1,350 |
-| **Comet Launcher** rocket (ranged) | I | 1 | direct 70 total; splash 45 at centre, r 3.5 m | 1.80 (reload) | detonates at 80 m | projectile 30 m/s, straight | mag 1, reload 1.8 s | knockback 4 m; self ×0.5; move ×0.85; props ×2 | heavy | 90 |
+| **Comet Launcher** rocket (ranged) | I | 1 | direct 70 total; splash 45 at centre, r 3.5 m | 1.80 (reload) | detonates at 80 m | projectile 30 m/s, straight | mag 1, reload 1.8 s | knockback 4 m; self ×0.5; move ×0.85; props ×2; **no weak-point bonus (×1.0, D-balance-2)** | heavy | 90 |
 | | II | 6 | 95; splash 61, r 4.0 m | 1.70 | same | same | reload 1.7 s | | heavy | 450 |
 | | III | 12 | 123; splash 79, r 4.5 m | 1.60 | same | same | reload 1.6 s | | heavy | 1,350 |
 | **Scrapburst Grenade** (support) | I | 1 | 70 at centre, r 4.0 m | 0.8 throw cooldown | ~20 m throw | thrown arc 18 m/s, bounces, fuse 1.6 s | stack 5 | self ×0.5; props ×2 | heavy | 15 ea |
@@ -303,9 +303,9 @@ Heat = shots until a 1.5 s overheat lockout. Explosions fall off linearly from t
 | **Ember Kunai** (ranged; the ninja's starter, HANDOFF 6h) | I | 1 | 13 | 0.38 | 35 m | thrown dart, 42 m/s, gravity 4 | mag 8, reload 1.3 s | RMB: hold 0.4 s hand seal, release: **Ember Seal** fireball (below), 8 s cooldown | light | 60 |
 | | II | 6 | 18 | 0.38 | same | same, pierce 1 | mag 9, 1.2 s | seal cooldown 7.5 s | light | 300 |
 | | III | 12 | 24 | 0.38 | same | same, pierce 1 | mag 10, 1.1 s | seal cooldown 7 s | light | 900 |
-| **Ember Seal** (the kunai's alt; not an item) | I | 1 | 30 direct incl. blast; splash 20 in 2.5 m; burn 4/s × 3 s | cooldown | 30 m | fireball 24 m/s, straight | the kunai tier's cooldown | spends no kunai; the server times the 0.4 s seal | heavy | – |
-| | II | 6 | 40; splash 27 in 2.75 m; burn 5/s | | same | same | | | heavy | – |
-| | III | 12 | 52; splash 35 in 3.0 m; burn 6/s | | same | same | | | heavy | – |
+| **Ember Seal** (the kunai's alt; not an item) | I | 1 | **24** (was 30, D-balance-3) direct incl. blast; splash 20 in 2.5 m; burn 4/s × 3 s | cooldown | 30 m | fireball 24 m/s, straight | the kunai tier's cooldown | spends no kunai; the server times the 0.4 s seal | heavy | – |
+| | II | 6 | **32** (was 40); splash 27 in 2.75 m; burn 5/s | | same | same | | | heavy | – |
+| | III | 12 | **42** (was 52); splash 35 in 3.0 m; burn 6/s | | same | same | | | heavy | – |
 
 ### 2.4 Starter weapons (D)
 
@@ -360,6 +360,29 @@ any level against any level.
 Format: seconds from the first hit / hits needed. PvE comparison: a regular L1 enemy with 22–60 HP dies to
 the Pocket Carbine in 0.5–1.5 s, inside [05]'s 1.1–1.8 s band. Build a headless sim that fails the
 build if any weapon's TTK leaves 0.6–1.6× of its class median [04].
+
+### 2.6 Balance pass 2026-11-12 (`pnpm balance`, D-balance-1…4)
+
+`tools/balance` models the shipped catalogues (the server's fire rules, AI clamps, the route) and fails when a
+number leaves its band (`pnpm balance`, Vitest project `balance`). Its first run on the shipped numbers failed
+24 checks; these changes bring every check into band. Every other number is unchanged.
+
+| Number | Old | New | Why (model, before → after) |
+|---|---:|---:|---|
+| Bearded Axe chop cooldown (all tiers) | none | 6 s | a chop every 0.8 s: 82 DPS at T1 (2.5× the tier median) and a 0.8 s PvP kill → 41 DPS, 1.6 s |
+| Bearded Axe II / III chop | 90 / 114 | 85 / 104 | chop + one light still killed an equal-level player at L6 and L12 (0.8 s) → 1.6 s, 3 hits |
+| Quarry Hammer III slam | 96 | 86 | slam + one light killed at L12 (1.1 s) → 2.2 s, 3 hits |
+| Hexquill III damage | 26 | 25 | 6 bolts killed at L12 (2.0 s, under the 2.2 s floor) → 2.4 s, 7 |
+| Yew Longbow rate I / II / III | 0.5 / 0.5 / 0.5 | 1.35 / 1.25 / 1.15 | the code let full draws chain at the draw time (2.0 / 1.8 / 1.6 s TTK); now draw + the 0.35 s recovery this table lists (2.7 / 2.5 / 2.3 s, the §2.5 values). Taps share the rate |
+| Comet Launcher headMult | 1.5 (default) | 1.0 | a direct head hit one-shot an equal-level player at every level (105–117% of HP); §2.1 gives explosives ×1.0 |
+| Ember Seal direct I / II / III | 30 / 40 / 52 | 24 / 32 / 42 | the seal opener on top of the dart stream made Hinoko win all 16 starter duels; the smallest trim that clears the starter checks |
+| Dunebreaker HP₁ | 1,200 | 1,000 | 41 s solo against 30–31 s for the other beasts; a solo player with two tonics lost (margin 0.84) → 37 s, 0.95 |
+
+Model findings left alone (in band, or by design): the Scatterpipe and Stillshot are burst weapons (1.8 / 2.8 s
+body, 1.4 s with a headshot); the Marsh Wisp (0.25 s) and the Collector (0.5 s) are designed fragile; beasts
+are even fights solo (margin 0.95–1.3 with two tonics). Splash damage (`explode`) is not scaled by the
+attacker's level multiplier in code, so splash falls behind direct hits at high level: a candidate for the
+next pass with play data.
 
 ---
 
@@ -474,7 +497,7 @@ Sixers' black-and-grey "6" look, IOI branding and Sorrento-like leaders [12].
 | **Dusk Wolf** (D) | Regular | 3–6 / 8–12 / 14–19 | 52–67 / 77–97 / 108–133 (42) | bite 9–20 (0.5 s); lunge 20–41 (0.8 s crouch + snarl + line decal); 16% | pack howl (1.5 s) before engaging. They circle at 6–8 m: one feints in front while two bite from the flanks. A wolf at < 25% HP flees if fewer than 2 pack mates remain | pack 3–5 | forests, ridges, canyon rims | Wolf Pelt 50% (8); Wolfpelt Cape 1/200 |
 | **Bramblehorn** (new) | Neutral beast | Arcadia L8 | 1,656 (900) | antler charge 50 (1.2 s head lowered + ground line); stomp 34, 4 m ring (1.0 s); 29% | 6 m tall mossy grazer with flowering, branching antlers. Neutral until struck, then fights the attacker; leash 40 m | 1 per copy | Clover Fields, Kestrel slopes | 126 coins; Bramblehorn Antler 100% (120); Antler Crown 1/8; weapon T2 1/2 |
 | **Fenstalker** (new) | Neutral beast | Hollowmere L14 | 2,560 (1,000) | beak spear 78 (0.9 s neck coil + line); wing buffet 41 + 5 m knockback in a 90° cone, 6 m (1.0 s wings spread); 34% | 7 m stilt-legged wading bird, grey-violet plumage; neutral; spears from the water's edge | 1 per copy | Mourning Mere shallows | 198 coins; Fenstalker Plume 100% (200); Heron Plume Hat 1/8; weapon T3 1/2 |
-| **Dunebreaker** (new) | Neutral beast | Meridian L20 | 3,936 (1,200) | roll charge 101 (1.2 s curl-up + dust line 25 m long); tail swipe 66 in a 120° cone, 5 m (0.8 s); 35% | armoured, salt-crusted canyon roller; neutral; rolls in straight lines and is stunned 2 s at the end of each roll | 1 per copy | Glasspan Salt Flats | 270 coins; Dunebreaker Scale 100% (300); Saltplate Mantle 1/8; weapon T3 1/2 |
+| **Dunebreaker** (new) | Neutral beast | Meridian L20 | **3,280 (1,000)** (was 3,936 (1,200), D-balance-2) | roll charge 101 (1.2 s curl-up + dust line 25 m long); tail swipe 66 in a 120° cone, 5 m (0.8 s); 35% | armoured, salt-crusted canyon roller; neutral; rolls in straight lines and is stunned 2 s at the end of each roll | 1 per copy | Glasspan Salt Flats | 270 coins; Dunebreaker Scale 100% (300); Saltplate Mantle 1/8; weapon T3 1/2 |
 
 ### 3.6 Drop tables (rolled for the top damage dealer) (new; rates from [r2-05])
 
@@ -877,6 +900,30 @@ crests, logos or franchise silhouettes from the §8.2 avoid lists.
 
 For the horse (an extra after the core), [r2-04] suggests a later "Sleipnir Saddle" eight-legged horse
 skin, if it is ever wanted.
+
+
+### 8.5 Starter stats (issue #9, D-balance-4; code `packages/shared/src/content/starters.ts`)
+
+A light class layer: each starter changes up to four numbers the server already computes in one place, each within
+about ±12% of the base, one strength paid for by a weakness. The server applies them (max HP; the movement
+budget and the dodge cooldown in `movement.ts`), the client predicts movement from the same row
+(`PlayerController.setStarterMove`), and the pick screen shows the words and Toughness / Speed / Dodge pips.
+The roll itself (4.5 m over 0.3 s, i-frames), jump, swim, horse and fall damage stay shared.
+
+| Starter | Max HP × (L1 / L20) | Run / sprint m/s | Dodge cooldown | Spell power × (lead wires it) | Shown as | Leads (model) |
+|---|---|---|---:|---:|---|---|
+| Base (all before) | 1.00 (100 / 290) | 6 / 9 | 1.2 s | 1.00 | | |
+| Hexwick | 0.90 (90 / 261) | 6 / 9 | 1.1 s | 1.15 | Fragile, Strong magic | magic |
+| Brother Ash | 1.12 (112 / 325) | 5.52 / 8.28 | 1.35 s | 0.90 | Sturdy, Slow | toughness |
+| Kappa | 1.00 (100 / 290) | 6.24 / 9.36 | 1.0 s | 1.00 | Balanced, Best dodge | crowd clear, evasion |
+| Unit 7 | 1.00 (100 / 290) | 6 / 9 | 1.25 s | 0.95 | Steady aim, Slow roll | duels (the reference body; pays with the roll, crowd clear and spell power) |
+| Hinoko | 0.88 (88 / 255) | 6.6 / 9.9 | 1.1 s | 1.05 | Fast, Fragile | mobility |
+
+The calls made for issue #9's open questions (the owner hasn't answered; D-balance-4): (1) max HP, run/sprint
+and dodge cooldown vary (no stamina exists; carry slots, jump and fall damage stay shared); (2) a light layer,
+not hard classes; (3) fixed multipliers, so they grow with the level curve; (4) yes, words plus pips; (5) every
+gain is paid for, and the model checks that no starter is at least as good as another on every stat, that each
+leads at least one role and none leads all, and that no starter duel is more lopsided than 0.6.
 
 ---
 

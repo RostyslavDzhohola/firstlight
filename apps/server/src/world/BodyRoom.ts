@@ -7,7 +7,8 @@ import { StateView } from "@colyseus/schema";
 import { BODIES, createTerrain, inWalledZone, isSafe, natureSolids, padDirs, portalNear, portalSpots, type BodyDef, type BodyId, type NatureSolids, type PortalSpot, type Terrain } from "@firstlight/shared";
 import { BACKPACK_SLOTS, HOTBAR_SLOTS, newCharacter, type CharacterData } from "@firstlight/shared/content/character";
 import { INV_SLOTS, moveSlot, storeItem } from "@firstlight/shared/content/inventory";
-import { fallDamageFraction, levelForXp, maxHp, pvpKillXp, xpAtLevel, xpToNext } from "@firstlight/shared/content/progression";
+import { fallDamageFraction, levelForXp, pvpKillXp, xpAtLevel, xpToNext } from "@firstlight/shared/content/progression";
+import { starterMaxHp } from "@firstlight/shared/content/starters";
 import { STARTERS, starterLook, WEAPON_BY_ID, WEAPON_INDEX } from "@firstlight/shared/content/weapons";
 import { NET, PHRASES, type InvItem, type YouState } from "@firstlight/shared/net/protocol";
 import { ANIM, BodyState, NpcState, PF, PileState, PlayerState } from "@firstlight/shared/net/schema";
@@ -502,7 +503,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     p.fz = f[2];
     p.anim = ANIM.IDLE;
     p.level = char.level;
-    p.maxHp = maxHp(char.level);
+    p.maxHp = starterMaxHp(char.starter, char.level);
     p.hp = char.dead ? 0 : Math.max(1, Math.min(p.maxHp, char.hp || p.maxHp));
     p.name = auth.name;
     p.userId = auth.userId; // random opaque id (not a credential): clients need it for blocks, mutes, parties (D27)
@@ -767,7 +768,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       if (a.airborne && !swimmingOk && !flying) {
         const drop = a.peakRadius - (R + ground);
         const frac = fallDamageFraction(drop);
-        if (frac > 0) dealDamage(this.host, null, a, frac * maxHp(a.char.level), false);
+        if (frac > 0) dealDamage(this.host, null, a, frac * starterMaxHp(a.char.starter, a.char.level), false);
       }
       a.airborne = false;
       a.peakRadius = len;
@@ -971,7 +972,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
         for (const k of Object.keys(live)) if (!(k in char)) delete live[k];
         Object.assign(a.char, char);
         a.state.level = a.char.level;
-        a.state.maxHp = maxHp(a.char.level);
+        a.state.maxHp = starterMaxHp(a.char.starter, a.char.level);
         a.state.hp = Math.min(a.state.hp, a.state.maxHp);
         this.equip(a, a.char.selected);
       }
@@ -1133,8 +1134,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     a.youDirty = true;
     const shown = a.state.level;
     if (a.char.level <= shown) return;
-    a.state.maxHp = maxHp(a.char.level);
-    a.state.hp = levelUpHp(a.state.hp, shown, a.char.level);
+    a.state.maxHp = starterMaxHp(a.char.starter, a.char.level);
+    a.state.hp = levelUpHp(a.state.hp, shown, a.char.level, a.char.starter);
     a.state.level = a.char.level;
     a.client.send("toast", { text: `Level ${a.char.level}!`, kind: "xp" });
     emitGameEvent(this, { type: "levelUp", playerId: a.id, level: a.char.level });
@@ -1247,7 +1248,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
         t.char.xp = xpAtLevel(lv);
         t.char.level = lv;
         t.state.level = lv;
-        t.state.maxHp = maxHp(lv);
+        t.state.maxHp = starterMaxHp(t.char.starter, lv);
         t.state.hp = t.state.maxHp;
         t.youDirty = true;
         break;
@@ -1365,7 +1366,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     a.airborne = false;
     a.peakRadius = len;
     groundMotion(a, len, now);
-    if (frac > 0) dealDamage(this.host, null, a, frac * maxHp(a.char.level), false);
+    if (frac > 0) dealDamage(this.host, null, a, frac * starterMaxHp(a.char.starter, a.char.level), false);
   }
 
   /** Distance-based views for NPCs and piles (players are not view-filtered). */
@@ -1420,7 +1421,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     // Inside a reward transaction the character may be levels ahead of the synced state, whose HP
     // rises only after the commit (showLevel). Save the HP it will show, so a crash in between
     // restarts with the level's HP (F12 confirm Codex N-S1). A failed save restores `char` (persist).
-    a.char.hp = a.dead ? a.state.hp : levelUpHp(a.state.hp, a.state.level, a.char.level);
+    a.char.hp = a.dead ? a.state.hp : levelUpHp(a.state.hp, a.state.level, a.char.level, a.char.starter);
     characterRepo.current.save(a.identity.userId, a.char);
   }
 
@@ -1540,10 +1541,10 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 }
 
 /** HP after levelling from `shown` to `level`: the max-HP gain is added, capped at the new max. */
-function levelUpHp(hp: number, shown: number, level: number): number {
+function levelUpHp(hp: number, shown: number, level: number, starter: number): number {
   if (level <= shown) return hp;
-  const newMax = maxHp(level);
-  return Math.min(newMax, hp + (newMax - maxHp(shown)));
+  const newMax = starterMaxHp(starter, level);
+  return Math.min(newMax, hp + (newMax - starterMaxHp(starter, shown)));
 }
 
 function norm(v: readonly number[]): V3 {

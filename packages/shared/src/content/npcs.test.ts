@@ -74,7 +74,7 @@ describe("npc roster", () => {
     expect(npcMaxHp(npcDef("hopbit"), 1)).toBe(22);
     expect(npcMaxHp(npcDef("bramblehorn"), 8)).toBe(1656);
     expect(npcMaxHp(npcDef("fenstalker"), 14)).toBe(2560);
-    expect(npcMaxHp(npcDef("dunebreaker"), 20)).toBe(3936);
+    expect(npcMaxHp(npcDef("dunebreaker"), 20)).toBe(3280); // HP₁ 1,000 (D-balance-2; was 1,200 → 3,936)
     expect(npcMaxHp(npcDef("cabinet_golem"), 6)).toBe(416);
     expect(npcMaxHp(npcDef("crypt_sentinel"), 13)).toBe(415);
     expect(Math.round(attackDamage(npcDef("pixel_lancer").attacks[0]!, 7))).toBe(36);

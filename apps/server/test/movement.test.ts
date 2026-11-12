@@ -22,6 +22,7 @@ import type { BodyId } from "@firstlight/shared";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 import { characterRepo } from "../src/world/characters.ts";
 import { newCharacter } from "@firstlight/shared/content/character";
+import { STARTER_STATS } from "@firstlight/shared/content/starters";
 
 let game: Game;
 const rooms: Room[] = [];
@@ -774,9 +775,12 @@ describe("sprinting over real terrain like the client (F12 Codex re-review S1)",
 describe("mounted limits go through the limits argument (F12 re-review nit)", () => {
   // A flat test world: radius 1000, ground at 0, no water, no props.
   const flat: MoveWorld = { radius: 1000, waterLevel: -100, groundAt: () => 0 };
+  // These pin the shared base pace (sprint 9, roll every 1.2 s): a starter index with no row in
+  // content/starters.ts gets the base. Per-starter pace and rolls: test/starters.test.ts.
+  const BASE_ROW = STARTER_STATS.length;
   function rider(now: number, mounted: boolean, graceUntil = 0): PlayerActor {
     const pos = { x: 0, y: 0, z: 1000 };
-    return { ...motionFields(1000, now), lastX: 0, lastY: 0, lastZ: 1000, state: pos, mounted, mountGraceUntil: graceUntil } as unknown as PlayerActor;
+    return { ...motionFields(1000, now), lastX: 0, lastY: 0, lastZ: 1000, state: pos, mounted, mountGraceUntil: graceUntil, char: { starter: BASE_ROW } } as unknown as PlayerActor;
   }
   /** A step of `metres` along +x on the flat world, from the actor's last position. */
   function step(a: PlayerActor, metres: number, anim = 3) {

@@ -5,6 +5,7 @@ import { PF } from "@firstlight/shared/net/schema";
 import type { Game } from "../src/app.ts";
 import { RULES } from "../src/world/BodyRoom.ts";
 import { pileStore } from "../src/world/piles.ts";
+import { starterMaxHp } from "@firstlight/shared/content/starters";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 
 let game: Game;
@@ -96,7 +97,7 @@ describe("combat (seam 1)", () => {
     a.send("fire", { slot: 0, ...aimAt(a, b), t: Date.now() });
     await waitFor(() => denied !== "");
     expect(denied).toBe("safe zone");
-    expect(st(a).players.get(b.sessionId).hp).toBe(100);
+    expect(st(a).players.get(b.sessionId).hp).toBe(starterMaxHp(1, 1)); // Brother Ash at full HP (content/starters.ts)
   });
 
   it("death drops a pile with everything carried; after rebirth the owner can loot it", async () => {

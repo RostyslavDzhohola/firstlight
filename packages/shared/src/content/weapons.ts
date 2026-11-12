@@ -82,17 +82,18 @@ export const WEAPONS: readonly WeaponDef[] = [
   {
     id: "axe", name: "Bearded Axe", cls: "melee", delivery: "melee", range: 2.2, arc: 90, maxTargets: 2, windup: 0.25,
     destroys: "light", stack: 1,
-    tiers: [T(1, 60, { damage: 30, rate: 0.8, heavy: 66, heavyTime: 0.8 }), T(6, 300, { damage: 41, rate: 0.8, heavy: 90, heavyTime: 0.75 }), T(12, 900, { damage: 52, rate: 0.8, heavy: 114, heavyTime: 0.7 })],
+    // Chop: 6 s cooldown and T2/T3 trimmed (D-balance-2): an uncooled chop every 0.8 s killed in 0.8 s.
+    tiers: [T(1, 60, { damage: 30, rate: 0.8, heavy: 66, heavyTime: 0.8, cooldown: 6 }), T(6, 300, { damage: 41, rate: 0.8, heavy: 85, heavyTime: 0.75, cooldown: 6 }), T(12, 900, { damage: 52, rate: 0.8, heavy: 104, heavyTime: 0.7, cooldown: 6 })],
   },
   {
     id: "hammer", name: "Quarry Hammer", cls: "melee", delivery: "melee", range: 2.3, arc: 100, maxTargets: 3, windup: 0.35,
     destroys: "heavy", stack: 1,
-    tiers: [T(1, 60, { damage: 40, rate: 1.1, heavy: 55, heavyTime: 1.0, radius: 3, cooldown: 6 }), T(6, 300, { damage: 54, rate: 1.1, heavy: 74, heavyTime: 1.0, radius: 3.5, cooldown: 6 }), T(12, 900, { damage: 70, rate: 1.1, heavy: 96, heavyTime: 1.0, radius: 4, cooldown: 6 })],
+    tiers: [T(1, 60, { damage: 40, rate: 1.1, heavy: 55, heavyTime: 1.0, radius: 3, cooldown: 6 }), T(6, 300, { damage: 54, rate: 1.1, heavy: 74, heavyTime: 1.0, radius: 3.5, cooldown: 6 }), T(12, 900, { damage: 70, rate: 1.1, heavy: 86, heavyTime: 1.0, radius: 4, cooldown: 6 })],
   },
   {
     id: "hexquill", name: "Hexquill", cls: "magic", delivery: "projectile", range: 40, speed: 45, gravity: 0,
     destroys: "light", stack: 1,
-    tiers: [T(1, 60, { damage: 15, rate: 0.4, heat: 12, pierce: 0 }), T(6, 300, { damage: 20, rate: 0.4, heat: 14, pierce: 1 }), T(12, 900, { damage: 26, rate: 0.4, heat: 16, pierce: 2 })],
+    tiers: [T(1, 60, { damage: 15, rate: 0.4, heat: 12, pierce: 0 }), T(6, 300, { damage: 20, rate: 0.4, heat: 14, pierce: 1 }), T(12, 900, { damage: 25, rate: 0.4, heat: 16, pierce: 2 })],
   },
   {
     id: "emberglass", name: "Emberglass Staff", cls: "magic", delivery: "projectile", range: 35, speed: 28, gravity: 0,
@@ -118,7 +119,8 @@ export const WEAPONS: readonly WeaponDef[] = [
   {
     id: "longbow", name: "Yew Longbow", cls: "ranged", delivery: "arrow", range: 100, speed: 55, gravity: 9.8,
     destroys: "light", stack: 1,
-    tiers: [T(1, 60, { damage: 45, tap: 15, rate: 0.5, draw: 1.0, headMult: 1.5, zoom: 1.8 }), T(6, 300, { damage: 61, tap: 20, rate: 0.5, draw: 0.9, headMult: 1.5, zoom: 1.8 }), T(12, 900, { damage: 75, tap: 25, rate: 0.5, draw: 0.8, headMult: 1.5, zoom: 1.8 })],
+    // rate = draw + the 0.35 s recovery content §2.3 lists (D-balance-2): the 0.5 s rate let full draws chain.
+    tiers: [T(1, 60, { damage: 45, tap: 15, rate: 1.35, draw: 1.0, headMult: 1.5, zoom: 1.8 }), T(6, 300, { damage: 61, tap: 20, rate: 1.25, draw: 0.9, headMult: 1.5, zoom: 1.8 }), T(12, 900, { damage: 75, tap: 25, rate: 1.15, draw: 0.8, headMult: 1.5, zoom: 1.8 })],
   },
   {
     id: "stillshot", name: "Stillshot Rifle", cls: "ranged", delivery: "hitscan", range: 150, spread: 4, adsSpread: 0,
@@ -128,7 +130,8 @@ export const WEAPONS: readonly WeaponDef[] = [
   {
     id: "comet", name: "Comet Launcher", cls: "ranged", delivery: "projectile", range: 80, speed: 30, gravity: 0,
     destroys: "heavy", stack: 1,
-    tiers: [T(1, 90, { damage: 70, splash: 45, radius: 3.5, rate: 1.8, mag: 1, reload: 1.8, knockback: 4 }), T(6, 450, { damage: 95, splash: 61, radius: 4, rate: 1.7, mag: 1, reload: 1.7, knockback: 4 }), T(12, 1350, { damage: 123, splash: 79, radius: 4.5, rate: 1.6, mag: 1, reload: 1.6, knockback: 4 })],
+    // headMult 1: explosives take no weak-point bonus (content §2.1; D-balance-2): a ×1.5 rocket one-shot.
+    tiers: [T(1, 90, { damage: 70, splash: 45, radius: 3.5, rate: 1.8, mag: 1, reload: 1.8, knockback: 4, headMult: 1 }), T(6, 450, { damage: 95, splash: 61, radius: 4, rate: 1.7, mag: 1, reload: 1.7, knockback: 4, headMult: 1 }), T(12, 1350, { damage: 123, splash: 79, radius: 4.5, rate: 1.6, mag: 1, reload: 1.6, knockback: 4, headMult: 1 })],
   },
   {
     id: "grenade", name: "Scrapburst Grenade", cls: "support", delivery: "thrown", range: 20, speed: 18, gravity: 9.8, fuse: 1.6,
@@ -179,7 +182,8 @@ export const WEAPONS: readonly WeaponDef[] = [
     id: "ember_seal", name: "Ember Seal", cls: "magic", delivery: "projectile", range: 30, speed: 24, gravity: 0,
     destroys: "heavy", stack: 1, hidden: true,
     // Direct hit includes the blast for the victim (like rockets); burn refreshes, never stacks.
-    tiers: [T(1, 0, { damage: 30, splash: 20, radius: 2.5, burn: 4, rate: 0.4 }), T(6, 0, { damage: 40, splash: 27, radius: 2.75, burn: 5, rate: 0.4 }), T(12, 0, { damage: 52, splash: 35, radius: 3, burn: 6, rate: 0.4 })],
+    // Direct 30/40/52 → 24/32/42 (D-balance-3): the seal opener on top of the dart stream made Hinoko win every starter duel.
+    tiers: [T(1, 0, { damage: 24, splash: 20, radius: 2.5, burn: 4, rate: 0.4 }), T(6, 0, { damage: 32, splash: 27, radius: 2.75, burn: 5, rate: 0.4 }), T(12, 0, { damage: 42, splash: 35, radius: 3, burn: 6, rate: 0.4 })],
   },
 ];
 

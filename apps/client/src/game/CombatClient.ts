@@ -15,6 +15,7 @@ import { Hud, type YouPlus } from "../ui/hud.ts";
 import { zoneInfo } from "../ui/zoneLabel.ts";
 import { PhraseWheel } from "../ui/phraseWheel.ts";
 import type { Game } from "./Game.ts";
+import { setStarterMove } from "./PlayerController.ts";
 import { openSaveProgress } from "../ui/account.ts";
 import { closeDeath, type DeathInfo } from "../ui/death.ts";
 import { DeathFlow } from "./deathFlow.ts";
@@ -325,6 +326,7 @@ export class CombatClient {
     if (meState) {
       g.hud.setHp(meState.hp, meState.maxHp);
       g.hud.setIdentity(meState.name, meState.starter, meState.palette, meState.look ?? 0);
+      setStarterMove(meState.starter); // predict the pace and roll the server validates (content/starters.ts)
       // The label shows what the server enforces (its flag); the shared zone function says where.
       const p = g.player.pos;
       g.hud.setZone(zoneInfo(g.bodyId, zoneAt(BODIES[g.bodyId], p.x, p.y, p.z), !!(meState.flags & PF.SAFE)));
