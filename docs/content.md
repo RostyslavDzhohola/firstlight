@@ -384,6 +384,10 @@ are even fights solo (margin 0.95–1.3 with two tonics). Splash damage (`explod
 attacker's level multiplier in code, so splash falls behind direct hits at high level: a candidate for the
 next pass with play data.
 
+**Review round 1** (Codex gpt-6.1-sol, `docs/reviews/2026-11-12-balance-starters-gpt-6.1-sol.md`; D-balance-5…8):
+
+- Melee damage lands on the press (`melee()`); the §2.3 `windup` values are not a delay (D-balance-5). No numbers changed.
+
 ---
 
 ## 3. Enemies and wildlife

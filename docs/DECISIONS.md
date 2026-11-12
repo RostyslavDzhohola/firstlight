@@ -1575,3 +1575,10 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   HP; against the most fragile starter a kill still takes two hits and ≥ 0.75 s. Why: issue #9 asked for
   starters that feel different; trade-offs (every strength paid for) keep any starter from being strictly
   best, which the model checks (no stat dominance, each leads a role, no duel more lopsided than 0.6).
+- **D-balance-5 (2026-11-12):** Melee damage lands on the press, as the server's `melee()` applies it: the
+  catalogue's `windup` (0.05–0.35 s) is no delay anywhere in the game (neither server nor client reads it), and
+  the balance model no longer delays melee hits by it (review finding 3). Why: the model penalised melee in
+  duels and PvE with a delay the game doesn't have. A real windup would need a delayed hit on the server
+  (rewound against the target's position at release) and client prediction, a combat change larger than this
+  pass, and nothing says melee needs slowing: with the delay gone Brother Ash wins 9 of 16 duels (was 8) and
+  every check stays in band. The field stays as data for a future swing animation.

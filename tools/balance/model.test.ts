@@ -25,9 +25,13 @@ describe("weapon timeline (hand-checked against combat.ts consumeAttack)", () =>
     expect(hitTimeline(w("sunbrand"), 1, 6, "plain", 1)[0]!.dmg).toBe(28);
   });
 
-  it("melee hits land after the windup; the primary cadence is the tier rate", () => {
+  it("melee damage lands on the press, as the server's melee() applies it (review finding 3; the windup is no delay)", () => {
     const hits = hitTimeline(w("sunbrand"), 0, 1, "plain", 1);
-    expect(hits.map((h) => +h.t.toFixed(2))).toEqual([0.12, 0.57, 1.02]);
+    expect(w("sunbrand").windup).toBeGreaterThan(0);
+    expect(hits.map((h) => +h.t.toFixed(2))).toEqual([0, 0.45, 0.9]);
+    // A charged heavy too: the axe's pre-charged chop lands at t = 0, the next light one rate later.
+    const axe = hitTimeline(w("axe"), 0, 1, "full", 1);
+    expect(axe.map((h) => [+h.t.toFixed(2), h.dmg])).toEqual([[0, 66], [w("axe").tiers[0].rate, 30]]);
   });
 
   it("charged heavies open and then wait out their cooldown", () => {

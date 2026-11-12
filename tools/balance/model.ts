@@ -44,7 +44,8 @@ const OVERHEAT_S = 1.5;
 /**
  * Every damaging hit one attacker lands on one target that is always in reach, from the first press at
  * t = 0 (pre-drawn bows, pre-charged heavies and a pre-held seal, as §2.5 counts), up to `horizon`.
- * Melee hits land `windup` after the press. Projectile travel time is ignored (point-blank).
+ * Melee damage lands on the press, as the server's `melee()` applies it (D-balance-5: the catalogue's
+ * `windup` is not a delay in the game). Projectile travel time is ignored unless `distance` is set.
  */
 export interface TimelineOptions {
   /** Bow drawn, heavy charged and seal held before the first press (§2.5 counts it so). Default true. */
@@ -62,7 +63,6 @@ export function hitTimeline(def: WeaponDef, tierIndex: number, level: number, po
   const round = (x: number) => Math.max(1, Math.round(x));
   // combat.ts weakMult: every projectile, pellet and hitscan hit on the head takes the tier's headMult (1.5 default).
   const weak = policy === "best" && def.delivery !== "melee" && def.delivery !== "chain" && def.delivery !== "thrown" ? (tier.headMult ?? 1.5) : 1;
-  const windup = def.delivery === "melee" ? (def.windup ?? 0) : 0;
   const seal = def.special ? WEAPONS.find((w) => w.id === def.special) : undefined;
   let t = 0;
   let last = -Infinity;
@@ -82,7 +82,7 @@ export function hitTimeline(def: WeaponDef, tierIndex: number, level: number, po
       continue;
     }
     let dmg = tier.damage;
-    let at = t + windup;
+    let at = t;
     let gap = tier.rate;
     if (def.delivery === "arrow") {
       // Full draws only: the server times the draw from the charge start, restarted after each shot.
@@ -91,29 +91,29 @@ export function hitTimeline(def: WeaponDef, tierIndex: number, level: number, po
     } else if (tier.heavy !== undefined && policy !== "plain" && specialReadyAt <= t) {
       // Charged heavy (axe chop, hammer slam): charge held from the last hit, released when full.
       dmg = tier.heavy;
-      if (t > 0 || !preheld) at = Math.max(t, (t > 0 ? last : 0) + (tier.heavyTime ?? 1)) + windup;
+      if (t > 0 || !preheld) at = Math.max(t, (t > 0 ? last : 0) + (tier.heavyTime ?? 1));
       if (tier.cooldown) specialReadyAt = at + tier.cooldown;
     } else if (def.delivery === "pellets") {
       dmg = tier.damage * (tier.pellets ?? 6);
     } else if (def.delivery === "thrown" && ++thrown > def.stack) break;
     hits.push({ t: at + flight(def) + (def.delivery === "thrown" ? (tier.fuse ?? def.fuse ?? 0) : 0), dmg: def.delivery === "pellets" ? (tier.pellets ?? 6) * round(tier.damage * lvl * weak) : round(dmg * lvl * weak), burn: tier.burn });
     // consumeAttack: magazine + reload, heat cooling one shot per second, the 1.5 s lockout.
-    let ready = at - windup + gap;
+    let ready = at + gap;
     if (mag !== undefined) {
       mag -= 1;
       if (mag <= 0) {
         mag = tier.mag;
-        ready = Math.max(ready, at - windup + (tier.reload ?? 1.5));
+        ready = Math.max(ready, at + (tier.reload ?? 1.5));
       }
     }
     if (tier.heat !== undefined) {
-      heat = Math.max(0, heat - (last === -Infinity ? 0 : at - windup - last)) + 1;
+      heat = Math.max(0, heat - (last === -Infinity ? 0 : at - last)) + 1;
       if (heat >= tier.heat) {
         heat = 0;
-        ready = Math.max(ready, at - windup + OVERHEAT_S);
+        ready = Math.max(ready, at + OVERHEAT_S);
       }
     }
-    last = at - windup;
+    last = at;
     t = ready;
   }
   return hits.sort((a, b) => a.t - b.t);
