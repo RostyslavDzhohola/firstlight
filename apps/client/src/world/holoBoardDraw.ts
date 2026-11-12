@@ -9,13 +9,15 @@
 import { fitText, type HoloPage } from "./holoBoardModel.ts";
 
 /** One page on the canvas (px), its side margin, where names start and the gap kept before the value. */
-export const HOLO_PAGE = { w: 512, h: 672, margin: 34, nameIndent: 46, gap: 16 } as const;
+export const HOLO_PAGE = { w: 512, h: 672, margin: 30, nameIndent: 58, gap: 14 } as const;
 /** The most of a row's width its right-hand value may take (the name keeps the rest). */
 export const HOLO_VALUE_SHARE = 0.5;
 
 const GOLD = "#ffd27a";
 const INK = "#d9f8ff";
 const DIM = "#6fb9cc";
+/** Section headings (the column labels): read from the pad, so brighter than the rules and ranks. */
+const HEAD = "#a9ecfb";
 const SANS = "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif";
 const MONO = "ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
 
@@ -50,26 +52,28 @@ function drawPage(g: Ctx, x0: number, page: HoloPage) {
   g.clip();
   g.textBaseline = "alphabetic";
   // Title, letter-spaced.
-  g.font = `800 46px ${SANS}`;
+  g.font = `800 56px ${SANS}`;
   g.fillStyle = GOLD;
-  centred(g, page.title.split("").join("  "), x0, 66);
-  g.font = `600 25px ${SANS}`;
+  centred(g, page.title.split("").join(" "), x0, 64);
+  g.font = `700 31px ${SANS}`;
   g.fillStyle = INK;
-  centred(g, page.subtitle.split("").join(" "), x0, 104);
+  centred(g, page.subtitle, x0, 104);
   g.fillStyle = DIM;
-  g.fillRect(L, 122, R - L, 2);
-  let y = 122;
-  const rowH = page.sections.length > 1 ? 50 : 56;
+  g.fillRect(L, 119, R - L, 3);
+  let y = 120;
+  // Few, bold rows (D-polish-3): five on a one-table page, three a table on the other; type scales with the row.
+  const rowH = page.sections.length > 1 ? 62 : 84;
+  const nameF = Math.round(rowH * 0.52), valueF = Math.round(rowH * 0.42), rankF = Math.round(rowH * 0.36), noteF = Math.round(rowH * 0.25);
   for (const s of page.sections) {
     y += 34;
-    g.font = `600 18px ${MONO}`;
-    g.fillStyle = DIM;
+    g.font = `700 25px ${MONO}`;
+    g.fillStyle = HEAD;
     g.textAlign = "left";
-    fitted(g, s.heading, L, y, R - L, y - 22, 30);
+    fitted(g, s.heading, L, y, R - L, y - 26, 34);
     y += 12;
     if (!s.rows.length) {
       y += 44;
-      g.font = `500 23px ${SANS}`;
+      g.font = `600 32px ${SANS}`;
       g.fillStyle = INK;
       centred(g, s.empty, x0, y);
       y += 34;
@@ -79,13 +83,13 @@ function drawPage(g: Ctx, x0: number, page: HoloPage) {
       const r = s.rows[i]!;
       y += rowH;
       const top = i === 0;
-      const base = y - (r.note ? 8 : 0);
+      const base = y - (r.note ? noteF * 0.75 : 0);
       g.textAlign = "left";
-      g.font = `600 22px ${MONO}`;
+      g.font = `700 ${rankF}px ${MONO}`;
       g.fillStyle = top ? GOLD : DIM;
       fitted(g, r.rank, L, base, nameIndent - 6, y - rowH + 6, rowH);
       // The value first: its measured width is the column the name must stay out of.
-      g.font = `700 24px ${MONO}`;
+      g.font = `700 ${valueF}px ${MONO}`;
       const value = fitText(r.value, (R - L) * HOLO_VALUE_SHARE, (t) => g.measureText(t).width);
       const valueW = g.measureText(value).width;
       g.fillStyle = top ? GOLD : INK;
@@ -94,20 +98,20 @@ function drawPage(g: Ctx, x0: number, page: HoloPage) {
       g.textAlign = "left";
       const nameX = L + nameIndent;
       const nameW = R - valueW - gap - nameX;
-      g.font = `${top ? 700 : 600} 30px ${SANS}`;
+      g.font = `${top ? 800 : 700} ${nameF}px ${SANS}`;
       fitted(g, r.name, nameX, base, nameW, y - rowH + 6, rowH);
       if (r.note) {
-        g.font = `500 15px ${SANS}`;
-        g.fillStyle = DIM;
-        fitted(g, r.note, nameX - 1, y + 10, nameW, y - 6, 22);
+        g.font = `600 ${noteF}px ${SANS}`;
+        g.fillStyle = HEAD;
+        fitted(g, r.note, nameX - 1, y + noteF * 0.55, nameW, y - noteF * 0.6, noteF * 1.5);
       }
     }
     y += 18;
   }
   g.fillStyle = DIM;
-  g.fillRect(L, PAGE_H - 58, R - L, 2);
-  g.font = `600 18px ${MONO}`;
-  centred(g, page.footer, x0, PAGE_H - 28);
+  g.fillRect(L, PAGE_H - 50, R - L, 2);
+  g.font = `600 20px ${MONO}`;
+  centred(g, page.footer, x0, PAGE_H - 20);
   g.restore();
 }
 

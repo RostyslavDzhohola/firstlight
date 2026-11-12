@@ -10,8 +10,8 @@ import { GLEAMS } from "@firstlight/shared/content/gleams";
 
 export const HOLO_TITLE = "FIRSTLIGHT";
 /** Rows a page's table shows. */
-export const HOLO_ROWS = 8;
-export const HOLO_MEDAL_ROWS = 4;
+export const HOLO_ROWS = 5;
+export const HOLO_MEDAL_ROWS = 3;
 /** The hunt's block sits under the medal table: three rows fit above the footer. */
 export const HOLO_HUNT_ROWS = 3;
 /** Seconds a page stays up before the board flips. */
@@ -119,19 +119,19 @@ export function holoPages(data: HomeData | null, hunt: HoloHunt | null = null): 
     {
       title: HOLO_TITLE,
       subtitle: "TOP TRAVELLERS",
-      sections: [{ heading: "HIGHEST LEVEL · THIS LIFE", rows: levels, empty: data ? "No names yet. Yours could be the first." : "Waiting for the tally…" }],
+      sections: [{ heading: "HIGHEST LEVEL · THIS LIFE", rows: levels, empty: data ? "Be the first on the board" : "Waiting for the tally…" }],
       footer,
     },
     {
       title: HOLO_TITLE,
       subtitle: "HALL OF FIRSTS",
       sections: [
-        { heading: "MOST MEDALS", rows: medals, empty: data ? "No medals won yet." : "Waiting for the tally…" },
+        { heading: "MOST MEDALS", rows: medals, empty: data ? "No medals yet" : "Waiting for the tally…" },
         {
           // The hunt's lines come from another system (and its names from players): cleaned like the rest.
           heading: cleanText(hunt?.heading ?? "") || "THE HUNT",
           rows: (hunt?.rows ?? []).slice(0, HOLO_HUNT_ROWS).map((r) => ({ rank: cleanText(r.rank), name: clipName(r.name), value: cleanText(r.value), note: cleanText(r.note) })),
-          empty: cleanText(hunt?.empty ?? "") || "Three trials. Sealed, for now.",
+          empty: cleanText(hunt?.empty ?? "") || "Three trials, sealed",
         },
       ],
       footer,

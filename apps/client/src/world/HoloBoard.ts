@@ -27,7 +27,7 @@ import { HoloFeed } from "./holoFeed.ts";
 export const HOLO_AT: readonly [number, number] = [7.2, -12.6];
 export const HOLO_FACES: readonly [number, number] = [0, 0];
 /** The panel: width, height and how high its lower edge floats (m). */
-export const HOLO_PANEL = { w: 5.0, h: 6.56, lift: 2.7 } as const;
+export const HOLO_PANEL = { w: 4.4, h: 5.775, lift: 1.55 } as const;
 const TINT = 0x7fe9ff;
 
 /** Yaw (degrees, townFrame's: 0 faces south, counter-clockwise from above) that turns a front at `at` towards `to`. */
@@ -95,18 +95,19 @@ export class HoloBoard implements ClientSystem {
       const tear = fract(sin(row.mul(91.7).add(floor(time.mul(24)).mul(13.1))).mul(43758.5453)).sub(0.5).mul(0.12).mul(this.uFlip);
       const ux = u.x.add(tear).clamp(0, 1);
       const ink = texture(this.tex, vec2(ux.add(this.uPage).mul(0.5), u.y)).rgb.mul(select(frontFacing, float(1), float(0)));
-      const lines = sin(u.y.mul(Math.PI * 2 * 150)).mul(0.14).add(0.86);
+      const lines = sin(u.y.mul(Math.PI * 2 * 150)).mul(0.07).add(0.93);
       const sweep = smoothstep(0.05, 0.0, abs(fract(u.y.add(time.mul(0.07))).sub(0.5)));
       const ex = min(u.x, float(1).sub(u.x)).mul(w);
       const ey = min(u.y, float(1).sub(u.y)).mul(h);
       const d = min(ex, ey);
       const frame = smoothstep(0.075, 0.04, d).mul(smoothstep(0.0, 0.02, d));
       const inkMax = max(ink.r, max(ink.g, ink.b));
-      const back = tint.mul(0.07);
+      // A dark, nearly solid backing (D-polish-3): the ink reads against it whatever stands behind the panel.
+      const back = vec3(0.004, 0.016, 0.03);
       // By night the lamplit town is dim: a little more punch, never a white-out by day.
-      const punch = mix(float(1.75), float(2.1), atmo.lamps);
+      const punch = mix(float(1.9), float(2.2), atmo.lamps);
       panelMat.colorNode = ink.mul(punch).add(tint.mul(frame.mul(1.5))).add(tint.mul(sweep.mul(0.1))).add(back).mul(lines).mul(flick);
-      panelMat.opacityNode = max(max(inkMax, frame), float(0.5)).mul(float(1).sub(this.uFlip.mul(0.25))).mul(smoothstep(0.0, 0.02, d));
+      panelMat.opacityNode = max(max(inkMax, frame), float(0.86)).mul(float(1).sub(this.uFlip.mul(0.25))).mul(smoothstep(0.0, 0.02, d));
     }
     const panel = new THREE.Mesh(new THREE.PlaneGeometry(w, h), panelMat);
     panel.name = "holo_panel";
@@ -120,11 +121,11 @@ export class HoloBoard implements ClientSystem {
     {
       const v = positionLocal.y.div(coneH).add(0.5);
       const rays = sin(uv().x.mul(Math.PI * 2 * 14).add(time.mul(0.6))).mul(0.25).add(0.75);
-      coneMat.colorNode = tint.mul(mix(float(0.5), float(0.05), v).mul(rays).mul(flick).mul(mix(float(0.6), float(1.1), atmo.lamps)));
+      coneMat.colorNode = tint.mul(mix(float(0.32), float(0.03), v).mul(rays).mul(flick).mul(mix(float(0.6), float(1.1), atmo.lamps)));
     }
     const cone = (this.cone = new THREE.Mesh(new THREE.CylinderGeometry(1, 0.09, coneH, 24, 1, true), coneMat));
     cone.name = "holo_cone";
-    cone.scale.set(w / 2, 1, 0.5);
+    cone.scale.set(w / 2, 1, 0.16); // thin front to back: a reader in front of the board stands clear of it
     cone.position.y = 0.42 + coneH / 2;
     cone.renderOrder = 4;
 
