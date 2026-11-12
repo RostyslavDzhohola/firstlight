@@ -10,6 +10,8 @@ export interface TrialSeen {
   msg: TrialMsg;
   /** When it arrived, on the clock listenTrials was given (the game's synced server clock, trialNow()). */
   at: number;
+  /** When this attempt started (the first message of a run of running/paused ones for one mission): an untimed collect's clock counts up from it. Defaults to `at`. */
+  since?: number;
 }
 
 interface MessageSource {
@@ -36,8 +38,11 @@ export function listenTrials(room: MessageSource, now: () => number = () => Date
   const mine = ++generation;
   latest = null;
   const off = room.onMessage("trial", (m) => {
-    if (mine !== generation) return;
-    latest = { msg: m, at: now() };
+    if (mine !== generation || !m) return;
+    const at = now();
+    const prev = latest;
+    const cont = prev && prev.msg.id === m.id && (prev.msg.state === "running" || prev.msg.state === "paused") && m.state !== "idle";
+    latest = { msg: m, at, since: cont ? (prev.since ?? prev.at) : at };
     for (const fn of listeners) fn(latest);
   });
   if (typeof off === "function") unbind = off as () => void;
@@ -110,7 +115,9 @@ export function trialHud(t: TrialSeen | null, now: number, linger = 4000): Trial
   if (msg.state === "failed") progress = msg.reason === "time" ? "Out of time" : msg.reason === "died" ? "You fell" : msg.reason === "left" ? "You left the ring" : "Failed";
   if (msg.state === "done") progress = `${progress} · complete`;
   const timed = msg.limitMs > 0 && msg.kind !== "defend";
-  const clock = msg.kind === "defend" ? formatClock(left) : timed ? formatClock(left) : "";
+  // An untimed collect counts up from its start (D-polish-ux-2), so every attempt shows a clock.
+  const elapsed = formatClock(Math.floor(Math.max(0, (msg.state === "running" ? now : t.at) - (t.since ?? t.at)) / 1000) * 1000);
+  const clock = msg.kind === "defend" ? formatClock(left) : timed ? formatClock(left) : msg.state === "failed" ? "" : elapsed;
   const tone: TrialHud["tone"] = msg.state === "done" ? "done" : msg.state === "failed" ? "failed" : msg.state === "paused" ? "paused" : msg.limitMs > 0 && left < 10_000 && msg.kind !== "defend" ? "urgent" : "normal";
   return { title: def.name, progress, clock, tone };
 }

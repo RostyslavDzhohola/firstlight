@@ -115,6 +115,8 @@
 .fl-mission.is-tracked .fl-mission__r { color: var(--hero-gold); }
 .fl-mission.is-done b { color: var(--fog-3); text-decoration: line-through; text-decoration-color: rgba(255, 255, 255, .35); }
 .fl-mission.is-done .fl-mission__st { border-color: var(--ok); background: var(--ok); }
+.fl-missions__more { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: var(--sp-2); width: 100%; padding: calc(.38 * var(--u)) 0 0; border-top: 1px solid rgba(196, 241, 255, .1); font: 600 var(--t-xs)/1.2 var(--font-display); letter-spacing: .06em; color: var(--photon); cursor: pointer; }
+.fl-missions__more:focus-visible { outline: 1px solid var(--photon); outline-offset: 2px; }
 
 .fl-toasts { width: 100%; display: flex; flex-direction: column; gap: calc(.5 * var(--u)); align-items: flex-end; z-index: var(--z-toast); }
 .fl-toast { display: flex; align-items: center; gap: calc(.7 * var(--u)); max-width: 100%; padding: calc(.55 * var(--u)) calc(.8 * var(--u)) calc(.55 * var(--u)) calc(.6 * var(--u)); animation: fl-pop .45s var(--ease-snap) both; }

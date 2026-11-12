@@ -21,6 +21,8 @@ import { ShopPanel } from "../ui/shop.ts";
 import { QuestWorld } from "../world/QuestWorld.ts";
 import type { Game } from "./Game.ts";
 import { HOTKEYS, hits } from "./keys.ts";
+import { trialSeen } from "./trialState.ts";
+import { worldPrompt } from "./worldPrompt.ts";
 import type { ClientSystem } from "./systems.ts";
 
 /** Survives body changes: the latest Hall of Firsts and a staged scene waiting for travel to finish. */
@@ -76,7 +78,9 @@ export class QuestClient implements ClientSystem {
     this.journal = new JournalPanel(game);
     this.keypad = new KeypadPanel(game);
     this.map = new MapPanel(game);
-    this.tracker = new MissionTracker(game.hud);
+    this.tracker = new MissionTracker(game.hud, () => {
+      if (!Panel.current) this.journal.show("missions");
+    });
     this.console = new AdminConsole(game);
     window.addEventListener("keydown", this.onKey);
 
@@ -154,9 +158,7 @@ export class QuestClient implements ClientSystem {
   }
 
   private promptFor(o: WorldObjectDef): string {
-    if (o.look === "keeper") return `E — Trade with ${SHOP_SPOT_BY_ID.get(o.id)?.keeper ?? o.name}`;
-    if (o.look === "guide" || o.look === "curator") return `E — Talk to ${o.name}`;
-    return `E — ${o.name}`;
+    return worldPrompt(o, this.game.hud.you);
   }
 
   private use(o: WorldObjectDef) {
@@ -176,7 +178,8 @@ export class QuestClient implements ClientSystem {
     const you = g.hud.you;
     const active = new Set((you?.missions ?? []).filter((m) => !m.done).map((m) => m.id));
     this.world.update(dt, { activeMissions: active, cosmeticsExtras: !!you?.cosmeticsExtras, gleams: you?.gleamVault ? 0 : gleamsWon(you?.missions ?? []) });
-    this.tracker.update(you, this.game.bodyId);
+    const trial = trialSeen()?.msg;
+    this.tracker.update(you, this.game.bodyId, trial && (trial.state === "running" || trial.state === "paused") ? trial.id : null);
     if (you !== this.lastYou) {
       this.lastYou = you;
       if (Panel.current && Panel.current !== this.map && Panel.current !== this.keypad) Panel.current.refresh();
@@ -253,3 +256,4 @@ export class QuestClient implements ClientSystem {
 export function createQuestClient(game: Game): ClientSystem | null {
   return game.net.room ? new QuestClient(game) : null;
 }
+
