@@ -11,9 +11,10 @@
 
 import * as THREE from "three/webgpu";
 import {
-  abs, acos, cameraPosition, clamp, dot, exp, float, floor, Fn, fract, hash, length, max, min, mix, normalize, output, positionWorld,
+  abs, acos, cameraPosition, clamp, cross, dot, exp, float, floor, Fn, fract, hash, If, length, max, min, mix, normalize, output, positionWorld,
   positionWorldDirection, pow, renderGroup, select, sin, smoothstep, sqrt, texture, time, uniform, vec2, vec3, vec4,
 } from "three/tsl";
+import { detailNoiseTexture } from "./noiseTexture.ts";
 import type { BodyLook } from "./looks.ts";
 import { LUT_H, LUT_SLICES, SKY_MID_E, skyLutTexture } from "./skyLut.ts";
 import { SunLight } from "three/addons/lights/SunLight.js";
@@ -84,6 +85,13 @@ export const atmo = {
   starCool: col(0xbfd9ff).setGroup(renderGroup),
   starDensity: uniform(0.5).setGroup(renderGroup),
   starGain: uniform(1).setGroup(renderGroup),
+  // ---- the second pass (D-gfx-worlds-6), driven per frame by environment.ts; 0 = the shader skips the term
+  /** Sun shafts and the wide glow round a low sun (dawn, dusk), in the sky and the haze. */
+  shafts: uniform(0).setGroup(renderGroup),
+  /** The low mist layer over water and in valleys: amount, colour, and the height (m above the water) where it has thinned to a third. */
+  mist: uniform(0).setGroup(renderGroup),
+  mistColor: col(0xffffff).setGroup(renderGroup),
+  mistTop: uniform(8).setGroup(renderGroup),
 };
 
 /** Single-scattering radiance from the per-body sky-view LUT atlas (see skyLut.ts): two slices by
@@ -106,21 +114,65 @@ const lutSky = Fn(([dir]: [any]) => {
   return mix(a, b, sl.sub(s0));
 });
 
-/** Sparse twinkling stars (background only), above the horizon, scaled by atmo.stars. */
+/**
+ * Stars (background only), above the horizon, scaled by atmo.stars: sparse bright ones that
+ * twinkle, a second layer of faint ones, and a pale river of star dust across the sky (one noise
+ * tap). Skipped whole by day.
+ */
 const starField = Fn(([dir]: [any]) => {
-  const p = dir.mul(150.0);
-  const cell: any = floor(p);
-  const seed = cell.x.mul(7.0).add(cell.y.mul(157.0)).add(cell.z.mul(113.0));
-  const h = hash(seed);
-  const j = vec3(hash(seed.add(1.7)), hash(seed.add(3.1)), hash(seed.add(5.3))).mul(0.6).add(0.2);
-  const d = length(fract(p).sub(j));
-  // density 0.5 lights 0.45% of the cells (the look before per-body skies); 1 about three times as many.
-  const on = smoothstep(float(0.999).sub(atmo.starDensity.mul(0.007)), 1.0, h);
-  const core = smoothstep(0.2, 0.0, d);
-  const twinkle = sin(time.mul(2.7).add(h.mul(97.0))).mul(0.3).add(0.7);
-  const above = smoothstep(0.02, 0.2, dot(dir, atmo.up));
-  const tint = mix(atmo.starWarm, atmo.starCool, hash(seed.add(9.1)));
-  return tint.mul(on.mul(core).mul(twinkle).mul(above).mul(atmo.stars).mul(atmo.starGain).mul(6.0));
+  const out: any = vec3(0).toVar();
+  If(atmo.stars.greaterThan(0.002), () => {
+    const layer = (scale: number, density: any, size: number, salt: number): any => {
+      const p = dir.mul(scale);
+      const cell: any = floor(p);
+      const seed = cell.x.mul(7.0).add(cell.y.mul(157.0)).add(cell.z.mul(113.0)).add(salt);
+      const h = hash(seed);
+      const j = vec3(hash(seed.add(1.7)), hash(seed.add(3.1)), hash(seed.add(5.3))).mul(0.6).add(0.2);
+      const d = length(fract(p).sub(j));
+      const on = smoothstep(float(0.999).sub(density), 1.0, h);
+      const twinkle = sin(time.mul(2.7).add(h.mul(97.0))).mul(0.3).add(0.7);
+      const tint = mix(atmo.starWarm, atmo.starCool, hash(seed.add(9.1)));
+      return tint.mul(on.mul(smoothstep(size, 0.0, d)).mul(twinkle));
+    };
+    // density 0.5 lights 0.45% of the cells (the look before per-body skies); 1 about three times as many.
+    const bright = layer(150.0, atmo.starDensity.mul(0.007), 0.2, 0.0).mul(6.0);
+    const faint = layer(310.0, atmo.starDensity.mul(0.02), 0.24, 31.0).mul(1.6);
+    // The river: a band round the sky, tilted against the horizon, broken up by the coarse noise.
+    const axis = normalize(atmo.up.mul(0.42).add(vec3(0.61, 0.2, -0.76)));
+    const band = exp(dot(dir, axis).mul(dot(dir, axis)).mul(-9.0));
+    const n = (texture(detailNoiseTexture(), dir.xz.mul(1.3).add(dir.y.mul(0.7))) as any).level(0);
+    const dust = mix(atmo.starCool, atmo.starWarm, n.g).mul(band.mul(smoothstep(0.32, 0.75, n.g.mul(0.65).add(n.r.mul(0.35))).mul(0.085)));
+    const above = smoothstep(0.02, 0.2, dot(dir, atmo.up));
+    out.assign(bright.add(faint).add(dust).mul(above.mul(atmo.stars).mul(atmo.starGain)));
+  });
+  return out;
+});
+
+/**
+ * Low-sun light toward `dir` (additive): shafts fanning out of the sun and a wide warm glow along
+ * the horizon under it. A term of the sky and of the haze colour, not a pass: the streaks are one
+ * tap of the noise texture round a ring about the sun's axis (so they radiate from the sun and
+ * close seamlessly), fading with the angle from it. Skipped whole when atmo.shafts is 0 (most of the day).
+ */
+export const sunShafts = Fn(([dir]: [any]) => {
+  const out: any = vec3(0).toVar();
+  If(atmo.shafts.greaterThan(0.002), () => {
+    const fwd = max(dot(dir, atmo.sunDir), 0.0);
+    const t0 = normalize(cross(atmo.sunDir, atmo.up).add(vec3(0.0001, 0.0002, 0.0003)));
+    const t1 = cross(atmo.sunDir, t0);
+    const q = vec2(dot(dir, t0), dot(dir, t1));
+    const ring = q.div(max(length(q), 0.0001));
+    const drift = time.mul(0.004);
+    const n = (texture(detailNoiseTexture(), ring.mul(0.31).add(vec2(drift.add(0.5), 0.5))) as any).level(0);
+    const streak = smoothstep(0.42, 0.72, n.g.mul(0.7).add(n.r.mul(0.3)));
+    const e = dot(dir, atmo.up);
+    const cone = pow(fwd, 6.0);
+    // No shafts on the disc itself (the halo is there) or far below the horizon.
+    const rays = streak.mul(cone).mul(float(1).sub(pow(fwd, 90.0))).mul(smoothstep(-0.25, 0.02, e)).mul(0.5);
+    const glow = pow(fwd, 2.5).mul(exp(abs(e).mul(-5.0))).mul(0.3);
+    out.assign(atmo.sunColor.mul(rays.add(glow).add(cone.mul(0.1)).mul(atmo.shafts)));
+  });
+  return out;
 });
 
 /** Sky radiance (linear) towards a unit direction. `disc` adds the HDR sun disc. */
@@ -157,7 +209,7 @@ export const skyColor = Fn(([dir, disc]: [any, any]) => {
  * it (the cloud layer, clouds.ts): the clouds hide the stars and the sun disc behind them.
  */
 export function skyBackgroundNode(wrap?: (dir: any, sky: any) => any): THREE.Node {
-  const sky = skyColor(positionWorldDirection, float(1)).add(starField(positionWorldDirection));
+  const sky = skyColor(positionWorldDirection, float(1)).add(starField(positionWorldDirection)).add(sunShafts(normalize(positionWorldDirection)));
   return wrap ? wrap(normalize(positionWorldDirection), sky) : sky;
 }
 
@@ -184,7 +236,7 @@ export const fogColor = Fn(([dir]: [any]) => {
   const dirH = normalize(dir.sub(atmo.up.mul(e)).add(atmo.up.mul(clamp(e, -0.05, 0.3))));
   const sky = skyColor(dirH, float(0));
   const fwd = max(dot(dir, atmo.sunDir), 0.0);
-  const c = sky.add(atmo.sunColor.mul(pow(fwd, 8.0).mul(atmo.inscatter)));
+  const c = sky.add(atmo.sunColor.mul(pow(fwd, 8.0).mul(atmo.inscatter))).add(sunShafts(dir).mul(0.8));
   // Dust storms: the haze takes the dust colour (lit by the sky's brightness).
   const lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
   return mix(c, atmo.fogTint.mul(lum.mul(1.6).add(0.02)), atmo.fogTintAmt);
@@ -201,7 +253,26 @@ export function radialFogNode(): THREE.Node {
     const lum = dot(haze, vec3(0.2126, 0.7152, 0.0722));
     const air = atmo.aerial.mul(lum.mul(1.35).add(0.02));
     const c = mix(haze, air, atmo.aerialAmt.mul(float(1).sub(smoothstep(0.45, 0.96, f))));
-    return vec4(mix(output.rgb, c, f), output.a);
+    const rgb: any = mix(output.rgb, c, f).toVar();
+    // The mist layer: a second, low fog that lies on the water and pools in the ground near its
+    // level, thinning to a third every `mistTop` metres up. Integrated along the view ray like the
+    // height fog above; lit by the haze it lies in (so the low sun's glow and shafts colour it).
+    If(atmo.mist.greaterThan(0.002), () => {
+      const toP = positionWorld.sub(cameraPosition);
+      const sea = atmo.planetR.add(atmo.waterLevel);
+      const k = float(1.1).div(atmo.mistTop);
+      const hC = max(length(cameraPosition).sub(sea), -2.0);
+      const hP = max(length(positionWorld).sub(sea), -2.0);
+      const eC = exp(k.mul(hC).negate());
+      const eP = exp(k.mul(hP).negate());
+      const dh = hP.sub(hC);
+      const avg = select(abs(dh.mul(k)).greaterThan(0.001), eC.sub(eP).div(k.mul(dh)), eC);
+      const fm = float(1).sub(exp(atmo.mist.mul(0.02).mul(length(toP)).mul(avg).negate())).min(0.92);
+      const lum = dot(haze, vec3(0.2126, 0.7152, 0.0722));
+      const mc = mix(haze, atmo.mistColor.mul(lum.mul(1.25).add(0.02)), 0.6);
+      rgb.assign(mix(rgb, mc, fm));
+    });
+    return vec4(rgb, output.a);
   })();
 }
 

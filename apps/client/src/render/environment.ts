@@ -19,7 +19,9 @@ import type { ResolvedSettings } from "./quality.ts";
 import type { RenderCtx } from "./renderer.ts";
 import { sliceFor } from "./skyLut.ts";
 import { terrainUniforms } from "./terrainMaterial.ts";
+import { vegetationFx } from "./vegetationAssets.ts";
 import { WeatherFx } from "./weather.ts";
+import { WORLD_LOOKS } from "./worldLooks.ts";
 
 export interface WeatherLook {
   /** Cloud cover 0..1: dims the sun, greys the sky, hides stars. */
@@ -180,6 +182,8 @@ export class Environment {
     hemiSky: new THREE.Color(), hemiGround: new THREE.Color(), nightHemiSky: new THREE.Color(), nightHemiGround: new THREE.Color(),
   };
   private drops = { amount: 0, kind: 0, fall: 9, wind: 0, len: 0.5, width: 0.012, alpha: 0 };
+  /** Fireflies showing now 0..1 (night × the planet's own amount, none in rain). */
+  private glowAmount = 0;
   private readonly angles = { elev: 0, az: 0 };
   /** The body's sun elevation range (scattering LUT slices). */
   private readonly lutRange: [number, number] = [0, 1];
@@ -203,6 +207,8 @@ export class Environment {
   applySettings(s: ResolvedSettings) {
     this.settings = s;
     this.fx.setCapacity(s.weatherDrops);
+    this.fx.setFireflies(s.on.fireflies ? s.fireflies : 0);
+    vegetationFx.value = s.on.foliagefx ? 1 : 0;
   }
 
   /** A new body (or copy): the look and lights to drive. */
@@ -396,6 +402,17 @@ export class Environment {
     atmo.glowBoost.value = 1 + 0.75 * night + 0.25 * cloud;
     setCloudWeather(cloud);
     atmo.lamps.value = lampLight(night, dusk);
+    // ---- the second pass: low-sun shafts and glow, ground mist, fireflies (uniforms; zero = the shader skips them)
+    const air = WORLD_LOOKS[this.body].air;
+    // Dawn and dusk both: the sun low and up. Hollowmere's sun is low all day, so it always has a little.
+    const lowSun = smooth(0.5, 0.1, elev) * smooth(-0.07, 0.03, elev);
+    atmo.shafts.value = on.shafts ? lowSun * air.shafts * (1 - cloud) * (1 - a * wl.dust) : 0;
+    // Mist: what the planet always carries, more in the cool of dawn (the morning half of the low sun) and in rain.
+    const morning = this.dayT < 0.5 ? smooth(0.42, 0.06, elev) * smooth(-0.12, 0.0, elev) : 0;
+    atmo.mist.value = on.mist ? Math.min(1.5, air.mist + air.mistDawn * morning + 0.35 * a * wl.wet) : 0;
+    atmo.mistColor.value.setHex(air.mistColor);
+    atmo.mistTop.value = air.mistTop;
+    this.glowAmount = on.fireflies ? night * air.fireflies * (1 - Math.min(1, a * wl.drops * 1.5)) : 0;
 
     // ---- fog / haze
     atmo.fogDensity.value = look.fogDensity * lerp(1, wl.fogMul, a) * (1 + night * 0.25);
@@ -503,6 +520,7 @@ export class Environment {
       if (this.settings.on.weather || this.weatherOv) this.fx.strike(camera, s.az, s.distance, s.seed);
     }
     this.fx.updateBolt(camera, atmo.flash.value * 1.6);
+    this.fx.updateFireflies(camera, dt, this.glowAmount, WORLD_LOOKS[this.body].air);
   }
 
   private readonly describedFor = { body: "", mins: -1, kind: "", pct: -1 };

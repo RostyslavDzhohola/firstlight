@@ -284,6 +284,10 @@ for (const backendName of ["webgpu", "webgl2"] as const) {
       fx.setCapacity(64);
       expectClean(build(renderer, scene, camera, fx.drops));
       expectClean(build(renderer, scene, camera, fx.bolt));
+      // The second pass: fireflies and spores (one more instanced draw, at night).
+      fx.setFireflies(64);
+      expect(fx.flies.material.name).toBe("fireflies");
+      expectClean(build(renderer, scene, camera, fx.flies));
     });
 
     it("sky planets, halos and the sky background", () => {

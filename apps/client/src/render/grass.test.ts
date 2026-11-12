@@ -55,6 +55,32 @@ describe("grass backlog", () => {
     grass.dispose();
   });
 
+  it("draws every clump of a near cell and only the head of a far cell's list (meadow thinning)", () => {
+    const grass = new GrassSystem(body.radius, body.chunksPerFace * CHUNK_QUADS);
+    grass.applySettings(resolveSettings("medium", false, true, emptyStored(), new Set()));
+    const ch = chunk(0, 3, 3);
+    const cam = ch.center.clone().setLength(ch.center.length() + 2);
+    grass.update(cam, [ch], 1000, 1000);
+    type C = { count: number; geo: THREE.InstancedBufferGeometry; center: THREE.Vector3; meta: THREE.InstancedBufferAttribute };
+    const all = () => [...(grass as any).cells.values()] as C[];
+    // Stand in the middle of a cell that grew grass and look again.
+    const home = all().find((c) => c.count > 50)!;
+    cam.copy(home.center).setLength(home.center.length() + 1.5);
+    grass.update(cam, [ch], 2000, 1000);
+    const cells = all();
+    const near = cells.filter((c) => c.center.distanceTo(cam) < 6 && c.count > 0);
+    const far = cells.filter((c) => c.center.distanceTo(cam) > 36 && c.count > 50);
+    expect(near.length).toBeGreaterThan(0);
+    expect(far.length).toBeGreaterThan(0);
+    for (const c of near) expect(c.geo.instanceCount).toBe(c.count);
+    for (const c of far) expect(c.geo.instanceCount).toBeLessThan(c.count * 0.8);
+    // Ranks run 0..1 in draw order, so the tail a far cell stops drawing is the part the shader has shrunk away.
+    const m = near[0]!.meta.array as Float32Array;
+    for (let i = 1; i < near[0]!.count; i++) expect(m[i * 4 + 3]!).toBeGreaterThan(m[(i - 1) * 4 + 3]!);
+    expect(m[(near[0]!.count - 1) * 4 + 3]!).toBeLessThanOrEqual(1);
+    grass.dispose();
+  });
+
   it("has no backlog with the grass off", () => {
     const grass = new GrassSystem(body.radius, body.chunksPerFace * CHUNK_QUADS);
     grass.applySettings(resolveSettings("medium", false, true, emptyStored(), new Set(["grass"])));
