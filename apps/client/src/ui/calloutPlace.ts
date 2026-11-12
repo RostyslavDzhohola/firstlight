@@ -76,9 +76,15 @@ export function placeCallout(ndc: { x: number; y: number; z: number }, w: number
   const sy = dy > 0 ? (h - MARGIN.bottom - cy) / dy : dy < 0 ? (MARGIN.top - cy) / dy : Infinity;
   const s = Math.min(sx, sy);
   let ex = cx + dx * s;
-  const ey = cy + dy * s;
+  let ey = cy + dy * s;
   if (avoid && ex >= avoid.left - GAP && ex <= avoid.right + GAP && ey >= avoid.top - GAP && ey <= avoid.bottom + GAP) ex = avoid.right + GAP;
-  return { x: ex, y: ey, edge: true, angle: Math.atan2(dy, dx), flip: flipBeside(ex, w, box, avoid) };
+  const flip = flipBeside(ex, w, box, avoid);
+  // A pinned label stays off the kept-clear areas too (a target straight up the screen pins it at
+  // the top, where the trial strip and banners are): it drops below the one it would cover.
+  const left = flip ? ex - ARROW_LABEL - box.w : ex;
+  const covered = keepClear.find((k) => overlaps({ left, top: ey - box.h / 2, right: left + ARROW_LABEL + box.w, bottom: ey + box.h / 2 }, k));
+  if (covered) ey = clamp(covered.bottom + GAP + box.h / 2, MARGIN.top, h - MARGIN.bottom);
+  return { x: ex, y: ey, edge: true, angle: Math.atan2(dy, dx), flip };
 }
 
 /** Label left of the arrow only when it doesn't fit on the right and the left side is clear of the panel. */

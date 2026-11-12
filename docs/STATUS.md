@@ -35,8 +35,9 @@ Sonnet 5.5. What it adds:
   hand, cast all four spells, died and rose, and started T2 and T3; its findings (the T2 beacon whiting
   out the screen, rings invisible from the side, a prompt behind the death card) are fixed (D-polish-8…10);
   the beacon was re-shot in a browser; the rings' new light posts were not caught in a shot (two tries
-  on the hill: the next ring was behind the slope each time). Seen in those shots: the mission pointer's
-  label can still sit on the trial strip's clock when the target is straight up the screen.
+  on the hill: the next ring was behind the slope each time). Seen in those shots and fixed: the mission
+  pointer's label sat on the trial strip's clock when the target was straight up the screen (a pinned
+  label now drops below the top banners; unit-tested, not re-shot).
 - **Before a deploy:** client first, then the server (protocol 6; migrations 8–10 run on boot, back up
   `game.db`); set `LOADTEST_ENABLED` only for load tests and check `LOADTEST_SECRET` is 32+ random bytes
   (D-security-1/2); decide `AGENTS_ENABLED` and the caps; run `pnpm e2e:gate` again and, after,

@@ -111,5 +111,19 @@ describe("world callout placement", () => {
     it("changes nothing for a point well clear of them", () => {
       expect(placeCallout(ndc(1200, 600), W, H, BOX, null, [CROSS, TOP])).toEqual(placeCallout(ndc(1200, 600), W, H, BOX, null));
     });
+
+    it("a label pinned at the top edge (target straight up the screen) drops below the top banners", () => {
+      // Above the screen, dead ahead: pinned at the top margin, which is inside the top-centre column.
+      const up = { x: 0, y: 3, z: 0.5 };
+      const plain = placeCallout(up, W, H, BOX, null);
+      expect(plain.edge).toBe(true);
+      const kept = placeCallout(up, W, H, BOX, null, [CROSS, TOP]);
+      expect(kept.edge).toBe(true);
+      expect(kept.x).toBe(plain.x);
+      expect(kept.y - BOX.h / 2).toBeGreaterThanOrEqual(TOP.bottom);
+      // Pinned at a side edge it is untouched.
+      const side = { x: 3, y: 0, z: 0.5 };
+      expect(placeCallout(side, W, H, BOX, null, [CROSS, TOP])).toEqual(placeCallout(side, W, H, BOX, null));
+    });
   });
 });
