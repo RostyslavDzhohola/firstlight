@@ -6,7 +6,7 @@
 
 import { NF, NPC_ANIM, NPC_INDEX, NPC_RULES } from "@firstlight/shared/content/npcs";
 import { PF } from "@firstlight/shared/net/schema";
-import { actorPos, type PlayerActor } from "../actors.ts";
+import { actorPos, npcSpeedFactor, type PlayerActor } from "../actors.ts";
 import type { V3 } from "../geometry.ts";
 import { cancelAttack, canSee, chest, groundOnly, isMelee, leapLanding, leapStopped, meleeHeightTol, startAttack, updateAttack } from "./attacks.ts";
 import type { NpcSystem } from "./NpcSystem.ts";
@@ -638,6 +638,7 @@ export function moveDir(sys: NpcSystem, n: Npc, dir: V3, speed: number, dt: numb
     n.facing = d;
   }
   const out: V3 = [0, 0, 0];
+  speed *= npcSpeedFactor(n, sys.world.now()); // a spell's slow (Frostbloom)
   const used = step(sys.ground, n.pos, d, speed * dt, n.def.locomotion, n.def.hover ?? 0, n.radius, out, avoidSafe, n.slideSide, n.height);
   sys.setAnim(n, anim);
   n.blockedMove = used < 0;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { preventsDefault } from "./input.ts";
+import { SPELLS } from "@firstlight/shared/content/spells";
 import { BINDINGS, HOTKEYS, hits } from "./keys.ts";
 
 describe("key bindings (SPEC §4.4, D-controls-2)", () => {
@@ -14,6 +15,15 @@ describe("key bindings (SPEC §4.4, D-controls-2)", () => {
       const id = `${b.shift ? "Shift+" : ""}${b.code}`;
       expect(seen.get(id), `${id}: ${b.what}`).toBeUndefined();
       seen.set(id, b.what);
+    }
+  });
+
+  it("every spell has its own key in the list: Q, F, X, Z", () => {
+    expect(SPELLS.map((s) => s.code)).toEqual(["KeyQ", "KeyF", "KeyX", "KeyZ"]);
+    for (const s of SPELLS) {
+      const hit = BINDINGS.filter((b) => b.code === s.code && !b.shift);
+      expect(hit, s.id).toHaveLength(1);
+      expect(hit[0]!.what).toBe(`spell: ${s.name}`);
     }
   });
 

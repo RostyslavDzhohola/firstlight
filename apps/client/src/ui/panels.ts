@@ -387,7 +387,7 @@ export class MissionTracker {
 
 // ---------------------------------------------------------------- admin console (Shift+` ; ` alone is the performance overlay)
 
-const CONSOLE_HELP = `stage <1-5> [all] · coins <n> · level <n> · give <id> [tier] [qty] · medal <id> · egg <E1-E12> · heal · unprotect · announce <text> · ${SKY_HELP}`;
+const CONSOLE_HELP = `stage <1-5> [all] · coins <n> · level <n> · give <id> [tier] [qty] · medal <id> · egg <E1-E12> · heal · unprotect · spells · announce <text> · ${SKY_HELP}`;
 
 /** Parse a console line into an admin message. */
 export function parseAdminLine(line: string): { cmd: string; args: Record<string, unknown> } | null {
@@ -411,6 +411,9 @@ export function parseAdminLine(line: string): { cmd: string; args: Record<string
       return { cmd, args: { text: rest.join(" ") } };
     case "sky":
       return { cmd, args: parseSkyArgs(rest) };
+    case "spells":
+      // `spells` (or `spells refill`): full aether and no cooldowns (server world/spells).
+      return { cmd, args: { refill: true } };
     default:
       return { cmd, args: {} };
   }

@@ -65,6 +65,11 @@ export const BINDINGS: readonly Binding[] = [
   { code: HOTKEYS.photo.code, shift: true, what: "photo mode" },
   { code: HOTKEYS.perf.code, what: "performance overlay" },
   { code: HOTKEYS.adminConsole.code, shift: true, what: "admin console" },
+  // The spellbook (content/spells.ts SPELLS: the codes are checked against it in keys.test.ts).
+  { code: "KeyQ", what: "spell: Skipstep" },
+  { code: "KeyF", what: "spell: Frostbloom" },
+  { code: "KeyX", what: "spell: Wishfall" },
+  { code: "KeyZ", what: "spell: Glasswing Ward" },
   { code: "KeyV", what: "push to talk", voice: true },
   { code: "KeyB", what: "radio", voice: true },
   { code: "Escape", shift: true, what: "mute everyone", voice: true },

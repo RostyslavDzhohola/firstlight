@@ -677,6 +677,35 @@ function makeCommands(player: Player, consoleErrors: string[]): { commands: Reco
         return `${pre}sent ${r.sent.join(",") || "nothing"}${training} · server ${r.accepted ? "accepted" : "did not echo"} the attack · denied ${r.denied.join(",") || "none"}${r.toasts.length ? ` · toasts ${r.toasts.map((t) => `"${t}"`).join(" ")}` : ""}\n${brief(await player.snap())}`;
       },
     },
+    cast: {
+      usage: "cast <spell> [target]",
+      help: "local only: cast skipstep|frostbloom|wishfall|glasswing (or its key: Q F X Z) with its real key, aimed at a target first if given (same targets as walk); reports what the server said",
+      async run([spell = "", spec]) {
+        localOnly("cast");
+        const want = spell.toLowerCase();
+        const slots = (await player.snap()).spells?.slots ?? [];
+        const slot = slots.find((x) => want && (x.id === want || x.key.toLowerCase() === want || x.name.toLowerCase().startsWith(want)));
+        if (!slot) throw new Error(`no spell "${spell}": ${slots.map((x) => `${x.id} (${x.key})`).join(", ") || "the spellbook isn't up yet"}`);
+        const pre = await ensureLock();
+        let aimed = "";
+        if (spec) {
+          const g = goal(spec, await player.snap());
+          aimed = (await player.aim(g.pick)) ? ` at ${g.label}` : ` (couldn't aim at ${g.label})`;
+        }
+        const since = await player.now();
+        await player.tap(`Key${slot.key}`);
+        // Wishfall lands after its warning; the others answer within a round trip.
+        await page.waitForTimeout(slot.id === "wishfall" ? 1900 : 600);
+        const ev = await player.events(since);
+        const sent = ev.some((e) => e.kind === "out" && e.type === "cast");
+        const denied = ev.filter((e) => e.kind === "in" && e.type === "denied").map((e) => `${e.action}:${e.reason}`);
+        const seen = ev.filter((e) => e.kind === "in" && e.type === "spell" && e.mine).map((e) => `${e.spell} ${e.phase}${typeof e.hits === "number" ? ` (slowed ${e.hits})` : ""}`);
+        const hits = ev.filter((e) => e.kind === "in" && e.type === "hit" && e.mine).map((e) => String(e.amount));
+        const toasts = ev.filter((e) => e.kind === "toast").map((e) => `"${String(e.text ?? "").trim()}"`);
+        const s = await player.snap();
+        return `${pre}${slot.name}${aimed}: ${sent ? "cast sent" : "nothing sent (the client held it back)"} · server ${seen.join(", ") || "sent no spell event"} · denied ${denied.join(",") || "none"}${hits.length ? ` · hits ${hits.join(", ")}` : ""}${toasts.length ? ` · toasts ${toasts.join(" ")}` : ""}\n${spellLine(s)}\n${brief(s)}`;
+      },
+    },
     fight: {
       usage: "fight [sec]",
       help: "local only: find the nearest hostile, close in, aim and attack until it pays XP, you die, or sec pass (default 60)",
@@ -1351,6 +1380,15 @@ function brief(s: Snap): string {
 }
 
 /** `fl state`: everything a player would glance at, in a dozen short lines. */
+/** The spellbook in one line: aether, then each spell with its key and whether a press would cast it. */
+function spellLine(s: Snap): string {
+  const b = s.spells;
+  if (!b) return "spells: not up yet";
+  const one = (x: NonNullable<Snap["spells"]>["slots"][number]) =>
+    `${x.key} ${x.name} ${!x.unlocked ? `locked (Lv ${x.level})` : x.cooldown > 0 ? `${x.cooldown.toFixed(1)} s` : x.short ? `needs ${x.cost} aether` : "ready"}`;
+  return `aether ${Math.floor(b.aether)}/${b.max}${b.ward ? ` · ward up (${b.ward.hp} HP, ${b.ward.left.toFixed(1)} s)` : ""} · ${b.slots.map(one).join(" · ")}`;
+}
+
 function describe(s: Snap, events: FlEvent[]): string {
   const lines = [brief(s)];
   const p = s.player;
@@ -1360,6 +1398,7 @@ function describe(s: Snap, events: FlEvent[]): string {
     lines.push(`me ${p.name ?? "?"} (${starter}) Lv ${s.you?.level ?? p.level ?? "?"} · HP ${n0(p.hp)} · XP ${s.you?.xp ?? "?"}/${s.you?.xpToNext ?? "?"} · coins ${s.you?.coins ?? "?"}${p.protected ? " · spawn protection on (just arrived: nothing can hurt you yet)" : ""}${p.inCombat ? " · in combat" : ""}${p.swimming ? " · swimming" : ""} · anim ${p.clip ?? p.anim}`);
   }
   if (s.weapon) lines.push(`weapon ${s.weapon.name} (${s.weapon.delivery}, range ${s.weapon.range} m) · hotbar ${(s.hotbar ?? []).map((h) => (h ? h.id : "-")).join(" ")}`);
+  if (s.spells) lines.push(spellLine(s));
   if (s.onboarding?.active) lines.push(`tutorial step ${s.onboarding.step ?? "?"} (${s.onboarding.done} done${s.onboarding.allDone ? ", all done" : ""})`);
   const npcs = (s.npcs ?? []).filter((n) => !n.dead).sort((a, b) => a.dist - b.dist);
   const hostile = npcs.filter((n) => n.hostile);

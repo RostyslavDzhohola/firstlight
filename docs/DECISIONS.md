@@ -1632,3 +1632,43 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   by the first `setServerSky`; the next update snaps the weather kind, amount and wetness. A URL or
   photo weather override still eases in, and so does every change during play. Why: the world
   darkened and cooled for ~4 s after the loader hid.
+- **D-spells-1 (2026-11-12):** every character has a spellbook apart from its weapons: aether (100,
+  +6/s, paused 1.5 s after a cast) and four spells on Q / F / X / Z that open at levels 1 / 3 / 6 / 9:
+  Skipstep, Frostbloom, Wishfall, Glasswing Ward (numbers: content.md §2.7, code
+  `packages/shared/src/content/spells.ts`). Nothing is persisted: the level gates them, so rebirth
+  resets them. Aether and cooldowns live per account in process memory (like the Prism Bubble's
+  timer), so a body hop doesn't refill them; a server restart does. Aether is private (`you.spells`),
+  not a schema field. Why: the owner asked for "more magic", and magic that is a weapon family is
+  lost the moment the weapon is swapped; a private resource costs no bandwidth for the other 39 players.
+- **D-spells-2 (2026-11-12):** the names are Skipstep, Frostbloom, Wishfall and Glasswing Ward, and
+  the resource is aether. "Starfall" was the working name for the third and was dropped: it is a World
+  of Warcraft and Warcraft III spell name, which the IP line counts as a near-miss. Why: IP line.
+- **D-spells-3 (2026-11-12):** the server moves the body for Skipstep. It walks the blink in 0.5 m
+  steps through the movement validator's own world (terrain, intact props, structures, natural
+  solids), stops before the first step that isn't allowed, sets the position and sends the usual
+  `correct`. Inputs the client sent before it heard (nearer the old place than the new) are dropped
+  for up to 1 s instead of being corrected (`PlayerActor.serverMove`): each correction would snap the
+  client back for a round trip. A fall under way keeps its peak, so a blink is no way down a cliff.
+  Why: D3, and a client-predicted blink would need the client and the server to agree on every
+  collider to the centimetre or rubber-band.
+- **D-spells-4 (2026-11-12):** Frostbloom slows players too, through the NPC lane's movement effects
+  (`applyMoveEffect` + the `npcFx` message the client already predicts), and creatures through a new
+  `NpcActor.slow` the brain's `moveDir` multiplies in. Bosses take the damage but not the slow, and a
+  creature's charge or leap (attack movement) isn't slowed. Why: the player slow was already
+  server-enforced and client-predicted, so it cost nothing new; boss fights are tuned around their
+  own movement.
+- **D-spells-5 (2026-11-12):** spell damage goes through combat's `dealDamage` and `explode`
+  (`explode` gained a `quiet` flag: the spell sends its own event). The Glasswing Ward is a hook in
+  `dealDamage` (`CombatHost.wards`) that takes an attacker's damage from the shell before HP; damage
+  with no attacker (falls, the admin command) passes. Spells follow the attack gates (dead, safe
+  zone, arrival protection, swimming, riding), Skipstep and the ward included. Why: one set of rules
+  for safe zones, walls, friendly fire, kill credit and events, and "no magic in town" is easier to
+  say than a list of exceptions.
+- **D-spells-6 (2026-11-12):** Wishfall warns for 1.2 s, not the brief's ~1.0 s, and deals 60 at the
+  centre. Why: its centre is 41–46% of an equal-level target's HP when it unlocks, and content §0
+  asks for at least 1.2 s of warning before a hit of 40% or more. One known dip under §2.5's burst
+  floor is recorded in §2.7 (a headshot timed on the landing: 1.2 s after the ring, against 1.4 s).
+- **D-spells-7 (2026-11-12):** the `cast` message is `{spell, dx, dy, dz, tx?, ty?, tz?}` with the
+  spell's string id; Wishfall takes an explicit ground point or, without one, the ray from the
+  caster's head. The server pulls a far or hidden point in rather than refusing it. Why: one small
+  shape both the game client and headless agents can send without a camera.

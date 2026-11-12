@@ -14,6 +14,7 @@ import { createMissionPointer } from "./MissionPointer.ts";
 import { createMapClient } from "./MapClient.ts";
 import { createAdminModeClient } from "./AdminModeClient.ts";
 import { createTrialClient } from "./TrialClient.ts";
+import { createSpellClient } from "./SpellClient.ts";
 
 export interface ClientSystem {
   update(dt: number, now: number): void;
@@ -44,3 +45,5 @@ CLIENT_SYSTEMS.push(createMapClient);
 CLIENT_SYSTEMS.push(createAdminModeClient);
 // Missions lane (2026-11-12): race / defend / collect markers, the trial clock strip and its sounds.
 CLIENT_SYSTEMS.push(createTrialClient);
+// Spells lane: the spellbook (Q / F / X / Z), its HUD bar and aether, and the spell effects.
+CLIENT_SYSTEMS.push(createSpellClient);

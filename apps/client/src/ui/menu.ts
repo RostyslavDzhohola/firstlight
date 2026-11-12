@@ -19,6 +19,7 @@ import { openVoicePanel, voice } from "../voice/index.ts";
 import { features } from "../config.ts";
 import { HOTKEYS } from "../game/keys.ts";
 import { fullscreenAvailable, isFullscreen, toggleFullscreen } from "../game/fullscreen.ts";
+import { SPELLS } from "@firstlight/shared/content/spells";
 import { bindPointerLock, PauseFlow, pauseKey, type PauseState } from "./pauseFlow.ts";
 import { LookSwitch } from "./lookSwitch.ts";
 
@@ -41,6 +42,10 @@ export const CONTROLS: CtlGroup[] = [
   {
     title: "World",
     rows: [[["E"], "Interact · pick up"], [["I"], "Inventory"], [["H"], "Whistle · ride horse"], [["M"], "Map · fast travel"], [["J"], "Journal"], [["Tab"], "Players"], [HOTKEYS.screenshot.caps, "Screenshot"], [HOTKEYS.photo.caps, "Photo mode"], [["Esc"], "Menu · back to the game"]],
+  },
+  {
+    title: "Spells",
+    rows: SPELLS.map((s): Ctl => [[s.keycap], s.level > 1 ? `${s.name} · level ${s.level}` : s.name]),
   },
   ...(features.voice ? [VOICE_CONTROLS] : []),
 ];

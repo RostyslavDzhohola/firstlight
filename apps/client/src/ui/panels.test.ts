@@ -3,6 +3,7 @@ import { parseAdminLine } from "./panels.ts";
 
 describe("admin console parser", () => {
   it("turns console lines into admin messages", () => {
+    expect(parseAdminLine("spells")).toEqual({ cmd: "spells", args: { refill: true } });
     expect(parseAdminLine("stage 3")).toEqual({ cmd: "stage", args: { n: 3, all: false } });
     expect(parseAdminLine("stage 4 all")).toEqual({ cmd: "stage", args: { n: 4, all: true } });
     expect(parseAdminLine("give stillshot 3")).toEqual({ cmd: "give", args: { id: "stillshot", tier: 3, qty: 1 } });

@@ -97,6 +97,25 @@ export interface PlayerActor {
   sandbox?: Sandbox;
   /** Moving into a sandbox (adminMode.ts): leaving out of a fight before then is a handoff, not a linger. */
   toSandboxUntil?: number;
+  /**
+   * The server moved this body itself (spells: Skipstep) from this place, and the client may not
+   * have heard yet: until `until`, inputs still sent from nearer the old place than the new one are
+   * dropped instead of being corrected (staleAfterServerMove).
+   */
+  serverMove?: { x: number; y: number; z: number; until: number };
+}
+
+/**
+ * Is this input one the client sent before it heard of a server move (PlayerActor.serverMove)? Such
+ * inputs are dropped: correcting each would snap the client back and forth for a round trip. The
+ * first input from the new place ends the hold.
+ */
+export function staleAfterServerMove(a: PlayerActor, m: { x: number; y: number; z: number }, now: number): boolean {
+  const s = a.serverMove;
+  if (!s) return false;
+  if (now < s.until && Math.hypot(m.x - s.x, m.y - s.y, m.z - s.z) < Math.hypot(m.x - a.lastX, m.y - a.lastY, m.z - a.lastZ)) return true;
+  a.serverMove = undefined;
+  return false;
 }
 
 /**
@@ -149,6 +168,14 @@ export interface NpcActor {
   /** Multiplier for weak-point hits on this NPC; replaces the weapon's headshot multiplier when set. */
   weakMult?: number;
   boss?: boolean;
+  /** A movement slow (spells: Frostbloom): walking speed × (1 − amount) until `until`. The NPC brain reads it. */
+  slow?: { amount: number; until: number };
+}
+
+/** An NPC's walking-speed factor right now (1 = normal). */
+export function npcSpeedFactor(n: NpcActor, now: number): number {
+  const s = n.slow;
+  return s && now < s.until ? 1 - s.amount : 1;
 }
 
 export type Actor = PlayerActor | NpcActor;

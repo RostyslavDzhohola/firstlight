@@ -96,6 +96,13 @@ export interface Snap {
   you?: { xp: number; xpToNext: number; coins: number; level: number; dead: boolean } | null;
   weapon?: { id: string; name: string; delivery: string; range: number; tier: number; slot: number } | null;
   hotbar?: ({ id: string; tier: number; qty: number } | null)[] | null;
+  /** The spellbook: aether now and each spell's key, lock, cooldown left (s) and readiness. */
+  spells?: {
+    aether: number;
+    max: number;
+    ward: { hp: number; left: number } | null;
+    slots: { id: string; name: string; key: string; level: number; cost: number; unlocked: boolean; cooldown: number; ready: boolean; short: boolean }[];
+  } | null;
   combat?: { training: boolean; deadUntilRespawn: boolean };
   onboarding?: { active: boolean; paid: boolean; ended: boolean; step: string | null; done: number; allDone: boolean } | null;
   dummies?: (Target & { down: boolean; hits: number | null })[];
