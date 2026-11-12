@@ -440,7 +440,8 @@ describe("the Three Gleams", () => {
     expect(invIds(b).filter((id: string) => id === "gleamweave_cape")).toHaveLength(1);
     // The cape can't be sold (a once-per-life reward, like egg items).
     expect(progressStore.current.hall().filter((e) => e.secretId === GLEAMS.firsts)).toHaveLength(1);
-  });
+    expect(progressStore.current.gleamkeepers()).toMatchObject({ count: 1, first: [{ name: "seeker" }] });
+  }, 90_000); // all three trials in turn: well over the 20 s default on a busy machine
 
   it("only people engrave and count: AI agents (either flag) and test accounts open the vault but take no Hall line and aren't Gleamkeepers", async () => {
     TRIAL_RULES.timeScale = 0.05;
