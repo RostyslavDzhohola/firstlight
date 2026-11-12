@@ -5,18 +5,19 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Room } from "@colyseus/sdk";
-import { BODIES } from "@firstlight/shared";
+import { BODIES, nearSafeZone } from "@firstlight/shared";
 import { AETHER, aetherAt, FROSTBLOOM, GLASSWING, SKIPSTEP, SPELLS, spellDamage, WISHFALL, type SpellId, type SpellsYou } from "@firstlight/shared/content/spells";
 import { maxHp } from "@firstlight/shared/content/progression";
 import type { SpellEvent } from "@firstlight/shared/net/protocol";
 import { townDir } from "@firstlight/shared/planet/townFrame";
 import type { Game } from "../src/app.ts";
 import { npcSpeedFactor, type NpcActor, type PlayerActor } from "../src/world/actors.ts";
-import { dealDamage } from "../src/world/combat.ts";
+import { dealDamage, wallBetween } from "../src/world/combat.ts";
 import { DestructionSystem } from "../src/world/destruction.ts";
 import { onGameEvent } from "../src/world/events.ts";
 import { moveLimits } from "../src/world/movement.ts";
 import { SpellSystem } from "../src/world/spells/SpellSystem.ts";
+import { supportOf } from "../src/world/support.ts";
 import { safeLeave, startServer, waitFor } from "./helpers.ts";
 import { adminBot, flat, me, nearPad, offset, openSpotOutside, serverRoom, spawnNpc, type V } from "./npc-bots.ts";
 
@@ -263,6 +264,12 @@ describe("Skipstep", () => {
   });
 });
 
+/** A metre above a ground point (chest height). */
+const lift1 = (p: V): V => {
+  const l = Math.hypot(p[0], p[1], p[2]);
+  return [p[0] + p[0] / l, p[1] + p[1] / l, p[2] + p[2] / l];
+};
+
 /** A point as given (the admin teleport snaps it to the ground itself). */
 const serverRoomless = (p: V): V => p;
 
@@ -321,6 +328,80 @@ describe("Frostbloom", () => {
     } finally {
       restore();
     }
+  }, SLOW);
+
+  it("a Prism Bubble shell shelters whoever stands behind it from the nova, and is charged for it once (review 1)", async () => {
+    const base = openSpotOutside("arcadia", 14);
+    const at = offset(base, 4, 0, R);
+    const a = await adminBot(game, rooms, "frost", "arcadia", at, 3);
+    const inside = await adminBot(game, rooms, "bubbled", "arcadia", offset(base, 8, 0, R), 3);
+    const open = await adminBot(game, rooms, "open", "arcadia", base, 3);
+    const h = listen(a);
+    await refill(a, h);
+    // A placid Woolback inside the shell too: two sheltered targets, one charge.
+    const sheep = await spawnNpc(a, "woolback", offset(base, 8.6, 0.8, R), { level: 3, roam: 0, instant: true });
+    const sheepHp = npc(a, sheep).state.hp;
+    const field = supportOf(serverRoom(a))!.bubbles;
+    const shell = field.add(inside.sessionId, pos(inside), 2, 150, Date.now() + 60_000);
+    const dmg = Math.round(spellDamage(FROSTBLOOM.damage, 3));
+    cast(a, "frostbloom");
+    await until("frostbloom cast", () => h.events.some((e) => e.spell === "frostbloom"));
+    const e = h.events.find((x) => x.spell === "frostbloom")!;
+    // Behind the shell: no damage, no slow, not listed.
+    expect(hpOf(inside)).toBe(maxHp(3));
+    expect(moveLimits(actor(inside), Date.now()).speed).toBe(1);
+    expect(npc(a, sheep).state.hp).toBe(sheepHp);
+    expect(npc(a, sheep).slow).toBeUndefined();
+    expect(e.hit).not.toContain(inside.sessionId);
+    expect(e.hit).not.toContain(sheep);
+    // In the open, the same distance the other way: hit as ever.
+    expect(maxHp(3) - hpOf(open)).toBe(dmg);
+    expect(e.hit).toContain(open.sessionId);
+    // The shell paid for what it stopped: the nova's flat damage, once.
+    expect(150 - shell.hp).toBeCloseTo(spellDamage(FROSTBLOOM.damage, 3), 5);
+  }, SLOW);
+
+  it("a crate inside a Prism Bubble is sheltered from the nova too; without the shell it cracks (review 1)", async () => {
+    const a = await adminBot(game, rooms, "icebreaker", "arcadia", openSpotOutside("arcadia", 14), 3);
+    const room = serverRoom(a);
+    const h = listen(a);
+    const sys = room.systems.find((s) => s instanceof DestructionSystem) as DestructionSystem;
+    // A crate or barrel with open ground 3 m from it, outside every safe zone, nothing else light nearby.
+    let prop: (typeof sys.list)[number] | null = null;
+    for (const s of sys.list) {
+      if (s.kind !== "crate" && s.kind !== "barrel") continue;
+      if (nearSafeZone(BODIES.arcadia, s.px, s.py, s.pz, 10)) continue;
+      for (let k = 0; k < 8 && !prop; k++) {
+        const ang = (k / 8) * Math.PI * 2;
+        const p = room.snapToGround([s.px + (s.rx * Math.cos(ang) + s.fx * Math.sin(ang)) * 3, s.py + (s.ry * Math.cos(ang) + s.fy * Math.sin(ang)) * 3, s.pz + (s.rz * Math.cos(ang) + s.fz * Math.sin(ang)) * 3]);
+        const h0 = Math.hypot(p[0], p[1], p[2]) - R;
+        if (h0 < BODIES.arcadia.waterLevel + 0.5 || room.moveWorld.footing!(p[0], p[1], p[2], 0.35).inside) continue;
+        if (wallBetween(room.host, lift1(p), [s.cx, s.cy, s.cz])) continue;
+        a.send("admin", { cmd: "teleport", args: { x: p[0], y: p[1], z: p[2] } });
+        a.send("admin", { cmd: "unprotect" });
+        await until("placed", () => d3(pos(a), p) < 1.5);
+        if (!room.safeNow(actor(a), Date.now())) prop = s;
+      }
+      if (prop) break;
+    }
+    expect(prop, "a light prop with room beside it").not.toBeNull();
+    const i = prop!.index;
+    const hp0 = sys.hp[i]!;
+    const field = supportOf(room)!.bubbles;
+    const shell = field.add(a.sessionId, [prop!.cx, prop!.cy, prop!.cz], 1.5, 150, Date.now() + 60_000);
+    await refill(a, h);
+    cast(a, "frostbloom");
+    await until("frostbloom cast", () => h.events.some((e) => e.spell === "frostbloom"));
+    expect(sys.hp[i]).toBe(hp0);
+    expect(shell.hp).toBeLessThan(150);
+    expect(shell.hp).toBeGreaterThanOrEqual(150 - spellDamage(FROSTBLOOM.damage, 3)); // charged once
+    // The control: the same cast with the shell gone cracks it.
+    field.clear();
+    await refill(a, h);
+    h.events.length = 0;
+    cast(a, "frostbloom");
+    await until("second frostbloom", () => h.events.some((e) => e.spell === "frostbloom"));
+    expect(sys.hp[i]!).toBeLessThan(hp0);
   }, SLOW);
 });
 

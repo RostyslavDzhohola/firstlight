@@ -3,8 +3,8 @@
 // events and its private `you.spells` say.
 //
 // - Skipstep: the server walks the blink (skipstep.ts), moves the body and sends `correct`.
-// - Frostbloom: a nova through combat's dealDamage (walls shelter, safe zones and protection hold,
-//   friendly fire on), plus a slow: players through the NPC lane's movement effects (enforced by
+// - Frostbloom: a nova through combat's dealDamage (walls and Prism Bubbles shelter, safe zones and
+//   protection hold, friendly fire on), plus a slow: players through the NPC lane's movement effects (enforced by
 //   the movement budget, predicted by the client), creatures through NpcActor.slow (bosses: none).
 // - Wishfall: a warning ring now, combat's explode() when it lands (heavy destruction, the caster
 //   takes half, Prism Bubbles and walls shelter as from any blast).
@@ -29,6 +29,7 @@ import { emitGameEvent } from "../events.ts";
 import { dist3, PLAYER_RADIUS, rayTerrain, type V3 } from "../geometry.ts";
 import { groundMotion } from "../movement.ts";
 import { applyMoveEffect } from "../npc/effects.ts";
+import { splashShield } from "../support.ts";
 import type { RoomSystem } from "../systems.ts";
 import { skipstepPath } from "./skipstep.ts";
 
@@ -215,6 +216,9 @@ export class SpellSystem implements RoomSystem {
     const chest = lift(at, 1.0);
     const dmg = spellDamage(FROSTBLOOM.damage, a.char.level);
     const slowed: string[] = [];
+    // Prism Bubble shells shelter as from any blast: who (and which props) they cover is decided
+    // before any shell is charged, and each shell in the way pays once (review 1).
+    const shield = splashShield(host.bubbles, chest);
     // Who is in the ring is decided before anyone is hurt (a death mustn't change the list).
     const inRing: Actor[] = [];
     for (const t of this.actors()) {
@@ -222,6 +226,7 @@ export class SpellSystem implements RoomSystem {
       const r = t.kind === "player" ? PLAYER_RADIUS : t.radius;
       if (dist3(at, actorPos(t)) > FROSTBLOOM.radiusM + r) continue;
       const tc = lift(actorPos(t), t.kind === "player" ? 1.0 : Math.min(t.height * 0.5, 3));
+      if (shield.blocks(tc)) continue;
       if (wallBetween(host, chest, tc)) continue; // not through a wall (D-zones-3)
       inRing.push(t);
     }
@@ -241,7 +246,8 @@ export class SpellSystem implements RoomSystem {
       }
     }
     // Frost cracks what a light weapon breaks (crates, barrels, fences).
-    host.props?.splash(chest, FROSTBLOOM.radiusM, dmg, "light", "frostbloom", a.id, undefined, (c) => wallBetween(host, chest, c));
+    host.props?.splash(chest, FROSTBLOOM.radiusM, dmg, "light", "frostbloom", a.id, undefined, (c) => shield.blocks(c) || wallBetween(host, chest, c));
+    shield.charge(() => dmg); // flat in the ring, like the nova itself
     this.send({ spell: "frostbloom", phase: "cast", by: a.id, x: at[0], y: at[1], z: at[2], r: FROSTBLOOM.radiusM, ms: FROSTBLOOM.slowS * 1000, hit: slowed });
   }
 
