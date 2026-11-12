@@ -144,6 +144,7 @@ export class TouchOverlay {
   private attack = false;
   private alt = false;
   private hotbarBound = new WeakSet<Element>();
+  private readonly offDevice: () => void;
 
   constructor(private readonly host: TouchHost, parent: HTMLElement = document.body) {
     this.root = el("div", "fl-touch");
@@ -210,7 +211,11 @@ export class TouchOverlay {
     this.root.addEventListener("contextmenu", (e) => e.preventDefault());
     this.root.addEventListener("touchmove", (e) => e.preventDefault(), { passive: false });
     parent.appendChild(this.root);
-    document.documentElement.classList.add("fl-touchmode");
+    // Touch presentation (the HUD's spell bar gives way, hotbar slots take taps) follows the device
+    // used last: a switch to the mouse or a pad brings the normal spell bar back (review #8).
+    const mode = (d: string) => document.documentElement.classList.toggle("fl-touchmode", d === "touch");
+    mode(host.input.device);
+    this.offDevice = host.input.onDeviceChange(mode);
     window.addEventListener("blur", () => this.release());
     // Focus lost or the page hidden (Input clears every source): let go of every pointer too, so a
     // finger still down when the page comes back must lift before it moves or looks again.
@@ -237,6 +242,7 @@ export class TouchOverlay {
     cancelAnimationFrame(this.raf);
     this.release();
     this.root.remove();
+    this.offDevice();
     document.documentElement.classList.remove("fl-touchmode");
   }
 

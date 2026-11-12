@@ -168,3 +168,24 @@ describe("wantsTouch", () => {
     expect(wantsTouch("?notouch", mm(true))).toBe(false);
   });
 });
+
+describe("fl-touchmode follows the active device (review #8)", () => {
+  it("a switch to the mouse or a pad brings the normal spell bar back; touch again restores the touch layout", () => {
+    const i = input();
+    i.setDevice("touch");
+    const o = new TouchOverlay({ input: i, look, interactAvailable: () => false, playing: () => true });
+    const on = () => document.documentElement.classList.contains("fl-touchmode");
+    expect(on()).toBe(true);
+    i.setDevice("kbm");
+    expect(on()).toBe(false);
+    i.setDevice("pad");
+    expect(on()).toBe(false);
+    i.setDevice("touch");
+    expect(on()).toBe(true);
+    o.stop();
+    expect(on()).toBe(false);
+    i.setDevice("kbm");
+    i.setDevice("touch");
+    expect(on()).toBe(false); // stopped: no longer listening
+  });
+});
