@@ -21,7 +21,7 @@ export const SPELL_COLORS = {
   skipstepCore: 0xf2fdff,
   frost: 0x9fdcff,
   frostDeep: 0x4aa8ff,
-  star: 0xffd27a,
+  star: 0xffb648,
   starCore: 0xfff6dc,
   ember: 0xff9a3c,
   ward: 0x9fd0ff,
@@ -64,25 +64,25 @@ function makeMaterials() {
     const u = uv();
     const r = u.x;
     const ang = u.y.mul(Math.PI * 2);
-    const rim = smoothstep(0.86, 0.95, r).mul(float(1).sub(smoothstep(0.985, 1.0, r)));
+    const rim = smoothstep(0.8, 0.92, r).mul(float(1).sub(smoothstep(0.985, 1.0, r)));
     // 0: Wishfall's warning. A ring closes in on the centre as the star comes down; eight spokes turn.
     const closing = smoothstep(0.07, 0.0, abs(r.sub(float(1).sub(prog))));
     const spokes = pow(abs(cos(ang.mul(4).add(clock.mul(1.4)))), 14).mul(smoothstep(0.18, 0.3, r)).mul(float(1).sub(smoothstep(0.7, 0.84, r)));
     const hurry = sin(clock.mul(mix(float(9), float(26), prog))).mul(0.14).add(0.86);
-    const warn = float(0.1).add(prog.mul(0.16)).add(rim.mul(0.85)).add(closing.mul(0.7)).add(spokes.mul(0.4)).mul(hurry);
+    const warn = float(0.2).add(prog.mul(0.22)).add(rim).add(closing.mul(0.85)).add(spokes.mul(0.5)).mul(hurry);
     // 1: Frostbloom. A front races out to the edge, leaving crystal veins that hold, then melt.
     const out = float(1).sub(pow(float(1).sub(clamp(age.div(0.32), 0, 1)), 3));
     const front = smoothstep(0.14, 0.0, abs(r.sub(out))).mul(float(1).sub(clamp(age.div(0.5), 0, 1)));
     const veins = abs(sin(ang.mul(7).add(sin(r.mul(9).add(fx.w)).mul(1.6)))).mul(abs(sin(r.mul(13).add(fx.w.mul(3)).add(ang.mul(3)))));
     const crystal = smoothstep(0.5, 0.92, veins);
     const melt = float(1).sub(smoothstep(0.62, 1.0, prog));
-    const frost = front.mul(1.1).add(float(0.16).add(crystal.mul(0.55)).add(rim.mul(0.5)).mul(melt).mul(step(r, out)));
+    const frost = front.mul(1.2).add(float(0.2).add(crystal.mul(0.6)).add(rim.mul(0.6)).mul(melt).mul(step(r, out)));
     // 2: Wishfall's landing. A shockwave runs out over a glow that dies down.
     const wave = pow(prog, 0.5);
-    const shock = smoothstep(0.1, 0.0, abs(r.sub(wave))).mul(float(1).sub(prog)).mul(1.2);
-    const scorch = float(1).sub(smoothstep(0.0, 0.75, r)).mul(pow(float(1).sub(prog), 2)).mul(0.7);
+    const shock = smoothstep(0.14, 0.0, abs(r.sub(wave))).mul(float(1).sub(prog)).mul(1.7);
+    const scorch = float(1).sub(smoothstep(0.0, 0.75, r)).mul(pow(float(1).sub(prog), 1.5)).mul(0.95);
     const land = shock.add(scorch);
-    decal.colorNode = col.mul(float(1.7).add(rim.mul(0.8)));
+    decal.colorNode = col.mul(float(2.4).add(rim.mul(1.2)));
     decal.opacityNode = clamp(warn.mul(is0).add(frost.mul(is1)).add(land.mul(is2)), 0, 1);
   }
 
@@ -102,7 +102,7 @@ function makeMaterials() {
     // 1: Wishfall's streak. Bright at the head (the end), a long tail behind; it flickers.
     const flicker = sin(clock.mul(47).add(along.mul(31))).mul(0.12).add(0.88);
     const streak = pow(along, 2.4).mul(flicker).mul(smoothstep(0.0, 0.12, prog));
-    beam.colorNode = col.mul(3.2);
+    beam.colorNode = col.mul(5);
     beam.opacityNode = clamp(trail.mul(is0).add(streak.mul(is1.add(is2))), 0, 1).mul(soft);
   }
 
@@ -113,7 +113,7 @@ function makeMaterials() {
     // 0: a flash that dies away. 1: a steady, flickering light (the star's head).
     const flash = pow(float(1).sub(prog), 2);
     const steady = sin(clock.mul(41).add(fx.w)).mul(0.14).add(0.86).mul(smoothstep(0.0, 0.1, prog)).mul(float(1).sub(smoothstep(0.92, 1.0, prog)));
-    glow.colorNode = col.mul(4);
+    glow.colorNode = col.mul(5);
     glow.opacityNode = pow(facing, 2.2).mul(flash.mul(is0).add(steady.mul(is1.add(is2))));
   }
 
@@ -369,7 +369,7 @@ export class SpellFx {
     this.beamBetween(a, b, 0.42, 420, 0, SPELL_COLORS.skipstep);
     this.beamBetween(a, b, 0.16, 300, 0, SPELL_COLORS.skipstepCore);
     this.glowAt(a, 0.9, 260, SPELL_COLORS.skipstep, 0, 0.3); // folds in where they left
-    this.glowAt(b, 0.5, 380, SPELL_COLORS.skipstepCore, 0, 3.2); // opens where they land
+    this.glowAt(b, 0.38, 360, SPELL_COLORS.skipstepCore, 0, 2.6); // opens where they land
     this.burst(a, SPELL_COLORS.skipstep, 14, { speed: [0.4, 1.8], life: [0.3, 0.7], size: [0.03, 0.08], intensity: 5, lift: 0.4 });
     this.burst(b, SPELL_COLORS.skipstepCore, 22, { speed: [1.2, 4], life: [0.3, 0.8], size: [0.03, 0.09], intensity: 6, lift: 0.6 });
     const steps = 6;
@@ -400,7 +400,7 @@ export class SpellFx {
       const out = _a.copy(p).sub(centre).normalize();
       const lean = _b.copy(p).normalize().addScaledVector(out, 0.35 + 0.25 * ((i * 3) % 4) / 3).normalize();
       s.mesh.quaternion.setFromUnitVectors(Y, lean).multiply(_q.setFromAxisAngle(Y, th * 3));
-      const h = 0.7 + 0.9 * ((i * 5) % 7) / 6, w = 0.16 + 0.1 * ((i * 3) % 5) / 4;
+      const h = 0.9 + 1.2 * ((i * 5) % 7) / 6, w = 0.2 + 0.14 * ((i * 3) % 5) / 4;
       const born = this.t + (r / radius) * 0.22 + i * 0.006; // the front reaches them on its way out
       setFx(s.mesh, born, born + life, 0, this.nextSeed(), i % 3 === 0 ? SPELL_COLORS.frostDeep : SPELL_COLORS.frost);
       s.mesh.scale.set(w, 0.001, w);
@@ -427,7 +427,7 @@ export class SpellFx {
     const from = at.clone().addScaledVector(up, 70).addScaledVector(slant, 26);
     const dir = at.clone().sub(from).normalize();
     const life = ms / 1000, born = this.t;
-    const tail = 16;
+    const tail = 22;
     const streak = this.take(this.beams, ms, id);
     const core = this.take(this.beams, ms, id);
     setFx(streak.mesh, born, born + life, 1, this.nextSeed(), SPELL_COLORS.star);
@@ -442,16 +442,16 @@ export class SpellFx {
       const k = Math.min(1, (t - born) / life);
       pos.copy(from).lerp(at, k * k);
       head.mesh.position.copy(pos);
-      head.mesh.scale.setScalar(0.9 + 0.5 * k);
+      head.mesh.scale.setScalar(1.5 + 0.9 * k);
       const len = tail * (0.4 + 0.6 * k);
-      for (const [b, w] of [[streak, 0.55], [core, 0.2]] as const) {
+      for (const [b, w] of [[streak, 0.9], [core, 0.35]] as const) {
         b.mesh.quaternion.copy(quat);
         b.mesh.position.copy(pos).addScaledVector(dir, -len);
         b.mesh.scale.set(w, w, len);
       }
       if (t >= nextSpark) {
         nextSpark = t + 0.03;
-        this.burst(pos, SPELL_COLORS.ember, 2, { speed: [0.3, 1.6], life: [0.3, 0.7], size: [0.04, 0.1], intensity: 6, lift: -1 });
+        this.burst(pos, SPELL_COLORS.ember, 3, { speed: [0.3, 1.8], life: [0.4, 0.9], size: [0.07, 0.18], intensity: 7, lift: -1 });
       }
     };
     place(born);
@@ -463,12 +463,12 @@ export class SpellFx {
     for (const list of [this.decals, this.beams, this.glows]) for (const s of list) if (s.key === id && s.until > 0) this.free(s);
     const up = at.clone().normalize();
     const c = at.clone().addScaledVector(up, 0.5);
-    this.decal(at, radius * 1.5, 900, 2, SPELL_COLORS.star);
-    this.glowAt(c, radius * 0.35, 520, SPELL_COLORS.starCore, 0, 3.4);
-    this.glowAt(c, radius * 0.25, 800, SPELL_COLORS.ember, 0, 5);
-    this.beamBetween(at, at.clone().addScaledVector(up, radius * 2.6), 0.5, 380, 0, SPELL_COLORS.starCore); // a pillar of light
-    this.burst(c, SPELL_COLORS.ember, 70, { speed: [4, 13], life: [0.5, 1.4], size: [0.04, 0.13], intensity: 6, lift: -7, spread: 0.85 });
-    this.burst(c, SPELL_COLORS.starCore, 40, { speed: [1, 6], life: [0.3, 0.9], size: [0.03, 0.08], intensity: 7, lift: 1.5 });
+    this.decal(at, radius * 1.5, 1100, 2, SPELL_COLORS.star);
+    this.glowAt(c, radius * 0.5, 650, SPELL_COLORS.starCore, 0, 3);
+    this.glowAt(c, radius * 0.35, 1000, SPELL_COLORS.ember, 0, 4.2);
+    this.beamBetween(at, at.clone().addScaledVector(up, radius * 3), 0.9, 520, 0, SPELL_COLORS.starCore); // a pillar of light
+    this.burst(c, SPELL_COLORS.ember, 90, { speed: [4, 14], life: [0.6, 1.5], size: [0.07, 0.2], intensity: 7, lift: -7, spread: 0.85 });
+    this.burst(c, SPELL_COLORS.starCore, 50, { speed: [1, 7], life: [0.4, 1.0], size: [0.05, 0.14], intensity: 8, lift: 1.5 });
   }
 
   /** Glasswing Ward: a shell that follows `where()` (feet; null = gone) for `ms`. */

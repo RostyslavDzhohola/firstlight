@@ -359,6 +359,60 @@ Format: seconds from the first hit / hits needed. PvE comparison: a regular L1 e
 the Pocket Carbine in 0.5–1.5 s, inside [05]'s 1.1–1.8 s band. Build a headless sim that fails the
 build if any weapon's TTK leaves 0.6–1.6× of its class median [04].
 
+### 2.6 Spells (new, 2026-11-12; code: `packages/shared/src/content/spells.ts`, D-spells-1…6)
+
+Every character has a spellbook, apart from the weapon in hand: **aether** and four spells on their
+own keys. Nothing is bought or dropped; spells open by character level, so a rebirth (level 1) closes
+them again and no new save data is needed. The server decides every cast (`cast` message,
+`apps/server/src/world/spells`).
+
+**Aether:** max 100; refills 6 per second, starting 1.5 s after the last cast. Private to its owner
+(HUD: the violet bar under HP). It and the cooldowns belong to the account, not the room: a body hop
+doesn't refill them. The four spells cost 130 together, so a full book never pays for all of them.
+
+| Spell | Key | Lv | Aether | Cooldown | What it does |
+|---|---|---|---:|---:|---|
+| **Skipstep** | Q | 1 | 20 | 6 s | Blink up to 10 m the way you look, along the ground. The server walks the path in 0.5 m steps and stops before a wall, an intact prop, a tree or boulder, deep water, or a ledge of more than 1 m per step. Under 1.5 m of room: refused, nothing spent. A fall under way still counts when you land |
+| **Frostbloom** | F | 3 | 30 | 10 s | Nova round the caster, radius 5 m: **24** damage (flat in the ring) and a **−40% move speed** slow for 3 s. Not through walls. Hits allies (friendly fire), never the caster. Bosses take the damage, not the slow. Light destruction (crates, barrels, fences) |
+| **Wishfall** | X | 6 | 45 | 14 s | A star called down on the ground point under the crosshair, up to 30 m away. Everyone within 160 m sees the ring for **1.2 s**, then it lands: **60** at the centre, falling linearly to 25% at the 4 m edge, knockback 4 m. The caster takes half (own-explosives rule). Heavy destruction. Prism Bubbles and walls shelter as from any blast |
+| **Glasswing Ward** | Z | 9 | 35 | 18 s | A shell on the caster for 4 s that absorbs **30 per 100 of the caster's max HP** dealt by players and creatures (burn ticks included). The rest of a bigger hit gets through. Falls and other damage with no attacker ignore it |
+
+**Shared rules:**
+- Damage = `base × (1 + 0.03(L−1))`, the weapons' level multiplier (§1.3). Weapon tier never counts.
+- Spells go through the weapons' damage pipeline: safe zones and arrival protection hold both ways,
+  walls stop them (D-zones-3), blocks reduce them, kill credit, XP, threat and the game events are
+  the same as for a weapon hit.
+- A cast is refused, like an attack, while dead, in a safe zone, under arrival protection, swimming
+  or riding; Frostbloom and Wishfall tag combat (10 s), all four cancel a logout countdown.
+- No animation lock: a cast never holds a weapon back.
+
+| Level (gate tier) | Player HP | Frostbloom | Wishfall, centre | Ward shell | Opening Frostbloom + Wishfall vs a sustained weapon over 5 s / 8 s / long fights |
+|---|---:|---:|---:|---:|---|
+| L3 (T1) | 120 | 25 (21%) | – | – | – |
+| L6 (T2) | 150 | 28 (18%) | 69 (46%) | – | +33% / +21% / +11% |
+| L9 (T2) | 180 | 30 (17%) | 74 (41%) | 54 | +33% / +21% / +11% |
+| L12 (T3) | 210 | 32 (15%) | 80 (38%) | 63 | +26% / +16% / +8% |
+| L20 (T3) | 290 | 38 (13%) | 94 (32%) | 87 | +26% / +16% / +8% |
+
+"Sustained weapon" is the mean of Hexquill, Sunbrand, Pocket Carbine and Bearded Axe at the gated
+tier (40 / 58 / 63 / 87 / 103 damage per second). "Long fights" is what aether allows: 75 aether for
+the pair every ~15.5 s. `spells.test.ts` in `packages/shared` checks these bands.
+
+**Why these numbers (against §2.5):**
+- **Level 1 is untouched.** Skipstep is the only level-1 spell and deals nothing, so every L1 figure
+  in the §2.5 table stands.
+- **No one-shots.** The largest spell hit, Wishfall's centre, is 32–46% of an equal-level target's
+  HP, well under the Stillshot headshot's 73–86%. With the level-3 Frostbloom added it is 46–64%.
+- **Burst.** Wishfall always warns for 1.2 s (§0's telegraph floor for a hit of 40% HP or more) and a
+  walking target leaves the ring in under a second; Frostbloom's slow is what keeps someone in it.
+  The fastest equal-level kill that uses spells is a Stillshot headshot or a direct rocket timed on
+  the star's landing: **1.2 s after the ring appears**, against 1.4 s for the two shots alone. That
+  is the one place the spellbook dips under the §2.5 burst floor; it needs the target to stand
+  through the warning.
+- **The ward** lengthens a fight by at most 30% once every 18 s; it never refills HP.
+- **Extra damage.** An opening pair adds a quarter to a third to a 5 s fight and about a tenth to a
+  long one, because aether, not the cooldowns, is the limit.
+
 ---
 
 ## 3. Enemies and wildlife
@@ -902,6 +956,7 @@ not a trademark search.
 | Cosmetics | Woolly Beanie, Wide Straw Hat, Messenger's Winged Cap, Hard Hat (Oversight Issue), Antler Crown, Heron Plume Hat, Coral Crown, Hollow Crown, Pixel Halo, Candle Crown, Ticket #000 Helmet, Traveller's Cloak, Wolfpelt Cape, Tide Cape, Court Mantle, Saltplate Mantle, Static Cloak, Fox Mask, Voxel Visor, Crowbeak Mask, Funeral Veil, Executive Visor, Bedroll, Woolback Plushie, Wind-Up Key, Signal Dish, Tidewrath Tooth, Receiver Floodlamp, Lantern of Lacefall, Golden Hopbit, Bone Bell; palettes Ivory, Sand, Midnight, Moss, Ember, Dusk | OK. "Hollow Crown" is Shakespeare (public domain) |
 | M11 cosmetics | Bracken Stitch Cap, Dockfold Cape, Petalwake Mask, Fenweave Cape, Copper Orbit Pack, Dewdial Crown, Wickfloat Mantle, Quietshift Lens | Original descriptive names; no §10 franchise names, near-misses or exact game titles identified. Reasoned check only |
 | M11 eggs, medals and titles | The Dewdial, Afloat in the Dark, The Quiet Shift, Tended the Dawn, Kept the Wicks, Off the Clock, Dawn Tender, Wick Keeper, Quietshift | Original or ordinary phrases; no §10 franchise names, near-misses or exact game titles identified. Reasoned check only |
+| Spells (new, 2026-11-12) | Aether; Skipstep, Frostbloom, Wishfall, Glasswing Ward | OK. "Aether" is the old word for the upper air (generic; many games use it as a common noun). "Glasswing" is a real butterfly. Rejected: "Starfall" (a World of Warcraft druid spell and a Warcraft III ability), "Blink" (Dota and Warcraft ability name), "Frost Nova" (Warcraft and Diablo), "Mana" (generic but every other game's word). Reasoned check only |
 
 ---
 
