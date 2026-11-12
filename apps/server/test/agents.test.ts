@@ -1,0 +1,384 @@
+// AI agents as players (D-agents-1..3, packages/agent-kit): the kit's FirstlightAgent against the
+// real server in-process. An agent joins flagged, observes, walks without a movement rejection,
+// fights with its starter weapon, takes missions, is refused in a safe zone and by the caps.
+
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { FirstlightAgent, type Observation } from "@firstlight/agent-kit";
+import { AGENT_HEADER, AGENT_REFUSAL } from "@firstlight/shared/net/agents";
+import { PROTOCOL_VERSION } from "@firstlight/shared/net/protocol";
+import type { Game } from "../src/app.ts";
+import { AGENT_RULES, agentSlotsPending, agentsOnline, resetAgentSlots } from "../src/world/agents.ts";
+import { onlineSnapshot } from "../src/ops/home.ts";
+import { liveRooms } from "../src/social/index.ts";
+import { Client, type Room } from "@colyseus/sdk";
+import { grantTravel, joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
+import { adminBot, ask, me as stateOf, offset, openSpotOutside, place, spawnNpc } from "./npc-bots.ts";
+
+let game: Game;
+let url: string;
+const agents: FirstlightAgent[] = [];
+const saved = { ...AGENT_RULES, enabled: AGENT_RULES.enabled };
+
+beforeAll(async () => {
+  game = await startServer();
+  url = `http://127.0.0.1:${game.port}`;
+});
+
+afterEach(async () => {
+  for (const a of agents.splice(0)) await a.close();
+  AGENT_RULES.enabled = saved.enabled;
+  AGENT_RULES.perIp = saved.perIp;
+  AGENT_RULES.perRoom = saved.perRoom;
+  resetAgentSlots();
+});
+
+afterAll(async () => {
+  await game.close();
+});
+
+/** An agent with a dev identity (`id` is its account), placed on `body` like the other tests' bots. */
+async function agent(id: string, body = "arcadia", starter: number | string = "unit7"): Promise<FirstlightAgent> {
+  grantTravel(id, body, { starter: typeof starter === "number" ? starter : ["hexwick", "ash", "kappa", "unit7", "ninja"].indexOf(starter) });
+  const a = new FirstlightAgent();
+  agents.push(a);
+  const r = await a.connect({ url, token: `dev:${id}:${id}`, body: body as never, starter });
+  expect(r.ok).toBe(true);
+  return a;
+}
+
+describe("agents: joining", () => {
+  it("joins flagged as an agent, and other clients see the flag", async () => {
+    const a = await agent("agentA");
+    const human = await joinAs(game, "humanA");
+    try {
+      await waitFor(() => (human.state as any).players?.size >= 2);
+      const seen = (human.state as any).players.get(a.sessionId);
+      expect(seen.agent).toBe(true);
+      expect(seen.name).toBe("agentA");
+      // The human isn't flagged, in its own state or the agent's.
+      expect((human.state as any).players.get(human.sessionId).agent).toBe(false);
+      await waitFor(() => a.observe({ peek: true }).players.length === 1);
+      const obs = a.observe();
+      const other = obs.players.find((p) => p.id === human.sessionId);
+      expect(other).toMatchObject({ name: "humanA", agent: false });
+      // Public counts are people: the agent is counted apart.
+      const online = onlineSnapshot(liveRooms as never);
+      expect(online.total).toBe(1);
+      expect(online.bodies.arcadia.names).toEqual(["humanA"]);
+      expect(agentsOnline()).toBe(1);
+    } finally {
+      await safeLeave(human);
+    }
+  }, 60_000);
+
+  it("observe() has the documented shape and a short summary", async () => {
+    const a = await agent("agentB");
+    await waitFor(() => a.observe({ peek: true }).self.maxHp > 0 && a.observe({ peek: true }).self.hotbar.length > 0);
+    const o: Observation = a.observe();
+    expect(o.status).toBe("playing");
+    expect(o.self).toMatchObject({ name: "agentB", agent: true, body: "arcadia", level: 1, zone: "safe", zoneKind: "outpost", dead: false });
+    expect(o.self.hp).toBe(o.self.maxHp);
+    expect(o.self.pos).toHaveLength(3);
+    expect(o.self.heading).toBeGreaterThanOrEqual(0);
+    expect(o.self.weapon).toMatchObject({ id: "carbine", kind: "ranged", slot: 0 });
+    expect(o.self.cooldowns).toEqual({ attack: 0, reload: 0, overheat: 0, dodge: 0, tonic: 0 });
+    for (const k of ["creatures", "players", "piles", "pads", "portals", "shops", "missions", "offers", "events"] as const) expect(Array.isArray(o[k])).toBe(true);
+    expect(o.guide).toMatchObject({ id: "guide", name: "Lark" });
+    expect(o.portals[0]).toMatchObject({ id: "portal:portus", to: "portus" });
+    expect(o.pads[0]).toMatchObject({ id: "pad:0" });
+    expect(o.offers.map((m) => m.id)).toEqual(["A1", "A2", "A3", "A4"]);
+    expect(o.summary).toContain("agentB [AI] L1 on arcadia");
+    expect(Buffer.byteLength(o.summary)).toBeLessThan(1500);
+    expect(Buffer.byteLength(JSON.stringify(o))).toBeLessThan(6000);
+  }, 60_000);
+});
+
+describe("agents: limits", () => {
+  it("the per-address cap refuses the extra agent with a clear message, and frees up when one leaves", async () => {
+    AGENT_RULES.perIp = 2;
+    const a1 = await agent("capA");
+    await agent("capB");
+    grantTravel("capC", "arcadia");
+    const third = new FirstlightAgent();
+    agents.push(third);
+    await expect(third.connect({ url, token: "dev:capC:capC", body: "arcadia" })).rejects.toMatchObject({ code: AGENT_REFUSAL.LIMIT, message: expect.stringContaining("Too many AI agents are playing from this address (2 of 2)") });
+    // People from the same address aren't counted.
+    const human = await joinAs(game, "capHuman");
+    await safeLeave(human);
+    // One agent leaves (in the safe zone: its body goes at once), the third gets in.
+    await a1.close();
+    await waitFor(() => agentsOnline() === 1);
+    expect((await third.connect({ url, token: "dev:capC:capC", body: "arcadia" })).ok).toBe(true);
+  }, 60_000);
+
+  it("the per-address cap uses the server's one client-address rule: an IPv6 /64 is one address (D-security-4)", async () => {
+    AGENT_RULES.perIp = 1;
+    const ask = async (id: string, ip: string) => {
+      grantTravel(id, "arcadia");
+      const res = await fetch(`${url}/api/play`, { method: "POST", headers: { Authorization: `Bearer dev:${id}:${id}`, "Content-Type": "application/json", [AGENT_HEADER]: "1", "x-real-ip": ip }, body: JSON.stringify({ body: "arcadia", v: PROTOCOL_VERSION }) });
+      return (await res.json()) as { ok: boolean; error?: string };
+    };
+    expect((await ask("v6a", "2001:db8:1:2::1")).ok).toBe(true);
+    // Another address of the same /64 (one household's prefix) is the same address for the cap.
+    expect(await ask("v6b", "2001:db8:1:2:ffff::9")).toMatchObject({ ok: false, error: AGENT_REFUSAL.LIMIT });
+    expect((await ask("v6c", "2001:db8:1:3::1")).ok).toBe(true);
+    // Something that isn't an address is no address at all: it can't be used to mint fresh cap keys.
+    expect((await ask("v6d", "not-an-ip-1")).ok).toBe(true);
+    expect(await ask("v6e", "not-an-ip-2")).toMatchObject({ ok: false, error: AGENT_REFUSAL.LIMIT });
+  }, 30_000);
+
+  it("the switch turns agents away, the header alone flags a player, and people are unaffected", async () => {
+    AGENT_RULES.enabled = false;
+    grantTravel("offA", "arcadia");
+    const a = new FirstlightAgent();
+    agents.push(a);
+    await expect(a.connect({ url, token: "dev:offA:offA", body: "arcadia" })).rejects.toMatchObject({ code: AGENT_REFUSAL.OFF });
+    const human = await joinAs(game, "offHuman");
+    await waitFor(() => !!(human.state as any).players?.get(human.sessionId));
+    expect((human.state as any).players.get(human.sessionId).agent).toBe(false);
+    await safeLeave(human);
+    AGENT_RULES.enabled = true;
+    // Any client that sends the header is an agent (the kit also sends the body field).
+    grantTravel("hdrA", "arcadia");
+    const res = await fetch(`${url}/api/play`, { method: "POST", headers: { Authorization: "Bearer dev:hdrA:hdrA", "Content-Type": "application/json", [AGENT_HEADER]: "1" }, body: JSON.stringify({ body: "arcadia", v: PROTOCOL_VERSION }) });
+    expect(((await res.json()) as { ok: boolean }).ok).toBe(true);
+  }, 60_000);
+
+  it("the per-room cap sends agents to another copy, then refuses", async () => {
+    AGENT_RULES.perRoom = 1;
+    const a1 = await agent("roomA");
+    const a2 = await agent("roomB");
+    expect(a2.room!.roomId).not.toBe(a1.room!.roomId); // a second copy opened for it
+    grantTravel("roomC", "arcadia");
+    const third = new FirstlightAgent();
+    agents.push(third);
+    await expect(third.connect({ url, token: "dev:roomC:roomC", body: "arcadia" })).rejects.toMatchObject({ code: AGENT_REFUSAL.LIMIT, message: expect.stringContaining("Every copy of this world") });
+  }, 60_000);
+
+  // Review 2026-11-12 (agent kit) #1: claims were keyed by account, so a failed second request freed
+  // the first request's seat and both caps could be passed without any race.
+  it("each request has a claim of its own: a failed request frees nothing but itself, and both caps hold", async () => {
+    AGENT_RULES.perIp = 1;
+    AGENT_RULES.perRoom = 1;
+    const ask = async (id: string, extra: Record<string, unknown> = {}, ip?: string) => {
+      const res = await fetch(`${url}/api/play`, { method: "POST", headers: { Authorization: `Bearer dev:${id}:${id}`, "Content-Type": "application/json", [AGENT_HEADER]: "1", ...(ip ? { "x-real-ip": ip } : {}) }, body: JSON.stringify({ body: "arcadia", v: PROTOCOL_VERSION, ...extra }) });
+      return (await res.json()) as { ok: boolean; error?: string; message?: string; reservation?: { roomId: string; sessionId: string } };
+    };
+    grantTravel("clmA", "arcadia");
+    grantTravel("clmB", "arcadia");
+    grantTravel("clmC", "arcadia");
+    // A reserves a seat and doesn't use it yet.
+    const first = await ask("clmA");
+    expect(first.ok).toBe(true);
+    expect(agentSlotsPending()).toBe(1);
+    // A's second request fails authorisation (a sandbox is an admin's): only its own claim goes.
+    expect(await ask("clmA", { sandbox: true })).toMatchObject({ ok: false });
+    expect(agentSlotsPending()).toBe(1);
+    // B, from the same address: the address cap still counts A's seat.
+    expect(await ask("clmB")).toMatchObject({ ok: false, error: AGENT_REFUSAL.LIMIT, message: expect.stringContaining("from this address (1 of 1)") });
+    // A failed request of another kind (a body the character has no ticket for) changes nothing either.
+    expect(await ask("clmA", { body: "hollowmere" })).toMatchObject({ ok: false, error: "travel" });
+    expect(agentSlotsPending()).toBe(1);
+    expect(await ask("clmB")).toMatchObject({ ok: false, error: AGENT_REFUSAL.LIMIT });
+    // C, from another address: the room cap still counts A's seat, so C gets another copy, never A's.
+    const other = await ask("clmC", {}, "203.0.113.7");
+    expect(other.ok).toBe(true);
+    expect(other.reservation!.roomId).not.toBe(first.reservation!.roomId);
+    expect(agentSlotsPending()).toBe(2);
+    // A's first seat is still good, and using it uses up that claim alone.
+    const room = await new Client(url).consumeSeatReservation(first.reservation as never);
+    try {
+      await waitFor(() => !!(room.state as any).players?.get(room.sessionId));
+      expect((room.state as any).players.get(room.sessionId).agent).toBe(true);
+      expect(agentSlotsPending()).toBe(1);
+      // In the room now, A counts as a body: B is still refused.
+      expect(await ask("clmB")).toMatchObject({ ok: false, error: AGENT_REFUSAL.LIMIT });
+    } finally {
+      await safeLeave(room);
+    }
+  }, 60_000);
+
+  it("a seat is admitted again when it is used: over the cap by then, or no longer counted, it is refused", async () => {
+    AGENT_RULES.perIp = 2;
+    await agent("useA");
+    grantTravel("useB", "arcadia");
+    const play = async () => {
+      const res = await fetch(`${url}/api/play`, { method: "POST", headers: { Authorization: "Bearer dev:useB:useB", "Content-Type": "application/json", [AGENT_HEADER]: "1" }, body: JSON.stringify({ body: "arcadia", v: PROTOCOL_VERSION }) });
+      return (await res.json()) as { ok: boolean; reservation?: unknown };
+    };
+    const seat = await play();
+    expect(seat.ok).toBe(true);
+    AGENT_RULES.perIp = 1; // the cap as it stands when the seat is used is the one that counts
+    await expect(new Client(url).consumeSeatReservation(seat.reservation as never)).rejects.toMatchObject({ message: expect.stringContaining(AGENT_REFUSAL.LIMIT) });
+    expect(agentSlotsPending()).toBe(0); // the refused seat stopped counting
+    expect(agentsOnline()).toBe(1);
+    // A seat whose claim is no longer counted (released, expired) can't put a body in.
+    AGENT_RULES.perIp = 2;
+    const stale = await play();
+    expect(stale.ok).toBe(true);
+    resetAgentSlots();
+    await expect(new Client(url).consumeSeatReservation(stale.reservation as never)).rejects.toMatchObject({ message: expect.stringContaining("seat expired") });
+    expect(agentsOnline()).toBe(1);
+  }, 60_000);
+});
+
+// From here on agents leave the safe zone: a body left out there lingers for 30 s (and counts
+// towards the caps), which is why the limits are tested above.
+describe("agents: moving", () => {
+  it("walks 40 m and out through the outpost gate without one movement rejection", async () => {
+    const a = await agent("agentC");
+    const from = a.position;
+    const r = await a.moveTo({ bearing: 90, distance: 40 }, { seconds: 40 });
+    expect(r).toMatchObject({ ok: true, corrections: 0 });
+    expect(a.corrections).toBe(0);
+    expect(Math.hypot(a.position[0] - from[0], a.position[1] - from[1], a.position[2] - from[2])).toBeGreaterThan(35);
+    expect(r.walked as number).toBeGreaterThanOrEqual(39);
+    // The server agrees on where the body is.
+    const room = [...liveRooms].find((x) => x.actors.has(a.sessionId))!;
+    const actor = room.actors.get(a.sessionId)!;
+    expect(actor.violations).toBe(0);
+    await waitFor(() => Math.hypot(actor.state.x - a.position[0], actor.state.y - a.position[1], actor.state.z - a.position[2]) < 0.5);
+  }, 60_000);
+});
+
+
+describe("agents: missions and fighting", () => {
+  const rooms: Room[] = [];
+  afterEach(async () => {
+    for (const r of rooms.splice(0)) await safeLeave(r);
+  });
+
+  it("walks to the guide and takes the missions", async () => {
+    const a = await agent("agentD");
+    // Arrivals are spread round the pad, sometimes right next to the guide: step well away first.
+    const lark = a.observe({ peek: true }).guide!;
+    expect(await a.moveTo({ bearing: (lark.bearing + 180) % 360, distance: 8 })).toMatchObject({ ok: true });
+    expect(await a.takeMissions()).toMatchObject({ ok: false, reason: "too far" });
+    expect(await a.moveTo("guide")).toMatchObject({ ok: true, corrections: 0 });
+    const talk = await a.interact();
+    expect(talk).toMatchObject({ ok: true, talkedTo: "Lark" });
+    const r = await a.takeMissions();
+    expect(r.ok).toBe(true);
+    expect((r.taken as { id: string }[]).map((m) => m.id)).toEqual(["A1", "A2", "A3", "A4"]);
+    const o = a.observe();
+    expect(o.offers).toEqual([]);
+    expect(o.missions.map((m) => [m.id, m.progress, m.goal, m.done])).toEqual([["A1", 0, 8, false], ["A2", 0, 1, false], ["A3", 0, 1, false], ["A4", 0, 5, false]]);
+    expect(o.missions[0]!.where!.dist).toBeGreaterThan(20);
+    expect(o.events.some((e) => e.text.startsWith("Mission accepted: Pest Control"))).toBe(true);
+    expect(o.summary).toContain("A1 Pest Control 0/8");
+  }, 40_000);
+
+  it("is refused cleanly in a safe zone", async () => {
+    const a = await agent("agentE");
+    const admin = await joinAs(game, "adminE", "arcadia", { starter: 3 }, "admin");
+    rooms.push(admin);
+    await waitFor(() => !!(admin.state as any).players?.get(admin.sessionId));
+    const p = a.position;
+    const at = offset(p, 3, 0, 500);
+    const npc = await ask<{ id: string }>(admin, "npcInfo", { cmd: "spawn", kind: "woolback", x: at[0], y: at[1], z: at[2], instant: true, roam: 0 });
+    await waitFor(() => a.observe({ peek: true }).creatures.some((c) => c.id === npc.id));
+    await waitFor(() => a.observe({ peek: true }).self.protectedFor === 0, 8000);
+    const r = await a.attack(npc.id, { seconds: 8 });
+    expect(r).toMatchObject({ ok: false, killed: false, reason: "safe zone" });
+    expect(String(r.hint)).toContain("safe zone");
+    expect(a.observe().creatures.find((c) => c.id === npc.id)!.hp).toBeGreaterThan(0);
+    // Things that need a place say where to go instead of failing silently.
+    expect(await a.buy("tonic_small")).toMatchObject({ ok: false, reason: "too far" });
+    expect(await a.enterPortal("meridian")).toMatchObject({ ok: false, reason: "no such portal" });
+    expect(await a.travel(3)).toMatchObject({ ok: false, reason: "undiscovered" });
+    expect(await a.respawn()).toMatchObject({ ok: false, reason: "not dead" });
+    expect(await a.moveTo("nowhere")).toMatchObject({ ok: false, reason: "unknown target" });
+  }, 40_000);
+
+  it("walks out, kills a creature with its starter weapon and gets XP", async () => {
+    const a = await agent("agentF");
+    const admin = await joinAs(game, "adminF", "arcadia", { starter: 3 }, "admin");
+    rooms.push(admin);
+    await waitFor(() => !!(admin.state as any).players?.get(admin.sessionId));
+    const spot = openSpotOutside("arcadia");
+    expect(await a.moveTo({ pos: spot }, { sprint: true, seconds: 40 })).toMatchObject({ ok: true, corrections: 0 });
+    expect(a.observe().self.zone).toBe("danger");
+    const at = offset(spot, 7, 0, 500);
+    const npc = await ask<{ id: string }>(admin, "npcInfo", { cmd: "spawn", kind: "hopbit", x: at[0], y: at[1], z: at[2], instant: true });
+    await waitFor(() => a.observe({ peek: true }).creatures.some((c) => c.id === npc.id));
+    const before = a.observe();
+    expect(before.creatures.find((c) => c.id === npc.id)).toMatchObject({ kind: "hopbit", name: "Hopbit", hostile: true, boss: false });
+    const r = await a.attack(npc.id, { seconds: 30 });
+    expect(r).toMatchObject({ ok: true, killed: true, target: "Hopbit" });
+    expect(r.xp as number).toBeGreaterThan(0);
+    await waitFor(() => a.observe({ peek: true }).self.xp > before.self.xp || a.observe({ peek: true }).self.level > before.self.level);
+    const after = a.observe();
+    expect(after.events.some((e) => e.type === "kill" && e.text.startsWith("killed Hopbit"))).toBe(true);
+    expect(after.events.some((e) => e.type === "hit" && e.text.includes("damage to Hopbit"))).toBe(true);
+    expect(a.corrections).toBe(0);
+  }, 90_000);
+  // Review 2026-11-12 (agent kit) #3: `pvp: false` only refused a player as the target; a swing at a
+  // creature still hit a person in the arc.
+  it("with pvp off it doesn't swing through a person at its creature: it holds, then fights once they are clear", async () => {
+    const a = await agent("agentP", "arcadia", "ash"); // Sunbrand: 2.4 m, a 110 degree arc, three targets
+    const spot = openSpotOutside("arcadia");
+    expect(await a.moveTo({ pos: spot }, { sprint: true, seconds: 40 })).toMatchObject({ ok: true });
+    const at = offset(spot, 6, 0, 500);
+    // The person stands right at the creature (petting it): no step to the side clears the arc.
+    const human = await adminBot(game, rooms, "humanP", "arcadia", offset(spot, 6, 0.25, 500));
+    const npc = await spawnNpc(human, "woolback", at, { instant: true, roam: 0 });
+    await waitFor(() => a.observe({ peek: true }).creatures.some((c) => c.id === npc) && a.observe({ peek: true }).players.some((p) => p.name === "humanP"));
+    const hp0: number = stateOf(human).hp;
+    const held = await a.attack(npc, { seconds: 20 });
+    expect(held).toMatchObject({ ok: false, killed: false, reason: "player in the way", who: "humanP", attacks: 0 });
+    expect(stateOf(human).hp).toBe(hp0);
+    // The person walks off: the same attack goes ahead.
+    place(human, offset(spot, 60, 40, 500));
+    await waitFor(() => (a.observe({ peek: true }).players.find((p) => p.name === "humanP")?.dist ?? 99) > 30);
+    const fought = await a.attack(npc, { seconds: 12, untilDead: false });
+    expect(fought.attacks as number).toBeGreaterThan(0);
+    expect(stateOf(human).hp).toBe(hp0);
+  }, 120_000);
+
+  it("trades, heals, rolls, dies and starts a new life", async () => {
+    const a = await agent("agentG");
+    const admin = await joinAs(game, "adminG", "arcadia", { starter: 3 }, "admin");
+    rooms.push(admin);
+    await waitFor(() => !!(admin.state as any).players?.get(admin.sessionId));
+    admin.send("admin", { cmd: "coins", args: { amount: 100, target: a.sessionId } });
+    await waitFor(() => a.observe({ peek: true }).self.coins === 100);
+    // The shop: a list, a purchase, a sale; the server's refusal reasons come through.
+    expect(await a.moveTo("shop")).toMatchObject({ ok: true });
+    const goods = await a.shop();
+    expect(goods).toMatchObject({ ok: true, shop: "Dawnpad Trading Post", coins: 100, level: 1 });
+    expect(await a.buy("tonic_small", { qty: 3 })).toMatchObject({ ok: true, coins: 70 });
+    expect(await a.buy("carbine", { tier: 2 })).toMatchObject({ ok: false, reason: "level" });
+    expect(await a.buy("comet")).toMatchObject({ ok: false, reason: "coins" });
+    expect(await a.buy("no_such_thing")).toMatchObject({ ok: false, reason: "not sold" });
+    await waitFor(() => a.observe({ peek: true }).self.hotbar.some((i) => i.id === "tonic_small" && i.qty === 3));
+    expect(await a.sell("tonic_small", 1)).toMatchObject({ ok: true, coins: 72 });
+    expect(a.observe().self.hotbar.find((i) => i.id === "tonic_small")).toMatchObject({ qty: 2 });
+    // Out in the wild: a roll (the one burst past sprint speed the server allows), then a tonic when hurt.
+    expect(await a.moveTo({ pos: openSpotOutside("arcadia") }, { sprint: true, seconds: 40 })).toMatchObject({ ok: true, corrections: 0 });
+    const roll = await a.dodge(90);
+    expect(roll.ok).toBe(true);
+    expect(roll.moved as number).toBeGreaterThan(3.5);
+    expect(await a.dodge(90)).toMatchObject({ ok: false, reason: "cooldown" });
+    await new Promise((ok) => setTimeout(ok, 400));
+    expect(a.corrections).toBe(0);
+    admin.send("admin", { cmd: "damage", args: { amount: 45, target: a.sessionId } });
+    await waitFor(() => a.observe({ peek: true }).self.hp <= 60);
+    expect(await a.useItem("tonic_small")).toMatchObject({ ok: true, used: "Small Tonic", left: 1 });
+    expect(await a.useItem("tonic_small")).toMatchObject({ ok: false, reason: "cooldown" });
+    await waitFor(() => a.observe({ peek: true }).self.hp >= 90, 8000);
+    // Death: everything refuses with the way out, and respawn starts over in Portus.
+    admin.send("admin", { cmd: "damage", args: { amount: 100_000, target: a.sessionId } });
+    await waitFor(() => a.dead);
+    const dead = a.observe();
+    expect(dead.status).toBe("dead");
+    expect(dead.summary).toContain("DEAD: call respawn.");
+    expect(dead.events.some((e) => e.type === "death")).toBe(true);
+    expect(await a.moveTo("guide")).toMatchObject({ ok: false, reason: "dead", hint: "call respawn" });
+    expect(await a.respawn({ starter: "ash" })).toMatchObject({ ok: true, body: "portus", starter: "ash" });
+    await waitFor(() => a.observe({ peek: true }).self.maxHp > 0 && a.observe({ peek: true }).self.hotbar.length > 0);
+    const reborn = a.observe();
+    expect(reborn.self).toMatchObject({ body: "portus", dead: false, level: 1, zone: "safe", zoneKind: "town" });
+    expect(reborn.self.weapon.id).toBe("sunbrand");
+    expect(reborn.status).toBe("playing");
+  }, 120_000);
+});

@@ -1,0 +1,17 @@
+/* The running race / defend / collect attempt (game/TrialClient.ts): a gold holo strip under the boss
+   bar slot, the clock large and monospaced. Urgent turns it coral; paused (out of a beacon's ring)
+   pulses; done and failed linger a moment. */
+.fl-trial { display: flex; align-items: center; gap: calc(1 * var(--u)); padding: calc(.5 * var(--u)) calc(1 * var(--u)); min-width: calc(24 * var(--u)); color: #fff4e0; text-shadow: var(--hud-text-shadow); }
+.fl-trial[hidden] { display: none; }
+.fl-trial__text { display: flex; flex-direction: column; gap: calc(.25 * var(--u)); min-width: 0; }
+.fl-trial__title { font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: .26em; text-transform: uppercase; color: var(--hero-gold); white-space: nowrap; }
+.fl-trial__progress { font: 500 var(--t-sm)/1.1 var(--font-body); color: #fff4e0; white-space: nowrap; }
+.fl-trial__clock { margin-left: auto; font: 600 var(--t-lg)/1 var(--font-mono); letter-spacing: .04em; color: #fff; }
+.fl-trial__clock:empty { display: none; }
+.fl-trial.is-urgent .fl-trial__clock { color: var(--hero-coral); }
+.fl-trial.is-paused { animation: fl-trial-pulse 0.9s var(--ease-in-out) infinite alternate; }
+.fl-trial.is-paused .fl-trial__progress { color: var(--hero-coral); }
+.fl-trial.is-done .fl-trial__title, .fl-trial.is-done .fl-trial__clock { color: var(--ok); }
+.fl-trial.is-failed { opacity: .85; }
+.fl-trial.is-failed .fl-trial__progress { color: var(--hero-coral); }
+@keyframes fl-trial-pulse { from { opacity: 1; } to { opacity: .55; } }

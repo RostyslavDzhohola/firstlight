@@ -7,9 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
 import { mrt, output, velocity } from "three/tsl";
 import { emptyStored, TIER_TABLE, resolveSettings, type StoredGfx, type Tier } from "./quality.ts";
-import { radialFogNode, skyBackgroundNode } from "./atmosphere.ts";
+import { atmo, fogNodeFor, radialFogNode, skyBackgroundNode } from "./atmosphere.ts";
 import { terrainMaterialFor } from "./terrainMaterial.ts";
 import { waterMaterialFor } from "./water.ts";
+import { withClouds } from "./clouds.ts";
+import { Landmarks } from "./landmarks.ts";
 import { GrassSystem } from "./grass.ts";
 import { testVegetationAssets } from "./vegetationAsset.testutil.ts";
 import { PropSystem } from "./props.ts";
@@ -19,6 +21,7 @@ import { SkyPlanets } from "./skyPlanets.ts";
 import { LOOKS } from "./looks.ts";
 import { buildPost } from "./post.ts";
 import { WeatherFx } from "./weather.ts";
+import { SpellFx } from "./spellFx.ts";
 import { stripTexture } from "./townAssets.ts";
 import { townMaterial } from "./townMaterial.ts";
 import { SunLight } from "three/addons/lights/SunLight.js";
@@ -33,6 +36,8 @@ const settingsFor = (t: Tier, webgpu = true) => resolveSettings(t, false, webgpu
 interface Built {
   vertex: string;
   fragment: string;
+  /** The uniform nodes the fragment stage reads. */
+  uniforms: Set<unknown>;
 }
 
 function build(renderer: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE.Camera, mesh: THREE.Object3D): Built {
@@ -54,7 +59,7 @@ function build(renderer: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE
   b.fogNode = scene.fogNode ?? null;
   b.environmentNode = null;
   b.build();
-  return { vertex: b.vertexShader, fragment: b.fragmentShader };
+  return { vertex: b.vertexShader, fragment: b.fragmentShader, uniforms: new Set((b.uniforms.fragment as { node: unknown }[]).map((u) => u.node)) };
 }
 
 /**
@@ -76,6 +81,9 @@ function derivativesInBranches(wgsl: string): string[] {
   }
   return bad;
 }
+
+/** A branch on one component of a direction against a constant (`if (abs(up.y) < 0.95)`): a tangent frame's reference axis being picked. */
+const AXIS_SWITCH = /\(\s*abs\(\s*\w+\.[xyz]\s*\)\s*[<>]=?\s*[0-9.]+\s*\)/;
 
 const errors: string[] = [];
 beforeEach(() => {
@@ -152,6 +160,29 @@ for (const backendName of ["webgpu", "webgl2"] as const) {
       expectClean(build(renderer, scene, camera, mesh));
     });
 
+    it("fog: with the far haze off, fogged shaders are built from the plain graph, without the aerial tint (review finding 3)", () => {
+      const fogged = (aerial: boolean) => {
+        const scene = sceneWithLights();
+        scene.fogNode = fogNodeFor(resolveSettings("medium", false, true, stored, new Set(aerial ? [] : (["aerial"] as const))).on);
+        const mesh = new THREE.Mesh(terrainGeometry(), terrainMaterialFor(settingsFor("medium")));
+        mesh.receiveShadow = true;
+        scene.add(mesh);
+        const b = build(renderer, scene, camera, mesh);
+        expectClean(b);
+        return b;
+      };
+      const tinted = fogged(true);
+      const plain = fogged(false);
+      expect(tinted.uniforms.has(atmo.aerialAmt)).toBe(true);
+      expect(tinted.uniforms.has(atmo.aerial)).toBe(true);
+      // `?noaerial` used to zero the amount and leave the tint's luminance, colour, distance ramp and mix in every fogged shader.
+      expect(plain.uniforms.has(atmo.aerialAmt)).toBe(false);
+      expect(plain.uniforms.has(atmo.aerial)).toBe(false);
+      expect(plain.fragment.length).toBeLessThan(tinted.fragment.length);
+      // The rest of the fog is all there: the height fog and the mist layer.
+      for (const u of [atmo.fogDensity, atmo.fogHeight, atmo.mist, atmo.mistTop]) expect(plain.uniforms.has(u)).toBe(true);
+    });
+
     it("water: levels 0–3", () => {
       for (let l = 0; l <= 3; l++) {
         const scene = sceneWithLights();
@@ -160,7 +191,11 @@ for (const backendName of ["webgpu", "webgl2"] as const) {
         g.setAttribute("depth", new THREE.BufferAttribute(new Float32Array(3).fill(1), 1));
         const mesh = new THREE.Mesh(g, waterMaterialFor(l));
         scene.add(mesh);
-        expectClean(build(renderer, scene, camera, mesh));
+        const b = build(renderer, scene, camera, mesh);
+        expectClean(b);
+        // No tangent frame from a reference axis picked by a threshold: the ripples' normal jumped
+        // across the latitude where the axis switched (planet graphics review, finding 2).
+        expect(b.fragment.match(AXIS_SWITCH)?.[0], `water-L${l}`).toBeUndefined();
       }
     });
 
@@ -252,12 +287,48 @@ for (const backendName of ["webgpu", "webgl2"] as const) {
       expectClean(build(renderer, scene, camera, blobs.mesh));
     });
 
+    it("the planets' pass: single blades (Low), full clumps (High), the clouded sky, the landmarks, plain variants", () => {
+      const scene = sceneWithLights();
+      for (const t of ["low", "high"] as const) {
+        const grass = new GrassSystem(500, 256);
+        grass.applySettings(settingsFor(t));
+        const cell = (grass as any).acquire();
+        expect(cell.mesh.material.name).toBe(t === "low" ? "grass" : "grass-meadow");
+        expect(!!cell.geoLite).toBe(t === "high");
+        expectClean(build(renderer, scene, camera, cell.mesh));
+      }
+      for (const level of [1, 2] as const) {
+        const bgMat = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide, fog: false });
+        bgMat.colorNode = skyBackgroundNode((dir, sky) => withClouds(dir, sky, level)) as any;
+        expectClean(build(renderer, scene, camera, new THREE.Mesh(new THREE.SphereGeometry(1, 8, 8), bgMat)));
+      }
+      const lm = new Landmarks("arcadia", 500);
+      expectClean(build(renderer, scene, camera, lm.mesh!));
+      // The kill switches' variants (`?noterrainfx`, `?nowaterfx` draws water level 0).
+      const plain = resolveSettings("high", false, true, stored, new Set(["terrainfx"] as const));
+      const terrain = terrainMaterialFor(plain);
+      expect(terrain).not.toBe(terrainMaterialFor(settingsFor("high")));
+      expectClean(build(renderer, scene, camera, new THREE.Mesh(terrainGeometry(), terrain)));
+    });
+
+    it("spell effects: decals, beams, glows, ice shards and the ward shell", () => {
+      const scene = sceneWithLights();
+      const fx = new SpellFx(scene, () => ({ body: { radius: 500, waterLevel: 0 }, groundHeight: () => 1 }) as never, () => {});
+      expect(fx.samples.map((m) => (m.material as THREE.Material).name)).toEqual(["spellDecal", "spellBeam", "spellGlow", "spellShard", "spellWard"]);
+      for (const m of fx.samples) expectClean(build(renderer, scene, camera, m));
+      fx.dispose();
+    });
+
     it("weather: rain/dust box and lightning bolt", () => {
       const scene = sceneWithLights();
       const fx = new WeatherFx(scene);
       fx.setCapacity(64);
       expectClean(build(renderer, scene, camera, fx.drops));
       expectClean(build(renderer, scene, camera, fx.bolt));
+      // The second pass: fireflies and spores (one more instanced draw, at night).
+      fx.setFireflies(64);
+      expect((fx.flies.material as THREE.Material).name).toBe("fireflies");
+      expectClean(build(renderer, scene, camera, fx.flies));
     });
 
     it("sky planets, halos and the sky background", () => {

@@ -4,6 +4,53 @@
 **Resume protocol:** SPEC §0. Read this file, check running tasks, continue at the first unchecked item.
 **Paused 2026-10-14 20:10 CDT by the owner:** their open requests (blinking, weapons, creeps, dodge delay, email-first sign-in, voice/radio removal, 3D characters, ElevenLabs SFX, pad outposts) are in the workspace handoff `../HANDOFF.md` (outside the repo). Start there.
 
+**The 2026-11-12 run (pull request #67, protocol 6; NOT deployed):** one overnight run in lanes, each
+reviewed by Codex gpt-6.1-sol (`docs/reviews/2026-11-12-*`, a fixes table per finding), play-tested by
+Sonnet 5.5. What it adds:
+- **Spellbook:** aether and four spells on Q / F / X / Z (Skipstep, Frostbloom, Wishfall, Glasswing Ward),
+  server-decided, spell power per starter (content §2.7, D-spells-*).
+- **The Three Gleams:** a three-trial hunt (ring race on Arcadia, beacon defence on Hollowmere, shard
+  collecting on Meridian) from Sela Marchbank in Portus, a vault, a Hall line; `race` / `defend` /
+  `collect` objective types; missions A4 and H4 (content §5, §5.1, D-hunt-*).
+- **Balance:** `pnpm balance` (a model over the real catalogues, 600+ banded checks), tuned outliers,
+  starters with their own HP, speed, dodge and spell power (#9; content §2.6, §8.5, D-balance-*).
+- **Graphics:** two passes on the planets (meadow, ground cover, terrain layers, water, clouds, haze,
+  sky landmarks, foliage shading, shafts, mist, fireflies; D-gfx-worlds-*) and two on the hub (rez-in and
+  de-rez, portal vortex, hologram scoreboard with the hunt's state, sky life, lantern light, loot-pile
+  beacons, nameplates, tone pass; D-gfx-hub-*); HUD moments and a home page on fresh stills (D-ui-*, D-home-*).
+- **Controls:** gamepad through one input layer, experimental touch (D-controls-5…7).
+- **Agent play:** `packages/agent-kit`, `tools/agent` (MCP server, HTTP bridge, CLI, hunter, residents),
+  the agent flag and "AI" chip, caps, `AGENTS_ENABLED` off in production (`docs/agents/playing.md`, D-agents-*).
+- **Fixes:** #3, #12, #31, #32, #33, #35, #44, #46; #34 on the client; the security pass's eight findings
+  (D-security-*); the October lanes (frame rate first #49, loader stills #47, art-pack code #48) with
+  their review fixes. The HD pack files are still not shipped (over the lane's GPU-memory budget).
+- **Measured on the final build (quiet M1, 1280×720, default tier):** 60 fps standing and after a sprint on
+  Portus, Arcadia, Hollowmere and Meridian, on WebGPU and on WebGL2 (p50 16.7 ms, p95 16.7–16.8 ms, no
+  frame over 100 ms, no console errors). `pnpm typecheck` clean; `pnpm test` 2,837 passed, 0 failed;
+  `pnpm balance` 650/650 in band; `pnpm e2e:gate` passed in full (32 journeys on WebGL2, 31 on WebGPU) before the last HUD and
+  trial-marker fixes; re-run on the final code it passed 62 of 63: J6.2 on WebGPU timed out once waiting
+  for the world in its second browser, and passed when run alone. Two Sonnet 5.5 play-tests found no crash.
+  The first (first ten minutes) found night too dark, a three-row mission tracker, a hard-to-read board,
+  grass at the camera and no guidance after the tutorial: fixed (D-polish-*). The second won trial T1 by
+  hand, cast all four spells, died and rose, and started T2 and T3; its findings (the T2 beacon whiting
+  out the screen, rings invisible from the side, a prompt behind the death card) are fixed (D-polish-8…10);
+  the beacon was re-shot in a browser; the rings' new light posts were not caught in a shot (two tries
+  on the hill: the next ring was behind the slope each time). Seen in those shots and fixed: the mission
+  pointer's label sat on the trial strip's clock when the target was straight up the screen (a pinned
+  label now drops below the top banners; unit-tested, not re-shot).
+- **Before a deploy:** client first, then the server (protocol 6; migrations 8–10 run on boot, back up
+  `game.db`); set `LOADTEST_ENABLED` only for load tests and check `LOADTEST_SECRET` is 32+ random bytes
+  (D-security-1/2); decide `AGENTS_ENABLED` and the caps; run `pnpm e2e:gate` again and, after,
+  `pnpm e2e:prod`.
+- **Open:** real-device checks for gamepad and touch (unit and emulated journeys only); trials T2 and T3
+  never finished by hand in a browser (server tests only); the board's rows are readable from 5 m, not
+  from the pad; the play-tester's fight macro never hit a Linewyrm (cause not found; Arcadia's grass was lowered so it
+  shows, D-polish-11); a level-1 character with no help dies to a Hopbit pack in seconds (within the
+  content's numbers, D-polish-ux-8, but worth watching with real players); frame times on a weaker machine than the M1 and on the Low tier; the
+  planet features' GPU cost on a quiet machine for the frame-rate lane's cost model; the art packs
+  within budget (#48); the home page's stats card (#12); whether agents and residents go live; the
+  residents' end-to-end no-kill-stealing test depends on the live world (it retries).
+
 **Round 2 (2026-10-16), live at main 9a0ee38, protocol 5:** the owner's picks are in — sculpted A characters
 (Kappa and Unit 7 with A/B looks, the ninja Hinoko), shops in every safe zone, admin mode (claim form + a
 private sandbox where nothing is saved, D-admin-1..3), a leaderboard of real people only (test accounts
@@ -112,6 +159,10 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 - [ ] M9 Hardening: F2 load test, perf pass (F10/F11) and the E2E run (T4 blocked) done.
   - [x] F12 three-model review: blockers fixed, all three reviewers sign off (b274af9)
   - [ ] Security pass (auth flows, rate limits, admin routes, input validation, no secrets in the bundle)
+    - Codex gpt-6.1-sol source review (2026-11-12): all eight findings fixed on `lane/security` with tests
+      (D-security-1…8, fixes table in `docs/reviews/2026-11-12-security-pass-gpt-6.1-sol.md`). Open: verify on
+      the deployment whether Railway overwrites a client's `X-Real-IP`, deployed env values, dependency
+      advisories and the production bundle (not in the review's scope).
   - [ ] Voice launch items from docs/risk-assessment.md §5: a public complaints/appeals contact and
     a terms page (voice rules, 16+). Admin voice-mutes are persisted in game.db (migration 5, 668ec82).
   - [x] Repo public (2026-10-18): history rewritten once (the old screenshot, Python caches, local

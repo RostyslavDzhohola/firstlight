@@ -3,7 +3,8 @@ import { BODIES, createTerrain, padDirs } from "@firstlight/shared";
 import { OUTPOSTS } from "@firstlight/shared/content/padOutposts";
 import { PAD_APRON_RADIUS } from "@firstlight/shared/planet/outpostGround";
 import { outpostAnchor, siteDir } from "@firstlight/shared/planet/sites";
-import { padGrassMask } from "./palette.ts";
+import { padGrassMask, PALETTES, terrainColor } from "./palette.ts";
+import type { Region } from "../render/regionNoise.ts";
 import { siteGrassMask } from "./siteGrass.ts";
 
 describe("grass around landing pads (live smoke test: blades grew through Dawnpad)", () => {
@@ -47,5 +48,33 @@ describe("grass round a pad outpost (D42)", () => {
       expect(mask(-p0[0], -p0[1], -p0[2])).toBe(1);
     }
     expect(siteGrassMask(BODIES.portus)).not.toBeNull();
+  });
+});
+
+describe("ground regions and worn earth (D-gfx-worlds-1, #7)", () => {
+  const colour = (body: "arcadia" | "hollowmere" | "meridian", region: Region | null, wear = 0) => {
+    const out = new Float32Array(3);
+    terrainColor(PALETTES[body], 12, 0, 1, 0, out, 0, region, wear);
+    return Array.from(out);
+  };
+  const dist = (a: number[], b: number[]) => Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!);
+
+  it("a dry region, a deep one and a lush one are three different grounds on every planet", () => {
+    for (const body of ["arcadia", "hollowmere", "meridian"] as const) {
+      const lush = colour(body, { dry: 0, deep: 0, patch: 0 });
+      const dry = colour(body, { dry: 1, deep: 0, patch: 0 });
+      const deep = colour(body, { dry: 0, deep: 1, patch: 0 });
+      expect(dist(lush, dry), body).toBeGreaterThan(0.03);
+      expect(dist(lush, deep), body).toBeGreaterThan(0.01);
+      expect(dist(dry, deep), body).toBeGreaterThan(0.03);
+    }
+  });
+
+  it("without a region (the map) the ground is the plain two-tone mix, and wear turns it to earth", () => {
+    const plain = colour("arcadia", null);
+    const worn = colour("arcadia", null, 1);
+    const dirt = PALETTES.arcadia.dirt;
+    expect(dist(worn, [...dirt])).toBeLessThan(dist(plain, [...dirt]));
+    expect(dist(worn, [...dirt])).toBeLessThan(0.02);
   });
 });

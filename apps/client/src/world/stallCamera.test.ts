@@ -96,7 +96,7 @@ const STALL_BODY: Record<string, StallBox> = {
   hollowmere: { x: 0, y: 1.45, z: 0, w: 3.6, h: 2.9, d: 2 },
   meridian: { x: 0, y: 1.45, z: 0, w: 3.6, h: 2.9, d: 2 },
 };
-const still = { locked: true, mouseDX: 0, mouseDY: 0, wheel: 0, sensitivity: 0.002, invertY: false, pressed: new Set<string>(), down: () => false } as unknown as Input;
+const still = { locked: true, captured: true, mouseDX: 0, mouseDY: 0, wheel: 0, sensitivity: 0.002, invertY: false, pressed: new Set<string>(), down: () => false } as unknown as Input;
 
 /** Feet on the ground at stall-frame (x, z) of `body`. */
 function feetAt(body: BodyId, x: number, z: number): THREE.Vector3 {

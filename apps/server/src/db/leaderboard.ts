@@ -4,6 +4,7 @@
 
 import { stmt, type Db } from "./game-db.ts";
 import { IS_TEST } from "./testAccounts.ts";
+import { IS_AGENT } from "./agentAccounts.ts";
 
 export interface LevelRow {
   name: string;
@@ -24,7 +25,8 @@ export interface MedalRow {
 
 const NOT_BANNED = "NOT EXISTS (SELECT 1 FROM ban b WHERE b.user_id = a.user_id AND (b.until IS NULL OR b.until > ?))";
 /** Our own automation never ranks (D-home-6). */
-const NOT_TEST = `NOT ${IS_TEST("a.user_id")}`;
+/** ...and the boards are the people's: AI agents don't rank either (D-agents-1). */
+const NOT_TEST = `NOT ${IS_TEST("a.user_id")} AND NOT ${IS_AGENT("a.user_id")}`;
 
 /** Highest live characters (level, XP, then first there), walking `character_rank` (migration 6). */
 const TOP_LEVELS_SQL = `SELECT a.display_name AS name, c.level, c.xp, c.starter, json_extract(c.inventory_json, '$.look') AS look, a.title_medal AS titleMedal

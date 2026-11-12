@@ -36,6 +36,23 @@ export const QUIPS: readonly string[] = [
   "Awaiting sign-off from Meridian Oversight…",
 ];
 
+/**
+ * With the repo public (config.publicRepo): the game is open source, say so in its own voice
+ * (D-showcase-3, the owner: "tell them, 'Hey, you can contribute to this game or whatever, or you
+ * can clone this game and build it yourself.'"). Same rules as QUIPS; a few among the rest.
+ */
+export const OPEN_SOURCE_QUIPS: readonly string[] = [
+  "Psst: this whole game is open source…",
+  "Like it? Come help build it on GitHub…",
+  "Clone it and build a world of your own…",
+  "Fork it, add a planet, send it back…",
+];
+
+/** The loader's deck: QUIPS, plus the open-source lines when the repo is public. */
+export function loaderQuips(publicRepo: boolean): readonly string[] {
+  return publicRepo ? [...QUIPS, ...OPEN_SOURCE_QUIPS] : QUIPS;
+}
+
 /** How long each line stays up (ms). */
 export const QUIP_MS = 3000;
 

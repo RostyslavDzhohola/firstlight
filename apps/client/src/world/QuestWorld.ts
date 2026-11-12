@@ -149,6 +149,8 @@ const ICONS: Record<string, string> = { dew: "◇", root: "⋎", bloom: "✿", r
 export interface QuestWorldState {
   activeMissions: Set<string>;
   cosmeticsExtras?: boolean;
+  /** Gleams won this life (gleams.ts): the Gleam Vault lights one socket per gleam. */
+  gleams?: number;
 }
 
 interface Prop {
@@ -161,6 +163,8 @@ interface Prop {
   /** A standing NPC figure (animated avatar in world space) and the way it faces. */
   npc?: AvatarView;
   facing?: THREE.Vector3;
+  /** The Gleam Vault's three sockets (lit per gleam won). */
+  sockets?: THREE.Mesh[];
 }
 
 
@@ -210,7 +214,7 @@ export class QuestWorld {
    */
   private faceInward() {
     for (const p of this.props) {
-      if (p.def.look !== "keeper" && p.def.look !== "guide" && p.def.look !== "hall") continue;
+      if (p.def.look !== "keeper" && p.def.look !== "guide" && p.def.look !== "hall" && p.def.look !== "curator" && p.def.look !== "vault") continue;
       const up = p.pos.clone().normalize();
       const anchor = this.body === "portus" ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(...placeDir(p.def.place));
       const toward = anchor.multiplyScalar(p.pos.length()).sub(p.pos);
@@ -272,6 +276,56 @@ export class QuestWorld {
         r.add(staff, lamp);
         const l = label(d.name, "Missions · E to talk");
         l.position.set(0, 2.5, 0);
+        r.add(l);
+        break;
+      }
+      case "curator": {
+        // Sela Marchbank, lamp-keeper of the Three Gleams: an existing starter in the Dusk palette with
+        // a lamp pole and three gleams circling her (gold, cyan, rose: the three trials).
+        p.npc = new AvatarView(0, 5);
+        p.npc.root.userData.occluderFade = true;
+        this.group.add(p.npc.root);
+        const pole = mesh(new THREE.CylinderGeometry(0.035, 0.04, 2.3, 6), std(0x3a2c4a, { metal: 0.4 }), -0.5, 1.15, 0.1);
+        const lamp = mesh(new THREE.OctahedronGeometry(0.16, 0), glow(0xfff0c0, 3), -0.5, 2.4, 0.1);
+        const orbit = new THREE.Group();
+        orbit.position.set(0, 2.15, 0);
+        [0xffd166, 0x8fe8ff, 0xff9ec4].forEach((c, i) => {
+          const a = (i / 3) * Math.PI * 2;
+          orbit.add(mesh(new THREE.OctahedronGeometry(0.09, 0), glow(c, 3), Math.cos(a) * 0.55, Math.sin(a * 2) * 0.08, Math.sin(a) * 0.55));
+        });
+        r.add(pole, lamp, orbit);
+        p.spin = orbit;
+        const l = label(d.name, "The Three Gleams · E to talk", "#ffe6a8");
+        l.position.set(0, 2.75, 0);
+        r.add(l);
+        break;
+      }
+      case "vault": {
+        // The Gleam Vault: a stone drum with a brass lid and three sockets that light per gleam won.
+        // The hunt's goal (D-polish-7): it stands on a stepped plinth with two bands of gold light,
+        // its sockets sit proud of the lid on brass cups, and a soft glow rises from it.
+        r.add(mesh(new THREE.CylinderGeometry(1.25, 1.4, 0.2, 24), std(0x4a4754, { rough: 0.9 }), 0, 0.1, 0));
+        r.add(mesh(new THREE.CylinderGeometry(1.0, 1.1, 0.16, 24), std(0x5c5866, { rough: 0.9 }), 0, 0.28, 0));
+        r.add(mesh(new THREE.CylinderGeometry(0.75, 0.85, 1.0, 16), std(0x5c5866, { rough: 0.9 }), 0, 0.86, 0));
+        const band = glow(0xffc866, 1.6);
+        r.add(mesh(new THREE.CylinderGeometry(1.02, 1.02, 0.04, 24), band, 0, 0.37, 0));
+        r.add(mesh(new THREE.CylinderGeometry(0.8, 0.8, 0.05, 24), band, 0, 1.2, 0));
+        r.add(mesh(new THREE.CylinderGeometry(0.66, 0.66, 0.1, 24), std(0xc9a46a, { metal: 0.8, rough: 0.35 }), 0, 1.41, 0));
+        const cup = std(0xc9a46a, { metal: 0.8, rough: 0.35 });
+        p.sockets = [0, 1, 2].map((i) => {
+          const a = (i / 3) * Math.PI * 2 + Math.PI / 2;
+          const x = Math.cos(a) * 0.38, z = Math.sin(a) * 0.38;
+          r.add(mesh(new THREE.CylinderGeometry(0.17, 0.2, 0.1, 12), cup, x, 1.5, z));
+          const m = mesh(new THREE.SphereGeometry(0.16, 14, 10), std(0x2a2733, { metal: 0.3 }), x, 1.6, z);
+          r.add(m);
+          return m;
+        });
+        // The rising glow: two nested, see-through shafts (no hard top: the outer one is faint and tall).
+        r.add(mesh(new THREE.CylinderGeometry(0.3, 0.6, 1.6, 16, 1, true), glow(0xffe6a8, 1.2, 0.16), 0, 2.26, 0));
+        r.add(mesh(new THREE.CylinderGeometry(0.12, 0.5, 3.4, 16, 1, true), glow(0xffe6a8, 1.2, 0.07), 0, 3.16, 0));
+        const l = label("The Gleam Vault", "three gleams open it · E", "#ffe6a8");
+        // Above the glow's bright part and clear of the plaza tree beside it.
+        l.position.set(0, 3.0, 0);
         r.add(l);
         break;
       }
@@ -538,7 +592,15 @@ export class QuestWorld {
       if (p.def.egg && EGG_BY_ID.get(p.def.egg)?.extra) p.root.visible = !!st.cosmeticsExtras;
       if (p.def.mission) p.root.visible = st.activeMissions.has(p.def.mission);
       if (p.bob) p.bob.position.y = (p.def.look === "ferry" ? 0.3 : p.def.look === "altar" ? 2.4 : p.def.look === "bowl" ? 1.0 : p.def.look === "keeper" ? 1.3 : 0.6) + Math.sin(this.t * 2 + p.pos.x) * 0.06;
-      if (p.spin) p.spin.rotation.y = Math.sin(this.t * 0.8) * 0.4;
+      if (p.spin) p.spin.rotation.y = p.def.look === "curator" ? this.t * 0.7 : Math.sin(this.t * 0.8) * 0.4;
+      if (p.sockets) {
+        const n = st.gleams ?? 0;
+        const lit = [0xffd166, 0x8fe8ff, 0xff9ec4];
+        p.sockets.forEach((m, i) => {
+          const want = i < n ? glow(lit[i]!, 3) : std(0x2a2733, { metal: 0.3 });
+          if (m.material !== want) m.material = want;
+        });
+      }
     }
     for (const [id, until] of this.litLanterns) {
       if (until > now) continue;

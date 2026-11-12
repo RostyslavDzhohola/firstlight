@@ -5,8 +5,10 @@
 // item slots by items.ts COSMETIC_SOCKET). Each shape is built around its socket point; cape and
 // backpack share the back socket, so each socket gets one group holding everything worn there.
 
+import { AGENT_CHIP } from "@firstlight/shared/net/agents";
 import * as THREE from "three/webgpu";
 import { applyOccluderFadeGated } from "./occluderFade.ts";
+import { PLATE_LIFT_M, PLATE_RANGE_M, plateLook, type PlateLook } from "./plates.ts";
 import { COSMETIC_BY_ID, COSMETICS, COSMETIC_SOCKET, type CosmeticSlot, type Socket } from "@firstlight/shared/content/items";
 import { keptSamples } from "./warmup.ts";
 import { disposeTree } from "./dispose.ts";
@@ -292,6 +294,13 @@ export function buildCosmetic(id: string, anims: Anim[]): THREE.Object3D | null 
         add(g, new THREE.OctahedronGeometry(0.028), m(0xf5a623, 3), -0.23 + i * 0.23, -0.3 - i * 0.18, -0.13);
       }
       break;
+    case "gleamweave_cape":
+      // The Gleam Vault's cape: deep dusk cloth with a woven gold hem and the three gleams (gold, cyan,
+      // rose) set down its back in a line.
+      cape(0x2b2545);
+      add(g, new THREE.BoxGeometry(0.62, 0.035, 0.025), m(0xc9a46a, 0.4, 1, 0.7), 0, -0.9, -0.1);
+      [0xffd166, 0x8fe8ff, 0xff9ec4].forEach((c, i) => add(g, new THREE.OctahedronGeometry(0.045), m(c, 3), 0, -0.25 - i * 0.2, -0.12));
+      break;
     case "quietshift_lens":
       add(g, new THREE.TorusGeometry(0.1, 0.025, 5, 8), m(0xa8774f, 0, 1, 0.65), 0.1, 0.02, 0.03);
       add(g, new THREE.CircleGeometry(0.084, 8), m(0x9bdde4, 0.8, 0.7), 0.1, 0.02, 0.035);
@@ -376,6 +385,8 @@ export class CosmeticRig {
   }
 }
 
+const _plateLook: PlateLook = { opacity: 1, scale: 1 };
+
 /** DOM name + title plates over other players within range. */
 export class Nameplates {
   private readonly root = document.createElement("div");
@@ -387,13 +398,14 @@ export class Nameplates {
     document.body.appendChild(this.root);
   }
 
-  update(camera: THREE.Camera, entries: { id: string; pos: THREE.Vector3; name: string; title: string }[], me: THREE.Vector3) {
+  /** `agent`: an AI agent plays this character (shared net/agents.ts): its name carries the "AI" chip. */
+  update(camera: THREE.Camera, entries: { id: string; pos: THREE.Vector3; name: string; title: string; agent?: boolean }[], me: THREE.Vector3) {
     const seen = new Set<string>();
     const v = new THREE.Vector3();
     for (const e of entries) {
       const d = e.pos.distanceTo(me);
-      if (d > 45) continue;
-      v.copy(e.pos).addScaledVector(e.pos.clone().normalize(), 2.15).project(camera);
+      if (d >= PLATE_RANGE_M) continue;
+      v.copy(e.pos).multiplyScalar(1 + PLATE_LIFT_M / Math.max(1, e.pos.length())).project(camera);
       if (v.z > 1 || Math.abs(v.x) > 1.1 || Math.abs(v.y) > 1.1) continue;
       seen.add(e.id);
       let p = this.plates.get(e.id);
@@ -403,10 +415,17 @@ export class Nameplates {
         this.root.appendChild(p.el);
         this.plates.set(e.id, p);
       }
-      const key = `${e.name}|${e.title}`;
+      const key = `${e.name}|${e.title}|${e.agent ? 1 : 0}`;
       if (p.key !== key) {
         p.key = key;
         p.el.textContent = e.name;
+        if (e.agent) {
+          const chip = document.createElement("b");
+          chip.className = "fl-plate__ai";
+          chip.textContent = AGENT_CHIP;
+          chip.title = "Played by an AI agent";
+          p.el.appendChild(chip);
+        }
         if (e.title) {
           const i = document.createElement("i");
           i.textContent = e.title;
@@ -415,7 +434,10 @@ export class Nameplates {
       }
       p.el.style.left = `${(v.x * 0.5 + 0.5) * innerWidth}px`;
       p.el.style.top = `${(-v.y * 0.5 + 0.5) * innerHeight}px`;
-      p.el.style.opacity = String(Math.max(0.35, 1 - d / 50));
+      // Whole up close, thinner and a little smaller with range, fading out at its edge (render/plates.ts).
+      const look = plateLook(d, _plateLook);
+      p.el.style.opacity = look.opacity.toFixed(2);
+      p.el.style.transform = `translate(-50%, -100%) scale(${look.scale.toFixed(3)})`;
     }
     for (const [id, p] of this.plates) {
       if (seen.has(id)) continue;

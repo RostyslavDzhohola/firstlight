@@ -4,6 +4,7 @@
 
 import { expectNoBlinking, measureBlinks, playAWhile } from "./blink.ts";
 import { expect, test } from "./fixtures.ts";
+import { stillsSeen, watchStills } from "./stills.ts";
 
 test.describe("J1 arrival", () => {
   test("J1.1 · item 6a · a new guest lands on the home page with a Play button", { tag: ["@J1", "@J1.1", "@item-6a"] }, async ({ player, page }) => {
@@ -14,11 +15,20 @@ test.describe("J1 arrival", () => {
   });
 
   test("J1.2 · items 1, 6i · Play → starter → tutorial → in the world in < 30 s, no blinking", { tag: ["@J1", "@J1.2", "@item-1"] }, async ({ player, page }) => {
+    await watchStills(page);
     const t = await player.playAsNewGuest({ starter: "Hexwick" });
     const s = await player.waitInWorld(90_000, "portus");
     const inWorldAt = Date.now();
     const loadingMs = t.pickShownAt - t.clickedAt + (inWorldAt - t.playAsAt);
     await player.note("timing", { playToPickMs: t.pickShownAt - t.clickedAt, playAsToWorldMs: inWorldAt - t.playAsAt, loadingMs, gfx: s.gfx });
+    // Stills of what awaits behind the loader (D-showcase-2): Portus' first, a new one every few
+    // seconds, and none left once the world is up.
+    const stills = await stillsSeen(page);
+    await player.note("stills", stills);
+    expect.soft(stills.seen.length, "the loader showed in-game stills").toBeGreaterThan(0);
+    expect.soft(stills.seen[0]?.id ?? "", "the first is of Portus, where a new player lands").toMatch(/^portus-/);
+    if (inWorldAt - t.playAsAt > 9000) expect.soft(new Set(stills.seen.map((x) => x.id)).size, "a long load rotates them").toBeGreaterThan(1);
+    expect.soft(stills.inDom, "the pictures go with the loader").toBe(0);
     expect.soft(s.gfx?.webgpu, "renderer under test").toBe(player.gfx === "webgpu");
     expect.soft(loadingMs, "Play → in the world (minus the time spent choosing) under 30 s").toBeLessThan(30_000);
     // Where the warm-up's time goes, per phase, with the shader count (D-load-1, #25).
@@ -42,12 +52,18 @@ test.describe("J1 arrival", () => {
   });
 
   test("J1.3 · item 1 · through a portal: the loading screen never freezes, nothing compiles after it", { tag: ["@J1", "@J1.3", "@item-1"] }, async ({ player, page }) => {
+    await watchStills(page);
     await player.joinAsDevAdmin({ starter: "Hexwick", body: "portus" });
     await player.waitInWorld(180_000, "portus");
     await player.lock();
     const t0 = await player.now();
     await player.walkThroughPortal("arcadia");
     const arrived = await player.now();
+    // The travel's loader opens on the destination's own stills (D-showcase-2).
+    const stills = await stillsSeen(page, t0);
+    await player.note("stills", stills);
+    expect.soft(stills.seen[0]?.id ?? "", "the travel shows Arcadia first").toMatch(/^arcadia-/);
+    expect.soft(stills.inDom, "the pictures go with the loader").toBe(0);
     const frames = await page.evaluate((t) => (window as any).__fl.frames.stats(t), t0);
     // Every build in the warm-up's watch window (the 120 rendered frames after the hand-over) counts.
     const shaders = await player.shaderWatchClosed();
@@ -145,14 +161,22 @@ test.describe("J1 arrival", () => {
     expect(probe.blanks, "no trial resize shows a blank world").toEqual([]);
   });
 
-  test("J1.5 · a WebGPU that never answers costs this device one 8 s wait, not one per visit", { tag: ["@J1", "@J1.5"] }, async ({ player, page }) => {
+  test("J1.5 · a WebGPU that never answers costs this device one 20 s wait, not one per visit", { tag: ["@J1", "@J1.5"] }, async ({ player, page }) => {
     test.skip(player.gfx !== "webgl", "the hang is simulated, so one renderer project covers it");
     // The owner's M1: Chrome's WebGPU adapter never answers. Same for every visit in this browser profile.
     await page.addInitScript(() => {
       const hang = { requestAdapter: () => new Promise(() => {}), getPreferredCanvasFormat: () => "bgra8unorm", wgslLanguageFeatures: new Set() };
       Object.defineProperty(Navigator.prototype, "gpu", { configurable: true, get: () => hang });
+      // Every status line the loader shows while the renderer starts (D-showcase-1: the slow-start line).
+      const seen: string[] = ((window as unknown as { __statusLines: string[] }).__statusLines = []);
+      setInterval(() => {
+        const t = document.querySelector(".fl-loading__status")?.textContent ?? "";
+        const note = document.querySelector(".fl-loading__step small")?.textContent ?? "";
+        const line = `${t} | ${note}`;
+        if (t && seen.at(-1) !== line) seen.push(line);
+      }, 100);
     });
-    /** One visit without ?webgl: ms from navigation to the renderer being up, and its start log. */
+    /** One visit without ?webgl: ms from navigation to the renderer being up, its start log and loader lines. */
     const visit = async (extra = "") => {
       const lines: string[] = [];
       const onLine = (m: { text(): string }) => void (m.text().startsWith("[gfx]") && lines.push(m.text()));
@@ -164,19 +188,24 @@ test.describe("J1 arrival", () => {
       const ms = Date.now() - t0;
       page.off("console", onLine);
       const record = await page.evaluate(() => localStorage.getItem("fl.gfx.webgpu-failed"));
-      return { ms, lines, record: record ? (JSON.parse(record) as Record<string, unknown>) : null };
+      const status = await page.evaluate(() => (window as unknown as { __statusLines: string[] }).__statusLines);
+      return { ms, lines, status, record: record ? (JSON.parse(record) as Record<string, unknown>) : null };
     };
     const first = await visit();
     const second = await visit();
     const forced = await visit("&webgpu");
-    await player.note("webgpu-memory", { firstMs: first.ms, secondMs: second.ms, forcedMs: forced.ms, record: second.record, lines: [first.lines, second.lines, forced.lines] });
-    expect.soft(first.lines.join("\n"), "the first visit waits out the deadline").toMatch(/WebGPU did not start within 8 s/);
-    expect.soft(first.ms, "the first visit pays the 8 s deadline").toBeGreaterThanOrEqual(8000);
+    await player.note("webgpu-memory", { firstMs: first.ms, secondMs: second.ms, forcedMs: forced.ms, record: second.record, lines: [first.lines, second.lines, forced.lines], status: [first.status, second.status, forced.status] });
+    expect.soft(first.lines.join("\n"), "the first visit waits out the deadline").toMatch(/WebGPU did not start within 20 s/);
+    expect.soft(first.ms, "the first visit pays the 20 s deadline").toBeGreaterThanOrEqual(20_000);
+    // While it waits, the Renderer step says so in plain words, then names the backup (D-showcase-1).
+    expect.soft(first.status.join("\n"), "the loader says WebGPU is still starting").toMatch(/Still starting WebGPU… \| the faster path; WebGL2 is the backup/);
+    expect.soft(first.status.join("\n"), "and then that WebGL2 takes over").toMatch(/Starting WebGL2… \| WebGL2, the backup path/);
+    expect.soft(second.status.join("\n"), "a visit that skips WebGPU has nothing to wait for").not.toMatch(/Still starting WebGPU/);
     expect.soft(second.record, "the device keeps a small record: reason, time, browser, GPU").toMatchObject({ reason: "timeout", browser: expect.stringMatching(/^Chrome\/\d+$/) });
     expect.soft(Object.keys(second.record ?? {}).sort(), "and nothing else").toEqual(["at", "browser", "gpu", "reason", "v"]);
     expect.soft(second.lines.join("\n"), "the second visit skips WebGPU").toMatch(/WebGPU skipped/);
-    expect.soft(second.ms, "the second visit doesn't wait for WebGPU").toBeLessThan(first.ms - 6000);
-    expect.soft(forced.lines.join("\n"), "?webgpu tries again").toMatch(/\?webgpu: trying WebGPU[\s\S]*WebGPU did not start within 8 s/);
+    expect.soft(second.ms, "the second visit doesn't wait for WebGPU").toBeLessThan(first.ms - 18_000);
+    expect.soft(forced.lines.join("\n"), "?webgpu tries again").toMatch(/\?webgpu: trying WebGPU[\s\S]*WebGPU did not start within 20 s/);
   });
   test("J1.6 · the owner's High tier, no probe: shader warm-up per phase, the loader never blocks 250 ms, nothing compiles after", { tag: ["@J1", "@J1.6"] }, async ({ player }) => {
     // The owner's M1 case (#18): a returning device on High, so no first-visit probe warms anything first.

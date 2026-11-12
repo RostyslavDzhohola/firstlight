@@ -14,3 +14,13 @@
 .fl-gallery-nav { position: fixed; left: 8px; bottom: 8px; z-index: 999; display: flex; flex-wrap: wrap; gap: 4px; max-width: 70vw; font: 500 13px/1 ui-monospace, monospace; }
 .fl-gallery-nav a { padding: 4px 6px; border-radius: 3px; background: rgba(0, 0, 0, .6); color: #bcc2cc; text-decoration: none; }
 .fl-gallery-nav a.is-on { color: #ffd99b; }
+/* The combat screen: the hit ring and the kill mark are Web Animations (they run to their end); hold them up for the still. */
+.fl-gallery-combat .fl-hitfrom > i, .fl-gallery-combat .fl-killmark, .fl-gallery-combat .fl-hitmark { opacity: 1 !important; }
+/* The share image (screen=og, 1200×630): the scene in the top four fifths, the wordmark on the dark foot. */
+.fl-og { position: fixed; inset: 0; overflow: hidden; background: #05070a; }
+.fl-og img { position: absolute; inset: 0 0 auto; width: 100%; height: 80%; object-fit: cover; object-position: 50% 62%; }
+.fl-og::after { content: ""; position: absolute; inset: 0; background: linear-gradient(0deg, #05070a 0%, #05070a 19%, rgba(5, 7, 10, .78) 30%, rgba(5, 7, 10, 0) 58%); }
+.fl-og__text { position: absolute; z-index: 1; left: 60px; right: 60px; bottom: 40px; display: grid; gap: 12px; justify-items: start; }
+.fl-og__text .fl-eyebrow { font-size: 19px; color: #efe9df; text-shadow: 0 1px 3px rgba(0, 0, 0, .8); }
+.fl-og__mark { --wm-size: 88px; text-shadow: 0 3px 30px rgba(0, 0, 0, .7); }
+.fl-og__text p { margin: 8px 0 0; font: 400 25px/1.3 var(--font-body); color: #d8d1c5; }

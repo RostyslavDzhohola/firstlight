@@ -13,10 +13,12 @@ import { el, icon, sprite, uiRoot } from "./dom.ts";
 import { formatDamage, isLowHp, parsePrompt, shownItem, slotView, type DamageKind, type SlotView } from "./hudFormat.ts";
 import { installSprites, portraitSprite } from "./sprites.ts";
 import { uiSettings, type UiSettings } from "./uiSettings.ts";
+import { MissionsPanel, type MissionsMore } from "./missionsPanel.ts";
 import { showSubtitle } from "./subtitle.ts";
 import { showCharacterPick, type CharacterChoice, type CharacterPickOptions } from "./characterPick.ts";
 import { showDeath, type DeathInfo } from "./death.ts";
 import type { ZoneInfo } from "./zoneLabel.ts";
+import { MomentsHud } from "./momentsView.ts";
 
 export type YouPlus = YouState & { selected: number; level: number; dead: boolean };
 export type { DamageKind } from "./hudFormat.ts";
@@ -110,7 +112,9 @@ export class Hud {
   private readonly right = el("div", "fl-hud__right", this.layer);
   /** The minimap's place (ui/minimap.ts): first in the right column, so missions and toasts flow below it. */
   readonly minimapSlot = el("div", "fl-hud__minimap", this.right);
-  private readonly missions = el("section", "fl-missions fl-holo fl-corners", this.right);
+  /** The event feed's place (ui/momentsView.ts): under the minimap, over the missions. */
+  private readonly feedSlot = el("div", "fl-feed", this.right);
+  private readonly missions = new MissionsPanel(this.right);
   private readonly toasts = el("div", "fl-toasts", this.right);
 
   private readonly mid = el("div", "fl-hud__mid", this.layer);
@@ -121,6 +125,14 @@ export class Hud {
   private readonly hotbarWrap = el("div", "fl-hotbar-wrap", this.layer);
   /** Bottom-right slot for the voice lane (own mic state, people in earshot). */
   readonly voiceSlot = el("div", "fl-hud__br", this.layer);
+  /**
+   * The moments (D-ui-2…4): earned banners (one at a time), the arrival title card, the event feed,
+   * the "hit from" ring and the kill mark. game/MomentsClient.ts feeds it and ticks it every frame.
+   */
+  readonly moments = new MomentsHud({ top: this.top, feed: this.feedSlot, layer: this.layer });
+  /** The spell bar's place, beside the hotbar, and the aether bar's, under HP on the player card (ui/spellBar.ts). */
+  spellSlot!: HTMLElement;
+  aetherSlot!: HTMLElement;
 
   // player card refs
   private faceSprite!: HTMLElement;
@@ -162,7 +174,7 @@ export class Hud {
   private c = {
     hp: -1, max: -1, low: false, safe: null as boolean | null, zone: "", logout: -2, prompt: "\u0000", level: -1, coins: -1,
     xp: "", wname: "", ammo: "", ranged: null as boolean | null, identity: "", selected: -1,
-    boss: "", bossFill: -1, bossNotches: "", party: "", missions: "",
+    boss: "", bossFill: -1, bossNotches: "", party: "",
   };
   private name = "";
   private starter = 0;
@@ -170,6 +182,7 @@ export class Hud {
   private look = 0;
   private settings: UiSettings = uiSettings.get();
   private liveDamage = 0;
+  private damageSeq = 2; // the first number of a burst lands dead on its target
   you: YouPlus | null = null;
   /** The last `you` seen alive: what the death screen lists as left in the pile. */
   lastAlive: YouPlus | null = null;
@@ -186,7 +199,6 @@ export class Hud {
     this.buildMe();
     this.buildHotbar();
     this.buildMid();
-    this.missions.hidden = true;
     this.toasts.setAttribute("aria-live", "polite");
     this.starter = Number(localStorage.getItem("fl.starter") ?? 0) || 0;
     this.palette = Number(localStorage.getItem("fl.palette") ?? 0) || 0;
@@ -251,6 +263,8 @@ export class Hud {
     const small = el("small", "", val, " / ");
     this.hpMax = el("span", "", small, "100");
 
+    this.aetherSlot = el("div", "fl-me__aether", this.me);
+
     const xp = el("div", "fl-xprow", this.me);
     el("span", "k", xp, "XP");
     const xb = el("div", "fl-xpbar", xp);
@@ -281,6 +295,7 @@ export class Hud {
     el("span", "fl-key", r, "R");
     r.append("Reload");
     this.ammo.hidden = true;
+    this.spellSlot = el("div", "fl-hud__spells", this.hotbarWrap);
   }
 
   private buildMid() {
@@ -503,7 +518,8 @@ export class Hud {
     if (!this.settings.damageNumbers || this.liveDamage >= MAX_DAMAGE_NUMBERS) return;
     const f = formatDamage(amount, kind ?? (weak ? "weak" : "normal"));
     const d = el("span", f.cls, this.world, f.text);
-    d.style.setProperty("--x", `${Math.round(x)}px`);
+    // A burst on one target fans out a little instead of stacking (set once; nothing reads it back).
+    d.style.setProperty("--x", `${Math.round(x + (this.damageSeq++ % 5 - 2) * 9)}px`);
     d.style.setProperty("--y", `${Math.round(y)}px`);
     this.liveDamage++;
     d.addEventListener("animationend", () => {
@@ -633,24 +649,9 @@ export class Hud {
 
   // ---------------------------------------------------------------------------------------------- missions (quests lane)
 
-  setMissions(lines: MissionLine[], header = "") {
-    const key = JSON.stringify([lines, header]);
-    if (key === this.c.missions) return;
-    this.c.missions = key;
-    this.missions.hidden = lines.length === 0;
-    this.missions.replaceChildren();
-    if (!lines.length) return;
-    const h = el("header", "", this.missions);
-    el("span", "fl-label", h, "Missions");
-    el("span", "", h, header);
-    for (const m of lines) {
-      const row = el("div", `fl-mission${m.state && m.state !== "open" ? ` is-${m.state}` : ""}`, this.missions);
-      el("i", "fl-mission__st", row);
-      const d = el("div", "", row);
-      el("b", "", d, m.title);
-      el("span", "", d, m.detail);
-      el("span", "fl-mission__r num", row, m.progress);
-    }
+  /** `more`: open missions not listed, as a "+N more (J)" line that runs `open` (the journal). */
+  setMissions(lines: MissionLine[], header = "", more: MissionsMore | null = null) {
+    this.missions.set(lines, header, more);
   }
 
   // ---------------------------------------------------------------------------------------------- full-screen flows
@@ -672,6 +673,7 @@ export class Hud {
   }
 
   dispose() {
+    this.missions.dispose();
     this.root.remove();
   }
 }

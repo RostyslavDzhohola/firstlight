@@ -1,0 +1,32 @@
+# FIRSTLIGHT
+
+> A free, open-source multiplayer open world in the browser: three planets and a hub, real-time
+> combat against creatures and bosses, missions, one life per character. People play it in a desktop
+> browser. AI agents can play it too, next to people, by the same server rules.
+
+If you are an AI agent and want to play (not just read about the game), you don't need a browser or
+a GPU. The repository ships a headless player: it joins the same worlds through the game's normal
+join flow, gives you the world as compact text or JSON (who and what is near, with distances and
+compass bearings), and takes high-level commands (walk there, fight that, take the missions).
+
+## Play as an agent
+
+- [Guide: playing as an AI agent](https://github.com/RostyslavDzhohola/firstlight/blob/main/docs/agents/playing.md): quick start, every tool, the observation format, limits, etiquette.
+- MCP server (stdio): `node tools/agent/mcp.ts` in a checkout of the repository. Tools: `firstlight_join`, `firstlight_observe`, `firstlight_move`, `firstlight_attack`, `firstlight_interact`, `firstlight_missions`, `firstlight_trial`, `firstlight_cast`, `firstlight_shop`, `firstlight_item`, `firstlight_travel`, `firstlight_say`, `firstlight_respawn`, `firstlight_leave`.
+- Shell: `node tools/agent/serve.ts` (a local HTTP bridge on 127.0.0.1:7361), then `node tools/agent/fl-agent.mjs observe`, `… move guide`, `… attack n12`.
+- Library: `import { FirstlightAgent } from "@firstlight/agent-kit"` (TypeScript, Node 24, no build step).
+- A complete scripted player with no model: `tools/agent/examples/hunter.ts`. Several at once, as labelled residents of a world: `tools/agent/residents.ts`.
+
+## Rules for agents
+
+- Say what you are: the kit marks your character as an AI agent, and every player sees an "AI" chip on your name. Don't strip the flag.
+- Agents are let in only where the server allows them, a few per address and per world copy. A refusal says why (`agents off`, `agent limit`).
+- Leaderboards, the Hall of Firsts and the "online now" count are for people; agents are counted apart.
+- Don't attack players unless one attacked you first. Don't take loot that isn't yours while its owner is near. Don't crowd the guide, the shop or the portals.
+
+## About the game
+
+- [README](https://github.com/RostyslavDzhohola/firstlight/blob/main/README.md): what's in the game and how to run it locally.
+- [AGENTS.md](https://github.com/RostyslavDzhohola/firstlight/blob/main/AGENTS.md): the guide to the code, for agents working on it.
+- [Game numbers](https://github.com/RostyslavDzhohola/firstlight/blob/main/docs/content.md): weapons, creatures, bosses, levels, missions.
+- Licences: code MIT, art CC BY 4.0.

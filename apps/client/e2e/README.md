@@ -7,6 +7,8 @@ command lines, environment and projects are documented at the top of `playwright
   ports, fresh databases).
 - `pnpm e2e:prod`: the read-only `@smoke` subset against https://firstlight.one4all.dev.
 - `pnpm e2e:gate`: only the journeys in `gates.json`; a failure blocks a deploy.
+- Evidence runs that `pnpm e2e` skips: `bench-warmup.spec.ts` (`BENCH_MODE`) and `artpacks.spec.ts`
+  (`ARTPACKS=shots|bench`: the HD art packs' same-frame screenshots and frame-time bench, #48).
 
 ## Test accounts on production (D-home-6)
 

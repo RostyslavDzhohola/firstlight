@@ -6,7 +6,7 @@
 
 import { NF, NPC_ANIM, NPC_INDEX, NPC_RULES } from "@firstlight/shared/content/npcs";
 import { PF } from "@firstlight/shared/net/schema";
-import { actorPos, type PlayerActor } from "../actors.ts";
+import { actorPos, npcSpeedFactor, type PlayerActor } from "../actors.ts";
 import type { V3 } from "../geometry.ts";
 import { cancelAttack, canSee, chest, groundOnly, isMelee, leapLanding, leapStopped, meleeHeightTol, startAttack, updateAttack } from "./attacks.ts";
 import type { NpcSystem } from "./NpcSystem.ts";
@@ -113,6 +113,12 @@ function calm(sys: NpcSystem, n: Npc, now: number, dt: number) {
 /** Nearest player this NPC can see (cone + line of sight), hear, or heard shooting. */
 function perceive(sys: NpcSystem, n: Npc, now: number): PlayerActor | null {
   const def = n.def;
+  // A trial creature (missions' defend waves) knows where its runner is and sees nobody else.
+  const owner = sys.ownerOf(n);
+  if (owner !== null) {
+    for (const lp of sys.live) if (!lp.untouchable && lp.a.identity.userId === owner && dist(n.pos, lp.pos) <= NPC_TUNING.ownedSenseM) return lp.a;
+    return null;
+  }
   const reach = Math.max(def.sight, def.hearing);
   if (n.nearD > Math.max(reach, NPC_RULES.noiseRadius)) return null;
   const cosHalf = Math.cos(((def.fov / 2) * Math.PI) / 180);
@@ -147,7 +153,7 @@ function perceive(sys: NpcSystem, n: Npc, now: number): PlayerActor | null {
 
 /** Take a target; pack mates within 15 m share it. Wolves howl first (1.5 s). */
 export function aggro(sys: NpcSystem, n: Npc, p: PlayerActor, now: number, share: boolean) {
-  if (n.dead || n.mode === MODE.EVADE) return;
+  if (n.dead || n.mode === MODE.EVADE || !sys.mayEngage(n, p)) return;
   // Woken again by the target it already gave up on, still out of reach: give up again at once
   // (no howl, no fresh window for a pad shooter; F12 final Opus SF9).
   if (n.unreachBy?.id === p.id && now - n.unreachBy.since >= NPC_TUNING.unreachableMs) {
@@ -197,7 +203,7 @@ function chase(sys: NpcSystem, n: Npc, now: number, dt: number) {
     return;
   }
   const d = flatDist(n.pos, tp);
-  if (d <= def.hearing) n.lastSeenAt = now;
+  if (d <= def.hearing || (sys.ownerOf(n) !== null && d <= NPC_TUNING.ownedSenseM)) n.lastSeenAt = now; // a trial creature never loses its runner
   else if (now - n.lastLosAt > 500) {
     n.lastLosAt = now;
     if (canSee(sys, chest(n.pos, Math.min(n.height * 0.8, 2)), chest(tp, 1.4))) n.lastSeenAt = now;
@@ -499,7 +505,7 @@ export function onNpcHurt(sys: NpcSystem, n: Npc, p: PlayerActor | null, now: nu
     sys.setAnim(n, NPC_ANIM.HIT);
     sys.sendNear(n.pos, 120, "npcAtk", { id: n.id, a: -1, sh: -1, ms: 0, x: 0, y: 0, z: 0, dx: 0, dy: 0, dz: 0, r: 0, w: 0, l: 0, ang: 0, c: 0 });
   }
-  if (n.mode === MODE.EVADE || n.mode === MODE.SPAWN || !p) return;
+  if (n.mode === MODE.EVADE || n.mode === MODE.SPAWN || !p || !sys.mayEngage(n, p)) return;
   const pp = actorPos(p);
   if (def.temper === "critter") {
     if (n.mode === MODE.FLEE) return;
@@ -638,6 +644,7 @@ export function moveDir(sys: NpcSystem, n: Npc, dir: V3, speed: number, dt: numb
     n.facing = d;
   }
   const out: V3 = [0, 0, 0];
+  speed *= npcSpeedFactor(n, sys.world.now()); // a spell's slow (Frostbloom)
   const used = step(sys.ground, n.pos, d, speed * dt, n.def.locomotion, n.def.hover ?? 0, n.radius, out, avoidSafe, n.slideSide, n.height);
   sys.setAnim(n, anim);
   n.blockedMove = used < 0;

@@ -13,8 +13,10 @@ import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import { HORSE, HORSE_COATS } from "@firstlight/shared/content/horse";
 import { config, flags } from "../config.ts";
 import { releaseAvatarObjects } from "./Avatars.ts";
-import { avatarRim, toonRamp } from "./avatars/material.ts";
+import { avatarRim, NIGHT_RIM, toonRamp } from "./avatars/material.ts";
+import { atmo } from "./atmosphere.ts";
 import { leanShadow } from "./leanShadow.ts";
+import { hideBareBones } from "./bareBones.ts";
 import { keptSamples } from "./warmup.ts";
 
 // ---- assets ----------------------------------------------------------------------------------
@@ -101,7 +103,7 @@ export function horseMaterial(): THREE.MeshToonNodeMaterial {
   m.gradientMap = toonRamp();
   m.colorNode = hide.mul(role.x).add(mane.mul(role.y)).add(blanket.mul(role.z)).add(color(LEATHER).mul(leather));
   // NodeMaterial.setupLighting() honours emissiveNode; the toon typings omit it (as for avatars).
-  (m as THREE.MeshToonNodeMaterial & { emissiveNode: THREE.Node | null }).emissiveNode = avatarRim.color.mul(fres).mul(avatarRim.strength);
+  (m as THREE.MeshToonNodeMaterial & { emissiveNode: THREE.Node | null }).emissiveNode = avatarRim.color.mul(fres).mul(avatarRim.strength.add(atmo.nightRim.mul(NIGHT_RIM)));
   m.name = "horse-coat";
   leanShadow(m); // shadows need no colour: one shadow build for every coat (#39, D-load-3)
   coatMat = m;
@@ -314,6 +316,7 @@ export class HorseView {
     const fit = this.stirrupFit.clone();
     this.stirrupFit.set(0, 0, 0);
     this.setStirrupFit(fit);
+    if (!flags.has("allbones")) hideBareBones(model); // the scene walks skip bones that hold nothing (#49)
     this.root.add(model);
     this.mixer = new THREE.AnimationMixer(model);
     for (const [name, clip] of a.clips) {

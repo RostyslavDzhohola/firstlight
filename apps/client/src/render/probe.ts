@@ -1,40 +1,90 @@
 // Quality auto-pick (SPEC §7.3): software / blocklisted adapters → Low; otherwise a ~2 s probe at
-// Medium on the current view, decided by decideProbe() (timing.ts): GPU timestamps where available
-// (p50 < 6 ms → High, then a short re-probe at High for Ultra; > 14 ms → Low), else rAF time
-// (vsync-limited: only "too slow" or a very fast high-refresh display can be told apart).
-// A probe with fewer than 30 frames or a hidden tab is invalid: Medium for this session, not saved.
+// Medium on the current view, decided by decideProbe() (timing.ts): GPU timestamps where available,
+// the GPU's busy time on WebGPU (D-framerate-2) (p50 < 6 ms → High, then a short re-probe at High for
+// Ultra, or back to Medium if High misses its own 10 ms; > 14 ms while the frames also miss the
+// display → Low), else rAF time (vsync-limited: only "too slow" or a very fast high-refresh display
+// can be told apart).
+// A probe with fewer than 30 frames, or with the tab hidden at any moment of it (warm-ups, the High
+// re-probe and the extras measurement included), is invalid: Medium for this session, no extras, not saved.
+// On Medium with a busy-time reading, the probe also plans the High extras this device's headroom
+// pays for and measures again with them on, keeping only what that measurement fits (D-framerate-3):
+// its GPU busy time, and its main-thread time and frame interval against Medium's (extrasRegression).
 
 import { isSoftwareRenderer, type RenderCtx } from "./renderer.ts";
-import { beginManualFrame, decideProbe, decideUltra, type TimestampSource } from "./timing.ts";
-import { warmup } from "./warmup.ts";
-import type { Tier } from "./quality.ts";
+import { beginManualFrame, decideProbe, decideUltra, percentile, PROBE_MIN_GPU, type TimestampSource } from "./timing.ts";
+import { warmup, type WarmupHooks, type WarmupProgress } from "./warmup.ts";
+import { EXTRA_COSTS, extrasBudget, extrasRegression, keepExtras, planExtras, type CostModel } from "./extrasPlan.ts";
+import { TIER_TABLE, type Extra, type Tier } from "./quality.ts";
 
 export interface ProbeResult {
   tier: Tier;
   /** False → apply for this session only (`ctx.setProbedTier(tier, { persist: false })`). */
   valid: boolean;
-  method: "software" | "gpu-timer" | "raf" | "invalid" | "error";
+  method: "software" | "gpu-busy" | "gpu-timer" | "raf" | "invalid" | "error";
   gpuP50: number | null;
   rafP50: number;
   highGpuP50: number | null;
+  /** Main-thread ms per probe frame (world update + render submission), p50. */
+  cpuP50: number | null;
+  /** The extras measurement's main-thread p50 and frame interval p50 (null: not measured). */
+  extrasCpuP50: number | null;
+  extrasRafP50: number | null;
+  /** The extras on top of the tier (Medium only, D-framerate-3), and the busy time measured with them. */
+  extras: Extra[];
+  extrasGpuP50: number | null;
   ms: number;
+}
+
+/**
+ * The world the probe draws. Each tier it tries rebuilds what the tier sizes (the grass clears every
+ * cell): `settle` waits, bounded, until that is back, so the stage's warm-up compiles it and its
+ * measurement draws it; `update` streams the world before every frame, as play does (planet
+ * graphics review, finding 1).
+ */
+export interface ProbeWorld {
+  update(): void;
+  settle?(): Promise<void>;
 }
 
 const nextFrame = () => new Promise<number>((r) => requestAnimationFrame((t) => r(t)));
 const visible = () => typeof document === "undefined" || document.visibilityState === "visible";
 
-async function measure(ctx: RenderCtx, ms: number, beforeFrame?: () => void, onFrac?: (f: number) => void): Promise<{ gpu: number[]; raf: number[]; visible: boolean }> {
+/**
+ * The tab's visibility over the whole probe: hidden at any check, or a `visibilitychange` to hidden in
+ * between (a moment the frames never saw), and the probe is invalid. `stop()` removes the listener.
+ */
+function watchVisibility(): { check(): boolean; stop(): void } {
+  const doc = typeof document === "undefined" ? undefined : (document as Partial<Pick<Document, "addEventListener" | "removeEventListener">>);
+  let stayed = visible();
+  const on = () => {
+    if (!visible()) stayed = false;
+  };
+  doc?.addEventListener?.("visibilitychange", on);
+  return {
+    check() {
+      on();
+      return stayed;
+    },
+    stop: () => doc?.removeEventListener?.("visibilitychange", on),
+  };
+}
+
+async function measure(ctx: RenderCtx, ms: number, beforeFrame?: () => void, onFrac?: (f: number) => void): Promise<{ gpu: number[]; busy: number[]; raf: number[]; cpu: number[]; visible: boolean }> {
   const raf: number[] = [];
+  const cpu: number[] = [];
   let stayedVisible = visible();
   const src = ctx.renderer as unknown as TimestampSource;
   ctx.gpu.drain();
+  ctx.gpu.drainBusy();
   let last = await nextFrame();
   const begin = last;
   const end = last + ms;
   for (;;) {
+    const c0 = performance.now();
     beforeFrame?.();
     beginManualFrame(src);
     ctx.render();
+    cpu.push(performance.now() - c0);
     ctx.gpu.frame();
     const t = await nextFrame();
     raf.push(t - last);
@@ -46,14 +96,14 @@ async function measure(ctx: RenderCtx, ms: number, beforeFrame?: () => void, onF
   // Let the last timestamp resolves land.
   await nextFrame();
   await nextFrame();
-  return { gpu: ctx.gpu.drain(), raf, visible: stayedVisible };
+  return { gpu: ctx.gpu.drain(), busy: ctx.gpu.drainBusy(), raf, cpu, visible: stayedVisible };
 }
 
 /**
  * Never throws: failures come back as an invalid Medium result. `onProgress(0–1)` moves through the
  * warm-up and the measurement (and the re-probe at High, when there is one), monotonic, ending at 1.
  */
-export async function runProbe(ctx: RenderCtx, beforeFrame?: () => void, onProgress?: (frac: number) => void): Promise<ProbeResult> {
+export async function runProbe(ctx: RenderCtx, world?: ProbeWorld | (() => void), onProgress?: (frac: number) => void, costs: CostModel = EXTRA_COSTS): Promise<ProbeResult> {
   let shown = 0;
   const report = (f: number) => {
     const next = Math.max(shown, Math.min(1, f));
@@ -62,37 +112,99 @@ export async function runProbe(ctx: RenderCtx, beforeFrame?: () => void, onProgr
     onProgress?.(shown);
   };
   try {
-    return await probeTier(ctx, beforeFrame, (a, b) => (f) => report(a + (b - a) * f));
+    return await probeTier(ctx, typeof world === "function" ? { update: world } : world, (a, b) => (f) => report(a + (b - a) * f), costs);
   } finally {
     report(1);
   }
 }
 
 /** The probe itself; `part(a, b)` reports a stage's own 0–1 as a…b of the probe's bar. */
-async function probeTier(ctx: RenderCtx, beforeFrame: (() => void) | undefined, part: (a: number, b: number) => (f: number) => void): Promise<ProbeResult> {
+async function probeTier(ctx: RenderCtx, world: ProbeWorld | undefined, part: (a: number, b: number) => (f: number) => void, costs: CostModel): Promise<ProbeResult> {
   const t0 = performance.now();
   if (isSoftwareRenderer(ctx.gpuName)) {
-    return { tier: "low", valid: true, method: "software", gpuP50: null, rafP50: 0, highGpuP50: null, ms: 0 };
+    return { tier: "low", valid: true, method: "software", gpuP50: null, rafP50: 0, highGpuP50: null, cpuP50: null, extrasCpuP50: null, extrasRafP50: null, extras: [], extrasGpuP50: null, ms: 0 };
   }
+  const watch = watchVisibility();
+  const hidden = (): ProbeResult => ({ tier: "medium", valid: false, method: "invalid", gpuP50: null, rafP50: 0, highGpuP50: null, cpuP50: null, extrasCpuP50: null, extrasRafP50: null, extras: [], extrasGpuP50: null, ms: performance.now() - t0 });
+  const frame = () => {
+    watch.check();
+    world?.update();
+  };
+  /** Switch to a stage's tier and wait for the world it sizes before warming and measuring it. */
+  const stage = async (tier: Tier, extras: readonly Extra[]) => {
+    ctx.setTier(tier, { persist: false, auto: true, extras });
+    await world?.settle?.();
+  };
   try {
-    ctx.setTier("medium", { persist: false, auto: true });
-    await warmup(ctx, { frames: 3, beforeFrame, label: "probe", onProgress: (p) => part(0, 0.45)(p.frac) });
-    const m = await measure(ctx, 2000, beforeFrame, part(0.45, 0.7));
+    await stage("medium", []); // plain Medium, whatever was saved
+    await warmup(ctx, { frames: 3, beforeFrame: frame, label: "probe", onProgress: (p) => part(0, 0.45)(p.frac) });
+    const m = await measure(ctx, 2000, frame, part(0.45, 0.7));
     // Drop the first few frames (pipeline creation tails).
-    const d = decideProbe({ raf: m.raf.slice(3), gpu: m.gpu.slice(2), gpuAvailable: ctx.gpu.available, visible: m.visible });
+    const d = decideProbe({ raf: m.raf.slice(3), gpu: m.gpu.slice(2), busy: m.busy.slice(2), gpuAvailable: ctx.gpu.available, visible: m.visible && watch.check() });
+    const cpuP50 = m.cpu.length > 3 ? percentile(m.cpu.slice(3), 0.5) : null;
     let tier = d.tier;
     let highGpuP50: number | null = null;
+    let extras: Extra[] = [];
+    let extrasGpuP50: number | null = null;
+    let extrasCpuP50: number | null = null;
+    let extrasRafP50: number | null = null;
     if (d.valid && d.reprobeHigh) {
-      ctx.setTier("high", { persist: false, auto: true });
-      await warmup(ctx, { frames: 3, beforeFrame, label: "probe", onProgress: (p) => part(0.7, 0.9)(p.frac) });
-      const h = await measure(ctx, 1200, beforeFrame, part(0.9, 1));
-      const u = h.visible ? decideUltra(h.gpu.slice(2)) : { tier: "high" as Tier, gpuP50: null };
-      tier = u.tier;
+      await stage("high", []);
+      await warmup(ctx, { frames: 3, beforeFrame: frame, label: "probe", onProgress: (p) => part(0.7, 0.85)(p.frac) });
+      const h = await measure(ctx, 1200, frame, part(0.85, 0.9));
+      if (!h.visible || !watch.check()) return hidden(); // not a High that was never measured
+      const u = decideUltra(h.gpu.slice(2), h.busy.slice(2));
+      tier = u.tier; // Medium again when High missed its own budget (frame rate first)
       highGpuP50 = u.gpuP50;
     }
-    return { tier, valid: d.valid, method: d.method, gpuP50: d.gpuP50, rafP50: d.rafP50, highGpuP50, ms: performance.now() - t0 };
+    if (d.valid && tier === "medium" && d.method === "gpu-busy" && d.gpuP50 !== null) {
+      const budgetMs = extrasBudget(d.rafP50, TIER_TABLE.medium.gpuTargetMs); // the busiest scenes' tail too
+      const plan = planExtras({ gpuMs: d.gpuP50, cpuMs: cpuP50, frameMs: d.rafP50, budgetMs }, costs);
+      if (plan.extras.length) {
+        await stage("medium", plan.extras);
+        await warmup(ctx, { frames: 3, beforeFrame: frame, label: "probe", onProgress: (p) => part(0.9, 0.95)(p.frac) });
+        const v = await measure(ctx, 1200, frame, part(0.95, 1)); // as long as the High re-probe
+        if (!v.visible || !watch.check()) return hidden();
+        const busy = v.busy.slice(2);
+        extrasCpuP50 = v.cpu.length > 3 ? percentile(v.cpu.slice(3), 0.5) : null;
+        extrasRafP50 = percentile(v.raf.slice(3), 0.5);
+        if (busy.length >= PROBE_MIN_GPU) {
+          extrasGpuP50 = percentile(busy, 0.5);
+          const regressed = extrasRegression({ cpuMs: cpuP50, frameMs: d.rafP50 }, { cpuMs: extrasCpuP50, frameMs: extrasRafP50 }, plan);
+          extras = regressed ? [] : keepExtras(plan, extrasGpuP50, budgetMs, costs);
+        }
+      }
+    }
+    if (!watch.check()) return hidden();
+    return { tier, valid: d.valid, method: d.method, gpuP50: d.gpuP50, rafP50: d.rafP50, highGpuP50, cpuP50, extrasCpuP50, extrasRafP50, extras, extrasGpuP50, ms: performance.now() - t0 };
   } catch (e) {
     console.warn("[gfx] probe failed, using medium for this session", e);
-    return { tier: "medium", valid: false, method: "error", gpuP50: null, rafP50: 0, highGpuP50: null, ms: performance.now() - t0 };
+    return { tier: "medium", valid: false, method: "error", gpuP50: null, rafP50: 0, highGpuP50: null, cpuP50: null, extrasCpuP50: null, extrasRafP50: null, extras: [], extrasGpuP50: null, ms: performance.now() - t0 };
+  } finally {
+    watch.stop();
   }
+}
+
+/**
+ * The live re-probe (the performance panel's "Re-run probe"), behind the loading screen: the probe
+ * on the world as play draws it, the tier it picked applied, then the full warm-up. Every tier the
+ * probe tries and the one it ends on clear what the tier sizes (the grass), so each warm-up and
+ * measurement waits for `world.settle` and streams with `world.update`: nothing the next frames of
+ * play draw is first compiled there (planet graphics review, finding 1).
+ */
+export async function reprobe(ctx: RenderCtx, o: {
+  world: ProbeWorld;
+  hooks?: WarmupHooks[];
+  /** After the probed tier is applied, before its warm-up (what follows the tier: textures, packs). */
+  afterTier?: () => Promise<void> | void;
+  onTuning?: (frac: number) => void;
+  onWarmup?: (p: WarmupProgress) => void;
+}): Promise<ProbeResult> {
+  const r = await runProbe(ctx, o.world, o.onTuning);
+  console.info(`[gfx] probe → ${r.tier}${r.valid ? "" : " (not saved)"}`, r);
+  ctx.setProbedTier(r.tier, { persist: r.valid, clearPinned: true, extras: r.extras });
+  await o.afterTier?.();
+  await o.world.settle?.();
+  await warmup(ctx, { frames: 3, hooks: o.hooks, beforeFrame: () => o.world.update(), label: "reprobe", onProgress: o.onWarmup });
+  return r;
 }

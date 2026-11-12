@@ -5,6 +5,7 @@
 // Usage:
 //   node src/load.ts --url http://localhost:2567 --bots 40 --body arcadia --seconds 120 --dev
 //   LOADTEST_SECRET=… node src/load.ts --url https://api.firstlight.one4all.dev --bots 40 --seconds 600
+// Production also needs LOADTEST_ENABLED=1 on the server for the run, and a strong secret (D-security-1, -2).
 
 import { BODIES, createTerrain, padDirs, type BodyId } from "@firstlight/shared";
 import { PROTOCOL_VERSION } from "@firstlight/shared/net/protocol";
@@ -48,9 +49,18 @@ const terrain = createTerrain(body);
 const R = body.radius;
 const pad = padDirs(body)[0]!;
 
+/** fetch, waiting and retrying while the server says 429 (bots have their own budgets, D-security-1). */
+async function fetchPaced(url: string, init: RequestInit): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const r = await fetch(url, init);
+    if (r.status !== 429 || attempt >= 20) return r;
+    await new Promise((ok) => setTimeout(ok, 500 + attempt * 250));
+  }
+}
+
 async function token(i: number): Promise<string> {
   if (DEV) return `dev:bot${i}:Bot${i}:loadtest`;
-  const r = await fetch(`${URL_}/api/test/bot-token`, { method: "POST", headers: { "x-loadtest-secret": SECRET, "Content-Type": "application/json" }, body: JSON.stringify({ name: `Bot${i}` }) });
+  const r = await fetchPaced(`${URL_}/api/test/bot-token`, { method: "POST", headers: { "x-loadtest-secret": SECRET, "Content-Type": "application/json" }, body: JSON.stringify({ name: `Bot${i}` }) });
   if (!r.ok) throw new Error(`bot-token ${r.status}`);
   return ((await r.json()) as { token: string }).token;
 }
@@ -80,7 +90,7 @@ let joinFailures = 0;
 async function spawnBot(i: number) {
   try {
     const tok = await token(i);
-    const r = await fetch(`${URL_}/api/play`, { method: "POST", headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json" }, body: JSON.stringify({ body: BODY, loadtest: true, v: PROTOCOL_VERSION }) });
+    const r = await fetchPaced(`${URL_}/api/play`, { method: "POST", headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json" }, body: JSON.stringify({ body: BODY, loadtest: true, v: PROTOCOL_VERSION }) });
     const res = (await r.json()) as { ok: boolean; reservation?: unknown };
     if (!res.ok) throw new Error(JSON.stringify(res));
     const client = new Client(URL_);

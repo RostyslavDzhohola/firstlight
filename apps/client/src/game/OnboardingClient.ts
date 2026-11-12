@@ -16,12 +16,16 @@ import { weaponColor } from "../render/effects.ts";
 import { pauseExtras, type PauseExtra } from "../ui/menu.ts";
 import { OnboardingHud } from "../ui/onboarding.ts";
 import { Panel } from "../ui/panels.ts";
+import { MapPanel } from "../ui/map.ts";
+import { saveReady, skipTutorialSub } from "../ui/saveOffer.ts";
 import { voice } from "../voice/index.ts";
 import { portalAt } from "../world/portalEntry.ts";
 import { TrainingDummies } from "../world/TrainingDummies.ts";
 import { DoneCardTimer } from "./doneCardTimer.ts";
 import type { Game } from "./Game.ts";
 import { OnboardingProgress } from "./onboardingProgress.ts";
+import { dummyCalloutSub, dummyTargets, guideTargets, nextDummy } from "./onboardingTargets.ts";
+import type { StepId } from "./onboardingSteps.ts";
 import type { ClientSystem } from "./systems.ts";
 
 /** Time the end card stays up, counted only while the game is on screen and playable (doneCardTimer.ts). */
@@ -59,6 +63,11 @@ export class OnboardingClient implements ClientSystem {
   private lastTrainAt = 0;
   /** CombatClient hook: the tutorial's tips or its last card are up (the "Progress not saved" toast waits). */
   private readonly busy = () => this.active || !!this.hud;
+  /** The card's current step (updated every frame while the tutorial runs). */
+  private step: StepId | undefined = undefined;
+  private readonly onDummyStep = () => this.active && this.step === "attack";
+  /** Map and minimap: the dummies still standing during the dummy step (#31). */
+  private readonly targets = () => (this.active ? dummyTargets(this.step, this.dummies.dummies.map((d) => d.down)) : []);
   /** The world is on screen and the player can act: no loading screen, pause menu, panel, photo mode or hidden tab. */
   private readonly playable = () => {
     const g = this.game;
@@ -66,7 +75,13 @@ export class OnboardingClient implements ClientSystem {
   };
   private readonly pauseRow = (): PauseExtra | null =>
     this.active
-      ? { icon: "arrow-r", title: "Skip tutorial", sub: this.paid ? "Hide the rest of the tips." : "No more XP and no Spark medal. It won't come back.", onClick: () => this.skip() }
+      ? {
+          icon: "arrow-r",
+          title: "Skip tutorial",
+          sub: skipTutorialSub({ paid: this.paid, saveReady: this.saveReady() }),
+          confirm: this.paid ? undefined : "Click again to skip the tutorial.",
+          onClick: () => this.skip(),
+        }
       : null;
 
   constructor(game: Game) {
@@ -96,6 +111,8 @@ export class OnboardingClient implements ClientSystem {
     game.combat.training = (def, tier, now) => this.attack(def, tier, now);
     // Level 2 is paid on the dummies: the "Progress not saved" toast waits until the HUD is gone.
     game.combat.tutorialBusy = this.busy;
+    game.combat.dummyStep = this.onDummyStep;
+    guideTargets.current = this.targets;
     pauseExtras.add(this.pauseRow);
   }
 
@@ -106,6 +123,11 @@ export class OnboardingClient implements ClientSystem {
     this.hud = new OnboardingHud(layer, () => this.skip(), config.publicRepo ? config.repoUrl : null, {
       expanded: this.progress.expanded, onExpanded: (expanded) => this.progress.setExpanded(expanded),
     });
+  }
+
+  /** Saving is unlocked (D34: level 2, the best this session counts after a rebirth). */
+  private saveReady(): boolean {
+    return saveReady(Math.max(this.game.hud.you?.level ?? 1, this.game.combat?.saveNudge?.best ?? 0));
   }
 
   private skip() {
@@ -218,15 +240,16 @@ export class OnboardingClient implements ClientSystem {
     this.hasLast = true;
     const playing = g.input.inPlay && !g.photo?.active && !Panel.current;
     if (playing && g.input.pressed.has("KeyT")) this.hud.toggleChecklist();
-    const look = playing ? (Math.abs(g.input.mouseDX) + Math.abs(g.input.mouseDY)) * g.input.sensitivity : 0;
+    const look = playing ? (Math.abs(g.input.mouseDX) + Math.abs(g.input.mouseDY)) * g.input.sensitivity + Math.abs(g.input.lookYaw) + Math.abs(g.input.lookPitch) : 0;
     const completed = steps.observe({
       dt,
       moved: playing ? moved : 0,
       lookRad: look,
       anim: g.player.anim,
       dummiesDown: down,
-      // Keys as the game saw them this frame (M and E open panels at once, so no panel check here).
+      // Keys as the game saw them this frame (E opens a panel at once, so no panel check here).
       pressed: g.photo?.active ? NO_KEYS : g.input.pressed,
+      mapOpen: Panel.current instanceof MapPanel,
       phrased: this.phrased,
       voiceOn: !!voice()?.optedIn,
       inPortal: !!portalAt(this.portals, p.x, p.y, p.z),
@@ -244,21 +267,25 @@ export class OnboardingClient implements ClientSystem {
 
     // Point at the dummies, then at the Arcadia portal, while that's the step on the card.
     const step = steps.current?.id;
+    this.step = step;
     let at: THREE.Vector3 | null = null;
     let title = "";
     let sub = "";
     if (step === "attack") {
-      at = this.dummies.chest(1, _a).addScaledVector(_b.copy(_a).normalize(), 0.9);
+      // The nearest dummy still standing; none left, no marker (Codex review: it always aimed at #1).
+      const next = nextDummy(this.dummies.dummies.map((d) => d.down), [p.x, p.y, p.z]);
+      at = next === null ? null : this.dummies.chest(next, _a).addScaledVector(_b.copy(_a).normalize(), 0.9);
       title = `Training dummies · ${down} / 3 down`;
-      sub = "10 XP each. Three hits knock one down.";
+      sub = dummyCalloutSub(at ? at.distanceTo(p) : 0);
     } else if (step === "portal") {
       const spot = this.portals.find((x) => x.to === "arcadia");
       if (spot) at = _a.set(spot.center[0], spot.center[1], spot.center[2]);
       title = "Arcadia";
       sub = "Levels 1–7 · walk in";
     }
-    // Off screen or behind the camera it's pinned to the screen edge with an arrow (wayfinding).
-    this.hud.setCallout(at && at.distanceTo(p) < 80 ? at.project(g.ctx.camera) : null, title, sub);
+    // Off screen or behind the camera it's pinned to the screen edge with an arrow (wayfinding). The
+    // dummies are pointed at from any distance: a player who wandered off is pointed back (#31).
+    this.hud.setCallout(at && (step === "attack" || at.distanceTo(p) < 80) ? at.project(g.ctx.camera) : null, title, sub);
   }
 
   dispose() {
@@ -281,6 +308,8 @@ export class OnboardingClient implements ClientSystem {
       return;
     }
     if (this.game.combat.tutorialBusy === this.busy) this.game.combat.tutorialBusy = null;
+    if (this.game.combat.dummyStep === this.onDummyStep) this.game.combat.dummyStep = null;
+    if (guideTargets.current === this.targets) guideTargets.current = () => [];
     hud?.dispose();
     this.hud = null;
   }

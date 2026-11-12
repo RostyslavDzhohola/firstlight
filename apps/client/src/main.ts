@@ -39,6 +39,16 @@ $("copy-link")?.addEventListener("click", async () => {
   if (c) c.hidden = false;
 });
 
+// Phones and tablets: "Try it on this device (experimental)" starts the game on the Low tier with the
+// touch controls (D-controls-6). A reload with those flags, then the usual Play (autoplay).
+$("try-touch")?.addEventListener("click", () => {
+  const q = new URLSearchParams(location.search);
+  q.set("touch", "");
+  q.set("tier", "low");
+  q.set("autoplay", "");
+  location.search = q.toString().replace(/=(?=&|$)/g, "");
+});
+
 /** The home cards, account buttons and share row (src/home/home.ts), started once. */
 let home: Promise<void> | null = null;
 function startHome(): Promise<void> {

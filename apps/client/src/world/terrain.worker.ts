@@ -10,6 +10,7 @@ import {
 import { LOOKS } from "../render/looks.ts";
 import { skyDir, type V3 } from "../render/sunFrame.ts";
 import { grassWeight, padGrassMask, PALETTES, terrainColor } from "./palette.ts";
+import { regionAt, type Region } from "../render/regionNoise.ts";
 import { siteGrassMask } from "./siteGrass.ts";
 
 const siteMasks = new Map<BodyId, ((x: number, y: number, z: number) => number) | null>();
@@ -188,10 +189,25 @@ self.onmessage = (e: MessageEvent<ChunkRequest>) => {
   if (!siteMasks.has(req.body)) siteMasks.set(req.body, siteGrassMask(body));
   const siteMask = siteMasks.get(req.body)!;
 
+  // Worn earth (0..1) per grid vertex: round the landing pads' aprons and along the site's paths
+  // and footprints, the same masks that keep the grass off them, a little wider.
+  // The hub keeps its own ground (the castle town's lawns and paving are its look): no wear, no regions.
+  const wear = new Float32Array(gridCount);
+  if (!hub) {
+    for (let b = 0; b <= q; b++) {
+      for (let a = 0; a <= q; a++) {
+        gridDir(req.face, i0 + a, j0 + b, n, dir);
+        let m = padGrassMask(pads, dir[0], dir[1], dir[2], R);
+        if (siteMask) m *= siteMask(dir[0], dir[1], dir[2]);
+        wear[b * side + a] = (1 - m) * 0.85;
+      }
+    }
+  }
+  const region: Region = { dry: 0, deep: 0, patch: 0 };
   for (let v = 0; v < count; v++) {
     const x = g.positions[v * 3]!, y = g.positions[v * 3 + 1]!, z = g.positions[v * 3 + 2]!;
     const nz = hash01(Math.floor(x * 0.7), Math.floor(y * 0.7), Math.floor(z * 0.7)) * 2 - 1;
-    terrainColor(pal, g.heights[v]!, water, g.flatness[v]!, nz * 0.6, colors, v * 3);
+    terrainColor(pal, g.heights[v]!, water, g.flatness[v]!, nz * 0.6, colors, v * 3, hub ? null : regionAt(x, y, z, region), v < gridCount ? wear[v]! : 0);
   }
   const bake = computeBake(terrain, req.face, req.cx, req.cy, req.bakeSun, g.heights);
 

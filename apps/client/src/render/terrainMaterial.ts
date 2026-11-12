@@ -2,17 +2,62 @@
 // shader adds procedural detail with biplanar sampling (Quilez: 2 fetches instead of 3) of a tiling
 // noise texture, slope/height variation (rock strata on cliffs, wet shore band), baked AO, and on
 // Low the baked sun visibility. High+ perturbs normals from the detail height (Mikkelsen bump).
-// One material per (layers, normals) variant, cached and shared by every chunk of every body.
+// One material per (layers, normals, layers-on) variant, cached and shared by every chunk of every body.
+//
+// Ground layers (`terrainfx`, D-gfx-worlds-1): the worker's vertex colours are a soft, 2–4 m wide
+// blend, so slopes read as smooth gradients. On top of them the shader draws each layer per pixel
+// from the slope and the height, with its edge broken up by the detail noise the material already
+// samples (no extra texture fetch): steep faces turn to rock with dark cracks, a band of worn earth
+// lies under them, the beach has a ragged edge, snow settles on flat high ground, moss grows on
+// rock that faces the sky and dry flats crack. The colours and amounts are shared uniforms
+// (applyGroundLook), so every body draws with the same shader.
 
 import * as THREE from "three/webgpu";
 import {
-  abs, attribute, cameraPosition, clamp, cross, dFdx, dFdy, distance, dot, float, length, mix, normalize,
-  normalViewGeometry, normalWorldGeometry, positionView, positionWorld, sign, sin, smoothstep, step,
+  abs, attribute, cameraPosition, clamp, cross, dFdx, dFdy, distance, dot, float, length, max, mix, normalize,
+  normalViewGeometry, normalWorldGeometry, positionView, positionWorld, pow, sign, sin, smoothstep, step,
   texture, uniform, vec2, vec3, vertexColor, renderGroup,
 } from "three/tsl";
 import { atmo } from "./atmosphere.ts";
 import { detailNoiseTexture } from "./noiseTexture.ts";
 import type { ResolvedSettings } from "./quality.ts";
+import type { GroundLook } from "./worldLooks.ts";
+
+const groundColor = (hex: number) => uniform(new THREE.Color(hex)).setGroup(renderGroup);
+
+/** The current body's per-pixel ground layers (worldLooks.ts GroundLook). */
+export const groundUniforms = {
+  rock: groundColor(0x7b8780),
+  dirt: groundColor(0x6b5238),
+  sand: groundColor(0xf2d58a),
+  snow: groundColor(0xf6fbff),
+  snowLine: uniform(999).setGroup(renderGroup),
+  moss: uniform(0).setGroup(renderGroup),
+  mossColor: groundColor(0x4f6a26),
+  cracks: uniform(0).setGroup(renderGroup),
+  /** Turf under the grass (D-gfx-worlds-6): the blade roots' colour and how far the ground takes it
+   *  (0: bare, as on Meridian and in the hub), out to `underReach` metres (the grass radius; 0: no grass). */
+  under: groundColor(0x16361a),
+  underAmt: uniform(0).setGroup(renderGroup),
+  underReach: uniform(0).setGroup(renderGroup),
+  /** Lichen or dust on the scattered rocks (vegetationAssets.ts): colour and amount. */
+  lichen: groundColor(0xb8c070),
+  lichenAmt: uniform(0).setGroup(renderGroup),
+};
+
+export function applyGroundLook(g: GroundLook) {
+  const u = groundUniforms;
+  u.rock.value.setHex(g.rock);
+  u.dirt.value.setHex(g.dirt);
+  u.sand.value.setHex(g.sand);
+  u.snow.value.setHex(g.snow);
+  u.snowLine.value = g.snowLine;
+  u.moss.value = g.moss;
+  u.mossColor.value.setHex(g.mossColor);
+  u.cracks.value = g.cracks;
+  u.lichen.value.setHex(g.lichen);
+  u.lichenAmt.value = g.lichenAmt;
+}
 
 export const terrainUniforms = {
   /** How much of the baked concavity AO to apply (less when GTAO runs). */
@@ -62,10 +107,11 @@ const cache = new Map<string, THREE.MeshStandardNodeMaterial>();
 export function terrainMaterialFor(s: ResolvedSettings): THREE.MeshStandardNodeMaterial {
   const layers = s.on.detail ? s.terrain.detailLayers : 0;
   const normals = layers >= 4 && s.terrain.normals;
-  const key = `${layers}:${normals}`;
+  const fx = layers >= 2 && s.on.terrainfx;
+  const key = `${layers}:${normals}:${fx}`;
   let m = cache.get(key);
   if (!m) {
-    m = build(layers, normals);
+    m = build(layers, normals, fx);
     cache.set(key, m);
   }
   return m;
@@ -77,9 +123,9 @@ export function applyTerrainSettings(s: ResolvedSettings) {
   terrainUniforms.aoStrength.value = s.on.ao ? 0.45 : 0.85;
 }
 
-function build(layers: number, normals: boolean): THREE.MeshStandardNodeMaterial {
+function build(layers: number, normals: boolean, fx: boolean): THREE.MeshStandardNodeMaterial {
   const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.92, metalness: 0 });
-  m.name = `terrain-L${layers}${normals ? "N" : ""}`;
+  m.name = `terrain-L${layers}${normals ? "N" : ""}${fx ? "" : "-plain"}`;
   const base = vertexColor().rgb;
   const bake = attribute("bake", "vec2");
   const wp = positionWorld;
@@ -90,6 +136,9 @@ function build(layers: number, normals: boolean): THREE.MeshStandardNodeMaterial
   const rock = float(1).sub(smoothstep(0.72, 0.9, flat));
   let col: any = base;
   let height: any = null;
+  let snowPx: any = null;
+  let beach: any = null;
+  let puddle: any = null;
 
   if (layers >= 2) {
     const tex = detailNoiseTexture();
@@ -99,11 +148,59 @@ function build(layers: number, normals: boolean): THREE.MeshStandardNodeMaterial
     const coarse = biplanar(tex, wp.div(9.0), Ng);
     const d1 = fine.r.sub(0.5).mul(nearFade);
     const d2 = coarse.g.sub(0.5);
+    if (fx) {
+      const g = groundUniforms;
+      // The slope as each pixel sees it: the coarse noise moves the thresholds, so layers meet in a
+      // ragged line instead of a contour. `d2` is about ±0.35.
+      const slope = flat.add(d2.mul(0.16));
+      const rockPx = float(1).sub(smoothstep(0.7, 0.84, slope));
+      // Worn earth: the band between the turf and the rock face, and thin patches where the turf breaks.
+      // Patchy (the fine noise gates it), so it never draws a line along the mesh's facets.
+      const dirtPx = smoothstep(0.96, 0.8, slope.add(d2.mul(0.2))).mul(float(1).sub(rockPx)).mul(smoothstep(0.42, 0.62, coarse.r)).mul(0.7)
+        .mul(float(1).sub(smoothstep(-30.0, -12.0, h.sub(g.snowLine)))); // no earth rim round the snow fields
+      col = mix(col, g.dirt.mul(float(1).add(d2.mul(0.5))), dirtPx);
+      // Rock faces: the layer colour over the vertex blend, strata and cracks follow below.
+      const rockCol = mix(g.rock, col, 0.5);
+      col = mix(col, rockCol, rockPx);
+      // Cracks: the ridged channel's valleys, thin dark lines on rock (close up) and across dry flats.
+      // (the ridged channel peaks along thin lines; its top few percent are the cracks)
+      const crackFine = smoothstep(0.9, 0.98, fine.b).mul(nearFade);
+      const crackWide = smoothstep(0.92, 0.985, coarse.b);
+      const open = float(1).sub(rockPx).mul(smoothstep(0.9, 0.98, flat)).mul(smoothstep(0.9, 2.2, h));
+      col = col.mul(float(1).sub(crackFine.mul(rockPx).mul(0.26)));
+      col = col.mul(float(1).sub(crackWide.mul(0.7).add(crackFine.mul(0.6)).min(1.0).mul(open).mul(g.cracks).mul(0.42)));
+      col = col.mul(float(1).add(coarse.r.sub(0.5).mul(open).mul(g.cracks).mul(0.5)));
+      // Moss where rock faces the sky.
+      const mossPx = smoothstep(0.5, 0.78, slope.add(d2.mul(0.25))).mul(rockPx).mul(g.moss);
+      col = mix(col, g.mossColor.mul(float(1).add(d2.mul(0.6))), mossPx.mul(0.85));
+      // Under the grass the turf takes the blade roots' colour, near the camera where you look down
+      // into the clumps: the gaps between blades read as their shade. Only where the ground is
+      // green (the worker's worn earth and dry heath stay themselves), fading out before the grass thins.
+      const green = smoothstep(0.0, 0.03, base.g.sub(base.r));
+      const underK = green.mul(float(1).sub(rockPx)).mul(float(1).sub(dirtPx)).mul(g.underAmt)
+        .mul(float(1).sub(smoothstep(g.underReach.mul(0.3), g.underReach.mul(0.8).add(0.01), dist)));
+      col = mix(col, g.under.mul(float(1).add(d1.mul(0.5)).add(d2.mul(0.35))), underK);
+      // The beach: warm bright sand up to a ragged line a metre or two above the water, then a wide
+      // soft band where it thins into the turf (the grass thins and shortens over the same band, grass.ts).
+      const sandH = h.add(d2.mul(2.0));
+      const sandPx = float(1).sub(smoothstep(0.6, 2.1, sandH)).mul(float(1).sub(rockPx.mul(0.7))).mul(step(-0.6, h));
+      const tide = sin(h.mul(7.0).add(d2.mul(9.0))).mul(smoothstep(1.6, 0.2, h)).mul(0.045);
+      const sandCol = g.sand.mul(float(1).add(d1.mul(0.26)).add(coarse.r.sub(0.5).mul(0.14)).add(tide));
+      col = mix(col, sandCol, smoothstep(0.0, 0.75, sandPx).mul(0.96));
+      beach = sandPx;
+      // Snow on flat high ground, drifting lower in the noise's hollows.
+      const snowH = h.add(d2.mul(14.0)).sub(g.snowLine);
+      snowPx = smoothstep(-9.0, -3.0, snowH).mul(smoothstep(0.55, 0.8, slope));
+      col = mix(col, g.snow.mul(float(1).add(d1.mul(0.12))), snowPx);
+    }
     // Fine grain: stronger on rock.
     col = col.mul(float(1).add(d1.mul(mix(0.28, 0.42, rock))));
     // Coarse blotches; on grass they drift towards a sun-dried yellow.
-    col = col.mul(float(1).add(d2.mul(0.32)));
-    const dry = clamp(d2.mul(2.0), 0.0, 1.0).mul(float(1).sub(rock));
+    const offBeach = beach ? float(1).sub(beach.mul(0.55)) : float(1);
+    col = col.mul(float(1).add(d2.mul(0.32).mul(offBeach)));
+    const dry = clamp(d2.mul(2.0), 0.0, 1.0).mul(float(1).sub(rock)).mul(offBeach);
+    // Rain pools in the coarse noise's hollows on flat ground: where the sheen lies (below).
+    if (fx) puddle = smoothstep(0.02, -0.12, d2).mul(smoothstep(0.86, 0.97, flat));
     col = mix(col, col.mul(vec3(1.1, 1.04, 0.82)), dry.mul(0.6));
     height = d1.mul(0.06);
     if (layers >= 4) {
@@ -120,7 +217,9 @@ function build(layers: number, normals: boolean): THREE.MeshStandardNodeMaterial
 
   // Wet band at the shore and darker lake bed.
   const wet = float(1).sub(smoothstep(0.0, 0.9, h)).mul(float(1).sub(rock.mul(0.5)));
-  col = col.mul(mix(float(1), float(0.62), wet));
+  // Wet sand right at the water is a shade deeper; the bed below the surface darkens as before.
+  const wetBeach = beach ? mix(wet, float(1).sub(smoothstep(-0.25, 0.3, h)), 0.75) : wet;
+  col = col.mul(mix(float(1), float(0.62), wetBeach));
   // Rain (weather): flat ground soaks darker than rock faces; puddle sheen via roughness below.
   const rainWet = atmo.wet.mul(float(1).sub(rock.mul(0.4)));
   col = col.mul(mix(float(1), float(0.72), rainWet));
@@ -128,7 +227,15 @@ function build(layers: number, normals: boolean): THREE.MeshStandardNodeMaterial
   col = col.mul(mix(float(1), bake.x, terrainUniforms.aoStrength));
   col = col.mul(mix(float(1), mix(float(0.55), float(1), bake.y), terrainUniforms.bakedSun.mul(terrainUniforms.sunMatch)));
   m.colorNode = col;
-  m.roughnessNode = mix(mix(float(0.93), float(0.5), wet), float(0.32), rainWet.mul(0.85));
+  if (puddle) {
+    // Wet sheen: while it rains, flat ground mirrors the sky at grazing angles, most in the puddles.
+    const V = normalize(cameraPosition.sub(wp));
+    const graze = pow(float(1).sub(max(dot(V, up), 0.0)), 4.0);
+    const sheen = rainWet.mul(graze).mul(puddle.mul(0.75).add(0.25)).mul(smoothstep(0.8, 0.95, flat));
+    m.emissiveNode = (atmo.horizon as any).mul(sheen.mul(0.5));
+  }
+  const rough = mix(mix(float(0.93), float(0.5), wet), float(0.32), rainWet.mul(0.85));
+  m.roughnessNode = snowPx ? mix(rough, float(0.55), snowPx) : rough;
 
   if (normals && height) {
     // Mikkelsen surface-gradient bump from screen-space derivatives of the procedural height.

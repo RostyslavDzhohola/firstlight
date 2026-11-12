@@ -8,6 +8,7 @@ import { getAccount } from "./accounts.ts";
 import { loadCharacter } from "./characters.ts";
 import { stmt, tx, type Db } from "./game-db.ts";
 import { isTestAccount, markTestAccount } from "./testAccounts.ts";
+import { isAgentAccount, markAgentAccount } from "./agentAccounts.ts";
 
 export interface LinkResult {
   /** Whose live character survived: the guest's, the account's, or none existed. */
@@ -37,6 +38,9 @@ export function linkAccounts(db: Db, fromUserId: string, toUserId: string, now =
     const fromTest = isTestAccount(db, fromUserId);
     const keepTest = fromTest && opts.targetIsNew === true;
     if (keepTest) markTestAccount(db, toUserId, "link", now);
+    // An agent's guest saved to a new account stays an agent's (D-agents-1); merging into an older
+    // account doesn't flag that account.
+    if (opts.targetIsNew === true && isAgentAccount(db, fromUserId)) markAgentAccount(db, toUserId, "link", now);
 
     // account: delete the guest row first so its display name is free for the target.
     let displayName = to?.displayName ?? null;
@@ -101,6 +105,12 @@ export function linkAccounts(db: Db, fromUserId: string, toUserId: string, now =
     // things that simply follow the player
     // A test guest's claims and play sessions don't become a real account's (D-home-6).
     if (!fromTest || keepTest) stmt(db, "UPDATE hall_of_firsts SET user_id = ? WHERE user_id = ?").run(toUserId, fromUserId);
+    // The Gleamkeepers: one row per account, the earlier opening kept (a test guest's doesn't carry over).
+    if (!fromTest || keepTest) {
+      stmt(db, "INSERT OR IGNORE INTO gleam_vault (user_id, display_name, opened_at) SELECT ?, display_name, opened_at FROM gleam_vault WHERE user_id = ?").run(toUserId, fromUserId);
+      stmt(db, "UPDATE gleam_vault SET opened_at = MIN(opened_at, COALESCE((SELECT opened_at FROM gleam_vault WHERE user_id = ?), opened_at)) WHERE user_id = ?").run(fromUserId, toUserId);
+    }
+    stmt(db, "DELETE FROM gleam_vault WHERE user_id = ?").run(fromUserId);
     stmt(db, "UPDATE pile SET owner_id = ? WHERE owner_id = ?").run(toUserId, fromUserId);
     stmt(db, "UPDATE report SET reporter = ? WHERE reporter = ?").run(toUserId, fromUserId);
     stmt(db, "UPDATE report SET target = ? WHERE target = ?").run(toUserId, fromUserId);

@@ -12,6 +12,10 @@ from mathutils import Vector, Matrix
 p = argparse.ArgumentParser()
 p.add_argument('--pack', required=True)
 p.add_argument('--out', required=True)
+# The HD art pack (tools/blender/artpacks) builds only the mesh atlas, larger: --atlas-size 4096 --atlas-only.
+# Tile and border scale with it, so every texel lands at the same normalized UV as in the shipped atlas.
+p.add_argument('--atlas-size', type=int, default=2048)
+p.add_argument('--atlas-only', action='store_true')
 a = p.parse_args(sys.argv[sys.argv.index('--') + 1:])
 src = Path(a.pack).resolve() / 'glTF'
 out = Path(a.out)
@@ -40,9 +44,11 @@ for name in models:
             textures.add(uri)
             material_textures[mat['name']] = uri
 
-# One 2048 atlas. Each 256 tile has a four-pixel extruded border to protect mip edges.
-size, tile, border = 2048, 256, 4
-pixels = [0.0] * (size * size * 4)
+# One atlas (2048 shipped): 8 x 8 tiles, each with an extruded border (4 px at 2048) to protect mip edges.
+import numpy as np
+size = a.atlas_size
+tile, border = size // 8, size // 512
+pixels = np.zeros(size * size * 4, dtype=np.float32)
 slots = {}
 for idx, uri in enumerate(sorted(textures)):
     if idx >= 64:
@@ -69,6 +75,9 @@ atlas.pixels.foreach_set(pixels)
 atlas.filepath_raw = str(out / 'atlas.png')
 atlas.file_format = 'PNG'
 atlas.save()
+if a.atlas_only:
+    print(f'VEGETATION atlas {size}: {len(textures)} tiles of {tile} px')
+    sys.exit(0)
 mat = bpy.data.materials.new('vegetation_atlas')
 mat.use_nodes = True
 bsdf = mat.node_tree.nodes.get('Principled BSDF')

@@ -13,6 +13,14 @@ import { horseClientSystem, horseInputSystem } from "./HorseClient.ts";
 import { createMissionPointer } from "./MissionPointer.ts";
 import { createMapClient } from "./MapClient.ts";
 import { createAdminModeClient } from "./AdminModeClient.ts";
+import { createTrialClient } from "./TrialClient.ts";
+import { createSpellClient } from "./SpellClient.ts";
+import { createHoloBoard } from "../world/HoloBoard.ts";
+import { createLightPools } from "../world/lightPools.ts";
+import { createTownLights } from "../world/townLights.ts";
+import { createControlsClient } from "./controls.ts";
+import { createMomentsClient } from "./MomentsClient.ts";
+import { createNextSteps } from "./NextStepsClient.ts";
 
 export interface ClientSystem {
   update(dt: number, now: number): void;
@@ -41,3 +49,19 @@ CLIENT_SYSTEMS.push(horseInputSystem);
 CLIENT_SYSTEMS.push(createMapClient);
 // Admin mode (D-admin-1): the Esc menu's Admin row, flying and speed from the server, the badge.
 CLIENT_SYSTEMS.push(createAdminModeClient);
+// Missions lane (2026-11-12): race / defend / collect markers, the trial clock strip and its sounds.
+CLIENT_SYSTEMS.push(createTrialClient);
+// Spells lane: the spellbook (Q / F / X / Z), its HUD bar and aether, and the spell effects.
+CLIENT_SYSTEMS.push(createSpellClient);
+// Hub graphics lane (D-gfx-hub-3): the hologram scoreboard in Portus' plaza.
+CLIENT_SYSTEMS.push(createHoloBoard);
+// Hub graphics lane (D-gfx-hub-6): lamp and portal light pools on Portus' ground.
+CLIENT_SYSTEMS.push(createLightPools);
+// Hub graphics lane (D-gfx-hub-8): lantern halos, portal glow and lantern motes in Portus.
+CLIENT_SYSTEMS.push(createTownLights);
+// Controls lane (D-controls-5): gamepad rumble on damage and kills, and the aim slowdown's creep test.
+CLIENT_SYSTEMS.push(createControlsClient);
+// Look-and-feel lane (D-ui-2…5): the arrival card, earned banners, the event feed, hit direction and the spell hint.
+CLIENT_SYSTEMS.push(createMomentsClient);
+// "What next" hints after the tutorial (D-polish-ux-3).
+CLIENT_SYSTEMS.push(createNextSteps);

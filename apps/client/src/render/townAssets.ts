@@ -84,6 +84,13 @@ export interface TownAssets {
 const pending = new Map<SiteId, Promise<TownAssets | null>>();
 /** Decoded strips by resolved URL: Portus and the Portus-kit outposts share theirs. A failed decode is dropped. */
 const strips = new Map<string, Promise<THREE.DataArrayTexture>>();
+/** The strips decoded so far, by file relative to the asset base ("portus/portus_color.webp"), with the SHA-256 their manifest gives. */
+const decoded = new Map<string, { texture: THREE.DataArrayTexture; sha256: string }>();
+
+/** A shipped strip decoded in this session (the HD art pack's swap target, render/artpacks), or null. */
+export function loadedStrip(file: string): { texture: THREE.DataArrayTexture; sha256: string } | null {
+  return decoded.get(file) ?? null;
+}
 
 /** The site folder under the asset base. */
 export function siteFolder(site: SiteId): string {
@@ -219,21 +226,22 @@ export async function loadSite(site: SiteId, fetchImpl: Fetch = (u, i) => fetch(
       throw new Error(`asset version ${manifest.version} does not match the layout ${want}`);
     }
     // A strip shared with another site is fetched and decoded once (its first download's signal).
-    const strip = (name: string, srgb: boolean) => {
-      const url = resolveAsset(base, name);
+    const strip = (file: { name: string; sha256: string }, srgb: boolean) => {
+      const url = resolveAsset(base, file.name);
       const key = `${url}|${srgb ? 1 : 0}`;
       let p = strips.get(key);
       if (!p) {
         p = get(url).then(body).then((b) => bounded(decodeStrip(new Blob([b]), manifest.layerSize, srgb)));
         strips.set(key, p);
-        p.catch(() => strips.delete(key));
+        const rel = url.startsWith(`${config.assetBase}/`) ? url.slice(config.assetBase.length + 1) : url;
+        p.then((texture) => void decoded.set(rel, { texture, sha256: file.sha256 }), () => strips.delete(key));
       }
       return bounded(p);
     };
     const [gltfBytes, color, normal] = await Promise.all([
       get(resolveAsset(base, manifest.files.glb.name)).then(body).then((b) => b.buffer),
-      strip(manifest.files.color.name, true),
-      strip(manifest.files.normal.name, false),
+      strip(manifest.files.color, true),
+      strip(manifest.files.normal, false),
     ]);
     const meshes = await bounded(parseTownGlb(gltfBytes));
     validateTown(meshes, manifest, sitePrefabTable(site));

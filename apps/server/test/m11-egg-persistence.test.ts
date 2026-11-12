@@ -9,7 +9,7 @@ import { pileStore } from "../src/world/piles.ts";
 import { SqliteCharacterRepo, SqlitePileStore } from "../src/world/sqliteStores.ts";
 import { progressStore, SqliteProgressStore } from "../src/world/quests/store.ts";
 import { safeLeave, startServer } from "./helpers.ts";
-import { bot, harness, invIds, objAt, sleep, tpAndWait, until, type Bot } from "./quest-helpers.ts";
+import { bot, harness, invIds, objAt, serverRoom, sleep, tpAndWait, until, type Bot } from "./quest-helpers.ts";
 
 let dir: string;
 let db: Db;
@@ -35,9 +35,30 @@ async function stop() {
   db.close();
 }
 
+/**
+ * Save the character as the autosave would. A brand-new character has no row until its first save
+ * (the SQLite repo writes only once the join has made the account row, so the helpers' pre-join
+ * travel ticket writes nothing), and a claim whose transaction fails leaves none: whether an
+ * autosave happened to run between the join and the claim decided whether the stored-row checks
+ * below found a character or null (the race this file failed on, alone or under load).
+ */
+function autosaved(b: Bot) {
+  const room = serverRoom(b);
+  const a = room.playerById(b.id)!;
+  room.saveActor(a);
+  expect(characterRepo.current.load(a.identity.userId)).not.toBeNull();
+}
+
 async function prepare(b: Bot, egg: EggDef) {
+  const ready = await prepareClaim(b, egg);
+  autosaved(b);
+  return ready;
+}
+
+async function prepareClaim(b: Bot, egg: EggDef) {
   if (egg.id === "E1") {
-    b.send("admin", { cmd: "coins", args: { amount: 3 } });
+    // Exactly 3 (after a restart the autosaved row already holds them).
+    if (b.you.coins !== 3) b.send("admin", { cmd: "coins", args: { amount: 3 - b.you.coins } });
     await until("offering coins", () => b.you.coins === 3);
     await tpAndWait(b, objAt("e1_bowl"));
     return { target: "e1_bowl" };

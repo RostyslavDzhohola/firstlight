@@ -1,6 +1,6 @@
 // Player settings that are not graphics (graphics live in render/quality.ts, volumes in audio/Audio.ts,
-// the voice opt-in in voice/VoiceClient.ts): mouse, field of view, comfort, damage numbers and the
-// map (minimap on/off and turning, the map's north-up or player-up).
+// the voice opt-in in voice/VoiceClient.ts): mouse, field of view, comfort, damage numbers, the
+// map (minimap on/off and turning, the map's north-up or player-up) and the missions panel (#3).
 // Stored in localStorage as `fl.ui.v1`; every value is validated on load.
 
 export interface UiSettings {
@@ -20,6 +20,21 @@ export interface UiSettings {
   minimapRotate: boolean;
   /** The map (M) opens with your heading up instead of north. */
   mapPlayerUp: boolean;
+  /** HUD missions panel (top right, under the minimap). */
+  missions: boolean;
+  /** The missions panel shows only its header (a click on the header toggles it). */
+  missionsCollapsed: boolean;
+  /** Gamepad look speed multiplier (D-controls-5). */
+  padSensitivity: number;
+  padInvertY: boolean;
+  /** Gamepad stick radial dead zone (0..1 of the throw). */
+  padDeadzone: number;
+  /** Gamepad stick response curve exponent (1 linear, higher: finer near the centre). */
+  padCurve: number;
+  /** Light look slowdown while the crosshair is on a creep (never players). */
+  padAimSlow: boolean;
+  /** Rumble on taking damage and on a kill, where the browser supports it. */
+  padRumble: boolean;
 }
 
 export const UI_DEFAULTS: Readonly<UiSettings> = Object.freeze({
@@ -33,11 +48,22 @@ export const UI_DEFAULTS: Readonly<UiSettings> = Object.freeze({
   minimap: true,
   minimapRotate: true,
   mapPlayerUp: false,
+  missions: true,
+  missionsCollapsed: false,
+  padSensitivity: 1,
+  padInvertY: false,
+  padDeadzone: 0.15,
+  padCurve: 1.8,
+  padAimSlow: true,
+  padRumble: true,
 }) as UiSettings;
 
 export const SENSITIVITY_RANGE = [0.2, 3] as const;
 export const FOV_RANGE = [60, 100] as const;
 export const BASE_SENSITIVITY = 0.0022;
+export const PAD_SENSITIVITY_RANGE = [0.3, 3] as const;
+export const PAD_DEADZONE_RANGE = [0.05, 0.35] as const;
+export const PAD_CURVE_RANGE = [1, 3] as const;
 
 const KEY = "fl.ui.v1";
 
@@ -60,6 +86,14 @@ export function normalizeUiSettings(raw: unknown): UiSettings {
     minimap: bool(r.minimap, d.minimap),
     minimapRotate: bool(r.minimapRotate, d.minimapRotate),
     mapPlayerUp: bool(r.mapPlayerUp, d.mapPlayerUp),
+    missions: bool(r.missions, d.missions),
+    missionsCollapsed: bool(r.missionsCollapsed, d.missionsCollapsed),
+    padSensitivity: Math.round(clamp(r.padSensitivity, PAD_SENSITIVITY_RANGE, d.padSensitivity) * 100) / 100,
+    padInvertY: bool(r.padInvertY, d.padInvertY),
+    padDeadzone: Math.round(clamp(r.padDeadzone, PAD_DEADZONE_RANGE, d.padDeadzone) * 100) / 100,
+    padCurve: Math.round(clamp(r.padCurve, PAD_CURVE_RANGE, d.padCurve) * 10) / 10,
+    padAimSlow: bool(r.padAimSlow, d.padAimSlow),
+    padRumble: bool(r.padRumble, d.padRumble),
   };
 }
 

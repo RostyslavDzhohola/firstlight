@@ -1,0 +1,19 @@
+{
+  "name": "@firstlight/agent-tools",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "mcp": "node mcp.ts",
+    "serve": "node serve.ts",
+    "hunter": "node examples/hunter.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@firstlight/agent-kit": "workspace:*",
+    "@firstlight/shared": "workspace:*"
+  },
+  "exports": {
+    "./*": "./*.ts"
+  }
+}

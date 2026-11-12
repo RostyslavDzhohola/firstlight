@@ -1,0 +1,17 @@
+{
+  "name": "@firstlight/agent-kit",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@colyseus/sdk": "0.18.5",
+    "@firstlight/shared": "workspace:*"
+  }
+}

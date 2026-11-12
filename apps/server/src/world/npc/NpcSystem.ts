@@ -386,10 +386,25 @@ export class NpcSystem implements RoomSystem {
   }
 
   /** Live NPCs raised by egg penalties or staged scenes in this room, or only those one account raised. */
-  spawnedCount(reason: "egg" | "stage", userId?: string): number {
+  spawnedCount(reason: "egg" | "stage" | "trial", userId?: string): number {
     let k = 0;
     for (const n of this.npcs.values()) if (n.spawned?.reason === reason && !n.dead && (userId === undefined || n.spawned.userId === userId)) k++;
     return k;
+  }
+
+  /**
+   * The account a trial creature belongs to (missions' defend waves, `spawned.reason === "trial"`), or
+   * null for everything else. An owned creature only sees, chases and hurts its owner, and only its
+   * owner can hurt it (perception, aggro, retaliation, hitPlayer and mitigate all ask mayEngage).
+   */
+  ownerOf(n: Npc): string | null {
+    return n.spawned?.reason === "trial" ? n.spawned.userId : null;
+  }
+
+  /** May this NPC and this player fight each other (trial creatures: only their owner)? */
+  mayEngage(n: Npc, p: PlayerActor): boolean {
+    const o = this.ownerOf(n);
+    return o === null || p.identity.userId === o;
   }
 
   /** Remove an NPC without rewards (despawn, egg exit, reset). */
@@ -456,6 +471,10 @@ export class NpcSystem implements RoomSystem {
   private mitigate(n: Npc, amount: number, weak: boolean, fromDir?: V3, attacker?: PlayerActor | NpcActor | null, why?: ImmuneWhy): number {
     if (n.dead || n.state.flags & NF.INVULN) {
       if (why) why.reason = n.state.flags & NF.SPAWNING ? "spawning" : n.state.flags & NF.EVADING ? "evading" : "invulnerable";
+      return 0;
+    }
+    if (attacker?.kind === "player" && !this.mayEngage(n, attacker)) {
+      if (why) why.reason = "invulnerable"; // another player's trial creature
       return 0;
     }
     if (n.boss && this.boss) return this.boss.mitigate(n, amount, weak, attacker, why);
@@ -538,6 +557,7 @@ export class NpcSystem implements RoomSystem {
   hitPlayer(n: Npc | null, p: PlayerActor, amount: number, opts: { fromDir?: V3; knockback?: number; effect?: StatusEffect; trueDamage?: boolean; src?: V3 } = {}): number {
     const now = this.world.now();
     if (p.dead) return 0;
+    if (n && !this.mayEngage(n, p)) return 0; // someone else's trial creature: its swings pass through
     if (opts.src && !opts.trueDamage && this.world.host.bubbles) {
       const shell = this.world.host.bubbles.between(opts.src, chest(actorPos(p)));
       if (shell) {

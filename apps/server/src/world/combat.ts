@@ -2,7 +2,8 @@
 // simulated projectiles with splash, damage rules (safe zones, protection, friendly fire on),
 // blocking, burn, healing. The room calls these from message handlers and the tick.
 
-import { damageMult, falloff, maxHp, splashFalloff } from "@firstlight/shared/content/progression";
+import { damageMult, falloff, splashFalloff } from "@firstlight/shared/content/progression";
+import { starterMaxHp } from "@firstlight/shared/content/starters";
 import { WEAPONS, WEAPON_BY_ID, WEAPON_INDEX, type Destroys, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
 import type { Terrain } from "@firstlight/shared";
 import { NET } from "@firstlight/shared/net/protocol";
@@ -47,6 +48,11 @@ export interface CombatHost {
   safeNow?(a: PlayerActor, now: number): boolean;
   /** Prism Bubbles (set by support.ts): shots, projectiles and splash crossing a shell stop at it. */
   bubbles?: BubbleHost;
+  /**
+   * Personal wards (set by spells/SpellSystem.ts: the Glasswing Ward): damage a player or creature
+   * deals to a warded player is taken from the ward first. Returns the damage that gets through.
+   */
+  wards?: { absorb(target: PlayerActor, amount: number, attacker: PlayerActor | NpcActor): number };
 }
 
 /**
@@ -342,6 +348,11 @@ export function fire(host: CombatHost, p: PlayerActor, msg: FireInput): FireResu
   }
   const res = consumeAttack(p, def, tier, now, 1, host);
   if (!res.ok) return res;
+  // A throw breaks a hand seal in progress (D-balance-7): the seal is a commitment, not free on top of the darts.
+  if (def.special) {
+    p.chargeStartedAt = 0;
+    p.chargeItem = null;
+  }
   const lvl = damageMult(p.char.level);
 
   switch (def.delivery) {
@@ -722,13 +733,19 @@ export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | 
       if (def.delivery === "melee" && tier.block && tier.level <= target.char.level) {
         const f: V3 = [target.state.fx, target.state.fy, target.state.fz];
         const l = Math.hypot(fromDir[0], fromDir[1], fromDir[2]) || 1;
-        const cos = (f[0] * fromDir[0] + f[1] * fromDir[1] + f[2] * fromDir[2]) / l;
+        const fl = Math.hypot(f[0], f[1], f[2]); // facing's direction only (D-security-7); zero length never blocks
+        const cos = fl > 1e-3 ? (f[0] * fromDir[0] + f[1] * fromDir[1] + f[2] * fromDir[2]) / (l * fl) : -1;
         if (cos >= Math.cos((60 * Math.PI) / 180)) dmg *= 1 - tier.block;
       }
     }
     target.combatUntil = now + COMBAT_TAG_MS;
     target.logoutEndsAt = null; // damage cancels logout
     if (attacker) target.lastDamagedBy = attacker.id;
+    // A ward (Glasswing Ward) takes what an attacker deals first; falls and admin damage pass.
+    if (attacker && host.wards) {
+      dmg = host.wards.absorb(target, dmg, attacker);
+      if (dmg <= 0) return false;
+    }
   } else {
     immuneWhy.reason = null;
     dmg = target.mitigate ? target.mitigate(dmg, weak, fromDir, attacker, immuneWhy) : dmg * (target.armour ?? 1);
@@ -763,8 +780,11 @@ export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | 
 /** Filled by an NPC's mitigate when a hit deals nothing (reused: dealDamage is synchronous). */
 const immuneWhy: ImmuneWhy = { reason: null };
 
-/** Splash damage around a point (friendly fire on; the owner takes half). */
-export function explode(host: CombatHost, owner: PlayerActor | NpcActor, at: V3, radius: number, damage: number, weaponIndex: number, exclude?: string, excludeProp?: number) {
+/**
+ * Splash damage around a point (friendly fire on; the owner takes half). `quiet`: no `explode`
+ * message (spells send their own event; a `weaponIndex` of -1 is no weapon: heavy destruction).
+ */
+export function explode(host: CombatHost, owner: PlayerActor | NpcActor, at: V3, radius: number, damage: number, weaponIndex: number, exclude?: string, excludeProp?: number, quiet = false) {
   // Prism Bubble shells: decide who (and which props) they shelter before charging any of them.
   const shield = splashShield(host.bubbles, at);
   const hits: { a: Actor; d: number }[] = [];
@@ -787,7 +807,7 @@ export function explode(host: CombatHost, owner: PlayerActor | NpcActor, at: V3,
   const w = WEAPONS[weaponIndex];
   host.props?.splash(at, radius, damage, owner.kind === "npc" ? "heavy" : (w?.destroys ?? "heavy"), w?.id ?? "", playerId(owner), excludeProp, (c) => shield.blocks(c) || wallBetween(host, at, c));
   shield.charge((b) => damage * splashFalloff(Math.max(0, dist3(at, b.c) - b.r), radius));
-  host.broadcastNear("explode", { id: 0, x: at[0], y: at[1], z: at[2], radius, weapon: weaponIndex }, at, 200);
+  if (!quiet) host.broadcastNear("explode", { id: 0, x: at[0], y: at[1], z: at[2], radius, weapon: weaponIndex }, at, 200);
 }
 
 const projectileLists = new WeakMap<CombatHost, Projectile[]>();
@@ -977,7 +997,7 @@ export function stepEffects(host: CombatHost, dt: number) {
       }
     }
     if (p.heals.length) {
-      const mh = maxHp(p.char.level);
+      const mh = starterMaxHp(p.char.starter, p.char.level);
       let add = 0;
       p.heals = p.heals.filter((h) => {
         if (h.left === undefined) {

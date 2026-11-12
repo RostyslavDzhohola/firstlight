@@ -21,7 +21,8 @@
 import { COSMETIC_BY_ID } from "@firstlight/shared/content/items";
 import { HORSE_WHISTLE } from "@firstlight/shared/content/horse";
 import { HOTBAR_SLOTS } from "@firstlight/shared/content/character";
-import { LEVEL_CAP, maxHp, xpAtLevel } from "@firstlight/shared/content/progression";
+import { LEVEL_CAP, xpAtLevel } from "@firstlight/shared/content/progression";
+import { starterMaxHp } from "@firstlight/shared/content/starters";
 import { WEAPONS, WEAPON_BY_ID, type WeaponDef } from "@firstlight/shared/content/weapons";
 import type { InvItem, YouState } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
@@ -185,7 +186,7 @@ export class AdminModeSystem implements RoomSystem {
     a.char.level = LEVEL_CAP;
     a.char.xp = xpAtLevel(LEVEL_CAP);
     a.state.level = LEVEL_CAP;
-    a.state.maxHp = maxHp(LEVEL_CAP);
+    a.state.maxHp = starterMaxHp(a.char.starter, LEVEL_CAP);
     a.state.hp = a.state.maxHp;
     log(a, "sandbox: max level");
   }

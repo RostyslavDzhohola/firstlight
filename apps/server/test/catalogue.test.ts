@@ -16,7 +16,7 @@ describe("M11 cosmetic catalogue", () => {
       ["wickfloat_mantle", "cape", "legendary", 0],
       ["quietshift_lens", "mask", "legendary", 0],
     ] as const;
-    expect(COSMETICS.slice(31).map((c) => c.id)).toEqual(expected.map(([id]) => id));
+    expect(COSMETICS.slice(31, 39).map((c) => c.id)).toEqual(expected.map(([id]) => id));
     for (const [id, slot, rarity, sell] of expected) {
       expect(COSMETIC_BY_ID.get(id)).toMatchObject({ slot, rarity });
       expect(COSMETIC_BY_ID.get(id)?.source.length).toBeGreaterThan(0);

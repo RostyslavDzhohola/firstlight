@@ -96,12 +96,15 @@
 .fl-hud__right { position: absolute; top: calc(1.2 * var(--u)); right: calc(1.5 * var(--u)); width: calc(19.5 * var(--u)); display: flex; flex-direction: column; align-items: flex-end; gap: calc(.6 * var(--u)); }
 /* Minimap (ui/minimap.ts): a round canvas at the top of the right column; its size is set inline. */
 .fl-hud__minimap { display: contents; }
-.fl-minimap { position: relative; flex: none; border-radius: 50%; background: rgba(5, 10, 15, .55); box-shadow: 0 0 0 1px rgba(0, 0, 0, .5), 0 4px 18px rgba(0, 0, 0, .35); }
+.fl-minimap { position: relative; flex: none; border-radius: 50%; background: rgba(5, 10, 15, .55); box-shadow: 0 0 0 1px rgba(0, 0, 0, .5), 0 0 0 2px color-mix(in srgb, var(--world, var(--photon)) 42%, transparent), 0 4px 18px rgba(0, 0, 0, .35); }
 .fl-minimap[hidden] { display: none; }
 .fl-minimap canvas { display: block; width: 100%; height: 100%; }
 .fl-missions { width: 100%; padding: calc(.75 * var(--u)) calc(.9 * var(--u)) calc(.8 * var(--u)); }
 .fl-missions header { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-2); margin-bottom: calc(.55 * var(--u)); }
 .fl-missions header .fl-label { color: var(--photon); }
+.fl-missions header button { all: unset; box-sizing: border-box; display: flex; flex: 1; justify-content: space-between; align-items: baseline; gap: var(--sp-2); cursor: pointer; }
+.fl-missions header button:focus-visible { outline: 1px solid var(--photon); outline-offset: 2px; }
+.fl-missions.is-collapsed header { margin-bottom: 0; }
 .fl-missions header span:last-child { font-size: var(--t-xs); color: var(--fog-3); }
 .fl-mission { display: grid; grid-template-columns: calc(1.1 * var(--u)) minmax(0, 1fr) auto; gap: var(--sp-2); align-items: start; padding: calc(.38 * var(--u)) 0; border-top: 1px solid rgba(196, 241, 255, .1); }
 .fl-mission__st { margin-top: calc(.2 * var(--u)); width: calc(.8 * var(--u)); height: calc(.8 * var(--u)); transform: rotate(45deg); border: 1.5px solid var(--fog-3); }
@@ -112,6 +115,8 @@
 .fl-mission.is-tracked .fl-mission__r { color: var(--hero-gold); }
 .fl-mission.is-done b { color: var(--fog-3); text-decoration: line-through; text-decoration-color: rgba(255, 255, 255, .35); }
 .fl-mission.is-done .fl-mission__st { border-color: var(--ok); background: var(--ok); }
+.fl-missions__more { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: var(--sp-2); width: 100%; padding: calc(.38 * var(--u)) 0 0; border-top: 1px solid rgba(196, 241, 255, .1); font: 600 var(--t-xs)/1.2 var(--font-display); letter-spacing: .06em; color: var(--photon); cursor: pointer; }
+.fl-missions__more:focus-visible { outline: 1px solid var(--photon); outline-offset: 2px; }
 
 .fl-toasts { width: 100%; display: flex; flex-direction: column; gap: calc(.5 * var(--u)); align-items: flex-end; z-index: var(--z-toast); }
 .fl-toast { display: flex; align-items: center; gap: calc(.7 * var(--u)); max-width: 100%; padding: calc(.55 * var(--u)) calc(.8 * var(--u)) calc(.55 * var(--u)) calc(.6 * var(--u)); animation: fl-pop .45s var(--ease-snap) both; }
@@ -210,24 +215,30 @@
 /* ---------------------------------------------------------------- world-anchored: damage numbers + speech bubbles */
 /* Positioned from projected 3D coordinates via --x/--y (set once); the keyframes compose them, so
    nothing here triggers layout. */
-.fl-dmg { --x: 0px; --y: 0px; position: absolute; left: 0; top: 0; font: 700 var(--t-xl)/1 var(--font-display); color: var(--dmg-normal); letter-spacing: .02em; white-space: nowrap; text-shadow: 0 2px 0 rgba(0, 0, 0, .7), 0 0 8px rgba(0, 0, 0, .5); animation: fl-dmg-float 1.4s var(--ease-out) both; }
+.fl-dmg { --x: 0px; --y: 0px; position: absolute; left: 0; top: 0; font: 700 var(--t-xl)/1 var(--font-display); color: var(--dmg-normal); letter-spacing: .02em; white-space: nowrap; -webkit-text-stroke: 3px rgba(8, 10, 14, .85); paint-order: stroke fill; text-shadow: 0 2px 0 rgba(0, 0, 0, .55); animation: fl-dmg-float 1.25s linear both; }
 .fl-dmg.is-weak { color: var(--dmg-weak); font-size: calc(var(--t-xl) * 1.3); animation-name: fl-dmg-pop; }
-.fl-dmg.is-armour { color: var(--dmg-armour); font-size: var(--t-md); }
-.fl-dmg.is-shield { color: #fff; -webkit-text-stroke: 1.5px var(--dmg-shield); paint-order: stroke fill; text-shadow: 0 2px 0 rgba(0, 0, 0, .7); }
+.fl-dmg.is-armour { color: var(--dmg-armour); font-size: var(--t-md); -webkit-text-stroke-width: 2px; }
+.fl-dmg.is-shield { color: #fff; -webkit-text-stroke: 3px var(--dmg-shield); text-shadow: 0 2px 0 rgba(0, 0, 0, .7); }
 .fl-dmg.is-heal { color: var(--ok); }
 /* Classic colours (colour-blind preset off): weak points go orange; size and "!" still mark them. */
 .fl-hud.is-classic-dmg .fl-dmg.is-weak { color: #ff8a3d; }
+/* Pop and settle (content §0): lands a touch large, snaps to size within 110 ms, holds still and
+   readable, then lifts and fades. The weak-point number lands bigger and tilts back level. */
 @keyframes fl-dmg-float {
-  0% { transform: translate(var(--x), var(--y)) translate(-50%, -50%) translateY(6px); opacity: 0; }
-  12% { opacity: 1; }
-  75% { opacity: 1; }
-  100% { transform: translate(var(--x), var(--y)) translate(-50%, -50%) translateY(-18px); opacity: 0; }
+  0% { transform: translate(var(--x), var(--y)) translate(-50%, -50%) scale(1.45); opacity: 0; }
+  5% { transform: translate(var(--x), var(--y)) translate(-50%, -50%) scale(1.22); opacity: 1; }
+  10% { transform: translate(var(--x), var(--y)) translate(-50%, -50%) scale(.96); opacity: 1; }
+  15% { transform: translate(var(--x), var(--y)) translate(-50%, -50%) scale(1); opacity: 1; }
+  55% { transform: translate(var(--x), var(--y)) translate(-50%, -50%) translateY(-4px) scale(1); opacity: 1; }
+  100% { transform: translate(var(--x), var(--y)) translate(-50%, -50%) translateY(-26px) scale(.94); opacity: 0; }
 }
 @keyframes fl-dmg-pop {
-  0% { transform: translate(var(--x), var(--y)) translate(-50%, -50%) translateY(0) scale(1.3); opacity: 0; }
-  10% { transform: translate(var(--x), var(--y)) translate(-50%, -50%) translateY(0) scale(1); opacity: 1; }
-  75% { opacity: 1; }
-  100% { transform: translate(var(--x), var(--y)) translate(-50%, -50%) translateY(-18px) scale(1); opacity: 0; }
+  0% { transform: translate(var(--x), var(--y)) translate(-50%, -50%) scale(1.9) rotate(-7deg); opacity: 0; }
+  5% { transform: translate(var(--x), var(--y)) translate(-50%, -50%) scale(1.4) rotate(-5deg); opacity: 1; }
+  11% { transform: translate(var(--x), var(--y)) translate(-50%, -50%) scale(.94) rotate(1deg); opacity: 1; }
+  17% { transform: translate(var(--x), var(--y)) translate(-50%, -50%) scale(1) rotate(0deg); opacity: 1; }
+  60% { transform: translate(var(--x), var(--y)) translate(-50%, -50%) translateY(-5px) scale(1); opacity: 1; }
+  100% { transform: translate(var(--x), var(--y)) translate(-50%, -50%) translateY(-30px) scale(.94); opacity: 0; }
 }
 
 .fl-bubble { --x: 0px; --y: 0px; --c: var(--party-2); position: absolute; left: 0; top: 0; display: flex; flex-direction: column; align-items: center; transform: translate(var(--x), var(--y)) translate(-50%, -100%); animation: fl-bubble 3s var(--ease-out) both; }

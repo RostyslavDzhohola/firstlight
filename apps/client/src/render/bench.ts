@@ -26,6 +26,7 @@ import type { PassConfig, PassCostReport } from "./passCost.ts";
 import { FEATURES, type Feature } from "./quality.ts";
 import { maxOf, percentile } from "./timing.ts";
 import { shaderStats } from "./warmup.ts";
+import type { ArtPacksState } from "./artpacks/ArtPacks.ts";
 
 /**
  * Features `?bench=passes` measures by default (each must have a kill switch). Not weather: bench
@@ -34,6 +35,13 @@ import { shaderStats } from "./warmup.ts";
 export const PASS_FEATURES: readonly Feature[] = [
   "grass", "trees", "detail", "shadows", "water", "sky", "skyplanets", "fog", "ao", "traa", "bloom", "fxaa", "grade", "grain",
   "vignette", "particles",
+  // The planets' graphics pass (D-gfx-worlds-1). `aerial` off draws with the plain fog graph (atmosphere.ts fogNodeFor).
+  "meadow", "clouds", "terrainfx", "waterfx", "landmarks", "aerial",
+  "portalfx", "holo", "skylife", "pools",
+  // The second pass (D-gfx-worlds-6): each sits behind a branch on a uniform, so switching it off takes its cost away.
+  // (shafts, mist and fireflies only cost when the sky has them: price them with ?time= at dawn or night.)
+  "foliagefx", "shafts", "mist", "fireflies",
+  "townlights", "pilebeacon",
 ];
 
 /** Rejects after `ms`: no wait in the passes bench may hang the run (hidden tab, stalled queue). */
@@ -105,6 +113,8 @@ export interface BenchHost {
   spawn: THREE.Vector3;
   stats(): { chunks: number; visibleChunks: number; grassBlades: number; props: number };
   body: string;
+  /** The HD art packs' state (render/artpacks), reported at the run's start and end. */
+  packs?: () => ArtPacksState;
 }
 
 interface Dummy {
@@ -136,8 +146,15 @@ export interface BenchResult {
   warmSeconds: number;
   frames: number;
   frameMs: { p50: number; p95: number; p99: number; mean: number; max: number };
+  /** Frames that took over 1.5× the median interval (a missed display refresh at vsync). */
+  slowFrames: number;
+  /** Main-thread time of each frame (game update + render submission). */
+  cpuMs: { p50: number; p95: number; p99: number };
   fps: { mean: number; p50: number };
+  /** three's GPU time (the passes summed: several times the real cost on tile-based GPUs). */
   gpuMs: { p50: number; p95: number } | null;
+  /** GPU busy time per frame (WebGPU pass union, D-framerate-2). */
+  gpuBusyMs: { p50: number; p95: number; p99: number; n: number } | null;
   draws: { mean: number; max: number };
   triangles: { mean: number; max: number };
   heapMB: { start: number; end: number; max: number } | null;
@@ -151,6 +168,8 @@ export interface BenchResult {
   /** `?bench=passes` only: per-pass GPU cost, or null with `passesNote` on WebGL2. */
   passes?: PassCostReport | null;
   passesNote?: string;
+  /** HD art packs live at the run's start and end, with their GPU bytes and swaps. */
+  packs: { start: ArtPacksState; end: ArtPacksState } | null;
   flags: string;
   userAgent: string;
 }
@@ -170,7 +189,9 @@ export class Bench {
    */
   holding = false;
   private readonly frames: number[] = [];
+  private readonly cpu: number[] = [];
   private readonly gpu: number[] = [];
+  private readonly busy: number[] = [];
   private readonly draws: number[] = [];
   private readonly tris: number[] = [];
   private readonly parts: number[] = [];
@@ -178,6 +199,7 @@ export class Bench {
   private readonly crowd: Dummy[] = [];
   private nextBurst = 0;
   private shaderBuildsAtStart = 0;
+  private packsAtStart: ArtPacksState | null = null;
   private readonly up = new THREE.Vector3();
   private readonly east = new THREE.Vector3();
   private readonly north = new THREE.Vector3();
@@ -283,6 +305,8 @@ export class Bench {
         this.phase = "run";
         this.runStart = now;
         this.shaderBuildsAtStart = shaderStats().total;
+        this.host.ctx.gpu.drainBusy();
+        this.packsAtStart = this.host.packs?.() ?? null;
         this.recording = false;
         this.pose(0, camera);
       }
@@ -298,23 +322,27 @@ export class Bench {
 
   /**
    * After rendering: record this frame. `frameMs` = the unclamped interval since the previous
-   * frame; renderer.info still holds this frame's draw calls (it resets at the next loop tick).
+   * frame, `cpuMs` = this frame's main-thread time; renderer.info still holds this frame's draw
+   * calls (it resets at the next loop tick).
    */
-  record(frameMs: number) {
+  record(frameMs: number, cpuMs = 0) {
     if (this.phase !== "run") return;
     const now = performance.now();
     // Skip the first run frame: its interval straddles the warm/run switch.
     if (!this.recording) {
       this.recording = true;
+      this.host.ctx.gpu.drainBusy();
       return;
     }
     const info = this.host.ctx.renderer.info.render;
     this.frames.push(frameMs);
+    this.cpu.push(cpuMs);
     this.draws.push(info.drawCalls);
     this.tris.push(info.triangles);
     this.parts.push(this.host.particles.liveCount);
     const g = this.host.ctx.gpu.last;
     if (g !== null) this.gpu.push(g);
+    for (const b of this.host.ctx.gpu.takeBusySamples()) this.busy.push(b); // the timer keeps only its last 600
     const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
     if (mem && this.frames.length % 30 === 0) this.heap.push(mem.usedJSHeapSize / 1048576);
     const elapsed = (now - this.runStart) / 1000;
@@ -459,7 +487,9 @@ export class Bench {
 
   private finish(passes?: PassCostReport | null, passesNote?: string) {
     this.phase = "done";
+    for (const b of this.host.ctx.gpu.takeBusySamples()) this.busy.push(b);
     const f = this.frames;
+    const median = percentile(f, 0.5);
     const mean = f.reduce((a, b) => a + b, 0) / Math.max(1, f.length);
     const ctx = this.host.ctx;
     const st = this.host.stats();
@@ -480,9 +510,12 @@ export class Bench {
       plannedSeconds: this.duration,
       warmSeconds: this.warm,
       frames: f.length,
-      frameMs: { p50: r2(percentile(f, 0.5)), p95: r2(percentile(f, 0.95)), p99: r2(percentile(f, 0.99)), mean: r2(mean), max: r2(maxOf(f)) },
+      frameMs: { p50: r2(median), p95: r2(percentile(f, 0.95)), p99: r2(percentile(f, 0.99)), mean: r2(mean), max: r2(maxOf(f)) },
+      slowFrames: f.filter((v) => v > median * 1.5).length,
+      cpuMs: { p50: r2(percentile(this.cpu, 0.5)), p95: r2(percentile(this.cpu, 0.95)), p99: r2(percentile(this.cpu, 0.99)) },
       fps: { mean: r2(1000 / Math.max(0.001, mean)), p50: r2(1000 / Math.max(0.001, percentile(f, 0.5))) },
       gpuMs: this.gpu.length ? { p50: r2(percentile(this.gpu, 0.5)), p95: r2(percentile(this.gpu, 0.95)) } : null,
+      gpuBusyMs: this.busy.length ? { p50: r2(percentile(this.busy, 0.5)), p95: r2(percentile(this.busy, 0.95)), p99: r2(percentile(this.busy, 0.99)), n: this.busy.length } : null,
       draws: { mean: r2(avg(this.draws)), max: maxOf(this.draws) },
       triangles: { mean: Math.round(avg(this.tris)), max: maxOf(this.tris) },
       heapMB: this.heap.length ? { start: r2(this.heap[0]!), end: r2(this.heap[this.heap.length - 1]!), max: r2(maxOf(this.heap)) } : null,
@@ -494,6 +527,7 @@ export class Bench {
       props: st.props,
       shaderBuildsDuringRun: shaderStats().total - this.shaderBuildsAtStart,
       ...(this.config.passes ? { passes: passes ?? null, ...(passesNote ? { passesNote } : {}) } : {}),
+      packs: this.packsAtStart && this.host.packs ? { start: this.packsAtStart, end: this.host.packs() } : null,
       flags: location.search,
       userAgent: navigator.userAgent,
     };

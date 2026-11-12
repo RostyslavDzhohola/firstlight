@@ -22,6 +22,7 @@ import type { BodyId } from "@firstlight/shared";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 import { characterRepo } from "../src/world/characters.ts";
 import { newCharacter } from "@firstlight/shared/content/character";
+import { STARTER_STATS } from "@firstlight/shared/content/starters";
 
 let game: Game;
 const rooms: Room[] = [];
@@ -774,9 +775,12 @@ describe("sprinting over real terrain like the client (F12 Codex re-review S1)",
 describe("mounted limits go through the limits argument (F12 re-review nit)", () => {
   // A flat test world: radius 1000, ground at 0, no water, no props.
   const flat: MoveWorld = { radius: 1000, waterLevel: -100, groundAt: () => 0 };
+  // These pin the shared base pace (sprint 9, roll every 1.2 s): a starter index with no row in
+  // content/starters.ts gets the base. Per-starter pace and rolls: test/starters.test.ts.
+  const BASE_ROW = STARTER_STATS.length;
   function rider(now: number, mounted: boolean, graceUntil = 0): PlayerActor {
     const pos = { x: 0, y: 0, z: 1000 };
-    return { ...motionFields(1000, now), lastX: 0, lastY: 0, lastZ: 1000, state: pos, mounted, mountGraceUntil: graceUntil } as unknown as PlayerActor;
+    return { ...motionFields(1000, now), lastX: 0, lastY: 0, lastZ: 1000, state: pos, mounted, mountGraceUntil: graceUntil, char: { starter: BASE_ROW } } as unknown as PlayerActor;
   }
   /** A step of `metres` along +x on the flat world, from the actor's last position. */
   function step(a: PlayerActor, metres: number, anim = 3) {
@@ -908,3 +912,76 @@ describe("mounted limits go through the limits argument (F12 re-review nit)", ()
   });
 });
 
+
+describe("a client at 4 fps (#33: slow frames advance up to 200 ms, one packet per frame)", () => {
+  const flat: MoveWorld = { radius: 1000, waterLevel: -100, groundAt: () => 0 };
+  /** Refusals for 16 s of one input packet per `frameMs` frame, each moving `speed` × 200 ms, packets 70 ms early or late. */
+  function refusals(speed: number, mounted: boolean, frameMs: number): number {
+    let now = 1_000_000;
+    const a = { ...motionFields(1000, now), lastX: 0, lastY: 0, lastZ: 1000, state: { x: 0, y: 0, z: 1000 }, mounted, mountGraceUntil: 0, char: { starter: 99 } } as unknown as PlayerActor; // no starter row: the base numbers
+    const jitter = [0, -70, 70, 40, -40, 70, -70, 0];
+    let x = 0;
+    let refused = 0;
+    for (let i = 0; i < 64; i++) {
+      x += speed * Math.min(0.2, frameMs / 1000); // the client's frameClock caps a frame at 200 ms
+      now += frameMs + jitter[i % jitter.length]! - (i ? jitter[(i - 1) % jitter.length]! : 0);
+      const l = Math.hypot(x, 1000);
+      const m = { x: (x / l) * 1000, y: 0, z: (1000 / l) * 1000, anim: mounted ? ANIM.RUN : ANIM.SPRINT };
+      const r = validateMove(a, m, flat, moveLimits(a, now), now);
+      if (!r.ok) refused++;
+      else {
+        a.lastX = m.x;
+        a.lastY = m.y;
+        a.lastZ = m.z;
+      }
+    }
+    return refused;
+  }
+
+  it("sprinting at 9 m/s in 250 ms or 400 ms frames is never refused", () => {
+    expect(refusals(9, false, 250)).toBe(0);
+    expect(refusals(9, false, 400)).toBe(0);
+  });
+
+  it("galloping at 16 m/s in 250 ms or 400 ms frames is never refused (Codex review: a 250 ms cap was)", () => {
+    expect(refusals(HORSE.sprint, true, 250)).toBe(0);
+    expect(refusals(HORSE.sprint, true, 400)).toBe(0);
+  });
+});
+
+describe("a client at 4 fps, full real time on foot (#33, D-fixes-1: frames advance up to 250 ms on foot, 200 ms riding)", () => {
+  const flat: MoveWorld = { radius: 1000, waterLevel: -100, groundAt: () => 0 };
+  /** Refusals for 16 s of one packet per `frameMs` frame, each moving `speed` × min(frame, cap), packets 70 ms early or late. */
+  function refusals(speed: number, mounted: boolean, frameMs: number, capS: number): number {
+    let now = 1_000_000;
+    const a = { ...motionFields(1000, now), lastX: 0, lastY: 0, lastZ: 1000, state: { x: 0, y: 0, z: 1000 }, mounted, mountGraceUntil: 0, char: { starter: 99 } } as unknown as PlayerActor; // no starter row: the base numbers
+    const jitter = [0, -70, 70, 40, -40, 70, -70, 0];
+    let x = 0;
+    let refused = 0;
+    for (let i = 0; i < 64; i++) {
+      x += speed * Math.min(capS, frameMs / 1000);
+      now += frameMs + jitter[i % jitter.length]! - (i ? jitter[(i - 1) % jitter.length]! : 0);
+      const l = Math.hypot(x, 1000);
+      const m = { x: (x / l) * 1000, y: 0, z: (1000 / l) * 1000, anim: mounted ? ANIM.RUN : ANIM.SPRINT };
+      const r = validateMove(a, m, flat, moveLimits(a, now), now);
+      if (!r.ok) refused++;
+      else {
+        a.lastX = m.x;
+        a.lastY = m.y;
+        a.lastZ = m.z;
+      }
+    }
+    return refused;
+  }
+
+  it("sprinting at 9 m/s in 250 ms frames advancing the full 250 ms is never refused (and 400 ms frames capped there)", () => {
+    expect(refusals(MOVE.maxSpeed, false, 250, 0.25)).toBe(0);
+    expect(refusals(MOVE.maxSpeed, false, 400, 0.25)).toBe(0);
+  });
+
+  it("galloping needs the 200 ms saddle cap: 250 ms gallop steps overrun the horse's bank under jitter", () => {
+    expect(refusals(HORSE.sprint, true, 250, 0.2)).toBe(0);
+    expect(refusals(HORSE.sprint, true, 400, 0.2)).toBe(0);
+    expect(refusals(HORSE.sprint, true, 250, 0.25)).toBeGreaterThan(0);
+  });
+});

@@ -183,6 +183,8 @@ export class SiteTown {
   private fallback: THREE.InstancedMesh[] = [];
   private settings: ResolvedSettings;
   private assets: TownAssets | null = null;
+  /** The site's download is over (landed, failed or timed out), however long after the arrival's deadline. */
+  readonly settled: Promise<void>;
   /** The asset that came after the deadline, waiting for the next loading screen (swapInLate). */
   private late: TownAssets | null = null;
   private lodDistance = 60;
@@ -209,6 +211,7 @@ export class SiteTown {
     };
     this.settings = settings;
     this.group.visible = !flags.has("notown");
+    this.settled = source.then(() => undefined, () => undefined);
     this.ready = this.build(source, deadlineMs);
   }
 

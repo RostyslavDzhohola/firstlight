@@ -220,6 +220,51 @@ describe("day/night", () => {
   });
 });
 
+describe("the second pass's air (D-gfx-worlds-6)", () => {
+  const at = (body: "arcadia" | "meridian" | "hollowmere", time: number, kill: Feature[] = [], weather: "clear" | "rain" = "clear") => {
+    const { env } = setup(body, kill);
+    env.timeOverride = time;
+    env.weatherOverride = { weather, intensity: weather === "clear" ? 0 : 1 };
+    run(env, weather === "clear" ? 2 : 30);
+    const cam = new THREE.PerspectiveCamera();
+    cam.position.set(0, 502, 0);
+    env.afterCamera(cam, 1 / 60);
+    return { shafts: atmo.shafts.value, mist: atmo.mist.value, flies: env.fx.flies.visible };
+  };
+
+  it("sun shafts and mist belong to the low sun; noon has neither on Arcadia", () => {
+    const noon = at("arcadia", 0.5);
+    expect(noon.shafts).toBeLessThan(0.05);
+    expect(noon.mist).toBeLessThan(0.1);
+    const dawn = at("arcadia", 0.17); // the sun 8° up, rising
+    expect(dawn.shafts).toBeGreaterThan(0.3);
+    expect(dawn.mist).toBeGreaterThan(noon.mist + 0.2);
+    const dusk = at("arcadia", 0.83);
+    expect(dusk.shafts).toBeGreaterThan(0.3);
+    expect(dusk.mist, "the mist is the morning's").toBeLessThan(dawn.mist);
+    expect(at("arcadia", 0).shafts, "no sun, no shafts").toBe(0);
+  });
+
+  it("Hollowmere's mist never lifts", () => {
+    expect(at("hollowmere", 0.5).mist).toBeGreaterThan(0.4);
+    expect(at("hollowmere", 0).mist).toBeGreaterThan(0.4);
+  });
+
+  it("fireflies come out at night on Arcadia and Hollowmere, not by day, not in rain, never on Meridian", () => {
+    expect(at("arcadia", 0).flies).toBe(true);
+    expect(at("hollowmere", 0).flies).toBe(true);
+    expect(at("arcadia", 0.5).flies).toBe(false);
+    expect(at("meridian", 0).flies).toBe(false);
+    expect(at("arcadia", 0, [], "rain").flies).toBe(false);
+  });
+
+  it("each has a kill switch that zeroes it", () => {
+    expect(at("arcadia", 0.17, ["shafts"]).shafts).toBe(0);
+    expect(at("hollowmere", 0.5, ["mist"]).mist).toBe(0);
+    expect(at("arcadia", 0, ["fireflies"]).flies).toBe(false);
+  });
+});
+
 describe("weather", () => {
   it("rain fills the box, wets surfaces over time and ripples water", () => {
     const { env } = setup("arcadia");
@@ -240,6 +285,36 @@ describe("weather", () => {
     run(env, 10);
     expect((env.fx.drops.geometry as THREE.InstancedBufferGeometry).instanceCount).toBeLessThan(200);
     expect(atmo.wet.value).toBeGreaterThan(0.3);
+  });
+
+  it("the first sky sync on a body takes the weather as it is; later changes ease (#46)", () => {
+    const t0 = Date.UTC(2026, 9, 12, 12);
+    vi.useFakeTimers({ now: t0, toFake: ["Date"] });
+    const { env, rig } = setup("arcadia");
+    env.timeOverride = 0.5;
+    // Rain that has been falling for ten minutes when the player arrives.
+    const rain = { weather: "rain" as const, intensity: 1, since: t0 - 10 * 60_000, until: t0 + 3_600_000 };
+    env.setServerSky(skyState("arcadia", 0, t0, 0, rain));
+    env.update(1 / 60);
+    // One frame in, the world is already as dark, wet and rainy as it will be: nothing eases in after the loader hides.
+    expect(env.weather).toBe("rain");
+    expect(env.weatherIntensity).toBeGreaterThan(0.95);
+    expect(atmo.wet.value).toBeGreaterThan(0.95);
+    const settled = rig.sun.intensity;
+    run(env, 4);
+    expect(rig.sun.intensity).toBeCloseTo(settled, 3);
+    // A change during play still eases: the rain stops, and a second later most of it is still there.
+    env.setServerSky(skyState("arcadia", 0, t0, 0, { weather: "clear", intensity: 0, since: t0 - 10 * 60_000, until: t0 + 3_600_000 }));
+    run(env, 0.5);
+    expect(env.weatherIntensity).toBeGreaterThan(0.5);
+    expect(env.weatherIntensity).toBeLessThan(0.95);
+    // The next body settles at once too.
+    const look = LOOKS.hollowmere;
+    env.setBody("hollowmere", 0, look, rig);
+    env.setServerSky(skyState("hollowmere", 0, t0, 0, { weather: "fog", intensity: 0.8, since: t0 - 10 * 60_000, until: t0 + 3_600_000 }));
+    env.update(1 / 60);
+    expect(env.weather).toBe("fog");
+    expect(env.weatherIntensity).toBeGreaterThan(0.75);
   });
 
   it("a new body starts dry", () => {

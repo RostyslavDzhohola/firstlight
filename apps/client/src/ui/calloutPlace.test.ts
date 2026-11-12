@@ -82,4 +82,48 @@ describe("world callout placement", () => {
     const left = placeCallout(ndc(900, 450), W, H, BOX, PANEL);
     expect(left.flip).toBe(false);
   });
+
+  describe("keep-clear areas (D-polish-ux-6: the mission pointer off the crosshair and the top banners)", () => {
+    const CROSS = { left: W / 2 - 40, top: H / 2 - 40, right: W / 2 + 40, bottom: H / 2 + 40 };
+    const TOP = { left: W / 2 - 300, top: 0, right: W / 2 + 300, bottom: 190 };
+    const label = (p: { x: number; y: number; flip: boolean; edge: boolean }) =>
+      p.edge ? { left: p.flip ? p.x - 16 - BOX.w : p.x + 16, top: p.y - 24, right: p.flip ? p.x - 16 : p.x + 16 + BOX.w, bottom: p.y + 24 } : { left: p.flip ? p.x - 10 - BOX.w : p.x - 6, top: p.y - 78, right: p.flip ? p.x + 6 : p.x + 10 + BOX.w, bottom: p.y + 6 };
+    const clear = (a: { left: number; top: number; right: number; bottom: number }, b: typeof a) => a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom;
+
+    it("takes the other side of its point when its label would cover the crosshair", () => {
+      const p = placeCallout(ndc(W / 2 - 50, H / 2 + 40), W, H, BOX, null, [CROSS, TOP]);
+      expect(p.edge).toBe(false);
+      expect(p.flip).toBe(true);
+      expect(clear(label(p), CROSS)).toBe(true);
+    });
+
+    it("stands beside the crosshair, pointing back, when neither side is clear", () => {
+      const p = placeCallout(ndc(W / 2, H / 2 + 50), W, H, BOX, null, [CROSS, TOP]);
+      expect(p.edge).toBe(true);
+      expect(clear(label(p), CROSS)).toBe(true);
+    });
+
+    it("keeps off the zone banner and trial strip at the top centre", () => {
+      const p = placeCallout(ndc(W / 2 + 10, 230), W, H, BOX, null, [CROSS, TOP]);
+      expect(clear(label(p), TOP)).toBe(true);
+    });
+
+    it("changes nothing for a point well clear of them", () => {
+      expect(placeCallout(ndc(1200, 600), W, H, BOX, null, [CROSS, TOP])).toEqual(placeCallout(ndc(1200, 600), W, H, BOX, null));
+    });
+
+    it("a label pinned at the top edge (target straight up the screen) drops below the top banners", () => {
+      // Above the screen, dead ahead: pinned at the top margin, which is inside the top-centre column.
+      const up = { x: 0, y: 3, z: 0.5 };
+      const plain = placeCallout(up, W, H, BOX, null);
+      expect(plain.edge).toBe(true);
+      const kept = placeCallout(up, W, H, BOX, null, [CROSS, TOP]);
+      expect(kept.edge).toBe(true);
+      expect(kept.x).toBe(plain.x);
+      expect(kept.y - BOX.h / 2).toBeGreaterThanOrEqual(TOP.bottom);
+      // Pinned at a side edge it is untouched.
+      const side = { x: 3, y: 0, z: 0.5 };
+      expect(placeCallout(side, W, H, BOX, null, [CROSS, TOP])).toEqual(placeCallout(side, W, H, BOX, null));
+    });
+  });
 });

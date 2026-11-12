@@ -6,7 +6,9 @@ import type { Game } from "../game/Game.ts";
 import { FEATURES, killSwitches, resolveSettings, TIERS, type Feature, type Tier } from "../render/quality.ts";
 import { button, el, icon, isolateKeys } from "./dom.ts";
 import { formatDamage } from "./hudFormat.ts";
-import { FOV_RANGE, SENSITIVITY_RANGE, uiSettings, type UiSettings, type UiSettingsPatch } from "./uiSettings.ts";
+import { FOV_RANGE, PAD_CURVE_RANGE, PAD_DEADZONE_RANGE, PAD_SENSITIVITY_RANGE, SENSITIVITY_RANGE, uiSettings, type UiSettings, type UiSettingsPatch } from "./uiSettings.ts";
+import { padLayoutList } from "./padLayout.ts";
+import { controls } from "../game/controls.ts";
 import { openVoicePanel, voice } from "../voice/index.ts";
 import { features } from "../config.ts";
 
@@ -145,7 +147,11 @@ export function openSettings(game: Game, host: HTMLElement, back: () => void, es
     icon("check", "", det);
     const dt = el("span", "", det, "Detected ");
     el("b", "", dt, stored.autoTier ?? "medium");
-    dt.append(" for this computer. Auto follows it and steps down if frames get slow.");
+    // The probe's extras (D-framerate-3): High features this computer measured room for on its tier.
+    const extras = s.auto ? s.extras.length : 0;
+    dt.append(" for this computer");
+    if (extras) dt.append(`, plus ${extras} High feature${extras === 1 ? "" : "s"} it has room for`);
+    dt.append(". Auto follows it and steps down if frames get slow.");
 
     const rs = el("div", "fl-setting", gfx);
     const rsRow = el("div", "fl-setting__row", rs);
@@ -178,7 +184,7 @@ export function openSettings(game: Game, host: HTMLElement, back: () => void, es
     const kills = killSwitches();
     for (const [f, label] of TOGGLES) {
       // Available on this tier/backend? Resolve once with the feature forced on.
-      const avail = resolveSettings(s.tier, s.auto, s.webgpu, { ...stored, features: { ...stored.features, [f]: true } }, kills).on[f];
+      const avail = resolveSettings(s.tier, s.auto, s.webgpu, { ...stored, features: { ...stored.features, [f]: true } }, kills, s.extras).on[f];
       const note = kills.has(f) ? "turned off by a URL flag" : avail ? null : (f === "ao" || f === "traa") && !ctx.webgpu ? "needs WebGPU and High or Ultra" : "needs a higher quality tier";
       const sw = toggle(grid, "fl-tg", label, note, s.on[f], !avail);
       sw.onchange = () => {
@@ -209,6 +215,35 @@ export function openSettings(game: Game, host: HTMLElement, back: () => void, es
   const inv = toggle(mid, "fl-line", "Invert Y", "Pull the mouse back to look up", ui.invertY);
   inv.onchange = () => setUi({ invertY: inv.checked });
   el("div", "fl-setting__hint", mid, "Full key list: Menu → How to play.");
+
+  // Gamepad (D-controls-5): look speed, invert, stick dead zone and curve, aim slowdown, rumble, the layout.
+  const pad = el("div", "fl-setting fl-setting--pad", mid);
+  pad.dataset.e2e = "settings-gamepad";
+  el("div", "fl-setting__row", pad, "Gamepad");
+  const slider = (id: string, label: string, [lo, hi]: readonly [number, number], step: number, value: number, fmt: (v: number) => string, set: (v: number) => void) => {
+    const box = el("div", "fl-setting", pad);
+    const row = el("div", "fl-setting__row", box);
+    const lab = el("label", "", row, label);
+    lab.htmlFor = id;
+    const out = el("output", "num", row, fmt(value));
+    const r = range(box, id, lo, hi, step, value);
+    r.addEventListener("input", () => {
+      out.textContent = fmt(Number(r.value));
+      set(Number(r.value));
+    });
+  };
+  slider("fl-pad-sens", "Look speed", PAD_SENSITIVITY_RANGE, 0.05, ui.padSensitivity, (v) => v.toFixed(2), (v) => setUi({ padSensitivity: v }));
+  slider("fl-pad-dz", "Stick dead zone", PAD_DEADZONE_RANGE, 0.01, ui.padDeadzone, (v) => `${Math.round(v * 100)}%`, (v) => setUi({ padDeadzone: v }));
+  slider("fl-pad-curve", "Response curve", PAD_CURVE_RANGE, 0.1, ui.padCurve, (v) => (v <= 1.05 ? "linear" : v.toFixed(1)), (v) => setUi({ padCurve: v }));
+  const pinv = toggle(pad, "fl-line", "Invert Y (gamepad)", "Push the stick down to look up", ui.padInvertY);
+  pinv.onchange = () => setUi({ padInvertY: pinv.checked });
+  const slow = toggle(pad, "fl-line", "Aim slowdown", "Look slows a little over a creep. No pull, and never on players.", ui.padAimSlow);
+  slow.onchange = () => setUi({ padAimSlow: slow.checked });
+  const rum = toggle(pad, "fl-line", "Rumble", "On taking damage and on a kill (Chrome and Edge)", ui.padRumble);
+  rum.onchange = () => setUi({ padRumble: rum.checked });
+  const fam = controls()?.pad.family ?? "xbox";
+  padLayoutList(pad, fam);
+  el("div", "fl-setting__hint", pad, "Touch screens (experimental): left thumb moves, drag on the right looks; buttons on the right. Look speed is the mouse sensitivity above.");
 
   el("hr", "", mid);
   const ah = el("h2", "", mid);
@@ -246,6 +281,8 @@ export function openSettings(game: Game, host: HTMLElement, back: () => void, es
   const mr = toggle(mid, "fl-line", "Turn the minimap with the camera", "Ahead is up. Off keeps north up.", ui.minimapRotate);
   mm.onchange = () => setUi({ minimap: mm.checked });
   mr.onchange = () => setUi({ minimapRotate: mr.checked });
+  const ms = toggle(mid, "fl-line", "Missions", "Top right, under the minimap. A click on its header folds it.", ui.missions);
+  ms.onchange = () => setUi({ missions: ms.checked });
 
   // ------------------------------------------------------------------------------------------ voice + colour
   // The voice lane owns the opt-in (16+), devices and radio (its "Voice & radio" panel); this column

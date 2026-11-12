@@ -26,8 +26,11 @@ const ARROW_LABEL = 16;
 /**
  * `ndc` is three's `Vector3.project()` result: x and y in −1…1 on screen, z > 1 behind the camera
  * (where x and y come out mirrored). `box` is the label's size; `avoid` the open tutorial panel.
+ * `keepClear`: more screen areas the label stays off while its point is on screen (the mission
+ * pointer: the crosshair and the top-centre banners, D-polish-ux-6): it takes the other side of its
+ * point, else stands beside the area with an arrow back.
  */
-export function placeCallout(ndc: { x: number; y: number; z: number }, w: number, h: number, box: { w: number; h: number }, avoid: Rect | null): CalloutPlacement {
+export function placeCallout(ndc: { x: number; y: number; z: number }, w: number, h: number, box: { w: number; h: number }, avoid: Rect | null, keepClear: readonly Rect[] = []): CalloutPlacement {
   // A point on the camera plane projects to infinities: keep its side, never NaN.
   const finite = Number.isFinite(ndc.x) && Number.isFinite(ndc.y) && Number.isFinite(ndc.z);
   const behind = finite && ndc.z > 1;
@@ -36,10 +39,24 @@ export function placeCallout(ndc: { x: number; y: number; z: number }, w: number
   const px = (nx * 0.5 + 0.5) * w;
   const py = (-ny * 0.5 + 0.5) * h;
   if (finite && !behind && Math.abs(nx) < ON_SCREEN && Math.abs(ny) < ON_SCREEN) {
+    const rect = (f: boolean): Rect =>
+      f ? { left: px - DOT_LABEL.side - box.w, top: py - DOT_LABEL.up, right: px + 6, bottom: py + 6 } : { left: px - 6, top: py - DOT_LABEL.up, right: px + DOT_LABEL.side + box.w, bottom: py + 6 };
     const flip = px + DOT_LABEL.side + box.w > w - 8;
-    const r = flip
-      ? { left: px - DOT_LABEL.side - box.w, top: py - DOT_LABEL.up, right: px + 6, bottom: py + 6 }
-      : { left: px - 6, top: py - DOT_LABEL.up, right: px + DOT_LABEL.side + box.w, bottom: py + 6 };
+    const r = rect(flip);
+    if (keepClear.length) {
+      const hit = (q: Rect) => keepClear.find((k) => overlaps(q, k)) ?? null;
+      const blocker = hit(r);
+      if (!blocker && (!avoid || !overlaps(r, avoid))) return { x: px, y: py, edge: false, angle: 0, flip };
+      const other = rect(!flip);
+      if (blocker && !hit(other) && (!avoid || !overlaps(other, avoid)) && other.left >= 8 && other.right <= w - 8) return { x: px, y: py, edge: false, angle: 0, flip: !flip };
+      if (blocker) {
+        // Beside the area (the side with room), level with the point but below the area's top band.
+        const right = blocker.right + GAP + ARROW_LABEL + box.w <= w - 8;
+        const bx = right ? blocker.right + GAP : blocker.left - GAP;
+        const by = clamp(py, Math.max(MARGIN.top, blocker.top < 4 ? blocker.bottom + GAP : MARGIN.top), h - MARGIN.bottom);
+        return { x: bx, y: by, edge: true, angle: Math.atan2(py - by, px - bx), flip: !right };
+      }
+    }
     if (!avoid || !overlaps(r, avoid)) return { x: px, y: py, edge: false, angle: 0, flip };
     // Beside the panel, pointing back at the point behind it.
     const ax = avoid.right + GAP;
@@ -59,9 +76,15 @@ export function placeCallout(ndc: { x: number; y: number; z: number }, w: number
   const sy = dy > 0 ? (h - MARGIN.bottom - cy) / dy : dy < 0 ? (MARGIN.top - cy) / dy : Infinity;
   const s = Math.min(sx, sy);
   let ex = cx + dx * s;
-  const ey = cy + dy * s;
+  let ey = cy + dy * s;
   if (avoid && ex >= avoid.left - GAP && ex <= avoid.right + GAP && ey >= avoid.top - GAP && ey <= avoid.bottom + GAP) ex = avoid.right + GAP;
-  return { x: ex, y: ey, edge: true, angle: Math.atan2(dy, dx), flip: flipBeside(ex, w, box, avoid) };
+  const flip = flipBeside(ex, w, box, avoid);
+  // A pinned label stays off the kept-clear areas too (a target straight up the screen pins it at
+  // the top, where the trial strip and banners are): it drops below the one it would cover.
+  const left = flip ? ex - ARROW_LABEL - box.w : ex;
+  const covered = keepClear.find((k) => overlaps({ left, top: ey - box.h / 2, right: left + ARROW_LABEL + box.w, bottom: ey + box.h / 2 }, k));
+  if (covered) ey = clamp(covered.bottom + GAP + box.h / 2, MARGIN.top, h - MARGIN.bottom);
+  return { x: ex, y: ey, edge: true, angle: Math.atan2(dy, dx), flip };
 }
 
 /** Label left of the arrow only when it doesn't fit on the right and the left side is clear of the panel. */

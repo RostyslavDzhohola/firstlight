@@ -13,12 +13,16 @@ import { PF } from "@firstlight/shared/net/schema";
 import { flags } from "../config.ts";
 import type { AvatarView } from "../render/Avatars.ts";
 import { CosmeticRig, Nameplates } from "../render/Cosmetics.ts";
+import { PlateBars } from "../render/plates.ts";
 import { MapPanel } from "../ui/map.ts";
-import { AdminConsole, GuidePanel, JournalPanel, KeypadPanel, MissionTracker, Panel } from "../ui/panels.ts";
+import { AdminConsole, CuratorPanel, GuidePanel, JournalPanel, KeypadPanel, MissionTracker, Panel } from "../ui/panels.ts";
+import { gleamsWon } from "@firstlight/shared/content/gleams";
 import { ShopPanel } from "../ui/shop.ts";
 import { QuestWorld } from "../world/QuestWorld.ts";
 import type { Game } from "./Game.ts";
 import { HOTKEYS, hits } from "./keys.ts";
+import { trialSeen } from "./trialState.ts";
+import { worldPrompt } from "./worldPrompt.ts";
 import type { ClientSystem } from "./systems.ts";
 
 /** Survives body changes: the latest Hall of Firsts and a staged scene waiting for travel to finish. */
@@ -34,6 +38,8 @@ const DENIED: Record<string, string> = {
   "mission:done this life": "You've done that mission in this life",
   "mission:active": "You're already on that mission",
   "mission:wrong planet": "That guide's missions are on another planet",
+  "mission:giver elsewhere": "Sela Marchbank gives the trials of the Three Gleams in Portus Plaza",
+  "mission:giver too far": "Stand next to Sela Marchbank to take a trial",
   "title:not earned": "You haven't earned that medal yet",
 };
 
@@ -42,11 +48,14 @@ export class QuestClient implements ClientSystem {
   private readonly world: QuestWorld;
   private readonly shop: ShopPanel;
   private readonly guide: GuidePanel | null;
+  private readonly curator: CuratorPanel | null;
   private readonly journal: JournalPanel;
   private readonly keypad: KeypadPanel;
   private readonly map: MapPanel;
   private readonly tracker: MissionTracker;
   private readonly plates = new Nameplates();
+  /** Health bars under the plates (render/plates.ts). */
+  private readonly plateBars = new PlateBars();
   private readonly console: AdminConsole;
   private readonly rigs = new Map<AvatarView, CosmeticRig>();
   private readonly interactables: { def: WorldObjectDef; pos: [number, number, number] }[];
@@ -65,10 +74,13 @@ export class QuestClient implements ClientSystem {
       .map((def) => ({ def, pos: objectPos(def, (x, y, z) => terrain.groundHeight(x, y, z)) }));
     this.shop = new ShopPanel(game);
     this.guide = (PLANET_IDS as readonly BodyId[]).includes(body) ? new GuidePanel(game, body as Exclude<BodyId, "portus">) : null;
+    this.curator = body === "portus" ? new CuratorPanel(game) : null;
     this.journal = new JournalPanel(game);
     this.keypad = new KeypadPanel(game);
     this.map = new MapPanel(game);
-    this.tracker = new MissionTracker(game.hud);
+    this.tracker = new MissionTracker(game.hud, () => {
+      if (!Panel.current) this.journal.show("missions");
+    });
     this.console = new AdminConsole(game);
     window.addEventListener("keydown", this.onKey);
 
@@ -146,9 +158,7 @@ export class QuestClient implements ClientSystem {
   }
 
   private promptFor(o: WorldObjectDef): string {
-    if (o.look === "keeper") return `E — Trade with ${SHOP_SPOT_BY_ID.get(o.id)?.keeper ?? o.name}`;
-    if (o.look === "guide") return `E — Talk to ${o.name}`;
-    return `E — ${o.name}`;
+    return worldPrompt(o, this.game.hud.you);
   }
 
   private use(o: WorldObjectDef) {
@@ -157,6 +167,7 @@ export class QuestClient implements ClientSystem {
       return spot ? this.shop.openAt(spot) : this.shop.open();
     }
     if (o.look === "guide") return this.guide?.open();
+    if (o.look === "curator") return this.curator?.open();
     if (o.look === "lantern" && o.egg === "E4") this.world.lightLantern(o.id);
     this.game.net.room?.send("interact", { target: o.id });
   }
@@ -166,8 +177,9 @@ export class QuestClient implements ClientSystem {
     const g = this.game;
     const you = g.hud.you;
     const active = new Set((you?.missions ?? []).filter((m) => !m.done).map((m) => m.id));
-    this.world.update(dt, { activeMissions: active, cosmeticsExtras: !!you?.cosmeticsExtras });
-    this.tracker.update(you, this.game.bodyId);
+    this.world.update(dt, { activeMissions: active, cosmeticsExtras: !!you?.cosmeticsExtras, gleams: you?.gleamVault ? 0 : gleamsWon(you?.missions ?? []) });
+    const trial = trialSeen()?.msg;
+    this.tracker.update(you, this.game.bodyId, trial && (trial.state === "running" || trial.state === "paused") ? trial.id : null);
     if (you !== this.lastYou) {
       this.lastYou = you;
       if (Panel.current && Panel.current !== this.map && Panel.current !== this.keypad) Panel.current.refresh();
@@ -209,13 +221,13 @@ export class QuestClient implements ClientSystem {
     const mine = players.get(room.sessionId);
     if (g.self && mine) this.rig(g.self).set(mine.cosmetics ?? "");
     const live = new Set<AvatarView>(g.self ? [g.self] : []);
-    const plates: { id: string; pos: THREE.Vector3; name: string; title: string }[] = [];
+    const plates: { id: string; pos: THREE.Vector3; name: string; title: string; agent: boolean }[] = [];
     for (const [id, a] of g.avatars) {
       const st = players.get(id);
       if (!st) continue;
       live.add(a);
       this.rig(a).set(st.cosmetics ?? "");
-      if (!(st.flags & PF.DEAD)) plates.push({ id, pos: a.root.position, name: st.name, title: st.title ?? "" });
+      if (!(st.flags & PF.DEAD)) plates.push({ id, pos: a.root.position, name: st.name, title: st.title ?? "", agent: !!st.agent });
     }
     for (const [avatar, r] of this.rigs) {
       if (live.has(avatar)) r.update(this.t);
@@ -225,6 +237,7 @@ export class QuestClient implements ClientSystem {
       }
     }
     this.plates.update(g.ctx.camera, plates, g.player.pos);
+    this.plateBars.sync(g.ctx.camera, g.avatars, players, g.player.pos);
   }
 
   dispose() {
@@ -234,6 +247,7 @@ export class QuestClient implements ClientSystem {
     this.world.dispose();
     this.tracker.dispose();
     this.plates.dispose();
+    this.plateBars.dispose();
     for (const r of this.rigs.values()) r.dispose();
     this.rigs.clear();
   }
@@ -242,3 +256,4 @@ export class QuestClient implements ClientSystem {
 export function createQuestClient(game: Game): ClientSystem | null {
   return game.net.room ? new QuestClient(game) : null;
 }
+

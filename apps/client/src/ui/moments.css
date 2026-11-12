@@ -1,0 +1,130 @@
+/* The HUD's moments (ui/momentsView.ts, D-ui-2…4): the earned banner, the arrival title card, the
+   event feed, the "hit from" ring and the kill mark. One family with the holo frames: photon lines
+   over a dark scrim, corners in the accent of what happened, the world's own colour on the arrival
+   card. Everything animates transform and opacity only; no blur, no filters on anything that moves. */
+
+/* ---------------------------------------------------------------- world accent (corners, rules, the minimap ring) */
+.fl-hud { --world: var(--photon); }
+.fl-hud[data-body="portus"] { --world: var(--portus); }
+.fl-hud[data-body="arcadia"] { --world: var(--arcadia); }
+.fl-hud[data-body="hollowmere"] { --world: var(--hollowmere-2); }
+.fl-hud[data-body="meridian"] { --world: var(--meridian-2); }
+
+/* One corner language for the HUD's holo frames (D-ui-6): the framed ones (missions, trial strip,
+   banners) keep four ticks, every other holo surface gets two, top-left and bottom-right, all in the
+   world's colour. Zone banners and party frames keep their own colours (safe / danger, the slot). */
+.fl-hud .fl-corners { --corner: var(--world); }
+.fl-hud .fl-holo:not(.fl-corners):not(.fl-banner):not(.fl-mate)::after {
+  content: ""; position: absolute; inset: -1px; pointer-events: none; opacity: .8;
+  background:
+    linear-gradient(var(--world) 0 0) top left / 9px 1px, linear-gradient(var(--world) 0 0) top left / 1px 9px,
+    linear-gradient(var(--world) 0 0) bottom right / 9px 1px, linear-gradient(var(--world) 0 0) bottom right / 1px 9px;
+  background-repeat: no-repeat;
+}
+
+/* ---------------------------------------------------------------- the banner (top centre, one at a time) */
+.fl-moments { order: 9; display: grid; justify-items: center; min-height: 0; }
+.fl-moment {
+  --accent: var(--photon); --corner-l: 12px;
+  position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: calc(.9 * var(--u));
+  min-width: calc(24 * var(--u)); max-width: min(calc(40 * var(--u)), 86vw);
+  padding: calc(.7 * var(--u)) calc(1.4 * var(--u)) calc(.7 * var(--u)) calc(.8 * var(--u));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 16%, transparent), transparent 62%), repeating-linear-gradient(180deg, rgba(196, 241, 255, .03) 0 1px, transparent 1px 3px), var(--hud-scrim);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  overflow: hidden; animation: fl-moment-in 320ms var(--ease-snap) both;
+}
+.fl-hud .fl-moment.fl-corners { --corner: var(--accent); }
+.fl-moment.is-out { animation: fl-moment-out 260ms var(--ease-in-out) both; }
+@keyframes fl-moment-in { from { opacity: 0; transform: translateY(-8px) scale(.94); } to { opacity: 1; transform: none; } }
+@keyframes fl-moment-out { to { opacity: 0; transform: translateY(-6px); } }
+.fl-moment__icon { position: relative; display: grid; place-items: center; width: calc(3.6 * var(--u)); height: calc(3.6 * var(--u)); border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); border-radius: var(--r-1); background: rgba(0, 0, 0, .4); animation: fl-moment-icon 520ms var(--ease-snap) 80ms both; }
+.fl-moment__icon .px { width: calc(2.6 * var(--u)); height: calc(2.6 * var(--u)); }
+@keyframes fl-moment-icon { from { transform: scale(.6) rotate(-8deg); } to { transform: none; } }
+.fl-moment__body { min-width: 0; display: grid; gap: calc(.22 * var(--u)); }
+.fl-moment__k { font: 700 var(--t-xs)/1 var(--font-display); letter-spacing: .26em; text-transform: uppercase; color: var(--accent); white-space: nowrap; }
+.fl-moment__t { font: 600 var(--t-xl)/1.05 var(--font-display); letter-spacing: .05em; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-moment__r { display: flex; align-items: center; gap: calc(.4 * var(--u)); font: 500 var(--t-xs)/1.3 var(--font-body); color: var(--fog-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-moment__r .fl-key { flex: none; }
+/* The light sweep: one pass of a soft bar across the frame. */
+.fl-moment__sweep { position: absolute; top: 0; bottom: 0; left: 0; width: 34%; pointer-events: none; background: linear-gradient(100deg, transparent, color-mix(in srgb, var(--accent) 26%, transparent) 45%, rgba(255, 255, 255, .2) 50%, color-mix(in srgb, var(--accent) 26%, transparent) 55%, transparent); transform: translateX(-110%); animation: fl-moment-sweep 900ms var(--ease-out) 180ms both; }
+@keyframes fl-moment-sweep { from { transform: translateX(-110%); } to { transform: translateX(310%); } }
+
+.fl-moment.is-level { --accent: var(--xp); }
+.fl-moment.is-level .fl-moment__t { font-size: var(--t-2xl); letter-spacing: .08em; }
+.fl-moment.is-spell { --accent: #cbb6ff; }
+.fl-moment.is-mission { --accent: var(--photon); }
+.fl-moment.is-trial { --accent: var(--hero-amber); }
+.fl-moment.is-gleam { --accent: #9ff3ff; }
+.fl-moment.is-gleam .fl-moment__t { letter-spacing: .14em; text-transform: uppercase; font-weight: 500; }
+.fl-moment.is-vault, .fl-moment.is-medal { --accent: var(--hero-gold); }
+.fl-moment.is-medal .fl-moment__icon, .fl-moment.is-vault .fl-moment__icon { background: linear-gradient(180deg, rgba(70, 44, 14, .8), rgba(24, 16, 8, .8)); }
+
+/* ---------------------------------------------------------------- arrival title card (upper middle; never takes input) */
+.fl-arrive {
+  --c: var(--world); position: absolute; left: 50%; top: 15%; transform: translateX(-50%); z-index: 1;
+  display: grid; justify-items: center; gap: calc(.75 * var(--u)); padding: calc(2 * var(--u)) calc(6 * var(--u));
+  pointer-events: none; text-align: center; white-space: nowrap;
+  background: radial-gradient(ellipse 50% 50% at 50% 50%, rgba(4, 7, 11, .58), rgba(4, 7, 11, .3) 55%, transparent 100%);
+  animation: fl-arrive-in 900ms var(--ease-out) both;
+}
+.fl-arrive[hidden] { display: none; }
+.fl-arrive[data-body="portus"] { --c: var(--portus); }
+.fl-arrive[data-body="arcadia"] { --c: var(--arcadia); }
+.fl-arrive[data-body="hollowmere"] { --c: var(--hollowmere-2); }
+.fl-arrive[data-body="meridian"] { --c: var(--meridian-2); }
+.fl-arrive.is-out { animation: fl-arrive-out 700ms var(--ease-in-out) both; }
+@keyframes fl-arrive-in { 0% { opacity: 0; } 10% { opacity: .75; } 16% { opacity: .25; } 34% { opacity: 1; } 100% { opacity: 1; } }
+@keyframes fl-arrive-out { to { opacity: 0; transform: translateX(-50%) translateY(-6px); } }
+.fl-arrive__k { font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: .5em; padding-left: .5em; text-transform: uppercase; color: var(--paper); text-shadow: var(--hud-text-shadow); }
+.fl-arrive__name { --wm-size: clamp(calc(2.6 * var(--u)), 5.2vw, calc(5 * var(--u))); --wm-track: .42em; padding-bottom: .3em; font-weight: 300; color: #fff; text-shadow: 0 2px 18px rgba(0, 0, 0, .55), 0 1px 2px rgba(0, 0, 0, .6); animation: fl-arrive-name 1200ms var(--ease-out) both; }
+@keyframes fl-arrive-name { from { transform: scale(1.06); } to { transform: none; } }
+/* The thin rule draws itself outward from the middle, in the world's colour; the sun crests it. */
+.fl-arrive__name::after { left: -8%; right: -8%; background: linear-gradient(90deg, transparent, var(--c) 22%, #fff 50%, var(--c) 78%, transparent); box-shadow: 0 0 .3em color-mix(in srgb, var(--c) 60%, transparent); transform: scaleX(0); animation: fl-arrive-rule 1100ms var(--ease-out) 260ms both; }
+.fl-arrive__name::before { opacity: 0; animation: fl-fade-in 600ms var(--ease-out) 900ms both; }
+@keyframes fl-arrive-rule { to { transform: scaleX(1); } }
+.fl-arrive__sub { display: flex; align-items: center; gap: calc(.8 * var(--u)); font: 500 var(--t-md)/1.2 var(--font-body); color: var(--paper); text-shadow: var(--hud-text-shadow); animation: fl-rise-in 600ms var(--ease-out) 520ms both; }
+.fl-arrive__sub i { width: 5px; height: 5px; transform: rotate(45deg); background: var(--c); box-shadow: 0 0 0 1px rgba(0, 0, 0, .45); }
+.fl-arrive__sub b { padding: calc(.3 * var(--u)) calc(.6 * var(--u)) calc(.3 * var(--u)) calc(.78 * var(--u)); border: 1px solid color-mix(in srgb, var(--c) 60%, transparent); border-radius: var(--r-1); background: rgba(4, 7, 11, .6); font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: .18em; text-transform: uppercase; color: #fff; text-shadow: none; }
+
+/* ---------------------------------------------------------------- event feed (right column, under the minimap) */
+/* Lines may run wider than the column (there is only sky to their left); they never push the column itself. */
+.fl-feed { align-self: flex-end; width: max-content; max-width: calc(30 * var(--u)); display: flex; flex-direction: column; align-items: flex-end; gap: calc(.25 * var(--u)); }
+.fl-feed:empty { display: none; }
+.fl-feed__line { display: flex; align-items: center; gap: calc(.45 * var(--u)); max-width: 100%; padding: calc(.28 * var(--u)) calc(.6 * var(--u)) calc(.28 * var(--u)) calc(.5 * var(--u)); background: linear-gradient(270deg, rgba(5, 10, 15, .72), rgba(5, 10, 15, .5)); border-right: 2px solid var(--world); font: 500 var(--t-xs)/1.25 var(--font-body); color: var(--fog-4); animation: fl-feed-in 260ms var(--ease-out) both; }
+.fl-feed__line.is-out { animation: fl-feed-out 240ms var(--ease-in-out) both; }
+@keyframes fl-feed-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
+@keyframes fl-feed-out { to { opacity: 0; transform: translateX(12px); } }
+.fl-feed__line .li { flex: none; width: 1em; height: 1em; color: var(--fog-3); }
+.fl-feed__text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-feed__text b { font-weight: 600; color: var(--paper); }
+.fl-feed__text b.is-me { color: var(--hero-cream); }
+.fl-feed__line.is-kill { border-right-color: var(--hero-amber); }
+.fl-feed__line.is-kill .li { color: var(--hero-amber); }
+.fl-feed__line.is-death { border-right-color: var(--danger); }
+.fl-feed__line.is-death .li { color: var(--danger); }
+.fl-feed__line.is-hunt { border-right-color: #9ff3ff; color: #e9fbff; }
+.fl-feed__line.is-hunt .li { color: #9ff3ff; }
+/* "AI": an agent player. A square cold chip (never colour alone: it says AI). */
+.fl-ai { display: inline-block; margin: 0 .15em 0 .4em; padding: 0 .35em; border: 1px solid rgba(196, 241, 255, .55); border-radius: var(--r-1); font: 700 .78em/1.35 var(--font-mono); letter-spacing: .06em; color: var(--photon); vertical-align: .08em; }
+
+/* ---------------------------------------------------------------- "hit from" ring + kill mark (round the crosshair) */
+.fl-hitfrom { position: absolute; left: 50%; top: 50%; width: calc(15 * var(--u)); height: calc(15 * var(--u)); transform: translate(-50%, -50%); }
+/* One wedge: a soft red arc at the top of the ring, turned to where the hit came from, with a pale
+   chevron pointing at it (shape, not colour alone). */
+.fl-hitfrom > i { --a: 0deg; position: absolute; inset: 0; opacity: 0; transform: rotate(var(--a)); }
+.fl-hitfrom > i::before { content: ""; position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(from -32deg, transparent, rgba(255, 72, 52, 1) 20deg, #ff8a73 32deg, rgba(255, 72, 52, 1) 44deg, transparent 64deg); -webkit-mask-image: radial-gradient(closest-side, transparent calc(100% - 10px), #000 calc(100% - 9px), #000 calc(100% - 1px), transparent 100%); mask-image: radial-gradient(closest-side, transparent calc(100% - 10px), #000 calc(100% - 9px), #000 calc(100% - 1px), transparent 100%); }
+.fl-hitfrom > i::after { content: ""; position: absolute; left: 50%; top: 15px; width: 20px; height: 12px; margin-left: -10px; background: #fff0ec; clip-path: polygon(50% 0, 100% 100%, 50% 58%, 0 100%); }
+
+.fl-killmark { position: absolute; left: 50%; top: 50%; width: calc(3.4 * var(--u)); height: calc(3.4 * var(--u)); opacity: 0; transform: translate(-50%, -50%) rotate(45deg); border: 2px solid var(--hero-coral); box-shadow: 0 0 0 1px rgba(0, 0, 0, .55), inset 0 0 0 1px rgba(0, 0, 0, .55); }
+.fl-killmark.is-boss { width: calc(5 * var(--u)); height: calc(5 * var(--u)); border-color: var(--hero-gold); }
+.fl-killmark i { position: absolute; width: calc(.5 * var(--u)); height: calc(.5 * var(--u)); background: #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, .6); }
+.fl-killmark .a { left: -4px; top: -4px; }
+.fl-killmark .b { right: -4px; top: -4px; }
+.fl-killmark .c { left: -4px; bottom: -4px; }
+.fl-killmark .d { right: -4px; bottom: -4px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .fl-moment__sweep { display: none; }
+  .fl-arrive__name::after { transform: none; }
+  .fl-arrive__name::before { opacity: 1; }
+}

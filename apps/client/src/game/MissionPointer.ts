@@ -5,13 +5,15 @@
 
 import "../ui/missionPointer.css";
 import * as THREE from "three/webgpu";
-import { MISSION_BY_ID, missionGoal, trackedMission } from "@firstlight/shared/content/missions";
-import { placeCallout } from "../ui/calloutPlace.ts";
+import { MISSION_BY_ID, missionGoal, trackedMission, type MissionDef } from "@firstlight/shared/content/missions";
+import { objectPos, WORLD_OBJECT_BY_ID } from "@firstlight/shared/content/world";
+import { placeCallout, type Rect } from "../ui/calloutPlace.ts";
 import { el } from "../ui/dom.ts";
 import type { Game } from "./Game.ts";
 import { huntTargets } from "./huntTargets.ts";
 import { missionTarget, type PointerNpc, type PointerTarget } from "./missionTarget.ts";
 import type { ClientSystem } from "./systems.ts";
+import { objectiveObject, trialSeen } from "./trialState.ts";
 
 /** Pick the target this often (ms); the callout itself follows it every frame. */
 const PICK_MS = 250;
@@ -64,7 +66,7 @@ class MissionPointer implements ClientSystem {
       // The server's list, held since the join (huntTargets.ts): null until one came (older servers never send it).
       const hunt = huntTargets();
       const eligible = hunt && open && hunt.id === open.id ? hunt.npcs : null;
-      this.target = def ? missionTarget(def, g.bodyId, [p.x, p.y, p.z], npcs, (x, y, z) => terrain.groundHeight(x, y, z), { eligible, counts: open!.counts }) : null;
+      this.target = def ? (def.race || def.defend || def.collect ? this.objective(def, open!.counts, [p.x, p.y, p.z]) : missionTarget(def, g.bodyId, [p.x, p.y, p.z], npcs, (x, y, z) => terrain.groundHeight(x, y, z), { eligible, counts: open!.counts })) : null;
     }
     const t = this.target;
     if (!t || g.photo?.active) return this.hide();
@@ -85,7 +87,7 @@ class MissionPointer implements ClientSystem {
       const h = this.box.offsetHeight;
       if (w > 0 && h > 0) this.boxSize = { w, h };
     }
-    const c = placeCallout(ndc, innerWidth, innerHeight, this.boxSize ?? { w: 160, h: 48 }, null);
+    const c = placeCallout(ndc, innerWidth, innerHeight, this.boxSize ?? { w: 160, h: 48 }, null, this.keepClear());
     const key = `${Math.round(c.x)},${Math.round(c.y)},${c.edge ? Math.round(c.angle * 20) : "-"},${c.flip ? 1 : 0}`;
     if (key === this.last.key) return;
     this.last.key = key;
@@ -94,6 +96,51 @@ class MissionPointer implements ClientSystem {
     this.callout.style.setProperty("--a", `${c.angle.toFixed(3)}rad`);
     this.callout.classList.toggle("is-edge", c.edge);
     this.callout.classList.toggle("is-flip", c.flip);
+  }
+
+  private clear: { w: number; h: number; rects: Rect[] } | null = null;
+
+  /**
+   * Where the label never goes (D-polish-ux-6): the crosshair, and the top-centre column (zone
+   * banner, boss bar, trial strip, earned banners). From the window size and the HUD's size unit
+   * (tokens.css `--u`), recomputed only on resize: no layout reads.
+   */
+  private keepClear(): Rect[] {
+    const w = innerWidth;
+    const h = innerHeight;
+    if (this.clear?.w === w && this.clear.h === h) return this.clear.rects;
+    const u = Math.min(19, Math.max(14, w * 0.00390625 + 9)); // tokens.css --u
+    const rects: Rect[] = [
+      { left: w / 2 - 3 * u, top: h / 2 - 3 * u, right: w / 2 + 3 * u, bottom: h / 2 + 3 * u },
+      { left: w / 2 - 22 * u, top: 0, right: w / 2 + 22 * u, bottom: 13 * u },
+    ];
+    this.clear = { w, h, rects };
+    return rects;
+  }
+
+  private readonly objAt = new Map<string, [number, number, number]>();
+
+  /** Race / defend / collect: the next ring, the beacon, or the nearest piece left (trialState.ts). */
+  private objective(def: MissionDef, counts: readonly number[] | undefined, me: [number, number, number]): PointerTarget | null {
+    if (def.body !== this.game.bodyId) return null;
+    const posOf = (id: string): [number, number, number] | null => {
+      let at = this.objAt.get(id);
+      const o = WORLD_OBJECT_BY_ID.get(id);
+      if (!at && o && o.body === this.game.bodyId) {
+        const t = this.game.planet.terrain;
+        at = objectPos(o, (x, y, z) => t.groundHeight(x, y, z));
+        this.objAt.set(id, at);
+      }
+      return at ?? null;
+    };
+    const trial = trialSeen()?.msg ?? null;
+    const id = objectiveObject(def, counts, trial, me, posOf);
+    const at = id ? posOf(id) : null;
+    if (!id || !at) return null;
+    const o = WORLD_OBJECT_BY_ID.get(id)!;
+    const name = o.name.replace(/^Light the /, "");
+    const title = name[0]!.toUpperCase() + name.slice(1); // "Ring 4", "Beacon", "Vigil lamp", "Gleam shard"
+    return { at, title, creep: false };
   }
 
   private hide() {

@@ -268,7 +268,7 @@ export function naturalChunkProps(terrain: Terrain, face: Face, cx: number, cy: 
   const arena = bossArena(terrain);
   const clearings = [
     ...(arena ? [{ dir: arena.up, radius: arena.radius + 6 }] : []),
-    ...objectsOn(body.id).map((o) => ({ dir: objectDir(o), radius: Math.max(2, o.range) + 4 })),
+    ...objectsOn(body.id).filter((o) => o.clearing !== false).map((o) => ({ dir: objectDir(o), radius: Math.max(2, o.range) + 4 })),
     ...portalSpots(body, terrain).map((o) => ({ dir: o.dir, radius: 6 })),
   ];
   const faceSeed = hash4(body.seed, face, 0x5eed);

@@ -5,6 +5,7 @@ import type { AdminModeState } from "../content/admin.ts";
 import type { BodyId } from "../planet/bodies.ts";
 import type { CosmeticSlot } from "../content/items.ts";
 import type { HallLine } from "../content/secrets.ts";
+import type { SpellId, SpellsYou } from "../content/spells.ts";
 
 export const NET = {
   TICK_MS: 50, // 20 Hz simulation and patches
@@ -32,7 +33,12 @@ export const NET = {
 // and a wider zone the server protects), and natural solids (D-solid-1): tree trunks, boulders,
 // spires and big rocks block movement on the server; an older client walks through them and would be
 // corrected at every tree.
-export const PROTOCOL_VERSION = 5;
+// 6: the 2026-11-12 run, shared by all of its lanes: per-starter move speed and dodge cooldown the
+// server validates against (D-balance-4: an older client predicts the base numbers and would be
+// corrected as Hinoko, Kappa or Brother Ash), the spellbook (`cast`, Skipstep moves the body on the
+// server), trials (`trial` messages, wave creatures), new world objects, the agent flag in the synced
+// player state, and play tokens bound to their session (D-security).
+export const PROTOCOL_VERSION = 6;
 
 // ---- HTTP: entering the world -------------------------------------------------------------
 
@@ -50,6 +56,8 @@ export interface PlayRequest {
   look?: number;
   /** Admins only: the admin's private sandbox copy of `body`, where nothing is saved (D-admin-3). */
   sandbox?: boolean;
+  /** An AI agent is playing (net/agents.ts; the `x-firstlight-agent: 1` header says the same). */
+  agent?: boolean;
 }
 
 export type PlayResponse =
@@ -148,7 +156,79 @@ export type ClientMessages = {
   train: { ox: number; oy: number; oz: number; dx: number; dy: number; dz: number };
   /** Onboarding: skip it (no more XP, no Spark medal; it never comes back). */
   onboarding: { action: "skip" };
+  /** Cast a spell from the spellbook (content/spells.ts; at most 5 a second). Refusals answer `denied {action: "cast", reason, req?}`. */
+  cast: CastMsg;
+  /**
+   * Ask for the spells already under way near you (sent once the client's handlers exist, like
+   * `supportSync`): each Glasswing Ward that is up comes back as a `spell` event with `late`.
+   */
+  spellSync: Record<string, never>;
 };
+
+/**
+ * Cast a spell. The server checks the level gate, aether, cooldown and the attack rules (not dead,
+ * not in a safe zone, not protected, swimming or riding), then does everything itself:
+ * - `skipstep`: blinks the caster up to 10 m along `dx,dy,dz` (projected onto the ground) and sends
+ *   the caster a `correct` with the new position, like any server move.
+ * - `frostbloom`, `glasswing`: around / on the caster; the aim is ignored.
+ * - `wishfall`: lands on `tx,ty,tz` (put on the ground, then searched back toward the caster until
+ *   the ground point is within 30 m of the caster's feet and nothing stands between the caster's
+ *   head and it). Without a target point: where the ray from the caster's head along `dx,dy,dz`
+ *   first meets the ground or something solid within 30 m.
+ * Everyone nearby then gets `spell` events. Refusal reasons: "locked" (level gate), "cooldown", "aether",
+ * "safe zone", "protected", "swimming", "mounted", "dead", "dir", "blocked" (Skipstep with a wall
+ * right ahead, Wishfall with no clear ground in range; nothing is spent).
+ */
+export interface CastMsg {
+  spell: SpellId;
+  /** Aim direction (the camera's forward), any length from 0.5 to 1.5. */
+  dx: number;
+  dy: number;
+  dz: number;
+  /** Wishfall only: the ground point to hit. */
+  tx?: number;
+  ty?: number;
+  tz?: number;
+  /**
+   * The client's own number for this cast (a non-negative integer that rises with every cast of the
+   * session). A refusal carries it back (`denied.req`) and `you.spells.req` is the last one dealt
+   * with, so a client with several casts in flight knows which answer is whose.
+   */
+  req?: number;
+}
+
+/**
+ * A spell happened (sent to clients within 160 m, and always to the caster). `x,y,z` is where:
+ * - skipstep `cast`: from `x,y,z` to `tx,ty,tz`.
+ * - frostbloom `cast`: the ring's centre, radius `r`; `hit` lists who was slowed for `ms`.
+ * - wishfall `cast`: the warning ring `id` at `x,y,z`, radius `r`, landing in `ms`; `impact`: it landed.
+ * - glasswing `cast`: a shell on `by` for `ms` with `hp`; `absorb`: it took `amount` from `from`
+ *   (`hp` left); `end`: gone (`broke` when it ran out of HP).
+ */
+export interface SpellEvent {
+  spell: SpellId;
+  phase: "cast" | "impact" | "absorb" | "end";
+  by: string;
+  x: number;
+  y: number;
+  z: number;
+  tx?: number;
+  ty?: number;
+  tz?: number;
+  r?: number;
+  ms?: number;
+  id?: number;
+  hit?: string[];
+  hp?: number;
+  amount?: number;
+  from?: string;
+  broke?: boolean;
+  /**
+   * A snapshot of something already under way when you arrived (the answer to `spellSync`): a
+   * ward's `cast` with the time and shell it has left. Draw it; it is not a new cast.
+   */
+  late?: boolean;
+}
 
 // ---- Server → client events (broadcast or direct) -------------------------------------------
 
@@ -158,7 +238,8 @@ export type ServerMessages = {
   /** A melee swing (animation and sound for everyone nearby). */
   swing: { by: string; weapon: number; heavy: boolean; hits: number };
   /** The server refused an action (`reason` is short and human-readable). */
-  denied: { action: string; reason: string };
+  /** A request was refused. `req`: the number a `cast` was sent with, when it had one. */
+  denied: { action: string; reason: string; req?: number };
   /** Admins: the real character is saved and may move into the sandbox now (join it through /api/play with `sandbox`). */
   sandbox: { home: BodyId };
   /** To the attacker only: a hit landed on an NPC that took no damage (spawning, evading, a shield). */
@@ -207,7 +288,38 @@ export type ServerMessages = {
   train: { dummy: number; hits: number; down: boolean };
   /** Onboarding finished: `xp` paid in total (50 when done, less when skipped). */
   onboarding: { state: "done" | "skipped"; xp: number };
+  /** A race / defend / collect attempt changed state (quests/trials.ts); sent to its runner only. */
+  trial: TrialMsg;
+  /** A spell was cast, landed, or a ward changed (content/spells.ts). */
+  spell: SpellEvent;
+  /**
+   * Hunt news for everyone else in the room (the client's event feed, D-ui-3): `name` won a gleam
+   * (`mission`: T1–T3) or opened the Gleam Vault. Display name only. Older clients ignore it.
+   */
+  news: { kind: "gleam" | "vault"; name: string; mission?: string };
 };
+
+/**
+ * A timed-objective attempt (missions race / defend / collect). `leftMs` is the clock left when sent
+ * (it stands still while `paused`), `endsAt` the server time (ms epoch) the running clock reaches 0,
+ * so the client counts down on its synced server clock whatever the delivery delay (older servers
+ * omit it: count from receipt), `limitMs` the whole clock (0 = untimed). `progress`/`goal` as in YouState.missions. `next` is the world object the
+ * attempt leads to now (the next ring, the beacon, or null for collect: the nearest shard).
+ */
+export interface TrialMsg {
+  id: string;
+  kind: "race" | "defend" | "collect";
+  state: "running" | "paused" | "done" | "failed" | "idle";
+  progress: number;
+  goal: number;
+  leftMs: number;
+  limitMs: number;
+  next: string | null;
+  /** Why it failed: "time", "died", "left", "abandoned" (or why it went idle: "dropped", a lost socket ended it). */
+  reason?: string;
+  /** Running and timed only: server time (ms epoch) when the clock runs out if nothing changes. */
+  endsAt?: number;
+}
 
 /** Private per-player state sent only to its owner. */
 export interface YouState {
@@ -230,10 +342,14 @@ export interface YouState {
   horses?: boolean;
   /** M11 extra #5 sources and world triggers are enabled. */
   cosmeticsExtras?: boolean;
+  /** This life opened the Gleam Vault (content/gleams.ts; once per life). */
+  gleamVault?: boolean;
   /** Onboarding in progress (Portus only): hits on each training dummy. Absent once done or skipped. */
   onboarding?: { hits: number[] };
   /** Admin accounts only: the admin-mode switches (content/admin.ts). */
   adminMode?: AdminModeState;
+  /** The spellbook: aether, cooldowns and an active ward (content/spells.ts; set by the spell system). */
+  spells?: SpellsYou;
 }
 
 export interface InvItem {

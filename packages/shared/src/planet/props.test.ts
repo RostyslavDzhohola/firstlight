@@ -127,7 +127,8 @@ describe("props", () => {
       const arena = bossArena(terrain);
       const circles = [
         ...(arena ? [{ dir: arena.up, radius: arena.radius + 6 }] : []),
-        ...objectsOn(id).map((o) => ({ dir: objectDir(o), radius: Math.max(2, o.range) + 4 })),
+        // Objects added after the layout froze (`clearing: false`, world.ts) leave the props where they are.
+        ...objectsOn(id).filter((o) => o.clearing !== false).map((o) => ({ dir: objectDir(o), radius: Math.max(2, o.range) + 4 })),
         ...portalSpots(body, terrain).map((o) => ({ dir: o.dir, radius: 6 })),
       ];
       const breakables = bodyBreakables(terrain);

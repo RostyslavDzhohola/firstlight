@@ -2,13 +2,17 @@
 import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
-import { abs, attribute, cameraViewMatrix, cross, dot, float, normalize, materialColor, mix, normalView, positionGeometry, positionLocal, positionViewDirection, positionWorld, renderGroup, select, sin, texture, time, uniform, vec3, vec4 } from "three/tsl";
+import { abs, attribute, cameraPosition, cameraViewMatrix, cross, dot, float, Fn, fract, If, max, normalWorld, normalize, mix, normalView, positionGeometry, positionLocal, positionViewDirection, positionWorld, pow, renderGroup, select, sin, smoothstep, texture, time, uniform, varying, vec3, vec4 } from "three/tsl";
 import { BODY_IDS, PROP_KINDS, type BodyId, type PropKind } from "@firstlight/shared";
 import { vegetationModels } from "./vegetationModels.ts";
 import { config } from "../config.ts";
 import { atmo } from "./atmosphere.ts";
 import { PROP_PALETTES } from "./propGeometry.ts";
 import { applyOccluderFade } from "./occluderFade.ts";
+import type { TextureSlot } from "./artpacks/ArtPacks.ts";
+import { mossy } from "./meadow.ts";
+import { detailNoiseTexture } from "./noiseTexture.ts";
+import { biplanar, groundUniforms } from "./terrainMaterial.ts";
 
 export interface VegetationAssets {
   geometry: Map<string, THREE.BufferGeometry>;
@@ -16,9 +20,10 @@ export interface VegetationAssets {
   impostors?: THREE.Texture;
 }
 let promise: Promise<VegetationAssets | null> | null = null;
+let loaded: VegetationAssets | null = null;
 
 export function preloadVegetation(): Promise<VegetationAssets | null> {
-  return promise ??= load().catch((err: unknown) => {
+  return promise ??= load().then((a) => (loaded = a)).catch((err: unknown) => {
     console.warn("[vegetation] assets failed to load; using procedural props", err);
     return null;
   });
@@ -157,7 +162,47 @@ export function vegetationPaletteBody(): BodyId | null {
   return paletteBody;
 }
 
+/**
+ * Foliage and rock shading (`foliagefx`, D-gfx-worlds-6): 1 on Medium and up, 0 on Low and with
+ * `?nofoliagefx` (environment.ts sets it with the settings). The extra shading sits behind a branch
+ * on this uniform, so switching it off takes its cost away without another shader.
+ */
+export const vegetationFx = uniform(1).setGroup(renderGroup);
+
 const materials = new Map<string, THREE.MeshStandardNodeMaterial>();
+
+type TextureNode = ReturnType<typeof texture>;
+/**
+ * Per shipped atlas: what the vegetation materials draw for it now, their texture nodes and the
+ * materials (`map`). An HD art pack (render/artpacks, D-artpacks) rebinds the near-mesh atlas in every
+ * material made from it; materials made later draw what it is bound to.
+ */
+const atlases = new Map<THREE.Texture, { current: THREE.Texture; nodes: TextureNode[]; materials: THREE.MeshStandardNodeMaterial[] }>();
+function atlasBinding(base: THREE.Texture) {
+  let b = atlases.get(base);
+  if (!b) atlases.set(base, (b = { current: base, nodes: [], materials: [] }));
+  return b;
+}
+
+/** The slot of a shipped atlas: rebinding it (same type, format and sampler) changes no program. */
+export function vegetationAtlasSlot(base: THREE.Texture): TextureSlot {
+  const b = atlasBinding(base);
+  return {
+    get texture() {
+      return b.current;
+    },
+    set(t: THREE.Texture) {
+      b.current = t;
+      for (const n of b.nodes) n.value = t;
+      for (const m of b.materials) m.map = t;
+    },
+  };
+}
+
+/** The loaded assets (null before they land or after a failure), for the HD pack's slot. */
+export function loadedVegetation(): VegetationAssets | null {
+  return loaded;
+}
 /** One opaque alpha-tested atlas material per kind (and near/far), shared by every body: the body's
  * colours come from applyVegetationPalette. The color attribute is a role mask, not vertex colour:
  * r foliage, g bark, b stone, black flower/mushroom paint. */
@@ -166,9 +211,12 @@ export function vegetationMaterial(kind: PropKind, atlas: THREE.Texture, imposto
   let m = materials.get(key);
   if (m) return m;
   const t = tintsFor(kind);
-  m = new THREE.MeshStandardNodeMaterial({ map: atlas, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.86, metalness: 0 });
+  const bound = atlasBinding(atlas);
+  m = new THREE.MeshStandardNodeMaterial({ map: bound.current, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.86, metalness: 0 });
   m.name = `vegetation:${key}`;
-  const sample = texture(atlas);
+  const sample = texture(bound.current);
+  bound.nodes.push(sample);
+  bound.materials.push(m);
   // Impostor foliage was baked neutral grey, while bark retains its source paint. This gives
   // a pixel-level role mask without downloading a third atlas. Dead trees are entirely bark.
   const neutral = abs(sample.r.sub(sample.g)).add(abs(sample.g.sub(sample.b))).lessThan(0.025);
@@ -179,7 +227,82 @@ export function vegetationMaterial(kind: PropKind, atlas: THREE.Texture, imposto
   const leaf = impostor ? t.leaf.mul(IMPOSTOR_FOLIAGE) : t.leaf;
   const tint = leaf.mul(role.r).add(t.bark.mul(role.g)).add(t.stone.mul(role.b))
     .add(vec3(1).mul(float(1).sub(role.r.add(role.g).add(role.b))));
-  m.colorNode = sample.rgb.mul(tint).mul(mix(float(1), float(0.78), atmo.wet));
+  const sways = !["rock", "boulder", "mushroom"].includes(kind);
+  // Each plant its own shade (D-gfx-worlds-1): the instance's wind phase doubles as a colour seed, so
+  // a stand of trees isn't one flat green, and the near mesh and its far card stay the same shade.
+  const shade = sways ? float(0.84).add(fract(attribute("iWind", "float").mul(3.71)).mul(0.3)) : float(1);
+  const painted = sample.rgb.mul(tint).mul(mix(float(1), shade, role.r));
+  // Moss on the sky-facing tops of rocks, where the planet grows any (worldLooks.ts ground.moss).
+  const rocky = !impostor && (kind === "rock" || kind === "boulder");
+  const base = rocky
+    ? mossy(painted, groundUniforms.mossColor, groundUniforms.moss, dot(normalize(normalWorld), normalize(positionWorld)), sample.g.add(sample.r).mul(0.5))
+    : painted;
+  // ---- foliagefx: the look that makes a tree a volume and a rock a surface (no new models).
+  const tall = ["oak", "pine", "blossom", "deadtree"].includes(kind);
+  // Height in the plant, 0 at the ground to 1 at the crown (models are in metres, roots at 0).
+  const vY = varying(positionGeometry.y, "vVegY");
+  const upW = normalize(positionWorld);
+  const viewW = normalize(cameraPosition.sub(positionWorld));
+  const sunUp = dot(atmo.sunDir, upW);
+  const day = smoothstep(-0.02, 0.15, sunUp);
+  // Rocks: one triplanar tap of the detail noise, taken outside the branch (WGSL allows no
+  // screen-space derivatives inside one); a rock is a handful of pixels, so it is all but free.
+  const rockN = normalize(normalWorld);
+  const rockTap: any = rocky ? biplanar(detailNoiseTexture(), positionWorld.div(1.7), rockN) : null;
+  const shaded: any = Fn(() => {
+    const c = base.toVar();
+    const tap: any = rockTap ? rockTap.toVar() : null; // evaluated here, ahead of the branch
+    If(vegetationFx.greaterThan(0.5), () => {
+      // Contact shade: every plant and rock darkens into the ground it stands on.
+      const contact = mix(float(0.52), float(1), smoothstep(0.0, tall ? 1.3 : 0.45, vY));
+      if (rocky) {
+        // Rocks: grain and cracks from the detail noise (triplanar: no stretching on any face),
+        // lichen or dust in patches, lighter tops.
+        const d = tap;
+        const upness = dot(rockN, upW);
+        const grain = float(1).add(d.r.sub(0.5).mul(0.5)).sub(smoothstep(0.88, 0.97, d.b).mul(0.3));
+        const patch = smoothstep(0.5, 0.64, d.g.add(upness.mul(0.12))).mul(groundUniforms.lichenAmt);
+        const lit = c.mul(grain).mul(mix(float(0.82), float(1.12), upness.mul(0.5).add(0.5)));
+        c.assign(mix(lit, groundUniforms.lichen.mul(d.r.mul(0.5).add(0.6)), patch).mul(contact));
+      } else {
+        // Leaf clusters: patches of the crown a metre or so across run lighter and yellower or
+        // darker and bluer, so a canopy is many masses of leaves, not one flat green.
+        const p = positionWorld;
+        const n1 = sin(dot(p, vec3(0.93, 1.21, 0.71))).mul(sin(dot(p, vec3(-0.67, 0.88, 1.13))));
+        const n2 = sin(dot(p, vec3(2.9, -2.3, 3.4)).add(n1.mul(2.0)));
+        const cluster = n1.mul(0.7).add(n2.mul(0.3));
+        const leafTint = mix(vec3(0.8, 0.94, 1.02), vec3(1.2, 1.1, 0.78), cluster.mul(0.5).add(0.5)).mul(cluster.mul(0.1).add(0.98));
+        // The crown is darker inside and below, brightest at the top where the sky reaches it.
+        const crown = mix(float(0.7), float(1.12), smoothstep(tall ? 1.6 : 0.1, tall ? 6.5 : 1.1, vY));
+        const leafK = role.r;
+        // The side of the crown toward the sun is lighter, the far side deeper (the lighting itself
+        // treats a crown as one surface facing the sky, so it has no sides of its own).
+        const sunSide = impostor ? float(1) : mix(float(1), mix(float(0.74), float(1.24), smoothstep(-0.6, 0.9, dot(normalize(normalWorld), atmo.sunDir))), day);
+        c.assign(c.mul(mix(vec3(1), leafTint.mul(crown).mul(sunSide), leafK)).mul(mix(contact, float(1), leafK.mul(tall ? 1 : 0.4))));
+      }
+    });
+    return c;
+  })();
+  m.colorNode = shaded.mul(mix(float(1), float(0.78), atmo.wet));
+  if (!rocky) {
+    // Light through and round the leaves: looking toward the sun the crown glows, the shaded side
+    // keeps a little of the sun (wrap), and at dusk the low sun rims trunks and crown edges.
+    (m as THREE.MeshStandardNodeMaterial).emissiveNode = Fn(() => {
+      const e = vec3(0).toVar();
+      If(vegetationFx.greaterThan(0.5), () => {
+        const back = pow(max(dot(viewW.negate(), atmo.sunDir), 0.0), 4.0);
+        const through = (atmo.sunColor as any).mul(base).mul(role.r).mul(back.mul(0.6).add(0.06)).mul(day);
+        e.assign(through);
+        if (!impostor) {
+          const low = smoothstep(0.6, 0.12, sunUp).mul(smoothstep(-0.08, 0.04, sunUp));
+          const fres = pow(float(1).sub(abs(dot(normalize(normalView), normalize(positionViewDirection)))), 3.0);
+          const side = dot(viewW, atmo.sunDir).mul(-0.5).add(0.5);
+          e.addAssign((atmo.sunColor as any).mul(mix(base, vec3(1), 0.25)).mul(fres.mul(low).mul(side).mul(0.5)));
+        }
+      });
+      return e;
+    })();
+  }
   m.opacityNode = sample.a;
   m.roughnessNode = mix(float(0.86), float(0.4), atmo.wet);
   // Foliage is lit as a canopy facing the sky. Leaf cards' own normals flip on back faces, which
@@ -191,12 +314,14 @@ export function vegetationMaterial(kind: PropKind, atlas: THREE.Texture, imposto
   const towardViewer = normalize(positionViewDirection.sub(upView.mul(dot(positionViewDirection, upView))).add(upView.mul(0.1)));
   if (impostor) m.normalNode = normalize(mix(towardViewer, upView, role.r));
   else if (!["rock", "boulder", "mushroom", "deadtree"].includes(kind)) m.normalNode = normalize(mix(normalView, upView, role.r.mul(NEAR_FOLIAGE_UP)));
-  if (!["rock", "boulder", "mushroom"].includes(kind)) {
+  if (sways) {
     // No compute/storage buffers: attribute + time works on WebGPU and WebGL2.
     // Roots stay still; each instance carries its packed yaw seed through LOD changes.
     const weight = positionGeometry.y.mul(0.16).clamp(0, 1).pow(2);
     const phase = attribute("iWind", "float");
-    const sway = sin(time.mul(1.4).add(phase).add(positionGeometry.y.mul(0.35))).mul(weight).mul(0.13);
+    const sway = sin(time.mul(1.4).add(phase).add(positionGeometry.y.mul(0.35))).mul(weight).mul(0.13)
+      // Canopy flutter: leaves shiver on their own, faster and smaller than the trunk's sway.
+      .add(impostor ? float(0) : sin(time.mul(3.3).add(phase.mul(1.7)).add(dot(positionGeometry, vec3(1.9, 2.7, 1.3)))).mul(attribute("color", "vec3").r).mul(weight.mul(0.6).add(0.2)).mul(0.035).mul(vegetationFx));
     // r186 applies instance transforms before positionNode. Bend in planet tangent space
     // while preserving that transformed position, including on the shadow pass.
     const up = normalize(positionLocal);

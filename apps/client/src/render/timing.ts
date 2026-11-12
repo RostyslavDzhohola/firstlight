@@ -3,7 +3,8 @@
 // resolution ladder (SPEC §7.3: [1, 0.79, 0.62, 0.5]; at the floor, drop a tier) and the probe's
 // tier decision.
 
-import type { Tier } from "./quality.ts";
+import { installPassUnion, type TimestampPool } from "./gpuUnion.ts";
+import { TIER_TABLE, type Tier } from "./quality.ts";
 
 export function percentile(values: readonly number[], p: number): number {
   if (values.length === 0) return 0;
@@ -32,6 +33,10 @@ export interface TimestampSource {
  * the value is recorded as is. Resolves are asynchronous, so a sample arrives every 1–3 frames.
  * Outside the animation loop `info.frame` doesn't advance: call `beginManualFrame()` before each
  * manually rendered frame so samples stay per-frame there too.
+ *
+ * That value sums the frame's passes (see gpuPlausible). On WebGPU the timer also records each
+ * frame's busy time, the union of the same passes' intervals (gpuUnion.ts, D-framerate-2): real GPU
+ * cost on tile-based GPUs too. The probe decides on it; the ladder keeps three's sum.
  */
 export class GpuTimer {
   /** Most recent GPU ms per frame, or null when the backend has no timer. */
@@ -42,15 +47,38 @@ export class GpuTimer {
   /** Samples not yet taken by the ladder/probe. */
   private fresh: number[] = [];
   readonly available: boolean;
+  /** Most recent GPU busy ms per frame (WebGPU pass union), or null. */
+  busyLast: number | null = null;
+  private readonly recentBusy: number[] = [];
+  private freshBusy: number[] = [];
+  /** WebGPU: waiting for three's timestamp pool (made on the first timed pass) to read its frames' busy time. */
+  private watchBusy: boolean;
 
   constructor(private readonly renderer: TimestampSource) {
     const b = renderer.backend as { trackTimestamp?: boolean; disjoint?: unknown; isWebGPUBackend?: boolean };
     // WebGPU: trackTimestamp is cleared at init when the feature is missing. WebGL2: needs the disjoint extension.
     this.available = !!b.trackTimestamp && (b.isWebGPUBackend ? true : !!b.disjoint);
+    this.watchBusy = this.available && !!b.isWebGPUBackend;
+  }
+
+  private busy(ms: number) {
+    if (!(ms > 0) || !Number.isFinite(ms)) return;
+    this.busyLast = ms;
+    this.recentBusy.push(ms);
+    if (this.recentBusy.length > 120) this.recentBusy.shift();
+    this.freshBusy.push(ms);
+    if (this.freshBusy.length > 600) this.freshBusy.shift();
   }
 
   /** Call once after each rendered frame. */
   frame() {
+    if (this.watchBusy) {
+      const pool = (this.renderer.backend as { timestampQueryPool?: { render?: unknown } }).timestampQueryPool?.render;
+      if (pool) {
+        this.watchBusy = false;
+        installPassUnion(pool as TimestampPool, (ms) => this.busy(ms));
+      }
+    }
     if (!this.available || this.pending) return;
     this.pending = true;
     this.renderer
@@ -86,6 +114,24 @@ export class GpuTimer {
   drain(): number[] {
     this.recent.length = 0;
     return this.takeSamples();
+  }
+
+  /** Median of the recent busy-time samples (display), or null. */
+  busyP50(): number | null {
+    return this.recentBusy.length ? percentile(this.recentBusy, 0.5) : null;
+  }
+
+  /** Busy-time samples that arrived since the last take or drain. */
+  takeBusySamples(): number[] {
+    const s = this.freshBusy;
+    this.freshBusy = [];
+    return s;
+  }
+
+  /** Start a fresh busy-time measurement: the pending samples, and the display window cleared too. */
+  drainBusy(): number[] {
+    this.recentBusy.length = 0;
+    return this.takeBusySamples();
   }
 }
 
@@ -342,8 +388,10 @@ export class ResolutionLadder {
 export interface ProbeSamples {
   /** Frame intervals (ms) at Medium. */
   raf: readonly number[];
-  /** GPU ms per frame at Medium. */
+  /** GPU ms per frame at Medium (three's figure: the passes summed). */
   gpu: readonly number[];
+  /** GPU busy ms per frame at Medium (WebGPU pass union, D-framerate-2), when the timer has it. */
+  busy?: readonly number[];
   gpuAvailable: boolean;
   /** document.visibilityState was "visible" for the whole measurement. */
   visible: boolean;
@@ -353,7 +401,7 @@ export interface ProbeDecision {
   tier: Tier;
   /** False → use Medium for this session and don't save anything. */
   valid: boolean;
-  method: "gpu-timer" | "raf" | "invalid";
+  method: "gpu-busy" | "gpu-timer" | "raf" | "invalid";
   gpuP50: number | null;
   rafP50: number;
   /** Ask for a short re-probe at High (GPU timer only) to decide Ultra. */
@@ -363,8 +411,26 @@ export interface ProbeDecision {
 export const PROBE_MIN_FRAMES = 30;
 export const PROBE_MIN_GPU = 20;
 
+/** The GPU p50 to decide on: busy time where there is enough of it, else three's sum if plausible. */
+function gpuEvidence(gpu: readonly number[], busy: readonly number[] | undefined, rafP50: number, min: number): { g: number; method: "gpu-busy" | "gpu-timer" } | null {
+  if (busy && busy.length >= min) {
+    const g = percentile(busy, 0.5);
+    if (gpuPlausible(g, rafP50)) return { g, method: "gpu-busy" };
+  }
+  if (gpu.length >= min) {
+    const g = percentile(gpu, 0.5);
+    if (gpuPlausible(g, rafP50)) return { g, method: "gpu-timer" };
+  }
+  return null;
+}
+
+/** Frame interval (ms) above which Medium's frames miss a 60 Hz display (the ladder's "slow" too). */
+const MISSES_60HZ_MS = 17.5;
+
 /**
- * SPEC §7.3 thresholds. GPU timer: p50 > 14 ms → Low, < 6 ms → High (and re-probe at High),
+ * SPEC §7.3 thresholds. GPU timer (busy time where there is one): p50 > 14 ms → Low, only while
+ * Medium's frames also miss the display (frame rate first: a timer that reads high while frames
+ * hold 60 Hz, the M1 on WebGL2, keeps Medium; D-framerate-2); < 6 ms → High (and re-probe at High),
  * else Medium. rAF only (vsync-limited): > 20 ms → Low, < 6 ms → High (very high refresh
  * displays), else Medium. Too few frames or a hidden tab → invalid (Medium, not saved).
  */
@@ -373,20 +439,25 @@ export function decideProbe(s: ProbeSamples): ProbeDecision {
   if (!s.visible || s.raf.length < PROBE_MIN_FRAMES) {
     return { tier: "medium", valid: false, method: "invalid", gpuP50: null, rafP50, reprobeHigh: false };
   }
-  const gTrusted = s.gpuAvailable && s.gpu.length >= PROBE_MIN_GPU && gpuPlausible(percentile(s.gpu, 0.5), rafP50);
-  if (gTrusted) {
-    const g = percentile(s.gpu, 0.5);
-    if (g > 14) return { tier: "low", valid: true, method: "gpu-timer", gpuP50: g, rafP50, reprobeHigh: false };
-    if (g >= 6) return { tier: "medium", valid: true, method: "gpu-timer", gpuP50: g, rafP50, reprobeHigh: false };
-    return { tier: "high", valid: true, method: "gpu-timer", gpuP50: g, rafP50, reprobeHigh: true };
+  const ev = s.gpuAvailable ? gpuEvidence(s.gpu, s.busy, rafP50, PROBE_MIN_GPU) : null;
+  if (ev) {
+    const { g, method } = ev;
+    if (g > 14 && rafP50 > MISSES_60HZ_MS) return { tier: "low", valid: true, method, gpuP50: g, rafP50, reprobeHigh: false };
+    if (g >= 6) return { tier: "medium", valid: true, method, gpuP50: g, rafP50, reprobeHigh: false };
+    return { tier: "high", valid: true, method, gpuP50: g, rafP50, reprobeHigh: true };
   }
   const tier: Tier = rafP50 > 20 ? "low" : rafP50 < 6 ? "high" : "medium";
   return { tier, valid: true, method: "raf", gpuP50: null, rafP50, reprobeHigh: false };
 }
 
-/** After a re-probe at High: Ultra only with clear headroom (p50 < 4 ms over ≥ 15 samples). */
-export function decideUltra(highGpu: readonly number[]): { tier: Tier; gpuP50: number | null } {
-  if (highGpu.length < 15) return { tier: "high", gpuP50: null };
-  const g = percentile(highGpu, 0.5);
-  return { tier: g < 4 ? "ultra" : "high", gpuP50: g };
+/**
+ * After a re-probe at High: Ultra only with clear headroom (p50 < 4 ms over ≥ 15 samples), and back
+ * to Medium when High itself takes more than High's budget (frame rate first, D-framerate-1), on
+ * the busy time where there are enough samples of it.
+ */
+export function decideUltra(highGpu: readonly number[], highBusy?: readonly number[]): { tier: Tier; gpuP50: number | null } {
+  const s = highBusy && highBusy.length >= 15 ? highBusy : highGpu;
+  if (s.length < 15) return { tier: "high", gpuP50: null };
+  const g = percentile(s, 0.5);
+  return { tier: g < 4 ? "ultra" : g > TIER_TABLE.high.gpuTargetMs ? "medium" : "high", gpuP50: g };
 }

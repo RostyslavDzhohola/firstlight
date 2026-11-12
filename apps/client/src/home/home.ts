@@ -8,11 +8,12 @@ import { config } from "../config.ts";
 import { button, el, icon, sprite } from "../ui/dom.ts";
 import { shareRow } from "../ui/share.ts";
 import { installSprites, portraitSprite } from "../ui/sprites.ts";
-import { fmtNum, hallRows, namesLine, progressView, visitsLine, worldCards, type MeInfo } from "./homeModel.ts";
+import { STILLS, type Still } from "../ui/loadingStills.ts";
+import { agentsGuideUrl, fmtNum, hallRows, HERO_FADE_MS, HERO_HOLD_MS, heroLive, heroStills, namesLine, newsTiles, progressView, visitsLine, WORLD_STILL, worldCards, type MeInfo } from "./homeModel.ts";
 import { onLandingShown } from "./landing.ts";
 import { takeHomeNotice, type HomeNotice } from "./leave.ts";
 import { signOutSession } from "./signOut.ts";
-import { dataFastNote } from "./datafast.ts";
+import { ANALYTICS_OPT_OUT_KEY, privacyText } from "./datafast.ts";
 
 const POLL_MS = 20_000;
 type Tab = "levels" | "hall" | "medals";
@@ -35,6 +36,16 @@ export function renderOnline(online: HomeOnline | null): void {
   el("i", "fl-live-dot", total).setAttribute("aria-hidden", "true");
   el("b", "num", total, online ? fmtNum(online.total) : "–");
   if (online) total.append(online.total === 1 ? " player" : " players");
+  const live = $("home-live");
+  const liveText = heroLive(online);
+  if (live) {
+    live.hidden = !liveText;
+    live.replaceChildren();
+    if (liveText) {
+      el("i", "fl-live-dot", live).setAttribute("aria-hidden", "true");
+      el("span", "", live, liveText);
+    }
+  }
   list.replaceChildren();
   for (const w of worldCards(online)) {
     const li = el("li", `is-${w.id}`, list);
@@ -45,36 +56,188 @@ export function renderOnline(online: HomeOnline | null): void {
   }
 }
 
-/** The four worlds: a planet, level range, boss, pads and players there now. */
+const STILL_BY_ID = new Map(STILLS.map((s) => [s.id, s]));
+
+/** The four worlds (D-home-10): an in-game still, the world's line, its levels and boss, and who is there now. */
 export function renderWorlds(online: HomeOnline | null): void {
   const box = $("home-worlds");
   if (!box) return;
-  box.replaceChildren();
-  for (const w of worldCards(online)) {
-    const card = el("article", `fl-panel fl-panel--quiet fl-home__world fl-home__worldc--${w.id}`, box);
-    card.setAttribute("role", "listitem");
-    card.setAttribute("aria-label", w.name);
-    const top = el("div", "fl-home__wtop", card);
-    el("i", `fl-planet fl-planet--${w.id}`, top).setAttribute("aria-hidden", "true");
-    const t = el("div", "", top);
-    el("h3", "", t, w.name);
-    el("small", "", t, w.levels);
-    el("p", "fl-home__blurb", card, w.blurb);
-    el("div", "", card); // grid filler: keeps the meta row at the bottom
-    const meta = el("div", "fl-home__wmeta", card);
-    if (w.boss) {
-      const b = el("span", "", meta);
-      sprite("crown", "", b);
-      b.append(`${w.boss.name} · Lv ${w.boss.level}`);
-    } else {
-      const s = el("span", "", meta);
-      icon("shield", "", s);
-      s.append("Safe inside the walls");
+  // The stills stay put between polls (no reload flicker): only the live parts are rewritten.
+  const cards = worldCards(online);
+  if (box.childElementCount !== cards.length) {
+    box.replaceChildren();
+    for (const w of cards) {
+      const card = el("article", `fl-panel fl-panel--quiet fl-home__world fl-home__worldc--${w.id}`, box);
+      card.setAttribute("role", "listitem");
+      card.setAttribute("aria-label", w.name);
+      card.dataset.world = w.id;
+      const pic = el("div", "fl-home__wpic", card);
+      const still = STILL_BY_ID.get(WORLD_STILL[w.id]);
+      if (still) {
+        const img = el("img", "", pic);
+        img.alt = "";
+        img.loading = "lazy";
+        img.decoding = "async";
+        img.width = 1920;
+        img.height = 1080;
+        if (still.focus) img.style.objectPosition = still.focus;
+        img.src = still.src;
+      }
+      const top = el("div", "fl-home__wtop", pic);
+      el("i", `fl-planet fl-planet--${w.id}`, top).setAttribute("aria-hidden", "true");
+      const t = el("div", "", top);
+      el("h3", "", t, w.name);
+      el("small", "", t, w.levels);
+      const body = el("div", "fl-home__wbody", card);
+      el("p", "fl-home__wline", body, w.line);
+      el("p", "fl-home__blurb", body, w.blurb);
+      const meta = el("div", "fl-home__wmeta", body);
+      if (w.boss) {
+        const b = el("span", "", meta);
+        sprite("crown", "", b);
+        b.append(`${w.boss.name} · Lv ${w.boss.level}`);
+      } else {
+        const sh = el("span", "", meta);
+        icon("shield", "", sh);
+        sh.append("Safe inside the walls");
+      }
+      el("div", "fl-home__wnow", body);
     }
-    const p = el("span", "", meta);
-    el("b", "num", p, online ? fmtNum(w.players) : "–");
-    p.append(" here");
   }
+  for (const w of cards) {
+    const now = box.querySelector<HTMLElement>(`[data-world="${w.id}"] .fl-home__wnow`);
+    if (!now) continue;
+    now.replaceChildren();
+    now.classList.toggle("is-empty", !w.players);
+    el("i", w.players ? "fl-live-dot" : "fl-home__nodot", now).setAttribute("aria-hidden", "true");
+    el("b", "num", now, online ? fmtNum(w.players) : "–");
+    el("span", "", now, online ? (w.players ? ` here: ${namesLine(online.bodies[w.id].names, w.players)}` : " here right now") : " here");
+  }
+}
+
+/** "New in the worlds": spells, the hunt (with its public state from the Hall of Firsts) and the starters. */
+export function renderNews(board: HomeBoard | null): void {
+  const box = $("home-new");
+  if (!box) return;
+  box.replaceChildren();
+  for (const t of newsTiles(board?.hall ?? null)) {
+    const tile = el("article", `fl-panel fl-panel--quiet fl-home__tile is-${t.id}`, box);
+    const icons = el("div", "fl-home__ticons", tile);
+    icons.setAttribute("aria-hidden", "true");
+    for (const i of t.icons) {
+      const cell = el("span", "", icons);
+      sprite(i.sprite, "", el("span", "fl-home__ticon", cell));
+      el("small", "", cell, i.label);
+    }
+    el("h3", "", tile, t.title);
+    el("p", "", tile, t.text);
+    if (t.state) {
+      const st = el("div", `fl-home__tstate${t.claimed ? " is-claimed" : ""}`, tile);
+      st.dataset.e2e = "home-hunt-state";
+      sprite(t.claimed ? "trophy" : "lock", "", st);
+      el("span", "", st, t.state);
+    }
+  }
+}
+
+// ------------------------------------------------------------------------------------- hero stills
+
+export interface HeroStillsOptions {
+  holdMs?: number;
+  fadeMs?: number;
+  /** Reduced motion: the first still stays, nothing cycles. */
+  still?: boolean;
+  /** The page is on screen (not under the loader, not a hidden tab): only then does the next still load. */
+  visible?: () => boolean;
+  /**
+   * Subscribe to changes of `visible` (the landing page shown or hidden, the tab hidden or back);
+   * returns the unsubscribe. With it a hidden hero parks with no timer and wakes on the call;
+   * without it, it looks again every second.
+   */
+  wake?: (fn: () => void) => () => void;
+  /** Load an image (resolves false when it fails): injected in tests. */
+  load?: (src: string) => Promise<boolean>;
+  caption?: HTMLElement | null;
+}
+
+const loadImage = (src: string) =>
+  new Promise<boolean>((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(true);
+    img.onerror = () => resolve(false);
+    img.src = src;
+  });
+
+/**
+ * The hero's slow cross-fade (D-home-9). `box` already holds the first still (index.html); each next
+ * one is downloaded only when its turn comes and the page is on screen, then faded in over the old
+ * one, which is removed when the fade ends. A still that fails to load is skipped. Returns stop().
+ */
+export function startHeroStills(box: HTMLElement, stills: readonly Still[], opts: HeroStillsOptions = {}): () => void {
+  const hold = opts.holdMs ?? HERO_HOLD_MS;
+  const fade = opts.fadeMs ?? HERO_FADE_MS;
+  const load = opts.load ?? loadImage;
+  const cap = opts.caption ?? null;
+  const say = (s: Still | undefined) => {
+    if (cap && s) cap.textContent = `${s.caption} · in-game`;
+  };
+  say(stills[0]);
+  if (opts.still || stills.length < 2) return () => {};
+  let i = 0;
+  let stopped = false;
+  let timer = 0;
+  /** Hidden with a `wake` to bring it back: no timer runs. */
+  let parked = false;
+  const next = async () => {
+    timer = 0;
+    if (stopped) return;
+    if (opts.visible && !opts.visible()) {
+      if (opts.wake) parked = true;
+      else timer = window.setTimeout(next, 1000);
+      return;
+    }
+    i = (i + 1) % stills.length;
+    const s = stills[i]!;
+    const ok = await load(s.src);
+    if (stopped) return;
+    if (ok) {
+      const old = [...box.querySelectorAll("img")];
+      const img = el("img", "", box);
+      img.alt = "";
+      img.decoding = "async";
+      if (s.focus) img.style.objectPosition = s.focus;
+      img.src = s.src;
+      // Next frame: the new still starts transparent, then fades in over the old one.
+      requestAnimationFrame(() => {
+        img.classList.add("is-on");
+        for (const o of old) o.classList.remove("is-on");
+      });
+      window.setTimeout(() => {
+        for (const o of old) o.remove();
+      }, fade + 100);
+      say(s);
+    }
+    timer = window.setTimeout(next, ok ? hold : 200);
+  };
+  timer = window.setTimeout(next, hold);
+  const unwake = opts.wake?.(() => {
+    if (stopped || !parked || (opts.visible && !opts.visible())) return;
+    parked = false; // on screen again: the next still after a full hold
+    timer = window.setTimeout(next, hold);
+  });
+  return () => {
+    stopped = true;
+    clearTimeout(timer);
+    unwake?.();
+  };
+}
+
+/** The Agents guide button: a link into the public repo, hidden until the repo is public. */
+function agentsLink(): void {
+  const a = $<HTMLAnchorElement>("home-agents-link");
+  if (!a) return;
+  a.hidden = !config.publicRepo;
+  if (config.publicRepo) a.href = agentsGuideUrl(config.repoUrl);
 }
 
 function boardRow(list: HTMLElement, opts: { rank?: number; sprite: string; name: string; tag?: string | null; val: string; unit?: string; open?: boolean }) {
@@ -119,25 +282,74 @@ export function renderBoard(board: HomeBoard | null, tab: Tab): void {
   }
 }
 
-/** "Online now: N · Total visits: M" (DataFast), or our own player count without it. */
+/**
+ * "● N online now" (DataFast, or our own player count without it), and nothing else on that line
+ * (#12, owner 2026-10-18). Total visits sit apart in the footer (a stand-in for DataFast's stats
+ * card, D-fixes-3); the analytics disclosure is the footer's Privacy card.
+ */
 export function renderVisits(visits: HomeVisits | null, ourOnline: number | null): void {
   const box = $("home-visits");
   if (!box) return;
   const line = visitsLine(visits, ourOnline);
   box.hidden = !line;
-  if (!line) return;
+  let total = $("home-total");
+  if (!line) {
+    if (total) total.hidden = true;
+    return;
+  }
   box.replaceChildren();
   el("i", "fl-live-dot", box).setAttribute("aria-hidden", "true");
-  const on = el("span", "", box, "Online now: ");
+  const on = el("span", "", box);
   el("b", "num", on, line.online);
+  on.append(" online now");
   if (line.total !== null) {
-    el("i", "sep", box).setAttribute("aria-hidden", "true");
-    const tot = el("span", "", box, "Total visits: ");
-    el("b", "num", tot, line.total);
-  }
-  // The page carries DataFast's script: say so, and say "cookieless" only when it is.
-  const note = dataFastNote(config.datafast);
-  if (note) el("span", "note", box, `· ${note}`);
+    if (!total) {
+      total = el("div", "fl-home__total", box.parentElement ?? box);
+      total.id = "home-total";
+      box.after(total);
+    }
+    total.hidden = false;
+    total.replaceChildren("Total visits ");
+    el("b", "num", total, line.total);
+  } else if (total) total.hidden = true;
+  privacyLink();
+}
+
+/** The footer's "Privacy" link (only with DataFast in the page): a short card on its analytics and the opt-out (#12). */
+function privacyLink(): void {
+  const text = privacyText(config.datafast);
+  const credit = document.querySelector(".fl-home__credit");
+  if (!text || !credit || document.getElementById("home-privacy")) return;
+  const b = button("Privacy", "fl-link fl-home__privacy", credit as HTMLElement, () => openPrivacy(text));
+  b.id = "home-privacy";
+  b.dataset.e2e = "home-privacy";
+}
+
+function openPrivacy(text: string[]): void {
+  const d = el("dialog", "fl-panel fl-privacy", document.body) as HTMLDialogElement;
+  d.setAttribute("aria-labelledby", "privacy-title");
+  el("h2", "", d, "Privacy").id = "privacy-title";
+  for (const line of text) el("p", "", d, line);
+  const out = (): boolean => {
+    try { return localStorage.getItem(ANALYTICS_OPT_OUT_KEY) === "1"; } catch { return false; }
+  };
+  const row = el("div", "fl-privacy__row", d);
+  const toggle = button("", "fl-btn fl-btn--sm", row, () => {
+    try {
+      if (out()) localStorage.removeItem(ANALYTICS_OPT_OUT_KEY);
+      else localStorage.setItem(ANALYTICS_OPT_OUT_KEY, "1");
+    } catch { /* storage unavailable: nothing to remember */ }
+    paint();
+  });
+  const state = el("span", "fl-privacy__state", row);
+  const paint = () => {
+    toggle.textContent = out() ? "Count my visits again" : "Don't count my visits";
+    state.textContent = out() ? "This browser is opted out." : "";
+  };
+  paint();
+  button("Close", "fl-btn fl-btn--sm fl-btn--ghost", row, () => d.close());
+  d.addEventListener("close", () => d.remove());
+  d.showModal();
 }
 
 export interface MeState {
@@ -292,6 +504,7 @@ export async function initHome(): Promise<void> {
   const paintData = () => {
     renderOnline(data?.online ?? null);
     renderWorlds(data?.online ?? null);
+    renderNews(data?.board ?? null);
     if (data) renderBoard(data.board, tab);
     renderVisits(data?.visits ?? null, data ? data.online.total : null);
   };
@@ -357,6 +570,24 @@ export async function initHome(): Promise<void> {
 
   paintData();
   paintMe();
+  agentsLink();
+  const stillsBox = $("home-stills");
+  if (stillsBox) {
+    // Runs for the page's life; parked (no timer) while the landing page or the tab is hidden.
+    startHeroStills(stillsBox, heroStills(STILLS), {
+      still: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches,
+      visible: () => !document.hidden && landingVisible(),
+      wake: (fn) => {
+        const offLanding = onLandingShown(() => fn());
+        document.addEventListener("visibilitychange", fn);
+        return () => {
+          offLanding();
+          document.removeEventListener("visibilitychange", fn);
+        };
+      },
+      caption: $("home-still-cap"),
+    });
+  }
   const poll = async () => {
     if (document.hidden || !landingVisible()) return;
     const next = await fetchHome();
@@ -396,6 +627,9 @@ export function paintHomeMock(data: HomeData, me: MeInfo | null, notice: HomeNot
   if (share && !share.firstChild) shareRow(share, { onHideUi: (h) => $("landing")?.classList.toggle("is-bare", h) });
   renderOnline(data.online);
   renderWorlds(data.online);
+  renderNews(data.board);
+  const cap = $("home-still-cap");
+  if (cap) cap.textContent = `${heroStills(STILLS)[0]?.caption ?? ""} · in-game`;
   renderBoard(data.board, "levels");
   renderVisits(data.visits, data.online.total);
   renderMe({ me, notice });

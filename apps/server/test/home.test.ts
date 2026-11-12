@@ -7,7 +7,7 @@ import { newCharacter } from "@firstlight/shared/content/character";
 import type { HomeData } from "@firstlight/shared/net/home";
 import type { Game } from "../src/app.ts";
 import Database from "better-sqlite3";
-import { awardMedal, banUser, claimFirst, ensureAccount, leaderboardPlans, linkAccounts, medalLeaders, openGameDb, setDisplayName, setTitleMedal, topLevels, type Db } from "../src/db/index.ts";
+import { awardMedal, banUser, claimFirst, ensureAccount, leaderboardPlans, linkAccounts, listGleamkeepers, markTestAccount, medalLeaders, openGameDb, recordGleamkeeper, setDisplayName, setTitleMedal, topLevels, type Db } from "../src/db/index.ts";
 import { migrate, MIGRATIONS } from "../src/db/schema.ts";
 import { dataFastVisits } from "../src/ops/datafast.ts";
 import { HOME_LIMITS, mountHome, onlineSnapshot, readBoard } from "../src/ops/home.ts";
@@ -109,6 +109,26 @@ describe("leaderboard at scale (migration 6)", () => {
     db.prepare("DELETE FROM medal WHERE user_id = 'u2'").run(); // a pruned account
     expect(medalLeaders(db).map((r) => [r.name, r.medals])).toEqual([["Wren_07", 2]]);
     expect(db.prepare("SELECT n, last_at FROM medal_count WHERE user_id = 'u1'").get()).toEqual({ n: 2, last_at: 10 });
+  });
+
+  it("counts the Gleamkeepers and names the first ones, oldest first, without test accounts; merges keep one row", () => {
+    expect(readBoard(db).gleams).toEqual({ keepers: 0, first: [] });
+    seed(db, "u1", "Wren_07", 9);
+    seed(db, "u2", "Mossback", 12);
+    seed(db, "t1", "Smoke_Bot", 12);
+    seed(db, "g1", null, 3);
+    expect(recordGleamkeeper(db, "u2", "Mossback", 2000)).toBe(true);
+    expect(recordGleamkeeper(db, "u2", "Mossback", 9000)).toBe(false); // once per account: a later life doesn't count again
+    expect(recordGleamkeeper(db, "t1", "Smoke_Bot", 1000)).toBe(true);
+    markTestAccount(db, "t1", "test");
+    expect(recordGleamkeeper(db, "u1", "Wren_07", 3000)).toBe(true);
+    expect(listGleamkeepers(db)).toEqual({ count: 2, first: [{ name: "Mossback", at: 2000 }, { name: "Wren_07", at: 3000 }] });
+    expect(listGleamkeepers(db, 1).first).toHaveLength(1);
+    // A guest who opened it earlier, saved into Wren's account: one row, the earlier date.
+    recordGleamkeeper(db, "g1", "Guest", 1500);
+    linkAccounts(db, "g1", "u1");
+    expect(listGleamkeepers(db)).toEqual({ count: 2, first: [{ name: "Wren_07", at: 1500 }, { name: "Mossback", at: 2000 }] });
+    expect(readBoard(db).gleams).toEqual({ keepers: 2, first: [{ name: "Wren_07", at: 1500 }, { name: "Mossback", at: 2000 }] });
   });
 
   it("backfills the counts when an existing database migrates", () => {

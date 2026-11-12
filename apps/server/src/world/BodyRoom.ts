@@ -7,17 +7,19 @@ import { StateView } from "@colyseus/schema";
 import { BODIES, createTerrain, inWalledZone, isSafe, natureSolids, padDirs, portalNear, portalSpots, type BodyDef, type BodyId, type NatureSolids, type PortalSpot, type Terrain } from "@firstlight/shared";
 import { BACKPACK_SLOTS, HOTBAR_SLOTS, newCharacter, type CharacterData } from "@firstlight/shared/content/character";
 import { INV_SLOTS, moveSlot, storeItem } from "@firstlight/shared/content/inventory";
-import { fallDamageFraction, levelForXp, maxHp, pvpKillXp, xpAtLevel, xpToNext } from "@firstlight/shared/content/progression";
+import { fallDamageFraction, levelForXp, pvpKillXp, xpAtLevel, xpToNext } from "@firstlight/shared/content/progression";
+import { starterMaxHp } from "@firstlight/shared/content/starters";
 import { STARTERS, starterLook, WEAPON_BY_ID, WEAPON_INDEX } from "@firstlight/shared/content/weapons";
 import { NET, PHRASES, type InvItem, type YouState } from "@firstlight/shared/net/protocol";
 import { ANIM, BodyState, NpcState, PF, PileState, PlayerState } from "@firstlight/shared/net/schema";
 import { z } from "zod";
 import type { Identity } from "../auth/identity.ts";
-import { actorPos, adminSwitch, inSaddle, pushHistory, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
+import { actorPos, adminSwitch, inSaddle, pushHistory, staleAfterServerMove, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
 import { characterRepo, withTx } from "./characters.ts";
 import { SWIM_FLOAT } from "@firstlight/shared/planet/water";
 import { structureCollider, type StructureCollider } from "@firstlight/shared/planet/town";
 import { CLOSE, hub, type HubRoom } from "./hub.ts";
+import { releaseAgentSlot, useAgentSeat } from "./agents.ts";
 
 /** Ban lookup for reconnects; set at boot when the database is available. */
 export const bannedCheck: { current: (userId: string) => boolean } = { current: () => false };
@@ -137,7 +139,7 @@ const YOU_LAZY_MS = 400;
  * and respawn write SQLite; ping, questSync and client:info answer with messages). Colyseus's 60/s
  * per client still bounds everything else.
  */
-export const MESSAGE_RATES: Record<string, number> = { ping: 20, travel: 2, respawn: 1, look: 2, logout: 4, questSync: 2, "client:info": 2, skySync: 2, npcSync: 2 };
+export const MESSAGE_RATES: Record<string, number> = { ping: 20, travel: 2, respawn: 1, look: 2, logout: 4, questSync: 2, "client:info": 2, skySync: 2, npcSync: 2, cast: 5, spellSync: 2 };
 /** Malformed messages are dropped (no kick for a harmless drift); this many within 10 s disconnects. */
 const BAD_MESSAGE_LIMIT = 20;
 
@@ -502,7 +504,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     p.fz = f[2];
     p.anim = ANIM.IDLE;
     p.level = char.level;
-    p.maxHp = maxHp(char.level);
+    p.maxHp = starterMaxHp(char.starter, char.level);
     p.hp = char.dead ? 0 : Math.max(1, Math.min(p.maxHp, char.hp || p.maxHp));
     p.name = auth.name;
     p.userId = auth.userId; // random opaque id (not a credential): clients need it for blocks, mutes, parties (D27)
@@ -510,6 +512,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     p.palette = char.palette;
     p.look = starterLook(char.starter, char.look);
     p.flags = (auth.admin ? PF.ADMIN : 0) | (auth.loadtest ? PF.LOADTEST : 0) | (char.dead ? PF.DEAD : 0);
+    p.agent = !!auth.agent; // an AI agent plays this one: every client labels it (D-agents-1)
     const a: PlayerActor = {
       kind: "player",
       id: client.sessionId,
@@ -573,9 +576,18 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
    * the character must still be allowed on this body (its travel ticket may have been used or expired).
    */
   private seatRefusal(sessionId: string, auth: Identity, now: number): string | null {
+    const why = this.seatRefusalFor(sessionId, auth, now);
+    if (!auth.agent || auth.loadtest) return why;
+    // An agent's seat (D-agents-3): refused for any reason, its claim stops counting; otherwise it is
+    // used up here and the caps are checked again, in the same step that puts the body in.
+    if (why) releaseAgentSlot(auth.agentClaim);
+    return why ?? useAgentSeat(auth, this.roomId, now);
+  }
+
+  private seatRefusalFor(sessionId: string, auth: Identity, now: number): string | null {
     if (!pendingSeats.consume(sessionId, auth.userId, now)) return "seat expired";
     if (!auth.loadtest && seatRefusal(auth.userId, now)) return "not allowed";
-    if (auth.account && identityCheck.current(auth.userId)) return "sign in again";
+    if (auth.account && identityCheck.current(auth.userId, auth.authSession)) return "sign in again"; // its own session (D-security-5)
     if (!storageRecovery.ok(auth.userId)) return "storage";
     if (travelRedirect(auth, this.bodyDef.id, now)) return "travel";
     return null;
@@ -585,6 +597,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     const a = this.actors.get(client.sessionId);
     if (!a || a.superseded || a.loggedOut || this.shuttingDown) return;
     a.state.flags |= PF.LINGER;
+    for (const s of this.systems) this.guarded("drop", () => s.onPlayerDrop?.(a));
     // Kicked or banned: no reconnection seat (onLeave runs next and removes the body).
     if (this.systems.some((s) => s.canReconnect?.(client.sessionId) === false)) return;
     // The promise rejects when the window expires or the room disposes; never let that escape.
@@ -606,6 +619,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     a.client = client;
     a.state.flags &= ~PF.LINGER;
     a.youDirty = true;
+    for (const s of this.systems) this.guarded("reconnect", () => s.onPlayerReconnect?.(a));
     if (a.dead) client.send("death", { victim: client.sessionId, killer: null, killerName: "", aliveMs: Date.now() - a.char.lifeStartedAt, level: a.char.level, pileId: "" });
   }
 
@@ -744,6 +758,11 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     const p = a.state;
     const now = Date.now();
     a.lastInputAt = now;
+    // The server just moved this body (a spell's blink): inputs sent before the client heard are dropped.
+    if (a.serverMove && staleAfterServerMove(a, msg, now)) {
+      p.seq = msg.seq;
+      return;
+    }
     // NPC slows / Cease-and-Desist (npc/effects.ts) and riding (horses) set the refill; see movement.ts.
     const r = validateMove(a, msg, this.moveWorld, moveLimits(a, now), now);
     const flying = adminSwitch(a, "fly");
@@ -767,7 +786,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       if (a.airborne && !swimmingOk && !flying) {
         const drop = a.peakRadius - (R + ground);
         const frac = fallDamageFraction(drop);
-        if (frac > 0) dealDamage(this.host, null, a, frac * maxHp(a.char.level), false);
+        if (frac > 0) dealDamage(this.host, null, a, frac * starterMaxHp(a.char.starter, a.char.level), false);
       }
       a.airborne = false;
       a.peakRadius = len;
@@ -787,9 +806,13 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     p.x = msg.x;
     p.y = msg.y;
     p.z = msg.z;
-    p.fx = msg.fx;
-    p.fy = msg.fy;
-    p.fz = msg.fz;
+    // Facing is a unit vector (D-security-7): normalised here; a zero-length one is refused (the old one stays).
+    const fl = Math.hypot(msg.fx, msg.fy, msg.fz);
+    if (fl > 1e-3) {
+      p.fx = msg.fx / fl;
+      p.fy = msg.fy / fl;
+      p.fz = msg.fz / fl;
+    }
     p.anim = CLIENT_ANIMS.has(msg.anim) ? msg.anim : ANIM.IDLE;
     p.seq = msg.seq;
     p.flags = swimmingOk ? p.flags | PF.SWIMMING : p.flags & ~PF.SWIMMING;
@@ -971,7 +994,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
         for (const k of Object.keys(live)) if (!(k in char)) delete live[k];
         Object.assign(a.char, char);
         a.state.level = a.char.level;
-        a.state.maxHp = maxHp(a.char.level);
+        a.state.maxHp = starterMaxHp(a.char.starter, a.char.level);
         a.state.hp = Math.min(a.state.hp, a.state.maxHp);
         this.equip(a, a.char.selected);
       }
@@ -1133,8 +1156,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     a.youDirty = true;
     const shown = a.state.level;
     if (a.char.level <= shown) return;
-    a.state.maxHp = maxHp(a.char.level);
-    a.state.hp = levelUpHp(a.state.hp, shown, a.char.level);
+    a.state.maxHp = starterMaxHp(a.char.starter, a.char.level);
+    a.state.hp = levelUpHp(a.state.hp, shown, a.char.level, a.char.starter);
     a.state.level = a.char.level;
     a.client.send("toast", { text: `Level ${a.char.level}!`, kind: "xp" });
     emitGameEvent(this, { type: "levelUp", playerId: a.id, level: a.char.level });
@@ -1247,7 +1270,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
         t.char.xp = xpAtLevel(lv);
         t.char.level = lv;
         t.state.level = lv;
-        t.state.maxHp = maxHp(lv);
+        t.state.maxHp = starterMaxHp(t.char.starter, lv);
         t.state.hp = t.state.maxHp;
         t.youDirty = true;
         break;
@@ -1365,7 +1388,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     a.airborne = false;
     a.peakRadius = len;
     groundMotion(a, len, now);
-    if (frac > 0) dealDamage(this.host, null, a, frac * maxHp(a.char.level), false);
+    if (frac > 0) dealDamage(this.host, null, a, frac * starterMaxHp(a.char.starter, a.char.level), false);
   }
 
   /** Distance-based views for NPCs and piles (players are not view-filtered). */
@@ -1420,7 +1443,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     // Inside a reward transaction the character may be levels ahead of the synced state, whose HP
     // rises only after the commit (showLevel). Save the HP it will show, so a crash in between
     // restarts with the level's HP (F12 confirm Codex N-S1). A failed save restores `char` (persist).
-    a.char.hp = a.dead ? a.state.hp : levelUpHp(a.state.hp, a.state.level, a.char.level);
+    a.char.hp = a.dead ? a.state.hp : levelUpHp(a.state.hp, a.state.level, a.char.level, a.char.starter);
     characterRepo.current.save(a.identity.userId, a.char);
   }
 
@@ -1540,10 +1563,10 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 }
 
 /** HP after levelling from `shown` to `level`: the max-HP gain is added, capped at the new max. */
-function levelUpHp(hp: number, shown: number, level: number): number {
+function levelUpHp(hp: number, shown: number, level: number, starter: number): number {
   if (level <= shown) return hp;
-  const newMax = maxHp(level);
-  return Math.min(newMax, hp + (newMax - maxHp(shown)));
+  const newMax = starterMaxHp(starter, level);
+  return Math.min(newMax, hp + (newMax - starterMaxHp(starter, shown)));
 }
 
 function norm(v: readonly number[]): V3 {

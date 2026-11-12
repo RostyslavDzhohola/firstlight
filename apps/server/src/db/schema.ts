@@ -217,6 +217,35 @@ export const MIGRATIONS: readonly string[] = [
     changed  INTEGER NOT NULL
   );
   `,
+  // 8 (lane missions): the Gleamkeepers, accounts that opened the Gleam Vault in an official life
+  // (content §5.1), the earliest first: the Portus hologram board counts them and names the first.
+  // Real players only (test accounts are filtered on read, agents never written). Idempotent, so
+  // it can be renumbered when lanes merge.
+  `
+  CREATE TABLE IF NOT EXISTS gleam_vault (
+    user_id       TEXT PRIMARY KEY,
+    display_name  TEXT NOT NULL,
+    opened_at     INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS gleam_vault_opened ON gleam_vault(opened_at);
+  `,
+  // 9 (lane agents): guest accounts an AI agent plays (D-agents-1): a row here is the account's
+  // is_agent flag, a side table like test_account (idempotent, renumberable).
+  `
+  CREATE TABLE IF NOT EXISTS agent_account (
+    user_id    TEXT PRIMARY KEY,
+    source     TEXT NOT NULL,
+    marked_at  INTEGER NOT NULL
+  );
+  `,
+  // 10 (lane agents): whether an AI agent played the session, recorded on the row when it starts
+  // (review 2026-11-12 agent kit #5). The account's flag can't say: a saved account may play one
+  // session as an agent and the next by hand, and a link moves rows to another account. Sessions
+  // logged before this are classed by their account's flag as it stands now.
+  `
+  ALTER TABLE session_log ADD COLUMN agent INTEGER NOT NULL DEFAULT 0;
+  UPDATE session_log SET agent = 1 WHERE user_id IN (SELECT user_id FROM agent_account);
+  `,
 ];
 
 /** Apply every migration newer than the database's user_version, each in its own transaction. */

@@ -72,6 +72,47 @@ describe("GpuTimer", () => {
     expect(t.takeSamples()).toEqual([]);
   });
 
+  it("on WebGPU also takes each frame's busy time from three's pass timestamps (D-framerate-2)", async () => {
+    const r = fakeRenderer();
+    const t = new GpuTimer(r);
+    expect(t.busyLast).toBeNull();
+    t.frame(); // no timestamp pool yet (three makes it on the first timed pass)
+    await flush();
+    // three's pool: two overlapping passes in frame 1 (sum 7 ms, busy 5 ms), resolved the way three does
+    const times = new BigUint64Array([0n, 4_000_000n, 2_000_000n, 5_000_000n]);
+    const pool = {
+      queryOffsets: new Map([["1:f1", 0], ["2:f1", 2]]),
+      resultBuffer: { getMappedRange: () => times.buffer as ArrayBuffer },
+      async _resolveQueries(this: { queryOffsets: Map<string, number>; resultBuffer: { getMappedRange(): ArrayBuffer } }) {
+        this.queryOffsets.clear();
+        this.resultBuffer.getMappedRange();
+        return 7;
+      },
+    };
+    (r.backend as { timestampQueryPool?: unknown }).timestampQueryPool = { render: pool };
+    r.push(7);
+    t.frame(); // finds the pool
+    await pool._resolveQueries();
+    await flush();
+    expect(t.busyLast).toBeCloseTo(5, 6);
+    expect(t.busyP50()).toBeCloseTo(5, 6);
+    expect(t.takeBusySamples()).toHaveLength(1);
+    expect(t.busyP50()).toBeCloseTo(5, 6); // taking keeps the display window
+    expect(t.drainBusy()).toEqual([]);
+    expect(t.busyP50()).toBeNull(); // draining starts a fresh one
+    expect(t.last).toBe(7); // three's sum is still recorded as before
+  });
+
+  it("has no busy time on WebGL2", async () => {
+    const r = fakeRenderer({ webgpu: false });
+    const t = new GpuTimer(r);
+    (r.backend as { timestampQueryPool?: unknown }).timestampQueryPool = { render: { queryOffsets: new Map(), resultBuffer: { getMappedRange: () => new ArrayBuffer(0) }, _resolveQueries: async () => 0 } };
+    t.frame();
+    await flush();
+    expect(t.busyLast).toBeNull();
+    expect(t.drainBusy()).toEqual([]);
+  });
+
   it("beginManualFrame advances the frame tag", () => {
     const r = fakeRenderer();
     beginManualFrame(r);
@@ -481,7 +522,7 @@ describe("probe decision", () => {
 
   it("uses the GPU timer thresholds", () => {
     const base = { raf: frames(120, 16.7), gpuAvailable: true, visible: true };
-    expect(decideProbe({ ...base, gpu: frames(60, 16) })).toMatchObject({ tier: "low", valid: true, method: "gpu-timer" });
+    expect(decideProbe({ ...base, raf: frames(120, 20), gpu: frames(60, 16) })).toMatchObject({ tier: "low", valid: true, method: "gpu-timer" });
     expect(decideProbe({ ...base, gpu: frames(60, 9) })).toMatchObject({ tier: "medium", reprobeHigh: false });
     expect(decideProbe({ ...base, gpu: frames(60, 4) })).toMatchObject({ tier: "high", reprobeHigh: true });
   });
@@ -497,6 +538,30 @@ describe("probe decision", () => {
     expect(decideUltra(frames(30, 3)).tier).toBe("ultra");
     expect(decideUltra(frames(30, 5)).tier).toBe("high");
     expect(decideUltra(frames(5, 1)).tier).toBe("high");
+  });
+
+  it("goes to Low on the GPU timer only while Medium's frames also miss the display (frame rate first, D-framerate-2)", () => {
+    // the M1 on WebGL2: three's timer reads 13–14 ms at Medium, frames hold 60 Hz
+    const base = { gpuAvailable: true, visible: true, gpu: frames(60, 14.03) };
+    expect(decideProbe({ ...base, raf: frames(120, 16.7) })).toMatchObject({ tier: "medium", valid: true, method: "gpu-timer" });
+    expect(decideProbe({ ...base, raf: frames(120, 18) })).toMatchObject({ tier: "low", method: "gpu-timer" });
+  });
+
+  it("decides on the GPU's busy time where there is one (M1: three's sum 52 ms, busy 8.8 ms, D-framerate-2)", () => {
+    const base = { raf: frames(120, 16.7), gpu: frames(60, 52), gpuAvailable: true, visible: true };
+    expect(decideProbe({ ...base, busy: frames(60, 8.8) })).toMatchObject({ tier: "medium", valid: true, method: "gpu-busy", gpuP50: 8.8 });
+    expect(decideProbe({ ...base, busy: frames(60, 4.5) })).toMatchObject({ tier: "high", method: "gpu-busy", reprobeHigh: true });
+    expect(decideProbe({ ...base, raf: frames(120, 19), busy: frames(60, 15) })).toMatchObject({ tier: "low", method: "gpu-busy" });
+    // too few busy samples: as before (three's sum, here implausible: frame time)
+    expect(decideProbe({ ...base, busy: frames(5, 4) })).toMatchObject({ tier: "medium", method: "raf" });
+    expect(decideUltra(frames(30, 9), frames(30, 3)).tier).toBe("ultra");
+    expect(decideUltra(frames(30, 3), frames(30, 6)).tier).toBe("high");
+  });
+
+  it("goes back to Medium when High itself misses High's GPU budget at the re-probe (frame rate first, D-framerate-1)", () => {
+    // a cheap arrival view put Medium under 6 ms, but High's own pixels and features cost 12 ms here
+    expect(decideUltra(frames(30, 52), frames(30, 12))).toEqual({ tier: "medium", gpuP50: 12 });
+    expect(decideUltra(frames(30, 10)).tier).toBe("high"); // exactly at the budget still fits
   });
 });
 

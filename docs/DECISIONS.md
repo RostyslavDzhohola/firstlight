@@ -1464,3 +1464,671 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   hiding at 160 m with grass, far terrain and trees still streaming in, the town giving up after
   15–18 s on a slow network for the whole visit, and Low's 512² character textures kept after a
   tier rise.
+
+- **D-agents-1 (2026-11-12):** AI agents are players, and they are labelled. A join request that
+  says so (`x-firstlight-agent: 1` or `agent: true` on `POST /api/play`; the kit always sends it) is
+  seated as an agent: `PlayerState.agent` is synced to every client (an `AI` chip on the nameplate
+  and in the Tab list), and a guest account that asks once is an agent's from then on
+  (`agent_account`, a side table like `test_account`; the flag follows the guest into a brand-new
+  saved account, not into an older one it merges with). Agents keep their own flag instead of
+  reusing `is_test`: they are real players, not our automation. The levels and medals boards, the
+  Hall of Firsts, the home page's online names and count and the play statistics are people's;
+  `/api/online` and `/stats` report agents apart. A saved account that plays with the flag is an
+  agent for that session only (its board row stays). Why: the owner wants agents and people in the
+  same worlds ("Anyone can play it"), and people must be able to tell which is which; an account
+  flagged by one experiment shouldn't lose its place on a board for good.
+- **D-agents-2 (2026-11-12):** `AGENTS_ENABLED` is on outside production and off in production
+  unless set to `1` (`0` turns agents off anywhere); a refused join answers `403 {error: "agents
+  off"}`. Why: deploying this lane must not change who can join the public game; letting agents
+  onto production is the owner's call (capacity, moderation, whether they may earn medals).
+- **D-agents-3 (2026-11-12):** agents can't crowd people out: at most `AGENTS_PER_IP` (4) at once
+  from one address and `AGENTS_PER_ROOM` (8 of 40 seats) in one copy of a world. The matchmaker
+  sends an agent to a copy with room for one more, opens a new copy if it may, and otherwise refuses
+  with `403 {error: "agent limit", message}` instead of putting it in the people's queue. Bodies
+  that linger after a drop and seats not used yet count; an agent coming back for its own body
+  doesn't count against itself; loopback counts like any address. Why: a room has 40 seats and
+  `SOLO_FILL_LIMIT` 36, so 8 leaves people at least 28; four per address is enough for a person's
+  experiments and too few to fill a world from one machine.
+- **D-agents-4 (2026-11-12):** the flag is honest labelling, not security. A script that leaves it
+  out plays as an unlabelled player under the same server rules, and nothing can tell it from a
+  person at a keyboard; the docs say so. No detection is attempted. Why: every rule that matters
+  (movement, damage, loot, rate limits) is already enforced for every client; guessing who is a bot
+  would mislabel people.
+- **D-agents-5 (2026-11-12):** the agent kit plays the client's rules, not the server's limits: run
+  6 m/s, sprint 9 m/s, one roll per 1.3 s, 20 inputs a second, the same push-out against the shared
+  solids. Each step covers the time since the last input sent, and the agent stands still while the
+  server sends no state patches for 170 ms. Why: the server's validator pays for at most 0.25 s of
+  movement between two inputs it handles, so on a stalling server a sprinting body (a person's too)
+  is snapped back; measured on the shared machine, stalls of 200-460 ms gave 2-11 corrections per
+  25 s of sprinting before, none after.
+- **D-agents-6 (2026-11-12):** agents don't fight people unless asked to: `attack` refuses a player
+  target without `pvp`, and the MCP tool describes `pvp` as self-defence only. PvP itself stays by
+  the server's rules for everyone. Why: an agent that hunts people at machine reaction time is the
+  quickest way to make people leave.
+- **D-showcase-1 (owner, 2026-10-18):** the WebGPU start deadline is 20 s (was 8 s), and the wait
+  is filled. Asked "Should WebGPU get 20 s to start instead of 8? WebGPU would win more often on a
+  slow start, but you could wait up to 12 s longer when it doesn't come", the owner: "Yeah, let's
+  stay open, and we can just show some kind of screenshots of what awaits them, or tell them, 'Hey,
+  you can contribute to this game or whatever, or you can clone this game and build it yourself.'"
+  `WEBGPU_INIT_TIMEOUT_MS` (`render/rendererStart.ts`) is 20 000; everything D-renderer-1 and
+  D-renderer-2 key off it follows: a start past 20 s falls back to WebGL2 and writes the device
+  record, `lateMs` counts from the start as before, and the second chance's "within the start
+  deadline" is 20 s too (a device that answers in 12 s now grants the next visit's try), so a
+  device whose WebGPU only hangs at page load pays one 20 s wait per 7-day record, never one per
+  visit. While a WebGPU start is still pending after 4 s (`WEBGPU_SLOW_NOTICE_MS`) the loader's
+  status reads "Still starting WebGPU…" and the Renderer step's note "the faster path; WebGL2 is
+  the backup"; when WebGL2 takes over, "Starting WebGL2…" / "WebGL2, the backup path"
+  (`startRenderer`'s `onStage`, `loading.ts` `rendererNote`), nothing that reads like an error,
+  and the quips keep running under it. J1.5 now expects the 20 s wait on the first visit, the two
+  lines on the loader, and none of that on the visit that skips WebGPU. Why: the owner's call;
+  High's GTAO and TRAA need WebGPU (`render/quality.ts`), and graphics quality comes before load
+  time (D-load-5).
+- **D-octfix-1 (2026-11-12):** The probe keeps Medium's extras only when the measurement with them on also keeps the main thread and the frames in line: its main-thread p50 and its frame-interval p50 may each take the larger of what Medium's measurement predicts (main thread: Medium's × (1 + the plan's CPU cost); frames: Medium's interval) and their budget (main thread: `extrasCpuBudget`, the busiest scenes' predicted p99 inside 90% of the frame; frames: the 60 Hz frame), plus 15% and 0.25 ms of noise; past either, no extras (`extrasRegression`, `render/extrasPlan.ts`). A tab hidden at any moment of the probe, warm-ups and later measurements included, makes it invalid (session-only Medium, no extras, not saved). Why: the GPU busy time can't see extras that cost draws or submit time, and a later stage measured in a hidden tab says nothing about the device (October review findings 1, 2). Frame rate first.
+- **D-octfix-2 (2026-11-12):** HD art packs: a missing pack manifest (any 4xx, or a body that isn't a manifest) means "no packs this session": one `console.info`, never asked again until reload. A failure that may pass (network error, 5xx) is asked again after 15 s, then 30 s, at most 3 times a session, never behind a loading screen; only giving up warns. A decode, upload step or rebind that fails drops the whole group (textures disposed, bitmaps closed, shipped bindings kept) and counts as one of the group's two tries; the strip worker's error, unreadable answer or a 30 s decode deadline fails its jobs and replaces the worker. Why: the packs aren't shipped yet, so a missing manifest is the normal case and must cost nothing per travel; every other failure must end in the shipped textures, never in a group stuck loading or a texture bound that never uploaded (October review findings 5–8).
+- **D-fixes-1 (2026-11-12):** A slow frame advances the game in full up to 250 ms on foot and 200 ms
+  in the saddle (`game/frameClock.ts`), run as movement steps of at most 50 ms; a gap over 1 s counts
+  as one 50 ms step. So the game keeps real time down to 4 fps on foot and 5 fps riding (it used to
+  clamp every frame to 50 ms: slow motion below 20 fps, #33). The server's movement check is
+  unchanged. Why: one input packet per frame has to fit the server's bank (3.5 m on foot, 5 m on a
+  horse) with 70 ms of network jitter; a 250 ms sprint (2.25 m) does, a 250 ms gallop (4 m)
+  doesn't, so riding keeps the 200 ms cap rather than loosening the anti-cheat limits.
+- **D-view-6 (2026-10-18):** the third-person camera keeps its whole near plane out of the solids,
+  swaps shoulders against a wall, and a player pinned in a pocket steps out (#34, with D-view-5).
+  The lens's line from the head is still cut by one ray, now against the structures, the natural
+  solids and the intact breakables too; then each corner of the near plane (padded 5 cm) must be
+  clear from the lens, or the lens comes in 0.1 m at a time, the edge bisected. The eased reach of
+  the line and where the lens ends up are kept apart (a lens pulled in to the head by a wall there
+  otherwise never got out again) and the lens eases back out only through clear positions. A line
+  over the right shoulder cut under 1 m while the left one's is 0.5 m longer moves the camera over
+  the left (~0.4 s), back once the right line is clear; decided on the lines' own lengths and only
+  once arrived (half way both are short, and it flapped). Right in at the head with a corner still in
+  a wall beside it, the lens slides across the view off that wall when that clears it. Round every
+  Portus item (every spot measured, 178k poses at three pitches; `world/portusCamera.test.ts` keeps every eighth spot): near-plane corners in a
+  structure 6.6 % → 0.2 % of poses, the lens itself never; what is left is the head within 0.3 m of
+  a castle wall or under a lean-to roof. The own avatar already dissolves near the lens (D-view-5:
+  gone within 0.5 m), so no new fade. Pockets: the sweep found one, the Hall of Firsts' column on its
+  0.32 m plinth: the column pushes the body into the plinth's side and the plinth pushes it back
+  (tops are stepped onto only from within half a body radius of the edge, which no walking step
+  reaches: low tops are climbed with a jump, at any frame rate), so a player who dropped in could
+  walk nowhere. Walking but held in place 0.5 s, the controller asks the solids for a step-out
+  (`game/stepOut.ts`): only where no walking probe (16 ways, the controller's 0.1 m steps with the
+  push-out after each) gets 0.25 m, the nearest spot on rings 0.25 m apart out to 1.5 m that is clear,
+  reached straight without crossing a solid, on a top if it stands on one, and not a pocket itself.
+  The server takes it as an ordinary step (bank full after the pinned half second; the real
+  validator in `apps/server/test/step-out.test.ts` refuses nothing at 20 and 60 fps); a player
+  pushing into a plain wall never moves. The step-out sees the structures and the natural solids as
+  one (the server checks moves against both), its probes stand on tops like the controller and
+  count only progress along the ground, and it checks at most 8 spots for being pockets per try.
+  Review round 1 (Codex): every lens candidate is checked where it would stand (lifted over the
+  ground), the search takes at most eight steps down a line, and a teleport starts the camera
+  afresh (full reach, right shoulder). Not done: zero near-plane clips (the head itself next to a
+  solid; only a smaller near plane would help, the renderer's call) and the issue's browser walk and
+  before/after screenshots. Client only: nothing shared or on the server changes.
+  Why: the Oct 16 play-test (#34) saw the camera inside walls, buildings and the head in Portus and
+  the player stuck between props; one ray let a lens beside a wall show it from inside.
+- **D-fixes-2 (2026-11-12):** A character who dies with the tutorial unfinished keeps it after the
+  rebirth in Portus: the steps done and the dummies already knocked down carry over. The first offer
+  still needs a level-1 character that never died; the account remembers that it was offered
+  (`onboarding_started` stat), and finishing or skipping still ends it for good. Why: the rebirth
+  rejoins Portus, where the "never died" check ended the tutorial without a word, and with it the
+  dummies' XP that takes a guest to level 2, where saving unlocks (D34, #31, #32). Found in this run's
+  play-through.
+- **D-fixes-3 (2026-11-12):** The home page's visits line says only "● N online now" (#12, the
+  owner's 2026-10-18 call). Total visits sit apart in the footer as plain text until DataFast's
+  stats card replaces them (its embed code is in the DataFast dashboard, not public docs). A
+  "Privacy" link in the footer, shown only when DataFast is in the page, opens a short card: who
+  counts visits, whether that sets cookies, what for, and a "Don't count my visits" switch
+  (`fl.noAnalytics`, which the DataFast guard honours on every visit, unlike a hand-set
+  `datafast_ignore`, which a normal visit clears since #44). Why: the owner asked for the cookie
+  sentence to leave the line and the disclosure to move to a Privacy link.
+- **D-hunt-1 (2026-11-12):** A public hunt is back: **The Three Gleams**. Sela Marchbank, the lamp-keeper in Portus Plaza, gives three trials, one per planet and each a different skill (T1 The Swift Gleam: a ring race round Highscore Hill on Arcadia; T2 The Steadfast Gleam: hold a beacon in south Thornwood on Hollowmere; T3 The Patient Gleam: gather eight shards on the Glasspan Salt Flats on Meridian). All three open the Gleam Vault beside her: the Gleamweave Cape (Legendary, unsellable), 600 coins, the medal The Three Gleams (title Gleamkeeper) and, for the first real account ever, the Hall of Firsts line "The Gleam Vault opens". This overrides content.md's header that dropped "the Hunt" of the research reports; nothing of that design (keys, gates, a scoreboard book) is carried over, and every name is our own. Why: the owner asked for a public contest everyone chases across the worlds, and a hub character with a vault in the plaza makes Portus its home.
+- **D-hunt-2 (2026-11-12):** Hunt progress belongs to the **life**, like missions: the trials are missions (T1–T3 in `char.missions`), so death and rebirth clear the gleams and the vault opens again in a later life (`life.gleamVault`, once per life, like an egg item). The medal and title are account-level (once per account, life-scoped so a staged or admin-assisted life doesn't earn it) and the Hall line is global. No migration: everything new is optional fields on the saved character JSON. Why: the game's rule is that progression is lost with the life and only medals, account and the Hall survive (D); a once-per-account vault would make its cape a one-off that the first death loses for good, and re-running the trials each life keeps the contest alive.
+- **D-hunt-3 (2026-11-12):** Three new mission objective types, run by the server in `apps/server/src/world/quests/trials.ts` for any mission that names them: `race` (rings in order inside a clock that starts at the first ring; time out fails, passing the first ring again restarts), `defend` (E lights a beacon; hold its ring for `holdS` while waves rise near you; outside the ring the clock pauses and after `graceS` the attempt fails) and `collect` (walk over every piece; with `limitS` the clock starts at the first and running out drops them). One attempt per player at a time; the attempt (clock, next ring, waves) lives only in the session, so a reconnect, a death or abandoning ends it and the mission stays accepted. Untimed collect pieces are saved in `counts`. Defend waves come from the NPC system's `createNpc` with `spawned: {reason: "trial"}`: they pay nothing (no XP, coins, drops or hunt credit), are capped at 18 per room, and dissolve when the attempt ends. Why: reusable types for later missions; the session-only attempt keeps a disconnect from pausing a clock; unpaid waves can't be farmed.
+- **D-hunt-4 (2026-11-12):** Errand Runner (medal 6) keeps asking for the original nine guide missions (`ERRAND_MISSIONS`), not the later ones (A4, H4, the trials). Why: a medal's condition shouldn't change under players who already earned or nearly earned it.
+- **D-balance-1 (2026-11-12):** Balance is computed and gated: `tools/balance` models the shipped
+  catalogues (weapon cadence with reloads, heat, draws, heavies and specials as `combat.ts` runs them;
+  creature attacks with the AI clamps; XP, coins and the shop along the intended route; starter duels and
+  roles) and `pnpm balance` exits non-zero when a number leaves its band; the Vitest project `balance` runs
+  it on every test run. Bands come from content §1–§4 (sustained PvP TTK 2.2–3.5 s, burst 1.4–3.5 s, a
+  1.4 s floor with heavies and specials, the largest hit ≤ 86% of an equal-level player; level 5 at
+  7–13 min, the cap at 60–150 min, no level twice its neighbours; T2 affordable by the gate) plus walls and
+  free kills per creature tier (solo TTK regular 0.2–3 s, heavy 1.5–8, elite 3–15, beast 20–45; a pack beaten
+  when half its telegraphed hits land; an idle player lasts ≥ 6 s against one creature). Why: the numbers were
+  starting values from before anyone played; a model makes every change checkable and explainable, and
+  gates future content changes.
+- **D-balance-2 (2026-11-12):** Tuned the outliers the model found with the smallest number changes
+  (content §2.6 has the before/after): axe chop 6 s cooldown and T2/T3 85/104; hammer T3 slam 86; Hexquill
+  T3 25; longbow rate = draw + 0.35 s (1.35/1.25/1.15); Comet headMult 1; Dunebreaker HP₁ 1,000. Why: an
+  uncooled chop doubled the axe's DPS and killed in 0.8 s, chop or slam plus one light killed at the gates,
+  a ×1.5 rocket headshot one-shot at every level, the code let bow draws chain at the draw time (the content
+  lists a 0.35 s recovery), and the Dunebreaker was a wall next to the other beasts.
+- **D-balance-3 (2026-11-12):** Ember Seal direct 30/40/52 → 24/32/42. Why: with the seal held before the
+  first throw on top of the dart stream, Hinoko won all 16 starter duels (4 opponents × L1/6/12/20); 24/32/42
+  is the smallest trim with which every starter leads a role and none leads all.
+- **D-balance-4 (2026-11-12):** Starters play differently through a light layer, made without the owner's
+  answers to issue #9: max HP ×0.88–1.12, run/sprint ×0.92–1.10 and the dodge cooldown 1.0–1.35 s, per starter (Unit 7 is the reference body: base HP and pace, a slower roll)
+  in `content/starters.ts` (content §8.5), fixed multipliers on the level curve; no stamina, jump, carry or
+  fall-damage changes. The server applies them (max HP; `movement.ts` takes the starter's sprint for the
+  budget and bank, its cooldown for rolls, and a slower starter gets 0.5 m more roll reserve per m/s under the
+  base because the 4.5 m roll is shared); the client predicts from the same row (`setStarterMove`); the pick
+  screen shows two words and Toughness/Speed/Dodge pips. An optional `spellPower` per starter is for the
+  spells lane, applied by the lead at integration. Bands vs per-starter HP: §2.5 bands hold against the base
+  HP; against the most fragile starter a kill still takes two hits and ≥ 0.75 s. Why: issue #9 asked for
+  starters that feel different; trade-offs (every strength paid for) keep any starter from being strictly
+  best, which the model checks (no stat dominance, each leads a role, no duel more lopsided than 0.6).
+- **D-gfx-worlds-1 (2026-11-12):** the planets get their own look in the wild, client only, no
+  protocol or world-geometry change. (1) Grass: the `?meadow` study's clumps are ported by hand
+  (`render/meadow.ts`) and are the look on Medium and up: each grass instance is a clump of blades
+  with an optional head on a stem, same cells, counts and one draw per cell. Medium draws the lite
+  clump everywhere (3 blades, 8 triangles), High and Ultra the full one within 14 m (5 curved blades,
+  22). The species, colours and glow are shared uniforms per body (`render/worldLooks.ts`): daisies,
+  buttercups, clover and lavender on Arcadia; fungus caps and ghost blooms that light themselves and
+  pale reeds on Hollowmere; dry seed-head scrub on Meridian. (2) Regions (#7): one deterministic
+  noise (`render/regionNoise.ts`) moves the worker's ground colours and the clumps' dryness between
+  lush, dry and deep together, and wears the ground to earth round the pads and along outpost paths.
+  (3) Ground layers in the terrain material, per pixel from slope and height with edges broken by
+  the detail noise it already samples (no extra fetch): rock with cracks, worn earth, beach, snow,
+  moss, dry cracks on flats. (4) Clouds on a shell round the planet (`render/clouds.ts`): one tap on
+  Medium, two octaves lit by a second tap on High; the weather closes the cover. (5) Water: three
+  depth stops, texture ripples in place of three 3-D procedural noises, a narrower foam line, mist
+  on Hollowmere's meres, glitter on High. (6) Far haze drifts to each planet's air colour, stars
+  per sky. (7) Horizon landmarks (`render/landmarks.ts`), one draw per body, 130 m or more above
+  the ground, hidden by the planet's sphere in the shader: floating islands with falls of light over
+  Arcadia, a broken ring round Hollowmere, orbital yards with blinking tethers over Meridian. Low
+  keeps the single blades, a clear sky and the plain water and ground; it gets the regions (vertex
+  colours), the haze colour and the landmarks. Kill switches: `?nomeadow ?noclouds ?noterrainfx
+  ?nowaterfx ?noaerial ?nolandmarks` (all but aerial are in `?bench=passes`). Measured with
+  `?bench=passes` on the M1 (WebGPU, 1280×720, six rounds, the machine at load 190–270): on Medium
+  every one of them was inside the noise on Arcadia, Hollowmere and Meridian (largest p50: landmarks
+  0.8 ms of a 6.2 ms frame with 2.7 ms of noise; meadow 0.18, 0.04 and −0.03 ms; clouds −0.1, −0.5
+  and 0.06 ms) and clouds cost −0.01 ms in Portus (3.95 ms frame, 0.9 ms noise); on High (Arcadia,
+  17.7 ms frame) terrainfx 0.63, landmarks 0.49, clouds 0.45, waterfx 0.40, meadow 0.04 ms. All six
+  switched off against all on, alternating twice over seven framed views (Medium, WebGPU, GPU busy
+  p50): 6.2 ms off, 7.0 ms on, +0.8 ms on average, with the two "on" runs themselves 2 ms apart;
+  every view held 16.7 ms frames (p95 16.8) both ways, and WebGL2 held 16.7 ms too. No shader is
+  built after the warm-up on either backend (0 in play on all three planets). On the main thread a
+  clump takes 2.9× a single blade's time to place (one High chunk, 280k instances, same process),
+  inside the grass's 2 ms a frame, so the rim fills in more slowly, never a longer frame. The
+  lead's quiet-machine runs decide whether any of it moves a tier. Why: the owner asked for worlds
+  people screenshot at no cost to frame rate (#49), and #7 says the planets look the same
+  everywhere.
+- **D-gfx-worlds-2 (2026-11-12):** tone mapping stays Neutral; `render/post.ts` and
+  `render/renderer.ts` are untouched. The study's ACES + S-curve would have changed the hub, the
+  avatars and the other graphics lane's grade in the same run. The lime greens the study blamed on
+  the curve are fixed where they come from: Arcadia's ground palette is olive, and the clumps pull
+  each body's grass colours toward its own lush and straw ends. `?tonemap=aces|agx` still works.
+  Why: one global curve change is the other lane's call to make with its grade, and the greens
+  didn't need it.
+- **D-gfx-worlds-3 (2026-11-12):** the hub keeps its own ground: Portus' lawns stay single blades
+  (`GrassSystem`'s `meadow` flag), its terrain colours take no regions and no wear, and it has no
+  landmarks. It does get the cloud layer (sparse, `WORLD_LOOKS.portus.clouds.cover` 0.58; 1 turns it
+  off). Why: the castle town's look belongs to the hub lane and Portus is the busiest scene, the one
+  that sets the M1's frame-rate tail.
+- **D-gfx-worlds-4 (2026-11-12):** two new extras, `meadow` (full clumps near the camera) and
+  `clouds2` (the lit clouds), exist for `?extras=` and are deliberately not in `EXTRA_COSTS`, so the
+  probe never adds them by itself. Why: an extra goes into the cost model with a cost measured on a
+  quiet M1 (D-framerate-3), and this run's machine was never quiet.
+- **D-gfx-worlds-5 (2026-11-12):** the sky and weather take the server's state as it is on the
+  first sync on a body instead of easing toward it (#46): `Environment.settle`, set by `setBody` and
+  by the first `setServerSky`; the next update snaps the weather kind, amount and wetness. A URL or
+  photo weather override still eases in, and so does every change during play. Why: the world
+  darkened and cooled for ~4 s after the loader hid.
+- **D-spells-1 (2026-11-12):** every character has a spellbook apart from its weapons: aether (100,
+  +6/s, paused 1.5 s after a cast) and four spells on Q / F / X / Z that open at levels 1 / 3 / 6 / 9:
+  Skipstep, Frostbloom, Wishfall, Glasswing Ward (numbers: content.md §2.7, code
+  `packages/shared/src/content/spells.ts`). Nothing is persisted: the level gates them, so rebirth
+  resets them. Aether and cooldowns live per account in process memory (like the Prism Bubble's
+  timer), so a body hop doesn't refill them; a server restart does. Aether is private (`you.spells`),
+  not a schema field. Why: the owner asked for "more magic", and magic that is a weapon family is
+  lost the moment the weapon is swapped; a private resource costs no bandwidth for the other 39 players.
+- **D-spells-2 (2026-11-12):** the names are Skipstep, Frostbloom, Wishfall and Glasswing Ward, and
+  the resource is aether. "Starfall" was the working name for the third and was dropped: it is a World
+  of Warcraft and Warcraft III spell name, which the IP line counts as a near-miss. Why: IP line.
+- **D-spells-3 (2026-11-12):** the server moves the body for Skipstep. It walks the blink in 0.5 m
+  steps through the movement validator's own world (terrain, intact props, structures, natural
+  solids), stops before the first step that isn't allowed, sets the position and sends the usual
+  `correct`. Inputs the client sent before it heard (nearer the old place than the new) are dropped
+  for up to 1 s instead of being corrected (`PlayerActor.serverMove`): each correction would snap the
+  client back for a round trip. A fall under way keeps its peak, so a blink is no way down a cliff.
+  Why: D3, and a client-predicted blink would need the client and the server to agree on every
+  collider to the centimetre or rubber-band.
+- **D-spells-4 (2026-11-12):** Frostbloom slows players too, through the NPC lane's movement effects
+  (`applyMoveEffect` + the `npcFx` message the client already predicts), and creatures through a new
+  `NpcActor.slow` the brain's `moveDir` multiplies in. Bosses take the damage but not the slow, and a
+  creature's charge or leap (attack movement) isn't slowed. Why: the player slow was already
+  server-enforced and client-predicted, so it cost nothing new; boss fights are tuned around their
+  own movement.
+- **D-spells-5 (2026-11-12):** spell damage goes through combat's `dealDamage` and `explode`
+  (`explode` gained a `quiet` flag: the spell sends its own event). The Glasswing Ward is a hook in
+  `dealDamage` (`CombatHost.wards`) that takes an attacker's damage from the shell before HP; damage
+  with no attacker (falls, the admin command) passes. Spells follow the attack gates (dead, safe
+  zone, arrival protection, swimming, riding), Skipstep and the ward included. Why: one set of rules
+  for safe zones, walls, friendly fire, kill credit and events, and "no magic in town" is easier to
+  say than a list of exceptions.
+- **D-spells-6 (2026-11-12):** Wishfall warns for 1.2 s, not the brief's ~1.0 s, and deals 60 at the
+  centre. Why: its centre is 41–46% of an equal-level target's HP when it unlocks, and content §0
+  asks for at least 1.2 s of warning before a hit of 40% or more. One known dip under §2.5's burst
+  floor is recorded in §2.7 (a headshot timed on the landing: 1.2 s after the ring, against 1.4 s).
+- **D-spells-7 (2026-11-12):** the `cast` message is `{spell, dx, dy, dz, tx?, ty?, tz?}` with the
+  spell's string id; Wishfall takes an explicit ground point or, without one, the ray from the
+  caster's head. The server pulls a far or hidden point in rather than refusing it. Why: one small
+  shape both the game client and headless agents can send without a camera.
+- **D-gfx-hub-1 (2026-11-12):** avatars rez in, de-rez and break into light shards, on the look's one
+  material. A player who appears (join, portal arrival, fast travel: a jump of over 8 m in a frame,
+  rebirth) materialises under a rising scan plane with a glowing edge, a column of light, a ground
+  ring and shards falling in (1.25 s); one who leaves is taken apart from the head down (0.85 s,
+  `Game.leaving`); one who dies falls for 0.4 s, dissolves into drifting shards (1.7 s) and stays gone
+  until they rise (someone already dead when first seen is just not drawn). `render/rez.ts`: the
+  body's part is two per-object uniforms (feet, cut/dissolve/glow) read by `rezKeep()` in the mask
+  and `rezGlow()` in the emissive of `avatarMaterial()`; the shadow mask stays the camera fade's
+  keep-all, so the lean shadow builds stand (D-load-3) and there is still one build per look
+  (D-load-4): the view stops casting and hides what it holds while most of the body is missing. The
+  light is one shared geometry and additive material (`rezFxMesh`, one draw per running effect),
+  warmed with the avatar samples. Kill switch `?norez` (the Rez toggle), on at every tier. Why: the
+  owner's "avatars materialise out of light"; a new material variant per effect would have undone
+  #39's 48 → 2 shadow pipelines and added first-use stalls.
+- **D-gfx-hub-2 (2026-11-12):** portals are a layered vortex, and they answer. On Medium and up every
+  portal opening (Portus' three arches, the planets' gate A arch or ring) draws
+  `world/portalVortex.ts` instead of the flat membrane: three swirl layers with view parallax, the
+  destination's zenith and horizon colours at the far end, a rim glow, motes drifting inwards, all in
+  one fragment shader on the same single mesh; `Portals.pulseNear()` sends a ring and a flash across
+  the portal someone appeared or vanished in (7 m). Low keeps the plain membrane (`portalfx` is
+  tier-gated; `?noportalfx`). Why: the portals are the hub's centrepiece and were flat blobs of one
+  colour by day; a portal can fill the screen up close, so Low doesn't pay for it (#49).
+- **D-gfx-hub-3 (2026-11-12):** the hologram scoreboard stands south-east of the Portus pad, at
+  (7.2 E, −12.6 N), facing the pad: between the Meridian court and the training yard, off the four
+  streets' lines. An emitter, a cone of light and a 5.0 × 6.6 m panel floating from 2.7 m up
+  (`world/HoloBoard.ts`: three draws, no collider, nothing on the server). It shows the home page's
+  public board (GET `/api/home`, on arrival and every 4 minutes): page 1 "FIRSTLIGHT · TOP
+  TRAVELLERS" (8 by level), page 2 "HALL OF FIRSTS" (4 by medals) and a block for the hunt, which
+  reads "Three trials. Sealed, for now." until someone calls `setHoloHunt({ heading, rows })`
+  (`world/holoBoardModel.ts` `HoloHunt`). Both pages share one canvas texture drawn only when the
+  data changes; the board flips every 11 s with two uniform writes a frame. `?noholo`; Low drops the
+  cone. Why: a public scoreboard everyone can see is part of the shared-universe feel; redrawing a
+  canvas per flip would be a texture upload on the main thread every few seconds.
+- **D-gfx-hub-4 (2026-11-12):** the sky has traffic. `render/skyLife.ts` draws thin light trails
+  between every pair of sky planets and from each down to our horizon, each lane with a few ships
+  (bright head, fading tail); 7 shooting stars on their own 45–125 s clocks at night; and, on High
+  and up, an aurora low in the dark sky in the body's colours. Two additive draws built once per
+  body in the local sky frame, one matrix write a frame, no texture, no atmosphere code touched.
+  Fast-travel pads get a 260 m tapered beam that strengthens from dusk (`beamMaterial`). All under
+  `skylife` (`?noskylife`), off on Low. Why: the owner's "a sky full of other worlds and traffic
+  between them", at a cost that stays in the noise.
+- **D-gfx-hub-5 (2026-11-12):** the post pipeline gets a tone step after the grade, in the same
+  output pass: a filmic S-curve (`toneContrast`, fixed at black, mid-grey and white) and split toning
+  that warms highlights and cools shadows (`toneSplit`), per body in `BODY_TONE` (`render/post.ts`;
+  Portus 0.22 / 0.55, the warmest). Bloom thresholds and strengths are unchanged: with the vortex,
+  the hologram and the pools at their present strengths, emissives bloom at night without washing
+  out the day, and those numbers live in `environment.ts` and `looks.ts` (the worlds lane's). No new
+  pass, no lens effects. Why: the grade was flat in the mid-tones, and Portus' evening read cold; a
+  few instructions in a pass that already runs cost nothing measurable.
+- **D-gfx-hub-6 (2026-11-12):** Portus' ground gets light pools: a warm one under each lamp post from
+  dusk, each portal's colour on the paving in front of it, the scoreboard's under its emitter
+  (`world/lightPools.ts`, one additive mesh draped 11 cm over the ground, one draw; `?nopools`,
+  Medium and up). Not real lights: no material in the town changes and nothing is shadowed. Additive
+  strength has to be near 1 to read on dark paving (at 0.4 the pools were invisible). Why: at night
+  the plaza floor was a flat dark disc under lit windows.
+- **D-security-1 (2026-11-12):** Load-test bots keep skipping the public ceilings but have finite budgets of their own (`world/botBudget.ts`): 320 bots online in all load-test rooms, 2 load-test copies per body and 8 in all, 8 new load-test rooms a minute, 40 unused bot seats, 100 bot `/api/play` calls and 60 minted bot tokens per 10 s; past them `/api/play` answers `loadtest full` or 429. In production the load-test features (bot tokens, bot JWTs, `/api/metrics`) also need `LOADTEST_ENABLED=1`; flagging our tools' guests as test accounts keeps working with the secret alone (D-home-6). `tools/bots` waits and retries on 429. Why: whoever held the load-test secret could mint identities and open unbounded copies on the production process (security pass finding 1); the budgets fit the SPEC's F2 runs (40 bots on a copy, then 2 copies × 4 bodies).
+- **D-security-2 (2026-11-12):** The load-test features need a strong `LOADTEST_SECRET` (43+ characters with 12+ distinct, i.e. 32 random bytes; the `ADMIN_CLAIM_TOKEN` rule): a shorter one switches bot tokens, bot JWTs and `/api/metrics` off with a boot warning, while flagging test guests keeps working (D-home-6). Wrong secrets at `/api/test/bot-token` and `/api/metrics` share one budget, 10 per client address (IPv6 per /64) and 100 overall per 10 minutes; past it both answer 429 before comparing anything, the right secret included. Why: the secret was guessable at full speed on two endpoints and any non-empty value enabled it (security pass finding 2).
+- **D-security-3 (2026-11-12):** `/api/play` checks in this order: a request budget before any token is looked at (120 per client address, IPv6 per /64, and 1,500 from everyone per 10 s; loopback has no address budget outside production), then the body id and protocol version (400 / 409 even for a bad token), then one JWT verification whose result the ban explainer reuses. The per-account and per-address limits after verification (`PLAY_LIMITS`) are unchanged. Why: invalid tokens and bodies spent no budget and a refused token was verified twice (security pass finding 3). A request with no token at all is refused (401) before the field checks.
+- **D-security-4 (2026-11-12):** One client-address rule (`auth/ip.ts`, `docs/tech-facts.md`): direct routes trust only Railway's `X-Real-IP` (the old fallback to the last `X-Forwarded-For` entry is gone), else the socket; routes behind the Vercel rewrite use the first `X-Forwarded-For` entry only after the origin secret matched; every address must parse as an IP; `/api/play`'s per-address limits and unused-seat caps key IPv6 per /64; in production loopback gets no exemption (`GameOptions.production`). Local development and the tests (no edge, loopback, `x-real-ip` set by the test) keep working. Why: limits trusted headers of unchecked provenance and exempted loopback in production (security pass finding 4). Whether Railway overwrites a client's `X-Real-IP` is still unverified on the deployment.
+- **D-security-5 (2026-11-12):** Play JWTs carry their issuing Better Auth session (`sid`). Every bearer use (`/api/play`, `/api/account/*`, bearer admin calls) needs that session to exist for that user and not be expired, and a seat is used only while that session lives (`revalidate(userId, sessionId)`), so signing out one browser ends its tokens and seats while the account's other sessions keep working, for guests and saved accounts alike. Tokens without `sid` (minted before this change) are honoured only if issued before the server process started, i.e. for their last minutes after the deploy. Why: a copied token kept working for account actions up to 15 minutes after its session signed out, and could take a seat while any other session existed (security pass finding 5).
+- **D-security-6 (2026-11-12):** `POST /api/account/name`: 6 attempts per account and 20 per client address (IPv6 per /64) per 10 minutes, refused ones included; a successful change starts a 60 s cooldown; asking for the name the account already has (after trimming) answers `ok` without writing. Over a limit: 429 with a message the name card shows ("Too many name changes…"). Why: each change wrote game.db and the auth user with no limit (security pass finding 6).
+- **D-security-7 (2026-11-12):** Facing is a unit vector: the server normalises the `input` facing before storing it and ignores a zero-length one (the previous facing stays; the position still counts), and the block check divides by the facing's length too (zero never blocks). Why: input only bounded each component, so a facing of (1,1,1) widened the 60° block half-angle to about 73° (security pass finding 7).
+- **D-security-8 (2026-11-12):** The admin-claim limiter (`ClaimLimiter`) uses the shared bounded `WindowLimiter`: a refused attempt records nothing, at most 10,000 addresses are remembered (new ones are refused past that), and idle addresses expire on every call. The limits themselves (5 per address per 10 minutes, 30 an hour overall) are unchanged. Why: once the global budget was spent every rejected request inserted a key, and the 10,000-key clean-up sat on a path that was then unreachable (security pass finding 8).
+- **D-balance-5 (2026-11-12):** Melee damage lands on the press, as the server's `melee()` applies it: the
+  catalogue's `windup` (0.05–0.35 s) is no delay anywhere in the game (neither server nor client reads it), and
+  the balance model no longer delays melee hits by it (review finding 3). Why: the model penalised melee in
+  duels and PvE with a delay the game doesn't have. A real windup would need a delayed hit on the server
+  (rewound against the target's position at release) and client prediction, a combat change larger than this
+  pass, and nothing says melee needs slowing: with the delay gone Brother Ash wins 9 of 16 duels (was 8) and
+  every check stays in band. The field stays as data for a future swing animation.
+- **D-balance-6 (2026-11-12):** The balance model runs two cadences: the shipped client's (each attack waits
+  the tier's rate, charges and seals their full time) and the fastest the server accepts (`consumeAttack`'s
+  0.85 × rate jitter allowance, 0.9 × heavyTime for charges and seals), which a modified client can play every
+  time. §2.5's design bands and floors (sustained 2.2–3.5 s, burst 1.4–3.5 s, the 1.4 s opener floor, DPS and
+  class bands, duels, PvE) are measured at the client's cadence; D-balance-4's hard floor (every kill takes two
+  hits and ≥ 0.75 s, against every starter's HP, heavies and specials included) holds at the server's.
+  Bearded Axe rate 0.8 → 0.9 (all tiers) brings the chop + light back over it (0.68 → 0.77 s against Hinoko and
+  Hexwick at L1/6/12). Why: review finding 1. The hard floor is the guarantee no client may break, so it holds
+  against what the server accepts. Holding §2.5's 1.4 s there too would slow the honest game by ~15% everywhere
+  (the Stillshot's head + body, §2.5's own 1.4 s example, is 1.19 s at 0.85 × its rate): balancing around a
+  cheat. That 15% is the server's to close (accept an early attack only to make up for a late one, or hold it
+  until due), a follow-up for the lead. The axe's rate is the smallest fix: the chop alone would need
+  66/85/104 → 57/73/87.
+- **D-balance-7 (2026-11-12):** A throw breaks the Ember Seal's hand seal: `combat.ts` `fire()` drops the
+  charge when a dart goes out, and the client throws nothing while a seal is held. The model holds the seal
+  after the last dart and makes the dart after a seal wait the rate (`castSpecial()` calls `markAttack()`).
+  Ember Seal direct 24/32/42 → 30/40/42: T1/T2 back to the content's values, T3 keeps D-balance-3's trim. Why:
+  review finding 2. The server already made the next dart wait after a seal, but it also let the hold run
+  while darts flew and the seal skips the rate gate, so a dart and a seal could leave in the same instant and
+  every mid-fight seal cost no dart time; modelled as the server ran, Hinoko won all 16 starter duels again
+  and Unit 7 led no role, even with the seal cut to 12/16/21. A hand seal that is a real commitment (0.4 s
+  with no throws, as content §2.3 describes it) is the smaller change: it is what D-balance-3 had assumed. With
+  it, D-balance-3's trim was larger than needed at T1/T2 (30/40 pass every check: Hinoko 12 duel wins, Unit 7
+  14) but not at T3 (52 hands Hinoko the duels at L12/L20 and Unit 7 leads nothing), so T1/T2 are restored and
+  T3 is kept.
+- **D-balance-8 (2026-11-12):** §2.5's 1.4 s burst floor gates best play too: every weapon's kill with
+  headshots, heavies and specials (base HP, the client's cadence), and D-balance-6's hard floor counts
+  headshots against every starter body. Scatterpipe headMult 1.5 → 1 and Ember Seal headMult 1.5 → 1 (all
+  tiers); Yew Longbow rate 1.35/1.25/1.15 → 1.4; Comet Launcher III rate and reload 1.6 → 1.65. Why: review
+  finding 4: the gate covered body hits and openers only, and three weapons were under it: two ×1.5 Scatterpipe
+  volleys killed in 0.9 s, a longbow head + body in 1.35/1.25/1.15 s, the kunai with a ×1.5 seal fireball in
+  1.14 s (L1/6/12). Pellets are point-blank burst, not precision, and the seal is an explosive (§2.1 gives explosives
+  ×1.0, as D-balance-2 did for the Comet), so neither takes a head bonus. The bow keeps its ×1.5 (its
+  identity) and fires a full draw every 1.4 s, the Stillshot's head + body time; a smaller head bonus would
+  have had to fall to ×1.05 at T3. The bow's slower T3 raised the L20 ranged median and left the Comet at 0.59×
+  it (class band 0.6), hence 1.65. Each change is load-bearing: reverting any one fails the checks.
+- **D-agents-7 (2026-11-12):** The per-address agent cap uses the security lane's one client-address rule (D-security-4): the address `directRequestIp` gives, keyed with `banKey` (an IPv6 /64 is one address); a header that isn't an address counts as absent. Agent requests pass the security lane's checks in its order (request budget, body and protocol version, one token verification) before the agent switch and caps are looked at. Why: the cap was keyed on the raw address, so one IPv6 household could run as many agents as it has addresses; and nothing about agents may make `/api/play` cheaper to hit.
+- **D-agents-8 (2026-11-12):** A character in play never turns into another one. Play tokens are bound to their session (D-security-5), so when the guest session behind an agent has ended, a reconnect, a portal hop or a rebirth stops with the agent `offline` and the event "the guest session ended"; only `connect` signs in as a new guest, and its result says so (`newGuest: true`). Why: silently signing in again mid-run would swap a levelled character for a level-1 stranger under the same name in the caller's log.
+- **D-agents-9 (2026-11-12):** The kit walks by the character's own row of `content/starters.ts` (run, sprint, dodge cooldown), read from the starter the server seated, and by any slow the server sends (`npcFx`): it never sprints faster than that row, rolls on that cooldown plus 100 ms of clock skew, and doesn't roll while slowed. A Skipstep's `correct` is taken as the new position and is not counted as a correction. Why: the server validates against the same row (D-balance-4); with the shared base numbers a Hinoko agent ran 9% slow and a Brother Ash agent was corrected.
+- **D-agents-10 (2026-11-12):** No kill stealing is a kit feature, not only a house rule: an observed creature carries `claimedBy` when another player hit it in the last 6 s or it is chasing them, and `attack(..., { yieldTo: "people" | "anyone" })` breaks off with `yielded` the moment that player hits it. Residents always fight with `yieldTo: "people"`, skip claimed creatures, and stand back 10 m after yielding. Why: a scripted hunter that finishes creatures people are fighting takes their XP and loot at machine speed; the server can't tell that from play, so the well-behaved client has to.
+- **D-agents-11 (2026-11-12):** Residents (`tools/agent/residents.ts`) are ordinary labelled agents: no server-side special case, the same switch and caps, their own guest accounts kept in `~/.firstlight/agents/residents/`. They keep 30 m from a boss arena's edge (nothing is picked inside, walks go round), never pass `pvp`, and when a player hurts them they drink and run for a safe zone instead of fighting back. One process runs all of them under a CPU budget (`--cpu`, default half a core: over it every pause stretches). Production keeps agents off (D-agents-2), so residents run there only when the owner turns `AGENTS_ENABLED` on and picks the caps. Why: the owner asked for worlds that feel busy with humans and AIs side by side; doing it through the public agent path keeps one set of rules and makes every resident visible as an AI.
+- **D-agents-12 (2026-11-12):** `playTrial` plays a race, defend or collect mission as one action, and the trials are also playable step by step (`moveTo("mission:<id>")` follows the attempt, `interact` lights a beacon). In a defend it holds a spot at least 4 m inside the ring and never follows a creature past it (`attack`'s `leash`). Why: a race needs a ring every few seconds and a defend needs a fight inside a boundary; a model deciding one tool call at a time loses the clock, and a fighter that chases leaves the ring and fails the hold.
+- **D-agents-13 (2026-11-12):** The kit doesn't cast Frostbloom or Wishfall while a player stands in the blast: `cast` answers `players in range` and spends nothing, unless `pvp: true` is passed (self-defence, like `attack`'s `pvp`, D-agents-6). Why: friendly fire is on for spells (D-spells), so a hunter clearing two Hopbits next to a person would hurt the person; "agents don't start fights with people" has to hold for area damage too.
+- **D-agents-14 (2026-11-12):** An agent that opens the Gleam Vault gets its cape and coins like anyone, but never the "first ever" line on the Hall of Firsts (`GLEAMS.firsts`): the vault's engraving skips `identity.agent`, as the eggs' and the bosses' do. Why: the Hall is people's (D-agents-1); the missions lane added this third engraving site in parallel, without the agent flag to check, and a resident hunt-chaser could have taken the line.
+- **D-hunt-5 (2026-11-12):** Skipstep is allowed in the race trials, and a blink counts only along its own path. The trial logic samples each racer's position every room tick (50 ms) between quest ticks and checks the rings along those short segments in order, so a blink (an instant 10 m move) passes a ring only if its straight path comes within the ring radius (4.5 m), and running then blinking inside one 200 ms quest tick can't cut a corner through a ring the player never came near. Why: the spellbook made a 10 m server-side move part of normal play; banning it in a race would be an invisible rule, and position checks along the real path keep rings in order and unskippable without touching the spell lane.
+- **D-hunt-6 (2026-11-12):** The Swift Gleam keeps its 75 s clock. Measured, the course is 406 m (412 m over the ground); the slowest sprinter, Brother Ash (8.28 m/s), needs ~50 s, which leaves 25 s of slack (a third of the clock; Hinoko keeps 33 s), and Skipstep buys back up to ~12 s more. Why: the margin was sized at 30 s for the base 9 m/s; 25 s still covers hills, a dodge and a Hopbit, and "slow" is Ash's chosen trade (content.md §5 Sizing).
+- **D-hunt-7 (2026-11-12):** Trial creatures belong to their runner: they sense the runner within 60 m through cover and come for them, never target or hurt anyone else, and nobody else's hits or spells land on them (NpcSystem.ownerOf / mayEngage). A dropped socket ends the attempt at once, and a trial says `done` only after its reward commits. Why: the review of the first round (docs/reviews/2026-11-12-missions-three-gleams-gpt-6.1-sol.md, findings 1–3); unpaid creatures loose on strangers, or drawn off by them, made the defend trials a griefing tool.
+- **D-gfx-worlds-6 (2026-11-12):** the planets' second pass, client only, no protocol or
+  world-geometry change. (1) Meadow grass redrawn (`render/meadow.ts`): leaf-shaped blades (widest a
+  third of the way up, ~5 cm on Arcadia) that bend at each row and turn half way to face the camera,
+  5 to a clump on Medium (20 triangles) and 7 with three rows near the camera on High (42); roots
+  darken into the clump, tips lighten, the wind's travelling wave lights the blades it bends, and
+  the turf under the grass takes the blade roots' colour near the camera (`terrainMaterial.ts`
+  `under`), so the gaps read as shade. Arcadia's blades are green, not straw. A clump covers more
+  ground than a blade, so a tier places 0.7 clumps per blade of its grass count (`MEADOW_SHARE`).
+  Clumps thin with distance: each carries its rank in its cell, the shader shrinks away the ranks
+  past the share kept at that distance (all within 15% of the grass radius, 30% at the rim) and
+  widens the rest, and far cells stop drawing that tail. (2) Beaches: warm bright sand to a ragged
+  line ~2 m above the water with faint tide lines, and the grass thins and shortens over the same
+  band. (3) Trees and rocks (`foliagefx`, `vegetationAssets.ts`): leaf clusters a metre across run
+  lighter and yellower or darker and bluer, the crown is darker inside and below, its sun side is
+  lighter, the sun glows through it when you look toward it and rims trunks and crown edges when it
+  is low, leaves flutter on top of the sway, every plant and rock darkens into the ground; rocks get
+  triplanar grain and cracks and lichen (teal on Hollowmere, pale dust on Meridian). (4) Air
+  (`atmosphere.ts`): `shafts`, rays fanning out of a low sun and a wide glow under it, a term of
+  the sky and haze colour (one noise tap round a ring about the sun's axis), no pass; `mist`, a
+  second low fog layer integrated along the view ray, lying on the water and in ground near its
+  level at dawn, in rain, and always on Hollowmere; a stronger far-haze tint per planet; a second
+  layer of faint stars and a pale river of star dust. (5) `fireflies`: fireflies on Arcadia and
+  rising spores on Hollowmere at night, one additive instanced draw in a box round the camera
+  (`weather.ts`); rain rings on water and a sky sheen in the puddles of wet flat ground. (6)
+  Landmarks: Arcadia's islands have a domed cap whose turf overhangs, strata that step in and jut
+  out as ledges, hanging shards, two kinds of tree, a broken arch with a lit rune on the big ones
+  and falls with a bright head; Hollowmere's ring has a lit seam under every slab and crystals on
+  its rim; Meridian's yards have bigger lights, lit panels, a green docking beacon and work lights.
+  Low keeps its single blades and its plain trees, ground, sky and fog; it gets the reworked
+  landmarks and the cheaper grass placement. Why: the owner asked for
+  several passes until the worlds are beautiful, and the first pass's sheets showed Medium's grass
+  as sparse yellow straw, dull olive beaches, flat-lit trees, long views without depth, cone-shaped
+  islands and nights with little to look at.
+- **D-gfx-worlds-7 (2026-11-12):** the second pass's four switches (`foliagefx`, `shafts`, `mist`,
+  `fireflies`) are uniforms, not shader variants: each term sits behind a branch on its amount
+  (`If(atmo.shafts > 0)` and so on), Low and a `?no<name>` switch set the amount to 0
+  (`Environment` writes them with the settings and every frame), and the fireflies are a hidden
+  draw. So a tier change, a kill switch or a time of day compiles nothing, Low pays a not-taken
+  branch, and `?bench=passes` can price each one by switching it (at a time of day that has it:
+  `&time=0.17` for shafts and mist, `&time=0` for fireflies). Screen-space derivatives stay outside
+  those branches (the rocks' triplanar tap is taken ahead of its branch): WGSL allows none inside
+  one, and `shaders.test.ts` checks it. Why: the fog and sky nodes are part of every material's
+  shader; a variant per tier would rebuild them all when the resolution ladder drops a tier
+  mid-play.
+- **D-gfx-worlds-8 (2026-11-12):** the grass's placement on the main thread costs a sixth of what
+  it did. The loop tested every blade against every landing pad (a chord per pad); now a cell is
+  tested once against the pads' aprons and its blades only if one can reach it. The per-clump data
+  is written in line (no call, no third random: the kept clump's own acceptance draw is reused),
+  and a tier places 0.7 clumps per blade of its count. Measured in one process (vitest, node 24,
+  one High chunk of Arcadia with full grass weight, four alternations after a warm-up): at the
+  first pass's head 142–155 ms for 279,577 single blades and 162–184 ms for as many clumps; now
+  20–26 ms for the blades and 23–24 ms for 195,704 clumps, so a meadow field takes 0.93× the time
+  of the single-blade field it replaces (the first pass measured 2.9× on a loaded machine). Why:
+  the brief asked to bring the clumps' placement cost down; the pads were the cost of both.
+- **D-fixes-4 (2026-11-12):** The tutorial pays its 50 XP (level 2, where saving unlocks) to the character
+  that finishes it. The completion pays its 20 XP, or for a level-1 character below 50 XP (one reborn
+  mid-tutorial: the dummies paid its earlier life and the rebirth started it at 0 XP) enough to reach
+  50 (`completionXp`, `world/onboarding.ts`). Dummies still pay once per account and the completion
+  pays once per account (its flag), so dying on purpose earns nothing: a reborn trainee ends where a
+  never-died one does, and a death after the end brings neither the tutorial nor XP back. Why: review
+  finding B1: after D-fixes-2 a paid dummy, a death and the rest of the tutorial paid 40 XP, so the
+  tutorial ended for good at level 1 with saving locked. Topping up at completion, not at the rebirth,
+  is the only point that pays once whatever the number of deaths.
+- **D-fixes-5 (2026-11-12):** The camera and the controller ease by game time, not by frames (review
+  B2, with D-fixes-1): `placeCamera(camera, dt)` moves the shoulder swap at 4.8 shoulder units/s
+  (~0.42 s right to left at any frame rate; it was 0.08 per placement, 6.25 s at 4 fps) and eases the
+  lens back out at 15 m/s (0.25 m per placement). Every `min(1, k·dt)` smoothing in them is now
+  `easeShare(k, dt)` (`game/frameClock.ts`): the share a 60 fps frame gave, compounded over the
+  frame, so 60 fps is unchanged and 4 fps lands in the same place at the same time: ground and air
+  acceleration, the roll's slow-down, the facing turn (aiming 18, walking 10, riding 6), the scope's
+  field-of-view zoom (14) and the saddle camera's blend (3). Feet within 1 mm above a prop top after
+  a frame's move land on it (a flat top's radius grows off its centre; a hair of drift left a fall
+  hovering for a frame). Why: since D-fixes-1 a slow frame advances in full, so a fixed step per
+  placement made the camera crawl at low frame rates and the linear factors snapped.
+- **D-spells-8 (2026-11-12):** review round 1 of the spellbook (six findings, all accepted; table in
+  `docs/reviews/2026-11-12-spellbook-gpt-6.1-sol.md`). What changed for players and clients: Frostbloom
+  stops at Prism Bubble shells like any blast, the shell paying the nova's damage once. Wishfall's
+  landing point is searched back toward the caster until the ground point itself is within 30 m of the
+  caster's feet and the line from the head is clear to it; when there is no such point the cast is
+  refused as `blocked` and costs nothing (this narrows D-spells-7's "pulls in rather than refusing":
+  pulling in is still the rule, refusing is for when nothing is left to pull in to). Frostbloom's
+  `npcFx` carries the slow the server holds, with `set`, and the client replaces its own. `cast` may
+  carry the client's number (`req`), echoed in `denied.req` and `you.spells.req`. Why: each was a
+  place where what the player saw and what the server did could differ. All new fields are optional,
+  so no protocol bump.
+- **D-spells-9 (2026-11-12):** the starters' spell power (D-balance-4's reserved `spellPower`) is
+  applied: it multiplies spell damage (Frostbloom, Wishfall) and the Glasswing Ward's shell, in one
+  place on the server (`SpellSystem.power` / `damage`; `spellDamage(base, level, power)` and
+  `wardShell(maxHp, power)` in `content/spells.ts`). Aether, costs, cooldowns, ranges, Frostbloom's
+  slow and Wishfall's warning stay shared. The pick screen gains a Magic pip row and `pnpm balance`
+  a spells section with its checks (`starter.*.spell`, `spell.oneshot`, `spell.pair`,
+  `spell.instant`, `spell.telegraph`). The multipliers stay as the balance lane set them
+  (0.90–1.15). Re-check of §2.7 with them: no spell is a one-shot (Hexwick's Wishfall centre is at
+  most 53% of an equal-level base body, 60% of the most fragile starter, under the Stillshot
+  headshot's 73–86%; it is over half only at levels 6 and 7) and the opening pair never kills (at most
+  84%). The burst statement was wrong before spell power and is corrected in §2.7: a Frostbloom and a
+  Stillshot headshot landing together kill a full-HP base body at levels 6 and 12 at power 1.00 (6,
+  7, 12, 13 from Hexwick), because nothing holds a weapon back after a cast. Narrowing the
+  multipliers can't remove that (at 1.00 it is already there), so they were left alone and the dip is
+  open: either a short weapon hold after a damaging cast (and no damaging cast for as long after a
+  shot), or Frostbloom at 17 damage. Spells were not put into the duel model: its duels are weapon
+  timelines at 10 m and adding casts would re-tune every duel band. Why: the brief asked for the
+  multiplier to be wired and the statements re-checked; a number that can't fix the statement
+  shouldn't be changed to look as if it did.
+- **D-gfx-hub-7 (2026-11-12):** who gets a rez effect, and what it costs. Only someone who arrives while
+  you are there materialises: `Net` marks the players of the join or reconnect snapshot `seeded` and they
+  are simply there. An effect needs one of 6 slots (`REZ_MAX_ACTIVE`) and to be within 90 m of the camera
+  (`rezAdmits`; the player's own always runs); a frame's arrivals take the slots nearest first. Without a
+  slot an arrival is whole at once, a departure is freed at once, and a death dissolves the body without
+  its light. Turning Rez off settles everything running at once (`AvatarView.settleRez`: bodies whole, the
+  dead lying where they fell, lights hidden, avatars mid de-rez freed). The light meshes are pooled and
+  never disposed, and every see-through material of the lane is single-pass (`forceSinglePass`). Why:
+  review A1/A2; and three keeps a material's built shader only while a drawn object uses it, so each
+  arrival after the last light was freed built `rez_fx` again, twice, in play (a transparent double-sided
+  mesh is drawn as two passes, back faces then front: also two draws where one gives the same picture).
+- **D-gfx-hub-8 (2026-11-12):** the rez light is light, and a death waits for the fall. The column fades
+  at its silhouette (brightest where the view passes through its middle: the opposite of a glass tube's
+  rim), a thin core flashes over the bloom threshold as the light arrives, the ground ring is a glyph that
+  turns and fades, and 30 motes wind up the column: still one geometry, one material, one draw. A death
+  holds 1.05 s before the body breaks up (2.4 s in all, was 0.4 / 1.7), the light starts then, and the
+  shards start where the body lies (`DEATH_LIE`: on its back, head 1.13 m behind the feet). Why: by day
+  the column read as a glass tube; and the death clip only lies still from about 1.0 s (measured on the
+  starter models), so the shards used to leave a standing shape while the body was still on its feet.
+- **D-gfx-hub-9 (2026-11-12):** Portus' light pools tint the paving. The pools' geometry is drawn twice:
+  first a tint whose blend multiplies what is under it (result = ground × (1 + tint × colour): the stones
+  and joints come up in the light's colour, as lit stone does), then a weak additive glow for the hue
+  where the ground is nearly black. The scoreboard's pool lies in front of the board. Supersedes
+  D-gfx-hub-6's single additive draw. Why: the additive pools laid a flat haze over the paving and hid it.
+- **D-gfx-hub-10 (2026-11-12):** Portus' evening air and windows. `world/townLights.ts`: a halo with a
+  blooming core at every lantern and brazier, each portal's colour hanging in the air round its arch (the
+  walls behind it read as lit by it), the scoreboard's glow at its emitter, and 64 motes drifting up from
+  the lamps and fires: camera-facing additive quads in one mesh and one draw, shader-animated, up with the
+  lamplight (`townlights`, `?notownlights`, Medium and up). Lit windows cross the bloom threshold at full
+  lamplight (`townMaterial` `WINDOW_GLOW` 1.85, was 0.7; the outposts share the material, so their windows
+  glow at night too). Why: the owner's "push the atmosphere within budget"; the town's evening had lit
+  windows that sat flat on the walls and lanterns that lit nothing round them. Chimney smoke and banner
+  colour are not done (they need per-building data the town's baked vertices don't carry).
+- **D-gfx-hub-11 (2026-11-12):** a loot pile has a beacon (`world/pileBeacon.ts`): a 34 m shaft of gold
+  light that widens with distance (3.2× at 64 m) and blooms at its foot, ripples on the ground and sparks
+  winding up round the pile, the last two fading out beyond about 45 m. One geometry, one additive
+  material, one draw per pile, on the shared clock; it replaces the pile's short faint beam
+  (`pilebeacon`, `?nopilebeacon`, on at every tier: it is a gameplay signal). Why: one life, and your pile
+  is anyone's: the pile is the moment the whole game turns on, and its 6 m beam was a few faint pixels at
+  60 m.
+- **D-gfx-hub-12 (2026-11-12):** nameplates and health bars. A player's plate is larger and outlined,
+  whole to 18 m, thinner to 46 m and fades to nothing at 60 m (was a pop at 45 m), a little smaller with
+  distance (`render/plates.ts`). Under it hangs a health bar: always when the player is hurt, within 22 m
+  at full health, red under 30%. The bar is its own element under the plate's anchor, so the name line
+  keeps room for a chip after the name (the agents lane's "AI"). Creature health bars keep their size on
+  screen from 16 m out (up to 3×). Why: plates were 11 px text with no backing and no health in a PvP
+  game; a creature's bar at 50 m was two pixels high.
+- **D-gfx-hub-13 (2026-11-12):** the hologram board asks only while it is on, and draws names inside
+  their own rectangle. `world/holoFeed.ts` follows the board's resolved state (off: no request, the one
+  under way aborted; on again: asks at once if its data is stale). `world/holoBoardDraw.ts` measures a
+  row's value first, cuts the name by `measureText()` between whole characters and clips it; names, titles
+  and the hunt's lines lose control characters and the bidirectional marks, overrides and isolates. Why:
+  review A3–A5.
+- **D-controls-5 (2026-11-12):** Gamepads, through one input layer. `Input` (`game/input.ts`) is the
+  only thing the controller, combat, spells and panels read: the gamepad (`game/gamepad.ts`) and the
+  touch overlay feed it buttons as the same keydown/keyup events the keyboard sends (`virtualKey`,
+  untrusted so they never flip the device), attack/alt as `lmb`/`rmb`, sticks as an analog move vector
+  (`moveX/moveY`, a light push walks) and look as radians (`lookYaw/lookPitch`). A new rule, "input
+  captured" (`capturedFrom`), replaces the pointer-lock checks for look and mouse combat: the pointer is
+  locked, or the player is back in the game with the pointer free (pause state "free") on a pad or touch;
+  never under a menu, panel or loading screen. The device is the last one used (a fresh pad press or
+  stick push, a touch, a trusted key or a mouse move over 4 px; emulated mouse events after a touch
+  don't count). Final layout (standard mapping; Xbox labels, PlayStation and Switch Pro shown in their
+  own): LS move (L3 sprints until the stick returns), RS look, A jump, B dodge-roll, X interact/pick
+  up/ride when a prompt is up and otherwise reload, Y whistle a horse, RT attack, LT alt (aim, block,
+  draw, charge), LB/RB previous/next hotbar slot, D-pad ←↑→↓ the spellbar's four slots left to right
+  (Q F X Z), Start pause menu, Select tap map / hold players, R3 inventory; the journal and the tutorial
+  checklist are pause-menu rows on a pad (Journal and Players on touch, two rows at most: the menu's
+  list has no room for more). Keyboard-only by
+  choice: photo mode, screenshot, the perf/admin overlays, the phrase wheel (G needs a pointer to pick),
+  invite Y/N (the Players panel has the buttons), voice. Stick tuning: radial dead zone with rescaling
+  (default 15 %), a response curve (exponent 1.8), look speed and invert Y separate from the mouse's.
+  Aim: a light look slowdown (×0.6) while the crosshair is on a creep, never on players and never any
+  pull or snap, so a pad gets no aim help against a person in PvP. Rumble on taking damage, on a kill
+  and on death where the browser has `vibrationActuator` (Chrome, Edge). Menus: no menu registers
+  anything; `ui/focusNav.ts` moves focus among the controls that are actually on top (a hit test at
+  each control's middle, so a modal's scrim hides what's under it), A clicks, B and Start send Esc,
+  left/right change sliders and selects, the right stick scrolls; a visible amber ring
+  (`fl-padfocus`). Keycaps in the HUD, the prompt and the tutorial switch to the device's glyphs
+  through `glyphFor` (`ui/glyphs.ts`); a MutationObserver runs only while a pad or touch is the device.
+  Why: anyone should be able to play; one layer keeps keyboard behaviour and tests as they were, and
+  sending keys reaches every existing panel and handler without per-panel code.
+- **D-controls-6 (2026-11-12):** Touch controls are experimental. A coarse pointer without hover, or
+  `?touch`, shows `ui/touchOverlay.ts`: a floating stick on the left half (pushed well past the rim
+  straight ahead it sprints), drag-to-look on the right half, Fire (hold keeps firing), Alt, Jump,
+  Roll, Reload, Use (only while a prompt is up), Map, Bag (inventory), Menu, the four spells (state and cooldown sweep copied from
+  the HUD spell bar, which hides in touch mode); the HUD hotbar's slots take taps. On short landscape
+  screens the player card moves to the top left, under it Map/Bag/Menu and the spells.
+  Multi-touch by pointer id; under the HUD layers (the HUD passes taps through); safe-area insets; no
+  scroll, zoom, selection or long-press menu; a "turn sideways" cover in portrait. The home page's
+  phone card keeps "Play on your computer" as the recommendation and adds "Try it on this device
+  (experimental)", which reloads with `?touch&tier=low&autoplay`. Why: the owner wants anyone to be
+  able to try the game; a playable basic on phones beats a "desktop only" wall, and Low keeps it running.
+- **D-controls-7 (2026-11-12):** Input sources own what they hold (review round 1). Held keys are kept per source (keyboard, `pad:<index>`, touch, menu rows) and `Input.keys` is their union; each pad owns its keys, sprint latch and Select. A source that goes away (a pad unplugged, focus lost) cancels alt (`altCancelled`) rather than releasing it, and combat drops the charge. Captured input also needs window focus and a visible page; losing either clears every source, and pads must return to neutral before they count again. Stick look is a turn rate the game integrates with its own frame time. The pad aim slowdown uses the crosshair's target query (`game/crosshairTarget.ts`, shared with spell aiming): only an unobstructed nearest creature counts. `fl-touchmode` follows the device; `touch-action: none` sits only on gameplay surfaces. Why: one device must never cancel, hold or fire for another, and nothing may act while the player isn't looking at the game.
+- **D-ui-2 (2026-11-12):** Earned moments are banners, one at a time, top centre under the trial strip (`ui/moments.ts` `BannerQueue`, `ui/momentsView.ts`): level-up, new spell (with its key, at levels 3, 6 and 9), mission complete, trial won, gleam won, the vault, medal earned. Each has its own accent, sprite and sound, and plays its sound when it shows, not when it was earned. The server still sends its text toasts for these; the client drops the ones a banner says (`bannerCovers`). Entering a world shows an arrival title card (name in the wordmark's style, the home page's line for that world, its levels); a reconnect into the same world shows none. Why: a level-up and a gleam used to be one more line in the toast column, the same size as "Reloading…", and two at once overlapped in time; a queue gives each its moment and never covers the crosshair.
+- **D-ui-3 (2026-11-12):** A light event feed sits under the minimap (`ui/eventFeed.ts`): who arrived and left, who fell to whom, what we felled (with its XP and coins), and hunt news. At most 4 lines, 6.5 s each (hunt news 10 s), no panel behind them. Agents get an "AI" chip when `PlayerState.agent` is in the schema (read defensively). The server broadcasts `news {kind: "gleam" | "vault", name, mission?}` to the other players in the room when a gleam is won or the vault opens. Load-test bots never report; more than three arrivals in one look become one line. Why: a shared world should show that other people are doing things; room scope keeps it cheap (no cross-room bus) and still covers the hub, where the vault is.
+- **D-ui-4 (2026-11-12):** Combat feedback follows content §0: hit-stop is local and holds only our own avatar's pose (light 40 ms, heavy 80, kill 120, boss kill 400; `game/hitStop.ts`), never movement, the camera or the network; a hit on us draws a wedge on a ring round the crosshair toward the attacker (an arc plus a chevron, so not colour alone); a kill opens a diamond round the crosshair; damage numbers land large, settle within 110 ms, hold, then lift, with a dark outline instead of a glow. Why: the doc listed hit-stop and nothing implemented it; "who is hitting me" had no answer on screen.
+- **D-ui-5 (2026-11-12):** The first spell hint is one toast ("Press Q to Skipstep"), the first time the player stands outside a safe zone with Skipstep ready, the tutorial's card gone and the world on screen; once per browser, and never for a player who cast first (`game/spellHint.ts`). Why: the tutorial runs inside Portus, where spells are refused, so it can't teach them; a step added there would break at the first cast.
+- **D-ui-6 (2026-11-12):** One family for HUD frames: every holo surface gets faint still scan lines over its scrim (a gradient, no filter, D-ui-1 stands) and corner ticks in the world's colour (`--world`, set from `data-body` on the HUD root): four on framed pieces (missions, trial strip, banners), two on the rest; the minimap gets a ring in the same colour. Zone banners and party frames keep their own colours (safe / danger, the slot). Arcade frames (hotbar, spell bar, toasts) are unchanged: warm stays "yours". Why: the first wave added pieces from three lanes; a shared corner and accent make them read as one HUD without moving anything.
+- **D-home-9 (2026-11-12):** The home page's hero is built on in-game stills: the Portus plaza still is in `index.html` and paints with the page, the others (one per planet) cross-fade behind the wordmark every 7 s, each downloaded only when its turn comes and the page is on screen. Muted and scrimmed, absolutely placed (no layout shift), still under reduced motion, named in a corner ("Glasswater Lake, Arcadia · in-game"). The nine loader stills were re-captured with `tools/stills` after this run's graphics passes, and `og.jpg` rebuilt from the plaza still and the wordmark (`ui-gallery.html?screen=og` at 1200×630). Why: the page described the game and showed none of it.
+- **D-home-10 (2026-11-12):** Under the hero, in this order: online now beside the leaderboard (both kept as decided: real people only, D-home-6), the four worlds as cards with a still, a line, the boss and who is there now, "New in the worlds" (spells, the Three Gleams with its public state read from the Hall of Firsts line `hunt:gleams`, starters), "Humans and AI agents play side by side", then the share row, visits and credits. The tiles are written from the shared catalogues so they can't go stale. The world's short line (`homeModel.ts` `worldLine`) is also the in-game arrival card's. Why: the worlds were four small text cards at the bottom of a dashboard; the new features had no place at all.
+- **D-home-11 (2026-11-12):** The agents guide link (`docs/agents/playing.md` in the repo) shows only when `VITE_PUBLIC_REPO` is on, like Star and Fork. Why: a link into a private repo is a 404.
+- **D-agents-15 (2026-11-12):** Every agent `/api/play` request holds a claim of its own (`Identity.agentClaim`), not one per account: a request that fails releases only its claim, every outstanding seat counts towards the per-address and per-room caps until it is used or expires, and the room admits the agent again when the seat is used (`useAgentSeat`: switch, both caps, and the claim must still be counted), in the same synchronous step that puts the body in. Why: review 2026-11-12 (agent kit) #1: with claims keyed by account, a failed second request freed the first seat and both caps could be passed without a race.
+- **D-agents-16 (2026-11-12):** `pvp: false` (the default) means the agent doesn't damage players at all, not only that it won't pick one as its target: before every weapon attack the kit checks every living person (a player who isn't flagged as an agent: agents fighting side by side don't wait for each other) against the weapon's shape from `content/weapons.ts` (`collateral.ts`: the melee arc and reach, the projectile's path out to the weapon's range with its spread, the splash, chain or thrown radius, each with a margin for lag and the server's own facing). With someone at risk it holds the attack and steps round the target away from them; after 5 s of that `attack` ends with `player in the way`. `pvp: true` switches the check off. Why: review 2026-11-12 (agent kit) #3: the server's melee hits the nearest bodies in the arc and a projectile the first body on its way, so a resident fighting a creature could hurt the person next to it.
+- **D-agents-17 (2026-11-12):** Everything the kit and its examples fight on their own yields to people: the example hunter's target choice (`pickTarget`) skips a creature a person has claimed and one it yielded in the last 40 s, and both it and the defend-trial helper (`threatNear`, used by resident chasers) call `attack` with `yieldTo: "people"`; on `yielded` (or `player in the way`) the creature is left for a while and the next look picks another or waits. Why: review 2026-11-12 (agent kit) #4: D-agents-10 held for residents only.
+- **D-agents-18 (2026-11-12):** A play session is an agent's or a person's by its own row: `session_log.agent` (migration 10) is written when the session starts, from the seat's agent flag, and the session totals, the D1/D7 return and the agents line on /stats read that column, not the account's flag. Rows from before the column are classed once, by `agent_account` as it stands when the migration runs. A session that starts as one and continues (the same tracker, after a reconnect) as the other keeps its first class. Why: review 2026-11-12 (agent kit) #5: classed by account, a saved account's agent session counted as a person's play and linking an agent's guest into an account rewrote its history.
+- **D-agents-19 (2026-11-12):** The kit's session file (the guest cookie: the character's key) is always private and never reached through a symlink: it is written to a new file created exclusively with `0600` enforced on the descriptor (`fchmod`), synced and renamed into place, a path that is a symlink or anything but a regular file is refused for writing and reading, and a file found readable by others is tightened when it is read. A session that can't be saved still plays (the next run is a new guest). Why: review 2026-11-12 (agent kit) #6: `writeFileSync(…, { mode })` only restricts a file it creates.
+- **D-polish-ux-1 (2026-11-12):** The HUD missions panel lists at most three missions in this order: the running trial attempt, else the mission just taken; then open missions given out on the current body; then open ones elsewhere, whose line starts "On <Planet> ·"; done missions only fill spare rows. Any open mission that does not fit is counted in a "+N more (J)" line that opens the journal (`ui/trackerRows.ts`). The diamond still marks `trackedMission` (what the pointer follows). Why: the play-test held five missions and the panel silently dropped two, so a new trial never appeared.
+- **D-polish-ux-2 (2026-11-12):** The trial strip did render: the play-test's own shot `06-a-05-a4-done` shows it top centre ("KITE SEASON · 5 of 5 kite panels · complete"), in the top column's normal flow under the zone banner and boss bar, which nothing overlaps. What it lacked was a clock on an untimed collect (A4): that clock now counts up from the attempt's first message (`TrialSeen.since`, kept across one attempt's running/paused messages), so race, defend and collect all show a count and a clock. Why: "make the strip show … with its count and clock" for every kind.
+- **D-polish-ux-3 (2026-11-12):** "What next" after the tutorial is three one-line toasts, each shown once per device (localStorage `fl.nextSteps`), a few seconds after arrival and never while the tutorial card is up (`game/nextSteps.ts`, `NextStepsClient.ts`): in Arcadia while no guide mission is held, Lark has your first missions; in Portus once any mission is done, Sela Marchbank's trials (unless a trial is held) and the plaza's scoreboard. Mission cards of the trials (Sela's panel, the journal) add how to get there: "Hollowmere: through the plaza's violet portal, then south to Thornwood". The onboarding steps are untouched. Why: after the last step (the Arcadia portal) nothing told a new player about the guide, the trials or the board.
+- **D-polish-ux-4 (2026-11-12):** Quest panels (`.fl-q`: Sela's, the guide's, the journal) scroll their body with a visible thin gold scrollbar (`scrollbar-color`, stable gutter) instead of the invisible overlay one, and on screens up to 800 px tall the panel is tighter (94vh, smaller padding, title and card spacing) so Sela's three trials and their buttons fit at 720 px. Her cards' row now says "Trial N" only; the planet is in the card's way line (D-polish-ux-3). Why: at 720 px the third trial's Accept was cut off with no sign the list scrolled.
+- **D-polish-ux-5 (2026-11-12):** The Gleam Vault's E prompt counts: "E — Gleam Vault · N of 3 gleams" until all three gleams are won, then "E — Open the Gleam Vault" (`game/worldPrompt.ts`, from `you.missions` like the server's refusal). Why: the prompt promised to open the vault while pressing E said it stays shut, and no count showed anywhere.
+- **D-polish-ux-6 (2026-11-12):** The mission pointer's label keeps off the crosshair (a 6u box at the centre) and the top-centre column (zone banner, boss bar, trial strip, earned banners: 44u wide, 13u tall): `placeCallout` takes optional keep-clear rects; a label that would land on one takes the other side of its point, else stands beside the area with an arrow back. The rects come from the window size and `--u`'s formula, recomputed on resize only. Medals needed no change: since the look-and-feel merge the server's "Medal earned: …" toast is dropped (`bannerCovers`) and the medal shows as a queued top-centre banner (`medalMoment`), not over the tracker; the play-test's shot 21 predates that. Why: the pointer's label covered the "Leaving the safe zone" banner and the crosshair.
+- **D-polish-ux-7 (2026-11-12):** The tutorial does not restart for a finished account: checked live (finish, Arcadia, back to Portus) the onboarding client is inactive (`active: false`) and no `.fl-onb` element exists. The "tutorial step now move" line came from the live harness, which diffed the idle checklist's first step; `e2e/live/session.ts` now reports a step only while the tutorial runs (and "tutorial done" only on the same body). No game change. Why: the play-test transcript logged it on every return to Portus.
+- **D-polish-ux-8 (2026-11-12):** No change to the first hunt (A1, Clover Fields). Packs there are Hopbits 4–6 as in `docs/content.md` §3.2, and the attack-token rule (`NpcSystem.acquireToken`: 2 melee + 2 ranged per player; a Hopbit's hop is a `leap`, so melee) lets at most two Hopbits strike a player at once, however many have aggro. `pnpm balance` puts a level-1 pack's kill-the-player time at 19.7 s at 50% hits with a pack-clear margin of 4.10. The play-test's 93 → 45 HP in under 10 s is those two hitting every hop (6 damage per ~2.2 s each). Why: the brief's bar for thinning was more than about three Hopbits attacking a level-1 player at once, which the token rule already prevents. Hit rate, not density, is the lever if the start still feels harsh.
+- **D-polish-1 (2026-11-12):** Night has a floor on every planet: at full night the moon key is 1.9× and the sky fill 1.75× the looks' own numbers, the ground bounce takes 45% of the sky fill's colour, exposure rises another 12%, the night grade lifts shadows (power below 1), avatars, horses and creatures get a moonlit fresnel rim (`atmo.nightRim`), and night clouds are the sky's own colour plus a faint lift with an edge twice as soft, never darker than the sky behind them. Why: the play-test found Arcadia's night unplayable ("ground, sky and creatures all merge into dark blue") and the night clouds drawn as dark bands with hard black outlines; all of it is uniforms and existing shaders, so no new variant to warm.
+- **D-polish-2 (2026-11-12):** Ground cover never fills the frame: a grass blade or meadow clump rooted within 0.7 m of the camera is 8% of its height and full size from 2 m, and one within 0.45 m of the sight line from the camera to the player's chest shrinks the same way (full from 1.25 m; the line stops 85% of the way, so the grass at the player's feet stays). Props that already fade between camera and player (trees, scrub, rocks) also dissolve within 0.45–1.3 m of the lens. Why: the play-test left a safe zone "nearly hidden behind blades of grass" and clipped into Meridian's scrub; both rules live in the existing vertex stage and the existing fade mask (shared uniforms), so they cost no pass and no new shader.
+- **D-polish-3 (2026-11-12):** The hologram board is read from the pad: the panel is 4.4 × 5.8 m with its lower edge 1.55 m up (was 5.0 × 6.6 m at 2.7 m, its top out of a third-person view), on a dark, 86% solid backing; it shows five level rows, three medal rows and three hunt rows (was 8/4/3) in type about 1.4× the old size, headings in a brighter ink, and the empty states are short ("Be the first on the board"). The light cone is a third as deep front to back and dimmer. Why: the play-test could not read the header or column labels from 5 m, the panel was cut off at the top close up and the reader stood inside the cone.
+- **D-polish-4 (2026-11-12):** World labels (keepers, guides, the Gleam Vault) have a size clamp: nearer than 8 m a label shrinks with its depth, so it is never larger on screen than at 8 m (down to 18% of its world size), on top of the fade within 2.5 m. Why: at talking distance Sela's 4.2 m name sprite covered her own "E Talk" prompt; the clamp is the label material's `scaleNode`, one shared node, no new variant.
+- **D-polish-5 (2026-11-12):** Arrival light is dimmed near the camera: the pad beam is 22% as bright at the lens, rising to full between 5 and 26 m, the arrival column and its flash are 40% as bright within 4 m, full from 16 m, and a portal's vortex within 8 m is half as bright and loses its night boost (full from 28 m). Why: the play-test's first view of Arcadia was a blown-out centre and Hollowmere's a silhouetted player; from a distance both lights are the landmarks they were. One term in each existing shader.
+- **D-polish-6 (2026-11-12):** Sky planets are lit spheres: a sharp terminator (the night side is the sky's own colour a shade darker, like a day moon), a lit limb and a thin atmosphere rim all the way round, stronger land/sea contrast with a coast line and cloud bands from the two noise fields already sampled, crisp from about 12° above the horizon; each is squashed by cos(angle off the view axis) along the line to the screen centre, as a symmetric matrix that leaves its surface frame fixed. Why: the play-test saw "a blurry egg-shaped blob" over Hollowmere (perspective stretches a sphere off-axis, and 40% of it was haze) and "a flat dark teal disc" over Meridian. Same two shaders, same per-frame matrices, nothing allocated.
+- **D-polish-7 (2026-11-12):** The Gleam Vault stands on a two-step plinth with two bands of gold light, its three sockets are larger and sit on brass cups above the lid, and two nested see-through shafts of light rise from it; its label sits at 3 m. Why: the play-test read the hunt's goal as "a stump with three dots, half behind a tree". Built from the lane's own `std`/`glow` materials, no new asset; the socket rule (one lit per gleam won) is unchanged.
+- **D-polish-8 (2026-11-12):** The defend beacon is a marker, not a floodlight: its ground ring is a thin outline about 10 cm high (it was a metre-high wall of light) with a faint see-through fill, and its column is a soft see-through beam; both the beam and the fill are added light that fades at grazing angles and is 12% as bright at the lens, full from 14 m, so the camera inside the beam sees almost nothing of it. Colours are about a quarter of the old values and stay under the bloom threshold (1.25) at full night, where the solid outline takes the 2× night boost and the beam and fill a quarter of it. Why: on Hollowmere the play-test saw "a near-solid white disc" at 14 m and "a full-height white column" over the player at 3 m. One more pooled material (`trialMarkerSoft`), compiled by the markers' own warm-up hook.
+- **D-polish-9 (2026-11-12):** Every race ring carries a post of light that reads from any side: a gold beam 16 m tall and about 1 m wide over the ring to run now (the first ring before the run starts), pulsing with it, and a dim blue one 4 m tall over each later ring; a post starts at the ring's top, so the hoop itself stays clear, and passed rings are still removed with their posts. Why: rings face along the route, so side-on the play-test saw "a thin yellow arc in the grass" at 35 m and found rings only through the marker text. One more pooled instanced mesh on the beacon's see-through material (`trialMarkerSoft`, D-polish-8), which dims within a few metres of the lens; no new shader.
+- **D-polish-10 (2026-11-12):** The "E take everything from …'s pile" prompt is not shown while you are dead (until you rise). Why: the play-test saw it behind the death card, over your own pile; E does nothing then. The mission-object and horse prompts already had this guard.
+- **D-polish-11 (2026-11-12):** Arcadia's meadow height factor is 1.0, down from 1.3 (clumps about 0.3–0.5 m instead of 0.36–0.65 m). Why: the second play-test could not see a Linewyrm at 15 m: ground creatures are 0.85–0.9 m tall and the taller clumps hid most of them. Checked in a browser at night next to a Hopbit pack (creatures and their bars clear of the grass, the meadow still reads full). Hollowmere and Meridian keep their heights; if small creatures hide there too, lower those the same way.
+- **D-gfx-worlds-9 (2026-11-12):** what the second pass costs, as far as this run's machine could
+  say. `?bench=passes` (same process, each feature switched off in turn, WebGPU, 1280×720, six
+  rounds): on Medium everything was inside the noise: at dawn on Arcadia (3.7 ms frame, 0.6 ms
+  noise) terrainfx 0.35, meadow 0.01, landmarks 0.01, shafts 0.00, foliagefx −0.01, mist −0.15 ms;
+  at dawn on Hollowmere (4.2 ms, 1.1 ms noise) landmarks 0.41, mist 0.33, terrainfx 0.29, meadow
+  0.24, shafts 0.09, foliagefx −0.22 ms; at night on Arcadia (4.7 ms, 1.7 ms noise) foliagefx 0.54,
+  fireflies 0.21, meadow 0.05 ms. On High at dawn on Arcadia (16.7 ms frame, GPU-bound, 4.3 ms
+  noise) meadow 1.33, terrainfx 0.75, waterfx 0.52, shafts 0.40, landmarks 0.11, foliagefx 0.09,
+  mist −0.21 ms. Against the first pass's head, alternating three times over twelve framed views
+  (Medium, WebGPU, GPU busy p50, mean of the views): 8.4 ms before, 9.5 ms now, 8.3 ms now with
+  the four new switches off; but the same build swung between 4.5 and 16 ms from one round to the
+  next as other lanes loaded the machine (Meridian's views, whose scene barely changed, ran at
+  0.55× the first pass's time in two rounds and 2× in the third), so that bracket does not resolve
+  a difference of 1 ms. Every view held 16.7 ms frames both ways (p95 16.8), bar one 33 ms p95 in
+  Arcadia's deep grass in the round where the load peaked. Plain play at each planet's spawn, same
+  alternation: Arcadia 5.7/4.2/3.5 ms before and 5.6/4.1/7.9 now, Hollowmere 6.0/4.8/4.5 and
+  6.4/4.1/10.0, Meridian 4.7/3.7/3.1 and 3.7/3.4/3.5. Triangles drawn went up in grass-heavy views
+  (Arcadia's meadow 524k → 662k, Hollowmere's fen 348k → 500k on Medium; these counts include the
+  clumps the shader has shrunk to nothing in a far cell's kept list) and stayed level elsewhere.
+  High held 16.7 ms frames in eleven framed views (GPU busy 8.6–13.9 ms, 1.9 M triangles in the
+  meadow); its bracket against the first pass did not run (the measuring job hit its time limit).
+  No shader is built after the warm-up on either backend (0 in play on all three planets, WebGPU
+  and WebGL2). If the lead's quiet-machine run wants triangles back, `MEADOW_SHARE` (0.7 clumps per
+  blade) and `MEADOW_FAR_KEEP` (0.3 kept at the rim) in `render/meadow.ts` are the two numbers.
+  The hub keeps its own sky: `WORLD_LOOKS.portus.air` has shafts, mist and fireflies at 0. Why:
+  the brief asks for each change's cost; a loaded machine gives bounds, not a verdict.
+- **D-gfx-worlds-10 (2026-11-12):** the planet graphics review's four findings are fixed
+  (`docs/reviews/2026-11-12-planet-graphics-pass1-gpt-6.1-sol.md` has the table), and with them
+  four rules. (1) A probe draws the world it measures: it takes a `ProbeWorld` (`render/probe.ts`),
+  streams before every frame and, after each tier switch, waits (up to `WORLD_TOPUP_CAP_MS`) for
+  the grass that tier sizes before that stage's warm-up and measurement; the first-visit probe, the
+  live re-probe (`reprobe()`) and a graphics change all do. What streams in after a warm-up must
+  already be compiled by it, so the grass keeps a hidden, empty cell of the tier's grass that only
+  the warm-up draws: the same material, attribute layout and shadow flag as the cells (three's
+  build key), whatever ground is near. (2) Water takes its ripple slope from a noise vector in world
+  space projected onto the surface (`render/waterRipple.ts`), never from a tangent frame built on a
+  reference axis: such a frame turns where the axis switches. (3) `aerial` is a shader variant, not
+  only a uniform: `fogNodeFor` keeps a plain fog graph and one with the far-haze tint and the
+  Aerial switch (`?noaerial`) picks between them, so `aerial` is in `?bench=passes`. This fits
+  D-gfx-worlds-7: the far haze is on at every tier, so no tier change and no ladder step switches
+  the variant; the switch itself rebuilds the fogged shaders behind its own warm-up, as the Fog
+  switch does. (4) What a planet's graphics build per body is freed with the body: the landmarks'
+  geometry goes with the body's last planet and their material with the last landmarks; the next
+  arrival builds them again before its warm-up. Why: the review (Codex gpt-6.1-sol) found that a
+  session starting on Low and re-probing upward compiled `grass-meadow` in play and measured bare
+  ground, that the ripples' normal jumped on two latitude circles which lakes cross on all three
+  planets, that `?noaerial` saved nothing, and that landmark buffers were never freed.
+- **D-gfx-worlds-11 (2026-11-12):** the planet features priced in the one calm stretch of the run
+  (load 5–20, 09:19–09:26), and the two extras still not in the cost model. `?bench=passes` on
+  Arcadia (M1, headless Chrome, WebGPU, each feature switched off in turn, six rounds of 16-frame
+  batches, noon, `e2e/bench-passes.spec.ts` with `BENCH_FLAGS=body=arcadia,benchwarm=20,benchrounds=6,
+  benchpasses=meadow+clouds+terrainfx+waterfx+landmarks+aerial+foliagefx+shafts+mist+fireflies`),
+  Medium and High alternated twice. Medium (1088×612, 2.86 and 2.74 ms a frame, 0.39 ms noise both
+  runs): all ten inside the noise; the largest were landmarks +0.18 then −0.11, terrainfx 0.09 and
+  0.17, shafts 0.06 and 0.14, foliagefx 0.09 and 0.08 ms; meadow −0.01 and 0.04, clouds 0.00 and
+  0.06, aerial −0.06 and 0.02 ms. High (1280×720, 7.75 and 7.74 ms, GPU-bound, 0.94 and 0.92 ms
+  noise): meadow 0.51 and 0.57 ms, terrainfx 0.14 and 0.15, landmarks 0.11 and 0.10, waterfx 0.07
+  and 0.07, foliagefx 0.04 and 0.03, aerial 0.03 and 0.00, mist 0.03 and 0.03, shafts and
+  fireflies 0.00, clouds −0.16 and −0.03 ms: the two runs agree to 0.06 ms on every feature but
+  clouds, so the meadow's 0.5–0.6 ms (7%) on High is real though under the bench's own noise line,
+  and nothing else of the planets' passes costs over 0.15 ms there. No shader was built during any
+  measurement. The extras: Medium with `extras=meadow,clouds2` against plain Medium, alternated
+  twice (twelve rounds), raised the GPU busy p50 over the bench's flight round the spawn from 2.84
+  to 3.11 ms and from 2.81 to 3.09 ms (+0.27 and +0.28 ms, 10% of Medium's). That is both extras
+  together, and the flight never comes within the 14 m where the `meadow` extra draws its full
+  clumps (triangles unchanged at 234k), so it is at most `clouds2`'s price and says nothing of
+  `meadow`'s. `EXTRA_COSTS` stays without both (D-gfx-worlds-4 stands): they need a quiet machine,
+  one extra a run, and for `meadow` a view at eye height in deep grass (the bench's fixed view and
+  flight are too high). The dawn and night runs for shafts, mist and fireflies (`time=0.17`,
+  `time=0`) ran as the load went back to 35–440: noise 1.0–6.3 ms, not usable. Why: the first two
+  passes measured at load 190–270 and could not resolve a millisecond; a cost goes into the model
+  only from a measurement that can (D-framerate-3).

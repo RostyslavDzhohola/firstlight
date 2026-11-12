@@ -15,9 +15,13 @@ import { rekeyLimits } from "./limits.ts";
 import { parties } from "./parties.ts";
 import { presenceOf, rekeyPresence, sendTo } from "./presence.ts";
 import { onTestMarked } from "../db/testAccounts.ts";
+import { agentRooms } from "../world/agents.ts";
+import { liveRooms as rooms } from "./presence.ts";
 import { createSocialSystem, enforceBlocksAfterMerge, rekeyOfflineTimer, rekeySessions, syncParty } from "./system.ts";
 
 SYSTEM_FACTORIES.push(createSocialSystem);
+// The agent caps (world/agents.ts) count bodies in every live room.
+agentRooms.current = () => rooms;
 
 // One of our tools flagged a player who's already in the world (D-home-6): out of public counts now,
 // not only from their next join.

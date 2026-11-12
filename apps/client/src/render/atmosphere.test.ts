@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three/webgpu";
-import { SunRig } from "./atmosphere.ts";
+import { fogNodeFor, SunRig } from "./atmosphere.ts";
 import { LOOKS } from "./looks.ts";
-import type { ResolvedSettings } from "./quality.ts";
+import { emptyStored, resolveSettings, type Feature, type ResolvedSettings } from "./quality.ts";
 
 const settings = (mode: "map" | "blob", mapSize = 2048) =>
   ({ on: { shadows: true, cascades: false }, shadows: { mode, mapSize, extent: 40, cascadeSize: 0, far: 200 } }) as unknown as ResolvedSettings;
@@ -36,5 +36,33 @@ describe("SunRig shadow settings (Chrome play-test: black world after Settings â
     expect(rig.sun.castShadow).toBe(false);
     rig.applySettings(settings("map"));
     expect(rig.sun.castShadow).toBe(true);
+  });
+});
+
+describe("fog graph variants (planet graphics review, finding 3)", () => {
+  const on = (kills: Feature[] = [], tier: "low" | "medium" | "high" | "ultra" = "medium") => resolveSettings(tier, false, true, emptyStored(), new Set(kills)).on;
+
+  it("none with the fog off, the plain graph with the far haze off, the aerial one otherwise", () => {
+    const aerial = fogNodeFor(on());
+    const plain = fogNodeFor(on(["aerial"]));
+    expect(aerial).not.toBeNull();
+    expect(plain).not.toBeNull();
+    expect(plain).not.toBe(aerial);
+    expect(fogNodeFor(on(["fog"]))).toBeNull();
+    expect(fogNodeFor(on(["fog", "aerial"]))).toBeNull();
+  });
+
+  it("is one node per variant for the session: going back to a variant finds the shaders built with it", () => {
+    const aerial = fogNodeFor(on());
+    const plain = fogNodeFor(on(["aerial"]));
+    expect(fogNodeFor(on())).toBe(aerial);
+    expect(fogNodeFor(on(["aerial"]))).toBe(plain);
+    expect(fogNodeFor({ fog: true, aerial: true })).toBe(aerial);
+  });
+
+  it("no tier switches the graph (the far haze is on at every tier), so a tier change rebuilds no fogged shader for it", () => {
+    const nodes = (["low", "medium", "high", "ultra"] as const).map((t) => fogNodeFor(on([], t)));
+    expect(new Set(nodes).size).toBe(1);
+    expect(nodes[0]).toBe(fogNodeFor({ fog: true, aerial: true }));
   });
 });

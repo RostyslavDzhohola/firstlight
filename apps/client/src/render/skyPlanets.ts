@@ -27,7 +27,7 @@ export class SkyPlanets {
   private readonly air: THREE.Color[];
   private readonly seeds: number[];
   private readonly m = new THREE.Matrix4();
-  private readonly q = new THREE.Quaternion();
+  private readonly fwd = new THREE.Vector3();
   private readonly s = new THREE.Vector3();
   private readonly p = new THREE.Vector3();
   private readonly tmp: V3 = [0, 0, 0];
@@ -58,18 +58,28 @@ export class SkyPlanets {
       const n1 = mx_fractal_noise_float(nL.mul(2.3).add(seed), 4, 2.0, 0.5);
       const n2 = mx_fractal_noise_float(nL.mul(9.0).sub(seed), 2, 2.0, 0.5);
       const landMask = smoothstep(-0.02, 0.12, n1);
-      const surface = mix(seaU.element(pi), landU.element(pi), landMask).mul(n2.mul(0.25).add(0.9));
+      // Readable at a few degrees across (D-polish-6): strong land/sea contrast, a brighter coast line
+      // and soft cloud bands from the same two noise fields (no extra taps).
+      const coast = smoothstep(0.1, 0.0, abs(n1.sub(0.05))).mul(0.18);
+      const ground = mix(seaU.element(pi).mul(0.8), landU.element(pi).mul(1.2), landMask).mul(n2.mul(0.45).add(0.85)).add(coast);
+      const cloudBand = smoothstep(0.12, 0.42, n2.add(n1.mul(0.35))).mul(0.42);
+      const surface = mix(ground, vec3(0.92, 0.95, 1.0), cloudBand);
       const N = normalize(normalWorld);
       const V = normalize(cameraPosition.sub(positionWorld));
       const lit = max(dot(N, atmo.sunDir), 0.0);
-      const lighting = smoothstep(-0.08, 0.35, dot(N, atmo.sunDir)).mul(0.9).add(lit.mul(0.4)).add(0.035);
+      // A sharp terminator: day side in full colour, the night side the sky's own colour a shade
+      // darker (a planet in a daylit sky, like a day moon), so the disc is a lit sphere, never a flat
+      // dark disc.
+      const day = smoothstep(-0.06, 0.16, dot(N, atmo.sunDir));
+      const lighting = day.mul(0.85).add(lit.mul(0.45));
       const fres = pow(float(1).sub(max(dot(N, V), 0.0)), 3.0);
-      const rim = airU.element(pi).mul(fres).mul(lighting.add(0.15)).mul(1.2);
-      const planet = surface.mul(lighting).add(rim);
+      // The lit limb and a thin atmosphere rim all the way round.
+      const rim = airU.element(pi).mul(fres).mul(day.mul(1.3).add(0.3));
       const viewDir = V.negate();
       const sky = skyColor(viewDir, float(0));
-      // Through the atmosphere: low planets sink into the haze.
-      const T = smoothstep(-0.03, 0.4, dot(viewDir, atmo.up)).mul(0.8).add(0.12);
+      const planet = mix(sky.mul(0.62).add(surface.mul(0.04)), surface.mul(lighting), day).add(rim);
+      // Through the atmosphere: only a planet at the horizon sinks into the haze; above ~12° it is crisp.
+      const T = smoothstep(-0.03, 0.2, dot(viewDir, atmo.up)).mul(0.8).add(0.18);
       mat.colorNode = mix(sky, planet, T);
     }
     this.planets = new THREE.InstancedMesh(geo, mat, MAX);
@@ -118,19 +128,35 @@ export class SkyPlanets {
     this.halos.visible = s.on.skyplanets && s.sky.planetAtmospheres;
   }
 
+  /** this.m = a sphere of radius `r` at this.p, squashed by `k` (0 none) along the unit axis in this.s. */
+  private squash(r: number, k: number) {
+    const a = this.s, e = this.m.elements;
+    e[0] = r * (1 - k * a.x * a.x); e[1] = -r * k * a.x * a.y; e[2] = -r * k * a.x * a.z; e[3] = 0;
+    e[4] = e[1]!; e[5] = r * (1 - k * a.y * a.y); e[6] = -r * k * a.y * a.z; e[7] = 0;
+    e[8] = e[2]!; e[9] = e[6]!; e[10] = r * (1 - k * a.z * a.z); e[11] = 0;
+    e[12] = this.p.x; e[13] = this.p.y; e[14] = this.p.z; e[15] = 1;
+  }
+
   update(camera: THREE.Camera) {
     if (!this.planets.visible) return;
     const up = atmo.up.value;
+    const fwd = camera.getWorldDirection(this.fwd);
     for (let i = 0; i < this.specs.length; i++) {
       const sp = this.specs[i]!;
       const d = skyDir(up.x, up.y, up.z, THREE.MathUtils.degToRad(sp.elevDeg), THREE.MathUtils.degToRad(sp.azDeg), this.tmp);
       const r = DIST * Math.tan(THREE.MathUtils.degToRad(sp.sizeDeg));
       this.p.set(d[0], d[1], d[2]).multiplyScalar(DIST).add(camera.position);
-      this.s.setScalar(r);
-      this.m.compose(this.p, this.q, this.s);
+      // Off the view axis a sphere projects as an ellipse, longer by 1/cos along the line from the
+      // screen centre (the play-test's "egg-shaped blob"): squash it by cos along that axis, as a
+      // symmetric matrix, so the planet's own frame (its surface features) never turns with the camera.
+      const cos = d[0] * fwd.x + d[1] * fwd.y + d[2] * fwd.z;
+      this.s.set(fwd.x - d[0] * cos, fwd.y - d[1] * cos, fwd.z - d[2] * cos);
+      const len = this.s.length();
+      const k = len > 1e-4 && cos > 0.15 ? 1 - cos : 0;
+      if (len > 1e-4) this.s.multiplyScalar(1 / len);
+      this.squash(r, k);
       this.planets.setMatrixAt(i, this.m);
-      this.s.setScalar(r * HALO_SCALE);
-      this.m.compose(this.p, this.q, this.s);
+      this.squash(r * HALO_SCALE, k);
       this.halos.setMatrixAt(i, this.m);
     }
     this.planets.instanceMatrix.needsUpdate = true;

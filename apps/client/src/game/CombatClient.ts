@@ -15,12 +15,16 @@ import { Hud, type YouPlus } from "../ui/hud.ts";
 import { zoneInfo } from "../ui/zoneLabel.ts";
 import { PhraseWheel } from "../ui/phraseWheel.ts";
 import type { Game } from "./Game.ts";
+import { setStarterMove } from "./PlayerController.ts";
+import { easeShare } from "./frameClock.ts";
 import { openSaveProgress } from "../ui/account.ts";
 import { closeDeath, type DeathInfo } from "../ui/death.ts";
 import { DeathFlow } from "./deathFlow.ts";
 import { offerNudge, offersSave, SaveNudge, saveReady } from "../ui/saveOffer.ts";
 import { saveStatus } from "../net/auth.ts";
 import { attackDeniedText, holsteredText, immuneText, NoticeGate } from "./notices.ts";
+import { heavyName, heavyRelease, SpecialCooldown } from "./specialCooldown.ts";
+import { bannerCovers } from "../ui/moments.ts";
 
 const NUDGED_KEY = "fl.saveNudged";
 const _v = new THREE.Vector3();
@@ -42,10 +46,12 @@ export class CombatClient {
   readonly hud: Hud;
   private lastFire = 0;
   private chargeStart = 0;
-  /** Ember Seal: the local cooldown mirror and whether the current RMB hold is a seal. */
-  private sealReadyAt = 0;
-  private sealPendingUntil = 0;
+  /** The server's one special cooldown (Ember Seal, axe chop, hammer slam), mirrored locally. */
+  private readonly special = new SpecialCooldown();
+  /** Whether the current RMB hold is a seal / a heavy charge, and when a released heavy goes out (0: none). */
   private sealHeld = false;
+  private heavyHeld = false;
+  private heavyDueAt = 0;
   private wasRmb = false;
   /** Right mouse last frame while saddle-locked (the Patchkit's self-patch there). */
   private saddleRmb = false;
@@ -78,6 +84,8 @@ export class CombatClient {
   training: ((def: WeaponDef, tier: TierStats, now: number) => boolean) | null = null;
   /** Onboarding hook: the tutorial is up (tips or its last card); the "Progress not saved" toast waits for it. */
   tutorialBusy: (() => boolean) | null = null;
+  /** OnboardingClient hook: the dummy step is on, so the holstered notice points at the dummies (#31). */
+  dummyStep: (() => boolean) | null = null;
   /** The "Progress not saved" toast (once per tab session) and the best level seen (Esc menu → Save progress). */
   readonly saveNudge = new SaveNudge(sessionStorage.getItem(NUDGED_KEY) === "1");
   /** Refusal notices: each reason once per press of an attack button. */
@@ -106,22 +114,21 @@ export class CombatClient {
       this.death.onYou(!!m.dead);
     });
     room.onMessage("toast", (m: { text: string; kind: string }) => {
+      // A level-up, a finished mission, a medal or a gleam has its own banner and sound (MomentsClient, D-ui-2).
+      if (bannerCovers(m.text)) return;
       this.hud.toast(m.text, m.kind);
       this.game.audio.play(m.kind === "xp" ? "levelUp" : m.kind === "coins" ? "coins" : "ui");
     });
     room.onMessage("denied", (m: { action: string; reason: string }) => {
-      // A seal the server refused (released too early after lag, safe zone…) didn't cast: give the
-      // local cooldown back. Its own "cooldown" refusal means the server's clock still runs.
-      if (m.action === "fire" && this.sealPendingUntil > performance.now()) {
-        this.sealPendingUntil = 0;
-        if (m.reason !== "cooldown") this.sealReadyAt = 0;
-      }
+      // A seal or heavy the server refused (released too early after lag, safe zone…) didn't start the
+      // cooldown: give the local one back. Its own "cooldown" refusal means the server's clock still runs.
+      if (m.action === "fire" || m.action === "melee") this.special.refused(performance.now(), m.reason);
       if (m.reason === "level gate") this.hud.toast("Your level is too low to use that tier", "warn");
       else if (m.action === "logout") this.hud.toast("Can't log out in combat — wait 10 s", "warn");
       else if (m.action === "use" && USE_DENIED[m.reason]) this.hud.toast(USE_DENIED[m.reason]!, "warn");
       else {
         // A refused attack says why (a refused Hexquill bolt used to show nothing at all).
-        const text = attackDeniedText(m.action, m.reason, this.game.bodyId);
+        const text = attackDeniedText(m.action, m.reason, this.game.bodyId, !!this.dummyStep?.());
         if (text && this.deniedGate.allow(text)) this.hud.toast(text, "warn");
       }
     });
@@ -234,7 +241,7 @@ export class CombatClient {
    */
   private nudgeHeld(): boolean {
     this.loadingEl ??= document.getElementById("loading");
-    return !!this.tutorialBusy?.() || !this.game.input.locked || this.deadUntilRespawn || !this.game.net.room || this.loadingEl?.hidden === false;
+    return !!this.tutorialBusy?.() || !this.game.input.captured || this.deadUntilRespawn || !this.game.net.room || this.loadingEl?.hidden === false;
   }
 
   /**
@@ -300,7 +307,8 @@ export class CombatClient {
     if (this.scoped) room?.send("scope", { on: false });
     if (this.wasRmb) room?.send("charge", { on: false });
     this.game.self?.setLocalFlags(0);
-    this.blocking = this.scoped = this.wasRmb = false;
+    this.blocking = this.scoped = this.wasRmb = this.sealHeld = this.heavyHeld = false;
+    this.heavyDueAt = 0;
   }
 
   aiming(): boolean {
@@ -323,6 +331,7 @@ export class CombatClient {
     if (meState) {
       g.hud.setHp(meState.hp, meState.maxHp);
       g.hud.setIdentity(meState.name, meState.starter, meState.palette, meState.look ?? 0);
+      setStarterMove(meState.starter); // predict the pace and roll the server validates (content/starters.ts)
       // The label shows what the server enforces (its flag); the shared zone function says where.
       const p = g.player.pos;
       g.hud.setZone(zoneInfo(g.bodyId, zoneAt(BODIES[g.bodyId], p.x, p.y, p.z), !!(meState.flags & PF.SAFE)));
@@ -337,13 +346,17 @@ export class CombatClient {
       this.dropMouseActions();
       return;
     }
-    // Mouse combat needs the pointer locked. Whenever it's gone (menu, panel, the hint state), cancel
+    // Mouse combat needs the input captured (the pointer locked, or a gamepad or touch player in the
+    // game: Input.captured, D-controls-5). Whenever it's gone (menu, panel, the hint state), cancel
     // any guard, scope or charge in progress: Input reports the right button released when the lock
     // goes, which would otherwise land a charged heavy now, or on the next lock.
-    if (!input.locked) {
+    if (!input.captured) {
       this.dropMouseActions();
       this.saddleRmb = false;
     }
+    // Alt cancelled (a pad unplugged mid-charge, focus lost), not let go: drop the charge, draw or
+    // guard; the release branch below must not launch a heavy (review #3).
+    if (input.altCancelled) this.dropMouseActions();
     // Keys work in the "Click to look around" state too (Input.inPlay, D-controls-4).
     if (this.deadUntilRespawn || !input.inPlay) return;
 
@@ -352,10 +365,10 @@ export class CombatClient {
     if (input.pressed.has("KeyR")) room.send("reload", { slot: g.hud.you?.selected ?? 0 });
     if (input.pressed.has("KeyE")) this.tryPickup();
 
-    if (!input.locked) {
+    if (!input.captured) {
       const cam = g.ctx.camera;
       if (Math.abs(cam.fov - this.baseFov) > 0.1) {
-        cam.fov += (this.baseFov - cam.fov) * Math.min(1, dt * 14);
+        cam.fov += (this.baseFov - cam.fov) * easeShare(14, dt);
         cam.updateProjectionMatrix();
       }
       return;
@@ -373,10 +386,11 @@ export class CombatClient {
       if (this.blocking) room.send("block", { on: false });
       if (this.scoped) room.send("scope", { on: false });
       if (this.wasRmb) room.send("charge", { on: false });
-      this.blocking = this.scoped = this.wasRmb = false;
+      this.blocking = this.scoped = this.wasRmb = this.sealHeld = this.heavyHeld = false;
+      this.heavyDueAt = 0;
       g.self?.setLocalFlags(0);
       if (Math.abs(cam.fov - this.baseFov) > 0.1) {
-        cam.fov += (this.baseFov - cam.fov) * Math.min(1, dt * 14);
+        cam.fov += (this.baseFov - cam.fov) * easeShare(14, dt);
         cam.updateProjectionMatrix();
       }
       // Patchkit: right mouse patches yourself here too (edge-triggered).
@@ -403,20 +417,34 @@ export class CombatClient {
         room.send("block", { on: rmb });
       }
       if (heavyCapable) {
-        // The server times the charge from this message (heavy without it is refused).
+        // The server times the charge from this message (heavy without it is refused). A heavy still
+        // cooling down (the axe chop, the hammer slam: the server's special cooldown) doesn't charge.
         if (rmb && !this.wasRmb) {
-          this.chargeStart = now;
-          room.send("charge", { on: true });
+          this.heavyHeld = !t.cooldown || this.special.ready(now);
+          if (this.heavyHeld) {
+            this.chargeStart = now;
+            room.send("charge", { on: true });
+          } else g.hud.toast(`${heavyName(def)} recharging`, "warn");
         }
-        if (!rmb && this.wasRmb) {
-          if (now - this.chargeStart >= (t.heavyTime ?? 0.8) * 1000) {
-            room.send("melee", { slot: g.hud.you?.selected ?? 0, t: Date.now(), heavy: true });
-            g.self?.trigger("heavy"); // own avatar animates now; remote views follow the server's swing
-            this.lastFire = now;
-          } else room.send("charge", { on: false });
+        if (!rmb && this.wasRmb && this.heavyHeld) {
+          this.heavyHeld = false;
+          const r = heavyRelease(now, this.chargeStart, this.lastFire, t, this.special);
+          if (r.send) this.heavyDueAt = r.at;
+          else room.send("charge", { on: false });
+        }
+      }
+      // A released heavy goes out once the light-attack gate is open (nothing is sent or animated before).
+      if (this.heavyDueAt && now >= this.heavyDueAt) {
+        this.heavyDueAt = 0;
+        if (heavyCapable) {
+          room.send("melee", { slot: g.hud.you?.selected ?? 0, t: Date.now(), heavy: true });
+          g.self?.trigger("heavy"); // own avatar animates now; remote views follow the server's swing
+          this.lastFire = now;
+          if (t.cooldown) this.special.started(now, t.cooldown);
         }
       }
     } else {
+      this.heavyDueAt = 0; // switched off the melee weapon: a released heavy is dropped
       const wantScope = rmb && (def.id === "stillshot" || def.id === "longbow" || def.delivery === "hitscan" || def.delivery === "pellets");
       if (wantScope !== this.scoped) {
         this.scoped = wantScope;
@@ -436,7 +464,7 @@ export class CombatClient {
     const zoom = this.scoped ? (t.zoom ?? 1.35) : 1;
     const targetFov = this.baseFov / zoom;
     if (Math.abs(cam.fov - targetFov) > 0.1) {
-      cam.fov += (targetFov - cam.fov) * Math.min(1, dt * 14);
+      cam.fov += (targetFov - cam.fov) * easeShare(14, dt);
       cam.updateProjectionMatrix();
     }
 
@@ -450,12 +478,14 @@ export class CombatClient {
     if (meState && meState.flags & PF.SAFE && !usableAnywhere(def)) {
       if (this.training?.(def, t, now)) return; // onboarding: the Portus training dummies take swings
       // The same text and gate as the server's "safe zone" refusal: one notice per press (notices.ts).
-      const text = holsteredText(g.bodyId);
+      const text = holsteredText(g.bodyId, !!this.dummyStep?.());
       if (input.lmbPressed && this.deniedGate.allow(text)) g.hud.toast(text, "warn");
       return;
     }
     const semi = def.delivery !== "hitscan" || def.id === "stillshot";
     if (semi && !input.lmbPressed) return;
+    // Both hands are on a hand seal: no throws while it is held (a throw would break it; D-balance-7).
+    if (this.sealHeld) return;
     if (now - this.lastFire < t.rate * 1000) return;
     this.lastFire = now;
     const slot = g.hud.you?.selected ?? 0;
@@ -508,7 +538,7 @@ export class CombatClient {
     const room = g.net.room!;
     const meState = (room.state as any).players?.get(room.sessionId);
     if (rmb && !this.wasRmb) {
-      if (now < this.sealReadyAt) {
+      if (!this.special.ready(now)) {
         g.hud.toast(`${WEAPON_BY_ID.get(def.special!)?.name ?? "Seal"} recharging`, "warn");
         this.sealHeld = false;
         return;
@@ -536,8 +566,7 @@ export class CombatClient {
       const dir = cam.getWorldDirection(new THREE.Vector3());
       room.send("fire", { slot: g.hud.you?.selected ?? 0, ox: origin.x, oy: origin.y, oz: origin.z, dx: dir.x, dy: dir.y, dz: dir.z, t: Date.now(), seal: true });
       g.self?.trigger("cast");
-      this.sealReadyAt = now + (t.cooldown ?? 8) * 1000;
-      this.sealPendingUntil = now + 1500; // a refusal within this window undoes the cooldown
+      this.special.started(now, t.cooldown ?? 8); // a refusal soon after undoes it
       this.lastFire = now;
     }
   }
@@ -620,7 +649,7 @@ export class CombatClient {
   }
 
   private updatePickupPrompt() {
-    const p = this.nearestPile();
+    const p = this.deadUntilRespawn ? null : this.nearestPile(); // no world prompt behind the death card (D-polish-10)
     this.game.hud.setPrompt(p ? `E — take everything from ${p.owner}'s pile` : null);
   }
 

@@ -77,6 +77,8 @@ export const PLAQUES: readonly PlaqueDef[] = [
   { id: BOSS_FIRSTS.hollow_king, hiddenLabel: "First to fell the Hollow King", label: "The Hollow King falls" },
   { id: BOSS_FIRSTS.receiver, hiddenLabel: "First to fell The Receiver", label: "The Receiver falls" },
   ...EGGS.slice(9).map((e, i) => ({ id: e.id, hiddenLabel: `Secret ${i + 10} · ${e.body[0]!.toUpperCase()}${e.body.slice(1)}`, label: e.name })),
+  // The Three Gleams (gleams.ts GLEAMS.firsts): the first account to open the Gleam Vault.
+  { id: "hunt:gleams", hiddenLabel: "First to open the Gleam Vault", label: "The Gleam Vault opens" },
 ];
 
 /** One engraved line, as sent to clients (`hall` message). */

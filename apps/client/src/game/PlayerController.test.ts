@@ -8,6 +8,7 @@ import { BreakableCollider, PLAYER_BODY } from "@firstlight/shared/planet/collid
 import type { Input } from "./input.ts";
 import { ANIM } from "@firstlight/shared/net/schema";
 import { MOVE, PlayerController, type MoveColliders } from "./PlayerController.ts";
+import { stepOut } from "./stepOut.ts";
 import { ADMIN_MODE } from "@firstlight/shared/content/admin";
 
 const R = 500;
@@ -17,7 +18,7 @@ const terrain = { body: { radius: R }, groundHeight: () => 0 } as unknown as Ter
 function fakeInput(keys: string[] = []) {
   const down = new Set(keys);
   return {
-    locked: true, mouseDX: 0, mouseDY: 0, wheel: 0, sensitivity: 0.002, invertY: false,
+    locked: true, captured: true, mouseDX: 0, mouseDY: 0, wheel: 0, sensitivity: 0.002, invertY: false,
     pressed: new Set<string>(),
     down: (k: string) => down.has(k),
     hold(k: string, on: boolean) {
@@ -82,6 +83,48 @@ describe("PlayerController in the Portus town (D38)", () => {
 });
 
 describe("PlayerController", () => {
+  describe("long frames (#33)", () => {
+    it("at 4 fps, 8 s of sprint covers the same ground as at 60 fps", () => {
+      const fast = spawn();
+      const slow = spawn();
+      run(fast, fakeInput(["KeyW", "ShiftLeft"]), 8, 60);
+      run(slow, fakeInput(["KeyW", "ShiftLeft"]), 8, 4);
+      expect(fast.pos.z).toBeGreaterThan(65); // ~9 m/s after the first fraction of a second
+      expect(slow.pos.z).toBeCloseTo(fast.pos.z, 0);
+    });
+
+    it("a 200 ms frame is four 50 ms steps, with the frame's mouse look and key presses applied once", () => {
+      const one = spawn();
+      const four = spawn();
+      const frame = () => {
+        const i = fakeInput(["KeyW"]);
+        i.mouseDX = 120;
+        i.pressed.add("Space");
+        return i;
+      };
+      one.update(0.2, frame(), false, 1000);
+      four.update(0.05, frame(), false, 1000);
+      for (let k = 1; k < 4; k++) four.update(0.05, fakeInput(["KeyW"]), false, 1000);
+      expect(one.pos.distanceTo(four.pos)).toBeLessThan(1e-9);
+      expect(one.facing.distanceTo(four.facing)).toBeLessThan(1e-9);
+      expect(one.vel.distanceTo(four.vel)).toBeLessThan(1e-9);
+    });
+
+    it("the dodge cooldown reads the frame's clock in every step of a long frame (Codex review)", () => {
+      const pc = spawn();
+      const press = (now: number) => {
+        const i = fakeInput();
+        i.pressed.add("KeyC");
+        pc.update(0.2, i, false, now);
+      };
+      press(10_000);
+      expect(pc.anim).toBe(ANIM.DODGE);
+      for (let t = 10_200; t < 11_250; t += 200) pc.update(0.2, fakeInput(), false, t);
+      press(11_250); // 1.25 s after the roll: past the 1.2 s cooldown, so it rolls
+      expect(pc.anim).toBe(ANIM.DODGE);
+    });
+  });
+
   it("runs forward at run speed along the surface", () => {
     const pc = spawn();
     run(pc, fakeInput(["KeyW"]), 1);
@@ -505,6 +548,107 @@ describe("third-person camera and structures (D42)", () => {
   });
 });
 
+describe("the camera's near plane, the shoulders and pockets (#34)", () => {
+  const portus = createTerrain("portus");
+  const town = structureCollider(portus)!;
+  const R = BODIES.portus.radius;
+  const groundR = (x: number, y: number, z: number) => R + portus.groundHeight(x, y, z);
+  const POINT = { radius: 0.01, height: 0.01, step: 0 };
+
+  /** A player south of the house at (26.2, 6.1), `e` m east, the town wired as SiteTown wires it, facing the house. */
+  function againstHouse(e = 26.2) {
+    const pc = new PlayerController(portus, BODIES.portus.waterLevel);
+    pc.setStructures({
+      resolve: (p, out) => town.resolve(p, out),
+      raycast: (o, d, maxT) => town.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT),
+      stepOut: (p) => stepOut(town, groundR, p),
+    });
+    const d = townDir(e, 2.2, R);
+    pc.teleport(d[0] * R, d[1] * R, d[2] * R);
+    run(pc, fakeInput(), 0.2);
+    const toward = (te: number, tn: number) => {
+      const q = townDir(te, tn, R);
+      const up = pc.pos.clone().normalize();
+      const v = new THREE.Vector3(q[0] * R - pc.pos.x, q[1] * R - pc.pos.y, q[2] * R - pc.pos.z);
+      return v.addScaledVector(up, -v.dot(up)).normalize();
+    };
+    pc.camForward.copy(toward(e, 30));
+    return { pc, toward };
+  }
+
+  /** Is a corner of `cam`'s near plane inside a structure? */
+  function nearPlaneIn(cam: THREE.PerspectiveCamera): boolean {
+    cam.updateMatrixWorld(true);
+    const half = Math.tan(THREE.MathUtils.degToRad(cam.fov / 2)) * cam.near;
+    const c = new THREE.Vector3();
+    for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+      c.set(sx * half * cam.aspect, sy * half, -cam.near).applyMatrix4(cam.matrixWorld);
+      if (town.footing(c.x, c.y, c.z, 0, POINT).inside) return true;
+    }
+    return false;
+  }
+
+  it("pushing into a plain wall for 3 s never steps the feet out: they only slide", () => {
+    const { pc } = againstHouse();
+    let jump = 0;
+    const last = pc.pos.clone();
+    run(pc, fakeInput(["KeyW"]), 3, 60, () => {
+      jump = Math.max(jump, pc.pos.distanceTo(last));
+      last.copy(pc.pos);
+    });
+    expect(jump).toBeLessThan(MOVE.run / 60 + 0.01);
+    expect(town.footing(pc.pos.x, pc.pos.y, pc.pos.z, PLAYER_BODY.step).inside).toBe(false);
+  });
+
+  it("a teleport starts the camera afresh: full reach over the right shoulder on the first frame", () => {
+    const { pc, toward } = againstHouse(25);
+    run(pc, fakeInput(["KeyW"]), 2);
+    pc.camForward.copy(toward(-10, 3)); // the wall on the right: over the left shoulder, pulled in
+    const cam = new THREE.PerspectiveCamera(75, 16 / 9, 0.3, 6000);
+    for (let i = 0; i < 80; i++) pc.placeCamera(cam);
+    // To the open plaza by the Hall board, nothing near.
+    const d = townDir(0, -20, R);
+    pc.teleport(d[0] * R, d[1] * R, d[2] * R);
+    pc.camPitch = -0.15;
+    pc.placeCamera(cam);
+    const up = pc.pos.clone().normalize();
+    const head = pc.pos.clone().addScaledVector(up, 1.65);
+    const right = new THREE.Vector3().crossVectors(pc.camForward, up).normalize();
+    expect(cam.position.distanceTo(head)).toBeGreaterThan(4.5);
+    expect(cam.position.clone().sub(head).dot(right)).toBeGreaterThan(0.5);
+  });
+
+  it("walking along a wall at the player's side, the camera looks over the other shoulder with its near plane clear, and comes back once away", () => {
+    // From 25 m east the house runs on behind the camera both ways: looking west, its wall is on the
+    // right and cuts the right shoulder's line short; looking east, it is on the left.
+    for (const [east, wallSide] of [[-10, "right"], [60, "left"]] as const) {
+      const { pc, toward } = againstHouse(25);
+      run(pc, fakeInput(["KeyW"]), 2); // into the wall: it is now right beside the body
+      pc.camForward.copy(toward(east, 3)); // along the wall
+      pc.camPitch = -0.15;
+      const cam = new THREE.PerspectiveCamera(75, 16 / 9, 0.3, 6000);
+      for (let i = 0; i < 80; i++) pc.placeCamera(cam);
+      const up = pc.pos.clone().normalize();
+      const head = pc.pos.clone().addScaledVector(up, 1.65);
+      const right = new THREE.Vector3().crossVectors(pc.camForward, up).normalize();
+      const wallRight = town.raycast(head.x, head.y, head.z, right.x, right.y, right.z, 1) < 1;
+      expect(wallRight).toBe(wallSide === "right");
+      expect(nearPlaneIn(cam), `heading east ${east}`).toBe(false);
+      expect(cam.position.distanceTo(head), `heading east ${east}: the camera stays out behind`).toBeGreaterThan(2);
+      // Over the shoulder away from the wall.
+      expect(Math.sign(cam.position.clone().sub(head).dot(right)), `heading east ${east}`).toBe(wallRight ? -1 : 1);
+      // Two metres off the wall, it is back over the right shoulder.
+      pc.camForward.copy(toward(26.2, -30));
+      run(pc, fakeInput(["KeyW"]), 0.4);
+      pc.camForward.copy(toward(east, 1));
+      for (let i = 0; i < 80; i++) pc.placeCamera(cam);
+      const head2 = pc.pos.clone().addScaledVector(pc.pos.clone().normalize(), 1.65);
+      const right2 = new THREE.Vector3().crossVectors(pc.camForward, pc.pos.clone().normalize()).normalize();
+      expect(cam.position.clone().sub(head2).dot(right2), `heading east ${east}, off the wall`).toBeGreaterThan(0.4);
+    }
+  });
+});
+
 describe("walking into the Portus portals (round 2: gate A's courts)", () => {
   it("walks straight from the plaza into each portal with W alone: nothing at its foot stops the feet", () => {
     const portus = createTerrain("portus");
@@ -619,5 +763,103 @@ describe("the camera and the natural solids (D-solid-1)", () => {
     const hit = nature.raycast(head.x, head.y, head.z, v.x, v.y, v.z, 8, CAMERA_SOLID_KINDS);
     expect(hit, "the spire is behind the head").toBeLessThan(5);
     expect(hit - l, "the lens stays short of the spire").toBeGreaterThan(0.15);
+  });
+});
+
+describe("the camera and the controller ease by time, not by frames (review B2)", () => {
+  /**
+   * On the flat sphere at the pole, looking +z, with a wall plane `side` m to the right of the feet
+   * (`wall.right`) and/or `back` m behind the head (`wall.behind`), each switched on and off by the test.
+   */
+  function scene(side = 0.3, back = 1.5) {
+    const pc = spawn();
+    pc.camPitch = 0;
+    const up = pc.pos.clone().normalize();
+    const right = new THREE.Vector3().crossVectors(pc.camForward, up).normalize();
+    const head = pc.pos.clone().addScaledVector(up, 1.65);
+    const wall = { right: false, behind: false };
+    const plane = (o: THREE.Vector3, d: THREE.Vector3, maxT: number, p: THREE.Vector3, n: THREE.Vector3) => {
+      const dn = d.dot(n);
+      if (dn <= 1e-6) return Infinity;
+      const t = p.clone().sub(o).dot(n) / dn;
+      return t >= 0 && t <= maxT ? t : Infinity;
+    };
+    const rightAt = pc.pos.clone().addScaledVector(right, side);
+    const back3 = pc.camForward.clone().negate();
+    const behindAt = head.clone().addScaledVector(back3, back);
+    pc.setStructures({
+      resolve: (_p, out) => {
+        out.pushed = false;
+        out.floor = 0;
+        return false;
+      },
+      raycast: (o, d, maxT) => Math.min(wall.right ? plane(o, d, maxT, rightAt, right) : Infinity, wall.behind ? plane(o, d, maxT, behindAt, back3) : Infinity),
+    });
+    const cam = new THREE.PerspectiveCamera(75, 16 / 9, 0.3, 6000);
+    const shoulder = () => (pc as unknown as { shoulder: number }).shoulder;
+    const lateral = () => cam.position.clone().sub(head).dot(right);
+    const reach = () => cam.position.distanceTo(head);
+    return { pc, cam, wall, shoulder, lateral, reach };
+  }
+
+  /** Placements at `fps` until `done` (or 10 s): the game time that took. */
+  function timeUntil(s: ReturnType<typeof scene>, fps: number, done: () => boolean): number {
+    let t = 0;
+    while (!done() && t < 10) {
+      s.pc.placeCamera(s.cam, 1 / fps);
+      t += 1 / fps;
+    }
+    return t;
+  }
+
+  for (const fps of [4, 60]) {
+    it(`swaps shoulders in ~0.42 s at ${fps} fps, there and back as a wall at the side comes and goes`, () => {
+      const s = scene();
+      for (let i = 0; i < 5; i++) s.pc.placeCamera(s.cam, 1 / fps); // settled at full reach, right shoulder
+      expect(s.shoulder()).toBe(1);
+      expect(s.lateral()).toBeGreaterThan(0.5);
+      s.wall.right = true;
+      s.pc.placeCamera(s.cam, 1 / fps); // the line is cut short: the swap is decided
+      const over = timeUntil(s, fps, () => s.shoulder() === -1);
+      expect(over).toBeGreaterThan(0.4);
+      expect(over).toBeLessThan(0.55);
+      expect(s.lateral()).toBeLessThan(-0.4);
+      s.wall.right = false;
+      s.pc.placeCamera(s.cam, 1 / fps);
+      const back = timeUntil(s, fps, () => s.shoulder() === 1);
+      expect(back).toBeGreaterThan(0.4);
+      expect(back).toBeLessThan(0.55);
+    });
+
+    it(`eases back out at 15 m/s at ${fps} fps once a wall behind is gone`, () => {
+      const s = scene();
+      for (let i = 0; i < 5; i++) s.pc.placeCamera(s.cam, 1 / fps);
+      s.wall.behind = true;
+      s.pc.placeCamera(s.cam, 1 / fps); // in at once
+      expect(s.reach()).toBeLessThan(1.5);
+      const pulled = s.reach();
+      s.wall.behind = false;
+      const out = timeUntil(s, fps, () => s.reach() > 4.5);
+      // (4.6 m − ~1.2 m) / 15 m/s ≈ 0.23 s: one 4 fps frame, ~14 at 60 fps (per placement, 4 fps took 3.5 s).
+      expect(out).toBeGreaterThan((4.5 - pulled) / 15 - 1e-6);
+      expect(out).toBeLessThanOrEqual(0.25 + 1e-6);
+    });
+  }
+
+  it("starts running and turns alike at 4 and 60 fps", () => {
+    const at = (fps: number) => {
+      const pc = spawn();
+      const sp: number[] = [];
+      run(pc, fakeInput(["KeyW"]), 0.25, fps, () => sp.push(pc.vel.length()));
+      const speed = sp.at(-1)!;
+      // Turn: the facing follows the motion after strafing right for a quarter second.
+      const pc2 = spawn();
+      run(pc2, fakeInput(["KeyD"]), 0.25, fps);
+      const facingDot = pc2.facing.dot(new THREE.Vector3(0, 0, 1));
+      return { speed, facingDot };
+    };
+    const slow = at(4), fast = at(60);
+    expect(slow.speed).toBeCloseTo(fast.speed, 1);
+    expect(slow.facingDot).toBeCloseTo(fast.facingDot, 1);
   });
 });

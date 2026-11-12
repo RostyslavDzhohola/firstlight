@@ -12,13 +12,16 @@ import {
 } from "@firstlight/shared";
 import { flags } from "../config.ts";
 import { atmo, type SunRig } from "./atmosphere.ts";
+import { setCloudWeather } from "./clouds.ts";
 import type { BodyLook } from "./looks.ts";
 import { MENU_GRADE, postUniforms, setGrade, type GradeParams } from "./post.ts";
 import type { ResolvedSettings } from "./quality.ts";
 import type { RenderCtx } from "./renderer.ts";
 import { sliceFor } from "./skyLut.ts";
 import { terrainUniforms } from "./terrainMaterial.ts";
+import { vegetationFx } from "./vegetationAssets.ts";
 import { WeatherFx } from "./weather.ts";
+import { WORLD_LOOKS } from "./worldLooks.ts";
 
 export interface WeatherLook {
   /** Cloud cover 0..1: dims the sun, greys the sky, hides stars. */
@@ -54,7 +57,16 @@ export const WEATHER_LOOKS: Record<Weather, WeatherLook> = {
 };
 
 /** Night grade: cooler, slightly desaturated, lifted shadows (blended in by the night factor). */
-const NIGHT_GRADE: GradeParams = { slope: [0.92, 0.98, 1.12], offset: [0.0, 0.006, 0.02], power: [1.04, 1.02, 0.98], saturation: 0.85, hue: 0 };
+const NIGHT_GRADE: GradeParams = { slope: [0.94, 1.0, 1.12], offset: [0.01, 0.016, 0.03], power: [0.94, 0.92, 0.9], saturation: 0.9, hue: 0 };
+/**
+ * The night floor (D-polish-1, play-test: "ground, sky and creatures all merge into dark blue"): at
+ * full night the moon key and the sky fill are this much stronger than the looks' own numbers, and
+ * the ground bounce takes this share of the sky fill's colour, so shaded ground never crushes to black.
+ */
+const NIGHT_MOON = 1.9;
+const NIGHT_FILL = 1.75;
+const NIGHT_BOUNCE = 0.45;
+const NIGHT_EXPOSURE = 1.12;
 const DUSK_SUN = new THREE.Color(0xff9a5a);
 const OVERCAST = new THREE.Color(0x8a94a4);
 const RAIN_DAY = new THREE.Color(0.62, 0.66, 0.74);
@@ -152,6 +164,12 @@ export class Environment {
   private kind: Weather = "clear";
   private amount = 0;
   private wetness = 0;
+  /**
+   * The next update takes the sky's weather as it is instead of easing toward it (#46): set by a new
+   * body and by the first server sync on it, so the world is already settled when the loader hides
+   * (it used to darken and cool for ~4 s after arrival). Changes during play still ease.
+   */
+  private settle = true;
   private strike: Strike | null = null;
   private fired = -1;
   private flashAt = -1e9;
@@ -173,6 +191,8 @@ export class Environment {
     hemiSky: new THREE.Color(), hemiGround: new THREE.Color(), nightHemiSky: new THREE.Color(), nightHemiGround: new THREE.Color(),
   };
   private drops = { amount: 0, kind: 0, fall: 9, wind: 0, len: 0.5, width: 0.012, alpha: 0 };
+  /** Fireflies showing now 0..1 (night × the planet's own amount, none in rain). */
+  private glowAmount = 0;
   private readonly angles = { elev: 0, az: 0 };
   /** The body's sun elevation range (scattering LUT slices). */
   private readonly lutRange: [number, number] = [0, 1];
@@ -196,6 +216,8 @@ export class Environment {
   applySettings(s: ResolvedSettings) {
     this.settings = s;
     this.fx.setCapacity(s.weatherDrops);
+    this.fx.setFireflies(s.on.fireflies ? s.fireflies : 0);
+    vegetationFx.value = s.on.foliagefx ? 1 : 0;
   }
 
   /** A new body (or copy): the look and lights to drive. */
@@ -212,6 +234,7 @@ export class Environment {
     this.kind = "clear";
     this.amount = 0;
     this.wetness = 0;
+    this.settle = true;
     const p = SKY_PROFILES[body];
     this.lutRange[0] = p.minElev;
     this.lutRange[1] = p.maxElev;
@@ -252,6 +275,7 @@ export class Environment {
       if (snap) this.flashAt = -1e9;
     }
     this.copy = s.copy;
+    if (!this.server) this.settle = true; // the first sync on this body: no easing in from the local guess
     this.server = s;
     this.local = null; // the fallback schedule takes this state's day offset/hold
   }
@@ -327,6 +351,15 @@ export class Environment {
       wKind = st.weather;
       wAmt = weatherAmount(st, now);
     }
+    if (this.settle) {
+      this.settle = false;
+      // A URL or photo override keeps easing in from clear (a dev flag's weather is a change, not an arrival).
+      if (!this.weatherOv) {
+        this.kind = wKind;
+        this.amount = wAmt;
+        this.wetness = WEATHER_LOOKS[wKind].wet * wAmt;
+      }
+    }
     if (wKind === this.kind || this.amount < 0.01) {
       if (wKind !== this.kind) this.kind = wKind;
       this.amount += (wAmt - this.amount) * approach(dt, 2.5);
@@ -376,7 +409,19 @@ export class Environment {
     atmo.wet.value = this.wetness;
     atmo.rain.value = wl.dust ? 0 : Math.min(1, a * wl.drops * 1.2);
     atmo.glowBoost.value = 1 + 0.75 * night + 0.25 * cloud;
+    setCloudWeather(cloud);
     atmo.lamps.value = lampLight(night, dusk);
+    // ---- the second pass: low-sun shafts and glow, ground mist, fireflies (uniforms; zero = the shader skips them)
+    const air = WORLD_LOOKS[this.body].air;
+    // Dawn and dusk both: the sun low and up. Hollowmere's sun is low all day, so it always has a little.
+    const lowSun = smooth(0.5, 0.1, elev) * smooth(-0.07, 0.03, elev);
+    atmo.shafts.value = on.shafts ? lowSun * air.shafts * (1 - cloud) * (1 - a * wl.dust) : 0;
+    // Mist: what the planet always carries, more in the cool of dawn (the morning half of the low sun) and in rain.
+    const morning = this.dayT < 0.5 ? smooth(0.42, 0.06, elev) * smooth(-0.12, 0.0, elev) : 0;
+    atmo.mist.value = on.mist ? Math.min(1.5, air.mist + air.mistDawn * morning + 0.12 * a * wl.wet) : 0;
+    atmo.mistColor.value.setHex(air.mistColor);
+    atmo.mistTop.value = air.mistTop;
+    this.glowAmount = on.fireflies ? night * air.fireflies * (1 - Math.min(1, a * wl.drops * 1.5)) : 0;
 
     // ---- fog / haze
     atmo.fogDensity.value = look.fogDensity * lerp(1, wl.fogMul, a) * (1 + night * 0.25);
@@ -393,17 +438,18 @@ export class Environment {
     // The key switches to the moon at night 0.4: the sun has faded to zero by then and the moon
     // ramps in from there, so the key light never jumps at sunset or sunrise.
     const sunI = look.sunIntensity * sunUp * (1 - cloud * 0.75) * (1 - smooth(0.2, 0.4, night));
-    const moonI = look.night.moonIntensity * smooth(0.4, 0.9, night) * (1 - cloud * 0.5);
+    const moonI = look.night.moonIntensity * NIGHT_MOON * smooth(0.4, 0.9, night) * (1 - cloud * 0.5);
     if (sk.keyIsMoon) rig.setKey(C.moon, moonI);
     else rig.setKey(this.c1, sunI);
     terrainUniforms.sunMatch.value = bakedSunMatch(elev, az, look.sunElev, look.sunAz) * (sunI / look.sunIntensity);
     this.c1.copy(C.hemiSky).lerp(C.nightHemiSky, night);
     if (cloud > 0) this.c1.lerp(OVERCAST, cloud * 0.4);
-    this.c2.copy(C.hemiGround).lerp(C.nightHemiGround, night);
-    rig.setFill(this.c1, this.c2, lerp(look.hemiIntensity, look.night.hemiIntensity, night) * (1 + cloud * 0.15) + flash * 2.2);
+    this.c2.copy(C.hemiGround).lerp(C.nightHemiGround, night).lerp(this.c1, night * NIGHT_BOUNCE);
+    rig.setFill(this.c1, this.c2, lerp(look.hemiIntensity, look.night.hemiIntensity * NIGHT_FILL, night) * (1 + cloud * 0.15) + flash * 2.2);
+    atmo.nightRim.value = night;
 
     // ---- post: exposure, bloom, grade
-    this.ctx.renderer.toneMappingExposure = look.exposure * lerp(1, look.night.exposure, night) * (1 + flash * 0.45) * this.photoExposure;
+    this.ctx.renderer.toneMappingExposure = look.exposure * lerp(1, look.night.exposure * NIGHT_EXPOSURE, night) * (1 + flash * 0.45) * this.photoExposure;
     postUniforms.bloomThreshold.value = lerp(look.bloomThreshold, 0.85, night);
     postUniforms.bloomStrength.value = look.bloomStrength * (1 + 0.6 * night);
     if (this.menu) setGrade(MENU_GRADE);
@@ -484,6 +530,7 @@ export class Environment {
       if (this.settings.on.weather || this.weatherOv) this.fx.strike(camera, s.az, s.distance, s.seed);
     }
     this.fx.updateBolt(camera, atmo.flash.value * 1.6);
+    this.fx.updateFireflies(camera, dt, this.glowAmount, WORLD_LOOKS[this.body].air);
   }
 
   private readonly describedFor = { body: "", mins: -1, kind: "", pct: -1 };

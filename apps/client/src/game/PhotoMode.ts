@@ -161,9 +161,9 @@ export class PhotoMode {
     const up = this.pos.clone().normalize();
     // Re-project the heading onto the local tangent plane as we move around the sphere.
     this.forward.addScaledVector(up, -this.forward.dot(up)).normalize();
-    if (input.locked) {
-      this.forward.applyAxisAngle(up, -input.mouseDX * input.sensitivity).normalize();
-      this.pitch += (input.invertY ? 1 : -1) * input.mouseDY * input.sensitivity;
+    if (input.captured) {
+      this.forward.applyAxisAngle(up, -input.mouseDX * input.sensitivity - input.lookYaw).normalize();
+      this.pitch += (input.invertY ? 1 : -1) * input.mouseDY * input.sensitivity + input.lookPitch;
       this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch));
     }
     const right = new THREE.Vector3().crossVectors(this.forward, up).normalize();
