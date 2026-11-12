@@ -130,3 +130,41 @@ describe("holding a place: a person's creature is left alone", () => {
     }
   });
 });
+
+// Review 2026-11-12 (agent kit) #3: who counts as someone in the way of an attack.
+describe("bystanders are people", () => {
+  it("a person next to the target holds the attack; another agent, a dead player or the target itself doesn't", async () => {
+    const a = new FirstlightAgent();
+    const { room } = fakeRoom();
+    const self = room.state.players.get("s1")!;
+    const pos: [number, number, number] = [self.x, self.y, self.z];
+    const up = pos.map((v) => v / Math.hypot(...pos)) as [number, number, number];
+    const world = bodyWorld("arcadia");
+    const ahead = world.onGround([pos[0] + 2, pos[1], pos[2]]);
+    const players = room.state.players as Map<string, unknown>;
+    const joining = attach(a, room);
+    room.message("you", { level: 1, hotbar: [], backpack: [] });
+    await joining;
+    try {
+      const p = a as any;
+      const d = [ahead[0] - pos[0], ahead[1] - pos[1], ahead[2] - pos[2]];
+      const k = d[0]! * up[0] + d[1]! * up[1] + d[2]! * up[2];
+      const flat = [d[0]! - up[0] * k, d[1]! - up[1] * k, d[2]! - up[2] * k];
+      const l = Math.hypot(...flat);
+      const facing = flat.map((v) => v / l);
+      const head = [pos[0] + up[0] * 1.6, pos[1] + up[1] * 1.6, pos[2] + up[2] * 1.6];
+      const at = (skip = "") => p.bystander(p.weapon(), pos, head, facing, ahead, skip)?.name ?? null; // fists: 1.6 m, 70 degrees
+      const near = { x: ahead[0], y: ahead[1], z: ahead[2], flags: 0 };
+      expect(at()).toBeNull();
+      players.set("a2", { ...near, name: "Scout", agent: true });
+      expect(at()).toBeNull();
+      players.set("d3", { ...near, name: "Fallen", agent: false, flags: 32 }); // PF.DEAD
+      expect(at()).toBeNull();
+      players.set("h1", { ...near, name: "Mira", agent: false });
+      expect(at()).toBe("Mira");
+      expect(at("h1")).toBeNull(); // the target of a pvp fight isn't its own bystander
+    } finally {
+      await a.close();
+    }
+  });
+});
