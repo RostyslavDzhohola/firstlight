@@ -649,7 +649,7 @@ export class CombatClient {
   }
 
   private updatePickupPrompt() {
-    const p = this.nearestPile();
+    const p = this.deadUntilRespawn ? null : this.nearestPile(); // no world prompt behind the death card (D-polish-10)
     this.game.hud.setPrompt(p ? `E — take everything from ${p.owner}'s pile` : null);
   }
 
