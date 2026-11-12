@@ -40,6 +40,13 @@ export const FEATURES = [
   "destruct",
   "weather",
   "daynight",
+  // The planets' graphics pass (D-gfx-worlds-1): each one a `?no<name>` switch `?bench=passes` can price.
+  "meadow", // grass clumps with flower heads and ground cover (off: the single blades)
+  "clouds", // the cloud layer in the sky
+  "terrainfx", // per-pixel ground layers: rock, worn earth, beach, snow, moss, cracks
+  "waterfx", // shore foam, ripples, glitter, mist (off: colour by depth + fresnel)
+  "aerial", // far terrain drifts toward the planet's haze colour
+  "landmarks", // the far-field silhouettes on each planet's horizon
 ] as const;
 export type Feature = (typeof FEATURES)[number];
 
@@ -58,7 +65,10 @@ export interface TierSpec {
   /** Single-map mode: `extent` = half-size of the box around the player. Cascades (High+,
    * opt-in): SunLight with 2 cascades of `mapSize`² out to `far` metres. */
   shadows: { mode: "blob" | "map"; mapSize: number; extent: number; far: number; cascadeSize: number };
-  grass: { count: number; radius: number; segments: 1 | 2 | 3 };
+  /** `clumps`: 0 single blades, 1 lite meadow clumps, 2 full clumps near the camera and lite beyond (meadow.ts). */
+  grass: { count: number; radius: number; segments: 1 | 2 | 3; clumps: 0 | 1 | 2 };
+  /** The cloud layer: 0 none, 1 one density tap (2 texture fetches a sky pixel), 2 two octaves lit by a second tap toward the sun (8). */
+  clouds: 0 | 1 | 2;
   props: { fullTo: number; lodTo: number };
   /** 0 colour + fresnel, 1 + baked depth + foam, 2 + ripples, 3 + (reserved: SSR on the nearest lake). */
   water: 0 | 1 | 2 | 3;
@@ -77,7 +87,8 @@ export const TIER_TABLE: Record<Tier, TierSpec> = {
     fog: { height: false, aerial: true },
     terrain: { detailLayers: 0, normals: false, bakedSun: true },
     shadows: { mode: "blob", mapSize: 0, extent: 0, far: 0, cascadeSize: 0 },
-    grass: { count: 25_000, radius: 25, segments: 1 },
+    grass: { count: 25_000, radius: 25, segments: 1, clumps: 0 },
+    clouds: 0,
     props: { fullTo: 0, lodTo: 110 },
     water: 0,
     post: { bloomScale: 0.33, fxaa: false, vignette: false, grain: false, ao: "off", traa: false },
@@ -89,7 +100,8 @@ export const TIER_TABLE: Record<Tier, TierSpec> = {
     fog: { height: true, aerial: true },
     terrain: { detailLayers: 2, normals: false, bakedSun: false },
     shadows: { mode: "map", mapSize: 1024, extent: 20, far: 40, cascadeSize: 0 },
-    grass: { count: 80_000, radius: 40, segments: 2 },
+    grass: { count: 80_000, radius: 40, segments: 2, clumps: 1 },
+    clouds: 1,
     props: { fullTo: 30, lodTo: 150 },
     water: 1,
     post: { bloomScale: 0.5, fxaa: true, vignette: true, grain: true, ao: "off", traa: false },
@@ -101,7 +113,8 @@ export const TIER_TABLE: Record<Tier, TierSpec> = {
     fog: { height: true, aerial: true },
     terrain: { detailLayers: 4, normals: true, bakedSun: false },
     shadows: { mode: "map", mapSize: 2048, extent: 40, far: 80, cascadeSize: 1024 },
-    grass: { count: 200_000, radius: 60, segments: 2 },
+    grass: { count: 200_000, radius: 60, segments: 2, clumps: 2 },
+    clouds: 2,
     props: { fullTo: 40, lodTo: 220 },
     water: 2,
     post: { bloomScale: 0.5, fxaa: true, vignette: true, grain: true, ao: "half", traa: true },
@@ -113,7 +126,8 @@ export const TIER_TABLE: Record<Tier, TierSpec> = {
     fog: { height: true, aerial: true },
     terrain: { detailLayers: 4, normals: true, bakedSun: false },
     shadows: { mode: "map", mapSize: 2048, extent: 60, far: 150, cascadeSize: 2048 },
-    grass: { count: 500_000, radius: 85, segments: 3 },
+    grass: { count: 500_000, radius: 85, segments: 3, clumps: 2 },
+    clouds: 2,
     props: { fullTo: 60, lodTo: 260 },
     water: 3,
     post: { bloomScale: 0.5, fxaa: true, vignette: true, grain: true, ao: "full", traa: true },
@@ -126,7 +140,7 @@ export const TIER_TABLE: Record<Tier, TierSpec> = {
  * ones this device's measured GPU headroom pays for (probe.ts). Each takes High's value for its
  * settings and never lowers a tier that has more. The tier's resolution and GPU budget stay its own.
  */
-export const EXTRAS = ["detail4", "normals", "atmospheres", "water2", "shadows", "grass", "props", "ao"] as const;
+export const EXTRAS = ["detail4", "normals", "atmospheres", "water2", "shadows", "grass", "props", "ao", "meadow", "clouds2"] as const;
 export type Extra = (typeof EXTRAS)[number];
 
 export function isExtra(v: unknown): v is Extra {
@@ -162,6 +176,7 @@ export function withExtras(spec: TierSpec, extras: Iterable<Extra>): TierSpec {
         s.grass.count = Math.max(s.grass.count, hi.grass.count);
         s.grass.radius = Math.max(s.grass.radius, hi.grass.radius);
         s.grass.segments = Math.max(s.grass.segments, hi.grass.segments) as TierSpec["grass"]["segments"];
+        // clumps stay the tier's: the "meadow" extra raises them
         break;
       case "props":
         s.props.fullTo = Math.max(s.props.fullTo, hi.props.fullTo);
@@ -169,6 +184,12 @@ export function withExtras(spec: TierSpec, extras: Iterable<Extra>): TierSpec {
         break;
       case "ao": // GTAO at half resolution (WebGPU only, resolveSettings)
         if (s.post.ao === "off") s.post.ao = hi.post.ao;
+        break;
+      case "meadow": // full clumps (5 curved blades, a 6-point head) near the camera; Low's single blades stay
+        if (s.grass.clumps > 0) s.grass.clumps = Math.max(s.grass.clumps, hi.grass.clumps) as TierSpec["grass"]["clumps"];
+        break;
+      case "clouds2": // the lit two-octave clouds
+        if (s.clouds > 0) s.clouds = Math.max(s.clouds, hi.clouds) as TierSpec["clouds"];
         break;
     }
   }
@@ -323,6 +344,11 @@ export function resolveSettings(tier: Tier, auto: boolean, webgpu: boolean, stor
   on.grain &&= spec.post.grain;
   on.vignette &&= spec.post.vignette;
   on.detail &&= spec.terrain.detailLayers > 0;
+  on.meadow &&= spec.grass.clumps > 0 && on.grass;
+  on.clouds &&= spec.clouds > 0 && on.sky;
+  // The per-pixel ground layers read the detail noise the material already samples.
+  on.terrainfx &&= on.detail;
+  on.waterfx &&= spec.water > 0 && on.water;
   // WebGPU-only extras on High/Ultra (SPEC §7.1, tech-facts §2).
   on.ao &&= webgpu && (t >= 2 || list.includes("ao")) && spec.post.ao !== "off";
   on.traa &&= webgpu && t >= 2 && spec.post.traa;

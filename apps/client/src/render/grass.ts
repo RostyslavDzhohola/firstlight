@@ -17,6 +17,7 @@ import { padGrassMask } from "../world/palette.ts";
 import { atmo } from "./atmosphere.ts";
 import type { BodyLook } from "./looks.ts";
 import type { ResolvedSettings } from "./quality.ts";
+import { MEADOW_NEAR, meadowCellFields, meadowClumpGeometry, meadowGrassMaterial, meadowMeta } from "./meadow.ts";
 
 export const grassUniforms = {
   radius: uniform(40).setGroup(renderGroup),
@@ -53,6 +54,11 @@ interface Cell {
   mesh: THREE.Mesh;
   geo: THREE.InstancedBufferGeometry;
   attr: THREE.InstancedBufferAttribute;
+  /** Meadow clumps only: per-clump data, the far (lite) geometry sharing the instance buffers, and
+   *  which of the two the mesh draws (0 near, 1 far). */
+  meta: THREE.InstancedBufferAttribute | null;
+  geoLite: THREE.InstancedBufferGeometry | null;
+  band: 0 | 1;
   center: THREE.Vector3;
   radius: number;
   inUse: boolean;
@@ -122,8 +128,11 @@ function grassMaterial(): THREE.MeshLambertNodeMaterial {
 }
 
 let sharedMaterial: THREE.MeshLambertNodeMaterial | null = null;
-/** One grass material for the app's lifetime (all bodies; values come from shared uniforms). */
-function grassMaterialShared(): THREE.MeshLambertNodeMaterial {
+let sharedMeadow: THREE.MeshLambertNodeMaterial | null = null;
+/** One grass material per kind for the app's lifetime (all bodies; values come from shared uniforms):
+ *  the single blades (Low, `?nomeadow`) or the meadow clumps (meadow.ts). */
+function grassMaterialShared(clumps: boolean): THREE.MeshLambertNodeMaterial {
+  if (clumps) return (sharedMeadow ??= meadowGrassMaterial(grassUniforms));
   sharedMaterial ??= grassMaterial();
   return sharedMaterial;
 }
@@ -132,6 +141,9 @@ export class GrassSystem {
   readonly group = new THREE.Group();
   private material: THREE.MeshLambertNodeMaterial | null = null;
   private blade: THREE.BufferGeometry | null = null;
+  private bladeLite: THREE.BufferGeometry | null = null;
+  /** 0 single blades, 1 lite clumps everywhere, 2 full clumps near the camera and lite ones beyond (quality.ts). */
+  private clumps: 0 | 1 | 2 = 0;
   private segments = 0;
   private cellQuads = 4;
   private density = 16;
@@ -140,6 +152,8 @@ export class GrassSystem {
   private receiveShadow = false;
   private readonly cells = new Map<string, Cell>();
   private readonly free: Cell[] = [];
+  private readonly cellCorners: number[] = new Array<number>(12).fill(0);
+  private readonly cellFields = new Float32Array(8);
   private lastUpdate = 0;
   private readonly lastPos = new THREE.Vector3(1e9, 0, 0);
   private wanted: { key: string; chunk: GrassChunk; ca: number; cb: number; d: number }[] = [];
@@ -147,7 +161,8 @@ export class GrassSystem {
   private rescan = false;
   blades = 0;
 
-  /** @param pads landing pads: no blade roots on their stone discs (the per-vertex weight alone
+  /** @param meadow false keeps the single blades whatever the tier.
+   *  @param pads landing pads: no blade roots on their stone discs (the per-vertex weight alone
    *  bleeds into the disc through interpolation).
    *  @param mask optional per-blade factor 0..1 at a planet point (the Portus town's paving and
    *  footprints): a blade root survives only where it is above 0.5. */
@@ -156,6 +171,8 @@ export class GrassSystem {
     private readonly quadsPerFace: number,
     private readonly pads: readonly Dir[] = [],
     private readonly mask: ((x: number, y: number, z: number) => number) | null = null,
+    /** False: single blades whatever the tier (the hub's lawns). */
+    private readonly meadow = true,
   ) {
     this.group.name = "grass";
   }
@@ -166,14 +183,16 @@ export class GrassSystem {
     const radius = s.grass.radius;
     grassUniforms.radius.value = radius;
     const density = s.grass.count / (Math.PI * radius * radius);
+    const clumps = s.on.meadow && this.meadow ? s.grass.clumps : 0;
     this.receiveShadow = s.on.shadows && s.shadows.mode === "map";
     // Largest quad (at a face centre, quads are 2R/n wide). Small quads (Portus ~2.3 m) or a large
     // radius → 8×8-quad cells, else 4×4: keeps grass at a few dozen draws.
     const quad = (2 * this.radiusOfBody) / this.quadsPerFace;
     const cellQuads = radius > 45 || quad < 3 ? 8 : 4;
     const capacity = Math.ceil(density * (cellQuads * quad) ** 2 * 1.1);
-    if (s.grass.segments !== this.segments || cellQuads !== this.cellQuads || capacity > this.capacity) {
+    if (s.grass.segments !== this.segments || cellQuads !== this.cellQuads || capacity > this.capacity || clumps !== this.clumps) {
       this.density = density;
+      this.clumps = clumps;
       this.rebuildAll(s.grass.segments, cellQuads, capacity);
       this.lastPos.set(1e9, 0, 0);
     } else if (Math.abs(density - this.density) > 1e-6) {
@@ -190,6 +209,7 @@ export class GrassSystem {
     for (const c of [...this.cells.values(), ...this.free]) {
       this.group.remove(c.mesh);
       c.geo.dispose();
+      c.geoLite?.dispose();
     }
     this.cells.clear();
     this.free.length = 0;
@@ -197,8 +217,11 @@ export class GrassSystem {
     this.segments = segments;
     this.cellQuads = cellQuads;
     this.capacity = capacity;
-    this.blade = bladeGeometry(segments);
-    this.material = grassMaterialShared();
+    // Clumps: level 1 draws the lite clump in every cell, level 2 the full one near the camera.
+    this.blade = this.clumps === 0 ? bladeGeometry(segments) : meadowClumpGeometry(this.clumps === 1);
+    this.bladeLite?.dispose();
+    this.bladeLite = this.clumps === 2 ? meadowClumpGeometry(true) : null;
+    this.material = grassMaterialShared(this.clumps > 0);
   }
 
   private acquire(): Cell {
@@ -209,23 +232,39 @@ export class GrassSystem {
     }
     const geo = new THREE.InstancedBufferGeometry();
     geo.index = this.blade!.index;
-    geo.setAttribute("position", this.blade!.getAttribute("position"));
+    for (const [name, a] of Object.entries(this.blade!.attributes)) geo.setAttribute(name, a);
     const attr = new THREE.InstancedBufferAttribute(new Float32Array(this.capacity * 4), 4);
     geo.setAttribute("iPos", attr);
     geo.instanceCount = 0;
+    let meta: THREE.InstancedBufferAttribute | null = null;
+    let geoLite: THREE.InstancedBufferGeometry | null = null;
+    if (this.clumps > 0) {
+      meta = new THREE.InstancedBufferAttribute(new Float32Array(this.capacity * 4), 4);
+      geo.setAttribute("iMeta", meta);
+    }
+    if (this.bladeLite && meta) {
+      geoLite = new THREE.InstancedBufferGeometry();
+      geoLite.index = this.bladeLite.index;
+      for (const [name, a] of Object.entries(this.bladeLite.attributes)) geoLite.setAttribute(name, a);
+      geoLite.setAttribute("iPos", attr);
+      geoLite.setAttribute("iMeta", meta);
+      geoLite.instanceCount = 0;
+      geoLite.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1);
+    }
     const mesh = new THREE.Mesh(geo, this.material!);
     mesh.matrixAutoUpdate = false;
     mesh.castShadow = false;
     mesh.receiveShadow = this.receiveShadow;
     mesh.name = "grassCell";
     geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1);
-    return { key: "", mesh, geo, attr, center: new THREE.Vector3(), radius: 1, inUse: true };
+    return { key: "", mesh, geo, attr, meta, geoLite, band: 0, center: new THREE.Vector3(), radius: 1, inUse: true };
   }
 
   private release(c: Cell) {
     this.group.remove(c.mesh);
     c.inUse = false;
     c.geo.instanceCount = 0;
+    if (c.geoLite) c.geoLite.instanceCount = 0;
     this.free.push(c);
   }
 
@@ -259,7 +298,9 @@ export class GrassSystem {
             const reach = radius + this.cellQuads * 3.2;
             if (d < reach) {
               keep.add(key);
-              if (!this.cells.has(key)) this.wanted.push({ key, chunk: ch, ca, cb, d });
+              const have = this.cells.get(key);
+              if (!have) this.wanted.push({ key, chunk: ch, ca, cb, d });
+              else this.setBand(have, d);
             } else if (d < reach + 12 && this.cells.has(key)) {
               keep.add(key); // hysteresis
             }
@@ -281,12 +322,22 @@ export class GrassSystem {
       const c = this.acquire();
       c.key = w.key;
       this.fill(c, w.chunk, w.ca, w.cb);
+      this.setBand(c, w.d);
       this.cells.set(w.key, c);
       this.group.add(c.mesh);
     }
     let n = 0;
     for (const c of this.cells.values()) n += c.geo.instanceCount;
     this.blades = n;
+  }
+
+  /** Clump level 2: near cells draw the full clumps, far cells the lite ones (same instance data). */
+  private setBand(c: Cell, d: number) {
+    if (!c.geoLite) return;
+    const band = d < MEADOW_NEAR ? 0 : d > MEADOW_NEAR + 4 || c.band === 1 ? 1 : 0;
+    if (band === c.band && c.mesh.geometry === (band ? c.geoLite : c.geo)) return;
+    c.band = band;
+    c.mesh.geometry = band ? c.geoLite : c.geo;
   }
 
   /** The streamed chunks changed (one arrived): the next update scans for its cells at once. */
@@ -329,6 +380,14 @@ export class GrassSystem {
     const area = 0.5 * Math.sqrt(cxp * cxp + cyp * cyp + czp * czp);
     const target = Math.min(this.capacity, Math.round(this.density * area));
     const rand = mulberry32(hash4(ch.face * 4096 + ch.cx * 64 + ch.cy, ca, cb, 0x9a55));
+    // The region's slow fields at the cell's corners, once: each clump interpolates them.
+    if (c.meta) {
+      const k = this.cellCorners;
+      [p00, p10, p01, p11].forEach((pi, i) => {
+        k[i * 3] = P[pi]!; k[i * 3 + 1] = P[pi + 1]!; k[i * 3 + 2] = P[pi + 2]!;
+      });
+      meadowCellFields(k, this.cellFields);
+    }
     const arr = c.attr.array as Float32Array;
     let n = 0;
     let minx = Infinity, miny = Infinity, minz = Infinity, maxx = -Infinity, maxy = -Infinity, maxz = -Infinity;
@@ -365,6 +424,7 @@ export class GrassSystem {
       arr[o + 1] = y;
       arr[o + 2] = z;
       arr[o + 3] = Math.round(scale * 100) + Math.min(0.999, rand());
+      if (c.meta) meadowMeta(x, y, z, fx / q, fy / q, this.cellFields, rand(), rand(), c.meta.array as Float32Array, o);
       n++;
       if (x < minx) minx = x; if (y < miny) miny = y; if (z < minz) minz = z;
       if (x > maxx) maxx = x; if (y > maxy) maxy = y; if (z > maxz) maxz = z;
@@ -382,6 +442,16 @@ export class GrassSystem {
     }
     c.geo.boundingSphere!.center.copy(c.center);
     c.geo.boundingSphere!.radius = c.radius;
+    if (c.meta) {
+      c.meta.clearUpdateRanges();
+      c.meta.addUpdateRange(0, Math.max(4, n * 4));
+      c.meta.needsUpdate = true;
+    }
+    if (c.geoLite) {
+      c.geoLite.instanceCount = n;
+      c.geoLite.boundingSphere!.center.copy(c.center);
+      c.geoLite.boundingSphere!.radius = c.radius;
+    }
     c.mesh.visible = n > 0;
   }
 
@@ -394,10 +464,12 @@ export class GrassSystem {
     for (const c of [...this.cells.values(), ...this.free]) {
       this.group.remove(c.mesh);
       c.geo.dispose();
+      c.geoLite?.dispose();
     }
     this.cells.clear();
     this.free.length = 0;
     this.blade?.dispose();
+    this.bladeLite?.dispose();
     this.group.removeFromParent();
   }
 }

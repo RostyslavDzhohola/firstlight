@@ -20,6 +20,7 @@ import { SunLight } from "three/addons/lights/SunLight.js";
 import { SunLightNode } from "three/addons/lights/SunLightNode.js";
 import type { ResolvedSettings } from "./quality.ts";
 import { skyDir, type V3 } from "./sunFrame.ts";
+import type { WorldLook } from "./worldLooks.ts";
 
 const col = (hex = 0xffffff) => uniform(new THREE.Color(hex));
 
@@ -74,6 +75,15 @@ export const atmo = {
   wet: uniform(0).setGroup(renderGroup),
   /** Rain hitting water now 0..1 (ripples). */
   rain: uniform(0).setGroup(renderGroup),
+  // ---- the planets' graphics pass (D-gfx-worlds-1), per body from worldLooks.ts
+  /** Aerial perspective: far terrain drifts toward this colour before it fades into the horizon. */
+  aerial: col(0x6f9fe8).setGroup(renderGroup),
+  aerialAmt: uniform(0).setGroup(renderGroup),
+  /** Stars: the two ends of their colour range, how many (0..1) and how bright. */
+  starWarm: col(0xffebd1).setGroup(renderGroup),
+  starCool: col(0xbfd9ff).setGroup(renderGroup),
+  starDensity: uniform(0.5).setGroup(renderGroup),
+  starGain: uniform(1).setGroup(renderGroup),
 };
 
 /** Single-scattering radiance from the per-body sky-view LUT atlas (see skyLut.ts): two slices by
@@ -104,12 +114,13 @@ const starField = Fn(([dir]: [any]) => {
   const h = hash(seed);
   const j = vec3(hash(seed.add(1.7)), hash(seed.add(3.1)), hash(seed.add(5.3))).mul(0.6).add(0.2);
   const d = length(fract(p).sub(j));
-  const on = smoothstep(0.9955, 1.0, h);
+  // density 0.5 lights 0.45% of the cells (the look before per-body skies); 1 about three times as many.
+  const on = smoothstep(float(0.999).sub(atmo.starDensity.mul(0.007)), 1.0, h);
   const core = smoothstep(0.2, 0.0, d);
   const twinkle = sin(time.mul(2.7).add(h.mul(97.0))).mul(0.3).add(0.7);
   const above = smoothstep(0.02, 0.2, dot(dir, atmo.up));
-  const tint = mix(vec3(1.0, 0.92, 0.82), vec3(0.75, 0.85, 1.0), hash(seed.add(9.1)));
-  return tint.mul(on.mul(core).mul(twinkle).mul(above).mul(atmo.stars).mul(6.0));
+  const tint = mix(atmo.starWarm, atmo.starCool, hash(seed.add(9.1)));
+  return tint.mul(on.mul(core).mul(twinkle).mul(above).mul(atmo.stars).mul(atmo.starGain).mul(6.0));
 });
 
 /** Sky radiance (linear) towards a unit direction. `disc` adds the HDR sun disc. */
@@ -141,9 +152,13 @@ export const skyColor = Fn(([dir, disc]: [any, any]) => {
   return c;
 });
 
-/** Background node: the sky in the view direction (plus stars at night). */
-export function skyBackgroundNode(): THREE.Node {
-  return skyColor(positionWorldDirection, float(1)).add(starField(positionWorldDirection));
+/**
+ * Background node: the sky in the view direction (plus stars at night). `wrap` lays something over
+ * it (the cloud layer, clouds.ts): the clouds hide the stars and the sun disc behind them.
+ */
+export function skyBackgroundNode(wrap?: (dir: any, sky: any) => any): THREE.Node {
+  const sky = skyColor(positionWorldDirection, float(1)).add(starField(positionWorldDirection));
+  return wrap ? wrap(normalize(positionWorldDirection), sky) : sky;
 }
 
 /** Fog amount (0..1) for the current fragment. Exposed for custom materials (sky planets, particles). */
@@ -180,7 +195,13 @@ export function radialFogNode(): THREE.Node {
   return Fn(() => {
     const dir = normalize(positionWorld.sub(cameraPosition));
     const f = fogAmount();
-    return vec4(mix(output.rgb, fogColor(dir), f), output.a);
+    const haze: any = fogColor(dir);
+    // Aerial perspective: at middle distances the haze is the planet's own air colour (blue hills on
+    // Arcadia, violet on Hollowmere), lit like the sky; the farthest ground fades into the horizon.
+    const lum = dot(haze, vec3(0.2126, 0.7152, 0.0722));
+    const air = atmo.aerial.mul(lum.mul(1.35).add(0.02));
+    const c = mix(haze, air, atmo.aerialAmt.mul(float(1).sub(smoothstep(0.45, 0.96, f))));
+    return vec4(mix(output.rgb, c, f), output.a);
   })();
 }
 
@@ -209,6 +230,16 @@ export function applyLook(look: BodyLook, radius: number, waterLevel: number, s:
   atmo.inscatter.value = look.inscatter;
   atmo.fogHeight.value = s.fog.height ? 1 : 0;
   atmo.scatterMix.value = s.sky.scatterSteps[0] > 0 ? look.scatter.mix : 0;
+}
+
+/** Load a body's far haze and stars (worldLooks.ts) into the shared uniforms. */
+export function applyWorldAir(w: WorldLook, s: ResolvedSettings) {
+  atmo.aerial.value.setHex(w.aerial);
+  atmo.aerialAmt.value = s.on.aerial ? w.aerialAmount : 0;
+  atmo.starWarm.value.setHex(w.stars.warm);
+  atmo.starCool.value.setHex(w.stars.cool);
+  atmo.starDensity.value = w.stars.density;
+  atmo.starGain.value = w.stars.gain;
 }
 
 /**
