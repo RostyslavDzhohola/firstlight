@@ -22,7 +22,7 @@ describe("meadow clumps", () => {
   /** Clumps over forty 85 × 52 m fields spread across a planet, each with the slow fields of a cell round it. */
   function field(body: keyof typeof WORLD_LOOKS) {
     const look = WORLD_LOOKS[body].meadow;
-    const cell = new Float32Array(8);
+    const cell = new Float32Array(12);
     const a = new Float32Array(4), b = new Float32Array(4);
     let flowers = 0, dry = 0;
     const species = new Set<number>();

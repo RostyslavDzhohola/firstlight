@@ -153,7 +153,7 @@ export class GrassSystem {
   private readonly cells = new Map<string, Cell>();
   private readonly free: Cell[] = [];
   private readonly cellCorners: number[] = new Array<number>(12).fill(0);
-  private readonly cellFields = new Float32Array(8);
+  private readonly cellFields = new Float32Array(12);
   private lastUpdate = 0;
   private readonly lastPos = new THREE.Vector3(1e9, 0, 0);
   private wanted: { key: string; chunk: GrassChunk; ca: number; cb: number; d: number }[] = [];

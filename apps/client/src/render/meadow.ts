@@ -122,18 +122,20 @@ export function meadowClumpGeometry(lite: boolean): THREE.BufferGeometry {
 
 /**
  * What a grass cell works out once, at its four corners, for its clumps to interpolate (the slow
- * fields: the region's dryness, and which head species the drift here grows): 8 values, corner
- * order (0,0) (1,0) (0,1) (1,1).
+ * fields: the region's dryness, which head species grows here, and how thick the drift of heads
+ * is): 12 values, three per corner, corner order (0,0) (1,0) (0,1) (1,1). Neighbouring cells share
+ * corners, so the fields run across cell edges without a seam.
  */
 export type CellFields = Float32Array;
 const low = { dry: 0, deep: 0 };
 
-/** Fill `out` (8 floats) from the cell's corner points (planet space), in corner order. */
+/** Fill `out` (12 floats) from the cell's corner points (planet space), in corner order. */
 export function meadowCellFields(corners: readonly number[], out: CellFields): CellFields {
   for (let i = 0; i < 4; i++) {
     const x = corners[i * 3]!, y = corners[i * 3 + 1]!, z = corners[i * 3 + 2]!;
-    out[i * 2] = regionLow(x, y, z, low).dry;
-    out[i * 2 + 1] = valueNoise(x * 0.035 + 3.3, y * 0.035 + 8.8, z * 0.035 + 1.1);
+    out[i * 3] = regionLow(x, y, z, low).dry;
+    out[i * 3 + 1] = valueNoise(x * 0.035 + 3.3, y * 0.035 + 8.8, z * 0.035 + 1.1);
+    out[i * 3 + 2] = smooth01(0.42, 0.75, valueNoise(x * 0.09 + 17.3, y * 0.09 + 4.1, z * 0.09 + 9.7));
   }
   return out;
 }
@@ -143,17 +145,17 @@ export function meadowCellFields(corners: readonly number[], out: CellFields): C
  * `r` and `r2` uniform randoms): x = dryness 0..1 (the planet's dry regions and straw patches),
  * y = head (0 none, 1–3 a disc species, 4 the spike), z = a second random, w = 0. Heads grow in
  * drifts, one species per drift. `look`: the body's ground cover (default: the one
- * applyMeadowLook loaded). One noise tap per clump (the drift); the slow fields come from the cell.
- * Measured (one High chunk, 280k instances, a loaded M1): filling it took 5.4× the single blades'
- * time with two taps per clump.
+ * applyMeadowLook loaded). No noise per clump: every field comes from the cell's corners. Measured
+ * (one High chunk, 280k instances, a loaded M1, clumps against single blades in one process): the
+ * fill took 5.4× the blades' time with two noise taps per clump and 4.1× with one.
  */
-export function meadowMeta(x: number, y: number, z: number, u: number, v: number, cell: CellFields, r: number, r2: number, out: Float32Array, o: number, look: MeadowLook = cpuLook) {
+export function meadowMeta(_x: number, _y: number, _z: number, u: number, v: number, cell: CellFields, r: number, r2: number, out: Float32Array, o: number, look: MeadowLook = cpuLook) {
   const w00 = (1 - u) * (1 - v), w10 = u * (1 - v), w01 = (1 - u) * v, w11 = u * v;
-  const regionDry = cell[0]! * w00 + cell[2]! * w10 + cell[4]! * w01 + cell[6]! * w11;
-  const speciesField = cell[1]! * w00 + cell[3]! * w10 + cell[5]! * w01 + cell[7]! * w11;
+  const regionDry = cell[0]! * w00 + cell[3]! * w10 + cell[6]! * w01 + cell[9]! * w11;
+  const speciesField = cell[1]! * w00 + cell[4]! * w10 + cell[7]! * w01 + cell[10]! * w11;
+  const drift = cell[2]! * w00 + cell[5]! * w10 + cell[8]! * w01 + cell[11]! * w11;
   // Clump to clump the dryness scatters a little (a random, not a third noise tap: the fill is per clump).
   const dry = Math.min(1, Math.max(0, regionDry + look.dryBias + (r2 - 0.5) * 0.3));
-  const drift = smooth01(0.42, 0.75, valueNoise(x * 0.09 + 17.3, y * 0.09 + 4.1, z * 0.09 + 9.7));
   const flowers = r < drift * look.flowerShare + look.flowerBase;
   const sp = Math.min(3, Math.floor(speciesField * 4.6 + (r2 - 0.5) * 0.8));
   out[o] = dry;
