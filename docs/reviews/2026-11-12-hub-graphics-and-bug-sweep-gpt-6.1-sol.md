@@ -21,3 +21,10 @@ reasoning effort high, Standard tier; no tests run. No blockers in either lane.
 | B2 | should-fix | `apps/client/src/game/PlayerController.ts:576` | The camera's shoulder switch advances a fixed 0.08 per rendered frame: 0.42 s at 60 fps, 6.25 s at 4 fps, with further shoulder decisions held until it settles. |
 
 Verdict (both): request changes. Decisions and fixes are recorded below this line as they land.
+
+### Fixes
+
+| Finding | Commit | Test (fails before the fix) |
+|---|---|---|
+| B1: a reborn trainee finishes at 40 XP, level 1, saving locked | `2e25a3ba` (D-fixes-4: the completion tops a level-1 character up to the tutorial's 50 XP; once per account, so no farming) | `apps/server/test/onboarding.test.ts` "dying mid-tutorial (D-fixes-2)": now runs on through completion and asserts 50 XP, level ≥ `OTP_MIN_LEVEL`, the done flag, and that a second death brings back neither the tutorial nor XP (timed out at "level 2" before); `completionXp` unit test |
+| B2: the shoulder swap moves 0.08 per frame (6.25 s at 4 fps) | `d2527cd5` (D-fixes-5: `placeCamera(camera, dt)`, swap 4.8 units/s, lens ease-out 15 m/s, `easeShare` for every `min(1, k·dt)` smoothing) | `apps/client/src/game/PlayerController.test.ts` "the camera and the controller ease by time, not by frames (review B2)": swap there and back as a side wall comes and goes, and the ease-out after a wall behind goes, each at 4 and 60 fps (the 4 fps cases failed before); running and turning alike at 4 and 60 fps; `frameClock.test.ts` "easeShare" |
