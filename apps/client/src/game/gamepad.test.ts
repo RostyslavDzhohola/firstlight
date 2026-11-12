@@ -588,9 +588,11 @@ describe("Polling path allocations (review #11)", () => {
     p.press(BTN.A);
     r.poll();
     const st = (r.src as unknown as { state: Map<number, { prev: boolean[]; cur: boolean[] }> }).state.get(0)!;
-    const bufs = new Set([st.prev, st.cur]);
-    for (let i = 0; i < 5; i++) r.poll();
-    expect(new Set([st.prev, st.cur])).toEqual(bufs);
+    const bufs = [st.prev, st.cur];
+    for (let i = 0; i < 5; i++) {
+      r.poll();
+      expect(bufs.includes(st.prev) && bufs.includes(st.cur), `poll ${i}`).toBe(true);
+    }
     r.dispose();
   });
 });
