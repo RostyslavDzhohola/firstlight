@@ -13,7 +13,7 @@ import { el, icon, sprite, uiRoot } from "./dom.ts";
 import { formatDamage, isLowHp, parsePrompt, shownItem, slotView, type DamageKind, type SlotView } from "./hudFormat.ts";
 import { installSprites, portraitSprite } from "./sprites.ts";
 import { uiSettings, type UiSettings } from "./uiSettings.ts";
-import { MissionsPanel } from "./missionsPanel.ts";
+import { MissionsPanel, type MissionsMore } from "./missionsPanel.ts";
 import { showSubtitle } from "./subtitle.ts";
 import { showCharacterPick, type CharacterChoice, type CharacterPickOptions } from "./characterPick.ts";
 import { showDeath, type DeathInfo } from "./death.ts";
@@ -649,8 +649,9 @@ export class Hud {
 
   // ---------------------------------------------------------------------------------------------- missions (quests lane)
 
-  setMissions(lines: MissionLine[], header = "") {
-    this.missions.set(lines, header);
+  /** `more`: open missions not listed, as a "+N more (J)" line that runs `open` (the journal). */
+  setMissions(lines: MissionLine[], header = "", more: MissionsMore | null = null) {
+    this.missions.set(lines, header, more);
   }
 
   // ---------------------------------------------------------------------------------------------- full-screen flows

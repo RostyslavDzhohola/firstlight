@@ -6,10 +6,17 @@ import { el } from "./dom.ts";
 import type { MissionLine } from "./hud.ts";
 import { uiSettings } from "./uiSettings.ts";
 
+/** The "+N more (J)" line: how many open missions aren't listed, and what a click on it does (open the journal). */
+export interface MissionsMore {
+  count: number;
+  open: () => void;
+}
+
 export class MissionsPanel {
   readonly root: HTMLElement;
   private lines: MissionLine[] = [];
   private header = "";
+  private more: MissionsMore | null = null;
   private key = "";
   private readonly off: () => void;
 
@@ -21,8 +28,9 @@ export class MissionsPanel {
     });
   }
 
-  set(lines: MissionLine[], header = "") {
-    const key = JSON.stringify([lines, header]);
+  set(lines: MissionLine[], header = "", more: MissionsMore | null = null) {
+    const key = JSON.stringify([lines, header, more?.count ?? 0]);
+    this.more = more;
     if (key === this.key) return;
     this.key = key;
     this.lines = lines;
@@ -60,6 +68,14 @@ export class MissionsPanel {
       el("b", "", d, m.title);
       el("span", "", d, m.detail);
       el("span", "fl-mission__r num", row, m.progress);
+    }
+    if (this.more && this.more.count > 0) {
+      const more = el("button", "fl-missions__more hit-area", this.root);
+      more.type = "button";
+      more.dataset.e2e = "missions-more";
+      more.append(`+${this.more.count} more `);
+      el("span", "fl-key", more, "J");
+      more.onclick = () => this.more?.open();
     }
   }
 }

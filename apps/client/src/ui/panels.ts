@@ -6,11 +6,12 @@ import "./quests.css";
 import type { BodyId } from "@firstlight/shared";
 import { COSMETIC_BY_ID, COSMETIC_SLOTS, RARITY_STYLE, isExtraCosmetic, itemName } from "@firstlight/shared/content/items";
 import { MEDALS } from "@firstlight/shared/content/medals";
-import { GUIDES, MISSION_BY_ID, MISSIONS, missionsFrom, missionsOn, trackedMission, type MissionDef } from "@firstlight/shared/content/missions";
+import { GUIDES, MISSION_BY_ID, MISSIONS, missionsFrom, missionsOn, type MissionDef } from "@firstlight/shared/content/missions";
+import { trackerRows } from "./trackerRows.ts";
 import { GLEAMS, gleamsWon } from "@firstlight/shared/content/gleams";
 import type { InvItem } from "@firstlight/shared/net/protocol";
 import type { Game } from "../game/Game.ts";
-import type { Hud, MissionLine, YouPlus } from "./hud.ts";
+import type { Hud, YouPlus } from "./hud.ts";
 import { overlayClosed, overlayOpened } from "./dom.ts";
 import { parseSkyArgs, SKY_HELP } from "./skyCommand.ts";
 
@@ -348,36 +349,30 @@ export class KeypadPanel extends Panel {
  */
 export class MissionTracker {
   private last = "";
+  /** Open mission ids at the last update (null before the first): a new one is the mission just taken. */
+  private static openIds: Set<string> | null = null;
+  /** The mission the player took most recently (survives travel: one tracker per body). */
+  private static recent: string | null = null;
 
-  constructor(private readonly hud: Pick<Hud, "setMissions"> | HTMLElement) {}
+  constructor(
+    private readonly hud: Pick<Hud, "setMissions"> | HTMLElement,
+    private readonly onMore: () => void = () => {},
+  ) {}
 
-  /** `body`: where the player is (the tracked mission is the first open one given out here). */
-  update(you: YouPlus | null, body: BodyId) {
+  /** `body`: where the player is; `trial`: the mission of the running trial attempt, if any (trialState.ts). */
+  update(you: YouPlus | null, body: BodyId, trial: string | null = null) {
     const all = you?.missions ?? [];
-    const key = JSON.stringify([all, body]);
+    if (you) {
+      const open = new Set(all.filter((m) => !m.done).map((m) => m.id));
+      const prev = MissionTracker.openIds;
+      if (prev) for (const id of open) if (!prev.has(id)) MissionTracker.recent = id;
+      MissionTracker.openIds = open;
+    }
+    const key = JSON.stringify([all, body, trial, MissionTracker.recent]);
     if (key === this.last || this.hud instanceof HTMLElement) return;
     this.last = key;
-    // The tracked mission (the one the mission pointer follows: missions.ts trackedMission), the
-    // other open ones, then the ones done this life; at most three lines.
-    const tracked = trackedMission(all, body);
-    const rows = [...(tracked ? [tracked] : []), ...all.filter((m) => !m.done && m !== tracked), ...all.filter((m) => m.done)].slice(0, 3);
-    const lines: MissionLine[] = [];
-    let planet = "";
-    let guide = "";
-    rows.forEach((m, i) => {
-      const def = MISSION_BY_ID.get(m.id);
-      if (!def) return;
-      planet ||= def.body[0]!.toUpperCase() + def.body.slice(1);
-      guide ||= def.guide;
-      lines.push({
-        id: m.id,
-        title: def.name,
-        detail: def.objective,
-        progress: m.done ? "Done" : `${m.progress}/${m.goal}`,
-        state: m.done ? "done" : i === 0 ? "tracked" : "open",
-      });
-    });
-    this.hud.setMissions(lines, [guide, planet].filter(Boolean).join(" · "));
+    const rows = trackerRows(all, body, { trial, recent: MissionTracker.recent });
+    this.hud.setMissions(rows.lines, rows.header, rows.more ? { count: rows.more, open: this.onMore } : null);
   }
 
   dispose() {

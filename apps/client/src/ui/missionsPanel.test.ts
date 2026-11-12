@@ -71,4 +71,15 @@ describe("missions panel (#3)", () => {
     expect(panel.root.hidden).toBe(false);
     expect(rows()).toBe(1);
   });
+
+  it("a +N more line opens the journal (D-polish-ux-1)", () => {
+    let opened = 0;
+    panel.set(LINES, "2 open", { count: 2, open: () => opened++ });
+    const more = panel.root.querySelector<HTMLButtonElement>(".fl-missions__more")!;
+    expect(more.textContent).toContain("+2 more");
+    more.click();
+    expect(opened).toBe(1);
+    panel.set(LINES, "2 open");
+    expect(panel.root.querySelector(".fl-missions__more")).toBeNull();
+  });
 });
