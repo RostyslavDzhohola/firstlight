@@ -756,7 +756,7 @@ room for three or four fights with L12–18 Oversight on the open flats. Tests s
 
 ### 5.1 The Three Gleams (the hunt, D-hunt-1, D-hunt-2)
 
-Sela Marchbank (the lamp-keeper of Portus Plaza, south-east of the pad) gives the three trials T1–T3 above, in
+Sela Marchbank (the lamp-keeper of Portus Plaza, on its west side between the pad and the Hall of Firsts) gives the three trials T1–T3 above, in
 any order; the journal and her panel track them. A gleam is won by completing its trial. With all three won
 in one life, E at the **Gleam Vault** beside her pays, once per life: the **Gleamweave Cape** (Legendary cape,
 can't be sold), **600 coins**, the medal **The Three Gleams** (title **Gleamkeeper**, medal 21) and, for the

@@ -878,7 +878,7 @@ export class QuestSystem implements RoomSystem {
       life.gleamVault = Date.now();
       a.char.coins += GLEAMS.reward.coins;
       if (eligible) {
-        this.award(a, GLEAMS.medal, events);
+        this.award(a, "three_gleams", events); // GLEAMS.medal
         if (!a.identity.loadtest && !a.identity.test && !life.unofficial) first = engrave(GLEAMS.firsts, a.identity.userId, a.identity.name, events);
       }
     });

@@ -54,6 +54,7 @@ describe("missions (content.md §5)", () => {
     }
     expect(WORLD_OBJECT_BY_ID.get(GLEAMS.curator.id)?.body).toBe("portus");
     expect(WORLD_OBJECT_BY_ID.get(GLEAMS.vault)?.body).toBe("portus");
+    expect(GLEAMS.medal).toBe("three_gleams"); // QuestSystem.openVault awards it by this literal
     expect(MEDAL_BY_ID.get(GLEAMS.medal)?.title).toBe("Gleamkeeper");
     expect(PLAQUES.some((p) => p.id === GLEAMS.firsts)).toBe(true);
     for (const it of GLEAMS.reward.items) expect(isEggItem(it), it.id).toBe(true); // once per life: unsellable
