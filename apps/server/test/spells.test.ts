@@ -149,6 +149,37 @@ describe("spellbook: gates, aether and cooldowns", () => {
     expect(h.you!.aether).toBeGreaterThan(b.aether + AETHER.regenPerS * 0.8);
   }, SLOW);
 
+  it("numbered casts are answered by number: a refusal carries the cast's `req`, and `you.spells.req` says which casts the state includes (review 5)", async () => {
+    const pad = nearPad("arcadia", 0, 2);
+    const a = await adminBot(game, rooms, "numbered", "arcadia", pad, 9);
+    const h = listen(a);
+    const refusals: { reason: string; req?: number }[] = [];
+    a.onMessage("denied", (m: { action: string; reason: string; req?: number }) => {
+      if (m.action === "cast") refusals.push({ reason: m.reason, ...(m.req !== undefined ? { req: m.req } : {}) });
+    });
+    await refill(a, h);
+    expect(h.you!.req).toBeUndefined();
+    const d = dirTo(pad, offset(pad, 5, 0, R));
+    // Q then F on the pad (a safe zone), as a client sends them: two refusals, each with its number.
+    a.send("cast", { spell: "skipstep", dx: d[0], dy: d[1], dz: d[2], req: 1 });
+    a.send("cast", { spell: "frostbloom", dx: d[0], dy: d[1], dz: d[2], req: 2 });
+    await until("both refused", () => refusals.length === 2);
+    expect(refusals).toEqual([{ reason: "safe zone", req: 1 }, { reason: "safe zone", req: 2 }]);
+    // An unnumbered cast (an agent, an older client) is refused as before, with no number.
+    cast(a, "glasswing", d);
+    await until("third refusal", () => refusals.length === 3);
+    expect(refusals[2]).toEqual({ reason: "safe zone" });
+    // Out in the open the cast lands, and the state that follows names it.
+    const base = openSpotOutside("arcadia", 14);
+    a.send("admin", { cmd: "teleport", args: { x: base[0], y: base[1], z: base[2] } });
+    await until("out in the open", () => flat(pos(a), base) < 2 && !serverRoom(a).safeNow(actor(a), Date.now()));
+    await sleep(1000); // a fresh rate window
+    a.send("cast", { spell: "glasswing", dx: d[0], dy: d[1], dz: d[2], req: 7 });
+    await until("the state includes cast 7", () => h.you?.req === 7);
+    expect(h.you!.aether).toBeLessThan(AETHER.max);
+    expect(h.you!.ready[index("glasswing")]).toBeGreaterThan(0);
+  }, SLOW);
+
   it("safe zones refuse every spell (nothing spent); the game event bus hears a cast; casts are rate-limited", async () => {
     const pad = nearPad("arcadia", 0, 2);
     const a = await adminBot(game, rooms, "padded", "arcadia", pad, 9);

@@ -81,6 +81,7 @@ const castSchema = z.object({
   tx: finite.optional(),
   ty: finite.optional(),
   tz: finite.optional(),
+  req: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
 });
 
 let starSeq = 1;
@@ -98,6 +99,8 @@ export class SpellSystem implements RoomSystem {
   readonly wards = new Map<string, Ward>();
   /** Stars on their way down. */
   readonly stars: Star[] = [];
+  /** Session id → the last numbered cast (`cast.req`) dealt with, cast or refused (review 5). */
+  private readonly handled = new Map<string, number>();
   private lastPrune = 0;
 
   constructor(room: BodyRoom) {
@@ -120,12 +123,15 @@ export class SpellSystem implements RoomSystem {
     const now = Date.now();
     const b = this.book(a, now);
     const w = this.wards.get(a.id);
+    const req = this.handled.get(a.id);
     you.spells = {
       aether: Math.round(aetherAt(b, now) * 10) / 10,
       t: now,
       regenAt: b.regenAt,
       ready: b.ready.map((r) => (r > now ? r : 0)),
       ...(w && w.until > now ? { ward: { hp: Math.round(w.hp), max: w.max, until: w.until } } : {}),
+      // Which of the client's casts this state includes: it shows the later ones on top of it.
+      ...(req !== undefined ? { req } : {}),
     };
   }
 
@@ -152,7 +158,9 @@ export class SpellSystem implements RoomSystem {
     const a = this.room.actors.get(c.sessionId);
     const def = SPELL_BY_ID.get(m.spell);
     if (!a || !def) return;
-    const deny = (reason: string) => void c.send("denied", { action: "cast", reason });
+    // A numbered cast is answered by number: the refusal carries it, and so does the next `you`.
+    if (m.req !== undefined) this.handled.set(a.id, m.req);
+    const deny = (reason: string) => void c.send("denied", { action: "cast", reason, ...(m.req !== undefined ? { req: m.req } : {}) });
     const now = Date.now();
     const b = this.book(a, now);
     const no = this.refusal(a, def, b, now);
@@ -405,11 +413,13 @@ export class SpellSystem implements RoomSystem {
 
   onPlayerLeave(sessionId: string) {
     this.wards.delete(sessionId);
+    this.handled.delete(sessionId);
   }
 
   dispose() {
     this.stars.length = 0;
     this.wards.clear();
+    this.handled.clear();
     if (this.room.host) this.room.host.wards = undefined;
   }
 }

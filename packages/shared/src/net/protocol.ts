@@ -154,7 +154,7 @@ export type ClientMessages = {
   train: { ox: number; oy: number; oz: number; dx: number; dy: number; dz: number };
   /** Onboarding: skip it (no more XP, no Spark medal; it never comes back). */
   onboarding: { action: "skip" };
-  /** Cast a spell from the spellbook (content/spells.ts; at most 5 a second). Refusals answer `denied {action: "cast", reason}`. */
+  /** Cast a spell from the spellbook (content/spells.ts; at most 5 a second). Refusals answer `denied {action: "cast", reason, req?}`. */
   cast: CastMsg;
 };
 
@@ -182,6 +182,12 @@ export interface CastMsg {
   tx?: number;
   ty?: number;
   tz?: number;
+  /**
+   * The client's own number for this cast (a non-negative integer that rises with every cast of the
+   * session). A refusal carries it back (`denied.req`) and `you.spells.req` is the last one dealt
+   * with, so a client with several casts in flight knows which answer is whose.
+   */
+  req?: number;
 }
 
 /**
@@ -220,7 +226,8 @@ export type ServerMessages = {
   /** A melee swing (animation and sound for everyone nearby). */
   swing: { by: string; weapon: number; heavy: boolean; hits: number };
   /** The server refused an action (`reason` is short and human-readable). */
-  denied: { action: string; reason: string };
+  /** A request was refused. `req`: the number a `cast` was sent with, when it had one. */
+  denied: { action: string; reason: string; req?: number };
   /** Admins: the real character is saved and may move into the sandbox now (join it through /api/play with `sandbox`). */
   sandbox: { home: BodyId };
   /** To the attacker only: a hit landed on an NPC that took no damage (spawning, evading, a shield). */

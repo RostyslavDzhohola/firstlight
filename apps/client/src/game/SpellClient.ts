@@ -61,10 +61,11 @@ export class SpellClient implements ClientSystem {
       if (typeof off === "function") this.offs.push(off as () => void);
     };
     on("you", (m: YouState & { level: number }) => this.book.setYou(m.spells, m.level));
-    on("denied", (m: { action: string; reason: string }) => {
+    on("denied", (m: { action: string; reason: string; req?: number }) => {
       if (m.action !== "cast") return;
-      this.book.refused(this.serverNow());
-      const s = this.lastCast;
+      // The refusal names its cast (`req`): that prediction goes, any other in flight stays.
+      const id = this.book.refused(this.serverNow(), m.req);
+      const s = id ? SPELLS[SPELL_INDEX.get(id)!]! : this.lastCast;
       if (s) this.bar.pulse(SPELL_INDEX.get(s.id)!, "deny");
       this.say(castDeniedText(m.reason, s ?? undefined));
     });
@@ -121,9 +122,9 @@ export class SpellClient implements ClientSystem {
       msg.ty = t[1];
       msg.tz = t[2];
     }
+    msg.req = this.book.predict(id, now);
     room.send("cast", msg);
     this.lastCast = s;
-    this.book.predict(id, now);
     this.bar.pulse(index, "cast");
     g.self?.trigger("cast");
     return null;

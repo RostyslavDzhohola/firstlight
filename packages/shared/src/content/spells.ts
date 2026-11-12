@@ -95,6 +95,11 @@ export interface SpellsYou {
   ready: number[];
   /** A Glasswing Ward that is up: shell HP left and when it ends. */
   ward?: { hp: number; max: number; until: number };
+  /**
+   * The last of this session's numbered casts (`cast.req`) the server has dealt with, cast or
+   * refused: this state includes it and every one before it. Absent until a numbered cast arrives.
+   */
+  req?: number;
 }
 
 /** Aether at `now` from a stored value: it refills from max(t, regenAt) at AETHER.regenPerS up to the max. */
