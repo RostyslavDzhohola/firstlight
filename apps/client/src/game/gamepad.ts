@@ -5,7 +5,7 @@
 // a pad is connected; a keyboard-and-mouse player pays nothing.
 
 import type { Input } from "./input.ts";
-import { BTN, hotbarStep, lookFromStick, PAD_LAYOUT, padFamily, SELECT_HOLD_MS, shapeStick, TRIGGER_ON, type Btn, type PadAction, type PadFamily, type StickTuning } from "./padMapping.ts";
+import { BTN, hotbarStep, lookFromStick, PAD_LAYOUT, padFamily, SELECT_HOLD_MS, shapeStick, TRIGGER_OFF, TRIGGER_ON, type Btn, type PadAction, type PadFamily, type StickTuning } from "./padMapping.ts";
 import type { Dir, FocusNav } from "../ui/focusNav.ts";
 
 export interface PadSettings extends StickTuning {
@@ -49,10 +49,11 @@ const ACTIVE_STICK = 0.25;
 
 const SOURCE = "pad";
 
-function pressedOf(p: PadLike, b: number): boolean {
+/** A button is down; triggers press above TRIGGER_ON and let go below TRIGGER_OFF (`was`: down last poll). */
+export function pressedOf(p: PadLike, b: number, was = false): boolean {
   const x = p.buttons[b];
   if (!x) return false;
-  return b === BTN.LT || b === BTN.RT ? x.value > TRIGGER_ON || (x.pressed && x.value === 0) : x.pressed;
+  return b === BTN.LT || b === BTN.RT ? x.value > (was ? TRIGGER_OFF : TRIGGER_ON) || (x.pressed && x.value === 0) : x.pressed;
 }
 
 /** What one pad holds: its buttons last poll, the keys it sent down, its sprint latch and Select. */
@@ -154,7 +155,7 @@ export class GamepadSource {
       const was = st.prev;
       const now2: boolean[] = [];
       for (let b = 0; b < Math.min(17, p.buttons.length); b++) {
-        const on = pressedOf(p, b);
+        const on = pressedOf(p, b, !!was[b]);
         now2[b] = on;
         if (on !== !!was[b]) edges.push({ pad: p, b: b as Btn, down: on });
         if (on && !was[b]) used = p; // a fresh press: a trigger still held from before doesn't claim the device back

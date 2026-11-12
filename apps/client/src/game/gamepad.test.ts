@@ -502,3 +502,31 @@ describe("Focus and visibility (review #1)", () => {
     expect(input.focused).toBe(true);
   });
 });
+
+describe("Trigger hysteresis (review #5)", () => {
+  it("presses above the press threshold, lets go only below the release one: noise near it doesn't flutter", () => {
+    const r = rig();
+    const p = pad();
+    r.pads.push(p);
+    const rt = (v: number) => (p.buttons as { pressed: boolean; value: number }[])[BTN.RT] = { pressed: v > 0.1, value: v };
+    rt(0.3);
+    r.poll();
+    expect(r.input.lmb).toBe(false); // under the press threshold
+    rt(0.4);
+    r.poll();
+    expect(r.input.lmb).toBe(true);
+    let presses = 0;
+    for (const v of [0.32, 0.38, 0.3, 0.37, 0.26]) {
+      r.frame();
+      rt(v);
+      r.poll();
+      if (r.input.lmbPressed) presses++;
+      expect(r.input.lmb, `at ${v}`).toBe(true);
+    }
+    expect(presses).toBe(0);
+    rt(0.15);
+    r.poll();
+    expect(r.input.lmb).toBe(false);
+    r.dispose();
+  });
+});

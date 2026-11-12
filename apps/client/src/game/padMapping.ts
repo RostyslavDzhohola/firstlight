@@ -64,6 +64,8 @@ export const PAD_LAYOUT: ReadonlyMap<Btn, PadAction> = new Map<Btn, PadAction>([
 
 /** Triggers count as pressed past this (they are analog 0..1). */
 export const TRIGGER_ON = 0.35;
+/** A pressed trigger counts as let go only below this (hysteresis: noise near TRIGGER_ON doesn't flutter, review #5). */
+export const TRIGGER_OFF = 0.2;
 /** Select held this long peeks the players list instead of opening the map. */
 export const SELECT_HOLD_MS = 400;
 
