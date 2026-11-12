@@ -20,6 +20,7 @@ import { banKey, directRequestIp, proxiedRequestIp } from "./ip.ts";
 import { botSecret, checkToolSecret } from "./loadtest.ts";
 import { botBudget } from "../world/botBudget.ts";
 import { createNameLimits, NAME_LIMIT_MESSAGE } from "./nameLimits.ts";
+import { WindowLimiter } from "./limiter.ts";
 
 /** mission_state_json → `life.playMs` (0 for older rows without per-life progress). */
 function lifePlayMs(ms: unknown): number {
@@ -255,27 +256,30 @@ export function claimTokenStrong(token: string): boolean {
   return token.length >= 43 && new Set(token).size >= 12;
 }
 
-/** Admin-claim attempts: per client IP and overall, counted before any comparison (D-admin-2). */
+/**
+ * Admin-claim attempts: per client IP and overall, counted before any comparison (D-admin-2). A
+ * refused attempt records nothing, the address map has a hard cap, and idle addresses expire on
+ * every call (D-security-8).
+ */
 export class ClaimLimiter {
   static readonly PER_IP = 5;
   static readonly PER_IP_WINDOW_MS = 10 * 60_000;
   static readonly GLOBAL = 30;
   static readonly GLOBAL_WINDOW_MS = 60 * 60_000;
-  private readonly byIp = new Map<string, number[]>();
-  private all: number[] = [];
+  static readonly MAX_ADDRESSES = 10_000;
+  private readonly byIp = new WindowLimiter(ClaimLimiter.PER_IP, ClaimLimiter.PER_IP_WINDOW_MS, ClaimLimiter.MAX_ADDRESSES);
+  private readonly all = new WindowLimiter(ClaimLimiter.GLOBAL, ClaimLimiter.GLOBAL_WINDOW_MS, 1);
 
   take(ip: string, now: number): boolean {
-    this.all = this.all.filter((t) => now - t < ClaimLimiter.GLOBAL_WINDOW_MS);
-    const mine = (this.byIp.get(ip) ?? []).filter((t) => now - t < ClaimLimiter.PER_IP_WINDOW_MS);
-    if (this.all.length >= ClaimLimiter.GLOBAL || mine.length >= ClaimLimiter.PER_IP) {
-      this.byIp.set(ip, mine);
-      return false;
-    }
-    mine.push(now);
-    this.all.push(now);
-    this.byIp.set(ip, mine);
-    if (this.byIp.size > 10_000) this.byIp.clear(); // a flood of addresses: the global cap still holds
+    if (!this.all.allows("all", now) || !this.byIp.allows(ip, now)) return false;
+    this.all.add("all", now);
+    this.byIp.add(ip, now);
     return true;
+  }
+
+  /** Addresses being remembered. */
+  get size(): number {
+    return this.byIp.size;
   }
 }
 

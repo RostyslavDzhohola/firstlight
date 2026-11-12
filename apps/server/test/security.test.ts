@@ -11,6 +11,8 @@ import { isTestAccount } from "../src/db/index.ts";
 import { BOT_BUDGET } from "../src/world/botBudget.ts";
 import { TOOL_GUESSES } from "../src/auth/loadtest.ts";
 import { NAME_LIMITS } from "../src/auth/nameLimits.ts";
+import { ClaimLimiter } from "../src/auth/routes.ts";
+import { WindowLimiter } from "../src/auth/limiter.ts";
 import { api, Browser, decodeJwt, play, startAuthServer, userIdOf, type AuthServer } from "./auth-helpers.ts";
 import { Client } from "@colyseus/sdk";
 import { joinAs, playRequest, safeLeave, startServer, waitFor } from "./helpers.ts";
@@ -374,3 +376,32 @@ describe("finding 7: facing is a unit vector", () => {
   });
 });
 
+describe("finding 8: the admin-claim limiter stays bounded", () => {
+  it("refuses before remembering an address once the global budget is spent", () => {
+    const l = new ClaimLimiter();
+    const t0 = 1_000_000;
+    for (let i = 0; i < ClaimLimiter.GLOBAL; i++) expect(l.take(`198.51.100.${i}`, t0)).toBe(true);
+    for (let i = 0; i < 500; i++) expect(l.take(`203.0.113.${i % 250}-${i}`, t0 + 1)).toBe(false);
+    expect(l.size).toBe(ClaimLimiter.GLOBAL);
+  });
+
+  it("forgets idle addresses on any call, refused ones included", () => {
+    const l = new ClaimLimiter();
+    const t0 = 1_000_000;
+    for (let i = 0; i < 5; i++) l.take(`198.51.100.${i}`, t0);
+    expect(l.size).toBe(5);
+    expect(l.take("198.51.100.9", t0 + ClaimLimiter.PER_IP_WINDOW_MS + 1)).toBe(true);
+    expect(l.size).toBe(1);
+  });
+
+  it("caps the addresses it remembers (the shared limiter refuses new keys past its cap)", () => {
+    const l = new WindowLimiter(5, 60_000, 3);
+    for (const k of ["a", "b", "c"]) expect(l.take(k, 0)).toBe(true);
+    expect(l.take("d", 1)).toBe(false);
+    l.add("e", 1);
+    expect(l.size).toBe(3);
+    expect(l.take("a", 2)).toBe(true); // known keys still count
+    expect(l.take("d", 60_001)).toBe(true); // once the others idle out
+    expect(l.size).toBe(2);
+  });
+});
