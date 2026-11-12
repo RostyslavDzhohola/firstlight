@@ -31,6 +31,7 @@ export interface Npc extends Target {
   name: string | null;
   temper: string | null;
   hostile: boolean;
+  tier?: string | null;
   height: number | null;
   level: number;
   hp: number;
@@ -39,6 +40,8 @@ export interface Npc extends Target {
   drawn: boolean;
 }
 /** The parts of `__fl.snapshot()` the journeys read (see src/debug/e2eHook.ts). */
+export type Quest = Partial<Target> & { id: string; name: string; type: "hunt" | "find" | "reach"; objective: string; taken: boolean; done: boolean; progress: number; goal: number };
+
 export interface Snap {
   t: number;
   stage: "landing" | "loading" | "starting" | "playing" | "stopped";
@@ -59,7 +62,7 @@ export interface Snap {
   ui: { visibleE2e: string[]; overlays: string[]; pauseMenuMode: string | null; photo: boolean | null; loggedOutCard: boolean };
   lastDenied: { action: string; reason: string; t: number } | null;
   net?: { roomId: string; sessionId: string } | null;
-  player?: { pos: number[]; heading: number; pitch: number; anim: number; clip: string | null; onGround: boolean; swimming: boolean; name: string | null; starter: number | null; hp: number | null; level: number | null; flags: number; protected: boolean; inCombat: boolean; dead: boolean };
+  player?: { pos: number[]; heading: number; pitch: number; anim: number; clip: string | null; onGround: boolean; swimming: boolean; name: string | null; starter: number | null; hp: number | null; maxHp?: number | null; level: number | null; flags: number; protected: boolean; inCombat: boolean; dead: boolean };
   zone?: { server: "safe" | "danger" | null; label: string | null; labelText: string | null; chip: boolean; local: "safe" | "danger" | null; kind: "town" | "outpost" | "pad" | "wild" | null; padIndex: number; padDist: number; safeRadius: number; toSafe: number | null };
   /** The nearest pad's centre (Portus: the plaza). */
   pad?: Target | null;
@@ -69,6 +72,8 @@ export interface Snap {
   guide?: (Target & { name: string | null }) | null;
   /** The tracked hunt mission's callout (planets): where it points. */
   mission?: (Partial<Target> & { shown: boolean; title: string; creep: boolean; at: number[] | null }) | null;
+  /** The guide's missions on this planet and where each objective is (absent fields: not placed). */
+  quests?: Quest[];
   you?: { xp: number; xpToNext: number; coins: number; level: number; dead: boolean } | null;
   weapon?: { id: string; name: string; delivery: string; range: number; tier: number; slot: number } | null;
   hotbar?: ({ id: string; tier: number; qty: number } | null)[] | null;
@@ -77,6 +82,8 @@ export interface Snap {
   dummies?: (Target & { down: boolean; hits: number | null })[];
   portals?: (Target & { to: string })[];
   npcs?: Npc[];
+  /** Every boss in the copy, however far. */
+  bosses?: Npc[];
   npcCount?: number;
   /** Other players in this copy (journeys run side by side). */
   players?: (Target & { id: string; name: string; dead: boolean })[];
@@ -358,6 +365,19 @@ export class Player {
       await this.page.mouse.move(this.mouse.x, this.mouse.y);
       await this.page.waitForTimeout(120);
     }
+    return true;
+  }
+
+  /**
+   * One mouse move by `t`'s exact aim error, without looking again: for a target that won't hold
+   * still (a hopping creature moves between `aim`'s looks). False when it can't be aimed at from here.
+   */
+  async aimOnce(t: Target) {
+    if (t.aimYaw === null || t.aimPitch === null) return false;
+    const { s, inv } = await this.sens();
+    this.mouse.x += t.aimYaw / s;
+    this.mouse.y += ((inv ? 1 : -1) * t.aimPitch) / s;
+    await this.page.mouse.move(this.mouse.x, this.mouse.y);
     return true;
   }
 

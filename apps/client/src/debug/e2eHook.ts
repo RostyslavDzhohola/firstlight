@@ -6,7 +6,8 @@
 //   snapshot()            plain JSON: stage, body, player (position, heading, animation), zone (server flag,
 //                         HUD label, local ring test), nearby NPCs (kind, hostile, distance, on screen, aim),
 //                         weapon and hotbar, the last server `denied`, pointer lock, onboarding step, open
-//                         menus/panels/overlays, portals, training dummies, visible [data-e2e] elements
+//                         menus/panels/overlays, portals, training dummies, the guide's missions and where
+//                         each objective is, every boss in the copy, visible [data-e2e] elements
 //   events(since?)        recent observations, oldest first: server combat messages ("in"), attack
 //                         messages we sent ("out"), key and mouse presses, player animation and avatar clip
 //                         changes, toasts, body/lock/loading/graphics changes
@@ -123,7 +124,19 @@ interface GameLike {
   planet?: { terrain?: unknown; body?: { radius: number } };
   input?: { locked: boolean; enabled: boolean; sensitivity: number; invertY: boolean };
   net?: { room: RoomLike | null; rtt?: number };
-  hud?: { you: { xp: number; xpToNext: number; coins: number; level: number; selected: number; hotbar: (Item | null)[]; dead: boolean; onboarding?: { hits: number[] } } | null };
+  hud?: {
+    you: {
+      xp: number;
+      xpToNext: number;
+      coins: number;
+      level: number;
+      selected: number;
+      hotbar: (Item | null)[];
+      dead: boolean;
+      onboarding?: { hits: number[] };
+      missions?: { id: string; progress: number; done: boolean }[];
+    } | null;
+  };
   combat?: { training: unknown; deadUntilRespawn: boolean };
   menu?: { mode?: string };
   photo?: { active: boolean };
@@ -158,6 +171,16 @@ interface SharedMods {
   PF: Record<string, number>;
   WEAPONS: readonly { id: string; name: string; delivery: string; range: number }[];
   WEAPON_BY_ID: ReadonlyMap<string, { id: string; name: string; delivery: string; range: number }>;
+  missionsOn(body: string): readonly {
+    id: string;
+    name: string;
+    type: string;
+    objective: string;
+    hunt?: { targets: { count: number }[]; place?: string };
+    find?: { object: string };
+    reach?: { place: string };
+  }[];
+  placeDir(id: string): readonly [number, number, number];
 }
 
 export type FlEvent = { t: number; kind: string; [k: string]: unknown };
@@ -204,9 +227,9 @@ export function installE2eHook(win: Window & typeof globalThis): void {
   const loadShared = () => {
     if (shared || sharedLoading) return;
     sharedLoading = true;
-    void Promise.all([import("@firstlight/shared"), import("@firstlight/shared/content/npcs"), import("@firstlight/shared/net/schema"), import("@firstlight/shared/content/weapons")])
-      .then(([s, n, sc, w]) => {
-        shared = { BODIES: s.BODIES, padDirs: s.padDirs, isSafe: s.isSafe, PAD_SAFE_RADIUS: s.PAD_SAFE_RADIUS, zoneAt: s.zoneAt, nearestSafeEntry: s.nearestSafeEntry, TOWN_GATES: s.TOWN_GATES, safeGates: s.safeGates, portalSpots: s.portalSpots, NPC_DEFS: n.NPC_DEFS, NF: n.NF, PF: sc.PF, WEAPONS: w.WEAPONS, WEAPON_BY_ID: w.WEAPON_BY_ID } as unknown as SharedMods;
+    void Promise.all([import("@firstlight/shared"), import("@firstlight/shared/content/npcs"), import("@firstlight/shared/net/schema"), import("@firstlight/shared/content/weapons"), import("@firstlight/shared/content/missions"), import("@firstlight/shared/content/places")])
+      .then(([s, n, sc, w, m, pl]) => {
+        shared = { BODIES: s.BODIES, padDirs: s.padDirs, isSafe: s.isSafe, PAD_SAFE_RADIUS: s.PAD_SAFE_RADIUS, zoneAt: s.zoneAt, nearestSafeEntry: s.nearestSafeEntry, TOWN_GATES: s.TOWN_GATES, safeGates: s.safeGates, portalSpots: s.portalSpots, NPC_DEFS: n.NPC_DEFS, NF: n.NF, PF: sc.PF, WEAPONS: w.WEAPONS, WEAPON_BY_ID: w.WEAPON_BY_ID, missionsOn: m.missionsOn, placeDir: pl.placeDir } as unknown as SharedMods;
       })
       .catch((e: unknown) => console.warn("[e2e] shared modules", e))
       .finally(() => (sharedLoading = false));
@@ -672,6 +695,10 @@ export function installE2eHook(win: Window & typeof globalThis): void {
     };
     const ob = onboarding(g);
     const you = g.hud?.you ?? null;
+    const interactables =
+      ((g.systems ?? []).find((x) => !!x && typeof x === "object" && Array.isArray((x as { interactables?: unknown }).interactables)) as
+        | { interactables: { def: { id: string; look?: string; name?: string }; pos: [number, number, number] }[] }
+        | undefined)?.interactables ?? [];
     const item = you ? you.hotbar[you.selected] : null;
     const def = item ? S.WEAPON_BY_ID.get(item.id) : S.WEAPONS[me?.weapon ?? 0];
 
@@ -735,11 +762,30 @@ export function installE2eHook(win: Window & typeof globalThis): void {
             : [],
       // The planet's mission guide by the main pad (QuestClient's interactables).
       guide: (() => {
-        const q = (g.systems ?? []).find((x) => !!x && typeof x === "object" && Array.isArray((x as { interactables?: unknown }).interactables)) as
-          | { interactables: { def: { look?: string; name?: string }; pos: [number, number, number] }[] }
-          | undefined;
-        const o = q?.interactables.find((i) => i.def.look === "guide");
+        const o = interactables.find((i) => i.def.look === "guide");
         return o ? { name: o.def.name ?? null, ...target(...o.pos) } : null;
+      })(),
+      // The guide's missions here and where each objective is (hunt: its area, find: the object,
+      // reach: the place), whether taken or not: the live play sessions walk to them.
+      quests: (() => {
+        if (!bodyDef || !terrain) return [];
+        // Each objective's spot on its own: a hunt with no place (H1) or a bad one leaves only that
+        // mission without a position.
+        const spotOf = (m: ReturnType<SharedMods["missionsOn"]>[number]): [number, number, number] | null => {
+          try {
+            if (m.find) return interactables.find((i) => i.def.id === m.find!.object)?.pos ?? null;
+            const place = m.reach?.place ?? m.hunt?.place;
+            return place ? onGround(S.placeDir(place), 0) : null;
+          } catch {
+            return null;
+          }
+        };
+        return S.missionsOn(body).map((m) => {
+          const st = you?.missions?.find((x) => x.id === m.id);
+          const at = spotOf(m);
+          const goal = m.hunt ? m.hunt.targets.reduce((n, t) => n + t.count, 0) : 1;
+          return { id: m.id, name: m.name, type: m.type, objective: m.objective, taken: !!st, done: !!st?.done, progress: st?.progress ?? 0, goal, ...(at ? target(...at) : {}) };
+        });
       })(),
       mission: (() => {
         const mp = missionPointer(g);
@@ -763,6 +809,8 @@ export function installE2eHook(win: Window & typeof globalThis): void {
         : [],
       portals,
       npcs: npcs.slice(0, 40),
+      // Every boss in this copy, however far (the nearest 40 can leave out one 60 m off).
+      bosses: npcs.filter((n) => n.tier === "boss"),
       npcCount: room?.state.npcs?.size ?? 0,
       // Other players in this copy (journeys run side by side in one copy: don't shoot through them).
       players: (() => {

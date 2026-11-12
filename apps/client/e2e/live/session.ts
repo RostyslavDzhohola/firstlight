@@ -1,16 +1,21 @@
 // A live play session: one headless, muted browser in the game that stays open while a model (or a
 // person) plays it one command at a time with `e2e/live/fl.mjs` (live/README.md). The same stack,
 // fixtures and Player as the journeys; every answer is short text a small model can read, and each
-// command lands in $E2E_OUT/live/transcript.log with its time.
+// command lands in $E2E_OUT/live/transcript.log with its time. The page is filmed (live/film.ts;
+// FL_LIVE_VIDEO=0 turns that off) and frame times are sampled every 5 s; at the end the film becomes
+// video.mp4 with a strip under the game showing each command, its answer and the driver's thinking time.
 
-import type { Locator } from "@playwright/test";
+import type { Browser, Locator } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { availableParallelism, loadavg } from "node:os";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
 import { measureBlinks, playAWhile } from "../blink.ts";
 import { test } from "../fixtures.ts";
 import { hitTrainingDummies, newEmail, saveWithEmail } from "../flows.ts";
-import { STARTERS, wrap180, type FlEvent, type Npc, type Player, type Snap, type StarterName, type Target } from "../player.ts";
+import { Film } from "./film.ts";
+import { STARTERS, wrap180, type FlEvent, type Npc, type Player, type Quest, type Snap, type StarterName, type Target } from "../player.ts";
 import { OUT, TARGET } from "../stack.ts";
 
 const PORT = Number(process.env.FL_LIVE_PORT ?? 7357);
@@ -19,9 +24,37 @@ const DIR = path.join(OUT, "live");
 const SHOTS = path.join(DIR, "shots");
 const SESSION_FILE = path.join(DIR, "session.json");
 const TRANSCRIPT = path.join(DIR, "transcript.log");
+const PERF_LOG = path.join(DIR, "perf.jsonl");
+const TRACE = path.join(DIR, "trace.log");
+const VIDEO = process.env.FL_LIVE_VIDEO !== "0";
+/** Who drives (a model's name), for the video's strip and the report. */
+const DRIVER = process.env.FL_LIVE_DRIVER ?? "";
 
 /** Commands that work before a game page is open. */
-const OPENERS = new Set(["help", "home", "start", "dev", "quit", "errors", "eval", "shot", "wait"]);
+const OPENERS = new Set(["help", "home", "start", "dev", "quit", "errors", "eval", "shot", "wait", "note", "report"]);
+
+/** One answered command (the transcript, the video strip). */
+interface Entry {
+  at: number;
+  ms: number;
+  ok: boolean;
+  line: string;
+  out: string;
+}
+
+/** Frame times over one 5 s window, with where the player was. */
+interface PerfSample {
+  at: number;
+  body: string | null;
+  playing: boolean;
+  frames: number;
+  p50: number;
+  p95: number;
+  max: number;
+  over100: number;
+  /** The machine's 1-minute load average then (other jobs slow the harness and the game). */
+  load: number;
+}
 
 interface Command {
   usage: string;
@@ -36,10 +69,31 @@ interface Goal {
   arrived(s: Snap): boolean;
 }
 
-test("live session", async ({ player, page, consoleErrors }) => {
+test("live session", async ({ player, page, consoleErrors, browser }) => {
+  const startedAt = Date.now();
   mkdirSync(SHOTS, { recursive: true });
   writeFileSync(TRANSCRIPT, "");
-  const commands = makeCommands(player, consoleErrors);
+  writeFileSync(PERF_LOG, "");
+  writeFileSync(TRACE, "");
+  const entries: Entry[] = [];
+  const perf: PerfSample[] = [];
+  // No ffmpeg (or no screencast) costs the film, never the session.
+  let film = VIDEO ? new Film(page, path.join(DIR, "film.mp4")) : null;
+  await film?.start().catch((e: unknown) => {
+    console.log(`[live] no film: ${String((e as Error)?.message ?? e).slice(0, 200)}`);
+    film = null;
+  });
+  const { commands, guardTick } = makeCommands(player, consoleErrors);
+  commands.note = {
+    usage: "note <text>",
+    help: "write a finding into the transcript and the video strip (e.g. `note A5 fail: no waypoint on the minimap`)",
+    run: async (args) => `noted: ${args.join(" ")}`,
+  };
+  commands.report = {
+    usage: "report",
+    help: "the session so far: time, commands, deaths, tutorial and missions, frame times per place, console errors",
+    run: async () => sessionReport(entries, perf, (await page.evaluate(() => !!(window as { __fl?: unknown }).__fl).catch(() => false)) ? await player.snap() : null, consoleErrors.length, startedAt, deaths),
+  };
   let shots = 0;
   commands.shot = {
     usage: "shot [name]",
@@ -95,6 +149,8 @@ test("live session", async ({ player, page, consoleErrors }) => {
     const args = msg.args ?? [];
     if (typeof cmd !== "string" || !Array.isArray(args) || !args.every((a) => typeof a === "string")) return reply(400, 'bad request: send {"cmd": string, "args": string[]}');
     clearTimeout(idle);
+    running = true;
+    await guarding;
     const t0 = Date.now();
     let ok = true;
     let out: string;
@@ -109,12 +165,78 @@ test("live session", async ({ player, page, consoleErrors }) => {
       // Playwright colours its messages: strip the escapes, keep the first lines.
       out = `error: ${String((e as Error)?.message ?? e).replace(/\u001b\[[0-9;]*m/g, "").split("\n").filter(Boolean).slice(0, 3).join(" | ")}`;
     }
+    // What changed since the last answer, the driver's thinking time included: the world doesn't wait.
+    if (c && cmd !== "snap" && cmd !== "eval") {
+      const now = await page.evaluate(() => !!(window as { __fl?: unknown }).__fl).catch(() => false) ? await player.snap().catch(() => null) : null;
+      const guarded = summarize(guardNotes);
+      guardNotes = [];
+      if (now?.player?.dead && lastSnap && !lastSnap.player?.dead) deaths++;
+      const delta = [now ? changes(lastSnap, now) : "", guarded && `the guard ${guarded} while you were thinking`].filter(Boolean).join(" · ");
+      if (delta) out += `\nsince your last command: ${delta}`;
+      lastSnap = now;
+    }
     const ms = Date.now() - t0;
-    appendFileSync(TRANSCRIPT, `${new Date(t0).toISOString()} ${String(ms).padStart(6)} ms ${ok ? "ok " : "ERR"} ${[cmd, ...args].join(" ")} → ${out.split("\n")[0]!.slice(0, 160)}\n`);
+    const line = [cmd, ...args].join(" ");
+    entries.push({ at: t0, ms, ok, line, out });
+    appendFileSync(TRANSCRIPT, `${new Date(t0).toISOString()} ${String(ms).padStart(6)} ms ${ok ? "ok " : "ERR"} ${line} → ${out.split("\n")[0]!.slice(0, 160)}\n`);
     reply(ok ? 200 : 400, out);
+    running = false;
     if (closing) quit();
     else armIdle();
   };
+
+  let lastSnap: Snap | null = null;
+  /** Deaths seen as alive → dead between answers (and at the end), not read from answer text. */
+  let deaths = 0;
+
+  // The guard: between commands the world keeps running while the driver thinks (seconds for a
+  // model), so the harness keeps the character alive the way a player's hands would. Commands wait
+  // for its beat to end; `guard off` stops it.
+  let guardOn = TARGET !== "prod";
+  let running = false;
+  let guardActive = false;
+  let guarding: Promise<unknown> = Promise.resolve();
+  let guardNotes: string[] = [];
+  const guardTimer = setInterval(() => {
+    if (running || closing || !guardOn || guardActive) return;
+    guardActive = true;
+    guarding = guardTick()
+      .then((note) => {
+        if (note) guardNotes.push(note);
+      })
+      .catch(() => {})
+      .finally(() => (guardActive = false));
+  }, 200);
+  commands.guard = {
+    usage: "guard [on|off]",
+    help: "between your commands the harness fights what comes within reach and drinks tonics (on by default; off on production)",
+    async run([how]) {
+      if (how === "on" || how === "off") {
+        if (how === "on" && TARGET === "prod") throw new Error("the guard fights, and production play is read-only");
+        guardOn = how === "on";
+      }
+      return `guard ${guardOn ? "on" : "off"}`;
+    },
+  };
+
+  // Frame times every 5 s, whatever the driver is doing (the travel, the fights, the thinking).
+  const sampler = setInterval(() => {
+    void page
+      .evaluate(() => {
+        const fl = (window as any).__fl;
+        if (!fl) return null;
+        const f = fl.frames.stats(performance.now() - 5000);
+        const s = fl.snapshot();
+        return { body: s.body ?? null, playing: s.stage === "playing" && !s.loading, frames: f.frames, p50: f.p50, p95: f.p95, max: f.max, over100: f.over100 };
+      })
+      .then((r) => {
+        if (!r || closing) return;
+        const sample = { at: Date.now(), ...r, load: Math.round(loadavg()[0]! * 10) / 10 } as PerfSample;
+        perf.push(sample);
+        appendFileSync(PERF_LOG, JSON.stringify(sample) + "\n");
+      })
+      .catch(() => {});
+  }, 5000);
 
   // One command at a time, in arrival order; a failed one never stalls the rest.
   let queue = Promise.resolve();
@@ -138,12 +260,29 @@ test("live session", async ({ player, page, consoleErrors }) => {
   } finally {
     closing = true;
     clearTimeout(idle);
+    clearInterval(sampler);
+    clearInterval(guardTimer);
     await queue;
+    await guarding;
     await new Promise<void>((resolve) => {
       server.close(() => resolve());
       server.closeIdleConnections();
     });
     rmSync(SESSION_FILE, { force: true });
+    // The last look before the page goes: a death since the last answer counts, and the report keeps
+    // the final tutorial and mission state.
+    const last = (await page.evaluate(() => !!(window as { __fl?: unknown }).__fl).catch(() => false)) ? await player.snap().catch(() => null) : null;
+    const prev = lastSnap as Snap | null; // set by `handle`; flow analysis here only sees the null it started as
+    if (last?.player?.dead && prev && !prev.player?.dead) deaths++;
+    writeFileSync(path.join(DIR, "report.txt"), sessionReport(entries, perf, last, consoleErrors.length, startedAt, deaths) + "\n");
+    if (film) {
+      const f = film;
+      const file = await f
+        .stop()
+        .then(() => finishVideo(f, browser, entries))
+        .catch((e: unknown) => `failed: ${String((e as Error)?.message ?? e).slice(0, 300)}`);
+      console.log(`[live] video: ${file}${f.cut ? ` (${f.cut})` : ""}`);
+    }
   }
 });
 
@@ -155,8 +294,15 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
-function makeCommands(player: Player, consoleErrors: string[]): Record<string, Command> {
+function makeCommands(player: Player, consoleErrors: string[]): { commands: Record<string, Command>; guardTick: () => Promise<string | null> } {
   const page = player.page;
+  /** The macros' own decisions (walk, fight, quest), for working out why a run went wrong. */
+  let traced = Date.now();
+  const trace = (line: string) => {
+    const now = Date.now();
+    appendFileSync(TRACE, `${new Date(now).toISOString()} +${String(now - traced).padStart(5)} ms ${line}\n`);
+    traced = now;
+  };
   let identity: string | null = null;
 
   const once = (who: string) => {
@@ -239,6 +385,84 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
       default:
         throw new Error(`unknown target "${spec ?? ""}": pad, guide, mission, gate, dummy, hostile, npc:<id|kind|name>, player:<name>`);
     }
+  };
+
+  /**
+   * One beat of a fight with `foe` (`fight`, `quest`): go round a wall, close in, side-step anyone in
+   * the line of fire, back off point blank, aim, and click only when it will land. True when it attacked.
+   */
+  let lastRoll = 0;
+  const fightBeat = async (s: Snap, foe: Npc): Promise<boolean> => {
+    trace(`beat: ${foe.name ?? foe.kind} ${foe.id} ${n0(foe.dist)} m ${n0(foe.bearing)}° · HP ${n0(s.player?.hp)}`);
+    const g = goal(`npc:${foe.id}`, s);
+    // Walls stop shots (D43): from behind one, go round it toward the foe one step at a time.
+    const line = (await player.clearance([foe.bearing], foe.surface))?.[0]?.clear ?? foe.surface;
+    if (line < foe.surface - 1.5) {
+      const go = await player.steer(foe.bearing, Math.min(4, foe.surface), s);
+      if (Math.abs(go.bearing) > 8) await player.turn(go.bearing);
+      await player.hold(["KeyW"], 600);
+      return false;
+    }
+    if (!g.arrived(s)) {
+      await player.walkTo(g.pick, g.arrived, { timeoutMs: 5000 });
+      return false;
+    }
+    // Outside safe zones a hit on a player is PvP, and on production they are real people.
+    const near = playerInHarmsWay(s, foe);
+    if (near) {
+      await player.hold([wrap180(near.bearing - foe.bearing) > 0 ? "KeyA" : "KeyD"], 600);
+      return false;
+    }
+    // Ranged: keep every hostile at 5 m or more. Point blank a bolt misses a creature at our feet,
+    // and a pack of Hopbits keeps up with a backpedal (two dry runs died without landing a shot).
+    // Turn away from the pack and sprint (9 m/s against their 4), or roll back 4.5 m when one is on
+    // top of us and the roll is ready, then turn back and shoot from range.
+    if (s.weapon?.delivery !== "melee") {
+      const close = (s.npcs ?? []).filter((n) => n.hostile && !n.dead && n.dist < 5);
+      if (close.length) {
+        const rad = (d: number) => (d * Math.PI) / 180;
+        const pack = (Math.atan2(close.reduce((a, n) => a + Math.sin(rad(n.bearing)), 0), close.reduce((a, n) => a + Math.cos(rad(n.bearing)), 0)) * 180) / Math.PI;
+        if (close.some((n) => n.dist < 2.5) && Date.now() - lastRoll > 1300) {
+          trace(`kite: roll back from ${close.length} at ${close.map((n) => n0(n.dist)).join("/")} m`);
+          if (Math.abs(pack) > 10) await player.turn(pack);
+          await page.keyboard.down("KeyS");
+          await player.hold(["KeyC"], 60);
+          await page.waitForTimeout(350);
+          await page.keyboard.up("KeyS");
+          lastRoll = Date.now();
+        } else {
+          trace(`kite: sprint away from ${close.length} at ${close.map((n) => n0(n.dist)).join("/")} m`);
+          await player.turn(wrap180(pack + 180));
+          await player.hold(["ShiftLeft", "KeyW"], 1400);
+          await player.turn(180);
+        }
+        return false;
+      }
+    }
+    // A bolt: one exact mouse move onto it and a frame for the camera to follow (a hopping creature
+    // moves between the looks of Player.aim). A swing: turn to face it.
+    const melee = s.weapon?.delivery === "melee";
+    if (melee) await player.aim(g.pick);
+    else if (!(await player.aimOnce(foe))) {
+      await player.turn(foe.bearing);
+      return false;
+    } else await page.waitForTimeout(40);
+    // Click only when it will land: a shot needs the crosshair on the foe; a swing sweeps an arc, so
+    // facing it within 20° is enough.
+    const aimed = await player.snap();
+    const still = aimed.npcs?.find((n) => n.id === foe.id && !n.dead);
+    // A bolt's tolerance is the target's own size at that range (a Hopbit is 0.9 m), never looser than 4.5°.
+    const size = Math.min(0.08, Math.max(0.015, ((still?.height ?? 0.9) * 0.4) / Math.max(1, still?.dist ?? 1)));
+    const onTarget =
+      !!still && still.aimYaw !== null && still.aimPitch !== null && (melee ? Math.abs(still.aimYaw) < 0.35 : Math.abs(still.aimYaw) < size && Math.abs(still.aimPitch) < Math.max(0.02, size));
+    if (!still || !onTarget || playerInHarmsWay(aimed, still)) {
+      trace(`hold fire: ${!still ? "foe gone" : !onTarget ? `off target yaw ${still.aimYaw} pitch ${still.aimPitch} (tolerance ${size.toFixed(3)}) at ${n0(still.dist)} m` : "a player near the line"}`);
+      return false;
+    }
+    trace(`fire at ${foe.name ?? foe.kind} ${foe.id} ${n0(still.dist)} m (HP ${n0(still.hp)})`);
+    await player.attack();
+    await page.waitForTimeout(450);
+    return true;
   };
 
   const walkOut = async () => {
@@ -481,43 +705,7 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
             continue;
           }
           foes.add(foe.name ?? foe.kind);
-          const g = goal(`npc:${foe.id}`, s);
-          // Walls stop shots (D43): from behind one, go round it toward the foe one step at a time.
-          const line = (await player.clearance([foe.bearing], foe.surface))?.[0]?.clear ?? foe.surface;
-          if (line < foe.surface - 1.5) {
-            const go = await player.steer(foe.bearing, Math.min(4, foe.surface), s);
-            if (Math.abs(go.bearing) > 8) await player.turn(go.bearing);
-            await player.hold(["KeyW"], 600);
-            continue;
-          }
-          if (!g.arrived(s)) {
-            await player.walkTo(g.pick, g.arrived, { timeoutMs: 5000 });
-            continue;
-          }
-          // Outside safe zones a hit on a player is PvP, and on production they are real people.
-          const near = playerInHarmsWay(s, foe);
-          if (near) {
-            await player.hold([wrap180(near.bearing - foe.bearing) > 0 ? "KeyA" : "KeyD"], 600);
-            continue;
-          }
-          // Point blank a bolt leaves from the hand and flies past a creature at our feet: back off first.
-          if (s.weapon?.delivery !== "melee" && foe.dist < 5) {
-            await player.turn(foe.bearing);
-            await player.hold(["KeyS"], 500);
-            continue;
-          }
-          await player.aim(g.pick);
-          // Aiming turned us: look again, and click only when it will land: a shot needs the crosshair on
-          // the foe (Player.aim's tolerances); a swing sweeps an arc, so facing it within 20° is enough.
-          const aimed = await player.snap();
-          const still = aimed.npcs?.find((n) => n.id === foe.id && !n.dead);
-          const melee = aimed.weapon?.delivery === "melee";
-          const onTarget =
-            !!still && still.aimYaw !== null && still.aimPitch !== null && (melee ? Math.abs(still.aimYaw) < 0.35 : Math.abs(still.aimYaw) < 0.015 && Math.abs(still.aimPitch) < 0.02);
-          if (!still || !onTarget || playerInHarmsWay(aimed, still)) continue;
-          await player.attack();
-          shots++;
-          await page.waitForTimeout(450);
+          if (await fightBeat(s, foe)) shots++;
         }
         const s = await player.snap();
         const gained = (s.you?.xp ?? 0) - xp0;
@@ -622,7 +810,455 @@ function makeCommands(player: Player, consoleErrors: string[]): Record<string, C
       },
     },
   };
-  return commands;
+
+  // ------------------------------------------------------------------------------ the first part
+  // FIRSTLIGHT's opening as macros a model chains: the tutorial in Portus (`step`, `tutorial`), the
+  // portal to Arcadia, Lark's three missions (`talk`, `quest`) and getting up again (`rise`). Each does
+  // a whole beat with real input at the harness's pace and answers what it saw.
+
+  /**
+   * The bearing to walk toward `want` that keeps 55 m from any boss (Arcadia's Tidewrath slams 70 HP
+   * along 40 m from its lake; two killed a level-3 dry run on its way to Gull Point): go along the
+   * tangent of that circle when the straight line would cross it, straight out when inside it.
+   */
+  const SHUN = 55;
+  const shunBosses = (s: Snap, want: number, toGoal: number): number => {
+    const boss = (s.bosses ?? []).filter((b) => !b.dead && b.surface < SHUN + 40).sort((a, b) => a.surface - b.surface)[0];
+    if (!boss || toGoal < boss.surface - SHUN) return want;
+    const off = wrap180(want - boss.bearing);
+    const side = off >= 0 ? 1 : -1;
+    if (boss.surface <= SHUN) return wrap180(boss.bearing + side * 130);
+    const tangent = (Math.asin(SHUN / boss.surface) * 180) / Math.PI;
+    if (Math.abs(off) >= tangent) return want;
+    return wrap180(boss.bearing + side * (tangent + 5));
+  };
+
+  /** Hold Shift+W and steer as we go (no stop to turn) until `arrived`, `stop` names a reason, or time runs out. */
+  const cruise = async (pick: (s: Snap) => Target | null, arrived: (s: Snap) => boolean, opts: { timeoutMs: number; avoidPortal?: boolean; stop?: (s: Snap) => string | null }): Promise<string> => {
+    const until = Date.now() + opts.timeoutMs;
+    const keys = ["ShiftLeft", "KeyW"];
+    let down = false;
+    const press = async (on: boolean) => {
+      if (on === down) return;
+      down = on;
+      for (const k of on ? keys : [...keys].reverse()) await (on ? page.keyboard.down(k) : page.keyboard.up(k));
+    };
+    const trail: { at: number; pos: number[] }[] = [];
+    let side = "KeyD";
+    let shunning = false;
+    const t0 = Date.now();
+    const end = (why: string) => {
+      trace(`walk: ${why} after ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+      return why;
+    };
+    try {
+      while (Date.now() < until) {
+        const s = await player.snap();
+        if (arrived(s)) return end("arrived");
+        const why = opts.stop?.(s);
+        if (why) return end(why);
+        const t = pick(s);
+        if (!t) return end("lost sight of it");
+        if (s.player?.dead) return end("died");
+        const want = shunBosses(s, t.bearing, t.surface);
+        if ((want !== t.bearing) !== shunning) {
+          shunning = want !== t.bearing;
+          trace(shunning ? `walk: going round a boss (bearing ${n0(want)}° instead of ${n0(t.bearing)}°)` : "walk: past the boss, straight on");
+        }
+        const go = await player.steer(want, Math.min(4, t.surface + 0.5), s, opts.avoidPortal ?? true);
+        if (Math.abs(go.bearing) > 70) await press(false); // a sharp turn: stop, turn, go on
+        if (Math.abs(go.bearing) > 3) await player.turn(go.bearing);
+        if (t.surface < 5) {
+          // Close: walk in short steps so we don't run past it.
+          await press(false);
+          await player.hold(["KeyW"], Math.max(120, Math.min(600, (t.surface / 4) * 1000)));
+          continue;
+        }
+        await press(true);
+        await page.waitForTimeout(90);
+        const now = Date.now();
+        trail.push({ at: now, pos: s.player!.pos });
+        while (trail.length > 1 && trail[0]!.at < now - 2500) trail.shift();
+        const a = trail[0]!;
+        const p = s.player!.pos;
+        if (now - a.at > 2000 && Math.hypot(a.pos[0]! - p[0]!, a.pos[1]! - p[1]!, a.pos[2]! - p[2]!) < 1.5) {
+          // Stuck (a slope, a creature, a corner the rays missed): back off, side-step, hop.
+          trace(`walk: stuck at ${p.map((v) => v.toFixed(0)).join(",")}, side-stepping`);
+          await press(false);
+          await player.hold(["KeyS"], 400);
+          await player.hold([side], 900);
+          await player.hold([side, "KeyW"], 700);
+          await player.tap("Space");
+          side = side === "KeyD" ? "KeyA" : "KeyD";
+          trail.length = 0;
+        }
+      }
+      return end(arrived(await player.snap()) ? "arrived" : "ran out of time");
+    } finally {
+      await press(false);
+    }
+  };
+
+  /** A tonic heals over 3 s and then cools down for 8 (weapons.ts): one per 8.5 s. */
+  let drankAt = 0;
+  const tonicReady = (s: Snap) => Date.now() - drankAt > 8500 && (s.hotbar ?? []).some((h) => !!h && /tonic/.test(h.id));
+  const hpShare = (s: Snap) => (s.player?.hp ?? 0) / (s.player?.maxHp || 100);
+
+  /** Below 45% HP with a tonic ready: drink it (select its slot, click, back to the weapon). */
+  const drink = async (s: Snap): Promise<string | null> => {
+    const hp = s.player?.hp ?? 0;
+    if (hpShare(s) >= 0.45 || s.player?.dead || !tonicReady(s)) return null;
+    const slot = (s.hotbar ?? []).findIndex((h) => !!h && /tonic/.test(h.id));
+    if (slot < 0) return null;
+    drankAt = Date.now();
+    const back = s.weapon?.slot ?? 0;
+    await player.tap(`Digit${slot + 1}`);
+    await page.waitForTimeout(250);
+    await player.attack();
+    await page.waitForTimeout(500);
+    await player.tap(`Digit${back + 1}`);
+    await page.waitForTimeout(250);
+    return `drank a ${s.hotbar![slot]!.id.replace(/_/g, " ")} at HP ${n0(hp)}`;
+  };
+
+  /**
+   * The hunt's prey: the live creature the mission pointer is on (the server says which kills count).
+   * The pointer's title reads "Hopbit · 36 m" and its spot is the creature's feet, so match by name and
+   * by where it is.
+   */
+  const pointedAt = (s: Snap): Npc | undefined => {
+    const m = s.mission;
+    if (!m?.creep || typeof m.surface !== "number" || typeof m.bearing !== "number") return undefined;
+    const name = m.title.split(" · ")[0]!.trim();
+    const off = (n: Npc) => Math.abs(n.surface - m.surface!) + Math.abs(wrap180(n.bearing - m.bearing!)) / 10;
+    return (s.npcs ?? []).filter((n) => !n.dead && (n.name === name || n.kind === name.toLowerCase()) && off(n) < 6).sort((a, b) => off(a) - off(b))[0];
+  };
+
+  /**
+   * A hostile close enough to be a fight already (it comes before any errand: dying resets missions).
+   * A ranged starter takes it on from 15 m, before it reaches point blank.
+   */
+  const threat = (s: Snap) => {
+    const r = s.weapon?.delivery === "melee" ? 8 : 15;
+    // Never a boss: that is a raid for a group, not something to pick a fight with on the way.
+    return (s.npcs ?? []).filter((n) => n.hostile && !n.dead && n.tier !== "boss" && n.dist < r).sort((a, b) => a.dist - b.dist)[0];
+  };
+
+  /**
+   * Out of tonics (or waiting on one) below half HP with something hostile near: run for the pad's safe
+   * ring instead of fighting on (nothing heals but tonics and level-ups, and dying resets every
+   * mission). What happened, or null when there was no need.
+   */
+  const retreat = async (s: Snap): Promise<string | null> => {
+    if (hpShare(s) >= 0.5 || tonicReady(s) || s.zone?.server === "safe" || !s.pad) return null;
+    if (!(s.npcs ?? []).some((n) => n.hostile && !n.dead && n.dist < 25)) return null;
+    trace(`retreat: HP ${n0(s.player?.hp)}, no tonic ready, running for the pad ${where(s.pad)}`);
+    const how = await cruise((x) => x.pad ?? null, (x) => x.zone?.server === "safe" || !(x.npcs ?? []).some((n) => n.hostile && !n.dead && n.dist < 30), { timeoutMs: 25_000, avoidPortal: true });
+    return `ran for safety at HP ${n0(s.player?.hp)} (${how})`;
+  };
+
+  const cardText = () => page.evaluate(() => (document.querySelector<HTMLElement>(".fl-onb__step")?.innerText ?? "").replace(/\s+/g, " ").trim());
+
+  /**
+   * A heading (degrees from the camera) for a straight run of `len` metres that stays clear of walls
+   * and passes no portal ring: Player.steer only sees rings within 10 m, and a 2.6 s sprint is 23 m
+   * (a dry run sprinted the tutorial straight into the Hollowmere portal).
+   */
+  const openHeading = async (len: number): Promise<number> => {
+    const s = await player.snap();
+    const cands = Array.from({ length: 12 }, (_, i) => wrap180(i * 30));
+    const clear = (await player.clearance(cands, len)) ?? cands.map((b) => ({ bearing: b, clear: len }));
+    const rad = (d: number) => (d * Math.PI) / 180;
+    const pastPortal = (b: number) =>
+      (s.portals ?? []).some((p) => {
+        const off = rad(wrap180(p.bearing - b));
+        const along = p.surface * Math.cos(off);
+        return along > -3 && along < len + 6 && Math.abs(p.surface * Math.sin(off)) < 7;
+      });
+    const ok = clear.filter((c) => c.clear >= len - 0.5 && !pastPortal(c.bearing)).sort((a, b) => Math.abs(a.bearing) - Math.abs(b.bearing));
+    trace(`tutorial: ${ok.length} of 12 headings give a clear ${len} m run${ok[0] ? `, taking ${ok[0].bearing}°` : ""}`);
+    if (!ok[0]) throw new Error(`no clear ${len} m run from here (walls or a portal ring in every direction): \`walk pad\` to the plaza's middle and \`step\` again`);
+    return ok[0].bearing;
+  };
+
+  /** How each tutorial step is done with real input (onboardingSteps.ts says what counts). */
+  const doStep: Record<string, () => Promise<unknown>> = {
+    move: async () => {
+      await player.turn(await openHeading(10));
+      await player.hold(["KeyW"], 1500);
+    },
+    look: async () => {
+      for (let i = 0; i < 4; i++) await player.turn(60);
+    },
+    jump: () => player.tap("Space"),
+    sprint: async () => {
+      await player.turn(await openHeading(25));
+      await player.hold(["ShiftLeft", "KeyW"], 2600);
+    },
+    dodge: () => player.hold(["KeyC"], 60),
+    attack: () => hitTrainingDummies(player),
+    switch: async () => {
+      await player.tap("Digit2");
+      await page.waitForTimeout(400);
+      await player.tap("Digit1");
+    },
+    pickup: () => player.tap("KeyE"),
+    map: async () => {
+      await player.tap("KeyM");
+      await page.waitForTimeout(1500);
+      await player.tap("KeyM");
+      await page.waitForTimeout(500);
+    },
+    // A quick tap keeps the wheel open; a number says that phrase (5: "Thanks").
+    wheel: async () => {
+      await player.tap("KeyG");
+      await page.waitForTimeout(500);
+      await player.tap("Digit5");
+    },
+    voice: () => page.waitForTimeout(9000),
+    portal: () => player.walkThroughPortal("arcadia"),
+  };
+
+  /** The current tutorial step, done; what its card said and how long it took. */
+  const step = async (): Promise<string> => {
+    localOnly("the tutorial macros (they hit training dummies)");
+    const s0 = await player.snap();
+    const id = s0.onboarding?.active && !s0.onboarding.allDone ? s0.onboarding.step : null;
+    if (!id) return s0.onboarding?.allDone ? "the tutorial is done" : "no tutorial step right now (it runs in Portus for a new player)";
+    const pre = await ensureLock();
+    const card = await cardText();
+    const t0 = Date.now();
+    const act = doStep[id];
+    if (!act) throw new Error(`no macro for the tutorial step "${id}": do it by hand (the card says: ${card})`);
+    let s = s0;
+    for (let i = 0; i < 3 && s.onboarding?.step === id && !s.onboarding.allDone; i++) {
+      await act();
+      await ensureLock();
+      for (let k = 0; k < 10; k++) {
+        s = await player.snap();
+        if (s.onboarding?.step !== id || s.onboarding.allDone || s.body !== s0.body) break;
+        await page.waitForTimeout(300);
+      }
+    }
+    const moved = s.onboarding?.step !== id || !!s.onboarding?.allDone || s.body !== s0.body;
+    const next = s.body !== s0.body ? `now on ${s.body}` : s.onboarding?.allDone ? "that was the last step" : `next: ${s.onboarding?.step}`;
+    return `${pre}${moved ? "done" : "NOT done"}: ${id} in ${((Date.now() - t0) / 1000).toFixed(1)} s · the card said "${card.slice(0, 220)}" · ${next}`;
+  };
+
+  /** Walk to the guide, press E, take every mission on offer and close the panel. */
+  const talk = async (): Promise<string> => {
+    localOnly("talk (it takes missions)");
+    const s0 = await player.snap();
+    if (!s0.guide) throw new Error("no guide here: each planet's guide stands by its main pad (Lark on Arcadia)");
+    const pre = await ensureLock();
+    const g = goal("guide", s0);
+    if (!g.arrived(s0)) {
+      const how = await cruise(g.pick, g.arrived, { timeoutMs: 45_000 });
+      if (how !== "arrived") throw new Error(`couldn't reach the guide: ${how}`);
+    }
+    await player.face((x) => x.guide?.bearing ?? null, 20);
+    const panel = page.locator(".fl-overlay").filter({ visible: true }).last();
+    for (let i = 0; i < 3 && !(await panel.count()); i++) {
+      await player.tap("KeyE");
+      await page.waitForTimeout(700);
+      if (!(await panel.count())) await player.hold(["KeyW"], 250);
+    }
+    if (!(await panel.count())) throw new Error("pressed E by the guide but no panel opened (`fl screen` shows the prompt, if any)");
+    const said = (await panel.innerText()).replace(/\s+/g, " ").trim();
+    let took = 0;
+    for (let i = 0; i < 4; i++) {
+      const accept = panel.getByRole("button", { name: /^accept$/i }).first();
+      if (!(await accept.count())) break;
+      await accept.click();
+      took++;
+      await page.waitForTimeout(600);
+    }
+    const close = panel.getByRole("button", { name: /^close$/i }).first();
+    if (await close.count()) await close.click();
+    else await player.escape();
+    await page.waitForTimeout(400);
+    await ensureLock();
+    const s = await player.snap();
+    const list = (s.quests ?? []).map((q) => `${q.id} ${q.name} (${q.type}: ${q.objective}) ${q.done ? "done" : q.taken ? `taken ${q.progress}/${q.goal}` : "not taken"}`);
+    return `${pre}took ${took} mission(s) · the panel said "${said.slice(0, 300)}"\n${list.join("\n")}`;
+  };
+
+  /** Pursue one mission until it is done, we die, or time runs out. */
+  const quest = async (id: string | undefined, sec: number): Promise<string> => {
+    localOnly("quest (it fights)");
+    const s0 = await player.snap();
+    const list = s0.quests ?? [];
+    if (!list.length) throw new Error("no missions here: they're on the planets (Lark by Arcadia's main pad gives three)");
+    const q0 = id ? list.find((q) => q.id.toLowerCase() === id.toLowerCase()) : list.find((q) => q.taken && !q.done);
+    if (!q0) throw new Error(id ? `no mission ${id} here (${list.map((q) => q.id).join(", ")})` : "no open mission: `fl talk` to the guide first");
+    if (q0.done) return `${q0.id} ${q0.name} is already done`;
+    if (!q0.taken) throw new Error(`${q0.id} isn't taken yet: \`fl talk\` first`);
+    const pre = await ensureLock();
+    const t0 = Date.now();
+    const until = t0 + sec * 1000;
+    trace(`quest ${q0.id} ${q0.name} (${q0.type}) ${q0.progress}/${q0.goal}, objective ${typeof q0.surface === "number" ? where(q0 as Target) : "not placed"}`);
+    const mine = (x: Snap) => x.quests?.find((q) => q.id === q0.id);
+    const spot = (x: Snap) => {
+      const q = mine(x);
+      return q && typeof q.surface === "number" ? (q as Quest & Target) : null;
+    };
+    const log: string[] = [];
+    let attacks = 0;
+    let fights = 0;
+    // Progress: a kill for a hunt; for a find or a reach (0/1 until the end), getting 10 m closer.
+    let progress = q0.progress;
+    let closest = q0.surface ?? Infinity;
+    let gainedAt = Date.now();
+    while (Date.now() < until) {
+      const s = await player.snap();
+      const q = mine(s);
+      if (!q || q.done || s.player?.dead) break;
+      if (q.progress !== progress || (q.type !== "hunt" && (q.surface ?? Infinity) < closest - 10)) {
+        progress = q.progress;
+        closest = Math.min(closest, q.surface ?? Infinity);
+        gainedAt = Date.now();
+      } else if (Date.now() - gainedAt > 150_000) {
+        log.push("no progress in 150 s: stopped (look with `state` or a `shot`)");
+        break;
+      }
+      const sip = await drink(s);
+      if (sip) {
+        log.push(sip);
+        continue;
+      }
+      const ran = await retreat(s);
+      if (ran) {
+        log.push(ran);
+        continue;
+      }
+      if (s.zone?.server === "safe" && q.type === "hunt" && (q.surface ?? 0) > 30) {
+        // Out of the pad's ring first (attacks don't count inside).
+        await walkOut();
+        continue;
+      }
+      const prey = q.type === "hunt" ? pointedAt(s) : undefined;
+      // A hunt fights what comes near. An errand (find, reach) runs past it the way a player would
+      // (a sprint is 9 m/s, a Hopbit 4, a Sparkfly 5): nothing heals between fights but tonics and
+      // level-ups, and every fight on the way costs HP the next place needs (a dry run reached
+      // Lacefall's Sparkflies at 49 HP and died there).
+      const foe = q.type === "hunt" ? (threat(s) ?? (prey && prey.surface < 45 ? prey : undefined)) : undefined;
+      // Weapons are holstered inside a safe ring, but a creature at its edge still reaches in: step out.
+      if (foe && s.zone?.server === "safe" && foe.dist < 8) {
+        trace(`quest ${q0.id}: ${foe.name ?? foe.kind} ${n0(foe.dist)} m away while we stand in a safe ring: walking out`);
+        await walkOut();
+        continue;
+      }
+      if (foe && s.zone?.server !== "safe") {
+        fights++;
+        if (await fightBeat(s, foe)) attacks++;
+        continue;
+      }
+      if (q.type === "hunt") {
+        const pointer = (x: Snap) => (x.mission?.shown && typeof x.mission.surface === "number" ? (x.mission as Target) : spot(x));
+        const how = await cruise(pointer, (x) => (pointedAt(x)?.surface ?? 99) < 40, { timeoutMs: Math.min(25_000, until - Date.now()), stop: (x) => (threat(x) ? "attacked" : null) });
+        if (how !== "arrived" && how !== "attacked") log.push(`walk: ${how}`);
+        continue;
+      }
+      // On an errand, stop running only to drink.
+      const thirsty = (x: Snap) => (hpShare(x) < 0.45 && tonicReady(x) ? "thirsty" : null);
+      if (q.type === "find") {
+        const at = spot(s);
+        if (!at) {
+          log.push("the object isn't placed here");
+          break;
+        }
+        if (at.surface > 1.6) {
+          const how = await cruise(spot, (x) => (spot(x)?.surface ?? 99) <= 1.6 || !!mine(x)?.done, { timeoutMs: Math.min(60_000, until - Date.now()), stop: thirsty });
+          if (how !== "arrived" && how !== "thirsty") log.push(`walk: ${how}`);
+          continue;
+        }
+        await player.tap("KeyE");
+        await page.waitForTimeout(900);
+        continue;
+      }
+      const how = await cruise(spot, (x) => !!mine(x)?.done, { timeoutMs: Math.min(60_000, until - Date.now()), stop: thirsty });
+      if (how !== "arrived" && how !== "thirsty") log.push(`walk: ${how}`);
+    }
+    // Done on an errand with creatures about (Lacefall's Sparkflies killed a dry run that stood by the
+    // bell): run on toward the pad until nothing hostile is within 30 m, before handing back.
+    let s = await player.snap();
+    if (mine(s)?.done && q0.type !== "hunt" && s.pad && (s.npcs ?? []).some((n) => n.hostile && !n.dead && n.dist < 25)) {
+      const how = await cruise((x) => x.pad ?? null, (x) => x.zone?.server === "safe" || !(x.npcs ?? []).some((n) => n.hostile && !n.dead && n.dist < 30), { timeoutMs: 20_000 });
+      log.push(`got clear of the creatures there (${how})`);
+      s = await player.snap();
+    }
+    const q = mine(s);
+    const verdict = s.player?.dead ? "YOU DIED: missions reset on rebirth (`fl rise`, then `fl talk` again)" : q?.done ? `${q0.id} ${q0.name} DONE` : `${q0.id} not done in ${sec} s (${q?.progress ?? 0}/${q?.goal ?? "?"})`;
+    const objective = q && typeof q.surface === "number" ? ` · objective ${where(q as Target)}` : "";
+    return `${pre}${verdict} in ${((Date.now() - t0) / 1000).toFixed(0)} s · ${attacks} attacks over ${fights} fight beats${objective}${log.length ? ` · ${[...new Set(log)].slice(0, 4).join("; ")}` : ""}\n${await state()}`;
+  };
+
+  Object.assign(commands, {
+    step: { usage: "step", help: "local only: do the current tutorial step with real input; says what its card asked and how long it took", run: step },
+    tutorial: {
+      usage: "tutorial [all]",
+      help: "local only: every tutorial step in turn up to the portal (`all`: walk into the Arcadia portal too); one line per step",
+      async run([all]) {
+        localOnly("the tutorial macros (they hit training dummies)");
+        const lines: string[] = [];
+        for (let i = 0; i < 14; i++) {
+          const s = await player.snap();
+          if (!s.onboarding?.active || s.onboarding.allDone || s.body !== "portus") break;
+          if (s.onboarding.step === "portal" && all !== "all") {
+            lines.push("stopped before the portal step: `fl step` or `fl portal arcadia` walks in");
+            break;
+          }
+          const line = await step();
+          lines.push(line);
+          if (line.startsWith("NOT done")) break;
+        }
+        return `${lines.join("\n") || "no tutorial running here"}\n${await state()}`;
+      },
+    },
+    talk: { usage: "talk", help: "local only: walk to this planet's guide, press E, take every mission offered and close the panel", run: talk },
+    quest: {
+      usage: "quest [id] [sec]",
+      help: "local only: do a taken mission (default: the first open one) until done, you die, or sec pass (default 240): hunts fight what the pointer marks, finds walk there and press E, reaches walk in",
+      run: ([id, sec]) => (id && /^\d+$/.test(id) ? quest(undefined, Number(id)) : quest(id, Number(sec ?? 240))),
+    },
+    rise: {
+      usage: "rise",
+      help: "local only: after dying, Rise again, keep the rebirth pick as it is, rise in town and wait for the world",
+      async run() {
+        localOnly("rise (rebirth replaces and saves the character)");
+        for (let i = 0; i < 5; i++) {
+          const s = await player.snap();
+          if (!s.player?.dead && s.stage === "playing" && !s.loading) break;
+          const b = page.getByRole("button", { name: /^rise (again|in)/i }).filter({ visible: true }).first();
+          if (await b.count()) await b.click();
+          await page.waitForTimeout(1500);
+        }
+        await player.waitInWorld();
+        return state();
+      },
+    },
+  } satisfies Record<string, Command>);
+
+  /**
+   * One beat of the guard (between commands): drink below 45% HP, fight a hostile within reach
+   * outside the safe zones. Nothing while dead, loading, in a menu or with the pointer free (the
+   * driver left it so), and never on production (read-only there). What it did, or null.
+   */
+  const guardTick = async (): Promise<string | null> => {
+    if (TARGET === "prod") return null;
+    const s = await player.snap().catch(() => null);
+    if (!s || s.stage !== "playing" || s.loading || !s.player || s.player.dead || !s.input.pointerLocked) return null;
+    if ((s.ui.pauseMenuMode && s.ui.pauseMenuMode !== "hidden") || s.ui.overlays.length) return null;
+    const sip = await drink(s);
+    if (sip) return sip;
+    const ran = await retreat(s);
+    if (ran) return ran;
+    const foe = threat(s);
+    if (!foe || s.zone?.server === "safe") return null;
+    await fightBeat(s, foe);
+    return `fought ${foe.name ?? foe.kind}#${foe.id}`;
+  };
+  return { commands, guardTick };
 }
 
 /**
@@ -711,6 +1347,8 @@ function describe(s: Snap, events: FlEvent[]): string {
     s.dummies?.length && `dummies ${s.dummies.filter((d) => !d.down).length} standing, nearest ${where([...s.dummies].filter((d) => !d.down).sort((a, b) => a.dist - b.dist)[0])}`,
   ].filter(Boolean);
   if (marks.length) lines.push(marks.join(" · "));
+  const quests = (s.quests ?? []).map((q) => `${q.id} ${q.name} ${q.done ? "done" : q.taken ? `${q.progress}/${q.goal}` : "not taken"}${!q.done && typeof q.surface === "number" ? ` (${where(q as Target)})` : ""}`);
+  if (quests.length) lines.push(`missions: ${quests.join(" | ")}`);
   lines.push(`on screen: ${s.ui.visibleE2e.join(", ") || "-"}`);
   const toasts = events.filter((e) => e.kind === "toast" && s.t - e.t < 15_000).map((e) => `"${String(e.text ?? "").trim().replace(/\s+/g, " ")}"`);
   if (toasts.length) lines.push(`toasts (15 s): ${toasts.slice(-3).join(" ")}`);
@@ -760,4 +1398,152 @@ async function screen(page: Player["page"]): Promise<string> {
     return { text, controls };
   });
   return `${r.text.slice(0, 2500)}\n--- controls (${r.controls.length}) ---\n${r.controls.slice(0, 40).join("\n")}`;
+}
+
+/** What changed between two snapshots, in a few words ("HP 100→58 · +15 XP · A1 3→4/8"); "" when nothing did. */
+function changes(a: Snap | null, b: Snap): string {
+  const out: string[] = [];
+  if (a && a.body !== b.body && b.body) out.push(`now on ${b.body}`);
+  // A new connection on the same body without travel: the connection dropped and the game rejoined.
+  else if (a?.net && b.net && a.net.sessionId !== b.net.sessionId && !b.player?.dead && !a.player?.dead) out.push("the game reconnected (the connection dropped)");
+  const hp0 = a?.player?.hp, hp1 = b.player?.hp;
+  if (a && !a.player?.dead && b.player?.dead) out.push("YOU DIED (missions reset; `fl rise`)");
+  else if (a?.player?.dead && b.player && !b.player.dead) out.push("you are alive again");
+  else if (typeof hp0 === "number" && typeof hp1 === "number" && Math.round(hp0) !== Math.round(hp1) && a?.body === b.body) out.push(`HP ${n0(hp0)}→${n0(hp1)}${hp1 < hp0 && b.player?.inCombat ? " (something is hitting you)" : ""}`);
+  const lv0 = a?.you?.level, lv1 = b.you?.level;
+  if (lv0 && lv1 && lv1 !== lv0) out.push(`level ${lv0}→${lv1}`);
+  else if (a?.you && b.you && b.you.xp > a.you.xp) out.push(`+${b.you.xp - a.you.xp} XP`);
+  const st0 = a?.onboarding?.step, st1 = b.onboarding?.step;
+  if (a && b.onboarding && st0 !== st1) out.push(st1 ? `tutorial step now ${st1}` : "tutorial done");
+  for (const q of b.quests ?? []) {
+    const was = a?.quests?.find((x) => x.id === q.id);
+    if (!was || a?.body !== b.body) continue;
+    if (q.done && !was.done) out.push(`${q.id} ${q.name} DONE`);
+    else if (q.taken && !was.taken) out.push(`took ${q.id} ${q.name}`);
+    else if (q.progress !== was.progress) out.push(`${q.id} ${was.progress}→${q.progress}/${q.goal}`);
+  }
+  // The pause menu and the panels don't stop the world (Haiku died reading How to play outside town).
+  const menu = b.ui.pauseMenuMode && b.ui.pauseMenuMode !== "hidden" ? "the pause menu" : b.ui.overlays.length ? "a panel" : null;
+  const foe = (b.npcs ?? []).filter((n) => n.hostile && !n.dead && n.dist < 25).sort((x, y) => x.dist - y.dist)[0];
+  if (menu && b.zone?.server === "danger" && foe && !b.player?.dead) out.push(`WARNING ${menu} is open outside a safe zone and the world doesn't pause: ${foe.name ?? foe.kind} ${n0(foe.dist)} m away`);
+  return out.join(" · ");
+}
+
+/** "fought 2 Hopbit, drank a tonic small at HP 30" from the guard's notes ("fought <name>#<id>"). */
+function summarize(notes: string[]): string {
+  const foes = new Map<string, Set<string>>();
+  const other: string[] = [];
+  for (const n of notes) {
+    const m = n.match(/^fought (.+)#(.+)$/);
+    if (m) foes.set(m[1]!, (foes.get(m[1]!) ?? new Set()).add(m[2]!));
+    else other.push(n);
+  }
+  return [...[...foes].map(([name, ids]) => `fought ${ids.size} ${name}`), ...other].join(", ");
+}
+
+const mmss = (ms: number) => `${String(Math.floor(ms / 60_000)).padStart(2, "0")}:${String(Math.floor((ms % 60_000) / 1000)).padStart(2, "0")}`;
+
+/** `fl report` and report.txt: the run in a dozen lines, frame times per place included. */
+function sessionReport(entries: Entry[], perf: PerfSample[], s: Snap | null, consoleErrors: number, startedAt: number, died: number): string {
+  const first = entries[0]?.at ?? startedAt;
+  const last = entries.at(-1);
+  const busy = entries.reduce((n, e) => n + e.ms, 0);
+  const span = last ? last.at + last.ms - first : 0;
+  const lines = [
+    `${DRIVER ? `driver ${DRIVER} · ` : ""}${mmss(span)} from the first command to the last · ${entries.length} commands (${entries.filter((e) => !e.ok).length} errors) · game busy ${mmss(busy)}, driver thinking ${mmss(Math.max(0, span - busy))}`,
+  ];
+  const marks = entries.filter((e) => /DONE|tutorial done|now on /.test(e.out)).map((e) => `${mmss(e.at + e.ms - first)} ${e.out.match(/since your last command: (.*)$/m)?.[1] ?? e.line}`);
+  if (marks.length) lines.push(`milestones: ${marks.slice(0, 12).join(" | ")}`);
+  if (s) {
+    const quests = (s.quests ?? []).map((q) => `${q.id} ${q.done ? "done" : q.taken ? `${q.progress}/${q.goal}` : "not taken"}`).join(", ");
+    lines.push(`now: ${brief(s)} · Lv ${s.you?.level ?? "?"}${s.onboarding?.active ? ` · tutorial ${s.onboarding.allDone ? "all done" : `at ${s.onboarding.step}`}` : ""}${quests ? ` · missions ${quests}` : ""}`);
+  }
+  lines.push(`deaths ${died} · console errors ${consoleErrors}`);
+  if (perf.length) {
+    const loads = perf.map((p) => p.load).sort((a, b) => a - b);
+    lines.push(`machine load (1-min average, ${availableParallelism()} cores): median ${loads[Math.floor(loads.length / 2)]} · max ${loads.at(-1)}${loads[Math.floor(loads.length / 2)]! > availableParallelism() * 2 ? " — busy: other jobs slowed this run" : ""}`);
+  }
+  // Frame times per place, only while playing (loading screens and travel are their own thing).
+  const byBody = new Map<string, PerfSample[]>();
+  for (const p of perf) if (p.playing && p.body && p.frames > 0) byBody.set(p.body, [...(byBody.get(p.body) ?? []), p]);
+  for (const [body, list] of byBody) {
+    const frames = list.reduce((n, p) => n + p.frames, 0);
+    const p95s = list.map((p) => p.p95).sort((x, y) => x - y);
+    lines.push(
+      `frames on ${body} (${list.length * 5} s${VIDEO ? ", filming on" : ""}): ${(frames / (list.length * 5)).toFixed(0)} fps · median p95 ${p95s[Math.floor(p95s.length / 2)]!.toFixed(1)} ms · worst 5 s p95 ${p95s.at(-1)!.toFixed(1)} ms · longest frame ${Math.max(...list.map((p) => p.max)).toFixed(0)} ms · ${list.reduce((n, p) => n + p.over100, 0)} frames over 100 ms`,
+    );
+  }
+  const loading = perf.filter((p) => !p.playing).length;
+  if (loading) lines.push(`not playing (loading, travel, home page) for about ${loading * 5} s of samples`);
+  lines.push(`evidence: ${DIR} (transcript.log, perf.jsonl, shots/${VIDEO ? ", video.mp4 when the session ends" : ""})`);
+  return lines.join("\n");
+}
+
+/**
+ * The film as an MP4: the game on top, and under it a strip with the driver, the clock, the command
+ * running or its answer, and the thinking gap before the next one. Captions are drawn as PNGs in a
+ * spare page (this ffmpeg has no text filters) and stacked under the game with ffmpeg.
+ */
+async function finishVideo(film: Film, browser: Browser, entries: Entry[]): Promise<string> {
+  const raw = film.file;
+  const seconds = film.seconds;
+  const filmStart = film.startedAt;
+  const first = entries[0]?.at ?? filmStart;
+  const t = (at: number) => Math.max(0, (at - filmStart) / 1000);
+
+  // Strip segments: [from, to) seconds of film, two lines each.
+  type Seg = { from: number; head: string; body: string; tone: "run" | "ok" | "err" | "idle" };
+  const segs: Seg[] = [{ from: 0, head: `${DRIVER || "driver"} · waiting for the first command`, body: "", tone: "idle" }];
+  entries.forEach((e, i) => {
+    const clock = mmss(e.at - first);
+    const next = entries[i + 1];
+    const answer = e.out.split("\n")[0]!.slice(0, 150);
+    const change = e.out.match(/since your last command: (.*)$/m)?.[1]?.slice(0, 120);
+    if (e.ms >= 400) segs.push({ from: t(e.at), head: `${DRIVER || "driver"} · ${clock} · #${i + 1}  ▶ ${e.line.slice(0, 80)}`, body: "running…", tone: "run" });
+    const gap = next ? ` · then ${((next.at - e.at - e.ms) / 1000).toFixed(1)} s thinking` : "";
+    segs.push({ from: t(e.at + e.ms), head: `${DRIVER || "driver"} · ${clock} · #${i + 1}  ${e.ok ? "✓" : "✗"} ${e.line.slice(0, 80)} (${(e.ms / 1000).toFixed(1)} s)${gap}`, body: `→ ${answer}${change ? `   [${change}]` : ""}`, tone: e.ok ? "ok" : "err" });
+  });
+  segs.sort((a, b) => a.from - b.from);
+
+  const caps = path.join(DIR, "video-strip");
+  rmSync(caps, { recursive: true, force: true });
+  mkdirSync(caps, { recursive: true });
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 84 } });
+  const strip = await ctx.newPage();
+  await strip.setContent(`<body style="margin:0;background:#0d1117;color:#e6edf3;font:15px -apple-system,Helvetica,sans-serif;height:84px;overflow:hidden">
+    <div id="h" style="padding:10px 14px 4px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+    <div id="b" style="padding:0 14px;color:#9da7b3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div></body>`);
+  // A segment shorter than a frame is dropped, and its time goes to the one before it, so every later
+  // caption keeps its place on the film's clock.
+  const kept = segs.filter((g, i) => (segs[i + 1]?.from ?? seconds) - g.from > 0.02 || i === 0);
+  const list: string[] = [];
+  for (let i = 0; i < kept.length; i++) {
+    const g = kept[i]!;
+    const dur = (kept[i + 1]?.from ?? seconds) - g.from;
+    if (dur <= 0) continue;
+    await strip.evaluate(([h, b, c]) => {
+      document.getElementById("h")!.textContent = h!;
+      document.getElementById("b")!.textContent = b!;
+      document.getElementById("h")!.style.color = c!;
+    }, [g.head, g.body, { run: "#f0b429", ok: "#e6edf3", err: "#ff7b72", idle: "#9da7b3" }[g.tone]] as const);
+    const png = path.join(caps, `${String(i).padStart(4, "0")}.png`);
+    await strip.screenshot({ path: png });
+    list.push(`file '${png}'`, `duration ${dur.toFixed(3)}`);
+  }
+  await ctx.close();
+  if (list.length) list.push(list.at(-2)!); // the concat demuxer needs the last picture twice
+  const listFile = path.join(caps, "strip.txt");
+  writeFileSync(listFile, list.join("\n") + "\n");
+
+  // From a second before the first command to two after the last answer.
+  const from = Math.max(0, t(first) - 1);
+  const lastEnd = entries.length ? t(entries.at(-1)!.at + entries.at(-1)!.ms) + 2 : seconds;
+  const mp4 = path.join(DIR, "video.mp4");
+  execFileSync(
+    "ffmpeg",
+    ["-y", "-v", "error", "-i", raw, "-f", "concat", "-safe", "0", "-i", listFile, "-filter_complex", "[0:v]fps=25,scale=1280:720,format=yuv420p[g];[1:v]fps=25,scale=1280:84,format=yuv420p[s];[g][s]vstack=inputs=2[o]", "-map", "[o]", "-ss", from.toFixed(2), "-t", Math.max(1, Math.min(seconds, lastEnd) - from).toFixed(2), ...(process.platform === "darwin" ? ["-c:v", "h264_videotoolbox", "-b:v", "3M"] : ["-c:v", "libx264", "-preset", "veryfast", "-crf", "26"]), "-movflags", "+faststart", mp4],
+    { stdio: "inherit", timeout: 20 * 60_000 },
+  );
+  rmSync(raw, { force: true }); // the strip's copy is the one to keep
+  return mp4;
 }
