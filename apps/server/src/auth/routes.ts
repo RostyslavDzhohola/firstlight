@@ -19,6 +19,7 @@ import type { Identity } from "./identity.ts";
 import { banKey, directRequestIp, proxiedRequestIp } from "./ip.ts";
 import { botSecret, checkToolSecret } from "./loadtest.ts";
 import { botBudget } from "../world/botBudget.ts";
+import { createNameLimits, NAME_LIMIT_MESSAGE } from "./nameLimits.ts";
 
 /** mission_state_json → `life.playMs` (0 for older rows without per-life progress). */
 function lifePlayMs(ms: unknown): number {
@@ -107,6 +108,7 @@ export function mountAccountRoutes(app: Express, a: Accounts, cfg: AccountsConfi
     res.json({ ok: true, saving: a.mailHealth.state() });
   });
 
+  const nameLimits = createNameLimits();
   app.post("/api/account/name", noStore, async (req, res) => {
     const id = await bearerIdentity(a, req);
     if (!id || id.loadtest) {
@@ -114,6 +116,21 @@ export function mountAccountRoutes(app: Express, a: Accounts, cfg: AccountsConfi
       return;
     }
     const raw = typeof req.body?.name === "string" ? req.body.name : "";
+    // Limits per account and address, then a no-op for the current name, then the cooldown (D-security-6).
+    const now = Date.now();
+    if (!nameLimits.attempt(id.userId, directRequestIp(req), now)) {
+      res.status(429).json({ ok: false, error: "slow down", message: NAME_LIMIT_MESSAGE });
+      return;
+    }
+    const current = getAccount(a.db, id.userId)?.displayName ?? null;
+    if (current !== null && raw.trim() === current) {
+      res.json({ ok: true, name: current });
+      return;
+    }
+    if (nameLimits.coolingDown(id.userId, now)) {
+      res.status(429).json({ ok: false, error: "slow down", message: NAME_LIMIT_MESSAGE });
+      return;
+    }
     const r = setDisplayName(a.db, id.userId, raw);
     if (!r.ok) {
       res.status(r.error === "taken" ? 409 : 400).json({ ok: false, error: r.error, message: NAME_MESSAGES[r.error] });
@@ -122,6 +139,7 @@ export function mountAccountRoutes(app: Express, a: Accounts, cfg: AccountsConfi
     // Keep the auth user's name in step: it is the JWT `name` and the name carried over on save.
     const ctx = await a.auth.$context;
     if (await ctx.internalAdapter.findUserById(id.userId)) await ctx.internalAdapter.updateUser(id.userId, { name: r.name });
+    nameLimits.changed(id.userId, now);
     res.json({ ok: true, name: r.name });
   });
 

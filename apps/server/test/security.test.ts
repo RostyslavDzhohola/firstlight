@@ -10,6 +10,7 @@ import { PLAY_LIMITS, type Game } from "../src/app.ts";
 import { isTestAccount } from "../src/db/index.ts";
 import { BOT_BUDGET } from "../src/world/botBudget.ts";
 import { TOOL_GUESSES } from "../src/auth/loadtest.ts";
+import { NAME_LIMITS } from "../src/auth/nameLimits.ts";
 import { api, Browser, decodeJwt, play, startAuthServer, userIdOf, type AuthServer } from "./auth-helpers.ts";
 import { Client } from "@colyseus/sdk";
 import { joinAs, playRequest, safeLeave, startServer } from "./helpers.ts";
@@ -23,6 +24,7 @@ const rooms: Room[] = [];
 const budget = { ...BOT_BUDGET };
 const guesses = { ...TOOL_GUESSES };
 const gate = { ...PLAY_GATE };
+const names = { ...NAME_LIMITS };
 
 afterEach(async () => {
   for (const r of rooms.splice(0)) await safeLeave(r);
@@ -33,6 +35,7 @@ afterEach(async () => {
   Object.assign(BOT_BUDGET, budget);
   Object.assign(TOOL_GUESSES, guesses);
   Object.assign(PLAY_GATE, gate);
+  Object.assign(NAME_LIMITS, names);
   vi.restoreAllMocks();
 });
 
@@ -291,5 +294,39 @@ describe("finding 5: play tokens are bound to the session that issued them", () 
     expect((await api(server, "/api/account/me", token)).status).toBe(200);
     await g.client.signOut();
     expect((await api(server, "/api/account/me", token)).status).toBe(401);
+  });
+});
+
+describe("finding 6: name changes are limited", () => {
+  const setName = (token: string, name: string, ip = "198.51.100.120") => api(server!, "/api/account/name", token, { body: { name }, headers: { "x-real-ip": ip } });
+
+  it("answers an unchanged name without a change, and makes the next change wait", async () => {
+    server = await startAuthServer();
+    const token = await new Browser(server).playToken();
+    expect((await setName(token, "Alpha_1")).json).toEqual({ ok: true, name: "Alpha_1" });
+    const spy = vi.spyOn((await server.accounts.auth.$context).internalAdapter, "updateUser");
+    expect((await setName(token, " Alpha_1 ")).json).toEqual({ ok: true, name: "Alpha_1" });
+    expect(spy).not.toHaveBeenCalled();
+    const again = await setName(token, "Beta_1");
+    expect(again.status).toBe(429);
+    expect(again.json.ok).toBe(false);
+  });
+
+  it("limits attempts per account and per address", async () => {
+    NAME_LIMITS.perAccount = 3;
+    NAME_LIMITS.cooldownMs = 0;
+    server = await startAuthServer();
+    const a = await new Browser(server).playToken();
+    for (const n of ["x", "Gamma_1", "y"]) expect((await setName(a, n)).status).not.toBe(429);
+    expect((await setName(a, "Delta_1")).status).toBe(429);
+
+    NAME_LIMITS.perAccount = 100;
+    NAME_LIMITS.perIp = 2;
+    const b = await new Browser(server).playToken();
+    const c = await new Browser(server).playToken();
+    expect((await setName(b, "Epsilon_1", "198.51.100.130")).json.ok).toBe(true);
+    expect((await setName(c, "Zeta_1", "198.51.100.130")).json.ok).toBe(true);
+    expect((await setName(c, "Eta_1", "198.51.100.130")).status).toBe(429);
+    expect((await setName(c, "Eta_1", "198.51.100.131")).json.ok).toBe(true);
   });
 });

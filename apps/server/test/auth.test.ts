@@ -11,6 +11,7 @@ import { OTP_PER_ACCOUNT_PER_DAY, OTP_PUBLIC_PER_IP_PER_DAY, OTP_PUBLIC_SHARE } 
 import type { AccountLinkedEvent } from "../src/auth/links.ts";
 import { api, Browser, decodeJwt, joinWithToken, play, startAuthServer, type AuthServer } from "./auth-helpers.ts";
 import { waitFor } from "./helpers.ts";
+import { NAME_LIMITS } from "../src/auth/nameLimits.ts";
 
 /** Dev outbox with a switchable delay and failure (the helper reads codes from any DevOutbox). */
 class ControlledOutbox extends DevOutbox {
@@ -315,8 +316,14 @@ describe("display names", () => {
     expect((await api(server, "/api/account/name", t2, { body: { name: "bad name" } })).json.error).toBe("chars");
     expect((await api(server, "/api/account/name", t2, { body: { name: "n1gg3r_x" } })).json.error).toBe("filtered");
     expect((await api(server, "/api/account/name", t2, { body: { name: "xX_fag_Xx" } })).json.error).toBe("filtered");
-    // the owner can re-set their own name with different case
-    expect((await api(server, "/api/account/name", t1, { body: { name: "ANN_1" } })).json.ok).toBe(true);
+    // the owner can re-set their own name with different case (once the change cooldown is over, D-security-6)
+    const cooldown = NAME_LIMITS.cooldownMs;
+    NAME_LIMITS.cooldownMs = 0;
+    try {
+      expect((await api(server, "/api/account/name", t1, { body: { name: "ANN_1" } })).json.ok).toBe(true);
+    } finally {
+      NAME_LIMITS.cooldownMs = cooldown;
+    }
     // and the name is what other players see
     const room = await joinWithToken(server, t1, "portus");
     rooms.push(room);
