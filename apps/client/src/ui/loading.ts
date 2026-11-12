@@ -3,9 +3,13 @@
 // Re-entrant: mid-game status lines ("Applying graphics settings…", "Reconnecting…") use a compact
 // card over the world instead of the full screen. A failed boot swaps the progress for an error with
 // a Retry button (showLoadingError); the next setLoading() goes back to progress. While the full
-// screen loads, a funny line at the bottom changes every few seconds (loadingQuips.ts, D-load-5).
+// screen loads, a funny line at the bottom changes every few seconds (loadingQuips.ts, D-load-5);
+// with the repo public, some of them say it's open source and a quiet link leads to it (D-showcase-3).
+// Behind it all, stills of what awaits crossfade slowly, the destination's first (loadingStills.ts).
 
-import { QUIP_MS, QUIPS, quipDeck, reportsTrouble } from "./loadingQuips.ts";
+import { config } from "../config.ts";
+import { loaderQuips, QUIP_MS, quipDeck, reportsTrouble } from "./loadingQuips.ts";
+import { STILLS, stillsSlideshow } from "./loadingStills.ts";
 
 export type BodyKey = "portus" | "arcadia" | "hollowmere" | "meridian";
 
@@ -33,6 +37,19 @@ export const TIPS = [
   "Hold the right mouse button to aim, block or charge, depending on your weapon.",
 ];
 
+/** A WebGPU start still pending after a few seconds (rendererStart's "webgpu-slow", D-showcase-1). */
+export const WEBGPU_SLOW_LINE = "Still starting WebGPU…";
+/** WebGL2 takes over from a WebGPU try that didn't start in time ("webgl2-fallback"). */
+export const WEBGL2_FALLBACK_LINE = "Starting WebGL2…";
+
+/** The Renderer step's note for a status line: in plain words while WebGPU takes its time. */
+export function rendererNote(text: string): string {
+  const t = text.trim();
+  if (t.startsWith(WEBGPU_SLOW_LINE.slice(0, -1))) return "the faster path; WebGL2 is the backup";
+  if (t.startsWith(WEBGL2_FALLBACK_LINE.slice(0, -1))) return "WebGL2, the backup path";
+  return BOOT_STEPS[0].note;
+}
+
 export interface LoadingPhase {
   step: number;
   /** Destination body when the line names one ("Travelling to Arcadia…"). */
@@ -49,7 +66,7 @@ export function loadingPhase(text: string, prev: LoadingPhase = { step: 0, body:
     const key = travel[1]!.toLowerCase();
     return { step: 1, body: key in BODY_INFO ? (key as BodyKey) : prev.body, compact: false };
   }
-  if (/^(Loading the game|Starting the renderer)/i.test(t)) return { ...prev, step: 0, compact: false };
+  if (/^(Loading the game|Starting the renderer|Still starting WebGPU|Starting WebGL2)/i.test(t)) return { ...prev, step: 0, compact: false };
   if (/^Reconnecting/i.test(t)) return { ...prev, step: 1, compact: true };
   if (/^Connecting/i.test(t)) return { ...prev, step: 1 };
   if (/^(Building the world|Loading characters)/i.test(t)) return { ...prev, step: 2 };
@@ -104,8 +121,9 @@ let root: HTMLElement | null = null;
 let phase: LoadingPhase = { step: 0, body: null, compact: false };
 let tipIndex = Math.floor(Math.random() * TIPS.length);
 let tipTimer = 0;
-const quips = quipDeck(QUIPS);
+const quips = quipDeck(loaderQuips(config.publicRepo));
 let quipTimer = 0;
+let stills: ReturnType<typeof stillsSlideshow> | null = null;
 const refs: {
   title?: HTMLElement; blurb?: HTMLElement; status?: HTMLElement; pct?: HTMLElement; fill?: HTMLElement;
   steps?: HTMLElement[]; tip?: HTMLElement; dots?: HTMLElement[]; badge?: HTMLElement; bar?: HTMLElement;
@@ -134,6 +152,8 @@ function build(): HTMLElement {
   const orbit = el("div", "fl-loading__orbit", bg);
   for (let i = 0; i < 3; i++) el("i", "", orbit);
   el("div", "fl-loading__orb", bg);
+  // In-game stills over the starfield (decorative: inside the aria-hidden background), a scrim on them.
+  stills = stillsSlideshow(el("div", "fl-loading__stills", bg), { stills: STILLS });
   el("div", "fl-grain", bg);
 
   const page = el("div", "fl-loading__page", root);
@@ -183,6 +203,13 @@ function build(): HTMLElement {
   refs.quip.hidden = true;
   refs.quipLines = [el("span", "", refs.quip), el("span", "", refs.quip)];
   el("span", "fl-loading__meta", side, "Pointer lock comes back when the world is ready");
+  if (config.publicRepo) {
+    // Quiet and never focused for you: a new tab, so the load (and the pointer lock after it) carries on here.
+    const repo = el("a", "fl-loading__repo", side, "Open source: contribute or fork it on GitHub");
+    repo.href = config.repoUrl;
+    repo.target = "_blank";
+    repo.rel = "noopener noreferrer";
+  }
   showTip();
   return root;
 }
@@ -238,7 +265,17 @@ export function setLoading(text: string, frac: number): void {
     last.compact = phase.compact;
   }
   runQuips(!phase.compact && !reportsTrouble(text));
-  if (text !== last.text) refs.status!.textContent = last.text = text;
+  // Stills on the full screen only (first load and travel), the destination's first.
+  if (phase.compact) stills!.stop();
+  else {
+    stills!.start(phase.body);
+    stills!.body(phase.body);
+  }
+  if (text !== last.text) {
+    refs.status!.textContent = last.text = text;
+    // The Renderer step's note follows its own lines (WebGPU still starting, WebGL2 the backup).
+    if (phase.step === 0 && !phase.compact) refs.steps![0]!.querySelector("small")!.textContent = rendererNote(text);
+  }
   const pct = Math.max(0, Math.min(100, Math.round(frac * 100)));
   if (pct !== last.pct) {
     last.pct = pct;
@@ -283,6 +320,7 @@ export function showLoadingError(e: LoadingError): void {
   last.compact = false;
   phase = { ...phase, compact: false };
   runQuips(false);
+  stills!.stop();
   r.classList.add("fl-loading--error");
   const box = el("div", "fl-loading__error", refs.card);
   box.setAttribute("role", "alert");
@@ -304,9 +342,12 @@ export function showLoadingError(e: LoadingError): void {
 export function hideLoading(): void {
   if (!root || root.hidden) return;
   clearError(root);
+  // Keys belong to the world now, not to a link (the repo link) someone tabbed to while waiting.
+  if (document.activeElement instanceof HTMLElement && root.contains(document.activeElement)) document.activeElement.blur();
   root.hidden = true;
   clearInterval(tipTimer);
   runQuips(false);
+  stills?.stop(); // nothing more downloads, and the pictures' memory goes back to the game
   // Next show starts fresh at the right step; a compact card must not stick to a full load.
   phase = { step: 0, body: phase.body, compact: false };
 }

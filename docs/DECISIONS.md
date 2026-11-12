@@ -1464,3 +1464,21 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   hiding at 160 m with grass, far terrain and trees still streaming in, the town giving up after
   15–18 s on a slow network for the whole visit, and Low's 512² character textures kept after a
   tier rise.
+- **D-showcase-1 (owner, 2026-10-18):** the WebGPU start deadline is 20 s (was 8 s), and the wait
+  is filled. Asked "Should WebGPU get 20 s to start instead of 8? WebGPU would win more often on a
+  slow start, but you could wait up to 12 s longer when it doesn't come", the owner: "Yeah, let's
+  stay open, and we can just show some kind of screenshots of what awaits them, or tell them, 'Hey,
+  you can contribute to this game or whatever, or you can clone this game and build it yourself.'"
+  `WEBGPU_INIT_TIMEOUT_MS` (`render/rendererStart.ts`) is 20 000; everything D-renderer-1 and
+  D-renderer-2 key off it follows: a start past 20 s falls back to WebGL2 and writes the device
+  record, `lateMs` counts from the start as before, and the second chance's "within the start
+  deadline" is 20 s too (a device that answers in 12 s now grants the next visit's try), so a
+  device whose WebGPU only hangs at page load pays one 20 s wait per 7-day record, never one per
+  visit. While a WebGPU start is still pending after 4 s (`WEBGPU_SLOW_NOTICE_MS`) the loader's
+  status reads "Still starting WebGPU…" and the Renderer step's note "the faster path; WebGL2 is
+  the backup"; when WebGL2 takes over, "Starting WebGL2…" / "WebGL2, the backup path"
+  (`startRenderer`'s `onStage`, `loading.ts` `rendererNote`), nothing that reads like an error,
+  and the quips keep running under it. J1.5 now expects the 20 s wait on the first visit, the two
+  lines on the loader, and none of that on the visit that skips WebGPU. Why: the owner's call;
+  High's GTAO and TRAA need WebGPU (`render/quality.ts`), and graphics quality comes before load
+  time (D-load-5).
