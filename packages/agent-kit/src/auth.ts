@@ -87,13 +87,16 @@ function expiryOf(token: string): number {
 
 /**
  * A guest account through Better Auth at `authUrl` (the site origin in production, the game server
- * itself locally). `sessionFile` keeps the session cookie between runs.
+ * itself locally). `sessionFile` keeps the session cookie between runs (it is the character: keep it private).
  */
-export function guestSession(authUrl: string, sessionFile?: string): TokenSource {
+export function guestSession(authUrl: string, sessionFile?: string, origin?: string): TokenSource {
   const base = authUrl.replace(/\/+$/, "");
   let cookie = readSession(sessionFile, base);
   let cached: { token: string; exp: number } | null = null;
-  const headers = (): Record<string, string> => ({ Origin: base, ...(cookie ? { Cookie: cookie } : {}) });
+  // Better Auth checks the Origin of requests that carry its cookie against the server's trusted
+  // origins (the site's own origin): `origin` names it when `authUrl` isn't it (a dev server reached
+  // directly, whose trusted origin is the Vite one).
+  const headers = (): Record<string, string> => ({ Origin: (origin ?? base).replace(/\/+$/, ""), ...(cookie ? { Cookie: cookie } : {}) });
 
   async function signIn(): Promise<void> {
     const res = await fetch(`${base}/api/auth/sign-in/anonymous`, { method: "POST", headers: { ...headers(), "Content-Type": "application/json" }, body: "{}", signal: AbortSignal.timeout(20_000) });

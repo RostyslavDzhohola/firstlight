@@ -201,6 +201,7 @@ async function main() {
   const joined = await agent.connect({
     url,
     authUrl: flag("auth-url") ?? process.env.FL_AUTH_URL,
+    authOrigin: process.env.FL_AUTH_ORIGIN,
     name,
     starter: flag("starter") ?? "unit7",
     ...(flag("dev") ? { token: `dev:${name.toLowerCase()}:${name}` } : { sessionFile: process.env.FL_AGENT_SESSION }),

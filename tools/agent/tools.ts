@@ -123,6 +123,7 @@ export const TOOLS: readonly ToolDef[] = [
         const r = await agent.connect({
           url,
           authUrl: (a.authUrl ?? process.env.FL_AUTH_URL) as string | undefined,
+          authOrigin: process.env.FL_AUTH_ORIGIN,
           name,
           starter: (a.starter ?? "unit7") as string,
           body: a.body as BodyId | undefined,

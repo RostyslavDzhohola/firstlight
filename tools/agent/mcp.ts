@@ -61,6 +61,9 @@ export async function handleRpc(session: Session, msg: Rpc): Promise<Record<stri
 }
 
 async function main() {
+  // stdout carries the protocol and nothing else: whatever a library prints (the Colyseus SDK
+  // reports its reconnects with console.log) goes to stderr.
+  console.log = console.info = console.debug = (...args: unknown[]) => console.error(...args);
   const session = new Session((line) => process.stderr.write(`[firstlight] ${line}\n`));
   const out = (m: unknown) => process.stdout.write(`${JSON.stringify(m)}\n`);
   const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });

@@ -1464,3 +1464,44 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   hiding at 160 m with grass, far terrain and trees still streaming in, the town giving up after
   15–18 s on a slow network for the whole visit, and Low's 512² character textures kept after a
   tier rise.
+
+- **D-agents-1 (2026-11-12):** AI agents are players, and they are labelled. A join request that
+  says so (`x-firstlight-agent: 1` or `agent: true` on `POST /api/play`; the kit always sends it) is
+  seated as an agent: `PlayerState.agent` is synced to every client (an `AI` chip on the nameplate
+  and in the Tab list), and a guest account that asks once is an agent's from then on
+  (`agent_account`, a side table like `test_account`; the flag follows the guest into a brand-new
+  saved account, not into an older one it merges with). Agents keep their own flag instead of
+  reusing `is_test`: they are real players, not our automation. The levels and medals boards, the
+  Hall of Firsts, the home page's online names and count and the play statistics are people's;
+  `/api/online` and `/stats` report agents apart. A saved account that plays with the flag is an
+  agent for that session only (its board row stays). Why: the owner wants agents and people in the
+  same worlds ("Anyone can play it"), and people must be able to tell which is which; an account
+  flagged by one experiment shouldn't lose its place on a board for good.
+- **D-agents-2 (2026-11-12):** `AGENTS_ENABLED` is on outside production and off in production
+  unless set to `1` (`0` turns agents off anywhere); a refused join answers `403 {error: "agents
+  off"}`. Why: deploying this lane must not change who can join the public game; letting agents
+  onto production is the owner's call (capacity, moderation, whether they may earn medals).
+- **D-agents-3 (2026-11-12):** agents can't crowd people out: at most `AGENTS_PER_IP` (4) at once
+  from one address and `AGENTS_PER_ROOM` (8 of 40 seats) in one copy of a world. The matchmaker
+  sends an agent to a copy with room for one more, opens a new copy if it may, and otherwise refuses
+  with `403 {error: "agent limit", message}` instead of putting it in the people's queue. Bodies
+  that linger after a drop and seats not used yet count; an agent coming back for its own body
+  doesn't count against itself; loopback counts like any address. Why: a room has 40 seats and
+  `SOLO_FILL_LIMIT` 36, so 8 leaves people at least 28; four per address is enough for a person's
+  experiments and too few to fill a world from one machine.
+- **D-agents-4 (2026-11-12):** the flag is honest labelling, not security. A script that leaves it
+  out plays as an unlabelled player under the same server rules, and nothing can tell it from a
+  person at a keyboard; the docs say so. No detection is attempted. Why: every rule that matters
+  (movement, damage, loot, rate limits) is already enforced for every client; guessing who is a bot
+  would mislabel people.
+- **D-agents-5 (2026-11-12):** the agent kit plays the client's rules, not the server's limits: run
+  6 m/s, sprint 9 m/s, one roll per 1.3 s, 20 inputs a second, the same push-out against the shared
+  solids. Each step covers the time since the last input sent, and the agent stands still while the
+  server sends no state patches for 170 ms. Why: the server's validator pays for at most 0.25 s of
+  movement between two inputs it handles, so on a stalling server a sprinting body (a person's too)
+  is snapped back; measured on the shared machine, stalls of 200-460 ms gave 2-11 corrections per
+  25 s of sprinting before, none after.
+- **D-agents-6 (2026-11-12):** agents don't fight people unless asked to: `attack` refuses a player
+  target without `pvp`, and the MCP tool describes `pvp` as self-defence only. PvP itself stays by
+  the server's rules for everyone. Why: an agent that hunts people at machine reaction time is the
+  quickest way to make people leave.

@@ -38,6 +38,8 @@ export interface ConnectOptions {
   url: string;
   /** Where Better Auth answers (`/api/auth/*`): the site origin in production. Default: `url`. */
   authUrl?: string;
+  /** The Origin header for sign-in requests, when the server trusts another origin than `authUrl` (a dev server reached directly trusts the Vite origin). */
+  authOrigin?: string;
   /** Display name to ask for (3-16 letters, digits or _). The server may refuse it; you keep a generated one. */
   name?: string;
   /** A new character's starter: index or id (hexwick, ash, kappa, unit7, ninja). */
@@ -175,7 +177,7 @@ export class FirstlightAgent {
     if (opts.token) this.tokens = fixedToken(opts.token);
     else if (opts.dev) this.tokens = fixedToken(`dev:agent${Math.random().toString(36).slice(2, 10)}:${opts.name ?? "Agent"}`);
     else {
-      this.tokens = guestSession(opts.authUrl ?? this.url, opts.sessionFile);
+      this.tokens = guestSession(opts.authUrl ?? this.url, opts.sessionFile, opts.authOrigin);
       if (opts.name) {
         const r = await claimName(this.url, await this.tokens.get(), opts.name);
         if (!r.ok) nameNote = `name not set: ${r.message}`;
@@ -326,7 +328,21 @@ export class FirstlightAgent {
     this.stopTimers();
     this.finish({ ok: false, reason: "left the body" });
     await Promise.race([room?.leave().catch(() => {}), sleep(1500)]);
-    await this.join(body);
+    // The old room is gone: a slow server (a timeout, a dropped socket) gets a few more tries before
+    // this gives up; a refusal (a cap, a ban) is final at once.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await this.join(body);
+        return;
+      } catch (e) {
+        if (e instanceof AgentError || attempt >= 3 || this.status === "closed") {
+          if (this.status !== "closed") this.status = "offline";
+          throw e;
+        }
+        this.log(`joining ${body} failed (${(e as Error).message}): trying again`);
+        await sleep(2000 * (attempt + 1));
+      }
+    }
   }
 
   /**
