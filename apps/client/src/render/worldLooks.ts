@@ -141,7 +141,7 @@ export const WORLD_LOOKS: Record<BodyId, WorldLook> = {
     meadow: {
       flowerShare: 0.6, flowerBase: 0.025, heads: [0xf7f3e8, 0xf5c518, 0xe98fb4, 0x8a6ad6], eye: 0xf0b020,
       glow: [0, 0, 0, 0], stem: [1.3, 1.25, 1.1, 1.45], size: [1, 0.72, 0.68, 1],
-      lushRoot: 0x173f1c, lushTip: 0x5c9a36, dryRoot: 0x3a4416, dryTip: 0xb8ae5a, pull: 0.78, dryBias: -0.22, height: 1.3, blade: 0.68, sheen: 0.3, under: 0.8, shore: 1,
+      lushRoot: 0x173f1c, lushTip: 0x5c9a36, dryRoot: 0x3a4416, dryTip: 0xb8ae5a, pull: 0.78, dryBias: -0.22, height: 1.0, blade: 0.68, sheen: 0.3, under: 0.8, shore: 1,
     },
     clouds: { cover: 0.5, height: 320, scale: 900, stretch: [1, 1, 1], lit: 0xffffff, shade: 0x8fa8d0, opacity: 0.94, speed: 1.6 },
     ground: { rock: 0x7b8780, dirt: 0x6b5238, sand: 0xffe2a0, snow: 0xf6fbff, snowLine: 70, moss: 0.7, mossColor: 0x4f6a26, cracks: 0, lichen: 0xc9c98a, lichenAmt: 0.45 },

@@ -27,8 +27,9 @@ Sonnet 5.5. What it adds:
 - **Measured on the final build (quiet M1, 1280×720, default tier):** 60 fps standing and after a sprint on
   Portus, Arcadia, Hollowmere and Meridian, on WebGPU and on WebGL2 (p50 16.7 ms, p95 16.7–16.8 ms, no
   frame over 100 ms, no console errors). `pnpm typecheck` clean; `pnpm test` 2,837 passed, 0 failed;
-  `pnpm balance` 650/650 in band; `pnpm e2e:gate` passed (32 journeys on WebGL2, 31 on WebGPU; run
-  before the last HUD review fixes and trial-marker fixes). Two Sonnet 5.5 play-tests found no crash.
+  `pnpm balance` 650/650 in band; `pnpm e2e:gate` passed in full (32 journeys on WebGL2, 31 on WebGPU) before the last HUD and
+  trial-marker fixes; re-run on the final code it passed 62 of 63: J6.2 on WebGPU timed out once waiting
+  for the world in its second browser, and passed when run alone. Two Sonnet 5.5 play-tests found no crash.
   The first (first ten minutes) found night too dark, a three-row mission tracker, a hard-to-read board,
   grass at the camera and no guidance after the tutorial: fixed (D-polish-*). The second won trial T1 by
   hand, cast all four spells, died and rose, and started T2 and T3; its findings (the T2 beacon whiting
@@ -40,7 +41,9 @@ Sonnet 5.5. What it adds:
   `pnpm e2e:prod`.
 - **Open:** real-device checks for gamepad and touch (unit and emulated journeys only); trials T2 and T3
   never finished by hand in a browser (server tests only); the board's rows are readable from 5 m, not
-  from the pad; the Linewyrm is hard to see and the play-tester's fight macro never hit it; frame times on a weaker machine than the M1 and on the Low tier; the
+  from the pad; the play-tester's fight macro never hit a Linewyrm (cause not found; Arcadia's grass was lowered so it
+  shows, D-polish-11); a level-1 character with no help dies to a Hopbit pack in seconds (within the
+  content's numbers, D-polish-ux-8, but worth watching with real players); frame times on a weaker machine than the M1 and on the Low tier; the
   planet features' GPU cost on a quiet machine for the frame-rate lane's cost model; the art packs
   within budget (#48); the home page's stats card (#12); whether agents and residents go live; the
   residents' end-to-end no-kill-stealing test depends on the live world (it retries).
