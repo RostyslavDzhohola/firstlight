@@ -143,14 +143,16 @@ export function meadowCellFields(corners: readonly number[], out: CellFields): C
  * `r` and `r2` uniform randoms): x = dryness 0..1 (the planet's dry regions and straw patches),
  * y = head (0 none, 1–3 a disc species, 4 the spike), z = a second random, w = 0. Heads grow in
  * drifts, one species per drift. `look`: the body's ground cover (default: the one
- * applyMeadowLook loaded). Two noise taps per clump; the slow fields come from the cell.
+ * applyMeadowLook loaded). One noise tap per clump (the drift); the slow fields come from the cell.
+ * Measured (one High chunk, 280k instances, a loaded M1): filling it took 5.4× the single blades'
+ * time with two taps per clump.
  */
 export function meadowMeta(x: number, y: number, z: number, u: number, v: number, cell: CellFields, r: number, r2: number, out: Float32Array, o: number, look: MeadowLook = cpuLook) {
   const w00 = (1 - u) * (1 - v), w10 = u * (1 - v), w01 = (1 - u) * v, w11 = u * v;
   const regionDry = cell[0]! * w00 + cell[2]! * w10 + cell[4]! * w01 + cell[6]! * w11;
   const speciesField = cell[1]! * w00 + cell[3]! * w10 + cell[5]! * w01 + cell[7]! * w11;
-  const patch = valueNoise(x * 0.06 + 1.9, y * 0.06 + 7.3, z * 0.06 + 2.2) * 2 - 1;
-  const dry = Math.min(1, Math.max(0, regionDry + look.dryBias + patch * 0.22));
+  // Clump to clump the dryness scatters a little (a random, not a third noise tap: the fill is per clump).
+  const dry = Math.min(1, Math.max(0, regionDry + look.dryBias + (r2 - 0.5) * 0.3));
   const drift = smooth01(0.42, 0.75, valueNoise(x * 0.09 + 17.3, y * 0.09 + 4.1, z * 0.09 + 9.7));
   const flowers = r < drift * look.flowerShare + look.flowerBase;
   const sp = Math.min(3, Math.floor(speciesField * 4.6 + (r2 - 0.5) * 0.8));
