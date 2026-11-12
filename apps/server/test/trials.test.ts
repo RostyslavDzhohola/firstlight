@@ -18,7 +18,7 @@ import { NF } from "@firstlight/shared/content/npcs";
 import { spawnNpc } from "./npc-bots.ts";
 import { characterRepo } from "../src/world/characters.ts";
 import { safeLeave, startServer, waitFor } from "./helpers.ts";
-import { bot, dieAndRejoin, harness, invIds, me, objAt, offPad, serverRoom, sleep, tpAndWait, until, wrapRoom, type Bot } from "./quest-helpers.ts";
+import { bot, dieAndRejoin, ground, harness, invIds, me, objAt, offPad, serverRoom, sleep, tpAndWait, until, wrapRoom, type Bot } from "./quest-helpers.ts";
 
 const SCALE = TRIAL_RULES.timeScale;
 const CALLS = PLAY_LIMITS.userCalls;
@@ -511,4 +511,90 @@ describe("the Three Gleams", () => {
     expect(b.you.medals).toContain("three_gleams");
     expect(progressStore.current.hall().filter((e) => e.secretId === GLEAMS.firsts)).toHaveLength(1);
   }, 120_000);
+});
+
+describe("spells on trials (the spellbook lane)", () => {
+  type V = [number, number, number];
+  const sub = (a: readonly number[], b: readonly number[]): V => [a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!];
+  const len = (v: readonly number[]) => Math.hypot(v[0]!, v[1]!, v[2]!);
+  const unit = (v: readonly number[]): V => [v[0]! / len(v), v[1]! / len(v), v[2]! / len(v)];
+  const cross = (a: V, b: V): V => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const feet = (b: Bot): V => [me(b).x, me(b).y, me(b).z];
+
+  it("Skipstep in a race: a blink past a ring doesn't count, a blink through one does (rings are checked along the blink)", async () => {
+    TRIAL_RULES.timeScale = 0.4; // 30 s clock
+    const a = await take("blinker", ["T1"], "arcadia");
+    a.send("admin", { cmd: "unprotect" });
+    await runRings(a, "T1", 0, 2); // the clock runs; ring 3 is next
+    const R3 = objAt("t1_ring_3");
+    const up = unit(R3);
+    const back = sub(objAt("t1_ring_2"), R3);
+    const along = unit(sub(back, up.map((u) => u * (back[0] * up[0] + back[1] * up[1] + back[2] * up[2])) as V)).map((v) => -v) as V; // ring 2 → ring 3, on the ground plane
+    const side = cross(up, along);
+    const at = (f: number, s: number) => ground("arcadia", unit(R3.map((v, i) => v + along[i]! * f + side[i]! * s)));
+    const blink = async () => {
+      const from = feet(a);
+      a.send("cast", { spell: "skipstep", dx: along[0], dy: along[1], dz: along[2] });
+      await until("blinked", () => len(sub(feet(a), from)) > 8);
+      await sleep(450); // two quest ticks
+    };
+    // Past: 7.5 m to the side of the ring (radius 4.5), blinking parallel to the route.
+    await tpAndWait(a, at(-25, 10));
+    await sleep(300);
+    await tpAndWait(a, at(-5, 7.5));
+    await sleep(300);
+    await blink();
+    expect(mission(a, "T1").progress).toBe(2);
+    // Through: from 7 m short of it, straight along the route.
+    a.send("admin", { cmd: "spells", args: { refill: true } }); // the cooldown, for the test
+    await tpAndWait(a, at(-25, 10)); // back round the side: no admin move of ours crosses the ring
+    await sleep(300);
+    await tpAndWait(a, at(-7, 0));
+    await sleep(300);
+    expect(mission(a, "T1").progress).toBe(2);
+    await blink();
+    await until("ring 3 by the blink", () => mission(a, "T1").progress === 3);
+    expect(lastTrial(a, "T1")).toMatchObject({ state: "running", next: "t1_ring_4" });
+  });
+
+  it("Frostbloom hurts the runner's own waves and not someone else's; the defender's ward soaks wave hits and the hold goes on", async () => {
+    TRIAL_RULES.timeScale = 0.25; // 22.5 s hold
+    const a = await take("caster_holder", ["T2"], "hollowmere");
+    const c = await bot("caster_bystander", "hollowmere");
+    a.send("npc", { cmd: "ambient", on: false });
+    for (const b of [a, c]) {
+      b.send("admin", { cmd: "level", args: { level: 9 } }); // Frostbloom (3) and the ward (9)
+      b.send("admin", { cmd: "unprotect" });
+    }
+    await tpAndWait(a, objAt("t2_beacon"));
+    await sleep(150);
+    a.send("interact", { target: "t2_beacon" });
+    await until("a wave", () => trialNpcs(a) > 0);
+    const npcs = npcSystemOf(serverRoom(a))!;
+    const owner = actor(a);
+    const close = () => [...npcs.npcs.values()].find((n) => n.spawned?.reason === "trial" && !n.dead && !(n.state.flags & NF.INVULN) && len(sub(n.pos, feet(a))) < 4);
+    await until("a wave creature up close (they come for the runner)", () => {
+      a.send("admin", { cmd: "heal" });
+      return !!close();
+    }, 8000);
+    // The runner's nova lands through combat's damage pipeline.
+    const w = close()!;
+    const hp = w.state.hp;
+    a.send("cast", { spell: "frostbloom", dx: 1, dy: 0, dz: 0 });
+    await until("frostbloom hurt the wave", () => w.state.hp < hp);
+    // A bystander's nova on top of it does nothing to someone else's trial.
+    const hp2 = w.state.hp;
+    await tpAndWait(c, w.pos);
+    c.send("cast", { spell: "frostbloom", dx: 1, dy: 0, dz: 0 });
+    await until("refused as immune", () => c.count("immune") > 0);
+    expect(w.state.hp).toBe(hp2);
+    // The ward on the beacon: wave hits go into the shell; the hold keeps counting.
+    await tpAndWait(a, objAt("t2_beacon"));
+    const held = mission(a, "T2").progress;
+    a.send("cast", { spell: "glasswing", dx: 1, dy: 0, dz: 0 });
+    await until("a wave hit soaked by the ward", () => (a.msgs.get("spell") ?? []).some((e: any) => e.spell === "glasswing" && e.phase === "absorb" && e.by === a.id), 8000);
+    expect(lastTrial(a, "T2").state).not.toBe("failed");
+    await until("the hold goes on", () => mission(a, "T2").progress > held);
+    expect(owner.dead).toBe(false);
+  });
 });

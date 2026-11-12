@@ -450,6 +450,7 @@ export class QuestSystem implements RoomSystem {
       if (a.dead) continue;
       const life = this.life(a);
       life.playMs += dtMs;
+      this.trials.sample(a); // racers' path between quest ticks (a Skipstep blink is its own segment)
     }
     if (now - this.lastSlow < QUEST_RULES.SLOW_TICK_MS) return;
     this.lastSlow = now;

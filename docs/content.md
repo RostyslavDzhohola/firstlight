@@ -763,7 +763,16 @@ structures, ≥ 100 m beyond the boss arenas' engagement radius and ≥ 30 m fro
 
 **Sizing (new):** *T1:* 7 legs of ~57 m = ~400 m; a sprint (9 m/s) takes ~45 s and a run (6 m/s) ~67 s, so
 75 s leaves ~30 s at a sprint for hills, a dodge or a Hopbit in the way and is just doable at a run; a horse
-(16 m/s) takes ~25 s but costs 1,500 coins, about five times what a level-6 life has (§1.4). *T2 / H4:* waves
+(16 m/s) takes ~25 s but costs 1,500 coins, about five times what a level-6 life has (§1.4).
+*Re-checked with the per-starter pace (2026-11-12, D-hunt-6):* measured from the world data, ring 1 → ring 8 is
+406 m on the surface, 412 m over the ground (18 m of climb). Sprinting the whole way (sprint has no stamina):
+Brother Ash (8.28 m/s) ~50 s, **25 s of slack (a third of the clock)**; Hexwick and Unit 7 (9.0) ~46 s, 29 s;
+Kappa (9.36) ~44 s, 31 s; Hinoko (9.9) ~42 s, 33 s. The clock stays 75 s. At a run only Hinoko still
+finishes (Ash's 5.52 m/s needs ~75 s); nobody has to run, so that's fine. **Skipstep is allowed in the race**
+(D-hunt-5): a blink is 10 m of the route at once, every 6 s (20 aether, which refills faster than that), so up
+to ~11 blinks (~110 m, ~12 s at a sprint) in a race. Rings are judged along the blink's own straight path:
+a blink through a ring counts it, a blink past one (more than the 4.5 m ring radius to the side) doesn't, and
+rings still fall in order. *T2 / H4:* waves
 are L9 (×1.96 HP, ×1.64 damage): Bonewalker 108 HP (slash 13, overhead 33), Gnawer 74 HP (bite 15, leap 30),
 every hit under the 35% cap (63) of a level-9 player's 180 HP. A level-9 player (×1.24 damage) on a T2 weapon
 does 50–66 DPS on paper (Hexquill II after heat, Sunbrand II, Carbine II after reloads), call it ~35 with
