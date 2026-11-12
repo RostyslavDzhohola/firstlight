@@ -386,7 +386,7 @@ export class NpcSystem implements RoomSystem {
   }
 
   /** Live NPCs raised by egg penalties or staged scenes in this room, or only those one account raised. */
-  spawnedCount(reason: "egg" | "stage", userId?: string): number {
+  spawnedCount(reason: "egg" | "stage" | "trial", userId?: string): number {
     let k = 0;
     for (const n of this.npcs.values()) if (n.spawned?.reason === reason && !n.dead && (userId === undefined || n.spawned.userId === userId)) k++;
     return k;

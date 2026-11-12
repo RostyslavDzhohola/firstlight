@@ -207,7 +207,28 @@ export type ServerMessages = {
   train: { dummy: number; hits: number; down: boolean };
   /** Onboarding finished: `xp` paid in total (50 when done, less when skipped). */
   onboarding: { state: "done" | "skipped"; xp: number };
+  /** A race / defend / collect attempt changed state (quests/trials.ts); sent to its runner only. */
+  trial: TrialMsg;
 };
+
+/**
+ * A timed-objective attempt (missions race / defend / collect). `leftMs` is the clock left when sent
+ * (the client counts down from its receipt; it stands still while `paused`), `limitMs` the whole
+ * clock (0 = untimed). `progress`/`goal` as in YouState.missions. `next` is the world object the
+ * attempt leads to now (the next ring, the beacon, or null for collect: the nearest shard).
+ */
+export interface TrialMsg {
+  id: string;
+  kind: "race" | "defend" | "collect";
+  state: "running" | "paused" | "done" | "failed" | "idle";
+  progress: number;
+  goal: number;
+  leftMs: number;
+  limitMs: number;
+  next: string | null;
+  /** Why it failed: "time", "died", "left", "abandoned" (or why it went idle). */
+  reason?: string;
+}
 
 /** Private per-player state sent only to its owner. */
 export interface YouState {

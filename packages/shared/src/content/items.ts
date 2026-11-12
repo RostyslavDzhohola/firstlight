@@ -78,6 +78,7 @@ export const COSMETICS: readonly CosmeticDef[] = [
   C("dewdial_crown", "Dewdial Crown", "hat", "legendary", "Easter egg E10", undefined, true),
   C("wickfloat_mantle", "Wickfloat Mantle", "cape", "legendary", "Easter egg E11", undefined, true),
   C("quietshift_lens", "Quietshift Lens", "mask", "legendary", "Easter egg E12", undefined, true),
+  C("gleamweave_cape", "Gleamweave Cape", "cape", "legendary", "the Gleam Vault (The Three Gleams), once per life"),
 ];
 
 export const COSMETIC_BY_ID: ReadonlyMap<string, CosmeticDef> = new Map(COSMETICS.map((c) => [c.id, c]));
@@ -182,7 +183,7 @@ export function itemStack(id: string): number {
 }
 
 /** Easter-egg rewards (content.md §6): the item id, or the skin for the Ferryman's Oar. */
-const EGG_ITEM_KEYS: ReadonlySet<string> = new Set(EGGS.map((e) => e.item.skin ?? e.item.id));
+const EGG_ITEM_KEYS: ReadonlySet<string> = new Set([...EGGS.map((e) => e.item.skin ?? e.item.id), "gleamweave_cape"]); // + the Gleam Vault's once-per-life cape (gleams.ts)
 
 /**
  * An Easter-egg reward. Eggs can be claimed once per life, so the Exchange doesn't buy them: at 500
