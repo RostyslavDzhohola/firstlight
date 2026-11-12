@@ -230,6 +230,9 @@ function setFx(mesh: THREE.Mesh, start: number, end: number, style: number, seed
   col.needsUpdate = true;
 }
 
+/** The sparks a falling star sheds (one shared object: the fall asks for them ~30 times a second). */
+const STAR_SPARKS: NonNullable<Parameters<Burst>[3]> = { speed: [0.3, 1.8], life: [0.4, 0.9], size: [0.07, 0.18], intensity: 7, lift: -1 };
+
 export type Burst = (at: THREE.Vector3, color: number, count: number, opts?: { speed?: [number, number]; life?: [number, number]; size?: [number, number]; intensity?: number; lift?: number; spread?: number }) => void;
 
 export class SpellFx {
@@ -240,6 +243,8 @@ export class SpellFx {
   private readonly glows: Slot[] = [];
   private readonly shards: Slot[] = [];
   private readonly wards: Slot[] = [];
+  /** Every pool, for the per-frame walk (made once: `update` allocates nothing). */
+  private readonly pools: readonly Slot[][] = [this.decals, this.beams, this.glows, this.shards, this.wards];
   private t = 0;
   private seed = 1;
 
@@ -274,7 +279,10 @@ export class SpellFx {
   /** Effects showing right now (tests, the perf overlay). */
   get live(): number {
     let n = 0;
-    for (const l of [this.decals, this.beams, this.glows, this.shards, this.wards]) for (const s of l) if (s.until > 0) n++;
+    for (let i = 0; i < this.pools.length; i++) {
+      const l = this.pools[i]!;
+      for (let j = 0; j < l.length; j++) if (l[j]!.until > 0) n++;
+    }
     return n;
   }
 
@@ -444,16 +452,17 @@ export class SpellFx {
       head.mesh.position.copy(pos);
       head.mesh.scale.setScalar(1.5 + 0.9 * k);
       const len = tail * (0.4 + 0.6 * k);
-      for (const [b, w] of [[streak, 0.9], [core, 0.35]] as const) {
-        b.mesh.quaternion.copy(quat);
-        b.mesh.position.copy(pos).addScaledVector(dir, -len);
-        b.mesh.scale.set(w, w, len);
-      }
+      streak.mesh.position.copy(pos).addScaledVector(dir, -len);
+      streak.mesh.scale.set(0.9, 0.9, len);
+      core.mesh.position.copy(streak.mesh.position);
+      core.mesh.scale.set(0.35, 0.35, len);
       if (t >= nextSpark) {
         nextSpark = t + 0.03;
-        this.burst(pos, SPELL_COLORS.ember, 3, { speed: [0.3, 1.8], life: [0.4, 0.9], size: [0.07, 0.18], intensity: 7, lift: -1 });
+        this.burst(pos, SPELL_COLORS.ember, 3, STAR_SPARKS);
       }
     };
+    streak.mesh.quaternion.copy(quat);
+    core.mesh.quaternion.copy(quat);
     place(born);
     streak.update = place;
   }
@@ -521,8 +530,11 @@ export class SpellFx {
   update(dt: number) {
     this.t += dt;
     this.mats.clock.value = this.t;
-    for (const list of [this.decals, this.beams, this.glows, this.shards, this.wards]) {
-      for (const s of list) {
+    // Indexed loops over the pools made in the constructor: no arrays or iterators per frame (review 6).
+    for (let i = 0; i < this.pools.length; i++) {
+      const list = this.pools[i]!;
+      for (let j = 0; j < list.length; j++) {
+        const s = list[j]!;
         if (s.until === 0) continue;
         if (this.t >= s.until) this.free(s);
         else s.update?.(this.t, dt);
