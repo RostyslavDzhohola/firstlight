@@ -8,6 +8,8 @@
 // The save card itself opens only with the mouse free. Saved players never see any of it.
 // Pure (unit-tested; no DOM).
 
+import { xpAtLevel } from "@firstlight/shared/content/progression";
+
 /** The server emails a code for a new address only from a player who reached this level (D34). */
 export const SAVE_MIN_LEVEL = 2;
 
@@ -151,4 +153,43 @@ export function firstSaveStep(c: { saving: "ok" | "busy" | "unavailable"; saveRe
 export function codeFromText(t: string): string {
   const run = t.match(/(?<!\d)\d{3}[\s-]?\d{3}(?!\d)/)?.[0] ?? t;
   return run.replace(/\D/g, "").slice(0, 6);
+}
+
+/**
+ * The locked Esc-menu row below level 2 (#32): how much XP is left and where it comes from. `tutorial`:
+ * the tutorial is still running, so its training dummies pay most of it.
+ */
+export function saveLockLine(s: { xp: number; tutorial: boolean }): string {
+  const left = Math.max(0, xpAtLevel(SAVE_MIN_LEVEL) - s.xp);
+  const how = s.tutorial ? "Knock down the training dummies, or fight outside the gates." : "Fight creeps outside the gates or finish a mission.";
+  return `Unlocks at level ${SAVE_MIN_LEVEL}: ${left} XP to go. ${how} Until then progress lives in this browser.`;
+}
+
+/** The "Skip tutorial" row's line: skipping before level 2 also puts off saving (#32, D34). */
+export function skipTutorialSub(s: { paid: boolean; saveReady: boolean }): string {
+  if (s.paid) return "Hide the rest of the tips.";
+  return s.saveReady ? "No more XP and no Spark medal. It won't come back." : `No more XP and no Spark medal, and saving waits until level ${SAVE_MIN_LEVEL}. It won't come back.`;
+}
+
+/** How long a first "are you sure" click stays armed. */
+export const CONFIRM_MS = 4000;
+
+/** A click that needs a second click within `windowMs` to go through (Skip tutorial, #32). */
+export class ConfirmClick {
+  private until = -Infinity;
+  constructor(private readonly windowMs = CONFIRM_MS) {}
+
+  /** True on the confirming click; the first click (or one after the window) only arms it. */
+  click(now: number): boolean {
+    if (this.armed(now)) {
+      this.until = -Infinity;
+      return true;
+    }
+    this.until = now + this.windowMs;
+    return false;
+  }
+
+  armed(now: number): boolean {
+    return now < this.until;
+  }
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DATAFAST_GUARD, dataFastNote, dataFastScript } from "./datafast.ts";
+import { ANALYTICS_OPT_OUT_KEY, DATAFAST_GUARD, dataFastScript, privacyText } from "./datafast.ts";
 
 describe("DataFast script", () => {
   it("is absent unless both the website id and the domain are set", () => {
@@ -23,21 +23,23 @@ describe("DataFast script", () => {
     expect(dataFastScript({ VITE_DATAFAST_WEBSITE_ID: "dfid_abc123", VITE_DATAFAST_DOMAIN: "one4all.dev", VITE_DATAFAST_COOKIELESS: "false" })?.src).toBe("https://datafa.st/js/script.js");
   });
 
-  it("claims cookieless only for the cookieless script", () => {
+  it("the Privacy card says cookies only for the cookie script, and is absent without DataFast (#12)", () => {
     const env = { VITE_DATAFAST_WEBSITE_ID: "dfid_abc123", VITE_DATAFAST_DOMAIN: "one4all.dev" };
-    expect(dataFastNote(dataFastScript({}))).toBeNull();
-    expect(dataFastNote(dataFastScript(env))).toBe("Cookieless analytics by DataFast");
-    expect(dataFastNote(dataFastScript({ ...env, VITE_DATAFAST_COOKIELESS: "false" }))).toBe("Analytics by DataFast, which sets cookies");
+    expect(privacyText(dataFastScript({}))).toBeNull();
+    expect(privacyText(dataFastScript(env))![0]).toContain("no cookies are set");
+    expect(privacyText(dataFastScript({ ...env, VITE_DATAFAST_COOKIELESS: "false" }))![0]).toContain("which sets cookies");
   });
 });
 
 describe("DataFast guard", () => {
-  function run(webdriver: boolean, search: string): string | null {
-    const store = new Map<string, string>();
-    const g = { navigator: { webdriver }, location: { search }, localStorage: { setItem: (k: string, v: string) => store.set(k, v) } };
-    new Function("navigator", "location", "localStorage", DATAFAST_GUARD)(g.navigator, g.location, g.localStorage);
+  /** One page load in a browser whose localStorage is `store`. */
+  function visit(store: Map<string, string>, webdriver: boolean, search: string): string | null {
+    const localStorage = { setItem: (k: string, v: string) => store.set(k, v), removeItem: (k: string) => store.delete(k), getItem: (k: string) => store.get(k) ?? null };
+    new Function("navigator", "location", "localStorage", DATAFAST_GUARD)({ webdriver }, { search }, localStorage);
     return store.get("datafast_ignore") ?? null;
   }
+  const run = (webdriver: boolean, search: string) => visit(new Map(), webdriver, search);
+
   it("opts automated browsers and test URLs out, and leaves players alone", () => {
     expect(run(true, "")).toBe("true");
     expect(run(false, "?e2e")).toBe("true");
@@ -46,5 +48,27 @@ describe("DataFast guard", () => {
     expect(run(false, "")).toBeNull();
     expect(run(false, "?autoplay")).toBeNull();
     expect(run(false, "?benchmark")).toBeNull();
+  });
+
+  it("counts the browser again on the next normal visit after a test visit (#44)", () => {
+    const store = new Map<string, string>();
+    expect(visit(store, false, "?e2e")).toBe("true");
+    expect(visit(store, false, "")).toBeNull();
+    expect(visit(store, false, "?bench=g1")).toBe("true");
+    expect(visit(store, false, "?autoplay")).toBeNull();
+  });
+
+  it("keeps a browser that opted out on the Privacy card out on every normal visit (#12)", () => {
+    const store = new Map<string, string>([[ANALYTICS_OPT_OUT_KEY, "1"]]);
+    expect(visit(store, false, "")).toBe("true");
+    expect(visit(store, false, "?autoplay")).toBe("true");
+    store.delete(ANALYTICS_OPT_OUT_KEY);
+    expect(visit(store, false, "")).toBeNull();
+  });
+
+  it("keeps automated browsers out on every visit, whatever the URL", () => {
+    const store = new Map<string, string>();
+    expect(visit(store, true, "")).toBe("true");
+    expect(visit(store, true, "?autoplay")).toBe("true");
   });
 });

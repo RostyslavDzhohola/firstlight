@@ -171,3 +171,15 @@ body.fl-home-up #ui { visibility: hidden; }
   .fl-home .fl-fly__planet--hollowmere { width: 34px; height: 34px; left: -10px; top: 300px; }
   .fl-home .fl-fly__planet--meridian { display: none; }
 }
+
+/* #12: total visits apart from the online line, and the footer's Privacy card. */
+.fl-home__total { font-size: var(--t-xs); color: var(--fog-3); }
+.fl-home__total b { font: 600 var(--t-sm)/1 var(--font-mono); color: var(--paper); margin-left: .3em; }
+.fl-home__privacy { background: none; border: 0; padding: 0; font: inherit; color: var(--fog-3); text-decoration: underline; cursor: pointer; }
+.fl-home__privacy:hover, .fl-home__privacy:focus-visible { color: var(--paper); }
+.fl-privacy { max-width: min(30rem, 92vw); padding: var(--sp-5); color: var(--paper-2); }
+.fl-privacy::backdrop { background: rgb(0 0 0 / .55); }
+.fl-privacy h2 { margin: 0 0 var(--sp-3); font: 300 var(--t-xl)/1 var(--font-display); letter-spacing: .08em; color: var(--paper); }
+.fl-privacy p { margin: 0 0 var(--sp-3); font-size: var(--t-sm); line-height: 1.5; }
+.fl-privacy__row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin-top: var(--sp-4); }
+.fl-privacy__state { font-size: var(--t-xs); color: var(--fog-3); flex: 1; }

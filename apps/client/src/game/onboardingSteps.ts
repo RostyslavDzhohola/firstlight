@@ -68,6 +68,8 @@ export interface Sample {
   dummiesDown: number;
   /** Key codes pressed this frame while playing (Digit1–4, KeyE, KeyM, KeyV…). */
   pressed: ReadonlySet<string>;
+  /** The map panel is open (M under the pause menu or another panel doesn't open it: #35). */
+  mapOpen: boolean;
   /** We said a phrase-wheel line this frame. */
   phrased: boolean;
   /** Voice chat is switched on. */
@@ -106,7 +108,7 @@ export class OnboardingSteps {
     for (const d of DIGITS) if (x.pressed.has(d)) this.slots.add(d);
     this.set("switch", this.slots.size);
     if (x.pressed.has("KeyE")) this.set("pickup", 1);
-    if (x.pressed.has("KeyM")) this.set("map", 1);
+    if (x.mapOpen) this.set("map", 1);
     if (x.phrased) this.set("wheel", 1);
     if (x.voiceOn || x.pressed.has("KeyV")) this.set("voice", 1);
     // Only actually walking into a ring counts (T9): passing or standing in front of one doesn't.

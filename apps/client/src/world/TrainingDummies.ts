@@ -6,6 +6,7 @@
 import * as THREE from "three/webgpu";
 import type { Terrain } from "@firstlight/shared";
 import { dummyPos, TRAINING_DUMMIES } from "@firstlight/shared/content/onboarding";
+import { stepsFor } from "../game/frameClock.ts";
 
 const DOWN_ANGLE = 1.2; // radians leaned back once knocked down
 const SPRING = 90;
@@ -120,10 +121,15 @@ export class TrainingDummies {
   }
 
   update(dt: number) {
+    // The spring is stiff: a slow frame (up to 250 ms, #33) runs as steps of at most 50 ms.
+    const steps = stepsFor(dt);
+    const h = dt / steps;
     for (const d of this.dummies) {
       const rest = d.down ? -DOWN_ANGLE : 0;
-      d.vel += (-SPRING * (d.angle - rest) - DAMP * d.vel) * dt;
-      d.angle += d.vel * dt;
+      for (let k = 0; k < steps; k++) {
+        d.vel += (-SPRING * (d.angle - rest) - DAMP * d.vel) * h;
+        d.angle += d.vel * h;
+      }
       d.pivot.rotation.x = d.angle;
     }
   }

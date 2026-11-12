@@ -61,7 +61,10 @@ test.describe("J2 safe zones and weapons", () => {
     expect.soft(training.notice || training.sent.includes("train"), "a training shot or the holstered notice").toBe(true);
     // After the tutorial (skipped from Esc, like a player who knows the game): the notice.
     await player.escape();
-    await page.getByRole("menuitem", { name: /skip tutorial/i }).or(page.getByRole("button", { name: /skip tutorial/i })).first().click();
+    // Before the dummies pay out, skipping asks for a second click (#32).
+    const skip = page.getByRole("menuitem", { name: /skip tutorial/i }).or(page.getByRole("button", { name: /skip tutorial/i })).first();
+    await skip.click();
+    await skip.click();
     await player.lock();
     await expectRefusedInside(player, "Portus town, after the tutorial");
     await player.lookUp(-0.25);

@@ -1484,3 +1484,59 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   time (D-load-5).
 - **D-octfix-1 (2026-11-12):** The probe keeps Medium's extras only when the measurement with them on also keeps the main thread and the frames in line: its main-thread p50 and its frame-interval p50 may each take the larger of what Medium's measurement predicts (main thread: Medium's × (1 + the plan's CPU cost); frames: Medium's interval) and their budget (main thread: `extrasCpuBudget`, the busiest scenes' predicted p99 inside 90% of the frame; frames: the 60 Hz frame), plus 15% and 0.25 ms of noise; past either, no extras (`extrasRegression`, `render/extrasPlan.ts`). A tab hidden at any moment of the probe, warm-ups and later measurements included, makes it invalid (session-only Medium, no extras, not saved). Why: the GPU busy time can't see extras that cost draws or submit time, and a later stage measured in a hidden tab says nothing about the device (October review findings 1, 2). Frame rate first.
 - **D-octfix-2 (2026-11-12):** HD art packs: a missing pack manifest (any 4xx, or a body that isn't a manifest) means "no packs this session": one `console.info`, never asked again until reload. A failure that may pass (network error, 5xx) is asked again after 15 s, then 30 s, at most 3 times a session, never behind a loading screen; only giving up warns. A decode, upload step or rebind that fails drops the whole group (textures disposed, bitmaps closed, shipped bindings kept) and counts as one of the group's two tries; the strip worker's error, unreadable answer or a 30 s decode deadline fails its jobs and replaces the worker. Why: the packs aren't shipped yet, so a missing manifest is the normal case and must cost nothing per travel; every other failure must end in the shipped textures, never in a group stuck loading or a texture bound that never uploaded (October review findings 5–8).
+- **D-fixes-1 (2026-11-12):** A slow frame advances the game in full up to 250 ms on foot and 200 ms
+  in the saddle (`game/frameClock.ts`), run as movement steps of at most 50 ms; a gap over 1 s counts
+  as one 50 ms step. So the game keeps real time down to 4 fps on foot and 5 fps riding (it used to
+  clamp every frame to 50 ms: slow motion below 20 fps, #33). The server's movement check is
+  unchanged. Why: one input packet per frame has to fit the server's bank (3.5 m on foot, 5 m on a
+  horse) with 70 ms of network jitter; a 250 ms sprint (2.25 m) does, a 250 ms gallop (4 m)
+  doesn't, so riding keeps the 200 ms cap rather than loosening the anti-cheat limits.
+- **D-view-6 (2026-10-18):** the third-person camera keeps its whole near plane out of the solids,
+  swaps shoulders against a wall, and a player pinned in a pocket steps out (#34, with D-view-5).
+  The lens's line from the head is still cut by one ray, now against the structures, the natural
+  solids and the intact breakables too; then each corner of the near plane (padded 5 cm) must be
+  clear from the lens, or the lens comes in 0.1 m at a time, the edge bisected. The eased reach of
+  the line and where the lens ends up are kept apart (a lens pulled in to the head by a wall there
+  otherwise never got out again) and the lens eases back out only through clear positions. A line
+  over the right shoulder cut under 1 m while the left one's is 0.5 m longer moves the camera over
+  the left (~0.4 s), back once the right line is clear; decided on the lines' own lengths and only
+  once arrived (half way both are short, and it flapped). Right in at the head with a corner still in
+  a wall beside it, the lens slides across the view off that wall when that clears it. Round every
+  Portus item (every spot measured, 178k poses at three pitches; `world/portusCamera.test.ts` keeps every eighth spot): near-plane corners in a
+  structure 6.6 % → 0.2 % of poses, the lens itself never; what is left is the head within 0.3 m of
+  a castle wall or under a lean-to roof. The own avatar already dissolves near the lens (D-view-5:
+  gone within 0.5 m), so no new fade. Pockets: the sweep found one, the Hall of Firsts' column on its
+  0.32 m plinth: the column pushes the body into the plinth's side and the plinth pushes it back
+  (tops are stepped onto only from within half a body radius of the edge, which no walking step
+  reaches: low tops are climbed with a jump, at any frame rate), so a player who dropped in could
+  walk nowhere. Walking but held in place 0.5 s, the controller asks the solids for a step-out
+  (`game/stepOut.ts`): only where no walking probe (16 ways, the controller's 0.1 m steps with the
+  push-out after each) gets 0.25 m, the nearest spot on rings 0.25 m apart out to 1.5 m that is clear,
+  reached straight without crossing a solid, on a top if it stands on one, and not a pocket itself.
+  The server takes it as an ordinary step (bank full after the pinned half second; the real
+  validator in `apps/server/test/step-out.test.ts` refuses nothing at 20 and 60 fps); a player
+  pushing into a plain wall never moves. The step-out sees the structures and the natural solids as
+  one (the server checks moves against both), its probes stand on tops like the controller and
+  count only progress along the ground, and it checks at most 8 spots for being pockets per try.
+  Review round 1 (Codex): every lens candidate is checked where it would stand (lifted over the
+  ground), the search takes at most eight steps down a line, and a teleport starts the camera
+  afresh (full reach, right shoulder). Not done: zero near-plane clips (the head itself next to a
+  solid; only a smaller near plane would help, the renderer's call) and the issue's browser walk and
+  before/after screenshots. Client only: nothing shared or on the server changes.
+  Why: the Oct 16 play-test (#34) saw the camera inside walls, buildings and the head in Portus and
+  the player stuck between props; one ray let a lens beside a wall show it from inside.
+- **D-fixes-2 (2026-11-12):** A character who dies with the tutorial unfinished keeps it after the
+  rebirth in Portus: the steps done and the dummies already knocked down carry over. The first offer
+  still needs a level-1 character that never died; the account remembers that it was offered
+  (`onboarding_started` stat), and finishing or skipping still ends it for good. Why: the rebirth
+  rejoins Portus, where the "never died" check ended the tutorial without a word, and with it the
+  dummies' XP that takes a guest to level 2, where saving unlocks (D34, #31, #32). Found in this run's
+  play-through.
+- **D-fixes-3 (2026-11-12):** The home page's visits line says only "● N online now" (#12, the
+  owner's 2026-10-18 call). Total visits sit apart in the footer as plain text until DataFast's
+  stats card replaces them (its embed code is in the DataFast dashboard, not public docs). A
+  "Privacy" link in the footer, shown only when DataFast is in the page, opens a short card: who
+  counts visits, whether that sets cookies, what for, and a "Don't count my visits" switch
+  (`fl.noAnalytics`, which the DataFast guard honours on every visit, unlike a hand-set
+  `datafast_ignore`, which a normal visit clears since #44). Why: the owner asked for the cookie
+  sentence to leave the line and the disclosure to move to a Privacy link.

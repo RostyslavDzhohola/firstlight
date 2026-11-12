@@ -1,5 +1,5 @@
 // Onboarding on Portus (SPEC §6.12, content.md §1.1, shared/content/onboarding.ts): offered once per
-// account to a brand-new character (level 1, never died). The client teaches move, look, jump,
+// account to a brand-new character (level 1, never died), and kept through a rebirth until it ends (D-fixes-2). The client teaches move, look, jump,
 // sprint and dodge on its own (nothing is paid for those); the server counts hits on the three
 // training dummies from `train` messages (Portus town is a safe zone, so real attacks are refused there),
 // pays 10 XP per dummy and, when all three are down, 20 XP and the Spark medal. Skipping ends it with
@@ -34,6 +34,12 @@ export const ONBOARDING_RULES = {
 };
 
 const SPARK = "spark";
+/**
+ * Account stat: onboarding was offered to this account (set at the first offer). A character that
+ * dies with the tutorial unfinished keeps it after the rebirth (D-fixes-2): only the first offer needs
+ * a character that never died.
+ */
+export const ONBOARDING_STARTED_STAT = "onboarding_started";
 
 const vec = z.number().finite();
 const trainSchema = z.object({ ox: vec, oy: vec, oz: vec, dx: vec, dy: vec, dz: vec });
@@ -73,6 +79,7 @@ export class OnboardingSystem implements RoomSystem {
     const uid = a.identity.userId;
     this.trainees.delete(uid);
     if (!this.eligible(a)) return;
+    if (progressStore.current.stat(uid, ONBOARDING_STARTED_STAT) === 0) progressStore.current.addStat(uid, ONBOARDING_STARTED_STAT, 1);
     const hits = this.dummies.map((_, i) => (progressStore.current.stat(uid, dummyStat(i)) > 0 ? ONBOARDING.HITS_PER_DUMMY : 0));
     const t: Trainee = { sessionId, hits, lastAt: 0 };
     this.trainees.set(uid, t);
@@ -96,10 +103,16 @@ export class OnboardingSystem implements RoomSystem {
     if (t) you.onboarding = { hits: [...t.hits] };
   }
 
-  /** A brand-new character on an account that hasn't finished (or skipped) onboarding. */
+  /**
+   * A level-1 character on an account that hasn't finished (or skipped) onboarding: a brand-new one
+   * (never died), or one reborn while the tutorial it was offered was still going (D-fixes-2: dying
+   * mid-tutorial used to end it silently, with the dummies' route to level 2 and saving).
+   */
   private eligible(a: PlayerActor): boolean {
-    if (a.identity.loadtest || a.dead || a.char.level !== 1 || a.char.deaths > 0) return false;
-    return progressStore.current.stat(a.identity.userId, ONBOARDING.STAT) === 0;
+    if (a.identity.loadtest || a.dead || a.char.level !== 1) return false;
+    const uid = a.identity.userId;
+    if (progressStore.current.stat(uid, ONBOARDING.STAT) !== 0) return false;
+    return a.char.deaths === 0 || progressStore.current.stat(uid, ONBOARDING_STARTED_STAT) > 0;
   }
 
   private allDown(t: Trainee): boolean {

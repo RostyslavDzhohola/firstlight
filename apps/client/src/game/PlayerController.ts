@@ -12,6 +12,7 @@ import { emptyContact, resetContact, type PropContact } from "@firstlight/shared
 import { ANIM } from "@firstlight/shared/net/schema";
 import { deepWater, SWIM_FLOAT } from "@firstlight/shared/planet/water";
 import type { Input } from "./input.ts";
+import { stepsFor } from "./frameClock.ts";
 import { mountedSpeed, rideCamera } from "./mount.ts";
 import { ADMIN_MODE } from "@firstlight/shared/content/admin";
 
@@ -26,6 +27,11 @@ export interface MoveColliders {
    * spires) or more (structures: the shop stalls' awnings too, D-view-5); else `raycast`.
    */
   cameraRay?(o: THREE.Vector3, d: THREE.Vector3, maxT: number): number;
+  /**
+   * Feet `pos` held in a pocket of these solids that walking can't leave: move them to the nearest
+   * clear spot close by (game/stepOut.ts). True if they moved (#34).
+   */
+  stepOut?(pos: THREE.Vector3): boolean;
 }
 
 export const MOVE = {
@@ -57,6 +63,8 @@ const SUBSTEP_H = 0.25;
 const SUBSTEP_V = 0.25;
 const MAX_SUBSTEPS = 16;
 
+const NO_PRESSES: ReadonlySet<string> = new Set();
+
 const _up = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _wish = new THREE.Vector3();
@@ -68,6 +76,18 @@ const _head = new THREE.Vector3();
 const _cam = new THREE.Vector3();
 const _camUp = new THREE.Vector3();
 const _camDir = new THREE.Vector3();
+const _start = new THREE.Vector3();
+const _lens = new THREE.Vector3();
+const _lensF = new THREE.Vector3();
+const _lensR = new THREE.Vector3();
+const _lensU = new THREE.Vector3();
+const _corner = new THREE.Vector3();
+const _target = new THREE.Vector3();
+const _probe = new THREE.Vector3();
+const _lensMoved = new THREE.Vector3();
+const _lensPush = new THREE.Vector3();
+const _lensSide = new THREE.Vector3();
+const _probeTarget = new THREE.Vector3();
 /**
  * The camera stops this far (m) short of a structure between the head and where it would be; with
  * the player pressed against a wall (the wall under CAMERA_WALL_GAP × 2 behind the head) it keeps half
@@ -76,6 +96,26 @@ const _camDir = new THREE.Vector3();
 export const CAMERA_WALL_GAP = 0.3;
 /** How fast (m per placement) the camera eases back out once the structure is out of the way. */
 const CAMERA_EASE_OUT = 0.25;
+/**
+ * The lens is a near plane, not a point (#34): its corners stay this far (m) clear of a solid too,
+ * the camera coming in by CAMERA_LENS_STEP at a time until no corner is in or behind one.
+ */
+export const CAMERA_LENS_PAD = 0.05;
+const CAMERA_LENS_STEP = 0.1;
+/** The camera sits this far (m) to the side of the head, over the right shoulder (or the left, #34). */
+const CAMERA_SHOULDER = 0.55;
+/** Its line over the shoulder cut shorter than this (m) and the other's this much longer: swap. */
+const CAMERA_SWAP_REACH = 1;
+const CAMERA_SWAP_GAIN = 0.5;
+/** How fast it moves over (shoulder units, 2 = right to left, per placement): ~0.4 s. */
+const CAMERA_SHOULDER_EASE = 0.08;
+/**
+ * Walking but held in place this long (s): ask the solids for a step-out, which they give only in a
+ * pocket walking can't leave (#34; the issue's bar is 2 s stuck).
+ */
+export const PIN_STEP_OUT_S = 0.5;
+/** Pinned: covering less than this share of the wanted speed over a frame. */
+const PIN_PROGRESS = 0.2;
 const AXIS_X = new THREE.Vector3(1, 0, 0);
 const AXIS_Z = new THREE.Vector3(0, 0, 1);
 /** Server corrections closer than this (metres) keep the camera heading (F12 confirm Sonnet N-6). */
@@ -92,6 +132,13 @@ export class PlayerController {
   camDistance = 4.6;
   /** How far behind the head the camera may sit now (a structure in the way pulls it in). */
   private camReach = Infinity;
+  /** Where the lens was put on its line last time (the near-plane check can bring it in further). */
+  private lensReach = Infinity;
+  /** Which shoulder the camera looks over (1 right, -1 left) and where it is on the way there. */
+  private shoulderGoal = 1;
+  private shoulder = 1;
+  /** The full length of the line cameraLine last placed a lens on. */
+  private lineFull = 0;
   onGround = false;
   swimming = false;
   anim: number = ANIM.IDLE;
@@ -130,6 +177,8 @@ export class PlayerController {
   private readonly structureContact = emptyContact();
   private readonly natureContact = emptyContact();
   private nature: MoveColliders | null = null;
+  /** Seconds walked without getting anywhere (PIN_STEP_OUT_S). */
+  private pinnedT = 0;
 
   constructor(private terrain: Terrain, private waterLevel: number) {}
 
@@ -200,6 +249,11 @@ export class PlayerController {
     this.camForward.copy(ref).addScaledVector(up, -ref.dot(up)).normalize();
     this.facing.copy(this.camForward);
     this.fallStartRadius = this.pos.length();
+    // A new place: the camera starts out at full reach over the right shoulder, nothing pinned.
+    this.camReach = Infinity;
+    this.lensReach = Infinity;
+    this.shoulder = this.shoulderGoal = 1;
+    this.pinnedT = 0;
   }
 
   /** A shove (m/s) along `dir` (projected onto the ground plane), with a little lift. */
@@ -217,14 +271,28 @@ export class PlayerController {
   }
 
   /**
-   * One frame. `dt` is the simulation step (Game clamps it to 50 ms, so a slow frame runs in slow
-   * motion); `now` is the wall clock (ms), which the dodge cooldown is a deadline on, like the
-   * server's 1.2 s: a stall of any length counts in full (D-combat-3). Without `now` the clock is
-   * the sum of the steps.
+   * One frame. `dt` is the frame's game time (Game's frameClock: up to 250 ms, 200 ms riding, #33); a frame longer
+   * than 50 ms runs as equal steps of at most 50 ms, with the frame's mouse look and key presses
+   * applied on the first step only. `now` is the wall clock (ms) of the frame, which the dodge
+   * cooldown is a deadline on, like the server's 1.2 s: a stall of any length counts in full
+   * (D-combat-3), and every step of a frame reads the same `now`, so a press is judged when it's
+   * read and a roll's deadline matches the server's. Without `now` the clock is the sum of the steps.
    */
   update(dt: number, input: Input, aiming: boolean, now = this.simMs + dt * 1000) {
+    const steps = stepsFor(dt);
+    if (steps === 1) return this.step(dt, input, aiming, now);
+    const h = dt / steps;
+    // Later steps see only the keys held down: no mouse movement, wheel or fresh presses.
+    const held = Object.create(input) as Input;
+    Object.assign(held, { mouseDX: 0, mouseDY: 0, wheel: 0, pressed: NO_PRESSES });
+    for (let k = 0; k < steps; k++) this.step(h, k === 0 ? input : held, aiming, now);
+  }
+
+  /** One movement step of at most 50 ms. */
+  private step(dt: number, input: Input, aiming: boolean, now: number) {
     this.simMs = now;
     const R = this.terrain.body.radius;
+    _start.copy(this.pos);
     const up = _up.copy(this.pos).normalize();
     // Parallel-transport camera and facing to the new tangent plane.
     this.camForward.addScaledVector(up, -this.camForward.dot(up)).normalize();
@@ -249,6 +317,7 @@ export class PlayerController {
     }
     const wish = _wish.set(0, 0, 0).addScaledVector(this.camForward, mz).addScaledVector(right, mx);
     if (wish.lengthSq() > 0) wish.normalize();
+    const walking = wish.lengthSq() > 0;
     const sprint = input.down("ShiftLeft") || input.down("ShiftRight");
     const speed = (this.swimming ? MOVE.swim : this.mounted ? mountedSpeed(sprint, MOVE.slow, MOVE.noSprint) : sprint && mz > 0 && !aiming ? MOVE.sprint : MOVE.run) * this.adminSpeed;
 
@@ -393,6 +462,7 @@ export class PlayerController {
 
     // Where the snap put the feet: clear of the solids (the server refuses feet inside one).
     if (this.structures || this.nature) this.clearAfterSnap(R, vH);
+    this.stepOutIfPinned(dt, walking ? speed : 0);
 
     if (this.onGround || this.swimming) {
       this.airTime = 0;
@@ -457,6 +527,25 @@ export class PlayerController {
     if (moved && this.onGround) this.fallStartRadius = this.pos.length();
   }
 
+  /**
+   * Walking at `speed` (0: not walking) but held where the feet are for PIN_STEP_OUT_S: step out of
+   * the pocket (MoveColliders.stepOut), standing still on the ground there. Pressed against a plain
+   * wall the feet can walk out (along it, away from it) and nothing moves; the check then waits
+   * another PIN_STEP_OUT_S.
+   */
+  private stepOutIfPinned(dt: number, speed: number) {
+    const held = speed > 0 && !this.frozen && !this.adminFly && !this.swimming && this.dodgeT <= 0 && this.pos.distanceTo(_start) < speed * dt * PIN_PROGRESS;
+    this.pinnedT = held ? this.pinnedT + dt : 0;
+    if (this.pinnedT < PIN_STEP_OUT_S) return;
+    this.pinnedT = 0;
+    if (!(this.structures?.stepOut?.(this.pos) || this.nature?.stepOut?.(this.pos))) return;
+    const up = _up.copy(this.pos).normalize();
+    this.vel.set(0, 0, 0);
+    this.onGround = true;
+    this.fallStartRadius = this.pos.length();
+    this.facing.addScaledVector(up, -this.facing.dot(up)).normalize();
+  }
+
   /** Over-the-shoulder camera. */
   /** Drop the motion into a push (`c` from a resolve), so the body slides along what pushed it. */
   private slide(c: PropContact, vH: THREE.Vector3) {
@@ -482,23 +571,157 @@ export class PlayerController {
     const look = _look.copy(this.camForward).applyAxisAngle(right, this.camPitch);
     const ride = rideCamera(this.rideBlend); // in the saddle: eyes higher, camera further back
     const head = _head.copy(this.pos).addScaledVector(up, 1.65 + ride.lift);
-    const camPos = _cam.copy(head).addScaledVector(look, -(this.camDistance + ride.back)).addScaledVector(right, 0.55).addScaledVector(up, 0.25);
-    // Above the ground first, so the structure check below sees the lens where it will be: lifted
-    // after it, a low look (aiming up) put the lens into a counter or a planter beside the line (#22).
-    this.aboveGround(camPos);
-    // Not through a structure (a house, a tower, a stall's awning): the camera comes in to just short of it
-    // along the line from the head, and eases back out once it's clear (no popping in and out).
-    const dir = _camDir.copy(camPos).sub(head);
-    const full = dir.length();
-    dir.divideScalar(full);
-    const s = this.structures;
-    const hit = Math.min((s?.cameraRay ?? s?.raycast)?.(head, dir, full + CAMERA_WALL_GAP) ?? Infinity, this.nature?.cameraRay?.(head, dir, full + CAMERA_WALL_GAP) ?? Infinity);
-    const want = hit < Infinity ? hit - Math.min(CAMERA_WALL_GAP, hit / 2) : full;
-    this.camReach = want < this.camReach ? want : Math.min(want, this.camReach + CAMERA_EASE_OUT);
-    if (this.camReach < full) camPos.copy(head).addScaledVector(dir, this.camReach);
-    this.aboveGround(camPos); // pulled in along the line from the head: a bump of ground on the way can still need it
-    camera.position.copy(camPos);
+    const back = this.camDistance + ride.back;
+    const toGo = this.shoulderGoal - this.shoulder;
+    this.shoulder = Math.abs(toGo) <= CAMERA_SHOULDER_EASE ? this.shoulderGoal : this.shoulder + Math.sign(toGo) * CAMERA_SHOULDER_EASE;
+    const target = _target.copy(head).addScaledVector(look, 6).addScaledVector(right, CAMERA_SHOULDER * this.shoulder);
+    const reach = this.cameraLine(camera, head, look, right, up, back, this.shoulder, true, _cam, target);
+    // Over the other shoulder when this one's line is cut short (a wall at the player's side) and
+    // the other's reaches clearly further (#34); back over the right one once its line is clear.
+    // Only once it has got where it was going, and on the lines' own lengths, not the eased reach
+    // (just over, that is still the old side's short one): otherwise it flaps between the two.
+    const settled = this.shoulder === this.shoulderGoal;
+    if (settled && reach < CAMERA_SWAP_REACH) {
+      const own = this.cameraLine(camera, head, look, right, up, back, this.shoulderGoal, false, _probe, _probeTarget);
+      const other = own < CAMERA_SWAP_REACH ? this.cameraLine(camera, head, look, right, up, back, -this.shoulderGoal, false, _probe, _probeTarget) : 0;
+      if (other > own + CAMERA_SWAP_GAIN) this.shoulderGoal = -this.shoulderGoal;
+    } else if (settled && this.shoulderGoal < 0 && this.cameraLine(camera, head, look, right, up, back, 1, false, _probe, _probeTarget) >= this.lineFull) this.shoulderGoal = 1;
+    camera.position.copy(_cam);
     camera.up.copy(up);
-    camera.lookAt(head.addScaledVector(look, 6).addScaledVector(right, 0.55));
+    camera.lookAt(target);
+  }
+
+  /**
+   * The camera on the line over shoulder `side` (1 right, -1 left, between while swapping): written
+   * to `out` (its look target to `target`, unless `eased`, where the caller set it), and how far from
+   * the head it ends up; `lineFull` gets the line's full length. Above the ground first, so the
+   * checks see the lens where it will be: lifted after them, a low look (aiming up) put the lens into
+   * a counter or a planter beside the line (#22). Not through a structure (a house, a tower, a
+   * stall's awning) or a natural solid: in to just short of it along the line from the head. `eased`
+   * (the real camera, not a probe): it eases back out once the way is clear (no popping in and out).
+   */
+  private cameraLine(camera: THREE.PerspectiveCamera, head: THREE.Vector3, look: THREE.Vector3, right: THREE.Vector3, up: THREE.Vector3, back: number, side: number, eased: boolean, out: THREE.Vector3, target: THREE.Vector3): number {
+    if (!eased) target.copy(head).addScaledVector(look, 6).addScaledVector(right, CAMERA_SHOULDER * side);
+    out.copy(head).addScaledVector(look, -back).addScaledVector(right, CAMERA_SHOULDER * side).addScaledVector(up, 0.25);
+    this.aboveGround(out);
+    const dir = _camDir.copy(out).sub(head);
+    const full = dir.length();
+    this.lineFull = full;
+    dir.divideScalar(full);
+    const hit = this.cameraHit(head, dir, full + CAMERA_WALL_GAP);
+    const want = hit < Infinity ? hit - Math.min(CAMERA_WALL_GAP, hit / 2) : full;
+    let reach = want;
+    if (eased) {
+      this.camReach = want < this.camReach ? want : Math.min(want, this.camReach + CAMERA_EASE_OUT);
+      reach = this.camReach;
+    }
+    reach = Math.min(reach, full);
+    // The whole near plane clear, not just its centre: a ray grazing a wall or a crate stopped the
+    // lens beside it with half the view inside (#34). In a step at a time until no corner is in one
+    // (an eighth of the way at most, so a long line costs no more than a short one), then the edge
+    // bisected. Every candidate is checked where it would stand, lifted over the ground like the
+    // lens. The search starts from the eased reach of the line, not the last lens position: a lens
+    // pulled in to the head by a wall there would otherwise never get out again.
+    const step = Math.max(CAMERA_LENS_STEP, reach / 8);
+    if (this.lensBlocked(camera, this.lensAt(head, dir, reach), target, up)) {
+      let blocked = reach;
+      reach = Math.max(0, reach - step);
+      while (reach > 0 && this.lensBlocked(camera, this.lensAt(head, dir, reach), target, up)) {
+        blocked = reach;
+        reach = Math.max(0, reach - step);
+      }
+      for (let k = 0; k < 5 && reach > 0; k++) {
+        const mid = (reach + blocked) / 2;
+        if (this.lensBlocked(camera, this.lensAt(head, dir, mid), target, up)) blocked = mid;
+        else reach = mid;
+      }
+    }
+    if (eased) {
+      // Out again at the easing pace too, while the way out is clear (through a blocked stretch, at once).
+      const next = this.lensReach + CAMERA_EASE_OUT;
+      if (next < reach && !this.lensBlocked(camera, this.lensAt(head, dir, next), target, up)) reach = next;
+      this.lensReach = reach;
+    }
+    out.copy(this.lensAt(head, dir, Math.min(reach, full)));
+    // Right in at the head and still in a wall beside it (the body is 0.38 m round, the near plane
+    // twice that wide): off the wall, into the player's own (faded) space, if that clears it.
+    if (reach <= 0 && this.lensBlocked(camera, out, target, up)) this.lensOffWall(camera, head, out, target, up);
+    return reach;
+  }
+
+  /**
+   * Move `lens` (looking at `target`) across its view, away from the near-plane corners that are in a
+   * solid, by how far each is in, a few passes; kept only if that clears the whole near plane and
+   * nothing stands between the head and where it got to (it would see past a stall's edge).
+   */
+  private lensOffWall(camera: THREE.PerspectiveCamera, head: THREE.Vector3, lens: THREE.Vector3, target: THREE.Vector3, up: THREE.Vector3) {
+    const moved = _lensMoved.copy(lens);
+    for (let pass = 0; pass < 3; pass++) {
+      const push = _lensPush.set(0, 0, 0);
+      const f = _lensF.copy(target).sub(moved).normalize();
+      for (let i = 0; i < 4; i++) {
+        const l = this.lensCorner(camera, f, up, i);
+        const t = this.cameraHit(moved, _corner, l);
+        if (t > l) continue;
+        // Back off the corner's sideways part (across the view), by how far it is in.
+        const side = _lensSide.copy(_corner).addScaledVector(f, -_corner.dot(f));
+        const sl = side.length();
+        if (sl > 1e-6) push.addScaledVector(side, -(l - t) / sl);
+      }
+      if (push.lengthSq() === 0) break;
+      moved.add(push);
+      this.aboveGround(moved);
+    }
+    if (this.lensBlocked(camera, moved, target, up)) return;
+    const d = _lensSide.copy(moved).sub(head);
+    const l = d.length();
+    if (l > 1e-6 && this.cameraHit(head, d.divideScalar(l), l + CAMERA_LENS_PAD) <= l + CAMERA_LENS_PAD) return;
+    lens.copy(moved);
+  }
+
+  /** The lens `reach` m along unit `dir` from the head, lifted over the ground (`_lens`, scratch). */
+  private lensAt(head: THREE.Vector3, dir: THREE.Vector3, reach: number): THREE.Vector3 {
+    _lens.copy(head).addScaledVector(dir, reach);
+    this.aboveGround(_lens); // pulled in along the line from the head: a bump of ground on the way can still need it
+    return _lens;
+  }
+
+  /** Distance along the ray (unit `d`) to the first solid the camera stops at, within `maxT`, or Infinity. */
+  private cameraHit(o: THREE.Vector3, d: THREE.Vector3, maxT: number): number {
+    const s = this.structures;
+    return Math.min(
+      (s?.cameraRay ?? s?.raycast)?.(o, d, maxT) ?? Infinity,
+      this.nature?.cameraRay?.(o, d, maxT) ?? Infinity,
+      this.colliders?.raycast?.(o, d, maxT) ?? Infinity, // intact breakables: crates, walls of a camp
+    );
+  }
+
+  /**
+   * Is a corner of `camera`'s near plane (padded by CAMERA_LENS_PAD) inside a solid, or behind one
+   * seen from the lens, with the lens at `lens` looking at `target`? Scratch vectors only.
+   */
+  private lensBlocked(camera: THREE.PerspectiveCamera, lens: THREE.Vector3, target: THREE.Vector3, up: THREE.Vector3): boolean {
+    const f = _lensF.copy(target).sub(lens).normalize();
+    for (let i = 0; i < 4; i++) {
+      const l = this.lensCorner(camera, f, up, i);
+      if (this.cameraHit(lens, _corner, l) <= l) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Padded near-plane corner `i` (0..3) of `camera` looking along unit `f`: its unit direction from
+   * the lens into `_corner`; returns its distance.
+   */
+  private lensCorner(camera: THREE.PerspectiveCamera, f: THREE.Vector3, up: THREE.Vector3, i: number): number {
+    const r = _lensR.crossVectors(f, up).normalize();
+    const u = _lensU.crossVectors(r, f);
+    const half = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.near;
+    const hh = half + CAMERA_LENS_PAD;
+    const hw = half * camera.aspect + CAMERA_LENS_PAD;
+    const c = _corner.copy(f).multiplyScalar(camera.near).addScaledVector(r, i & 1 ? hw : -hw).addScaledVector(u, i & 2 ? hh : -hh);
+    const l = c.length();
+    c.divideScalar(l);
+    return l;
   }
 }

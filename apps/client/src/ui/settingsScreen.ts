@@ -250,6 +250,8 @@ export function openSettings(game: Game, host: HTMLElement, back: () => void, es
   const mr = toggle(mid, "fl-line", "Turn the minimap with the camera", "Ahead is up. Off keeps north up.", ui.minimapRotate);
   mm.onchange = () => setUi({ minimap: mm.checked });
   mr.onchange = () => setUi({ minimapRotate: mr.checked });
+  const ms = toggle(mid, "fl-line", "Missions", "Top right, under the minimap. A click on its header folds it.", ui.missions);
+  ms.onchange = () => setUi({ missions: ms.checked });
 
   // ------------------------------------------------------------------------------------------ voice + colour
   // The voice lane owns the opt-in (16+), devices and radio (its "Voice & radio" panel); this column
