@@ -1508,7 +1508,13 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   every one of them was inside the noise on Arcadia, Hollowmere and Meridian (largest p50: landmarks
   0.8 ms of a 6.2 ms frame with 2.7 ms of noise; meadow 0.18, 0.04 and −0.03 ms; clouds −0.1, −0.5
   and 0.06 ms) and clouds cost −0.01 ms in Portus (3.95 ms frame, 0.9 ms noise); on High (Arcadia,
-  17.7 ms frame) terrainfx 0.63, landmarks 0.49, clouds 0.45, waterfx 0.40, meadow 0.04 ms. The
+  17.7 ms frame) terrainfx 0.63, landmarks 0.49, clouds 0.45, waterfx 0.40, meadow 0.04 ms. All six
+  switched off against all on, alternating twice over seven framed views (Medium, WebGPU, GPU busy
+  p50): 6.2 ms off, 7.0 ms on, +0.8 ms on average, with the two "on" runs themselves 2 ms apart;
+  every view held 16.7 ms frames (p95 16.8) both ways, and WebGL2 held 16.7 ms too. No shader is
+  built after the warm-up on either backend (0 in play on all three planets). On the main thread a
+  clump takes 2.9× a single blade's time to place (one High chunk, 280k instances, same process),
+  inside the grass's 2 ms a frame, so the rim fills in more slowly, never a longer frame. The
   lead's quiet-machine runs decide whether any of it moves a tier. Why: the owner asked for worlds
   people screenshot at no cost to frame rate (#49), and #7 says the planets look the same
   everywhere.
