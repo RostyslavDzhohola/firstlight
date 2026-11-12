@@ -15,6 +15,8 @@ export interface Identity {
   agent?: boolean;
   /** The address an agent's seat was asked from (the per-address agent cap, world/agents.ts). */
   agentIp?: string;
+  /** This /api/play request's own agent claim (world/agents.ts): the seat it becomes is used up by this handle alone. */
+  agentClaim?: string;
   /** The Better Auth session that issued the token (D-security-5): bearer calls and seat use need it alive. */
   authSession?: string;
 }

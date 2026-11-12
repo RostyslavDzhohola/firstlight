@@ -7,10 +7,10 @@ import { FirstlightAgent, type Observation } from "@firstlight/agent-kit";
 import { AGENT_HEADER, AGENT_REFUSAL } from "@firstlight/shared/net/agents";
 import { PROTOCOL_VERSION } from "@firstlight/shared/net/protocol";
 import type { Game } from "../src/app.ts";
-import { AGENT_RULES, agentsOnline, resetAgentSlots } from "../src/world/agents.ts";
+import { AGENT_RULES, agentSlotsPending, agentsOnline, resetAgentSlots } from "../src/world/agents.ts";
 import { onlineSnapshot } from "../src/ops/home.ts";
 import { liveRooms } from "../src/social/index.ts";
-import type { Room } from "@colyseus/sdk";
+import { Client, type Room } from "@colyseus/sdk";
 import { grantTravel, joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 import { ask, offset, openSpotOutside } from "./npc-bots.ts";
 
@@ -153,6 +153,72 @@ describe("agents: limits", () => {
     const third = new FirstlightAgent();
     agents.push(third);
     await expect(third.connect({ url, token: "dev:roomC:roomC", body: "arcadia" })).rejects.toMatchObject({ code: AGENT_REFUSAL.LIMIT, message: expect.stringContaining("Every copy of this world") });
+  }, 60_000);
+
+  // Review 2026-11-12 (agent kit) #1: claims were keyed by account, so a failed second request freed
+  // the first request's seat and both caps could be passed without any race.
+  it("each request has a claim of its own: a failed request frees nothing but itself, and both caps hold", async () => {
+    AGENT_RULES.perIp = 1;
+    AGENT_RULES.perRoom = 1;
+    const ask = async (id: string, extra: Record<string, unknown> = {}, ip?: string) => {
+      const res = await fetch(`${url}/api/play`, { method: "POST", headers: { Authorization: `Bearer dev:${id}:${id}`, "Content-Type": "application/json", [AGENT_HEADER]: "1", ...(ip ? { "x-real-ip": ip } : {}) }, body: JSON.stringify({ body: "arcadia", v: PROTOCOL_VERSION, ...extra }) });
+      return (await res.json()) as { ok: boolean; error?: string; message?: string; reservation?: { roomId: string; sessionId: string } };
+    };
+    grantTravel("clmA", "arcadia");
+    grantTravel("clmB", "arcadia");
+    grantTravel("clmC", "arcadia");
+    // A reserves a seat and doesn't use it yet.
+    const first = await ask("clmA");
+    expect(first.ok).toBe(true);
+    expect(agentSlotsPending()).toBe(1);
+    // A's second request fails authorisation (a sandbox is an admin's): only its own claim goes.
+    expect(await ask("clmA", { sandbox: true })).toMatchObject({ ok: false });
+    expect(agentSlotsPending()).toBe(1);
+    // B, from the same address: the address cap still counts A's seat.
+    expect(await ask("clmB")).toMatchObject({ ok: false, error: AGENT_REFUSAL.LIMIT, message: expect.stringContaining("from this address (1 of 1)") });
+    // A failed request of another kind (a body the character has no ticket for) changes nothing either.
+    expect(await ask("clmA", { body: "hollowmere" })).toMatchObject({ ok: false, error: "travel" });
+    expect(agentSlotsPending()).toBe(1);
+    expect(await ask("clmB")).toMatchObject({ ok: false, error: AGENT_REFUSAL.LIMIT });
+    // C, from another address: the room cap still counts A's seat, so C gets another copy, never A's.
+    const other = await ask("clmC", {}, "203.0.113.7");
+    expect(other.ok).toBe(true);
+    expect(other.reservation!.roomId).not.toBe(first.reservation!.roomId);
+    expect(agentSlotsPending()).toBe(2);
+    // A's first seat is still good, and using it uses up that claim alone.
+    const room = await new Client(url).consumeSeatReservation(first.reservation as never);
+    try {
+      await waitFor(() => !!(room.state as any).players?.get(room.sessionId));
+      expect((room.state as any).players.get(room.sessionId).agent).toBe(true);
+      expect(agentSlotsPending()).toBe(1);
+      // In the room now, A counts as a body: B is still refused.
+      expect(await ask("clmB")).toMatchObject({ ok: false, error: AGENT_REFUSAL.LIMIT });
+    } finally {
+      await safeLeave(room);
+    }
+  }, 60_000);
+
+  it("a seat is admitted again when it is used: over the cap by then, or no longer counted, it is refused", async () => {
+    AGENT_RULES.perIp = 2;
+    await agent("useA");
+    grantTravel("useB", "arcadia");
+    const play = async () => {
+      const res = await fetch(`${url}/api/play`, { method: "POST", headers: { Authorization: "Bearer dev:useB:useB", "Content-Type": "application/json", [AGENT_HEADER]: "1" }, body: JSON.stringify({ body: "arcadia", v: PROTOCOL_VERSION }) });
+      return (await res.json()) as { ok: boolean; reservation?: unknown };
+    };
+    const seat = await play();
+    expect(seat.ok).toBe(true);
+    AGENT_RULES.perIp = 1; // the cap as it stands when the seat is used is the one that counts
+    await expect(new Client(url).consumeSeatReservation(seat.reservation as never)).rejects.toMatchObject({ message: expect.stringContaining(AGENT_REFUSAL.LIMIT) });
+    expect(agentSlotsPending()).toBe(0); // the refused seat stopped counting
+    expect(agentsOnline()).toBe(1);
+    // A seat whose claim is no longer counted (released, expired) can't put a body in.
+    AGENT_RULES.perIp = 2;
+    const stale = await play();
+    expect(stale.ok).toBe(true);
+    resetAgentSlots();
+    await expect(new Client(url).consumeSeatReservation(stale.reservation as never)).rejects.toMatchObject({ message: expect.stringContaining("seat expired") });
+    expect(agentsOnline()).toBe(1);
   }, 60_000);
 });
 

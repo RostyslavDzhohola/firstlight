@@ -105,6 +105,7 @@ async function playSandbox(identity: Identity, input: PlayInput): Promise<PlayRe
       return md?.sandbox === owner && md.sandboxGen === sb.id && md.body === input.body && !r.locked;
     });
     target ??= await matchMaker.createRoom("body", { body: input.body, copy: 0, loadtest: false, sandbox: owner, sandboxGen: sb.id });
+    if (identity.agent) agentSeated(identity.agentClaim, target.roomId);
     const reservation = await matchMaker.reserveSeatFor(target, { body: input.body }, identity);
     return { ok: true, reservation: reservation as unknown as import("@firstlight/shared/net/protocol").SeatReservation };
   });
@@ -161,7 +162,7 @@ export async function play(identity: Identity, input: PlayInput, limits: Matchma
       target = await matchMaker.createRoom("body", { body: input.body, copy, loadtest });
     }
     queue.delete(identity.userId);
-    if (agent) agentSeated(identity.userId, target.roomId);
+    if (agent) agentSeated(identity.agentClaim, target.roomId);
     const reservation = await matchMaker.reserveSeatFor(target, { body: input.body, starter: input.starter, palette: input.palette, look: input.look }, identity);
     return { ok: true, reservation: reservation as unknown as import("@firstlight/shared/net/protocol").SeatReservation };
   });

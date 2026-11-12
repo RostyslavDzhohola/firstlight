@@ -215,11 +215,14 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     identity.agent = agent;
     if (agent) {
       identity.agentIp = ip ? banKey(ip) : "unknown"; // the security lane's address rule (D-security-4): IPv6 per /64
-      const refused = claimAgentSlot(identity, identity.agentIp, now);
-      if (refused) {
-        res.status(403).json({ ok: false, ...refused });
+      // Its own claim, by its own handle: whatever becomes of this request releases this claim only
+      // (an earlier seat of the same account stays counted until it is used or expires).
+      const claimed = claimAgentSlot(identity, identity.agentIp, now);
+      if ("refused" in claimed) {
+        res.status(403).json({ ok: false, ...claimed.refused });
         return;
       }
+      identity.agentClaim = claimed.claim;
     }
     // An admin's sandbox (D-admin-3): admins only, the real character alive and out of a fight; it
     // is saved now and leaves the real world, and the sandbox opens (or goes on, after travel).
@@ -227,7 +230,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     if (sandbox) {
       const why = enterSandbox(identity, now);
       if (why) {
-        if (agent) releaseAgentSlot(identity.userId);
+        if (agent) releaseAgentSlot(identity.agentClaim);
         res.status(403).json({ ok: false, error: why });
         return;
       }
@@ -236,7 +239,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     // names (portal, out of combat); brand-new characters start home. Admins and bots are exempt.
     const redirect = travelRedirect(identity, body, Date.now());
     if (redirect) {
-      if (agent) releaseAgentSlot(identity.userId);
+      if (agent) releaseAgentSlot(identity.agentClaim);
       res.json({ ok: false, error: "travel", body: redirect });
       return;
     }
@@ -247,7 +250,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     // becomes the reservation or is released.
     const seatIp = perAddress ? (ip ? banKey(ip) : "unknown") : identity.loadtest ? BOT_SEAT_KEY : null;
     if (!identity.loadtest && (pendingSeats.forUser(identity.userId, now) >= PLAY_LIMITS.userSeats || (seatIp !== null && pendingSeats.forIp(seatIp, now) >= PLAY_LIMITS.ipSeats))) {
-      if (agent) releaseAgentSlot(identity.userId);
+      if (agent) releaseAgentSlot(identity.agentClaim);
       res.status(429).json({ ok: false, error: "slow down" });
       return;
     }
@@ -274,11 +277,11 @@ export async function createGame(opts: GameOptions): Promise<Game> {
       );
       if (result.ok) pendingSeats.bind(claim, result.reservation.sessionId, result.reservation.roomId);
       else pendingSeats.release(claim);
-      if (agent && !result.ok) releaseAgentSlot(identity.userId);
+      if (agent && !result.ok) releaseAgentSlot(identity.agentClaim);
       res.json(result);
     } catch (err) {
       pendingSeats.release(claim);
-      if (agent) releaseAgentSlot(identity.userId);
+      if (agent) releaseAgentSlot(identity.agentClaim);
       console.error("play failed", err);
       res.status(500).json({ ok: false, error: "play failed" });
     }
