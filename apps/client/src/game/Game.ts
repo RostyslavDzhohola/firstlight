@@ -9,6 +9,8 @@ import { config, flags } from "../config.ts";
 import { Net, TravelRedirect, type Snapshot } from "../net/Net.ts";
 import { AvatarView, avatarWarmupHook, preloadAvatars } from "../render/Avatars.ts";
 import { avatarTexturesFollowTier, setAvatarTextureLowRes } from "../render/avatars/assets.ts";
+import type { ArtPacks } from "../render/artpacks/ArtPacks.ts";
+import { createArtPacks } from "../render/artpacks/env.ts";
 import { webgpuSecondChance } from "../render/rendererStart.ts";
 import { WORLD_READY_CAP_MS, WORLD_TOPUP_CAP_MS, worldReady, type WorldReadiness } from "./worldReady.ts";
 import { HorseView, horseWarmupHook, preloadHorse } from "../render/Horses.ts";
@@ -71,6 +73,8 @@ export class Game {
   env!: Environment;
   blobs!: BlobShadows;
   bench: Bench | null = null;
+  /** HD art packs after arrival (render/artpacks, D-artpacks): paused behind every loading screen. */
+  packs!: ArtPacks;
   photo!: PhotoMode;
   combat!: CombatClient;
   audio!: GameAudio;
@@ -125,6 +129,7 @@ export class Game {
       throw new RendererUnavailable(e); // nothing was attached yet: a retry starts clean
     }
     installShaderMonitor(this.ctx);
+    this.packs = createArtPacks(this.ctx.renderer);
     setAvatarTextureLowRes(this.ctx.tier === "low"); // 512² character textures on Low
     void preloadAvatars(); // character GLBs stream in while we connect and build the world
     void preloadHorse(); // 147 KB: horses are in the warm-up, so they never compile mid-game
@@ -444,6 +449,7 @@ export class Game {
 
   async enterBody(body: BodyId, choice?: { starter: number; palette: number; look?: number }): Promise<void> {
     setLoading(`Travelling to ${body[0]!.toUpperCase()}${body.slice(1)}…`, 0.15);
+    this.packs.pause(); // the arrival's own downloads first; HD packs resume after the hand-over
     await this.net.leave();
     for (const s of this.systems) s.dispose();
     this.systems = [];
@@ -571,6 +577,8 @@ export class Game {
     }
     // The probe (or a tier change made while travelling) can lift a session that started on Low (D-load-6).
     await avatarTexturesFollowTier(this.ctx.tier);
+    // A tier that doesn't take a live HD pack gets the shipped textures back before the warm-up uploads them.
+    this.packs.setTier(this.ctx.tier);
     // The bench crowd exists before warm-up so its shaders compile behind the loading screen.
     const benchCfg = benchConfig();
     if (benchCfg && !this.bench) {
@@ -582,6 +590,7 @@ export class Game {
         spawn,
         stats: () => this.planet.stats(),
         body: this.bodyId,
+        packs: () => this.packs.state(),
       }, benchCfg);
       this.player.frozen = true;
       this.applyCharsVisibility();
@@ -609,6 +618,8 @@ export class Game {
     // Hand-over: from here a close is a mid-game disconnect (no await until the caller resumes play).
     if (watch) this.net.onLeaveRoom = (code) => this.onRoomClosed(code);
     hideLoading();
+    // HD art packs download in play: after a short delay and the site download, if it is still running (D-artpacks).
+    this.packs.resume({ after: this.planet.town?.settled });
   }
 
   /**
@@ -664,9 +675,11 @@ export class Game {
     this.rewarming = true;
     setLoading("Applying graphics settings…", 0.5);
     this.swapInLateSite();
+    this.packs.pause();
     const shaders = warmupProgress(0.5);
     try {
       await avatarTexturesFollowTier(this.ctx.tier); // a session that started on Low: 1024² now (D-load-6)
+      this.packs.setTier(this.ctx.tier); // a tier without a live pack: the shipped textures, before the warm-up
       await warmup(this.ctx, {
         frames: 3,
         hooks: [this.warmupHook()],
@@ -681,6 +694,7 @@ export class Game {
       hideLoading();
       this.running = true;
       this.last = performance.now();
+      this.packs.resume({ after: this.planet.town?.settled });
       this.endRewarm();
     }
   }
@@ -706,6 +720,7 @@ export class Game {
     const tuningLine = "Tuning graphics for this computer…";
     setLoading(tuningLine, 0.5);
     this.swapInLateSite();
+    this.packs.pause();
     const tuning = stepProgress(0.5, 0.75);
     const shaders = warmupProgress(0.75);
     try {
@@ -713,6 +728,7 @@ export class Game {
       console.info(`[gfx] probe → ${r.tier}${r.valid ? "" : " (not saved)"}`, r);
       this.ctx.setProbedTier(r.tier, { persist: r.valid, clearPinned: true, extras: r.extras });
       await avatarTexturesFollowTier(this.ctx.tier); // D-load-6
+      this.packs.setTier(this.ctx.tier);
       await warmup(this.ctx, {
         frames: 3,
         hooks: [this.warmupHook()],
@@ -726,6 +742,7 @@ export class Game {
       hideLoading();
       this.running = true;
       this.last = performance.now();
+      this.packs.resume({ after: this.planet.town?.settled });
       this.endRewarm();
     }
   }
@@ -834,6 +851,7 @@ export class Game {
       this.blobs.end();
     }
     if (this.input.hit(HOTKEYS.perf)) this.perf.toggle();
+    this.packs.frame(); // an HD pack's next upload slice, or its swap (one per frame)
     this.ctx.render();
     let cpuMs = performance.now() - cpu0;
     if (CPU_SLOW > 1) {

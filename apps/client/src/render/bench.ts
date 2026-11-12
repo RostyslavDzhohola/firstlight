@@ -26,6 +26,7 @@ import type { PassConfig, PassCostReport } from "./passCost.ts";
 import { FEATURES, type Feature } from "./quality.ts";
 import { maxOf, percentile } from "./timing.ts";
 import { shaderStats } from "./warmup.ts";
+import type { ArtPacksState } from "./artpacks/ArtPacks.ts";
 
 /**
  * Features `?bench=passes` measures by default (each must have a kill switch). Not weather: bench
@@ -105,6 +106,8 @@ export interface BenchHost {
   spawn: THREE.Vector3;
   stats(): { chunks: number; visibleChunks: number; grassBlades: number; props: number };
   body: string;
+  /** The HD art packs' state (render/artpacks), reported at the run's start and end. */
+  packs?: () => ArtPacksState;
 }
 
 interface Dummy {
@@ -158,6 +161,8 @@ export interface BenchResult {
   /** `?bench=passes` only: per-pass GPU cost, or null with `passesNote` on WebGL2. */
   passes?: PassCostReport | null;
   passesNote?: string;
+  /** HD art packs live at the run's start and end, with their GPU bytes and swaps. */
+  packs: { start: ArtPacksState; end: ArtPacksState } | null;
   flags: string;
   userAgent: string;
 }
@@ -187,6 +192,7 @@ export class Bench {
   private readonly crowd: Dummy[] = [];
   private nextBurst = 0;
   private shaderBuildsAtStart = 0;
+  private packsAtStart: ArtPacksState | null = null;
   private readonly up = new THREE.Vector3();
   private readonly east = new THREE.Vector3();
   private readonly north = new THREE.Vector3();
@@ -293,6 +299,7 @@ export class Bench {
         this.runStart = now;
         this.shaderBuildsAtStart = shaderStats().total;
         this.host.ctx.gpu.drainBusy();
+        this.packsAtStart = this.host.packs?.() ?? null;
         this.recording = false;
         this.pose(0, camera);
       }
@@ -513,6 +520,7 @@ export class Bench {
       props: st.props,
       shaderBuildsDuringRun: shaderStats().total - this.shaderBuildsAtStart,
       ...(this.config.passes ? { passes: passes ?? null, ...(passesNote ? { passesNote } : {}) } : {}),
+      packs: this.packsAtStart && this.host.packs ? { start: this.packsAtStart, end: this.host.packs() } : null,
       flags: location.search,
       userAgent: navigator.userAgent,
     };

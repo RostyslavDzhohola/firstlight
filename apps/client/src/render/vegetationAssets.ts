@@ -9,6 +9,7 @@ import { config } from "../config.ts";
 import { atmo } from "./atmosphere.ts";
 import { PROP_PALETTES } from "./propGeometry.ts";
 import { applyOccluderFade } from "./occluderFade.ts";
+import type { TextureSlot } from "./artpacks/ArtPacks.ts";
 
 export interface VegetationAssets {
   geometry: Map<string, THREE.BufferGeometry>;
@@ -16,9 +17,10 @@ export interface VegetationAssets {
   impostors?: THREE.Texture;
 }
 let promise: Promise<VegetationAssets | null> | null = null;
+let loaded: VegetationAssets | null = null;
 
 export function preloadVegetation(): Promise<VegetationAssets | null> {
-  return promise ??= load().catch((err: unknown) => {
+  return promise ??= load().then((a) => (loaded = a)).catch((err: unknown) => {
     console.warn("[vegetation] assets failed to load; using procedural props", err);
     return null;
   });
@@ -158,6 +160,39 @@ export function vegetationPaletteBody(): BodyId | null {
 }
 
 const materials = new Map<string, THREE.MeshStandardNodeMaterial>();
+
+type TextureNode = ReturnType<typeof texture>;
+/**
+ * Per shipped atlas: what the vegetation materials draw for it now, their texture nodes and the
+ * materials (`map`). An HD art pack (render/artpacks, D-artpacks) rebinds the near-mesh atlas in every
+ * material made from it; materials made later draw what it is bound to.
+ */
+const atlases = new Map<THREE.Texture, { current: THREE.Texture; nodes: TextureNode[]; materials: THREE.MeshStandardNodeMaterial[] }>();
+function atlasBinding(base: THREE.Texture) {
+  let b = atlases.get(base);
+  if (!b) atlases.set(base, (b = { current: base, nodes: [], materials: [] }));
+  return b;
+}
+
+/** The slot of a shipped atlas: rebinding it (same type, format and sampler) changes no program. */
+export function vegetationAtlasSlot(base: THREE.Texture): TextureSlot {
+  const b = atlasBinding(base);
+  return {
+    get texture() {
+      return b.current;
+    },
+    set(t: THREE.Texture) {
+      b.current = t;
+      for (const n of b.nodes) n.value = t;
+      for (const m of b.materials) m.map = t;
+    },
+  };
+}
+
+/** The loaded assets (null before they land or after a failure), for the HD pack's slot. */
+export function loadedVegetation(): VegetationAssets | null {
+  return loaded;
+}
 /** One opaque alpha-tested atlas material per kind (and near/far), shared by every body: the body's
  * colours come from applyVegetationPalette. The color attribute is a role mask, not vertex colour:
  * r foliage, g bark, b stone, black flower/mushroom paint. */
@@ -166,9 +201,12 @@ export function vegetationMaterial(kind: PropKind, atlas: THREE.Texture, imposto
   let m = materials.get(key);
   if (m) return m;
   const t = tintsFor(kind);
-  m = new THREE.MeshStandardNodeMaterial({ map: atlas, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.86, metalness: 0 });
+  const bound = atlasBinding(atlas);
+  m = new THREE.MeshStandardNodeMaterial({ map: bound.current, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.86, metalness: 0 });
   m.name = `vegetation:${key}`;
-  const sample = texture(atlas);
+  const sample = texture(bound.current);
+  bound.nodes.push(sample);
+  bound.materials.push(m);
   // Impostor foliage was baked neutral grey, while bark retains its source paint. This gives
   // a pixel-level role mask without downloading a third atlas. Dead trees are entirely bark.
   const neutral = abs(sample.r.sub(sample.g)).add(abs(sample.g.sub(sample.b))).lessThan(0.025);
