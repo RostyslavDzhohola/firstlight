@@ -17,6 +17,7 @@ import { dealDamage, wallBetween } from "../src/world/combat.ts";
 import { DestructionSystem } from "../src/world/destruction.ts";
 import { onGameEvent } from "../src/world/events.ts";
 import { moveLimits } from "../src/world/movement.ts";
+import { applyMoveEffect } from "../src/world/npc/effects.ts";
 import { SpellSystem } from "../src/world/spells/SpellSystem.ts";
 import { supportOf } from "../src/world/support.ts";
 import { safeLeave, startServer, waitFor } from "./helpers.ts";
@@ -356,6 +357,38 @@ describe("Frostbloom", () => {
     } finally {
       restore();
     }
+  }, SLOW);
+
+  it("tells a slowed player the slow the server holds for them: a stronger one already running stays, a weaker one is replaced (review 4)", async () => {
+    const base = openSpotOutside("arcadia", 14);
+    const a = await adminBot(game, rooms, "frost", "arcadia", base, 3);
+    const b = await adminBot(game, rooms, "slowed", "arcadia", offset(base, 3, 0, R), 3);
+    const h = listen(a);
+    const fx: { kind: string; ms: number; amount: number; set?: boolean }[] = [];
+    b.onMessage("npcFx", (m) => fx.push(m));
+    // A creature's stronger slow is already on the target: 60% with a minute to go.
+    await refill(a, h);
+    applyMoveEffect(actor(b), { kind: "slow", seconds: 60, amount: 0.6 }, Date.now());
+    const until0 = actor(b).npcFx!.slowUntil;
+    cast(a, "frostbloom");
+    await until("the slow reached its client", () => fx.length === 1);
+    // The server kept the 60% (Frostbloom's 40% is ignored while it lasts) and says exactly that.
+    expect(actor(b).npcFx).toMatchObject({ slow: 0.6, slowUntil: until0 });
+    expect(fx[0]).toMatchObject({ kind: "slow", amount: 0.6, set: true });
+    expect(fx[0]!.ms).toBeGreaterThan(FROSTBLOOM.slowS * 1000);
+    expect(fx[0]!.ms).toBeLessThanOrEqual(60_000);
+    expect(moveLimits(actor(b), Date.now()).speed).toBeCloseTo(0.4);
+    // A weaker slow running: Frostbloom's takes its place, for its own 3 s.
+    await refill(a, h);
+    const t0 = Date.now();
+    actor(b).npcFx!.slow = 0.2;
+    actor(b).npcFx!.slowUntil = t0 + 60_000;
+    h.events.length = 0;
+    cast(a, "frostbloom");
+    await until("the second slow reached its client", () => fx.length === 2);
+    expect(fx[1]).toMatchObject({ kind: "slow", amount: FROSTBLOOM.slow, ms: FROSTBLOOM.slowS * 1000, set: true });
+    expect(actor(b).npcFx!.slow).toBe(FROSTBLOOM.slow);
+    expect(actor(b).npcFx!.slowUntil).toBeLessThan(t0 + 60_000);
   }, SLOW);
 
   it("a Prism Bubble shell shelters whoever stands behind it from the nova, and is charged for it once (review 1)", async () => {

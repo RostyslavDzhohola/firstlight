@@ -1047,7 +1047,11 @@ export interface BossEventMsg {
 export type NpcServerMessages = {
   npcAtk: NpcAttackMsg;
   npcShot: NpcShotMsg;
-  npcFx: { kind: StatusEffect["kind"]; ms: number; amount: number; by: string };
+  /**
+   * A status effect on you for `ms`. `set` (slow/chill): this is the whole slow the server holds for
+   * you now, its amount and time left; replace any slow or chill you were predicting with it.
+   */
+  npcFx: { kind: StatusEffect["kind"]; ms: number; amount: number; by: string; set?: boolean };
   npcPull: { x: number; y: number; z: number; speed: number; ms: number };
   npcKill: { id: string; kind: number; xp: number; coins: number };
   boss: BossEventMsg;

@@ -239,9 +239,12 @@ export class SpellSystem implements RoomSystem {
       if (t.kind === "player") {
         if (t.dead) continue;
         // The NPC lane's slow: the movement budget enforces it, the client predicts it (npcFx).
-        const e = { kind: "slow" as const, seconds: FROSTBLOOM.slowS, amount: FROSTBLOOM.slow };
-        applyMoveEffect(t, e, now);
-        t.client?.send("npcFx", { kind: e.kind, ms: e.seconds * 1000, amount: e.amount, by: a.id });
+        applyMoveEffect(t, { kind: "slow", seconds: FROSTBLOOM.slowS, amount: FROSTBLOOM.slow }, now);
+        // The client is told the slow the server now holds, not the one asked for (review 4): a
+        // stronger slow already running wins and an equal one is extended (npc/effects.ts), and
+        // `set` has the client put this in place of whatever slows it was predicting.
+        const held = t.npcFx!;
+        t.client?.send("npcFx", { kind: "slow", ms: Math.max(0, held.slowUntil - now), amount: held.slow, by: a.id, set: true });
         slowed.push(t.id);
       } else if (t.state.hp > 0 && !t.boss) {
         slowNpc(t, FROSTBLOOM.slow, now + FROSTBLOOM.slowS * 1000);
