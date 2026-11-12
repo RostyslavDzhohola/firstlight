@@ -6,7 +6,11 @@ import * as THREE from "three/webgpu";
 import { BODIES, CHUNK_QUADS, createTerrain, gridDir, padDirs, SKY_PROFILES, type BodyDef, type BodyId, type Face, type Terrain } from "@firstlight/shared";
 import { OUTPOSTS } from "@firstlight/shared/content/padOutposts";
 import type { BakeResult, ChunkRequest, ChunkResult } from "./terrain.worker.ts";
-import { applyLook, atmo, radialFogNode, skyBackgroundNode, sunRigFor, type SunRig } from "../render/atmosphere.ts";
+import { applyLook, applyWorldAir, atmo, radialFogNode, skyBackgroundNode, sunRigFor, type SunRig } from "../render/atmosphere.ts";
+import { applyCloudLook, withClouds } from "../render/clouds.ts";
+import { Landmarks } from "../render/landmarks.ts";
+import { applyMeadowLook } from "../render/meadow.ts";
+import { WORLD_LOOKS, type WorldLook } from "../render/worldLooks.ts";
 import { applyGrassLook, GrassSystem, type GrassChunk } from "../render/grass.ts";
 import { LOOKS, type BodyLook } from "../render/looks.ts";
 import { postUniforms, setGrade } from "../render/post.ts";
@@ -15,7 +19,7 @@ import type { RenderCtx, ResolvedSettings } from "../render/renderer.ts";
 import { applySkyLut } from "../render/skyLut.ts";
 import { skyPlanetsFor, type SkyPlanets } from "../render/skyPlanets.ts";
 import { localFrame, type V3 } from "../render/sunFrame.ts";
-import { applyTerrainSettings, terrainMaterialFor, terrainUniforms } from "../render/terrainMaterial.ts";
+import { applyGroundLook, applyTerrainSettings, terrainMaterialFor, terrainUniforms } from "../render/terrainMaterial.ts";
 import { applyWaterLook, createWaterMesh, waterMaterialFor } from "../render/water.ts";
 import type { WorldBuild } from "../game/worldReady.ts";
 import { SiteTown } from "./SiteTown.ts";
@@ -54,7 +58,13 @@ const EAGER_GRASS_MS = 8;
 
 // Scene-level nodes are built once and shared by every body (all inputs are shared uniforms),
 // so arriving on a new planet never invalidates material caches.
-let skyNode: THREE.Node | null = null;
+/** The sky per cloud level (quality.ts `clouds`: 0 none, 1 one tap, 2 lit): a tier change picks another, a travel never does. */
+const skyNodes = new Map<number, THREE.Node>();
+function skyNodeFor(level: 0 | 1 | 2): THREE.Node {
+  let n = skyNodes.get(level);
+  if (!n) skyNodes.set(level, (n = level === 0 ? skyBackgroundNode() : skyBackgroundNode((dir, sky) => withClouds(dir, sky, level))));
+  return n;
+}
 let fogNode: THREE.Node | null = null;
 
 export class Planet {
@@ -62,6 +72,9 @@ export class Planet {
   readonly terrain: Terrain;
   readonly group = new THREE.Group();
   readonly look: BodyLook;
+  /** The planets' graphics pass: ground cover, clouds, ground layers, water, far haze, stars. */
+  readonly world: WorldLook;
+  readonly landmarks: Landmarks;
   readonly rig: SunRig;
   readonly skyPlanets: SkyPlanets;
   readonly grass: GrassSystem;
@@ -99,6 +112,7 @@ export class Planet {
     this.body = BODIES[bodyId];
     this.terrain = createTerrain(this.body);
     this.look = LOOKS[bodyId];
+    this.world = WORLD_LOOKS[bodyId];
     this.loadRadius = Math.min(520, this.body.radius * 1.2);
     this.settings = ctx.settings;
     this.group.name = `planet:${bodyId}`;
@@ -132,9 +146,12 @@ export class Planet {
     applyLook(this.look, this.body.radius, this.body.waterLevel, this.settings);
     // Scattering LUT slices span the body's sun elevations over the day (day/night cycle).
     applySkyLut(bodyId, this.look, [SKY_PROFILES[bodyId].minElev, SKY_PROFILES[bodyId].maxElev]);
-    applyWaterLook(this.look);
+    applyWaterLook(this.look, this.world.water);
     applyGrassLook(this.look);
-    skyNode ??= skyBackgroundNode();
+    applyMeadowLook(bodyId);
+    applyCloudLook(this.world.clouds);
+    applyGroundLook(this.world.ground);
+    applyWorldAir(this.world, this.settings);
     fogNode ??= radialFogNode();
     ctx.renderer.toneMappingExposure = this.look.exposure;
     postUniforms.bloomThreshold.value = this.look.bloomThreshold;
@@ -148,14 +165,17 @@ export class Planet {
     const hub = this.body.terrain.kind === "hub";
     // No blade roots on the site's paving, paths or footprints (townGround.ts, outpostGround.ts).
     const grassMask = siteGrassMask(this.body);
-    this.grass = new GrassSystem(this.body.radius, n, hub ? [] : padDirs(this.body), grassMask);
+    // The hub's lawns stay single blades: its look is the castle town's, and it is the busiest scene.
+    this.grass = new GrassSystem(this.body.radius, n, hub ? [] : padDirs(this.body), grassMask, !hub);
     this.group.add(this.grass.group);
+    this.landmarks = new Landmarks(bodyId, this.body.radius);
+    this.group.add(this.landmarks.group);
     this.props = new PropSystem(bodyId);
     this.group.add(this.props.group);
     this.town = hub || bodyId in OUTPOSTS ? new SiteTown(this.terrain, this.settings) : null;
     if (this.town) this.group.add(this.town.group);
     this.material = terrainMaterialFor(this.settings);
-    this.waterMaterial = waterMaterialFor(this.settings.water);
+    this.waterMaterial = waterMaterialFor(this.settings.on.waterfx ? this.settings.water : 0);
     // A hidden one-triangle water patch at the planet centre: the warm-up protocol shows hidden
     // objects, so the water shader compiles even when no lake is in range yet.
     this.waterDummy = createWaterMesh(
@@ -183,7 +203,7 @@ export class Planet {
     this.settings = s;
     if (s.on.sky) {
       this.scene.background = null;
-      this.scene.backgroundNode = skyNode;
+      this.scene.backgroundNode = skyNodeFor(s.on.clouds ? s.clouds : 0);
     } else {
       this.scene.backgroundNode = null;
       this.scene.background = new THREE.Color(this.look.horizon);
@@ -191,6 +211,8 @@ export class Planet {
     this.scene.fogNode = s.on.fog ? fogNode : null;
     atmo.fogHeight.value = s.fog.height ? 1 : 0;
     atmo.scatterMix.value = s.sky.scatterSteps[0] > 0 ? this.look.scatter.mix : 0;
+    applyWorldAir(this.world, s);
+    this.landmarks.applySettings(s);
     applyTerrainSettings(s);
     if (terrainUniforms.bakedSun.value > 0) this.rebakeSun();
     const mat = terrainMaterialFor(s);
@@ -198,7 +220,7 @@ export class Planet {
       this.material = mat;
       for (const c of this.loaded.values()) if (c.mesh) c.mesh.material = mat;
     }
-    const wm = waterMaterialFor(s.water);
+    const wm = waterMaterialFor(s.on.waterfx ? s.water : 0);
     if (wm !== this.waterMaterial) {
       this.waterMaterial = wm;
       for (const c of this.loaded.values()) if (c.water) c.water.material = wm;
@@ -227,6 +249,7 @@ export class Planet {
     this.cullHorizon(camera.position);
     this.grass.update(camera.position, this.grassChunks(), now, this.eager ? EAGER_GRASS_MS : undefined);
     this.props.update(camera.position, now);
+    this.landmarks.update(camera);
     this.town?.update(camera);
 
     if (!this.eager && now - this.lastStream < 200) return this.pendingNear(ux, uy, uz);
@@ -427,6 +450,7 @@ export class Planet {
     for (const w of this.workers) w.terminate();
     for (const c of [...this.loaded.values()]) this.unload(c);
     this.grass.dispose();
+    this.landmarks.dispose();
     this.props.dispose();
     this.town?.dispose();
     // The sun rig and sky planets are shared across bodies (re-skinned by the next Planet).

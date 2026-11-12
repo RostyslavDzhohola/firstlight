@@ -10,6 +10,8 @@ import { emptyStored, TIER_TABLE, resolveSettings, type StoredGfx, type Tier } f
 import { radialFogNode, skyBackgroundNode } from "./atmosphere.ts";
 import { terrainMaterialFor } from "./terrainMaterial.ts";
 import { waterMaterialFor } from "./water.ts";
+import { withClouds } from "./clouds.ts";
+import { Landmarks } from "./landmarks.ts";
 import { GrassSystem } from "./grass.ts";
 import { testVegetationAssets } from "./vegetationAsset.testutil.ts";
 import { PropSystem } from "./props.ts";
@@ -250,6 +252,30 @@ for (const backendName of ["webgpu", "webgl2"] as const) {
       expectClean(build(renderer, scene, camera, p.mesh));
       const blobs = new BlobShadows(scene);
       expectClean(build(renderer, scene, camera, blobs.mesh));
+    });
+
+    it("the planets' pass: single blades (Low), full clumps (High), the clouded sky, the landmarks, plain variants", () => {
+      const scene = sceneWithLights();
+      for (const t of ["low", "high"] as const) {
+        const grass = new GrassSystem(500, 256);
+        grass.applySettings(settingsFor(t));
+        const cell = (grass as any).acquire();
+        expect(cell.mesh.material.name).toBe(t === "low" ? "grass" : "grass-meadow");
+        expect(!!cell.geoLite).toBe(t === "high");
+        expectClean(build(renderer, scene, camera, cell.mesh));
+      }
+      for (const level of [1, 2] as const) {
+        const bgMat = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide, fog: false });
+        bgMat.colorNode = skyBackgroundNode((dir, sky) => withClouds(dir, sky, level)) as any;
+        expectClean(build(renderer, scene, camera, new THREE.Mesh(new THREE.SphereGeometry(1, 8, 8), bgMat)));
+      }
+      const lm = new Landmarks("arcadia", 500);
+      expectClean(build(renderer, scene, camera, lm.mesh!));
+      // The kill switches' variants (`?noterrainfx`, `?nowaterfx` draws water level 0).
+      const plain = resolveSettings("high", false, true, stored, new Set(["terrainfx"] as const));
+      const terrain = terrainMaterialFor(plain);
+      expect(terrain).not.toBe(terrainMaterialFor(settingsFor("high")));
+      expectClean(build(renderer, scene, camera, new THREE.Mesh(terrainGeometry(), terrain)));
     });
 
     it("weather: rain/dust box and lightning bolt", () => {

@@ -1575,3 +1575,60 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   HP; against the most fragile starter a kill still takes two hits and ≥ 0.75 s. Why: issue #9 asked for
   starters that feel different; trade-offs (every strength paid for) keep any starter from being strictly
   best, which the model checks (no stat dominance, each leads a role, no duel more lopsided than 0.6).
+- **D-gfx-worlds-1 (2026-11-12):** the planets get their own look in the wild, client only, no
+  protocol or world-geometry change. (1) Grass: the `?meadow` study's clumps are ported by hand
+  (`render/meadow.ts`) and are the look on Medium and up: each grass instance is a clump of blades
+  with an optional head on a stem, same cells, counts and one draw per cell. Medium draws the lite
+  clump everywhere (3 blades, 8 triangles), High and Ultra the full one within 14 m (5 curved blades,
+  22). The species, colours and glow are shared uniforms per body (`render/worldLooks.ts`): daisies,
+  buttercups, clover and lavender on Arcadia; fungus caps and ghost blooms that light themselves and
+  pale reeds on Hollowmere; dry seed-head scrub on Meridian. (2) Regions (#7): one deterministic
+  noise (`render/regionNoise.ts`) moves the worker's ground colours and the clumps' dryness between
+  lush, dry and deep together, and wears the ground to earth round the pads and along outpost paths.
+  (3) Ground layers in the terrain material, per pixel from slope and height with edges broken by
+  the detail noise it already samples (no extra fetch): rock with cracks, worn earth, beach, snow,
+  moss, dry cracks on flats. (4) Clouds on a shell round the planet (`render/clouds.ts`): one tap on
+  Medium, two octaves lit by a second tap on High; the weather closes the cover. (5) Water: three
+  depth stops, texture ripples in place of three 3-D procedural noises, a narrower foam line, mist
+  on Hollowmere's meres, glitter on High. (6) Far haze drifts to each planet's air colour, stars
+  per sky. (7) Horizon landmarks (`render/landmarks.ts`), one draw per body, 130 m or more above
+  the ground, hidden by the planet's sphere in the shader: floating islands with falls of light over
+  Arcadia, a broken ring round Hollowmere, orbital yards with blinking tethers over Meridian. Low
+  keeps the single blades, a clear sky and the plain water and ground; it gets the regions (vertex
+  colours), the haze colour and the landmarks. Kill switches: `?nomeadow ?noclouds ?noterrainfx
+  ?nowaterfx ?noaerial ?nolandmarks` (all but aerial are in `?bench=passes`). Measured with
+  `?bench=passes` on the M1 (WebGPU, 1280×720, six rounds, the machine at load 190–270): on Medium
+  every one of them was inside the noise on Arcadia, Hollowmere and Meridian (largest p50: landmarks
+  0.8 ms of a 6.2 ms frame with 2.7 ms of noise; meadow 0.18, 0.04 and −0.03 ms; clouds −0.1, −0.5
+  and 0.06 ms) and clouds cost −0.01 ms in Portus (3.95 ms frame, 0.9 ms noise); on High (Arcadia,
+  17.7 ms frame) terrainfx 0.63, landmarks 0.49, clouds 0.45, waterfx 0.40, meadow 0.04 ms. All six
+  switched off against all on, alternating twice over seven framed views (Medium, WebGPU, GPU busy
+  p50): 6.2 ms off, 7.0 ms on, +0.8 ms on average, with the two "on" runs themselves 2 ms apart;
+  every view held 16.7 ms frames (p95 16.8) both ways, and WebGL2 held 16.7 ms too. No shader is
+  built after the warm-up on either backend (0 in play on all three planets). On the main thread a
+  clump takes 2.9× a single blade's time to place (one High chunk, 280k instances, same process),
+  inside the grass's 2 ms a frame, so the rim fills in more slowly, never a longer frame. The
+  lead's quiet-machine runs decide whether any of it moves a tier. Why: the owner asked for worlds
+  people screenshot at no cost to frame rate (#49), and #7 says the planets look the same
+  everywhere.
+- **D-gfx-worlds-2 (2026-11-12):** tone mapping stays Neutral; `render/post.ts` and
+  `render/renderer.ts` are untouched. The study's ACES + S-curve would have changed the hub, the
+  avatars and the other graphics lane's grade in the same run. The lime greens the study blamed on
+  the curve are fixed where they come from: Arcadia's ground palette is olive, and the clumps pull
+  each body's grass colours toward its own lush and straw ends. `?tonemap=aces|agx` still works.
+  Why: one global curve change is the other lane's call to make with its grade, and the greens
+  didn't need it.
+- **D-gfx-worlds-3 (2026-11-12):** the hub keeps its own ground: Portus' lawns stay single blades
+  (`GrassSystem`'s `meadow` flag), its terrain colours take no regions and no wear, and it has no
+  landmarks. It does get the cloud layer (sparse, `WORLD_LOOKS.portus.clouds.cover` 0.58; 1 turns it
+  off). Why: the castle town's look belongs to the hub lane and Portus is the busiest scene, the one
+  that sets the M1's frame-rate tail.
+- **D-gfx-worlds-4 (2026-11-12):** two new extras, `meadow` (full clumps near the camera) and
+  `clouds2` (the lit clouds), exist for `?extras=` and are deliberately not in `EXTRA_COSTS`, so the
+  probe never adds them by itself. Why: an extra goes into the cost model with a cost measured on a
+  quiet M1 (D-framerate-3), and this run's machine was never quiet.
+- **D-gfx-worlds-5 (2026-11-12):** the sky and weather take the server's state as it is on the
+  first sync on a body instead of easing toward it (#46): `Environment.settle`, set by `setBody` and
+  by the first `setServerSky`; the next update snaps the weather kind, amount and wetness. A URL or
+  photo weather override still eases in, and so does every change during play. Why: the world
+  darkened and cooled for ~4 s after the loader hid.

@@ -3,12 +3,20 @@
 
 import { chordMetres, type BodyId, type Dir } from "@firstlight/shared";
 import { PAD_APRON_RADIUS } from "@firstlight/shared/planet/outpostGround";
+import type { Region } from "../render/regionNoise.ts";
 
 type RGB = [number, number, number];
 
 export interface TerrainPalette {
   grass: RGB;
   grass2: RGB;
+  /** Regions (#7, regionNoise.ts): the dry end of the ground cover (straw, ash, salt) and the deep end (clover, moss, rust). */
+  grassDry: RGB;
+  grassDeep: RGB;
+  /** Worn earth: under steep ground, round the landing pads and along an outpost's paths. */
+  dirt: RGB;
+  /** Added to the region's dryness (Arcadia is mostly lush). */
+  dryBias?: number;
   rock: RGB;
   rock2: RGB;
   sand: RGB;
@@ -32,19 +40,24 @@ const srgb = (hex: number): RGB => {
 
 export const PALETTES: Record<BodyId, TerrainPalette> = {
   portus: {
-    grass: srgb(0x6fb85a), grass2: srgb(0x9ccc6a), rock: srgb(0xc9b8a0), rock2: srgb(0xe8d9c0),
+    grass: srgb(0x6fb85a), grass2: srgb(0x9ccc6a), grassDry: srgb(0xa9b860), grassDeep: srgb(0x4f9a4a), dirt: srgb(0x8a6f52),
+    rock: srgb(0xc9b8a0), rock2: srgb(0xe8d9c0),
     sand: srgb(0xe6d2a8), bed: srgb(0x7a6b55), snow: srgb(0xf4f0ff), snowLine: 999, grassDensity: 0.7,
   },
   arcadia: {
-    grass: srgb(0x3fae4a), grass2: srgb(0x8fd14f), rock: srgb(0x6f7d74), rock2: srgb(0x9aa39c),
+    // Olive rather than lime: the meadow's clumps cover the ground, so it reads as shade under them.
+    grass: srgb(0x2f7030), grass2: srgb(0x5c923a), grassDry: srgb(0x8f9044), grassDeep: srgb(0x245a30), dirt: srgb(0x6b5238), dryBias: -0.18,
+    rock: srgb(0x6f7d74), rock2: srgb(0x9aa39c),
     sand: srgb(0xf2d58a), bed: srgb(0x2e7f78), snow: srgb(0xf6fbff), snowLine: 70, grassDensity: 1,
   },
   hollowmere: {
-    grass: srgb(0x4f5a3c), grass2: srgb(0x6e6a4a), rock: srgb(0x4a4258), rock2: srgb(0x6c6080),
+    grass: srgb(0x4f5a3c), grass2: srgb(0x6e6a4a), grassDry: srgb(0x7d7262), grassDeep: srgb(0x2c4a42), dirt: srgb(0x33283a),
+    rock: srgb(0x4a4258), rock2: srgb(0x6c6080),
     sand: srgb(0x6b5f55), bed: srgb(0x2b2633), snow: srgb(0xd8d2ea), snowLine: 65, grassDensity: 0.8,
   },
   meridian: {
-    grass: srgb(0x9a6a3c), grass2: srgb(0xb8854a), rock: srgb(0xa8452c), rock2: srgb(0xc9663a),
+    grass: srgb(0x9a6a3c), grass2: srgb(0xb8854a), grassDry: srgb(0xd9bc92), grassDeep: srgb(0x7c4a32), dirt: srgb(0x7a3d28),
+    rock: srgb(0xa8452c), rock2: srgb(0xc9663a),
     sand: srgb(0xf0e6d8), bed: srgb(0xd8d0c4), snow: srgb(0xf0e6d8), snowLine: 999,
     bands: [srgb(0xb24a2c), srgb(0xd27a44), srgb(0x8e3524), srgb(0xe09a5a), srgb(0xa5402a)],
     bandHeight: 6,
@@ -61,8 +74,13 @@ function smooth(e0: number, e1: number, x: number) {
   return t * t * (3 - 2 * t);
 }
 
-/** Colour for one vertex. `n` is a cheap per-vertex noise in [-1,1] for variation. */
-export function terrainColor(p: TerrainPalette, height: number, water: number, flatness: number, n: number, out: Float32Array, o: number) {
+/**
+ * Colour for one vertex. `n` is a cheap per-vertex noise in [-1,1] for variation. `region` (the
+ * planet's regions at this point, regionNoise.ts) moves the ground cover between lush, dry and deep,
+ * so a field is never one flat colour and a walk crosses visibly different ground (#7); without it
+ * (the map) the ground is the plain two-tone mix. `wear` 0..1 turns the ground to worn earth.
+ */
+export function terrainColor(p: TerrainPalette, height: number, water: number, flatness: number, n: number, out: Float32Array, o: number, region: Region | null = null, wear = 0) {
   const h = height - water;
   let rock = mix(p.rock, p.rock2, 0.5 + 0.5 * n);
   if (p.bands && p.bandHeight) {
@@ -70,8 +88,17 @@ export function terrainColor(p: TerrainPalette, height: number, water: number, f
     const band = p.bands[((bi % p.bands.length) + p.bands.length) % p.bands.length]!;
     rock = mix(band, rock, 0.25);
   }
-  const grass = mix(p.grass, p.grass2, 0.5 + 0.5 * n);
+  let grass = mix(p.grass, p.grass2, 0.5 + 0.5 * n);
+  if (region) {
+    grass = mix(grass, p.grassDeep, region.deep * 0.75);
+    grass = mix(grass, p.grassDry, Math.min(1, Math.max(0, (region.dry + (p.dryBias ?? 0)) * 0.85 + region.patch * 0.18)));
+    // Patches a few metres across: a little lighter or darker than the field round them.
+    const k = 1 + region.patch * 0.14;
+    grass = [grass[0] * k, grass[1] * k, grass[2] * k];
+  }
   const rockiness = 1 - smooth(0.72, 0.9, flatness);
+  // Worn earth where the turf thins on steepening ground, and wherever feet wore it away.
+  grass = mix(grass, p.dirt, Math.max(wear, smooth(0.93, 0.8, flatness) * 0.6));
   let c = mix(grass, rock, rockiness);
   // Beach and lake bed.
   const sandT = 1 - smooth(0.6, 1.8, h);
