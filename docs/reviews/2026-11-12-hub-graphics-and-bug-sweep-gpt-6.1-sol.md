@@ -13,6 +13,16 @@ reasoning effort high, Standard tier; no tests run. No blockers in either lane.
 | A4 | should-fix | `HoloBoard.ts:81` | Names are cut by character count but drawn without a measured width limit or clip: sixteen wide characters overlap the value column and the next page. |
 | A5 | nit | `apps/client/src/world/holoBoardModel.ts:101`; `HoloBoard.ts:256` | `holoPageAt()` returns a new object every visible frame. |
 
+### Fixes (lane/gfx-hub, second pass)
+
+| Finding | Commit | Fix | Test |
+|---|---|---|---|
+| A1 | `9203eb33` | `Net` marks every player of the join or reconnect snapshot `seeded`: they are simply there. An effect needs one of 6 slots (`REZ_MAX_ACTIVE`) and to be within 90 m of the camera (`rezAdmits`; the player's own always runs); a frame's arrivals take the slots nearest first (`AvatarView.rezArrivals`). Without a slot an arrival is whole at once, a departure is freed at once, a death dissolves the body without its light. | `apps/client/src/net/Net.test.ts` "Net remotes: who was already there"; `apps/client/src/render/rezGate.test.ts` "rezAdmits", "arrivals" (forty at once → six effects, the nearest) |
+| A2 | `b5b02991` | `AvatarView.settleRez()` runs when the resolved Rez setting changes: off, every effect ends now (bodies whole, the dead lying where they fell as with Rez off, lights hidden, slots free) and the avatars mid de-rez are freed; on again, the dead are gone until they rise. | `apps/client/src/render/rezGate.test.ts` "the Rez switch" |
+| A3 | `708fee35` | The request moved into `world/holoFeed.ts`, which follows the board's resolved state (`settings.on.holo`, not offline): off, no request and the one under way is aborted; on again, it asks at once if its data is older than the interval; dispose aborts. | `apps/client/src/world/holoFeed.test.ts` |
+| A4 | `c32817b9` | `world/holoBoardDraw.ts`: a row measures its value first, the name gets the rest, cut by `measureText()` between whole characters and clipped to its rectangle (the note too); a value takes at most half a row; each page is clipped to its half of the canvas. `cleanText()` strips C0/C1 controls and the bidirectional marks, embeddings, overrides and isolates from names, titles and the hunt's lines. | `apps/client/src/world/holoBoardDraw.test.ts` |
+| A5 | `7f74cd7d` | `holoPageAt()` takes an `out` object; the board keeps one. | `apps/client/src/world/holoBoardModel.test.ts` "holoPageAt per frame" |
+
 ## B. Bug sweep
 
 | # | Severity | Where | Finding |
