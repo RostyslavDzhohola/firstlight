@@ -133,7 +133,8 @@ export const WORLD_LOOKS: Record<BodyId, WorldLook> = {
     clouds: { cover: 0.58, height: 300, scale: 760, stretch: [1, 1, 1], lit: 0xfffaf0, shade: 0x9fb0d0, opacity: 0.85, speed: 1.2 },
     ground: { rock: 0xcbbba4, dirt: 0x8a6f52, sand: 0xe6d2a8, snow: 0xf4f0ff, snowLine: 999, moss: 0.25, mossColor: 0x6a8a3a, cracks: 0, lichen: 0xc8c890, lichenAmt: 0.2 },
     water: { shore: 0x9ff0e0, absorb: 0.35, mist: 0, mistColor: 0xffffff, glitter: 1, foam: 1 },
-    air: { shafts: 0.6, mist: 0, mistDawn: 0, mistColor: 0xffffff, mistTop: 8, fireflies: 0, fireflyA: 0xffffff, fireflyB: 0xffffff, fireflySize: 0.05, fireflyRise: 0, fireflyBlink: 1 },
+    // The hub's sky and evening light are the hub lane's: no shafts, mist or fireflies here (one number each to turn on).
+    air: { shafts: 0, mist: 0, mistDawn: 0, mistColor: 0xffffff, mistTop: 8, fireflies: 0, fireflyA: 0xffffff, fireflyB: 0xffffff, fireflySize: 0.05, fireflyRise: 0, fireflyBlink: 1 },
     aerial: 0x8fb4e8, aerialAmount: 0.3,
     stars: { warm: 0xffe8c8, cool: 0xc8dcff, density: 0.5, gain: 1 },
   },

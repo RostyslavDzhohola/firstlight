@@ -2060,3 +2060,29 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
 - **D-polish-9 (2026-11-12):** Every race ring carries a post of light that reads from any side: a gold beam 16 m tall and about 1 m wide over the ring to run now (the first ring before the run starts), pulsing with it, and a dim blue one 4 m tall over each later ring; a post starts at the ring's top, so the hoop itself stays clear, and passed rings are still removed with their posts. Why: rings face along the route, so side-on the play-test saw "a thin yellow arc in the grass" at 35 m and found rings only through the marker text. One more pooled instanced mesh on the beacon's see-through material (`trialMarkerSoft`, D-polish-8), which dims within a few metres of the lens; no new shader.
 - **D-polish-10 (2026-11-12):** The "E take everything from …'s pile" prompt is not shown while you are dead (until you rise). Why: the play-test saw it behind the death card, over your own pile; E does nothing then. The mission-object and horse prompts already had this guard.
 - **D-polish-11 (2026-11-12):** Arcadia's meadow height factor is 1.0, down from 1.3 (clumps about 0.3–0.5 m instead of 0.36–0.65 m). Why: the second play-test could not see a Linewyrm at 15 m: ground creatures are 0.85–0.9 m tall and the taller clumps hid most of them. Checked in a browser at night next to a Hopbit pack (creatures and their bars clear of the grass, the meadow still reads full). Hollowmere and Meridian keep their heights; if small creatures hide there too, lower those the same way.
+- **D-gfx-worlds-9 (2026-11-12):** what the second pass costs, as far as this run's machine could
+  say. `?bench=passes` (same process, each feature switched off in turn, WebGPU, 1280×720, six
+  rounds): on Medium everything was inside the noise: at dawn on Arcadia (3.7 ms frame, 0.6 ms
+  noise) terrainfx 0.35, meadow 0.01, landmarks 0.01, shafts 0.00, foliagefx −0.01, mist −0.15 ms;
+  at dawn on Hollowmere (4.2 ms, 1.1 ms noise) landmarks 0.41, mist 0.33, terrainfx 0.29, meadow
+  0.24, shafts 0.09, foliagefx −0.22 ms; at night on Arcadia (4.7 ms, 1.7 ms noise) foliagefx 0.54,
+  fireflies 0.21, meadow 0.05 ms. On High at dawn on Arcadia (16.7 ms frame, GPU-bound, 4.3 ms
+  noise) meadow 1.33, terrainfx 0.75, waterfx 0.52, shafts 0.40, landmarks 0.11, foliagefx 0.09,
+  mist −0.21 ms. Against the first pass's head, alternating three times over twelve framed views
+  (Medium, WebGPU, GPU busy p50, mean of the views): 8.4 ms before, 9.5 ms now, 8.3 ms now with
+  the four new switches off; but the same build swung between 4.5 and 16 ms from one round to the
+  next as other lanes loaded the machine (Meridian's views, whose scene barely changed, ran at
+  0.55× the first pass's time in two rounds and 2× in the third), so that bracket does not resolve
+  a difference of 1 ms. Every view held 16.7 ms frames both ways (p95 16.8), bar one 33 ms p95 in
+  Arcadia's deep grass in the round where the load peaked. Plain play at each planet's spawn, same
+  alternation: Arcadia 5.7/4.2/3.5 ms before and 5.6/4.1/7.9 now, Hollowmere 6.0/4.8/4.5 and
+  6.4/4.1/10.0, Meridian 4.7/3.7/3.1 and 3.7/3.4/3.5. Triangles drawn went up in grass-heavy views
+  (Arcadia's meadow 524k → 662k, Hollowmere's fen 348k → 500k on Medium; these counts include the
+  clumps the shader has shrunk to nothing in a far cell's kept list) and stayed level elsewhere.
+  High held 16.7 ms frames in eleven framed views (GPU busy 8.6–13.9 ms, 1.9 M triangles in the
+  meadow); its bracket against the first pass did not run (the measuring job hit its time limit).
+  No shader is built after the warm-up on either backend (0 in play on all three planets, WebGPU
+  and WebGL2). If the lead's quiet-machine run wants triangles back, `MEADOW_SHARE` (0.7 clumps per
+  blade) and `MEADOW_FAR_KEEP` (0.3 kept at the rim) in `render/meadow.ts` are the two numbers.
+  The hub keeps its own sky: `WORLD_LOOKS.portus.air` has shafts, mist and fireflies at 0. Why:
+  the brief asks for each change's cost; a loaded machine gives bounds, not a verdict.
