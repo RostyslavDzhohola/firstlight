@@ -4,6 +4,35 @@
 **Resume protocol:** SPEC §0. Read this file, check running tasks, continue at the first unchecked item.
 **Paused 2026-10-14 20:10 CDT by the owner:** their open requests (blinking, weapons, creeps, dodge delay, email-first sign-in, voice/radio removal, 3D characters, ElevenLabs SFX, pad outposts) are in the workspace handoff `../HANDOFF.md` (outside the repo). Start there.
 
+**The 2026-11-12 run (pull request #67, protocol 6; NOT deployed):** one overnight run in lanes, each
+reviewed by Codex gpt-6.1-sol (`docs/reviews/2026-11-12-*`, a fixes table per finding), play-tested by
+Sonnet 5.5. What it adds:
+- **Spellbook:** aether and four spells on Q / F / X / Z (Skipstep, Frostbloom, Wishfall, Glasswing Ward),
+  server-decided, spell power per starter (content §2.7, D-spells-*).
+- **The Three Gleams:** a three-trial hunt (ring race on Arcadia, beacon defence on Hollowmere, shard
+  collecting on Meridian) from Sela Marchbank in Portus, a vault, a Hall line; `race` / `defend` /
+  `collect` objective types; missions A4 and H4 (content §5, §5.1, D-hunt-*).
+- **Balance:** `pnpm balance` (a model over the real catalogues, 600+ banded checks), tuned outliers,
+  starters with their own HP, speed, dodge and spell power (#9; content §2.6, §8.5, D-balance-*).
+- **Graphics:** two passes on the planets (meadow, ground cover, terrain layers, water, clouds, haze,
+  sky landmarks, foliage shading, shafts, mist, fireflies; D-gfx-worlds-*) and two on the hub (rez-in and
+  de-rez, portal vortex, hologram scoreboard with the hunt's state, sky life, lantern light, loot-pile
+  beacons, nameplates, tone pass; D-gfx-hub-*); HUD moments and a home page on fresh stills (D-ui-*, D-home-*).
+- **Controls:** gamepad through one input layer, experimental touch (D-controls-5…7).
+- **Agent play:** `packages/agent-kit`, `tools/agent` (MCP server, HTTP bridge, CLI, hunter, residents),
+  the agent flag and "AI" chip, caps, `AGENTS_ENABLED` off in production (`docs/agents/playing.md`, D-agents-*).
+- **Fixes:** #3, #12, #31, #32, #33, #35, #44, #46; #34 on the client; the security pass's eight findings
+  (D-security-*); the October lanes (frame rate first #49, loader stills #47, art-pack code #48) with
+  their review fixes. The HD pack files are still not shipped (over the lane's GPU-memory budget).
+- **Measured:** 60 fps (p95 16.7–16.8 ms, no frame over 100 ms) on Portus, Arcadia, Hollowmere and Meridian
+  on WebGPU, 1280×720, the M1, default tier; the full Vitest run passes.
+- **Before a deploy:** client first, then the server (protocol 6; migrations 8–10 run on boot); set
+  `LOADTEST_ENABLED` only for load tests and check `LOADTEST_SECRET` is 32+ random bytes (D-security-1/2);
+  decide `AGENTS_ENABLED` and the caps; run `pnpm e2e:gate` and, after, `pnpm e2e:prod`.
+- **Open:** the Playwright journeys were not re-run against the new HUD pieces; WebGL2 frame times on the
+  final build; real-device checks for gamepad and touch; the art packs within budget; whether agents and
+  residents go live.
+
 **Round 2 (2026-10-16), live at main 9a0ee38, protocol 5:** the owner's picks are in — sculpted A characters
 (Kappa and Unit 7 with A/B looks, the ninja Hinoko), shops in every safe zone, admin mode (claim form + a
 private sandbox where nothing is saved, D-admin-1..3), a leaderboard of real people only (test accounts
