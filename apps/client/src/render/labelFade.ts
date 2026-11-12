@@ -16,10 +16,10 @@ export const LABEL_FADE_FAR = 2.5;
 /**
  * The size clamp (D-polish-4, play-test: a keeper's name covered her own "E Talk" prompt): a label is
  * its world size from LABEL_FULL_DEPTH m out; nearer, it shrinks with the depth, so on screen it stays
- * the size it has at LABEL_FULL_DEPTH (about 60 px of 720 for a two-line label), down to LABEL_MIN_SCALE.
+ * the size it has at LABEL_FULL_DEPTH (about 80 px of 720 for a two-line label), down to LABEL_MIN_SCALE.
  */
-export const LABEL_FULL_DEPTH = 11;
-export const LABEL_MIN_SCALE = 0.14;
+export const LABEL_FULL_DEPTH = 8;
+export const LABEL_MIN_SCALE = 0.18;
 
 /** A label's size factor at `depth` m in front of the camera (the shader's formula). */
 export function labelScale(depth: number): number {

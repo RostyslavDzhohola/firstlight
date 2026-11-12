@@ -16,7 +16,7 @@
 // The timing is pure (rezPose) and unit-tested; AvatarView steps it and writes the uniforms.
 
 import * as THREE from "three/webgpu";
-import { abs, atan, attribute, cos, dot, float, floor, fract, max, mix, normalize, normalView, positionLocal, positionViewDirection, positionWorld, select, sin, smoothstep, uniform, uv, vec3 } from "three/tsl";
+import { abs, atan, attribute, cameraPosition, cos, dot, float, floor, fract, max, mix, length, normalize, normalView, positionLocal, positionViewDirection, positionWorld, select, sin, smoothstep, uniform, uv, vec3 } from "three/tsl";
 
 export type RezKind = "in" | "out" | "death";
 
@@ -324,10 +324,13 @@ export function rezFxMaterial(): THREE.MeshBasicNodeMaterial {
   const facing = abs(dot(normalView, positionViewDirection)).clamp(0, 1);
   const env = smoothstep(0.0, 0.1, p).mul(float(1).sub(smoothstep(0.5, 1.0, p)));
   const shimmer = sin(v.mul(9).sub(p.mul(16)).add(uv().x.mul(Math.PI * 2 * 3))).mul(0.12).add(0.88);
-  const halo = facing.pow(1.7).mul(float(1).sub(v).pow(1.6)).mul(env).mul(shimmer).mul(select(isDeath, float(0.0), float(0.34)));
+  // Near the camera (your own arrival, 4–6 m off) the column and its flash are under half as bright
+  // (D-polish-5): it no longer blows out the middle of the first view or leaves you a silhouette.
+  const nearDim = mix(float(0.4), float(1), smoothstep(4.0, 16.0, length(positionWorld.sub(cameraPosition))));
+  const halo = facing.pow(1.7).mul(float(1).sub(v).pow(1.6)).mul(env).mul(shimmer).mul(nearDim).mul(select(isDeath, float(0.0), float(0.34)));
   // The core flashes as the light arrives, well over the bloom threshold, and is gone a moment later.
   const flash = smoothstep(0.0, 0.07, p).mul(float(1).sub(smoothstep(0.1, 0.42, p)));
-  const core = facing.pow(0.8).mul(float(1).sub(v).pow(1.2)).mul(flash.mul(3.2).add(env.mul(0.5))).mul(select(isDeath, float(0.0), float(1.0)));
+  const core = facing.pow(0.8).mul(float(1).sub(v).pow(1.2)).mul(flash.mul(3.2).add(env.mul(0.5))).mul(nearDim).mul(select(isDeath, float(0.0), float(1.0)));
   // The glyph: an outer ring, a broken ring turning one way, ticks turning the other, a triangle.
   const gx = uv().x.sub(0.5).mul(2), gy = uv().y.sub(0.5).mul(2);
   const gr = gx.mul(gx).add(gy.mul(gy)).sqrt();
