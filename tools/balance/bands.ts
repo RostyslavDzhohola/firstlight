@@ -34,9 +34,11 @@ export const BIGGEST_HIT = 0.86;
 /**
  * Per-starter HP shifts TTK: against every starter, still two hits and this long (D-balance-4). A hard floor,
  * held at the fastest cadence the server accepts (a modified client can play it; D-balance-6), with
- * heavies and specials.
+ * heavies, specials and headshots.
  */
 export const STARTER_TTK_FLOOR = 0.75;
+/** §2.5's burst floor (s): no kill faster with headshots either (review finding 4; D-balance-8). */
+export const BEST_FLOOR = 1.4;
 /** [04]: each weapon's TTK within 0.6–1.6× its class median. */
 export const CLASS_BAND: [number, number] = [0.6, 1.6];
 /** Solo TTK of an on-level creature (median starter weapon, s), by tier. */
@@ -79,11 +81,12 @@ export function checks(): Check[] {
       const band = burst ? BURST_TTK : SUSTAINED_TTK;
       add({ id: `pvp.ttk.${name}`, what: `${name} TTK (primary, body)`, value: fmt(c.ttk), band: `${band[0]}–${band[1]} s`, ok: inBand(c.ttk, ...band), source: "content §2.5" });
       add({ id: `pvp.opener.${name}`, what: `${name} TTK with heavies/specials`, value: fmt(c.openerTtk), band: `≥ ${OPENER_FLOOR} s`, ok: c.openerTtk >= OPENER_FLOOR - 1e-9, source: "content §2.5 burst floor" });
+      add({ id: `pvp.best.${name}`, what: `${name} TTK with headshots (and heavies/specials)`, value: `${fmt(c.bestTtk)}/${c.bestHits}`, band: `≥ ${BEST_FLOOR} s`, ok: c.bestTtk >= BEST_FLOOR - 1e-9, source: "content §2.5 burst floor (review finding 4)" });
       add({ id: `pvp.biggest.${name}`, what: `${name} biggest hit ÷ HP`, value: fmt(c.biggestShare), band: `≤ ${BIGGEST_HIT}`, ok: c.biggestShare <= BIGGEST_HIT + 1e-9, source: "content §2.5 no one-shots" });
       for (const b of bodies) {
         const v = pvpCell(c.family, level, starterMaxHp(b.i, level), undefined, "server");
-        const fast = { t: v.openerTtk, hits: v.openerHits };
-        add({ id: `pvp.floor.${name}.${STARTERS[b.i]!.id}`, what: `${name} vs ${STARTERS[b.i]!.name} (${v.targetHp} HP) at the server's cadence: fastest kill (heavies, specials) / biggest hit ÷ HP`, value: `${fmt(fast.t)} s, ${fast.hits} hits / ${fmt(v.biggestShare)}`, band: `≥ ${STARTER_TTK_FLOOR} s, ≥ 2 hits, < 1`, ok: fast.t >= STARTER_TTK_FLOOR - 1e-9 && fast.hits >= 2 && v.biggestShare < 1, source: "D-balance-4, D-balance-6" });
+        const fast = v.bestTtk < v.openerTtk ? { t: v.bestTtk, hits: v.bestHits } : { t: v.openerTtk, hits: v.openerHits };
+        add({ id: `pvp.floor.${name}.${STARTERS[b.i]!.id}`, what: `${name} vs ${STARTERS[b.i]!.name} (${v.targetHp} HP) at the server's cadence: fastest kill (heavies, specials, headshots) / biggest hit ÷ HP`, value: `${fmt(fast.t)} s, ${fast.hits} hits / ${fmt(v.biggestShare)}`, band: `≥ ${STARTER_TTK_FLOOR} s, ≥ 2 hits, < 1`, ok: fast.t >= STARTER_TTK_FLOOR - 1e-9 && fast.hits >= 2 && v.biggestShare < 1, source: "D-balance-4, D-balance-6" });
       }
     }
     for (const cls of ["melee", "magic", "ranged"]) {

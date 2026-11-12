@@ -102,7 +102,8 @@ export function hitTimeline(def: WeaponDef, tierIndex: number, level: number, po
     const s = t === 0 && last === -Infinity && preheld ? 0 : sealAt(Math.max(0, last));
     if (seal && sealCdAt <= t + 1e-9 && sealAt(t) > s + 1e-9) {
       const st = seal.tiers[tierIndex]!;
-      hits.push({ t: s + flight(seal), dmg: round(st.damage * lvl), burn: st.burn });
+      // The fireball's head hit takes the seal tier's own headMult (combat.ts weakMult on the projectile's tier).
+      hits.push({ t: s + flight(seal), dmg: round(st.damage * lvl * (policy === "best" ? (st.headMult ?? 1.5) : 1)), burn: st.burn });
       sealCdAt = s + tier.cooldown!;
       last = s;
       t = Math.max(t, s + tier.rate * rk);

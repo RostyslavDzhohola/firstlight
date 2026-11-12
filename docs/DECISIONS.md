@@ -1607,3 +1607,14 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   it, D-balance-3's trim was larger than needed at T1/T2 (30/40 pass every check: Hinoko 12 duel wins, Unit 7
   14) but not at T3 (52 hands Hinoko the duels at L12/L20 and Unit 7 leads nothing), so T1/T2 are restored and
   T3 is kept.
+- **D-balance-8 (2026-11-12):** §2.5's 1.4 s burst floor gates best play too: every weapon's kill with
+  headshots, heavies and specials (base HP, the client's cadence), and D-balance-6's hard floor counts
+  headshots against every starter body. Scatterpipe headMult 1.5 → 1 and Ember Seal headMult 1.5 → 1 (all
+  tiers); Yew Longbow rate 1.35/1.25/1.15 → 1.4; Comet Launcher III rate and reload 1.6 → 1.65. Why: review
+  finding 4: the gate covered body hits and openers only, and three weapons were under it: two ×1.5 Scatterpipe
+  volleys killed in 0.9 s, a longbow head + body in 1.35/1.25/1.15 s, the kunai with a ×1.5 seal fireball in
+  1.14 s (L1/6/12). Pellets are point-blank burst, not precision, and the seal is an explosive (§2.1 gives explosives
+  ×1.0, as D-balance-2 did for the Comet), so neither takes a head bonus. The bow keeps its ×1.5 (its
+  identity) and fires a full draw every 1.4 s, the Stillshot's head + body time; a smaller head bonus would
+  have had to fall to ×1.05 at T3. The bow's slower T3 raised the L20 ranged median and left the Comet at 0.59×
+  it (class band 0.6), hence 1.65. Each change is load-bearing: reverting any one fails the checks.

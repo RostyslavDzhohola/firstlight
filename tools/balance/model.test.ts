@@ -107,6 +107,44 @@ describe("the Ember Seal (review finding 2, D-balance-7)", () => {
   });
 });
 
+describe("the headshot floor (review finding 4, D-balance-8)", () => {
+  it("every weapon's best-play TTK (headshots, heavies, specials) is gated at every level against §2.5's 1.4 s", () => {
+    const all = checks();
+    for (const f of ["scatterpipe", "longbow", "stillshot", "kunai", "carbine"]) {
+      for (const l of [1, 6, 12, 20]) expect(all.find((c) => c.id === `pvp.best.${f} L${l}`)?.ok).toBe(true);
+    }
+    // And the hard floor counts headshots against every starter body at the server's cadence.
+    expect(all.some((c) => c.id === "pvp.floor.kunai L12.ninja" && c.what.includes("headshots"))).toBe(true);
+  });
+
+  it("the L1 Scatterpipe: two ×1.5 head volleys (63 each) killed in 0.9 s; pellets take no head bonus now", () => {
+    const sp = w("scatterpipe");
+    expect(sp.tiers.map((t) => t.headMult)).toEqual([1, 1, 1]);
+    const c = pvpCell("scatterpipe", 1);
+    expect([c.bestTtk, c.bestHits]).toEqual([c.ttk, c.hits]); // best play is the body volley: 1.8 s / 3
+    expect(c.bestTtk).toBeGreaterThanOrEqual(1.4);
+  });
+
+  it("the gate catches a weapon under the floor (the old ×1.5 pellets)", () => {
+    const sp = w("scatterpipe") as { tiers: { headMult?: number }[] };
+    try {
+      for (const t of sp.tiers) t.headMult = 1.5;
+      const c = pvpCell("scatterpipe", 1);
+      expect([+c.bestTtk.toFixed(2), c.bestHits]).toEqual([0.9, 2]);
+      expect(checks().find((x) => x.id === "pvp.best.scatterpipe L1")?.ok).toBe(false);
+    } finally {
+      for (const t of sp.tiers) t.headMult = 1;
+    }
+  });
+
+  it("the Ember Seal's fireball head hit takes the seal's own headMult, 1 for an explosive", () => {
+    const seal = w("ember_seal");
+    expect(seal.tiers.map((t) => t.headMult)).toEqual([1, 1, 1]);
+    const best = hitTimeline(w("kunai"), 0, 1, "best", 1);
+    expect(best[0]!.dmg).toBe(seal.tiers[0].damage);
+  });
+});
+
 describe("damage and burn", () => {
   it("burn burns continuously and refreshes, never stacks", () => {
     expect(timeToKill([{ t: 0, dmg: 24, burn: 4 }], 30)!.t).toBeCloseTo(1.5);
@@ -127,8 +165,8 @@ describe("PvP cells match content §2.5 where the content's numbers still hold",
     ["carbine", 1, 2.75, 12],
     ["scatterpipe", 1, 1.8, 3],
     ["stillshot", 1, 2.8, 3],
-    ["longbow", 1, 2.7, 3],
-    ["longbow", 12, 2.3, 3],
+    ["longbow", 1, 2.8, 3], // rate 1.4 (D-balance-8; §2.5 listed 2.7)
+    ["longbow", 12, 2.8, 3], // §2.5 listed 2.3
   ] as const)("%s at L%i: %f s / %i hits", (fam, level, t, hits) => {
     const c = pvpCell(fam, level);
     expect(c.ttk).toBeCloseTo(t, 5);
