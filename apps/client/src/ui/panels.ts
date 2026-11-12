@@ -8,6 +8,7 @@ import { COSMETIC_BY_ID, COSMETIC_SLOTS, RARITY_STYLE, isExtraCosmetic, itemName
 import { MEDALS } from "@firstlight/shared/content/medals";
 import { GUIDES, MISSION_BY_ID, MISSIONS, missionsFrom, missionsOn, type MissionDef } from "@firstlight/shared/content/missions";
 import { trackerRows } from "./trackerRows.ts";
+import { trialWay } from "../game/nextSteps.ts";
 import { GLEAMS, gleamsWon } from "@firstlight/shared/content/gleams";
 import type { InvItem } from "@firstlight/shared/net/protocol";
 import type { Game } from "../game/Game.ts";
@@ -103,6 +104,8 @@ function missionCard(parent: HTMLElement, def: MissionDef, you: YouPlus | null, 
   el("b", "", top, `${def.name}`);
   el("span", "ty", top, def.type);
   el("div", "obj", card, def.objective);
+  const way = trialWay(def);
+  if (way) el("div", "rw way", card, way);
   const items = def.reward.items.filter((i) => !isExtraCosmetic(i.id) || !!you?.cosmeticsExtras).map((i) => `${i.qty} × ${itemName(i)}`);
   el("div", "rw", card, `Recommended LV ${def.recLevel[0]}–${def.recLevel[1]} · Reward ${def.reward.xp} XP, ${def.reward.coins} ◎${items.length ? `, ${items.join(", ")}` : ""}`);
   if (state && !state.done) {

@@ -20,6 +20,7 @@ import { createLightPools } from "../world/lightPools.ts";
 import { createTownLights } from "../world/townLights.ts";
 import { createControlsClient } from "./controls.ts";
 import { createMomentsClient } from "./MomentsClient.ts";
+import { createNextSteps } from "./NextStepsClient.ts";
 
 export interface ClientSystem {
   update(dt: number, now: number): void;
@@ -62,3 +63,5 @@ CLIENT_SYSTEMS.push(createTownLights);
 CLIENT_SYSTEMS.push(createControlsClient);
 // Look-and-feel lane (D-ui-2…5): the arrival card, earned banners, the event feed, hit direction and the spell hint.
 CLIENT_SYSTEMS.push(createMomentsClient);
+// "What next" hints after the tutorial (D-polish-ux-3).
+CLIENT_SYSTEMS.push(createNextSteps);
