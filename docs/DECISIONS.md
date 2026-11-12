@@ -1778,3 +1778,12 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   identity) and fires a full draw every 1.4 s, the Stillshot's head + body time; a smaller head bonus would
   have had to fall to ×1.05 at T3. The bow's slower T3 raised the L20 ranged median and left the Comet at 0.59×
   it (class band 0.6), hence 1.65. Each change is load-bearing: reverting any one fails the checks.
+- **D-fixes-4 (2026-11-12):** The tutorial pays its 50 XP (level 2, where saving unlocks) to the character
+  that finishes it. The completion pays its 20 XP, or for a level-1 character below 50 XP (one reborn
+  mid-tutorial: the dummies paid its earlier life and the rebirth started it at 0 XP) enough to reach
+  50 (`completionXp`, `world/onboarding.ts`). Dummies still pay once per account and the completion
+  pays once per account (its flag), so dying on purpose earns nothing: a reborn trainee ends where a
+  never-died one does, and a death after the end brings neither the tutorial nor XP back. Why: review
+  finding B1: after D-fixes-2 a paid dummy, a death and the rest of the tutorial paid 40 XP, so the
+  tutorial ended for good at level 1 with saving locked. Topping up at completion, not at the rebirth,
+  is the only point that pays once whatever the number of deaths.
