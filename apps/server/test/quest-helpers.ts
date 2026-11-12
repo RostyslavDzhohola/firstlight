@@ -23,7 +23,11 @@ export interface Bot {
 }
 
 export async function bot(userId: string, body: BodyId, role = "admin", extra: Record<string, unknown> = {}, ticket = true): Promise<Bot> {
-  const room = await joinAs(harness.game!, userId, body, extra, role, ticket);
+  return wrapRoom(await joinAs(harness.game!, userId, body, extra, role, ticket));
+}
+
+/** A Bot around a room already joined (or reconnected with its token). */
+export async function wrapRoom(room: Room): Promise<Bot> {
   harness.rooms.push(room);
   const b: Bot = {
     room,

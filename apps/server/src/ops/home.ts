@@ -9,7 +9,7 @@ import { MEDAL_BY_ID } from "@firstlight/shared/content/medals";
 import { STARTERS, starterLook } from "@firstlight/shared/content/weapons";
 import type { HomeBoard, HomeData, HomeOnline } from "@firstlight/shared/net/home";
 import { banKey, directRequestIp } from "../auth/ip.ts";
-import { listHallOfFirsts, medalLeaders, onTestMarked, topLevels, type Db } from "../db/index.ts";
+import { listGleamkeepers, listHallOfFirsts, medalLeaders, onTestMarked, topLevels, type Db } from "../db/index.ts";
 import { liveRooms } from "../social/index.ts";
 import type { VisitSource } from "./datafast.ts";
 
@@ -65,6 +65,7 @@ export function readBoard(db: Db, now = Date.now(), rows = HOME_LIMITS.boardRows
     }),
     medals: medalLeaders(db, rows, now).map((r) => ({ name: r.name, medals: r.medals, title: titleOf(r.titleMedal) })),
     hall: listHallOfFirsts(db).map((e) => ({ id: e.secretId, name: e.displayName, foundAt: e.foundAt })),
+    gleams: (({ count, first }) => ({ keepers: count, first }))(listGleamkeepers(db, 5)),
   };
 }
 

@@ -4,8 +4,8 @@
 // change as a `trial` message (protocol.ts TrialMsg) and counts the clock down itself.
 //
 // What persists: the mission entry (accepted, done, and for collect the pieces taken in `counts`).
-// The attempt itself (clock, next ring, waves) lives in this session only: a reconnect, a death, a
-// timeout or leaving a beacon's ring ends it, and the mission stays accepted for another try.
+// The attempt itself (clock, next ring, waves) lives in this session only: a dropped socket, a
+// reconnect, a death, a timeout or leaving a beacon's ring ends it, and the mission stays accepted for another try.
 // Defend waves come from the NPC system's public createNpc/dissolve, marked `spawned: "trial"`, so
 // they pay nothing (rewards.ts) and dissolve when the attempt ends.
 
@@ -13,6 +13,7 @@ import { MISSION_BY_ID, missionGoal, type MissionDef } from "@firstlight/shared/
 import { NPC_DEFS, NPC_INDEX } from "@firstlight/shared/content/npcs";
 import { inReach } from "@firstlight/shared/content/world";
 import type { TrialMsg } from "@firstlight/shared/net/protocol";
+import { PF } from "@firstlight/shared/net/schema";
 import { actorPos, type PlayerActor } from "../actors.ts";
 import type { V3 } from "../geometry.ts";
 import { npcSystemOf } from "../npc/index.ts";
@@ -48,6 +49,8 @@ interface Run {
   npcIds: string[];
   lastAt: number;
   paused: boolean;
+  /** The objective is met but the reward's save failed: the payout retries each tick and the clock stops. */
+  complete: boolean;
 }
 
 type Mission = PlayerActor["char"]["missions"][number];
@@ -56,8 +59,19 @@ export class TrialLogic {
   private readonly q: QuestSystem;
   /** Session id → the running attempt. */
   private readonly runs = new Map<string, Run>();
-  /** Session id → feet position at the previous tick (race rings are passed along that segment). */
+  /** Session id → feet position at the previous quest tick (race rings are passed along the path from it). */
   private readonly lastPos = new Map<string, V3>();
+  /**
+   * Session id → feet positions sampled every room tick (50 ms) since the last quest tick, for players
+   * with a race open here. Rings are checked along each short segment in order, so a Skipstep blink
+   * (an instant 10 m move) counts only if its own straight path crosses a ring, and running then
+   * blinking inside one quest tick can't cut a corner through one it never came near (D-hunt-5).
+   */
+  private readonly paths = new Map<string, V3[]>();
+  /** Players with a race mission open on this body (refreshed each quest tick). */
+  private readonly racers = new Set<string>();
+  /** Session id → the mission whose attempt a dropped socket ended (told on reconnect). */
+  private readonly dropped = new Map<string, string>();
 
   constructor(q: QuestSystem) {
     this.q = q;
@@ -93,7 +107,9 @@ export class TrialLogic {
       limitMs = this.scaled(def.collect.limitS);
       leftMs = run ? Math.max(0, run.deadline - now) : limitMs;
     }
-    const msg: TrialMsg = { id: def.id, kind, state, progress: m?.progress ?? 0, goal: missionGoal(def), leftMs, limitMs, next, ...(reason ? { reason } : {}) };
+    // The deadline on the server clock: the client counts down to it, so delivery delay doesn't stretch it.
+    const endsAt = state === "running" && run && limitMs > 0 ? now + leftMs : 0;
+    const msg: TrialMsg = { id: def.id, kind, state, progress: m?.progress ?? 0, goal: missionGoal(def), leftMs, limitMs, next, ...(reason ? { reason } : {}), ...(endsAt ? { endsAt } : {}) };
     a.client.send("trial", msg);
   }
 
@@ -118,6 +134,31 @@ export class TrialLogic {
     if (run) this.dissolveWaves(run);
     this.runs.delete(sessionId);
     this.lastPos.delete(sessionId);
+    this.paths.delete(sessionId);
+    this.racers.delete(sessionId);
+    this.dropped.delete(sessionId);
+  }
+
+  /**
+   * The socket dropped: the body waits out the reconnection window, but the attempt ends now (its
+   * clock can't run for someone who isn't there, D-hunt-3): waves dissolve, progress resets as on a
+   * failure, and the reconnect hears `idle` (reason "dropped"). Nothing ticks while the body lingers.
+   */
+  onDrop(a: PlayerActor) {
+    this.lastPos.delete(a.id);
+    this.paths.delete(a.id);
+    const run = this.runs.get(a.id);
+    if (!run) return;
+    this.reset(a, run);
+    this.dropped.set(a.id, run.id);
+  }
+
+  /** Back on the same body: say the attempt the drop ended is gone (the HUD clears its clock). */
+  onReconnect(a: PlayerActor) {
+    const id = this.dropped.get(a.id);
+    this.dropped.delete(a.id);
+    const def = id ? MISSION_BY_ID.get(id) : undefined;
+    if (def) this.send(a, def, a.char.missions.find((x) => x.id === id && !x.done), "idle", "dropped");
   }
 
   /** Death ends any attempt (the mission stays accepted until the rebirth clears it). */
@@ -141,16 +182,43 @@ export class TrialLogic {
 
   // ---------------------------------------------------------------- tick
 
+  /** Every room tick: note where a racer is (see `paths`). Cheap for everyone else. */
+  sample(a: PlayerActor) {
+    if (!this.racers.has(a.id) || a.state.flags & PF.LINGER) return;
+    let path = this.paths.get(a.id);
+    if (!path) this.paths.set(a.id, (path = []));
+    const p = actorPos(a);
+    const last = path.at(-1) ?? this.lastPos.get(a.id);
+    if (last && last[0] === p[0] && last[1] === p[1] && last[2] === p[2]) return;
+    if (path.length >= 16) path.shift(); // a stalled quest tick: keep the latest
+    path.push([p[0], p[1], p[2]]);
+  }
+
   tickPlayer(a: PlayerActor, now: number) {
+    // A dropped or lingering body runs no trial: it can't start a race standing in ring 1 or take a shard.
+    if (a.state.flags & PF.LINGER) return;
     const p = actorPos(a);
     const prev = this.lastPos.get(a.id) ?? p;
     this.lastPos.set(a.id, [p[0], p[1], p[2]]);
+    const sampled = this.paths.get(a.id);
+    const pts: V3[] = [prev, ...(sampled ?? []), p];
+    if (sampled) sampled.length = 0;
+    let racing = false;
     for (const { m, def } of this.q.activeMissions(a)) {
-      if (def.race) this.tickRace(a, m, def, prev, p, now);
+      if (def.race) racing = true;
+      if (def.race) this.tickRace(a, m, def, pts, now);
       else if (def.collect) this.tickCollect(a, m, def, p, now);
       else if (def.defend) this.tickDefend(a, m, def, p, now);
-      if (a.dead) return;
+      if (a.dead) break;
     }
+    if (racing) this.racers.add(a.id);
+    else this.racers.delete(a.id);
+  }
+
+  /** Index of the first segment of `pts` (from `from`) that passes through the ring at `c`, or -1. */
+  private passedAt(c: V3, pts: readonly V3[], from: number, radius: number): number {
+    for (let i = Math.max(1, from); i < pts.length; i++) if (this.passes(c, pts[i - 1]!, pts[i]!, radius)) return i;
+    return -1;
   }
 
   private ringAt(id: string): V3 {
@@ -180,18 +248,24 @@ export class TrialLogic {
     return Math.hypot(x, y, z) <= radius;
   }
 
-  private tickRace(a: PlayerActor, m: Mission, def: MissionDef, prev: V3, p: V3, now: number) {
+  private tickRace(a: PlayerActor, m: Mission, def: MissionDef, pts: readonly V3[], now: number) {
     const race = def.race!;
     let run = this.runs.get(a.id);
     if (run && run.id !== def.id) return; // one attempt at a time
+    if (run?.complete) return this.finish(a, m, def, run);
     if (run && now > run.deadline) {
       this.fail(a, "time");
       run = undefined;
     }
+    // Rings fall in order, each on the same segment as the one before or a later one.
+    let seg = 1;
+    let started = false;
     if (!run) {
       // Passing the first ring starts the clock (again, after a failure).
-      if (!this.passes(this.ringAt(race.rings[0]!), prev, p, race.radius)) return;
-      if (this.runs.has(a.id)) return;
+      const at = this.passedAt(this.ringAt(race.rings[0]!), pts, 1, race.radius);
+      if (at < 0 || this.runs.has(a.id)) return;
+      seg = at;
+      started = true;
       run = this.newRun(def, "race", now);
       run.deadline = now + this.scaled(race.limitS);
       run.next = 1;
@@ -199,24 +273,23 @@ export class TrialLogic {
       m.progress = 1;
       a.youDirty = true;
       this.q.toast(a, `${def.name}: the clock is running — ${race.rings.length - 1} rings to go`, "info");
-      this.send(a, def, m, "running");
-      return;
     }
-    // Several rings can fall in one tick at a gallop; each needs its own pass.
+    // Several rings can fall in one tick at a gallop; each needs its own pass, in order along the path.
     let moved = false;
-    while (run.next < race.rings.length && this.passes(this.ringAt(race.rings[run.next]!), prev, p, race.radius)) {
+    while (run.next < race.rings.length) {
+      const at = this.passedAt(this.ringAt(race.rings[run.next]!), pts, seg, race.radius);
+      if (at < 0) break;
+      seg = at;
       run.next++;
       moved = true;
     }
-    if (!moved) return;
-    m.progress = run.next;
-    a.youDirty = true;
-    if (run.next >= race.rings.length) {
-      this.end(a, run);
-      this.send(a, def, m, "done");
-      this.q.completeMission(a, m, def);
+    if (!moved) {
+      if (started) this.send(a, def, m, "running");
       return;
     }
+    m.progress = run.next;
+    a.youDirty = true;
+    if (run.next >= race.rings.length) return this.finish(a, m, def, run);
     this.send(a, def, m, "running");
   }
 
@@ -227,6 +300,8 @@ export class TrialLogic {
       if (c.limitS) return; // a timed collect waits for the other attempt to end
       run = undefined;
     }
+    // Every piece is in but the payout's save failed: retry it (the clock has stopped).
+    if (run?.complete || (m.counts && m.counts.length === c.pieces.length && m.counts.every((v) => v))) return this.finish(a, m, def, run);
     if (run && c.limitS && now > run.deadline) {
       this.fail(a, "time");
       return; // a shard underfoot starts the next attempt on a later tick
@@ -249,12 +324,7 @@ export class TrialLogic {
       this.runs.set(a.id, run);
       this.q.toast(a, `${def.name}: the clock is running — ${m.progress} of ${c.pieces.length} ${c.itemName}`, "info");
     }
-    if (m.progress >= c.pieces.length) {
-      if (run) this.end(a, run);
-      this.send(a, def, m, "done");
-      this.q.completeMission(a, m, def);
-      return;
-    }
+    if (m.progress >= c.pieces.length) return this.finish(a, m, def, run);
     if (!c.limitS) this.q.toast(a, `${def.name}: ${m.progress} of ${c.pieces.length} ${c.itemName}`, "info");
     this.send(a, def, m, "running");
   }
@@ -290,6 +360,7 @@ export class TrialLogic {
     const d = def.defend!;
     const run = this.runs.get(a.id);
     if (!run || run.id !== def.id) return;
+    if (run.complete) return this.finish(a, m, def, run);
     const dt = Math.max(0, now - run.lastAt);
     run.lastAt = now;
     const inside = inReach(this.q.pos(d.beacon), p, d.radius, 0);
@@ -318,9 +389,7 @@ export class TrialLogic {
     }
     if (run.heldMs >= this.scaled(d.holdS)) {
       m.progress = d.holdS;
-      this.end(a, run);
-      this.send(a, def, m, "done");
-      this.q.completeMission(a, m, def);
+      this.finish(a, m, def, run);
     }
   }
 
@@ -344,8 +413,22 @@ export class TrialLogic {
 
   // ---------------------------------------------------------------- endings
 
+  /**
+   * The objective is met: pay first, and only once the reward has committed end the attempt and say
+   * `done`. A failed save keeps the attempt, marked complete (no clock, no ring checks), and the next
+   * tick tries the payout again; the client hears nothing until it lands.
+   */
+  private finish(a: PlayerActor, m: Mission, def: MissionDef, run: Run | undefined) {
+    if (!this.q.completeMission(a, m, def)) {
+      if (run) run.complete = true;
+      return;
+    }
+    if (run) this.end(a, run);
+    this.send(a, def, m, "done");
+  }
+
   private newRun(def: MissionDef, kind: Kind, now: number): Run {
-    return { id: def.id, kind, startedAt: now, deadline: 0, next: 0, heldMs: 0, outsideSince: 0, waves: 0, npcIds: [], lastAt: now, paused: false };
+    return { id: def.id, kind, startedAt: now, deadline: 0, next: 0, heldMs: 0, outsideSince: 0, waves: 0, npcIds: [], lastAt: now, paused: false, complete: false };
   }
 
   private dissolveWaves(run: Run) {
@@ -364,19 +447,25 @@ export class TrialLogic {
     if (this.runs.get(a.id) === run) this.runs.delete(a.id);
   }
 
-  /** End the player's attempt as failed: progress back to 0 (timed collects drop their pieces). */
-  fail(a: PlayerActor, reason: "time" | "died" | "left") {
-    const run = this.runs.get(a.id);
-    if (!run) return;
+  /** End an attempt without a word: waves dissolve, progress back to 0 (timed collects drop their pieces). */
+  private reset(a: PlayerActor, run: Run): { def: MissionDef | undefined; m: Mission | undefined } {
     this.end(a, run);
     const def = MISSION_BY_ID.get(run.id);
     const m = a.char.missions.find((x) => x.id === run.id && !x.done);
-    if (!def) return;
-    if (m) {
+    if (def && m) {
       m.progress = 0;
       if (def.collect) m.counts = def.collect.pieces.map(() => 0);
       a.youDirty = true;
     }
+    return { def, m };
+  }
+
+  /** End the player's attempt as failed: progress back to 0 (timed collects drop their pieces). */
+  fail(a: PlayerActor, reason: "time" | "died" | "left") {
+    const run = this.runs.get(a.id);
+    if (!run) return;
+    const { def, m } = this.reset(a, run);
+    if (!def) return;
     const again = def.race ? "pass the first ring to try again" : def.defend ? "light the beacon to try again" : "gather the first shard to start again";
     const why = reason === "time" ? "out of time" : reason === "died" ? "you fell" : "you left the beacon's ring";
     if (reason !== "died") this.q.toast(a, `${def.name} failed: ${why} — ${again}`, "warn");

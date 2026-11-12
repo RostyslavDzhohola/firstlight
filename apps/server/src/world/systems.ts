@@ -30,6 +30,10 @@ export interface RoomSystem {
   /** Optional: return false to refuse a dropped client's reconnection (kicked or banned players). */
   canReconnect?(sessionId: string): boolean;
   dispose?(): void;
+  /** Optional: a player's socket dropped (the body stays for the reconnection window; leave hooks run only if it expires). */
+  onPlayerDrop?(actor: PlayerActor): void;
+  /** Optional: a dropped player reconnected with their token (same session, same body). */
+  onPlayerReconnect?(actor: PlayerActor): void;
 }
 
 export type SystemFactory = (room: BodyRoom) => RoomSystem | null;

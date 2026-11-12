@@ -536,7 +536,7 @@ export class Game {
       localStorage.setItem("fl.body", body);
       this.combat.attach();
       listenHuntTargets(room); // before anything else can arrive unheard (huntTargets.ts)
-      listenTrials(room); // the same for race / defend / collect attempts (trialState.ts)
+      listenTrials(room, () => Date.now() + this.net.serverOffset); // the same for race / defend / collect attempts, stamped on the server clock (trialState.ts)
       const me = await waitFor(() => (room.state as any).players?.get(room.sessionId), { stage: "waiting for our player", timeoutMs: 15_000, watch: w });
       this.player.teleport(me.x, me.y, me.z);
       this.net.onCorrect = (x, y, z) => this.player.correct(x, y, z);

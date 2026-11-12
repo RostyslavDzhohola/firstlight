@@ -586,6 +586,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     const a = this.actors.get(client.sessionId);
     if (!a || a.superseded || a.loggedOut || this.shuttingDown) return;
     a.state.flags |= PF.LINGER;
+    for (const s of this.systems) this.guarded("drop", () => s.onPlayerDrop?.(a));
     // Kicked or banned: no reconnection seat (onLeave runs next and removes the body).
     if (this.systems.some((s) => s.canReconnect?.(client.sessionId) === false)) return;
     // The promise rejects when the window expires or the room disposes; never let that escape.
@@ -607,6 +608,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     a.client = client;
     a.state.flags &= ~PF.LINGER;
     a.youDirty = true;
+    for (const s of this.systems) this.guarded("reconnect", () => s.onPlayerReconnect?.(a));
     if (a.dead) client.send("death", { victim: client.sessionId, killer: null, killerName: "", aliveMs: Date.now() - a.char.lifeStartedAt, level: a.char.level, pileId: "" });
   }
 
