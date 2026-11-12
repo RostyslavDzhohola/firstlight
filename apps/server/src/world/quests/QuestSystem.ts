@@ -764,6 +764,8 @@ export class QuestSystem implements RoomSystem {
     emitGameEvent(this.room, { type: "missionDone", playerId: a.id, missionId: def.id });
     if (ERRAND_MISSIONS.every((id) => a.char.missions.some((x) => x.id === id && x.done))) this.award(a, "errand_runner");
     if (def.trial) {
+      // The hunt is public: the others in this world copy read it in their event feed (D-ui-3).
+      this.room.broadcast("news", { kind: "gleam", name: a.state.name, mission: def.id }, { except: a.client });
       const n = gleamsWon(a.char.missions);
       this.toast(a, n >= GLEAMS.trials.length ? `All three gleams won — ${GLEAMS.curator.name}'s vault in Portus Plaza is waiting for you` : `Gleam won: ${n} of ${GLEAMS.trials.length} — ${GLEAMS.name}`, "medal");
     }
@@ -913,6 +915,7 @@ export class QuestSystem implements RoomSystem {
     for (const e of events) e();
     this.toast(a, `The Gleam Vault opens · +${GLEAMS.reward.coins} ◎ · Gleamweave Cape`, "medal");
     a.client.send("missionDone", { id: "vault", xp: 0, coins: GLEAMS.reward.coins });
+    this.room.broadcast("news", { kind: "vault", name: a.state.name }, { except: a.client });
     emitGameEvent(this.room, { type: "missionDone", playerId: a.id, missionId: "vault" });
     if (first) this.toast(a, "First ever to open it — your name is engraved on the Hall of Firsts", "medal");
   }

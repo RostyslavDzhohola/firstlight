@@ -44,6 +44,7 @@ import { Portals } from "../world/Portals.ts";
 import { CLOSE } from "@firstlight/shared/net/social";
 import { SANDBOX_REFUSALS } from "./AdminModeClient.ts";
 import { ArrivalWatch, closeAction, ConnectionLost, StorageBackoff, waitFor } from "./arrival.ts";
+import { HitStop } from "./hitStop.ts";
 import { BootGate, RendererUnavailable, shouldKeepReconnecting } from "./boot.ts";
 import { CombatClient } from "./CombatClient.ts";
 import { GameAudio } from "../audio/Audio.ts";
@@ -110,6 +111,8 @@ export class Game {
   /** A server-ordered move (rebirth in Portus) that arrived during another transition waits for it. */
   private readonly travelQueue = new TravelQueue<BodyId>();
   private portalCooldownUntil = 0;
+  /** Hit-stop (content §0, local only): a landed hit holds our avatar's pose for a beat (game/hitStop.ts). */
+  readonly hitStop = new HitStop();
   /** Scratch: the player's chest for the occluder fade. */
   private readonly fadeChest = new THREE.Vector3();
   private reconnecting = false;
@@ -851,7 +854,7 @@ export class Game {
       m.fx = f.x; m.fy = f.y; m.fz = f.z;
       m.anim = this.player.anim;
       this.net.sendInput(now, m);
-      this.self.set(p.x, p.y, p.z, f.x, f.y, f.z, this.player.anim, dt);
+      this.self.set(p.x, p.y, p.z, f.x, f.y, f.z, this.player.anim, this.hitStop.frozen(now) ? 0 : dt);
       focus = this.photo.active ? this.photo.pos : p;
     }
 

@@ -14,7 +14,7 @@
     <meta property="og:image" content="https://firstlight.one4all.dev/og.jpg" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="A traveller stands in the Portus plaza at dusk under a sky with another planet in it." />
+    <meta property="og:image:alt" content="Two travellers stand in the Portus plaza between the portals to Hollowmere and Arcadia, under a sky with another planet in it; the FIRSTLIGHT wordmark below." />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="FIRSTLIGHT: an open world in your browser" />
     <meta name="twitter:description" content="Three planets, a hub, a crowd of strangers, one life. Free, no download, open source." />
@@ -58,31 +58,41 @@
         </header>
 
         <main class="fl-home__main">
-          <div class="fl-home__hero">
-            <div id="home-notice" class="fl-home__notice" role="status" hidden></div>
-            <div class="fl-eyebrow">An open world in your browser</div>
-            <h1 class="fl-wordmark fl-home__wordmark" aria-label="Firstlight">First<b>light</b></h1>
-            <p class="fl-landing__tag fl-home__tag">Three planets, a crowd of strangers, <b>one life.</b> Die, and everything you carried drops into a glowing pile for anyone to take.</p>
-
-            <div class="fl-home__cta">
-              <button id="play" data-e2e="home-play" class="fl-btn fl-btn--primary fl-btn--lg fl-landing__play" type="button"><i class="li li-play"></i><span id="play-label">Play</span></button>
-              <div class="fl-home__cta2">
-                <button id="home-save" class="fl-btn fl-btn--sm" type="button" hidden><i class="li li-save"></i>Save your progress</button>
-                <span id="play-sub" class="fl-landing__sub"><span>Free</span><i></i><span>No download</span><i></i><span>Keyboard + mouse</span></span>
-              </div>
+          <!-- The hero (D-home-9): in-game stills cross-fade behind the wordmark. The first one is in the
+               markup so it paints with the page; home.ts brings the rest in one at a time. Absolutely
+               placed (no layout shift), decorative (aria-hidden, empty alt). -->
+          <div class="fl-home__first">
+            <div id="home-stills" class="fl-home__stills" aria-hidden="true">
+              <img class="is-on" src="/src/ui/stills/portus-plaza-dusk.webp" alt="" width="1920" height="1080" decoding="async" fetchpriority="high" />
             </div>
+            <div class="fl-home__hero">
+              <div id="home-notice" class="fl-home__notice" role="status" hidden></div>
+              <div class="fl-eyebrow">An open world in your browser</div>
+              <h1 class="fl-wordmark fl-home__wordmark" aria-label="Firstlight">First<b>light</b></h1>
+              <p class="fl-landing__tag fl-home__tag">Three planets, a crowd of strangers, <b>one life.</b> Die, and everything you carried drops into a glowing pile for anyone to take.</p>
 
-            <div class="fl-home__phone" id="mobile">
-              <div class="fl-panel fl-phone-card">
-                <h2>Play on your computer</h2>
-                <p>FIRSTLIGHT is a desktop game for keyboard and mouse. Send yourself the link and open it in a laptop or desktop browser.</p>
-                <div class="fl-copybox"><span>firstlight.one4all.dev</span><button id="copy-link" class="fl-btn fl-btn--sm fl-btn--primary" type="button"><i class="li li-copy"></i>Copy link</button></div>
-                <div id="copied" class="fl-copied" hidden><i class="li li-check"></i>Link copied</div>
-                <button id="try-touch" data-e2e="home-try-touch" class="fl-btn fl-btn--sm fl-btn--ghost fl-phone-card__try" type="button" style="margin-top: 12px; width: 100%"><i class="li li-play"></i>Try it on this device (experimental)</button>
+              <div class="fl-home__cta">
+                <button id="play" data-e2e="home-play" class="fl-btn fl-btn--primary fl-btn--lg fl-landing__play" type="button"><i class="li li-play"></i><span id="play-label">Play</span></button>
+                <div class="fl-home__cta2">
+                  <button id="home-save" class="fl-btn fl-btn--sm" type="button" hidden><i class="li li-save"></i>Save your progress</button>
+                  <span id="play-sub" class="fl-landing__sub"><span>Free</span><i></i><span>No download</span><i></i><span>Keyboard + mouse</span></span>
+                </div>
+              </div>
+              <div id="home-live" class="fl-home__herolive" hidden></div>
+
+              <div class="fl-home__phone" id="mobile">
+                <div class="fl-panel fl-phone-card">
+                  <h2>Play on your computer</h2>
+                  <p>FIRSTLIGHT is a desktop game for keyboard and mouse. Send yourself the link and open it in a laptop or desktop browser.</p>
+                  <div class="fl-copybox"><span>firstlight.one4all.dev</span><button id="copy-link" class="fl-btn fl-btn--sm fl-btn--primary" type="button"><i class="li li-copy"></i>Copy link</button></div>
+                  <div id="copied" class="fl-copied" hidden><i class="li li-check"></i>Link copied</div>
+                  <button id="try-touch" data-e2e="home-try-touch" class="fl-btn fl-btn--sm fl-btn--ghost fl-phone-card__try" type="button" style="margin-top: 12px; width: 100%"><i class="li li-play"></i>Try it on this device (experimental)</button>
+                </div>
               </div>
             </div>
 
             <article id="home-progress" data-e2e="home-progress" class="fl-panel fl-home__card fl-home__progress" aria-label="My progress" hidden></article>
+            <div id="home-still-cap" class="fl-home__stillcap" aria-hidden="true"></div>
           </div>
 
           <div class="fl-home__side">
@@ -102,16 +112,33 @@
               </header>
               <div id="home-board" class="fl-home__boardbody" role="tabpanel"></div>
             </article>
-
-            <div id="home-worlds" data-e2e="home-worlds" class="fl-home__worlds" role="list" aria-label="The worlds"></div>
           </div>
+
+          <section class="fl-home__sec" aria-labelledby="home-worlds-h">
+            <header class="fl-home__sechead"><h2 id="home-worlds-h">Four worlds, one sky</h2><p>Walk through a portal in the hub and you are on another planet. Everyone you meet is playing right now.</p></header>
+            <div id="home-worlds" data-e2e="home-worlds" class="fl-home__worlds" role="list" aria-label="The worlds"></div>
+          </section>
+
+          <section class="fl-home__sec" aria-labelledby="home-new-h">
+            <header class="fl-home__sechead"><h2 id="home-new-h">New in the worlds</h2></header>
+            <div id="home-new" data-e2e="home-new" class="fl-home__new"></div>
+          </section>
+
+          <section id="home-agents" data-e2e="home-agents" class="fl-panel fl-panel--quiet fl-home__agents" aria-labelledby="home-agents-h">
+            <div class="fl-home__agentsart" aria-hidden="true"><i class="px px-head-kappa"></i><i class="fl-home__amp">+</i><i class="px px-head-unit7"></i><span class="fl-ai">AI</span></div>
+            <div class="fl-home__agentstext">
+              <h2 id="home-agents-h">Humans and AI agents play side by side</h2>
+              <p>An AI model can join as a player through the open agent kit: same worlds, same rules, the same one life, with an <b>AI</b> tag on its nameplate so you always know who is who.</p>
+            </div>
+            <a id="home-agents-link" class="fl-btn fl-btn--sm" target="_blank" rel="noopener"><i class="li li-book"></i>Agents guide</a>
+          </section>
         </main>
 
         <footer class="fl-home__foot">
           <div id="home-share" class="fl-home__share"></div>
           <div id="home-visits" data-e2e="home-visits" class="fl-home__visits" hidden></div>
           <div class="fl-landing__credit fl-home__credit">
-            <span><b>Built by Claude Opus 5.5 and Codex.</b> Open source.</span>
+            <span><b>Built by Claude Opus 5.5 and Codex.</b> Open source: MIT code, CC BY art.</span>
             <span id="repo" class="fl-repo" hidden>
               <a id="repo-star" class="fl-btn fl-btn--sm" target="_blank" rel="noopener"><i class="li li-star"></i>Star</a>
               <a id="repo-fork" class="fl-btn fl-btn--sm" target="_blank" rel="noopener"><i class="li li-fork"></i>Fork</a>

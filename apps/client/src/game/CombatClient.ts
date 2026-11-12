@@ -24,6 +24,7 @@ import { offerNudge, offersSave, SaveNudge, saveReady } from "../ui/saveOffer.ts
 import { saveStatus } from "../net/auth.ts";
 import { attackDeniedText, holsteredText, immuneText, NoticeGate } from "./notices.ts";
 import { heavyName, heavyRelease, SpecialCooldown } from "./specialCooldown.ts";
+import { bannerCovers } from "../ui/moments.ts";
 
 const NUDGED_KEY = "fl.saveNudged";
 const _v = new THREE.Vector3();
@@ -113,6 +114,8 @@ export class CombatClient {
       this.death.onYou(!!m.dead);
     });
     room.onMessage("toast", (m: { text: string; kind: string }) => {
+      // A level-up, a finished mission, a medal or a gleam has its own banner and sound (MomentsClient, D-ui-2).
+      if (bannerCovers(m.text)) return;
       this.hud.toast(m.text, m.kind);
       this.game.audio.play(m.kind === "xp" ? "levelUp" : m.kind === "coins" ? "coins" : "ui");
     });

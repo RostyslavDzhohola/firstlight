@@ -120,6 +120,10 @@ describe("race (T1, The Swift Gleam)", () => {
     expect(lastTrial(a, "T1").state).toBe("done");
     expect(a.last("missionDone")).toEqual({ id: "T1", xp: 300, coins: 80 });
     expect(a.toasts.some((t) => t.includes("Gleam won: 1 of 3"))).toBe(true);
+    // The hunt is public: each hears of the other's gleam (the event feed), never of their own.
+    await until("the news reached both", () => a.count("news") === 1 && c.count("news") === 1);
+    expect(a.last("news")).toEqual({ kind: "gleam", name: me(c).name, mission: "T1" });
+    expect(c.last("news")).toEqual({ kind: "gleam", name: me(a).name, mission: "T1" });
   });
 
   it("running out of time fails the attempt; passing the first ring again restarts it", async () => {

@@ -6,7 +6,7 @@ Plain DOM + CSS (D25). The look is the design verdict in `docs/design/ui-judging
 
 See every screen and state with mock data, no server needed: run the client dev server and open
 `/ui-gallery.html?screen=hud&nav` (screens: landing (the home page with mock data), home-guest, loading, charpick, hud, hud-oversight, death,
-menu, settings, save-code, players, compass, wheel, shop, inventory, inventory-drag, onboarding,
+menu, settings, save-code, players, compass, wheel, shop, inventory, inventory-drag, moment-level, arrival, hud-full, hud-combat, og (the share image), onboarding,
 onboarding-attack, onboarding-portal, onboarding-done, kit-inventory, kit-onboarding, …). Add
 `&live` to keep animations running, `&low` for the Low-tier look and `&blur=1` for the old blurred look.
 
@@ -25,6 +25,8 @@ onboarding-attack, onboarding-portal, onboarding-done, kit-inventory, kit-onboar
   `?blur=1` (`fl-blur` on `<html>`, `look.ts`) brings the old blurred look back for A/B recordings;
   `styles/flatLook.test.ts` fails on a new blur anywhere else. The Low tier (`fl-lowfx`) also drops the
   vignette's and death screen's grayscale backdrop filters.
+- **One banner at a time.** Anything a player earns goes through `hud.moments.push` (the queue), never a second
+  banner element. Holo frames take their corner and accent colour from `--world` (the HUD root's `data-body`).
 - **HUD roots** carry `.fl-hud` or `data-hud` so photo mode (Shift+P) and the pause menu hide them. Menus and overlays don't.
 - **Full-screen overlays that free the mouse** call `overlayOpened(name)` / `overlayClosed(name)`
   (`ui/dom.ts`) so the Esc menu doesn't pop over them. When the last one closes without taking the
@@ -56,6 +58,7 @@ onboarding-attack, onboarding-portal, onboarding-done, kit-inventory, kit-onboar
 | `map.ts`, `mapView.ts`, `mapMarkers.ts`, `mapRaster.ts`, `mapAtlas.ts` | The map (M): projection (north = the compass's, `social/compassMath.ts`), markers, the per-body ground atlas (baked and drawn in `world/mapAtlas.worker.ts`) |
 | `minimap.ts`, `minimapLayout.ts` | The HUD minimap and its size/avoid rules |
 | `waypoint.ts` | The player's waypoint (one per body, localStorage; `WAYPOINT_COLOUR` / `--waypoint`) |
+| `moments.ts`, `momentsView.ts`, `moments.css` | The HUD's moments (D-ui-2…6): earned banners and their queue, the arrival title card (`arrivalCard.ts`), the event feed (`eventFeed.ts`), the "hit from" ring (`hitFrom.ts`) and the kill mark; fed by `game/MomentsClient.ts`. Gallery: `moment-level` … `moment-medal`, `arrival`, `hud-full`, `hud-combat` |
 | `spellBar.ts`, `spellBar.css` | The spellbook on the HUD: four spell slots beside the hotbar (keycap, icon, cooldown sweep, "Lv N" while locked) and the aether bar under HP; fed by `game/SpellClient.ts` from `game/spellBook.ts` |
 
 **Size unit.** Use `calc(N * var(--u))` where a design says N rem (`--u` is 14 px at 1280 wide, 19 px
@@ -83,6 +86,10 @@ hud.setMissions(lines, header)        // already driven by the quests MissionTra
 hud.voiceSlot                         // bottom-right container for voice indicators
 hud.minimapSlot                       // top of the right column: the minimap (ui/minimap.ts, driven by game/MapClient.ts)
 hud.spellSlot / hud.aetherSlot        // beside the hotbar / under HP on the player card: the spell bar and aether (ui/spellBar.ts)
+hud.moments.push(...moments)          // earned banners, one at a time (ui/moments.ts builds them: levelMoments, missionMoments, medalMoment)
+hud.moments.arrival(arrivalCard(body)) // the arrival title card
+hud.moments.feed(kind, parts, now)    // a line in the event feed under the minimap (ui/eventFeed.ts feedText.*)
+hud.moments.hitFrom(angle, now)       // "hit from" wedge round the crosshair; hud.moments.kill(boss?) the kill mark
 hud.death(info) / hud.characterPick(opts)   // both resolve { starter, palette }, or null when closeDeath() / cancelCharacterPick() closed them
 ```
 

@@ -19,6 +19,7 @@ import { createHoloBoard } from "../world/HoloBoard.ts";
 import { createLightPools } from "../world/lightPools.ts";
 import { createTownLights } from "../world/townLights.ts";
 import { createControlsClient } from "./controls.ts";
+import { createMomentsClient } from "./MomentsClient.ts";
 
 export interface ClientSystem {
   update(dt: number, now: number): void;
@@ -59,3 +60,5 @@ CLIENT_SYSTEMS.push(createLightPools);
 CLIENT_SYSTEMS.push(createTownLights);
 // Controls lane (D-controls-5): gamepad rumble on damage and kills, and the aim slowdown's creep test.
 CLIENT_SYSTEMS.push(createControlsClient);
+// Look-and-feel lane (D-ui-2…5): the arrival card, earned banners, the event feed, hit direction and the spell hint.
+CLIENT_SYSTEMS.push(createMomentsClient);

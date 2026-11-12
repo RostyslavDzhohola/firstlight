@@ -27,7 +27,7 @@ const still = (id: string, body: BodyKey, caption: string, focus?: string): Stil
 
 /**
  * The stills, captured from this build at Ultra on WebGPU (tools/stills/capture.ts, shots.ts; our own
- * work, CC BY 4.0, docs/ASSETS.md): 1920×1080 WebP, 48–100 KB each. Within a body, listed in the
+ * work, CC BY 4.0, docs/ASSETS.md): 1920×1080 WebP, 67–108 KB each (re-captured 2026-11-12 after the graphics passes). Within a body, listed in the
  * order a load opens them.
  */
 export const STILLS: readonly Still[] = [

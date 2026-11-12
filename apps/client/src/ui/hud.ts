@@ -18,6 +18,7 @@ import { showSubtitle } from "./subtitle.ts";
 import { showCharacterPick, type CharacterChoice, type CharacterPickOptions } from "./characterPick.ts";
 import { showDeath, type DeathInfo } from "./death.ts";
 import type { ZoneInfo } from "./zoneLabel.ts";
+import { MomentsHud } from "./momentsView.ts";
 
 export type YouPlus = YouState & { selected: number; level: number; dead: boolean };
 export type { DamageKind } from "./hudFormat.ts";
@@ -111,6 +112,8 @@ export class Hud {
   private readonly right = el("div", "fl-hud__right", this.layer);
   /** The minimap's place (ui/minimap.ts): first in the right column, so missions and toasts flow below it. */
   readonly minimapSlot = el("div", "fl-hud__minimap", this.right);
+  /** The event feed's place (ui/momentsView.ts): under the minimap, over the missions. */
+  private readonly feedSlot = el("div", "fl-feed", this.right);
   private readonly missions = new MissionsPanel(this.right);
   private readonly toasts = el("div", "fl-toasts", this.right);
 
@@ -122,6 +125,11 @@ export class Hud {
   private readonly hotbarWrap = el("div", "fl-hotbar-wrap", this.layer);
   /** Bottom-right slot for the voice lane (own mic state, people in earshot). */
   readonly voiceSlot = el("div", "fl-hud__br", this.layer);
+  /**
+   * The moments (D-ui-2…4): earned banners (one at a time), the arrival title card, the event feed,
+   * the "hit from" ring and the kill mark. game/MomentsClient.ts feeds it and ticks it every frame.
+   */
+  readonly moments = new MomentsHud({ top: this.top, feed: this.feedSlot, layer: this.layer });
   /** The spell bar's place, beside the hotbar, and the aether bar's, under HP on the player card (ui/spellBar.ts). */
   spellSlot!: HTMLElement;
   aetherSlot!: HTMLElement;
@@ -174,6 +182,7 @@ export class Hud {
   private look = 0;
   private settings: UiSettings = uiSettings.get();
   private liveDamage = 0;
+  private damageSeq = 2; // the first number of a burst lands dead on its target
   you: YouPlus | null = null;
   /** The last `you` seen alive: what the death screen lists as left in the pile. */
   lastAlive: YouPlus | null = null;
@@ -509,7 +518,8 @@ export class Hud {
     if (!this.settings.damageNumbers || this.liveDamage >= MAX_DAMAGE_NUMBERS) return;
     const f = formatDamage(amount, kind ?? (weak ? "weak" : "normal"));
     const d = el("span", f.cls, this.world, f.text);
-    d.style.setProperty("--x", `${Math.round(x)}px`);
+    // A burst on one target fans out a little instead of stacking (set once; nothing reads it back).
+    d.style.setProperty("--x", `${Math.round(x + (this.damageSeq++ % 5 - 2) * 9)}px`);
     d.style.setProperty("--y", `${Math.round(y)}px`);
     this.liveDamage++;
     d.addEventListener("animationend", () => {
