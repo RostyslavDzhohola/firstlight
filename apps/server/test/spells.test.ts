@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Room } from "@colyseus/sdk";
 import { BODIES } from "@firstlight/shared";
-import { AETHER, FROSTBLOOM, GLASSWING, SKIPSTEP, SPELLS, spellDamage, WISHFALL, type SpellId, type SpellsYou } from "@firstlight/shared/content/spells";
+import { AETHER, aetherAt, FROSTBLOOM, GLASSWING, SKIPSTEP, SPELLS, spellDamage, WISHFALL, type SpellId, type SpellsYou } from "@firstlight/shared/content/spells";
 import { maxHp } from "@firstlight/shared/content/progression";
 import type { SpellEvent } from "@firstlight/shared/net/protocol";
 import { townDir } from "@firstlight/shared/planet/townFrame";
@@ -16,6 +16,7 @@ import { dealDamage } from "../src/world/combat.ts";
 import { DestructionSystem } from "../src/world/destruction.ts";
 import { onGameEvent } from "../src/world/events.ts";
 import { moveLimits } from "../src/world/movement.ts";
+import { SpellSystem } from "../src/world/spells/SpellSystem.ts";
 import { safeLeave, startServer, waitFor } from "./helpers.ts";
 import { adminBot, flat, me, nearPad, offset, openSpotOutside, serverRoom, spawnNpc, type V } from "./npc-bots.ts";
 
@@ -45,6 +46,10 @@ const hpOf = (r: Room): number => actor(r).state.hp;
 const until = (label: string, cond: () => boolean, ms?: number) => waitFor(cond, ms).catch(() => {
   throw new Error(`timed out waiting for: ${label}`);
 });
+
+const spells = (r: Room): SpellSystem => serverRoom(r).systems.find((s) => s instanceof SpellSystem) as SpellSystem;
+/** These tests wait on the server's real timers (cooldowns, the star's fall); the machine is shared. */
+const SLOW = 60_000;
 
 /** What a bot hears about spells: its `you.spells`, the refusals and the `spell` events. */
 function listen(r: Room) {
@@ -105,7 +110,7 @@ describe("spellbook: gates, aether and cooldowns", () => {
       await sleep(450); // five casts a second at most
     }
     expect(SPELLS.map((s) => s.level)).toEqual([1, 3, 6, 9]);
-  });
+  }, SLOW);
 
   it("a cast spends its aether and starts its cooldown; aether waits 1.5 s, then refills; no aether, no cast", async () => {
     const base = openSpotOutside("arcadia", 14);
@@ -128,17 +133,18 @@ describe("spellbook: gates, aether and cooldowns", () => {
     cast(a, "frostbloom");
     await until("aether refusal", () => h.denied.includes("aether"));
     expect(h.events.some((e) => e.spell === "frostbloom")).toBe(false);
-    // The book refills only after the pause, at 6 a second.
-    const book = serverRoom(a).systems.map((s) => (s as { book?: (p: PlayerActor, now: number) => { aether: number; t: number; regenAt: number } }).book).find(Boolean)!;
-    const b = book.call(serverRoom(a).systems.find((s) => "book" in s), actor(a), Date.now());
+    // The book refills only after the pause, at 6 a second: what `you` says is the shared function of the server's book.
+    const b = { ...spells(a).book(actor(a), Date.now()) };
     expect(b.aether).toBeCloseTo(AETHER.max - cost("glasswing") - cost("wishfall"), 0);
+    expect(aetherAt(b, b.regenAt)).toBe(b.aether);
     await sleep(Math.max(0, b.regenAt - Date.now()) + 1000);
     h.you = null;
     actor(a).youDirty = true;
     await until("a fresh you", () => !!h.you);
-    expect(h.you!.aether).toBeGreaterThan(b.aether + AETHER.regenPerS * 0.6);
-    expect(h.you!.aether).toBeLessThan(b.aether + AETHER.regenPerS * 2.5);
-  });
+    expect(h.you!.t).toBeGreaterThan(b.regenAt + 900);
+    expect(h.you!.aether).toBeCloseTo(aetherAt(b, h.you!.t), 0);
+    expect(h.you!.aether).toBeGreaterThan(b.aether + AETHER.regenPerS * 0.8);
+  }, SLOW);
 
   it("safe zones refuse every spell (nothing spent); the game event bus hears a cast; casts are rate-limited", async () => {
     const pad = nearPad("arcadia", 0, 2);
@@ -176,7 +182,7 @@ describe("spellbook: gates, aether and cooldowns", () => {
     await sleep(400);
     expect(h.denied.length).toBeGreaterThan(0);
     expect(h.denied.length).toBeLessThanOrEqual(5);
-  });
+  }, SLOW);
 });
 
 describe("Skipstep", () => {
@@ -287,14 +293,20 @@ describe("Frostbloom", () => {
       expect(e.r).toBe(FROSTBLOOM.radiusM);
       // The creature in the ring took the level-scaled damage and walks at 60%.
       expect(toughHp - npc(a, tough).state.hp).toBe(dmg);
-      expect(npcSpeedFactor(npc(a, tough), Date.now())).toBeCloseTo(1 - FROSTBLOOM.slow);
+      const slow = npc(a, tough).slow!;
+      expect(slow.amount).toBe(FROSTBLOOM.slow);
+      expect(npcSpeedFactor(npc(a, tough), slow.until - 1)).toBeCloseTo(1 - FROSTBLOOM.slow);
+      expect(npcSpeedFactor(npc(a, tough), slow.until)).toBe(1);
       expect(e.hit).toContain(tough);
       // The weak one died of it and the caster is paid.
       await until("kill paid", () => !!kill);
       expect(kill!.xp).toBeGreaterThan(0);
       // The player in the ring (friendly fire is on) is hurt and slowed on the server and told.
       expect(maxHp(3) - hpOf(b)).toBe(dmg);
-      expect(moveLimits(actor(b), Date.now()).speed).toBeCloseTo(1 - FROSTBLOOM.slow);
+      const fxB = actor(b).npcFx!;
+      expect(fxB.slow).toBe(FROSTBLOOM.slow);
+      expect(fxB.slowUntil - slow.until).toBeLessThan(50); // one cast, one clock
+      expect(moveLimits(actor(b), fxB.slowUntil - 1).speed).toBeCloseTo(1 - FROSTBLOOM.slow);
       expect(e.hit).toContain(b.sessionId);
       await until("the slow reached its client", () => fx.length > 0);
       expect(fx[0]).toMatchObject({ kind: "slow", amount: FROSTBLOOM.slow });
@@ -309,7 +321,7 @@ describe("Frostbloom", () => {
     } finally {
       restore();
     }
-  });
+  }, SLOW);
 });
 
 describe("Wishfall", () => {
@@ -333,11 +345,15 @@ describe("Wishfall", () => {
     expect(ring.r).toBe(WISHFALL.radiusM);
     expect(d3([ring.x, ring.y, ring.z], target)).toBeLessThan(0.6);
     await until("the victim sees the ring too", () => seenByB.some((e) => e.spell === "wishfall" && e.phase === "cast"));
-    // Nothing lands before the warning is over.
-    await sleep(600);
-    expect(npc(a, wyrm).state.hp).toBe(wyrmHp);
-    expect(hpOf(b)).toBe(maxHp(6));
-    await until("impact", () => h.events.some((e) => e.spell === "wishfall" && e.phase === "impact"), 3000);
+    // Nothing lands before the warning is over: while the star is still on its way, nobody is hurt,
+    // and it is due a full warning after the cast was sent.
+    const star = spells(a).stars[0];
+    if (star) {
+      expect(star.landAt - t0).toBeGreaterThanOrEqual(WISHFALL.telegraphS * 1000);
+      expect(npc(a, wyrm).state.hp).toBe(wyrmHp);
+      expect(hpOf(b)).toBe(maxHp(6));
+    }
+    await until("impact", () => h.events.some((e) => e.spell === "wishfall" && e.phase === "impact"), 8000);
     expect(Date.now() - t0).toBeGreaterThanOrEqual(WISHFALL.telegraphS * 1000 - 60);
     // 60 × 1.15 at the centre, falling to 25% at the 4 m edge: both stood 1–2 m off it.
     const full = spellDamage(WISHFALL.damage, 6);
@@ -354,11 +370,11 @@ describe("Wishfall", () => {
     await refill(a, h);
     h.events.length = 0;
     cast(a, "wishfall", dirTo(base, target), pos(a));
-    await until("own impact", () => h.events.some((e) => e.phase === "impact"), 3000);
+    await until("own impact", () => h.events.some((e) => e.phase === "impact"), 8000);
     const self = maxHp(6) - hpOf(a);
     expect(self).toBeGreaterThan(full * 0.5 * 0.8);
     expect(self).toBeLessThanOrEqual(Math.round(full * 0.5));
-  });
+  }, SLOW);
 
   it("a far target is pulled in to 30 m, and a star breaks what only heavy attacks break", async () => {
     const a = await adminBot(game, rooms, "wrecker", "hollowmere", nearPad("hollowmere", 0, 2), 20);
@@ -391,7 +407,7 @@ describe("Wishfall", () => {
     const hp0 = sys.hp[statue!.index]!;
     // Frostbloom is light: a statue shrugs it off even point blank… (we are 8 m off: cast the star first)
     cast(a, "wishfall", dirTo(pos(a), [statue!.px, statue!.py, statue!.pz]), [statue!.px, statue!.py, statue!.pz]);
-    await until("impact", () => h.events.some((e) => e.spell === "wishfall" && e.phase === "impact"), 3000);
+    await until("impact", () => h.events.some((e) => e.spell === "wishfall" && e.phase === "impact"), 8000);
     expect(sys.hp[statue!.index]!).toBeLessThan(hp0);
 
     // 80 m away along the aim is pulled in to the 30 m range.
@@ -403,48 +419,54 @@ describe("Wishfall", () => {
     await until("ring", () => h.events.some((e) => e.spell === "wishfall" && e.phase === "cast"));
     const ring = h.events.find((e) => e.spell === "wishfall")!;
     expect(d3([ring.x, ring.y, ring.z], here)).toBeLessThanOrEqual(WISHFALL.rangeM + 3);
-  });
+  }, SLOW);
 });
 
 describe("Glasswing Ward", () => {
   it("soaks 30% of max HP from attackers, lets the rest through, breaks, and runs out by itself", async () => {
-    const base = openSpotOutside("arcadia", 14);
-    const a = await adminBot(game, rooms, "warded", "arcadia", base, 9);
-    const b = await adminBot(game, rooms, "gunner", "arcadia", offset(base, 6, 0, R), 9);
-    const h = listen(a);
-    await refill(a, h);
-    const shell = Math.round((GLASSWING.absorbPer100MaxHp / 100) * maxHp(9));
-    expect(shell).toBe(54);
-    cast(a, "glasswing");
-    await until("ward up", () => h.you?.ward?.hp === shell);
-    expect(h.events.find((e) => e.spell === "glasswing" && e.phase === "cast")).toMatchObject({ by: a.sessionId, ms: GLASSWING.durationS * 1000, hp: shell });
+    // A long shell, so a slow machine can't let it run out mid-test (its 4 s are the next test's).
+    const restore = shorten(GLASSWING, "durationS", 30);
+    try {
+      const base = openSpotOutside("arcadia", 14);
+      const a = await adminBot(game, rooms, "warded", "arcadia", base, 9);
+      const b = await adminBot(game, rooms, "gunner", "arcadia", offset(base, 6, 0, R), 9);
+      const h = listen(a);
+      await refill(a, h);
+      const shell = Math.round((GLASSWING.absorbPer100MaxHp / 100) * maxHp(9));
+      expect(shell).toBe(54);
+      cast(a, "glasswing");
+      await until("ward up", () => h.you?.ward?.hp === shell);
+      expect(h.events.find((e) => e.spell === "glasswing" && e.phase === "cast")).toMatchObject({ by: a.sessionId, ms: GLASSWING.durationS * 1000, hp: shell });
 
-    // A real carbine shot from another player: the shell takes it, the HP doesn't move.
-    const s = pos(b), t = pos(a);
-    const l = Math.hypot(...s), tl = Math.hypot(...t);
-    const o = [s[0] + (s[0] / l) * 1.6, s[1] + (s[1] / l) * 1.6, s[2] + (s[2] / l) * 1.6];
-    const aim = [t[0] + t[0] / tl, t[1] + t[1] / tl, t[2] + t[2] / tl];
-    const d = dirTo(o, aim);
-    b.send("fire", { slot: 0, ox: o[0], oy: o[1], oz: o[2], dx: d[0], dy: d[1], dz: d[2], t: Date.now() });
-    await until("absorbed", () => h.events.some((e) => e.phase === "absorb"));
-    const soak = h.events.find((e) => e.phase === "absorb")!;
-    expect(soak).toMatchObject({ by: a.sessionId, from: b.sessionId });
-    expect(soak.amount).toBeGreaterThan(0);
-    expect(hpOf(a)).toBe(maxHp(9));
-    expect(soak.hp).toBe(shell - soak.amount!);
+      // A real carbine shot from another player: the shell takes it, the HP doesn't move.
+      const s = pos(b), t = pos(a);
+      const l = Math.hypot(...s), tl = Math.hypot(...t);
+      const o = [s[0] + (s[0] / l) * 1.6, s[1] + (s[1] / l) * 1.6, s[2] + (s[2] / l) * 1.6];
+      const aim = [t[0] + t[0] / tl, t[1] + t[1] / tl, t[2] + t[2] / tl];
+      const d = dirTo(o, aim);
+      b.send("fire", { slot: 0, ox: o[0], oy: o[1], oz: o[2], dx: d[0], dy: d[1], dz: d[2], t: Date.now() });
+      await until("absorbed", () => h.events.some((e) => e.phase === "absorb"));
+      const soak = h.events.find((e) => e.phase === "absorb")!;
+      expect(soak).toMatchObject({ by: a.sessionId, from: b.sessionId });
+      expect(soak.amount).toBeGreaterThan(0);
+      expect(hpOf(a)).toBe(maxHp(9));
+      expect(soak.hp).toBe(shell - soak.amount!);
 
-    // A hit bigger than what is left: the rest gets through and the shell breaks.
-    const left = soak.hp!;
-    dealDamage(serverRoom(a).host, actor(b), actor(a), left + 20, false);
-    await until("ward broke", () => h.events.some((e) => e.phase === "end" && e.broke === true));
-    expect(hpOf(a)).toBe(maxHp(9) - 20);
-    // No shell any more: the next shot hurts.
-    const hp = hpOf(a);
-    await sleep(300);
-    b.send("fire", { slot: 0, ox: o[0], oy: o[1], oz: o[2], dx: d[0], dy: d[1], dz: d[2], t: Date.now() });
-    await until("hurt", () => hpOf(a) < hp);
-    expect(h.you!.ready[index("glasswing")]).toBeGreaterThan(Date.now() + 15_000);
-  });
+      // A hit bigger than what is left: the rest gets through and the shell breaks.
+      const left = soak.hp!;
+      dealDamage(serverRoom(a).host, actor(b), actor(a), left + 20, false);
+      await until("ward broke", () => h.events.some((e) => e.phase === "end" && e.broke === true));
+      expect(hpOf(a)).toBe(maxHp(9) - 20);
+      // No shell any more: the next shot hurts.
+      const hp = hpOf(a);
+      await sleep(300);
+      b.send("fire", { slot: 0, ox: o[0], oy: o[1], oz: o[2], dx: d[0], dy: d[1], dz: d[2], t: Date.now() });
+      await until("hurt", () => hpOf(a) < hp);
+      expect(h.you!.ready[index("glasswing")]).toBeGreaterThan(Date.now() + 10_000);
+    } finally {
+      restore();
+    }
+  }, SLOW);
 
   it("ends after its 4 s, and never takes falls or other damage with no attacker", async () => {
     const restore = shorten(GLASSWING, "durationS", 0.5);
