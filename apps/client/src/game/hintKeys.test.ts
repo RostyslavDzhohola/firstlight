@@ -9,6 +9,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
 import { WEAPON_BY_ID } from "@firstlight/shared/content/weapons";
+import { SpecialCooldown } from "./specialCooldown.ts";
 import { setupMenuDom, type MenuDom } from "../ui/menu.testutil.ts";
 
 let r: MenuDom;
@@ -148,6 +149,10 @@ describe("keys in the hint state act through the real handlers", () => {
       training: null,
       lastFire: 0,
       chargeStart: 0,
+      special: new SpecialCooldown(), // field initialisers don't run under Object.create
+      sealHeld: false,
+      heavyHeld: false,
+      heavyDueAt: 0,
       wasRmb: false,
       saddleRmb: false,
       blocking: false,

@@ -15,6 +15,8 @@ export interface Identity {
   agent?: boolean;
   /** The address an agent's seat was asked from (the per-address agent cap, world/agents.ts). */
   agentIp?: string;
+  /** The Better Auth session that issued the token (D-security-5): bearer calls and seat use need it alive. */
+  authSession?: string;
 }
 
 /** Request facts a verifier may use (IP bans; our test tools' marker). */
@@ -24,6 +26,8 @@ export interface VerifyContext {
   toolSecret?: string | null;
   /** The request says an AI agent is playing (/api/play only): a guest account is flagged for good. */
   agent?: boolean;
+  /** Set by the accounts verifier: the token it checked and its payload (null: bad signature or expired), for reuse. */
+  jwt?: { token: string; payload: Record<string, unknown> | null };
 }
 
 export type TokenVerifier = (token: string, ctx?: VerifyContext) => Promise<Identity | null>;

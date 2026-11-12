@@ -55,6 +55,7 @@ export const MEDALS: readonly MedalDef[] = [
   M("E10", "tended_the_dawn", "Tended the Dawn", "hidden", "Claim the Dewdial Crown", "account", "Dawn Tender"),
   M("E11", "kept_the_wicks", "Kept the Wicks", "hidden", "Claim the Wickfloat Mantle", "account", "Wick Keeper"),
   M("E12", "off_the_clock", "Off the Clock", "hidden", "Claim the Quietshift Lens", "account", "Quietshift"),
+  M("21", "three_gleams", "The Three Gleams", "feat", "Win all three trials of the Three Gleams in one life and open the Gleam Vault in Portus", "life", "Gleamkeeper"),
 ];
 
 export const MEDAL_BY_ID: ReadonlyMap<string, MedalDef> = new Map(MEDALS.map((m) => [m.id, m]));

@@ -3,7 +3,7 @@
 import type { BodyId } from "../planet/bodies.ts";
 import type { InvItem } from "../net/protocol.ts";
 import type { CosmeticSlot } from "./items.ts";
-import { maxHp } from "./progression.ts";
+import { starterMaxHp } from "./starters.ts";
 import { STARTERS, starterLook } from "./weapons.ts";
 
 export const HOTBAR_SLOTS = 4;
@@ -51,6 +51,8 @@ export interface LifeProgress {
   playMs: number;
   /** Part of a staged scene or credited with an admin-assisted boss kill: no life-scoped medals. */
   unofficial?: boolean;
+  /** When this life opened the Gleam Vault (gleams.ts; once per life, ms epoch). */
+  gleamVault?: number;
 }
 
 export function emptyLife(): LifeProgress {
@@ -68,7 +70,7 @@ export function newCharacter(starter: number, palette: number, now = Date.now(),
     level: 1,
     xp: 0,
     coins: 0,
-    hp: maxHp(1),
+    hp: starterMaxHp(index, 1),
     body: "portus",
     pos: null,
     hotbar: [{ id: s.weapon, tier: 1, qty: 1 }, null, null, null],

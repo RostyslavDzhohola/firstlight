@@ -15,7 +15,7 @@ import indexHtml from "../../../index.html?raw";
 import type { Game } from "../../game/Game.ts";
 import { loadStored, resolveSettings, type Feature, type Tier } from "../../render/quality.ts";
 import { Hud, type YouPlus } from "../hud.ts";
-import { setLoading, setLoadingBadge } from "../loading.ts";
+import { setLoading, setLoadingBadge, WEBGPU_SLOW_LINE } from "../loading.ts";
 import { Menu } from "../menu.ts";
 import { openSaveProgress, showSignIn, pickDisplayName } from "../account.ts";
 import { installSprites } from "../sprites.ts";
@@ -39,7 +39,7 @@ import { paintHomeMock } from "../../home/home.ts";
 import type { HomeData } from "@firstlight/shared/net/home";
 
 const SCREENS = [
-  "landing", "home-guest", "loading", "loading-compact", "charpick", "charpick-rebirth", "hud", "hud-oversight", "hud-states",
+  "landing", "home-guest", "loading", "loading-compact", "loading-webgpu", "charpick", "charpick-rebirth", "hud", "hud-oversight", "hud-states",
   "death", "death-player", "death-party", "death-world", "menu", "menu-logout", "settings",
   "players", "compass", "wheel", "shop", "journal", "invite", "removed", "kit-inventory", "kit-onboarding", "inventory", "inventory-drag", "onboarding", "onboarding-attack", "onboarding-loot", "onboarding-portal", "onboarding-done", "save", "save-code", "save-saved", "save-busy", "save-unavailable", "save-locked", "signin", "signin-unavailable", "name", "notice",
 ] as const;
@@ -225,6 +225,11 @@ async function run() {
       paintHomeMock(HOME_MOCK, guest ? { ...ME_MOCK, guest: true, displayName: null, name: "Wanderer-4410", titleMedal: null, character: { ...ME_MOCK.character!, level: 3, xp: 260 } } : ME_MOCK, guest ? "logged-out" : null);
       break;
     }
+    case "loading-webgpu":
+      // A slow WebGPU start on the first load (D-showcase-1).
+      setLoading("Loading the game…", 0.02);
+      setLoading(WEBGPU_SLOW_LINE, 0.05);
+      break;
     case "loading":
     case "loading-compact":
       gameEl.className = "fl-gallery-world";
@@ -373,7 +378,7 @@ async function run() {
       hud.setHp(100, 100);
       const onb = new OnboardingHud(hud.root.querySelector<HTMLElement>(".fl-hud__layer")!, () => {}, "https://github.com/example/firstlight", { expanded: q.has("expanded"), onExpanded: () => {} });
       const steps = new OnboardingSteps();
-      const sample = { dt: 0, moved: 0, lookRad: 0, anim: ANIM.IDLE as number, dummiesDown: 0, pressed: new Set<string>(), phrased: false, voiceOn: false, atPortal: false, inPortal: false };
+      const sample = { dt: 0, moved: 0, lookRad: 0, anim: ANIM.IDLE as number, dummiesDown: 0, pressed: new Set<string>(), mapOpen: false, phrased: false, voiceOn: false, atPortal: false, inPortal: false };
       for (const id of ["move", "look", "jump"] as const) steps.complete(id);
       steps.observe({ ...sample, dt: 1.1, anim: ANIM.SPRINT });
       if (screen !== "onboarding") for (const id of ["sprint", "dodge"] as const) steps.complete(id);

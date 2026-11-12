@@ -112,6 +112,10 @@ against the repo, the finish-line table and the lane table on 2026-10-12 (F12 do
 - [ ] M9 Hardening: F2 load test, perf pass (F10/F11) and the E2E run (T4 blocked) done.
   - [x] F12 three-model review: blockers fixed, all three reviewers sign off (b274af9)
   - [ ] Security pass (auth flows, rate limits, admin routes, input validation, no secrets in the bundle)
+    - Codex gpt-6.1-sol source review (2026-11-12): all eight findings fixed on `lane/security` with tests
+      (D-security-1…8, fixes table in `docs/reviews/2026-11-12-security-pass-gpt-6.1-sol.md`). Open: verify on
+      the deployment whether Railway overwrites a client's `X-Real-IP`, deployed env values, dependency
+      advisories and the production bundle (not in the review's scope).
   - [ ] Voice launch items from docs/risk-assessment.md §5: a public complaints/appeals contact and
     a terms page (voice rules, 16+). Admin voice-mutes are persisted in game.db (migration 5, 668ec82).
   - [x] Repo public (2026-10-18): history rewritten once (the old screenshot, Python caches, local

@@ -12,6 +12,7 @@ import {
 } from "@firstlight/shared";
 import { flags } from "../config.ts";
 import { atmo, type SunRig } from "./atmosphere.ts";
+import { setCloudWeather } from "./clouds.ts";
 import type { BodyLook } from "./looks.ts";
 import { MENU_GRADE, postUniforms, setGrade, type GradeParams } from "./post.ts";
 import type { ResolvedSettings } from "./quality.ts";
@@ -152,6 +153,12 @@ export class Environment {
   private kind: Weather = "clear";
   private amount = 0;
   private wetness = 0;
+  /**
+   * The next update takes the sky's weather as it is instead of easing toward it (#46): set by a new
+   * body and by the first server sync on it, so the world is already settled when the loader hides
+   * (it used to darken and cool for ~4 s after arrival). Changes during play still ease.
+   */
+  private settle = true;
   private strike: Strike | null = null;
   private fired = -1;
   private flashAt = -1e9;
@@ -212,6 +219,7 @@ export class Environment {
     this.kind = "clear";
     this.amount = 0;
     this.wetness = 0;
+    this.settle = true;
     const p = SKY_PROFILES[body];
     this.lutRange[0] = p.minElev;
     this.lutRange[1] = p.maxElev;
@@ -252,6 +260,7 @@ export class Environment {
       if (snap) this.flashAt = -1e9;
     }
     this.copy = s.copy;
+    if (!this.server) this.settle = true; // the first sync on this body: no easing in from the local guess
     this.server = s;
     this.local = null; // the fallback schedule takes this state's day offset/hold
   }
@@ -327,6 +336,15 @@ export class Environment {
       wKind = st.weather;
       wAmt = weatherAmount(st, now);
     }
+    if (this.settle) {
+      this.settle = false;
+      // A URL or photo override keeps easing in from clear (a dev flag's weather is a change, not an arrival).
+      if (!this.weatherOv) {
+        this.kind = wKind;
+        this.amount = wAmt;
+        this.wetness = WEATHER_LOOKS[wKind].wet * wAmt;
+      }
+    }
     if (wKind === this.kind || this.amount < 0.01) {
       if (wKind !== this.kind) this.kind = wKind;
       this.amount += (wAmt - this.amount) * approach(dt, 2.5);
@@ -376,6 +394,7 @@ export class Environment {
     atmo.wet.value = this.wetness;
     atmo.rain.value = wl.dust ? 0 : Math.min(1, a * wl.drops * 1.2);
     atmo.glowBoost.value = 1 + 0.75 * night + 0.25 * cloud;
+    setCloudWeather(cloud);
     atmo.lamps.value = lampLight(night, dusk);
 
     // ---- fog / haze

@@ -486,7 +486,7 @@ export const NPC_DEFS: readonly NpcDef[] = [
   },
   {
     id: "dunebreaker", name: "Dunebreaker", planet: "meridian", family: "beast", tier: "beast", temper: "neutral",
-    levels: [20, 20], hp: 1200, speed: 1.2, runSpeed: 4, locomotion: "ground", radius: 2.0, height: 3.5, ...PERCEPTION,
+    levels: [20, 20], hp: 1000, speed: 1.2, runSpeed: 4, locomotion: "ground", radius: 2.0, height: 3.5, ...PERCEPTION,
     pack: [1, 1], steadfast: true, respawn: "beast", model: "dunebreaker",
     attacks: [
       atk({ id: "roll", name: "Roll Charge", shape: "charge", weight: "heavy", damage: 40, telegraph: 1.2, speed: 14, length: 25, width: 3, stun: 2, range: 24, minRange: 6, cooldown: 7 }),

@@ -10,7 +10,7 @@ import { STARTER_LOOKS, STARTERS } from "@firstlight/shared/content/weapons";
 import type { Game } from "../game/Game.ts";
 import { openSaveProgress } from "./account.ts";
 import { onAccountChange, saveStatus } from "../net/auth.ts";
-import { offersSave, SAVE_MIN_LEVEL, saveReady } from "./saveOffer.ts";
+import { ConfirmClick, offersSave, saveLockLine, saveReady } from "./saveOffer.ts";
 import { button, el, icon, isOverlayOpen, keycaps, onOverlayChange, sprite, uiRoot } from "./dom.ts";
 import { installSprites, portraitSprite } from "./sprites.ts";
 import { openSettings } from "./settingsScreen.ts";
@@ -19,6 +19,7 @@ import { openVoicePanel, voice } from "../voice/index.ts";
 import { features } from "../config.ts";
 import { HOTKEYS } from "../game/keys.ts";
 import { fullscreenAvailable, isFullscreen, toggleFullscreen } from "../game/fullscreen.ts";
+import { SPELLS } from "@firstlight/shared/content/spells";
 import { bindPointerLock, PauseFlow, pauseKey, type PauseState } from "./pauseFlow.ts";
 import { LookSwitch } from "./lookSwitch.ts";
 
@@ -42,6 +43,10 @@ export const CONTROLS: CtlGroup[] = [
     title: "World",
     rows: [[["E"], "Interact · pick up"], [["I"], "Inventory"], [["H"], "Whistle · ride horse"], [["M"], "Map · fast travel"], [["J"], "Journal"], [["Tab"], "Players"], [HOTKEYS.screenshot.caps, "Screenshot"], [HOTKEYS.photo.caps, "Photo mode"], [["Esc"], "Menu · back to the game"]],
   },
+  {
+    title: "Spells",
+    rows: SPELLS.map((s): Ctl => [[s.keycap], s.level > 1 ? `${s.name} · level ${s.level}` : s.name]),
+  },
   ...(features.voice ? [VOICE_CONTROLS] : []),
 ];
 
@@ -51,6 +56,8 @@ export interface PauseExtra {
   title: string;
   sub: string;
   onClick: () => void;
+  /** Ask for a second click first; this replaces `sub` until then (Skip tutorial, #32). */
+  confirm?: string;
 }
 export const pauseExtras = new Set<() => PauseExtra | null>();
 
@@ -272,7 +279,9 @@ export class Menu {
       sub.textContent += " · Guest";
       // The server emails a new address only from level 2 (D34); a rebirth keeps it unlocked.
       const ready = saveReady(Math.max(this.game.hud.you?.level ?? 1, this.game.combat?.saveNudge?.best ?? 0));
-      const save = item("save", "Save progress", ready ? "Progress lives in this browser until saved · email code, no password" : `Unlocks at level ${SAVE_MIN_LEVEL}: play a little first. Until then progress lives in this browser.`, "", saveSlot);
+      const you = this.game.hud.you;
+      const locked = saveLockLine({ xp: you?.xp ?? 0, tutorial: !!you?.onboarding });
+      const save = item("save", "Save progress", ready ? "Progress lives in this browser until saved · email code, no password" : locked, "", saveSlot);
       save.b.dataset.e2e = "menu-save";
       el("span", "fl-menu__badge", save.right, "Not saved");
       save.b.disabled = !ready;
@@ -313,7 +322,13 @@ export class Menu {
       const x = extra();
       if (!x) continue;
       const row = item(x.icon, x.title, x.sub);
+      const confirm = x.confirm ? new ConfirmClick() : null;
       row.b.onclick = () => {
+        if (confirm && !confirm.click(performance.now())) {
+          row.sub.textContent = x.confirm!;
+          row.b.classList.add("is-armed");
+          return;
+        }
         x.onClick();
         this.flow.resume();
       };

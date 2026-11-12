@@ -6,7 +6,8 @@ import "./quests.css";
 import type { BodyId } from "@firstlight/shared";
 import { COSMETIC_BY_ID, COSMETIC_SLOTS, RARITY_STYLE, isExtraCosmetic, itemName } from "@firstlight/shared/content/items";
 import { MEDALS } from "@firstlight/shared/content/medals";
-import { GUIDES, MISSION_BY_ID, MISSIONS, missionsOn, trackedMission, type MissionDef } from "@firstlight/shared/content/missions";
+import { GUIDES, MISSION_BY_ID, MISSIONS, missionsFrom, missionsOn, trackedMission, type MissionDef } from "@firstlight/shared/content/missions";
+import { GLEAMS, gleamsWon } from "@firstlight/shared/content/gleams";
 import type { InvItem } from "@firstlight/shared/net/protocol";
 import type { Game } from "../game/Game.ts";
 import type { Hud, MissionLine, YouPlus } from "./hud.ts";
@@ -147,6 +148,45 @@ export class GuidePanel extends Panel {
   }
 }
 
+/**
+ * Sela Marchbank's panel (Portus Plaza): the Three Gleams. Her line follows your progress; the three
+ * trials as mission cards (planet, recommended level, objective, accept / abandon) and the vault's
+ * reward. The vault itself is opened at the vault (E), not here.
+ */
+export class CuratorPanel extends Panel {
+  render() {
+    const you = this.you();
+    const b = this.box;
+    b.innerHTML = "";
+    const c = GLEAMS.curator;
+    el("h2", "", b, c.name.toUpperCase());
+    el("p", "sub", b, `${c.role[0]!.toUpperCase()}${c.role.slice(1)} · ${GLEAMS.name}`);
+    const won = gleamsWon(you?.missions ?? []);
+    const opened = !!you?.gleamVault;
+    el("p", "quote", b, `“${opened ? GLEAMS.lines.opened : won >= GLEAMS.trials.length ? GLEAMS.lines.all : won > 0 ? GLEAMS.lines.some : GLEAMS.lines.none}”`);
+    const body = el("div", "body", b);
+    const trials = missionsFrom(c.id);
+    for (const def of trials) {
+      missionCard(body, def, you, (row) => {
+        el("span", "rw", row, `Trial ${def.trial} · ${def.body[0]!.toUpperCase()}${def.body.slice(1)}`);
+        el("span", "quote", row, `“${def.pitch}”`).style.margin = "0";
+        const state = you?.missions.find((m) => m.id === def.id);
+        if (!state) el("button", "btn", row, "Accept").onclick = () => send(this.game, "mission", { action: "accept", id: def.id });
+        else if (!state.done) el("button", "btn ghost", row, "Abandon").onclick = () => send(this.game, "mission", { action: "abandon", id: def.id });
+      });
+    }
+    const vault = el("div", `mission${opened ? " done" : ""}`, body);
+    const top = el("div", "top", vault);
+    el("b", "", top, "The Gleam Vault");
+    el("span", "ty", top, `${won} / ${GLEAMS.trials.length}`);
+    el("div", "obj", vault, opened ? "Opened in this life." : "Bring all three gleams to the vault beside me and press E.");
+    el("div", "rw", vault, `Reward: Gleamweave Cape (Legendary), ${GLEAMS.reward.coins} ◎, the title “Gleamkeeper”, and the first ever to open it is engraved on the Hall of Firsts.`);
+    const foot = el("div", "foot", b);
+    el("span", "", foot, "Gleams are lost when you die, like missions. The medal and title are yours for good.");
+    el("button", "btn ghost", foot, "Close").onclick = () => this.close();
+  }
+}
+
 // ---------------------------------------------------------------- journal
 
 export class JournalPanel extends Panel {
@@ -185,12 +225,12 @@ export class JournalPanel extends Panel {
 
   private renderMissions(body: HTMLElement, you: YouPlus | null) {
     const mine = you?.missions ?? [];
-    if (!mine.length) el("p", "sub", body, "No missions yet. Each planet's guide waits at its main pad: Lark on Arcadia, Sexton Mabry on Hollowmere, Rook Calder on Meridian.");
+    if (!mine.length) el("p", "sub", body, "No missions yet. Each planet's guide waits at its main pad: Lark on Arcadia, Sexton Mabry on Hollowmere, Rook Calder on Meridian. In Portus Plaza, Sela Marchbank gives the three trials of the Three Gleams.");
     for (const m of mine) {
       const def = MISSION_BY_ID.get(m.id);
       if (!def) continue;
       missionCard(body, def, you, (row) => {
-        el("span", "rw", row, `${def.body[0]!.toUpperCase()}${def.body.slice(1)} · ${def.guide}`);
+        el("span", "rw", row, `${def.body[0]!.toUpperCase()}${def.body.slice(1)} · ${def.trial ? `${GLEAMS.name}, trial ${def.trial}` : def.guide}`);
         if (!m.done) el("button", "btn ghost", row, "Abandon").onclick = () => send(this.game, "mission", { action: "abandon", id: def.id });
       });
     }
@@ -347,7 +387,7 @@ export class MissionTracker {
 
 // ---------------------------------------------------------------- admin console (Shift+` ; ` alone is the performance overlay)
 
-const CONSOLE_HELP = `stage <1-5> [all] · coins <n> · level <n> · give <id> [tier] [qty] · medal <id> · egg <E1-E12> · heal · unprotect · announce <text> · ${SKY_HELP}`;
+const CONSOLE_HELP = `stage <1-5> [all] · coins <n> · level <n> · give <id> [tier] [qty] · medal <id> · egg <E1-E12> · heal · unprotect · spells · announce <text> · ${SKY_HELP}`;
 
 /** Parse a console line into an admin message. */
 export function parseAdminLine(line: string): { cmd: string; args: Record<string, unknown> } | null {
@@ -371,6 +411,9 @@ export function parseAdminLine(line: string): { cmd: string; args: Record<string
       return { cmd, args: { text: rest.join(" ") } };
     case "sky":
       return { cmd, args: parseSkyArgs(rest) };
+    case "spells":
+      // `spells` (or `spells refill`): full aether and no cooldowns (server world/spells).
+      return { cmd, args: { refill: true } };
     default:
       return { cmd, args: {} };
   }

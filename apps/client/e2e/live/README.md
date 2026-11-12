@@ -40,7 +40,9 @@ apps/client/e2e/live/fl.mjs quit       # ends it; so do 20 idle minutes (FL_LIVE
   the weapon, the tutorial step, hostiles with their distance and direction, the pad, guide, portals,
   gates, the menus and HUD parts on screen, and recent toasts.
 - Use the macros before stepping by hand: `start`, `tutorial`, `step`, `talk`, `quest`, `rise`, `out`,
-  `portal <body>`, `walk <target>`, `fight`, `train`, `blink`. Use `key`, `turn`, `clickxy` and `eval`
+  `portal <body>`, `walk <target>`, `fight`, `train`, `blink`, `cast <spell> [target]` (local only:
+  presses the spell's real key, Q F X Z, and says what the server answered; `state` has the aether
+  and each spell's cooldown). Use `key`, `turn`, `clickxy` and `eval`
   only when a check needs that one input.
 - Every answer ends with `since your last command: …` when something changed in between (HP, XP,
   level, tutorial step, mission progress, a death, a new body). The world runs while you think: a

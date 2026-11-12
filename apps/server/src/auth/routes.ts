@@ -16,7 +16,11 @@ import { NAME_MESSAGES } from "../db/names.ts";
 import type { Accounts, AccountsConfig } from "./accounts.ts";
 import { safeEqual, sha256Hex } from "./crypto.ts";
 import type { Identity } from "./identity.ts";
-import { directRequestIp, firstForwardedFor } from "./ip.ts";
+import { banKey, directRequestIp, proxiedRequestIp } from "./ip.ts";
+import { botSecret, checkToolSecret } from "./loadtest.ts";
+import { botBudget } from "../world/botBudget.ts";
+import { createNameLimits, NAME_LIMIT_MESSAGE } from "./nameLimits.ts";
+import { WindowLimiter } from "./limiter.ts";
 
 /** mission_state_json → `life.playMs` (0 for older rows without per-life progress). */
 function lifePlayMs(ms: unknown): number {
@@ -105,6 +109,7 @@ export function mountAccountRoutes(app: Express, a: Accounts, cfg: AccountsConfi
     res.json({ ok: true, saving: a.mailHealth.state() });
   });
 
+  const nameLimits = createNameLimits();
   app.post("/api/account/name", noStore, async (req, res) => {
     const id = await bearerIdentity(a, req);
     if (!id || id.loadtest) {
@@ -112,6 +117,21 @@ export function mountAccountRoutes(app: Express, a: Accounts, cfg: AccountsConfi
       return;
     }
     const raw = typeof req.body?.name === "string" ? req.body.name : "";
+    // Limits per account and address, then a no-op for the current name, then the cooldown (D-security-6).
+    const now = Date.now();
+    if (!nameLimits.attempt(id.userId, directRequestIp(req), now)) {
+      res.status(429).json({ ok: false, error: "slow down", message: NAME_LIMIT_MESSAGE });
+      return;
+    }
+    const current = getAccount(a.db, id.userId)?.displayName ?? null;
+    if (current !== null && raw.trim() === current) {
+      res.json({ ok: true, name: current });
+      return;
+    }
+    if (nameLimits.coolingDown(id.userId, now)) {
+      res.status(429).json({ ok: false, error: "slow down", message: NAME_LIMIT_MESSAGE });
+      return;
+    }
     const r = setDisplayName(a.db, id.userId, raw);
     if (!r.ok) {
       res.status(r.error === "taken" ? 409 : 400).json({ ok: false, error: r.error, message: NAME_MESSAGES[r.error] });
@@ -120,6 +140,7 @@ export function mountAccountRoutes(app: Express, a: Accounts, cfg: AccountsConfi
     // Keep the auth user's name in step: it is the JWT `name` and the name carried over on save.
     const ctx = await a.auth.$context;
     if (await ctx.internalAdapter.findUserById(id.userId)) await ctx.internalAdapter.updateUser(id.userId, { name: r.name });
+    nameLimits.changed(id.userId, now);
     res.json({ ok: true, name: r.name });
   });
 
@@ -174,8 +195,8 @@ export function mountAccountRoutes(app: Express, a: Accounts, cfg: AccountsConfi
       res.status(403).send("Open this page on the game's site.");
       return;
     }
-    const ip = (cfg.originSecret ? firstForwardedFor(req) : directRequestIp(req)) ?? "unknown";
-    if (!attempts.take(ip, Date.now())) {
+    const ip = cfg.originSecret ? proxiedRequestIp(req) : directRequestIp(req);
+    if (!attempts.take(ip ? banKey(ip) : "unknown", Date.now())) {
       res.status(429).send("Too many attempts. Try again later.");
       return;
     }
@@ -205,14 +226,20 @@ export function mountAccountRoutes(app: Express, a: Accounts, cfg: AccountsConfi
     );
   });
 
+  // Off unless load tests are on (production: LOADTEST_ENABLED=1 too; D-security-1).
+  const botKey = botSecret(cfg);
   app.post("/api/test/bot-token", noStore, async (req, res) => {
-    if (!cfg.loadtestSecret) {
+    if (!botKey) {
       res.status(404).json({ ok: false, error: "not found" });
       return;
     }
-    const got = req.headers["x-loadtest-secret"];
-    if (typeof got !== "string" || !safeEqual(got, cfg.loadtestSecret)) {
-      res.status(403).json({ ok: false, error: "forbidden" });
+    const check = checkToolSecret(req.headers["x-loadtest-secret"], botKey, directRequestIp(req));
+    if (check !== "ok") {
+      res.status(check === "limited" ? 429 : 403).json({ ok: false, error: check === "limited" ? "slow down" : "forbidden" });
+      return;
+    }
+    if (!botBudget.takeToken()) {
+      res.status(429).json({ ok: false, error: "slow down" });
       return;
     }
     const raw = typeof req.body?.id === "string" ? req.body.id : "";
@@ -229,27 +256,30 @@ export function claimTokenStrong(token: string): boolean {
   return token.length >= 43 && new Set(token).size >= 12;
 }
 
-/** Admin-claim attempts: per client IP and overall, counted before any comparison (D-admin-2). */
+/**
+ * Admin-claim attempts: per client IP and overall, counted before any comparison (D-admin-2). A
+ * refused attempt records nothing, the address map has a hard cap, and idle addresses expire on
+ * every call (D-security-8).
+ */
 export class ClaimLimiter {
   static readonly PER_IP = 5;
   static readonly PER_IP_WINDOW_MS = 10 * 60_000;
   static readonly GLOBAL = 30;
   static readonly GLOBAL_WINDOW_MS = 60 * 60_000;
-  private readonly byIp = new Map<string, number[]>();
-  private all: number[] = [];
+  static readonly MAX_ADDRESSES = 10_000;
+  private readonly byIp = new WindowLimiter(ClaimLimiter.PER_IP, ClaimLimiter.PER_IP_WINDOW_MS, ClaimLimiter.MAX_ADDRESSES);
+  private readonly all = new WindowLimiter(ClaimLimiter.GLOBAL, ClaimLimiter.GLOBAL_WINDOW_MS, 1);
 
   take(ip: string, now: number): boolean {
-    this.all = this.all.filter((t) => now - t < ClaimLimiter.GLOBAL_WINDOW_MS);
-    const mine = (this.byIp.get(ip) ?? []).filter((t) => now - t < ClaimLimiter.PER_IP_WINDOW_MS);
-    if (this.all.length >= ClaimLimiter.GLOBAL || mine.length >= ClaimLimiter.PER_IP) {
-      this.byIp.set(ip, mine);
-      return false;
-    }
-    mine.push(now);
-    this.all.push(now);
-    this.byIp.set(ip, mine);
-    if (this.byIp.size > 10_000) this.byIp.clear(); // a flood of addresses: the global cap still holds
+    if (!this.all.allows("all", now) || !this.byIp.allows(ip, now)) return false;
+    this.all.add("all", now);
+    this.byIp.add(ip, now);
     return true;
+  }
+
+  /** Addresses being remembered. */
+  get size(): number {
+    return this.byIp.size;
   }
 }
 

@@ -23,6 +23,8 @@ export const env = {
   turnKeyToken: process.env.TURN_KEY_API_TOKEN ?? "",
   adminClaimToken: process.env.ADMIN_CLAIM_TOKEN ?? "",
   loadtestSecret: process.env.LOADTEST_SECRET ?? "",
+  /** Production load tests need this switch as well as the secret (D-security-1). */
+  loadtestEnabled: process.env.LOADTEST_ENABLED === "1",
   /** DataFast website API key (`df_…`) for the home page's visit counts (6f); empty = not shown. */
   datafastApiKey: process.env.DATAFAST_API_KEY ?? "",
   allowDevGuests: process.env.ALLOW_DEV_GUESTS === "1",

@@ -123,7 +123,7 @@ interface GameLike {
   };
   planet?: { terrain?: unknown; body?: { radius: number } };
   input?: { locked: boolean; enabled: boolean; sensitivity: number; invertY: boolean };
-  net?: { room: RoomLike | null; rtt?: number };
+  net?: { room: RoomLike | null; rtt?: number; serverOffset?: number };
   hud?: {
     you: {
       xp: number;
@@ -134,7 +134,8 @@ interface GameLike {
       hotbar: (Item | null)[];
       dead: boolean;
       onboarding?: { hits: number[] };
-      missions?: { id: string; progress: number; done: boolean }[];
+      missions?: { id: string; progress: number; done: boolean; counts?: number[] }[];
+      gleamVault?: boolean;
     } | null;
   };
   combat?: { training: unknown; deadUntilRespawn: boolean };
@@ -142,6 +143,18 @@ interface GameLike {
   photo?: { active: boolean };
   self?: { currentName?: string };
   systems?: unknown[];
+}
+/** game/SpellClient.ts, as the hook reads it. */
+interface SpellClientLike {
+  book: {
+    view(now: number): {
+      aether: number;
+      max: number;
+      ward: { hp: number; max: number; left: number } | null;
+      slots: { id: string; name: string; keycap: string; level: number; cost: number; locked: boolean; cooldown: number; ready: boolean; short: boolean }[];
+    };
+  };
+  castSpell(id: string, target?: readonly [number, number, number]): string | null;
 }
 /** A collider the player's movement uses (structures: town, outposts, waystones; props: trees, rocks…). */
 interface RayCollider {
@@ -179,17 +192,29 @@ interface SharedMods {
     hunt?: { targets: { count: number }[]; place?: string };
     find?: { object: string };
     reach?: { place: string };
+    race?: { rings: string[]; limitS: number };
+    defend?: { beacon: string; holdS: number; radius: number };
+    collect?: { pieces: string[]; limitS?: number };
+    trial?: number;
   }[];
+  /** Sela Marchbank's trials (the Three Gleams; Portus). Same shape as missionsOn. */
+  missionsFrom(giver: string): ReturnType<SharedMods["missionsOn"]>;
   placeDir(id: string): readonly [number, number, number];
+  /** The latest race / defend / collect attempt (game/trialState.ts) and its HUD line. */
+  trialSeen(): { msg: Record<string, unknown> & { id: string; state: string; progress: number; goal: number; next: string | null }; at: number } | null;
+  trialHud(t: unknown, now: number): { title: string; progress: string; clock: string; tone: string } | null;
+  clockLeft(t: unknown, now: number): number;
 }
 
 export type FlEvent = { t: number; kind: string; [k: string]: unknown };
 
-const IN_TYPES = ["immune", "npcKill", "denied", "shot", "projectile", "swing", "hit", "toast", "death", "reborn", "explode", "loggedOut", "train", "onboarding", "correct"] as const;
-const OUT_TYPES = new Set(["fire", "melee", "train", "equip", "charge", "block", "scope", "use", "respawn", "logout", "travel", "onboarding", "admin", "interact", "pickup"]);
+const IN_TYPES = ["immune", "npcKill", "denied", "shot", "projectile", "swing", "hit", "toast", "death", "reborn", "explode", "loggedOut", "train", "onboarding", "correct", "spell"] as const;
+const OUT_TYPES = new Set(["fire", "melee", "train", "equip", "charge", "block", "scope", "use", "respawn", "logout", "travel", "onboarding", "admin", "interact", "pickup", "cast"]);
 const HUD_PARTS: [string, string][] = [
   ["playerCard", ".fl-me"],
   ["hotbar", ".fl-hotbar-wrap"],
+  ["spells", ".fl-spells"],
+  ["aether", ".fl-me__aether"],
   ["tutorial", ".fl-onb"],
   ["compass", ".fl-compass"],
   ["missions", ".fl-missions"],
@@ -227,9 +252,9 @@ export function installE2eHook(win: Window & typeof globalThis): void {
   const loadShared = () => {
     if (shared || sharedLoading) return;
     sharedLoading = true;
-    void Promise.all([import("@firstlight/shared"), import("@firstlight/shared/content/npcs"), import("@firstlight/shared/net/schema"), import("@firstlight/shared/content/weapons"), import("@firstlight/shared/content/missions"), import("@firstlight/shared/content/places")])
-      .then(([s, n, sc, w, m, pl]) => {
-        shared = { BODIES: s.BODIES, padDirs: s.padDirs, isSafe: s.isSafe, PAD_SAFE_RADIUS: s.PAD_SAFE_RADIUS, zoneAt: s.zoneAt, nearestSafeEntry: s.nearestSafeEntry, TOWN_GATES: s.TOWN_GATES, safeGates: s.safeGates, portalSpots: s.portalSpots, NPC_DEFS: n.NPC_DEFS, NF: n.NF, PF: sc.PF, WEAPONS: w.WEAPONS, WEAPON_BY_ID: w.WEAPON_BY_ID, missionsOn: m.missionsOn, placeDir: pl.placeDir } as unknown as SharedMods;
+    void Promise.all([import("@firstlight/shared"), import("@firstlight/shared/content/npcs"), import("@firstlight/shared/net/schema"), import("@firstlight/shared/content/weapons"), import("@firstlight/shared/content/missions"), import("@firstlight/shared/content/places"), import("../game/trialState.ts")])
+      .then(([s, n, sc, w, m, pl, ts]) => {
+        shared = { BODIES: s.BODIES, padDirs: s.padDirs, isSafe: s.isSafe, PAD_SAFE_RADIUS: s.PAD_SAFE_RADIUS, zoneAt: s.zoneAt, nearestSafeEntry: s.nearestSafeEntry, TOWN_GATES: s.TOWN_GATES, safeGates: s.safeGates, portalSpots: s.portalSpots, NPC_DEFS: n.NPC_DEFS, NF: n.NF, PF: sc.PF, WEAPONS: w.WEAPONS, WEAPON_BY_ID: w.WEAPON_BY_ID, missionsOn: m.missionsOn, missionsFrom: m.missionsFrom, placeDir: pl.placeDir, trialSeen: ts.trialSeen, trialHud: ts.trialHud, clockLeft: ts.clockLeft } as unknown as SharedMods;
       })
       .catch((e: unknown) => console.warn("[e2e] shared modules", e))
       .finally(() => (sharedLoading = false));
@@ -307,6 +332,12 @@ export function installE2eHook(win: Window & typeof globalThis): void {
             e.killer = m.killerName;
           }
           if ("weapon" in m) e.weapon = m.weapon;
+          if (type === "spell") {
+            e.spell = m.spell;
+            e.phase = m.phase;
+            if ("amount" in m) e.amount = m.amount;
+            if (Array.isArray(m.hit)) e.hits = m.hit.length;
+          }
           if (type === "swing") e.hits = m.hits;
         }
         push(e);
@@ -316,7 +347,7 @@ export function installE2eHook(win: Window & typeof globalThis): void {
     room.send = (type: string, msg?: unknown, ...rest: unknown[]) => {
       if (OUT_TYPES.has(type)) {
         const m = (msg ?? {}) as Record<string, unknown>;
-        push({ t: performance.now(), kind: "out", type, ...(type === "admin" ? { cmd: m.cmd } : {}), ...("slot" in m ? { slot: m.slot } : {}), ...("on" in m ? { on: m.on } : {}), ...("heavy" in m ? { heavy: m.heavy } : {}) });
+        push({ t: performance.now(), kind: "out", type, ...(type === "admin" ? { cmd: m.cmd } : {}), ...("slot" in m ? { slot: m.slot } : {}), ...("on" in m ? { on: m.on } : {}), ...("heavy" in m ? { heavy: m.heavy } : {}), ...("spell" in m ? { spell: m.spell } : {}) });
       }
       return send(type, msg, ...rest);
     };
@@ -590,6 +621,9 @@ export function installE2eHook(win: Window & typeof globalThis): void {
   const npcRenderer = (g: GameLike): { views: Map<string, { dist: number; gone: boolean }> } | null =>
     ((g.systems ?? []).find((s) => !!s && typeof s === "object" && (s as { views?: unknown }).views instanceof Map && "telegraphs" in s) as { views: Map<string, { dist: number; gone: boolean }> } | undefined) ?? null;
 
+  const spellClient = (g: GameLike | null): SpellClientLike | null =>
+    ((g?.systems ?? []).find((s) => !!s && typeof s === "object" && "book" in s && typeof (s as { castSpell?: unknown }).castSpell === "function") as SpellClientLike | undefined) ?? null;
+
   const snapshot = () => {
     const g = game();
     const now = performance.now();
@@ -699,6 +733,11 @@ export function installE2eHook(win: Window & typeof globalThis): void {
       ((g.systems ?? []).find((x) => !!x && typeof x === "object" && Array.isArray((x as { interactables?: unknown }).interactables)) as
         | { interactables: { def: { id: string; look?: string; name?: string }; pos: [number, number, number] }[] }
         | undefined)?.interactables ?? [];
+    // Race rings, shards and kite panels (TrialClient's walk-in spots; beacons are interactables).
+    const trialSpots =
+      ((g.systems ?? []).find((x) => !!x && typeof x === "object" && (x as { trialSpots?: unknown }).trialSpots instanceof Map) as
+        | { trialSpots: Map<string, { pos: [number, number, number] }> }
+        | undefined)?.trialSpots ?? new Map<string, { pos: [number, number, number] }>();
     const item = you ? you.hotbar[you.selected] : null;
     const def = item ? S.WEAPON_BY_ID.get(item.id) : S.WEAPONS[me?.weapon ?? 0];
 
@@ -765,26 +804,55 @@ export function installE2eHook(win: Window & typeof globalThis): void {
         const o = interactables.find((i) => i.def.look === "guide");
         return o ? { name: o.def.name ?? null, ...target(...o.pos) } : null;
       })(),
+      // Portus: Sela Marchbank (the Three Gleams) and the Gleam Vault.
+      curator: (() => {
+        const o = interactables.find((i) => i.def.look === "curator");
+        const v = interactables.find((i) => i.def.look === "vault");
+        return o ? { name: o.def.name ?? null, ...target(...o.pos), vault: v ? target(...v.pos) : null, vaultOpened: !!you?.gleamVault } : null;
+      })(),
+      // The running race / defend / collect attempt (the server's latest `trial` message), its HUD
+      // line and clock left, and the world object it leads to.
+      trial: (() => {
+        const t = S.trialSeen?.();
+        if (!t) return null;
+        const now = performance.now();
+        return { ...t.msg, clockLeftMs: Math.round(S.clockLeft(t, now)), hud: S.trialHud(t, now), hudShown: !!document.querySelector('[data-e2e="trial-hud"]:not([hidden])') };
+      })(),
       // The guide's missions here and where each objective is (hunt: its area, find: the object,
       // reach: the place), whether taken or not: the live play sessions walk to them.
       quests: (() => {
         if (!bodyDef || !terrain) return [];
         // Each objective's spot on its own: a hunt with no place (H1) or a bad one leaves only that
         // mission without a position.
+        const objAt = (id: string): [number, number, number] | null => {
+          const o = interactables.find((i) => i.def.id === id) ?? trialSpots.get(id);
+          return o?.pos ?? null;
+        };
         const spotOf = (m: ReturnType<SharedMods["missionsOn"]>[number]): [number, number, number] | null => {
           try {
             if (m.find) return interactables.find((i) => i.def.id === m.find!.object)?.pos ?? null;
+            const st = you?.missions?.find((x) => x.id === m.id);
+            const t = S.trialSeen?.()?.msg;
+            if (m.race) return objAt(m.race.rings[t && t.id === m.id && t.state === "running" ? Math.min(t.progress, m.race.rings.length - 1) : 0]!);
+            if (m.defend) return objAt(m.defend.beacon);
+            if (m.collect) {
+              const left = m.collect.pieces.filter((_, i) => !st?.counts?.[i]).map(objAt).filter((p): p is [number, number, number] => !!p);
+              const me = g.player?.pos;
+              return left.sort((a, b) => (me ? Math.hypot(a[0] - me.x, a[1] - me.y, a[2] - me.z) - Math.hypot(b[0] - me.x, b[1] - me.y, b[2] - me.z) : 0))[0] ?? null;
+            }
             const place = m.reach?.place ?? m.hunt?.place;
             return place ? onGround(S.placeDir(place), 0) : null;
           } catch {
             return null;
           }
         };
-        return S.missionsOn(body).map((m) => {
+        // On a planet: its guide's missions and, if taken, Sela's trial there; in Portus: Sela's trials.
+        const list = body === "portus" ? S.missionsFrom("curator_sela") : [...S.missionsOn(body), ...S.missionsFrom("curator_sela").filter((m) => (m as { body?: string }).body === body)];
+        return list.map((m) => {
           const st = you?.missions?.find((x) => x.id === m.id);
-          const at = spotOf(m);
-          const goal = m.hunt ? m.hunt.targets.reduce((n, t) => n + t.count, 0) : 1;
-          return { id: m.id, name: m.name, type: m.type, objective: m.objective, taken: !!st, done: !!st?.done, progress: st?.progress ?? 0, goal, ...(at ? target(...at) : {}) };
+          const at = body === "portus" ? null : spotOf(m);
+          const goal = m.hunt ? m.hunt.targets.reduce((n, t) => n + t.count, 0) : m.race ? m.race.rings.length : m.defend ? m.defend.holdS : m.collect ? m.collect.pieces.length : 1;
+          return { id: m.id, name: m.name, type: m.type, objective: m.objective, taken: !!st, done: !!st?.done, progress: st?.progress ?? 0, goal, ...(m.trial ? { trial: m.trial } : {}), ...(at ? target(...at) : {}) };
         });
       })(),
       mission: (() => {
@@ -796,6 +864,18 @@ export function installE2eHook(win: Window & typeof globalThis): void {
       you: you ? { xp: you.xp, xpToNext: you.xpToNext, coins: you.coins, level: you.level, dead: you.dead } : null,
       weapon: def ? { id: def.id, name: def.name, delivery: def.delivery, range: def.range, tier: item?.tier ?? 1, slot: you?.selected ?? 0 } : null,
       hotbar: you ? you.hotbar.map((h) => (h ? { id: h.id, tier: h.tier, qty: h.qty } : null)) : null,
+      // The spellbook (game/SpellClient.ts): aether now, and each spell's key, lock, cooldown left (s) and readiness.
+      spells: (() => {
+        const sc = spellClient(g);
+        if (!sc) return null;
+        const v = sc.book.view(Date.now() + (g.net?.serverOffset ?? 0));
+        return {
+          aether: Math.round(v.aether * 10) / 10,
+          max: v.max,
+          ward: v.ward ? { hp: v.ward.hp, left: Math.round(v.ward.left * 10) / 10 } : null,
+          slots: v.slots.map((s) => ({ id: s.id, name: s.name, key: s.keycap, level: s.level, cost: s.cost, unlocked: !s.locked, cooldown: Math.round(s.cooldown * 10) / 10, ready: s.ready, short: s.short })),
+        };
+      })(),
       combat: { training: !!g.combat?.training, deadUntilRespawn: !!g.combat?.deadUntilRespawn },
       onboarding: ob
         ? { active: ob.active, paid: ob.paid, ended: ob.ended, step: ob.progress.steps.current?.id ?? null, done: ob.progress.steps.doneCount, allDone: ob.progress.steps.allDone }

@@ -5,7 +5,8 @@ r2-02, r2-04, r2-05 and r2-08. I also checked 07, 09, r2-10, r2-11, r2-15 and r3
 licences, planet scale and the character/boss keyframes. Superseded report content (Zone Laws, Legend,
 Continue Coin, Red Book, the Hunt, Glitch Flats/Bastion, level brackets, skulls, wanted systems,
 downed state, the 8 old avatars, synthwave as the main look) is not carried forward. The last section
-lists the conflicts.
+lists the conflicts. (2026-11-12: a public hunt of our own design is back as **The Three Gleams**, §5.1;
+D-hunt-1 overrides the drop of the reports' Hunt, none of whose names or mechanics return.)
 
 **Tags:** (D) = DECISIONS.md. [05], [12], [r2-04], etc. = taken from that report. (new) = invented
 here. Every number below is a starting value for the tuning sheet, not a measurement.
@@ -115,7 +116,8 @@ before each tier gate. That pushes players to buy the next tier.
 | Regular kill at E = 1 / 4 / 7 / 10 / 13 / 16 / 20 | 3 / 5 / 8 / 10 / 12 / 15 / 18 | computed |
 | Elite kill at the same levels | 14 / 26 / 38 / 50 / 62 / 74 / 90 | computed |
 | Camp chest (opens when the camp elite dies) | Blockyard 60 · Ossuary 150 · Checkpoint Seven 300 | (new) |
-| Missions | see §5 (30–400 each, 1,630 total) | (new) |
+| Missions | see §5 (25–400 each, 2,395 total with the 2026-11-12 five) | (new) |
+| The Gleam Vault (§5.1) | 600, once per life | (new) |
 | Boss purse (each eligible player) | Tidewrath 120 · Hollow King 300 · The Receiver 600 | [r2-05] scaled |
 | Selling | see 1.5 | |
 
@@ -258,15 +260,15 @@ Heat = shots until a 1.5 s overheat lockout. Explosions fall off linearly from t
 | **Riverstaff** bo staff (melee) | I | 1 | 13 | 0.40 | 3.0 m | melee arc 150°, ≤ 4 targets, windup 0.10 | none | every 3rd hit in a row knocks back 3.0 m; RMB block 50% | light | 60 |
 | | II | 6 | 18 | 0.40 | 3.0 m | same | none | knockback 3.5 m; block 55% | light | 300 |
 | | III | 12 | 23 | 0.40 | 3.0 m | same | none | knockback 4.0 m; block 60% | light | 900 |
-| **Bearded Axe** (melee) | I | 1 | 30 | 0.80 | 2.2 m | melee arc 90°, ≤ 2 targets, windup 0.25 | none | RMB charge 0.8 s heavy chop 66 (heavy destruction) | light / heavy on chop | 60 |
-| | II | 6 | 41 | 0.80 | 2.2 m | same | none | chop 0.75 s → 90 | same | 300 |
-| | III | 12 | 52 | 0.80 | 2.2 m | same | none | chop 0.70 s → 114 | same | 900 |
+| **Bearded Axe** (melee) | I | 1 | 30 | **0.90** (was 0.80, D-balance-6) | 2.2 m | melee arc 90°, ≤ 2 targets, windup 0.25 | none | RMB charge 0.8 s heavy chop 66 (heavy destruction), **6 s chop cooldown** (D-balance-2) | light / heavy on chop | 60 |
+| | II | 6 | 41 | **0.90** | 2.2 m | same | none | chop 0.75 s → **85** (was 90, D-balance-2) | same | 300 |
+| | III | 12 | 52 | **0.90** | 2.2 m | same | none | chop 0.70 s → **104** (was 114, D-balance-2) | same | 900 |
 | **Quarry Hammer** (melee) | I | 1 | 40 | 1.10 | 2.3 m | melee arc 100°, ≤ 3 targets, windup 0.35; move ×0.9 | none | RMB charge 1.0 s ground slam 55, radius 3.0 m (edge 50%), knock-up 1 m, 6 s cooldown | heavy | 60 |
 | | II | 6 | 54 | 1.10 | 2.3 m | same | none | slam 74, r 3.5 m | heavy | 300 |
-| | III | 12 | 70 | 1.10 | 2.3 m | same | none | slam 96, r 4.0 m | heavy | 900 |
+| | III | 12 | 70 | 1.10 | 2.3 m | same | none | slam **86** (was 96, D-balance-2), r 4.0 m | heavy | 900 |
 | **Hexquill** wand (magic) | I | 1 | 15 | 0.40 | 40 m | projectile 45 m/s, straight | heat 12 | RMB aim 1.3×; bolts pierce 0 | light | 60 |
 | | II | 6 | 20 | 0.40 | 40 m | same | heat 14 | pierce 1 | light | 300 |
-| | III | 12 | 26 | 0.40 | 40 m | same | heat 16 | pierce 2 | light | 900 |
+| | III | 12 | **25** (was 26, D-balance-2) | 0.40 | 40 m | same | heat 16 | pierce 2 | light | 900 |
 | **Emberglass Staff** fire staff (magic) | I | 1 | 24 direct; splash 12 in 2.0 m; burn 4/s × 3 s | 0.80 | 35 m | projectile 28 m/s, straight | heat 5 | burn refreshes, never stacks; RMB aim 1.3× | heavy | 60 |
 | | II | 6 | 32; splash 16 in 2.5 m; burn 5/s | 0.80 | 35 m | same | heat 6 | | heavy | 300 |
 | | III | 12 | 42; splash 21 in 3.0 m; burn 7/s | 0.80 | 35 m | same | heat 7 | | heavy | 900 |
@@ -276,18 +278,18 @@ Heat = shots until a 1.5 s overheat lockout. Explosions fall off linearly from t
 | **Pocket Carbine** blaster (ranged) | I | 1 | 9 | 0.25 | full to 25 m, 60% at 45 m | hitscan + bolt tracer; hip 1.5°, ADS 0.3° | mag 24, reload 1.4 s | RMB ADS 1.4× | light | 60 |
 | | II | 6 | 12 | 0.25 | same | same | mag 28, 1.3 s | | light | 300 |
 | | III | 12 | 16 | 0.25 | same | same | mag 32, 1.2 s | | light | 900 |
-| **Scatterpipe** shotgun (ranged) | I | 1 | 7 pellets × 6 | 0.90 | full to 10 m, 30% at 22 m | hitscan pellets, 7° cone (ADS 5°) | mag 6, reload 2.0 s | | light | 60 |
+| **Scatterpipe** shotgun (ranged) | I | 1 | 7 pellets × 6 | 0.90 | full to 10 m, 30% at 22 m | hitscan pellets, 7° cone (ADS 5°) | mag 6, reload 2.0 s | **no weak-point bonus (×1.0, D-balance-8)**: point-blank pellets are the burst | light | 60 |
 | | II | 6 | 7 × 8 | 0.90 | same | same | mag 7, 1.8 s | | light | 300 |
 | | III | 12 | 7 × 10 | 0.90 | same | same | mag 8, 1.6 s | | light | 900 |
-| **Yew Longbow** (ranged) | I | 1 | tap 15; full draw 45 | tap 0.5; draw 1.0 + 0.35 recovery | ~100 m arc | arcing projectile, 25 → 55 m/s by draw, gravity 9.8 | none | hold RMB to draw (zoom 1.8× at full), LMB to loose; head ×1.5 | light | 60 |
-| | II | 6 | 20; 61 | draw 0.9 | same | same | none | | light | 300 |
-| | III | 12 | 25; 75 | draw 0.8 | same | same | none | T3 full draw trimmed from 79 to 75 so two body hits never kill at the L12 gate | light | 900 |
+| **Yew Longbow** (ranged) | I | 1 | tap 15; full draw 45 | draw 1.0, a full draw every **1.4** s (code `rate`; 0.5 → 1.35 by D-balance-2, 1.4 by D-balance-8) | ~100 m arc | arcing projectile, 25 → 55 m/s by draw, gravity 9.8 | none | hold RMB to draw (zoom 1.8× at full), LMB to loose; head ×1.5 | light | 60 |
+| | II | 6 | 20; 61 | draw 0.9 (rate **1.4**, was 1.25) | same | same | none | | light | 300 |
+| | III | 12 | 25; 75 | draw 0.8 (rate **1.4**, was 1.15) | same | same | none | T3 full draw trimmed from 79 to 75 so two body hits never kill at the L12 gate | light | 900 |
 | **Stillshot Rifle** sniper (ranged) | I | 1 | 45 body; head ×1.8 = 81 | 1.40 | 150 m, no falloff | hitscan; unscoped spread 4°, scoped 0° | mag 4, reload 2.2 s | RMB scope 4×; lens glint visible to anyone ≥ 30 m away while scoped | light | 90 |
 | | II | 6 | 61 (head 110) | 1.40 | same | same | mag 5, 2.0 s | scope 5× | light | 450 |
 | | III | 12 | 75 (head 135) | 1.40 | same | same | mag 5, 1.8 s | scope 6× (75, not 79, to keep 3 body shots) | light | 1,350 |
-| **Comet Launcher** rocket (ranged) | I | 1 | direct 70 total; splash 45 at centre, r 3.5 m | 1.80 (reload) | detonates at 80 m | projectile 30 m/s, straight | mag 1, reload 1.8 s | knockback 4 m; self ×0.5; move ×0.85; props ×2 | heavy | 90 |
+| **Comet Launcher** rocket (ranged) | I | 1 | direct 70 total; splash 45 at centre, r 3.5 m | 1.80 (reload) | detonates at 80 m | projectile 30 m/s, straight | mag 1, reload 1.8 s | knockback 4 m; self ×0.5; move ×0.85; props ×2; **no weak-point bonus (×1.0, D-balance-2)** | heavy | 90 |
 | | II | 6 | 95; splash 61, r 4.0 m | 1.70 | same | same | reload 1.7 s | | heavy | 450 |
-| | III | 12 | 123; splash 79, r 4.5 m | 1.60 | same | same | reload 1.6 s | | heavy | 1,350 |
+| | III | 12 | 123; splash 79, r 4.5 m | **1.65** (was 1.60, D-balance-8) | same | same | reload **1.65 s** | | heavy | 1,350 |
 | **Scrapburst Grenade** (support) | I | 1 | 70 at centre, r 4.0 m | 0.8 throw cooldown | ~20 m throw | thrown arc 18 m/s, bounces, fuse 1.6 s | stack 5 | self ×0.5; props ×2 | heavy | 15 ea |
 | | II | 6 | 95, r 4.5 m | 0.8 | same | fuse 1.5 s | stack 5 | | heavy | 40 ea |
 | | III | 12 | 123, r 5.0 m | 0.8 | same | fuse 1.4 s | stack 5 | | heavy | 90 ea |
@@ -298,12 +300,12 @@ Heat = shots until a 1.5 s overheat lockout. Explosions fall off linearly from t
 | | II | 6 | 200 per 100 max HP | 22 s | r 3.5 m, 7 s | | | | none | 400 |
 | | III | 12 | 260 per 100 max HP | 20 s | r 4.0 m, 8 s | | | | none | 1,000 |
 | **Radio** (item) | – | 1 | – | – | same planet, any distance | channels 1–9, talk on B, crackle filter, max 8 per channel | – | drops on death | none | **100** (D) |
-| **Ember Kunai** (ranged; the ninja's starter, HANDOFF 6h) | I | 1 | 13 | 0.38 | 35 m | thrown dart, 42 m/s, gravity 4 | mag 8, reload 1.3 s | RMB: hold 0.4 s hand seal, release: **Ember Seal** fireball (below), 8 s cooldown | light | 60 |
+| **Ember Kunai** (ranged; the ninja's starter, HANDOFF 6h) | I | 1 | 13 | 0.38 | 35 m | thrown dart, 42 m/s, gravity 4 | mag 8, reload 1.3 s | RMB: hold 0.4 s hand seal (a throw breaks it, D-balance-7), release: **Ember Seal** fireball (below), 8 s cooldown | light | 60 |
 | | II | 6 | 18 | 0.38 | same | same, pierce 1 | mag 9, 1.2 s | seal cooldown 7.5 s | light | 300 |
 | | III | 12 | 24 | 0.38 | same | same, pierce 1 | mag 10, 1.1 s | seal cooldown 7 s | light | 900 |
-| **Ember Seal** (the kunai's alt; not an item) | I | 1 | 30 direct incl. blast; splash 20 in 2.5 m; burn 4/s × 3 s | cooldown | 30 m | fireball 24 m/s, straight | the kunai tier's cooldown | spends no kunai; the server times the 0.4 s seal | heavy | – |
-| | II | 6 | 40; splash 27 in 2.75 m; burn 5/s | | same | same | | | heavy | – |
-| | III | 12 | 52; splash 35 in 3.0 m; burn 6/s | | same | same | | | heavy | – |
+| **Ember Seal** (the kunai's alt; not an item) | I | 1 | **30** (24 under D-balance-3, restored by D-balance-7) direct incl. blast; splash 20 in 2.5 m; burn 4/s × 3 s | cooldown | 30 m | fireball 24 m/s, straight | the kunai tier's cooldown | spends no kunai; the server times the 0.4 s seal; **no weak-point bonus (×1.0, an explosive, D-balance-8)** | heavy | – |
+| | II | 6 | **40** (32 under D-balance-3, restored); splash 27 in 2.75 m; burn 5/s | | same | same | | | heavy | – |
+| | III | 12 | **42** (was 52, D-balance-3, kept); splash 35 in 3.0 m; burn 6/s | | same | same | | | heavy | – |
 
 ### 2.4 Starter weapons (D)
 
@@ -331,7 +333,8 @@ starter (`STARTER_LOOKS`; `PlayerState.look` and the saved character store the i
 
 **Target (new):** at equal level with the gated tier and 100% accuracy:
 - **2.2–3.5 s** for sustained weapons.
-- **1.4–1.8 s floor** for burst weapons that need a headshot, a direct rocket hit or point-blank pellets.
+- **1.4–1.8 s floor** for burst weapons that need a headshot, a direct rocket hit or point-blank pellets. The
+  1.4 s floor holds for every weapon with headshots, heavies and specials too (D-balance-8).
 - **No one-shot kills at equal level.** The largest single hit is a Stillshot headshot at 73–86% of
   the target's HP.
 
@@ -343,21 +346,115 @@ any level against any level.
 | Fists | 4.8 s / 13 | 6.4 / 17 | 7.6 / 20 | 9.2 / 24 | 9.2 / 24 |
 | Sunbrand | 2.25 / 6 | 2.25 / 6 | 2.25 / 6 | 2.25 / 6 | 4.5 / 11 |
 | Riverstaff | 2.8 / 8 | 2.8 / 8 | 2.4 / 7 | 3.2 / 9 | 5.6 / 15 |
-| Bearded Axe | 2.4 / 4 | 2.4 / 4 | 2.4 / 4 | 2.4 / 4 | 4.8 / 7 |
+| Bearded Axe (rate 0.9, D-balance-6) | 2.7 / 4 | 2.7 / 4 | 2.7 / 4 | 2.7 / 4 | 5.4 / 7 |
 | Quarry Hammer | 2.2 / 3 | 2.2 / 3 | 2.2 / 3 | 2.2 / 3 | 4.4 / 5 |
 | Hexquill | 2.4 / 7 | 2.4 / 7 | 2.4 / 7 | 2.8 / 8 | 6.3 / 13 |
 | Emberglass Staff (direct + burn) | 2.4 / 4 | 2.4 / 4 | 2.4 / 4 | 2.4 / 4 | 6.3 / 7 |
 | Stormcoil (first target) | 2.8 / 5 | 2.8 / 5 | 2.8 / 5 | 3.5 / 6 | 7.8 / 10 |
 | Pocket Carbine | 2.75 / 12 | 2.5 / 11 | 2.25 / 10 | 2.75 / 12 | 5.0 / 21 |
 | Scatterpipe (all 7 pellets, ≤ 10 m) | 1.8 / 3 | 1.8 / 3 | 1.8 / 3 | 1.8 / 3 | 3.6 / 5 |
-| Yew Longbow (full draws, first one pre-drawn) | 2.7 / 3 | 2.5 / 3 | 2.3 / 3 | 2.3 / 3 | 5.4 / 5 |
+| Yew Longbow (full draws, first one pre-drawn; rate 1.4, D-balance-8) | 2.8 / 3 | 2.8 / 3 | 2.8 / 3 | 2.8 / 3 | 5.6 / 5 |
 | Stillshot Rifle, body / head + body | 2.8 / 3 · 1.4 / 2 | same | same | same | 7.8 / 5 |
-| Comet Launcher (direct hits) | 1.8 / 2 | 1.7 / 2 | 1.6 / 2 | 1.6 / 2 | 3.6 / 3 |
+| Comet Launcher (direct hits) | 1.8 / 2 | 1.7 / 2 | 1.65 / 2 | 1.65 / 2 | 3.6 / 3 |
 | Ember Kunai (all darts) | 2.7 / 8 | 2.7 / 8 | 2.3 / 7 | 2.7 / 8 | 5.3 / 15 |
 
 Format: seconds from the first hit / hits needed. PvE comparison: a regular L1 enemy with 22–60 HP dies to
 the Pocket Carbine in 0.5–1.5 s, inside [05]'s 1.1–1.8 s band. Build a headless sim that fails the
 build if any weapon's TTK leaves 0.6–1.6× of its class median [04].
+
+### 2.6 Balance pass 2026-11-12 (`pnpm balance`, D-balance-1…4)
+
+`tools/balance` models the shipped catalogues (the server's fire rules, AI clamps, the route) and fails when a
+number leaves its band (`pnpm balance`, Vitest project `balance`). Its first run on the shipped numbers failed
+24 checks; these changes bring every check into band. Every other number is unchanged.
+
+| Number | Old | New | Why (model, before → after) |
+|---|---:|---:|---|
+| Bearded Axe chop cooldown (all tiers) | none | 6 s | a chop every 0.8 s: 82 DPS at T1 (2.5× the tier median) and a 0.8 s PvP kill → 41 DPS, 1.6 s |
+| Bearded Axe II / III chop | 90 / 114 | 85 / 104 | chop + one light still killed an equal-level player at L6 and L12 (0.8 s) → 1.6 s, 3 hits |
+| Quarry Hammer III slam | 96 | 86 | slam + one light killed at L12 (1.1 s) → 2.2 s, 3 hits |
+| Hexquill III damage | 26 | 25 | 6 bolts killed at L12 (2.0 s, under the 2.2 s floor) → 2.4 s, 7 |
+| Yew Longbow rate I / II / III | 0.5 / 0.5 / 0.5 | 1.35 / 1.25 / 1.15 | the code let full draws chain at the draw time (2.0 / 1.8 / 1.6 s TTK); now draw + the 0.35 s recovery this table lists (2.7 / 2.5 / 2.3 s, the §2.5 values). Taps share the rate |
+| Comet Launcher headMult | 1.5 (default) | 1.0 | a direct head hit one-shot an equal-level player at every level (105–117% of HP); §2.1 gives explosives ×1.0 |
+| Ember Seal direct I / II / III | 30 / 40 / 52 | 24 / 32 / 42 | the seal opener on top of the dart stream made Hinoko win all 16 starter duels; the smallest trim that clears the starter checks |
+| Dunebreaker HP₁ | 1,200 | 1,000 | 41 s solo against 30–31 s for the other beasts; a solo player with two tonics lost (margin 0.84) → 37 s, 0.95 |
+
+Model findings left alone (in band, or by design): the Scatterpipe and Stillshot are burst weapons (1.8 / 2.8 s
+body, 1.4 s with a headshot); the Marsh Wisp (0.25 s) and the Collector (0.5 s) are designed fragile; beasts
+are even fights solo (margin 0.95–1.3 with two tonics). Splash damage (`explode`) is not scaled by the
+attacker's level multiplier in code, so splash falls behind direct hits at high level: a candidate for the
+next pass with play data.
+
+**Review round 1** (Codex gpt-6.1-sol, `docs/reviews/2026-11-12-balance-starters-gpt-6.1-sol.md`; D-balance-5…8):
+
+- Melee damage lands on the press (`melee()`); the §2.3 `windup` values are not a delay (D-balance-5). No numbers changed.
+- Two cadences (D-balance-6): §2.5's bands at the shipped client's; the hard floor (two hits and ≥ 0.75 s against
+  every starter) at the fastest the server accepts (0.85 × rate, 0.9 × charge).
+- A throw breaks the Ember Seal's hand seal (server and client), and the dart after a seal waits the rate (D-balance-7).
+- The 1.4 s floor gates best play (headshots, heavies, specials) at base HP, and the hard floor counts headshots too (D-balance-8).
+
+| Number | Old | New | Why (model, before → after) |
+|---|---:|---:|---|
+| Ember Seal direct I / II / III | 24 / 32 / 42 | 30 / 40 / 42 | with a throw breaking the hold (D-balance-7) and the dart after a seal waiting the rate, the T1/T2 trim wasn't needed (Hinoko 12 duel wins, Unit 7 14); 52 at T3 still hands Hinoko the L12/L20 duels |
+| Scatterpipe headMult (all tiers) | 1.5 (default) | 1.0 | two ×1.5 head volleys (63 each at L1) killed in 0.9 s at every level, under the 1.4 s floor → the body volley, 1.8 s / 3 |
+| Yew Longbow rate I / II / III | 1.35 / 1.25 / 1.15 | 1.4 / 1.4 / 1.4 | a head + body pair of full draws killed in 1.35 / 1.25 / 1.15 s → 1.4 s (the Stillshot's head + body); body 2.7 / 2.5 / 2.3 → 2.8 s; a lower head bonus would have needed ×1.05 at T3 |
+| Ember Seal headMult (all tiers) | 1.5 (default) | 1.0 | an explosive (§2.1, like the Comet); a ×1.5 fireball head hit put the kunai's best kill at 1.14 s (L1/6/12) and 0.65 s on Hinoko at L6 at the server's cadence → 1.52 s, ≥ 0.97 s |
+| Comet Launcher III rate / reload | 1.6 | 1.65 | knock-on of the longbow: the L20 ranged median rose and the Comet sat at 0.59× it (class band 0.6–1.6) → 0.61× |
+| Bearded Axe rate (all tiers) | 0.80 | 0.90 | at the server's cadence chop + light killed an 88–90 HP starter at L1/6/12 in 0.68 s → 0.77 s; sustained DPS 44 / 68 / 99 → 40 / 61 / 89, PvP 2.4 → 2.7 s body, 1.6 → 1.8 s with the chop |
+
+### 2.7 Spells (new, 2026-11-12; code: `packages/shared/src/content/spells.ts`, D-spells-1…7)
+
+Every character has a spellbook, apart from the weapon in hand: **aether** and four spells on their
+own keys. Nothing is bought or dropped; spells open by character level, so a rebirth (level 1) closes
+them again and no new save data is needed. The server decides every cast (`cast` message,
+`apps/server/src/world/spells`).
+
+**Aether:** max 100; refills 6 per second, starting 1.5 s after the last cast. Private to its owner
+(HUD: the violet bar under HP). It and the cooldowns belong to the account, not the room: a body hop
+doesn't refill them. The four spells cost 130 together, so a full book never pays for all of them.
+
+| Spell | Key | Lv | Aether | Cooldown | What it does |
+|---|---|---|---:|---:|---|
+| **Skipstep** | Q | 1 | 20 | 6 s | Blink up to 10 m the way you look, along the ground. The server walks the path in 0.5 m steps and stops before a wall, an intact prop, a tree or boulder, deep water, or a ledge of more than 1 m per step. Under 1.5 m of room: refused, nothing spent. A fall under way still counts when you land |
+| **Frostbloom** | F | 3 | 30 | 10 s | Nova round the caster, radius 5 m: **24** damage (flat in the ring) and a **−40% move speed** slow for 3 s. Not through walls. Hits allies (friendly fire), never the caster. Bosses take the damage, not the slow. Light destruction (crates, barrels, fences) |
+| **Wishfall** | X | 6 | 45 | 14 s | A star called down on the ground point under the crosshair, up to 30 m away. Everyone within 160 m sees the ring for **1.2 s**, then it lands: **60** at the centre, falling linearly to 25% at the 4 m edge, knockback 4 m. The caster takes half (own-explosives rule). Heavy destruction. Prism Bubbles and walls shelter as from any blast |
+| **Glasswing Ward** | Z | 9 | 35 | 18 s | A shell on the caster for 4 s that absorbs **30 per 100 of the caster's max HP** dealt by players and creatures (burn ticks included). The rest of a bigger hit gets through. Falls and other damage with no attacker ignore it |
+
+**Shared rules:**
+- Damage = `base × (1 + 0.03(L−1))`, the weapons' level multiplier (§1.3). Weapon tier never counts.
+- Spells go through the weapons' damage pipeline: safe zones and arrival protection hold both ways,
+  walls stop them (D-zones-3), blocks reduce them, kill credit, XP, threat and the game events are
+  the same as for a weapon hit.
+- A cast is refused, like an attack, while dead, in a safe zone, under arrival protection, swimming
+  or riding; Frostbloom and Wishfall tag combat (10 s), all four cancel a logout countdown.
+- No animation lock: a cast never holds a weapon back.
+
+| Level (gate tier) | Player HP | Frostbloom | Wishfall, centre | Ward shell | Opening Frostbloom + Wishfall vs a sustained weapon over 5 s / 8 s / long fights |
+|---|---:|---:|---:|---:|---|
+| L3 (T1) | 120 | 25 (21%) | – | – | – |
+| L6 (T2) | 150 | 28 (18%) | 69 (46%) | – | +33% / +21% / +11% |
+| L9 (T2) | 180 | 30 (17%) | 74 (41%) | 54 | +33% / +21% / +11% |
+| L12 (T3) | 210 | 32 (15%) | 80 (38%) | 63 | +26% / +16% / +8% |
+| L20 (T3) | 290 | 38 (13%) | 94 (32%) | 87 | +26% / +16% / +8% |
+
+"Sustained weapon" is the mean of Hexquill, Sunbrand, Pocket Carbine and Bearded Axe at the gated
+tier (40 / 58 / 63 / 87 / 103 damage per second). "Long fights" is what aether allows: 75 aether for
+the pair every ~15.5 s. `spells.test.ts` in `packages/shared` checks these bands.
+
+**Why these numbers (against §2.5):**
+- **Level 1 is untouched.** Skipstep is the only level-1 spell and deals nothing, so every L1 figure
+  in the §2.5 table stands.
+- **No one-shots.** The largest spell hit, Wishfall's centre, is 32–46% of an equal-level target's
+  HP, well under the Stillshot headshot's 73–86%. With the level-3 Frostbloom added it is 46–64%.
+- **Burst.** Wishfall always warns for 1.2 s (§0's telegraph floor for a hit of 40% HP or more) and a
+  walking target leaves the ring in under a second; Frostbloom's slow is what keeps someone in it.
+  The fastest equal-level kill that uses spells is a Stillshot headshot or a direct rocket timed on
+  the star's landing: **1.2 s after the ring appears**, against 1.4 s for the two shots alone. That
+  is the one place the spellbook dips under the §2.5 burst floor; it needs the target to stand
+  through the warning.
+- **The ward** lengthens a fight by at most 30% once every 18 s; it never refills HP.
+- **Extra damage.** An opening pair adds a quarter to a third to a 5 s fight and about a tenth to a
+  long one, because aether, not the cooldowns, is the limit.
 
 ---
 
@@ -472,7 +569,7 @@ Sixers' black-and-grey "6" look, IOI branding and Sorrento-like leaders [12].
 | **Dusk Wolf** (D) | Regular | 3–6 / 8–12 / 14–19 | 52–67 / 77–97 / 108–133 (42) | bite 9–20 (0.5 s); lunge 20–41 (0.8 s crouch + snarl + line decal); 16% | pack howl (1.5 s) before engaging. They circle at 6–8 m: one feints in front while two bite from the flanks. A wolf at < 25% HP flees if fewer than 2 pack mates remain | pack 3–5 | forests, ridges, canyon rims | Wolf Pelt 50% (8); Wolfpelt Cape 1/200 |
 | **Bramblehorn** (new) | Neutral beast | Arcadia L8 | 1,656 (900) | antler charge 50 (1.2 s head lowered + ground line); stomp 34, 4 m ring (1.0 s); 29% | 6 m tall mossy grazer with flowering, branching antlers. Neutral until struck, then fights the attacker; leash 40 m | 1 per copy | Clover Fields, Kestrel slopes | 126 coins; Bramblehorn Antler 100% (120); Antler Crown 1/8; weapon T2 1/2 |
 | **Fenstalker** (new) | Neutral beast | Hollowmere L14 | 2,560 (1,000) | beak spear 78 (0.9 s neck coil + line); wing buffet 41 + 5 m knockback in a 90° cone, 6 m (1.0 s wings spread); 34% | 7 m stilt-legged wading bird, grey-violet plumage; neutral; spears from the water's edge | 1 per copy | Mourning Mere shallows | 198 coins; Fenstalker Plume 100% (200); Heron Plume Hat 1/8; weapon T3 1/2 |
-| **Dunebreaker** (new) | Neutral beast | Meridian L20 | 3,936 (1,200) | roll charge 101 (1.2 s curl-up + dust line 25 m long); tail swipe 66 in a 120° cone, 5 m (0.8 s); 35% | armoured, salt-crusted canyon roller; neutral; rolls in straight lines and is stunned 2 s at the end of each roll | 1 per copy | Glasspan Salt Flats | 270 coins; Dunebreaker Scale 100% (300); Saltplate Mantle 1/8; weapon T3 1/2 |
+| **Dunebreaker** (new) | Neutral beast | Meridian L20 | **3,280 (1,000)** (was 3,936 (1,200), D-balance-2) | roll charge 101 (1.2 s curl-up + dust line 25 m long); tail swipe 66 in a 120° cone, 5 m (0.8 s); 35% | armoured, salt-crusted canyon roller; neutral; rolls in straight lines and is stunned 2 s at the end of each roll | 1 per copy | Glasspan Salt Flats | 270 coins; Dunebreaker Scale 100% (300); Saltplate Mantle 1/8; weapon T3 1/2 |
 
 ### 3.6 Drop tables (rolled for the top damage dealer) (new; rates from [r2-05])
 
@@ -642,7 +739,54 @@ Rules (new):
 | M2 | Meridian | find | Whistleblower | Pick up the memo drive on the manager's desk in the Oversight Lobby | 14–17 | 2,400 XP, 350 coins | **Egg E7**: the wall safe is in the same office; the break-room mirror is next door |
 | M3 | Meridian | reach | Site Visit | Reach the gantry overlook above Foreclosure Yard | 15–18 | 2,800 XP, 400 coins, Copper Orbit Pack | **Boss lair**: both Override Consoles are visible from the gantry |
 
-Totals: 10,280 XP and 1,630 coins per life.
+Totals: 10,280 XP and 1,630 coins per life for the nine (Errand Runner still asks for these nine, D-hunt-4).
+
+**Added 2026-11-12 (new objective types, D-hunt-3):** `race` (rings in order inside a clock that starts at the
+first ring), `defend` (E lights a beacon; hold its ring while waves arrive; outside it the clock pauses, past
+the grace the attempt fails) and `collect` (walk over every piece; optionally timed from the first). Failing
+(time, death, leaving the ring) ends the attempt; the mission stays accepted, so you try again. Waves pay nothing.
+
+| # | Planet / giver | Type | Name | Exact objective | Rec. Lv | Reward | Routes the player toward |
+|---|---|---|---|---|---|---|---|
+| A4 | Arcadia / Lark | collect | Kite Season | Gather the 5 glowing kite panels in the meadow between Dawnpad and Clover Fields (untimed; pieces are kept across a reconnect) | 1–3 | 60 XP, 25 coins | The bridge from the tutorial into the wild: the meadow runs on into Clover Fields |
+| H4 | Hollowmere / Sexton Mabry | defend | The Long Vigil | Light the vigil lamp on the road north-east of Saint Orrin's ruin; hold its 14 m ring for 60 s (10 s grace outside). Waves at L9: 2 Bonewalkers at 2 s, 2 Gnawers at 25 s, 2 Bonewalkers at 45 s | 9–12 | 900 XP, 150 coins | Saint Orrin's ruin |
+| T1 | Arcadia / Sela Marchbank (Portus) | race | The Swift Gleam | 8 rings on a 75 m loop round Highscore Hill (~400 m), in order, within 75 s of ring 1 | 4–7 | 300 XP, 80 coins, gleam 1 | Highscore Hill's camps |
+| T2 | Hollowmere / Sela Marchbank | defend | The Steadfast Gleam | Light the beacon in south Thornwood; hold its 14 m ring for 90 s (10 s grace). Waves at L9: 2 Bonewalkers at 2 s, 2 Gnawers at 22 s, 2 Bonewalkers at 45 s, 3 Gnawers at 65 s | 9–12 | 1,000 XP, 160 coins, gleam 2 | Thornwood |
+| T3 | Meridian / Sela Marchbank | collect | The Patient Gleam | 8 shards spread over ~240 m of the Glasspan Salt Flats, within 240 s of the first | 14–17 | 2,400 XP, 350 coins, gleam 3 | Glasspan's patrols |
+
+Totals with the five: **14,940 XP and 2,395 coins per life** (+4,660 XP, +765 coins; credited at the levels
+above, the cap arrives a few minutes sooner, §1.1). Trial sites are on dry ground, outside safe zones and
+structures, ≥ 100 m beyond the boss arenas' engagement radius and ≥ 30 m from any egg part (checked in
+`packages/shared/src/content/gleams.test.ts`).
+
+**Sizing (new):** *T1:* 7 legs of ~57 m = ~400 m; a sprint (9 m/s) takes ~45 s and a run (6 m/s) ~67 s, so
+75 s leaves ~30 s at a sprint for hills, a dodge or a Hopbit in the way and is just doable at a run; a horse
+(16 m/s) takes ~25 s but costs 1,500 coins, about five times what a level-6 life has (§1.4). *T2 / H4:* waves
+are L9 (×1.96 HP, ×1.64 damage): Bonewalker 108 HP (slash 13, overhead 33), Gnawer 74 HP (bite 15, leap 30),
+every hit under the 35% cap (63) of a level-9 player's 180 HP. A level-9 player (×1.24 damage) on a T2 weapon
+does 50–66 DPS on paper (Hexquill II after heat, Sunbrand II, Carbine II after reloads), call it ~35 with
+misses. T2's nine enemies (4 Bonewalkers 432 HP + 5 Gnawers 370 HP = ~800 HP) take ~23 s of shooting in a 90 s
+hold; each wave is two or three enemies and the next comes 20 s later, so a wave cleared in time never stacks,
+and one Small Tonic per wave covers the chip damage. H4's six (4 Bonewalkers + 2 Gnawers, ~580 HP) take ~17 s in
+60 s. *T3:* the shortest nearest-first route over the eight shards is ~520 m (~60 s at a sprint); 240 s leaves
+room for three or four fights with L12–18 Oversight on the open flats. Tests shrink every clock with
+`TRIAL_RULES.timeScale`.
+
+### 5.1 The Three Gleams (the hunt, D-hunt-1, D-hunt-2)
+
+Sela Marchbank (the lamp-keeper of Portus Plaza, on its west side between the pad and the Hall of Firsts) gives the three trials T1–T3 above, in
+any order; the journal and her panel track them. A gleam is won by completing its trial. With all three won
+in one life, E at the **Gleam Vault** beside her pays, once per life: the **Gleamweave Cape** (Legendary cape,
+can't be sold), **600 coins**, the medal **The Three Gleams** (title **Gleamkeeper**, medal 21) and, for the
+first real account ever, the Hall of Firsts line **"The Gleam Vault opens"**. Gleams are life progress (lost
+on rebirth, like missions); medal and Hall line are permanent. Staged copies pay the vault's reward without
+the medal or the Hall line; test and load-test accounts never engrave (D-home-6).
+
+Her lines: "Three gleams of the first light, one on each world. The vault remembers who brings them home."
+(greeting) · "Every world kept one gleam when the light was young. Win all three and the vault in front of me
+opens for you." · "The vault hums when you come near. It can feel what you carry. Bring the rest." · "All
+three. Go on, the vault is listening." · "The vault knows your face now. Win them again in another life and
+it will open again."
 
 ---
 
@@ -690,7 +834,7 @@ since the last rebirth; "account" means cumulative.
 | 3 | Firstlight | progress | Reach level 20 | life | Firstlighter |
 | 4 | Grand Tour | progress | Set foot on Arcadia, Hollowmere and Meridian | life | Wanderer |
 | 5 | Cartographer | progress | Use every fast-travel pad on one planet (12 / 12 / 20) | life | Cartographer |
-| 6 | Errand Runner | progress | Complete all 9 missions | life | Reliable |
+| 6 | Errand Runner | progress | Complete all 9 missions (the original nine, D-hunt-4) | life | Reliable |
 | 7 | Tide Turner | feat | Loot-eligible on a Tidewrath kill | account | Tide Turner |
 | 8 | Regicide | feat | Loot-eligible on a Hollow King kill | account | Regicide |
 | 9 | Decommissioned | feat | Loot-eligible on a Receiver kill | account | Decommissioner |
@@ -705,6 +849,7 @@ since the last rebirth; "account" means cumulative.
 | 18 | Killed by a Woolback | joke | Die to a Woolback buck, or to fall damage within 5 s of a Woolback's knockback | account | Fleeced |
 | 19 | With Friends Like These | joke | Be killed by a member of your current party | account | Trusting |
 | 20 | Own Goal | joke | Die to your own Comet rocket, Scrapburst or Emberglass splash | account | Self-Starter |
+| 21 | The Three Gleams | feat | Win all three trials of the Three Gleams in one life and open the Gleam Vault (§5.1) | life (earned once per account) | Gleamkeeper |
 | H1–H9 | the original 9 egg medals in §6 | hidden | Claim that egg's item | account | same as the medal name |
 | H10 | Tended the Dawn | hidden | Claim the Dewdial Crown | account | Dawn Tender |
 | H11 | Kept the Wicks | hidden | Claim the Wickfloat Mantle | account | Wick Keeper |
@@ -812,6 +957,7 @@ Cosmetics are items: they drop on death (D). Slots are hat, cape, mask and backp
 | Hat | Dewdial Crown | Legendary | egg E10; cannot be sold |
 | Cape | Wickfloat Mantle | Legendary | egg E11; cannot be sold |
 | Mask | Quietshift Lens | Legendary | egg E12; cannot be sold |
+| Cape | Gleamweave Cape | Legendary | the Gleam Vault (§5.1), once per life; cannot be sold |
 
 Planet cosmetic pity is tracked by account, life and cosmetic across travel and copy recreation.
 Counters reset on a server restart or after six hours without an eligible roll for that cosmetic.
@@ -826,6 +972,30 @@ crests, logos or franchise silhouettes from the §8.2 avoid lists.
 
 For the horse (an extra after the core), [r2-04] suggests a later "Sleipnir Saddle" eight-legged horse
 skin, if it is ever wanted.
+
+
+### 8.5 Starter stats (issue #9, D-balance-4; code `packages/shared/src/content/starters.ts`)
+
+A light class layer: each starter changes up to four numbers the server already computes in one place, each within
+about ±12% of the base, one strength paid for by a weakness. The server applies them (max HP; the movement
+budget and the dodge cooldown in `movement.ts`), the client predicts movement from the same row
+(`PlayerController.setStarterMove`), and the pick screen shows the words and Toughness / Speed / Dodge pips.
+The roll itself (4.5 m over 0.3 s, i-frames), jump, swim, horse and fall damage stay shared.
+
+| Starter | Max HP × (L1 / L20) | Run / sprint m/s | Dodge cooldown | Spell power × (lead wires it) | Shown as | Leads (model) |
+|---|---|---|---:|---:|---|---|
+| Base (all before) | 1.00 (100 / 290) | 6 / 9 | 1.2 s | 1.00 | | |
+| Hexwick | 0.90 (90 / 261) | 6 / 9 | 1.1 s | 1.15 | Fragile, Strong magic | magic |
+| Brother Ash | 1.12 (112 / 325) | 5.52 / 8.28 | 1.35 s | 0.90 | Sturdy, Slow | toughness |
+| Kappa | 1.00 (100 / 290) | 6.24 / 9.36 | 1.0 s | 1.00 | Balanced, Best dodge | crowd clear, evasion |
+| Unit 7 | 1.00 (100 / 290) | 6 / 9 | 1.25 s | 0.95 | Steady aim, Slow roll | duels (the reference body; pays with the roll, crowd clear and spell power) |
+| Hinoko | 0.88 (88 / 255) | 6.6 / 9.9 | 1.1 s | 1.05 | Fast, Fragile | mobility |
+
+The calls made for issue #9's open questions (the owner hasn't answered; D-balance-4): (1) max HP, run/sprint
+and dodge cooldown vary (no stamina exists; carry slots, jump and fall damage stay shared); (2) a light layer,
+not hard classes; (3) fixed multipliers, so they grow with the level curve; (4) yes, words plus pips; (5) every
+gain is paid for, and the model checks that no starter is at least as good as another on every stat, that each
+leads at least one role and none leads all, and that no starter duel is more lopsided than 0.6.
 
 ---
 
@@ -902,6 +1072,8 @@ not a trademark search.
 | Cosmetics | Woolly Beanie, Wide Straw Hat, Messenger's Winged Cap, Hard Hat (Oversight Issue), Antler Crown, Heron Plume Hat, Coral Crown, Hollow Crown, Pixel Halo, Candle Crown, Ticket #000 Helmet, Traveller's Cloak, Wolfpelt Cape, Tide Cape, Court Mantle, Saltplate Mantle, Static Cloak, Fox Mask, Voxel Visor, Crowbeak Mask, Funeral Veil, Executive Visor, Bedroll, Woolback Plushie, Wind-Up Key, Signal Dish, Tidewrath Tooth, Receiver Floodlamp, Lantern of Lacefall, Golden Hopbit, Bone Bell; palettes Ivory, Sand, Midnight, Moss, Ember, Dusk | OK. "Hollow Crown" is Shakespeare (public domain) |
 | M11 cosmetics | Bracken Stitch Cap, Dockfold Cape, Petalwake Mask, Fenweave Cape, Copper Orbit Pack, Dewdial Crown, Wickfloat Mantle, Quietshift Lens | Original descriptive names; no §10 franchise names, near-misses or exact game titles identified. Reasoned check only |
 | M11 eggs, medals and titles | The Dewdial, Afloat in the Dark, The Quiet Shift, Tended the Dawn, Kept the Wicks, Off the Clock, Dawn Tender, Wick Keeper, Quietshift | Original or ordinary phrases; no §10 franchise names, near-misses or exact game titles identified. Reasoned check only |
+| The Three Gleams (2026-11-12) | Sela Marchbank, the Three Gleams, the Swift / Steadfast / Patient Gleam, gleam shard, the Gleam Vault, Gleamweave Cape, Gleamkeeper; Kite Season, The Long Vigil, vigil lamp | Original. Deliberately no keys, gates, egg-hunt or scoreboard-book wording from the well-known contest novel and film, and no names from it. Rejected: "Dawnshard" (a published novella), "Vaultwarden" (a software product), "Vance" and "Teague" as surnames (game and film characters), "Merriweather" (a film character). Reasoned check only |
+| Spells (new, 2026-11-12) | Aether; Skipstep, Frostbloom, Wishfall, Glasswing Ward | OK. "Aether" is the old word for the upper air (generic; many games use it as a common noun). "Glasswing" is a real butterfly. Rejected: "Starfall" (a World of Warcraft druid spell and a Warcraft III ability), "Blink" (Dota and Warcraft ability name), "Frost Nova" (Warcraft and Diablo), "Mana" (generic but every other game's word). Reasoned check only |
 
 ---
 

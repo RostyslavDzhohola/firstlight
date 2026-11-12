@@ -38,6 +38,9 @@ Code is MIT (`LICENSE`), our own art CC BY 4.0 (`LICENSE-ART`).
   `packages/shared/src/net/agents.ts` (the flag).
 - `tools/bots` load-test bots; `tools/blender/characters` headless Blender build of the starter GLBs;
   `tools/sfx` ElevenLabs sound-effect generation and processing (writes to `/tmp`, never the repo).
+  `tools/balance` the balance model (D-balance-1): `pnpm balance` prints weapon DPS, PvP and PvE
+  time-to-kill, the XP/coin route and the starter checks from the real catalogues, and exits 1 when a
+  number leaves its band (Vitest project `balance` runs the same checks).
 
 ## Commands
 
@@ -47,6 +50,7 @@ Scripts live in the `package.json` files. The ones you need:
 - `pnpm typecheck`: TypeScript 7 (`tsc`) for shared, server and client. TS 7 only typechecks; it has no compiler API.
 - `pnpm test`: every Vitest project. One file: `pnpm vitest run apps/server/test/combat.test.ts`;
   one project: `pnpm vitest run --project server` (`shared`, `server`, `client`, `agent-kit`, `agent-tools`).
+- `pnpm balance`: the balance report and band checks; run it after changing any game number.
 - `pnpm --filter @firstlight/client build`: production client bundle (no source maps).
 - `pnpm --filter @firstlight/server start`: runs `src/main.ts` directly, like production (`apps/server/Dockerfile`).
 
@@ -79,7 +83,7 @@ file alone before calling it a failure.
   `onGameEvent(room, h)`, one bus per room, throwing handlers are isolated. New event: add an
   interface and a member of the `GameEvent` union. Missions, medals and eggs listen in `quests/QuestSystem.ts`.
 - **Admin commands:** built-ins are the switch in `BodyRoom` (teleport, give, level, coins, heal,
-  unprotect, damage, announce); anything else reaches each system's `onAdmin`. The client console
+  unprotect, damage, announce); anything else reaches each system's `onAdmin` (`spells`: full aether, no cooldowns). The client console
   and its help line are in `apps/client/src/ui/panels.ts`.
 - **Client systems** (`apps/client/src/game/systems.ts`): `CLIENT_SYSTEMS.push(factory)`; set
   `factory.offline = true` to also run without a server (`?offline`, `?bench`).

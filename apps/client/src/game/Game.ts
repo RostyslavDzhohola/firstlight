@@ -1,5 +1,7 @@
 import { cosmeticWarmupHook } from "../render/Cosmetics.ts";
+import { trialWarmupHook } from "../world/TrialMarkers.ts";
 import { listenHuntTargets } from "./huntTargets.ts";
+import { listenTrials } from "./trialState.ts";
 // Game orchestration: renderer, current body, local player, network, remote avatars, combat,
 // portals, piles, HUD and the main loop.
 
@@ -8,7 +10,12 @@ import { BODIES, CAMERA_SOLID_KINDS, natureSolids, padDirs, type BodyId, type Na
 import { config, flags } from "../config.ts";
 import { Net, TravelRedirect, type Snapshot } from "../net/Net.ts";
 import { AvatarView, avatarWarmupHook, preloadAvatars } from "../render/Avatars.ts";
+import { rezSwitch } from "../render/rez.ts";
+import { skyLifeFor, type SkyLife } from "../render/skyLife.ts";
+import { BODY_TONE, setTone } from "../render/post.ts";
 import { avatarTexturesFollowTier, setAvatarTextureLowRes } from "../render/avatars/assets.ts";
+import type { ArtPacks } from "../render/artpacks/ArtPacks.ts";
+import { createArtPacks } from "../render/artpacks/env.ts";
 import { webgpuSecondChance } from "../render/rendererStart.ts";
 import { WORLD_READY_CAP_MS, WORLD_TOPUP_CAP_MS, worldReady, type WorldReadiness } from "./worldReady.ts";
 import { HorseView, horseWarmupHook, preloadHorse } from "../render/Horses.ts";
@@ -28,7 +35,7 @@ import { Menu } from "../ui/menu.ts";
 import { coversWorld } from "../ui/pauseFlow.ts";
 import { bindUi } from "../ui/bind.ts";
 import { pickDisplayName } from "../ui/account.ts";
-import { hideLoading, loadingFrac, setLoading, setLoadingBadge, stepProgress, WARMUP_FROM, warmupProgress } from "../ui/loading.ts";
+import { hideLoading, loadingFrac, setLoading, setLoadingBadge, stepProgress, WARMUP_FROM, WEBGL2_FALLBACK_LINE, WEBGPU_SLOW_LINE, warmupProgress } from "../ui/loading.ts";
 import { getAccountInfo, invalidatePlayToken, isDevGuest } from "../net/auth.ts";
 import { PilesView } from "../world/PilesView.ts";
 import { breakablesLayoutPending } from "../world/Breakables.ts";
@@ -44,6 +51,8 @@ import { Input } from "./input.ts";
 import { HOTKEYS } from "./keys.ts";
 import { PhotoMode } from "./PhotoMode.ts";
 import { PlayerController } from "./PlayerController.ts";
+import { FRAME_MAX_RIDE_S, FRAME_MAX_S, frameClock } from "./frameClock.ts";
+import { bothSolids, stepOut } from "./stepOut.ts";
 import { CLIENT_SYSTEMS, type ClientSystem } from "./systems.ts";
 import { installSocial, partyRoomOn, removedFromWorld } from "../social/index.ts";
 import { goHome } from "../home/leave.ts";
@@ -64,6 +73,10 @@ export class Game {
   input!: Input;
   readonly net = new Net();
   readonly avatars = new Map<string, AvatarView>();
+  /** Players who left: their avatars de-rez (render/rez.ts) for a moment, then go. */
+  private readonly leaving = new Set<AvatarView>();
+  /** Traffic between the sky planets, shooting stars, the aurora (render/skyLife.ts). */
+  private skyLife: SkyLife | null = null;
   self!: AvatarView;
   perf!: PerfOverlay;
   particles!: ParticleSystem;
@@ -71,6 +84,8 @@ export class Game {
   env!: Environment;
   blobs!: BlobShadows;
   bench: Bench | null = null;
+  /** HD art packs after arrival (render/artpacks, D-artpacks): paused behind every loading screen. */
+  packs!: ArtPacks;
   photo!: PhotoMode;
   combat!: CombatClient;
   audio!: GameAudio;
@@ -117,11 +132,15 @@ export class Game {
     setLoading("Starting the renderer…", 0.05);
     const container = document.getElementById("game")!;
     try {
-      this.ctx = await createRenderer(container);
+      // A slow WebGPU start says so in plain words; it has 20 s before WebGL2 takes over (D-showcase-1).
+      this.ctx = await createRenderer(container, {
+        onStage: (s) => setLoading(s === "webgpu-slow" ? WEBGPU_SLOW_LINE : WEBGL2_FALLBACK_LINE, 0.05),
+      });
     } catch (e) {
       throw new RendererUnavailable(e); // nothing was attached yet: a retry starts clean
     }
     installShaderMonitor(this.ctx);
+    this.packs = createArtPacks(this.ctx.renderer);
     setAvatarTextureLowRes(this.ctx.tier === "low"); // 512² character textures on Low
     void preloadAvatars(); // character GLBs stream in while we connect and build the world
     void preloadHorse(); // 147 KB: horses are in the warm-up, so they never compile mid-game
@@ -163,6 +182,9 @@ export class Game {
       this.particles.applySettings(this.ctx.settings);
       this.blobs.applySettings(this.ctx.settings);
       this.applyCharsVisibility();
+      rezSwitch.on = this.ctx.settings.on.rez;
+      this.portals?.applySettings(this.ctx.settings);
+      this.skyLife?.applySettings(this.ctx.settings);
     };
     applyFx();
     this.ctx.onChange(applyFx);
@@ -441,11 +463,14 @@ export class Game {
 
   async enterBody(body: BodyId, choice?: { starter: number; palette: number; look?: number }): Promise<void> {
     setLoading(`Travelling to ${body[0]!.toUpperCase()}${body.slice(1)}…`, 0.15);
+    this.packs.pause(); // the arrival's own downloads first; HD packs resume after the hand-over
     await this.net.leave();
     for (const s of this.systems) s.dispose();
     this.systems = [];
     for (const a of this.avatars.values()) a.dispose();
     this.avatars.clear();
+    for (const a of this.leaving) a.dispose();
+    this.leaving.clear();
     this.portals?.dispose();
     this.piles?.dispose();
     this.planet?.dispose();
@@ -459,12 +484,21 @@ export class Game {
     // and so do its natural solids (trunks, boulders, spires, big rocks: D-solid-1).
     this.player.setStructures(this.planet.town?.moveColliders ?? null);
     const nature = (this.nature = natureSolids(this.planet.terrain));
+    const terrain = this.planet.terrain;
+    const groundR = (x: number, y: number, z: number) => terrain.body.radius + terrain.groundHeight(x, y, z);
+    const pocketSolids = this.planet.town ? bothSolids(this.planet.town.collider, nature) : nature;
     this.player.setNature({
       resolve: (pos, out) => nature.resolve(pos, out),
       raycast: (o, d, maxT) => nature.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT),
       cameraRay: (o, d, maxT) => nature.raycast(o.x, o.y, o.z, d.x, d.y, d.z, maxT, CAMERA_SOLID_KINDS),
+      // Out of a pocket of the structures and the natural solids together, as the server checks moves (#34).
+      stepOut: (pos) => stepOut(pocketSolids, groundR, pos),
     });
     this.portals = new Portals(this.ctx.scene, body, this.planet.terrain);
+    this.portals.applySettings(this.ctx.settings);
+    setTone(BODY_TONE[body]); // the body's filmic curve and split toning, over its grade (render/post.ts)
+    this.skyLife = skyLifeFor(this.ctx.scene, this.planet.look.skyPlanets, body);
+    this.skyLife.applySettings(this.ctx.settings);
     this.audio.setMusic(body);
     this.piles = new PilesView(this.ctx.scene);
 
@@ -502,6 +536,7 @@ export class Game {
       localStorage.setItem("fl.body", body);
       this.combat.attach();
       listenHuntTargets(room); // before anything else can arrive unheard (huntTargets.ts)
+      listenTrials(room); // the same for race / defend / collect attempts (trialState.ts)
       const me = await waitFor(() => (room.state as any).players?.get(room.sessionId), { stage: "waiting for our player", timeoutMs: 15_000, watch: w });
       this.player.teleport(me.x, me.y, me.z);
       this.net.onCorrect = (x, y, z) => this.player.correct(x, y, z);
@@ -539,6 +574,7 @@ export class Game {
       this.self.root.name = "selfAvatar";
       this.self.root.userData.ownAvatar = true; // dissolves with the camera close to it (D-view-5)
     }
+    if (rezSwitch.on) this.self.prepareRez(); // its rez light is drawn (dark) by the warm-up below
     this.ctx.scene.add(this.self.root);
     {
       const p = this.player.pos, f = this.player.facing;
@@ -559,7 +595,7 @@ export class Game {
       try {
         const r = await runProbe(this.ctx, updateWorld, (f) => setLoading(tuningLine, tuning.at(f)));
         console.info(`[gfx] probe → ${r.tier}${r.valid ? "" : " (not saved)"}`, r);
-        this.ctx.setProbedTier(r.tier, { persist: r.valid });
+        this.ctx.setProbedTier(r.tier, { persist: r.valid, extras: r.extras });
       } catch (e) {
         console.warn("[gfx] probe failed, staying on medium", e);
         this.ctx.setProbedTier("medium", { persist: false });
@@ -568,6 +604,8 @@ export class Game {
     }
     // The probe (or a tier change made while travelling) can lift a session that started on Low (D-load-6).
     await avatarTexturesFollowTier(this.ctx.tier);
+    // A tier that doesn't take a live HD pack gets the shipped textures back before the warm-up uploads them.
+    this.packs.setTier(this.ctx.tier);
     // The bench crowd exists before warm-up so its shaders compile behind the loading screen.
     const benchCfg = benchConfig();
     if (benchCfg && !this.bench) {
@@ -579,6 +617,7 @@ export class Game {
         spawn,
         stats: () => this.planet.stats(),
         body: this.bodyId,
+        packs: () => this.packs.state(),
       }, benchCfg);
       this.player.frozen = true;
       this.applyCharsVisibility();
@@ -606,6 +645,13 @@ export class Game {
     // Hand-over: from here a close is a mid-game disconnect (no await until the caller resumes play).
     if (watch) this.net.onLeaveRoom = (code) => this.onRoomClosed(code);
     hideLoading();
+    // The player materialises as the world appears (render/rez.ts); a portal they stand by answers.
+    if (!this.bench) {
+      this.self.rez("in");
+      this.portals?.pulseNear(this.player.pos);
+    }
+    // HD art packs download in play: after a short delay and the site download, if it is still running (D-artpacks).
+    this.packs.resume({ after: this.planet.town?.settled });
   }
 
   /**
@@ -642,6 +688,7 @@ export class Game {
     const cosmetics = cosmeticWarmupHook(this.ctx.scene, () => this.player.pos);
     const avatars = avatarWarmupHook(this.ctx.scene, () => this.player.pos);
     const horses = horseWarmupHook(this.ctx.scene, () => this.player.pos); // the six coat materials
+    const trials = trialWarmupHook(this.ctx.scene, () => this.player.pos); // race rings, beacons, shards
     return {
       forceAll: (on: boolean) => {
         this.planet.props.setForceAll(on);
@@ -649,6 +696,7 @@ export class Game {
         avatars.forceAll(on);
         cosmetics.forceAll(on);
         horses.forceAll(on);
+        trials.forceAll(on);
       },
     };
   }
@@ -661,9 +709,11 @@ export class Game {
     this.rewarming = true;
     setLoading("Applying graphics settings…", 0.5);
     this.swapInLateSite();
+    this.packs.pause();
     const shaders = warmupProgress(0.5);
     try {
       await avatarTexturesFollowTier(this.ctx.tier); // a session that started on Low: 1024² now (D-load-6)
+      this.packs.setTier(this.ctx.tier); // a tier without a live pack: the shipped textures, before the warm-up
       await warmup(this.ctx, {
         frames: 3,
         hooks: [this.warmupHook()],
@@ -678,6 +728,7 @@ export class Game {
       hideLoading();
       this.running = true;
       this.last = performance.now();
+      this.packs.resume({ after: this.planet.town?.settled });
       this.endRewarm();
     }
   }
@@ -692,6 +743,7 @@ export class Game {
     this.env.update(1 / 60);
     this.planet.update(f.x, f.y, f.z, this.ctx.camera, performance.now());
     this.env.afterCamera(this.ctx.camera, 1 / 60);
+    this.skyLife?.update(this.ctx.camera);
     this.particles.update(1 / 60, this.ctx.camera.position, performance.now());
   }
 
@@ -703,13 +755,15 @@ export class Game {
     const tuningLine = "Tuning graphics for this computer…";
     setLoading(tuningLine, 0.5);
     this.swapInLateSite();
+    this.packs.pause();
     const tuning = stepProgress(0.5, 0.75);
     const shaders = warmupProgress(0.75);
     try {
       const r = await runProbe(this.ctx, undefined, (f) => setLoading(tuningLine, tuning.at(f)));
       console.info(`[gfx] probe → ${r.tier}${r.valid ? "" : " (not saved)"}`, r);
-      this.ctx.setProbedTier(r.tier, { persist: r.valid, clearPinned: true });
+      this.ctx.setProbedTier(r.tier, { persist: r.valid, clearPinned: true, extras: r.extras });
       await avatarTexturesFollowTier(this.ctx.tier); // D-load-6
+      this.packs.setTier(this.ctx.tier);
       await warmup(this.ctx, {
         frames: 3,
         hooks: [this.warmupHook()],
@@ -723,6 +777,7 @@ export class Game {
       hideLoading();
       this.running = true;
       this.last = performance.now();
+      this.packs.resume({ after: this.planet.town?.settled });
       this.endRewarm();
     }
   }
@@ -737,7 +792,8 @@ export class Game {
   private frame() {
     const now = performance.now();
     const rawMs = now - this.last;
-    const dt = Math.min(0.05, rawMs / 1000);
+    // A slow frame advances in full up to 250 ms (200 ms riding), in ≤ 50 ms movement steps: 4 fps keeps real time (#33).
+    const { dt } = frameClock(rawMs, this.player?.mounted ? FRAME_MAX_RIDE_S : FRAME_MAX_S);
     this.last = now;
     if (!this.running || this.travelling) {
       // Presses made behind a loading screen are dropped, not kept for the first frame back (a C
@@ -784,13 +840,28 @@ export class Game {
         a.root.visible = this.ctx.settings.on.chars;
         this.avatars.set(id, a);
         this.ctx.scene.add(a.root);
+        // Someone arrived: they materialise, and the portal they came through (if any) pulses.
+        a.set(s.x, s.y, s.z, s.fx, s.fy, s.fz, s.anim, 0);
+        a.rez("in");
+        this.portals?.pulseNear(a.root.position);
       }
       a.set(s.x, s.y, s.z, s.fx, s.fy, s.fz, s.anim, dt);
     }
     for (const [id, a] of this.avatars) {
       if (!this.net.remotes.has(id)) {
-        a.dispose();
+        // Gone (left, or through a portal): the avatar de-rezzes where it stood, then is freed.
         this.avatars.delete(id);
+        this.portals?.pulseNear(a.root.position);
+        if (rezSwitch.on && a.root.visible) {
+          a.rez("out");
+          this.leaving.add(a);
+        } else a.dispose();
+      }
+    }
+    for (const a of this.leaving) {
+      if (a.stepRez(dt)) {
+        a.dispose();
+        this.leaving.delete(a);
       }
     }
 
@@ -821,6 +892,7 @@ export class Game {
     this.audio.updateListener(this.ctx.camera);
     if (FX_DEMO && now >= this.nextFxDemo) this.fxDemo(now, focus);
     this.env.afterCamera(this.ctx.camera, dt);
+    this.skyLife?.update(this.ctx.camera);
     this.particles.update(dt, this.ctx.camera.position, now);
     if (this.ctx.settings.on.chars) {
       this.blobs.begin();
@@ -831,6 +903,7 @@ export class Game {
       this.blobs.end();
     }
     if (this.input.hit(HOTKEYS.perf)) this.perf.toggle();
+    this.packs.frame(); // an HD pack's next upload slice, or its swap (one per frame)
     this.ctx.render();
     let cpuMs = performance.now() - cpu0;
     if (CPU_SLOW > 1) {
@@ -841,7 +914,7 @@ export class Game {
       cpuMs *= CPU_SLOW;
     }
     this.ctx.afterFrame(now, rawMs);
-    this.bench?.record(rawMs);
+    this.bench?.record(rawMs, cpuMs);
     shaderMonitorFrame();
     const x = this.perfExtras;
     x.cpuMs = cpuMs;

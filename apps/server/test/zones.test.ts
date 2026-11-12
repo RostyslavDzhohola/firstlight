@@ -9,6 +9,7 @@ import { siteAnchor, siteDir, townDir } from "@firstlight/shared/planet/townFram
 import { OUTPOSTS, type OutpostBody } from "@firstlight/shared/content/padOutposts";
 import { NF, NPC_DEFS, NPC_RULES } from "@firstlight/shared/content/npcs";
 import { STARTERS, WEAPON_BY_ID, WEAPON_INDEX } from "@firstlight/shared/content/weapons";
+import { starterMaxHp } from "@firstlight/shared/content/starters";
 import { PF } from "@firstlight/shared/net/schema";
 import type { Game } from "../src/app.ts";
 import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
@@ -260,7 +261,7 @@ describe("Portus after the deploy (D-zones-1)", () => {
     await waitFor(() => patches >= 3); // server ticks have set the flags for where they stand
     expect(me(r).flags & PF.SAFE).toBeFalsy();
     expect(me(r).flags & PF.PROTECTED).toBeTruthy(); // 5 s to get bearings before anything can hurt them
-    expect(me(r).hp).toBe(100);
+    expect(me(r).hp).toBe(starterMaxHp(0, 1)); // Hexwick's full HP (D-balance-4)
   });
 
   it("a death outside the walls leaves a Portus pile that persists and shows after rebirth in town", async () => {

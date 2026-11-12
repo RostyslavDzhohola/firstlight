@@ -148,7 +148,7 @@ describe("admin mode in the real world", () => {
 
   it("movement limits ignore switches without a sandbox, and on a non-admin even in one", () => {
     const sandbox = { switches: { fly: true, god: true, speed: true } } as unknown as Sandbox;
-    const actor = { identity: { admin: false }, sandbox, ...motionFields(BODIES.arcadia.radius, 0) } as unknown as PlayerActor;
+    const actor = { identity: { admin: false }, sandbox, char: { starter: 3 }, ...motionFields(BODIES.arcadia.radius, 0) } as unknown as PlayerActor;
     expect(moveLimits(actor, 0)).not.toHaveProperty("fly");
     expect(moveLimits(actor, 0)).not.toHaveProperty("boost");
     actor.identity.admin = true;

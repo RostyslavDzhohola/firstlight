@@ -3,7 +3,7 @@ import { ANIM } from "@firstlight/shared/net/schema";
 import { activeSteps, ALL_STEPS, OnboardingSteps, STEPS, type Sample, type StepId } from "./onboardingSteps.ts";
 
 const s = (over: Partial<Sample> = {}): Sample => ({
-  dt: 1 / 60, moved: 0, lookRad: 0, anim: ANIM.IDLE, dummiesDown: 0, pressed: new Set(), phrased: false, voiceOn: false, inPortal: false, ...over,
+  dt: 1 / 60, moved: 0, lookRad: 0, anim: ANIM.IDLE, dummiesDown: 0, pressed: new Set(), mapOpen: false, phrased: false, voiceOn: false, inPortal: false, ...over,
 });
 const keys = (...codes: string[]) => s({ pressed: new Set(codes) });
 const FIRST: StepId[] = ["move", "look", "jump", "sprint", "dodge"];
@@ -88,7 +88,10 @@ describe("onboarding steps", () => {
     expect(o.isDone("switch")).toBe(false);
     expect(o.observe(keys("Digit1"))).toEqual(["switch"]);
     expect(o.observe(keys("KeyE"))).toEqual(["pickup"]);
-    expect(o.observe(keys("KeyM"))).toEqual(["map"]);
+    // M alone (pressed under the pause menu, say) isn't enough: the map has to open (#35).
+    o.observe(keys("KeyM"));
+    expect(o.isDone("map")).toBe(false);
+    expect(o.observe(s({ mapOpen: true }))).toEqual(["map"]);
     o.observe(keys("KeyG")); // opening the wheel isn't enough
     expect(o.isDone("wheel")).toBe(false);
     expect(o.observe(s({ phrased: true }))).toEqual(["wheel"]);

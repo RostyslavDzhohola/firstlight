@@ -2,13 +2,16 @@
 import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
-import { abs, attribute, cameraViewMatrix, cross, dot, float, normalize, materialColor, mix, normalView, positionGeometry, positionLocal, positionViewDirection, positionWorld, renderGroup, select, sin, texture, time, uniform, vec3, vec4 } from "three/tsl";
+import { abs, attribute, cameraViewMatrix, cross, dot, float, fract, normalWorld, normalize, materialColor, mix, normalView, positionGeometry, positionLocal, positionViewDirection, positionWorld, renderGroup, select, sin, texture, time, uniform, vec3, vec4 } from "three/tsl";
 import { BODY_IDS, PROP_KINDS, type BodyId, type PropKind } from "@firstlight/shared";
 import { vegetationModels } from "./vegetationModels.ts";
 import { config } from "../config.ts";
 import { atmo } from "./atmosphere.ts";
 import { PROP_PALETTES } from "./propGeometry.ts";
 import { applyOccluderFade } from "./occluderFade.ts";
+import type { TextureSlot } from "./artpacks/ArtPacks.ts";
+import { mossy } from "./meadow.ts";
+import { groundUniforms } from "./terrainMaterial.ts";
 
 export interface VegetationAssets {
   geometry: Map<string, THREE.BufferGeometry>;
@@ -16,9 +19,10 @@ export interface VegetationAssets {
   impostors?: THREE.Texture;
 }
 let promise: Promise<VegetationAssets | null> | null = null;
+let loaded: VegetationAssets | null = null;
 
 export function preloadVegetation(): Promise<VegetationAssets | null> {
-  return promise ??= load().catch((err: unknown) => {
+  return promise ??= load().then((a) => (loaded = a)).catch((err: unknown) => {
     console.warn("[vegetation] assets failed to load; using procedural props", err);
     return null;
   });
@@ -158,6 +162,39 @@ export function vegetationPaletteBody(): BodyId | null {
 }
 
 const materials = new Map<string, THREE.MeshStandardNodeMaterial>();
+
+type TextureNode = ReturnType<typeof texture>;
+/**
+ * Per shipped atlas: what the vegetation materials draw for it now, their texture nodes and the
+ * materials (`map`). An HD art pack (render/artpacks, D-artpacks) rebinds the near-mesh atlas in every
+ * material made from it; materials made later draw what it is bound to.
+ */
+const atlases = new Map<THREE.Texture, { current: THREE.Texture; nodes: TextureNode[]; materials: THREE.MeshStandardNodeMaterial[] }>();
+function atlasBinding(base: THREE.Texture) {
+  let b = atlases.get(base);
+  if (!b) atlases.set(base, (b = { current: base, nodes: [], materials: [] }));
+  return b;
+}
+
+/** The slot of a shipped atlas: rebinding it (same type, format and sampler) changes no program. */
+export function vegetationAtlasSlot(base: THREE.Texture): TextureSlot {
+  const b = atlasBinding(base);
+  return {
+    get texture() {
+      return b.current;
+    },
+    set(t: THREE.Texture) {
+      b.current = t;
+      for (const n of b.nodes) n.value = t;
+      for (const m of b.materials) m.map = t;
+    },
+  };
+}
+
+/** The loaded assets (null before they land or after a failure), for the HD pack's slot. */
+export function loadedVegetation(): VegetationAssets | null {
+  return loaded;
+}
 /** One opaque alpha-tested atlas material per kind (and near/far), shared by every body: the body's
  * colours come from applyVegetationPalette. The color attribute is a role mask, not vertex colour:
  * r foliage, g bark, b stone, black flower/mushroom paint. */
@@ -166,9 +203,12 @@ export function vegetationMaterial(kind: PropKind, atlas: THREE.Texture, imposto
   let m = materials.get(key);
   if (m) return m;
   const t = tintsFor(kind);
-  m = new THREE.MeshStandardNodeMaterial({ map: atlas, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.86, metalness: 0 });
+  const bound = atlasBinding(atlas);
+  m = new THREE.MeshStandardNodeMaterial({ map: bound.current, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.86, metalness: 0 });
   m.name = `vegetation:${key}`;
-  const sample = texture(atlas);
+  const sample = texture(bound.current);
+  bound.nodes.push(sample);
+  bound.materials.push(m);
   // Impostor foliage was baked neutral grey, while bark retains its source paint. This gives
   // a pixel-level role mask without downloading a third atlas. Dead trees are entirely bark.
   const neutral = abs(sample.r.sub(sample.g)).add(abs(sample.g.sub(sample.b))).lessThan(0.025);
@@ -179,7 +219,17 @@ export function vegetationMaterial(kind: PropKind, atlas: THREE.Texture, imposto
   const leaf = impostor ? t.leaf.mul(IMPOSTOR_FOLIAGE) : t.leaf;
   const tint = leaf.mul(role.r).add(t.bark.mul(role.g)).add(t.stone.mul(role.b))
     .add(vec3(1).mul(float(1).sub(role.r.add(role.g).add(role.b))));
-  m.colorNode = sample.rgb.mul(tint).mul(mix(float(1), float(0.78), atmo.wet));
+  const sways = !["rock", "boulder", "mushroom"].includes(kind);
+  // Each plant its own shade (D-gfx-worlds-1): the instance's wind phase doubles as a colour seed, so
+  // a stand of trees isn't one flat green, and the near mesh and its far card stay the same shade.
+  const shade = sways ? float(0.84).add(fract(attribute("iWind", "float").mul(3.71)).mul(0.3)) : float(1);
+  const painted = sample.rgb.mul(tint).mul(mix(float(1), shade, role.r));
+  // Moss on the sky-facing tops of rocks, where the planet grows any (worldLooks.ts ground.moss).
+  const rocky = !impostor && (kind === "rock" || kind === "boulder");
+  const base = rocky
+    ? mossy(painted, groundUniforms.mossColor, groundUniforms.moss, dot(normalize(normalWorld), normalize(positionWorld)), sample.g.add(sample.r).mul(0.5))
+    : painted;
+  m.colorNode = base.mul(mix(float(1), float(0.78), atmo.wet));
   m.opacityNode = sample.a;
   m.roughnessNode = mix(float(0.86), float(0.4), atmo.wet);
   // Foliage is lit as a canopy facing the sky. Leaf cards' own normals flip on back faces, which
@@ -191,7 +241,7 @@ export function vegetationMaterial(kind: PropKind, atlas: THREE.Texture, imposto
   const towardViewer = normalize(positionViewDirection.sub(upView.mul(dot(positionViewDirection, upView))).add(upView.mul(0.1)));
   if (impostor) m.normalNode = normalize(mix(towardViewer, upView, role.r));
   else if (!["rock", "boulder", "mushroom", "deadtree"].includes(kind)) m.normalNode = normalize(mix(normalView, upView, role.r.mul(NEAR_FOLIAGE_UP)));
-  if (!["rock", "boulder", "mushroom"].includes(kind)) {
+  if (sways) {
     // No compute/storage buffers: attribute + time works on WebGPU and WebGL2.
     // Roots stay still; each instance carries its packed yaw seed through LOD changes.
     const weight = positionGeometry.y.mul(0.16).clamp(0, 1).pow(2);

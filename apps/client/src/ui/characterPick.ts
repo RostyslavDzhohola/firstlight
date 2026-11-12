@@ -11,6 +11,7 @@ import { button, el, icon, isolateKeys, overlayClosed, overlayOpened, sprite, ui
 import { config } from "../config.ts";
 import { weaponChips } from "./hudFormat.ts";
 import { installSprites, itemSprite, portraitSprite } from "./sprites.ts";
+import { PIPS, starterPickStats } from "./starterStats.ts";
 
 export interface CharacterPickOptions {
   /** Old call form: a custom heading. */
@@ -143,6 +144,16 @@ export function showCharacterPick(opts: CharacterPickOptions = {}): Promise<Char
     const wName = el("b", "", wText);
     const wLine = el("span", "", wText);
     const chips = el("div", "fl-charpick__stats", wcard);
+    // The starter's body (content/starters.ts): plain words and Toughness / Speed / Dodge pips.
+    const body = el("div", "fl-charpick__body", ident);
+    body.setAttribute("aria-label", "Starter stats");
+    const traitRow = el("div", "fl-charpick__traits", body);
+    const barRows = ["Toughness", "Speed", "Dodge"].map((label) => {
+      const row = el("div", "fl-charpick__bar", body);
+      el("span", "fl-charpick__barlabel", row, label);
+      const pips = el("span", "fl-charpick__pips", row);
+      return { row, cells: Array.from({ length: PIPS }, () => el("i", "", pips)) };
+    });
 
     // ---- look, palette, name, play
     const cfg = el("aside", "fl-charpick__config fl-panel", cols);
@@ -285,6 +296,13 @@ export function showCharacterPick(opts: CharacterPickOptions = {}): Promise<Char
       wName.textContent = `${def.name} I`;
       wLine.textContent = STARTER_COPY[starter]!.weapon;
       chips.replaceChildren(...weaponChips(def).map((c) => el("span", "fl-chip", undefined, c)));
+      const stats = starterPickStats(starter);
+      traitRow.replaceChildren(...stats.traits.map((t) => el("span", "fl-chip", undefined, t)));
+      stats.bars.forEach((b, i) => {
+        const r = barRows[i]!;
+        r.row.setAttribute("aria-label", `${b.label} ${b.pips} of ${PIPS}`);
+        r.cells.forEach((c, k) => c.classList.toggle("is-on", k < b.pips));
+      });
       play.textContent = rebirth ? "Rise in Portus" : `Play as ${STARTERS[starter]!.name}`;
     }
 

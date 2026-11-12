@@ -24,7 +24,7 @@ describe("QuestWorld NPCs", () => {
       const world = new QuestWorld(new THREE.Scene(), body, createTerrain(body));
       world.update(0.016, { activeMissions: new Set(), cosmeticsExtras: true });
       const npcs = world.props.filter((p) => p.npc);
-      expect(npcs.map((p) => p.def.look).sort(), body).toEqual(body === "portus" ? ["keeper"] : ["guide", "keeper"]);
+      expect(npcs.map((p) => p.def.look).sort(), body).toEqual(body === "portus" ? ["curator", "keeper"] : ["guide", "keeper"]); // Portus: Juno Vale and Sela Marchbank
       for (const p of npcs) {
         const at = p.npc!.root.getWorldPosition(new THREE.Vector3());
         expect(at.distanceTo(p.pos), `${p.def.id} avatar`).toBeLessThan(0.5);
@@ -105,7 +105,7 @@ describe("QuestWorld near the camera (#22)", () => {
       scene.updateMatrixWorld(true);
       const labels: THREE.Sprite[] = [];
       world.group.traverse((o) => { if ((o as THREE.Sprite).isSprite) labels.push(o as THREE.Sprite); });
-      expect(labels.length, "the keeper's and the guide's labels").toBe(body === "portus" ? 1 : 2);
+      expect(labels.length, "the keeper's and the guide's labels (Portus: Juno's, Sela's and the Gleam Vault's)").toBe(body === "portus" ? 3 : 2);
       for (const l of labels) {
         expect(hasLabelFade(l.material), "the label's material fades").toBe(true);
         // The camera coming straight at the label, 1.4 m and then 2.6 m short of it.

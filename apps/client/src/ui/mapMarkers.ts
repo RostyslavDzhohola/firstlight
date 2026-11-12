@@ -74,6 +74,8 @@ export function staticMarkers(body: BodyId, terrain: Terrain): MapMarker[] {
     const hall = WORLD_OBJECT_BY_ID.get("hall_wall");
     if (juno) out.push({ id: "shop:juno", kind: "shop", dir: objectDir(juno), label: "Portus Exchange", priority: 2 });
     if (hall) out.push({ id: "shop:hall", kind: "shop", dir: objectDir(hall), label: "Hall of Firsts", priority: 2 });
+    const sela = WORLD_OBJECT_BY_ID.get("curator_sela");
+    if (sela) out.push({ id: "guide:curator_sela", kind: "guide", dir: objectDir(sela), label: "Sela Marchbank · the Three Gleams", priority: 2 });
     for (const [name, e, n] of PORTUS_SPOTS) out.push({ id: `town:${name}`, kind: "town", dir: townDir(e, n, def.radius), label: name, priority: 1 });
   }
   for (const s of portalSpots(def, terrain)) {
@@ -83,12 +85,24 @@ export function staticMarkers(body: BodyId, terrain: Terrain): MapMarker[] {
 }
 
 /** Where each active mission on this body points (the mission tracker's targets). */
-export function missionTargets(body: BodyId, missions: readonly { id: string; done?: boolean }[]): { id: string; dir: V3; label: string }[] {
+export function missionTargets(body: BodyId, missions: readonly { id: string; done?: boolean; counts?: readonly number[] }[]): { id: string; dir: V3; label: string }[] {
   const out: { id: string; dir: V3; label: string }[] = [];
   for (const m of missions) {
     if (m.done) continue;
     const md = MISSION_BY_ID.get(m.id as never);
     if (!md || md.body !== body) continue;
+    // Race: the first ring (where the clock starts); defend: the beacon; collect: the middle of the
+    // pieces still out there (the mission pointer leads to the nearest one).
+    const trialAt = md.race ? md.race.rings[0] : md.defend ? md.defend.beacon : null;
+    if (trialAt || md.collect) {
+      const ids = trialAt ? [trialAt] : md.collect!.pieces.filter((_, i) => !m.counts?.[i]);
+      const dirs = ids.map((id) => WORLD_OBJECT_BY_ID.get(id)).filter((o) => !!o).map((o) => objectDir(o!));
+      if (!dirs.length) continue;
+      const sum = dirs.reduce((s, d) => [s[0] + d[0], s[1] + d[1], s[2] + d[2]] as V3, [0, 0, 0] as V3);
+      const l = Math.hypot(sum[0], sum[1], sum[2]) || 1;
+      out.push({ id: md.id, dir: [sum[0] / l, sum[1] / l, sum[2] / l], label: md.collect ? `${md.name} (${ids.length} left)` : md.name });
+      continue;
+    }
     const obj = md.find ? WORLD_OBJECT_BY_ID.get(md.find.object) : undefined;
     const dir = md.reach ? placeDir(md.reach.place) : obj ? objectDir(obj) : md.hunt?.place ? placeDir(md.hunt.place) : null;
     if (dir) out.push({ id: md.id, dir, label: md.name });

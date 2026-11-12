@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BODIES, isSafe, padDirs, type BodyId } from "@firstlight/shared";
 import { MEDAL_RULES } from "@firstlight/shared/content/medals";
-import { missionsOn } from "@firstlight/shared/content/missions";
+import { ERRAND_MISSIONS, missionsOn } from "@firstlight/shared/content/missions";
 import { offsetDir, placeDir } from "@firstlight/shared/content/places";
 import { rayTerrain } from "../src/world/geometry.ts";
 import { WEAPON_INDEX } from "@firstlight/shared/content/weapons";
@@ -135,7 +135,7 @@ const quests = (b: Bot) => serverRoom(b).systems.find((s) => "eggs" in s) as Que
 
 async function runPlanetMissions(b: Bot, body: Exclude<BodyId, "portus">) {
   await tpAndWait(b, objAt(`guide_${body}`));
-  const defs = missionsOn(body);
+  const defs = missionsOn(body).filter((d) => ERRAND_MISSIONS.includes(d.id)); // the later ones: trials.test.ts
   for (const d of defs) b.send("mission", { action: "accept", id: d.id });
   await until(`${body} accepted`, () => defs.every((d) => mission(b, d.id)), 8000);
   await sleep(300); // one quest tick at the guide arms the reach mission (players walk from here)
@@ -162,7 +162,7 @@ describe("all nine missions", () => {
     for (const body of ["arcadia", "hollowmere", "meridian"] as const) {
       const b = await bot("courier", body);
       await runPlanetMissions(b, body);
-      coins += missionsOn(body).reduce((s, d) => s + d.reward.coins, 0);
+      coins += missionsOn(body).filter((d) => ERRAND_MISSIONS.includes(d.id)).reduce((s, d) => s + d.reward.coins, 0);
       expect(b.you.coins).toBe(coins);
       if (body === "meridian") {
         await until("errand runner", () => b.you.medals.includes("errand_runner"), 8000);

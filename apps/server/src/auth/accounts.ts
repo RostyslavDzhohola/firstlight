@@ -23,11 +23,12 @@ import { stmt } from "../db/game-db.ts";
 import { authOptions, authRequestState, buildAuth, OTP_MIN_LEVEL, OTP_PER_ACCOUNT_PER_DAY, OTP_PUBLIC_PER_IP_PER_DAY, OTP_PUBLIC_SHARE, type FirstlightAuth } from "./better-auth.ts";
 import { hmacHex, safeEqual } from "./crypto.ts";
 import type { Identity, TokenVerifier, VerifyContext } from "./identity.ts";
-import { banKey, CLIENT_IP_HEADER, firstForwardedFor, normalizeIp } from "./ip.ts";
+import { banKey, CLIENT_IP_HEADER, normalizeIp, proxiedRequestIp } from "./ip.ts";
 import { accountLinks, type LinkEvents } from "./links.ts";
 import { classifyMailFailure, DevOutbox, disabledMailer, MailHealth, resendMailer, type Mailer } from "./mailer.ts";
 import { identifyRequest, mountAccountRoutes, requireAdminFor } from "./routes.ts";
 import { pruneGuests } from "./prune.ts";
+import { botSecret, botSecretWarning } from "./loadtest.ts";
 import { liveSessions, type SessionRegistry } from "./sessions.ts";
 
 export const DEV_AUTH_SECRET = "dev-only-secret-change-me-dev-only-secret";
@@ -46,6 +47,8 @@ export interface AccountsConfig {
   resendKey: string;
   adminClaimToken: string;
   loadtestSecret: string;
+  /** LOADTEST_ENABLED=1: in production the load-test features need it as well as the secret (D-security-1). */
+  loadtestEnabled?: boolean;
   otpPerEmailPerHour: number;
   otpDailyBudget: number;
   /** Better Auth rate limiting (default: on in production only). */
@@ -79,7 +82,7 @@ export interface Accounts {
    * Is this account still allowed into a seat it reserved earlier? Refusal reason or null: the
    * user row is gone (merged or deleted guest), it is banned, or it has no session left (signed out).
    */
-  revalidate(userId: string): string | null;
+  revalidate(userId: string, sessionId?: string): string | null;
   /** Resolve the caller from the Better Auth session cookie, else a Bearer JWT. */
   identify(req: Request): Promise<Identity | null>;
   /** Express middleware for /admin and /stats routes: 401 unless signed in, 403 unless admin. Sets res.locals.identity. */
@@ -215,6 +218,16 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
   const pruneTimer = setInterval(housekeeping, 24 * 3_600_000);
   pruneTimer.unref();
 
+  const startedAt = Date.now();
+  const sessionByIdStmt = authDb.prepare(`SELECT "expiresAt" AS exp FROM "session" WHERE id = ? AND "userId" = ?`);
+  /** Does this session of this user still exist and not expire before `now`? */
+  const sessionLive = (sessionId: string, userId: string, now: number): boolean => {
+    const row = sessionByIdStmt.get(sessionId, userId) as { exp: unknown } | undefined;
+    return !!row && dbTime(row.exp) > now;
+  };
+  const botKey = botSecret(cfg);
+  const botWarning = botSecretWarning(cfg);
+  if (botWarning) console.warn(botWarning);
   const userStmt = authDb.prepare(`SELECT id, name, "isAnonymous" AS anon FROM "user" WHERE id = ?`);
 
   const betterAuthVerifier: TokenVerifier = async (token, vctx?: VerifyContext) => {
@@ -222,19 +235,24 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
     try {
       payload = (await auth.api.verifyJWT({ body: { token } })).payload as Record<string, unknown> | null;
     } catch {
-      return null;
+      payload = null;
     }
+    if (vctx) vctx.jwt = { token, payload };
     const sub = payload?.sub;
     if (!payload || typeof sub !== "string" || !sub) return null;
     const tokenName = typeof payload.name === "string" ? payload.name : "";
     if (payload.loadtest === true) {
       // Bot identities are minted only by /api/test/bot-token and only honoured during load tests.
-      if (!cfg.loadtestSecret) return null;
+      if (!botKey) return null;
       return { userId: sub, name: tokenName || "Bot", guest: true, admin: false, loadtest: true };
     }
     const user = userStmt.get(sub) as { id: string; name: string; anon: number | null } | undefined;
     if (!user) return null; // merged/deleted guest or deleted account
     const now = Date.now();
+    // Bound to the issuing session (D-security-5): signed out or expired, its tokens are dead. Tokens
+    // without one come from before this change: only those issued before this process started.
+    const sid = typeof payload.sid === "string" && payload.sid ? payload.sid : null;
+    if (sid ? !sessionLive(sid, sub, now) : !(typeof payload.iat === "number" && payload.iat * 1000 < startedAt)) return null;
     if (isBanned(db, sub, now)) return null;
     const ip = normalizeIp(vctx?.ip);
     const ipHash = ip ? hashIp(ip) : null;
@@ -254,14 +272,14 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
     }
     // An AI agent says so when it asks for a seat (D-agents-1): its guest account is flagged from then on.
     if (user.anon === 1 && vctx?.agent) markAgentAccount(db, sub, "play", now);
-    return { userId: sub, name: display ?? generated, guest: user.anon === 1, admin: acc.isAdmin, loadtest: false, account: true, test: isTestAccount(db, sub), agent: isAgentAccount(db, sub) };
+    return { userId: sub, name: display ?? generated, guest: user.anon === 1, admin: acc.isAdmin, loadtest: false, account: true, test: isTestAccount(db, sub), agent: isAgentAccount(db, sub), ...(sid ? { authSession: sid } : {}) };
   };
 
   const sessionStmt = authDb.prepare(`SELECT 1 FROM "session" WHERE "userId" = ? LIMIT 1`);
-  const revalidate = (userId: string): string | null => {
+  const revalidate = (userId: string, sessionId?: string): string | null => {
     if (!userStmt.get(userId)) return "account gone";
     if (isBanned(db, userId, Date.now())) return "banned";
-    if (!sessionStmt.get(userId)) return "signed out";
+    if (sessionId ? !sessionLive(sessionId, userId, Date.now()) : !sessionStmt.get(userId)) return "signed out";
     return null;
   };
 
@@ -298,7 +316,8 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
           }
         }
         delete req.headers["x-origin-secret"];
-        const ip = firstForwardedFor(req) ?? normalizeIp(req.socket.remoteAddress);
+        // Past the origin-secret check: the Vercel hop's first forwarded address (D-security-4, ip.ts).
+        const ip = proxiedRequestIp(req);
         if (ip) req.headers[CLIENT_IP_HEADER] = ip;
         next();
       });
@@ -351,6 +370,7 @@ export function accountsConfigFromEnv(env: {
   resendKey: string;
   adminClaimToken: string;
   loadtestSecret: string;
+  loadtestEnabled?: boolean;
   otpDailyBudget: number;
   otpPerEmailPerHour: number;
   devMailLog: boolean;
@@ -367,8 +387,17 @@ export function accountsConfigFromEnv(env: {
     resendKey: env.resendKey,
     adminClaimToken: env.adminClaimToken,
     loadtestSecret: env.loadtestSecret,
+    loadtestEnabled: env.loadtestEnabled,
     otpDailyBudget: env.otpDailyBudget,
     otpPerEmailPerHour: env.otpPerEmailPerHour,
     devMailLog: env.devMailLog,
   };
+}
+
+/** A Better Auth date column (ms or s since the epoch, or an ISO string) in ms; NaN if unreadable. */
+function dbTime(v: unknown): number {
+  if (typeof v === "number") return v < 1e12 ? v * 1000 : v;
+  if (typeof v === "string") return /^\d+$/.test(v) ? dbTime(Number(v)) : Date.parse(v);
+  if (v instanceof Date) return v.getTime();
+  return Number.NaN;
 }

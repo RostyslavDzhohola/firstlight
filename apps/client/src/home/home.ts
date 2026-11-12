@@ -12,7 +12,7 @@ import { fmtNum, hallRows, namesLine, progressView, visitsLine, worldCards, type
 import { onLandingShown } from "./landing.ts";
 import { takeHomeNotice, type HomeNotice } from "./leave.ts";
 import { signOutSession } from "./signOut.ts";
-import { dataFastNote } from "./datafast.ts";
+import { ANALYTICS_OPT_OUT_KEY, privacyText } from "./datafast.ts";
 
 const POLL_MS = 20_000;
 type Tab = "levels" | "hall" | "medals";
@@ -119,25 +119,74 @@ export function renderBoard(board: HomeBoard | null, tab: Tab): void {
   }
 }
 
-/** "Online now: N · Total visits: M" (DataFast), or our own player count without it. */
+/**
+ * "● N online now" (DataFast, or our own player count without it), and nothing else on that line
+ * (#12, owner 2026-10-18). Total visits sit apart in the footer (a stand-in for DataFast's stats
+ * card, D-fixes-3); the analytics disclosure is the footer's Privacy card.
+ */
 export function renderVisits(visits: HomeVisits | null, ourOnline: number | null): void {
   const box = $("home-visits");
   if (!box) return;
   const line = visitsLine(visits, ourOnline);
   box.hidden = !line;
-  if (!line) return;
+  let total = $("home-total");
+  if (!line) {
+    if (total) total.hidden = true;
+    return;
+  }
   box.replaceChildren();
   el("i", "fl-live-dot", box).setAttribute("aria-hidden", "true");
-  const on = el("span", "", box, "Online now: ");
+  const on = el("span", "", box);
   el("b", "num", on, line.online);
+  on.append(" online now");
   if (line.total !== null) {
-    el("i", "sep", box).setAttribute("aria-hidden", "true");
-    const tot = el("span", "", box, "Total visits: ");
-    el("b", "num", tot, line.total);
-  }
-  // The page carries DataFast's script: say so, and say "cookieless" only when it is.
-  const note = dataFastNote(config.datafast);
-  if (note) el("span", "note", box, `· ${note}`);
+    if (!total) {
+      total = el("div", "fl-home__total", box.parentElement ?? box);
+      total.id = "home-total";
+      box.after(total);
+    }
+    total.hidden = false;
+    total.replaceChildren("Total visits ");
+    el("b", "num", total, line.total);
+  } else if (total) total.hidden = true;
+  privacyLink();
+}
+
+/** The footer's "Privacy" link (only with DataFast in the page): a short card on its analytics and the opt-out (#12). */
+function privacyLink(): void {
+  const text = privacyText(config.datafast);
+  const credit = document.querySelector(".fl-home__credit");
+  if (!text || !credit || document.getElementById("home-privacy")) return;
+  const b = button("Privacy", "fl-link fl-home__privacy", credit as HTMLElement, () => openPrivacy(text));
+  b.id = "home-privacy";
+  b.dataset.e2e = "home-privacy";
+}
+
+function openPrivacy(text: string[]): void {
+  const d = el("dialog", "fl-panel fl-privacy", document.body) as HTMLDialogElement;
+  d.setAttribute("aria-labelledby", "privacy-title");
+  el("h2", "", d, "Privacy").id = "privacy-title";
+  for (const line of text) el("p", "", d, line);
+  const out = (): boolean => {
+    try { return localStorage.getItem(ANALYTICS_OPT_OUT_KEY) === "1"; } catch { return false; }
+  };
+  const row = el("div", "fl-privacy__row", d);
+  const toggle = button("", "fl-btn fl-btn--sm", row, () => {
+    try {
+      if (out()) localStorage.removeItem(ANALYTICS_OPT_OUT_KEY);
+      else localStorage.setItem(ANALYTICS_OPT_OUT_KEY, "1");
+    } catch { /* storage unavailable: nothing to remember */ }
+    paint();
+  });
+  const state = el("span", "fl-privacy__state", row);
+  const paint = () => {
+    toggle.textContent = out() ? "Count my visits again" : "Don't count my visits";
+    state.textContent = out() ? "This browser is opted out." : "";
+  };
+  paint();
+  button("Close", "fl-btn fl-btn--sm fl-btn--ghost", row, () => d.close());
+  d.addEventListener("close", () => d.remove());
+  d.showModal();
 }
 
 export interface MeState {

@@ -6,17 +6,21 @@
 import type { Accounts } from "../auth/accounts.ts";
 import { normalizeIp } from "../auth/ip.ts";
 import { isBanned, isIpBanned } from "../db/index.ts";
+import type { VerifyContext } from "../auth/identity.ts";
 
-export type RefusalExplainer = (token: string, ip: string | null) => Promise<"banned" | null>;
+export type RefusalExplainer = (token: string, ip: string | null, ctx?: VerifyContext) => Promise<"banned" | null>;
 
 export function banExplainer(a: Pick<Accounts, "auth" | "db" | "hashIp">): RefusalExplainer {
-  return async (token, ip) => {
+  return async (token, ip, ctx) => {
     let sub: unknown;
-    try {
-      sub = ((await a.auth.api.verifyJWT({ body: { token } })).payload as Record<string, unknown> | null)?.sub;
-    } catch {
-      return null;
-    }
+    // The verifier's result for this token when it has one (D-security-3): one signature check per request.
+    if (ctx?.jwt?.token === token) sub = ctx.jwt.payload?.sub;
+    else
+      try {
+        sub = ((await a.auth.api.verifyJWT({ body: { token } })).payload as Record<string, unknown> | null)?.sub;
+      } catch {
+        return null;
+      }
     if (typeof sub !== "string" || !sub) return null;
     const now = Date.now();
     if (isBanned(a.db, sub, now)) return "banned";

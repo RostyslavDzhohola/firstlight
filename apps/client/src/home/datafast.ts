@@ -32,13 +32,31 @@ export function dataFastScript(env: DataFastEnv): DataFastScript | null {
 /**
  * Inline script placed before DataFast's tag: automated browsers (navigator.webdriver: Playwright,
  * CDP, our journeys and smoke runs) and test URLs (?e2e, ?bench, ?offline) set DataFast's own opt-out
- * flag (https://datafa.st/docs/excluding-analytics), so test runs don't count as visits.
+ * flag (https://datafa.st/docs/excluding-analytics), so test runs don't count as visits. Any other
+ * visit removes the flag, so one test visit doesn't hide that browser from DataFast forever (#44).
+ * Trade-off: someone who set `datafast_ignore` by hand to hide their own visits loses it on their
+ * next normal visit; the owner wants to be counted, so that's fine. A player who opts out on the
+ * home page's Privacy card (ANALYTICS_OPT_OUT_KEY) stays out on every visit (#12).
  */
 export const DATAFAST_GUARD =
-  'try{if(navigator.webdriver||/[?&](?:e2e|bench|offline)(?:[=&]|$)/.test(location.search))localStorage.setItem("datafast_ignore","true")}catch(e){}';
+  'try{if(navigator.webdriver||/[?&](?:e2e|bench|offline)(?:[=&]|$)/.test(location.search)||localStorage.getItem("fl.noAnalytics")==="1")localStorage.setItem("datafast_ignore","true");else localStorage.removeItem("datafast_ignore")}catch(e){}';
 
-/** The page's one-line analytics note: only claim "cookieless" when the cookieless script is the one in the page. */
-export function dataFastNote(s: DataFastScript | null): string | null {
+/** The Privacy card's opt-out (localStorage "1"); DATAFAST_GUARD reads the same key. */
+export const ANALYTICS_OPT_OUT_KEY = "fl.noAnalytics";
+
+/**
+ * The home page's Privacy card text (#12, owner 2026-10-18): who counts the visits, whether that
+ * sets cookies (only claim "no cookies" for the cookieless script), what for, and how to opt out.
+ * Null without DataFast: nothing to disclose.
+ */
+export function privacyText(s: DataFastScript | null): string[] | null {
   if (!s) return null;
-  return s.cookieless ? "Cookieless analytics by DataFast" : "Analytics by DataFast, which sets cookies";
+  return [
+    s.cookieless
+      ? "The home page counts visits with DataFast's cookieless analytics: no cookies are set."
+      : "The home page counts visits with DataFast analytics, which sets cookies in your browser.",
+    "We use the counts only to see how many people visit and how many are online now. No ads, nothing sold.",
+    "The game itself keeps your guest character in this browser's storage so you can come back to it.",
+    "Opting out below stops DataFast counting this browser, on this device, from your next visit on.",
+  ];
 }

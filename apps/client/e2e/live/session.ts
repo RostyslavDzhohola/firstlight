@@ -348,6 +348,10 @@ function makeCommands(player: Player, consoleErrors: string[]): { commands: Reco
         return { label: "the pad", pick: (x) => x.pad ?? null, arrived: (x) => near(3)(x.pad ?? null) };
       case "guide":
         return { label: `the guide ${s.guide?.name ?? ""}`.trim(), pick: (x) => x.guide ?? null, arrived: (x) => near(2.5)(x.guide ?? null) };
+      case "curator":
+        return { label: `${s.curator?.name ?? "Sela Marchbank"} (Portus Plaza)`, pick: (x) => x.curator ?? null, arrived: (x) => near(2.5)(x.curator ?? null) };
+      case "vault":
+        return { label: "the Gleam Vault", pick: (x) => x.curator?.vault ?? null, arrived: (x) => near(2)(x.curator?.vault ?? null) };
       case "mission":
         return {
           label: s.mission?.title ? `the mission marker (${s.mission.title})` : "a mission marker",
@@ -383,7 +387,7 @@ function makeCommands(player: Player, consoleErrors: string[]): { commands: Reco
         return { label: `player ${p.name}`, pick: (x) => x.players?.find((o) => o.id === p.id) ?? null, arrived: (x) => near(3)(x.players?.find((o) => o.id === p.id) ?? null) };
       }
       default:
-        throw new Error(`unknown target "${spec ?? ""}": pad, guide, mission, gate, dummy, hostile, npc:<id|kind|name>, player:<name>`);
+        throw new Error(`unknown target "${spec ?? ""}": pad, guide, curator, vault, mission, gate, dummy, hostile, npc:<id|kind|name>, player:<name>`);
     }
   };
 
@@ -671,6 +675,35 @@ function makeCommands(player: Player, consoleErrors: string[]): { commands: Reco
         const r = await player.attackResult(since, 1200);
         const training = r.sent.length > 0 && r.sent.every((m) => m === "train") ? " (a training swing: weapons are holstered here and only a training dummy answers it)" : "";
         return `${pre}sent ${r.sent.join(",") || "nothing"}${training} · server ${r.accepted ? "accepted" : "did not echo"} the attack · denied ${r.denied.join(",") || "none"}${r.toasts.length ? ` · toasts ${r.toasts.map((t) => `"${t}"`).join(" ")}` : ""}\n${brief(await player.snap())}`;
+      },
+    },
+    cast: {
+      usage: "cast <spell> [target]",
+      help: "local only: cast skipstep|frostbloom|wishfall|glasswing (or its key: Q F X Z) with its real key, aimed at a target first if given (same targets as walk); reports what the server said",
+      async run([spell = "", spec]) {
+        localOnly("cast");
+        const want = spell.toLowerCase();
+        const slots = (await player.snap()).spells?.slots ?? [];
+        const slot = slots.find((x) => want && (x.id === want || x.key.toLowerCase() === want || x.name.toLowerCase().startsWith(want)));
+        if (!slot) throw new Error(`no spell "${spell}": ${slots.map((x) => `${x.id} (${x.key})`).join(", ") || "the spellbook isn't up yet"}`);
+        const pre = await ensureLock();
+        let aimed = "";
+        if (spec) {
+          const g = goal(spec, await player.snap());
+          aimed = (await player.aim(g.pick)) ? ` at ${g.label}` : ` (couldn't aim at ${g.label})`;
+        }
+        const since = await player.now();
+        await player.tap(`Key${slot.key}`);
+        // Wishfall lands after its warning; the others answer within a round trip.
+        await page.waitForTimeout(slot.id === "wishfall" ? 1900 : 600);
+        const ev = await player.events(since);
+        const sent = ev.some((e) => e.kind === "out" && e.type === "cast");
+        const denied = ev.filter((e) => e.kind === "in" && e.type === "denied").map((e) => `${e.action}:${e.reason}`);
+        const seen = ev.filter((e) => e.kind === "in" && e.type === "spell" && e.mine).map((e) => `${e.spell} ${e.phase}${typeof e.hits === "number" ? ` (slowed ${e.hits})` : ""}`);
+        const hits = ev.filter((e) => e.kind === "in" && e.type === "hit" && e.mine).map((e) => String(e.amount));
+        const toasts = ev.filter((e) => e.kind === "toast").map((e) => `"${String(e.text ?? "").trim()}"`);
+        const s = await player.snap();
+        return `${pre}${slot.name}${aimed}: ${sent ? "cast sent" : "nothing sent (the client held it back)"} · server ${seen.join(", ") || "sent no spell event"} · denied ${denied.join(",") || "none"}${hits.length ? ` · hits ${hits.join(", ")}` : ""}${toasts.length ? ` · toasts ${toasts.join(" ")}` : ""}\n${spellLine(s)}\n${brief(s)}`;
       },
     },
     fight: {
@@ -1049,14 +1082,16 @@ function makeCommands(player: Player, consoleErrors: string[]): { commands: Reco
   const talk = async (): Promise<string> => {
     localOnly("talk (it takes missions)");
     const s0 = await player.snap();
-    if (!s0.guide) throw new Error("no guide here: each planet's guide stands by its main pad (Lark on Arcadia)");
+    // A planet's guide, or in Portus Sela Marchbank (the Three Gleams' trials).
+    const who = s0.guide ? "guide" : s0.curator ? "curator" : null;
+    if (!who) throw new Error("no guide here: each planet's guide stands by its main pad (Lark on Arcadia); Sela Marchbank in Portus Plaza gives the trials");
     const pre = await ensureLock();
-    const g = goal("guide", s0);
+    const g = goal(who, s0);
     if (!g.arrived(s0)) {
       const how = await cruise(g.pick, g.arrived, { timeoutMs: 45_000 });
-      if (how !== "arrived") throw new Error(`couldn't reach the guide: ${how}`);
+      if (how !== "arrived") throw new Error(`couldn't reach ${g.label}: ${how}`);
     }
-    await player.face((x) => x.guide?.bearing ?? null, 20);
+    await player.face((x) => (who === "guide" ? x.guide : x.curator)?.bearing ?? null, 20);
     const panel = page.locator(".fl-overlay").filter({ visible: true }).last();
     for (let i = 0; i < 3 && !(await panel.count()); i++) {
       await player.tap("KeyE");
@@ -1113,7 +1148,7 @@ function makeCommands(player: Player, consoleErrors: string[]): { commands: Reco
       const s = await player.snap();
       const q = mine(s);
       if (!q || q.done || s.player?.dead) break;
-      if (q.progress !== progress || (q.type !== "hunt" && (q.surface ?? Infinity) < closest - 10)) {
+      if (q.progress !== progress || (q.type !== "hunt" && q.type !== "defend" && (q.surface ?? Infinity) < closest - 10)) {
         progress = q.progress;
         closest = Math.min(closest, q.surface ?? Infinity);
         gainedAt = Date.now();
@@ -1134,6 +1169,29 @@ function makeCommands(player: Player, consoleErrors: string[]): { commands: Reco
       if (s.zone?.server === "safe" && q.type === "hunt" && (q.surface ?? 0) > 30) {
         // Out of the pad's ring first (attacks don't count inside).
         await walkOut();
+        continue;
+      }
+      // Defend: light the beacon (E), then hold its ring and fight what the waves bring.
+      if (q.type === "defend") {
+        const at = spot(s);
+        const live = s.trial && s.trial.id === q0.id && (s.trial.state === "running" || s.trial.state === "paused");
+        const foe = live ? threat(s) : undefined;
+        if (foe && (at?.surface ?? 0) < 12) {
+          fights++;
+          if (await fightBeat(s, foe)) attacks++;
+          continue;
+        }
+        if (at && at.surface > (live ? 6 : 2.2)) {
+          const how = await cruise(spot, (x) => (spot(x)?.surface ?? 99) <= (live ? 4 : 2), { timeoutMs: Math.min(60_000, until - Date.now()), stop: (x) => (hpShare(x) < 0.45 && tonicReady(x) ? "thirsty" : null) });
+          if (how !== "arrived" && how !== "thirsty") log.push(`walk: ${how}`);
+          continue;
+        }
+        if (!live) {
+          await player.tap("KeyE");
+          await page.waitForTimeout(900);
+          continue;
+        }
+        await page.waitForTimeout(500);
         continue;
       }
       const prey = q.type === "hunt" ? pointedAt(s) : undefined;
@@ -1322,6 +1380,15 @@ function brief(s: Snap): string {
 }
 
 /** `fl state`: everything a player would glance at, in a dozen short lines. */
+/** The spellbook in one line: aether, then each spell with its key and whether a press would cast it. */
+function spellLine(s: Snap): string {
+  const b = s.spells;
+  if (!b) return "spells: not up yet";
+  const one = (x: NonNullable<Snap["spells"]>["slots"][number]) =>
+    `${x.key} ${x.name} ${!x.unlocked ? `locked (Lv ${x.level})` : x.cooldown > 0 ? `${x.cooldown.toFixed(1)} s` : x.short ? `needs ${x.cost} aether` : "ready"}`;
+  return `aether ${Math.floor(b.aether)}/${b.max}${b.ward ? ` · ward up (${b.ward.hp} HP, ${b.ward.left.toFixed(1)} s)` : ""} · ${b.slots.map(one).join(" · ")}`;
+}
+
 function describe(s: Snap, events: FlEvent[]): string {
   const lines = [brief(s)];
   const p = s.player;
@@ -1331,6 +1398,7 @@ function describe(s: Snap, events: FlEvent[]): string {
     lines.push(`me ${p.name ?? "?"} (${starter}) Lv ${s.you?.level ?? p.level ?? "?"} · HP ${n0(p.hp)} · XP ${s.you?.xp ?? "?"}/${s.you?.xpToNext ?? "?"} · coins ${s.you?.coins ?? "?"}${p.protected ? " · spawn protection on (just arrived: nothing can hurt you yet)" : ""}${p.inCombat ? " · in combat" : ""}${p.swimming ? " · swimming" : ""} · anim ${p.clip ?? p.anim}`);
   }
   if (s.weapon) lines.push(`weapon ${s.weapon.name} (${s.weapon.delivery}, range ${s.weapon.range} m) · hotbar ${(s.hotbar ?? []).map((h) => (h ? h.id : "-")).join(" ")}`);
+  if (s.spells) lines.push(spellLine(s));
   if (s.onboarding?.active) lines.push(`tutorial step ${s.onboarding.step ?? "?"} (${s.onboarding.done} done${s.onboarding.allDone ? ", all done" : ""})`);
   const npcs = (s.npcs ?? []).filter((n) => !n.dead).sort((a, b) => a.dist - b.dist);
   const hostile = npcs.filter((n) => n.hostile);

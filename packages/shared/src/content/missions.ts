@@ -5,8 +5,8 @@
 import type { BodyId } from "../planet/bodies.ts";
 import type { InvItem } from "../net/protocol.ts";
 
-export type MissionType = "hunt" | "find" | "reach";
-export type MissionId = "A1" | "A2" | "A3" | "H1" | "H2" | "H3" | "M1" | "M2" | "M3";
+export type MissionType = "hunt" | "find" | "reach" | "race" | "defend" | "collect";
+export type MissionId = "A1" | "A2" | "A3" | "H1" | "H2" | "H3" | "M1" | "M2" | "M3" | "A4" | "H4" | "T1" | "T2" | "T3";
 
 export interface HuntTarget {
   /** NPC def id as emitted in kill events by the NPC lane (e.g. "hopbit"). */
@@ -30,10 +30,37 @@ export interface MissionDef {
   find?: { object: string; itemName: string };
   /** reach: enter the trigger radius around a place. */
   reach?: { place: string; radius: number };
+  /**
+   * race: pass through these rings (world-object ids, in order) within `limitS` seconds of passing
+   * the first; running out of time fails the attempt, and passing the first ring again restarts it.
+   */
+  race?: { rings: string[]; radius: number; limitS: number };
+  /**
+   * defend: light the beacon (a world object, E) and stay within `radius` of it for `holdS` seconds
+   * while waves arrive. Outside the ring the clock pauses; outside longer than `graceS`, or dying, fails.
+   * Waves are raised at `level` near the defender and pay nothing (like egg penalties).
+   */
+  defend?: { beacon: string; radius: number; holdS: number; graceS: number; level: number; waves: DefendWave[] };
+  /**
+   * collect: walk within `radius` of each piece (world-object ids). With `limitS`, the clock starts at
+   * the first piece and running out drops the pieces gathered so far.
+   */
+  collect?: { pieces: string[]; radius: number; limitS?: number; itemName: string };
+  /** The world object that gives this mission (default: `guide_<body>`, the planet's guide). */
+  giver?: string;
+  /** A trial of the Three Gleams (gleams.ts): completing it wins that gleam. */
+  trial?: 1 | 2 | 3;
   /** One line the guide says when offering it. */
   pitch: string;
   /** What the mission routes the player toward (content.md §5). */
   routes: string;
+}
+
+export interface DefendWave {
+  /** Seconds of holding (the beacon's clock) before this wave is raised. */
+  atS: number;
+  npcKind: string;
+  count: number;
 }
 
 export interface GuideDef {
@@ -131,18 +158,101 @@ export const MISSIONS: readonly MissionDef[] = [
     pitch: "Get eyes on Foreclosure Yard from the gantry. Don't get repossessed.",
     routes: "Both Override Consoles are visible from the gantry.",
   },
+  // ---------------------------------------------------------------- 2026-11-12: new objective types
+  {
+    id: "A4", body: "arcadia", guide: "Lark", type: "collect", name: "Kite Season",
+    objective: "Gather the 5 torn kite panels the wind dropped in the meadow between Dawnpad and Clover Fields", recLevel: [1, 3],
+    reward: { xp: 60, coins: 25, items: [] },
+    collect: { pieces: ["a4_kite_1", "a4_kite_2", "a4_kite_3", "a4_kite_4", "a4_kite_5"], radius: 2.5, itemName: "kite panels" },
+    pitch: "The wind took my kite apart. The pieces glow a bit, they're lined. Follow the glow.",
+    routes: "The meadow runs on into Clover Fields, where the Hopbits graze.",
+  },
+  {
+    id: "H4", body: "hollowmere", guide: "Sexton Mabry", type: "defend", name: "The Long Vigil",
+    objective: "Light the vigil lamp on the Saint Orrin's road and keep it company for 60 seconds", recLevel: [9, 12],
+    reward: { xp: 900, coins: 150, items: [] },
+    defend: {
+      beacon: "h4_lamp", radius: 14, holdS: 60, graceS: 10, level: 9,
+      waves: [
+        { atS: 2, npcKind: "bonewalker", count: 2 },
+        { atS: 25, npcKind: "gnawer", count: 2 },
+        { atS: 45, npcKind: "bonewalker", count: 2 },
+      ],
+    },
+    pitch: "Someone has to sit with the vigil lamp tonight. The dead dislike company. Bring a weapon.",
+    routes: "The road climbs on toward Saint Orrin's ruin and its old well.",
+  },
+  // ---------------------------------------------------------------- the Three Gleams (gleams.ts), from Sela Marchbank in Portus
+  {
+    id: "T1", body: "arcadia", guide: "Sela Marchbank", giver: "curator_sela", trial: 1, type: "race", name: "The Swift Gleam",
+    objective: "Run the eight lit rings around Highscore Hill, in order, within 75 seconds of the first", recLevel: [4, 7],
+    reward: { xp: 300, coins: 80, items: [] },
+    race: { rings: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => `t1_ring_${i}`), radius: 4.5, limitS: 75 },
+    pitch: "The first gleam never sits still. It runs a ring road on Arcadia; keep pace and it's yours.",
+    routes: "The ring road circles Highscore Hill; its crowns of voxel creatures don't like runners.",
+  },
+  {
+    id: "T2", body: "hollowmere", guide: "Sela Marchbank", giver: "curator_sela", trial: 2, type: "defend", name: "The Steadfast Gleam",
+    objective: "Light the beacon in south Thornwood and hold its ring for 90 seconds", recLevel: [9, 12],
+    reward: { xp: 1000, coins: 160, items: [] },
+    defend: {
+      beacon: "t2_beacon", radius: 14, holdS: 90, graceS: 10, level: 9,
+      waves: [
+        { atS: 2, npcKind: "bonewalker", count: 2 },
+        { atS: 22, npcKind: "gnawer", count: 2 },
+        { atS: 45, npcKind: "bonewalker", count: 2 },
+        { atS: 65, npcKind: "gnawer", count: 3 },
+      ],
+    },
+    pitch: "The second gleam is a beacon the Hollow Court wants dark. Light it, then don't let it be alone.",
+    routes: "South Thornwood, a long walk from the lantern-lit pad; the trees are full of things that used to be people.",
+  },
+  {
+    id: "T3", body: "meridian", guide: "Sela Marchbank", giver: "curator_sela", trial: 3, type: "collect", name: "The Patient Gleam",
+    objective: "Gather the 8 shards of the third gleam on the Glasspan Salt Flats within 4 minutes of the first", recLevel: [14, 17],
+    reward: { xp: 2400, coins: 350, items: [] },
+    collect: { pieces: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => `t3_shard_${i}`), radius: 2.5, limitS: 240, itemName: "gleam shards" },
+    pitch: "The third gleam broke on Meridian's salt. Gather every shard before Oversight files them away.",
+    routes: "The Glasspan Salt Flats: open ground, long sightlines, and patrols that notice you.",
+  },
 ];
 
 export const MISSION_BY_ID: ReadonlyMap<string, MissionDef> = new Map(MISSIONS.map((m) => [m.id, m]));
 
+/** The guide missions of a planet (what its guide hands out). Sela's trials are not in here. */
 export function missionsOn(body: BodyId): MissionDef[] {
-  return MISSIONS.filter((m) => m.body === body);
+  return MISSIONS.filter((m) => m.body === body && !m.giver);
 }
 
-/** Total goal units for the progress bar (hunt: sum of counts; find/reach: 1). */
+/** Total goal units for the progress bar (hunt: sum of counts; race: rings; defend: seconds held; collect: pieces; find/reach: 1). */
 export function missionGoal(m: MissionDef): number {
-  return m.hunt ? m.hunt.targets.reduce((s, t) => s + t.count, 0) : 1;
+  if (m.hunt) return m.hunt.targets.reduce((s, t) => s + t.count, 0);
+  if (m.race) return m.race.rings.length;
+  if (m.defend) return m.defend.holdS;
+  if (m.collect) return m.collect.pieces.length;
+  return 1;
 }
+
+/** The nine original guide missions: Errand Runner (medal 6) asks for these, not later additions. */
+export const ERRAND_MISSIONS: readonly MissionId[] = ["A1", "A2", "A3", "H1", "H2", "H3", "M1", "M2", "M3"];
+
+/** The world object that gives a mission: its `giver`, else the planet guide. */
+export function missionGiver(def: MissionDef): string {
+  return def.giver ?? `guide_${def.body}`;
+}
+
+/** Missions a giver hands out (the guide's or Sela Marchbank's panel). */
+export function missionsFrom(giver: string): MissionDef[] {
+  return MISSIONS.filter((m) => missionGiver(m) === giver);
+}
+
+/** Objective types run as a timed or tracked attempt on the server (quests/trials.ts). */
+export function isTrialType(m: MissionDef): boolean {
+  return !!(m.race || m.defend || m.collect);
+}
+
+/** The defend waves that every NPC kind of the catalogue must exist for (checked in tests). */
+export const DEFEND_NPC_KINDS: readonly string[] = [...new Set(MISSIONS.flatMap((m) => m.defend?.waves.map((w) => w.npcKind) ?? []))];
 
 /** Every NPC kind a hunt mission listens for (the NPC lane must emit these ids). */
 export const MISSION_NPC_KINDS: readonly string[] = [...new Set(MISSIONS.flatMap((m) => m.hunt?.targets.map((t) => t.npcKind) ?? []))];

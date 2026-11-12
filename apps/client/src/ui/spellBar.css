@@ -1,0 +1,43 @@
+/* The spellbook on the HUD (ui/spellBar.ts): four spell slots beside the hotbar and the aether bar
+   under HP on the player card. Warm arcade frames like the hotbar (yours), aether in its own violet. */
+
+.fl-hud__spells { position: absolute; left: calc(100% + 1.4 * var(--u)); bottom: 0; }
+.fl-spells { display: flex; gap: calc(.4 * var(--u)); }
+/* The frame clips what it holds (arcade corners), so the keycap sits beside it, in the wrapper. */
+.fl-spell { position: relative; transition: transform var(--dur-2) var(--ease-out); }
+.fl-spell__box { width: calc(3.7 * var(--u)); height: calc(3.7 * var(--u)); display: grid; place-items: center; }
+.fl-spell__box > .px { width: calc(2.3 * var(--u)); height: calc(2.3 * var(--u)); }
+.fl-spell__k { position: absolute; left: 50%; bottom: calc(100% + .3 * var(--u)); transform: translateX(-50%); min-width: calc(1.5 * var(--u)); padding: 1px calc(.3 * var(--u)); font: 700 var(--t-xs)/1.25 var(--font-mono); text-align: center; color: var(--hero-cream); background: rgba(12, 10, 8, .72); box-shadow: 0 0 0 1px rgba(255, 229, 184, .3); border-radius: var(--r-1); }
+/* Cooldown: a dark sweep that unwinds clockwise (--cd from 1 to 0), and the seconds left. */
+.fl-spell__cd { --cd: 0; position: absolute; inset: 2px; background: conic-gradient(rgba(6, 8, 14, .78) calc(var(--cd) * 360deg), transparent 0); pointer-events: none; }
+.fl-spell__n { position: absolute; inset: 0; display: grid; place-items: center; font: 700 var(--t-sm)/1 var(--font-mono); color: #fff; }
+.fl-spell__box > .fl-spell__lock { position: absolute; right: calc(.25 * var(--u)); top: calc(.25 * var(--u)); width: calc(1.05 * var(--u)); height: calc(1.05 * var(--u)); }
+.fl-spell.is-locked .fl-spell__box { --edge: rgba(255, 255, 255, .22); }
+.fl-spell.is-locked .fl-spell__icon { filter: grayscale(1); opacity: .32; }
+.fl-spell.is-locked .fl-spell__n { place-items: end center; padding-bottom: calc(.3 * var(--u)); font-size: var(--t-xs); color: var(--fog-4); }
+.fl-spell.is-locked .fl-spell__k { color: var(--fog-3); }
+.fl-spell.is-cd .fl-spell__icon { opacity: .5; }
+.fl-spell.is-short .fl-spell__box { --edge: rgba(141, 107, 220, .7); }
+.fl-spell.is-short .fl-spell__icon { filter: saturate(.3); opacity: .5; }
+.fl-spell.is-short .fl-spell__n { place-items: end center; padding-bottom: calc(.3 * var(--u)); font-size: var(--t-xs); color: #cbb6ff; }
+.fl-spell.is-ready .fl-spell__box { --edge: linear-gradient(180deg, #e9fbff, #6fe8ff); }
+.fl-spell.is-up .fl-spell__box { --edge: linear-gradient(180deg, #fff, #cbb6ff); --fill: linear-gradient(180deg, rgba(48, 36, 92, .85), rgba(16, 12, 36, .85)); }
+.fl-spell.is-up .fl-spell__icon { opacity: .45; }
+.fl-spell.is-up .fl-spell__n { color: #e4d9ff; }
+.fl-spell.is-cast { animation: fl-spell-cast 240ms var(--ease-out); }
+.fl-spell.is-deny { animation: fl-spell-deny 260ms linear; }
+@keyframes fl-spell-cast { 0% { transform: translateY(calc(-.5 * var(--u))) scale(1.12); } 100% { transform: none; } }
+@keyframes fl-spell-deny { 0%, 100% { transform: none; } 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+
+.fl-me__aether { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: calc(.55 * var(--u)); align-items: center; margin-top: calc(.5 * var(--u)); }
+.fl-me__aether > .px { width: calc(1.5 * var(--u)); height: calc(1.5 * var(--u)); }
+.fl-aebar { position: relative; height: calc(.62 * var(--u)); background: rgba(10, 8, 24, .72); box-shadow: 0 0 0 1px rgba(203, 182, 255, .35); overflow: hidden; }
+.fl-aebar i { --fill: 1; position: absolute; inset: 0; transform-origin: left center; transform: scaleX(var(--fill)); background: linear-gradient(180deg, #d9ccff, #8d6bdc 55%, #5a3fb0); }
+/* Notches at each spell's price would crowd it: quarters only. */
+.fl-aebar::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0 calc(25% - 1px), rgba(0, 0, 0, .4) calc(25% - 1px) 25%); }
+.fl-me__aether .v { font: 700 var(--t-xs)/1 var(--font-mono); color: #d9ccff; white-space: nowrap; min-width: calc(2.2 * var(--u)); text-align: right; }
+.fl-me__aether.is-low .v { color: var(--fog-3); }
+
+@media (prefers-reduced-motion: reduce) {
+  .fl-spell.is-cast, .fl-spell.is-deny { animation: none; }
+}

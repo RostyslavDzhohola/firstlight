@@ -40,7 +40,23 @@ export interface Npc extends Target {
   drawn: boolean;
 }
 /** The parts of `__fl.snapshot()` the journeys read (see src/debug/e2eHook.ts). */
-export type Quest = Partial<Target> & { id: string; name: string; type: "hunt" | "find" | "reach"; objective: string; taken: boolean; done: boolean; progress: number; goal: number };
+export type Quest = Partial<Target> & { id: string; name: string; type: "hunt" | "find" | "reach" | "race" | "defend" | "collect"; objective: string; taken: boolean; done: boolean; progress: number; goal: number; trial?: number };
+
+/** The running race / defend / collect attempt (the server's latest `trial` message) and its HUD strip. */
+export interface TrialSnap {
+  id: string;
+  kind: "race" | "defend" | "collect";
+  state: "running" | "paused" | "done" | "failed" | "idle";
+  progress: number;
+  goal: number;
+  leftMs: number;
+  limitMs: number;
+  next: string | null;
+  reason?: string;
+  clockLeftMs: number;
+  hud: { title: string; progress: string; clock: string; tone: string } | null;
+  hudShown: boolean;
+}
 
 export interface Snap {
   t: number;
@@ -74,9 +90,19 @@ export interface Snap {
   mission?: (Partial<Target> & { shown: boolean; title: string; creep: boolean; at: number[] | null }) | null;
   /** The guide's missions on this planet and where each objective is (absent fields: not placed). */
   quests?: Quest[];
+  /** Portus: Sela Marchbank (the Three Gleams) and the Gleam Vault. */
+  curator?: (Target & { name: string | null; vault: Target | null; vaultOpened: boolean }) | null;
+  trial?: TrialSnap | null;
   you?: { xp: number; xpToNext: number; coins: number; level: number; dead: boolean } | null;
   weapon?: { id: string; name: string; delivery: string; range: number; tier: number; slot: number } | null;
   hotbar?: ({ id: string; tier: number; qty: number } | null)[] | null;
+  /** The spellbook: aether now and each spell's key, lock, cooldown left (s) and readiness. */
+  spells?: {
+    aether: number;
+    max: number;
+    ward: { hp: number; left: number } | null;
+    slots: { id: string; name: string; key: string; level: number; cost: number; unlocked: boolean; cooldown: number; ready: boolean; short: boolean }[];
+  } | null;
   combat?: { training: boolean; deadUntilRespawn: boolean };
   onboarding?: { active: boolean; paid: boolean; ended: boolean; step: string | null; done: number; allDone: boolean } | null;
   dummies?: (Target & { down: boolean; hits: number | null })[];
@@ -152,7 +178,8 @@ export class Player {
 
   /** `/?e2e[&webgl]&…`: the hook, the renderer under test, and any extra flags. */
   url(extra: Record<string, string | number | true> = {}): string {
-    const parts = ["e2e", ...(this.gfx === "webgl" ? ["webgl"] : [])];
+    // E2E_FLAGS: extra URL flags for every page of a run (e.g. `nopacks` for a baseline without the HD art packs).
+    const parts = ["e2e", ...(this.gfx === "webgl" ? ["webgl"] : []), ...(process.env.E2E_FLAGS ?? "").split(",").filter(Boolean)];
     for (const [k, v] of Object.entries(extra)) parts.push(v === true ? k : `${k}=${encodeURIComponent(String(v))}`);
     return `/?${parts.join("&")}`;
   }

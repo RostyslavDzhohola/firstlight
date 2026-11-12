@@ -13,6 +13,7 @@ import { createSupportSystem } from "./support.ts";
 import { createHorseSystem } from "./horses/HorseSystem.ts";
 import { createOnboardingSystem } from "./onboarding.ts";
 import { createAdminModeSystem } from "./adminMode.ts";
+import { createSpellSystem } from "./spells/SpellSystem.ts";
 
 export interface RoomSystem {
   /** Called every simulation tick (50 ms). */
@@ -46,3 +47,5 @@ SYSTEM_FACTORIES.push(createHorseSystem);
 SYSTEM_FACTORIES.push(createOnboardingSystem);
 // Admin mode (D-admin-1): the owner's fly / god / speed switches, max level and every item.
 SYSTEM_FACTORIES.push(createAdminModeSystem);
+// Spells lane: the spellbook (aether, Skipstep, Frostbloom, Wishfall, Glasswing Ward; hooks combat via host.wards).
+SYSTEM_FACTORIES.push(createSpellSystem);

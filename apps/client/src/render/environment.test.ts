@@ -242,6 +242,36 @@ describe("weather", () => {
     expect(atmo.wet.value).toBeGreaterThan(0.3);
   });
 
+  it("the first sky sync on a body takes the weather as it is; later changes ease (#46)", () => {
+    const t0 = Date.UTC(2026, 9, 12, 12);
+    vi.useFakeTimers({ now: t0, toFake: ["Date"] });
+    const { env, rig } = setup("arcadia");
+    env.timeOverride = 0.5;
+    // Rain that has been falling for ten minutes when the player arrives.
+    const rain = { weather: "rain" as const, intensity: 1, since: t0 - 10 * 60_000, until: t0 + 3_600_000 };
+    env.setServerSky(skyState("arcadia", 0, t0, 0, rain));
+    env.update(1 / 60);
+    // One frame in, the world is already as dark, wet and rainy as it will be: nothing eases in after the loader hides.
+    expect(env.weather).toBe("rain");
+    expect(env.weatherIntensity).toBeGreaterThan(0.95);
+    expect(atmo.wet.value).toBeGreaterThan(0.95);
+    const settled = rig.sun.intensity;
+    run(env, 4);
+    expect(rig.sun.intensity).toBeCloseTo(settled, 3);
+    // A change during play still eases: the rain stops, and a second later most of it is still there.
+    env.setServerSky(skyState("arcadia", 0, t0, 0, { weather: "clear", intensity: 0, since: t0 - 10 * 60_000, until: t0 + 3_600_000 }));
+    run(env, 0.5);
+    expect(env.weatherIntensity).toBeGreaterThan(0.5);
+    expect(env.weatherIntensity).toBeLessThan(0.95);
+    // The next body settles at once too.
+    const look = LOOKS.hollowmere;
+    env.setBody("hollowmere", 0, look, rig);
+    env.setServerSky(skyState("hollowmere", 0, t0, 0, { weather: "fog", intensity: 0.8, since: t0 - 10 * 60_000, until: t0 + 3_600_000 }));
+    env.update(1 / 60);
+    expect(env.weather).toBe("fog");
+    expect(env.weatherIntensity).toBeGreaterThan(0.75);
+  });
+
   it("a new body starts dry", () => {
     const { env, ctx } = setup("arcadia");
     env.timeOverride = 0.5;

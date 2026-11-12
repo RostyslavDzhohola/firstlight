@@ -17,7 +17,7 @@ import { characterRepo } from "../src/world/characters.ts";
 import { pileStore } from "../src/world/piles.ts";
 import { SqliteCharacterRepo, SqlitePileStore } from "../src/world/sqliteStores.ts";
 import { placeDir } from "@firstlight/shared/content/places";
-import { maxHp } from "@firstlight/shared/content/progression";
+import { starterMaxHp } from "@firstlight/shared/content/starters";
 import { bossArena } from "@firstlight/shared/content/arenas";
 import { NF } from "@firstlight/shared/content/npcs";
 import { NPC_TUNING, npcSystemOf, onNpcEvent, resetTuning } from "../src/world/npc/index.ts";
@@ -328,8 +328,8 @@ describe("mission XP commits with the completion (F12 final B1)", () => {
     await waitFor(() => b.toasts.includes("Level 2!"));
     // The completion's one save also carries the level-up's HP (F12 confirm Codex N-S1).
     expect(stored("climber").hp).toBe(actor(b).state.hp);
-    expect(maxHp(stored("climber").level)).toBe(actor(b).state.maxHp);
-    expect(actor(b).state.maxHp).toBe(110);
+    expect(starterMaxHp(me(b.room).starter, stored("climber").level)).toBe(actor(b).state.maxHp);
+    expect(actor(b).state.maxHp).toBe(starterMaxHp(me(b.room).starter, 2)); // the starter's row (D-balance-4)
     // Further triggers pay nothing more.
     kills(1);
     await qsleep(200);
@@ -516,20 +516,21 @@ describe("a level-up's extra HP is in the reward's save (F12 confirm Codex N-S1)
 
   it("a kill that crosses a level stores the HP and max HP the player sees", async () => {
     const { r, a, toasts, kill } = await oneShort("healed");
-    expect(a.state.hp).toBe(100);
+    const hp2 = starterMaxHp(a.state.starter, 2); // the default starter's row (D-balance-4)
+    expect(a.state.hp).toBe(starterMaxHp(a.state.starter, 1));
     await kill();
     await waitFor(() => toasts.includes("Level 2!"));
     expect(a.state.level).toBe(2);
-    expect(a.state.maxHp).toBe(110);
-    expect(a.state.hp).toBe(110);
+    expect(a.state.maxHp).toBe(hp2);
+    expect(a.state.hp).toBe(hp2);
     // A crash now restarts from game.db: the row carries the healed HP, not the level-1 HP.
     const db2 = openGameDb(join(dir, "game.db"));
     const row = new SqliteCharacterRepo(db2).load("healed")!;
     db2.close();
     expect(row.level).toBe(2);
     expect(row.hp).toBe(a.state.hp);
-    expect(maxHp(row.level)).toBe(a.state.maxHp);
-    await waitFor(() => me(r).hp === 110 && me(r).maxHp === 110); // published after the commit
+    expect(starterMaxHp(a.state.starter, row.level)).toBe(a.state.maxHp);
+    await waitFor(() => me(r).hp === hp2 && me(r).maxHp === hp2); // published after the commit
   });
 
   it("a level-up reward whose save fails changes neither the live nor the stored HP", async () => {
@@ -539,10 +540,11 @@ describe("a level-up's extra HP is in the reward's save (F12 confirm Codex N-S1)
     expect(failedSaves).toBeGreaterThan(0);
     expect(toasts).not.toContain("Level 2!");
     expect(a.char.level).toBe(1);
-    expect(a.char.hp).toBe(100);
-    expect([a.state.level, a.state.maxHp, a.state.hp]).toEqual([1, 100, 100]);
+    const hp1 = starterMaxHp(a.state.starter, 1); // the default starter's row (D-balance-4)
+    expect(a.char.hp).toBe(hp1);
+    expect([a.state.level, a.state.maxHp, a.state.hp]).toEqual([1, hp1, hp1]);
     const row = characterRepo.current.load("unhealed")!;
-    expect([row.xp, row.level, row.hp]).toEqual([49, 1, 100]);
+    expect([row.xp, row.level, row.hp]).toEqual([49, 1, hp1]);
   });
 });
 

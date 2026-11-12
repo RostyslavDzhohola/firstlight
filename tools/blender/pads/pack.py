@@ -189,10 +189,8 @@ def main():
     glb.write(os.path.join(PP.OUT, f"{BODY}_raw.glb"), extras)
     if SHARED_STRIPS is None:
         color, mask, normal = PP.layer_images({})
-        strip_c = np.concatenate([np.concatenate([c, a[..., None]], axis=2) for c, a in zip(color, mask)]).astype(np.float32)
-        strip_n = np.concatenate(normal).astype(np.float32)
-        PP.save_webp(strip_c, os.path.join(PP.OUT, f"{BODY}_color.webp"), 82)
-        PP.save_webp(strip_n, os.path.join(PP.OUT, f"{BODY}_normal.webp"), 90)
+        PP.save_strip([np.concatenate([c, a[..., None]], axis=2) for c, a in zip(color, mask)], os.path.join(PP.OUT, f"{BODY}_color.webp"), 82)
+        PP.save_strip(normal, os.path.join(PP.OUT, f"{BODY}_normal.webp"), 90)
 
     index = {p["name"]: i for i, p in enumerate(prefabs)}
     layout = [dict(prefab=it["prefab"], east=it["east"], north=it["north"], yaw=it["yaw"], scale=it["scale"], base=it["base"],

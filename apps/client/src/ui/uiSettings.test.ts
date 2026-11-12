@@ -34,6 +34,13 @@ describe("ui settings persistence", () => {
     expect(normalizeUiSettings({ minimap: "no", minimapRotate: 0, mapPlayerUp: true })).toMatchObject({ minimap: true, minimapRotate: true, mapPlayerUp: true });
   });
 
+  it("shows the missions panel expanded for saves from before #3, and validates the new fields", () => {
+    const old = memStore({ "fl.ui.v1": JSON.stringify({ v: 1, sensitivity: 1.2, minimap: false }) });
+    expect(loadUiSettings(old)).toMatchObject({ minimap: false, missions: true, missionsCollapsed: false });
+    expect(normalizeUiSettings({ missions: "off", missionsCollapsed: 1 })).toMatchObject({ missions: true, missionsCollapsed: false });
+    expect(normalizeUiSettings({ missions: false, missionsCollapsed: true })).toMatchObject({ missions: false, missionsCollapsed: true });
+  });
+
   it("keeps unrelated values when patching", () => {
     const s = patchUiSettings(patchUiSettings(UI_DEFAULTS, { fov: 88 }), { shake: false });
     expect(s).toMatchObject({ fov: 88, shake: false, sensitivity: 1 });

@@ -1,31 +1,52 @@
-// Lake water (SPEC §7.3 water row). Each terrain chunk that reaches below the water level gets a
-// water patch from the worker: a spherical cap at the water radius with the depth below the surface
-// baked per vertex (no depth texture, no per-pixel height function). The shader:
-//   L0  colour by depth + fresnel to the sky colour
-//   L1  + animated normal noise, sun glint, shoreline foam bands
+// Lake water (SPEC §7.3 water row; reworked in the planets' graphics pass, D-gfx-worlds-1). Each
+// terrain chunk that reaches below the water level gets a water patch from the worker: a spherical
+// cap at the water radius with the depth below the surface baked per vertex (no depth texture, no
+// per-pixel height function, no reflection pass). The shader:
+//   L0  three colour stops by depth (shore → shallow → deep), clearer at the shore, fresnel to the
+//       analytic sky (so the sky's colour and the sun's glow lie on the water)
+//   L1  + ripples from two scrolling taps of the detail-noise texture (they replaced three 3-D
+//       procedural noises), a sun glint that breaks into glitter, a soft foam line that laps at the
+//       shore with a ragged edge, mist lying on far water (Hollowmere), rain chop
 //   L2+ + a second, finer ripple octave
-// Reflections come from the analytic sky (so the sun disc becomes a glint that blooms).
-// SSR on the nearest lake (Ultra) is not implemented yet.
+// Each planet's water is a set of shared uniforms (looks.ts colours, worldLooks.ts WaterLook):
+// Arcadia clear turquoise, Hollowmere dark and misty, Meridian shallow and mineral.
+// SSR on the nearest lake (Ultra) is not implemented.
 
 import * as THREE from "three/webgpu";
 import {
-  attribute, cameraPosition, clamp, dot, exp, float, max, mix, mx_noise_float, mx_noise_vec3, normalize,
+  abs, attribute, cameraPosition, clamp, cross, distance, dot, exp, float, max, mix, normalize,
   positionWorld, pow, reflect, select, sin, smoothstep, time, uniform, vec3, renderGroup,
 } from "three/tsl";
 import { atmo, skyColor } from "./atmosphere.ts";
 import type { BodyLook } from "./looks.ts";
+import { detailNoiseTexture } from "./noiseTexture.ts";
+import { biplanar } from "./terrainMaterial.ts";
+import type { WaterLook } from "./worldLooks.ts";
 import type { WaterMeshData } from "../world/terrain.worker.ts";
 
 export const waterUniforms = {
   shallow: uniform(new THREE.Color(0x3fe0c8)).setGroup(renderGroup),
   deep: uniform(new THREE.Color(0x0d5a78)).setGroup(renderGroup),
   foam: uniform(new THREE.Color(0xeafffa)).setGroup(renderGroup),
+  shore: uniform(new THREE.Color(0x8ff5e0)).setGroup(renderGroup),
+  absorb: uniform(0.35).setGroup(renderGroup),
+  mist: uniform(0).setGroup(renderGroup),
+  mistColor: uniform(new THREE.Color(0xffffff)).setGroup(renderGroup),
+  glitter: uniform(1).setGroup(renderGroup),
+  foamAmt: uniform(1).setGroup(renderGroup),
 };
 
-export function applyWaterLook(look: BodyLook) {
+export function applyWaterLook(look: BodyLook, w?: WaterLook) {
   waterUniforms.shallow.value.setHex(look.waterShallow);
   waterUniforms.deep.value.setHex(look.waterDeep);
   waterUniforms.foam.value.setHex(look.foam);
+  if (!w) return;
+  waterUniforms.shore.value.setHex(w.shore);
+  waterUniforms.absorb.value = w.absorb;
+  waterUniforms.mist.value = w.mist;
+  waterUniforms.mistColor.value.setHex(w.mistColor);
+  waterUniforms.glitter.value = w.glitter;
+  waterUniforms.foamAmt.value = w.foam;
 }
 
 const cache = new Map<number, THREE.MeshBasicNodeMaterial>();
@@ -43,23 +64,31 @@ export function waterMaterialFor(level: number): THREE.MeshBasicNodeMaterial {
 function build(level: number): THREE.MeshBasicNodeMaterial {
   const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false });
   m.name = `water-L${level}`;
+  const u = waterUniforms;
   const depth = attribute("depth", "float");
   const wp = positionWorld;
   const up = normalize(wp);
   const V = normalize(cameraPosition.sub(wp));
   let N: any = up;
+  let n1: any = null;
+  let n2: any = null;
   if (level >= 1) {
+    const tex = detailNoiseTexture();
     const t = time;
-    const n1 = mx_noise_vec3(wp.mul(0.32).add(vec3(t.mul(0.21), t.mul(0.13), t.mul(-0.17))));
-    let g: any = n1.sub(up.mul(dot(n1, up))).mul(0.09);
+    // A tangent frame on the sphere; two noise channels of one tap are the slope along each axis.
+    const ref = select(abs(up.y).lessThan(0.95), vec3(0, 1, 0), vec3(1, 0, 0));
+    const t0 = normalize(cross(ref, up));
+    const t1 = cross(up, t0);
+    const slope = (s: any) => t0.mul(s.r.sub(0.5)).add(t1.mul(s.g.sub(0.5)));
+    n1 = biplanar(tex, wp.mul(0.085).add(vec3(t.mul(0.017), t.mul(0.011), t.mul(-0.014))), up);
+    let g: any = slope(n1).mul(0.13);
     if (level >= 2) {
-      const n2 = mx_noise_vec3(wp.mul(1.15).add(vec3(t.mul(-0.36), t.mul(0.29), t.mul(0.31))));
-      g = g.add(n2.sub(up.mul(dot(n2, up))).mul(0.045));
+      n2 = biplanar(tex, wp.mul(0.31).add(vec3(t.mul(-0.05), t.mul(0.041), t.mul(0.045))), up);
+      g = g.add(slope(n2).mul(0.07));
     }
-    // Rain on the surface: a fast, fine chop that only shows while it rains.
-    // Uniform branch (select → if/else): the extra noise is skipped while it's dry.
-    const nr = mx_noise_vec3(wp.mul(5.0).add(vec3(t.mul(1.7), t.mul(-2.3), t.mul(1.9))));
-    g = select(atmo.rain.greaterThan(0.001), g.add(nr.sub(up.mul(dot(nr, up))).mul(atmo.rain.mul(0.12))), g);
+    // Rain on the surface: the same taps' other two channels as a fast, fine chop (no extra fetch).
+    const chop = n2 ?? n1;
+    g = g.add(t0.mul(chop.b.sub(0.5)).add(t1.mul(chop.a.sub(0.5))).mul(atmo.rain.mul(0.5)));
     N = normalize(up.add(g));
   }
   const ndv = max(dot(N, V), 0.0);
@@ -68,23 +97,40 @@ function build(level: number): THREE.MeshBasicNodeMaterial {
   // Keep reflections above the horizon (a flat lake can't see below it).
   const Rl = normalize(R.add(up.mul(max(float(0.03).sub(dot(R, up)), 0.0))));
   const refl = skyColor(Rl, float(level >= 1 ? 1 : 0));
-  const k = float(1).sub(exp(max(depth, 0.0).mul(-0.35)));
+  const d = max(depth, 0.0);
+  const k = float(1).sub(exp(d.mul(u.absorb).negate()));
   const sunUp = max(dot(up, atmo.sunDir), 0.0);
-  const clear = mix(waterUniforms.shallow, waterUniforms.deep, k);
+  // Shore → shallow → deep.
+  const clear = mix(mix(u.shore, u.shallow, smoothstep(0.0, 0.3, k)), u.deep, smoothstep(0.2, 1.0, k));
   // Rain stirs and greys the water (puddle-ish tint).
   const stirred = mix(clear, vec3(dot(clear, vec3(0.3, 0.45, 0.25))).mul(vec3(0.9, 1.0, 1.05)), atmo.wet.mul(0.45));
   const body = stirred.mul(sunUp.mul(0.65).add(0.35));
   let col: any = mix(body, refl, fres);
-  let alpha: any = clamp(mix(float(0.5), float(0.95), smoothstep(0.0, 3.0, depth)).add(fres.mul(0.5)), 0.0, 1.0);
+  // Clear at the shore (the bed shows through), opaque within a couple of metres of depth.
+  let alpha: any = clamp(mix(float(0.3), float(0.95), smoothstep(0.0, 0.75, k)).add(fres.mul(0.5)), 0.0, 1.0);
   if (level >= 1) {
+    // Sun: a tight glint, and a wider lobe broken into glitter by the fine speckle channel.
     const rs = max(dot(Rl, atmo.sunDir), 0.0);
-    col = col.add(atmo.sunColor.mul(pow(rs, 160.0).mul(1.5).add(pow(rs, 1400.0).mul(14.0))));
-    const band = smoothstep(0.75, 0.0, depth).mul(smoothstep(-0.25, 0.0, depth));
-    const nz = mx_noise_float(wp.mul(1.7).add(vec3(0.0, time.mul(0.35), 0.0))).mul(0.5).add(0.5);
-    const pulse = sin(depth.mul(9.0).sub(time.mul(1.6))).mul(0.5).add(0.5);
-    const foam = smoothstep(0.55, 0.8, nz.mul(0.55).add(pulse.mul(0.5))).mul(band);
-    col = mix(col, waterUniforms.foam.mul(sunUp.mul(0.6).add(0.5)), foam);
-    alpha = max(alpha, foam);
+    let glint: any = pow(rs, 1400.0).mul(14.0).add(pow(rs, 160.0).mul(1.5));
+    if (level >= 2) {
+      // Glitter needs speckle far finer than the ripples: its own tap, sparks a hand across that wink.
+      const sp = biplanar(detailNoiseTexture(), wp.mul(2.3).add(vec3(time.mul(0.11), time.mul(-0.07), time.mul(0.09))), up);
+      const twinkle = smoothstep(0.62, 0.74, sp.a.mul(0.6).add(sp.r.mul(0.4)).add(sin(time.mul(3.1).add(n1.r.mul(40.0))).mul(0.05)));
+      glint = glint.add(pow(rs, 22.0).mul(twinkle).mul(u.glitter).mul(2.6));
+    }
+    col = col.add(atmo.sunColor.mul(glint));
+    // Foam: a soft line where the water thins out, lapping in and out, its edge torn by the noise.
+    const band = smoothstep(0.42, 0.0, depth).mul(smoothstep(-0.25, 0.0, depth));
+    const lap = sin(depth.mul(14.0).sub(time.mul(1.4)).add(n1.g.mul(5.0))).mul(0.5).add(0.5);
+    const foam = smoothstep(0.5, 0.82, band.mul(0.7).add(n1.r.sub(0.5).mul(0.45).mul(band)).add(lap.mul(band).mul(0.4))).mul(u.foamAmt);
+    col = mix(col, u.foam.mul(sunUp.mul(0.6).add(0.5)), foam.min(1.0));
+    alpha = max(alpha, foam.min(1.0));
+    // Mist lying on the water at a distance, lit by the sky at the horizon.
+    const dist = distance(wp, cameraPosition);
+    const mistAmt = u.mist.mul(smoothstep(12.0, 110.0, dist)).mul(float(1).sub(ndv).pow(1.5));
+    const lum = dot(atmo.horizon as any, vec3(0.2126, 0.7152, 0.0722));
+    col = mix(col, mix(atmo.horizon, u.mistColor.mul(lum.mul(1.2).add(0.03)), 0.55), mistAmt);
+    alpha = max(alpha, mistAmt);
   }
   // Soft shoreline: fade out where the patch meets the terrain.
   alpha = alpha.mul(smoothstep(-0.05, 0.12, depth));

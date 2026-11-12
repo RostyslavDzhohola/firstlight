@@ -6,18 +6,21 @@ import { matchMaker, Server } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import type { TokenVerifier } from "./auth/identity.ts";
-import { directRequestIp } from "./auth/ip.ts";
+import { banKey, directRequestIp } from "./auth/ip.ts";
 import { BodyRoom } from "./world/BodyRoom.ts";
 import { enterSandbox, isBodyId, onlineCount, play, type MatchmakingLimits } from "./world/matchmaking.ts";
 import { identityCheck, storageRecovery, travelRedirect } from "./world/admission.ts";
 import { pendingSeats } from "./world/reservations.ts";
 import { STARTERS } from "@firstlight/shared/content/weapons";
 import { PROTOCOL_VERSION } from "@firstlight/shared/net/protocol";
-import { timingSafeEqual } from "node:crypto";
 import { partyOf, partyRoomFor, playRefusal } from "./social/index.ts";
 import { publicOnlineCount } from "./ops/home.ts";
 import { AGENT_HEADER } from "@firstlight/shared/net/agents";
 import { agentsOnline, claimAgentSlot, releaseAgentSlot } from "./world/agents.ts";
+import { BOT_BUDGET, BOT_SEAT_KEY, botBudget } from "./world/botBudget.ts";
+import { botSecretFromEnv, checkToolSecret, resetToolGuesses } from "./auth/loadtest.ts";
+import { createPlayGate, playBodyRefusal } from "./world/playGate.ts";
+import type { VerifyContext } from "./auth/identity.ts";
 
 export interface GameOptions {
   port: number;
@@ -30,9 +33,11 @@ export interface GameOptions {
   gracefulShutdown?: boolean;
   onShutdown?: () => Promise<void> | void;
   /** When verification fails: is this a validly signed token of a banned account/network? (403 "banned" instead of 401.) */
-  explainRefusal?: (token: string, ip: string | null) => Promise<string | null>;
+  explainRefusal?: (token: string, ip: string | null, ctx?: VerifyContext) => Promise<string | null>;
   /** Accounts: recheck a real account when its seat is used (merged/deleted, banned, signed out). */
-  revalidate?: (userId: string) => string | null;
+  revalidate?: (userId: string, sessionId?: string) => string | null;
+  /** Production: no loopback exemptions from per-address limits (D-security-3, D-security-4). */
+  production?: boolean;
 }
 
 const LOOPBACK: ReadonlySet<string> = new Set(["127.0.0.1", "::1"]);
@@ -66,14 +71,11 @@ export function agentRequested(req: Request): boolean {
   return h === "1" || h === "true" || req.body?.agent === true;
 }
 
-function secretMatches(given: unknown, expected: string): boolean {
-  if (typeof given !== "string" || !expected) return false;
-  const a = Buffer.from(given), b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
 export async function createGame(opts: GameOptions): Promise<Game> {
   identityCheck.current = opts.revalidate ?? (() => null);
+  botBudget.reset();
+  resetToolGuesses();
+  const playGate = createPlayGate(!!opts.production);
   const playCalls = new Map<string, number[]>();
   const ipCalls = new Map<string, number[]>();
   const pruneCalls = setInterval(() => {
@@ -130,12 +132,24 @@ export async function createGame(opts: GameOptions): Promise<Game> {
   });
 
   app.post("/api/play", async (req, res) => {
+    // Before any verification (D-security-3): the request budgets, then the cheap field checks.
+    if (!playGate.admit(directRequestIp(req))) {
+      res.status(429).json({ ok: false, error: "slow down" });
+      return;
+    }
     const auth = req.headers.authorization ?? "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+    const early = token ? playBodyRefusal(req.body) : { status: 401, json: { ok: false, error: "unauthorized" } };
+    if (early) {
+      res.status(early.status).json(early.json);
+      return;
+    }
     const wantsAgent = agentRequested(req);
-    const identity = token ? await opts.verify(token, { ip: directRequestIp(req), toolSecret: toolHeader(req), agent: wantsAgent }) : null;
+    const vctx: VerifyContext = { ip: directRequestIp(req), toolSecret: toolHeader(req), agent: wantsAgent };
+    const identity = token ? await opts.verify(token, vctx) : null;
     if (!identity) {
-      const why = token && opts.explainRefusal ? await opts.explainRefusal(token, directRequestIp(req)).catch(() => null) : null;
+      // The explainer reuses the verification above (vctx.jwt) instead of verifying again.
+      const why = token && opts.explainRefusal ? await opts.explainRefusal(token, directRequestIp(req), vctx).catch(() => null) : null;
       if (why) res.status(403).json({ ok: false, error: why });
       else res.status(401).json({ ok: false, error: "unauthorized" });
       return;
@@ -162,9 +176,10 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     const ip = directRequestIp(req);
     // Per-address limits skip load-test bots and loopback (local development and in-process tests;
     // production requests always carry the edge's client address).
-    const perAddress = !identity.loadtest && !(ip !== null && LOOPBACK.has(ip));
+    // Production has no loopback exemption (D-security-4); addresses are keyed IPv6 per /64.
+    const perAddress = !identity.loadtest && !(!opts.production && ip !== null && LOOPBACK.has(ip));
     if (!identity.loadtest) {
-      const key = ip ?? "unknown";
+      const key = ip ? banKey(ip) : "unknown";
       const fromIp = (ipCalls.get(key) ?? []).filter((t) => now - t < PLAY_LIMITS.windowMs);
       if (perAddress && fromIp.length >= PLAY_LIMITS.ipCalls) {
         res.status(429).json({ ok: false, error: "slow down" });
@@ -172,6 +187,11 @@ export async function createGame(opts: GameOptions): Promise<Game> {
       }
       fromIp.push(now);
       ipCalls.set(key, fromIp);
+    }
+    // Bots: a call budget of their own instead (D-security-1).
+    if (identity.loadtest && !botBudget.takePlayCall(now)) {
+      res.status(429).json({ ok: false, error: "slow down" });
+      return;
     }
     // A change of this account couldn't be saved: not back in until storage works (F12 re-review S5).
     if (!storageRecovery.ok(identity.userId)) {
@@ -194,7 +214,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     const agent = !identity.loadtest && (wantsAgent || !!identity.agent);
     identity.agent = agent;
     if (agent) {
-      identity.agentIp = ip ?? "unknown";
+      identity.agentIp = ip ? banKey(ip) : "unknown"; // the security lane's address rule (D-security-4): IPv6 per /64
       const refused = claimAgentSlot(identity, identity.agentIp, now);
       if (refused) {
         res.status(403).json({ ok: false, ...refused });
@@ -225,9 +245,13 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     const partyRoom = sandbox ? undefined : partyRoomFor(identity.userId, body, typeof req.body.partyLeaderRoomId === "string" ? req.body.partyLeaderRoomId : undefined);
     // Unused-seat caps: checked and claimed together, before any await (F12 re-review S4); the claim
     // becomes the reservation or is released.
-    const seatIp = perAddress ? (ip ?? "unknown") : null;
+    const seatIp = perAddress ? (ip ? banKey(ip) : "unknown") : identity.loadtest ? BOT_SEAT_KEY : null;
     if (!identity.loadtest && (pendingSeats.forUser(identity.userId, now) >= PLAY_LIMITS.userSeats || (seatIp !== null && pendingSeats.forIp(seatIp, now) >= PLAY_LIMITS.ipSeats))) {
       if (agent) releaseAgentSlot(identity.userId);
+      res.status(429).json({ ok: false, error: "slow down" });
+      return;
+    }
+    if (identity.loadtest && pendingSeats.forIp(BOT_SEAT_KEY, now) >= BOT_BUDGET.seats) {
       res.status(429).json({ ok: false, error: "slow down" });
       return;
     }
@@ -262,9 +286,10 @@ export async function createGame(opts: GameOptions): Promise<Game> {
 
   // Load-test and admin metrics: per-room tick time and process usage. Guarded by the load-test secret.
   app.get("/api/metrics", async (req, res) => {
-    const secret = process.env.LOADTEST_SECRET;
-    if (!secret || !secretMatches(req.headers["x-loadtest-secret"], secret)) {
-      res.status(403).json({ error: "forbidden" });
+    const secret = botSecretFromEnv(); // off in production unless LOADTEST_ENABLED=1 (D-security-1)
+    const check = secret ? checkToolSecret(req.headers["x-loadtest-secret"], secret, directRequestIp(req)) : "wrong";
+    if (check !== "ok") {
+      res.status(check === "limited" ? 429 : 403).json({ error: check === "limited" ? "slow down" : "forbidden" });
       return;
     }
     const rooms = await matchMaker.query({ name: "body" });
