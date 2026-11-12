@@ -211,6 +211,11 @@ export class TouchOverlay {
     parent.appendChild(this.root);
     document.documentElement.classList.add("fl-touchmode");
     window.addEventListener("blur", () => this.release());
+    // Any touch anywhere (a menu button, the HUD) makes touch the device again, so the overlay can't be
+    // stranded hidden after a key or a mouse took over.
+    window.addEventListener("pointerdown", (e) => {
+      if (e.pointerType === "touch") host.input.setDevice("touch");
+    }, { capture: true });
   }
 
   /** Start the per-frame sync (visibility, Use, spell state). */

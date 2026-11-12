@@ -224,8 +224,12 @@ export class Input {
   }
 
   lock() {
-    // Phones and tablets without the Pointer Lock API: nothing to ask for (touch looks by dragging).
-    if (typeof this.el.requestPointerLock !== "function") return;
+    // Touch looks by dragging, and phones without the Pointer Lock API (iPhone Safari) have nothing to
+    // ask for: report it as refused, so the pause flow goes back to the game ("free"), where touch is captured.
+    if (this.device === "touch" || typeof this.el.requestPointerLock !== "function") {
+      if (!this.locked) this.onLockError?.();
+      return;
+    }
     // One request at a time (a double click asks once); a request that never settles stops blocking after 2 s.
     if (this.locked || (this.requesting && performance.now() - this.requestedAt < 2000)) return;
     const call = (...opts: [object?]) => (this.el.requestPointerLock as (o?: object) => Promise<void> | void).call(this.el, ...opts);

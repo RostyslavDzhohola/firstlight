@@ -308,6 +308,29 @@ describe("Input device switching", () => {
     expect(input.pressed.has("KeyE")).toBe(true);
   });
 
+  it("touch never asks for pointer lock: the request reports refused, so the pause flow goes back to the game", () => {
+    const el = document.createElement("canvas") as HTMLCanvasElement & { requestPointerLock: () => Promise<void> };
+    let asked = 0;
+    el.requestPointerLock = () => (asked++, Promise.resolve());
+    const input = new Input(el);
+    let refused = 0;
+    input.onLockError = () => refused++;
+    input.setDevice("touch");
+    input.lock();
+    expect(asked).toBe(0);
+    expect(refused).toBe(1);
+  });
+
+  it("a page without the Pointer Lock API (iPhone Safari) reports refused instead of throwing", () => {
+    const el = document.createElement("div");
+    Object.defineProperty(el, "requestPointerLock", { value: undefined });
+    const input = new Input(el);
+    let refused = 0;
+    input.onLockError = () => refused++;
+    expect(() => input.lock()).not.toThrow();
+    expect(refused).toBe(1);
+  });
+
   it("two sticks (pad and touch) add up and clamp to length 1", () => {
     const input = new Input(document.createElement("canvas"));
     input.setMove("pad", 0, 0.8);

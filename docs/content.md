@@ -997,6 +997,21 @@ not hard classes; (3) fixed multipliers, so they grow with the level curve; (4) 
 gain is paid for, and the model checks that no starter is at least as good as another on every stat, that each
 leads at least one role and none leads all, and that no starter duel is more lopsided than 0.6.
 
+### 8.6 Controls: gamepad and touch numbers (D-controls-5, D-controls-6; code `apps/client/src/game/padMapping.ts`, `ui/touchOverlay.ts`)
+
+| What | Value |
+| --- | --- |
+| Stick dead zone (radial, rescaled) | 15 % default, Settings 5–35 % |
+| Response curve exponent | 1.8 default, Settings 1 (linear) – 3 |
+| Look stick at full throw, look speed 1 | 3.5 rad/s yaw (~200°/s), 2.2 rad/s pitch; Settings 0.3–3× |
+| Aim slowdown over a creep (never players, no pull) | look rate × 0.6 within 1.1 m of the crosshair ray, 2–60 m |
+| Triggers count as pressed | past 0.35 |
+| Select held for the players list | 400 ms |
+| Menu focus repeat | first after 380 ms, then every 110 ms |
+| Rumble | hit taken 140 ms (strength 0.35 + damage/60), kill 120–180 ms, own death 450 ms full |
+| Touch stick throw | 56 px; 12 % dead zone; sprint pushed past 1.35× the throw straight ahead |
+| Touch look | 0.0058 rad per px at sensitivity 1 (the mouse sensitivity setting scales it) |
+
 ---
 
 ## 9. Asset sources
