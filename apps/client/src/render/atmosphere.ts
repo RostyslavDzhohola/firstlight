@@ -136,12 +136,13 @@ const starField = Fn(([dir]: [any]) => {
     };
     // density 0.5 lights 0.45% of the cells (the look before per-body skies); 1 about three times as many.
     const bright = layer(150.0, atmo.starDensity.mul(0.007), 0.2, 0.0).mul(6.0);
-    const faint = layer(310.0, atmo.starDensity.mul(0.02), 0.24, 31.0).mul(1.6);
-    // The river: a band round the sky, tilted against the horizon, broken up by the coarse noise.
+    // The river: a band round the sky, tilted against the horizon: a soft glow, mottled by the
+    // coarse noise, with the faint stars crowding into it.
     const axis = normalize(atmo.up.mul(0.42).add(vec3(0.61, 0.2, -0.76)));
-    const band = exp(dot(dir, axis).mul(dot(dir, axis)).mul(-9.0));
-    const n = (texture(detailNoiseTexture(), dir.xz.mul(1.3).add(dir.y.mul(0.7))) as any).level(0);
-    const dust = mix(atmo.starCool, atmo.starWarm, n.g).mul(band.mul(smoothstep(0.32, 0.75, n.g.mul(0.65).add(n.r.mul(0.35))).mul(0.085)));
+    const band = exp(dot(dir, axis).mul(dot(dir, axis)).mul(-11.0));
+    const faint = layer(310.0, atmo.starDensity.mul(band.mul(0.07).add(0.018)), 0.24, 31.0).mul(1.8);
+    const n = (texture(detailNoiseTexture(), vec2(dot(dir, vec3(0.8, 0.1, 0.59)), dot(dir, vec3(-0.59, 0.2, 0.78))).mul(0.9)) as any).level(0);
+    const dust = mix(atmo.starCool, atmo.starWarm, n.g).mul(band.mul(n.g.mul(0.9).add(0.35)).mul(0.03));
     const above = smoothstep(0.02, 0.2, dot(dir, atmo.up));
     out.assign(bright.add(faint).add(dust).mul(above.mul(atmo.stars).mul(atmo.starGain)));
   });

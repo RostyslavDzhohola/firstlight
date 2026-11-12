@@ -434,6 +434,7 @@ export class GrassSystem {
     }
     // Clumps thin out and shorten toward the water: the beach stays sand (terrainMaterial.ts draws it up to ~1.7 m).
     const shoreR = metaArr && Number.isFinite(atmo.waterLevel.value) ? R + atmo.waterLevel.value : -1;
+    const shoreLo = 0.8 * look.shore, shoreHi = 2.3 * look.shore;
     const mask = this.mask;
     const arr = c.attr.array as Float32Array;
     const invTarget = 1 / Math.max(1, target);
@@ -465,8 +466,8 @@ export class GrassSystem {
       if (nearPad || shoreR > 0) {
         const l = Math.sqrt(x * x + y * y + z * z);
         if (nearPad && padGrassMask(this.pads, x / l, y / l, z / l, R) <= 0) continue;
-        if (shoreR > 0 && l - shoreR < 2.8) {
-          const t = Math.min(1, Math.max(0, (l - shoreR - 1.0) / 1.8));
+        if (shoreR > 0 && l - shoreR < shoreHi) {
+          const t = Math.min(1, Math.max(0, (l - shoreR - shoreLo) / (shoreHi - shoreLo)));
           shore = t * t * (3 - 2 * t);
           if (r2 >= gw * shore) continue;
           gw *= shore;

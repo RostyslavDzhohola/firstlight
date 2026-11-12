@@ -8,7 +8,7 @@
 import * as THREE from "three/webgpu";
 import {
   abs, attribute, cameraPosition, cos, cross, distance, float, Fn, fract, length, max, mix, normalize, positionGeometry,
-  positionPrevious, renderGroup, sin, smoothstep, step, time, uniform, vec2, vec3,
+  positionPrevious, pow, renderGroup, sin, smoothstep, step, time, uniform, vec2, vec3,
 } from "three/tsl";
 import type { AirLook } from "./worldLooks.ts";
 import { hash01 } from "@firstlight/shared";
@@ -102,8 +102,8 @@ export const fireflyUniforms = {
   blink: uniform(1).setGroup(renderGroup),
   amount: uniform(0).setGroup(renderGroup),
 };
-/** Half width of the fireflies' box (m) and its height (m): from 1.9 m under the eye to 3.6 m over it. */
-const FLY_HALF = 22, FLY_HEIGHT = 5.5;
+/** Half width of the fireflies' box (m) and its height (m): from 1.75 m under the eye to 3.25 m over it. */
+const FLY_HALF = 16, FLY_HEIGHT = 5;
 
 function fireflyMaterial(): THREE.MeshBasicNodeMaterial {
   const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, fog: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
@@ -137,7 +137,7 @@ function fireflyMaterial(): THREE.MeshBasicNodeMaterial {
   const near = smoothstep(0.6, 2.5, distance(base, cameraPosition));
   const tint = mix(f.colorA, f.colorB, step(0.72, s.w));
   // A hot core in a soft halo, bright enough to bloom.
-  m.colorNode = tint.mul(core.mul(core).mul(3.2).add(core.mul(0.5))).mul(lit.mul(edge).mul(near).mul(f.amount));
+  m.colorNode = tint.mul(pow(core, 4.0).mul(4.5).add(core.mul(core).mul(0.6))).mul(lit.mul(edge).mul(near).mul(f.amount));
   return m;
 }
 

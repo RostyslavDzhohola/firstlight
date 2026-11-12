@@ -183,8 +183,9 @@ function build(layers: number, normals: boolean, fx: boolean): THREE.MeshStandar
       // The beach: warm bright sand up to a ragged line a metre or two above the water, then a wide
       // soft band where it thins into the turf (the grass thins and shortens over the same band, grass.ts).
       const sandH = h.add(d2.mul(2.0));
-      const sandPx = float(1).sub(smoothstep(0.7, 2.6, sandH)).mul(float(1).sub(rockPx.mul(0.7))).mul(step(-0.6, h));
-      const sandCol = g.sand.mul(float(1).add(d1.mul(0.22)).add(coarse.r.sub(0.5).mul(0.12)));
+      const sandPx = float(1).sub(smoothstep(0.6, 2.1, sandH)).mul(float(1).sub(rockPx.mul(0.7))).mul(step(-0.6, h));
+      const tide = sin(h.mul(7.0).add(d2.mul(9.0))).mul(smoothstep(1.6, 0.2, h)).mul(0.045);
+      const sandCol = g.sand.mul(float(1).add(d1.mul(0.26)).add(coarse.r.sub(0.5).mul(0.14)).add(tide));
       col = mix(col, sandCol, smoothstep(0.0, 0.75, sandPx).mul(0.96));
       beach = sandPx;
       // Snow on flat high ground, drifting lower in the noise's hollows.
@@ -195,7 +196,7 @@ function build(layers: number, normals: boolean, fx: boolean): THREE.MeshStandar
     // Fine grain: stronger on rock.
     col = col.mul(float(1).add(d1.mul(mix(0.28, 0.42, rock))));
     // Coarse blotches; on grass they drift towards a sun-dried yellow.
-    const offBeach = beach ? float(1).sub(beach.mul(0.8)) : float(1);
+    const offBeach = beach ? float(1).sub(beach.mul(0.55)) : float(1);
     col = col.mul(float(1).add(d2.mul(0.32).mul(offBeach)));
     const dry = clamp(d2.mul(2.0), 0.0, 1.0).mul(float(1).sub(rock)).mul(offBeach);
     // Rain pools in the coarse noise's hollows on flat ground: where the sheen lies (below).

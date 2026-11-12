@@ -409,7 +409,7 @@ export class Environment {
     atmo.shafts.value = on.shafts ? lowSun * air.shafts * (1 - cloud) * (1 - a * wl.dust) : 0;
     // Mist: what the planet always carries, more in the cool of dawn (the morning half of the low sun) and in rain.
     const morning = this.dayT < 0.5 ? smooth(0.42, 0.06, elev) * smooth(-0.12, 0.0, elev) : 0;
-    atmo.mist.value = on.mist ? Math.min(1.5, air.mist + air.mistDawn * morning + 0.35 * a * wl.wet) : 0;
+    atmo.mist.value = on.mist ? Math.min(1.5, air.mist + air.mistDawn * morning + 0.12 * a * wl.wet) : 0;
     atmo.mistColor.value.setHex(air.mistColor);
     atmo.mistTop.value = air.mistTop;
     this.glowAmount = on.fireflies ? night * air.fireflies * (1 - Math.min(1, a * wl.drops * 1.5)) : 0;

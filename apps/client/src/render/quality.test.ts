@@ -64,6 +64,23 @@ describe("the planets' graphics pass (D-gfx-worlds-1)", () => {
     expect(resolveSettings("high", false, true, stored, new Set(["water"] as const)).on.waterfx).toBe(false);
   });
 
+  it("the second pass (foliage shading, shafts, mist, fireflies) is Medium and up, each with its kill switch", () => {
+    const feats = ["foliagefx", "shafts", "mist", "fireflies"] as const;
+    const low = resolveSettings("low", false, true, stored, new Set());
+    expect(feats.map((f) => low.on[f])).toEqual([false, false, false, false]);
+    expect(low.fireflies).toBe(0);
+    for (const t of ["medium", "high", "ultra"] as const) {
+      const s = resolveSettings(t, false, false, stored, new Set());
+      expect(feats.map((f) => s.on[f]), t).toEqual([true, true, true, true]);
+      expect(s.fireflies).toBeGreaterThan(0);
+      for (const f of feats) expect(resolveSettings(t, false, true, stored, new Set([f])).on[f], `${t} ${f}`).toBe(false);
+    }
+    // Their parents switch them off too: no trees, no foliage shading; no sky, no shafts; no fog, no mist.
+    expect(resolveSettings("high", false, true, stored, new Set(["trees"] as const)).on.foliagefx).toBe(false);
+    expect(resolveSettings("high", false, true, stored, new Set(["sky"] as const)).on.shafts).toBe(false);
+    expect(resolveSettings("high", false, true, stored, new Set(["fog"] as const)).on.mist).toBe(false);
+  });
+
   it("the meadow and clouds2 extras raise Medium to High's clumps and clouds, and give Low nothing", () => {
     const s = withExtras(TIER_TABLE.medium, ["meadow", "clouds2"]);
     expect(s.grass).toEqual({ ...TIER_TABLE.medium.grass, clumps: 2 });

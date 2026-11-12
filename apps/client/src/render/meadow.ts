@@ -324,10 +324,11 @@ export function meadowGrassMaterial(u: MeadowGrassInputs): THREE.MeshLambertNode
   // colour (terrainMaterial.ts `under`), so the gaps between blades read as depth, not as bare earth.
   const ao = mix(float(0.42), float(1), smoothstep(0.0, 0.62, vHf));
   // Clump to clump: a little lighter or darker, and a drift between a blue and a yellow green.
-  const shade = vSeed.mul(0.22).add(0.86);
+  const shade = vSeed.mul(0.3).add(0.82);
   const hue = mix(vec3(0.92, 1.0, 1.06), vec3(1.07, 1.0, 0.86), fract(vSeed.mul(7.31)));
   const sheen = vWave.mul(vHf).mul(vHf).mul(mu.sheen);
-  const bladeCol = mix(rootC, tipC, pow(vHf, 1.25)).mul(shade).mul(hue).mul(ao).mul(float(1).add(sheen));
+  const fresh = smoothstep(0.7, 1.0, vHf).mul(0.22);
+  const bladeCol = mix(rootC, tipC, pow(vHf, 1.25)).mul(shade).mul(hue).mul(ao).mul(float(1).add(sheen).add(fresh));
   const petal = bySpecies(vSpecies, mu.head0, mu.head1, mu.head2, mu.head3);
   const centre = select(vSpecies.lessThan(0.5), mu.eye, petal.mul(0.8));
   const headCol = mix(centre, petal, smoothstep(0.25, 0.45, vRim));

@@ -286,7 +286,7 @@ for (const backendName of ["webgpu", "webgl2"] as const) {
       expectClean(build(renderer, scene, camera, fx.bolt));
       // The second pass: fireflies and spores (one more instanced draw, at night).
       fx.setFireflies(64);
-      expect(fx.flies.material.name).toBe("fireflies");
+      expect((fx.flies.material as THREE.Material).name).toBe("fireflies");
       expectClean(build(renderer, scene, camera, fx.flies));
     });
 
