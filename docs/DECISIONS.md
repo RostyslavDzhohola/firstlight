@@ -1672,3 +1672,58 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   spell's string id; Wishfall takes an explicit ground point or, without one, the ray from the
   caster's head. The server pulls a far or hidden point in rather than refusing it. Why: one small
   shape both the game client and headless agents can send without a camera.
+- **D-gfx-hub-1 (2026-11-12):** avatars rez in, de-rez and break into light shards, on the look's one
+  material. A player who appears (join, portal arrival, fast travel: a jump of over 8 m in a frame,
+  rebirth) materialises under a rising scan plane with a glowing edge, a column of light, a ground
+  ring and shards falling in (1.25 s); one who leaves is taken apart from the head down (0.85 s,
+  `Game.leaving`); one who dies falls for 0.4 s, dissolves into drifting shards (1.7 s) and stays gone
+  until they rise (someone already dead when first seen is just not drawn). `render/rez.ts`: the
+  body's part is two per-object uniforms (feet, cut/dissolve/glow) read by `rezKeep()` in the mask
+  and `rezGlow()` in the emissive of `avatarMaterial()`; the shadow mask stays the camera fade's
+  keep-all, so the lean shadow builds stand (D-load-3) and there is still one build per look
+  (D-load-4): the view stops casting and hides what it holds while most of the body is missing. The
+  light is one shared geometry and additive material (`rezFxMesh`, one draw per running effect),
+  warmed with the avatar samples. Kill switch `?norez` (the Rez toggle), on at every tier. Why: the
+  owner's "avatars materialise out of light"; a new material variant per effect would have undone
+  #39's 48 → 2 shadow pipelines and added first-use stalls.
+- **D-gfx-hub-2 (2026-11-12):** portals are a layered vortex, and they answer. On Medium and up every
+  portal opening (Portus' three arches, the planets' gate A arch or ring) draws
+  `world/portalVortex.ts` instead of the flat membrane: three swirl layers with view parallax, the
+  destination's zenith and horizon colours at the far end, a rim glow, motes drifting inwards, all in
+  one fragment shader on the same single mesh; `Portals.pulseNear()` sends a ring and a flash across
+  the portal someone appeared or vanished in (7 m). Low keeps the plain membrane (`portalfx` is
+  tier-gated; `?noportalfx`). Why: the portals are the hub's centrepiece and were flat blobs of one
+  colour by day; a portal can fill the screen up close, so Low doesn't pay for it (#49).
+- **D-gfx-hub-3 (2026-11-12):** the hologram scoreboard stands south-east of the Portus pad, at
+  (7.2 E, −12.6 N), facing the pad: between the Meridian court and the training yard, off the four
+  streets' lines. An emitter, a cone of light and a 5.0 × 6.6 m panel floating from 2.7 m up
+  (`world/HoloBoard.ts`: three draws, no collider, nothing on the server). It shows the home page's
+  public board (GET `/api/home`, on arrival and every 4 minutes): page 1 "FIRSTLIGHT · TOP
+  TRAVELLERS" (8 by level), page 2 "HALL OF FIRSTS" (4 by medals) and a block for the hunt, which
+  reads "Three trials. Sealed, for now." until someone calls `setHoloHunt({ heading, rows })`
+  (`world/holoBoardModel.ts` `HoloHunt`). Both pages share one canvas texture drawn only when the
+  data changes; the board flips every 11 s with two uniform writes a frame. `?noholo`; Low drops the
+  cone. Why: a public scoreboard everyone can see is part of the shared-universe feel; redrawing a
+  canvas per flip would be a texture upload on the main thread every few seconds.
+- **D-gfx-hub-4 (2026-11-12):** the sky has traffic. `render/skyLife.ts` draws thin light trails
+  between every pair of sky planets and from each down to our horizon, each lane with a few ships
+  (bright head, fading tail); 7 shooting stars on their own 45–125 s clocks at night; and, on High
+  and up, an aurora low in the dark sky in the body's colours. Two additive draws built once per
+  body in the local sky frame, one matrix write a frame, no texture, no atmosphere code touched.
+  Fast-travel pads get a 260 m tapered beam that strengthens from dusk (`beamMaterial`). All under
+  `skylife` (`?noskylife`), off on Low. Why: the owner's "a sky full of other worlds and traffic
+  between them", at a cost that stays in the noise.
+- **D-gfx-hub-5 (2026-11-12):** the post pipeline gets a tone step after the grade, in the same
+  output pass: a filmic S-curve (`toneContrast`, fixed at black, mid-grey and white) and split toning
+  that warms highlights and cools shadows (`toneSplit`), per body in `BODY_TONE` (`render/post.ts`;
+  Portus 0.22 / 0.55, the warmest). Bloom thresholds and strengths are unchanged: with the vortex,
+  the hologram and the pools at their present strengths, emissives bloom at night without washing
+  out the day, and those numbers live in `environment.ts` and `looks.ts` (the worlds lane's). No new
+  pass, no lens effects. Why: the grade was flat in the mid-tones, and Portus' evening read cold; a
+  few instructions in a pass that already runs cost nothing measurable.
+- **D-gfx-hub-6 (2026-11-12):** Portus' ground gets light pools: a warm one under each lamp post from
+  dusk, each portal's colour on the paving in front of it, the scoreboard's under its emitter
+  (`world/lightPools.ts`, one additive mesh draped 11 cm over the ground, one draw; `?nopools`,
+  Medium and up). Not real lights: no material in the town changes and nothing is shadowed. Additive
+  strength has to be near 1 to read on dark paving (at 0.4 the pools were invisible). Why: at night
+  the plaza floor was a flat dark disc under lit windows.

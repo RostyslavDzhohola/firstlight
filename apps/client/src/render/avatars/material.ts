@@ -11,6 +11,7 @@ import { attribute, dot, float, max, mix, normalMap, normalView, positionViewDir
 import type { StarterTextures } from "./assets.ts";
 import { applyOccluderFadeGated } from "../occluderFade.ts";
 import { leanShadow } from "../leanShadow.ts";
+import { rezGlow, rezKeep } from "../rez.ts";
 
 /** docs/content.md §8.3: primary, secondary, accent. */
 export const PALETTES: readonly (readonly [number, number, number])[] = [
@@ -102,12 +103,17 @@ export function avatarMaterial(tex: StarterTextures): THREE.MeshToonNodeMaterial
   const normal = texture(tex.normal, uv());
   m.normalNode = normalMap(normal, vec2(1, -1));
   // NodeMaterial.setupLighting() honours emissiveNode on every node material; the toon typings omit it.
+  // The rez edge (render/rez.ts) glows in the accent, lifted towards white: 0 on an idle avatar.
+  const rezEdge = mix(cAcc, vec3(0.75, 0.95, 1), 0.45).mul(rezGlow() as never).mul(5);
   (m as THREE.MeshToonNodeMaterial & { emissiveNode: THREE.Node | null }).emissiveNode =
-    cAcc.mul(max(role.z, painted)).mul(2.2).add(avatarRim.color.mul(fres).mul(avatarRim.strength));
+    cAcc.mul(max(role.z, painted)).mul(2.2).add(avatarRim.color.mul(fres).mul(avatarRim.strength)).add(rezEdge);
   m.side = THREE.DoubleSide; // cloth is single-sided: robe hems, hoods and sleeves show their insides
   m.name = `avatar-look-${looks++}`;
   // Quest NPCs (keepers, guides) dissolve between the camera and the player; players never (D-view-5).
   applyOccluderFadeGated(m);
+  // Rez-in / de-rez (D-gfx-hub-1): per-object values, the same one shader. Added after the camera
+  // fade so the shadow mask stays its keep-all (lean shadows, D-load-3).
+  m.maskNode = (rezKeep() as unknown as { and(b: THREE.Node): THREE.Node }).and(m.maskNode!);
   // Shadows need no colour: one shadow build for every look and palette (#39, D-load-3).
   leanShadow(m);
   cache.set(tex, { material: m, albedo, normal });

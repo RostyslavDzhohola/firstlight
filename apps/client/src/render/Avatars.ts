@@ -19,6 +19,7 @@ import { applyOccluderFadeGated } from "./occluderFade.ts";
 import { hideBareBones } from "./bareBones.ts";
 import { weaponModel } from "./avatars/weapons.ts";
 import { keptSamples } from "./warmup.ts";
+import { CUT_GONE, CUT_IDLE, rezBody, rezFxMesh, rezMode, rezPose, rezSwitch, type RezBody, type RezFx, type RezKind, type RezPose } from "./rez.ts";
 
 export { preloadAvatars } from "./avatars/assets.ts";
 
@@ -145,6 +146,10 @@ const _fwd = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 const _d = new THREE.Vector3();
+/** The rez light leans from the palette's accent towards this. */
+const _rezTint = new THREE.Color(0xbfefff);
+/** A move of more than this in one frame is a teleport (m): the fastest horse covers under 1 m. */
+export const TELEPORT_M = 8;
 
 type Lod = "full" | "mid" | "far";
 
@@ -213,6 +218,15 @@ export class AvatarView {
   private debugClip: string | null = null;
   private manualDetail = false;
   private localFlags: number | null = null;
+  // Rez-in / de-rez (render/rez.ts): the running effect, the body's shader values, the light mesh.
+  private rezKind: RezKind | null = null;
+  private rezT = 0;
+  private rezGone = false;
+  private rezSolid = true;
+  private rezValues: RezBody | null = null;
+  private rezLight: { mesh: THREE.Mesh; fx: RezFx } | null = null;
+  private readonly rezNow: RezPose = { cut: CUT_IDLE, dissolve: 0, glow: 0, fx: 1, solid: true, done: true };
+  private life = 0;
 
   constructor(palette = 0, starter = 0, look = 0) {
     this.palette = palette;
@@ -263,6 +277,7 @@ export class AvatarView {
       if (def.cls === "ranged" && def.delivery !== "arrow") obj.quaternion.copy(GUN_GRIP);
       socket.add(obj);
       this.weaponObj = obj;
+      obj.visible = this.rezSolid;
       this.applyShadow();
     }
   }
@@ -291,7 +306,110 @@ export class AvatarView {
 
   /** PlayerState.flags (PF): DEAD, BLOCKING, SWIMMING, SCOPED override the animation state. */
   setFlags(bits: number) {
+    const was = this.flagBits & PF.DEAD, is = bits & PF.DEAD;
     this.flagBits = bits;
+    if (is && !was) {
+      // Already dead when we first saw them: no body, no show.
+      if (this.life < 0.5) this.rezHide();
+      else this.rez("death");
+    } else if (!is && was) this.rez("in");
+  }
+
+  /**
+   * Start a rez effect (render/rez.ts): "in" materialises the avatar, "out" takes it apart from the
+   * head down (the caller keeps stepping it with stepRez and disposes it when that returns true),
+   * "death" breaks it into shards and leaves it gone until it rises ("in").
+   */
+  rez(kind: RezKind) {
+    if (!rezSwitch.on) {
+      if (kind === "in") this.rezClear();
+      return;
+    }
+    this.rezKind = kind;
+    this.rezT = 0;
+    this.rezGone = false;
+    this.prepareRez();
+    const [, , accent] = PALETTES[((this.palette % PALETTES.length) + PALETTES.length) % PALETTES.length]!;
+    const light = this.rezLight!;
+    light.fx.color.setHex(accent).lerp(_rezTint, kind === "death" ? 0.25 : 0.5);
+    light.mesh.visible = true;
+    this.applyRez(rezPose(kind, 0, this.rezNow));
+  }
+
+  /**
+   * Give the avatar its (hidden) rez light now, so a warm-up that follows draws it once: the player's
+   * own avatar gets it before the arrival's warm-up, and its first effect builds nothing in play.
+   */
+  prepareRez() {
+    if (this.rezLight) return;
+    this.rezLight = rezFxMesh();
+    this.root.add(this.rezLight.mesh);
+  }
+
+  /** Whether a rez effect is running. */
+  get rezzing(): boolean {
+    return this.rezKind !== null;
+  }
+
+  /** Advance a running effect (set() does it for a placed avatar); true once it has finished. */
+  stepRez(dt: number): boolean {
+    const kind = this.rezKind;
+    if (!kind) return true;
+    this.rezT += dt;
+    const pose = rezPose(kind, this.rezT, this.rezNow);
+    this.applyRez(pose);
+    if (!pose.done) return false;
+    this.rezKind = null;
+    this.rezGone = kind !== "in";
+    if (this.rezLight) this.rezLight.mesh.visible = false;
+    return true;
+  }
+
+  /** Gone without the show (someone who was already dead when they came into view). */
+  private rezHide() {
+    this.rezKind = null;
+    this.rezGone = true;
+    this.rezNow.cut = CUT_GONE;
+    this.rezNow.dissolve = 1;
+    this.rezNow.glow = 0;
+    this.rezNow.solid = false;
+    this.applyRez(this.rezNow);
+    if (this.rezLight) this.rezLight.mesh.visible = false;
+  }
+
+  /** Back to a whole, idle body. */
+  private rezClear() {
+    this.rezKind = null;
+    this.rezGone = false;
+    if (this.rezLight) this.rezLight.mesh.visible = false;
+    this.rezNow.cut = CUT_IDLE;
+    this.rezNow.dissolve = this.rezNow.glow = 0;
+    this.rezNow.solid = true;
+    this.applyRez(this.rezNow);
+  }
+
+  private applyRez(pose: RezPose) {
+    const b = this.rezValues;
+    if (b) {
+      b.feet.copy(this.root.position);
+      if (b.feet.lengthSq() < 1e-6) b.feet.set(0, 1, 0);
+      b.p.set(pose.cut, pose.dissolve, pose.glow);
+    }
+    const l = this.rezLight;
+    if (l && this.rezKind) l.fx.p.set(pose.fx, rezMode(this.rezKind), pose.cut, 1);
+    if (pose.solid !== this.rezSolid) {
+      this.rezSolid = pose.solid;
+      this.applyShadow();
+      this.applyHeld();
+    }
+    // The far-LOD capsule has no dissolve: it just isn't there while the body is gone.
+    this.proxy.visible = pose.cut > CUT_GONE && pose.dissolve < 1;
+  }
+
+  /** What the avatar holds and wears shows only while most of the body is there. */
+  private applyHeld() {
+    if (this.weaponObj) this.weaponObj.visible = this.rezSolid;
+    for (const o of this.attached.values()) o.visible = this.rezSolid;
   }
 
   /** Local prediction for the player's own avatar: when set, these BLOCKING/SCOPED bits replace the
@@ -333,6 +451,7 @@ export class AvatarView {
     this.attached.delete(slot);
     if (!obj) return;
     this.attached.set(slot, obj);
+    obj.visible = this.rezSolid;
     (this.sockets.get(slot) ?? this.root).add(obj);
   }
 
@@ -350,8 +469,13 @@ export class AvatarView {
       const v = Math.min(20, _d.length() / dt);
       this.speed += (v - this.speed) * Math.min(1, dt * 8);
     }
+    // A jump no legs make (fast travel, a rebirth at the pad): the avatar materialises where it lands.
+    if (this.havePrev && dt > 0 && !this.rezGone && this.prevPos.distanceToSquared(_d.set(x, y, z)) > TELEPORT_M * TELEPORT_M) {
+      if (this.rezKind !== "in" || this.rezT > 0.2) this.rez("in");
+    }
     this.prevPos.set(x, y, z);
     this.havePrev = true;
+    this.life += dt;
 
     this.root.position.set(x, y, z);
     _up.set(x, y, z).normalize();
@@ -362,6 +486,7 @@ export class AvatarView {
     _right.crossVectors(_up, _fwd);
     _m.makeBasis(_right, _up, _fwd);
     this.root.quaternion.setFromRotationMatrix(_m);
+    if (this.rezKind) this.stepRez(dt);
 
     if (!this.mixer) {
       this.capsuleMotion(anim, dt);
@@ -391,6 +516,11 @@ export class AvatarView {
     this.teardownModel();
     this.proxy.removeFromParent();
     releaseAvatarObjects(this.proxy);
+    if (this.rezLight) {
+      this.rezLight.mesh.removeFromParent();
+      this.rezLight.mesh.dispose(); // the geometry and material are shared
+      this.rezLight = null;
+    }
     this.root.removeFromParent();
   }
 
@@ -434,7 +564,7 @@ export class AvatarView {
   }
 
   private applyShadow() {
-    const cast = this.lod === "full";
+    const cast = this.lod === "full" && this.rezSolid;
     this.model?.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = cast; });
   }
 
@@ -465,6 +595,13 @@ export class AvatarView {
     this.fit = m === orig ? null : modelStirrupPoint(a, m, new THREE.Vector3()).sub(modelStirrupPoint(a, orig, _d));
     this.model = model;
     this.mesh = mesh;
+    if (mesh) {
+      // The body's rez values live with the mesh; a new look takes over the running effect's.
+      this.rezValues = rezBody(mesh);
+      this.rezValues.feet.copy(this.root.position);
+      if (this.rezValues.feet.lengthSq() < 1e-6) this.rezValues.feet.set(0, 1, 0);
+      this.rezValues.p.set(this.rezNow.cut, this.rezNow.dissolve, this.rezNow.glow);
+    }
     this.makeSockets(model);
     if (!flags.has("allbones")) hideBareBones(model); // the scene walks skip fingers and toes (#49)
     this.proxy.removeFromParent();
@@ -539,6 +676,7 @@ export class AvatarView {
     releaseAvatarObjects(this.model);
     this.model = null;
     this.mesh = null;
+    this.rezValues = null;
     this.sockets.clear();
   }
 
@@ -695,6 +833,11 @@ export function avatarWarmupHook(scene: THREE.Object3D, at: () => THREE.Vector3)
       });
       // Starter 0 → trim colour i: all six proxy + trim materials.
       for (let i = 0; i < PALETTES.length; i++) parts.push(capsule(i, 0));
+      // The rez light (render/rez.ts): one material, drawn dark here.
+      const light = rezFxMesh().mesh;
+      light.frustumCulled = false;
+      light.visible = true; // hidden with the group, like the other samples (its values draw it dark)
+      parts.push(light);
       return parts;
     });
   return {

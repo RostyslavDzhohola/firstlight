@@ -125,8 +125,9 @@ describe("avatar warm-up hook", () => {
     const kept = scene.getObjectByName("avatarWarmup")!;
     expect(kept).toBeTruthy();
     expect(kept.visible).toBe(false); // warmup() shows hidden objects while it runs
-    // One avatar per look, and one far-LOD capsule per palette.
-    expect(kept.children).toHaveLength(mod.avatarWarmupLooks().length + mod.PALETTES.length);
+    // One avatar per look, one far-LOD capsule per palette, and the rez light (render/rez.ts).
+    expect(kept.children).toHaveLength(mod.avatarWarmupLooks().length + mod.PALETTES.length + 1);
+    expect(kept.children.filter((c: { name: string }) => c.name === "rez_fx")).toHaveLength(1);
     expect(mod.AvatarView.all.size).toBe(before); // never ranked by the LOD pass
     const w = watchDisposals(kept);
     hook.forceAll(false);
@@ -137,7 +138,7 @@ describe("avatar warm-up hook", () => {
     const other = new THREE.Scene();
     mod.avatarWarmupHook(other, () => at(50)).forceAll(true);
     expect(other.getObjectByName("avatarWarmup")).toBe(kept);
-    expect(kept.children).toHaveLength(mod.avatarWarmupLooks().length + mod.PALETTES.length);
+    expect(kept.children).toHaveLength(mod.avatarWarmupLooks().length + mod.PALETTES.length + 1);
     for (const c of kept.children) expect(c.position.distanceTo(at(50))).toBeLessThan(1e-6);
     expect(w.disposed.size).toBe(0);
   });

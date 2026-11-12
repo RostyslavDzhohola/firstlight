@@ -16,6 +16,11 @@ import { atmo } from "../render/atmosphere.ts";
 import { disposeTree } from "../render/dispose.ts";
 import { outpostGateStrips } from "./gateStrips.ts";
 import { portalAt } from "./portalEntry.ts";
+import { BEAM_HEIGHT, beamMaterial, PULSE_SECONDS, vortexMaterial, type PortalVortex } from "./portalVortex.ts";
+import type { ResolvedSettings } from "../render/quality.ts";
+
+/** A portal answers (pulses) when someone appears or vanishes within this many metres of its ring centre. */
+export const PULSE_REACH = 7;
 
 export const PORTAL_COLORS: Record<BodyId, number> = {
   portus: 0xffd8a8,
@@ -89,10 +94,16 @@ export class Portals {
   /** The plain pad discs and portal bases a planet's outpost models replace. */
   private readonly padDiscs = new Set<THREE.Object3D>();
   private readonly portalBases: THREE.Object3D[] = [];
-  /** Gate-A portals on a planet: the membrane while the gate model is drawn, else the ring and disc. */
-  private readonly archParts: { membrane: THREE.Object3D; plain: THREE.Object3D[] }[] = [];
   private padModels = false;
   private t = 0;
+  /**
+   * Each portal's fill, plain and vortex (D-gfx-hub-2): `arch` in gate A's opening (null: a ring
+   * portal), `disc` in the ring. One of the four is drawn (refresh()).
+   */
+  private readonly fills: { arch: { plain: THREE.Object3D; vortex: THREE.Object3D } | null; disc: { plain: THREE.Object3D; vortex: THREE.Object3D }; ring: THREE.Object3D; hub: boolean; fx: PortalVortex[]; center: THREE.Vector3 }[] = [];
+  private fx = true;
+  private readonly beams: THREE.Object3D[] = [];
+  private beamsOn = true;
 
   constructor(scene: THREE.Scene, body: BodyId, terrain: Terrain) {
     scene.add(this.group);
@@ -120,7 +131,14 @@ export class Portals {
       disc.position.y = 2.6;
       const base = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 3, 0.4, 32), padMat);
       base.position.y = 0.2;
-      g.add(ring, disc, base);
+      // The vortex in the ring (Medium and up): the same disc, still (the shader swirls).
+      const discFx = vortexMaterial(to, color, { kind: "disc", radius: 2.05 });
+      const discVortex = new THREE.Mesh(disc.geometry, discFx.material);
+      discVortex.name = "portal_vortex";
+      discVortex.position.y = 2.6;
+      g.add(ring, disc, discVortex, base);
+      const fill: (typeof this.fills)[number] = { arch: null, disc: { plain: disc, vortex: discVortex }, ring, hub: def.terrain.kind === "hub", fx: [discFx], center: new THREE.Vector3() };
+      this.fills.push(fill);
       if (def.terrain.kind !== "hub") this.portalBases.push(base);
       if (gate.style === "arch") {
         // Gate A: the membrane fills the arch. Portus' courts always stand; on a planet the gate is an
@@ -128,13 +146,13 @@ export class Portals {
         const shape = new THREE.Shape(archOutline(gate).map(([x, y]) => new THREE.Vector2(x, y)));
         const membrane = new THREE.Mesh(new THREE.ShapeGeometry(shape, 8), membraneMaterial(color, gate));
         membrane.name = "portal_membrane";
-        g.add(membrane);
-        if (def.terrain.kind === "hub") {
-          ring.visible = disc.visible = base.visible = false;
-        } else {
-          this.archParts.push({ membrane, plain: [ring, disc] });
-          membrane.visible = false;
-        }
+        const archFx = vortexMaterial(to, color, { kind: "arch", base: gate.base, spring: gate.spring, half: gate.half });
+        const vortex = new THREE.Mesh(membrane.geometry, archFx.material);
+        vortex.name = "portal_vortex";
+        g.add(membrane, vortex);
+        fill.arch = { plain: membrane, vortex };
+        fill.fx.push(archFx);
+        if (def.terrain.kind === "hub") base.visible = false;
       }
       this.spinners.push(disc);
       place(g, dir, h);
@@ -146,6 +164,7 @@ export class Portals {
       this.group.add(g);
       this.cullables.push({ obj: g, at: dir.clone().multiplyScalar(R + h) });
       const center = dir.clone().multiplyScalar(R + h).addScaledVector(up, 2.6);
+      fill.center.copy(center);
       const label = makeLabel(BODIES[to].name.toUpperCase(), color);
       // Over gate A's floating keystone and globe (9.9 m), or 3.2 m over the ring.
       label.position.copy(center).addScaledVector(up, gate.style === "arch" ? 8.0 : 3.2);
@@ -172,6 +191,10 @@ export class Portals {
       this.group.add(border);
     } else {
       const pads = padDirs(def);
+      const beamGeo = new THREE.CylinderGeometry(1.5, 0.55, BEAM_HEIGHT, 12, 1, true);
+      const thinBeamGeo = new THREE.CylinderGeometry(0.25, 0.25, 60, 8, 1, true);
+      const beamMats: Record<number, THREE.Material> = {};
+      const thinMats: Record<number, THREE.Material> = {};
       // The walled outpost round pad 0 (D-b2-1): its wall is the zone's edge, so pad 0 has no ring of
       // its own; the border is drawn across the gate passages instead, like Portus'.
       const wall = OUTPOSTS[body as OutpostBody]?.wall;
@@ -198,10 +221,17 @@ export class Portals {
         ring.position.y = 0.3;
         place(holder, dir, h);
         if (i === 0 && wall) ring.visible = false;
-        const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 60, 8, 1, true), glow(i === 0 ? 0xffd8a8 : 0x72f1b8, 1.2, 0.25));
-        beam.position.y = 30;
+        // The pad's beam into the sky (D-gfx-hub-4): tall, tapered, strong from dusk; the thin plain one
+        // when the sky's extras are off.
+        const beamColor = i === 0 ? 0xffd8a8 : 0x72f1b8;
+        const beam = new THREE.Mesh(beamGeo, (beamMats[beamColor] ??= beamMaterial(beamColor)));
+        beam.name = "pad_beam";
+        beam.position.y = BEAM_HEIGHT / 2;
+        const thin = new THREE.Mesh(thinBeamGeo, (thinMats[beamColor] ??= glow(beamColor, 1.2, 0.25)));
+        thin.position.y = 30;
         const bh = new THREE.Group();
-        bh.add(beam);
+        bh.add(beam, thin);
+        this.beams.push(beam, thin);
         place(bh, dir, h);
         this.group.add(pad, holder, bh);
         this.padDiscs.add(pad);
@@ -215,6 +245,42 @@ export class Portals {
     for (const spot of this.spots) {
       addPortal(spot.to, new THREE.Vector3(...spot.dir), spot.h, new THREE.Vector3(...spot.facing));
     }
+    this.refresh();
+  }
+
+  /** The portal vortex and the tall pad beams follow their feature switches (Low: the plain ones). */
+  applySettings(s: ResolvedSettings) {
+    this.fx = s.on.portalfx;
+    this.beamsOn = s.on.skylife;
+    this.refresh();
+  }
+
+  /** Which fill each portal draws: the arch's (gate A drawn) or the ring's, vortex or plain. */
+  private refresh() {
+    for (const f of this.fills) {
+      const arch = !!f.arch && (f.hub || this.padModels);
+      if (f.arch) {
+        f.arch.vortex.visible = arch && this.fx;
+        f.arch.plain.visible = arch && !this.fx;
+      }
+      f.ring.visible = !arch;
+      f.disc.vortex.visible = !arch && this.fx;
+      f.disc.plain.visible = !arch && !this.fx;
+    }
+    for (let i = 0; i < this.beams.length; i += 2) {
+      this.beams[i]!.visible = this.beamsOn;
+      this.beams[i + 1]!.visible = !this.beamsOn;
+    }
+  }
+
+  /** Someone appeared or vanished at `pos`: the portal they stand in (within PULSE_REACH) pulses. */
+  pulseNear(pos: THREE.Vector3): boolean {
+    for (const f of this.fills) {
+      if (f.center.distanceToSquared(pos) > PULSE_REACH * PULSE_REACH) continue;
+      for (const v of f.fx) v.pulseAge.value = 0;
+      return true;
+    }
+    return false;
   }
 
   /** The portal the player (feet at `pos`) is standing in, if any (every frame: no allocation). */
@@ -226,16 +292,14 @@ export class Portals {
   setPadModels(on: boolean) {
     this.padModels = on;
     for (const b of this.portalBases) b.visible = !on;
-    for (const a of this.archParts) {
-      a.membrane.visible = on;
-      for (const o of a.plain) o.visible = !on;
-    }
+    this.refresh();
     if (on) for (const d of this.padDiscs) d.visible = false;
   }
 
   update(dt: number, playerPos?: THREE.Vector3, maxDistance = 450) {
     this.t += dt;
     for (const s of this.spinners) s.rotation.z = this.t * 0.6;
+    for (const f of this.fills) for (const v of f.fx) if (v.pulseAge.value < PULSE_SECONDS) v.pulseAge.value = Math.min(PULSE_SECONDS, v.pulseAge.value + dt);
     if (playerPos) {
       for (const c of this.cullables) c.obj.visible = c.at.distanceTo(playerPos) < maxDistance && !(this.padModels && this.padDiscs.has(c.obj));
     }

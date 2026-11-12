@@ -47,6 +47,13 @@ export const FEATURES = [
   "waterfx", // shore foam, ripples, glitter, mist (off: colour by depth + fresnel)
   "aerial", // far terrain drifts toward the planet's haze colour
   "landmarks", // the far-field silhouettes on each planet's horizon
+  // The hub lane (D-gfx-hub): avatar rez-in / de-rez, the portal vortex, the Portus hologram
+  // scoreboard, sky traffic / pad beams / shooting stars / aurora.
+  "rez",
+  "portalfx",
+  "holo",
+  "skylife",
+  "pools",
 ] as const;
 export type Feature = (typeof FEATURES)[number];
 
@@ -296,7 +303,7 @@ export function killSwitches(): Set<Feature> {
   for (const f of FEATURES) if (flags.has(`no${f}`)) off.add(f);
   // ?nopost implies no post effects at all (tone mapping still runs).
   if (off.has("post")) for (const f of ["bloom", "ao", "traa", "fxaa", "grade", "grain", "vignette"] as const) off.add(f);
-  if (off.has("sky")) off.add("skyplanets");
+  if (off.has("sky")) off.add("skyplanets").add("skylife");
   if (off.has("particles")) off.add("motes");
   return off;
 }
@@ -358,6 +365,10 @@ export function resolveSettings(tier: Tier, auto: boolean, webgpu: boolean, stor
   if (on.traa) on.fxaa = false;
   if (!on.sky) on.skyplanets = false;
   if (!on.particles) on.motes = false;
+  // Low keeps the plain portal membrane and an empty sky (D-gfx-hub-2, -4): frame rate first (#49).
+  on.portalfx &&= t >= 1;
+  on.skylife &&= t >= 1 && on.sky;
+  on.pools &&= t >= 1;
   // Cascaded sun shadows only on High/Ultra with shadow maps.
   on.cascades &&= on.shadows && spec.shadows.mode === "map" && t >= 2;
   return { ...spec, tier, auto, webgpu, on, userScale: stored.renderScale, extras: list };

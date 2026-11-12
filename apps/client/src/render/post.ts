@@ -1,12 +1,14 @@
 // Post pipeline (SPEC §7.1): scene pass → [GTAO (WebGPU High/Ultra)] → [TRAA (opt-in)] → bloom →
-// [DoF (photo mode)] → renderOutput (tone map + sRGB) → grade (cdl + saturation + hue) → vignette → grain → FXAA.
+// [DoF (photo mode)] → renderOutput (tone map + sRGB) → grade (cdl + saturation + hue) → tone (a gentle
+// filmic S-curve and split toning per body, D-gfx-hub-5: a few instructions in the same pass) →
+// vignette → grain → FXAA.
 // Everything per-body is a shared uniform, so changing planets never rebuilds shaders; only tier or
 // feature changes rebuild the pipeline.
 
 import * as THREE from "three/webgpu";
 import {
   cdl, convertToTexture, float, fract, hue, interleavedGradientNoise, luminance, mix, mrt, output, pass, renderOutput,
-  screenCoordinate, time, uniform, vec2, vec3, vec4, velocity, renderGroup,
+  screenCoordinate, smoothstep, time, uniform, vec2, vec3, vec4, velocity, renderGroup,
 } from "three/tsl";
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
 import { fxaa } from "three/addons/tsl/display/FXAANode.js";
@@ -15,6 +17,7 @@ import { denoise } from "three/addons/tsl/display/DenoiseNode.js";
 import { dof } from "three/addons/tsl/display/DepthOfFieldNode.js";
 import { traa } from "three/addons/tsl/display/TRAANode.js";
 import { vignette } from "three/addons/tsl/display/CRT.js";
+import type { BodyId } from "@firstlight/shared";
 import type { ResolvedSettings } from "./quality.ts";
 
 export interface GradeParams {
@@ -43,6 +46,9 @@ export const postUniforms = {
   vignette: uniform(0.28).setGroup(renderGroup),
   grain: uniform(0.035).setGroup(renderGroup),
   aoStrength: uniform(0.75).setGroup(renderGroup),
+  // Tone (D-gfx-hub-5): S-curve amount, and how far highlights warm and shadows cool.
+  toneContrast: uniform(0).setGroup(renderGroup),
+  toneSplit: uniform(0).setGroup(renderGroup),
   // Photo mode depth of field (only in the pipeline while photo mode is on).
   dofFocus: uniform(12).setGroup(renderGroup),
   dofFocal: uniform(6).setGroup(renderGroup),
@@ -55,6 +61,48 @@ export function setGrade(g: GradeParams) {
   postUniforms.gradePower.value.set(...g.power);
   postUniforms.gradeSat.value = g.saturation;
   postUniforms.gradeHue.value = g.hue;
+}
+
+/** Per body: `contrast` 0 … 1 of the filmic S-curve, `split` 0 … 1 of the warm-highlight / cool-shadow toning. */
+export interface ToneParams {
+  contrast: number;
+  split: number;
+}
+
+/**
+ * The bodies' tone on top of their grade (D-gfx-hub-5). Portus leans warm: its lit windows and lamps
+ * read as firelight against the evening. Hollowmere is already dark and moody: the lightest curve.
+ */
+export const BODY_TONE: Record<BodyId, ToneParams> = {
+  portus: { contrast: 0.22, split: 0.55 },
+  arcadia: { contrast: 0.18, split: 0.25 },
+  hollowmere: { contrast: 0.12, split: 0.3 },
+  meridian: { contrast: 0.2, split: 0.35 },
+};
+export const NEUTRAL_TONE: ToneParams = { contrast: 0, split: 0 };
+
+/** Highlights lean towards this, shadows towards that (display space, luminance-neutral shifts). */
+export const SPLIT_WARM: readonly [number, number, number] = [0.07, 0.012, -0.075];
+export const SPLIT_COOL: readonly [number, number, number] = [-0.028, 0.0, 0.04];
+
+export function setTone(t: ToneParams) {
+  postUniforms.toneContrast.value = t.contrast;
+  postUniforms.toneSplit.value = t.split;
+}
+
+/** The S-curve on one display-space channel (pure; the shader's formula): fixed at 0, ½ and 1. */
+export function toneCurve(c: number, contrast: number): number {
+  const x = Math.min(1, Math.max(0, c));
+  return x + (x * x * (3 - 2 * x) - x) * contrast;
+}
+
+/** The split-tone shift of one channel `i` for a pixel of luminance `l` (pure; the shader's formula). */
+export function splitShift(l: number, i: 0 | 1 | 2, split: number): number {
+  const sm = (e0: number, e1: number, x: number) => {
+    const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+    return t * t * (3 - 2 * t);
+  };
+  return (SPLIT_WARM[i] * sm(0.5, 1.0, l) + SPLIT_COOL[i] * sm(0.45, 0.0, l)) * split;
 }
 
 export interface PostBuild {
@@ -127,6 +175,13 @@ export function buildPost(scene: THREE.Scene, camera: THREE.Camera, s: ResolvedS
   if (s.on.grade) {
     out = cdl(out, postUniforms.gradeSlope, postUniforms.gradeOffset, postUniforms.gradePower, postUniforms.gradeSat);
     out = vec4(hue(out.rgb, postUniforms.gradeHue), out.a);
+    // Tone: an S-curve (deeper shadows, brighter highlights, mid-grey where it was), then highlights
+    // towards firelight and shadows towards dusk blue. Uniforms: a body change builds nothing.
+    const c = out.rgb.clamp(0, 1);
+    const curved = c.add(c.mul(c).mul(float(3).sub(c.mul(2))).sub(c).mul(postUniforms.toneContrast));
+    const l = luminance(curved);
+    const split = vec3(...SPLIT_WARM).mul(smoothstep(0.5, 1.0, l)).add(vec3(...SPLIT_COOL).mul(smoothstep(0.45, 0.0, l)));
+    out = vec4(curved.add(split.mul(postUniforms.toneSplit)), out.a);
   }
   if (s.on.vignette) out = vec4(vignette(out.rgb, postUniforms.vignette, float(0.55)), out.a);
   if (s.on.grain) {

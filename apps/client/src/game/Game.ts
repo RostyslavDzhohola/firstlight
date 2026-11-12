@@ -10,6 +10,9 @@ import { BODIES, CAMERA_SOLID_KINDS, natureSolids, padDirs, type BodyId, type Na
 import { config, flags } from "../config.ts";
 import { Net, TravelRedirect, type Snapshot } from "../net/Net.ts";
 import { AvatarView, avatarWarmupHook, preloadAvatars } from "../render/Avatars.ts";
+import { rezSwitch } from "../render/rez.ts";
+import { skyLifeFor, type SkyLife } from "../render/skyLife.ts";
+import { BODY_TONE, setTone } from "../render/post.ts";
 import { avatarTexturesFollowTier, setAvatarTextureLowRes } from "../render/avatars/assets.ts";
 import type { ArtPacks } from "../render/artpacks/ArtPacks.ts";
 import { createArtPacks } from "../render/artpacks/env.ts";
@@ -70,6 +73,10 @@ export class Game {
   input!: Input;
   readonly net = new Net();
   readonly avatars = new Map<string, AvatarView>();
+  /** Players who left: their avatars de-rez (render/rez.ts) for a moment, then go. */
+  private readonly leaving = new Set<AvatarView>();
+  /** Traffic between the sky planets, shooting stars, the aurora (render/skyLife.ts). */
+  private skyLife: SkyLife | null = null;
   self!: AvatarView;
   perf!: PerfOverlay;
   particles!: ParticleSystem;
@@ -175,6 +182,9 @@ export class Game {
       this.particles.applySettings(this.ctx.settings);
       this.blobs.applySettings(this.ctx.settings);
       this.applyCharsVisibility();
+      rezSwitch.on = this.ctx.settings.on.rez;
+      this.portals?.applySettings(this.ctx.settings);
+      this.skyLife?.applySettings(this.ctx.settings);
     };
     applyFx();
     this.ctx.onChange(applyFx);
@@ -459,6 +469,8 @@ export class Game {
     this.systems = [];
     for (const a of this.avatars.values()) a.dispose();
     this.avatars.clear();
+    for (const a of this.leaving) a.dispose();
+    this.leaving.clear();
     this.portals?.dispose();
     this.piles?.dispose();
     this.planet?.dispose();
@@ -483,6 +495,10 @@ export class Game {
       stepOut: (pos) => stepOut(pocketSolids, groundR, pos),
     });
     this.portals = new Portals(this.ctx.scene, body, this.planet.terrain);
+    this.portals.applySettings(this.ctx.settings);
+    setTone(BODY_TONE[body]); // the body's filmic curve and split toning, over its grade (render/post.ts)
+    this.skyLife = skyLifeFor(this.ctx.scene, this.planet.look.skyPlanets, body);
+    this.skyLife.applySettings(this.ctx.settings);
     this.audio.setMusic(body);
     this.piles = new PilesView(this.ctx.scene);
 
@@ -558,6 +574,7 @@ export class Game {
       this.self.root.name = "selfAvatar";
       this.self.root.userData.ownAvatar = true; // dissolves with the camera close to it (D-view-5)
     }
+    if (rezSwitch.on) this.self.prepareRez(); // its rez light is drawn (dark) by the warm-up below
     this.ctx.scene.add(this.self.root);
     {
       const p = this.player.pos, f = this.player.facing;
@@ -628,6 +645,11 @@ export class Game {
     // Hand-over: from here a close is a mid-game disconnect (no await until the caller resumes play).
     if (watch) this.net.onLeaveRoom = (code) => this.onRoomClosed(code);
     hideLoading();
+    // The player materialises as the world appears (render/rez.ts); a portal they stand by answers.
+    if (!this.bench) {
+      this.self.rez("in");
+      this.portals?.pulseNear(this.player.pos);
+    }
     // HD art packs download in play: after a short delay and the site download, if it is still running (D-artpacks).
     this.packs.resume({ after: this.planet.town?.settled });
   }
@@ -721,6 +743,7 @@ export class Game {
     this.env.update(1 / 60);
     this.planet.update(f.x, f.y, f.z, this.ctx.camera, performance.now());
     this.env.afterCamera(this.ctx.camera, 1 / 60);
+    this.skyLife?.update(this.ctx.camera);
     this.particles.update(1 / 60, this.ctx.camera.position, performance.now());
   }
 
@@ -817,13 +840,28 @@ export class Game {
         a.root.visible = this.ctx.settings.on.chars;
         this.avatars.set(id, a);
         this.ctx.scene.add(a.root);
+        // Someone arrived: they materialise, and the portal they came through (if any) pulses.
+        a.set(s.x, s.y, s.z, s.fx, s.fy, s.fz, s.anim, 0);
+        a.rez("in");
+        this.portals?.pulseNear(a.root.position);
       }
       a.set(s.x, s.y, s.z, s.fx, s.fy, s.fz, s.anim, dt);
     }
     for (const [id, a] of this.avatars) {
       if (!this.net.remotes.has(id)) {
-        a.dispose();
+        // Gone (left, or through a portal): the avatar de-rezzes where it stood, then is freed.
         this.avatars.delete(id);
+        this.portals?.pulseNear(a.root.position);
+        if (rezSwitch.on && a.root.visible) {
+          a.rez("out");
+          this.leaving.add(a);
+        } else a.dispose();
+      }
+    }
+    for (const a of this.leaving) {
+      if (a.stepRez(dt)) {
+        a.dispose();
+        this.leaving.delete(a);
       }
     }
 
@@ -854,6 +892,7 @@ export class Game {
     this.audio.updateListener(this.ctx.camera);
     if (FX_DEMO && now >= this.nextFxDemo) this.fxDemo(now, focus);
     this.env.afterCamera(this.ctx.camera, dt);
+    this.skyLife?.update(this.ctx.camera);
     this.particles.update(dt, this.ctx.camera.position, now);
     if (this.ctx.settings.on.chars) {
       this.blobs.begin();
