@@ -68,6 +68,12 @@ export class Input {
   /** Analog move from a stick (x right, y forward, length ≤ 1), by source name. */
   private readonly virtualMove = new Map<string, { x: number; y: number }>();
   lmbPressed = false;
+  /**
+   * Alt (the right button) went away this frame by cancellation, not by the player letting go: a pad
+   * unplugged mid-charge, focus lost. Combat drops the charge, draw or guard instead of releasing it
+   * (review #3). Cleared at endFrame.
+   */
+  altCancelled = false;
   /** Camera turn this frame from a stick or a drag, radians (+yaw turns right, +pitch looks up). */
   lookYaw = 0;
   lookPitch = 0;
@@ -210,6 +216,17 @@ export class Input {
     else this.virtualButtons.set(source, [attack, alt]);
   }
 
+  /**
+   * A gamepad or touch source stops holding attack and alt without the player letting go (it was
+   * unplugged, the page lost focus): if alt is no longer held by anyone, combat sees a cancel.
+   */
+  cancelButtons(source: string) {
+    const b = this.virtualButtons.get(source);
+    if (!b) return;
+    this.virtualButtons.delete(source);
+    if (b[1] && !this.rmb) this.altCancelled = true;
+  }
+
   /** A stick's move vector (x right, y forward); length is clamped to 1. Zero clears the source. */
   setMove(source: string, x: number, y: number) {
     if (x === 0 && y === 0) this.virtualMove.delete(source);
@@ -337,6 +354,7 @@ export class Input {
     this.mouseDX = 0;
     this.mouseDY = 0;
     this.lmbPressed = false;
+    this.altCancelled = false;
     this.wheel = 0;
     this.lookYaw = 0;
     this.lookPitch = 0;

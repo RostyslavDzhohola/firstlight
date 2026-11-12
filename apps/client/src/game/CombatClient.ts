@@ -351,6 +351,9 @@ export class CombatClient {
       this.dropMouseActions();
       this.saddleRmb = false;
     }
+    // Alt cancelled (a pad unplugged mid-charge, focus lost), not let go: drop the charge, draw or
+    // guard; the release branch below must not launch a heavy (review #3).
+    if (input.altCancelled) this.dropMouseActions();
     // Keys work in the "Click to look around" state too (Input.inPlay, D-controls-4).
     if (this.deadUntilRespawn || !input.inPlay) return;
 

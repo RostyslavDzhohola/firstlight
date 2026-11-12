@@ -402,3 +402,43 @@ describe("GamepadSource: two pads, one unplugged (review #2)", () => {
     r.dispose();
   });
 });
+
+describe("GamepadSource: unplugged mid-charge (review #3)", () => {
+  it("cancels alt instead of releasing it, so combat drops the charge", () => {
+    const r = rig();
+    const p = pad();
+    r.pads.push(p);
+    p.press(BTN.LT);
+    r.poll();
+    expect(r.input.rmb).toBe(true);
+    r.pads.length = 0;
+    r.src.unplugged(0);
+    expect(r.input.rmb).toBe(false);
+    expect(r.input.altCancelled).toBe(true);
+    r.frame();
+    expect(r.input.altCancelled).toBe(false);
+    r.dispose();
+  });
+
+  it("an intentional let-go is a release, not a cancel", () => {
+    const r = rig();
+    const p = pad();
+    r.pads.push(p);
+    p.press(BTN.LT);
+    r.poll();
+    p.press(BTN.LT, false);
+    r.poll();
+    expect(r.input.rmb).toBe(false);
+    expect(r.input.altCancelled).toBe(false);
+    r.dispose();
+  });
+
+  it("a mouse still holding the right button means nothing is cancelled", () => {
+    const input = new Input(document.createElement("canvas"));
+    input.rmb = true;
+    input.setButtons("pad:0", false, true);
+    input.cancelButtons("pad:0");
+    expect(input.rmb).toBe(true);
+    expect(input.altCancelled).toBe(false);
+  });
+});

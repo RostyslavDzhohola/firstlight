@@ -120,7 +120,7 @@ export class GamepadSource {
 
   /** A pad went away: let go of everything it held (no stuck sprint, trigger, key or Select). */
   unplugged(index: number): void {
-    this.releasePad(index);
+    this.releasePad(index, true);
     this.state.delete(index);
     if (this.active?.index === index) this.active = null;
     if (!this.connected().length) this.releaseAll();
@@ -268,8 +268,11 @@ export class GamepadSource {
     this.host.input.virtualKey(code, false, source);
   }
 
-  /** Let go of what one pad holds: its keys, triggers, stick, sprint latch and Select. */
-  private releasePad(index: number): void {
+  /**
+   * Let go of what one pad holds: its keys, triggers, stick, sprint latch and Select. `cancel` (the pad
+   * was unplugged, focus went): a held alt is cancelled, not released, so no charged heavy launches.
+   */
+  private releasePad(index: number, cancel = false): void {
     const st = this.state.get(index);
     if (!st) return;
     const input = this.host.input;
@@ -279,7 +282,8 @@ export class GamepadSource {
     st.selectAt = 0;
     st.selectTab = false;
     input.setMove(st.source, 0, 0);
-    input.setButtons(st.source, false, false);
+    if (cancel) input.cancelButtons(st.source);
+    else input.setButtons(st.source, false, false);
   }
 
   /** Let go of every pad's held keys, triggers, sticks and sprint. */
