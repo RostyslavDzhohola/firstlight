@@ -22,7 +22,7 @@ import { TrainingDummies } from "../world/TrainingDummies.ts";
 import { DoneCardTimer } from "./doneCardTimer.ts";
 import type { Game } from "./Game.ts";
 import { OnboardingProgress } from "./onboardingProgress.ts";
-import { dummyTargets, guideTargets, nextDummy } from "./onboardingTargets.ts";
+import { dummyCalloutSub, dummyTargets, guideTargets, nextDummy } from "./onboardingTargets.ts";
 import type { StepId } from "./onboardingSteps.ts";
 import type { ClientSystem } from "./systems.ts";
 
@@ -262,7 +262,7 @@ export class OnboardingClient implements ClientSystem {
       const next = nextDummy(this.dummies.dummies.map((d) => d.down), [p.x, p.y, p.z]);
       at = next === null ? null : this.dummies.chest(next, _a).addScaledVector(_b.copy(_a).normalize(), 0.9);
       title = `Training dummies · ${down} / 3 down`;
-      sub = "10 XP each. Three hits knock one down.";
+      sub = dummyCalloutSub(at ? at.distanceTo(p) : 0);
     } else if (step === "portal") {
       const spot = this.portals.find((x) => x.to === "arcadia");
       if (spot) at = _a.set(spot.center[0], spot.center[1], spot.center[2]);

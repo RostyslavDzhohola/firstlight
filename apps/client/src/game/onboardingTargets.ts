@@ -19,6 +19,16 @@ export function dummyTargets(step: StepId | undefined, down: readonly boolean[])
   return out;
 }
 
+/**
+ * The dummy callout's second line: how far the next dummy is once the player is more than a few
+ * strides off (rounded to 5 m so the label isn't re-laid out every frame), then the rules (#31).
+ */
+export function dummyCalloutSub(dist: number): string {
+  const rules = "10 XP each. Three hits knock one down.";
+  if (!(dist > 12)) return rules;
+  return `${Math.max(15, Math.round(dist / 5) * 5)} m away · ${rules}`;
+}
+
 /** What the map and minimap draw besides mission targets; the tutorial sets it while it runs. */
 export const guideTargets: { current: () => GuideTarget[] } = { current: () => [] };
 

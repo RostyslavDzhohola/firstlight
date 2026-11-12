@@ -123,7 +123,7 @@ export class CombatClient {
       else if (m.action === "use" && USE_DENIED[m.reason]) this.hud.toast(USE_DENIED[m.reason]!, "warn");
       else {
         // A refused attack says why (a refused Hexquill bolt used to show nothing at all).
-        const text = attackDeniedText(m.action, m.reason, this.game.bodyId);
+        const text = attackDeniedText(m.action, m.reason, this.game.bodyId, !!this.dummyStep?.());
         if (text && this.deniedGate.allow(text)) this.hud.toast(text, "warn");
       }
     });

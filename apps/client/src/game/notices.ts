@@ -39,9 +39,9 @@ export function immuneText(reason: string): string | null {
 }
 
 /** The notice for a refused attack, or null (not an attack, or a reason players needn't see, like the rate limit). */
-export function attackDeniedText(action: string, reason: string, body?: BodyId): string | null {
+export function attackDeniedText(action: string, reason: string, body?: BodyId, training = false): string | null {
   if (action !== "fire" && action !== "melee") return null;
-  if (reason === "safe zone") return holsteredText(body);
+  if (reason === "safe zone") return holsteredText(body, training);
   return ATTACK_DENIED[reason] ?? null;
 }
 
