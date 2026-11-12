@@ -30,7 +30,9 @@ describe("trial clock and HUD line", () => {
   });
 
   it("collect: pieces of the goal; untimed has no clock; done and failed linger, then hide", () => {
-    expect(trialHud({ msg: msg({ id: "A4", kind: "collect", progress: 2, goal: 5, leftMs: 0, limitMs: 0, next: null }), at: 0 }, 0)).toEqual({ title: "Kite Season", progress: "2 of 5 kite panels", clock: "", tone: "normal" });
+    expect(trialHud({ msg: msg({ id: "A4", kind: "collect", progress: 2, goal: 5, leftMs: 0, limitMs: 0, next: null }), at: 0 }, 0)).toEqual({ title: "Kite Season", progress: "2 of 5 kite panels", clock: "0:00", tone: "normal" });
+    // Untimed: the clock counts up from the attempt's start (D-polish-ux-2).
+    expect(trialHud({ msg: msg({ id: "A4", kind: "collect", progress: 2, goal: 5, leftMs: 0, limitMs: 0, next: null }), at: 5000, since: 1000 }, 13_900)?.clock).toBe("0:12");
     const done = { msg: msg({ id: "T3", kind: "collect", state: "done", progress: 8, goal: 8, limitMs: 240_000, next: null }), at: 0 };
     expect(trialHud(done, 1000)).toMatchObject({ progress: "8 of 8 gleam shards · complete", tone: "done" });
     expect(trialHud(done, 5000)).toBeNull();
@@ -44,7 +46,23 @@ describe("trial clock and HUD line", () => {
     listenTrials({ onMessage: (_t, f) => (cb = f) }, () => 42);
     expect(trialSeen()).toBeNull();
     cb!(msg({}));
-    expect(trialSeen()).toEqual({ msg: msg({}), at: 42 });
+    expect(trialSeen()).toEqual({ msg: msg({}), at: 42, since: 42 });
+  });
+
+  it("an attempt keeps its start across its messages; a new attempt starts again", () => {
+    let cb: ((m: TrialMsg) => void) | null = null;
+    let t = 10;
+    listenTrials({ onMessage: (_t, f) => (cb = f) }, () => t);
+    cb!(msg({ id: "A4", kind: "collect", progress: 0 }));
+    t = 20;
+    cb!(msg({ id: "A4", kind: "collect", progress: 1 }));
+    expect(trialSeen()?.since).toBe(10);
+    t = 30;
+    cb!(msg({ id: "A4", kind: "collect", state: "done" }));
+    expect(trialSeen()?.since).toBe(10);
+    t = 40;
+    cb!(msg({ id: "A4", kind: "collect", progress: 0 }));
+    expect(trialSeen()?.since).toBe(40);
   });
 
   it("an old room delivering late can't overwrite the current room's attempt; its listener is removed", () => {
