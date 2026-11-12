@@ -46,6 +46,7 @@ export const FEATURES = [
   "portalfx",
   "holo",
   "skylife",
+  "pools",
 ] as const;
 export type Feature = (typeof FEATURES)[number];
 
@@ -341,6 +342,7 @@ export function resolveSettings(tier: Tier, auto: boolean, webgpu: boolean, stor
   // Low keeps the plain portal membrane and an empty sky (D-gfx-hub-2, -4): frame rate first (#49).
   on.portalfx &&= t >= 1;
   on.skylife &&= t >= 1 && on.sky;
+  on.pools &&= t >= 1;
   // Cascaded sun shadows only on High/Ultra with shadow maps.
   on.cascades &&= on.shadows && spec.shadows.mode === "map" && t >= 2;
   return { ...spec, tier, auto, webgpu, on, userScale: stored.renderScale, extras: list };

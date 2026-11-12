@@ -55,7 +55,7 @@ function drawPage(g: CanvasRenderingContext2D, x0: number, page: HoloPage) {
   const rowH = page.sections.length > 1 ? 50 : 56;
   for (const s of page.sections) {
     y += 34;
-    g.font = `600 16px ${mono}`;
+    g.font = `600 18px ${mono}`;
     g.fillStyle = DIM;
     g.textAlign = "left";
     g.fillText(s.heading, L, y);
@@ -73,19 +73,19 @@ function drawPage(g: CanvasRenderingContext2D, x0: number, page: HoloPage) {
       y += rowH;
       const top = i === 0;
       g.textAlign = "left";
-      g.font = `600 20px ${mono}`;
+      g.font = `600 22px ${mono}`;
       g.fillStyle = top ? GOLD : DIM;
       g.fillText(r.rank, L, y - (r.note ? 8 : 0));
-      g.font = `${top ? 700 : 600} 26px ${sans}`;
+      g.font = `${top ? 700 : 600} 30px ${sans}`;
       g.fillStyle = top ? GOLD : INK;
-      g.fillText(r.name, L + 44, y - (r.note ? 8 : 0));
+      g.fillText(r.name, L + 46, y - (r.note ? 8 : 0));
       if (r.note) {
-        g.font = `500 14px ${sans}`;
+        g.font = `500 15px ${sans}`;
         g.fillStyle = DIM;
         g.fillText(r.note, L + 45, y + 10);
       }
       g.textAlign = "right";
-      g.font = `700 22px ${mono}`;
+      g.font = `700 24px ${mono}`;
       g.fillStyle = top ? GOLD : INK;
       g.fillText(r.value, R, y - (r.note ? 8 : 0));
     });
@@ -93,7 +93,7 @@ function drawPage(g: CanvasRenderingContext2D, x0: number, page: HoloPage) {
   }
   g.fillStyle = DIM;
   g.fillRect(L, PAGE_H - 58, R - L, 2);
-  g.font = `600 16px ${mono}`;
+  g.font = `600 18px ${mono}`;
   g.textAlign = "center";
   g.fillText(page.footer, x0 + PAGE_W / 2, PAGE_H - 28);
 }

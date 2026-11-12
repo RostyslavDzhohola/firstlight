@@ -39,15 +39,16 @@ describe("the hub lane's feature switches", () => {
   const on = (tier: "low" | "medium" | "high", kills: Feature[] = []) => resolveSettings(tier, false, true, emptyStored(), new Set(kills)).on;
 
   it("are all on from Medium up; Low keeps the plain portals and an empty sky, but still rezzes and shows the board", () => {
-    for (const t of ["medium", "high"] as const) expect([on(t).rez, on(t).portalfx, on(t).holo, on(t).skylife]).toEqual([true, true, true, true]);
-    expect([on("low").rez, on("low").portalfx, on("low").holo, on("low").skylife]).toEqual([true, false, true, false]);
+    for (const t of ["medium", "high"] as const) expect([on(t).rez, on(t).portalfx, on(t).holo, on(t).skylife, on(t).pools]).toEqual([true, true, true, true, true]);
+    expect([on("low").rez, on("low").portalfx, on("low").holo, on("low").skylife, on("low").pools]).toEqual([true, false, true, false, false]);
   });
 
   it("each has its own kill switch, and the sky's extras go with the sky", () => {
-    for (const f of ["rez", "portalfx", "holo", "skylife"] as const) {
+    const mine = ["rez", "portalfx", "holo", "skylife", "pools"] as const;
+    for (const f of mine) {
       const s = on("high", [f]);
       expect(s[f]).toBe(false);
-      for (const g of ["rez", "portalfx", "holo", "skylife"] as const) if (g !== f) expect(s[g]).toBe(true);
+      for (const g of mine) if (g !== f) expect(s[g]).toBe(true);
     }
     expect(on("high", ["sky"]).skylife).toBe(false);
   });

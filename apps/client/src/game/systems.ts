@@ -14,6 +14,7 @@ import { createMissionPointer } from "./MissionPointer.ts";
 import { createMapClient } from "./MapClient.ts";
 import { createAdminModeClient } from "./AdminModeClient.ts";
 import { createHoloBoard } from "../world/HoloBoard.ts";
+import { createLightPools } from "../world/lightPools.ts";
 
 export interface ClientSystem {
   update(dt: number, now: number): void;
@@ -44,3 +45,5 @@ CLIENT_SYSTEMS.push(createMapClient);
 CLIENT_SYSTEMS.push(createAdminModeClient);
 // Hub graphics lane (D-gfx-hub-3): the hologram scoreboard in Portus' plaza.
 CLIENT_SYSTEMS.push(createHoloBoard);
+// Hub graphics lane (D-gfx-hub-6): lamp and portal light pools on Portus' ground.
+CLIENT_SYSTEMS.push(createLightPools);
