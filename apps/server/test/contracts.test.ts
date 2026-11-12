@@ -49,6 +49,7 @@ const MEDAL_NEEDS: Record<string, string[]> = {
   grand_tour: ["game:travel"],
   cartographer: [], // pad touches are checked on the quest tick
   errand_runner: ["npc:kill", "message:interact"], // all nine missions (reach is checked on the tick)
+  three_gleams: ["message:interact"], // the Gleam Vault (race and collect are checked on the tick, defend starts on interact)
   tide_turner: ["npc:bossKill"],
   regicide: ["npc:bossKill"],
   decommissioned: ["npc:bossKill"],

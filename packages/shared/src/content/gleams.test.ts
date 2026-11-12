@@ -7,6 +7,8 @@ import { BODIES, PLANET_IDS } from "../planet/bodies.ts";
 import { createTerrain } from "../planet/terrain.ts";
 import { nearSafeZone } from "../planet/zones.ts";
 import { structureCollider } from "../planet/sites.ts";
+import { natureSolids } from "../planet/natureSolids.ts";
+import { offsetDir } from "./places.ts";
 import { bossArena } from "./arenas.ts";
 import { MISSIONS } from "./missions.ts";
 import { TRAINING_DUMMIES } from "./onboarding.ts";
@@ -23,8 +25,18 @@ describe("trial sites", () => {
       const arena = bossArena(t);
       const eggs = WORLD_OBJECTS.filter((o) => o.body === body && o.egg).map((o) => objectPos(o, g));
       const sc = structureCollider(t);
+      const ns = natureSolids(t);
       for (const { m, o } of SITES.filter((s) => s.o.body === body)) {
         const p = objectPos(o, g);
+        expect(o.clearing, `${o.id} leaves the frozen props alone`).toBe(false);
+        // No tree or rock within 3 m of the spot (they stay put: `clearing: false`).
+        ns.warm(p[0], p[1], p[2], 12, Infinity);
+        const l = Math.hypot(p[0], p[1], p[2]);
+        for (const [e, n] of [[0, 0], [1.5, 0], [-1.5, 0], [0, 1.5], [0, -1.5], [3, 0], [-3, 0], [0, 3], [0, -3]] as const) {
+          const d = offsetDir([p[0] / l, p[1] / l, p[2] / l], e, n, BODIES[body].radius);
+          const r = BODIES[body].radius + t.groundHeight(d[0], d[1], d[2]) + 0.3;
+          expect(ns.isClear({ x: d[0] * r, y: d[1] * r, z: d[2] * r }), `${o.id} nature at ${e},${n}`).toBe(true);
+        }
         const d = Math.hypot(p[0], p[1], p[2]);
         const ground = t.groundHeight(p[0] / d, p[1] / d, p[2] / d);
         expect(ground, `${o.id} dry`).toBeGreaterThan(BODIES[body].waterLevel);

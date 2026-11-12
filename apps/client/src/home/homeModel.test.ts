@@ -53,7 +53,7 @@ describe("home model", () => {
 
   it("puts claimed Hall of Firsts plaques first, the rest as mysteries", () => {
     const rows = hallRows([{ id: "boss:tidewrath", name: "Mossback", foundAt: Date.UTC(2026, 9, 14) }]);
-    expect(rows).toHaveLength(15);
+    expect(rows).toHaveLength(16); // 12 eggs, 3 bosses, the Gleam Vault
     expect(rows[0]).toEqual({ label: "Tidewrath falls", name: "Mossback", date: "Oct 14" });
     expect(rows[1]).toEqual({ label: "Secret 1 · Arcadia", name: null, date: null });
   });
