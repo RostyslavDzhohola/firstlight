@@ -1787,3 +1787,14 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   finding B1: after D-fixes-2 a paid dummy, a death and the rest of the tutorial paid 40 XP, so the
   tutorial ended for good at level 1 with saving locked. Topping up at completion, not at the rebirth,
   is the only point that pays once whatever the number of deaths.
+- **D-fixes-5 (2026-11-12):** The camera and the controller ease by game time, not by frames (review
+  B2, with D-fixes-1): `placeCamera(camera, dt)` moves the shoulder swap at 4.8 shoulder units/s
+  (~0.42 s right to left at any frame rate; it was 0.08 per placement, 6.25 s at 4 fps) and eases the
+  lens back out at 15 m/s (0.25 m per placement). Every `min(1, k·dt)` smoothing in them is now
+  `easeShare(k, dt)` (`game/frameClock.ts`): the share a 60 fps frame gave, compounded over the
+  frame, so 60 fps is unchanged and 4 fps lands in the same place at the same time: ground and air
+  acceleration, the roll's slow-down, the facing turn (aiming 18, walking 10, riding 6), the scope's
+  field-of-view zoom (14) and the saddle camera's blend (3). Feet within 1 mm above a prop top after
+  a frame's move land on it (a flat top's radius grows off its centre; a hair of drift left a fall
+  hovering for a frame). Why: since D-fixes-1 a slow frame advances in full, so a fixed step per
+  placement made the camera crawl at low frame rates and the linear factors snapped.

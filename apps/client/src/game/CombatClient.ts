@@ -16,6 +16,7 @@ import { zoneInfo } from "../ui/zoneLabel.ts";
 import { PhraseWheel } from "../ui/phraseWheel.ts";
 import type { Game } from "./Game.ts";
 import { setStarterMove } from "./PlayerController.ts";
+import { easeShare } from "./frameClock.ts";
 import { openSaveProgress } from "../ui/account.ts";
 import { closeDeath, type DeathInfo } from "../ui/death.ts";
 import { DeathFlow } from "./deathFlow.ts";
@@ -360,7 +361,7 @@ export class CombatClient {
     if (!input.locked) {
       const cam = g.ctx.camera;
       if (Math.abs(cam.fov - this.baseFov) > 0.1) {
-        cam.fov += (this.baseFov - cam.fov) * Math.min(1, dt * 14);
+        cam.fov += (this.baseFov - cam.fov) * easeShare(14, dt);
         cam.updateProjectionMatrix();
       }
       return;
@@ -382,7 +383,7 @@ export class CombatClient {
       this.heavyDueAt = 0;
       g.self?.setLocalFlags(0);
       if (Math.abs(cam.fov - this.baseFov) > 0.1) {
-        cam.fov += (this.baseFov - cam.fov) * Math.min(1, dt * 14);
+        cam.fov += (this.baseFov - cam.fov) * easeShare(14, dt);
         cam.updateProjectionMatrix();
       }
       // Patchkit: right mouse patches yourself here too (edge-triggered).
@@ -456,7 +457,7 @@ export class CombatClient {
     const zoom = this.scoped ? (t.zoom ?? 1.35) : 1;
     const targetFov = this.baseFov / zoom;
     if (Math.abs(cam.fov - targetFov) > 0.1) {
-      cam.fov += (targetFov - cam.fov) * Math.min(1, dt * 14);
+      cam.fov += (targetFov - cam.fov) * easeShare(14, dt);
       cam.updateProjectionMatrix();
     }
 
