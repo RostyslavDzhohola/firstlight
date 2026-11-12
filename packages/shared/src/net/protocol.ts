@@ -272,6 +272,11 @@ export type ServerMessages = {
   trial: TrialMsg;
   /** A spell was cast, landed, or a ward changed (content/spells.ts). */
   spell: SpellEvent;
+  /**
+   * Hunt news for everyone else in the room (the client's event feed, D-ui-3): `name` won a gleam
+   * (`mission`: T1–T3) or opened the Gleam Vault. Display name only. Older clients ignore it.
+   */
+  news: { kind: "gleam" | "vault"; name: string; mission?: string };
 };
 
 /**

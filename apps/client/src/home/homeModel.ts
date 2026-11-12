@@ -17,6 +17,19 @@ const BLURB: Record<BodyId, string> = {
   hollowmere: "Violet dusk over Mourning Mere. The Hollow Court keeps the fen.",
   meridian: "Red canyons and chrome spires, run by Meridian Oversight.",
 };
+/** One line per world: the world cards' headline and the in-game arrival card (ui/arrivalCard.ts). */
+const LINE: Record<BodyId, string> = {
+  portus: "The castle town between the worlds",
+  arcadia: "Golden meadows round Glasswater Lake",
+  hollowmere: "Violet dusk over Mourning Mere",
+  meridian: "Red canyons and chrome spires",
+};
+export const worldLine = (id: BodyId): string => LINE[id];
+/** "Levels 1–7"; Portus: "Safe · Lv 1–2" (the creeps outside its walls). */
+export function worldLevels(id: BodyId): string {
+  const b = BODIES[id];
+  return b.levels[1] > 0 ? `Levels ${b.levels[0]}–${b.levels[1]}` : `Safe · Lv ${PORTUS_LEVELS[0]}–${PORTUS_LEVELS[1]}`;
+}
 const PADS: Record<string, number> = { icosa: 12, dodeca: 20, none: 0 };
 /** Portus: the town is safe; the creeps outside its walls (D-zones-1) span these levels. */
 const PORTUS_LEVELS = (() => {
@@ -27,6 +40,8 @@ const PORTUS_LEVELS = (() => {
 export interface WorldCard {
   id: BodyId;
   name: string;
+  /** The short headline line ("Golden meadows round Glasswater Lake"). */
+  line: string;
   blurb: string;
   /** "Levels 1–7"; for Portus "Safe · Lv 1–2" (the creeps outside its walls; short enough to fit the header beside the planet). */
   levels: string;
@@ -42,8 +57,9 @@ export function worldCards(online: HomeOnline | null): WorldCard[] {
     return {
       id,
       name: b.name,
+      line: LINE[id],
       blurb: BLURB[id],
-      levels: b.levels[1] > 0 ? `Levels ${b.levels[0]}–${b.levels[1]}` : `Safe · Lv ${PORTUS_LEVELS[0]}–${PORTUS_LEVELS[1]}`,
+      levels: worldLevels(id),
       players: online?.bodies[id]?.players ?? 0,
       boss: boss ? { name: npcDef(boss.id).name, level: boss.level } : null,
       pads: PADS[b.padLayout] ?? 0,

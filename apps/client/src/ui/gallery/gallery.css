@@ -14,3 +14,5 @@
 .fl-gallery-nav { position: fixed; left: 8px; bottom: 8px; z-index: 999; display: flex; flex-wrap: wrap; gap: 4px; max-width: 70vw; font: 500 13px/1 ui-monospace, monospace; }
 .fl-gallery-nav a { padding: 4px 6px; border-radius: 3px; background: rgba(0, 0, 0, .6); color: #bcc2cc; text-decoration: none; }
 .fl-gallery-nav a.is-on { color: #ffd99b; }
+/* The combat screen: the hit ring and the kill mark are Web Animations (they run to their end); hold them up for the still. */
+.fl-gallery-combat .fl-hitfrom > i, .fl-gallery-combat .fl-killmark, .fl-gallery-combat .fl-hitmark { opacity: 1 !important; }

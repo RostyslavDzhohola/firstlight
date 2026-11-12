@@ -224,6 +224,9 @@ const HUD_PARTS: [string, string][] = [
   ["voiceSlot", ".fl-hud__br"],
   ["saveCard", ".fl-savecard"],
   ["prompt", ".fl-prompt"],
+  ["banner", ".fl-moment"],
+  ["arrival", ".fl-arrive"],
+  ["feed", ".fl-feed__line"],
 ];
 
 const r1 = (v: number) => Math.round(v * 10) / 10;
@@ -285,6 +288,12 @@ export function installE2eHook(win: Window & typeof globalThis): void {
           seenToasts.add(n);
           push({ t: performance.now(), kind: "toast", text: n.textContent ?? "", cls: n.className });
         }
+  });
+
+  // Earned banners (ui/momentsView.ts) replaced some toasts ("Level 3!", "Mission complete: …"): the same record.
+  win.addEventListener("fl:moment", (e) => {
+    const d = (e as CustomEvent<{ kind: string; text: string }>).detail;
+    push({ t: performance.now(), kind: "toast", text: d.text, cls: `fl-moment is-${d.kind}` });
   });
 
   // ---- room messages (re-attached after every travel)

@@ -10,6 +10,7 @@ import "../styles/landing.css";
 import "../styles/home.css";
 import "../styles/loading.css";
 import "./gallery.css";
+import "../trial.css";
 import "../../social/social.css";
 import indexHtml from "../../../index.html?raw";
 import type { Game } from "../../game/Game.ts";
@@ -36,9 +37,16 @@ import { OnboardingSteps } from "../../game/onboardingSteps.ts";
 import { ANIM } from "@firstlight/shared/net/schema";
 import { INVENTORY_HTML, ONBOARDING_HTML } from "./kitExamples.ts";
 import { paintHomeMock } from "../../home/home.ts";
+import { arrivalCard } from "../arrivalCard.ts";
+import { feedText } from "../eventFeed.ts";
+import { levelMoments, medalMoment, missionMoments, type Moment } from "../moments.ts";
+import { SpellBar } from "../spellBar.ts";
+import { SPELLS } from "@firstlight/shared/content/spells";
+import type { BodyId } from "@firstlight/shared/planet/bodies";
 import type { HomeData } from "@firstlight/shared/net/home";
 
 const SCREENS = [
+  "moment-level", "moment-spell", "moment-mission", "moment-trial", "moment-gleam", "moment-vault", "moment-medal", "arrival", "arrival-portus", "arrival-hollowmere", "arrival-meridian", "hud-full", "hud-combat",
   "landing", "home-guest", "loading", "loading-compact", "loading-webgpu", "charpick", "charpick-rebirth", "hud", "hud-oversight", "hud-states",
   "death", "death-player", "death-party", "death-world", "menu", "menu-logout", "settings",
   "players", "compass", "wheel", "shop", "journal", "invite", "removed", "kit-inventory", "kit-onboarding", "inventory", "inventory-drag", "onboarding", "onboarding-attack", "onboarding-loot", "onboarding-portal", "onboarding-done", "save", "save-code", "save-saved", "save-busy", "save-unavailable", "save-locked", "signin", "signin-unavailable", "name", "notice",
@@ -213,6 +221,85 @@ function party() {
   });
 }
 
+/** One of each banner (D-ui-2), from the same builders the game uses. */
+const MOMENTS: Record<string, () => Moment> = {
+  level: () => levelMoments(6, 7)[0]!,
+  spell: () => levelMoments(2, 3)[1]!,
+  mission: () => missionMoments("A3", 180, 60)[0]!,
+  trial: () => missionMoments("T1", 300, 80)[0]!,
+  gleam: () => missionMoments("T1", 300, 80, [{ id: "T2", done: true }])[1]!,
+  vault: () => missionMoments("vault", 0, 600)[0]!,
+  medal: () => medalMoment("demolition_crew")!,
+};
+
+/** A calm HUD (player card, hotbar, spell bar and aether, a minimap stand-in) for the moments screens. */
+function quietHud(body: BodyId = "arcadia"): Hud {
+  gameEl.className = "fl-gallery-world";
+  const hud = new Hud();
+  hud.root.dataset.body = body;
+  hud.setIdentity("Wren_07", 3, 0);
+  hud.setYou(you());
+  hud.setHp(132, 160);
+  hud.setZone({ zone: "danger", label: "Danger", place: "The wilds", title: "", sub: "" });
+  const bar = new SpellBar(hud.spellSlot, hud.aetherSlot);
+  bar.update({
+    aether: 64, max: 100, ward: null,
+    slots: SPELLS.map((s, i) => ({ id: s.id, name: s.name, keycap: s.keycap, level: s.level, locked: i === 3, cooldown: i === 1 ? 4.2 : 0, cooldownFrac: i === 1 ? 0.42 : 0, short: false, ready: i !== 1 && i !== 3, cost: s.cost })),
+  });
+  const mm = el("div", "fl-minimap", hud.minimapSlot);
+  mm.style.width = mm.style.height = "150px";
+  return hud;
+}
+
+function showMoment(hud: Hud, m: Moment) {
+  hud.moments.push(m);
+  hud.moments.tick(performance.now());
+}
+
+function fullHud(combat: boolean): Hud {
+  const hud = quietHud();
+  hud.setMissions(
+    [
+      { id: "b", title: "The Lost Bell", detail: "Find the Shepherd's Bell at Lacefall", progress: "380 m", state: "tracked" },
+      { id: "c", title: "The Big Lake", detail: "Reach the Gull Point overlook", progress: "0/1" },
+    ],
+    "Lark · Arcadia",
+  );
+  const now = performance.now();
+  hud.moments.feed("join", feedText.joined({ name: "Mossback" }), now);
+  hud.moments.feed("hunt", feedText.wonGleam({ name: "Tin_Lantern", agent: true }, "The Swift Gleam"), now);
+  hud.moments.feed("death", feedText.fell({ name: "Pip_Hexer" }, "Hopbit Bruiser"), now);
+  hud.moments.feed("kill", feedText.felled("Hopbit", 12, 3), now);
+  // The trial strip, as game/TrialClient.ts builds it.
+  const top = hud.root.querySelector(".fl-hud__top")!;
+  const trial = el("section", "fl-trial fl-holo fl-corners is-normal", top);
+  const text = el("div", "fl-trial__text", trial);
+  el("span", "fl-trial__title", text, "The Swift Gleam");
+  el("span", "fl-trial__progress", text, "Ring 4 of 8");
+  el("span", "fl-trial__clock", trial, "0:41");
+  showMoment(hud, MOMENTS[q.get("m") ?? "level"]!());
+  hud.toast("+8", "coins");
+  hud.toast("Not enough aether for Wishfall", "warn");
+  const v = el("div", "fl-holo", hud.voiceSlot);
+  v.append("Hold ");
+  el("span", "fl-key", v, "V");
+  v.append(" to talk");
+  if (combat) {
+    hud.setHp(34, 160);
+    const w = innerWidth, h = innerHeight;
+    hud.damageNumber(w * 0.56, h * 0.4, 47, true);
+    hud.damageNumber(w * 0.6, h * 0.44, 31, false);
+    hud.damageNumber(w * 0.64, h * 0.4, 6, false, "armour");
+    hud.damageNumber(w * 0.6, h * 0.5, 12, false, "shield");
+    hud.hit(true);
+    hud.moments.hitFrom(118, now);
+    hud.moments.hitFrom(250, now);
+    hud.moments.kill();
+    hud.root.classList.add("fl-gallery-combat");
+  }
+  return hud;
+}
+
 async function run() {
   const nav = el("nav", "fl-gallery-nav", document.body);
   if (q.has("nav")) for (const s of SCREENS) el("a", s === screen ? "is-on" : "", nav, s).setAttribute("href", `?screen=${s}&nav`);
@@ -246,6 +333,29 @@ async function run() {
       void hud.characterPick(screen === "charpick" ? { askName: { suggested: "Wren_07" } } : { rebirth: true });
       break;
     }
+    case "moment-level":
+    case "moment-spell":
+    case "moment-mission":
+    case "moment-trial":
+    case "moment-gleam":
+    case "moment-vault":
+    case "moment-medal":
+      showMoment(quietHud(), MOMENTS[screen.slice(7)]!());
+      break;
+    case "arrival":
+    case "arrival-portus":
+    case "arrival-hollowmere":
+    case "arrival-meridian": {
+      const body = (screen.split("-")[1] ?? "arcadia") as BodyId;
+      quietHud(body).moments.arrival(arrivalCard(body));
+      break;
+    }
+    case "hud-full":
+      fullHud(false);
+      break;
+    case "hud-combat":
+      fullHud(true);
+      break;
     case "hud":
       hudScene("monster");
       break;
