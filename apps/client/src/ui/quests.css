@@ -12,7 +12,18 @@
 .fl-q .tab.on { color: var(--paper); }
 .fl-q .tab.on::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--dawn-3); }
 .fl-q select.tab { height: calc(2 * var(--u)); padding: 0 calc(.4 * var(--u)); border: 1px solid var(--line-3); border-radius: var(--r-2); background: rgba(0, 0, 0, .35); color: var(--paper); text-transform: none; letter-spacing: 0; font-family: var(--font-mono); }
-.fl-q .body { overflow: auto; flex: 1; min-height: calc(8 * var(--u)); padding-right: calc(.3 * var(--u)); }
+.fl-q .body { overflow: auto; flex: 1; min-height: calc(8 * var(--u)); padding-right: calc(.3 * var(--u)); scrollbar-width: thin; scrollbar-color: rgba(255, 217, 155, .6) rgba(0, 0, 0, .35); scrollbar-gutter: stable; }
+/* Short screens (720 px tall and less, D-polish-ux-4): tighter cards so Sela's three trials and their buttons fit; the body still scrolls, with a visible bar. */
+@media (max-height: 800px) {
+  .fl-q { max-height: 94vh; padding: calc(.9 * var(--u)) calc(1.2 * var(--u)); }
+  .fl-q h2 { font-size: var(--t-xl); }
+  .fl-q .sub { margin-bottom: var(--sp-2); }
+  .fl-q .quote { margin-bottom: var(--sp-2); }
+  .fl-q .mission { padding: calc(.5 * var(--u)) var(--sp-3); }
+  .fl-q .mission .obj { margin: calc(.25 * var(--u)) 0; }
+  .fl-q .mission > .top:last-child { margin-top: calc(.35 * var(--u)) !important; }
+  .fl-q .foot { margin-top: var(--sp-2); }
+}
 .fl-q .cat { margin: var(--sp-3) 0 calc(.4 * var(--u)); font: 600 var(--t-xs)/1.2 var(--font-display); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--dawn-3); }
 .fl-q .row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--sp-3); align-items: center; padding: calc(.45 * var(--u)) calc(.6 * var(--u)); border-bottom: 1px solid var(--line-1); }
 .fl-q .row:hover { background: rgba(255, 255, 255, .03); }
@@ -30,6 +41,7 @@
 .fl-q .mission .ty { height: calc(1.4 * var(--u)); display: inline-flex; align-items: center; padding: 0 calc(.45 * var(--u)); font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: .1em; text-transform: uppercase; border-radius: var(--r-1); border: 1px solid var(--photon-line); color: var(--photon); }
 .fl-q .mission .obj { margin: calc(.4 * var(--u)) 0; color: var(--paper-2); }
 .fl-q .mission .rw { color: var(--fog-3); font-size: var(--t-xs); }
+.fl-q .mission .way { color: var(--photon); }
 .fl-q .mission .bar { height: 4px; background: rgba(0, 0, 0, .5); overflow: hidden; margin: var(--sp-2) 0 calc(.3 * var(--u)); }
 .fl-q .mission .bar i { display: block; height: 100%; background: linear-gradient(90deg, #ffb547, #ffe6b8); }
 .fl-q .mission.done { opacity: .6; }

@@ -172,7 +172,7 @@ export class CuratorPanel extends Panel {
     const trials = missionsFrom(c.id);
     for (const def of trials) {
       missionCard(body, def, you, (row) => {
-        el("span", "rw", row, `Trial ${def.trial} · ${def.body[0]!.toUpperCase()}${def.body.slice(1)}`);
+        el("span", "rw", row, `Trial ${def.trial}`); // the card's way line names the planet (D-polish-ux-3)
         el("span", "quote", row, `“${def.pitch}”`).style.margin = "0";
         const state = you?.missions.find((m) => m.id === def.id);
         if (!state) el("button", "btn", row, "Accept").onclick = () => send(this.game, "mission", { action: "accept", id: def.id });
