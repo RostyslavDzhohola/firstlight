@@ -133,6 +133,31 @@ describe("the hero's cross-fade", () => {
     expect(box().querySelector("img.is-on")!.getAttribute("src")).toBe("c.webp");
     stop();
   });
+
+  it("parks with no timer while hidden when it can be woken, and resumes on show", async () => {
+    const loaded: string[] = [];
+    let visible = true;
+    let wakeFn: (() => void) | null = null;
+    let unsubscribed = false;
+    const stop = startHeroStills(box(), stills, {
+      holdMs: 1000, fadeMs: 100, visible: () => visible, load: async (src) => (loaded.push(src), true),
+      wake: (fn) => ((wakeFn = fn), () => (unsubscribed = true)),
+    });
+    visible = false;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(loaded).toEqual([]);
+    expect(vi.getTimerCount()).toBe(0); // nothing reschedules itself for the session
+    wakeFn!(); // a wake while still hidden (tab back, landing still under the loader) stays parked
+    expect(vi.getTimerCount()).toBe(0);
+    visible = true;
+    wakeFn!();
+    wakeFn!(); // a second wake doesn't start a second clock
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(loaded).toEqual(["b.webp"]);
+    stop();
+    expect(unsubscribed).toBe(true);
+  });
 });
 
 describe("the sections under the hero", () => {

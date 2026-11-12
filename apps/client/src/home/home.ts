@@ -149,6 +149,12 @@ export interface HeroStillsOptions {
   still?: boolean;
   /** The page is on screen (not under the loader, not a hidden tab): only then does the next still load. */
   visible?: () => boolean;
+  /**
+   * Subscribe to changes of `visible` (the landing page shown or hidden, the tab hidden or back);
+   * returns the unsubscribe. With it a hidden hero parks with no timer and wakes on the call;
+   * without it, it looks again every second.
+   */
+  wake?: (fn: () => void) => () => void;
   /** Load an image (resolves false when it fails): injected in tests. */
   load?: (src: string) => Promise<boolean>;
   caption?: HTMLElement | null;
@@ -180,9 +186,16 @@ export function startHeroStills(box: HTMLElement, stills: readonly Still[], opts
   let i = 0;
   let stopped = false;
   let timer = 0;
+  /** Hidden with a `wake` to bring it back: no timer runs. */
+  let parked = false;
   const next = async () => {
+    timer = 0;
     if (stopped) return;
-    if (opts.visible && !opts.visible()) return void (timer = window.setTimeout(next, 1000));
+    if (opts.visible && !opts.visible()) {
+      if (opts.wake) parked = true;
+      else timer = window.setTimeout(next, 1000);
+      return;
+    }
     i = (i + 1) % stills.length;
     const s = stills[i]!;
     const ok = await load(s.src);
@@ -207,9 +220,15 @@ export function startHeroStills(box: HTMLElement, stills: readonly Still[], opts
     timer = window.setTimeout(next, ok ? hold : 200);
   };
   timer = window.setTimeout(next, hold);
+  const unwake = opts.wake?.(() => {
+    if (stopped || !parked || (opts.visible && !opts.visible())) return;
+    parked = false; // on screen again: the next still after a full hold
+    timer = window.setTimeout(next, hold);
+  });
   return () => {
     stopped = true;
     clearTimeout(timer);
+    unwake?.();
   };
 }
 
@@ -554,9 +573,18 @@ export async function initHome(): Promise<void> {
   agentsLink();
   const stillsBox = $("home-stills");
   if (stillsBox) {
+    // Runs for the page's life; parked (no timer) while the landing page or the tab is hidden.
     startHeroStills(stillsBox, heroStills(STILLS), {
       still: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches,
       visible: () => !document.hidden && landingVisible(),
+      wake: (fn) => {
+        const offLanding = onLandingShown(() => fn());
+        document.addEventListener("visibilitychange", fn);
+        return () => {
+          offLanding();
+          document.removeEventListener("visibilitychange", fn);
+        };
+      },
       caption: $("home-still-cap"),
     });
   }
