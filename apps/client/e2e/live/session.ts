@@ -1481,8 +1481,10 @@ function changes(a: Snap | null, b: Snap): string {
   const lv0 = a?.you?.level, lv1 = b.you?.level;
   if (lv0 && lv1 && lv1 !== lv0) out.push(`level ${lv0}→${lv1}`);
   else if (a?.you && b.you && b.you.xp > a.you.xp) out.push(`+${b.you.xp - a.you.xp} XP`);
-  const st0 = a?.onboarding?.step, st1 = b.onboarding?.step;
-  if (a && b.onboarding && st0 !== st1) out.push(st1 ? `tutorial step now ${st1}` : "tutorial done");
+  // Only a running tutorial has a step: a finished account's idle checklist still reads "move" on each
+  // return to Portus, which used to log "tutorial step now move" though nothing showed (D-polish-ux-7).
+  const st0 = a?.onboarding?.active ? a.onboarding.step : null, st1 = b.onboarding?.active ? b.onboarding.step : null;
+  if (a && b.onboarding && st0 !== st1 && (st1 || (st0 && a.body === b.body))) out.push(st1 ? `tutorial step now ${st1}` : "tutorial done");
   for (const q of b.quests ?? []) {
     const was = a?.quests?.find((x) => x.id === q.id);
     if (!was || a?.body !== b.body) continue;
