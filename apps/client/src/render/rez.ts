@@ -360,6 +360,33 @@ export function rezFxMesh(): { mesh: THREE.Mesh; fx: RezFx } {
   return { mesh, fx };
 }
 
+/**
+ * The light meshes are pooled and never disposed. three keeps a material's built shader only while
+ * some drawn object still uses it: when the last light mesh of a departed avatar was disposed, the
+ * next arrival's light built the shader again, twice (a transparent double-sided mesh draws its back
+ * and front faces as two passes), in play (measured on WebGPU: +2 builds per join). An avatar
+ * borrows a light for the length of an effect and gives it back.
+ */
+const lightPool: { mesh: THREE.Mesh; fx: RezFx }[] = [];
+/** Light meshes made this session (the pool's size plus the ones in use). */
+export const rezLights = { made: 0 };
+
+/** A light for one effect: from the pool, or new while none is free. */
+export function takeRezLight(): { mesh: THREE.Mesh; fx: RezFx } {
+  const l = lightPool.pop();
+  if (l) return l;
+  rezLights.made++;
+  return rezFxMesh();
+}
+
+/** Give a light back: hidden, out of the scene, kept (with its render state) for the next effect. */
+export function returnRezLight(l: { mesh: THREE.Mesh; fx: RezFx }) {
+  l.mesh.visible = false;
+  l.mesh.removeFromParent();
+  l.fx.p.copy(FX_IDLE);
+  lightPool.push(l);
+}
+
 /** `?norez` / the Rez toggle: off, rez() calls do nothing (set from the resolved settings). */
 export const rezSwitch = { on: true };
 

@@ -19,7 +19,7 @@ import { applyOccluderFadeGated } from "./occluderFade.ts";
 import { hideBareBones } from "./bareBones.ts";
 import { weaponModel } from "./avatars/weapons.ts";
 import { keptSamples } from "./warmup.ts";
-import { CUT_GONE, CUT_IDLE, rezActive, rezAdmits, rezBody, rezFxMesh, rezMode, rezPose, rezSwitch, type RezBody, type RezFx, type RezKind, type RezPose } from "./rez.ts";
+import { CUT_GONE, CUT_IDLE, rezActive, rezAdmits, rezBody, rezFxMesh, rezMode, rezPose, rezSwitch, returnRezLight, takeRezLight, type RezBody, type RezFx, type RezKind, type RezPose } from "./rez.ts";
 
 export { preloadAvatars } from "./avatars/assets.ts";
 
@@ -373,7 +373,7 @@ export class AvatarView {
       const light = this.rezLight!;
       light.fx.color.setHex(accent).lerp(_rezTint, kind === "death" ? 0.25 : 0.5);
       light.mesh.visible = true;
-    } else if (this.rezLight) this.rezLight.mesh.visible = false;
+    } else this.rezLightDone();
     this.applyRez(rezPose(kind, 0, this.rezNow));
     return true;
   }
@@ -405,8 +405,18 @@ export class AvatarView {
    */
   prepareRez() {
     if (this.rezLight) return;
-    this.rezLight = rezFxMesh();
+    this.rezLight = takeRezLight();
     this.root.add(this.rezLight.mesh);
+  }
+
+  /** The effect is over: anyone but the player gives the light back to the pool (render/rez.ts). */
+  private rezLightDone() {
+    const l = this.rezLight;
+    if (!l) return;
+    l.mesh.visible = false;
+    if (this.root.userData.ownAvatar === true) return; // the player's own stays, ready for the next warm-up
+    this.rezLight = null;
+    returnRezLight(l);
   }
 
   /** Whether a rez effect is running. */
@@ -425,7 +435,7 @@ export class AvatarView {
     this.rezKind = null;
     this.rezGone = kind !== "in";
     this.rezRelease();
-    if (this.rezLight) this.rezLight.mesh.visible = false;
+    this.rezLightDone();
     return true;
   }
 
@@ -439,7 +449,7 @@ export class AvatarView {
     this.rezNow.glow = 0;
     this.rezNow.solid = false;
     this.applyRez(this.rezNow);
-    if (this.rezLight) this.rezLight.mesh.visible = false;
+    this.rezLightDone();
   }
 
   /** Back to a whole, idle body. */
@@ -447,7 +457,7 @@ export class AvatarView {
     this.rezKind = null;
     this.rezRelease();
     this.rezGone = false;
-    if (this.rezLight) this.rezLight.mesh.visible = false;
+    this.rezLightDone();
     this.rezNow.cut = CUT_IDLE;
     this.rezNow.dissolve = this.rezNow.glow = 0;
     this.rezNow.solid = true;
@@ -584,8 +594,7 @@ export class AvatarView {
     releaseAvatarObjects(this.proxy);
     this.rezRelease();
     if (this.rezLight) {
-      this.rezLight.mesh.removeFromParent();
-      this.rezLight.mesh.dispose(); // the geometry and material are shared
+      returnRezLight(this.rezLight); // pooled, never disposed: its shader stays built (render/rez.ts)
       this.rezLight = null;
     }
     this.root.removeFromParent();
