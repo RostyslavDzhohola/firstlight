@@ -13,6 +13,8 @@ export interface SessionStart {
   backend?: string | null;
   /** Quality tier, e.g. "low" | "medium" | "high". */
   tier?: string | null;
+  /** An AI agent plays this session (D-agents-1): kept on the row, so it holds whatever becomes of the account. */
+  agent?: boolean;
 }
 
 export interface SessionProgress {
@@ -23,11 +25,12 @@ export interface SessionProgress {
 }
 
 export function startSession(db: Db, s: SessionStart): number {
-  const r = stmt(db, "INSERT INTO session_log (user_id, started_at, backend, tier) VALUES (?, ?, ?, ?)").run(
+  const r = stmt(db, "INSERT INTO session_log (user_id, started_at, backend, tier, agent) VALUES (?, ?, ?, ?, ?)").run(
     s.userId,
     s.startedAt ?? Date.now(),
     s.backend ?? null,
     s.tier ?? null,
+    s.agent ? 1 : 0,
   );
   return Number(r.lastInsertRowid);
 }
@@ -74,12 +77,12 @@ export interface Retention {
   d7Rate: number | null;
 }
 
-/** D1/D7 return by first-session cohort over the last `days` days (real players only, D-home-6). */
+/** D1/D7 return by first-session cohort over the last `days` days (people's sessions only: no test accounts, D-home-6; no agent sessions, by the row's own flag). */
 export function retention(db: Db, now = Date.now(), days = 30): Retention {
   const today = Math.floor(now / DAY);
   const rows = stmt(
     db,
-    `WITH real AS (SELECT user_id, started_at FROM session_log s WHERE NOT ${IS_TEST("s.user_id")}),
+    `WITH real AS (SELECT user_id, started_at FROM session_log s WHERE NOT ${IS_TEST("s.user_id")} AND s.agent = 0),
           first AS (SELECT user_id, MIN(started_at) / ${DAY} AS d0 FROM real GROUP BY user_id),
           days AS (SELECT DISTINCT user_id, started_at / ${DAY} AS d FROM real)
      SELECT f.d0 AS d0, COUNT(*) AS cohort,
@@ -124,11 +127,11 @@ export function testSessionCount(db: Db, since = 0): { sessions: number; players
   return stmt(db, `SELECT COUNT(*) AS sessions, COUNT(DISTINCT user_id) AS players FROM session_log s WHERE started_at >= ? AND ${IS_TEST("s.user_id")}`).get(since) as { sessions: number; players: number };
 }
 
-/** Aggregates over real players' sessions started since `since` (test accounts excluded, D-home-6). */
+/** Aggregates over people's sessions started since `since` (test accounts excluded, D-home-6; agent sessions by the row's own flag, D-agents-1). */
 export function sessionStats(db: Db, since = 0): SessionStats {
   const rows = stmt(
     db,
-    `SELECT user_id, started_at, ended_at, body_time_json, deaths, max_level, backend, tier FROM session_log s WHERE started_at >= ? AND NOT ${IS_TEST("s.user_id")}`,
+    `SELECT user_id, started_at, ended_at, body_time_json, deaths, max_level, backend, tier FROM session_log s WHERE started_at >= ? AND NOT ${IS_TEST("s.user_id")} AND s.agent = 0`,
   ).all(since) as {
     user_id: string;
     started_at: number;
@@ -178,4 +181,9 @@ export function sessionStats(db: Db, since = 0): SessionStats {
     out.medianSessionMs = lengths[Math.floor(lengths.length / 2)]!;
   }
   return out;
+}
+
+/** Sessions an AI agent played since `since`, and how many accounts played them (shown apart on /stats). */
+export function agentSessionCount(db: Db, since = 0): { sessions: number; players: number } {
+  return stmt(db, "SELECT COUNT(*) AS sessions, COUNT(DISTINCT user_id) AS players FROM session_log s WHERE started_at >= ? AND s.agent = 1").get(since) as { sessions: number; players: number };
 }

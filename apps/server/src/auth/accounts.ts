@@ -13,6 +13,7 @@ import { toNodeHandler } from "better-auth/node";
 import type { Express, NextFunction, Request, Response } from "express";
 import { ensureAccount, isBanned, isIpBanned } from "../db/accounts.ts";
 import { backfillTestAccounts, isTestAccount, markTestAccount } from "../db/testAccounts.ts";
+import { isAgentAccount, markAgentAccount } from "../db/agentAccounts.ts";
 import { openGameDb, setGameDb, type Db } from "../db/game-db.ts";
 import { linkAccounts } from "../db/link.ts";
 import { setDisplayName } from "../db/accounts.ts";
@@ -269,7 +270,9 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
       const r = setDisplayName(db, sub, user.name, now);
       if (r.ok) display = r.name;
     }
-    return { userId: sub, name: display ?? generated, guest: user.anon === 1, admin: acc.isAdmin, loadtest: false, account: true, test: isTestAccount(db, sub), ...(sid ? { authSession: sid } : {}) };
+    // An AI agent says so when it asks for a seat (D-agents-1): its guest account is flagged from then on.
+    if (user.anon === 1 && vctx?.agent) markAgentAccount(db, sub, "play", now);
+    return { userId: sub, name: display ?? generated, guest: user.anon === 1, admin: acc.isAdmin, loadtest: false, account: true, test: isTestAccount(db, sub), agent: isAgentAccount(db, sub), ...(sid ? { authSession: sid } : {}) };
   };
 
   const sessionStmt = authDb.prepare(`SELECT 1 FROM "session" WHERE "userId" = ? LIMIT 1`);

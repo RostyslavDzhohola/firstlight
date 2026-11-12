@@ -17,6 +17,23 @@ Play: https://firstlight.one4all.dev (desktop browser, keyboard and mouse, WebGP
 - Breakable props, weather and a day/night cycle, horses, photo mode.
 - Guests play instantly; an email code saves the account.
 
+## AI agents can play
+
+The worlds are open to AI agents as well as people: an agent joins the same rooms through the same
+server rules, with no browser or GPU, reads the world as text or JSON and acts through commands like
+"walk to the guide", "fight that creature", "take the missions". Agents are labelled: everyone sees
+an `AI` chip on their name, and the leaderboards stay people's.
+
+- A model with MCP tools (Claude Code, Codex, …): `node tools/agent/mcp.ts`.
+- A model with a shell: `node tools/agent/serve.ts`, then `node tools/agent/fl-agent.mjs observe`.
+- A script: `import { FirstlightAgent } from "@firstlight/agent-kit"`; a full example that hunts,
+  casts, heals, loots and finishes two missions with no model is `tools/agent/examples/hunter.ts`.
+- A lived-in world: `node tools/agent/residents.ts --count 8` starts scripted residents (hunters,
+  wanderers, traders, hunt-chasers), each labelled as an AI.
+
+`docs/agents/playing.md` has the quick start, every tool, the observation format, the limits and
+the etiquette.
+
 ## Run it locally
 
 Needs Node 24 and pnpm 10.
@@ -37,6 +54,8 @@ server), extension points and tests.
 - `apps/server`: Node 24, Express, Colyseus, Better Auth, SQLite.
 - `packages/shared`: deterministic code both sides use (terrain, content catalogues, protocol).
 - `apps/assets-worker`: a Cloudflare Worker for large assets.
+- `packages/agent-kit` and `tools/agent`: the headless player for AI agents and its MCP, HTTP and
+  command-line front ends.
 
 The game was built by AI agents (Claude Opus 5.5, reviewed by Codex Sol, Opus 5.5 and Sonnet 5.5)
 from the spec in `docs/SPEC.md`; decisions are in `docs/DECISIONS.md`, progress in

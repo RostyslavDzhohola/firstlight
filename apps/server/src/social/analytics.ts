@@ -42,7 +42,7 @@ export function trackJoin(actor: PlayerActor, body: string, now = Date.now()): v
   }
   if (t?.current) closeCurrent(t, now);
   if (!t) {
-    t = { key: userId, logId: sessionStart(userId, now), bodyTime: {}, deaths: 0, maxLevel: actor.char.level, lastFlush: now, lastLeftAt: null, current: null, endTimer: null };
+    t = { key: userId, logId: sessionStart(userId, now, !!actor.identity.agent), bodyTime: {}, deaths: 0, maxLevel: actor.char.level, lastFlush: now, lastLeftAt: null, current: null, endTimer: null };
     trackers.set(userId, t);
   }
   t.lastLeftAt = null;

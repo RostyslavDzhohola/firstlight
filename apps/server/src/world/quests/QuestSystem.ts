@@ -124,14 +124,13 @@ const slotSchema = z.number().int().min(0).max(HOTBAR_SLOTS + BACKPACK_SLOTS - 1
 
 /**
  * A person's account: not a load-test bot, not our own test automation (D-home-6) and not an AI agent
- * (D-agents-1). The agent flag (`identity.agent`, synced as `PlayerState.agent`) comes with the agents
- * lane, so it is read defensively: either field, if present and truthy, marks an agent.
+ * (D-agents-1). The one rule for everything that is the people's in this system (the Hall of Firsts,
+ * the Gleamkeepers): either agent flag, the session's `identity.agent` or the synced
+ * `PlayerState.agent`, marks an agent.
  */
 export function isPerson(a: PlayerActor): boolean {
   if (a.identity.loadtest || a.identity.test) return false;
-  const id = a.identity as unknown as { agent?: unknown };
-  const st = a.state as unknown as { agent?: unknown };
-  return !id.agent && !st.agent;
+  return !a.identity.agent && !a.state.agent;
 }
 
 export class QuestSystem implements RoomSystem {
@@ -945,7 +944,7 @@ export class QuestSystem implements RoomSystem {
       life.eggs.push(eggId);
       if (eligible) {
         this.award(a, egg.medal, events);
-        if (!a.identity.loadtest && !a.identity.test) first = engrave(eggId, a.identity.userId, a.identity.name, events); // our automation never engraves (D-home-6)
+        if (isPerson(a)) first = engrave(eggId, a.identity.userId, a.identity.name, events); // our automation never engraves (D-home-6), nor do AI agents (D-agents-1)
       }
     });
     if (!paid) return;
@@ -1054,7 +1053,7 @@ export class QuestSystem implements RoomSystem {
       if (hits && !hits.hurt) this.award(a, "untouchable");
     }
     this.bossHits.delete(e.npcKind);
-    const people = eligible.filter((a) => !a.identity.loadtest && !a.identity.test); // real players only (D-home-6)
+    const people = eligible.filter(isPerson); // real players only (D-home-6, D-agents-1)
     if (people.length) engrave(BOSS_FIRSTS[e.bossId], people[0]!.identity.userId, people.map((a) => a.identity.name).join(", ").slice(0, 200));
   }
 

@@ -33,7 +33,7 @@ export interface HomeDeps {
 interface RoomLike {
   bodyDef: { id: string };
   metadata?: { loadtest?: boolean; sandbox?: string } | null;
-  actors: Map<string, { identity: { loadtest?: boolean; test?: boolean }; superseded?: boolean; state: { name: string } }>;
+  actors: Map<string, { identity: { loadtest?: boolean; test?: boolean; agent?: boolean }; superseded?: boolean; state: { name: string } }>;
 }
 
 /** Players per body, and up to `namesPerBody` names each (sorted). Load-test bots, test accounts (D-home-6) and admin sandboxes never count. */
@@ -45,7 +45,7 @@ export function onlineSnapshot(rooms: Iterable<RoomLike>, namesPerBody = HOME_LI
     const slot = bodies[r.bodyDef.id as BodyId];
     if (!slot) continue;
     for (const a of r.actors.values()) {
-      if (a.identity.loadtest || a.identity.test || a.superseded) continue;
+      if (a.identity.loadtest || a.identity.test || a.identity.agent || a.superseded) continue; // people only: AI agents are counted apart (D-agents-1)
       slot.players++;
       total++;
       if (a.state.name) slot.names.push(a.state.name);

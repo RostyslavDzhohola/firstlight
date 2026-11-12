@@ -56,6 +56,8 @@ export interface PlayRequest {
   look?: number;
   /** Admins only: the admin's private sandbox copy of `body`, where nothing is saved (D-admin-3). */
   sandbox?: boolean;
+  /** An AI agent is playing (net/agents.ts; the `x-firstlight-agent: 1` header says the same). */
+  agent?: boolean;
 }
 
 export type PlayResponse =

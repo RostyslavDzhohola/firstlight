@@ -69,6 +69,7 @@ export const PlayerState = schema(
     radioCh: t.uint8(),
     userId: t.string(),
     look: t.uint8(), // STARTER_LOOKS index (appended: older clients ignore it and draw look 0)
+    agent: t.boolean(), // an AI agent plays this character (net/agents.ts, D-agents-1; appended: older clients ignore it)
   },
   "Player",
 );

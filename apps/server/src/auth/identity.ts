@@ -11,6 +11,12 @@ export interface Identity {
   account?: boolean;
   /** One of our own automation accounts (D-home-6): plays normally, never on a public surface. */
   test?: boolean;
+  /** An AI agent plays this character (D-agents-1): labelled for everyone, kept off the people's boards and counts. */
+  agent?: boolean;
+  /** The address an agent's seat was asked from (the per-address agent cap, world/agents.ts). */
+  agentIp?: string;
+  /** This /api/play request's own agent claim (world/agents.ts): the seat it becomes is used up by this handle alone. */
+  agentClaim?: string;
   /** The Better Auth session that issued the token (D-security-5): bearer calls and seat use need it alive. */
   authSession?: string;
 }
@@ -20,6 +26,8 @@ export interface VerifyContext {
   ip?: string | null;
   /** The request's x-loadtest-secret header: with the right secret, a guest is flagged as a test account. */
   toolSecret?: string | null;
+  /** The request says an AI agent is playing (/api/play only): a guest account is flagged for good. */
+  agent?: boolean;
   /** Set by the accounts verifier: the token it checked and its payload (null: bad signature or expired), for reuse. */
   jwt?: { token: string; payload: Record<string, unknown> | null };
 }

@@ -218,13 +218,13 @@ export class QuestClient implements ClientSystem {
     const mine = players.get(room.sessionId);
     if (g.self && mine) this.rig(g.self).set(mine.cosmetics ?? "");
     const live = new Set<AvatarView>(g.self ? [g.self] : []);
-    const plates: { id: string; pos: THREE.Vector3; name: string; title: string }[] = [];
+    const plates: { id: string; pos: THREE.Vector3; name: string; title: string; agent: boolean }[] = [];
     for (const [id, a] of g.avatars) {
       const st = players.get(id);
       if (!st) continue;
       live.add(a);
       this.rig(a).set(st.cosmetics ?? "");
-      if (!(st.flags & PF.DEAD)) plates.push({ id, pos: a.root.position, name: st.name, title: st.title ?? "" });
+      if (!(st.flags & PF.DEAD)) plates.push({ id, pos: a.root.position, name: st.name, title: st.title ?? "", agent: !!st.agent });
     }
     for (const [avatar, r] of this.rigs) {
       if (live.has(avatar)) r.update(this.t);

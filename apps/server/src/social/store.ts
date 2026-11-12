@@ -172,9 +172,9 @@ export function clearBannedUntilIfFree(db: Db, userId: string, now = Date.now())
 
 // ---- play sessions (analytics) -------------------------------------------------------------------
 
-export function sessionStart(userId: string, now = Date.now()): number | null {
+export function sessionStart(userId: string, now = Date.now(), agent = false): number | null {
   const db = currentDb();
-  return db ? startSession(db, { userId, startedAt: now }) : null;
+  return db ? startSession(db, { userId, startedAt: now, agent }) : null;
 }
 
 export function sessionUpdate(id: number | null, p: SessionProgress): void {

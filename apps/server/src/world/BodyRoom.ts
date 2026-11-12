@@ -19,6 +19,7 @@ import { characterRepo, withTx } from "./characters.ts";
 import { SWIM_FLOAT } from "@firstlight/shared/planet/water";
 import { structureCollider, type StructureCollider } from "@firstlight/shared/planet/town";
 import { CLOSE, hub, type HubRoom } from "./hub.ts";
+import { releaseAgentSlot, useAgentSeat } from "./agents.ts";
 
 /** Ban lookup for reconnects; set at boot when the database is available. */
 export const bannedCheck: { current: (userId: string) => boolean } = { current: () => false };
@@ -511,6 +512,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     p.palette = char.palette;
     p.look = starterLook(char.starter, char.look);
     p.flags = (auth.admin ? PF.ADMIN : 0) | (auth.loadtest ? PF.LOADTEST : 0) | (char.dead ? PF.DEAD : 0);
+    p.agent = !!auth.agent; // an AI agent plays this one: every client labels it (D-agents-1)
     const a: PlayerActor = {
       kind: "player",
       id: client.sessionId,
@@ -574,6 +576,15 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
    * the character must still be allowed on this body (its travel ticket may have been used or expired).
    */
   private seatRefusal(sessionId: string, auth: Identity, now: number): string | null {
+    const why = this.seatRefusalFor(sessionId, auth, now);
+    if (!auth.agent || auth.loadtest) return why;
+    // An agent's seat (D-agents-3): refused for any reason, its claim stops counting; otherwise it is
+    // used up here and the caps are checked again, in the same step that puts the body in.
+    if (why) releaseAgentSlot(auth.agentClaim);
+    return why ?? useAgentSeat(auth, this.roomId, now);
+  }
+
+  private seatRefusalFor(sessionId: string, auth: Identity, now: number): string | null {
     if (!pendingSeats.consume(sessionId, auth.userId, now)) return "seat expired";
     if (!auth.loadtest && seatRefusal(auth.userId, now)) return "not allowed";
     if (auth.account && identityCheck.current(auth.userId, auth.authSession)) return "sign in again"; // its own session (D-security-5)

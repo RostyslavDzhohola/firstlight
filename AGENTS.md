@@ -30,6 +30,13 @@ Code is MIT (`LICENSE`), our own art CC BY 4.0 (`LICENSE-ART`).
 - `packages/shared`: deterministic code both sides import: `planet/` (terrain height function, pads,
   portals), `content/` (catalogues), `net/` (protocol types, Colyseus schema, close codes). No DOM, no three.
 - `apps/assets-worker`: Cloudflare Worker serving large assets under `/v/<buildId>/…`.
+- `packages/agent-kit`: the headless player AI agents use (`FirstlightAgent`: the guest join flagged
+  as an agent, a world model from room state, `observe()`, high-level actions; erasable TypeScript,
+  Node runs it directly). `tools/agent`: its MCP server (`mcp.ts`), loopback HTTP bridge
+  (`serve.ts`), CLI (`fl-agent.mjs`), the scripted `examples/hunter.ts`, and `residents.ts`
+  (N scripted AI residents; their behaviours are in `resident-roles.ts`). Guide:
+  `docs/agents/playing.md`. Server side: `apps/server/src/world/agents.ts` (switch and caps),
+  `packages/shared/src/net/agents.ts` (the flag).
 - `tools/bots` load-test bots; `tools/blender/characters` headless Blender build of the starter GLBs;
   `tools/sfx` ElevenLabs sound-effect generation and processing (writes to `/tmp`, never the repo).
   `tools/balance` the balance model (D-balance-1): `pnpm balance` prints weapon DPS, PvP and PvE
@@ -43,7 +50,7 @@ Scripts live in the `package.json` files. The ones you need:
 - `pnpm dev`: server (`tsx watch`, :2567) and client (Vite, :5173) together.
 - `pnpm typecheck`: TypeScript 7 (`tsc`) for shared, server and client. TS 7 only typechecks; it has no compiler API.
 - `pnpm test`: every Vitest project. One file: `pnpm vitest run apps/server/test/combat.test.ts`;
-  one project: `pnpm vitest run --project server` (`shared`, `server`, `client`).
+  one project: `pnpm vitest run --project server` (`shared`, `server`, `client`, `agent-kit`, `agent-tools`).
 - `pnpm balance`: the balance report and band checks; run it after changing any game number.
 - `pnpm --filter @firstlight/client build`: production client bundle (no source maps).
 - `pnpm --filter @firstlight/server start`: runs `src/main.ts` directly, like production (`apps/server/Dockerfile`).
