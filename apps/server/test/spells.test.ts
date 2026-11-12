@@ -9,6 +9,7 @@ import { BODIES, nearSafeZone } from "@firstlight/shared";
 import { AETHER, aetherAt, FROSTBLOOM, GLASSWING, SKIPSTEP, SPELLS, spellDamage, WISHFALL, type SpellId, type SpellsYou } from "@firstlight/shared/content/spells";
 import { maxHp } from "@firstlight/shared/content/progression";
 import type { SpellEvent } from "@firstlight/shared/net/protocol";
+import { PF } from "@firstlight/shared/net/schema";
 import { townDir } from "@firstlight/shared/planet/townFrame";
 import type { Game } from "../src/app.ts";
 import { npcSpeedFactor, type NpcActor, type PlayerActor } from "../src/world/actors.ts";
@@ -264,6 +265,28 @@ describe("Skipstep", () => {
   });
 });
 
+/**
+ * Put a bot's body `h` metres up, as on a tower top or a ledge (the server's own state: a bot can't
+ * climb). The move is fresh, so idle gravity leaves it there for the cast. Returns the new feet.
+ */
+function hoist(r: Room, h: number): V {
+  const a = actor(r);
+  const p = pos(r);
+  const l = Math.hypot(...p);
+  const up: V = [p[0] + (p[0] / l) * h, p[1] + (p[1] / l) * h, p[2] + (p[2] / l) * h];
+  a.state.x = a.lastX = up[0];
+  a.state.y = a.lastY = up[1];
+  a.state.z = a.lastZ = up[2];
+  a.lastMoveAt = Date.now();
+  return up;
+}
+
+/** How far `p` is from the straight way over the ground from `a` to `b` (their great circle), in metres. */
+function offLine(p: V, a: V, b: V): number {
+  const n = [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  return Math.abs(p[0] * n[0]! + p[1] * n[1]! + p[2] * n[2]!) / Math.hypot(n[0]!, n[1]!, n[2]!);
+}
+
 /** A metre above a ground point (chest height). */
 const lift1 = (p: V): V => {
   const l = Math.hypot(p[0], p[1], p[2]);
@@ -499,7 +522,53 @@ describe("Wishfall", () => {
     cast(a, "wishfall", dirTo(here, farPoint), farPoint);
     await until("ring", () => h.events.some((e) => e.spell === "wishfall" && e.phase === "cast"));
     const ring = h.events.find((e) => e.spell === "wishfall")!;
-    expect(d3([ring.x, ring.y, ring.z], here)).toBeLessThanOrEqual(WISHFALL.rangeM + 3);
+    expect(d3([ring.x, ring.y, ring.z], here)).toBeLessThanOrEqual(WISHFALL.rangeM + 1e-6);
+  }, SLOW);
+
+  it("the 30 m range holds for the ground point the star lands on: from a height and down a steep slope (review 2)", async () => {
+    const base = openSpotOutside("arcadia", 14);
+    const a = await adminBot(game, rooms, "highcaller", "arcadia", base, 6);
+    const room = serverRoom(a);
+    const h = listen(a);
+    const ringOf = async (label: string) => {
+      await until(label, () => h.events.some((e) => e.spell === "wishfall" && e.phase === "cast"));
+      const e = h.events.find((x) => x.spell === "wishfall" && x.phase === "cast")!;
+      return [e.x, e.y, e.z] as V;
+    };
+    // From a height (a tower top, a ledge): 15 m up, a ground target 40 m ahead over open ground.
+    await refill(a, h);
+    const stood = pos(a);
+    const high = hoist(a, 15);
+    const ahead = room.snapToGround(offset(base, 40, 0, R));
+    cast(a, "wishfall", dirTo(high, ahead), ahead);
+    const fromHeight = await ringOf("ring from a height");
+    expect(d3(fromHeight, room.snapToGround(fromHeight))).toBeLessThan(1e-6); // on the ground
+    expect(d3(fromHeight, high)).toBeLessThanOrEqual(WISHFALL.rangeM + 1e-6);
+    expect(d3(fromHeight, high)).toBeGreaterThan(WISHFALL.rangeM - 0.1); // and no nearer than it has to be
+    expect(flat(fromHeight, stood)).toBeGreaterThan(22); // √(30² − 15²) ≈ 26 m out on level ground
+    expect(offLine(fromHeight, stood, ahead)).toBeLessThan(0.05); // on the way to the asked point
+
+    // Down a steep, even slope (17 m of drop over 30 m; the brow of it is 10 m behind), aiming
+    // level: the point at range hangs in the air and the ground under it is far below.
+    const top = room.snapToGround(offset(offset(base, -50, 200, R), 10, 0, R));
+    const foot = room.snapToGround(offset(top, 30, 0, R));
+    expect(Math.hypot(...top) - Math.hypot(...foot)).toBeGreaterThan(15);
+    a.send("admin", { cmd: "teleport", args: { x: top[0], y: top[1], z: top[2] } });
+    a.send("admin", { cmd: "unprotect" });
+    await until("on the slope", () => d3(pos(a), top) < 2 && !(me(a).flags & PF.PROTECTED));
+    expect(room.safeNow(actor(a), Date.now())).toBe(false);
+    for (const withPoint of [false, true]) {
+      await refill(a, h);
+      h.events.length = 0;
+      const feet = pos(a);
+      const out = offset(feet, 30, 0, R).map((v) => (v * Math.hypot(...feet)) / R) as V; // 30 m out at our own height
+      cast(a, "wishfall", dirTo(feet, out), withPoint ? out : undefined);
+      const ring = await ringOf(`ring down the slope (${withPoint ? "air point" : "ray"})`);
+      expect(d3(ring, feet)).toBeLessThanOrEqual(WISHFALL.rangeM + 1e-6);
+      expect(d3(ring, feet)).toBeGreaterThan(20); // down the slope, not back at our feet
+      expect(Math.hypot(...feet) - Math.hypot(...ring)).toBeGreaterThan(8);
+      await sleep(250); // five casts a second
+    }
   }, SLOW);
 });
 

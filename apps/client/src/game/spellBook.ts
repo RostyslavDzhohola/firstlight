@@ -44,7 +44,7 @@ export function castDeniedText(reason: string, s: SpellDef | undefined): string 
     case "protected": return "Arrival protection: spells ready in a moment";
     case "swimming": return "Can't cast while swimming";
     case "mounted": return "No spells from the saddle: E to get off";
-    case "blocked": return "No room to Skipstep that way";
+    case "blocked": return s?.id === "wishfall" ? "No clear ground there for Wishfall" : "No room to Skipstep that way";
     case "locked": return s ? blockText(s, "level") : null;
     case "cooldown": return s ? blockText(s, "cooldown") : null;
     case "aether": return s ? blockText(s, "aether") : null;

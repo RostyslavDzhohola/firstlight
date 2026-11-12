@@ -164,12 +164,13 @@ export type ClientMessages = {
  * - `skipstep`: blinks the caster up to 10 m along `dx,dy,dz` (projected onto the ground) and sends
  *   the caster a `correct` with the new position, like any server move.
  * - `frostbloom`, `glasswing`: around / on the caster; the aim is ignored.
- * - `wishfall`: lands on `tx,ty,tz` (snapped to the ground, pulled back to 30 m and to the first
- *   thing between the caster's head and it). Without a target point: where the ray from the
- *   caster's head along `dx,dy,dz` first meets the ground or something solid within 30 m.
+ * - `wishfall`: lands on `tx,ty,tz` (put on the ground, then searched back toward the caster until
+ *   the ground point is within 30 m of the caster's feet and nothing stands between the caster's
+ *   head and it). Without a target point: where the ray from the caster's head along `dx,dy,dz`
+ *   first meets the ground or something solid within 30 m.
  * Everyone nearby then gets `spell` events. Refusal reasons: "locked" (level gate), "cooldown", "aether",
  * "safe zone", "protected", "swimming", "mounted", "dead", "dir", "blocked" (Skipstep with a wall
- * right ahead; nothing is spent).
+ * right ahead, Wishfall with no clear ground in range; nothing is spent).
  */
 export interface CastMsg {
   spell: SpellId;

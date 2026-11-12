@@ -83,6 +83,7 @@ describe("the spellbook the HUD draws", () => {
   it("puts the server's refusals into words", () => {
     expect(castDeniedText("safe zone", SPELLS[0])).toBe("No spells in safe zones");
     expect(castDeniedText("blocked", SPELLS[0])).toBe("No room to Skipstep that way");
+    expect(castDeniedText("blocked", SPELLS[2])).toBe("No clear ground there for Wishfall");
     expect(castDeniedText("aether", SPELLS[2])).toBe("Not enough aether for Wishfall");
     expect(castDeniedText("dir", SPELLS[0])).toBeNull();
   });

@@ -39,6 +39,8 @@ export const SPELL_NET = {
   radius: 160,
   /** After a blink, inputs still coming from the old place are dropped for at most this long (ms). */
   staleInputMs: 1000,
+  /** Wishfall's landing point is searched back toward the caster in steps this long (m). */
+  starStepM: 0.5,
 };
 
 interface Book {
@@ -177,8 +179,7 @@ export class SpellSystem implements RoomSystem {
         this.frostbloom(a, now);
         return true;
       case "wishfall":
-        this.wishfall(a, d, m, now);
-        return true;
+        return this.wishfall(a, d, m, now);
       case "glasswing":
         this.glasswing(a, now);
         return true;
@@ -252,10 +253,11 @@ export class SpellSystem implements RoomSystem {
   }
 
   /**
-   * Where the star lands: the asked point (or what the ray from the head along the aim meets), no
-   * further than the range, pulled back to the first thing between the caster's head and it, on the ground.
+   * Where the star lands: the asked point (or what the ray from the head along the aim meets),
+   * pulled back to the first thing between the caster's head and it, on the ground, and no further
+   * than the range from the caster's feet. Null: there is no ground in range (a caster 30 m up).
    */
-  starTarget(a: PlayerActor, d: V3, m: { tx?: number; ty?: number; tz?: number }): V3 {
+  starTarget(a: PlayerActor, d: V3, m: { tx?: number; ty?: number; tz?: number }): V3 | null {
     const host = this.room.host;
     const feet = actorPos(a);
     const head = lift(feet, 1.6);
@@ -288,14 +290,50 @@ export class SpellSystem implements RoomSystem {
         target = [head[0] + dir[0] * t, head[1] + dir[1] * t, head[2] + dir[2] * t];
       }
     }
-    return this.room.snapToGround(target);
+    // The range holds for the ground the star lands on, not for the point before it was put there
+    // (review 2): from a height or down a slope the ground under a point 30 m off is farther.
+    return this.groundWithin(feet, target, range);
   }
 
-  private wishfall(a: PlayerActor, d: V3, m: CastMsg, now: number) {
+  /**
+   * The ground point on the way from `feet` to `target` that is farthest from the caster and still
+   * within `range` metres of the feet. Walks back from the target in 0.5 m steps and closes in on
+   * the range's edge between two steps. Null: not even the ground under the feet is in range.
+   */
+  private groundWithin(feet: V3, target: V3, range: number): V3 | null {
+    const v: V3 = [target[0] - feet[0], target[1] - feet[1], target[2] - feet[2]];
+    const steps = Math.max(1, Math.ceil(Math.hypot(v[0], v[1], v[2]) / SPELL_NET.starStepM));
+    const groundAt = (k: number): V3 => this.room.snapToGround([feet[0] + v[0] * k, feet[1] + v[1] * k, feet[2] + v[2] * k]);
+    let over = false;
+    for (let i = steps; i >= 0; i--) {
+      const p = groundAt(i / steps);
+      if (dist3(feet, p) > range) {
+        over = true;
+        continue;
+      }
+      if (!over) return p;
+      // The edge of the range lies between this step and the one before: the farthest point inside it.
+      let lo = i / steps, hi = (i + 1) / steps, best = p;
+      for (let n = 0; n < 7; n++) {
+        const mid = (lo + hi) / 2;
+        const q = groundAt(mid);
+        if (dist3(feet, q) <= range) {
+          lo = mid;
+          best = q;
+        } else hi = mid;
+      }
+      return best;
+    }
+    return null;
+  }
+
+  private wishfall(a: PlayerActor, d: V3, m: CastMsg, now: number): true | string {
     const at = this.starTarget(a, d, m);
+    if (!at) return "blocked"; // nowhere for it to land: nothing is spent
     const star: Star = { id: starSeq++, owner: a, at, landAt: now + WISHFALL.telegraphS * 1000, damage: spellDamage(WISHFALL.damage, a.char.level) };
     this.stars.push(star);
     this.send({ spell: "wishfall", phase: "cast", by: a.id, x: at[0], y: at[1], z: at[2], r: WISHFALL.radiusM, ms: WISHFALL.telegraphS * 1000, id: star.id });
+    return true;
   }
 
   private land(s: Star) {
