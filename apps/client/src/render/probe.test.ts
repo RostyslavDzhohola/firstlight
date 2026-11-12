@@ -5,6 +5,20 @@ import type { RenderCtx } from "./renderer.ts";
 import type { Extra } from "./quality.ts";
 import type { CostModel } from "./extrasPlan.ts";
 
+const listeners = new Set<() => void>();
+const fakeDocument = {
+  visibilityState: "visible" as "visible" | "hidden",
+  addEventListener: (type: string, cb: () => void) => type === "visibilitychange" && listeners.add(cb),
+  removeEventListener: (type: string, cb: () => void) => type === "visibilitychange" && listeners.delete(cb),
+};
+/** The tab is hidden for a moment and shown again between two frames (only the event says so). */
+function hideForAMoment() {
+  for (const state of ["hidden", "visible"] as const) {
+    fakeDocument.visibilityState = state;
+    for (const cb of [...listeners]) cb();
+  }
+}
+
 /** Main-thread ms a frame's render takes, and the display's frame interval, with these extras on. */
 interface FrameCost {
   cpuMs?: (extras: readonly Extra[]) => number;
@@ -20,7 +34,9 @@ function fakeCtx(gpuMs: number | null, busyMs?: (extras: readonly Extra[]) => nu
   let clock = 0;
   let frameT = 0;
   vi.stubGlobal("window", {});
-  vi.stubGlobal("document", { visibilityState: "visible" });
+  vi.stubGlobal("document", fakeDocument);
+  fakeDocument.visibilityState = "visible";
+  listeners.clear();
   vi.stubGlobal("requestAnimationFrame", (cb: (t: number) => void) =>
     setTimeout(() => {
       frameT = Math.max(clock, frameT + (cost.frameMs?.(extras) ?? 16));
@@ -165,5 +181,62 @@ describe("runProbe extras on Medium (D-framerate-3)", () => {
     const { ctx } = fakeCtx(52, (on) => (on.length ? 7.2 : 6.5), { cpuMs: (on) => (on.length ? 2 : 1) });
     const r = await runProbe(ctx, undefined, undefined, model);
     expect(r.extras).toEqual(["normals", "water2"]);
+  });
+});
+
+describe("runProbe and a tab hidden at any stage (whole-probe visibility)", () => {
+  const model: CostModel = { normals: { value: 3, gpu: 0.1, cpu: 0 }, water2: { value: 1, gpu: 0.05, cpu: 0 } };
+  /** Hide the tab for a moment the first time the probe's bar is inside (a, b]. */
+  const hideWithin = (a: number, b: number) => {
+    let done = false;
+    return (f: number) => {
+      if (done || f <= a || f > b) return;
+      done = true;
+      hideForAMoment();
+    };
+  };
+  const invalid = { tier: "medium", valid: false, method: "invalid", extras: [] };
+
+  it("is still valid with the tab shown throughout (the case below without the hiding)", async () => {
+    const r = await runProbe(fakeCtx(52, (on) => (on.length ? 5.6 : 5)).ctx, undefined, undefined, model);
+    expect(r).toMatchObject({ valid: true });
+    expect(listeners.size).toBe(0); // the watcher is gone after the probe
+  });
+
+  it("Medium's warm-up", async () => {
+    const r = await runProbe(fakeCtx(52, () => 6.5).ctx, undefined, hideWithin(0, 0.45), model);
+    expect(r).toMatchObject(invalid);
+  });
+
+  it("the extras' warm-up and measurement: no extras, nothing saved", async () => {
+    for (const [a, b] of [[0.9, 0.95], [0.95, 0.999]] as const) {
+      const { ctx, calls } = fakeCtx(52, (on) => (on.length ? 7.2 : 6.5));
+      const r = await runProbe(ctx, undefined, hideWithin(a, b), model);
+      expect(calls[1]?.extras).toEqual(["normals", "water2"]); // it got that far
+      expect(r).toMatchObject(invalid);
+      expect(listeners.size).toBe(0);
+    }
+  });
+
+  it("the High re-probe's warm-up and measurement: Medium for the session, not High", async () => {
+    for (const [a, b] of [[0.7, 0.85], [0.85, 0.9]] as const) {
+      const { ctx, tiers } = fakeCtx(52, () => 3); // Medium 3 ms → re-probe at High (3 ms → Ultra)
+      const r = await runProbe(ctx, undefined, hideWithin(a, b), model);
+      expect(tiers).toContain("high"); // it got that far
+      expect(r).toMatchObject(invalid);
+    }
+  });
+
+  it("a hidden tab between the High re-probe and the extras (High missed: Medium with extras)", async () => {
+    let tier = "medium";
+    const { ctx, calls } = fakeCtx(52, (on) => (tier === "high" ? 12 : on.length ? 5.6 : 5));
+    const setTier = ctx.setTier.bind(ctx);
+    (ctx as { setTier: typeof ctx.setTier }).setTier = (t, o) => {
+      tier = t;
+      if (calls.length === 2) hideForAMoment(); // as the extras go on
+      setTier(t, o);
+    };
+    const r = await runProbe(ctx, undefined, undefined, model);
+    expect(r).toMatchObject(invalid);
   });
 });
