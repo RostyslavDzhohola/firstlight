@@ -177,7 +177,15 @@ export interface SpawnRequestEvent {
   egg?: EggId;
 }
 
+/** A player cast a spell (spells/SpellSystem.ts; content/spells.ts ids). */
+export interface SpellCastEvent {
+  type: "spellCast";
+  playerId: string;
+  spell: string;
+}
+
 export type GameEvent =
+  | SpellCastEvent
   | KillEvent
   | DeathEvent
   | DamageEvent

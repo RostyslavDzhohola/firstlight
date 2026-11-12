@@ -13,7 +13,7 @@ import { NET, PHRASES, type InvItem, type YouState } from "@firstlight/shared/ne
 import { ANIM, BodyState, NpcState, PF, PileState, PlayerState } from "@firstlight/shared/net/schema";
 import { z } from "zod";
 import type { Identity } from "../auth/identity.ts";
-import { actorPos, adminSwitch, inSaddle, pushHistory, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
+import { actorPos, adminSwitch, inSaddle, pushHistory, staleAfterServerMove, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
 import { characterRepo, withTx } from "./characters.ts";
 import { SWIM_FLOAT } from "@firstlight/shared/planet/water";
 import { structureCollider, type StructureCollider } from "@firstlight/shared/planet/town";
@@ -137,7 +137,7 @@ const YOU_LAZY_MS = 400;
  * and respawn write SQLite; ping, questSync and client:info answer with messages). Colyseus's 60/s
  * per client still bounds everything else.
  */
-export const MESSAGE_RATES: Record<string, number> = { ping: 20, travel: 2, respawn: 1, look: 2, logout: 4, questSync: 2, "client:info": 2, skySync: 2, npcSync: 2 };
+export const MESSAGE_RATES: Record<string, number> = { ping: 20, travel: 2, respawn: 1, look: 2, logout: 4, questSync: 2, "client:info": 2, skySync: 2, npcSync: 2, cast: 5 };
 /** Malformed messages are dropped (no kick for a harmless drift); this many within 10 s disconnects. */
 const BAD_MESSAGE_LIMIT = 20;
 
@@ -744,6 +744,11 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     const p = a.state;
     const now = Date.now();
     a.lastInputAt = now;
+    // The server just moved this body (a spell's blink): inputs sent before the client heard are dropped.
+    if (a.serverMove && staleAfterServerMove(a, msg, now)) {
+      p.seq = msg.seq;
+      return;
+    }
     // NPC slows / Cease-and-Desist (npc/effects.ts) and riding (horses) set the refill; see movement.ts.
     const r = validateMove(a, msg, this.moveWorld, moveLimits(a, now), now);
     const flying = adminSwitch(a, "fly");

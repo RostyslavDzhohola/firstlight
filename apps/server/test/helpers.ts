@@ -13,6 +13,7 @@ import { MemoryProgressStore, progressStore } from "../src/world/quests/store.ts
 import { copyRestrictions, CopyStateRestrictions } from "../src/world/quests/restrictions.ts";
 import { EGG_TIMERS } from "../src/world/quests/eggs.ts";
 import { SUPPORT_TIMERS } from "../src/world/support.ts";
+import { SPELL_BOOKS } from "../src/world/spells/SpellSystem.ts";
 import { copyStateStore, MemoryCopyStateStore } from "../src/world/copyState.ts";
 import { hub } from "../src/world/hub.ts";
 import { resetSandboxes } from "../src/sandbox.ts";
@@ -34,6 +35,7 @@ export async function startServer(
   EGG_TIMERS.puzzles.clear();
   EGG_TIMERS.keypads.clear();
   SUPPORT_TIMERS.bubbleReady.clear();
+  SPELL_BOOKS.byUser.clear();
   cosmeticPity.clear();
   // Quiet worlds by default: tests that need ambient enemies or bosses opt in via NPC_TUNING.
   resetTuning();

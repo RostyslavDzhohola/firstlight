@@ -5,6 +5,7 @@ import type { AdminModeState } from "../content/admin.ts";
 import type { BodyId } from "../planet/bodies.ts";
 import type { CosmeticSlot } from "../content/items.ts";
 import type { HallLine } from "../content/secrets.ts";
+import type { SpellId, SpellsYou } from "../content/spells.ts";
 
 export const NET = {
   TICK_MS: 50, // 20 Hz simulation and patches
@@ -148,7 +149,62 @@ export type ClientMessages = {
   train: { ox: number; oy: number; oz: number; dx: number; dy: number; dz: number };
   /** Onboarding: skip it (no more XP, no Spark medal; it never comes back). */
   onboarding: { action: "skip" };
+  /** Cast a spell from the spellbook (content/spells.ts; at most 5 a second). Refusals answer `denied {action: "cast", reason}`. */
+  cast: CastMsg;
 };
+
+/**
+ * Cast a spell. The server checks the level gate, aether, cooldown and the attack rules (not dead,
+ * not in a safe zone, not protected, swimming or riding), then does everything itself:
+ * - `skipstep`: blinks the caster up to 10 m along `dx,dy,dz` (projected onto the ground) and sends
+ *   the caster a `correct` with the new position, like any server move.
+ * - `frostbloom`, `glasswing`: around / on the caster; the aim is ignored.
+ * - `wishfall`: lands on `tx,ty,tz` (snapped to the ground, pulled back to 30 m and to the first
+ *   thing between the caster's head and it). Without a target point: where the ray from the
+ *   caster's head along `dx,dy,dz` first meets the ground or something solid within 30 m.
+ * Everyone nearby then gets `spell` events. Refusal reasons: "locked" (level gate), "cooldown", "aether",
+ * "safe zone", "protected", "swimming", "mounted", "dead", "dir", "blocked" (Skipstep with a wall
+ * right ahead; nothing is spent).
+ */
+export interface CastMsg {
+  spell: SpellId;
+  /** Aim direction (the camera's forward), any length from 0.5 to 1.5. */
+  dx: number;
+  dy: number;
+  dz: number;
+  /** Wishfall only: the ground point to hit. */
+  tx?: number;
+  ty?: number;
+  tz?: number;
+}
+
+/**
+ * A spell happened (sent to clients within 160 m, and always to the caster). `x,y,z` is where:
+ * - skipstep `cast`: from `x,y,z` to `tx,ty,tz`.
+ * - frostbloom `cast`: the ring's centre, radius `r`; `hit` lists who was slowed for `ms`.
+ * - wishfall `cast`: the warning ring `id` at `x,y,z`, radius `r`, landing in `ms`; `impact`: it landed.
+ * - glasswing `cast`: a shell on `by` for `ms` with `hp`; `absorb`: it took `amount` from `from`
+ *   (`hp` left); `end`: gone (`broke` when it ran out of HP).
+ */
+export interface SpellEvent {
+  spell: SpellId;
+  phase: "cast" | "impact" | "absorb" | "end";
+  by: string;
+  x: number;
+  y: number;
+  z: number;
+  tx?: number;
+  ty?: number;
+  tz?: number;
+  r?: number;
+  ms?: number;
+  id?: number;
+  hit?: string[];
+  hp?: number;
+  amount?: number;
+  from?: string;
+  broke?: boolean;
+}
 
 // ---- Server → client events (broadcast or direct) -------------------------------------------
 
@@ -207,6 +263,8 @@ export type ServerMessages = {
   train: { dummy: number; hits: number; down: boolean };
   /** Onboarding finished: `xp` paid in total (50 when done, less when skipped). */
   onboarding: { state: "done" | "skipped"; xp: number };
+  /** A spell was cast, landed, or a ward changed (content/spells.ts). */
+  spell: SpellEvent;
 };
 
 /** Private per-player state sent only to its owner. */
@@ -234,6 +292,8 @@ export interface YouState {
   onboarding?: { hits: number[] };
   /** Admin accounts only: the admin-mode switches (content/admin.ts). */
   adminMode?: AdminModeState;
+  /** The spellbook: aether, cooldowns and an active ward (content/spells.ts; set by the spell system). */
+  spells?: SpellsYou;
 }
 
 export interface InvItem {
