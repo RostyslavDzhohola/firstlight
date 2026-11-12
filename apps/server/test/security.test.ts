@@ -13,7 +13,10 @@ import { TOOL_GUESSES } from "../src/auth/loadtest.ts";
 import { NAME_LIMITS } from "../src/auth/nameLimits.ts";
 import { api, Browser, decodeJwt, play, startAuthServer, userIdOf, type AuthServer } from "./auth-helpers.ts";
 import { Client } from "@colyseus/sdk";
-import { joinAs, playRequest, safeLeave, startServer } from "./helpers.ts";
+import { joinAs, playRequest, safeLeave, startServer, waitFor } from "./helpers.ts";
+import { BODIES, isSafe } from "@firstlight/shared";
+import { dealDamage } from "../src/world/combat.ts";
+import { fakeWorld } from "./npcWorld.ts";
 
 /** A load-test secret strong enough to switch the load-test features on (D-security-2). */
 export const STRONG_SECRET = "lt-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGH";
@@ -330,3 +333,44 @@ describe("finding 6: name changes are limited", () => {
     expect((await setName(c, "Eta_1", "198.51.100.131")).json.ok).toBe(true);
   });
 });
+
+describe("finding 7: facing is a unit vector", () => {
+  it("input facing is normalised, and a zero-length facing is refused", async () => {
+    game = await startServer();
+    const r = await joinAs(game, "facer", "portus");
+    rooms.push(r);
+    const me = () => (r.state as any).players?.get(r.sessionId);
+    await waitFor(() => !!me());
+    const { x, y, z } = me();
+    r.send("input", { seq: 1, x, y, z, fx: 1, fy: 1, fz: 1, anim: 0, t: Date.now() });
+    await waitFor(() => Math.abs(me().fx - 1 / Math.sqrt(3)) < 0.01 && Math.abs(me().fz - 1 / Math.sqrt(3)) < 0.01);
+    r.send("input", { seq: 2, x, y, z, fx: 0, fy: 0, fz: 0, anim: 0, t: Date.now() });
+    r.send("input", { seq: 3, x, y, z, fx: 1, fy: 1, fz: 1, anim: 0, t: Date.now() });
+    await waitFor(() => me().seq === 3);
+    expect(Math.hypot(me().fx, me().fy, me().fz)).toBeCloseTo(1, 2);
+  });
+
+  it("the block arc uses the facing's direction, whatever its length", () => {
+    const w = fakeWorld("arcadia", { immortal: true });
+    const body = BODIES.arcadia;
+    let at: [number, number, number] | null = null;
+    for (let i = 0; i < 200 && !at; i++) {
+      const a = i * 2.399, zc = 1 - (2 * (i + 0.5)) / 200, rr = Math.sqrt(1 - zc * zc);
+      const p = w.world.snapToGround([Math.cos(a) * rr * body.radius, zc * body.radius, Math.sin(a) * rr * body.radius]);
+      if (Math.hypot(...p) - body.radius > body.waterLevel + 0.3 && !isSafe(body, p[0], p[1], p[2])) at = p;
+    }
+    const p = w.addPlayer("blocker", at!, 10);
+    p.char.hotbar[0] = { id: "sunbrand", tier: 1, qty: 1 };
+    p.char.selected = 0;
+    p.blocking = true;
+    // An over-long facing (1,1,1); the blow comes 70° off it, outside the 60° block half-angle.
+    p.state.fx = p.state.fy = p.state.fz = 1;
+    const u = [1 / Math.sqrt(3), 1 / Math.sqrt(3), 1 / Math.sqrt(3)], v = [1 / Math.SQRT2, -1 / Math.SQRT2, 0];
+    const c = Math.cos((70 * Math.PI) / 180), s = Math.sin((70 * Math.PI) / 180);
+    const from: [number, number, number] = [c * u[0]! + s * v[0]!, c * u[1]! + s * v[1]!, c * u[2]! + s * v[2]!];
+    const hp = p.state.hp;
+    expect(dealDamage(w.world.host, null, p, 10, false, from)).toBe(true);
+    expect(hp - p.state.hp).toBeCloseTo(10, 0); // not blocked (blocked: 3)
+  });
+});
+
