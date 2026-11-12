@@ -5,7 +5,8 @@
 //
 // The panel's text is drawn once to a canvas (both pages side by side) whenever the data changes; a
 // frame costs two uniform writes (which page, how far into a flip). The data is the home page's
-// public board (GET /api/home), asked for on arrival and every few minutes.
+// public board (GET /api/home), asked for on arrival and every few minutes while the board is on
+// (world/holoFeed.ts).
 
 import * as THREE from "three/webgpu";
 import { abs, float, floor, fract, frontFacing, max, min, mix, positionLocal, select, sin, smoothstep, texture, time, uniform, uv, vec2, vec3 } from "three/tsl";
@@ -17,7 +18,8 @@ import type { ClientSystem, ClientSystemFactory } from "../game/systems.ts";
 import { atmo } from "../render/atmosphere.ts";
 import { disposeTree } from "../render/dispose.ts";
 import type { ResolvedSettings } from "../render/quality.ts";
-import { HOLO_REFRESH_MS, holoPageAt, holoPages, type HoloHunt, type HoloPage } from "./holoBoardModel.ts";
+import { holoPageAt, holoPages, type HoloHunt, type HoloPage } from "./holoBoardModel.ts";
+import { HoloFeed } from "./holoFeed.ts";
 
 /** Where the emitter stands (east, north of the plaza's centre, m) and what the panel faces. */
 export const HOLO_AT: readonly [number, number] = [7.2, -12.6];
@@ -129,8 +131,9 @@ export class HoloBoard implements ClientSystem {
   private data: HomeData | null = null;
   private drawn = "";
   private t = 0;
-  private nextFetch = 0;
-  private disposed = false;
+  /** The loop's clock at the last frame (ms): what the feed's refresh interval is measured on. */
+  private clock = performance.now();
+  private readonly feed: HoloFeed;
   private readonly off: () => void;
 
   constructor(private readonly game: Game) {
@@ -143,6 +146,10 @@ export class HoloBoard implements ClientSystem {
     this.tex.minFilter = THREE.LinearFilter;
     this.tex.magFilter = THREE.LinearFilter;
     this.redraw();
+    this.feed = new HoloFeed(`${config.apiUrl}/api/home`, (data) => {
+      this.data = data;
+      this.redraw();
+    });
 
     const tint = vec3(...new THREE.Color(TINT).toArray());
     const flick = sin(time.mul(31)).mul(sin(time.mul(7.3))).mul(0.05).add(0.95);
@@ -222,6 +229,8 @@ export class HoloBoard implements ClientSystem {
   private applySettings(s: ResolvedSettings) {
     this.group.visible = s.on.holo;
     this.cone.visible = s.tier !== "low";
+    // The feed follows the board: off, it asks for nothing and drops a request under way.
+    this.feed.setEnabled(s.on.holo && !flags.has("offline"), this.clock);
   }
 
   /** Draw the pages again if what they say has changed (data or hunt lines). */
@@ -234,24 +243,10 @@ export class HoloBoard implements ClientSystem {
     this.tex.needsUpdate = true;
   }
 
-  private async refresh() {
-    if (flags.has("offline")) return;
-    try {
-      const r = await fetch(`${config.apiUrl}/api/home`, { signal: AbortSignal.timeout(8000) });
-      if (!r.ok || this.disposed) return;
-      this.data = (await r.json()) as HomeData;
-      if (!this.disposed) this.redraw();
-    } catch {
-      /* the board keeps what it has */
-    }
-  }
-
   update(dt: number, now: number) {
-    if (now >= this.nextFetch) {
-      this.nextFetch = now + HOLO_REFRESH_MS;
-      void this.refresh();
-    }
+    this.clock = now;
     if (!this.group.visible) return;
+    this.feed.tick(now);
     this.t += dt;
     const p = holoPageAt(this.t);
     this.uPage.value = p.page;
@@ -259,7 +254,7 @@ export class HoloBoard implements ClientSystem {
   }
 
   dispose() {
-    this.disposed = true;
+    this.feed.dispose();
     this.off();
     if (live === this) live = null;
     this.group.removeFromParent();
