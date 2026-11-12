@@ -22,7 +22,7 @@ import { stmt } from "../db/game-db.ts";
 import { authOptions, authRequestState, buildAuth, OTP_MIN_LEVEL, OTP_PER_ACCOUNT_PER_DAY, OTP_PUBLIC_PER_IP_PER_DAY, OTP_PUBLIC_SHARE, type FirstlightAuth } from "./better-auth.ts";
 import { hmacHex, safeEqual } from "./crypto.ts";
 import type { Identity, TokenVerifier, VerifyContext } from "./identity.ts";
-import { banKey, CLIENT_IP_HEADER, firstForwardedFor, normalizeIp } from "./ip.ts";
+import { banKey, CLIENT_IP_HEADER, normalizeIp, proxiedRequestIp } from "./ip.ts";
 import { accountLinks, type LinkEvents } from "./links.ts";
 import { classifyMailFailure, DevOutbox, disabledMailer, MailHealth, resendMailer, type Mailer } from "./mailer.ts";
 import { identifyRequest, mountAccountRoutes, requireAdminFor } from "./routes.ts";
@@ -302,7 +302,8 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
           }
         }
         delete req.headers["x-origin-secret"];
-        const ip = firstForwardedFor(req) ?? normalizeIp(req.socket.remoteAddress);
+        // Past the origin-secret check: the Vercel hop's first forwarded address (D-security-4, ip.ts).
+        const ip = proxiedRequestIp(req);
         if (ip) req.headers[CLIENT_IP_HEADER] = ip;
         next();
       });

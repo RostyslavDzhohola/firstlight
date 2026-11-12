@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { PROTOCOL_VERSION } from "@firstlight/shared/net/protocol";
 import { PLAY_GATE } from "../src/world/playGate.ts";
 import { banAccount } from "../src/social/moderation.ts";
-import type { Game } from "../src/app.ts";
+import { PLAY_LIMITS, type Game } from "../src/app.ts";
 import { isTestAccount } from "../src/db/index.ts";
 import { BOT_BUDGET } from "../src/world/botBudget.ts";
 import { TOOL_GUESSES } from "../src/auth/loadtest.ts";
@@ -207,5 +207,39 @@ describe("finding 3: /api/play spends a budget before verifying anything", () =>
     const r = await play(server, token);
     expect(r).toEqual({ status: 403, json: { ok: false, error: "banned" } });
     expect(spy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("finding 4: one trusted-proxy rule for client addresses", () => {
+  const good = { body: "portus", v: PROTOCOL_VERSION };
+  const limits = { ...PLAY_LIMITS };
+  afterEach(() => Object.assign(PLAY_LIMITS, limits));
+  const send = (port: number, token: string, headers: Record<string, string>) =>
+    fetch(`http://127.0.0.1:${port}/api/play`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...headers }, body: JSON.stringify(good) }).then((r) => r.status);
+
+  it("ignores X-Forwarded-For and invalid X-Real-IP on direct routes", async () => {
+    PLAY_GATE.ipCalls = 2;
+    game = await startServer({}, { production: true });
+    expect(await send(game.port, "bad", { "x-forwarded-for": "203.0.113.1, 198.51.100.1" })).toBe(401);
+    expect(await send(game.port, "bad", { "x-forwarded-for": "203.0.113.2, 198.51.100.2" })).toBe(401);
+    expect(await send(game.port, "bad", { "x-forwarded-for": "203.0.113.3, 198.51.100.3" })).toBe(429);
+    await game.close();
+    game = await startServer({}, { production: true });
+    expect(await send(game.port, "bad", { "x-real-ip": "not-an-ip-1" })).toBe(401);
+    expect(await send(game.port, "bad", { "x-real-ip": "not-an-ip-2" })).toBe(401);
+    expect(await send(game.port, "bad", { "x-real-ip": "not-an-ip-3" })).toBe(429);
+  });
+
+  it("limits loopback in production (not in development) and IPv6 per /64 after verification", async () => {
+    PLAY_LIMITS.ipCalls = 2;
+    game = await startServer({}, { production: true });
+    expect(await send(game.port, "dev:lo1:lo1", {})).toBe(200);
+    expect(await send(game.port, "dev:lo2:lo2", {})).toBe(200);
+    expect(await send(game.port, "dev:lo3:lo3", {})).toBe(429);
+    for (const [i, ip] of ["2001:db8:5:6::1", "2001:db8:5:6::2"].entries()) expect(await send(game.port, `dev:v6${i}:v6${i}`, { "x-real-ip": ip })).toBe(200);
+    expect(await send(game.port, "dev:v6x:v6x", { "x-real-ip": "2001:db8:5:6:aaaa::3" })).toBe(429);
+    await game.close();
+    game = await startServer();
+    for (const id of ["dv1", "dv2", "dv3"]) expect(await send(game.port, `dev:${id}:${id}`, {})).toBe(200);
   });
 });

@@ -16,7 +16,7 @@ import { NAME_MESSAGES } from "../db/names.ts";
 import type { Accounts, AccountsConfig } from "./accounts.ts";
 import { safeEqual, sha256Hex } from "./crypto.ts";
 import type { Identity } from "./identity.ts";
-import { directRequestIp, firstForwardedFor } from "./ip.ts";
+import { banKey, directRequestIp, proxiedRequestIp } from "./ip.ts";
 import { botSecret, checkToolSecret } from "./loadtest.ts";
 import { botBudget } from "../world/botBudget.ts";
 
@@ -176,8 +176,8 @@ export function mountAccountRoutes(app: Express, a: Accounts, cfg: AccountsConfi
       res.status(403).send("Open this page on the game's site.");
       return;
     }
-    const ip = (cfg.originSecret ? firstForwardedFor(req) : directRequestIp(req)) ?? "unknown";
-    if (!attempts.take(ip, Date.now())) {
+    const ip = cfg.originSecret ? proxiedRequestIp(req) : directRequestIp(req);
+    if (!attempts.take(ip ? banKey(ip) : "unknown", Date.now())) {
       res.status(429).send("Too many attempts. Try again later.");
       return;
     }

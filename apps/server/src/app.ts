@@ -6,7 +6,7 @@ import { matchMaker, Server } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import type { TokenVerifier } from "./auth/identity.ts";
-import { directRequestIp } from "./auth/ip.ts";
+import { banKey, directRequestIp } from "./auth/ip.ts";
 import { BodyRoom } from "./world/BodyRoom.ts";
 import { enterSandbox, isBodyId, onlineCount, play, type MatchmakingLimits } from "./world/matchmaking.ts";
 import { identityCheck, storageRecovery, travelRedirect } from "./world/admission.ts";
@@ -167,9 +167,10 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     const ip = directRequestIp(req);
     // Per-address limits skip load-test bots and loopback (local development and in-process tests;
     // production requests always carry the edge's client address).
-    const perAddress = !identity.loadtest && !(ip !== null && LOOPBACK.has(ip));
+    // Production has no loopback exemption (D-security-4); addresses are keyed IPv6 per /64.
+    const perAddress = !identity.loadtest && !(!opts.production && ip !== null && LOOPBACK.has(ip));
     if (!identity.loadtest) {
-      const key = ip ?? "unknown";
+      const key = ip ? banKey(ip) : "unknown";
       const fromIp = (ipCalls.get(key) ?? []).filter((t) => now - t < PLAY_LIMITS.windowMs);
       if (perAddress && fromIp.length >= PLAY_LIMITS.ipCalls) {
         res.status(429).json({ ok: false, error: "slow down" });
@@ -221,7 +222,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     const partyRoom = sandbox ? undefined : partyRoomFor(identity.userId, body, typeof req.body.partyLeaderRoomId === "string" ? req.body.partyLeaderRoomId : undefined);
     // Unused-seat caps: checked and claimed together, before any await (F12 re-review S4); the claim
     // becomes the reservation or is released.
-    const seatIp = perAddress ? (ip ?? "unknown") : identity.loadtest ? BOT_SEAT_KEY : null;
+    const seatIp = perAddress ? (ip ? banKey(ip) : "unknown") : identity.loadtest ? BOT_SEAT_KEY : null;
     if (!identity.loadtest && (pendingSeats.forUser(identity.userId, now) >= PLAY_LIMITS.userSeats || (seatIp !== null && pendingSeats.forIp(seatIp, now) >= PLAY_LIMITS.ipSeats))) {
       res.status(429).json({ ok: false, error: "slow down" });
       return;
