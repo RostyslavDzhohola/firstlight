@@ -25,7 +25,8 @@ function webpSize(b: Buffer): [number, number] {
 }
 
 describe.skipIf(!existsSync(manifestUrl))("the shipped HD art pack", () => {
-  const m = JSON.parse(readFileSync(manifestUrl, "utf8")) as PackManifest;
+  // Vitest still runs a skipped suite's body to collect it, so the read is guarded too.
+  const m = (existsSync(manifestUrl) ? JSON.parse(readFileSync(manifestUrl, "utf8")) : { version: 1, files: {} }) as PackManifest;
 
   it("lists files that exist, with their sizes, hashes and dimensions", () => {
     expect(m.version).toBe(1);
