@@ -11,7 +11,9 @@ import { LOOKS } from "./looks.ts";
 import { rezFxMesh } from "./rez.ts";
 import { SkyLife } from "./skyLife.ts";
 import { lightPoolGeometry, lightPoolMaterial, portusLightPools } from "../world/lightPools.ts";
+import { pileBeaconGeometry, pileBeaconMaterial } from "../world/pileBeacon.ts";
 import { BEAM_HEIGHT, beamMaterial, vortexMaterial } from "../world/portalVortex.ts";
+import { portusTownLights, townLightGeometry, townLightMaterial } from "../world/townLights.ts";
 
 const fakeCanvas = () =>
   ({ style: {}, width: 800, height: 600, addEventListener() {}, removeEventListener() {}, getContext() { return null; } }) as unknown as HTMLCanvasElement;
@@ -97,6 +99,16 @@ for (const backendName of ["webgpu", "webgl2"] as const) {
       sky.dispose();
     });
 
+    it("Portus' evening lights and the loot pile's beacon", () => {
+      const lights = new THREE.Mesh(townLightGeometry(portusTownLights(), createTerrain("portus")), townLightMaterial({ up: new THREE.Vector3(0, 1, 0), east: new THREE.Vector3(1, 0, 0), north: new THREE.Vector3(0, 0, -1) }));
+      const l = build(renderer, scene, camera, lights);
+      clean(l);
+      reads(l, "aLight", "aShape");
+      const beacon = build(renderer, scene, camera, new THREE.Mesh(pileBeaconGeometry(), pileBeaconMaterial()));
+      clean(beacon);
+      reads(beacon, "aPart");
+    });
+
     it("the light pools read their colour, radius and strength per vertex", async () => {
       const geometry = lightPoolGeometry(portusLightPools(), createTerrain("portus"));
       for (const layer of ["tint", "glow"] as const) {
@@ -107,3 +119,22 @@ for (const backendName of ["webgpu", "webgl2"] as const) {
     });
   });
 }
+
+describe("the hub lane's see-through materials draw in one pass", () => {
+  // three renders a transparent, double-sided material twice (back faces, then front faces: two
+  // draws and two shader builds per mesh) unless forceSinglePass is set. Additive light and flat
+  // membranes look the same in one.
+  it("rez light, light pools, pad beam and vortex", () => {
+    const mats: THREE.Material[] = [
+      rezFxMesh().mesh.material as THREE.Material,
+      lightPoolMaterial("tint"),
+      lightPoolMaterial("glow"),
+      beamMaterial(0x72f1b8),
+      vortexMaterial("arcadia", 0x36f9f6, { kind: "arch", base: 0.14, spring: 5, half: 1.93 }).material,
+    ];
+    for (const m of mats) {
+      expect(m.transparent, m.name).toBe(true);
+      if (m.side === THREE.DoubleSide) expect(m.forceSinglePass, m.name).toBe(true);
+    }
+  });
+});

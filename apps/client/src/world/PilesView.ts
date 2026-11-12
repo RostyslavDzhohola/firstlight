@@ -1,9 +1,13 @@
-// Loot piles as "digital matter": a slowly turning cluster of glowing cubes with a faint beam,
-// sized by how much it holds. Reads room.state.piles (view-filtered by distance).
+// Loot piles as "digital matter": a slowly turning cluster of glowing cubes under a beacon
+// (world/pileBeacon.ts: a tall shaft of light that reads from afar, ripples and sparks up close),
+// sized by how much it holds. Reads room.state.piles (view-filtered by distance). `?nopilebeacon`
+// (the Pilebeacon toggle) brings back the short faint beam.
 
 import * as THREE from "three/webgpu";
 import { releaseObjects } from "../render/dispose.ts";
+import type { ResolvedSettings } from "../render/quality.ts";
 import { warmupSamples } from "../render/warmup.ts";
+import { pileBeaconGeometry, pileBeaconMaterial } from "./pileBeacon.ts";
 
 const cubeGeo = new THREE.BoxGeometry(0.28, 0.28, 0.28);
 const beamGeo = new THREE.CylinderGeometry(0.12, 0.35, 6, 8, 1, true);
@@ -18,12 +22,15 @@ const beamMat = new THREE.MeshBasicNodeMaterial({ color: new THREE.Color(0xffd8a
  */
 let samples: THREE.Group | null = null;
 export function pileSamples(): THREE.Group {
-  return (samples ??= warmupSamples("pilesWarmup", [[cubeGeo, cubeMat], [cubeGeo, cubeMat2], [beamGeo, beamMat]]));
+  return (samples ??= warmupSamples("pilesWarmup", [[cubeGeo, cubeMat], [cubeGeo, cubeMat2], [beamGeo, beamMat], [pileBeaconGeometry(), pileBeaconMaterial()]]));
 }
 
 interface PileView {
   group: THREE.Group;
   spin: THREE.Group;
+  /** The beacon and the plain beam it replaces: one of the two is drawn. */
+  beacon: THREE.Mesh;
+  beam: THREE.Mesh;
   items: number;
 }
 
@@ -37,9 +44,21 @@ export class PilesView {
   private readonly views = new Map<string, PileView>();
   private readonly seen = new Set<string>();
   private t = 0;
+  private beaconOn = true;
 
   constructor(private readonly scene: THREE.Scene) {
     scene.add(pileSamples());
+  }
+
+  /** The Pilebeacon switch (`?nopilebeacon`): off, piles keep the short plain beam. */
+  applySettings(s: ResolvedSettings) {
+    this.beaconOn = s.on.pilebeacon;
+    for (const v of this.views.values()) this.showBeacon(v);
+  }
+
+  private showBeacon(v: PileView) {
+    v.beacon.visible = this.beaconOn;
+    v.beam.visible = !this.beaconOn;
   }
 
   update(state: any, dt: number) {
@@ -85,9 +104,15 @@ export class PilesView {
       c.rotation.set(i, i * 1.7, i * 0.3);
       spin.add(c);
     }
-    group.add(spin, new THREE.Mesh(beamGeo, beamMat));
+    const beam = new THREE.Mesh(beamGeo, beamMat);
+    const beacon = new THREE.Mesh(pileBeaconGeometry(), pileBeaconMaterial());
+    beacon.name = "pile_beacon";
+    beacon.renderOrder = 5;
+    group.add(spin, beam, beacon);
     this.scene.add(group);
-    return { group, spin, items: p.items };
+    const v: PileView = { group, spin, beacon, beam, items: p.items };
+    this.showBeacon(v);
+    return v;
   }
 
   dispose() {

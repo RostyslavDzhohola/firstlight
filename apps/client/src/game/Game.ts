@@ -191,6 +191,7 @@ export class Game {
       }
       this.portals?.applySettings(this.ctx.settings);
       this.skyLife?.applySettings(this.ctx.settings);
+      this.piles?.applySettings(this.ctx.settings);
     };
     applyFx();
     this.ctx.onChange(applyFx);
@@ -507,6 +508,7 @@ export class Game {
     this.skyLife.applySettings(this.ctx.settings);
     this.audio.setMusic(body);
     this.piles = new PilesView(this.ctx.scene);
+    this.piles.applySettings(this.ctx.settings);
 
     const stored = { starter: Number(localStorage.getItem("fl.starter") ?? 0), palette: Number(localStorage.getItem("fl.palette") ?? 0), look: Number(localStorage.getItem("fl.look") ?? 0) || 0 };
     // S5: from the join until control is handed over, a close of the new room aborts the arrival
