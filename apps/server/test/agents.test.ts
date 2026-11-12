@@ -12,7 +12,7 @@ import { onlineSnapshot } from "../src/ops/home.ts";
 import { liveRooms } from "../src/social/index.ts";
 import { Client, type Room } from "@colyseus/sdk";
 import { grantTravel, joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
-import { ask, offset, openSpotOutside } from "./npc-bots.ts";
+import { adminBot, ask, me as stateOf, offset, openSpotOutside, place, spawnNpc } from "./npc-bots.ts";
 
 let game: Game;
 let url: string;
@@ -312,6 +312,29 @@ describe("agents: missions and fighting", () => {
     expect(after.events.some((e) => e.type === "hit" && e.text.includes("damage to Hopbit"))).toBe(true);
     expect(a.corrections).toBe(0);
   }, 90_000);
+  // Review 2026-11-12 (agent kit) #3: `pvp: false` only refused a player as the target; a swing at a
+  // creature still hit a person in the arc.
+  it("with pvp off it doesn't swing through a person at its creature: it holds, then fights once they are clear", async () => {
+    const a = await agent("agentP", "arcadia", "ash"); // Sunbrand: 2.4 m, a 110 degree arc, three targets
+    const spot = openSpotOutside("arcadia");
+    expect(await a.moveTo({ pos: spot }, { sprint: true, seconds: 40 })).toMatchObject({ ok: true });
+    const at = offset(spot, 6, 0, 500);
+    // The person stands right at the creature (petting it): no step to the side clears the arc.
+    const human = await adminBot(game, rooms, "humanP", "arcadia", offset(spot, 6, 0.25, 500));
+    const npc = await spawnNpc(human, "woolback", at, { instant: true, roam: 0 });
+    await waitFor(() => a.observe({ peek: true }).creatures.some((c) => c.id === npc) && a.observe({ peek: true }).players.some((p) => p.name === "humanP"));
+    const hp0: number = stateOf(human).hp;
+    const held = await a.attack(npc, { seconds: 20 });
+    expect(held).toMatchObject({ ok: false, killed: false, reason: "player in the way", who: "humanP", attacks: 0 });
+    expect(stateOf(human).hp).toBe(hp0);
+    // The person walks off: the same attack goes ahead.
+    place(human, offset(spot, 60, 40, 500));
+    await waitFor(() => (a.observe({ peek: true }).players.find((p) => p.name === "humanP")?.dist ?? 99) > 30);
+    const fought = await a.attack(npc, { seconds: 12, untilDead: false });
+    expect(fought.attacks as number).toBeGreaterThan(0);
+    expect(stateOf(human).hp).toBe(hp0);
+  }, 120_000);
+
   it("trades, heals, rolls, dies and starts a new life", async () => {
     const a = await agent("agentG");
     const admin = await joinAs(game, "adminG", "arcadia", { starter: 3 }, "admin");

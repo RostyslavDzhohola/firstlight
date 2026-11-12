@@ -31,7 +31,8 @@ import { inReach } from "@firstlight/shared/content/world";
 import { shopSpotAt } from "@firstlight/shared/content/shops";
 import { AgentError, claimName, fixedToken, guestSession, type TokenSource } from "./auth.ts";
 import { summarize, type Observation, type ObservedCreature, type ObservedItem, type ObservedMission, type ObservedPlace, type ObservedSpells, type ObservedTrial } from "./observe.ts";
-import { addScaled, bearingOfDir, bearingTo, dirOfBearing, dist, groundDistance, len, norm, scale, sub, tangent, turn, type V3 } from "./vec.ts";
+import { attackShape, bystanderAtRisk, type Bystander } from "./collateral.ts";
+import { addScaled, bearingOfDir, bearingTo, cross, dirOfBearing, dist, dot, groundDistance, len, norm, scale, sub, tangent, turn, type V3 } from "./vec.ts";
 import { createNavigator, type Navigator } from "./nav.ts";
 import { WALK, Walker } from "./walker.ts";
 import { bodyWorld, type BodyWorld, type WorldObject } from "./world.ts";
@@ -126,7 +127,12 @@ export interface AttackOptions {
   untilDead?: boolean;
   /** Stop when your HP falls under this fraction (0-1), so you can retreat. */
   retreatBelow?: number;
-  /** Allow attacking another player. Off by default: agents don't start fights with people. */
+  /**
+   * Allow attacking another player. Off by default: agents don't start fights with people, and they
+   * don't hurt them by accident either: while a player stands in the weapon's arc, on the shot's
+   * path or in its blast the attack is held and the agent steps round (reason "player in the way"
+   * after 5 s of that). With `pvp: true` nothing is held.
+   */
   pvp?: boolean;
   /** Don't follow the target further than `radius` metres from `pos` (holding a beacon's ring). */
   leash?: { pos: readonly number[]; radius: number };
@@ -1191,6 +1197,16 @@ export class FirstlightAgent {
     return w.structures.raycast(from[0], from[1], from[2], u[0], u[1], u[2], l) > l && w.nature.raycast(from[0], from[1], from[2], u[0], u[1], u[2], l) > l;
   }
 
+  /** The first living player (not us, not `skip`) an attack with this weapon could hurt (collateral.ts). */
+  private bystander(w: { def: WeaponDef; tier: TierStats }, pos: V3, head: V3, facing: V3, aim: V3, skip: string): Bystander | null {
+    const others: Bystander[] = [];
+    (this.room?.state as any)?.players?.forEach((p: any, k: string) => {
+      if (k === this.sessionId || k === skip || ((p.flags as number) & PF.DEAD) !== 0) return;
+      others.push({ id: k, name: p.name, p: [p.x, p.y, p.z] });
+    });
+    return others.length ? bystanderAtRisk(attackShape(w.def, w.tier), pos, head, facing, aim, others) : null;
+  }
+
   /**
    * Fight a creature (or, with `pvp`, a player) with the weapon in hand: closes to the weapon's
    * range, keeps facing it, attacks at the weapon's rate, waits out reloads and overheats.
@@ -1225,6 +1241,7 @@ export class FirstlightAgent {
     let goneAt = 0;
     let attacks = 0;
     let drawUntil = 0;
+    let heldAt = 0;
     let prev: { p: V3; at: number } | null = null;
     let vel: V3 = [0, 0, 0];
     const hp0: number = get()?.hp ?? 0;
@@ -1289,6 +1306,23 @@ export class FirstlightAgent {
       // In a safe zone and already within reach: one try tells the caller why it doesn't work.
       const probeSafe = safe && d <= reach && sight && attacks === 0 && now >= this.nextAttackAt;
       if (!ready && !probeSafe) return { wish, speed, face };
+      if (!o.pvp) {
+        // No collateral damage (collateral.ts): hold while a player is in the arc, the path or the blast.
+        const near = this.bystander(w, pos, head, face, chest, id);
+        if (near) {
+          heldAt ||= now;
+          if (now - heldAt > 5000) return result({ ok: false, killed: false, reason: "player in the way", who: near.name, targetHp: t.hp, hint: `${near.name} is in your weapon's arc, line of fire or blast: pick another creature, or wait for a clear swing` });
+          // Step round the target, away from them, until the swing or the shot is clear.
+          const side = cross(up, face);
+          let step: V3 | null = scale(side, dot(side, sub(near.p, pos)) > 0 ? -1 : 1);
+          if (o.leash) {
+            const out = sub(pos, [o.leash.pos[0]!, o.leash.pos[1]!, o.leash.pos[2]!]);
+            if (len(out) >= o.leash.radius && dot(step, out) > 0) step = null;
+          }
+          return { wish: step, speed: this.walker.run, face };
+        }
+        heldAt = 0;
+      }
       if (w.def.delivery === "arrow" && !drawUntil) {
         drawUntil = now + (w.tier.draw ?? 1) * 1000 + 80;
         return { wish: null, speed, face, after: () => room.send("charge", { on: true }) };
