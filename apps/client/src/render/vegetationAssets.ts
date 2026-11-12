@@ -2,7 +2,7 @@
 import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
-import { abs, attribute, cameraViewMatrix, cross, dot, float, normalize, materialColor, mix, normalView, positionGeometry, positionLocal, positionViewDirection, positionWorld, renderGroup, select, sin, texture, time, uniform, vec3, vec4 } from "three/tsl";
+import { abs, attribute, cameraViewMatrix, cross, dot, float, fract, normalWorld, normalize, materialColor, mix, normalView, positionGeometry, positionLocal, positionViewDirection, positionWorld, renderGroup, select, sin, texture, time, uniform, vec3, vec4 } from "three/tsl";
 import { BODY_IDS, PROP_KINDS, type BodyId, type PropKind } from "@firstlight/shared";
 import { vegetationModels } from "./vegetationModels.ts";
 import { config } from "../config.ts";
@@ -10,6 +10,8 @@ import { atmo } from "./atmosphere.ts";
 import { PROP_PALETTES } from "./propGeometry.ts";
 import { applyOccluderFade } from "./occluderFade.ts";
 import type { TextureSlot } from "./artpacks/ArtPacks.ts";
+import { mossy } from "./meadow.ts";
+import { groundUniforms } from "./terrainMaterial.ts";
 
 export interface VegetationAssets {
   geometry: Map<string, THREE.BufferGeometry>;
@@ -217,7 +219,17 @@ export function vegetationMaterial(kind: PropKind, atlas: THREE.Texture, imposto
   const leaf = impostor ? t.leaf.mul(IMPOSTOR_FOLIAGE) : t.leaf;
   const tint = leaf.mul(role.r).add(t.bark.mul(role.g)).add(t.stone.mul(role.b))
     .add(vec3(1).mul(float(1).sub(role.r.add(role.g).add(role.b))));
-  m.colorNode = sample.rgb.mul(tint).mul(mix(float(1), float(0.78), atmo.wet));
+  const sways = !["rock", "boulder", "mushroom"].includes(kind);
+  // Each plant its own shade (D-gfx-worlds-1): the instance's wind phase doubles as a colour seed, so
+  // a stand of trees isn't one flat green, and the near mesh and its far card stay the same shade.
+  const shade = sways ? float(0.84).add(fract(attribute("iWind", "float").mul(3.71)).mul(0.3)) : float(1);
+  const painted = sample.rgb.mul(tint).mul(mix(float(1), shade, role.r));
+  // Moss on the sky-facing tops of rocks, where the planet grows any (worldLooks.ts ground.moss).
+  const rocky = !impostor && (kind === "rock" || kind === "boulder");
+  const base = rocky
+    ? mossy(painted, groundUniforms.mossColor, groundUniforms.moss, dot(normalize(normalWorld), normalize(positionWorld)), sample.g.add(sample.r).mul(0.5))
+    : painted;
+  m.colorNode = base.mul(mix(float(1), float(0.78), atmo.wet));
   m.opacityNode = sample.a;
   m.roughnessNode = mix(float(0.86), float(0.4), atmo.wet);
   // Foliage is lit as a canopy facing the sky. Leaf cards' own normals flip on back faces, which
@@ -229,7 +241,7 @@ export function vegetationMaterial(kind: PropKind, atlas: THREE.Texture, imposto
   const towardViewer = normalize(positionViewDirection.sub(upView.mul(dot(positionViewDirection, upView))).add(upView.mul(0.1)));
   if (impostor) m.normalNode = normalize(mix(towardViewer, upView, role.r));
   else if (!["rock", "boulder", "mushroom", "deadtree"].includes(kind)) m.normalNode = normalize(mix(normalView, upView, role.r.mul(NEAR_FOLIAGE_UP)));
-  if (!["rock", "boulder", "mushroom"].includes(kind)) {
+  if (sways) {
     // No compute/storage buffers: attribute + time works on WebGPU and WebGL2.
     // Roots stay still; each instance carries its packed yaw seed through LOD changes.
     const weight = positionGeometry.y.mul(0.16).clamp(0, 1).pow(2);

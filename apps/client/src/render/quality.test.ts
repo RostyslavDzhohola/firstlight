@@ -39,6 +39,40 @@ describe("withExtras", () => {
   });
 });
 
+describe("the planets' graphics pass (D-gfx-worlds-1)", () => {
+  const stored = emptyStored();
+
+  it("Low keeps the single blades and a clear sky; Medium gets lite clumps and one-tap clouds; High the full ones", () => {
+    const low = resolveSettings("low", false, true, stored, kills);
+    expect([low.on.meadow, low.on.clouds, low.on.terrainfx, low.on.waterfx]).toEqual([false, false, false, false]);
+    expect(low.on.landmarks).toBe(true); // one draw, a few thousand triangles: every tier
+    expect(low.on.aerial).toBe(true); // a uniform's worth of haze colour
+    const med = resolveSettings("medium", false, true, stored, kills);
+    expect([med.on.meadow, med.on.clouds, med.on.terrainfx, med.on.waterfx]).toEqual([true, true, true, true]);
+    expect([med.grass.clumps, med.clouds]).toEqual([1, 1]);
+    const high = resolveSettings("high", false, true, stored, kills);
+    expect([high.grass.clumps, high.clouds]).toEqual([2, 2]);
+  });
+
+  it("every new feature has a kill switch, and a parent switched off takes its children", () => {
+    for (const f of ["meadow", "clouds", "terrainfx", "waterfx", "aerial", "landmarks"] as const) {
+      expect(resolveSettings("high", false, true, stored, new Set([f])).on[f], f).toBe(false);
+    }
+    expect(resolveSettings("high", false, true, stored, new Set(["grass"] as const)).on.meadow).toBe(false);
+    expect(resolveSettings("high", false, true, stored, new Set(["sky"] as const)).on.clouds).toBe(false);
+    expect(resolveSettings("high", false, true, stored, new Set(["detail"] as const)).on.terrainfx).toBe(false);
+    expect(resolveSettings("high", false, true, stored, new Set(["water"] as const)).on.waterfx).toBe(false);
+  });
+
+  it("the meadow and clouds2 extras raise Medium to High's clumps and clouds, and give Low nothing", () => {
+    const s = withExtras(TIER_TABLE.medium, ["meadow", "clouds2"]);
+    expect(s.grass).toEqual({ ...TIER_TABLE.medium.grass, clumps: 2 });
+    expect(s.clouds).toBe(2);
+    const low = withExtras(TIER_TABLE.low, ["meadow", "clouds2"]);
+    expect([low.grass.clumps, low.clouds]).toEqual([0, 0]);
+  });
+});
+
 describe("resolveSettings with extras", () => {
   const stored = (extra: Partial<StoredGfx> = {}): StoredGfx => ({ ...emptyStored(), ...extra });
 

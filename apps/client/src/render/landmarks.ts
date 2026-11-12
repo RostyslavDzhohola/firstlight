@@ -142,8 +142,11 @@ function offset(from: V3, metres: number, heading: number, radius: number): V3 {
 
 // ------------------------------------------------------------------------------------- Arcadia
 
-/** One floating island: a meadow cap on an inverted rock spire, a few pines, falls of light off the rim. */
-function island(b: SilhouetteBuilder, f: Frame, w: number, r: () => number) {
+/** Nothing of Arcadia's islands comes lower than this above the radius (Kestrel Peak is 95 m). */
+const ISLAND_FLOOR = 130;
+
+/** One floating island (its top `h` above the radius): a meadow cap on an inverted rock spire, a few pines, falls of light off the rim. */
+function island(b: SilhouetteBuilder, f: Frame, w: number, h: number, r: () => number) {
   const K = 9;
   const turf = rgb(0x6aa84a), turf2 = rgb(0x8fc85a), earth = rgb(0x6b5238), rock = rgb(0xb0a696), dark = rgb(0x7d7468), deep = rgb(0x554e48);
   const rim: V3[] = [], lip: V3[] = [], mid: V3[] = [], rimR: number[] = [];
@@ -185,7 +188,8 @@ function island(b: SilhouetteBuilder, f: Frame, w: number, r: () => number) {
     const i = Math.floor(r() * K);
     const a = (i / K) * Math.PI * 2;
     const x = Math.cos(a) * rimR[i]! * 0.96, z = Math.sin(a) * rimR[i]! * 0.96;
-    const len = w * (1.6 + r() * 1.4), hw = w * 0.045, ph = r() * 10;
+    // The light thins out in mid-air: it never reaches the ground.
+    const len = Math.min(w * (1.6 + r() * 1.4), h - ISLAND_FLOOR), hw = w * 0.045, ph = r() * 10;
     for (const [dx, dz] of [[Math.sin(a), -Math.cos(a)], [Math.cos(a), Math.sin(a)]] as const) {
       const g0: V3 = [3.2, ph, FLOW], g1: V3 = [0, ph + len * 0.06, FLOW];
       b.quad(
@@ -203,11 +207,15 @@ function arcadia(radius: number): SilhouetteBuilder {
   // One in view from the landing pad, the rest spread round the planet.
   const dirs: V3[] = [offset(pad, 230, 0.9, radius), offset(pad, 330, 3.6, radius), ...spreadDirs(13, 0x51a7)];
   dirs.forEach((d, i) => {
-    const w = 30 + r() * 34;
-    const f = new Frame(d, radius, 150 + r() * 90, r() * 6.28);
-    island(b, f, w, r);
+    // Tops 230–330 m up: the deepest spire (1.4 × the width) still ends above ISLAND_FLOOR.
+    const w = 34 + r() * 36;
+    const h = 230 + r() * 100;
+    island(b, new Frame(d, radius, h, r() * 6.28), w, h, r);
     // A smaller rock or two keeping it company.
-    if (i % 2 === 0) island(b, new Frame(offset(d, w * 2.2 + r() * 40, r() * 6.28, radius), radius, 120 + r() * 120, r() * 6.28), 9 + r() * 9, r);
+    if (i % 2 === 0) {
+      const h2 = 190 + r() * 110;
+      island(b, new Frame(offset(d, w * 2.2 + r() * 40, r() * 6.28, radius), radius, h2, r() * 6.28), 10 + r() * 10, h2, r);
+    }
   });
   return b;
 }
