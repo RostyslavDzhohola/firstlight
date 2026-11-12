@@ -46,7 +46,7 @@ import type { BodyId } from "@firstlight/shared/planet/bodies";
 import type { HomeData } from "@firstlight/shared/net/home";
 
 const SCREENS = [
-  "moment-level", "moment-spell", "moment-mission", "moment-trial", "moment-gleam", "moment-vault", "moment-medal", "arrival", "arrival-portus", "arrival-hollowmere", "arrival-meridian", "hud-full", "hud-combat",
+  "og", "moment-level", "moment-spell", "moment-mission", "moment-trial", "moment-gleam", "moment-vault", "moment-medal", "arrival", "arrival-portus", "arrival-hollowmere", "arrival-meridian", "hud-full", "hud-combat",
   "landing", "home-guest", "loading", "loading-compact", "loading-webgpu", "charpick", "charpick-rebirth", "hud", "hud-oversight", "hud-states",
   "death", "death-player", "death-party", "death-world", "menu", "menu-logout", "settings",
   "players", "compass", "wheel", "shop", "journal", "invite", "removed", "kit-inventory", "kit-onboarding", "inventory", "inventory-drag", "onboarding", "onboarding-attack", "onboarding-loot", "onboarding-portal", "onboarding-done", "save", "save-code", "save-saved", "save-busy", "save-unavailable", "save-locked", "signin", "signin-unavailable", "name", "notice",
@@ -306,7 +306,7 @@ async function run() {
   switch (screen) {
     case "landing":
     case "home-guest": {
-      const m = /<section id="landing"[\s\S]*?<\/section>/.exec(indexHtml);
+      const m = /<section id="landing"[\s\S]*<\/section>/.exec(indexHtml);
       document.body.insertAdjacentHTML("beforeend", m ? m[0] : "");
       const guest = screen === "home-guest";
       paintHomeMock(HOME_MOCK, guest ? { ...ME_MOCK, guest: true, displayName: null, name: "Wanderer-4410", titleMedal: null, character: { ...ME_MOCK.character!, level: 3, xp: 260 } } : ME_MOCK, guest ? "logged-out" : null);
@@ -331,6 +331,21 @@ async function run() {
       const hud = new Hud();
       hud.root.hidden = true;
       void hud.characterPick(screen === "charpick" ? { askName: { suggested: "Wren_07" } } : { rebirth: true });
+      break;
+    }
+    case "og": {
+      // The share image (public/og.jpg, 1200×630): an in-game still and the wordmark. Shoot this
+      // screen at 1200×630 and save it as a JPEG.
+      const og = el("div", "fl-ui fl-og", document.body);
+      const img = el("img", "", og);
+      img.alt = "";
+      img.src = new URL("../stills/portus-plaza-dusk.webp", import.meta.url).href;
+      const text = el("div", "fl-og__text", og);
+      el("div", "fl-eyebrow", text, "An open world in your browser");
+      const mark = el("div", "fl-wordmark fl-og__mark", text);
+      mark.append("First");
+      el("b", "", mark, "light");
+      el("p", "", text, "Three planets, a hub, a crowd of strangers, one life. Free, no download.");
       break;
     }
     case "moment-level":

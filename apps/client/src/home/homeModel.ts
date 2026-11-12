@@ -7,15 +7,20 @@ import { MEDAL_BY_ID, MEDALS } from "@firstlight/shared/content/medals";
 import { LEVEL_CAP, xpAtLevel, xpToNext } from "@firstlight/shared/content/progression";
 import { PLAQUES, type HallLine } from "@firstlight/shared/content/secrets";
 import { STARTERS, starterLook } from "@firstlight/shared/content/weapons";
+import { GLEAMS } from "@firstlight/shared/content/gleams";
+import { MISSION_BY_ID } from "@firstlight/shared/content/missions";
+import { SPELLS } from "@firstlight/shared/content/spells";
+import { starterStats } from "@firstlight/shared/content/starters";
 import type { HomeOnline, HomeVisits } from "@firstlight/shared/net/home";
 
 // ------------------------------------------------------------------------------------------- worlds
 
+/** What follows the world's line on its card (the line itself is LINE below). */
 const BLURB: Record<BodyId, string> = {
-  portus: "The castle town between the worlds: shop, portals, Hall of Firsts. Creeps roam outside its walls.",
-  arcadia: "Golden meadows round Glasswater Lake, where the Brightbits roam.",
-  hollowmere: "Violet dusk over Mourning Mere. The Hollow Court keeps the fen.",
-  meridian: "Red canyons and chrome spires, run by Meridian Oversight.",
+  portus: "Shop, portals and the Hall of Firsts. Creeps roam outside its walls.",
+  arcadia: "Where the Brightbits roam.",
+  hollowmere: "The Hollow Court keeps the fen.",
+  meridian: "Run by Meridian Oversight.",
 };
 /** One line per world: the world cards' headline and the in-game arrival card (ui/arrivalCard.ts). */
 const LINE: Record<BodyId, string> = {
@@ -199,4 +204,86 @@ export function namesLine(names: readonly string[], players: number, max = 3): s
   const shown = names.slice(0, max);
   const more = players - shown.length;
   return more > 0 ? `${shown.join(", ")} and ${more} more` : shown.join(", ");
+}
+
+// ------------------------------------------------------------------------------- the hero and its stills
+
+/**
+ * The hero's in-game stills (D-home-9), by their ids in ui/loadingStills.ts STILLS, in the order they
+ * cross-fade: the hub first (it is in index.html, so it paints with the page), then one per planet.
+ */
+export const HERO_STILLS = ["portus-plaza-dusk", "arcadia-lake", "hollowmere-planet", "meridian-mesa", "portus-portal"] as const;
+/** The still on each world's card. */
+export const WORLD_STILL: Record<BodyId, string> = { portus: "portus-above", arcadia: "arcadia-pond", hollowmere: "hollowmere-fen", meridian: "meridian-waystation" };
+
+/** How long a hero still holds before the next fades in (ms), and the fade (home.css). */
+export const HERO_HOLD_MS = 7000;
+export const HERO_FADE_MS = 2200;
+
+/** The stills in hero order; ids the build doesn't have are skipped. */
+export function heroStills<T extends { id: string }>(all: readonly T[], ids: readonly string[] = HERO_STILLS): T[] {
+  return ids.map((id) => all.find((s) => s.id === id)).filter((s): s is T => !!s);
+}
+
+/** The line under Play: who is in the worlds right now, or an invitation when it is empty. */
+export function heroLive(online: HomeOnline | null): string | null {
+  if (!online) return null;
+  const { count, label } = onlineLabel(online.total);
+  return count ? `${count} ${label} right now` : label;
+}
+
+// ------------------------------------------------------------------------------------- what is new
+
+export interface NewsTile {
+  id: "spells" | "hunt" | "starters";
+  title: string;
+  text: string;
+  /** Sprites shown on the tile (ui/sprites.ts), each with a short label under it. */
+  icons: { sprite: string; label: string }[];
+  /** A line of live state under the text (the hunt's), or null. */
+  state: string | null;
+  /** Whether `state` is good news already claimed (styled as done) or still open. */
+  claimed?: boolean;
+}
+
+/** The hunt's public state from the Hall of Firsts: who opened the Gleam Vault first, or that nobody has. */
+export function huntState(hall: readonly HallLine[] | null): { text: string; claimed: boolean } | null {
+  if (!hall) return null;
+  const first = hall.find((l) => l.id === GLEAMS.firsts);
+  return first ? { text: `First opened by ${first.name} · ${fmtDate(first.foundAt)}`, claimed: true } : { text: "The vault has never been opened. Be the first.", claimed: false };
+}
+
+/** The three tiles of "New in the worlds", written from the shared content so they can't go stale. */
+export function newsTiles(hall: readonly HallLine[] | null): NewsTile[] {
+  const hunt = huntState(hall);
+  const levels = SPELLS.map((s) => s.level);
+  const trials = GLEAMS.trials.map((id) => MISSION_BY_ID.get(id)!);
+  const traits = (i: number) => starterStats(i).traits[0] ?? "";
+  return [
+    {
+      id: "spells", title: "A spellbook for everyone",
+      text: `Four spells on ${SPELLS.map((s) => s.keycap).join(" ")}, next to whatever weapon you carry: a blink, a ring of frost, a falling star, a glass ward. They open at levels ${levels.slice(0, -1).join(", ")} and ${levels.at(-1)}.`,
+      icons: SPELLS.map((s) => ({ sprite: `spell-${s.id}`, label: s.keycap })),
+      state: null,
+    },
+    {
+      id: "hunt", title: `The hunt: ${GLEAMS.name}`,
+      text: `One gleam on each planet, each won by a different skill: a ring race on ${BODIES[trials[0]!.body].name}, a beacon to hold on ${BODIES[trials[1]!.body].name}, shards to gather on ${BODIES[trials[2]!.body].name}. Bring all three home and the vault in Portus opens.`,
+      icons: trials.map((t) => ({ sprite: "prism", label: BODIES[t.body].name })),
+      state: hunt?.text ?? null,
+      claimed: hunt?.claimed,
+    },
+    {
+      id: "starters", title: "Five starters that play differently",
+      text: "Each has its own weapon, health, pace and dodge: one strength paid for by one weakness. Pick again every time you are reborn.",
+      icons: STARTERS.map((st, i) => ({ sprite: HEAD_SPRITES[i] ?? "head-unit7", label: traits(i) })),
+      state: null,
+    },
+  ];
+}
+const HEAD_SPRITES = ["head-hexwick", "head-ash", "head-kappa", "head-unit7", "head-ninja"];
+
+/** The agents guide in the public repo (shown only once the repo is public). */
+export function agentsGuideUrl(repoUrl: string): string {
+  return `${repoUrl.replace(/\/$/, "")}/blob/main/docs/agents/playing.md`;
 }
