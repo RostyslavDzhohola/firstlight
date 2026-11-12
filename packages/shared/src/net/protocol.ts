@@ -289,7 +289,7 @@ export interface TrialMsg {
   leftMs: number;
   limitMs: number;
   next: string | null;
-  /** Why it failed: "time", "died", "left", "abandoned" (or why it went idle). */
+  /** Why it failed: "time", "died", "left", "abandoned" (or why it went idle: "dropped", a lost socket ended it). */
   reason?: string;
 }
 

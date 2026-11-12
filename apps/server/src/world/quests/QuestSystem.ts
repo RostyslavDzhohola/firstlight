@@ -401,6 +401,14 @@ export class QuestSystem implements RoomSystem {
     this.trials.onLeave(sessionId);
   }
 
+  onPlayerDrop(a: PlayerActor) {
+    this.trials.onDrop(a);
+  }
+
+  onPlayerReconnect(a: PlayerActor) {
+    this.trials.onReconnect(a);
+  }
+
   /** (Re)load account-level progress for a player: medals, title, discovered pads on this body. */
   loadAccount(a: PlayerActor) {
     const q = this.qp(a);

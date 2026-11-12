@@ -3,6 +3,8 @@
 // client sees. Trial clocks run at TRIAL_RULES.timeScale (shrunk here, restored after each test).
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { Client } from "@colyseus/sdk";
+import { PF } from "@firstlight/shared/net/schema";
 import { GLEAMS } from "@firstlight/shared/content/gleams";
 import { MISSION_BY_ID } from "@firstlight/shared/content/missions";
 import type { BodyId } from "@firstlight/shared";
@@ -10,8 +12,9 @@ import { PLAY_LIMITS } from "../src/app.ts";
 import { TRIAL_RULES } from "../src/world/quests/trials.ts";
 import { npcSystemOf } from "../src/world/npc/index.ts";
 import { progressStore } from "../src/world/quests/store.ts";
+import { QuestSystem } from "../src/world/quests/QuestSystem.ts";
 import { safeLeave, startServer, waitFor } from "./helpers.ts";
-import { bot, harness, invIds, me, objAt, offPad, serverRoom, sleep, tpAndWait, until, type Bot } from "./quest-helpers.ts";
+import { bot, harness, invIds, me, objAt, offPad, serverRoom, sleep, tpAndWait, until, wrapRoom, type Bot } from "./quest-helpers.ts";
 
 const SCALE = TRIAL_RULES.timeScale;
 const CALLS = PLAY_LIMITS.userCalls;
@@ -66,6 +69,28 @@ async function gather(b: Bot, id: string, from = 0, to?: number) {
 }
 
 const trialNpcs = (b: Bot) => npcSystemOf(serverRoom(b))!.spawnedCount("trial");
+const actor = (b: Bot) => serverRoom(b).actors.get(b.id)!;
+const questsOf = (room: ReturnType<typeof serverRoom>) => room.systems.find((s): s is QuestSystem => s instanceof QuestSystem)!;
+
+/**
+ * Drop the bot's socket the way a lost network does (not a consented leave: the server keeps the body
+ * for the reconnection window and runs onDrop), wait until the server has noticed, and return a
+ * function that reconnects with the room's token as a fresh client.
+ */
+async function dropSocket(b: Bot): Promise<() => Promise<Bot>> {
+  const token = b.room.reconnectionToken;
+  const room = serverRoom(b);
+  const a = actor(b);
+  b.room.reconnection.enabled = false; // we reconnect by hand, with the token
+  b.room.connection.close(3000, "network lost (test)");
+  await until("server saw the drop", () => (a.state.flags & PF.LINGER) !== 0);
+  return async () => {
+    const r = await new Client(`http://127.0.0.1:${harness.game!.port}`).reconnect(token);
+    const nb = await wrapRoom(r);
+    await until("same body back", () => room.actors.get(nb.id) === a && (a.state.flags & PF.LINGER) === 0);
+    return nb;
+  };
+}
 
 describe("race (T1, The Swift Gleam)", () => {
   it("starts at the first ring, takes them in order, pays on the last; two runners at once", async () => {
@@ -155,6 +180,34 @@ describe("defend (T2, The Steadfast Gleam; H4, The Long Vigil)", () => {
     a.send("interact", { target: "h4_lamp" });
     await until("held", () => mission(a, "H4").done, 12000);
     expect(a.last("missionDone")).toEqual({ id: "H4", xp: 900, coins: 150 });
+  });
+
+  it("a dropped socket ends the attempt at once: no hold time while away, the waves go, idle on reconnect", async () => {
+    TRIAL_RULES.timeScale = 0.05; // 4.5 s hold
+    const a = await take("dropped_holder", ["T2"], "hollowmere");
+    await tpAndWait(a, objAt("t2_beacon"));
+    a.send("interact", { target: "t2_beacon" });
+    await until("running", () => lastTrial(a, "T2")?.state === "running");
+    await until("a wave", () => trialNpcs(a) > 0);
+    const server = serverRoom(a);
+    const body = actor(a);
+    const reconnect = await dropSocket(a);
+    // The attempt is cancelled and its waves dissolve while the body waits for its owner.
+    await until("attempt cancelled", () => !questsOf(server).trials.run(body), 2000);
+    await until("waves gone", () => trialNpcs(a) === 0, 3000);
+    // Longer than the whole hold: a lingering body standing in the ring earns nothing.
+    await sleep(5500);
+    const m = body.char.missions.find((x) => x.id === "T2")!;
+    expect(m.done).toBe(false);
+    expect(m.progress).toBe(0);
+    expect(questsOf(server).trials.run(body)).toBeUndefined();
+    const back = await reconnect();
+    await until("idle on reconnect", () => lastTrial(back, "T2")?.state === "idle");
+    expect(lastTrial(back, "T2").reason).toBe("dropped");
+    expect(mission(back, "T2")).toMatchObject({ progress: 0, done: false });
+    // And the beacon lights again for a fresh attempt.
+    back.send("interact", { target: "t2_beacon" });
+    await until("running again", () => lastTrial(back, "T2")?.state === "running");
   });
 
   it("dying on the beacon fails the attempt and its waves dissolve", async () => {

@@ -4,8 +4,8 @@
 // change as a `trial` message (protocol.ts TrialMsg) and counts the clock down itself.
 //
 // What persists: the mission entry (accepted, done, and for collect the pieces taken in `counts`).
-// The attempt itself (clock, next ring, waves) lives in this session only: a reconnect, a death, a
-// timeout or leaving a beacon's ring ends it, and the mission stays accepted for another try.
+// The attempt itself (clock, next ring, waves) lives in this session only: a dropped socket, a
+// reconnect, a death, a timeout or leaving a beacon's ring ends it, and the mission stays accepted for another try.
 // Defend waves come from the NPC system's public createNpc/dissolve, marked `spawned: "trial"`, so
 // they pay nothing (rewards.ts) and dissolve when the attempt ends.
 
@@ -13,6 +13,7 @@ import { MISSION_BY_ID, missionGoal, type MissionDef } from "@firstlight/shared/
 import { NPC_DEFS, NPC_INDEX } from "@firstlight/shared/content/npcs";
 import { inReach } from "@firstlight/shared/content/world";
 import type { TrialMsg } from "@firstlight/shared/net/protocol";
+import { PF } from "@firstlight/shared/net/schema";
 import { actorPos, type PlayerActor } from "../actors.ts";
 import type { V3 } from "../geometry.ts";
 import { npcSystemOf } from "../npc/index.ts";
@@ -58,6 +59,8 @@ export class TrialLogic {
   private readonly runs = new Map<string, Run>();
   /** Session id → feet position at the previous tick (race rings are passed along that segment). */
   private readonly lastPos = new Map<string, V3>();
+  /** Session id → the mission whose attempt a dropped socket ended (told on reconnect). */
+  private readonly dropped = new Map<string, string>();
 
   constructor(q: QuestSystem) {
     this.q = q;
@@ -118,6 +121,28 @@ export class TrialLogic {
     if (run) this.dissolveWaves(run);
     this.runs.delete(sessionId);
     this.lastPos.delete(sessionId);
+    this.dropped.delete(sessionId);
+  }
+
+  /**
+   * The socket dropped: the body waits out the reconnection window, but the attempt ends now (its
+   * clock can't run for someone who isn't there, D-hunt-3): waves dissolve, progress resets as on a
+   * failure, and the reconnect hears `idle` (reason "dropped"). Nothing ticks while the body lingers.
+   */
+  onDrop(a: PlayerActor) {
+    this.lastPos.delete(a.id);
+    const run = this.runs.get(a.id);
+    if (!run) return;
+    this.reset(a, run);
+    this.dropped.set(a.id, run.id);
+  }
+
+  /** Back on the same body: say the attempt the drop ended is gone (the HUD clears its clock). */
+  onReconnect(a: PlayerActor) {
+    const id = this.dropped.get(a.id);
+    this.dropped.delete(a.id);
+    const def = id ? MISSION_BY_ID.get(id) : undefined;
+    if (def) this.send(a, def, a.char.missions.find((x) => x.id === id && !x.done), "idle", "dropped");
   }
 
   /** Death ends any attempt (the mission stays accepted until the rebirth clears it). */
@@ -142,6 +167,8 @@ export class TrialLogic {
   // ---------------------------------------------------------------- tick
 
   tickPlayer(a: PlayerActor, now: number) {
+    // A dropped or lingering body runs no trial: it can't start a race standing in ring 1 or take a shard.
+    if (a.state.flags & PF.LINGER) return;
     const p = actorPos(a);
     const prev = this.lastPos.get(a.id) ?? p;
     this.lastPos.set(a.id, [p[0], p[1], p[2]]);
@@ -364,19 +391,25 @@ export class TrialLogic {
     if (this.runs.get(a.id) === run) this.runs.delete(a.id);
   }
 
-  /** End the player's attempt as failed: progress back to 0 (timed collects drop their pieces). */
-  fail(a: PlayerActor, reason: "time" | "died" | "left") {
-    const run = this.runs.get(a.id);
-    if (!run) return;
+  /** End an attempt without a word: waves dissolve, progress back to 0 (timed collects drop their pieces). */
+  private reset(a: PlayerActor, run: Run): { def: MissionDef | undefined; m: Mission | undefined } {
     this.end(a, run);
     const def = MISSION_BY_ID.get(run.id);
     const m = a.char.missions.find((x) => x.id === run.id && !x.done);
-    if (!def) return;
-    if (m) {
+    if (def && m) {
       m.progress = 0;
       if (def.collect) m.counts = def.collect.pieces.map(() => 0);
       a.youDirty = true;
     }
+    return { def, m };
+  }
+
+  /** End the player's attempt as failed: progress back to 0 (timed collects drop their pieces). */
+  fail(a: PlayerActor, reason: "time" | "died" | "left") {
+    const run = this.runs.get(a.id);
+    if (!run) return;
+    const { def, m } = this.reset(a, run);
+    if (!def) return;
     const again = def.race ? "pass the first ring to try again" : def.defend ? "light the beacon to try again" : "gather the first shard to start again";
     const why = reason === "time" ? "out of time" : reason === "died" ? "you fell" : "you left the beacon's ring";
     if (reason !== "died") this.q.toast(a, `${def.name} failed: ${why} — ${again}`, "warn");
