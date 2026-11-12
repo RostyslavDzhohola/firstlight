@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { HomeOnline } from "@firstlight/shared/net/home";
 import type { MeInfo } from "./homeModel.ts";
 import { almanacLines, bodyAngle, bodyPos, enterBody, FRONT, frontBody, neighbour, ORRERY_BODIES, orreryCamera, orreryPlate, pickBody, project, wrapAngle, yawFor } from "./orreryModel.ts";
-import { wantsOrrery } from "./orrery.ts";
+import { PIXEL_BUDGET, wantsOrrery } from "./orrery.ts";
 
 const W = 1440, H = 900;
 const online = (n: Partial<Record<string, [number, string[]]>> = {}): HomeOnline => {
@@ -55,7 +55,23 @@ describe("the orrery's sky", () => {
     });
   });
 
-  it("a click on a world picks it, a click on empty sky picks nothing, the nearer world wins", () => {
+  it("where two worlds overlap on screen, the nearer one is picked", () => {
+    // Portus and Arcadia line up on the same bearing when their angles meet.
+    const [p0, p1] = [ORRERY_BODIES[0]!, ORRERY_BODIES[1]!];
+    const t = (p1.phase - p0.phase) / (p0.speed - p1.speed);
+    const a = bodyAngle(p0, t, 0);
+    expect(Math.abs(wrapAngle(a - bodyAngle(p1, t, 0)))).toBeLessThan(1e-9);
+    // A camera far out on that bearing, looking in at the star: both discs hold the same point.
+    const dir = [Math.cos(a), 0, Math.sin(a)] as const;
+    const cam = { pos: [dir[0] * 30, 0, dir[2] * 30] as const, fwd: [-dir[0], 0, -dir[2]] as const, right: [dir[2], 0, -dir[0]] as const, up: [0, 1, 0] as const, tan: 0.3 };
+    const s0 = project(bodyPos(p0, t, 0), cam, W, H);
+    const s1 = project(bodyPos(p1, t, 0), cam, W, H);
+    expect(Math.hypot(s0.x - s1.x, s0.y - s1.y)).toBeLessThan(1);
+    expect(s1.depth).toBeLessThan(s0.depth); // Arcadia's ring is the outer one: nearer this camera
+    expect(pickBody(s0.x, s0.y, t, 0, cam, W, H)).toBe(1);
+  });
+
+  it("a click on a world picks it, a click on empty sky picks nothing", () => {
     const yaw = yawFor(1, 0, 0);
     const b = ORRERY_BODIES[1]!;
     const cam = orreryCamera(bodyPos(b, 0, yaw), b.radius);
@@ -110,6 +126,16 @@ describe("the almanac", () => {
     expect(lines[0]).toBe("1 traveller is awake right now");
     expect(lines).toContain("Vexa_77 leads the travellers at level 19");
     expect(lines).toContain("The Gleam Vault has never been opened");
+  });
+});
+
+describe("the sky's cost", () => {
+  it("a 4K window draws at a lower scale, inside the pixel budget", () => {
+    const scale = (w: number, h: number, dpr: number) => Math.min(dpr, 1.5, Math.sqrt(PIXEL_BUDGET / (w * h)));
+    expect(scale(1440, 900, 2)).toBe(1.5);
+    const k = scale(3840, 2160, 1);
+    expect(k).toBeLessThan(1);
+    expect(3840 * k * 2160 * k).toBeLessThanOrEqual(PIXEL_BUDGET + 1);
   });
 });
 

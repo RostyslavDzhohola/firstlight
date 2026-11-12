@@ -206,9 +206,13 @@ void main() {
   o = vec4(col, 1.0);
 }`;
 
+/** The most pixels the sky's drawing buffer may have (about 2560 × 1440). */
+export const PIXEL_BUDGET = 3_700_000;
+
 export interface Orrery {
   setData(data: HomeData | null): void;
-  setMe(me: MeInfo | null): void;
+  /** `error`: what went wrong with the account corner's last action (a failed sign-out), shown beside it. */
+  setMe(me: MeInfo | null, error?: string | null): void;
   /** Draw or rest (the landing left the page, or came back). */
   setShown(shown: boolean): void;
   dispose(): void;
@@ -241,34 +245,60 @@ export function startOrrery(landing: HTMLElement, hooks: OrreryHooks): Orrery | 
   const canvas = el("canvas", "fl-orrery__sky");
   const gl = canvas.getContext("webgl2", { antialias: false, alpha: false, powerPreference: "high-performance" });
   if (!gl) return null;
-  const sh = (type: number, src: string) => {
-    const s = gl.createShader(type)!;
-    gl.shaderSource(s, src);
-    gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) ?? "shader");
-    return s;
-  };
-  let prog: WebGLProgram;
-  try {
-    prog = gl.createProgram()!;
-    gl.attachShader(prog, sh(gl.VERTEX_SHADER, VERT));
-    gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FRAG));
-    gl.linkProgram(prog);
-    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog) ?? "link");
-  } catch (err) {
-    console.warn("[orrery] the sky would not compile; the classic page stays", err);
-    return null;
+  type Uniforms = Record<"res" | "time" | "cam" | "fwd" | "right" | "up" | "tan" | "body" | "lights" | "focus" | "orbit", WebGLUniformLocation | null>;
+  /** Compile and bind everything the sky needs (again when a lost context comes back). Null: it would not build. */
+  function build(): Uniforms | null {
+    const g = gl!;
+    try {
+      const sh = (type: number, src: string) => {
+        const x = g.createShader(type)!;
+        g.shaderSource(x, src);
+        g.compileShader(x);
+        if (!g.getShaderParameter(x, g.COMPILE_STATUS)) throw new Error(g.getShaderInfoLog(x) ?? "shader");
+        return x;
+      };
+      const prog = g.createProgram()!;
+      g.attachShader(prog, sh(g.VERTEX_SHADER, VERT));
+      g.attachShader(prog, sh(g.FRAGMENT_SHADER, FRAG));
+      g.linkProgram(prog);
+      if (!g.getProgramParameter(prog, g.LINK_STATUS)) throw new Error(g.getProgramInfoLog(prog) ?? "link");
+      g.useProgram(prog);
+      g.bindBuffer(g.ARRAY_BUFFER, g.createBuffer());
+      g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), g.STATIC_DRAW);
+      const loc = g.getAttribLocation(prog, "p");
+      g.enableVertexAttribArray(loc);
+      g.vertexAttribPointer(loc, 2, g.FLOAT, false, 0, 0);
+      const U = (n: string) => g.getUniformLocation(prog, n);
+      const uu: Uniforms = { res: U("uRes"), time: U("uTime"), cam: U("uCam"), fwd: U("uFwd"), right: U("uRight"), up: U("uUp"), tan: U("uTan"), body: U("uBody"), lights: U("uLights"), focus: U("uFocus"), orbit: U("uOrbit") };
+      g.uniform1fv(uu.orbit, ORRERY_BODIES.map((o) => o.orbit));
+      return uu;
+    } catch (err) {
+      console.warn("[orrery] the sky would not compile; the classic page stays", err);
+      return null;
+    }
   }
-  gl.useProgram(prog);
-  const buf = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-  const loc = gl.getAttribLocation(prog, "p");
-  gl.enableVertexAttribArray(loc);
-  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-  const U = (n: string) => gl.getUniformLocation(prog, n);
-  const u = { res: U("uRes"), time: U("uTime"), cam: U("uCam"), fwd: U("uFwd"), right: U("uRight"), up: U("uUp"), tan: U("uTan"), body: U("uBody"), lights: U("uLights"), focus: U("uFocus"), orbit: U("uOrbit") };
-  gl.uniform1fv(u.orbit, ORRERY_BODIES.map((b) => b.orbit));
+  let u = build();
+  if (!u) return null;
+  const loseExt = gl.getExtension("WEBGL_lose_context");
+  /** We let the context go ourselves (the landing left the page for the game's own renderer). */
+  let released = false;
+  /** The context was lost under us and the classic page stood in. */
+  let fellBack = false;
+  canvas.addEventListener("webglcontextlost", (e) => {
+    e.preventDefault(); // we will build again when it comes back
+    u = null;
+    if (!released && shown && !document.body.classList.contains("fl-menu-classic")) {
+      fellBack = true;
+      setClassic(true);
+    }
+  });
+  canvas.addEventListener("webglcontextrestored", () => {
+    u = build();
+    canvas.width = 0; // the drawing buffer is sized again on the next frame
+    if (u && fellBack) setClassic(false);
+    fellBack = false;
+    wake();
+  });
 
   // ---- the page over the sky --------------------------------------------------------------
   const root = el("div", "fl-orrery");
@@ -285,7 +315,10 @@ export function startOrrery(landing: HTMLElement, hooks: OrreryHooks): Orrery | 
   const saveBtn = el("button", "fl-orrery__link", "Save your progress");
   saveBtn.type = "button";
   saveBtn.onclick = () => hooks.save();
-  account.append(who, saveBtn, signBtn);
+  const accountNote = el("span", "fl-orrery__accountnote");
+  accountNote.setAttribute("role", "status");
+  accountNote.hidden = true;
+  account.append(accountNote, who, saveBtn, signBtn);
   top.append(mark, account);
 
   const tags = ORRERY_BODIES.map((b, i) => {
@@ -293,6 +326,8 @@ export function startOrrery(landing: HTMLElement, hooks: OrreryHooks): Orrery | 
     t.type = "button";
     t.dataset.body = b.id;
     t.append(el("span", "fl-orrery__tagname"), el("span", "fl-orrery__tagcount"));
+    t.setAttribute("aria-pressed", "false");
+    t.hidden = true;
     t.onclick = () => choose(i);
     return t;
   });
@@ -306,6 +341,18 @@ export function startOrrery(landing: HTMLElement, hooks: OrreryHooks): Orrery | 
   const line = el("p", "fl-orrery__line");
   const facts = el("ul", "fl-orrery__facts");
   const act = el("div", "fl-orrery__act");
+  const diveBtn = el("button", "fl-orrery__dive");
+  diveBtn.type = "button";
+  diveBtn.dataset.e2e = "orrery-dive";
+  const diveLabel = el("span", "fl-orrery__divelabel");
+  diveBtn.append(el("span", "fl-orrery__divering"), diveLabel, el("kbd", "", "Enter"));
+  diveBtn.onclick = () => startDive();
+  const routeNote = el("p", "fl-orrery__note");
+  const routeBtn = el("button", "fl-orrery__link fl-orrery__go");
+  routeBtn.type = "button";
+  let routeTo: BodyId = "portus";
+  routeBtn.onclick = () => choose(indexOf(routeTo));
+  act.append(diveBtn, routeNote, routeBtn);
   plate.append(kicker, name, line, facts, act);
 
   const almanac = el("aside", "fl-orrery__almanac");
@@ -338,7 +385,8 @@ export function startOrrery(landing: HTMLElement, hooks: OrreryHooks): Orrery | 
   const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
   let data: HomeData | null = null;
   let me: MeInfo | null = null;
-  let shown = true;
+  let accountError: string | null = null;
+  let shown = landing.style.display !== "none";
   let disposed = false;
   let raf = 0;
   let last = performance.now();
@@ -348,7 +396,12 @@ export function startOrrery(landing: HTMLElement, hooks: OrreryHooks): Orrery | 
   let yawVel = 0;
   let dragging = false;
   let dragX = 0;
+  let downX = 0;
+  let downY = 0;
+  let dragId = -1;
+  /** How far the pointer has gone from where it went down (px, either direction): past 5 it is a drag, not a click. */
   let moved = 0;
+  let resetTimer = 0;
   /** The traveller has turned or chosen something: the front world no longer follows their character. */
   let touched = false;
   let dive = 0; // 0 none … 1 at the surface
@@ -388,6 +441,7 @@ export function startOrrery(landing: HTMLElement, hooks: OrreryHooks): Orrery | 
 
   function startDive() {
     if (diving) return;
+    window.clearTimeout(resetTimer);
     diving = true;
     root.classList.add("is-diving");
     if (reduced) {
@@ -409,24 +463,26 @@ export function startOrrery(landing: HTMLElement, hooks: OrreryHooks): Orrery | 
     name.style.setProperty("--len", String(Math.max(6, p.name.length)));
     line.textContent = p.line;
     facts.replaceChildren(...p.facts.map((f) => el("li", "", f)));
-    act.replaceChildren();
+    const isDive = p.action.kind === "dive";
+    const hadFocus = act.contains(document.activeElement);
+    diveBtn.hidden = !isDive;
+    routeNote.hidden = isDive;
+    routeBtn.hidden = isDive;
     if (p.action.kind === "dive") {
-      const b = el("button", "fl-orrery__dive");
-      b.type = "button";
-      b.dataset.e2e = "orrery-dive";
-      b.append(el("span", "fl-orrery__divering"), el("span", "fl-orrery__divelabel", p.action.label), el("kbd", "", "Enter"));
-      b.onclick = () => startDive();
-      act.append(b);
+      diveLabel.textContent = p.action.label;
     } else {
-      const go = p.action.go;
-      const b = el("button", "fl-orrery__link fl-orrery__go", p.action.goLabel);
-      b.type = "button";
-      b.onclick = () => choose(indexOf(go));
-      act.append(el("p", "fl-orrery__note", p.action.note), b);
+      routeTo = p.action.go;
+      routeNote.textContent = p.action.note;
+      routeBtn.textContent = p.action.goLabel;
     }
+    // The control that had the keyboard was swapped for the other: the keyboard follows.
+    if (hadFocus && !act.contains(document.activeElement)) (isDive ? diveBtn : routeBtn).focus();
     // Retrigger the plate's entrance.
-    plate.classList.remove("is-in");
-    void plate.offsetWidth;
+    if (plate.dataset.shown !== id) {
+      plate.dataset.shown = id;
+      plate.classList.remove("is-in");
+      void plate.offsetWidth;
+    }
     plate.classList.add("is-in");
     measurePlate();
   }
@@ -444,6 +500,8 @@ export function startOrrery(landing: HTMLElement, hooks: OrreryHooks): Orrery | 
   }
 
   function paintAccount() {
+    accountNote.textContent = accountError ?? "";
+    accountNote.hidden = !accountError;
     const guest = !me || me.guest;
     const nm = me?.displayName ?? me?.name ?? "";
     who.textContent = nm ? `${nm}${guest ? " · guest" : ""}` : "";
@@ -457,9 +515,11 @@ export function startOrrery(landing: HTMLElement, hooks: OrreryHooks): Orrery | 
     const r = root.getBoundingClientRect();
     w = Math.max(1, r.width);
     h = Math.max(1, r.height);
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
-    const cw = Math.round(w * dpr);
-    const ch = Math.round(h * dpr);
+    // The whole sky is one fragment shader: its cost is the pixel count. At most 1.5 device pixels
+    // per CSS pixel, and at most PIXEL_BUDGET in all (a 4K window draws at a lower scale).
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5, Math.sqrt(PIXEL_BUDGET / (w * h)));
+    const cw = Math.max(1, Math.round(w * dpr));
+    const ch = Math.max(1, Math.round(h * dpr));
     if (canvas.width !== cw || canvas.height !== ch) {
       canvas.width = cw;
       canvas.height = ch;
@@ -469,7 +529,8 @@ export function startOrrery(landing: HTMLElement, hooks: OrreryHooks): Orrery | 
 
   function frame(now: number) {
     raf = 0;
-    if (disposed || !shown || document.hidden || document.body.classList.contains("fl-menu-classic")) return;
+    const uu = u;
+    if (disposed || !shown || !uu || document.hidden || document.body.classList.contains("fl-menu-classic")) return;
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
     if (!reduced) t += dt;
@@ -494,8 +555,9 @@ export function startOrrery(landing: HTMLElement, hooks: OrreryHooks): Orrery | 
       flash.style.opacity = String(Math.max(0, (dive - 0.55) / 0.45));
       if (dive >= 1) {
         hooks.play();
-        diving = false; // Play takes the page; a failed load brings it back
-        window.setTimeout(reset, 1200);
+        diving = false; // Play takes the page; a failed load brings it back (setShown resets the sky)
+        window.clearTimeout(resetTimer);
+        resetTimer = window.setTimeout(reset, 1200);
       }
     }
 
@@ -509,13 +571,13 @@ export function startOrrery(landing: HTMLElement, hooks: OrreryHooks): Orrery | 
 
     resize();
     const g = gl!;
-    g.uniform2f(u.res, canvas.width, canvas.height);
-    g.uniform1f(u.time, t);
-    g.uniform3fv(u.cam, cam.pos as unknown as number[]);
-    g.uniform3fv(u.fwd, cam.fwd as unknown as number[]);
-    g.uniform3fv(u.right, cam.right as unknown as number[]);
-    g.uniform3fv(u.up, cam.up as unknown as number[]);
-    g.uniform1f(u.tan, cam.tan);
+    g.uniform2f(uu.res, canvas.width, canvas.height);
+    g.uniform1f(uu.time, t);
+    g.uniform3fv(uu.cam, cam.pos as unknown as number[]);
+    g.uniform3fv(uu.fwd, cam.fwd as unknown as number[]);
+    g.uniform3fv(uu.right, cam.right as unknown as number[]);
+    g.uniform3fv(uu.up, cam.up as unknown as number[]);
+    g.uniform1f(uu.tan, cam.tan);
     const bodies: number[] = [];
     const lights: number[] = [];
     const foc: number[] = [];
@@ -531,13 +593,17 @@ export function startOrrery(landing: HTMLElement, hooks: OrreryHooks): Orrery | 
       const under = i !== focus && s.x > plateBox.left - 30 && s.x < plateBox.right + 30 && s.y > plateBox.top - 10 && s.y < plateBox.bottom + 30;
       const vis = s.depth > 0.5 && s.x > -80 && s.x < w + 80 && s.y > 40 && s.y < h - 40 && dive < 0.2 && !under;
       tag.style.transform = `translate(${s.x.toFixed(1)}px, ${s.y.toFixed(1)}px) translate(-50%, -100%)`;
-      tag.style.opacity = vis ? "1" : "0";
-      tag.style.pointerEvents = vis ? "auto" : "none";
-      tag.classList.toggle("is-front", i === focus);
+      // Out of sight is out of the tab order and out of a screen reader's way too.
+      if (tag.hidden === vis) tag.hidden = !vis;
+      const front = i === focus;
+      if (tag.classList.contains("is-front") !== front) {
+        tag.classList.toggle("is-front", front);
+        tag.setAttribute("aria-pressed", String(front));
+      }
     });
-    g.uniform4fv(u.body, bodies);
-    g.uniform1fv(u.lights, lights);
-    g.uniform1fv(u.focus, foc);
+    g.uniform4fv(uu.body, bodies);
+    g.uniform1fv(uu.lights, lights);
+    g.uniform1fv(uu.focus, foc);
     g.drawArrays(g.TRIANGLES, 0, 3);
 
     // The almanac turns a line every few seconds.
@@ -561,6 +627,7 @@ export function startOrrery(landing: HTMLElement, hooks: OrreryHooks): Orrery | 
   }
 
   function reset() {
+    window.clearTimeout(resetTimer);
     dive = 0;
     diving = false;
     flash.style.opacity = "0";
@@ -570,19 +637,21 @@ export function startOrrery(landing: HTMLElement, hooks: OrreryHooks): Orrery | 
 
   // ---- hands ----------------------------------------------------------------------------
   const onDown = (e: PointerEvent) => {
-    if (diving || (e.target as HTMLElement).closest("button, a, .fl-orrery__plate")) return;
+    if (diving || dragging || (e.target as HTMLElement).closest("button, a, .fl-orrery__plate")) return;
     dragging = true;
-    dragX = e.clientX;
+    dragId = e.pointerId;
+    dragX = downX = e.clientX;
+    downY = e.clientY;
     moved = 0;
     yawVel = 0;
     root.setPointerCapture(e.pointerId);
     root.classList.add("is-dragging");
   };
   const onMove = (e: PointerEvent) => {
-    if (!dragging) return;
+    if (!dragging || e.pointerId !== dragId) return;
     const dx = e.clientX - dragX;
     dragX = e.clientX;
-    moved += Math.abs(dx);
+    moved = Math.max(moved, Math.hypot(e.clientX - downX, e.clientY - downY));
     if (moved >= 5) touched = true;
     const d = (-dx / w) * 2.4;
     yaw += d;
@@ -594,9 +663,19 @@ export function startOrrery(landing: HTMLElement, hooks: OrreryHooks): Orrery | 
     }
     wake();
   };
-  const onUp = (e: PointerEvent) => {
+  /** The gesture ended without the traveller meaning anything by it: nothing is picked, nothing coasts. */
+  const cancelDrag = () => {
     if (!dragging) return;
     dragging = false;
+    dragId = -1;
+    yawVel = 0;
+    root.classList.remove("is-dragging");
+    wake();
+  };
+  const onUp = (e: PointerEvent) => {
+    if (!dragging || e.pointerId !== dragId) return;
+    dragging = false;
+    dragId = -1;
     root.classList.remove("is-dragging");
     if (moved < 5) {
       // A click on the sky: a world under the pointer is chosen (or dived into, if it is the front one).
@@ -625,7 +704,9 @@ export function startOrrery(landing: HTMLElement, hooks: OrreryHooks): Orrery | 
   root.addEventListener("pointerdown", onDown);
   root.addEventListener("pointermove", onMove);
   root.addEventListener("pointerup", onUp);
-  root.addEventListener("pointercancel", onUp);
+  root.addEventListener("pointercancel", cancelDrag);
+  root.addEventListener("lostpointercapture", cancelDrag);
+  window.addEventListener("blur", cancelDrag);
   window.addEventListener("keydown", onKey);
   const onVis = () => {
     measurePlate();
@@ -649,9 +730,10 @@ export function startOrrery(landing: HTMLElement, hooks: OrreryHooks): Orrery | 
       paintPlate();
       wake();
     },
-    setMe(m) {
+    setMe(m, error = null) {
       const before = enterBody(me);
       me = m;
+      accountError = error;
       paintAccount();
       // Until the traveller has touched the sky, the front world follows where their character is.
       const now = enterBody(me);
@@ -659,12 +741,27 @@ export function startOrrery(landing: HTMLElement, hooks: OrreryHooks): Orrery | 
       paintPlate(true);
       wake();
     },
-    setShown(s) {
-      shown = s;
-      if (s) reset();
+    setShown(next) {
+      shown = next;
+      cancelDrag();
+      if (next) {
+        // Back on the page (a failed load): the sky gets its context back and starts from rest.
+        released = false;
+        if (gl.isContextLost()) loseExt?.restoreContext();
+        reset();
+      } else {
+        // The loader has the page and the game's renderer is starting: it should not share the GPU
+        // with a sky nobody can see.
+        window.clearTimeout(resetTimer);
+        released = true;
+        if (!gl.isContextLost()) loseExt?.loseContext();
+      }
     },
     dispose() {
       disposed = true;
+      released = true;
+      window.clearTimeout(resetTimer);
+      window.removeEventListener("blur", cancelDrag);
       cancelAnimationFrame(raf);
       window.removeEventListener("keydown", onKey);
       document.removeEventListener("visibilitychange", onVis);
@@ -672,7 +769,7 @@ export function startOrrery(landing: HTMLElement, hooks: OrreryHooks): Orrery | 
       document.body.classList.remove("fl-menu-orrery", "fl-menu-classic");
       root.remove();
       back.remove();
-      gl.getExtension("WEBGL_lose_context")?.loseContext();
+      if (!gl.isContextLost()) loseExt?.loseContext();
     },
   };
 }

@@ -20,13 +20,15 @@ body.fl-menu-classic .fl-orrery__back { display: inline-flex; position: fixed; z
 .fl-orrery__top { position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: center; justify-content: space-between; padding: calc(1.5 * var(--u)) calc(2.2 * var(--u)); }
 .fl-orrery__mark { --wm-size: calc(1.05 * var(--u)); }
 .fl-orrery__account { display: flex; align-items: baseline; gap: calc(1.4 * var(--u)); }
+.fl-orrery__accountnote { font: 500 var(--t-xs)/1.3 var(--font-body); color: var(--dawn-1); max-width: 22em; }
+.fl-orrery__tag[hidden] { display: none; }
 .fl-orrery__who { font: 500 var(--t-xs)/1 var(--font-mono); letter-spacing: .06em; color: var(--paper-2); opacity: .8; }
 .fl-orrery__link { appearance: none; border: 0; background: none; padding: .35em 0; margin: 0; cursor: pointer; color: var(--paper); font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: var(--track-caps); text-transform: uppercase; box-shadow: inset 0 -1px 0 var(--line-3); transition: box-shadow .2s ease, color .2s ease; }
 .fl-orrery__link:hover, .fl-orrery__link:focus-visible { color: #fff; box-shadow: inset 0 -1px 0 var(--here); outline: none; }
 
 /* ---- the tags that ride above each world ---- */
 .fl-orrery__tags { position: absolute; inset: 0; }
-.fl-orrery__tag { position: absolute; left: 0; top: 0; appearance: none; border: 0; background: none; padding: .5em .7em .9em; cursor: pointer; display: inline-flex; align-items: baseline; gap: .6em; color: var(--paper-2); font: 600 calc(.8 * var(--u))/1 var(--font-display); letter-spacing: var(--track-wide); text-transform: uppercase; white-space: nowrap; opacity: 0; transition: opacity .35s ease, color .25s ease; will-change: transform; text-shadow: 0 1px 6px rgba(0, 0, 0, .8); }
+.fl-orrery__tag { position: absolute; left: 0; top: 0; appearance: none; border: 0; background: none; padding: .5em .7em .9em; cursor: pointer; display: inline-flex; align-items: baseline; gap: .6em; color: var(--paper-2); font: 600 calc(.8 * var(--u))/1 var(--font-display); letter-spacing: var(--track-wide); text-transform: uppercase; white-space: nowrap; transition: color .25s ease; will-change: transform; animation: fl-orrery-tag .35s ease both; text-shadow: 0 1px 6px rgba(0, 0, 0, .8); }
 .fl-orrery__tag::after { content: ""; position: absolute; left: 50%; bottom: .15em; width: 1px; height: .6em; background: currentColor; opacity: .5; }
 .fl-orrery__tag.is-front { color: #fff; }
 .fl-orrery__tag:hover, .fl-orrery__tag:focus-visible { color: var(--here); outline: none; }
@@ -65,6 +67,7 @@ body.fl-menu-classic .fl-orrery__back { display: inline-flex; position: fixed; z
 .fl-orrery__dive:focus-visible { outline: none; }
 .fl-orrery__divelabel { box-shadow: inset 0 -1px 0 var(--line-3); padding-bottom: .3em; }
 .fl-orrery__dive:hover .fl-orrery__divelabel, .fl-orrery__dive:focus-visible .fl-orrery__divelabel { box-shadow: inset 0 -1px 0 var(--here); }
+@keyframes fl-orrery-tag { from { opacity: 0; } to { opacity: 1; } }
 @keyframes fl-orrery-pulse { 0%, 100% { transform: scale(.8); opacity: .85; } 50% { transform: scale(1.05); opacity: 1; } }
 @keyframes fl-orrery-ring { from { transform: scale(.8); opacity: .5; } to { transform: scale(1.5); opacity: 0; } }
 

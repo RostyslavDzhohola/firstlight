@@ -515,7 +515,7 @@ export async function initHome(): Promise<void> {
   const actions: MeActions = { save: () => void saveProgress(), signOut: () => void signOut() };
   const paintMe = () => {
     renderMe(state, actions);
-    orrery?.setMe(state.me);
+    orrery?.setMe(state.me, state.error ?? null);
   };
   if (landing && wantsOrrery()) {
     orrery = startOrrery(landing, { play: () => $("play")?.click(), signIn: () => $("signin")?.click(), signOut: () => void signOut(), save: () => void saveProgress() });
