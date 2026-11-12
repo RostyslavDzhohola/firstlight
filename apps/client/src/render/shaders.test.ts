@@ -80,6 +80,9 @@ function derivativesInBranches(wgsl: string): string[] {
   return bad;
 }
 
+/** A branch on one component of a direction against a constant (`if (abs(up.y) < 0.95)`): a tangent frame's reference axis being picked. */
+const AXIS_SWITCH = /\(\s*abs\(\s*\w+\.[xyz]\s*\)\s*[<>]=?\s*[0-9.]+\s*\)/;
+
 const errors: string[] = [];
 beforeEach(() => {
   errors.length = 0;
@@ -163,7 +166,11 @@ for (const backendName of ["webgpu", "webgl2"] as const) {
         g.setAttribute("depth", new THREE.BufferAttribute(new Float32Array(3).fill(1), 1));
         const mesh = new THREE.Mesh(g, waterMaterialFor(l));
         scene.add(mesh);
-        expectClean(build(renderer, scene, camera, mesh));
+        const b = build(renderer, scene, camera, mesh);
+        expectClean(b);
+        // No tangent frame from a reference axis picked by a threshold: the ripples' normal jumped
+        // across the latitude where the axis switched (planet graphics review, finding 2).
+        expect(b.fragment.match(AXIS_SWITCH)?.[0], `water-L${l}`).toBeUndefined();
       }
     });
 

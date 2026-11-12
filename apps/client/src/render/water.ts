@@ -15,7 +15,7 @@
 import * as THREE from "three/webgpu";
 import {
   abs, attribute, cameraPosition, clamp, cross, distance, dot, exp, float, floor, Fn, fract, hash, If, length, max, mix, normalize,
-  positionWorld, pow, reflect, select, sin, smoothstep, time, uniform, vec2, vec3, renderGroup,
+  positionWorld, pow, reflect, sin, smoothstep, time, uniform, vec3, renderGroup,
 } from "three/tsl";
 import { atmo, skyColor } from "./atmosphere.ts";
 import type { BodyLook } from "./looks.ts";
@@ -23,6 +23,7 @@ import { detailNoiseTexture } from "./noiseTexture.ts";
 import { biplanar } from "./terrainMaterial.ts";
 import type { WaterLook } from "./worldLooks.ts";
 import type { WaterMeshData } from "../world/terrain.worker.ts";
+import { CHOP_GAIN, CHOP_MEAN, RIPPLE_MIX } from "./waterRipple.ts";
 
 export const waterUniforms = {
   shallow: uniform(new THREE.Color(0x3fe0c8)).setGroup(renderGroup),
@@ -75,43 +76,58 @@ function build(level: number): THREE.MeshBasicNodeMaterial {
   if (level >= 1) {
     const tex = detailNoiseTexture();
     const t = time;
-    // A tangent frame on the sphere; two noise channels of one tap are the slope along each axis.
-    const ref = select(abs(up.y).lessThan(0.95), vec3(0, 1, 0), vec3(1, 0, 0));
-    const t0 = normalize(cross(ref, up));
-    const t1 = cross(up, t0);
-    const slope = (s: any) => t0.mul(s.r.sub(0.5)).add(t1.mul(s.g.sub(0.5)));
+    // The ripples' slope: each tap's noise as a vector in world space, and the part of it that lies
+    // in the surface (waterRipple.ts). No tangent frame: one built from a reference axis turned
+    // where the axis switched, and the normal jumped on those two latitude circles.
+    const mixRow = (c: any, row: readonly [number, number, number]) => dot(c, vec3(row[0], row[1], row[2]));
+    const ripple = (s: any) => {
+      const c = vec3(s.r, s.g, s.a).sub(0.5);
+      return vec3(mixRow(c, RIPPLE_MIX[0]), mixRow(c, RIPPLE_MIX[1]), mixRow(c, RIPPLE_MIX[2]));
+    };
+    const tangent = (v: any) => v.sub(up.mul(dot(v, up)));
     n1 = biplanar(tex, wp.mul(0.085).add(vec3(t.mul(0.017), t.mul(0.011), t.mul(-0.014))), up);
-    let g: any = slope(n1).mul(0.13);
+    const v1: any = ripple(n1);
+    let g: any = tangent(v1).mul(0.13);
+    let vChop: any = v1;
     if (level >= 2) {
       n2 = biplanar(tex, wp.mul(0.31).add(vec3(t.mul(-0.05), t.mul(0.041), t.mul(0.045))), up);
-      g = g.add(slope(n2).mul(0.07));
+      vChop = ripple(n2);
+      g = g.add(tangent(vChop).mul(0.07));
     }
-    // Rain on the surface: the same taps' other two channels as a fast, fine chop (no extra fetch).
+    // Rain on the surface: the finest tap again as a fast chop (no extra fetch), its ripple vector
+    // turned a quarter round the normal and scaled by the ridged channel about its mean.
     const chop = n2 ?? n1;
-    g = g.add(t0.mul(chop.b.sub(0.5)).add(t1.mul(chop.a.sub(0.5))).mul(atmo.rain.mul(0.5)));
+    g = g.add(cross(up, vChop).mul(chop.b.sub(CHOP_MEAN).mul(CHOP_GAIN)).mul(atmo.rain.mul(0.5)));
     // Rain rings (D-gfx-worlds-6): where drops land, rings spread and fade. Two grids of cells a
-    // metre or so across, one drop a cell at a random spot and moment; skipped whole when it is dry.
+    // metre or so across in world space, one drop a cell, put on the water under its spot in the
+    // cell at a random moment; skipped whole when it is dry. A ring fades toward its cell's faces
+    // (the surface cuts the cells at every angle), so nothing is clipped at a seam.
     const rings: any = Fn(() => {
-      const acc: any = vec2(0).toVar();
+      const acc: any = vec3(0).toVar();
       If(atmo.rain.greaterThan(0.02), () => {
-        const uv = vec2(dot(wp, t0), dot(wp, t1));
+        const surface = length(wp);
         for (const [scale, salt, rate] of [[0.85, 0, 0.95], [1.37, 41.7, 1.2]] as const) {
-          const p = uv.mul(scale).add(salt);
+          const p = wp.mul(scale).add(salt);
           const cell: any = floor(p);
-          const h = hash(cell.x.mul(127.1).add(cell.y.mul(311.7)).add(salt));
-          const at = vec2(hash(h.mul(91.3).add(1.0)), hash(h.mul(47.9).add(2.0))).sub(0.5).mul(0.5);
-          const d = fract(p).sub(0.5).sub(at);
+          // (kept positive: the hash reads its seed as an unsigned integer, and half the planet's cells are negative)
+          const h = hash(cell.x.mul(127.1).add(cell.y.mul(311.7)).add(cell.z.mul(74.7)).add(salt + 1.0e6));
+          const at = vec3(hash(h.mul(91.3).add(1.0)), hash(h.mul(47.9).add(2.0)), hash(h.mul(63.1).add(3.0))).sub(0.5).mul(0.5);
+          // The drop's spot in the cell, back in world space and onto the water sphere.
+          const drop = normalize(cell.add(0.5).add(at).sub(salt)).mul(surface);
+          const d = tangent(wp.sub(drop)).mul(scale);
           const r = length(d);
           const life = fract(time.mul(rate).add(h.mul(7.0)));
           const front = life.mul(0.42);
-          const wave = sin(r.sub(front).mul(55.0)).mul(smoothstep(0.07, 0.0, abs(r.sub(front)))).mul(float(1).sub(life)).mul(smoothstep(0.0, 0.08, life));
+          const f = abs(fract(p).sub(0.5));
+          const inside = float(1).sub(smoothstep(0.36, 0.5, max(f.x, max(f.y, f.z))));
+          const wave = sin(r.sub(front).mul(55.0)).mul(smoothstep(0.07, 0.0, abs(r.sub(front)))).mul(float(1).sub(life)).mul(smoothstep(0.0, 0.08, life)).mul(inside);
           acc.addAssign(d.div(max(r, 0.001)).mul(wave));
         }
         acc.mulAssign(atmo.rain);
       });
       return acc;
     })();
-    g = g.add(t0.mul(rings.x).add(t1.mul(rings.y)).mul(0.42));
+    g = g.add(rings.mul(0.42));
     N = normalize(up.add(g));
   }
   const ndv = max(dot(N, V), 0.0);
