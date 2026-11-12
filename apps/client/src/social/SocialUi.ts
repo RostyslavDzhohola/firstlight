@@ -138,7 +138,7 @@ export class SocialUi {
       if (e.repeat) return;
       if (!this.list.isOpen) {
         this.tabDownAt = performance.now();
-        if (this.game.input.locked) this.list.peek();
+        if (this.game.input.captured) this.list.peek(); // held Tab (or the gamepad's held View) peeks
         else this.list.open();
       } else if (this.list.interactive) this.list.close(true);
       return;

@@ -15,7 +15,7 @@ const UNIT7 = idx("unit7");
 
 function input(keys: string[]) {
   const down = new Set(keys);
-  return { locked: true, mouseDX: 0, mouseDY: 0, wheel: 0, sensitivity: 0.002, invertY: false, pressed: new Set<string>(), down: (k: string) => down.has(k) } as unknown as Input & { pressed: Set<string> };
+  return { locked: true, captured: true, mouseDX: 0, mouseDY: 0, wheel: 0, sensitivity: 0.002, invertY: false, pressed: new Set<string>(), down: (k: string) => down.has(k) } as unknown as Input & { pressed: Set<string> };
 }
 
 function sprintSpeed(): number {

@@ -77,10 +77,10 @@ export class PhraseWheel {
       this.swallowLmb = false;
     }
     if (!this.open) {
-      if (allowed && input.locked && input.pressed.has("KeyG")) this.show(input, now);
+      if (allowed && input.captured && input.pressed.has("KeyG")) this.show(input, now);
       return this.open;
     }
-    if (!allowed || !input.locked) {
+    if (!allowed || !input.captured) {
       this.hide();
       return false;
     }

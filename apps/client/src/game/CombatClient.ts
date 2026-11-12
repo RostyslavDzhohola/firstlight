@@ -237,7 +237,7 @@ export class CombatClient {
    */
   private nudgeHeld(): boolean {
     this.loadingEl ??= document.getElementById("loading");
-    return !!this.tutorialBusy?.() || !this.game.input.locked || this.deadUntilRespawn || !this.game.net.room || this.loadingEl?.hidden === false;
+    return !!this.tutorialBusy?.() || !this.game.input.captured || this.deadUntilRespawn || !this.game.net.room || this.loadingEl?.hidden === false;
   }
 
   /**
@@ -342,10 +342,11 @@ export class CombatClient {
       this.dropMouseActions();
       return;
     }
-    // Mouse combat needs the pointer locked. Whenever it's gone (menu, panel, the hint state), cancel
+    // Mouse combat needs the input captured (the pointer locked, or a gamepad or touch player in the
+    // game: Input.captured, D-controls-5). Whenever it's gone (menu, panel, the hint state), cancel
     // any guard, scope or charge in progress: Input reports the right button released when the lock
     // goes, which would otherwise land a charged heavy now, or on the next lock.
-    if (!input.locked) {
+    if (!input.captured) {
       this.dropMouseActions();
       this.saddleRmb = false;
     }
@@ -357,7 +358,7 @@ export class CombatClient {
     if (input.pressed.has("KeyR")) room.send("reload", { slot: g.hud.you?.selected ?? 0 });
     if (input.pressed.has("KeyE")) this.tryPickup();
 
-    if (!input.locked) {
+    if (!input.captured) {
       const cam = g.ctx.camera;
       if (Math.abs(cam.fov - this.baseFov) > 0.1) {
         cam.fov += (this.baseFov - cam.fov) * Math.min(1, dt * 14);

@@ -48,6 +48,7 @@ import { BootGate, RendererUnavailable, shouldKeepReconnecting } from "./boot.ts
 import { CombatClient } from "./CombatClient.ts";
 import { GameAudio } from "../audio/Audio.ts";
 import { Input } from "./input.ts";
+import { installControls } from "./controls.ts";
 import { HOTKEYS } from "./keys.ts";
 import { PhotoMode } from "./PhotoMode.ts";
 import { PlayerController } from "./PlayerController.ts";
@@ -149,6 +150,7 @@ export class Game {
     this.input = new Input(this.ctx.renderer.domElement);
     // Behind a loading screen (first arrival, travel, rejoin, re-warm) panel and world keys wait.
     this.input.suspendedWhile = () => !this.running || this.travelling;
+    installControls(this); // gamepad, touch overlay, glyphs, menu focus navigation (D-controls-5, -6)
     this.photo = new PhotoMode({
       ctx: this.ctx,
       input: this.input,

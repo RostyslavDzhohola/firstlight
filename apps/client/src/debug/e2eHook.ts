@@ -122,7 +122,7 @@ interface GameLike {
     getNature?(): RayCollider | null;
   };
   planet?: { terrain?: unknown; body?: { radius: number } };
-  input?: { locked: boolean; enabled: boolean; sensitivity: number; invertY: boolean };
+  input?: { locked: boolean; enabled: boolean; sensitivity: number; invertY: boolean; device?: string; captured?: boolean };
   net?: { room: RoomLike | null; rtt?: number; serverOffset?: number };
   hud?: {
     you: {
@@ -644,6 +644,9 @@ export function installE2eHook(win: Window & typeof globalThis): void {
         enabled: g?.input?.enabled ?? null,
         sensitivity: g?.input?.sensitivity ?? null,
         invertY: g?.input?.invertY ?? null,
+        // Controls lane (D-controls-5): the device used last and the captured-input rule.
+        device: g?.input?.device ?? null,
+        captured: g?.input?.captured ?? null,
       },
       ui: {
         visibleE2e,

@@ -22,6 +22,8 @@ import { fullscreenAvailable, isFullscreen, toggleFullscreen } from "../game/ful
 import { SPELLS } from "@firstlight/shared/content/spells";
 import { bindPointerLock, PauseFlow, pauseKey, type PauseState } from "./pauseFlow.ts";
 import { LookSwitch } from "./lookSwitch.ts";
+import { padLayoutList } from "./padLayout.ts";
+import { controls } from "../game/controls.ts";
 
 type Ctl = [keys: readonly string[] | "mouse-l" | "mouse-r" | "mouse-move", label: string];
 type CtlGroup = { title: string; rows: Ctl[] };
@@ -95,6 +97,13 @@ export function buildHowTo(parent: HTMLElement): HTMLElement {
       } else keycaps(keys, dt);
       el("dd", "", dl, label);
     }
+  }
+  // A gamepad in use: its layout too, in that pad's labels (D-controls-5).
+  const c = controls();
+  if (c && (c.pad.active || c.pad.family !== "xbox" || document.documentElement.dataset.device === "pad")) {
+    const h = el("h3", "fl-howto__pad", panel, "Gamepad");
+    h.style.marginTop = "12px";
+    padLayoutList(panel, c.pad.family);
   }
   const rules = el("div", "fl-howto__rules", panel);
   for (const [sp, title, text] of RULES) {

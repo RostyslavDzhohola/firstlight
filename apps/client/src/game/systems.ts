@@ -17,6 +17,7 @@ import { createTrialClient } from "./TrialClient.ts";
 import { createSpellClient } from "./SpellClient.ts";
 import { createHoloBoard } from "../world/HoloBoard.ts";
 import { createLightPools } from "../world/lightPools.ts";
+import { createControlsClient } from "./controls.ts";
 
 export interface ClientSystem {
   update(dt: number, now: number): void;
@@ -53,3 +54,5 @@ CLIENT_SYSTEMS.push(createSpellClient);
 CLIENT_SYSTEMS.push(createHoloBoard);
 // Hub graphics lane (D-gfx-hub-6): lamp and portal light pools on Portus' ground.
 CLIENT_SYSTEMS.push(createLightPools);
+// Controls lane (D-controls-5): gamepad rumble on damage and kills, and the aim slowdown's creep test.
+CLIENT_SYSTEMS.push(createControlsClient);

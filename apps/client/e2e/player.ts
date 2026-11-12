@@ -74,7 +74,7 @@ export interface Snap {
     gpuUntrusted?: boolean | null;
     canvas?: [number, number] | null;
   } | null;
-  input: { pointerLocked: boolean; anyPointerLock: boolean; gameLocked: boolean | null; sensitivity: number | null; invertY: boolean | null };
+  input: { pointerLocked: boolean; anyPointerLock: boolean; gameLocked: boolean | null; sensitivity: number | null; invertY: boolean | null; device?: string | null; captured?: boolean | null };
   ui: { visibleE2e: string[]; overlays: string[]; pauseMenuMode: string | null; photo: boolean | null; loggedOutCard: boolean };
   lastDenied: { action: string; reason: string; t: number } | null;
   net?: { roomId: string; sessionId: string } | null;
