@@ -9,7 +9,7 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { pickTarget } from "./examples/hunter.ts";
-import { handleRpc, MCP_PROTOCOL } from "./mcp.ts";
+import { handleRpc, MCP_PROTOCOL, parseRpc } from "./mcp.ts";
 import { bridge } from "./serve.ts";
 import { callTool, checkArgs, PLAYBOOK, Session, TOOLS, TOOL_BY_NAME } from "./tools.ts";
 
@@ -191,5 +191,21 @@ describe("the example hunter leaves a person's fight alone", () => {
   it("asks attack() to yield to people", () => {
     const src = readFileSync(join(import.meta.dirname, "examples", "hunter.ts"), "utf8");
     expect(src).toMatch(/agent\.attack\(target\.id, \{[^}]*yieldTo: "people"/);
+  });
+});
+
+// Review 2026-11-12 (agent kit) #7: `null` is valid JSON; reading `.method` of it threw outside the
+// request's error handler and ended the MCP process, and its character with it.
+describe("MCP: a line that is JSON but not a request", () => {
+  it("answers -32600 for null and other non-objects, -32700 for what isn't JSON, and passes a request on", async () => {
+    for (const line of ["null", "42", '"tools/list"', "true", "[]", '[{"jsonrpc":"2.0","id":1,"method":"ping"}]']) {
+      expect(parseRpc(line), line).toEqual({ error: { jsonrpc: "2.0", id: null, error: { code: -32600, message: expect.any(String) } } });
+    }
+    expect(parseRpc("{nope")).toMatchObject({ error: { id: null, error: { code: -32700 } } });
+    const ok = parseRpc('{"jsonrpc":"2.0","id":7,"method":"ping"}');
+    expect(ok).toEqual({ msg: { jsonrpc: "2.0", id: 7, method: "ping" } });
+    // An object that isn't a request still gets its -32600 from the handler, with its id.
+    const odd = parseRpc('{"id":9,"params":null}') as { msg: never };
+    expect(await handleRpc(new Session(() => {}), odd.msg)).toMatchObject({ id: 9, error: { code: -32600 } });
   });
 });

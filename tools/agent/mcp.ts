@@ -60,6 +60,22 @@ export async function handleRpc(session: Session, msg: Rpc): Promise<Record<stri
   }
 }
 
+/**
+ * One line of stdin as a request, or the JSON-RPC error to answer it with: -32700 when it isn't
+ * JSON, -32600 when it is JSON but not a request object (`null`, a number, a string, an array:
+ * batches aren't part of this transport). Exported for the tests.
+ */
+export function parseRpc(line: string): { msg: Rpc } | { error: Record<string, unknown> } {
+  let msg: unknown;
+  try {
+    msg = JSON.parse(line);
+  } catch {
+    return { error: { jsonrpc: "2.0", id: null, error: { code: -32700, message: "parse error" } } };
+  }
+  if (msg === null || typeof msg !== "object" || Array.isArray(msg)) return { error: { jsonrpc: "2.0", id: null, error: { code: -32600, message: "not a JSON-RPC 2.0 request" } } };
+  return { msg: msg as Rpc };
+}
+
 async function main() {
   // stdout carries the protocol and nothing else: whatever a library prints (the Colyseus SDK
   // reports its reconnects with console.log) goes to stderr.
@@ -71,13 +87,12 @@ async function main() {
   let chain: Promise<void> = Promise.resolve();
   rl.on("line", (line) => {
     if (!line.trim()) return;
-    let msg: Rpc;
-    try {
-      msg = JSON.parse(line) as Rpc;
-    } catch {
-      out({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "parse error" } });
+    const parsed = parseRpc(line);
+    if ("error" in parsed) {
+      out(parsed.error);
       return;
     }
+    const msg = parsed.msg;
     // firstlight_stop must be able to interrupt a walk or a fight in progress.
     const urgent = msg.method === "tools/call" && msg.params?.name === "firstlight_stop";
     const run = async () => {
