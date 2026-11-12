@@ -12,3 +12,15 @@ run. No blockers.
 | 5 | nit | `apps/client/src/home/home.ts:185` | The hidden hero reschedules itself every second for the whole session; `initHome()` drops its stop callback. |
 
 Verdict: request changes. Decisions and fixes are recorded below this line as they land.
+
+## Fixes
+
+All five accepted and fixed (lane agent, Claude Opus 5.5).
+
+| # | Fix | Commit | Test |
+|---|---|---|---|
+| 1 | `BannerQueue.pause/resume`; `MomentsHud.tick(now, hidden)` stops the banner clock under `body.fl-paused` or photo mode, the banner on screen resumes with the hold it had left; the feed's clock is unchanged. | `a35e1e9a` | `ui/moments.test.ts` "pauses while the HUD is hidden…"; `ui/momentsView.test.ts` "waits while the HUD is hidden…" |
+| 2 | The mission and trial reward line names the granted items (`itemsLine`), from the payload's `items` when sent, else the mission catalogue minus extra cosmetics unless `you.cosmeticsExtras`. A3 reads "+180 XP · +60 ◎ · 1 × Large Tonic". | `1eea7dc9` | `ui/moments.test.ts` "names the items a mission paid…" |
+| 3 | Hit wedges and the kill mark check `prefers-reduced-motion` before `animate()`: a brief static hold (opacity only, no transform or fade). | `9b0f359f` | `ui/momentsView.test.ts` "reduced motion" |
+| 4 | `feedKiller()` (ui/eventFeed.ts) resolves `npc:<kind>` with `classifyKiller()` and the NPC catalogue; the death feed uses it. | `50ff8639` | `ui/eventFeed.test.ts` "who a death names as the killer" |
+| 5 | `startHeroStills` takes a `wake` subscription; home.ts wakes it on `onLandingShown` and `visibilitychange`, and the hidden hero parks with no timer. | `3df3302d` | `home/homeHero.test.ts` "parks with no timer while hidden…" |
