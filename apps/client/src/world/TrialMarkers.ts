@@ -55,10 +55,26 @@ interface Spot {
   def: WorldObjectDef;
   pos: THREE.Vector3;
   up: THREE.Vector3;
+  /** Rings: the race this ring is on, its place in it, and the ring it faces (the next, or the previous for the last). */
+  race?: { mission: string; k: number; toward: THREE.Vector3 | null };
+  /** Shards: the collect this piece belongs to and its index in it. */
+  piece?: { mission: string; k: number };
+}
+
+/** One of your open missions on this body, as update() looks it up (pooled per id, reused every frame). */
+interface OpenEntry {
+  def: MissionDef;
+  counts: readonly number[] | undefined;
 }
 
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
+/** Scratch for the beacon's ground ring and the shard spin (update allocates nothing per frame). */
+const _q2 = new THREE.Quaternion();
+const _spin = new THREE.Quaternion();
+const _yAxis = new THREE.Vector3(0, 1, 0);
+/** The torus (XY plane) laid flat on the tangent plane. */
+const LAY_FLAT = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
 const _s = new THREE.Vector3();
 const _p = new THREE.Vector3();
 const _a = new THREE.Vector3();
@@ -83,6 +99,9 @@ export class TrialMarkers {
   private readonly columnMesh: THREE.InstancedMesh | null;
   private readonly shardMesh: THREE.InstancedMesh | null;
   private t = 0;
+  /** Open missions by id, refilled each frame from pooled entries (no per-frame Map or wrappers). */
+  private readonly open = new Map<string, OpenEntry>();
+  private readonly pool = new Map<string, OpenEntry>();
 
   constructor(scene: THREE.Scene, body: BodyId, terrain: Terrain) {
     this.body = body;
@@ -96,6 +115,20 @@ export class TrialMarkers {
     this.rings = objs.filter((o) => o.look === "ring").map(spot);
     this.beacons = objs.filter((o) => o.look === "beacon").map(spot);
     this.shards = objs.filter((o) => o.look === "shard").map(spot);
+    // Static race order and piece indices, worked out once (was a find() per ring per frame).
+    for (const s of this.rings) {
+      const race = s.def.mission ? MISSION_BY_ID.get(s.def.mission)?.race : undefined;
+      const k = race ? race.rings.indexOf(s.def.id) : -1;
+      if (!race || k < 0) continue;
+      const byId = (id: string | undefined) => this.rings.find((r) => r.def.id === id);
+      const t = byId(race.rings[Math.min(k + 1, race.rings.length - 1)]) ?? byId(race.rings[Math.max(0, k - 1)]);
+      s.race = { mission: s.def.mission!, k, toward: t && t !== s ? t.pos : null };
+    }
+    for (const s of this.shards) {
+      const c = s.def.mission ? MISSION_BY_ID.get(s.def.mission)?.collect : undefined;
+      const k = c ? c.pieces.indexOf(s.def.id) : -1;
+      if (c && k >= 0) s.piece = { mission: s.def.mission!, k };
+    }
     const g = geometries();
     const make = (geo: THREE.BufferGeometry, n: number, name: string) => {
       if (!n) return null;
@@ -128,86 +161,96 @@ export class TrialMarkers {
 
   update(dt: number, st: TrialMarkerState) {
     this.t += dt;
-    const open = new Map<string, { def: MissionDef; counts?: readonly number[] }>();
+    const open = this.open;
+    open.clear();
     for (const m of st.missions) {
-      const def = MISSION_BY_ID.get(m.id);
-      if (!m.done && def && def.body === this.body) open.set(m.id, { def, counts: m.counts });
+      if (m.done) continue;
+      let e = this.pool.get(m.id);
+      if (!e) {
+        const def = MISSION_BY_ID.get(m.id);
+        if (!def || def.body !== this.body) continue;
+        this.pool.set(m.id, (e = { def, counts: undefined }));
+      }
+      e.counts = m.counts;
+      open.set(m.id, e);
     }
     const trial = st.trial;
     let any = false;
 
     // Race rings: upright, facing along the route; the next one gold, the rest pale; passed ones gone.
-    if (this.ringMesh) {
-      this.rings.forEach((s, i) => {
-        const mission = s.def.mission ? open.get(s.def.mission) : undefined;
-        const race = mission?.def.race;
-        const k = race ? race.rings.indexOf(s.def.id) : -1;
-        const running = !!trial && trial.id === s.def.mission && trial.state === "running";
+    const ringMesh = this.ringMesh;
+    if (ringMesh) {
+      for (let i = 0; i < this.rings.length; i++) {
+        const s = this.rings[i]!;
+        const r = s.race;
+        const running = !!r && !!trial && trial.id === r.mission && trial.state === "running";
         const next = running ? trial!.progress : 0;
-        if (!race || k < 0 || (running && k < next)) {
-          this.ringMesh!.setMatrixAt(i, HIDDEN);
-          return;
+        if (!r || !open.has(r.mission) || (running && r.k < next)) {
+          ringMesh.setMatrixAt(i, HIDDEN);
+          continue;
         }
         any = true;
-        const toward = this.rings.find((r) => r.def.id === race.rings[Math.min(k + 1, race.rings.length - 1)]) ?? this.rings.find((r) => r.def.id === race.rings[Math.max(0, k - 1)]);
-        const q = this.frame(s, toward && toward !== s ? toward.pos : null);
-        const pulse = k === next ? 1 + Math.sin(this.t * 4) * 0.05 : 0.85;
+        const q = this.frame(s, r.toward);
+        const pulse = r.k === next ? 1 + Math.sin(this.t * 4) * 0.05 : 0.85;
         _p.copy(s.pos).addScaledVector(s.up, RING_LIFT);
-        this.ringMesh!.setMatrixAt(i, _m.compose(_p, q, _s.set(pulse, pulse, pulse)));
-        this.ringMesh!.setColorAt(i, k === next ? C.next : C.later);
-      });
-      this.ringMesh.instanceMatrix.needsUpdate = true;
-      if (this.ringMesh.instanceColor) this.ringMesh.instanceColor.needsUpdate = true;
+        ringMesh.setMatrixAt(i, _m.compose(_p, q, _s.set(pulse, pulse, pulse)));
+        ringMesh.setColorAt(i, r.k === next ? C.next : C.later);
+      }
+      ringMesh.instanceMatrix.needsUpdate = true;
+      if (ringMesh.instanceColor) ringMesh.instanceColor.needsUpdate = true;
     }
 
     // Beacons: a ground ring at the hold radius and a column; lit while held, coral while paused.
-    if (this.flatMesh && this.columnMesh) {
-      this.beacons.forEach((s, i) => {
-        const mission = s.def.mission ? open.get(s.def.mission) : undefined;
-        const d = mission?.def.defend;
+    const flatMesh = this.flatMesh;
+    const columnMesh = this.columnMesh;
+    if (flatMesh && columnMesh) {
+      for (let i = 0; i < this.beacons.length; i++) {
+        const s = this.beacons[i]!;
+        const d = s.def.mission ? open.get(s.def.mission)?.def.defend : undefined;
         if (!d) {
-          this.flatMesh!.setMatrixAt(i, HIDDEN);
-          this.columnMesh!.setMatrixAt(i, HIDDEN);
-          return;
+          flatMesh.setMatrixAt(i, HIDDEN);
+          columnMesh.setMatrixAt(i, HIDDEN);
+          continue;
         }
         any = true;
         const mine = !!trial && trial.id === s.def.mission;
         const col = mine && trial!.state === "paused" ? C.paused : mine && trial!.state === "running" ? C.lit : C.idle;
         const q = this.frame(s, null);
         // The flat ring lies on the ground: rotate the torus (XY plane) to the tangent plane.
-        const flatQ = _q.clone().multiply(new THREE.Quaternion().setFromAxisAngle(_a.set(1, 0, 0), Math.PI / 2));
+        const flatQ = _q2.copy(q).multiply(LAY_FLAT);
         _p.copy(s.pos).addScaledVector(s.up, 0.15);
-        this.flatMesh!.setMatrixAt(i, _m.compose(_p, flatQ, _s.set(d.radius, d.radius, d.radius * 8)));
-        this.flatMesh!.setColorAt(i, col);
+        flatMesh.setMatrixAt(i, _m.compose(_p, flatQ, _s.set(d.radius, d.radius, d.radius * 8)));
+        flatMesh.setColorAt(i, col);
         const breathe = mine && trial!.state === "running" ? 1 + Math.sin(this.t * 3) * 0.12 : 0.7;
         _p.copy(s.pos).addScaledVector(s.up, 3.5);
-        this.columnMesh!.setMatrixAt(i, _m.compose(_p, q, _s.set(breathe, 1, breathe)));
-        this.columnMesh!.setColorAt(i, col);
-      });
-      for (const m of [this.flatMesh, this.columnMesh]) {
-        m.instanceMatrix.needsUpdate = true;
-        if (m.instanceColor) m.instanceColor.needsUpdate = true;
+        columnMesh.setMatrixAt(i, _m.compose(_p, q, _s.set(breathe, 1, breathe)));
+        columnMesh.setColorAt(i, col);
       }
+      flatMesh.instanceMatrix.needsUpdate = true;
+      columnMesh.instanceMatrix.needsUpdate = true;
+      if (flatMesh.instanceColor) flatMesh.instanceColor.needsUpdate = true;
+      if (columnMesh.instanceColor) columnMesh.instanceColor.needsUpdate = true;
     }
 
     // Shards and kite panels: bobbing, spinning; gone once taken.
-    if (this.shardMesh) {
-      this.shards.forEach((s, i) => {
-        const mission = s.def.mission ? open.get(s.def.mission) : undefined;
-        const c = mission?.def.collect;
-        const k = c ? c.pieces.indexOf(s.def.id) : -1;
-        if (!c || k < 0 || mission!.counts?.[k]) {
-          this.shardMesh!.setMatrixAt(i, HIDDEN);
-          return;
+    const shardMesh = this.shardMesh;
+    if (shardMesh) {
+      for (let i = 0; i < this.shards.length; i++) {
+        const s = this.shards[i]!;
+        const pc = s.piece;
+        const mission = pc ? open.get(pc.mission) : undefined;
+        if (!pc || !mission?.def.collect || mission.counts?.[pc.k]) {
+          shardMesh.setMatrixAt(i, HIDDEN);
+          continue;
         }
         any = true;
-        const q = this.frame(s, null).multiply(new THREE.Quaternion().setFromAxisAngle(_a.set(0, 1, 0), this.t * 1.6 + i));
+        const q = this.frame(s, null).multiply(_spin.setFromAxisAngle(_yAxis, this.t * 1.6 + i));
         _p.copy(s.pos).addScaledVector(s.up, 1.1 + Math.sin(this.t * 2 + i) * 0.15);
-        this.shardMesh!.setMatrixAt(i, _m.compose(_p, q, _s.set(1, 1.5, 1)));
-        this.shardMesh!.setColorAt(i, s.def.mission === "A4" ? C.kite : C.shard);
-      });
-      this.shardMesh.instanceMatrix.needsUpdate = true;
-      if (this.shardMesh.instanceColor) this.shardMesh.instanceColor.needsUpdate = true;
+        shardMesh.setMatrixAt(i, _m.compose(_p, q, _s.set(1, 1.5, 1)));
+        shardMesh.setColorAt(i, s.def.mission === "A4" ? C.kite : C.shard);
+      }
+      shardMesh.instanceMatrix.needsUpdate = true;
+      if (shardMesh.instanceColor) shardMesh.instanceColor.needsUpdate = true;
     }
     this.group.visible = any;
   }
