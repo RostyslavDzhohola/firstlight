@@ -1,11 +1,11 @@
 // Meadow grass (D-gfx-worlds-1): the clump meshes and the per-clump data the CPU writes.
 import { describe, expect, it } from "vitest";
-import { meadowCellFields, meadowClumpGeometry, meadowMeta } from "./meadow.ts";
+import { MEADOW_FAR_KEEP, MEADOW_TRIANGLES, meadowCellFields, meadowClumpGeometry, meadowKeep, meadowMeta } from "./meadow.ts";
 import { WORLD_LOOKS } from "./worldLooks.ts";
 
 describe("meadow clumps", () => {
   it("builds the near and far clumps with matching attributes", () => {
-    for (const [lite, tris] of [[false, 22], [true, 8]] as const) {
+    for (const [lite, tris] of [[false, MEADOW_TRIANGLES.full], [true, MEADOW_TRIANGLES.lite]] as const) {
       const g = meadowClumpGeometry(lite);
       const n = g.getAttribute("position").count;
       expect(g.getAttribute("bl").count).toBe(n);
@@ -16,6 +16,18 @@ describe("meadow clumps", () => {
       const parts = Array.from(g.getAttribute("part").array as Float32Array);
       expect(parts.filter((p) => p === 2).length).toBe(lite ? 5 : 7);
       g.dispose();
+    }
+  });
+
+  it("thins with distance: everything near, MEADOW_FAR_KEEP of the clumps at the rim, never more with distance", () => {
+    expect(meadowKeep(0, 40)).toBe(1);
+    expect(meadowKeep(5, 40)).toBe(1);
+    expect(meadowKeep(40, 40)).toBeCloseTo(MEADOW_FAR_KEEP, 6);
+    let prev = 1;
+    for (let d = 0; d <= 60; d += 1) {
+      const k = meadowKeep(d, 40);
+      expect(k).toBeLessThanOrEqual(prev);
+      prev = k;
     }
   });
 

@@ -54,6 +54,11 @@ export const FEATURES = [
   "holo",
   "skylife",
   "pools",
+  // The planets' second pass (D-gfx-worlds-6): uniform-gated, so a switch or a tier change compiles nothing.
+  "foliagefx", // trees and rocks: leaf clusters, light through the crown, contact shade, dusk rim, rock detail and lichen
+  "shafts", // dawn and dusk: sun shafts and a wide glow round the low sun, in the sky and the haze
+  "mist", // a low mist layer in valleys and over water (dawn; Hollowmere always)
+  "fireflies", // fireflies and drifting spores near the ground at night (one draw round the camera)
 ] as const;
 export type Feature = (typeof FEATURES)[number];
 
@@ -85,6 +90,8 @@ export interface TierSpec {
   fullAvatars: number;
   /** Rain streaks / dust motes in the camera-local weather box at full intensity (one draw). */
   weatherDrops: number;
+  /** Fireflies and spores in the camera-local box at night (one draw; 0 = none). */
+  fireflies: number;
 }
 
 export const TIER_TABLE: Record<Tier, TierSpec> = {
@@ -99,7 +106,7 @@ export const TIER_TABLE: Record<Tier, TierSpec> = {
     props: { fullTo: 0, lodTo: 110 },
     water: 0,
     post: { bloomScale: 0.33, fxaa: false, vignette: false, grain: false, ao: "off", traa: false },
-    particles: 2_000, motes: 60, fullAvatars: 8, weatherDrops: 1_500,
+    particles: 2_000, motes: 60, fullAvatars: 8, weatherDrops: 1_500, fireflies: 0,
   },
   medium: {
     dprCap: 1.25, renderScale: 0.85, gpuTargetMs: 12, drawBudget: 250,
@@ -112,7 +119,7 @@ export const TIER_TABLE: Record<Tier, TierSpec> = {
     props: { fullTo: 30, lodTo: 150 },
     water: 1,
     post: { bloomScale: 0.5, fxaa: true, vignette: true, grain: true, ao: "off", traa: false },
-    particles: 5_000, motes: 160, fullAvatars: 16, weatherDrops: 4_000,
+    particles: 5_000, motes: 160, fullAvatars: 16, weatherDrops: 4_000, fireflies: 260,
   },
   high: {
     dprCap: 1.5, renderScale: 1.0, gpuTargetMs: 10, drawBudget: 400,
@@ -125,7 +132,7 @@ export const TIER_TABLE: Record<Tier, TierSpec> = {
     props: { fullTo: 40, lodTo: 220 },
     water: 2,
     post: { bloomScale: 0.5, fxaa: true, vignette: true, grain: true, ao: "half", traa: true },
-    particles: 15_000, motes: 300, fullAvatars: 24, weatherDrops: 8_000,
+    particles: 15_000, motes: 300, fullAvatars: 24, weatherDrops: 8_000, fireflies: 420,
   },
   ultra: {
     dprCap: 2.0, renderScale: 1.0, gpuTargetMs: 7, drawBudget: 600,
@@ -138,7 +145,7 @@ export const TIER_TABLE: Record<Tier, TierSpec> = {
     props: { fullTo: 60, lodTo: 260 },
     water: 3,
     post: { bloomScale: 0.5, fxaa: true, vignette: true, grain: true, ao: "full", traa: true },
-    particles: 30_000, motes: 500, fullAvatars: 40, weatherDrops: 14_000,
+    particles: 30_000, motes: 500, fullAvatars: 40, weatherDrops: 14_000, fireflies: 640,
   },
 };
 
@@ -356,6 +363,11 @@ export function resolveSettings(tier: Tier, auto: boolean, webgpu: boolean, stor
   // The per-pixel ground layers read the detail noise the material already samples.
   on.terrainfx &&= on.detail;
   on.waterfx &&= spec.water > 0 && on.water;
+  // The second pass: Medium and up (Low keeps its plain trees, sky and fog).
+  on.foliagefx &&= t >= 1 && on.trees;
+  on.shafts &&= t >= 1 && on.sky;
+  on.mist &&= spec.fog.height && on.fog;
+  on.fireflies &&= spec.fireflies > 0;
   // WebGPU-only extras on High/Ultra (SPEC §7.1, tech-facts §2).
   on.ao &&= webgpu && (t >= 2 || list.includes("ao")) && spec.post.ao !== "off";
   on.traa &&= webgpu && t >= 2 && spec.post.traa;

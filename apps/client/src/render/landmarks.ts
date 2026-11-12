@@ -145,57 +145,121 @@ function offset(from: V3, metres: number, heading: number, radius: number): V3 {
 /** Nothing of Arcadia's islands comes lower than this above the radius (Kestrel Peak is 95 m). */
 const ISLAND_FLOOR = 130;
 
-/** One floating island (its top `h` above the radius): a meadow cap on an inverted rock spire, a few pines, falls of light off the rim. */
-function island(b: SilhouetteBuilder, f: Frame, w: number, h: number, r: () => number) {
-  const K = 9;
-  const turf = rgb(0x6aa84a), turf2 = rgb(0x8fc85a), earth = rgb(0x6b5238), rock = rgb(0xb0a696), dark = rgb(0x7d7468), deep = rgb(0x554e48);
-  const rim: V3[] = [], lip: V3[] = [], mid: V3[] = [], rimR: number[] = [];
-  const depth = w * (0.85 + r() * 0.55);
+/**
+ * One floating island (its top `h` above the radius). Second pass (D-gfx-worlds-6): a domed meadow
+ * cap whose turf overhangs the rock, three bands of strata that step in and jut out as ledges, a
+ * spire with hanging shards under it, pines and round-crowned trees, a broken arch with a lit rune
+ * on the bigger ones, and falls of light with a bright head pouring off the rim. `big` islands get
+ * the full set; the small companion rocks a simpler one.
+ */
+function island(b: SilhouetteBuilder, f: Frame, w: number, h: number, r: () => number, big = true) {
+  const K = big ? 11 : 8;
+  const turf = rgb(0x5fa046), turf2 = rgb(0x8fc85a), turfDark = rgb(0x3f7a34), earth = rgb(0x6b5238);
+  const rockA = rgb(0xb9ad9a), rockB = rgb(0x8d8375), rockC = rgb(0x6f675c), deep = rgb(0x4b4540);
+  const depth = w * (0.95 + r() * 0.55);
+  const ang: number[] = [], rimR: number[] = [];
   for (let i = 0; i < K; i++) {
-    const a = (i / K) * Math.PI * 2;
-    const rr = w * (0.72 + r() * 0.45);
-    rimR.push(rr);
-    rim.push(f.at(Math.cos(a) * rr, (r() - 0.5) * w * 0.08, Math.sin(a) * rr));
-    // The turf overhangs the rock: a green lip you can see from below.
-    lip.push(f.at(Math.cos(a) * rr * 0.8, -w * 0.13, Math.sin(a) * rr * 0.8));
-    const mr = rr * (0.5 + r() * 0.28);
-    mid.push(f.at(Math.cos(a + 0.2) * mr, -depth * (0.3 + r() * 0.28), Math.sin(a + 0.2) * mr));
+    ang.push((i / K) * Math.PI * 2 + (r() - 0.5) * 0.25);
+    rimR.push(w * (0.7 + r() * 0.5));
   }
-  const top = f.at(w * (r() - 0.5) * 0.3, w * (0.1 + r() * 0.12), w * (r() - 0.5) * 0.3);
-  const apex = f.at(w * (r() - 0.5) * 0.4, -depth, w * (r() - 0.5) * 0.4);
+  const ringAt = (k: number, y: number, jitter: number, twist = 0): V3[] =>
+    ang.map((a, i) => f.at(Math.cos(a + twist) * rimR[i]! * k * (1 + (r() - 0.5) * jitter), y + (r() - 0.5) * w * 0.05, Math.sin(a + twist) * rimR[i]! * k * (1 + (r() - 0.5) * jitter)));
+  const band = (top: V3[], bot: V3[], ct: V3, cb: V3) => {
+    for (let i = 0; i < K; i++) {
+      const j = (i + 1) % K;
+      b.quad(top[i]!, top[j]!, bot[j]!, bot[i]!, ct, ct, cb, cb);
+    }
+  };
+  // The cap: a dome of meadow, its turf bulging out over the rock and tucking back under.
+  const crown = f.at(w * (r() - 0.5) * 0.3, w * (0.16 + r() * 0.1), w * (r() - 0.5) * 0.3);
+  const inner = ringAt(0.55, w * 0.1, 0.1);
+  const rim = ringAt(1.0, 0, 0);
+  const bulge = ringAt(1.07, -w * 0.07, 0.04);
+  const tuck = ringAt(0.84, -w * 0.15, 0.06);
   for (let i = 0; i < K; i++) {
     const j = (i + 1) % K;
-    b.tri(top, rim[j]!, rim[i]!, turf2, turf, turf);
-    b.quad(rim[i]!, rim[j]!, lip[j]!, lip[i]!, turf, turf, earth, earth);
-    b.quad(lip[i]!, lip[j]!, mid[j]!, mid[i]!, rock, rock, dark, dark);
-    b.tri(mid[i]!, mid[j]!, apex, dark, dark, deep);
+    b.tri(crown, inner[j]!, inner[i]!, turf2, turf2, turf2);
   }
-  // Pines for scale.
-  const pine = rgb(0x2f6a3a), pine2 = rgb(0x244f2e);
-  for (let t = 0; t < 5; t++) {
-    const a = r() * Math.PI * 2, d = w * (0.1 + r() * 0.45), h = w * (0.16 + r() * 0.14), s = h * 0.3;
-    const x = Math.cos(a) * d, z = Math.sin(a) * d, y = w * 0.04;
-    const tip = f.at(x, y + h, z);
-    const p = [f.at(x + s, y, z), f.at(x - s * 0.5, y, z + s * 0.87), f.at(x - s * 0.5, y, z - s * 0.87)] as const;
-    b.tri(tip, p[1], p[0], pine, pine2, pine2);
-    b.tri(tip, p[2], p[1], pine, pine2, pine2);
-    b.tri(tip, p[0], p[2], pine, pine2, pine2);
+  band(inner, rim, turf2, turf);
+  band(rim, bulge, turf, turfDark);
+  band(bulge, tuck, turfDark, earth);
+  // Strata: each band steps in, then the next juts out again as a ledge (lit top, dark underside).
+  let prev = tuck;
+  let k = 0.84;
+  let y = -w * 0.15;
+  const bands = big ? 3 : 2;
+  for (let s = 0; s < bands; s++) {
+    const dy = (depth * 0.62) / bands;
+    const kIn = k * (0.8 + r() * 0.08);
+    const face = ringAt(kIn, y - dy * 0.8, 0.12, s * 0.15);
+    band(prev, face, s % 2 ? rockB : rockA, s % 2 ? rockC : rockB);
+    y -= dy;
+    k = kIn * (s < bands - 1 ? 1.12 : 0.8);
+    const ledge = ringAt(k, y, 0.14, s * 0.15 + 0.1);
+    band(face, ledge, rockC, deep);
+    prev = ledge;
   }
-  // Falls of light: two crossed ribbons from the rim, bright at the lip and thinning out below.
-  const light = rgb(0xbff7ff);
-  const falls = 2 + Math.floor(r() * 2);
-  for (let k = 0; k < falls; k++) {
+  const apex = f.at(w * (r() - 0.5) * 0.4, -depth, w * (r() - 0.5) * 0.4);
+  for (let i = 0; i < K; i++) b.tri(prev[i]!, prev[(i + 1) % K]!, apex, rockC, rockC, deep);
+  // Shards hanging under the ledges.
+  for (let t = 0; t < (big ? 4 : 1); t++) {
+    const a = r() * Math.PI * 2, d = w * (0.25 + r() * 0.3), len = w * (0.25 + r() * 0.35), s2 = w * (0.05 + r() * 0.05), y0 = -depth * (0.35 + r() * 0.2);
+    const x = Math.cos(a) * d, z = Math.sin(a) * d;
+    const tip = f.at(x, y0 - len, z);
+    const p = [f.at(x + s2, y0, z), f.at(x - s2 * 0.5, y0, z + s2 * 0.87), f.at(x - s2 * 0.5, y0, z - s2 * 0.87)] as const;
+    b.tri(tip, p[0], p[1], deep, rockB, rockB);
+    b.tri(tip, p[1], p[2], deep, rockB, rockB);
+    b.tri(tip, p[2], p[0], deep, rockB, rockB);
+  }
+  // Trees for scale: two-tier pines and round crowns on trunks.
+  const pine = rgb(0x2f6a3a), pine2 = rgb(0x1f4a2a), leaf = rgb(0x4f9a3a), leaf2 = rgb(0x2f6a2c), bark = rgb(0x5a4030);
+  const cone = (x: number, y0: number, z: number, hgt: number, rad: number, c0: V3, c1: V3) => {
+    const tip = f.at(x, y0 + hgt, z);
+    const p = [f.at(x + rad, y0, z), f.at(x - rad * 0.5, y0, z + rad * 0.87), f.at(x - rad * 0.5, y0, z - rad * 0.87)] as const;
+    b.tri(tip, p[1], p[0], c0, c1, c1);
+    b.tri(tip, p[2], p[1], c0, c1, c1);
+    b.tri(tip, p[0], p[2], c0, c1, c1);
+  };
+  const trees = big ? 7 : 2;
+  for (let t = 0; t < trees; t++) {
+    const a = r() * Math.PI * 2, d = w * (0.12 + r() * 0.5), hgt = w * (0.16 + r() * 0.16);
+    const x = Math.cos(a) * d, z = Math.sin(a) * d, y0 = w * (0.1 - (d / w) * 0.12);
+    if (t % 3 === 2) {
+      const cr = hgt * 0.42;
+      b.box(f, x, y0 + hgt * 0.3, z, hgt * 0.05, hgt * 0.3, hgt * 0.05, a, bark);
+      b.box(f, x, y0 + hgt * 0.75, z, cr, cr * 0.8, cr, a, leaf, leaf2);
+      b.box(f, x + cr * 0.5, y0 + hgt * 0.95, z + cr * 0.3, cr * 0.6, cr * 0.55, cr * 0.6, a + 0.7, leaf, leaf2);
+    } else {
+      cone(x, y0, z, hgt * 0.75, hgt * 0.32, pine, pine2);
+      cone(x, y0 + hgt * 0.4, z, hgt * 0.6, hgt * 0.22, pine, pine2);
+    }
+  }
+  // A broken arch on the bigger islands: two pillars, half a lintel, fallen blocks, a rune that glows at night.
+  if (big && w > 44) {
+    const stone = rgb(0xd8d0c0), stone2 = rgb(0x9a9284), rune = rgb(0xffe7a0);
+    const a = r() * Math.PI * 2, d = w * 0.3, x = Math.cos(a) * d, z = Math.sin(a) * d, s2 = w * 0.03, y0 = w * 0.07, ph = w * 0.3;
+    const ex = Math.cos(a + 1.57) * s2 * 4, ez = Math.sin(a + 1.57) * s2 * 4;
+    b.box(f, x - ex, y0 + ph / 2, z - ez, s2, ph / 2, s2, a, stone, stone2);
+    b.box(f, x + ex, y0 + ph * 0.36, z + ez, s2, ph * 0.36, s2, a, stone, stone2);
+    b.box(f, x - ex * 0.45, y0 + ph + s2 * 0.8, z - ez * 0.45, s2 * 1.1, s2 * 0.8, s2 * 3.2, a, stone, stone2);
+    b.box(f, x + ex * 1.6, y0 + s2, z + ez * 1.6, s2 * 1.4, s2, s2 * 1.1, a + 0.5, stone, stone2);
+    b.box(f, x - ex, y0 + ph * 0.7, z - ez, s2 * 1.08, s2 * 0.5, s2 * 1.08, a, rune, rune, [2.6, r() * 6.28, STEADY]);
+  }
+  // Falls of light: two crossed ribbons from the rim, a bright head where they leave the lip, thinning out below.
+  const light = rgb(0xbff7ff), white = rgb(0xf4ffff);
+  const falls = big ? 2 + Math.floor(r() * 2) : 1;
+  for (let n = 0; n < falls; n++) {
     const i = Math.floor(r() * K);
-    const a = (i / K) * Math.PI * 2;
-    const x = Math.cos(a) * rimR[i]! * 0.96, z = Math.sin(a) * rimR[i]! * 0.96;
+    const a = ang[i]!;
+    const x = Math.cos(a) * rimR[i]! * 1.03, z = Math.sin(a) * rimR[i]! * 1.03;
     // The light thins out in mid-air: it never reaches the ground.
-    const len = Math.min(w * (1.6 + r() * 1.4), h - ISLAND_FLOOR), hw = w * 0.045, ph = r() * 10;
+    const len = Math.min(w * (1.6 + r() * 1.4), h - ISLAND_FLOOR), hw = w * 0.05, ph = r() * 10, head = len * 0.12;
     for (const [dx, dz] of [[Math.sin(a), -Math.cos(a)], [Math.cos(a), Math.sin(a)]] as const) {
-      const g0: V3 = [3.2, ph, FLOW], g1: V3 = [0, ph + len * 0.06, FLOW];
-      b.quad(
-        f.at(x - dx * hw, 0, z - dz * hw), f.at(x + dx * hw, 0, z + dz * hw), f.at(x + dx * hw * 0.35, -len, z + dz * hw * 0.35), f.at(x - dx * hw * 0.35, -len, z - dz * hw * 0.35),
-        light, light, light, light, g0, g0, g1, g1,
-      );
+      const g0: V3 = [5.5, ph, FLOW], g1: V3 = [3.0, ph + head * 0.06, FLOW], g2: V3 = [0, ph + len * 0.06, FLOW];
+      const p0 = f.at(x - dx * hw, -w * 0.02, z - dz * hw), p1 = f.at(x + dx * hw, -w * 0.02, z + dz * hw);
+      const m0 = f.at(x - dx * hw * 0.9, -head, z - dz * hw * 0.9), m1 = f.at(x + dx * hw * 0.9, -head, z + dz * hw * 0.9);
+      b.quad(p0, p1, m1, m0, white, white, light, light, g0, g0, g1, g1);
+      b.quad(m0, m1, f.at(x + dx * hw * 0.3, -len, z + dz * hw * 0.3), f.at(x - dx * hw * 0.3, -len, z - dz * hw * 0.3), light, light, light, light, g1, g1, g2, g2);
     }
   }
 }
@@ -214,7 +278,7 @@ function arcadia(radius: number): SilhouetteBuilder {
     // A smaller rock or two keeping it company.
     if (i % 2 === 0) {
       const h2 = 190 + r() * 110;
-      island(b, new Frame(offset(d, w * 2.2 + r() * 40, r() * 6.28, radius), radius, h2, r() * 6.28), 10 + r() * 10, h2, r);
+      island(b, new Frame(offset(d, w * 2.2 + r() * 40, r() * 6.28, radius), radius, h2, r() * 6.28), 10 + r() * 10, h2, r, false);
     }
   });
   return b;
@@ -227,7 +291,7 @@ function ring(b: SilhouetteBuilder, axis: V3, start: V3, ringR: number, segments
   const n = norm(axis);
   const e = norm(cross(n, cross(start, n)));
   const t = cross(n, e);
-  const stone = rgb(0x9c8fb6), under = rgb(0x3d3356), rune = rgb(0xc9a0ff);
+  const stone = rgb(0x9c8fb6), under = rgb(0x3d3356), rune = rgb(0xc9a0ff), crystal = rgb(0x7fffe0);
   const step_ = arc / segments;
   let gap = 0;
   for (let i = 0; i < segments; i++) {
@@ -252,6 +316,10 @@ function ring(b: SilhouetteBuilder, axis: V3, start: V3, ringR: number, segments
     b.box(f, 0, lift, 0, len * 0.94, thick / 2, width / 2, yaw, stone, under);
     // A lit seam of runes along the inner face of every third slab.
     if (i % 3 === 0) b.box(f, 0, lift - thick / 2 - 0.6, 0, len * 0.6, 0.7, width * 0.08, yaw, rune, rune, [2.2, r() * 6.28, BLINK]);
+    // A steady seam down the middle of the others' undersides (the side the ground sees), and now and
+    // then a pale crystal standing on a slab's rim: the ring reads as a line of lights at night.
+    else b.box(f, 0, lift - thick / 2 - 0.4, 0, len * 0.5, 0.45, width * 0.03, yaw, rune, rune, [0.9, 0, STEADY]);
+    if (i % 7 === 3) b.box(f, 0, lift + thick / 2 + 7, width * 0.36, 2.2, 7, 2.2, yaw + 0.6, crystal, crystal, [2.4, r() * 6.28, i % 14 === 3 ? BLINK : STEADY]);
     // Buttress teeth on the outer face.
     if (i % 4 === 1) b.box(f, 0, lift + thick / 2 + 5, 0, len * 0.22, 6, width * 0.3, yaw, stone, under);
   }
@@ -276,7 +344,7 @@ function hollowmere(radius: number): SilhouetteBuilder {
 /** An orbital yard: a long truss with a cross spar, panel arrays, a mast, strobes, and a tether with chasing warning lights. */
 function yard(b: SilhouetteBuilder, f: Frame, size: number, tetherTo: number, r: () => number) {
   const steel = rgb(0x5a6672), dark = rgb(0x262c34), panel = rgb(0x1f3a5c), hazard = rgb(0xd9842a);
-  const red = rgb(0xff3a28), white = rgb(0xe8f4ff), cyan = rgb(0x6ff0ea);
+  const red = rgb(0xff3a28), white = rgb(0xe8f4ff), cyan = rgb(0x6ff0ea), green = rgb(0x6aff8a), amber = rgb(0xffb040);
   const L = size, W = size * 0.055;
   b.box(f, 0, 0, 0, L / 2, W * 0.7, W, 0, steel, dark);
   b.box(f, L * 0.12, 0, 0, W, W * 0.6, L * 0.24, 0, steel, dark);
@@ -284,17 +352,20 @@ function yard(b: SilhouetteBuilder, f: Frame, size: number, tetherTo: number, r:
   for (let i = -3; i <= 3; i++) b.box(f, (i / 3.5) * L * 0.5, 0, 0, W * 0.25, W * 1.5, W * 1.6, 0, hazard, dark);
   // Panel arrays on both sides.
   for (const sx of [-0.32, -0.12, 0.3]) {
-    for (const sz of [-1, 1]) b.box(f, sx * L, W * 0.2, sz * (W * 2 + L * 0.11), L * 0.07, 0.6, L * 0.1, 0, panel, dark, [0.05, 0, STEADY]);
+    for (const sz of [-1, 1]) b.box(f, sx * L, W * 0.2, sz * (W * 2 + L * 0.11), L * 0.07, 0.6, L * 0.1, 0, panel, dark, [0.22, 0, STEADY]);
   }
   // A habitat drum and a mast with a red beacon.
   b.box(f, -L * 0.2, W * 1.6, 0, L * 0.06, W * 1.2, W * 1.4, 0.4, steel, dark);
   b.box(f, L * 0.12, L * 0.11, 0, W * 0.18, L * 0.11, W * 0.18, 0, steel, dark);
-  const s = Math.max(2.6, size * 0.014);
+  const s = Math.max(3.4, size * 0.018);
   b.box(f, L * 0.12, L * 0.22 + s, 0, s, s, s, 0, red, red, [7, r() * 6.28, BLINK]);
   // Strobes at the truss ends, running lights along the keel.
   b.box(f, L / 2, 0, 0, s, s, s, 0, white, white, [8, r() * 6.28, BLINK]);
   b.box(f, -L / 2, 0, 0, s, s, s, 0, white, white, [8, r() * 6.28, BLINK]);
   for (let i = -2; i <= 2; i++) b.box(f, (i / 2.5) * L * 0.5, -W * 0.9, 0, s * 0.7, s * 0.5, s * 0.7, 0, cyan, cyan, [3, 0, STEADY]);
+  // A green docking beacon under the drum and amber work lights along the cross spar.
+  b.box(f, -L * 0.2, -W * 1.2, 0, s, s * 0.6, s, 0, green, green, [5, r() * 6.28, BLINK]);
+  for (const sz of [-1, 1]) b.box(f, L * 0.12, W * 0.8, sz * L * 0.22, s * 0.8, s * 0.6, s * 0.8, 0, amber, amber, [3.2, 0, STEADY]);
   // The tether: a cable down toward the ground (it stops well above it), warning lights chasing up it.
   const top = -W, len = tetherTo;
   b.box(f, -L * 0.05, top - len / 2, 0, 0.9, len / 2, 0.9, 0.3, dark, dark);

@@ -13,11 +13,12 @@ import {
   transformDirection, uniform, vec3, varying, renderGroup,
 } from "three/tsl";
 import { CHUNK_QUADS, hash4, mulberry32, type Dir, type Face } from "@firstlight/shared";
-import { padGrassMask } from "../world/palette.ts";
+import { PAD_GRASS_RADIUS, padGrassMask } from "../world/palette.ts";
 import { atmo } from "./atmosphere.ts";
 import type { BodyLook } from "./looks.ts";
 import type { ResolvedSettings } from "./quality.ts";
-import { MEADOW_NEAR, meadowCellFields, meadowClumpGeometry, meadowGrassMaterial, meadowMeta } from "./meadow.ts";
+import { MEADOW_NEAR, MEADOW_SHARE, meadowCellFields, meadowClumpGeometry, meadowCpuLook, meadowGrassMaterial, meadowKeep } from "./meadow.ts";
+import { groundUniforms } from "./terrainMaterial.ts";
 
 export const grassUniforms = {
   radius: uniform(40).setGroup(renderGroup),
@@ -59,6 +60,10 @@ interface Cell {
   meta: THREE.InstancedBufferAttribute | null;
   geoLite: THREE.InstancedBufferGeometry | null;
   band: 0 | 1;
+  /** Instances placed (the mesh draws the first `drawn` of them: far cells thin out, meadow.ts). */
+  count: number;
+  /** Clumps the cell would hold at full grass weight: a clump's rank is its index over this. */
+  target: number;
   center: THREE.Vector3;
   radius: number;
   inUse: boolean;
@@ -127,6 +132,7 @@ function grassMaterial(): THREE.MeshLambertNodeMaterial {
   return m;
 }
 
+const underTmp = new THREE.Color();
 let sharedMaterial: THREE.MeshLambertNodeMaterial | null = null;
 let sharedMeadow: THREE.MeshLambertNodeMaterial | null = null;
 /** One grass material per kind for the app's lifetime (all bodies; values come from shared uniforms):
@@ -182,8 +188,14 @@ export class GrassSystem {
     this.group.visible = this.enabled;
     const radius = s.grass.radius;
     grassUniforms.radius.value = radius;
-    const density = s.grass.count / (Math.PI * radius * radius);
     const clumps = s.on.meadow && this.meadow ? s.grass.clumps : 0;
+    // A clump covers more ground than a blade: fewer of them (meadow.ts MEADOW_SHARE).
+    const density = (s.grass.count * (clumps > 0 ? MEADOW_SHARE : 1)) / (Math.PI * radius * radius);
+    // The ground under the grass takes the blades' root colour out to where they thin (terrainMaterial.ts).
+    groundUniforms.underReach.value = s.on.grass && clumps > 0 ? radius : 0;
+    const look = meadowCpuLook();
+    groundUniforms.underAmt.value = clumps > 0 ? look.under : 0;
+    groundUniforms.under.value.copy(grassUniforms.root.value).lerp(underTmp.setHex(look.lushRoot), look.pull).multiplyScalar(0.5);
     this.receiveShadow = s.on.shadows && s.shadows.mode === "map";
     // Largest quad (at a face centre, quads are 2R/n wide). Small quads (Portus ~2.3 m) or a large
     // radius → 8×8-quad cells, else 4×4: keeps grass at a few dozen draws.
@@ -257,13 +269,14 @@ export class GrassSystem {
     mesh.receiveShadow = this.receiveShadow;
     mesh.name = "grassCell";
     geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1);
-    return { key: "", mesh, geo, attr, meta, geoLite, band: 0, center: new THREE.Vector3(), radius: 1, inUse: true };
+    return { key: "", mesh, geo, attr, meta, geoLite, band: 0, count: 0, target: 1, center: new THREE.Vector3(), radius: 1, inUse: true };
   }
 
   private release(c: Cell) {
     this.group.remove(c.mesh);
     c.inUse = false;
     c.geo.instanceCount = 0;
+    c.count = 0;
     if (c.geoLite) c.geoLite.instanceCount = 0;
     this.free.push(c);
   }
@@ -327,12 +340,23 @@ export class GrassSystem {
       this.group.add(c.mesh);
     }
     let n = 0;
-    for (const c of this.cells.values()) n += c.geo.instanceCount;
+    for (const c of this.cells.values()) n += c.mesh.geometry === c.geoLite ? c.geoLite.instanceCount : c.geo.instanceCount;
     this.blades = n;
   }
 
-  /** Clump level 2: near cells draw the full clumps, far cells the lite ones (same instance data). */
+  /**
+   * A cell at distance `d`. Clumps thin with distance: the shader shrinks away the clumps ranked past
+   * the share kept at their distance, so the cell stops drawing that tail (3 m of slack for the
+   * camera's movement between scans). Clump level 2: near cells draw the full clumps, far cells the
+   * lite ones (same instance data).
+   */
   private setBand(c: Cell, d: number) {
+    if (c.meta) {
+      const keep = meadowKeep(Math.max(0, d - c.radius - 3), grassUniforms.radius.value) + 0.05;
+      const drawn = keep >= 1 ? c.count : Math.min(c.count, Math.ceil(c.target * keep));
+      c.geo.instanceCount = drawn;
+      if (c.geoLite) c.geoLite.instanceCount = drawn;
+    }
     if (!c.geoLite) return;
     const band = d < MEADOW_NEAR ? 0 : d > MEADOW_NEAR + 4 || c.band === 1 ? 1 : 0;
     if (band === c.band && c.mesh.geometry === (band ? c.geoLite : c.geo)) return;
@@ -381,14 +405,39 @@ export class GrassSystem {
     const target = Math.min(this.capacity, Math.round(this.density * area));
     const rand = mulberry32(hash4(ch.face * 4096 + ch.cx * 64 + ch.cy, ca, cb, 0x9a55));
     // The region's slow fields at the cell's corners, once: each clump interpolates them.
-    if (c.meta) {
+    const metaArr = c.meta ? (c.meta.array as Float32Array) : null;
+    const F = this.cellFields;
+    if (metaArr) {
       const k = this.cellCorners;
-      [p00, p10, p01, p11].forEach((pi, i) => {
-        k[i * 3] = P[pi]!; k[i * 3 + 1] = P[pi + 1]!; k[i * 3 + 2] = P[pi + 2]!;
-      });
-      meadowCellFields(k, this.cellFields);
+      k[0] = P[p00]!; k[1] = P[p00 + 1]!; k[2] = P[p00 + 2]!;
+      k[3] = P[p10]!; k[4] = P[p10 + 1]!; k[5] = P[p10 + 2]!;
+      k[6] = P[p01]!; k[7] = P[p01 + 1]!; k[8] = P[p01 + 2]!;
+      k[9] = P[p11]!; k[10] = P[p11 + 1]!; k[11] = P[p11 + 2]!;
+      meadowCellFields(k, F);
     }
+    const look = meadowCpuLook();
+    const dryBias = look.dryBias, flowerShare = look.flowerShare, flowerBase = look.flowerBase;
+    // Pads: tested per blade only in the cells a pad's apron can reach (the test walks every pad).
+    const R = this.radiusOfBody;
+    let nearPad = false;
+    if (this.pads.length) {
+      const mx = (P[p00]! + P[p11]!) / 2, my = (P[p00 + 1]! + P[p11 + 1]!) / 2, mz = (P[p00 + 2]! + P[p11 + 2]!) / 2;
+      const ml = Math.hypot(mx, my, mz);
+      const reach = (PAD_GRASS_RADIUS + 3 + Math.hypot(d1x, d1y, d1z) * 0.75) / R;
+      for (const pad of this.pads) {
+        const dx = mx / ml - pad[0], dy = my / ml - pad[1], dz = mz / ml - pad[2];
+        if (dx * dx + dy * dy + dz * dz < reach * reach) {
+          nearPad = true;
+          break;
+        }
+      }
+    }
+    // Clumps thin out and shorten toward the water: the beach stays sand (terrainMaterial.ts draws it up to ~2 m).
+    const shoreR = metaArr && Number.isFinite(atmo.waterLevel.value) ? R + atmo.waterLevel.value : -1;
+    const shoreLo = 0.8 * look.shore, shoreHi = 2.3 * look.shore;
+    const mask = this.mask;
     const arr = c.attr.array as Float32Array;
+    const invTarget = 1 / Math.max(1, target);
     let n = 0;
     let minx = Infinity, miny = Infinity, minz = Infinity, maxx = -Infinity, maxy = -Infinity, maxz = -Infinity;
     for (let k = 0; k < target; k++) {
@@ -396,39 +445,65 @@ export class GrassSystem {
       const ia = Math.min(q - 1, Math.floor(fx)), ib = Math.min(q - 1, Math.floor(fy));
       const u = fx - ia, v = fy - ib;
       const a = a0 + ia, b = b0 + ib;
-      const i00 = vi(a, b), i10 = vi(a + 1, b), i11 = vi(a + 1, b + 1), i01 = vi(a, b + 1);
+      const i00 = vi(a, b), i10 = i00 + 1, i01 = i00 + side, i11 = i01 + 1;
       // Density: bilinear of the 4 corner weights.
-      const gw = (G[i00]! * (1 - u) + G[i10]! * u) * (1 - v) + (G[i01]! * (1 - u) + G[i11]! * u) * v;
+      let gw = (G[i00]! * (1 - u) + G[i10]! * u) * (1 - v) + (G[i01]! * (1 - u) + G[i11]! * u) * v;
       const r2 = rand();
       if (r2 >= gw) continue;
       // Position on the rendered triangle (same split as the chunk mesh).
-      let wa: number, wb: number, wc: number, ib2: number, ic2: number;
+      let wb: number, wc: number, ib2: number, ic2: number;
       if (u >= v) {
         ib2 = i10; ic2 = i11; wb = u - v; wc = v;
       } else {
         ib2 = i11; ic2 = i01; wb = u; wc = v - u;
       }
-      wa = 1 - wb - wc;
+      const wa = 1 - wb - wc;
       const A = i00 * 3, B = ib2 * 3, C = ic2 * 3;
       const x = P[A]! * wa + P[B]! * wb + P[C]! * wc;
       const y = P[A + 1]! * wa + P[B + 1]! * wb + P[C + 1]! * wc;
       const z = P[A + 2]! * wa + P[B + 2]! * wb + P[C + 2]! * wc;
-      if (this.pads.length) {
-        const l = Math.hypot(x, y, z);
-        if (padGrassMask(this.pads, x / l, y / l, z / l, this.radiusOfBody) <= 0) continue;
+      let shore = 1;
+      if (nearPad || shoreR > 0) {
+        const l = Math.sqrt(x * x + y * y + z * z);
+        if (nearPad && padGrassMask(this.pads, x / l, y / l, z / l, R) <= 0) continue;
+        if (shoreR > 0 && l - shoreR < shoreHi) {
+          const t = Math.min(1, Math.max(0, (l - shoreR - shoreLo) / (shoreHi - shoreLo)));
+          shore = t * t * (3 - 2 * t);
+          if (r2 >= gw * shore) continue;
+          gw *= shore;
+        }
       }
-      if (this.mask && this.mask(x, y, z) <= 0.5) continue;
-      const scale = 0.55 + rand() * 0.75 * (0.6 + 0.4 * gw);
+      if (mask && mask(x, y, z) <= 0.5) continue;
+      const scale = (0.55 + rand() * 0.75 * (0.6 + 0.4 * gw)) * (0.6 + 0.4 * shore);
       const o = n * 4;
       arr[o] = x;
       arr[o + 1] = y;
       arr[o + 2] = z;
       arr[o + 3] = Math.round(scale * 100) + Math.min(0.999, rand());
-      if (c.meta) meadowMeta(x, y, z, fx / q, fy / q, this.cellFields, rand(), rand(), c.meta.array as Float32Array, o);
+      if (metaArr) {
+        // Per-clump data (meadow.ts meadowMeta, in line: this loop is the grass's whole CPU cost).
+        const cu = fx / q, cv = fy / q;
+        const w00 = (1 - cu) * (1 - cv), w10 = cu * (1 - cv), w01 = (1 - cu) * cv, w11 = cu * cv;
+        const r = rand();
+        const rs = (r2 / gw) - 0.5; // uniform in ±0.5 given the clump was kept: no third random
+        const dry = F[0]! * w00 + F[3]! * w10 + F[6]! * w01 + F[9]! * w11 + dryBias + rs * 0.3;
+        const drift = F[2]! * w00 + F[5]! * w10 + F[8]! * w01 + F[11]! * w11;
+        let head = 0;
+        if (r < drift * flowerShare + flowerBase) {
+          const sp = Math.floor((F[1]! * w00 + F[4]! * w10 + F[7]! * w01 + F[10]! * w11) * 4.6 + rs * 0.8);
+          head = (sp < 0 ? 0 : sp > 3 ? 3 : sp) + 1;
+        }
+        metaArr[o] = dry < 0 ? 0 : dry > 1 ? 1 : dry;
+        metaArr[o + 1] = head;
+        metaArr[o + 2] = rs + 0.5;
+        metaArr[o + 3] = n * invTarget;
+      }
       n++;
       if (x < minx) minx = x; if (y < miny) miny = y; if (z < minz) minz = z;
       if (x > maxx) maxx = x; if (y > maxy) maxy = y; if (z > maxz) maxz = z;
     }
+    c.count = n;
+    c.target = target;
     c.geo.instanceCount = n;
     c.attr.clearUpdateRanges();
     c.attr.addUpdateRange(0, Math.max(4, n * 4));

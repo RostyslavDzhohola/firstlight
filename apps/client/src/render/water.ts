@@ -14,8 +14,8 @@
 
 import * as THREE from "three/webgpu";
 import {
-  abs, attribute, cameraPosition, clamp, cross, distance, dot, exp, float, max, mix, normalize,
-  positionWorld, pow, reflect, select, sin, smoothstep, time, uniform, vec3, renderGroup,
+  abs, attribute, cameraPosition, clamp, cross, distance, dot, exp, float, floor, Fn, fract, hash, If, length, max, mix, normalize,
+  positionWorld, pow, reflect, select, sin, smoothstep, time, uniform, vec2, vec3, renderGroup,
 } from "three/tsl";
 import { atmo, skyColor } from "./atmosphere.ts";
 import type { BodyLook } from "./looks.ts";
@@ -89,6 +89,29 @@ function build(level: number): THREE.MeshBasicNodeMaterial {
     // Rain on the surface: the same taps' other two channels as a fast, fine chop (no extra fetch).
     const chop = n2 ?? n1;
     g = g.add(t0.mul(chop.b.sub(0.5)).add(t1.mul(chop.a.sub(0.5))).mul(atmo.rain.mul(0.5)));
+    // Rain rings (D-gfx-worlds-6): where drops land, rings spread and fade. Two grids of cells a
+    // metre or so across, one drop a cell at a random spot and moment; skipped whole when it is dry.
+    const rings: any = Fn(() => {
+      const acc: any = vec2(0).toVar();
+      If(atmo.rain.greaterThan(0.02), () => {
+        const uv = vec2(dot(wp, t0), dot(wp, t1));
+        for (const [scale, salt, rate] of [[0.85, 0, 0.95], [1.37, 41.7, 1.2]] as const) {
+          const p = uv.mul(scale).add(salt);
+          const cell: any = floor(p);
+          const h = hash(cell.x.mul(127.1).add(cell.y.mul(311.7)).add(salt));
+          const at = vec2(hash(h.mul(91.3).add(1.0)), hash(h.mul(47.9).add(2.0))).sub(0.5).mul(0.5);
+          const d = fract(p).sub(0.5).sub(at);
+          const r = length(d);
+          const life = fract(time.mul(rate).add(h.mul(7.0)));
+          const front = life.mul(0.42);
+          const wave = sin(r.sub(front).mul(55.0)).mul(smoothstep(0.07, 0.0, abs(r.sub(front)))).mul(float(1).sub(life)).mul(smoothstep(0.0, 0.08, life));
+          acc.addAssign(d.div(max(r, 0.001)).mul(wave));
+        }
+        acc.mulAssign(atmo.rain);
+      });
+      return acc;
+    })();
+    g = g.add(t0.mul(rings.x).add(t1.mul(rings.y)).mul(0.42));
     N = normalize(up.add(g));
   }
   const ndv = max(dot(N, V), 0.0);
