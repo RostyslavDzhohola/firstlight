@@ -1,7 +1,9 @@
 // Horizon landmarks (D-gfx-worlds-1): pure visuals that nobody can reach, cheap enough for every tier.
 import { describe, expect, it } from "vitest";
+import type * as THREE from "three/webgpu";
 import { BODIES } from "@firstlight/shared";
-import { buildLandmarks, spreadDirs } from "./landmarks.ts";
+import { buildLandmarks, Landmarks, spreadDirs } from "./landmarks.ts";
+import { watchDisposals } from "./disposeWatch.testutil.ts";
 
 describe("horizon landmarks", () => {
   it("the hub has none; each planet has its own set", () => {
@@ -43,5 +45,78 @@ describe("horizon landmarks", () => {
       for (let j = 0; j < i; j++) min = Math.min(min, Math.acos(Math.min(1, dirs[i]![0] * dirs[j]![0] + dirs[i]![1] * dirs[j]![1] + dirs[i]![2] * dirs[j]![2])));
     }
     expect(min).toBeGreaterThan(Math.sqrt((4 * Math.PI) / 13) / 3);
+  });
+});
+
+describe("landmark lifetime (planet graphics review, finding 4)", () => {
+  it("leaving a body frees its geometry and, with no landmarks left, the material; the next arrival builds new ones", () => {
+    const first = new Landmarks("arcadia", 500);
+    const mesh = first.mesh!;
+    const geo = mesh.geometry;
+    const mat = mesh.material as THREE.Material;
+    const w = watchDisposals(first.group);
+    expect(w.all.has(geo) && w.all.has(mat)).toBe(true);
+    first.dispose();
+    expect(w.disposed.has(geo), "the departing body's geometry").toBe(true);
+    expect(w.disposed.has(mat), "the material, with its last owner").toBe(true);
+    expect(w.disposed.has(mesh), "the mesh's own render state").toBe(true);
+    expect(first.mesh).toBeNull();
+    expect(first.group.children.length).toBe(0);
+    first.dispose(); // twice is safe (a failed arrival disposes what it built)
+
+    const again = new Landmarks("arcadia", 500);
+    const w2 = watchDisposals(again.group);
+    expect(again.mesh!.geometry).not.toBe(geo);
+    expect(again.mesh!.material).not.toBe(mat);
+    expect(again.mesh!.geometry.getAttribute("position").count).toBe(geo.getAttribute("position").count);
+    expect(w2.disposed.size).toBe(0);
+    again.dispose();
+    expect(w2.disposed.size).toBe(3); // its mesh's render state, its geometry and the material
+  });
+
+  it("the material outlives a body while another body's landmarks draw with it (a travel builds the next planet before the last one goes, or after)", () => {
+    const arcadia = new Landmarks("arcadia", 500);
+    const hollowmere = new Landmarks("hollowmere", 750);
+    const mat = arcadia.mesh!.material;
+    expect(hollowmere.mesh!.material).toBe(mat);
+    expect(hollowmere.mesh!.geometry).not.toBe(arcadia.mesh!.geometry);
+    const w = watchDisposals(arcadia.group);
+    watchDisposals(hollowmere.group, w);
+    const arcadiaGeo = arcadia.mesh!.geometry, hollowGeo = hollowmere.mesh!.geometry;
+    arcadia.dispose();
+    expect(w.disposed.has(arcadiaGeo)).toBe(true);
+    expect(w.disposed.has(hollowGeo)).toBe(false);
+    expect(w.disposed.has(mat as never)).toBe(false);
+    hollowmere.dispose();
+    expect(w.disposed.has(hollowGeo)).toBe(true);
+    expect(w.disposed.has(mat as never)).toBe(true);
+  });
+
+  it("two planets of one body share its geometry until the last of them goes", () => {
+    const a = new Landmarks("meridian", 1000);
+    const b = new Landmarks("meridian", 1000);
+    const geo = a.mesh!.geometry;
+    expect(b.mesh!.geometry).toBe(geo);
+    const w = watchDisposals(a.group);
+    const mesh = a.mesh!;
+    a.dispose();
+    expect([...w.disposed]).toEqual([mesh]); // its own render state only: the other planet still draws the rest
+    expect(b.mesh!.geometry).toBe(geo);
+    b.dispose();
+    expect(w.disposed.has(geo)).toBe(true);
+  });
+
+  it("the hub has nothing to free", () => {
+    const hub = new Landmarks("portus", 150);
+    expect(hub.mesh).toBeNull();
+    const w = watchDisposals(hub.group);
+    hub.dispose();
+    expect(w.all.size).toBe(0);
+    // And it holds no share of the material: a planet's landmarks after the hub still free it.
+    const planet = new Landmarks("arcadia", 500);
+    const mat = planet.mesh!.material;
+    watchDisposals(planet.group, w);
+    planet.dispose();
+    expect(w.disposed.has(mat as never)).toBe(true);
   });
 });

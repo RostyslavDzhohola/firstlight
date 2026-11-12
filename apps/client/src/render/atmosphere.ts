@@ -243,17 +243,24 @@ export const fogColor = Fn(([dir]: [any]) => {
   return mix(c, atmo.fogTint.mul(lum.mul(1.6).add(0.02)), atmo.fogTintAmt);
 });
 
-/** Scene fog node (assigned to scene.fogNode). */
-export function radialFogNode(): THREE.Node {
+/**
+ * Scene fog graph (assigned to scene.fogNode). `aerial` false leaves the far-haze tint out of the
+ * graph: `?noaerial` and the Aerial switch then take its work away from every fogged material, not
+ * just its amount (planet graphics review, finding 3). Use fogNodeFor: one graph per variant.
+ */
+export function radialFogNode(aerial = true): THREE.Node {
   return Fn(() => {
     const dir = normalize(positionWorld.sub(cameraPosition));
     const f = fogAmount();
     const haze: any = fogColor(dir);
-    // Aerial perspective: at middle distances the haze is the planet's own air colour (blue hills on
-    // Arcadia, violet on Hollowmere), lit like the sky; the farthest ground fades into the horizon.
-    const lum = dot(haze, vec3(0.2126, 0.7152, 0.0722));
-    const air = atmo.aerial.mul(lum.mul(1.35).add(0.02));
-    const c = mix(haze, air, atmo.aerialAmt.mul(float(1).sub(smoothstep(0.45, 0.96, f))));
+    let c: any = haze;
+    if (aerial) {
+      // Aerial perspective: at middle distances the haze is the planet's own air colour (blue hills on
+      // Arcadia, violet on Hollowmere), lit like the sky; the farthest ground fades into the horizon.
+      const lum = dot(haze, vec3(0.2126, 0.7152, 0.0722));
+      const air = atmo.aerial.mul(lum.mul(1.35).add(0.02));
+      c = mix(haze, air, atmo.aerialAmt.mul(float(1).sub(smoothstep(0.45, 0.96, f))));
+    }
     const rgb: any = mix(output.rgb, c, f).toVar();
     // The mist layer: a second, low fog that lies on the water and pools in the ground near its
     // level, thinning to a third every `mistTop` metres up. Integrated along the view ray like the
@@ -275,6 +282,22 @@ export function radialFogNode(): THREE.Node {
     });
     return vec4(rgb, output.a);
   })();
+}
+
+const fogNodes = new Map<boolean, THREE.Node>();
+
+/**
+ * The fog graph for the settings: none with fog off, the plain one with the far haze off, else the
+ * one with the aerial tint. One node per variant for the session: the fog is part of every fogged
+ * material's shader, so going back to a variant must find the same node (the same build key). A
+ * switch between them rebuilds those shaders, behind the graphics change's warm-up; no tier does
+ * (the far haze is on at every tier).
+ */
+export function fogNodeFor(on: { fog: boolean; aerial: boolean }): THREE.Node | null {
+  if (!on.fog) return null;
+  let n = fogNodes.get(on.aerial);
+  if (!n) fogNodes.set(on.aerial, (n = radialFogNode(on.aerial)));
+  return n;
 }
 
 const tmpColor = new THREE.Color();

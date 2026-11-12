@@ -6,7 +6,7 @@ import * as THREE from "three/webgpu";
 import { BODIES, CHUNK_QUADS, createTerrain, gridDir, padDirs, SKY_PROFILES, type BodyDef, type BodyId, type Face, type Terrain } from "@firstlight/shared";
 import { OUTPOSTS } from "@firstlight/shared/content/padOutposts";
 import type { BakeResult, ChunkRequest, ChunkResult } from "./terrain.worker.ts";
-import { applyLook, applyWorldAir, atmo, radialFogNode, skyBackgroundNode, sunRigFor, type SunRig } from "../render/atmosphere.ts";
+import { applyLook, applyWorldAir, atmo, fogNodeFor, skyBackgroundNode, sunRigFor, type SunRig } from "../render/atmosphere.ts";
 import { applyCloudLook, withClouds } from "../render/clouds.ts";
 import { Landmarks } from "../render/landmarks.ts";
 import { applyMeadowLook } from "../render/meadow.ts";
@@ -65,7 +65,6 @@ function skyNodeFor(level: 0 | 1 | 2): THREE.Node {
   if (!n) skyNodes.set(level, (n = level === 0 ? skyBackgroundNode() : skyBackgroundNode((dir, sky) => withClouds(dir, sky, level))));
   return n;
 }
-let fogNode: THREE.Node | null = null;
 
 export class Planet {
   readonly body: BodyDef;
@@ -152,7 +151,6 @@ export class Planet {
     applyCloudLook(this.world.clouds);
     applyGroundLook(this.world.ground);
     applyWorldAir(this.world, this.settings);
-    fogNode ??= radialFogNode();
     ctx.renderer.toneMappingExposure = this.look.exposure;
     postUniforms.bloomThreshold.value = this.look.bloomThreshold;
     postUniforms.bloomStrength.value = this.look.bloomStrength;
@@ -208,7 +206,8 @@ export class Planet {
       this.scene.backgroundNode = null;
       this.scene.background = new THREE.Color(this.look.horizon);
     }
-    this.scene.fogNode = s.on.fog ? fogNode : null;
+    // The plain or the aerial fog graph (atmosphere.ts fogNodeFor): a graphics change warms the one picked.
+    this.scene.fogNode = fogNodeFor(s.on);
     atmo.fogHeight.value = s.fog.height ? 1 : 0;
     atmo.scatterMix.value = s.sky.scatterSteps[0] > 0 ? this.look.scatter.mix : 0;
     applyWorldAir(this.world, s);

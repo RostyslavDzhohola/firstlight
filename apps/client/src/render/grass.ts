@@ -165,6 +165,14 @@ export class GrassSystem {
   private wanted: { key: string; chunk: GrassChunk; ca: number; cb: number; d: number }[] = [];
   /** A chunk arrived or left since the last scan: scan at the next update (D-load-6). */
   private rescan = false;
+  /**
+   * A hidden cell with no clumps in it, drawn only by warmup() (it shows hidden meshes and draws
+   * one instance of an empty one): the tier's grass material is compiled with the cells' attribute
+   * layout and shadow flag whatever ground lies round the camera, and three keeps that build while
+   * the sample lives, so the first cell to stream in after a tier change, on a pad or over water,
+   * compiles nothing in play (planet graphics review, finding 1).
+   */
+  private sample: Cell | null = null;
   blades = 0;
 
   /** @param meadow false keeps the single blades whatever the tier.
@@ -215,6 +223,12 @@ export class GrassSystem {
       this.lastPos.set(1e9, 0, 0);
     }
     for (const c of [...this.cells.values(), ...this.free]) c.mesh.receiveShadow = this.receiveShadow;
+    if (this.sample) this.sample.mesh.receiveShadow = this.receiveShadow;
+  }
+
+  /** The warm-up sample of the current tier's grass (null before the first settings). */
+  get warmupSample(): THREE.Mesh | null {
+    return this.sample?.mesh ?? null;
   }
 
   private rebuildAll(segments: number, cellQuads: number, capacity: number) {
@@ -225,6 +239,7 @@ export class GrassSystem {
     }
     this.cells.clear();
     this.free.length = 0;
+    this.dropSample();
     this.blade?.dispose();
     this.segments = segments;
     this.cellQuads = cellQuads;
@@ -234,24 +249,42 @@ export class GrassSystem {
     this.bladeLite?.dispose();
     this.bladeLite = this.clumps === 2 ? meadowClumpGeometry(true) : null;
     this.material = grassMaterialShared(this.clumps > 0);
+    // The full and the lite clump share one attribute layout, so one sample stands for both.
+    const sample = this.acquire(1);
+    sample.inUse = false;
+    sample.mesh.name = "grassSample";
+    sample.mesh.visible = false;
+    sample.mesh.frustumCulled = false;
+    this.sample = sample;
+    this.group.add(sample.mesh);
   }
 
-  private acquire(): Cell {
-    const c = this.free.pop();
+  private dropSample() {
+    if (!this.sample) return;
+    this.group.remove(this.sample.mesh);
+    this.sample.geo.dispose();
+    this.sample.geoLite?.dispose();
+    this.sample = null;
+  }
+
+  /** A cell from the pool, or a new one; `capacity` builds a new one of that size (the warm-up sample). */
+  private acquire(capacity?: number): Cell {
+    const c = capacity === undefined ? this.free.pop() : undefined;
     if (c) {
       c.inUse = true;
       return c;
     }
+    const size = capacity ?? this.capacity;
     const geo = new THREE.InstancedBufferGeometry();
     geo.index = this.blade!.index;
     for (const [name, a] of Object.entries(this.blade!.attributes)) geo.setAttribute(name, a);
-    const attr = new THREE.InstancedBufferAttribute(new Float32Array(this.capacity * 4), 4);
+    const attr = new THREE.InstancedBufferAttribute(new Float32Array(size * 4), 4);
     geo.setAttribute("iPos", attr);
     geo.instanceCount = 0;
     let meta: THREE.InstancedBufferAttribute | null = null;
     let geoLite: THREE.InstancedBufferGeometry | null = null;
     if (this.clumps > 0) {
-      meta = new THREE.InstancedBufferAttribute(new Float32Array(this.capacity * 4), 4);
+      meta = new THREE.InstancedBufferAttribute(new Float32Array(size * 4), 4);
       geo.setAttribute("iMeta", meta);
     }
     if (this.bladeLite && meta) {
@@ -543,6 +576,7 @@ export class GrassSystem {
     }
     this.cells.clear();
     this.free.length = 0;
+    this.dropSample();
     this.blade?.dispose();
     this.bladeLite?.dispose();
     this.group.removeFromParent();
