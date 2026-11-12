@@ -10,6 +10,7 @@ import { identityIsAdmin } from "./adminMode.ts";
 import type { BodyRoomMetadata } from "./BodyRoom.ts";
 import { characterRepo } from "./characters.ts";
 import { CLOSE, hub } from "./hub.ts";
+import { BOT_BUDGET, botBudget } from "./botBudget.ts";
 
 export interface MatchmakingLimits {
   maxClients: number;
@@ -128,6 +129,8 @@ export async function play(identity: Identity, input: PlayInput, limits: Matchma
       }, 0);
       if (total + partySize > limits.globalCap) return enqueue(identity.userId, total - limits.globalCap);
     }
+    // Bots skip the public ceilings but have finite ones of their own (D-security-1).
+    if (loadtest && all.reduce((s, r) => s + ((r.metadata as BodyRoomMetadata | undefined)?.loadtest ? r.clients : 0), 0) >= BOT_BUDGET.population) return { ok: false, error: "loadtest full" };
 
     mine.sort((a, b) => b.clients - a.clients);
     let target = undefined as (typeof mine)[number] | undefined;
@@ -143,6 +146,7 @@ export async function play(identity: Identity, input: PlayInput, limits: Matchma
     }
     if (!target) {
       if (mine.length >= limits.maxCopiesPerBody && !loadtest) return enqueue(identity.userId, 0);
+      if (loadtest && !botBudget.takeRoom(mine.length, all.filter((r) => (r.metadata as BodyRoomMetadata | undefined)?.loadtest).length)) return { ok: false, error: "loadtest full" };
       const used = new Set(mine.map((r) => (r.metadata as BodyRoomMetadata).copy));
       let copy = 0;
       while (used.has(copy)) copy++;

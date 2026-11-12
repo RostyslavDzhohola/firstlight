@@ -11,6 +11,8 @@ export interface Identity {
   account?: boolean;
   /** One of our own automation accounts (D-home-6): plays normally, never on a public surface. */
   test?: boolean;
+  /** The Better Auth session that issued the token (D-security-5): bearer calls and seat use need it alive. */
+  authSession?: string;
 }
 
 /** Request facts a verifier may use (IP bans; our test tools' marker). */
@@ -18,6 +20,8 @@ export interface VerifyContext {
   ip?: string | null;
   /** The request's x-loadtest-secret header: with the right secret, a guest is flagged as a test account. */
   toolSecret?: string | null;
+  /** Set by the accounts verifier: the token it checked and its payload (null: bad signature or expired), for reuse. */
+  jwt?: { token: string; payload: Record<string, unknown> | null };
 }
 
 export type TokenVerifier = (token: string, ctx?: VerifyContext) => Promise<Identity | null>;

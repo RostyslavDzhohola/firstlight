@@ -264,7 +264,8 @@ export function authOptions(d: AuthDeps) {
         jwt: {
           expirationTime: "15m",
           // Never the default (whole user incl. email): name and guest flag only.
-          definePayload: ({ user }) => ({ name: user.name, guest: !!(user as { isAnonymous?: boolean | null }).isAnonymous }),
+          // `sid`: the issuing session, so signing it out ends its tokens (D-security-5).
+          definePayload: ({ user, session }) => ({ name: user.name, guest: !!(user as { isAnonymous?: boolean | null }).isAnonymous, sid: session.id }),
         },
       }),
     ],

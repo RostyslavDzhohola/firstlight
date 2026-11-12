@@ -728,7 +728,8 @@ export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | 
       if (def.delivery === "melee" && tier.block && tier.level <= target.char.level) {
         const f: V3 = [target.state.fx, target.state.fy, target.state.fz];
         const l = Math.hypot(fromDir[0], fromDir[1], fromDir[2]) || 1;
-        const cos = (f[0] * fromDir[0] + f[1] * fromDir[1] + f[2] * fromDir[2]) / l;
+        const fl = Math.hypot(f[0], f[1], f[2]); // facing's direction only (D-security-7); zero length never blocks
+        const cos = fl > 1e-3 ? (f[0] * fromDir[0] + f[1] * fromDir[1] + f[2] * fromDir[2]) / (l * fl) : -1;
         if (cos >= Math.cos((60 * Math.PI) / 180)) dmg *= 1 - tier.block;
       }
     }

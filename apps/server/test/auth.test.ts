@@ -11,6 +11,7 @@ import { OTP_PER_ACCOUNT_PER_DAY, OTP_PUBLIC_PER_IP_PER_DAY, OTP_PUBLIC_SHARE } 
 import type { AccountLinkedEvent } from "../src/auth/links.ts";
 import { api, Browser, decodeJwt, joinWithToken, play, startAuthServer, type AuthServer } from "./auth-helpers.ts";
 import { waitFor } from "./helpers.ts";
+import { NAME_LIMITS } from "../src/auth/nameLimits.ts";
 
 /** Dev outbox with a switchable delay and failure (the helper reads codes from any DevOutbox). */
 class ControlledOutbox extends DevOutbox {
@@ -83,7 +84,7 @@ describe("guest play", () => {
     const claims = decodeJwt(t.data!.token);
     expect(JSON.stringify(claims)).not.toContain("example.test");
     expect(claims.email).toBeUndefined();
-    expect(Object.keys(claims).sort()).toEqual(["aud", "exp", "guest", "iat", "iss", "name", "sub"]);
+    expect(Object.keys(claims).sort()).toEqual(["aud", "exp", "guest", "iat", "iss", "name", "sid", "sub"]); // sid: the issuing session (D-security-5)
     expect(claims.guest).toBe(false);
     expect(claims.name).toBe("Keeper");
   });
@@ -315,8 +316,14 @@ describe("display names", () => {
     expect((await api(server, "/api/account/name", t2, { body: { name: "bad name" } })).json.error).toBe("chars");
     expect((await api(server, "/api/account/name", t2, { body: { name: "n1gg3r_x" } })).json.error).toBe("filtered");
     expect((await api(server, "/api/account/name", t2, { body: { name: "xX_fag_Xx" } })).json.error).toBe("filtered");
-    // the owner can re-set their own name with different case
-    expect((await api(server, "/api/account/name", t1, { body: { name: "ANN_1" } })).json.ok).toBe(true);
+    // the owner can re-set their own name with different case (once the change cooldown is over, D-security-6)
+    const cooldown = NAME_LIMITS.cooldownMs;
+    NAME_LIMITS.cooldownMs = 0;
+    try {
+      expect((await api(server, "/api/account/name", t1, { body: { name: "ANN_1" } })).json.ok).toBe(true);
+    } finally {
+      NAME_LIMITS.cooldownMs = cooldown;
+    }
     // and the name is what other players see
     const room = await joinWithToken(server, t1, "portus");
     rooms.push(room);
@@ -837,6 +844,8 @@ describe("the auth proxy gate", () => {
   });
 });
 
+const LT_SECRET = "lt-secret-0123456789abcdefghijklmnopqrstuvwxyzABCD";
+
 describe("load-test bot tokens", () => {
   it("are not available unless LOADTEST_SECRET is set", async () => {
     server = await startAuthServer();
@@ -844,10 +853,10 @@ describe("load-test bot tokens", () => {
   });
 
   it("need the x-loadtest-secret header, and give a loadtest identity", async () => {
-    server = await startAuthServer({ loadtestSecret: "lt-secret" });
+    server = await startAuthServer({ loadtestSecret: LT_SECRET });
     expect((await api(server, "/api/test/bot-token", null, { method: "POST", body: {} })).status).toBe(403);
     expect((await api(server, "/api/test/bot-token", null, { method: "POST", body: {}, headers: { "x-loadtest-secret": "wrong" } })).status).toBe(403);
-    const r = await api(server, "/api/test/bot-token", null, { method: "POST", body: { id: "bot7" }, headers: { "x-loadtest-secret": "lt-secret" } });
+    const r = await api(server, "/api/test/bot-token", null, { method: "POST", body: { id: "bot7" }, headers: { "x-loadtest-secret": LT_SECRET } });
     expect(r.status).toBe(200);
     expect(r.json.userId).toBe("lt_bot7");
     const play1 = await play(server, r.json.token, { body: "arcadia", loadtest: true });
@@ -860,8 +869,8 @@ describe("load-test bot tokens", () => {
 
   it("bot tokens stop working when the load test ends (secret unset)", async () => {
     const dir = (await import("./auth-helpers.ts")).tempDir();
-    server = await startAuthServer({ dir, loadtestSecret: "lt-secret" });
-    const r = await api(server, "/api/test/bot-token", null, { method: "POST", body: {}, headers: { "x-loadtest-secret": "lt-secret" } });
+    server = await startAuthServer({ dir, loadtestSecret: LT_SECRET });
+    const r = await api(server, "/api/test/bot-token", null, { method: "POST", body: {}, headers: { "x-loadtest-secret": LT_SECRET } });
     await server.close(true);
     server = await startAuthServer({ dir });
     expect((await play(server, r.json.token, { body: "arcadia", loadtest: true })).status).toBe(401);

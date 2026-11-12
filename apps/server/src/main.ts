@@ -57,6 +57,7 @@ const game = await createGame({
   },
   allowedOrigins: env.clientOrigins,
   gracefulShutdown: true,
+  production: env.production,
   mountBeforeJson: accounts.mountBeforeJson,
   explainRefusal: banExplainer(accounts),
   revalidate: accounts.revalidate,

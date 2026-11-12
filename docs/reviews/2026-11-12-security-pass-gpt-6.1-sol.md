@@ -22,3 +22,23 @@ progress or medals in the handlers read; no player-string DOM XSS, input-built S
 bundled server secret found.
 
 Decisions and fixes are recorded below this line as they land.
+
+## Fixes (lane/security, 2026-11-12, Claude Opus 5.5)
+
+All tests are in `apps/server/test/security.test.ts` (in-process server) unless noted; each fails on the
+code before its commit.
+
+| # | Finding | Commit | Decision | Test (`describe` → cases) |
+|---|---|---|---|---|
+| 1 | Load-test identities bypass every ceiling | `cd5fcac7` | D-security-1 | "finding 1": bot population, copies per body and creation rate, unused bot seats and play calls, token minting rate, production needs `LOADTEST_ENABLED=1` (test guests still flagged; `/api/metrics` off) |
+| 2 | Load-test secret guessable, any value enables it | `3476948a` | D-security-2 | "finding 2": a short secret switches bot tokens off (flagging still works), wrong guesses limited per address before comparing on bot tokens and metrics, and overall |
+| 3 | `/api/play` throttles only after verification | `80b926b0` | D-security-3 | "finding 3": body/version before the token, per-address (IPv6 /64) and global budget with invalid tokens, one `verifyJWT` per refused request with the ban explainer |
+| 4 | Proxy headers of unchecked provenance; loopback exempt in production | `43629f90` | D-security-4 | "finding 4": `X-Forwarded-For` and invalid `X-Real-IP` ignored on direct routes, loopback limited in production (not in development), IPv6 per /64 after verification |
+| 5 | Play JWTs not bound to their session | `a3aa26f1` | D-security-5 | "finding 5": signing out one session kills its tokens and a seat it reserved while the other session works (saved account); a guest's token dies with its session. `auth.test.ts` payload test now lists `sid` |
+| 6 | Name changes unlimited | `d9edc35d` | D-security-6 | "finding 6": unchanged name answers without a write and the next change waits; attempts per account and per address |
+| 7 | Facing not normalised for blocking | `74ae654e` | D-security-7 | "finding 7": input facing normalised and zero length refused; a blow 70° off an over-long facing isn't blocked (checked to fail with the old block maths) |
+| 8 | Admin-claim limiter grows after the global budget | `c9dec9e9` | D-security-8 | "finding 8": refused attempts record nothing, idle addresses expire on any call, the shared limiter caps its keys |
+
+New production env: `LOADTEST_ENABLED=1` only for the duration of a load test (with a strong `LOADTEST_SECRET`).
+Still to verify on the deployment (D-security-4): that Railway's edge overwrites a client-supplied
+`X-Real-IP`, and that the first `X-Forwarded-For` entry behind the Vercel rewrite is the browser's.

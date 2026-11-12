@@ -576,7 +576,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   private seatRefusal(sessionId: string, auth: Identity, now: number): string | null {
     if (!pendingSeats.consume(sessionId, auth.userId, now)) return "seat expired";
     if (!auth.loadtest && seatRefusal(auth.userId, now)) return "not allowed";
-    if (auth.account && identityCheck.current(auth.userId)) return "sign in again";
+    if (auth.account && identityCheck.current(auth.userId, auth.authSession)) return "sign in again"; // its own session (D-security-5)
     if (!storageRecovery.ok(auth.userId)) return "storage";
     if (travelRedirect(auth, this.bodyDef.id, now)) return "travel";
     return null;
@@ -793,9 +793,13 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     p.x = msg.x;
     p.y = msg.y;
     p.z = msg.z;
-    p.fx = msg.fx;
-    p.fy = msg.fy;
-    p.fz = msg.fz;
+    // Facing is a unit vector (D-security-7): normalised here; a zero-length one is refused (the old one stays).
+    const fl = Math.hypot(msg.fx, msg.fy, msg.fz);
+    if (fl > 1e-3) {
+      p.fx = msg.fx / fl;
+      p.fy = msg.fy / fl;
+      p.fz = msg.fz / fl;
+    }
     p.anim = CLIENT_ANIMS.has(msg.anim) ? msg.anim : ANIM.IDLE;
     p.seq = msg.seq;
     p.flags = swimmingOk ? p.flags | PF.SWIMMING : p.flags & ~PF.SWIMMING;
