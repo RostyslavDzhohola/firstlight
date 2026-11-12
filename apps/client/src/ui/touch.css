@@ -36,7 +36,7 @@
 .fl-touch__top { position: absolute; left: calc(12px + env(safe-area-inset-left)); top: calc(10px + env(safe-area-inset-top)); display: flex; gap: 10px; pointer-events: none; }
 .fl-touch__small { position: relative; width: 44px; height: 44px; border-radius: 10px; font-size: 12px; }
 
-.fl-touch__portrait { position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; background: rgba(4, 6, 9, .88); color: var(--paper); text-align: center; pointer-events: auto; z-index: 2; }
+.fl-touch__portrait { position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; background: rgba(4, 6, 9, .95); color: var(--paper); text-align: center; pointer-events: auto; z-index: 2; }
 .fl-touch__portrait b { font-size: 22px; }
 .fl-touch__portrait span { font: 400 14px/1.4 var(--font-body); opacity: .8; }
 /* Portrait: the cover goes over the HUD too (toasts stay under menus). */
