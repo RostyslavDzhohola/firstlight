@@ -160,7 +160,7 @@ export const WORLD_LOOKS: Record<BodyId, WorldLook> = {
     clouds: { cover: 0.47, height: 260, scale: 1100, stretch: [1, 0.55, 1], lit: 0xf090d0, shade: 0x2c1c50, opacity: 0.72, speed: 0.8 },
     ground: { rock: 0x4a4258, dirt: 0x33283a, sand: 0x6b5f55, snow: 0xd8d2ea, snowLine: 65, moss: 0.55, mossColor: 0x2f5a50, cracks: 0.15, lichen: 0x7fd8c0, lichenAmt: 0.35 },
     water: { shore: 0x58c8b0, absorb: 0.7, mist: 0.75, mistColor: 0xb890e0, glitter: 0.7, foam: 0.7 },
-    air: { shafts: 0.8, mist: 0.65, mistDawn: 0.4, mistColor: 0xc8a0f0, mistTop: 9, fireflies: 0.8, fireflyA: 0x6affd8, fireflyB: 0xd890ff, fireflySize: 0.07, fireflyRise: 0.16, fireflyBlink: 0.35 },
+    air: { shafts: 0.6, mist: 0.65, mistDawn: 0.4, mistColor: 0xc8a0f0, mistTop: 9, fireflies: 0.8, fireflyA: 0x6affd8, fireflyB: 0xd890ff, fireflySize: 0.07, fireflyRise: 0.16, fireflyBlink: 0.35 },
     aerial: 0x8a5ad0, aerialAmount: 0.75,
     stars: { warm: 0xffc8f0, cool: 0xb8a8ff, density: 0.8, gain: 1.3 },
   },

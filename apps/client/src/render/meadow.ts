@@ -75,8 +75,8 @@ const CLUMP_RADIUS = 0.2;
  * carries its rank in its cell (0..1, `iMeta.w`); the shader shrinks away the ones ranked above the
  * share kept at their distance and widens the rest, the CPU stops drawing the tail of each far cell.
  */
-export const MEADOW_FAR_KEEP = 0.34;
-const THIN_FROM = 0.18, THIN_TO = 0.86;
+export const MEADOW_FAR_KEEP = 0.3;
+const THIN_FROM = 0.15, THIN_TO = 0.86;
 
 /** Share of a cell's clumps kept at `dist` metres with the grass radius `radius` (the shader's curve, for the CPU's instance counts). */
 export function meadowKeep(dist: number, radius: number): number {
@@ -267,7 +267,7 @@ export function meadowGrassMaterial(u: MeadowGrassInputs): THREE.MeshLambertNode
   // Thinning: the share of clumps kept falls with distance, the ones kept grow wider to cover for the rest.
   const thinT = smoothstep(u.radius.mul(THIN_FROM), u.radius.mul(THIN_TO), dist);
   const kept = mix(float(1), float(MEADOW_FAR_KEEP), thinT);
-  const keepRank = smoothstep(kept.add(0.06), kept.sub(0.02), meta.w);
+  const keepRank = smoothstep(kept.add(0.04), kept.sub(0.03), meta.w);
   const widen = mix(float(1), float(1 / Math.sqrt(MEADOW_FAR_KEEP)), thinT);
 
   m.positionNode = Fn((builder: any) => {

@@ -352,7 +352,7 @@ export class GrassSystem {
    */
   private setBand(c: Cell, d: number) {
     if (c.meta) {
-      const keep = meadowKeep(Math.max(0, d - c.radius - 3), grassUniforms.radius.value) + 0.07;
+      const keep = meadowKeep(Math.max(0, d - c.radius - 3), grassUniforms.radius.value) + 0.05;
       const drawn = keep >= 1 ? c.count : Math.min(c.count, Math.ceil(c.target * keep));
       c.geo.instanceCount = drawn;
       if (c.geoLite) c.geoLite.instanceCount = drawn;
@@ -432,7 +432,7 @@ export class GrassSystem {
         }
       }
     }
-    // Clumps thin out and shorten toward the water: the beach stays sand (terrainMaterial.ts draws it up to ~1.7 m).
+    // Clumps thin out and shorten toward the water: the beach stays sand (terrainMaterial.ts draws it up to ~2 m).
     const shoreR = metaArr && Number.isFinite(atmo.waterLevel.value) ? R + atmo.waterLevel.value : -1;
     const shoreLo = 0.8 * look.shore, shoreHi = 2.3 * look.shore;
     const mask = this.mask;

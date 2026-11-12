@@ -1539,3 +1539,57 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   by the first `setServerSky`; the next update snaps the weather kind, amount and wetness. A URL or
   photo weather override still eases in, and so does every change during play. Why: the world
   darkened and cooled for ~4 s after the loader hid.
+- **D-gfx-worlds-6 (2026-11-12):** the planets' second pass, client only, no protocol or
+  world-geometry change. (1) Meadow grass redrawn (`render/meadow.ts`): leaf-shaped blades (widest a
+  third of the way up, ~5 cm on Arcadia) that bend at each row and turn half way to face the camera,
+  5 to a clump on Medium (20 triangles) and 7 with three rows near the camera on High (42); roots
+  darken into the clump, tips lighten, the wind's travelling wave lights the blades it bends, and
+  the turf under the grass takes the blade roots' colour near the camera (`terrainMaterial.ts`
+  `under`), so the gaps read as shade. Arcadia's blades are green, not straw. A clump covers more
+  ground than a blade, so a tier places 0.7 clumps per blade of its grass count (`MEADOW_SHARE`).
+  Clumps thin with distance: each carries its rank in its cell, the shader shrinks away the ranks
+  past the share kept at that distance (all within 15% of the grass radius, 30% at the rim) and
+  widens the rest, and far cells stop drawing that tail. (2) Beaches: warm bright sand to a ragged
+  line ~2 m above the water with faint tide lines, and the grass thins and shortens over the same
+  band. (3) Trees and rocks (`foliagefx`, `vegetationAssets.ts`): leaf clusters a metre across run
+  lighter and yellower or darker and bluer, the crown is darker inside and below, its sun side is
+  lighter, the sun glows through it when you look toward it and rims trunks and crown edges when it
+  is low, leaves flutter on top of the sway, every plant and rock darkens into the ground; rocks get
+  triplanar grain and cracks and lichen (teal on Hollowmere, pale dust on Meridian). (4) Air
+  (`atmosphere.ts`): `shafts`, rays fanning out of a low sun and a wide glow under it, a term of
+  the sky and haze colour (one noise tap round a ring about the sun's axis), no pass; `mist`, a
+  second low fog layer integrated along the view ray, lying on the water and in ground near its
+  level at dawn, in rain, and always on Hollowmere; a stronger far-haze tint per planet; a second
+  layer of faint stars and a pale river of star dust. (5) `fireflies`: fireflies on Arcadia and
+  rising spores on Hollowmere at night, one additive instanced draw in a box round the camera
+  (`weather.ts`); rain rings on water and a sky sheen in the puddles of wet flat ground. (6)
+  Landmarks: Arcadia's islands have a domed cap whose turf overhangs, strata that step in and jut
+  out as ledges, hanging shards, two kinds of tree, a broken arch with a lit rune on the big ones
+  and falls with a bright head; Hollowmere's ring has a lit seam under every slab and crystals on
+  its rim; Meridian's yards have bigger lights, lit panels, a green docking beacon and work lights.
+  Low keeps its single blades and its plain trees, ground, sky and fog; it gets the reworked
+  landmarks and the cheaper grass placement. Why: the owner asked for
+  several passes until the worlds are beautiful, and the first pass's sheets showed Medium's grass
+  as sparse yellow straw, dull olive beaches, flat-lit trees, long views without depth, cone-shaped
+  islands and nights with little to look at.
+- **D-gfx-worlds-7 (2026-11-12):** the second pass's four switches (`foliagefx`, `shafts`, `mist`,
+  `fireflies`) are uniforms, not shader variants: each term sits behind a branch on its amount
+  (`If(atmo.shafts > 0)` and so on), Low and a `?no<name>` switch set the amount to 0
+  (`Environment` writes them with the settings and every frame), and the fireflies are a hidden
+  draw. So a tier change, a kill switch or a time of day compiles nothing, Low pays a not-taken
+  branch, and `?bench=passes` can price each one by switching it (at a time of day that has it:
+  `&time=0.17` for shafts and mist, `&time=0` for fireflies). Screen-space derivatives stay outside
+  those branches (the rocks' triplanar tap is taken ahead of its branch): WGSL allows none inside
+  one, and `shaders.test.ts` checks it. Why: the fog and sky nodes are part of every material's
+  shader; a variant per tier would rebuild them all when the resolution ladder drops a tier
+  mid-play.
+- **D-gfx-worlds-8 (2026-11-12):** the grass's placement on the main thread costs a sixth of what
+  it did. The loop tested every blade against every landing pad (a chord per pad); now a cell is
+  tested once against the pads' aprons and its blades only if one can reach it. The per-clump data
+  is written in line (no call, no third random: the kept clump's own acceptance draw is reused),
+  and a tier places 0.7 clumps per blade of its count. Measured in one process (vitest, node 24,
+  one High chunk of Arcadia with full grass weight, four alternations after a warm-up): at the
+  first pass's head 142–155 ms for 279,577 single blades and 162–184 ms for as many clumps; now
+  20–26 ms for the blades and 23–24 ms for 195,704 clumps, so a meadow field takes 0.93× the time
+  of the single-blade field it replaces (the first pass measured 2.9× on a loaded machine). Why:
+  the brief asked to bring the clumps' placement cost down; the pads were the cost of both.

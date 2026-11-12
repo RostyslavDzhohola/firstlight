@@ -165,11 +165,11 @@ export const sunShafts = Fn(([dir]: [any]) => {
     const ring = q.div(max(length(q), 0.0001));
     const drift = time.mul(0.004);
     const n = (texture(detailNoiseTexture(), ring.mul(0.31).add(vec2(drift.add(0.5), 0.5))) as any).level(0);
-    const streak = smoothstep(0.42, 0.72, n.g.mul(0.7).add(n.r.mul(0.3)));
+    const streak = smoothstep(0.38, 0.78, n.g.mul(0.7).add(n.r.mul(0.3)));
     const e = dot(dir, atmo.up);
-    const cone = pow(fwd, 6.0);
+    const cone = pow(fwd, 8.0);
     // No shafts on the disc itself (the halo is there) or far below the horizon.
-    const rays = streak.mul(cone).mul(float(1).sub(pow(fwd, 90.0))).mul(smoothstep(-0.25, 0.02, e)).mul(0.5);
+    const rays = streak.mul(cone).mul(float(1).sub(pow(fwd, 90.0))).mul(smoothstep(-0.25, 0.02, e)).mul(0.42);
     const glow = pow(fwd, 2.5).mul(exp(abs(e).mul(-5.0))).mul(0.3);
     out.assign(atmo.sunColor.mul(rays.add(glow).add(cone.mul(0.1)).mul(atmo.shafts)));
   });
