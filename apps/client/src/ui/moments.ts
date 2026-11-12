@@ -5,9 +5,11 @@
 // banner replaces so the toast column doesn't say the same thing twice.
 
 import { GLEAMS, gleamsWon } from "@firstlight/shared/content/gleams";
+import { isExtraCosmetic, itemName } from "@firstlight/shared/content/items";
 import { MEDAL_BY_ID } from "@firstlight/shared/content/medals";
 import { MISSION_BY_ID, type MissionDef } from "@firstlight/shared/content/missions";
 import { SPELLS, type SpellDef } from "@firstlight/shared/content/spells";
+import type { InvItem } from "@firstlight/shared/net/protocol";
 import type { SoundName } from "../audio/sounds.ts";
 
 export type MomentKind = "level" | "spell" | "mission" | "trial" | "gleam" | "vault" | "medal";
@@ -76,20 +78,35 @@ export function trialFeat(def: MissionDef): string {
   return "";
 }
 
+/** What else a mission paid, for its banner. */
+export interface MissionPaid {
+  /** The items granted, when the server says (otherwise the mission catalogue's). */
+  items?: readonly Pick<InvItem, "id" | "qty">[];
+  /** `you.cosmeticsExtras`: the extra cosmetics are paid out (the catalogue's are left out otherwise, as on the server). */
+  extras?: boolean;
+}
+
+/** "2 × Small Tonic, 1 × Large Tonic", or "". */
+export function itemsLine(items: readonly Pick<InvItem, "id" | "qty">[]): string {
+  return items.map((i) => `${i.qty} × ${itemName(i)}`).join(", ");
+}
+
 /**
  * The server's `missionDone`: a mission banner, or for a race / defend / collect a "Trial won"
  * banner; a trial of the Three Gleams adds the gleam it won (`missions`: the player's list as last
- * seen, which may not hold this one as done yet). "vault" is the Gleam Vault opening.
+ * seen, which may not hold this one as done yet). "vault" is the Gleam Vault opening. The reward line
+ * names the items too: the banner covers the server's toast that did (`bannerCovers`).
  */
-export function missionMoments(id: string, xp: number, coins: number, missions: readonly { id: string; done: boolean }[] = []): Moment[] {
+export function missionMoments(id: string, xp: number, coins: number, missions: readonly { id: string; done: boolean }[] = [], paid: MissionPaid = {}): Moment[] {
   if (id === "vault") {
     return [{ kind: "vault", kicker: GLEAMS.name, title: "The Gleam Vault opens", reward: rewardLine(0, coins, "Gleamweave Cape"), sprite: "chest", ms: HOLD_LONG_MS }];
   }
   const def = MISSION_BY_ID.get(id);
   if (!def) return [];
+  const items = itemsLine(paid.items ?? def.reward.items.filter((i) => paid.extras || !isExtraCosmetic(i.id)));
   const out: Moment[] = [];
-  if (isTimed(def)) out.push({ kind: "trial", kicker: "Trial won", title: def.name, reward: rewardLine(xp, coins, trialFeat(def)), sprite: "trophy", ms: HOLD_MS });
-  else out.push({ kind: "mission", kicker: "Mission complete", title: def.name, reward: rewardLine(xp, coins), sprite: "flag", ms: HOLD_MS });
+  if (isTimed(def)) out.push({ kind: "trial", kicker: "Trial won", title: def.name, reward: rewardLine(xp, coins, [trialFeat(def), items].filter(Boolean).join(" · ")), sprite: "trophy", ms: HOLD_MS });
+  else out.push({ kind: "mission", kicker: "Mission complete", title: def.name, reward: rewardLine(xp, coins, items), sprite: "flag", ms: HOLD_MS });
   if (def.trial) {
     const total = GLEAMS.trials.length;
     const won = Math.min(total, gleamsWon([...missions.filter((m) => m.id !== id), { id, done: true }]));

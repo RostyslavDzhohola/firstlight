@@ -89,7 +89,10 @@ export class MomentsClient implements ClientSystem {
       if (prev !== null && y.level > prev) m.push(...levelMoments(prev, y.level));
       if (y.dead) m.clearBanners(); // the death screen has the floor
     });
-    on("missionDone", (d: { id: string; xp: number; coins: number }) => m.push(...missionMoments(d.id, d.xp, d.coins, game.hud.you?.missions ?? [])));
+    on("missionDone", (d: { id: string; xp: number; coins: number; items?: { id: string; qty: number }[] }) => {
+      const you = game.hud.you;
+      m.push(...missionMoments(d.id, d.xp, d.coins, you?.missions ?? [], { items: d.items, extras: !!you?.cosmeticsExtras }));
+    });
     on("medal", (d: { id: string }) => m.push(medalMoment(d.id)));
     on("news", (n: { kind: "gleam" | "vault"; name: string; mission?: string }) => {
       const who: FeedWho = { name: n.name, agent: this.agentNamed(n.name) };

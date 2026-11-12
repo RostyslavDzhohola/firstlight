@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { isExtraCosmetic } from "@firstlight/shared/content/items";
 import { SAMPLE_FALLBACKS } from "../audio/sounds.ts";
 import { PRESETS } from "../audio/presets.ts";
 import { BANNER_GAP_MS, BANNER_IN_MS, BANNER_OUT_MS, bannerCovers, BannerQueue, levelMoments, medalMoment, missionMoments, MOMENT_SOUNDS, nextSpell, rewardLine, spellUnlocks, type Moment } from "./moments.ts";
@@ -36,8 +37,18 @@ describe("the banners' words", () => {
     expect(levelMoments(9, 10)[0]!.reward).toBe("More health and damage");
   });
 
+  it("names the items a mission paid (its toast is covered), from the payload or the catalogue", () => {
+    expect(missionMoments("A2", 120, 40)[0]!.reward).toBe("+120 XP · +40 ◎"); // pays no items
+    expect(missionMoments("A3", 180, 60, [], { items: [{ id: "tonic_small", qty: 2 }] })[0]!.reward).toBe("+180 XP · +60 ◎ · 2 × Small Tonic");
+    expect(missionMoments("A3", 180, 60, [], { items: [] })[0]!.reward).toBe("+180 XP · +60 ◎");
+    // An extra cosmetic is named only where the server pays it out.
+    const extra = isExtraCosmetic("copper_orbit_pack");
+    expect(missionMoments("M3", 2800, 400, [], { extras: true })[0]!.reward).toContain("1 × ");
+    expect(missionMoments("M3", 2800, 400)[0]!.reward.includes("1 × ")).toBe(!extra);
+  });
+
   it("a mission pays in one banner; a timed one is a trial won; a trial of the hunt adds its gleam", () => {
-    expect(missionMoments("A3", 180, 60)).toMatchObject([{ kind: "mission", kicker: "Mission complete", title: "The Big Lake", reward: "+180 XP · +60 ◎" }]);
+    expect(missionMoments("A3", 180, 60)).toMatchObject([{ kind: "mission", kicker: "Mission complete", title: "The Big Lake", reward: "+180 XP · +60 ◎ · 1 × Large Tonic" }]);
     expect(missionMoments("nope", 1, 1)).toEqual([]);
     const first = missionMoments("T1", 300, 80, []);
     expect(first.map((x) => x.kind)).toEqual(["trial", "gleam"]);
