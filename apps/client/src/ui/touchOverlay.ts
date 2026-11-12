@@ -116,7 +116,7 @@ export class TouchSticks {
   private setSprint(on: boolean): void {
     if (on === this.sprint) return;
     this.sprint = on;
-    this.host.input.virtualKey("ShiftLeft", on);
+    this.host.input.virtualKey("ShiftLeft", on, SOURCE);
   }
 }
 
@@ -185,16 +185,16 @@ export class TouchOverlay {
     const pad = el("div", "fl-touch__actions", this.root);
     this.button(pad, { id: "fire", label: "Fire", cls: "fl-touch__fire", press: (on) => this.setAttack(on) });
     this.button(pad, { id: "alt", label: "Alt", cls: "fl-touch__alt", press: (on) => this.setAlt(on) });
-    this.button(pad, { id: "jump", label: "Jump", cls: "fl-touch__jump", press: (on) => host.input.virtualKey("Space", on) });
+    this.button(pad, { id: "jump", label: "Jump", cls: "fl-touch__jump", press: (on) => host.input.virtualKey("Space", on, SOURCE) });
     this.button(pad, { id: "roll", label: "Roll", cls: "fl-touch__roll", press: (on) => on && this.tap("KeyC") });
     this.button(pad, { id: "reload", label: "R", cls: "fl-touch__reload", press: (on) => on && this.tap("KeyR") });
-    this.use = this.button(pad, { id: "use", label: "Use", cls: "fl-touch__use", press: (on) => host.input.virtualKey("KeyE", on) });
+    this.use = this.button(pad, { id: "use", label: "Use", cls: "fl-touch__use", press: (on) => host.input.virtualKey("KeyE", on, SOURCE) });
     this.use.hidden = true;
 
     // Spells: four buttons over the cluster, their state copied from the HUD's spell bar each frame.
     const sp = el("div", "fl-touch__spells", this.root);
     for (const s of SPELLS) {
-      const b = this.button(sp, { id: `spell-${s.id}`, label: "", cls: "fl-touch__spell", press: (on) => host.input.virtualKey(s.code, on) });
+      const b = this.button(sp, { id: `spell-${s.id}`, label: "", cls: "fl-touch__spell", press: (on) => host.input.virtualKey(s.code, on, SOURCE) });
       b.dataset.spell = s.id;
       el("i", "fl-touch__cd", b);
       el("span", "fl-touch__n", b);
@@ -330,8 +330,8 @@ export class TouchOverlay {
   }
 
   private tap(code: string): void {
-    this.host.input.virtualKey(code, true);
-    this.host.input.virtualKey(code, false);
+    this.host.input.virtualKey(code, true, SOURCE);
+    this.host.input.virtualKey(code, false, SOURCE);
   }
 
   private setAttack(on: boolean): void {

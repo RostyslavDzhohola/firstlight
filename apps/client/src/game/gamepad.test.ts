@@ -340,3 +340,38 @@ describe("Input device switching", () => {
     expect(input.moveX).toBeCloseTo(0.8);
   });
 });
+
+describe("Input: held keys per source (review #4)", () => {
+  it("a pad's Shift keyup doesn't cancel a sprint the keyboard still holds", () => {
+    const r = rig();
+    const p = pad();
+    r.pads.push(p);
+    window.dispatchEvent(new KeyboardEvent("keydown", { code: "ShiftLeft" })); // keyboard sprint
+    p.stick(0, 0, -1);
+    p.press(BTN.LS);
+    r.poll();
+    p.press(BTN.LS, false);
+    p.stick(0, 0, 0); // the stick comes back: the pad's sprint latch lets go
+    r.poll();
+    expect(r.input.down("ShiftLeft")).toBe(true);
+    window.dispatchEvent(new KeyboardEvent("keyup", { code: "ShiftLeft" }));
+    expect(r.input.down("ShiftLeft")).toBe(false);
+    r.dispose();
+  });
+
+  it("the union: a key is down while any source holds it; clearing one source keeps the others", () => {
+    const input = new Input(document.createElement("canvas"));
+    input.virtualKey("Space", true, "touch");
+    window.dispatchEvent(new KeyboardEvent("keydown", { code: "Space" }));
+    window.dispatchEvent(new KeyboardEvent("keyup", { code: "Space" }));
+    expect(input.down("Space")).toBe(true); // touch still holds it
+    input.virtualKey("KeyW", true, "touch");
+    window.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyW" }));
+    input.clearKeys("touch");
+    expect(input.down("Space")).toBe(false);
+    expect(input.down("KeyW")).toBe(true); // the keyboard's own hold
+    expect([...input.heldFrom("kbd")]).toEqual(["KeyW"]);
+    input.clearKeys();
+    expect(input.keys.size).toBe(0);
+  });
+});

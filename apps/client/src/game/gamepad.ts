@@ -226,32 +226,32 @@ export class GamepadSource {
   private setSprint(on: boolean): void {
     if (on === this.sprinting) return;
     this.sprinting = on;
-    this.host.input.virtualKey("ShiftLeft", on);
+    this.host.input.virtualKey("ShiftLeft", on, SOURCE);
   }
 
   private keyDown(code: string, b: number): void {
     this.keyUpFrom(b);
     this.held.set(code, b);
-    this.host.input.virtualKey(code, true);
+    this.host.input.virtualKey(code, true, SOURCE);
   }
 
   private keyUpFrom(b: number): void {
     for (const [code, from] of this.held) {
       if (from !== b) continue;
       this.held.delete(code);
-      this.host.input.virtualKey(code, false);
+      this.host.input.virtualKey(code, false, SOURCE);
     }
   }
 
   private tap(code: string): void {
-    this.host.input.virtualKey(code, true);
-    this.host.input.virtualKey(code, false);
+    this.host.input.virtualKey(code, true, SOURCE);
+    this.host.input.virtualKey(code, false, SOURCE);
   }
 
   /** Let go of every held key, the triggers, the stick and sprint. */
   releaseAll(): void {
     const input = this.host.input;
-    for (const code of this.held.keys()) input.virtualKey(code, false);
+    for (const code of this.held.keys()) input.virtualKey(code, false, SOURCE);
     this.held.clear();
     this.setSprint(false);
     this.selectAt = 0;

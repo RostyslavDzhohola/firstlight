@@ -26,6 +26,8 @@ export function keyOf(code: string): string {
   return code;
 }
 
+const EMPTY: ReadonlySet<string> = new Set();
+
 /** Mouse events this soon after a touch are the browser's emulated ones, not a mouse. */
 const TOUCH_MOUSE_MS = 900;
 /** Mouse movement smaller than this (px in one event) doesn't switch the device (a nudged desk). */
@@ -40,8 +42,19 @@ export function capturedFrom(s: { enabled: boolean; suspended: boolean; locked: 
   return s.enabled && !s.suspended && (s.locked || (s.free && s.device !== "kbm"));
 }
 
+/** The source of real keyboard events (virtual keys name theirs: "pad:0", "touch", "menu"). */
+export const KEYBOARD = "kbd";
+
 export class Input {
+  /**
+   * Keys held down: the union of every source's own held set (keyboard, each pad, touch). A key is
+   * down while any source holds it; a keyup releases only the sending source's hold, so a pad's
+   * synthetic Shift keyup can't cancel a sprint the keyboard still holds (review #4).
+   */
   readonly keys = new Set<string>();
+  private readonly heldBy = new Map<string, Set<string>>();
+  /** The source of the virtual key being dispatched right now (null: a real keyboard event). */
+  private dispatching: string | null = null;
   readonly pressed = new Set<string>(); // went down this frame
   /** Of `pressed`, the keys that went down with Shift held (read at the key press, not at the frame). */
   private readonly pressedShift = new Set<string>();
@@ -93,10 +106,10 @@ export class Input {
         this.pressed.add(e.code);
         if (e.shiftKey) this.pressedShift.add(e.code);
       }
-      this.keys.add(e.code);
+      this.hold(this.dispatching ?? KEYBOARD, e.code, true);
     });
-    window.addEventListener("keyup", (e) => this.keys.delete(e.code));
-    window.addEventListener("blur", () => this.keys.clear());
+    window.addEventListener("keyup", (e) => this.hold(this.dispatching ?? KEYBOARD, e.code, false));
+    window.addEventListener("blur", () => this.clearKeys(KEYBOARD));
     el.addEventListener("mousedown", (e) => {
       if (this.emulatedMouse()) return; // a tap on a touch screen: the touch overlay owns it
       this.setDevice("kbm");
@@ -127,7 +140,7 @@ export class Input {
     document.addEventListener("pointerlockchange", () => {
       this.locked = document.pointerLockElement === el;
       if (!this.locked) {
-        this.keys.clear();
+        this.clearKeys(KEYBOARD);
         this.mouseL = this.mouseR = false;
       }
     });
@@ -135,6 +148,38 @@ export class Input {
     document.addEventListener("pointerlockerror", () => {
       if (!this.requesting) this.onLockError?.();
     });
+  }
+
+  /** `source` holds (or let go of) `code`; `keys` stays the union of every source. */
+  private hold(source: string, code: string, on: boolean): void {
+    let set = this.heldBy.get(source);
+    if (on) {
+      if (!set) this.heldBy.set(source, (set = new Set()));
+      set.add(code);
+      this.keys.add(code);
+      return;
+    }
+    if (!set?.delete(code)) return;
+    for (const other of this.heldBy.values()) if (other.has(code)) return;
+    this.keys.delete(code);
+  }
+
+  /** Let go of every key one source holds, or of every key of every source (a panel opened). */
+  clearKeys(source?: string): void {
+    if (source === undefined) {
+      this.heldBy.clear();
+      this.keys.clear();
+      return;
+    }
+    const set = this.heldBy.get(source);
+    if (!set) return;
+    for (const code of [...set]) this.hold(source, code, false);
+    this.heldBy.delete(source);
+  }
+
+  /** Keys one source holds right now (tests, diagnostics). */
+  heldFrom(source: string): ReadonlySet<string> {
+    return this.heldBy.get(source) ?? EMPTY;
   }
 
   /** Left mouse, or attack held on a gamepad or the touch overlay. */
@@ -200,10 +245,16 @@ export class Input {
    * at the focused element so every listener (this class, panels, the pause menu, the players list)
    * reacts as it does to the key. Untrusted, so it never switches the device back to the keyboard.
    */
-  virtualKey(code: string, down: boolean) {
+  virtualKey(code: string, down: boolean, source = "virtual") {
     if (typeof document === "undefined") return;
     const target = (document.activeElement as HTMLElement | null) ?? document.body;
-    target?.dispatchEvent(new KeyboardEvent(down ? "keydown" : "keyup", { code, key: keyOf(code), bubbles: true, cancelable: true }));
+    const was = this.dispatching;
+    this.dispatching = source;
+    try {
+      target?.dispatchEvent(new KeyboardEvent(down ? "keydown" : "keyup", { code, key: keyOf(code), bubbles: true, cancelable: true }));
+    } finally {
+      this.dispatching = was;
+    }
   }
 
   /** The device used last changed: glyphs, the touch overlay and the captured rule follow. */

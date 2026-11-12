@@ -77,8 +77,8 @@ export function installControls(game: Game): Controls {
   const row = (icon: string, title: string, sub: string, code: string, on: readonly string[]) => () =>
     on.includes(input.device) ? { icon, title, sub, onClick: () => queueMicrotask(() => tapKey(code)) } : null;
   const tapKey = (code: string) => {
-    input.virtualKey(code, true);
-    input.virtualKey(code, false);
+    input.virtualKey(code, true, "menu");
+    input.virtualKey(code, false, "menu");
   };
   pauseExtras.add(row("book", "Journal", "Missions, medals and the wardrobe", "KeyJ", ["pad", "touch"]));
   pauseExtras.add(row("check", "Tutorial checklist", "Show or hide the first-steps list", "KeyT", ["pad"]));

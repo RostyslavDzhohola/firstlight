@@ -59,7 +59,7 @@ export class Panel {
     this.render();
     document.body.appendChild(this.overlay);
     this.game.input.enabled = false;
-    this.game.input.keys.clear();
+    this.game.input.clearKeys();
     window.addEventListener("keydown", this.onKey, true);
     overlayOpened("panel"); // keeps the Esc menu away while the mouse is free
     document.exitPointerLock?.();
