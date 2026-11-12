@@ -11,6 +11,7 @@ import { installSprites, portraitSprite } from "../ui/sprites.ts";
 import { STILLS, type Still } from "../ui/loadingStills.ts";
 import { agentsGuideUrl, fmtNum, hallRows, HERO_FADE_MS, HERO_HOLD_MS, heroLive, heroStills, namesLine, newsTiles, progressView, visitsLine, WORLD_STILL, worldCards, type MeInfo } from "./homeModel.ts";
 import { onLandingShown } from "./landing.ts";
+import { startOrrery, wantsOrrery, type Orrery } from "./orrery.ts";
 import { takeHomeNotice, type HomeNotice } from "./leave.ts";
 import { signOutSession } from "./signOut.ts";
 import { ANALYTICS_OPT_OUT_KEY, privacyText } from "./datafast.ts";
@@ -501,7 +502,10 @@ export async function initHome(): Promise<void> {
     };
   }
 
+  // The orrery menu (D-menu-1): the sky over this page, when the visit gets it (home/orrery.ts).
+  let orrery: Orrery | null = null;
   const paintData = () => {
+    orrery?.setData(data);
     renderOnline(data?.online ?? null);
     renderWorlds(data?.online ?? null);
     renderNews(data?.board ?? null);
@@ -509,7 +513,13 @@ export async function initHome(): Promise<void> {
     renderVisits(data?.visits ?? null, data ? data.online.total : null);
   };
   const actions: MeActions = { save: () => void saveProgress(), signOut: () => void signOut() };
-  const paintMe = () => renderMe(state, actions);
+  const paintMe = () => {
+    renderMe(state, actions);
+    orrery?.setMe(state.me, state.error ?? null);
+  };
+  if (landing && wantsOrrery()) {
+    orrery = startOrrery(landing, { play: () => $("play")?.click(), signIn: () => $("signin")?.click(), signOut: () => void signOut(), save: () => void saveProgress() });
+  }
   // Lookups can overlap (the first load, another tab's broadcast, a save): only the newest one paints.
   let meSeq = 0;
   const refreshMe = async () => {
@@ -604,6 +614,7 @@ export async function initHome(): Promise<void> {
   // Under the loading screen the page is out (landing.ts, D-home-8): no polling. Back on the home page
   // (a failed load): fresh data at once, then the usual rhythm.
   onLandingShown((shown) => {
+    orrery?.setShown(shown);
     clearInterval(pollTimer);
     if (!shown) return;
     void poll();

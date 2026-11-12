@@ -1,0 +1,91 @@
+/* The orrery menu (D-menu-1, home/orrery.ts): the first screen is the sky. No cards, no panels, no
+   filled buttons: type set straight on the sky, hairlines, and one ring to dive through. The classic
+   home page stays in the document underneath and comes back with "Open the almanac". */
+
+body.fl-menu-orrery:not(.fl-menu-classic) .fl-home { overflow: hidden; }
+body.fl-menu-orrery:not(.fl-menu-classic) .fl-home > .fl-fly,
+body.fl-menu-orrery:not(.fl-menu-classic) .fl-home__page { display: none; }
+body.fl-menu-classic .fl-orrery { display: none; }
+.fl-orrery__back { display: none; }
+body.fl-menu-classic .fl-orrery__back { display: inline-flex; position: fixed; z-index: 5; top: calc(1.1 * var(--u)); left: 50%; transform: translateX(-50%); }
+
+.fl-orrery { position: absolute; inset: 0; overflow: hidden; background: #03050a; cursor: grab; user-select: none; -webkit-user-select: none; touch-action: none; --here: #ffd99b; }
+.fl-orrery.is-dragging { cursor: grabbing; }
+.fl-orrery__sky { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.fl-orrery__ui { position: absolute; inset: 0; pointer-events: none; font-family: var(--font-body); color: var(--paper); }
+.fl-orrery__ui button, .fl-orrery__ui a, .fl-orrery__plate { pointer-events: auto; }
+.fl-orrery__flash { position: absolute; inset: 0; pointer-events: none; opacity: 0; background: radial-gradient(circle at 42% 50%, #fff8ec, #ffe2b4 45%, #f3ae5b 100%); }
+
+/* ---- top: the mark and the account, as plain words ---- */
+.fl-orrery__top { position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: center; justify-content: space-between; padding: calc(1.5 * var(--u)) calc(2.2 * var(--u)); }
+.fl-orrery__mark { --wm-size: calc(1.05 * var(--u)); }
+.fl-orrery__account { display: flex; align-items: baseline; gap: calc(1.4 * var(--u)); }
+.fl-orrery__accountnote { font: 500 var(--t-xs)/1.3 var(--font-body); color: var(--dawn-1); max-width: 22em; }
+.fl-orrery__tag[hidden] { display: none; }
+.fl-orrery__who { font: 500 var(--t-xs)/1 var(--font-mono); letter-spacing: .06em; color: var(--paper-2); opacity: .8; }
+.fl-orrery__link { appearance: none; border: 0; background: none; padding: .35em 0; margin: 0; cursor: pointer; color: var(--paper); font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: var(--track-caps); text-transform: uppercase; box-shadow: inset 0 -1px 0 var(--line-3); transition: box-shadow .2s ease, color .2s ease; }
+.fl-orrery__link:hover, .fl-orrery__link:focus-visible { color: #fff; box-shadow: inset 0 -1px 0 var(--here); outline: none; }
+
+/* ---- the tags that ride above each world ---- */
+.fl-orrery__tags { position: absolute; inset: 0; }
+.fl-orrery__tag { position: absolute; left: 0; top: 0; appearance: none; border: 0; background: none; padding: .5em .7em .9em; cursor: pointer; display: inline-flex; align-items: baseline; gap: .6em; color: var(--paper-2); font: 600 calc(.8 * var(--u))/1 var(--font-display); letter-spacing: var(--track-wide); text-transform: uppercase; white-space: nowrap; transition: color .25s ease; will-change: transform; animation: fl-orrery-tag .35s ease both; text-shadow: 0 1px 6px rgba(0, 0, 0, .8); }
+.fl-orrery__tag::after { content: ""; position: absolute; left: 50%; bottom: .15em; width: 1px; height: .6em; background: currentColor; opacity: .5; }
+.fl-orrery__tag.is-front { color: #fff; }
+.fl-orrery__tag:hover, .fl-orrery__tag:focus-visible { color: var(--here); outline: none; }
+.fl-orrery__tagcount { font: 500 calc(.72 * var(--u))/1 var(--font-mono); letter-spacing: 0; color: var(--ok); }
+.fl-orrery__tagcount:empty { display: none; }
+.fl-orrery__tagcount::before { content: "● "; font-size: .6em; vertical-align: .2em; }
+
+/* ---- the plate: the front world's name and what is true there ---- */
+.fl-orrery__plate { position: absolute; left: 53%; right: calc(2.2 * var(--u)); top: 50%; transform: translateY(-52%); max-width: calc(30 * var(--u)); cursor: default; user-select: text; -webkit-user-select: text; }
+.fl-orrery__plate[data-body="portus"] { --here: #ffd99b; }
+.fl-orrery__plate[data-body="arcadia"] { --here: #7fd8ff; }
+.fl-orrery__plate[data-body="hollowmere"] { --here: #d59bff; }
+.fl-orrery__plate[data-body="meridian"] { --here: #ffb07a; }
+.fl-orrery__plate > * { opacity: 0; transform: translateY(.6em); }
+.fl-orrery__plate.is-in > * { opacity: 1; transform: none; transition: opacity .5s ease, transform .6s cubic-bezier(.2, .7, .2, 1); }
+.fl-orrery__plate.is-in > :nth-child(2) { transition-delay: .05s; }
+.fl-orrery__plate.is-in > :nth-child(3) { transition-delay: .11s; }
+.fl-orrery__plate.is-in > :nth-child(4) { transition-delay: .17s; }
+.fl-orrery__plate.is-in > :nth-child(5) { transition-delay: .24s; }
+.fl-orrery__kicker { display: flex; align-items: center; gap: 1em; font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: var(--track-wide); text-transform: uppercase; color: var(--here); }
+.fl-orrery__kicker::before { content: ""; width: calc(3.2 * var(--u)); height: 1px; background: currentColor; }
+.fl-orrery__name { margin: .28em 0 0 -.04em; font: 300 min(8.2vw, calc(41vw / (.56 * var(--len, 8))))/.92 var(--font-display); white-space: nowrap; letter-spacing: .02em; text-transform: uppercase; color: #fff; text-shadow: 0 0 1.2em rgba(0, 0, 0, .55); }
+.fl-orrery__line { margin: .9em 0 0; max-width: 26em; font: 400 var(--t-md)/1.45 var(--font-body); color: var(--paper); text-shadow: 0 1px 8px rgba(0, 0, 0, .7); }
+.fl-orrery__facts { list-style: none; margin: 1.1em 0 0; padding: 0; display: grid; gap: .5em; font: 400 var(--t-sm)/1.4 var(--font-body); color: var(--paper-2); text-shadow: 0 1px 8px rgba(0, 0, 0, .7); }
+.fl-orrery__facts li { display: grid; grid-template-columns: 1.6em 1fr; }
+.fl-orrery__facts li::before { content: "—"; color: var(--here); opacity: .8; }
+.fl-orrery__act { margin-top: calc(1.9 * var(--u)); }
+.fl-orrery__note { margin: 0 0 .8em; max-width: 26em; font: 400 var(--t-sm)/1.45 var(--font-body); color: var(--paper-2); }
+
+/* The way in: a ring, not a button. */
+.fl-orrery__dive { appearance: none; border: 0; background: none; padding: 0; margin: 0; cursor: pointer; display: inline-flex; align-items: center; gap: 1.1em; color: #fff; font: 600 var(--t-lg)/1 var(--font-display); letter-spacing: var(--track-caps); text-transform: uppercase; text-align: left; }
+.fl-orrery__divering { position: relative; flex: none; width: 3.3em; height: 3.3em; border-radius: 50%; border: 1px solid var(--here); box-shadow: 0 0 1.4em -.3em var(--here), inset 0 0 1.1em -.4em var(--here); transition: transform .35s cubic-bezier(.2, .7, .2, 1), box-shadow .3s ease; }
+.fl-orrery__divering::before { content: ""; position: absolute; inset: 32%; border-radius: 50%; background: var(--here); box-shadow: 0 0 1em var(--here); animation: fl-orrery-pulse 2.4s ease-in-out infinite; }
+.fl-orrery__divering::after { content: ""; position: absolute; inset: -.5em; border-radius: 50%; border: 1px solid var(--here); opacity: .35; animation: fl-orrery-ring 2.4s ease-out infinite; }
+.fl-orrery__dive:hover .fl-orrery__divering, .fl-orrery__dive:focus-visible .fl-orrery__divering { transform: scale(1.12); box-shadow: 0 0 2.2em -.2em var(--here), inset 0 0 1.4em -.3em var(--here); }
+.fl-orrery__dive:focus-visible { outline: none; }
+.fl-orrery__divelabel { box-shadow: inset 0 -1px 0 var(--line-3); padding-bottom: .3em; }
+.fl-orrery__dive:hover .fl-orrery__divelabel, .fl-orrery__dive:focus-visible .fl-orrery__divelabel { box-shadow: inset 0 -1px 0 var(--here); }
+@keyframes fl-orrery-tag { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fl-orrery-pulse { 0%, 100% { transform: scale(.8); opacity: .85; } 50% { transform: scale(1.05); opacity: 1; } }
+@keyframes fl-orrery-ring { from { transform: scale(.8); opacity: .5; } to { transform: scale(1.5); opacity: 0; } }
+
+.fl-orrery kbd { display: inline-block; min-width: 1.5em; padding: .22em .45em; margin: 0 .15em; border: 1px solid var(--line-3); border-radius: var(--r-2); font: 500 .68em/1 var(--font-mono); letter-spacing: 0; text-align: center; color: var(--paper-2); vertical-align: .12em; }
+
+/* ---- the almanac and the hint: one line each, at the foot ---- */
+.fl-orrery__almanac { position: absolute; left: calc(2.2 * var(--u)); bottom: calc(1.6 * var(--u)); max-width: 44%; display: flex; align-items: baseline; gap: 1em; text-shadow: 0 1px 8px rgba(0, 0, 0, .8); }
+.fl-orrery__almanachead { flex: none; font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: var(--track-wide); text-transform: uppercase; color: var(--dawn-3); }
+.fl-orrery__almanacline { font: 400 var(--t-sm)/1.35 var(--font-body); color: var(--paper-2); opacity: 0; }
+.fl-orrery__almanacline.is-in { opacity: 1; transition: opacity .9s ease; }
+.fl-orrery__foot { position: absolute; right: calc(2.2 * var(--u)); bottom: calc(1.6 * var(--u)); display: flex; flex-direction: column; align-items: flex-end; gap: .9em; }
+.fl-orrery__hint { display: inline-flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; font: 400 var(--t-xs)/1.5 var(--font-body); color: var(--fog-2); }
+.fl-orrery__hint i { width: 1px; height: 1em; margin: 0 .9em; background: var(--line-3); }
+
+/* Diving: the words leave first. */
+.fl-orrery.is-diving .fl-orrery__ui { opacity: 0; transition: opacity .45s ease; }
+
+@media (prefers-reduced-motion: reduce) {
+  .fl-orrery__plate > *, .fl-orrery__plate.is-in > * { opacity: 1; transform: none; transition: none; }
+  .fl-orrery__divering::before, .fl-orrery__divering::after { animation: none; }
+}
