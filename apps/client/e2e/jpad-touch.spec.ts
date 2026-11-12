@@ -107,14 +107,28 @@ test.describe("Gamepad and touch", () => {
       if (/Settings/.test(txt)) break;
       await press(player, /Resume/.test(txt) ? BTN.DOWN : BTN.UP);
     }
-    const focused = await page.locator(".fl-padfocus").textContent();
-    if (/Settings/.test(focused ?? "")) {
-      await press(player, BTN.A);
-      await expect(page.locator('[data-e2e="settings-gamepad"]'), "Settings shows the Gamepad section").toBeVisible();
-      await page.locator('[data-e2e="settings-gamepad"]').scrollIntoViewIfNeeded();
-      await player.shot("pad-settings");
-      await press(player, BTN.B); // Esc in Settings goes straight back to the game
-    } else await press(player, BTN.B);
+    // Pad navigation must reach Settings (no Playwright click or scroll stands in for it, review #10).
+    await expect(page.locator(".fl-padfocus"), "pad focus reaches Settings").toContainText("Settings");
+    await press(player, BTN.A);
+    await expect(page.locator('[data-e2e="settings-gamepad"]'), "Settings shows the Gamepad section").toBeVisible();
+    // Scroll with the pad: focus a control in Settings with the D-pad, then the right stick down scrolls
+    // the panel that holds it.
+    await press(player, BTN.DOWN);
+    await expect(page.locator(".fl-padfocus"), "a focus ring inside Settings").toHaveCount(1);
+    const scrollTop = () =>
+      page.evaluate(() => {
+        let el: HTMLElement | null = document.querySelector<HTMLElement>(".fl-padfocus");
+        while (el && !(el.scrollHeight > el.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(el).overflowY))) el = el.parentElement;
+        return { top: (el ?? document.scrollingElement)?.scrollTop ?? 0, room: el ? el.scrollHeight - el.clientHeight : 0 };
+      });
+    const before = await scrollTop();
+    expect(before.room, "Settings is taller than its panel (something to scroll)").toBeGreaterThan(0);
+    await stick(player, [0, 0, 0, 1], 600);
+    const after = await scrollTop();
+    await player.note("pad scroll", `${before.top} → ${after.top} of ${before.room}`);
+    expect(after.top, "the right stick scrolls Settings").toBeGreaterThan(before.top);
+    await player.shot("pad-settings");
+    await press(player, BTN.B); // Esc in Settings goes straight back to the game
     await expect(page.locator('[data-e2e="pause-menu"]'), "B goes back to the game").toBeHidden();
     await player.until((s) => s.input.captured === true, "captured again", 5000);
 
