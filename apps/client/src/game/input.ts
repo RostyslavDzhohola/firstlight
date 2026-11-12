@@ -125,11 +125,11 @@ export class Input {
         this.pressed.add(e.code);
         if (e.shiftKey) this.pressedShift.add(e.code);
       }
-      this.hold(this.dispatching ?? KEYBOARD, e.code, true);
+      this.holdKey(this.dispatching ?? KEYBOARD, e.code, true);
     });
     window.addEventListener("keyup", (e) => {
       if (this.dispatching === null) this.staleKeys.delete(e.code);
-      this.hold(this.dispatching ?? KEYBOARD, e.code, false);
+      this.holdKey(this.dispatching ?? KEYBOARD, e.code, false);
     });
     window.addEventListener("blur", () => this.setFocused(false));
     window.addEventListener("focus", () => this.setFocused(!(typeof document !== "undefined" && document.visibilityState === "hidden")));
@@ -206,7 +206,7 @@ export class Input {
   }
 
   /** `source` holds (or let go of) `code`; `keys` stays the union of every source. */
-  private hold(source: string, code: string, on: boolean): void {
+  private holdKey(source: string, code: string, on: boolean): void {
     let set = this.heldBy.get(source);
     if (on) {
       if (!set) this.heldBy.set(source, (set = new Set()));
@@ -228,7 +228,7 @@ export class Input {
     }
     const set = this.heldBy.get(source);
     if (!set) return;
-    for (const code of [...set]) this.hold(source, code, false);
+    for (const code of [...set]) this.holdKey(source, code, false);
     this.heldBy.delete(source);
   }
 
