@@ -73,7 +73,7 @@ for (const backendName of ["webgpu", "webgl2"] as const) {
       for (const n of names) expect(b.vertex + b.fragment).toContain(n);
     };
 
-    it("the rez light: one material for the column, rings and shards", () => {
+    it("the rez light: one material for the column, glyph, scan disc, shards and motes", () => {
       const b = build(renderer, scene, camera, rezFxMesh().mesh);
       clean(b);
       reads(b, "aFx", "aCenter");
