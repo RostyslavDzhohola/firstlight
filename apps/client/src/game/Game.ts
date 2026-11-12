@@ -817,6 +817,8 @@ export class Game {
       return;
     }
     const cpu0 = performance.now();
+    // Stick look turns at its held rate over this frame's game time (review #6: no half-speed turning at low fps).
+    this.input.integrateLook(dt);
 
     let focus: THREE.Vector3;
     if (this.bench) {

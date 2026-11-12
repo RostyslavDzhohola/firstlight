@@ -68,6 +68,8 @@ export class Input {
   private readonly virtualButtons = new Map<string, [boolean, boolean]>();
   /** Analog move from a stick (x right, y forward, length ≤ 1), by source name. */
   private readonly virtualMove = new Map<string, { x: number; y: number }>();
+  /** Held look rates from sticks (rad/s), by source (setLookRate). */
+  private readonly lookRate = new Map<string, { yaw: number; pitch: number }>();
   lmbPressed = false;
   /**
    * Alt (the right button) went away this frame by cancellation, not by the player letting go: a pad
@@ -191,6 +193,7 @@ export class Input {
       this.mouseL = this.mouseR = false;
       for (const source of [...this.virtualButtons.keys()]) this.cancelButtons(source);
       this.virtualMove.clear();
+      this.lookRate.clear();
       this.lookYaw = this.lookPitch = 0;
     }
     for (const l of this.focusListeners) l(on);
@@ -295,6 +298,31 @@ export class Input {
     }
     const l = Math.hypot(x, y);
     return l > 1 ? { x: x / l, y: y / l } : { x, y };
+  }
+
+  /**
+   * A stick's held turn rate (radians per second; +yaw right, +pitch up), by source. Zero clears it.
+   * The game turns it into this frame's look with its own elapsed time (integrateLook), so a slow
+   * frame turns as far as real time says, up to the frame clock's ceiling (review #6).
+   */
+  setLookRate(source: string, yaw: number, pitch: number) {
+    if (yaw === 0 && pitch === 0) this.lookRate.delete(source);
+    else {
+      const r = this.lookRate.get(source);
+      if (r) {
+        r.yaw = yaw;
+        r.pitch = pitch;
+      } else this.lookRate.set(source, { yaw, pitch });
+    }
+  }
+
+  /** Add the held turn rates over `dt` seconds of game time (Game.frame, with frameClock's dt). */
+  integrateLook(dt: number) {
+    if (!this.lookRate.size || !this.captured) return;
+    for (const r of this.lookRate.values()) {
+      this.lookYaw += r.yaw * dt;
+      this.lookPitch += r.pitch * dt;
+    }
   }
 
   /** Add camera turn for this frame (radians; +yaw right, +pitch up). Only counts while captured. */

@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { capturedFrom, Input } from "./input.ts";
 import { GamepadSource, type PadLike, type PadSettings } from "./gamepad.ts";
-import { BTN, SELECT_HOLD_MS } from "./padMapping.ts";
+import { BTN, LOOK_RATE, SELECT_HOLD_MS } from "./padMapping.ts";
 import type { FocusNav } from "../ui/focusNav.ts";
 
 const SETTINGS: PadSettings = { deadzone: 0.15, curve: 1, sensitivity: 1, invertY: false, aimSlow: 1, rumble: true };
@@ -112,6 +112,7 @@ describe("GamepadSource in play", () => {
   it("the right stick turns the camera (look radians for this frame)", () => {
     p.stick(1, 1, 0);
     r.poll();
+    r.input.integrateLook(1 / 60);
     expect(r.input.lookYaw).toBeGreaterThan(0);
     r.frame();
     expect(r.input.lookYaw).toBe(0);
@@ -527,6 +528,30 @@ describe("Trigger hysteresis (review #5)", () => {
     rt(0.15);
     r.poll();
     expect(r.input.lmb).toBe(false);
+    r.dispose();
+  });
+});
+
+describe("Pad look and the frame clock (review #6)", () => {
+  it("a 200 ms frame turns twice as far as a 100 ms one: the stick is a rate the game integrates", () => {
+    const r = rig();
+    const p = pad();
+    r.pads.push(p);
+    p.stick(1, 1, 0);
+    r.poll(200);
+    r.input.integrateLook(0.1);
+    const at100 = r.input.lookYaw;
+    r.frame();
+    r.poll(200);
+    r.input.integrateLook(0.2);
+    expect(at100).toBeGreaterThan(0);
+    expect(r.input.lookYaw).toBeCloseTo(at100 * 2, 6);
+    expect(r.input.lookYaw).toBeCloseTo(LOOK_RATE.yaw * 0.2, 6); // full stick, sensitivity 1, curve 1
+    p.stick(1, 0, 0);
+    r.poll();
+    r.frame();
+    r.input.integrateLook(0.2);
+    expect(r.input.lookYaw).toBe(0); // the stick back at rest: no turn left over
     r.dispose();
   });
 });

@@ -189,11 +189,12 @@ export class GamepadSource {
     const mode = input.captured ? "play" : "ui";
     if (mode !== this.mode) this.setMode(mode);
     if (mode === "play") {
+      // A turn rate, not radians: the game applies it with its own frame time (Input.integrateLook).
       if (lx || ly) {
         const slow = s.aimSlow < 1 && this.host.onTarget() ? s.aimSlow : 1;
-        const l = lookFromStick(lx, ly, dt, s.sensitivity, s.invertY, slow);
-        input.addLook(l.yaw, l.pitch);
-      }
+        const l = lookFromStick(lx, ly, 1, s.sensitivity, s.invertY, slow);
+        input.setLookRate(SOURCE, l.yaw, l.pitch);
+      } else input.setLookRate(SOURCE, 0, 0);
       for (const p of pads) this.play(this.stateOf(p.index), edges, sticks.get(p.index)!, now);
     } else this.ui(edges, mx, my, ly, now, dt);
   }
@@ -310,6 +311,7 @@ export class GamepadSource {
 
   /** Let go of every pad's held keys, triggers, sticks and sprint. */
   releaseAll(): void {
+    this.host.input.setLookRate(SOURCE, 0, 0);
     for (const index of this.state.keys()) this.releasePad(index);
   }
 
