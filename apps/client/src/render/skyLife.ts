@@ -186,7 +186,7 @@ export class SkyLife {
     // Night, or Portus' late dusk (its sun never sets): what the trails and the aurora brighten with.
     const dark = max(atmo.stars, atmo.lamps.mul(0.55));
 
-    const mat = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false });
+    const mat = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, forceSinglePass: true, fog: false });
     mat.name = "sky_traffic";
     {
       const a = attribute("aLane", "vec4");
@@ -212,7 +212,7 @@ export class SkyLife {
     this.traffic = new THREE.Mesh(skyTrafficGeometry(specs), mat);
     this.traffic.name = "skyTraffic";
 
-    const aur = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false });
+    const aur = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, forceSinglePass: true, fog: false });
     aur.name = "sky_aurora";
     {
       const u = uv().x, v = uv().y;

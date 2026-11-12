@@ -5,10 +5,12 @@
 //
 // The panel's text is drawn once to a canvas (both pages side by side) whenever the data changes; a
 // frame costs two uniform writes (which page, how far into a flip). The data is the home page's
-// public board (GET /api/home), asked for on arrival and every few minutes.
+// public board (GET /api/home), asked for on arrival and every few minutes while the board is on
+// (world/holoFeed.ts).
 
 import * as THREE from "three/webgpu";
 import { abs, float, floor, fract, frontFacing, max, min, mix, positionLocal, select, sin, smoothstep, texture, time, uniform, uv, vec2, vec3 } from "three/tsl";
+import { gleamsWon } from "@firstlight/shared/content/gleams";
 import type { HomeData } from "@firstlight/shared/net/home";
 import { townDir, townFrame, type TownPlacement } from "@firstlight/shared/planet/townFrame";
 import { config, flags } from "../config.ts";
@@ -17,95 +19,20 @@ import type { ClientSystem, ClientSystemFactory } from "../game/systems.ts";
 import { atmo } from "../render/atmosphere.ts";
 import { disposeTree } from "../render/dispose.ts";
 import type { ResolvedSettings } from "../render/quality.ts";
-import { gleamsWon } from "@firstlight/shared/content/gleams";
-import { HOLO_REFRESH_MS, holoHunt, holoPageAt, holoPages, type HoloHunt, type HoloPage } from "./holoBoardModel.ts";
+import { drawHoloPages, HOLO_PAGE } from "./holoBoardDraw.ts";
+import { HOLO_PAGE_SECONDS, holoHunt, holoPageAt, holoPages, type HoloFlip, type HoloHunt } from "./holoBoardModel.ts";
+import { HoloFeed } from "./holoFeed.ts";
 
 /** Where the emitter stands (east, north of the plaza's centre, m) and what the panel faces. */
 export const HOLO_AT: readonly [number, number] = [7.2, -12.6];
 export const HOLO_FACES: readonly [number, number] = [0, 0];
 /** The panel: width, height and how high its lower edge floats (m). */
 export const HOLO_PANEL = { w: 5.0, h: 6.56, lift: 2.7 } as const;
-const PAGE_W = 512, PAGE_H = 672;
 const TINT = 0x7fe9ff;
-const GOLD = "#ffd27a";
-const INK = "#d9f8ff";
-const DIM = "#6fb9cc";
 
 /** Yaw (degrees, townFrame's: 0 faces south, counter-clockwise from above) that turns a front at `at` towards `to`. */
 export function holoYaw(at: readonly [number, number], to: readonly [number, number]): number {
   return (Math.atan2(to[0] - at[0], -(to[1] - at[1])) * 180) / Math.PI;
-}
-
-function drawPage(g: CanvasRenderingContext2D, x0: number, page: HoloPage) {
-  const sans = "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif";
-  const mono = "ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
-  const L = x0 + 34, R = x0 + PAGE_W - 34;
-  g.textBaseline = "alphabetic";
-  // Title, letter-spaced.
-  g.font = `800 46px ${sans}`;
-  g.fillStyle = GOLD;
-  g.textAlign = "center";
-  const spaced = page.title.split("").join("  ");
-  g.fillText(spaced, x0 + PAGE_W / 2, 66);
-  g.font = `600 25px ${sans}`;
-  g.fillStyle = INK;
-  g.fillText(page.subtitle.split("").join(" "), x0 + PAGE_W / 2, 104);
-  g.fillStyle = DIM;
-  g.fillRect(L, 122, R - L, 2);
-  let y = 122;
-  const rowH = page.sections.length > 1 ? 50 : 56;
-  for (const s of page.sections) {
-    y += 34;
-    g.font = `600 18px ${mono}`;
-    g.fillStyle = DIM;
-    g.textAlign = "left";
-    g.fillText(s.heading, L, y);
-    y += 12;
-    if (!s.rows.length) {
-      y += 44;
-      g.font = `500 23px ${sans}`;
-      g.fillStyle = INK;
-      g.textAlign = "center";
-      g.fillText(s.empty, x0 + PAGE_W / 2, y);
-      y += 34;
-      continue;
-    }
-    s.rows.forEach((r, i) => {
-      y += rowH;
-      const top = i === 0;
-      g.textAlign = "left";
-      g.font = `600 22px ${mono}`;
-      g.fillStyle = top ? GOLD : DIM;
-      g.fillText(r.rank, L, y - (r.note ? 8 : 0));
-      g.font = `${top ? 700 : 600} 30px ${sans}`;
-      g.fillStyle = top ? GOLD : INK;
-      g.fillText(r.name, L + 46, y - (r.note ? 8 : 0));
-      if (r.note) {
-        g.font = `500 15px ${sans}`;
-        g.fillStyle = DIM;
-        g.fillText(r.note, L + 45, y + 10);
-      }
-      g.textAlign = "right";
-      g.font = `700 24px ${mono}`;
-      g.fillStyle = top ? GOLD : INK;
-      g.fillText(r.value, R, y - (r.note ? 8 : 0));
-    });
-    y += 18;
-  }
-  g.fillStyle = DIM;
-  g.fillRect(L, PAGE_H - 58, R - L, 2);
-  g.font = `600 18px ${mono}`;
-  g.textAlign = "center";
-  g.fillText(page.footer, x0 + PAGE_W / 2, PAGE_H - 28);
-}
-
-/** Both pages on one canvas, side by side (the panel's shader picks one). */
-export function drawHoloPages(canvas: HTMLCanvasElement, pages: readonly [HoloPage, HoloPage]) {
-  const g = canvas.getContext("2d")!;
-  g.fillStyle = "#000";
-  g.fillRect(0, 0, canvas.width, canvas.height);
-  drawPage(g, 0, pages[0]);
-  drawPage(g, PAGE_W, pages[1]);
 }
 
 let live: HoloBoard | null = null;
@@ -130,29 +57,36 @@ export class HoloBoard implements ClientSystem {
   private data: HomeData | null = null;
   private drawn = "";
   private t = 0;
-  private nextFetch = 0;
-  private disposed = false;
+  /** Scratch for holoPageAt (nothing is allocated per frame). */
+  private readonly flip: HoloFlip = { page: 0, flip: 0 };
+  /** The loop's clock at the last frame (ms): what the feed's refresh interval is measured on. */
+  private clock = performance.now();
+  private readonly feed: HoloFeed;
   /** The viewer's gleams this life ("2|0": won, vault opened), redrawn on change; "" without a character. */
   private youKey = "";
   private readonly off: () => void;
 
   constructor(private readonly game: Game) {
     this.group.name = "holoBoard";
-    this.canvas.width = PAGE_W * 2;
-    this.canvas.height = PAGE_H;
+    this.canvas.width = HOLO_PAGE.w * 2;
+    this.canvas.height = HOLO_PAGE.h;
     this.tex = new THREE.CanvasTexture(this.canvas);
     this.tex.colorSpace = THREE.SRGBColorSpace;
     this.tex.generateMipmaps = false;
     this.tex.minFilter = THREE.LinearFilter;
     this.tex.magFilter = THREE.LinearFilter;
     this.redraw();
+    this.feed = new HoloFeed(`${config.apiUrl}/api/home`, (data) => {
+      this.data = data;
+      this.redraw();
+    });
 
     const tint = vec3(...new THREE.Color(TINT).toArray());
     const flick = sin(time.mul(31)).mul(sin(time.mul(7.3))).mul(0.05).add(0.95);
     const { w, h, lift } = HOLO_PANEL;
 
     // The panel.
-    const panelMat = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false });
+    const panelMat = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true, fog: false });
     panelMat.name = "holo_panel";
     {
       const u = uv();
@@ -181,7 +115,7 @@ export class HoloBoard implements ClientSystem {
 
     // The cone of light from the emitter's lens up to the panel's lower edge (an elliptical fan).
     const coneH = lift - 0.42;
-    const coneMat = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false });
+    const coneMat = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, forceSinglePass: true, fog: false });
     coneMat.name = "holo_cone";
     {
       const v = positionLocal.y.div(coneH).add(0.5);
@@ -225,6 +159,8 @@ export class HoloBoard implements ClientSystem {
   private applySettings(s: ResolvedSettings) {
     this.group.visible = s.on.holo;
     this.cone.visible = s.tier !== "low";
+    // The feed follows the board: off, it asks for nothing and drops a request under way.
+    this.feed.setEnabled(s.on.holo && !flags.has("offline"), this.clock);
   }
 
   /** Draw the pages again if what they say has changed (data or hunt lines). */
@@ -241,40 +177,26 @@ export class HoloBoard implements ClientSystem {
     this.tex.needsUpdate = true;
   }
 
-  private async refresh() {
-    if (flags.has("offline")) return;
-    try {
-      const r = await fetch(`${config.apiUrl}/api/home`, { signal: AbortSignal.timeout(8000) });
-      if (!r.ok || this.disposed) return;
-      this.data = (await r.json()) as HomeData;
-      if (!this.disposed) this.redraw();
-    } catch {
-      /* the board keeps what it has */
-    }
-  }
-
   update(dt: number, now: number) {
+    this.clock = now;
+    if (!this.group.visible) return;
     const you = this.game.hud.you;
     const key = you ? `${gleamsWon(you.missions)}|${you.gleamVault ? 1 : 0}` : "";
     if (key !== this.youKey) {
       // You just opened the vault: ask again once the server's board cache (60 s) has your name.
-      if (key.endsWith("|1") && this.youKey.endsWith("|0")) this.nextFetch = Math.min(this.nextFetch, now + 61_000);
+      if (key.endsWith("|1") && this.youKey.endsWith("|0")) this.feed.askBy(now + 61_000);
       this.youKey = key;
       this.redraw();
     }
-    if (now >= this.nextFetch) {
-      this.nextFetch = now + HOLO_REFRESH_MS;
-      void this.refresh();
-    }
-    if (!this.group.visible) return;
+    this.feed.tick(now);
     this.t += dt;
-    const p = holoPageAt(this.t);
+    const p = holoPageAt(this.t, HOLO_PAGE_SECONDS, undefined, this.flip);
     this.uPage.value = p.page;
     this.uFlip.value = p.flip;
   }
 
   dispose() {
-    this.disposed = true;
+    this.feed.dispose();
     this.off();
     if (live === this) live = null;
     this.group.removeFromParent();

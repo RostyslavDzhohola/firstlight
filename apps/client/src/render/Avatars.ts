@@ -19,7 +19,7 @@ import { applyOccluderFadeGated } from "./occluderFade.ts";
 import { hideBareBones } from "./bareBones.ts";
 import { weaponModel } from "./avatars/weapons.ts";
 import { keptSamples } from "./warmup.ts";
-import { CUT_GONE, CUT_IDLE, rezBody, rezFxMesh, rezMode, rezPose, rezSwitch, type RezBody, type RezFx, type RezKind, type RezPose } from "./rez.ts";
+import { CUT_GONE, CUT_IDLE, rezActive, rezAdmits, rezBody, rezFxMesh, rezMode, rezPose, rezSwitch, returnRezLight, takeRezLight, type RezBody, type RezFx, type RezKind, type RezPose } from "./rez.ts";
 
 export { preloadAvatars } from "./avatars/assets.ts";
 
@@ -152,6 +152,7 @@ const _rezTint = new THREE.Color(0xbfefff);
 export const TELEPORT_M = 8;
 
 type Lod = "full" | "mid" | "far";
+const byRezDist = (p: AvatarView, q: AvatarView) => p.rezDist - q.rezDist;
 
 /** The avatar stands on the analytic ground height, but the rendered terrain is a triangulated mesh
  *  and feet are spread on slopes: sink the model a few cm so feet read as planted (Kappa's bare feet
@@ -226,6 +227,13 @@ export class AvatarView {
   private rezValues: RezBody | null = null;
   private rezLight: { mesh: THREE.Mesh; fx: RezFx } | null = null;
   private readonly rezNow: RezPose = { cut: CUT_IDLE, dissolve: 0, glow: 0, fx: 1, solid: true, done: true };
+  /** This avatar's running effect holds one of the few slots (rezActive). */
+  private rezLit = false;
+  /** Scratch for rezArrivals' sort (m from the camera). */
+  rezDist = 0;
+  /** Where effects are judged from: the camera, kept by the LOD pass and rezArrivals. */
+  private static readonly rezFrom = new THREE.Vector3();
+  private static rezFromKnown = false;
   private life = 0;
 
   constructor(palette = 0, starter = 0, look = 0) {
@@ -309,10 +317,27 @@ export class AvatarView {
     const was = this.flagBits & PF.DEAD, is = bits & PF.DEAD;
     this.flagBits = bits;
     if (is && !was) {
-      // Already dead when we first saw them: no body, no show.
-      if (this.life < 0.5) this.rezHide();
+      // Already dead when we first saw them: no body, no show. (Rez off: the body lies where it fell.)
+      if (this.life < 0.5 && rezSwitch.on) this.rezHide();
       else this.rez("death");
     } else if (!is && was) this.rez("in");
+  }
+
+  /**
+   * The Rez switch changed (`rezSwitch.on` is already the new value). Off: every running effect ends
+   * now: bodies are whole (the dead lie where they fell, as they do with Rez off), the lights are
+   * hidden, the slots are free, and the avatars in `leaving` (mid de-rez) are freed. On: the dead are
+   * gone until they rise, as they are for anyone who meets them dead.
+   */
+  static settleRez(on: boolean, leaving?: Set<AvatarView>) {
+    if (!on && leaving) {
+      for (const a of leaving) a.dispose();
+      leaving.clear();
+    }
+    for (const a of AvatarView.all) {
+      if (!on) a.rezClear();
+      else if (a.flagBits & PF.DEAD) a.rezHide();
+    }
   }
 
   /**
@@ -320,20 +345,58 @@ export class AvatarView {
    * head down (the caller keeps stepping it with stepRez and disposes it when that returns true),
    * "death" breaks it into shards and leaves it gone until it rises ("in").
    */
-  rez(kind: RezKind) {
+  rez(kind: RezKind): boolean {
     if (!rezSwitch.on) {
       if (kind === "in") this.rezClear();
-      return;
+      return false;
+    }
+    // The slots are few (rezAdmits): the player's own effect always runs, anyone else's needs a free
+    // one and to be near enough to see. Without one an arrival is simply there, a departure simply
+    // gone (the caller frees it), and a death dissolves the body without its light, so every dead
+    // avatar ends the same way.
+    this.rezRelease();
+    const own = this.root.userData.ownAvatar === true;
+    const dist = AvatarView.rezFromKnown ? this.root.position.distanceTo(AvatarView.rezFrom) : NaN;
+    const lit = rezAdmits(rezActive.count, dist, own);
+    if (!lit && kind !== "death") {
+      if (kind === "in") this.rezClear();
+      return false;
     }
     this.rezKind = kind;
     this.rezT = 0;
     this.rezGone = false;
-    this.prepareRez();
-    const [, , accent] = PALETTES[((this.palette % PALETTES.length) + PALETTES.length) % PALETTES.length]!;
-    const light = this.rezLight!;
-    light.fx.color.setHex(accent).lerp(_rezTint, kind === "death" ? 0.25 : 0.5);
-    light.mesh.visible = true;
+    if (lit) {
+      this.prepareRez();
+      rezActive.count++;
+      this.rezLit = true;
+      const [, , accent] = PALETTES[((this.palette % PALETTES.length) + PALETTES.length) % PALETTES.length]!;
+      const light = this.rezLight!;
+      light.fx.color.setHex(accent).lerp(_rezTint, kind === "death" ? 0.25 : 0.5);
+      light.mesh.visible = true;
+    } else this.rezLightDone();
     this.applyRez(rezPose(kind, 0, this.rezNow));
+    return true;
+  }
+
+  /**
+   * The avatars that arrived this frame materialise, nearest the camera first: when more arrive at
+   * once than there are slots, the ones in front of the player get them.
+   */
+  static rezArrivals(list: AvatarView[], camera: THREE.Camera) {
+    const from = camera.getWorldPosition(AvatarView.rezFrom);
+    AvatarView.rezFromKnown = true;
+    if (list.length > 1) {
+      for (const a of list) a.rezDist = a.root.position.distanceToSquared(from);
+      list.sort(byRezDist);
+    }
+    for (const a of list) a.rez("in");
+  }
+
+  /** Give back this avatar's effect slot. */
+  private rezRelease() {
+    if (!this.rezLit) return;
+    this.rezLit = false;
+    rezActive.count = Math.max(0, rezActive.count - 1);
   }
 
   /**
@@ -342,8 +405,18 @@ export class AvatarView {
    */
   prepareRez() {
     if (this.rezLight) return;
-    this.rezLight = rezFxMesh();
+    this.rezLight = takeRezLight();
     this.root.add(this.rezLight.mesh);
+  }
+
+  /** The effect is over: anyone but the player gives the light back to the pool (render/rez.ts). */
+  private rezLightDone() {
+    const l = this.rezLight;
+    if (!l) return;
+    l.mesh.visible = false;
+    if (this.root.userData.ownAvatar === true) return; // the player's own stays, ready for the next warm-up
+    this.rezLight = null;
+    returnRezLight(l);
   }
 
   /** Whether a rez effect is running. */
@@ -361,27 +434,30 @@ export class AvatarView {
     if (!pose.done) return false;
     this.rezKind = null;
     this.rezGone = kind !== "in";
-    if (this.rezLight) this.rezLight.mesh.visible = false;
+    this.rezRelease();
+    this.rezLightDone();
     return true;
   }
 
   /** Gone without the show (someone who was already dead when they came into view). */
   private rezHide() {
     this.rezKind = null;
+    this.rezRelease();
     this.rezGone = true;
     this.rezNow.cut = CUT_GONE;
     this.rezNow.dissolve = 1;
     this.rezNow.glow = 0;
     this.rezNow.solid = false;
     this.applyRez(this.rezNow);
-    if (this.rezLight) this.rezLight.mesh.visible = false;
+    this.rezLightDone();
   }
 
   /** Back to a whole, idle body. */
   private rezClear() {
     this.rezKind = null;
+    this.rezRelease();
     this.rezGone = false;
-    if (this.rezLight) this.rezLight.mesh.visible = false;
+    this.rezLightDone();
     this.rezNow.cut = CUT_IDLE;
     this.rezNow.dissolve = this.rezNow.glow = 0;
     this.rezNow.solid = true;
@@ -516,9 +592,9 @@ export class AvatarView {
     this.teardownModel();
     this.proxy.removeFromParent();
     releaseAvatarObjects(this.proxy);
+    this.rezRelease();
     if (this.rezLight) {
-      this.rezLight.mesh.removeFromParent();
-      this.rezLight.mesh.dispose(); // the geometry and material are shared
+      returnRezLight(this.rezLight); // pooled, never disposed: its shader stays built (render/rez.ts)
       this.rezLight = null;
     }
     this.root.removeFromParent();
@@ -528,6 +604,8 @@ export class AvatarView {
   /** Rank avatars by distance to the camera; nearest `maxFull` animate fully. Call once a frame. */
   static updateLod(camera: THREE.Camera, maxFull: number, keep?: AvatarView) {
     const cam = camera.getWorldPosition(_d);
+    AvatarView.rezFrom.copy(cam);
+    AvatarView.rezFromKnown = true;
     const list: { a: AvatarView; d: number }[] = [];
     for (const a of AvatarView.all) list.push({ a, d: a.root.position.distanceToSquared(cam) });
     list.sort((p, q) => p.d - q.d);
