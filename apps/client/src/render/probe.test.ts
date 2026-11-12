@@ -5,15 +5,28 @@ import type { RenderCtx } from "./renderer.ts";
 import type { Extra } from "./quality.ts";
 import type { CostModel } from "./extrasPlan.ts";
 
+/** Main-thread ms a frame's render takes, and the display's frame interval, with these extras on. */
+interface FrameCost {
+  cpuMs?: (extras: readonly Extra[]) => number;
+  frameMs?: (extras: readonly Extra[]) => number;
+}
+
 /**
- * A renderer on a hand-moved frame clock: every frame is 16 ms, the GPU timer says `gpuMs`, and its
- * busy time (WebGPU pass union) `busyMs(extras on)` when given.
+ * A renderer on a hand-moved frame clock: every frame is 16 ms (or `frameMs(extras on)`), a render
+ * takes `cpuMs(extras on)` of main thread, the GPU timer says `gpuMs`, and its busy time (WebGPU pass
+ * union) `busyMs(extras on)` when given.
  */
-function fakeCtx(gpuMs: number | null, busyMs?: (extras: readonly Extra[]) => number) {
+function fakeCtx(gpuMs: number | null, busyMs?: (extras: readonly Extra[]) => number, cost: FrameCost = {}) {
   let clock = 0;
+  let frameT = 0;
   vi.stubGlobal("window", {});
   vi.stubGlobal("document", { visibilityState: "visible" });
-  vi.stubGlobal("requestAnimationFrame", (cb: (t: number) => void) => setTimeout(() => cb((clock += 16)), 0));
+  vi.stubGlobal("requestAnimationFrame", (cb: (t: number) => void) =>
+    setTimeout(() => {
+      frameT = Math.max(clock, frameT + (cost.frameMs?.(extras) ?? 16));
+      clock = frameT;
+      cb(clock);
+    }, 0));
   vi.spyOn(performance, "now").mockImplementation(() => clock);
   const tiers: string[] = [];
   const calls: { tier: string; extras: readonly Extra[] | undefined }[] = [];
@@ -33,6 +46,7 @@ function fakeCtx(gpuMs: number | null, busyMs?: (extras: readonly Extra[]) => nu
       extras = opts?.extras ?? [];
     },
     render() {
+      clock += cost.cpuMs?.(extras) ?? 0;
       if (gpuMs !== null) pending.push(gpuMs);
       if (busyMs) busy.push(busyMs(extras));
     },
@@ -130,5 +144,26 @@ describe("runProbe extras on Medium (D-framerate-3)", () => {
     const r = await runProbe(ctx, undefined, undefined, model);
     expect(calls.map((c) => c.tier)).toEqual(["medium", "high", "medium"]);
     expect(r).toMatchObject({ tier: "medium", highGpuP50: 12, gpuP50: 5, extras: ["normals", "water2"], extrasGpuP50: 5.6 });
+  });
+
+  it("drops extras whose GPU time fits when the main thread slows with them (CPU over baseline and budget)", async () => {
+    // GPU 6.5 → 7.2 ms fits (as above); the main thread goes 2 → 6 ms a frame, past its 3 ms budget
+    const { ctx, calls } = fakeCtx(52, (on) => (on.length ? 7.2 : 6.5), { cpuMs: (on) => (on.length ? 6 : 2) });
+    const r = await runProbe(ctx, undefined, undefined, model);
+    expect(calls[1]).toEqual({ tier: "medium", extras: ["normals", "water2"] }); // planned and measured
+    expect(r).toMatchObject({ tier: "medium", valid: true, cpuP50: 2, extrasGpuP50: 7.2, extras: [] });
+  });
+
+  it("drops extras whose GPU time fits when the frames slow with them (frame interval over the display's)", async () => {
+    const { ctx } = fakeCtx(52, (on) => (on.length ? 7.2 : 6.5), { frameMs: (on) => (on.length ? 33 : 16) });
+    const r = await runProbe(ctx, undefined, undefined, model);
+    expect(r).toMatchObject({ tier: "medium", valid: true, extrasGpuP50: 7.2, extras: [] });
+  });
+
+  it("keeps extras whose main-thread and frame costs stay inside the budget", async () => {
+    // 1 → 2 ms of main thread is double, but inside the 3 ms budget; frames stay on the display's 16 ms
+    const { ctx } = fakeCtx(52, (on) => (on.length ? 7.2 : 6.5), { cpuMs: (on) => (on.length ? 2 : 1) });
+    const r = await runProbe(ctx, undefined, undefined, model);
+    expect(r.extras).toEqual(["normals", "water2"]);
   });
 });
