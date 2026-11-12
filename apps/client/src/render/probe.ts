@@ -4,14 +4,16 @@
 // Ultra, or back to Medium if High misses its own 10 ms; > 14 ms while the frames also miss the
 // display → Low), else rAF time (vsync-limited: only "too slow" or a very fast high-refresh display
 // can be told apart).
-// A probe with fewer than 30 frames or a hidden tab is invalid: Medium for this session, not saved.
+// A probe with fewer than 30 frames, or with the tab hidden at any moment of it (warm-ups, the High
+// re-probe and the extras measurement included), is invalid: Medium for this session, no extras, not saved.
 // On Medium with a busy-time reading, the probe also plans the High extras this device's headroom
-// pays for and measures again with them on, keeping only what that measurement fits (D-framerate-3).
+// pays for and measures again with them on, keeping only what that measurement fits (D-framerate-3):
+// its GPU busy time, and its main-thread time and frame interval against Medium's (extrasRegression).
 
 import { isSoftwareRenderer, type RenderCtx } from "./renderer.ts";
 import { beginManualFrame, decideProbe, decideUltra, percentile, PROBE_MIN_GPU, type TimestampSource } from "./timing.ts";
 import { warmup } from "./warmup.ts";
-import { EXTRA_COSTS, extrasBudget, keepExtras, planExtras, type CostModel } from "./extrasPlan.ts";
+import { EXTRA_COSTS, extrasBudget, extrasRegression, keepExtras, planExtras, type CostModel } from "./extrasPlan.ts";
 import { TIER_TABLE, type Extra, type Tier } from "./quality.ts";
 
 export interface ProbeResult {
@@ -24,6 +26,9 @@ export interface ProbeResult {
   highGpuP50: number | null;
   /** Main-thread ms per probe frame (world update + render submission), p50. */
   cpuP50: number | null;
+  /** The extras measurement's main-thread p50 and frame interval p50 (null: not measured). */
+  extrasCpuP50: number | null;
+  extrasRafP50: number | null;
   /** The extras on top of the tier (Medium only, D-framerate-3), and the busy time measured with them. */
   extras: Extra[];
   extrasGpuP50: number | null;
@@ -32,6 +37,26 @@ export interface ProbeResult {
 
 const nextFrame = () => new Promise<number>((r) => requestAnimationFrame((t) => r(t)));
 const visible = () => typeof document === "undefined" || document.visibilityState === "visible";
+
+/**
+ * The tab's visibility over the whole probe: hidden at any check, or a `visibilitychange` to hidden in
+ * between (a moment the frames never saw), and the probe is invalid. `stop()` removes the listener.
+ */
+function watchVisibility(): { check(): boolean; stop(): void } {
+  const doc = typeof document === "undefined" ? undefined : (document as Partial<Pick<Document, "addEventListener" | "removeEventListener">>);
+  let stayed = visible();
+  const on = () => {
+    if (!visible()) stayed = false;
+  };
+  doc?.addEventListener?.("visibilitychange", on);
+  return {
+    check() {
+      on();
+      return stayed;
+    },
+    stop: () => doc?.removeEventListener?.("visibilitychange", on),
+  };
+}
 
 async function measure(ctx: RenderCtx, ms: number, beforeFrame?: () => void, onFrac?: (f: number) => void): Promise<{ gpu: number[]; busy: number[]; raf: number[]; cpu: number[]; visible: boolean }> {
   const raf: number[] = [];
@@ -86,24 +111,33 @@ export async function runProbe(ctx: RenderCtx, beforeFrame?: () => void, onProgr
 async function probeTier(ctx: RenderCtx, beforeFrame: (() => void) | undefined, part: (a: number, b: number) => (f: number) => void, costs: CostModel): Promise<ProbeResult> {
   const t0 = performance.now();
   if (isSoftwareRenderer(ctx.gpuName)) {
-    return { tier: "low", valid: true, method: "software", gpuP50: null, rafP50: 0, highGpuP50: null, cpuP50: null, extras: [], extrasGpuP50: null, ms: 0 };
+    return { tier: "low", valid: true, method: "software", gpuP50: null, rafP50: 0, highGpuP50: null, cpuP50: null, extrasCpuP50: null, extrasRafP50: null, extras: [], extrasGpuP50: null, ms: 0 };
   }
+  const watch = watchVisibility();
+  const hidden = (): ProbeResult => ({ tier: "medium", valid: false, method: "invalid", gpuP50: null, rafP50: 0, highGpuP50: null, cpuP50: null, extrasCpuP50: null, extrasRafP50: null, extras: [], extrasGpuP50: null, ms: performance.now() - t0 });
+  const frame = () => {
+    watch.check();
+    beforeFrame?.();
+  };
   try {
     ctx.setTier("medium", { persist: false, auto: true, extras: [] }); // plain Medium, whatever was saved
-    await warmup(ctx, { frames: 3, beforeFrame, label: "probe", onProgress: (p) => part(0, 0.45)(p.frac) });
-    const m = await measure(ctx, 2000, beforeFrame, part(0.45, 0.7));
+    await warmup(ctx, { frames: 3, beforeFrame: frame, label: "probe", onProgress: (p) => part(0, 0.45)(p.frac) });
+    const m = await measure(ctx, 2000, frame, part(0.45, 0.7));
     // Drop the first few frames (pipeline creation tails).
-    const d = decideProbe({ raf: m.raf.slice(3), gpu: m.gpu.slice(2), busy: m.busy.slice(2), gpuAvailable: ctx.gpu.available, visible: m.visible });
+    const d = decideProbe({ raf: m.raf.slice(3), gpu: m.gpu.slice(2), busy: m.busy.slice(2), gpuAvailable: ctx.gpu.available, visible: m.visible && watch.check() });
     const cpuP50 = m.cpu.length > 3 ? percentile(m.cpu.slice(3), 0.5) : null;
     let tier = d.tier;
     let highGpuP50: number | null = null;
     let extras: Extra[] = [];
     let extrasGpuP50: number | null = null;
+    let extrasCpuP50: number | null = null;
+    let extrasRafP50: number | null = null;
     if (d.valid && d.reprobeHigh) {
       ctx.setTier("high", { persist: false, auto: true, extras: [] });
-      await warmup(ctx, { frames: 3, beforeFrame, label: "probe", onProgress: (p) => part(0.7, 0.85)(p.frac) });
-      const h = await measure(ctx, 1200, beforeFrame, part(0.85, 0.9));
-      const u = h.visible ? decideUltra(h.gpu.slice(2), h.busy.slice(2)) : { tier: "high" as Tier, gpuP50: null };
+      await warmup(ctx, { frames: 3, beforeFrame: frame, label: "probe", onProgress: (p) => part(0.7, 0.85)(p.frac) });
+      const h = await measure(ctx, 1200, frame, part(0.85, 0.9));
+      if (!h.visible || !watch.check()) return hidden(); // not a High that was never measured
+      const u = decideUltra(h.gpu.slice(2), h.busy.slice(2));
       tier = u.tier; // Medium again when High missed its own budget (frame rate first)
       highGpuP50 = u.gpuP50;
     }
@@ -112,18 +146,25 @@ async function probeTier(ctx: RenderCtx, beforeFrame: (() => void) | undefined, 
       const plan = planExtras({ gpuMs: d.gpuP50, cpuMs: cpuP50, frameMs: d.rafP50, budgetMs }, costs);
       if (plan.extras.length) {
         ctx.setTier("medium", { persist: false, auto: true, extras: plan.extras });
-        await warmup(ctx, { frames: 3, beforeFrame, label: "probe", onProgress: (p) => part(0.9, 0.95)(p.frac) });
-        const v = await measure(ctx, 1200, beforeFrame, part(0.95, 1)); // as long as the High re-probe
+        await warmup(ctx, { frames: 3, beforeFrame: frame, label: "probe", onProgress: (p) => part(0.9, 0.95)(p.frac) });
+        const v = await measure(ctx, 1200, frame, part(0.95, 1)); // as long as the High re-probe
+        if (!v.visible || !watch.check()) return hidden();
         const busy = v.busy.slice(2);
-        if (v.visible && busy.length >= PROBE_MIN_GPU) {
+        extrasCpuP50 = v.cpu.length > 3 ? percentile(v.cpu.slice(3), 0.5) : null;
+        extrasRafP50 = percentile(v.raf.slice(3), 0.5);
+        if (busy.length >= PROBE_MIN_GPU) {
           extrasGpuP50 = percentile(busy, 0.5);
-          extras = keepExtras(plan, extrasGpuP50, budgetMs, costs);
+          const regressed = extrasRegression({ cpuMs: cpuP50, frameMs: d.rafP50 }, { cpuMs: extrasCpuP50, frameMs: extrasRafP50 }, plan);
+          extras = regressed ? [] : keepExtras(plan, extrasGpuP50, budgetMs, costs);
         }
       }
     }
-    return { tier, valid: d.valid, method: d.method, gpuP50: d.gpuP50, rafP50: d.rafP50, highGpuP50, cpuP50, extras, extrasGpuP50, ms: performance.now() - t0 };
+    if (!watch.check()) return hidden();
+    return { tier, valid: d.valid, method: d.method, gpuP50: d.gpuP50, rafP50: d.rafP50, highGpuP50, cpuP50, extrasCpuP50, extrasRafP50, extras, extrasGpuP50, ms: performance.now() - t0 };
   } catch (e) {
     console.warn("[gfx] probe failed, using medium for this session", e);
-    return { tier: "medium", valid: false, method: "error", gpuP50: null, rafP50: 0, highGpuP50: null, cpuP50: null, extras: [], extrasGpuP50: null, ms: performance.now() - t0 };
+    return { tier: "medium", valid: false, method: "error", gpuP50: null, rafP50: 0, highGpuP50: null, cpuP50: null, extrasCpuP50: null, extrasRafP50: null, extras: [], extrasGpuP50: null, ms: performance.now() - t0 };
+  } finally {
+    watch.stop();
   }
 }

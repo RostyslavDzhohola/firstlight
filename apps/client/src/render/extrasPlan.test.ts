@@ -3,7 +3,7 @@
 // with them on stays within Medium's budget.
 
 import { describe, expect, it } from "vitest";
-import { EXTRA_COSTS, extrasBudget, keepExtras, planExtras, TAIL_FACTOR, type CostModel } from "./extrasPlan.ts";
+import { EXTRA_COSTS, extrasBudget, extrasCpuBudget, extrasRegression, keepExtras, planExtras, TAIL_FACTOR, type CostModel } from "./extrasPlan.ts";
 
 /** A made-up model: GPU cost as a fraction of Medium's busy time, CPU as a fraction of its main-thread time. */
 const MODEL: CostModel = {
@@ -84,5 +84,23 @@ describe("EXTRA_COSTS on the M1's own probe readings (WebGPU, Portus arrival vie
     // a faster GPU and CPU (Medium under the M1's), and a slower GPU (no room left)
     expect(planExtras({ gpuMs: 6.2, cpuMs: 1.2, frameMs: 16.7, budgetMs: extrasBudget(16.7, 12) }, EXTRA_COSTS).extras).toContain("shadows");
     expect(planExtras({ gpuMs: 7.95, cpuMs: 2.8, frameMs: 16.7, budgetMs: extrasBudget(16.7, 12) }, EXTRA_COSTS).extras).toEqual([]);
+  });
+});
+
+describe("extrasRegression: the extras measurement's main thread and frames", () => {
+  const plan = { extras: ["shadows" as const], baseMs: 6, gpuMs: 6.9, cpuFrac: 0.1 };
+
+  it("passes what the prediction or the budget allows, within the noise", () => {
+    expect(extrasCpuBudget(16.7)).toBeCloseTo(3.006, 2);
+    expect(extrasRegression({ cpuMs: 2, frameMs: 16.7 }, { cpuMs: 3.2, frameMs: 16.7 }, plan)).toBeNull(); // over 2.2, inside budget
+    expect(extrasRegression({ cpuMs: 4, frameMs: 16.7 }, { cpuMs: 4.6, frameMs: 16.7 }, plan)).toBeNull(); // the prediction (4.4) and noise
+    expect(extrasRegression({ cpuMs: null, frameMs: 8.3 }, { cpuMs: null, frameMs: 16.7 }, plan)).toBeNull(); // 120 Hz down to 60: the target
+  });
+
+  it("names the main thread or the frames when they go past both", () => {
+    expect(extrasRegression({ cpuMs: 2, frameMs: 16.7 }, { cpuMs: 5, frameMs: 16.7 }, plan)).toBe("cpu");
+    expect(extrasRegression({ cpuMs: 4, frameMs: 16.7 }, { cpuMs: 6, frameMs: 16.7 }, plan)).toBe("cpu");
+    expect(extrasRegression({ cpuMs: 2, frameMs: 16.7 }, { cpuMs: 2, frameMs: 33.3 }, plan)).toBe("frames");
+    expect(extrasRegression({ cpuMs: 2, frameMs: 25 }, { cpuMs: 2, frameMs: 33.3 }, plan)).toBe("frames"); // a slower display: its own frame
   });
 });

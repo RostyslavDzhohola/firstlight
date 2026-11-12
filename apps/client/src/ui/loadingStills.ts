@@ -4,7 +4,8 @@
 //
 // It must not slow the load: small WebP files (stills/, captured by tools/stills), the first one
 // requested as the loader appears but at low priority, each next one only once the one before is on
-// screen (one download at a time, one still ahead). A still that fails to load is skipped silently.
+// screen (one download at a time, one still ahead; a destination change or stop cancels the one on its
+// way). A still that fails to load is skipped silently.
 // Decorative: `alt=""` inside the loader's aria-hidden background. The look (scrim, zoom, fade,
 // reduced motion) is in styles/loading.css.
 
@@ -41,7 +42,10 @@ export const STILLS: readonly Still[] = [
   still("meridian-waystation", "meridian", "Waystation Nine, Meridian", "40% 50%"),
 ];
 
-/** How long a still stays up before the next fades in (ms), and the crossfade (matches loading.css). */
+/**
+ * How long a still stays up before the next fades in (ms), and the crossfade (matches loading.css;
+ * the old still goes when its own fade ends, however long the CSS makes it: 3 s under reduced motion).
+ */
 export const STILL_HOLD_MS = 6000;
 export const STILL_FADE_MS = 1600;
 
@@ -99,21 +103,56 @@ export class StillDeck {
   }
 }
 
-/** Download and decode one still, at low priority, off the main thread; rejects on a broken file. */
-export function loadStill(s: Still): Promise<HTMLImageElement> {
+const aborted = (signal: AbortSignal): unknown => signal.reason ?? new DOMException("The still was cancelled", "AbortError");
+
+/**
+ * Download and decode one still, at low priority, off the main thread; rejects on a broken file.
+ * `signal` cancels it: the image loses its src (the browser drops the request and the decode) and the
+ * promise rejects with the abort reason.
+ */
+export function loadStill(s: Still, signal?: AbortSignal): Promise<HTMLImageElement> {
+  if (signal?.aborted) return Promise.reject(aborted(signal));
   const img = new Image();
   img.alt = "";
   img.decoding = "async";
   img.setAttribute("fetchpriority", "low"); // before src: the request goes out at low priority
   img.src = s.src;
-  return img.decode().then(() => img);
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const cancel = () => {
+      reject(aborted(signal!));
+      img.removeAttribute("src");
+    };
+    signal?.addEventListener("abort", cancel, { once: true });
+    img.decode().then(
+      () => {
+        signal?.removeEventListener("abort", cancel);
+        resolve(img);
+      },
+      (e: unknown) => {
+        signal?.removeEventListener("abort", cancel);
+        reject(e);
+      },
+    );
+  });
+}
+
+/** The element's longest transition-duration in ms; `fallback` where the browser gives none to read. */
+function transitionMs(el: HTMLElement, fallback: number): number {
+  const raw = typeof getComputedStyle === "function" ? getComputedStyle(el).transitionDuration : "";
+  if (!raw?.trim()) return fallback;
+  let ms = 0;
+  for (const part of raw.split(",")) {
+    const v = Number.parseFloat(part);
+    if (Number.isFinite(v)) ms = Math.max(ms, part.trim().endsWith("ms") ? v : v * 1000);
+  }
+  return ms;
 }
 
 export interface SlideshowOptions {
   /** The catalogue (STILLS in the game). */
   stills: readonly Still[];
-  /** Default loadStill. */
-  load?: (s: Still) => Promise<HTMLImageElement>;
+  /** Default loadStill; `signal` aborts when the slideshow no longer wants that still. */
+  load?: (s: Still, signal: AbortSignal) => Promise<HTMLImageElement>;
   holdMs?: number;
   fadeMs?: number;
 }
@@ -128,8 +167,8 @@ export function stillsSlideshow(container: HTMLElement, opts: SlideshowOptions) 
   const load = opts.load ?? loadStill;
   const hold = opts.holdMs ?? STILL_HOLD_MS;
   const fade = opts.fadeMs ?? STILL_FADE_MS;
-  /** Bumped by start/stop/body: a download from an older plan is dropped when it lands. */
-  let run = 0;
+  /** The one download on its way; start/stop/body cancel it (a cancelled one is dropped if it lands). */
+  let inflight: AbortController | null = null;
   let running = false;
   let shownAt = 0;
   let current: { still: Still; el: HTMLElement } | null = null;
@@ -139,13 +178,21 @@ export function stillsSlideshow(container: HTMLElement, opts: SlideshowOptions) 
 
   const clock = () => (typeof performance === "undefined" ? Date.now() : performance.now());
 
+  function cancel() {
+    inflight?.abort();
+    inflight = null;
+  }
+
   function fetchNext() {
+    cancel();
     const s = deck.next();
     if (!s) return;
-    const mine = run;
-    load(s).then(
+    const mine = new AbortController();
+    inflight = mine;
+    load(s, mine.signal).then(
       (img) => {
-        if (mine !== run || !running) return;
+        if (mine.signal.aborted || !running) return;
+        inflight = null;
         waiting = { still: s, img };
         // The first one goes up at once; the next after the current one's time on screen.
         const wait = current ? Math.max(0, hold - (clock() - shownAt)) : 0;
@@ -153,7 +200,8 @@ export function stillsSlideshow(container: HTMLElement, opts: SlideshowOptions) 
         holdTimer = window.setTimeout(showWaiting, wait);
       },
       () => {
-        if (mine !== run || !running) return;
+        if (mine.signal.aborted || !running) return; // cancelled, not broken
+        inflight = null;
         deck.failed(s); // silently: the next one instead
         fetchNext();
       },
@@ -178,11 +226,27 @@ export function stillsSlideshow(container: HTMLElement, opts: SlideshowOptions) 
     shownAt = clock();
     // Next frame: from opacity 0, so the fade runs (the old one fades out under it, then goes).
     requestAnimationFrame(() => requestAnimationFrame(() => fig.classList.add("is-on")));
-    if (old) {
-      old.el.classList.remove("is-on");
-      window.setTimeout(() => old.el.remove(), fade + 100);
-    }
+    if (old) retire(old.el);
     fetchNext();
+  }
+
+  /** The old still fades out under the new one and goes when its fade ends (a timer as the backstop). */
+  function retire(el: HTMLElement) {
+    const ms = transitionMs(el, fade);
+    el.classList.remove("is-on");
+    if (ms <= 0) {
+      el.remove(); // no fade: a plain swap
+      return;
+    }
+    let timer = 0;
+    const done = (e?: Event) => {
+      if (e && (e.target !== el || (e as TransitionEvent).propertyName !== "opacity")) return; // a child's, or another property
+      el.removeEventListener("transitionend", done);
+      clearTimeout(timer);
+      el.remove();
+    };
+    el.addEventListener("transitionend", done);
+    timer = window.setTimeout(() => done(), ms + 100);
   }
 
   return {
@@ -190,7 +254,6 @@ export function stillsSlideshow(container: HTMLElement, opts: SlideshowOptions) 
     start(body: BodyKey | null) {
       if (running) return;
       running = true;
-      run++;
       destination = body;
       deck.plan(body);
       fetchNext();
@@ -200,7 +263,7 @@ export function stillsSlideshow(container: HTMLElement, opts: SlideshowOptions) 
       if (!running || body === destination) return;
       destination = body;
       if (current?.still.body === body) return;
-      run++;
+      cancel();
       waiting = null;
       clearTimeout(holdTimer);
       deck.plan(body);
@@ -209,7 +272,7 @@ export function stillsSlideshow(container: HTMLElement, opts: SlideshowOptions) 
     stop() {
       if (!running) return;
       running = false;
-      run++;
+      cancel();
       waiting = null;
       clearTimeout(holdTimer);
       current = null;

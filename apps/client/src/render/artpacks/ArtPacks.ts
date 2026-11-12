@@ -7,7 +7,10 @@
 // A loading screen (travel, a graphics change) pauses it: the download in flight is aborted, a group
 // half uploaded is dropped. A tier that doesn't take a pack puts the shipped textures back (they upload
 // again behind that loading screen's warm-up) and releases the HD ones. A failed download keeps the
-// shipped textures; each group gets two tries per session. The env is injected (tests drive it by hand).
+// shipped textures, as does a failed decode, upload step or rebind (the whole group is dropped); each
+// group gets two tries per session. No manifest (the packs aren't on this server) is the session's
+// answer, said once; a manifest that fails to arrive is tried a few times. The env is injected (tests
+// drive it by hand).
 
 import type * as THREE from "three/webgpu";
 import type { Tier } from "../quality.ts";
@@ -20,7 +23,10 @@ export interface TextureSlot {
 }
 
 export interface ArtPacksEnv {
-  /** The pack manifest (fetched once; null when there is none or it failed). */
+  /**
+   * The pack manifest. Null: there is none (404, not a manifest), final for the session; a rejection
+   * is a failure that may pass (network, 5xx), tried again a bounded number of times.
+   */
   manifest(): Promise<PackManifest | null>;
   /** A pack file's bytes, checked against its SHA-256. */
   download(entry: PackEntry, signal: AbortSignal): Promise<Uint8Array>;
@@ -96,13 +102,40 @@ export function liveTextureBytes(t: THREE.Texture): number {
 
 const MAX_TRIES = 2;
 
+/**
+ * Free an HD texture this controller made: its GPU side, and a decoded 2D image still held (an
+ * ImageBitmap, 16–64 MB outside the JS heap; uploaded ones have only their size left). Every path that
+ * gives an HD texture up comes through here. Never for a shipped texture: its CPU copy stays.
+ */
+export function freeTexture(t: THREE.Texture | undefined) {
+  if (!t) return;
+  const img = t.image as { close?: () => void } | null | undefined;
+  if (typeof img?.close === "function") {
+    img.close();
+    const { width, height } = t.image as { width?: number; height?: number };
+    t.image = { width, height };
+  }
+  t.dispose();
+}
+
+/** The manifest as far as this session knows it. */
+type ManifestState =
+  | { kind: "unknown" }
+  | { kind: "asking"; p: Promise<PackManifest | null> }
+  | { kind: "waiting"; cancel: () => void }
+  | { kind: "known"; manifest: PackManifest | null };
+
 export class ArtPacks {
   /** After a hand-over, wait this long before the first download (the arrival's late downloads, the first frames of play). */
   static START_DELAY_MS = 3000;
+  /** A manifest that failed to arrive is asked again after this (doubling each time), up to MANIFEST_TRIES in a session. */
+  static MANIFEST_RETRY_MS = 15_000;
+  static MANIFEST_TRIES = 3;
 
   private tier: Tier | null = null;
   private packs: PackId[] = [];
-  private manifestP: Promise<PackManifest | null> | null = null;
+  private manifest: ManifestState = { kind: "unknown" };
+  private manifestTries = 0;
   private readonly groups = new Map<string, Group>();
   private running = false;
   private pumping = 0;
@@ -170,6 +203,10 @@ export class ArtPacks {
     this.cancelStart?.();
     this.cancelStart = null;
     this.running = false;
+    if (this.manifest.kind === "waiting") {
+      this.manifest.cancel(); // the next resume asks (the try count stays)
+      this.manifest = { kind: "unknown" };
+    }
     if (this.current && (this.current.state === "loading" || this.current.state === "uploading")) this.drop(this.current);
     this.current = null;
   }
@@ -182,11 +219,21 @@ export class ArtPacks {
     if (step) {
       const t0 = this.env.now();
       if (!this.uploadAt) this.uploadAt = t0;
-      step();
+      try {
+        step();
+      } catch (e) {
+        this.failTry(g, "didn't upload", e); // nothing of it is bound: the shipped textures stay
+        return;
+      }
       this.stepMs = Math.max(this.stepMs, this.env.now() - t0);
       return;
     }
-    this.swap(g);
+    try {
+      this.swap(g);
+    } catch (e) {
+      this.failTry(g, "didn't swap in", e);
+      return;
+    }
     this.current = null;
     void this.pump();
   }
@@ -201,7 +248,7 @@ export class ArtPacks {
       skipped: of("skipped"),
       gpuBytes: this.liveBytes(),
       swaps: [...this.swaps],
-      busy: !!this.current || !!this.startToken || this.pumping > 0,
+      busy: !!this.current || !!this.startToken || this.pumping > 0 || this.manifest.kind === "waiting",
     };
   }
 
@@ -222,17 +269,45 @@ export class ArtPacks {
     if (!this.running || this.current) return;
     this.pumping++;
     try {
-      this.manifestP ??= this.env.manifest().catch((e: unknown) => {
-        console.warn("[packs] no pack manifest; keeping the shipped textures", e);
-        return null;
-      });
-      const manifest = await this.manifestP;
-      if (!manifest) this.manifestP = null; // the next resume asks again
+      const manifest = await this.askManifest();
       if (!manifest || !this.running || this.current) return;
       this.next(manifest);
     } finally {
       this.pumping--;
     }
+  }
+
+  /** The manifest, once per session: null while there is none (yet). */
+  private async askManifest(): Promise<PackManifest | null> {
+    const m = this.manifest;
+    if (m.kind === "known") return m.manifest;
+    if (m.kind === "waiting") return null; // a retry is on its timer
+    if (m.kind === "asking") return m.p;
+    this.manifestTries++;
+    const p = this.env.manifest().then(
+      (manifest) => {
+        if (!manifest) console.info("[packs] no HD art packs on this server; keeping the shipped textures");
+        this.manifest = { kind: "known", manifest };
+        return manifest;
+      },
+      (e: unknown) => {
+        const last = this.manifestTries >= ArtPacks.MANIFEST_TRIES;
+        if (last) console.warn(`[packs] the pack manifest didn't load in ${this.manifestTries} tries; keeping the shipped textures this session`, e);
+        else console.info("[packs] the pack manifest didn't load; trying again later", e);
+        if (last) this.manifest = { kind: "known", manifest: null };
+        else if (!this.running) this.manifest = { kind: "unknown" }; // the next resume asks
+        else {
+          const cancel = this.env.later(() => {
+            this.manifest = { kind: "unknown" };
+            void this.pump();
+          }, ArtPacks.MANIFEST_RETRY_MS * 2 ** (this.manifestTries - 1));
+          this.manifest = { kind: "waiting", cancel };
+        }
+        return null;
+      },
+    );
+    this.manifest = { kind: "asking", p };
+    return p;
   }
 
   private next(manifest: PackManifest) {
@@ -277,7 +352,7 @@ export class ArtPacks {
       if (signal.aborted) throw signal.reason ?? new Error("aborted");
       const t = await this.env.make(f, bytes, g.bases[i]!.base, signal);
       if (signal.aborted || g.state !== "loading" || g.abort !== abort) {
-        t.dispose(); // given up meanwhile: nothing is uploaded or bound
+        freeTexture(t); // given up meanwhile: nothing is uploaded or bound
         throw signal.reason ?? new Error("aborted");
       }
       g.made[i] = t;
@@ -286,22 +361,37 @@ export class ArtPacks {
     Promise.all(files).then(
       (made) => {
         if (g.abort !== abort || g.state !== "loading") return;
+        try {
+          g.steps = made.flatMap((t) => this.env.uploadSteps(t));
+        } catch (e) {
+          this.failTry(g, "didn't upload", e);
+          return;
+        }
         g.state = "uploading";
-        g.steps = made.flatMap((t) => this.env.uploadSteps(t));
         g.stepCount = g.steps.length;
       },
       (e: unknown) => {
         if (g.abort !== abort) return; // dropped (pause / tier): already cleaned up
-        g.tries++;
-        console.warn(`[packs] ${g.id} didn't load${g.tries >= MAX_TRIES ? "; keeping the shipped textures for this session" : "; trying again after the next loading screen"}`, e);
-        this.release(g);
-        g.state = g.tries >= MAX_TRIES ? "failed" : "pending";
-        g.cooling = true;
-        if (this.current === g) this.current = null;
-        abort.abort();
-        void this.pump();
+        this.failTry(g, "didn't load", e);
       },
     );
+  }
+
+  /**
+   * A try of `g` failed (download, decode, upload or rebind): abort what is still running, free all it
+   * made, keep the shipped textures bound. Two tries a session; the next one after the next resume.
+   */
+  private failTry(g: Group, what: string, e: unknown) {
+    g.tries++;
+    console.warn(`[packs] ${g.id} ${what}${g.tries >= MAX_TRIES ? "; keeping the shipped textures for this session" : "; trying again after the next loading screen"}`, e);
+    const a = g.abort;
+    g.abort = null; // a file still on its way is freed when it lands
+    a?.abort();
+    this.release(g);
+    g.state = g.tries >= MAX_TRIES ? "failed" : "pending";
+    g.cooling = true;
+    if (this.current === g) this.current = null;
+    void this.pump();
   }
 
   /** Bind the group's HD textures in its slots (one frame), release the shipped ones on the GPU. */
@@ -313,8 +403,18 @@ export class ArtPacks {
       return;
     }
     const t0 = this.env.now();
-    g.live = g.bases.map((b, i) => ({ slot: b.slot, base: b.base, hd: g.made[i]! }));
-    for (const l of g.live) l.slot.set(l.hd);
+    const live = g.bases.map((b, i) => ({ slot: b.slot, base: b.base, hd: g.made[i]! }));
+    const bound: Live[] = [];
+    try {
+      for (const l of live) {
+        l.slot.set(l.hd);
+        bound.push(l);
+      }
+    } catch (e) {
+      for (const l of bound) l.slot.set(l.base); // all or nothing: the shipped ones back where they were
+      throw e;
+    }
+    g.live = live;
     for (const l of g.live) l.base.dispose(); // its CPU copy stays: a tier change can bind it again
     g.made = [];
     g.abort = null;
@@ -337,14 +437,14 @@ export class ArtPacks {
   /** Put the shipped textures back in a live group's slots and release the HD ones. */
   private rollback(g: Group) {
     for (const l of g.live) l.slot.set(l.base);
-    for (const l of g.live) l.hd.dispose();
+    for (const l of g.live) freeTexture(l.hd);
     g.live = [];
     g.gpuBytes = 0;
     g.state = "pending";
   }
 
   private release(g: Group) {
-    for (const t of g.made) t?.dispose();
+    for (const t of g.made) freeTexture(t);
     g.made = [];
     g.steps = [];
     g.gpuBytes = 0;

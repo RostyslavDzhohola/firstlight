@@ -108,9 +108,10 @@ function world(loaded: string[] = ["portus/portus_color.webp", "portus/portus_no
 
 describe("ArtPacks", () => {
   let warn: ReturnType<typeof vi.spyOn>;
+  let info: ReturnType<typeof vi.spyOn>;
   beforeEach(() => {
     warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.spyOn(console, "info").mockImplementation(() => {});
+    info = vi.spyOn(console, "info").mockImplementation(() => {});
   });
   afterEach(() => vi.restoreAllMocks());
 
@@ -353,5 +354,236 @@ describe("ArtPacks", () => {
     await w.tick(ArtPacks.START_DELAY_MS * 3);
     expect(w.downloads).toEqual([]);
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  /** Pause and resume like travel and rewarms do, each time past the start delay and any retry. */
+  const travels = async (w: ReturnType<typeof world>, packs: ArtPacks, n: number) => {
+    for (let i = 0; i < n; i++) {
+      packs.pause();
+      packs.resume();
+      await w.tick(ArtPacks.START_DELAY_MS + ArtPacks.MANIFEST_RETRY_MS * 4);
+    }
+  };
+
+  it("no manifest (the pack files aren't shipped): one quiet line, asked once a session, nothing more", async () => {
+    const w = world();
+    const manifest = vi.fn(async () => null);
+    w.env.manifest = manifest;
+    const packs = new ArtPacks(w.env, { mode: "auto" });
+    packs.setTier("high");
+    packs.resume();
+    await w.tick(ArtPacks.START_DELAY_MS);
+    await travels(w, packs, 6);
+    packs.setTier("ultra"); // a graphics change behind its loading screen
+    await travels(w, packs, 2);
+    expect(manifest).toHaveBeenCalledTimes(1);
+    expect(info.mock.calls.filter((c: unknown[]) => String(c[0]).startsWith("[packs]"))).toHaveLength(1);
+    expect(warn).not.toHaveBeenCalled();
+    expect(w.downloads).toEqual([]);
+    expect(packs.state().busy).toBe(false);
+  });
+
+  it("a transient manifest failure (network, 5xx) is tried again after a delay, a bounded number of times", async () => {
+    const w = world();
+    let fails = 2;
+    const manifest = vi.fn(async () => {
+      if (fails-- > 0) throw new Error("pack manifest 503");
+      return MANIFEST;
+    });
+    w.env.manifest = manifest;
+    const packs = new ArtPacks(w.env, { mode: "auto" });
+    packs.setTier("medium");
+    packs.resume();
+    await w.tick(ArtPacks.START_DELAY_MS);
+    expect(manifest).toHaveBeenCalledTimes(1);
+    expect(w.downloads).toEqual([]);
+    await w.tick(ArtPacks.MANIFEST_RETRY_MS);
+    expect(manifest).toHaveBeenCalledTimes(2);
+    await w.tick(ArtPacks.MANIFEST_RETRY_MS * 2); // the delay grows
+    expect(manifest).toHaveBeenCalledTimes(3);
+    expect(w.downloads.map((d) => d.entry)).toEqual(["portus/portus_color.webp", "portus/portus_normal.webp"]);
+  });
+
+  it("a manifest that keeps failing stops after its tries, across any number of resumes; a pause holds the retry", async () => {
+    const w = world();
+    const manifest = vi.fn(async () => {
+      throw new Error("offline");
+    });
+    w.env.manifest = manifest;
+    const packs = new ArtPacks(w.env, { mode: "auto" });
+    packs.setTier("medium");
+    packs.resume();
+    await w.tick(ArtPacks.START_DELAY_MS);
+    packs.pause(); // a loading screen while the retry waits: nothing is asked behind it
+    await w.tick(ArtPacks.MANIFEST_RETRY_MS * 10);
+    expect(manifest).toHaveBeenCalledTimes(1);
+    await travels(w, packs, 8);
+    expect(manifest).toHaveBeenCalledTimes(ArtPacks.MANIFEST_TRIES);
+    expect(warn).toHaveBeenCalledTimes(1); // once, when it gives up
+    expect(w.downloads).toEqual([]);
+    expect(packs.state().busy).toBe(false);
+  });
+
+  /** HD textures made from a decoded 2D image (an ImageBitmap, 16–64 MB outside the JS heap); `hold` keeps make() pending. */
+  function withBitmaps(w: ReturnType<typeof world>) {
+    const closed: string[] = [];
+    const held: (() => void)[] = [];
+    let hold = false;
+    w.env.make = (entry) => {
+      const t = w.watch(tex(`hd ${entry.base}`));
+      t.image = { width: 2048, height: 2048, close: () => closed.push(entry.base) } as never;
+      if (!hold) return Promise.resolve(t);
+      return new Promise((r) => held.push(() => r(t)));
+    };
+    return { closed, held, holdMakes: () => (hold = true) };
+  }
+
+  it("a pause frees a half-made group's bitmaps as well as its textures", async () => {
+    const w = world(["characters/ash_albedo.webp", "characters/ash_normal.webp"]);
+    const b = withBitmaps(w);
+    const packs = new ArtPacks(w.env, { mode: "on", only: ["chars"] });
+    packs.setTier("medium");
+    packs.resume();
+    await w.tick(ArtPacks.START_DELAY_MS);
+    w.downloads[0]!.resolve(new Uint8Array(4)); // the albedo is made; the normal is still downloading
+    await w.tick();
+    packs.pause();
+    expect(b.closed).toEqual(["characters/ash_albedo.webp"]);
+    expect([...w.disposed].map((t) => t.name)).toContain("hd characters/ash_albedo.webp");
+  });
+
+  it("a texture made after its group was given up (pause during the decode) is freed, bitmap and all", async () => {
+    const w = world(["characters/ash_albedo.webp", "characters/ash_normal.webp"]);
+    const b = withBitmaps(w);
+    b.holdMakes();
+    const packs = new ArtPacks(w.env, { mode: "on", only: ["chars"] });
+    packs.setTier("medium");
+    packs.resume();
+    await w.tick(ArtPacks.START_DELAY_MS);
+    w.downloads[0]!.resolve(new Uint8Array(4));
+    await w.tick();
+    expect(b.held).toHaveLength(1); // decoding
+    packs.pause();
+    b.held[0]!(); // the decode lands after the pause
+    await w.tick();
+    expect(b.closed).toEqual(["characters/ash_albedo.webp"]);
+    expect(w.slots.get("characters/ash_albedo.webp")!.sets).toEqual([]);
+  });
+
+  it("a group that fails part way (one file's download) frees the other file's bitmap", async () => {
+    const w = world(["characters/ash_albedo.webp", "characters/ash_normal.webp"]);
+    const b = withBitmaps(w);
+    const packs = new ArtPacks(w.env, { mode: "on", only: ["chars"] });
+    packs.setTier("medium");
+    packs.resume();
+    await w.tick(ArtPacks.START_DELAY_MS);
+    w.downloads[0]!.resolve(new Uint8Array(4));
+    await w.tick();
+    w.downloads[1]!.reject(new Error("offline"));
+    await w.tick();
+    expect(b.closed).toEqual(["characters/ash_albedo.webp"]);
+    expect(w.slots.get("characters/ash_albedo.webp")!.sets).toEqual([]);
+  });
+
+  /** Two tries of the characters' group, each to the end of its upload and past it. */
+  async function twoTries(w: ReturnType<typeof world>, packs: ArtPacks) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      packs.resume();
+      await w.tick(ArtPacks.START_DELAY_MS);
+      await w.land();
+      expect(() => packs.frame()).not.toThrow();
+      await w.frames(packs, 8);
+      packs.pause();
+    }
+  }
+
+  it("an upload step that throws drops the whole group, keeps the shipped textures bound, and counts as a try", async () => {
+    const w = world(["characters/ash_albedo.webp", "characters/ash_normal.webp"]);
+    const b = withBitmaps(w);
+    w.env.uploadSteps = (t) => [
+      () => w.uploads.push(`${t.name} 1/2`),
+      () => {
+        if (t.name.includes("normal")) throw new Error("GPU out of memory"); // initTexture()
+        w.uploads.push(`${t.name} 2/2`);
+      },
+    ];
+    const packs = new ArtPacks(w.env, { mode: "on", only: ["chars"] });
+    packs.setTier("medium");
+    const albedo = w.slots.get("characters/ash_albedo.webp")!, normal = w.slots.get("characters/ash_normal.webp")!;
+    const bases = [albedo.texture, normal.texture];
+    packs.resume();
+    await w.tick(ArtPacks.START_DELAY_MS);
+    await w.land();
+    for (let i = 0; i < 8; i++) expect(() => packs.frame()).not.toThrow();
+    await w.tick();
+    expect(albedo.sets).toEqual([]); // never swapped in: not the albedo that did upload, not the normal
+    expect(normal.sets).toEqual([]);
+    for (const t of bases) expect(w.disposed.has(t)).toBe(false);
+    expect([...w.disposed].map((t) => t.name).sort()).toEqual(["hd characters/ash_albedo.webp", "hd characters/ash_normal.webp"]);
+    expect(b.closed.sort()).toEqual(["characters/ash_albedo.webp", "characters/ash_normal.webp"]);
+    expect(packs.state()).toMatchObject({ live: [], failed: [], gpuBytes: 0 });
+    expect(warn).toHaveBeenCalledTimes(1);
+    // the bounded policy: a second try after the next loading screen, then it stays shipped
+    packs.pause();
+    await twoTries(w, packs);
+    expect(packs.state().failed).toEqual(["chars:ash"]);
+    expect(albedo.texture).toBe(bases[0]);
+  });
+
+  it("setting the upload up (uploadSteps) that throws goes the same way", async () => {
+    const w = world(["characters/ash_albedo.webp", "characters/ash_normal.webp"]);
+    w.env.uploadSteps = () => {
+      throw new Error("no renderer");
+    };
+    const packs = new ArtPacks(w.env, { mode: "on", only: ["chars"] });
+    packs.setTier("medium");
+    await twoTries(w, packs);
+    expect(packs.state()).toMatchObject({ live: [], failed: ["chars:ash"], busy: false });
+    expect(w.slots.get("characters/ash_albedo.webp")!.sets).toEqual([]);
+  });
+
+  it("a rebind that throws part way puts the shipped textures back in every slot", async () => {
+    const w = world(["characters/ash_albedo.webp", "characters/ash_normal.webp"]);
+    const normal = w.slots.get("characters/ash_normal.webp")!;
+    const base = normal.texture;
+    const set = normal.set.bind(normal);
+    normal.set = (t) => {
+      if (t !== base) throw new Error("material gone");
+      set(t);
+    };
+    const packs = new ArtPacks(w.env, { mode: "on", only: ["chars"] });
+    packs.setTier("medium");
+    const albedo = w.slots.get("characters/ash_albedo.webp")!;
+    const albedoBase = albedo.texture;
+    packs.resume();
+    await w.tick(ArtPacks.START_DELAY_MS);
+    await w.land();
+    for (let i = 0; i < 8; i++) expect(() => packs.frame()).not.toThrow();
+    expect(albedo.texture).toBe(albedoBase);
+    expect(normal.texture).toBe(base);
+    expect(w.disposed.has(albedoBase)).toBe(false);
+    expect(packs.state().live).toEqual([]);
+  });
+
+  it("a decode that fails (the strip worker's error or deadline) frees the group and takes the normal two tries", async () => {
+    const w = world(["portus/portus_color.webp", "portus/portus_normal.webp"]);
+    const make = w.env.make;
+    w.env.make = (entry, bytes, like, signal) =>
+      entry.base.endsWith("normal.webp") ? Promise.reject(new Error("strip decode missed its 30000 ms deadline")) : make(entry, bytes, like, signal);
+    const packs = new ArtPacks(w.env, { mode: "on", only: ["town"] });
+    packs.setTier("medium");
+    const color = w.slots.get("portus/portus_color.webp")!;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      packs.resume();
+      await w.tick(ArtPacks.START_DELAY_MS);
+      await w.land();
+      await w.frames(packs, 8);
+      expect(packs.state().busy, "never stuck loading").toBe(false);
+      packs.pause();
+    }
+    expect(w.downloads.length, "two tries").toBe(4);
+    expect(color.sets).toEqual([]);
+    expect([...w.disposed].filter((t) => t.name === "hd portus/portus_color.webp")).toHaveLength(2);
+    expect(packs.state().failed).toEqual(["town:portus"]);
   });
 });

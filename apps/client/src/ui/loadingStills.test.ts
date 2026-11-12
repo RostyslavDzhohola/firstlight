@@ -4,7 +4,7 @@ import type { BodyKey } from "./loading.ts";
 import { existsSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { STILL_FADE_MS, STILL_HOLD_MS, STILLS, StillDeck, stillsSlideshow, type Still } from "./loadingStills.ts";
+import { loadStill, STILL_FADE_MS, STILL_HOLD_MS, STILLS, StillDeck, stillsSlideshow, type Still } from "./loadingStills.ts";
 
 const mk = (id: string, body: BodyKey): Still => ({ id, body, caption: `${id} caption`, src: `/stills/${id}.webp` });
 const SET: Still[] = [
@@ -81,19 +81,22 @@ describe("StillDeck (which still comes next)", () => {
 describe("the stills slideshow (DOM)", () => {
   /** A loader the test settles by hand: one pending download per still asked for. */
   function loader() {
-    const asked: { still: Still; ok: () => void; fail: () => void }[] = [];
-    const load = (still: Still) =>
+    const asked: { still: Still; signal: AbortSignal; ok: () => void; fail: () => void }[] = [];
+    const load = (still: Still, signal: AbortSignal) =>
       new Promise<HTMLImageElement>((resolve, reject) => {
         const img = document.createElement("img");
         img.alt = "";
         img.src = still.src;
-        asked.push({ still, ok: () => resolve(img), fail: () => reject(new Error("404")) });
+        asked.push({ still, signal, ok: () => resolve(img), fail: () => reject(new Error("404")) });
       });
-    return { asked, load, last: () => asked.at(-1)! };
+    /** Downloads asked for and not cancelled (settled ones included). */
+    const live = () => asked.filter((a) => !a.signal.aborted);
+    return { asked, load, live, last: () => asked.at(-1)! };
   }
   let box: HTMLElement;
   beforeEach(() => {
     vi.useFakeTimers();
+    document.head.querySelectorAll("style").forEach((e) => e.remove());
     document.body.replaceChildren();
     box = document.createElement("div");
     document.body.append(box);
@@ -141,6 +144,87 @@ describe("the stills slideshow (DOM)", () => {
     expect(figs()).toHaveLength(2); // both while they fade
     await vi.advanceTimersByTimeAsync(STILL_FADE_MS + 100);
     expect(figs()).toHaveLength(1);
+  });
+
+  /** Up to the moment the second still fades in over the first (p1 → p2 in Portus). */
+  async function toCrossfade() {
+    const l = loader();
+    const show = stillsSlideshow(box, { stills: SET, load: l.load });
+    show.start("portus");
+    l.last().ok();
+    await flush();
+    await frames();
+    l.last().ok();
+    await flush();
+    const old = figs()[0]!;
+    await vi.advanceTimersByTimeAsync(STILL_HOLD_MS);
+    await frames();
+    expect(show.shown()).toBe("p2");
+    return { old, show };
+  }
+  const css = (text: string) => {
+    const st = document.createElement("style");
+    st.textContent = text;
+    document.head.append(st);
+  };
+
+  it("under reduced motion's slower fade (3 s, loading.css) the old still stays until its fade is over", async () => {
+    css(".fl-loading__still { transition-duration: 3s; }");
+    const { old } = await toCrossfade();
+    expect(figs()).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(STILL_FADE_MS + 100);
+    expect(old.isConnected).toBe(true); // mid-fade: not gone at the default 1.6 s
+    await vi.advanceTimersByTimeAsync(3000 - STILL_FADE_MS);
+    expect(figs()).toHaveLength(1);
+    expect(old.isConnected).toBe(false);
+  });
+
+  it("the old still goes when its fade ends (transitionend), not later", async () => {
+    css(".fl-loading__still { transition-duration: 3s; }");
+    const { old } = await toCrossfade();
+    old.querySelector("img")!.dispatchEvent(new Event("transitionend", { bubbles: true })); // a child's: not its fade
+    expect(old.isConnected).toBe(true);
+    const end = new Event("transitionend", { bubbles: true }) as Event & { propertyName?: string };
+    Object.defineProperty(end, "propertyName", { value: "opacity" });
+    old.dispatchEvent(end);
+    expect(old.isConnected).toBe(false);
+    expect(figs()).toHaveLength(1);
+  });
+
+  it("with no fade at all (transition-duration 0) it is a plain swap", async () => {
+    css(".fl-loading__still { transition-duration: 0s; }");
+    const { old } = await toCrossfade();
+    expect(old.isConnected).toBe(false);
+    expect(figs()).toHaveLength(1);
+  });
+
+  it("a destination change or a stop cancels the download on its way: one in flight at a time", async () => {
+    const l = loader();
+    const show = stillsSlideshow(box, { stills: SET, load: l.load });
+    show.start(null);
+    const first = l.last();
+    expect(first.still.body).toBe("portus");
+    show.body("meridian"); // while the first is still on its way
+    expect(first.signal.aborted).toBe(true);
+    expect(l.last().still.id).toBe("m1");
+    expect(l.live().map((a) => a.still.id)).toEqual(["m1"]);
+    show.body("arcadia");
+    expect(l.live().map((a) => a.still.id)).toEqual(["a1"]);
+    // A cancelled download that lands anyway (or fails) changes nothing, and isn't counted as broken.
+    first.ok();
+    l.asked[1]!.fail();
+    await flush();
+    await frames();
+    expect(figs()).toHaveLength(0);
+    expect(l.live().map((a) => a.still.id)).toEqual(["a1"]);
+    show.stop();
+    expect(l.live()).toHaveLength(0);
+    show.start("meridian"); // opens on m2 this time (the deck turns over), then m1: not skipped as failed
+    expect(l.last().still.id).toBe("m2");
+    l.last().ok();
+    await flush();
+    await frames();
+    expect(l.last().still.id).toBe("m1");
   });
 
   it("keeps the still up until a slow next one arrives, then swaps", async () => {
@@ -230,6 +314,66 @@ describe("the stills slideshow (DOM)", () => {
     await vi.advanceTimersByTimeAsync(STILL_HOLD_MS * 2);
     expect(box.children).toHaveLength(0);
     expect(show.shown()).toBeNull();
+  });
+});
+
+describe("loadStill (the browser's download and decode)", () => {
+  /** An Image stand-in: its request is out while it has a src; decode() settles by hand. */
+  class FakeImage {
+    static made: FakeImage[] = [];
+    alt = "";
+    decoding = "";
+    style = {};
+    private attrs = new Map<string, string>();
+    settle: { ok: () => void; fail: (e: unknown) => void } | null = null;
+    constructor() {
+      FakeImage.made.push(this);
+    }
+    get src() {
+      return this.attrs.get("src") ?? "";
+    }
+    set src(v: string) {
+      this.attrs.set("src", v);
+    }
+    setAttribute(k: string, v: string) {
+      this.attrs.set(k, v);
+    }
+    getAttribute(k: string) {
+      return this.attrs.get(k) ?? null;
+    }
+    removeAttribute(k: string) {
+      this.attrs.delete(k);
+      this.settle?.fail(new Error("EncodingError")); // a browser fails the decode of a dropped request
+    }
+    decode() {
+      return new Promise<void>((ok, fail) => (this.settle = { ok, fail }));
+    }
+  }
+  beforeEach(() => {
+    FakeImage.made = [];
+    vi.stubGlobal("Image", FakeImage);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("asks at low priority and resolves with the decoded image", async () => {
+    const p = loadStill(mk("p1", "portus"));
+    const img = FakeImage.made[0]!;
+    expect(img.getAttribute("fetchpriority")).toBe("low");
+    expect(img.src).toBe("/stills/p1.webp");
+    img.settle!.ok();
+    await expect(p).resolves.toBe(img);
+  });
+
+  it("cancelled: the request is dropped (no src) and it rejects as aborted", async () => {
+    const ac = new AbortController();
+    const p = loadStill(mk("p1", "portus"), ac.signal);
+    const img = FakeImage.made[0]!;
+    ac.abort();
+    expect(img.getAttribute("src")).toBeNull();
+    await expect(p).rejects.toMatchObject({ name: "AbortError" });
+    // Already cancelled: nothing is asked for.
+    await expect(loadStill(mk("p2", "portus"), ac.signal)).rejects.toMatchObject({ name: "AbortError" });
+    expect(FakeImage.made).toHaveLength(1);
   });
 });
 

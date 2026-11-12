@@ -28,30 +28,96 @@ export const PACK_FILE_TIMEOUT_MS = 120_000;
 
 const hex = (b: ArrayBuffer) => Array.from(new Uint8Array(b), (x) => x.toString(16).padStart(2, "0")).join("");
 
-let worker: Worker | null = null;
-let jobs = 0;
-const waiting = new Map<number, { resolve: (d: ArrayBuffer) => void; reject: (e: Error) => void }>();
-function decodeStrip(blob: Blob, size: number, layers: number, cols: number, signal: AbortSignal): Promise<Uint8Array> {
-  if (!worker) {
-    worker = new Worker(new URL("./strip.worker.ts", import.meta.url), { type: "module" });
-    worker.onmessage = (e: MessageEvent<StripResult>) => {
-      const w = waiting.get(e.data.id);
-      waiting.delete(e.data.id);
-      if (!w) return;
-      if ("error" in e.data) w.reject(new Error(e.data.error));
-      else w.resolve(e.data.data);
-    };
-  }
-  const id = ++jobs;
-  return new Promise<Uint8Array>((resolve, reject) => {
-    waiting.set(id, { resolve: (d) => resolve(new Uint8Array(d)), reject });
-    signal.addEventListener("abort", () => {
-      waiting.delete(id); // the worker finishes and its answer is dropped
-      reject(signal.reason ?? new Error("aborted"));
-    }, { once: true });
-    worker!.postMessage({ id, blob, size, layers, cols } satisfies StripJob);
-  });
+/**
+ * A strip decode that takes longer than this has hung the worker (a 2048×8192 WebP decodes in well
+ * under a second on the M1): its jobs fail and the worker is replaced.
+ */
+export const STRIP_DECODE_TIMEOUT_MS = 30_000;
+
+/** What stripDecoder needs from a Worker (a fake in tests). */
+export interface StripWorker {
+  onmessage: ((e: MessageEvent<StripResult>) => void) | null;
+  onerror: ((e: ErrorEvent) => void) | null;
+  onmessageerror: ((e: MessageEvent) => void) | null;
+  postMessage(job: StripJob): void;
+  terminate(): void;
 }
+
+/**
+ * The strip worker's client: one worker, jobs by id, each with a deadline. A worker error, a message
+ * that can't be read or a missed deadline fails every job the worker holds and drops it (the next job
+ * starts a fresh one); the rejection reaches ArtPacks through make(), whose group cleanup and two tries
+ * take it from there. An aborted job rejects at once; the worker's later answer is dropped.
+ */
+export function stripDecoder(spawn: () => StripWorker, deadlineMs = STRIP_DECODE_TIMEOUT_MS) {
+  let worker: StripWorker | null = null;
+  let jobs = 0;
+  const waiting = new Map<number, { resolve: (d: ArrayBuffer) => void; reject: (e: unknown) => void }>();
+  const reset = (why: Error) => {
+    const w = worker;
+    worker = null;
+    w?.terminate();
+    const held = [...waiting.values()];
+    waiting.clear();
+    for (const j of held) j.reject(why);
+  };
+  const live = (): StripWorker => {
+    if (worker) return worker;
+    const w = spawn();
+    w.onmessage = (e) => {
+      if (worker !== w) return;
+      const j = waiting.get(e.data.id);
+      if (!j) return; // aborted meanwhile
+      if ("error" in e.data) j.reject(new Error(e.data.error));
+      else j.resolve(e.data.data);
+    };
+    w.onerror = (e) => {
+      if (worker !== w) return;
+      e.preventDefault?.(); // handled here: not an uncaught error on the page
+      reset(new Error(`strip worker failed: ${e.message || "error"}`));
+    };
+    w.onmessageerror = () => {
+      if (worker === w) reset(new Error("strip worker: an answer couldn't be read"));
+    };
+    return (worker = w);
+  };
+  return (blob: Blob, size: number, layers: number, cols: number, signal: AbortSignal): Promise<Uint8Array> => {
+    if (signal.aborted) return Promise.reject(signal.reason ?? new Error("aborted"));
+    const id = ++jobs;
+    return new Promise<Uint8Array>((resolve, reject) => {
+      const done = () => {
+        waiting.delete(id);
+        clearTimeout(timer);
+        signal.removeEventListener("abort", onAbort);
+      };
+      const onAbort = () => {
+        done();
+        reject(signal.reason ?? new Error("aborted"));
+      };
+      const timer = setTimeout(() => {
+        if (waiting.has(id)) reset(new Error(`strip decode missed its ${deadlineMs} ms deadline`));
+      }, deadlineMs);
+      waiting.set(id, {
+        resolve: (d) => {
+          done();
+          resolve(new Uint8Array(d));
+        },
+        reject: (e) => {
+          done();
+          reject(e);
+        },
+      });
+      signal.addEventListener("abort", onAbort, { once: true });
+      try {
+        live().postMessage({ id, blob, size, layers, cols } satisfies StripJob);
+      } catch (e) {
+        reset(e instanceof Error ? e : new Error(String(e))); // no worker (or it can't take the job)
+      }
+    });
+  };
+}
+
+const decodeStrip = stripDecoder(() => new Worker(new URL("./strip.worker.ts", import.meta.url), { type: "module" }) as unknown as StripWorker);
 
 /** Copy what the program and the binding depend on from the shipped texture (sampler, colour space, UV transform). */
 export function likeShipped(t: THREE.Texture, like: THREE.Texture): THREE.Texture {
@@ -97,9 +163,11 @@ export function artPacksEnv(renderer: THREE.WebGPURenderer): ArtPacksEnv {
   const folder = `${config.assetBase}/${PACK_FOLDER}`;
   return {
     async manifest() {
+      // A network error rejects (ArtPacks tries again); so does a server error.
       const r = await fetch(`${folder}/manifest.json`, { priority: "low" } as RequestInit);
-      if (!r.ok) throw new Error(`pack manifest ${r.status}`);
-      const m = (await r.json()) as PackManifest;
+      if (r.status >= 500) throw new Error(`pack manifest ${r.status}`);
+      if (!r.ok) return null; // 404: no packs on this server (the normal case while they aren't shipped)
+      const m = (await r.json().catch(() => null)) as PackManifest | null; // a fallback HTML page: none either
       return m?.version === 1 && m.files ? m : null;
     },
     async download(entry: PackEntry, signal: AbortSignal) {

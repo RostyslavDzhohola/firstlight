@@ -49,6 +49,11 @@ export function extrasBudget(frameMs: number, tierBudgetMs: number): number {
 export const CPU_TAIL_FACTOR = 5.0;
 const CPU_TAIL_SHARE = 0.9;
 
+/** The main-thread time per probe frame that keeps the busiest scenes' predicted p99 inside 90% of the frame. */
+export function extrasCpuBudget(frameMs: number): number {
+  return (CPU_TAIL_SHARE * Math.max(frameMs, 1000 / 60)) / CPU_TAIL_FACTOR;
+}
+
 /** Extras that bring others with them (terrain normals need the 4 detail layers, quality.ts). */
 const INCLUDES: Partial<Record<Extra, Extra[]>> = { normals: ["detail4"] };
 
@@ -70,6 +75,8 @@ export interface ExtrasPlan {
   baseMs: number;
   /** Predicted GPU busy time with the plan's extras. */
   gpuMs: number;
+  /** Main-thread time the plan's extras add, as a fraction of Medium's (the cost model's). */
+  cpuFrac: number;
 }
 
 /** The probe's Medium measurement: GPU busy p50, main-thread p50 (null: unknown), frame interval, budget. */
@@ -85,7 +92,7 @@ export function planExtras(m: MediumMeasure, model: CostModel): ExtrasPlan {
     .filter(([, c]) => c.value > 0)
     .sort((a, b) => b[1].value / Math.max(1e-6, b[1].gpu) - a[1].value / Math.max(1e-6, a[1].gpu));
   const extras: Extra[] = [];
-  const cpuBudget = (CPU_TAIL_SHARE * Math.max(m.frameMs, 1000 / 60)) / CPU_TAIL_FACTOR;
+  const cpuBudget = extrasCpuBudget(m.frameMs);
   for (const [e] of ranked) {
     if (extras.some((o) => INCLUDES[o]?.includes(e))) continue; // already in
     const next = costOf([...extras, e], model);
@@ -93,7 +100,34 @@ export function planExtras(m: MediumMeasure, model: CostModel): ExtrasPlan {
     if (next.cpu > costOf(extras, model).cpu && (m.cpuMs === null || m.cpuMs * (1 + next.cpu) > cpuBudget)) continue;
     extras.push(e);
   }
-  return { extras, baseMs: m.gpuMs, gpuMs: m.gpuMs * (1 + costOf(extras, model).gpu) };
+  const cost = costOf(extras, model);
+  return { extras, baseMs: m.gpuMs, gpuMs: m.gpuMs * (1 + cost.gpu), cpuFrac: cost.cpu };
+}
+
+/** Measurement noise a median over the probe's ~1 s keeps: 15% and a quarter millisecond. */
+const NOISE_SHARE = 1.15;
+const NOISE_MS = 0.25;
+const over = (ms: number, limit: number) => ms > limit * NOISE_SHARE + NOISE_MS;
+
+/** Main-thread and frame-interval p50s of one probe measurement (null CPU: too few frames). */
+export interface FrameMeasure {
+  cpuMs: number | null;
+  frameMs: number;
+}
+
+/**
+ * The extras measurement's main thread and frames against Medium's (finding 1 of the October review):
+ * each may take the larger of what Medium's measurement predicts with the plan on and its budget
+ * (main thread: extrasCpuBudget; frames: the 60 Hz frame, SPEC's target), within the noise. Anything
+ * past that is a regression the GPU busy time can't see (more draws, a slower submit), and the extras
+ * go: frame rate first. Returns which one regressed, or null.
+ */
+export function extrasRegression(base: FrameMeasure, withExtras: FrameMeasure, plan: ExtrasPlan): "cpu" | "frames" | null {
+  if (base.cpuMs !== null && withExtras.cpuMs !== null) {
+    if (over(withExtras.cpuMs, Math.max(base.cpuMs * (1 + plan.cpuFrac), extrasCpuBudget(base.frameMs)))) return "cpu";
+  }
+  if (over(withExtras.frameMs, Math.max(base.frameMs, 1000 / 60))) return "frames";
+  return null;
 }
 
 /**
