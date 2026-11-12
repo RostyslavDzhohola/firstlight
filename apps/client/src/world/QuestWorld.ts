@@ -302,16 +302,30 @@ export class QuestWorld {
       }
       case "vault": {
         // The Gleam Vault: a stone drum with a brass lid and three sockets that light per gleam won.
-        r.add(mesh(new THREE.CylinderGeometry(0.75, 0.85, 1.0, 16), std(0x5c5866, { rough: 0.9 }), 0, 0.5, 0));
-        r.add(mesh(new THREE.CylinderGeometry(0.62, 0.62, 0.08, 24), std(0xc9a46a, { metal: 0.8, rough: 0.35 }), 0, 1.04, 0));
+        // The hunt's goal (D-polish-7): it stands on a stepped plinth with two bands of gold light,
+        // its sockets sit proud of the lid on brass cups, and a soft glow rises from it.
+        r.add(mesh(new THREE.CylinderGeometry(1.25, 1.4, 0.2, 24), std(0x4a4754, { rough: 0.9 }), 0, 0.1, 0));
+        r.add(mesh(new THREE.CylinderGeometry(1.0, 1.1, 0.16, 24), std(0x5c5866, { rough: 0.9 }), 0, 0.28, 0));
+        r.add(mesh(new THREE.CylinderGeometry(0.75, 0.85, 1.0, 16), std(0x5c5866, { rough: 0.9 }), 0, 0.86, 0));
+        const band = glow(0xffc866, 1.6);
+        r.add(mesh(new THREE.CylinderGeometry(1.02, 1.02, 0.04, 24), band, 0, 0.37, 0));
+        r.add(mesh(new THREE.CylinderGeometry(0.8, 0.8, 0.05, 24), band, 0, 1.2, 0));
+        r.add(mesh(new THREE.CylinderGeometry(0.66, 0.66, 0.1, 24), std(0xc9a46a, { metal: 0.8, rough: 0.35 }), 0, 1.41, 0));
+        const cup = std(0xc9a46a, { metal: 0.8, rough: 0.35 });
         p.sockets = [0, 1, 2].map((i) => {
           const a = (i / 3) * Math.PI * 2 + Math.PI / 2;
-          const m = mesh(new THREE.SphereGeometry(0.11, 12, 8), std(0x2a2733, { metal: 0.3 }), Math.cos(a) * 0.38, 1.12, Math.sin(a) * 0.38);
+          const x = Math.cos(a) * 0.38, z = Math.sin(a) * 0.38;
+          r.add(mesh(new THREE.CylinderGeometry(0.17, 0.2, 0.1, 12), cup, x, 1.5, z));
+          const m = mesh(new THREE.SphereGeometry(0.16, 14, 10), std(0x2a2733, { metal: 0.3 }), x, 1.6, z);
           r.add(m);
           return m;
         });
+        // The rising glow: two nested, see-through shafts (no hard top: the outer one is faint and tall).
+        r.add(mesh(new THREE.CylinderGeometry(0.3, 0.6, 1.6, 16, 1, true), glow(0xffe6a8, 1.2, 0.16), 0, 2.26, 0));
+        r.add(mesh(new THREE.CylinderGeometry(0.12, 0.5, 3.4, 16, 1, true), glow(0xffe6a8, 1.2, 0.07), 0, 3.16, 0));
         const l = label("The Gleam Vault", "three gleams open it · E", "#ffe6a8");
-        l.position.set(0, 2.0, 0);
+        // Above the glow's bright part and clear of the plaza tree beside it.
+        l.position.set(0, 3.0, 0);
         r.add(l);
         break;
       }
