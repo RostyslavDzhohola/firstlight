@@ -15,6 +15,7 @@ import {
 import { CHUNK_QUADS, hash4, mulberry32, type Dir, type Face } from "@firstlight/shared";
 import { PAD_GRASS_RADIUS, padGrassMask } from "../world/palette.ts";
 import { atmo } from "./atmosphere.ts";
+import { coverScaleNode } from "./occluderFade.ts";
 import type { BodyLook } from "./looks.ts";
 import type { ResolvedSettings } from "./quality.ts";
 import { MEADOW_NEAR, MEADOW_SHARE, meadowCellFields, meadowClumpGeometry, meadowCpuLook, meadowGrassMaterial, meadowKeep } from "./meadow.ts";
@@ -112,7 +113,8 @@ function grassMaterial(): THREE.MeshLambertNodeMaterial {
   m.positionNode = Fn((builder: any) => {
     const dist = distance(base, cameraPosition);
     const fade = smoothstep(grassUniforms.radius, grassUniforms.radius.mul(0.72), dist);
-    const height = grassUniforms.height.mul(scale).mul(fade);
+    // Never in the lens or across the view of the player (D-polish-2).
+    const height = grassUniforms.height.mul(scale).mul(fade).mul(coverScaleNode(base));
     const gust = mx_noise_float(base.mul(0.045).add(grassUniforms.windDir.mul(time.mul(0.9)))).mul(0.5).add(0.5);
     const flutter = sin(time.mul(2.3).add(seed.mul(6.283))).mul(0.12);
     const bend = gust.mul(grassUniforms.windStrength).add(flutter).mul(hf.mul(hf));

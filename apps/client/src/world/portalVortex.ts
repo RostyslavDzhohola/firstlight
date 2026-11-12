@@ -9,7 +9,7 @@
 
 import * as THREE from "three/webgpu";
 import {
-  abs, atan, cameraPosition, exp, float, floor, fract, length, log, max, min, mix, modelWorldMatrixInverse, normalize, positionLocal, sin,
+  abs, atan, cameraPosition, exp, float, floor, fract, length, log, max, min, mix, modelWorldMatrixInverse, normalize, positionLocal, positionWorld, sin,
   smoothstep, time, uniform, vec2, vec3, vec4,
 } from "three/tsl";
 import type { BodyId } from "@firstlight/shared";
@@ -103,7 +103,10 @@ export function vortexMaterial(to: BodyId, color: number, shape: VortexShape): P
   const flash = exp(age.mul(-5)).mul(0.55);
   const pulse = mix(tint, vec3(1, 1, 1), 0.65).mul(ring.mul(2.6).add(flash));
 
-  m.colorNode = deep.add(arms).add(rimGlow).add(motes).add(pulse).mul(atmo.glowBoost);
+  // Up close the night boost is taken back and the whole disc dimmed (D-polish-5): arriving 6 m in
+  // front of the portal, its swirl reads as a swirl, not a white disc that bloom spreads over the view.
+  const camNear = smoothstep(8.0, 28.0, length(positionWorld.sub(cameraPosition)));
+  m.colorNode = deep.add(arms).add(rimGlow).add(motes).add(pulse).mul(mix(float(0.5), atmo.glowBoost, camNear));
   // Mostly opaque (the far side of the gate doesn't show through), feathered at the very edge.
   m.opacityNode = mix(float(0.86), float(1), max(rim, near.mul(0.5))).mul(smoothstep(0.0, 0.07, edge));
   return { material: m, pulseAge };
@@ -122,8 +125,14 @@ export function beamMaterial(color: number): THREE.MeshBasicNodeMaterial {
   const fall = float(1).sub(v).pow(2.4);
   const drift = sin(v.mul(60).sub(time.mul(1.4))).mul(0.12).add(0.88);
   const strength = mix(float(0.22), float(1.25), atmo.lamps);
-  m.colorNode = tint.mul(fall.mul(drift).mul(strength));
+  // Near the camera the beam is a quarter as bright (D-polish-5): standing on the pad, the first view
+  // of a world is the world, not a white column; from across the valley it is the landmark it was.
+  const near = mix(float(BEAM_NEAR_DIM), float(1), smoothstep(BEAM_NEAR[0], BEAM_NEAR[1], length(positionWorld.sub(cameraPosition))));
+  m.colorNode = tint.mul(fall.mul(drift).mul(strength).mul(near));
   return m;
 }
 
 export const BEAM_HEIGHT = 260;
+/** The pad beam's brightness at the camera, and the distances (m) between which it rises to full. */
+export const BEAM_NEAR_DIM = 0.22;
+export const BEAM_NEAR = [5, 26] as const;

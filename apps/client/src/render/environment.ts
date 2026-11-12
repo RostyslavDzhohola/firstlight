@@ -57,7 +57,16 @@ export const WEATHER_LOOKS: Record<Weather, WeatherLook> = {
 };
 
 /** Night grade: cooler, slightly desaturated, lifted shadows (blended in by the night factor). */
-const NIGHT_GRADE: GradeParams = { slope: [0.92, 0.98, 1.12], offset: [0.0, 0.006, 0.02], power: [1.04, 1.02, 0.98], saturation: 0.85, hue: 0 };
+const NIGHT_GRADE: GradeParams = { slope: [0.94, 1.0, 1.12], offset: [0.01, 0.016, 0.03], power: [0.94, 0.92, 0.9], saturation: 0.9, hue: 0 };
+/**
+ * The night floor (D-polish-1, play-test: "ground, sky and creatures all merge into dark blue"): at
+ * full night the moon key and the sky fill are this much stronger than the looks' own numbers, and
+ * the ground bounce takes this share of the sky fill's colour, so shaded ground never crushes to black.
+ */
+const NIGHT_MOON = 1.9;
+const NIGHT_FILL = 1.75;
+const NIGHT_BOUNCE = 0.45;
+const NIGHT_EXPOSURE = 1.12;
 const DUSK_SUN = new THREE.Color(0xff9a5a);
 const OVERCAST = new THREE.Color(0x8a94a4);
 const RAIN_DAY = new THREE.Color(0.62, 0.66, 0.74);
@@ -429,17 +438,18 @@ export class Environment {
     // The key switches to the moon at night 0.4: the sun has faded to zero by then and the moon
     // ramps in from there, so the key light never jumps at sunset or sunrise.
     const sunI = look.sunIntensity * sunUp * (1 - cloud * 0.75) * (1 - smooth(0.2, 0.4, night));
-    const moonI = look.night.moonIntensity * smooth(0.4, 0.9, night) * (1 - cloud * 0.5);
+    const moonI = look.night.moonIntensity * NIGHT_MOON * smooth(0.4, 0.9, night) * (1 - cloud * 0.5);
     if (sk.keyIsMoon) rig.setKey(C.moon, moonI);
     else rig.setKey(this.c1, sunI);
     terrainUniforms.sunMatch.value = bakedSunMatch(elev, az, look.sunElev, look.sunAz) * (sunI / look.sunIntensity);
     this.c1.copy(C.hemiSky).lerp(C.nightHemiSky, night);
     if (cloud > 0) this.c1.lerp(OVERCAST, cloud * 0.4);
-    this.c2.copy(C.hemiGround).lerp(C.nightHemiGround, night);
-    rig.setFill(this.c1, this.c2, lerp(look.hemiIntensity, look.night.hemiIntensity, night) * (1 + cloud * 0.15) + flash * 2.2);
+    this.c2.copy(C.hemiGround).lerp(C.nightHemiGround, night).lerp(this.c1, night * NIGHT_BOUNCE);
+    rig.setFill(this.c1, this.c2, lerp(look.hemiIntensity, look.night.hemiIntensity * NIGHT_FILL, night) * (1 + cloud * 0.15) + flash * 2.2);
+    atmo.nightRim.value = night;
 
     // ---- post: exposure, bloom, grade
-    this.ctx.renderer.toneMappingExposure = look.exposure * lerp(1, look.night.exposure, night) * (1 + flash * 0.45) * this.photoExposure;
+    this.ctx.renderer.toneMappingExposure = look.exposure * lerp(1, look.night.exposure * NIGHT_EXPOSURE, night) * (1 + flash * 0.45) * this.photoExposure;
     postUniforms.bloomThreshold.value = lerp(look.bloomThreshold, 0.85, night);
     postUniforms.bloomStrength.value = look.bloomStrength * (1 + 0.6 * night);
     if (this.menu) setGrade(MENU_GRADE);

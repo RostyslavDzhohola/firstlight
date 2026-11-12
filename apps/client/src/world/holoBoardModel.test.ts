@@ -27,7 +27,7 @@ describe("the hologram scoreboard's pages", () => {
     const rows = p0.sections[0]!.rows;
     expect(rows).toHaveLength(HOLO_ROWS);
     expect(rows[0]).toEqual({ rank: "01", name: "Wren_0", value: "LV 20", note: "Bellringer" });
-    expect(rows[7]!.rank).toBe("08");
+    expect(rows[HOLO_ROWS - 1]!.rank).toBe(`0${HOLO_ROWS}`);
     expect(p0.footer).toBe("3 TRAVELLERS IN THE WORLDS");
   });
 
@@ -51,7 +51,7 @@ describe("the hologram scoreboard's pages", () => {
     expect(p1.sections[0]!.rows).toHaveLength(HOLO_MEDAL_ROWS);
     expect(p1.sections[0]!.rows[0]!.value).toBe("6 MEDALS");
     expect(p1.sections[1]).toMatchObject({ heading: "THE HUNT", rows: [] });
-    expect(p1.sections[1]!.empty).toMatch(/Sealed/);
+    expect(p1.sections[1]!.empty).toMatch(/sealed/);
     const [, h1] = holoPages(d, { heading: "THE HUNT · TRIAL 2 OF 3", rows: [{ rank: "01", name: "Ashfall", value: "2 / 3", note: "" }] });
     expect(h1.sections[1]!.heading).toBe("THE HUNT · TRIAL 2 OF 3");
     expect(h1.sections[1]!.rows[0]!.name).toBe("Ashfall");

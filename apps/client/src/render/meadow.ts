@@ -16,6 +16,7 @@ import {
 } from "three/tsl";
 import type { BodyId } from "@firstlight/shared";
 import { atmo } from "./atmosphere.ts";
+import { coverScaleNode } from "./occluderFade.ts";
 import { regionLow, smooth01, valueNoise } from "./regionNoise.ts";
 import { WORLD_LOOKS, type MeadowLook } from "./worldLooks.ts";
 
@@ -274,7 +275,7 @@ export function meadowGrassMaterial(u: MeadowGrassInputs): THREE.MeshLambertNode
     const fade = smoothstep(u.radius, u.radius.mul(0.72), dist).mul(keepRank);
     const keep = select(isFlower, select(flowerOn, float(1), float(0)), float(1));
     const hStem = stemK.mul(float(0.95).add(seed.mul(0.25)));
-    const height = u.height.mul(mu.height).mul(scale).mul(select(isFlower, hStem, bl.w)).mul(fade).mul(keep);
+    const height = u.height.mul(mu.height).mul(scale).mul(select(isFlower, hStem, bl.w)).mul(fade).mul(keep).mul(coverScaleNode(base));
     const hfe = select(isHead, float(1), hf);
     const flutter = sin(time.mul(2.6).add(seed.mul(6.283)).add(bl.z.mul(3.0))).mul(0.06);
     const bend = gust.mul(u.windStrength).add(wave.mul(0.2)).add(flutter).mul(hfe.mul(hfe));

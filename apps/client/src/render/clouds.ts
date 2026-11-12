@@ -89,7 +89,9 @@ function cloudLayer(dir: any, sky: any, level: 1 | 2): any {
     const cover = u.cover;
     const e = dot(dir, atmo.up);
     const horizon = smoothstep(-0.02, 0.16, e);
-    const alpha = smoothstep(cover, cover.add(0.16), d).mul(horizon).mul(u.opacity);
+    const sunUp = smoothstep(-0.08, 0.2, dot(atmo.sunDir, atmo.up));
+    // By night the edge is twice as soft and the deck thinner: faint moonlit shapes, no outline.
+    const alpha = smoothstep(cover, cover.add(mix(float(0.34), float(0.16), sunUp)), d).mul(horizon).mul(u.opacity).mul(mix(float(0.7), float(1), sunUp));
     const thick = smoothstep(cover.add(0.1), cover.add(0.35), d);
     let core: any;
     if (level === 2) {
@@ -102,15 +104,16 @@ function cloudLayer(dir: any, sky: any, level: 1 | 2): any {
     } else {
       core = thick.mul(0.7).add(0.15);
     }
-    const sunUp = smoothstep(-0.08, 0.2, dot(atmo.sunDir, atmo.up));
     const toward = pow(max(dot(dir, atmo.sunDir), 0.0), 6.0);
     // Kept under the bloom threshold: a bright cloud deck would veil the whole frame with bloom.
     // By night the deck is lit by the sky it hangs in (the night palette), a shade above it.
     const lit = mix(u.lit, (atmo.sunColor as any).mul(u.lit), 0.45).mul(sunUp.mul(0.82).add(0.02)).add(atmo.zenith.mul(0.35));
     const shade = mix(mix(atmo.zenith, atmo.horizon, 0.45), u.shade, sunUp.mul(0.6)).mul(mix(float(0.7), float(0.95), sunUp));
-    const rgb = mix(lit, shade, core.mul(0.7))
-      .add(atmo.sunColor.mul(toward.mul(float(1).sub(core)).mul(0.35).mul(sunUp)))
-      .add(atmo.flashColor.mul(atmo.flash.mul(0.8)));
+    const day = mix(lit, shade, core.mul(0.7)).add(atmo.sunColor.mul(toward.mul(float(1).sub(core)).mul(0.35).mul(sunUp)));
+    // Night (D-polish-1): never darker than the sky behind it (the old deck's edges were, which drew
+    // hard black outlines): the sky's own colour plus a faint moonlit lift that grows towards the core.
+    const moonlit = sky.mul(1.04).add(vec3(0.012, 0.017, 0.03).mul(thick.mul(0.6).add(0.4)));
+    const rgb = mix(max(day, moonlit), day, sunUp).add(atmo.flashColor.mul(atmo.flash.mul(0.8)));
     // Aerial perspective: far clouds near the horizon take the sky colour.
     const far = smoothstep(500.0, 1600.0, t).mul(0.65);
     return vec4(mix(rgb, sky, far), alpha);
