@@ -13,11 +13,10 @@ import { identityCheck, storageRecovery, travelRedirect } from "./world/admissio
 import { pendingSeats } from "./world/reservations.ts";
 import { STARTERS } from "@firstlight/shared/content/weapons";
 import { PROTOCOL_VERSION } from "@firstlight/shared/net/protocol";
-import { timingSafeEqual } from "node:crypto";
 import { partyOf, partyRoomFor, playRefusal } from "./social/index.ts";
 import { publicOnlineCount } from "./ops/home.ts";
 import { BOT_BUDGET, BOT_SEAT_KEY, botBudget } from "./world/botBudget.ts";
-import { botSecretFromEnv } from "./auth/loadtest.ts";
+import { botSecretFromEnv, checkToolSecret, resetToolGuesses } from "./auth/loadtest.ts";
 
 export interface GameOptions {
   port: number;
@@ -60,15 +59,10 @@ export function toolHeader(req: Request): string | null {
   return typeof v === "string" && v ? v : null;
 }
 
-function secretMatches(given: unknown, expected: string): boolean {
-  if (typeof given !== "string" || !expected) return false;
-  const a = Buffer.from(given), b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
 export async function createGame(opts: GameOptions): Promise<Game> {
   identityCheck.current = opts.revalidate ?? (() => null);
   botBudget.reset();
+  resetToolGuesses();
   const playCalls = new Map<string, number[]>();
   const ipCalls = new Map<string, number[]>();
   const pruneCalls = setInterval(() => {
@@ -248,8 +242,9 @@ export async function createGame(opts: GameOptions): Promise<Game> {
   // Load-test and admin metrics: per-room tick time and process usage. Guarded by the load-test secret.
   app.get("/api/metrics", async (req, res) => {
     const secret = botSecretFromEnv(); // off in production unless LOADTEST_ENABLED=1 (D-security-1)
-    if (!secret || !secretMatches(req.headers["x-loadtest-secret"], secret)) {
-      res.status(403).json({ error: "forbidden" });
+    const check = secret ? checkToolSecret(req.headers["x-loadtest-secret"], secret, directRequestIp(req)) : "wrong";
+    if (check !== "ok") {
+      res.status(check === "limited" ? 429 : 403).json({ error: check === "limited" ? "slow down" : "forbidden" });
       return;
     }
     const rooms = await matchMaker.query({ name: "body" });

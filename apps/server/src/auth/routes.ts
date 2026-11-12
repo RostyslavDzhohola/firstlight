@@ -17,7 +17,7 @@ import type { Accounts, AccountsConfig } from "./accounts.ts";
 import { safeEqual, sha256Hex } from "./crypto.ts";
 import type { Identity } from "./identity.ts";
 import { directRequestIp, firstForwardedFor } from "./ip.ts";
-import { botSecret } from "./loadtest.ts";
+import { botSecret, checkToolSecret } from "./loadtest.ts";
 import { botBudget } from "../world/botBudget.ts";
 
 /** mission_state_json → `life.playMs` (0 for older rows without per-life progress). */
@@ -214,9 +214,9 @@ export function mountAccountRoutes(app: Express, a: Accounts, cfg: AccountsConfi
       res.status(404).json({ ok: false, error: "not found" });
       return;
     }
-    const got = req.headers["x-loadtest-secret"];
-    if (typeof got !== "string" || !safeEqual(got, botKey)) {
-      res.status(403).json({ ok: false, error: "forbidden" });
+    const check = checkToolSecret(req.headers["x-loadtest-secret"], botKey, directRequestIp(req));
+    if (check !== "ok") {
+      res.status(check === "limited" ? 429 : 403).json({ ok: false, error: check === "limited" ? "slow down" : "forbidden" });
       return;
     }
     if (!botBudget.takeToken()) {

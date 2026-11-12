@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { Game } from "../src/app.ts";
 import { isTestAccount } from "../src/db/index.ts";
 import { BOT_BUDGET } from "../src/world/botBudget.ts";
+import { TOOL_GUESSES } from "../src/auth/loadtest.ts";
 import { api, Browser, play, startAuthServer, userIdOf, type AuthServer } from "./auth-helpers.ts";
 import { joinAs, playRequest, safeLeave, startServer } from "./helpers.ts";
 
@@ -16,6 +17,7 @@ let game: Game | null = null;
 let server: AuthServer | null = null;
 const rooms: Room[] = [];
 const budget = { ...BOT_BUDGET };
+const guesses = { ...TOOL_GUESSES };
 
 afterEach(async () => {
   for (const r of rooms.splice(0)) await safeLeave(r);
@@ -24,6 +26,7 @@ afterEach(async () => {
   await server?.close();
   server = null;
   Object.assign(BOT_BUDGET, budget);
+  Object.assign(TOOL_GUESSES, guesses);
 });
 
 const bot = (id: string) => `dev:${id}:${id}:loadtest`;
@@ -96,5 +99,59 @@ describe("finding 1: load-test bots have finite budgets of their own", () => {
     const r = await mint();
     expect(r.status).toBe(200);
     expect((await play(server, r.json.token, { body: "arcadia", loadtest: true })).json.ok).toBe(true);
+  });
+});
+
+/** Run `fn` with these process env values, then put the old ones back. */
+async function withEnv(vars: Record<string, string | undefined>, fn: () => Promise<void>): Promise<void> {
+  const saved = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
+  const apply = (v: Record<string, string | undefined>) => {
+    for (const [k, x] of Object.entries(v)) if (x === undefined) delete process.env[k];
+    else process.env[k] = x;
+  };
+  apply(vars);
+  try {
+    await fn();
+  } finally {
+    apply(saved);
+  }
+}
+
+describe("finding 2: the load-test secret is strong and can't be guessed at speed", () => {
+  const mint = (s: AuthServer, secret: string, ip: string) =>
+    api(s, "/api/test/bot-token", null, { method: "POST", body: {}, headers: { "x-loadtest-secret": secret, "x-real-ip": ip } });
+
+  it("a short secret switches bot tokens off (test guests are still flagged)", async () => {
+    server = await startAuthServer({ loadtestSecret: "lt-secret" });
+    expect((await mint(server, "lt-secret", "198.51.100.20")).status).toBe(404);
+    const token = await new Browser(server).playToken();
+    await api(server, "/api/account/me", token, { headers: { "x-loadtest-secret": "lt-secret" } });
+    expect(isTestAccount(server.accounts.db, userIdOf(token))).toBe(true);
+  });
+
+  it("limits wrong guesses per address, before comparing, on bot tokens and metrics alike", async () => {
+    TOOL_GUESSES.perIp = 3;
+    server = await startAuthServer({ loadtestSecret: STRONG_SECRET });
+    for (let i = 0; i < 3; i++) expect((await mint(server, `wrong-${i}`, "198.51.100.21")).status).toBe(403);
+    // The right secret from that address is refused too now: nothing is compared any more.
+    expect((await mint(server, STRONG_SECRET, "198.51.100.21")).status).toBe(429);
+    await withEnv({ LOADTEST_SECRET: STRONG_SECRET, NODE_ENV: "test" }, async () => {
+      expect((await api(server!, "/api/metrics", null, { headers: { "x-loadtest-secret": STRONG_SECRET, "x-real-ip": "198.51.100.21" } })).status).toBe(429);
+      // Another address still gets in.
+      expect((await api(server!, "/api/metrics", null, { headers: { "x-loadtest-secret": STRONG_SECRET, "x-real-ip": "198.51.100.22" } })).status).toBe(200);
+    });
+    expect((await mint(server, STRONG_SECRET, "198.51.100.22")).status).toBe(200);
+  });
+
+  it("limits wrong guesses overall, across addresses", async () => {
+    TOOL_GUESSES.global = 4;
+    server = await startAuthServer({ loadtestSecret: STRONG_SECRET });
+    await withEnv({ LOADTEST_SECRET: STRONG_SECRET, NODE_ENV: "test" }, async () => {
+      for (let i = 0; i < 4; i++) {
+        const r = i % 2 ? await mint(server!, "wrong", `198.51.100.${30 + i}`) : await api(server!, "/api/metrics", null, { headers: { "x-loadtest-secret": "wrong", "x-real-ip": `198.51.100.${30 + i}` } });
+        expect(r.status).toBe(403);
+      }
+    });
+    expect((await mint(server, STRONG_SECRET, "198.51.100.40")).status).toBe(429);
   });
 });

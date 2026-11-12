@@ -837,6 +837,8 @@ describe("the auth proxy gate", () => {
   });
 });
 
+const LT_SECRET = "lt-secret-0123456789abcdefghijklmnopqrstuvwxyzABCD";
+
 describe("load-test bot tokens", () => {
   it("are not available unless LOADTEST_SECRET is set", async () => {
     server = await startAuthServer();
@@ -844,10 +846,10 @@ describe("load-test bot tokens", () => {
   });
 
   it("need the x-loadtest-secret header, and give a loadtest identity", async () => {
-    server = await startAuthServer({ loadtestSecret: "lt-secret" });
+    server = await startAuthServer({ loadtestSecret: LT_SECRET });
     expect((await api(server, "/api/test/bot-token", null, { method: "POST", body: {} })).status).toBe(403);
     expect((await api(server, "/api/test/bot-token", null, { method: "POST", body: {}, headers: { "x-loadtest-secret": "wrong" } })).status).toBe(403);
-    const r = await api(server, "/api/test/bot-token", null, { method: "POST", body: { id: "bot7" }, headers: { "x-loadtest-secret": "lt-secret" } });
+    const r = await api(server, "/api/test/bot-token", null, { method: "POST", body: { id: "bot7" }, headers: { "x-loadtest-secret": LT_SECRET } });
     expect(r.status).toBe(200);
     expect(r.json.userId).toBe("lt_bot7");
     const play1 = await play(server, r.json.token, { body: "arcadia", loadtest: true });
@@ -860,8 +862,8 @@ describe("load-test bot tokens", () => {
 
   it("bot tokens stop working when the load test ends (secret unset)", async () => {
     const dir = (await import("./auth-helpers.ts")).tempDir();
-    server = await startAuthServer({ dir, loadtestSecret: "lt-secret" });
-    const r = await api(server, "/api/test/bot-token", null, { method: "POST", body: {}, headers: { "x-loadtest-secret": "lt-secret" } });
+    server = await startAuthServer({ dir, loadtestSecret: LT_SECRET });
+    const r = await api(server, "/api/test/bot-token", null, { method: "POST", body: {}, headers: { "x-loadtest-secret": LT_SECRET } });
     await server.close(true);
     server = await startAuthServer({ dir });
     expect((await play(server, r.json.token, { body: "arcadia", loadtest: true })).status).toBe(401);
