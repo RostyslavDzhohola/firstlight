@@ -300,12 +300,12 @@ Heat = shots until a 1.5 s overheat lockout. Explosions fall off linearly from t
 | | II | 6 | 200 per 100 max HP | 22 s | r 3.5 m, 7 s | | | | none | 400 |
 | | III | 12 | 260 per 100 max HP | 20 s | r 4.0 m, 8 s | | | | none | 1,000 |
 | **Radio** (item) | – | 1 | – | – | same planet, any distance | channels 1–9, talk on B, crackle filter, max 8 per channel | – | drops on death | none | **100** (D) |
-| **Ember Kunai** (ranged; the ninja's starter, HANDOFF 6h) | I | 1 | 13 | 0.38 | 35 m | thrown dart, 42 m/s, gravity 4 | mag 8, reload 1.3 s | RMB: hold 0.4 s hand seal, release: **Ember Seal** fireball (below), 8 s cooldown | light | 60 |
+| **Ember Kunai** (ranged; the ninja's starter, HANDOFF 6h) | I | 1 | 13 | 0.38 | 35 m | thrown dart, 42 m/s, gravity 4 | mag 8, reload 1.3 s | RMB: hold 0.4 s hand seal (a throw breaks it, D-balance-7), release: **Ember Seal** fireball (below), 8 s cooldown | light | 60 |
 | | II | 6 | 18 | 0.38 | same | same, pierce 1 | mag 9, 1.2 s | seal cooldown 7.5 s | light | 300 |
 | | III | 12 | 24 | 0.38 | same | same, pierce 1 | mag 10, 1.1 s | seal cooldown 7 s | light | 900 |
-| **Ember Seal** (the kunai's alt; not an item) | I | 1 | **24** (was 30, D-balance-3) direct incl. blast; splash 20 in 2.5 m; burn 4/s × 3 s | cooldown | 30 m | fireball 24 m/s, straight | the kunai tier's cooldown | spends no kunai; the server times the 0.4 s seal | heavy | – |
-| | II | 6 | **32** (was 40); splash 27 in 2.75 m; burn 5/s | | same | same | | | heavy | – |
-| | III | 12 | **42** (was 52); splash 35 in 3.0 m; burn 6/s | | same | same | | | heavy | – |
+| **Ember Seal** (the kunai's alt; not an item) | I | 1 | **30** (24 under D-balance-3, restored by D-balance-7) direct incl. blast; splash 20 in 2.5 m; burn 4/s × 3 s | cooldown | 30 m | fireball 24 m/s, straight | the kunai tier's cooldown | spends no kunai; the server times the 0.4 s seal | heavy | – |
+| | II | 6 | **40** (32 under D-balance-3, restored); splash 27 in 2.75 m; burn 5/s | | same | same | | | heavy | – |
+| | III | 12 | **42** (was 52, D-balance-3, kept); splash 35 in 3.0 m; burn 6/s | | same | same | | | heavy | – |
 
 ### 2.4 Starter weapons (D)
 
@@ -389,9 +389,11 @@ next pass with play data.
 - Melee damage lands on the press (`melee()`); the §2.3 `windup` values are not a delay (D-balance-5). No numbers changed.
 - Two cadences (D-balance-6): §2.5's bands at the shipped client's; the hard floor (two hits and ≥ 0.75 s against
   every starter) at the fastest the server accepts (0.85 × rate, 0.9 × charge).
+- A throw breaks the Ember Seal's hand seal (server and client), and the dart after a seal waits the rate (D-balance-7).
 
 | Number | Old | New | Why (model, before → after) |
 |---|---:|---:|---|
+| Ember Seal direct I / II / III | 24 / 32 / 42 | 30 / 40 / 42 | with a throw breaking the hold (D-balance-7) and the dart after a seal waiting the rate, the T1/T2 trim wasn't needed (Hinoko 12 duel wins, Unit 7 14); 52 at T3 still hands Hinoko the L12/L20 duels |
 | Bearded Axe rate (all tiers) | 0.80 | 0.90 | at the server's cadence chop + light killed an 88–90 HP starter at L1/6/12 in 0.68 s → 0.77 s; sustained DPS 44 / 68 / 99 → 40 / 61 / 89, PvP 2.4 → 2.7 s body, 1.6 → 1.8 s with the chop |
 
 ---

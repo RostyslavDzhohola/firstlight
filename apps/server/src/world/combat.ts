@@ -343,6 +343,11 @@ export function fire(host: CombatHost, p: PlayerActor, msg: FireInput): FireResu
   }
   const res = consumeAttack(p, def, tier, now, 1, host);
   if (!res.ok) return res;
+  // A throw breaks a hand seal in progress (D-balance-7): the seal is a commitment, not free on top of the darts.
+  if (def.special) {
+    p.chargeStartedAt = 0;
+    p.chargeItem = null;
+  }
   const lvl = damageMult(p.char.level);
 
   switch (def.delivery) {

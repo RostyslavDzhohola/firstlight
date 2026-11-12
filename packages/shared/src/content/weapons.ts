@@ -183,8 +183,9 @@ export const WEAPONS: readonly WeaponDef[] = [
     id: "ember_seal", name: "Ember Seal", cls: "magic", delivery: "projectile", range: 30, speed: 24, gravity: 0,
     destroys: "heavy", stack: 1, hidden: true,
     // Direct hit includes the blast for the victim (like rockets); burn refreshes, never stacks.
-    // Direct 30/40/52 → 24/32/42 (D-balance-3): the seal opener on top of the dart stream made Hinoko win every starter duel.
-    tiers: [T(1, 0, { damage: 24, splash: 20, radius: 2.5, burn: 4, rate: 0.4 }), T(6, 0, { damage: 32, splash: 27, radius: 2.75, burn: 5, rate: 0.4 }), T(12, 0, { damage: 42, splash: 35, radius: 3, burn: 6, rate: 0.4 })],
+    // Direct 30/40/52 → 24/32/42 (D-balance-3), then 30/40/42 (D-balance-7): with darts waiting the rate after a
+    // seal and a throw breaking the hold, T1/T2 didn't need the trim; T3 keeps it.
+    tiers: [T(1, 0, { damage: 30, splash: 20, radius: 2.5, burn: 4, rate: 0.4 }), T(6, 0, { damage: 40, splash: 27, radius: 2.75, burn: 5, rate: 0.4 }), T(12, 0, { damage: 42, splash: 35, radius: 3, burn: 6, rate: 0.4 })],
   },
 ];
 

@@ -75,6 +75,38 @@ describe("the server's accepted cadence (review finding 1)", () => {
   });
 });
 
+describe("the Ember Seal (review finding 2, D-balance-7)", () => {
+  const kunai = w("kunai");
+  const seal = w("ember_seal");
+  const isSeal = (h: { dmg: number }) => h.dmg === seal.tiers[0].damage;
+
+  it("after a seal the next dart waits the rate gate (castSpecial calls markAttack)", () => {
+    const rate = kunai.tiers[0].rate;
+    const hits = hitTimeline(kunai, 0, 1, "full", 20);
+    expect([hits[0]!.t, hits[0]!.dmg]).toEqual([0, seal.tiers[0].damage]); // pre-held, cast at t = 0
+    expect(hits[1]!.t).toBeCloseTo(rate); // not at once
+    const server = hitTimeline(kunai, 0, 1, "full", 20, { cadence: "server" });
+    expect(server[1]!.t).toBeCloseTo(0.85 * rate);
+    // Every seal after the opener: held 0.4 s after the last dart, and the next dart a full rate after it.
+    const seals = hits.map((h, i) => [h, i] as const).filter(([h]) => isSeal(h)).slice(1);
+    expect(seals.length).toBeGreaterThan(0);
+    for (const [h, i] of seals) {
+      expect(h.t - hits[i - 1]!.t).toBeGreaterThanOrEqual(kunai.tiers[0].heavyTime! - 1e-9);
+      expect(hits[i + 1]!.t - h.t).toBeGreaterThanOrEqual(rate - 1e-9);
+      expect(h.t - seals[0]![0].t).toBeGreaterThanOrEqual(0); // and on its 8 s cooldown
+    }
+    expect(seals[0]![0].t).toBeGreaterThanOrEqual(kunai.tiers[0].cooldown!);
+  });
+
+  it("nothing pre-held (a duel): darts first, the seal 0.4 s after a dart once the hold is done", () => {
+    const hits = hitTimeline(kunai, 0, 1, "full", 2, { preheld: false });
+    expect(hits[0]!.t).toBe(0);
+    expect(isSeal(hits[0]!)).toBe(false);
+    const first = hits.findIndex(isSeal);
+    expect(hits[first]!.t - hits[first - 1]!.t).toBeCloseTo(kunai.tiers[0].heavyTime!);
+  });
+});
+
 describe("damage and burn", () => {
   it("burn burns continuously and refreshes, never stacks", () => {
     expect(timeToKill([{ t: 0, dmg: 24, burn: 4 }], 30)!.t).toBeCloseTo(1.5);

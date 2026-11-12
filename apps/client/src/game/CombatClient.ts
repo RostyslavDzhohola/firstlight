@@ -303,7 +303,7 @@ export class CombatClient {
     if (this.scoped) room?.send("scope", { on: false });
     if (this.wasRmb) room?.send("charge", { on: false });
     this.game.self?.setLocalFlags(0);
-    this.blocking = this.scoped = this.wasRmb = false;
+    this.blocking = this.scoped = this.wasRmb = this.sealHeld = false;
   }
 
   aiming(): boolean {
@@ -377,7 +377,7 @@ export class CombatClient {
       if (this.blocking) room.send("block", { on: false });
       if (this.scoped) room.send("scope", { on: false });
       if (this.wasRmb) room.send("charge", { on: false });
-      this.blocking = this.scoped = this.wasRmb = false;
+      this.blocking = this.scoped = this.wasRmb = this.sealHeld = false;
       g.self?.setLocalFlags(0);
       if (Math.abs(cam.fov - this.baseFov) > 0.1) {
         cam.fov += (this.baseFov - cam.fov) * Math.min(1, dt * 14);
@@ -460,6 +460,8 @@ export class CombatClient {
     }
     const semi = def.delivery !== "hitscan" || def.id === "stillshot";
     if (semi && !input.lmbPressed) return;
+    // Both hands are on a hand seal: no throws while it is held (a throw would break it; D-balance-7).
+    if (this.sealHeld) return;
     if (now - this.lastFire < t.rate * 1000) return;
     this.lastFire = now;
     const slot = g.hud.you?.selected ?? 0;

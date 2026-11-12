@@ -81,24 +81,31 @@ export function hitTimeline(def: WeaponDef, tierIndex: number, level: number, po
   const round = (x: number) => Math.max(1, Math.round(x));
   // combat.ts weakMult: every projectile, pellet and hitscan hit on the head takes the tier's headMult (1.5 default).
   const weak = policy === "best" && def.delivery !== "melee" && def.delivery !== "chain" && def.delivery !== "thrown" ? (tier.headMult ?? 1.5) : 1;
-  const seal = def.special ? WEAPONS.find((w) => w.id === def.special) : undefined;
+  // The kunai's Ember Seal (policy "full"/"best"): a hand seal held heavyTime, cast on the tier's cooldown,
+  // ignoring the throw rate and the reload. A throw breaks the seal (D-balance-7: combat.ts fire() drops the
+  // charge, the client throws nothing while a seal is held), so the hold starts after the last dart, and the
+  // seal's markAttack() restarts the rate gate: the next dart waits the rate after it (review finding 2).
+  // The client starts a hold only once the cooldown is over; the server times the hold alone (0.9 × heavyTime).
+  const seal = def.special && policy !== "plain" && tier.cooldown ? WEAPONS.find((w) => w.id === def.special) : undefined;
+  const holdS = (tier.heavyTime ?? 0.4) * ck;
+  let sealCdAt = 0;
   let t = 0;
   let last = -Infinity;
   let mag = tier.mag;
   let heat = 0;
-  let specialReadyAt = 0;
   let heavyReadyAt = 0;
   let thrown = 0;
   for (let guard = 0; guard < 10_000 && t <= horizon; guard++) {
-    // The kunai's Ember Seal: held 0.4 s, cast on the tier's cooldown, ignores the throw rate and reload.
-    if (seal && policy !== "plain" && tier.cooldown && t >= specialReadyAt) {
+    // The seal goes as soon as its cooldown is up by the next press (pre-held at t = 0 when `preheld`), unless the
+    // dart due now doesn't delay it (the hold, restarted after that dart, still ends by the same time).
+    const sealAt = (after: number) => (server ? Math.max(sealCdAt, after + holdS) : Math.max(sealCdAt, after) + holdS);
+    const s = t === 0 && last === -Infinity && preheld ? 0 : sealAt(Math.max(0, last));
+    if (seal && sealCdAt <= t + 1e-9 && sealAt(t) > s + 1e-9) {
       const st = seal.tiers[tierIndex]!;
-      const at = t === 0 && preheld ? 0 : t + (tier.heavyTime ?? 0.4) * ck;
-      hits.push({ t: at + flight(seal), dmg: round(st.damage * lvl), burn: st.burn });
-      specialReadyAt = at + tier.cooldown;
-      t = Math.max(t, at);
-      if (t === 0) t = 1e-9; // the throw after a pre-held seal is the next press
-      continue;
+      hits.push({ t: s + flight(seal), dmg: round(st.damage * lvl), burn: st.burn });
+      sealCdAt = s + tier.cooldown!;
+      last = s;
+      t = Math.max(t, s + tier.rate * rk);
     }
     let dmg = tier.damage;
     let at = t;

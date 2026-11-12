@@ -85,13 +85,13 @@ describe("PvP time-to-kill (content.md §2.5)", () => {
   });
 });
 
-describe("balance pass (content.md §2.6, D-balance-2/3)", () => {
+describe("balance pass (content.md §2.6, D-balance-2/3/7)", () => {
   it("the tuned numbers", () => {
     expect(weapon("axe").tiers.map((t) => [t.heavy, t.cooldown])).toEqual([[66, 6], [85, 6], [104, 6]]);
     expect(weapon("hammer").tiers[2].heavy).toBe(86);
     expect(weapon("hexquill").tiers[2].damage).toBe(25);
     expect(weapon("longbow").tiers.map((t) => +(t.rate - (t.draw ?? 0)).toFixed(2))).toEqual([0.35, 0.35, 0.35]);
     expect(weapon("comet").tiers.map((t) => t.headMult)).toEqual([1, 1, 1]);
-    expect(weapon("ember_seal").tiers.map((t) => t.damage)).toEqual([24, 32, 42]);
+    expect(weapon("ember_seal").tiers.map((t) => t.damage)).toEqual([30, 40, 42]); // D-balance-7 restored T1/T2
   });
 });

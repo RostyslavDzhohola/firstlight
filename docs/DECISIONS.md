@@ -1595,3 +1595,15 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   cheat. That 15% is the server's to close (accept an early attack only to make up for a late one, or hold it
   until due), a follow-up for the lead. The axe's rate is the smallest fix: the chop alone would need
   66/85/104 → 57/73/87.
+- **D-balance-7 (2026-11-12):** A throw breaks the Ember Seal's hand seal: `combat.ts` `fire()` drops the
+  charge when a dart goes out, and the client throws nothing while a seal is held. The model holds the seal
+  after the last dart and makes the dart after a seal wait the rate (`castSpecial()` calls `markAttack()`).
+  Ember Seal direct 24/32/42 → 30/40/42: T1/T2 back to the content's values, T3 keeps D-balance-3's trim. Why:
+  review finding 2. The server already made the next dart wait after a seal, but it also let the hold run
+  while darts flew and the seal skips the rate gate, so a dart and a seal could leave in the same instant and
+  every mid-fight seal cost no dart time; modelled as the server ran, Hinoko won all 16 starter duels again
+  and Unit 7 led no role, even with the seal cut to 12/16/21. A hand seal that is a real commitment (0.4 s
+  with no throws, as content §2.3 describes it) is the smaller change: it is what D-balance-3 had assumed. With
+  it, D-balance-3's trim was larger than needed at T1/T2 (30/40 pass every check: Hinoko 12 duel wins, Unit 7
+  14) but not at T3 (52 hands Hinoko the duels at L12/L20 and Unit 7 leads nothing), so T1/T2 are restored and
+  T3 is kept.
