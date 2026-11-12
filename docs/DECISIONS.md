@@ -1582,3 +1582,16 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   (rewound against the target's position at release) and client prediction, a combat change larger than this
   pass, and nothing says melee needs slowing: with the delay gone Brother Ash wins 9 of 16 duels (was 8) and
   every check stays in band. The field stays as data for a future swing animation.
+- **D-balance-6 (2026-11-12):** The balance model runs two cadences: the shipped client's (each attack waits
+  the tier's rate, charges and seals their full time) and the fastest the server accepts (`consumeAttack`'s
+  0.85 × rate jitter allowance, 0.9 × heavyTime for charges and seals), which a modified client can play every
+  time. §2.5's design bands and floors (sustained 2.2–3.5 s, burst 1.4–3.5 s, the 1.4 s opener floor, DPS and
+  class bands, duels, PvE) are measured at the client's cadence; D-balance-4's hard floor (every kill takes two
+  hits and ≥ 0.75 s, against every starter's HP, heavies and specials included) holds at the server's.
+  Bearded Axe rate 0.8 → 0.9 (all tiers) brings the chop + light back over it (0.68 → 0.77 s against Hinoko and
+  Hexwick at L1/6/12). Why: review finding 1. The hard floor is the guarantee no client may break, so it holds
+  against what the server accepts. Holding §2.5's 1.4 s there too would slow the honest game by ~15% everywhere
+  (the Stillshot's head + body, §2.5's own 1.4 s example, is 1.19 s at 0.85 × its rate): balancing around a
+  cheat. That 15% is the server's to close (accept an early attack only to make up for a late one, or hold it
+  until due), a follow-up for the lead. The axe's rate is the smallest fix: the chop alone would need
+  66/85/104 → 57/73/87.

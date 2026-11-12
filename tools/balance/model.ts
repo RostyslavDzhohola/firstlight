@@ -42,6 +42,19 @@ const BURN_S = 3;
 const OVERHEAT_S = 1.5;
 
 /**
+ * How fast the attacker presses. "client": the shipped client's own gates (each attack waits the tier's
+ * rate, charges and seals are held their full time; the game as designed). "server": the fastest cadence
+ * `combat.ts` accepts, which a modified client can play every time: consumeAttack lets an attack through
+ * at 0.85 × the rate (a jitter allowance), `melee()` takes a heavy charged 0.9 × heavyTime and
+ * `castSpecial()` a seal held 0.9 × heavyTime. Reloads, heat, draws and cooldowns are exact on both.
+ */
+export type Cadence = "client" | "server";
+/** combat.ts consumeAttack: `now - lastAttackAt < rate × 0.85` is refused. */
+export const SERVER_RATE_ALLOWANCE = 0.85;
+/** combat.ts melee() / castSpecial(): a charge or seal held 90% of heavyTime counts. */
+export const SERVER_CHARGE_ALLOWANCE = 0.9;
+
+/**
  * Every damaging hit one attacker lands on one target that is always in reach, from the first press at
  * t = 0 (pre-drawn bows, pre-charged heavies and a pre-held seal, as §2.5 counts), up to `horizon`.
  * Melee damage lands on the press, as the server's `melee()` applies it (D-balance-5: the catalogue's
@@ -52,10 +65,15 @@ export interface TimelineOptions {
   preheld?: boolean;
   /** Target distance (m): projectile hits land distance / speed after release. Default 0 (point-blank). */
   distance?: number;
+  /** Default "client". */
+  cadence?: Cadence;
 }
 
 export function hitTimeline(def: WeaponDef, tierIndex: number, level: number, policy: Policy, horizon = 60, opts: TimelineOptions = {}): Hit[] {
   const preheld = opts.preheld ?? true;
+  const server = opts.cadence === "server";
+  const rk = server ? SERVER_RATE_ALLOWANCE : 1;
+  const ck = server ? SERVER_CHARGE_ALLOWANCE : 1;
   const flight = (w: WeaponDef) => (opts.distance && (w.delivery === "projectile" || w.delivery === "arrow") ? opts.distance / (w.speed ?? 30) : 0);
   const tier = def.tiers[tierIndex]!;
   const lvl = damageMult(level);
@@ -69,12 +87,13 @@ export function hitTimeline(def: WeaponDef, tierIndex: number, level: number, po
   let mag = tier.mag;
   let heat = 0;
   let specialReadyAt = 0;
+  let heavyReadyAt = 0;
   let thrown = 0;
   for (let guard = 0; guard < 10_000 && t <= horizon; guard++) {
     // The kunai's Ember Seal: held 0.4 s, cast on the tier's cooldown, ignores the throw rate and reload.
     if (seal && policy !== "plain" && tier.cooldown && t >= specialReadyAt) {
       const st = seal.tiers[tierIndex]!;
-      const at = t === 0 && preheld ? 0 : t + (tier.heavyTime ?? 0.4);
+      const at = t === 0 && preheld ? 0 : t + (tier.heavyTime ?? 0.4) * ck;
       hits.push({ t: at + flight(seal), dmg: round(st.damage * lvl), burn: st.burn });
       specialReadyAt = at + tier.cooldown;
       t = Math.max(t, at);
@@ -83,16 +102,17 @@ export function hitTimeline(def: WeaponDef, tierIndex: number, level: number, po
     }
     let dmg = tier.damage;
     let at = t;
-    let gap = tier.rate;
+    let gap = tier.rate * rk;
     if (def.delivery === "arrow") {
-      // Full draws only: the server times the draw from the charge start, restarted after each shot.
-      gap = Math.max(tier.rate, tier.draw ?? 1);
+      // Full draws only: the server times the draw from the charge start, restarted after each shot (exact).
+      gap = Math.max(tier.rate * rk, tier.draw ?? 1);
       if (t === 0 && !preheld) at = tier.draw ?? 1;
-    } else if (tier.heavy !== undefined && policy !== "plain" && specialReadyAt <= t) {
-      // Charged heavy (axe chop, hammer slam): charge held from the last hit, released when full.
+    } else if (tier.heavy !== undefined && policy !== "plain" && heavyReadyAt <= t) {
+      // Charged heavy (axe chop, hammer slam): every melee resets the charge, so it is held from the last hit.
+      // Heavy first: a light then a heavy is never quicker (its gap is max(rate, charge), the other way the rate).
       dmg = tier.heavy;
-      if (t > 0 || !preheld) at = Math.max(t, (t > 0 ? last : 0) + (tier.heavyTime ?? 1));
-      if (tier.cooldown) specialReadyAt = at + tier.cooldown;
+      if (t > 0 || !preheld) at = Math.max(t, (t > 0 ? last : 0) + (tier.heavyTime ?? 1) * ck);
+      if (tier.cooldown) heavyReadyAt = at + tier.cooldown;
     } else if (def.delivery === "pellets") {
       dmg = tier.damage * (tier.pellets ?? 6);
     } else if (def.delivery === "thrown" && ++thrown > def.stack) break;
@@ -203,6 +223,7 @@ export interface PvpCell {
   family: Family;
   level: number;
   targetHp: number;
+  cadence: Cadence;
   /** Seconds from the first hit to the kill, "plain" policy (§2.5 format), and the hits it took. */
   ttk: number;
   hits: number;
@@ -216,17 +237,17 @@ export interface PvpCell {
   biggestShare: number;
 }
 
-/** TTK at equal level with the gated tier against a target of `targetHp` (default: the base curve). */
-export function pvpCell(family: Family, level: number, targetHp = maxHp(level), tierIndex: number = family === "fists" ? 0 : gatedTier(level)): PvpCell {
+/** TTK at equal level with the gated tier against a target of `targetHp` (default: the base curve), at the client's or the server's cadence. */
+export function pvpCell(family: Family, level: number, targetHp = maxHp(level), tierIndex: number = family === "fists" ? 0 : gatedTier(level), cadence: Cadence = "client"): PvpCell {
   const def = WEAPONS.find((w) => w.id === family)!;
-  const body = hitTimeline(def, tierIndex, level, "plain", 120);
-  const full = hitTimeline(def, tierIndex, level, "full", 120);
-  const best = hitTimeline(def, tierIndex, level, "best", 120);
+  const body = hitTimeline(def, tierIndex, level, "plain", 120, { cadence });
+  const full = hitTimeline(def, tierIndex, level, "full", 120, { cadence });
+  const best = hitTimeline(def, tierIndex, level, "best", 120, { cadence });
   const k = timeToKill(body, targetHp)!;
   const kf = timeToKill(full, targetHp)!;
   const kb = timeToKill(best, targetHp)!;
   return {
-    family, level, targetHp,
+    family, level, targetHp, cadence,
     ttk: k.t - body[0]!.t, hits: k.hits,
     openerTtk: kf.t - full[0]!.t, openerHits: kf.hits,
     bestTtk: kb.t - best[0]!.t, bestHits: kb.hits,

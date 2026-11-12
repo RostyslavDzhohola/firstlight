@@ -4,6 +4,7 @@
 
 import { STARTERS } from "../../packages/shared/src/content/weapons.ts";
 import { STARTER_STATS, starterMaxHp, starterMove } from "../../packages/shared/src/content/starters.ts";
+import { gatedTier } from "./model.ts";
 import { checks } from "./bands.ts";
 import {
   affordability, bossRows, COMBAT_FAMILIES, creatureRows, duelWins, progression, pvpCell, PVP_LEVELS, roleLeaders,
@@ -39,6 +40,13 @@ if (args.has("--json")) {
       const cs = PVP_LEVELS.map((l) => pvpCell(fam, l));
       return [fam, ...cs.map((c) => `${f(c.ttk)}/${c.hits}`), ...cs.map((c) => `${f(c.openerTtk)}/${c.openerHits}`)];
     }));
+  const frail = STARTER_STATS.reduce((m, s, i) => (s.hp < STARTER_STATS[m]!.hp ? i : m), 0);
+  table(`The hard floor at the server's accepted cadence (0.85 × rate, 0.9 × charge: a modified client) against ${STARTERS[frail]!.name}, the most fragile starter (s / hits; ≥ 0.75 s and 2 hits, D-balance-6)`,
+    ["Weapon", ...PVP_LEVELS.map((l) => `L${l}`)],
+    COMBAT_FAMILIES.map((fam) => [fam, ...PVP_LEVELS.map((l) => {
+      const c = pvpCell(fam, l, starterMaxHp(frail, l), fam === "fists" ? 0 : gatedTier(l), "server");
+      return `${f(c.openerTtk)}/${c.openerHits}`;
+    })]));
   table("Creatures at their levels (player on level; TTK = solo, starter weapons min/median/max; margin = pack-kills-player at 50% hits ÷ pack clear)",
     ["Creature", "Tier", "Lv", "HP", "TTK min", "TTK med", "TTK max", "Kills player", "Pack", "Margin"],
     creatureRows().map((r) => [r.name, r.tier, r.enemyLevel, r.hp, f(r.ttkMin), f(r.ttkMedian), f(r.ttkMax), f(r.killsPlayerS, 1), r.packSize, f(r.margin)]));

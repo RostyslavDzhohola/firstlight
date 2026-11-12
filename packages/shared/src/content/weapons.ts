@@ -83,7 +83,8 @@ export const WEAPONS: readonly WeaponDef[] = [
     id: "axe", name: "Bearded Axe", cls: "melee", delivery: "melee", range: 2.2, arc: 90, maxTargets: 2, windup: 0.25,
     destroys: "light", stack: 1,
     // Chop: 6 s cooldown and T2/T3 trimmed (D-balance-2): an uncooled chop every 0.8 s killed in 0.8 s.
-    tiers: [T(1, 60, { damage: 30, rate: 0.8, heavy: 66, heavyTime: 0.8, cooldown: 6 }), T(6, 300, { damage: 41, rate: 0.8, heavy: 85, heavyTime: 0.75, cooldown: 6 }), T(12, 900, { damage: 52, rate: 0.8, heavy: 104, heavyTime: 0.7, cooldown: 6 })],
+    // Rate 0.8 → 0.9 (D-balance-6): at the server's 0.85 allowance, chop + light killed a 88–90 HP starter in 0.68 s.
+    tiers: [T(1, 60, { damage: 30, rate: 0.9, heavy: 66, heavyTime: 0.8, cooldown: 6 }), T(6, 300, { damage: 41, rate: 0.9, heavy: 85, heavyTime: 0.75, cooldown: 6 }), T(12, 900, { damage: 52, rate: 0.9, heavy: 104, heavyTime: 0.7, cooldown: 6 })],
   },
   {
     id: "hammer", name: "Quarry Hammer", cls: "melee", delivery: "melee", range: 2.3, arc: 100, maxTargets: 3, windup: 0.35,

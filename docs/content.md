@@ -260,9 +260,9 @@ Heat = shots until a 1.5 s overheat lockout. Explosions fall off linearly from t
 | **Riverstaff** bo staff (melee) | I | 1 | 13 | 0.40 | 3.0 m | melee arc 150°, ≤ 4 targets, windup 0.10 | none | every 3rd hit in a row knocks back 3.0 m; RMB block 50% | light | 60 |
 | | II | 6 | 18 | 0.40 | 3.0 m | same | none | knockback 3.5 m; block 55% | light | 300 |
 | | III | 12 | 23 | 0.40 | 3.0 m | same | none | knockback 4.0 m; block 60% | light | 900 |
-| **Bearded Axe** (melee) | I | 1 | 30 | 0.80 | 2.2 m | melee arc 90°, ≤ 2 targets, windup 0.25 | none | RMB charge 0.8 s heavy chop 66 (heavy destruction), **6 s chop cooldown** (D-balance-2) | light / heavy on chop | 60 |
-| | II | 6 | 41 | 0.80 | 2.2 m | same | none | chop 0.75 s → **85** (was 90, D-balance-2) | same | 300 |
-| | III | 12 | 52 | 0.80 | 2.2 m | same | none | chop 0.70 s → **104** (was 114, D-balance-2) | same | 900 |
+| **Bearded Axe** (melee) | I | 1 | 30 | **0.90** (was 0.80, D-balance-6) | 2.2 m | melee arc 90°, ≤ 2 targets, windup 0.25 | none | RMB charge 0.8 s heavy chop 66 (heavy destruction), **6 s chop cooldown** (D-balance-2) | light / heavy on chop | 60 |
+| | II | 6 | 41 | **0.90** | 2.2 m | same | none | chop 0.75 s → **85** (was 90, D-balance-2) | same | 300 |
+| | III | 12 | 52 | **0.90** | 2.2 m | same | none | chop 0.70 s → **104** (was 114, D-balance-2) | same | 900 |
 | **Quarry Hammer** (melee) | I | 1 | 40 | 1.10 | 2.3 m | melee arc 100°, ≤ 3 targets, windup 0.35; move ×0.9 | none | RMB charge 1.0 s ground slam 55, radius 3.0 m (edge 50%), knock-up 1 m, 6 s cooldown | heavy | 60 |
 | | II | 6 | 54 | 1.10 | 2.3 m | same | none | slam 74, r 3.5 m | heavy | 300 |
 | | III | 12 | 70 | 1.10 | 2.3 m | same | none | slam **86** (was 96, D-balance-2), r 4.0 m | heavy | 900 |
@@ -345,7 +345,7 @@ any level against any level.
 | Fists | 4.8 s / 13 | 6.4 / 17 | 7.6 / 20 | 9.2 / 24 | 9.2 / 24 |
 | Sunbrand | 2.25 / 6 | 2.25 / 6 | 2.25 / 6 | 2.25 / 6 | 4.5 / 11 |
 | Riverstaff | 2.8 / 8 | 2.8 / 8 | 2.4 / 7 | 3.2 / 9 | 5.6 / 15 |
-| Bearded Axe | 2.4 / 4 | 2.4 / 4 | 2.4 / 4 | 2.4 / 4 | 4.8 / 7 |
+| Bearded Axe (rate 0.9, D-balance-6) | 2.7 / 4 | 2.7 / 4 | 2.7 / 4 | 2.7 / 4 | 5.4 / 7 |
 | Quarry Hammer | 2.2 / 3 | 2.2 / 3 | 2.2 / 3 | 2.2 / 3 | 4.4 / 5 |
 | Hexquill | 2.4 / 7 | 2.4 / 7 | 2.4 / 7 | 2.8 / 8 | 6.3 / 13 |
 | Emberglass Staff (direct + burn) | 2.4 / 4 | 2.4 / 4 | 2.4 / 4 | 2.4 / 4 | 6.3 / 7 |
@@ -387,6 +387,12 @@ next pass with play data.
 **Review round 1** (Codex gpt-6.1-sol, `docs/reviews/2026-11-12-balance-starters-gpt-6.1-sol.md`; D-balance-5…8):
 
 - Melee damage lands on the press (`melee()`); the §2.3 `windup` values are not a delay (D-balance-5). No numbers changed.
+- Two cadences (D-balance-6): §2.5's bands at the shipped client's; the hard floor (two hits and ≥ 0.75 s against
+  every starter) at the fastest the server accepts (0.85 × rate, 0.9 × charge).
+
+| Number | Old | New | Why (model, before → after) |
+|---|---:|---:|---|
+| Bearded Axe rate (all tiers) | 0.80 | 0.90 | at the server's cadence chop + light killed an 88–90 HP starter at L1/6/12 in 0.68 s → 0.77 s; sustained DPS 44 / 68 / 99 → 40 / 61 / 89, PvP 2.4 → 2.7 s body, 1.6 → 1.8 s with the chop |
 
 ---
 

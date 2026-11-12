@@ -31,7 +31,11 @@ export const OPENER_FLOOR = 1.4;
 export const FISTS_FLOOR = 3.5;
 /** §2.5: the largest single hit (a Stillshot headshot) is 73–86% of an equal-level target. */
 export const BIGGEST_HIT = 0.86;
-/** Per-starter HP shifts TTK: against the most fragile starter, still two hits and this long (D-balance-4). */
+/**
+ * Per-starter HP shifts TTK: against every starter, still two hits and this long (D-balance-4). A hard floor,
+ * held at the fastest cadence the server accepts (a modified client can play it; D-balance-6), with
+ * heavies and specials.
+ */
 export const STARTER_TTK_FLOOR = 0.75;
 /** [04]: each weapon's TTK within 0.6–1.6× its class median. */
 export const CLASS_BAND: [number, number] = [0.6, 1.6];
@@ -61,8 +65,8 @@ export function checks(): Check[] {
   }
 
   // --- PvP at equal level
-  const fragile = Math.min(...STARTER_STATS.map((s) => s.hp));
-  const fragileIdx = STARTER_STATS.findIndex((s) => s.hp === fragile);
+  // One starter per HP multiplier at or under the base: the hard floor holds against each body (higher HP only helps).
+  const bodies = STARTER_STATS.map((s, i) => ({ hp: s.hp, i })).filter((x, k, all) => x.hp <= 1 && all.findIndex((y) => y.hp === x.hp) === k);
   for (const level of PVP_LEVELS) {
     const cells = COMBAT_FAMILIES.map((f) => pvpCell(f, level));
     for (const c of cells) {
@@ -76,8 +80,11 @@ export function checks(): Check[] {
       add({ id: `pvp.ttk.${name}`, what: `${name} TTK (primary, body)`, value: fmt(c.ttk), band: `${band[0]}–${band[1]} s`, ok: inBand(c.ttk, ...band), source: "content §2.5" });
       add({ id: `pvp.opener.${name}`, what: `${name} TTK with heavies/specials`, value: fmt(c.openerTtk), band: `≥ ${OPENER_FLOOR} s`, ok: c.openerTtk >= OPENER_FLOOR - 1e-9, source: "content §2.5 burst floor" });
       add({ id: `pvp.biggest.${name}`, what: `${name} biggest hit ÷ HP`, value: fmt(c.biggestShare), band: `≤ ${BIGGEST_HIT}`, ok: c.biggestShare <= BIGGEST_HIT + 1e-9, source: "content §2.5 no one-shots" });
-      const vsFragile = pvpCell(c.family, level, starterMaxHp(fragileIdx, level));
-      add({ id: `pvp.fragile.${name}`, what: `${name} vs ${STARTERS[fragileIdx]!.name}: TTK with specials / biggest hit ÷ HP`, value: `${fmt(vsFragile.openerTtk)} s / ${fmt(vsFragile.biggestShare)}`, band: `≥ ${STARTER_TTK_FLOOR} s and < 1`, ok: vsFragile.openerTtk >= STARTER_TTK_FLOOR && vsFragile.biggestShare < 1, source: "D-balance-4" });
+      for (const b of bodies) {
+        const v = pvpCell(c.family, level, starterMaxHp(b.i, level), undefined, "server");
+        const fast = { t: v.openerTtk, hits: v.openerHits };
+        add({ id: `pvp.floor.${name}.${STARTERS[b.i]!.id}`, what: `${name} vs ${STARTERS[b.i]!.name} (${v.targetHp} HP) at the server's cadence: fastest kill (heavies, specials) / biggest hit ÷ HP`, value: `${fmt(fast.t)} s, ${fast.hits} hits / ${fmt(v.biggestShare)}`, band: `≥ ${STARTER_TTK_FLOOR} s, ≥ 2 hits, < 1`, ok: fast.t >= STARTER_TTK_FLOOR - 1e-9 && fast.hits >= 2 && v.biggestShare < 1, source: "D-balance-4, D-balance-6" });
+      }
     }
     for (const cls of ["melee", "magic", "ranged"]) {
       const cc = cells.filter((c) => c.family !== "fists" && classOf(c.family) === cls);
