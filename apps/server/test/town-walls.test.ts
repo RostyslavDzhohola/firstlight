@@ -10,6 +10,7 @@ import { NPC_INDEX } from "@firstlight/shared/content/npcs";
 import { structureCollider } from "@firstlight/shared/planet/town";
 import { townDir } from "@firstlight/shared/planet/townFrame";
 import { WEAPON_INDEX, WEAPONS } from "@firstlight/shared/content/weapons";
+import { starterMaxHp } from "@firstlight/shared/content/starters";
 import { PF } from "@firstlight/shared/net/schema";
 import { matchMaker } from "@colyseus/core";
 import type { Game } from "../src/app.ts";
@@ -161,7 +162,7 @@ describe("players' attacks on the real path", () => {
     shooter.send("fire", { ...shot(shooter, town(44.5, 4.5, 1)), slot });
     await waitFor(() => fired.length === 2);
     await new Promise((ok) => setTimeout(ok, 1500));
-    expect(st(shooter).players.get(target.sessionId).hp).toBe(100);
+    expect(st(shooter).players.get(target.sessionId).hp).toBe(starterMaxHp(1, 1)); // Brother Ash's full HP (D-balance-4)
   }, 30_000);
 });
 

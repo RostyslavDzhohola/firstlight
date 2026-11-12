@@ -83,7 +83,8 @@ export const WEAPONS: readonly WeaponDef[] = [
     id: "axe", name: "Bearded Axe", cls: "melee", delivery: "melee", range: 2.2, arc: 90, maxTargets: 2, windup: 0.25,
     destroys: "light", stack: 1,
     // Chop: 6 s cooldown and T2/T3 trimmed (D-balance-2): an uncooled chop every 0.8 s killed in 0.8 s.
-    tiers: [T(1, 60, { damage: 30, rate: 0.8, heavy: 66, heavyTime: 0.8, cooldown: 6 }), T(6, 300, { damage: 41, rate: 0.8, heavy: 85, heavyTime: 0.75, cooldown: 6 }), T(12, 900, { damage: 52, rate: 0.8, heavy: 104, heavyTime: 0.7, cooldown: 6 })],
+    // Rate 0.8 → 0.9 (D-balance-6): at the server's 0.85 allowance, chop + light killed a 88–90 HP starter in 0.68 s.
+    tiers: [T(1, 60, { damage: 30, rate: 0.9, heavy: 66, heavyTime: 0.8, cooldown: 6 }), T(6, 300, { damage: 41, rate: 0.9, heavy: 85, heavyTime: 0.75, cooldown: 6 }), T(12, 900, { damage: 52, rate: 0.9, heavy: 104, heavyTime: 0.7, cooldown: 6 })],
   },
   {
     id: "hammer", name: "Quarry Hammer", cls: "melee", delivery: "melee", range: 2.3, arc: 100, maxTargets: 3, windup: 0.35,
@@ -114,13 +115,15 @@ export const WEAPONS: readonly WeaponDef[] = [
     id: "scatterpipe", name: "Scatterpipe", cls: "ranged", delivery: "pellets", range: 10, falloffTo: 22, falloffMin: 0.3, spread: 7, adsSpread: 5,
     destroys: "light", stack: 1,
     // 7 pellets × 6 / 8 / 10 damage (content.md §2.3, §2.5 "all 7 pellets").
-    tiers: [T(1, 60, { damage: 6, pellets: 7, rate: 0.9, mag: 6, reload: 2.0 }), T(6, 300, { damage: 8, pellets: 7, rate: 0.9, mag: 7, reload: 1.8 }), T(12, 900, { damage: 10, pellets: 7, rate: 0.9, mag: 8, reload: 1.6 })],
+    // headMult 1 (D-balance-8): two ×1.5 head volleys killed in 0.9 s, under §2.5's 1.4 s burst floor.
+    tiers: [T(1, 60, { damage: 6, pellets: 7, rate: 0.9, mag: 6, reload: 2.0, headMult: 1 }), T(6, 300, { damage: 8, pellets: 7, rate: 0.9, mag: 7, reload: 1.8, headMult: 1 }), T(12, 900, { damage: 10, pellets: 7, rate: 0.9, mag: 8, reload: 1.6, headMult: 1 })],
   },
   {
     id: "longbow", name: "Yew Longbow", cls: "ranged", delivery: "arrow", range: 100, speed: 55, gravity: 9.8,
     destroys: "light", stack: 1,
     // rate = draw + the 0.35 s recovery content §2.3 lists (D-balance-2): the 0.5 s rate let full draws chain.
-    tiers: [T(1, 60, { damage: 45, tap: 15, rate: 1.35, draw: 1.0, headMult: 1.5, zoom: 1.8 }), T(6, 300, { damage: 61, tap: 20, rate: 1.25, draw: 0.9, headMult: 1.5, zoom: 1.8 }), T(12, 900, { damage: 75, tap: 25, rate: 1.15, draw: 0.8, headMult: 1.5, zoom: 1.8 })],
+    // Then 1.4 at every tier (D-balance-8): a head + body pair of full draws killed in 1.35 / 1.25 / 1.15 s.
+    tiers: [T(1, 60, { damage: 45, tap: 15, rate: 1.4, draw: 1.0, headMult: 1.5, zoom: 1.8 }), T(6, 300, { damage: 61, tap: 20, rate: 1.4, draw: 0.9, headMult: 1.5, zoom: 1.8 }), T(12, 900, { damage: 75, tap: 25, rate: 1.4, draw: 0.8, headMult: 1.5, zoom: 1.8 })],
   },
   {
     id: "stillshot", name: "Stillshot Rifle", cls: "ranged", delivery: "hitscan", range: 150, spread: 4, adsSpread: 0,
@@ -131,7 +134,8 @@ export const WEAPONS: readonly WeaponDef[] = [
     id: "comet", name: "Comet Launcher", cls: "ranged", delivery: "projectile", range: 80, speed: 30, gravity: 0,
     destroys: "heavy", stack: 1,
     // headMult 1: explosives take no weak-point bonus (content §2.1; D-balance-2): a ×1.5 rocket one-shot.
-    tiers: [T(1, 90, { damage: 70, splash: 45, radius: 3.5, rate: 1.8, mag: 1, reload: 1.8, knockback: 4, headMult: 1 }), T(6, 450, { damage: 95, splash: 61, radius: 4, rate: 1.7, mag: 1, reload: 1.7, knockback: 4, headMult: 1 }), T(12, 1350, { damage: 123, splash: 79, radius: 4.5, rate: 1.6, mag: 1, reload: 1.6, knockback: 4, headMult: 1 })],
+    // T3 rate/reload 1.6 → 1.65 (D-balance-8): the slower longbow raised the L20 ranged median (class band).
+    tiers: [T(1, 90, { damage: 70, splash: 45, radius: 3.5, rate: 1.8, mag: 1, reload: 1.8, knockback: 4, headMult: 1 }), T(6, 450, { damage: 95, splash: 61, radius: 4, rate: 1.7, mag: 1, reload: 1.7, knockback: 4, headMult: 1 }), T(12, 1350, { damage: 123, splash: 79, radius: 4.5, rate: 1.65, mag: 1, reload: 1.65, knockback: 4, headMult: 1 })],
   },
   {
     id: "grenade", name: "Scrapburst Grenade", cls: "support", delivery: "thrown", range: 20, speed: 18, gravity: 9.8, fuse: 1.6,
@@ -182,8 +186,10 @@ export const WEAPONS: readonly WeaponDef[] = [
     id: "ember_seal", name: "Ember Seal", cls: "magic", delivery: "projectile", range: 30, speed: 24, gravity: 0,
     destroys: "heavy", stack: 1, hidden: true,
     // Direct hit includes the blast for the victim (like rockets); burn refreshes, never stacks.
-    // Direct 30/40/52 → 24/32/42 (D-balance-3): the seal opener on top of the dart stream made Hinoko win every starter duel.
-    tiers: [T(1, 0, { damage: 24, splash: 20, radius: 2.5, burn: 4, rate: 0.4 }), T(6, 0, { damage: 32, splash: 27, radius: 2.75, burn: 5, rate: 0.4 }), T(12, 0, { damage: 42, splash: 35, radius: 3, burn: 6, rate: 0.4 })],
+    // Direct 30/40/52 → 24/32/42 (D-balance-3), then 30/40/42 (D-balance-7): with darts waiting the rate after a
+    // seal and a throw breaking the hold, T1/T2 didn't need the trim; T3 keeps it.
+    // headMult 1 (D-balance-8): an explosive, like the Comet (content §2.1); a ×1.5 head hit put Hinoko under the floors.
+    tiers: [T(1, 0, { damage: 30, splash: 20, radius: 2.5, burn: 4, rate: 0.4, headMult: 1 }), T(6, 0, { damage: 40, splash: 27, radius: 2.75, burn: 5, rate: 0.4, headMult: 1 }), T(12, 0, { damage: 42, splash: 35, radius: 3, burn: 6, rate: 0.4, headMult: 1 })],
   },
 ];
 

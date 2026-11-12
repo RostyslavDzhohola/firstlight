@@ -115,6 +115,23 @@ describe("ninja starter: Ember Kunai and Ember Seal", () => {
     await waitFor(() => denied.includes("cooldown"));
   });
 
+  it("a throw breaks the hand seal: darts during the hold leave nothing to cast (D-balance-7)", async () => {
+    const { a, b, denied, hp } = await duel();
+    a.send("charge", { on: true });
+    await hold(150);
+    a.send("fire", { slot: 0, ...aimAt(a, b), t: Date.now() }); // a dart mid-seal
+    await waitFor(() => hp() < ASH_HP);
+    const afterDart = hp();
+    await hold(400); // the hold, counted from the charge start, is long past 0.4 s now
+    a.send("fire", { slot: 0, ...aimAt(a, b), t: Date.now(), seal: true });
+    await waitFor(() => denied.includes("not charged"));
+    await hold(600);
+    expect(hp()).toBe(afterDart); // no fireball
+    // Held again after the throw, the seal casts (the cooldown never started).
+    await seal(a, aimAt(a, b));
+    await waitFor(() => hp() <= afterDart - SEAL.tiers[0].damage);
+  });
+
   it("a charge started with another item in hand doesn't cast (no fists-to-kunai seal)", async () => {
     const { a, b, denied, hp } = await duel();
     a.send("equip", { slot: 1 }); // empty slot: fists

@@ -1735,3 +1735,46 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
 - **D-security-6 (2026-11-12):** `POST /api/account/name`: 6 attempts per account and 20 per client address (IPv6 per /64) per 10 minutes, refused ones included; a successful change starts a 60 s cooldown; asking for the name the account already has (after trimming) answers `ok` without writing. Over a limit: 429 with a message the name card shows ("Too many name changes…"). Why: each change wrote game.db and the auth user with no limit (security pass finding 6).
 - **D-security-7 (2026-11-12):** Facing is a unit vector: the server normalises the `input` facing before storing it and ignores a zero-length one (the previous facing stays; the position still counts), and the block check divides by the facing's length too (zero never blocks). Why: input only bounded each component, so a facing of (1,1,1) widened the 60° block half-angle to about 73° (security pass finding 7).
 - **D-security-8 (2026-11-12):** The admin-claim limiter (`ClaimLimiter`) uses the shared bounded `WindowLimiter`: a refused attempt records nothing, at most 10,000 addresses are remembered (new ones are refused past that), and idle addresses expire on every call. The limits themselves (5 per address per 10 minutes, 30 an hour overall) are unchanged. Why: once the global budget was spent every rejected request inserted a key, and the 10,000-key clean-up sat on a path that was then unreachable (security pass finding 8).
+- **D-balance-5 (2026-11-12):** Melee damage lands on the press, as the server's `melee()` applies it: the
+  catalogue's `windup` (0.05–0.35 s) is no delay anywhere in the game (neither server nor client reads it), and
+  the balance model no longer delays melee hits by it (review finding 3). Why: the model penalised melee in
+  duels and PvE with a delay the game doesn't have. A real windup would need a delayed hit on the server
+  (rewound against the target's position at release) and client prediction, a combat change larger than this
+  pass, and nothing says melee needs slowing: with the delay gone Brother Ash wins 9 of 16 duels (was 8) and
+  every check stays in band. The field stays as data for a future swing animation.
+- **D-balance-6 (2026-11-12):** The balance model runs two cadences: the shipped client's (each attack waits
+  the tier's rate, charges and seals their full time) and the fastest the server accepts (`consumeAttack`'s
+  0.85 × rate jitter allowance, 0.9 × heavyTime for charges and seals), which a modified client can play every
+  time. §2.5's design bands and floors (sustained 2.2–3.5 s, burst 1.4–3.5 s, the 1.4 s opener floor, DPS and
+  class bands, duels, PvE) are measured at the client's cadence; D-balance-4's hard floor (every kill takes two
+  hits and ≥ 0.75 s, against every starter's HP, heavies and specials included) holds at the server's.
+  Bearded Axe rate 0.8 → 0.9 (all tiers) brings the chop + light back over it (0.68 → 0.77 s against Hinoko and
+  Hexwick at L1/6/12). Why: review finding 1. The hard floor is the guarantee no client may break, so it holds
+  against what the server accepts. Holding §2.5's 1.4 s there too would slow the honest game by ~15% everywhere
+  (the Stillshot's head + body, §2.5's own 1.4 s example, is 1.19 s at 0.85 × its rate): balancing around a
+  cheat. That 15% is the server's to close (accept an early attack only to make up for a late one, or hold it
+  until due), a follow-up for the lead. The axe's rate is the smallest fix: the chop alone would need
+  66/85/104 → 57/73/87.
+- **D-balance-7 (2026-11-12):** A throw breaks the Ember Seal's hand seal: `combat.ts` `fire()` drops the
+  charge when a dart goes out, and the client throws nothing while a seal is held. The model holds the seal
+  after the last dart and makes the dart after a seal wait the rate (`castSpecial()` calls `markAttack()`).
+  Ember Seal direct 24/32/42 → 30/40/42: T1/T2 back to the content's values, T3 keeps D-balance-3's trim. Why:
+  review finding 2. The server already made the next dart wait after a seal, but it also let the hold run
+  while darts flew and the seal skips the rate gate, so a dart and a seal could leave in the same instant and
+  every mid-fight seal cost no dart time; modelled as the server ran, Hinoko won all 16 starter duels again
+  and Unit 7 led no role, even with the seal cut to 12/16/21. A hand seal that is a real commitment (0.4 s
+  with no throws, as content §2.3 describes it) is the smaller change: it is what D-balance-3 had assumed. With
+  it, D-balance-3's trim was larger than needed at T1/T2 (30/40 pass every check: Hinoko 12 duel wins, Unit 7
+  14) but not at T3 (52 hands Hinoko the duels at L12/L20 and Unit 7 leads nothing), so T1/T2 are restored and
+  T3 is kept.
+- **D-balance-8 (2026-11-12):** §2.5's 1.4 s burst floor gates best play too: every weapon's kill with
+  headshots, heavies and specials (base HP, the client's cadence), and D-balance-6's hard floor counts
+  headshots against every starter body. Scatterpipe headMult 1.5 → 1 and Ember Seal headMult 1.5 → 1 (all
+  tiers); Yew Longbow rate 1.35/1.25/1.15 → 1.4; Comet Launcher III rate and reload 1.6 → 1.65. Why: review
+  finding 4: the gate covered body hits and openers only, and three weapons were under it: two ×1.5 Scatterpipe
+  volleys killed in 0.9 s, a longbow head + body in 1.35/1.25/1.15 s, the kunai with a ×1.5 seal fireball in
+  1.14 s (L1/6/12). Pellets are point-blank burst, not precision, and the seal is an explosive (§2.1 gives explosives
+  ×1.0, as D-balance-2 did for the Comet), so neither takes a head bonus. The bow keeps its ×1.5 (its
+  identity) and fires a full draw every 1.4 s, the Stillshot's head + body time; a smaller head bonus would
+  have had to fall to ×1.05 at T3. The bow's slower T3 raised the L20 ranged median and left the Comet at 0.59×
+  it (class band 0.6), hence 1.65. Each change is load-bearing: reverting any one fails the checks.

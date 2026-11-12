@@ -260,9 +260,9 @@ Heat = shots until a 1.5 s overheat lockout. Explosions fall off linearly from t
 | **Riverstaff** bo staff (melee) | I | 1 | 13 | 0.40 | 3.0 m | melee arc 150°, ≤ 4 targets, windup 0.10 | none | every 3rd hit in a row knocks back 3.0 m; RMB block 50% | light | 60 |
 | | II | 6 | 18 | 0.40 | 3.0 m | same | none | knockback 3.5 m; block 55% | light | 300 |
 | | III | 12 | 23 | 0.40 | 3.0 m | same | none | knockback 4.0 m; block 60% | light | 900 |
-| **Bearded Axe** (melee) | I | 1 | 30 | 0.80 | 2.2 m | melee arc 90°, ≤ 2 targets, windup 0.25 | none | RMB charge 0.8 s heavy chop 66 (heavy destruction), **6 s chop cooldown** (D-balance-2) | light / heavy on chop | 60 |
-| | II | 6 | 41 | 0.80 | 2.2 m | same | none | chop 0.75 s → **85** (was 90, D-balance-2) | same | 300 |
-| | III | 12 | 52 | 0.80 | 2.2 m | same | none | chop 0.70 s → **104** (was 114, D-balance-2) | same | 900 |
+| **Bearded Axe** (melee) | I | 1 | 30 | **0.90** (was 0.80, D-balance-6) | 2.2 m | melee arc 90°, ≤ 2 targets, windup 0.25 | none | RMB charge 0.8 s heavy chop 66 (heavy destruction), **6 s chop cooldown** (D-balance-2) | light / heavy on chop | 60 |
+| | II | 6 | 41 | **0.90** | 2.2 m | same | none | chop 0.75 s → **85** (was 90, D-balance-2) | same | 300 |
+| | III | 12 | 52 | **0.90** | 2.2 m | same | none | chop 0.70 s → **104** (was 114, D-balance-2) | same | 900 |
 | **Quarry Hammer** (melee) | I | 1 | 40 | 1.10 | 2.3 m | melee arc 100°, ≤ 3 targets, windup 0.35; move ×0.9 | none | RMB charge 1.0 s ground slam 55, radius 3.0 m (edge 50%), knock-up 1 m, 6 s cooldown | heavy | 60 |
 | | II | 6 | 54 | 1.10 | 2.3 m | same | none | slam 74, r 3.5 m | heavy | 300 |
 | | III | 12 | 70 | 1.10 | 2.3 m | same | none | slam **86** (was 96, D-balance-2), r 4.0 m | heavy | 900 |
@@ -278,18 +278,18 @@ Heat = shots until a 1.5 s overheat lockout. Explosions fall off linearly from t
 | **Pocket Carbine** blaster (ranged) | I | 1 | 9 | 0.25 | full to 25 m, 60% at 45 m | hitscan + bolt tracer; hip 1.5°, ADS 0.3° | mag 24, reload 1.4 s | RMB ADS 1.4× | light | 60 |
 | | II | 6 | 12 | 0.25 | same | same | mag 28, 1.3 s | | light | 300 |
 | | III | 12 | 16 | 0.25 | same | same | mag 32, 1.2 s | | light | 900 |
-| **Scatterpipe** shotgun (ranged) | I | 1 | 7 pellets × 6 | 0.90 | full to 10 m, 30% at 22 m | hitscan pellets, 7° cone (ADS 5°) | mag 6, reload 2.0 s | | light | 60 |
+| **Scatterpipe** shotgun (ranged) | I | 1 | 7 pellets × 6 | 0.90 | full to 10 m, 30% at 22 m | hitscan pellets, 7° cone (ADS 5°) | mag 6, reload 2.0 s | **no weak-point bonus (×1.0, D-balance-8)**: point-blank pellets are the burst | light | 60 |
 | | II | 6 | 7 × 8 | 0.90 | same | same | mag 7, 1.8 s | | light | 300 |
 | | III | 12 | 7 × 10 | 0.90 | same | same | mag 8, 1.6 s | | light | 900 |
-| **Yew Longbow** (ranged) | I | 1 | tap 15; full draw 45 | draw 1.0 + 0.35 recovery (code `rate` **1.35**, was 0.5, D-balance-2) | ~100 m arc | arcing projectile, 25 → 55 m/s by draw, gravity 9.8 | none | hold RMB to draw (zoom 1.8× at full), LMB to loose; head ×1.5 | light | 60 |
-| | II | 6 | 20; 61 | draw 0.9 (rate **1.25**) | same | same | none | | light | 300 |
-| | III | 12 | 25; 75 | draw 0.8 (rate **1.15**) | same | same | none | T3 full draw trimmed from 79 to 75 so two body hits never kill at the L12 gate | light | 900 |
+| **Yew Longbow** (ranged) | I | 1 | tap 15; full draw 45 | draw 1.0, a full draw every **1.4** s (code `rate`; 0.5 → 1.35 by D-balance-2, 1.4 by D-balance-8) | ~100 m arc | arcing projectile, 25 → 55 m/s by draw, gravity 9.8 | none | hold RMB to draw (zoom 1.8× at full), LMB to loose; head ×1.5 | light | 60 |
+| | II | 6 | 20; 61 | draw 0.9 (rate **1.4**, was 1.25) | same | same | none | | light | 300 |
+| | III | 12 | 25; 75 | draw 0.8 (rate **1.4**, was 1.15) | same | same | none | T3 full draw trimmed from 79 to 75 so two body hits never kill at the L12 gate | light | 900 |
 | **Stillshot Rifle** sniper (ranged) | I | 1 | 45 body; head ×1.8 = 81 | 1.40 | 150 m, no falloff | hitscan; unscoped spread 4°, scoped 0° | mag 4, reload 2.2 s | RMB scope 4×; lens glint visible to anyone ≥ 30 m away while scoped | light | 90 |
 | | II | 6 | 61 (head 110) | 1.40 | same | same | mag 5, 2.0 s | scope 5× | light | 450 |
 | | III | 12 | 75 (head 135) | 1.40 | same | same | mag 5, 1.8 s | scope 6× (75, not 79, to keep 3 body shots) | light | 1,350 |
 | **Comet Launcher** rocket (ranged) | I | 1 | direct 70 total; splash 45 at centre, r 3.5 m | 1.80 (reload) | detonates at 80 m | projectile 30 m/s, straight | mag 1, reload 1.8 s | knockback 4 m; self ×0.5; move ×0.85; props ×2; **no weak-point bonus (×1.0, D-balance-2)** | heavy | 90 |
 | | II | 6 | 95; splash 61, r 4.0 m | 1.70 | same | same | reload 1.7 s | | heavy | 450 |
-| | III | 12 | 123; splash 79, r 4.5 m | 1.60 | same | same | reload 1.6 s | | heavy | 1,350 |
+| | III | 12 | 123; splash 79, r 4.5 m | **1.65** (was 1.60, D-balance-8) | same | same | reload **1.65 s** | | heavy | 1,350 |
 | **Scrapburst Grenade** (support) | I | 1 | 70 at centre, r 4.0 m | 0.8 throw cooldown | ~20 m throw | thrown arc 18 m/s, bounces, fuse 1.6 s | stack 5 | self ×0.5; props ×2 | heavy | 15 ea |
 | | II | 6 | 95, r 4.5 m | 0.8 | same | fuse 1.5 s | stack 5 | | heavy | 40 ea |
 | | III | 12 | 123, r 5.0 m | 0.8 | same | fuse 1.4 s | stack 5 | | heavy | 90 ea |
@@ -300,12 +300,12 @@ Heat = shots until a 1.5 s overheat lockout. Explosions fall off linearly from t
 | | II | 6 | 200 per 100 max HP | 22 s | r 3.5 m, 7 s | | | | none | 400 |
 | | III | 12 | 260 per 100 max HP | 20 s | r 4.0 m, 8 s | | | | none | 1,000 |
 | **Radio** (item) | – | 1 | – | – | same planet, any distance | channels 1–9, talk on B, crackle filter, max 8 per channel | – | drops on death | none | **100** (D) |
-| **Ember Kunai** (ranged; the ninja's starter, HANDOFF 6h) | I | 1 | 13 | 0.38 | 35 m | thrown dart, 42 m/s, gravity 4 | mag 8, reload 1.3 s | RMB: hold 0.4 s hand seal, release: **Ember Seal** fireball (below), 8 s cooldown | light | 60 |
+| **Ember Kunai** (ranged; the ninja's starter, HANDOFF 6h) | I | 1 | 13 | 0.38 | 35 m | thrown dart, 42 m/s, gravity 4 | mag 8, reload 1.3 s | RMB: hold 0.4 s hand seal (a throw breaks it, D-balance-7), release: **Ember Seal** fireball (below), 8 s cooldown | light | 60 |
 | | II | 6 | 18 | 0.38 | same | same, pierce 1 | mag 9, 1.2 s | seal cooldown 7.5 s | light | 300 |
 | | III | 12 | 24 | 0.38 | same | same, pierce 1 | mag 10, 1.1 s | seal cooldown 7 s | light | 900 |
-| **Ember Seal** (the kunai's alt; not an item) | I | 1 | **24** (was 30, D-balance-3) direct incl. blast; splash 20 in 2.5 m; burn 4/s × 3 s | cooldown | 30 m | fireball 24 m/s, straight | the kunai tier's cooldown | spends no kunai; the server times the 0.4 s seal | heavy | – |
-| | II | 6 | **32** (was 40); splash 27 in 2.75 m; burn 5/s | | same | same | | | heavy | – |
-| | III | 12 | **42** (was 52); splash 35 in 3.0 m; burn 6/s | | same | same | | | heavy | – |
+| **Ember Seal** (the kunai's alt; not an item) | I | 1 | **30** (24 under D-balance-3, restored by D-balance-7) direct incl. blast; splash 20 in 2.5 m; burn 4/s × 3 s | cooldown | 30 m | fireball 24 m/s, straight | the kunai tier's cooldown | spends no kunai; the server times the 0.4 s seal; **no weak-point bonus (×1.0, an explosive, D-balance-8)** | heavy | – |
+| | II | 6 | **40** (32 under D-balance-3, restored); splash 27 in 2.75 m; burn 5/s | | same | same | | | heavy | – |
+| | III | 12 | **42** (was 52, D-balance-3, kept); splash 35 in 3.0 m; burn 6/s | | same | same | | | heavy | – |
 
 ### 2.4 Starter weapons (D)
 
@@ -333,7 +333,8 @@ starter (`STARTER_LOOKS`; `PlayerState.look` and the saved character store the i
 
 **Target (new):** at equal level with the gated tier and 100% accuracy:
 - **2.2–3.5 s** for sustained weapons.
-- **1.4–1.8 s floor** for burst weapons that need a headshot, a direct rocket hit or point-blank pellets.
+- **1.4–1.8 s floor** for burst weapons that need a headshot, a direct rocket hit or point-blank pellets. The
+  1.4 s floor holds for every weapon with headshots, heavies and specials too (D-balance-8).
 - **No one-shot kills at equal level.** The largest single hit is a Stillshot headshot at 73–86% of
   the target's HP.
 
@@ -345,16 +346,16 @@ any level against any level.
 | Fists | 4.8 s / 13 | 6.4 / 17 | 7.6 / 20 | 9.2 / 24 | 9.2 / 24 |
 | Sunbrand | 2.25 / 6 | 2.25 / 6 | 2.25 / 6 | 2.25 / 6 | 4.5 / 11 |
 | Riverstaff | 2.8 / 8 | 2.8 / 8 | 2.4 / 7 | 3.2 / 9 | 5.6 / 15 |
-| Bearded Axe | 2.4 / 4 | 2.4 / 4 | 2.4 / 4 | 2.4 / 4 | 4.8 / 7 |
+| Bearded Axe (rate 0.9, D-balance-6) | 2.7 / 4 | 2.7 / 4 | 2.7 / 4 | 2.7 / 4 | 5.4 / 7 |
 | Quarry Hammer | 2.2 / 3 | 2.2 / 3 | 2.2 / 3 | 2.2 / 3 | 4.4 / 5 |
 | Hexquill | 2.4 / 7 | 2.4 / 7 | 2.4 / 7 | 2.8 / 8 | 6.3 / 13 |
 | Emberglass Staff (direct + burn) | 2.4 / 4 | 2.4 / 4 | 2.4 / 4 | 2.4 / 4 | 6.3 / 7 |
 | Stormcoil (first target) | 2.8 / 5 | 2.8 / 5 | 2.8 / 5 | 3.5 / 6 | 7.8 / 10 |
 | Pocket Carbine | 2.75 / 12 | 2.5 / 11 | 2.25 / 10 | 2.75 / 12 | 5.0 / 21 |
 | Scatterpipe (all 7 pellets, ≤ 10 m) | 1.8 / 3 | 1.8 / 3 | 1.8 / 3 | 1.8 / 3 | 3.6 / 5 |
-| Yew Longbow (full draws, first one pre-drawn) | 2.7 / 3 | 2.5 / 3 | 2.3 / 3 | 2.3 / 3 | 5.4 / 5 |
+| Yew Longbow (full draws, first one pre-drawn; rate 1.4, D-balance-8) | 2.8 / 3 | 2.8 / 3 | 2.8 / 3 | 2.8 / 3 | 5.6 / 5 |
 | Stillshot Rifle, body / head + body | 2.8 / 3 · 1.4 / 2 | same | same | same | 7.8 / 5 |
-| Comet Launcher (direct hits) | 1.8 / 2 | 1.7 / 2 | 1.6 / 2 | 1.6 / 2 | 3.6 / 3 |
+| Comet Launcher (direct hits) | 1.8 / 2 | 1.7 / 2 | 1.65 / 2 | 1.65 / 2 | 3.6 / 3 |
 | Ember Kunai (all darts) | 2.7 / 8 | 2.7 / 8 | 2.3 / 7 | 2.7 / 8 | 5.3 / 15 |
 
 Format: seconds from the first hit / hits needed. PvE comparison: a regular L1 enemy with 22–60 HP dies to
@@ -383,6 +384,23 @@ body, 1.4 s with a headshot); the Marsh Wisp (0.25 s) and the Collector (0.5 s) 
 are even fights solo (margin 0.95–1.3 with two tonics). Splash damage (`explode`) is not scaled by the
 attacker's level multiplier in code, so splash falls behind direct hits at high level: a candidate for the
 next pass with play data.
+
+**Review round 1** (Codex gpt-6.1-sol, `docs/reviews/2026-11-12-balance-starters-gpt-6.1-sol.md`; D-balance-5…8):
+
+- Melee damage lands on the press (`melee()`); the §2.3 `windup` values are not a delay (D-balance-5). No numbers changed.
+- Two cadences (D-balance-6): §2.5's bands at the shipped client's; the hard floor (two hits and ≥ 0.75 s against
+  every starter) at the fastest the server accepts (0.85 × rate, 0.9 × charge).
+- A throw breaks the Ember Seal's hand seal (server and client), and the dart after a seal waits the rate (D-balance-7).
+- The 1.4 s floor gates best play (headshots, heavies, specials) at base HP, and the hard floor counts headshots too (D-balance-8).
+
+| Number | Old | New | Why (model, before → after) |
+|---|---:|---:|---|
+| Ember Seal direct I / II / III | 24 / 32 / 42 | 30 / 40 / 42 | with a throw breaking the hold (D-balance-7) and the dart after a seal waiting the rate, the T1/T2 trim wasn't needed (Hinoko 12 duel wins, Unit 7 14); 52 at T3 still hands Hinoko the L12/L20 duels |
+| Scatterpipe headMult (all tiers) | 1.5 (default) | 1.0 | two ×1.5 head volleys (63 each at L1) killed in 0.9 s at every level, under the 1.4 s floor → the body volley, 1.8 s / 3 |
+| Yew Longbow rate I / II / III | 1.35 / 1.25 / 1.15 | 1.4 / 1.4 / 1.4 | a head + body pair of full draws killed in 1.35 / 1.25 / 1.15 s → 1.4 s (the Stillshot's head + body); body 2.7 / 2.5 / 2.3 → 2.8 s; a lower head bonus would have needed ×1.05 at T3 |
+| Ember Seal headMult (all tiers) | 1.5 (default) | 1.0 | an explosive (§2.1, like the Comet); a ×1.5 fireball head hit put the kunai's best kill at 1.14 s (L1/6/12) and 0.65 s on Hinoko at L6 at the server's cadence → 1.52 s, ≥ 0.97 s |
+| Comet Launcher III rate / reload | 1.6 | 1.65 | knock-on of the longbow: the L20 ranged median rose and the Comet sat at 0.59× it (class band 0.6–1.6) → 0.61× |
+| Bearded Axe rate (all tiers) | 0.80 | 0.90 | at the server's cadence chop + light killed an 88–90 HP starter at L1/6/12 in 0.68 s → 0.77 s; sustained DPS 44 / 68 / 99 → 40 / 61 / 89, PvP 2.4 → 2.7 s body, 1.6 → 1.8 s with the chop |
 
 ### 2.7 Spells (new, 2026-11-12; code: `packages/shared/src/content/spells.ts`, D-spells-1…7)
 

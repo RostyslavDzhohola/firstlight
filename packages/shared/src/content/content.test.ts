@@ -44,7 +44,7 @@ function ttk(id: string, tier: 0 | 1 | 2, level: number): { seconds: number; hit
   let perHit = t.damage * (t.pellets ?? 1) * damageMult(level);
   if (w.delivery === "arrow") perHit = t.damage * damageMult(level);
   const hits = Math.ceil(hp / perHit);
-  let seconds = (hits - 1) * (w.delivery === "arrow" ? (t.draw ?? 1) + 0.35 : t.rate);
+  let seconds = (hits - 1) * (w.delivery === "arrow" ? Math.max(t.rate, t.draw ?? 1) : t.rate);
   if (t.mag && hits > t.mag) seconds += Math.floor((hits - 1) / t.mag) * (t.reload ?? 0);
   return { seconds, hits };
 }
@@ -85,13 +85,17 @@ describe("PvP time-to-kill (content.md §2.5)", () => {
   });
 });
 
-describe("balance pass (content.md §2.6, D-balance-2/3)", () => {
+describe("balance pass (content.md §2.6, D-balance-2/3/6/7/8)", () => {
   it("the tuned numbers", () => {
     expect(weapon("axe").tiers.map((t) => [t.heavy, t.cooldown])).toEqual([[66, 6], [85, 6], [104, 6]]);
     expect(weapon("hammer").tiers[2].heavy).toBe(86);
     expect(weapon("hexquill").tiers[2].damage).toBe(25);
-    expect(weapon("longbow").tiers.map((t) => +(t.rate - (t.draw ?? 0)).toFixed(2))).toEqual([0.35, 0.35, 0.35]);
+    expect(weapon("longbow").tiers.map((t) => t.rate)).toEqual([1.4, 1.4, 1.4]); // §2.5's 1.4 s burst floor (D-balance-8)
     expect(weapon("comet").tiers.map((t) => t.headMult)).toEqual([1, 1, 1]);
-    expect(weapon("ember_seal").tiers.map((t) => t.damage)).toEqual([24, 32, 42]);
+    expect(weapon("comet").tiers.map((t) => [t.rate, t.reload])).toEqual([[1.8, 1.8], [1.7, 1.7], [1.65, 1.65]]);
+    expect(weapon("scatterpipe").tiers.map((t) => t.headMult)).toEqual([1, 1, 1]);
+    expect(weapon("ember_seal").tiers.map((t) => t.headMult)).toEqual([1, 1, 1]);
+    expect(weapon("axe").tiers.map((t) => t.rate)).toEqual([0.9, 0.9, 0.9]); // D-balance-6
+    expect(weapon("ember_seal").tiers.map((t) => t.damage)).toEqual([30, 40, 42]); // D-balance-7 restored T1/T2
   });
 });

@@ -4,6 +4,7 @@
 
 import { STARTERS } from "../../packages/shared/src/content/weapons.ts";
 import { STARTER_STATS, starterMaxHp, starterMove } from "../../packages/shared/src/content/starters.ts";
+import { gatedTier } from "./model.ts";
 import { checks } from "./bands.ts";
 import {
   affordability, bossRows, COMBAT_FAMILIES, creatureRows, duelWins, progression, pvpCell, PVP_LEVELS, roleLeaders,
@@ -33,12 +34,19 @@ if (args.has("--json")) {
   table("Weapon DPS at the tier's gate level (sustained: 60 s with reloads, heat and cooldowns; burst: first 3 s with headshots)",
     ["Weapon", "T", "Lv", "Sustained", "Burst", "Biggest hit"],
     weaponTable().map((r) => [r.name, r.tier, r.level, f(r.sustainedDps, 1), f(r.burstDps, 1), r.biggestHit]));
-  table("PvP time to kill at equal level, gated tier, base HP (s from the first hit / hits; opener = with heavies and specials)",
-    ["Weapon", ...PVP_LEVELS.map((l) => `L${l}`), ...PVP_LEVELS.map((l) => `L${l} opener`)],
+  table("PvP time to kill at equal level, gated tier, base HP (s from the first hit / hits; opener = with heavies and specials; best = plus headshots)",
+    ["Weapon", ...PVP_LEVELS.map((l) => `L${l}`), ...PVP_LEVELS.map((l) => `L${l} opener`), ...PVP_LEVELS.map((l) => `L${l} best`)],
     COMBAT_FAMILIES.map((fam) => {
       const cs = PVP_LEVELS.map((l) => pvpCell(fam, l));
-      return [fam, ...cs.map((c) => `${f(c.ttk)}/${c.hits}`), ...cs.map((c) => `${f(c.openerTtk)}/${c.openerHits}`)];
+      return [fam, ...cs.map((c) => `${f(c.ttk)}/${c.hits}`), ...cs.map((c) => `${f(c.openerTtk)}/${c.openerHits}`), ...cs.map((c) => `${f(c.bestTtk)}/${c.bestHits}`)];
     }));
+  const frail = STARTER_STATS.reduce((m, s, i) => (s.hp < STARTER_STATS[m]!.hp ? i : m), 0);
+  table(`The hard floor at the server's accepted cadence (0.85 × rate, 0.9 × charge: a modified client) against ${STARTERS[frail]!.name}, the most fragile starter, heavies, specials and headshots included (s / hits; ≥ 0.75 s and 2 hits, D-balance-6)`,
+    ["Weapon", ...PVP_LEVELS.map((l) => `L${l}`)],
+    COMBAT_FAMILIES.map((fam) => [fam, ...PVP_LEVELS.map((l) => {
+      const c = pvpCell(fam, l, starterMaxHp(frail, l), fam === "fists" ? 0 : gatedTier(l), "server");
+      return c.bestTtk < c.openerTtk ? `${f(c.bestTtk)}/${c.bestHits}` : `${f(c.openerTtk)}/${c.openerHits}`;
+    })]));
   table("Creatures at their levels (player on level; TTK = solo, starter weapons min/median/max; margin = pack-kills-player at 50% hits ÷ pack clear)",
     ["Creature", "Tier", "Lv", "HP", "TTK min", "TTK med", "TTK max", "Kills player", "Pack", "Margin"],
     creatureRows().map((r) => [r.name, r.tier, r.enemyLevel, r.hp, f(r.ttkMin), f(r.ttkMedian), f(r.ttkMax), f(r.killsPlayerS, 1), r.packSize, f(r.margin)]));
