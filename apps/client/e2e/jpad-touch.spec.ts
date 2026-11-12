@@ -71,12 +71,15 @@ test.describe("Gamepad and touch", () => {
     const s0 = await player.until((s) => s.input.device === "pad" && s.input.captured === true, "the pad is the device and the input is captured", 10_000);
     expect(s0.input.pointerLocked, "no pointer lock needed").toBe(false);
 
-    // Walk: left stick forward.
+    // Walk: the left stick pushed directly away from the arrival portal (bearings are relative to where
+    // we face), so the walk can't end in a travel.
     const p0 = s0.player!.pos;
-    await stick(player, [0, -1, 0, 0], 1500);
+    const away = (((s0.portals?.[0]?.bearing ?? 180) + 180) * Math.PI) / 180;
+    await stick(player, [Math.sin(away), -Math.cos(away), 0, 0], 1200);
     const s1 = await player.snap();
     await player.note("pad walk", `${dist(p0, s1.player!.pos).toFixed(1)} m`);
     expect(dist(p0, s1.player!.pos), "the left stick walks").toBeGreaterThan(3);
+    expect(s1.body, "still on Arcadia").toBe("arcadia");
 
     // Look: right stick right.
     const h0 = s1.player!.heading;
@@ -98,7 +101,15 @@ test.describe("Gamepad and touch", () => {
     await press(player, BTN.DOWN);
     await expect(page.locator(".fl-padfocus"), "a focus ring on a menu item").toHaveCount(1);
     await player.shot("pad-pause-focus");
-    await press(player, BTN.B);
+    // A on Settings (the row under Resume) opens it: the Gamepad section with the layout.
+    const focused = await page.locator(".fl-padfocus").textContent();
+    if (/Settings/.test(focused ?? "")) {
+      await press(player, BTN.A);
+      await expect(page.locator('[data-e2e="settings-gamepad"]'), "Settings shows the Gamepad section").toBeVisible();
+      await page.locator('[data-e2e="settings-gamepad"]').scrollIntoViewIfNeeded();
+      await player.shot("pad-settings");
+      await press(player, BTN.B); // Esc in Settings goes straight back to the game
+    } else await press(player, BTN.B);
     await expect(page.locator('[data-e2e="pause-menu"]'), "B goes back to the game").toBeHidden();
     await player.until((s) => s.input.captured === true, "captured again", 5000);
 

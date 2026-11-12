@@ -58,8 +58,8 @@ function usable(el: HTMLElement): boolean {
 }
 
 /** The nearest scrolling ancestor (for controls in a long list scrolled out of view). */
-function scroller(el: HTMLElement): HTMLElement | null {
-  for (let p = el.parentElement; p; p = p.parentElement) {
+function scroller(el: HTMLElement, self = false): HTMLElement | null {
+  for (let p = self ? el : el.parentElement; p; p = p.parentElement) {
     const o = getComputedStyle(p).overflowY;
     if ((o === "auto" || o === "scroll") && p.scrollHeight > p.clientHeight) return p;
   }
@@ -163,7 +163,7 @@ export class FocusNav {
   /** Right stick in a menu: scroll the focused control's list (or the page). */
   scroll(dy: number): void {
     const cur = this.current();
-    const s = cur ? scroller(cur) : null;
+    const s = cur ? scroller(cur, true) : null; // a focused scrolling panel (How to play) scrolls itself
     (s ?? this.doc.scrollingElement)?.scrollBy?.({ top: dy });
   }
 
