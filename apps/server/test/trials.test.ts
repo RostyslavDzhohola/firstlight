@@ -13,9 +13,12 @@ import { TRIAL_RULES } from "../src/world/quests/trials.ts";
 import { npcSystemOf } from "../src/world/npc/index.ts";
 import { progressStore } from "../src/world/quests/store.ts";
 import { QuestSystem } from "../src/world/quests/QuestSystem.ts";
+import { onGameEvent } from "../src/world/events.ts";
+import { NF } from "@firstlight/shared/content/npcs";
+import { spawnNpc } from "./npc-bots.ts";
 import { characterRepo } from "../src/world/characters.ts";
 import { safeLeave, startServer, waitFor } from "./helpers.ts";
-import { bot, harness, invIds, me, objAt, offPad, serverRoom, sleep, tpAndWait, until, wrapRoom, type Bot } from "./quest-helpers.ts";
+import { bot, dieAndRejoin, harness, invIds, me, objAt, offPad, serverRoom, sleep, tpAndWait, until, wrapRoom, type Bot } from "./quest-helpers.ts";
 
 const SCALE = TRIAL_RULES.timeScale;
 const CALLS = PLAY_LIMITS.userCalls;
@@ -147,7 +150,7 @@ describe("race (T1, The Swift Gleam)", () => {
 });
 
 describe("defend (T2, The Steadfast Gleam; H4, The Long Vigil)", () => {
-  it("the beacon starts the clock, waves rise near the defender and pay nothing, and dissolve at the end", async () => {
+  it("the beacon starts the clock, waves rise near the defender, and dissolve at the end", async () => {
     TRIAL_RULES.timeScale = 0.06; // 5.4 s hold, waves at 0.1 / 1.3 / 2.7 / 3.9 s
     const a = await take("holder", ["T2"], "hollowmere");
     const c = await take("holder_b", ["T2"], "hollowmere");
@@ -163,6 +166,47 @@ describe("defend (T2, The Steadfast Gleam; H4, The Long Vigil)", () => {
     await until("both held", () => mission(a, "T2").done && mission(c, "T2").done, 15000);
     expect(a.last("missionDone")).toEqual({ id: "T2", xp: 1000, coins: 160 });
     await until("waves dissolved", () => trialNpcs(a) === 0, 3000);
+  });
+
+  it("a wave creature its runner kills pays nothing: no XP, coins, drops or hunt credit (an ordinary one does)", async () => {
+    TRIAL_RULES.timeScale = 0.3; // 27 s hold: the kill comes long before the end
+    const a = await take("wave_farmer", ["T2", "H1"], "hollowmere"); // H1: a hunt, to see no kill credit
+    a.send("npc", { cmd: "ambient", on: false });
+    await tpAndWait(a, objAt("t2_beacon"));
+    a.send("admin", { cmd: "unprotect" });
+    const room = serverRoom(a);
+    const npcs = npcSystemOf(room)!;
+    const kills: unknown[] = [];
+    const off = onGameEvent(room, (e) => {
+      if (e.type === "kill") kills.push(e);
+    });
+    try {
+      a.send("interact", { target: "t2_beacon" });
+      await until("a wave", () => trialNpcs(a) > 0);
+      const w = [...npcs.npcs.values()].find((n) => n.spawned?.reason === "trial")!;
+      await until("risen", () => (w.state.flags & NF.INVULN) === 0);
+      const me0 = actor(a).char;
+      const xp = me0.xp;
+      const coins = me0.coins;
+      const piles = room.state.piles.size;
+      const h1 = JSON.stringify(actor(a).char.missions.find((m) => m.id === "H1"));
+      a.send("npc", { cmd: "hurt", id: w.id, as: a.id, amount: 5000 });
+      await until("the wave creature falls", () => w.dead || !npcs.npcs.has(w.id));
+      await sleep(600); // a payout would have landed by now (it retries on later ticks)
+      expect(actor(a).char.xp).toBe(xp);
+      expect(actor(a).char.coins).toBe(coins);
+      expect(room.state.piles.size).toBe(piles);
+      expect(kills).toEqual([]); // no kill event: no hunt credit, medals or news
+      expect(JSON.stringify(actor(a).char.missions.find((m) => m.id === "H1"))).toBe(h1);
+      expect(a.msgs.get("npcKill")?.some((k: any) => k.id === w.id && (k.xp > 0 || k.coins > 0)) ?? false).toBe(false);
+      // The same kill on an ordinary Bonewalker pays: the path above is the one that pays.
+      const plain = await spawnNpc(a.room, "bonewalker", objAt("t2_beacon"), { level: 9, instant: true });
+      a.send("npc", { cmd: "hurt", id: plain, as: a.id, amount: 5000 });
+      await until("an ordinary kill pays XP", () => actor(a).char.xp > xp);
+      expect(kills.length).toBe(1);
+    } finally {
+      off();
+    }
   });
 
   it("leaving the ring pauses the clock, and staying out past the grace fails it", async () => {
@@ -400,26 +444,71 @@ describe("the Three Gleams", () => {
 
   it("hunt progress belongs to the life: a rebirth clears the gleams and the vault opens again; the medal stays", async () => {
     TRIAL_RULES.timeScale = 0.05;
-    let b = await take("lifer", ["T1"], "arcadia");
-    await runRings(b, "T1");
-    await until("T1", () => mission(b, "T1").done);
-    // A reconnect keeps a won gleam.
+    const capes = (b: Bot) => invIds(b).filter((id: string) => id === "gleamweave_cape").length;
+    /** Win T1, T2 and T3 in this life, then stand in Portus at the vault. */
+    async function winAll(uid: string, checkReconnect = false): Promise<Bot> {
+      let b = await take(uid, ["T1", "T2", "T3"], "arcadia");
+      await runRings(b, "T1");
+      await until("T1", () => mission(b, "T1").done);
+      await safeLeave(b.room);
+      if (checkReconnect) {
+        b = await bot(uid, "arcadia"); // a reconnect keeps a won gleam
+        expect(mission(b, "T1").done).toBe(true);
+        await safeLeave(b.room);
+      }
+      b = await bot(uid, "hollowmere");
+      await tpAndWait(b, objAt("t2_beacon"));
+      b.send("interact", { target: "t2_beacon" });
+      await until("T2", () => mission(b, "T2").done, 12000);
+      await safeLeave(b.room);
+      b = await bot(uid, "meridian");
+      await gather(b, "T3");
+      await until("T3", () => mission(b, "T3").done);
+      await safeLeave(b.room);
+      b = await bot(uid, "portus");
+      await tpAndWait(b, objAt("gleam_vault"));
+      return b;
+    }
+    async function openVault(b: Bot) {
+      const coins = b.you.coins;
+      b.send("interact", { target: "gleam_vault" });
+      await until("cape", () => capes(b) === 1);
+      await until("coins", () => b.you.coins === coins + GLEAMS.reward.coins);
+    }
+
+    // Life 1: the vault pays, the medal is earned, the Hall line engraved.
+    let b = await winAll("lifer", true);
+    await openVault(b);
+    await until("medal", () => b.you.medals.includes("three_gleams"));
+    expect(b.count("medal")).toBe(1);
+    expect(b.you.gleamVault).toBe(true);
     await safeLeave(b.room);
+
+    // Death and rebirth: missions, gleams and the vault's once-per-life flag go with the life.
     b = await bot("lifer", "arcadia");
-    expect(mission(b, "T1").done).toBe(true);
-    // Death and rebirth: missions (and gleams) are lost with the life.
-    await tpAndWait(b, offPad("arcadia", 0, 40));
-    b.send("admin", { cmd: "unprotect" });
-    await sleep(120);
-    b.send("admin", { cmd: "damage", args: { amount: 5000 } });
-    await waitFor(() => b.count("death") > 0);
-    b.send("respawn", { starter: 1, palette: 0 });
-    await waitFor(() => b.count("reborn") > 0);
+    b = (await dieAndRejoin(b, "lifer", "arcadia")).bot;
+    expect(b.you.missions).toEqual([]);
+    expect(b.you.gleamVault).toBe(false);
+    expect(b.you.medals).toContain("three_gleams"); // the medal stays with the account
     await safeLeave(b.room);
     b = await bot("lifer", "portus");
-    expect(b.you.missions).toEqual([]);
-    await tpAndWait(b, objAt("curator_sela"));
-    b.send("mission", { action: "accept", id: "T1" });
-    await until("re-accepted", () => !!mission(b, "T1"));
-  });
+    await tpAndWait(b, objAt("gleam_vault"));
+    b.send("interact", { target: "gleam_vault" });
+    await until("locked again", () => b.last("denied")?.reason === "vault locked");
+    await safeLeave(b.room);
+
+    // Life 2: win them again; the vault pays exactly once more, with no second medal or Hall line.
+    b = await winAll("lifer");
+    expect(capes(b)).toBe(0); // the first cape went into the death pile
+    const before = b.you.coins;
+    await openVault(b);
+    b.send("interact", { target: "gleam_vault" });
+    await until("once per life", () => b.last("denied")?.reason === "vault opened");
+    await sleep(300);
+    expect(capes(b)).toBe(1);
+    expect(b.you.coins).toBe(before + GLEAMS.reward.coins);
+    expect(b.count("medal")).toBe(0);
+    expect(b.you.medals).toContain("three_gleams");
+    expect(progressStore.current.hall().filter((e) => e.secretId === GLEAMS.firsts)).toHaveLength(1);
+  }, 120_000);
 });
