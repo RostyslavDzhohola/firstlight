@@ -195,6 +195,8 @@ export class FirstlightAgent {
   private tonicUntil = 0;
   private waiters: { type: string; test: (m: any) => boolean; resolve: (m: any) => void }[] = [];
   private joinGen = 0;
+  /** The room attach() is still taking over (its close is attach's failure, not a reconnect). */
+  private attaching: Room | null = null;
   private lastPatchAt = 0;
   /** Ticks spent standing because the server had gone quiet (see onTick). */
   stalls = 0;
@@ -279,7 +281,7 @@ export class FirstlightAgent {
           void room.leave().catch(() => {});
           throw new AgentError("superseded");
         }
-        await this.attach(room, body);
+        await this.attach(room, body, gen);
         return;
       }
       if ("queue" in r) {
@@ -298,47 +300,71 @@ export class FirstlightAgent {
     }
   }
 
-  private async attach(room: Room, body: BodyId): Promise<void> {
+  /**
+   * Take a joined room as the agent's world. `gen` is the join it belongs to: a `close()`, a newer
+   * join or the room going away while this waits makes it stale, and a stale attach never marks the
+   * agent playing or starts timers; it lets go of the room and throws instead.
+   */
+  private async attach(room: Room, body: BodyId, gen: number): Promise<void> {
+    const stale = () => gen !== this.joinGen || this.status === "closed" || this.room !== room;
     this.room = room;
-    this.bodyId = body;
-    this.world = bodyWorld(body);
-    this.walker.setWorld(this.world, (id) => !!(room.state as any)?.broken?.has?.(id));
-    this.seq = 0;
-    this.you = null;
-    this.huntIds = new Set();
-    this.trials.clear(); // an attempt doesn't outlive its room session (quests/trials.ts)
-    this.claims.clear();
-    room.onMessage("*", (type: string | number, m: any) => this.onMessage(String(type), m));
-    this.lastPatchAt = Date.now();
-    room.onStateChange(() => (this.lastPatchAt = Date.now())); // the server's clock is in the state: a patch every tick
-    room.onLeave((code: number) => this.onRoomClosed(room, code));
-    // The character appears in the synced state a patch after the join.
-    const t0 = Date.now();
-    while (!this.me() && Date.now() - t0 < 10_000 && this.room === room) await sleep(25);
-    const me = this.me();
-    if (!me) throw new AgentError("join", "joined, but the character never appeared in the room state");
-    // The private half (XP, coins, inventory) comes as a `you` message right after the join: the
-    // first look should have it. If it was sent before this handler existed, ask again: cancelling a
-    // logout that isn't running changes nothing and makes the server send `you`.
-    const t1 = Date.now();
-    let asked = false;
-    while (!this.you && Date.now() - t1 < 6000 && this.room === room) {
-      if (!asked && Date.now() - t1 > 500) {
-        asked = true;
-        room.send("logout", { start: false });
+    this.attaching = room;
+    try {
+      this.bodyId = body;
+      this.world = bodyWorld(body);
+      this.walker.setWorld(this.world, (id) => !!(room.state as any)?.broken?.has?.(id));
+      this.seq = 0;
+      this.you = null;
+      this.huntIds = new Set();
+      this.trials.clear(); // an attempt doesn't outlive its room session (quests/trials.ts)
+      this.claims.clear();
+      room.onMessage("*", (type: string | number, m: any) => this.onMessage(String(type), m));
+      this.lastPatchAt = Date.now();
+      room.onStateChange(() => (this.lastPatchAt = Date.now())); // the server's clock is in the state: a patch every tick
+      room.onLeave((code: number) => this.onRoomClosed(room, code));
+      // The character appears in the synced state a patch after the join.
+      const t0 = Date.now();
+      while (!stale() && !this.me() && Date.now() - t0 < 10_000) await sleep(25);
+      if (stale()) throw this.staleAttach(gen);
+      if (!this.me()) throw new AgentError("join", "joined, but the character never appeared in the room state");
+      // The private half (XP, coins, inventory) comes as a `you` message right after the join: the
+      // first look should have it. If it was sent before this handler existed, ask again: cancelling a
+      // logout that isn't running changes nothing and makes the server send `you`.
+      const t1 = Date.now();
+      let asked = false;
+      while (!stale() && !this.you && Date.now() - t1 < 6000) {
+        if (!asked && Date.now() - t1 > 500) {
+          asked = true;
+          room.send("logout", { start: false });
+        }
+        await sleep(25);
       }
-      await sleep(25);
+      // Checked after the last await, in the same step that installs the timers.
+      if (stale()) throw this.staleAttach(gen);
+      const me = this.me();
+      if (!me) throw new AgentError("join", "the character left the room state while joining");
+      this.walker.setStarter(me.starter); // the character's own pace and roll (content/starters.ts)
+      this.walker.place(me.x, me.y, me.z);
+      this.displayName = me.name;
+      this.status = "playing";
+      this.lastTick = Date.now();
+      this.stopTimers();
+      this.timer = setInterval(() => this.onTick(), TICK_MS);
+      this.pingTimer = setInterval(() => room.send("ping", { t: Date.now() }), 5000);
+      room.send("questSync", {});
+      this.log(`joined ${body} as ${me.name}${me.agent ? " [AI]" : ""}`);
+    } catch (e) {
+      // A failed attach leaves nothing behind: the room is let go (ours only), no timers were started.
+      if (this.room === room) this.room = null;
+      void Promise.resolve(room.leave()).catch(() => {});
+      throw e;
+    } finally {
+      if (this.attaching === room) this.attaching = null;
     }
-    this.walker.setStarter(me.starter); // the character's own pace and roll (content/starters.ts)
-    this.walker.place(me.x, me.y, me.z);
-    this.displayName = me.name;
-    this.status = "playing";
-    this.lastTick = Date.now();
-    this.stopTimers();
-    this.timer = setInterval(() => this.onTick(), TICK_MS);
-    this.pingTimer = setInterval(() => room.send("ping", { t: Date.now() }), 5000);
-    room.send("questSync", {});
-    this.log(`joined ${body} as ${me.name}${me.agent ? " [AI]" : ""}`);
+  }
+
+  private staleAttach(gen: number): AgentError {
+    return gen !== this.joinGen || this.status === "closed" ? new AgentError("superseded") : new AgentError("join", "the connection dropped while joining");
   }
 
   private stopTimers() {
@@ -350,6 +376,7 @@ export class FirstlightAgent {
   private onRoomClosed(room: Room, code: number) {
     if (this.room !== room) return; // we left it ourselves (travel, respawn, close)
     this.room = null;
+    if (this.attaching === room) return; // still joining it: attach() fails and its caller decides what next
     this.stopTimers();
     this.finish({ ok: false, reason: "disconnected" });
     if (this.status === "closed") return;
