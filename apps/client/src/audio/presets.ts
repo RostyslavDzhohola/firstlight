@@ -32,6 +32,13 @@ export const PRESETS = {
   ui: [0.4, 0, 520, , 0.005, 0.03, 0, 1, -30],
   denied: [0.5, 0, 160, , 0.04, 0.08, 2, 1],
   whistle: [0.6, 0, 1250, 0.02, 0.12, 0.12, 0, 1, 4, , 420, 0.1, , , , , , 0.8, 0.04], // two-note horse whistle
+  // The spellbook (content §2.6).
+  skipstep: [0.9, 0.05, 480, 0.01, 0.03, 0.16, 0, 1.4, 38, , , , , 0.3, , , , 0.6, 0.02], // a quick zip upward
+  frostbloom: [1.1, 0.05, 900, 0.01, 0.08, 0.38, 1, 1.8, -8, , 320, 0.06, , 0.25, , , 0.06, 0.6, 0.06], // glass breath
+  wishfallCast: [0.8, 0.02, 320, 0.08, 0.3, 0.55, 1, 1.2, 9, , 160, 0.12, 0.09, , , , , 0.7, 0.1], // a rising shimmer
+  wishfall: [1.8, 0.05, 105, 0.01, 0.14, 0.65, 3, 2, -3, , , , , 1.1, , 0.3, 0.12, 0.5, 0.2], // the star lands
+  ward: [0.9, 0, 640, 0.04, 0.2, 0.38, 0, 1, , , 230, 0.08, 0.06, , , , , 0.7, 0.08], // a glass chord
+  wardHit: [0.7, 0.02, 1500, , 0.01, 0.09, 1, 1.5, -22, , , , , , , , , 0.6], // tink
 } as const satisfies Record<string, Preset>;
 
 export type PresetName = keyof typeof PRESETS;

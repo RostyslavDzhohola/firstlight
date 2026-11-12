@@ -123,7 +123,7 @@ interface GameLike {
   };
   planet?: { terrain?: unknown; body?: { radius: number } };
   input?: { locked: boolean; enabled: boolean; sensitivity: number; invertY: boolean };
-  net?: { room: RoomLike | null; rtt?: number };
+  net?: { room: RoomLike | null; rtt?: number; serverOffset?: number };
   hud?: {
     you: {
       xp: number;
@@ -142,6 +142,18 @@ interface GameLike {
   photo?: { active: boolean };
   self?: { currentName?: string };
   systems?: unknown[];
+}
+/** game/SpellClient.ts, as the hook reads it. */
+interface SpellClientLike {
+  book: {
+    view(now: number): {
+      aether: number;
+      max: number;
+      ward: { hp: number; max: number; left: number } | null;
+      slots: { id: string; name: string; keycap: string; level: number; cost: number; locked: boolean; cooldown: number; ready: boolean; short: boolean }[];
+    };
+  };
+  castSpell(id: string, target?: readonly [number, number, number]): string | null;
 }
 /** A collider the player's movement uses (structures: town, outposts, waystones; props: trees, rocks…). */
 interface RayCollider {
@@ -185,11 +197,13 @@ interface SharedMods {
 
 export type FlEvent = { t: number; kind: string; [k: string]: unknown };
 
-const IN_TYPES = ["immune", "npcKill", "denied", "shot", "projectile", "swing", "hit", "toast", "death", "reborn", "explode", "loggedOut", "train", "onboarding", "correct"] as const;
-const OUT_TYPES = new Set(["fire", "melee", "train", "equip", "charge", "block", "scope", "use", "respawn", "logout", "travel", "onboarding", "admin", "interact", "pickup"]);
+const IN_TYPES = ["immune", "npcKill", "denied", "shot", "projectile", "swing", "hit", "toast", "death", "reborn", "explode", "loggedOut", "train", "onboarding", "correct", "spell"] as const;
+const OUT_TYPES = new Set(["fire", "melee", "train", "equip", "charge", "block", "scope", "use", "respawn", "logout", "travel", "onboarding", "admin", "interact", "pickup", "cast"]);
 const HUD_PARTS: [string, string][] = [
   ["playerCard", ".fl-me"],
   ["hotbar", ".fl-hotbar-wrap"],
+  ["spells", ".fl-spells"],
+  ["aether", ".fl-me__aether"],
   ["tutorial", ".fl-onb"],
   ["compass", ".fl-compass"],
   ["missions", ".fl-missions"],
@@ -307,6 +321,12 @@ export function installE2eHook(win: Window & typeof globalThis): void {
             e.killer = m.killerName;
           }
           if ("weapon" in m) e.weapon = m.weapon;
+          if (type === "spell") {
+            e.spell = m.spell;
+            e.phase = m.phase;
+            if ("amount" in m) e.amount = m.amount;
+            if (Array.isArray(m.hit)) e.hits = m.hit.length;
+          }
           if (type === "swing") e.hits = m.hits;
         }
         push(e);
@@ -316,7 +336,7 @@ export function installE2eHook(win: Window & typeof globalThis): void {
     room.send = (type: string, msg?: unknown, ...rest: unknown[]) => {
       if (OUT_TYPES.has(type)) {
         const m = (msg ?? {}) as Record<string, unknown>;
-        push({ t: performance.now(), kind: "out", type, ...(type === "admin" ? { cmd: m.cmd } : {}), ...("slot" in m ? { slot: m.slot } : {}), ...("on" in m ? { on: m.on } : {}), ...("heavy" in m ? { heavy: m.heavy } : {}) });
+        push({ t: performance.now(), kind: "out", type, ...(type === "admin" ? { cmd: m.cmd } : {}), ...("slot" in m ? { slot: m.slot } : {}), ...("on" in m ? { on: m.on } : {}), ...("heavy" in m ? { heavy: m.heavy } : {}), ...("spell" in m ? { spell: m.spell } : {}) });
       }
       return send(type, msg, ...rest);
     };
@@ -590,6 +610,9 @@ export function installE2eHook(win: Window & typeof globalThis): void {
   const npcRenderer = (g: GameLike): { views: Map<string, { dist: number; gone: boolean }> } | null =>
     ((g.systems ?? []).find((s) => !!s && typeof s === "object" && (s as { views?: unknown }).views instanceof Map && "telegraphs" in s) as { views: Map<string, { dist: number; gone: boolean }> } | undefined) ?? null;
 
+  const spellClient = (g: GameLike | null): SpellClientLike | null =>
+    ((g?.systems ?? []).find((s) => !!s && typeof s === "object" && "book" in s && typeof (s as { castSpell?: unknown }).castSpell === "function") as SpellClientLike | undefined) ?? null;
+
   const snapshot = () => {
     const g = game();
     const now = performance.now();
@@ -796,6 +819,18 @@ export function installE2eHook(win: Window & typeof globalThis): void {
       you: you ? { xp: you.xp, xpToNext: you.xpToNext, coins: you.coins, level: you.level, dead: you.dead } : null,
       weapon: def ? { id: def.id, name: def.name, delivery: def.delivery, range: def.range, tier: item?.tier ?? 1, slot: you?.selected ?? 0 } : null,
       hotbar: you ? you.hotbar.map((h) => (h ? { id: h.id, tier: h.tier, qty: h.qty } : null)) : null,
+      // The spellbook (game/SpellClient.ts): aether now, and each spell's key, lock, cooldown left (s) and readiness.
+      spells: (() => {
+        const sc = spellClient(g);
+        if (!sc) return null;
+        const v = sc.book.view(Date.now() + (g.net?.serverOffset ?? 0));
+        return {
+          aether: Math.round(v.aether * 10) / 10,
+          max: v.max,
+          ward: v.ward ? { hp: v.ward.hp, left: Math.round(v.ward.left * 10) / 10 } : null,
+          slots: v.slots.map((s) => ({ id: s.id, name: s.name, key: s.keycap, level: s.level, cost: s.cost, unlocked: !s.locked, cooldown: Math.round(s.cooldown * 10) / 10, ready: s.ready, short: s.short })),
+        };
+      })(),
       combat: { training: !!g.combat?.training, deadUntilRespawn: !!g.combat?.deadUntilRespawn },
       onboarding: ob
         ? { active: ob.active, paid: ob.paid, ended: ob.ended, step: ob.progress.steps.current?.id ?? null, done: ob.progress.steps.doneCount, allDone: ob.progress.steps.allDone }

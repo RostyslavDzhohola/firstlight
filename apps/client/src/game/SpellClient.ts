@@ -1,0 +1,298 @@
+// The spellbook on the client (content §2.6): the cast keys (Q / F / X / Z), what the crosshair is
+// on for Wishfall, the HUD's spell bar and aether, and the effects and sounds of every `spell`
+// event near us. The server decides everything (server/world/spells): a press sends `cast`, the
+// HUD shows it at once, and a refusal takes it back.
+
+import * as THREE from "three/webgpu";
+import { SPELL_INDEX, SPELLS, WISHFALL, type SpellDef, type SpellId } from "@firstlight/shared/content/spells";
+import type { CastMsg, SpellEvent, YouState } from "@firstlight/shared/net/protocol";
+import { PF } from "@firstlight/shared/net/schema";
+import { SpellFx } from "../render/spellFx.ts";
+import { SpellBar } from "../ui/spellBar.ts";
+import type { Game } from "./Game.ts";
+import { blockText, castDeniedText, SpellBook } from "./spellBook.ts";
+import type { ClientSystem } from "./systems.ts";
+
+const _o = new THREE.Vector3();
+const _d = new THREE.Vector3();
+const _v = new THREE.Vector3();
+const _w = new THREE.Vector3();
+
+interface Posed {
+  x: number;
+  y: number;
+  z: number;
+  flags?: number;
+  hp?: number;
+}
+interface RoomState {
+  players?: { get(id: string): Posed | undefined; forEach(cb: (p: Posed, id: string) => void): void };
+  npcs?: { get(id: string): Posed | undefined; forEach(cb: (n: Posed, id: string) => void): void };
+}
+
+export class SpellClient implements ClientSystem {
+  readonly book = new SpellBook();
+  readonly fx: SpellFx;
+  private readonly bar: SpellBar;
+  private readonly game: Game;
+  private readonly offs: (() => void)[] = [];
+  /** The spell last sent, for the refusal that answers it. */
+  private lastCast: SpellDef | null = null;
+  /** Notices already shown lately (text → when), so a held or mashed key says a thing once. */
+  private readonly said = new Map<string, number>();
+  /** Who is frosted (Frostbloom's slow) and until when (performance.now ms). */
+  private readonly chilled = new Map<string, number>();
+  private chillAt = 0;
+  /** Where each warded player's shell is drawn (smoothed between state patches). */
+  private readonly wardPos = new Map<string, THREE.Vector3>();
+  /** Our velocity last frame: a blink keeps it (the server's `correct` stops the body). */
+  private readonly vel = new THREE.Vector3();
+
+  constructor(game: Game) {
+    this.game = game;
+    this.fx = new SpellFx(game.ctx.scene, () => game.planet.terrain, (at, color, count, opts) => void game.burst(at, color, count, opts));
+    this.bar = new SpellBar(game.hud.spellSlot, game.hud.aetherSlot);
+    const you = game.hud.you;
+    if (you) this.book.setYou(you.spells, you.level);
+    const room = game.net.room;
+    if (!room) return; // offline: the bar shows a full book; nothing to cast at
+    const on = (type: string, cb: (m: never) => void) => {
+      const off = room.onMessage(type, cb as (m: unknown) => void) as unknown;
+      if (typeof off === "function") this.offs.push(off as () => void);
+    };
+    on("you", (m: YouState & { level: number }) => this.book.setYou(m.spells, m.level));
+    on("denied", (m: { action: string; reason: string }) => {
+      if (m.action !== "cast") return;
+      this.book.refused(this.serverNow());
+      const s = this.lastCast;
+      if (s) this.bar.pulse(SPELL_INDEX.get(s.id)!, "deny");
+      this.say(castDeniedText(m.reason, s ?? undefined));
+    });
+    on("spell", (m: SpellEvent) => this.onSpell(m));
+  }
+
+  private serverNow(): number {
+    return Date.now() + this.game.net.serverOffset;
+  }
+
+  private state(): RoomState | null {
+    return (this.game.net.room?.state as RoomState | undefined) ?? null;
+  }
+
+  private say(text: string | null) {
+    if (!text) return;
+    const now = performance.now();
+    if (now - (this.said.get(text) ?? -1e9) < 1500) return;
+    this.said.set(text, now);
+    this.game.hud.toast(text, "warn");
+    this.game.audio.play("denied");
+  }
+
+  // ------------------------------------------------------------------------------------ casting
+
+  /**
+   * Cast `id` the way its key does: checks what the client can see (level, cooldown, aether, safe
+   * zone, saddle), then sends `cast` with the camera's aim. `target`: Wishfall's ground point
+   * (default: what the crosshair is on). Returns why nothing was sent, or null when it was.
+   */
+  castSpell(id: SpellId, target?: readonly [number, number, number]): string | null {
+    const g = this.game;
+    const room = g.net.room;
+    const index = SPELL_INDEX.get(id);
+    if (!room || index === undefined) return "no room";
+    const s = SPELLS[index]!;
+    const now = this.serverNow();
+    const deny = (why: string, text: string) => {
+      this.bar.pulse(index, "deny");
+      this.say(text);
+      return why;
+    };
+    const why = this.book.block(id, now);
+    if (why) return deny(why, blockText(s, why));
+    const me = this.state()?.players?.get(room.sessionId);
+    if (me && (me.flags ?? 0) & PF.SAFE) return deny("safe zone", castDeniedText("safe zone", s)!);
+    if (g.player.saddleLocked) return deny("mounted", castDeniedText("mounted", s)!);
+    const cam = g.ctx.camera;
+    const d = cam.getWorldDirection(_d);
+    const msg: CastMsg = { spell: id, dx: d.x, dy: d.y, dz: d.z };
+    if (id === "wishfall") {
+      const t = target ?? this.crosshairPoint(WISHFALL.rangeM).toArray();
+      msg.tx = t[0];
+      msg.ty = t[1];
+      msg.tz = t[2];
+    }
+    room.send("cast", msg);
+    this.lastCast = s;
+    this.book.predict(id, now);
+    this.bar.pulse(index, "cast");
+    g.self?.trigger("cast");
+    return null;
+  }
+
+  /**
+   * What the crosshair is on within `range` metres of us: the feet of the creature or player nearest
+   * the camera ray, else where the ray meets the ground or something solid, else the point at range
+   * (the server puts it on the ground and checks the line from our head itself).
+   */
+  crosshairPoint(range: number): THREE.Vector3 {
+    const g = this.game;
+    const cam = g.ctx.camera;
+    const o = cam.getWorldPosition(_o);
+    const d = cam.getWorldDirection(_d);
+    const me = g.player.pos;
+    const head = _v.copy(me).addScaledVector(_w.copy(me).normalize(), 1.6);
+    // The camera sits behind the head: aiming starts there.
+    const skip = Math.max(0, head.sub(o).dot(d));
+    const max = skip + range;
+    let t = max;
+    const terrain = g.planet.terrain;
+    const R = terrain.body.radius;
+    for (let k = skip; k <= max; k += 1) {
+      _v.copy(o).addScaledVector(d, k);
+      const l = _v.length();
+      if (l < R + terrain.groundHeight(_v.x / l, _v.y / l, _v.z / l)) {
+        t = k;
+        break;
+      }
+    }
+    _v.copy(o).addScaledVector(d, skip);
+    for (const c of [g.player.getColliders(), g.player.getStructures()]) {
+      const hit = c?.raycast?.(_v, d, max - skip) ?? Infinity;
+      if (skip + hit < t) t = skip + hit;
+    }
+    // Someone under the crosshair: the star is called onto their feet.
+    const room = g.net.room;
+    const st = this.state();
+    let best: Posed | null = null;
+    let bestT = t;
+    const test = (p: Posed, h: number, r: number) => {
+      _v.set(p.x, p.y, p.z);
+      _v.addScaledVector(_w.copy(_v).normalize(), h).sub(o);
+      const along = _v.dot(d);
+      if (along < skip || along > bestT + r) return;
+      if (_v.addScaledVector(d, -along).length() > r) return;
+      best = p;
+      bestT = along;
+    };
+    st?.npcs?.forEach((n) => {
+      if ((n.hp ?? 1) > 0) test(n, 0.8, 1.3);
+    });
+    st?.players?.forEach((p, id) => {
+      if (id !== room?.sessionId && !((p.flags ?? 0) & PF.DEAD)) test(p, 1.0, 1.1);
+    });
+    const hit = best as Posed | null;
+    if (hit) return new THREE.Vector3(hit.x, hit.y, hit.z);
+    return new THREE.Vector3().copy(o).addScaledVector(d, t);
+  }
+
+  // ------------------------------------------------------------------------------------ events
+
+  private posOf(id: string): THREE.Vector3 | null {
+    const room = this.game.net.room;
+    if (id === room?.sessionId) return this.game.player.pos;
+    const st = this.state();
+    const p = st?.players?.get(id) ?? st?.npcs?.get(id);
+    return p ? _v.set(p.x, p.y, p.z) : null;
+  }
+
+  private onSpell(m: SpellEvent) {
+    const g = this.game;
+    const me = g.net.room?.sessionId;
+    const mine = m.by === me;
+    const at = new THREE.Vector3(m.x, m.y, m.z);
+    const heard = mine ? null : at;
+    switch (m.spell) {
+      case "skipstep": {
+        const to = new THREE.Vector3(m.tx ?? m.x, m.ty ?? m.y, m.tz ?? m.z);
+        this.fx.blink(at, to);
+        g.audio.play("skipstep", mine ? null : to);
+        if (mine) {
+          // The server moved us (its `correct` came first and stopped the body): keep running.
+          const up = _w.copy(g.player.pos).normalize();
+          g.player.vel.copy(this.vel).addScaledVector(up, -this.vel.dot(up));
+        }
+        break;
+      }
+      case "frostbloom": {
+        this.fx.frost(at, m.r ?? 5, m.ms ?? 3000);
+        g.audio.play("frostbloom", heard);
+        const until = performance.now() + (m.ms ?? 3000);
+        for (const id of m.hit ?? []) this.chilled.set(id, until);
+        break;
+      }
+      case "wishfall":
+        if (m.phase === "cast") {
+          this.fx.starFall(m.id ?? 0, at, m.r ?? WISHFALL.radiusM, m.ms ?? WISHFALL.telegraphS * 1000);
+          g.audio.play("wishfallCast", heard);
+        } else if (m.phase === "impact") {
+          this.fx.starImpact(m.id ?? 0, at, m.r ?? WISHFALL.radiusM);
+          g.audio.play("wishfall", at);
+          g.audio.play("explosion", at, 0.55);
+        }
+        break;
+      case "glasswing":
+        if (m.phase === "cast") {
+          const key = m.by;
+          this.wardPos.set(key, at.clone());
+          this.fx.ward(key, () => this.wardPos.get(key) ?? null, m.ms ?? 4000);
+          g.audio.play("ward", heard);
+        } else if (m.phase === "absorb") {
+          this.fx.wardHit(m.by);
+          g.audio.play("wardHit", heard);
+          if (m.from === me && !mine) {
+            // Our hit went into their shell: say so where a damage number would be.
+            g.audio.play("hitmark");
+            const p = at.clone().addScaledVector(at.clone().normalize(), 1.9).project(g.ctx.camera);
+            if (p.z <= 1) g.hud.damageNumber((p.x * 0.5 + 0.5) * innerWidth, (-p.y * 0.5 + 0.5) * innerHeight, m.amount ?? 0, false, "shield");
+          }
+        } else if (m.phase === "end") {
+          this.fx.wardEnd(m.by, !!m.broke);
+          this.wardPos.delete(m.by);
+          if (m.broke) g.audio.play("shatter", heard, 0.8, 1.5);
+        }
+        break;
+    }
+  }
+
+  // ------------------------------------------------------------------------------------ frame
+
+  update(dt: number, now: number) {
+    const g = this.game;
+    // Shells follow their owners: ours exactly, the others eased between state patches.
+    for (const [id, p] of this.wardPos) {
+      const to = this.posOf(id);
+      if (!to) this.wardPos.delete(id);
+      else if (id === g.net.room?.sessionId) p.copy(to);
+      else p.lerp(to, 1 - Math.exp(-dt * 16));
+    }
+    this.fx.update(dt);
+    if (this.chilled.size && now >= this.chillAt) {
+      this.chillAt = now + 110;
+      for (const [id, until] of this.chilled) {
+        const p = now < until ? this.posOf(id) : null;
+        if (!p) this.chilled.delete(id);
+        else this.fx.chill(_o.copy(p).addScaledVector(_w.copy(p).normalize(), 0.3 + Math.random() * 1.2));
+      }
+    }
+    this.bar.update(this.book.view(this.serverNow()));
+    this.vel.copy(g.player.vel);
+    // Photo mode owns the keys; the dead and the paused cast nothing. Keys work in the "Click to
+    // look around" state too (Input.inPlay, D-controls-4), like the hotbar's.
+    if (!g.net.room || g.photo?.active || g.combat.deadUntilRespawn || !g.input.inPlay) return;
+    for (const s of SPELLS) if (g.input.pressed.has(s.code)) this.castSpell(s.id);
+  }
+
+  dispose() {
+    for (const off of this.offs) off();
+    this.fx.dispose();
+    this.bar.dispose();
+    this.chilled.clear();
+    this.wardPos.clear();
+  }
+}
+
+/** CLIENT_SYSTEMS entry. Also runs offline (the HUD bar and the warmed effects; nothing casts without a server). */
+export function createSpellClient(game: Game): ClientSystem {
+  return new SpellClient(game);
+}
+createSpellClient.offline = true;

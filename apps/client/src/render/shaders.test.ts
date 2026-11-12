@@ -19,6 +19,7 @@ import { SkyPlanets } from "./skyPlanets.ts";
 import { LOOKS } from "./looks.ts";
 import { buildPost } from "./post.ts";
 import { WeatherFx } from "./weather.ts";
+import { SpellFx } from "./spellFx.ts";
 import { stripTexture } from "./townAssets.ts";
 import { townMaterial } from "./townMaterial.ts";
 import { SunLight } from "three/addons/lights/SunLight.js";
@@ -250,6 +251,14 @@ for (const backendName of ["webgpu", "webgl2"] as const) {
       expectClean(build(renderer, scene, camera, p.mesh));
       const blobs = new BlobShadows(scene);
       expectClean(build(renderer, scene, camera, blobs.mesh));
+    });
+
+    it("spell effects: decals, beams, glows, ice shards and the ward shell", () => {
+      const scene = sceneWithLights();
+      const fx = new SpellFx(scene, () => ({ body: { radius: 500, waterLevel: 0 }, groundHeight: () => 1 }) as never, () => {});
+      expect(fx.samples.map((m) => (m.material as THREE.Material).name)).toEqual(["spellDecal", "spellBeam", "spellGlow", "spellShard", "spellWard"]);
+      for (const m of fx.samples) expectClean(build(renderer, scene, camera, m));
+      fx.dispose();
     });
 
     it("weather: rain/dust box and lightning bolt", () => {

@@ -121,6 +121,9 @@ export class Hud {
   private readonly hotbarWrap = el("div", "fl-hotbar-wrap", this.layer);
   /** Bottom-right slot for the voice lane (own mic state, people in earshot). */
   readonly voiceSlot = el("div", "fl-hud__br", this.layer);
+  /** The spell bar's place, beside the hotbar, and the aether bar's, under HP on the player card (ui/spellBar.ts). */
+  spellSlot!: HTMLElement;
+  aetherSlot!: HTMLElement;
 
   // player card refs
   private faceSprite!: HTMLElement;
@@ -251,6 +254,8 @@ export class Hud {
     const small = el("small", "", val, " / ");
     this.hpMax = el("span", "", small, "100");
 
+    this.aetherSlot = el("div", "fl-me__aether", this.me);
+
     const xp = el("div", "fl-xprow", this.me);
     el("span", "k", xp, "XP");
     const xb = el("div", "fl-xpbar", xp);
@@ -281,6 +286,7 @@ export class Hud {
     el("span", "fl-key", r, "R");
     r.append("Reload");
     this.ammo.hidden = true;
+    this.spellSlot = el("div", "fl-hud__spells", this.hotbarWrap);
   }
 
   private buildMid() {
