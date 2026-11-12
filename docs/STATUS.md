@@ -26,17 +26,21 @@ Sonnet 5.5. What it adds:
   their review fixes. The HD pack files are still not shipped (over the lane's GPU-memory budget).
 - **Measured on the final build (quiet M1, 1280×720, default tier):** 60 fps standing and after a sprint on
   Portus, Arcadia, Hollowmere and Meridian, on WebGPU and on WebGL2 (p50 16.7 ms, p95 16.7–16.8 ms, no
-  frame over 100 ms, no console errors). `pnpm typecheck` clean; `pnpm test` 2,835 passed, 0 failed;
+  frame over 100 ms, no console errors). `pnpm typecheck` clean; `pnpm test` 2,837 passed, 0 failed;
   `pnpm balance` 650/650 in band; `pnpm e2e:gate` passed (32 journeys on WebGL2, 31 on WebGPU; run
-  before the last five HUD review fixes). A Sonnet 5.5 play-test of the first ten minutes found no
-  crash; its findings (night too dark, the mission tracker's three-row limit, the board's legibility,
-  grass at the camera, no guidance after the tutorial) are fixed (D-polish-*).
+  before the last HUD review fixes and trial-marker fixes). Two Sonnet 5.5 play-tests found no crash.
+  The first (first ten minutes) found night too dark, a three-row mission tracker, a hard-to-read board,
+  grass at the camera and no guidance after the tutorial: fixed (D-polish-*). The second won trial T1 by
+  hand, cast all four spells, died and rose, and started T2 and T3; its findings (the T2 beacon whiting
+  out the screen, rings invisible from the side, a prompt behind the death card) are fixed (D-polish-8…10)
+  but not re-shot in a browser.
 - **Before a deploy:** client first, then the server (protocol 6; migrations 8–10 run on boot, back up
   `game.db`); set `LOADTEST_ENABLED` only for load tests and check `LOADTEST_SECRET` is 32+ random bytes
   (D-security-1/2); decide `AGENTS_ENABLED` and the caps; run `pnpm e2e:gate` again and, after,
   `pnpm e2e:prod`.
 - **Open:** real-device checks for gamepad and touch (unit and emulated journeys only); trials T2 and T3
-  played only by server tests; frame times on a weaker machine than the M1 and on the Low tier; the
+  never finished by hand in a browser (server tests only); the board's rows are readable from 5 m, not
+  from the pad; the Linewyrm is hard to see and the play-tester's fight macro never hit it; frame times on a weaker machine than the M1 and on the Low tier; the
   planet features' GPU cost on a quiet machine for the frame-rate lane's cost model; the art packs
   within budget (#48); the home page's stats card (#12); whether agents and residents go live; the
   residents' end-to-end no-kill-stealing test depends on the live world (it retries).
