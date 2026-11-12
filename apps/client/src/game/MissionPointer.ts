@@ -7,7 +7,7 @@ import "../ui/missionPointer.css";
 import * as THREE from "three/webgpu";
 import { MISSION_BY_ID, missionGoal, trackedMission, type MissionDef } from "@firstlight/shared/content/missions";
 import { objectPos, WORLD_OBJECT_BY_ID } from "@firstlight/shared/content/world";
-import { placeCallout } from "../ui/calloutPlace.ts";
+import { placeCallout, type Rect } from "../ui/calloutPlace.ts";
 import { el } from "../ui/dom.ts";
 import type { Game } from "./Game.ts";
 import { huntTargets } from "./huntTargets.ts";
@@ -87,7 +87,7 @@ class MissionPointer implements ClientSystem {
       const h = this.box.offsetHeight;
       if (w > 0 && h > 0) this.boxSize = { w, h };
     }
-    const c = placeCallout(ndc, innerWidth, innerHeight, this.boxSize ?? { w: 160, h: 48 }, null);
+    const c = placeCallout(ndc, innerWidth, innerHeight, this.boxSize ?? { w: 160, h: 48 }, null, this.keepClear());
     const key = `${Math.round(c.x)},${Math.round(c.y)},${c.edge ? Math.round(c.angle * 20) : "-"},${c.flip ? 1 : 0}`;
     if (key === this.last.key) return;
     this.last.key = key;
@@ -96,6 +96,26 @@ class MissionPointer implements ClientSystem {
     this.callout.style.setProperty("--a", `${c.angle.toFixed(3)}rad`);
     this.callout.classList.toggle("is-edge", c.edge);
     this.callout.classList.toggle("is-flip", c.flip);
+  }
+
+  private clear: { w: number; h: number; rects: Rect[] } | null = null;
+
+  /**
+   * Where the label never goes (D-polish-ux-6): the crosshair, and the top-centre column (zone
+   * banner, boss bar, trial strip, earned banners). From the window size and the HUD's size unit
+   * (tokens.css `--u`), recomputed only on resize: no layout reads.
+   */
+  private keepClear(): Rect[] {
+    const w = innerWidth;
+    const h = innerHeight;
+    if (this.clear?.w === w && this.clear.h === h) return this.clear.rects;
+    const u = Math.min(19, Math.max(14, w * 0.00390625 + 9)); // tokens.css --u
+    const rects: Rect[] = [
+      { left: w / 2 - 3 * u, top: h / 2 - 3 * u, right: w / 2 + 3 * u, bottom: h / 2 + 3 * u },
+      { left: w / 2 - 22 * u, top: 0, right: w / 2 + 22 * u, bottom: 13 * u },
+    ];
+    this.clear = { w, h, rects };
+    return rects;
   }
 
   private readonly objAt = new Map<string, [number, number, number]>();

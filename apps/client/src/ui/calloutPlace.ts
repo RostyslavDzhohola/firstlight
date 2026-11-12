@@ -26,8 +26,11 @@ const ARROW_LABEL = 16;
 /**
  * `ndc` is three's `Vector3.project()` result: x and y in −1…1 on screen, z > 1 behind the camera
  * (where x and y come out mirrored). `box` is the label's size; `avoid` the open tutorial panel.
+ * `keepClear`: more screen areas the label stays off while its point is on screen (the mission
+ * pointer: the crosshair and the top-centre banners, D-polish-ux-6): it takes the other side of its
+ * point, else stands beside the area with an arrow back.
  */
-export function placeCallout(ndc: { x: number; y: number; z: number }, w: number, h: number, box: { w: number; h: number }, avoid: Rect | null): CalloutPlacement {
+export function placeCallout(ndc: { x: number; y: number; z: number }, w: number, h: number, box: { w: number; h: number }, avoid: Rect | null, keepClear: readonly Rect[] = []): CalloutPlacement {
   // A point on the camera plane projects to infinities: keep its side, never NaN.
   const finite = Number.isFinite(ndc.x) && Number.isFinite(ndc.y) && Number.isFinite(ndc.z);
   const behind = finite && ndc.z > 1;
@@ -36,10 +39,24 @@ export function placeCallout(ndc: { x: number; y: number; z: number }, w: number
   const px = (nx * 0.5 + 0.5) * w;
   const py = (-ny * 0.5 + 0.5) * h;
   if (finite && !behind && Math.abs(nx) < ON_SCREEN && Math.abs(ny) < ON_SCREEN) {
+    const rect = (f: boolean): Rect =>
+      f ? { left: px - DOT_LABEL.side - box.w, top: py - DOT_LABEL.up, right: px + 6, bottom: py + 6 } : { left: px - 6, top: py - DOT_LABEL.up, right: px + DOT_LABEL.side + box.w, bottom: py + 6 };
     const flip = px + DOT_LABEL.side + box.w > w - 8;
-    const r = flip
-      ? { left: px - DOT_LABEL.side - box.w, top: py - DOT_LABEL.up, right: px + 6, bottom: py + 6 }
-      : { left: px - 6, top: py - DOT_LABEL.up, right: px + DOT_LABEL.side + box.w, bottom: py + 6 };
+    const r = rect(flip);
+    if (keepClear.length) {
+      const hit = (q: Rect) => keepClear.find((k) => overlaps(q, k)) ?? null;
+      const blocker = hit(r);
+      if (!blocker && (!avoid || !overlaps(r, avoid))) return { x: px, y: py, edge: false, angle: 0, flip };
+      const other = rect(!flip);
+      if (blocker && !hit(other) && (!avoid || !overlaps(other, avoid)) && other.left >= 8 && other.right <= w - 8) return { x: px, y: py, edge: false, angle: 0, flip: !flip };
+      if (blocker) {
+        // Beside the area (the side with room), level with the point but below the area's top band.
+        const right = blocker.right + GAP + ARROW_LABEL + box.w <= w - 8;
+        const bx = right ? blocker.right + GAP : blocker.left - GAP;
+        const by = clamp(py, Math.max(MARGIN.top, blocker.top < 4 ? blocker.bottom + GAP : MARGIN.top), h - MARGIN.bottom);
+        return { x: bx, y: by, edge: true, angle: Math.atan2(py - by, px - bx), flip: !right };
+      }
+    }
     if (!avoid || !overlaps(r, avoid)) return { x: px, y: py, edge: false, angle: 0, flip };
     // Beside the panel, pointing back at the point behind it.
     const ax = avoid.right + GAP;
