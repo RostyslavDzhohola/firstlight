@@ -399,10 +399,12 @@ export function buildLandmarks(body: BodyId): SilhouetteBuilder | null {
   return BUILDERS[body]?.(BODIES[body].radius) ?? null;
 }
 
+/** Built by the first landmarks in the session to need it, disposed with the last (Landmarks.dispose). */
 let shared: THREE.MeshLambertNodeMaterial | null = null;
+let sharedUsers = 0;
 
 /** One material for every body's landmarks: vertex colour, lit by the scene's lights, fogged, self-lit where `glow` says. */
-export function landmarkMaterial(): THREE.MeshLambertNodeMaterial {
+function landmarkMaterial(): THREE.MeshLambertNodeMaterial {
   if (shared) return shared;
   const m = new THREE.MeshLambertNodeMaterial({ alphaTest: 0.5, side: THREE.DoubleSide });
   m.name = "landmarks";
@@ -428,22 +430,32 @@ export function landmarkMaterial(): THREE.MeshLambertNodeMaterial {
   return m;
 }
 
-const geometries = new Map<BodyId, THREE.BufferGeometry>();
+/**
+ * A body's landmark soup while a planet of it is up: shared by every Landmarks of that body, freed
+ * with the last one (planet graphics review, finding 4: they used to stay for the session, three
+ * bodies' vertex buffers after a tour, with no teardown).
+ */
+const geometries = new Map<BodyId, { geo: THREE.BufferGeometry; users: number }>();
 
 export class Landmarks {
   readonly group = new THREE.Group();
-  readonly mesh: THREE.Mesh | null = null;
+  /** Null on the hub (it has none) and after dispose(). */
+  mesh: THREE.Mesh | null = null;
+  private readonly body: BodyId;
 
   constructor(body: BodyId, _radius: number) {
     this.group.name = "landmarks";
-    let g = geometries.get(body);
-    if (!g) {
+    this.body = body;
+    let entry = geometries.get(body);
+    if (!entry) {
       const b = buildLandmarks(body);
       if (!b) return;
-      g = b.geometry();
-      geometries.set(body, g);
+      entry = { geo: b.geometry(), users: 0 };
+      geometries.set(body, entry);
     }
-    const mesh = new THREE.Mesh(g, landmarkMaterial());
+    entry.users++;
+    sharedUsers++;
+    const mesh = new THREE.Mesh(entry.geo, landmarkMaterial());
     mesh.name = `landmarks:${body}`;
     mesh.matrixAutoUpdate = false;
     mesh.castShadow = false;
@@ -463,8 +475,27 @@ export class Landmarks {
     /* planet-fixed: nothing moves on the CPU */
   }
 
+  /**
+   * Leaving the body: its geometry goes with the last Landmarks that drew it, and the material with
+   * the last Landmarks of any body (three frees their GPU buffers and shader build on `dispose`). The
+   * next arrival builds both again in its constructor, so the arrival's warm-up compiles them.
+   */
   dispose() {
-    // Geometries and the material live as long as the app (cached per body).
     this.group.removeFromParent();
+    const mesh = this.mesh;
+    if (!mesh) return;
+    this.mesh = null;
+    this.group.remove(mesh);
+    mesh.dispose(); // its own render state: a geometry or material that lives on would keep it (dispose.ts)
+    const entry = geometries.get(this.body);
+    if (entry && entry.geo === mesh.geometry && --entry.users <= 0) {
+      geometries.delete(this.body);
+      entry.geo.dispose();
+    }
+    if (--sharedUsers <= 0) {
+      sharedUsers = 0;
+      shared?.dispose();
+      shared = null;
+    }
   }
 }
