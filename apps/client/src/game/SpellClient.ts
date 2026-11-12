@@ -7,7 +7,9 @@ import * as THREE from "three/webgpu";
 import { SPELL_INDEX, SPELLS, WISHFALL, type SpellDef, type SpellId } from "@firstlight/shared/content/spells";
 import type { CastMsg, SpellEvent, YouState } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
+import { blastTrauma, CameraShake } from "../render/cameraShake.ts";
 import { SpellFx } from "../render/spellFx.ts";
+import { uiSettings } from "../ui/uiSettings.ts";
 import { SpellBar } from "../ui/spellBar.ts";
 import type { Game } from "./Game.ts";
 import { blockText, castDeniedText, SpellBook } from "./spellBook.ts";
@@ -47,6 +49,8 @@ export class SpellClient implements ClientSystem {
   private readonly wardPos = new Map<string, THREE.Vector3>();
   /** Our velocity last frame: a blink keeps it (the server's `correct` stops the body). */
   private readonly vel = new THREE.Vector3();
+  /** Screen shake from a star landing near us (content §0's trauma model; the settings toggle turns it off). */
+  readonly shake = new CameraShake();
 
   constructor(game: Game) {
     this.game = game;
@@ -61,14 +65,17 @@ export class SpellClient implements ClientSystem {
       if (typeof off === "function") this.offs.push(off as () => void);
     };
     on("you", (m: YouState & { level: number }) => this.book.setYou(m.spells, m.level));
-    on("denied", (m: { action: string; reason: string }) => {
+    on("denied", (m: { action: string; reason: string; req?: number }) => {
       if (m.action !== "cast") return;
-      this.book.refused(this.serverNow());
-      const s = this.lastCast;
+      // The refusal names its cast (`req`): that prediction goes, any other in flight stays.
+      const id = this.book.refused(this.serverNow(), m.req);
+      const s = id ? SPELLS[SPELL_INDEX.get(id)!]! : this.lastCast;
       if (s) this.bar.pulse(SPELL_INDEX.get(s.id)!, "deny");
       this.say(castDeniedText(m.reason, s ?? undefined));
     });
     on("spell", (m: SpellEvent) => this.onSpell(m));
+    // Wards that were up before we arrived (late join, reconnect): ask now that the handlers exist.
+    room.send("spellSync", {});
   }
 
   private serverNow(): number {
@@ -121,9 +128,9 @@ export class SpellClient implements ClientSystem {
       msg.ty = t[1];
       msg.tz = t[2];
     }
+    msg.req = this.book.predict(id, now);
     room.send("cast", msg);
     this.lastCast = s;
-    this.book.predict(id, now);
     this.bar.pulse(index, "cast");
     g.self?.trigger("cast");
     return null;
@@ -228,14 +235,17 @@ export class SpellClient implements ClientSystem {
           this.fx.starImpact(m.id ?? 0, at, m.r ?? WISHFALL.radiusM);
           g.audio.play("wishfall", at);
           g.audio.play("explosion", at, 0.55);
+          // The ground jumps: most inside the blast, nothing past 40 m.
+          this.shake.add(blastTrauma(at.distanceTo(g.player.pos), m.r ?? WISHFALL.radiusM));
         }
         break;
       case "glasswing":
         if (m.phase === "cast") {
           const key = m.by;
           this.wardPos.set(key, at.clone());
-          this.fx.ward(key, () => this.wardPos.get(key) ?? null, m.ms ?? 4000);
-          g.audio.play("ward", heard);
+          // `late`: it was up before we arrived (the answer to our `spellSync`): drawn, not announced.
+          this.fx.ward(key, () => this.wardPos.get(key) ?? null, m.ms ?? 4000, !!m.late);
+          if (!m.late) g.audio.play("ward", heard);
         } else if (m.phase === "absorb") {
           this.fx.wardHit(m.by);
           g.audio.play("wardHit", heard);
@@ -266,6 +276,14 @@ export class SpellClient implements ClientSystem {
       else p.lerp(to, 1 - Math.exp(-dt * 16));
     }
     this.fx.update(dt);
+    // After the controller has placed the camera for this frame (and never in photo mode: its camera is the player's to hold still).
+    const turn = this.shake.step(dt, uiSettings.get().shake && !g.photo?.active);
+    if (turn.roll !== 0 || turn.pitch !== 0 || turn.yaw !== 0) {
+      const cam = g.ctx.camera;
+      cam.rotateX(turn.pitch);
+      cam.rotateY(turn.yaw);
+      cam.rotateZ(turn.roll);
+    }
     if (this.chilled.size && now >= this.chillAt) {
       this.chillAt = now + 110;
       for (const [id, until] of this.chilled) {

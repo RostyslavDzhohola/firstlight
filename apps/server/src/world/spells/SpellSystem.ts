@@ -3,12 +3,13 @@
 // events and its private `you.spells` say.
 //
 // - Skipstep: the server walks the blink (skipstep.ts), moves the body and sends `correct`.
-// - Frostbloom: a nova through combat's dealDamage (walls shelter, safe zones and protection hold,
-//   friendly fire on), plus a slow: players through the NPC lane's movement effects (enforced by
+// - Frostbloom: a nova through combat's dealDamage (walls and Prism Bubbles shelter, safe zones and
+//   protection hold, friendly fire on), plus a slow: players through the NPC lane's movement effects (enforced by
 //   the movement budget, predicted by the client), creatures through NpcActor.slow (bosses: none).
 // - Wishfall: a warning ring now, combat's explode() when it lands (heavy destruction, the caster
 //   takes half, Prism Bubbles and walls shelter as from any blast).
 // - Glasswing Ward: CombatHost.wards; dealDamage takes an attacker's damage from the shell first.
+// Spell damage and the ward's shell scale with the caster's starter (spell power, content §8.5).
 //
 // Aether and cooldowns are kept per account at process level, like the support timers: a body hop
 // or a new room copy doesn't refill or reset them. A server restart does (they are short).
@@ -16,9 +17,10 @@
 import type { Client } from "@colyseus/core";
 import { z } from "zod";
 import {
-  AETHER, aetherAt, FROSTBLOOM, GLASSWING, SKIPSTEP, SPELL_BY_ID, SPELL_IDS, SPELL_INDEX, SPELLS, spellDamage, WISHFALL,
+  AETHER, aetherAt, FROSTBLOOM, GLASSWING, SKIPSTEP, SPELL_BY_ID, SPELL_IDS, SPELL_INDEX, SPELLS, spellDamage, wardShell, WISHFALL,
   type SpellDef, type SpellId,
 } from "@firstlight/shared/content/spells";
+import { starterSpellPower } from "@firstlight/shared/content/starters";
 import type { CastMsg, SpellEvent, YouState } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
 import { sandboxed } from "../../sandbox.ts";
@@ -29,6 +31,7 @@ import { emitGameEvent } from "../events.ts";
 import { dist3, PLAYER_RADIUS, rayTerrain, type V3 } from "../geometry.ts";
 import { groundMotion } from "../movement.ts";
 import { applyMoveEffect } from "../npc/effects.ts";
+import { splashShield } from "../support.ts";
 import type { RoomSystem } from "../systems.ts";
 import { skipstepPath } from "./skipstep.ts";
 
@@ -38,6 +41,8 @@ export const SPELL_NET = {
   radius: 160,
   /** After a blink, inputs still coming from the old place are dropped for at most this long (ms). */
   staleInputMs: 1000,
+  /** Wishfall's landing point is searched back toward the caster in steps this long (m). */
+  starStepM: 0.5,
 };
 
 interface Book {
@@ -78,9 +83,12 @@ const castSchema = z.object({
   tx: finite.optional(),
   ty: finite.optional(),
   tz: finite.optional(),
+  req: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
 });
 
 let starSeq = 1;
+/** The star's blast goes off this far above its ground point (m). */
+const STAR_BLAST_LIFT = 0.4;
 
 function lift(p: V3, h: number): V3 {
   const l = Math.hypot(p[0], p[1], p[2]) || 1;
@@ -93,11 +101,16 @@ export class SpellSystem implements RoomSystem {
   readonly wards = new Map<string, Ward>();
   /** Stars on their way down. */
   readonly stars: Star[] = [];
+  /** Session id → the last numbered cast (`cast.req`) dealt with, cast or refused (review 5). */
+  private readonly handled = new Map<string, number>();
+  /** Session id → the last `spellSync` answered (one a second). */
+  private readonly synced = new Map<string, number>();
   private lastPrune = 0;
 
   constructor(room: BodyRoom) {
     this.room = room;
     room.onMessage("cast", castSchema, (c: Client, m: CastMsg) => this.cast(c, m));
+    room.onMessage("spellSync", z.object({}).passthrough().optional(), (c: Client) => this.snapshot(c));
     room.host.wards = { absorb: (target, amount, attacker) => this.absorb(target, amount, attacker) };
   }
 
@@ -115,12 +128,15 @@ export class SpellSystem implements RoomSystem {
     const now = Date.now();
     const b = this.book(a, now);
     const w = this.wards.get(a.id);
+    const req = this.handled.get(a.id);
     you.spells = {
       aether: Math.round(aetherAt(b, now) * 10) / 10,
       t: now,
       regenAt: b.regenAt,
       ready: b.ready.map((r) => (r > now ? r : 0)),
       ...(w && w.until > now ? { ward: { hp: Math.round(w.hp), max: w.max, until: w.until } } : {}),
+      // Which of the client's casts this state includes: it shows the later ones on top of it.
+      ...(req !== undefined ? { req } : {}),
     };
   }
 
@@ -147,7 +163,9 @@ export class SpellSystem implements RoomSystem {
     const a = this.room.actors.get(c.sessionId);
     const def = SPELL_BY_ID.get(m.spell);
     if (!a || !def) return;
-    const deny = (reason: string) => void c.send("denied", { action: "cast", reason });
+    // A numbered cast is answered by number: the refusal carries it, and so does the next `you`.
+    if (m.req !== undefined) this.handled.set(a.id, m.req);
+    const deny = (reason: string) => void c.send("denied", { action: "cast", reason, ...(m.req !== undefined ? { req: m.req } : {}) });
     const now = Date.now();
     const b = this.book(a, now);
     const no = this.refusal(a, def, b, now);
@@ -176,8 +194,7 @@ export class SpellSystem implements RoomSystem {
         this.frostbloom(a, now);
         return true;
       case "wishfall":
-        this.wishfall(a, d, m, now);
-        return true;
+        return this.wishfall(a, d, m, now);
       case "glasswing":
         this.glasswing(a, now);
         return true;
@@ -204,6 +221,19 @@ export class SpellSystem implements RoomSystem {
     return true;
   }
 
+  /**
+   * The caster's spell power (content §8.5): the starter's multiplier on spell damage and on the
+   * ward's shell. Every spell number that depends on who casts goes through here and `damage`.
+   */
+  private power(a: PlayerActor): number {
+    return starterSpellPower(a.char.starter);
+  }
+
+  /** What a spell of `base` damage deals for this caster: the level curve and the starter's spell power. */
+  private damage(a: PlayerActor, base: number): number {
+    return spellDamage(base, a.char.level, this.power(a));
+  }
+
   private *actors(): Iterable<Actor> {
     yield* this.room.host.players();
     yield* this.room.host.npcs();
@@ -213,8 +243,11 @@ export class SpellSystem implements RoomSystem {
     const host = this.room.host;
     const at = actorPos(a);
     const chest = lift(at, 1.0);
-    const dmg = spellDamage(FROSTBLOOM.damage, a.char.level);
+    const dmg = this.damage(a, FROSTBLOOM.damage);
     const slowed: string[] = [];
+    // Prism Bubble shells shelter as from any blast: who (and which props) they cover is decided
+    // before any shell is charged, and each shell in the way pays once (review 1).
+    const shield = splashShield(host.bubbles, chest);
     // Who is in the ring is decided before anyone is hurt (a death mustn't change the list).
     const inRing: Actor[] = [];
     for (const t of this.actors()) {
@@ -222,6 +255,7 @@ export class SpellSystem implements RoomSystem {
       const r = t.kind === "player" ? PLAYER_RADIUS : t.radius;
       if (dist3(at, actorPos(t)) > FROSTBLOOM.radiusM + r) continue;
       const tc = lift(actorPos(t), t.kind === "player" ? 1.0 : Math.min(t.height * 0.5, 3));
+      if (shield.blocks(tc)) continue;
       if (wallBetween(host, chest, tc)) continue; // not through a wall (D-zones-3)
       inRing.push(t);
     }
@@ -231,9 +265,12 @@ export class SpellSystem implements RoomSystem {
       if (t.kind === "player") {
         if (t.dead) continue;
         // The NPC lane's slow: the movement budget enforces it, the client predicts it (npcFx).
-        const e = { kind: "slow" as const, seconds: FROSTBLOOM.slowS, amount: FROSTBLOOM.slow };
-        applyMoveEffect(t, e, now);
-        t.client?.send("npcFx", { kind: e.kind, ms: e.seconds * 1000, amount: e.amount, by: a.id });
+        applyMoveEffect(t, { kind: "slow", seconds: FROSTBLOOM.slowS, amount: FROSTBLOOM.slow }, now);
+        // The client is told the slow the server now holds, not the one asked for (review 4): a
+        // stronger slow already running wins and an equal one is extended (npc/effects.ts), and
+        // `set` has the client put this in place of whatever slows it was predicting.
+        const held = t.npcFx!;
+        t.client?.send("npcFx", { kind: "slow", ms: Math.max(0, held.slowUntil - now), amount: held.slow, by: a.id, set: true });
         slowed.push(t.id);
       } else if (t.state.hp > 0 && !t.boss) {
         slowNpc(t, FROSTBLOOM.slow, now + FROSTBLOOM.slowS * 1000);
@@ -241,67 +278,98 @@ export class SpellSystem implements RoomSystem {
       }
     }
     // Frost cracks what a light weapon breaks (crates, barrels, fences).
-    host.props?.splash(chest, FROSTBLOOM.radiusM, dmg, "light", "frostbloom", a.id, undefined, (c) => wallBetween(host, chest, c));
+    host.props?.splash(chest, FROSTBLOOM.radiusM, dmg, "light", "frostbloom", a.id, undefined, (c) => shield.blocks(c) || wallBetween(host, chest, c));
+    shield.charge(() => dmg); // flat in the ring, like the nova itself
     this.send({ spell: "frostbloom", phase: "cast", by: a.id, x: at[0], y: at[1], z: at[2], r: FROSTBLOOM.radiusM, ms: FROSTBLOOM.slowS * 1000, hit: slowed });
   }
 
   /**
-   * Where the star lands: the asked point (or what the ray from the head along the aim meets), no
-   * further than the range, pulled back to the first thing between the caster's head and it, on the ground.
+   * Where the star lands, or null when there is nowhere for it: the asked point (or what the ray
+   * from the head along the aim meets) is put on the ground, and from there the server searches
+   * back toward the caster for the farthest ground point that is
+   * - within the range of the caster's feet, measured to the ground point itself (review 2: from a
+   *   height or down a slope the ground under a point 30 m off is farther), and
+   * - in the clear (review 3): nothing between the caster's head and chest height over the point,
+   *   nor between there and where the blast goes off. The line is traced to each candidate itself,
+   *   so the star can't end up beneath a roof or inside a raised solid the first line met.
    */
-  starTarget(a: PlayerActor, d: V3, m: { tx?: number; ty?: number; tz?: number }): V3 {
+  starTarget(a: PlayerActor, d: V3, m: { tx?: number; ty?: number; tz?: number }): V3 | null {
     const host = this.room.host;
     const feet = actorPos(a);
     const head = lift(feet, 1.6);
     const range = WISHFALL.rangeM;
-    const firstSolid = (o: V3, dir: V3, maxT: number): number =>
-      Math.min(
-        rayTerrain(host.terrain, o, dir, maxT, 1),
-        host.walls?.raycast(o[0], o[1], o[2], dir[0], dir[1], dir[2], maxT) ?? Infinity,
-        host.props?.raycast(o, dir, maxT)?.t ?? Infinity,
-      );
+    const solidOnRay = (o: V3, dir: V3, maxT: number): number =>
+      Math.min(host.walls?.raycast(o[0], o[1], o[2], dir[0], dir[1], dir[2], maxT) ?? Infinity, host.props?.raycast(o, dir, maxT)?.t ?? Infinity);
+    /** Is anything on the way from `from` to `to` (the ground too, with `ground`)? */
+    const blocked = (from: V3, to: V3, ground: boolean): boolean => {
+      const line: V3 = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+      const l = Math.hypot(line[0], line[1], line[2]);
+      if (l < 1e-3) return false;
+      const dir: V3 = [line[0] / l, line[1] / l, line[2] / l];
+      return Math.min(ground ? rayTerrain(host.terrain, from, dir, l, 1) : Infinity, solidOnRay(from, dir, l)) < l - 0.05;
+    };
+    const clear = (p: V3): boolean => {
+      const chest = lift(p, 1.0);
+      return !blocked(head, chest, true) && !blocked(chest, lift(p, STAR_BLAST_LIFT), false);
+    };
     let target: V3;
     if (m.tx !== undefined && m.ty !== undefined && m.tz !== undefined && Math.hypot(m.tx, m.ty, m.tz) > this.room.bodyDef.radius * 0.5) {
       target = [m.tx, m.ty, m.tz];
     } else {
-      const t = Math.min(range, firstSolid(head, d, range));
+      const t = Math.min(range, rayTerrain(host.terrain, head, d, range, 1), solidOnRay(head, d, range));
       target = [head[0] + d[0] * t, head[1] + d[1] * t, head[2] + d[2] * t];
     }
-    const v: V3 = [target[0] - feet[0], target[1] - feet[1], target[2] - feet[2]];
+    // The search starts no further out than the range in a straight line.
+    let v: V3 = [target[0] - feet[0], target[1] - feet[1], target[2] - feet[2]];
     const far = Math.hypot(v[0], v[1], v[2]);
-    if (far > range) target = [feet[0] + (v[0] * range) / far, feet[1] + (v[1] * range) / far, feet[2] + (v[2] * range) / far];
-    // Not over a wall or a hill the caster can't see past: the star lands in front of it.
-    const aim = lift(this.room.snapToGround(target), 1.0);
-    const line: V3 = [aim[0] - head[0], aim[1] - head[1], aim[2] - head[2]];
-    const l = Math.hypot(line[0], line[1], line[2]);
-    if (l > 1e-3) {
-      const dir: V3 = [line[0] / l, line[1] / l, line[2] / l];
-      const stop = firstSolid(head, dir, l);
-      if (stop < l - 0.05) {
-        const t = Math.max(0, stop - 0.5);
-        target = [head[0] + dir[0] * t, head[1] + dir[1] * t, head[2] + dir[2] * t];
+    if (far > range) v = [(v[0] * range) / far, (v[1] * range) / far, (v[2] * range) / far];
+    const steps = Math.max(1, Math.ceil(Math.min(far, range) / SPELL_NET.starStepM));
+    const groundAt = (k: number): V3 => this.room.snapToGround([feet[0] + v[0] * k, feet[1] + v[1] * k, feet[2] + v[2] * k]);
+    let over = false;
+    for (let i = steps; i >= 0; i--) {
+      const p = groundAt(i / steps);
+      if (dist3(feet, p) > range) {
+        over = true;
+        continue;
       }
+      if (over) {
+        // The edge of the range lies between this step and the one before: the farthest point inside it.
+        over = false;
+        let lo = i / steps, hi = (i + 1) / steps, edge: V3 | null = null;
+        for (let n = 0; n < 7; n++) {
+          const mid = (lo + hi) / 2;
+          const q = groundAt(mid);
+          if (dist3(feet, q) <= range) {
+            lo = mid;
+            edge = q;
+          } else hi = mid;
+        }
+        if (edge && clear(edge)) return edge;
+      }
+      if (clear(p)) return p;
     }
-    return this.room.snapToGround(target);
+    return null;
   }
 
-  private wishfall(a: PlayerActor, d: V3, m: CastMsg, now: number) {
+  private wishfall(a: PlayerActor, d: V3, m: CastMsg, now: number): true | string {
     const at = this.starTarget(a, d, m);
-    const star: Star = { id: starSeq++, owner: a, at, landAt: now + WISHFALL.telegraphS * 1000, damage: spellDamage(WISHFALL.damage, a.char.level) };
+    if (!at) return "blocked"; // no clear ground in range: nothing is spent
+    const star: Star = { id: starSeq++, owner: a, at, landAt: now + WISHFALL.telegraphS * 1000, damage: this.damage(a, WISHFALL.damage) };
     this.stars.push(star);
     this.send({ spell: "wishfall", phase: "cast", by: a.id, x: at[0], y: at[1], z: at[2], r: WISHFALL.radiusM, ms: WISHFALL.telegraphS * 1000, id: star.id });
+    return true;
   }
 
   private land(s: Star) {
     const a = s.owner;
     // The blast, through combat (safe zones, protection, walls, bubbles, self ×0.5, heavy destruction).
     // A caster who has left the world since deals none; the star still lands for everyone watching.
-    if (!a.removed && !a.superseded) explode(this.room.host, a, lift(s.at, 0.4), WISHFALL.radiusM, s.damage, -1, undefined, undefined, true);
+    if (!a.removed && !a.superseded) explode(this.room.host, a, lift(s.at, STAR_BLAST_LIFT), WISHFALL.radiusM, s.damage, -1, undefined, undefined, true);
     this.send({ spell: "wishfall", phase: "impact", by: a.id, x: s.at[0], y: s.at[1], z: s.at[2], r: WISHFALL.radiusM, id: s.id });
   }
 
   private glasswing(a: PlayerActor, now: number) {
-    const max = Math.round((GLASSWING.absorbPer100MaxHp / 100) * a.state.maxHp);
+    const max = wardShell(a.state.maxHp, this.power(a));
     const ms = GLASSWING.durationS * 1000;
     this.wards.set(a.id, { hp: max, max, until: now + ms });
     const at = actorPos(a);
@@ -329,6 +397,26 @@ export class SpellSystem implements RoomSystem {
     a.youDirty = true;
     const at = actorPos(a);
     this.send({ spell: "glasswing", phase: "end", by: sessionId, x: at[0], y: at[1], z: at[2], broke });
+  }
+
+  /**
+   * `spellSync`: what was already under way when this client arrived. Every ward that is up within
+   * the spell events' reach comes as its `cast` again, with the time and shell it has left and
+   * `late` (draw it, don't announce it). Stars are not included: their whole life is 1.2 s.
+   */
+  private snapshot(c: Client) {
+    const me = this.room.actors.get(c.sessionId);
+    const now = Date.now();
+    if (!me || now - (this.synced.get(c.sessionId) ?? 0) < 1000) return;
+    this.synced.set(c.sessionId, now);
+    const from = actorPos(me);
+    for (const [id, w] of this.wards) {
+      const a = this.room.actors.get(id);
+      if (!a || a.dead || w.until <= now) continue;
+      const at = actorPos(a);
+      if (dist3(from, at) > SPELL_NET.radius) continue;
+      c.send("spell", { spell: "glasswing", phase: "cast", by: id, x: at[0], y: at[1], z: at[2], ms: w.until - now, hp: Math.round(w.hp), late: true });
+    }
   }
 
   // ------------------------------------------------------------------------------------ the room
@@ -363,11 +451,15 @@ export class SpellSystem implements RoomSystem {
 
   onPlayerLeave(sessionId: string) {
     this.wards.delete(sessionId);
+    this.handled.delete(sessionId);
+    this.synced.delete(sessionId);
   }
 
   dispose() {
     this.stars.length = 0;
     this.wards.clear();
+    this.handled.clear();
+    this.synced.clear();
     if (this.room.host) this.room.host.wards = undefined;
   }
 }

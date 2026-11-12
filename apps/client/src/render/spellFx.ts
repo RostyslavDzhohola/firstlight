@@ -1,5 +1,5 @@
 // Spell visuals (content §2.7): Skipstep's trail and flashes, Frostbloom's ring of frost and ice
-// shards, Wishfall's warning ring, falling star and shockwave, the Glasswing Ward's faceted shell.
+// shards, Wishfall's warning ring, falling star, landing and scorch, the Glasswing Ward's faceted shell.
 //
 // Five node materials for all of it, built once: timing, style and colour ride on per-mesh vertex
 // attributes and one shared clock uniform drives the animation (the telegraph decals' trick,
@@ -32,7 +32,25 @@ const DECAL_LIFT = 0.16;
 const DECAL_RINGS = 7;
 const DECAL_SEGS = 40;
 const SHARDS_PER_BLOOM = 14;
-const POOL = { decals: 6, beams: 6, glows: 12, shards: SHARDS_PER_BLOOM * 2, wards: 4 };
+const POOL = { decals: 8, beams: 6, tails: 4, glows: 12, shards: SHARDS_PER_BLOOM * 2, wards: 4 };
+
+/** Wishfall's star: where it comes from, how it falls and what it leaves. */
+const STAR = {
+  /** It starts this high over the ground point and this far to one side (about 18° off straight down). */
+  heightM: 55,
+  leanM: 18,
+  /** Position along the fall = (time share)^ease: it gathers speed, and is low enough to see for the last third. */
+  ease: 1.4,
+  /** The tail's length (m) when it lands; it starts at under half of that. */
+  tailM: 26,
+  /** The landing's shockwave runs out to this many blast radii over `landMs`. */
+  shockRadii: 1.5,
+  landMs: 1300,
+  /** The scorch mark's radius (of the blast's) and how long it stays; embers lift off it for `emberS`. */
+  scorchRadii: 0.95,
+  scorchMs: 7000,
+  emberS: 3.2,
+} as const;
 
 const Y = new THREE.Vector3(0, 1, 0);
 const Z = new THREE.Vector3(0, 0, 1);
@@ -65,11 +83,26 @@ function makeMaterials() {
     const r = u.x;
     const ang = u.y.mul(Math.PI * 2);
     const rim = smoothstep(0.8, 0.92, r).mul(float(1).sub(smoothstep(0.985, 1.0, r)));
-    // 0: Wishfall's warning. A ring closes in on the centre as the star comes down; eight spokes turn.
+    const span = max(fx.y.sub(fx.x), 0.001);
+    const d2 = is2.mul(float(1).sub(step(2.5, fx.z)));
+    const d3 = step(2.5, fx.z);
+    // 0: Wishfall's warning. The rim beats and rings sweep in from it to the centre, slowly at first
+    // and faster as the star nears (2 beats a second rising to 9: the phase is the integral of that,
+    // so it never jumps). One ring closes on the centre over the whole warning, eight spokes turn,
+    // and the middle heats up at the end.
+    const beat = age.mul(float(2).add(age.div(span).mul(3.5)));
+    const pulse = pow(sin(beat.mul(Math.PI * 2)).mul(0.5).add(0.5), 2);
+    const sweep = smoothstep(0.08, 0.0, abs(r.sub(float(1).sub(fract(beat))))).mul(float(0.35).add(prog.mul(0.65)));
     const closing = smoothstep(0.07, 0.0, abs(r.sub(float(1).sub(prog))));
     const spokes = pow(abs(cos(ang.mul(4).add(clock.mul(1.4)))), 14).mul(smoothstep(0.18, 0.3, r)).mul(float(1).sub(smoothstep(0.7, 0.84, r)));
-    const hurry = sin(clock.mul(mix(float(9), float(26), prog))).mul(0.14).add(0.86);
-    const warn = float(0.2).add(prog.mul(0.22)).add(rim).add(closing.mul(0.85)).add(spokes.mul(0.5)).mul(hurry);
+    const heat = float(1).sub(smoothstep(0.0, float(0.3).add(prog.mul(0.25)), r)).mul(pow(prog, 2));
+    const warn = float(0.14).add(prog.mul(0.2))
+      .add(rim.mul(float(0.7).add(pulse.mul(0.6))))
+      .add(sweep.mul(0.75))
+      .add(closing.mul(0.85))
+      .add(spokes.mul(0.45))
+      .add(heat.mul(0.9))
+      .mul(smoothstep(0.0, 0.08, age));
     // 1: Frostbloom. A front races out to the edge, leaving crystal veins that hold, then melt.
     const out = float(1).sub(pow(float(1).sub(clamp(age.div(0.32), 0, 1)), 3));
     const front = smoothstep(0.14, 0.0, abs(r.sub(out))).mul(float(1).sub(clamp(age.div(0.5), 0, 1)));
@@ -77,13 +110,25 @@ function makeMaterials() {
     const crystal = smoothstep(0.5, 0.92, veins);
     const melt = float(1).sub(smoothstep(0.62, 1.0, prog));
     const frost = front.mul(1.2).add(float(0.2).add(crystal.mul(0.6)).add(rim.mul(0.6)).mul(melt).mul(step(r, out)));
-    // 2: Wishfall's landing. A shockwave runs out over a glow that dies down.
-    const wave = pow(prog, 0.5);
-    const shock = smoothstep(0.14, 0.0, abs(r.sub(wave))).mul(float(1).sub(prog)).mul(1.7);
-    const scorch = float(1).sub(smoothstep(0.0, 0.75, r)).mul(pow(float(1).sub(prog), 1.5)).mul(0.95);
-    const land = shock.add(scorch);
-    decal.colorNode = col.mul(float(2.4).add(rim.mul(1.2)));
-    decal.opacityNode = clamp(warn.mul(is0).add(frost.mul(is1)).add(land.mul(is2)), 0, 1);
+    // 2: Wishfall's landing. A white-hot flash on the ground, gone in a third of the time; a
+    // shockwave that runs out to the edge with a fainter ring behind it; a glow that dies down.
+    const wave = pow(prog, 0.45);
+    const shock = smoothstep(0.16, 0.0, abs(r.sub(wave))).mul(pow(float(1).sub(prog), 1.2)).mul(1.9);
+    const wake = smoothstep(0.1, 0.0, abs(r.sub(wave.mul(0.72)))).mul(pow(float(1).sub(prog), 2)).mul(0.8);
+    const flash = float(1).sub(smoothstep(0.0, 0.85, r)).mul(pow(float(1).sub(clamp(prog.mul(3.2), 0, 1)), 2)).mul(1.4);
+    const afterglow = float(1).sub(smoothstep(0.0, 0.6, r)).mul(pow(float(1).sub(prog), 1.5)).mul(0.7);
+    const land = shock.add(wake).add(flash).add(afterglow);
+    // 3: the scorch a star leaves. A charred patch with a ragged edge; the cracks in it glow like
+    // embers and cool in the first half; the whole mark fades in the last third.
+    const ragged = sin(ang.mul(5).add(fx.w)).mul(0.06).add(sin(ang.mul(11).add(fx.w.mul(2.3))).mul(0.04));
+    const char = float(1).sub(smoothstep(float(0.5).add(ragged), float(0.92).add(ragged), r));
+    const cooling = pow(float(1).sub(clamp(prog.mul(2.2), 0, 1)), 2);
+    const cracks = smoothstep(0.55, 0.95, veins).mul(float(1).sub(smoothstep(0.15, 0.9, r))).mul(cooling);
+    const twinkle = sin(clock.mul(9).add(r.mul(40)).add(ang.mul(13))).mul(0.25).add(0.75);
+    const scorch = char.mul(0.62).add(cracks.mul(0.5)).mul(float(1).sub(smoothstep(0.65, 1.0, prog))).mul(smoothstep(0.0, 0.03, prog));
+    const scorchColour = mix(vec3(0.03, 0.022, 0.018), col.mul(3.2).mul(twinkle), clamp(cracks.mul(1.4), 0, 1));
+    decal.colorNode = mix(col.mul(float(2.4).add(rim.mul(1.2)).add(heat.mul(is0).mul(2)).add(flash.mul(d2).mul(1.5))), scorchColour, d3);
+    decal.opacityNode = clamp(warn.mul(is0).add(frost.mul(is1)).add(land.mul(d2)).add(scorch.mul(d3)), 0, 1);
   }
 
   // ---- beams: an open tube along +Z, u.y = 0 at its start, 1 at its end ------------------------
@@ -99,11 +144,20 @@ function makeMaterials() {
     const twist = sin(around.mul(2).add(along.mul(22)).sub(clock.mul(26))).mul(0.35).add(0.65);
     const chase = smoothstep(prog.mul(1.3).sub(0.55), prog.mul(1.3), along).mul(0.6).add(0.4);
     const trail = ends.mul(twist).mul(chase).mul(pow(float(1).sub(prog), 1.4));
-    // 1: Wishfall's streak. Bright at the head (the end), a long tail behind; it flickers.
+    // 1: Wishfall's streak, drawn on a cone that is wide at the star and a point far behind it.
+    // Hot at the head with a long cooling tail and filaments that stream back along it. A cone seen
+    // end-on (from under the star) keeps a floor of light, so the fall reads from any angle.
     const flicker = sin(clock.mul(47).add(along.mul(31))).mul(0.12).add(0.88);
-    const streak = pow(along, 2.4).mul(flicker).mul(smoothstep(0.0, 0.12, prog));
+    const filaments = sin(around.mul(3).add(along.mul(9)).sub(clock.mul(30))).mul(0.2).add(0.8);
+    const streak = pow(along, 1.7).mul(flicker).mul(filaments).mul(smoothstep(0.0, 0.06, prog));
+    const allRound = mix(float(0.4), float(1), pow(facing, 1.3));
+    // 2: Wishfall's path: a thin line of light from the ground point up the way the star comes,
+    // faint at first and brighter as it nears, with light running down it. It is what a frame shows
+    // while the star itself is still above the view.
+    const running = sin(along.mul(46).add(clock.mul(22))).mul(0.3).add(0.7);
+    const path = pow(float(1).sub(along), 1.3).mul(running).mul(float(0.16).add(pow(prog, 2).mul(0.6))).mul(smoothstep(0.0, 0.1, prog));
     beam.colorNode = col.mul(5);
-    beam.opacityNode = clamp(trail.mul(is0).add(streak.mul(is1.add(is2))), 0, 1).mul(soft);
+    beam.opacityNode = clamp(trail.mul(is0).mul(soft).add(streak.mul(is1).add(path.mul(is2)).mul(allRound)), 0, 1);
   }
 
   // ---- glows: a ball of light, bright in the middle and gone at the rim -------------------------
@@ -191,6 +245,14 @@ function beamGeometry(): THREE.BufferGeometry {
   return withFx(g);
 }
 
+/** The star's tail: a cone along +Z, a point at its start (uv.y = 0) and one unit wide at its end, the star. */
+function tailGeometry(): THREE.BufferGeometry {
+  const g = new THREE.CylinderGeometry(1, 0.03, 1, 14, 4, true);
+  g.translate(0, 0.5, 0);
+  g.rotateX(Math.PI / 2);
+  return withFx(g);
+}
+
 function shardGeometry(): THREE.BufferGeometry {
   const g = new THREE.ConeGeometry(1, 1, 4, 1, true).toNonIndexed();
   g.translate(0, 0.5, 0); // base on the ground, tip up
@@ -230,6 +292,11 @@ function setFx(mesh: THREE.Mesh, start: number, end: number, style: number, seed
   col.needsUpdate = true;
 }
 
+/** The sparks a falling star sheds (one shared object: the fall asks for them ~30 times a second). */
+const STAR_SPARKS: NonNullable<Parameters<Burst>[3]> = { speed: [0.3, 1.8], life: [0.4, 0.9], size: [0.07, 0.18], intensity: 7, lift: -1 };
+/** The embers that lift off the scorch for a few seconds after the landing: slow, long-lived, drifting up. */
+const STAR_EMBERS: NonNullable<Parameters<Burst>[3]> = { speed: [0.15, 0.9], life: [1.6, 3.2], size: [0.05, 0.12], intensity: 5, lift: 0.7, spread: 0.6 };
+
 export type Burst = (at: THREE.Vector3, color: number, count: number, opts?: { speed?: [number, number]; life?: [number, number]; size?: [number, number]; intensity?: number; lift?: number; spread?: number }) => void;
 
 export class SpellFx {
@@ -237,9 +304,13 @@ export class SpellFx {
   private readonly mats = sharedMaterials();
   private readonly decals: Slot[] = [];
   private readonly beams: Slot[] = [];
+  /** Wishfall's tails: the beam material on a cone. */
+  private readonly tails: Slot[] = [];
   private readonly glows: Slot[] = [];
   private readonly shards: Slot[] = [];
   private readonly wards: Slot[] = [];
+  /** Every pool, for the per-frame walk (made once: `update` allocates nothing). */
+  private readonly pools: readonly Slot[][] = [this.decals, this.beams, this.tails, this.glows, this.shards, this.wards];
   private t = 0;
   private seed = 1;
 
@@ -259,6 +330,7 @@ export class SpellFx {
     const glowGeo = new THREE.SphereGeometry(1, 20, 14);
     fill(this.decals, POOL.decals, discGeometry, this.mats.decal, "spellDecal", 4);
     fill(this.beams, POOL.beams, beamGeometry, this.mats.beam, "spellBeam");
+    fill(this.tails, POOL.tails, tailGeometry, this.mats.beam, "spellTail");
     fill(this.glows, POOL.glows, () => withFx(glowGeo.clone()), this.mats.glow, "spellGlow");
     fill(this.shards, POOL.shards, shardGeometry, this.mats.shard, "spellShard", 5);
     fill(this.wards, POOL.wards, wardGeometry, this.mats.ward, "spellWard", 7);
@@ -274,7 +346,10 @@ export class SpellFx {
   /** Effects showing right now (tests, the perf overlay). */
   get live(): number {
     let n = 0;
-    for (const l of [this.decals, this.beams, this.glows, this.shards, this.wards]) for (const s of l) if (s.until > 0) n++;
+    for (let i = 0; i < this.pools.length; i++) {
+      const l = this.pools[i]!;
+      for (let j = 0; j < l.length; j++) if (l[j]!.until > 0) n++;
+    }
     return n;
   }
 
@@ -351,8 +426,8 @@ export class SpellFx {
     return s;
   }
 
-  private beamBetween(from: THREE.Vector3, to: THREE.Vector3, width: number, ms: number, style: number, color: number): Slot {
-    const s = this.take(this.beams, ms);
+  private beamBetween(from: THREE.Vector3, to: THREE.Vector3, width: number, ms: number, style: number, color: number, key: string | number | null = null): Slot {
+    const s = this.take(this.beams, ms, key);
     s.mesh.position.copy(from);
     s.mesh.quaternion.setFromUnitVectors(Z, _a.copy(to).sub(from).normalize());
     s.mesh.scale.set(width, width, Math.max(0.01, from.distanceTo(to)));
@@ -418,61 +493,94 @@ export class SpellFx {
     this.burst(at, SPELL_COLORS.frost, 3, { speed: [0.1, 0.5], life: [0.4, 0.9], size: [0.02, 0.05], intensity: 4, lift: -0.5, spread: 1 });
   }
 
-  /** Wishfall, cast: the warning ring, and the star on its way down to land when the ring closes. */
+  /**
+   * Wishfall, cast: the warning ring, the line of light the star will come down, and the star
+   * itself: a hot head in a corona with a tapering tail, from high above at a slight angle, landing
+   * when the ring closes.
+   */
   starFall(id: number, at: THREE.Vector3, radius: number, ms: number) {
     this.decal(at, radius, ms + 80, 0, SPELL_COLORS.star, id);
     const up = at.clone().normalize();
     const ref = Math.abs(up.y) < 0.9 ? Y : Z;
-    const slant = new THREE.Vector3().crossVectors(up, ref).normalize();
-    const from = at.clone().addScaledVector(up, 70).addScaledVector(slant, 26);
+    // Which side it leans in from depends on the star, so two in a row differ and everyone watching sees the same.
+    const lean = new THREE.Vector3().crossVectors(up, ref).normalize().applyAxisAngle(up, id * 2.399963);
+    const from = at.clone().addScaledVector(up, STAR.heightM).addScaledVector(lean, STAR.leanM);
     const dir = at.clone().sub(from).normalize();
     const life = ms / 1000, born = this.t;
-    const tail = 22;
-    const streak = this.take(this.beams, ms, id);
-    const core = this.take(this.beams, ms, id);
-    setFx(streak.mesh, born, born + life, 1, this.nextSeed(), SPELL_COLORS.star);
+    this.beamBetween(at, from, 0.22, ms, 2, SPELL_COLORS.star, id);
+    const tail = this.take(this.tails, ms, id);
+    const core = this.take(this.tails, ms, id);
+    setFx(tail.mesh, born, born + life, 1, this.nextSeed(), SPELL_COLORS.star);
     setFx(core.mesh, born, born + life, 1, this.nextSeed(), SPELL_COLORS.starCore);
     const head = this.take(this.glows, ms, id);
+    const corona = this.take(this.glows, ms, id);
     setFx(head.mesh, born, born + life, 1, this.nextSeed(), SPELL_COLORS.starCore);
+    setFx(corona.mesh, born, born + life, 1, this.nextSeed(), SPELL_COLORS.star);
     const quat = new THREE.Quaternion().setFromUnitVectors(Z, dir);
+    tail.mesh.quaternion.copy(quat);
+    core.mesh.quaternion.copy(quat);
     const pos = new THREE.Vector3();
     let nextSpark = 0;
     const place = (t: number) => {
-      // It speeds up as it falls.
-      const k = Math.min(1, (t - born) / life);
-      pos.copy(from).lerp(at, k * k);
+      const k = Math.min(1, Math.max(0, (t - born) / life));
+      pos.copy(from).lerp(at, Math.pow(k, STAR.ease));
       head.mesh.position.copy(pos);
-      head.mesh.scale.setScalar(1.5 + 0.9 * k);
-      const len = tail * (0.4 + 0.6 * k);
-      for (const [b, w] of [[streak, 0.9], [core, 0.35]] as const) {
-        b.mesh.quaternion.copy(quat);
-        b.mesh.position.copy(pos).addScaledVector(dir, -len);
-        b.mesh.scale.set(w, w, len);
-      }
+      head.mesh.scale.setScalar(1.1 + 0.7 * k);
+      corona.mesh.position.copy(pos);
+      corona.mesh.scale.setScalar(2.6 + 1.6 * k);
+      // The tail's wide end is the star; it lengthens as the star gathers speed.
+      const len = STAR.tailM * (0.45 + 0.55 * k);
+      tail.mesh.position.copy(pos).addScaledVector(dir, -len);
+      tail.mesh.scale.set(1.15, 1.15, len);
+      core.mesh.position.copy(tail.mesh.position);
+      core.mesh.scale.set(0.42, 0.42, len);
       if (t >= nextSpark) {
         nextSpark = t + 0.03;
-        this.burst(pos, SPELL_COLORS.ember, 3, { speed: [0.3, 1.8], life: [0.4, 0.9], size: [0.07, 0.18], intensity: 7, lift: -1 });
+        this.burst(pos, SPELL_COLORS.ember, 3, STAR_SPARKS);
       }
     };
     place(born);
-    streak.update = place;
+    tail.update = place;
   }
 
-  /** Wishfall, landed: the ring goes, a flash and a shockwave take its place, embers fly. */
+  /**
+   * Wishfall, landed: the ring and the star go; a flash on the ground and in the air, a shockwave
+   * running out past the blast, a pillar of light, a spray of embers, then a scorch mark that
+   * smoulders (embers lift off it for a few seconds) and fades.
+   */
   starImpact(id: number, at: THREE.Vector3, radius: number) {
-    for (const list of [this.decals, this.beams, this.glows]) for (const s of list) if (s.key === id && s.until > 0) this.free(s);
+    for (const list of [this.decals, this.beams, this.tails, this.glows]) for (const s of list) if (s.key === id && s.until > 0) this.free(s);
     const up = at.clone().normalize();
     const c = at.clone().addScaledVector(up, 0.5);
-    this.decal(at, radius * 1.5, 1100, 2, SPELL_COLORS.star);
+    this.decal(at, radius * STAR.shockRadii, STAR.landMs, 2, SPELL_COLORS.star);
+    this.glowAt(c, radius * 0.75, 220, SPELL_COLORS.starCore, 0, 2.2); // the flash
     this.glowAt(c, radius * 0.5, 650, SPELL_COLORS.starCore, 0, 3);
-    this.glowAt(c, radius * 0.35, 1000, SPELL_COLORS.ember, 0, 4.2);
+    this.glowAt(c, radius * 0.35, 1100, SPELL_COLORS.ember, 0, 4.2);
     this.beamBetween(at, at.clone().addScaledVector(up, radius * 3), 0.9, 520, 0, SPELL_COLORS.starCore); // a pillar of light
     this.burst(c, SPELL_COLORS.ember, 90, { speed: [4, 14], life: [0.6, 1.5], size: [0.07, 0.2], intensity: 7, lift: -7, spread: 0.85 });
     this.burst(c, SPELL_COLORS.starCore, 50, { speed: [1, 7], life: [0.4, 1.0], size: [0.05, 0.14], intensity: 8, lift: 1.5 });
+    // The scorch, and the embers that keep lifting off it.
+    const scorchR = radius * STAR.scorchRadii;
+    const scorch = this.decal(at, scorchR, STAR.scorchMs, 3, SPELL_COLORS.ember);
+    const ref = Math.abs(up.y) < 0.9 ? Y : Z;
+    const f = new THREE.Vector3().crossVectors(up, ref).normalize();
+    const side = new THREE.Vector3().crossVectors(up, f);
+    const centre = at.clone().addScaledVector(up, 0.2);
+    const born = this.t;
+    let next = born + 0.12;
+    scorch.update = (t) => {
+      if (t < next || t > born + STAR.emberS) return;
+      next = t + 0.2;
+      const th = this.nextSeed(), rr = scorchR * 0.8 * Math.sqrt(this.nextSeed() / 6.29);
+      this.burst(_a.copy(centre).addScaledVector(f, Math.cos(th) * rr).addScaledVector(side, Math.sin(th) * rr), SPELL_COLORS.ember, 2, STAR_EMBERS);
+    };
   }
 
-  /** Glasswing Ward: a shell that follows `where()` (feet; null = gone) for `ms`. */
-  ward(key: string, where: () => THREE.Vector3 | null, ms: number) {
+  /**
+   * Glasswing Ward: a shell that follows `where()` (feet; null = gone) for `ms`. `quiet`: it was
+   * already up when we arrived, so it is simply there (no burst of light at its start).
+   */
+  ward(key: string, where: () => THREE.Vector3 | null, ms: number, quiet = false) {
     this.wardEnd(key, false, true);
     const s = this.take(this.wards, ms, key);
     const born = this.t;
@@ -489,7 +597,7 @@ export class SpellFx {
     };
     follow(born, 0);
     s.update = follow;
-    const p = where();
+    const p = quiet ? null : where();
     if (p) this.burst(p.clone().addScaledVector(p.clone().normalize(), 1), SPELL_COLORS.wardEdge, 26, { speed: [0.6, 2.4], life: [0.3, 0.8], size: [0.02, 0.07], intensity: 5, lift: 1.2 });
   }
 
@@ -521,8 +629,11 @@ export class SpellFx {
   update(dt: number) {
     this.t += dt;
     this.mats.clock.value = this.t;
-    for (const list of [this.decals, this.beams, this.glows, this.shards, this.wards]) {
-      for (const s of list) {
+    // Indexed loops over the pools made in the constructor: no arrays or iterators per frame (review 6).
+    for (let i = 0; i < this.pools.length; i++) {
+      const list = this.pools[i]!;
+      for (let j = 0; j < list.length; j++) {
+        const s = list[j]!;
         if (s.until === 0) continue;
         if (this.t >= s.until) this.free(s);
         else s.update?.(this.t, dt);
@@ -533,7 +644,7 @@ export class SpellFx {
   dispose() {
     this.group.removeFromParent();
     releaseObjects(this.group);
-    for (const list of [this.decals, this.beams, this.glows, this.shards, this.wards]) for (const s of list) s.mesh.geometry.dispose();
+    for (const list of this.pools) for (const s of list) s.mesh.geometry.dispose();
     // The materials are the session's (sharedMaterials): kept.
   }
 }

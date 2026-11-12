@@ -74,13 +74,19 @@ export const WISHFALL = {
 
 /** Glasswing Ward: a personal shell that absorbs damage dealt by players and creatures. */
 export const GLASSWING = {
-  /** Shell HP per 100 of the caster's max HP. */
+  /** Shell HP per 100 of the caster's max HP (times the caster's spell power: `wardShell`). */
   absorbPer100MaxHp: 30,
   durationS: 4,
 } as const;
 
-/** Spell damage scales with level like weapons (content §1.3), never with weapon tier. */
-export const spellDamage = (base: number, level: number) => base * (1 + 0.03 * (level - 1));
+/**
+ * Spell damage scales with level like weapons (content §1.3), never with weapon tier, and with the
+ * caster's spell power (content §8.5: `starterSpellPower`, 1 for the shared base).
+ */
+export const spellDamage = (base: number, level: number, power = 1) => base * (1 + 0.03 * (level - 1)) * power;
+
+/** The Glasswing Ward's shell HP for a caster with `maxHp` and spell power `power`. */
+export const wardShell = (maxHp: number, power = 1) => Math.round((GLASSWING.absorbPer100MaxHp / 100) * maxHp * power);
 
 export const spellUnlocked = (s: SpellDef, level: number) => level >= s.level;
 
@@ -95,6 +101,11 @@ export interface SpellsYou {
   ready: number[];
   /** A Glasswing Ward that is up: shell HP left and when it ends. */
   ward?: { hp: number; max: number; until: number };
+  /**
+   * The last of this session's numbered casts (`cast.req`) the server has dealt with, cast or
+   * refused: this state includes it and every one before it. Absent until a numbered cast arrives.
+   */
+  req?: number;
 }
 
 /** Aether at `now` from a stored value: it refills from max(t, regenAt) at AETHER.regenPerS up to the max. */

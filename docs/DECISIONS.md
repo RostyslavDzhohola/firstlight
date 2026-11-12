@@ -1855,3 +1855,33 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   a frame's move land on it (a flat top's radius grows off its centre; a hair of drift left a fall
   hovering for a frame). Why: since D-fixes-1 a slow frame advances in full, so a fixed step per
   placement made the camera crawl at low frame rates and the linear factors snapped.
+- **D-spells-8 (2026-11-12):** review round 1 of the spellbook (six findings, all accepted; table in
+  `docs/reviews/2026-11-12-spellbook-gpt-6.1-sol.md`). What changed for players and clients: Frostbloom
+  stops at Prism Bubble shells like any blast, the shell paying the nova's damage once. Wishfall's
+  landing point is searched back toward the caster until the ground point itself is within 30 m of the
+  caster's feet and the line from the head is clear to it; when there is no such point the cast is
+  refused as `blocked` and costs nothing (this narrows D-spells-7's "pulls in rather than refusing":
+  pulling in is still the rule, refusing is for when nothing is left to pull in to). Frostbloom's
+  `npcFx` carries the slow the server holds, with `set`, and the client replaces its own. `cast` may
+  carry the client's number (`req`), echoed in `denied.req` and `you.spells.req`. Why: each was a
+  place where what the player saw and what the server did could differ. All new fields are optional,
+  so no protocol bump.
+- **D-spells-9 (2026-11-12):** the starters' spell power (D-balance-4's reserved `spellPower`) is
+  applied: it multiplies spell damage (Frostbloom, Wishfall) and the Glasswing Ward's shell, in one
+  place on the server (`SpellSystem.power` / `damage`; `spellDamage(base, level, power)` and
+  `wardShell(maxHp, power)` in `content/spells.ts`). Aether, costs, cooldowns, ranges, Frostbloom's
+  slow and Wishfall's warning stay shared. The pick screen gains a Magic pip row and `pnpm balance`
+  a spells section with its checks (`starter.*.spell`, `spell.oneshot`, `spell.pair`,
+  `spell.instant`, `spell.telegraph`). The multipliers stay as the balance lane set them
+  (0.90–1.15). Re-check of §2.7 with them: no spell is a one-shot (Hexwick's Wishfall centre is at
+  most 53% of an equal-level base body, 60% of the most fragile starter, under the Stillshot
+  headshot's 73–86%; it is over half only at levels 6 and 7) and the opening pair never kills (at most
+  84%). The burst statement was wrong before spell power and is corrected in §2.7: a Frostbloom and a
+  Stillshot headshot landing together kill a full-HP base body at levels 6 and 12 at power 1.00 (6,
+  7, 12, 13 from Hexwick), because nothing holds a weapon back after a cast. Narrowing the
+  multipliers can't remove that (at 1.00 it is already there), so they were left alone and the dip is
+  open: either a short weapon hold after a damaging cast (and no damaging cast for as long after a
+  shot), or Frostbloom at 17 damage. Spells were not put into the duel model: its duels are weapon
+  timelines at 10 m and adding casts would re-tune every duel band. Why: the brief asked for the
+  multiplier to be wired and the statements re-checked; a number that can't fix the statement
+  shouldn't be changed to look as if it did.
