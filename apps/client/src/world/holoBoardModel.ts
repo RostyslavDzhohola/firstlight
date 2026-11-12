@@ -136,13 +136,23 @@ export function holoPages(data: HomeData | null, hunt: HoloHunt | null = null): 
   ];
 }
 
-/** Which page shows at `t` seconds, and how far into a flip it is (0 none … 1 mid-flip). */
-export function holoPageAt(t: number, pageSeconds = HOLO_PAGE_SECONDS, flipSeconds = 0.5): { page: 0 | 1; flip: number } {
+export interface HoloFlip {
+  page: 0 | 1;
+  /** How far into a flip the board is: 0 none … 1 mid-flip. */
+  flip: number;
+}
+
+/**
+ * Which page shows at `t` seconds, and how far into a flip it is. Written into `out` when given: the
+ * board asks every frame and keeps one (review A5).
+ */
+export function holoPageAt(t: number, pageSeconds = HOLO_PAGE_SECONDS, flipSeconds = 0.5, out: HoloFlip = { page: 0, flip: 0 }): HoloFlip {
   const k = Math.max(0, t) / pageSeconds;
-  const page = (Math.floor(k) % 2) as 0 | 1;
   const into = (k - Math.floor(k)) * pageSeconds;
   const left = pageSeconds - into;
   // The flicker straddles the change: the last and the first half of `flipSeconds`.
   const d = Math.min(into, left);
-  return { page, flip: d < flipSeconds / 2 ? 1 - d / (flipSeconds / 2) : 0 };
+  out.page = (Math.floor(k) % 2) as 0 | 1;
+  out.flip = d < flipSeconds / 2 ? 1 - d / (flipSeconds / 2) : 0;
+  return out;
 }

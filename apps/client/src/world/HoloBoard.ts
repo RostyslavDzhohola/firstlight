@@ -19,7 +19,7 @@ import { atmo } from "../render/atmosphere.ts";
 import { disposeTree } from "../render/dispose.ts";
 import type { ResolvedSettings } from "../render/quality.ts";
 import { drawHoloPages, HOLO_PAGE } from "./holoBoardDraw.ts";
-import { holoPageAt, holoPages, type HoloHunt } from "./holoBoardModel.ts";
+import { HOLO_PAGE_SECONDS, holoPageAt, holoPages, type HoloFlip, type HoloHunt } from "./holoBoardModel.ts";
 import { HoloFeed } from "./holoFeed.ts";
 
 /** Where the emitter stands (east, north of the plaza's centre, m) and what the panel faces. */
@@ -56,6 +56,8 @@ export class HoloBoard implements ClientSystem {
   private data: HomeData | null = null;
   private drawn = "";
   private t = 0;
+  /** Scratch for holoPageAt (nothing is allocated per frame). */
+  private readonly flip: HoloFlip = { page: 0, flip: 0 };
   /** The loop's clock at the last frame (ms): what the feed's refresh interval is measured on. */
   private clock = performance.now();
   private readonly feed: HoloFeed;
@@ -173,7 +175,7 @@ export class HoloBoard implements ClientSystem {
     if (!this.group.visible) return;
     this.feed.tick(now);
     this.t += dt;
-    const p = holoPageAt(this.t);
+    const p = holoPageAt(this.t, HOLO_PAGE_SECONDS, undefined, this.flip);
     this.uPage.value = p.page;
     this.uFlip.value = p.flip;
   }

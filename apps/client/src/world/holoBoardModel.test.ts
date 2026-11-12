@@ -72,3 +72,21 @@ describe("the hologram scoreboard's pages", () => {
     expect(holoPageAt(HOLO_PAGE_SECONDS + 0.05).flip).toBeGreaterThan(0.5);
   });
 });
+
+describe("holoPageAt per frame (review A5)", () => {
+  it("writes into the object it is given and returns it, with the same answers", () => {
+    const out = { page: 0 as 0 | 1, flip: 0 };
+    for (const t of [0, 0.6, HOLO_PAGE_SECONDS - 0.05, HOLO_PAGE_SECONDS + 0.05, HOLO_PAGE_SECONDS * 1.5, HOLO_PAGE_SECONDS * 7.3]) {
+      const fresh = holoPageAt(t);
+      expect(holoPageAt(t, HOLO_PAGE_SECONDS, undefined, out)).toBe(out);
+      expect(out).toEqual(fresh);
+    }
+  });
+
+  it("the board keeps one flip object for its frames", async () => {
+    const src = await (await import("node:fs/promises")).readFile(new URL("./HoloBoard.ts", import.meta.url), "utf8");
+    const calls = src.match(/holoPageAt\(([^)]*)\)/g) ?? [];
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("this.flip");
+  });
+});
