@@ -18,7 +18,8 @@ import type { ClientSystem, ClientSystemFactory } from "../game/systems.ts";
 import { atmo } from "../render/atmosphere.ts";
 import { disposeTree } from "../render/dispose.ts";
 import type { ResolvedSettings } from "../render/quality.ts";
-import { holoPageAt, holoPages, type HoloHunt, type HoloPage } from "./holoBoardModel.ts";
+import { drawHoloPages, HOLO_PAGE } from "./holoBoardDraw.ts";
+import { holoPageAt, holoPages, type HoloHunt } from "./holoBoardModel.ts";
 import { HoloFeed } from "./holoFeed.ts";
 
 /** Where the emitter stands (east, north of the plaza's centre, m) and what the panel faces. */
@@ -26,87 +27,11 @@ export const HOLO_AT: readonly [number, number] = [7.2, -12.6];
 export const HOLO_FACES: readonly [number, number] = [0, 0];
 /** The panel: width, height and how high its lower edge floats (m). */
 export const HOLO_PANEL = { w: 5.0, h: 6.56, lift: 2.7 } as const;
-const PAGE_W = 512, PAGE_H = 672;
 const TINT = 0x7fe9ff;
-const GOLD = "#ffd27a";
-const INK = "#d9f8ff";
-const DIM = "#6fb9cc";
 
 /** Yaw (degrees, townFrame's: 0 faces south, counter-clockwise from above) that turns a front at `at` towards `to`. */
 export function holoYaw(at: readonly [number, number], to: readonly [number, number]): number {
   return (Math.atan2(to[0] - at[0], -(to[1] - at[1])) * 180) / Math.PI;
-}
-
-function drawPage(g: CanvasRenderingContext2D, x0: number, page: HoloPage) {
-  const sans = "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif";
-  const mono = "ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
-  const L = x0 + 34, R = x0 + PAGE_W - 34;
-  g.textBaseline = "alphabetic";
-  // Title, letter-spaced.
-  g.font = `800 46px ${sans}`;
-  g.fillStyle = GOLD;
-  g.textAlign = "center";
-  const spaced = page.title.split("").join("  ");
-  g.fillText(spaced, x0 + PAGE_W / 2, 66);
-  g.font = `600 25px ${sans}`;
-  g.fillStyle = INK;
-  g.fillText(page.subtitle.split("").join(" "), x0 + PAGE_W / 2, 104);
-  g.fillStyle = DIM;
-  g.fillRect(L, 122, R - L, 2);
-  let y = 122;
-  const rowH = page.sections.length > 1 ? 50 : 56;
-  for (const s of page.sections) {
-    y += 34;
-    g.font = `600 18px ${mono}`;
-    g.fillStyle = DIM;
-    g.textAlign = "left";
-    g.fillText(s.heading, L, y);
-    y += 12;
-    if (!s.rows.length) {
-      y += 44;
-      g.font = `500 23px ${sans}`;
-      g.fillStyle = INK;
-      g.textAlign = "center";
-      g.fillText(s.empty, x0 + PAGE_W / 2, y);
-      y += 34;
-      continue;
-    }
-    s.rows.forEach((r, i) => {
-      y += rowH;
-      const top = i === 0;
-      g.textAlign = "left";
-      g.font = `600 22px ${mono}`;
-      g.fillStyle = top ? GOLD : DIM;
-      g.fillText(r.rank, L, y - (r.note ? 8 : 0));
-      g.font = `${top ? 700 : 600} 30px ${sans}`;
-      g.fillStyle = top ? GOLD : INK;
-      g.fillText(r.name, L + 46, y - (r.note ? 8 : 0));
-      if (r.note) {
-        g.font = `500 15px ${sans}`;
-        g.fillStyle = DIM;
-        g.fillText(r.note, L + 45, y + 10);
-      }
-      g.textAlign = "right";
-      g.font = `700 24px ${mono}`;
-      g.fillStyle = top ? GOLD : INK;
-      g.fillText(r.value, R, y - (r.note ? 8 : 0));
-    });
-    y += 18;
-  }
-  g.fillStyle = DIM;
-  g.fillRect(L, PAGE_H - 58, R - L, 2);
-  g.font = `600 18px ${mono}`;
-  g.textAlign = "center";
-  g.fillText(page.footer, x0 + PAGE_W / 2, PAGE_H - 28);
-}
-
-/** Both pages on one canvas, side by side (the panel's shader picks one). */
-export function drawHoloPages(canvas: HTMLCanvasElement, pages: readonly [HoloPage, HoloPage]) {
-  const g = canvas.getContext("2d")!;
-  g.fillStyle = "#000";
-  g.fillRect(0, 0, canvas.width, canvas.height);
-  drawPage(g, 0, pages[0]);
-  drawPage(g, PAGE_W, pages[1]);
 }
 
 let live: HoloBoard | null = null;
@@ -138,8 +63,8 @@ export class HoloBoard implements ClientSystem {
 
   constructor(private readonly game: Game) {
     this.group.name = "holoBoard";
-    this.canvas.width = PAGE_W * 2;
-    this.canvas.height = PAGE_H;
+    this.canvas.width = HOLO_PAGE.w * 2;
+    this.canvas.height = HOLO_PAGE.h;
     this.tex = new THREE.CanvasTexture(this.canvas);
     this.tex.colorSpace = THREE.SRGBColorSpace;
     this.tex.generateMipmaps = false;
