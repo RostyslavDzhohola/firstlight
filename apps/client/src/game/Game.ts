@@ -184,7 +184,11 @@ export class Game {
       this.particles.applySettings(this.ctx.settings);
       this.blobs.applySettings(this.ctx.settings);
       this.applyCharsVisibility();
-      rezSwitch.on = this.ctx.settings.on.rez;
+      if (rezSwitch.on !== this.ctx.settings.on.rez) {
+        // Off: what is running ends now, not when its clock runs out (review A2).
+        rezSwitch.on = this.ctx.settings.on.rez;
+        AvatarView.settleRez(rezSwitch.on, this.leaving);
+      }
       this.portals?.applySettings(this.ctx.settings);
       this.skyLife?.applySettings(this.ctx.settings);
     };

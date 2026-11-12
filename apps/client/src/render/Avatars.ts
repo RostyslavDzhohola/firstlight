@@ -317,10 +317,27 @@ export class AvatarView {
     const was = this.flagBits & PF.DEAD, is = bits & PF.DEAD;
     this.flagBits = bits;
     if (is && !was) {
-      // Already dead when we first saw them: no body, no show.
-      if (this.life < 0.5) this.rezHide();
+      // Already dead when we first saw them: no body, no show. (Rez off: the body lies where it fell.)
+      if (this.life < 0.5 && rezSwitch.on) this.rezHide();
       else this.rez("death");
     } else if (!is && was) this.rez("in");
+  }
+
+  /**
+   * The Rez switch changed (`rezSwitch.on` is already the new value). Off: every running effect ends
+   * now: bodies are whole (the dead lie where they fell, as they do with Rez off), the lights are
+   * hidden, the slots are free, and the avatars in `leaving` (mid de-rez) are freed. On: the dead are
+   * gone until they rise, as they are for anyone who meets them dead.
+   */
+  static settleRez(on: boolean, leaving?: Set<AvatarView>) {
+    if (!on && leaving) {
+      for (const a of leaving) a.dispose();
+      leaving.clear();
+    }
+    for (const a of AvatarView.all) {
+      if (!on) a.rezClear();
+      else if (a.flagBits & PF.DEAD) a.rezHide();
+    }
   }
 
   /**

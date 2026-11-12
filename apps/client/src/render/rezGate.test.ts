@@ -1,4 +1,5 @@
 // The rez effect's gates (review A1): a few slots, the nearest arrivals first, nothing beyond sight.
+// And the Rez switch (review A2): turning it off settles what is running at once.
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
 import { ANIM, PF } from "@firstlight/shared/net/schema";
@@ -103,5 +104,87 @@ describe("arrivals (AvatarView.rezArrivals)", () => {
     expect(victim.rezzing).toBe(true);
     expect(rezActive.count).toBe(REZ_MAX_ACTIVE);
     expect(lights()).toBe(REZ_MAX_ACTIVE);
+  });
+});
+
+describe("the Rez switch (AvatarView.settleRez)", () => {
+  const live = (a: InstanceType<typeof mod.AvatarView>, frames = 40) => {
+    const p = a.root.position;
+    for (let i = 0; i < frames; i++) a.set(p.x, p.y, p.z, 1, 0, 0, ANIM.IDLE, 1 / 30);
+  };
+  /** The far-LOD capsule stands in for the body here (?nochars): hidden while the avatar is gone. */
+  const bodyShown = (a: InstanceType<typeof mod.AvatarView>) => {
+    let shown = false;
+    a.root.traverseVisible((o) => { if ((o as THREE.Mesh).isMesh && o.name !== "rez_fx") shown = true; });
+    return shown;
+  };
+
+  it("off: arrivals are whole, the dying lie whole, lights are hidden, slots are free and departures are freed", () => {
+    const arriving = avatar(4);
+    mod.AvatarView.rezArrivals([arriving], camera);
+    const dying = avatar(6);
+    live(dying);
+    dying.setFlags(PF.DEAD);
+    dying.stepRez(REZ_SECONDS.death * 0.7);
+    const gone = avatar(8);
+    live(gone);
+    gone.setFlags(PF.DEAD);
+    gone.stepRez(REZ_SECONDS.death + 0.1);
+    expect(bodyShown(gone)).toBe(false);
+    const leaver = avatar(10);
+    expect(leaver.rez("out")).toBe(true);
+    const leaving = new Set([leaver]);
+    expect(rezActive.count).toBe(3);
+    expect(lights()).toBe(3);
+
+    rezSwitch.on = false;
+    mod.AvatarView.settleRez(false, leaving);
+
+    expect(rezActive.count).toBe(0);
+    expect(lights()).toBe(0);
+    for (const a of [arriving, dying, gone]) {
+      expect(a.rezzing).toBe(false);
+      expect(bodyShown(a)).toBe(true);
+    }
+    expect(leaving.size).toBe(0);
+    expect(mod.AvatarView.all.has(leaver)).toBe(false);
+    expect(leaver.root.parent).toBeNull();
+    // Nothing steps or draws afterwards.
+    live(arriving, 3);
+    expect(arriving.rezzing).toBe(false);
+    expect(lights()).toBe(0);
+  });
+
+  it("off: later deaths, arrivals and departures start nothing", () => {
+    rezSwitch.on = false;
+    const a = avatar(5);
+    live(a);
+    a.setFlags(PF.DEAD);
+    expect(a.rezzing).toBe(false);
+    expect(bodyShown(a)).toBe(true);
+    expect(a.rez("out")).toBe(false);
+    // Someone met dead with Rez off lies there too.
+    const met = avatar(7);
+    met.setFlags(PF.DEAD);
+    expect(bodyShown(met)).toBe(true);
+    expect(lights()).toBe(0);
+  });
+
+  it("on again: the dead are gone until they rise, the living are untouched", () => {
+    rezSwitch.on = false;
+    const dead = avatar(5);
+    live(dead);
+    dead.setFlags(PF.DEAD);
+    const alive = avatar(9);
+    live(alive);
+    rezSwitch.on = true;
+    mod.AvatarView.settleRez(true);
+    expect(bodyShown(dead)).toBe(false);
+    expect(bodyShown(alive)).toBe(true);
+    expect(lights()).toBe(0);
+    dead.setFlags(0); // they rise
+    expect(dead.rezzing).toBe(true);
+    dead.stepRez(REZ_SECONDS.in + 0.1);
+    expect(bodyShown(dead)).toBe(true);
   });
 });
