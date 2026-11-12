@@ -34,7 +34,7 @@ import type { ArtPacksState } from "./artpacks/ArtPacks.ts";
  */
 export const PASS_FEATURES: readonly Feature[] = [
   "grass", "trees", "detail", "shadows", "water", "sky", "skyplanets", "fog", "ao", "traa", "bloom", "fxaa", "grade", "grain",
-  "vignette", "particles",
+  "vignette", "particles", "portalfx", "holo", "skylife",
 ];
 
 /** Rejects after `ms`: no wait in the passes bench may hang the run (hidden tab, stalled queue). */
