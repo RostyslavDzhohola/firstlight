@@ -3,7 +3,7 @@
 // sensibly without a game. Playing through them against a server: apps/server/test/agent-tools.test.ts.
 
 import { readdirSync, readFileSync } from "node:fs";
-import { createServer, type Server } from "node:http";
+import { createServer, request, type Server } from "node:http";
 import { stripTypeScriptTypes } from "node:module";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -132,7 +132,8 @@ describe("HTTP bridge", () => {
     expect(fromPage.status).toBe(403);
     expect(await fromPage.json()).toMatchObject({ ok: false, reason: "forbidden" });
     // ...and so is a foreign hostname pointed at this address (DNS rebinding).
-    expect((await fetch(`${base}/observe`, { headers: { Host: "evil.example:7361" } })).status).toBe(403);
+    const rebound = await new Promise<number>((ok, fail) => request(`${base}/observe`, { headers: { Host: "evil.example:7361" } }, (res) => (res.resume(), ok(res.statusCode ?? 0))).on("error", fail).end());
+    expect(rebound).toBe(403);
   });
 });
 
