@@ -8,6 +8,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { AgentError, FirstlightAgent, type ActionResult, type MoveTarget } from "@firstlight/agent-kit";
 import { BODY_IDS, type BodyId } from "@firstlight/shared";
+import { MISSIONS, isTrialType } from "@firstlight/shared/content/missions";
+import { SPELL_IDS, SPELLS } from "@firstlight/shared/content/spells";
 import { STARTERS } from "@firstlight/shared/content/weapons";
 import { PHRASES } from "@firstlight/shared/net/protocol";
 
@@ -44,7 +46,7 @@ export function checkArgs(schema: Schema, args: unknown): string | null {
       if (p.minItems !== undefined && v.length < p.minItems) return `"${k}" needs at least ${p.minItems} item(s)`;
       if (p.maxItems !== undefined && v.length > p.maxItems) return `"${k}" takes at most ${p.maxItems} item(s)`;
       for (const x of v) {
-        if (typeof x !== p.items?.type) return `"${k}" items must be ${p.items?.type}s`;
+        if (typeof x !== p.items?.type || (typeof x === "number" && !Number.isFinite(x))) return `"${k}" items must be ${p.items?.type}s`;
         if (p.items?.enum && !p.items.enum.includes(x as string)) return `"${k}" items must be one of ${p.items.enum.join(", ")}`;
       }
       continue;
@@ -84,7 +86,15 @@ export class Session {
 }
 
 const STARTER_IDS = STARTERS.map((s) => s.id);
-const TARGET_HELP = "an id from firstlight_observe (creature, player or loot pile), or: guide, shop, portal:<body>, pad:<n>, pad (nearest), gate, safe (nearest safe zone), mission:<id>";
+/** One short line per spell for the tool description (the catalogue's blurbs are written for people at a keyboard). */
+const SPELL_HELP: Record<string, string> = {
+  skipstep: "blink up to 10 m along the ground, the way out of a bad fight.",
+  frostbloom: "frost within 5 m of you, damage and a slow.",
+  wishfall: "a star on a point up to 30 m away, landing after 1.2 s.",
+  glasswing: "a shell that soaks up damage for 4 s.",
+};
+const TRIAL_IDS = MISSIONS.filter(isTrialType).map((m) => m.id as string);
+const TARGET_HELP = "an id from firstlight_observe (creature, player or loot pile), or: guide, curator, vault, shop, portal:<body>, pad:<n>, pad (nearest), gate, safe (nearest safe zone), mission:<id> (where that mission leads now)";
 
 function sessionFile(url: string, name: string): string | undefined {
   if (process.env.FL_AGENT_SESSION === "none") return undefined;
@@ -165,10 +175,10 @@ export const TOOLS: readonly ToolDef[] = [
       type: "object",
       additionalProperties: false,
       properties: {
-        target: { type: "string", description: `Where to go: ${TARGET_HELP}.`, maxLength: 64 },
+        target: { type: "string", description: "Where to go (see above).", maxLength: 64 },
         bearing: { type: "number", description: "Compass bearing in degrees to walk along (0 north, 90 east, 180 south, 270 west). Needs distance.", minimum: 0, maximum: 360 },
         distance: { type: "number", description: "Metres to walk along bearing (1-400).", minimum: 1, maximum: 400 },
-        sprint: { type: "boolean", description: "Sprint at 9 m/s instead of running at 6 m/s." },
+        sprint: { type: "boolean", description: "Sprint instead of running (9 against 6 m/s; each starter's own pace differs a little, see self.speed)." },
         within: { type: "number", description: "Stop this many metres from the target (default depends on the target).", minimum: 0.3, maximum: 60 },
         seconds: { type: "number", description: "Stop walking after this long (default: enough for the distance, at most 60).", minimum: 1, maximum: 120 },
         untilHit: { type: "boolean", description: "Stop as soon as something hurts you (default true)." },
@@ -209,7 +219,7 @@ export const TOOLS: readonly ToolDef[] = [
   },
   {
     name: "firstlight_dodge",
-    description: "Roll 4.5 m in a blink (out of a telegraphed attack), along a compass bearing or the way you face. Ready every 1.3 s; not while swimming.",
+    description: "Roll 4.5 m in a blink (out of a telegraphed attack), along a compass bearing or the way you face. Ready every 1.0 to 1.35 s depending on the starter; not while swimming or slowed.",
     needsAgent: true,
     inputSchema: { type: "object", additionalProperties: false, properties: { bearing: { type: "number", description: "Compass bearing to roll along. Default: the way you face.", minimum: 0, maximum: 360 } } },
     run: (s, a) => act(s, s.agent!.dodge(a.bearing)),
@@ -217,29 +227,29 @@ export const TOOLS: readonly ToolDef[] = [
   {
     name: "firstlight_interact",
     description:
-      "Use what is in reach, like a person's E key: pick up the loot pile you stand at, talk to the guide (lists missions), open the shop (lists goods), take a mission item, press a button. Walk up first with firstlight_move.",
+      "Use what is in reach, like a person's E key: pick up the loot pile you stand at, talk to the guide or to Sela Marchbank (lists missions), open the shop (lists goods), take a mission item, light a beacon, open the Gleam Vault (needs all three gleams). Walk up first with firstlight_move.",
     needsAgent: true,
-    inputSchema: { type: "object", additionalProperties: false, properties: { target: { type: "string", description: "Which thing, when several are in reach: a pile id, guide, shop, or an object id. Default: the nearest.", maxLength: 64 } } },
+    inputSchema: { type: "object", additionalProperties: false, properties: { target: { type: "string", description: "Which thing, when several are in reach: a pile id, guide, curator, vault, shop, or an object id. Default: the nearest.", maxLength: 64 } } },
     run: (s, a) => act(s, s.agent!.interact(a.target)),
   },
   {
     name: "firstlight_missions",
     description:
-      "Missions: list yours and what the guide here offers, or take them. Guides stand at the main pad of each planet (not on Portus); to take missions stand within 3 m of the guide (firstlight_move target=guide). Hunt missions count kills, find missions need an item picked up with firstlight_interact, reach missions complete on arrival (firstlight_move target=mission:<id>).",
+      "Missions: list yours and what the giver here offers, or take them (within 3 m of the giver). Guides stand at the main pad of each planet; in Portus, Sela Marchbank (target=curator) gives the trials of the Three Gleams, played on the planets. Hunt missions count kills, find missions need an item picked up with firstlight_interact, reach missions complete on arrival (firstlight_move target=mission:<id>); race, defend and collect missions: firstlight_trial.",
     needsAgent: true,
     inputSchema: {
       type: "object",
       additionalProperties: false,
       required: ["action"],
       properties: {
-        action: { type: "string", description: "list: your missions and the guide's offers. take: accept the offers.", enum: ["list", "take"] },
-        ids: { type: "array", description: "With take: only these mission ids (default: all on offer).", items: { type: "string" }, maxItems: 9 },
+        action: { type: "string", description: "list: your missions and the offers here. take: accept the offers of the giver you stand at.", enum: ["list", "take"] },
+        ids: { type: "array", description: "With take: only these mission ids (default: all on offer).", items: { type: "string", enum: MISSIONS.map((m) => m.id as string) }, maxItems: MISSIONS.length },
       },
     },
     async run(s, a) {
       if (a.action === "take") return act(s, s.agent!.takeMissions(a.ids));
       const o = s.agent!.observe({ peek: true });
-      return { ok: true, missions: o.missions, offers: o.offers, guide: o.guide };
+      return { ok: true, missions: o.missions, offers: o.offers, guide: o.guide, hunt: o.hunt };
     },
   },
   {
@@ -326,19 +336,44 @@ export const TOOLS: readonly ToolDef[] = [
   },
   {
     name: "firstlight_cast",
-    description: "Reserved for the spellbook: cast a spell at a creature or along a bearing. The spell system is being added; until then this does nothing in the world.",
+    description: `Cast a spell. Spells cost aether (100 at most, refills 6 a second) and have cooldowns; firstlight_observe shows what is ready. ${SPELLS.map((x) => `${x.id} (level ${x.level}, ${x.cost} aether, ${x.cooldownS} s): ${SPELL_HELP[x.id]}`).join(" ")} Not in a safe zone, while protected, or swimming. Aim with one of target, bearing or pos (default: the way you face).`,
     needsAgent: true,
     inputSchema: {
       type: "object",
       additionalProperties: false,
       required: ["spell"],
       properties: {
-        spell: { type: "string", description: "Spell id.", minLength: 1, maxLength: 32 },
-        target: { type: "string", description: "Creature or player id to aim at.", maxLength: 64 },
-        bearing: { type: "number", description: "Compass bearing to aim along instead of a target.", minimum: 0, maximum: 360 },
+        spell: { type: "string", description: "The spell.", enum: SPELL_IDS },
+        target: { type: "string", description: "Creature or player id: skipstep blinks toward it, wishfall lands on it.", minLength: 1, maxLength: 64 },
+        bearing: { type: "number", description: "Compass bearing: the way skipstep blinks; with distance, where wishfall lands.", minimum: 0, maximum: 360 },
+        distance: { type: "number", description: "wishfall with bearing: metres away (default 12).", minimum: 1, maximum: 30 },
+        pos: { type: "array", description: "wishfall: a ground point [x, y, z] (as self.pos).", items: { type: "number" }, minItems: 3, maxItems: 3 },
       },
     },
-    run: (s, a) => act(s, s.agent!.cast(a.spell, { targetId: a.target, bearing: a.bearing })),
+    async run(s, a) {
+      const aims = [a.target, a.bearing, a.pos].filter((v) => v !== undefined).length;
+      if (aims > 1) return { ok: false, reason: "bad arguments", hint: "aim with one of target, bearing or pos" };
+      if (a.distance !== undefined && (a.bearing === undefined || a.spell !== "wishfall")) return { ok: false, reason: "bad arguments", hint: "distance goes with bearing, for wishfall" };
+      if (a.pos !== undefined && a.spell !== "wishfall") return { ok: false, reason: "bad arguments", hint: "pos is for wishfall; aim the others with target or bearing" };
+      return act(s, s.agent!.cast(a.spell, { targetId: a.target, bearing: a.bearing, distance: a.distance, pos: a.pos }));
+    },
+  },
+  {
+    name: "firstlight_trial",
+    description:
+      "Play a race, defend or collect mission you hold, start to finish, on the body you stand on. race: sprints through the rings in order (ring 1 starts the clock). collect: walks over every piece. defend: lights the beacon, stays in its ring and fights what comes. Returns when done, failed (\"failed: time\", \"failed: left\", \"dead\"), blocked, or out of seconds; call again to retry.",
+    needsAgent: true,
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["mission"],
+      properties: {
+        mission: { type: "string", description: "A4 (collect, Arcadia), H4 (defend, Hollowmere), T1 (race, Arcadia), T2 (defend, Hollowmere), T3 (timed collect, Meridian).", enum: TRIAL_IDS },
+        seconds: { type: "number", description: "Give up after this long (default: the objective's time plus the walk there).", minimum: 5, maximum: 600 },
+        retreatBelow: { type: "number", description: "defend: stop fighting under this fraction of max HP (default 0.25).", minimum: 0.05, maximum: 0.95 },
+      },
+    },
+    run: (s, a) => act(s, s.agent!.playTrial(a.mission, { seconds: a.seconds, retreatBelow: a.retreatBelow })),
   },
   {
     name: "firstlight_leave",
@@ -377,6 +412,8 @@ export const PLAYBOOK = [
   "Positions are distances in metres and compass bearings (0 north, 90 east). Ids come from firstlight_observe.",
   "Safe zones (the Portus town, the outpost round each planet's main pad, 12 m round every pad): nobody can fight there; shops and guides are inside.",
   "To level up: on Portus walk to a portal (firstlight_move target=portal:arcadia) and firstlight_travel portal=arcadia. On the planet: firstlight_move target=guide, firstlight_missions action=take, leave the outpost, fight creatures of about your level, pick up loot piles, heal with tonics, return to safety (firstlight_move target=safe) when hurt.",
+  "Spells (firstlight_cast) cost aether and unlock by level: skipstep 1 (a blink out of a bad fight), frostbloom 3 (when surrounded), wishfall 6, glasswing 9 (a shell when hurt).",
+  "Race, defend and collect missions are played with firstlight_trial. The public hunt: Sela Marchbank in Portus (target=curator) gives trials T1 (Arcadia, levels 4-7), T2 (Hollowmere, 9-12), T3 (Meridian, 14-17); all three open the Gleam Vault beside her.",
   "Dying costs the character: a new life starts at level 1 (firstlight_respawn). Retreat early.",
   "Be a good neighbour: don't attack players unless one attacked you first, don't take loot piles that aren't yours while their owner is near, don't crowd people at the guide or the shop.",
 ].join("\n");

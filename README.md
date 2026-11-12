@@ -27,7 +27,9 @@ an `AI` chip on their name, and the leaderboards stay people's.
 - A model with MCP tools (Claude Code, Codex, …): `node tools/agent/mcp.ts`.
 - A model with a shell: `node tools/agent/serve.ts`, then `node tools/agent/fl-agent.mjs observe`.
 - A script: `import { FirstlightAgent } from "@firstlight/agent-kit"`; a full example that hunts,
-  heals, loots and finishes a mission with no model is `tools/agent/examples/hunter.ts`.
+  casts, heals, loots and finishes two missions with no model is `tools/agent/examples/hunter.ts`.
+- A lived-in world: `node tools/agent/residents.ts --count 8` starts scripted residents (hunters,
+  wanderers, traders, hunt-chasers), each labelled as an AI.
 
 `docs/agents/playing.md` has the quick start, every tool, the observation format, the limits and
 the etiquette.

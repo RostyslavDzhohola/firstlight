@@ -14,7 +14,7 @@ import { callTool, checkArgs, PLAYBOOK, Session, TOOLS, TOOL_BY_NAME } from "./t
 
 describe("tool schemas", () => {
   it("every tool is named, described and closed to unknown arguments", () => {
-    expect(TOOLS.map((t) => t.name)).toEqual(expect.arrayContaining(["firstlight_join", "firstlight_observe", "firstlight_move", "firstlight_attack", "firstlight_interact", "firstlight_travel", "firstlight_shop", "firstlight_missions", "firstlight_respawn", "firstlight_leave"]));
+    expect(TOOLS.map((t) => t.name)).toEqual(expect.arrayContaining(["firstlight_join", "firstlight_observe", "firstlight_move", "firstlight_attack", "firstlight_interact", "firstlight_travel", "firstlight_shop", "firstlight_missions", "firstlight_trial", "firstlight_cast", "firstlight_respawn", "firstlight_leave"]));
     expect(new Set(TOOLS.map((t) => t.name)).size).toBe(TOOLS.length);
     for (const t of TOOLS) {
       expect(t.name, t.name).toMatch(/^firstlight_[a-z]+$/);
@@ -34,8 +34,8 @@ describe("tool schemas", () => {
         if (p.enum) expect(p.enum.length, `${t.name}.${k}`).toBeGreaterThan(0);
       }
     }
-    // The whole tool list is small enough to sit in a model's context (about 2k tokens).
-    expect(Buffer.byteLength(JSON.stringify(TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema }))))).toBeLessThan(12_000);
+    // The whole tool list is small enough to sit in a model's context (about 3k tokens, sixteen tools).
+    expect(Buffer.byteLength(JSON.stringify(TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema }))))).toBeLessThan(13_500);
     expect(Buffer.byteLength(PLAYBOOK)).toBeLessThan(1600);
   });
 
@@ -58,7 +58,24 @@ describe("tool schemas", () => {
     const missions = TOOL_BY_NAME.get("firstlight_missions")!.inputSchema;
     expect(checkArgs(missions, { action: "take", ids: ["A1", "A2"] })).toBeNull();
     expect(checkArgs(missions, { action: "take", ids: [1] })).toBe('"ids" items must be strings');
+    expect(checkArgs(missions, { action: "take", ids: ["Z9"] })).toContain('"ids" items must be one of A1');
     expect(checkArgs(TOOL_BY_NAME.get("firstlight_join")!.inputSchema, { name: "ab" })).toBe('"name" is too short');
+    // Spells and trials: only the game's own ids, bounded aims.
+    const cast = TOOL_BY_NAME.get("firstlight_cast")!.inputSchema;
+    expect(checkArgs(cast, { spell: "skipstep", bearing: 180 })).toBeNull();
+    expect(checkArgs(cast, { spell: "wishfall", target: "n12" })).toBeNull();
+    expect(checkArgs(cast, { spell: "wishfall", bearing: 10, distance: 25 })).toBeNull();
+    expect(checkArgs(cast, { spell: "wishfall", pos: [10, 500, -3] })).toBeNull();
+    expect(checkArgs(cast, {})).toBe('missing "spell"');
+    expect(checkArgs(cast, { spell: "fireball" })).toBe('"spell" must be one of skipstep, frostbloom, wishfall, glasswing');
+    expect(checkArgs(cast, { spell: "wishfall", distance: 31, bearing: 0 })).toBe('"distance" must be at most 30');
+    expect(checkArgs(cast, { spell: "wishfall", pos: [1, 2] })).toBe('"pos" needs at least 3 item(s)');
+    expect(checkArgs(cast, { spell: "wishfall", pos: [1, 2, "3"] })).toBe('"pos" items must be numbers');
+    expect(checkArgs(cast, { spell: "skipstep", ox: 1 })).toContain('unknown argument "ox"');
+    const trial = TOOL_BY_NAME.get("firstlight_trial")!.inputSchema;
+    expect(checkArgs(trial, { mission: "T1", seconds: 120 })).toBeNull();
+    expect(checkArgs(trial, { mission: "A1" })).toBe('"mission" must be one of A4, H4, T1, T2, T3');
+    expect(checkArgs(trial, { mission: "T2", seconds: 1 })).toBe('"seconds" must be at least 5');
   });
 
   it("refuses to act before joining, and never throws", async () => {

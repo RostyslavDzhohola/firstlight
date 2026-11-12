@@ -2,7 +2,8 @@
 // portals, zones and world objects the server validates against and the browser client draws.
 
 import { BODIES, bodyBreakables, createTerrain, natureSolids, padDirs, portalSpots, safeGates, zoneAt, inWalledZone, type BodyDef, type BodyId, type Breakable, type NatureSolids, type PortalSpot, type Terrain, type Zone } from "@firstlight/shared";
-import { GUIDES, MISSION_BY_ID, missionsOn, type MissionDef } from "@firstlight/shared/content/missions";
+import { GUIDES, MISSION_BY_ID, missionGiver, missionsFrom, missionsOn, type MissionDef } from "@firstlight/shared/content/missions";
+import { GLEAMS } from "@firstlight/shared/content/gleams";
 import { NPC_AREAS } from "@firstlight/shared/content/npcs";
 import { padName, placeDir, towardDir } from "@firstlight/shared/content/places";
 import { SHOP_SPOTS, type ShopSpot } from "@firstlight/shared/content/shops";
@@ -50,6 +51,13 @@ export class BodyWorld {
   readonly objects: readonly WorldObject[];
   readonly shops: readonly (ShopSpot & { at: V3 })[];
   readonly guide: WorldObject | null;
+  /** Every world object of this body by id, the ones without an E prompt too (rings, shards, kite panels). */
+  readonly things: ReadonlyMap<string, WorldObject>;
+  /** Who hands out missions here: the planet's guide, or Sela Marchbank in Portus (the Three Gleams). */
+  readonly givers: readonly WorldObject[];
+  /** Sela Marchbank and the Gleam Vault (Portus only). */
+  readonly curator: WorldObject | null;
+  readonly vault: WorldObject | null;
   /** Gate centres of the walled safe zone (Portus town, a planet's arrival outpost), on the ground. */
   readonly gates: readonly V3[];
   /** Centre of the walled safe zone (unit direction), or null. */
@@ -71,6 +79,10 @@ export class BodyWorld {
       .map((def) => ({ def, pos: objectPos(def, (x, y, z) => this.terrain.groundHeight(x, y, z)) }));
     this.shops = SHOP_SPOTS.filter((s) => s.body === id).map((s) => ({ ...s, at: [s.pos[0], s.pos[1], s.pos[2]] as V3 }));
     this.guide = this.objects.find((o) => o.def.look === "guide") ?? null;
+    this.things = new Map(objectsOn(id).map((def) => [def.id, { def, pos: objectPos(def, (x, y, z) => this.terrain.groundHeight(x, y, z)) }]));
+    this.curator = this.objects.find((o) => o.def.id === GLEAMS.curator.id) ?? null;
+    this.vault = this.objects.find((o) => o.def.id === GLEAMS.vault) ?? null;
+    this.givers = this.objects.filter((o) => missionsFrom(o.def.id).length > 0);
     this.gates = safeGates(this.body).map((g) => this.onGround(g));
     this.walledCentre = hub ? [0, 1, 0] : this.gates.length ? norm(padDirs(this.body)[0]!) : null;
   }
@@ -144,6 +156,12 @@ export class BodyWorld {
   missionSpot(missionId: string): { pos: V3; what: string; radius?: number } | null {
     const def = MISSION_BY_ID.get(missionId);
     if (!def || def.body !== this.id) return null;
+    // Race, defend and collect: where an attempt starts (the agent narrows it to the next ring or the nearest piece).
+    const first = def.race?.rings[0] ?? def.defend?.beacon ?? def.collect?.pieces[0];
+    if (first) {
+      const o = this.things.get(first);
+      return o ? { pos: o.pos, what: def.race ? "the first ring (running through it starts the clock)" : def.defend ? `${o.def.name} (E), then stay within ${def.defend.radius} m` : `the first of the ${def.collect!.itemName}`, radius: def.race?.radius ?? def.collect?.radius ?? 3 } : null;
+    }
     if (def.find) {
       const o = this.objects.find((x) => x.def.id === def.find!.object);
       return o ? { pos: o.pos, what: o.def.name } : null;
@@ -160,6 +178,11 @@ export class BodyWorld {
     }
     return null;
   }
+}
+
+/** The world object that gives a mission, when it stands on this body. */
+export function giverOf(w: BodyWorld, def: MissionDef): WorldObject | null {
+  return w.givers.find((g) => g.def.id === missionGiver(def)) ?? null;
 }
 
 function id2guide(id: BodyId) {

@@ -33,7 +33,8 @@ Code is MIT (`LICENSE`), our own art CC BY 4.0 (`LICENSE-ART`).
 - `packages/agent-kit`: the headless player AI agents use (`FirstlightAgent`: the guest join flagged
   as an agent, a world model from room state, `observe()`, high-level actions; erasable TypeScript,
   Node runs it directly). `tools/agent`: its MCP server (`mcp.ts`), loopback HTTP bridge
-  (`serve.ts`), CLI (`fl-agent.mjs`) and the scripted `examples/hunter.ts`. Guide:
+  (`serve.ts`), CLI (`fl-agent.mjs`), the scripted `examples/hunter.ts`, and `residents.ts`
+  (N scripted AI residents; their behaviours are in `resident-roles.ts`). Guide:
   `docs/agents/playing.md`. Server side: `apps/server/src/world/agents.ts` (switch and caps),
   `packages/shared/src/net/agents.ts` (the flag).
 - `tools/bots` load-test bots; `tools/blender/characters` headless Blender build of the starter GLBs;

@@ -3,7 +3,7 @@
 // surface (levels and medals boards, online now, play statistics) counts it. A person shows everywhere.
 
 import type { Room } from "@colyseus/sdk";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -14,7 +14,8 @@ import { mountHome } from "../src/ops/home.ts";
 import { characterRepo, MemoryCharacterRepo } from "../src/world/characters.ts";
 import { SqliteCharacterRepo } from "../src/world/sqliteStores.ts";
 import { resetAgentSlots } from "../src/world/agents.ts";
-import { api, Browser, joinWithToken, ORIGIN, play, startAuthServer, userIdOf, type AuthServer } from "./auth-helpers.ts";
+import { liveRooms } from "../src/social/index.ts";
+import { api, Browser, decodeJwt, joinWithToken, ORIGIN, play, startAuthServer, userIdOf, type AuthServer } from "./auth-helpers.ts";
 import { safeLeave, waitFor } from "./helpers.ts";
 
 let server: AuthServer | null = null;
@@ -85,6 +86,53 @@ describe("agent accounts (D-agents-1)", () => {
     expect(again.r).toMatchObject({ ok: true, name: "Scout_7" });
     expect((again.a.room!.state as any).players.get(again.a.room!.sessionId).userId).toBe(id);
   }, 60_000);
+
+  it("play tokens are bound to the guest session (D-security-5): a drop brings the same character back, an ended session never turns into someone else mid-run", async () => {
+    const s = await start();
+    const db = s.accounts.db;
+    const sessionFile = join(mkdtempSync(join(tmpdir(), "fl-agent-")), "session.json");
+    const log: string[] = [];
+    const a = new FirstlightAgent();
+    agents.push(a);
+    const first = await a.connect({ url: s.base, authOrigin: ORIGIN, starter: "unit7", sessionFile, log: (l) => log.push(l) });
+    expect(first.ok).toBe(true);
+    expect(first.newGuest).toBeUndefined();
+    const userOf = (x: FirstlightAgent): string => (x.room!.state as any).players.get(x.room!.sessionId).userId;
+    const id = userOf(a);
+    // The session file holds the cookie; the tokens it buys carry that session's id.
+    const cookie = (JSON.parse(readFileSync(sessionFile, "utf8")) as { cookie: string }).cookie;
+    const auth = { Origin: ORIGIN, Cookie: cookie };
+    const token = ((await (await fetch(`${s.base}/api/auth/token`, { headers: auth })).json()) as { token: string }).token;
+    expect(userIdOf(token)).toBe(id);
+    expect(decodeJwt(token).sid).toBeTruthy();
+
+    // The server drops the connection: the kit rejoins with its session and is the same character.
+    const drop = (x: FirstlightAgent) => [...liveRooms].find((r) => r.actors.has(x.sessionId))!.actors.get(x.sessionId)!.client.leave(4050);
+    const room1 = a.room;
+    drop(a);
+    await waitFor(() => a.status === "playing" && !!a.room && a.room !== room1, 20_000);
+    expect(userOf(a)).toBe(id);
+    expect(a.events.some((e) => e.text === "reconnected")).toBe(true);
+
+    // The session is signed out: its tokens and seats are dead. The body in the world stays until it
+    // leaves; coming back for it is refused, and the kit stops instead of joining as a new guest.
+    expect((await fetch(`${s.base}/api/auth/sign-out`, { method: "POST", headers: { ...auth, "Content-Type": "application/json" }, body: "{}" })).ok).toBe(true);
+    expect((await play(s, token, { body: "portus" })).status).toBe(401);
+    drop(a);
+    await waitFor(() => a.status === "offline", 30_000);
+    expect(a.events.some((e) => e.text.startsWith("the guest session ended"))).toBe(true);
+    expect(await a.moveTo({ bearing: 0, distance: 5 })).toMatchObject({ ok: false, reason: "not connected" });
+    expect(isAgentAccount(db, id)).toBe(true);
+
+    // A new run with the same file: a new guest, and the result says that this is another character.
+    const b = new FirstlightAgent();
+    agents.push(b);
+    const second = await b.connect({ url: s.base, authOrigin: ORIGIN, starter: "unit7", sessionFile, log: (l) => log.push(l) });
+    expect(second).toMatchObject({ ok: true, newGuest: true });
+    expect(userOf(b)).not.toBe(id);
+    expect(isAgentAccount(db, userOf(b))).toBe(true);
+    expect(log.some((l) => l.includes("the saved guest session has ended"))).toBe(true);
+  }, 90_000);
 
   it("the flag sticks to a guest that once played as an agent, and follows it into a new saved account only", async () => {
     const s = await start();

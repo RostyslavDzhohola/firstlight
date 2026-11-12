@@ -111,6 +111,22 @@ describe("agents: limits", () => {
     expect((await third.connect({ url, token: "dev:capC:capC", body: "arcadia" })).ok).toBe(true);
   }, 60_000);
 
+  it("the per-address cap uses the server's one client-address rule: an IPv6 /64 is one address (D-security-4)", async () => {
+    AGENT_RULES.perIp = 1;
+    const ask = async (id: string, ip: string) => {
+      grantTravel(id, "arcadia");
+      const res = await fetch(`${url}/api/play`, { method: "POST", headers: { Authorization: `Bearer dev:${id}:${id}`, "Content-Type": "application/json", [AGENT_HEADER]: "1", "x-real-ip": ip }, body: JSON.stringify({ body: "arcadia", v: PROTOCOL_VERSION }) });
+      return (await res.json()) as { ok: boolean; error?: string };
+    };
+    expect((await ask("v6a", "2001:db8:1:2::1")).ok).toBe(true);
+    // Another address of the same /64 (one household's prefix) is the same address for the cap.
+    expect(await ask("v6b", "2001:db8:1:2:ffff::9")).toMatchObject({ ok: false, error: AGENT_REFUSAL.LIMIT });
+    expect((await ask("v6c", "2001:db8:1:3::1")).ok).toBe(true);
+    // Something that isn't an address is no address at all: it can't be used to mint fresh cap keys.
+    expect((await ask("v6d", "not-an-ip-1")).ok).toBe(true);
+    expect(await ask("v6e", "not-an-ip-2")).toMatchObject({ ok: false, error: AGENT_REFUSAL.LIMIT });
+  }, 30_000);
+
   it("the switch turns agents away, the header alone flags a player, and people are unaffected", async () => {
     AGENT_RULES.enabled = false;
     grantTravel("offA", "arcadia");

@@ -16,6 +16,17 @@ function crowded(): Omit<Observation, "summary"> {
       hotbar: [0, 1, 2, 3].map((slot) => ({ slot, id: "tonic_large", name: "Large Tonic", tier: 1, qty: 10 })),
       backpack: Array.from({ length: 16 }, (_, i) => ({ slot: 4 + i, id: "scatterpipe", name: "Scatterpipe", tier: 3, qty: 1 })),
       cooldowns: { attack: 1400, reload: 2200, overheat: 1500, dodge: 1300, tonic: 8000 },
+      starter: "ninja",
+      speed: { run: 6.6, sprint: 9.9, dodgeCooldown: 1.1 },
+      spells: {
+        aether: 37.5, max: 100, ward: { hp: 87, left: 3.4 },
+        list: [
+          { id: "skipstep", name: "Skipstep", level: 1, cost: 20, cooldown: 6, unlocked: true, readyIn: 0, ready: true, what: "" },
+          { id: "frostbloom", name: "Frostbloom", level: 3, cost: 30, cooldown: 10, unlocked: true, readyIn: 7400, ready: false, what: "" },
+          { id: "wishfall", name: "Wishfall", level: 6, cost: 45, cooldown: 14, unlocked: true, readyIn: 0, ready: false, what: "" },
+          { id: "glasswing", name: "Glasswing Ward", level: 9, cost: 35, cooldown: 18, unlocked: false, readyIn: 0, ready: false, what: "" },
+        ],
+      },
     },
     creatures: Array.from({ length: 8 }, (_, i) => ({ id: `n${1000 + i}`, kind: "compliance_officer", name: "Compliance Officer", level: 20, hp: 123456, maxHp: 654321, dist: 123.4 + n(i), bearing: 359, hostile: true, boss: i === 0, onMe: i < 3, mission: true })),
     players: Array.from({ length: 8 }, (_, i) => ({ id: `p${i}`, name: `Sixteen_Chars_${i}x`, level: 20, dist: 44.4, bearing: 180, agent: i % 2 === 0, dead: i === 1 })),
@@ -25,8 +36,12 @@ function crowded(): Omit<Observation, "summary"> {
     guide: { id: "guide", name: "Sexton Mabry", dist: 300.1, bearing: 200 },
     shops: [{ id: "shop", name: "Lanternfall Stall (Nell Ashgrove)", dist: 310, bearing: 201, inReach: false }],
     safety: { id: "safe", name: "pad 7 Lanternfall Crossing", dist: 99, bearing: 10 },
-    missions: ["H1", "H2", "H3"].map((id) => ({ id, name: "A Fairly Long Mission Name", objective: "Kill 6 Bonewalkers and 4 Bone Archers inside the Drowned Chapel grounds", progress: 3, goal: 10, done: false, where: { dist: 450.5, bearing: 77, what: "the hunting ground" } })),
-    offers: ["A1", "A2", "A3"].map((id) => ({ id, name: "Another Mission Name Here", objective: "Pick up the Shepherd's Bell at the edge of Lacefall's plunge pool", levels: "13-20" })),
+    missions: [
+      ...["H1", "H2", "H3"].map((id) => ({ id, name: "A Fairly Long Mission Name", type: "hunt", objective: "Kill 6 Bonewalkers and 4 Bone Archers inside the Drowned Chapel grounds", progress: 3, goal: 10, done: false, where: { dist: 450.5, bearing: 77, what: "the hunting ground" } })),
+      { id: "T2", name: "The Steadfast Gleam", type: "defend", objective: "Light the beacon in south Thornwood and hold its ring for 90 seconds", progress: 41, goal: 90, done: false, where: { dist: 6.2, bearing: 140, what: "the lit beacon", id: "t2_beacon" }, trial: { state: "paused", left: 49, limit: 90, remaining: 49, next: "get back inside the beacon's ring now" } },
+    ],
+    offers: ["A1", "A2", "A3"].map((id) => ({ id, name: "Another Mission Name Here", type: "collect", objective: "Pick up the Shepherd's Bell at the edge of Lacefall's plunge pool", levels: "13-20", from: "Sexton Mabry" })),
+    hunt: { name: "The Three Gleams", gleams: 1, of: 3, vaultOpened: false },
     events: Array.from({ length: 12 }, (_, i) => ({ ago: i * 3.3, type: "toast", text: `Mission complete: Pest Control · +80 XP · +30 ◎ · 2 × Small Tonic (${i})` })),
   };
 }
@@ -39,6 +54,9 @@ describe("observation summary", () => {
     expect(text).toContain("DANGER (wild), swimming, in combat");
     expect(text).toContain("ATTACKING YOU");
     expect(text).toContain("n1000 Compliance Officer");
+    expect(text).toContain("Aether 38/100, ward 87hp 4s. Spells: skipstep ready, frostbloom 8s, wishfall needs 45, glasswing L9.");
+    // A running attempt is listed first, with its type, state and clock.
+    expect(text).toContain("Missions: T2 The Steadfast Gleam 41/90 [defend paused 49s left]: get back inside the beacon's ring now -> t2_beacon 6 m SE (140°)");
   });
 
   it("holds any size it is asked for", () => {

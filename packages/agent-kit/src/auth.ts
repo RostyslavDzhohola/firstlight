@@ -5,6 +5,12 @@
 // for a 15-minute JWT (GET /api/auth/token) and send that to /api/play. The cookie is the character:
 // keep it in `sessionFile` and the same guest comes back on the next run.
 //
+// A play token is bound to the session that issued it (its `sid` claim, D-security-5): the server
+// takes it, and keeps the seat it bought, only while that session exists. So a token is never kept
+// past its session: a 401 from the game drops the cached token and asks the session for a new one,
+// and a session that is gone (signed out, expired, pruned) can't be revived: the saved cookie is
+// dropped and a new guest is made, which `onNewGuest` reports, because that is a new character.
+//
 // Local servers started with ALLOW_DEV_GUESTS=1 (and the in-process test server) also take dev
 // tokens, `dev:<id>:<name>`: no auth round trip at all.
 
@@ -22,8 +28,12 @@ export class AgentError extends Error {
 }
 
 export interface TokenSource {
-  /** A token for /api/play; `fresh` drops any cached one first. */
-  get(fresh?: boolean): Promise<string>;
+  /**
+   * A token for /api/play; `fresh` drops any cached one first. `sameSession`: never sign in anew: if
+   * the session behind this source has ended, throw AgentError("session ended") instead (a character
+   * in play stays that character; a new guest would be someone else).
+   */
+  get(fresh?: boolean, sameSession?: boolean): Promise<string>;
   /** The display name the token carries, when known without asking the server. */
   readonly name: string | null;
 }
@@ -74,6 +84,16 @@ function cookiesOf(res: Response, had: string | null): string {
   return [...jar].map(([k, v]) => `${k}=${v}`).join("; ");
 }
 
+/** Read (not verify) the session a play token is bound to (`sid`), or null for a token without one. */
+export function sessionOf(token: string): string | null {
+  try {
+    const p = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8")) as { sid?: unknown };
+    return typeof p.sid === "string" && p.sid ? p.sid : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Read (not verify) a JWT's expiry in ms. */
 function expiryOf(token: string): number {
   try {
@@ -89,9 +109,10 @@ function expiryOf(token: string): number {
  * A guest account through Better Auth at `authUrl` (the site origin in production, the game server
  * itself locally). `sessionFile` keeps the session cookie between runs (it is the character: keep it private).
  */
-export function guestSession(authUrl: string, sessionFile?: string, origin?: string): TokenSource {
+export function guestSession(authUrl: string, sessionFile?: string, origin?: string, onNewGuest?: (why: string) => void): TokenSource {
   const base = authUrl.replace(/\/+$/, "");
   let cookie = readSession(sessionFile, base);
+  const hadSaved = !!cookie;
   let cached: { token: string; exp: number } | null = null;
   // Better Auth checks the Origin of requests that carry its cookie against the server's trusted
   // origins (the site's own origin): `origin` names it when `authUrl` isn't it (a dev server reached
@@ -121,8 +142,9 @@ export function guestSession(authUrl: string, sessionFile?: string, origin?: str
 
   return {
     name: null,
-    async get(fresh = false) {
+    async get(fresh = false, sameSession = false) {
       if (!fresh && cached && cached.exp - 60_000 > Date.now()) return cached.token;
+      const cached0 = !!cached;
       cached = null;
       for (let attempt = 0; attempt < 2; attempt++) {
         if (!cookie) await signIn();
@@ -131,7 +153,10 @@ export function guestSession(authUrl: string, sessionFile?: string, origin?: str
           cached = { token: t, exp: expiryOf(t) };
           return t;
         }
-        cookie = null; // the session is gone (pruned guest, signed out): a new guest
+        // The session is gone (pruned guest, signed out, expired): its tokens and seats went with it.
+        if (sameSession && cookie) throw new AgentError("session ended", "the guest session this character belongs to has ended (signed out or expired): connect again to play as a new guest");
+        if (attempt === 0 && (hadSaved || cached0)) onNewGuest?.("the saved guest session has ended (signed out or expired): signing in as a new guest, a new character");
+        cookie = null;
       }
       throw new AgentError("auth", "couldn't get a play token");
     },

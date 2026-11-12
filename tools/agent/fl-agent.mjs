@@ -10,17 +10,19 @@
 //   node tools/agent/fl-agent.mjs shop buy --item tonic_small --qty 2
 //   node tools/agent/fl-agent.mjs item use --item tonic_small
 //   node tools/agent/fl-agent.mjs travel --portal arcadia
+//   node tools/agent/fl-agent.mjs cast skipstep --bearing 180      # or: cast wishfall --target n12
+//   node tools/agent/fl-agent.mjs trial A4                         # play a race / defend / collect mission
 //   node tools/agent/fl-agent.mjs tools               # every tool with its arguments
 //   node tools/agent/fl-agent.mjs quit                # leave the game and stop the bridge
 //
 // `--key value` pairs become the tool's JSON arguments (numbers and true/false are converted). The
 // first bare word after the tool is its main argument (move/attack/interact: target; missions/shop/
-// item: action; say: phrase). Prints the game's text summary when there is one, else JSON. Exit code
+// item: action; say: phrase; cast: spell; trial: mission). `--pos x,y,z` and `--ids A1,A4` are lists. Prints the game's text summary when there is one, else JSON. Exit code
 // 0 when the result is ok, 1 when it isn't, 2 when the bridge can't be reached.
 
 const base = `http://127.0.0.1:${process.env.FL_AGENT_PORT ?? 7361}`;
 const [tool, ...rest] = process.argv.slice(2);
-const MAIN = { move: "target", attack: "target", interact: "target", missions: "action", shop: "action", item: "action", say: "phrase", cast: "spell" };
+const MAIN = { move: "target", attack: "target", interact: "target", missions: "action", shop: "action", item: "action", say: "phrase", cast: "spell", trial: "mission" };
 
 function parse(words) {
   const args = {};
@@ -30,7 +32,13 @@ function parse(words) {
       const next = words[i + 1];
       const v = next === undefined || next.startsWith("--") ? "true" : words[++i];
       const key = w.slice(2);
-      args[key] = v === "true" ? true : v === "false" ? false : v !== "" && !Number.isNaN(Number(v)) && key !== "target" && key !== "name" && key !== "item" ? Number(v) : key === "ids" ? v.split(",") : v;
+      args[key] =
+        key === "pos" ? v.split(",").map(Number)
+        : key === "ids" ? v.split(",")
+        : v === "true" ? true
+        : v === "false" ? false
+        : v !== "" && !Number.isNaN(Number(v)) && key !== "target" && key !== "name" && key !== "item" && key !== "mission" && key !== "spell" ? Number(v)
+        : v;
     } else if (MAIN[tool] && args[MAIN[tool]] === undefined) args[MAIN[tool]] = w;
     else if (tool === "shop" || tool === "item") args.item ??= w;
   }
@@ -39,7 +47,7 @@ function parse(words) {
 
 async function main() {
   if (!tool || tool === "help" || tool === "--help") {
-    console.log("usage: fl-agent.mjs <join|observe|move|stop|attack|dodge|interact|missions|shop|item|travel|say|respawn|leave|tools|quit> [main argument] [--key value …]\nStart the bridge first: node tools/agent/serve.ts");
+    console.log("usage: fl-agent.mjs <join|observe|move|stop|attack|dodge|interact|missions|trial|shop|item|travel|cast|say|respawn|leave|tools|quit> [main argument] [--key value …]\nStart the bridge first: node tools/agent/serve.ts");
     return 0;
   }
   let res;

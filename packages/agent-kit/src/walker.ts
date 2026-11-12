@@ -7,20 +7,34 @@
 import { ANIM } from "@firstlight/shared/net/schema";
 import { emptyContact, resetContact, type PropContact, type XYZ } from "@firstlight/shared/planet/collide";
 import { deepWater, SWIM_FLOAT } from "@firstlight/shared/planet/water";
+import { BASE_MOVE, starterMove } from "@firstlight/shared/content/starters";
 import type { BodyWorld } from "./world.ts";
 import { cross, dot, len, norm, tangent, type V3 } from "./vec.ts";
 
-/** The client's speeds (m/s) and the server's matching allowances (movement.ts MOVE). */
+/**
+ * The client's speeds (m/s) and the server's matching allowances (movement.ts MOVE). `run`, `sprint`
+ * and `dodgeCooldownMs` are the shared base: each starter has its own (content/starters.ts), which a
+ * Walker takes with `setStarter` and offers as `walker.run`, `walker.sprint` and `walker.dodgeCooldownMs`.
+ */
 export const WALK = {
-  run: 6,
-  sprint: 9,
+  run: BASE_MOVE.run,
+  sprint: BASE_MOVE.sprint,
   swim: 3,
   gravity: 18,
   dodgeSpeed: 15, // 4.5 m in 0.3 s
   dodgeTime: 0.3,
-  /** The server lets a roll start every 1.2 s; a little longer here so clock skew can't refuse one. */
-  dodgeCooldownMs: 1300,
+  /** A roll starts this much later than the server's cooldown allows, so clock skew can't refuse one. */
+  dodgeSkewMs: 100,
+  /** The base cooldown (1.2 s on the server) with the skew: starters differ (walker.dodgeCooldownMs). */
+  dodgeCooldownMs: BASE_MOVE.dodgeCooldown * 1000 + 100,
 } as const;
+
+/** A movement effect the server enforces for a while (npc/effects.ts; Frostbloom's slow is one too). */
+interface MoveFx {
+  kind: "slow" | "nosprint";
+  amount: number;
+  until: number;
+}
 
 const SUBSTEP = 0.25;
 const MAX_SUBSTEPS = 16;
@@ -43,6 +57,11 @@ export class Walker {
   private readonly nc = emptyContact();
   private world: BodyWorld;
   private isBroken: (id: string) => boolean;
+  /** This starter's own pace and roll (content/starters.ts): the row the server validates against. */
+  private baseRun: number = WALK.run;
+  private baseSprint: number = WALK.sprint;
+  private dodgeMs: number = WALK.dodgeCooldownMs;
+  private readonly fx: MoveFx[] = [];
 
   constructor(world: BodyWorld, isBroken: (id: string) => boolean = () => false) {
     this.world = world;
@@ -52,6 +71,47 @@ export class Walker {
   setWorld(world: BodyWorld, isBroken: (id: string) => boolean) {
     this.world = world;
     this.isBroken = isBroken;
+  }
+
+  /** Take a starter's run and sprint speed and dodge cooldown from the shared table (STARTERS index). */
+  setStarter(starter: number) {
+    const m = starterMove(starter);
+    this.baseRun = m.run;
+    this.baseSprint = m.sprint;
+    this.dodgeMs = m.dodgeCooldown * 1000 + WALK.dodgeSkewMs;
+  }
+
+  /** The server slowed this body (an `npcFx` message: chill, slow, no-sprint): predict it, as the client does. */
+  addEffect(kind: string, amount: number, ms: number, now = Date.now()) {
+    if (kind === "chill" || kind === "slow") this.fx.push({ kind: "slow", amount: Math.max(0, Math.min(1, amount)), until: now + ms });
+    else if (kind === "nosprint") this.fx.push({ kind: "nosprint", amount: 0, until: now + ms });
+  }
+
+  private effects(now: number): { slow: number; noSprint: boolean } {
+    let slow = 0, noSprint = false;
+    for (let i = this.fx.length - 1; i >= 0; i--) {
+      const e = this.fx[i]!;
+      if (e.until <= now) this.fx.splice(i, 1);
+      else if (e.kind === "slow") slow = Math.max(slow, e.amount);
+      else noSprint = true;
+    }
+    return { slow, noSprint };
+  }
+
+  /** Run speed right now (m/s): the starter's, less any slow. */
+  get run(): number {
+    return this.baseRun * (1 - this.effects(Date.now()).slow);
+  }
+
+  /** Sprint speed right now (m/s): the starter's, less any slow; a run while sprinting is forbidden. */
+  get sprint(): number {
+    const e = this.effects(Date.now());
+    return (e.noSprint ? this.baseRun : this.baseSprint) * (1 - e.slow);
+  }
+
+  /** Milliseconds between rolls for this starter (the server's cooldown plus a little skew). */
+  get dodgeCooldownMs(): number {
+    return this.dodgeMs;
   }
 
   get p(): V3 {
@@ -80,7 +140,9 @@ export class Walker {
   /** Start a roll along `dir` (unit tangent) if one is ready; the next steps carry it. */
   dodge(dir: V3, now: number): boolean {
     if (now < this.dodgeReadyAt || !this.onGround || this.swimming) return false;
-    this.dodgeReadyAt = now + WALK.dodgeCooldownMs;
+    const e = this.effects(now);
+    if (e.noSprint || e.slow > 0) return false; // the server shrinks or refuses the burst while slowed
+    this.dodgeReadyAt = now + this.dodgeMs;
     this.dodgeLeft = WALK.dodgeTime;
     this.dodgeDir = dir;
     this.facing = dir;
@@ -134,7 +196,7 @@ export class Walker {
       vH = [d[0] * WALK.dodgeSpeed, d[1] * WALK.dodgeSpeed, d[2] * WALK.dodgeSpeed];
     } else if (wish) {
       const d = tangent(up, wish);
-      const s = this.swimming ? Math.min(speed, WALK.swim) : speed;
+      const s = this.swimming ? Math.min(speed, WALK.swim) : Math.min(speed, this.sprint);
       if (d) vH = [d[0] * s, d[1] * s, d[2] * s];
     }
     if (this.swimming) this.vUp = 0;

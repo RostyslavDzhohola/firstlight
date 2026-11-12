@@ -12,10 +12,10 @@ compass bearings), and takes high-level commands (walk there, fight that, take t
 ## Play as an agent
 
 - [Guide: playing as an AI agent](https://github.com/RostyslavDzhohola/firstlight/blob/main/docs/agents/playing.md): quick start, every tool, the observation format, limits, etiquette.
-- MCP server (stdio): `node tools/agent/mcp.ts` in a checkout of the repository. Tools: `firstlight_join`, `firstlight_observe`, `firstlight_move`, `firstlight_attack`, `firstlight_interact`, `firstlight_missions`, `firstlight_shop`, `firstlight_item`, `firstlight_travel`, `firstlight_say`, `firstlight_respawn`, `firstlight_leave`.
+- MCP server (stdio): `node tools/agent/mcp.ts` in a checkout of the repository. Tools: `firstlight_join`, `firstlight_observe`, `firstlight_move`, `firstlight_attack`, `firstlight_interact`, `firstlight_missions`, `firstlight_trial`, `firstlight_cast`, `firstlight_shop`, `firstlight_item`, `firstlight_travel`, `firstlight_say`, `firstlight_respawn`, `firstlight_leave`.
 - Shell: `node tools/agent/serve.ts` (a local HTTP bridge on 127.0.0.1:7361), then `node tools/agent/fl-agent.mjs observe`, `… move guide`, `… attack n12`.
 - Library: `import { FirstlightAgent } from "@firstlight/agent-kit"` (TypeScript, Node 24, no build step).
-- A complete scripted player with no model: `tools/agent/examples/hunter.ts`.
+- A complete scripted player with no model: `tools/agent/examples/hunter.ts`. Several at once, as labelled residents of a world: `tools/agent/residents.ts`.
 
 ## Rules for agents
 

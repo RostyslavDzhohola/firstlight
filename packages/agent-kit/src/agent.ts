@@ -15,23 +15,26 @@
 import { Client, type Room } from "@colyseus/sdk";
 import { BODY_IDS, type BodyId } from "@firstlight/shared";
 import { SHOP, itemName } from "@firstlight/shared/content/items";
-import { MISSION_BY_ID, missionGoal } from "@firstlight/shared/content/missions";
+import { GLEAMS, gleamsWon } from "@firstlight/shared/content/gleams";
+import { isTrialType as isTrial, MISSION_BY_ID, missionGoal, missionsFrom, type MissionDef } from "@firstlight/shared/content/missions";
+import { AETHER, aetherAt, castBlock, SPELL_BY_ID, SPELL_INDEX, SPELLS, WISHFALL } from "@firstlight/shared/content/spells";
+import { STARTER_STATS, starterMove } from "@firstlight/shared/content/starters";
 import { NF, NPC_DEFS } from "@firstlight/shared/content/npcs";
 import { towardDir } from "@firstlight/shared/content/places";
 import { STARTERS, WEAPON_BY_ID, WEAPONS, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
 import { AGENT_HEADER } from "@firstlight/shared/net/agents";
-import { NET, PHRASES, PROTOCOL_VERSION, type InvItem, type PlayResponse, type YouState } from "@firstlight/shared/net/protocol";
+import { NET, PHRASES, PROTOCOL_VERSION, type CastMsg, type InvItem, type PlayResponse, type SpellEvent, type TrialMsg, type YouState } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
 import { CLOSE } from "@firstlight/shared/net/social";
 import { PORTAL_REACH } from "@firstlight/shared/planet/portals";
 import { inReach } from "@firstlight/shared/content/world";
 import { shopSpotAt } from "@firstlight/shared/content/shops";
 import { AgentError, claimName, fixedToken, guestSession, type TokenSource } from "./auth.ts";
-import { summarize, type Observation, type ObservedCreature, type ObservedItem, type ObservedMission, type ObservedPlace } from "./observe.ts";
+import { summarize, type Observation, type ObservedCreature, type ObservedItem, type ObservedMission, type ObservedPlace, type ObservedSpells, type ObservedTrial } from "./observe.ts";
 import { addScaled, bearingOfDir, bearingTo, dirOfBearing, dist, groundDistance, len, norm, scale, sub, tangent, turn, type V3 } from "./vec.ts";
 import { createNavigator, type Navigator } from "./nav.ts";
 import { WALK, Walker } from "./walker.ts";
-import { bodyWorld, type BodyWorld } from "./world.ts";
+import { bodyWorld, giverOf, type BodyWorld, type WorldObject } from "./world.ts";
 
 export interface ConnectOptions {
   /** The game server (API) origin, e.g. `http://localhost:2567`. */
@@ -69,7 +72,7 @@ export interface ActionResult {
 
 export interface AgentEvent {
   at: number;
-  type: "hit" | "hurt" | "kill" | "death" | "toast" | "denied" | "mission" | "shop" | "info" | "phrase" | "level";
+  type: "hit" | "hurt" | "kill" | "death" | "toast" | "denied" | "mission" | "shop" | "info" | "phrase" | "level" | "spell" | "trial";
   text: string;
   /** Merged repeats (hits on one target). */
   n?: number;
@@ -91,6 +94,26 @@ export interface MoveOptions {
   stopWhenHit?: boolean;
 }
 
+export interface CastAim {
+  /** Aim at a creature or player from the observation (Skipstep blinks toward it, Wishfall lands on it). */
+  targetId?: string;
+  /** Aim along a compass bearing (Skipstep: the way to blink; Wishfall: `distance` metres that way). */
+  bearing?: number;
+  /** Wishfall with `bearing`: how far away the star lands (default 12 m, at most 30). */
+  distance?: number;
+  /** Wishfall: a ground point `[x, y, z]` in the body's frame. */
+  pos?: readonly number[];
+}
+
+export interface TrialOptions {
+  /** Give up after this long (default: what the objective needs, at most 600 s). */
+  seconds?: number;
+  /** defend: leave the fight when HP falls under this fraction (default 0.25); the hold goes on while you stay in the ring. */
+  retreatBelow?: number;
+  /** race, collect: stop as soon as something hurts you (the attempt itself goes on: its clock too). */
+  stopWhenHit?: boolean;
+}
+
 export interface AttackOptions {
   /** Fight for at most this long (default 20 s, at most 120). */
   seconds?: number;
@@ -100,6 +123,13 @@ export interface AttackOptions {
   retreatBelow?: number;
   /** Allow attacking another player. Off by default: agents don't start fights with people. */
   pvp?: boolean;
+  /** Don't follow the target further than `radius` metres from `pos` (holding a beacon's ring). */
+  leash?: { pos: readonly number[]; radius: number };
+  /**
+   * Break off (reason "yielded") as soon as another player hits the same creature: "people" for a
+   * person only, "anyone" for other agents too. No kill stealing: the fight is theirs.
+   */
+  yieldTo?: "people" | "anyone";
 }
 
 type You = YouState & { selected?: number; level?: number; dead?: boolean };
@@ -163,6 +193,14 @@ export class FirstlightAgent {
   private lastPatchAt = 0;
   /** Ticks spent standing because the server had gone quiet (see onTick). */
   stalls = 0;
+  /** The last `trial` message per mission (race, defend, collect attempts), with when it came. */
+  private readonly trials = new Map<string, TrialMsg & { at: number }>();
+  /** Creatures another player hit lately: who, and when (the `claimedBy` of an observed creature). */
+  private readonly claims = new Map<string, { by: string; at: number }>();
+  /** stop() and close() end a multi-step action (playTrial) by moving this on. */
+  private planGen = 0;
+  /** The guest session this character belongs to ended and a new guest was made (see connect's result). */
+  private newGuest = false;
 
   // ------------------------------------------------------------------------------------ joining
 
@@ -177,7 +215,10 @@ export class FirstlightAgent {
     if (opts.token) this.tokens = fixedToken(opts.token);
     else if (opts.dev) this.tokens = fixedToken(`dev:agent${Math.random().toString(36).slice(2, 10)}:${opts.name ?? "Agent"}`);
     else {
-      this.tokens = guestSession(opts.authUrl ?? this.url, opts.sessionFile, opts.authOrigin);
+      this.tokens = guestSession(opts.authUrl ?? this.url, opts.sessionFile, opts.authOrigin, (why) => {
+        this.newGuest = true;
+        this.log(why);
+      });
       if (opts.name) {
         const r = await claimName(this.url, await this.tokens.get(), opts.name);
         if (!r.ok) nameNote = `name not set: ${r.message}`;
@@ -189,7 +230,8 @@ export class FirstlightAgent {
       this.status = "offline";
       throw e;
     }
-    return { ok: true, name: this.displayName, body: this.bodyId, starter: STARTERS[this.starter]!.id, ...(nameNote ? { note: nameNote } : {}) };
+    const starter = STARTERS[this.me()?.starter ?? this.starter]?.id ?? STARTERS[this.starter]!.id;
+    return { ok: true, name: this.displayName, body: this.bodyId, starter, ...(nameNote ? { note: nameNote } : {}), ...(this.newGuest ? { newGuest: true, hint: "the saved guest session had ended (signed out or expired): this is a new guest character" } : {}) };
   }
 
   private log(line: string) {
@@ -197,14 +239,16 @@ export class FirstlightAgent {
   }
 
   /** /api/play → seat → room, following travel redirects and queues. Throws AgentError on refusal. */
-  private async join(body: BodyId): Promise<void> {
+  private async join(body: BodyId, sameSession = false): Promise<void> {
     const gen = ++this.joinGen;
     this.status = this.status === "reconnecting" ? "reconnecting" : "joining";
     const tokens = this.tokens!;
     let fresh = false;
     let waited = 0;
     for (;;) {
-      const token = await tokens.get(fresh);
+      // A play token is bound to its session (D-security-5). Coming back for a character already in
+      // play (`sameSession`: a reconnect, a portal, a rebirth) never swaps in a new guest.
+      const token = await tokens.get(fresh, sameSession);
       const res = await fetch(`${this.url}/api/play`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", [AGENT_HEADER]: "1" },
@@ -243,7 +287,7 @@ export class FirstlightAgent {
         continue;
       }
       if (r.error === "version") throw new AgentError("version", `the server speaks protocol ${r.version}, this kit ${PROTOCOL_VERSION}: update the kit`);
-      if (r.error === "unauthorized") throw new AgentError("unauthorized", "the server refused the play token (a dev token needs a server started with ALLOW_DEV_GUESTS=1)");
+      if (r.error === "unauthorized") throw new AgentError("unauthorized", "the server refused the play token (its session ended or was signed out; a dev token needs a server started with ALLOW_DEV_GUESTS=1)");
       throw new AgentError(r.error, r.message ?? r.error);
     }
   }
@@ -277,7 +321,9 @@ export class FirstlightAgent {
       }
       await sleep(25);
     }
+    this.walker.setStarter(me.starter); // the character's own pace and roll (content/starters.ts)
     this.walker.place(me.x, me.y, me.z);
+    this.trials.clear(); // an attempt doesn't outlive its room session (quests/trials.ts)
     this.displayName = me.name;
     this.status = "playing";
     this.lastTick = Date.now();
@@ -317,14 +363,15 @@ export class FirstlightAgent {
       await sleep(Math.min(15_000, 1000 * 2 ** attempt));
       if (this.status !== "reconnecting") return;
       try {
-        await this.join(this.bodyId);
+        await this.join(this.bodyId, true);
         this.note("info", "reconnected");
         return;
       } catch (e) {
         const code = e instanceof AgentError ? e.code : "";
         this.log(`reconnect failed: ${(e as Error).message}`);
         if (code === "superseded") return;
-        if (code === "banned" || code === "kicked" || code === "agents off" || code === "version") break;
+        if (code === "session ended") this.note("info", "the guest session ended (signed out or expired): this character can't be reached any more; connect again for a new guest");
+        if (code === "banned" || code === "kicked" || code === "agents off" || code === "version" || code === "session ended") break;
       }
     }
     if (this.status === "reconnecting") {
@@ -344,7 +391,7 @@ export class FirstlightAgent {
     // this gives up; a refusal (a cap, a ban) is final at once.
     for (let attempt = 0; ; attempt++) {
       try {
-        await this.join(body);
+        await this.join(body, true);
         return;
       } catch (e) {
         if (e instanceof AgentError || attempt >= 3 || this.status === "closed") {
@@ -370,6 +417,7 @@ export class FirstlightAgent {
       await this.waitFor("loggedOut", () => true, 15_000);
     }
     this.status = "closed";
+    this.planGen++;
     this.joinGen++;
     this.room = null;
     this.stopTimers();
@@ -454,15 +502,32 @@ export class FirstlightAgent {
         break;
       }
       case "correct":
+        // The server put the body somewhere: adopt it. A move we asked for (fast travel, Skipstep)
+        // isn't a refusal; anything else is movement the server didn't accept.
         this.walker.place(m.x, m.y, m.z);
         if (Date.now() < this.expectTeleport) this.expectTeleport = 0;
         else this.corrections++;
+        break;
+      case "npcFx":
+        // A slow, chill or no-sprint the server now enforces on the movement budget: walk by it.
+        this.walker.addEffect(String(m.kind), Number(m.amount) || 0, Number(m.ms) || 0);
+        break;
+      case "trial":
+        this.onTrial(m as TrialMsg);
+        break;
+      case "spell":
+        this.onSpell(m as SpellEvent);
         break;
       case "hit":
         if (m.target === id && m.attacker !== id) {
           this.lastHurtAt = Date.now();
           this.note("hurt", `took {n} damage from ${this.nameOf(m.attacker)}{hits}`, { key: `in:${m.attacker}`, amount: m.amount });
         } else if (m.attacker === id) this.note("hit", `dealt {n} damage to ${this.nameOf(m.target)}{hits}`, { key: `out:${m.target}`, amount: m.amount });
+        else if ((this.room?.state as any)?.npcs?.has(m.target) && (this.room?.state as any)?.players?.has(m.attacker)) {
+          // Someone else is fighting that creature (etiquette: it is theirs).
+          this.claims.set(m.target, { by: m.attacker, at: Date.now() });
+          if (this.claims.size > 60) this.claims.delete(this.claims.keys().next().value!);
+        }
         break;
       case "npcKill": {
         const name = NPC_DEFS[m.kind]?.name ?? "a creature";
@@ -485,7 +550,7 @@ export class FirstlightAgent {
         else this.note("denied", `refused: ${m.action} (${m.reason})`, { key: `denied:${m.action}:${m.reason}`, amount: 0 });
         break;
       case "missionDone":
-        this.note("mission", `mission ${m.id} complete: +${m.xp} XP, +${m.coins} coins`);
+        this.note("mission", m.id === "vault" ? `the Gleam Vault opened: +${m.coins} coins and the Gleamweave Cape` : `mission ${m.id} complete: +${m.xp} XP, +${m.coins} coins`);
         break;
       case "huntTargets":
         this.huntIds = new Set(m.npcs as string[]);
@@ -505,6 +570,56 @@ export class FirstlightAgent {
       default:
         break;
     }
+  }
+
+  private onTrial(m: TrialMsg) {
+    const before = this.trials.get(m.id);
+    this.trials.set(m.id, { ...m, at: Date.now() });
+    const name = MISSION_BY_ID.get(m.id)?.name ?? m.id;
+    if (m.state === "failed") this.note("trial", `${m.id} ${name}: attempt failed (${m.reason ?? "?"})`);
+    else if (m.state === "done") this.note("trial", `${m.id} ${name}: done`);
+    else if (m.state === "paused") this.note("trial", `${m.id} ${name}: outside the beacon's ring, the clock waits (go back within seconds or it fails)`);
+    else if (m.state === "running" && before?.state !== "running") this.note("trial", `${m.id} ${name}: ${m.kind === "defend" ? `the beacon is lit, hold its ring for ${Math.ceil(m.leftMs / 1000)} s` : m.limitMs ? `the clock is running, ${Math.ceil(m.leftMs / 1000)} s` : "started"}`);
+  }
+
+  private onSpell(e: SpellEvent) {
+    const id = this.sessionId;
+    const name = SPELL_BY_ID.get(e.spell)?.name ?? e.spell;
+    if (e.by === id) {
+      if (e.phase === "cast") {
+        const text =
+          e.spell === "skipstep" ? `cast Skipstep: blinked ${round1(dist([e.x, e.y, e.z], [e.tx ?? e.x, e.ty ?? e.y, e.tz ?? e.z]))} m`
+          : e.spell === "frostbloom" ? `cast Frostbloom: ${e.hit?.length ?? 0} slowed`
+          : e.spell === "wishfall" ? `cast Wishfall: a star lands ${round1(dist(this.walker.p, [e.x, e.y, e.z]))} m away in ${round1((e.ms ?? 0) / 1000)} s`
+          : `cast ${name}: a shell of ${e.hp ?? 0} HP for ${round1((e.ms ?? 0) / 1000)} s`;
+        this.note("spell", text);
+      } else if (e.phase === "absorb") this.note("spell", `the ward absorbed {n} damage{hits}`, { key: "ward", amount: e.amount ?? 0 });
+      else if (e.phase === "end" && e.spell === "glasswing") this.note("spell", e.broke ? "the ward broke" : "the ward ended");
+      return;
+    }
+    // Someone else's star about to land close by: worth knowing before it does.
+    if (e.spell === "wishfall" && e.phase === "cast" && dist(this.walker.p, [e.x, e.y, e.z]) <= (e.r ?? WISHFALL.radiusM) + 3) {
+      this.note("spell", `a star called by ${this.nameOf(e.by)} lands ${round1(dist(this.walker.p, [e.x, e.y, e.z]))} m from you in ${round1((e.ms ?? 0) / 1000)} s: move away`);
+    }
+  }
+
+  /** The server's clock now (ms): the synced room time, carried forward since the last patch. */
+  private serverNow(): number {
+    const t: number = (this.room?.state as any)?.time || 0;
+    return t ? t + Math.max(0, Date.now() - this.lastPatchAt) : Date.now();
+  }
+
+  /** The other player fighting creature `id`: they hit it in the last `ms`, or (with `chased`) it is after them. */
+  private claimOf(id: string, ms = 6000, chased = false): { id: string; name: string; agent: boolean } | null {
+    const st = this.room?.state as any;
+    const c = this.claims.get(id);
+    let by: string | null = c && Date.now() - c.at <= ms ? c.by : null;
+    if (!by && chased) {
+      const t: string | undefined = st?.npcs?.get(id)?.target;
+      if (t && t !== this.sessionId && st?.players?.has(t)) by = t;
+    }
+    const p = by ? st?.players?.get(by) : null;
+    return p && by !== this.sessionId ? { id: by!, name: p.name, agent: !!p.agent } : null;
   }
 
   private waitFor<T = any>(type: string, test: (m: T) => boolean, ms: number): Promise<T | null> {
@@ -635,6 +750,7 @@ export class FirstlightAgent {
         boss: def?.family === "boss",
         onMe: n.target === this.sessionId,
         mission: this.huntIds.has(id),
+        ...(this.claimOf(id, 6000, true) ? { claimedBy: (({ name, agent }) => ({ name, agent }))(this.claimOf(id, 6000, true)!) } : {}),
       });
     });
     creatures.sort((a, b) => a.dist - b.dist);
@@ -662,19 +778,37 @@ export class FirstlightAgent {
 
     const missions: ObservedMission[] = (you?.missions ?? []).map((m) => {
       const def = MISSION_BY_ID.get(m.id);
-      const spot = !m.done ? w.missionSpot(m.id) : null;
+      const timed = !!def && !m.done && isTrial(def);
+      const tt = timed ? this.trialTarget(m, def) : null;
+      const spot = m.done ? null : tt ? { pos: tt.obj.pos, what: tt.what, id: tt.obj.def.id } : w.missionSpot(m.id);
       return {
         id: m.id,
         name: def?.name ?? m.id,
+        type: def?.type ?? "",
         objective: def?.objective ?? "",
         progress: m.progress,
         goal: m.goal || (def ? missionGoal(def) : 1),
         done: m.done,
-        ...(spot ? { where: { dist: round1(groundDistance(pos, spot.pos)), bearing: bearingTo(pos, spot.pos), what: spot.what } } : {}),
+        ...(spot ? { where: { dist: round1(groundDistance(pos, spot.pos)), bearing: bearingTo(pos, spot.pos), what: spot.what, ...("id" in spot ? { id: spot.id } : {}) } } : {}),
+        ...(def && !m.done && def.body !== this.bodyId ? { on: def.body } : {}),
+        ...(timed ? { trial: this.observedTrial(m, def, now) } : {}),
       };
     });
     const have = new Set((you?.missions ?? []).map((m) => m.id));
-    const offers = w.missions().filter((m) => !have.has(m.id)).map((m) => ({ id: m.id as string, name: m.name, objective: m.objective, levels: `${m.recLevel[0]}-${m.recLevel[1]}` }));
+    const offers = w.givers.flatMap((g) =>
+      missionsFrom(g.def.id).filter((m) => !have.has(m.id)).map((m) => ({ id: m.id as string, name: m.name, type: m.type as string, objective: m.objective, levels: `${m.recLevel[0]}-${m.recLevel[1]}`, from: g.def.name })),
+    );
+    const hunt: Observation["hunt"] = {
+      name: GLEAMS.name,
+      gleams: gleamsWon(you?.missions ?? []),
+      of: GLEAMS.trials.length,
+      vaultOpened: !!you?.gleamVault,
+      ...(w.curator ? { curator: place("curator", w.curator.def.name, w.curator.pos) } : {}),
+      ...(w.vault ? { vault: place("vault", "the Gleam Vault", w.vault.pos) } : {}),
+    };
+    const level: number = you?.level ?? me?.level ?? 1;
+    const starterIdx: number = me?.starter ?? this.starter;
+    const pace = starterMove(starterIdx);
 
     const fresh = this.events.filter((e) => e.at > this.seenEventAt).slice(-12);
     if (!o.peek && fresh.length) this.seenEventAt = fresh[fresh.length - 1]!.at;
@@ -693,7 +827,7 @@ export class FirstlightAgent {
         heading: bearingOfDir(norm(pos), this.walker.facing),
         hp: me?.hp ?? 0,
         maxHp: me?.maxHp ?? 0,
-        level: you?.level ?? me?.level ?? 1,
+        level,
         xp: you?.xp ?? 0,
         xpToNext: you?.xpToNext ?? 0,
         coins: you?.coins ?? 0,
@@ -720,6 +854,9 @@ export class FirstlightAgent {
           dodge: Math.max(0, this.walker.dodgeReadyAt - now),
           tonic: Math.max(0, this.tonicUntil - now),
         },
+        starter: STARTER_STATS[starterIdx]?.id ?? STARTERS[starterIdx]?.id ?? "unit7",
+        speed: { run: round1(pace.run), sprint: round1(pace.sprint), dodgeCooldown: pace.dodgeCooldown },
+        spells: this.observedSpells(level),
       },
       creatures: creatures.slice(0, 8),
       players: players.slice(0, 8),
@@ -731,6 +868,7 @@ export class FirstlightAgent {
       safety: safe ? place("safe", safe.name, safe.pos) : null,
       missions,
       offers,
+      hunt,
       events: fresh.map((e) => ({ ago: round1((now - e.at) / 1000), type: e.type, text: e.text })),
     };
     return { ...obs, summary: summarize(obs, o.maxSummaryBytes) };
@@ -738,6 +876,74 @@ export class FirstlightAgent {
 
   private safeSpot(pos: V3): { pos: V3; name: string } | null {
     return this.world.safeSpot(pos);
+  }
+
+  private observedSpells(level: number): ObservedSpells {
+    const book = this.you?.spells ?? null;
+    const sn = this.serverNow();
+    const aether = book ? aetherAt(book, sn) : AETHER.max;
+    return {
+      aether: round1(aether),
+      max: AETHER.max,
+      ...(book?.ward && book.ward.until > sn ? { ward: { hp: book.ward.hp, left: round1((book.ward.until - sn) / 1000) } } : {}),
+      list: SPELLS.map((sp, i) => {
+        const unlocked = level >= sp.level;
+        const readyIn = Math.max(0, Math.round((book?.ready[i] ?? 0) - sn));
+        return { id: sp.id, name: sp.name, level: sp.level, cost: sp.cost, cooldown: sp.cooldownS, unlocked, readyIn, ready: unlocked && readyIn === 0 && aether >= sp.cost, what: sp.blurb };
+      }),
+    };
+  }
+
+  /**
+   * Where an open race, defend or collect mission leads right now on this body: the next ring (the
+   * first one while no attempt runs), the beacon, or the nearest piece not gathered yet.
+   */
+  private trialTarget(m: { id: string; counts?: number[] }, def: MissionDef): { obj: WorldObject; what: string; radius: number } | null {
+    if (def.body !== this.bodyId) return null;
+    const w = this.world;
+    const t = this.trials.get(def.id);
+    const live = t?.state === "running" || t?.state === "paused";
+    if (def.race) {
+      const id = (live && t?.next) || def.race.rings[0]!;
+      const o = w.things.get(id);
+      const n = def.race.rings.indexOf(id) + 1;
+      return o ? { obj: o, what: live ? `ring ${n} of ${def.race.rings.length}: run through it` : "ring 1: running through it starts the clock", radius: def.race.radius } : null;
+    }
+    if (def.defend) {
+      const o = w.things.get(def.defend.beacon);
+      return o ? { obj: o, what: live ? `the lit beacon: stay within ${def.defend.radius} m of it` : `${o.def.name}: interact with it, then stay within ${def.defend.radius} m`, radius: def.defend.radius } : null;
+    }
+    if (def.collect) {
+      const pos = this.walker.p;
+      let best: WorldObject | null = null, bestD = Infinity, left = 0;
+      def.collect.pieces.forEach((id, i) => {
+        if (m.counts?.[i]) return;
+        const o = w.things.get(id);
+        if (!o) return;
+        left++;
+        const d = groundDistance(pos, o.pos);
+        if (d < bestD) (bestD = d), (best = o);
+      });
+      return best ? { obj: best, what: `the nearest of ${left} ${def.collect.itemName} left: walk over it`, radius: def.collect.radius } : null;
+    }
+    return null;
+  }
+
+  private observedTrial(m: { id: string; progress: number; goal: number }, def: MissionDef, now: number): ObservedTrial {
+    const t = this.trials.get(def.id);
+    const live = t?.state === "running" || t?.state === "paused";
+    // An untimed collect has no attempt to start or lose: it runs from the first piece on.
+    const state = live ? t!.state : !def.collect?.limitS && def.collect && m.progress > 0 ? "running" : "idle";
+    const limit = t?.limitMs !== undefined && live ? round1(t.limitMs / 1000) : (def.race?.limitS ?? def.defend?.holdS ?? def.collect?.limitS ?? 0);
+    const left = live && t!.limitMs > 0 ? round1(Math.max(0, t!.leftMs - (t!.state === "running" ? now - t!.at : 0)) / 1000) : undefined;
+    const goal = m.goal || missionGoal(def);
+    const remaining = Math.max(0, goal - m.progress);
+    const here = def.body === this.bodyId;
+    const next = !here ? `played on ${def.body}`
+      : def.race ? (live ? `run through the rings in order, ${remaining} to go` : "run through ring 1 to start the clock, then the rings in order")
+      : def.defend ? (t?.state === "paused" ? "get back inside the beacon's ring now" : live ? `stay in the ring and fight what comes, ${remaining} s to hold` : "walk to the beacon and interact with it to start")
+      : `walk over each piece, ${remaining} left${def.collect?.limitS && !live ? ` (the first one starts a ${def.collect.limitS} s clock)` : ""}`;
+    return { state, ...(left !== undefined ? { left } : {}), limit, remaining, next, ...(t?.state === "failed" ? { failed: t.reason ?? "failed" } : {}) };
   }
 
   // ------------------------------------------------------------------------------------ targets
@@ -795,9 +1001,26 @@ export class FirstlightAgent {
         const s = this.safeSpot(pos);
         return s ? fixed(s.pos, s.name, 2) : { error: { ok: false, reason: "no safe zone known" } };
       }
+      case "curator":
+      case "sela":
+        return w.curator ? fixed(w.curator.pos, w.curator.def.name, 2) : { error: { ok: false, reason: "not here", hint: "Sela Marchbank stands in Portus Plaza" } };
+      case "vault":
+        return w.vault ? fixed(w.vault.pos, "the Gleam Vault", 1.8) : { error: { ok: false, reason: "not here", hint: "the Gleam Vault stands in Portus Plaza" } };
       case "mission": {
         const open = (this.you?.missions ?? []).filter((m) => !m.done);
         const m = tail ? open.find((x) => x.id === tail) : open.find((x) => w.missionSpot(x.id));
+        const mdef = m ? MISSION_BY_ID.get(m.id) : undefined;
+        if (m && mdef && isTrial(mdef)) {
+          // The next ring, the beacon or the nearest piece left: a point that moves on as the attempt does.
+          const first = this.trialTarget(m, mdef);
+          if (!first) return { error: { ok: false, reason: "no mission spot", hint: mdef.body !== this.bodyId ? `mission ${m.id} is played on ${mdef.body}` : "nothing left to reach" } };
+          const mid = m.id;
+          const at = (): V3 | null => {
+            const cur = (this.you?.missions ?? []).find((x) => x.id === mid && !x.done);
+            return cur ? (this.trialTarget(cur, mdef)?.obj.pos ?? null) : null;
+          };
+          return { at, label: `mission ${m.id}: ${first.what}`, within: mdef.defend ? 2 : 1.2 };
+        }
         const spot = m ? w.missionSpot(m.id) : null;
         return spot ? fixed(spot.pos, `mission ${m!.id}: ${spot.what}`, Math.max(2, Math.min(8, (spot.radius ?? 4) / 2))) : { error: { ok: false, reason: "no mission spot", hint: "take a mission from the guide first; some missions have no fixed place" } };
       }
@@ -812,10 +1035,10 @@ export class FirstlightAgent {
       const k: string = pid;
       return { at: () => (st.players.get(k) ? [st.players.get(k).x, st.players.get(k).y, st.players.get(k).z] : null), label: st.players.get(k).name, within: 2.5 };
     }
-    const obj = w.objects.find((o) => o.def.id === id);
+    const obj = w.things.get(id);
     if (obj) return fixed(obj.pos, obj.def.name, Math.max(0.6, obj.def.range * 0.6));
     if ((BODY_IDS as readonly string[]).includes(id)) return this.resolve(`portal:${id}`);
-    return { error: { ok: false, reason: "unknown target", hint: "use an id from observe(), or guide, shop, portal:<body>, pad:<n>, gate, safe, mission:<id>, {bearing, distance}" } };
+    return { error: { ok: false, reason: "unknown target", hint: "use an id from observe(), or guide, curator, vault, shop, portal:<body>, pad:<n>, gate, safe, mission:<id>, {bearing, distance}" } };
   }
 
   // ------------------------------------------------------------------------------------ walking
@@ -838,8 +1061,8 @@ export class FirstlightAgent {
     if (!first) return { ok: false, reason: "target gone" };
     const within = o.within ?? t.within;
     const far = groundDistance(start, first);
-    const speed = o.sprint ? WALK.sprint : WALK.run;
-    const limit = Math.min(o.seconds ?? Math.min(60, far / speed * 1.8 + 8), 300) * 1000;
+    const pace = () => (o.sprint ? this.walker.sprint : this.walker.run); // the starter's own, less any slow, read every tick
+    const limit = Math.min(o.seconds ?? Math.min(60, far / pace() * 1.8 + 8), 300) * 1000;
     const nav = this.navigator(t.at);
     const t0 = Date.now();
     const hurt0 = this.lastHurtAt;
@@ -875,12 +1098,13 @@ export class FirstlightAgent {
       const over = o.seconds !== undefined ? now - t0 > limit : ticks * TICK_MS > limit || now - t0 > limit * 3;
       if (over) return report(false, "timeout", "still on the way: call moveTo again to keep going");
       if (n.blocked) return report(false, "blocked", "no way round found from here: try another bearing or a nearer target");
-      return { wish: n.wish, speed };
+      return { wish: n.wish, speed: pace() };
     });
   }
 
   /** Stop whatever the character is doing (the pending action resolves as cancelled). */
   async stop(): Promise<ActionResult> {
+    this.planGen++;
     this.cancel("stopped");
     return { ok: true };
   }
@@ -904,16 +1128,17 @@ export class FirstlightAgent {
     return { ok: true, heading: bearingOfDir(up, dir) };
   }
 
-  /** Roll 4.5 m (a short burst past sprint speed) along a bearing, or the way you face. Every 1.3 s. */
+  /** Roll 4.5 m (a short burst past sprint speed) along a bearing, or the way you face. The cooldown is the starter's (1.0 to 1.35 s). */
   async dodge(bearing?: number): Promise<ActionResult> {
     const no = this.notPlaying();
     if (no) return no;
     const up = norm(this.walker.p);
     const dir = bearing === undefined ? this.walker.facing : dirOfBearing(up, bearing);
     const now = Date.now();
-    if (!this.walker.dodge(dir, now)) return { ok: false, reason: this.walker.swimming ? "swimming" : "cooldown", readyIn: Math.max(0, this.walker.dodgeReadyAt - now) };
+    if (!this.walker.dodge(dir, now)) return { ok: false, reason: this.walker.swimming ? "swimming" : now < this.walker.dodgeReadyAt ? "cooldown" : "slowed", readyIn: Math.max(0, this.walker.dodgeReadyAt - now) };
     const from = this.walker.p;
     await sleep(WALK.dodgeTime * 1000 + TICK_MS * 2);
+    // The roll's cooldown is the starter's (Kappa 1.0 s … Brother Ash 1.35 s).
     return { ok: true, moved: round1(dist(from, this.walker.p)) };
   }
 
@@ -981,6 +1206,10 @@ export class FirstlightAgent {
         return result({ ok: true, killed: !!t, ...(t ? {} : { reason: "target gone", hint: "it left your sight (fled, or someone else's kill)" }) });
       }
       if (now - t0 > limit) return result({ ok: !untilDead, killed: false, reason: "time", targetHp: t.hp, dealt: Math.max(0, hp0 - t.hp), hint: "still alive: attack again, or retreat" });
+      if (o.yieldTo && !isPlayer) {
+        const c = this.claimOf(id, 5000);
+        if (c && (o.yieldTo === "anyone" || !c.agent)) return result({ ok: false, killed: false, reason: "yielded", to: c.name, targetHp: t.hp, hint: `${c.name} is fighting it: the kill is theirs` });
+      }
       if (o.retreatBelow && me.hp < me.maxHp * o.retreatBelow) return result({ ok: false, killed: false, reason: "low hp", targetHp: t.hp, hint: "retreat: moveTo('safe'), or useItem a tonic" });
       const den = this.lastDenial;
       if (den && den.at >= t0 && (den.action === "fire" || den.action === "melee")) {
@@ -1010,7 +1239,12 @@ export class FirstlightAgent {
       const face = tangent(up, sub(tp, pos)) ?? this.walker.facing;
       let wish: V3 | null = null;
       if (d > want || !sight) wish = nav(now).wish;
-      const speed = d > want + 8 ? WALK.sprint : WALK.run;
+      const speed = d > want + 8 ? this.walker.sprint : this.walker.run;
+      if (o.leash && wish) {
+        // Holding a place (a beacon's ring): never walk further out than the leash, whatever the target does.
+        const out = sub(pos, [o.leash.pos[0]!, o.leash.pos[1]!, o.leash.pos[2]!]);
+        if (len(out) >= o.leash.radius && wish[0] * out[0] + wish[1] * out[1] + wish[2] * out[2] > 0) wish = null;
+      }
       const safe = ((me.flags as number) & PF.SAFE) !== 0;
       const protectedNow = (this.you?.protectedUntil ?? 0) > (st.time || now);
       const ready = !safe && !protectedNow && d <= reach && sight && now >= this.nextAttackAt && now >= this.reloadUntil && now >= this.overheatUntil;
@@ -1064,22 +1298,233 @@ export class FirstlightAgent {
   }
 
   /**
-   * Reserved for the spellbook (the spells lane adds a `cast` client message): sends
-   * `cast { spell, ...aim }` as it is. The final message shape is wired at integration; until the
-   * server knows the message this does nothing in the world.
+   * Cast a spell from the spellbook (content/spells.ts): `skipstep` (blink up to 10 m along the
+   * ground; level 1), `frostbloom` (a ring of frost around you: damage and a slow; level 3),
+   * `wishfall` (a star on a ground point up to 30 m away, landing 1.2 s later; level 6), `glasswing`
+   * (a shell that soaks up damage for 4 s; level 9). Each costs aether and has a cooldown (see
+   * `self.spells`). The server decides: a refusal comes back as its reason ("locked", "cooldown",
+   * "aether", "safe zone", "protected", "swimming", "blocked").
+   *
+   * Skipstep moves the body on the server: the agent takes the position the server sends back.
    */
-  async cast(spell: string, aim: { targetId?: string; bearing?: number } = {}): Promise<ActionResult> {
+  async cast(spell: string, aim: CastAim = {}): Promise<ActionResult> {
     const no = this.notPlaying();
     if (no) return no;
+    const key = spell.trim().toLowerCase();
+    const def = SPELL_BY_ID.get(key) ?? SPELLS.find((x) => x.name.toLowerCase() === key || (key === "ward" && x.id === "glasswing"));
+    if (!def) return { ok: false, reason: "no such spell", hint: `spells: ${SPELLS.map((x) => x.id).join(", ")}` };
+    const room = this.room!;
+    const st = room.state as any;
+    const idx = SPELL_INDEX.get(def.id)!;
+    const level: number = this.you?.level ?? this.me()?.level ?? 1;
+    // What can be told from here saves a round trip; the server checks the same things again.
+    const block = castBlock(def, level, this.you?.spells, this.serverNow());
+    if (block === "level") return { ok: false, reason: "locked", hint: `${def.name} unlocks at level ${def.level} (you are level ${level})` };
+    if (block === "cooldown") return { ok: false, reason: "cooldown", readyIn: Math.max(0, Math.round((this.you?.spells?.ready[idx] ?? 0) - this.serverNow())) };
+    if (block === "aether") return { ok: false, reason: "aether", hint: `${def.name} costs ${def.cost} aether; it refills ${AETHER.regenPerS} a second` };
     const pos = this.walker.p;
     const up = norm(pos);
-    const head = addScaled(pos, up, 1.6);
-    const st = this.room!.state as any;
-    const t = aim.targetId ? (st.npcs?.get(aim.targetId) ?? st.players?.get(aim.targetId)) : null;
-    const dir = t ? norm(sub(addScaled([t.x, t.y, t.z], up, 1), head)) : aim.bearing !== undefined ? dirOfBearing(up, aim.bearing) : this.walker.facing;
-    // STUB (lane/spells): the message name and fields below are a placeholder for the lead to match.
-    this.room!.send("cast", { spell, ox: head[0], oy: head[1], oz: head[2], dx: dir[0], dy: dir[1], dz: dir[2], ...(aim.targetId ? { targetId: aim.targetId } : {}), t: Date.now() });
-    return { ok: true, sent: true, note: "cast is a reserved stub: the server may not know this message yet" };
+    let dir: V3 = this.walker.facing;
+    let point: V3 | null = null;
+    if (aim.targetId) {
+      const t = st.npcs?.get(aim.targetId) ?? st.players?.get(aim.targetId);
+      if (!t) return { ok: false, reason: "unknown target", hint: "use a creature or player id from observe()" };
+      point = [t.x, t.y, t.z];
+      dir = tangent(up, sub(point, pos)) ?? dir;
+    } else if (aim.pos) {
+      const q = aim.pos;
+      if (!Array.isArray(q) || q.length !== 3 || !q.every((v) => Number.isFinite(v)) || len(q) < this.world.R * 0.5) return { ok: false, reason: "bad target", hint: "pos is [x, y, z] in the body's frame (see self.pos)" };
+      point = this.world.onGround(q);
+      dir = tangent(up, sub(point, pos)) ?? dir;
+    } else if (aim.bearing !== undefined) {
+      if (!Number.isFinite(aim.bearing)) return { ok: false, reason: "bad target", hint: "bearing in compass degrees" };
+      dir = dirOfBearing(up, aim.bearing);
+      if (def.id === "wishfall") point = this.world.onGround(towardDir(up, norm(addScaled(up, dir, 1)), Math.max(1, Math.min(WISHFALL.rangeM, aim.distance ?? 12)), this.world.R));
+    }
+    const msg: CastMsg = { spell: def.id, dx: dir[0], dy: dir[1], dz: dir[2], ...(def.id === "wishfall" && point ? { tx: point[0], ty: point[1], tz: point[2] } : {}) };
+    const id = this.sessionId;
+    const from = this.walker.p;
+    const t0 = Date.now();
+    if (def.id === "skipstep") {
+      this.walker.facing = dir;
+      this.expectTeleport = t0 + 2500; // the server's `correct` after a blink is the spell working, not a refusal
+    }
+    const cast = this.waitFor<SpellEvent>("spell", (e) => e.by === id && e.spell === def.id && e.phase === "cast", 2500).then((e) => (e ? { e } : null));
+    const denied = this.waitFor<{ action: string; reason: string }>("denied", (m) => m.action === "cast", 2500).then((m) => (m ? { reason: m.reason } : null));
+    room.send("cast", msg);
+    const r = await Promise.race([cast, denied]);
+    if (def.id === "skipstep" && !(r && "e" in r)) this.expectTeleport = 0;
+    if (!r) return { ok: false, reason: "no answer", hint: "casts are limited to 5 a second" };
+    if ("reason" in r) {
+      const hint: Record<string, string> = {
+        locked: `${def.name} unlocks at level ${def.level}`,
+        "safe zone": "no spells in a safe zone: walk out of it first",
+        protected: "arrival protection is still on: wait for self.protectedFor to reach 0",
+        swimming: "get out of the water first",
+        blocked: "a wall, deep water or a ledge right ahead: aim another way",
+        dead: "call respawn",
+      };
+      return { ok: false, reason: r.reason, ...(hint[r.reason] ? { hint: hint[r.reason] } : {}) };
+    }
+    const e = r.e;
+    if (def.id === "skipstep") await this.until(() => dist(from, this.walker.p) > 0.5, 600); // the `correct` that carries the new position
+    await this.until(() => (this.you?.spells?.t ?? 0) >= (st.time || 0) - 2000 && (this.you?.spells?.ready[idx] ?? 0) > 0, 500);
+    const book = this.you?.spells;
+    return {
+      ok: true,
+      spell: def.id,
+      aether: book ? Math.round(aetherAt(book, this.serverNow())) : undefined,
+      cooldown: def.cooldownS,
+      ...(def.id === "skipstep" ? { moved: round1(dist(from, this.walker.p)) } : {}),
+      ...(def.id === "frostbloom" ? { slowed: e.hit?.length ?? 0, radius: e.r } : {}),
+      ...(def.id === "wishfall" ? { landsIn: round1((e.ms ?? 0) / 1000), distance: round1(dist(from, [e.x, e.y, e.z])), radius: e.r } : {}),
+      ...(def.id === "glasswing" ? { shell: e.hp ?? 0, seconds: round1((e.ms ?? 0) / 1000) } : {}),
+    };
+  }
+
+  // ------------------------------------------------------------------------------------ trials
+
+  /**
+   * Play a race, defend or collect mission you hold on this body, from wherever you stand:
+   * - race: sprints to the first ring (passing it starts the clock) and on through every ring in order;
+   * - collect: walks over each piece, nearest first (a timed one starts its clock at the first);
+   * - defend: walks to the beacon, lights it, stays inside its ring and fights what comes until the hold is over.
+   * Resolves when the mission is done, the attempt fails ("failed: time", "failed: left", "dead"),
+   * the way is blocked, or `seconds` are up. Call it again for another attempt.
+   */
+  async playTrial(missionId: string, o: TrialOptions = {}): Promise<ActionResult> {
+    const no = this.notPlaying();
+    if (no) return no;
+    const def = MISSION_BY_ID.get(missionId.trim().toUpperCase());
+    if (!def || !isTrial(def)) return { ok: false, reason: "not a trial", hint: "race, defend and collect missions only (missions[].type in observe())" };
+    const mine = () => (this.you?.missions ?? []).find((m) => m.id === def.id);
+    const m0 = mine();
+    if (!m0) return { ok: false, reason: "not accepted", hint: def.giver ? "take it from Sela Marchbank in Portus Plaza: moveTo('curator'), then missions take" : `take it from the guide on ${def.body}: moveTo('guide'), then missions take` };
+    if (m0.done) return { ok: true, done: true, note: "already done in this life" };
+    if (def.body !== this.bodyId) return { ok: false, reason: "wrong body", hint: `it is played on ${def.body}: go there first (the portal in Portus, or the portal back to Portus from here)` };
+    if (!this.trialTarget(m0, def)) return { ok: false, reason: "no mission spot" };
+    const t0 = Date.now();
+    const corrections0 = this.corrections;
+    const report = (r: ActionResult): ActionResult => {
+      const m = mine();
+      return { ...r, mission: def.id, type: def.type, progress: m?.progress ?? 0, goal: m?.goal || missionGoal(def), seconds: round1((Date.now() - t0) / 1000), hp: this.me()?.hp ?? 0, corrections: this.corrections - corrections0 };
+    };
+    const failed = (): string | null => {
+      const t = this.trials.get(def.id);
+      return t && t.state === "failed" && t.at >= t0 ? (t.reason ?? "failed") : null;
+    };
+    if (def.defend) return report(await this.holdBeacon(def, o, mine, failed, t0));
+
+    // race and collect: one walk whose target moves on as the server counts rings and pieces.
+    const limit = Math.max(5, Math.min(600, o.seconds ?? (def.race?.limitS ?? def.collect?.limitS ?? 120) + 240)) * 1000;
+    const nav = this.navigator(() => {
+      const m = mine();
+      return m && !m.done ? (this.trialTarget(m, def)?.obj.pos ?? null) : null;
+    });
+    let goneAt = 0;
+    const hurt0 = this.lastHurtAt;
+    return report(
+      await this.run((now) => {
+        const m = mine();
+        if (!m) return { done: { ok: false, reason: "not accepted" } };
+        if (m.done) return { done: { ok: true, done: true } };
+        if (o.stopWhenHit && this.lastHurtAt > hurt0) return { done: { ok: false, done: false, reason: "hurt", hint: "something is attacking you: fight or move to safety, then call it again" } };
+        const why = failed();
+        if (why) return { done: { ok: false, done: false, reason: `failed: ${why}`, hint: why === "time" ? "out of time: call it again for another attempt (passing ring 1, or the first piece, restarts the clock)" : "call it again for another attempt" } };
+        if (now - t0 > limit) return { done: { ok: false, done: false, reason: "timeout", hint: "still going: call it again to continue" } };
+        const n = nav(now);
+        if (n.gone) {
+          // Every piece counted and the reward a tick behind: wait for it, briefly.
+          goneAt ||= now;
+          return now - goneAt > 1500 ? { done: { ok: false, done: false, reason: "no mission spot" } } : IDLE;
+        }
+        goneAt = 0;
+        if (n.blocked) return { done: { ok: false, done: false, reason: "blocked", hint: "no way round found from here: move somewhere else and call it again" } };
+        return { wish: n.wish, speed: this.walker.sprint };
+      }),
+    );
+  }
+
+  /** The nearest live creature that is after you or hostile, within `radius` of `centre` (not a boss). */
+  private threatNear(centre: readonly number[], radius: number): { id: string; dist: number; near: number } | null {
+    const st = this.room?.state as any;
+    const pos = this.walker.p;
+    let best: { id: string; dist: number; near: number } | null = null;
+    let near = 0;
+    st?.npcs?.forEach((n: any, id: string) => {
+      if (n.flags & NF.DEAD || n.hp <= 0) return;
+      const def = NPC_DEFS[n.kind];
+      if (def?.family === "boss") return;
+      const at = [n.x, n.y, n.z];
+      const mine = n.target === this.sessionId;
+      if (!mine && !(def?.temper === "hostile" || (n.flags & NF.AGGRO) !== 0)) return;
+      if (dist(centre, at) > radius) return;
+      const d = dist(pos, at);
+      if (d <= 5) near++;
+      if (!best || d < best.dist) best = { id, dist: d, near: 0 };
+    });
+    if (best) (best as { near: number }).near = near;
+    return best;
+  }
+
+  private async holdBeacon(def: MissionDef, o: TrialOptions, mine: () => { done: boolean } | undefined, failed: () => string | null, t0: number): Promise<ActionResult> {
+    const d = def.defend!;
+    const beacon = this.world.things.get(d.beacon);
+    if (!beacon) return { ok: false, reason: "no mission spot" };
+    const gen = ++this.planGen;
+    const alive = () => this.planGen === gen && this.status === "playing" && !!this.room && !this.dead;
+    const limit = Math.max(5, Math.min(600, o.seconds ?? d.holdS + 240)) * 1000;
+    const lit = () => {
+      const t = this.trials.get(def.id);
+      return !!t && t.at >= t0 - 1 && (t.state === "running" || t.state === "paused");
+    };
+    const alreadyLit = () => {
+      const t = this.trials.get(def.id);
+      return !!t && (t.state === "running" || t.state === "paused");
+    };
+    if (groundDistance(this.walker.p, beacon.pos) > 2.2) {
+      const r = await this.moveTo({ pos: beacon.pos }, { sprint: true, within: 2 });
+      if (!r.ok) return { ...r, done: false, phase: "walking to the beacon" };
+    }
+    for (let i = 0; i < 3 && alive() && !alreadyLit(); i++) {
+      this.room?.send("interact", { target: d.beacon });
+      await this.until(() => lit() || !alive(), 1200);
+    }
+    if (!alreadyLit()) return { ok: false, done: false, reason: alive() ? "beacon not lit" : this.dead ? "dead" : "cancelled", hint: "stand within 3 m of the beacon, out of any other attempt" };
+    // Hold: stay well inside the ring, fight what comes close, drink when hurt.
+    const inner = Math.max(4, d.radius - 4);
+    const retreat = o.retreatBelow ?? 0.25;
+    while (alive()) {
+      const m = mine();
+      if (!m) return { ok: false, done: false, reason: "not accepted" };
+      if (m.done) return { ok: true, done: true };
+      const why = failed();
+      if (why) return { ok: false, done: false, reason: `failed: ${why}`, hint: "light the beacon again for another attempt" };
+      if (Date.now() - t0 > limit) return { ok: false, done: false, reason: "timeout" };
+      const me = this.me();
+      if (groundDistance(this.walker.p, beacon.pos) > inner) {
+        const r = await this.moveTo({ pos: beacon.pos }, { within: 3, sprint: true, seconds: 8 });
+        if (r.reason === "cancelled") return { ...r, done: false };
+        continue;
+      }
+      const hurt = !!me && me.hp < me.maxHp * 0.55;
+      const foe = this.threatNear(beacon.pos, d.radius - 1);
+      if (hurt && Date.now() >= this.tonicUntil) {
+        const tonic = this.findItem("tonic_large") ?? this.findItem("tonic_small");
+        if (tonic) await this.useItem(tonic.slot);
+      }
+      // Spells where they pay: the ward when hurt and under attack, frost when two or more are on top of you.
+      const sp = this.observedSpells(this.you?.level ?? 1).list;
+      if (foe && hurt && sp[3]?.ready) await this.cast("glasswing");
+      else if (foe && foe.near >= 2 && sp[1]?.ready) await this.cast("frostbloom");
+      if (foe && me && me.hp >= me.maxHp * retreat) {
+        const r = await this.attack(foe.id, { seconds: 6, untilDead: false, leash: { pos: beacon.pos, radius: inner } });
+        if (r.reason === "cancelled") return { ...r, done: false };
+        continue;
+      }
+      await sleep(150);
+    }
+    return { ok: false, done: false, reason: this.dead ? "dead" : "cancelled", ...(this.dead ? { hint: "call respawn" } : {}) };
   }
 
   // ------------------------------------------------------------------------------------ items
@@ -1178,7 +1623,7 @@ export class FirstlightAgent {
     const active = new Set((this.you?.missions ?? []).filter((m) => !m.done).map((m) => m.id));
     let best: (typeof this.world.objects)[number] | null = null, bestD = Infinity;
     for (const o of this.world.objects) {
-      if (target && o.def.id !== target && !(target === "guide" && o.def.look === "guide") && !(target === "shop" && o.def.look === "keeper")) continue;
+      if (target && o.def.id !== target && !(target === "guide" && o.def.look === "guide") && !(target === "shop" && o.def.look === "keeper") && !((target === "curator" || target === "sela") && o.def.look === "curator") && !(target === "vault" && o.def.look === "vault")) continue;
       if (o.def.mission && !active.has(o.def.mission)) continue;
       if (!inReach(o.pos, pos, o.def.range, 0.3)) continue;
       const d = groundDistance(o.pos, pos);
@@ -1187,6 +1632,21 @@ export class FirstlightAgent {
     if (!best) return { ok: false, reason: "nothing in reach", hint: "walk up to it first: moveTo('guide'), moveTo('shop'), moveTo(<pile id>)" };
     if (best.def.look === "guide") return { ok: true, talkedTo: best.def.name, ...this.guideTalk() };
     if (best.def.look === "keeper") return this.shop();
+    if (best.def.look === "curator") {
+      const won = gleamsWon(this.you?.missions ?? []);
+      const says = this.you?.gleamVault ? GLEAMS.lines.opened : won >= GLEAMS.trials.length ? GLEAMS.lines.all : won > 0 ? GLEAMS.lines.some : GLEAMS.lines.none;
+      return { ok: true, talkedTo: best.def.name, says, gleams: won, of: GLEAMS.trials.length, ...this.guideTalk() };
+    }
+    if (best.def.look === "vault") {
+      const t0 = Date.now();
+      const opened = this.waitFor("missionDone", (m: { id: string }) => m.id === "vault", 2000).then((m) => (m ? "opened" : null));
+      const refused = this.waitFor<{ action: string; reason: string }>("denied", (m) => m.action === "interact", 2000).then((m) => m?.reason ?? null);
+      room.send("interact", { target: best.def.id });
+      const r = await Promise.race([opened, refused]);
+      if (r === "opened") return { ok: true, opened: true, coins: this.you?.coins ?? 0, reward: `${GLEAMS.reward.coins} coins and the Gleamweave Cape` };
+      const won = gleamsWon(this.you?.missions ?? []);
+      return { ok: false, reason: r ?? (Date.now() - t0 >= 2000 ? "no answer" : "refused"), gleams: won, of: GLEAMS.trials.length, hint: r === "vault opened" ? "once per life" : `the vault needs all three gleams (trials T1, T2, T3 from ${GLEAMS.curator.name})` };
+    }
     const done0 = this.events.length;
     room.send("interact", { target: best.def.id });
     await sleep(400);
@@ -1198,16 +1658,19 @@ export class FirstlightAgent {
     return { offers: obs.offers, active: obs.missions.filter((m) => !m.done) };
   }
 
-  /** Take every mission the guide of this body still has for you. You must stand within 3 m of the guide. */
+  /**
+   * Take every mission the giver you stand at still has for you (within 3 m): the planet's guide, or
+   * Sela Marchbank in Portus, who gives the three trials of the Three Gleams (played on the planets).
+   */
   async takeMissions(ids?: string[]): Promise<ActionResult> {
     const no = this.notPlaying();
     if (no) return no;
     const w = this.world;
-    if (!w.guide) return { ok: false, reason: "no guide here", hint: "guides stand at the main pad of each planet (Arcadia, Hollowmere, Meridian), not on Portus" };
-    const d = groundDistance(this.walker.p, w.guide.pos);
-    if (d > 2.8) return { ok: false, reason: "too far", distance: round1(d), hint: "moveTo('guide') first" };
+    if (!w.givers.length) return { ok: false, reason: "no guide here" };
+    const near = w.givers.map((g) => ({ g, d: groundDistance(this.walker.p, g.pos) })).sort((a, b) => a.d - b.d)[0]!;
+    if (near.d > 2.8) return { ok: false, reason: "too far", distance: round1(near.d), hint: near.g.def.look === "guide" ? "moveTo('guide') first" : "moveTo('curator') first" };
     const have = new Set((this.you?.missions ?? []).map((m) => m.id));
-    const want = w.missions().filter((m) => !have.has(m.id) && (!ids || ids.includes(m.id)));
+    const want = missionsFrom(near.g.def.id).filter((m) => !have.has(m.id) && (!ids || ids.includes(m.id)));
     if (!want.length) return { ok: true, taken: [], note: "nothing new to take", active: this.guideTalk().active };
     const t0 = Date.now();
     for (const m of want) {
@@ -1218,7 +1681,7 @@ export class FirstlightAgent {
     const got = want.filter((m) => (this.you?.missions ?? []).some((x) => x.id === m.id));
     const den = this.lastDenial;
     if (!got.length) return { ok: false, reason: den && den.at >= t0 && den.action === "mission" ? den.reason : "not accepted" };
-    return { ok: true, taken: got.map((m) => ({ id: m.id, name: m.name, objective: m.objective, reward: `${m.reward.xp} XP, ${m.reward.coins} coins` })) };
+    return { ok: true, from: near.g.def.name, taken: got.map((m) => ({ id: m.id, name: m.name, type: m.type, on: m.body, objective: m.objective, reward: `${m.reward.xp} XP, ${m.reward.coins} coins` })) };
   }
 
   // ------------------------------------------------------------------------------------ shops

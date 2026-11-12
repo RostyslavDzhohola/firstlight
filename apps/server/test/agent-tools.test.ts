@@ -80,7 +80,22 @@ describe("a model plays over MCP", () => {
     expect(JSON.parse((await call("firstlight_item", { action: "select", slot: 1 })).text)).toMatchObject({ ok: true, slot: 1 });
     expect(JSON.parse((await call("firstlight_say", { phrase: "Thanks" })).text)).toMatchObject({ ok: true, said: "Thanks" });
     expect(JSON.parse((await call("firstlight_travel", {})).text)).toMatchObject({ ok: false, reason: "bad target" });
-    expect(JSON.parse((await call("firstlight_cast", { spell: "spark", bearing: 90 })).text)).toMatchObject({ ok: true, sent: true });
+    // Spells: a tight schema, the kit's own checks, and the server's refusal (no spells in the town).
+    expect(JSON.parse((await call("firstlight_cast", { spell: "spark", bearing: 90 })).text)).toMatchObject({ ok: false, reason: "bad arguments", hint: '"spell" must be one of skipstep, frostbloom, wishfall, glasswing' });
+    expect(JSON.parse((await call("firstlight_cast", { spell: "wishfall", target: "n1", bearing: 90 })).text)).toMatchObject({ ok: false, reason: "bad arguments", hint: "aim with one of target, bearing or pos" });
+    expect(JSON.parse((await call("firstlight_cast", { spell: "skipstep", pos: [1, 2, 3] })).text)).toMatchObject({ ok: false, reason: "bad arguments" });
+    expect(JSON.parse((await call("firstlight_cast", { spell: "frostbloom" })).text)).toMatchObject({ ok: false, reason: "locked" });
+    expect(JSON.parse((await call("firstlight_cast", { spell: "skipstep", bearing: 90 })).text)).toMatchObject({ ok: false, reason: "safe zone", hint: expect.stringContaining("walk out") });
+    // The trials: taken from Sela Marchbank here in Portus, played on the planets.
+    expect(JSON.parse((await call("firstlight_trial", { mission: "A1" })).text)).toMatchObject({ ok: false, reason: "bad arguments" });
+    expect(JSON.parse((await call("firstlight_trial", { mission: "T1" })).text)).toMatchObject({ ok: false, reason: "not accepted", hint: expect.stringContaining("Sela Marchbank") });
+    expect(JSON.parse((await call("firstlight_move", { target: "curator" })).text)).toMatchObject({ ok: true, corrections: 0 });
+    const offers = JSON.parse((await call("firstlight_missions", { action: "list" })).text);
+    expect(offers.offers.map((m: { id: string }) => m.id)).toEqual(["T1", "T2", "T3"]);
+    expect(offers.hunt).toMatchObject({ name: "The Three Gleams", gleams: 0, of: 3 });
+    expect(JSON.parse((await call("firstlight_missions", { action: "take", ids: ["T1"] })).text)).toMatchObject({ ok: true, from: "Sela Marchbank", taken: [{ id: "T1", type: "race", on: "arcadia" }] });
+    expect(JSON.parse((await call("firstlight_trial", { mission: "T1" })).text)).toMatchObject({ ok: false, reason: "wrong body" });
+    expect((await call("firstlight_observe")).text).toContain("T1 The Swift Gleam 0/8 [race idle]");
 
     expect(JSON.parse((await call("firstlight_leave")).text)).toMatchObject({ ok: true, left: true });
     await waitFor(() => !flagged("McpScout"));
@@ -136,17 +151,21 @@ describe("the example hunter", () => {
     const lines: string[] = [];
     try {
       await agent.connect({ url, token: "dev:hunterT:Hunter_T", body: "arcadia", starter: "unit7" });
-      const report = await runHunter(agent, { budgetMs: 150_000, mission: "A1", log: (l) => lines.push(l), until: (r) => r.kills >= 2 });
+      const report = await runHunter(agent, { budgetMs: 240_000, mission: "A1", log: (l) => lines.push(l), until: (r) => r.kills >= 2 && !!r.collect?.done });
       expect(report.mission.taken, lines.join("\n")).toBe(true);
+      // Kite Season (a collect near the pad): taken with the hunt and finished on the way out.
+      expect(report.collect, lines.join("\n")).toMatchObject({ id: "A4", taken: true, progress: 5, goal: 5, done: true });
+      expect(lines.some((l) => l.startsWith("A4 Kite Season: done"))).toBe(true);
       expect(report.kills, lines.join("\n")).toBeGreaterThanOrEqual(2);
       expect(report.corrections).toBe(0);
       expect(report.deaths).toBe(0);
       expect(agent.observe().self.zone).toBe("danger");
       expect(lines.some((l) => l.startsWith("take mission A1: ok"))).toBe(true);
+      expect(lines.some((l) => l.startsWith("take mission A4: ok"))).toBe(true);
     } finally {
       await agent.close();
     }
-  }, 180_000);
+  }, 300_000);
 });
 
 describe("the real processes (Node runs the .ts sources directly)", () => {
@@ -223,7 +242,19 @@ describe("the real processes (Node runs the .ts sources directly)", () => {
     const bad = await cli("attack", "n1", "--seconds", "500");
     expect(bad.code).toBe(1);
     expect(bad.out).toContain("must be at most 120");
-    expect((await cli("tools")).out).toContain("move  --target --bearing --distance");
+    // Spells and trials from the shell: the main argument is the spell or the mission.
+    const cast = await cli("cast", "skipstep", "--bearing", "180");
+    expect(cast.code).toBe(1);
+    expect(JSON.parse(cast.out)).toMatchObject({ ok: false, reason: "safe zone" });
+    const star = await cli("cast", "wishfall", "--pos", "1,2");
+    expect(JSON.parse(star.out)).toMatchObject({ ok: false, reason: "bad arguments", hint: '"pos" needs at least 3 item(s)' });
+    const trial = await cli("trial", "T1");
+    expect(trial.code).toBe(1);
+    expect(JSON.parse(trial.out)).toMatchObject({ ok: false, reason: "not accepted" });
+    const tools = (await cli("tools")).out;
+    expect(tools).toContain("move  --target --bearing --distance");
+    expect(tools).toContain("cast  --spell <skipstep|frostbloom|wishfall|glasswing> --target --bearing --distance --pos");
+    expect(tools).toContain("trial  --mission <A4|H4|T1|T2|T3>");
     expect(JSON.parse((await cli("quit")).out)).toEqual({ ok: true, left: true });
     await new Promise<void>((ok) => (bridgeProc.exitCode !== null ? ok() : bridgeProc.once("exit", () => ok())));
     expect((await cli("observe")).code).toBe(2); // no bridge any more
