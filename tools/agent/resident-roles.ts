@@ -284,6 +284,12 @@ export async function hunter(r: Resident): Promise<void> {
         theirs.set(target.id, now + 40_000);
         r.log(`leaves the ${target.name} to ${fight.to}`);
         await walk(r, { bearing: (target.bearing + 180) % 360, distance: 10 }, { seconds: 5 });
+      } else if (fight.reason === "player in the way") {
+        // A person stands in its swing or its line of fire (the kit held every attack, D-agents-16):
+        // not this creature for now; a step back, and the next look picks another.
+        theirs.set(target.id, now + 15_000);
+        r.log(`holds off the ${target.name}: ${fight.who} is in the way`);
+        await walk(r, { bearing: (target.bearing + 180) % 360, distance: 6 }, { seconds: 4 });
       } else if (fight.reason === "safe zone") await walk(r, target.id, { within: 6, seconds: 10 });
       else if (fight.killed) r.log(`killed ${target.name} L${target.level}: +${fight.xp} XP`);
       continue;

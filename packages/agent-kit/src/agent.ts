@@ -129,7 +129,7 @@ export interface AttackOptions {
   retreatBelow?: number;
   /**
    * Allow attacking another player. Off by default: agents don't start fights with people, and they
-   * don't hurt them by accident either: while a player stands in the weapon's arc, on the shot's
+   * don't hurt them by accident either: while a person stands in the weapon's arc, on the shot's
    * path or in its blast the attack is held and the agent steps round (reason "player in the way"
    * after 5 s of that). With `pvp: true` nothing is held.
    */
@@ -1197,11 +1197,15 @@ export class FirstlightAgent {
     return w.structures.raycast(from[0], from[1], from[2], u[0], u[1], u[2], l) > l && w.nature.raycast(from[0], from[1], from[2], u[0], u[1], u[2], l) > l;
   }
 
-  /** The first living player (not us, not `skip`) an attack with this weapon could hurt (collateral.ts). */
+  /**
+   * The first living person (a player who isn't an agent; not `skip`) an attack with this weapon
+   * could hurt (collateral.ts). Other agents aren't waited for: residents hunt side by side, and
+   * holding for each other would stall every shared fight.
+   */
   private bystander(w: { def: WeaponDef; tier: TierStats }, pos: V3, head: V3, facing: V3, aim: V3, skip: string): Bystander | null {
     const others: Bystander[] = [];
     (this.room?.state as any)?.players?.forEach((p: any, k: string) => {
-      if (k === this.sessionId || k === skip || ((p.flags as number) & PF.DEAD) !== 0) return;
+      if (k === this.sessionId || k === skip || p.agent || ((p.flags as number) & PF.DEAD) !== 0) return;
       others.push({ id: k, name: p.name, p: [p.x, p.y, p.z] });
     });
     return others.length ? bystanderAtRisk(attackShape(w.def, w.tier), pos, head, facing, aim, others) : null;
