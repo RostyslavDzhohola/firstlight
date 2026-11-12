@@ -16,6 +16,7 @@ import { flags } from "../config.ts";
 import { avatarAssets, MODEL_SCALE, modelIndex, preloadAvatars, ROLL_SPEED, UAL_PELVIS, type AvatarAssets } from "./avatars/assets.ts";
 import { avatarMaterial, PALETTES, proxyMaterial, setAvatarPalette } from "./avatars/material.ts";
 import { applyOccluderFadeGated } from "./occluderFade.ts";
+import { hideBareBones } from "./bareBones.ts";
 import { weaponModel } from "./avatars/weapons.ts";
 import { keptSamples } from "./warmup.ts";
 
@@ -465,6 +466,7 @@ export class AvatarView {
     this.model = model;
     this.mesh = mesh;
     this.makeSockets(model);
+    if (!flags.has("allbones")) hideBareBones(model); // the scene walks skip fingers and toes (#49)
     this.proxy.removeFromParent();
     this.holder.add(model);
     if (this.lod === "far") {

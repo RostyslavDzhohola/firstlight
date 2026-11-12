@@ -145,7 +145,11 @@ export function openSettings(game: Game, host: HTMLElement, back: () => void, es
     icon("check", "", det);
     const dt = el("span", "", det, "Detected ");
     el("b", "", dt, stored.autoTier ?? "medium");
-    dt.append(" for this computer. Auto follows it and steps down if frames get slow.");
+    // The probe's extras (D-framerate-3): High features this computer measured room for on its tier.
+    const extras = s.auto ? s.extras.length : 0;
+    dt.append(" for this computer");
+    if (extras) dt.append(`, plus ${extras} High feature${extras === 1 ? "" : "s"} it has room for`);
+    dt.append(". Auto follows it and steps down if frames get slow.");
 
     const rs = el("div", "fl-setting", gfx);
     const rsRow = el("div", "fl-setting__row", rs);
@@ -178,7 +182,7 @@ export function openSettings(game: Game, host: HTMLElement, back: () => void, es
     const kills = killSwitches();
     for (const [f, label] of TOGGLES) {
       // Available on this tier/backend? Resolve once with the feature forced on.
-      const avail = resolveSettings(s.tier, s.auto, s.webgpu, { ...stored, features: { ...stored.features, [f]: true } }, kills).on[f];
+      const avail = resolveSettings(s.tier, s.auto, s.webgpu, { ...stored, features: { ...stored.features, [f]: true } }, kills, s.extras).on[f];
       const note = kills.has(f) ? "turned off by a URL flag" : avail ? null : (f === "ao" || f === "traa") && !ctx.webgpu ? "needs WebGPU and High or Ultra" : "needs a higher quality tier";
       const sw = toggle(grid, "fl-tg", label, note, s.on[f], !avail);
       sw.onchange = () => {

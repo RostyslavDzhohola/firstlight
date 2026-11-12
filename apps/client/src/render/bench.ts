@@ -136,8 +136,15 @@ export interface BenchResult {
   warmSeconds: number;
   frames: number;
   frameMs: { p50: number; p95: number; p99: number; mean: number; max: number };
+  /** Frames that took over 1.5× the median interval (a missed display refresh at vsync). */
+  slowFrames: number;
+  /** Main-thread time of each frame (game update + render submission). */
+  cpuMs: { p50: number; p95: number; p99: number };
   fps: { mean: number; p50: number };
+  /** three's GPU time (the passes summed: several times the real cost on tile-based GPUs). */
   gpuMs: { p50: number; p95: number } | null;
+  /** GPU busy time per frame (WebGPU pass union, D-framerate-2). */
+  gpuBusyMs: { p50: number; p95: number; p99: number; n: number } | null;
   draws: { mean: number; max: number };
   triangles: { mean: number; max: number };
   heapMB: { start: number; end: number; max: number } | null;
@@ -170,7 +177,9 @@ export class Bench {
    */
   holding = false;
   private readonly frames: number[] = [];
+  private readonly cpu: number[] = [];
   private readonly gpu: number[] = [];
+  private readonly busy: number[] = [];
   private readonly draws: number[] = [];
   private readonly tris: number[] = [];
   private readonly parts: number[] = [];
@@ -283,6 +292,7 @@ export class Bench {
         this.phase = "run";
         this.runStart = now;
         this.shaderBuildsAtStart = shaderStats().total;
+        this.host.ctx.gpu.drainBusy();
         this.recording = false;
         this.pose(0, camera);
       }
@@ -298,23 +308,27 @@ export class Bench {
 
   /**
    * After rendering: record this frame. `frameMs` = the unclamped interval since the previous
-   * frame; renderer.info still holds this frame's draw calls (it resets at the next loop tick).
+   * frame, `cpuMs` = this frame's main-thread time; renderer.info still holds this frame's draw
+   * calls (it resets at the next loop tick).
    */
-  record(frameMs: number) {
+  record(frameMs: number, cpuMs = 0) {
     if (this.phase !== "run") return;
     const now = performance.now();
     // Skip the first run frame: its interval straddles the warm/run switch.
     if (!this.recording) {
       this.recording = true;
+      this.host.ctx.gpu.drainBusy();
       return;
     }
     const info = this.host.ctx.renderer.info.render;
     this.frames.push(frameMs);
+    this.cpu.push(cpuMs);
     this.draws.push(info.drawCalls);
     this.tris.push(info.triangles);
     this.parts.push(this.host.particles.liveCount);
     const g = this.host.ctx.gpu.last;
     if (g !== null) this.gpu.push(g);
+    for (const b of this.host.ctx.gpu.takeBusySamples()) this.busy.push(b); // the timer keeps only its last 600
     const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
     if (mem && this.frames.length % 30 === 0) this.heap.push(mem.usedJSHeapSize / 1048576);
     const elapsed = (now - this.runStart) / 1000;
@@ -459,7 +473,9 @@ export class Bench {
 
   private finish(passes?: PassCostReport | null, passesNote?: string) {
     this.phase = "done";
+    for (const b of this.host.ctx.gpu.takeBusySamples()) this.busy.push(b);
     const f = this.frames;
+    const median = percentile(f, 0.5);
     const mean = f.reduce((a, b) => a + b, 0) / Math.max(1, f.length);
     const ctx = this.host.ctx;
     const st = this.host.stats();
@@ -480,9 +496,12 @@ export class Bench {
       plannedSeconds: this.duration,
       warmSeconds: this.warm,
       frames: f.length,
-      frameMs: { p50: r2(percentile(f, 0.5)), p95: r2(percentile(f, 0.95)), p99: r2(percentile(f, 0.99)), mean: r2(mean), max: r2(maxOf(f)) },
+      frameMs: { p50: r2(median), p95: r2(percentile(f, 0.95)), p99: r2(percentile(f, 0.99)), mean: r2(mean), max: r2(maxOf(f)) },
+      slowFrames: f.filter((v) => v > median * 1.5).length,
+      cpuMs: { p50: r2(percentile(this.cpu, 0.5)), p95: r2(percentile(this.cpu, 0.95)), p99: r2(percentile(this.cpu, 0.99)) },
       fps: { mean: r2(1000 / Math.max(0.001, mean)), p50: r2(1000 / Math.max(0.001, percentile(f, 0.5))) },
       gpuMs: this.gpu.length ? { p50: r2(percentile(this.gpu, 0.5)), p95: r2(percentile(this.gpu, 0.95)) } : null,
+      gpuBusyMs: this.busy.length ? { p50: r2(percentile(this.busy, 0.5)), p95: r2(percentile(this.busy, 0.95)), p99: r2(percentile(this.busy, 0.99)), n: this.busy.length } : null,
       draws: { mean: r2(avg(this.draws)), max: maxOf(this.draws) },
       triangles: { mean: Math.round(avg(this.tris)), max: maxOf(this.tris) },
       heapMB: this.heap.length ? { start: r2(this.heap[0]!), end: r2(this.heap[this.heap.length - 1]!), max: r2(maxOf(this.heap)) } : null,

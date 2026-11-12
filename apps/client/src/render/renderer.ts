@@ -6,8 +6,8 @@ import * as THREE from "three/webgpu";
 import { flags } from "../config.ts";
 import { buildPost, MENU_GRADE, postUniforms, setGrade, type AoOverride, type GradeParams, type PostBuild } from "./post.ts";
 import {
-  clearStored, emptyStored, FEATURES, killSwitches, loadStored, resolveSettings, saveStored, TIERS, tierIndex,
-  urlScale, urlTier, validAutoTier, type Feature, type ResolvedSettings, type StoredGfx, type Tier,
+  clearStored, emptyStored, FEATURES, floorDrop, killSwitches, loadStored, resolveSettings, saveStored, TIERS,
+  urlExtras, urlScale, urlTier, validAutoExtras, validAutoTier, type Extra, type Feature, type ResolvedSettings, type StoredGfx, type Tier,
 } from "./quality.ts";
 import { createFramePath } from "./frameSize.ts";
 import { startRenderer, type BackendStatus } from "./rendererStart.ts";
@@ -15,6 +15,7 @@ import { GpuTimer, ResolutionLadder } from "./timing.ts";
 import { compileForPass, passCallDepth, saveRenderState, type CompileProgress, type GuardedRenderer, type PassCompileRenderer } from "./compilePass.ts";
 import { frameCounterDraw, frameCounterTick } from "./frameCounter.ts";
 import { installLeanShadows, type ShadowNodesRenderer } from "./leanShadow.ts";
+import { installShadowPass } from "./shadowPass.ts";
 import { traceGlCalls } from "./glTrace.ts";
 
 export { TIERS, FEATURES, type Tier, type Feature, type ResolvedSettings };
@@ -36,15 +37,19 @@ export interface RenderCtx {
   readonly tier: Tier;
   readonly ladder: ResolutionLadder;
   readonly gpu: GpuTimer;
-  /** Pin a tier (persisted unless `persist: false`). */
-  setTier(t: Tier, opts?: { persist?: boolean; auto?: boolean }): void;
+  /**
+   * Pin a tier (persisted unless `persist: false`). `extras` (the probe's measurements) applies those
+   * extras for this session instead of the saved ones (D-framerate-3).
+   */
+  setTier(t: Tier, opts?: { persist?: boolean; auto?: boolean; extras?: readonly Extra[] }): void;
   /** Return to the automatic (probed) tier. */
   setAutoTier(): void;
   /**
-   * Apply a probe result. `persist: false` (invalid probe) uses it for this session only;
-   * `clearPinned` also drops a user-pinned tier (F3 "re-probe"). Applies settings once.
+   * Apply a probe result: the tier and the extras it measured headroom for (none when omitted).
+   * `persist: false` (invalid probe) uses it for this session only; `clearPinned` also drops a
+   * user-pinned tier (F3 "re-probe"). Applies settings once.
    */
-  setProbedTier(t: Tier, opts?: { persist?: boolean; clearPinned?: boolean }): void;
+  setProbedTier(t: Tier, opts?: { persist?: boolean; clearPinned?: boolean; extras?: readonly Extra[] }): void;
   /** True when no tier is pinned and no saved probe result matches this backend + GPU. */
   needsProbe(): boolean;
   /**
@@ -129,6 +134,9 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
   // and coat; for the renderer's whole life, before its first shadow render (#39, D-load-3).
   // `?fullshadow` keeps three's own shadow nodes for every material (A/B runs).
   if (!flags.has("fullshadow")) installLeanShadows(renderer as unknown as ShadowNodesRenderer);
+  // The sun shadow pass without its second matrix walk and its per-frame cache-key churn (#49,
+  // D-framerate-2). `?oldshadowpass` keeps three's own pass (A/B runs).
+  if (!flags.has("oldshadowpass")) installShadowPass();
   // `?gltrace` (#39 diagnostics): log the WebGL calls that block on the GPU process.
   const traceGl = (renderer.backend as { gl?: object }).gl;
   if (flags.has("gltrace") && !webgpu && traceGl) traceGlCalls(traceGl);
@@ -149,6 +157,7 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
   const kills = killSwitches();
   const forcedTier = urlTier();
   const forcedScale = urlScale();
+  const forcedExtras = urlExtras();
   const listeners = new Set<SettingsListener>();
   const ladder = new ResolutionLadder();
   ladder.enabled = !flags.has("noladder") && !flags.has("bench");
@@ -160,7 +169,11 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
 
   let tier: Tier = forcedTier ?? stored.tier ?? validAutoTier(stored, backendName, gpuName) ?? "medium";
   let auto = !forcedTier && !stored.tier;
-  let settings = resolveSettings(tier, auto, webgpu, stored, kills);
+  /** Extras for this session only (the probe measuring, an unsaved probe result); null: the saved ones. */
+  let sessionExtras: readonly Extra[] | null = null;
+  /** Extras on top of the tier: the URL's, else (automatic tier only) the session's or the saved ones. */
+  const extrasNow = (): readonly Extra[] => forcedExtras ?? (auto ? (sessionExtras ?? validAutoExtras(stored, backendName, gpuName)) : []);
+  let settings = resolveSettings(tier, auto, webgpu, stored, kills, extrasNow());
   let post: PostBuild | null = null;
   /** Call depth of the current post build's scene pass (compilePass.ts), learned on first use. */
   let passDepth: number | null = null;
@@ -190,7 +203,7 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
 
   function apply() {
     const prev = settings;
-    settings = resolveSettings(tier, auto, webgpu, stored, killsNow());
+    settings = resolveSettings(tier, auto, webgpu, stored, killsNow(), extrasNow());
     renderer.shadowMap.enabled = settings.on.shadows && settings.shadows.mode === "map";
     rebuildPost();
     ctx.resize();
@@ -223,6 +236,7 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
       if (!TIERS.includes(t)) return;
       tier = t;
       auto = opts.auto ?? false;
+      sessionExtras = opts.extras ?? null;
       if (opts.persist !== false && !auto) {
         stored = { ...stored, tier: t };
         saveStored(stored);
@@ -235,13 +249,16 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
       saveStored(stored);
       tier = forcedTier ?? validAutoTier(stored, backendName, gpuName) ?? "medium";
       auto = !forcedTier;
+      sessionExtras = null;
       ladder.reset();
       apply();
     },
     setProbedTier(t, opts = {}) {
       if (opts.clearPinned) stored = { ...stored, tier: null };
-      if (opts.persist !== false) stored = { ...stored, autoTier: t, autoBackend: backendName, autoGpu: gpuName };
+      const extras = [...(opts.extras ?? [])];
+      if (opts.persist !== false) stored = { ...stored, autoTier: t, autoBackend: backendName, autoGpu: gpuName, autoExtras: extras };
       if (opts.clearPinned || opts.persist !== false) saveStored(stored);
+      sessionExtras = opts.persist !== false ? null : extras;
       // The probe switches tiers while measuring; always land on the effective choice.
       tier = forcedTier ?? stored.tier ?? t;
       auto = !forcedTier && !stored.tier;
@@ -366,15 +383,23 @@ export async function createRenderer(container: HTMLElement): Promise<RenderCtx>
     events: window,
   });
   ladder.onFloor = () => {
-    // At the ladder floor drop a tier, but only when the tier is automatic. The drop is saved
-    // as the automatic tier, so the next session starts there instead of walking down again.
-    if (!auto || tierIndex(tier) === 0) return;
+    // At the ladder floor drop the probe's extras first (D-framerate-3), then a tier, but only when
+    // the tier is automatic. The drop is saved as the automatic choice, so the next session starts
+    // there instead of walking down again.
+    const next = floorDrop(tier, auto, settings.extras, forcedExtras !== null);
+    if (!next) return;
     const from = tier;
-    const lower = TIERS[tierIndex(tier) - 1]!;
+    const lower = next.tier;
+    const dropExtras = next.dropExtras;
     let done = false;
     const change = () => {
       if (done || tier !== from || !auto) return;
       done = true;
+      if (dropExtras) {
+        console.info(`[gfx] resolution ladder at floor, dropping the extras on ${from} (${settings.extras.join(", ")})`);
+        ctx.setProbedTier(from, { extras: [] });
+        return;
+      }
       console.info(`[gfx] resolution ladder at floor, dropping tier ${from} → ${lower}`);
       ctx.setProbedTier(lower);
     };

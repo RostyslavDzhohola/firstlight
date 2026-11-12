@@ -26,7 +26,7 @@ export interface MenuDom {
 
 function gameFor(input: InputT) {
   const ctx = {
-    settings: { tier: "medium", auto: true, webgpu: false, renderScale: 1, on: {} as Record<string, boolean> },
+    settings: { tier: "medium", auto: true, webgpu: false, renderScale: 1, on: {} as Record<string, boolean>, extras: [] },
     stored: () => ({ features: {} }),
     webgpu: false,
     onChange: () => () => {},

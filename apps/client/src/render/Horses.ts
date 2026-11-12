@@ -15,6 +15,7 @@ import { config, flags } from "../config.ts";
 import { releaseAvatarObjects } from "./Avatars.ts";
 import { avatarRim, toonRamp } from "./avatars/material.ts";
 import { leanShadow } from "./leanShadow.ts";
+import { hideBareBones } from "./bareBones.ts";
 import { keptSamples } from "./warmup.ts";
 
 // ---- assets ----------------------------------------------------------------------------------
@@ -314,6 +315,7 @@ export class HorseView {
     const fit = this.stirrupFit.clone();
     this.stirrupFit.set(0, 0, 0);
     this.setStirrupFit(fit);
+    if (!flags.has("allbones")) hideBareBones(model); // the scene walks skip bones that hold nothing (#49)
     this.root.add(model);
     this.mixer = new THREE.AnimationMixer(model);
     for (const [name, clip] of a.clips) {
