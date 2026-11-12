@@ -22,6 +22,7 @@ import { QuestWorld } from "../world/QuestWorld.ts";
 import type { Game } from "./Game.ts";
 import { HOTKEYS, hits } from "./keys.ts";
 import { trialSeen } from "./trialState.ts";
+import { worldPrompt } from "./worldPrompt.ts";
 import type { ClientSystem } from "./systems.ts";
 
 /** Survives body changes: the latest Hall of Firsts and a staged scene waiting for travel to finish. */
@@ -157,9 +158,7 @@ export class QuestClient implements ClientSystem {
   }
 
   private promptFor(o: WorldObjectDef): string {
-    if (o.look === "keeper") return `E — Trade with ${SHOP_SPOT_BY_ID.get(o.id)?.keeper ?? o.name}`;
-    if (o.look === "guide" || o.look === "curator") return `E — Talk to ${o.name}`;
-    return `E — ${o.name}`;
+    return worldPrompt(o, this.game.hud.you);
   }
 
   private use(o: WorldObjectDef) {
@@ -257,3 +256,4 @@ export class QuestClient implements ClientSystem {
 export function createQuestClient(game: Game): ClientSystem | null {
   return game.net.room ? new QuestClient(game) : null;
 }
+
