@@ -14,7 +14,8 @@ import { flags } from "../config.ts";
 import type { AvatarView } from "../render/Avatars.ts";
 import { CosmeticRig, Nameplates } from "../render/Cosmetics.ts";
 import { MapPanel } from "../ui/map.ts";
-import { AdminConsole, GuidePanel, JournalPanel, KeypadPanel, MissionTracker, Panel } from "../ui/panels.ts";
+import { AdminConsole, CuratorPanel, GuidePanel, JournalPanel, KeypadPanel, MissionTracker, Panel } from "../ui/panels.ts";
+import { gleamsWon } from "@firstlight/shared/content/gleams";
 import { ShopPanel } from "../ui/shop.ts";
 import { QuestWorld } from "../world/QuestWorld.ts";
 import type { Game } from "./Game.ts";
@@ -34,6 +35,8 @@ const DENIED: Record<string, string> = {
   "mission:done this life": "You've done that mission in this life",
   "mission:active": "You're already on that mission",
   "mission:wrong planet": "That guide's missions are on another planet",
+  "mission:giver elsewhere": "Sela Marchbank gives the trials of the Three Gleams in Portus Plaza",
+  "mission:giver too far": "Stand next to Sela Marchbank to take a trial",
   "title:not earned": "You haven't earned that medal yet",
 };
 
@@ -42,6 +45,7 @@ export class QuestClient implements ClientSystem {
   private readonly world: QuestWorld;
   private readonly shop: ShopPanel;
   private readonly guide: GuidePanel | null;
+  private readonly curator: CuratorPanel | null;
   private readonly journal: JournalPanel;
   private readonly keypad: KeypadPanel;
   private readonly map: MapPanel;
@@ -65,6 +69,7 @@ export class QuestClient implements ClientSystem {
       .map((def) => ({ def, pos: objectPos(def, (x, y, z) => terrain.groundHeight(x, y, z)) }));
     this.shop = new ShopPanel(game);
     this.guide = (PLANET_IDS as readonly BodyId[]).includes(body) ? new GuidePanel(game, body as Exclude<BodyId, "portus">) : null;
+    this.curator = body === "portus" ? new CuratorPanel(game) : null;
     this.journal = new JournalPanel(game);
     this.keypad = new KeypadPanel(game);
     this.map = new MapPanel(game);
@@ -147,7 +152,7 @@ export class QuestClient implements ClientSystem {
 
   private promptFor(o: WorldObjectDef): string {
     if (o.look === "keeper") return `E — Trade with ${SHOP_SPOT_BY_ID.get(o.id)?.keeper ?? o.name}`;
-    if (o.look === "guide") return `E — Talk to ${o.name}`;
+    if (o.look === "guide" || o.look === "curator") return `E — Talk to ${o.name}`;
     return `E — ${o.name}`;
   }
 
@@ -157,6 +162,7 @@ export class QuestClient implements ClientSystem {
       return spot ? this.shop.openAt(spot) : this.shop.open();
     }
     if (o.look === "guide") return this.guide?.open();
+    if (o.look === "curator") return this.curator?.open();
     if (o.look === "lantern" && o.egg === "E4") this.world.lightLantern(o.id);
     this.game.net.room?.send("interact", { target: o.id });
   }
@@ -166,7 +172,7 @@ export class QuestClient implements ClientSystem {
     const g = this.game;
     const you = g.hud.you;
     const active = new Set((you?.missions ?? []).filter((m) => !m.done).map((m) => m.id));
-    this.world.update(dt, { activeMissions: active, cosmeticsExtras: !!you?.cosmeticsExtras });
+    this.world.update(dt, { activeMissions: active, cosmeticsExtras: !!you?.cosmeticsExtras, gleams: you?.gleamVault ? 0 : gleamsWon(you?.missions ?? []) });
     this.tracker.update(you, this.game.bodyId);
     if (you !== this.lastYou) {
       this.lastYou = you;

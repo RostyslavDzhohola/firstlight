@@ -9,7 +9,8 @@ import { BACKPACK_SLOTS, HOTBAR_SLOTS, emptyLife, type LifeProgress } from "@fir
 import { HORSE_WHISTLE } from "@firstlight/shared/content/horse";
 import { COSMETIC_BY_ID, COSMETIC_SLOTS, isEggItem, isExtraCosmetic, itemName, itemStack, sellValue, shopEntry, type CosmeticSlot } from "@firstlight/shared/content/items";
 import { MEDAL_BY_ID, MEDAL_RULES } from "@firstlight/shared/content/medals";
-import { huntCredit, huntTargetIndex, MISSION_BY_ID, MISSIONS, missionGoal, trackedMission, type MissionDef } from "@firstlight/shared/content/missions";
+import { ERRAND_MISSIONS, huntCredit, huntTargetIndex, MISSION_BY_ID, missionGiver, missionGoal, trackedMission, type MissionDef } from "@firstlight/shared/content/missions";
+import { GLEAMS, gleamsWon } from "@firstlight/shared/content/gleams";
 import { offsetDir, padName, placeDir } from "@firstlight/shared/content/places";
 import { BOSS_FIRSTS, EGG_BY_ID, type EggId } from "@firstlight/shared/content/secrets";
 import { buyBlock, SHOP_SPOTS, shopSpotAt, type ShopSpot } from "@firstlight/shared/content/shops";
@@ -36,6 +37,7 @@ import { copyRestrictions, type CopyRestrictions } from "./restrictions.ts";
 import { roomCopyKey } from "../copyState.ts";
 import { runStage, STAGE_LIMITS } from "./stage.ts";
 import { progressStore } from "./store.ts";
+import { TrialLogic } from "./trials.ts";
 import { emitPileEvent, pileStore } from "../piles.ts";
 
 /** Shops refuse a combat-tagged player in a pad ring (D-shops-3). */
@@ -127,6 +129,8 @@ export class QuestSystem implements RoomSystem {
   readonly objects: WorldObjectDef[];
   private readonly objPos = new Map<string, V3>();
   readonly eggs: EggLogic;
+  /** Race, defend and collect attempts (trials.ts). */
+  readonly trials: TrialLogic;
   private readonly unsubs: (() => void)[] = [];
   private lastSlow = 0;
   private lastLevelCheck = 0;
@@ -149,6 +153,7 @@ export class QuestSystem implements RoomSystem {
     const t = room.terrain;
     for (const o of this.objects) this.objPos.set(o.id, objectPos(o, (x, y, z) => t.groundHeight(x, y, z)));
     this.eggs = new EggLogic(this);
+    this.trials = new TrialLogic(this);
     this.watchShots();
 
     room.onMessage("fastTravel", z.object({ pad: z.number().int().min(0).max(63) }), (c, m) => this.fastTravel(c, m.pad));
@@ -174,6 +179,7 @@ export class QuestSystem implements RoomSystem {
   dispose() {
     for (const u of this.unsubs.splice(0)) u();
     this.restoreBroadcast?.();
+    this.trials.dispose();
   }
 
   /** Observe combat's "shot" broadcasts (hitscan rays and Stormcoil chains) for Arc Welder and egg E8. */
@@ -387,10 +393,12 @@ export class QuestSystem implements RoomSystem {
     this.life(a);
     this.loadAccount(a);
     this.refreshCosmetics(a);
+    this.trials.onJoin(a);
   }
 
   onPlayerLeave(sessionId: string) {
     this.players.delete(sessionId);
+    this.trials.onLeave(sessionId);
   }
 
   /** (Re)load account-level progress for a player: medals, title, discovered pads on this body. */
@@ -411,12 +419,14 @@ export class QuestSystem implements RoomSystem {
     const q = this.qp(a);
     you.missions = a.char.missions.map((m) => {
       const def = MISSION_BY_ID.get(m.id);
-      return { id: m.id, progress: m.progress, goal: def ? missionGoal(def) : 1, done: m.done, ...(def?.hunt ? { counts: def.hunt.targets.map((_, i) => m.counts?.[i] ?? 0) } : {}) };
+      const counts = def?.hunt ? def.hunt.targets.map((_, i) => m.counts?.[i] ?? 0) : def?.collect ? def.collect.pieces.map((_, i) => m.counts?.[i] ?? 0) : null;
+      return { id: m.id, progress: m.progress, goal: def ? missionGoal(def) : 1, done: m.done, ...(counts ? { counts } : {}) };
     });
     you.medals = [...q.medals];
     you.pads = [...q.pads].sort((x, y) => x - y);
     you.title = q.title;
     you.cosmeticsExtras = env.cosmeticsExtras;
+    you.gleamVault = !!this.life(a).gleamVault;
     you.worn = { ...(a.char.worn ?? {}) };
   }
 
@@ -442,6 +452,8 @@ export class QuestSystem implements RoomSystem {
       const q = this.qp(a);
       if (this.room.bodyDef.padLayout !== "none") this.touchPads(a, q);
       this.checkReach(a, q);
+      this.trials.tickPlayer(a, now);
+      if (a.dead) continue;
       this.eggs.tickPlayer(a, q, now);
       this.refreshCosmetics(a);
       this.sendHuntTargets(a);
@@ -676,22 +688,25 @@ export class QuestSystem implements RoomSystem {
     const have = list.find((m) => m.id === id);
     if (action === "abandon") {
       if (!have || have.done) return;
+      this.trials.onAbandon(a, id);
       a.char.missions = list.filter((m) => m !== have);
       a.youDirty = true;
       this.toast(a, `Mission abandoned: ${def.name}`, "info");
       return;
     }
-    if (def.body !== this.body) return c.send("denied", { action: "mission", reason: "wrong planet" });
-    const guide = WORLD_OBJECT_BY_ID.get(`guide_${def.body}`)!;
-    if (!this.near(a, guide, 3)) return c.send("denied", { action: "mission", reason: "too far" });
+    // The giver hands it out: the planet's guide, or Sela Marchbank in Portus for the Three Gleams.
+    const giver = WORLD_OBJECT_BY_ID.get(missionGiver(def))!;
+    if (giver.body !== this.body) return c.send("denied", { action: "mission", reason: def.giver ? "giver elsewhere" : "wrong planet" });
+    if (!this.near(a, giver, 3)) return c.send("denied", { action: "mission", reason: def.giver ? "giver too far" : "too far" });
     if (have) return c.send("denied", { action: "mission", reason: have.done ? "done this life" : "active" });
-    list.push({ id, progress: 0, done: false, ...(def.hunt ? { counts: def.hunt.targets.map(() => 0) } : {}) });
+    const counts = def.hunt ? def.hunt.targets.map(() => 0) : def.collect ? def.collect.pieces.map(() => 0) : null;
+    list.push({ id, progress: 0, done: false, ...(counts ? { counts } : {}) });
     a.youDirty = true;
     this.toast(a, `Mission accepted: ${def.name} — ${def.objective}`, "info");
     this.room.saveActor(a);
   }
 
-  private activeMissions(a: PlayerActor): { m: CharacterMission; def: MissionDef }[] {
+  activeMissions(a: PlayerActor): { m: CharacterMission; def: MissionDef }[] {
     const out: { m: CharacterMission; def: MissionDef }[] = [];
     for (const m of a.char.missions) {
       if (m.done) continue;
@@ -725,7 +740,11 @@ export class QuestSystem implements RoomSystem {
     this.toast(a, `Mission complete: ${def.name} · +${def.reward.xp} XP · +${def.reward.coins} ◎${extra ? ` · ${extra}` : ""}`, "xp");
     a.client.send("missionDone", { id: def.id, xp: def.reward.xp, coins: def.reward.coins });
     emitGameEvent(this.room, { type: "missionDone", playerId: a.id, missionId: def.id });
-    if (MISSIONS.every((d) => a.char.missions.some((x) => x.id === d.id && x.done))) this.award(a, "errand_runner");
+    if (ERRAND_MISSIONS.every((id) => a.char.missions.some((x) => x.id === id && x.done))) this.award(a, "errand_runner");
+    if (def.trial) {
+      const n = gleamsWon(a.char.missions);
+      this.toast(a, n >= GLEAMS.trials.length ? `All three gleams won — ${GLEAMS.curator.name}'s vault in Portus Plaza is waiting for you` : `Gleam won: ${n} of ${GLEAMS.trials.length} — ${GLEAMS.name}`, "medal");
+    }
   }
 
   private onKillForMissions(e: KillEvent) {
@@ -822,14 +841,53 @@ export class QuestSystem implements RoomSystem {
     const o = WORLD_OBJECT_BY_ID.get(target);
     if (!o || o.body !== this.body || o.trigger !== "interact") return;
     if (!this.near(a, o)) return c.send("denied", { action: "interact", reason: "too far" });
+    if (o.id === GLEAMS.vault) return this.openVault(a);
     if (o.mission) {
       const active = a.char.missions.find((m) => m.id === o.mission && !m.done);
       const def = MISSION_BY_ID.get(o.mission);
-      if (active && def) this.completeMission(a, active, def);
+      if (!active || !def) return;
+      if (def.defend) this.trials.interact(a, o.id);
+      else if (def.find) this.completeMission(a, active, def);
       return;
     }
     if (o.egg && EGG_BY_ID.get(o.egg)?.extra && !env.cosmeticsExtras) return c.send("denied", { action: "interact", reason: "unavailable" });
     if (o.egg) this.eggs.interact(a, this.qp(a), o, code);
+  }
+
+  /**
+   * The Gleam Vault (gleams.ts): with all three trials done this life, pay its cape and coins once per
+   * life, the medal (life-scoped, so a staged or assisted life doesn't earn it) and, for the first
+   * real account ever, the Hall of Firsts line. Staged copies pay the reward only, like eggs.
+   */
+  openVault(a: PlayerActor) {
+    const life = this.life(a);
+    const won = gleamsWon(a.char.missions);
+    if (life.gleamVault) {
+      this.toast(a, "The vault is empty for you in this life. Win the gleams again in another", "info");
+      return a.client.send("denied", { action: "interact", reason: "vault opened" });
+    }
+    if (won < GLEAMS.trials.length) {
+      this.toast(a, `The vault stays shut: ${won} of ${GLEAMS.trials.length} gleams. Talk to ${GLEAMS.curator.name}`, "info");
+      return a.client.send("denied", { action: "interact", reason: "vault locked" });
+    }
+    const eligible = this.official();
+    const events: (() => void)[] = [];
+    let first = false;
+    const items = GLEAMS.reward.items.map((i) => ({ ...i }));
+    const paid = this.grant(a, items, () => {
+      life.gleamVault = Date.now();
+      a.char.coins += GLEAMS.reward.coins;
+      if (eligible) {
+        this.award(a, GLEAMS.medal, events);
+        if (!a.identity.loadtest && !a.identity.test && !life.unofficial) first = engrave(GLEAMS.firsts, a.identity.userId, a.identity.name, events);
+      }
+    });
+    if (!paid) return;
+    for (const e of events) e();
+    this.toast(a, `The Gleam Vault opens · +${GLEAMS.reward.coins} ◎ · Gleamweave Cape`, "medal");
+    a.client.send("missionDone", { id: "vault", xp: 0, coins: GLEAMS.reward.coins });
+    emitGameEvent(this.room, { type: "missionDone", playerId: a.id, missionId: "vault" });
+    if (first) this.toast(a, "First ever to open it — your name is engraved on the Hall of Firsts", "medal");
   }
 
   /**
@@ -1082,6 +1140,7 @@ export class QuestSystem implements RoomSystem {
       else if (e.killerKind === "world" && now - q.woolbackHitAt <= MEDAL_RULES.WOOLBACK_FALL_WINDOW_MS) this.award(victim, "killed_by_a_woolback");
       if (e.killerKind === "player" && e.killerId === victim.id) this.award(victim, "own_goal");
       this.eggs.resetWicks(victim, q);
+      this.trials.onDeath(victim);
       // Everything carried is in the pile now: nothing is worn; egg sequences reset.
       victim.char.worn = {};
       this.refreshCosmetics(victim);

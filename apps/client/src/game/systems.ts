@@ -13,6 +13,7 @@ import { horseClientSystem, horseInputSystem } from "./HorseClient.ts";
 import { createMissionPointer } from "./MissionPointer.ts";
 import { createMapClient } from "./MapClient.ts";
 import { createAdminModeClient } from "./AdminModeClient.ts";
+import { createTrialClient } from "./TrialClient.ts";
 
 export interface ClientSystem {
   update(dt: number, now: number): void;
@@ -41,3 +42,5 @@ CLIENT_SYSTEMS.push(horseInputSystem);
 CLIENT_SYSTEMS.push(createMapClient);
 // Admin mode (D-admin-1): the Esc menu's Admin row, flying and speed from the server, the badge.
 CLIENT_SYSTEMS.push(createAdminModeClient);
+// Missions lane (2026-11-12): race / defend / collect markers, the trial clock strip and its sounds.
+CLIENT_SYSTEMS.push(createTrialClient);

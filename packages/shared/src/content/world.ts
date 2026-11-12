@@ -18,7 +18,9 @@ export type ObjectLook =
   | "keeper" | "guide" | "hall"
   | "bell" | "ledger" | "memo"
   | "bowl" | "cabinet" | "button" | "plaque" | "burrow" | "lantern" | "ferry" | "chest"
-  | "rope" | "well" | "altar" | "safe" | "poster" | "mirror" | "lamp" | "hatch" | "pod";
+  | "rope" | "well" | "altar" | "safe" | "poster" | "mirror" | "lamp" | "hatch" | "pod"
+  // 2026-11-12, the new objective types and the Three Gleams (gleams.ts)
+  | "ring" | "beacon" | "shard" | "curator" | "vault";
 
 export interface WorldObjectDef {
   id: string;
@@ -126,6 +128,28 @@ export const WORLD_OBJECTS: readonly WorldObjectDef[] = [
 
   // Shop keepers inside each arrival outpost (round 2), where SHOP_SPOTS puts them.
   ...SHOP_SPOTS.filter((s) => s.body !== "portus").map((s) => keeper(s, MAIN_PAD[s.body as Exclude<BodyId, "portus">])),
+
+  // ---------------------------------------------------------------- 2026-11-12: new objective types
+  // Placed on open, dry ground away from safe zones, boss arenas and egg sites (checked in
+  // packages/shared/src/content/gleams.test.ts). Rings, shards and beacons are drawn by the client's
+  // trial markers (world/TrialMarkers.ts) and handled by the server's trials (quests/trials.ts).
+  // The Three Gleams: Sela Marchbank and the Gleam Vault in Portus Plaza, south-east of the pad.
+  O({ id: "curator_sela", body: "portus", place: "portus_plaza", east: 9, north: -3, look: "curator", name: "Sela Marchbank", trigger: "interact", range: 3 }),
+  O({ id: "gleam_vault", body: "portus", place: "portus_plaza", east: 13, north: -8, look: "vault", name: "Open the Gleam Vault", trigger: "interact", range: 2.5 }),
+  // T1 The Swift Gleam: eight rings on a 75 m loop around Highscore Hill (about 400 m of running).
+  ...ring(8, 75, 0.4).map((p, i) => O({ id: `t1_ring_${i + 1}`, body: "arcadia", place: "highscore_hill", ...p, look: "ring", name: `Ring ${i + 1}`, trigger: "none", range: 4.5, mission: "T1", part: String(i + 1) })),
+  // T2 The Steadfast Gleam: the beacon in south Thornwood.
+  O({ id: "t2_beacon", body: "hollowmere", place: "thornwood", east: -80, north: -100, look: "beacon", name: "Light the beacon", trigger: "interact", range: 3, mission: "T2" }),
+  // T3 The Patient Gleam: eight shards across the Glasspan Salt Flats.
+  ...([[-40, 20], [0, 80], [50, 100], [80, -60], [120, -80], [-120, 0], [30, -20], [-90, -80]] as const).map(([east, north], i) =>
+    O({ id: `t3_shard_${i + 1}`, body: "meridian", place: "glasspan_flats", east, north, look: "shard", name: "gleam shard", trigger: "none", range: 2.5, mission: "T3", part: String(i + 1) }),
+  ),
+  // A4 Kite Season: five kite panels in the meadow between Dawnpad and Clover Fields.
+  ...([[-63, -34], [-49, -50], [-30, -40], [-40, -15], [-60, -10]] as const).map(([east, north], i) =>
+    O({ id: `a4_kite_${i + 1}`, body: "arcadia", place: "clover_fields", east, north, look: "shard", name: "kite panel", trigger: "none", range: 2.5, mission: "A4", part: String(i + 1) }),
+  ),
+  // H4 The Long Vigil: the vigil lamp on the road north-east of Saint Orrin's ruin.
+  O({ id: "h4_lamp", body: "hollowmere", place: "saint_orrins", east: 60, north: 100, look: "beacon", name: "Light the vigil lamp", trigger: "interact", range: 3, mission: "H4" }),
 ];
 
 export const WORLD_OBJECT_BY_ID: ReadonlyMap<string, WorldObjectDef> = new Map(WORLD_OBJECTS.map((o) => [o.id, o]));

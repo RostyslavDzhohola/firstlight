@@ -5,12 +5,13 @@ import { describe, expect, it } from "vitest";
 import { BODIES, PLANET_IDS } from "../planet/bodies.ts";
 import { padDirs } from "../planet/pads.ts";
 import { createTerrain } from "../planet/terrain.ts";
-import { COSMETIC_BY_ID, COSMETICS, isCosmetic, SHOP, SKIN_BY_ID, TROPHIES, itemName, sellValue, shopEntry, unitSellValue } from "./items.ts";
+import { COSMETIC_BY_ID, COSMETICS, isCosmetic, isEggItem, SHOP, SKIN_BY_ID, TROPHIES, itemName, sellValue, shopEntry, unitSellValue } from "./items.ts";
+import { GLEAMS, gleamsWon } from "./gleams.ts";
 import { MEDAL_BY_ID, MEDALS } from "./medals.ts";
-import { GUIDES, huntCredit, huntTargetIndex, MISSION_BY_ID, MISSIONS, missionGoal, trackedMission } from "./missions.ts";
+import { ERRAND_MISSIONS, GUIDES, huntCredit, huntTargetIndex, MISSION_BY_ID, MISSIONS, missionGiver, missionGoal, missionsOn, trackedMission } from "./missions.ts";
 import { arcMetres, BOSS_LAIRS, MAIN_PAD, PLACE_BY_ID, PLACES, padName, placeDir } from "./places.ts";
 import { EGGS, PLAQUES } from "./secrets.ts";
-import { NPC_AREAS, PLANET_WILDS } from "./npcs.ts";
+import { NPC_AREAS, NPC_DEFS, PLANET_WILDS } from "./npcs.ts";
 import { WEAPON_BY_ID } from "./weapons.ts";
 import { inReach, objectPos, WORLD_OBJECT_BY_ID, WORLD_OBJECTS } from "./world.ts";
 
@@ -18,24 +19,47 @@ const unique = (xs: string[]) => new Set(xs).size === xs.length;
 const itemExists = (id: string) => WEAPON_BY_ID.has(id) || COSMETIC_BY_ID.has(id) || TROPHIES.some((t) => t.id === id);
 
 describe("missions (content.md §5)", () => {
-  it("has 9 unique missions, one hunt, find and reach per planet", () => {
-    expect(MISSIONS).toHaveLength(9);
+  it("keeps the 9 original guide missions first (ids by index), one hunt, find and reach per planet", () => {
+    expect(MISSIONS.slice(0, 9).map((m) => m.id)).toEqual([...ERRAND_MISSIONS]);
+    expect(MISSIONS.map((m) => m.id)).toEqual([...ERRAND_MISSIONS, "A4", "H4", "T1", "T2", "T3"]);
     expect(unique(MISSIONS.map((m) => m.id))).toBe(true);
     for (const body of PLANET_IDS) {
-      const ms = MISSIONS.filter((m) => m.body === body);
+      const ms = MISSIONS.slice(0, 9).filter((m) => m.body === body);
       expect(ms.map((m) => m.type).sort()).toEqual(["find", "hunt", "reach"]);
-      expect(ms.every((m) => m.guide === GUIDES[body].name)).toBe(true);
+      expect(missionsOn(body).every((m) => m.guide === GUIDES[body].name && missionGiver(m) === GUIDES[body].id)).toBe(true);
     }
   });
 
-  it("pays positive rewards totalling 10,280 XP and 1,630 coins", () => {
+  it("pays positive rewards: 10,280 XP and 1,630 coins for the nine, 14,940 XP and 2,395 coins with the 2026-11-12 five", () => {
     for (const m of MISSIONS) {
       expect(m.reward.xp, m.id).toBeGreaterThan(0);
       expect(m.reward.coins, m.id).toBeGreaterThan(0);
       for (const it of m.reward.items) expect(itemExists(it.id), `${m.id} ${it.id}`).toBe(true);
     }
-    expect(MISSIONS.reduce((s, m) => s + m.reward.xp, 0)).toBe(10280);
-    expect(MISSIONS.reduce((s, m) => s + m.reward.coins, 0)).toBe(1630);
+    const nine = MISSIONS.slice(0, 9);
+    expect(nine.reduce((s, m) => s + m.reward.xp, 0)).toBe(10280);
+    expect(nine.reduce((s, m) => s + m.reward.coins, 0)).toBe(1630);
+    expect(MISSIONS.reduce((s, m) => s + m.reward.xp, 0)).toBe(14940);
+    expect(MISSIONS.reduce((s, m) => s + m.reward.coins, 0)).toBe(2395);
+  });
+
+  it("gives the Three Gleams from Sela Marchbank in Portus: one trial per planet, each a different new type", () => {
+    const trials = GLEAMS.trials.map((id) => MISSION_BY_ID.get(id)!);
+    expect(trials.map((m) => m.body)).toEqual(["arcadia", "hollowmere", "meridian"]);
+    expect(trials.map((m) => m.type)).toEqual(["race", "defend", "collect"]);
+    expect(trials.map((m) => m.trial)).toEqual([1, 2, 3]);
+    for (const m of trials) {
+      expect(missionGiver(m)).toBe(GLEAMS.curator.id);
+      expect(m.guide).toBe(GLEAMS.curator.name);
+    }
+    expect(WORLD_OBJECT_BY_ID.get(GLEAMS.curator.id)?.body).toBe("portus");
+    expect(WORLD_OBJECT_BY_ID.get(GLEAMS.vault)?.body).toBe("portus");
+    expect(MEDAL_BY_ID.get(GLEAMS.medal)?.title).toBe("Gleamkeeper");
+    expect(PLAQUES.some((p) => p.id === GLEAMS.firsts)).toBe(true);
+    for (const it of GLEAMS.reward.items) expect(isEggItem(it), it.id).toBe(true); // once per life: unsellable
+    // Recommended levels climb with the planets, inside each planet's band (content.md §3).
+    expect(trials.map((m) => m.recLevel)).toEqual([[4, 7], [9, 12], [14, 17]]);
+    expect(gleamsWon([{ id: "T1", done: true }, { id: "T2", done: false }, { id: "A1", done: true }])).toBe(1);
   });
 
   it("hunt targets spawn where the hunt counts them (the NPC lane reports kills by spawn area)", () => {
@@ -55,8 +79,18 @@ describe("missions (content.md §5)", () => {
 
   it("points at places and objects that exist on the mission's planet", () => {
     for (const m of MISSIONS) {
-      const n = Number(!!m.hunt) + Number(!!m.find) + Number(!!m.reach);
+      const n = Number(!!m.hunt) + Number(!!m.find) + Number(!!m.reach) + Number(!!m.race) + Number(!!m.defend) + Number(!!m.collect);
       expect(n, m.id).toBe(1);
+      for (const id of [...(m.race?.rings ?? []), ...(m.collect?.pieces ?? []), ...(m.defend ? [m.defend.beacon] : [])]) {
+        const o = WORLD_OBJECT_BY_ID.get(id);
+        expect(o?.body, `${m.id} ${id}`).toBe(m.body);
+        expect(o?.mission, `${m.id} ${id}`).toBe(m.id);
+      }
+      if (m.defend) {
+        expect(WORLD_OBJECT_BY_ID.get(m.defend.beacon)?.trigger).toBe("interact");
+        for (const w of m.defend.waves) expect(NPC_DEFS.some((d) => d.id === w.npcKind), w.npcKind).toBe(true);
+        expect(m.defend.level).toBeGreaterThanOrEqual(m.recLevel[0]);
+      }
       expect(m[m.type], `${m.id} has data for its type`).toBeTruthy();
       if (m.hunt?.place) expect(PLACE_BY_ID.get(m.hunt.place)?.body).toBe(m.body);
       if (m.reach) expect(PLACE_BY_ID.get(m.reach.place)?.body).toBe(m.body);
@@ -69,20 +103,21 @@ describe("missions (content.md §5)", () => {
     }
     expect(missionGoal(MISSION_BY_ID.get("A1")!)).toBe(8);
     expect(missionGoal(MISSION_BY_ID.get("M1")!)).toBe(7);
+    expect([missionGoal(MISSION_BY_ID.get("T1")!), missionGoal(MISSION_BY_ID.get("T2")!), missionGoal(MISSION_BY_ID.get("T3")!), missionGoal(MISSION_BY_ID.get("A4")!)]).toEqual([8, 90, 8, 5]);
   });
 });
 
 describe("medals (content.md §7)", () => {
-  it("has 20 medals plus 12 hidden egg medals, unique ids and titles", () => {
-    expect(MEDALS).toHaveLength(32);
-    expect(MEDALS.filter((m) => !m.hidden)).toHaveLength(20);
+  it("has 21 medals plus 12 hidden egg medals, unique ids and titles", () => {
+    expect(MEDALS).toHaveLength(33);
+    expect(MEDALS.filter((m) => !m.hidden)).toHaveLength(21);
     expect(MEDALS.filter((m) => m.hidden)).toHaveLength(12);
     expect(unique(MEDALS.map((m) => m.id))).toBe(true);
     for (const m of MEDALS) {
       expect(m.title.length, m.id).toBeGreaterThan(0);
       expect(m.condition.length, m.id).toBeGreaterThan(0);
     }
-    expect(MEDALS.filter((m) => !m.hidden).map((m) => Number(m.ref))).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
+    expect(MEDALS.filter((m) => !m.hidden).map((m) => Number(m.ref))).toEqual(Array.from({ length: 21 }, (_, i) => i + 1));
   });
 });
 
@@ -102,8 +137,9 @@ describe("Easter eggs (content.md §6)", () => {
     }
   });
 
-  it("has one Hall of Firsts plaque per egg and per boss", () => {
-    expect(PLAQUES).toHaveLength(15);
+  it("has one Hall of Firsts plaque per egg, per boss and for the Gleam Vault", () => {
+    expect(PLAQUES).toHaveLength(16);
+    expect(PLAQUES.at(-1)?.id).toBe(GLEAMS.firsts);
     expect(unique(PLAQUES.map((p) => p.id))).toBe(true);
   });
 });
@@ -178,11 +214,11 @@ describe("Portus Exchange and cosmetics (content.md §1.5, §8.4)", () => {
     expect(unitSellValue({ id: "fists", tier: 1 })).toBe(0);
   });
 
-  it("lists the 39 cosmetics across hat, cape, mask and backpack", () => {
-    expect(COSMETICS).toHaveLength(39);
+  it("lists the 40 cosmetics across hat, cape, mask and backpack", () => {
+    expect(COSMETICS).toHaveLength(40);
     expect(unique(COSMETICS.map((c) => c.id))).toBe(true);
     const bySlot = (s: string) => COSMETICS.filter((c) => c.slot === s).length;
-    expect([bySlot("hat"), bySlot("cape"), bySlot("mask"), bySlot("backpack")]).toEqual([13, 9, 7, 10]);
+    expect([bySlot("hat"), bySlot("cape"), bySlot("mask"), bySlot("backpack")]).toEqual([13, 10, 7, 10]);
     expect(COSMETICS.every((c) => !WEAPON_BY_ID.has(c.id) && isCosmetic(c.id))).toBe(true);
   });
 });

@@ -5,13 +5,15 @@
 
 import "../ui/missionPointer.css";
 import * as THREE from "three/webgpu";
-import { MISSION_BY_ID, missionGoal, trackedMission } from "@firstlight/shared/content/missions";
+import { MISSION_BY_ID, missionGoal, trackedMission, type MissionDef } from "@firstlight/shared/content/missions";
+import { objectPos, WORLD_OBJECT_BY_ID } from "@firstlight/shared/content/world";
 import { placeCallout } from "../ui/calloutPlace.ts";
 import { el } from "../ui/dom.ts";
 import type { Game } from "./Game.ts";
 import { huntTargets } from "./huntTargets.ts";
 import { missionTarget, type PointerNpc, type PointerTarget } from "./missionTarget.ts";
 import type { ClientSystem } from "./systems.ts";
+import { objectiveObject, trialSeen } from "./trialState.ts";
 
 /** Pick the target this often (ms); the callout itself follows it every frame. */
 const PICK_MS = 250;
@@ -64,7 +66,7 @@ class MissionPointer implements ClientSystem {
       // The server's list, held since the join (huntTargets.ts): null until one came (older servers never send it).
       const hunt = huntTargets();
       const eligible = hunt && open && hunt.id === open.id ? hunt.npcs : null;
-      this.target = def ? missionTarget(def, g.bodyId, [p.x, p.y, p.z], npcs, (x, y, z) => terrain.groundHeight(x, y, z), { eligible, counts: open!.counts }) : null;
+      this.target = def ? (def.race || def.defend || def.collect ? this.objective(def, open!.counts, [p.x, p.y, p.z]) : missionTarget(def, g.bodyId, [p.x, p.y, p.z], npcs, (x, y, z) => terrain.groundHeight(x, y, z), { eligible, counts: open!.counts })) : null;
     }
     const t = this.target;
     if (!t || g.photo?.active) return this.hide();
@@ -94,6 +96,31 @@ class MissionPointer implements ClientSystem {
     this.callout.style.setProperty("--a", `${c.angle.toFixed(3)}rad`);
     this.callout.classList.toggle("is-edge", c.edge);
     this.callout.classList.toggle("is-flip", c.flip);
+  }
+
+  private readonly objAt = new Map<string, [number, number, number]>();
+
+  /** Race / defend / collect: the next ring, the beacon, or the nearest piece left (trialState.ts). */
+  private objective(def: MissionDef, counts: readonly number[] | undefined, me: [number, number, number]): PointerTarget | null {
+    if (def.body !== this.game.bodyId) return null;
+    const posOf = (id: string): [number, number, number] | null => {
+      let at = this.objAt.get(id);
+      const o = WORLD_OBJECT_BY_ID.get(id);
+      if (!at && o && o.body === this.game.bodyId) {
+        const t = this.game.planet.terrain;
+        at = objectPos(o, (x, y, z) => t.groundHeight(x, y, z));
+        this.objAt.set(id, at);
+      }
+      return at ?? null;
+    };
+    const trial = trialSeen()?.msg ?? null;
+    const id = objectiveObject(def, counts, trial, me, posOf);
+    const at = id ? posOf(id) : null;
+    if (!id || !at) return null;
+    const o = WORLD_OBJECT_BY_ID.get(id)!;
+    const name = o.name.replace(/^Light the /, "");
+    const title = name[0]!.toUpperCase() + name.slice(1); // "Ring 4", "Beacon", "Vigil lamp", "Gleam shard"
+    return { at, title, creep: false };
   }
 
   private hide() {

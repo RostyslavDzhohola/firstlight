@@ -51,6 +51,8 @@ export interface LifeProgress {
   playMs: number;
   /** Part of a staged scene or credited with an admin-assisted boss kill: no life-scoped medals. */
   unofficial?: boolean;
+  /** When this life opened the Gleam Vault (gleams.ts; once per life, ms epoch). */
+  gleamVault?: number;
 }
 
 export function emptyLife(): LifeProgress {
