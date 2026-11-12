@@ -5,7 +5,8 @@ r2-02, r2-04, r2-05 and r2-08. I also checked 07, 09, r2-10, r2-11, r2-15 and r3
 licences, planet scale and the character/boss keyframes. Superseded report content (Zone Laws, Legend,
 Continue Coin, Red Book, the Hunt, Glitch Flats/Bastion, level brackets, skulls, wanted systems,
 downed state, the 8 old avatars, synthwave as the main look) is not carried forward. The last section
-lists the conflicts.
+lists the conflicts. (2026-11-12: a public hunt of our own design is back as **The Three Gleams**, §5.1;
+D-hunt-1 overrides the drop of the reports' Hunt, none of whose names or mechanics return.)
 
 **Tags:** (D) = DECISIONS.md. [05], [12], [r2-04], etc. = taken from that report. (new) = invented
 here. Every number below is a starting value for the tuning sheet, not a measurement.
@@ -115,7 +116,8 @@ before each tier gate. That pushes players to buy the next tier.
 | Regular kill at E = 1 / 4 / 7 / 10 / 13 / 16 / 20 | 3 / 5 / 8 / 10 / 12 / 15 / 18 | computed |
 | Elite kill at the same levels | 14 / 26 / 38 / 50 / 62 / 74 / 90 | computed |
 | Camp chest (opens when the camp elite dies) | Blockyard 60 · Ossuary 150 · Checkpoint Seven 300 | (new) |
-| Missions | see §5 (30–400 each, 1,630 total) | (new) |
+| Missions | see §5 (25–400 each, 2,395 total with the 2026-11-12 five) | (new) |
+| The Gleam Vault (§5.1) | 600, once per life | (new) |
 | Boss purse (each eligible player) | Tidewrath 120 · Hollow King 300 · The Receiver 600 | [r2-05] scaled |
 | Selling | see 1.5 | |
 
@@ -642,7 +644,54 @@ Rules (new):
 | M2 | Meridian | find | Whistleblower | Pick up the memo drive on the manager's desk in the Oversight Lobby | 14–17 | 2,400 XP, 350 coins | **Egg E7**: the wall safe is in the same office; the break-room mirror is next door |
 | M3 | Meridian | reach | Site Visit | Reach the gantry overlook above Foreclosure Yard | 15–18 | 2,800 XP, 400 coins, Copper Orbit Pack | **Boss lair**: both Override Consoles are visible from the gantry |
 
-Totals: 10,280 XP and 1,630 coins per life.
+Totals: 10,280 XP and 1,630 coins per life for the nine (Errand Runner still asks for these nine, D-hunt-4).
+
+**Added 2026-11-12 (new objective types, D-hunt-3):** `race` (rings in order inside a clock that starts at the
+first ring), `defend` (E lights a beacon; hold its ring while waves arrive; outside it the clock pauses, past
+the grace the attempt fails) and `collect` (walk over every piece; optionally timed from the first). Failing
+(time, death, leaving the ring) ends the attempt; the mission stays accepted, so you try again. Waves pay nothing.
+
+| # | Planet / giver | Type | Name | Exact objective | Rec. Lv | Reward | Routes the player toward |
+|---|---|---|---|---|---|---|---|
+| A4 | Arcadia / Lark | collect | Kite Season | Gather the 5 glowing kite panels in the meadow between Dawnpad and Clover Fields (untimed; pieces are kept across a reconnect) | 1–3 | 60 XP, 25 coins | The bridge from the tutorial into the wild: the meadow runs on into Clover Fields |
+| H4 | Hollowmere / Sexton Mabry | defend | The Long Vigil | Light the vigil lamp on the road north-east of Saint Orrin's ruin; hold its 14 m ring for 60 s (10 s grace outside). Waves at L9: 2 Bonewalkers at 2 s, 2 Gnawers at 25 s, 2 Bonewalkers at 45 s | 9–12 | 900 XP, 150 coins | Saint Orrin's ruin |
+| T1 | Arcadia / Sela Marchbank (Portus) | race | The Swift Gleam | 8 rings on a 75 m loop round Highscore Hill (~400 m), in order, within 75 s of ring 1 | 4–7 | 300 XP, 80 coins, gleam 1 | Highscore Hill's camps |
+| T2 | Hollowmere / Sela Marchbank | defend | The Steadfast Gleam | Light the beacon in south Thornwood; hold its 14 m ring for 90 s (10 s grace). Waves at L9: 2 Bonewalkers at 2 s, 2 Gnawers at 22 s, 2 Bonewalkers at 45 s, 3 Gnawers at 65 s | 9–12 | 1,000 XP, 160 coins, gleam 2 | Thornwood |
+| T3 | Meridian / Sela Marchbank | collect | The Patient Gleam | 8 shards spread over ~240 m of the Glasspan Salt Flats, within 240 s of the first | 14–17 | 2,400 XP, 350 coins, gleam 3 | Glasspan's patrols |
+
+Totals with the five: **14,940 XP and 2,395 coins per life** (+4,660 XP, +765 coins; credited at the levels
+above, the cap arrives a few minutes sooner, §1.1). Trial sites are on dry ground, outside safe zones and
+structures, ≥ 100 m beyond the boss arenas' engagement radius and ≥ 30 m from any egg part (checked in
+`packages/shared/src/content/gleams.test.ts`).
+
+**Sizing (new):** *T1:* 7 legs of ~57 m = ~400 m; a sprint (9 m/s) takes ~45 s and a run (6 m/s) ~67 s, so
+75 s leaves ~30 s at a sprint for hills, a dodge or a Hopbit in the way and is just doable at a run; a horse
+(16 m/s) takes ~25 s but costs 1,500 coins, about five times what a level-6 life has (§1.4). *T2 / H4:* waves
+are L9 (×1.96 HP, ×1.64 damage): Bonewalker 108 HP (slash 13, overhead 33), Gnawer 74 HP (bite 15, leap 30),
+every hit under the 35% cap (63) of a level-9 player's 180 HP. A level-9 player (×1.24 damage) on a T2 weapon
+does 50–66 DPS on paper (Hexquill II after heat, Sunbrand II, Carbine II after reloads), call it ~35 with
+misses. T2's nine enemies (4 Bonewalkers 432 HP + 5 Gnawers 370 HP = ~800 HP) take ~23 s of shooting in a 90 s
+hold; each wave is two or three enemies and the next comes 20 s later, so a wave cleared in time never stacks,
+and one Small Tonic per wave covers the chip damage. H4's six (4 Bonewalkers + 2 Gnawers, ~580 HP) take ~17 s in
+60 s. *T3:* the shortest nearest-first route over the eight shards is ~520 m (~60 s at a sprint); 240 s leaves
+room for three or four fights with L12–18 Oversight on the open flats. Tests shrink every clock with
+`TRIAL_RULES.timeScale`.
+
+### 5.1 The Three Gleams (the hunt, D-hunt-1, D-hunt-2)
+
+Sela Marchbank (the lamp-keeper of Portus Plaza, south-east of the pad) gives the three trials T1–T3 above, in
+any order; the journal and her panel track them. A gleam is won by completing its trial. With all three won
+in one life, E at the **Gleam Vault** beside her pays, once per life: the **Gleamweave Cape** (Legendary cape,
+can't be sold), **600 coins**, the medal **The Three Gleams** (title **Gleamkeeper**, medal 21) and, for the
+first real account ever, the Hall of Firsts line **"The Gleam Vault opens"**. Gleams are life progress (lost
+on rebirth, like missions); medal and Hall line are permanent. Staged copies pay the vault's reward without
+the medal or the Hall line; test and load-test accounts never engrave (D-home-6).
+
+Her lines: "Three gleams of the first light, one on each world. The vault remembers who brings them home."
+(greeting) · "Every world kept one gleam when the light was young. Win all three and the vault in front of me
+opens for you." · "The vault hums when you come near. It can feel what you carry. Bring the rest." · "All
+three. Go on, the vault is listening." · "The vault knows your face now. Win them again in another life and
+it will open again."
 
 ---
 
@@ -690,7 +739,7 @@ since the last rebirth; "account" means cumulative.
 | 3 | Firstlight | progress | Reach level 20 | life | Firstlighter |
 | 4 | Grand Tour | progress | Set foot on Arcadia, Hollowmere and Meridian | life | Wanderer |
 | 5 | Cartographer | progress | Use every fast-travel pad on one planet (12 / 12 / 20) | life | Cartographer |
-| 6 | Errand Runner | progress | Complete all 9 missions | life | Reliable |
+| 6 | Errand Runner | progress | Complete all 9 missions (the original nine, D-hunt-4) | life | Reliable |
 | 7 | Tide Turner | feat | Loot-eligible on a Tidewrath kill | account | Tide Turner |
 | 8 | Regicide | feat | Loot-eligible on a Hollow King kill | account | Regicide |
 | 9 | Decommissioned | feat | Loot-eligible on a Receiver kill | account | Decommissioner |
@@ -705,6 +754,7 @@ since the last rebirth; "account" means cumulative.
 | 18 | Killed by a Woolback | joke | Die to a Woolback buck, or to fall damage within 5 s of a Woolback's knockback | account | Fleeced |
 | 19 | With Friends Like These | joke | Be killed by a member of your current party | account | Trusting |
 | 20 | Own Goal | joke | Die to your own Comet rocket, Scrapburst or Emberglass splash | account | Self-Starter |
+| 21 | The Three Gleams | feat | Win all three trials of the Three Gleams in one life and open the Gleam Vault (§5.1) | life (earned once per account) | Gleamkeeper |
 | H1–H9 | the original 9 egg medals in §6 | hidden | Claim that egg's item | account | same as the medal name |
 | H10 | Tended the Dawn | hidden | Claim the Dewdial Crown | account | Dawn Tender |
 | H11 | Kept the Wicks | hidden | Claim the Wickfloat Mantle | account | Wick Keeper |
@@ -812,6 +862,7 @@ Cosmetics are items: they drop on death (D). Slots are hat, cape, mask and backp
 | Hat | Dewdial Crown | Legendary | egg E10; cannot be sold |
 | Cape | Wickfloat Mantle | Legendary | egg E11; cannot be sold |
 | Mask | Quietshift Lens | Legendary | egg E12; cannot be sold |
+| Cape | Gleamweave Cape | Legendary | the Gleam Vault (§5.1), once per life; cannot be sold |
 
 Planet cosmetic pity is tracked by account, life and cosmetic across travel and copy recreation.
 Counters reset on a server restart or after six hours without an eligible roll for that cosmetic.
@@ -902,6 +953,7 @@ not a trademark search.
 | Cosmetics | Woolly Beanie, Wide Straw Hat, Messenger's Winged Cap, Hard Hat (Oversight Issue), Antler Crown, Heron Plume Hat, Coral Crown, Hollow Crown, Pixel Halo, Candle Crown, Ticket #000 Helmet, Traveller's Cloak, Wolfpelt Cape, Tide Cape, Court Mantle, Saltplate Mantle, Static Cloak, Fox Mask, Voxel Visor, Crowbeak Mask, Funeral Veil, Executive Visor, Bedroll, Woolback Plushie, Wind-Up Key, Signal Dish, Tidewrath Tooth, Receiver Floodlamp, Lantern of Lacefall, Golden Hopbit, Bone Bell; palettes Ivory, Sand, Midnight, Moss, Ember, Dusk | OK. "Hollow Crown" is Shakespeare (public domain) |
 | M11 cosmetics | Bracken Stitch Cap, Dockfold Cape, Petalwake Mask, Fenweave Cape, Copper Orbit Pack, Dewdial Crown, Wickfloat Mantle, Quietshift Lens | Original descriptive names; no §10 franchise names, near-misses or exact game titles identified. Reasoned check only |
 | M11 eggs, medals and titles | The Dewdial, Afloat in the Dark, The Quiet Shift, Tended the Dawn, Kept the Wicks, Off the Clock, Dawn Tender, Wick Keeper, Quietshift | Original or ordinary phrases; no §10 franchise names, near-misses or exact game titles identified. Reasoned check only |
+| The Three Gleams (2026-11-12) | Sela Marchbank, the Three Gleams, the Swift / Steadfast / Patient Gleam, gleam shard, the Gleam Vault, Gleamweave Cape, Gleamkeeper; Kite Season, The Long Vigil, vigil lamp | Original. Deliberately no keys, gates, egg-hunt or scoreboard-book wording from the well-known contest novel and film, and no names from it. Rejected: "Dawnshard" (a published novella), "Vaultwarden" (a software product), "Vance" and "Teague" as surnames (game and film characters), "Merriweather" (a film character). Reasoned check only |
 
 ---
 
