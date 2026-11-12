@@ -40,7 +40,7 @@ export function portusLightPools(): LightPool[] {
   for (const [to, [e, n]] of Object.entries(TOWN_FIXED.portals) as [BodyId, readonly [number, number]][]) {
     // In front of the arch: 3.4 m towards the plaza's centre.
     const d = Math.hypot(e, n) || 1;
-    pools.push({ at: [e - (e / d) * 3.4, n - (n / d) * 3.4], radius: 6.0, color: PORTAL_COLORS[to], day: 0.22, strength: 1.25 });
+    pools.push({ at: [e - (e / d) * 3.4, n - (n / d) * 3.4], radius: 6.0, color: PORTAL_COLORS[to], day: 0.22, strength: 0.9 });
   }
   pools.push({ at: HOLO_AT, radius: 3.6, color: 0x7fe9ff, day: 0.22, strength: 1.1 });
   return pools;
