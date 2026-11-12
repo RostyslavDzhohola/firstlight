@@ -10,7 +10,8 @@ import { PLAY_LIMITS, type Game } from "../src/app.ts";
 import { isTestAccount } from "../src/db/index.ts";
 import { BOT_BUDGET } from "../src/world/botBudget.ts";
 import { TOOL_GUESSES } from "../src/auth/loadtest.ts";
-import { api, Browser, play, startAuthServer, userIdOf, type AuthServer } from "./auth-helpers.ts";
+import { api, Browser, decodeJwt, play, startAuthServer, userIdOf, type AuthServer } from "./auth-helpers.ts";
+import { Client } from "@colyseus/sdk";
 import { joinAs, playRequest, safeLeave, startServer } from "./helpers.ts";
 
 /** A load-test secret strong enough to switch the load-test features on (D-security-2). */
@@ -241,5 +242,54 @@ describe("finding 4: one trusted-proxy rule for client addresses", () => {
     await game.close();
     game = await startServer();
     for (const id of ["dv1", "dv2", "dv3"]) expect(await send(game.port, `dev:${id}:${id}`, {})).toBe(200);
+  });
+});
+
+/** Try to use a reservation; resolves to the room, or null when the server refuses the seat. */
+async function consume(base: string, reservation: unknown): Promise<Room | null> {
+  try {
+    const r = await new Client(base).consumeSeatReservation(reservation as never);
+    rooms.push(r);
+    let closed = false;
+    r.onLeave(() => (closed = true));
+    await new Promise((ok) => setTimeout(ok, 300));
+    return closed ? null : r;
+  } catch {
+    return null;
+  }
+}
+
+describe("finding 5: play tokens are bound to the session that issued them", () => {
+  it("signing out one session kills its tokens and seats; another session of the account keeps working", async () => {
+    server = await startAuthServer();
+    const a = new Browser(server, "198.51.100.90");
+    await a.playToken(); // a guest first, who then saves
+    await a.saveWithEmail("twosessions@example.test", "Twosess");
+    const b = new Browser(server, "198.51.100.91");
+    await b.saveWithEmail("twosessions@example.test");
+    const ta = await a.playToken();
+    const tb = await b.playToken();
+    expect(userIdOf(ta)).toBe(userIdOf(tb));
+    expect(decodeJwt(ta).sid).toBeTruthy();
+    const seat = await play(server, ta, { body: "portus" });
+    expect(seat.json.ok).toBe(true);
+
+    await a.client.signOut();
+    expect((await api(server, "/api/account/me", ta)).status).toBe(401);
+    expect((await play(server, ta, { body: "portus" })).status).toBe(401);
+    // A seat reserved before signing out can't be used either, though the account has another session.
+    expect(await consume(server.base, (seat.json as any).reservation)).toBeNull();
+
+    expect((await api(server, "/api/account/me", tb)).status).toBe(200);
+    expect((await play(server, tb, { body: "portus" })).json.ok).toBe(true);
+  });
+
+  it("a guest's token dies with its session", async () => {
+    server = await startAuthServer();
+    const g = new Browser(server, "198.51.100.92");
+    const token = await g.playToken();
+    expect((await api(server, "/api/account/me", token)).status).toBe(200);
+    await g.client.signOut();
+    expect((await api(server, "/api/account/me", token)).status).toBe(401);
   });
 });

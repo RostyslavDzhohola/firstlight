@@ -81,7 +81,7 @@ export interface Accounts {
    * Is this account still allowed into a seat it reserved earlier? Refusal reason or null: the
    * user row is gone (merged or deleted guest), it is banned, or it has no session left (signed out).
    */
-  revalidate(userId: string): string | null;
+  revalidate(userId: string, sessionId?: string): string | null;
   /** Resolve the caller from the Better Auth session cookie, else a Bearer JWT. */
   identify(req: Request): Promise<Identity | null>;
   /** Express middleware for /admin and /stats routes: 401 unless signed in, 403 unless admin. Sets res.locals.identity. */
@@ -217,6 +217,13 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
   const pruneTimer = setInterval(housekeeping, 24 * 3_600_000);
   pruneTimer.unref();
 
+  const startedAt = Date.now();
+  const sessionByIdStmt = authDb.prepare(`SELECT "expiresAt" AS exp FROM "session" WHERE id = ? AND "userId" = ?`);
+  /** Does this session of this user still exist and not expire before `now`? */
+  const sessionLive = (sessionId: string, userId: string, now: number): boolean => {
+    const row = sessionByIdStmt.get(sessionId, userId) as { exp: unknown } | undefined;
+    return !!row && dbTime(row.exp) > now;
+  };
   const botKey = botSecret(cfg);
   const botWarning = botSecretWarning(cfg);
   if (botWarning) console.warn(botWarning);
@@ -241,6 +248,10 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
     const user = userStmt.get(sub) as { id: string; name: string; anon: number | null } | undefined;
     if (!user) return null; // merged/deleted guest or deleted account
     const now = Date.now();
+    // Bound to the issuing session (D-security-5): signed out or expired, its tokens are dead. Tokens
+    // without one come from before this change: only those issued before this process started.
+    const sid = typeof payload.sid === "string" && payload.sid ? payload.sid : null;
+    if (sid ? !sessionLive(sid, sub, now) : !(typeof payload.iat === "number" && payload.iat * 1000 < startedAt)) return null;
     if (isBanned(db, sub, now)) return null;
     const ip = normalizeIp(vctx?.ip);
     const ipHash = ip ? hashIp(ip) : null;
@@ -258,14 +269,14 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
       const r = setDisplayName(db, sub, user.name, now);
       if (r.ok) display = r.name;
     }
-    return { userId: sub, name: display ?? generated, guest: user.anon === 1, admin: acc.isAdmin, loadtest: false, account: true, test: isTestAccount(db, sub) };
+    return { userId: sub, name: display ?? generated, guest: user.anon === 1, admin: acc.isAdmin, loadtest: false, account: true, test: isTestAccount(db, sub), ...(sid ? { authSession: sid } : {}) };
   };
 
   const sessionStmt = authDb.prepare(`SELECT 1 FROM "session" WHERE "userId" = ? LIMIT 1`);
-  const revalidate = (userId: string): string | null => {
+  const revalidate = (userId: string, sessionId?: string): string | null => {
     if (!userStmt.get(userId)) return "account gone";
     if (isBanned(db, userId, Date.now())) return "banned";
-    if (!sessionStmt.get(userId)) return "signed out";
+    if (sessionId ? !sessionLive(sessionId, userId, Date.now()) : !sessionStmt.get(userId)) return "signed out";
     return null;
   };
 
@@ -378,4 +389,12 @@ export function accountsConfigFromEnv(env: {
     otpPerEmailPerHour: env.otpPerEmailPerHour,
     devMailLog: env.devMailLog,
   };
+}
+
+/** A Better Auth date column (ms or s since the epoch, or an ISO string) in ms; NaN if unreadable. */
+function dbTime(v: unknown): number {
+  if (typeof v === "number") return v < 1e12 ? v * 1000 : v;
+  if (typeof v === "string") return /^\d+$/.test(v) ? dbTime(Number(v)) : Date.parse(v);
+  if (v instanceof Date) return v.getTime();
+  return Number.NaN;
 }

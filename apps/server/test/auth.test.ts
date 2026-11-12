@@ -83,7 +83,7 @@ describe("guest play", () => {
     const claims = decodeJwt(t.data!.token);
     expect(JSON.stringify(claims)).not.toContain("example.test");
     expect(claims.email).toBeUndefined();
-    expect(Object.keys(claims).sort()).toEqual(["aud", "exp", "guest", "iat", "iss", "name", "sub"]);
+    expect(Object.keys(claims).sort()).toEqual(["aud", "exp", "guest", "iat", "iss", "name", "sid", "sub"]); // sid: the issuing session (D-security-5)
     expect(claims.guest).toBe(false);
     expect(claims.name).toBe("Keeper");
   });

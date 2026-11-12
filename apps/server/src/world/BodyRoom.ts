@@ -575,7 +575,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   private seatRefusal(sessionId: string, auth: Identity, now: number): string | null {
     if (!pendingSeats.consume(sessionId, auth.userId, now)) return "seat expired";
     if (!auth.loadtest && seatRefusal(auth.userId, now)) return "not allowed";
-    if (auth.account && identityCheck.current(auth.userId)) return "sign in again";
+    if (auth.account && identityCheck.current(auth.userId, auth.authSession)) return "sign in again"; // its own session (D-security-5)
     if (!storageRecovery.ok(auth.userId)) return "storage";
     if (travelRedirect(auth, this.bodyDef.id, now)) return "travel";
     return null;

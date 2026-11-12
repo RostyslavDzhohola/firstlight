@@ -16,7 +16,7 @@ export const HOME_BODY: BodyId = "portus";
  * deleted guest; not banned; still signed in somewhere)? Returns a refusal reason or null.
  * Only identities from real accounts (`identity.account`) are checked; set by createGame.
  */
-export const identityCheck: { current: (userId: string) => string | null } = { current: () => null };
+export const identityCheck: { current: (userId: string, sessionId?: string) => string | null } = { current: () => null };
 
 /** Does `ch` hold an unexpired travel ticket to `body`? */
 export function ticketFor(ch: Pick<CharacterData, "travelTo" | "travelUntil">, body: BodyId, now: number): boolean {

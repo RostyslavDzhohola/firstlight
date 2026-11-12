@@ -33,7 +33,7 @@ export interface GameOptions {
   /** When verification fails: is this a validly signed token of a banned account/network? (403 "banned" instead of 401.) */
   explainRefusal?: (token: string, ip: string | null, ctx?: VerifyContext) => Promise<string | null>;
   /** Accounts: recheck a real account when its seat is used (merged/deleted, banned, signed out). */
-  revalidate?: (userId: string) => string | null;
+  revalidate?: (userId: string, sessionId?: string) => string | null;
   /** Production: no loopback exemptions from per-address limits (D-security-3, D-security-4). */
   production?: boolean;
 }
