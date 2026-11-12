@@ -3,6 +3,9 @@
 // part (the lines, their wording, how long they stay); ui/momentsView.ts draws it and
 // game/MomentsClient.ts feeds it.
 
+import { NPC_DEFS } from "@firstlight/shared/content/npcs";
+import { classifyKiller } from "./hudFormat.ts";
+
 export type FeedKind = "join" | "leave" | "kill" | "death" | "hunt" | "info";
 
 export interface FeedWho {
@@ -155,4 +158,16 @@ export class KillTally {
     this.coins += coins;
     return { count: this.count, xp: this.xp, coins: this.coins, again };
   }
+}
+
+/**
+ * A death's `killerName` as the feed says it when the killer isn't a player in the room: a creature
+ * comes on the wire as `npc:<kind>` and reads by its name ("Dusk Wolf"); the world's own causes
+ * ("the fall") read as sent. Null when there is none.
+ */
+export function feedKiller(killerName: string | null | undefined): string | null {
+  const raw = killerName?.trim() ?? "";
+  if (!raw) return null;
+  if (!raw.startsWith("npc:")) return raw;
+  return classifyKiller({ killerName: raw }, null, { npcName: (kind) => NPC_DEFS.find((d) => d.id === kind)?.name }).name;
 }

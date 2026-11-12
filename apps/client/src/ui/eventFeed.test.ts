@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FEED_HUNT_MS, FEED_MAX, FEED_MS, FeedModel, feedPlain, feedText, KillTally, Roster, TALLY_MS } from "./eventFeed.ts";
+import { feedKiller, FEED_HUNT_MS, FEED_MAX, FEED_MS, FeedModel, feedPlain, feedText, KillTally, Roster, TALLY_MS } from "./eventFeed.ts";
 
 describe("the event feed's lines", () => {
   it("words each kind of news; an agent's name carries (AI) in plain text", () => {
@@ -98,5 +98,15 @@ describe("kills in a row", () => {
     expect(f.lines.map((l) => l.id)).toEqual([line.id]);
     f.tick(3000 + FEED_MS);
     expect(f.update(line.id, feedText.felled("Hopbit", 9, 9, 3), 20_000)).toBe(false);
+  });
+});
+
+describe("who a death names as the killer", () => {
+  it("reads a creature by its name, not its wire id; the world's causes as sent", () => {
+    expect(feedKiller("npc:dusk_wolf")).toBe("Dusk Wolf");
+    expect(feedPlain(feedText.fell({ name: "Pip" }, feedKiller("npc:dusk_wolf")))).toBe("Pip fell to Dusk Wolf");
+    expect(feedKiller("the fall")).toBe("the fall");
+    expect(feedKiller("")).toBeNull();
+    expect(feedKiller(undefined)).toBeNull();
   });
 });

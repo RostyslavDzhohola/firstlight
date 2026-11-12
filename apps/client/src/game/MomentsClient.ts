@@ -12,7 +12,7 @@ import { SPELLS } from "@firstlight/shared/content/spells";
 import type { YouState } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
 import { ArrivalGate, arrivalCard } from "../ui/arrivalCard.ts";
-import { feedText, KillTally, Roster, type FeedWho } from "../ui/eventFeed.ts";
+import { feedKiller, feedText, KillTally, Roster, type FeedWho } from "../ui/eventFeed.ts";
 import { hitAngle } from "../ui/hitFrom.ts";
 import { levelMoments, medalMoment, missionMoments, MOMENT_SOUNDS, type Moment } from "../ui/moments.ts";
 import type { Game } from "./Game.ts";
@@ -105,7 +105,7 @@ export class MomentsClient implements ClientSystem {
       const victim = whoOf(st?.players?.get(d.victim));
       const killer = d.killer ? st?.players?.get(d.killer) : undefined;
       const mine = d.killer === me;
-      const by = mine ? { name: "You", me: true } : killer ? whoOf(killer) : d.killerName || null;
+      const by = mine ? { name: "You", me: true } : killer ? whoOf(killer) : feedKiller(d.killerName);
       m.feed(mine ? "kill" : "death", feedText.fell(victim, by), performance.now());
       if (mine) {
         m.kill();
