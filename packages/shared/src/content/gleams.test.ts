@@ -9,6 +9,7 @@ import { nearSafeZone } from "../planet/zones.ts";
 import { structureCollider } from "../planet/sites.ts";
 import { bossArena } from "./arenas.ts";
 import { MISSIONS } from "./missions.ts";
+import { TRAINING_DUMMIES } from "./onboarding.ts";
 import { objectPos, surfaceDistance, WORLD_OBJECT_BY_ID, WORLD_OBJECTS } from "./world.ts";
 
 const SITES = MISSIONS.flatMap((m) => [...(m.race?.rings ?? []), ...(m.collect?.pieces ?? []), ...(m.defend ? [m.defend.beacon] : [])].map((id) => ({ m, o: WORLD_OBJECT_BY_ID.get(id)! })));
@@ -34,7 +35,7 @@ describe("trial sites", () => {
         for (const e of eggs) expect(surfaceDistance(e, p), `${o.id} egg part`).toBeGreaterThan(30);
       }
     }
-  });
+  }, 30_000); // three terrains and their structure colliders
 
   it("puts Sela Marchbank and the Gleam Vault on clear plaza floor in Portus", () => {
     const t = createTerrain("portus");
@@ -45,6 +46,8 @@ describe("trial sites", () => {
       const l = Math.hypot(p[0], p[1], p[2]);
       const q = { x: (p[0] * (l + 0.3)) / l, y: (p[1] * (l + 0.3)) / l, z: (p[2] * (l + 0.3)) / l };
       expect(sc.isClear(q), id).toBe(true);
+      // Out of the tutorial's training yard (its dummies, fences and target stand south-east of the pad).
+      for (const d of TRAINING_DUMMIES) expect(Math.hypot((o.east ?? 0) - d.east, (o.north ?? 0) - d.north), `${id} training yard`).toBeGreaterThan(10);
     }
   });
 });

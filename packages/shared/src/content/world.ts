@@ -133,9 +133,10 @@ export const WORLD_OBJECTS: readonly WorldObjectDef[] = [
   // Placed on open, dry ground away from safe zones, boss arenas and egg sites (checked in
   // packages/shared/src/content/gleams.test.ts). Rings, shards and beacons are drawn by the client's
   // trial markers (world/TrialMarkers.ts) and handled by the server's trials (quests/trials.ts).
-  // The Three Gleams: Sela Marchbank and the Gleam Vault in Portus Plaza, south-east of the pad.
-  O({ id: "curator_sela", body: "portus", place: "portus_plaza", east: 9, north: -3, look: "curator", name: "Sela Marchbank", trigger: "interact", range: 3 }),
-  O({ id: "gleam_vault", body: "portus", place: "portus_plaza", east: 13, north: -8, look: "vault", name: "Open the Gleam Vault", trigger: "interact", range: 2.5 }),
+  // The Three Gleams: Sela Marchbank and the Gleam Vault on the plaza's west side, on open floor between
+  // the pad and the Hall of Firsts (clear of the training yard south-east of the pad).
+  O({ id: "curator_sela", body: "portus", place: "portus_plaza", east: -10.5, north: -1.5, look: "curator", name: "Sela Marchbank", trigger: "interact", range: 3 }),
+  O({ id: "gleam_vault", body: "portus", place: "portus_plaza", east: -10.5, north: -6, look: "vault", name: "Open the Gleam Vault", trigger: "interact", range: 2.5 }),
   // T1 The Swift Gleam: eight rings on a 75 m loop around Highscore Hill (about 400 m of running).
   ...ring(8, 75, 0.4).map((p, i) => O({ id: `t1_ring_${i + 1}`, body: "arcadia", place: "highscore_hill", ...p, look: "ring", name: `Ring ${i + 1}`, trigger: "none", range: 4.5, mission: "T1", part: String(i + 1) })),
   // T2 The Steadfast Gleam: the beacon in south Thornwood.
