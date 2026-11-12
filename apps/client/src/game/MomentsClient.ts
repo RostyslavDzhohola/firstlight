@@ -12,7 +12,7 @@ import { SPELLS } from "@firstlight/shared/content/spells";
 import type { YouState } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
 import { ArrivalGate, arrivalCard } from "../ui/arrivalCard.ts";
-import { feedText, Roster, type FeedWho } from "../ui/eventFeed.ts";
+import { feedText, KillTally, Roster, type FeedWho } from "../ui/eventFeed.ts";
 import { hitAngle } from "../ui/hitFrom.ts";
 import { levelMoments, medalMoment, missionMoments, MOMENT_SOUNDS, type Moment } from "../ui/moments.ts";
 import type { Game } from "./Game.ts";
@@ -64,6 +64,7 @@ export class MomentsClient implements ClientSystem {
   /** The level the banners have seen (null until this room's first `you`). */
   private level: number | null;
   private readonly roster = new Roster<FeedWho>();
+  private readonly tally = new KillTally();
   private rosterAt = 0;
   private spells: SpellClient | null | undefined;
   private readonly onNpcKill = (e: Event) => this.npcKill((e as CustomEvent).detail);
@@ -154,7 +155,10 @@ export class MomentsClient implements ClientSystem {
     const now = performance.now();
     m.kill(boss);
     this.game.hitStop.hit(boss ? "bossKill" : "kill", now);
-    m.feed("kill", feedText.felled(def.name, d.xp ?? 0, d.coins ?? 0), now);
+    // Kills of the same creature in a row count up on one line (a Frostbloom through a pack).
+    const t = this.tally.add(def.name, d.xp ?? 0, d.coins ?? 0, now);
+    const parts = feedText.felled(def.name, t.xp, t.coins, t.count);
+    if (!(t.again && this.tally.line !== null && m.feedUpdate(this.tally.line, parts, now))) this.tally.line = m.feed("kill", parts, now);
   }
 
   /** The wedge for a hit on us: the attacker's bearing round the player, in the camera's frame. */

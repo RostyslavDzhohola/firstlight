@@ -95,6 +95,21 @@ describe("the event feed", () => {
   });
 });
 
+describe("a kill tally in the feed", () => {
+  it("rewrites its line in place instead of adding one", () => {
+    const { hud, feed } = mount();
+    const id = hud.feed("kill", feedText.felled("Hopbit", 3, 3), 0)!;
+    hud.feed("join", feedText.joined({ name: "Mossback" }), 10);
+    const first = feed.querySelector<HTMLElement>(".fl-feed__line")!;
+    expect(hud.feedUpdate(id, feedText.felled("Hopbit", 6, 6, 2), 500)).toBe(true);
+    expect(feed.querySelectorAll(".fl-feed__line").length).toBe(2);
+    expect(feed.querySelector(".fl-feed__line")).toBe(first);
+    expect(first.title).toBe("Hopbit ×2 down · +6 XP · +6 ◎");
+    expect(first.querySelector(".fl-feed__text")!.textContent).toBe("Hopbit ×2 down · +6 XP · +6 ◎");
+    expect(hud.feedUpdate(999, ["nope"], 600)).toBe(false);
+  });
+});
+
 describe("the hit ring", () => {
   it("turns a wedge to the bearing, reuses one for hits from the same side, and never makes more than four", () => {
     const { hud, layer } = mount();

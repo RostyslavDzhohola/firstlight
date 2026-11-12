@@ -23,6 +23,8 @@ export interface FeedLine {
   /** When it was added and when it goes (the model's clock). */
   at: number;
   until: number;
+  /** Bumped when `update` rewrites the line in place (the view redraws its text). */
+  rev: number;
 }
 
 export const FEED_MAX = 4;
@@ -38,8 +40,8 @@ export const feedText = {
   /** A player died: to another player, to a creature (`by` is its name), or to the world. */
   fell: (victim: FeedWho, by: FeedWho | string | null): FeedPart[] =>
     by === null || by === "" ? [who(victim), " fell"] : typeof by === "string" ? [who(victim), ` fell to ${by}`] : [who(by), " felled ", who(victim)],
-  /** Our own kill of a creature, with what it paid. */
-  felled: (npc: string, xp: number, coins: number): FeedPart[] => [`${npc} down${xp > 0 ? ` · +${xp} XP` : ""}${coins > 0 ? ` · +${coins} ◎` : ""}`],
+  /** Our own kill of a creature (or `count` of them in a row), with what it paid in all. */
+  felled: (npc: string, xp: number, coins: number, count = 1): FeedPart[] => [`${npc}${count > 1 ? ` ×${count}` : ""} down${xp > 0 ? ` · +${xp} XP` : ""}${coins > 0 ? ` · +${coins} ◎` : ""}`],
   wonGleam: (w: FeedWho, gleam: string): FeedPart[] => [who(w), ` won ${gleam}`],
   openedVault: (w: FeedWho): FeedPart[] => [who(w), " opened the Gleam Vault"],
 };
@@ -65,10 +67,20 @@ export class FeedModel {
   add(kind: FeedKind, parts: FeedPart[], now: number, ms = kind === "hunt" ? FEED_HUNT_MS : FEED_MS): FeedLine | null {
     const text = feedPlain(parts);
     if (this.items.some((l) => now - l.at < 1000 && feedPlain(l.parts) === text)) return null;
-    const line: FeedLine = { id: ++this.seq, kind, parts, at: now, until: now + ms };
+    const line: FeedLine = { id: ++this.seq, kind, parts, at: now, until: now + ms, rev: 0 };
     this.items.push(line);
     if (this.items.length > FEED_MAX) this.items = this.items.slice(-FEED_MAX);
     return line;
+  }
+
+  /** Rewrite a line that is still up, in its place, and give it its full time again. False when it has gone. */
+  update(id: number, parts: FeedPart[], now: number, ms = FEED_MS): boolean {
+    const line = this.items.find((l) => l.id === id);
+    if (!line) return false;
+    line.parts = parts;
+    line.until = now + ms;
+    line.rev++;
+    return true;
   }
 
   tick(now: number): boolean {
@@ -108,5 +120,39 @@ export class Roster<T extends { name: string }> {
     }
     this.known = new Map(now);
     return { joined, left };
+  }
+}
+
+// ------------------------------------------------------------------------------------- kills in a row
+
+/** Kills of the same creature this close together are one line that counts up ("Hopbit ×3 down"). */
+export const TALLY_MS = 4000;
+
+/**
+ * Our own kills, tallied: a Frostbloom through a pack of Hopbits is one line with a count and the
+ * sum of what it paid, not five lines pushing everything else out of the feed.
+ */
+export class KillTally {
+  private name = "";
+  private at = -Infinity;
+  private count = 0;
+  private xp = 0;
+  private coins = 0;
+  /** The feed line the tally is on (set by the caller once it has added it). */
+  line: number | null = null;
+
+  /** A kill at `now`: the running totals, and whether this continues the line already up. */
+  add(name: string, xp: number, coins: number, now: number): { count: number; xp: number; coins: number; again: boolean } {
+    const again = name === this.name && now - this.at <= TALLY_MS;
+    if (!again) {
+      this.name = name;
+      this.count = this.xp = this.coins = 0;
+      this.line = null;
+    }
+    this.at = now;
+    this.count++;
+    this.xp += xp;
+    this.coins += coins;
+    return { count: this.count, xp: this.xp, coins: this.coins, again };
   }
 }

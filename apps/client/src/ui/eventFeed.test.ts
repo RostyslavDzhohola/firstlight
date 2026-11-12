@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FEED_HUNT_MS, FEED_MAX, FEED_MS, FeedModel, feedPlain, feedText, Roster } from "./eventFeed.ts";
+import { FEED_HUNT_MS, FEED_MAX, FEED_MS, FeedModel, feedPlain, feedText, KillTally, Roster, TALLY_MS } from "./eventFeed.ts";
 
 describe("the event feed's lines", () => {
   it("words each kind of news; an agent's name carries (AI) in plain text", () => {
@@ -72,5 +72,31 @@ describe("who is here", () => {
     r.diff(room("a"), "me");
     r.reset();
     expect(r.diff(room("x", "y"), "me")).toEqual({ joined: [], left: [] });
+  });
+});
+
+describe("kills in a row", () => {
+  it("the same creature within a few seconds counts up with summed pay; another creature or a pause starts over", () => {
+    const t = new KillTally();
+    expect(t.add("Hopbit", 3, 3, 0)).toEqual({ count: 1, xp: 3, coins: 3, again: false });
+    expect(t.add("Hopbit", 3, 3, 300)).toEqual({ count: 2, xp: 6, coins: 6, again: true });
+    expect(t.add("Hopbit", 2, 3, 600)).toEqual({ count: 3, xp: 8, coins: 9, again: true });
+    expect(feedPlain(feedText.felled("Hopbit", 8, 9, 3))).toBe("Hopbit ×3 down · +8 XP · +9 ◎");
+    expect(t.add("Sparkfly", 5, 1, 700)).toEqual({ count: 1, xp: 5, coins: 1, again: false });
+    expect(t.line).toBeNull();
+    expect(t.add("Sparkfly", 5, 1, 700 + TALLY_MS + 1).again).toBe(false);
+  });
+
+  it("the feed rewrites the tally's line in place and gives it its time again", () => {
+    const f = new FeedModel();
+    const line = f.add("kill", feedText.felled("Hopbit", 3, 3), 0)!;
+    f.add("join", feedText.joined({ name: "a" }), 100);
+    expect(f.update(line.id, feedText.felled("Hopbit", 6, 6, 2), 3000)).toBe(true);
+    expect(f.lines.map((l) => feedPlain(l.parts))).toEqual(["Hopbit ×2 down · +6 XP · +6 ◎", "a arrived"]);
+    expect(f.lines[0]!.rev).toBe(1);
+    f.tick(FEED_MS + 200); // the join line's time is up; the tally's was renewed at 3000
+    expect(f.lines.map((l) => l.id)).toEqual([line.id]);
+    f.tick(3000 + FEED_MS);
+    expect(f.update(line.id, feedText.felled("Hopbit", 9, 9, 3), 20_000)).toBe(false);
   });
 });

@@ -33,7 +33,7 @@ export class MomentsHud {
   private readonly banner: HTMLElement;
   private bannerEl: HTMLElement | null = null;
   private readonly feedBox: HTMLElement;
-  private readonly feedEls = new Map<number, HTMLElement>();
+  private readonly feedEls = new Map<number, { el: HTMLElement; rev: number }>();
   private readonly arriveBox: HTMLElement;
   private arriveTimer = 0;
   private readonly ring: HTMLElement;
@@ -134,8 +134,18 @@ export class MomentsHud {
 
   // ------------------------------------------------------------------------------------------ feed
 
-  feed(kind: FeedKind, parts: FeedPart[], now: number): void {
-    if (this.feedModel.add(kind, parts, now)) this.renderFeed();
+  /** Add a line; returns its id (for `feedUpdate`), or null when it repeated one just shown. */
+  feed(kind: FeedKind, parts: FeedPart[], now: number): number | null {
+    const line = this.feedModel.add(kind, parts, now);
+    if (line) this.renderFeed();
+    return line?.id ?? null;
+  }
+
+  /** Rewrite a line still on screen (a kill tally counting up). False when it has already gone. */
+  feedUpdate(id: number, parts: FeedPart[], now: number): boolean {
+    if (!this.feedModel.update(id, parts, now)) return false;
+    this.renderFeed();
+    return true;
   }
 
   private renderFeed() {
@@ -144,14 +154,27 @@ export class MomentsHud {
     for (const [id, e] of this.feedEls) {
       if (live.has(id)) continue;
       this.feedEls.delete(id);
-      e.classList.add("is-out");
-      window.setTimeout(() => e.remove(), 240);
+      e.el.classList.add("is-out");
+      window.setTimeout(() => e.el.remove(), 240);
     }
-    for (const l of lines) if (!this.feedEls.has(l.id)) this.feedEls.set(l.id, this.feedLine(l));
+    for (const l of lines) {
+      const have = this.feedEls.get(l.id);
+      if (!have) this.feedEls.set(l.id, { el: this.feedLine(l), rev: l.rev });
+      else if (have.rev !== l.rev) {
+        have.rev = l.rev;
+        this.fillLine(have.el, l);
+      }
+    }
   }
 
   private feedLine(l: FeedLine): HTMLElement {
     const row = el("div", `fl-feed__line is-${l.kind}`, this.feedBox);
+    this.fillLine(row, l);
+    return row;
+  }
+
+  private fillLine(row: HTMLElement, l: FeedLine) {
+    row.replaceChildren();
     row.title = feedPlain(l.parts);
     el("i", `li li-${FEED_ICON[l.kind]}`, row).setAttribute("aria-hidden", "true");
     const text = el("span", "fl-feed__text", row);
@@ -165,7 +188,6 @@ export class MomentsHud {
         }
       }
     }
-    return row;
   }
 
   // ------------------------------------------------------------------------------------------ combat
