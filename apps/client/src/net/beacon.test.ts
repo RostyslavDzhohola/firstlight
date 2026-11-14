@@ -171,6 +171,99 @@ describe("funnel beacon (#85)", () => {
     expect(funnelPosts().at(-1)).toEqual({ visit: "visitC", steps: ["pick"] });
   });
 
+  // Review round three, #4: on one page, Play acknowledged for visit A, A's token expires, World is
+  // made while the page has no live token, and the server answers the renewal with visit B: World
+  // was tagged A and dropped. A step made then waits for the renewal's answer and goes to it once.
+  describe("a step made while the visit is being replaced (review round three #4)", () => {
+    function rollover(answer: "new" | "same" | "fails-then-new") {
+      let clock = 1_000_000;
+      let issued = 0;
+      let renewals = 0;
+      const tok = (id: string) => `v1.${id}.p.${clock}.${clock}.mac`;
+      const t = env({ now: () => clock }, (url, body) => {
+        if (url.endsWith("/api/visit")) {
+          const prevId = typeof body.prev === "string" ? body.prev.split(".")[1] : null;
+          if (prevId) {
+            renewals++;
+            if (answer === "fails-then-new" && renewals <= 2) return null; // the network drops the renewal
+            if (answer === "same") return { status: 200, json: { visit: tok(prevId), exp: clock + 1000 } };
+          }
+          return { status: 200, json: { visit: tok(`visit${String.fromCharCode(65 + issued++)}`), exp: clock + 1000 } };
+        }
+        if (url.endsWith("/api/funnel")) return { status: 200, json: { done: body.steps.map((x: { step: string }) => x.step) } };
+        return { status: 204, json: null };
+      });
+      const posts = () => t.to("/api/funnel").flatMap((p) => p.body.steps.map((x: { step: string }) => `${p.body.visit.split(".")[1]}:${x.step}`));
+      return { t, posts, tick: (ms: number) => (clock += ms) };
+    }
+
+    it("the same page: Play acknowledged for A, A expires, World made, the server issues B: World goes to B once", async () => {
+      const { t, posts, tick } = rollover("new");
+      const b = new Beacon(t.e);
+      b.start();
+      b.step("play");
+      await t.drain();
+      expect(posts()).toEqual(["visitA:play"]);
+      tick(5000); // A's token is no longer live
+      b.step("world", 7);
+      b.step("world", 8); // once
+      await t.drain();
+      expect(posts()).toEqual(["visitA:play", "visitB:world"]);
+      expect(b.has("world")).toBe(true);
+      expect(b.has("play")).toBe(false); // B never pressed Play
+    });
+
+    it("the renewal resolves to the same visit: World goes to A once, Play is not sent again", async () => {
+      const { t, posts, tick } = rollover("same");
+      const b = new Beacon(t.e);
+      b.start();
+      b.step("play");
+      await t.drain();
+      tick(5000);
+      b.step("world", 7);
+      b.step("play"); // already A's
+      await t.drain();
+      expect(posts()).toEqual(["visitA:play", "visitA:world"]);
+      expect(b.has("play")).toBe(true);
+      expect(b.has("world")).toBe(true);
+    });
+
+    it("the renewal fails: World waits (also for the next page) and goes, once, to the visit the renewal finally gives", async () => {
+      const { t, posts, tick } = rollover("fails-then-new");
+      const b = new Beacon(t.e);
+      b.start();
+      b.step("play");
+      await t.drain();
+      tick(5000);
+      b.step("world", 7);
+      await t.drain(); // the first renewals are dropped; the retries get through
+      expect(posts()).toEqual(["visitA:play", "visitB:world"]);
+      // The next page has nothing left to send.
+      const next = new Beacon(t.e);
+      next.start();
+      await t.drain();
+      expect(posts()).toEqual(["visitA:play", "visitB:world"]);
+    });
+  });
+
+  it("a server with the funnel switched off (204): the page stops asking and keeps its steps; a later page sends them once it is on", async () => {
+    let on = false;
+    const t = env({}, (url, body) => (!on && (url.endsWith("/api/visit") || url.endsWith("/api/funnel")) ? { status: 204, json: null } : defaultServer()(url, body)));
+    const b = new Beacon(t.e);
+    b.start();
+    b.step("play");
+    await t.drain();
+    b.step("pick");
+    await t.drain();
+    expect(t.to("/api/visit")).toHaveLength(1); // asked once, no retries
+    expect(t.to("/api/funnel")).toHaveLength(0);
+    on = true;
+    const later = new Beacon(t.e);
+    later.start();
+    await t.drain();
+    expect(t.to("/api/funnel").flatMap((p) => p.body.steps.map((x: { step: string }) => x.step))).toEqual(["play", "pick"]);
+  });
+
   it("storage that throws: one visit per page, kept in memory (review #8)", async () => {
     const t = env({ store: { getItem: () => { throw new Error("denied"); }, setItem: () => { throw new Error("denied"); }, removeItem: () => { throw new Error("denied"); } } });
     const b = new Beacon(t.e);
