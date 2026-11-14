@@ -73,3 +73,27 @@ describe("per-starter movement", () => {
     expect(w.sprint).toBeCloseTo(6 * 0.6);
   });
 });
+
+describe("each body's pull (sky review 5)", () => {
+  /** Metres fallen in `s` seconds from 20 m over open ground on `body`. */
+  function fall(body: "arcadia" | "lumen", s: number): number {
+    const world = bodyWorld(body);
+    const w = new Walker(world);
+    const p = world.pads[0]!.pos;
+    const pl = Math.hypot(p[0], p[1], p[2]);
+    const g = world.onGround([p[0] / pl + 0.05, p[1] / pl, p[2] / pl + 0.05]);
+    const l = Math.hypot(g[0], g[1], g[2]);
+    const k = (l + 20) / l;
+    w.place(g[0] * k, g[1] * k, g[2] * k);
+    const before = Math.hypot(w.pos.x, w.pos.y, w.pos.z);
+    for (let t = 0; t < s - 1e-9; t += 0.05) w.step(0.05, null, 0);
+    return before - Math.hypot(w.pos.x, w.pos.y, w.pos.z);
+  }
+
+  it("falls a quarter as fast on Lumen as on Arcadia, like the client and the server's envelope", () => {
+    expect(fall("arcadia", 1)).toBeGreaterThan(8);
+    const moon = fall("lumen", 1);
+    expect(moon).toBeGreaterThan(2);
+    expect(moon).toBeLessThan(2.6); // ½ · 4.5 m/s² · 1 s²
+  });
+});

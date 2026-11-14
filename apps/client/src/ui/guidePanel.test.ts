@@ -49,3 +49,21 @@ describe("guide panels (sky review 2 and 3)", () => {
     expect(open.box.querySelector(".mission button.btn:not(.ghost)")).toBeNull();
   });
 });
+
+describe("the journal's Sites tab lists the moon's site too (sky review 4)", () => {
+  it("draws a row for every site it counts, the Quietfall Wreck included once found", async () => {
+    const { JournalPanel } = await import("./panels.ts");
+    const { WILD_SITES } = await import("@firstlight/shared/content/wildSites");
+    const { game } = fakeGame({ missions: [], sites: ["quietfall_wreck"] });
+    const j = new JournalPanel(game);
+    j.show("sites");
+    try {
+      expect(j.box.querySelectorAll(".body .row")).toHaveLength(WILD_SITES.length);
+      expect(j.box.textContent).toContain(`1 of ${WILD_SITES.length} sites found`);
+      expect(j.box.textContent).toContain("The Quietfall Wreck");
+      expect([...j.box.querySelectorAll(".body .cat")].map((c) => c.textContent)).toContain("lumen");
+    } finally {
+      j.close(false);
+    }
+  });
+});

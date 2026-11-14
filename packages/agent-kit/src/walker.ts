@@ -8,6 +8,7 @@ import { ANIM } from "@firstlight/shared/net/schema";
 import { emptyContact, resetContact, type PropContact, type XYZ } from "@firstlight/shared/planet/collide";
 import { deepWater, SWIM_FLOAT } from "@firstlight/shared/planet/water";
 import { BASE_MOVE, starterMove } from "@firstlight/shared/content/starters";
+import { BASE_GRAVITY, bodyGravity } from "@firstlight/shared/planet/bodies";
 import type { BodyWorld } from "./world.ts";
 import { cross, dot, len, norm, tangent, type V3 } from "./vec.ts";
 
@@ -20,7 +21,8 @@ export const WALK = {
   run: BASE_MOVE.run,
   sprint: BASE_MOVE.sprint,
   swim: 3,
-  gravity: 18,
+  /** The base pull; each body's own (Lumen's is a quarter) is `bodyGravity` of the walker's body. */
+  gravity: BASE_GRAVITY,
   dodgeSpeed: 15, // 4.5 m in 0.3 s
   dodgeTime: 0.3,
   /** A roll starts this much later than the server's cooldown allows, so clock skew can't refuse one. */
@@ -200,7 +202,7 @@ export class Walker {
       if (d) vH = [d[0] * s, d[1] * s, d[2] * s];
     }
     if (this.swimming) this.vUp = 0;
-    else this.vUp -= WALK.gravity * dt;
+    else this.vUp -= bodyGravity(this.world.body) * dt;
     const hSpeed0 = len(vH);
 
     let floorR = 0;

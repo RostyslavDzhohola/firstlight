@@ -4,7 +4,7 @@
 
 import { WILD_SITES } from "@firstlight/shared/content/wildSites";
 import "./quests.css";
-import { BODIES, type BodyId } from "@firstlight/shared";
+import { BODIES, BODY_IDS, type BodyId } from "@firstlight/shared";
 import { COSMETIC_BY_ID, COSMETIC_SLOTS, RARITY_STYLE, isExtraCosmetic, itemName } from "@firstlight/shared/content/items";
 import { MEDALS } from "@firstlight/shared/content/medals";
 import { GUIDES, MISSION_BY_ID, MISSIONS, missionGiver, missionsFrom, missionsOn, type MissionDef } from "@firstlight/shared/content/missions";
@@ -339,7 +339,8 @@ export class JournalPanel extends Panel {
   private renderSites(body: HTMLElement, you: YouPlus | null) {
     const found = new Set(you?.sites ?? []);
     el("p", "sub", body, `${found.size} of ${WILD_SITES.length} sites found this life. Each guards a chest; finding one is worth XP once per life.`);
-    for (const planet of ["arcadia", "hollowmere", "meridian"] as const) {
+    // Every body with sites, in body order (Lumen's Quietfall Wreck too: it counts in the total).
+    for (const planet of BODY_IDS.filter((b) => WILD_SITES.some((x) => x.body === b))) {
       el("div", "cat", body, planet);
       for (const s of WILD_SITES.filter((x) => x.body === planet)) {
         const row = el("div", "row", body);
