@@ -52,9 +52,13 @@ load-test bots keep their budgets; the journeys use normal limits.
 
 | # | Fix | Commit |
 |---|---|---|
-| 1 | | |
-| 2 | | |
-| 3 | | |
-| 4 | | |
-| 5 | | |
-| 6 | | |
+| 1 | Reports, housekeeping and the boot-time count run in a worker thread with its own connection to game.db (`db/funnelWorker.ts`, `db/funnelService.ts`); `/stats` awaits it with a timeout. One linear pass over `funnel_step` serves every window (the cohort join was quadratic). The fold writes each day's totals and a `meta:folded` watermark in one transaction, then deletes or marks rows in 200-row transactions with pauses (resumable, never double-counted). The budget never queries on the game's thread. The worker checkpoints the WAL; the game's connection doesn't while it runs (D-sec3-1). `funnel-stall.test.ts` fills 2.7 M rows and measures the game thread's CPU between 2 ms ticks through the day's first write, `/stats`, housekeeping and shutdown, free and locked: 2–14 ms (bound 50 ms); the old synchronous report on the same data took 15.7 s (D-sec3-2). | `c055c6e2`, `bb15ab7c`, `be5346ce` |
+| 2 | No request returns the dev key: Vite prints a link with the key in its URL fragment in the developer's terminal, and the page keeps it (`net/devKey.ts`); `/@firstlight/dev-key` and its guard are gone. A build holds neither key nor fetch (D-sec3-6). | `bf24dffd` |
+| 3 | `closeFunnel`: the timer's bounded, lock-free slices until one overall deadline (2 s); the rest counted lost and logged once; `Accounts.close()` async (D-sec3-4). Test: 5,000 rows under a held lock end at the deadline, one warning. | `bb15ab7c` |
+| 4 | A step made without a live token waits for the renewal's answer and joins that visit once (D-sec3-5). Tests: the review's same-instance probe, a renewal to the same id, a renewal that fails first. | `b06bd81b` |
+| 5 | `CREDENTIAL_KEYS`: an explicit list, never a longer word or a bare `code`/`key` (D-sec3-7). Tests: the review's two examples and more. | `51ede812` |
+| 6 | `urlEnd` finds the first `[` once (linear). Test: a URL ending in 4,000 `]` in under 2 ms. | `51ede812` |
+
+Also: `FUNNEL_ENABLED=0` switches the funnel off (204s, nothing stored, no timer or worker, `/stats` says so; the page takes 204 as "not now"; D-sec3-3), tests for both states (`bb15ab7c`, with the 204 handling in `b06bd81b`). The Privacy card's retention line was stale since D-sec2-6 (`be5346ce`).
+
+Left on the game's thread, each bounded: the queue's flush (at most one 200-row slice or 4 ms per turn, never a lock wait); the ingest's primary-key lookups and its scans of the queue (5,000 entries at most); the guest-to-account move inside the link transaction (one account's rows); posting jobs and receiving the report. Not the funnel's but seen while measuring: the admin check in front of `/stats` writes the account's last visit (`ensureAccount`) and waits up to 5 s for a lock like every other game write, and the daily `pruneSessionLog` and guest pruning still run on the game's thread.
