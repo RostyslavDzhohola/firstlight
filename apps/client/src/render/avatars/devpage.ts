@@ -1,4 +1,4 @@
-// Dev lineup (?avatars): every starter look (5 starters + 2 second looks) × 6 palettes on a lit stage, cycling through every clip.
+// Dev lineup (?avatars): every starter look (6 starters + 2 second looks; the Traveller stands in Ash's body) × 6 palettes on a lit stage, cycling through every clip.
 // Keys: ← / → previous/next clip · Space pause/resume cycling · W next weapon · S toggle sockets
 // · G toggle the sun's shadow. Drag to orbit, wheel to zoom. Add ?tier=low|medium|high|ultra as usual.
 // &warmcheck: run the game's warm-up (the avatar hook) first, then stand the line-up (every look ×

@@ -5,6 +5,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { FirstlightAgent, type Observation } from "@firstlight/agent-kit";
 import { AGENT_HEADER, AGENT_REFUSAL } from "@firstlight/shared/net/agents";
+import { STARTERS } from "@firstlight/shared/content/weapons";
 import { PROTOCOL_VERSION } from "@firstlight/shared/net/protocol";
 import type { Game } from "../src/app.ts";
 import { AGENT_RULES, agentSlotsPending, agentsOnline, resetAgentSlots } from "../src/world/agents.ts";
@@ -38,7 +39,7 @@ afterAll(async () => {
 
 /** An agent with a dev identity (`id` is its account), placed on `body` like the other tests' bots. */
 async function agent(id: string, body = "arcadia", starter: number | string = "unit7"): Promise<FirstlightAgent> {
-  grantTravel(id, body, { starter: typeof starter === "number" ? starter : ["hexwick", "ash", "kappa", "unit7", "ninja"].indexOf(starter) });
+  grantTravel(id, body, { starter: typeof starter === "number" ? starter : STARTERS.findIndex((s) => s.id === starter) });
   const a = new FirstlightAgent();
   agents.push(a);
   const r = await a.connect({ url, token: `dev:${id}:${id}`, body: body as never, starter });

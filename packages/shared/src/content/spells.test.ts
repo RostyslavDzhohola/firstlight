@@ -83,7 +83,7 @@ describe("spell catalogue (content.md §2.7)", () => {
 
   // Spell power (content §8.5): the starter's multiplier on spell damage and the ward's shell.
   it("spell power multiplies damage and the ward's shell, and nothing else", () => {
-    expect(STARTERS.map((_, i) => starterSpellPower(i))).toEqual([1.15, 0.9, 1, 0.95, 1.05]);
+    expect(STARTERS.map((_, i) => starterSpellPower(i))).toEqual([1.15, 0.9, 1, 0.95, 1.05, 1]); // the Traveller is the base
     expect(starterSpellPower(99)).toBe(1); // an unknown starter is the base
     expect(spellDamage(60, 6, 1.15)).toBeCloseTo(60 * 1.15 * 1.15);
     expect(spellDamage(60, 6)).toBeCloseTo(spellDamage(60, 6, 1));

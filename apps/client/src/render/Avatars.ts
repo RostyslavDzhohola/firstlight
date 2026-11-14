@@ -1,4 +1,4 @@
-// Player avatars: the five starters (Hexwick, Brother Ash, Kappa, Unit 7, Hinoko), each in one of its
+// Player avatars: the starters (Hexwick, Brother Ash, Kappa, Unit 7, Hinoko, and the Traveller in Ash's body), each in one of its
 // looks (STARTER_LOOKS: Kappa and Unit 7 have two), as skinned GLBs on one shared skeleton, animated by an AnimationMixer with crossfades driven by the ANIM state, tinted by
 // palette, with sockets for weapons (right hand) and cosmetics (head, face, back, belt).
 // Until the GLBs are loaded (or if they fail) the old capsule stands in, so the public API

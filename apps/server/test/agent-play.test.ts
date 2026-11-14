@@ -9,6 +9,7 @@ import type { Room } from "@colyseus/sdk";
 import { bodyWorld, FirstlightAgent, groundDistance } from "@firstlight/agent-kit";
 import { BODIES, type BodyId } from "@firstlight/shared";
 import { PF } from "@firstlight/shared/net/schema";
+import { STARTERS } from "@firstlight/shared/content/weapons";
 import type { Game } from "../src/app.ts";
 import { AGENT_RULES, resetAgentSlots } from "../src/world/agents.ts";
 import { GLEAMS } from "@firstlight/shared/content/gleams";
@@ -26,7 +27,6 @@ let url: string;
 const agents: FirstlightAgent[] = [];
 const rooms: Room[] = [];
 const SCALE = TRIAL_RULES.timeScale;
-const STARTERS = ["hexwick", "ash", "kappa", "unit7", "ninja"];
 const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
 let step = "";
 /** waitFor that says which wait ran out. */
@@ -90,7 +90,7 @@ afterAll(async () => {
 });
 
 async function agent(id: string, body: BodyId = "arcadia", starter = "unit7"): Promise<FirstlightAgent> {
-  grantTravel(id, body, { starter: STARTERS.indexOf(starter) });
+  grantTravel(id, body, { starter: STARTERS.findIndex((s) => s.id === starter) });
   const a = new FirstlightAgent();
   agents.push(a);
   expect((await a.connect({ url, token: `dev:${id}:${id}:admin`, body, starter })).ok).toBe(true);

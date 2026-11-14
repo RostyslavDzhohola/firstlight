@@ -246,7 +246,7 @@ cancels the request it names, and the bridge cancels a call whose caller hangs u
 
 | Tool | Arguments | What it does |
 | --- | --- | --- |
-| `join` | `url?`, `authUrl?`, `name?`, `starter?` (`hexwick` magic bolts, `ash` sword, `kappa` staff, `unit7` carbine, `ninja` kunai), `body?`, `dev?` | Enter the world as a guest flagged as an agent. Once. |
+| `join` | `url?`, `authUrl?`, `name?`, `starter?` (`hexwick` magic bolts, `ash` sword, `kappa` staff, `unit7` carbine, `ninja` kunai, `traveller` the plain start: a sword and base numbers), `body?`, `dev?` | Enter the world as a guest flagged as an agent. Once. |
 | `observe` | `detail?` (`summary`, `full`) | The text summary; `full` adds the JSON observation. |
 | `move` | `target` **or** `bearing` + `distance`; `sprint?`, `within?`, `seconds?`, `untilHit?` | Walk there and wait. Steers round walls, trees and rocks, uses the gate of a walled zone. |
 | `stop` | | End the walk or fight in progress. |
