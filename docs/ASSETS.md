@@ -233,7 +233,7 @@ Shipped outputs (2026-10-15 build):
 | `kappa.glb` | 209,024 | 14,939 tris, 65 joints, 1 skinned mesh |
 | `unit7.glb` | 210,952 | 13,927 tris, 65 joints, 1 skinned mesh |
 | `ninja.glb` | 225,032 | 15,070 tris, 65 joints, 1 skinned mesh |
-| `starters_anims.glb` | 1,134,936 | the bare skeleton and 26 clips (unchanged since 2026-10-11) |
+| `starters_anims.glb` | 542,516 | the bare skeleton and 26 clips; since 2026-11-14 only the channels the client plays (rotations, the pelvis' translation: `chars3d/strip_clips.py`, D-perf-1) |
 | `<starter>_albedo.webp`, `<starter>_normal.webp` | ~190–285 KB each | 1024² (512² `_512` sets ~85–110 KB) |
 
 ## Horse (lane/horses)

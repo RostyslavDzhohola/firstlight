@@ -70,8 +70,10 @@ UBC="$(find "$SRC/ubc/x" -path '*Godot - UE*' -name 'Superhero_Male_FullBody.glt
   --ual1 "$UAL1" --ual2 "$UAL2" --out "$WORK/raw/starters_anims.glb" | grep -E "^ANIMS"
 
 mkdir -p "$OUT_DEV" "$OUT_SRC"
+python3 -I "$HERE/../chars3d/strip_clips.py" "$WORK/raw/starters_anims.glb" "$WORK/raw/starters_anims.game.glb"
 for f in hexwick ash kappa unit7 starters_anims; do
-  $GLTF optimize "$WORK/raw/$f.glb" "$OUT_DEV/$f.glb" --compress meshopt --simplify false --flatten false \
+  src="$WORK/raw/$f.glb"; [ "$f" = starters_anims ] && src="$WORK/raw/starters_anims.game.glb"
+  $GLTF optimize "$src" "$OUT_DEV/$f.glb" --compress meshopt --simplify false --flatten false \
     --join false --instance false --palette false --texture-compress false --prune-attributes false \
     --resample true --weld false >/dev/null
 done

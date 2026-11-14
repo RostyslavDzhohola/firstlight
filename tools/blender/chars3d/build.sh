@@ -97,8 +97,11 @@ done
 [ -z "${CHARS// }" ] || python3 -I "$HERE/webp.py" "$WORK/raw" "$WORK/stage" $CHARS
 [ -z "${LOOKS// }" ] || python3 -I "$HERE/webp.py" --albedo "$WORK/raw" "$WORK/stage" $LOOKS # flat normals: the client's
 python3 -I "$HERE/webp.py" --ui "$WORK/ui" "$WORK/stage"
+# the clips without the channels the client drops (strip_clips.py); renders above used the full set
+python3 -I "$HERE/strip_clips.py" "$WORK/raw/starters_anims.glb" "$WORK/raw/starters_anims.game.glb"
 for f in $ALL starters_anims; do
-  $GLTF optimize "$WORK/raw/$f.glb" "$WORK/stage/$f.glb" --compress meshopt --simplify false --flatten false \
+  src="$WORK/raw/$f.glb"; [ "$f" = starters_anims ] && src="$WORK/raw/starters_anims.game.glb"
+  $GLTF optimize "$src" "$WORK/stage/$f.glb" --compress meshopt --simplify false --flatten false \
     --join false --instance false --palette false --texture-compress false --prune-attributes false \
     --resample true --weld false >/dev/null
 done
