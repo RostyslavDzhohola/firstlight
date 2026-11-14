@@ -494,7 +494,7 @@ export class Player {
   async walkTo(target: (s: Snap) => Target | null, arrived: (s: Snap) => boolean, opts: { timeoutMs?: number; sprint?: boolean; avoidPortal?: boolean } = {}) {
     const until = Date.now() + (opts.timeoutMs ?? 30_000);
     const trail: number[][] = [];
-    let side = "KeyD";
+    let stuck = 0;
     while (Date.now() < until) {
       const s = await this.snap();
       if (arrived(s)) return true;
@@ -509,17 +509,31 @@ export class Player {
         const a = trail[trail.length - 4]!;
         const b = s.player!.pos;
         if (Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!) < 1) {
-          // Still stuck (a slope, a creature, a corner the rays missed): back off, side-step, hop.
-          await this.hold(["KeyS"], 400);
-          await this.hold([side], 900);
-          await this.hold([side, "KeyW"], 700);
-          await this.tap("Space");
-          side = side === "KeyD" ? "KeyA" : "KeyD";
+          await this.unstick(t.bearing, ++stuck);
           trail.length = 0;
         }
       }
     }
     return arrived(await this.snap());
+  }
+
+  /**
+   * Stuck on the way to `want` (degrees from the camera; `attempt` counts from 1 per walk): a low
+   * fence or wall the clearance rays see over, a slope, a creature. Back off, turn well off the blocked
+   * line to one side (the most open of 70–130° there, by the rays), sprint round it and hop. The side
+   * stays the same for two attempts before switching, so a long wall (an outpost's) is walked round
+   * instead of bounced along by alternating side-steps. Returns the heading taken.
+   */
+  async unstick(want: number, attempt: number): Promise<number> {
+    if (attempt > 1 && attempt % 2 === 1) this.lastSide = -this.lastSide;
+    await this.hold(["KeyS"], 500);
+    const offs = [70, 90, 110, 130].map((o) => wrap180(want + this.lastSide * o));
+    const got = (await this.clearance(offs, 12)) ?? [];
+    const heading = got.find((c) => c.clear >= 6)?.bearing ?? offs[1]!;
+    await this.turn(heading);
+    await this.hold(["ShiftLeft", "KeyW"], 1400);
+    await this.tap("Space");
+    return heading;
   }
 
   /**

@@ -16,6 +16,7 @@ import { missionTarget, type PointerNpc, type PointerTarget } from "./missionTar
 import type { ClientSystem } from "./systems.ts";
 import { objectiveObject, trialSeen } from "./trialState.ts";
 import { missionTrack } from "./missionTrack.ts";
+import { guideToVisit } from "./guideMarker.ts";
 import { compassGuides, type CompassMarker } from "../social/compass.ts";
 import { missionColour } from "../ui/missionColour.ts";
 
@@ -38,8 +39,14 @@ class MissionPointer implements ClientSystem {
   private missionId = "";
   private missionName = "";
   private pickedAt = -Infinity;
+  /** The planet's guide, while nothing tracked points anywhere here and they still have missions to give (guideMarker.ts). */
+  private guide: { label: string; pos: [number, number, number] } | null = null;
   private readonly compassGuide = (): CompassMarker[] =>
-    this.target && this.missionId ? [{ key: "mission", label: this.missionName, colour: missionColour(this.missionId), pos: this.target.at, kind: "mission" }] : [];
+    this.target && this.missionId
+      ? [{ key: "mission", label: this.missionName, colour: missionColour(this.missionId), pos: this.target.at, kind: "mission" }]
+      : this.guide
+        ? [{ key: "guide", label: this.guide.label, colour: "#ffd27a", pos: this.guide.pos, kind: "guide" }]
+        : [];
   private last = { text: "", key: "" };
   private boxSize: { w: number; h: number } | null = null;
 
@@ -79,6 +86,9 @@ class MissionPointer implements ClientSystem {
       const hunt = huntTargets();
       const eligible = hunt && open && hunt.id === open.id ? hunt.npcs : null;
       this.target = def ? (def.race || def.defend || def.collect ? this.objective(def, open!.counts, [p.x, p.y, p.z]) : missionTarget(def, g.bodyId, [p.x, p.y, p.z], npcs, (x, y, z) => terrain.groundHeight(x, y, z), { eligible, counts: open!.counts })) : null;
+      const visit = guideToVisit(g.bodyId, g.hud.you?.missions ?? [], !!this.target);
+      const gdef = visit ? WORLD_OBJECT_BY_ID.get(visit.id) : undefined;
+      this.guide = visit && gdef ? { label: `${visit.name} · missions`, pos: objectPos(gdef, (x, y, z) => terrain.groundHeight(x, y, z)) } : null;
     }
     const t = this.target;
     if (!t || g.photo?.active) return this.hide();
