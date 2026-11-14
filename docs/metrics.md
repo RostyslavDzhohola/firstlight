@@ -106,7 +106,7 @@ gives each metric one verdict:
 
 | verdict | when | exit |
 |---|---|---:|
-| `better` / `worse` / `same` | moved past `max(noise × |before|, floor)` (the larger noise of the two runs; gates: any change) | `worse`: 1 |
+| `better` / `worse` / `same` | moved past `max(noise × \|before\|, floor)` (the larger noise of the two runs; gates: any change) | `worse`: 1 |
 | `missing` | in the before run, absent from a group the after run measured: a measurement failed | 1 |
 | `incompatible` | same id, different unit, direction or group | 1 |
 | `noisy` | a load-sensitive metric (noise over 2 %) where either run was busy and they are not one session (both busy, groups started within `--session-minutes`, default 30), or the machines differ | 3 |
