@@ -10,7 +10,7 @@ describe("the guide on the compass", () => {
     expect(guideToVisit("portus", [], false)).toBeNull();
   });
   it("stops once every mission the guide gives is taken or done", () => {
-    const all = ["A1", "A2", "A3", "A4"].map((id) => ({ id, done: id === "A1" }));
+    const all = ["A1", "A2", "A3", "A4", "L1"].map((id) => ({ id, done: id === "A1" }));
     expect(guideToVisit("arcadia", all, false)).toBeNull();
     expect(guideToVisit("arcadia", all.slice(1), false)).not.toBeNull();
   });

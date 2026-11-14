@@ -1,7 +1,7 @@
 // The home page's pure parts (6a): the worlds list, the progress card, the leaderboard rows and the
 // text lines, built from shared content and the /api/home and /api/account/me answers. No DOM.
 
-import { BODIES, BODY_IDS, type BodyId } from "@firstlight/shared/planet/bodies";
+import { BODIES, BODY_IDS, PLANET_IDS, type BodyId } from "@firstlight/shared/planet/bodies";
 import { BOSS_BY_BODY, npcDef, PORTUS_WILDS } from "@firstlight/shared/content/npcs";
 import { MEDAL_BY_ID, MEDALS } from "@firstlight/shared/content/medals";
 import { LEVEL_CAP, xpAtLevel, xpToNext } from "@firstlight/shared/content/progression";
@@ -280,10 +280,12 @@ function allNewsTiles(hall: readonly HallLine[] | null): NewsTile[] {
   const levels = SPELLS.map((s) => s.level);
   const trials = GLEAMS.trials.map((id) => MISSION_BY_ID.get(id)!);
   const traits = (i: number) => starterStats(i).traits[0] ?? "";
-  const planets = [...new Set(WILD_SITES.map((s) => s.body))];
+  // The planets' sites only: the one on the moon is for the player to find.
+  const sites = WILD_SITES.filter((s) => (PLANET_IDS as readonly string[]).includes(s.body));
+  const planets = [...new Set(sites.map((s) => s.body))];
   return [
     {
-      id: "sites", title: `${numberWord(WILD_SITES.length)} wild places to find`,
+      id: "sites", title: `${numberWord(sites.length)} wild places to find`,
       text: `Off the paths on ${planets.map((b) => BODIES[b].name).join(", ").replace(/, ([^,]*)$/, " and $1")}: watchtowers, ruins, a shrine, a cave and a landmark you can see from far away. Each has a guardian and a chest that opens when it falls, and finding one pays XP.`,
       icons: planets.map((b) => ({ sprite: "chest", label: BODIES[b].name })),
       state: null,
