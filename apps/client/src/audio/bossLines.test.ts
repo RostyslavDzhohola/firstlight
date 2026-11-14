@@ -1,15 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { bossLineUrl } from "./bossLines.ts";
+import { BOSS_DEFS } from "@firstlight/shared/content/npcs";
+import { spokenId } from "@firstlight/shared/content/dialogue";
+import { bossTrigger } from "./bossLines.ts";
+import { hasVoice } from "./speech.ts";
 
-describe("boss line URLs", () => {
-  it("join the voice base and the clip name once (no doubled /v/ segment)", () => {
-    const base = "https://firstlight-assets.example.workers.dev/v/voice-1";
-    expect(bossLineUrl("tidewrath", "engage", base)).toBe(`${base}/tidewrath-engage.mp3`);
-    expect(bossLineUrl("receiver", "defeat", `${base}/`)).toBe(`${base}/receiver-defeat.mp3`);
-    expect(bossLineUrl("hollowking", "phase2", base).match(/\/v\//g)).toHaveLength(1);
-  });
-
-  it("default to the asset Worker's voice set, which production serves (the clips are never in the repo)", () => {
-    expect(bossLineUrl("tidewrath", "phase2")).toBe("https://firstlight-assets.rosty-build.workers.dev/v/voice-1/tidewrath-phase2.mp3");
+describe("boss lines", () => {
+  it("every line the server sends maps to its trigger and has a recording made from that text", () => {
+    for (const b of BOSS_DEFS) {
+      for (const t of ["engage", "phase2", "defeat"] as const) {
+        expect(bossTrigger(b.id, b.voice[t]), `${b.id} ${t}`).toBe(t);
+        expect(hasVoice(spokenId.boss(b.id, t)), `${b.id} ${t}`).toBe(true);
+      }
+    }
+    expect(bossTrigger("tidewrath", "Something else entirely.")).toBeNull();
   });
 });

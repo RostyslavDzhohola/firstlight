@@ -25,6 +25,8 @@ import { saveStatus } from "../net/auth.ts";
 import { attackDeniedText, holsteredText, immuneText, NoticeGate } from "./notices.ts";
 import { heavyName, heavyRelease, SpecialCooldown } from "./specialCooldown.ts";
 import { bannerCovers } from "../ui/moments.ts";
+import { say, subtitleMs } from "../audio/speech.ts";
+import { uiSettings } from "../ui/uiSettings.ts";
 
 const NUDGED_KEY = "fl.saveNudged";
 const _v = new THREE.Vector3();
@@ -161,6 +163,7 @@ export class CombatClient {
         const s = this.toScreen(_v.set(m.x, m.y, m.z), 1.9);
         if (s) this.hud.damageNumber(s.x, s.y, m.amount, m.weak);
       }
+      if (m.attacker === me || m.target === me) this.game.audio.fight(); // the music's combat layer
       if (m.target === me) {
         if (m.kb && (m.kx || m.ky || m.kz)) this.game.player.knockback(new THREE.Vector3(m.kx, m.ky, m.kz), m.kb);
         this.hud.hurt();
@@ -213,16 +216,19 @@ export class CombatClient {
       const slot = partyState().members.findIndex((x) => x.sessionId === m.by) + 1;
       this.hud.bubble(s.x, s.y, PHRASES[m.id] ?? "", { name: speaker?.name, slot: slot > 0 && slot <= 4 ? (slot as 1 | 2 | 3 | 4) : undefined });
     });
-    // A resident's line (#82): a bubble over it for everyone near, held long enough to read, and a
-    // subtitle as well when it answers you.
-    room.onMessage("speech", (m: { by: string; text: string; to?: string }) => {
+    // A resident's line (#82): a bubble over it for everyone near, held long enough to read, a
+    // subtitle as well when it answers you, and its recording from where it stands (lines without
+    // slots are spoken: audio/speech.ts).
+    room.onMessage("speech", (m: { by: string; text: string; to?: string; line?: string }) => {
       if (isBlocked(m.by)) return;
       const speaker = (room.state as any).players?.get(m.by);
       if (!speaker) return;
-      const ms = Math.min(9000, 2500 + m.text.length * 45);
-      const s = this.toScreen(new THREE.Vector3(speaker.x, speaker.y, speaker.z), 2.3);
+      const at = new THREE.Vector3(speaker.x, speaker.y, speaker.z);
+      const ms = m.line ? subtitleMs(m.line, m.text) : Math.min(9000, 2500 + m.text.length * 45);
+      const s = this.toScreen(at.clone(), 2.3);
       if (s) this.hud.bubble(s.x, s.y, m.text, { name: speaker.name, ms });
-      if (m.to === me) this.hud.subtitle(String(speaker.name).replace(/_/g, " "), m.text, ms);
+      if (m.to === me && uiSettings.get().subtitles) this.hud.subtitle(String(speaker.name).replace(/_/g, " "), m.text, ms);
+      if (m.line) say(this.game.audio, m.line, { name: null, at: at.addScaledVector(at.clone().normalize(), 1.6), key: m.by }); // from its head
     });
     room.onMessage("death", (m: { victim: string; killer: string | null; killerName: string; aliveMs: number; level: number; pileId: string }) => {
       if (m.victim !== me) return;

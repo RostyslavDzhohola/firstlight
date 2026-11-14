@@ -28,6 +28,8 @@ import { uiSettings } from "../ui/uiSettings.ts";
 import { worldPrompt } from "./worldPrompt.ts";
 import { pickInteract } from "./interactTarget.ts";
 import type { ClientSystem } from "./systems.ts";
+import { CHARACTER_BY_OBJECT, SPOKEN_BY_ID } from "@firstlight/shared/content/dialogue";
+import { NpcTalk, type Talker } from "./npcTalk.ts";
 
 /** Survives body changes: the latest Hall of Firsts and a staged scene waiting for travel to finish. */
 let hall: HallLine[] = [];
@@ -70,6 +72,9 @@ export class QuestClient implements ClientSystem {
   /** The server hears which mission is tracked (#69): its hunt targets follow it. */
   private readonly offTrack: () => void;
   private readonly trackSync: TrackSync;
+  /** The guides, Sela and the shopkeepers talk (npcTalk.ts). */
+  private readonly talk: NpcTalk;
+  private readonly talkers: Talker[];
 
   constructor(game: Game) {
     this.game = game;
@@ -90,6 +95,13 @@ export class QuestClient implements ClientSystem {
       if (!Panel.current) this.journal.show("missions");
     });
     this.console = new AdminConsole(game);
+    this.talk = new NpcTalk(game);
+    this.talkers = this.interactables.filter((o) => CHARACTER_BY_OBJECT.has(o.def.id)).map((o) => ({ id: o.def.id, pos: o.pos }));
+    for (const p of [this.shop, this.guide, this.curator]) {
+      if (!p) continue;
+      p.onClosed = () => this.talk.farewell();
+      p.onAccept = (id) => this.talk.offer(id);
+    }
     window.addEventListener("keydown", this.onKey);
 
     const room = game.net.room!;
@@ -183,12 +195,17 @@ export class QuestClient implements ClientSystem {
   }
 
   private use(o: WorldObjectDef) {
-    if (o.look === "keeper") {
-      const spot = SHOP_SPOT_BY_ID.get(o.id);
-      return spot ? this.shop.openAt(spot) : this.shop.open();
+    if (o.look === "keeper" || o.look === "guide" || o.look === "curator") {
+      // The character greets you as their panel opens (game/npcTalk.ts); the guide's panel quotes it.
+      const pos = this.interactables.find((x) => x.def === o)?.pos;
+      const said = pos ? this.talk.greet({ id: o.id, pos }) : null;
+      if (o.look === "keeper") {
+        const spot = SHOP_SPOT_BY_ID.get(o.id);
+        return spot ? this.shop.openAt(spot) : this.shop.open();
+      }
+      if (o.look === "guide" && this.guide) this.guide.line = (said && SPOKEN_BY_ID.get(said)?.text) || null;
+      return o.look === "guide" ? this.guide?.open() : this.curator?.open();
     }
-    if (o.look === "guide") return this.guide?.open();
-    if (o.look === "curator") return this.curator?.open();
     if (o.look === "lantern" && o.egg === "E4") this.world.lightLantern(o.id);
     this.game.net.room?.send("interact", { target: o.id });
   }
@@ -198,6 +215,7 @@ export class QuestClient implements ClientSystem {
     const g = this.game;
     const you = g.hud.you;
     const active = new Set((you?.missions ?? []).filter((m) => !m.done).map((m) => m.id));
+    this.talk.update(dt, this.talkers, !!Panel.current || !!g.combat.deadUntilRespawn);
     this.world.update(dt, { activeMissions: active, cosmeticsExtras: !!you?.cosmeticsExtras, gleams: you?.gleamVault ? 0 : gleamsWon(you?.missions ?? []) });
     const trial = trialSeen()?.msg;
     this.tracker.update(you, this.game.bodyId, trial && (trial.state === "running" || trial.state === "paused") ? trial.id : null);

@@ -31,8 +31,8 @@ const TOGGLES: [Feature, string][] = [
 ];
 
 const TIER_LABEL: Record<Tier | "auto", string> = { auto: "Auto", low: "Low", medium: "Medium", high: "High", ultra: "Ultra" };
-// The Voice slider goes with voice chat (hidden in this build, D-controls-1).
-const VOLUMES: [keyof Game["audio"]["volumes"], string][] = [["master", "Master"], ["music", "Music"], ["sfx", "Effects"], ...(features.voice ? [["voice", "Voice"] as [keyof Game["audio"]["volumes"], string]] : [])];
+// "Voices" is the characters' spoken lines; the Voice chat slider goes with voice chat (hidden in this build, D-controls-1).
+const VOLUMES: [keyof Game["audio"]["volumes"], string][] = [["master", "Master"], ["music", "Music"], ["sfx", "Effects"], ["speech", "Voices"], ...(features.voice ? [["voice", "Voice chat"] as [keyof Game["audio"]["volumes"], string]] : [])];
 
 function range(parent: HTMLElement, id: string, min: number, max: number, step: number, value: number): HTMLInputElement {
   const r = el("input", "fl-range", parent);
@@ -277,6 +277,8 @@ export function openSettings(game: Game, host: HTMLElement, back: () => void, es
       flashSaved();
     });
   }
+  const subs = toggle(mid, "fl-line", "Subtitles", "What characters say, at the bottom of the screen", ui.subtitles);
+  subs.onchange = () => setUi({ subtitles: subs.checked });
 
   el("hr", "", mid);
   const comfort = el("h2", "", mid);

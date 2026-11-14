@@ -7,8 +7,6 @@ const params = new URLSearchParams(typeof location === "undefined" ? "" : locati
 export const config = {
   apiUrl: (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:2567",
   assetBase: (import.meta.env.VITE_ASSET_BASE as string | undefined) ?? "/assets-dev",
-  /** Boss voice lines (ElevenLabs, never in git) live on the asset Worker as a versioned set. */
-  voiceBase: (import.meta.env.VITE_VOICE_BASE as string | undefined) ?? "https://firstlight-assets.rosty-build.workers.dev/v/voice-1",
   /** Sound-effect samples (ElevenLabs, never in git): a versioned set with a manifest on the asset Worker. */
   sfxBase: (import.meta.env.VITE_SFX_BASE as string | undefined) ?? "https://firstlight-assets.rosty-build.workers.dev/v/sfx-1",
   publicRepo: import.meta.env.VITE_PUBLIC_REPO === "true",

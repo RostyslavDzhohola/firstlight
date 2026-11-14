@@ -132,6 +132,8 @@ const BAKE_MATCH_COS_ZERO = Math.cos(1.0);
 
 export interface EnvAudio {
   setWeather(rain: number, wind: number): void;
+  /** The night factor, for the music's night variant (optional: older callers don't have it). */
+  setNight?(night: number): void;
   thunder(delaySec: number, distance: number): void;
 }
 
@@ -493,6 +495,7 @@ export class Environment {
     if (wl.dust) this.rainColor.copy(atmo.fogTint.value).multiplyScalar(lerp(1.1, 0.18, night));
     else this.rainColor.copy(RAIN_DAY).lerp(RAIN_NIGHT, night).multiplyScalar(1 + flash * 3);
     this.audio?.setWeather(wl.rainSound * a, wl.windSound * a);
+    this.audio?.setNight?.(night);
   }
 
   /** No frames are running (loading, travel, menus that stop the loop): the weather bed goes quiet. */

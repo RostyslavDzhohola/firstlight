@@ -1,5 +1,5 @@
 // Player settings that are not graphics (graphics live in render/quality.ts, volumes in audio/Audio.ts,
-// the voice opt-in in voice/VoiceClient.ts): mouse, field of view, comfort, damage numbers, the
+// the voice opt-in in voice/VoiceClient.ts): mouse, field of view, comfort, damage numbers, subtitles, the
 // map (minimap on/off and turning, the map's north-up or player-up) and the missions panel (#3).
 // Stored in localStorage as `fl.ui.v1`; every value is validated on load.
 
@@ -39,6 +39,8 @@ export interface UiSettings {
   view: "third" | "first";
   /** Field of view in first person (degrees, vertical like `fov`). */
   fovFirst: number;
+  /** Subtitles for what characters say (bosses, guides, shopkeepers, residents answering you). */
+  subtitles: boolean;
 }
 
 export const UI_DEFAULTS: Readonly<UiSettings> = Object.freeze({
@@ -62,6 +64,7 @@ export const UI_DEFAULTS: Readonly<UiSettings> = Object.freeze({
   padRumble: true,
   view: "third",
   fovFirst: 80,
+  subtitles: true,
 }) as UiSettings;
 
 export const SENSITIVITY_RANGE = [0.2, 3] as const;
@@ -102,6 +105,7 @@ export function normalizeUiSettings(raw: unknown): UiSettings {
     padRumble: bool(r.padRumble, d.padRumble),
     view: r.view === "first" || r.view === "third" ? r.view : d.view,
     fovFirst: Math.round(clamp(r.fovFirst, FOV_RANGE, d.fovFirst)),
+    subtitles: bool(r.subtitles, d.subtitles),
   };
 }
 

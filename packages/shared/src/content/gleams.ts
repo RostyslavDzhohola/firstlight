@@ -33,3 +33,8 @@ export const GLEAMS = {
 export function gleamsWon(missions: readonly { id: string; done: boolean }[]): number {
   return GLEAMS.trials.filter((t) => missions.some((m) => m.id === t && m.done)).length;
 }
+
+/** Which of Sela's lines fits: the panel shows it and she says it when you walk up. */
+export function selaLine(won: number, opened: boolean): keyof typeof GLEAMS.lines {
+  return opened ? "opened" : won >= GLEAMS.trials.length ? "all" : won > 0 ? "some" : "none";
+}

@@ -109,7 +109,7 @@ describe("talking to a resident", () => {
       await wait(() => me.heard.filter((h) => h.toMe).length >= 2, 15_000, 'me.heard.filter((h) => h.toMe).length >= 2');
       const [greet, doing] = me.heard.filter((h) => h.toMe);
       expect(greet!.line).toMatch(/^marlo\.greet\./);
-      expect(greet!.text).toContain("PipRowan");
+      expect(greet!.text).toBe(LINE_BY_ID.get(greet!.line)!.text); // greetings carry no name: they are spoken aloud
       expect(doing!.line).toMatch(/^marlo\.doing\./);
       // Help!: where to go for a level 1 (the portal to Arcadia), then a tip for that level.
       await me.agent.phrase("Help!");

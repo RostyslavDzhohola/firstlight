@@ -1,0 +1,302 @@
+{
+ "model": "Kokoro-82M v1.0 (kokoro-onnx 0.6.1, kokoro-v1.0.onnx fp32)",
+ "kbps": 24,
+ "lines": {
+  "boss.hollow_king.engage": {
+   "k": "11zforv",
+   "ms": 3217
+  },
+  "boss.the_receiver.engage": {
+   "k": "1sot5z8",
+   "ms": 2383
+  },
+  "boss.tidewrath.engage": {
+   "k": "no2vje",
+   "ms": 3222
+  },
+  "brindle.greet.1": {
+   "k": "e7zpdk",
+   "ms": 4004
+  },
+  "juno.farewell.1": {
+   "k": "nmbm8m",
+   "ms": 2466
+  },
+  "juno.farewell.2": {
+   "k": "l0mv2i",
+   "ms": 3049
+  },
+  "juno.greet.1": {
+   "k": "1s1xo65",
+   "ms": 4385
+  },
+  "juno.greet.2": {
+   "k": "p9ll2j",
+   "ms": 3563
+  },
+  "juno.idle.1": {
+   "k": "rxrlux",
+   "ms": 5052
+  },
+  "lark.farewell.1": {
+   "k": "ihcqys",
+   "ms": 3285
+  },
+  "lark.farewell.2": {
+   "k": "1qz1iiq",
+   "ms": 2354
+  },
+  "lark.greet.0": {
+   "k": "1hoxgjm",
+   "ms": 2427
+  },
+  "lark.greet.1": {
+   "k": "u9pmdt",
+   "ms": 3982
+  },
+  "lark.greet.2": {
+   "k": "1kn8nja",
+   "ms": 3399
+  },
+  "lark.idle.1": {
+   "k": "ecos4g",
+   "ms": 2665
+  },
+  "lark.idle.2": {
+   "k": "1wsd7ci",
+   "ms": 4651
+  },
+  "lark.idle.3": {
+   "k": "1iv83mk",
+   "ms": 5717
+  },
+  "mabry.farewell.1": {
+   "k": "m5o67f",
+   "ms": 4090
+  },
+  "mabry.farewell.2": {
+   "k": "tfdlzq",
+   "ms": 3669
+  },
+  "mabry.greet.0": {
+   "k": "1mp4mce",
+   "ms": 5366
+  },
+  "mabry.greet.1": {
+   "k": "skk762",
+   "ms": 3785
+  },
+  "mabry.greet.2": {
+   "k": "s20uh2",
+   "ms": 4523
+  },
+  "mabry.idle.1": {
+   "k": "1tm2d8a",
+   "ms": 6078
+  },
+  "mabry.idle.2": {
+   "k": "fbmi63",
+   "ms": 3563
+  },
+  "mabry.idle.3": {
+   "k": "19rfjmc",
+   "ms": 2859
+  },
+  "mission.A1": {
+   "k": "13h67o1",
+   "ms": 5858
+  },
+  "mission.A2": {
+   "k": "1rity55",
+   "ms": 4610
+  },
+  "mission.A3": {
+   "k": "1q1p8k6",
+   "ms": 4757
+  },
+  "mission.A4": {
+   "k": "wucrg2",
+   "ms": 5672
+  },
+  "mission.H1": {
+   "k": "1um2bk9",
+   "ms": 4693
+  },
+  "mission.H2": {
+   "k": "1s2q1cp",
+   "ms": 7829
+  },
+  "mission.H3": {
+   "k": "vywr5n",
+   "ms": 7444
+  },
+  "mission.H4": {
+   "k": "14picml",
+   "ms": 6080
+  },
+  "mission.M1": {
+   "k": "kzmgio",
+   "ms": 3224
+  },
+  "mission.M2": {
+   "k": "1pn8rax",
+   "ms": 5223
+  },
+  "mission.M3": {
+   "k": "avil4z",
+   "ms": 4041
+  },
+  "mission.T1": {
+   "k": "1otx8l5",
+   "ms": 6208
+  },
+  "mission.T2": {
+   "k": "u1hxz9",
+   "ms": 5397
+  },
+  "mission.T3": {
+   "k": "1w52l0b",
+   "ms": 5726
+  },
+  "nell.farewell.1": {
+   "k": "1xh9hzm",
+   "ms": 2965
+  },
+  "nell.farewell.2": {
+   "k": "kvf4fb",
+   "ms": 2401
+  },
+  "nell.greet.1": {
+   "k": "11gmaan",
+   "ms": 4757
+  },
+  "nell.greet.2": {
+   "k": "1v3e0cy",
+   "ms": 7781
+  },
+  "nell.idle.1": {
+   "k": "51nf0a",
+   "ms": 8341
+  },
+  "odile.farewell.1": {
+   "k": "1uzxbmo",
+   "ms": 3200
+  },
+  "odile.farewell.2": {
+   "k": "1km18y0",
+   "ms": 4245
+  },
+  "odile.greet.0": {
+   "k": "8is8bj",
+   "ms": 3728
+  },
+  "odile.greet.1": {
+   "k": "1yfuxv5",
+   "ms": 4139
+  },
+  "odile.greet.2": {
+   "k": "5ukpw7",
+   "ms": 4117
+  },
+  "odile.idle.1": {
+   "k": "1j5eavd",
+   "ms": 3792
+  },
+  "odile.idle.2": {
+   "k": "18koozm",
+   "ms": 4990
+  },
+  "odile.idle.3": {
+   "k": "y2irjn",
+   "ms": 3092
+  },
+  "ostrow.farewell.1": {
+   "k": "1w910vp",
+   "ms": 3925
+  },
+  "ostrow.farewell.2": {
+   "k": "uh51s8",
+   "ms": 3200
+  },
+  "ostrow.greet.1": {
+   "k": "1ha2tn0",
+   "ms": 4181
+  },
+  "ostrow.greet.2": {
+   "k": "1odoxt5",
+   "ms": 3648
+  },
+  "ostrow.idle.1": {
+   "k": "1q707rr",
+   "ms": 3776
+  },
+  "pell.farewell.1": {
+   "k": "ergtus",
+   "ms": 3136
+  },
+  "pell.farewell.2": {
+   "k": "6spg1w",
+   "ms": 2795
+  },
+  "pell.greet.1": {
+   "k": "1ernrxf",
+   "ms": 3861
+  },
+  "pell.greet.2": {
+   "k": "2sn6fw",
+   "ms": 3627
+  },
+  "pell.idle.1": {
+   "k": "bbtbkc",
+   "ms": 5269
+  },
+  "rook.farewell.1": {
+   "k": "1ncv5zk",
+   "ms": 3568
+  },
+  "rook.farewell.2": {
+   "k": "1xuwjd8",
+   "ms": 4357
+  },
+  "rook.greet.0": {
+   "k": "1o5elj4",
+   "ms": 4271
+  },
+  "rook.greet.1": {
+   "k": "4kvxgn",
+   "ms": 5032
+  },
+  "rook.greet.2": {
+   "k": "1dhy9g7",
+   "ms": 3053
+  },
+  "rook.idle.1": {
+   "k": "1tgvhu",
+   "ms": 5686
+  },
+  "rook.idle.2": {
+   "k": "1i0u0ch",
+   "ms": 4782
+  },
+  "rook.idle.3": {
+   "k": "1rkq7zn",
+   "ms": 4439
+  },
+  "sela.farewell.1": {
+   "k": "133kehs",
+   "ms": 3413
+  },
+  "sela.farewell.2": {
+   "k": "16g6zi2",
+   "ms": 2923
+  },
+  "sela.idle.1": {
+   "k": "rk49uf",
+   "ms": 4479
+  },
+  "sela.idle.2": {
+   "k": "1q5xhu9",
+   "ms": 4843
+  }
+ }
+}
