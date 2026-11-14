@@ -877,7 +877,7 @@ function makeCommands(player: Player, consoleErrors: string[]): { commands: Reco
       for (const k of on ? keys : [...keys].reverse()) await (on ? page.keyboard.down(k) : page.keyboard.up(k));
     };
     const trail: { at: number; pos: number[] }[] = [];
-    let side = "KeyD";
+    let stuckCount = 0;
     let shunning = false;
     const t0 = Date.now();
     const end = (why: string) => {
@@ -915,14 +915,10 @@ function makeCommands(player: Player, consoleErrors: string[]): { commands: Reco
         const a = trail[0]!;
         const p = s.player!.pos;
         if (now - a.at > 2000 && Math.hypot(a.pos[0]! - p[0]!, a.pos[1]! - p[1]!, a.pos[2]! - p[2]!) < 1.5) {
-          // Stuck (a slope, a creature, a corner the rays missed): back off, side-step, hop.
-          trace(`walk: stuck at ${p.map((v) => v.toFixed(0)).join(",")}, side-stepping`);
+          // Stuck: Player.unstick goes round on one side (walls the rays see over, a long outpost wall).
           await press(false);
-          await player.hold(["KeyS"], 400);
-          await player.hold([side], 900);
-          await player.hold([side, "KeyW"], 700);
-          await player.tap("Space");
-          side = side === "KeyD" ? "KeyA" : "KeyD";
+          const took = await player.unstick(want, ++stuckCount);
+          trace(`walk: stuck at ${p.map((v) => v.toFixed(0)).join(",")} (${stuckCount}), going round by ${n0(took)}°`);
           trail.length = 0;
         }
       }
@@ -1029,7 +1025,8 @@ function makeCommands(player: Player, consoleErrors: string[]): { commands: Reco
       await player.hold(["ShiftLeft", "KeyW"], 2600);
     },
     dodge: () => player.hold(["KeyC"], 60),
-    attack: () => hitTrainingDummies(player),
+    // Since #68 one left click anywhere in Portus completes the attack lesson (a dummy in reach falls with it).
+    attack: () => player.attack(),
     switch: async () => {
       await player.tap("Digit2");
       await page.waitForTimeout(400);

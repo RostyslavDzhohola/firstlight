@@ -16,6 +16,9 @@ import { missionTarget, type PointerNpc, type PointerTarget } from "./missionTar
 import type { ClientSystem } from "./systems.ts";
 import { objectiveObject, trialSeen } from "./trialState.ts";
 import { missionTrack } from "./missionTrack.ts";
+import { guideToVisit } from "./guideMarker.ts";
+import { BODIES } from "@firstlight/shared";
+import { PLACE_BY_ID, placeDir } from "@firstlight/shared/content/places";
 import { compassGuides, type CompassMarker } from "../social/compass.ts";
 import { missionColour } from "../ui/missionColour.ts";
 
@@ -38,8 +41,14 @@ class MissionPointer implements ClientSystem {
   private missionId = "";
   private missionName = "";
   private pickedAt = -Infinity;
+  /** The planet's guide, while nothing tracked points anywhere here and they still have missions to give (guideMarker.ts). */
+  private guide: { label: string; pos: [number, number, number] } | null = null;
   private readonly compassGuide = (): CompassMarker[] =>
-    this.target && this.missionId ? [{ key: "mission", label: this.missionName, colour: missionColour(this.missionId), pos: this.target.at, kind: "mission" }] : [];
+    this.target && this.missionId
+      ? [{ key: "mission", label: this.missionName, colour: missionColour(this.missionId), pos: this.target.at, kind: "mission" }]
+      : this.guide
+        ? [{ key: "guide", label: this.guide.label, colour: "#ffd27a", pos: this.guide.pos, kind: "guide" }]
+        : [];
   private last = { text: "", key: "" };
   private boxSize: { w: number; h: number } | null = null;
 
@@ -78,7 +87,15 @@ class MissionPointer implements ClientSystem {
       // The server's list, held since the join (huntTargets.ts): null until one came (older servers never send it).
       const hunt = huntTargets();
       const eligible = hunt && open && hunt.id === open.id ? hunt.npcs : null;
-      this.target = def ? (def.race || def.defend || def.collect ? this.objective(def, open!.counts, [p.x, p.y, p.z]) : missionTarget(def, g.bodyId, [p.x, p.y, p.z], npcs, (x, y, z) => terrain.groundHeight(x, y, z), { eligible, counts: open!.counts })) : null;
+      this.target = def ? (def.race || def.defend || def.collect || def.find || def.reach ? this.objective(def, open!.counts, [p.x, p.y, p.z]) : missionTarget(def, g.bodyId, [p.x, p.y, p.z], npcs, (x, y, z) => terrain.groundHeight(x, y, z), { eligible, counts: open!.counts })) : null;
+      // The missions panel (top right) is kept clear too: a pinned label at the right edge sat on it
+      // (play-through 2026-11-14). Read with the pick, 4 times a second, not every frame.
+      const panel = g.hud.root.querySelector<HTMLElement>(".fl-missions");
+      const pr = panel && !panel.hidden ? panel.getBoundingClientRect() : null;
+      this.panelRect = pr && pr.width > 0 ? { left: pr.left - 8, top: pr.top - 8, right: pr.right + 8, bottom: pr.bottom + 8 } : null;
+      const visit = guideToVisit(g.bodyId, g.hud.you?.missions ?? [], !!this.target);
+      const gdef = visit ? WORLD_OBJECT_BY_ID.get(visit.id) : undefined;
+      this.guide = visit && gdef ? { label: `${visit.name} · missions`, pos: objectPos(gdef, (x, y, z) => terrain.groundHeight(x, y, z)) } : null;
     }
     const t = this.target;
     if (!t || g.photo?.active) return this.hide();
@@ -99,7 +116,7 @@ class MissionPointer implements ClientSystem {
       const h = this.box.offsetHeight;
       if (w > 0 && h > 0) this.boxSize = { w, h };
     }
-    const c = placeCallout(ndc, innerWidth, innerHeight, this.boxSize ?? { w: 160, h: 48 }, null, this.keepClear());
+    const c = placeCallout(ndc, innerWidth, innerHeight, this.boxSize ?? { w: 160, h: 48 }, null, this.panelRect ? [...this.keepClear(), this.panelRect] : this.keepClear());
     const key = `${Math.round(c.x)},${Math.round(c.y)},${c.edge ? Math.round(c.angle * 20) : "-"},${c.flip ? 1 : 0}`;
     if (key === this.last.key) return;
     this.last.key = key;
@@ -111,6 +128,8 @@ class MissionPointer implements ClientSystem {
   }
 
   private clear: { w: number; h: number; rects: Rect[] } | null = null;
+  /** The missions panel's screen rect (with a margin), refreshed at each pick; null while it is hidden. */
+  private panelRect: Rect | null = null;
 
   /**
    * Where the label never goes (D-polish-ux-6): the crosshair, and the top-centre column (zone
@@ -132,7 +151,7 @@ class MissionPointer implements ClientSystem {
 
   private readonly objAt = new Map<string, [number, number, number]>();
 
-  /** Race / defend / collect: the next ring, the beacon, or the nearest piece left (trialState.ts). */
+  /** Race / defend / collect: the next ring, the beacon, or the nearest piece left (trialState.ts); find: the object; reach: the place. */
   private objective(def: MissionDef, counts: readonly number[] | undefined, me: [number, number, number]): PointerTarget | null {
     if (def.body !== this.game.bodyId) return null;
     const posOf = (id: string): [number, number, number] | null => {
@@ -145,6 +164,20 @@ class MissionPointer implements ClientSystem {
       }
       return at ?? null;
     };
+    // Find and reach (play-through 2026-11-14: tracking The Lost Bell put nothing on the compass):
+    // the object to pick up, or the place to enter.
+    if (def.reach) {
+      const d = placeDir(def.reach.place);
+      const t = this.game.planet.terrain;
+      const body = BODIES[def.body];
+      const r = body.radius + Math.max(t.groundHeight(d[0], d[1], d[2]), body.waterLevel - 1.05);
+      return { at: [d[0] * r, d[1] * r, d[2] * r], title: PLACE_BY_ID.get(def.reach.place)?.name ?? def.name, creep: false };
+    }
+    if (def.find) {
+      const at = posOf(def.find.object);
+      const item = def.find.itemName.replace(/^the /, "");
+      return at ? { at, title: item[0]!.toUpperCase() + item.slice(1), creep: false } : null;
+    }
     const trial = trialSeen()?.msg ?? null;
     const id = objectiveObject(def, counts, trial, me, posOf);
     const at = id ? posOf(id) : null;
