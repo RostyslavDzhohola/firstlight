@@ -28,7 +28,9 @@ async function takeFirstMission(player: Player): Promise<boolean> {
   await player.face((x) => x.guide?.bearing ?? null, 10);
   await player.tap("KeyE");
   const accept = player.page.locator(".fl-overlay .fl-panel").getByRole("button", { name: /^Accept$/ }).first();
-  if (!(await accept.isVisible({ timeout: 5000 }).catch(() => false))) {
+  // A real wait: isVisible's timeout is ignored (it answers at once), and on a loaded machine the
+  // guide's panel opens a second or more after E.
+  if (!(await accept.waitFor({ state: "visible", timeout: 8000 }).then(() => true, () => false))) {
     await player.note("guide", "no Accept button (panel didn't open?)");
     return false;
   }
