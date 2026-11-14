@@ -66,6 +66,8 @@ export interface MissionLine {
   /** Right column: "3/8", "380 m", "Done". */
   progress: string;
   state?: "open" | "tracked" | "done";
+  /** The running trial's mission: listed first and in full, but "tracked" stays the player's choice. */
+  trial?: boolean;
   /** The mission's colour (#86: the same on its compass marker and its objects in the world). */
   colour?: string;
 }

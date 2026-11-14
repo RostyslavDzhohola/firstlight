@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { trackedMission } from "@firstlight/shared/content/missions";
 import { trackerRows } from "./trackerRows.ts";
 
 const m = (id: string, done = false, progress = 0, goal = 8) => ({ id, done, progress, goal });
@@ -12,11 +13,30 @@ describe("mission tracker rows (D-polish-ux-1)", () => {
     expect(r.more).toBe(2);
   });
 
-  it("a running trial comes first", () => {
+  it("a running trial comes first, shown in full, but it is not called tracked", () => {
     const r = trackerRows(HELD, "arcadia", { trial: "A4" });
     expect(r.lines[0]!.id).toBe("A4");
+    expect(r.lines[0]!.trial).toBe(true);
     expect(r.lines[0]!.progress).toBe("2/5");
+    expect(r.lines[0]!.state).toBe("open");
     expect(r.more).toBe(2);
+  });
+
+  // Review 2026-11-13 #2: with A4's trial running and A1 chosen, the panel marked A4 tracked while the
+  // compass and the server followed A1. One effective tracked mission everywhere.
+  it("marks the same mission tracked as the compass and the server follow, while a trial runs", () => {
+    const r = trackerRows(HELD, "arcadia", { trial: "A4", tracked: "A1" });
+    const tracked = r.lines.filter((l) => l.state === "tracked").map((l) => l.id);
+    expect(tracked).toEqual([trackedMission(HELD, "arcadia", "A1")!.id]);
+    expect(tracked).toEqual(["A1"]);
+    expect(r.lines.map((l) => l.id).slice(0, 2)).toEqual(["A4", "A1"]);
+    expect(r.lines.filter((l) => l.trial).map((l) => l.id)).toEqual(["A4"]);
+  });
+
+  it("a trial that is also the tracked mission is both", () => {
+    const r = trackerRows(HELD, "arcadia", { trial: "A4", tracked: "A4" });
+    expect(r.lines[0]).toMatchObject({ id: "A4", trial: true, state: "tracked" });
+    expect(r.lines.filter((l) => l.state === "tracked")).toHaveLength(1);
   });
 
   it("the tracked mission comes first and is the one marked tracked (#69); a finished trial id no longer counts", () => {

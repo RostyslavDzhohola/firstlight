@@ -130,6 +130,10 @@ button.fl-mission { all: unset; box-sizing: border-box; display: grid; grid-temp
 button.fl-mission:hover b, button.fl-mission:focus-visible b { color: var(--hero-gold); }
 button.fl-mission:focus-visible { outline: 1px solid var(--photon); outline-offset: 2px; }
 .fl-mission:not(.is-tracked) b { font-weight: 500; color: var(--paper-2); }
+/* Review 2026-11-13 #2: a running trial leads the list in full and lit, but only the player's choice is "tracked". */
+.fl-mission.is-trial { border-left: 2px solid var(--mc, var(--photon)); padding-left: calc(.4 * var(--u)); background: linear-gradient(90deg, rgba(196, 241, 255, .08), transparent 70%); }
+.fl-mission.is-trial b { font-weight: 600; color: var(--paper); }
+.fl-mission .fl-mission__k { display: block; font: 600 calc(.85 * var(--t-xs))/1.2 var(--font-display); letter-spacing: .12em; text-transform: uppercase; color: var(--mc, var(--photon)); }
 
 .fl-toasts { width: 100%; display: flex; flex-direction: column; gap: calc(.5 * var(--u)); align-items: flex-end; z-index: var(--z-toast); }
 .fl-toast { display: flex; align-items: center; gap: calc(.7 * var(--u)); max-width: 100%; padding: calc(.55 * var(--u)) calc(.8 * var(--u)) calc(.55 * var(--u)) calc(.6 * var(--u)); animation: fl-pop .45s var(--ease-snap) both; }

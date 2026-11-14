@@ -65,9 +65,11 @@ export class MissionsPanel {
     b.title = `${missionsCollapsed ? "Show missions" : "Collapse missions"} (${MISSIONS_KEY.cap})`;
     b.onclick = () => uiSettings.set({ missionsCollapsed: !uiSettings.get().missionsCollapsed });
     el("span", "fl-label", b, "Missions");
-    // Collapsed: the tracked mission's title and progress stay on the one line.
+    // Collapsed: a running trial (it is against the clock), else the tracked mission, stays on the one line.
+    const trial = this.lines.find((l) => l.trial);
     const tracked = this.lines.find((l) => l.state === "tracked");
-    el("span", "fl-missions__h", b, missionsCollapsed && tracked ? `${tracked.title} · ${tracked.progress}` : this.header);
+    const line = trial ? `Trial: ${trial.title} · ${trial.progress}` : tracked ? `${tracked.title} · ${tracked.progress}` : this.header;
+    el("span", "fl-missions__h", b, missionsCollapsed ? line : this.header);
     const ctl = el("span", "fl-missions__ctl", b);
     el("span", "fl-key", ctl, MISSIONS_KEY.cap);
     el("i", `fl-missions__chev${missionsCollapsed ? " is-closed" : ""}`, ctl);
@@ -75,7 +77,7 @@ export class MissionsPanel {
     if (missionsCollapsed) return;
     for (const m of this.lines) {
       const open = m.state === "open";
-      const row = el(open ? "button" : "div", `fl-mission${m.state && m.state !== "open" ? ` is-${m.state}` : ""}`, this.root);
+      const row = el(open ? "button" : "div", `fl-mission${m.state && m.state !== "open" ? ` is-${m.state}` : ""}${m.trial ? " is-trial" : ""}`, this.root);
       if (m.colour) row.style.setProperty("--mc", m.colour);
       row.dataset.e2e = `mission-row-${m.id}`;
       if (open && row instanceof HTMLButtonElement) {
@@ -85,9 +87,10 @@ export class MissionsPanel {
       }
       el("i", "fl-mission__st", row);
       const d = el("div", "", row);
+      if (m.trial) el("span", "fl-mission__k", d, "Trial running");
       el("b", "", d, m.title);
-      // Only the tracked mission says what to do (#69); the others are one line.
-      if (m.state === "tracked") el("span", "", d, m.detail);
+      // Only the tracked mission and a running trial say what to do (#69); the others are one line.
+      if (m.state === "tracked" || m.trial) el("span", "", d, m.detail);
       el("span", "fl-mission__r num", row, m.state === "tracked" ? `▸ ${m.progress}` : m.progress);
     }
     if (this.more && this.more.count > 0) {
