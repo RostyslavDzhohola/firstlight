@@ -7,7 +7,7 @@ import { maxHp, REGEN } from "../../packages/shared/src/content/progression.ts";
 import { BASE_MOVE, STARTER_STATS, starterMaxHp } from "../../packages/shared/src/content/starters.ts";
 import {
   affordability, BURST_FAMILIES, bossRows, COMBAT_FAMILIES, creatureRows, dominations, duelResults, median, progression,
-  encounterGaps, pvpCell, PVP_LEVELS, regenSafety, roleLeaders, spellPeaks, weaponTable, buildRows, GUARD_FAMILIES, type Family,
+  encounterGaps, oneRun, pvpCell, PVP_LEVELS, regenSafety, roleLeaders, spellPeaks, weaponTable, buildRows, GUARD_FAMILIES, type Family,
 } from "./model.ts";
 import { BLOCK_CAP, buildStats, TREE } from "../../packages/shared/src/content/tree.ts";
 import { WISHFALL } from "../../packages/shared/src/content/spells.ts";
@@ -65,7 +65,12 @@ export const BUILD_EDGE: [number, number] = [1, 1.45];
 /** #81: through a guard, a build's nodes let at least this share of what a plain guard lets through (a guard is never a wall). */
 export const GUARD_KEEP = 0.5;
 
+/** Every band check, in one model run (the model's per-run memo: model.ts oneRun). */
 export function checks(): Check[] {
+  return oneRun(allChecks);
+}
+
+function allChecks(): Check[] {
   const out: Check[] = [];
   const add = (c: Check) => out.push(c);
 

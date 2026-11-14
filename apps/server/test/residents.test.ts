@@ -19,7 +19,7 @@ import { AGENT_RULES, agentsOnline, resetAgentSlots } from "../src/world/agents.
 import { NPC_TUNING } from "../src/world/npc/index.ts";
 import { liveRooms } from "../src/social/index.ts";
 import { safeLeave, startServer, waitFor as poll } from "./helpers.ts";
-import { adminBot, flat, me, nearPad, offset, place, spawnNpc } from "./npc-bots.ts";
+import { adminBot, flat, me, nearPad, offset, place, serverRoom, spawnNpc } from "./npc-bots.ts";
 
 let game: Game;
 let url: string;
@@ -138,7 +138,12 @@ describe("residents", () => {
   // This one depends on what the live world puts near the hunter: when a nearer Hopbit takes its
   // attention first it never engages the golem and there is nothing to yield (review notes,
   // 2026-11-12). The rule itself is unit-tested (agent-kit attach.test.ts, tools.test.ts), so this
-  // end-to-end run gets two more tries.
+  // end-to-end run gets two more tries. Two things made that the rule rather than the exception
+  // (2026-11-14): the golem came while the hunter was on one of its walks (the guide and the shop,
+  // the first thing it does on every visit, or 25 s to its mission's hunting ground), which stop only
+  // for a hit: the slow golem never caught it, and once it lost the hunter, the hunter's mission
+  // Hopbits (A1) came first. So the golem comes once the hunter goes hunting and stands still (between
+  // walks, or fighting), right beside it: a creature attacking it is the first thing a hunter fights.
   it("no kill stealing: a resident hunter stands back when a person joins its fight", { timeout: 480_000, retry: 2 }, async () => {
     AGENT_RULES.enabled = true;
     const lines: string[] = (story = []);
@@ -146,24 +151,38 @@ describe("residents", () => {
     const resident = () => [...liveRooms].filter((r) => r.bodyDef.id === "arcadia").flatMap((r) => [...r.actors.values()]).find((a) => a.identity.name === "Brindle_Oake");
     try {
       // Out of the outpost (the same character as the test above: it comes back where it left).
+      await waitFor(() => lines.some((l) => l.includes("Brindle_Oake") && l.includes("goes hunting")), 120_000, "the hunter goes hunting");
       await waitFor(() => !!resident() && (resident()!.state.flags & (PF.SAFE | PF.PROTECTED)) === 0, 120_000, "the hunter is out of the outpost");
       const R = BODIES.arcadia.radius;
       const at = (): [number, number, number] => [resident()!.state.x, resident()!.state.y, resident()!.state.z];
+      let still: { p: [number, number, number]; since: number } | null = null;
+      await waitFor(() => {
+        const r = resident();
+        if (!r || (r.state.flags & (PF.SAFE | PF.PROTECTED)) !== 0) return (still = null), false;
+        if (!still || flat(at(), still.p) > 0.5) still = { p: at(), since: Date.now() };
+        return Date.now() - still.since > 1500; // between walks, or in a fight on the spot
+      }, 120_000, "the hunter stands still out of the outpost");
       // The person waits on the pad for now: a creature that went for them first would be theirs
       // from the start, and the hunter would rightly never touch it.
       const person = await adminBot(game, rooms, "personZ", "arcadia", nearPad("arcadia", 0, 2), 8);
+      const npcs = () => (serverRoom(person).systems.find((x) => (x as { npcs?: unknown }).npcs instanceof Map) as unknown as { npcs: Map<string, { state: { x: number; y: number; z: number; hp: number; maxHp: number } }> }).npcs;
       // A creature tough enough for a fight worth joining (a Cabinet Golem, 260 base HP): the hunter
       // is put at level 7 so that it is fair game for it.
       person.send("admin", { cmd: "level", args: { level: 7, target: resident()!.id } });
       await waitFor(() => resident()!.char.level === 7, 6000, "the hunter is level 7");
-      const npc = await spawnNpc(person, "cabinet_golem", offset(at(), 7, 0, R), { level: 7, instant: true });
-      const creature = () => (person.state as any).npcs?.get(npc);
+      const npc = await spawnNpc(person, "cabinet_golem", offset(at(), 3, 0, R), { level: 7, instant: true });
+      // Read on the server: the hunter may be well out, beyond what the person on the pad is sent.
+      const creature = () => {
+        const n = npcs().get(npc);
+        return n && n.state.hp > 0 ? n.state : undefined;
+      };
       await waitFor(() => !!creature(), 6000, "the creature is in the world");
-      const full: number = creature().maxHp;
-      await waitFor(() => !creature() || creature().hp < full, 60_000, "the hunter's first hit on it");
+      const full: number = creature()!.maxHp;
+      await waitFor(() => !creature() || creature()!.hp < full, 60_000, "the hunter's first hit on it");
       expect(creature(), lines.join("\n")).toBeTruthy();
       // The person arrives, joins in, and keeps shooting until it is dead.
-      const beside = offset([creature().x, creature().y, creature().z], 5, 6, R);
+      const c0 = creature()!;
+      const beside = offset([c0.x, c0.y, c0.z], 5, 6, R);
       place(person, beside);
       await waitFor(() => flat([me(person).x, me(person).y, me(person).z], beside) < 3, 6000, "the person is beside the fight");
       const iv = setInterval(() => {
@@ -180,7 +199,7 @@ describe("residents", () => {
         await waitFor(() => run.report().residents[0]!.yields >= 1, 30_000, "the hunter yields");
         expect(lines.some((l) => l.includes("Brindle_Oake") && l.includes("leaves the Cabinet Golem to personZ")), lines.join("\n")).toBe(true);
         // It stood back: a few seconds on, it is well clear of the creature it left.
-        await waitFor(() => !creature() || Math.hypot(creature().x - resident()!.state.x, creature().y - resident()!.state.y, creature().z - resident()!.state.z) > 6, 15_000, "the hunter stands back");
+        await waitFor(() => { const c = creature(); return !c || Math.hypot(c.x - resident()!.state.x, c.y - resident()!.state.y, c.z - resident()!.state.z) > 6; }, 15_000, "the hunter stands back");
       } finally {
         clearInterval(iv);
       }

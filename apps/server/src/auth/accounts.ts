@@ -61,7 +61,7 @@ export interface AccountsConfig {
   devCodeRoute?: boolean;
   /** The root `pnpm dev`'s per-run key (DEV_SIGNIN_KEY, tools/dev.ts); a reader of the route must send it. */
   devCodeKey?: string;
-  /** The funnel (#85; FUNNEL_ENABLED, default on): off, nothing is recorded and no funnel timer or worker starts. */
+  /** The funnel (#85; FUNNEL_ENABLED: off in production unless =1, D-ship-12): off, nothing is recorded and no funnel timer or worker starts. */
   funnelEnabled?: boolean;
   /** Accepted after the Better Auth verifier (dev guest tokens when ALLOW_DEV_GUESTS=1). */
   fallbackVerifier?: TokenVerifier;

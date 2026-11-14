@@ -102,7 +102,7 @@ export const FUNNEL_LIMITS = {
   workerBusyMs: 5_000,
 };
 
-/** The on/off switch (FUNNEL_ENABLED, default on): off, nothing is taken, queued or stored and no timer or worker starts. Set at boot (auth/accounts.ts). */
+/** The on/off switch (FUNNEL_ENABLED; off in production unless =1, D-ship-12): off, nothing is taken, queued or stored and no timer or worker starts. Set at boot (auth/accounts.ts). */
 export const funnelConfig = { enabled: true };
 
 export const accountSubject = (userId: string) => `u:${userId}`;

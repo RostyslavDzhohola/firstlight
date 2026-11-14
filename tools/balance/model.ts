@@ -564,16 +564,44 @@ export const FIGHT_DEFS = NPC_DEFS.filter((d) => d.family !== "egg" && d.tier !=
 /** The starter weapons, each once (the plain Traveller carries Brother Ash's Sunbrand, #80): the five medians are taken over. */
 export const STARTER_WEAPONS: readonly string[] = [...new Set(STARTERS.map((s) => s.weapon as string))];
 
+// One run's memo (bands.ts checks() is one run). The creature rows, the area rates and the route ask
+// for the same starter timelines and creature kills hundreds of times; inside a run the catalogues are
+// fixed, so each is worked out once. Outside a run nothing is kept: tests change a catalogue entry
+// between runs (model.test.ts) and must see the change.
+let runMemo: Map<string, unknown> | null = null;
+
+/** Run `f` with the per-run memo (nested runs share the outer one). */
+export function oneRun<T>(f: () => T): T {
+  if (runMemo) return f();
+  runMemo = new Map();
+  try {
+    return f();
+  } finally {
+    runMemo = null;
+  }
+}
+
+function memo<T>(key: string, f: () => T): T {
+  if (!runMemo) return f();
+  if (runMemo.has(key)) return runMemo.get(key) as T;
+  const v = f();
+  runMemo.set(key, v);
+  return v;
+}
+
 /** Seconds for one player with each starter weapon (gated tier) to kill the creature, from the first press. */
 export function playerKillsCreature(def: NpcDef, enemyLevel: number, playerLevel = expectedPlayerLevel(enemyLevel)): { min: number; median: number; max: number } {
-  // The Enforcer's riot shield blocks frontal damage until broken: count it (a head-on fight).
-  const hp = npcMaxHp(def, enemyLevel) + npcShieldHp(def, enemyLevel);
-  const times = STARTER_WEAPONS.map((id) => {
-    const w = WEAPONS.find((x) => x.id === id)!;
-    const k = timeToKill(hitTimeline(w, gatedTier(playerLevel), playerLevel, "full", 300), hp);
-    return k ? k.t : Infinity;
-  }).sort((a, b) => a - b);
-  return { min: times[0]!, median: median(times), max: times[times.length - 1]! };
+  return memo(`kills|${def.id}|${enemyLevel}|${playerLevel}`, () => {
+    // The Enforcer's riot shield blocks frontal damage until broken: count it (a head-on fight).
+    const hp = npcMaxHp(def, enemyLevel) + npcShieldHp(def, enemyLevel);
+    const times = STARTER_WEAPONS.map((id) => {
+      const w = WEAPONS.find((x) => x.id === id)!;
+      const hits = memo(`starterHits|${id}|${playerLevel}`, () => hitTimeline(w, gatedTier(playerLevel), playerLevel, "full", 300));
+      const k = timeToKill(hits, hp);
+      return k ? k.t : Infinity;
+    }).sort((a, b) => a - b);
+    return { min: times[0]!, median: median(times), max: times[times.length - 1]! };
+  });
 }
 
 const isMelee = (a: AttackDef) => a.shape === "arc" || a.shape === "ring" || a.shape === "charge" || a.shape === "leap" || a.shape === "line";
@@ -603,11 +631,17 @@ export function creatureTimeline(def: NpcDef, enemyLevel: number, horizon = 120,
 
 /** Apply the AI clamps (NpcSystem.hitPlayer) to merged events from one or more creatures of a tier. */
 export function clampHits(events: { t: number; dmg: number }[], tier: NpcDef["tier"], targetMaxHp: number): { t: number; dmg: number }[] {
+  // The events come sorted by time, so the hits inside the sequence window are a sliding window.
   const recent: { t: number; amt: number }[] = [];
   const out: { t: number; dmg: number }[] = [];
+  const windowS = AI_CAPS.sequenceMs / 1000;
+  const cap = aiHitCap(tier, targetMaxHp);
+  let first = 0;
   for (const e of events) {
-    let dmg = Math.min(e.dmg, aiHitCap(tier, targetMaxHp));
-    const used = recent.filter((h) => e.t - h.t < AI_CAPS.sequenceMs / 1000).reduce((s, h) => s + h.amt, 0);
+    while (first < recent.length && !(e.t - recent[first]!.t < windowS)) first++;
+    let used = 0; // summed in order, as before: the same rounding to the last bit
+    for (let i = first; i < recent.length; i++) used += recent[i]!.amt;
+    let dmg = Math.min(e.dmg, cap);
     dmg = Math.min(dmg, AI_CAPS.sequence * targetMaxHp - used);
     if (dmg < 0.5) continue;
     recent.push({ t: e.t, amt: dmg });

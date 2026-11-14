@@ -112,7 +112,9 @@ describe("the camera round the Portus town (#34)", () => {
     // One ray from the head left 6.6 % of these poses with a near-plane corner in a solid; what is
     // left is the head itself within 0.3 m of a wall (backed into a castle wall, under a lean-to).
     expect(clipped / poses, `${clipped} of ${poses} poses with a near-plane corner in a structure`).toBeLessThan(0.005);
-  }, 300_000);
+    // ~2 min alone (2026-11-14, after the first-person view: the squeezed camera tries the eye too), 609 s in
+    // the loaded full suite: 15 min.
+  }, 900_000);
 });
 
 describe("stuck pockets in the Portus town (#34)", () => {

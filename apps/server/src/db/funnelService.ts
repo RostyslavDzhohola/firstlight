@@ -6,7 +6,7 @@
 // so a busy /stats can't pile jobs up. A job that outlives its timeout is left to finish (its answer
 // is dropped); a worker that dies is started again on the next job.
 //
-// Started by auth/accounts.ts when the funnel is on (FUNNEL_ENABLED, default on) and game.db is a
+// Started by auth/accounts.ts when the funnel is on (FUNNEL_ENABLED; off in production unless =1, D-ship-12) and game.db is a
 // file; /stats finds it by its database (funnelServiceFor). While it runs, the worker checkpoints the
 // WAL and the game's connection doesn't (wal_autocheckpoint 0): a commit on the game's thread never
 // copies megabytes the worker's housekeeping wrote. A worker that stops unasked after running a while

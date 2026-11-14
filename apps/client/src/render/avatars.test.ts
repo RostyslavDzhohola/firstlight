@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
-import { STARTER_LOOKS, STARTERS, WEAPONS } from "@firstlight/shared/content/weapons";
+import { PLAIN_STARTER, STARTER_LOOKS, STARTERS, WEAPONS } from "@firstlight/shared/content/weapons";
 import { ANIM } from "@firstlight/shared/net/schema";
 import { watchDisposals } from "./disposeWatch.testutil.ts";
 
@@ -106,8 +106,11 @@ describe("held items", () => {
 describe("avatar warm-up hook", () => {
   it("stands every starter's every look once (T9: each look's material in play compiles behind the loading screen)", () => {
     const looks = mod.avatarWarmupLooks();
-    const n = STARTER_LOOKS.flat().length; // 5 starters + the second looks of Kappa and Unit 7
+    // One sample per model, not per (starter, look): the Traveller wears Brother Ash's body (D-progress-4),
+    // the same build. 5 originals + the second looks of Kappa and Unit 7.
+    const n = new Set(STARTER_LOOKS.flat().map((l) => l.id)).size;
     expect(n).toBe(7);
+    expect(STARTER_LOOKS.flat()).toHaveLength(8);
     // One toon material per look; the palette is a per-object uniform (#39, D-load-4), not a build.
     expect(looks).toHaveLength(n);
     expect(new Set(looks.map((l) => `${l.starter}:${l.look}`)).size).toBe(n);
@@ -148,8 +151,11 @@ describe("looks → models", () => {
   it("draws every look with its own model; the originals come first, in starter order", async () => {
     const { MODEL_FILES, MODEL_SCALE, modelIndex } = await import("./avatars/assets.ts");
     STARTER_LOOKS.forEach((ls, s) => ls.forEach((l, k) => expect(MODEL_FILES[modelIndex(s, k)]).toBe(l.id)));
-    STARTERS.forEach((st, s) => expect(MODEL_FILES[s]).toBe(st.id));
-    expect(MODEL_FILES).toHaveLength(STARTER_LOOKS.flat().length);
+    // The five originals by starter index; the Traveller has no model of its own and draws Ash's.
+    STARTERS.forEach((st, s) => expect(MODEL_FILES[modelIndex(s)]).toBe(STARTER_LOOKS[s]![0]!.id));
+    STARTERS.slice(0, 5).forEach((st, s) => expect(MODEL_FILES[s]).toBe(st.id));
+    expect(modelIndex(PLAIN_STARTER)).toBe(MODEL_FILES.indexOf("ash"));
+    expect(MODEL_FILES).toHaveLength(new Set(STARTER_LOOKS.flat().map((l) => l.id)).size);
     expect(MODEL_SCALE).toHaveLength(MODEL_FILES.length);
     expect(modelIndex(2, 1)).toBe(MODEL_FILES.indexOf("kappa_b"));
     expect(modelIndex(0, 1)).toBe(0); // Hexwick has no second look: the original

@@ -19,10 +19,11 @@ import { makeRideClip } from "./ride.ts";
 import { preloadSculptedWeapons, SCULPTED_FILE_COUNT } from "./sculpted.ts";
 import type { TextureSlot } from "../artpacks/ArtPacks.ts";
 
-/** Every look's model file (STARTER_LOOKS ids): first the five starters' original looks, in
- *  PlayerState.starter order, then the second looks. */
+/** Every look's model file (the distinct STARTER_LOOKS ids): first the five original starters' looks, in
+ *  PlayerState.starter order, then the second looks. The Traveller (starter 5) has no model of its own:
+ *  its look id is "ash" and draws Brother Ash's body (D-progress-4). */
 export const MODEL_FILES = ["hexwick", "ash", "kappa", "unit7", "ninja", "kappa_b", "unit7_b"] as const;
-/** The starters' original looks (index = PlayerState.starter). */
+/** The original starters' looks (index = PlayerState.starter for starters 0–4; these have their own normal maps). */
 export const STARTER_FILES = MODEL_FILES.slice(0, 5);
 
 /** Per-model scale (one skeleton; silhouettes differ in build): Hexwick slim and young, Brother Ash

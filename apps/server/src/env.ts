@@ -42,10 +42,12 @@ export const env = {
   /** The root `pnpm dev`'s per-run key (tools/dev.ts): the dev client sends it to read a code. Without
    *  it the dev-code route is not mounted at all; production refuses to boot with it. */
   devSigninKey: process.env.DEV_SIGNIN_KEY ?? "",
-  /** The first-session funnel and client error reports (#85, db/funnel.ts): on unless FUNNEL_ENABLED=0.
-   *  Off, /api/visit, /api/funnel and /api/client-error answer 204 and store nothing, the rooms record
-   *  nothing, no flush timer or funnel worker starts, and /stats says so. Read at boot. */
-  funnelEnabled: process.env.FUNNEL_ENABLED !== "0",
+  /** The first-session funnel and client error reports (#85, db/funnel.ts): on outside production; in
+   *  production only with FUNNEL_ENABLED=1 (D-ship-12: its fourth review left one blocker open, a day's
+   *  fold that can hold the write lock for seconds under many distinct tutorial ids). FUNNEL_ENABLED=0
+   *  turns it off anywhere. Off, /api/visit, /api/funnel and /api/client-error answer 204 and store
+   *  nothing, the rooms record nothing, no flush timer or funnel worker starts, and /stats says so. */
+  funnelEnabled: process.env.FUNNEL_ENABLED === undefined || process.env.FUNNEL_ENABLED === "" ? process.env.NODE_ENV !== "production" : process.env.FUNNEL_ENABLED === "1",
   /** M11 extra #2 (SPEC §6.14): horses. On in dev and production; FEATURE_HORSES=0 turns them off
    *  (no whistle sales, H refused, clients told through `you.horses`). Mutable for tests. */
   horses: process.env.FEATURE_HORSES !== "0",

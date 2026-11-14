@@ -1001,9 +1001,9 @@ export const ITEM_SPRITE: Readonly<Record<string, string>> = {
 
 /** Starter index (STARTERS order) → pixel portrait sprite (kept for the UI gallery and fallbacks). */
 export const STARTER_PORTRAIT = ["head-hexwick", "head-ash", "head-kappa", "head-unit7", "head-ninja", "head-ash"] as const;
-/** Starter ids (STARTERS order) for the rendered 3D portraits (tools/blender/chars3d render.py). */
-/** Every look's portrait (STARTER_LOOKS ids). */
-const PORTRAIT_IDS = STARTER_LOOKS.flatMap((ls) => ls.map((l) => l.id));
+/** Every look's rendered 3D portrait (STARTER_LOOKS ids, tools/blender/chars3d render.py), each once:
+ *  the Traveller's look is Brother Ash's. */
+const PORTRAIT_IDS = [...new Set(STARTER_LOOKS.flatMap((ls) => ls.map((l) => l.id)))];
 
 /** Items drawn with a render of their sculpted model (`.px-icon-<id>`) instead of their pixel map. */
 const ICON_IDS: ReadonlySet<string> = new Set(SCULPTED_WEAPONS);

@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { SPELL_BY_ID, SPELLS, spellDamage, FROSTBLOOM } from "@firstlight/shared/content/spells";
 import { starterSpellPower } from "@firstlight/shared/content/starters";
+import { STARTERS } from "@firstlight/shared/content/weapons";
 import { spellCost, spellEffect, spellGains, spellPower, spellTooltip } from "./spellInfo.ts";
 
 const s = (id: string) => SPELL_BY_ID.get(id)!;
 
 describe("spell numbers at your level (#79)", () => {
   it("uses the server's formula with the starter's spell power", () => {
-    for (const starter of [0, 1, 2, 3, 4]) {
+    for (const starter of STARTERS.keys()) {
       expect(spellPower(s("frostbloom"), 7, starter)!.value).toBe(Math.round(spellDamage(FROSTBLOOM.damage, 7, starterSpellPower(starter))));
     }
     expect(spellPower(s("skipstep"), 5, 0)).toBeNull();
