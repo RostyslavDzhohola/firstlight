@@ -7,6 +7,7 @@ import { BODIES, buildChunk, chunkOf, chunkProps, createTerrain, packProps, padD
 import { GrassSystem, type GrassChunk } from "./grass.ts";
 import { testVegetationAssets } from "./vegetationAsset.testutil.ts";
 import { PropSystem } from "./props.ts";
+import { lodBand } from "./lodFade.ts";
 import { emptyStored, resolveSettings, type StoredGfx, type Tier } from "./quality.ts";
 import { grassWeight, PALETTES } from "../world/palette.ts";
 
@@ -154,7 +155,8 @@ describe("vegetation (CPU)", () => {
           expect(d).toBeLessThan(s.props.fullTo + 0.5);
           near++;
         } else {
-          expect(d).toBeGreaterThanOrEqual(s.props.fullTo - 0.5);
+          // Far cards start at fullTo, or a fade band earlier for kinds that cross-fade (lodFade.ts).
+          expect(d).toBeGreaterThanOrEqual(lodBand(s.props.fullTo).farFrom - 0.5);
           expect(d).toBeLessThan(s.props.lodTo + 0.5);
           far++;
         }

@@ -153,10 +153,10 @@ export const PROP_STYLES: Record<BodyId, PropRule[]> = {
     // Regions (#7): each named region's own undergrowth, only in kinds the planet already draws (no
     // new draw calls): the wood's ferns and toadstools, the meadow's flowers, the heath's gorse. The
     // marsh is its wet ground colour and the open water's edge.
-    { kind: "fern", every: 2, chance: 0.34, minFlat: 0.82, minH: 0.6, maxH: 60, scale: [0.8, 1.45], regions: ["wood"] },
-    { kind: "mushroom", every: 3, chance: 0.22, minFlat: 0.82, minH: 0.6, maxH: 60, scale: [0.8, 1.3], regions: ["wood"] },
-    { kind: "flower", every: 2, chance: 0.2, minFlat: 0.84, minH: 0.8, maxH: 60, scale: [0.8, 1.3], regions: ["meadow"] },
-    { kind: "bush", every: 3, chance: 0.24, minFlat: 0.82, minH: 0.6, maxH: 70, scale: [0.55, 1.05], regions: ["heath"] },
+    { kind: "fern", every: 2, chance: 0.18, minFlat: 0.82, minH: 0.6, maxH: 60, scale: [0.9, 1.5], regions: ["wood"] },
+    { kind: "mushroom", every: 3, chance: 0.12, minFlat: 0.82, minH: 0.6, maxH: 60, scale: [0.8, 1.3], regions: ["wood"] },
+    { kind: "flower", every: 3, chance: 0.2, minFlat: 0.84, minH: 0.8, maxH: 60, scale: [0.8, 1.3], regions: ["meadow"] },
+    { kind: "bush", every: 3, chance: 0.14, minFlat: 0.82, minH: 0.6, maxH: 70, scale: [0.6, 1.1], regions: ["heath"] },
   ],
   hollowmere: [
     { kind: "deadtree", every: 2, chance: 0.3, maskScale: 120, maskMin: 0.02, minFlat: 0.8, minH: 0.8, maxH: 70, scale: [0.8, 1.45] },
@@ -167,9 +167,9 @@ export const PROP_STYLES: Record<BodyId, PropRule[]> = {
     { kind: "fern", every: 2, chance: 0.12, maskScale: 120, maskMin: 0.02, maskSeed: 0, minFlat: 0.82, minH: 0.6, maxH: 40, scale: [0.7, 1.2] },
     { kind: "mushroom", every: 3, chance: 0.14, maskScale: 120, maskMin: 0.02, maskSeed: 0, minFlat: 0.82, minH: 0.6, maxH: 40, scale: [0.7, 1.2] },
     // Regions (#7): the fen's reeds, the mire's ferns, the hollow's glowcaps; the ash barrens stay bare.
-    { kind: "reed", every: 2, chance: 0.36, minFlat: 0.84, minH: 0.05, maxH: 8, scale: [0.8, 1.35], regions: ["fen"] },
-    { kind: "fern", every: 2, chance: 0.3, minFlat: 0.82, minH: 0.4, maxH: 50, scale: [0.8, 1.3], regions: ["mire"] },
-    { kind: "mushroom", every: 2, chance: 0.36, minFlat: 0.82, minH: 0.5, maxH: 50, scale: [0.9, 1.6], regions: ["glowcap"] },
+    { kind: "reed", every: 2, chance: 0.2, minFlat: 0.84, minH: 0.05, maxH: 8, scale: [0.8, 1.35], regions: ["fen"] },
+    { kind: "fern", every: 2, chance: 0.16, minFlat: 0.82, minH: 0.4, maxH: 50, scale: [0.8, 1.3], regions: ["mire"] },
+    { kind: "mushroom", every: 2, chance: 0.2, minFlat: 0.82, minH: 0.5, maxH: 50, scale: [0.9, 1.6], regions: ["glowcap"] },
   ],
   meridian: [
     { kind: "scrub", every: 2, chance: 0.13, minFlat: 0.8, minH: 0.5, maxH: 90, scale: [0.7, 1.4] },
@@ -177,7 +177,7 @@ export const PROP_STYLES: Record<BodyId, PropRule[]> = {
     { kind: "rock", every: 3, chance: 0.08, minFlat: 0.76, minH: 0.2, maxH: 999, scale: [0.6, 1.5] },
     { kind: "boulder", every: 5, chance: 0.09, minFlat: 0.78, minH: 0.5, maxH: 999, scale: [0.7, 1.5] },
     // Regions (#7): the dunes and the salt pan stay bare; that is their look.
-    { kind: "scrub", every: 2, chance: 0.3, minFlat: 0.8, minH: 0.5, maxH: 90, scale: [0.8, 1.5], regions: ["rust"] },
+    { kind: "scrub", every: 2, chance: 0.18, minFlat: 0.8, minH: 0.5, maxH: 90, scale: [0.8, 1.5], regions: ["rust"] },
   ],
   // Lumen: bare regolith, rocks and boulders only (heights are above its far-down water level).
   lumen: [

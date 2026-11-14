@@ -39,6 +39,7 @@ const SIGNALS: Record<string, RegExp> = {
   "npc:egg:E9": /emitNpcEvent\(\{\s*kind: "egg"[^}]*egg: "E9"/,
   "broadcast:shot": /broadcastNear\("shot"/,
   "message:interact": /onMessage\("interact"/,
+  "npc:granny": /emitNpcEvent\(\{ kind: "granny"/,
 };
 
 /** What each medal needs from production code (the quest system awards it when these arrive). */
@@ -64,6 +65,8 @@ const MEDAL_NEEDS: Record<string, string[]> = {
   killed_by_a_woolback: ["game:damage", "game:death"],
   with_friends_like_these: ["game:death"],
   own_goal: ["game:death"],
+  outran_granny: ["npc:granny"], // Granny Gust gives up on a quarry who lasted her chase (#2)
+  grounded_granny: ["npc:kill"], // her kill, like any creature's
 };
 
 /** Known gaps, owned by another lane (none now: onboarding pays Spark since lane/f12-ui). */
