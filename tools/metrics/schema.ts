@@ -8,7 +8,7 @@
 //          100 ms: 0 → 1 is not a 100 % regression).
 // A change is real when it moves past max(noise × |baseline|, floor).
 
-export const GROUPS = ["static", "health", "tests", "load", "frame", "passes", "server"] as const;
+export const GROUPS = ["static", "health", "tests", "load", "frame", "passes", "server", "funnel"] as const;
 export type Group = (typeof GROUPS)[number];
 export type Better = "lower" | "higher";
 

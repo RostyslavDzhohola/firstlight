@@ -330,3 +330,14 @@ export function funnelKpis(r: FunnelReport): FunnelKpi[] {
 /** The funnel's steps in their order, for the step tables (visits, then accounts). */
 export const VISIT_FUNNEL: readonly string[] = ["page", "play", "pick", "world", "tutorial_done"];
 export const ACCOUNT_FUNNEL: readonly string[] = [ACCOUNT_STEPS.join, ACCOUNT_STEPS.kill, ACCOUNT_STEPS.mission, ACCOUNT_STEPS.level2, ACCOUNT_STEPS.tutorialDone, ACCOUNT_STEPS.level5, ACCOUNT_STEPS.saved, ACCOUNT_STEPS.firstSession, ACCOUNT_STEPS.back];
+
+/** The funnel over the last day, 7 days and all time: what /stats shows and `pnpm metrics --funnel` reads. */
+export function funnelWindows(db: Db, now = Date.now()) {
+  const windows = { day: funnelReport(db, now - DAY, now), week: funnelReport(db, now - 7 * DAY, now), all: funnelReport(db, 0, now) };
+  return {
+    windows,
+    kpis: { day: funnelKpis(windows.day), week: funnelKpis(windows.week), all: funnelKpis(windows.all) },
+    errors: { day: clientErrorReport(db, now - DAY), week: clientErrorReport(db, now - 7 * DAY), all: clientErrorReport(db, 0) },
+  };
+}
+export type FunnelWindows = ReturnType<typeof funnelWindows>;

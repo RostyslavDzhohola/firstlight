@@ -15,9 +15,15 @@ import { enterFullscreen } from "./game/fullscreen.ts";
 import { hideLandingUnderLoader, showLanding } from "./home/landing.ts";
 import { hideLoading, setLoading, showLoadingError } from "./ui/loading.ts";
 import { applyUiLook } from "./ui/look.ts";
+import { funnelStep, installErrorReporting, markPlay } from "./net/beacon.ts";
 
 // Flat surfaces, or the old blurred look with ?blur=1 (D-ui-1): before anything else draws.
 applyUiLook(document.documentElement, location.search);
+
+// Our own funnel and error reports (#85, net/beacon.ts): uncaught errors, then "opened the page".
+installErrorReporting();
+funnelStep("page");
+if (innerWidth < 760) funnelStep("narrow", innerWidth); // a phone or a narrow window: how many get that far
 
 // Playwright journeys only (?e2e): window.__fl, a separate chunk that is never fetched otherwise.
 void maybeInstallE2e(location.search, window, () => import("./debug/e2eHook.ts"));
@@ -77,8 +83,12 @@ async function boot() {
     },
     {
       hideLoading,
-      showRemoved: (reason) => void import("./social/screens.ts").then((m) => m.showRemoved(reason)),
-      showError: (f) =>
+      showRemoved: (reason) => {
+        funnelStep("removed");
+        void import("./social/screens.ts").then((m) => m.showRemoved(reason));
+      },
+      showError: (f) => {
+        funnelStep(f.id === "renderer" ? "webgl_none" : f.id === "version" ? "version" : "boot_fail", undefined, f.id);
         showLoadingError({
           title: f.title,
           text: f.text,
@@ -91,13 +101,15 @@ async function boot() {
           },
           back: "Back to the home page",
           onBack: backToLanding,
-        }),
+        });
+      },
     },
   );
 }
 
 playBtn?.addEventListener("click", async () => {
   playBtn.disabled = true;
+  markPlay();
   // Fullscreen (with Keyboard Lock for Esc) + pointer lock must be requested inside the click.
   await enterFullscreen();
   await boot();

@@ -37,6 +37,7 @@ import { bindUi } from "../ui/bind.ts";
 import { pickDisplayName } from "../ui/account.ts";
 import { hideLoading, loadingFrac, setLoading, setLoadingBadge, stepProgress, WARMUP_FROM, WEBGL2_FALLBACK_LINE, WEBGPU_SLOW_LINE, warmupProgress } from "../ui/loading.ts";
 import { getAccountInfo, invalidatePlayToken, isDevGuest } from "../net/auth.ts";
+import { beacon, funnelStep, markWorld } from "../net/beacon.ts";
 import { PilesView } from "../world/PilesView.ts";
 import { breakablesLayoutPending } from "../world/Breakables.ts";
 import { Planet } from "../world/Planet.ts";
@@ -153,6 +154,9 @@ export class Game {
       throw new RendererUnavailable(e); // nothing was attached yet: a retry starts clean
     }
     installShaderMonitor(this.ctx);
+    // The funnel (#85): error reports carry the renderer from here on; a WebGL2 fallback says why.
+    beacon().gfx = { backend: this.ctx.webgpu ? "webgpu" : "webgl2", tier: this.ctx.tier };
+    if (this.ctx.start?.fallback) funnelStep("fallback", undefined, String(this.ctx.start.fallback));
     this.packs = createArtPacks(this.ctx.renderer);
     setAvatarTextureLowRes(this.ctx.tier === "low"); // 512² character textures on Low
     void preloadAvatars(); // character GLBs stream in while we connect and build the world
@@ -236,6 +240,7 @@ export class Game {
     if (!localStorage.getItem("fl.starter") && !automated) {
       hideLoading();
       this.firstChoice = (await this.hud.characterPick({ askName: needsName ? { suggested: info!.name } : undefined })) ?? undefined;
+      funnelStep("pick");
     } else if (needsName) {
       hideLoading(); // the name card sits in #ui, under the loading screen
       await pickDisplayName({ suggested: info!.name, dismissible: true });
@@ -269,6 +274,7 @@ export class Game {
     this.input.endFrame();
     if (!this.bench) this.input.lock();
     this.ctx.renderer.setAnimationLoop(() => this.frame());
+    markWorld(this.ctx.webgpu ? "webgpu" : "webgl2", this.ctx.tier); // the funnel's "world on screen" (#85)
     // On WebGL2 because WebGPU didn't start: ask WebGPU once more at a quiet moment (D-renderer-2).
     if (this.ctx.start) void webgpuSecondChance(this.ctx.start);
   }
@@ -399,6 +405,7 @@ export class Game {
       }
       hideLoading();
       this.stop();
+      funnelStep("lost");
       this.menu.showNotice("CONNECTION LOST", "Couldn't reach the server. Your character is safe.", "Try again", () => void this.resume());
     } finally {
       this.reconnecting = false;

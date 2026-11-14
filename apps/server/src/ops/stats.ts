@@ -9,14 +9,11 @@ import type { Identity } from "../auth/identity.ts";
 import {
   ACCOUNT_FUNNEL,
   agentSessionCount,
-  clientErrorReport,
-  funnelKpis,
-  funnelReport,
+  funnelWindows,
   retention,
   sessionStats,
   testSessionCount,
   VISIT_FUNNEL,
-  type Db,
   type FunnelKpi,
   type FunnelReport,
 } from "../db/index.ts";
@@ -46,16 +43,6 @@ function onlineNow(): { total: number; perBody: Record<string, number>; test: nu
     total += n;
   }
   return { total, perBody, test, agents };
-}
-
-/** The funnel (#85) over the last day, 7 days and all time: what /stats shows and `pnpm metrics` reads. */
-export function funnelWindows(db: Db, now = Date.now()) {
-  const windows = { day: funnelReport(db, now - DAY, now), week: funnelReport(db, now - 7 * DAY, now), all: funnelReport(db, 0, now) };
-  return {
-    windows,
-    kpis: { day: funnelKpis(windows.day), week: funnelKpis(windows.week), all: funnelKpis(windows.all) },
-    errors: { day: clientErrorReport(db, now - DAY), week: clientErrorReport(db, now - 7 * DAY), all: clientErrorReport(db, 0) },
-  };
 }
 
 const STEP_NAMES: Record<string, string> = {
