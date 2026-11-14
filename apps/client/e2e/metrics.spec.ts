@@ -23,6 +23,8 @@ interface Resources {
   requests: number;
   transferKB: number;
   decodedKB: number;
+  /** The 15 largest over the wire: path (no query) and KB. */
+  top: [string, number][];
 }
 
 /** Every resource the page fetched so far (the navigation included), from Resource Timing. */
@@ -36,6 +38,10 @@ function resources(page: Page): Promise<Resources> {
       requests: all.length,
       transferKB: kb(all.reduce((a, e) => a + (e.transferSize || 0), 0)),
       decodedKB: kb(all.reduce((a, e) => a + (e.decodedBodySize || 0), 0)),
+      top: [...all]
+        .sort((a, b) => (b.transferSize || 0) - (a.transferSize || 0))
+        .slice(0, 15)
+        .map((e) => [new URL(e.name).pathname, kb(e.transferSize || 0)] as [string, number]),
     };
   });
 }
@@ -93,17 +99,29 @@ async function visit(player: Player) {
   return { fcpMs, menuMs, playToWorldMs: Math.round(worldMs - playAt), navToWorldMs: worldMs, atMenu, atWorld, warm, afterWarmup: shaders.afterWarmup, heapMB: heap, webgpu: backend };
 }
 
-test("metrics · browser", { tag: ["@metrics"] }, async ({ player, page, context }, info) => {
+test("metrics · browser", { tag: ["@metrics"] }, async ({ player: fixturePlayer, page: fixturePage, context, browser }, info) => {
   test.skip(MODE !== "load" && MODE !== "frame", "set METRICS_MODE=load|frame (pnpm metrics --load / --frame)");
   test.setTimeout(30 * 60_000);
-  const out: Record<string, unknown> = { mode: MODE, project: info.project.name, tier: TIER, viewport: page.viewportSize() };
+  // METRICS_VIEWPORT=1920x1080 and METRICS_DPR=2 (frame mode): a window the size of a real one (#87),
+  // in a context of its own (same headless, muted browser) since a page can't change its pixel ratio.
+  const vp = /^(\d+)x(\d+)$/.exec(process.env.METRICS_VIEWPORT ?? "");
+  const dpr = Number(process.env.METRICS_DPR ?? 1);
+  let player = fixturePlayer;
+  let page = fixturePage;
+  if (MODE === "frame" && (vp || dpr !== 1)) {
+    const ctx = await browser.newContext({ viewport: vp ? { width: Number(vp[1]), height: Number(vp[2]) } : (page.viewportSize() ?? undefined), deviceScaleFactor: dpr });
+    page = await ctx.newPage();
+    const { Player: P } = await import("./player.ts");
+    player = new P(page, info, fixturePlayer.gfx);
+  }
+  const out: Record<string, unknown> = { mode: MODE, project: info.project.name, tier: TIER, viewport: page.viewportSize(), dpr };
   if (MODE === "load") {
     out.cold = await visit(player);
     // The same browser again: HTTP cache, Chrome's GPU program cache and the saved guest all warm.
     const page2 = await context.newPage();
     await page.close();
     const { Player: P } = await import("./player.ts");
-    out.warm = await visit(new P(page2, info, player.gfx));
+    out.warm = await visit(new P(page2, info, fixturePlayer.gfx));
     await page2.close();
   } else {
     const bodies = (process.env.METRICS_BODIES ?? "portus,arcadia,hollowmere,meridian").split(",").filter(Boolean);

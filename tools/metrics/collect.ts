@@ -12,7 +12,9 @@
 //   pnpm metrics --only frame          just the named group(s), comma-separated
 //   pnpm metrics --repeat 3            run each group 3 times: medians, and noise from the spread
 //   pnpm metrics --compare a.json b.json   deltas, flagging changes beyond each metric's noise (exit 1 on a regression)
+//   pnpm metrics --merge a.json b.json --out c.json   several runs (one per group) into one file
 // Options: --gfx webgpu|webgl (browser groups, default webgpu), --tier <tier>, --bodies portus,arcadia,
+//   --viewport 1920x1080 --dpr 2 (frame: a real window's size, #87), --flags a=b,c (extra URL flags),
 //   --seconds N (frame run length, default 20), --bots 1,25,50,100, --out <file>, --no-build, --json.
 // Browser groups use the journeys' stack on E2E_PORT/E2E_CLIENT_PORT (default 2612/5212); the server group
 // runs its own server on METRICS_SERVER_PORT (default 2622). Headless and muted, like every test browser.
@@ -175,7 +177,12 @@ function browserRun(mode: "load" | "frame", gfx: string, env: Record<string, str
     return null;
   }
   const j = JSON.parse(readFileSync(file, "utf8"));
+  // Keep the raw browser report (largest requests, warm-up phases) next to the results for digging.
+  mkdirSync(RESULTS, { recursive: true });
+  const raw = path.join(RESULTS, `raw-${mode}-${gfx}-${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
+  writeFileSync(raw, JSON.stringify(j, null, 1));
   rmSync(file, { force: true });
+  notes.push(`raw ${mode} report: ${path.relative(ROOT, raw)}`);
   return j;
 }
 
@@ -221,10 +228,13 @@ function frameGroup(notes: string[]): Metric[] {
   const out: Metric[] = [];
   const tier = opt("--tier", process.env.METRICS_TIER ?? "medium");
   for (const gfx of opt("--gfx", "webgpu").split(",")) {
-    const j = browserRun("frame", gfx, { METRICS_TIER: tier, METRICS_BODIES: opt("--bodies", "portus,arcadia,hollowmere,meridian"), METRICS_SECONDS: opt("--seconds", "20") }, notes);
+    const viewport = opt("--viewport"), dpr = opt("--dpr", "1");
+    const j = browserRun("frame", gfx, { METRICS_TIER: tier, METRICS_BODIES: opt("--bodies", "portus,arcadia,hollowmere,meridian"), METRICS_SECONDS: opt("--seconds", "20"), METRICS_VIEWPORT: viewport, METRICS_DPR: dpr, METRICS_FLAGS: opt("--flags") }, notes);
     if (!j) continue;
+    // The default window (1280×720 at DPR 1) keeps the plain id; another size is part of the id.
+    const size = viewport || dpr !== "1" ? `.vp${viewport || "1280x720"}d${dpr}` : "";
     for (const [body, b] of Object.entries(j.bodies as Record<string, any>)) {
-      const p = `frame.${gfx}.${tier}.${body}`;
+      const p = `frame.${gfx}.${tier}.${body}${size}`;
       out.push(
         m("frame", `${p}.fps`, b.fps.mean, "fps", "higher", 0.05),
         m("frame", `${p}.frame.p50`, b.frameMs.p50, "ms", "lower", 0.05),
@@ -236,6 +246,9 @@ function frameGroup(notes: string[]): Metric[] {
         m("frame", `${p}.draws`, b.draws.mean, "calls", "lower", 0.02),
         m("frame", `${p}.triangles`, b.triangles.mean / 1000, "ktris", "lower", 0.02),
         m("frame", `${p}.shader_builds`, b.shaderBuildsDuringRun, "builds", "lower", 0, 1),
+        // The drawing buffer after the resolution ladder (render/timing.ts) settled: it drops scale when frames run long.
+        m("frame", `${p}.pixel_ratio`, b.pixelRatio, "ratio", "higher", 0.02),
+        m("frame", `${p}.canvas_mpx`, (b.canvas[0] * b.canvas[1]) / 1e6, "Mpx", "higher", 0.02),
       );
       if (b.over) out.push(m("frame", `${p}.over33`, b.over[33], "frames", "lower", 0.5, 3), m("frame", `${p}.over50`, b.over[50], "frames", "lower", 0.5, 2), m("frame", `${p}.over100`, b.over[100], "frames", "lower", 0.5, 1));
       if (b.gpuBusyMs) out.push(m("frame", `${p}.gpu_busy.p50`, b.gpuBusyMs.p50, "ms", "lower", 0.1), m("frame", `${p}.gpu_busy.p95`, b.gpuBusyMs.p95, "ms", "lower", 0.2));
@@ -424,6 +437,18 @@ async function main() {
     if (has("--json")) console.log(JSON.stringify(d, null, 1));
     else printCompare(d, has("--all-rows"));
     process.exitCode = d.some((x) => x.verdict === "worse") ? 1 : 0;
+    return;
+  }
+
+  if (has("--merge")) {
+    // Several runs (e.g. one per group) into one file: metrics in order, the first run's machine and commit.
+    const files = argv.slice(argv.indexOf("--merge") + 1).filter((a) => !a.startsWith("--") && a !== opt("--out"));
+    const rs = files.map((f) => JSON.parse(readFileSync(f, "utf8")) as MetricsRun);
+    const merged: MetricsRun = { ...rs[0]!, groups: [...new Set(rs.flatMap((r) => r.groups))], repeat: Math.min(...rs.map((r) => r.repeat)), metrics: rs.flatMap((r) => r.metrics), notes: rs.flatMap((r) => r.notes) };
+    const errs = validateRun(merged);
+    if (errs.length) throw new Error(errs.join("\n"));
+    writeFileSync(opt("--out", "merged.json"), JSON.stringify(merged, null, 1) + "\n");
+    console.log(`merged ${merged.metrics.length} metrics from ${files.length} runs into ${opt("--out", "merged.json")}`);
     return;
   }
 
