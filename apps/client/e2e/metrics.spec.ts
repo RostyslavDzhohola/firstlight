@@ -148,7 +148,8 @@ test("metrics · browser", { tag: ["@metrics"] }, async ({ player: fixturePlayer
         // Only the recorded run (not loading or the shader warm-up): the bench overlay reads "BENCH <preset> <s> / <s> s" then.
         await page.waitForFunction(() => [...document.querySelectorAll("div")].some((d) => /^BENCH \w+ \d+\.\d \/ /.test(d.textContent ?? "")), null, { timeout: 10 * 60_000, polling: 100 });
         await cdp.send("HeapProfiler.enable");
-        await cdp.send("HeapProfiler.startSampling", { samplingInterval: 16384 });
+        // Collected objects too: per-frame garbage is what the profile is for (by default only survivors are reported).
+        await cdp.send("HeapProfiler.startSampling", { samplingInterval: 16384, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true });
       }
       await page.waitForFunction(() => (window as unknown as { __benchDone?: boolean }).__benchDone === true, null, { timeout: 10 * 60_000, polling: 1000 });
       runs[body] = await page.evaluate(() => (window as unknown as { __bench: unknown }).__bench);
