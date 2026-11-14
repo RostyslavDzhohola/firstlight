@@ -614,6 +614,22 @@ Sixers' black-and-grey "6" look, IOI branding and Sorrento-like leaders [12].
 | Scrapburst Grenade (tier as weapon) | 1/25 from listed enemies |
 | Planet cosmetics (any eligible enemy on that planet) | Arcadia Messenger's Winged Cap 1/150 · Hollowmere Crowbeak Mask 1/100 · Meridian Hard Hat (Oversight Issue) 1/75; also Petalwake Mask 1/180 on Arcadia and Fenweave Cape 1/160 on Hollowmere; each guaranteed independently after 3× its expected kills in one life (pity) |
 
+### 3.7 Wild sites (new, 2026-11-13, lane world, issue #72; code `packages/shared/src/content/wildSites.ts`)
+
+Built places out in the wilds, three per planet, each with a level band, a guardian and its pack (member 0, the guardian, holds the chest's key: the chest's loot lands on the chest when it falls, rolled like a camp chest at the guardian's level), and a discovery: feet within the site's footprint + 10 m pay XP once per life (30 % of `xpToNext(band low)`, rounded to 5) and add it to the map and the journal's Sites tab. Camp respawn (300 s). From each planet's easy site its landmark is in sight (under 300 m).
+
+| Site | Planet | Kind | Band | Guardian | Pack | Chest (coins · weapons · tonics · cosmetic) | Discovery XP |
+|---|---|---|---|---|---|---|---|
+| Bellwether Watch | Arcadia | watchtower (climb to the lookout, 6 m) | 2–3 | Linewyrm L3 | 4 Hopbit L2, 1 Sparkfly L3 | 25 · 0 · 1 | 40 |
+| Emberfall Keep | Arcadia | ruin | 4–5 | Pixel Lancer L5 | 2 Bomblet L4, 3 Hopbit L4, 1 Linewyrm L5 | 45 · 1 · 1 | 120 |
+| Skyhook Arch | Arcadia | landmark (24 m rock arch) | 6–7 | Cabinet Golem L7 | 2 Pixel Lancer L6, 2 Sparkfly L6, 1 Bomblet L7 | 80 · 1 · 2 · Voxel Visor 1/12 | 220 |
+| The Lantern Shrine | Hollowmere | shrine | 7–8 | Cantor L8 | 3 Bonewalker L7, 2 Marsh Wisp L7 | 70 · 0 · 1 | 280 |
+| The Sunken Barrow | Hollowmere | cave you walk into | 9–11 | Crypt Sentinel L11 | 3 Bonewalker L10, 2 Bone Archer L9 | 120 · 1 · 2 | 405 |
+| The Hollow Elm | Hollowmere | landmark (37 m dead tree) | 12–13 | Crypt Sentinel L13 | 1 Cantor L12, 2 Bone Archer L12, 3 Gnawer L12 | 200 · 1 · 2 · Crowbeak Mask 1/12 | 625 |
+| Relay Mast Four | Meridian | watchtower (climb to the deck, 6 m) | 13–14 | Enforcer L14 | 3 Associate L13, 1 Collector L13 | 150 · 1 · 1 | 705 |
+| The Foreclosed Depot | Meridian | ruin | 15–17 | Compliance Officer L17 | 2 Enforcer L16, 3 Associate L15, 1 Auditor L16 | 260 · 1 · 2 | 870 |
+| The Long Haul wreck | Meridian | landmark (40 m freighter hull) | 19–20 | Compliance Officer L20 | 2 Enforcer L19, 2 Auditor L19, 1 Collector L20 | 420 · 2 · 2 | 1,240 |
+
 ---
 
 ## 4. Bosses
@@ -1136,6 +1152,7 @@ not a trademark search.
 | The Three Gleams (2026-11-12) | Sela Marchbank, the Three Gleams, the Swift / Steadfast / Patient Gleam, gleam shard, the Gleam Vault, Gleamweave Cape, Gleamkeeper; Kite Season, The Long Vigil, vigil lamp | Original. Deliberately no keys, gates, egg-hunt or scoreboard-book wording from the well-known contest novel and film, and no names from it. Rejected: "Dawnshard" (a published novella), "Vaultwarden" (a software product), "Vance" and "Teague" as surnames (game and film characters), "Merriweather" (a film character). Reasoned check only |
 | Spells (new, 2026-11-12) | Aether; Skipstep, Frostbloom, Wishfall, Glasswing Ward | OK. "Aether" is the old word for the upper air (generic; many games use it as a common noun). "Glasswing" is a real butterfly. Rejected: "Starfall" (a World of Warcraft druid spell and a Warcraft III ability), "Blink" (Dota and Warcraft ability name), "Frost Nova" (Warcraft and Diablo), "Mana" (generic but every other game's word). Reasoned check only |
 | AI residents (2026-11-12, `tools/agent/residents.ts`) | Brindle_Oake, Tamsin_Hollis, Marlo_Thistle, Juniper_Fenn, Garnet_Moss, Hesper_Dunn, Sable_Finch, Corbin_Reed, Wendell_Crane, Odessa_Larch, Ptolemy_Birch, Isla_Thornby | OK (ordinary given names with plant, bird and tree surnames; none shares a word with a name already in the game, which `apps/server/test/residents.test.ts` checks). Rejected: "Fennick Shaw" (one step from a Star Wars bounty hunter), "Odessa Quill" (a Marvel surname), "Juniper Vane" (too close to Juno Vale, the Portus keeper), anything with "Wren" (the example player name) |
+| Wild sites (2026-11-13, §3.7) | Bellwether Watch, Emberfall Keep, Skyhook Arch, the Lantern Shrine, the Sunken Barrow, the Hollow Elm, Relay Mast Four, the Foreclosed Depot, the Long Haul wreck | OK. Plain English words and compounds; "skyhook" and "long haul" are generic terms, not titles; none names a known game, film or franchise place. |
 
 ---
 
