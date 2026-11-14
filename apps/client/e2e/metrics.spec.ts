@@ -65,14 +65,16 @@ async function pressPlay(player: Player): Promise<number> {
   const t = await player.now();
   await player.playButton().click();
   const pick = page.locator(".fl-charpick");
-  // A new guest gets the starter pick; a returning one goes straight to loading. Whichever comes first.
+  // A new guest gets the starter pick; a returning one goes straight into the game. Whichever comes
+  // first. The loading screen ("Loading the game…") and the game object both come before the pick,
+  // so only a running game means no pick is coming.
   let picked = false;
   for (const until = Date.now() + 45_000; Date.now() < until; await page.waitForTimeout(100)) {
     if (await pick.isVisible()) {
       picked = true;
       break;
     }
-    if ((await player.snap()).stage !== "landing") break;
+    if ((await player.snap()).stage === "playing") break;
   }
   if (picked) {
     await pick.locator(".fl-starter", { hasText: "Hexwick" }).click();
