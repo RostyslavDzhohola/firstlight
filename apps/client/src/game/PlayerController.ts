@@ -116,6 +116,12 @@ const _eyeDir = new THREE.Vector3();
 /** First person: the eye may back off a solid in front of it this far (m) behind the head's centre (the head is cut away). */
 export const EYE_BACKOFF = 0.3;
 /**
+ * Third person pressed in closer than this (m) to the head (a wall or a crate behind the player): the
+ * camera moves to the eyes instead, the head cut away, until its line is clear past CLOSE_OUT (#34).
+ */
+export const CLOSE_IN = 0.6;
+export const CLOSE_OUT = 0.9;
+/**
  * The camera stops this far (m) short of a structure between the head and where it would be; with
  * the player pressed against a wall (the wall under CAMERA_WALL_GAP × 2 behind the head) it keeps half
  * the way to the wall instead, so the lens never ends up inside the wall (browser check, round 2).
@@ -168,6 +174,9 @@ export class PlayerController {
   dead = false;
   /** 0 third person … 1 first person: where the camera is on its way between the two. */
   viewBlend = 0;
+  /** 0 … 1: third person squeezed against the head, framed from the eyes instead (CLOSE_IN, #34). */
+  closeBlend = 0;
+  private closeGoal = 0;
   /** The scroll wheel changed the view (Game stores the choice). */
   onViewChange: ((v: ViewMode) => void) | null = null;
   /** The first-person eye (feet-relative, eased) and the head it follows (Game sets it from the avatar each frame). */
@@ -301,6 +310,12 @@ export class PlayerController {
     this.shoulder = this.shoulderGoal = 1;
     this.pinnedT = 0;
     this.eye.snap();
+    this.closeBlend = this.closeGoal = 0;
+  }
+
+  /** How far the camera is towards the eye framing (first person, or third squeezed against the head). */
+  get eyeBlend(): number {
+    return Math.max(this.viewBlend, this.closeBlend);
   }
 
   /** The view the camera is heading to now (the choice, unless a state pulls it out: game/view.ts viewFor). */
@@ -653,25 +668,38 @@ export class PlayerController {
   placeCamera(camera: THREE.PerspectiveCamera, dt = 1 / 60) {
     const t = Math.max(0, dt);
     const wantFirst = this.viewNow === "first";
-    const was = this.viewBlend;
+    const was = this.eyeBlend;
+    const wasView = this.viewBlend;
     this.viewBlend = stepBlend(this.viewBlend, wantFirst ? 1 : 0, t);
-    if (was === 0 && this.viewBlend > 0) this.eye.snap();
     // Leaving first person: the third-person camera grows back out from the head (eased, never through a wall).
-    if (was === 1 && this.viewBlend < 1) this.camReach = this.lensReach = 0;
+    if (wasView === 1 && this.viewBlend < 1) this.camReach = this.lensReach = 0;
     const up = _up.copy(this.pos).normalize();
     const right = _right.crossVectors(this.camForward, up).normalize();
     const look = _look.copy(this.camForward).applyAxisAngle(right, this.camPitch);
-    if (this.viewBlend > 0) this.placeEye(camera, up, right, look, t);
     if (this.viewBlend >= 1) {
       // All the way in: the eye only, no third-person line to check.
+      this.closeBlend = this.closeGoal = 0;
+      if (was === 0) this.eye.snap();
+      this.placeEye(camera, up, right, look, t);
       camera.position.copy(_eye);
       camera.up.copy(up);
       camera.lookAt(_eyeTarget);
       return;
     }
     this.placeThird(camera, up, right, look, t);
-    if (this.viewBlend > 0) {
-      const k = smoothBlend(this.viewBlend);
+    // Squeezed against the head: frame from the eyes until the line behind is clear again (#34).
+    const near = _cam.distanceTo(_head);
+    if (wantFirst) this.closeGoal = 0;
+    else if (near < CLOSE_IN) this.closeGoal = 1;
+    else if (near > CLOSE_OUT) this.closeGoal = 0;
+    if (this.closeGoal || this.closeBlend > 0 || this.viewBlend > 0) {
+      if (was === 0) this.eye.snap();
+      // The eyes only if they have a clear view themselves; else the third-person lens stays (it is clear).
+      if (!this.placeEye(camera, up, right, look, t) && !wantFirst) this.closeGoal = 0;
+    }
+    this.closeBlend = stepBlend(this.closeBlend, this.closeGoal, t);
+    const k = smoothBlend(this.eyeBlend);
+    if (k > 0) {
       _cam.lerp(_eye, k);
       _target.lerp(_eyeTarget, k);
     }
@@ -685,22 +713,32 @@ export class PlayerController {
    * (eased, no sway or roll: game/view.ts EyeFollow), a little in front of the face. A solid right in
    * front (pressed against a wall) backs the eye off along the heading until the near plane is clear.
    */
-  private placeEye(camera: THREE.PerspectiveCamera, up: THREE.Vector3, right: THREE.Vector3, look: THREE.Vector3, t: number) {
+  private placeEye(camera: THREE.PerspectiveCamera, up: THREE.Vector3, right: THREE.Vector3, look: THREE.Vector3, t: number): boolean {
     if (this.hasHead) {
       const d = _eyeDir.copy(this.headPoint).sub(this.pos);
       this.eye.follow(d.dot(up), d.dot(this.camForward), d.dot(right), t);
     } else this.eye.rest(rideCamera(this.rideBlend).lift, t);
     const base = _eyeBase.copy(this.pos).addScaledVector(up, this.eye.up).addScaledVector(right, this.eye.side);
     const ahead = this.eye.forward + VIEW.eyeForward;
-    _eye.copy(base).addScaledVector(this.camForward, ahead);
-    _eyeTarget.copy(_eye).addScaledVector(look, 6);
-    if (!this.lensBlocked(camera, _eye, _eyeTarget, up)) return;
-    // In steps back along the heading, down to EYE_BACKOFF behind the head's centre.
-    for (let back = ahead - CAMERA_LENS_STEP; back >= -EYE_BACKOFF - 1e-6; back -= CAMERA_LENS_STEP) {
-      _eye.copy(base).addScaledVector(this.camForward, back);
+    // From in front of the face back along the heading, down to EYE_BACKOFF behind the head's centre:
+    // the first spot nothing stands between the head and, with the whole near plane clear.
+    for (let along = ahead; along >= -EYE_BACKOFF - 1e-6; along -= CAMERA_LENS_STEP) {
+      _eye.copy(base).addScaledVector(this.camForward, along);
       _eyeTarget.copy(_eye).addScaledVector(look, 6);
-      if (!this.lensBlocked(camera, _eye, _eyeTarget, up)) return;
+      if (this.eyeReachable(base, _eye) && !this.lensBlocked(camera, _eye, _eyeTarget, up)) return true;
     }
+    // Nowhere clear (a face in a wall under a low beam): at the head's centre, the best there is.
+    _eye.copy(base);
+    _eyeTarget.copy(_eye).addScaledVector(look, 6);
+    return false;
+  }
+
+  /** Nothing solid between the head's centre `base` and the eye at `p` (with the lens pad). */
+  private eyeReachable(base: THREE.Vector3, p: THREE.Vector3): boolean {
+    const d = _eyeDir.copy(p).sub(base);
+    const l = d.length();
+    if (l < 1e-6) return true;
+    return this.cameraHit(base, d.divideScalar(l), l + CAMERA_LENS_PAD) > l + CAMERA_LENS_PAD;
   }
 
   /** The over-the-shoulder camera into `_cam`, its look target into `_target`. */

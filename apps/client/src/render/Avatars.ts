@@ -148,8 +148,49 @@ const _m = new THREE.Matrix4();
 const _d = new THREE.Vector3();
 /** The rez light leans from the palette's accent towards this. */
 const _rezTint = new THREE.Color(0xbfefff);
-/** The first-person head cut reaches this far (m) past the crown and the face: hair, ears, a hat's brim. */
-const HEAD_CUT_MARGIN = 0.07;
+/** The first-person head cut reaches this far (m) past the head's own vertices (and the crown and face sockets). */
+const HEAD_CUT_MARGIN = 0.04;
+/**
+ * Per model (MODEL_FILES index): the sphere round every vertex the head carries (hair, ears, a hat's
+ * brim, a beak): its centre in the Head bone's space and its radius in model units. Measured once from
+ * the rest pose (headCutOf).
+ */
+const HEAD_CUTS = new Map<number, { centre: THREE.Vector3; r: number } | null>();
+
+/**
+ * The sphere round the vertices skinned mostly (half or more) to `head` or the bones under it, in the
+ * model at rest (unscaled, identity transform): centre in `head`'s space, radius in model units.
+ */
+function headCutOf(model: THREE.Object3D, head: THREE.Object3D): { centre: THREE.Vector3; r: number } | null {
+  const pts: THREE.Vector3[] = [];
+  const box = new THREE.Box3();
+  model.traverse((o) => {
+    const sm = o as THREE.SkinnedMesh;
+    if (!sm.isSkinnedMesh || !sm.skeleton) return;
+    const mine = new Set<number>();
+    sm.skeleton.bones.forEach((b, i) => {
+      for (let p: THREE.Object3D | null = b; p; p = p.parent) if (p === head) return void mine.add(i);
+    });
+    const pos = sm.geometry.getAttribute("position");
+    const si = sm.geometry.getAttribute("skinIndex");
+    const sw = sm.geometry.getAttribute("skinWeight");
+    if (!pos || !si || !sw || !mine.size) return;
+    for (let v = 0; v < pos.count; v++) {
+      let w = 0;
+      for (let k = 0; k < 4; k++) if (mine.has(si.getComponent(v, k))) w += sw.getComponent(v, k);
+      if (w < 0.5) continue;
+      // Skinned where the bones are now (the rest pose), then into the model's space.
+      const q = sm.getVertexPosition(v, new THREE.Vector3()).applyMatrix4(sm.matrixWorld);
+      pts.push(q);
+      box.expandByPoint(q);
+    }
+  });
+  if (!pts.length) return null;
+  const c = box.getCenter(new THREE.Vector3());
+  let r = 0;
+  for (const q of pts) r = Math.max(r, q.distanceTo(c));
+  return { centre: head.worldToLocal(c), r };
+}
 /** A move of more than this in one frame is a teleport (m): the fastest horse covers under 1 m. */
 export const TELEPORT_M = 8;
 
@@ -550,8 +591,11 @@ export class AvatarView {
     bone.updateWorldMatrix(true, true);
     face.getWorldPosition(eye);
     crown.getWorldPosition(_d);
-    bone.getWorldPosition(centre).add(_d).multiplyScalar(0.5);
-    return Math.max(centre.distanceTo(_d), centre.distanceTo(eye)) + HEAD_CUT_MARGIN;
+    const cut = HEAD_CUTS.get(this.modelIdx);
+    if (cut) centre.copy(cut.centre).applyMatrix4(bone.matrixWorld);
+    else bone.getWorldPosition(centre).add(_d).multiplyScalar(0.5);
+    const scale = MODEL_SCALE[this.modelIdx] ?? 1;
+    return Math.max(centre.distanceTo(_d), centre.distanceTo(eye), (cut?.r ?? 0) * scale) + HEAD_CUT_MARGIN;
   }
 
   /** Place at a planet-space position, standing on local up, facing a tangent direction. */
@@ -753,6 +797,9 @@ export class AvatarView {
       bone.add(sock);
       this.sockets.set(name, sock);
     }
+    // The first-person head cut's sphere, once per model (only the local player's avatar uses it).
+    const head = bones.get("Head");
+    if (head && !HEAD_CUTS.has(this.modelIdx)) HEAD_CUTS.set(this.modelIdx, headCutOf(model, head));
     model.scale.setScalar(s);
     model.updateMatrixWorld(true);
   }

@@ -936,11 +936,12 @@ export class Game {
       // First person follows the drawn head (its face socket); dead, the camera pulls out (game/view.ts).
       const p = this.player;
       p.dead = !!this.combat.deadUntilRespawn;
-      const r = (p.viewNow === "first" || p.viewBlend > 0) && this.self ? this.self.firstPersonHead(this.eyeAt, this.headCut.centre) : 0;
+      // (Also in third person: squeezed against a wall it frames from the eyes too, PlayerController CLOSE_IN.)
+      const r = this.self ? this.self.firstPersonHead(this.eyeAt, this.headCut.centre) : 0;
       p.setHead(r > 0 ? this.eyeAt : null);
       p.placeCamera(this.ctx.camera, dt);
       // Nearly in: the body stays and only the head is cut away; on the way the near-camera fade dissolves it all.
-      if (p.viewBlend > 0.85) this.headCut.radius = r;
+      if (p.eyeBlend > 0.85) this.headCut.radius = r;
     }
     // Trees, rocks and props between the camera and the player dissolve (not in photo mode or the bench).
     // The cone aims at the drawn avatar's chest bone: in the saddle that's ~0.8 m higher than on foot.
