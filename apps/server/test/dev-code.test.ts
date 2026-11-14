@@ -107,7 +107,8 @@ describe("the code on a local development server (#84)", () => {
   it("refuses a loopback hop that forwards someone else (a proxy on the same machine)", async () => {
     server = await startAuthServer({ devCodeRoute: true });
     await sendCode(server, "proxied@example.test");
-    for (const h of [{ "x-forwarded-for": "203.0.113.9" }, { "x-real-ip": "203.0.113.9" }, { forwarded: "for=203.0.113.9" }, { "x-forwarded-for": "127.0.0.1, 203.0.113.9" }]) {
+    const hops: Record<string, string>[] = [{ "x-forwarded-for": "203.0.113.9" }, { "x-real-ip": "203.0.113.9" }, { forwarded: "for=203.0.113.9" }, { "x-forwarded-for": "127.0.0.1, 203.0.113.9" }];
+    for (const h of hops) {
       const res = await get(server, "127.0.0.1", "proxied@example.test", h);
       expect(res.status, JSON.stringify(h)).toBe(404);
     }
