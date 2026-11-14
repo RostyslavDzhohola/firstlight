@@ -163,6 +163,43 @@ make them a coin faucet (F12 review).
 | The horse | Never a target, never saved. Leaves 30 s after you get off, and at once when you die, log out, drop your connection, travel (portal or pad fast travel; any teleport), or lose the whistle (sold, dropped). A rider who leaves outside a safe zone lingers on foot |
 | Coats | Six (chestnut, bay, grey, palomino, black, white), each with its own blanket colour; your coat is fixed by your account id |
 
+### 1.7 Build tree (issue #81; code: `packages/shared/src/content/tree.ts`) (new)
+
+Every level past the first gives **one point** (19 at level 20). Points go into five open branches in any
+mix; inside a branch the nodes are taken top-down (a node needs the one above it) and cost **1, 2, 3, 3**
+points by row, so the whole tree (39 points) is about twice what a level-20 character has: two branches to
+the bottom, or the top of everything. Points are lost with the level when you die (a rebirth has none).
+The server decides every spend and respec and saves the tree with the character (migration 12, table
+`character_tree`). Panel: **U**, or Esc → Build on any device.
+
+| Branch | Row | Node | Cost | Effect |
+|---|---|---|---|---|
+| Body | 1 | Hardy | 1 | Max HP ×1.12 (on the starter's level curve) |
+| Body | 2 | Second Roll | 2 | Hold **two** dodge rolls; each comes back one dodge cooldown after it was used (the movement budget holds a roll per charge) |
+| Body | 3 | Tonic Craft | 3 | Tonics heal ×1.4 and **end a running slow/chill and a burn** |
+| Body | 4 | Last Breath | 3 | A blow from someone that would kill leaves 1 HP instead, once per 90 s (falls are not saved). Regeneration is untouched: no Body node heals inside a fight (§1.1) |
+| Blade | 1 | Keen Edge | 1 | Melee damage ×1.1 |
+| Blade | 2 | Cleave | 2 | Each swing hits **one more** target, arc +30° |
+| Blade | 3 | Iron Guard | 3 | Block +15 points (a Sunbrand blocks 85% instead of 70%), capped at 90% |
+| Blade | 4 | Riposte | 3 | Heavy-attack cooldowns ×0.65 (the axe's chop and the hammer's slam: 6 s → 3.9 s) |
+| Bow and gun | 1 | Steady Hands | 1 | Ranged-class damage ×1.1 (guns, bows, crossbow, kunai, launcher; not magic weapons) |
+| Bow and gun | 2 | Quick Hands | 2 | Reloads ×0.7, bow draw ×0.75 |
+| Bow and gun | 3 | Far Sight | 3 | Gun falloff starts ×1.4 farther and the hitscan reach stretches with it |
+| Magic | 1 | Attuned | 1 | Spell power ×1.1 (Frostbloom, Wishfall, the ward's shell), on top of the starter's |
+| Magic | 2 | Quickened | 2 | Spell cooldowns ×0.75 |
+| Magic | 3 | Deep Well | 3 | Aether refill ×1.4 (6 → 8.4 a second) |
+| Magic | 4 | Cool Head | 3 | Magic weapons fire ×1.5 shots before overheating (rounded) |
+| Travel | 1 | Long Stride | 1 | Run and sprint ×1.06 on foot |
+| Travel | 2 | Far Step | 2 | Skipstep reaches 15 m (base 10 m) |
+| Travel | 3 | Featherfall | 3 | Falls do no damage up to 14 m (base 8 m), then 8% a metre as before |
+
+**Respec:** in a safe zone (the Portus town or a pad ring, out of combat), **10 ◎ per point spent**;
+every point comes back at once. **Balance** (`pnpm balance`, "Build tree"): a plain build, a build focused on
+each branch first and a spread build, at levels 5, 10 and 20, each hold the D-balance-4 hard floor (no
+kill of the most fragile plain starter in under 0.75 s or in one hit, server cadence, heavies, specials and
+headshots) and a duel edge over plain (best class damage × HP with rolls) of 1.00–1.45; Attuned keeps the
+spell one-shot and opening-pair checks.
+
 ---
 
 ## 2. Weapons

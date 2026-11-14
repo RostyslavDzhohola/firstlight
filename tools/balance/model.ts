@@ -17,6 +17,7 @@ import { MISSIONS } from "../../packages/shared/src/content/missions.ts";
 import { siteDiscoveryXp, WILD_SITES, type WildSiteDef } from "../../packages/shared/src/content/wildSites.ts";
 import { STARTER_STATS, starterMaxHp, starterMove, starterSpellPower } from "../../packages/shared/src/content/starters.ts";
 import { FROSTBLOOM, SPELL_BY_ID, spellDamage, wardShell, WISHFALL } from "../../packages/shared/src/content/spells.ts";
+import { BRANCHES, buildStats, NEUTRAL_BUILD, playerMaxHp, spendRefusal, TREE, weaponHeat, type BranchId, type BuildStats } from "../../packages/shared/src/content/tree.ts";
 
 // ------------------------------------------------------------------------------------ weapons
 
@@ -70,6 +71,8 @@ export interface TimelineOptions {
   distance?: number;
   /** Default "client". */
   cadence?: Cadence;
+  /** The attacker's build tree (content/tree.ts, #81): its damage, heavy cooldown, reload, draw and heat, as combat.ts applies them. */
+  build?: BuildStats;
 }
 
 export function hitTimeline(def: WeaponDef, tierIndex: number, level: number, policy: Policy, horizon = 60, opts: TimelineOptions = {}): Hit[] {
@@ -79,7 +82,14 @@ export function hitTimeline(def: WeaponDef, tierIndex: number, level: number, po
   const ck = server ? SERVER_CHARGE_ALLOWANCE : 1;
   const flight = (w: WeaponDef) => (opts.distance && (w.delivery === "projectile" || w.delivery === "arrow") ? opts.distance / (w.speed ?? 30) : 0);
   const tier = def.tiers[tierIndex]!;
-  const lvl = damageMult(level);
+  // The build tree (#81) as combat.ts reads it: Blade and Bow-and-gun damage by weapon class, Riposte's heavy
+  // cooldown, Quick Hands' reload (ranged) and draw, Cool Head's heat. The Ember Seal (magic) takes no branch damage.
+  const b = opts.build ?? NEUTRAL_BUILD;
+  const sealLvl = damageMult(level);
+  const lvl = sealLvl * (def.cls === "melee" ? b.meleeDamage : def.cls === "ranged" ? b.rangedDamage : 1);
+  const drawS = (tier.draw ?? 1) * b.draw;
+  const reloadS = (tier.reload ?? 1.5) * (def.cls === "ranged" ? b.reload : 1);
+  const heatCap = tier.heat === undefined ? undefined : weaponHeat(tier.heat, b);
   const hits: Hit[] = [];
   const round = (x: number) => Math.max(1, Math.round(x));
   // combat.ts weakMult: every projectile, pellet and hitscan hit on the head takes the tier's headMult (1.5 default).
@@ -106,7 +116,7 @@ export function hitTimeline(def: WeaponDef, tierIndex: number, level: number, po
     if (seal && sealCdAt <= t + 1e-9 && sealAt(t) > s + 1e-9) {
       const st = seal.tiers[tierIndex]!;
       // The fireball's head hit takes the seal tier's own headMult (combat.ts weakMult on the projectile's tier).
-      hits.push({ t: s + flight(seal), dmg: round(st.damage * lvl * (policy === "best" ? (st.headMult ?? 1.5) : 1)), burn: st.burn });
+      hits.push({ t: s + flight(seal), dmg: round(st.damage * sealLvl * (policy === "best" ? (st.headMult ?? 1.5) : 1)), burn: st.burn });
       sealCdAt = s + tier.cooldown!;
       last = s;
       t = Math.max(t, s + tier.rate * rk);
@@ -116,14 +126,14 @@ export function hitTimeline(def: WeaponDef, tierIndex: number, level: number, po
     let gap = tier.rate * rk;
     if (def.delivery === "arrow") {
       // Full draws only: the server times the draw from the charge start, restarted after each shot (exact).
-      gap = Math.max(tier.rate * rk, tier.draw ?? 1);
-      if (t === 0 && !preheld) at = tier.draw ?? 1;
+      gap = Math.max(tier.rate * rk, drawS);
+      if (t === 0 && !preheld) at = drawS;
     } else if (tier.heavy !== undefined && policy !== "plain" && heavyReadyAt <= t) {
       // Charged heavy (axe chop, hammer slam): every melee resets the charge, so it is held from the last hit.
       // Heavy first: a light then a heavy is never quicker (its gap is max(rate, charge), the other way the rate).
       dmg = tier.heavy;
       if (t > 0 || !preheld) at = Math.max(t, (t > 0 ? last : 0) + (tier.heavyTime ?? 1) * ck);
-      if (tier.cooldown) heavyReadyAt = at + tier.cooldown;
+      if (tier.cooldown) heavyReadyAt = at + tier.cooldown * b.heavyCooldown;
     } else if (def.delivery === "pellets") {
       dmg = tier.damage * (tier.pellets ?? 6);
     } else if (def.delivery === "thrown" && ++thrown > def.stack) break;
@@ -134,12 +144,12 @@ export function hitTimeline(def: WeaponDef, tierIndex: number, level: number, po
       mag -= 1;
       if (mag <= 0) {
         mag = tier.mag;
-        ready = Math.max(ready, at + (tier.reload ?? 1.5));
+        ready = Math.max(ready, at + reloadS);
       }
     }
-    if (tier.heat !== undefined) {
+    if (heatCap !== undefined) {
       heat = Math.max(0, heat - (last === -Infinity ? 0 : at - last)) + 1;
-      if (heat >= tier.heat) {
+      if (heat >= heatCap) {
         heat = 0;
         ready = Math.max(ready, at + OVERHEAT_S);
       }
@@ -975,3 +985,108 @@ export function affordability(rows = progression()): Affordability[] {
 
 export type { TierStats };
 export { median };
+
+// ------------------------------------------------------------------------------------ build tree (#81)
+
+/** The levels the build checks run at (the brief: 5, 10 and 20). */
+export const BUILD_LEVELS = [5, 10, 20] as const;
+
+/** Take the node `pick` names, again and again, while one can be taken (`pick` sees the level's points through spendRefusal). */
+function greedy(pick: (taken: readonly string[]) => string | null): string[] {
+  const taken: string[] = [];
+  for (let guard = 0; guard < TREE.length; guard++) {
+    const next = pick(taken);
+    if (!next) break;
+    taken.push(next);
+  }
+  return taken;
+}
+
+const nextIn = (level: number, taken: readonly string[], branch: BranchId) =>
+  TREE.filter((n) => n.branch === branch).sort((a, b) => a.row - b.row).find((n) => spendRefusal(level, taken, n.id) === null)?.id ?? null;
+
+export interface BuildDef {
+  /** "plain", "focused:<branch>" or "spread". */
+  id: string;
+  name: string;
+  nodes(level: number): string[];
+}
+
+/**
+ * The builds the model holds to its bands: none spent; one branch to the bottom and then the next
+ * (each branch first in turn); and a spread that takes the next row of every branch in turn.
+ */
+export const BUILDS: readonly BuildDef[] = [
+  { id: "plain", name: "plain", nodes: () => [] },
+  ...BRANCHES.map((br): BuildDef => ({
+    id: `focused:${br.id}`,
+    name: `focused ${br.name}`,
+    nodes: (level) => greedy((taken) => nextIn(level, taken, br.id) ?? BRANCHES.map((o) => nextIn(level, taken, o.id)).find((x) => x) ?? null),
+  })),
+  {
+    id: "spread", name: "spread",
+    nodes: (level) => greedy((taken) => {
+      // The branch with the fewest nodes so far that can still take one (ties: BRANCHES order).
+      const counts = BRANCHES.map((br) => ({ br, n: taken.filter((id) => TREE.find((t) => t.id === id)!.branch === br.id).length }));
+      for (const { br } of counts.sort((a, b) => a.n - b.n)) {
+        const id = nextIn(level, taken, br.id);
+        if (id) return id;
+      }
+      return null;
+    }),
+  },
+];
+
+/** Weapons each build fights with: its branch's families (Blade: melee; Bow and gun: ranged; Magic: magic), every combat family otherwise. */
+function buildFamilies(b: BuildDef): readonly Family[] {
+  const branch = b.id.startsWith("focused:") ? b.id.slice(8) : null;
+  const cls = branch === "blade" ? "melee" : branch === "aim" ? "ranged" : branch === "magic" ? "magic" : null;
+  return COMBAT_FAMILIES.filter((f) => f !== "fists" && (!cls || WEAPONS.find((w) => w.id === f)!.cls === cls));
+}
+
+export interface BuildRow {
+  build: string;
+  level: number;
+  nodes: string[];
+  points: number;
+  /** Max HP of a base starter with this build, and the plain value. */
+  hp: number;
+  plainHp: number;
+  /** Fastest kill of the most fragile plain starter at this level, by any family the build fights with (server cadence, heavies, specials, headshots; s). */
+  fastestTtk: number;
+  fastestFamily: string;
+  fastestHits: number;
+  /** Duel edge over the plain build: (best class damage × effective HP with rolls) ÷ the plain's. */
+  edge: number;
+}
+
+/** Effective HP multiplier from rolls with `charges` held (the upper bound: every charge spent as soon as it is back). */
+export const rollFactor = (cooldown: number, charges: number) => dodgeFactor(cooldown / Math.max(1, charges));
+
+export function buildRows(): BuildRow[] {
+  const rows: BuildRow[] = [];
+  const unit7 = 3; // the steady reference starter (base HP, base pace)
+  for (const level of BUILD_LEVELS) {
+    const frail = frailHp(level);
+    for (const b of BUILDS) {
+      const nodes = b.nodes(level);
+      const st: BuildStats = buildStats(nodes);
+      let best = { t: Infinity, family: "", hits: 0 };
+      for (const fam of buildFamilies(b)) {
+        const def = WEAPONS.find((w) => w.id === fam)!;
+        const hits = hitTimeline(def, gatedTier(level), level, "best", 120, { cadence: "server", build: st });
+        const k = timeToKill(hits, frail);
+        if (k && k.t - hits[0]!.t < best.t) best = { t: k.t - hits[0]!.t, family: fam, hits: k.hits };
+      }
+      const cd = starterMove(unit7).dodgeCooldown;
+      const offense = Math.max(st.meleeDamage, st.rangedDamage, st.spellPower);
+      const defense = (st.hp * rollFactor(cd, st.dodgeCharges)) / rollFactor(cd, 1);
+      rows.push({
+        build: b.name, level, nodes, points: nodes.reduce((n, id) => n + TREE.find((t) => t.id === id)!.cost, 0),
+        hp: playerMaxHp({ starter: unit7, level, tree: nodes }), plainHp: playerMaxHp({ starter: unit7, level }),
+        fastestTtk: best.t, fastestFamily: best.family, fastestHits: best.hits, edge: offense * defense,
+      });
+    }
+  }
+  return rows;
+}

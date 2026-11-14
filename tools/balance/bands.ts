@@ -7,8 +7,9 @@ import { maxHp, REGEN } from "../../packages/shared/src/content/progression.ts";
 import { STARTER_STATS, starterMaxHp } from "../../packages/shared/src/content/starters.ts";
 import {
   affordability, BURST_FAMILIES, bossRows, COMBAT_FAMILIES, creatureRows, dominations, duelResults, median, progression,
-  encounterGaps, pvpCell, PVP_LEVELS, regenSafety, roleLeaders, spellPeaks, weaponTable, type Family,
+  encounterGaps, pvpCell, PVP_LEVELS, regenSafety, roleLeaders, spellPeaks, weaponTable, buildRows, type Family,
 } from "./model.ts";
+import { buildStats } from "../../packages/shared/src/content/tree.ts";
 import { WISHFALL } from "../../packages/shared/src/content/spells.ts";
 
 export interface Check {
@@ -56,6 +57,8 @@ export const SPELL_POWER_BAND: [number, number] = [0.85, 1.15];
 /** §0's telegraph floor, held for spells too: a hit of this share of base HP or more warns for at least 1.2 s. */
 export const TELEGRAPH_SHARE = 0.4;
 export const TELEGRAPH_S = 1.2;
+/** #81: a build's duel edge over a plain character (best class damage × effective HP with rolls). */
+export const BUILD_EDGE: [number, number] = [1, 1.45];
 
 export function checks(): Check[] {
   const out: Check[] = [];
@@ -171,6 +174,17 @@ export function checks(): Check[] {
   STARTERS.forEach((s, i) => add({ id: `starter.${s.id}.role`, what: `${s.name} leads roles`, value: String(leads[i]), band: `1–${Object.keys(leaders).length - 1}`, ok: leads[i]! >= 1 && leads[i]! < Object.keys(leaders).length, source: "issue #9 (each plays differently, none strictly best)" }));
   const worst = Math.min(...duelResults().map((r) => Math.min(r.ratio, 1 / r.ratio)));
   add({ id: "starter.duels", what: "Most lopsided starter duel (loser's speed ÷ winner's)", value: fmt(worst), band: "≥ 0.6", ok: worst >= 0.6, source: "D-balance-4 (no hopeless matchup)" });
+
+  // --- the build tree (#81, content §1.6): plain, focused (each branch first) and spread builds at levels 5, 10 and 20
+  for (const r of buildRows()) {
+    const id = `build.${r.build.replace(/\s+/g, "-").toLowerCase()}.L${r.level}`;
+    add({ id: `${id}.floor`, what: `${r.build} build at level ${r.level}: fastest kill of the most fragile plain starter (${r.fastestFamily}, ${r.fastestHits} hits, server cadence)`, value: fmt(r.fastestTtk), band: `≥ ${STARTER_TTK_FLOOR} s and ≥ 2 hits`, ok: r.fastestTtk >= STARTER_TTK_FLOOR - 1e-9 && r.fastestHits >= 2, source: "D-balance-4 hard floor, held for every build" });
+    add({ id: `${id}.edge`, what: `${r.build} build at level ${r.level}: duel edge over plain (best damage × HP with rolls)`, value: fmt(r.edge), band: `${BUILD_EDGE[0]}–${BUILD_EDGE[1]}`, ok: inBand(r.edge, ...BUILD_EDGE), source: "#81 (a choice, not a lock-in: in band like a starter's light layer)" });
+  }
+  // Attuned on the strongest caster: still no spell one-shot, and the opening pair still doesn't kill.
+  const attuned = buildStats(["magic_attuned"]).spellPower;
+  add({ id: "build.spell.oneshot", what: "Largest spell hit with Attuned ÷ the most fragile starter's HP", value: fmt(peaks.hitOfFrail * attuned), band: `≤ ${BIGGEST_HIT}`, ok: peaks.hitOfFrail * attuned <= BIGGEST_HIT + 1e-9, source: "content §2.7 (no one-shots), #81" });
+  add({ id: "build.spell.pair", what: "Opening Frostbloom + Wishfall with Attuned ÷ the most fragile starter's HP", value: fmt(peaks.pairOfFrail * attuned), band: "< 1", ok: peaks.pairOfFrail * attuned < 1, source: "content §2.7, D-spells-9, #81" });
   return out;
 }
 

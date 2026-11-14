@@ -3,7 +3,7 @@
 // blocking, burn, healing. The room calls these from message handlers and the tick.
 
 import { damageMult, falloff, REGEN, splashFalloff } from "@firstlight/shared/content/progression";
-import { BLOCK_CAP, buildStats, playerMaxHp } from "@firstlight/shared/content/tree";
+import { BLOCK_CAP, buildStats, playerMaxHp, weaponHeat } from "@firstlight/shared/content/tree";
 import { WEAPONS, WEAPON_BY_ID, WEAPON_INDEX, type Destroys, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
 import type { Terrain } from "@firstlight/shared";
 import { NET } from "@firstlight/shared/net/protocol";
@@ -299,11 +299,6 @@ function markAttack(p: PlayerActor, now: number) {
     p.blocking = false; // no blocking while attacking
     p.state.flags &= ~PF.BLOCKING;
   }
-}
-
-/** Shots before a magic weapon overheats for this build (Cool Head, tree): the tier's, stretched and rounded. */
-export function weaponHeat(heat: number, build: { heat: number }): number {
-  return Math.round(heat * build.heat);
 }
 
 /** Rate limit, gates, magazine/heat. Mutates actor state when the attack is allowed. */

@@ -9,7 +9,7 @@ import { gatedTier } from "./model.ts";
 import { checks } from "./bands.ts";
 import {
   affordability, bossRows, COMBAT_FAMILIES, siteVisits, SITE_TRIP_S, creatureRows, duelWins, frailHp, novaHeadshotLevels, progression, pvpCell, PVP_LEVELS, roleLeaders,
-  encounterGaps, regenSafety, SPELL_LEVELS, spellPeaks, spellRows, starterRoles, weaponTable,
+  encounterGaps, regenSafety, SPELL_LEVELS, spellPeaks, spellRows, starterRoles, weaponTable, buildRows,
 } from "./model.ts";
 import { REGEN } from "../../packages/shared/src/content/progression.ts";
 
@@ -30,7 +30,7 @@ const all = checks();
 const failed = all.filter((c) => !c.ok);
 
 if (args.has("--json")) {
-  console.log(JSON.stringify({ weapons: weaponTable(), pvp: COMBAT_FAMILIES.flatMap((fam) => PVP_LEVELS.map((l) => pvpCell(fam, l))), creatures: creatureRows(), bosses: bossRows(), sites: siteVisits(), progression: progression(), shop: affordability(), starters: starterRoles(), spells: spellRows(), spellPeaks: spellPeaks(), checks: all }, null, 2));
+  console.log(JSON.stringify({ weapons: weaponTable(), pvp: COMBAT_FAMILIES.flatMap((fam) => PVP_LEVELS.map((l) => pvpCell(fam, l))), creatures: creatureRows(), bosses: bossRows(), sites: siteVisits(), progression: progression(), shop: affordability(), starters: starterRoles(), builds: buildRows(), spells: spellRows(), spellPeaks: spellPeaks(), checks: all }, null, 2));
 } else if (!args.has("--failures")) {
   console.log("# FIRSTLIGHT balance report (tools/balance; D-balance-1)");
   table("Weapon DPS at the tier's gate level (sustained: 60 s with reloads, heat and cooldowns; burst: first 3 s with headshots)",
@@ -88,6 +88,9 @@ if (args.has("--json")) {
   console.log("Known dip (D-spells-9, not a check): a Frostbloom and a Stillshot headshot landing together kill a full-HP equal-level target within 5 m at levels");
   for (const [i, s] of STARTERS.entries()) console.log(`  ${s.name.padEnd(12)} × ${f(starterSpellPower(i))}: base HP [${novaHeadshotLevels(starterSpellPower(i)).join(", ") || "none"}] · most fragile starter [${novaHeadshotLevels(starterSpellPower(i), frailHp).join(", ") || "none"}]`);
   console.log("\nRole leaders:", Object.entries(roleLeaders()).map(([k, v]) => `${k}: ${v.join(", ")}`).join(" · "));
+  table("Build tree (#81, content §1.6): plain, focused (each branch first) and spread builds on a base starter",
+    ["Build", "Level", "Points", "Max HP (plain)", "Fastest kill of the most fragile plain starter", "Duel edge", "Nodes"],
+    buildRows().map((r) => [r.build, r.level, r.points, `${r.hp} (${r.plainHp})`, `${f(r.fastestTtk)} s · ${r.fastestFamily} · ${r.fastestHits} hits`, f(r.edge), r.nodes.join(" ") || "none"]));
   console.log(`\n## Checks: ${all.length - failed.length}/${all.length} in band`);
 }
 if (!args.has("--json")) {

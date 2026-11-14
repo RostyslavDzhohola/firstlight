@@ -189,6 +189,11 @@ export function rollReady(times: readonly number[], now: number, cooldownMs: num
   return recent < Math.max(1, charges);
 }
 
+/** Shots before a magic weapon overheats for this build (Cool Head): the tier's, stretched and rounded. */
+export function weaponHeat(heat: number, build: Pick<BuildStats, "heat">): number {
+  return Math.round(heat * build.heat);
+}
+
 /** A caster's spell power: the starter's (content §8.5) times the Magic branch's. */
 export function casterPower(c: { starter: number; tree?: readonly string[] }): number {
   return starterSpellPower(c.starter) * buildStats(c.tree).spellPower;
