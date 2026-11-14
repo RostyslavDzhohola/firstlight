@@ -77,7 +77,7 @@ export interface GuideDef {
 
 export const GUIDES: Record<Exclude<BodyId, "portus">, GuideDef> = {
   arcadia: { id: "guide_arcadia", body: "arcadia", name: "Lark", role: "a young shepherd", greeting: "Mind the lake. And the sheep. Mostly the lake." },
-  hollowmere: { id: "guide_hollowmere", body: "hollowmere", name: "Sexton Mabry", role: "the chapel grave-keeper", greeting: "Every bell here rings for someone. Try not to make it you." },
+  hollowmere: { id: "guide_hollowmere", body: "hollowmere", name: "Sexton Mabry", role: "the chapel grave-keeper", greeting: "Every bell out here rings for somebody. I keep the list. Try not to be on it." },
   meridian: { id: "guide_meridian", body: "meridian", name: "Rook Calder", role: "an ex-Oversight courier", greeting: "Oversight runs this rock. I just run errands they'd rather I didn't." },
   lumen: { id: "guide_lumen", body: "lumen", name: "Surveyor Odile", role: "a stranded moon surveyor", greeting: "Jump gently. Up here you come down slower than your mistakes." },
 };
@@ -90,7 +90,7 @@ export const MISSIONS: readonly MissionDef[] = [
     objective: "Kill 8 Hopbits inside Clover Fields", recLevel: [1, 3],
     reward: { xp: 80, coins: 30, items: items(["tonic_small", 2]) },
     hunt: { targets: [{ npcKind: "hopbit", count: 8, label: "Hopbits" }], place: "clover_fields" },
-    pitch: "The Hopbits are chewing the clover to stubble. Thin them out for me?",
+    pitch: "Hopbits have eaten Clover Fields down to stubble. Eight fewer Hopbits and the clover might stand a chance.",
     routes: "Clover Fields' far edge looks down on Glasswater Lake, where coral spikes break the surface.",
   },
   {
@@ -98,7 +98,7 @@ export const MISSIONS: readonly MissionDef[] = [
     objective: "Pick up the Shepherd's Bell at the edge of Lacefall's plunge pool", recLevel: [2, 4],
     reward: { xp: 120, coins: 40, items: [] },
     find: { object: "a2_bell", itemName: "the Shepherd's Bell" },
-    pitch: "My flock's bell went down by Lacefall. Funny thing, it keeps ringing.",
+    pitch: "My flock's bell fell in by Lacefall. It's still ringing down there. Bells shouldn't do that.",
     routes: "Light motes drift out of a gap in the falling water.",
   },
   {
@@ -106,7 +106,7 @@ export const MISSIONS: readonly MissionDef[] = [
     objective: "Enter the 8 m trigger at the Gull Point overlook", recLevel: [3, 6],
     reward: { xp: 180, coins: 60, items: items(["tonic_large", 1]) },
     reach: { place: "gull_point_overlook", radius: 8 },
-    pitch: "Folks say the lake breathes. Don't swim at Gull Point.",
+    pitch: "Go up to the Gull Point overlook and watch the lake for me. Folk say it breathes. Don't swim.",
     routes: "Two Tide Stones sit on the shore below the overlook.",
   },
   {
@@ -122,7 +122,7 @@ export const MISSIONS: readonly MissionDef[] = [
     objective: "Pick up the ledger from the Drowned Chapel altar", recLevel: [8, 11],
     reward: { xp: 900, coins: 150, items: [] },
     find: { object: "h2_ledger", itemName: "the Sexton's Ledger" },
-    pitch: "My ledger of the buried is on the Drowned Chapel altar. Something guards it now.",
+    pitch: "I left my ledger on the Drowned Chapel altar. Every name I've buried is in it, and something's sitting on it now.",
     routes: "Three bell ropes hang beside the altar.",
   },
   {
@@ -130,7 +130,7 @@ export const MISSIONS: readonly MissionDef[] = [
     objective: "Reach the top platform of the Tolling Tower", recLevel: [9, 12],
     reward: { xp: 1100, coins: 180, items: [] },
     reach: { place: "tolling_tower", radius: 8 },
-    pitch: "Climb the Tolling Tower ramps and tell me what you see in the Nave.",
+    pitch: "Climb the Tolling Tower and look down into the Nave. Then come back and tell me I was wrong about what's in there.",
     routes: "The platform looks into the Hollow Nave's broken roof.",
   },
   {
@@ -169,7 +169,7 @@ export const MISSIONS: readonly MissionDef[] = [
     objective: "Gather the 5 torn kite panels the wind dropped in the meadow between Dawnpad and Clover Fields", recLevel: [1, 3],
     reward: { xp: 60, coins: 25, items: [] },
     collect: { pieces: ["a4_kite_1", "a4_kite_2", "a4_kite_3", "a4_kite_4", "a4_kite_5"], radius: 2.5, itemName: "kite panels" },
-    pitch: "The wind took my kite apart. The pieces glow a bit, they're lined. Follow the glow.",
+    pitch: "The wind took my kite apart and dropped it across the meadow. The panels glow a little. Follow the glow.",
     routes: "The meadow runs on into Clover Fields, where the Hopbits graze.",
   },
   {
@@ -193,7 +193,7 @@ export const MISSIONS: readonly MissionDef[] = [
     objective: "Run the eight lit rings around Highscore Hill, in order, within 75 seconds of the first", recLevel: [4, 7],
     reward: { xp: 300, coins: 80, items: [] },
     race: { rings: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => `t1_ring_${i}`), radius: 4.5, limitS: 75 },
-    pitch: "The first gleam never sits still. It runs a ring road on Arcadia; keep pace and it's yours.",
+    pitch: "The first gleam won't sit still. It runs the ring road round Highscore Hill. Keep up with it and it's yours.",
     routes: "The ring road circles Highscore Hill; its crowns of voxel creatures don't like runners.",
   },
   {

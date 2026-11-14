@@ -49,6 +49,7 @@ import { HitStop } from "./hitStop.ts";
 import { BootGate, isVersionRefusal, RendererUnavailable, shouldKeepReconnecting } from "./boot.ts";
 import { CombatClient } from "./CombatClient.ts";
 import { GameAudio } from "../audio/Audio.ts";
+import { stopSpeech } from "../audio/speech.ts";
 import { Input } from "./input.ts";
 import { installControls } from "./controls.ts";
 import { HOTKEYS } from "./keys.ts";
@@ -504,6 +505,7 @@ export class Game {
     await this.net.leave();
     for (const s of this.systems) s.dispose();
     this.systems = [];
+    stopSpeech(this.audio); // nobody from the last body talks on, and nothing they were loading plays here
     for (const a of this.avatars.values()) a.dispose();
     this.avatars.clear();
     for (const a of this.leaving) a.dispose();

@@ -62,7 +62,7 @@ describe("the lines", () => {
     expect(renderLine(where, { place: "my <script> house", dist: 24, dir: "north-east" })).toBeNull();
     expect(renderLine(where, { place: "the portal to Arcadia", dist: 2.5, dir: "north-east" })).toBeNull();
     expect(renderLine(where, { place: "the portal to Arcadia", dist: 24, dir: "up" })).toBeNull();
-    expect(renderLine(LINE_BY_ID.get("brindle.greet.1")!, { you: "Pip_Rowan", me: "Brindle_Oake" })).toMatch(/^Pip Rowan\. Brindle Oake\./);
+    expect(renderLine({ id: "test", voice: "brindle", topic: "greet", text: "{you}. {me}." }, { you: "Pip_Rowan", me: "Brindle_Oake" })).toBe("Pip Rowan. Brindle Oake.");
   });
 });
 
@@ -73,7 +73,7 @@ describe("speak", () => {
     const id = actor("TalkPal")!.id;
     expect((await res.agent.speak("tamsin.greet.1", { to: id })).ok).toBe(true);
     await waitFor(() => pal.heard.some((h) => h.text));
-    expect(pal.heard.find((h) => h.text)).toMatchObject({ name: "TalkRes", line: "tamsin.greet.1", toMe: true, text: "Oh, hello TalkPal! Stand still a moment, you're improving the view." });
+    expect(pal.heard.find((h) => h.text)).toMatchObject({ name: "TalkRes", line: "tamsin.greet.1", toMe: true, text: "Oh, hello. Don't move. The light's doing something lovely on your left side." });
     // Refusals: too soon after the last line, unknown lines, slots off the lists, people can't speak lines.
     const denied = (a: FirstlightAgent) => a.events.filter((e) => e.type === "denied").map((e) => e.text);
     await res.agent.speak("tamsin.doing.1");
@@ -109,7 +109,7 @@ describe("talking to a resident", () => {
       await wait(() => me.heard.filter((h) => h.toMe).length >= 2, 15_000, 'me.heard.filter((h) => h.toMe).length >= 2');
       const [greet, doing] = me.heard.filter((h) => h.toMe);
       expect(greet!.line).toMatch(/^marlo\.greet\./);
-      expect(greet!.text).toContain("PipRowan");
+      expect(greet!.text).toBe(LINE_BY_ID.get(greet!.line!)!.text); // greetings carry no name: they are spoken aloud
       expect(doing!.line).toMatch(/^marlo\.doing\./);
       // Help!: where to go for a level 1 (the portal to Arcadia), then a tip for that level.
       await me.agent.phrase("Help!");

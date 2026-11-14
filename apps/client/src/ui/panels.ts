@@ -16,7 +16,7 @@ import { uiSettings } from "./uiSettings.ts";
 import { spellCost, spellEffect, spellPower } from "../game/spellInfo.ts";
 import { SPELLS } from "@firstlight/shared/content/spells";
 import { LEVEL_CAP } from "@firstlight/shared/content/progression";
-import { GLEAMS, gleamsWon } from "@firstlight/shared/content/gleams";
+import { GLEAMS, gleamsWon, selaLine } from "@firstlight/shared/content/gleams";
 import type { InvItem } from "@firstlight/shared/net/protocol";
 import type { Game } from "../game/Game.ts";
 import type { Hud, YouPlus } from "./hud.ts";
@@ -32,6 +32,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", parent?: HT
 }
 
 const send = (game: Game, type: string, msg: unknown) => game.net.room?.send(type, msg as never);
+
 
 /** A modal panel. Only one is open at a time. */
 export class Panel {
@@ -74,9 +75,20 @@ export class Panel {
     document.exitPointerLock?.();
   }
 
+  /** Called once each time the panel closes (the character you were talking to says goodbye). */
+  onClosed: (() => void) | null = null;
+  /** Called when a mission is accepted here (its giver says the offer: game/npcTalk.ts). */
+  onAccept: ((missionId: string) => void) | null = null;
+
+  protected accept(missionId: string) {
+    send(this.game, "mission", { action: "accept", id: missionId });
+    this.onAccept?.(missionId);
+  }
+
   close(relock = true) {
     if (!this.isOpen) return;
     this.overlay.remove();
+    this.onClosed?.();
     window.removeEventListener("keydown", this.onKey, true);
     if (Panel.current === this) Panel.current = null;
     overlayClosed("panel");
@@ -144,6 +156,8 @@ function giverWhere(id: string): string {
  */
 export class GuidePanel extends Panel {
   private readonly body: Exclude<BodyId, "portus">;
+  /** What the guide said as you walked up (game/npcTalk.ts); the panel quotes it. */
+  line: string | null = null;
   constructor(game: Game, body: Exclude<BodyId, "portus">) {
     super(game);
     this.body = body;
@@ -156,14 +170,14 @@ export class GuidePanel extends Panel {
     b.innerHTML = "";
     el("h2", "", b, g.name.toUpperCase());
     el("p", "sub", b, `${g.role[0]!.toUpperCase()}${g.role.slice(1)} at the main pad`);
-    el("p", "quote", b, `“${g.greeting}”`);
+    el("p", "quote", b, `“${this.line ?? g.greeting}”`);
     const body = el("div", "body", b);
     for (const def of missionsFrom(g.id)) {
       missionCard(body, def, you, (row) => {
         el("span", "quote", row, `“${def.pitch}”`).style.margin = "0";
         const state = you?.missions.find((m) => m.id === def.id);
         if (!state) {
-          el("button", "btn", row, "Accept").onclick = () => send(this.game, "mission", { action: "accept", id: def.id });
+          el("button", "btn", row, "Accept").onclick = () => this.accept(def.id);
         } else if (!state.done) {
           el("button", "btn ghost", row, "Abandon").onclick = () => send(this.game, "mission", { action: "abandon", id: def.id });
         }
@@ -195,7 +209,7 @@ export class CuratorPanel extends Panel {
     el("p", "sub", b, `${c.role[0]!.toUpperCase()}${c.role.slice(1)} · ${GLEAMS.name}`);
     const won = gleamsWon(you?.missions ?? []);
     const opened = !!you?.gleamVault;
-    el("p", "quote", b, `“${opened ? GLEAMS.lines.opened : won >= GLEAMS.trials.length ? GLEAMS.lines.all : won > 0 ? GLEAMS.lines.some : GLEAMS.lines.none}”`);
+    el("p", "quote", b, `“${GLEAMS.lines[selaLine(won, opened)]}”`);
     const body = el("div", "body", b);
     const trials = missionsFrom(c.id);
     for (const def of trials) {
@@ -203,7 +217,7 @@ export class CuratorPanel extends Panel {
         el("span", "rw", row, `Trial ${def.trial}`); // the card's way line names the planet (D-polish-ux-3)
         el("span", "quote", row, `“${def.pitch}”`).style.margin = "0";
         const state = you?.missions.find((m) => m.id === def.id);
-        if (!state) el("button", "btn", row, "Accept").onclick = () => send(this.game, "mission", { action: "accept", id: def.id });
+        if (!state) el("button", "btn", row, "Accept").onclick = () => this.accept(def.id);
         else if (!state.done) el("button", "btn ghost", row, "Abandon").onclick = () => send(this.game, "mission", { action: "abandon", id: def.id });
       });
     }
