@@ -192,7 +192,7 @@ export const LOOKS: Record<BodyId, BodyLook> = {
     night: { zenith: 0x020308, mid: 0x050812, horizon: 0x0c1220, ground: 0x1e2026, moon: 0xb8e0ff, moonIntensity: 1.0, hemiSky: 0x3a5a8a, hemiGround: 0x18181c, hemiIntensity: 0.9, exposure: 1.35 },
     scatter: { rayleigh: [1, 1, 1], mie: 0, mix: 0 },
     skyPlanets: [
-      { body: "arcadia", sizeDeg: 14 },
+      { body: "arcadia", sizeDeg: 10 },
       { body: "portus", sizeDeg: 2.2 },
       { body: "hollowmere", sizeDeg: 4 },
       { body: "meridian", sizeDeg: 4.5 },

@@ -630,6 +630,36 @@ Built places out in the wilds, three per planet, each with a level band, a guard
 | The Foreclosed Depot | Meridian | ruin | 15–17 | Compliance Officer L17 | 2 Enforcer L16, 3 Associate L15, 1 Auditor L16 | 260 · 1 · 2 | 870 |
 | The Long Haul wreck | Meridian | landmark (40 m freighter hull) | 19–20 | Compliance Officer L20 | 2 Enforcer L19, 2 Auditor L19, 1 Collector L20 | 420 · 2 · 2 | 1,240 |
 
+
+### 3.8 Lumen, Arcadia's moon (new, 2026-11-13, lane sky, issue #6): the Dustborn
+
+R 240 m, 12 pads (no outposts, shop, eggs or boss), levels 6–9, **gravity 4.5 m/s² (a quarter of the
+base 18)**: the same 6.6 m/s jump rises ~4.8 m and hangs ~2.9 s, and the server's jump envelope and
+fall damage use the body's pull (a drop hurts by its landing speed: 8 m of free fall here is 32 m).
+Reached through the moon portal across Dawnpad on Arcadia; Lumen's one portal goes back to Arcadia.
+No air: always clear, a black sky, Arcadia hanging still 36° up, about 20° across.
+
+| Area | Type | Enemy Lv | Spawns |
+|---|---|---|---|
+| Moonfall Pad (main pad, guide Surveyor Odile) | safe ring | – | none; 3 Glimmerhop L6 at 55 m |
+| the Hush | dry basin (mid of pads 3 and 7) | 7–9 | Glimmerhop packs of 3–5; Dustmoth pairs with 1–2 Glimmerhops |
+| wilds (density 0.45) | craters | 6–9 by distance | Glimmerhops 3–5, Dustmoths 2–3, mixed |
+
+| Enemy | Tier | Lv | HP (HP1) | Attacks: damage at L1 (telegraph) | Behaviour | Pack | Drops |
+|---|---|---|---|---|---|---|---|
+| Glimmerhop | Regular | 6–9 | 64–78 (40) | Moon Leap 15 (0.8 s), a 9 m leap that lands in a 2 m circle; Nip 8 (0.5 s) | leaps in from range, then nips | 3–5 | coins; Small Tonic 1/10 |
+| Dustmoth | Regular | 6–9 | 42–51 (26) | Dust Spit 9 (0.6 s), 14 m/s bolt, chill 15% for 1.5 s | hovers 2.4 m up, keeps 9–14 m away | 2–3 | coins; grenade 1/25 |
+| Cratermaw | Elite | 8–9 | 350–372 (190) | Moonquake 24, 4.5 m ring + 4 m knockback (1.2 s); Maw 13 (0.6 s) | steadfast; guards the Quietfall Wreck | 1 | weapon 1/4 |
+
+Tonic on Lumen: Small Tonic 1/9. Planet cosmetic: Messenger's Winged Cap 1/150 (Arcadia's).
+
+| Site | Body | Kind | Band | Guardian | Pack | Chest | Discovery XP |
+|---|---|---|---|---|---|---|---|
+| The Quietfall Wreck | Lumen | landmark (the Long Haul hull prefab, broken across a crater) | 8–9 | Cratermaw L9 | 3 Glimmerhop L8, 2 Dustmoth L8 | 110 · 1 · 1 | 340 |
+
+Mission **L1 The Thing in the Wreck** (hunt, given by Lark on Arcadia, played on Lumen, rec. 6–9):
+the Cratermaw and 4 Glimmerhops; 650 XP, 110 coins, 1 Large Tonic.
+
 ---
 
 ## 4. Bosses
@@ -1166,6 +1196,7 @@ not a trademark search.
 | Spells (new, 2026-11-12) | Aether; Skipstep, Frostbloom, Wishfall, Glasswing Ward | OK. "Aether" is the old word for the upper air (generic; many games use it as a common noun). "Glasswing" is a real butterfly. Rejected: "Starfall" (a World of Warcraft druid spell and a Warcraft III ability), "Blink" (Dota and Warcraft ability name), "Frost Nova" (Warcraft and Diablo), "Mana" (generic but every other game's word). Reasoned check only |
 | AI residents (2026-11-12, `tools/agent/residents.ts`) | Brindle_Oake, Tamsin_Hollis, Marlo_Thistle, Juniper_Fenn, Garnet_Moss, Hesper_Dunn, Sable_Finch, Corbin_Reed, Wendell_Crane, Odessa_Larch, Ptolemy_Birch, Isla_Thornby | OK (ordinary given names with plant, bird and tree surnames; none shares a word with a name already in the game, which `apps/server/test/residents.test.ts` checks). Rejected: "Fennick Shaw" (one step from a Star Wars bounty hunter), "Odessa Quill" (a Marvel surname), "Juniper Vane" (too close to Juno Vale, the Portus keeper), anything with "Wren" (the example player name) |
 | Wild sites (2026-11-13, §3.7) | Bellwether Watch, Emberfall Keep, Skyhook Arch, the Lantern Shrine, the Sunken Barrow, the Hollow Elm, Relay Mast Four, the Foreclosed Depot, the Long Haul wreck | OK. Plain English words and compounds; "skyhook" and "long haul" are generic terms, not titles; none names a known game, film or franchise place. |
+| Lumen (lane sky, 2026-11-13) | Lumen, the Dustborn, Glimmerhop, Dustmoth, Cratermaw, Surveyor Odile, Moonfall Pad, the Hush, the Quietfall Wreck, The Thing in the Wreck | Original or ordinary words; "Lumen" is a common Latin word for light (also a unit of light), no franchise moon or character of that name known to us. Reasoned check only |
 
 ---
 
