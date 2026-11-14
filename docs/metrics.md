@@ -314,11 +314,26 @@ only add "page" claims or Play presses without joins; it cannot add a server-ver
 visit's kind (person, test, agent) is fixed at issue. A flood can still pull `gets_in` down (Play
 presses that never join) until the day's visit cap; `/stats` then says the day was capped.
 
-Bounds (`FUNNEL_LIMITS`, `INGEST` in `apps/server/src/db/funnel.ts` and `ops/funnel.ts`): 40,000
-visit rows, 40,000 account rows and 1,000 error reports a UTC day; raw steps kept 21 days, then
-folded into `funnel_day` (daily totals, about a hundred rows a day; all-time medians are medians of
-the daily medians); error reports kept 30 days; every write queued and flushed once a second in one
-transaction; bodies 4 kb for every content type.
+Bounds (`FUNNEL_LIMITS` in `apps/server/src/db/funnelRules.ts`, `INGEST` in `ops/funnel.ts`): 40,000
+visit rows, 40,000 account rows and 1,000 error reports a UTC day; raw steps kept 31 days (longer
+than a visit can act, D-sec2-6), then folded into `funnel_day` (daily totals, about a hundred rows a
+day; all-time medians are medians of the daily medians; a folded account's own rows stay, marked,
+while the account exists); error reports kept 30 days; bodies 4 kb for every content type.
+
+None of it holds the game's thread (D-sec3-1): writes are queued and flushed once a second in
+200-row transactions that never wait for a lock (at most about 4 ms per turn of the event loop);
+the `/stats` report, the daily fold and the error pruning run in the funnel's worker thread on its
+own connection (`db/funnelWorker.ts`), one linear pass over the raw rows, writing in 200-row
+transactions with pauses; shutdown flushes within one 2 s deadline and counts the rest lost.
+`apps/server/test/funnel-stall.test.ts` measures it at the caps (2.7 M rows): the game thread's
+longest busy stretch stays under 15 ms of CPU during a report, a fold and a shutdown, free or locked,
+where the old synchronous report alone took 15.7 s. `/stats` waits up to a minute for the worker's
+report (at the caps, a few seconds on a quiet machine) and says so if it doesn't come.
+
+`FUNNEL_ENABLED=0` switches the whole funnel off: the three page endpoints answer 204 and store
+nothing, rooms record nothing, no timer or worker starts, and `/stats` says it is off. Pages already
+deployed take 204 as "not now" and start reporting by themselves once the server is restarted with
+the funnel on.
 
 Still lab-only: frame rate on real visits (the beacon carries no frame times yet) and soft-locks.
 Test visits (our tools' secret, `navigator.webdriver`, `?e2e`, `?bench`) and agents are counted apart;

@@ -9,7 +9,8 @@
 // Started by auth/accounts.ts when the funnel is on (FUNNEL_ENABLED, default on) and game.db is a
 // file; /stats finds it by its database (funnelServiceFor). While it runs, the worker checkpoints the
 // WAL and the game's connection doesn't (wal_autocheckpoint 0): a commit on the game's thread never
-// copies megabytes the worker's housekeeping wrote. A worker that stops unasked is started again.
+// copies megabytes the worker's housekeeping wrote. A worker that stops unasked after running a while
+// is started again; one that dies at start waits for the next job.
 
 import { Worker } from "node:worker_threads";
 import type { Db } from "./game-db.ts";
@@ -48,13 +49,13 @@ export class FunnelService {
     this.path = path;
     this.autoCheckpoint = db.pragma("wal_autocheckpoint", { simple: true }) as number;
     this.spawn();
-    db.pragma("wal_autocheckpoint = 0"); // the worker checkpoints (funnelWorker.ts)
   }
 
   private spawn(): Worker {
     if (this.worker) return this.worker;
     const w = new Worker(new URL("./funnelWorker.ts", import.meta.url), { workerData: { path: this.path } });
     w.unref(); // never keeps the process alive
+    if (this.db.open) this.db.pragma("wal_autocheckpoint = 0"); // the worker checkpoints (funnelWorker.ts)
     w.on("message", (a: FunnelAnswer) => {
       const h = this.waiting.get(a.id);
       if (!h) return;
@@ -68,11 +69,20 @@ export class FunnelService {
       for (const h of this.waiting.values()) h.no(err);
       this.waiting.clear();
     };
-    w.on("error", fail);
+    const born = performance.now();
+    let why = "";
+    w.on("error", (err) => {
+      why = err.message;
+      fail(err);
+    });
     w.on("exit", (code) => {
       fail(new Error(`funnel worker stopped (${code})`));
-      // It keeps the WAL short: start it again (not in a loop: once a second at most).
-      if (!this.closed) setTimeout(() => this.closed || this.spawn(), 1_000).unref();
+      if (this.closed) return;
+      // It keeps the WAL short, so one that ran a while is started again; one that died at once
+      // (a broken install) is not looped: the next job tries again.
+      console.warn(`funnel worker stopped (${why || `exit ${code}`})${performance.now() - born > 10_000 ? "; starting it again" : ""}`);
+      if (performance.now() - born > 10_000) setTimeout(() => this.closed || this.spawn(), 1_000).unref();
+      else if (this.db.open) this.db.pragma(`wal_autocheckpoint = ${this.autoCheckpoint}`); // until a worker runs again
     });
     this.worker = w;
     return w;
