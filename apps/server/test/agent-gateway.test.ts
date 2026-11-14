@@ -352,13 +352,14 @@ describe("review 2026-11-13: queues, cancellation and joins hold against a hosti
     const j = holdJoins();
     try {
       const a = m.call(sid, 1, "firstlight_join", { name: "TwinA" });
-      const b = m.call(sid, 2, "firstlight_join", { name: "TwinB" });
       await waitFor(() => j.entered() >= 1);
-      // Let the second request reach the server before the first join finishes.
-      expect((await m.post({ id: 3, method: "ping" }, sid)).status).toBe(200);
+      const b = m.call(sid, 2, "firstlight_join", { name: "TwinB" });
+      // The second is refused while the first is in flight, without waiting for it.
+      expect((await within(b, 5000, "a second join while one is in flight")).result.content[0].text).toContain('"join in progress"');
       j.open();
-      const answers = (await Promise.all([a, b])).map((r) => r.result.content[0].text as string);
-      expect(answers.filter((t) => t.includes('"already playing"'))).toHaveLength(1);
+      expect((await a).result.isError).toBe(false);
+      // Once seated, another join is "already playing", not a second character.
+      expect((await m.call(sid, 3, "firstlight_join", { name: "TwinC" })).result.content[0].text).toContain('"already playing"');
       expect(j.entered()).toBe(1);
     } finally {
       j.restore();
@@ -386,6 +387,56 @@ describe("review 2026-11-13: queues, cancellation and joins hold against a hosti
     // Stays gone (the seat is closed, not idle).
     await new Promise((ok) => setTimeout(ok, 500));
     expect(actor("LateSeat")).toBeUndefined();
+  }, 60_000);
+
+  // Review round two, finding 2: with the seat queue limit at four, twelve concurrent legacy joins all
+  // waited, cancelling freed none, and cancelling the first join still left a live seat.
+  it("legacy MCP: one join in flight per session; more are refused at once, and a cancelled join leaves no seat", async () => {
+    GATEWAY_RULES.queuePerSeat = 4;
+    const m = legacy("198.51.100.45");
+    const sid = await m.open();
+    const j = holdJoins();
+    try {
+      const first = m.call(sid, 1, "firstlight_join", { name: "FloodSeat" });
+      await waitFor(() => j.entered() === 1);
+      const more = Array.from({ length: 12 }, (_v, i) => m.call(sid, 10 + i, "firstlight_join", { name: `Flood${i}` }));
+      const answers = await within(Promise.all(more), 5000, "twelve joins behind one in flight");
+      for (const a of answers) expect(a.result.content[0].text).toContain('"join in progress"');
+      expect(j.entered()).toBe(1);
+      // The client cancels the join in flight: when the sign-in finishes, its seat is closed at once.
+      expect((await m.post({ method: "notifications/cancelled", params: { requestId: 1 } }, sid)).status).toBe(202);
+      j.open();
+      expect((await within(first, 15_000, "the cancelled join")).result.content[0].text).toContain("cancelled");
+    } finally {
+      j.restore();
+    }
+    await waitFor(() => !actor("FloodSeat"), 15_000);
+    expect((await json(await fetch(`${base}/api/agent`))).body.seats.used).toBe(0);
+    // The session can join again afterwards.
+    const again = await m.call(sid, 30, "firstlight_join", { name: "FloodAgain" });
+    expect(again.result.isError, JSON.stringify(again)).toBe(false);
+    expect((await m.del(sid)).status).toBe(204);
+    await waitFor(() => !actor("FloodAgain"), 15_000);
+  }, 60_000);
+
+  it("legacy MCP: a join whose caller hangs up leaves no seat", async () => {
+    const m = legacy("198.51.100.46");
+    const sid = await m.open();
+    const j = holdJoins();
+    const gone = new AbortController();
+    try {
+      const r = m.post({ id: 1, method: "tools/call", params: { name: "firstlight_join", arguments: { name: "HangSeat" } } }, sid, gone.signal).catch(() => null);
+      await waitFor(() => j.entered() === 1);
+      gone.abort();
+      await r;
+      j.open();
+    } finally {
+      j.restore();
+    }
+    await waitFor(() => !!actor("HangSeat"), 15_000).catch(() => {});
+    await waitFor(() => !actor("HangSeat"), 15_000);
+    expect((await json(await fetch(`${base}/api/agent`))).body.seats.used).toBe(0);
+    await m.del(sid);
   }, 60_000);
 
   it("a caller that hangs up while it joins leaves no seat behind", async () => {
