@@ -28,7 +28,7 @@ test("treefade · walk at a tree line", { tag: ["@treefade"] }, async ({ player,
   test.setTimeout(20 * 60_000);
   const dir = path.join(OUT, LABEL);
   mkdirSync(dir, { recursive: true });
-  await player.joinAsDevAdmin({ starter: "Hexwick", body: "arcadia", extra: { tier: "medium" } });
+  await player.joinAsDevAdmin({ starter: "Hexwick", body: "arcadia", extra: { tier: "medium", time: "0.42" } }); // late morning: trees read best in daylight
   await player.waitInWorld(240_000, "arcadia");
   await player.lock();
   await player.walkOutOfRing(60_000);
@@ -41,12 +41,14 @@ test("treefade · walk at a tree line", { tag: ["@treefade"] }, async ({ player,
   const shot = () => page.screenshot({ path: path.join(dir, `${String(n++).padStart(4, "0")}.jpg`), type: "jpeg", quality: 80 });
   for (let i = 0; i < 4; i++) await shot();
   for (let i = 0; i < 36; i++) {
+    if (i % 5 === 0) await player.admin("heal"); // stop-motion is slow: keep the creatures from ending the walk
     await player.hold(["KeyW"], 350);
     await page.waitForTimeout(120);
     await shot();
   }
   for (let i = 0; i < 4; i++) await shot();
   for (let i = 0; i < 30; i++) {
+    if (i % 5 === 0) await player.admin("heal");
     await player.hold(["KeyS"], 350);
     await page.waitForTimeout(120);
     await shot();
