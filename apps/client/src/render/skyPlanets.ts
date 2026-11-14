@@ -1,5 +1,6 @@
-// Sky planets (SPEC §6.1 "other planets hang in each sky", §7.2 rule 3): the other bodies as
-// distant spheres at fixed directions in the local sky frame, lit by the sun with a fresnel rim,
+// Sky planets (SPEC §6.1 "other planets hang in each sky", §7.2 rule 3): the other bodies and
+// Arcadia's moon as distant spheres in the local sky frame, on their orbits (#5, #6: the environment
+// works out where, shared skyBodyPlace), lit by the sun with a fresnel rim (so they show phases),
 // seen through the sky (they fade into the horizon haze). High+ adds an atmosphere halo shell.
 // One InstancedMesh for the planets and one for the halos: 2 draws total.
 
@@ -8,15 +9,15 @@ import {
   abs, attribute, cameraPosition, dot, exp, float, int, max, mix, mx_fractal_noise_float, normalGeometry,
   normalize, normalWorld, positionWorld, pow, smoothstep, sqrt, uniformArray, vec3,
 } from "three/tsl";
-import { BODY_IDS } from "@firstlight/shared";
-import { atmo, skyColor } from "./atmosphere.ts";
+import { ORBIT_IDS } from "@firstlight/shared";
+import { atmo, skyColor, SKY_BODY_SLOTS } from "./atmosphere.ts";
 import { SKY_PLANET_PALETTES, type SkyPlanetSpec } from "./looks.ts";
 import type { ResolvedSettings } from "./quality.ts";
 import { skyDir, type V3 } from "./sunFrame.ts";
 
 const DIST = 4000;
 const HALO_SCALE = 1.12;
-const MAX = 4;
+const MAX = SKY_BODY_SLOTS;
 
 export class SkyPlanets {
   readonly planets: THREE.InstancedMesh;
@@ -117,10 +118,13 @@ export class SkyPlanets {
       this.sea[i]!.setHex(pal.sea);
       this.air[i]!.setHex(pal.atmosphere);
       // Seed by body, so a planet looks the same from every sky.
-      this.seeds[i] = (BODY_IDS.indexOf(sp.body) + 1) * 7.31;
+      this.seeds[i] = (ORBIT_IDS.indexOf(sp.body) + 1) * 7.31;
     });
     this.planets.count = this.specs.length;
-    this.halos.count = this.specs.length;
+    // Airless bodies (black atmosphere) come last in each look and get no halo shell.
+    let halos = this.specs.length;
+    while (halos > 0 && SKY_PLANET_PALETTES[this.specs[halos - 1]!.body].atmosphere === 0) halos--;
+    this.halos.count = halos;
   }
 
   applySettings(s: ResolvedSettings) {
@@ -137,14 +141,16 @@ export class SkyPlanets {
     e[12] = this.p.x; e[13] = this.p.y; e[14] = this.p.z; e[15] = 1;
   }
 
-  update(camera: THREE.Camera) {
+  /** Place them round the camera where the sky has them now (the rig's `sky.bodies`, radians, local sky frame). */
+  update(camera: THREE.Camera, at: readonly { elev: number; az: number; size: number }[]) {
     if (!this.planets.visible) return;
     const up = atmo.up.value;
     const fwd = camera.getWorldDirection(this.fwd);
     for (let i = 0; i < this.specs.length; i++) {
       const sp = this.specs[i]!;
-      const d = skyDir(up.x, up.y, up.z, THREE.MathUtils.degToRad(sp.elevDeg), THREE.MathUtils.degToRad(sp.azDeg), this.tmp);
-      const r = DIST * Math.tan(THREE.MathUtils.degToRad(sp.sizeDeg));
+      const a = at[i]!;
+      const d = skyDir(up.x, up.y, up.z, a.elev, a.az, this.tmp);
+      const r = DIST * Math.tan(THREE.MathUtils.degToRad(sp.sizeDeg * a.size));
       this.p.set(d[0], d[1], d[2]).multiplyScalar(DIST).add(camera.position);
       // Off the view axis a sphere projects as an ellipse, longer by 1/cos along the line from the
       // screen centre (the play-test's "egg-shaped blob"): squash it by cos along that axis, as a

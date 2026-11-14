@@ -7,7 +7,7 @@
 
 import * as THREE from "three/webgpu";
 import {
-  dayT as dayAt, DAY_MS, isWeather, nextStrike, skyState, SKY_PROFILES, sunAngles, weatherAmount,
+  dayT as dayAt, DAY_MS, isWeather, nextStrike, skyBodyPlace, skyState, SKY_PROFILES, sunAngles, weatherAmount,
   type BodyId, type SkyState, type Strike, type Weather,
 } from "@firstlight/shared";
 import { flags } from "../config.ts";
@@ -67,6 +67,10 @@ const NIGHT_MOON = 1.9;
 const NIGHT_FILL = 1.75;
 const NIGHT_BOUNCE = 0.45;
 const NIGHT_EXPOSURE = 1.12;
+/** The orbit clock while the time of day is held (photo mode, ?time, admin staging, the bench): any fixed value. */
+const HELD_ORBIT_MS = 0;
+/** The night key light never comes from lower than this (radians, 18°), so night stays readable. */
+const MOON_MIN_ELEV = THREE.MathUtils.degToRad(18);
 const DUSK_SUN = new THREE.Color(0xff9a5a);
 const OVERCAST = new THREE.Color(0x8a94a4);
 const RAIN_DAY = new THREE.Color(0.62, 0.66, 0.74);
@@ -239,13 +243,26 @@ export class Environment {
     this.lutRange[0] = p.minElev;
     this.lutRange[1] = p.maxElev;
     this.loadPalette();
-    // Moonlight comes from the highest sky planet, so the light matches what you see.
-    let best = look.skyPlanets[0];
-    for (const p of look.skyPlanets) if (best && p.elevDeg > best.elevDeg) best = p;
-    if (best) {
-      rig.sky.moonElev = THREE.MathUtils.degToRad(Math.max(18, best.elevDeg));
-      rig.sky.moonAz = THREE.MathUtils.degToRad(best.azDeg);
+  }
+
+  /**
+   * The sky bodies for this frame (#5, #6): each on its orbit for this sun and orbit clock, into the
+   * rig's `sky.bodies` (SkyPlanets draws them there); and the night key light from Lumen while it is
+   * up, else the highest of them, never lower than 18° so night stays readable.
+   */
+  private placeSkyBodies(look: BodyLook, rig: SunRig, sunElev: number, sunAz: number, orbitMs: number) {
+    const bodies = rig.sky.bodies;
+    let best = -1, moon = -1;
+    for (let i = 0; i < look.skyPlanets.length && i < bodies.length; i++) {
+      const sp = look.skyPlanets[i]!;
+      const b = skyBodyPlace(this.body, sp.body, sunElev, sunAz, orbitMs, bodies[i]);
+      if (best < 0 || b.elev > bodies[best]!.elev) best = i;
+      if (sp.body === "lumen") moon = i;
     }
+    if (moon >= 0 && bodies[moon]!.elev > 0) best = moon;
+    if (best < 0) return;
+    rig.sky.moonElev = Math.max(MOON_MIN_ELEV, bodies[best]!.elev);
+    rig.sky.moonAz = bodies[best]!.az;
   }
 
   /**
@@ -327,7 +344,8 @@ export class Environment {
 
     // ---- time of day
     let elev: number, az: number;
-    if ((!on.daynight || this.referenceSun) && this.timeOv === null) {
+    const fixedSky = (!on.daynight || this.referenceSun) && this.timeOv === null;
+    if (fixedSky) {
       elev = look.sunElev;
       az = look.sunAz;
       this.dayT = referenceDayT(this.body, elev);
@@ -337,6 +355,10 @@ export class Environment {
       elev = a.elev;
       az = a.az;
     }
+    // A held time of day holds the bodies too (a fixed orbit clock): where they stand then depends on
+    // the held time alone, the same for every client and still while it is held.
+    const held = fixedSky || this.timeOv !== null || st.dayHold !== undefined;
+    this.placeSkyBodies(look, rig, elev, az, held ? HELD_ORBIT_MS : now);
     this.sunElev = elev;
     const { night, dusk, sunUp } = lightFactors(elev, look.sunElev, this.factors);
     this.night = night;
