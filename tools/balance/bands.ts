@@ -3,11 +3,11 @@
 // number that left its band; `pnpm balance` exits non-zero on any.
 
 import { STARTERS } from "../../packages/shared/src/content/weapons.ts";
-import { maxHp } from "../../packages/shared/src/content/progression.ts";
+import { maxHp, REGEN } from "../../packages/shared/src/content/progression.ts";
 import { STARTER_STATS, starterMaxHp } from "../../packages/shared/src/content/starters.ts";
 import {
   affordability, BURST_FAMILIES, bossRows, COMBAT_FAMILIES, creatureRows, dominations, duelResults, median, progression,
-  pvpCell, PVP_LEVELS, roleLeaders, spellPeaks, weaponTable, type Family,
+  pvpCell, PVP_LEVELS, regenSafety, roleLeaders, spellPeaks, weaponTable, type Family,
 } from "./model.ts";
 import { WISHFALL } from "../../packages/shared/src/content/spells.ts";
 
@@ -120,6 +120,12 @@ export function checks(): Check[] {
   for (const b of bossRows()) {
     add({ id: `boss.${b.id}`, what: `${b.id} two-player kill (min)`, value: fmt(b.killMin, 1), band: `${BOSS_MIN[0]}–${BOSS_MIN[1]}`, ok: inBand(b.killMin, ...BOSS_MIN), source: "content §4 (4.7 / 5.2 / 5.8 min modelled)" });
   }
+
+  // --- out-of-combat regeneration (#77): it never runs inside a fight
+  const rg = regenSafety();
+  add({ id: "regen.creatureGap", what: `Longest pause between a hostile creature's attacks (${rg.creatureGapId})`, value: fmt(rg.creatureGapS), band: `< ${REGEN.DELAY_S} s (regen's delay)`, ok: rg.creatureGapS < REGEN.DELAY_S, source: "#77 (regen can't out-heal a fight)" });
+  add({ id: "regen.starterSwing", what: "Slowest starter weapon's time between attacks", value: fmt(rg.starterSwingS), band: `< ${REGEN.DELAY_S} s (regen's delay)`, ok: rg.starterSwingS < REGEN.DELAY_S, source: "#77 (a fighting player keeps the tag up)" });
+  add({ id: "regen.full", what: "Regeneration from 0 to full health (s)", value: fmt(rg.fullS, 0), band: "≥ 60 s (slower than a tonic)", ok: rg.fullS >= 60, source: "#77 (very slow self-healing)" });
 
   // --- progression and coins
   const prog = progression();

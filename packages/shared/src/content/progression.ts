@@ -80,3 +80,11 @@ export function splashFalloff(distance: number, radius: number): number {
 
 export const ONBOARDING_XP = 50;
 export const SELL_RATE = 0.25;
+
+/**
+ * Out-of-combat regeneration (#77, content.md §1.1): once a player has neither taken nor dealt damage
+ * for DELAY_S (the server's combat tag), health comes back at PER_SEC of max HP per second until full.
+ * Any hit taken or attack made stops it again, so it never runs inside a fight (`pnpm balance`
+ * checks every creature fight keeps the tag up). Slow on purpose: a tonic is the in-fight heal.
+ */
+export const REGEN = { DELAY_S: 10, PER_SEC: 0.01 } as const;

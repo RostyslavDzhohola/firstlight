@@ -10,7 +10,7 @@
 // Simplifications are named where they happen. Times are seconds.
 
 import { WEAPONS, STARTERS, type WeaponDef, type TierStats } from "../../packages/shared/src/content/weapons.ts";
-import { damageMult, killCoins, killXp, LEVEL_CAP, maxHp, ONBOARDING_XP, xpToNext } from "../../packages/shared/src/content/progression.ts";
+import { damageMult, killCoins, killXp, LEVEL_CAP, maxHp, ONBOARDING_XP, REGEN, xpToNext } from "../../packages/shared/src/content/progression.ts";
 import { AI_CAPS, aiHitCap, attackDamage, BOSS_DEFS, NPC_AREAS, NPC_DEFS, npcCoins, npcDef, npcMaxHp, npcShieldHp, type AttackDef, type NpcDef } from "../../packages/shared/src/content/npcs.ts";
 import { MISSIONS } from "../../packages/shared/src/content/missions.ts";
 import { STARTER_STATS, starterMaxHp, starterMove, starterSpellPower } from "../../packages/shared/src/content/starters.ts";
@@ -673,6 +673,51 @@ export function creatureRows(): CreatureRow[] {
   }
   return rows;
 }
+
+// ------------------------------------------------------------------------------------ regeneration (#77)
+
+export interface RegenSafety {
+  /** Longest pause between one creature's attacks on a player it fights (any fight creature, any of its levels), s. */
+  creatureGapS: number;
+  creatureGapId: string;
+  /** The slowest starter weapon's time between attacks, s. */
+  starterSwingS: number;
+  /** Seconds regeneration needs from 0 to full health. */
+  fullS: number;
+  /** HP regenerated in the time of the quickest on-level regular's kill of an idle player, ÷ max HP. */
+  regenInFightShare: number;
+}
+
+/**
+ * Regeneration can't out-heal a fight (#77): it waits REGEN.DELAY_S without damage taken or dealt,
+ * so a fight where the creature attacks, or the player swings, more often than that never sees it.
+ */
+export function regenSafety(): RegenSafety {
+  let creatureGapS = 0;
+  let creatureGapId = "";
+  for (const def of FIGHT_DEFS) {
+    if (def.temper !== "hostile") continue; // neutral beasts only fight back: the player's swings hold the tag
+    for (const [lo, hi] of creatureLevels(def)) {
+      for (const E of lo === hi ? [lo] : [lo, hi]) {
+        const ev = creatureTimeline(def, E, 120);
+        for (let i = 1; i < ev.length; i++) {
+          const gap = ev[i]!.t - ev[i - 1]!.t;
+          if (gap > creatureGapS) {
+            creatureGapS = gap;
+            creatureGapId = `${def.id} L${E}`;
+          }
+        }
+      }
+    }
+  }
+  const starterSwingS = Math.max(...STARTERS.map((s) => WEAPON_BY_ID_LOCAL.get(s.weapon)!.tiers[0]!.rate));
+  const fullS = 1 / REGEN.PER_SEC;
+  // Even if it did run, the share of HP it could add in the time a regular kills an idle player.
+  const quick = Math.min(...creatureRows().filter((r) => r.tier === "regular").map((r) => r.killsPlayerS));
+  return { creatureGapS, creatureGapId, starterSwingS, fullS, regenInFightShare: REGEN.PER_SEC * quick };
+}
+
+const WEAPON_BY_ID_LOCAL = new Map(WEAPONS.map((w) => [w.id as string, w]));
 
 // ------------------------------------------------------------------------------------ bosses
 

@@ -131,6 +131,7 @@ removes every coin (D), so prices are set for one life.
 |---|---:|---|
 | Small Tonic (potion) | 10 | +40 HP over 3 s; 0.4 s drink; move at 70% while drinking; stack 10; 8 s shared tonic cooldown; damage does not interrupt (new) |
 | Large Tonic (potion) | 35 | +120 HP over 4 s; otherwise as above (new) |
+| Regeneration (no item, #77) | free | **1% of max HP a second** once you have neither taken nor dealt damage for **10 s** (the combat tag: `REGEN` in `progression.ts`); any hit or attack stops it. 0 to full: 100 s. Decided on the server; `pnpm balance` checks it never runs inside a creature fight (longest pause between a hostile's attacks 5.0 s, slowest starter swing 0.45 s) |
 | Weapon T1 / T2 / T3 (standard families) | 60 / 300 / 900 | [r2-05] |
 | Stillshot Rifle, Comet Launcher T1 / T2 / T3 | 90 / 450 / 1,350 | ×1.5 heavy-weapon premium (new) |
 | Scrapburst Grenade T1 / T2 / T3 (each) | 15 / 40 / 90 | (new) |

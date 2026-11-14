@@ -2,7 +2,7 @@
 // simulated projectiles with splash, damage rules (safe zones, protection, friendly fire on),
 // blocking, burn, healing. The room calls these from message handlers and the tick.
 
-import { damageMult, falloff, splashFalloff } from "@firstlight/shared/content/progression";
+import { damageMult, falloff, REGEN, splashFalloff } from "@firstlight/shared/content/progression";
 import { starterMaxHp } from "@firstlight/shared/content/starters";
 import { WEAPONS, WEAPON_BY_ID, WEAPON_INDEX, type Destroys, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
 import type { Terrain } from "@firstlight/shared";
@@ -16,7 +16,8 @@ import { HORSE } from "@firstlight/shared/content/horse";
 
 /** Lag compensation window: the one shared constant (SPEC §5.3: history ≤ 200 ms). */
 export const REWIND_MS = NET.REWIND_MS;
-export const COMBAT_TAG_MS = 10_000;
+/** No hit taken or dealt for this long: out of combat (logout, pad travel, and regeneration's start, REGEN.DELAY_S). */
+export const COMBAT_TAG_MS = REGEN.DELAY_S * 1000;
 export const ORIGIN_SLACK = 7; // metres the shot origin may be from the shooter's head (camera offset)
 
 export interface CombatHost {
@@ -953,6 +954,8 @@ function advance(host: CombatHost, p: Projectile, d: V3, step: number, now: numb
 }
 
 const burnAcc = new WeakMap<PlayerActor, number>();
+/** Fractional HP of out-of-combat regeneration not yet paid (#77). */
+const regenAcc = new WeakMap<PlayerActor, number>();
 
 /** Burning NPCs per room (Emberglass): the attacker's session id gets the credit. */
 const npcBurnLists = new WeakMap<CombatHost, Map<NpcActor, { perSec: number; until: number; by: string; acc: number }>>();
@@ -962,7 +965,7 @@ function npcBurns(host: CombatHost) {
   return m;
 }
 
-/** Per-tick effects: burn (players and NPCs), heals over time. */
+/** Per-tick effects: burn (players and NPCs), heals over time, out-of-combat regeneration (#77). */
 export function stepEffects(host: CombatHost, dt: number) {
   const now = host.now();
   const burning = npcBurnLists.get(host);
@@ -1019,5 +1022,13 @@ export function stepEffects(host: CombatHost, dt: number) {
         if (p.state.hp < mh) p.state.hp = Math.min(mh, p.state.hp + whole);
       }
     }
+    // Out of combat (no hit taken or dealt for the combat tag, REGEN.DELAY_S): slow regeneration.
+    const mh = starterMaxHp(p.char.starter, p.char.level);
+    if (p.state.hp > 0 && p.state.hp < mh && now >= p.combatUntil && !p.burn) {
+      const acc = (regenAcc.get(p) ?? 0) + mh * REGEN.PER_SEC * dt;
+      const whole = Math.floor(acc + 1e-6);
+      regenAcc.set(p, acc - whole);
+      if (whole > 0) p.state.hp = Math.min(mh, p.state.hp + whole);
+    } else regenAcc.delete(p);
   }
 }
