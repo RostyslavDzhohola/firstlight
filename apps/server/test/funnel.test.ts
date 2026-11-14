@@ -191,7 +191,7 @@ describe("/stats shows the funnel", () => {
     expect((await owner.fetch("/admin/claim", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ token: CLAIM_TOKEN }).toString() })).status).toBeLessThan(400);
     const html = await (await owner.fetch("/stats")).text();
     for (const h of ["Launch KPIs (#85)", "Play presses that reach the world", "First visit, step by step", "New characters, step by step", "Tutorial: move", "ReferenceError: boom", "webgl2/low: 1"]) expect(html).toContain(h);
-    const json = await (await owner.fetch("/stats?format=json")).json();
+    const json = (await (await owner.fetch("/stats?format=json")).json()) as any;
     expect(json.funnel.kpis.all.find((k: { id: string }) => k.id === "gets_in")).toMatchObject({ value: 1 });
     expect(json.funnel.errors.week.total).toBe(1);
   });
