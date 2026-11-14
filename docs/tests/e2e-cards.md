@@ -191,3 +191,16 @@ Setup: a fresh guest (clean browser profile) on a stack with an empty database, 
 6. Click the weapon, click "Drop here": a pile appears at your feet. Close with I, stand on the
    pile, press E: the weapon is back in slot 1.
 7. Reload: the tutorial doesn't come back.
+
+## Jfail: a stranger's worst moments (lane ship, #85)
+
+`apps/client/e2e/jfail.spec.ts`, local stack only, on WebGL2 and WebGPU (`JFAIL_FILM=1` films each one):
+1. Server down at Play: "Couldn't reach the world" with Retry; Retry gets in.
+2. No WebGL2 and no WebGPU: "Graphics didn't start" and what to try.
+3. A full world: "THE WORLD IS FULL" with the queue place; in by itself.
+4. The connection drops mid-game: "Reconnecting…", then back in the world.
+5. A deploy mid-session the one reload can't fix: "A NEW VERSION IS OUT" with Reload.
+6. Pointer lock refused: "Click to look around", nothing throws.
+7. A phone-sized window: the home page fits, says how to play, offers the touch try.
+8. The funnel: the page reports page, Play, pick and world (seconds, renderer) once each.
+9. The tab frozen in the background (`JFAIL_BACKGROUND_S`, default 60): the world runs on, still connected.

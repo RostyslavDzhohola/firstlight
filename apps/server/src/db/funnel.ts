@@ -149,12 +149,15 @@ const median = (xs: number[]): number | null => {
   return s[Math.floor(s.length / 2)]!;
 };
 
-/** The funnel for subjects whose first row falls in [since, now], people only. */
+/**
+ * The funnel for subjects whose first row falls in [since, now], people only. Accounts count from their
+ * first join (an account that only saved, e.g. one made on the home page, is not a new character).
+ */
 export function funnelReport(db: Db, since = 0, now = Date.now()): FunnelReport {
   const rows = stmt(
     db,
     `WITH f AS (SELECT subject, step, at, value, detail, ${KIND_SQL} AS kind FROM funnel_step f),
-          cohort AS (SELECT subject FROM f GROUP BY subject HAVING MIN(at) >= ? AND MAX(kind = 'person') = 1 AND MIN(kind = 'person') = 1)
+          cohort AS (SELECT subject FROM f GROUP BY subject HAVING MIN(at) >= ? AND MIN(kind = 'person') = 1 AND (subject LIKE 'v:%' OR MAX(step = 'join') = 1))
      SELECT f.subject, f.step, f.at, f.value, f.detail FROM f JOIN cohort USING (subject)`,
   ).all(since) as { subject: string; step: string; at: number; value: number | null; detail: string | null }[];
   const apartRows = stmt(
@@ -309,7 +312,7 @@ export interface FunnelKpi {
 export function funnelKpis(r: FunnelReport): FunnelKpi[] {
   const share = (id: string, label: string, target: number, num: number, den: number, below = false): FunnelKpi => {
     const value = den ? num / den : null;
-    return { id, label, target: below ? `${Math.round(target * 100)}% or less` : `${Math.round(target * 100)}%`, unit: "share", value, num, den, ok: value === null ? null : below ? value <= target : value >= target };
+    return { id, label, target: below ? (target === 0 ? "none" : `${Math.round(target * 100)}% or less`) : `${Math.round(target * 100)}%`, unit: "share", value, num, den, ok: value === null ? null : below ? value <= target : value >= target };
   };
   const v = (k: string) => r.visits[k] ?? 0;
   const a = (k: string) => r.accounts[k] ?? 0;

@@ -196,3 +196,14 @@ describe("/stats shows the funnel", () => {
     expect(json.funnel.errors.week.total).toBe(1);
   });
 });
+
+describe("the funnel's cohorts", () => {
+  it("an account that saved but never joined a world is not a new character", async () => {
+    const s = await start();
+    const { recordStep } = await import("../src/db/funnel.ts");
+    recordStep(s.accounts.db, { subject: accountSubject("homeOnly"), step: "saved" });
+    recordStep(s.accounts.db, { subject: accountSubject("player1"), step: "join" });
+    recordStep(s.accounts.db, { subject: accountSubject("player1"), step: "saved" });
+    expect(funnelReport(s.accounts.db).accounts).toEqual({ join: 1, saved: 1 });
+  });
+});

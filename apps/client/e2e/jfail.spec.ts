@@ -6,7 +6,7 @@
 // the journeys' local stack, so the real client code handles each one.
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures.ts";
@@ -42,8 +42,9 @@ const dropConnection = (page: Page) =>
 const PLAY = `${API_ORIGIN}/api/play`;
 
 /**
- * JFAIL_FILM=1: film each test stop-motion (a screenshot every ~300 ms, as treefade.spec.ts does, so a
- * loaded machine can't make it stutter) into $E2E_OUT/films/jfail-<n>-<project>.mp4 (needs ffmpeg).
+ * JFAIL_FILM=1: film each test into $E2E_OUT/films/jfail-<n>-<project>.mp4 (needs ffmpeg) from the
+ * page's screencast (CDP, frames as the compositor makes them), played back at the real timing with the
+ * last frame held, so a loaded machine gives a choppier clip but never a shorter or faster one.
  */
 const FILM = !!process.env.JFAIL_FILM;
 test.beforeEach(async ({ page }, info) => {
@@ -52,19 +53,25 @@ test.beforeEach(async ({ page }, info) => {
   const dir = path.join(OUT, "films", `${id}-${info.project.name}`);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
-  let n = 0;
-  let stop = false;
-  const loop = (async () => {
-    while (!stop) {
-      await page.screenshot({ path: path.join(dir, `f${String(n).padStart(4, "0")}.jpg`), type: "jpeg", quality: 75, timeout: 10_000 }).then(() => n++, () => {});
-      await new Promise((r) => setTimeout(r, 300));
-    }
-  })();
+  const frames: { file: string; t: number }[] = [];
+  const cdp = await page.context().newCDPSession(page);
+  cdp.on("Page.screencastFrame", (f: { data: string; sessionId: number; metadata: { timestamp?: number } }) => {
+    const file = path.join(dir, `f${String(frames.length).padStart(5, "0")}.jpg`);
+    writeFileSync(file, Buffer.from(f.data, "base64"));
+    frames.push({ file, t: f.metadata.timestamp ?? Date.now() / 1000 });
+    void cdp.send("Page.screencastFrameAck", { sessionId: f.sessionId }).catch(() => {});
+  });
+  await cdp.send("Page.startScreencast", { format: "jpeg", quality: 75, maxWidth: 1280, maxHeight: 720, everyNthFrame: 2 });
   (info as unknown as { filmStop: () => Promise<void> }).filmStop = async () => {
-    stop = true;
-    await loop;
-    if (n < 2) return;
-    execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-framerate", "4", "-i", path.join(dir, "f%04d.jpg"), "-vf", "scale=1280:-2,format=yuv420p", "-r", "24", path.join(OUT, "films", `${path.basename(dir)}.mp4`)]);
+    await cdp.send("Page.stopScreencast").catch(() => {});
+    await cdp.detach().catch(() => {});
+    if (frames.length < 2) return;
+    // The concat list: each frame for as long as it was on screen (at most 4 s), the last held 2.5 s.
+    const lines = frames.flatMap((f, i) => [`file '${f.file}'`, `duration ${i + 1 < frames.length ? Math.min(4, Math.max(0.02, frames[i + 1]!.t - f.t)).toFixed(3) : "2.5"}`]);
+    lines.push(`file '${frames[frames.length - 1]!.file}'`);
+    const list = path.join(dir, "list.txt");
+    writeFileSync(list, lines.join("\n") + "\n");
+    execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", list, "-vf", "scale=1280:-2,format=yuv420p", "-r", "24", path.join(OUT, "films", `${path.basename(dir)}.mp4`)]);
   };
 });
 test.afterEach(async ({}, info) => {
