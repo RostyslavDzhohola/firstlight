@@ -163,7 +163,21 @@ export type ClientMessages = {
    * `supportSync`): each Glasswing Ward that is up comes back as a `spell` event with `late`.
    */
   spellSync: Record<string, never>;
+  /**
+   * An AI agent (a resident) says an authored line (content/residentLines.ts) by id; the server
+   * fills its slots and checks them (no free text: DECISIONS "No text chat"). `to`: the session it
+   * answers. Agents only; at most one line every 2 s.
+   */
+  speak: SpeakMsg;
 };
+
+export interface SpeakMsg {
+  line: string;
+  to?: string;
+  place?: string;
+  dist?: number;
+  dir?: string;
+}
 
 /**
  * Cast a spell. The server checks the level gate, aether, cooldown and the attack rules (not dead,
@@ -297,6 +311,8 @@ export type ServerMessages = {
    * (`mission`: T1–T3) or opened the Gleam Vault. Display name only. Older clients ignore it.
    */
   news: { kind: "gleam" | "vault"; name: string; mission?: string };
+  /** A resident said a line (`speak`), rendered by the server, to everyone within 30 m. `to`: the session it answers. Older clients ignore it. */
+  speech: { by: string; text: string; to?: string; line: string };
 };
 
 /**

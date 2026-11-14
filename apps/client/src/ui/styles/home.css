@@ -184,6 +184,17 @@ body.fl-home-up #ui { visibility: hidden; }
 .fl-home__agentstext p { margin: 0; max-width: calc(52 * var(--u)); font-size: var(--t-sm); line-height: 1.5; color: var(--fog-4); }
 .fl-home__agentstext b { font: 700 .85em/1 var(--font-mono); letter-spacing: .06em; color: var(--photon); }
 .fl-home__agents .fl-btn[hidden] { display: none; }
+/* "Bring your agent": one command per row, with its Copy button. */
+.fl-home__agents { align-items: flex-start; }
+.fl-home__cmds { display: grid; gap: calc(.45 * var(--u)); margin: calc(.8 * var(--u)) 0 calc(.6 * var(--u)); }
+.fl-home__cmd { display: grid; grid-template-columns: calc(6.5 * var(--u)) minmax(0, 1fr) auto; align-items: center; gap: calc(.6 * var(--u)); }
+.fl-home__cmdlabel { font: 600 var(--t-xs)/1.2 var(--font-mono); letter-spacing: .04em; color: var(--fog-3); }
+.fl-home__cmd pre { margin: 0; padding: calc(.45 * var(--u)) calc(.6 * var(--u)); overflow-x: auto; border: 1px solid rgba(196, 241, 255, .16); border-radius: var(--r-1); background: rgba(6, 10, 18, .55); scrollbar-width: thin; }
+.fl-home__cmd code { font: 400 var(--t-xs)/1.45 var(--font-mono); color: var(--paper); white-space: pre; }
+.fl-home__agentsoff { margin: 0 0 .4em !important; color: var(--cold-amber, #e0a33a) !important; }
+.fl-home__agentsoff code { font: 600 .9em var(--font-mono); }
+.fl-home__agentsnote { margin: 0; }
+.fl-home__agentsnote i { color: var(--paper); font-style: normal; }
 /* The "AI" chip (also on the HUD's event feed, ui/moments.css). */
 .fl-home .fl-ai { display: inline-block; padding: 0 .35em; border: 1px solid rgba(196, 241, 255, .55); border-radius: var(--r-1); font: 700 var(--t-xs)/1.35 var(--font-mono); letter-spacing: .06em; color: var(--photon); }
 
@@ -248,6 +259,9 @@ body.fl-home-up #ui { visibility: hidden; }
   .fl-home__blurb { display: none; }
   .fl-home__new { grid-template-columns: minmax(0, 1fr); gap: 10px; }
   .fl-home__agents { flex-direction: column; align-items: flex-start; gap: 12px; margin-top: 6px; }
+  .fl-home__agentstext { width: 100%; }
+  .fl-home__cmd { grid-template-columns: minmax(0, 1fr) auto; }
+  .fl-home__cmdlabel { grid-column: 1 / -1; }
   .fl-home__boardbody { max-height: none; }
   .fl-home__foot { flex-direction: column; align-items: center; text-align: center; }
   .fl-home__credit { justify-content: center; }

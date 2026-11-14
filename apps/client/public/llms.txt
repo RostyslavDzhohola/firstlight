@@ -4,15 +4,36 @@
 > combat against creatures and bosses, missions, one life per character. People play it in a desktop
 > browser. AI agents can play it too, next to people, by the same server rules.
 
-If you are an AI agent and want to play (not just read about the game), you don't need a browser or
-a GPU. The repository ships a headless player: it joins the same worlds through the game's normal
-join flow, gives you the world as compact text or JSON (who and what is near, with distances and
-compass bearings), and takes high-level commands (walk there, fight that, take the missions).
+If you are an AI agent and want to play (not just read about the game), you don't need a browser, a
+GPU or a checkout: the game server plays a character for you. It joins the same worlds through the
+game's normal join flow, gives you the world as compact text or JSON (who and what is near, with
+distances and compass bearings), and takes high-level commands (walk there, fight that, take the
+missions).
 
-## Play as an agent
+## Play as an agent: one URL
+
+The game's API host serves agents at two endpoints (public game: `https://api.firstlight.one4all.dev`):
+
+- Remote MCP (Streamable HTTP, protocol 2026-07-28 and the 2025 revisions): `<api>/mcp`.
+  Claude Code: `claude mcp add --transport http firstlight https://api.firstlight.one4all.dev/mcp`.
+  Codex: `codex mcp add firstlight --url https://api.firstlight.one4all.dev/mcp`.
+  Then: "Join FIRSTLIGHT and reach level 3." Call `firstlight_join` first; it returns a `seat` handle:
+  pass it as `seat` to every other tool (clients that keep an MCP session may leave it out).
+- Plain HTTP+JSON, for a model with only `curl` or a fetch tool:
+  `POST <api>/api/agent/join` with `{"name":"Scout_7"}` returns `seat` and the playbook; then send
+  `Authorization: Bearer <seat>` to `GET <api>/api/agent/observe`, `POST <api>/api/agent/act` with
+  `{"tool":"move","target":"guide"}` (any tool's short name plus its arguments), and
+  `POST <api>/api/agent/leave`. `GET <api>/api/agent` lists every tool with its JSON schema.
+- When a server has agents off, `GET <api>/api/agent` says `"enabled": false` and a join answers
+  `agents off`. On the public game they stay off until the owner turns them on. Seats close after
+  10 idle minutes.
+
+Tools: `firstlight_join`, `firstlight_observe`, `firstlight_move`, `firstlight_attack`, `firstlight_interact`, `firstlight_missions`, `firstlight_trial`, `firstlight_cast`, `firstlight_shop`, `firstlight_item`, `firstlight_travel`, `firstlight_say`, `firstlight_respawn`, `firstlight_leave`, `firstlight_stop`, `firstlight_dodge`.
+
+## Or run the player yourself
 
 - [Guide: playing as an AI agent](https://github.com/RostyslavDzhohola/firstlight/blob/main/docs/agents/playing.md): quick start, every tool, the observation format, limits, etiquette.
-- MCP server (stdio): `node tools/agent/mcp.ts` in a checkout of the repository. Tools: `firstlight_join`, `firstlight_observe`, `firstlight_move`, `firstlight_attack`, `firstlight_interact`, `firstlight_missions`, `firstlight_trial`, `firstlight_cast`, `firstlight_shop`, `firstlight_item`, `firstlight_travel`, `firstlight_say`, `firstlight_respawn`, `firstlight_leave`.
+- MCP server (stdio): `node tools/agent/mcp.ts` in a checkout of the repository (Node 24, `pnpm install`).
 - Shell: `node tools/agent/serve.ts` (a local HTTP bridge on 127.0.0.1:7361), then `node tools/agent/fl-agent.mjs observe`, `… move guide`, `… attack n12`.
 - Library: `import { FirstlightAgent } from "@firstlight/agent-kit"` (TypeScript, Node 24, no build step).
 - A complete scripted player with no model: `tools/agent/examples/hunter.ts`. Several at once, as labelled residents of a world: `tools/agent/residents.ts`.

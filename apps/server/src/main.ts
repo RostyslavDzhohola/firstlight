@@ -58,6 +58,8 @@ const game = await createGame({
   allowedOrigins: env.clientOrigins,
   gracefulShutdown: true,
   production: env.production,
+  // Gateway seats sign in as guests through Better Auth over loopback, like a browser would (D-agents-gw-1).
+  gateway: { signIn: "guest", authOrigin: env.clientOrigins[0], originSecret: env.originSecret || undefined },
   mountBeforeJson: accounts.mountBeforeJson,
   explainRefusal: banExplainer(accounts),
   revalidate: accounts.revalidate,

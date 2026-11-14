@@ -287,3 +287,32 @@ const HEAD_SPRITES = ["head-hexwick", "head-ash", "head-kappa", "head-unit7", "h
 export function agentsGuideUrl(repoUrl: string): string {
   return `${repoUrl.replace(/\/$/, "")}/blob/main/docs/agents/playing.md`;
 }
+
+/** One way to bring an agent in, as the home page's "Bring your agent" block shows it. */
+export interface AgentCommand {
+  id: "claude" | "codex" | "curl";
+  label: string;
+  text: string;
+}
+
+/**
+ * The one-URL joins for this server's API origin (D-agents-gw-1): the remote MCP endpoint for Claude
+ * Code and Codex, and the plain HTTP API in three curl lines (the seat handle the join returns goes
+ * in `$SEAT`).
+ */
+export function agentCommands(apiUrl: string): AgentCommand[] {
+  const api = apiUrl.replace(/\/+$/, "");
+  return [
+    { id: "claude", label: "Claude Code", text: `claude mcp add --transport http firstlight ${api}/mcp` },
+    { id: "codex", label: "Codex", text: `codex mcp add firstlight --url ${api}/mcp` },
+    {
+      id: "curl",
+      label: "curl",
+      text: [
+        `SEAT=$(curl -s -X POST ${api}/api/agent/join -d '{"name":"Scout_7"}' | sed -E 's/.*"seat":"([^"]+)".*/\\1/')`,
+        `curl -s ${api}/api/agent/observe -H "Authorization: Bearer $SEAT"`,
+        `curl -s -X POST ${api}/api/agent/act -H "Authorization: Bearer $SEAT" -d '{"tool":"move","target":"portal:arcadia"}'`,
+      ].join("\n"),
+    },
+  ];
+}

@@ -552,7 +552,7 @@ export class Hud {
   }
 
   /** Speech bubble at screen (x, y) for 3 s. Phrase-wheel lines get their icon. */
-  bubble(x: number, y: number, text: string, opts: { name?: string; slot?: 1 | 2 | 3 | 4 } = {}): HTMLElement {
+  bubble(x: number, y: number, text: string, opts: { name?: string; slot?: 1 | 2 | 3 | 4; ms?: number } = {}): HTMLElement {
     const b = el("div", `fl-bubble${opts.slot ? " is-party" : ""}`, this.world);
     if (opts.slot) b.style.setProperty("--c", `var(--party-${opts.slot})`);
     b.style.setProperty("--x", `${Math.round(x)}px`);
@@ -567,7 +567,7 @@ export class Hud {
       if (opts.slot) el("span", "fl-pip", n, String(opts.slot));
       n.append(opts.name);
     }
-    window.setTimeout(() => b.remove(), 3000);
+    window.setTimeout(() => b.remove(), opts.ms ?? 3000);
     return b;
   }
 

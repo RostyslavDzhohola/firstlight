@@ -10,8 +10,8 @@ import { GLEAMS } from "@firstlight/shared/content/gleams";
 import { SPELLS } from "@firstlight/shared/content/spells";
 import { STARTERS } from "@firstlight/shared/content/weapons";
 import { STILLS } from "../ui/loadingStills.ts";
-import { renderNews, renderOnline, renderWorlds, startHeroStills } from "./home.ts";
-import { agentsGuideUrl, HERO_STILLS, heroLive, heroStills, huntState, newsTiles, WORLD_STILL, worldCards } from "./homeModel.ts";
+import { paintAgentsSwitch, renderAgentCommands, renderNews, renderOnline, renderWorlds, startHeroStills } from "./home.ts";
+import { agentCommands, agentsGuideUrl, HERO_STILLS, heroLive, heroStills, huntState, newsTiles, WORLD_STILL, worldCards } from "./homeModel.ts";
 
 const online: HomeOnline = {
   total: 5,
@@ -66,6 +66,34 @@ describe("the hero's model", () => {
     expect(tiles[1]!.state).toContain("never been opened");
     expect(tiles[2]!.icons).toHaveLength(STARTERS.length);
     expect(newsTiles(null)[1]!.state).toBeNull(); // no board: the tile says nothing it doesn't know
+  });
+
+  it("brings an agent in with one command: Claude Code, Codex, or three curl lines", () => {
+    const cmds = agentCommands("https://api.example.dev/");
+    expect(cmds.map((c) => c.id)).toEqual(["claude", "codex", "curl"]);
+    expect(cmds[0]!.text).toBe("claude mcp add --transport http firstlight https://api.example.dev/mcp");
+    expect(cmds[1]!.text).toBe("codex mcp add firstlight --url https://api.example.dev/mcp");
+    const curl = cmds[2]!.text.split("\n");
+    expect(curl).toHaveLength(3);
+    expect(curl[0]).toContain("https://api.example.dev/api/agent/join");
+    expect(curl[2]).toContain('Authorization: Bearer $SEAT');
+    const box = document.createElement("div");
+    renderAgentCommands(box, "https://api.example.dev");
+    expect([...box.querySelectorAll("[data-cmd]")].map((r) => (r as HTMLElement).dataset.cmd)).toEqual(["claude", "codex", "curl"]);
+    expect(box.querySelectorAll("button").length).toBe(3);
+    expect(box.querySelector("code")!.textContent).toContain("/mcp");
+  });
+
+  it("says plainly when the server has agents off", async () => {
+    const note = document.createElement("p");
+    note.hidden = true;
+    const answer = (body: unknown) => (async () => new Response(JSON.stringify(body))) as unknown as typeof fetch;
+    await paintAgentsSwitch(note, "https://api.example.dev", answer({ ok: true, enabled: false }));
+    expect(note.hidden).toBe(false);
+    await paintAgentsSwitch(note, "https://api.example.dev", answer({ ok: true, enabled: true }));
+    expect(note.hidden).toBe(true);
+    await paintAgentsSwitch(note, "https://api.example.dev", (async () => { throw new Error("down"); }) as unknown as typeof fetch);
+    expect(note.hidden).toBe(true);
   });
 
   it("links the agents guide by its path in the repo", () => {

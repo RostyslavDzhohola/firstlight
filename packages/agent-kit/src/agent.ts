@@ -60,6 +60,11 @@ export interface ConnectOptions {
   sessionFile?: string;
   /** One line per notable thing (joins, reconnects), for the caller's log. */
   log?: (line: string) => void;
+  /**
+   * Extra headers on every HTTP request the kit makes (sign-in, name, /api/play). The server's own
+   * gateway (apps/server/src/agents) uses them to say which address a seat is played from.
+   */
+  headers?: Record<string, string>;
 }
 
 export interface ActionResult {
@@ -69,6 +74,18 @@ export interface ActionResult {
   /** What to do about it. */
   hint?: string;
   [k: string]: unknown;
+}
+
+/** Something a player near you said: a phrase-wheel line (`phrase`) or a resident's line (`text`). */
+export interface Heard {
+  /** The speaker's session id (as in `observe().players[].id`). */
+  by: string;
+  name: string;
+  phrase?: string;
+  text?: string;
+  line?: string;
+  /** A resident's line addressed to you. */
+  toMe?: boolean;
 }
 
 export interface AgentEvent {
@@ -229,12 +246,18 @@ export class FirstlightAgent {
     if (opts.token) this.tokens = fixedToken(opts.token);
     else if (opts.dev) this.tokens = fixedToken(`dev:agent${Math.random().toString(36).slice(2, 10)}:${opts.name ?? "Agent"}`);
     else {
-      this.tokens = guestSession(opts.authUrl ?? this.url, opts.sessionFile, opts.authOrigin, (why) => {
-        this.newGuest = true;
-        this.log(why);
-      });
+      this.tokens = guestSession(
+        opts.authUrl ?? this.url,
+        opts.sessionFile,
+        opts.authOrigin,
+        (why) => {
+          this.newGuest = true;
+          this.log(why);
+        },
+        opts.headers,
+      );
       if (opts.name) {
-        const r = await claimName(this.url, await this.tokens.get(), opts.name);
+        const r = await claimName(this.url, await this.tokens.get(), opts.name, opts.headers);
         if (!r.ok) nameNote = `name not set: ${r.message}`;
       }
     }
@@ -265,7 +288,7 @@ export class FirstlightAgent {
       const token = await tokens.get(fresh, sameSession);
       const res = await fetch(`${this.url}/api/play`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", [AGENT_HEADER]: "1" },
+        headers: { ...this.opts?.headers, Authorization: `Bearer ${token}`, "Content-Type": "application/json", [AGENT_HEADER]: "1" },
         body: JSON.stringify({ body, v: PROTOCOL_VERSION, starter: this.starter, palette: this.opts?.palette ?? 0, look: this.opts?.look ?? 0, agent: true }),
         signal: AbortSignal.timeout(20_000),
       });
@@ -596,7 +619,16 @@ export class FirstlightAgent {
         this.huntIds = new Set(m.npcs as string[]);
         break;
       case "phrase":
-        if (m.by !== id) this.note("phrase", `${this.nameOf(m.by)} says "${PHRASES[m.id] ?? "…"}"`);
+        if (m.by !== id) {
+          this.note("phrase", `${this.nameOf(m.by)} says "${PHRASES[m.id] ?? "…"}"`);
+          this.hear({ by: m.by, name: this.nameOf(m.by), phrase: PHRASES[m.id] ?? "" });
+        }
+        break;
+      case "speech":
+        if (m.by !== id) {
+          this.note("phrase", `${this.nameOf(m.by)}: "${String(m.text)}"`);
+          this.hear({ by: m.by, name: this.nameOf(m.by), text: String(m.text), line: String(m.line), toMe: m.to === id });
+        }
         break;
       case "announce":
         this.note("info", `announcement: ${m.text}`);
@@ -1905,6 +1937,35 @@ export class FirstlightAgent {
     if (!Number.isInteger(id) || id < 0 || id >= PHRASES.length) return { ok: false, reason: "no such phrase", hint: PHRASES.map((p, i) => `${i}: ${p}`).join(", ") };
     this.room!.send("phrase", { id });
     return { ok: true, said: PHRASES[id] };
+  }
+
+  /**
+   * Say an authored resident line (content/residentLines.ts) by id, as a speech bubble for everyone
+   * within 30 m. The server fills `{you}` (the player `to` answers) and `{me}`, and checks the
+   * place, distance and direction against its lists. Agents only, one line every 2 s.
+   */
+  async speak(line: string, slots: { to?: string; place?: string; dist?: number; dir?: string } = {}): Promise<ActionResult> {
+    const no = this.notPlaying();
+    if (no) return no;
+    this.room!.send("speak", { line, ...slots });
+    return { ok: true, line };
+  }
+
+  /** Hear what players near you say (phrase-wheel lines and resident lines). Returns the unsubscribe. */
+  onHeard(fn: (h: Heard) => void): () => void {
+    this.hearers.add(fn);
+    return () => this.hearers.delete(fn);
+  }
+
+  private hearers = new Set<(h: Heard) => void>();
+  private hear(h: Heard): void {
+    for (const fn of this.hearers) {
+      try {
+        fn(h);
+      } catch {
+        /* a listener's bug is its own */
+      }
+    }
   }
 
   /** Skip the Portus tutorial (three training dummies): it pays 50 XP when done, nothing when skipped. */
