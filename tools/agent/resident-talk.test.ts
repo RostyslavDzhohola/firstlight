@@ -6,7 +6,7 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LINE_BY_ID } from "@firstlight/shared/content/residentLines";
-import { brainFromEnv, modelBrain, modelPrompt, parseAnswer, placesFor, scriptedBrain, type TalkContext } from "./resident-talk.ts";
+import { brainFromEnv, modelBrain, modelPrompt, parseAnswer, placesFor, scriptedBrain, tokenReserve, type TalkContext } from "./resident-talk.ts";
 
 /** Just the parts of an observation the brains read. */
 function obs(over: Record<string, unknown> = {}): TalkContext["obs"] {
@@ -129,11 +129,38 @@ describe("the model brain", () => {
     await slow.answer(ctx({ kind: "phrase", phrase: "GG" }));
     await slow.answer(ctx({ kind: "phrase", phrase: "GG" }));
     expect(slow.stats).toMatchObject({ calls: 1, lastFallback: "cadence" });
-    // The token budget counts too.
-    const tight = modelBrain({ api: "openai", url: base, model: "m", callsPerHour: 99, tokensPerHour: 400, minGapMs: 0 });
+    // The token budget counts too: room for one call's allowance, then the 432 it really used plus
+    // the next allowance don't fit.
+    const tight = modelBrain({ api: "openai", url: base, model: "m", callsPerHour: 99, tokensPerHour: tokenReserve(modelPrompt(ctx({ kind: "phrase", phrase: "GG" }))) + 100, minGapMs: 0 });
     await tight.answer(ctx({ kind: "phrase", phrase: "GG" }));
     await tight.answer(ctx({ kind: "phrase", phrase: "GG" }));
     expect(tight.stats).toMatchObject({ calls: 1, lastFallback: "budget" });
+  });
+
+  // Review 2026-11-13 (agent gateway, GPT-6.1 Sol) #2: the budget was checked against what finished
+  // calls had spent, so concurrent conversations all went out (budgets of one call and one token let
+  // three calls and 1,296 tokens through).
+  it("concurrent conversations can't overspend: a call and a token allowance are reserved before the fetch", async () => {
+    reply = () => openaiSays('{"say": ["marlo.gg.1"]}');
+    const gg = () => ctx({ kind: "phrase", phrase: "GG" });
+    const at = (b: ReturnType<typeof modelBrain>) => Promise.all([b.answer(gg()), b.answer(gg()), b.answer(gg())]);
+    // One call an hour: three at once make one request.
+    let before = seen.length;
+    const oneCall = modelBrain({ api: "openai", url: base, model: "m", callsPerHour: 1, tokensPerHour: 1_000_000, minGapMs: 0 }, scriptedBrain(() => 0));
+    expect((await at(oneCall)).every((says) => says.length === 1)).toBe(true); // everyone still gets an answer
+    expect(seen.length - before).toBe(1);
+    expect(oneCall.stats).toMatchObject({ calls: 1, fallbacks: 2, lastFallback: "budget" });
+    // One token an hour: no call fits at all.
+    before = seen.length;
+    const oneToken = modelBrain({ api: "openai", url: base, model: "m", callsPerHour: 1, tokensPerHour: 1, minGapMs: 0 });
+    await at(oneToken);
+    expect(seen.length - before).toBe(0);
+    expect(oneToken.stats).toMatchObject({ calls: 0, tokensIn: 0, tokensOut: 0 });
+    // Room for one allowance and a half: one of three concurrent calls goes out.
+    before = seen.length;
+    const half = modelBrain({ api: "openai", url: base, model: "m", callsPerHour: 99, tokensPerHour: Math.floor(tokenReserve(modelPrompt(gg())) * 1.5), minGapMs: 0 });
+    await at(half);
+    expect(seen.length - before).toBe(1);
   });
 
   it("parses only offered ids and only listed places; the env picks the brain", () => {

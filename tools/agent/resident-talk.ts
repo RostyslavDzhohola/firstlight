@@ -163,9 +163,27 @@ export function modelPrompt(ctx: TalkContext): { system: string; user: string; c
   return { system, user, candidates };
 }
 
+/** The answer's length cap (`max_tokens`): a line id or two in JSON. */
+const MAX_ANSWER_TOKENS = 80;
+
+/** A prompt's tokens by its characters: about four to a token in English; three, to be safe. */
+const promptTokens = (p: { system: string; user: string }, perToken = 4) => Math.ceil((p.system.length + p.user.length) / perToken);
+
+/**
+ * What a call may cost at most, reserved against the hourly budget before it is made: the prompt
+ * counted generously plus the whole answer cap. Reconciled to what it really used afterwards.
+ */
+export function tokenReserve(p: { system: string; user: string }): number {
+  return promptTokens(p, 3) + MAX_ANSWER_TOKENS;
+}
+
 /** The model brain: chooses among the authored lines; the scripted brain answers whenever it can't. */
 export function modelBrain(o: ModelBrainOptions, fallback: Brain = scriptedBrain()): Brain & { stats: ModelStats } {
   const stats: ModelStats = { calls: 0, tokensIn: 0, tokensOut: 0, fallbacks: 0 };
+  /**
+   * The rolling hour's calls, each holding its tokens: a reservation (taken synchronously, before the
+   * fetch, so concurrent conversations see each other's) until the call reports what it used.
+   */
   const spent: { at: number; tokens: number }[] = [];
   let lastCall = 0;
   const doFetch = o.fetch ?? fetch;
@@ -180,11 +198,14 @@ export function modelBrain(o: ModelBrainOptions, fallback: Brain = scriptedBrain
     async answer(ctx) {
       const now = Date.now();
       while (spent.length && now - spent[0]!.at > 3_600_000) spent.shift();
+      const p = modelPrompt(ctx);
       const tokens = spent.reduce((n, s) => n + s.tokens, 0);
-      if (spent.length >= o.callsPerHour || tokens >= o.tokensPerHour) return fall(ctx, "budget");
+      // Check and reserve with no await between them: the budget holds for calls in flight too.
+      const held = { at: now, tokens: tokenReserve(p) };
+      if (spent.length + 1 > o.callsPerHour || tokens + held.tokens > o.tokensPerHour) return fall(ctx, "budget");
       if (now - lastCall < o.minGapMs) return fall(ctx, "cadence");
       lastCall = now;
-      const p = modelPrompt(ctx);
+      spent.push(held);
       const base = o.url.replace(/\/+$/, "");
       let text = "";
       let used = { in: 0, out: 0 };
@@ -194,18 +215,18 @@ export function modelBrain(o: ModelBrainOptions, fallback: Brain = scriptedBrain
             ? await doFetch(`${base}/v1/messages`, {
                 method: "POST",
                 headers: { "content-type": "application/json", "anthropic-version": "2023-06-01", ...(o.key ? { "x-api-key": o.key } : {}) },
-                body: JSON.stringify({ model: o.model, max_tokens: 80, system: p.system, messages: [{ role: "user", content: p.user }] }),
+                body: JSON.stringify({ model: o.model, max_tokens: MAX_ANSWER_TOKENS, system: p.system, messages: [{ role: "user", content: p.user }] }),
                 signal: AbortSignal.timeout(o.timeoutMs ?? 8000),
               })
             : await doFetch(`${base}/chat/completions`, {
                 method: "POST",
                 headers: { "content-type": "application/json", ...(o.key ? { authorization: `Bearer ${o.key}` } : {}) },
-                body: JSON.stringify({ model: o.model, max_tokens: 80, temperature: 0.8, messages: [{ role: "system", content: p.system }, { role: "user", content: p.user }] }),
+                body: JSON.stringify({ model: o.model, max_tokens: MAX_ANSWER_TOKENS, temperature: 0.8, messages: [{ role: "system", content: p.system }, { role: "user", content: p.user }] }),
                 signal: AbortSignal.timeout(o.timeoutMs ?? 8000),
               });
         stats.calls++;
         if (!res.ok) {
-          spent.push({ at: now, tokens: Math.ceil((p.system.length + p.user.length) / 4) });
+          held.tokens = promptTokens(p);
           return fall(ctx, `http ${res.status}`);
         }
         const body = (await res.json()) as any;
@@ -218,15 +239,17 @@ export function modelBrain(o: ModelBrainOptions, fallback: Brain = scriptedBrain
         }
       } catch (e) {
         stats.calls++;
-        spent.push({ at: now, tokens: Math.ceil((p.system.length + p.user.length) / 4) });
+        held.tokens = promptTokens(p);
         return fall(ctx, (e as Error).name === "TimeoutError" ? "timeout" : "network");
       }
       // Without a usage report, count the characters (about four to a token).
-      if (!used.in) used.in = Math.ceil((p.system.length + p.user.length) / 4);
+      if (!used.in) used.in = promptTokens(p);
       if (!used.out) used.out = Math.ceil(text.length / 4);
       stats.tokensIn += used.in;
       stats.tokensOut += used.out;
-      spent.push({ at: now, tokens: used.in + used.out });
+      // Reconcile: the call holds what it really used (an endpoint that ignored max_tokens is
+      // counted in full, so the next calls see it).
+      held.tokens = used.in + used.out;
       const says = parseAnswer(text, p.candidates, placesFor(ctx.obs, ctx.to.level));
       return says.length ? says : fall(ctx, "bad answer");
     },
