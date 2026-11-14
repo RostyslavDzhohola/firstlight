@@ -11,9 +11,19 @@
 // membership reaches LOD_SLACK m past the band on its own side, so between two refreshes no instance
 // can be inside the band without both levels drawing it (no flicker at the band's edge), and the near
 // mesh's reach (and so its triangle count) is the tier's `fullTo`, as before.
+//
+// Only materials that carry the dither may overlap: a kind still drawn with the procedural material
+// (the vegetation assets failed to load, or haven't installed yet) keeps the old exclusive split at
+// `fullTo` (lodRanges), so it never draws both shapes whole through the band.
+//
+// Shadows fade with the level (lodShadowKeep): the near mesh's shadow loses the same share of its
+// shadow-map texels as its colour loses pixels, so it is gone by the band's end, before the CPU stops
+// drawing the near mesh at `fullTo`, instead of dropping whole there. The far card casts no shadow. The
+// occluder fade still never touches shadows. The shadow pass renders from the light, so its distance is
+// measured from the view camera's position (`lodUniforms.eye`, set every frame by props.ts).
 
+import * as THREE from "three/webgpu";
 import { attribute, cameraPosition, float, interleavedGradientNoise, length, renderGroup, screenCoordinate, select, smoothstep, uniform } from "three/tsl";
-import type * as THREE from "three/webgpu";
 
 /** How far (m) the camera can move between two instance refreshes (props.ts update: 2 m), plus a margin. */
 export const LOD_SLACK = 2.5;
@@ -54,10 +64,33 @@ export function lodKeeps(side: 0 | 1 | 2, noise: number, blend: number): boolean
   return side === 0 ? true : side === 1 ? noise >= blend : noise < blend;
 }
 
+/** The share of an instance's pixels (and, with lodShadowKeep, shadow texels) the `side` level keeps at distance `d` (pure; tested). */
+export function lodCoverage(side: 0 | 1 | 2, d: number, band: Pick<LodBand, "start" | "end">): number {
+  const blend = lodBlend(d, band);
+  return side === 0 ? 1 : side === 1 ? 1 - blend : blend;
+}
+
+/**
+ * Which distances each level draws (pure; tested). `faded`: the kind's materials carry the dither, so
+ * the levels overlap through the band; otherwise one exclusive split at `fullTo`.
+ */
+export function lodRanges(fullTo: number, faded: boolean): { nearTo: number; farFrom: number } {
+  if (!faded) return { nearTo: fullTo, farFrom: fullTo };
+  const b = lodBand(fullTo);
+  return { nearTo: b.nearTo, farFrom: b.farFrom };
+}
+
 export const lodUniforms = {
   start: uniform(0).setGroup(renderGroup),
   end: uniform(0).setGroup(renderGroup),
+  /** The view camera's world position (the shadow pass's own camera is the light's). */
+  eye: uniform(new THREE.Vector3()).setGroup(renderGroup),
 };
+
+/** Where the view camera is (props.ts, every frame). */
+export function setLodEye(p: THREE.Vector3): void {
+  lodUniforms.eye.value.copy(p);
+}
 
 /** Write the band into the shared uniforms (one per frame at most: props.ts applySettings). */
 export function setLodBand(band: LodBand): void {
@@ -71,32 +104,43 @@ const side = uniform(0).onObjectUpdate(({ object }) => {
   return s === 1 || s === 2 ? s : 0;
 });
 
+/** The keep rule for a fragment of an instance seen from `from` (screen coordinate: the pass's own target). */
+function keepFrom(from: THREE.Node): THREE.Node {
+  const d = length(attribute("iCenter", "vec3").sub(from as never));
+  // No band (Low: far cards only, or before the first settings): the far level keeps every pixel.
+  const blend = select(lodUniforms.end.greaterThan(lodUniforms.start), smoothstep(lodUniforms.start, lodUniforms.end, d), float(1));
+  const noise = interleavedGradientNoise(screenCoordinate.xy);
+  const near = noise.greaterThanEqual(blend);
+  const far = noise.lessThan(blend);
+  return select(side.lessThan(0.5), float(1), select(side.lessThan(1.5), select(near, float(1), float(0)), select(far, float(1), float(0)))).greaterThan(0.5) as unknown as THREE.Node;
+}
+
 let keepNode: THREE.Node | null = null;
+let shadowKeepNode: THREE.Node | null = null;
 
 /**
  * Keep (true) or drop (false) this fragment of a two-level prop. One node shared by every material
  * that uses it; the geometry must carry an instanced vec3 `iCenter` (the instance's position).
  */
 export function lodKeep(): THREE.Node {
-  if (keepNode) return keepNode;
-  const d = length(attribute("iCenter", "vec3").sub(cameraPosition));
-  // No band (Low: far cards only, or before the first settings): the far level keeps every pixel.
-  const blend = select(lodUniforms.end.greaterThan(lodUniforms.start), smoothstep(lodUniforms.start, lodUniforms.end, d), float(1));
-  const noise = interleavedGradientNoise(screenCoordinate.xy);
-  const near = noise.greaterThanEqual(blend);
-  const far = noise.lessThan(blend);
-  keepNode = select(side.lessThan(0.5), float(1), select(side.lessThan(1.5), select(near, float(1), float(0)), select(far, float(1), float(0)))).greaterThan(0.5) as unknown as THREE.Node;
-  return keepNode;
+  return (keepNode ??= keepFrom(cameraPosition as unknown as THREE.Node));
 }
 
+/** The same rule for the shadow pass: the distance from the view camera, the dither in shadow-map texels. */
+export function lodShadowKeep(): THREE.Node {
+  return (shadowKeepNode ??= keepFrom(lodUniforms.eye as unknown as THREE.Node));
+}
+
+type Mask = { and(b: THREE.Node): THREE.Node };
+
 /**
- * Add the cross-fade to `m`'s colour-pass mask (after the occluder fade, so both apply). The shadow
- * mask is left as it is: the near mesh's shadow keeps its full shape out to `fullTo`.
+ * Add the cross-fade to `m`'s colour mask (after the occluder fade, so both apply) and to its shadow
+ * mask (after the material's own shadow mask, which the occluder fade leaves whole).
  */
 export function applyLodFade<M extends THREE.NodeMaterial>(m: M): M {
-  const own = m.maskNode as unknown as { and(b: THREE.Node): THREE.Node } | null;
-  const shadow = m.maskShadowNode ?? own ?? null;
+  const own = m.maskNode as unknown as Mask | null;
+  const shadow = (m.maskShadowNode ?? own ?? null) as unknown as Mask | null;
   m.maskNode = own ? own.and(lodKeep()) : lodKeep();
-  if (shadow) m.maskShadowNode = shadow as THREE.Node;
+  m.maskShadowNode = shadow ? shadow.and(lodShadowKeep()) : lodShadowKeep();
   return m;
 }

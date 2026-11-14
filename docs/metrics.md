@@ -5,6 +5,40 @@ order"). Every number has an id, a unit, a better direction, one command that pr
 noise (measured: three runs) and whether a hill climb can use it as is. Groups are ordered from cheapest
 to most expensive to measure.
 
+## Where to climb first
+
+Ten metrics that are cheap to measure and most worth improving, best first. "Exact" and "±2 %"
+metrics don't move with the machine's load, so a single run before and after a change settles it.
+The last two are timings: climb them only on a quiet machine, with `--repeat 3` on both sides.
+
+| # | metric | today | noise | command (time) | why it matters |
+|---:|---|---:|---|---|---|
+| 1 | `load.webgpu.cold.world.transfer` | 11.7 MB | ±2 % | `pnpm metrics --only load` (~1 min, browser) | every byte before the world is waiting on a first visit (#85 "gets in") |
+| 2 | `firstvisit.world.br` | 657 KB | exact | `pnpm metrics --only static` (~1 min) | code the world needs before its first frame |
+| 3 | `frame.webgpu.medium.hollowmere.draws` | 159 | ±2 % | `pnpm metrics --only frame --bodies hollowmere` (~1 min, browser) | draw calls are main-thread time on every frame; Hollowmere is the worst body |
+| 4 | `load.webgpu.cold.warmup.stages` | 187 pipelines | ±2 % | `pnpm metrics --only load` | each pipeline compiles during the arrival's warm-up (2.3 s, 149 ms longest freeze) |
+| 5 | `frame.webgpu.medium.portus.triangles` | 504 k | ±2 % | `pnpm metrics --only frame --bodies portus` | GPU vertex work; Portus draws the most |
+| 6 | `frame.webgpu.medium.hollowmere.gpu_mem.total` | 266 MB | ±2 % | `pnpm metrics --only frame --bodies hollowmere` | GPU memory; low-memory laptops and phones drop the context |
+| 7 | `frame.webgpu.medium.hollowmere.programs` | 163 | ±2 % | same | live pipelines: fewer means a shorter warm-up and fewer hitches |
+| 8 | `load.webgpu.cold.world.requests` | 173 | ±2 % (≥ 2) | `pnpm metrics --only load` | requests to get in: each one costs a round trip on a slow link |
+| 9 | `frame.webgpu.medium.hollowmere.heap.growth` | 32 MB per 20 s | ±50 % (≥ 5 MB) | `pnpm metrics --only frame --bodies hollowmere --heapprof --repeat 3` (quiet machine) | per-frame garbage (1.6 MB/s) becomes GC pauses; the raw report names the allocation sites |
+| 10 | `frame.webgpu.medium.portus.gpu_busy.p50` | 4.2 ms | ±10 % | `pnpm metrics --only frame --bodies portus --repeat 3` (quiet machine) | GPU time per frame: the headroom a 2020 laptop needs for 60 fps |
+
+How to climb one (the browser rows): tonight's browser numbers come from a busy machine and an older
+collector, so `--compare` against the committed baseline will never call them better (exit 3). Take
+your own baseline at the start of the climb, then compare each attempt against it:
+
+```sh
+pnpm metrics --only frame --bodies hollowmere --out /tmp/before.json      # once
+# … make a change …
+pnpm metrics --only frame --bodies hollowmere --out /tmp/after.json
+pnpm metrics --compare /tmp/before.json /tmp/after.json                   # 0: keep it if the row says better
+```
+
+Keep a change only when `--compare` exits 0 and the climbed row says `better`. Exit 1 means something
+got worse, went missing, failed a gate or failed to measure; exit 3 means the comparison can't say
+(see "Comparing runs" below). Static rows (2) compare against the committed baseline directly.
+
 ## Running it
 
 ```sh
@@ -16,33 +50,74 @@ pnpm metrics --tests              # + Vitest count and time per project (~4 min)
 pnpm metrics --passes             # + ?bench=passes per-pass GPU ms at High (~20 min, WebGPU)
 pnpm metrics --all                # everything
 pnpm metrics --only frame --bodies portus --tier high --gfx webgpu,webgl --seconds 30
-pnpm metrics --repeat 3           # each group 3×: medians, and noise raised to the observed spread
-pnpm metrics --compare before.json after.json   # deltas; exit 1 when anything got worse beyond noise
-pnpm metrics --merge a.json b.json --out all.json
+pnpm metrics --repeat 3           # each group 3×: medians (gates: the worst run), noise raised to the observed spread
+pnpm metrics --compare before.json after.json [--skip <regex>] [--session-minutes 30]   # exit 0 / 1 / 3: see below
+pnpm metrics --merge a.json b.json:frame,load --out all.json     # whole runs, or some groups of one
 ```
+
+A run exits 0 only when every group it ran is complete and every gate is 0. It writes its file either
+way, so a failed run can be read, but its `status` says which groups failed and why.
 
 Each run writes `tools/bench/results/metrics-<time>-<commit>.json` (gitignored). The browser groups
 use the journeys' stack (`apps/client/e2e/metrics.spec.ts`, headless and muted, ports `E2E_PORT` /
 `E2E_CLIENT_PORT`, default 2612/5212); the server group starts its own server on
 `METRICS_SERVER_PORT` (default 2622) with fresh databases and a throwaway load-test secret.
 
-### The run file (schema v1, `tools/metrics/schema.ts`)
+### The run file (schema v2, `tools/metrics/schema.ts`)
 
 ```jsonc
-{ "v": 1, "when": "…", "commit": "…", "branch": "…", "dirty": false,
+{ "v": 2, "when": "…", "commit": "…", "branch": "…", "dirty": false, "tree": "",
   "machine": { "os", "cpu", "cores", "memGB", "node", "busy", "load1" },
   "groups": ["static", "health"], "repeat": 3, "notes": [],
+  "status": { "static": { "ok": true, "errors": [], "missing": [], "when": "…", "commit": "…",
+                          "dirty": false, "tree": "", "busy": false, "load1": 2.1, "repeat": 3 }, … },
   "metrics": [ { "id": "frame.webgpu.medium.portus.gpu_busy.p50", "value": 7.36, "unit": "ms",
-                 "better": "lower", "group": "frame", "noise": 0.1, "floor": 0.25 } ] }
+                 "better": "lower", "group": "frame", "noise": 0.1, "floor": 0.25 },
+               { "id": "tests.client.failed", "value": 0, "unit": "tests", "better": "lower",
+                 "group": "tests", "noise": 0, "gate": true } ] }
 ```
 
 - `noise` is the typical run-to-run spread as a fraction of the value (0.1 = ±10 %); 0 means
   deterministic. The noise in the tables below was measured with three runs (the server two) on a
   machine at load 60–350, so treat it as an upper bound. An idle machine's spread is smaller. `floor` (optional) is an absolute spread for counts that sit near zero.
-- `--compare` calls a change real when it moves past `max(noise × |before|, floor)`, using the larger
-  noise of the two runs. Anything else is "same".
-- `machine.busy` is true when the 1-minute load average is over half the cores. Frame, load and server
-  numbers from a busy machine are relative at best: compare only runs taken in the same few minutes.
+- `gate: true` marks a correctness count that must be 0: type errors, balance checks out of band,
+  failing tests, shader builds after the warm-up or during a frame run. No tolerance: 0 → 1 is worse,
+  `--repeat` keeps the worst run, and a run with a gate above 0 exits 1.
+- `status` has one entry per group (D-metrics-3). `ok` means every measurement the group promised was
+  taken: each group lists the ids it will produce before it runs (every body, cache, load level,
+  project), and a failed build, a crashed subprocess, a failed browser run, a field missing from a
+  report or a short repeat makes it not ok, with the reason in `errors` and the absent ids in `missing`.
+  A failed build never reports the sizes of the `dist` it left behind, and `--no-build` measures `dist`
+  but marks the group not ok (it may be another tree's). A file whose status claims success with
+  missing or no metrics fails validation.
+- Each group keeps its own provenance: commit, `dirty`, `tree` (a hash of the uncommitted changes,
+  so two dirty runs of different edits don't pass for the same tree), start time, `busy` (the 1-minute
+  load average went over half the cores while it ran) and the highest `load1`. A run whose source tree
+  changes while it runs marks every group not ok. `--merge` keeps each group's provenance, refuses a
+  group that two inputs both carry or inputs from another machine, and sets the top-level `commit` and
+  `tree` to "mixed" when the groups differ.
+- Schema v1 files (written before 2026-11-14) still read: every group comes back not ok ("kept no
+  completeness record"), and the known gate ids become gates.
+
+### Comparing runs
+
+`pnpm metrics --compare before.json after.json` compares only the groups the after run measured, and
+gives each metric one verdict:
+
+| verdict | when | exit |
+|---|---|---:|
+| `better` / `worse` / `same` | moved past `max(noise × \|before\|, floor)` (the larger noise of the two runs; gates: any change) | `worse`: 1 |
+| `missing` | in the before run, absent from a group the after run measured: a measurement failed | 1 |
+| `incompatible` | same id, different unit, direction or group | 1 |
+| `noisy` | a load-sensitive metric (noise over 2 %) where either run was busy and they are not one session (both busy, groups started within `--session-minutes`, default 30), or the machines differ | 3 |
+| `unbaselined` | in the after run, in a group the before run left incomplete (or listed as missing) | 3 |
+| `new` | in a group the before run didn't measure | 0 |
+
+Exit 1 also when any after group is incomplete or any after gate is above 0. Exit 3 (inconclusive,
+nothing can be claimed) when nothing failed but some metric was `noisy` or `unbaselined`, or a before
+group was incomplete. Exit 0 only for a conclusive comparison with nothing worse. Counts that load
+can't move (bytes, draw calls, triangles, requests, resource counts: noise ≤ 2 %) are judged across
+sessions even when a run was busy.
 
 ### Hill-climb notes
 
@@ -60,7 +135,7 @@ use the journeys' stack (`apps/client/e2e/metrics.spec.ts`, headless and muted, 
 
 | id | meaning | unit | better | noise | climb? |
 |---|---|---|---|---|---|
-| `balance.checks.failed` | balance-model band checks out of band (`tools/balance`) | checks | lower | exact | yes (gate: must stay 0) |
+| `balance.checks.failed` | balance-model band checks out of band (`tools/balance`) | checks | lower | gate | gate: must stay 0 |
 | `balance.checks.total` | band checks the model runs | checks | higher | exact | no (coverage) |
 
 ## 2. Static and build (≈1 min): `pnpm metrics` (default)
@@ -72,7 +147,7 @@ level 9, brotli quality 11 (what a CDN serves at best).
 |---|---|---|---|---|---|
 | `build.client.ms` | `pnpm --filter @firstlight/client build` wall time | ms | lower | ±75 % | yes, with `--repeat 3` |
 | `typecheck.ms` | `pnpm typecheck` wall time (shared, server, client in parallel) | ms | lower | ±136 % | yes, with `--repeat 3` |
-| `typecheck.errors` | TypeScript errors | errors | lower | exact | gate |
+| `typecheck.errors` | TypeScript errors | errors | lower | gate | gate: must stay 0 |
 | `bundle.js.count` | JS files in the build | files | lower | exact | yes |
 | `bundle.js.{raw,gzip,br}` | all JS, summed | KB | lower | exact | yes |
 | `bundle.css.{raw,br}` | all CSS, summed | KB | lower | exact | yes |
@@ -106,7 +181,7 @@ are page milliseconds from navigation start. Ids are `load.<gfx>.<cold|warm>.…
 | `warmup.gap_max.ms` | the longest gap between animation frames during the warm-up (what a freeze looks like) | ms | lower | ±40 % | with care |
 | `warmup.gaps_over250` | frame gaps over 250 ms during the warm-up | gaps | lower | floor 2 | gate |
 | `warmup.longtasks` | main-thread tasks over 50 ms during the warm-up | tasks | lower | ±30 % | with care |
-| `shaders_after_warmup` | shader builds in the 120 frames after the warm-up (a hitch while playing) | builds | lower | exact | gate: must stay 0 |
+| `shaders_after_warmup` | shader builds in the 120 frames after the warm-up (a hitch while playing) | builds | lower | gate | gate: must stay 0 |
 | `heap` | JS heap in the world | MB | lower | ±10 % | with care |
 
 ## 4. Server (≈3 min): `pnpm metrics --server [--bots 1,25,50,80] [--server-seconds 20]`
@@ -115,13 +190,19 @@ The real server (`apps/server/src/main.ts`) with fresh databases; for each level
 (`tools/bots/src/load.ts --dev`) join Portus, run round the pad at 20 Hz inputs, and the collector reads
 `/api/metrics` twice over the steady part. Ids are `server.bots<N>.…`. 80 is the most one body takes:
 rooms hold 40 (`NET.MAX_CLIENTS`) and load tests may open 2 copies of a body (`BOT_BUDGET.copiesPerBody`).
-At 100, the last 20 bots retry their refused joins for about 19 minutes. The collector kills a level
-whose bots haven't finished after its run time plus 3 minutes, and reports how many joined.
+At 100, the last 20 bots retry their refused joins for about 19 minutes.
+
+A level counts only at its full requested population: every bot must join (the bots' `N/N bots
+joined` line), the server must hold N players when sampling starts and still N when it ends, and the
+bots' `RESULT` must count N. A level short of that (a partial join, a bot dropped mid-run, a run
+killed after its run time plus 3 minutes) publishes only `joined` (and `population` if sampled), and
+the group is not ok.
 
 | id | meaning | unit | better | noise | climb? |
 |---|---|---|---|---|---|
 | `server.idle.{rss,heap}` | the process with no rooms | MB | lower | ±15 % | with care |
-| `…joined`, `…rooms` | bots that got in, rooms they filled | bots, rooms | higher / lower | exact | gate |
+| `…joined`, `…rooms` | bots that got in, rooms they filled | bots, rooms | higher / lower | exact | completeness |
+| `…population` | players the server held while sampling (the smaller of the two samples) | players | higher | exact | completeness |
 | `…tick.p50/p95/p99` | `BodyRoom.tick` duration over the last 400 ticks (the room's 20 Hz simulation) | ms | lower | ±25–77 % | yes at 50+ bots, `--repeat 3` |
 | `…cpu` | server process CPU over the sampled window | % of a core | lower | ±15 % | yes, `--repeat 3` |
 | `…rss`, `…heap` | process memory at that load | MB | lower | ±10–20 % | with care |
@@ -149,23 +230,24 @@ Ids are `frame.<gfx>.<tier>.<body>.…`.
 | `over33`, `over50`, `over100` | frames over 33, 50 and 100 ms in the run | frames | lower | floor 1–3 | gate |
 | `draws` | draw calls per frame, mean | calls | lower | ±2 % | **yes** |
 | `triangles` | triangles per frame, mean | ktris | lower | ±2 % | **yes** |
-| `shader_builds` | shader builds during the run | builds | lower | exact | gate: must stay 0 |
+| `shader_builds` | shader builds during the run | builds | lower | gate | gate: must stay 0 |
 | `gpu_mem.total`, `gpu_mem.textures` | three's estimate of GPU memory (renderer.info.memory) | MB | lower | ±2 % | yes |
 | `geometries`, `textures`, `programs` | live GPU resources | count | lower | ±2 % | yes |
 | `heap.end`, `heap.growth` | JS heap at the end, and its growth over the run (a leak or per-frame allocation) | MB | lower | ±10–50 % | with care |
 
 Per pass: `pnpm metrics --passes [--tier high]` runs `?bench=passes` (bench-passes.spec.ts): the fixed
 view rendered in uncapped batches with each feature off in turn. `passes.<tier>.<feature>` is that
-feature's cost in ms per frame (floor 0.25 ms), `passes.<tier>.baseline.p50` the whole frame,
-`passes.<tier>.noise_floor` the run's own noise, `passes.<tier>.gtao.s<samples>_x<scale>` the GTAO sweep. Run it only on a quiet
-machine (#52: a busy machine's noise floor reached 2.6 ms).
+feature's cost in ms per frame (floor: 0.25 ms or the run's own noise floor, whichever is larger),
+`passes.<tier>.baseline.p50` the whole frame, `passes.<tier>.noise_floor` the run's own noise, `passes.<tier>.gtao.s<samples>_x<scale>` the GTAO sweep. A report the bench itself marks invalid
+publishes no cost (only the baseline and noise floor, for diagnosis) and the group is not ok. Run it
+only on a quiet machine (#52: a busy machine's noise floor reached 2.6 ms).
 
 ## 6. Tests (≈4 min): `pnpm metrics --tests [--projects shared,client,server]`
 
 | id | meaning | unit | better | noise | climb? |
 |---|---|---|---|---|---|
 | `tests.<project>.count` | Vitest tests in the project | tests | higher | exact | no (coverage) |
-| `tests.<project>.failed` | failing tests | tests | lower | floor 1 (load-sensitive timeouts) | gate |
+| `tests.<project>.failed` | failing tests (a load-sensitive timeout counts: rerun the file alone, then fix or record it) | tests | lower | gate | gate: must stay 0 |
 | `tests.<project>.ms` | wall time of `pnpm vitest run --project <p>` | ms | lower | not measured tonight | yes, `--repeat 3` |
 
 ## 7. Not yet collected (measurable with what exists, not wired)
@@ -203,26 +285,35 @@ real-visit numbers.
 
 ## Baseline (2026-11-13, `night/integration` head)
 
-The full baseline is `docs/metrics/baseline-2026-11-13.json` (219 metrics, commit `f9fd7ff0`, which is
-`night/integration` 7afbca81's game code plus the collector). Static, frame and health ran 3 times, the server twice.
+The full baseline is `docs/metrics/baseline-2026-11-13.json` (schema v2, 245 metrics). Each group
+carries its own provenance and status (D-metrics-3):
+
+| group | commit | complete? | what it means for `--compare` |
+|---|---|---|---|
+| static, health | `bc65969e` (2026-11-14, this collector) | yes | usable: bytes and counts compare directly; `build.client.ms` and `typecheck.ms` were busy (load 182), so they come back `noisy` |
+| tests | `bc65969e` | no: taken at load 180–440, the 26 failures are timeouts (rerun alone, shared's were all 5 s timeouts) | test counts are exact; anything compared against this group is inconclusive (exit 3) |
+| frame, load, server | `f9fd7ff0` (2026-11-13, schema v1, busy) | no: v1 kept no completeness record; frame lacks `pixel_ratio` and `canvas_mpx`, load the warm visit, server the 80-bot level and `population` | reference only: comparisons exit 3. Take your own baseline in the session you climb in |
+
 Compare a later run with `pnpm metrics --compare docs/metrics/baseline-2026-11-13.json <new.json>`.
+The server group was not re-run on 2026-11-14: the load average stayed between 80 and 460 all session,
+so a 20 Hz tick timer would have measured the machine, not the game.
 
 **Every frame, load and server number below was taken on a very busy machine** (load average 60–350
 on 8 cores while four lanes built, tested and ran Blender). Read them as relative, and re-run them on an
 idle machine before you climb against them. Bytes, counts, draw calls, triangles and GPU memory are
 unaffected.
 
-Static and build:
+Static and build (2026-11-14, `bc65969e`):
 
 | metric | value |
 |---|---:|
-| `bundle.js.br`: all JS, brotli | 763 KB |
-| `chunk.three.tsl.js.br` / `chunk.game.js.br` | 209 / 221 KB |
+| `bundle.js.br`: all JS, brotli | 784 KB |
+| `chunk.three.tsl.js.br` / `chunk.game.js.br` | 210 / 227 KB |
 | `firstvisit.home.br`: before the home page runs | 25 KB (3 requests) |
-| `firstvisit.world.br`: code before the world's first frame | 645 KB (29 requests) |
-| `dist.total.bytes` (of which models 8.0 MB, images 6.1 MB) | 17.7 MB |
-| `build.client.ms` / `typecheck.ms` (busy machine: ±75 % / ±136 %) | 3.2 s / 4.4 s |
-| `balance.checks.failed` | 0 of 650 |
+| `firstvisit.world.br`: code before the world's first frame | 657 KB (28 requests) |
+| `dist.total.bytes` (of which models 9.5 MB, images 6.1 MB) | 19.2 MB |
+| `build.client.ms` / `typecheck.ms` (busy machine, load 182) | 6.8 s / 26.3 s |
+| `balance.checks.failed` | 0 of 653 |
 
 Frame (`?bench`, WebGPU, Medium, 1280×720, DPR 1, 20 s per body):
 

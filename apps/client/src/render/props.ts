@@ -4,12 +4,13 @@
 // tier's "full mesh to" distance, LOD1 (low poly, no shadow) to the draw distance.
 // One draw per deterministic model variant/LOD, plus nearby LOD0 shadow draws. Between the two the
 // modelled props cross-fade over a distance band (lodFade.ts, #74): an instance in the band is in both.
+// Procedural props (no vegetation assets) have no dither, so they keep one exclusive split.
 
 import * as THREE from "three/webgpu";
 import { hash01, PROP_KINDS, PROP_STRIDE, PROP_STYLES, type BodyId, type PropKind } from "@firstlight/shared";
 import { float, materialColor, mix } from "three/tsl";
 import { atmo } from "./atmosphere.ts";
-import { lodBand, setLodBand } from "./lodFade.ts";
+import { lodBand, lodRanges, setLodBand, setLodEye } from "./lodFade.ts";
 import { applyOccluderFade } from "./occluderFade.ts";
 import { propGeometry, PROP_PALETTES } from "./propGeometry.ts";
 import { applyVegetationPalette, preloadVegetation, validateVegetationAssets, vegetationMaterial, type VegetationAssets } from "./vegetationAssets.ts";
@@ -34,6 +35,8 @@ interface KindMeshes {
   lod0: THREE.InstancedMesh;
   lod1: THREE.InstancedMesh;
   capacity: number;
+  /** Its materials carry the cross-fade dither (the modelled assets installed), so its levels may overlap. */
+  faded: boolean;
 }
 
 const CAPACITY: Partial<Record<PropKind, number>> = { reed: 6000, oak: 4000, scrub: 4000 };
@@ -57,8 +60,6 @@ export class PropSystem {
   private readonly kinds = new Map<number, KindMeshes>();
   private readonly chunks = new Map<string, ChunkProps>();
   private fullTo = 25;
-  /** The far level draws instances at least this far (m): the cross-fade band's start, less slack. */
-  private farFrom = 25;
   private lodTo = 180;
   private enabled = true;
   private castShadow = true;
@@ -98,7 +99,7 @@ export class PropSystem {
           this.group.add(m);
           return m;
         };
-        this.kinds.set(k * 8 + variant, { kind, variant, lod0: mk(0), lod1: mk(1), capacity });
+        this.kinds.set(k * 8 + variant, { kind, variant, lod0: mk(0), lod1: mk(1), capacity, faded: false });
       }
     }
     this.ready = (assets ? Promise.resolve(assets) : preloadVegetation())
@@ -112,7 +113,7 @@ export class PropSystem {
     if (this.disposed) return;
     validateVegetationAssets(assets);
     const mergeRocks = this.kinds.has(PROP_KINDS.indexOf("rock") * 8) && this.kinds.has(PROP_KINDS.indexOf("boulder") * 8);
-    const replacements: { mesh: THREE.InstancedMesh; geometry: THREE.BufferGeometry; material: THREE.Material }[] = [];
+    const replacements: { km: KindMeshes; mesh: THREE.InstancedMesh; geometry: THREE.BufferGeometry; material: THREE.Material }[] = [];
     const chunks = new Map<string, ChunkProps>();
     try {
       for (const km of this.kinds.values()) {
@@ -123,7 +124,7 @@ export class PropSystem {
           const mesh = lod === 0 ? km.lod0 : km.lod1;
           const geometry = assets.geometry.get(`${name}_L${lod}`)!.clone();
           // Track ownership before preparing so a preparation failure also disposes this clone.
-          const replacement = { mesh, geometry, material: mesh.material as THREE.Material };
+          const replacement = { km, mesh, geometry, material: mesh.material as THREE.Material };
           replacements.push(replacement);
           if (km.kind === "boulder") geometry.scale(2.3 / 0.9, 2.3 / 0.9, 2.3 / 0.9);
           if (km.kind === "blossom") geometry.scale(5.2 / 6.2, 5.2 / 6.2, 5.2 / 6.2);
@@ -144,6 +145,7 @@ export class PropSystem {
     for (const r of replacements) {
       r.mesh.geometry = r.geometry;
       r.mesh.material = r.material;
+      r.km.faded = true; // vegetationMaterial applies the cross-fade
     }
     for (const geometry of old) geometry.dispose();
     if (mergeRocks) {
@@ -166,9 +168,7 @@ export class PropSystem {
     this.enabled = s.on.trees;
     this.group.visible = this.enabled;
     this.fullTo = s.props.fullTo;
-    const band = lodBand(this.fullTo);
-    this.farFrom = band.farFrom;
-    setLodBand(band);
+    setLodBand(lodBand(this.fullTo));
     this.lodTo = s.props.lodTo;
     this.castShadow = s.on.shadows && s.shadows.mode === "map";
     for (const k of this.kinds.values()) k.lod0.castShadow = this.castShadow && !SMALL.has(k.kind);
@@ -290,20 +290,22 @@ export class PropSystem {
   }
 
   update(cam: THREE.Vector3, now: number) {
+    setLodEye(cam); // every frame: the shadow pass's fade measures from here (lodFade.ts)
     if (!this.enabled) return;
     if (!this.dirty && now - this.lastUpdate < 400 && cam.distanceToSquared(this.lastPos) < 4) return;
     this.dirty = false;
     this.lastUpdate = now;
     this.lastPos.copy(cam);
     const full2 = this.forceAll ? Infinity : this.fullTo * this.fullTo;
-    // Far cards start before the near meshes end: the cross-fade band holds both (lodFade.ts).
-    const far2 = this.forceAll ? 0 : this.farFrom * this.farFrom;
     const lod2 = this.lodTo * this.lodTo;
     let total = 0;
     for (const [k, km] of this.kinds) {
       let n0 = 0, n1 = 0;
       const small = SMALL.has(km.kind);
       const kindLod2 = small && !this.forceAll ? Math.min(this.lodTo, 65) ** 2 : lod2;
+      // Faded kinds: far cards start before the near meshes end, the band holds both (lodFade.ts).
+      const farFrom = lodRanges(this.fullTo, km.faded).farFrom;
+      const far2 = this.forceAll ? 0 : farFrom * farFrom;
       // Order-dependent signature of the selected instances: upload only when it changes.
       let sig0 = 0x9e3779b9, sig1 = 0x85ebca6b;
       const a0 = km.lod0.instanceMatrix.array as Float32Array;
