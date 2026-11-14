@@ -384,6 +384,9 @@ export class Player {
     this.mouse.x += dx;
     await this.page.mouse.move(this.mouse.x, this.mouse.y);
     await this.page.waitForTimeout(80);
+    // The game turns on its next frame: wait for two, or on a loaded machine (300 ms frames) the keys
+    // pressed next walk the old way (J2.4 sprinted off the Arcadia pad into the portal home).
+    await this.page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))).catch(() => {});
   }
 
   /** Look up (+) or down (−) by `rad`. */
