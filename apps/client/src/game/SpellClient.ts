@@ -168,9 +168,14 @@ export class SpellClient implements ClientSystem {
         this.fx.blink(at, to);
         g.audio.play("skipstep", mine ? null : to);
         if (mine) {
-          // The server moved us (its `correct` came first and stopped the body): keep running.
+          // The server moved us (its `correct` came first and stopped the body): keep running, and
+          // keep a jump that was still rising (#78: the hop was cut off and the body dropped where it
+          // landed). The body blinked, it didn't arrive: no rez-in, no speed spike from the 10 m.
           const up = _w.copy(g.player.pos).normalize();
-          g.player.vel.copy(this.vel).addScaledVector(up, -this.vel.dot(up));
+          const rise = Math.max(0, this.vel.dot(up));
+          g.player.vel.copy(this.vel).addScaledVector(up, rise - this.vel.dot(up));
+          if (rise > 0) g.player.onGround = false;
+          g.self?.blinked();
         }
         break;
       }

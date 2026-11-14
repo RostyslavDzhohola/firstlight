@@ -355,6 +355,11 @@ export class AvatarView {
     return this.speed;
   }
 
+  /** The body moved here without walking (a Skipstep blink): no teleport rez-in, no speed spike from the distance (#78). */
+  blinked() {
+    this.havePrev = false;
+  }
+
   /** PlayerState.flags (PF): DEAD, BLOCKING, SWIMMING, SCOPED override the animation state. */
   setFlags(bits: number) {
     const was = this.flagBits & PF.DEAD, is = bits & PF.DEAD;
@@ -889,7 +894,9 @@ export class AvatarView {
         else { name = "sprint"; ts = clamp(sp / (CLIP_SPEED.sprint! * this.stride), 0.85, 1.3 / this.stride); }
         break;
       case ANIM.JUMP: name = "jump_air"; break;
-      case ANIM.FALL: name = "fall"; break;
+      // A hop's way down keeps the jump clip (it reaches its landing as a 0.73 s hop lands); the long
+      // fall's flail only once the clip has run out, off a ledge (#78: every hop flailed half-way).
+      case ANIM.FALL: name = this.currentName === "jump_air" && !!this.current?.isRunning() ? "jump_air" : "fall"; break;
       case ANIM.SWIM:
         if (sp > 0.6) { name = "swim"; ts = clamp(sp / CLIP_SPEED.swim!, 0.7, 1.6); } else name = "swim_idle";
         break;
