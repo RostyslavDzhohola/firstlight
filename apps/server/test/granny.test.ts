@@ -94,6 +94,30 @@ describe("Granny Gust (#2)", () => {
     }
   });
 
+  it("only time in her sights counts toward surviving her: leaving and coming back doesn't pay the medal early", () => {
+    const w = fakeWorld("hollowmere", { immortal: true });
+    const events: NpcEvent[] = [];
+    const off = onNpcEvent((e) => events.push(e));
+    try {
+      const p = w.addPlayer("p", fenPoint(w, 0), 12);
+      const g = w.sys.createNpc(NPC_INDEX.get("granny_gust")!, 9, fenPoint(w, 30), w.clock.t, { instant: true, roam: 20 });
+      for (let i = 0; i < 20 && grannyPhase(g) !== "chase"; i++) w.step(50);
+      for (let i = 0; i < 20 * 10; i++) w.step(50); // 10 s of chase
+      // Gone (another body, far off) for a long while: she loses you.
+      w.movePlayer(p, fenPoint(w, 400));
+      for (let i = 0; i < 20 * 60; i++) w.step(50);
+      expect(grannyPhase(g)).toBe("roam");
+      w.movePlayer(p, fenPoint(w, 0));
+      for (let i = 0; i < 20 * 10 && grannyPhase(g) !== "chase"; i++) w.step(50);
+      // A fresh chase: ten seconds in, no medal yet (the old time doesn't count).
+      for (let i = 0; i < 20 * 10; i++) w.step(50);
+      expect(events.some((e) => e.kind === "granny")).toBe(false);
+    } finally {
+      off();
+      w.sys.dispose();
+    }
+  });
+
   it("beating her pays like a beast and names her in the kill event (the Grounded medal)", () => {
     const w = fakeWorld("hollowmere", { immortal: true });
     const events: NpcEvent[] = [];

@@ -24,6 +24,10 @@ interface GrannyState {
   phase: Phase;
   target: PlayerActor | null;
   chaseStart: number;
+  /** Time (ms) the target has spent in her sights this chase: alive, in reach, not in a safe zone. */
+  chasedMs: number;
+  /** Her last think (the attack system runs her dashes without one: count the gap on her next). */
+  tickAt: number;
   /** When the target was last within reach (for giving up). */
   seenAt: number;
   dashes: number;
@@ -45,7 +49,7 @@ const states = new WeakMap<Npc, GrannyState>();
 function stateOf(n: Npc): GrannyState {
   let s = states.get(n);
   if (!s) {
-    s = { phase: "roam", target: null, chaseStart: 0, seenAt: 0, dashes: 0, dashing: false, hpAtDash: 0, until: 0, ignore: new Map(), lastLine: 0, lineNo: 0, goal: null, nextLook: 0 };
+    s = { phase: "roam", target: null, chaseStart: 0, chasedMs: 0, tickAt: 0, seenAt: 0, dashes: 0, dashing: false, hpAtDash: 0, until: 0, ignore: new Map(), lastLine: 0, lineNo: 0, goal: null, nextLook: 0 };
     states.set(n, s);
   }
   return s;
@@ -81,6 +85,8 @@ function engage(sys: NpcSystem, n: Npc, s: GrannyState, p: PlayerActor, now: num
   s.phase = "chase";
   s.target = p;
   s.chaseStart = now;
+  s.chasedMs = 0;
+  s.tickAt = now;
   s.seenAt = now;
   s.dashes = 0;
   n.target = p;
@@ -103,6 +109,9 @@ function release(sys: NpcSystem, n: Npc, s: GrannyState, now: number) {
 
 export function grannyThink(sys: NpcSystem, n: Npc, now: number, dt: number) {
   const s = stateOf(n);
+  // Time since her last think (dashes run in the attack system, without one), at most a dash's length.
+  const gap = Math.min(4000, Math.max(0, now - s.tickAt));
+  s.tickAt = now;
   // A dash we started has ended (the attack system ran it): count it, and gloat if it landed.
   if (s.dashing && !n.attack) {
     s.dashing = false;
@@ -120,15 +129,20 @@ export function grannyThink(sys: NpcSystem, n: Npc, now: number, dt: number) {
   }
   if (s.phase === "winded") {
     sys.setAnim(n, NPC_ANIM.KNEEL);
-    if (s.target) holdRegen(s.target, "miniboss", now);
+    if (s.target && valid(sys, n, s.target)) {
+      holdRegen(s.target, "miniboss", now);
+      s.seenAt = now;
+      s.chasedMs += gap;
+    }
     if (now < s.until) return;
     n.state.flags &= ~(NF.STUNNED | NF.WEAK_OPEN);
-    s.phase = valid(sys, n, s.target) ? "chase" : "roam";
+    // Back on her feet: only after the same quarry if it is still here and has been all along.
+    s.phase = valid(sys, n, s.target) && now - s.seenAt <= GRANNY.loseSeconds * 1000 ? "chase" : "roam";
     if (s.phase === "roam") release(sys, n, s, now);
     return;
   }
   if (s.phase === "roam") return roam(sys, n, s, now, dt);
-  return chase(sys, n, s, now, dt);
+  return chase(sys, n, s, now, dt, gap);
 }
 
 function roam(sys: NpcSystem, n: Npc, s: GrannyState, now: number, dt: number) {
@@ -160,7 +174,7 @@ function roam(sys: NpcSystem, n: Npc, s: GrannyState, now: number, dt: number) {
   else n.facing = dir;
 }
 
-function chase(sys: NpcSystem, n: Npc, s: GrannyState, now: number, dt: number) {
+function chase(sys: NpcSystem, n: Npc, s: GrannyState, now: number, dt: number, gap: number) {
   const p = s.target;
   if (!p || p.dead) {
     if (p?.dead) grannySay(sys, n, "won", now, true);
@@ -168,11 +182,15 @@ function chase(sys: NpcSystem, n: Npc, s: GrannyState, now: number, dt: number) 
   }
   const tp = actorPos(p);
   const d = dist(n.pos, tp);
-  if (valid(sys, n, p) && d <= GRANNY.loseAt) s.seenAt = now;
+  if (valid(sys, n, p) && d <= GRANNY.loseAt) {
+    s.seenAt = now;
+    s.chasedMs += gap;
+  }
   if (now - s.seenAt > GRANNY.loseSeconds * 1000) return release(sys, n, s, now);
   holdRegen(p, "miniboss", now);
-  // Kept alive through a whole chase: she gives up on you (the medal) and leaves you be a while.
-  if (now - s.chaseStart >= GRANNY.surviveSeconds * 1000) {
+  // Kept alive through a whole chase (time in her sights, not time since she first saw you): she
+  // gives up on you (the medal) and leaves you be a while.
+  if (s.chasedMs >= GRANNY.surviveSeconds * 1000) {
     grannySay(sys, n, "gaveUp", now, true);
     s.ignore.set(p.identity.userId, now + GRANNY.ignoreSeconds * 1000);
     emitNpcEvent({ kind: "granny", body: sys.world.body.id, outcome: "outran", sessionIds: [p.id], userIds: [p.identity.userId] });
